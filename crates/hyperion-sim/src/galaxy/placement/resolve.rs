@@ -12,10 +12,9 @@
 //! full the cell: no cell is generated, and nothing is cached, so the answer cannot depend on what
 //! has been generated before.
 
+use super::candidate::{catalogue_claims, evaluate_with_hook};
 use super::cell::{candidate_count_from_bound, layer_bound};
-use super::{
-    CandidateOutcome, CellKey, ResolveSystemError, SystemRecord, evaluate_candidate_from_bound,
-};
+use super::{CandidateOutcome, CellKey, ResolveSystemError, SystemRecord};
 use crate::galaxy::Galaxy;
 use crate::galaxy::features::centre::members::resolve_centre_member;
 use crate::galaxy::features::members::{NoInteriorCache, resolve_member};
@@ -156,11 +155,22 @@ fn resolve_candidate(
     key: CellKey,
     index: u32,
 ) -> Result<SystemRecord, ResolveSystemError> {
+    resolve_candidate_with(galaxy, key, index, catalogue_claims)
+}
+
+/// [`resolve_candidate`] with the carve-out hook given: the production hook, or a test's claim
+/// (P08.T13's seam), on the same path as everything else that evaluates a candidate.
+fn resolve_candidate_with(
+    galaxy: &Galaxy,
+    key: CellKey,
+    index: u32,
+    claims: impl Fn(&Galaxy, &SystemRecord) -> bool,
+) -> Result<SystemRecord, ResolveSystemError> {
     let bound = layer_bound(galaxy, key);
     if index >= candidate_count_from_bound(galaxy.seed(), key, bound) {
         return Err(ResolveSystemError::NoSuchSystem);
     }
-    match evaluate_candidate_from_bound(galaxy, key, index, bound) {
+    match evaluate_with_hook(galaxy, key, index, bound, claims) {
         CandidateOutcome::Accepted(record) => Ok(record),
         CandidateOutcome::Thinned | CandidateOutcome::ClaimedByCatalogue => {
             Err(ResolveSystemError::NoSuchSystem)
@@ -172,7 +182,9 @@ fn resolve_candidate(
 mod tests {
     use super::*;
     use crate::coords::GalacticPosition;
+    use crate::galaxy::displaced::site::{ExplosionSite, explosion_site};
     use crate::galaxy::params::GalaxyParams;
+    use crate::galaxy::placement::candidate::claims_with;
     use crate::galaxy::placement::{
         STELLAR_LAYERS, candidate_count, evaluate_candidate, generate_cell,
     };
@@ -294,6 +306,80 @@ mod tests {
             }
         }
         panic!("only {thinned} thinned candidates in 64 layer-E cells at the Sun-like point");
+    }
+
+    /// P08.T13: with a claim that says yes to every recent death, a layer-E record whose primary
+    /// dies inside the interval resolves to no such system and its candidate is the catalogue's,
+    /// while under the production stub it resolves to itself, and a record whose primary dies
+    /// outside the interval resolves to itself under either.
+    ///
+    /// Neither `resolve` nor the candidate's evaluation takes a time, so the outcome is the same
+    /// at every query time, on both sides of the death, by construction.
+    #[test]
+    fn resolve_refuses_a_record_whose_recent_death_is_claimed() {
+        let galaxy = galaxy();
+        let always = |g: &Galaxy, r: &SystemRecord| {
+            claims_with(
+                g,
+                r,
+                explosion_site,
+                |_: &Galaxy, _: &ExplosionSite, _: &SystemRecord| true,
+            )
+        };
+        // A fixed scan along x from the Sun-like point: near the solar circle a death falls in the
+        // interval's 4.26 Myr in about one layer-E cell in 28.
+        let first = CellKey::containing(Layer::E, &sunlike()).unwrap();
+        let [x, y, z] = first.gen_cell().to_array();
+        let mut cell = Vec::new();
+        let (mut dying, mut quiet) = (None, None);
+        for step in 0..600 {
+            let key = CellKey::new(Layer::E, [x + step, y, z]).unwrap();
+            generate_cell(&galaxy, key, &mut cell);
+            for record in &cell {
+                match explosion_site(&galaxy, record) {
+                    Some(site) if dying.is_none() => dying = Some((key, *record, site)),
+                    None if quiet.is_none() => quiet = Some((key, *record)),
+                    Some(_) | None => {}
+                }
+            }
+            if dying.is_some() {
+                break;
+            }
+        }
+        let index = |record: &SystemRecord| {
+            let SystemIdKind::Grid(grid) = record.id().kind() else {
+                unreachable!("a grid record has a grid ID")
+            };
+            grid.index()
+        };
+        let (key, record, site) = dying.expect("a death in the interval within 600 layer-E cells");
+        assert_eq!(
+            resolve_candidate_with(&galaxy, key, index(&record), always),
+            Err(ResolveSystemError::NoSuchSystem)
+        );
+        let bound = layer_bound(&galaxy, key);
+        assert_eq!(
+            evaluate_with_hook(&galaxy, key, index(&record), bound, always),
+            CandidateOutcome::ClaimedByCatalogue
+        );
+        assert_eq!(resolve(&galaxy, record.id()), Ok(record));
+        // The same site from a second galaxy of the same seed, which has generated nothing.
+        assert_eq!(explosion_site(&self::galaxy(), &record), Some(site));
+        let (quiet_key, quiet) = quiet.expect("most layer-E records die outside the interval");
+        assert_eq!(
+            resolve_candidate_with(&galaxy, quiet_key, index(&quiet), always),
+            Ok(quiet)
+        );
+        println!(
+            "claimed: layer-E cell {:?}, candidate {}, {:.2} M☉ dying at {} ({:.1} yr), site {:?} \
+             ly (this galaxy has no kinematic tables, so it is the epoch position)",
+            key.gen_cell().to_array(),
+            index(&record),
+            record.primary_initial_mass().value(),
+            site.death(),
+            site.death().since_epoch().as_julian_years_f64(),
+            site.position().to_light_years_f64(),
+        );
     }
 
     /// Since plan 13 (P13.T3.c) every layer resolves: a substellar ID names an object or no such

@@ -29,12 +29,14 @@
 //!
 //! # Frames
 //!
-//! Every satellite orbit is a [`KeplerElements`] about its parent, with μ = G (`M_p` + m), in the
-//! parent's body frame (plan 14, phase D): referred to the parent's equator for regular moons and
-//! for a giant-impact moon, which forms in the equatorial plane of the debris disc (see
-//! [`impact`]), and to its orbital plane for captures. The parent's equator is placed by its
-//! obliquity and pole (P14.T14.a, T14.c), which are not built; until they are, the elements are
-//! relative to that plane and nothing here needs its orientation.
+//! Every satellite orbit is a [`KeplerElements`] about its parent, with μ = G (`M_p` + m), whose
+//! inclination, node and periapsis the generators here draw against a reference plane they never
+//! orient: the equator for regular moons and for a giant-impact moon, which forms in the
+//! equatorial plane of the debris disc (see [`impact`]), and the orbital plane for captures.
+//! P14.T22.a places that plane in the parent's body frame: the parent's local Laplace plane at
+//! the moon's distance (P14.T56.a, [`laplace`](crate::planetary::laplace)), which is the equator
+//! well inside the Laplace radius and the orbital plane well beyond it, from [`MOONS_VERSION`],
+//! and the parent's orbital plane below it.
 //!
 //! # Sub-indices
 //!
@@ -46,6 +48,7 @@
 use std::error::Error;
 use std::fmt;
 
+use crate::GeneratorVersion;
 use crate::id::BodyId;
 use crate::math;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation};
@@ -67,6 +70,16 @@ pub use irregular::{
     BeltAdjacency, CaptureKind, CapturedMoon, Captures, IrregularPopulation, NearestBelt, captures,
 };
 pub use regular::{DerivedMoon, RegularMoon, RegularMoons, Volcanism, regular_moons};
+
+/// The generator version from which every moon and ring lies on its parent's Laplace surface
+/// (P14.T56.a), and its later subtasks' moons' own ranks and tides (P14.T56.c, T56.d): 23, the
+/// 22 → 23 batch's bump (plan 14, P14.T56; decision-bump-plan-after-22 §1.2).
+///
+/// Below it every value is version 22's, bit for bit
+/// ([`SatellitePlanes::in_force`](crate::planetary::laplace::SatellitePlanes::in_force)). P14.T54.a
+/// deletes the hold with its tripwire (`the_moons_are_held_only_until_the_batch_s_bump`) and
+/// blesses the moved goldens with its bump.
+pub const MOONS_VERSION: GeneratorVersion = GeneratorVersion::new(23);
 
 /// Which kind of body a [`MoonParent`] is: a planet, or a dwarf planet (P14.T21.c's largest belt
 /// members), which T18 gives its own range of mass ratios.
@@ -521,6 +534,24 @@ pub(crate) mod testing {
             1.000_002_61,
             0.0167,
         )
+    }
+
+    /// P14.T56's subtasks are held until the 22 → 23 batch's bump, so that the batch's goldens
+    /// move once: until then `generate` refers every moon and ring to its parent's orbital plane,
+    /// as version 22 does, and the server sends no ring normal. The bump removes the hold, and this
+    /// test with it.
+    #[test]
+    fn the_moons_are_held_only_until_the_batch_s_bump() {
+        use crate::GENERATOR_VERSION;
+        use crate::planetary::laplace::SatellitePlanes;
+        assert!(
+            GENERATOR_VERSION < MOONS_VERSION,
+            "the 22 → 23 bump puts every moon and ring on its parent's Laplace surface: make \
+             `generate` take `SatellitePlanes::LaplaceSurface` and the server send every ring's \
+             normal, and remove `SatellitePlanes::in_force`, `MOONS_VERSION` and this test (plan \
+             14, P14.T56.a as built)"
+        );
+        assert_eq!(SatellitePlanes::in_force(), SatellitePlanes::OrbitalPlane);
     }
 
     #[test]

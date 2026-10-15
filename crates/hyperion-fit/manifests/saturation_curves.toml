@@ -1,0 +1,6 @@
+# The anchors of the condensables' solid branches (plan 14, P14.T49.b): each published
+# sublimation equation's ln p moved to meet the branch above it, the first the liquid branch at the
+# triple temperature (science-p14-t24f §6.3). The equations are the sim's own, in
+# `hyperion_sim::substance::diagram`, which the task's fingerprint probes; it takes no parameters
+# and no dataset.
+task = "saturation_curves"

@@ -4,8 +4,10 @@
 //! - `tests/golden/substance/registry.golden` pins every row's values by their bits, at the
 //!   generator version: the elements' order, each row's identity (index, key, kind, charge,
 //!   stoichiometry and molar mass), its client optics, its gas columns (the held class, the
-//!   molecular constants, and `c_p` ÷ R, H̃ and S̃ at fixed temperatures; P14.T49.b) and its phase
-//!   columns. A changed value is moved output, which bumps the version.
+//!   molecular constants, and `c_p` ÷ R, H̃ and S̃ at fixed temperatures; P14.T49.b), its phase
+//!   columns, and its phase diagram (its points, anchors, curve, densities and enthalpies at fixed
+//!   fractions of its triple and critical temperatures; P14.T49.b). A changed value is moved
+//!   output, which bumps the version.
 //! - `packages/protocol/fixtures/substances.json` mirrors the rows for the client (index, key,
 //!   kind, molar mass, `c_p` ÷ R and the three optics flags), which rendering plan R08's parity
 //!   check and P14.T35.e's decode tests read. `just bless` (`HYPERION_BLESS=1`) writes it, and
@@ -24,9 +26,10 @@ use std::path::{Path, PathBuf};
 
 use hyperion_sim::GENERATOR_VERSION;
 use hyperion_sim::substance::{
-    self, EQUILIBRIUM_HYDROGEN, Element, GasColumns, LevelSet, MolecularConstants, Substance,
+    self, EQUILIBRIUM_HYDROGEN, Element, GasColumns, LevelSet, MolecularConstants, PhaseDiagram,
+    Substance,
 };
-use hyperion_sim::units::Kelvin;
+use hyperion_sim::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::{GoldenWriter, Mode, f64_digest};
 
@@ -172,6 +175,116 @@ fn pin_sums(w: &mut GoldenWriter, label: &str, molecular: &MolecularConstants) {
     );
 }
 
+/// Pins `value` under `label`, or `none`.
+fn f64_or_none(w: &mut GoldenWriter, label: &str, value: Option<f64>) {
+    match value {
+        Some(v) => w.f64(label, v),
+        None => w.line(&format!("{label} none")),
+    }
+}
+
+/// The golden's diagram section: each condensable's points, anchors, saturation pressure at fixed
+/// fractions of its triple and critical temperatures, liquid and solid densities, melting
+/// pressure, enthalpies and boiling point under one atmosphere (P14.T49.b).
+fn diagram_section(w: &mut GoldenWriter) {
+    w.line("[diagram]");
+    for id in substance::diagram::condensables() {
+        let row = id.substance();
+        let d: &PhaseDiagram = row
+            .phase_diagram()
+            .expect("a condensable has a phase diagram");
+        let label = format!("diagram {} {}", id.index(), row.key());
+        let (t_t, t_c) = (
+            d.triple_temperature().value(),
+            d.critical_temperature().value(),
+        );
+        for (name, value) in [
+            ("triple_temperature_k", t_t),
+            ("triple_pressure_pa", d.triple_pressure().value()),
+            ("critical_temperature_k", t_c),
+            ("critical_pressure_pa", d.critical_pressure().value()),
+            (
+                "vaporisation_j_per_mol",
+                d.triple_vaporisation_enthalpy_j_per_mol(),
+            ),
+            (
+                "triple_liquid_density_kg_per_m3",
+                d.triple_liquid_density().value(),
+            ),
+        ] {
+            w.f64(&format!("{label}: {name}"), value);
+        }
+        f64_or_none(
+            w,
+            &format!("{label}: fusion_j_per_mol"),
+            d.triple_fusion_enthalpy_j_per_mol(),
+        );
+        for (k, (piece, anchor)) in d.sublimation().iter().zip(d.anchors()).enumerate() {
+            w.f64(
+                &format!(
+                    "{label}: piece {k} {} from {} K, anchor",
+                    piece.phase(),
+                    piece.lower().value()
+                ),
+                *anchor,
+            );
+        }
+        let middle = f64::midpoint(t_t, t_c);
+        for (name, t) in [
+            ("0.3 T_t", 0.3 * t_t),
+            ("0.6 T_t", 0.6 * t_t),
+            ("0.9 T_t", 0.9 * t_t),
+            ("T_t", t_t),
+            ("mid", middle),
+            ("0.99 T_c", 0.99 * t_c),
+        ] {
+            let at = Kelvin::new(t);
+            w.f64(
+                &format!("{label}: saturation_pressure_pa at {name}"),
+                d.saturation_pressure(at).value(),
+            );
+            f64_or_none(
+                w,
+                &format!("{label}: clausius_clapeyron_j_per_mol at {name}"),
+                d.clausius_clapeyron_enthalpy_j_per_mol(at),
+            );
+        }
+        f64_or_none(
+            w,
+            &format!("{label}: liquid_density_kg_per_m3 at mid"),
+            d.liquid_density(Kelvin::new(middle))
+                .map(KilogramsPerCubicMetre::value),
+        );
+        for (name, t) in [("0.3 T_t", 0.3 * t_t), ("0.9 T_t", 0.9 * t_t)] {
+            f64_or_none(
+                w,
+                &format!("{label}: solid_density_kg_per_m3 at {name}"),
+                d.solid_density(Kelvin::new(t))
+                    .map(KilogramsPerCubicMetre::value),
+            );
+        }
+        for (name, t) in [("0.95 T_t", 0.95 * t_t), ("1.05 T_t", 1.05 * t_t)] {
+            f64_or_none(
+                w,
+                &format!("{label}: melting_pressure_pa at {name}"),
+                d.melting_pressure(Kelvin::new(t)).map(Pascals::value),
+            );
+        }
+        f64_or_none(
+            w,
+            &format!("{label}: falling_melting_pressure_pa at 0.95 T_t"),
+            d.falling_melting_pressure(Kelvin::new(0.95 * t_t))
+                .map(Pascals::value),
+        );
+        f64_or_none(
+            w,
+            &format!("{label}: saturation_temperature_k at 101325 Pa"),
+            d.saturation_temperature(Pascals::new(101_325.0))
+                .map(Kelvin::value),
+        );
+    }
+}
+
 /// The golden's text.
 fn registry_golden() -> String {
     let mut w = GoldenWriter::new();
@@ -237,6 +350,7 @@ fn registry_golden() -> String {
             w.f64(&format!("{label}: {name}"), value);
         }
     }
+    diagram_section(&mut w);
     w.finish()
 }
 

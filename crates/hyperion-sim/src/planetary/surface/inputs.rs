@@ -17,6 +17,10 @@
 //! [`CoarseInputs::for_body`] answers [`SurfaceInputsError::NotModelled`] for every body that has
 //! a solid surface, and every test, the reference worlds among them, builds its inputs with
 //! [`CoarseInputsBuilder`], each value a plain argument (Design note 3, "Until an ask lands").
+//! [`CoarseInputs::from_record`] is the reading of the rest (R09.T10.e): every other value from
+//! the record's sections at [`RECORD_TIME`], a moon's seasons from its planet's record, with the
+//! crust, condensates and palette given as arguments, which P14.T54.a connects to the section's
+//! members and the palette's resolution, so that `for_body` answers with it from then.
 //! The types here are the pass's own
 //! vocabulary for those values, each named after the plan-14 task that will supply it; the
 //! reading of the record replaces the builder's arguments one for one when the section is
@@ -29,6 +33,8 @@
 //! row's key, or moves these inputs onto `SubstanceId` with the palette's keys resolved from it
 //! (R09's Risks, "Deviations in T10, as built").
 
+use core::f64::consts::TAU;
+use core::num::FpCategory;
 use std::error::Error;
 use std::fmt;
 
@@ -37,12 +43,21 @@ use hyperion_surface::field::{BodyRef, ClimateModelKind, Crust, MaterialPalette,
 use hyperion_surface::spheroid::Spheroid;
 use hyperion_surface::substance_key::SubstanceKey;
 
+use crate::galaxy::consts::YEARS_PER_GIGAYEAR;
+use crate::id::BodyId;
+use crate::math;
+use crate::orbit::{BuildOrbitError, Eccentricity, KeplerElements, Orientation, seconds_between};
 use crate::planetary::SystemContext;
 use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
-use crate::planetary::record::{BodyRecord, Modelled, RecordSection, Section};
+use crate::planetary::frames::BodyFixedFrame;
+use crate::planetary::hooks::surface::{SeasonalSpin, SeasonsFrom};
+use crate::planetary::placement::OrbitHost;
+use crate::planetary::record::{BodyKind, BodyOrbit, BodyRecord, Modelled, RecordSection, Section};
+use crate::substance::SubstanceId;
+use crate::time::UniverseTime;
 use crate::units::{
-    Gigayears, Kelvin, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared, Pascals, Radians,
-    Seconds, WattsPerSquareMetre, Years,
+    Gigayears, GravitationalParameter, Kelvin, KilogramsPerSquareMetre, Metres,
+    MetresPerSecondSquared, Pascals, Radians, Seconds, WattsPerSquareMetre, Years,
 };
 
 /// One substance's share of the surface, as plan 14's `surface_liquids` and `surface_ices` list
@@ -95,7 +110,11 @@ pub struct Spin {
     /// Where on the seasonal orbit the northern spring equinox falls, as a true anomaly from
     /// periapsis in the orbit's direction of motion, radians, 0 to below 2π: the phase of the
     /// seasons against the distance cycle (77.05° on Earth, 180° less its perihelion longitude
-    /// 102.947°; 109.0° on Mars, whose perihelion falls at Ls 251.0°).
+    /// 102.947°, the J2000 mean element of NASA's Earth fact sheet; 109.0° on Mars, whose
+    /// perihelion falls at Ls 251.0°, Allison and McEwen 2000, PSS 48, 215, eqs. 16–17, as Mars24
+    /// implements them). North is the frame's pole, the spin's angular momentum by the right-hand
+    /// rule and the field's +z: for a retrograde spin it is the IAU's south (Venus's, Uranus's),
+    /// and a phase compared with IAU-labelled seasons is half a turn off there.
     pub equinox_true_anomaly: Radians,
 }
 
@@ -127,14 +146,35 @@ pub struct WetEpoch {
     pub start: Gigayears,
     /// When it ended, thousands of millions of years ago: zero for a world wet now.
     pub end: Gigayears,
-    /// The epoch in Earth-equivalent years, its length scaled by its flood frequency relative to
-    /// an arid-to-semiarid Earth's: the stream-power solver's t (Design note 9, as corrected by
-    /// R09.T0.b). Finite and non-negative.
+    /// The time channel-forming flow ran at a typical point of the surface over the epoch, over
+    /// the reference flood intermittency of 5% (Hoke, Hynek and Tucker 2011's storms, ruled in
+    /// science-hoke.md), in Earth-equivalent years: the stream-power solver's t (Design note 9,
+    /// as corrected by R09.T0.b), plan 14's `WetEpoch::effective_flow`. Finite and non-negative.
     pub effective_flow: Years,
     /// The liquid inventory then, as its mass over the body's whole surface, M ÷ 4πR², finite and
     /// non-negative: what the pass places as a paleo-sea or spreads through closed basins, by the
     /// liquid's density (Design note 9). A mass, so that it needs no density to be stated.
     pub paleo_inventory: KilogramsPerSquareMetre,
+}
+
+impl From<&crate::planetary::hooks::figures::WetEpoch> for WetEpoch {
+    /// Plan 14's wet epoch (P14.T48.b) in the pass's vocabulary, as
+    /// [`CoarseInputs::from_record`] reads the record's figures: its span, its effective flow and
+    /// its paleo-inventory, each the record's to the bit.
+    ///
+    /// Two of its members are not carried, since this struct has no place for them yet: the
+    /// epoch's runoff at the reference intermittency, which weights the drainage area on a world
+    /// dry now (Design note 3's `runoff`, which R09.T14.c's dry-now branch reads and adds here),
+    /// and its liquid, which the record states as water alone (P14.T48.b), the liquid the pass
+    /// assumes.
+    fn from(epoch: &crate::planetary::hooks::figures::WetEpoch) -> Self {
+        Self {
+            start: epoch.start(),
+            end: epoch.end(),
+            effective_flow: epoch.effective_flow(),
+            paleo_inventory: epoch.paleo_inventory(),
+        }
+    }
 }
 
 /// How much of the climate's heat the air moves from day to night, the classifier's thermal
@@ -369,6 +409,117 @@ impl fmt::Display for SurfaceInputsError {
 
 impl Error for SurfaceInputsError {}
 
+/// The time a body's record is read at for its coarse inputs: the epoch.
+///
+/// The field is keyed without a time, so its inputs come from the record at one time, the same
+/// whoever asks and whenever (R09.T17). The server's `surface::RECORD_TIME`, at which it fetches
+/// the records, is this constant re-exported. [`CoarseInputs::from_record`] reads the body's spin
+/// and its seasonal orbit at it, so the records it is given are the snapshot at it. The epoch is
+/// R09.T17's choice and decision-bump-plan-after-22's lean; P14.T54.a settles it, and from the
+/// serve gate's bump it is part of the payload's contract (ibid. §1.4).
+pub const RECORD_TIME: UniverseTime = UniverseTime::EPOCH;
+
+/// Whose orbit sets the seasons of the body [`CoarseInputs::from_record`] reads, with the
+/// planet's record where it is a moon's planet's (`decision-r09-t2.md` item 1).
+///
+/// The record-bearing form of plan 14's
+/// [`SeasonsFrom`](crate::planetary::hooks::surface::SeasonsFrom).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SeasonsFromRecord<'a> {
+    /// The body's own orbit: a planet's, a dwarf planet's or a belt member's about its host.
+    Own,
+    /// The orbit of a moon's planet about the planet's host, from the planet's record at
+    /// [`RECORD_TIME`].
+    Planet(&'a BodyRecord),
+}
+
+/// Why [`CoarseInputs::from_record`] cannot give a body's inputs.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ReadCoarseInputsError {
+    /// A section the pass reads has no solid surface, is not modelled or is withheld, as
+    /// [`CoarseInputs::for_body`] answers it.
+    Section(SurfaceInputsError),
+    /// The body is a moon of this planet, whose orbit sets the moon's seasons, and
+    /// [`SeasonsFromRecord::Own`] was given.
+    PlanetMissing(BodyId),
+    /// The record given as the body's planet is not the planet it orbits: another body, or a
+    /// body of another system.
+    NotItsPlanet {
+        /// The planet the body orbits, or `None` for a body that is not a moon, whose seasons are
+        /// its own orbit's.
+        planet: Option<BodyId>,
+        /// The body whose record was given.
+        given: BodyId,
+    },
+    /// The record's seasonal orbit does not hold at [`RECORD_TIME`]: it holds only until that
+    /// time or before, or its drift cell (P14.T45.a) starts after it, as for a record taken at
+    /// another time.
+    NotAtRecordTime,
+    /// The seasonal orbit's drift model at [`RECORD_TIME`], inside its cell, gives no bound orbit.
+    SeasonalOrbit(BuildOrbitError),
+    /// The values read, with the crust, condensates and palette given, break a rule of
+    /// [`CoarseInputsBuilder::build`]: a palette with no entry for a substance on the ground or a
+    /// lithology, a crust the builder refuses, or a record's value out of its range.
+    Build(BuildCoarseInputsError),
+}
+
+impl fmt::Display for ReadCoarseInputsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Section(error) => error.fmt(f),
+            Self::PlanetMissing(planet) => write!(
+                f,
+                "a moon of body {planet} has its planet's seasons, and no planet's record was given"
+            ),
+            Self::NotItsPlanet {
+                planet: Some(planet),
+                given,
+            } => write!(
+                f,
+                "body {given}'s record was given as the planet of a moon of body {planet}"
+            ),
+            Self::NotItsPlanet {
+                planet: None,
+                given,
+            } => write!(
+                f,
+                "body {given}'s record was given as the planet of a body that is not a moon"
+            ),
+            Self::NotAtRecordTime => {
+                f.write_str("the record's seasonal orbit does not hold at the record's time")
+            }
+            Self::SeasonalOrbit(_) => {
+                f.write_str("the seasonal orbit at the record's time is not a bound orbit")
+            }
+            Self::Build(_) => f.write_str("the coarse inputs read from the record were refused"),
+        }
+    }
+}
+
+impl Error for ReadCoarseInputsError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            // Its text is the section's own, so the section's error is not its cause again.
+            Self::Section(error) => error.source(),
+            Self::PlanetMissing(_) | Self::NotItsPlanet { .. } | Self::NotAtRecordTime => None,
+            Self::SeasonalOrbit(error) => Some(error),
+            Self::Build(error) => Some(error),
+        }
+    }
+}
+
+impl From<SurfaceInputsError> for ReadCoarseInputsError {
+    fn from(error: SurfaceInputsError) -> Self {
+        Self::Section(error)
+    }
+}
+
+impl From<BuildCoarseInputsError> for ReadCoarseInputsError {
+    fn from(error: BuildCoarseInputsError) -> Self {
+        Self::Build(error)
+    }
+}
+
 impl CoarseInputs {
     /// A builder with no value set.
     #[must_use]
@@ -386,14 +537,14 @@ impl CoarseInputs {
     /// regime, which reads into the pass's vocabulary by
     /// `From<&hooks::surface::ClimateRegime>` (each substance by its registry row's key), and
     /// the global figures. The inputs come from it with the record's `bulk` (gravity), `figure`
-    /// (the spheroid), `rotation` (the spin) and `orbit` sections and the hosts of `ctx` (their
-    /// light over the orbit, which P14.T12's `Illumination` gives only as an orbit average), and
-    /// the palette's entries from the registry's rows of the substances the section names
+    /// (the spheroid), `rotation` (the spin) and `orbit` sections and the hosts' light, at
+    /// [`RECORD_TIME`], as [`from_record`](Self::from_record) reads them (R09.T10.e), and the
+    /// palette's entries from the registry's rows of the substances the section names
     /// (P14.T49.b–c). The section's crust and condensates (P14.T51.a, T51.c) are declared but not
-    /// modelled until P14.T54.a, which also settles what this reading lacks: the record's time, on
-    /// which the hosts' light and the spin depend, and, for a moon, its planet's orbit, which sets
-    /// its seasons (R09's Risks; main's ruling of 2026-10-10). Until then an `Ok` section answers
-    /// [`SurfaceInputsError::NotModelled`], from its crust.
+    /// modelled until P14.T54.a, which connects them and the palette's resolution to that reading,
+    /// with a moon's planet's record, which sets its seasons and which this signature does not yet
+    /// take, and settles the record's time (decision-bump-plan-after-22 §1.2 and §1.5). Until then
+    /// an `Ok` section answers [`SurfaceInputsError::NotModelled`], from its crust.
     ///
     /// # Errors
     ///
@@ -405,26 +556,226 @@ impl CoarseInputs {
     /// - [`SurfaceInputsError::NotResolved`] naming [`RecordSection::Surface`] for one a degraded
     ///   record withholds.
     pub fn for_body(record: &BodyRecord, ctx: &SystemContext) -> Result<Self, SurfaceInputsError> {
-        let surface = match record.surface() {
-            Section::Ok(surface) => surface,
-            Section::NotApplicable => return Err(SurfaceInputsError::NoSolidSurface),
-            Section::NotModelled => {
-                return Err(SurfaceInputsError::NotModelled(RecordSection::Surface));
-            }
-            Section::NotResolved => {
-                return Err(SurfaceInputsError::NotResolved(RecordSection::Surface));
-            }
-        };
+        let surface = surface_of(record)?;
         let crust = match surface.crust() {
             Modelled::Ok(crust) => crust,
             Modelled::NotModelled => {
                 return Err(SurfaceInputsError::NotModelled(RecordSection::Surface));
             }
         };
-        // The hosts are read with the crust, the condensates and the palette, which P14.T54.a
-        // defines on the record; until then the crust is uninhabited and nothing reaches them.
+        // P14.T54.a turns the record's crust and condensates into the pass's, resolves the
+        // palette, and passes them to `from_record`; until then the crust is uninhabited and
+        // nothing reaches the reading. `from_record` takes the hosts' light from the record's
+        // conditions, so the context is not read.
         let _ = ctx;
         match *crust {}
+    }
+
+    /// The inputs of the body of `record`, read from its record's sections, with the crust,
+    /// condensates and palette given (R09.T10.e; decision-bump-plan-after-22 §1.5): the reading
+    /// [`for_body`](Self::for_body) answers with once P14.T54.a puts those three on the record.
+    ///
+    /// `record`, and the planet's record in `seasons`, are their bodies' records at
+    /// [`RECORD_TIME`], at which the reading takes the spin and the seasonal orbit. `seasons` is
+    /// [`SeasonsFromRecord::Planet`] with a moon's planet's record, whose orbit sets the moon's
+    /// seasons (`decision-r09-t2.md` item 1), and [`SeasonsFromRecord::Own`] for every other body:
+    /// a planet, a dwarf planet or a belt's member, whose own orbit sets them. The values come
+    /// from:
+    ///
+    /// - **the surface section** (P14.T48.e): its state and material, its climate regime (each
+    ///   substance by its registry row's key), its conditions (the mean surface temperature and
+    ///   the signed contrasts, the pressure and the gases, and the hosts' light, P14.T12's sum of
+    ///   L ÷ (4π a² √(1 − e²)) over the hosts at the record's time, the orbit average that the
+    ///   pass draws over the seasonal orbit, a companion's and a planet's shares with it, as
+    ///   [`host_flux`](Self::host_flux) says), and its figures (`σ_h`, the liquids and ices with
+    ///   an area, the tectonic regime and continental fraction, the volcanism level, the heat
+    ///   flow, the surface age, the crater contract and the wet epoch);
+    /// - **the bulk section**'s gravity and **the figure section**'s spheroid;
+    /// - **the rotation section**'s body-fixed frame: the spin at [`RECORD_TIME`] under the
+    ///   seasonal orbit ([`SeasonalSpin::of`], as the record's conditions were derived), with the
+    ///   equinox's true anomaly from the frame's pole and the orbit's plane and periapsis;
+    /// - **the orbit section**, the body's own or its planet's: its eccentricity and period at
+    ///   [`RECORD_TIME`], along its drift for an evolving orbit (P14.T45.a).
+    ///
+    /// An `Airless` surface's pressure is exactly zero, a contract of the field's header
+    /// (decision-r11-palette-liquids §2, item 5), and every other state keeps the record's. A
+    /// liquid or an ice whose area is zero lies nowhere on the ground (the record lists water at
+    /// a zero share on a dry world, P14.T24.b), so it is not one of the inputs' liquids or ices,
+    /// and it needs no palette entry. The surface section's crust and condensates are not read:
+    /// `crust` and `condensates` stand for them, and `palette` for their resolution.
+    ///
+    /// # Errors
+    ///
+    /// - [`ReadCoarseInputsError::Section`] as [`for_body`](Self::for_body) answers the surface
+    ///   section's tag; and for a bulk, figure, rotation or orbit section, the body's or its
+    ///   planet's, that is not modelled or does not apply,
+    ///   [`SurfaceInputsError::NotModelled`] naming it (a body that orbits nothing has no seasons
+    ///   this reading models), or that is withheld, [`SurfaceInputsError::NotResolved`] naming it;
+    /// - [`ReadCoarseInputsError::PlanetMissing`] for a moon given [`SeasonsFromRecord::Own`], and
+    ///   [`ReadCoarseInputsError::NotItsPlanet`] for a planet's record that is not the moon's
+    ///   planet's (another body's, or a body's of another system), or one given for a body that is
+    ///   not a moon;
+    /// - [`ReadCoarseInputsError::NotAtRecordTime`] for a seasonal orbit whose record does not hold
+    ///   at [`RECORD_TIME`], as for a record taken at another time;
+    /// - [`ReadCoarseInputsError::SeasonalOrbit`] for a seasonal orbit whose drift gives no bound
+    ///   orbit at [`RECORD_TIME`];
+    /// - [`ReadCoarseInputsError::Build`] for what [`CoarseInputsBuilder::build`] refuses: a
+    ///   palette without an entry for a liquid, an ice, a condensate on the ground or a lithology,
+    ///   a crust it refuses, or a value of the record outside its range.
+    ///
+    /// # Examples
+    ///
+    /// A generated dry rocky planet's inputs, with a crust and palette of the example's own while
+    /// the record's crust is not modelled. The palette must name each ice that lies on the ground,
+    /// as the record's figures list them; a planet with a sea would also need the liquid's entry,
+    /// with its optical record (`PaletteEntry::liquid`, R11's), which a dry planet does without:
+    ///
+    /// ```
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::placement::CellKey;
+    /// use hyperion_sim::id::Layer;
+    /// use hyperion_sim::planetary::derive::PlanetClass;
+    /// use hyperion_sim::planetary::record::{BodyKind, RecordSection, Section};
+    /// use hyperion_sim::planetary::surface::{
+    ///     CoarseInputs, CrustInputs, LidCrust, RECORD_TIME, SeasonsFromRecord, SurfaceInputsError,
+    /// };
+    /// use hyperion_sim::planetary::{SystemContext, generate};
+    /// use hyperion_sim::units::{Dex, Kelvin, SolarMasses, Years};
+    /// use hyperion_surface::field::{MaterialPalette, MechanicsFamily, PaletteEntry, PaletteRole};
+    /// use hyperion_surface::substance_key::SubstanceKey;
+    ///
+    /// // The first of Sun-like systems 1, 2, … that holds a dry rocky planet, at the record's
+    /// // time.
+    /// let cell = CellKey::new(Layer::C, [0, 812, 0])?;
+    /// let mut found = None;
+    /// for index in 1..64 {
+    ///     let ctx = SystemContext::builder()
+    ///         .system(cell.candidate_id(index).ok_or("an index in range")?)
+    ///         .star(SolarMasses::new(1.0))
+    ///         .fe_h(Dex::ZERO)
+    ///         .age_at_epoch(Years::new(4.57e9))
+    ///         .build()?;
+    ///     let system = generate(Seed::new(0x5eed_0009_0010), &ctx);
+    ///     let snapshot = system.snapshot_at(&ctx, RECORD_TIME);
+    ///     let rocky = snapshot.bodies().iter().find(|record| {
+    ///         let dry = matches!(record.surface(), Section::Ok(surface)
+    ///             if surface.figures().surface_liquids().iter().all(|&(_, area)| area <= 0.0));
+    ///         dry && record.identity().kind() == BodyKind::Planet
+    ///             && record.bulk().ok().is_some_and(|bulk| bulk.class() == PlanetClass::Rocky)
+    ///     });
+    ///     if let Some(rocky) = rocky {
+    ///         found = Some((ctx, rocky.clone()));
+    ///         break;
+    ///     }
+    /// }
+    /// let (ctx, rocky) = found.ok_or("a Sun-like system holds a dry rocky planet")?;
+    /// let Section::Ok(surface) = rocky.surface() else {
+    ///     return Err("a rocky planet has a surface section".into());
+    /// };
+    /// // A basalt lid, and an entry for each ice with an area on the ground.
+    /// let basalt = SubstanceKey::new("basalt")?;
+    /// let entry = |substance, role| PaletteEntry {
+    ///     substance,
+    ///     role,
+    ///     normal_albedo_bvr: [0.1; 3],
+    ///     phase_row: 0,
+    ///     grain_density_kg_m3: 3_010.0,
+    ///     transition: Kelvin::new(1_253.15),
+    ///     mechanics: MechanicsFamily::Silicate,
+    ///     // Neither the rock nor an ice is a liquid, so neither carries a liquid record.
+    ///     liquid: None,
+    /// };
+    /// let mut entries = vec![entry(basalt, PaletteRole::SecondaryCrust)];
+    /// let ices = surface.figures().surface_ices().iter();
+    /// let on_the_ground = ices.filter(|&&(_, area_fraction)| area_fraction > 0.0);
+    /// entries.extend(on_the_ground.map(|&(id, _)| entry(id.substance().key(), PaletteRole::Ice)));
+    /// let palette = MaterialPalette::new(entries)?;
+    /// let crust = CrustInputs {
+    ///     primary: None,
+    ///     secondary: Some(basalt),
+    ///     tertiary: None,
+    ///     bulk: None,
+    ///     lid: LidCrust::Secondary,
+    ///     provinces: basalt,
+    ///     melt_area_fraction: 0.0,
+    /// };
+    /// // A planet's seasons are its own orbit's, so it needs no planet's record.
+    /// let inputs = CoarseInputs::from_record(&rocky, SeasonsFromRecord::Own, crust, [], palette)?;
+    /// let bulk = rocky.bulk().ok().ok_or("a rocky planet has a bulk section")?;
+    /// assert_eq!(inputs.gravity(), bulk.surface_gravity());
+    /// assert!(inputs.seasonal_orbit().is_some());
+    /// // `for_body` still stops at the record's crust, which is not modelled.
+    /// assert_eq!(
+    ///     CoarseInputs::for_body(&rocky, &ctx),
+    ///     Err(SurfaceInputsError::NotModelled(RecordSection::Surface))
+    /// );
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn from_record(
+        record: &BodyRecord,
+        seasons: SeasonsFromRecord<'_>,
+        crust: CrustInputs,
+        condensates: impl IntoIterator<Item = Condensate>,
+        palette: MaterialPalette,
+    ) -> Result<Self, ReadCoarseInputsError> {
+        let surface = surface_of(record)?;
+        let bulk = section(record.bulk(), RecordSection::Bulk)?;
+        let figure = section(record.figure(), RecordSection::Figure)?;
+        let frame = section(record.rotation(), RecordSection::Rotation)?;
+        let (orbit, whose) = seasonal_orbit_of(record, seasons)?;
+        let seasonal = elements_at(orbit, RECORD_TIME)?;
+        let (conditions, figures) = (surface.conditions(), surface.figures());
+        let identity = record.identity();
+        let mut builder = Self::builder()
+            .body(BodyRef::new(
+                identity.system().raw(),
+                identity.index().get(),
+            ))
+            .figure(figure.spheroid())
+            .gravity(bulk.surface_gravity())
+            .sigma_h(figures.sigma_h())
+            .liquids(on_the_ground(figures.surface_liquids()))
+            .ices(on_the_ground(figures.surface_ices()))
+            .mean_surface_temperature(conditions.mean_surface_temperature())
+            .equator_pole_contrast_k(conditions.equator_pole_contrast_k())
+            .day_night_contrast_k(conditions.day_night_contrast_k())
+            .spin(spin_of(frame, &seasonal, whose))
+            .host_flux(conditions.stellar_flux())
+            .seasonal_orbit(SeasonalOrbit {
+                eccentricity: seasonal.eccentricity().value(),
+                period: seasonal.period(),
+            })
+            .surface_pressure(surface_pressure_of(
+                surface.state(),
+                conditions.surface_pressure(),
+            ))
+            .gases(
+                conditions
+                    .gases()
+                    .iter()
+                    .map(|&(id, mole_fraction)| GasShare {
+                        substance: id.substance().key(),
+                        mole_fraction,
+                    }),
+            )
+            .surface(surface.state(), surface.material())
+            .tectonics(figures.tectonic_regime(), figures.continental_fraction())
+            .volcanism(figures.volcanism())
+            .heat_flow(figures.heat_flow())
+            // As the crater contract converts its ages (`hooks::figures`), so that a surface as
+            // old as its system stays no older than it.
+            .surface_age(Gigayears::new(
+                figures.surface_age().value() / YEARS_PER_GIGAYEAR,
+            ))
+            .craters(*figures.craters())
+            .climate(ClimateRegime::from(surface.climate_regime()))
+            .crust(crust)
+            .condensates(condensates)
+            .palette(palette);
+        if let Some(epoch) = figures.wet_epoch() {
+            builder = builder.wet_epoch(WetEpoch::from(epoch));
+        }
+        Ok(builder.build()?)
     }
 
     /// The body.
@@ -526,6 +877,11 @@ impl CoarseInputs {
 
     /// The light of every host at the body, averaged over the orbit, watts per square metre
     /// (P14.T12's sum of L ÷ (4π a² √(1 − e²)) over the hosts): zero for a free-floating body.
+    ///
+    /// The pass draws all of it over the seasonal orbit's (a ÷ r)² cycle, which is exact for one
+    /// host. A companion star's share, on the pair's orbit, and a moon's planetshine, on the
+    /// moon's own, have their own cycles: their annual mean is exact, their seasonal shape the
+    /// seasonal orbit's (R09's Risks, "Deviations in T10.e, as built").
     #[must_use]
     pub const fn host_flux(&self) -> WattsPerSquareMetre {
         self.host_flux
@@ -719,6 +1075,224 @@ fn check_craters(
         });
     }
     Ok(())
+}
+
+/// The surface section of `record`, decided from its tag alone (decision-p14-t35e-wire §2.4):
+/// a section that does not apply has no solid surface, and one not modelled or withheld names
+/// the surface.
+fn surface_of(
+    record: &BodyRecord,
+) -> Result<&crate::planetary::record::Surface, SurfaceInputsError> {
+    match record.surface() {
+        Section::Ok(surface) => Ok(surface),
+        Section::NotApplicable => Err(SurfaceInputsError::NoSolidSurface),
+        Section::NotModelled => Err(SurfaceInputsError::NotModelled(RecordSection::Surface)),
+        Section::NotResolved => Err(SurfaceInputsError::NotResolved(RecordSection::Surface)),
+    }
+}
+
+/// The contents of the section `name` of a record whose surface section is `Ok`: a section that
+/// is not modelled, or that does not apply where the pass needs it (a free-floating body's orbit),
+/// is a reading this version does not model, and a withheld one is not resolved.
+fn section<T>(section: &Section<T>, name: RecordSection) -> Result<&T, SurfaceInputsError> {
+    match section {
+        Section::Ok(value) => Ok(value),
+        Section::NotModelled | Section::NotApplicable => Err(SurfaceInputsError::NotModelled(name)),
+        Section::NotResolved => Err(SurfaceInputsError::NotResolved(name)),
+    }
+}
+
+/// The orbit that sets the seasons of the body of `record`, and whose it is: a moon's planet's,
+/// from the planet's record in `seasons`, and every other body's own (`decision-r09-t2.md` item
+/// 1). A planet's record is the moon's planet's if it is the same body of the same system.
+///
+/// A belt's member is listed under its belt but orbits the belt's host (P14.T21.c), so a body is
+/// a moon by its kind, not by its parent's being a body.
+fn seasonal_orbit_of<'a>(
+    record: &'a BodyRecord,
+    seasons: SeasonsFromRecord<'a>,
+) -> Result<(&'a BodyOrbit, SeasonsFrom), ReadCoarseInputsError> {
+    let identity = record.identity();
+    let moon_of = match (identity.kind(), identity.parent()) {
+        (BodyKind::Moon(_), Some(OrbitHost::Body(planet))) => {
+            Some(planet.body_id(identity.system()))
+        }
+        (
+            BodyKind::Moon(_),
+            Some(OrbitHost::Star(_) | OrbitHost::Pair(_) | OrbitHost::Barycentre) | None,
+        )
+        | (
+            BodyKind::Planet
+            | BodyKind::DwarfPlanet
+            | BodyKind::Ring
+            | BodyKind::Belt(_)
+            | BodyKind::CometaryHalo
+            | BodyKind::ProtoplanetaryDisc
+            | BodyKind::DebrisDisc
+            | BodyKind::Unresolved,
+            _,
+        ) => None,
+    };
+    match (moon_of, seasons) {
+        (None, SeasonsFromRecord::Own) => Ok((
+            section(record.orbit(), RecordSection::Orbit)?,
+            SeasonsFrom::Own,
+        )),
+        (Some(wanted), SeasonsFromRecord::Planet(planet)) if body_id_of(planet) == wanted => Ok((
+            section(planet.orbit(), RecordSection::Orbit)?,
+            SeasonsFrom::Planet,
+        )),
+        (Some(wanted), SeasonsFromRecord::Own) => Err(ReadCoarseInputsError::PlanetMissing(wanted)),
+        (moon_of, SeasonsFromRecord::Planet(given)) => Err(ReadCoarseInputsError::NotItsPlanet {
+            planet: moon_of,
+            given: body_id_of(given),
+        }),
+    }
+}
+
+/// The ID of the body of `record`: its index in its system.
+#[must_use]
+fn body_id_of(record: &BodyRecord) -> BodyId {
+    let identity = record.identity();
+    identity.index().body_id(identity.system())
+}
+
+/// The elements of `orbit` at `t`: its own for an orbit that holds, and for an evolving orbit its
+/// drift cell's model then (P14.T45.a), the eccentricity eᵣ + ė Δt and the mean motion
+/// nᵣ + ṅ Δt that [`DriftingOrbit::relative_state_at`](crate::planetary::drift::DriftingOrbit)
+/// propagates, so the period 2π ÷ n, with the axis aᵣ + ȧ Δt and the gravitational parameter
+/// n² a³ that Kepler's third law gives them. At the cell's reference time they are the record's
+/// elements, to the bit; at [`RECORD_TIME`], the epoch, every drift cell of a record taken then
+/// starts, since the cells are aligned on it. The phase is not the model's: the elements keep the
+/// reference's mean anomaly at the epoch, since the reading takes only their shape, period and
+/// orientation.
+///
+/// # Errors
+///
+/// - [`ReadCoarseInputsError::NotAtRecordTime`] if the record's orbit does not hold at `t`: its
+///   `valid_until` is `t` or earlier, or its drift cell starts after `t`;
+/// - [`ReadCoarseInputsError::SeasonalOrbit`] if the model gives no bound orbit at `t`.
+fn elements_at(
+    orbit: &BodyOrbit,
+    t: UniverseTime,
+) -> Result<KeplerElements, ReadCoarseInputsError> {
+    let ended = orbit.valid_until().is_some_and(|until| until <= t);
+    let elements = *orbit.elements();
+    let Some(drift) = orbit.drift() else {
+        return if ended {
+            Err(ReadCoarseInputsError::NotAtRecordTime)
+        } else {
+            Ok(elements)
+        };
+    };
+    if ended || t < drift.reference() {
+        return Err(ReadCoarseInputsError::NotAtRecordTime);
+    }
+    if t == drift.reference() {
+        return Ok(elements);
+    }
+    let dt = seconds_between(drift.reference(), t);
+    let model = || {
+        let e = Eccentricity::new(
+            elements.eccentricity().value() + drift.eccentricity_rate_per_s() * dt,
+        )?;
+        let n = TAU / elements.period().value() + drift.mean_motion_rate_rad_per_s2() * dt;
+        let a = elements.semi_major_axis().value() + drift.semi_major_axis_rate_m_per_s() * dt;
+        KeplerElements::from_period(
+            Seconds::new(TAU / n),
+            GravitationalParameter::new(n * n * a * a * a),
+            e,
+            *elements.orientation(),
+            elements.mean_anomaly_at_epoch(),
+        )
+    };
+    model().map_err(ReadCoarseInputsError::SeasonalOrbit)
+}
+
+/// The spin at [`RECORD_TIME`] of the body whose frame is `frame`, under the seasonal orbit
+/// `seasonal`, which is `whose`: [`SeasonalSpin::of`]'s obliquity, sidereal period and solar day,
+/// as the record's conditions read them, and the equinox's true anomaly
+/// ([`equinox_true_anomaly`]).
+#[must_use]
+fn spin_of(frame: &BodyFixedFrame, seasonal: &KeplerElements, whose: SeasonsFrom) -> Spin {
+    let spin = SeasonalSpin::of(frame, RECORD_TIME, seasonal, whose);
+    Spin {
+        obliquity: spin.obliquity,
+        rotation_period: spin.rotation_period,
+        solar_day: spin.solar_day,
+        equinox_true_anomaly: equinox_true_anomaly(frame.pole(), seasonal.orientation()),
+    }
+}
+
+/// The smallest in-plane share of the pole, |p̂ × n̂|, at which the equator crosses the seasonal
+/// orbit's plane on a line: below it the body has no obliquity to speak of, and its equinox is
+/// set at periapsis.
+const EQUINOX_MIN_TILT: f64 = 1e-12;
+
+/// The true anomaly on the orbit whose plane and periapsis are `orbit` at which the northern
+/// spring equinox falls for a body whose pole is `pole`, rad, in [0, 2π): where the sun, seen
+/// from the body, crosses its equator going north (as [`Spin::equinox_true_anomaly`] states it).
+/// `pole` is the spin axis's unit vector on the system frame's axes, as
+/// [`BodyFixedFrame::pole`] gives it, the axes of `orbit`'s elements (a moon's planet's elements
+/// about its host, and the moon's frame, share them).
+///
+/// That sun lies along p̂ × n̂, with p̂ the pole and n̂ the orbit's normal, so the body lies along
+/// n̂ × p̂, whose components on the orbit's periapsis direction P and the direction Q a quarter-turn
+/// ahead of it give ν = atan2(p̂ · P, −p̂ · Q). For a moon the orbit is its planet's, and the sun
+/// it sees is the planet's. A pole along the normal, within [`EQUINOX_MIN_TILT`], has no equinox,
+/// and takes 0.
+#[must_use]
+fn equinox_true_anomaly(pole: [f64; 3], orbit: &Orientation) -> Radians {
+    let dot = |u: [f64; 3], v: [f64; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    let p = orbit.periapsis_direction();
+    let n = orbit.normal();
+    // Q = n̂ × P, a quarter-turn ahead of periapsis in the direction of motion.
+    let q = [
+        n[1] * p[2] - n[2] * p[1],
+        n[2] * p[0] - n[0] * p[2],
+        n[0] * p[1] - n[1] * p[0],
+    ];
+    let (along_p, along_q) = (dot(pole, p), dot(pole, q));
+    if math::hypot(along_p, along_q) < EQUINOX_MIN_TILT {
+        return Radians::ZERO;
+    }
+    let anomaly = math::atan2(along_p, -along_q);
+    // atan2 gives [−π, π] (−π for a −0 along P with the pole behind Q): a negative angle a turn
+    // up, where −π comes to π and a tiny one rounds to a whole turn, which is periapsis again;
+    // `+ 0.0` makes a −0 the +0 the range holds.
+    let anomaly = if anomaly < 0.0 {
+        anomaly + TAU
+    } else {
+        anomaly + 0.0
+    };
+    Radians::new(if anomaly < TAU { anomaly } else { 0.0 })
+}
+
+/// The shares of `shares` that lie on the ground, in the pass's vocabulary: every share but one of
+/// no area (±0), so that the builder still refuses a negative or NaN share.
+fn on_the_ground(shares: &[(SubstanceId, f64)]) -> impl Iterator<Item = AreaShare> + '_ {
+    shares
+        .iter()
+        .filter(|&&(_, area_fraction)| area_fraction.classify() != FpCategory::Zero)
+        .map(|&(id, area_fraction)| AreaShare {
+            substance: id.substance().key(),
+            area_fraction,
+        })
+}
+
+/// The surface pressure the pass reads of a surface in the state `state` whose conditions give
+/// `pressure`: exactly zero for an `Airless` state, the header's contract
+/// (decision-r11-palette-liquids §2, item 5), and the conditions' for every other.
+#[must_use]
+fn surface_pressure_of(state: SurfaceState, pressure: Pascals) -> Pascals {
+    match state {
+        SurfaceState::Airless => Pascals::ZERO,
+        SurfaceState::GasEnvelope
+        | SurfaceState::MagmaOcean
+        | SurfaceState::RunawayGreenhouse
+        | SurfaceState::Temperate
+        | SurfaceState::Snowball => pressure,
+    }
 }
 
 /// Why [`CoarseInputsBuilder::build`] refused its values.
@@ -1524,14 +2098,16 @@ mod tests {
     use crate::galaxy::placement::CellKey;
     use crate::id::Layer;
     use crate::planetary::derive::PlanetClass;
+    use crate::planetary::derive::atmosphere::Gas;
     use crate::planetary::generate;
     use crate::planetary::record::DetailLevel;
-    use crate::planetary::testing::synthetic_star;
+    use crate::planetary::testing::{SampleFilter, sample_contexts, synthetic_star};
     use crate::time::UniverseTime;
-    use crate::units::{Dex, SolarMasses};
+    use crate::units::{Degrees, Dex, SolarMasses};
     use hyperion_surface::field::{
         FieldView, LiquidBasis, LiquidProperties, MechanicsFamily, PaletteEntry,
     };
+    use hyperion_testkit::float::assert_same_bits;
 
     /// The key `key`, which a test knows to be valid.
     fn key(key: &str) -> SubstanceKey {
@@ -2557,6 +3133,779 @@ mod tests {
         assert_eq!(
             SurfaceInputsError::NotModelled(RecordSection::Surface).to_string(),
             "the body's surface section is not modelled"
+        );
+    }
+
+    // R09.T10.e: the reading of the record's other sections, on generated records with crusts,
+    // condensates and palettes of the tests' own, since the record's are not modelled before
+    // P14.T54.a.
+
+    /// A hand-made crust: a basalt secondary crust at the surface, its provinces' too.
+    fn basalt_crust() -> CrustInputs {
+        CrustInputs {
+            primary: None,
+            secondary: Some(key("basalt")),
+            tertiary: None,
+            bulk: None,
+            lid: LidCrust::Secondary,
+            provinces: key("basalt"),
+            melt_area_fraction: 0.0,
+        }
+    }
+
+    /// The palette [`basalt_crust`] needs on `record`'s body, with `also`: the basalt's entry and
+    /// an entry of each liquid and ice the record's figures put on the ground, by its row's key,
+    /// each once, and none for a share with no area.
+    fn palette_for(record: &BodyRecord, also: &[(PaletteRole, &str)]) -> MaterialPalette {
+        let Section::Ok(surface) = record.surface() else {
+            panic!("{:?} has no surface section", record.index());
+        };
+        let figures = surface.figures();
+        let mut entries =
+            std::collections::BTreeSet::from([(PaletteRole::SecondaryCrust, key("basalt"))]);
+        entries.extend(also.iter().map(|&(role, substance)| (role, key(substance))));
+        for (shares, role) in [
+            (figures.surface_liquids(), PaletteRole::Liquid),
+            (figures.surface_ices(), PaletteRole::Ice),
+        ] {
+            entries.extend(on_the_ground(shares).map(|share| (role, share.substance)));
+        }
+        palette(
+            entries
+                .into_iter()
+                .map(|(role, substance)| PaletteEntry {
+                    substance,
+                    ..entry("basalt", role)
+                })
+                .collect(),
+        )
+    }
+
+    /// The records at [`RECORD_TIME`] of the systems of `contexts`, generated in [`SEED`]'s
+    /// universe, each list with its system's context.
+    fn records_at_record_time(contexts: &[SystemContext]) -> Vec<(SystemContext, Vec<BodyRecord>)> {
+        contexts
+            .iter()
+            .map(|ctx| {
+                let snapshot = generate(SEED, ctx).snapshot_at(ctx, RECORD_TIME);
+                (ctx.clone(), snapshot.bodies().to_vec())
+            })
+            .collect()
+    }
+
+    /// The Sun-like systems 1, 2, … of [`rocky_giant_and_sub_neptune`], with their records at
+    /// [`RECORD_TIME`].
+    fn sun_like_records() -> impl Iterator<Item = (SystemContext, Vec<BodyRecord>)> {
+        (1..64).map(|index| {
+            let id = CellKey::new(Layer::C, [0, 812, 0])
+                .unwrap()
+                .candidate_id(index)
+                .unwrap();
+            let ctx =
+                synthetic_star(id, SolarMasses::new(1.0), Dex::ZERO, Years::new(4.57e9)).unwrap();
+            records_at_record_time(&[ctx]).pop().unwrap()
+        })
+    }
+
+    /// The record among `records` of the planet of `record`'s body if it is a moon, or `None`.
+    fn planet_of<'a>(record: &BodyRecord, records: &'a [BodyRecord]) -> Option<&'a BodyRecord> {
+        match (record.identity().kind(), record.identity().parent()) {
+            (BodyKind::Moon(_), Some(OrbitHost::Body(planet))) => {
+                records.iter().find(|r| r.index() == planet)
+            }
+            _ => None,
+        }
+    }
+
+    /// Whose orbit sets the seasons of `record`'s body, among `records`, its system's.
+    fn seasons_of<'a>(record: &BodyRecord, records: &'a [BodyRecord]) -> SeasonsFromRecord<'a> {
+        planet_of(record, records).map_or(SeasonsFromRecord::Own, SeasonsFromRecord::Planet)
+    }
+
+    /// `record`'s inputs with [`basalt_crust`], no condensates and [`palette_for`] it.
+    fn read(record: &BodyRecord, seasons: SeasonsFromRecord<'_>) -> CoarseInputs {
+        CoarseInputs::from_record(
+            record,
+            seasons,
+            basalt_crust(),
+            [],
+            palette_for(record, &[]),
+        )
+        .unwrap_or_else(|e| panic!("{:?} reads into no inputs: {e:?}", record.index()))
+    }
+
+    /// The dot product of two vectors.
+    fn dot(u: [f64; 3], v: [f64; 3]) -> f64 {
+        u[0] * v[0] + u[1] * v[1] + u[2] * v[2]
+    }
+
+    /// Checks that `equinox` is where the sun, seen from a body whose pole is `pole` on the orbit
+    /// `orbit`, crosses the body's equator going north: the sun's direction there lies in the
+    /// equator's plane, and its motion about the orbit's normal carries it north.
+    fn assert_northward_equinox(equinox: Radians, pole: [f64; 3], orbit: &Orientation) {
+        let nu = equinox.value();
+        assert!(
+            (0.0..TAU).contains(&nu),
+            "the equinox's anomaly {nu} is outside [0, 2π)"
+        );
+        let (p, n) = (orbit.periapsis_direction(), orbit.normal());
+        let q = [
+            n[1] * p[2] - n[2] * p[1],
+            n[2] * p[0] - n[0] * p[2],
+            n[0] * p[1] - n[1] * p[0],
+        ];
+        let (cos, sin) = (math::cos(nu), math::sin(nu));
+        // The sun, seen from the body at true anomaly ν, lies along −(cos ν P + sin ν Q).
+        let sun = [0, 1, 2].map(|i| -(cos * p[i] + sin * q[i]));
+        assert!(
+            dot(sun, pole).abs() < 1e-9,
+            "at the equinox the sun is {} off the equator",
+            dot(sun, pole)
+        );
+        let motion = [
+            n[1] * sun[2] - n[2] * sun[1],
+            n[2] * sun[0] - n[0] * sun[2],
+            n[0] * sun[1] - n[1] * sun[0],
+        ];
+        assert!(
+            dot(motion, pole) > 0.0,
+            "at the equinox the sun moves south, {}",
+            dot(motion, pole)
+        );
+    }
+
+    #[test]
+    fn the_equinox_is_where_the_sun_crosses_the_equator_going_north() {
+        // In ecliptic axes with the vernal point on +x, a pole tilted ε towards +y, and an orbit
+        // in the plane whose perihelion lies at longitude ϖ: the equinox falls at ν = 180° − ϖ.
+        let tilted = |obliquity_deg: f64| {
+            let (sin, cos) = math::sin_cos(Radians::from(Degrees::new(obliquity_deg)).value());
+            [0.0, sin, cos]
+        };
+        let ecliptic = |perihelion_deg: f64| {
+            Orientation::new(
+                Radians::ZERO,
+                Radians::ZERO,
+                Radians::from(Degrees::new(perihelion_deg)),
+            )
+            .unwrap()
+        };
+        let degrees = |r: Radians| Degrees::from(r).value();
+        // Earth: perihelion longitude 102.94719° (NASA's Earth fact sheet, J2000 mean elements),
+        // so 77.05281°.
+        let earth = equinox_true_anomaly(tilted(23.44), &ecliptic(102.947_19));
+        assert!(
+            (degrees(earth) - 77.052_81).abs() < 1e-9,
+            "{}",
+            degrees(earth)
+        );
+        // Mars: perihelion at Ls 251.000° (Allison and McEwen 2000, eqs. 16–17, at J2000, as
+        // Mars24 implements them), a longitude of 71.0° on these axes, so 109.0°.
+        let mars = equinox_true_anomaly(tilted(25.19), &ecliptic(71.0));
+        assert!((degrees(mars) - 109.0).abs() < 1e-9, "{}", degrees(mars));
+        // Any orbit and pole, a retrograde spin among them.
+        for (inclination, node, argument) in [(0.3, 1.0, 2.0), (2.9, 4.0, 0.5), (1.2, 5.5, 6.1)] {
+            let orbit = Orientation::new(
+                Radians::new(inclination),
+                Radians::new(node),
+                Radians::new(argument),
+            )
+            .unwrap();
+            for pole in [
+                [0.6, 0.0, 0.8],
+                [0.0, -0.28, -0.96],
+                [-0.48, 0.6, 0.64],
+                [1.0, 0.0, 0.0],
+            ] {
+                let equinox = equinox_true_anomaly(pole, &orbit);
+                assert_northward_equinox(equinox, pole, &orbit);
+            }
+        }
+        // A pole along the orbit's normal, either way, has no equinox.
+        let orbit = ecliptic(40.0);
+        assert_eq!(equinox_true_anomaly([0.0, 0.0, 1.0], &orbit), Radians::ZERO);
+        assert_eq!(
+            equinox_true_anomaly([0.0, 0.0, -1.0], &orbit),
+            Radians::ZERO
+        );
+    }
+
+    /// A hand-made seasonal water frost.
+    fn frost() -> Condensate {
+        Condensate {
+            substance: key("H2O"),
+            phase: CondensatePhase::Solid,
+            reservoir: KilogramsPerSquareMetre::new(12.0),
+            area_fraction: 0.01,
+            persistence: Persistence::Seasonal,
+        }
+    }
+
+    /// The palette [`planet_reading`] gives its planet: [`palette_for`] it, with water's ice entry
+    /// for the [`frost`].
+    fn frosted_palette(record: &BodyRecord) -> MaterialPalette {
+        palette_for(record, &[(PaletteRole::Ice, "H2O")])
+    }
+
+    /// The rocky planet of [`rocky_giant_and_sub_neptune`], with its system's context, and its
+    /// inputs read with [`basalt_crust`], the [`frost`] and the [`frosted_palette`].
+    fn planet_reading() -> (SystemContext, BodyRecord, CoarseInputs) {
+        let [(ctx, rocky), ..] = rocky_giant_and_sub_neptune();
+        assert_eq!(
+            RECORD_TIME,
+            UniverseTime::EPOCH,
+            "the helper's records are the epoch's"
+        );
+        let palette = frosted_palette(&rocky);
+        let inputs = CoarseInputs::from_record(
+            &rocky,
+            SeasonsFromRecord::Own,
+            basalt_crust(),
+            [frost()],
+            palette,
+        )
+        .unwrap();
+        (ctx, rocky, inputs)
+    }
+
+    #[test]
+    fn a_generated_planet_reads_its_sections_to_the_bit() {
+        let (_, rocky, inputs) = planet_reading();
+        let Section::Ok(surface) = rocky.surface() else {
+            panic!(
+                "a generated rocky planet's surface is {:?}",
+                rocky.surface()
+            );
+        };
+        let (conditions, figures) = (surface.conditions(), surface.figures());
+        // The body, its figure and its gravity.
+        let identity = rocky.identity();
+        assert_eq!(
+            inputs.body(),
+            BodyRef::new(identity.system().raw(), identity.index().get())
+        );
+        let bulk = rocky.bulk().ok().unwrap();
+        assert_eq!(inputs.figure(), rocky.figure().ok().unwrap().spheroid());
+        assert_eq!(inputs.gravity(), bulk.surface_gravity());
+        // The surface section's state, material, regime, conditions and figures, to the bit.
+        assert_eq!(inputs.surface_state(), surface.state());
+        assert_eq!(inputs.surface_material(), surface.material());
+        assert_eq!(
+            *inputs.climate(),
+            ClimateRegime::from(surface.climate_regime())
+        );
+        assert_eq!(
+            inputs.mean_surface_temperature(),
+            conditions.mean_surface_temperature()
+        );
+        assert_same_bits(
+            inputs.equator_pole_contrast_k(),
+            conditions.equator_pole_contrast_k(),
+        );
+        assert_same_bits(
+            inputs.day_night_contrast_k(),
+            conditions.day_night_contrast_k(),
+        );
+        let pressure = match surface.state() {
+            SurfaceState::Airless => Pascals::ZERO,
+            _ => conditions.surface_pressure(),
+        };
+        assert_eq!(inputs.surface_pressure(), pressure);
+        let gases: Vec<_> = conditions
+            .gases()
+            .iter()
+            .map(|&(id, x)| (id.substance().key(), x))
+            .collect();
+        let read_gases: Vec<_> = inputs
+            .gases()
+            .iter()
+            .map(|g| (g.substance, g.mole_fraction))
+            .collect();
+        assert_eq!(read_gases, gases, "the gases, in the record's order");
+        assert_eq!(inputs.host_flux(), conditions.stellar_flux());
+        assert_eq!(inputs.sigma_h(), figures.sigma_h());
+        let wet =
+            |shares: &[(SubstanceId, f64)]| -> Vec<AreaShare> { on_the_ground(shares).collect() };
+        assert_eq!(inputs.liquids(), wet(figures.surface_liquids()).as_slice());
+        assert_eq!(inputs.ices(), wet(figures.surface_ices()).as_slice());
+        assert_eq!(inputs.tectonics(), figures.tectonic_regime());
+        assert_same_bits(
+            inputs.continental_fraction(),
+            figures.continental_fraction(),
+        );
+        assert_same_bits(inputs.volcanism(), figures.volcanism());
+        assert_eq!(inputs.heat_flow(), figures.heat_flow());
+        assert_same_bits(
+            inputs.surface_age().value(),
+            figures.surface_age().value() / 1e9,
+        );
+        assert_eq!(inputs.craters(), figures.craters());
+        assert_eq!(
+            inputs.wet_epoch().copied(),
+            figures.wet_epoch().map(WetEpoch::from)
+        );
+        // The arguments, as given.
+        assert_eq!(*inputs.crust(), basalt_crust());
+        assert_eq!(inputs.condensates(), [frost()].as_slice());
+        assert_eq!(inputs.palette(), &frosted_palette(&rocky));
+    }
+
+    #[test]
+    fn a_generated_planet_takes_its_seasons_and_light_from_its_own_orbit() {
+        let (ctx, rocky, inputs) = planet_reading();
+        // The seasons: the planet's own orbit at the record's time, and its spin under it.
+        let orbit = rocky.orbit().ok().unwrap();
+        let elements = elements_at(orbit, RECORD_TIME).unwrap();
+        let seasonal = inputs.seasonal_orbit().unwrap();
+        assert_same_bits(seasonal.eccentricity, elements.eccentricity().value());
+        assert_eq!(seasonal.period, elements.period());
+        let frame = rocky.rotation().ok().unwrap();
+        let spin = inputs.spin();
+        assert_eq!(spin.obliquity, frame.obliquity());
+        let rate = frame.rate().rate_at(RECORD_TIME);
+        assert_same_bits(spin.rotation_period.value(), TAU / rate);
+        match spin.solar_day {
+            // A day turns at the spin less the sun's mean motion, prograde below 90°.
+            Some(day) => {
+                let synodic =
+                    (1.0 / spin.rotation_period.value() - 1.0 / seasonal.period.value()).abs();
+                assert!((day.value() * synodic - 1.0).abs() < 1e-9, "{day:?}");
+            }
+            None => assert!(matches!(
+                frame.state_at(RECORD_TIME),
+                crate::planetary::derive::rotation::SpinState::Locked(_)
+            )),
+        }
+        assert_northward_equinox(
+            spin.equinox_true_anomaly,
+            frame.pole(),
+            elements.orientation(),
+        );
+        // The hosts' light: one star's, along the seasonal orbit at the record's time.
+        let star = ctx.stars()[0].state_at(RECORD_TIME).unwrap();
+        let light =
+            WattsPerSquareMetre::from(crate::planetary::derive::irradiation::luminosity_flux(
+                star.luminosity(),
+                elements.semi_major_axis(),
+                elements.eccentricity().value(),
+            ));
+        assert!(
+            (inputs.host_flux().value() / light.value() - 1.0).abs() < 1e-12,
+            "{:?} against the star's {light:?}",
+            inputs.host_flux()
+        );
+        // `for_body` still stops at the record's crust: nothing generated moves.
+        assert_eq!(
+            CoarseInputs::for_body(&rocky, &ctx),
+            Err(SurfaceInputsError::NotModelled(RecordSection::Surface))
+        );
+    }
+
+    /// The first moon with a surface section in the Sun-like systems 1, 2, … of
+    /// [`rocky_giant_and_sub_neptune`], with its system's context, its record and its planet's,
+    /// at [`RECORD_TIME`].
+    fn generated_moon() -> (SystemContext, BodyRecord, BodyRecord) {
+        for (ctx, records) in sun_like_records() {
+            for record in &records {
+                if let Section::Ok(_) = record.surface()
+                    && let Some(planet) = planet_of(record, &records)
+                {
+                    return (ctx, record.clone(), planet.clone());
+                }
+            }
+        }
+        panic!("63 Sun-like systems hold no moon with a surface");
+    }
+
+    #[test]
+    fn a_moon_takes_its_seasons_from_its_planet_s_orbit() {
+        let (ctx, moon, planet) = generated_moon();
+        let inputs = read(&moon, SeasonsFromRecord::Planet(&planet));
+        // The planet's orbit sets the year, not the moon's own about its planet.
+        let planet_orbit = elements_at(planet.orbit().ok().unwrap(), RECORD_TIME).unwrap();
+        let seasonal = inputs.seasonal_orbit().unwrap();
+        assert_same_bits(seasonal.eccentricity, planet_orbit.eccentricity().value());
+        assert_eq!(seasonal.period, planet_orbit.period());
+        assert_ne!(
+            seasonal.period,
+            moon.orbit().ok().unwrap().elements().period()
+        );
+        // Its obliquity is to the planet's orbit, and its equinox on it; it turns under its star.
+        let frame = moon.rotation().ok().unwrap();
+        let normal = planet_orbit.orientation().normal();
+        let tilt = math::acos(dot(frame.pole(), normal).clamp(-1.0, 1.0));
+        let spin = inputs.spin();
+        assert!((spin.obliquity.value() - tilt).abs() < 1e-12, "{spin:?}");
+        assert_northward_equinox(
+            spin.equinox_true_anomaly,
+            frame.pole(),
+            planet_orbit.orientation(),
+        );
+        assert!(spin.solar_day.is_some(), "a moon has a solar day: {spin:?}");
+        // A moon needs its planet's record, and no other's.
+        let read_with = |seasons| {
+            CoarseInputs::from_record(&moon, seasons, basalt_crust(), [], palette_for(&moon, &[]))
+        };
+        assert_eq!(
+            read_with(SeasonsFromRecord::Own),
+            Err(ReadCoarseInputsError::PlanetMissing(body_id_of(&planet)))
+        );
+        assert_eq!(
+            read_with(SeasonsFromRecord::Planet(&moon)),
+            Err(ReadCoarseInputsError::NotItsPlanet {
+                planet: Some(body_id_of(&planet)),
+                given: body_id_of(&moon),
+            })
+        );
+        // A body of another system with the planet's index is not its planet.
+        let namesake = sun_like_records()
+            .filter(|(other, _)| other.id() != ctx.id())
+            .find_map(|(_, records)| records.into_iter().find(|r| r.index() == planet.index()))
+            .expect("another Sun-like system has a body with the planet's index");
+        assert_eq!(
+            read_with(SeasonsFromRecord::Planet(&namesake)),
+            Err(ReadCoarseInputsError::NotItsPlanet {
+                planet: Some(body_id_of(&planet)),
+                given: body_id_of(&namesake),
+            })
+        );
+        // The planet's orbit, withheld from a contact's record.
+        assert_eq!(
+            read_with(SeasonsFromRecord::Planet(
+                &planet.degrade(DetailLevel::Contact)
+            )),
+            Err(ReadCoarseInputsError::Section(
+                SurfaceInputsError::NotResolved(RecordSection::Orbit)
+            ))
+        );
+        // A body that is not a moon takes no planet's record.
+        let [(_, rocky), ..] = rocky_giant_and_sub_neptune();
+        assert_eq!(
+            CoarseInputs::from_record(
+                &rocky,
+                SeasonsFromRecord::Planet(&planet),
+                basalt_crust(),
+                [],
+                palette_for(&rocky, &[])
+            ),
+            Err(ReadCoarseInputsError::NotItsPlanet {
+                planet: None,
+                given: body_id_of(&planet),
+            })
+        );
+        assert_eq!(
+            CoarseInputs::for_body(&moon, &ctx),
+            Err(SurfaceInputsError::NotModelled(RecordSection::Surface))
+        );
+    }
+
+    #[test]
+    fn the_seasonal_orbit_follows_its_drift_inside_its_cell_and_holds_nowhere_else() {
+        // The first evolving orbit, with a drift and a cell's end, of the Sun-like systems.
+        let orbit = sun_like_records()
+            .find_map(|(_, records)| {
+                records.iter().find_map(|record| {
+                    let orbit = *record.orbit().ok()?;
+                    let drift = orbit.drift()?;
+                    let moving = drift.eccentricity_rate_per_s().abs() > 0.0
+                        && drift.mean_motion_rate_rad_per_s2().abs() > 0.0;
+                    (moving && orbit.valid_until().is_some()).then_some(orbit)
+                })
+            })
+            .expect("a Sun-like system has an evolving orbit");
+        let drift = *orbit.drift().unwrap();
+        let (start, end) = (drift.reference(), orbit.valid_until().unwrap());
+        assert_eq!(
+            start, RECORD_TIME,
+            "a cell of a record at the epoch starts there"
+        );
+        let elements = orbit.elements();
+        // At the cell's start, the record's elements to the bit.
+        assert_eq!(elements_at(&orbit, start), Ok(*elements));
+        // Inside it, the model's eccentricity, mean motion and axis.
+        let mid =
+            UniverseTime::new(start.seconds() + (end.seconds() - start.seconds()) / 2, 0).unwrap();
+        let dt = seconds_between(start, mid);
+        assert!(dt > 0.0, "the cell is {start:?} to {end:?}");
+        let at = elements_at(&orbit, mid).unwrap();
+        assert_same_bits(
+            at.eccentricity().value(),
+            elements.eccentricity().value() + drift.eccentricity_rate_per_s() * dt,
+        );
+        let n = TAU / elements.period().value() + drift.mean_motion_rate_rad_per_s2() * dt;
+        assert_same_bits(at.period().value(), TAU / n);
+        let a = elements.semi_major_axis().value() + drift.semi_major_axis_rate_m_per_s() * dt;
+        assert!(
+            (at.semi_major_axis().value() / a - 1.0).abs() < 1e-14,
+            "{:?} against {a} m",
+            at.semi_major_axis()
+        );
+        assert_eq!(at.orientation(), elements.orientation());
+        // Before the cell and from its end the record does not hold, as for a record taken at
+        // another time.
+        let before = UniverseTime::new(start.seconds() - 1, 0).unwrap();
+        assert_eq!(
+            elements_at(&orbit, before),
+            Err(ReadCoarseInputsError::NotAtRecordTime)
+        );
+        assert_eq!(
+            elements_at(&orbit, end),
+            Err(ReadCoarseInputsError::NotAtRecordTime)
+        );
+        // An orbit that holds has no start, but an end.
+        let holding = BodyOrbit::new(*elements, Some(end));
+        assert_eq!(elements_at(&holding, before), Ok(*elements));
+        assert_eq!(
+            elements_at(&holding, end),
+            Err(ReadCoarseInputsError::NotAtRecordTime)
+        );
+    }
+
+    #[test]
+    fn a_section_the_reading_cannot_read_is_named() {
+        assert_eq!(section(&Section::Ok(7_u8), RecordSection::Bulk), Ok(&7));
+        // A free-floating body's orbit does not apply, and gives no seasons this reading models.
+        assert_eq!(
+            section(&Section::<u8>::NotApplicable, RecordSection::Orbit),
+            Err(SurfaceInputsError::NotModelled(RecordSection::Orbit))
+        );
+        assert_eq!(
+            section(&Section::<u8>::NotModelled, RecordSection::Rotation),
+            Err(SurfaceInputsError::NotModelled(RecordSection::Rotation))
+        );
+        assert_eq!(
+            section(&Section::<u8>::NotResolved, RecordSection::Figure),
+            Err(SurfaceInputsError::NotResolved(RecordSection::Figure))
+        );
+    }
+
+    #[test]
+    fn a_share_with_no_area_lies_nowhere_on_the_ground() {
+        let (water, methane, ammonia) = (
+            Gas::Water.substance(),
+            Gas::Methane.substance(),
+            Gas::Ammonia.substance(),
+        );
+        // A negative share is kept, for the builder to refuse.
+        let shares = [
+            (water, 0.0),
+            (methane, 0.25),
+            (water, -0.0),
+            (ammonia, -0.1),
+        ];
+        let ground: Vec<_> = on_the_ground(&shares).collect();
+        let share = |id: SubstanceId, area_fraction| AreaShare {
+            substance: id.substance().key(),
+            area_fraction,
+        };
+        assert_eq!(ground, [share(methane, 0.25), share(ammonia, -0.1)]);
+    }
+
+    #[test]
+    fn the_reading_refuses_what_it_cannot_read() {
+        let [(_, rocky), (_, giant), _] = rocky_giant_and_sub_neptune();
+        let read_with = |record: &BodyRecord, crust, palette| {
+            CoarseInputs::from_record(record, SeasonsFromRecord::Own, crust, [], palette)
+        };
+        assert_eq!(
+            read_with(&giant, basalt_crust(), palette_for(&rocky, &[])),
+            Err(ReadCoarseInputsError::Section(
+                SurfaceInputsError::NoSolidSurface
+            ))
+        );
+        assert_eq!(
+            read_with(
+                &rocky.degrade(DetailLevel::Bulk),
+                basalt_crust(),
+                palette_for(&rocky, &[])
+            ),
+            Err(ReadCoarseInputsError::Section(
+                SurfaceInputsError::NotResolved(RecordSection::Surface)
+            ))
+        );
+        // The builder's refusals of the arguments: a palette without the crust's lithology, and a
+        // lid naming a crust the body lacks.
+        let water_only = palette(vec![
+            entry("H2O", PaletteRole::Ice),
+            entry("H2O", PaletteRole::Liquid),
+        ]);
+        let no_basalt = read_with(&rocky, basalt_crust(), water_only);
+        assert_eq!(
+            no_basalt,
+            Err(ReadCoarseInputsError::Build(
+                BuildCoarseInputsError::NotInPalette {
+                    part: "secondary crust",
+                    substance: key("basalt"),
+                    role: PaletteRole::SecondaryCrust,
+                }
+            ))
+        );
+        let primary_lid = CrustInputs {
+            lid: LidCrust::Primary,
+            ..basalt_crust()
+        };
+        assert_eq!(
+            read_with(&rocky, primary_lid, palette_for(&rocky, &[])),
+            Err(ReadCoarseInputsError::Build(
+                BuildCoarseInputsError::LidAbsent(LidCrust::Primary)
+            ))
+        );
+    }
+
+    #[test]
+    fn the_reading_s_refusals_say_why() {
+        let [(_, rocky), ..] = rocky_giant_and_sub_neptune();
+        let id = body_id_of(&rocky);
+        let not_in_palette = BuildCoarseInputsError::NotInPalette {
+            part: "secondary crust",
+            substance: key("basalt"),
+            role: PaletteRole::SecondaryCrust,
+        };
+        let texts = [
+            (
+                ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(
+                    RecordSection::Surface,
+                )),
+                "the body's surface section is not modelled".to_owned(),
+            ),
+            (
+                ReadCoarseInputsError::PlanetMissing(id),
+                format!(
+                    "a moon of body {id} has its planet's seasons, and no planet's record was \
+                     given"
+                ),
+            ),
+            (
+                ReadCoarseInputsError::NotItsPlanet {
+                    planet: Some(id),
+                    given: id,
+                },
+                format!("body {id}'s record was given as the planet of a moon of body {id}"),
+            ),
+            (
+                ReadCoarseInputsError::NotItsPlanet {
+                    planet: None,
+                    given: id,
+                },
+                format!("body {id}'s record was given as the planet of a body that is not a moon"),
+            ),
+            (
+                ReadCoarseInputsError::NotAtRecordTime,
+                "the record's seasonal orbit does not hold at the record's time".to_owned(),
+            ),
+            (
+                ReadCoarseInputsError::SeasonalOrbit(BuildOrbitError::EccentricityOutOfRange {
+                    value: -1e-9,
+                }),
+                "the seasonal orbit at the record's time is not a bound orbit".to_owned(),
+            ),
+            (
+                ReadCoarseInputsError::Build(not_in_palette),
+                "the coarse inputs read from the record were refused".to_owned(),
+            ),
+        ];
+        for (error, text) in texts {
+            assert_eq!(error.to_string(), text);
+        }
+        assert!(
+            id.to_string().contains('.'),
+            "a body's ID names its system: {id}"
+        );
+        let refused = ReadCoarseInputsError::Build(not_in_palette);
+        assert_eq!(
+            refused
+                .source()
+                .unwrap()
+                .downcast_ref::<BuildCoarseInputsError>(),
+            Some(&not_in_palette)
+        );
+        for error in [
+            ReadCoarseInputsError::Section(SurfaceInputsError::NoSolidSurface),
+            ReadCoarseInputsError::NotAtRecordTime,
+        ] {
+            assert!(error.source().is_none(), "{error:?}");
+        }
+    }
+
+    /// How many of the sample's real systems the census reads.
+    const CENSUS: usize = 40;
+
+    #[test]
+    fn every_generated_solid_body_reads_into_inputs_the_builder_takes() {
+        let contexts = sample_contexts(CENSUS, SEED, SampleFilter::ALL).unwrap();
+        let (mut bodies, mut moons, mut airless, mut aired, mut drifting, mut dry) =
+            (0, 0, 0, 0, 0, 0);
+        let mut zeroed = 0;
+        for (ctx, records) in records_at_record_time(&contexts) {
+            for record in &records {
+                let Section::Ok(surface) = record.surface() else {
+                    continue;
+                };
+                let seasons = seasons_of(record, &records);
+                // The palette names only what lies on the ground: a share with no area needs no
+                // entry.
+                let inputs = read(record, seasons);
+                let figures = surface.figures();
+                bodies += 1;
+                dry += usize::from(
+                    figures
+                        .surface_liquids()
+                        .iter()
+                        .chain(figures.surface_ices())
+                        .any(|&(_, area_fraction)| area_fraction.classify() == FpCategory::Zero),
+                );
+                // Airless is zero pressure, to the bit; every other state keeps the record's.
+                if surface.state() == SurfaceState::Airless {
+                    airless += 1;
+                    // The record's tenuous air, which the header states as none.
+                    zeroed += usize::from(surface.conditions().surface_pressure().value() > 0.0);
+                    assert_same_bits(inputs.surface_pressure().value(), 0.0);
+                } else {
+                    aired += 1;
+                    assert_eq!(
+                        inputs.surface_pressure(),
+                        surface.conditions().surface_pressure()
+                    );
+                }
+                // The seasons: the moon's planet's orbit or the body's own.
+                let orbit = match seasons {
+                    SeasonsFromRecord::Own => record.orbit(),
+                    SeasonsFromRecord::Planet(planet) => {
+                        moons += 1;
+                        planet.orbit()
+                    }
+                };
+                let orbit = orbit.ok().unwrap();
+                drifting += usize::from(orbit.drift().is_some());
+                let elements = elements_at(orbit, RECORD_TIME).unwrap();
+                assert_eq!(
+                    inputs.seasonal_orbit().map(|o| o.period),
+                    Some(elements.period())
+                );
+                let spin = inputs.spin();
+                if math::sin(spin.obliquity.value()) > 1e-6 {
+                    assert_northward_equinox(
+                        spin.equinox_true_anomaly,
+                        record.rotation().ok().unwrap().pole(),
+                        elements.orientation(),
+                    );
+                }
+                // `for_body` is unchanged: no generated body's inputs are served.
+                assert_eq!(
+                    CoarseInputs::for_body(record, &ctx),
+                    Err(SurfaceInputsError::NotModelled(RecordSection::Surface))
+                );
+            }
+        }
+        eprintln!(
+            "census: {bodies} bodies: {moons} moons, {airless} airless ({zeroed} with a tenuous \
+             air zeroed), {aired} with air, {drifting} on drifting seasonal orbits, {dry} listing \
+             a share with no area"
+        );
+        assert!(
+            moons > 0 && airless > 0 && aired > 0 && bodies > moons && dry > 0,
+            "{bodies} bodies: {moons} moons, {airless} airless, {aired} with air, \
+             {drifting} on drifting orbits, {dry} listing a share with no area"
         );
     }
 }

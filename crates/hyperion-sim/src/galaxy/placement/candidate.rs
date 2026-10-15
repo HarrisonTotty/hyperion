@@ -18,12 +18,13 @@
 use super::record::{SystemKind, SystemRecord};
 use super::{CellKey, layer_bound, rogue_planet_saturation_density};
 use crate::coords::GalacticPosition;
+use crate::galaxy::displaced::site::{ExplosionSite, explosion_site, recent_death_claims};
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::imf::MassBand;
 #[cfg(doc)]
 use crate::galaxy::shares::ShareMatrix;
 use crate::galaxy::{Galaxy, PointLy};
-use crate::id::SystemId;
+use crate::id::{Layer, SystemId};
 use crate::rng::{Mark, ObjectKey, Seed, Stream, tags};
 
 /// How far outside plan 02's bound the thinning pads it before drawing, relative: 10⁻¹²
@@ -101,9 +102,10 @@ pub(super) fn evaluate_candidate_from_bound(
 }
 
 /// [`evaluate_candidate_from_bound`] with the carve-out hook given, so that a test can claim
-/// candidates that no class claims yet (plan 03, Design note 5).
+/// candidates that no class claims yet (plan 03, Design note 5), and resolving can take the same
+/// hook (P08.T13's seam).
 #[must_use]
-fn evaluate_with_hook(
+pub(super) fn evaluate_with_hook(
     galaxy: &Galaxy,
     key: CellKey,
     index: u32,
@@ -131,11 +133,30 @@ fn evaluate_with_hook(
 ///
 /// The hook sits after the marks are drawn because a class is a deterministic test on a candidate's
 /// own marks (brainstorm, "Rare events are found by carving out their hosts, not the events"), and
-/// the cells draw conditional on not being in the class. Until plan 09 fills it in, the field keeps
-/// every candidate it accepts, and [`CandidateOutcome::ClaimedByCatalogue`] never appears.
+/// the cells draw conditional on not being in the class. It is asked for stellar records only
+/// (plan 13, P13.T3.c). For a layer-E record it computes the record's
+/// [`explosion_site`] and, where the primary dies inside the interval, passes the site to
+/// [`recent_death_claims`] (plan 08, P08.T13); every other layer is answered no without a site.
+/// Until plan 09 fills that claim in (P09.T35), the field keeps every candidate it accepts, and
+/// [`CandidateOutcome::ClaimedByCatalogue`] never appears.
 #[must_use]
-fn catalogue_claims(_galaxy: &Galaxy, _record: &SystemRecord) -> bool {
-    false
+pub(super) fn catalogue_claims(galaxy: &Galaxy, record: &SystemRecord) -> bool {
+    claims_with(galaxy, record, explosion_site, recent_death_claims)
+}
+
+/// [`catalogue_claims`] with the site and the claim given: for a layer-E record, `claim` of its
+/// `site` where it has one, and no for every other layer, which asks neither (P08.T13). Production
+/// passes [`explosion_site`] and [`recent_death_claims`]; a test passes counting or always-yes
+/// closures, which needs no hidden state.
+#[must_use]
+pub(super) fn claims_with(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    site: impl FnOnce(&Galaxy, &SystemRecord) -> Option<ExplosionSite>,
+    claim: impl FnOnce(&Galaxy, &ExplosionSite, &SystemRecord) -> bool,
+) -> bool {
+    record.layer() == Layer::E
+        && site(galaxy, record).is_some_and(|site| claim(galaxy, &site, record))
 }
 
 /// The ID of candidate `index` of `key`.
@@ -269,9 +290,10 @@ mod tests {
     use hyperion_testkit::stats::{ALPHA, assert_p_value, chi_square_gof};
 
     use super::*;
+    use crate::galaxy::displaced::site::take_verdicts;
     use crate::galaxy::params::GalaxyParams;
-    use crate::galaxy::placement::{STELLAR_LAYERS, SystemOrigin, candidate_count};
-    use crate::id::{Layer, SystemIdKind};
+    use crate::galaxy::placement::{STELLAR_LAYERS, SystemOrigin, candidate_count, generate_cell};
+    use crate::id::SystemIdKind;
     use crate::rng::{Seed, Threshold};
     use crate::units::consts::METRES_PER_LIGHT_YEAR;
 
@@ -599,6 +621,77 @@ mod tests {
             claimed > 0 && accepted > 0,
             "{claimed} claimed and {accepted} left of a layer-C cell"
         );
+    }
+
+    /// P08.T13: the hook asks for a site exactly once for each candidate the thinning accepts in
+    /// layer E and never in layers A–D, and passes each site there is to the claim exactly once;
+    /// and the production hook gives one verdict of the interval predicate per accepted layer-E
+    /// record and none elsewhere.
+    #[test]
+    fn hook_asks_for_a_site_once_per_accepted_layer_e_candidate() {
+        let galaxy = galaxy();
+        let asked = std::cell::Cell::new(0_u32);
+        let (sites, claimed) = (std::cell::Cell::new(0_u32), std::cell::Cell::new(0_u32));
+        let site = |g: &Galaxy, r: &SystemRecord| {
+            asked.set(asked.get() + 1);
+            let site = explosion_site(g, r);
+            sites.set(sites.get() + u32::from(site.is_some()));
+            site
+        };
+        let claim = |_: &Galaxy, _: &ExplosionSite, _: &SystemRecord| {
+            claimed.set(claimed.get() + 1);
+            false
+        };
+        let hook = |g: &Galaxy, r: &SystemRecord| claims_with(g, r, site, claim);
+        let mut cells = Vec::new();
+        let mut accepted_e = 0_u32;
+        for spec in &STELLAR_LAYERS {
+            let layer = spec.layer();
+            let [x, y, z] = CellKey::containing(layer, &sunlike())
+                .unwrap()
+                .gen_cell()
+                .to_array();
+            // Enough layer-E cells that some hold a death in the interval (about one in 28).
+            let count = if layer == Layer::E { 160 } else { 2 };
+            for dx in 0..count {
+                let key = CellKey::new(layer, [x + dx, y, z]).unwrap();
+                cells.push(key);
+                let bound = layer_bound(&galaxy, key);
+                for index in 0..candidate_count(&galaxy, key) {
+                    let before = asked.get();
+                    let outcome = evaluate_with_hook(&galaxy, key, index, bound, hook);
+                    let asks = asked.get() - before;
+                    match outcome {
+                        CandidateOutcome::Accepted(_) if layer == Layer::E => {
+                            assert_eq!(asks, 1, "{key:?} candidate {index}");
+                            accepted_e += 1;
+                        }
+                        CandidateOutcome::Accepted(_) | CandidateOutcome::Thinned => {
+                            assert_eq!(asks, 0, "{key:?} candidate {index}");
+                        }
+                        CandidateOutcome::ClaimedByCatalogue => {
+                            unreachable!("the test's claim says no")
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(asked.get(), accepted_e);
+        assert!(sites.get() > 0, "no site in {accepted_e} layer-E records");
+        assert_eq!(claimed.get(), sites.get());
+        // The production hook, through the whole-cell walk: one verdict per accepted layer-E
+        // record, from the one site it computes.
+        take_verdicts();
+        let mut systems = Vec::new();
+        let mut placed_e = 0;
+        for key in cells {
+            generate_cell(&galaxy, key, &mut systems);
+            if key.layer() == Layer::E {
+                placed_e += u64::try_from(systems.len()).unwrap();
+            }
+        }
+        assert_eq!(placed_e, u64::from(accepted_e));
+        assert_eq!(take_verdicts().total(), placed_e);
     }
 
     /// Every draw of a candidate, re-derived from plan 03's Design notes 1–4 with nothing of this

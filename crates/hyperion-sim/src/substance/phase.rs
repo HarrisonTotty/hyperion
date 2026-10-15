@@ -8,8 +8,9 @@
 //! Its saturation vapour pressure is Clausius–Clapeyron from the triple point, with the enthalpy
 //! of the branch below or above it: the four constant sets P14.T13.c fixed for water, carbon
 //! dioxide, nitrogen and argon, moved here verbatim so that no saturation pressure moves, and
-//! methane's, for P14.T24.f. P14.T49.b replaces each with a fit to its substance's reference
-//! equation of state, a deliberate change of output at the 22 → 23 bump.
+//! methane's, for P14.T24.f. P14.T49.b replaces each with its substance's reference equations of
+//! state, a deliberate change of output at the 22 → 23 bump: the phase diagrams of
+//! [`diagram`](super::diagram), built and held until P14.T54.a points the callers at them.
 //!
 //! The phase diagram this gives ([`PhaseColumns::phase_at`]) is the saturation curve's:
 //!

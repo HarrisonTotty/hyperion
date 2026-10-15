@@ -305,6 +305,7 @@ async fn a_client_that_asks_for_no_push_and_no_bulk_receives_only_known_text_fra
             min_layer: MassLayer::A,
             limit: 100,
             include_stellar: false,
+            mode: hyperion_protocol::QueryModeDto::Now,
         }))
         .await;
     // The range query's terminal response comes next: no notification or other message precedes it.

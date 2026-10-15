@@ -35,7 +35,10 @@
 //! grain densities (science-r09-drainage.md §3 and §5). R09.T10.d added an undifferentiated body's
 //! bulk material and the lid, which crust or bulk material the surface shows, and the reference
 //! Moon's and Mars's own rows, the feldspathic highlands and the iron-rich basalt
-//! (science-composition-crusts.md §1, §2, §5 and §7). Run on any inputs, the pass so far yields its
+//! (science-composition-crusts.md §1, §2, §5 and §7). R09.T10.e wrote the reading of the record,
+//! [`CoarseInputs::from_record`]: every input but the crust, the condensates and the palette from
+//! the record's sections at [`RECORD_TIME`], a moon's seasons from its planet's record, with those
+//! three given, which P14.T54.a connects to the record. Run on any inputs, the pass so far yields its
 //! initial state: a smooth, dry sphere at the datum under a still climate at the body's mean
 //! surface temperature, with the inputs' palette. R09.T11–T15 fill the steps and R09.T16 pins the
 //! reference worlds' fields.
@@ -51,7 +54,8 @@
 //! | R09.T2 (follow-up B) | the palette and the substance byte | [`hyperion_surface::field`]'s `MaterialPalette`, `PaletteEntry`, `PaletteRole` and `SynthesisCell::pack_substances`; [`hyperion_surface::substance_key::SubstanceKey`], every substance's key |
 //! | 14 | the record | [`BodyRecord`](crate::planetary::record::BodyRecord)'s surface section's tag, [`RecordSection`](crate::planetary::record::RecordSection) |
 //! | 14 | the surface state and material | [`SurfaceState`](crate::planetary::derive::atmosphere::SurfaceState), [`SurfaceMaterial`](crate::planetary::derive::atmosphere::SurfaceMaterial) |
-//! | 14 | everything else of Design note 3 | builder arguments until P14.T48 and P14.T54.a put them on the record |
+//! | 14 | the surface section's members (P14.T48.e) and the bulk, figure, rotation and orbit sections | [`Surface`](crate::planetary::record::Surface)'s state, material, regime, [`SurfaceConditions`](crate::planetary::hooks::surface::SurfaceConditions) and [`GlobalFigures`](crate::planetary::hooks::figures::GlobalFigures); [`BulkProperties`](crate::planetary::record::BulkProperties), [`BodyFigure`](crate::planetary::derive::figure::BodyFigure), [`BodyFixedFrame`](crate::planetary::frames::BodyFixedFrame) with [`SeasonalSpin::of`](crate::planetary::hooks::surface::SeasonalSpin::of), [`BodyOrbit`](crate::planetary::record::BodyOrbit) and its drift |
+//! | 14 | the crust, the condensates and the palette's sources | builder arguments, and [`CoarseInputs::from_record`]'s, until P14.T54.a puts them on the record |
 
 pub mod grid;
 pub mod inputs;
@@ -64,7 +68,8 @@ pub use grid::{BuildCellGraphError, CellGraph};
 pub use inputs::{
     AreaShare, BuildCoarseInputsError, ClimateRegime, CoarseInputs, CoarseInputsBuilder,
     Condensate, CondensatePhase, CrustInputs, Forcing, GasShare, LidCrust, MAX_CONDENSATES,
-    Persistence, SeasonalOrbit, Spin, SurfaceInputsError, TectonicRegime, ThermalRegime, WetEpoch,
+    Persistence, RECORD_TIME, ReadCoarseInputsError, SeasonalOrbit, SeasonsFromRecord, Spin,
+    SurfaceInputsError, TectonicRegime, ThermalRegime, WetEpoch,
 };
 pub use quantise::{QuantiseFieldError, quantise};
 

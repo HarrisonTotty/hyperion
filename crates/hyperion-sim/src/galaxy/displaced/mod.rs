@@ -12,9 +12,11 @@
 //!
 //! What exists so far: P08.T1's layout (the class indices and kinds below, and the galaxy's scales,
 //! [`scales`]), the binarity seam and the kick bins (P08.T8), the forms (P08.T10) and their bounds
-//! (P08.T11). The class table, the marks and the runaway model are built by the tasks named in
-//! their modules, and nothing generated reads a displaced class until P08.T12 switches them on
-//! with its version bump.
+//! (P08.T11), and the explosion-site hook (P08.T13): the interval predicate
+//! [`death_in_interval`] and [`explosion_site`], which plan 03's carve-out hook asks for every
+//! layer-E record and whose claim answers no until plan 09's P09.T35. The class table, the marks
+//! and the runaway model are built by the tasks named in their modules, and nothing generated
+//! reads a displaced class until P08.T12 switches them on with its version bump.
 //!
 //! Speeds are in units of the galaxy's circular speed `v_c` and times in units of `R_d ÷ v_c`
 //! ([`GalaxyScales`]), as plan 15's form table has them.
@@ -30,6 +32,7 @@ pub mod scales;
 pub mod site;
 
 pub use scales::GalaxyScales;
+pub use site::{ExplosionSite, death_in_interval, explosion_site};
 
 /// The number of speed bins of the class table: edges at 0.25, 0.5, 0.85, 1.3, 1.75, 2.2 and 2.8
 /// `v_c` (brainstorm, "Displaced objects: kicks and runaways"; plan 08, P08.T9.a).

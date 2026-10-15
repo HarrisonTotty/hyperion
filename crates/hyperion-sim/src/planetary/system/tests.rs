@@ -4,6 +4,7 @@
 //! galaxy at the solar circle (P14.T1.d), whose contexts carry plan 11's companions and plan 06's
 //! models; the synthetic hosts are the context builder's.
 
+use core::f64::consts::PI;
 use std::sync::OnceLock;
 
 use hyperion_testkit::float::assert_same_bits;
@@ -23,7 +24,7 @@ use crate::planetary::index::{BodySlot, BodySub};
 use crate::planetary::params::{FLATTENING_CAP, HILL_STABLE_GAP};
 use crate::planetary::placement::mutual_hill_radius;
 use crate::planetary::record::{DetailLevel, MoonOrigin, Population, RecordSection, SectionState};
-use crate::planetary::satellites::generate_satellites;
+use crate::planetary::satellites::{MoonPlane, generate_satellites};
 use crate::planetary::testing::{SampleFilter, sample_contexts, synthetic_binary, synthetic_star};
 use crate::stellar::Phase;
 use crate::stellar::multiplicity::star_positions_at;
@@ -3470,4 +3471,402 @@ fn the_published_volatile_history_reads_each_body_s_past() {
     }
     eprintln!("{checked} published histories, {moons} moons'; {epochs} wet epochs");
     assert!(checked > 100 && moons > 5, "{checked}, {moons}");
+}
+
+// P14.T56.a: every moon and ring on its parent's Laplace surface, ahead of the bump.
+
+/// The sample's systems, generated whole on the Laplace surface (P14.T56.a), once.
+fn laplace_whole() -> &'static [(SystemContext, PlanetarySystem)] {
+    static SYSTEMS: OnceLock<Vec<(SystemContext, PlanetarySystem)>> = OnceLock::new();
+    SYSTEMS.get_or_init(|| {
+        sample()
+            .iter()
+            .map(|ctx| {
+                let system = generate_with(SEED, ctx, SatellitePlanes::LaplaceSurface);
+                (ctx.clone(), system)
+            })
+            .collect()
+    })
+}
+
+/// Asserts two vectors equal bit for bit.
+fn same3(a: [f64; 3], b: [f64; 3]) {
+    for (x, y) in a.into_iter().zip(b) {
+        assert_same_bits(x, y);
+    }
+}
+
+fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+/// The angle between two unit vectors, rad.
+fn between(a: [f64; 3], b: [f64; 3]) -> f64 {
+    let c = [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ];
+    crate::math::atan2(dot3(c, c).sqrt(), dot3(a, b))
+}
+
+#[test]
+fn the_laplace_surface_is_the_same_twice_and_order_independent() {
+    for (ctx, system) in laplace_whole().iter().take(40) {
+        assert_eq!(
+            &generate_with(SEED, ctx, SatellitePlanes::LaplaceSurface),
+            system
+        );
+    }
+    let contexts: Vec<SystemContext> = sample().iter().take(30).cloned().collect();
+    assert_order_independent(&contexts, |ctx| {
+        generate_with(SEED, ctx, SatellitePlanes::LaplaceSurface)
+    });
+}
+
+/// P14.T56.a: the Laplace surface turns planes only. Every planet is as version 22 has it, with
+/// its frame held, and every satellite keeps its index, draws, local elements and mass, so that
+/// T22.b's properties, which read nothing else, stand; no regular moon or ring of the sample lies
+/// in an eccentricity band (decision-p14-moons §1.2 expects none of 5 × 10⁻¹¹ of giants), and each
+/// moon keeps whether it has a rotation law.
+#[test]
+fn the_laplace_surface_moves_no_satellite_s_elements_mass_or_count() {
+    let (mut frames, mut moons, mut rings, mut tilted) = (0, 0, 0, 0);
+    for ((ctx, flat), (_, laid)) in whole().iter().zip(laplace_whole()) {
+        assert_eq!(flat.zones(), laid.zones());
+        let held: Vec<Body> = laid
+            .planets()
+            .map(|body| Body {
+                laplace: None,
+                ..body.clone()
+            })
+            .collect();
+        let before: Vec<Body> = flat.planets().cloned().collect();
+        assert_eq!(held, before, "{:?}", ctx.id());
+        frames += laid
+            .planets()
+            .filter(|body| body.laplace().is_some())
+            .count();
+        assert_eq!(flat.satellites().len(), laid.satellites().len());
+        for (a, b) in flat.satellites().iter().zip(laid.satellites()) {
+            assert_eq!(a.parent_index(), b.parent_index());
+            assert_eq!(a.parent(), b.parent());
+            assert_eq!(a.moonlets(), b.moonlets());
+            assert_eq!(a.irregulars(), b.irregulars());
+            assert_eq!(a.moons().len(), b.moons().len(), "{:?}", a.parent_index());
+            let Some(parent) = a.parent() else {
+                continue;
+            };
+            let age = ctx.age_at_epoch();
+            for (x, y) in a.moons().iter().zip(b.moons()) {
+                assert_eq!(
+                    (x.index(), x.moon(), x.radius_rank()),
+                    (y.index(), y.moon(), y.radius_rank())
+                );
+                assert_eq!(x.local_orbit_at(parent, age), y.local_orbit_at(parent, age));
+                assert_eq!(x.plane(), &MoonPlane::OrbitalPlane);
+                if matches!(y.plane(), MoonPlane::Laplace(_)) {
+                    tilted += 1;
+                }
+                // A moon's spin, lock and tilt are its own; only its frame turns with its orbit.
+                let (bx, by) = (flat.body(x.index()).unwrap(), laid.body(y.index()).unwrap());
+                assert_eq!(
+                    bx.rotation.is_some(),
+                    by.rotation.is_some(),
+                    "{:?}",
+                    x.index()
+                );
+                if let (Some(rx), Some(ry)) = (bx.rotation, by.rotation) {
+                    assert_eq!(
+                        (rx.obliquity_law(), rx.primordial_period(), rx.obliquity()),
+                        (ry.obliquity_law(), ry.primordial_period(), ry.obliquity())
+                    );
+                    assert_eq!(rx.locking_time(), ry.locking_time(), "{:?}", x.index());
+                }
+                moons += 1;
+            }
+            assert_eq!(a.rings().len(), b.rings().len(), "{:?}", a.parent_index());
+            for (x, y) in a.rings().iter().zip(b.rings()) {
+                assert_eq!(
+                    (
+                        x.index(),
+                        x.kind(),
+                        x.inner_edge(),
+                        x.outer_edge(),
+                        x.mass(),
+                        x.gaps()
+                    ),
+                    (
+                        y.index(),
+                        y.kind(),
+                        y.inner_edge(),
+                        y.outer_edge(),
+                        y.mass(),
+                        y.gaps()
+                    )
+                );
+                same3(x.normal(), parent.orbit().orientation().normal());
+                rings += 1;
+            }
+        }
+    }
+    assert!(
+        frames > 300 && moons > 100 && rings > 50 && tilted * 10 > moons * 9,
+        "{frames} frames, {moons} moons ({tilted} on a Laplace plane), {rings} rings"
+    );
+}
+
+/// P14.T56.a: each moon's orbit lies at its drawn inclination to its own local Laplace plane,
+/// whose pole lies between its parent's spin pole and orbit normal.
+#[test]
+fn every_moon_lies_at_its_drawn_tilt_to_its_local_laplace_plane() {
+    let mut moons = 0;
+    for (ctx, system) in laplace_whole() {
+        let age = ctx.age_at(parent_time(ctx));
+        for found in system.satellites() {
+            let (Some(parent), Some(frame)) = (
+                found.parent(),
+                system.body(found.parent_index()).and_then(Body::laplace),
+            ) else {
+                continue;
+            };
+            for moon in found.moons() {
+                let MoonPlane::Laplace(plane) = moon.plane() else {
+                    panic!("{:?} of a parent with a frame lies off it", moon.index());
+                };
+                let local = moon.local_orbit_at(parent, age);
+                let pole = plane.pole_at(local.semi_major_axis());
+                let normal = moon.orbit_at(parent, age).orientation().normal();
+                let tilt = between(normal, pole);
+                assert!(
+                    (tilt - local.inclination().value()).abs() < 1e-7,
+                    "{:?}",
+                    moon.index()
+                );
+                let (spin, orbit) = (frame.spin_pole(), frame.orbit_normal());
+                match moon.moon() {
+                    SatelliteMoon::Captured(_) => {
+                        assert_eq!(plane.sense(), crate::planetary::laplace::PoleSense::Orbit);
+                        assert!(dot3(pole, orbit) > 0.0, "{:?}", moon.index());
+                    }
+                    SatelliteMoon::Regular(_) | SatelliteMoon::GiantImpact(_) => {
+                        assert_eq!(plane.sense(), crate::planetary::laplace::PoleSense::Spin);
+                        assert!(dot3(pole, spin) > 0.0, "{:?}", moon.index());
+                    }
+                }
+                let sided = if dot3(pole, orbit) < 0.0 {
+                    pole.map(|v| -v)
+                } else {
+                    pole
+                };
+                let across = between(spin, sided).min(between(spin.map(|v| -v), sided));
+                let apart = between(spin, orbit).min(between(spin.map(|v| -v), orbit));
+                assert!(across <= apart + 1e-12, "{:?}", moon.index());
+                assert!(plane.laplace_radius().value() > 0.0);
+                moons += 1;
+            }
+        }
+    }
+    assert!(moons > 100, "{moons} moons");
+}
+
+/// P14.T56.a: a ring lies on its parent's local Laplace plane at the geometric mean of its edges,
+/// with the regular moons inside that radius counted, on the spin's side. Close in that is the
+/// equator: under 0.1 `r_L` the pole is within ¼ sin 2ε′ (r ÷ `r_L`)⁵, the small-radius limit of
+/// the plane's tilt, and within 10⁻⁹ rad wherever that limit is (a technical correction of the plan's
+/// "10⁻⁹ rad under 0.1 `r_L`", which the surface's own law exceeds there: Saturn's rings, at 0.063
+/// `r_L`, tilt 1.9 × 10⁻⁷ rad).
+#[test]
+fn every_ring_lies_on_its_local_laplace_plane_and_close_in_on_the_equator() {
+    let (mut rings, mut close, mut nanoradian) = (0, 0, 0);
+    for (_, system) in laplace_whole() {
+        for found in system.satellites() {
+            let Some(frame) = system.body(found.parent_index()).and_then(Body::laplace) else {
+                continue;
+            };
+            for ring in found.rings() {
+                let middle =
+                    Metres::new((ring.inner_edge().value() * ring.outer_edge().value()).sqrt());
+                let inside = found.moons().iter().filter_map(|moon| match moon.moon() {
+                    SatelliteMoon::Regular(regular) => {
+                        let a = regular.orbit().semi_major_axis();
+                        (a < middle).then(|| crate::planetary::laplace::InnerMoon {
+                            mass_ratio: Kilograms::from(regular.mass()).value()
+                                / frame.parent_mass().value(),
+                            semi_major_axis: a,
+                        })
+                    }
+                    SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_) => None,
+                });
+                let rl = frame.laplace_radius(inside);
+                let expected = frame
+                    .local(rl, crate::planetary::laplace::PoleSense::Spin)
+                    .pole_at(middle);
+                same3(ring.normal(), expected);
+                let x = ring.outer_edge().value() / rl.value();
+                if x < 0.1 {
+                    let e = frame
+                        .obliquity()
+                        .value()
+                        .min(PI - frame.obliquity().value());
+                    let limit = 0.25 * crate::math::sin(2.0 * e) * crate::math::powi(x, 5);
+                    let tilt = between(ring.normal(), frame.spin_pole());
+                    assert!(
+                        tilt <= limit * (1.0 + 1e-6) + 1e-15,
+                        "{:?}: {tilt} > {limit}",
+                        ring.index()
+                    );
+                    if limit < 1e-9 {
+                        assert!(tilt < 1e-9);
+                        nanoradian += 1;
+                    }
+                    close += 1;
+                }
+                rings += 1;
+            }
+        }
+    }
+    assert!(
+        rings > 50 && close > 40 && nanoradian > 0,
+        "{rings} rings, {close} close in, {nanoradian} within 1 nrad"
+    );
+}
+
+/// P14.T56.a with P14.T30.a: on the Laplace surface `generate_satellites` for a planet or member,
+/// on the frame its body holds, equals its children in `generate`, over 1,000 systems. A
+/// giant-impact moon's plane is held where its drift law anchors it (decision-p14-moons §1.2,
+/// "Read once"); the largest turn of its local Laplace plane across the clock window, which bounds
+/// every step between its drift cells, is under the ruling's 0.1° (5.0 × 10⁻⁴° over this sample's
+/// 1,024 giant-impact moons, 2026-10-15).
+#[test]
+fn on_the_laplace_surface_generate_satellites_is_each_parent_s_children_in_generate() {
+    let contexts = sample_contexts(1_000, Seed::new(0x5a7e_1117), SampleFilter::ALL).unwrap();
+    let (mut compared, mut impacts, mut widest) = (0, 0, 0.0_f64);
+    for ctx in &contexts {
+        let system = generate_with(SEED, ctx, SatellitePlanes::LaplaceSurface);
+        let (start, end) = (ctx.age_at(ClockWindow::START), ctx.age_at(ClockWindow::END));
+        let parents = system
+            .bodies()
+            .iter()
+            .filter(|body| matches!(body.kind(), BodyKind::Planet | BodyKind::DwarfPlanet));
+        for parent in parents {
+            let belt = if parent.kind() == BodyKind::Planet {
+                system.nearest_belt(parent.index())
+            } else {
+                None
+            };
+            let alone = generate_satellites(SEED, ctx, parent, belt);
+            assert_eq!(
+                alone,
+                system.satellites_of(parent.index()),
+                "{:?}",
+                parent.index()
+            );
+            let children: Vec<BodyIndex> =
+                system.children(parent.index()).map(Body::index).collect();
+            let mut expected: Vec<BodyIndex> = alone
+                .moons()
+                .iter()
+                .map(Satellite::index)
+                .chain(alone.rings().iter().map(Ring::index))
+                .collect();
+            expected.sort_unstable();
+            assert_eq!(children, expected);
+            compared += 1;
+            let Some(moon_parent) = alone.parent() else {
+                continue;
+            };
+            for moon in alone.moons() {
+                let (SatelliteMoon::GiantImpact(impact), MoonPlane::Laplace(plane)) =
+                    (moon.moon(), moon.plane())
+                else {
+                    continue;
+                };
+                let a = |age| impact.orbit_at(moon_parent, age).semi_major_axis();
+                let turn = between(plane.pole_at(a(start)), plane.pole_at(a(end)));
+                widest = widest.max(turn);
+                impacts += 1;
+            }
+        }
+    }
+    assert!(
+        compared > 1_000 && impacts > 100,
+        "{compared} parents, {impacts} impact moons"
+    );
+    assert!(
+        widest.to_degrees() < 0.1,
+        "a giant-impact moon's plane turns {}° across the window",
+        widest.to_degrees()
+    );
+}
+
+/// P14.T56.a: each planet's and member's frame is read off its own held law and published figure
+/// at `parent_time`: its spin pole, the normal of the orbit its law was derived on, J₂ of its
+/// figure's equatorial radius and moment of inertia at its spin rate then, and its age then.
+#[test]
+fn each_parent_s_frame_is_its_own_law_and_figure_at_its_time() {
+    let mut frames = 0;
+    for (ctx, system) in laplace_whole().iter().take(150) {
+        let t = parent_time(ctx);
+        for body in system.bodies() {
+            let primary = matches!(body.part, Part::Planet(_) | Part::Member(_));
+            let Some(frame) = body.laplace() else {
+                assert!(
+                    !primary || body.rotation.is_none(),
+                    "{:?} has a law and no frame",
+                    body.index()
+                );
+                continue;
+            };
+            let law = body.rotation.expect("a body with a frame has a law");
+            // The frame takes its axes as unit vectors again, to the last bit or so.
+            assert!(between(frame.spin_pole(), law.frame().pole()) < 1e-15);
+            let record = system.body_at(ctx, body.index(), t).unwrap();
+            let (Section::Ok(orbit), Section::Ok(bulk), Section::Ok(mass)) =
+                (record.orbit(), record.bulk(), record.mass())
+            else {
+                panic!("{:?} has a frame and no record then", body.index());
+            };
+            let elements = system.elements_at_parent_time(ctx, body, orbit.elements());
+            assert!(between(frame.orbit_normal(), elements.orientation().normal()) < 1e-15);
+            let Section::Ok(figure) = body.figure_section(Some(bulk), *mass, t) else {
+                panic!("{:?} has no figure", body.index());
+            };
+            let radius = Metres::new(figure.spheroid().equatorial_radius_m);
+            let spin = law.frame();
+            let j2 = hydrostatic_j2(
+                figure.moment_factor(),
+                spin.rate().rate_at(t),
+                radius,
+                Kilograms::from(*mass),
+                spin.state_at(t),
+            );
+            assert_same_bits(frame.j2(), j2);
+            assert_same_bits(frame.equatorial_radius().value(), radius.value());
+            assert_same_bits(frame.read_at().value(), ctx.age_at(t).value());
+            frames += 1;
+        }
+    }
+    assert!(frames > 100, "{frames} frames");
+}
+
+/// P14.T56.a with P14.T46.b (b): on the Laplace surface every body's held law, a moon's derived
+/// on its plane after its parent's, is still the one derived from its record at `parent_time`,
+/// bit for bit, whatever order the bodies are asked in.
+#[test]
+fn on_the_laplace_surface_every_law_is_its_record_s() {
+    let mut laws = 0;
+    for (ctx, system) in laplace_whole().iter().take(150) {
+        let indices: Vec<BodyIndex> = system.bodies().iter().map(Body::index).collect();
+        let held = |index: BodyIndex| system.rotation_of(ctx, index).unwrap();
+        for &index in &indices {
+            let body = system.body(index).unwrap();
+            let record = system.body_at(ctx, index, parent_time(ctx)).unwrap();
+            let derived = system.derive_rotation(ctx, body, &record);
+            assert_eq!(held(index), derived, "{index:?}");
+            laws += usize::from(derived.is_some());
+        }
+        assert_order_independent(&indices, |&index| held(index));
+    }
+    assert!(laws > 300, "{laws} laws");
 }

@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::observe::{ObservedDto, QueryModeDto};
 use crate::primitives::{GalacticPosition, SeedHex, SystemIdHex, UniverseIdHex, UniverseTime};
 use crate::stellar::StellarBriefDto;
 
@@ -451,6 +452,14 @@ pub struct SystemsInRangeRequest {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[ts(as = "Option<bool>", optional)]
     pub include_stellar: bool,
+    /// The mode to answer in (plan 12, P12.T6): `now` when absent, and written only when
+    /// observed, so that a request of plan 04's form is unchanged.
+    ///
+    /// Observed mode finds the same systems and census as `now`; each row then also carries its
+    /// `observed`, and a row's `stellar`, when asked for, is its primary when the light left it.
+    #[serde(default, skip_serializing_if = "QueryModeDto::is_now")]
+    #[ts(as = "Option<QueryModeDto>", optional)]
+    pub mode: QueryModeDto,
 }
 
 /// The systems within range of a point at a time, with the census that says what was left out.
@@ -550,7 +559,9 @@ pub struct SystemRecord {
     /// position at the query's time is its epoch position plus this times the time since the
     /// epoch.
     pub velocity_km_s: [f64; 3],
-    /// What its primary is now, when the request set `include_stellar` (plan 06, P06.T33).
+    /// What its primary is now, when the request set `include_stellar` (plan 06, P06.T33); in
+    /// observed mode, what it was when the light left it, absent if it had not formed then (plan
+    /// 12, P12.T6).
     ///
     /// Absent otherwise: the key is left out rather than written `null`, so that a row without a
     /// brief is exactly plan 04's. A brown dwarf's brief is its own; a rogue planet has none, and
@@ -569,6 +580,16 @@ pub struct SystemRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub fe_h_dex: Option<f64>,
+    /// What the request's observer receives from the system, in observed mode only (plan 12,
+    /// P12.T6); the key is left out in `now`, so that such a row is exactly plan 04's.
+    ///
+    /// The row's other fields but `stellar` stay the present's in either mode, `position`,
+    /// `age_myr` and `velocity_km_s` among them (plan 12, Design note 4); with `include_stellar`,
+    /// `stellar` is the primary's when the light left it. A server built before P12.T6 answers an
+    /// observed request without this key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub observed: Option<ObservedDto>,
 }
 
 #[cfg(test)]
@@ -902,6 +923,7 @@ mod tests {
                 min_layer: MassLayer::A,
                 limit: 5_000,
                 include_stellar: false,
+                mode: QueryModeDto::Now,
             }),
             json!({
                 "kind": "systems_in_range",
@@ -935,6 +957,7 @@ mod tests {
                 min_layer: MassLayer::A,
                 limit: 5_000,
                 include_stellar: false,
+                mode: QueryModeDto::Now,
             })
         );
     }
@@ -990,6 +1013,7 @@ mod tests {
                 velocity_km_s: [-12.5, 231.25, 7.0],
                 stellar: None,
                 fe_h_dex: None,
+                observed: None,
             },
             SystemRecord {
                 id: SystemIdHex::from_u64(0x6000_0000_0000_0001),
@@ -1005,6 +1029,7 @@ mod tests {
                 velocity_km_s: [3.5, -228.0, -0.75],
                 stellar: None,
                 fe_h_dex: None,
+                observed: None,
             },
         ]
     }
@@ -1159,6 +1184,7 @@ mod tests {
                 min_layer: MassLayer::C,
                 limit: 5_000,
                 include_stellar: true,
+                mode: QueryModeDto::Now,
             }),
             json!({
                 "kind": "systems_in_range",
@@ -1172,6 +1198,96 @@ mod tests {
                 "min_layer": "c",
                 "limit": 5_000,
                 "include_stellar": true,
+            }),
+        );
+    }
+
+    #[test]
+    fn systems_in_range_request_wire_form_observed() {
+        assert_wire_form(
+            &RequestBody::SystemsInRange(SystemsInRangeRequest {
+                universe: universe(),
+                centre: chart_centre(),
+                radius_ly: 50.0,
+                time: epoch_plus_a_century(),
+                min_layer: MassLayer::A,
+                limit: 5_000,
+                include_stellar: false,
+                mode: QueryModeDto::Observed {
+                    observer: GalacticPosition {
+                        cell_ly: [0, 23_000, 0],
+                        offset_m: [0.5, 0.0, 0.0],
+                    },
+                },
+            }),
+            json!({
+                "kind": "systems_in_range",
+                "universe": "0123456789abcdef",
+                "centre": {
+                    "cell_ly": [26_000, 0, -1],
+                    "offset_m": [0.0, 0.0, 4_730_365_236_290_400.0],
+                },
+                "radius_ly": 50.0,
+                "time": { "seconds": 3_155_760_000_i64, "nanos": 0 },
+                "min_layer": "a",
+                "limit": 5_000,
+                "mode": {
+                    "type": "observed",
+                    "observer": { "cell_ly": [0, 23_000, 0], "offset_m": [0.5, 0.0, 0.0] },
+                },
+            }),
+        );
+    }
+
+    #[test]
+    fn systems_in_range_request_of_plan_04_is_asked_now() {
+        // The form plan 04 pinned, with no `mode`, still parses, and reads as `now`.
+        let text = r#"{"kind":"systems_in_range","universe":"0123456789abcdef",
+            "centre":{"cell_ly":[26000,0,-1],"offset_m":[0,0,4730365236290400]},
+            "radius_ly":50,"time":{"seconds":3155760000,"nanos":0},"min_layer":"a","limit":5000}"#;
+        match serde_json::from_str::<RequestBody>(text).unwrap() {
+            RequestBody::SystemsInRange(request) => assert_eq!(request.mode, QueryModeDto::Now),
+            other => panic!("expected a range request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn system_record_wire_form_observed() {
+        let mut row = two_rows().remove(1);
+        row.observed = Some(ObservedDto {
+            emitted: UniverseTime {
+                seconds: -94_668_796_800,
+                nanos: 125,
+            },
+            light_age_yr: 3_100.25,
+            apparent_position: GalacticPosition {
+                cell_ly: [25_990, 22, 0],
+                offset_m: [0.0, 1.0e15, 3.0e15],
+            },
+            curvature_error_ly: 0.002_5,
+            curvature_error_arcsec: 0.125,
+        });
+        assert_wire_form(
+            &row,
+            json!({
+                "id": "6000000000000001",
+                "designation": "Vorth AB-C b17-2",
+                "position": { "cell_ly": [25_990, 20, 0], "offset_m": [0.0, 2.0e15, 3.0e15] },
+                "layer": "b",
+                "initial_mass_msun": 0.625,
+                "age_myr": 45.0,
+                "population": "young_thin_disc",
+                "velocity_km_s": [3.5, -228.0, -0.75],
+                "observed": {
+                    "emitted": { "seconds": -94_668_796_800_i64, "nanos": 125 },
+                    "light_age_yr": 3_100.25,
+                    "apparent_position": {
+                        "cell_ly": [25_990, 22, 0],
+                        "offset_m": [0.0, 1.0e15, 3.0e15],
+                    },
+                    "curvature_error_ly": 0.002_5,
+                    "curvature_error_arcsec": 0.125,
+                },
             }),
         );
     }
@@ -1214,6 +1330,7 @@ mod tests {
                     absolute_v_mag: None,
                 }),
                 fe_h_dex: None,
+                observed: None,
             },
             json!({
                 "id": "0200080020000000",
@@ -1285,6 +1402,7 @@ mod tests {
                     min_layer: layer,
                     limit: 5_000,
                     include_stellar: true,
+                    mode: QueryModeDto::Now,
                 }),
                 json!({
                     "kind": "systems_in_range",
@@ -1318,6 +1436,7 @@ mod tests {
                 absolute_v_mag: None,
             }),
             fe_h_dex: None,
+            observed: None,
             ..two_rows().remove(1)
         };
         let brown_dwarf = SystemRecord {
@@ -1341,6 +1460,7 @@ mod tests {
                 absolute_v_mag: None,
             }),
             fe_h_dex: None,
+            observed: None,
         };
         let rogue_planet = SystemRecord {
             id: SystemIdHex::from_u64(0xc1ff_3657_7ff8_0005),
@@ -1356,6 +1476,7 @@ mod tests {
             velocity_km_s: [-40.0, 190.0, 22.5],
             stellar: None,
             fe_h_dex: Some(-0.375),
+            observed: None,
         };
         vec![star, brown_dwarf, rogue_planet]
     }

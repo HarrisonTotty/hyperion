@@ -19,6 +19,7 @@ use crate::galaxy::{
     ExtinctionResult, GalaxyParameters, GalaxyParametersRequest, SystemsInRange,
     SystemsInRangeRequest,
 };
+use crate::observe::{ResolveSystemRequest, ResolvedSystem};
 use crate::planetary::{
     BodyDetailDto, BodyDetailRequest, BodyEventsDto, BodyEventsRequest, SystemBodiesDto,
     SystemBodiesRequest,
@@ -303,6 +304,8 @@ pub enum RequestBody {
     ExtinctionMap(ExtinctionMapRequest),
     /// The extinction from one point to each of a list of targets.
     Extinction(ExtinctionRequest),
+    /// One system by its ID at a time, now or as an observer receives it (plan 12).
+    ResolveSystem(ResolveSystemRequest),
 }
 
 /// The answer to a request, with the same `kind` as the request it answers.
@@ -352,6 +355,9 @@ pub enum ResponseBody {
     ExtinctionMap(ExtinctionMap),
     /// The extinction to each target, in the request's order.
     Extinction(ExtinctionResult),
+    // Boxed, as `SystemBodies` is: a range row is several times the size of most answers.
+    /// The system's row.
+    ResolveSystem(Box<ResolvedSystem>),
 }
 
 /// The `kind` string of every [`RequestBody`] variant, which is also that of the
@@ -379,6 +385,7 @@ pub const REQUEST_KINDS: &[&str] = &[
     "survey_pass",
     "extinction_map",
     "extinction",
+    "resolve_system",
 ];
 
 #[cfg(test)]
@@ -390,9 +397,10 @@ mod tests {
     use super::*;
     use crate::bulk::BulkManifestDto;
     use crate::galaxy::{
-        Census, ExtinctionTarget, MapPopulation, MapView, MassLayer, ParameterGroup,
-        SystemsInRange, TargetExtinction,
+        Census, ExtinctionTarget, MapPopulation, MapView, MassLayer, ParameterGroup, Population,
+        SystemRecord, SystemsInRange, TargetExtinction,
     };
+    use crate::observe::QueryModeDto;
     use crate::orbit::HierarchyDto;
     use crate::planetary::{
         BodyKindDto, BodyRecordDto, BodyStateDto, DetailLevelDto, OrbitHostDto, SectionDto,
@@ -547,6 +555,7 @@ mod tests {
                     min_layer: MassLayer::A,
                     limit: 5_000,
                     include_stellar: false,
+                    mode: QueryModeDto::Now,
                 }))
             }
             Some(RequestBody::SystemsInRange(_)) => {
@@ -626,7 +635,17 @@ mod tests {
                     targets: vec![ExtinctionTarget::System { id: system() }],
                 }))
             }
-            Some(RequestBody::Extinction(_)) => None,
+            Some(RequestBody::Extinction(_)) => {
+                Some(RequestBody::ResolveSystem(ResolveSystemRequest {
+                    universe,
+                    system: system(),
+                    time: UniverseTime::default(),
+                    mode: QueryModeDto::Observed {
+                        observer: GalacticPosition::default(),
+                    },
+                }))
+            }
+            Some(RequestBody::ResolveSystem(_)) => None,
         }
     }
 
@@ -777,7 +796,26 @@ mod tests {
                     targets: vec![TargetExtinction::NoSuchSystem],
                 }))
             }
-            Some(ResponseBody::Extinction(_)) => None,
+            Some(ResponseBody::Extinction(_)) => {
+                Some(ResponseBody::ResolveSystem(Box::new(ResolvedSystem {
+                    universe,
+                    time: UniverseTime::default(),
+                    record: SystemRecord {
+                        id: system(),
+                        designation: "Vorth AB-C e4-17".to_owned(),
+                        position: GalacticPosition::default(),
+                        layer: MassLayer::E,
+                        initial_mass_msun: 11.25,
+                        age_myr: 7_250.5,
+                        population: Population::OldThinDisc,
+                        velocity_km_s: [0.0; 3],
+                        stellar: None,
+                        fe_h_dex: None,
+                        observed: None,
+                    },
+                })))
+            }
+            Some(ResponseBody::ResolveSystem(_)) => None,
         }
     }
 
@@ -1067,6 +1105,7 @@ mod tests {
                 "survey_pass",
                 "extinction_map",
                 "extinction",
+                "resolve_system",
             ]
         );
     }

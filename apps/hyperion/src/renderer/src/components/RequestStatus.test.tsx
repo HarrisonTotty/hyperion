@@ -106,6 +106,31 @@ describe("RequestStatus", () => {
     );
   });
 
+  it("names what the request is for before its state, where one is given", () => {
+    render(<RequestStatus state={{ kind: "pending" }} subject="EXTINCTION" />);
+
+    expect(screen.getByRole("status")).toHaveTextContent(/^EXTINCTION PENDING$/);
+  });
+
+  it("names what the request is for before a rejection and its reason", () => {
+    render(
+      <RequestStatus
+        state={{ kind: "rejected", code: "unknown_universe", reason: "no such universe" }}
+        subject="EXTINCTION"
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(/^EXTINCTION REJECTED: no such universe$/);
+  });
+
+  it("names no subject before the link's state, which is the link's", () => {
+    render(
+      <RequestStatus state={{ kind: "link_down", reason: "NO CARRIER" }} subject="EXTINCTION" />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(/^NO CARRIER$/);
+  });
+
   it("offers no RETRY when the caller cannot send again", () => {
     render(<RequestStatus state={{ kind: "timed_out" }} />);
 

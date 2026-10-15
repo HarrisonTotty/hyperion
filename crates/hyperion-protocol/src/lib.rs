@@ -40,6 +40,7 @@ mod bulk;
 mod envelope;
 mod galaxy;
 mod modelled;
+mod observe;
 mod orbit;
 mod planetary;
 mod primitives;
@@ -65,6 +66,7 @@ pub use galaxy::{
     TargetExtinction, Unit,
 };
 pub use modelled::Modelled;
+pub use observe::{ObservedDto, QueryModeDto, ResolveSystemRequest, ResolvedSystem};
 pub use orbit::{HierarchyDto, HierarchyNodeDto, OrbitDto};
 pub use planetary::{
     AbsorberDto, AerosolInventoryDto, AerosolModeDto, AerosolShapeDto, ArchitectureClassDto,
@@ -157,6 +159,11 @@ pub use universe::{
 /// P07.T10.b leaves the value's cells empty, one built since shows it Missing). Every other enum
 /// is closed: it carries all its variants from the first build that sends a value of it, and a
 /// variant added after that bumps (`decision-gg-port-d0.md` §1).
+///
+/// A defaulted field is an optional one: `mode` on `systems_in_range` and `resolve_system`
+/// (galaxy plan 12, P12.T6) reads absent as `now`, so a request built before it is answered as
+/// before; a server built before it ignores the field and answers `now`, so a client reads a row
+/// without `observed` as not observed, whatever it asked.
 pub const PROTOCOL_VERSION: u32 = 2;
 
 #[cfg(test)]

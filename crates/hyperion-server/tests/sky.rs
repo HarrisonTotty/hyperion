@@ -842,6 +842,7 @@ fn range_query(universe: &UniverseIdHex) -> RequestBody {
         min_layer: MassLayer::A,
         limit: 100,
         include_stellar: false,
+        mode: hyperion_protocol::QueryModeDto::Now,
     })
 }
 

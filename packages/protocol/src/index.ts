@@ -105,6 +105,7 @@ import type { MassLayer } from "./generated/MassLayer";
 import type { MoonOriginDto } from "./generated/MoonOriginDto";
 import type { NatalKickDto } from "./generated/NatalKickDto";
 import type { ObjectKindDto } from "./generated/ObjectKindDto";
+import type { ObservedDto } from "./generated/ObservedDto";
 import type { OpenUniverseRequest } from "./generated/OpenUniverseRequest";
 import type { OrbitDriftDto } from "./generated/OrbitDriftDto";
 import type { OrbitDto } from "./generated/OrbitDto";
@@ -118,10 +119,13 @@ import type { PlanetClassDto } from "./generated/PlanetClassDto";
 import type { PlanetaryNebulaDto } from "./generated/PlanetaryNebulaDto";
 import type { Population } from "./generated/Population";
 import type { PulsarDto } from "./generated/PulsarDto";
+import type { QueryModeDto } from "./generated/QueryModeDto";
 import type { RemnantDto } from "./generated/RemnantDto";
 import type { RequestBody } from "./generated/RequestBody";
 import type { RequestError } from "./generated/RequestError";
 import type { RequestId } from "./generated/RequestId";
+import type { ResolveSystemRequest } from "./generated/ResolveSystemRequest";
+import type { ResolvedSystem } from "./generated/ResolvedSystem";
 import type { ResponseBody } from "./generated/ResponseBody";
 // The subscription envelope (plan 12's P12.T9, built by rendering plan R03's R03.T5.a).
 import type { NotificationBody } from "./generated/NotificationBody";
@@ -311,6 +315,7 @@ export type {
   MoonOriginDto,
   NatalKickDto,
   ObjectKindDto,
+  ObservedDto,
   OpenUniverseRequest,
   OrbitDriftDto,
   OrbitDto,
@@ -324,10 +329,13 @@ export type {
   PlanetaryNebulaDto,
   Population,
   PulsarDto,
+  QueryModeDto,
   RemnantDto,
   RequestBody,
   RequestError,
   RequestId,
+  ResolveSystemRequest,
+  ResolvedSystem,
   ResponseBody,
   NotificationBody,
   SubscribeRequest,

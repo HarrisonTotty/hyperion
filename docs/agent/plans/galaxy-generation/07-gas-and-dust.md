@@ -1157,8 +1157,9 @@ variants exist.
     sign for its subtraction (signoff-6; plan 05's ruling 8 governs a number's sign). The guide's
     "One name per thing" rule means nothing on the console may use an abbreviation that is not on
     this list.
-- **P07.T11.b Galaxy map.** A quantity selector (`SYSTEMS`, `EXTINCTION`, and a `DUST OVERLAY` toggle
-  available under `SYSTEMS`), keyboard-operable with its key shown, a display control and styled as
+- **P07.T11.b Galaxy map.** A quantity selector (`COLUMN DENSITY`, `EXTINCTION`, and a
+  `DUST OVERLAY` toggle available under `COLUMN DENSITY` where the page has room for it
+  (decision-gg-port-d0)), keyboard-operable with its key shown, a display control and styled as
   one. It belongs in `GalaxyMapPanel.tsx` beside the `POPULATION` choice it already owns, and is passed
   to both `GalaxyMapView`s as a prop: the panel holds **no** request, and the only
   `useServerRequest` in the map pipeline is in `GalaxyMapView.tsx`, so that is where
@@ -1217,6 +1218,9 @@ variants exist.
 --deny-warnings`, a root-only script) and `pnpm test` as well as the Rust gate; one file at a time
   with `pnpm --filter hyperion exec vitest run <path>`. By eye, dark lanes lie on the inner edges of
   the young population's arms in the face-on overlay.
+- **Built** (2026-10-15, at version 22): T11.b and T11.c, ported from galaxy-generation 5b1c3285
+  (its T11 half) by lane `gg-port-a2` under `decision-gg-port-d0.md`; see Risks,
+  "P07.T11.b–c, ported".
 
 ### P07.T12 Milky Way and statistical verification
 
@@ -2139,3 +2143,222 @@ Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::
     - D0 counts the gas labels as 17 (§1.1's rows, A1's "the 17 labels", §2.2's "15 kept and 2
       renamed"); the group sends 18 (15 in units an older client knows, 3 in new ones), all 18
       labelled as §2.2's table lists them. Nothing it rules depends on the count.
+- **P07.T11.b–c, as built (lanes `ext07` and `ext07b`, 2026-09-30, at versions 15 and 16) on
+  `galaxy-generation`.** Kept as history, condensed; the port below brings it onto
+  `rendering-and-planets` and supersedes its layout bullets, its provisional pin and its list for
+  the owner.
+  - _T11.b._ `GalaxyMapView.tsx` exports `MapQuantity` and `DUST_OVERLAY_LABEL`; the panel's keys
+    are `Q` (steps `QUANTITY`) and `D` (toggles `DUST OVERLAY`, a `.control` with `aria-pressed`,
+    held back under `EXTINCTION`). `RasterLegend.tsx` is extracted from `DensityLegend.tsx`, whose
+    output is unchanged; `ExtinctionLegend` builds on it with plain-decimal ticks (`0.01`, `0.1`,
+    `1`, `10`). A picture of two maps waits for both, and under the overlay the status names
+    `EXTINCTION` when it is that map's. The view also reads `CURSOR A(V)` in `mag`; under the overlay the undimmed density
+    and A(V) share one live region. `dustOverlay` keeps a pixel with no dust above 0.01 mag at its
+    code, and sends one the shift takes to or below the floor to code 0.
+  - _T11.c._ `SystemReadoutProps` gains only the reading (`extinction: LineExtinction | null`);
+    `SystemsPanel` shows the request's state after the summary's, outside the readout's live region
+    (rulings 13 and 14), through `RequestStatus`'s new `subject` prop. `RETRY` is
+    `LocalChartState.retryExtinction`. The rows stand under the heading `FROM CHART CENTRE`; the
+    line runs from the centre of the chart on show, at its time.
+  - _The compact layout (`ext07b`)._ `mapLayout(size)` is `compact` below `COMPACT_BELOW_REM`
+    (44 rem, ruling 149.2) and `stacked` otherwise and before the page is measured;
+    `mapPictureWidth(size, layout)` replaces the panel's `pictureWidthFor`. Compact, the controls
+    stand in a row across the page, 7.5 rem tall with the tabs' clearance; the words column is at
+    least 27 rem; each view's row is as tall as its picture or its words; under the overlay a
+    view's two legends stand side by side; the link's reason stands in the tabs' row. Both layouts
+    name the overlay once for the page, beside its toggle, and stacked, the pictures start 2.5 rem
+    down, clear of the page tabs (which had drawn `HR DIAGRAM` over the face-on picture).
+  - _Superseded by the port:_ `ext07`'s "Open: the map page's compact layout", "Found, not this
+    lane's", "1280 × 720, deferred" and "For the owner (UX, deferred)" bullets; `ext07b`'s
+    measurements (taken before R01.T5.b's header strip); and its provisional pin, the overlay at
+    1280 × 720 running 70 px past the edge-on picture with the compact page scrolling 68 px, with
+    the `overflow-y: auto; scrollbar-gutter: stable` rule that let it.
+- **P07.T11.b–c, ported (lane `gg-port-a2`, 2026-10-15, at version 22).** Built on
+  `rendering-and-planets`: ported from galaxy-generation 5b1c3285 (its T11 half) by checking its
+  client paths out over the tip and merging each by hand, under `decision-gg-port-d0.md` (batch
+  A2). The client and this plan only: no `GENERATOR_VERSION` or `PROTOCOL_VERSION` change, no wire
+  change.
+  - _Merged by hand._ `RasterLegend`'s ticks carry R07.T16.f's `density-legend__tick-mark` class
+    (stroke `calc(1px * var(--line-scale))`, decision-thin-line-contrast), and the commit's
+    `strokeWidth={1}` goes; `DensityLegend` is the commit's `RasterLegend` form. `RequestStatus`
+    keeps the tip's `isRefusal` beside `subject`. `styles.css` took the commit's block into the
+    grown file by a clean three-way merge. `useLocalChart` and `SystemReadout` keep the `geometry/`
+    imports. `SystemReadout.summary.test.tsx`, which the tip added since, passes `extinction={null}`.
+  - _Ruling 2, the names (D0 §2.1)._ The quantities are `COLUMN DENSITY` and `EXTINCTION`
+    (`MapQuantity` is `"column_density" | "extinction"`, not `"systems"`). The toggle is held back
+    with `NOT AVAILABLE: dims COLUMN DENSITY only` under `EXTINCTION` (`OVERLAY_DENSITY_ONLY`) and
+    `NOT AVAILABLE: no room for DUST OVERLAY at this window size` where the page has no room
+    (`OVERLAY_NO_ROOM`), each a visible line beside the toggle and its description. `CURSOR A(V)`,
+    `FROM CHART CENTRE` and `QUANTITY` are kept. `RequestStatus`'s subject stands before the
+    request's own state with a space (`EXTINCTION PENDING`, `EXTINCTION REJECTED: <reason>`,
+    `EXTINCTION TIMED OUT`) and never before the link's state. `SystemsPanel` reads
+    `EXTINCTION REJECTED: no such system` for a target the server resolves to none, as a refusal
+    with no `RETRY`, and shows the link's state once: not again for the extinction while the
+    summary's status shows it. `E(B−V)` has U+2212 in the readout's row, the doc comments and the
+    tests. No caption under the overlay's legends (§2.3). Built to D0 §2.4's drafts, pending the
+    owner's sign-off (the sign-off queue's item 22); the guide is not edited here.
+  - _Ruling 3, the room (D0 §3.2)._ The compact page's scroll rule is deleted, and nothing on the
+    page scrolls. `mapLayout.ts` gains the measured `WORDS_REM` (the tallest words of each view,
+    plain and under the overlay, in each layout, plus 0.5 rem), and three rules on the page's size
+    alone: `mapPictureWidth` compact leaves the edge-on row its tallest plain words, and the
+    face-on row likewise (at 1280 × 720 the pictures are 256 px, not 260, and under a mode banner
+    254); `mapRows(size, layout)` gives each view its picture's height or its tallest plain words',
+    whichever is taller, and the stacked grid takes its rows from it (`--map-face-row`,
+    `--map-edge-row`); and `overlayHasRoom(size, layout)` is true where those rows hold the
+    overlay's words. Where it is false, the toggle is held back (`aria-disabled`, described by the
+    reason, and by the link's reason too while the link is down), `D` does nothing, and the choice
+    is kept for when the page has room; the room's reason comes before `EXTINCTION`'s. The overlay
+    is offered at 1920 × 1080 and held back at 1280 × 720, 1536 × 864 and 1280 × 1024.
+  - _Deviations from the ruling's text, with their reasons._
+    - **The stacked rows (not in D0).** At 1280 × 1024 the stacked pictures are as wide as the page
+      allows (326 px), and the face-on words with the controls above them (up to 414 px, 25.9 rem,
+      with the link's and the room's reasons) ran 40–66 px past the face-on row into the edge-on
+      view: no picture width could fix that, since the pictures cannot grow. The face-on view now
+      keeps the height of its tallest plain words where they are taller than the picture, which
+      stands at its top (`mapRows`); the edge-on view likewise. At every size whose pictures are
+      the taller, 1920 × 1080 among them, the layout is unchanged. The smallest change that keeps
+      ruling 149.2's 44 rem switch, which the local chart shares; for main, as a question (below).
+    - **The overlay's legends side by side in both layouts (D0 §3.2.4's fallback).** Measured at
+      the narrowest stacked column (24 rem, at 1280 × 1024), the edge-on words under the overlay
+      were 270 px, 278 with the headroom, against the 276–277 px of the 1920 × 1080 edge-on
+      picture, so a rule on the page's size alone could not offer the overlay at the design size;
+      at its own 24.6 rem column they were 252 px. With the legends side by side they are 218 px at
+      both columns, leaving 1920 × 1080 50 px beyond the headroom.
+    - **§3.3's lean taken.** A stale view's status line under its head, counted in the plain
+      reserve, would have narrowed the 1280 × 720 pictures from 260 to 226 px, 34 px past the
+      lean's 24 px. A stale view whose request waits on the link now leaves the link's state to the
+      page, which states it once for both views (the tabs' row compact, the controls stacked); its
+      `S` marks and muted ramp stay.
+    - **The held-back reason's letter-spacing.** The reasons beside the toggle are sentences, now
+      set as the `VIEW` display sets its own (`.view-instruments-panel__reason`), without the
+      labels' 0.15 em: with it, `OVERLAY_NO_ROOM` took three lines of the compact controls' row
+      (138 px against its 7.5 rem, 120 px) and the 1280 × 720 page ran 10 px past its foot.
+  - _Measured_ (D0 §3.4): hidden runs of the lane's own build, the client offscreen and never
+    shown (a `--require` hook in the lane's `target/a2-layout/`, not committed), against the lane's
+    `hyperion-server` with seed 0x4d2's universe, at 1280 × 720, 1536 × 864 (1920 × 1080 at 125%),
+    1920 × 1080 and 1280 × 1024, in the header strip as it is and with the graphics safe mode's
+    banner (2 px taller, so binding), in six states each (`COLUMN DENSITY` with `ALL` and with
+    `YOUNG THIN DISC`, `EXTINCTION`, the overlay on or its toggle held back, the first load, and
+    the link down after both maps loaded). Words are a view's last line of words less its top;
+    overruns the words' foot less the row's (negative fits). Before (5b1c3285's layout as ported,
+    the scroll rule deleted, the overlay offered everywhere) → after (the lane's commit):
+    - 1280 × 720 (page 798 × 520, 518 under the banner; compact): pictures 260 → 256 (254). Plain
+      words face-on 150 px and edge-on 128 px in every state, the edge-on row's fit −2 → the edge-on
+      row 128 px with the page's foot 8 px below it. Under the overlay the content ran 68 px (70)
+      past the page's foot, clipped → the toggle held back in all six states, with
+      `OVERLAY_NO_ROOM` in two lines of the 120 px controls' row, and with the link's reason too
+      while it is down.
+    - 1536 × 864 (page 816 × 664, 662; compact): pictures 296 → 296; plain edge-on words fit by
+      20 px and the page's foot is 92 px (90) below them. Under the overlay the edge-on words, 200
+      px, made their row taller than its 148 px picture and still ended 40 px above the page's foot
+      → the toggle held back, as the ruling's test of half the picture's height has it (a finding,
+      below).
+    - 1920 × 1080 (page 1,036 × 880, 878; stacked): pictures 554 (552) → unchanged; plain words
+      face-on −206 (−204) and edge-on −149 (−148), unchanged; the overlay's face-on words 292 → 258
+      px (−78 → −112) and edge-on 252 → 218 px against 277 (276), −25 → −59 (−58); offered, named
+      once beside its toggle.
+    - 1280 × 1024 (page 798 × 824, 822; stacked): pictures 326 → 326. The face-on words with the
+      controls overran their row by 40 px (`COLUMN DENSITY`), 44 (`EXTINCTION`) and 66 (the link
+      down) → the face-on view 462 px, the words inside it by 34 px and by 8 with the link down;
+      edge-on −17 px, unchanged; the page's foot 191 px (189) below the edge-on view; the toggle
+      held back, its reason 3.2 lines of the 24 rem column.
+    - Nothing scrolls in any state at any size (the page's, the work area's and the document's
+      scroll sizes equal their client sizes); no element clips; the tabs stand clear of the face-on
+      picture. The axis labels stand outside the picture's box by design (`map-view__area`'s
+      `scrollWidth` 24 px over its width, overflow visible).
+    - Found: the link down after both maps loaded is not a stale state: an `ok` answer outlives the
+      link (`useServerRequest`), so the maps stay current and only the page shows `NO CARRIER`. A
+      view goes stale only when it asks again, after a resize across a resolution step; its words
+      were measured by setting its status line under its head (`NO CARRIER`, 30 px; a failure
+      with `RETRY`, 44 px).
+  - _By eye (T11.b's acceptance)._ Seed 0x4d2, face-on, `YOUNG THIN DISC`, 1920 × 1080: with the
+    overlay a thin dark lane runs along the inner edge of each arm, clearest on the inner turns,
+    and the centre is dimmed; without it neither. Shots in the lane's `target/a2-layout/shots/`.
+  - _Tests._ `mapLayout.test.ts` pins the layout, the pictures' width, the rows and the room at
+    each size measured, with and without the banner; `GalaxyMapPanel.test.tsx` holds the toggle
+    back at 1280 × 720's page (described by the room's reason, `D` and a click inert, the choice
+    kept through a resize and back), offers it at 1920 × 1080's with both legends in each view and
+    the overlay named once, gives the room's reason before `EXTINCTION`'s, and lays the page out
+    the same with the overlay on as off; `GalaxyMapView.test.tsx` keeps a stale picture with the
+    link down without a status line of its own; `RequestStatus.test.tsx` the subject's space and
+    the link's state without one; `SystemReadout.extinction.test.tsx` the refusal without `RETRY`
+    and the link's state shown once.
+  - _From review_ (TypeScript, UX and plan-conformance reviewers).
+    - The extinction's answer is a union, `LineAnswer` (`none`, `line`, `no_such_system`,
+      `invalid`), switched on in `SystemsPanel`; an answer of other than one line, or with a figure
+      that is not finite, reads `EXTINCTION DATA INVALID: <cause>` with `RETRY`, a fault, as an
+      answer that fails a display's checks does (a new name, below).
+    - `MapQuantity` is switched on with no `default` (`takesOverlay`, `needsDensity`,
+      `needsExtinction`, `layerKind`).
+    - `Q` and `D` act only while the map page is on show (`GalaxyMapPanel`'s new `shown`, from
+      `GalaxyPages`) and a universe is open: the page stays mounted behind its tab, so that its
+      maps are kept, and the keys had changed the unseen map from the other three pages.
+    - The tests split to one behaviour each; new ones cover a text field, modified and repeated
+      keys, the link down where the page has room, the page behind its tab and no universe open.
+    - The console-ux scripts: `ux_lint.py` 0 errors (its 10 checks are the lists' existing
+      `overflow-y: auto` rules, outside the diff); `contrast.py` passes every required pairing
+      (`--text-muted` on `--surface-1` 6.76:1, the `--accent` underline 9.72:1; no token changed);
+      `glyphs.py` finds U+2212, `²`, `³`, `↑` and `↓` in both B612 faces.
+  - _Also as built._
+    - §3.3 covers a stale view's line only. A view with no picture yet, when the link drops before
+      its first map, shows the link's state where its picture will be, beside the page's; it
+      costs the words column nothing.
+    - Before the page is measured `overlayHasRoom` has no size, and the toggle is held back with
+      the room's reason; the page is measured in a layout effect before the first paint, so the
+      reason never shows at a size with room.
+    - The map's status names `EXTINCTION` only under the overlay, once the density map has
+      answered; under `EXTINCTION` the one map's state reads plain (`PENDING`), with no other
+      beside it to tell apart.
+    - The measured build predates the review's changes, none of which moves the layout.
+  - _New name, for the sign-off queue._ `EXTINCTION DATA INVALID`, beside the guide's
+    `MAP DATA INVALID` and `CHART DATA INVALID` in the `SYSTEM DATA INVALID` row.
+  - _For main (questions, each with the lean built)._
+    - **The stacked rows.** Whether a stacked page too narrow for its pictures to hold its words
+      should give the face-on view their height (built, `mapRows`), or go compact, as 1280 × 1024
+      would then be (pictures 278 px under the controls' row, the local chart staying stacked).
+      Lean: as built, since it keeps ruling 149.2's one switch for the panel's two pages and
+      moves nothing at 1920 × 1080.
+    - **A stale view's own line.** A view goes stale only after a resize across a resolution step
+      (above), and its status line, `PENDING` or a failure with `RETRY`, then stands under its
+      head. At 1280 × 720 that takes the edge-on words 22 px (`PENDING`) or 36 px (a failure) past
+      the page's foot, clipped there, until the new map answers or `RETRY` is pressed; stacked it
+      fits but for a failure at 1280 × 1024 (10 px into the gap). D0's plain states do not name it,
+      and its acceptance 1 is "nothing clips in any state". Options: reserve the line (the
+      1280 × 720 pictures 226 px for `PENDING`, 212 for a failure, past §3.3's 24 px); state a
+      stale view's line once for the page, as §3.3 does the link's (`PENDING` of a resize stands in
+      both views at once); or accept it. Lean: as built until ruled, since the `PENDING` is a few
+      seconds after a resize and the failure rare, and the smallest reversible choice is none.
+    - **Whether a link drop makes a kept map stale.** T11.b's text says "a map kept after the link
+      drops is marked stale as the guide requires", and plan 05's ruling (8) reads the guide's
+      "Loss of the server link makes every live value on the console stale at once" so; plan 05's
+      design note D4 calls a map a snapshot, not a live value, and the code (`useServerRequest`,
+      plan 05) keeps an answered map current through a link loss, so `CURSOR DENSITY`, now
+      `CURSOR A(V)` too, and the pictures stay in `--text` with no `S` while the page says
+      `NO CARRIER`. It predates this port; the port follows the code. Lean: a task of its own for
+      the map as a whole, after a ruling; T11.b's sentence is left as written.
+    - **`CURSOR A(V)`'s precision.** Two decimals, as every A(V) on the console is written, from an
+      8-bit map: the edge-on map's code step is about 3.3 %, about 1.3 mag at 40 mag, so
+      `40.47 mag` shows figures the map does not hold (the guide's "the precision the operator can
+      act on"). `CURSOR DENSITY`'s three figures are the same case, ruled before (a code's centre
+      carries no `~`). Options: the extinction map at 16 bits, which the protocol allows; or
+      fewer figures for a map reading. Lean: as built until ruled.
+    - **The overlay's A(V) bar.** The UX reviewer reads a real, not certain, risk that the A(V)
+      bar beside the dimmed density is taken for the picture's brightness, which D0 §2.3 leaves to
+      a page-level line beside the overlay's name. Lean: none added; for the ruling D0 §2.3 names.
+    - **The density map's status under the overlay** reads `REJECTED: <reason>` beside
+      `EXTINCTION REJECTED: …` with no subject of its own; a subject such as `COLUMN DENSITY` would
+      be a new composed name. Lean: as built.
+    - **One grammar for `STATE: cause` lines.** The held-back reasons are set without the labels'
+      letter-spacing (the `VIEW` display's form); `EXTINCTION REJECTED: …` and `NO CHART: …` on
+      the same display are spaced. Lean: as built; a ship-wide ruling may set one form.
+  - _Deferred findings (2026-10-13 rule)._
+    - At 1536 × 864 (1920 × 1080 at 125%) the overlay's edge-on words, 200 px, would have stood
+      on the page 40 px above its foot, in a row grown past its 148 px picture, with nothing above
+      that picture moving; the ruling's test (half the picture at least as tall as the words) holds
+      the overlay back there. A later ruling may offer it where a compact page holds the rows the
+      overlay's words make; the rule is constants and one comparison in `overlayHasRoom`.
+    - `BELOW FLOOR`, which predates the port and now also follows `CURSOR A(V)`, is not on the
+      nomenclature list.
+    - `LocalChartPanel.test.tsx`'s "asks again for a new centre, keeping every setting but the
+      selection" took 15.4 s and failed once under a load of about 30 with the galaxy suites beside
+      it; it passes alone (24 of 24).

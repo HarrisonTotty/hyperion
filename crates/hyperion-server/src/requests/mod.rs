@@ -16,9 +16,11 @@
 //! [`Handler`] is the seam where each kind's handler plugs in (plan 04, P04.T14). The server's is
 //! [`Handlers`]; unit tests inject doubles through [`AppState`]. The handlers of the universe
 //! lifecycle are in [`universe`], the galaxy's in [`galaxy`], the system's in [`system`], the
-//! scene's in [`scene`], the sky's in [`sky`], and the surface's in [`surface`].
+//! scene's in [`scene`], the sky's in [`sky`], the surface's in [`surface`], and plan 12's
+//! `resolve_system` in [`observe`].
 
 mod galaxy;
+mod observe;
 mod scene;
 mod sky;
 mod surface;
@@ -201,8 +203,8 @@ fn open_topic(
 /// ([`SkyService`](crate::SkyService)): it is on by default since rendering plan R13's R13.T2, and
 /// when the server is started with `--serve-sky=false`, `sky` is answered `unsupported`, as before
 /// R06.T11.a. Rendering plan R09's `survey_pass` is served (R09.T19.a), and its `surface_field`,
-/// answered in bulk (R09.T19.b). A later plan's kind that this server's [`REQUEST_KINDS`] does not
-/// hold is refused before it reaches here, as
+/// answered in bulk (R09.T19.b), and plan 12's `resolve_system` (P12.T6). A later plan's kind that
+/// this server's [`REQUEST_KINDS`] does not hold is refused before it reaches here, as
 /// `unsupported`. A kind the protocol already defines but whose handler has not landed is answered
 /// `unsupported` here, under its own ID, as an older server would answer it (plan 04, design note
 /// 15): `body_events` until plan 14's P14.T31. Each handler that names a universe starts from
@@ -271,6 +273,9 @@ impl Handler for Handlers {
             RequestBody::Extinction(request) => {
                 Box::pin(galaxy::extinction(state, request, token).map(answered))
             }
+            RequestBody::ResolveSystem(request) => {
+                Box::pin(observe::resolve_system(state, request, token).map(answered))
+            }
         }
     }
 
@@ -324,6 +329,7 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
         RequestBody::SurveyPass(_) => "survey_pass",
         RequestBody::ExtinctionMap(_) => "extinction_map",
         RequestBody::Extinction(_) => "extinction",
+        RequestBody::ResolveSystem(_) => "resolve_system",
     }
 }
 
@@ -333,13 +339,13 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
 /// A system's bodies can: its belts' named members (plan 14, P14.T21) run to 255 a belt, each a
 /// record. So can a window of body events, whose comets carry sampled tracks (P14.T31). One body's
 /// record cannot. An extinction map can, as a density map can; the extinction to at most 64
-/// targets cannot (plan 07, P07.T10). A subscription's answer is as large as its topic's state:
-/// the scene's holds a whole system's bodies (rendering plan R03, Design note 14). `scene_ship`,
-/// `scene_cameras` and `unsubscribe` are small. The sky's JSON is small but its census and hosts
-/// grow with the request, and rendering plan R06 classes it large (`is_large`; Design note 17's
-/// size class). Rendering plan R09 classes its `surface_field` large as plan 04's row R09
-/// requires, whose payload runs to some 15 MB, though its JSON is a header and a cover; its
-/// `survey_pass` answers one revision.
+/// targets cannot (plan 07, P07.T10), and neither can one system's row (plan 12, P12.T6). A
+/// subscription's answer is as large as its topic's state: the scene's holds a whole system's bodies
+/// (rendering plan R03, Design note 14). `scene_ship`, `scene_cameras` and `unsubscribe` are small.
+/// The sky's JSON is small but its census and hosts grow with the request, and rendering plan R06
+/// classes it large (`is_large`; Design note 17's size class). Rendering plan R09 classes its
+/// `surface_field` large as plan 04's row R09 requires, whose payload runs to some 15 MB, though
+/// its JSON is a header and a cover; its `survey_pass` answers one revision.
 pub(crate) fn is_large(body: &ResponseBody) -> bool {
     match body {
         ResponseBody::DensityMap(_)
@@ -362,7 +368,8 @@ pub(crate) fn is_large(body: &ResponseBody) -> bool {
         | ResponseBody::SceneShip(_)
         | ResponseBody::SceneCameras
         | ResponseBody::SurveyPass(_)
-        | ResponseBody::Extinction(_) => false,
+        | ResponseBody::Extinction(_)
+        | ResponseBody::ResolveSystem(_) => false,
     }
 }
 
@@ -1168,6 +1175,7 @@ mod tests {
                 min_layer: MassLayer::A,
                 limit: 5_000,
                 include_stellar: false,
+                mode: hyperion_protocol::QueryModeDto::Now,
             }),
             RequestBody::SystemSummary(SystemSummaryRequest {
                 universe: universe.clone(),
@@ -1246,6 +1254,12 @@ mod tests {
                 targets: vec![ExtinctionTarget::System {
                     id: SystemIdHex::from_u64(0x0200_0800_2000_0000),
                 }],
+            }),
+            RequestBody::ResolveSystem(hyperion_protocol::ResolveSystemRequest {
+                universe: UniverseIdHex::from_u64(42),
+                system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                time: UniverseTime::default(),
+                mode: hyperion_protocol::QueryModeDto::Now,
             }),
         ]
     }
