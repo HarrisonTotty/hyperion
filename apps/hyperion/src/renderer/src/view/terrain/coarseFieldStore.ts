@@ -31,6 +31,10 @@
 import type {
   BodyIdHex,
   BulkChunk,
+  LiquidBasisDto,
+  LiquidDto,
+  PaletteEntryDto,
+  PaletteRoleDto,
   RecordSectionDto,
   RequestClient,
   RequestFailure,
@@ -222,6 +226,162 @@ export function fieldDemand(
     }
   }
   return { want, release };
+}
+
+/**
+ * The number of spectral bins of a palette entry's liquid record: R08's fifteen bake bins, 380 to
+ * 760 nm (`hyperion-protocol`'s `SURFACE_LIQUID_BINS`; decision-r11-palette-liquids §1.2).
+ */
+export const LIQUID_BINS: LiquidDto["refractive_index"]["length"] = 15;
+
+/**
+ * The bases a liquid record may name, as `hyperion-surface`'s `LiquidBasis` codes them: a record,
+ * so that a basis the protocol gains fails to compile here.
+ */
+const LIQUID_BASES: Readonly<Record<LiquidBasisDto, true>> = {
+  measured: true,
+  derived: true,
+  stand_in: true,
+};
+
+/** Whether `value` is finite and above 0. */
+function positive(value: number): boolean {
+  return Number.isFinite(value) && value > 0;
+}
+
+/** Whether `value` is finite and at least +0: a −0 is refused, as R09's codec refuses it. */
+function atLeastZero(value: number): boolean {
+  return Number.isFinite(value) && value >= 0 && !Object.is(value, -0);
+}
+
+/** Whether `value` is a fraction, finite from +0 to 1. */
+function isFraction(value: number): boolean {
+  return atLeastZero(value) && value <= 1;
+}
+
+/** Whether `values` holds `count` values, each passing `test`. */
+function holds(
+  values: ReadonlyArray<number>,
+  count: number,
+  test: (value: number) => boolean,
+): boolean {
+  return values.length === count && values.every(test);
+}
+
+/** Whether `bins` holds one value a liquid bin, each passing `test`. */
+function byBin(bins: ReadonlyArray<number>, test: (value: number) => boolean): boolean {
+  return holds(bins, LIQUID_BINS, test);
+}
+
+/** Whether a by-bin member that may be absent is absent, `null`, or passes `test` in every bin. */
+function absentOrByBin(
+  bins: ReadonlyArray<number> | null | undefined,
+  test: (value: number) => boolean,
+): boolean {
+  return bins === undefined || bins === null || byBin(bins, test);
+}
+
+/**
+ * Whether an entry of each role must carry a liquid record, may, or must not
+ * (decision-r11-palette-liquids §1.3): a sea's or a lake's must, a crust's may where the body
+ * melts it, and an ice, a cover or a deposit never does.
+ */
+const LIQUID_RULES: Readonly<Record<PaletteRoleDto, "required" | "allowed" | "refused">> = {
+  primary_crust: "allowed",
+  secondary_crust: "allowed",
+  tertiary_crust: "allowed",
+  province: "allowed",
+  ice: "refused",
+  liquid: "required",
+  cover: "refused",
+  deposit: "refused",
+  bulk: "allowed",
+};
+
+/** Why a liquid record cannot be taken, by its first member out of range, or `null`. */
+function liquidFailure(record: LiquidDto): string | null {
+  const bins = `${LIQUID_BINS} finite values`;
+  if (!positive(record.temperature_k)) {
+    return `temperature, ${record.temperature_k} K, is not positive`;
+  }
+  if (!positive(record.density_kg_m3)) {
+    return `density, ${record.density_kg_m3} kg/m³, is not positive`;
+  }
+  if (!Object.hasOwn(LIQUID_BASES, record.basis)) {
+    return `basis, "${record.basis}", is not one this client knows`;
+  }
+  if (!byBin(record.refractive_index, positive)) {
+    return `refractive index is not ${bins} above 0`;
+  }
+  if (!absentOrByBin(record.absorption_per_m, atLeastZero)) {
+    return `absorption is not ${bins} of at least 0`;
+  }
+  if (!absentOrByBin(record.scattering_per_m, atLeastZero)) {
+    return `scattering is not ${bins} of at least 0`;
+  }
+  const tension = record.surface_tension_n_per_m;
+  if (tension !== undefined && tension !== null && !positive(tension)) {
+    return `surface tension, ${tension} N/m, is not positive`;
+  }
+  const viscosity = record.viscosity_pa_s;
+  if (viscosity !== undefined && viscosity !== null && !positive(viscosity)) {
+    return `viscosity, ${viscosity} Pa s, is not positive`;
+  }
+  return null;
+}
+
+/** Why a palette entry cannot be taken, or `null`. */
+function entryFailure(entry: PaletteEntryDto): string | null {
+  if (!holds(entry.normal_albedo_bvr, 3, atLeastZero)) {
+    return "has a normal albedo that is not three finite values of at least 0";
+  }
+  if (!Number.isInteger(entry.phase_row) || entry.phase_row < 0 || entry.phase_row > 255) {
+    return `has a phase row, ${entry.phase_row}, that is not a byte`;
+  }
+  const rule = LIQUID_RULES[entry.role];
+  if (entry.liquid === null) {
+    return rule === "required" ? "has no liquid record" : null;
+  }
+  if (rule === "refused") {
+    return "has a liquid record, which no ice, cover or deposit carries";
+  }
+  const failure = liquidFailure(entry.liquid);
+  return failure === null ? null : `has a liquid record whose ${failure}`;
+}
+
+/**
+ * Why a field's header cannot be taken, by the first of its members out of range, or `null`.
+ *
+ * @remarks
+ * It holds what R09's codec holds of the same members (decision-r11-palette-liquids §1.6 and §2):
+ * each palette entry's normal albedo finite and at least 0 and its phase row a byte; a liquid
+ * record on every liquid entry and on no ice, cover or deposit, each of its members in range and
+ * each by-bin member {@link LIQUID_BINS} long, a member not modelled absent; the main liquid,
+ * where there is one, a liquid entry of the palette; and the two fractions plan 14 fills, the
+ * maturity and the organic cover, from 0 to 1 where present. The server sends only headers its own
+ * checks pass, so a header refused here is a damaged answer or a server of another build.
+ */
+export function headerFailure(header: SurfaceHeaderDto): string | null {
+  for (const [index, entry] of header.palette.entries()) {
+    const failure = entryFailure(entry);
+    if (failure !== null) {
+      return `the palette's entry ${index}, ${entry.substance} as ${entry.role}, ${failure}`;
+    }
+  }
+  const main = header.main_liquid;
+  if (main !== null && header.palette[main]?.role !== "liquid") {
+    return `the field's main liquid, entry ${main}, is not a liquid of its palette`;
+  }
+  const fractions = [
+    ["maturity", header.maturity],
+    ["organic cover", header.organic_cover],
+  ] as const;
+  for (const [name, value] of fractions) {
+    if (value !== undefined && value !== null && !isFraction(value)) {
+      return `the field's ${name}, ${value}, is not from 0 to 1`;
+    }
+  }
+  return null;
 }
 
 /** The part of R05's pool the store posts to. */
@@ -679,7 +839,7 @@ export class CoarseFieldStore {
     if (entry.coverage !== null && entry.coverage.level !== header.level) {
       return `the field's level moved from ${entry.coverage.level} to ${header.level}`;
     }
-    return null;
+    return headerFailure(header);
   }
 
   /**

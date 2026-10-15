@@ -9,10 +9,11 @@
 //! dichotomy, Tharsis and dry valleys; a Moon's basins and maria; a Ceres's ice-rich craters), not
 //! plan 14's values or the coarse pass's. The four bodies carry palettes (decision-composition
 //! §1.7; science-r09-drainage.md §3–§5; science-composition-crusts.md §2–§4 and §7): an Earth's
-//! basalt, granite and water as ice and as liquid; a Mars's iron-rich basalt, dust and water and
-//! CO₂ ices; a Moon's feldspathic crust, its maria's iron-rich basalt and the water ice of its cold
-//! traps; a Ceres's phyllosilicate, its primary crust, sodium carbonate and water ice, each water
-//! ice at ice Ih's density where it lies. Their keys are checked by the grammar alone until plan
+//! basalt, granite and water as ice and as liquid, the liquid with its record at 25 °C
+//! ([`liquid_water`]; decision-r11-palette-liquids §4); a Mars's iron-rich basalt, dust and water
+//! and CO₂ ices; a Moon's feldspathic crust, its maria's iron-rich basalt and the water ice of its
+//! cold traps; a Ceres's phyllosilicate, its primary crust, sodium carbonate and water ice, each
+//! water ice at ice Ih's density where it lies. Their keys are checked by the grammar alone until plan
 //! 14's rows exist (P14.T49.b's test then checks them against the registry), and their values are
 //! illustrative ones, each with its basis, standing in for nothing: the server resolves a
 //! generated world's from the registry. Their crater contracts' targets, projectiles, system age
@@ -36,6 +37,7 @@ use hyperion_base::units::{
     MetresPerSecondSquared, Pascals, PerSquareKilometre, Radians, consts::SECONDS_PER_JULIAN_YEAR,
 };
 
+use super::liquids::{LIQUID_WATER_DENSITY_KG_M3, liquid_water};
 use super::{
     CellSite, ClimateSample, FieldBuilder, PlateSpec, Routing, SeafloorSample, arc, cross, dot,
     norm, scale, sub, unit,
@@ -46,8 +48,8 @@ use crate::craters::{
 };
 use crate::cube::unit_dir;
 use crate::field::{
-    BodyRef, BoundaryKind, ClimateModelKind, CoarseField, Crust, MaterialPalette, MechanicsFamily,
-    PaletteEntry, PaletteRole, month_edges,
+    BodyRef, BoundaryKind, ClimateModelKind, CoarseField, Crust, LiquidProperties, MaterialPalette,
+    MechanicsFamily, PaletteEntry, PaletteRole, month_edges,
 };
 use crate::num;
 use crate::spheroid::Spheroid;
@@ -168,7 +170,7 @@ struct Substance {
 }
 
 impl Substance {
-    /// The entry of the substance in `role`.
+    /// The entry of the substance in `role`, with no liquid record.
     #[must_use]
     const fn entry(&self, role: PaletteRole) -> PaletteEntry {
         PaletteEntry {
@@ -179,6 +181,17 @@ impl Substance {
             grain_density_kg_m3: self.grain_density_kg_m3,
             transition: Kelvin::new(self.transition_k),
             mechanics: self.mechanics,
+            liquid: None,
+        }
+    }
+
+    /// The substance's [`PaletteRole::Liquid`] entry with its record `liquid`, whose density is
+    /// the substance's grain density.
+    #[must_use]
+    fn liquid_entry(&self, liquid: LiquidProperties) -> PaletteEntry {
+        PaletteEntry {
+            liquid: Some(liquid),
+            ..self.entry(PaletteRole::Liquid)
         }
     }
 
@@ -386,17 +399,25 @@ const WATER_ICE: Substance = Substance {
     mechanics: MechanicsFamily::WaterIce,
 };
 
-/// Liquid water: the Fresnel reflectance at normal incidence, ((n − 1) ÷ (n + 1))², of n = 1.337,
-/// 1.333 and 1.331 at 0.45, 0.55 and 0.65 µm, at 25 °C (Hale and Querry 1973, Appl. Opt. 12,
-/// 555); its density at 0 °C, 999.84 kg m⁻³ (IAPWS-95, Wagner and Pruß 2002, J. Phys. Chem. Ref.
-/// Data 31, 387).
+/// Liquid water at 25 °C, its record's temperature ([`liquid_water`]): the Fresnel reflectance at
+/// normal incidence, ((n − 1) ÷ (n + 1))², from its record's n at the bands' 0.44, 0.55 and
+/// 0.64 µm, 0.020 836, 0.020 393 and 0.020 205, to four places (Hale and Querry 1973, Appl. Opt.
+/// 12, 555, through R08's `water.json`; decision-r11-palette-liquids §2, item 7); its record's
+/// density, 997.047 kg m⁻³ at 25 °C (IAPWS-95, Wagner and Pruß 2002, J. Phys. Chem. Ref. Data 31,
+/// 387). R08.T5.h moves the file's n to IAPWS R9-97 (decision-r08-t5g.md §1), and the four places
+/// follow the record when it takes it.
 const WATER: Substance = Substance {
     key: SubstanceKey::new_const("H2O"),
     normal_albedo_bvr: [0.020_8, 0.020_4, 0.020_2],
-    grain_density_kg_m3: 999.84,
+    grain_density_kg_m3: LIQUID_WATER_DENSITY_KG_M3,
     transition_k: WATER_MELTING_K,
     mechanics: MechanicsFamily::WaterIce,
 };
+
+/// The density of the liquid water the Earth-like world's runoff is a depth of, kg m⁻³: fresh
+/// water's at 0 °C and 1 atm, 999.84 (IAPWS-95, Wagner and Pruß 2002), the conversion the
+/// illustration was built with, which its sea's record at 25 °C does not move.
+const RUNOFF_WATER_DENSITY_KG_M3: f64 = 999.84;
 
 /// CO₂ ice: Design note 8's carbon dioxide frost, 0.4–0.8; its density at 150 K, a Mars-like
 /// frost's temperature, 1,621 kg m⁻³ (Mangan et al. 2017, Icarus 294, 201, whose fit over 80–195
@@ -725,7 +746,7 @@ const EARTH_RUNOFF_SHARE: f64 = 0.4;
 /// The Earth-like world's own erosive runoff at `dir`, metres of liquid water a Julian year:
 /// [`EARTH_RUNOFF_SHARE`] of its annual precipitation there, each month's rate weighted by the
 /// share of the year its span of mean anomaly is ([`month_edges`]), as a depth of liquid water at
-/// its palette entry's density.
+/// [`RUNOFF_WATER_DENSITY_KG_M3`].
 #[must_use]
 fn earth_runoff_m_per_year(dir: [f64; 3]) -> f64 {
     let edges = month_edges(EARTH_ORBIT_E).expect("Earth's seasonal orbit is bound");
@@ -734,7 +755,7 @@ fn earth_runoff_m_per_year(dir: [f64; 3]) -> f64 {
         .zip(earth_climate(dir).month_precipitation_kg_m2_s)
         .map(|(span, rate)| (span[1].value() - span[0].value()) / core::f64::consts::TAU * rate)
         .sum();
-    EARTH_RUNOFF_SHARE * kg_per_m2_s * SECONDS_PER_JULIAN_YEAR / WATER.grain_density_kg_m3
+    EARTH_RUNOFF_SHARE * kg_per_m2_s * SECONDS_PER_JULIAN_YEAR / RUNOFF_WATER_DENSITY_KG_M3
 }
 
 fn earth_like() -> CoarseField {
@@ -761,7 +782,7 @@ fn earth_like() -> CoarseField {
         BASALT.entry(PaletteRole::SecondaryCrust),
         GRANITE.entry(PaletteRole::TertiaryCrust),
         WATER_ICE.ice_entry_at(Kelvin::new(earth_temperature(POLE_LAT_RAD))),
-        WATER.entry(PaletteRole::Liquid),
+        WATER.liquid_entry(liquid_water()),
     ]);
     let continents = index(&earth, &GRANITE, PaletteRole::TertiaryCrust);
     let ocean_floor = index(&earth, &BASALT, PaletteRole::SecondaryCrust);

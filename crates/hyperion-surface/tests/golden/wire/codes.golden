@@ -40,6 +40,13 @@ mechanics_family 4 = Salt
 mechanics_family 5 = Organic
 target_class 0 = NonPorous
 target_class 1 = Porous
+liquid_basis 0 = Measured
+liquid_basis 1 = Derived
+liquid_basis 2 = StandIn
+phase_row 0 = Unassigned
+phase_row 1 = Regolith
+phase_row 2 = Ice
+phase_row 3 = Lambert
 substance_nibble 15 = None
 surface_class 0..=0 = Unclassified
 surface_class 1..=63 = KoppenGeiger

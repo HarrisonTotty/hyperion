@@ -272,6 +272,8 @@ fn level_five_field_of(body: BodyRef, flow: FlowDirection) -> CoarseField {
         palette: MaterialPalette::default(),
         crust_palette: [None; 4],
         main_liquid: None,
+        maturity: None,
+        organic_cover: None,
     })
     .unwrap();
     let cell = SynthesisCell {

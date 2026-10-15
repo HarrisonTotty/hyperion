@@ -39,11 +39,15 @@
 //!    cutoff followed by its diameter), the gravity, the target factor, the impact velocity, the
 //!    projectile density, the target (its class's code, a byte, then its density) and the
 //!    system's age, each `Option` (the impact velocity, the albedo scale, each crust's palette
-//!    entry and the main liquid's) as a presence byte, 0 or 1, followed by its value when 1, and
-//!    the palette as its entry count, a byte, then each entry, 59 bytes: its key
-//!    NUL-padded to 16 bytes, its role (a byte), its normal albedo in B, V and R (three `f64`),
-//!    its phase row (a byte), its grain density and transition temperature (`f64`) and its
-//!    mechanics family (a byte).
+//!    entry, the main liquid's, and the two reserved fractions, the maturity and the organic
+//!    cover, which end the header) as a presence byte, 0 or 1, followed by its value when 1, and
+//!    the palette as its entry count, a byte, then each entry: its key NUL-padded to 16 bytes, its
+//!    role (a byte), its normal albedo in B, V and R (three `f64`), its phase row (a byte), its
+//!    grain density and transition temperature (`f64`), its mechanics family (a byte) and its
+//!    liquid record, an `Option`: when present, its temperature and density (`f64`), its basis (a
+//!    byte), its refractive index in the fifteen liquid bins (15 `f64`), its absorption and its
+//!    scattering, each an `Option` of 15 `f64`, and its surface tension and viscosity, each an
+//!    `Option` of an `f64`. An entry is 60 bytes without a record and 201 to 457 with one.
 //! 2. The block's cover: its range count, `u32`, then each range as its first cell index and the
 //!    index past its last, two `u32`, and its [`ResolutionCode`], a byte: the block's surveyed
 //!    cells with their codes and its margin cells at [`ResolutionCode::NONE`], sorted, disjoint and
@@ -68,10 +72,12 @@
 //! the cells of several blocks travels in each, whole, so that every block is self-contained; a
 //! [`PartialField`](crate::field::PartialField) keeps one copy of it.
 //!
-//! Each fixed record's layout (the synthesis and climate records, the header's parts) is one
-//! table in the private `form` module, from which its writer, its reader and its length are all
-//! generated, so that a field added to a record, or a part to the header, is one line there; the
-//! strides above are the tables' sums. A crater, whose reach has no fixed length, is written and
+//! Each record's layout (the synthesis and climate records, the header's parts, a palette entry
+//! and its liquid record) is one table in the private `form` module, from which its writer and its
+//! reader, and for a fixed record its length, are all generated, so that a field added to a
+//! record, or a part to the header, is one line there; the strides above are the tables' sums. A
+//! decoder checks a palette's entry count against the shortest entry, 60 bytes, before it
+//! allocates. A crater, whose reach has no fixed length, is written and
 //! read by hand here (`put_crater`, `read_crater`, `CRATER_FIXED_BYTES`), and a field added to
 //! [`CoarseCrater`] touches all three; the encoder's check of each block's length against its plan
 //! catches a writer that disagrees with the sizes.
@@ -107,7 +113,8 @@ mod form;
 ///
 /// The one-byte codes of the closed sets are registries that grow without a new format: the
 /// field's enums ([`BoundaryKind`], [`FlowDirection`], [`Morphology`], [`ClimateModelKind`],
-/// [`PrecipitationSource`], [`PaletteRole`], [`MechanicsFamily`]), the crater contract's
+/// [`PrecipitationSource`], [`PaletteRole`], [`MechanicsFamily`], a liquid record's
+/// [`LiquidBasis`]), the crater contract's
 /// [`TargetClass`](crate::craters::TargetClass), and this layout's own tags (the
 /// screening's 0, 1 and 2, and the presence bytes). [`Crust`] is the exception: the header holds
 /// one palette entry a crust, so a new crust lengthens the header and takes a new format. A new
@@ -118,12 +125,24 @@ mod form;
 /// fetched again, never misread. A decoder that meets a code it does not know refuses the block
 /// ([`DecodeBlockError::Code`] or [`DecodeBlockError::Tag`]) rather than misread it. The open
 /// codes ([`SurfaceClass`], within its three ranges, the crater state and a palette entry's phase
-/// row) are bytes whose meanings their owners assign, by the same rule. A substance is its key, a
+/// row, whose 0 to 3 are R10's unassigned row and its `PhaseLaw` codes) are bytes whose meanings
+/// their owners assign, by the same rule. A substance is its key, a
 /// string, so a new substance is a new key, which an older reader can still name. The scaled codes
 /// ([`LogArea`], [`LogSteepness`], [`LogRunoff`], [`LogPrecipitation`], [`Wind`],
 /// [`ResolutionCode`], the sea floor's two nibbles and the linear steps) keep their scales: a new
 /// scale is a new format. The golden file `tests/golden/wire/codes.golden` pins every code's
 /// decoded value, so a renumbered code fails it and an appended one only extends it.
+///
+/// # What freezes with the format
+///
+/// Beside the layout above, format 1 holds a palette entry's liquid record with its members and
+/// their units, R08's fifteen bake bins for its optical members
+/// ([`LIQUID_BINS`](crate::field::LIQUID_BINS),
+/// [`LIQUID_BIN_CENTRES_NM`](crate::field::LIQUID_BIN_CENTRES_NM)), [`LiquidBasis`]'s codes, and
+/// the header's two reserved fractions, the maturity and the organic cover
+/// (decision-r11-palette-liquids §2). A new liquid member or a new bin set is a new format;
+/// filling an absent member (a liquid's absorption, a melt's measured optics) moves values, not
+/// the layout.
 ///
 /// [`Crust`]: crate::field::Crust
 /// [`BoundaryKind`]: crate::field::BoundaryKind
@@ -132,6 +151,7 @@ mod form;
 /// [`PrecipitationSource`]: crate::field::PrecipitationSource
 /// [`PaletteRole`]: crate::field::PaletteRole
 /// [`MechanicsFamily`]: crate::field::MechanicsFamily
+/// [`LiquidBasis`]: crate::field::LiquidBasis
 /// [`SurfaceClass`]: crate::field::SurfaceClass
 /// [`LogArea`]: crate::field::LogArea
 /// [`LogSteepness`]: crate::field::LogSteepness

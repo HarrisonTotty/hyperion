@@ -110,7 +110,9 @@ pub use header::{
 };
 pub use months::{MonthBlend, month_at, month_blend, month_edges, month_share};
 pub use palette::{
-    BuildPaletteError, MaterialPalette, MechanicsFamily, NO_ENTRY, PaletteEntry, PaletteRole,
+    BVR_EFFECTIVE_WAVELENGTHS_NM, BuildPaletteError, LIQUID_BIN_CENTRES_NM, LIQUID_BINS,
+    LiquidBasis, LiquidProperties, MaterialPalette, MechanicsFamily, NO_ENTRY, PaletteEntry,
+    PaletteRole,
 };
 pub use partial::{InsertBlockError, PartialField};
 

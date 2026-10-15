@@ -8,7 +8,9 @@
 //! as functions of position, and the builder derives what depends on them (the plates' boundaries,
 //! the water, each cell's substances, the flow, drainage and catchment runoff, the craters'
 //! morphology, relief and reach, the header's realised figures and steps), so that every field it
-//! returns is valid by construction.
+//! returns is valid by construction. [`liquid_water`], [`liquid_methane_titan`] and
+//! [`basaltic_melt`] are liquid records for a palette's entries, each with its sources and basis
+//! (decision-r11-palette-liquids §1).
 //!
 //! These are test inputs, not generated worlds: nothing here draws from a stream, the values are
 //! illustrative ones near the real bodies', and the coarse pass's physics (R09.T10–T16) is
@@ -22,8 +24,13 @@
 //! coarse band (`synth::craters::rims::CoarseRims::coarse_profile`, R09.T7.c), but sampled at each
 //! cell's centre rather than smoothed to the cell.
 
+mod liquids;
 mod worlds;
 
+pub use liquids::{
+    LIQUID_METHANE_TITAN_DENSITY_KG_M3, LIQUID_WATER_DENSITY_KG_M3, basaltic_melt,
+    liquid_methane_titan, liquid_water,
+};
 pub use worlds::{SyntheticWorld, synthetic_field};
 
 use hyperion_base::math;
@@ -185,6 +192,8 @@ pub struct FieldBuilder {
     palette: MaterialPalette,
     crust_palette: [Option<u8>; 4],
     main_liquid: Option<u8>,
+    maturity: Option<f64>,
+    organic_cover: Option<f64>,
     ice_entry: Option<IceEntryFn>,
     plates: Vec<PlateSpec>,
     crust: DirFn<Crust>,
@@ -248,6 +257,8 @@ impl FieldBuilder {
             palette: MaterialPalette::default(),
             crust_palette: [None; 4],
             main_liquid: None,
+            maturity: None,
+            organic_cover: None,
             ice_entry: None,
             plates: Vec::new(),
             crust: Box::new(|_| Crust::Lid),
@@ -373,6 +384,22 @@ impl FieldBuilder {
         self
     }
 
+    /// The ground's space-weathering maturity, a reserved part of the header from +0 to 1
+    /// (absent by default; [`build`](Self::build) panics on one outside it).
+    #[must_use]
+    pub fn maturity(mut self, maturity: f64) -> Self {
+        self.maturity = Some(maturity);
+        self
+    }
+
+    /// The organic cover, a reserved part of the header from +0 to 1 (absent by default;
+    /// [`build`](Self::build) panics on one outside it).
+    #[must_use]
+    pub fn organic_cover(mut self, cover: f64) -> Self {
+        self.organic_cover = Some(cover);
+        self
+    }
+
     /// The palette index of the ice of each cell that has ice, from its site: for a world with
     /// more than one ice.
     #[must_use]
@@ -476,6 +503,7 @@ impl FieldBuilder {
     ///   can hold;
     /// - an oceanic cell's sea floor whose hill relief is not finite and positive, or whose ponded
     ///   sediment is not finite and non-negative;
+    /// - a maturity or an organic cover that is not finite or not within +0 to 1;
     /// - a crust's palette entry or a main liquid the header refuses, a cell with ice and no ice
     ///   entry to name (none in the palette, or [`ice_entry`](Self::ice_entry)'s not an `Ice`
     ///   entry), or a cell under water and no main liquid;
@@ -563,6 +591,8 @@ impl FieldBuilder {
             palette: self.palette,
             crust_palette: self.crust_palette,
             main_liquid: self.main_liquid,
+            maturity: self.maturity,
+            organic_cover: self.organic_cover,
         })
         .expect("the builder's header parts are valid");
         let climate: Vec<ClimateCell> = samples
@@ -1522,11 +1552,48 @@ mod tests {
             assert_same_bits(ice.transition.value(), 273.15);
             assert_eq!(ice.mechanics, MechanicsFamily::WaterIce);
         }
-        // The liquid keeps its own density.
+        // The liquid keeps its own density, its record's.
         assert_same_bits(
             entry(&earth, "H2O", PaletteRole::Liquid).grain_density_kg_m3,
-            999.84,
+            997.047,
         );
+    }
+
+    /// The Earth-like world's sea carries liquid water's record at 25 °C, measured, its normal
+    /// albedo the record's Fresnel reflectance to the row's four places (which follow the record
+    /// when it takes R08.T5.h's index); no other entry of any synthetic world carries one
+    /// (decision-r11-palette-liquids §1.3, §2 item 7 and §4).
+    #[test]
+    fn the_synthetic_sea_carries_its_liquid_record() {
+        let earth = synthetic_field(SyntheticWorld::EarthLike);
+        let sea = entry(&earth, "H2O", PaletteRole::Liquid);
+        assert_eq!(sea.liquid.as_ref(), Some(&liquid_water()));
+        let record = liquid_water();
+        assert_eq!(record.basis, crate::field::LiquidBasis::Measured);
+        assert_same_bits(record.density_kg_m3, sea.grain_density_kg_m3);
+        for (held, fresnel) in sea
+            .normal_albedo_bvr
+            .iter()
+            .zip(record.fresnel_normal_albedo_bvr())
+        {
+            assert!((held - fresnel).abs() < 5e-5, "{held} against {fresnel}");
+        }
+        let others = [
+            SyntheticWorld::MarsLike,
+            SyntheticWorld::MoonLike,
+            SyntheticWorld::CeresLike,
+        ]
+        .map(synthetic_field);
+        for field in std::iter::once(&earth).chain(&others) {
+            for e in field.header().palette().entries() {
+                assert_eq!(
+                    e.liquid.is_some(),
+                    e.role == PaletteRole::Liquid,
+                    "{}",
+                    e.substance.as_str()
+                );
+            }
+        }
     }
 
     /// The bound on the relative error of a quantised runoff times a quantised area: half a

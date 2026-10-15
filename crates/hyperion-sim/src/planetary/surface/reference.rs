@@ -45,7 +45,8 @@ use hyperion_surface::craters::{
     self, CraterParams, CraterParamsParts, CraterTarget, Screening, TargetClass,
 };
 use hyperion_surface::field::{
-    BodyRef, ClimateModelKind, MaterialPalette, MechanicsFamily, PaletteEntry, PaletteRole,
+    BodyRef, ClimateModelKind, LiquidBasis, LiquidProperties, MaterialPalette, MechanicsFamily,
+    PaletteEntry, PaletteRole,
 };
 use hyperion_surface::spheroid::Spheroid;
 use hyperion_surface::substance_key::SubstanceKey;
@@ -104,7 +105,7 @@ struct Substance {
 }
 
 impl Substance {
-    /// The entry of the substance in `role`.
+    /// The entry of the substance in `role`, with no liquid record.
     #[must_use]
     const fn entry(&self, role: PaletteRole) -> PaletteEntry {
         PaletteEntry {
@@ -115,6 +116,17 @@ impl Substance {
             grain_density_kg_m3: self.grain_density_kg_m3,
             transition: Kelvin::new(self.transition_k),
             mechanics: self.mechanics,
+            liquid: None,
+        }
+    }
+
+    /// The substance's [`PaletteRole::Liquid`] entry with its record `liquid`, whose density is
+    /// the substance's grain density.
+    #[must_use]
+    fn liquid_entry(&self, liquid: LiquidProperties) -> PaletteEntry {
+        PaletteEntry {
+            liquid: Some(liquid),
+            ..self.entry(PaletteRole::Liquid)
         }
     }
 
@@ -317,18 +329,67 @@ const WATER_ICE: Substance = Substance {
     mechanics: MechanicsFamily::WaterIce,
 };
 
-/// Liquid water: the Fresnel reflectance at normal incidence, ((n − 1) ÷ (n + 1))², of n = 1.337,
-/// 1.333 and 1.331 at 0.45, 0.55 and 0.65 µm (Hale and Querry 1973's grid points, which give the
-/// same three at the bands' 0.44 and 0.64 µm), at 25 °C (Hale and Querry 1973, Appl. Opt. 12,
-/// 555), standing in for `A_N`, which a specular surface does not have, until R11's ocean
-/// replaces it; its density at 0 °C and 1 atm, 999.84 kg m⁻³ (IAPWS-95, Wagner and Pruß 2002, J.
-/// Phys. Chem. Ref. Data 31, 387).
+/// Liquid water at 25 °C, its record's temperature ([`WATER_RECORD`]): the Fresnel reflectance at
+/// normal incidence, ((n − 1) ÷ (n + 1))², from its record's n at the bands' 0.44, 0.55 and
+/// 0.64 µm, 0.020 836, 0.020 393 and 0.020 205, to four places, a specular surface's, never a
+/// Lambertian albedo (decision-r11-palette-liquids §2, item 7); its record's density, 997.047 kg
+/// m⁻³ at 25 °C and 100 kPa (IAPWS-95, Wagner and Pruß 2002, J. Phys. Chem. Ref. Data 31, 387).
 const WATER: Substance = Substance {
     key: H2O,
     normal_albedo_bvr: [0.020_8, 0.020_4, 0.020_2],
-    grain_density_kg_m3: 999.84,
+    grain_density_kg_m3: WATER_RECORD.density_kg_m3,
     transition_k: WATER_MELTING_K,
     mechanics: MechanicsFamily::WaterIce,
+};
+
+/// Liquid water's record at 25 °C and 100 kPa, every member measured, so
+/// `Measured`: the synthetic worlds' water (`hyperion_surface::testing::liquid_water`), whose
+/// figures and sources these are, kept apart as the rows are (decision-r11-palette-liquids §1.8's
+/// water row and §4).
+///
+/// - **n and a:** the uniform means over R08's fifteen bake bins of R08's `water.json`, its 5 nm
+///   grid interpolated linearly in n and in a = 4πk ÷ λ, to its six figures: n Hale and Querry
+///   1973's (Appl. Opt. 12, 555) at 25 °C, and a, since R08.T5.g, Pope and Fry 1997's (Appl.
+///   Opt. 36, 8710) at 22 °C over 380–727.5 nm and Hale and Querry's from 750 nm. R08.T5.h moves
+///   the file's n to IAPWS R9-97 and its k at the ends (decision-r08-t5g.md §1 and §2); taking it
+///   here, with [`WATER`]'s normal albedo, re-blesses at the version in force.
+/// - **Density:** IAPWS-95's 997.047 kg m⁻³ at 298.15 K and 100 kPa (IAPWS R6-95(2018)).
+/// - **Surface tension:** IAPWS R1-76(2014)'s 0.071 97 N m⁻¹ at 298.15 K.
+/// - **Viscosity:** IAPWS R12-08's 8.900 × 10⁻⁴ Pa s at 298.15 K and 100 kPa (Huber et al. 2009,
+///   J. Phys. Chem. Ref. Data 38, 101).
+/// - **Scattering:** not modelled here.
+///
+/// The reference Earth's mean surface temperature is 288 K, so the generated world's record would
+/// be resolved colder (§1.7); this one keeps its file's temperature, its index's, at which every
+/// member but the absorption (Pope and Fry's, at 22 °C) was measured.
+const WATER_RECORD: LiquidProperties = LiquidProperties {
+    temperature: Kelvin::new(298.15),
+    density_kg_m3: 997.047,
+    basis: LiquidBasis::Measured,
+    refractive_index: [
+        1.339_609, 1.338_280, 1.337_267, 1.336_253, 1.335_240, 1.334_227, 1.333_256, 1.332_954,
+        1.332_237, 1.331_945, 1.331_219, 1.331_000, 1.330_931, 1.330_194, 1.330_000,
+    ],
+    absorption_per_m: Some([
+        0.008_164_55,
+        0.004_722_25,
+        0.007_288_68,
+        0.010_766_7,
+        0.017_950_3,
+        0.039_037_0,
+        0.051_761_7,
+        0.073_031_0,
+        0.180_294,
+        0.277_590,
+        0.334_405,
+        0.442_138,
+        0.601_402,
+        1.353_06,
+        2.380_73,
+    ]),
+    scattering_per_m: None,
+    surface_tension_n_per_m: Some(0.071_97),
+    viscosity_pa_s: Some(8.900e-4),
 };
 
 /// CO₂ ice: Design note 8's carbon dioxide frost, 0.4–0.8; its density at 150 K, a Mars-like
@@ -611,7 +672,7 @@ pub fn earth_like() -> CoarseInputs {
             BASALT.entry(PaletteRole::SecondaryCrust),
             GRANITE.entry(PaletteRole::TertiaryCrust),
             WATER_ICE.ice_entry_at(coldest_zone(mean, contrast)),
-            WATER.entry(PaletteRole::Liquid),
+            WATER.liquid_entry(WATER_RECORD),
         ]))
         .condensates([
             condensate(
@@ -971,6 +1032,18 @@ mod tests {
     use super::*;
     use hyperion_surface::field::coarse_level;
 
+    /// The surface crate's liquid bins are the sky's bake bins to the bit, so that a liquid
+    /// record's bin means and a client's interpolation of them share one grid with each star's
+    /// bake spectrum (decision-r11-palette-liquids §1.2).
+    #[test]
+    fn the_liquid_bins_are_the_sky_s_bake_bins_to_the_bit() {
+        let bits = hyperion_testkit::float::bits;
+        assert_eq!(
+            hyperion_surface::field::LIQUID_BIN_CENTRES_NM.map(bits),
+            crate::sky::colour::BAKE_WAVELENGTHS_NM.map(bits)
+        );
+    }
+
     #[test]
     fn the_reference_worlds_are_the_bodies_they_name() {
         let earth = earth_like();
@@ -1117,7 +1190,27 @@ mod tests {
         let earth = earth_like();
         let sea = earth.palette().get(earth.main_liquid().unwrap()).unwrap();
         assert_eq!((sea.role, sea.substance), (Liquid, H2O));
-        assert!((sea.grain_density_kg_m3 - 999.84).abs() < 1e-9);
+        assert!((sea.grain_density_kg_m3 - 997.047).abs() < 1e-9);
+        // Its record is water's at 25 °C, measured, its normal albedo the record's Fresnel
+        // reflectance to the row's four places (decision-r11-palette-liquids §2, item 7): when the
+        // record takes R08.T5.h's index, the row's four places follow it.
+        let record = sea
+            .liquid
+            .as_ref()
+            .expect("a sea carries its liquid record");
+        assert_eq!(record.basis, hyperion_surface::field::LiquidBasis::Measured);
+        assert!((record.temperature.value() - 298.15).abs() < 1e-9);
+        for (held, fresnel) in sea
+            .normal_albedo_bvr
+            .iter()
+            .zip(record.fresnel_normal_albedo_bvr())
+        {
+            assert!((held - fresnel).abs() < 5e-5, "{held} against {fresnel}");
+        }
+        // No other world's entry carries a record: none has a sea or a melting crust.
+        for world in [mars_like(), moon_like(), ceres_like()] {
+            assert!(world.palette().entries().iter().all(|e| e.liquid.is_none()));
+        }
     }
 
     /// Each row's density is a grain density, within its sources' range of solids, or, at the

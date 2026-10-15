@@ -1,7 +1,14 @@
-import type { BulkManifestDto, CoverDto, SurfaceHeaderDto } from "@hyperion/protocol";
+import type {
+  BulkManifestDto,
+  CoverDto,
+  LiquidDto,
+  PaletteEntryDto,
+  SurfaceHeaderDto,
+} from "@hyperion/protocol";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import protocolSurfaceSource from "../../../../../../../crates/hyperion-protocol/src/surface.rs?raw";
 import wireSource from "../../../../../../../crates/hyperion-surface/src/wire.rs?raw";
 import { RECONNECT_DELAY_MS } from "../../lib/connection";
 import { type ServerLink, useServerLink } from "../../lib/serverLink";
@@ -20,6 +27,8 @@ import {
   fieldDemand,
   FIELD_RETRY_DELAY_MS,
   FIELD_RETRY_MAX_DELAY_MS,
+  headerFailure,
+  LIQUID_BINS,
   MAX_BLOCK_BYTES,
 } from "./coarseFieldStore";
 import { type CoverageView, fieldCellAt, resolutionOfCodeM } from "./coverage";
@@ -54,7 +63,68 @@ const HEADER: SurfaceHeaderDto = {
   climate_model: "radiative_equilibrium",
   precipitation: "heuristic",
   palette: [],
+  main_liquid: null,
 };
+
+/** `v` in each of a liquid record's bins. */
+function bins(v: number): LiquidDto["refractive_index"] {
+  return [v, v, v, v, v, v, v, v, v, v, v, v, v, v, v];
+}
+
+/**
+ * Liquid water's record at 25 °C, every member present: n about 1.333, Pope and Fry's absorption
+ * about 0.05 m⁻¹ in the green, IAPWS's density, surface tension and viscosity, and a stand-in
+ * scattering of order Morel's, since no test here reads the values.
+ */
+const WATER: LiquidDto = {
+  temperature_k: 298.15,
+  density_kg_m3: 997.047,
+  basis: "measured",
+  refractive_index: bins(1.333),
+  absorption_per_m: bins(0.05),
+  scattering_per_m: bins(0.002),
+  surface_tension_n_per_m: 0.071_97,
+  viscosity_pa_s: 8.9e-4,
+};
+
+/** A basaltic melt's record, its optional members not modelled. */
+const MELT: LiquidDto = {
+  temperature_k: 1_473.15,
+  density_kg_m3: 2_700,
+  basis: "stand_in",
+  refractive_index: bins(1.565),
+};
+
+/** A palette entry of `substance` as `role`, its record `liquid`. */
+function paletteEntry(
+  substance: string,
+  role: PaletteEntryDto["role"],
+  liquid: LiquidDto | null,
+): PaletteEntryDto {
+  return { substance, role, normal_albedo_bvr: [0.1, 0.12, 0.14], phase_row: 1, liquid };
+}
+
+/** {@link HEADER} with a lava-crust, an ice and a sea, the sea its main liquid. */
+const SEA_HEADER: SurfaceHeaderDto = {
+  ...HEADER,
+  palette: [
+    paletteEntry("basalt", "primary_crust", MELT),
+    paletteEntry("H2O", "ice", null),
+    { ...paletteEntry("H2O", "liquid", WATER), normal_albedo_bvr: [0.0208, 0.0204, 0.0202] },
+  ],
+  main_liquid: 2,
+  maturity: 0.75,
+  organic_cover: 0,
+};
+
+/** {@link SEA_HEADER} with its sea's record `liquid`. */
+function seaWith(liquid: LiquidDto): SurfaceHeaderDto {
+  const [crust, ice, sea] = SEA_HEADER.palette;
+  if (crust === undefined || ice === undefined || sea === undefined) {
+    throw new Error("the sea header holds three entries");
+  }
+  return { ...SEA_HEADER, palette: [crust, ice, { ...sea, liquid }] };
+}
 
 /** A payload block of `length` bytes: R09's frame (HYSF, format 1, its length at offset 6), then `marker`. */
 function block(length: number, marker: number): Uint8Array {
@@ -343,6 +413,91 @@ describe("the field demand", () => {
     expect(fieldDemand([highFar, localThere], new Set()).want).toEqual([
       { body: MOON, reason: "local-body" },
     ]);
+  });
+});
+
+describe("the field header's checks", () => {
+  it("holds the protocol's liquid bin count", () => {
+    expect(protocolSurfaceSource).toContain("pub const SURFACE_LIQUID_BINS: usize = 15;");
+    expect(LIQUID_BINS).toBe(15);
+  });
+
+  it("takes a sea's full record, a melt's with members not modelled, and the two fractions", () => {
+    expect(headerFailure(HEADER)).toBeNull();
+    expect(headerFailure(SEA_HEADER)).toBeNull();
+    expect(headerFailure(seaWith(WATER))).toBeNull();
+    expect(headerFailure({ ...SEA_HEADER, maturity: 1, organic_cover: null })).toBeNull();
+    expect(
+      headerFailure({ ...HEADER, palette: [paletteEntry("basalt", "bulk", null)] }),
+    ).toBeNull();
+  });
+
+  it("refuses a main liquid that is not a liquid entry of the palette", () => {
+    for (const main of [0, 1, 3, 1.5]) {
+      expect(headerFailure({ ...SEA_HEADER, main_liquid: main })).toMatch(
+        new RegExp(`main liquid, entry ${main}, is not a liquid`, "u"),
+      );
+    }
+  });
+
+  it("refuses a maturity or an organic cover outside 0 to 1", () => {
+    expect(headerFailure({ ...SEA_HEADER, maturity: 1.5 })).toMatch(/maturity, 1.5, is not/u);
+    expect(headerFailure({ ...SEA_HEADER, organic_cover: -0 })).toMatch(/organic cover, 0, is/u);
+    expect(headerFailure({ ...SEA_HEADER, organic_cover: Number.NaN })).toMatch(/organic cover/u);
+  });
+
+  it("refuses a liquid entry without a liquid record", () => {
+    const [crust, ice, sea] = SEA_HEADER.palette;
+    if (crust === undefined || ice === undefined || sea === undefined) {
+      throw new Error("the sea header holds three entries");
+    }
+    expect(headerFailure({ ...SEA_HEADER, palette: [crust, ice, { ...sea, liquid: null }] })).toBe(
+      "the palette's entry 2, H2O as liquid, has no liquid record",
+    );
+  });
+
+  it("refuses a liquid record on an ice", () => {
+    const [crust, ice, sea] = SEA_HEADER.palette;
+    if (crust === undefined || ice === undefined || sea === undefined) {
+      throw new Error("the sea header holds three entries");
+    }
+    expect(
+      headerFailure({ ...SEA_HEADER, palette: [crust, { ...ice, liquid: WATER }, sea] }),
+    ).toMatch(/entry 1, H2O as ice, has a liquid record, which no ice/u);
+  });
+
+  it("refuses a record's member out of its range, or of another bin count", () => {
+    const short = [...bins(1.333)].slice(1);
+    const cases: ReadonlyArray<readonly [Partial<Record<keyof LiquidDto, unknown>>, RegExp]> = [
+      [{ temperature_k: 0 }, /temperature, 0 K, is not positive/u],
+      [{ density_kg_m3: Number.POSITIVE_INFINITY }, /density/u],
+      [{ basis: "guessed" }, /basis, "guessed", is not one/u],
+      [{ refractive_index: short }, /refractive index is not 15 finite values above 0/u],
+      [{ refractive_index: bins(0) }, /refractive index/u],
+      [{ absorption_per_m: bins(-0) }, /absorption is not 15/u],
+      [{ scattering_per_m: [...bins(0.002), 0.002] }, /scattering is not 15/u],
+      [{ surface_tension_n_per_m: -0.07 }, /surface tension, -0.07 N\/m/u],
+      [{ viscosity_pa_s: 0 }, /viscosity, 0 Pa s/u],
+    ];
+    for (const [change, message] of cases) {
+      // A member out of range is what a damaged answer holds, which the DTO's type cannot.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+      const record = { ...WATER, ...change } as LiquidDto;
+      expect(headerFailure(seaWith(record))).toMatch(message);
+    }
+  });
+
+  it("refuses an entry's normal albedo below 0", () => {
+    const entry = paletteEntry("basalt", "primary_crust", null);
+    const changed: PaletteEntryDto = { ...entry, normal_albedo_bvr: [0.1, -0.1, 0.1] };
+    expect(headerFailure({ ...HEADER, palette: [changed] })).toMatch(/normal albedo/u);
+  });
+
+  it("refuses an entry's phase row that is not a byte", () => {
+    const entry = paletteEntry("basalt", "primary_crust", null);
+    expect(headerFailure({ ...HEADER, palette: [{ ...entry, phase_row: 256 }] })).toMatch(
+      /phase row, 256, that is not a byte/u,
+    );
   });
 });
 
@@ -745,6 +900,24 @@ describe("the coarse-field store", () => {
     h.store.want(MOON, "local-body");
     await answer(h, [block(50, 1), block(40, 2).subarray(0, 20)], 1, cover([0, 1, 9]));
     expect(h.store.status(MOON)?.failure).toMatch(/inside a block/u);
+    expect(h.store.coverage(MOON)).toBeNull();
+  });
+
+  it("refuses an answer whose header is out of range, holding why", async () => {
+    const h = harness(1);
+    h.store.want(MOON, "local-body");
+    const socket = h.socket();
+    const { id } = latestAsk(socket);
+    socket.serverResponds(id, {
+      kind: "surface_field",
+      state: "ready",
+      header: { ...SEA_HEADER, maturity: 2 },
+      revision: 1,
+      coverage: cover([0, 1, 9]),
+      bulk: sendFrames(socket, id, block(50, 1), 64),
+    });
+    await settle();
+    expect(h.store.status(MOON)?.failure).toMatch(/maturity, 2, is not from 0 to 1/u);
     expect(h.store.coverage(MOON)).toBeNull();
   });
 

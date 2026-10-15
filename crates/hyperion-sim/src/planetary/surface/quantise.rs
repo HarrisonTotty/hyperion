@@ -21,7 +21,8 @@ use hyperion_surface::field::{
 
 use super::inputs::CoarseInputs;
 use super::steps::{CellState, ClimateState, Working};
-use crate::units::Metres;
+use crate::planetary::derive::atmosphere::SurfaceState;
+use crate::units::{Metres, Pascals};
 
 /// Why [`quantise`] could not turn a working state into a field.
 #[derive(Debug, Clone, PartialEq)]
@@ -109,7 +110,9 @@ impl Error for QuantiseFieldError {
 /// [`CoarseInputs::main_liquid`]), and each cell's substance byte packs its ice and liquid
 /// entries. The header's parts that travel as raw `f64` bits (the sea level, the lapse rate
 /// and the realised figures) have a −0 made +0, so that a zero has one form on the wire whichever
-/// way a step reached it.
+/// way a step reached it. The header's surface pressure is exactly 0 for an airless surface state,
+/// as R10's classifier takes it, and the inputs' own pressure otherwise ([`header_pressure`];
+/// decision-r11-palette-liquids §2, item 5).
 ///
 /// Public, beside [`coarse_pass`](super::coarse_pass), so that a bench or test can quantise the
 /// state a step leaves (R09.T14's and R09.T16's benches).
@@ -190,13 +193,16 @@ pub fn quantise(
         temperature_step,
         anomaly_step,
         surface_age: inputs.surface_age(),
-        surface_pressure: inputs.surface_pressure(),
+        surface_pressure: header_pressure(inputs),
         albedo_scale: None,
         // The field owns its palette while the borrowed inputs keep theirs: one copy of at most
         // 15 entries a field, cold beside the cells.
         palette: inputs.palette().clone(),
         crust_palette: inputs.crust_palette(),
         main_liquid: inputs.main_liquid(),
+        // Reserved for P14.T51.d's figures, which P14.T54.b fills.
+        maturity: None,
+        organic_cover: None,
     })
     .map_err(QuantiseFieldError::Header)?;
     let level = header.level();
@@ -222,6 +228,26 @@ pub fn quantise(
 #[must_use]
 fn unsigned_zero(x: f64) -> f64 {
     x + 0.0
+}
+
+/// The header's surface pressure for `inputs`: exactly 0 where the surface state is
+/// [`SurfaceState::Airless`], whatever pressure the inputs give, so that the field's pressure
+/// tells an airless world from an atmosphere as R10's classifier and R11's atmosphere class read
+/// it (decision-r11-palette-liquids §2, item 5; R10's "Airless is zero pressure"); the inputs'
+/// pressure under every other state, a −0 made +0, so that a zero has one form on the wire.
+///
+/// Every state but `Airless` keeps its pressure, so P14.T53.c's tenuous state, when it joins
+/// [`SurfaceState`], takes an arm here that keeps its own, positive and below the airless line.
+#[must_use]
+fn header_pressure(inputs: &CoarseInputs) -> Pascals {
+    match inputs.surface_state() {
+        SurfaceState::Airless => Pascals::ZERO,
+        SurfaceState::GasEnvelope
+        | SurfaceState::MagmaOcean
+        | SurfaceState::RunawayGreenhouse
+        | SurfaceState::Temperate
+        | SurfaceState::Snowball => Pascals::new(unsigned_zero(inputs.surface_pressure().value())),
+    }
 }
 
 /// Refuses an array of `found` entries for a level of `expected`.
@@ -627,6 +653,62 @@ mod tests {
         let one = record_winds(&state, 1).unwrap();
         assert_eq!(one[0], winds[0]);
         assert!(one[1..].iter().all(|&w| w == Wind::CALM));
+    }
+
+    /// The reference Moon's inputs with a surface pressure of `pressure`, its state still airless.
+    fn moon_at(pressure: Pascals) -> CoarseInputs {
+        let moon = reference::moon_like();
+        let mut builder = CoarseInputs::builder()
+            .body(moon.body())
+            .figure(moon.figure())
+            .gravity(moon.gravity())
+            .sigma_h(moon.sigma_h())
+            .liquids(moon.liquids().iter().copied())
+            .ices(moon.ices().iter().copied())
+            .mean_surface_temperature(moon.mean_surface_temperature())
+            .equator_pole_contrast_k(moon.equator_pole_contrast_k())
+            .day_night_contrast_k(moon.day_night_contrast_k())
+            .spin(*moon.spin())
+            .host_flux(moon.host_flux())
+            .surface_pressure(pressure)
+            .gases(moon.gases().iter().copied())
+            .surface(moon.surface_state(), moon.surface_material())
+            .tectonics(moon.tectonics(), moon.continental_fraction())
+            .volcanism(moon.volcanism())
+            .heat_flow(moon.heat_flow())
+            .surface_age(moon.surface_age())
+            .craters(*moon.craters())
+            .climate(*moon.climate())
+            .crust(*moon.crust())
+            .condensates(moon.condensates().iter().copied())
+            .palette(moon.palette().clone());
+        if let Some(orbit) = moon.seasonal_orbit() {
+            builder = builder.seasonal_orbit(*orbit);
+        }
+        if let Some(epoch) = moon.wet_epoch() {
+            builder = builder.wet_epoch(*epoch);
+        }
+        builder.build().unwrap()
+    }
+
+    /// An airless body's header pressure is exactly 0, whatever partial pressure its inputs keep
+    /// below the airless line, as R10's classifier takes it; an atmosphere's is its own
+    /// (decision-r11-palette-liquids §2, item 5).
+    #[test]
+    fn an_airless_body_s_header_pressure_is_exactly_zero() {
+        let inputs = moon_at(Pascals::new(40.0));
+        assert_eq!(inputs.surface_state(), SurfaceState::Airless);
+        let (_, grid, climate) = moon_working();
+        let pass = Pass::new(SurfaceSeed::new(1), &inputs, &grid, &climate);
+        let field = quantise(&inputs, Working::initial(&pass)).unwrap();
+        assert_same_bits(field.header().surface_pressure().value(), 0.0);
+        let mars = reference::mars_like();
+        assert_ne!(mars.surface_state(), SurfaceState::Airless);
+        assert_same_bits(
+            header_pressure(&mars).value(),
+            mars.surface_pressure().value(),
+        );
+        assert!(header_pressure(&mars).value() > 0.0);
     }
 
     #[test]

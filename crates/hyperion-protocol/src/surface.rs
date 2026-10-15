@@ -50,8 +50,17 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::Modelled;
 use crate::bulk::BulkManifestDto;
 use crate::primitives::{BodyIdHex, UniverseIdHex, UniverseTime};
+
+/// The number of spectral bins of a liquid record's optical members ([`LiquidDto`]).
+///
+/// They are rendering plan R08's fifteen bake bins, 25.33 nm wide from 380 to 760 nm, centred at
+/// 392.67 + 25.33 k nm, the grid each star's light is sent on
+/// ([`SKY_BAKE_BINS`](crate::SKY_BAKE_BINS); `packages/protocol/fixtures/bake_wavelengths_nm.json`),
+/// each member's value its uniform mean over its bin: `hyperion-surface`'s `field::LIQUID_BINS`.
+pub const SURFACE_LIQUID_BINS: usize = 15;
 
 /// Asks for one body's coarse field in the cells the ship has surveyed (`surface_field`), answered
 /// in bulk with a [`SurfaceFieldDto`].
@@ -107,9 +116,11 @@ pub enum SurfaceFieldDto {
 /// A coarse field's header as the main thread reads it: the scalars of the payload's `FieldHeader`
 /// (rendering plan R09, Design note 17), each in the unit its name states.
 ///
-/// The band spectrum, the crater parameters and the palette's optical and mechanical values are
-/// the synthesis's and travel in block 0 of the payload alone. Members may be added later; removing
-/// one changes the contract.
+/// The band spectrum, the crater parameters and the palette's grain densities, transitions and
+/// mechanics families are the synthesis's and travel in block 0 of the payload alone; each palette
+/// entry's normal albedo, phase row and liquid record travel in both, for the main thread's
+/// photometry and its ocean (decision-r11-palette-liquids §1.5 and §2, item 8). Members may be
+/// added later; removing one changes the contract.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SurfaceHeaderDto {
@@ -156,7 +167,9 @@ pub struct SurfaceHeaderDto {
     /// The body's surface age, Gyr (10⁹ years), non-negative and at most its system's age: plan
     /// 14's.
     pub surface_age_gyr: f64,
-    /// The body's mean surface pressure, Pa, non-negative: plan 14's, 0 on an airless body.
+    /// The body's mean surface pressure, Pa, non-negative: plan 14's, exactly 0 on an airless body,
+    /// and a tenuous body's own below 100 Pa, so that 0 is airless, below 100 Pa tenuous, and at or
+    /// above it an atmosphere.
     pub surface_pressure_pa: f64,
     /// Rendering plan R10's albedo scale, dimensionless and positive: the one factor on the
     /// palette's class albedos that makes the body's materials give its geometric albedo, each
@@ -173,6 +186,20 @@ pub struct SurfaceHeaderDto {
     /// entry indexes this list: each a key of plan 14's substance registry with its role on the
     /// body. Empty for a body whose composition is not modelled.
     pub palette: Vec<PaletteEntryDto>,
+    /// The index in [`palette`](Self::palette) of the body's main liquid, its sea's, a
+    /// [`PaletteRoleDto::Liquid`] entry; `null` for a body with none.
+    pub main_liquid: Option<u8>,
+    /// The ground's space-weathering maturity, dimensionless from 0 for fresh ground to 1 for
+    /// saturated weathering, which rendering plan R10's cover term reads; absent until galaxy plan
+    /// 14 computes it (P14.T51.d).
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<f64>>", optional)]
+    pub maturity: Modelled<f64>,
+    /// The organic cover, dimensionless from 0 to 1: the covered fraction of the ground that can
+    /// take one; absent until galaxy plan 14 computes it (P14.T51.d).
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<f64>>", optional)]
+    pub organic_cover: Modelled<f64>,
 }
 
 /// The coarse model a body's climate step ran (rendering plan R09, Design note 8).
@@ -203,8 +230,10 @@ pub enum PrecipitationSourceDto {
     Heuristic,
 }
 
-/// One substance of a body's palette.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+/// One substance of a body's palette, with the values the main thread's photometry and ocean read:
+/// its normal albedo, its phase row and its liquid record (decision-r11-palette-liquids §1.5 and
+/// §2, item 8). Its grain density, transition and mechanics family travel in the payload alone.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct PaletteEntryDto {
     /// The substance: a key of plan 14's substance registry, a formula (`H2O`, `Na2CO3`), the
@@ -212,6 +241,79 @@ pub struct PaletteEntryDto {
     pub substance: String,
     /// What the substance is to the body.
     pub role: PaletteRoleDto,
+    /// The normal albedo A<sub>N</sub>, the radiance factor at i = e = α = 0, in the Johnson B, V
+    /// and R bands, dimensionless, finite and non-negative, as resolved, before rendering plan
+    /// R10's [`albedo_scale`](SurfaceHeaderDto::albedo_scale): above 1 on a strongly
+    /// backscattering surface. A [`PaletteRoleDto::Liquid`] entry's is its record's Fresnel
+    /// reflectance at normal incidence, ((n − 1) ÷ (n + 1))², at 440, 550 and 640 nm, never a
+    /// Lambertian albedo.
+    pub normal_albedo_bvr: [f64; 3],
+    /// The row of rendering plan R10's phase table its photometric law takes, R10's `PhaseLaw`
+    /// codes: 1 the Moon's regolith law, 2 an airless ice's, 3 Lambert's, and 0 for none assigned,
+    /// where the law of its mechanics family stands, as it does for a code a client does not know.
+    pub phase_row: u8,
+    /// The liquid's record, on a [`PaletteRoleDto::Liquid`] entry and on a crust entry whose rock
+    /// the body melts (a lava lake or a magma ocean); `null` where the entry is not liquid on the
+    /// body.
+    pub liquid: Option<LiquidDto>,
+}
+
+/// What a liquid on the ground is to light and to waves, resolved by the server for its body at
+/// [`temperature_k`](Self::temperature_k) (rendering plan R11.T8; decision-r11-palette-liquids
+/// §1.1).
+///
+/// The optical members are by the [`SURFACE_LIQUID_BINS`] bake bins, shortest first. A member the
+/// server does not model for this liquid is absent, never 0; a client labels each absent member
+/// and each record that is not [`LiquidBasisDto::Measured`] (the style guide's "Missing" and
+/// approximate states). No member is scaled by the header's `albedo_scale`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LiquidDto {
+    /// The temperature every other member is resolved at, K, positive.
+    pub temperature_k: f64,
+    /// The liquid's density at that temperature and the surface pressure, kg/m³, positive.
+    pub density_kg_m3: f64,
+    /// How directly the members were obtained: the least direct of them.
+    pub basis: LiquidBasisDto,
+    /// The real refractive index n relative to vacuum, each bin's mean, dimensionless, positive.
+    pub refractive_index: [f64; SURFACE_LIQUID_BINS],
+    /// The absorption coefficient a = 4πk ÷ λ, m⁻¹, Napierian, each bin's mean, non-negative;
+    /// absent where not modelled.
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<[f64; SURFACE_LIQUID_BINS]>>", optional)]
+    pub absorption_per_m: Modelled<[f64; SURFACE_LIQUID_BINS]>,
+    /// The pure liquid's scattering coefficient b over 4π, m⁻¹, each bin's mean, non-negative, its
+    /// phase function symmetric so that its backscattering is b ÷ 2; suspended and dissolved
+    /// matter is not in it. Absent where not modelled.
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<[f64; SURFACE_LIQUID_BINS]>>", optional)]
+    pub scattering_per_m: Modelled<[f64; SURFACE_LIQUID_BINS]>,
+    /// The surface tension, N/m, positive, against the body's air or the liquid's own vapour;
+    /// absent where not modelled.
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<f64>>", optional)]
+    pub surface_tension_n_per_m: Modelled<f64>,
+    /// The dynamic viscosity μ, Pa s, positive (the kinematic is μ ÷ ρ); absent where not
+    /// modelled.
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<f64>>", optional)]
+    pub viscosity_pa_s: Modelled<f64>,
+}
+
+/// How directly a liquid record's members were obtained (decision-r11-palette-liquids §1.1), as
+/// `hyperion-surface`'s `LiquidBasis` names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum LiquidBasisDto {
+    /// Every member from measurements of this liquid, or from a reference correlation fitted to
+    /// them within its range.
+    Measured,
+    /// At least one member from a mixing rule, an estimation method, a reference composition in
+    /// place of the body's, or an extrapolation beyond a source's range.
+    Derived,
+    /// At least one member is a named analogue's or a stated constant.
+    StandIn,
 }
 
 /// What a palette entry is to the body (decision-composition §1.7), as `hyperion-surface`'s
@@ -420,13 +522,58 @@ mod tests {
                 PaletteEntryDto {
                     substance: "phyllosilicate".to_owned(),
                     role: PaletteRoleDto::PrimaryCrust,
+                    normal_albedo_bvr: [0.094; 3],
+                    phase_row: 1,
+                    liquid: None,
                 },
                 PaletteEntryDto {
                     substance: "H2O".to_owned(),
                     role: PaletteRoleDto::Ice,
+                    normal_albedo_bvr: [0.965, 0.96, 0.955],
+                    phase_row: 0,
+                    liquid: None,
                 },
             ],
+            main_liquid: None,
+            maturity: Modelled::NotModelled,
+            organic_cover: Modelled::NotModelled,
         }
+    }
+
+    /// A liquid water record with every member, its bins' values `0.25 + k`.
+    fn liquid() -> LiquidDto {
+        LiquidDto {
+            temperature_k: 298.15,
+            density_kg_m3: 997.047,
+            basis: LiquidBasisDto::Measured,
+            refractive_index: [1.333; SURFACE_LIQUID_BINS],
+            absorption_per_m: Modelled::Value(bins()),
+            scattering_per_m: Modelled::Value([0.002_5; SURFACE_LIQUID_BINS]),
+            surface_tension_n_per_m: Modelled::Value(0.071_97),
+            viscosity_pa_s: Modelled::Value(8.9e-4),
+        }
+    }
+
+    /// Fifteen bins' distinct values, `0.25 + k`.
+    fn bins() -> [f64; SURFACE_LIQUID_BINS] {
+        let mut values = [0.25; SURFACE_LIQUID_BINS];
+        for (k, v) in (0_u8..).zip(&mut values) {
+            *v += f64::from(k);
+        }
+        values
+    }
+
+    fn liquid_json() -> Value {
+        json!({
+            "temperature_k": 298.15,
+            "density_kg_m3": 997.047,
+            "basis": "measured",
+            "refractive_index": vec![1.333; SURFACE_LIQUID_BINS],
+            "absorption_per_m": bins(),
+            "scattering_per_m": vec![0.002_5; SURFACE_LIQUID_BINS],
+            "surface_tension_n_per_m": 0.071_97,
+            "viscosity_pa_s": 8.9e-4,
+        })
     }
 
     fn header_json() -> Value {
@@ -450,10 +597,86 @@ mod tests {
             "climate_model": "radiative_equilibrium",
             "precipitation": "heuristic",
             "palette": [
-                { "substance": "phyllosilicate", "role": "primary_crust" },
-                { "substance": "H2O", "role": "ice" },
+                {
+                    "substance": "phyllosilicate",
+                    "role": "primary_crust",
+                    "normal_albedo_bvr": [0.094, 0.094, 0.094],
+                    "phase_row": 1,
+                    "liquid": null,
+                },
+                {
+                    "substance": "H2O",
+                    "role": "ice",
+                    "normal_albedo_bvr": [0.965, 0.96, 0.955],
+                    "phase_row": 0,
+                    "liquid": null,
+                },
             ],
+            "main_liquid": null,
         })
+    }
+
+    /// A palette entry's liquid record carries every member it models, by bin; a member not
+    /// modelled is an absent key, never `null` or 0; an entry with no record is `null`; and a
+    /// header names its main liquid and, once plan 14 computes them, its two fractions
+    /// (decision-r11-palette-liquids §1.5 and §2).
+    #[test]
+    fn palette_liquid_wire_forms() {
+        assert_wire_form(&liquid(), liquid_json());
+        let sparse = LiquidDto {
+            basis: LiquidBasisDto::StandIn,
+            absorption_per_m: Modelled::NotModelled,
+            scattering_per_m: Modelled::NotModelled,
+            surface_tension_n_per_m: Modelled::NotModelled,
+            viscosity_pa_s: Modelled::NotModelled,
+            ..liquid()
+        };
+        assert_wire_form(
+            &sparse,
+            json!({
+                "temperature_k": 298.15,
+                "density_kg_m3": 997.047,
+                "basis": "stand_in",
+                "refractive_index": vec![1.333; SURFACE_LIQUID_BINS],
+            }),
+        );
+        let mut sea = header();
+        sea.palette.push(PaletteEntryDto {
+            substance: "H2O".to_owned(),
+            role: PaletteRoleDto::Liquid,
+            normal_albedo_bvr: [0.020_8, 0.020_4, 0.020_2],
+            phase_row: 0,
+            liquid: Some(liquid()),
+        });
+        sea.main_liquid = Some(2);
+        sea.maturity = Modelled::Value(0.75);
+        sea.organic_cover = Modelled::Value(0.0);
+        let mut sea_json = header_json();
+        sea_json["palette"].as_array_mut().unwrap().push(json!({
+            "substance": "H2O",
+            "role": "liquid",
+            "normal_albedo_bvr": [0.020_8, 0.020_4, 0.020_2],
+            "phase_row": 0,
+            "liquid": liquid_json(),
+        }));
+        sea_json["main_liquid"] = json!(2);
+        sea_json["maturity"] = json!(0.75);
+        sea_json["organic_cover"] = json!(0.0);
+        assert_wire_form(&sea, sea_json);
+    }
+
+    /// A liquid's by-bin member of another length than the fifteen bins is refused.
+    #[test]
+    fn a_liquid_member_of_another_bin_count_is_rejected() {
+        for (member, length) in [("refractive_index", 14), ("absorption_per_m", 16)] {
+            let mut short = liquid_json();
+            short[member] = json!(vec![1.0; length]);
+            let error = serde_json::from_value::<LiquidDto>(short).unwrap_err();
+            assert!(
+                error.to_string().contains("invalid length"),
+                "{member}: unexpected error: {error}"
+            );
+        }
     }
 
     #[test]
@@ -637,6 +860,11 @@ mod tests {
             (PaletteRoleDto::Cover, "cover"),
             (PaletteRoleDto::Deposit, "deposit"),
             (PaletteRoleDto::Bulk, "bulk"),
+        ]);
+        assert_wire_strings(&[
+            (LiquidBasisDto::Measured, "measured"),
+            (LiquidBasisDto::Derived, "derived"),
+            (LiquidBasisDto::StandIn, "stand_in"),
         ]);
         assert_wire_strings(&[
             (RecordSectionDto::Label, "label"),

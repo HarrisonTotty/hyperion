@@ -11,9 +11,10 @@
 use std::ops::Range;
 
 use hyperion_protocol::{
-    BodyIdHex, ClimateModelDto, CoverDto, CoverRangeDto, ErrorCode, PaletteEntryDto,
-    PaletteRoleDto, PrecipitationSourceDto, RecordSectionDto, RequestError, SurfaceFieldRequest,
-    SurfaceHeaderDto, SurfaceRevisionDto, SurveyPassRequest, SurveySourceDto,
+    BodyIdHex, ClimateModelDto, CoverDto, CoverRangeDto, ErrorCode, LiquidBasisDto, LiquidDto,
+    Modelled, PaletteEntryDto, PaletteRoleDto, PrecipitationSourceDto, RecordSectionDto,
+    RequestError, SURFACE_LIQUID_BINS, SurfaceFieldRequest, SurfaceHeaderDto, SurfaceRevisionDto,
+    SurveyPassRequest, SurveySourceDto,
 };
 use hyperion_sim::id::{BodyId, SystemId};
 use hyperion_sim::planetary::record::RecordSection;
@@ -22,8 +23,8 @@ use hyperion_sim::planetary::{BodyIndex, ResolveBodyError};
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::Metres;
 use hyperion_surface::field::{
-    ClimateModelKind, CoarseLevel, Cover, FieldHeader, PaletteRole, PrecipitationSource,
-    ResolutionCode,
+    ClimateModelKind, CoarseLevel, Cover, FieldHeader, LIQUID_BINS, LiquidBasis, LiquidProperties,
+    PaletteEntry, PaletteRole, PrecipitationSource, ResolutionCode,
 };
 
 use super::planetary::{body_refusal, unknown_body_system};
@@ -216,8 +217,14 @@ impl TryFrom<&SurfaceFieldRequest> for FieldRequest {
     }
 }
 
-/// A field's header as the main thread reads it: the scalars of `header`, its classes, and its
-/// palette's substances and roles (ruled by "main", 2026-10-13, R09.T19.a's record).
+// The wire's bins are the field's: a liquid record's by-bin members cross as they are, and a new
+// bin set is a new payload format and a new protocol (decision-r11-palette-liquids §1.2).
+const _: () = assert!(SURFACE_LIQUID_BINS == LIQUID_BINS);
+
+/// A field's header as the main thread reads it: the scalars of `header`, its classes, its
+/// palette's substances and roles with each entry's normal albedo, phase row and liquid record
+/// (ruled by "main", 2026-10-13, R09.T19.a's record; decision-r11-palette-liquids §1.5 and §2),
+/// its main liquid, and the two fractions plan 14 fills later, absent until it does.
 ///
 /// The body is the header's own, which on the reference worlds is theirs, not the body asked for
 /// (R09.T17's deferred finding).
@@ -248,11 +255,57 @@ pub(crate) fn surface_header(header: &FieldHeader) -> SurfaceHeaderDto {
             .palette()
             .entries()
             .iter()
-            .map(|entry| PaletteEntryDto {
-                substance: entry.substance.as_str().to_owned(),
-                role: palette_role(entry.role),
-            })
+            .map(palette_entry)
             .collect(),
+        main_liquid: header.main_liquid(),
+        maturity: modelled(header.maturity()),
+        organic_cover: modelled(header.organic_cover()),
+    }
+}
+
+/// A palette entry as the main thread reads it: its key, its role, its normal albedo before the
+/// albedo scale, its phase row, and its liquid record, `None` where the entry is not liquid on the
+/// body.
+#[must_use]
+fn palette_entry(entry: &PaletteEntry) -> PaletteEntryDto {
+    PaletteEntryDto {
+        substance: entry.substance.as_str().to_owned(),
+        role: palette_role(entry.role),
+        normal_albedo_bvr: entry.normal_albedo_bvr,
+        phase_row: entry.phase_row,
+        liquid: entry.liquid.as_ref().map(liquid),
+    }
+}
+
+/// A liquid record as the wire carries it: each member as the field holds it, and each member the
+/// server does not model absent (decision-r11-palette-liquids §1.4).
+#[must_use]
+pub(crate) fn liquid(record: &LiquidProperties) -> LiquidDto {
+    LiquidDto {
+        temperature_k: record.temperature.value(),
+        density_kg_m3: record.density_kg_m3,
+        basis: liquid_basis(record.basis),
+        refractive_index: record.refractive_index,
+        absorption_per_m: modelled(record.absorption_per_m),
+        scattering_per_m: modelled(record.scattering_per_m),
+        surface_tension_n_per_m: modelled(record.surface_tension_n_per_m),
+        viscosity_pa_s: modelled(record.viscosity_pa_s),
+    }
+}
+
+/// A value the field holds or does not model, as the wire carries it: absent when it is `None`.
+#[must_use]
+fn modelled<T>(value: Option<T>) -> Modelled<T> {
+    value.map_or(Modelled::NotModelled, Modelled::Value)
+}
+
+/// A liquid record's basis as the wire names it.
+#[must_use]
+pub(crate) fn liquid_basis(basis: LiquidBasis) -> LiquidBasisDto {
+    match basis {
+        LiquidBasis::Measured => LiquidBasisDto::Measured,
+        LiquidBasis::Derived => LiquidBasisDto::Derived,
+        LiquidBasis::StandIn => LiquidBasisDto::StandIn,
     }
 }
 
@@ -450,7 +503,10 @@ mod tests {
     use hyperion_sim::planetary::DecodeBodyIndexError;
     use hyperion_sim::planetary::hooks::surface_seed;
     use hyperion_sim::planetary::surface::{coarse_pass, reference};
-    use hyperion_surface::field::FieldView;
+    use hyperion_sim::units::Kelvin;
+    use hyperion_surface::field::{FieldView, MaterialPalette, MechanicsFamily};
+    use hyperion_surface::substance_key::SubstanceKey;
+    use hyperion_surface::testing::{FieldBuilder, basaltic_melt, liquid_water};
 
     use super::*;
     use crate::compute::{ComputeError, JobError, SubmitJobError};
@@ -684,7 +740,116 @@ mod tests {
         for (entry, held) in wire.palette.iter().zip(header.palette().entries()) {
             assert_eq!(entry.substance, held.substance.as_str());
             assert_eq!(entry.role, palette_role(held.role));
+            assert_eq!(
+                entry.normal_albedo_bvr.map(f64::to_bits),
+                held.normal_albedo_bvr.map(f64::to_bits)
+            );
+            assert_eq!(entry.phase_row, held.phase_row);
+            assert_eq!(entry.liquid, None, "{}", entry.substance);
         }
+        assert_eq!(wire.main_liquid, None);
+        assert!(wire.maturity.is_not_modelled(), "{wire:?}");
+        assert!(wire.organic_cover.is_not_modelled(), "{wire:?}");
+    }
+
+    /// Decision-r11-palette-liquids §1.5 and §2: a sea's and a melt's records reach the wire with
+    /// every member to the bit, a member the field does not model absent, an entry that is not
+    /// liquid with none; the header names its main liquid and carries the two fractions plan 14
+    /// fills, once they are filled; and every basis has its wire name.
+    #[test]
+    fn a_field_header_carries_its_liquid_records() {
+        let entry = |key, role, density, liquid| PaletteEntry {
+            substance: SubstanceKey::new(key).unwrap(),
+            role,
+            normal_albedo_bvr: [0.3; 3],
+            phase_row: 1,
+            grain_density_kg_m3: density,
+            transition: Kelvin::new(1_400.0),
+            mechanics: MechanicsFamily::Silicate,
+            liquid,
+        };
+        let water = liquid_water();
+        let sea = PaletteEntry {
+            normal_albedo_bvr: water.fresnel_normal_albedo_bvr(),
+            phase_row: 0,
+            transition: Kelvin::new(273.15),
+            mechanics: MechanicsFamily::WaterIce,
+            ..entry("H2O", PaletteRole::Liquid, water.density_kg_m3, Some(water))
+        };
+        let palette = MaterialPalette::new(vec![
+            entry(
+                "basalt",
+                PaletteRole::PrimaryCrust,
+                2_900.0,
+                Some(basaltic_melt()),
+            ),
+            entry("anorthosite", PaletteRole::SecondaryCrust, 2_730.0, None),
+            sea,
+        ])
+        .unwrap();
+        let field = FieldBuilder::new(Metres::new(4.697e5))
+            .palette(palette)
+            .crust_palette([None, None, Some(0), Some(1)])
+            .main_liquid(2)
+            .maturity(0.75)
+            .organic_cover(0.0)
+            .build();
+        let wire = surface_header(field.header());
+        assert_eq!(wire.main_liquid, Some(2));
+        assert_eq!(wire.maturity, Modelled::Value(0.75));
+        assert_eq!(wire.organic_cover, Modelled::Value(0.0));
+        let [melt, rock, sea] = wire.palette.as_slice() else {
+            panic!("{:?}", wire.palette);
+        };
+        assert_eq!(rock.liquid, None);
+        let record = liquid_water();
+        let sent = sea.liquid.as_ref().unwrap();
+        assert_eq!(sent.basis, LiquidBasisDto::Measured);
+        assert_eq!(
+            sent.temperature_k.to_bits(),
+            record.temperature.value().to_bits()
+        );
+        assert_eq!(sent.density_kg_m3.to_bits(), record.density_kg_m3.to_bits());
+        assert_eq!(
+            sent.refractive_index.map(f64::to_bits),
+            record.refractive_index.map(f64::to_bits)
+        );
+        assert_eq!(
+            sent.absorption_per_m,
+            Modelled::Value(record.absorption_per_m.unwrap())
+        );
+        assert!(sent.scattering_per_m.is_not_modelled(), "{sent:?}");
+        assert_eq!(
+            sent.surface_tension_n_per_m,
+            Modelled::Value(record.surface_tension_n_per_m.unwrap())
+        );
+        assert_eq!(
+            sent.viscosity_pa_s,
+            Modelled::Value(record.viscosity_pa_s.unwrap())
+        );
+        assert_eq!(
+            sea.normal_albedo_bvr.map(f64::to_bits),
+            record.fresnel_normal_albedo_bvr().map(f64::to_bits)
+        );
+        let lava = melt.liquid.as_ref().unwrap();
+        assert_eq!(lava.basis, LiquidBasisDto::StandIn);
+        assert!(lava.surface_tension_n_per_m.is_not_modelled(), "{lava:?}");
+        assert!(lava.viscosity_pa_s.is_not_modelled(), "{lava:?}");
+        let bases: Vec<_> = LiquidBasis::ALL
+            .iter()
+            .map(|&basis| serde_json::to_value(liquid_basis(basis)).unwrap())
+            .collect();
+        assert_eq!(bases, ["measured", "derived", "stand_in"]);
+    }
+
+    /// The sim's reference Earth carries the surface crate's synthetic water record, through a
+    /// copy of its own (the sim's tests cannot reach the surface crate's `testing`), so that the
+    /// two move together when R08.T5.h moves `water.json`.
+    #[test]
+    fn the_reference_earth_s_sea_is_the_synthetic_water_record() {
+        let earth = reference::earth_like();
+        let sea = earth.palette().get(earth.main_liquid().unwrap()).unwrap();
+        assert_eq!(sea.liquid.as_ref(), Some(&liquid_water()));
     }
 
     /// A survey log of a later format is the save's, and any other failure to open it the

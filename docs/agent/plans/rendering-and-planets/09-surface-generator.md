@@ -191,7 +191,19 @@ pub mod field {
         anomaly_step: u8 (0.25 K × 2ⁿ, per body, Design note 17), surface_age: Gigayears,
         surface_pressure: Pascals, albedo_scale: Option<f64> (R10's),
         palette: MaterialPalette (≤ 15 PaletteEntry, T2's follow-up B),
-        crust_palette: [Option<u8>; 4], main_liquid: Option<u8> */ }
+        crust_palette: [Option<u8>; 4], main_liquid: Option<u8>,
+        maturity: Option<f64>, organic_cover: Option<f64> (P14.T51.d's, in [0, 1],
+        absent until P14.T54.b; follow-up E) */ }
+    pub struct PaletteEntry { /* substance, role, normal_albedo_bvr, phase_row,
+        grain_density_kg_m3, transition, mechanics,
+        liquid: Option<LiquidProperties> (follow-up E: required on a Liquid entry, present on a
+        crust entry the body melts, absent elsewhere) */ }
+    pub const LIQUID_BINS: usize = 15;                     // R08's bake bins, 380–760 nm
+    pub enum LiquidBasis { Measured = 0, Derived = 1, StandIn = 2 }   // a coded byte
+    pub struct LiquidProperties { /* temperature: Kelvin, density_kg_m3, basis,
+        refractive_index: [f64; LIQUID_BINS], absorption_per_m, scattering_per_m:
+        Option<[f64; LIQUID_BINS]>, surface_tension_n_per_m, viscosity_pa_s: Option<f64>
+        (decision-r11-palette-liquids §1.1) */ }
     pub struct SynthesisCell { /* elevation_mm: i32,
         boundary_distance: i16 (1 km, saturating),
         plate: u8, crust: Crust, boundary: BoundaryKind, boundary_obliquity: u8,
@@ -387,6 +399,12 @@ resolution_m, cells: Vec<CellRangeDto> }` answered by `SurveyPassDto { revision 
   `CellRangeDto` is `{ start: u32, end: u32 }` and `cells` holds at most `MAX_SURVEY_RANGES` (256)
   ranges, so that a request stays under plan 04's 16 KiB `MAX_INBOUND_FRAME_BYTES`; a longer pass is
   sent as several requests with one time span. More ranges is `bad_request` naming `cells`.
+- `SurfaceHeaderDto`'s palette entries, each a `PaletteEntryDto` of `substance`, `role`,
+  `normal_albedo_bvr`, `phase_row` and `liquid: Option<LiquidDto>`, and its
+  `main_liquid: Option<u8>`, `maturity` and `organic_cover` (`Modelled<f64>`, absent until plan
+  14 fills them), all additive JSON (T2's follow-up E). `LiquidDto` mirrors `LiquidProperties` (`temperature_k`, `density_kg_m3`, `basis`
+  as `LiquidBasisDto`, `refractive_index`, and the four optional members as `Modelled`, absent
+  when not modelled), its by-bin members `SURFACE_LIQUID_BINS` (15) long.
 - `CoverDto`: `ranges: Vec<CoverRangeDto>`, each `{ start: u32, end: u32, resolution: u8 }`, a
   half-open range of `cell_index` values with its `ResolutionCode`, so that R10's readouts know the
   resolution per cell. It travels server to client only.
@@ -1441,11 +1459,12 @@ decision-r09-t2's follow-up, which edits the same files).
   Moon's primary.
 
 - **The shape is frozen only from R09.T19's first send.** R10's and R11's re-validations may add
-  members (a liquid's index, absorption, viscosity and surface tension for R11.T8) before then,
-  re-blessing `tests/golden/wire/` at the current version with neither `SURFACE_PAYLOAD_FORMAT`
-  nor `GENERATOR_VERSION` bumped; from T19's first send a change bumps both (Generator version,
-  the ruling of 2026-10-09, which governs; corrected 2026-10-10 from "under a
-  `SURFACE_PAYLOAD_FORMAT` bump").
+  members before then, re-blessing `tests/golden/wire/` at the current version with neither
+  `SURFACE_PAYLOAD_FORMAT` nor `GENERATOR_VERSION` bumped; from T19's first send a change bumps
+  both (Generator version, the ruling of 2026-10-09, which governs; corrected 2026-10-10 from
+  "under a `SURFACE_PAYLOAD_FORMAT` bump"). R11.T8's liquid members are ruled in
+  `decision-r11-palette-liquids.md` and built by follow-up E (R09.T2.e), with every other R10 or
+  R11 ask on the payload before the gate.
 - Tests: the palette's bounds, order and refusals; every synthetic world valid; `SubstanceKey`'s
   grammar (formula, `e-`, name, and rejections).
 - Acceptance: `cargo test -p hyperion-surface field`;
@@ -1515,6 +1534,39 @@ _Follow-up C, runoff, grain densities and the read solidus_ (science-r09-drainag
     `palette_role` row, an extension (codes only gain), before T19's first send. Neither
     `GENERATOR_VERSION` nor `SURFACE_PAYLOAD_FORMAT` is bumped (Generator version).
   - _Accept:_ `cargo test -p hyperion-surface field`; `cargo test -p hyperion-surface wire`.
+
+- **R09.T2.e Follow-up E, the palette's liquid record and the reserved header parts**
+  (`decision-r11-palette-liquids.md` §1, §2 and §4, 2026-10-14; lane r09-palette-liquids; after
+  R10.T10.a). The layout of the gate's set, before the first send, so a re-bless at the version in
+  force with no bump (Generator version).
+  - **`field/palette.rs`:** `LIQUID_BINS` (15, R08's bake bins), `LiquidBasis` (`coded_enum!`,
+    `Measured` 0, `Derived` 1, `StandIn` 2) and `LiquidProperties` (§1.1's eight members, each
+    with its unit, range and source rule); `PaletteEntry.liquid: Option<LiquidProperties>` with
+    §1.3's presence rule, and a `Liquid` entry's `normal_albedo_bvr` documented as the record's
+    Fresnel reflectance at normal incidence (§2, item 7); `MaterialPalette::new` refuses a `Liquid`
+    entry without a record, a record on an `Ice`, `Cover` or `Deposit` entry, a `Liquid` entry
+    whose grain density is not its record's density to the bit, and a member out of range (§1.6).
+  - **`field/header.rs`:** `FieldHeaderParts` gains `maturity` and `organic_cover`, each
+    `Option<f64>` in [0, 1], after `main_liquid`, with getters and `FieldBuilder`'s setters (§2,
+    item 4).
+  - **The codec:** the entry's table takes the non-fixed form with the record's presence byte and
+    members (§1.5); `LiquidBasis` joins `wire_coded!`; `MaterialPalette::read`'s `need` takes the
+    60-byte minimum entry; the header's table gains the two parts.
+  - **Values:** the header's `surface_pressure` is exactly 0 for an `Airless` body (§2, item 5);
+    the synthetic and reference worlds' liquid entries carry records entered by hand with their
+    sources (§4).
+  - **The protocol and the server:** `PaletteEntryDto` gains `normal_albedo_bvr`, `phase_row` and
+    `liquid: Option<LiquidDto>`; `LiquidDto` and `LiquidBasisDto` are new; `SurfaceHeaderDto` gains
+    `main_liquid`, `maturity` and `organic_cover`. `convert/surface.rs` fills them; the client's
+    coarse-field store range-checks them.
+  - _Goldens:_ `payloads.golden` is re-blessed at 22, with a new `Liquids whole` line;
+    `codes.golden` gains `LiquidBasis`'s rows and the phase-row codes, an extension; and
+    `worker/moon_like.golden`'s block-0 lines move with the layout (§4: "every other surface-crate
+    or sim golden that encodes a palette").
+  - _Accept:_ `cargo test -p hyperion-surface field`; `cargo test -p hyperion-surface wire`;
+    `cargo test -p hyperion-surface testing`; `cargo test -p hyperion-surface lava_world`;
+    `cargo test -p hyperion-sim planetary::surface`; `cargo test -p hyperion-protocol surface`;
+    `cargo test -p hyperion-server surface`; `just gen-protocol-check`; `just smart-ci`.
 
 ### R09.T3 The payload codec
 
@@ -2534,7 +2586,11 @@ per climate record (`decision-r09-t2.md` item 1), and every code's scale (Risks,
 T2, as built"), the spectrum's break fields, the sea-floor byte's two scales
 (`decision-r09-t5.md`) and `LogRunoff`'s scale for follow-up C's two runoff bytes,
 `LogPrecipitation`'s in volume: code 0 none, below 0.1 mm a⁻¹, and code c ≥ 1
-0.1 mm a⁻¹ × 2^((c − 1) ÷ 12) (science-r09-drainage.md §1). R10.T10.a fills
+0.1 mm a⁻¹ × 2^((c − 1) ÷ 12) (science-r09-drainage.md §1); and T2's follow-up E's palette
+liquid record (its eight members in order, each optional member's presence byte, and the
+record's own), `LIQUID_BINS`' fifteen bake bins, `LiquidBasis`'s codes 0–2, and the header's
+`maturity` and `organic_cover`, dimensionless in [0, 1] and absent until P14.T54.b
+(decision-r11-palette-liquids §1 and §2). R10.T10.a fills
 `FieldHeader.albedo_scale` and bumps `GENERATOR_VERSION`,
 re-blessing this plan's payload and coarse goldens in that commit. _As built (main's ruling for
 R10.T10.a, 2026-10-14): no bump. The first send above has not happened, since no generated body is
@@ -3346,6 +3402,129 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
       the same figures, their docs §10.1's word for word), `CHONDRITIC_SOLIDUS_K`'s LPSC 25
       citation, the `FELDSPATHIC` assertion against Kiefer et al.'s 2,840–2,910,
       `CrustInputs::bulk`, and `lid`, whose `LidCrust::Bulk` takes the `Bulk` entry built here.
+- **Deviations in T2.e, as built** (2026-10-15; follow-up E, decision-r11-palette-liquids §1, §2
+  and §4; lane r09-palette-liquids, on R10.T10.a's `albedo_scale` and R08.T5.g's liquid files).
+  - _The ID._ R09.T2.e, after follow-up D's R09.T2.d; the ruling calls it "R09 follow-up E".
+  - _The water record's temperature is 25 °C, not 15 °C._ The ruling's example is IAPWS-95's
+    999.10 kg m⁻³ at 288.15 K; the records take 298.15 K, `water.json`'s and its index's
+    temperature, at which IAPWS-95's density (997.047 kg m⁻³, at 0.1 MPa: the science check
+    computed 997.047 0 there and 997.047 6 at 1 atm, the same within the formulation), IAPWS
+    R1-76's surface tension (0.071 97 N m⁻¹) and IAPWS R12-08's viscosity (8.900 × 10⁻⁴ Pa s, at
+    0.1 MPa) are read, so that no member is carried to another temperature; Pope and Fry's
+    absorption, at 22 °C, is taken as the file holds it. The reference Earth's `WATER_RECORD` is the same record; §1.7's temperature rule is
+    P14.T54.a's, for generated bodies.
+  - _Water's optics are R08.T5.g's file._ n is Hale and Querry's, unchanged; a, merged from
+    R08.T5.g (`48ff891a`), is Pope and Fry 1997's over 380–727.5 nm and Hale and Querry's from
+    750 nm. Each bin is the uniform mean of the file's 5 nm grid interpolated linearly in n and in
+    a = 4πk ÷ λ, to six figures (recomputed after the merge; the method reproduces the earlier
+    file's bins exactly): 0.007 29 m⁻¹ in the bin about 443 nm (Hale and Querry's k gave 0.031 1)
+    and 0.051 8 in the bin about 545 nm (0.042 3 before). `seawater.json` (variant `S35`) is not
+    used: the Earth's sea is `H2O`, pure water, as the ruling's §5 leaves it until plan 14 models
+    salinity.
+  - _R08.T5.h will move the file_ (decision-r08-t5g.md §1, §2 and §7; main's note, 2026-10-15):
+    water's n to IAPWS R9-97, by up to 4.5 × 10⁻³ at 380 nm (superseding "Hale and Querry" in
+    decision-r11-palette-liquids §1.8's water row), and its k to Mason, Cone and Fry 2016 over
+    380–495 nm and Kou, Labrie and Chýlek 1993 over 730–780 nm, with no bump. The records are
+    entered by hand, as §3 of the ruling has them, since the surface crate and the sim read no
+    material file; so each water value carries a note that T5.h moves it, and where taking T5.h's
+    re-blesses: `wire/payloads.golden`, with `liquid_water`, the reference `WATER_RECORD`, and the
+    Earth-like `WATER` rows' four-place normal albedo. No test pins today's `water.json`: the
+    Fresnel test reads a linear index of its own, and water's index bounds take R9-97's 1.345 at
+    380 nm. No record holds ethane, whose T5.h level (1.3887 at 670 nm) replaces §1.8's "about
+    1.40".
+  - _The methane record is `Derived`, not §1.8's `Measured`._ `liquid_methane_titan` is at
+    93.65 K, Huygens's, with Setzmann and Wagner 1991's density there at Huygens's 1,467 hPa,
+    447.6 kg m⁻³ (447.614, the science check's evaluation through the NIST WebBook; the WIP's
+    447.4, a line between the triple and boiling points, was 0.2 low). Its n is
+    `methane-liquid.json`'s at 90 K, each bin's mean carried by Lorentz–Lorenz at constant molar
+    refraction by 447.6 ÷ 452.4, where 452.4 kg m⁻³ is the saturated-liquid line extrapolated to
+    90 K, 0.69 K below the triple point (90.694 K): an extrapolation beyond the source's range, so
+    `Derived` by §1.1's rule. The bin about 545 nm is 1.290 300, 0.003 4 below the file's.
+    Absorption is absent, since the file holds k = 0 at 380–400 nm with no bound and its visible k
+    is indicative; tension and viscosity are absent. `basaltic_melt` (1,473.15 K, `StandIn`) on the lava
+    world's crust entry in `material/classify/tests.rs`: `basaltic-glass.json`'s n and a, a stated
+    2,700 kg m⁻³, the rest absent. The density's citation is restated as the science check could
+    verify it: about 2,690–2,750 kg m⁻³ for tholeiites at 1,200 °C and 1 bar by Lange 1997's and
+    Lange and Carmichael 1987's partial molar volumes as DensityX (Iacovino and Till 2019) combines
+    them. The sim's `inputs.rs` tests hold their own `methane_sea`, since the sim's library tests
+    cannot reach `hyperion_surface::testing` without its feature; the server's test
+    `the_reference_earth_s_sea_is_the_synthetic_water_record` holds the reference Earth's copy of
+    the water record to the synthetic one, and nothing holds the methane copy to its original.
+  - _No record carries scattering._ Einstein–Smoluchowski–Cabannes is P14.T49.h's, and R08.T5.g
+    added no scattering column.
+  - _The Earth-like world's runoff keeps 999.84 kg m⁻³._ Its sea's grain density becomes the
+    record's 997.047 (the rule: a `Liquid` entry's grain density is its record's to the bit), and
+    `RUNOFF_WATER_DENSITY_KG_M3` (999.84, the conversion the illustration was built with) keeps
+    its runoff, channels and heights where they were.
+  - _The airless pressure is the quantiser's._ `header_pressure` writes exactly 0 for
+    `SurfaceState::Airless`, the one place the header is built from inputs, so P14.T54.a's
+    `for_body` need not write it (test `an_airless_body_s_header_pressure_is_exactly_zero`), and
+    makes a −0 pressure +0 under every other state (the determinism audit). _Tenuous air waits for
+    P14.T53.c:_ `SurfaceState` has no tenuous state yet, so every body below `AIRLESS_PRESSURE`
+    (100 Pa) is `Airless` and its header pressure 0 until T53.c; the match has no wildcard, so
+    T53.c's state takes an arm that keeps its own pressure (§2, item 5).
+  - _The bins' test runs on every target_, not `native_only` as §4 says:
+    `the_liquid_bins_are_r08s_bake_bins` reads `bake_wavelengths_nm.json` through `include_str!`,
+    which embeds it at compile time.
+  - _The server's length refusal is the compiler's._ The by-bin members are fixed-length arrays
+    on both sides, so `convert/surface.rs` asserts `SURFACE_LIQUID_BINS == LIQUID_BINS` at compile
+    time, and serde refuses a DTO array of another length (`a_liquid_member_of_another_bin_count_is_rejected`).
+  - _`PaletteEntry` is no longer `Copy`_ (the ruling's option; `LiquidProperties` is `Clone`):
+    callers that copied entries clone them, and `FieldHeader` borrows its palette as before.
+    `PaletteEntryDto` drops `Eq` and `Hash`, since it holds `f64`s now.
+  - _Public items beyond the ruling:_ `LIQUID_BIN_CENTRES_NM`; `BVR_EFFECTIVE_WAVELENGTHS_NM`
+    (440, 550 and 640 nm, the sim's B, V and Cousins R); `LiquidProperties::refractive_index_at`
+    (linear between the bins' centres) and `fresnel_normal_albedo_bvr`, which a `Liquid` entry's
+    normal albedo is checked against; `BuildFieldHeaderError::NotAFraction` (a −0 refused);
+    `testing`'s `liquid_water`, `liquid_methane_titan`, `basaltic_melt`,
+    `LIQUID_WATER_DENSITY_KG_M3` and `LIQUID_METHANE_TITAN_DENSITY_KG_M3`, and
+    `FieldBuilder::{maturity, organic_cover}`; the
+    protocol's `SURFACE_LIQUID_BINS`; the server's crate-visible `liquid` and `liquid_basis`; and
+    the client's `headerFailure` and `LIQUID_BINS` (`view/terrain/coarseFieldStore.ts`, typed as
+    the generated tuple's length).
+  - _The client's checks_ go beyond §4's list: besides the main liquid, the two fractions and each
+    record's members (`null` taken as absent for an optional member), they refuse a `Liquid`
+    entry without a record, a record on an ice, a cover or a deposit, an unknown basis, a normal
+    albedo below 0 and a phase row that is not a byte, as the codec does. A refused header is
+    held as the body's failure, as a level out of range is.
+  - _The reference and synthetic Earths' `WATER` keep their normal albedo_, [0.020 8, 0.020 4,
+    0.020 2]: the record's Fresnel reflectance to four places, which their tests hold within
+    5 × 10⁻⁵.
+  - _Tests beyond §4's list._ `liquid_field` in `wire/tests.rs`, a field with every present form
+    of the record (a melt on the lid, a sea with every member, scattering a test value) and both
+    fractions present, round-trips to the bit (`a_wire_payload_carries_its_liquid_records_and_fractions`)
+    and is a new `payloads.golden` line, `Liquids whole`, since the layout's present forms freeze
+    at the first send (the determinism audit); the sim's
+    `the_liquid_bins_are_the_sky_s_bake_bins_to_the_bit` holds `LIQUID_BIN_CENTRES_NM` to
+    `sky::colour::BAKE_WAVELENGTHS_NM`, which the fixture pins to 10⁻⁹ only; and the server's
+    `a_field_header_carries_its_liquid_records`.
+- **Deferred findings (2026-10-13 rule)** (R09.T2.e). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The ruling's "about three times"_ (§1.9, finding 3): Hale and Querry's k was 5.06 times Pope
+    and Fry's at 440 nm (R08.T5.g's figure); in the bins, the one about 443 nm fell 4.3-fold, and
+    the one about 545 nm rose 1.23-fold.
+  - _The ruling's Morel 1974 oracle_ for water's b (§1.8, about 0.0045 m⁻¹ at 450 nm and 0.0019 at
+    550 nm) is seawater's, not pure water's: Morel's seawater, at S = 38.4, scatters about 30% more
+    than pure water (R08.T5.g's note on Zhang, Hu and He 2009). For P14.T49.h's test.
+  - _"Johnson R" at 640 nm._ The normal albedo's R is read at 640 nm, the sim's Cousins R; Johnson's
+    own R lies near 700 nm. For water the Fresnel reflectance differs by about 5 × 10⁻⁵.
+  - _Water's shortest bin._ Its absorption, 0.008 16 m⁻¹ over 380–405 nm, lies above the next
+    bin's 0.004 72: Pope and Fry's ultraviolet rise, which R08.T5.g records as possibly
+    contaminated below 420 nm (its lean: Mason et al. 2016 there). The record carries the file as
+    it stands.
+  - _One temperature per record._ Pope and Fry measured at 22 °C, the record is at 25 °C
+    (R08.T5.g's deferred "one temperature per liquid").
+  - _The file's grid._ Averaged from Pope and Fry's own 2.5 nm rows, water's bins about 443 and
+    545 nm would be 0.007 300 and 0.051 89 m⁻¹, about 0.2% above the record's, since `water.json`
+    keeps every other row (the science check); well inside the source's uncertainty, and the ruling
+    takes the file's grid.
+  - _No scattering in the water records._ §1.8's water row names ES–Cabannes for b, which is
+    P14.T49.h's; the hand-entered records leave it absent rather than enter an uncomputed value,
+    so R11.T8's tests on the synthetic worlds have no deep-water body term until T49.h (the
+    conformance review's question for main).
+  - _The liquid member is named by a string._ `BuildPaletteError::LiquidMember`'s `member` is a
+    `&'static str`, as the header's `NotFinite { part }` is; a small enum was the Rust review's
+    suggestion, not taken.
 - **Deviations in T3, as built** (2026-10-09; the layout is generated output from T9's and T16's
   goldens on, revisable until then).
   - _Files._ `wire.rs` (the API, the block layout in its module documentation, the encoder and the

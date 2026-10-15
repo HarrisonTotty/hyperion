@@ -165,6 +165,8 @@ import type { CellRangeDto } from "./generated/CellRangeDto";
 import type { ClimateModelDto } from "./generated/ClimateModelDto";
 import type { CoverDto } from "./generated/CoverDto";
 import type { CoverRangeDto } from "./generated/CoverRangeDto";
+import type { LiquidBasisDto } from "./generated/LiquidBasisDto";
+import type { LiquidDto } from "./generated/LiquidDto";
 import type { PaletteEntryDto } from "./generated/PaletteEntryDto";
 import type { PaletteRoleDto } from "./generated/PaletteRoleDto";
 import type { PrecipitationSourceDto } from "./generated/PrecipitationSourceDto";
@@ -365,6 +367,8 @@ export type {
   ClimateModelDto,
   CoverDto,
   CoverRangeDto,
+  LiquidBasisDto,
+  LiquidDto,
   PaletteEntryDto,
   PaletteRoleDto,
   PrecipitationSourceDto,

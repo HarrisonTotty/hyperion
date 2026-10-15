@@ -305,6 +305,7 @@ fn table_rows(out: &mut GoldenWriter) {
                         grain_density_kg_m3: 917.0,
                         transition: Kelvin::new(273.15),
                         mechanics: family,
+                        liquid: None,
                     }])
                     .expect("a one-entry palette is valid");
                     let p = properties(
@@ -353,6 +354,7 @@ fn table_lunar(out: &mut GoldenWriter) {
         grain_density_kg_m3: 3_100.0,
         transition: Kelvin::new(1_500.0),
         mechanics: MechanicsFamily::Silicate,
+        liquid: None,
     }])
     .expect("a one-entry palette is valid");
     let soil = properties(

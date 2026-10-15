@@ -106,9 +106,10 @@ pub use stellar::{
     SystemSummaryRequest, VariabilityDto, VariableKindDto, XrayBinaryKindDto,
 };
 pub use surface::{
-    CellRangeDto, ClimateModelDto, CoverDto, CoverRangeDto, PaletteEntryDto, PaletteRoleDto,
-    PrecipitationSourceDto, RecordSectionDto, SurfaceFieldDto, SurfaceFieldRequest,
-    SurfaceHeaderDto, SurfaceRevisionDto, SurveyPassDto, SurveyPassRequest, SurveySourceDto,
+    CellRangeDto, ClimateModelDto, CoverDto, CoverRangeDto, LiquidBasisDto, LiquidDto,
+    PaletteEntryDto, PaletteRoleDto, PrecipitationSourceDto, RecordSectionDto, SURFACE_LIQUID_BINS,
+    SurfaceFieldDto, SurfaceFieldRequest, SurfaceHeaderDto, SurfaceRevisionDto, SurveyPassDto,
+    SurveyPassRequest, SurveySourceDto,
 };
 pub use universe::{
     CreateUniverseRequest, OpenUniverseRequest, UniverseInfo, UniverseList, UniverseStatus,

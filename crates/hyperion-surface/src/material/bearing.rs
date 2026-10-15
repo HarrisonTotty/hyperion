@@ -483,6 +483,7 @@ mod tests {
             grain_density_kg_m3: 3_100.0,
             transition: Kelvin::new(1_500.0),
             mechanics: MechanicsFamily::Silicate,
+            liquid: None,
         }])
         .unwrap();
         properties(Material::new(MaterialClass::Regolith, 0).unwrap(), &palette).unwrap()
@@ -594,6 +595,7 @@ mod tests {
             grain_density_kg_m3: 3_010.0,
             transition: Kelvin::new(1_253.15),
             mechanics: MechanicsFamily::Silicate,
+            liquid: None,
         }])
         .unwrap();
         let bedrock =
@@ -643,6 +645,7 @@ mod tests {
             grain_density_kg_m3: grain_density,
             transition: Kelvin::new(1_500.0),
             mechanics: MechanicsFamily::Silicate,
+            liquid: None,
         }])
         .unwrap();
         properties(Material::new(class, 0).unwrap(), &palette).unwrap()
@@ -761,6 +764,7 @@ mod tests {
             grain_density_kg_m3: 3_010.0,
             transition: Kelvin::new(1_253.15),
             mechanics: MechanicsFamily::Silicate,
+            liquid: None,
         }])
         .unwrap();
         let bedrock =

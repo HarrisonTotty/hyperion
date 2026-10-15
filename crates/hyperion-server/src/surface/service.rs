@@ -1481,6 +1481,7 @@ mod tests {
             grain_density_kg_m3: 3_000.0,
             transition: Kelvin::new(1_250.0),
             mechanics: MechanicsFamily::Silicate,
+            liquid: None,
         };
         builder
             .palette(MaterialPalette::new(vec![crust]).unwrap())

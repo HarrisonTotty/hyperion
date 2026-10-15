@@ -121,6 +121,8 @@ use steps::{Pass, Working};
 ///     grain_density_kg_m3: 2_500.0,
 ///     transition: Kelvin::new(1_423.15),
 ///     mechanics: MechanicsFamily::Silicate,
+///     // Ceres's rock does not melt, so the entry carries no liquid record.
+///     liquid: None,
 /// }])?;
 ///
 /// let gravity = MetresPerSecondSquared::new(0.284);

@@ -1280,6 +1280,7 @@ mod tests {
             grain_density_kg_m3: 917.0,
             transition: Kelvin::new(273.15),
             mechanics,
+            liquid: None,
         }
     }
 

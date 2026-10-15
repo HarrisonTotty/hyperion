@@ -8,9 +8,11 @@ import type { PrecipitationSourceDto } from "./PrecipitationSourceDto";
  * A coarse field's header as the main thread reads it: the scalars of the payload's `FieldHeader`
  * (rendering plan R09, Design note 17), each in the unit its name states.
  *
- * The band spectrum, the crater parameters and the palette's optical and mechanical values are
- * the synthesis's and travel in block 0 of the payload alone. Members may be added later; removing
- * one changes the contract.
+ * The band spectrum, the crater parameters and the palette's grain densities, transitions and
+ * mechanics families are the synthesis's and travel in block 0 of the payload alone; each palette
+ * entry's normal albedo, phase row and liquid record travel in both, for the main thread's
+ * photometry and its ocean (decision-r11-palette-liquids §1.5 and §2, item 8). Members may be
+ * added later; removing one changes the contract.
  */
 export type SurfaceHeaderDto = { 
 /**
@@ -85,7 +87,9 @@ reference_temperature_k: number,
  */
 surface_age_gyr: number, 
 /**
- * The body's mean surface pressure, Pa, non-negative: plan 14's, 0 on an airless body.
+ * The body's mean surface pressure, Pa, non-negative: plan 14's, exactly 0 on an airless body,
+ * and a tenuous body's own below 100 Pa, so that 0 is airless, below 100 Pa tenuous, and at or
+ * above it an atmosphere.
  */
 surface_pressure_pa: number, 
 /**
@@ -110,4 +114,20 @@ precipitation: PrecipitationSourceDto,
  * entry indexes this list: each a key of plan 14's substance registry with its role on the
  * body. Empty for a body whose composition is not modelled.
  */
-palette: Array<PaletteEntryDto>, };
+palette: Array<PaletteEntryDto>, 
+/**
+ * The index in [`palette`](Self::palette) of the body's main liquid, its sea's, a
+ * [`PaletteRoleDto::Liquid`] entry; `null` for a body with none.
+ */
+main_liquid: number | null, 
+/**
+ * The ground's space-weathering maturity, dimensionless from 0 for fresh ground to 1 for
+ * saturated weathering, which rendering plan R10's cover term reads; absent until galaxy plan
+ * 14 computes it (P14.T51.d).
+ */
+maturity?: number | null, 
+/**
+ * The organic cover, dimensionless from 0 to 1: the covered fraction of the ground that can
+ * take one; absent until galaxy plan 14 computes it (P14.T51.d).
+ */
+organic_cover?: number | null, };

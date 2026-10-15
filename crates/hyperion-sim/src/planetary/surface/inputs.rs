@@ -1529,23 +1529,51 @@ mod tests {
     use crate::planetary::testing::synthetic_star;
     use crate::time::UniverseTime;
     use crate::units::{Dex, SolarMasses};
-    use hyperion_surface::field::{FieldView, MechanicsFamily, PaletteEntry};
+    use hyperion_surface::field::{
+        FieldView, LiquidBasis, LiquidProperties, MechanicsFamily, PaletteEntry,
+    };
 
     /// The key `key`, which a test knows to be valid.
     fn key(key: &str) -> SubstanceKey {
         SubstanceKey::new(key).unwrap()
     }
 
-    /// An entry of `substance` in `role`, with any valid values.
+    /// A sea of liquid methane at Titan's surface temperature, 93.65 K, `Derived`: the surface
+    /// crate's synthetic record (`hyperion_surface::testing::liquid_methane_titan`, whose figures
+    /// and sources these are, which this crate's tests cannot reach without its `testing`
+    /// feature): Setzmann and Wagner 1991's 447.6 kg m⁻³ at 93.65 K and Huygens's 1,467 hPa, and
+    /// Martonchik and Orton 1994's n at 90 K carried to it by Lorentz–Lorenz from 452.4 kg m⁻³,
+    /// the other members not modelled (decision-r11-palette-liquids §1.8).
+    fn methane_sea() -> LiquidProperties {
+        LiquidProperties {
+            temperature: Kelvin::new(93.65),
+            density_kg_m3: 447.6,
+            basis: LiquidBasis::Derived,
+            refractive_index: [
+                1.296_516, 1.295_764, 1.294_671, 1.293_578, 1.292_486, 1.291_394, 1.290_300,
+                1.289_209, 1.288_562, 1.287_754, 1.287_153, 1.286_718, 1.286_668, 1.286_660,
+                1.286_355,
+            ],
+            absorption_per_m: None,
+            scattering_per_m: None,
+            surface_tension_n_per_m: None,
+            viscosity_pa_s: None,
+        }
+    }
+
+    /// An entry of `substance` in `role`, with any valid values; a liquid's with a record, a sea of
+    /// methane at Titan's temperature ([`methane_sea`]), and its record's density.
     fn entry(substance: &str, role: PaletteRole) -> PaletteEntry {
+        let liquid = (role == PaletteRole::Liquid).then(methane_sea);
         PaletteEntry {
             substance: key(substance),
             role,
             normal_albedo_bvr: [0.1; 3],
             phase_row: 0,
-            grain_density_kg_m3: 1_000.0,
+            grain_density_kg_m3: liquid.as_ref().map_or(1_000.0, |l| l.density_kg_m3),
             transition: Kelvin::new(300.0),
             mechanics: MechanicsFamily::Silicate,
+            liquid,
         }
     }
 
@@ -1880,8 +1908,8 @@ mod tests {
             .palette()
             .entries()
             .iter()
-            .copied()
             .filter(|e| e.role != PaletteRole::Ice)
+            .cloned()
             .collect();
         assert_eq!(
             refused(earth_builder().palette(palette(without_ice))),
@@ -1891,8 +1919,8 @@ mod tests {
             .palette()
             .entries()
             .iter()
-            .copied()
             .filter(|e| e.role != PaletteRole::TertiaryCrust)
+            .cloned()
             .collect();
         assert_eq!(
             refused(earth_builder().palette(palette(without_granite))),
@@ -1903,8 +1931,8 @@ mod tests {
             .palette()
             .entries()
             .iter()
-            .copied()
             .filter(|e| e.substance != key("basalt"))
+            .cloned()
             .collect();
         assert_eq!(
             refused(earth_builder().palette(palette(without_basalt))),
@@ -2017,8 +2045,8 @@ mod tests {
             .palette()
             .entries()
             .iter()
-            .copied()
             .filter(|e| e.role != PaletteRole::PrimaryCrust)
+            .cloned()
             .chain([entry("chondrite_h", PaletteRole::Bulk)])
             .collect();
         builder_of(&ceres)
@@ -2133,8 +2161,8 @@ mod tests {
             .palette()
             .entries()
             .iter()
-            .copied()
             .filter(|e| e.role != PaletteRole::Bulk)
+            .cloned()
             .chain([entry("chondrite_h", PaletteRole::PrimaryCrust)])
             .collect();
         assert_eq!(
@@ -2229,8 +2257,8 @@ mod tests {
             .palette()
             .entries()
             .iter()
-            .copied()
             .filter(|e| e.role != PaletteRole::PrimaryCrust)
+            .cloned()
             .chain([entry("phyllosilicate", PaletteRole::Province)])
             .collect();
         let refused = builder_of(&ceres)

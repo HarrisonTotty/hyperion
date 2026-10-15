@@ -32,7 +32,8 @@ use crate::test_sizes::per_target;
 use crate::testing::{CellSite, ClimateSample, FieldBuilder, Routing, SyntheticWorld};
 
 /// A palette entry of `key` in `role`, illustrative values: a normal albedo of 0.5 in every band,
-/// a grain density of `density`, a transition of `transition_k` and the family `mechanics`.
+/// a grain density of `density`, a transition of `transition_k`, the family `mechanics` and no
+/// liquid record.
 fn entry(
     key: &str,
     role: PaletteRole,
@@ -48,6 +49,7 @@ fn entry(
         grain_density_kg_m3: density,
         transition: Kelvin::new(transition_k),
         mechanics,
+        liquid: None,
     }
 }
 
@@ -57,9 +59,25 @@ fn basalt(role: PaletteRole) -> PaletteEntry {
     entry("basalt", role, 3_010.0, 1_253.15, MechanicsFamily::Silicate)
 }
 
-/// Water ice, or liquid water, in `role`: ice Ih's 917 kg m⁻³, melting at 273.15 K.
+/// Water ice in `role`, ice Ih's 917 kg m⁻³, melting at 273.15 K; or, as a
+/// [`PaletteRole::Liquid`], liquid water with the synthetic water's record and its density
+/// ([`crate::testing::liquid_water`]).
 fn water(role: PaletteRole) -> PaletteEntry {
-    entry("H2O", role, 917.0, 273.15, MechanicsFamily::WaterIce)
+    if role == PaletteRole::Liquid {
+        let record = crate::testing::liquid_water();
+        PaletteEntry {
+            liquid: Some(record.clone()),
+            ..entry(
+                "H2O",
+                role,
+                record.density_kg_m3,
+                273.15,
+                MechanicsFamily::WaterIce,
+            )
+        }
+    } else {
+        entry("H2O", role, 917.0, 273.15, MechanicsFamily::WaterIce)
+    }
 }
 
 fn palette(entries: Vec<PaletteEntry>) -> MaterialPalette {
@@ -928,9 +946,15 @@ fn material_the_pluto_like_world_takes_its_frost_and_its_glacier() {
 /// and no air, one month a year, the ground at `T_ss` cos^¼ θ of 2,474 K on the day side about the
 /// substellar point at +x, and 60 K on the night side, as CoRoT-7 b's (2,474 ± 71 K at the
 /// substellar point and 50–75 K on the night side; Léger et al. 2011, Icarus 213, 1, abstract).
+/// Its crust entry carries its melt's record, the synthetic basaltic melt's stand-in
+/// (decision-r11-palette-liquids §1.3 and §4), which the classifier does not read.
 fn lava_world() -> CoarseField {
+    let crust = PaletteEntry {
+        liquid: Some(crate::testing::basaltic_melt()),
+        ..basalt(PaletteRole::SecondaryCrust)
+    };
     FieldBuilder::new(Metres::new(6.371e6))
-        .palette(palette(vec![basalt(PaletteRole::SecondaryCrust)]))
+        .palette(palette(vec![crust]))
         .crust_palette([None, None, Some(0), None])
         .climate(|dir| {
             let cos = dir[0];
@@ -949,6 +973,17 @@ fn lava_world() -> CoarseField {
 #[test]
 fn material_the_lava_world_takes_its_melt() {
     let field = lava_world();
+    let melt = field
+        .header()
+        .palette()
+        .get(0)
+        .and_then(|e| e.liquid.as_ref());
+    assert!(
+        melt.is_some_and(
+            |m| m.temperature.value() > field.header().palette().entries()[0].transition.value()
+        ),
+        "the crust entry carries a melt's record above its solidus"
+    );
     let synth = Synthesiser::new(&field, DetailSeed::new(13));
     let substellar = [1.0, 0.0, 0.0];
     let mut rng = Lcg::new(0x6c61_7661_0000_0001);
@@ -1319,7 +1354,11 @@ fn material_each_rule_names_its_entry_chain() {
     // A crust, a cover and a dust deposit: the crust for the floor and the regolith, the deposit
     // for sand and dust.
     let f = field_of(
-        vec![basalt(PaletteRole::SecondaryCrust), cover, deposit],
+        vec![
+            basalt(PaletteRole::SecondaryCrust),
+            cover.clone(),
+            deposit.clone(),
+        ],
         Some(0),
     );
     let e = Entries::of(f.header(), Crust::Lid);
@@ -1338,7 +1377,11 @@ fn material_each_rule_names_its_entry_chain() {
     // A salt deposit and a dust deposit, the salt first by key: the salt is the salt, and sand
     // and dust the deposit that is not a salt.
     let f = field_of(
-        vec![basalt(PaletteRole::SecondaryCrust), salt, deposit],
+        vec![
+            basalt(PaletteRole::SecondaryCrust),
+            salt.clone(),
+            deposit.clone(),
+        ],
         Some(0),
     );
     let e = Entries::of(f.header(), Crust::Lid);

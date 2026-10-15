@@ -151,7 +151,12 @@ pub struct FieldHeaderParts {
     /// at most the crater contract's system age.
     pub surface_age: Gigayears,
     /// The body's mean surface pressure, pascals: plan 14's, carried for R11's atmosphere class
-    /// (Design note 18); 0 on an airless body. Finite and non-negative.
+    /// (Design note 18). Finite and non-negative.
+    ///
+    /// Exactly 0 where the body's surface state is airless, as R10's classifier takes it, and a
+    /// tenuous body's own pressure, positive and below the airless line of 100 Pa
+    /// (decision-r11-palette-liquids §2, item 5), so that the pressure gives three classes: 0 is
+    /// airless, below 100 Pa tenuous, and at or above it an atmosphere.
     pub surface_pressure: Pascals,
     /// R10's albedo scale (Design note 18; R10's Design note 8, T10.a): the one factor c,
     /// dimensionless, finite and positive, on the palette's class albedos in B, V and R that makes
@@ -182,6 +187,15 @@ pub struct FieldHeaderParts {
     /// The palette entry of the body's main liquid, its sea's, or `None`: a
     /// [`PaletteRole::Liquid`] entry.
     pub main_liquid: Option<u8>,
+    /// The ground's space-weathering maturity, dimensionless in [+0, 1]: 0 for fresh ground and 1
+    /// for saturated weathering, which R10.T1.c's cover term reads on both sides
+    /// (decision-r11-palette-liquids §2, item 4). Reserved for P14.T51.d's figure, whose builder
+    /// fixes its exact definition within this contract, and `None` until P14.T54.b fills it.
+    pub maturity: Option<f64>,
+    /// The organic cover: the covered fraction of the ground that can take one, dimensionless in
+    /// [+0, 1] (decision-r11-palette-liquids §2, item 4). Reserved for P14.T51.d's figure, as
+    /// [`maturity`](Self::maturity) is, and `None` until P14.T54.b fills it.
+    pub organic_cover: Option<f64>,
 }
 
 /// A coarse field's header: [`FieldHeaderParts`], validated, with the level and the boundary
@@ -233,6 +247,12 @@ pub enum BuildFieldHeaderError {
         /// The part's name.
         part: &'static str,
     },
+    /// A part that is a fraction is not within +0 to 1 (a −0 is refused, so that a value has one
+    /// wire form).
+    NotAFraction {
+        /// The part's name.
+        part: &'static str,
+    },
     /// A crust's palette entry is past the palette or of a role no [`Crust`] variant may take.
     CrustPalette {
         /// The crust.
@@ -274,6 +294,7 @@ impl std::fmt::Display for BuildFieldHeaderError {
             Self::NotFinite { part } => write!(f, "{part} is not finite"),
             Self::Negative { part } => write!(f, "{part} is negative"),
             Self::NotPositive { part } => write!(f, "{part} is not positive"),
+            Self::NotAFraction { part } => write!(f, "{part} is not within 0 to 1"),
             Self::CrustPalette { crust, entry } => write!(
                 f,
                 "the {crust:?} crust's palette entry {entry} is past the palette or not a \
@@ -324,6 +345,17 @@ fn finest_step(largest: f64, base: f64, limit: f64) -> Option<u8> {
     (0..=MAX_STEP_EXPONENT).find(|&n| (largest / step(base, n)).round() <= limit)
 }
 
+/// Checks a reserved fraction of the header, absent or within +0 to 1.
+fn check_fraction(part: &'static str, fraction: Option<f64>) -> Result<(), BuildFieldHeaderError> {
+    match fraction {
+        Some(f) if !f.is_finite() => Err(BuildFieldHeaderError::NotFinite { part }),
+        Some(f) if !(0.0..=1.0).contains(&f) || f.is_sign_negative() => {
+            Err(BuildFieldHeaderError::NotAFraction { part })
+        }
+        Some(_) | None => Ok(()),
+    }
+}
+
 /// `value` ÷ `step`, rounded, if it lies within `min` to `max`.
 fn quantise(value: f64, step: f64, min: f64, max: f64) -> Result<f64, QuantiseValueError> {
     if !value.is_finite() {
@@ -345,9 +377,10 @@ impl FieldHeader {
     /// [`BuildFieldHeaderError`] if the radius is not finite and positive, the figure is not the
     /// radius's spheroid, the months are neither 1 nor 12, the season eccentricity is outside
     /// [0, 1) or not 0 in a one-month year, a step's exponent is above 15, a part is not finite
-    /// or out of its range (each part's documentation states it), a crust's palette entry is past
-    /// the palette or of a role no [`Crust`] variant may take, the main liquid's is past it or not a
-    /// liquid's, or the surface is older than the crater contract's system.
+    /// or out of its range (each part's documentation states it; a reserved fraction outside +0 to
+    /// 1 is [`BuildFieldHeaderError::NotAFraction`]), a crust's palette entry is past the palette
+    /// or of a role no [`Crust`] variant may take, the main liquid's is past it or not a liquid's,
+    /// or the surface is older than the crater contract's system.
     pub fn new(parts: FieldHeaderParts) -> Result<Self, BuildFieldHeaderError> {
         let r = parts.radius.value();
         if !(r.is_finite() && r > 0.0) {
@@ -412,6 +445,12 @@ impl FieldHeader {
         ];
         if let Some(&(part, _)) = positive.iter().find(|(_, v)| *v <= 0.0) {
             return Err(BuildFieldHeaderError::NotPositive { part });
+        }
+        for (part, fraction) in [
+            ("maturity", parts.maturity),
+            ("organic cover", parts.organic_cover),
+        ] {
+            check_fraction(part, fraction)?;
         }
         for (&crust, &entry) in Crust::ALL.iter().zip(&parts.crust_palette) {
             if let Some(entry) = entry
@@ -641,6 +680,20 @@ impl FieldHeader {
         self.parts.main_liquid
     }
 
+    /// The ground's space-weathering maturity, 0 to 1, `None` until plan 14 fills it
+    /// ([`FieldHeaderParts::maturity`]).
+    #[must_use]
+    pub fn maturity(&self) -> Option<f64> {
+        self.parts.maturity
+    }
+
+    /// The organic cover, 0 to 1, `None` until plan 14 fills it
+    /// ([`FieldHeaderParts::organic_cover`]).
+    #[must_use]
+    pub fn organic_cover(&self) -> Option<f64> {
+        self.parts.organic_cover
+    }
+
     /// The annual mean surface temperature of `cell`, reduced to sea level, kelvin: its code times
     /// the temperature step, about the reference temperature.
     #[must_use]
@@ -860,6 +913,41 @@ mod tests {
         );
     }
 
+    /// The two reserved parts, the maturity and the organic cover, are absent until plan 14 fills
+    /// them, keep any value from +0 to 1, and refuse one outside it, a −0 or a NaN
+    /// (decision-r11-palette-liquids §2, item 4).
+    #[test]
+    fn a_field_header_holds_its_reserved_fractions_within_zero_to_one() {
+        let header = FieldHeader::new(parts()).unwrap();
+        assert_eq!((header.maturity(), header.organic_cover()), (None, None));
+        let mut filled = parts();
+        filled.maturity = Some(1.0);
+        filled.organic_cover = Some(0.0);
+        let header = FieldHeader::new(filled).unwrap();
+        assert_eq!(header.maturity(), Some(1.0));
+        assert_eq!(header.organic_cover(), Some(0.0));
+        let refuse = |edit: fn(&mut FieldHeaderParts)| {
+            let mut p = parts();
+            edit(&mut p);
+            FieldHeader::new(p).unwrap_err()
+        };
+        let maturity = BuildFieldHeaderError::NotAFraction { part: "maturity" };
+        assert_eq!(refuse(|p| p.maturity = Some(1.000_001)), maturity);
+        assert_eq!(refuse(|p| p.maturity = Some(-0.0)), maturity);
+        assert_eq!(
+            refuse(|p| p.organic_cover = Some(-0.25)),
+            BuildFieldHeaderError::NotAFraction {
+                part: "organic cover"
+            }
+        );
+        assert_eq!(
+            refuse(|p| p.organic_cover = Some(f64::NAN)),
+            BuildFieldHeaderError::NotFinite {
+                part: "organic cover"
+            }
+        );
+    }
+
     /// A surface older than its system, the crater contract's system age, which the chronology
     /// cannot count, is refused; one as old is not (R09.T7.e).
     #[test]
@@ -903,7 +991,7 @@ mod tests {
         entries.push(PaletteEntry {
             substance: crate::substance_key::SubstanceKey::new("cometary").unwrap(),
             role: PaletteRole::Bulk,
-            ..parts.palette.entries()[0]
+            ..parts.palette.entries()[0].clone()
         });
         parts.palette = MaterialPalette::new(entries).unwrap();
         parts.crust_palette = [None, None, Some(2), Some(2)];

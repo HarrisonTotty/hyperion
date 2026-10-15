@@ -18,8 +18,9 @@ use super::DecodeBlockError;
 use crate::craters::{CraterParams, CraterParamsParts, CraterTarget, Screening, TargetClass};
 use crate::field::{
     BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, Crust, FieldHeaderParts, FlowDirection,
-    LogArea, LogPrecipitation, LogRunoff, LogSteepness, MaterialPalette, MechanicsFamily,
-    Morphology, PaletteEntry, PaletteRole, PrecipitationSource, SurfaceClass, SynthesisCell, Wind,
+    LIQUID_BINS, LiquidBasis, LiquidProperties, LogArea, LogPrecipitation, LogRunoff, LogSteepness,
+    MaterialPalette, MechanicsFamily, Morphology, PaletteEntry, PaletteRole, PrecipitationSource,
+    SurfaceClass, SynthesisCell, Wind,
 };
 use crate::spheroid::Spheroid;
 use crate::substance_key::SubstanceKey;
@@ -125,11 +126,14 @@ wire_table!(FieldHeaderParts {
     palette: MaterialPalette,
     crust_palette: [Option<u8>; 4],
     main_liquid: Option<u8>,
+    maturity: Option<f64>,
+    organic_cover: Option<f64>,
 });
 
-// A palette entry (59 bytes): its key's 16 padded bytes, its role, its normal albedo in B, V and R,
-// its phase row, grain density, transition and mechanics family.
-wire_table!(fixed PaletteEntry {
+// A palette entry (60 bytes without a liquid record, 201 to 457 with one): its key's 16 padded
+// bytes, its role, its normal albedo in B, V and R, its phase row, grain density, transition and
+// mechanics family, then its liquid record as a presence byte and the record when present.
+wire_table!(PaletteEntry {
     substance: SubstanceKey,
     role: PaletteRole,
     normal_albedo_bvr: [f64; 3],
@@ -137,6 +141,32 @@ wire_table!(fixed PaletteEntry {
     grain_density_kg_m3: f64,
     transition: Kelvin,
     mechanics: MechanicsFamily,
+    liquid: Option<LiquidProperties>,
+});
+
+/// The bytes of the shortest palette entry, one without a liquid record: 60.
+pub(super) const PALETTE_ENTRY_MIN_BYTES: usize = SubstanceKey::BYTES
+    + PaletteRole::BYTES
+    + <[f64; 3]>::BYTES
+    + u8::BYTES
+    + f64::BYTES
+    + Kelvin::BYTES
+    + MechanicsFamily::BYTES
+    // The liquid record's presence byte.
+    + u8::BYTES;
+
+// A liquid record (141 to 397 bytes): its temperature, density and basis, its refractive index by
+// bin, its absorption and scattering by bin, each a presence byte then 15 `f64` when present, and
+// its surface tension and viscosity, each a presence byte then an `f64` when present.
+wire_table!(LiquidProperties {
+    temperature: Kelvin,
+    density_kg_m3: f64,
+    basis: LiquidBasis,
+    refractive_index: [f64; LIQUID_BINS],
+    absorption_per_m: Option<[f64; LIQUID_BINS]>,
+    scattering_per_m: Option<[f64; LIQUID_BINS]>,
+    surface_tension_n_per_m: Option<f64>,
+    viscosity_pa_s: Option<f64>,
 });
 
 // The datum: the equatorial radius a, then the polar radius c.
@@ -271,6 +301,7 @@ wire_coded!(
     PrecipitationSource,
     PaletteRole,
     MechanicsFamily,
+    LiquidBasis,
     TargetClass
 );
 
@@ -426,7 +457,8 @@ impl FixedWire for SubstanceKey {
 }
 
 impl Wire for MaterialPalette {
-    /// Its entry count, a byte, then each entry.
+    /// Its entry count, a byte, then each entry, checked against the shortest entry's 60 bytes
+    /// before anything is allocated.
     fn put(&self, out: &mut Vec<u8>) {
         u8::try_from(self.len())
             .expect("a palette holds at most 15 entries")
@@ -438,7 +470,7 @@ impl Wire for MaterialPalette {
 
     fn read(r: &mut Reader<'_>) -> Result<Self, DecodeBlockError> {
         let count = u8::read(r)?;
-        r.need(u64::from(count), PaletteEntry::BYTES)?;
+        r.need(u64::from(count), PALETTE_ENTRY_MIN_BYTES)?;
         let mut entries = Vec::with_capacity(usize::from(count));
         for _ in 0..count {
             entries.push(PaletteEntry::read(r)?);
@@ -571,9 +603,10 @@ mod tests {
     use wasm_bindgen_test::wasm_bindgen_test as test;
 
     /// The records' strides are Design note 17's: 25 bytes a synthesis record (its 21, the
-    /// substance byte, the sea floor's and the two runoff bytes) and 50 a climate record, and a
-    /// palette entry is 59; the header's spectrum is 32 (β₁, V₁, the break degree and β₂); a field
-    /// added to any moves them, and the payload's size with them.
+    /// substance byte, the sea floor's and the two runoff bytes) and 50 a climate record; the
+    /// header's spectrum is 32 (β₁, V₁, the break degree and β₂); a field added to any moves them,
+    /// and the payload's size with them. A palette entry is 60 bytes without a liquid record and
+    /// 201 to 457 with one (decision-r11-palette-liquids §1.5).
     #[test]
     fn wire_records_have_design_note_seventeens_strides() {
         assert_eq!(SynthesisCell::BYTES, 25);
@@ -583,7 +616,147 @@ mod tests {
         assert_eq!(Wind::BYTES, 2);
         assert_eq!(Spheroid::BYTES, 16);
         assert_eq!(SubstanceKey::BYTES, 16);
-        assert_eq!(PaletteEntry::BYTES, 59);
+        assert_eq!(PALETTE_ENTRY_MIN_BYTES, 60);
+        let length = |entry: &PaletteEntry| {
+            let mut out = Vec::new();
+            entry.put(&mut out);
+            out.len()
+        };
+        let mut sea = liquid_entry();
+        assert_eq!(
+            length(&PaletteEntry {
+                liquid: None,
+                ..sea.clone()
+            }),
+            60
+        );
+        let record = sea.liquid.as_mut().unwrap();
+        record.scattering_per_m = Some([2e-3; LIQUID_BINS]);
+        assert_eq!(length(&sea), 457, "a full record");
+        let record = sea.liquid.as_mut().unwrap();
+        (record.absorption_per_m, record.scattering_per_m) = (None, None);
+        (record.surface_tension_n_per_m, record.viscosity_pa_s) = (None, None);
+        assert_eq!(
+            length(&sea),
+            201,
+            "a record with every optional member absent"
+        );
+    }
+
+    /// A liquid water entry with the synthetic water's record.
+    fn liquid_entry() -> PaletteEntry {
+        let water = crate::testing::liquid_water();
+        PaletteEntry {
+            substance: SubstanceKey::new("H2O").unwrap(),
+            role: PaletteRole::Liquid,
+            normal_albedo_bvr: water.fresnel_normal_albedo_bvr(),
+            phase_row: 0,
+            grain_density_kg_m3: water.density_kg_m3,
+            transition: Kelvin::new(273.15),
+            mechanics: MechanicsFamily::WaterIce,
+            liquid: Some(water),
+        }
+    }
+
+    /// A palette entry's liquid record comes back to the bit: a full one, one with each optional
+    /// member absent in turn, and a melt's on a crust entry; an unknown basis code is refused
+    /// (decision-r11-palette-liquids §4's tests).
+    #[test]
+    fn wire_palette_entries_read_back_their_liquid_records() {
+        let full = {
+            let mut sea = liquid_entry();
+            sea.liquid.as_mut().unwrap().scattering_per_m = Some([2e-3; LIQUID_BINS]);
+            sea
+        };
+        round_trip(&full);
+        let absent: [fn(&mut LiquidProperties); 4] = [
+            |l| l.absorption_per_m = None,
+            |l| l.scattering_per_m = None,
+            |l| l.surface_tension_n_per_m = None,
+            |l| l.viscosity_pa_s = None,
+        ];
+        for edit in absent {
+            let mut sea = full.clone();
+            edit(sea.liquid.as_mut().unwrap());
+            round_trip(&sea);
+            round_trip(&MaterialPalette::new(vec![sea]).unwrap());
+        }
+        let lava = PaletteEntry {
+            substance: SubstanceKey::new("basalt").unwrap(),
+            role: PaletteRole::SecondaryCrust,
+            normal_albedo_bvr: [0.1; 3],
+            phase_row: 1,
+            grain_density_kg_m3: 3_010.0,
+            transition: Kelvin::new(1_253.15),
+            mechanics: MechanicsFamily::Silicate,
+            liquid: Some(crate::testing::basaltic_melt()),
+        };
+        round_trip(&MaterialPalette::new(vec![lava, full.clone()]).unwrap());
+        // The basis byte: after the entry's 59 fixed bytes, the presence byte, the temperature and
+        // the density.
+        let mut bytes = Vec::new();
+        full.put(&mut bytes);
+        let basis = 59 + 1 + 8 + 8;
+        assert_eq!(bytes[basis], u8::from(LiquidBasis::Measured));
+        bytes[basis] = 3;
+        assert_eq!(
+            PaletteEntry::read(&mut Reader::new(&bytes)),
+            Err(unknown("LiquidBasis", 3))
+        );
+        assert_eq!(
+            LiquidBasis::read(&mut Reader::new(&[2])),
+            Ok(LiquidBasis::StandIn)
+        );
+        // A record's presence byte is a presence byte.
+        bytes[basis] = 0;
+        bytes[59] = 2;
+        assert_eq!(
+            PaletteEntry::read(&mut Reader::new(&bytes)),
+            Err(DecodeBlockError::Tag {
+                part: "presence",
+                code: 2
+            })
+        );
+    }
+
+    /// A decoded palette is refused as [`MaterialPalette::new`] refuses it: a liquid without its
+    /// record, a record on an ice, and a record's member out of its range.
+    #[test]
+    fn wire_palettes_refuse_liquid_records_out_of_place() {
+        let palette_of = |entry: &PaletteEntry| {
+            let mut out = vec![1_u8];
+            entry.put(&mut out);
+            MaterialPalette::read(&mut Reader::new(&out))
+        };
+        let refused = |error| Err(DecodeBlockError::Palette(error));
+        let dry = PaletteEntry {
+            liquid: None,
+            ..liquid_entry()
+        };
+        assert_eq!(
+            palette_of(&dry),
+            refused(crate::field::BuildPaletteError::LiquidMissing { entry: 0 })
+        );
+        let frozen = PaletteEntry {
+            role: PaletteRole::Ice,
+            ..liquid_entry()
+        };
+        assert_eq!(
+            palette_of(&frozen),
+            refused(crate::field::BuildPaletteError::LiquidMisplaced {
+                entry: 0,
+                role: PaletteRole::Ice
+            })
+        );
+        let mut cold = liquid_entry();
+        cold.liquid.as_mut().unwrap().temperature = Kelvin::new(-1.0);
+        assert_eq!(
+            palette_of(&cold),
+            refused(crate::field::BuildPaletteError::LiquidMember {
+                entry: 0,
+                member: "temperature"
+            })
+        );
     }
 
     /// Asserts that `value` comes back from its bytes to the bit, reading every byte it wrote.
@@ -692,9 +865,10 @@ mod tests {
             grain_density_kg_m3: 1_170.0,
             transition: Kelvin::new(390.0),
             mechanics: MechanicsFamily::VolatileIce,
+            liquid: None,
         };
         round_trip(&entry);
-        round_trip(&MaterialPalette::new(vec![entry]).unwrap());
+        round_trip(&MaterialPalette::new(vec![entry.clone()]).unwrap());
         round_trip(&MaterialPalette::default());
         // A key's padding, a palette past fifteen entries, and an unknown role are refused.
         let mut padded = *key.as_padded();

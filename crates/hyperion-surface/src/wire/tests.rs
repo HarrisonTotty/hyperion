@@ -4,6 +4,7 @@
 use std::sync::OnceLock;
 
 use hyperion_base::units::{Gigayears, Kelvin};
+use hyperion_testkit::float::assert_same_bits;
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 use hyperion_testkit::lcg::Lcg;
@@ -17,12 +18,13 @@ use super::*;
 use crate::craters::{Screening, TargetClass};
 use crate::field::{
     BoundaryKind, BuildPaletteError, ClimateModelKind, Crust, FieldView, FlowDirection,
-    InsertBlockError, LogArea, LogPrecipitation, LogRunoff, LogSteepness, MechanicsFamily,
-    NO_ENTRY, PaletteRole, PartialField, PrecipitationSource, SurfaceClass, Wind, cell_at_index,
-    crater_key_order,
+    InsertBlockError, LIQUID_BINS, LiquidBasis, LiquidProperties, LogArea, LogPrecipitation,
+    LogRunoff, LogSteepness, MaterialPalette, MechanicsFamily, NO_ENTRY, PaletteEntry, PaletteRole,
+    PartialField, PrecipitationSource, SurfaceClass, Wind, cell_at_index, crater_key_order,
 };
-use crate::substance_key::ParseSubstanceKeyError;
-use crate::testing::{SyntheticWorld, synthetic_field};
+use crate::material::{PhaseLaw, UNASSIGNED_PHASE_ROW};
+use crate::substance_key::{ParseSubstanceKeyError, SubstanceKey};
+use crate::testing::{FieldBuilder, SyntheticWorld, basaltic_melt, liquid_water, synthetic_field};
 
 /// The Earth-like world, built once for the tests that read it (0.6–0.8 s a build).
 fn earth() -> &'static CoarseField {
@@ -136,6 +138,95 @@ fn first_difference(a: &[u8], b: &[u8]) -> Option<usize> {
         .zip(b)
         .position(|(x, y)| x != y)
         .or_else(|| (a.len() != b.len()).then(|| a.len().min(b.len())))
+}
+
+/// A Ceres-sized flat field whose palette holds every present form of the liquid record
+/// (decision-r11-palette-liquids §1.5): a basalt lid melting to [`basaltic_melt`]'s record, its
+/// optional members absent but the absorption; a water ice with none; and a sea of
+/// [`liquid_water`] with a scattering of 0.0025 m⁻¹ in every bin, a test value, so that every
+/// member is present; the sea its main liquid, and the header's two fractions present, 0.25 and
+/// 0.75.
+fn liquid_field() -> CoarseField {
+    let entry = |key, role, density, transition_k, mechanics, liquid| PaletteEntry {
+        substance: SubstanceKey::new(key).unwrap(),
+        role,
+        normal_albedo_bvr: [0.1, 0.12, 0.14],
+        phase_row: 1,
+        grain_density_kg_m3: density,
+        transition: Kelvin::new(transition_k),
+        mechanics,
+        liquid,
+    };
+    let sea = LiquidProperties {
+        scattering_per_m: Some([0.002_5; LIQUID_BINS]),
+        ..liquid_water()
+    };
+    let palette = MaterialPalette::new(vec![
+        entry(
+            "basalt",
+            PaletteRole::PrimaryCrust,
+            3_010.0,
+            1_253.15,
+            MechanicsFamily::Silicate,
+            Some(basaltic_melt()),
+        ),
+        entry(
+            "H2O",
+            PaletteRole::Ice,
+            916.72,
+            273.15,
+            MechanicsFamily::WaterIce,
+            None,
+        ),
+        PaletteEntry {
+            normal_albedo_bvr: sea.fresnel_normal_albedo_bvr(),
+            phase_row: UNASSIGNED_PHASE_ROW,
+            ..entry(
+                "H2O",
+                PaletteRole::Liquid,
+                sea.density_kg_m3,
+                273.15,
+                MechanicsFamily::WaterIce,
+                Some(sea.clone()),
+            )
+        },
+    ])
+    .unwrap();
+    FieldBuilder::new(Metres::new(4.697e5))
+        .palette(palette)
+        .crust_palette([None, None, Some(0), None])
+        .main_liquid(2)
+        .maturity(0.25)
+        .organic_cover(0.75)
+        .build()
+}
+
+/// A payload carries each liquid record and the header's two fractions to the bit: the field
+/// rebuilt from its blocks is the field, the records, the main liquid and the fractions among it,
+/// and encodes to the same bytes again.
+#[test]
+fn a_wire_payload_carries_its_liquid_records_and_fractions() {
+    let field = liquid_field();
+    let cover = whole(&field);
+    let bytes = encode_payload(&field, &cover, None);
+    let rebuilt = reassemble(&blocks_of(&bytes));
+    assert_eq!(rebuilt, field);
+    let (held, sent) = (rebuilt.header(), field.header());
+    assert_eq!(held.main_liquid(), Some(2));
+    assert_same_bits(held.maturity().unwrap(), 0.25);
+    assert_same_bits(held.organic_cover().unwrap(), 0.75);
+    for (got, put) in held
+        .palette()
+        .entries()
+        .iter()
+        .zip(sent.palette().entries())
+    {
+        assert_eq!(got.liquid, put.liquid, "{}", put.substance.as_str());
+    }
+    assert_eq!(
+        first_difference(&encode_payload(&rebuilt, &cover, None), &bytes),
+        None
+    );
 }
 
 /// Every synthetic world's whole payload decodes to its field exactly: rebuilt from the blocks it
@@ -658,6 +749,68 @@ fn crater_spans(block: &[u8]) -> Vec<(usize, usize)> {
     spans
 }
 
+/// Block 0's header section's last parts out of their ranges are each refused with their own
+/// error: the palette's order and keys, a crust's entry, and a reserved fraction outside 0 to 1
+/// (decision-r11-palette-liquids §2, item 4); and the Ceres-like palette's entries carry no
+/// liquid record.
+#[test]
+fn malformed_wire_palettes_and_header_fractions_are_refused_with_their_errors() {
+    let (_, bytes, _) = ceres_blocks();
+    let block = |block: usize, error: DecodeBlockError| DecodePayloadError::Block { block, error };
+    let damaged = |at: usize, value: &[u8]| {
+        let mut b = bytes.clone();
+        patch(&mut b, at, value);
+        decode_payload(&b).unwrap_err()
+    };
+    let declared = u16::from_le_bytes([bytes[33], bytes[34]]);
+    // The header section's last parts: the Ceres-like palette (a count and three entries of 60
+    // bytes, none with a liquid record), each crust's entry (four options, the lid's and the
+    // provinces' present: six bytes), the main liquid's (absent: one byte) and the two reserved
+    // fractions (absent: a byte each).
+    let end = 35 + usize::from(declared);
+    let palette = end - 9 - (1 + 3 * 60);
+    assert_eq!(bytes[palette], 3);
+    let unsorted = DecodeBlockError::Palette(BuildPaletteError::Unsorted { entry: 1 });
+    let second_role = palette + 1 + 60 + 16;
+    assert_eq!(
+        bytes[second_role],
+        u8::from(PaletteRole::Ice),
+        "the second entry is the ice"
+    );
+    assert_eq!(
+        damaged(second_role, &[u8::from(PaletteRole::PrimaryCrust)]),
+        block(0, unsorted)
+    );
+    let key = DecodeBlockError::SubstanceKey(ParseSubstanceKeyError::Malformed { at: 2 });
+    assert_eq!(damaged(palette + 1, b"P"), block(0, key));
+    let crust = DecodeBlockError::Header(BuildFieldHeaderError::CrustPalette {
+        crust: Crust::Lid,
+        entry: 1,
+    });
+    assert_eq!(
+        bytes[end - 7..end],
+        [PRESENT, 0, PRESENT, 0, ABSENT, ABSENT, ABSENT]
+    );
+    assert_eq!(damaged(end - 6, &[1]), block(0, crust));
+    // Each entry's liquid record is absent, after its 59 fixed bytes.
+    for k in 0..3 {
+        assert_eq!(bytes[palette + 1 + 60 * k + 59], ABSENT, "entry {k}");
+    }
+    // A reserved fraction outside 0 to 1, here the maturity at 2.
+    let mut fraction = bytes.clone();
+    fraction.splice(
+        end - 2..end - 1,
+        [PRESENT].into_iter().chain(f64_bytes(2.0)),
+    );
+    let length = u16::try_from(usize::from(declared) + 8).unwrap();
+    patch(&mut fraction, 33, &length.to_le_bytes());
+    let block_length = u32_at(&fraction, 6) + 8;
+    patch(&mut fraction, 6, &block_length.to_le_bytes());
+    let outside =
+        DecodeBlockError::Header(BuildFieldHeaderError::NotAFraction { part: "maturity" });
+    assert_eq!(decode_payload(&fraction).unwrap_err(), block(0, outside));
+}
+
 /// Block 0's header parts out of their ranges, an unknown screening tag, a header length its
 /// parts do not fill, a header of another body or level than its block, an empty or outlying
 /// cover range, a non-canonical cover, a record with water below its ground, and two craters out
@@ -710,31 +863,6 @@ fn malformed_wire_parts_are_refused_with_their_errors() {
         block: CoarseLevel::new(6).unwrap(),
     };
     assert_eq!(damaged(24, &[6]), block(0, level));
-    // The header section's last parts: the Ceres-like palette (a count and three entries of 59
-    // bytes), each crust's entry (four options, the lid's and the provinces' present: six bytes)
-    // and the main liquid's (absent: one byte).
-    let end = 35 + usize::from(declared);
-    let palette = end - 7 - (1 + 3 * 59);
-    assert_eq!(bytes[palette], 3);
-    let unsorted = DecodeBlockError::Palette(BuildPaletteError::Unsorted { entry: 1 });
-    let second_role = palette + 1 + 59 + 16;
-    assert_eq!(
-        bytes[second_role],
-        u8::from(PaletteRole::Ice),
-        "the second entry is the ice"
-    );
-    assert_eq!(
-        damaged(second_role, &[u8::from(PaletteRole::PrimaryCrust)]),
-        block(0, unsorted)
-    );
-    let key = DecodeBlockError::SubstanceKey(ParseSubstanceKeyError::Malformed { at: 2 });
-    assert_eq!(damaged(palette + 1, b"P"), block(0, key));
-    let crust = DecodeBlockError::Header(BuildFieldHeaderError::CrustPalette {
-        crust: Crust::Lid,
-        entry: 1,
-    });
-    assert_eq!(bytes[end - 5..end], [PRESENT, 0, PRESENT, 0, ABSENT]);
-    assert_eq!(damaged(end - 4, &[1]), block(0, crust));
     // Block 1's cover, one range at 37, and its first record after it.
     let start = u32_at(&bytes, at[1] + 37);
     let empty = DecodeBlockError::Cover(BuildCoverError::EmptyRange { start, end: start });
@@ -1041,8 +1169,9 @@ fn write_payload(w: &mut GoldenWriter, label: &str, bytes: &[u8]) {
 }
 
 /// The golden file `tests/golden/wire/payloads.golden`: each synthetic world's whole payload, the
-/// Mars-like world's survey, its delta and its margin, and the Moon-like world split at 48 KiB,
-/// each as its blocks' lengths and an FNV-1a 64 digest of its bytes but the generator version's.
+/// Mars-like world's survey, its delta and its margin, the Moon-like world split at 48 KiB, and
+/// [`liquid_field`]'s whole payload, each as its blocks' lengths and an FNV-1a 64 digest of its
+/// bytes but the generator version's.
 /// The format, the margin, the
 /// delta rule and the split are generated output (Design note 17), so a change to any of them
 /// fails here, and is a generator-version change.
@@ -1091,6 +1220,14 @@ fn wire_payloads_match_their_golden() {
         &mut w,
         "MoonLike whole in 48 KiB",
         &encode_within(&moon, &whole(&moon), None, SYNTHESIS_MARGIN_CELLS, 48 << 10),
+    );
+    // Every present form of the liquid record and the header's fractions, which freeze with the
+    // format at the first send (decision-r11-palette-liquids §1.5 and §2, item 4).
+    let liquids = liquid_field();
+    write_payload(
+        &mut w,
+        "Liquids whole",
+        &encode_payload(&liquids, &whole(&liquids), None),
     );
     golden!("wire/payloads", w.as_str());
 }
@@ -1176,6 +1313,11 @@ fn write_enum_codes(w: &mut GoldenWriter) {
     write_codes(w, "palette_role", PaletteRole::ALL);
     write_codes(w, "mechanics_family", MechanicsFamily::ALL);
     write_codes(w, "target_class", TargetClass::ALL);
+    write_codes(w, "liquid_basis", LiquidBasis::ALL);
+    // A palette entry's phase row, an open code R10 assigns: its unassigned row, then its laws
+    // (decision-r11-palette-liquids §2, item 3).
+    w.line(&format!("phase_row {UNASSIGNED_PHASE_ROW} = Unassigned"));
+    write_codes(w, "phase_row", PhaseLaw::ALL);
     w.line(&format!("substance_nibble {NO_ENTRY} = None"));
     write_surface_class_ranges(w);
     w.line(&format!("screening {SCREENING_NONE} = None"));
