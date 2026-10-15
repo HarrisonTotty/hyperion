@@ -15,6 +15,7 @@ use crate::field::{
     CoarseField, CoarseLevel, Cover, CoverRange, ResolutionCode, SYNTHESIS_MARGIN_CELLS,
     SynthesisCell,
 };
+use crate::material::MaterialClass;
 use crate::patch::{BakeOptions, NormalScale, VertexPath};
 use crate::synth::test_support::{SEED, world};
 use crate::testing::SyntheticWorld;
@@ -858,4 +859,78 @@ fn worker_answers_are_the_same_in_any_order_from_the_body_s_cache_and_across_blo
         let cold = ask(&mut f.worker(), f.body, &sights, q);
         assert_eq!(warm, cold, "{q:?}");
     }
+}
+
+/// R10.T10.b: a material's drawn photometry is its properties over the body's palette under the
+/// header's albedo scale, 1 where the header holds none, with its law's L(0) at the scaled V; a
+/// consolidated form draws Lambert's law whatever its entry; and a body not held, or an entry past
+/// the palette, is refused.
+#[test]
+fn worker_photometry_is_the_palette_s_properties_under_the_field_s_scale() {
+    let f = fixture();
+    let unscaled = f.worker();
+    // The same world with a scale in its header, started from its first payload's block 0 alone:
+    // the photometry reads the header, nothing surveyed.
+    let field = world(WORLD).clone().with_albedo_scale(Some(0.73)).unwrap();
+    let header_block = split(&encode_within(
+        &field,
+        &cover(&f.first, |_| code(50.0)),
+        None,
+        SYNTHESIS_MARGIN_CELLS,
+        FIXTURE_BLOCK_BYTES,
+    ))
+    .swap_remove(0);
+    assert_eq!(
+        unscaled.field(f.body).unwrap().header().albedo_scale(),
+        None,
+        "the fixture's header holds no scale, so its materials take c = 1"
+    );
+    let mut scaled = WorkerFields::new();
+    scaled.init(f.body, &header_block).unwrap();
+    let palette = field.header().palette();
+    let entries = u8::try_from(palette.len()).unwrap();
+    assert!(entries > 0, "the Moon-like palette names substances");
+    let mut moved = false;
+    for (fields, c, is_scaled) in [(&unscaled, 1.0, false), (&scaled, 0.73, true)] {
+        for entry in 0..entries {
+            for class in [
+                MaterialClass::Regolith,
+                MaterialClass::Frost,
+                MaterialClass::Glacier,
+            ] {
+                let material = Material::new(class, entry).unwrap();
+                let resolved = properties(material, palette).unwrap();
+                let drawn = fields.photometry(f.body, material).unwrap();
+                let bvr = scaled_normal_albedo(&resolved, c);
+                assert_eq!(drawn.normal_albedo_bvr().map(bits), bvr.map(bits));
+                assert_eq!(drawn.phase_law(), resolved.phase_law());
+                assert_eq!(
+                    bits(drawn.limb_parameter()),
+                    bits(resolved.phase_law().limb_parameter(bvr[1]))
+                );
+                if class == MaterialClass::Glacier {
+                    assert_eq!(drawn.phase_law(), PhaseLaw::Lambert);
+                    assert_eq!(bits(drawn.limb_parameter()), bits(0.0));
+                }
+                moved |= is_scaled && bvr.map(bits) != resolved.normal_albedo_bvr().map(bits);
+            }
+        }
+    }
+    assert!(moved, "the scale moves some material's albedo");
+    let other = BodyRef::new(f.body.raw_system_id(), f.body.body_index() ^ 1);
+    let material = Material::new(MaterialClass::Regolith, 0).unwrap();
+    assert_eq!(
+        unscaled.photometry(other, material),
+        Err(ResolvePhotometryError::NotStarted(other))
+    );
+    let past = Material::new(MaterialClass::Regolith, entries).unwrap();
+    assert_eq!(
+        unscaled.photometry(f.body, past),
+        Err(ResolvePhotometryError::Properties(
+            ResolvePropertiesError::EntryNotInPalette {
+                entry: entries,
+                len: palette.len()
+            }
+        ))
+    );
 }

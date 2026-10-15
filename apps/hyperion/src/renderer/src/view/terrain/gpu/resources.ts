@@ -12,8 +12,15 @@
  * loss the engine's restore makes every handle anew, so the layout is derived again from the
  * rebuilt device's limits and every slot's contents are gone; {@link TerrainResources.onRebuilt}
  * tells the owner of the cache to start again.
+ *
+ * A lit layout (R10.T10.b, `slotLayout.ts`' `TerrainShading`) adds each slot's class weights and
+ * class laws, the frame's lights (`terrainMaterial.ts`' `packTerrainLighting`) and the terrain's
+ * phase table, whose rows (`TerrainPhaseRows`) the slots' class laws name: kept across a device
+ * restore, so that a row's index never changes, and uploaded again whenever one is added.
  */
 
+import { PHASE_TABLE_SAMPLES } from "../../appearance/law";
+import { packPhaseFactorRows } from "../../appearance/litBodyProbe";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../../engine/gpuFlags";
 import { type GpuCapabilities, MAX_TEXTURE_ARRAY_LAYERS } from "../../engine/platform";
 import type { BufferHandle, MeshHandle, RenderEngine, TextureHandle } from "../../engine/types";
@@ -21,13 +28,25 @@ import type { TerrainSettings, TerrainVertexPath } from "../../quality/qualitySe
 import type { SpheroidFigure } from "../../atmosphere/hillaire";
 import type { PatchKey } from "../patchKey";
 import {
+  CLASS_WEIGHTS_BYTES,
   DOUBLE_NORMALS_PER_SIDE,
   PATCH_VERTICES_PER_SIDE,
   type SlotFieldName,
   type SlotLayout,
+  type TerrainShading,
   terrainSlotLayout,
   NORMALS_GUTTER_TEXELS,
 } from "../slotLayout";
+import {
+  classRowLaw,
+  PHASE_LAW,
+  packClassLaws,
+  packTerrainLighting,
+  TERRAIN_LIGHT_ROWS,
+  type TerrainLighting,
+  TerrainPhaseRows,
+} from "../terrainMaterial";
+import type { TerrainLayers } from "../workers/messages";
 import {
   CONTACTS_HEADER_BYTES,
   CONTACT_RECORD_BYTES,
@@ -52,6 +71,12 @@ export const GRID_INDICES = QUADS * QUADS * 6;
 export const PATCH_INDICES = GRID_INDICES + 4 * QUADS * 6;
 /** Bytes of `drawIndexedIndirect`'s arguments: five `u32`. */
 export const INDIRECT_ARGS_BYTES = 20;
+
+/**
+ * The rows a lit layout's phase table is first made with: row 0 and the three laws at L(0) = 1 and
+ * 0, which most bodies' materials share; it doubles as rows are added.
+ */
+const LIT_TABLE_ROWS = 4;
 
 /** The texture format of the normals atlas: an octahedral pair as two half floats. */
 export const NORMALS_FORMAT = "rg16float";
@@ -141,6 +166,8 @@ export type TerrainLimits = Pick<
 
 /** A setting's terrain layout on one device. */
 export interface TerrainLayout {
+  /** How its patches are shaded: R05's spike shading, or R10's lit material with its fields. */
+  readonly shading: TerrainShading;
   /** The vertex path the device can hold: the setting's, or `face-differences` on a fallback. */
   readonly vertexPath: TerrainVertexPath;
   /**
@@ -172,14 +199,18 @@ function storageFits(layout: SlotLayout, limits: TerrainLimits): boolean {
  * @throws Error if even the `face-differences` layout's buffers or the atlas do not fit the
  * device, which no adapter meeting WebGPU's default limits does at either setting's budget.
  */
-export function terrainLayout(terrain: TerrainSettings, limits: TerrainLimits): TerrainLayout {
-  let slots = terrainSlotLayout(terrain);
+export function terrainLayout(
+  terrain: TerrainSettings,
+  limits: TerrainLimits,
+  shading: TerrainShading = "spike",
+): TerrainLayout {
+  let slots = terrainSlotLayout(terrain, shading);
   let vertexPath = terrain.vertexPath;
   let fallback: TerrainLayout["fallback"] = "none";
   if (!storageFits(slots, limits) && vertexPath === "baked-offsets") {
     vertexPath = "face-differences";
     fallback = "binding-limit";
-    slots = terrainSlotLayout({ ...terrain, vertexPath });
+    slots = terrainSlotLayout({ ...terrain, vertexPath }, shading);
   }
   if (!storageFits(slots, limits)) {
     throw new Error(
@@ -201,7 +232,7 @@ export function terrainLayout(terrain: TerrainSettings, limits: TerrainLimits): 
     limits.maxTextureDimension2D,
     MAX_TEXTURE_ARRAY_LAYERS,
   );
-  return { vertexPath, fallback, slots, atlas };
+  return { shading, vertexPath, fallback, slots, atlas };
 }
 
 /** A patch edge, anticlockwise from y = 0: 0 is y = 0, 1 is x = 64, 2 is y = 64, 3 is x = 0. */
@@ -311,22 +342,43 @@ export interface SlotUpload {
   readonly originHeightM: number;
   /** How far the skirts hang below the edge vertices, metres. */
   readonly skirtDepthM: number;
+  /** R10's layers of a body's bake, which a lit layout draws; `null` for the test planet's. */
+  readonly layers: TerrainLayers | null;
 }
 
-/** The slot fields this plan keeps in storage buffers (R10 adds its own to `SlotFieldName`). */
-export type SlotBufferField = Extract<SlotFieldName, "heights" | "offsets">;
+/** The slot fields kept in storage buffers: R05's, and R10.T10.b's class weights and laws. */
+export type SlotBufferField = Extract<SlotFieldName, "heights" | "offsets" | "class-layers">;
 
 /** What {@link TerrainResources.upload} did. */
 export type SlotUploadResult =
   | { readonly kind: "uploaded" }
-  /** Nothing was written: the bake predates the layout (see {@link TerrainResources.upload}). */
-  | { readonly kind: "refused"; readonly reason: "slot-outside-layout" | "vertex-path-mismatch" };
+  /**
+   * Nothing was written: the bake predates the layout, or a lit layout was given a bake without
+   * R10's layers (see {@link TerrainResources.upload}).
+   */
+  | {
+      readonly kind: "refused";
+      readonly reason: "slot-outside-layout" | "vertex-path-mismatch" | "layers-missing";
+    };
 
 const UPLOADED: SlotUploadResult = { kind: "uploaded" };
+
+/** A lit layout's frame resources (R10.T10.b). */
+interface LitMade {
+  /** The frame's lights, `TERRAIN_LIGHT_ROWS` `vec4f`. */
+  readonly lights: BufferHandle;
+  /** The phase table, `rgba32float`, `tableRows` rows of `PHASE_TABLE_SAMPLES`. */
+  table: TextureHandle;
+  tableRows: number;
+  /** The rows' version the table holds. */
+  tableVersion: number;
+}
 
 /** The buffers and textures of one layout, made together. */
 interface Made {
   readonly layout: TerrainLayout;
+  /** The lit layout's frame resources; `null` for R05's spike shading. */
+  readonly lit: LitMade | null;
   /** Each storage-buffer field of the layout with bytes, by its name. */
   readonly fields: ReadonlyMap<SlotFieldName, BufferHandle>;
   readonly slotRecords: BufferHandle;
@@ -349,6 +401,12 @@ export class TerrainResources {
   readonly #engine: RenderEngine;
   readonly #terrain: TerrainSettings;
   readonly #figure: SpheroidFigure;
+  readonly #shading: TerrainShading;
+  /**
+   * The lit layout's phase rows, row 0 the body's uniform law (Lambert's row until the first
+   * {@link TerrainResources.setLighting}): kept across restores, so that the slots' rows hold.
+   */
+  readonly #rows = new TerrainPhaseRows(classRowLaw(PHASE_LAW.lambert, 0));
   readonly #rebuilt = new Set<(layout: TerrainLayout) => void>();
   readonly #offRestored: () => void;
   readonly #slotRecord = new ArrayBuffer(SLOT_RECORD_BYTES);
@@ -357,10 +415,16 @@ export class TerrainResources {
   #made: Made;
   #normalsScratch: Uint16Array;
 
-  constructor(engine: RenderEngine, terrain: TerrainSettings, figure: SpheroidFigure) {
+  constructor(
+    engine: RenderEngine,
+    terrain: TerrainSettings,
+    figure: SpheroidFigure,
+    shading: TerrainShading = "spike",
+  ) {
     this.#engine = engine;
     this.#terrain = terrain;
     this.#figure = figure;
+    this.#shading = shading;
     this.#made = this.#make();
     this.#normalsScratch = this.#scratchFor(this.#made.layout);
     this.#offRestored = engine.onRestored(() => {
@@ -408,10 +472,37 @@ export class TerrainResources {
   }
 
   /**
-   * The storage buffer of a slot field (`heights`, `offsets`), or `null` where the layout has none.
+   * The storage buffer of a slot field (`heights`, `offsets`, and a lit layout's `class-layers`),
+   * or `null` where the layout has none.
    */
   field(name: SlotBufferField): BufferHandle | null {
     return this.#made.fields.get(name) ?? null;
+  }
+
+  /** A lit layout's lights buffer and phase table, or `null` for R05's spike shading. */
+  get lit(): { readonly lights: BufferHandle; readonly phaseTable: TextureHandle } | null {
+    const lit = this.#made.lit;
+    return lit === null ? null : { lights: lit.lights, phaseTable: lit.table };
+  }
+
+  /** The lit layout's phase rows, row 0 the body's uniform law. */
+  get phaseRows(): TerrainPhaseRows {
+    return this.#rows;
+  }
+
+  /**
+   * Writes a frame's lights into a lit layout's buffer, and the body's uniform law into row 0 of
+   * its phase table where it changed; nothing on R05's spike shading.
+   */
+  setLighting(lighting: TerrainLighting): void {
+    const lit = this.#made.lit;
+    if (lit === null) {
+      return;
+    }
+    this.#rows.setElsewhere(lighting.elsewhere);
+    this.#writeTable(lit);
+    const { equatorialRadiusM: a, polarRadiusM: c } = this.#figure;
+    this.#engine.writeBuffer(lit.lights, 0, packTerrainLighting(lighting, c / a));
   }
 
   /**
@@ -429,9 +520,14 @@ export class TerrainResources {
    * Writes a baked patch into its slot: heights, offsets where the layout has them, the slot's
    * record and its normals tile with the gutter filled from the tile's edge.
    *
+   * On a lit layout it also writes the slot's class layers, its class weights (zeros where the
+   * bake skipped them) then its class laws, adding their rows to the phase table.
+   *
    * @returns `refused` with nothing written for a bake that no longer fits the layout: one baked
    * before a restore re-derived it ({@link TerrainResources.onRebuilt}), whose slot is past the new
-   * count or whose offsets the new vertex path does not take; else `uploaded`.
+   * count or whose offsets the new vertex path does not take; or, on a lit layout, a bake without
+   * R10's layers; else `uploaded`.
+   * @throws RangeError also for class weights of another size than a slot's, before any write.
    * @throws RangeError if an array's length is not the layout's, which no bake of the setting gives.
    */
   upload(patch: SlotUpload): SlotUploadResult {
@@ -442,6 +538,16 @@ export class TerrainResources {
     }
     if (fields.has("offsets") === (patch.offsets === null)) {
       return { kind: "refused", reason: "vertex-path-mismatch" };
+    }
+    const { layers } = patch;
+    if (this.#made.lit !== null && layers === null) {
+      return { kind: "refused", reason: "layers-missing" };
+    }
+    const weightsBytes = layers?.weights.length ?? 0;
+    if (this.#made.lit !== null && weightsBytes !== 0 && weightsBytes !== CLASS_WEIGHTS_BYTES) {
+      throw new RangeError(
+        `class weights of ${String(weightsBytes)} B, where a slot holds ${String(CLASS_WEIGHTS_BYTES)} B`,
+      );
     }
     this.#checkLength("heights", patch.heights.byteLength);
     if (patch.offsets !== null) {
@@ -467,6 +573,23 @@ export class TerrainResources {
       this.#slotRecordBytes,
     );
     this.#writeNormals(slot, patch.normals);
+    const lit = this.#made.lit;
+    if (lit !== null && layers !== null) {
+      const { weights } = layers;
+      // The slot's class layers: its weights (zeros where the bake skipped them), then its laws.
+      this.#writeField(
+        "class-layers",
+        slot,
+        weights.length === 0 ? new Uint8Array(CLASS_WEIGHTS_BYTES) : weights,
+      );
+      this.#writeField(
+        "class-layers",
+        slot,
+        packClassLaws(layers.photometry, this.#rows),
+        CLASS_WEIGHTS_BYTES,
+      );
+      this.#writeTable(lit);
+    }
     return UPLOADED;
   }
 
@@ -514,12 +637,13 @@ export class TerrainResources {
     }
   }
 
-  #writeField(name: SlotBufferField, slot: number, data: Float32Array): void {
+  /** Writes `data` into `slot`'s part of field `name`, `withinBytes` into the slot. */
+  #writeField(name: SlotBufferField, slot: number, data: ArrayBufferView, withinBytes = 0): void {
     const buffer = this.#made.fields.get(name);
     if (buffer === undefined) {
       throw new RangeError(`the layout has no ${name} buffer`);
     }
-    this.#engine.writeBuffer(buffer, slot * this.#slotBytes(name), data);
+    this.#engine.writeBuffer(buffer, slot * this.#slotBytes(name) + withinBytes, data);
   }
 
   #writeNormals(slot: number, normals: Float16Array): void {
@@ -550,13 +674,62 @@ export class TerrainResources {
     );
   }
 
+  /** Uploads the phase table if its rows changed, in a larger texture where they outgrew it. */
+  #writeTable(lit: LitMade): void {
+    const rows = this.#rows;
+    if (lit.tableVersion === rows.version) {
+      return;
+    }
+    const laws = rows.laws;
+    if (laws.length > lit.tableRows) {
+      this.#engine.releaseTexture(lit.table);
+      lit.tableRows = Math.max(2 * lit.tableRows, laws.length);
+      lit.table = this.#table(lit.tableRows);
+    }
+    this.#engine.writeTexture(
+      lit.table,
+      { x: 0, y: 0 },
+      { width: PHASE_TABLE_SAMPLES, height: laws.length },
+      packPhaseFactorRows(laws),
+    );
+    lit.tableVersion = rows.version;
+  }
+
+  #table(rows: number): TextureHandle {
+    return this.#engine.createTexture({
+      name: "terrain phase table",
+      size: { width: PHASE_TABLE_SAMPLES, height: rows },
+      dimension: "2d",
+      format: "rgba32float",
+      mips: 1,
+      usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+      category: "other",
+    });
+  }
+
+  /** A lit layout's frame resources, the table holding the rows kept. */
+  #makeLit(): LitMade {
+    const lights = this.#engine.createBuffer({
+      name: "terrain lights",
+      bytes: TERRAIN_LIGHT_ROWS * 16,
+      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+      category: "other",
+    });
+    // No star until the first frame's lights: nothing is lit.
+    this.#engine.writeBuffer(lights, 0, new Float32Array(TERRAIN_LIGHT_ROWS * 4));
+    const tableRows = Math.max(LIT_TABLE_ROWS, this.#rows.laws.length);
+    const lit: LitMade = { lights, table: this.#table(tableRows), tableRows, tableVersion: -1 };
+    this.#writeTable(lit);
+    return lit;
+  }
+
   #scratchFor(layout: TerrainLayout): Uint16Array {
     return new Uint16Array(layout.atlas.tileTexels * layout.atlas.tileTexels * 2);
   }
 
   #make(): Made {
     const engine = this.#engine;
-    const layout = terrainLayout(this.#terrain, engine.capabilities);
+    const layout = terrainLayout(this.#terrain, engine.capabilities, this.#shading);
     const { slotCount } = layout.slots;
     const fields = new Map<SlotFieldName, BufferHandle>();
     for (const field of layout.slots.fields) {
@@ -619,6 +792,7 @@ export class TerrainResources {
     });
     // indexCount, instanceCount, firstIndex, baseVertex, firstInstance: only the count changes.
     engine.writeBuffer(indirect, 0, new Uint32Array([PATCH_INDICES, 0, 0, 0, 0]));
-    return { layout, fields, slotRecords, normals, mesh, instances, contacts, indirect };
+    const lit = layout.shading === "lit" ? this.#makeLit() : null;
+    return { layout, lit, fields, slotRecords, normals, mesh, instances, contacts, indirect };
   }
 }

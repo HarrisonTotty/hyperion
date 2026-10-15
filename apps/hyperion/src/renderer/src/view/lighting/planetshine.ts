@@ -40,6 +40,7 @@ import type { BodyIdHex } from "@hyperion/protocol";
 import { dot, norm, normalise, scale, sub, type Vec3 } from "../../geometry/vec3";
 import type { BodyFigure, BodyPhotometry } from "../appearance/fromWire";
 import {
+  limbShareAt,
   PHASE_TABLE_SAMPLES,
   PHASE_TABLE_STEP_RAD,
   phaseFactorTableOf,
@@ -140,7 +141,8 @@ export function phaseMaximum(law: PhotometricLaw): number {
   const { rgb } = phaseFactorTableOf(law);
   let phase = 0;
   for (let i = 0; i < PHASE_TABLE_SAMPLES; i += 1) {
-    const shape = shapePhase(law.lommelSeeligerShare, i * PHASE_TABLE_STEP_RAD);
+    const alpha = i * PHASE_TABLE_STEP_RAD;
+    const shape = shapePhase(law.lommelSeeligerShare, alpha, limbShareAt(law, alpha));
     for (let c = 0; c < 3; c += 1) {
       phase = Math.max(phase, (rgb[3 * i + c] ?? 0) * shape);
     }
@@ -215,13 +217,14 @@ function eclipsedLights(neighbour: LitNeighbour, towards: Vec3): ReadonlyArray<L
     return neighbour.lights;
   }
   const { body } = neighbour;
+  const { law } = body.photometry;
   return neighbour.lights.map((light) => {
     const visible = discEclipseVisible(
       light.host,
       body,
       neighbour.shadowing,
       towards,
-      body.photometry.law.lommelSeeligerShare,
+      (alpha) => limbShareAt(law, alpha),
       neighbour.annuli,
     );
     const illuminance: Rgb = [

@@ -51,12 +51,38 @@ export const MESH_NORMALS_BYTES = normalsTileBytes(PATCH_VERTICES_PER_SIDE);
 export const DOUBLE_NORMALS_BYTES = normalsTileBytes(DOUBLE_NORMALS_PER_SIDE);
 
 /**
+ * Bytes of a patch's class weights (R10.T10.b): 65 × 65 vertices of 8 bytes over the patch's
+ * palette, 33,800 B (`TerrainLayers.weights`).
+ */
+export const CLASS_WEIGHTS_BYTES = VERTICES * 8;
+
+/**
+ * Bytes of a patch's class laws (R10.T10.b): its palette's 8 slots as two `vec4f` each, 256 B
+ * (`terrainMaterial.ts`' `packClassLaws`).
+ */
+export const CLASS_LAWS_BYTES = 8 * 2 * 16;
+
+/**
+ * Bytes of a patch's class layers (R10.T10.b): its class weights, then its class laws, 34,056 B,
+ * one storage buffer for both so that the lit material keeps a storage binding free.
+ */
+export const CLASS_LAYERS_BYTES = CLASS_WEIGHTS_BYTES + CLASS_LAWS_BYTES;
+
+/**
  * A field of a slot.
  *
  * @remarks
- * R10 adds its own fields (class weights, the survey mask) to this union and sizes `horizon-map`.
+ * R10 adds its own fields to this union (the class layers, R10.T10.b) and sizes `horizon-map` (T8,
+ * T14).
  */
-export type SlotFieldName = "heights" | "offsets" | "normals" | "horizon-map";
+export type SlotFieldName = "heights" | "offsets" | "normals" | "horizon-map" | "class-layers";
+
+/**
+ * How a terrain's patches are shaded: R05's spike shading, one hand albedo (the test planet, and a
+ * body baked without weights), or R10's lit material from each patch's class weights and laws
+ * (R10.T10.b), which takes their field, `class-layers`.
+ */
+export type TerrainShading = "spike" | "lit";
 
 /** Where a slot field lives on the GPU. */
 export type SlotFieldStorage =
@@ -116,9 +142,13 @@ export function slotLayout(fields: ReadonlyArray<SlotField>, budgetBytes: number
 /**
  * This plan's fields for a terrain setting: heights and morph targets, the offsets on the
  * `baked-offsets` path, the normals at the setting's resolution, and the horizon map at zero bytes
- * until R10 sizes it.
+ * until R10 sizes it; with R10's lit shading, the class layers, weights and laws (R10.T10.b), so
+ * that R05's test planet and its spike keep their slots.
  */
-export function terrainSlotFields(terrain: TerrainSettings): ReadonlyArray<SlotField> {
+export function terrainSlotFields(
+  terrain: TerrainSettings,
+  shading: TerrainShading = "spike",
+): ReadonlyArray<SlotField> {
   const fields: SlotField[] = [
     { name: "heights", storage: "storage-buffer", bytes: HEIGHTS_BYTES },
   ];
@@ -140,10 +170,20 @@ export function terrainSlotFields(terrain: TerrainSettings): ReadonlyArray<SlotF
   }
   fields.push({ name: "normals", storage: "texture", bytes: normalsBytes });
   fields.push({ name: "horizon-map", storage: "storage-buffer", bytes: 0 });
+  switch (shading) {
+    case "lit":
+      fields.push({ name: "class-layers", storage: "storage-buffer", bytes: CLASS_LAYERS_BYTES });
+      break;
+    case "spike":
+      break;
+  }
   return fields;
 }
 
-/** The slot layout of a terrain setting, over its own cache budget. */
-export function terrainSlotLayout(terrain: TerrainSettings): SlotLayout {
-  return slotLayout(terrainSlotFields(terrain), terrain.cacheBytes);
+/** The slot layout of a terrain setting and shading, over its own cache budget. */
+export function terrainSlotLayout(
+  terrain: TerrainSettings,
+  shading: TerrainShading = "spike",
+): SlotLayout {
+  return slotLayout(terrainSlotFields(terrain, shading), terrain.cacheBytes);
 }

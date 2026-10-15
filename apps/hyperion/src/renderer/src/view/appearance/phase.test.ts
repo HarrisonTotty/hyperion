@@ -3,7 +3,15 @@ import { describe, expect, it } from "vitest";
 import { SOLAR_SYSTEM_PHOTOMETRY } from "../../test/litFixtures";
 import type { Rgb } from "../photometry/toneCurve";
 import { PHASE_F_CLAMP, phaseFactor, type PhaseTemplateId, type PhotometricLaw } from "./law";
-import { discIntegratedPhase, geometricAlbedo, lawFor } from "./phase";
+import { bodyReflection } from "../bodies/oblate";
+import { vec3 } from "../../geometry/vec3";
+import {
+  discIntegratedPhase,
+  geometricAlbedo,
+  lawFor,
+  lawPhaseIntegral as exactLawPhaseIntegral,
+  withTemplateCurve,
+} from "./phase";
 import { phaseIntegral, shapePhase } from "./shapes";
 import { PHASE_TEMPLATES } from "./templates";
 
@@ -301,5 +309,47 @@ describe("Earth after Robinson 2026 (R07.T4.d)", () => {
   it("gives 0.23 q within 3% of Robinson's visual spherical albedo of 0.294", () => {
     // The fit's f = 0.23 times its clamped q is 0.302, 2.6% above his physical model's 0.294.
     expect(Math.abs((0.23 * clampedPhaseIntegral("earth")) / 0.294 - 1)).toBeLessThan(0.03);
+  });
+});
+
+describe("the Moon under McEwen's L(α) (plan R10, R10.T10.b; decision-r07-t8b)", () => {
+  const constant: PhotometricLaw = {
+    a: [0.12, 0.12, 0.12],
+    lommelSeeligerShare: 1,
+    template: "moon",
+    phaseExponent: [1, 1, 1],
+  };
+  const curved = withTemplateCurve(constant);
+  const sphere = { equatorialRadiusM: 1.7374e6, polarRadiusM: 1.7374e6, pole: null };
+
+  it("carries the template's curve onto a law made for it, and none onto Mars's", () => {
+    expect(curved.lommelSeeligerCurve).toBe("mcewen-1996");
+    expect(lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon").lommelSeeligerCurve).toBe(
+      "mcewen-1996",
+    );
+    expect(lawFor([0.17, 0.17, 0.17], [1, 1, 1], "mars").lommelSeeligerCurve).toBeUndefined();
+  });
+
+  it("keeps the constant-L law's p exactly", () => {
+    expect(geometricAlbedo(curved)).toEqual(geometricAlbedo(constant));
+  });
+
+  it.each([30, 60, 90, 120])("keeps its point flux to 10⁻⁴ at %i°", (deg) => {
+    const alpha = deg * RAD_PER_DEG;
+    const towardsStar = vec3(Math.sin(alpha), 0, Math.cos(alpha));
+    const towardsObserver = vec3(0, 0, 1);
+    const ours = bodyReflection(sphere, curved, towardsStar, towardsObserver)[1];
+    const theirs = bodyReflection(sphere, constant, towardsStar, towardsObserver)[1];
+    expect(Math.abs(ours / theirs - 1)).toBeLessThan(1e-4);
+  });
+
+  // Past the template's 150°, where f is held, the held f draws the tail under L(α) = 0 (Lambert's
+  // shape) in place of Lommel–Seeliger's: q falls by 1.80 × 10⁻⁴, above the task's 10⁻⁴, which the
+  // decision's own computation (2 × 10⁻⁴ at equal flux) did not resolve; recorded in R10's Risks.
+  it("keeps its q within 2 × 10⁻⁴, the held tail past 150° taking 1.80 × 10⁻⁴ off it", () => {
+    const ours = exactLawPhaseIntegral(curved)[1];
+    const theirs = exactLawPhaseIntegral(constant)[1];
+    expect(ours / theirs - 1).toBeCloseTo(-1.8e-4, 5);
+    expect(Math.abs(ours / theirs - 1)).toBeLessThan(2e-4);
   });
 });

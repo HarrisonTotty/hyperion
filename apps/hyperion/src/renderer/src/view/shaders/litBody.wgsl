@@ -6,7 +6,8 @@
 // A library composed by concatenation: it declares no binding of its own. Its includer declares
 // `phase_factor_table : texture_2d<f32>` at the includer's own group and binding (an
 // `rgba32float` texture read with textureLoad, so unfilterable-float): one row per tabulated law,
-// PHASE_TABLE_SAMPLES texels from 0 to π every 0.5°, f in r, g and b (alpha unused). The
+// PHASE_TABLE_SAMPLES texels from 0 to π every 0.5°, f in r, g and b and the law's L(α) in a (plan
+// R10, R10.T10.b; decision-r07-t8b), L(0) at every sample for a law without a curve. The
 // TypeScript twin is `view/appearance/brdf.ts`, which reads the same table the same way.
 
 const LIT_PI : f32 = 3.14159265358979;
@@ -15,12 +16,13 @@ const LIT_PI : f32 = 3.14159265358979;
 const PHASE_TABLE_SAMPLES : u32 = 361u;
 const PHASE_TABLE_STEP_RAD : f32 = 0.00872664625997165;
 
-// A lunar-Lambert law: the albedo scale A per channel, the Lommel–Seeliger share L, the exponents
-// s per channel that its table row was made with, and `table_row`, the row of `phase_factor_table`
-// holding its f (one row per tabulated law: template, L and s). The shader reads f from the row; s
-// rides along for callers that rebuild rows. A texel of several classes (R10) reflects the weighted
-// sum of its classes' `body_brdf`, each class keeping its own LunarLambert, never one law built
-// from weighted parameters (decision-r07-t8b).
+// A lunar-Lambert law: the albedo scale A per channel, its Lommel–Seeliger share at opposition
+// L(0), the exponents s per channel that its table row was made with, and `table_row`, the row of
+// `phase_factor_table` holding its f and L(α) (one row per tabulated law: template, s and L(α)).
+// The shader reads f and L(α) from the row; `l` is L(0), for p, A and the figure's albedo scale,
+// and s rides along for callers that rebuild rows. A texel of several classes (R10) reflects the
+// weighted sum of its classes' `body_brdf`, each class keeping its own LunarLambert and row, never
+// one law built from weighted parameters (decision-r07-t8b).
 struct LunarLambert {
   a : vec3f,
   l : f32,
@@ -28,23 +30,31 @@ struct LunarLambert {
   table_row : u32,
 }
 
-// f per channel at phase α, by linear interpolation between the row's two nearest samples.
-fn phase_factor(row : u32, alpha : f32) -> vec3f {
+// The row at phase α, f per channel in rgb and L(α) in a, by linear interpolation between its two
+// nearest samples.
+fn phase_row(row : u32, alpha : f32) -> vec4f {
   let x = clamp(alpha, 0.0, LIT_PI) / PHASE_TABLE_STEP_RAD;
   let i = min(u32(floor(x)), PHASE_TABLE_SAMPLES - 2u);
   let t = x - f32(i);
-  let below = textureLoad(phase_factor_table, vec2u(i, row), 0).rgb;
-  let above = textureLoad(phase_factor_table, vec2u(i + 1u, row), 0).rgb;
+  let below = textureLoad(phase_factor_table, vec2u(i, row), 0);
+  let above = textureLoad(phase_factor_table, vec2u(i + 1u, row), 0);
   return below + t * (above - below);
 }
 
-// I/F = A · f(α) · [L · 2μ₀ ÷ (μ₀ + μ) + (1 − L) μ₀]; dark where μ₀ ≤ 0 or μ ≤ 0.
+// f per channel at phase α.
+fn phase_factor(row : u32, alpha : f32) -> vec3f {
+  return phase_row(row, alpha).rgb;
+}
+
+// I/F = A · f(α) · [L(α) · 2μ₀ ÷ (μ₀ + μ) + (1 − L(α)) μ₀], f and L(α) from the law's row; dark
+// where μ₀ ≤ 0 or μ ≤ 0.
 fn body_brdf(law : LunarLambert, mu0 : f32, mu : f32, alpha : f32) -> vec3f {
   if (mu0 <= 0.0 || mu <= 0.0) {
     return vec3f(0.0);
   }
-  let disc = law.l * 2.0 * mu0 / (mu0 + mu) + (1.0 - law.l) * mu0;
-  return law.a * phase_factor(law.table_row, alpha) * disc;
+  let row = phase_row(law.table_row, alpha);
+  let disc = row.a * 2.0 * mu0 / (mu0 + mu) + (1.0 - row.a) * mu0;
+  return law.a * row.rgb * disc;
 }
 
 // The horizon term (Design note 6): the irradiance from a uniform sphere of H = d ÷ R★ on an
@@ -85,11 +95,11 @@ fn sphere_irradiance(h : f32, phi : f32, horizon : f32) -> f32 {
   return max(0.0, direct + tangential);
 }
 
-// `body_brdf`'s disc term under an extended source (a star, or a neighbour's planetshine): μ₀
-// replaced by the source's irradiance factor h, which equals μ₀ wherever the whole source is up and
-// lights the soft band past the terminator, and the Lommel–Seeliger term's μ₀ + μ floored at the
-// source's angular radius, so that it stays bounded at the limb in that band. The TypeScript twin
-// is `view/bodies/discShading.ts`' `surfaceReflectance`.
+// `body_brdf`'s disc term under an extended source (a star, or a neighbour's planetshine), at the
+// share `l`, the law's L(α) from its row: μ₀ replaced by the source's irradiance factor h, which
+// equals μ₀ wherever the whole source is up and lights the soft band past the terminator, and the
+// Lommel–Seeliger term's μ₀ + μ floored at the source's angular radius, so that it stays bounded at
+// the limb in that band. The TypeScript twin is `view/bodies/discShading.ts`' `surfaceReflectance`.
 fn lit_disc_term(l : f32, h : f32, mu0 : f32, mu : f32, source_radius : f32) -> f32 {
   return l * 2.0 * h / max(max(mu0, 0.0) + mu, source_radius) + (1.0 - l) * h;
 }
@@ -167,6 +177,51 @@ fn eclipse_visible(
     inner_edge = outer_edge;
   }
   return max(0.0, 1.0 - hidden);
+}
+
+// A lit point's frame for R08's lookups (plan R08, R08.T9.b; Design note 17): its geodetic latitude,
+// rad, from its spheroid normal against the pole, and its north and east, unit and horizontal, in
+// the axes of the normal and the pole (the view's on R07's disc, body-fixed on R10's terrain). At
+// a pole, where every azimuth is the same, east is any horizontal direction. Shared by
+// `bodyDisc.wgsl` and R10's `terrainLit.wgsl`, it calls `preciseTrig.wgsl`'s `preciseAtan2`, which
+// every includer composes with R08's surface lighting.
+struct LocalFrame {
+  latitude : f32,
+  north : vec3f,
+  east : vec3f,
+}
+
+// Below this cosine of its latitude a point is taken as at a pole.
+const AT_POLE : f32 = 1e-6;
+
+// The frame at the point of unit spheroid normal `normal` on a body of unit pole `pole`: sin φ is
+// n · p and cos φ |p × n|, φ by `preciseAtan2` (R08's `preciseTrig.wgsl`), east p × n ÷ cos φ and
+// north n × east.
+fn local_frame(normal : vec3f, pole : vec3f) -> LocalFrame {
+  let sin_latitude = clamp(dot(normal, pole), -1.0, 1.0);
+  let towards_east = cross(pole, normal);
+  let cos_latitude = length(towards_east);
+  var east : vec3f;
+  if (cos_latitude > AT_POLE) {
+    east = towards_east / cos_latitude;
+  } else {
+    let other = select(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), abs(normal.x) > 0.9);
+    east = normalize(cross(other, normal));
+  }
+  let latitude = preciseAtan2(abs(sin_latitude), cos_latitude);
+  return LocalFrame(select(latitude, -latitude, sin_latitude < 0.0), cross(normal, east), east);
+}
+
+// A unit direction's azimuth at the frame, rad, from north towards east, in [−π, π]; 0 at the
+// zenith or the nadir.
+fn local_azimuth(frame : LocalFrame, d : vec3f) -> f32 {
+  let towards_north = dot(d, frame.north);
+  let towards_east = dot(d, frame.east);
+  if (!(towards_north * towards_north + towards_east * towards_east > 0.0)) {
+    return 0.0;
+  }
+  let azimuth = preciseAtan2(abs(towards_east), towards_north);
+  return select(azimuth, -azimuth, towards_east < 0.0);
 }
 
 // R11's hook (its Design note 14): the ring's shadow on the body, 1 until `ringShadow.wgsl`

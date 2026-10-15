@@ -91,6 +91,7 @@ function layers(complete: boolean, unsurveyed: readonly number[]): TerrainLayers
     sigmaM: 0,
     complete,
     unsurveyedCells: Uint32Array.from(unsurveyed),
+    photometry: new Float32Array(40),
   };
 }
 

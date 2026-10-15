@@ -87,6 +87,14 @@
 //! - `material(system, body, seed, face, u, v)` returns a `GroundAnswer`, the class's code, its
 //!   entry and, where the palette names the entry, its properties, or `undefined` where the cell
 //!   is not surveyed or no field is held.
+//! - `photometry(system, body, palette)` takes a bake's `palette()` (a `Uint8Array` of 8 × 2) and
+//!   returns a `Float32Array` of 8 × 5, slot k at `5 k`: the photometry the lit terrain draws its
+//!   material with ([`WorkerFields::photometry`], plan R10, T10.b): its normal albedo in B, V and
+//!   R under the field's albedo scale, its law's code (R10.T1.a's `PhaseLaw`, 1 to 3) and the
+//!   law's L(0); all five 0, law code 0 for none, for an empty slot or one whose palette names no
+//!   substance. It returns `undefined` where no field of the body is held, and throws for a
+//!   palette of another length, a class code no class has, an entry no palette holds, or one past
+//!   the body's palette.
 
 use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::Metres;
@@ -97,7 +105,7 @@ use crate::bake::{TerrainBakeOptions, TerrainLayers, WeightsLayer};
 use crate::cube::{Face, FaceUv, PatchKey};
 use crate::field::{BodyRef, FieldView};
 use crate::geometry::{BAND_LIMIT_M, FINEST_SPACING_M};
-use crate::material::MaterialProperties;
+use crate::material::{MAX_CLASSES, Material, MaterialClass, MaterialProperties};
 use crate::noise::LatticeCache;
 use crate::patch::{BakeOptions, NormalScale, PatchBake, VertexPath};
 use crate::reading::{LineOfSight, SlantRange, SurveyedReading};
@@ -421,6 +429,9 @@ fn norm([x, y, z]: [f64; 3]) -> f64 {
 
 /// The palette byte of no entry, and of an empty slot's class and entry.
 const NONE_BYTE: u8 = 255;
+
+/// The values `photometry` gives a palette slot: `A_N` in B, V and R, the law's code and L(0).
+const PHOTOMETRY_STRIDE: usize = 5;
 
 /// The client's fields, one a body ([`WorkerFields`]; see the module documentation).
 #[wasm_bindgen(js_name = SurfaceFields)]
@@ -1056,6 +1067,67 @@ impl JsSurfaceFields {
         Ok(unless_unsurveyed(answer)
             .flatten()
             .map(|material| GroundAnswer { material }))
+    }
+
+    /// The photometry of each slot of a bake's `palette` on the body (see the module
+    /// documentation).
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` naming the problem if the body index is above 65,535, the palette is not 8 × 2
+    /// bytes, or a slot's class code names no class, its entry is one no palette holds, or past the
+    /// body's palette.
+    pub fn photometry(
+        &self,
+        system: u64,
+        body: u32,
+        palette: &[u8],
+    ) -> Result<Option<Vec<f32>>, JsError> {
+        let body = body_ref(system, body)?;
+        if palette.len() != 2 * MAX_CLASSES {
+            return Err(JsError::new(&format!(
+                "a palette of {} bytes, not {MAX_CLASSES} slots of 2",
+                palette.len()
+            )));
+        }
+        // Checked first, so that a palette of empty slots alone answers `undefined` too.
+        if self.fields.field(body).is_none() {
+            return Ok(None);
+        }
+        let mut out = vec![0.0_f32; PHOTOMETRY_STRIDE * MAX_CLASSES];
+        for (values, &[class, entry]) in out
+            .as_chunks_mut::<PHOTOMETRY_STRIDE>()
+            .0
+            .iter_mut()
+            .zip(palette.as_chunks::<2>().0)
+        {
+            if entry == NONE_BYTE {
+                continue;
+            }
+            let class = MaterialClass::try_from(class)
+                .map_err(|_| JsError::new(&format!("class code {class} names no class")))?;
+            let material = Material::new(class, entry)
+                .ok_or_else(|| JsError::new(&format!("entry {entry} is one no palette holds")))?;
+            let drawn = self
+                .fields
+                .photometry(body, material)
+                .map_err(|e| JsError::new(&e.to_string()))?;
+            let [b, v, r] = drawn.normal_albedo_bvr();
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "the shader reads f32; a normal albedo of at most 1.35 and an L(0) in \
+                          [0, 1] narrow far inside its range"
+            )]
+            let narrowed = [
+                b as f32,
+                v as f32,
+                r as f32,
+                f32::from(u8::from(drawn.phase_law())),
+                drawn.limb_parameter() as f32,
+            ];
+            *values = narrowed;
+        }
+        Ok(Some(out))
     }
 }
 

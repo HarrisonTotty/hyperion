@@ -84,7 +84,18 @@ export interface TerrainLayers {
    * once: a block that surveys one of them changes the mask (R10's rebake rule, `rebake.ts`).
    */
   readonly unsurveyedCells: Uint32Array;
+  /**
+   * The photometry the lit terrain draws each palette slot with (R10.T10.b; `src/wasm.rs`'s
+   * `photometry`), 8 × {@link PHOTOMETRY_STRIDE}, slot k at `5 k`: its normal albedo in the
+   * Johnson B, V and R bands under the field's albedo scale, its law's code (`PhaseLaw`, 1 to 3)
+   * and the law's L(0); all 0, law code 0, for an empty slot or one whose palette names no
+   * substance.
+   */
+  readonly photometry: Float32Array;
 }
+
+/** The values a palette slot's photometry takes in {@link TerrainLayers.photometry}. */
+export const PHOTOMETRY_STRIDE = 5;
 
 /**
  * Whether the provisional test planet's octaves 8 to 12 are ridged (R05 Design note 12): the spike
@@ -214,8 +225,14 @@ export function bakeTransferables(bake: BakedPatch): Transferable[] {
     buffers.push(bake.offsets.buffer);
   }
   if (bake.layers !== null) {
-    const { palette, weights, surveyMask, unsurveyedCells } = bake.layers;
-    buffers.push(palette.buffer, weights.buffer, surveyMask.buffer, unsurveyedCells.buffer);
+    const { palette, weights, surveyMask, unsurveyedCells, photometry } = bake.layers;
+    buffers.push(
+      palette.buffer,
+      weights.buffer,
+      surveyMask.buffer,
+      unsurveyedCells.buffer,
+      photometry.buffer,
+    );
   }
   return buffers;
 }

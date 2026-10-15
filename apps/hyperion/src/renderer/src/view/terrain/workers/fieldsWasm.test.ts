@@ -36,6 +36,7 @@ import {
   type HeightSourceSetting,
   type HeightWorkerRequest,
   PALETTE_NONE,
+  PHOTOMETRY_STRIDE,
   type WeightsLayerSetting,
 } from "./messages";
 import { needsRebake } from "./rebake";
@@ -217,6 +218,23 @@ function paletteWords(palette: Uint8Array): string[] {
     );
   }
   return words;
+}
+
+/**
+ * Whether a named palette slot's photometry is one the lit terrain can draw (R10.T10.b): a law of
+ * R10.T1.a's three, L(0) 0 for Lambert's and in [0.38, 1] for the particulate ones, and no band's
+ * albedo negative.
+ */
+function lawfulPhotometry([
+  b = Number.NaN,
+  v = Number.NaN,
+  r = Number.NaN,
+  law,
+  limb = Number.NaN,
+]: ReadonlyArray<number>): boolean {
+  const limbOfLaw =
+    law === 3 ? limb === 0 : (law === 1 || law === 2) && limb >= Math.fround(0.38) && limb <= 1;
+  return limbOfLaw && Math.min(b, v, r) >= 0;
 }
 
 const VERTEX_PATHS = {
@@ -418,6 +436,76 @@ describe("the height worker's fields on the real module", () => {
       expect(transfer).toContain(layers.unsurveyedCells.buffer);
     }
     direct.free();
+  });
+
+  it("gives each bake's palette the photometry of its materials, as the native materials name them", () => {
+    const fields = heldFields();
+    // Each material the fixture names with its properties, by its class and entry, as the module
+    // draws it: the fixture's header holds no albedo scale, so c is 1 (R10.T10.b).
+    const named = new Map<string, ReadonlyArray<number>>();
+    for (const record of recordsOf("material")) {
+      if (!record.bits.has("albedo_v")) {
+        continue;
+      }
+      const [code, , entry] = record.lines.get("class") ?? [];
+      named.set(`${String(code)}:${String(entry)}`, [
+        ...["albedo_b", "albedo_v", "albedo_r"].map((l) =>
+          Math.fround(fromBits(bitsOf(record, l))),
+        ),
+        Number(record.lines.get("phase_law")?.[0]),
+        Math.fround(fromBits(bitsOf(record, "limb"))),
+      ]);
+    }
+    /** Each slot's values: the empty and unnamed slots', the named slots', and the pinned pairs. */
+    const empty: number[][] = [];
+    const drawn: number[][] = [];
+    const pinnedPairs: [number[], ReadonlyArray<number>][] = [];
+    for (const record of recordsOf("patch")) {
+      const [, name, face, level, i, j, path, normals, weights] = record.head;
+      const key = { face: faceOf(face), level: Number(level), i: Number(i), j: Number(j) };
+      const settings: BakeSettings = {
+        vertexPath: lookup(VERTEX_PATHS, path),
+        normals: lookup(NORMALS, normals),
+        source: {
+          kind: "body",
+          body: FIXTURE.body,
+          detailSeed: FIXTURE.seed,
+          weights: lookup(WEIGHTS, weights),
+        },
+      };
+      const { reply, transfer } = answerRequest(
+        module,
+        { kind: "bake", id: 3, key, generation: 5, settings },
+        fields,
+      );
+      if (reply.kind !== "baked" || reply.bake.layers === null) {
+        throw new Error(`${String(name)} was not baked: ${JSON.stringify(reply)}`);
+      }
+      const { palette, photometry } = reply.bake.layers;
+      expect(photometry).toHaveLength(8 * PHOTOMETRY_STRIDE);
+      expect(transfer).toContain(photometry.buffer);
+      for (let k = 0; k < 8; k += 1) {
+        const code = palette[2 * k];
+        const entry = palette[2 * k + 1];
+        const values = [...photometry.subarray(PHOTOMETRY_STRIDE * k, PHOTOMETRY_STRIDE * (k + 1))];
+        if (code === PALETTE_NONE || entry === PALETTE_NONE) {
+          empty.push(values);
+          continue;
+        }
+        drawn.push(values);
+        const pinned = named.get(`${String(code)}:${String(entry)}`);
+        if (pinned !== undefined) {
+          pinnedPairs.push([values, pinned]);
+        }
+      }
+    }
+    expect(empty.every((values) => values.every((value) => value === 0))).toBe(true);
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(drawn.filter((values) => !lawfulPhotometry(values))).toEqual([]);
+    expect(pinnedPairs.length).toBeGreaterThan(0);
+    for (const [values, pinned] of pinnedPairs) {
+      expect(values).toEqual(pinned);
+    }
   });
 
   it("reads the fixture's points as the native readings do", () => {
@@ -677,6 +765,23 @@ describe("the height worker's fields on the real module", () => {
     expect(() => direct.bake(id, 3, 0n, 1, 300, 0, 0, 0, 0, 0, 0)).toThrow(/level/u);
     expect(() => direct.bake(id, 3, 0n, 1, 5, 99, 0, 0, 0, 0, 0)).toThrow(/outside level 5/u);
     expect(() => direct.bake(id, 3, 0n, 1, 5, 0, 0, 0, 0, 0, -1)).toThrow(/skirt/u);
+    // The palette's photometry (R10.T10.b): none without a field, and a palette refused whole.
+    const empty = new Uint8Array(16).fill(PALETTE_NONE);
+    expect(direct.photometry(id, 3, empty)).toBeUndefined();
+    expect(() => direct.photometry(id, 3, new Uint8Array(15))).toThrow(/palette of 15 bytes/u);
+    const [first] = FIXTURE.blocks;
+    if (first === undefined) {
+      throw new Error("the fixture has a block 0");
+    }
+    const [, index] = FIXTURE.body.split(".");
+    const bodyIndex = Number.parseInt(index ?? "", 16);
+    direct.fieldInit(id, bodyIndex, new Uint8Array(first)).free();
+    const slot = (code: number, entry: number): Uint8Array =>
+      Uint8Array.from([code, entry, ...empty.subarray(2)]);
+    expect(direct.photometry(id, bodyIndex, empty)).toEqual(new Float32Array(40));
+    expect(() => direct.photometry(id, bodyIndex, slot(200, 0))).toThrow(/class code 200/u);
+    expect(() => direct.photometry(id, bodyIndex, slot(1, 20))).toThrow(/no palette holds/u);
+    expect(() => direct.photometry(id, bodyIndex, slot(1, 14))).toThrow(/past a palette/u);
     direct.free();
   });
 });

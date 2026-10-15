@@ -9,7 +9,7 @@ import type { Vec3 } from "../../geometry/vec3";
 import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
 import { TERRAIN_SETTINGS, terrainSettingsFor } from "../quality/qualitySetting";
 import { terrainMaterialSpec } from "./gpu/material";
-import { terrainSlotLayout } from "./slotLayout";
+import { CLASS_LAWS_BYTES, terrainSlotLayout } from "./slotLayout";
 import { distanceToBoxM, relativeBounds } from "./bounds";
 import type { DrawSet } from "./cache";
 import { vertexDir } from "./cube";
@@ -29,6 +29,13 @@ import {
   SELECTION_MARGIN,
   selectionTolerancePx,
 } from "./selectionTolerance";
+import { lawFor } from "../appearance/phase";
+import { createAirlessTables } from "../atmosphere/surfaceLighting";
+import {
+  packTerrainLighting,
+  type TerrainLighting,
+  terrainLitMaterialSpec,
+} from "./terrainMaterial";
 import {
   effectiveTauPx,
   morphRangeM,
@@ -39,15 +46,23 @@ import {
   TerrainPass,
   type TerrainPool,
   type TerrainView,
+  terrainShadingOf,
 } from "./terrainPass";
 import { distanceToBoxFromM } from "./viewGeometry";
-import type { BakedPatch, BakeSettings } from "./workers/messages";
+import {
+  type BakedPatch,
+  type BakeSettings,
+  PALETTE_NONE,
+  type TerrainLayers,
+} from "./workers/messages";
 
 const PLANET = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
 
 /** A pool that records the demand and bakes on the test's command. */
 class FakePool implements TerrainPool {
   demand: ReadonlyArray<PatchRequest> = [];
+  /** R10's layers each bake carries: `null`, as the test planet's, unless a test sets them. */
+  layers: TerrainLayers | null = null;
   readonly #listeners = new Set<(bake: BakedPatch) => void>();
   terminated = false;
 
@@ -95,7 +110,7 @@ class FakePool implements TerrainPool {
       boundingRadiusM: 1,
       originHeightM: 0,
       skirtDepthM: 1,
-      layers: null,
+      layers: this.layers,
     };
     for (const listener of this.#listeners) {
       listener(bake);
@@ -150,24 +165,27 @@ function inputAt(view: TerrainView, nowMs = 0): TerrainFrameInput {
 
 async function passOn(
   setting: "high" | "low",
-  extra: Pick<TerrainPassOptions, "measureSelection" | "onResident" | "onSelect" | "terrain"> = {},
+  extra: Partial<
+    Pick<TerrainPassOptions, "measureSelection" | "onResident" | "onSelect" | "terrain" | "source">
+  > = {},
 ): Promise<{ pass: TerrainPass; pool: () => FakePool; engine: CountingRenderEngine }> {
   const counting = await countingRenderEngine({
     maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
     maxBufferSize: MAX_REQUESTED_BUFFER_BYTES,
   });
   const pools: FakePool[] = [];
+  const { source = { kind: "test-planet", ridges: "off" }, ...rest } = extra;
   const pass = new TerrainPass({
     engine: counting,
     setting,
     planet: PLANET,
-    source: { kind: "test-planet", ridges: "off" },
+    source,
     createPool: (bake) => {
       const pool = new FakePool(bake);
       pools.push(pool);
       return pool;
     },
-    ...extra,
+    ...rest,
   });
   await pass.ready();
   return {
@@ -935,5 +953,158 @@ describe("the terrain pass after a device loss", () => {
     expect(pool()).not.toBe(first);
     pass.dispose();
     expect(pool().terminated).toBe(true);
+  });
+});
+
+/** A body's layers: slot 0 regolith (law 1, L(0) 1), slot 1 unnamed, the weights all slot 0's. */
+function bodyLayers(): TerrainLayers {
+  const palette = new Uint8Array(16).fill(PALETTE_NONE);
+  palette.set([1, 0, 2, PALETTE_NONE]);
+  const weights = new Uint8Array(65 * 65 * 8);
+  for (let v = 0; v < 65 * 65; v += 1) {
+    weights[8 * v] = 255;
+  }
+  const photometry = new Float32Array(40);
+  photometry.set([0.1, 0.12, 0.14, 1, 1]);
+  return {
+    palette,
+    weights,
+    surveyMask: new Uint8Array(65 * 65).fill(255),
+    boundM: 1,
+    sigmaM: 0,
+    complete: true,
+    unsurveyedCells: new Uint32Array(),
+    photometry,
+  };
+}
+
+describe("the lit terrain of a body (R10.T10.b)", () => {
+  const BODY = {
+    kind: "body",
+    body: "0200080020000000.0301",
+    detailSeed: "617373656d626c79",
+    weights: "baked",
+  } as const;
+
+  const LIGHTING = {
+    lights: [],
+    occluders: [],
+    secondaries: [],
+    elsewhere: lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+    exposureScale: 1e-4,
+  } satisfies TerrainLighting;
+
+  it("shades a body baked with its weights with the lit material, and the test planet and the wireframe's bakes with R05's", async () => {
+    const lit = await passOn("high", { source: BODY });
+    expect(lit.pass.shading).toBe("lit");
+    expect(lit.pass.layout.shading).toBe("lit");
+    expect(terrainShadingOf({ ...BODY, weights: "skipped" })).toBe("spike");
+    expect(terrainShadingOf({ kind: "test-planet", ridges: "on" })).toBe("spike");
+    const planet = await passOn("high");
+    expect(planet.pass.shading).toBe("spike");
+    // R05's layout keeps its slots: the lit fields are the lit layout's alone.
+    expect(planet.pass.layout.slots).toEqual(terrainSlotLayout(TERRAIN_SETTINGS.high));
+    expect(lit.pass.layout.slots).toEqual(terrainSlotLayout(TERRAIN_SETTINGS.high, "lit"));
+  });
+
+  it("binds the slots' class weights and laws, the lights, the phase table and a body without air's tables", async () => {
+    const { pass, pool, engine } = await passOn("low", { source: BODY });
+    pool().layers = bodyLayers();
+    const view = northPole(2_000_000);
+    pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    pool().bakeDemand(pass);
+    const frame = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    const draw = frame.draw;
+    if (draw === null) {
+      throw new Error("the lit pass drew nothing");
+    }
+    expect(draw.material.name).toBe(terrainLitMaterialSpec(pass.layout.vertexPath).name);
+    expect(Object.keys(draw.storageBuffers ?? {}).toSorted()).toEqual([
+      "classLayers",
+      "contacts",
+      "heights",
+      "instances",
+      "slots",
+      "terrainLights",
+    ]);
+    expect(Object.keys(draw.textures).toSorted()).toEqual([
+      "atmosphereAbsorberColumns",
+      "atmosphereAbsorberCurves",
+      "atmosphereAbsorberPressureColumns",
+      "atmosphereBody",
+      "atmosphereIrradiance",
+      "atmosphereLastAbsorberPressureColumn",
+      "atmosphereTransmittance",
+      "normals",
+      "phaseFactorTable",
+    ]);
+    // The camera body-fixed, with 1 ÷ a beside it.
+    expect([...(draw.uniforms["cameraBodyFixedM"] ?? [])]).toEqual(
+      [0, 0, PLANET.figure.polarRadiusM + 2_000_000, 1 / PLANET.figure.equatorialRadiusM].map(
+        Math.fround,
+      ),
+    );
+    const lights = engine.writes.findLast((w) => w.buffer === "terrain lights");
+    expect(lights?.data).toEqual(
+      new Uint8Array(
+        packTerrainLighting(LIGHTING, PLANET.figure.polarRadiusM / PLANET.figure.equatorialRadiusM)
+          .buffer,
+      ),
+    );
+    // Slot 0's class law: regolith on its law's row, after row 0, `elsewhere`; slot 1 has none.
+    const laws = engine.writes.findLast(
+      (w) => w.buffer === "terrain class-layers" && w.bytes === CLASS_LAWS_BYTES,
+    );
+    const packed = new Float32Array(laws?.data.slice().buffer ?? new ArrayBuffer(0));
+    expect([...packed.subarray(0, 5)]).toEqual([0.14, 0.12, 0.1, 1, 1].map(Math.fround));
+    expect(packed[8 + 4]).toBe(-1);
+  });
+
+  it("draws nothing lit until a frame gives its lights, and binds the frame's atmosphere where given", async () => {
+    const { pass, pool, engine } = await passOn("low", { source: BODY });
+    pool().layers = bodyLayers();
+    const view = northPole(2_000_000);
+    pass.frame(inputAt(view));
+    pool().bakeDemand(pass);
+    const unlit = pass.frame(inputAt(view));
+    expect(unlit.draw).not.toBeNull();
+    expect(engine.writes.filter((w) => w.buffer === "terrain lights")).toHaveLength(1);
+    const air = createAirlessTables(engine, "a body's air");
+    const withAir = pass.frame({ ...inputAt(view), lighting: { ...LIGHTING, atmosphere: air } });
+    expect(withAir.draw?.textures["atmosphereBody"]).toBe(air.body);
+  });
+
+  it("binds the larger phase table once the slots' laws outgrow it", async () => {
+    const { pass, pool } = await passOn("low", { source: BODY });
+    pool().layers = bodyLayers();
+    const view = northPole(2_000_000);
+    pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    pool().bakeDemand(pass);
+    const before = pass.frame({ ...inputAt(view), lighting: LIGHTING }).draw?.textures[
+      "phaseFactorTable"
+    ];
+    // Six bright frosts of six L(0)s: rows past the table's first four.
+    const frosts = bodyLayers();
+    const photometry = new Float32Array(40);
+    for (let k = 0; k < 6; k += 1) {
+      photometry.set([0.9, 0.9, 0.9, 2, 0.9 - 0.05 * k], 5 * k);
+    }
+    pool().layers = { ...frosts, photometry };
+    pool().deliver(pass, { face: 2, level: 3, i: 1, j: 1 });
+    const after = pass.frame({ ...inputAt(view), lighting: LIGHTING }).draw?.textures[
+      "phaseFactorTable"
+    ];
+    expect(before?.name).toBe("terrain phase table");
+    expect(after?.name).toBe("terrain phase table");
+    expect(after).not.toBe(before);
+  });
+
+  it("refuses a bake without R10's layers into a lit layout's slots", async () => {
+    const { pass, pool } = await passOn("low", { source: BODY });
+    const view = northPole(2_000_000);
+    pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    expect(pool().bakeDemand(pass)).toBeGreaterThan(0);
+    const frame = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    expect(frame.drawSet.count).toBe(0);
   });
 });

@@ -40,7 +40,7 @@ import type { BodyFigure, BodyPhotometry } from "../appearance/fromWire";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { patchMeshData } from "../terrain/gpu/resources";
 import patchVertexWgsl from "../terrain/shaders/patchVertex.wgsl?raw";
-import { PHASE_TABLE_SAMPLES, type PhotometricLaw } from "../appearance/law";
+import { limbShareAt, PHASE_TABLE_SAMPLES, type PhotometricLaw } from "../appearance/law";
 import { packPhaseFactorRows } from "../appearance/litBodyProbe";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
 import type { KernelPair } from "../engine/kernels";
@@ -283,7 +283,7 @@ export function pointFlux(
       body,
       blockers,
       toCamera,
-      law.lommelSeeligerShare,
+      (alpha) => limbShareAt(law, alpha),
       k,
     );
     for (const ch of [0, 1, 2] as const) {

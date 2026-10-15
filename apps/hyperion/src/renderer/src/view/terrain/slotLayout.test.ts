@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { SETTINGS, type TerrainVertexPath } from "../quality/qualitySetting";
 import {
+  CLASS_LAWS_BYTES,
+  CLASS_LAYERS_BYTES,
+  CLASS_WEIGHTS_BYTES,
   DOUBLE_NORMALS_BYTES,
   HEIGHTS_BYTES,
   MESH_NORMALS_BYTES,
@@ -34,6 +37,21 @@ describe("the slot layout", () => {
   it("declares the horizon map with zero bytes until R10 sizes it", () => {
     const horizon = terrainSlotFields(SETTINGS.low.terrain).find((f) => f.name === "horizon-map");
     expect(horizon?.bytes).toBe(0);
+  });
+
+  it("adds R10.T10.b's class layers, its weights then its laws, to a lit layout alone, 34,056 B a slot", () => {
+    expect(CLASS_WEIGHTS_BYTES).toBe(65 * 65 * 8);
+    expect(CLASS_LAWS_BYTES).toBe(256);
+    expect(CLASS_LAYERS_BYTES).toBe(34_056);
+    const spike = terrainSlotLayout(SETTINGS.low.terrain);
+    const lit = terrainSlotLayout(SETTINGS.low.terrain, "lit");
+    expect(spike.fields.map((f) => f.name)).not.toContain("class-layers");
+    expect(lit.fields.at(-1)).toEqual({
+      name: "class-layers",
+      storage: "storage-buffer",
+      bytes: CLASS_LAYERS_BYTES,
+    });
+    expect(lit.bytesPerSlot - spike.bytesPerSlot).toBe(CLASS_LAYERS_BYTES);
   });
 
   it("carries offsets on the baked-offsets path only", () => {
