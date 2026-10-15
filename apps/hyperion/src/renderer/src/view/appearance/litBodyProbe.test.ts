@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 import { WGSL_CATALOGUE } from "../engine/catalogue";
 import litBodyWgsl from "../shaders/litBody.wgsl?raw";
 import { brdf, brdfFromTable } from "./brdf";
-import { PHASE_TABLE_SAMPLES, PHASE_TABLE_STEP_RAD, phaseFactorTableOf } from "./law";
+import {
+  PHASE_TABLE_SAMPLES,
+  PHASE_TABLE_STEP_RAD,
+  phaseFactorTableOf,
+  type PhotometricLaw,
+} from "./law";
 import type { SurfaceLightingReader } from "../atmosphere/surfaceLighting";
 import {
   type AtmosphereLookup,
@@ -17,7 +22,6 @@ import {
   packLightingProbeCases,
   packPhaseFactorRows,
   PROBE_CASE_BYTES,
-  syntheticShare,
 } from "./litBodyProbe";
 import { vec3 } from "../../geometry/vec3";
 import { annulusEdges } from "../lighting/annuli";
@@ -67,32 +71,45 @@ describe("the lit-body probe", () => {
     expect(f32[12]).toBeCloseTo(0.3, 7);
   });
 
-  it("lays each law's f out as an rgba32float row", () => {
+  it("lays each law's f out as an rgba32float row, its L(α) in alpha", () => {
     const texels = packPhaseFactorRows([LAW, LAW]);
     expect(texels).toHaveLength(2 * PHASE_TABLE_SAMPLES * 4);
-    const { rgb } = phaseFactorTableOf(LAW);
+    const { rgb, alpha } = phaseFactorTableOf(LAW);
     expect([
       texels[4 * 100],
       texels[4 * 100 + 1],
       texels[4 * 100 + 2],
       texels[4 * 100 + 3],
-    ]).toEqual([rgb[300], rgb[301], rgb[302], 0]);
+    ]).toEqual([rgb[300], rgb[301], rgb[302], alpha[100]]);
+    // Mercury's template carries McEwen's L(α): L(50°) = 1 − 0.95 + 0.605 − 0.1825 = 0.4725.
+    expect(texels[4 * 100 + 3]).toBeCloseTo(0.4725, 6);
   });
 
-  it("expects brdf of the law the kernel builds per texel", () => {
+  it("writes a law without a curve's L(0) in every alpha (R07's rows, unchanged in f)", () => {
+    const withoutCurve: PhotometricLaw = {
+      a: LAW.a,
+      lommelSeeligerShare: LAW.lommelSeeligerShare,
+      template: LAW.template,
+      phaseExponent: LAW.phaseExponent,
+    };
+    const texels = packPhaseFactorRows([withoutCurve]);
+    for (const i of [0, 100, 360]) {
+      expect(texels[4 * i + 3]).toBe(1);
+    }
+  });
+
+  it("expects brdf of the law the kernel builds per texel: its A, its row's f and L(α)", () => {
     const perTexel: BrdfProbeCase = { ...CASE, perTexel: { normalAlbedo: 0.25 } };
     const [expected] = expectedBrdf([perTexel]);
     const alpha = Math.fround(0.5);
     const law = {
       ...LAW,
       a: [Math.fround(0.25), Math.fround(0.25) * 0.9, Math.fround(0.25) * 0.8] as const,
-      lommelSeeligerShare: syntheticShare(alpha),
     };
-    // f from the borrowed row (Mercury's own L), the disc term from the per-texel A and L.
     expect(expected).toEqual(
       brdfFromTable(law, phaseFactorTableOf(LAW), Math.fround(0.8), Math.fround(0.6), alpha),
     );
-    expect(expected).not.toEqual(brdf(law, Math.fround(0.8), Math.fround(0.6), alpha));
+    expect(expected).toEqual(brdf(law, Math.fround(0.8), Math.fround(0.6), alpha));
   });
 });
 

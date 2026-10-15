@@ -20,6 +20,7 @@ import {
   viewSceneOf,
 } from "../../test/sceneFixture";
 import { PROVISIONAL_PHOTOMETRY } from "../../view/appearance/fromWire";
+import type { ScreenCircle } from "../../view/bodies/regime";
 import { sceneHostDiscs } from "../../view/lighting/hostLights";
 import type { ViewScene } from "../../view/scene/model";
 import { litBodiesOf, litLabelsOf, photorealFrame } from "./photorealFrame";
@@ -42,7 +43,9 @@ function drawnOnly(body: LitBodyInput): LitBodyInput {
   return { ...body, lighting: undefined };
 }
 
-async function frameOfPhaseScene(): Promise<ReturnType<typeof photorealFrame>> {
+async function frameOfPhaseScene(
+  terrainFootprints?: ReadonlyArray<ScreenCircle>,
+): Promise<ReturnType<typeof photorealFrame>> {
   const engine = await countingRenderEngine();
   const run = startRun(phaseScene());
   const pose = runPose(run);
@@ -69,6 +72,7 @@ async function frameOfPhaseScene(): Promise<ReturnType<typeof photorealFrame>> {
     previousRegimes: new Map(),
     overlay: null,
     meter: "average",
+    ...(terrainFootprints === undefined ? {} : { terrainFootprints }),
   });
 }
 
@@ -102,6 +106,12 @@ describe("a photorealistic frame of the phase scene", () => {
     expect(planLitBodies(frame.bodies, frame.lights, options, new Map())).toEqual(
       planLitBodies(frame.bodies.map(drawnOnly), frame.lights, options, new Map()),
     );
+  });
+
+  it("takes the terrain's footprints as the geometry that writes depth (R10.T10.b)", async () => {
+    expect((await frameOfPhaseScene()).depthWriters).toEqual([]);
+    const footprint: ScreenCircle = { xPx: 960, yPx: 540, radiusPx: 300 };
+    expect((await frameOfPhaseScene([footprint])).depthWriters).toEqual([footprint]);
   });
 
   it("draws no sky without one, and takes the camera's role and field", async () => {

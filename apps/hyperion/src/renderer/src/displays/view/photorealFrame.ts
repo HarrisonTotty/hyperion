@@ -25,7 +25,7 @@ import {
   PROVISIONAL_PHOTOMETRY,
 } from "../../view/appearance/fromWire";
 import type { LitBodyInput } from "../../view/bodies/draw";
-import type { LitRegime } from "../../view/bodies/regime";
+import type { LitRegime, ScreenCircle } from "../../view/bodies/regime";
 import { type ProjectionCamera, project, type Viewport } from "../../view/camera/projection";
 import type { CameraPose } from "../../view/camera/pose";
 import type { DrawItem, FrameSubmission } from "../../view/engine/types";
@@ -69,6 +69,12 @@ export interface PhotorealInputs {
   readonly overlay: FrameSubmission | null;
   /** The operator's meter where the view is the exposure's source, or `null` (no histogram). */
   readonly meter: MeterMode | null;
+  /**
+   * The footprints of the terrain the frame draws, which writes depth (plan R10, R10.T10.b): a
+   * disc they overlap is drawn in the mesh regime (`promoteOverlapping`, R07 Design note 2). None
+   * until a view draws a body's terrain (R10.T10.c, T11).
+   */
+  readonly terrainFootprints?: ReadonlyArray<ScreenCircle>;
 }
 
 /** A wireframe sprite as a record at infinity. */
@@ -174,8 +180,8 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     glareSources: inputs.discs.glareSources(camera, viewport, run.camera.role),
     lights,
     bodies: litBodiesOf(scene, pose, discs),
-    // Nothing in a view writes depth yet; R10's terrain and lit craft add their footprints.
-    depthWriters: [],
+    // R10's terrain, where the view draws it; lit craft will add theirs.
+    depthWriters: inputs.terrainFootprints ?? [],
     previousRegimes: inputs.previousRegimes,
     overlay: inputs.overlay,
     meter: inputs.meter,

@@ -18,13 +18,28 @@
  * Positions follow R02's differencing: patch origins and contacts are body-fixed `f64`, rotated
  * into the body's non-rotating axes, less the camera in those axes, and narrowed once into the
  * records; the view's rotation is the camera's orientation in the body's axes.
+ *
+ * A body's patches baked with their class weights take R10's lit material (R10.T10.b,
+ * `terrainMaterial.ts`), lit by the frame's {@link TerrainFrameInput.lighting}; the test planet,
+ * and a body baked without weights, keep R05's material and its one sun.
  */
 
 import type { Quaternion } from "../camera/pose";
 import { conjugate, multiply, quaternionFromRows } from "../camera/quaternion";
 import { type Rotation3, rotateToBodyFixed } from "../coords/rotation";
-import type { DrawItem, MaterialHandle, RenderEngine, ViewSize } from "../engine/types";
+import type {
+  DrawItem,
+  MaterialHandle,
+  RenderEngine,
+  TextureHandle,
+  ViewSize,
+} from "../engine/types";
 import type { BufferHandle } from "../engine/types";
+import {
+  createAirlessTables,
+  surfaceLightingDrawTextures,
+  type SurfaceLightingTables,
+} from "../atmosphere/surfaceLighting";
 import {
   type QualitySetting,
   TERRAIN_SETTINGS,
@@ -54,6 +69,8 @@ import {
   type ViewSelectionInput,
 } from "./select";
 import { RESELECT_MOVE_FRACTION, selectionTolerancePx } from "./selectionTolerance";
+import type { TerrainShading } from "./slotLayout";
+import { type TerrainLighting, terrainLitMaterialSpec } from "./terrainMaterial";
 import type { BakedPatch, BakeSettings, HeightSourceSetting } from "./workers/messages";
 
 /**
@@ -71,6 +88,36 @@ export const WORKER_SKIRT_MARGIN_M = 0;
 
 /** The visual albedo the spike shades with, a hand value (Design note 17). */
 export const SPIKE_ALBEDO = 0.15;
+
+/**
+ * How a source's patches are shaded: R10's lit material for a body baked with its class weights,
+ * R05's spike shading for the test planet and for a body baked without them (the wireframe's).
+ */
+export function terrainShadingOf(source: HeightSourceSetting): TerrainShading {
+  let shading: TerrainShading;
+  switch (source.kind) {
+    case "test-planet":
+      shading = "spike";
+      break;
+    case "body":
+      switch (source.weights) {
+        case "baked":
+          shading = "lit";
+          break;
+        case "skipped":
+          shading = "spike";
+          break;
+      }
+      break;
+  }
+  return shading;
+}
+
+/** A frame's lights of a lit terrain, with its body's atmosphere tables where it has one. */
+export interface TerrainFrameLighting extends TerrainLighting {
+  /** The body's tables (`surfaceLightingTablesOf`); absent for a body without an atmosphere. */
+  readonly atmosphere?: SurfaceLightingTables;
+}
 
 /** The height pool the pass drives: T10's `HeightWorkerPool`, or a test's fake. */
 export interface TerrainPool {
@@ -106,6 +153,13 @@ export interface TerrainFrameInput {
   readonly sunIlluminanceLx: readonly [number, number, number];
   /** The frame's pre-exposure (R02's `exposureScale` of its EV100). */
   readonly exposureScale: number;
+  /**
+   * What lights a lit terrain (R10.T10.b): the body's stars, occluders and planetshine sources,
+   * body-fixed, its uniform law and the frame's pre-exposure, with its atmosphere's tables where it
+   * has one. R05's spike shading reads the sun above instead; a lit terrain given none draws its
+   * patches unlit.
+   */
+  readonly lighting?: TerrainFrameLighting;
   /** A monotonic time for the annunciation's debounce, milliseconds. */
   readonly nowMs: number;
 }
@@ -170,9 +224,14 @@ interface Device {
   readonly pool: TerrainPool;
   readonly offBaked: () => void;
   readonly instances: InstanceRecords;
+  /** A lit terrain's tables of no air, for a body without an atmosphere; `null` for the spike's. */
+  readonly airless: SurfaceLightingTables | null;
   material: MaterialHandle | null;
   /** The draw, made once the material is ready; its uniforms are rewritten in place each frame. */
   draw: DrawItem | null;
+  /** The phase table and atmosphere tables a lit draw binds, to make it again when they change. */
+  drawnTable: TextureHandle | null;
+  drawnAtmosphere: SurfaceLightingTables | null;
 }
 
 /** The inputs of the last selection, to decide whether to select again, and what it gave. */
@@ -279,11 +338,18 @@ export class TerrainPass {
   readonly #contacts = new ContactRecords();
   readonly #debounce = new TerrainAnnunciationDebounce();
   readonly #offRestored: () => void;
+  readonly #shading: TerrainShading;
   readonly #uniforms = {
     bodyRotation: new Float32Array(16),
     sunDirection: new Float32Array(4),
     sunRadiance: new Float32Array(4),
     atlas: new Float32Array(4),
+  };
+  /** The lit material's `Draw` (`terrainLit.wgsl`), rewritten in place each frame. */
+  readonly #litUniforms = {
+    bodyRotation: this.#uniforms.bodyRotation,
+    cameraBodyFixedM: new Float32Array(4),
+    atlas: this.#uniforms.atlas,
   };
   /**
    * Each level's morph band, start then end, for the last selection's view at its tolerance
@@ -302,6 +368,7 @@ export class TerrainPass {
     this.#terrain = options.terrain ?? TERRAIN_SETTINGS[options.setting];
     this.#planet = options.planet;
     this.#source = options.source;
+    this.#shading = terrainShadingOf(options.source);
     this.#createPool = options.createPool;
     this.#measureSelection = options.measureSelection ?? false;
     this.#onResident = options.onResident ?? null;
@@ -322,17 +389,24 @@ export class TerrainPass {
     return Math.floor(this.layout.slots.slotCount / 2);
   }
 
+  /** How the pass shades its patches ({@link terrainShadingOf}). */
+  get shading(): TerrainShading {
+    return this.#shading;
+  }
+
   /** Compiles the material ahead of the first frame; frames draw nothing until it resolves. */
   async ready(): Promise<void> {
     const device = this.#device;
+    const path = device.resources.layout.vertexPath;
     const material = await this.#engine.createMaterialAsync(
-      terrainMaterialSpec(device.resources.layout.vertexPath),
+      this.#shading === "lit" ? terrainLitMaterialSpec(path) : terrainMaterialSpec(path),
       ["rgba16float"],
       [device.resources.mesh],
     );
     if (device === this.#device && !this.#disposed) {
       device.material = material;
-      device.draw = this.#drawItem(device.resources, material);
+      // A lit draw is made at its first frame, which knows its tables (`#writeLit`).
+      device.draw = this.#shading === "lit" ? null : this.#drawItem(device.resources, material);
     }
   }
 
@@ -372,11 +446,19 @@ export class TerrainPass {
     this.#device.offBaked();
     this.#device.pool.terminate();
     this.#device.resources.dispose();
+    this.#releaseAirless(this.#device);
+  }
+
+  #releaseAirless(device: Device): void {
+    if (device.airless !== null) {
+      this.#engine.releaseTexture(device.airless.body);
+    }
   }
 
   #makeDevice(resources?: TerrainResources): Device {
     const made =
-      resources ?? new TerrainResources(this.#engine, this.#terrain, this.#planet.figure);
+      resources ??
+      new TerrainResources(this.#engine, this.#terrain, this.#planet.figure, this.#shading);
     const { layout } = made;
     const cache = new PatchCache(layout.slots);
     const pool = this.#createPool({
@@ -393,8 +475,12 @@ export class TerrainPass {
         this.#store(device, bake);
       }),
       instances: new InstanceRecords(layout.slots.slotCount),
+      airless:
+        this.#shading === "lit" ? createAirlessTables(this.#engine, "terrain: no air") : null,
       material: null,
       draw: null,
+      drawnTable: null,
+      drawnAtmosphere: null,
     };
     return device;
   }
@@ -404,6 +490,7 @@ export class TerrainPass {
     const old = this.#device;
     old.offBaked();
     old.pool.terminate();
+    // The restore made every handle anew: the old tables of no air went with the old device.
     this.#device = this.#makeDevice(old.resources);
     this.#rangesVersion += 1;
     this.#selected = null;
@@ -588,11 +675,14 @@ export class TerrainPass {
       );
     }
     resources.writeFrame(instances, this.#contacts);
-    if (device.draw === null || instances.count === 0) {
+    if (device.material === null || instances.count === 0) {
       return null;
     }
     const u = this.#uniforms;
     rotationMat4(input.view.rotation, u.bodyRotation);
+    if (this.#shading === "lit") {
+      return this.#writeLit(device, input);
+    }
     const sun = input.sunDirectionBodyFixed;
     u.sunDirection[0] = sun.x;
     u.sunDirection[1] = sun.y;
@@ -605,8 +695,49 @@ export class TerrainPass {
     return device.draw;
   }
 
-  /** The draw of `resources` with `material`, its uniforms this pass's arrays. */
-  #drawItem(resources: TerrainResources, material: MaterialHandle): DrawItem {
+  /** A lit frame's uniforms and lights, and its draw, made again where its tables changed. */
+  #writeLit(device: Device, input: TerrainFrameInput): DrawItem | null {
+    const { resources } = device;
+    const lighting = input.lighting;
+    if (lighting !== undefined) {
+      resources.setLighting(lighting);
+    }
+    const camera = rotateToBodyFixed(input.view.rotation, input.view.cameraM);
+    const c = this.#litUniforms.cameraBodyFixedM;
+    c[0] = camera.x;
+    c[1] = camera.y;
+    c[2] = camera.z;
+    c[3] = 1 / this.#planet.figure.equatorialRadiusM;
+    const lit = resources.lit;
+    const atmosphere = lighting?.atmosphere ?? device.airless;
+    const material = device.material;
+    if (lit === null || atmosphere === null || material === null) {
+      return null;
+    }
+    if (
+      device.draw === null ||
+      device.drawnTable !== lit.phaseTable ||
+      device.drawnAtmosphere !== atmosphere
+    ) {
+      device.draw = this.#drawItem(resources, material, { table: lit.phaseTable, atmosphere });
+      device.drawnTable = lit.phaseTable;
+      device.drawnAtmosphere = atmosphere;
+    }
+    return device.draw;
+  }
+
+  /**
+   * The draw of `resources` with `material`, its uniforms this pass's arrays; a lit terrain's binds
+   * its class weights, laws, lights, `phase` table and atmosphere tables too.
+   */
+  #drawItem(
+    resources: TerrainResources,
+    material: MaterialHandle,
+    phase: {
+      readonly table: TextureHandle;
+      readonly atmosphere: SurfaceLightingTables;
+    } | null = null,
+  ): DrawItem {
     const heights = resources.field("heights");
     if (heights === null) {
       throw new Error("the terrain layout has no heights buffer");
@@ -628,12 +759,34 @@ export class TerrainPass {
       atlas.tileTexels,
       atlas.samplesPerSide,
     ]);
+    const lit = resources.lit;
+    const classLayers = resources.field("class-layers");
+    if (phase === null) {
+      return {
+        mesh: resources.mesh,
+        material,
+        offsetFromCameraM: ZERO_OFFSET,
+        uniforms: this.#uniforms,
+        textures: { normals: resources.normals },
+        storageBuffers,
+        indirect: { buffer: resources.indirect, offsetBytes: 0 },
+      };
+    }
+    if (lit === null || classLayers === null) {
+      throw new Error("a lit terrain's draw has no lit layout: its class layers or lights");
+    }
+    storageBuffers["classLayers"] = classLayers;
+    storageBuffers["terrainLights"] = lit.lights;
     return {
       mesh: resources.mesh,
       material,
       offsetFromCameraM: ZERO_OFFSET,
-      uniforms: this.#uniforms,
-      textures: { normals: resources.normals },
+      uniforms: this.#litUniforms,
+      textures: {
+        normals: resources.normals,
+        phaseFactorTable: phase.table,
+        ...surfaceLightingDrawTextures(phase.atmosphere),
+      },
       storageBuffers,
       indirect: { buffer: resources.indirect, offsetBytes: 0 },
     };

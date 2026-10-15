@@ -42,16 +42,23 @@ export function shapeGeometricAlbedo(lommelSeeligerShare: number): number {
 }
 
 /**
- * Φ_shape(α; L), the disc term's disc-integrated phase function, one at opposition.
+ * Φ_shape(α; L), the disc term's disc-integrated phase function, one at opposition: with L(α) the
+ * share at α, [L(α) Φ_LS(α) + ⅔(1 − L(α)) Φ_Lam(α)] ÷ [L(0) + ⅔(1 − L(0))] (plan R10, Design note 8;
+ * decision-r07-t8b). The disc term at a fixed α has one L over the whole disc, so its integral is
+ * the albedo-weighted mixture at L(α), normalised by the geometric albedo at L(0).
  *
- * @param lommelSeeligerShare - L, 0 (Lambert) to 1 (Lommel–Seeliger).
+ * @param lommelSeeligerShare - L(0), 0 (Lambert) to 1 (Lommel–Seeliger).
+ * @param shareAtPhase - L(α), the share at `alphaRad`; L(0) for a constant share.
  */
-export function shapePhase(lommelSeeligerShare: number, alphaRad: number): number {
-  const l = lommelSeeligerShare;
-  const lambertWeight = (2 / 3) * (1 - l);
+export function shapePhase(
+  lommelSeeligerShare: number,
+  alphaRad: number,
+  shareAtPhase: number = lommelSeeligerShare,
+): number {
+  const l = shareAtPhase;
   return (
-    (l * lommelSeeligerPhase(alphaRad) + lambertWeight * lambertPhase(alphaRad)) /
-    (l + lambertWeight)
+    (l * lommelSeeligerPhase(alphaRad) + (2 / 3) * (1 - l) * lambertPhase(alphaRad)) /
+    shapeGeometricAlbedo(lommelSeeligerShare)
   );
 }
 

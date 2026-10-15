@@ -22,8 +22,20 @@
  * analogue's measured q: Ganymede's 0.80 (Squyres and Veverka 1981, Icarus 46, 137) and Europa's
  * 1.01 (Grundy et al. 2007, Science 318, 234). A magma ocean under 30 kPa takes Mercury's curve;
  * above it, Venus's (decision-phase-curves, 2026-10-02).
+ *
+ * The five templates at L(0) = 1, the airless and particulate ones (`moon`, `mercury`,
+ * `airless-ice`, `snowball` and `magma`), carry McEwen 1996's lunar L(α) (`law.ts`'s
+ * `mcewenLunarProfile`; plan R10, R10.T10.b, decision-r07-t8b), which moves only their limb
+ * profile: f is tabulated against it, so p is unchanged and Φ is Φ_t^s wherever f is not clamped.
+ * McEwen fitted the Moon alone, so on `airless-ice` and `snowball` the profile is the Moon's
+ * extrapolated to icy albedos (decision-r10-limb's deferred findings).
+ * Past a template's range, where f is held, the held f draws the tail under L(α) = 0, Lambert's
+ * shape, in place of Lommel–Seeliger's, which lowers q by 1.8 × 10⁻⁴ (the Moon), 3.7 × 10⁻⁴
+ * (airless ice), 6.8 × 10⁻⁴ (a snowball) and 1.4 × 10⁻⁶ (Mercury and magma), relative (R10's
+ * Risks, "Deviations in T10.b, as built"). The generator's q (plan 14's `photometry.rs`) is the
+ * constant-L law's.
  */
-import type { PhaseTemplateId } from "./law";
+import type { LommelSeeligerCurve, PhaseTemplateId } from "./law";
 import { lambertPhase } from "./shapes";
 
 /** A measured V phase curve, normalised to one at opposition. */
@@ -46,6 +58,11 @@ export interface PhaseTemplate {
   readonly lommelSeeligerShare: number;
   /** True for a stand-in with no measured analogue, which is labelled wherever it is shown. */
   readonly provisional: boolean;
+  /**
+   * The profile L(α) ÷ L(0) a law on this curve takes (decision-r07-t8b); absent, a constant L. A
+   * law made for the template (`lawFor`, `modelledPhotometry`) carries it.
+   */
+  readonly lommelSeeligerCurve?: LommelSeeligerCurve;
 }
 
 const DEG_PER_RAD = 180 / Math.PI;
@@ -76,9 +93,10 @@ function template(
   lommelSeeligerShare: number,
   source: string,
   provisional: boolean,
+  lommelSeeligerCurve: LommelSeeligerCurve | null = null,
 ): PhaseTemplate {
   const validToRad = validToDeg / DEG_PER_RAD;
-  return {
+  const made: PhaseTemplate = {
     phaseV: (alphaRad) => {
       const clamped = Math.min(Math.max(alphaRad, 0), validToRad);
       return fluxFromDimming(dimmingMag(clamped * DEG_PER_RAD));
@@ -88,7 +106,11 @@ function template(
     source,
     provisional,
   };
+  return lommelSeeligerCurve === null ? made : { ...made, lommelSeeligerCurve };
 }
+
+/** The lunar L(α) of the five airless templates (decision-r07-t8b). */
+const MCEWEN: LommelSeeligerCurve = "mcewen-1996";
 
 /**
  * The Moon, Krisciunas and Schaefer 1991, eq. 9 (after Allen 1973): Δm = 0.026 α + 4 × 10⁻⁹ α⁴, α
@@ -197,8 +219,8 @@ const MOON_KS91 =
  * fit gives 6.78 mag against the table's 7.5).
  */
 export const PHASE_TEMPLATES: Readonly<Record<PhaseTemplateId, PhaseTemplate>> = {
-  moon: template(moonDimming, 150, 1, `${MOON_KS91}; to 150°`, false),
-  mercury: template(mercuryDimming, 169.5, 1, `${MH2018}, eq. 2; to 169.5°`, false),
+  moon: template(moonDimming, 150, 1, `${MOON_KS91}; to 150°`, false, MCEWEN),
+  mercury: template(mercuryDimming, 169.5, 1, `${MH2018}, eq. 2; to 169.5°`, false, MCEWEN),
   mars: template(marsDimming, 50, 0.5, `${MH2018}, eq. 6; to 50°`, false),
   venus: template(venusDimming, 179, 0, `${MH2018}, eqs. 3–4; to 179°`, false),
   earth: template(earthDimming, 144, 0, ROBINSON2026, false),
@@ -212,6 +234,7 @@ export const PHASE_TEMPLATES: Readonly<Record<PhaseTemplateId, PhaseTemplate>> =
     1,
     `PROVISIONAL: the Moon's curve shape (${MOON_KS91}); q from Ganymede's 0.80 (Squyres and Veverka 1981, Icarus 46, 137) through s`,
     true,
+    MCEWEN,
   ),
   snowball: template(
     moonDimming,
@@ -219,6 +242,7 @@ export const PHASE_TEMPLATES: Readonly<Record<PhaseTemplateId, PhaseTemplate>> =
     1,
     `PROVISIONAL: the Moon's curve shape (${MOON_KS91}); q from Europa's 1.01 (Grundy et al. 2007, Science 318, 234) through s; cloud-free ice`,
     true,
+    MCEWEN,
   ),
   // Design note 5's provisional photometry: a Lambert sphere, Φ = Φ_L, f = 1, held past 179°
   // where Φ_L reaches 0 at 180°.
@@ -235,5 +259,6 @@ export const PHASE_TEMPLATES: Readonly<Record<PhaseTemplateId, PhaseTemplate>> =
     1,
     `PROVISIONAL: Mercury's curve stands in (${MH2018}, eq. 2); no magma-ocean analogue; thin branch only, P < 30 kPa (thicker: venus)`,
     true,
+    MCEWEN,
   ),
 };

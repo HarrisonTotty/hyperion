@@ -3,13 +3,15 @@
  * reaches a body's p and q (plan R07, Design note 5).
  *
  * @remarks
- * Φ(α) = f(α) Φ_shape(α; L), f read from the law's table as the shader reads it, so that the point
- * regime integrates the law the disc draws. `lawFor` takes p and q per display channel, the
- * template's L, and solves each channel's exponent s in Φ_t^s by bisection: q falls monotonically
- * as s rises, since Φ_t ≤ 1 wherever the integrand's weight sin α is not negligible.
+ * Φ(α) = f(α) Φ_shape(α; L), f read from the law's table as the shader reads it and Φ_shape taken
+ * with the law's L(α) (`law.ts`'s `limbShareAt`), so that the point regime integrates the law the
+ * disc draws. `lawFor` takes p and q per display channel, the template's L(0) and its L(α) curve,
+ * and solves each channel's exponent s in Φ_t^s by bisection: q falls monotonically as s rises,
+ * since Φ_t ≤ 1 wherever the integrand's weight sin α is not negligible.
  */
 import type { Rgb } from "../photometry/toneCurve";
 import {
+  limbShareAt,
   PHASE_F_CLAMP,
   phaseFactor,
   phaseFactorFromTable,
@@ -27,7 +29,7 @@ import { PHASE_TEMPLATES } from "./templates";
  */
 export function discIntegratedPhase(law: PhotometricLaw, phaseRad: number): Rgb {
   const [r, g, b] = phaseFactorFromTable(phaseFactorTableOf(law), phaseRad);
-  const shape = shapePhase(law.lommelSeeligerShare, phaseRad);
+  const shape = shapePhase(law.lommelSeeligerShare, phaseRad, limbShareAt(law, phaseRad));
   return [r * shape, g * shape, b * shape];
 }
 
@@ -36,7 +38,8 @@ const LAW_INTEGRAL_INTERVALS = 7200;
 
 /**
  * The law's phase integral per channel, q = 2 ∫₀^π f(α) Φ_shape(α; L) sin α dα, with the exact f
- * (clamped, and held past the template's range), as plan 14 defines a body's q (P14.T47).
+ * (clamped, and held past the template's range) and the law's L(α), as plan 14 defines a body's q
+ * (P14.T47).
  *
  * @remarks
  * Simpson's rule over 7,200 intervals, as `shapes.ts`' `phaseIntegral`, with each node's f found
@@ -51,7 +54,7 @@ export function lawPhaseIntegral(law: PhotometricLaw): Rgb {
     const alpha = i * h;
     const weight =
       (i === 0 || i === n ? 1 : i % 2 === 1 ? 4 : 2) *
-      shapePhase(law.lommelSeeligerShare, alpha) *
+      shapePhase(law.lommelSeeligerShare, alpha, limbShareAt(law, alpha)) *
       Math.sin(alpha);
     const f = phaseFactor(law, alpha);
     sums[0] += weight * f[0];
@@ -79,10 +82,12 @@ const SOLVE_INTERVALS = 1800;
 
 /**
  * The phase integral of a template's law as a function of the exponent s, over a grid sampled
- * once: q(s) = 2 ∫ min(Φ_t^s, 4 Φ_shape) sin α dα inside the range and f(α_end) Φ_shape beyond.
+ * once: q(s) = 2 ∫ min(Φ_t^s, 4 Φ_shape) sin α dα inside the range and f(α_end) Φ_shape beyond,
+ * Φ_shape with the template's L(α).
  */
 function phaseIntegralOfExponent(template: PhaseTemplateId): (s: number) => number {
-  const { phaseV, validToRad, lommelSeeligerShare } = PHASE_TEMPLATES[template];
+  const curve = PHASE_TEMPLATES[template];
+  const { phaseV, validToRad, lommelSeeligerShare } = curve;
   const h = Math.PI / SOLVE_INTERVALS;
   const weight = new Float64Array(SOLVE_INTERVALS + 1);
   const phaseTemplate = new Float64Array(SOLVE_INTERVALS + 1);
@@ -93,11 +98,11 @@ function phaseIntegralOfExponent(template: PhaseTemplateId): (s: number) => numb
     const simpson = i === 0 || i === SOLVE_INTERVALS ? 1 : i % 2 === 1 ? 4 : 2;
     weight[i] = ((2 * h) / 3) * simpson * Math.sin(alpha);
     phaseTemplate[i] = phaseV(alpha);
-    shape[i] = shapePhase(lommelSeeligerShare, alpha);
+    shape[i] = shapePhase(lommelSeeligerShare, alpha, limbShareAt(curve, alpha));
     inRange.push(alpha <= validToRad);
   }
   const endTemplate = phaseV(validToRad);
-  const endShape = shapePhase(lommelSeeligerShare, validToRad);
+  const endShape = shapePhase(lommelSeeligerShare, validToRad, limbShareAt(curve, validToRad));
   return (s) => {
     const heldF =
       endShape > 0 ? Math.min(PHASE_F_CLAMP, endTemplate ** s / endShape) : PHASE_F_CLAMP;
@@ -138,10 +143,10 @@ function solveExponent(qOf: (s: number) => number, q: number): number {
  * The law of a body of geometric albedo p and phase integral q per display channel on a template.
  *
  * @remarks
- * L is the template's; A = p ÷ [L + ⅔(1 − L)]; each channel's s is solved so that the law's phase
- * integral is q. A q beyond what s from 1/16 to 16 reaches takes the bracket's end, the nearest law
- * the template allows. The phase integral is that of the exact, clamped and held f; the table's
- * interpolation moves it by about 10⁻⁴.
+ * L(0) and the L(α) curve are the template's; A = p ÷ [L(0) + ⅔(1 − L(0))]; each channel's s is
+ * solved so that the law's phase integral, under its L(α), is q. A q beyond what s from 1/16 to 16
+ * reaches takes the bracket's end, the nearest law the template allows. The phase integral is that
+ * of the exact, clamped and held f; the table's interpolation moves it by about 10⁻⁴.
  *
  * @param p - Geometric albedo per display channel (r, g, b).
  * @param q - Phase integral per display channel (r, g, b).
@@ -150,10 +155,19 @@ export function lawFor(p: Rgb, q: Rgb, template: PhaseTemplateId): PhotometricLa
   const { lommelSeeligerShare } = PHASE_TEMPLATES[template];
   const k = shapeGeometricAlbedo(lommelSeeligerShare);
   const qOf = phaseIntegralOfExponent(template);
-  return {
+  return withTemplateCurve({
     a: [p[0] / k, p[1] / k, p[2] / k],
     lommelSeeligerShare,
     template,
     phaseExponent: [solveExponent(qOf, q[0]), solveExponent(qOf, q[1]), solveExponent(qOf, q[2])],
-  };
+  });
+}
+
+/**
+ * `law` with its template's L(α) curve (`templates.ts`), as every law made for a template carries
+ * it; `law` itself where the template has none.
+ */
+export function withTemplateCurve(law: PhotometricLaw): PhotometricLaw {
+  const curve = PHASE_TEMPLATES[law.template].lommelSeeligerCurve;
+  return curve === undefined ? law : { ...law, lommelSeeligerCurve: curve };
 }

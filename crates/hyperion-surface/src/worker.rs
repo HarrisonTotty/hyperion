@@ -1,7 +1,8 @@
 //! What a client's height worker holds and answers for real bodies (plan R10, T6.b): a
 //! [`PartialField`] a body, built from R09's payload blocks as the render thread posts them, and
-//! over it R10's bake ([`bake_terrain`]), readings ([`surveyed_reading`], [`slant_range`]) and
-//! material ([`material_at`] with [`properties`]).
+//! over it R10's bake ([`bake_terrain`]), readings ([`surveyed_reading`], [`slant_range`]),
+//! material ([`material_at`] with [`properties`]) and the photometry the lit terrain draws a
+//! bake's palette with ([`WorkerFields::photometry`], R10.T10.b).
 //!
 //! The client's WebAssembly module wraps [`WorkerFields`] in its `SurfaceFields` export
 //! (`src/wasm.rs`) thinly: the decoding, the merge, the survey's change, the level table and each
@@ -59,7 +60,10 @@ use crate::bake::{TerrainBake, TerrainBakeOptions, UNSURVEYED, bake_terrain};
 use crate::cube::{FaceUv, MAX_LEVEL, PATCH_QUADS, PatchKey, face_uv_to_xyz, unit_dir};
 use crate::field::{BodyRef, FieldView, InsertBlockError, PartialField, cell_at_index, cell_index};
 use crate::geometry::vertex_spacing;
-use crate::material::{GroundMaterial, MaterialProperties, material_at, properties};
+use crate::material::{
+    GroundMaterial, Material, MaterialProperties, PhaseLaw, ResolvePropertiesError, material_at,
+    properties, scaled_normal_albedo,
+};
 use crate::num;
 use crate::reading::{LineOfSight, SurveyedReading, slant_range, surveyed_reading};
 use crate::synth::{BandLevel, LevelBounds, QueryHeightError, SynthCache, Synthesiser};
@@ -243,6 +247,74 @@ impl From<QueryHeightError> for QueryBodyError {
     fn from(e: QueryHeightError) -> Self {
         match e {
             QueryHeightError::NotSurveyed(cell) => Self::NotSurveyed(cell),
+        }
+    }
+}
+
+/// A material's photometry as the lit terrain draws it (plan R10, T10.b; Design note 8): its normal
+/// albedo in B, V and R under the body's albedo scale ([`scaled_normal_albedo`]), its law, and the
+/// law's L(0) at the scaled V ([`PhaseLaw::limb_parameter`]), as T10.a's solve assumed them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawnPhotometry {
+    normal_albedo_bvr: [f64; 3],
+    phase_law: PhaseLaw,
+    limb_parameter: f64,
+}
+
+impl DrawnPhotometry {
+    /// The normal albedo in the Johnson B, V and R bands under the field header's albedo scale c,
+    /// dimensionless: c `A_N`, its V clamped to the material's
+    /// [`scale_range`](crate::material::scale_range) and its B and R taking V's factor, each from 0
+    /// to its law's ceiling ([`PhaseLaw::normal_albedo_ceiling`]: 1.35 for the particulate laws, 1
+    /// for Lambert's).
+    #[must_use]
+    pub const fn normal_albedo_bvr(&self) -> [f64; 3] {
+        self.normal_albedo_bvr
+    }
+
+    /// The photometric law: its row's f(α) and L(α) (R07's phase table, R10.T10.b).
+    #[must_use]
+    pub const fn phase_law(&self) -> PhaseLaw {
+        self.phase_law
+    }
+
+    /// L(0), the law's Lommel–Seeliger share at opposition at the scaled albedo in V, dimensionless:
+    /// 0 for Lambert's law, 0.38 to 1 for the particulate laws ([`limb_parameter`](
+    /// crate::material::limb_parameter)), NaN for a NaN albedo.
+    #[must_use]
+    pub const fn limb_parameter(&self) -> f64 {
+        self.limb_parameter
+    }
+}
+
+/// Why a worker could not give a material's photometry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ResolvePhotometryError {
+    /// No field of the body is held.
+    NotStarted(BodyRef),
+    /// The material's entry is past the body's palette.
+    Properties(ResolvePropertiesError),
+}
+
+impl std::fmt::Display for ResolvePhotometryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotStarted(body) => write!(
+                f,
+                "no field of body {} of system {:#x} is held",
+                body.body_index(),
+                body.raw_system_id()
+            ),
+            Self::Properties(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for ResolvePhotometryError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::NotStarted(_) => None,
+            Self::Properties(e) => Some(e),
         }
     }
 }
@@ -575,6 +647,41 @@ impl WorkerFields {
                 .expect("the classifier names only entries of the body's palette")
         });
         Ok(Some(SurveyedMaterial { ground, properties }))
+    }
+
+    /// The photometry `material` is drawn with on `body` ([`DrawnPhotometry`]).
+    ///
+    /// Its properties over the body's palette ([`properties`]), its albedo under the field header's
+    /// scale (R10.T10.a's c, 1 where the header holds none: the palette's albedos as resolved, as
+    /// [`FieldHeaderParts::albedo_scale`](crate::field::FieldHeaderParts::albedo_scale)'s contract
+    /// has it), and its law's L(0) there. It reads the header alone, so it answers wherever the
+    /// body's field is held, surveyed or not.
+    ///
+    /// # Errors
+    ///
+    /// [`ResolvePhotometryError::NotStarted`] where no field of `body` is held, and
+    /// [`ResolvePhotometryError::Properties`] for an entry past its palette.
+    pub fn photometry(
+        &self,
+        body: BodyRef,
+        material: Material,
+    ) -> Result<DrawnPhotometry, ResolvePhotometryError> {
+        let header = self
+            .bodies
+            .get(&body)
+            .ok_or(ResolvePhotometryError::NotStarted(body))?
+            .field
+            .header();
+        let resolved =
+            properties(material, header.palette()).map_err(ResolvePhotometryError::Properties)?;
+        let normal_albedo_bvr =
+            scaled_normal_albedo(&resolved, header.albedo_scale().unwrap_or(1.0));
+        let phase_law = resolved.phase_law();
+        Ok(DrawnPhotometry {
+            normal_albedo_bvr,
+            phase_law,
+            limb_parameter: phase_law.limb_parameter(normal_albedo_bvr[1]),
+        })
     }
 
     /// The body's field and what is kept with it.

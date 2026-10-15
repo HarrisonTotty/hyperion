@@ -23,7 +23,7 @@ import type { SystemBody, SystemBodyPhotometry } from "../../lib/system/model";
 import type { BodyFigure } from "../terrain/planet";
 import type { Rgb } from "../photometry/toneCurve";
 import type { PhaseTemplateId, PhotometricLaw } from "./law";
-import { lawFor, lawPhaseIntegral } from "./phase";
+import { lawFor, lawPhaseIntegral, withTemplateCurve } from "./phase";
 import { shapeGeometricAlbedo } from "./shapes";
 
 export type { BodyFigure } from "../terrain/planet";
@@ -158,12 +158,13 @@ function bondRatioFindingOf(statedRatio: number, lawRatio: number): BondRatioFin
 export function modelledPhotometry(section: SystemBodyPhotometry): ModelledPhotometry {
   const { geometricAlbedo: p, phaseExponent: s, lunarLambertShare: l } = section;
   const k = shapeGeometricAlbedo(l);
-  const law: PhotometricLaw = {
+  // The template's L(α) curve rides with the law (decision-r07-t8b): L(0) is the section's L.
+  const law: PhotometricLaw = withTemplateCurve({
     a: [p.r / k, p.v / k, p.b / k],
     lommelSeeligerShare: l,
     template: templateOf(section.phaseTemplate),
     phaseExponent: [s.r, s.v, s.b],
-  };
+  });
   const q = lawPhaseIntegral(law);
   const lawRatio = (p.v * q[1]) / section.bondAlbedo;
   return {

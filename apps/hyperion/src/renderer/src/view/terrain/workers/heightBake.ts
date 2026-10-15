@@ -189,6 +189,14 @@ export interface WasmSurfaceFields {
     u: number,
     v: number,
   ): WasmGround | undefined;
+  /**
+   * The photometry of each slot of a bake's palette (R10.T10.b), 8 × 5; `undefined` where no
+   * field of the body is held.
+   *
+   * @throws Error for a palette the module cannot read (another length, or a slot naming no class
+   *   or no entry of the body's palette).
+   */
+  photometry(system: bigint, body: number, palette: Uint8Array): Float32Array | undefined;
   free(): void;
 }
 
@@ -534,14 +542,21 @@ export class WorkerFields {
       return null;
     }
     try {
+      const palette = baked.palette();
+      // The palette's photometry from the field the bake was made over, in the same message.
+      const photometry = this.#module.photometry(...bodyArgs(source.body), palette);
+      if (photometry === undefined) {
+        throw new Error(`the field of ${source.body} went before its bake's photometry`);
+      }
       return patchOf(baked, key, generation, {
-        palette: baked.palette(),
+        palette,
         weights: baked.weights(),
         surveyMask: baked.surveyMask(),
         boundM: baked.boundM,
         sigmaM: baked.sigmaM,
         complete: baked.complete,
         unsurveyedCells: baked.unsurveyedCells(),
+        photometry,
       });
     } finally {
       baked.free();

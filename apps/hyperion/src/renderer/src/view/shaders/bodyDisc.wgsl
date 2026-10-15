@@ -32,8 +32,8 @@
 //   1  the centre's unit direction from the camera; w, a ÷ D;
 //   2  the pole's unit direction; w, c ÷ a;
 //   3  samples per axis in a wholly covered pixel and in a limb pixel; the lights; the occluders;
-//   4  law 0's A per channel (r, g, b), scaled for the figure; w, its L: the uniform law, or a
-//      class map's `elsewhere`;
+//   4  law 0's A per channel (r, g, b), scaled for the figure; w, its L(0): the uniform law, or a
+//      class map's `elsewhere` (its L(α) is its row's alpha);
 //   5  law 0's row of `phase_factor_table`; the annuli per channel; exposure ÷ π; the class map's
 //      classes, 0 for a uniform surface;
 //   6 + 8j, light j: the star's unit direction from the body's centre, w its distance ÷ a; its
@@ -41,7 +41,7 @@
 //      edges and fluxes) for r, g and b, two rows each;
 //   22 + k, occluder k: its centre from the body's centre ÷ a; w, its radius ÷ a;
 //   24, 25  a class map's body-fixed x and y axes (z their cross product);
-//   26 + k, class k (law k + 1): its A per channel, scaled; w, its L;
+//   26 + k, class k (law k + 1): its A per channel, scaled; w, its L(0);
 //   42 to 45  the classes' rows of `phase_factor_table`, four a row;
 //   46  the planetshine sources (x);
 //   47 + 2j, source j: the neighbour's unit direction from the body's centre, w its distance ÷ a;
@@ -290,8 +290,10 @@ fn surface_reflectance(
       continue;
     }
     let law = surface_law(m);
-    let disc_term = lit_disc_term(law.l, h, mu0, mu, source_radius);
-    reflectance = reflectance + share * law.a * phase_factor(law.table_row, alpha) * disc_term;
+    // f and L(α) from the law's row (plan R10, R10.T10.b; decision-r07-t8b).
+    let row = phase_row(law.table_row, alpha);
+    let disc_term = lit_disc_term(row.a, h, mu0, mu, source_radius);
+    reflectance = reflectance + share * law.a * row.rgb * disc_term;
   }
   return reflectance;
 }
@@ -300,48 +302,6 @@ fn surface_reflectance(
 struct Shaded {
   radiance : vec3f,
   lit : bool,
-}
-
-// A lit point's frame for R08's lookups (plan R08, R08.T9.b; Design note 17): its geodetic latitude,
-// rad, from its spheroid normal against the pole, and its north and east, unit and horizontal, in
-// the view's axes. At a pole, where every azimuth is the same, east is any horizontal direction.
-struct LocalFrame {
-  latitude : f32,
-  north : vec3f,
-  east : vec3f,
-}
-
-// Below this cosine of its latitude a point is taken as at a pole.
-const AT_POLE : f32 = 1e-6;
-
-// The frame at the point of unit spheroid normal `normal` on a body of unit pole `pole`: sin φ is
-// n · p and cos φ |p × n|, φ by `preciseAtan2` (R08's `preciseTrig.wgsl`), east p × n ÷ cos φ and
-// north n × east.
-fn local_frame(normal : vec3f, pole : vec3f) -> LocalFrame {
-  let sin_latitude = clamp(dot(normal, pole), -1.0, 1.0);
-  let towards_east = cross(pole, normal);
-  let cos_latitude = length(towards_east);
-  var east : vec3f;
-  if (cos_latitude > AT_POLE) {
-    east = towards_east / cos_latitude;
-  } else {
-    let other = select(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), abs(normal.x) > 0.9);
-    east = normalize(cross(other, normal));
-  }
-  let latitude = preciseAtan2(abs(sin_latitude), cos_latitude);
-  return LocalFrame(select(latitude, -latitude, sin_latitude < 0.0), cross(normal, east), east);
-}
-
-// A unit direction's azimuth at the frame, rad, from north towards east, in [−π, π]; 0 at the
-// zenith or the nadir.
-fn local_azimuth(frame : LocalFrame, d : vec3f) -> f32 {
-  let towards_north = dot(d, frame.north);
-  let towards_east = dot(d, frame.east);
-  if (!(towards_north * towards_north + towards_east * towards_east > 0.0)) {
-    return 0.0;
-  }
-  let azimuth = preciseAtan2(abs(towards_east), towards_north);
-  return select(azimuth, -azimuth, towards_east < 0.0);
 }
 
 // The radiance of the point `q` (from the body's centre ÷ a) seen along `ray`, pre-exposed.

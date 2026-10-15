@@ -5,9 +5,9 @@
  * @remarks
  * A disc is one screen rectangle whose fragments intersect their rays with the body's spheroid
  * (the polar axis scaled by a ÷ c makes it a sphere, the normal taken by the inverse transpose)
- * and shade each hit with the body's law: I/F = A f(α) [L · 2h ÷ (μ₀ + μ) + (1 − L) h], where h,
- * the horizon term (`sphereIrradianceFactor`), stands for the law's μ₀ and equals it wherever the
- * whole star is up; each star's light is cut by the eclipse term of up to two occluders and summed
+ * and shade each hit with the body's law: I/F = A f(α) [L(α) · 2h ÷ (μ₀ + μ) + (1 − L(α)) h], f
+ * and L(α) from its phase row, where h, the horizon term (`sphereIrradianceFactor`), stands for the
+ * law's μ₀ and equals it wherever the whole star is up; each star's light is cut by the eclipse term of up to two occluders and summed
  * over up to two stars, and up to two lit neighbours add their planetshine through the same law,
  * each a uniform sphere through `planetshineIrradiance` (T11, Design note 7), never eclipsed. The
  * law is its `DiscSurface`'s: one law, or under a class map each class's law weighted by the
@@ -34,7 +34,12 @@ import {
   type SurfaceLightingReader,
   type SurfaceLightingTables,
 } from "../atmosphere/surfaceLighting";
-import { phaseFactorFromTable, type PhaseFactorTable, phaseFactorTableOf } from "../appearance/law";
+import {
+  limbShareFromTable,
+  phaseFactorFromTable,
+  type PhaseFactorTable,
+  phaseFactorTableOf,
+} from "../appearance/law";
 import { type ProjectionCamera, toViewAxes, type Viewport } from "../camera/projection";
 import type { AnnulusSet } from "../lighting/annuli";
 import { MAX_BODY_LIGHTS } from "../lighting/hostLights";
@@ -341,9 +346,13 @@ function annulusCount(record: DiscRecord): number {
   return record.lights[0]?.annuli[0].flux.length ?? 0;
 }
 
-/** One of a record's laws as the shader holds it: A scaled per channel, L and its phase table. */
+/**
+ * One of a record's laws as the shader holds it: A scaled per channel, L(0) and its phase table,
+ * whose alpha holds its L(α).
+ */
 interface ScaledLaw {
   readonly a: Rgb;
+  /** L(0). */
   readonly share: number;
   readonly table: PhaseFactorTable;
   readonly tableRow: number;
@@ -608,7 +617,8 @@ function sharesAt(body: ViewBody, q: Vec3): number[] {
 
 /**
  * The reflectance I/F of the body's laws by their shares at a point lit by one source:
- * A f(α) [L · 2h ÷ (μ₀ + μ) + (1 − L) h], with h the source's irradiance factor in place of μ₀
+ * A f(α) [L(α) · 2h ÷ (μ₀ + μ) + (1 − L(α)) h], f and L(α) from each law's row, with h the source's
+ * irradiance factor in place of μ₀
  * (it equals μ₀ wherever the whole source is up, and lights the soft band past the terminator) and
  * the Lommel–Seeliger term's μ₀ + μ floored at the source's angular radius, so that it stays
  * bounded at the limb in that band; `surface_reflectance` and `lit_disc_term` in the shader.
@@ -629,7 +639,8 @@ function surfaceReflectance(
     if (!(weight > 0)) {
       return;
     }
-    const discTerm = (law.share * 2 * h) / lsDenominator + (1 - law.share) * h;
+    const share = limbShareFromTable(law.table, alpha);
+    const discTerm = (share * 2 * h) / lsDenominator + (1 - share) * h;
     const f = phaseFactorFromTable(law.table, alpha);
     for (const c of CHANNELS) {
       reflectance[c] += weight * law.a[c] * f[c] * discTerm;
@@ -639,7 +650,7 @@ function surfaceReflectance(
 }
 
 /**
- * A lit point's frame for R08's lookups (plan R08, R08.T9.b; `bodyDisc.wgsl`'s `local_frame`): its
+ * A lit point's frame for R08's lookups (plan R08, R08.T9.b; `litBody.wgsl`'s `local_frame`): its
  * geodetic latitude from its spheroid normal against the pole, and its north and east, in the
  * view's axes; at a pole any horizontal east.
  */
@@ -649,7 +660,7 @@ interface LocalFrame {
   readonly east: Vec3;
 }
 
-/** Below this cosine of its latitude a point is taken as at a pole (`bodyDisc.wgsl`'s `AT_POLE`). */
+/** Below this cosine of its latitude a point is taken as at a pole (`litBody.wgsl`'s `AT_POLE`). */
 const AT_POLE = 1e-6;
 
 function localFrameOf(normal: Vec3, pole: Vec3): LocalFrame {

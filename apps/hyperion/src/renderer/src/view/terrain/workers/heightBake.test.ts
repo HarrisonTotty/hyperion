@@ -68,6 +68,7 @@ function fakeModule(): { module: HeightModule; held: Map<string, number> } {
       throw new Error("a field test drew a line of sight");
     },
     material: () => undefined,
+    photometry: () => undefined,
     free: () => {},
   };
   return {

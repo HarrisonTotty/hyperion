@@ -62,6 +62,7 @@ function exercise(engine: RenderEngine, setting: "high" | "low"): TerrainResourc
       normals: new Float16Array(n * n * 2),
       originHeightM: 100,
       skirtDepthM: 2,
+      layers: null,
     });
   }
   const instances = new InstanceRecords(slots.slotCount);

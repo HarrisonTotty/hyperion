@@ -9,7 +9,7 @@ import {
   SUN_RADIUS_M,
 } from "../../test/litFixtures";
 import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
-import { phaseFactorFromTable, phaseFactorTableOf } from "../appearance/law";
+import { limbShareAt, phaseFactorFromTable, phaseFactorTableOf } from "../appearance/law";
 import { brdf } from "../appearance/brdf";
 import { lawFor } from "../appearance/phase";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
@@ -125,9 +125,10 @@ const ORACLE_PHI = 800;
 
 /**
  * The body's exact flux at the camera per channel, lx, from a finite distance: the disc's own law
- * (its horizon term, the Lommel–Seeliger floor and its oblate albedo scale) integrated over the
- * visible, lit spheroid in `f64`, each element weighted by μ dA ÷ r² (decision-r07-t8a, follow-up
- * (b)). No eclipses: the bodies tested have no occluders.
+ * (its horizon term, the Lommel–Seeliger floor, its oblate albedo scale at L(0) and its L(α) at
+ * each element's phase) integrated over the visible, lit spheroid in `f64`, each element weighted
+ * by μ dA ÷ r² (decision-r07-t8a, follow-up (b)). No eclipses: the bodies tested have no
+ * occluders.
  *
  * Each element's vectors are written out in scalars, each component by the very operations of
  * `vec3`'s `add`, `sub`, `scale`, `dot`, `norm` and `normalise`, in their order, and cos φ and
@@ -220,7 +221,8 @@ function nearFieldFlux(
         }
         const alpha = Math.acos(Math.min(1, Math.max(-1, tx * cx + ty * cy + tz * cz)));
         const f = phaseFactorFromTable(table, alpha);
-        const share = law.lommelSeeligerShare;
+        // L(α) at the element's own phase, the law's (R10.T10.b; decision-r07-t8b).
+        const share = limbShareAt(law, alpha);
         const floor = Math.asin(Math.min(1, host.disc.radius_m / d));
         const discTerm =
           (share * 2 * horizon) / Math.max(Math.max(mu0, 0) + mu, floor) + (1 - share) * horizon;
@@ -338,7 +340,10 @@ describe("the disc and the point at the 3 px switch", () => {
     }
   });
 
-  /** The lunar law (L = 1) and the f = 0.098 spheroid seen from 45° latitude. */
+  /**
+   * The lunar law (L(0) = 1, under McEwen's L(α) since R10.T10.b) and the f = 0.098 spheroid seen
+   * from 45° latitude.
+   */
   const moon = {
     ...PROVISIONAL_PHOTOMETRY,
     law: lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
@@ -349,8 +354,16 @@ describe("the disc and the point at the 3 px switch", () => {
     pole: vec3(0, Math.SQRT1_2, Math.SQRT1_2),
   };
 
-  it("holds for a lunar law (L = 1)", () => {
+  it("holds for a lunar law (L(0) = 1)", () => {
     for (const phaseDeg of [0, 90, 150]) {
+      expect(worstOver(3, phaseDeg, { photometry: moon })).toBeLessThan(0.01);
+    }
+  });
+
+  // R10.T10.b: McEwen's L(α) moves the Moon's limb profile, not its flux (decision-r07-t8b).
+  it("holds for the Moon template under McEwen's L(α) at 30°, 90° and 120°", () => {
+    expect(moon.law.lommelSeeligerCurve).toBe("mcewen-1996");
+    for (const phaseDeg of [30, 90, 120]) {
       expect(worstOver(3, phaseDeg, { photometry: moon })).toBeLessThan(0.01);
     }
   });
@@ -363,7 +376,7 @@ describe("the disc and the point at the 3 px switch", () => {
 
   // From 4 to 32 px at 150°, against the near field (decision-r07-small-disc-cost, G2′).
   for (const px of [4.01, 8, 13, 24]) {
-    it(`holds the near-field flux for a lunar law (L = 1) to 1% at ${String(px)} px and 150°`, () => {
+    it(`holds the near-field flux for a lunar law (L(0) = 1) to 1% at ${String(px)} px and 150°`, () => {
       expect(worstOver(px, 150, { photometry: moon }, "near-field")).toBeLessThan(0.01);
     });
 
@@ -713,6 +726,32 @@ describe("an eclipse", () => {
     const point =
       pointFlux(body, hosts, [occluder], DISC_ANNULI_HIGH)[1] /
       pointFlux(body, hosts, [], DISC_ANNULI_HIGH)[1];
+    expect(Math.abs(disc / point - 1)).toBeLessThan(0.01);
+  });
+
+  it("darkens a lunar law under McEwen's L(α) on the disc and the point alike at 60°, to 1%", () => {
+    // R10.T10.b: the point's eclipse takes the law's L(α) at its phase, as the disc's pixels do.
+    const moon = {
+      ...PROVISIONAL_PHOTOMETRY,
+      law: lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+    };
+    expect(moon.law.lommelSeeligerCurve).toBe("mcewen-1996");
+    const lit = scene(moonRadius / Math.sin(1.5 / PX_PER_RAD), 60, {
+      figure: body.figure,
+      photometry: moon,
+    });
+    const sun = lit.hosts[0]?.centreM ?? vec3(0, 0, 0);
+    const toSun = normalise(sub(sun, lit.body.centreM));
+    const shadowing: LitBodyInput = {
+      ...earth,
+      centreM: add(add(lit.body.centreM, scale(toSun, 3.844e8)), vec3(0, 6.5e6, 0)),
+    };
+    const blocker = { id: shadowing.id, centreM: shadowing.centreM, radiusM: 6.371e6 };
+    const disc = discFlux(lit.body, lit.hosts, [shadowing])[1] / discFlux(lit.body, lit.hosts)[1];
+    const point =
+      pointFlux(lit.body, lit.hosts, [blocker], DISC_ANNULI_HIGH)[1] /
+      pointFlux(lit.body, lit.hosts, [], DISC_ANNULI_HIGH)[1];
+    expect(disc).toBeLessThan(0.9);
     expect(Math.abs(disc / point - 1)).toBeLessThan(0.01);
   });
 

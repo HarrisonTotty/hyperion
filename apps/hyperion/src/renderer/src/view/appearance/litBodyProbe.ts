@@ -41,8 +41,9 @@ export interface BrdfProbeCase {
   readonly mu: number;
   readonly phaseRad: number;
   /**
-   * A law built per texel from a synthetic normal albedo A_N and L(α) (R10's hook, Design note
-   * 24), or `null` to shade with {@link BrdfProbeCase.law} as given.
+   * A law built per texel from a synthetic normal albedo A_N (R10's class law, Design note 24),
+   * whose L(α) its row carries (decision-r07-t8b), or `null` to shade with
+   * {@link BrdfProbeCase.law} as given.
    */
   readonly perTexel: { readonly normalAlbedo: number } | null;
 }
@@ -50,12 +51,7 @@ export interface BrdfProbeCase {
 /** The synthetic per-texel law's colour, A = A_N × (1, 0.9, 0.8) in r, g, b. */
 const PER_TEXEL_TINT: Rgb = [1, 0.9, 0.8];
 
-/** The synthetic per-texel L(α) = 1 − 0.5 α ÷ π, a stand-in for R10's phase-dependent share. */
-export function syntheticShare(phaseRad: number): number {
-  return 1 - (0.5 * phaseRad) / Math.PI;
-}
-
-/** The law a per-texel case shades with, as the kernel builds it. */
+/** The law a per-texel case shades with, as the kernel builds it: its A, the row's L(α). */
 export function perTexelLaw(probe: BrdfProbeCase): PhotometricLaw {
   if (probe.perTexel === null) {
     return probe.law;
@@ -64,7 +60,6 @@ export function perTexelLaw(probe: BrdfProbeCase): PhotometricLaw {
   return {
     ...probe.law,
     a: [albedo * PER_TEXEL_TINT[0], albedo * PER_TEXEL_TINT[1], albedo * PER_TEXEL_TINT[2]],
-    lommelSeeligerShare: syntheticShare(Math.fround(probe.phaseRad)),
   };
 }
 
@@ -93,16 +88,21 @@ export function packBrdfProbeCases(cases: ReadonlyArray<BrdfProbeCase>): ArrayBu
   return bytes;
 }
 
-/** The probe's table: each law's f as one `rgba32float` row, alpha 0. */
+/**
+ * A frame's phase table: each law's f as one `rgba32float` row, f in r, g and b and its L(α) in a
+ * (`law.ts`'s `PhaseFactorTable`; plan R10, R10.T10.b, decision-r07-t8b), L(0) at every sample for
+ * a law without a curve.
+ */
 export function packPhaseFactorRows(laws: ReadonlyArray<PhotometricLaw>): Float32Array {
   const texels = new Float32Array(laws.length * PHASE_TABLE_SAMPLES * 4);
   laws.forEach((law, row) => {
-    const { rgb } = phaseFactorTableOf(law);
+    const { rgb, alpha } = phaseFactorTableOf(law);
     for (let i = 0; i < PHASE_TABLE_SAMPLES; i += 1) {
       const at = (row * PHASE_TABLE_SAMPLES + i) * 4;
       texels[at] = rgb[3 * i] ?? 0;
       texels[at + 1] = rgb[3 * i + 1] ?? 0;
       texels[at + 2] = rgb[3 * i + 2] ?? 0;
+      texels[at + 3] = alpha[i] ?? 0;
     }
   });
   return texels;
@@ -110,7 +110,7 @@ export function packPhaseFactorRows(laws: ReadonlyArray<PhotometricLaw>): Float3
 
 /** The reference's I/F for each case, at the case's inputs rounded to `f32` as the GPU reads them. */
 export function expectedBrdf(cases: ReadonlyArray<BrdfProbeCase>): Rgb[] {
-  // A per-texel law reads the row of the law it borrows, as the kernel does.
+  // A per-texel law reads its f and L(α) from the row of the law it is made from, as the kernel does.
   return cases.map((probe) =>
     brdfFromTable(
       perTexelLaw(probe),
@@ -448,8 +448,8 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let c = cases[id.x];
   var law = LunarLambert(c.a, c.l, c.s, c.row);
   if (c.per_texel == 1u) {
-    // A law built per texel (R10's hook): A from a normal albedo, L from the phase.
-    law = LunarLambert(c.a.x * vec3f(1.0, 0.9, 0.8), 1.0 - 0.5 * c.alpha / LIT_PI, c.s, c.row);
+    // A law built per texel (R10's class law): A from a normal albedo, L(α) from the row's alpha.
+    law = LunarLambert(c.a.x * vec3f(1.0, 0.9, 0.8), c.l, c.s, c.row);
   }
   results[id.x] = vec4f(body_brdf(law, c.mu0, c.mu, c.alpha), 0.0);
 }

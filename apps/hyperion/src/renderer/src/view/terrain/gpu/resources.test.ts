@@ -8,12 +8,18 @@ import {
 import { BUFFER_USAGE } from "../../engine/gpuFlags";
 import { MAX_REQUESTED_BUFFER_BYTES } from "../../engine/platform";
 import { TERRAIN_SETTINGS } from "../../quality/qualitySetting";
+import { PHASE_TABLE_SAMPLES } from "../../appearance/law";
+import { lawFor } from "../../appearance/phase";
 import {
+  CLASS_LAWS_BYTES,
+  CLASS_LAYERS_BYTES,
+  CLASS_WEIGHTS_BYTES,
   DOUBLE_NORMALS_BYTES,
   HEIGHTS_BYTES,
   OFFSETS_BYTES,
   terrainSlotLayout,
 } from "../slotLayout";
+import type { TerrainLayers } from "../workers/messages";
 import { allocationTally } from "./allocationTally";
 import {
   atlasTile,
@@ -59,6 +65,7 @@ function upload(slot: number, normalsPerSide: number, offsets: boolean, fill = 1
     normals: new Float16Array(normalsPerSide * normalsPerSide * 2).fill(fill),
     originHeightM: 120,
     skirtDepthM: 3,
+    layers: null,
   };
 }
 
@@ -355,6 +362,82 @@ describe("the terrain's resources", () => {
         category: "height-cache",
       }),
     ).toThrow(LimitExceeded);
+  });
+
+  it("write a lit layout's class weights and laws for each slot, adding the laws' rows", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit");
+    expect(resources.field("class-layers")?.bytes).toBe(
+      resources.layout.slots.slotCount * CLASS_LAYERS_BYTES,
+    );
+    expect(resources.lit).not.toBeNull();
+    const photometry = new Float32Array(40);
+    photometry.set([0.1, 0.12, 0.14, 1, 1, 0.8, 0.82, 0.84, 2, 0.72]);
+    const layers: TerrainLayers = {
+      palette: new Uint8Array(16),
+      weights: new Uint8Array(),
+      surveyMask: new Uint8Array(65 * 65),
+      boundM: 1,
+      sigmaM: 0,
+      complete: true,
+      unsurveyedCells: new Uint32Array(),
+      photometry,
+    };
+    expect(resources.upload({ ...upload(3, 65, false), layers }).kind).toBe("uploaded");
+    // The slot's class layers: its weights, then its laws.
+    const [weights, laws] = engine.writes.filter((w) => w.buffer === "terrain class-layers");
+    expect([weights?.offsetBytes, weights?.bytes]).toEqual([
+      3 * CLASS_LAYERS_BYTES,
+      CLASS_WEIGHTS_BYTES,
+    ]);
+    expect(weights?.data.every((b) => b === 0)).toBe(true);
+    expect([laws?.offsetBytes, laws?.bytes]).toEqual([
+      3 * CLASS_LAYERS_BYTES + CLASS_WEIGHTS_BYTES,
+      CLASS_LAWS_BYTES,
+    ]);
+    // Row 0 is the body's uniform law; the regolith's and the frost's rows follow it.
+    expect(resources.phaseRows.laws.map((law) => law.lommelSeeligerShare)).toEqual(
+      [0, 1, 0.72].map(Math.fround),
+    );
+    const table = engine.textureWritten.findLast((w) => w.texture === "terrain phase table");
+    expect(table?.size).toEqual({ width: PHASE_TABLE_SAMPLES, height: 3 });
+    resources.dispose();
+  });
+
+  it("refuse, writing nothing, a bake without R10's layers into a lit layout", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit");
+    engine.resetCounts();
+    expect(resources.upload({ ...upload(0, 65, false), layers: null })).toEqual({
+      kind: "refused",
+      reason: "layers-missing",
+    });
+    expect(engine.counts.bufferWrites).toBe(0);
+    resources.dispose();
+  });
+
+  it("grow a lit layout's phase table as rows are added, and keep its rows across a restore", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit");
+    for (let k = 0; k < 6; k += 1) {
+      resources.phaseRows.rowOf(1, 0.5 + 0.05 * k);
+    }
+    resources.setLighting({
+      lights: [],
+      occluders: [],
+      secondaries: [],
+      elsewhere: lawFor([0.2, 0.2, 0.2], [0.6, 0.6, 0.6], "moon"),
+      exposureScale: 1,
+    });
+    const rows = resources.phaseRows.laws.length;
+    expect(rows).toBe(7);
+    const grown = engine.textureSpecs.findLast((spec) => spec.name === "terrain phase table");
+    expect(grown?.size).toEqual({ width: PHASE_TABLE_SAMPLES, height: 8 });
+    engine.restore();
+    expect(resources.phaseRows.laws).toHaveLength(rows);
+    const remade = engine.textureWritten.findLast((w) => w.texture === "terrain phase table");
+    expect(remade?.size).toEqual({ width: PHASE_TABLE_SAMPLES, height: rows });
+    resources.dispose();
   });
 
   it("stop following restores once disposed", async () => {
