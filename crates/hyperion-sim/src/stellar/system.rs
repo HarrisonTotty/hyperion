@@ -708,14 +708,10 @@ impl StarModel {
     }
 
     /// The initial mass the track is built for: the star's own, held to the formulae's 150 M☉
-    /// (P06.T14).
+    /// (P06.T14), [`track_mass_of`] its initial mass.
     #[must_use]
     fn track_mass(&self) -> SolarMasses {
-        if self.initial_mass > sse::MAX_INITIAL_MASS {
-            sse::MAX_INITIAL_MASS
-        } else {
-            self.initial_mass
-        }
+        track_mass_of(self.initial_mass)
     }
 
     /// The cooling fits' state at `age`, for an object below 0.1 M☉.
@@ -1967,12 +1963,36 @@ pub(crate) fn primary_rotation_draws(
 /// The clock time of `death` for a star whose age at the epoch is `age_at_epoch`.
 #[must_use]
 fn clock_death(age_at_epoch: Years, death: Death) -> ClockDeath {
-    let years = death.age().value() - age_at_epoch.value();
-    match Span::from_seconds_f64(years * SECONDS_PER_JULIAN_YEAR)
-        .and_then(|span| UniverseTime::EPOCH.checked_add(span))
-    {
+    match clock_time_of_death(age_at_epoch, death.age()) {
         Some(t) => ClockDeath::At(t, death.kind()),
         None => ClockDeath::BeyondClockRange,
+    }
+}
+
+/// The clock time at which a star whose age at the epoch is `age_at_epoch` reaches the age
+/// `death_age` (both Julian years since its onset of collapse): the epoch plus (`death_age` −
+/// `age_at_epoch`) × 31,557,600 s, floored to the nanosecond, or `None` where the clock cannot
+/// hold it (its whole seconds do not fit an `i64`, about ±2.9 × 10¹¹ years).
+///
+/// It is [`SystemStars::death_time`]'s conversion, which plan 08's interval predicate shares
+/// (`galaxy::displaced::death_in_interval`, P08.T13), so that a death the predicate finds is the
+/// stellar stage's to the nanosecond. The time is non-decreasing in `death_age`.
+#[must_use]
+pub(crate) fn clock_time_of_death(age_at_epoch: Years, death_age: Years) -> Option<UniverseTime> {
+    let years = death_age.value() - age_at_epoch.value();
+    Span::from_seconds_f64(years * SECONDS_PER_JULIAN_YEAR)
+        .and_then(|span| UniverseTime::EPOCH.checked_add(span))
+}
+
+/// The initial mass a star of initial mass `initial_mass` has its track built for: its own, held to
+/// the formulae's 150 M☉ (`sse::MAX_INITIAL_MASS`, P06.T14), as [`StarModel`] builds it, which
+/// plan 08's interval predicate shares (P08.T13).
+#[must_use]
+pub(crate) fn track_mass_of(initial_mass: SolarMasses) -> SolarMasses {
+    if initial_mass > sse::MAX_INITIAL_MASS {
+        sse::MAX_INITIAL_MASS
+    } else {
+        initial_mass
     }
 }
 
