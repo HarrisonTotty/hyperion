@@ -60,11 +60,12 @@ pub struct RingGapDto {
     pub radius_m: f64,
 }
 
-/// A giant's ring: its kind, material, edges and optical depth (P14.T20).
+/// A giant's ring: its kind, material, edges and optical depth (P14.T20), and its plane's normal
+/// (P14.T56.a).
 ///
-/// Its edges are distances from its planet's centre in the planet's equatorial plane, which this
-/// generator version takes to be the planet's orbital plane until P14.T14 gives planets their
-/// poles. The ring's record's `position_m` is its planet's.
+/// Its edges are distances from its planet's centre in its plane, the plane `normal` is normal to,
+/// or without `normal` the planet's orbital plane. The ring's record's `position_m` is its
+/// planet's.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct RingDto {
@@ -81,6 +82,15 @@ pub struct RingDto {
     pub optical_depth: f64,
     /// The gaps the planet's moons clear in it, inside out; none in a dusty ring.
     pub gaps: Vec<RingGapDto>,
+    /// The normal of its plane, a unit vector along the galactic axes (P14.T56.a): the planet's
+    /// local Laplace plane at the geometric mean of its edges, on the spin's side, its equator
+    /// well inside its Laplace radius. Absent from a server of a generator version that does
+    /// not place rings on the Laplace surface, whose rings lie in their planet's orbital plane.
+    /// Optional on the wire, so [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION) stays 2 (plan 04,
+    /// Design note 15).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub normal: Option<[f64; 3]>,
 }
 
 /// Where a belt lies, by the rule that placed it.
@@ -221,6 +231,7 @@ pub(crate) mod tests {
                 resonance: [2, 1],
                 radius_m: 117_000_000.0,
             }],
+            normal: None,
         })
     }
 
@@ -289,6 +300,30 @@ pub(crate) mod tests {
     #[test]
     fn ring_wire_form() {
         assert_wire_form(&saturn_ring(), saturn_ring_json());
+    }
+
+    /// P14.T56.a: a ring's plane on the Laplace surface goes as its unit normal, and a ring
+    /// without one, as an older server sends it, reads as before.
+    #[test]
+    fn a_ring_s_normal_is_optional_on_the_wire() {
+        let PopulationDto::Ring(ring) = saturn_ring() else {
+            unreachable!("the fixture is a ring")
+        };
+        let tilted = PopulationDto::Ring(RingDto {
+            normal: Some([0.0, -0.6, 0.8]),
+            ..ring
+        });
+        let mut wire = saturn_ring_json();
+        wire["normal"] = json!([0.0, -0.6, 0.8]);
+        assert_wire_form(&tilted, wire);
+        let without: PopulationDto = serde_json::from_value(saturn_ring_json()).unwrap();
+        assert_eq!(without, saturn_ring());
+        assert!(
+            serde_json::to_value(&without)
+                .unwrap()
+                .get("normal")
+                .is_none()
+        );
     }
 
     #[test]

@@ -14,7 +14,7 @@ use hyperion_sim::planetary::disc::{self, DiscDraws, DiscHost, DiscProfile, Trun
 use hyperion_sim::planetary::halo::{HaloBounds, HaloHost, Scatterer, halo, surviving_share};
 use hyperion_sim::planetary::placement::classes::orbits::SystemPlane;
 use hyperion_sim::planetary::placement::{Neighbour, OrbitHost};
-use hyperion_sim::planetary::rings::{RingMoon, RingParent, generate_rings};
+use hyperion_sim::planetary::rings::{RingMoon, RingParent, RingPlane, generate_rings};
 use hyperion_sim::planetary::{BodyIndex, BodySlot, BodySub};
 use hyperion_sim::stellar::Composition;
 use hyperion_sim::stellar::sse::{ZCoeffs, zams};
@@ -145,7 +145,9 @@ fn rings(w: &mut GoldenWriter) {
                 EarthFluxes::new(flux),
             )
             .unwrap();
-            for ring in generate_rings(SEED, id, &parent, &moons) {
+            // Version 22's plane, which no line of this golden reads (P14.T56.a).
+            let plane = RingPlane::Fixed([0.0, 0.0, 1.0]);
+            for ring in generate_rings(SEED, id, &parent, &moons, &plane) {
                 w.line(&format!(
                     "ring {id} {:#06x} {:?} {:?}",
                     ring.index().get(),

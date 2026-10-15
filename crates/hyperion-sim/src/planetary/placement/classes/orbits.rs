@@ -174,6 +174,37 @@ impl SystemPlane {
         }
     }
 
+    /// The plane whose normal is `pole`, a direction along the system frame's axes (P14.T56.a):
+    /// the inclination atan2(√(x² + y²), z) of the normal to galactic north and the node
+    /// atan2(x, −y), the inverse of [`frame`](Self::frame)'s normal (sin i sin Ω, −sin i cos Ω,
+    /// cos i). A pole along galactic north or south, whose node is undefined, takes the node 0.
+    ///
+    /// # Errors
+    ///
+    /// As [`SystemPlane::new`], for a pole whose components are not finite.
+    ///
+    /// # Examples
+    ///
+    /// A plane rebuilt from its own normal is itself:
+    ///
+    /// ```
+    /// use hyperion_sim::planetary::placement::classes::orbits::SystemPlane;
+    /// use hyperion_sim::units::Radians;
+    ///
+    /// let plane = SystemPlane::new(Radians::new(1.1), Radians::new(2.3))?;
+    /// let again = SystemPlane::from_pole(plane.frame()[2])?;
+    /// assert!((again.inclination().value() - 1.1).abs() < 1e-15);
+    /// assert!((again.node().value() - 2.3).abs() < 1e-15);
+    /// # Ok::<(), hyperion_sim::orbit::BuildOrbitError>(())
+    /// ```
+    pub fn from_pole(pole: [f64; 3]) -> Result<Self, BuildOrbitError> {
+        let [x, y, z] = pole;
+        let sin_i = math::hypot(x, y);
+        let inclination = math::atan2(sin_i, z);
+        let node = if sin_i > 0.0 { math::atan2(x, -y) } else { 0.0 };
+        Self::new(Radians::new(inclination), Radians::new(node))
+    }
+
     /// The inclination of the plane's normal to galactic north, rad, in `[0, π]`.
     #[must_use]
     pub const fn inclination(&self) -> Radians {
@@ -767,6 +798,25 @@ mod tests {
 
     fn close(a: [f64; 3], b: [f64; 3]) -> bool {
         a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-12)
+    }
+
+    /// P14.T56.a: a plane rebuilt from its pole is itself, and a pole along galactic north or
+    /// south takes the node 0.
+    #[test]
+    fn a_plane_from_its_pole() {
+        for (i, node) in [(0.3, 0.1), (1.1, 2.3), (2.9, 5.9)] {
+            let plane = SystemPlane::new(Radians::new(i), Radians::new(node)).unwrap();
+            let again = SystemPlane::from_pole(plane.frame()[2]).unwrap();
+            assert!((again.inclination().value() - i).abs() < 1e-15);
+            assert!((again.node().value() - node).abs() < 1e-14);
+        }
+        let north = SystemPlane::from_pole([0.0, 0.0, 2.0]).unwrap();
+        assert_eq!(north.inclination(), Radians::ZERO);
+        assert_eq!(north.node(), Radians::ZERO);
+        let south = SystemPlane::from_pole([0.0, 0.0, -1.0]).unwrap();
+        assert!((south.inclination().value() - PI).abs() < 1e-15);
+        assert_eq!(south.node(), Radians::ZERO);
+        assert!(SystemPlane::from_pole([f64::NAN, 0.0, 1.0]).is_err());
     }
 
     #[test]

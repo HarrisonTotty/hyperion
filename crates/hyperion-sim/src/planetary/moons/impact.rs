@@ -26,10 +26,15 @@
 //! # Frame
 //!
 //! The moon forms in the equatorial plane of the debris disc, which after the impact is its
-//! parent's equator, so its orbit is circular and on the parent's equator, and its inclination to
-//! the parent's orbital plane is the parent's new obliquity, which P14.T14.a draws. Plan 14's
-//! phase D gives "the rest" of the moons' orbits relative to the parent's orbital plane; this one
-//! is relative to the equator until T14 places it (a deviation, recorded in the plan).
+//! parent's equator, so its orbit is circular and on the parent's equator, and it follows the
+//! parent's Laplace surface adiabatically as it recedes (Goldreich 1965, AJ 70, 5): it lies on the
+//! parent's Laplace surface at its present distance, the equator while it is well inside the
+//! Laplace radius (P14.T56.a, [`laplace`](crate::planetary::laplace)). Its elements here are
+//! relative to that plane, which P14.T22.a orients; below
+//! [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION) it is the parent's orbital plane.
+//! One that recedes through the eccentricity band of a parent tilted beyond 68.875° keeps its
+//! circular orbit: what the transition does to it is not modelled (Ćuk et al. 2016, Nature 539,
+//! 402).
 //!
 //! # Draws
 //!

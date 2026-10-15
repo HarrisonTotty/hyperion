@@ -13014,3 +13014,126 @@ tables::gauss_legendre`.
     (De Sanctis et al. 2015, Nature 528, 241; its citation checked, not read) point to an origin
     beyond the ammonia line or NH₃ carried inward: the rule's known counter-case
     (decision-p14-moons §F1-plan), not tuned.
+- **Deviations in P14.T56.a, as built (`p14-moons`, 2026-10-15).** Moons and rings on the
+  parent's classical Laplace surface, held behind `MOONS_VERSION` = 23 (`planetary/moons/mod.rs`)
+  with its tripwire `the_moons_are_held_only_until_the_batch_s_bump`. Below 23 every value is
+  version 22's: `generate` takes `SatellitePlanes::in_force()`, version 22's `OrbitalPlane`, and
+  the server sends no ring normal. `GENERATOR_VERSION` stays 22 and `golden_diff.py` reports no
+  golden moved.
+  - _The hold's switch._ `laplace::SatellitePlanes` (`OrbitalPlane`, `LaplaceSurface`) with
+    `in_force()`, and `system::generate_with(seed, ctx, planes)` (crate-private), which is
+    `generate` with the planes given, so that the tests reach the Laplace surface ahead of the
+    bump. T54.a makes `generate` take `LaplaceSurface`, drops the `OrbitalPlane` branches
+    (`MoonPlane::OrbitalPlane`, `RingPlane::Fixed`'s use in `satellites_of`, the first pass) if
+    nothing else needs them, sends every ring's normal, and deletes the hold and its tripwire.
+  - _The pass order (the handoff's crux)._ On the Laplace surface `generate_with` finds each
+    parent's satellites twice. Step 7 finds them in version 22's planes, which fixes
+    `had_giant_impact`, all a planet's or member's rotation law reads of its moons (its record at
+    `parent_time` reads none of their orbits). The rotation pass then derives every planet's and
+    member's law, and the moons' wait. `place_on_laplace_surfaces` builds each one's
+    `LaplaceFrame` from its law and its record at `parent_time` (`Body::laplace`), finds its
+    satellites again on it from step 7's inputs (`SatelliteSite`), rebuilds the moon and ring
+    bodies, and derives each moon's law on its plane (`moon_rotations`, each parent's record built
+    once). The band drops no giant-impact moon, so the parent's law stands.
+    `generate_satellites` reads the frame its `&Body` holds, so it still equals `generate`'s
+    (`on_the_laplace_surface_generate_satellites_is_each_parent_s_children_in_generate`, 1,000
+    systems). Cost: one more `satellites_of` per parent and one more primary record per parent
+    with moons, untimed; T54.a's bless note times it with T33.a's bench.
+  - _Names beyond Provides._ In `planetary/laplace.rs`: `LaplaceFrame` (with
+    `LaplaceFrameParts` and `BuildLaplaceFrameError`), one per parent, holding its spin pole,
+    orbit normal and obliquity, J₂ and its radius, the tide's factor a_p³ (1 − e_p²)^{3/2} M_p ÷
+    M_*, its mass and the age it was read at; `LocalLaplace`, one orbit's plane (the parent's
+    axes, its own r_L and its `PoleSense`); `InnerMoon`; `fluid_love_number`, `laplace_angle`
+    (φ), `eccentricity_band` with `BAND_FREE_OBLIQUITY_DEG` (68.8°) and `BAND_SCAN`
+    (0.85–1.30 r_L), and `reaches_band`. Elsewhere: `satellites::MoonPlane` and
+    `Satellite::plane`, `Body::laplace`, `rings::RingPlane` and `Ring::normal`;
+    `rings()` and `generate_rings()` take a `&RingPlane`; `satellites_of` (crate-private) takes a
+    `SatelliteFrame`. `laplace_pole`'s companions that nothing outside the crate needs
+    (`LaplaceFrame::new` and its parts and error, `LaplaceFrame::local`, `eccentricity_band`,
+    `reaches_band` and the band's constants) are crate-private. `Body` gains about 100 bytes and
+    `Satellite` about 80 at version 22 too, which each cached system's byte count
+    (P14.T36.a) carries.
+  - _Signatures._ `hydrostatic_j2` takes the parent's `SpinState`, not a `synchronous` flag (the
+    Rust rules' enum over a bool): × 2.5 only at `Locked(Synchronous)`, as the figure takes it.
+    `Satellite::orbit_at` keeps its signature: each moon carries its `MoonPlane`, its parent's
+    frame with its own Laplace radius read once (every moon of any origin inside it at
+    `parent_time` counted), so no caller changed. `in_body_frame` takes the plane and became
+    private. A giant-impact moon's `orbit_at` follows φ(a(t)) at whatever age it is asked;
+    `moon_trajectory` takes the plane once, at its drift law's anchor, and the law carries it; the
+    two differ by at most the turn measured below.
+  - _A capture's pole on its orbit's side_ (a choice made here; question for "main").
+    `laplace_pole` keeps the spin's sense, as ruled, for regular and giant-impact moons and rings.
+    A capture's plane (`PoleSense::Orbit`) takes the pole on its parent's orbit normal's side,
+    because its drawn sense (retrograde with probability 0.8) is about the orbit, as its
+    stability limit (Domingos et al. 2006) reads it. The two differ only about a parent spinning
+    retrograde, such as an impact-struck rocky planet with small captures. Lean: keep.
+  - _The wire's first send_ (a choice made here; question for "main"). `RingDto.normal` is
+    optional, and the server fills it only from `MOONS_VERSION`
+    (`a_ring_s_normal_is_sent_from_the_batch_s_bump`), so `scene_systems.golden` keeps its bytes
+    at 22. Its shape is therefore first sent, and frozen, at 23, with its values, where
+    decision-bump-plan-after-22 §1.4 had the shape freeze when T56.a landed. The protocol fixture
+    is unchanged. Lean: keep; T54.a sends it always.
+  - _The band._ `eccentricity_unstable` is the ruling's criterion. Its test against Tremaine et
+    al. (2009) uses eq. 34 (eq. 33 with eq. 22 substituted), on a 0.1° × 1,001-point grid: the
+    arXiv text of eq. 33 differs from eq. 34 by the sign of its 6 sin 2φ sin 2(φ − φ⊙) term, and
+    as printed puts the onset at 60°, while eq. 34 and the criterion agree everywhere and put it
+    at 68.8749°. The band's edges are a fixed scan of 0.85–1.30 r_L in 450 steps and 40 halvings;
+    no band lies below 68.8°, and each is one interval inside the scan (tested). The criterion is
+    exactly their condition (the module documentation gives the factored λ², as the science check
+    derived it from their eq. 25). A regular moon is tested at its own a ÷ r_L, with the moons
+    found so far inside it counted, before the captures are cleared of the regular moons, so where
+    the band drops moons a capture whose pericentre fell inside the dropped moons' apocentres is
+    kept, and a parent's moon count can change by more than the moons dropped. A ring is tested
+    over its whole width at the r_L of its geometric mean, which counts only the regular moons
+    inside it (its `RingMoon`s): no capture or giant-impact moon is that close in.
+  - _The rings' 10⁻⁹ rad_ (technical correction). The plan's "every ring's normal lies within
+    10⁻⁹ rad of its parent's pole where its radius is under 0.1 r_L" contradicts the law itself:
+    φ ≈ ¼ sin 2ε′ (r ÷ r_L)⁵, up to 2.5 × 10⁻⁶ rad at 0.1 r_L (Saturn's rings, at 2.27 R_S
+    against r_L = 36.1 R_S from J₂ alone, tilt about 2.0 × 10⁻⁷ rad). A docs batch amends T56.a's
+    _Tests_ text. The test holds every ring's normal to the law bit for bit, under 0.1 r_L
+    within ¼ sin 2ε′ (r_out ÷ r_L)⁵, and within 10⁻⁹ rad wherever that bound is.
+  - _The giant-impact moon's step._ Its plane is held where its drift law anchors its elements
+    ("Read once"). The largest turn of its local Laplace plane across the clock window, which
+    bounds every step between its drift cells, is 5.0 × 10⁻⁴° over the 1,000-system sample's
+    1,024 giant-impact moons, far under the ruling's 0.1°, so the anchored plane stands.
+  - _No band in the sample._ No regular moon or ring of the 400-system sample lies in a band, as
+    the ruling expects (5 × 10⁻¹¹ of giants); `satellites/tests.rs` drives the band's removal and
+    the 98° parent on synthetic Jupiters, and `rings.rs` a ring in the band.
+  - _`SystemPlane::from_pole`_ takes i = atan2(√(x² + y²), z) rather than acos(z), which keeps
+    its precision near the poles; a pole along galactic north takes the node 0.
+  - _The tests' fact-sheet values_ are one consistent set, cited in `laplace/tests.rs`: J₂ from
+    Jacobson 2022 (Saturn), Durante et al. 2020 (Jupiter) and Jacobson 2009 (Neptune), NSSDC's
+    J2000 mean orbits, masses as ratios of JPL's GMs, and NSSDC's satellite axes. The ruling's
+    `laplace.py` set was partly older or uncited; no tilt moves by more than 0.02°.
+  - _Files beyond the task's._ `planetary/mod.rs` declares `laplace`;
+    `tests/planetary_small_bodies_golden.rs` passes `generate_rings` a fixed plane facing galactic
+    north (its golden prints no normal, and the plane moves no other value); the tests are `laplace/tests.rs`, and new cases in `satellites/tests.rs`,
+    `system/tests.rs`, `hyperion-protocol`'s `population.rs` and the server's conversion.
+  - _The acceptance commands._ The _Accept_ line selects only the laplace, satellites and
+    protocol tests. The rest run under `cargo test -p hyperion-sim laplace` (every system test of
+    the surface is named for it), `cargo test -p hyperion-sim planetary::rings`,
+    `cargo test -p hyperion-sim the_moons_are_held` and
+    `cargo test -p hyperion-server a_ring_s_normal`; `just smart-ci` runs them all.
+  - _For T54.a._ Add each ring's normal, and a moon's plane, to the `planetary/systems` goldens'
+    lines; the moons' positions and frames move in `observe`, `frame` and `orbit`. A small golden
+    of the module's own values (J₂, r_L, poles, band edges) would pin them across targets before
+    then (the determinism audit's suggestion, not built: `planetary/systems` pins them at 23).
+  - _For T56.d._ `laplace::fluid_love_number` is built; T56.d calls it, or re-exports it from
+    `moons/tides.rs`, rather than defining a second copy.
+- **Deferred findings (2026-10-13 rule)**, from P14.T56.a's science check:
+  - _Eq. 4 close in._ Tremaine et al.'s J₂′ holds at r ≫ a_i. With a massive moon a third or half
+    as far out it counts it short: the formula gives Callisto 0.53° (JPL's JUP365: 0.4°), Iapetus
+    16.0° (SAT441: 14.8°) and Hyperion 0.41° (0.1°). The Laplace–Lagrange factor
+    b₃/₂⁽¹⁾(α) ÷ 3α on each inner term brings all within 0.1° (the science check's computation;
+    its citation is unverified). The tests keep the plan's bounds (Callisto 0.4–0.6°, Iapetus
+    14–17°).
+  - _Triton._ Its Laplace plane is the Neptune–Triton invariable plane, 0.46° from Neptune's
+    equator (Jacobson 2009), not a test particle's 0.007°: a massive moon's pull on its parent's
+    spin is not modelled.
+  - _J₂'s accuracy._ The first-order Darwin–Radau J₂ is good to about ±6% for the giants
+    (Jupiter at its measured 0.264 comes out 6% high, Saturn 1.5% low); at the gas giant's
+    class factor 0.25 Jupiter's is 0.0135, 8% under Juno's, so r_L is 2% short, and the ruling's
+    "0.0140" is not reproduced there. k_f ≤ 0 for C ÷ M a² ≤ 2 ÷ 15, which no class reaches.
+  - _Unread sources._ Murray and Dermott 1999 §4.6 (cited instead: Gao and Stevenson 2013,
+    eqs. 2–3; Ragazzo 2020, eq. 2.74, as the science check read them), and Ward 1981's value for
+    Iapetus.
