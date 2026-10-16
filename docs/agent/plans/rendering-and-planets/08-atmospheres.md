@@ -3343,6 +3343,34 @@ Acceptance for T5.b and T5.c:
   - Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/atmosphere` and
     `pnpm --filter hyperion exec vitest run src/tools/materials`.
 
+- **R08.T5.i The solids' visible absorption: ammonia ice, calcium titanate and sodium sulphide**
+  (decision-p14-t49c-split §5.3, 2026-10-16; client data and tests only, no `GENERATOR_VERSION`
+  bump; after P14.T49.h's step 1, whose smart-ci rule runs `hyperion-fit` when a material file
+  changes (decision-p14-t49h-liquids §8), and before P14.T54.a).
+  - `ammonia-ice.json`: `standIn`, with k = 0 over 380–780 nm and Martonchik et al.'s n.
+    - Martonchik, Orton and Appleby 1984's Table I gives the visible as a linear interpolation in k
+      between its 6,840 and 31,250 cm⁻¹ rows, and its 200–320 nm rows as a straight line, so no
+      visible k is measured.
+    - No measured visible absorption was found, and the search is recorded.
+    - The visible frost reflectances (Hapke et al. 1981; Wagner, Hapke and Wells 1987) show a bright
+      frost, and are P14.T49.i's to invert.
+  - `calcium-titanate.json`: `standIn`, its values kept as an upper bound.
+    - Ueda et al. 1998's visible k is a Kramers–Kronig value from normal-incidence reflectance,
+      which does not constrain a sub-gap k of 10⁻³.
+    - The crystal's gap (3.8–4.38 eV) and its colourless thin sections put its absorption below
+      those values.
+    - A transmission measurement, if one is found, replaces it, and its phase table is remade.
+  - `sodium-sulphide.json`: the stand-in text gains that its flat visible k is a computed
+    spectrum's, not a colourless solid's absorption, and bounds it from above.
+  - The fit's tables that read these files go stale, and are refitted at the version in force, with
+    no bump, through the first-emission path (decision-p14-t49h-liquids §5), before P14.T54.a:
+    `substance_albedos` (P14.T49.c), if it has landed. `liquid_optics` reads none of them.
+  - Tests: each file parses with its provenance and states its reason; NH₃ ice's k is 0 and its n
+    unchanged; the held NH₃-ice mode at T5.b's index; the stand-in label on NH₃-ice and CaTiO₃
+    decks.
+  - Accept: `pnpm --filter hyperion exec vitest run src/renderer/src/view/atmosphere` and
+    `pnpm --filter hyperion exec vitest run src/tools/materials`.
+
 - **R08.T5.e Venus's ultraviolet absorber, fitted** (science-r08-unowned-absorbers). After T5.d
   and R08.T12.e, on the reference tracer's Venus deck: R08.T12's `venus-92bar` case, with
   T24.g's four modes, mode 2 `acid_uv_absorber`. It moves no generated output, since k_UA is 0
@@ -8911,7 +8939,9 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
       (science-r08-nonspherical.md §3.2): kept, with its provenance restated and a bound test
       (R08.T5.b's follow-up);
     - NH₃ ice's visible k comes from earlier published spectra (Martonchik et al.'s abstract),
-      unread here, and moves 1 − ω by about 10⁻² for 10 µm grains;
+      unread here, and moves 1 − ω by about 10⁻² for 10 µm grains. _Taken up by R08.T5.i_
+      (2026-10-16, decision-p14-t49c-split §5.3): the visible k is a linear fill between Table I's
+      1,462 and 320 nm rows, not a measurement, and the file's k is now 0, a stated stand-in;
     - CO₂ ice's n is for ice near 80 K and its k (Hansen 2005) for ice grown at 150 K;
     - Jäger's k is printed to 10⁻⁴.
   - _MgSiO₃ and Mg₂SiO₄_ are built here, from T5.b's list, although T5.d also lists them. T5.d takes
@@ -9257,8 +9287,8 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     15°–50°, ω above 0.99995. The table's smallest crystal, D = 2 µm, has r = 3V ÷ 4A = 0.30 µm
     and Ã ÷ πr̃² = 4.85, so with the tail's area kept (below) the tail passes 10% of the scattering
     at 550 nm up to about r_eff 0.55 µm at v_eff 0.3 (0.3 µm: 35%; 0.5 µm: 14%, an `analogue`;
-    0.7 µm: a `model`). NH₃ ice (r_eff 10 µm) is an `analogue` with Mie's ω 0.9938 on its own index;
-    CH₄ and CO₂ ices are analogues too. One cirrus mode at one wavelength costs about 9 ms (load
+    0.7 µm: a `model`). NH₃ ice (r_eff 10 µm) is an `analogue` with Mie's ω 0.9938 on its own index
+    (1 to rounding since R08.T5.i, whose file has k = 0); CH₄ and CO₂ ices are analogues too. One cirrus mode at one wavelength costs about 9 ms (load
     6–30, provisional).
   - _Iron's file_ (`iron.json`, Johnson and Christy) is a `nonSphericalMineral`, solid iron's
     class; a liquid iron mode takes it as its named analogue and is drawn as spheres.
@@ -9603,7 +9633,10 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     yellow, not white. Kept as ruling 5 takes the compilation; the lean, for the owner: hold k
     from 451 nm below (`ignoreBelowUm` 0.45), or take an open primary (refractiveindex.info's
     Debenham 1984 or Ozaki and Adachi 1993, CC0). CaTiO₃'s visible k (1.8 × 10⁻³ at 550 nm, from
-    reflectance) may share the problem, unchecked (the science check).
+    reflectance) may share the problem, unchecked (the science check). _CaTiO₃ taken up by
+    R08.T5.i_ (2026-10-16, decision-p14-t49c-split §5.3): its sub-gap k is the Kramers–Kronig
+    transform's, which reflectance cannot see, and the file keeps it as a labelled upper bound,
+    `standIn`. ZnS's ultraviolet k stays open.
   - _The retrievals' real index is held._ `chromophore` (n 1.4, fixed at 700 nm; Braude et al. do
     not say how it varies elsewhere) and `ice_giant_haze` (1.4 at 800 nm, Kramers–Kronig elsewhere
     in Irwin et al.) take n constant. A Kramers–Kronig n from each k spectrum is for a later task.
@@ -9638,7 +9671,9 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     the film's 2.436, reflectance 0.218 against 0.175). Which form a condensate takes is not
     modelled.
   - _Na₂S, FeS and CaTiO₃_ rest on weak visible data: a computed index (a stand-in), four rows
-    interpolated across the visible, and a closed primary read through the compilation.
+    interpolated across the visible, and a closed primary read through the compilation. _CaTiO₃
+    and Na₂S taken up by R08.T5.i_ (2026-10-16, decision-p14-t49c-split §5.3): both files are
+    `standIn`, their visible k stated as an upper bound on the crystal's. FeS stays open.
   - _MnS's and CaTiO₃'s widened node rule_ (above; ruled on the issue 2026-10-14). The better
     cure scales a TAMUdust2020 node's absorption by the particles' own k between nodes, as the
     renderer already does on a floor's table and on Yang et al.'s; it would give 1.26's accuracy
@@ -9975,6 +10010,168 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
   - _Practical salinity in the guide._ The UX guide's composition words name mass and mole
     fractions only; "practical salinity 35" follows the literature's name, and its unit-free form
     follows the guide's dimensionless figures. For the owner to add to the guide.
+- **Deviations in T5.i, as built** (2026-10-16; decision-p14-t49c-split §5.3;
+  `view/atmosphere/materials/` (`ammonia-ice.json`, `calcium-titanate.json`, `sodium-sulphide.json`
+  and `materials.test.ts`), `view/atmosphere/sizeDistributionStop.test.ts`,
+  `view/atmosphere/nonSpherical.test.ts`, `apps/hyperion/src/tools/materials.ts` and its test,
+  `NOTICE`).
+  - _The files._ `ammonia-ice.json` grows from 3,603 B to 9,457 B, `calcium-titanate.json` from
+    4,492 B to 8,814 B and `sodium-sulphide.json` from 4,567 B to 6,709 B. Each file's provenance,
+    and its k at 450, 550 and 650 nm, before and after:
+    - NH₃ ice, `measured` to `standIn`: 2.20747 × 10⁻⁵, 2.88714 × 10⁻⁵ and 3.77608 × 10⁻⁵ to 0, and
+      0 at every grid point; n unchanged (1.43606 at 550 nm). Its name gains "(its absorption not
+      drawn)".
+    - CaTiO₃, `measured` to `standIn`: 4.59402 × 10⁻³, 1.81089 × 10⁻³ and 9.84679 × 10⁻⁴,
+      unchanged, as is n; its name gains "(an upper bound on its absorption)", a noun phrase like
+      the other names' parentheticals, where the brief's example read "(its absorption an upper
+      bound)" (the UX review).
+    - Na₂S, `standIn` unchanged: 2.03102 × 10⁻², 1.46463 × 10⁻² and 1.26302 × 10⁻², unchanged, as
+      are n and its name; its `standIn` and `reduction` gain the reason and the bound.
+  - _The regeneration, by hand._ Every one of the tool's 35 inputs was fetched anew on 2026-10-16,
+    each into its own directory, and checked by the tool's SHA-256 (HITRAN2024's tar and both
+    e-prints' archives by theirs). Through `scripts/materials.mjs`, then Prettier, all 44 index
+    files regenerate byte for byte at the base; after the change only the three files differ. No
+    phase file is touched: the phase tool was not run, and TAMUdust2020's archive was not fetched.
+  - _The fill, re-read._ Martonchik et al.'s Table I on the journal's abstract page gives the rows
+    as the ruling read them. The tool holds them from 6,840 to 50,000 cm⁻¹ (`MARTONCHIK_TABLE_I_ROWS`)
+    and builds the file's figures from them, and its test re-derives the linear fill to four figures
+    (3.9629 and 2.1087 × 10⁻⁵), the log-linear 2.05 × 10⁻⁵ and 7.22 × 10⁻⁶, and the 200–320 nm line
+    to within a unit of the table's last figure. Not to half a unit: the 210 nm row (47,619 cm⁻¹)
+    lies 5.0 × 10⁻¹⁰ off the line, since the line gives 1.6715 × 10⁻⁶ at 210 nm and the table
+    prints 1.671. The file states the evidence in its `reduction` and the search in its `source`; its
+    `paper` names Martonchik et al. as the source of n and of the rows shown to be a fill.
+  - _What the fill shows, narrowed_ (the science check). The ruling reads "no row from 200 to
+    1,462 nm measures absorption"; the evidence shows the rows between the 1,462 and 200 nm rows to
+    be interpolations, while the 1,462, 320 and 200 nm rows are the anchors and are not shown to be
+    constructed. The files say so ("the k rows between its 1,462 and 200 nm rows are
+    interpolations, not measurements"), in place of the first draft's "measure no absorption",
+    which read as a measured zero. 380–780 nm still lies wholly on interpolations, so the file's
+    k = 0 stands.
+  - _Two causes, softened_ (the science check). Kitzmann and Heng's Table 1 marks both Ueda et
+    al.'s and Khachai et al.'s data "Data available as figure" (read from the arXiv copy). So
+    CaTiO₃'s text says the reflectance does not constrain its sub-gap k, which comes from the
+    transform as read from a figure, and Na₂S's that the cause of its flat k is not established:
+    the ruling's computed tail or too small a gap, or a floor from the digitising, since the
+    compilation's k stays near 1.25 × 10⁻² from 0.56 to 1.6 µm and is 8.6 × 10⁻³ at 20 µm. Each
+    bound stands either way.
+  - _The gap._ The entry's "the crystal's gap (3.8–4.38 eV)" is Krause et al.'s value for ultrathin
+    layers; the compiled single crystal's absorption edge lies near 3.65 eV (k 0.027 at 3.62 eV and
+    0.058 at 3.67 eV). CaTiO₃'s text gives both; 380–780 nm (3.26–1.59 eV) lies below either.
+  - _NH₃: the liquid's bound._ NH₃ ice's search record adds the liquid's measured attenuation,
+    already in `ammonia-liquid.json` (Robertson and Williams 1973's Table I, read again on the
+    journal's page): it bounds the liquid's k by 6.7 × 10⁻⁷ at 400 nm and 2.8 × 10⁻⁷ at 654 nm,
+    17 and 136 times below the fill there. It bounds the liquid, not the crystal, so the search's
+    "nor a measured bound on it" stands for the solid.
+  - _The player text_ follows the UX review: NH₃ ice's `standIn` writes "a fill between their
+    1462 nm and 320 nm values" (the brief's example read "a straight line between their 1,462 and
+    320 nm rows": the guide groups digits only from five, and the fill is linear in wavenumber, not
+    in wavelength) and "its real index is theirs" (the other reasons' name for n); Na₂S's ends "so it
+    is an upper bound on the crystal's absorption". `materials.test.ts` gains a guard: no number of
+    four digits or fewer is grouped in a file's `name` or `standIn`. CaTiO₃'s "a k this small" keeps
+    no figure, as the brief keeps figures out of `standIn`.
+  - _NH₃ ice's figures_ are built from the tool's constants (`MARTONCHIK_TABLE_I_ROWS`,
+    `MARTONCHIK_UV_LINE`, `T5B_AMMONIA_ICE_550`), and the tool's test asserts the file states them.
+    _CaTiO₃'s and Na₂S's figures_ are hand-written in the tool's text, as the ruling computed them,
+    and the tool's test recomputes each from the committed file's own index: the normal reflectance
+    at 550 nm (0.1598728 with k = 0, 0.1598730 with the file's k, a change of 2.5 × 10⁻⁷), the
+    30 µm transmissions (2.1% and 29% at 450 and 550 nm; Na₂S 4.4 × 10⁻⁵ at 550 nm), the absorption
+    lengths (7.8 and 24 µm; 3.0 µm), and 380–780 nm as 3.26–1.59 eV. The thin section's 30 µm is
+    cited to Wikipedia's "Thin section" (a revision by its ID), where the ruling took it from
+    memory.
+  - _The `adjust`._ `withoutVisibleAbsorption(index)`, beside `addAcidUvAbsorber`, takes the reduced
+    index alone, since k = 0 needs no grid; `FetchedSpec.adjust`'s doc names both.
+  - _Names beyond the sketch._ In the tool: `FETCHED_T5I`, `withoutVisibleAbsorption`,
+    `WavenumberRow`, `MARTONCHIK_TABLE_I_ROWS`, `MARTONCHIK_UV_LINE`, `martonchikUltravioletLineK`,
+    `wavenumberFraction`, `WavenumberFill`, `wavenumberFill` and `T5B_AMMONIA_ICE_550`; the private
+    formatter `timesTen`, which `signedScientific` now calls (its output unchanged).
+  - _The search_ (2026-10-16), each source with its SHA-256 in the file it bears on:
+    - Read: Martonchik et al.'s page and abstract; the abstracts of Hapke, Wells, Wagner and
+      Partlow 1981 and of Wagner, Hapke and Wells 1987 (NASA NTRS), Browell and Anderson 1975,
+      Hudson, Gerakines and Yarnall 2022, Ueda et al. 1998 and Krause et al. 2015 (OpenAlex); Pipes,
+      Browell and Anderson 1974's title (Crossref); Kieffer 1974 in full (NTRS), NH₃ frost over
+      about 1.25–3 µm only; the Handbook of Mineralogy's perovskite sheet, whose download here has
+      the SHA-256 main recorded; PubChem's HSDB colour entries for Na₂S.
+    - Pipes et al. 1974 is ultraviolet only (1400–3000 Å), so the visible frost reflectances for
+      P14.T49.i are Hapke et al. 1981 and Wagner, Hapke and Wells 1987.
+    - New candidates: Howett, Carlson, Irwin and Calcutt 2007 (J. Opt. Soc. Am. B 24, 126), NH₃ ice
+      by thin-film transmission over 1300–12,000 cm⁻¹ (0.83–7.7 µm), short of 780 nm, whose Table 1
+      of earlier work lists no visible measurement but Martonchik et al.'s; Rosen and Pipkin 1978
+      (Icarus 35, 252), Na- and K-doped NH₃ frosts' reflectance, closed, its title alone reachable;
+      Walker 1979 (J. Cryst. Growth 47, 598), Na₂S's crystal growth, closed, its title alone; and,
+      found by the science check, Linz and Herrington 1958 (J. Chem. Phys. 28, 824, DOI
+      10.1063/1.1744278), "the optical density of a flame fusion single crystal plate of CaTiO3"
+      with visible n, nD = 2.403 ± 0.02 (its abstract, through Crossref), closed and its values
+      unread: the lead for the transmission measurement that would replace CaTiO₃'s bound, posted
+      on the issue as a lead, not a found value.
+    - Unreachable: Lebofsky and Fegley 1976, closed, its title alone (Crossref, OpenAlex; ADS's
+      abstract service refused the fetch, its scan timed out); Hapke et al. 1981's ADS scan
+      (refused); Ueda et al.'s and Krause et al.'s full texts, which OpenAlex lists as free to read
+      but IOPscience serves to subscribers only, and Hudson et al. 2022's open PDF, which
+      IOPscience's bot check refused (its abstract suffices). OpenAlex's search refused (rate-limited) after its
+      record lookups, so the new candidates came from Crossref's.
+    - No measured visible k, and no measured bound, was read for any of the three; Linz and
+      Herrington's lead went to the issue as a comment, and the build kept §3's choices.
+  - _Tests rewritten._ `materials.test.ts`'s "gives no label beneath a τ 30 deck" is now "gives no
+    reason beneath a τ 30 deck": the NH₃-ice deck at τ 0 raises the label itself, and the NH₄SH mode
+    under τ 30 adds no reason (`materialApproximations` names `NH3` alone).
+    `sizeDistributionStop.test.ts`'s "NH3 ice of 10 µm" is now "NH3 ice of 10 µm at T5.b's index",
+    `fixed({ n: 1.43606, k: 2.88714e-5 })`, its held numbers unmoved. `nonSpherical.test.ts`'s
+    "draws NH₃ ice as an analogue with its own index's Mie cross-sections and ω" asserted NH₃'s ω
+    below water ice's; it now asserts ω = 1 to 10⁻¹² and above water ice's, the one its own
+    lossless index gives. `aerosol.test.ts` is unchanged: the 3 µm NH₃ mode's quadrature still
+    converges. "give every fetched file its checksum and the date fetched" reads the `measured`
+    files, which NH₃ ice and CaTiO₃ leave (Na₂S already had), so T5.i's block holds the three files'
+    sources to it instead, and the tool's header test holds every fetched file's `source` to the
+    tool's text.
+  - _Tests added._ In `materials.test.ts`: the three files' provenance; NH₃ ice's k = 0 at every grid
+    point and n 1.43606 at 550 nm; CaTiO₃'s and Na₂S's k at 550 nm; each `standIn`'s reason; an
+    NH₃-ice and a CaTiO₃ deck at τ 0 each giving `atmosphereApproximate` with its file's `standIn`.
+    In the tool's test: the `adjust` (k = 0, n as reduced) alone and through `reduceSource`; the
+    fill and the line; n off the straight line (1.4347 and 1.4613 against 1.423 and 1.449); the
+    figures each of the three files states; and, for every fetched file, its committed `name`,
+    `provenance`, `paper`, `source`, `licence`, `reduction` and `standIn` equal to the tool's header,
+    the text half of the by-hand regeneration, which needs no fetched source (the TypeScript review:
+    an edited header had gone uncommitted).
+  - _The fit, path A._ P14.T49.c has not landed at the base: no `substance_albedos` manifest and no
+    `substance_albedo.rs`. `cargo run -p hyperion-fit -- check` passes (31 fresh, 6 warnings, the
+    base's provisional tables, 0 failures; `liquid_optics` fresh); no table reads the three files,
+    since `liquid_optics` lists only the seven liquids. `ammonia-ice.json`'s and
+    `calcium-titanate.json`'s data hashes change (provenance, and NH₃'s k), and
+    `sodium-sulphide.json`'s does not (prose only), so T49.c's own refit reads the corrected files
+    when it lands, and the row overrides decision-p14-t49c-split §1.2, item 2, would give `NH3` and
+    `CaTiO3` are not needed: each file's provenance is now `standIn`.
+  - _The checks._ `pnpm --filter hyperion exec vitest run src/renderer/src/view/atmosphere` passes
+    (43 files, 2,608 tests and 2 skipped, at the base before the review's text edits), as do
+    `src/tools/materials` and `src/tools/nonSpherical`; the gate's run is the issue's record.
+  - _On screen_ nothing changes at the base: no renderer path calls `materialLabels` yet, and a
+    Jupiter-class body's NH₃ deck already raises `ATMOSPHERE: APPROXIMATE` through its phase
+    analogue, so once the label is wired the stand-in adds a reason. No client golden reads the
+    three files.
+  - _`NOTICE`_: Martonchik et al.'s entry gains that `ammonia-ice.json` takes only the real index
+    from it, and that the tool holds eleven of Table I's rows, read from the journal's page, as the
+    fill's evidence, which no file is reduced from (the plan-conformance review, under the
+    "Licences" rule). No other source supplies values: the frosts, the gap, the Handbook and PubChem
+    are cited as facts.
+- **Deferred findings (2026-10-13 rule)** (R08.T5.i). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The fill's origin._ Martonchik et al.'s abstract names no source for their visible k, and the
+    paper is closed. If the full text names a measured spectrum behind the two rows, that spectrum
+    is the lead for a measured visible absorption.
+  - _NH₃ ice's colour._ k = 0 draws the crystal lossless, so a pure NH₃ deck draws white; the
+    crystal's weak N–H overtone bands are not drawn, and a measured bound on them would replace
+    k = 0.
+  - _The frosts' reflectances._ Hapke et al. 1981's and Wagner, Hapke and Wells 1987's spectra are
+    in closed papers; whether a machine-readable copy exists for P14.T49.i is unchecked.
+  - _CaTiO₃'s films._ Krause et al.'s DUV–VIS ellipsometry was not read (closed); thin-film
+    ellipsometry is not expected to resolve a k near 10⁻³, and a model's zero below the gap is not
+    a measurement.
+  - _CaTiO₃'s transmission lead and its n._ Linz and Herrington 1958's single-crystal optical
+    density would replace the bound if read (and the phase table would be remade); the article is
+    closed. Their nD = 2.403 ± 0.02 lies 0.086 above the file's 2.3175 at 589.3 nm (interpolated),
+    and the Handbook's n = 2.34–2.37 above it too; n is out of T5.i's scope, and is Ueda et al.'s
+    Kramers–Kronig n as compiled.
+  - _Na₂S's floor._ Whether Na₂S's flat k is the calculation's or the digitising's is not settled;
+    Khachai et al.'s figure is in a closed paper.
 - **Deviations in T12.a, as built** (2026-10-09; `crates/hyperion-fit/src/atmosphere/`, the
   `atmosphere-reference` command in `cli.rs`, `RunFitError` in `lib.rs`).
   - _Signatures._ `trace_reference` returns `Result<ReferenceRadiances, TraceReferenceError>`: the

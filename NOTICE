@@ -481,7 +481,12 @@ ruled 2026-10-09 and 2026-10-10).
   503-520; as distributed in optool's lnk_data (C. Dominik, M. Min and R. Tazaki, ascl:2104.010;
   https://github.com/cdominik/optool, commit 0b1fa6df). Reduced to the visible in
   apps/hyperion/src/renderer/src/view/atmosphere/materials/ammonia-ice.json and
-  enstatite-glass.json.
+  enstatite-glass.json. Since R08.T5.i ammonia-ice.json takes only the real index from it, its
+  visible imaginary index being a fill between the table's rows, not a measurement; eleven rows of
+  the paper's Table I (6840 to 50000 per cm), read from the journal's abstract page
+  (https://opg.optica.org/ao/abstract.cfm?uri=ao-23-4-541), are held in
+  apps/hyperion/src/tools/materials.ts as that evidence, cited to the paper, and no file is reduced
+  from them (plan R08, R08.T5.i).
 
 - Refractive indices of water ice, liquid and solid methane, iron and soot, from the
   refractiveindex.info database (M. N. Polyanskiy, Sci. Data 11, 94 (2024); commit c5c2f188),

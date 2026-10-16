@@ -893,8 +893,9 @@ interface FetchedSpec {
   readonly resample: ResampleOptions;
   readonly header: MaterialHeader;
   /**
-   * A stated change made to the reduced index, on the file's grid: `acid_uv_absorber`'s added
-   * k_UA. Absent for a file that is the reduction alone.
+   * A stated change made to the reduced index, on the file's grid: `acid_uv_absorber`'s added k_UA
+   * ({@link addAcidUvAbsorber}), and since R08.T5.i NH₃ ice's k set to 0
+   * ({@link withoutVisibleAbsorption}). Absent for a file that is the reduction alone.
    */
   readonly adjust?: (index: ReducedIndex, grid: ReadonlyArray<number>) => ReducedIndex;
 }
@@ -911,6 +912,9 @@ export const FETCHED_T5G = "2026-10-14";
 
 /** The day R08.T5.h's sources were fetched. */
 export const FETCHED_T5H = "2026-10-15";
+
+/** The day R08.T5.i's sources were fetched (decision-p14-t49c-split §5.3). */
+export const FETCHED_T5I = "2026-10-16";
 
 /**
  * The a-priori k of Venus's ultraviolet absorber at 365 nm, k₃₆₅: the ruled value
@@ -953,6 +957,158 @@ function addAcidUvAbsorber(acid: ReducedIndex, grid: ReadonlyArray<number>): Red
   };
 }
 
+/**
+ * NH₃ ice's index with its visible absorption not drawn: n as reduced, and k = 0 at every grid
+ * point, a stated stand-in (R08.T5.i; decision-p14-t49c-split §5.3).
+ *
+ * @remarks
+ * Martonchik et al.'s k rows between their 1,462 and 200 nm rows are interpolations, not
+ * measurements ({@link MARTONCHIK_TABLE_I_ROWS}), and no measured visible absorption of NH₃ ice was
+ * found, so
+ * the file draws the colourless crystal lossless: an upper bound on its brightness, as the k = 0
+ * ices are (decision-p14-t49c-split §5.6, "Lossless grains (the k = 0 stand-ins): confirmed
+ * recorded, as upper bounds and labelled").
+ */
+export function withoutVisibleAbsorption(index: ReducedIndex): ReducedIndex {
+  return { n: index.n, k: index.k.map(() => 0) };
+}
+
+/** One row of a table by wavenumber: ν, cm⁻¹, and the complex index n + ik. */
+export interface WavenumberRow {
+  readonly wavenumberPerCm: number;
+  readonly n: number;
+  readonly k: number;
+}
+
+/**
+ * Martonchik, Orton and Appleby 1984's Table I (Appl. Opt. 23, 541) from its 6,840 cm⁻¹ row
+ * (1,462 nm) to its 50,000 cm⁻¹ row (200 nm), every row between, as the journal's abstract page
+ * shows them ({@link MARTONCHIK_PAGE}, read {@link FETCHED_T5I}).
+ *
+ * @remarks
+ * R08.T5.i reads them as the evidence that the k rows between are interpolations
+ * (decision-p14-t49c-split §5.3): the 14,976.7 and 23,113.3 cm⁻¹ rows are the linear fill in k
+ * between the 6,840 and 31,250 cm⁻¹ rows ({@link wavenumberFill}), and the rows from 31,250 to
+ * 50,000 cm⁻¹ lie on a straight line in wavelength ({@link martonchikUltravioletLineK}). The file's
+ * n is reduced from optool's copy of the table, not from these.
+ */
+export const MARTONCHIK_TABLE_I_ROWS: ReadonlyArray<WavenumberRow> = [
+  { wavenumberPerCm: 6840, n: 1.408, k: 5.817e-5 },
+  { wavenumberPerCm: 14_976.7, n: 1.423, k: 3.963e-5 },
+  { wavenumberPerCm: 23_113.3, n: 1.449, k: 2.109e-5 },
+  { wavenumberPerCm: 31_250, n: 1.488, k: 2.546e-6 },
+  { wavenumberPerCm: 33_333, n: 1.505, k: 2.387e-6 },
+  { wavenumberPerCm: 35_714, n: 1.517, k: 2.228e-6 },
+  { wavenumberPerCm: 38_462, n: 1.544, k: 2.069e-6 },
+  { wavenumberPerCm: 41_667, n: 1.582, k: 1.91e-6 },
+  { wavenumberPerCm: 46_729, n: 1.677, k: 1.703e-6 },
+  { wavenumberPerCm: 47_619, n: 1.707, k: 1.671e-6 },
+  { wavenumberPerCm: 50_000, n: 1.792, k: 1.592e-6 },
+];
+
+const MARTONCHIK_PAGE = fetchedSource(
+  "the journal's abstract page",
+  "https://opg.optica.org/ao/abstract.cfm?uri=ao-23-4-541",
+  "42ed721929a8baeeae4a1ed0f79970bf0c6fc46e93b56c0e46156a3e4bc83092",
+  FETCHED_T5I,
+);
+
+/** A row of {@link MARTONCHIK_TABLE_I_ROWS} by its wavenumber, cm⁻¹. */
+function martonchikRow(wavenumberPerCm: number): WavenumberRow {
+  const row = MARTONCHIK_TABLE_I_ROWS.find((r) => r.wavenumberPerCm === wavenumberPerCm);
+  if (row === undefined) {
+    throw new Error(`no Table I row at ${wavenumberPerCm} cm⁻¹`);
+  }
+  return row;
+}
+
+/**
+ * The straight line in wavelength that every row of {@link MARTONCHIK_TABLE_I_ROWS} from 200 to
+ * 320 nm lies on, within a unit of the table's last figure (computed for R08.T5.i, as decision-p14-t49c-split
+ * §5.3 found the 240–320 nm rows): k = k₂₀₀ + s (λ − 200 nm), with k₂₀₀ the 200 nm row's k and s
+ * per nm.
+ */
+export const MARTONCHIK_UV_LINE = { kAt200Nm: 1.592e-6, slopePerNm: 7.95e-9 } as const;
+
+/** k on {@link MARTONCHIK_UV_LINE} at a wavelength, nm. */
+export function martonchikUltravioletLineK(wavelengthNm: number): number {
+  return MARTONCHIK_UV_LINE.kAt200Nm + MARTONCHIK_UV_LINE.slopePerNm * (wavelengthNm - 200);
+}
+
+/** Where a wavenumber, cm⁻¹, lies between two rows: 0 at the first, 1 at the second. */
+export function wavenumberFraction(
+  lo: WavenumberRow,
+  hi: WavenumberRow,
+  wavenumberPerCm: number,
+): number {
+  return (wavenumberPerCm - lo.wavenumberPerCm) / (hi.wavenumberPerCm - lo.wavenumberPerCm);
+}
+
+/** The index the fills between two rows give at a wavenumber between them. */
+export interface WavenumberFill {
+  /** k linear in k. */
+  readonly kLinear: number;
+  /** k linear in log k, the reduction's own rule, for comparison. */
+  readonly kLogLinear: number;
+  /** n linear in n. */
+  readonly nLinear: number;
+}
+
+/** The index the fills between two rows by wavenumber give at a wavenumber between them, cm⁻¹. */
+export function wavenumberFill(
+  lo: WavenumberRow,
+  hi: WavenumberRow,
+  wavenumberPerCm: number,
+): WavenumberFill {
+  const t = wavenumberFraction(lo, hi, wavenumberPerCm);
+  return {
+    kLinear: lo.k + t * (hi.k - lo.k),
+    kLogLinear: lo.k * (hi.k / lo.k) ** t,
+    nLinear: lo.n + t * (hi.n - lo.n),
+  };
+}
+
+/**
+ * `ammonia-ice.json`'s index at 550 nm as R08.T5.b reduced it, before R08.T5.i's k = 0: n and k
+ * from optool's copy of Martonchik et al.'s table (`sizeDistributionStop.test.ts` holds its NH₃-ice
+ * mode at it).
+ */
+export const T5B_AMMONIA_ICE_550 = { n: 1.43606, k: 2.88714e-5 } as const;
+
+/** A positive number as `m × 10ⁿ`, its mantissa to the fraction digits given. */
+function timesTen(value: number, fractionDigits: number): string {
+  const [mantissa, exponent] = value.toExponential(fractionDigits).split("e");
+  const superscript = (exponent ?? "")
+    .replace("+", "")
+    .replace("-", "⁻")
+    .replace(/[0-9]/gu, (d) => "⁰¹²³⁴⁵⁶⁷⁸⁹"[Number(d)] ?? d);
+  return `${mantissa ?? ""} × 10${superscript}`;
+}
+
+/** A row's wavenumber as the files write it: 14,976.7 cm⁻¹. */
+function wavenumberText(row: WavenumberRow): string {
+  return row.wavenumberPerCm.toLocaleString("en-GB", { maximumFractionDigits: 1 });
+}
+
+/** `ammonia-ice.json`'s `reduction`: n as reduced, and the evidence for its k = 0. */
+function ammoniaIceReductionText(): string {
+  const lo = martonchikRow(6840);
+  const hi = martonchikRow(31_250);
+  const r668 = martonchikRow(14_976.7);
+  const r433 = martonchikRow(23_113.3);
+  const f668 = wavenumberFill(lo, hi, r668.wavenumberPerCm);
+  const f433 = wavenumberFill(lo, hi, r433.wavenumberPerCm);
+  const cm = wavenumberText;
+  const lengthMm = (550e-6 / (4 * Math.PI * T5B_AMMONIA_ICE_550.k)).toFixed(1);
+  return `n linear in wavelength between the source's rows, onto 380–780 nm every 5 nm, to six significant figures; the source has rows at 320, 433, 668 and 1,462 nm here, so n is interpolated between them; the copy states no temperature. k = 0 at every grid point, a stated stand-in (R08.T5.i, decision-p14-t49c-split §5.3), since the paper's k rows between its 1,462 and 200 nm rows are interpolations, not measurements, and no measured visible absorption was found (the file's source). Its Table I (${MARTONCHIK_PAGE}) has two rows between 1,462 and 320 nm, ${cm(r668)} cm⁻¹ (668 nm, k ${timesTen(r668.k, 3)}) and ${cm(r433)} cm⁻¹ (433 nm, ${timesTen(r433.k, 3)}), at one and two thirds of the interval between its ${cm(lo)} cm⁻¹ row (k ${timesTen(lo.k, 3)}) and its ${cm(hi)} cm⁻¹ row (${timesTen(hi.k, 3)}); they equal the linear interpolation in k between those rows to four figures, ${timesTen(f668.kLinear, 4)} and ${timesTen(f433.kLinear, 4)}, where a fill linear in log k would give ${timesTen(f668.kLogLinear, 2)} and ${timesTen(f433.kLogLinear, 2)} (computed). Every row from 200 to 320 nm lies on k = ${timesTen(MARTONCHIK_UV_LINE.kAt200Nm, 3)} + ${timesTen(MARTONCHIK_UV_LINE.slopePerNm, 2)} (λ − 200 nm) within a unit of the table's last figure (computed). So 380–780 nm lies wholly on interpolations: 380–433 nm runs towards the 320 nm row, an end of the 200–320 nm line, and 668–780 nm towards the 1,462 nm row, at the edge of the 1.5 µm band (Table I's k reaches 2.693 × 10⁻⁴ at 6,500 cm⁻¹). The paper's abstract says only that the real index was "obtained from previously published spectra of the absorption index ni by means of the Kramers-Kronig dispersion relation", and does not name the visible's source (${fetchedSource("OpenAlex's record", "https://api.openalex.org/works/doi:10.1364/AO.23.000541", "6dd81d6a76cdc19ad45c89c21d9d3226fa3eb4d3121a7c4e5fec05203e97b4e0", FETCHED_T5I)}). As R08.T5.b reduced it, k was ${timesTen(T5B_AMMONIA_ICE_550.k, 5)} at 550 nm, an absorption length of ${lengthMm} mm (computed), which makes a white frost come out at a normal albedo of 0.29 in P14.T49.c's model (decision-p14-t49c-split ruling 5). k = 0 draws the colourless crystal lossless, an upper bound on its brightness, as the k = 0 ices are (decision-p14-t49c-split §5.6), and Hapke et al. 1981's bright frost agrees with it (the file's source); the crystal's weak N–H overtone bands are not drawn. n is not part of the fill: the rows' ${r668.n} and ${r433.n} at 668 and 433 nm lie off the straight line between the 1,462 and 320 nm rows' n (${f668.nLinear.toFixed(4)} and ${f433.nLinear.toFixed(4)}, computed), and n stays as reduced`;
+}
+
+/**
+ * `ammonia-ice.json`'s record of R08.T5.i's search for a measured visible absorption of NH₃ ice
+ * (decision-p14-t49c-split §5.3): each candidate, what it covers, and what was read.
+ */
+const NH3_ICE_SEARCH_TEXT = `R08.T5.i's search for a measured visible absorption of NH3 ice (${FETCHED_T5I}) found none, nor a measured bound on it, for the solid. The liquid's measured total attenuation (C. W. Robertson and D. Williams, "Lambert absorption coefficient of liquid ammonia in the visible region", J. Opt. Soc. Am. 63 (1973) 763, DOI 10.1364/JOSA.63.000763, Table I, ${fetchedSource("read on the journal's page", "https://opg.optica.org/josa/abstract.cfm?uri=josa-63-6-763", "802a0b942b36a10c61509c62e6977e803a8b4fa37a04d61f7ed01b4d0c14beeb", FETCHED_T5I)}, as ammonia-liquid.json cites it) bounds the liquid's k by 6.7 × 10⁻⁷ at 400 nm and 2.8 × 10⁻⁷ at 654 nm (k = αλ ÷ 4π, computed), 17 and 136 times below the fill's k there, on a sample whose temperature and purity the page does not state. Hapke, Wells, Wagner and Partlow 1981 (Icarus 47, 361, DOI 10.1016/0019-1035(81)90184-6; closed; its abstract at NASA NTRS 19820033673, https://ntrs.nasa.gov/api/citations/19820033673, SHA-256 7249b50d768713b24b5a8a691817669776ffe1407c430cd8559b1cf72b493281) measure frosts' reflectance over 0.1–2.5 µm, "NH3 is bright at wavelengths longer than 0.21 microns, where reflectance drops to a value of only a few per cent at shorter wavelengths"; Wagner, Hapke and Wells 1987 (Icarus 69, 14, DOI 10.1016/0019-1035(87)90003-0; closed; its abstract at NTRS 19870044303, https://ntrs.nasa.gov/api/citations/19870044303, SHA-256 3c7ec35217257030126c23f11bb9b8530880a1d5212b9984bda17bfee1e8a9d6) give an atlas of reflectance over 92–1800 nm with NH3 frost among the frosts. Neither gives k: they are the visible frost reflectances for P14.T49.i to invert. Pipes, Browell and Anderson 1974 (Icarus 21, 283, DOI 10.1016/0019-1035(74)90043-8; closed; its title through Crossref, https://api.crossref.org/works/10.1016/0019-1035(74)90043-8, SHA-256 ee41413eb0b6cc82274e6acb0de1752cdea2562652577831e64328f6c7a5e10f) reach 1400–3000 Å only. Browell and Anderson 1975 (J. Opt. Soc. Am. 65, 919, DOI 10.1364/JOSA.65.000919; closed; its abstract through OpenAlex, https://api.openalex.org/works/doi:10.1364/JOSA.65.000919, SHA-256 ab7cf61eac917a62e0f3b70adc8ed6df7138cb2079059608011041fd0f85ce57) give n of amorphous NH3 ice over 1925–3200 Å, and upper limits on its absorption at 1760 Å only. Hudson, Gerakines and Yarnall 2022 (Astrophys. J. 925, 156, DOI 10.3847/1538-4357/ac3e74; its abstract through OpenAlex, https://api.openalex.org/works/doi:10.3847/1538-4357/ac3e74, SHA-256 e6acf9d02b881e941edba56f6a3e37c633a24b6e4497559b19aec0844fa36927) give infrared optical constants and n at 670 nm. Howett, Carlson, Irwin and Calcutt 2007 (J. Opt. Soc. Am. B 24, 126, DOI 10.1364/JOSAB.24.000126; closed; the journal's abstract page, https://opg.optica.org/josab/abstract.cfm?uri=josab-24-1-126, SHA-256 f3f952d8c413c5fdafa928451f294dc3808e7bd53bc5ad91694f0fc94ec4f630) measure thin-film transmission over 1300–12,000 cm⁻¹ (0.83–7.7 µm), and their Table 1 of earlier work on NH3 ice lists none in the visible but Martonchik et al.'s. Kieffer 1974 ("Ring particle sizes and composition derived from eclipse cooling curves and reflection spectra", in The Rings of Saturn, NASA, 1974; NTRS 19750009169, https://ntrs.nasa.gov/api/citations/19750009169/downloads/19750009169.pdf, SHA-256 d542cec141d79e43819a3b5d497c1f60b0f617d44d58876ff4593a04905da7b3, read in full) shows NH3 frost spectra over about 1.25–3 µm only (its Fig. 1). Lebofsky and Fegley 1976 ("Laboratory reflection spectra for the determination of chemical composition of icy bodies", Icarus 28, 379, DOI 10.1016/0019-1035(76)90151-2; https://api.crossref.org/works/10.1016/0019-1035(76)90151-2, SHA-256 ddb3457e0de897d377a75d28496c42d30b6ac32a14d0a709914267986f7f2708) and Rosen and Pipkin 1978 ("Reflectance spectra for sodium and potassium doped ammonia frosts: Implications for Io's surface", Icarus 35, 252, DOI 10.1016/0019-1035(78)90010-6; https://api.openalex.org/works/doi:10.1016/0019-1035(78)90010-6, SHA-256 16f405f46b5503c8001b22fdc371c0e467d31e900a17ba76ba6e1fe9c3fb37fc) are closed, their titles alone reachable`;
+
 /** The LX-MIE commit Kitzmann and Heng 2018's compilation was fetched at (master, 2026-10-06). */
 export const LX_MIE_COMMIT = "38cc6d97c2268d58c41ccfc3955283ab6ee2ca44";
 
@@ -989,6 +1145,28 @@ const ARGON_HOLD_TEXT =
 /** Irwin et al. 2022's two planets' Aerosol-3 "Mean 1" k at two of their rows (their tables). */
 const IRWIN_PLANETS_TEXT =
   "Uranus 1.50 × 10⁻³ and Neptune 1.01 × 10⁻² at 400 nm, 1.91 × 10⁻⁴ and 5.47 × 10⁻³ at 500 nm";
+
+/**
+ * A standard petrographic thin section's thickness, as {@link CATIO3_BOUND_TEXT}'s figures take it:
+ * ground "until the sample is only 30 μm thick" (Wikipedia, "Thin section", revision 1323745730,
+ * read {@link FETCHED_T5I}).
+ */
+const THIN_SECTION_SOURCE = `a standard thin section's thickness (Wikipedia, "Thin section", ${fetchedSource("revision 1323745730", "https://en.wikipedia.org/w/index.php?title=Thin_section&oldid=1323745730", "66633dded2f05cad0e37e0e2531a082b8dd19f7e90371e426289b5c4decd51b4", FETCHED_T5I)})`;
+
+/**
+ * `calcium-titanate.json`'s record that its visible k is an upper bound, not a measurement of
+ * absorption (R08.T5.i; decision-p14-t49c-split §5.3): the source's method, what reflectance can
+ * see, the band gap and the mineral in transmitted light. The figures marked computed are from the
+ * file's own index at 450 and 550 nm (the tool's test recomputes them).
+ */
+const CATIO3_BOUND_TEXT = `Its visible k is not a measurement of absorption (R08.T5.i, decision-p14-t49c-split §5.3), and the file keeps it as an upper bound on the pure crystal's sub-gap k, a stated stand-in. Ueda et al.'s abstract: "Normal incidence light reflection measurements have been performed for single crystals over the wide energy region from 0.4 to 35 eV. The dielectric functions and optical constants are evaluated from the reflectance spectrum by the Kramers-Krönig transformation technique" (${fetchedSource("through OpenAlex", "https://api.openalex.org/works/doi:10.1088/0953-8984/10/16/018", "30d02af069bb67a91cd07186919db44614faaa4c42db12bda711ff61f8523a3d", FETCHED_T5I)}; the article is closed). At 550 nm, n 2.33245, the normal reflectance is 0.1598728 with k = 0 and 0.1598730 with the file's k of 1.81089 × 10⁻³, a change of 2.5 × 10⁻⁷ (computed): reflectance cannot see a k this small, so the measurement does not constrain the sub-gap k, which comes from the transform, as Kitzmann and Heng read it from Ueda et al.'s figure (their Table 1, "Data available as figure"; ${fetchedSource("the arXiv copy, arXiv:1710.04946v2", "https://arxiv.org/pdf/1710.04946v2", "ba36c5a2cc6ee4dc71fbf11d461301324f1e144d3700d72f61d1ebb8e83723ec", FETCHED_T5I)}). 380–780 nm is 3.26–1.59 eV, below the compiled crystal's absorption edge near 3.65 eV (its k is 0.027 at 3.62 eV and 0.058 at 3.67 eV, the compilation's rows) and below the band gap of 3.8–4.38 eV that Krause, Weber, Pohl, Rellinghaus, Kersch and Mikolajick 2015 measure in ultrathin layers by low-energy EELS (electron energy loss spectroscopy) ("Investigation of band gap and permittivity of the perovskite CaTiO3 in ultrathin layers", J. Phys. D 48, 415304, DOI 10.1088/0022-3727/48/41/415304; their abstract, ${fetchedSource("through OpenAlex", "https://api.openalex.org/works/doi:10.1088/0022-3727/48/41/415304", "23e4cb27986c8707e63d04a1f403ce90b9b6ab5440f9b41f52bad43bd2cb68e4", FETCHED_T5I)}; the article is closed, so their DUV–VIS ellipsometry was not read). The Handbook of Mineralogy's perovskite sheet (J. W. Anthony, R. A. Bideaux, K. W. Bladh and M. C. Nichols, Mineral Data Publishing, ${fetchedSource("version 1", "https://www.handbookofmineralogy.org/pdfs/perovskite.pdf", "c8f43952ab901561cf0a922bc47b17579ee2cdc9d80188ccf2c7d1065c6c62a6", FETCHED_T5I)}) describes the natural mineral, whose Vogtsberg analysis there carries 25.99% Nb2O5, 5.69% FeO and 3.08% RE2O3, as "Opaque, transparent in thin fragments", "colorless to dark brown in transmitted light", with a "White to grayish white" streak and n = 2.34–2.37. At the file's k a 30 µm section, ${THIN_SECTION_SOURCE}, would transmit 2.1% at 450 nm and 29% at 550 nm before reflection losses, absorption lengths of 7.8 and 24 µm (computed): a section colourless in transmitted light is not possible at these values, even of the impure mineral, so the file's k lies above the crystal's absorption, and a colourless crystal would draw brighter. The k is kept rather than set to 0, since no measurement says the absorption is nil, and a changed k would need the phase table remade; a transmission measurement, if one is found, replaces it. R08.T5.i's search (${FETCHED_T5I}) found none that could be read: A. Linz and K. Herrington, "Electrical and Optical Properties of Synthetic Calcium Titanate Crystal", J. Chem. Phys. 28 (1958) 824–825, DOI 10.1063/1.1744278, whose abstract reads "The optical density of a flame fusion single crystal plate of CaTiO3 is reported. The refractive indices for the visible region are given, with nD = 2.403±0.02" (${fetchedSource("through Crossref", "https://api.crossref.org/works/10.1063/1.1744278", "da8e8cc24a8adf62dbaefcf9b302a5b12111e351d6c87872a298dd81ac5cf81c", FETCHED_T5I)}); the article is closed and its values were not read, so it is the lead for that measurement`;
+
+/**
+ * `sodium-sulphide.json`'s record that its visible k bounds the crystal's from above (R08.T5.i;
+ * decision-p14-t49c-split §5.3). The figures marked computed are from the file's own index (the
+ * tool's test recomputes them).
+ */
+const NA2S_BOUND_TEXT = `Its k, 1.46 × 10⁻² at 550 nm and 1.26–1.27 × 10⁻² over 600–780 nm with no feature, is not a colourless solid's absorption, so the file bounds the crystal's visible k from above (R08.T5.i, decision-p14-t49c-split §5.3). Its cause is not established: the ruling reads it as a computed spectrum's broadening tail or too small a computed gap, but Kitzmann and Heng took Khachai et al.'s values from a figure (their Table 1, "Data available as figure"; ${fetchedSource("the arXiv copy, arXiv:1710.04946v2", "https://arxiv.org/pdf/1710.04946v2", "ba36c5a2cc6ee4dc71fbf11d461301324f1e144d3700d72f61d1ebb8e83723ec", FETCHED_T5I)}), and the compilation's k stays near 1.25 × 10⁻² from 0.56 to 1.6 µm and is 8.6 × 10⁻³ at 20 µm, flat where a tail below a gap would fall, so a floor from the digitising is as likely. PubChem's Hazardous Substances Data Bank entries for sodium sulfide (CID 14804, "Color/Form", ${fetchedSource("PubChem's record", "https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/14804/JSON?heading=Color/Form", "be262d6b1122cc6f6eb45de0a7a702fbce68c931cab62497d0357819e4b26415", FETCHED_T5I)}) give "CLEAR CRYSTALS; YELLOW OR BRICK-RED LUMPS OR FLAKES" (the National Fire Protection Association's Fire Protection Guide on Hazardous Materials, 7th ed., 1978), "AMORPHOUS, YELLOW-PINK OR WHITE CRYSTALS" (Sax 1979) and "White to pink, crystalline solid" (Ashford 1994), and state no cause of the coloured forms. At the file's k a 30 µm crystal would transmit 4.4 × 10⁻⁵ at 550 nm, an absorption length of 3.0 µm (computed): not clear. R08.T5.i's search (${FETCHED_T5I}) found no measured visible constants of Na2S, as R08.T5.d's did not; Walker 1979 ("Crystal growth of sodium sulphide, Na2S", J. Cryst. Growth 47, 598, DOI 10.1016/0022-0248(79)90146-5; ${fetchedSource("OpenAlex's record", "https://api.openalex.org/works/doi:10.1016/0022-0248(79)90146-5", "fd28561691a2125a61393da08e570208147ad1653a5ed693a84352ea0f1826e5", FETCHED_T5I)}) is closed, its title alone reachable`;
 
 /** Every material file reduced from a fetched source, in the registry's order (a key's default first). */
 export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
@@ -1029,22 +1207,24 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
       key: "NH3",
       phase: "solid",
       variant: null,
-      name: "crystalline NH3 ice",
+      name: "crystalline NH3 ice (its absorption not drawn)",
       temperatureK: null,
       shape: "crystal",
-      provenance: "measured",
+      provenance: "standIn",
       paper:
-        'J. V. Martonchik, G. S. Orton and J. F. Appleby, "Optical properties of NH3 ice from the far infrared to the near ultraviolet", Appl. Opt. 23 (1984) 541–547, DOI 10.1364/AO.23.000541',
-      source: fetchedSource(
+        'J. V. Martonchik, G. S. Orton and J. F. Appleby, "Optical properties of NH3 ice from the far infrared to the near ultraviolet", Appl. Opt. 23 (1984) 541–547, DOI 10.1364/AO.23.000541, for n, and for the k rows between its 1,462 and 200 nm rows, which this file shows to be interpolations and does not draw',
+      source: `${fetchedSource(
         "optool, lnk_data/nh3-m-Martonchik1983.lnk",
         `${OPTOOL_URL}/nh3-m-Martonchik1983.lnk`,
         "14a5b66bb35101a89cacb07cd80585413ee4aa8986d966138d866ffd4fb9babd",
-      ),
+      )}. ${NH3_ICE_SEARCH_TEXT}`,
       licence: OPTOOL_TERMS,
-      reduction: `${STANDARD_REDUCTION}; the source has rows at 320, 433, 668 and 1,462 nm here, so the visible is interpolated between them; the copy states no temperature. The paper's visible k comes from earlier published spectra (its abstract), not read here`,
-      standIn: null,
+      reduction: ammoniaIceReductionText(),
+      standIn:
+        "a crystal whose visible absorption is not drawn: Martonchik et al.'s visible k is a fill between their 1462 nm and 320 nm values, not a measurement, and no measured visible absorption of NH3 ice was found, so k = 0, an upper bound on its brightness; its real index is theirs",
       fit: null,
     },
+    adjust: withoutVisibleAbsorption,
   },
   {
     file: "methane-liquid.json",
@@ -1372,18 +1552,19 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
       key: "CaTiO3",
       phase: "solid",
       variant: null,
-      name: "crystalline CaTiO3",
+      name: "crystalline CaTiO3 (an upper bound on its absorption)",
       temperatureK: null,
       shape: "nonSphericalMineral",
-      provenance: "measured",
+      provenance: "standIn",
       paper: `K. Ueda, H. Yanagi, R. Noshiro, H. Hosono and H. Kawazoe, J. Phys.: Condens. Matter 10 (1998) 3669–3677, DOI 10.1088/0953-8984/10/16/018, for the visible; Th. Posch, F. Kerschbaum, D. Fabian, H. Mutschke, J. Dorschner, A. Tamanai and Th. Henning, "Infrared properties of solid titanium oxides: Exploring potential primary dust condensates", Astrophys. J. Suppl. 149 (2003) 437–445, DOI 10.1086/379167, for the infrared; as compiled by ${KITZMANN_HENG}`,
       source: compilationSource(
         "CaTiO3.dat",
         "2d4cb5db2740c70dd3c2122d58062f04fb1e245675dfe8254919b801a1f8f2e1",
       ),
       licence: COMPILATION_TERMS,
-      reduction: `${STANDARD_REDUCTION}; the source's rows are about 3.6–7.7 nm apart here. No open copy of Ueda et al.'s visible values was found. The copy states no temperature`,
-      standIn: null,
+      reduction: `${STANDARD_REDUCTION}; the source's rows are about 3.6–7.7 nm apart here. No open copy of Ueda et al.'s visible values was found. The copy states no temperature. ${CATIO3_BOUND_TEXT}`,
+      standIn:
+        "an upper bound on absorption: Ueda et al.'s visible k is a Kramers–Kronig value from normal-incidence reflectance, which cannot detect a k this small, and thin sections of the mineral can be colourless, so the pure crystal absorbs less",
       fit: null,
     },
   },
@@ -1457,9 +1638,9 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
         "1cc0d352d00273decac51c14bd1dd5cc7ad13c982af35d8a3705358b1e02aa27",
       ),
       licence: COMPILATION_TERMS,
-      reduction: `${STANDARD_REDUCTION}; the source's rows are about 3.5–8 nm apart here. Its visible part is Khachai et al.'s first-principles (FP-APW+lo) calculation, not a measurement, so the file is a stated stand-in. The copy states no temperature`,
+      reduction: `${STANDARD_REDUCTION}; the source's rows are about 3.5–8 nm apart here. Its visible part is Khachai et al.'s first-principles (FP-APW+lo) calculation, not a measurement, so the file is a stated stand-in. The copy states no temperature. ${NA2S_BOUND_TEXT}`,
       standIn:
-        "a computed index: Khachai et al. 2009's first-principles calculation of crystalline Na2S, since no measured visible optical constants of Na2S were found",
+        "a computed index: Khachai et al. 2009's first-principles calculation of crystalline Na2S, since no measured visible optical constants of Na2S were found; its flat visible k is a computed spectrum's, not a colourless solid's absorption, so it is an upper bound on the crystal's absorption",
       fit: null,
     },
   },
@@ -2216,12 +2397,7 @@ function signed(value: number, digits: number): string {
 
 /** A signed figure in scientific notation, as the files write it: −5.6 × 10⁻⁶. */
 function signedScientific(value: number): string {
-  const [mantissa, exponent] = Math.abs(value).toExponential(1).split("e");
-  const superscript = (exponent ?? "")
-    .replace("+", "")
-    .replace("-", "⁻")
-    .replace(/[0-9]/gu, (d) => "⁰¹²³⁴⁵⁶⁷⁸⁹"[Number(d)] ?? d);
-  return `${value < 0 ? "−" : "+"}${mantissa ?? ""} × 10${superscript}`;
+  return `${value < 0 ? "−" : "+"}${timesTen(Math.abs(value), 1)}`;
 }
 
 /** water.json's n's record: R9-97's range, its checks, and the change from T5.g's Hale and Querry. */

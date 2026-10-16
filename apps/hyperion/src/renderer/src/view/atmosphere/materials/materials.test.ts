@@ -397,6 +397,15 @@ describe("refractiveIndex", () => {
     ).toEqual([]);
   });
 
+  it("groups no number of four digits or fewer in a file's player text, as the guide writes them", () => {
+    // ux-guidelines.md, "Numbers, units and time": digits group in threes from five digits.
+    expect(
+      MATERIAL_FILES.flatMap((file) => [file.name, file.standIn ?? ""]).filter((text) =>
+        /(?<![0-9,])[0-9],[0-9]{3}(?![0-9,])/u.test(text),
+      ),
+    ).toEqual([]);
+  });
+
   it("names the enstatite glass by its phase and formula, with no mineral name", () => {
     expect(MATERIAL_FILES.find((file) => file.key === "MgSiO3")?.name).toBe("amorphous MgSiO3");
   });
@@ -559,14 +568,74 @@ describe("NH₄SH, a stated stand-in", () => {
     ).toEqual(["atmosphereApproximate"]);
   });
 
-  it("gives no label beneath a τ 30 deck", () => {
+  it("gives no reason beneath a τ 30 deck", () => {
+    // Since R08.T5.i the NH₃-ice deck above is a stand-in too (decision-p14-t49c-split §5.3), so
+    // the body takes the label from it; the NH₄SH mode under τ 30 adds no reason.
     expect(
-      materialLabels([
+      materialApproximations([
         { material: "NH3", form: { phase: "solid" }, opticalDepthAbove550: 0 },
         { material: "NH4SH", opticalDepthAbove550: 30 },
-      ]),
-    ).toEqual([]);
+      ]).map((a) => a.material),
+    ).toEqual(["NH3"]);
   });
+});
+
+describe("the solids' visible absorption (R08.T5.i, decision-p14-t49c-split §5.3)", () => {
+  const ammonia = fileOf("NH3", "solid");
+  const titanate = fileOf("CaTiO3");
+  const sulphide = fileOf("Na2S");
+
+  it("files NH3 ice, CaTiO3 and Na2S as stand-ins", () => {
+    expect([ammonia, titanate, sulphide].map((file) => file.provenance)).toEqual([
+      "standIn",
+      "standIn",
+      "standIn",
+    ]);
+  });
+
+  it("keeps each one's fetched source with its checksum and the date fetched", () => {
+    // "give every fetched file its checksum and the date fetched" reads the `measured` files, which
+    // NH3 ice and CaTiO3 have left; all three are reduced from a fetched source.
+    for (const file of [ammonia, titanate, sulphide]) {
+      expect(file.source).toMatch(/SHA-256 [0-9a-f]{64}/u);
+      expect(file.source).toMatch(/fetched \d{4}-\d{2}-\d{2}/u);
+    }
+  });
+
+  it("draws NH3 ice with k = 0 at every grid point", () => {
+    expect(Array.from(ammonia.k).filter((k) => k !== 0)).toEqual([]);
+  });
+
+  it("keeps Martonchik et al.'s n for NH3 ice: 1.43606 at 550 nm", () => {
+    expect(valueAt(ammonia.n, ammonia, 550)).toBe(1.43606);
+  });
+
+  it("keeps CaTiO3's and Na2S's k as their bounds: 1.81089 × 10⁻³ and 1.46463 × 10⁻² at 550 nm", () => {
+    expect([valueAt(titanate.k, titanate, 550), valueAt(sulphide.k, sulphide, 550)]).toEqual([
+      1.81089e-3, 1.46463e-2,
+    ]);
+  });
+
+  it("names each stand-in's reason: the fill, reflectance's Kramers–Kronig value, the computed spectrum", () => {
+    expect(ammonia.standIn).toMatch(
+      /a fill between their 1462 nm and 320 nm values, not a measurement/u,
+    );
+    expect(titanate.standIn).toMatch(/a Kramers–Kronig value from normal-incidence reflectance/u);
+    expect(sulphide.standIn).toMatch(/a computed spectrum's, not a colourless solid's absorption/u);
+  });
+
+  it.each([
+    ["an NH3-ice", { material: "NH3", form: { phase: "solid" }, opticalDepthAbove550: 0 }, ammonia],
+    ["a CaTiO3", { material: "CaTiO3", opticalDepthAbove550: 0 }, titanate],
+  ] as const)(
+    "gives atmosphereApproximate for %s deck at τ 0, its file's stand-in the reason",
+    (_, layer, file) => {
+      expect(materialLabels([layer])).toEqual(["atmosphereApproximate"]);
+      expect(materialApproximations([layer])).toEqual([
+        { material: layer.material, reason: file.standIn },
+      ]);
+    },
+  );
 });
 
 describe("the stand-in label", () => {
