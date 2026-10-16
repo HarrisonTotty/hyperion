@@ -328,12 +328,36 @@ impl SpinningBody {
         class: PlanetClass,
         fractions: &MassFractions,
     ) -> Result<Self, BuildSpinningBodyError> {
-        let (love_number, tidal_q) = tides(
-            class,
-            EarthMasses::from(mass),
-            EarthRadii::from(radius),
-            fractions,
-        );
+        Self::with_tides(mass, radius, class, fractions, SpinTides::OfClass)
+    }
+
+    /// A body of mass `mass`, radius `radius`, class `class` and mass fractions `fractions`, with
+    /// its moment of inertia ([`moment_of_inertia_factor`]) and the tides `spin_tides` say: its
+    /// class's ([`of_class`](Self::of_class)), or a moon's own pair (P14.T56.d).
+    ///
+    /// # Errors
+    ///
+    /// As [`new`](Self::new), for a mass or radius that is not positive and finite, and for a
+    /// given Love number or Q that is not.
+    pub fn with_tides(
+        mass: Kilograms,
+        radius: Metres,
+        class: PlanetClass,
+        fractions: &MassFractions,
+        spin_tides: SpinTides,
+    ) -> Result<Self, BuildSpinningBodyError> {
+        let (love_number, tidal_q) = match spin_tides {
+            SpinTides::OfClass => tides(
+                class,
+                EarthMasses::from(mass),
+                EarthRadii::from(radius),
+                fractions,
+            ),
+            SpinTides::Given {
+                love_number,
+                tidal_q,
+            } => (love_number, tidal_q),
+        };
         Self::new(
             mass,
             radius,
@@ -372,6 +396,23 @@ impl SpinningBody {
     pub const fn tidal_q(&self) -> f64 {
         self.tidal_q
     }
+}
+
+/// Which tides a body's spin reads ([`SpinningBody::with_tides`]).
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub enum SpinTides {
+    /// Its class's pair ([`tides`], P14.T14.d): every planet's and member's, and every moon's
+    /// below [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION).
+    OfClass,
+    /// A pair given: a moon's own by its composition and state from
+    /// [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION)
+    /// ([`MoonTides`](crate::planetary::moons::tides::MoonTides), P14.T56.d).
+    Given {
+        /// Its Love number k₂, dimensionless, positive and finite.
+        love_number: f64,
+        /// Its tidal quality factor Q, dimensionless, positive and finite.
+        tidal_q: f64,
+    },
 }
 
 /// A [`SpinningBody`] could not be built.
@@ -1018,6 +1059,8 @@ pub struct SpinInputs {
     pub primary_mass: Kilograms,
     /// The system's age at the epoch.
     pub age_at_epoch: Years,
+    /// The tides its locking reads: its class's, or a moon's own (P14.T56.d).
+    pub tides: SpinTides,
 }
 
 /// A body's rotation (P14.T14): its spin as drawn, its locking time, and its body-fixed frame.
@@ -1034,16 +1077,23 @@ impl BodyRotation {
     /// The rotation of the body `inputs` describe (P14.T14.a–c): its primordial period
     /// ([`primordial_period`], floored at its [`breakup_period`]), its obliquity ([`obliquity`]),
     /// its locking time ([`tidal_locking_time`] of that period at the tides and moment of inertia
-    /// [`SpinningBody::of_class`] gives it) and its frame ([`BodyFixedFrame::new`]).
+    /// [`SpinningBody::with_tides`] gives it, its class's or its own) and its frame
+    /// ([`BodyFixedFrame::new`]).
     ///
     /// # Errors
     ///
-    /// [`DeriveRotationError::Body`] for a mass or radius that is not positive and finite, and
+    /// [`DeriveRotationError::Body`] for a mass or radius that is not positive and finite, or a
+    /// given pair of tides that is not, and
     /// [`DeriveRotationError::Law`] for a locking time that is not positive, which a primary of
     /// positive mass never gives.
     pub fn derive(inputs: &SpinInputs) -> Result<Self, DeriveRotationError> {
-        let body =
-            SpinningBody::of_class(inputs.mass, inputs.radius, inputs.class, &inputs.fractions)?;
+        let body = SpinningBody::with_tides(
+            inputs.mass,
+            inputs.radius,
+            inputs.class,
+            &inputs.fractions,
+            inputs.tides,
+        )?;
         let drawn = primordial_period(SpinFamily::of(inputs.class), inputs.draws.period_rank);
         let floor = breakup_period(inputs.mass, inputs.radius);
         let period = Seconds::new(drawn.value().max(floor.value()));
@@ -1762,6 +1812,56 @@ mod tests {
                 held.moment_factor(),
                 moment_of_inertia_factor(class, &fractions),
             );
+        }
+    }
+
+    /// P14.T56.d: a moon's own pair, given, is its spinning body's, with its class's moment of
+    /// inertia; its class's pair is `of_class`'s bit for bit; and a given pair that is not
+    /// positive and finite is refused.
+    #[test]
+    fn a_given_pair_of_tides_is_the_spinning_body_s() {
+        let (kilograms, metres) = (Kilograms::new(1.48e23), Metres::new(2.63e6));
+        let fractions = MassFractions::solid(0.0, 0.55, 0.45);
+        let given = SpinTides::Given {
+            love_number: 0.43,
+            tidal_q: 33.0,
+        };
+        for class in [PlanetClass::Rocky, PlanetClass::Icy] {
+            let held =
+                SpinningBody::with_tides(kilograms, metres, class, &fractions, given).unwrap();
+            assert_same_bits(held.love_number(), 0.43);
+            assert_same_bits(held.tidal_q(), 33.0);
+            assert_same_bits(
+                held.moment_factor(),
+                moment_of_inertia_factor(class, &fractions),
+            );
+            let of_class =
+                SpinningBody::with_tides(kilograms, metres, class, &fractions, SpinTides::OfClass)
+                    .unwrap();
+            assert_eq!(
+                of_class,
+                SpinningBody::of_class(kilograms, metres, class, &fractions).unwrap()
+            );
+        }
+        for (love_number, tidal_q, error) in [
+            (0.0, 33.0, BuildSpinningBodyError::LoveNumberNotPositive),
+            (
+                0.43,
+                f64::INFINITY,
+                BuildSpinningBodyError::TidalQNotPositive,
+            ),
+        ] {
+            let refused = SpinningBody::with_tides(
+                kilograms,
+                metres,
+                PlanetClass::Icy,
+                &fractions,
+                SpinTides::Given {
+                    love_number,
+                    tidal_q,
+                },
+            );
+            assert_eq!(refused, Err(error));
         }
     }
 }

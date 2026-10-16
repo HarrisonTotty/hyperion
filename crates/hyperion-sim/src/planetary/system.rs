@@ -112,7 +112,9 @@ use crate::planetary::derive::atmosphere::{
 use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
 use crate::planetary::derive::irradiation::luminosity_flux;
 use crate::planetary::derive::photometry::{BodyPhotometry, PhotometryInputs};
-use crate::planetary::derive::rotation::{BodyRotation, ObliquityLaw, SpinDraws, SpinInputs};
+use crate::planetary::derive::rotation::{
+    BodyRotation, ObliquityLaw, SpinDraws, SpinInputs, SpinTides,
+};
 use crate::planetary::derive::{
     BodyHosts, DerivedBody, HabitableZone, HostLight, Illumination, MassFractions, PlacedBody,
     PlanetClass, derive_body, habitable_zone_of, radius_chen_kipping,
@@ -141,12 +143,13 @@ use crate::planetary::index::{BodyIndex, LAST_PLANET_SLOT};
 use crate::planetary::label::{self, BodyLabel};
 use crate::planetary::laplace::{LaplaceFrame, LaplaceFrameParts, SatellitePlanes, hydrostatic_j2};
 use crate::planetary::moons::regular::{
-    DerivedMoon, MOON_ICE_DENSITY, MOON_ROCK_DENSITY, MoonBulk, MoonBulkRule, MoonInventories,
-    MoonNursery, MoonSky, MoonVolatiles, derive_moon_under,
+    DerivedMoon, MOON_ICE_DENSITY, MOON_ROCK_DENSITY, MoonBulk, MoonBulkRule, MoonHolds,
+    MoonInputs, MoonInventories, MoonNursery, MoonSky, MoonTideRule, MoonVolatiles,
+    derive_moon_under,
 };
 use crate::planetary::moons::regular::{ICY_MOON_ICE_FRACTION, moon_radius};
 use crate::planetary::moons::{
-    BeltAdjacency, MoonParent, MoonParentParts, NearestBelt, ParentKind,
+    BeltAdjacency, MoonParent, MoonParentParts, MoonRules, NearestBelt, ParentKind,
 };
 use crate::planetary::params::{GIANT_LOVE_NUMBER, ROCKY_LOVE_NUMBER, SPACING_GIANT_MASS};
 use crate::planetary::placement::classes::orbits::{HostPlane, SystemPlane, host_plane};
@@ -890,6 +893,11 @@ pub struct PlanetarySystem {
     /// atmosphere are read (P14.T56.c's hold and its follow-up's): version 22's below
     /// [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION), each moon's own from it.
     moon_inventories: MoonInventories,
+    /// Which tides its moons take (P14.T56.d's hold), set at generation since their rotation laws
+    /// read them: version 22's below
+    /// [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION), each moon's own by composition
+    /// and state from it.
+    moon_tides: MoonTideRule,
 }
 
 /// A system's cometary halo and the orbit host it surrounds.
@@ -914,12 +922,18 @@ struct SystemHalo {
 /// As [`generate_planets`].
 #[must_use]
 pub fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
-    generate_with(seed, ctx, SatellitePlanes::in_force())
+    generate_with(seed, ctx, MoonRules::in_force())
 }
 
-/// [`generate`], with every satellite in the planes `planes` give (P14.T56.a's hold): version 22's
-/// below [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION), and from it the Laplace
-/// surface, which the tests reach ahead of the bump.
+/// [`generate`], with its satellites made under the rules `rules` (P14.T56's holds): every
+/// satellite in the planes they give (T56.a), its moons' volatiles and the bulk their air is read
+/// at (T56.c and its follow-up), and its moons' tides (T56.d), version 22's below
+/// [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION) and version 23's from it, which the
+/// tests reach ahead of the bump.
+///
+/// Under a moon's own tides its rotation law reads its derivation (its branch reads its air and
+/// heat), so every moon's law is derived after its planet's, on its own derivation at
+/// [`parent_time`], as on the Laplace surface ([`PlanetarySystem::moon_rotations`]).
 ///
 /// On the Laplace surface the satellites are found twice. Step 7 finds them in version 22's
 /// planes, which fixes whether a planet or member had a giant impact, all its rotation law reads
@@ -932,12 +946,10 @@ pub fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
 ///
 /// As [`generate_planets`].
 #[must_use]
-pub(crate) fn generate_with(
-    seed: Seed,
-    ctx: &SystemContext,
-    planes: SatellitePlanes,
-) -> PlanetarySystem {
+pub(crate) fn generate_with(seed: Seed, ctx: &SystemContext, rules: MoonRules) -> PlanetarySystem {
     let mut system = generate_planets(seed, ctx);
+    system.moon_inventories = rules.inventories;
+    system.moon_tides = rules.tides;
     let id = ctx.id();
 
     // Step 6: belts, host by host.
@@ -1017,13 +1029,15 @@ pub(crate) fn generate_with(
     // law, so the order of the pass changes nothing. The records are one snapshot's, which equals
     // `body_at` body by body and derives each parent once (decision-p14-phase-j A3).
     let snapshot = system.snapshot_at(ctx, parent_time(ctx));
-    let laplace = planes == SatellitePlanes::LaplaceSurface;
+    let laplace = rules.planes == SatellitePlanes::LaplaceSurface;
+    let own_tides = rules.tides == MoonTideRule::ByState;
     let rotations: Vec<Option<BodyRotation>> = system
         .bodies
         .iter()
         .map(|body| {
-            // On the Laplace surface a moon's law waits for its plane, which its parent's sets.
-            if laplace && matches!(body.part, Part::Moon(_)) {
+            // On the Laplace surface a moon's law waits for its plane, which its parent's sets,
+            // and under its own tides for its derivation, which reads its parent's record.
+            if (laplace || own_tides) && matches!(body.part, Part::Moon(_)) {
                 return None;
             }
             let record = snapshot
@@ -1037,6 +1051,11 @@ pub(crate) fn generate_with(
     }
     if laplace {
         system.place_on_laplace_surfaces(seed, ctx, &snapshot, &sites);
+    } else if own_tides {
+        let rotations = system.moon_rotations(ctx);
+        for (body, rotation) in system.bodies.iter_mut().zip(rotations) {
+            body.rotation = rotation;
+        }
     }
     system
 }
@@ -1168,6 +1187,7 @@ pub fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
         belts: Vec::new(),
         halo: None,
         moon_inventories: MoonInventories::in_force(),
+        moon_tides: MoonTideRule::in_force(),
     }
 }
 
@@ -1561,14 +1581,24 @@ impl PlanetarySystem {
     /// `rule` gives (P14.T56.c's hold and its follow-up's), for the tests to reach each moon's own
     /// ahead of the bump.
     ///
-    /// Setting it after [`generate`] is generating with it: nothing generation reads depends on a
-    /// moon's inventory or atmosphere, since a moon's rotation law reads its bulk's class,
-    /// fractions and radius and its orbit, which neither reaches
-    /// (`under_their_own_volatiles_the_moons_move_nothing_their_rotation_reads`). P14.T54.a deletes
-    /// it with the hold.
+    /// Setting it after [`generate`] is generating with it under version 22's tides: nothing
+    /// generation reads then depends on a moon's inventory or atmosphere, since a moon's rotation
+    /// law reads its bulk's class, fractions and radius and its orbit, which neither reaches
+    /// (`under_their_own_volatiles_the_moons_move_nothing_their_rotation_reads`). Under its own
+    /// tides (P14.T56.d) its law reads its branch, which reads its air, so the volatiles are a
+    /// switch of [`generate_with`] then, and this refuses. P14.T54.a deletes it with the hold.
+    ///
+    /// # Panics
+    ///
+    /// For a system whose moons take their own tides.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn with_moon_inventories(self, rule: MoonInventories) -> Self {
+        assert_eq!(
+            self.moon_tides,
+            MoonTideRule::ClassPair,
+            "under a moon's own tides its volatiles are set at generation (`generate_with`)"
+        );
         Self {
             moon_inventories: rule,
             ..self
@@ -2154,6 +2184,7 @@ impl PlanetarySystem {
             t,
             fe_h: ctx.fe_h(),
             age: ctx.age_at(t),
+            tides: self.moon_tides,
         };
         let case = match of {
             SurfaceOf::Body { derived, bulk } => SurfaceCase {
@@ -2241,7 +2272,17 @@ impl PlanetarySystem {
         else {
             return None;
         };
-        self.rotation_from(ctx, body, orbit.elements(), bulk, *mass)
+        // Under its own tides a moon's law reads its derivation then (P14.T56.d), which reads its
+        // planet's record: the moon arm passes its pair, as `moon_rotations` does.
+        if let (Part::Moon(moon), MoonTideRule::ByState) = (&body.part, self.moon_tides) {
+            let OrbitHost::Body(parent) = body.host else {
+                unreachable!("a moon's host is a body")
+            };
+            let epoch = Epoch::new(self, ctx, parent_time(ctx));
+            let now = self.parent_now(&epoch, parent);
+            return self.moon_rotation(ctx, &epoch, body, moon, &now);
+        }
+        self.rotation_from(ctx, body, orbit.elements(), bulk, *mass, SpinTides::OfClass)
     }
 
     /// The elements of `body` at [`parent_time`] that its rotation law and its satellites' frame
@@ -2270,7 +2311,8 @@ impl PlanetarySystem {
     }
 
     /// The rotation of the planet, member or moon `body`, present at [`parent_time`] with its
-    /// record's orbit `recorded`, bulk `bulk` and mass `mass` then: [`derive_rotation`]'s law.
+    /// record's orbit `recorded`, bulk `bulk` and mass `mass` then, whose locking reads the tides
+    /// `tides` (its class's, or a moon's own, P14.T56.d): [`derive_rotation`]'s law.
     ///
     /// [`derive_rotation`]: Self::derive_rotation
     #[must_use]
@@ -2281,6 +2323,7 @@ impl PlanetarySystem {
         recorded: &KeplerElements,
         bulk: &BulkProperties,
         mass: EarthMasses,
+        tides: SpinTides,
     ) -> Option<BodyRotation> {
         let index = body.index;
         let obliquity_law = match body.part {
@@ -2304,6 +2347,7 @@ impl PlanetarySystem {
             orbit: elements,
             primary_mass: Kilograms::new(primary),
             age_at_epoch: ctx.age_at_epoch(),
+            tides,
         };
         // A present body's record has a positive mass and radius and an orbit about a primary of
         // positive mass, so the derivation refuses nothing the generator makes; a refusal would
@@ -2426,14 +2470,7 @@ impl PlanetarySystem {
                 };
                 let at = parents.iter().position(|(index, _)| *index == parent);
                 let at = at.unwrap_or_else(|| {
-                    let primary = self
-                        .body(parent)
-                        .expect("a satellite's parent is a body of its system");
-                    let host = fate_host(ctx, self.zone_of(primary));
-                    let fate = self.fate_of(primary, &host);
-                    let label =
-                        label::label(self, parent).expect("every body of a system has a label");
-                    parents.push((parent, self.primary_record(&epoch, primary, label, &fate).1));
+                    parents.push((parent, self.parent_now(&epoch, parent)));
                     parents.len() - 1
                 });
                 self.moon_rotation(ctx, &epoch, body, moon, &parents[at].1)
@@ -2441,9 +2478,24 @@ impl PlanetarySystem {
             .collect()
     }
 
+    /// The planet or member `parent` as its satellites read it at the epoch's time
+    /// ([`primary_record`](Self::primary_record)'s).
+    #[must_use]
+    fn parent_now(&self, epoch: &Epoch<'_>, parent: BodyIndex) -> ParentNow {
+        let primary = self
+            .body(parent)
+            .expect("a satellite's parent is a body of its system");
+        let host = fate_host(epoch.ctx, self.zone_of(primary));
+        let fate = self.fate_of(primary, &host);
+        let label = label::label(self, parent).expect("every body of a system has a label");
+        self.primary_record(epoch, primary, label, &fate).1
+    }
+
     /// The rotation law of the moon `body`, `moon`, whose parent is as `now` says at the epoch's
     /// time: as [`derive_rotation`](Self::derive_rotation) gives it from its record then, whose
-    /// orbit is present and whose bulk is its derivation's.
+    /// orbit is present and whose bulk is its derivation's, with the tides its derivation takes
+    /// ([`DerivedMoon::spin_tides`]: its class's below
+    /// [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION), its own from it).
     #[must_use]
     fn moon_rotation(
         &self,
@@ -2460,7 +2512,7 @@ impl PlanetarySystem {
         let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(epoch.t));
         let derived = self.moon_derived(epoch, moon, &orbit, now)?;
         let bulk = Self::moon_bulk_of(moon, &derived, now);
-        self.rotation_from(ctx, body, &orbit, &bulk, body.mass())
+        self.rotation_from(ctx, body, &orbit, &bulk, body.mass(), derived.spin_tides())
     }
 
     /// Whether the planet or dwarf planet `index` has a giant-impact moon (P14.T18).
@@ -2928,19 +2980,26 @@ impl PlanetarySystem {
             MoonInventories::Shared => (MoonVolatiles::SHARED, MoonBulkRule::Solved),
             MoonInventories::Own => (satellite.own_volatiles(), MoonBulkRule::Own),
         };
+        let holds = MoonHolds {
+            line: NitrogenLine::in_force(),
+            bulk: rule,
+            tides: self.moon_tides,
+        };
+        let inputs = MoonInputs {
+            mass: satellite.mass(),
+            orbit: *orbit,
+            radius_rank: satellite.radius_rank(),
+            volatiles,
+            bulk: Self::moon_own_bulk(moon, parent),
+        };
         // As above: the derivation refuses only inputs the generator never makes, so its error
         // carries nothing a caller could act on.
         derive_moon_under(
-            NitrogenLine::in_force(),
-            rule,
-            satellite.mass(),
-            orbit,
+            holds,
+            &inputs,
             &moon.parent,
             nursery,
             sky,
-            satellite.radius_rank(),
-            volatiles,
-            Self::moon_own_bulk(moon, parent),
             epoch.ctx.age_at_epoch(),
             epoch.t,
         )
@@ -3317,17 +3376,14 @@ impl SurfaceInterior {
 
     /// The interior of the moon `moon`, derived as `derived`: its tide is its derivation's,
     /// P14.T17.b's (science-p14-t24b-laws §1.1's `q_tid`, P14.T56.d's from 22 → 23), and a regular
-    /// moon's ocean is its flag's; no rule computes another moon's ocean.
+    /// moon's ocean is its flag's ([`DerivedMoon::subsurface`]: at its tidal flux below
+    /// [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION), its branch's at its whole heat
+    /// flow from it, decision-p14-moons §F-ocean F3); no rule publishes another moon's ocean, though
+    /// its tides read one.
     #[must_use]
     fn of_moon(moon: &MoonPart, derived: &DerivedMoon) -> Self {
         let subsurface_ocean = match moon.satellite.moon() {
-            SatelliteMoon::Regular(_) => Subsurface::of_regular_moon(
-                derived.radius(),
-                derived.density(),
-                derived.ice_fraction(),
-                derived.equilibrium_temperature(),
-                derived.heat_flux(),
-            ),
+            SatelliteMoon::Regular(_) => derived.subsurface(),
             SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_) => Subsurface::NotComputed,
         };
         Self {
@@ -3352,6 +3408,9 @@ struct SurfaceTime<'a> {
     t: UniverseTime,
     fe_h: Dex,
     age: Years,
+    /// The moons' tide rule the system was generated under, which picks an ice-rich crust's
+    /// resurfacing calibration (P14.T56.d's hold).
+    tides: MoonTideRule,
 }
 
 /// What [`PlanetarySystem::surface_section`] reads of a body beyond its record's place: a planet's
@@ -3536,7 +3595,7 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
             window: entry,
         },
     };
-    let derived = GlobalFigures::derive(&figure_inputs);
+    let derived = GlobalFigures::derive_under(&figure_inputs, time.tides);
     // The generator's bodies are in the figures' range: a refusal is a bug, which the tests'
     // debug builds catch, and it carries nothing a caller could act on, so the body's figures are
     // not modelled, as an uncomputed derivation's.

@@ -1566,7 +1566,7 @@ pub(in crate::planetary::hooks::figures) fn jovian(kg: f64, a_km: f64, e: f64) -
     use crate::planetary::derive::BodyHosts;
     use crate::planetary::derive::solar::{self, PLANETS};
     use crate::planetary::moons::regular::{
-        MoonBulk, MoonNursery, MoonSky, MoonVolatiles, derive_moon,
+        MoonBulk, MoonInputs, MoonNursery, MoonSky, MoonVolatiles, derive_moon,
     };
     use crate::planetary::moons::testing::planet_id;
     use crate::planetary::moons::{MoonParent, ParentKind};
@@ -1606,15 +1606,18 @@ pub(in crate::planetary::hooks::figures) fn jovian(kg: f64, a_km: f64, e: f64) -
         Radians::ZERO,
     )
     .unwrap();
+    let moon = MoonInputs {
+        mass: EarthMasses::new(kg / EARTH_MASS_KG),
+        orbit: moon_orbit,
+        radius_rank: UnitUniform::HALF,
+        volatiles: MoonVolatiles::SHARED,
+        bulk: MoonBulk::Derived,
+    };
     derive_moon(
-        EarthMasses::new(kg / EARTH_MASS_KG),
-        &moon_orbit,
+        &moon,
         &parent,
         &nursery,
         &sky,
-        UnitUniform::HALF,
-        MoonVolatiles::SHARED,
-        MoonBulk::Derived,
         SOLAR_AGE,
         UniverseTime::EPOCH,
     )
@@ -1691,6 +1694,60 @@ fn io_at_its_measured_elements_is_a_heat_pipe_with_no_field() {
     );
     assert_eq!(figures.tectonic_regime(), TectonicRegime::HeatPipe);
     assert_eq!(figures.magnetic_field(), MagneticField::None);
+}
+
+/// P14.T56.d's `F_nt`, which a moon's tidal branch reads before its tide and ocean are known, is
+/// the published figures' non-tidal heat flow bit for bit: for Io, whose tide makes it a heat pipe,
+/// and for the measured Europa, whose ocean gives it an ice shell, both taking the stagnant lid's
+/// Urey ratio that a lid of their mass takes with no tide and no ocean; and none for a gas envelope.
+#[test]
+fn a_moon_s_non_tidal_heat_flow_needs_no_tide_and_no_ocean() {
+    let io = jovian(8.931_9e22, 421_700.0, 0.0041);
+    let figures = moon_figures(&io, 421_700.0, 1.769);
+    assert_eq!(figures.tectonic_regime(), TectonicRegime::HeatPipe);
+    let r = io.radius().value();
+    let heat = HeatInputs {
+        mass: EarthMasses::new(
+            io.density().value() * 4.0 / 3.0 * core::f64::consts::PI * math::powi(r, 3)
+                / EARTH_MASS_KG,
+        ),
+        radius: io.radius(),
+        surface_gravity: MetresPerSecondSquared::new(
+            GRAVITATIONAL_CONSTANT * io.density().value() * 4.0 / 3.0 * core::f64::consts::PI * r,
+        ),
+        class: io.class(),
+        fractions: io.fractions(),
+        inventory_water: io.inventory().water(),
+        fe_h: Dex::new(0.0),
+        tidal_heat_flow: WattsPerSquareMetre::new(0.0),
+        subsurface_ocean: Subsurface::NotComputed,
+    };
+    let state = io.atmosphere().state();
+    let f = non_tidal_heat_flow(&heat, SOLAR_AGE, state).unwrap();
+    assert_same_bits(f.value(), figures.non_tidal_heat_flow().value());
+    assert_eq!(
+        non_tidal_heat_flow(&heat, SOLAR_AGE, SurfaceState::GasEnvelope),
+        None
+    );
+    let (figures, _, _) = measured_europa();
+    assert_eq!(figures.tectonic_regime(), TectonicRegime::IceShell);
+    let (radius, density, water, _) = EUROPA_MEASURED;
+    let kg = density * 4.0 / 3.0 * core::f64::consts::PI * math::powi(radius, 3);
+    let measured = HeatInputs {
+        mass: EarthMasses::new(kg / EARTH_MASS_KG),
+        radius: Metres::new(radius),
+        surface_gravity: MetresPerSecondSquared::new(
+            GRAVITATIONAL_CONSTANT * kg / (radius * radius),
+        ),
+        class: PlanetClass::Rocky,
+        fractions: MassFractions::solid(0.1, 0.82, water),
+        inventory_water: Kilograms::new(water * kg),
+        ..heat
+    };
+    // The measured Europa's figures read the generated Europa's air.
+    let state = europa().atmosphere().state();
+    let f = non_tidal_heat_flow(&measured, SOLAR_AGE, state).unwrap();
+    assert_same_bits(f.value(), figures.non_tidal_heat_flow().value());
 }
 
 /// Europa's measured bulk: radius 1,560.8 km and density 3,013 kg m⁻³ (NASA's Jovian satellite
@@ -2389,9 +2446,11 @@ fn the_resurfacing_exponent_is_fitted_on_mars() {
 }
 
 /// Io's surface at its measured elements is under 1 Myr old. Europa's measured bulk is ice-rich,
-/// and at P14.T56.d's heat flow (23), 0.0386 W m⁻², its surface is 60 Myr ± 10% old: here its
-/// tide is set so that its whole heat flow is that, since T56.d's membrane is built in the 22 → 23
-/// batch, whose test this stands for. Under P14.T17.b's tide (22) its age is recorded.
+/// and at the calibration's heat flow in force (version 22's 0.0386 W m⁻² below `MOONS_VERSION`,
+/// [`ICE_RESURFACING_HEAT_FLOW`] from it) its surface is 60 Myr ± 10% old: here its tide is set so
+/// that its whole heat flow is that; P14.T56.d's own tides refit the constant in
+/// `europa_s_surface_at_its_own_tides_is_its_calibration`. Under P14.T17.b's tide (22) its age is
+/// recorded.
 #[test]
 fn io_s_surface_is_young_and_europa_s_is_its_calibration() {
     let io = jovian(8.931_9e22, 421_700.0, 0.0041);
@@ -2412,15 +2471,103 @@ fn io_s_surface_is_young_and_europa_s_is_its_calibration() {
     );
     assert_eq!(measured.impactors().crust(), Crust::IceRich);
     assert!(measured.surface_age().value() < 1e6);
-    let tide = ICE_RESURFACING_HEAT_FLOW.value() - measured.non_tidal_heat_flow().value();
-    let (at_23, ..) = measured_europa_under(&europa(), WattsPerSquareMetre::new(tide));
+    // The calibration in force: version 22's below MOONS_VERSION.
+    let calibration = surface_age::ice_resurfacing_heat_flow(MoonTideRule::in_force());
+    let tide = calibration.value() - measured.non_tidal_heat_flow().value();
+    let (in_force, ..) = measured_europa_under(&europa(), WattsPerSquareMetre::new(tide));
     eprintln!(
-        "the measured Europa at T56.d's heat flow: {:?}, S {:.2} Myr",
-        at_23.impactors().crust(),
-        at_23.surface_age().value() / 1e6
+        "the measured Europa at the calibration in force: {:?}, S {:.2} Myr",
+        in_force.impactors().crust(),
+        in_force.surface_age().value() / 1e6
     );
-    assert_eq!(at_23.impactors().crust(), Crust::IceRich);
-    assert!((at_23.surface_age().value() / 60e6 - 1.0).abs() <= 0.1);
+    assert_eq!(in_force.impactors().crust(), Crust::IceRich);
+    assert!((in_force.surface_age().value() / 60e6 - 1.0).abs() <= 0.1);
+}
+
+/// P14.T48.c's check, which P14.T56.d carries, and the calibration of
+/// [`ICE_RESURFACING_HEAT_FLOW`] (decision-p14-t56d-membrane §4.6 and §7.2): the measured Europa at
+/// its measured elements, at the tide its own tides give it on the ocean branch (`MoonTides`, at its
+/// rock's `F_nt` and its own bulk), is ice-rich, and from `MOONS_VERSION` its surface is Zahnle et
+/// al.'s 60 Myr ± 3%; its whole heat flow refits the constant to 10⁻⁶ W m⁻². Under decision-p14-moons
+/// F2's superseded membrane it took 0.0386 W m⁻², version 22's calibration; under Beuthe's,
+/// 0.01924. Jupiter's GM is JPL's (JUP365) and Europa's sidereal period NASA's Jovian satellite fact
+/// sheet's, 3.551181 d, read 2026-10-16.
+#[test]
+fn europa_s_surface_at_its_own_tides_is_its_calibration() {
+    use crate::planetary::derive::rotation::moment_of_inertia_factor;
+    use crate::planetary::moons::regular::MoonTideRule;
+    use crate::planetary::moons::tides::{
+        MoonTides, TidalBranch, TidalMaterial, TideInputs, tidal_forcing,
+    };
+    let (radius, density, water, surface) = EUROPA_MEASURED;
+    let kg = density * 4.0 / 3.0 * core::f64::consts::PI * math::powi(radius, 3);
+    let fractions = MassFractions::solid(0.1, 0.82, water);
+    let derived = europa();
+    let heat = HeatInputs {
+        mass: EarthMasses::new(kg / EARTH_MASS_KG),
+        radius: Metres::new(radius),
+        surface_gravity: MetresPerSecondSquared::new(
+            GRAVITATIONAL_CONSTANT * kg / (radius * radius),
+        ),
+        class: PlanetClass::Rocky,
+        fractions,
+        inventory_water: Kilograms::new(water * kg),
+        fe_h: Dex::new(0.0),
+        tidal_heat_flow: WattsPerSquareMetre::new(0.0),
+        subsurface_ocean: Subsurface::NotComputed,
+    };
+    let non_tidal = non_tidal_heat_flow(&heat, SOLAR_AGE, derived.atmosphere().state()).unwrap();
+    let jupiter = Kilograms::new(126_686_531.9e9 / GRAVITATIONAL_CONSTANT);
+    let n = core::f64::consts::TAU / (3.551_181 * SECONDS_PER_DAY);
+    let forcing = tidal_forcing(
+        jupiter,
+        Metres::new(radius),
+        Metres::new(671_100e3),
+        0.0094,
+        n,
+    );
+    let tides = MoonTides::of(&TideInputs {
+        material: TidalMaterial::of_water(water),
+        moment_factor: moment_of_inertia_factor(PlanetClass::Rocky, &fractions),
+        mass: Kilograms::new(kg),
+        radius: Metres::new(radius),
+        water,
+        surface_temperature: Kelvin::new(surface),
+        non_tidal_heat_flow: non_tidal,
+        forcing,
+        mean_motion_rad_per_s: n,
+    });
+    assert_eq!(tides.branch(), TidalBranch::Ocean);
+    let tide = WattsPerSquareMetre::new(forcing.value() * tides.loss());
+    let (figures, ..) = measured_europa_under(&derived, tide);
+    let f = figures.heat_flow().value();
+    eprintln!(
+        "the measured Europa at its own tides: F {:.2} mW m⁻² ({:.2} its branch's), {:?}, S {:.2} \
+         Myr",
+        f * 1e3,
+        tides.heat_flow().value() * 1e3,
+        figures.impactors().crust(),
+        figures.surface_age().value() / 1e6
+    );
+    assert!((f / tides.heat_flow().value() - 1.0).abs() < 1e-9, "{f}");
+    assert_eq!(figures.impactors().crust(), Crust::IceRich);
+    let at_23 = surface_age::surface_age_under(
+        MoonTideRule::ByState,
+        &surface_age::SurfaceAgeInputs {
+            age: SOLAR_AGE,
+            molten_until: None,
+            last_giant_impact: None,
+            heat_flow: figures.heat_flow(),
+            crust: figures.impactors().crust(),
+        },
+    );
+    eprintln!(
+        "its surface at 23: {:.3} Myr; the refit F₀ {f:.9} W m⁻² against {}",
+        at_23.value() / 1e6,
+        ICE_RESURFACING_HEAT_FLOW.value()
+    );
+    assert!((at_23.value() / 60e6 - 1.0).abs() <= 0.03, "{at_23:?}");
+    assert!((f - ICE_RESURFACING_HEAT_FLOW.value()).abs() < 1e-6, "{f}");
 }
 
 /// P14.T48.c: the shared density returns the published N☾(>1 km) at 1 km on an unscreened body at

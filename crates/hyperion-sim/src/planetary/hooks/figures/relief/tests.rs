@@ -34,7 +34,8 @@ fn volcanism_of<'a>(
     figures: &GlobalFigures,
 ) -> VolcanismInputs<impl Fn(Years) -> WattsPerSquareMetre + 'a> {
     let air = inputs.atmosphere;
-    let interior = interior_of(inputs).expect("a body with figures has an interior");
+    let heat = inputs.heat();
+    let interior = interior_of(&heat).expect("a body with figures has an interior");
     let state = air.state();
     VolcanismInputs {
         crust: figures.impactors().crust(),
@@ -43,8 +44,8 @@ fn volcanism_of<'a>(
         surface_temperature: air.surface_temperature(),
         surface_gravity: inputs.surface_gravity,
         radius: inputs.radius,
-        iron_share: heat_at(inputs, interior, inputs.age, state).iron_share,
-        heat_flow_at: move |t: Years| heat_at(inputs, interior, t, state).heat_flow,
+        iron_share: heat_at(&heat, interior, inputs.age, state).iron_share,
+        heat_flow_at: move |t: Years| heat_at(&heat, interior, t, state).heat_flow,
     }
 }
 

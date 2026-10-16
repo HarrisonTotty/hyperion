@@ -43,6 +43,18 @@
 //! ([`tidal_heating`]) gives a surface heat flux, a volcanism level and the subsurface-ocean flag
 //! ([`has_subsurface_ocean`]).
 //!
+//! # Tides (P14.T56.d)
+//!
+//! From [`MOONS_VERSION`] a moon's tides are its own, by its composition and state
+//! ([`tides`](crate::planetary::moons::tides)): one complex Love number per moon, on the cold, ocean
+//! (after Beuthe 2015's membrane, decision-p14-t56d-membrane) or heated branch its whole heat flow
+//! puts it on, read at its own bulk ([`MoonBulk`]). Its tidal
+//! heat reads its loss Im k₂, its ocean flag is its branch's, and its locking time its (k₂, Q),
+//! which the stored rotation law reads too. Below it every moon takes version 22's: Io's response
+//! [`MOON_TIDAL_RESPONSE`] for its heat, the flag at that tidal flux alone, and the class pair
+//! k₂ = 0.3, Q = 100 for its locking, at its nursery's radius (`MoonTideRule::in_force`,
+//! crate-private).
+//!
 //! # Volatiles (P14.T56.c)
 //!
 //! A moon's volatile inventory reads [`MoonVolatiles`]: its own ranks, words 0–5 of its
@@ -82,13 +94,19 @@ use crate::Seed;
 use crate::math;
 use crate::orbit::KeplerElements;
 use crate::planetary::derive::atmosphere::{NitrogenLine, VolatileDraws};
-use crate::planetary::derive::rotation::{SpinningBody, tidal_locking_time};
+use crate::planetary::derive::rotation::{
+    SpinTides, SpinningBody, moment_of_inertia_factor, tidal_locking_time,
+};
 use crate::planetary::derive::{
     BodyHosts, BuildBodyHostsError, BuildFormationZoneError, BuildPlacedBodyError, DeriveBodyError,
     DerivedBody, FormationZone, GivenBulk, GivenFractions, HostLight, Illumination, MassFractions,
     PlacedBody, PlanetClass, SnowLineSide, derive_body_under,
 };
 use crate::planetary::disc::{self, DiscDraws, DiscHost, DiscProfile, Truncation};
+use crate::planetary::hooks::figures::{HeatInputs, Subsurface, non_tidal_heat_flow};
+use crate::planetary::moons::tides::{
+    MoonTides, TidalBranch, TidalMaterial, TideInputs, mean_density, tidal_forcing,
+};
 use crate::planetary::moons::{
     MOONS_VERSION, MoonParent, decide, draw_rank, log_uniform, moon_orbit, rayleigh,
 };
@@ -101,11 +119,11 @@ use crate::stellar::Composition;
 use crate::stellar::draws::UnitUniform;
 use crate::stellar::substellar::{GIANT_MIN_MASS, giant_cooling};
 use crate::time::UniverseTime;
-use crate::units::consts::{GRAVITATIONAL_CONSTANT, STEFAN_BOLTZMANN};
+use crate::units::consts::{GM_EARTH, GRAVITATIONAL_CONSTANT, STEFAN_BOLTZMANN};
 use crate::units::{
-    Degrees, EarthMasses, JupiterMasses, Kelvin, Kilograms, KilogramsPerCubicMetre, Metres,
-    Radians, Seconds, SolarLuminosities, SolarMasses, SolarRadii, Watts, WattsPerSquareMetre,
-    Years,
+    Degrees, Dex, EarthMasses, JupiterMasses, Kelvin, Kilograms, KilogramsPerCubicMetre, Metres,
+    MetresPerSecondSquared, Radians, Seconds, SolarLuminosities, SolarMasses, SolarRadii, Watts,
+    WattsPerSquareMetre, Years,
 };
 
 /// The least mass of a parent with regular moons: 10 M⊕, with an envelope (P14.T17.a), which the
@@ -216,12 +234,15 @@ pub const HILL_FRACTION: f64 = 0.05;
 /// temperature as the star's snow line of P14.T3.b (Hayashi 1981, via Kennedy and Kenyon 2008).
 pub const ICE_LINE_TEMPERATURE: Kelvin = Kelvin::new(170.0);
 
-/// The tidal response k₂ ÷ Q of a regular moon, for its tidal heating: 0.015 (P14.T17.b).
+/// The tidal response k₂ ÷ Q of a tidally heated rocky moon, its loss Im k₂: 0.015 (P14.T17.b;
+/// P14.T56.d's heated branch).
 ///
 /// Io's, measured from its astrometry: k₂ ÷ Q = 0.015 ± 0.003 (Lainey et al. 2009, Nature 459,
-/// 957, abstract), for every moon (ruling 83.1). P14.T14.b's rocky body, k₂ = 0.3 and Q = 100, is
-/// 0.003, which would give Io 0.45 W m⁻² against its observed 1.4–3.8; this value gives it 2.2.
-/// Provisional for icy moons, whose own value is unmeasured.
+/// 957, abstract). Below [`MOONS_VERSION`] every moon's tidal heat reads it (ruling 83.1); from it
+/// only the heated rocky branch's does ([`tides`](crate::planetary::moons::tides), decision-p14-moons
+/// §3.2), and the cold and ocean branches read their own. P14.T14.b's rocky body, k₂ = 0.3 and Q =
+/// 100, is 0.003, which would give Io 0.45 W m⁻² against its observed 1.4–3.8; this value gives it
+/// 2.2.
 pub const MOON_TIDAL_RESPONSE: f64 = 0.015;
 
 /// The thermal conductivity of water ice times temperature: 651 W m⁻¹ (k = 651 ÷ T; Petrenko
@@ -978,6 +999,83 @@ impl MoonBulkRule {
     }
 }
 
+/// Which tides a moon's derivation takes (P14.T56.d, held by [`MOONS_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum MoonTideRule {
+    /// Version 22's: Io's response [`MOON_TIDAL_RESPONSE`] for every moon's heat, the ocean flag
+    /// at that tidal flux, and the class pair (k₂ = 0.3, Q = 100) for its locking, all at the
+    /// nursery's radius.
+    ClassPair,
+    /// Its own, by composition and state ([`MoonTides`]), at its own bulk ([`MoonBulk`]).
+    ByState,
+}
+
+impl MoonTideRule {
+    /// The rule the generator version in force takes: [`ByState`](Self::ByState) from
+    /// [`MOONS_VERSION`], and [`ClassPair`](Self::ClassPair) below it, so that every value below it
+    /// is version 22's, bit for bit. P14.T54.a deletes the hold.
+    #[must_use]
+    pub(crate) const fn in_force() -> Self {
+        if GENERATOR_VERSION.get() >= MOONS_VERSION.get() {
+            Self::ByState
+        } else {
+            Self::ClassPair
+        }
+    }
+}
+
+/// The holds a moon's derivation is read under (crate-private): P14.T50.c's nitrogen line, the
+/// bulk its air is read at (P14.T56.c's follow-up) and its tides (P14.T56.d).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct MoonHolds {
+    /// The line beyond which its nitrogen takes the icy boost.
+    pub(crate) line: NitrogenLine,
+    /// The bulk its inventory and atmosphere are read at.
+    pub(crate) bulk: MoonBulkRule,
+    /// Its tides.
+    pub(crate) tides: MoonTideRule,
+}
+
+impl MoonHolds {
+    /// The holds the generator version in force takes.
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        Self {
+            line: NitrogenLine::in_force(),
+            bulk: MoonBulkRule::in_force(),
+            tides: MoonTideRule::in_force(),
+        }
+    }
+
+    /// Every hold of the 22 → 23 batch released, as version 23 takes them: what the tests reach
+    /// ahead of the bump.
+    #[cfg(test)]
+    pub(crate) const BATCH: Self = Self {
+        line: NitrogenLine::Ammonia,
+        bulk: MoonBulkRule::Own,
+        tides: MoonTideRule::ByState,
+    };
+}
+
+/// What [`derive_moon`] reads of the moon itself (P14.T56.d gathers them): its mass, its orbit
+/// about its planet, its radius rank, its volatiles and its own bulk.
+///
+/// The fields are plain values: [`derive_moon`] refuses a stated bulk whose radius is not
+/// positive and finite.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MoonInputs {
+    /// Its mass.
+    pub mass: EarthMasses,
+    /// Its orbit about its planet, with μ = G (`M_p` + m).
+    pub orbit: KeplerElements,
+    /// The radius rank its own `planet.radius` stream gives it.
+    pub radius_rank: UnitUniform,
+    /// Its volatile ranks and where they formed.
+    pub volatiles: MoonVolatiles,
+    /// Its own bulk, at which its air and, from [`MOONS_VERSION`], its tides are read.
+    pub bulk: MoonBulk,
+}
+
 /// What lights a moon at a time: its planet's own glow at the moon's distance, and the planet's
 /// hosts at the planet's orbit (P14.T17.b, "the star as the source of light").
 #[derive(Debug, Clone, PartialEq)]
@@ -1037,11 +1135,19 @@ pub struct DerivedMoon {
     ice_fraction: f64,
     radius: Metres,
     density: KilogramsPerCubicMetre,
+    tide: TideState,
+}
+
+/// What a moon's tides give it at a time, built once by its rule ([`MoonTideRule`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TideState {
     tidal_heating: Watts,
     heat_flux: WattsPerSquareMetre,
     volcanism: Volcanism,
-    subsurface_ocean: bool,
+    subsurface: Subsurface,
+    ocean_heat_flow: WattsPerSquareMetre,
     locking_time: Seconds,
+    tides: Option<MoonTides>,
 }
 
 impl DerivedMoon {
@@ -1127,34 +1233,74 @@ impl DerivedMoon {
         }
     }
 
-    /// The tidal heat its planet raises in it, W ([`tidal_heating`]).
+    /// The tidal heat its planet raises in it, W ([`tidal_heating`]): at Io's response
+    /// [`MOON_TIDAL_RESPONSE`] below [`MOONS_VERSION`], and at its own loss Im k₂ and its own bulk's
+    /// radius ([`tides`](Self::tides)) from it.
     #[must_use]
     pub const fn tidal_heating(&self) -> Watts {
-        self.tidal_heating
+        self.tide.tidal_heating
     }
 
-    /// Its tidal heat spread over its surface, W m⁻².
+    /// Its tidal heat spread over its surface, W m⁻²: its [`radius`](Self::radius)'s below
+    /// [`MOONS_VERSION`], and its own bulk's ([`MoonBulk`]), its record's, from it.
     #[must_use]
     pub const fn heat_flux(&self) -> WattsPerSquareMetre {
-        self.heat_flux
+        self.tide.heat_flux
+    }
+
+    /// The heat flow its ocean flag reads, W m⁻²: its tidal [`heat_flux`](Self::heat_flux) alone
+    /// below [`MOONS_VERSION`] (P14.T17.b's flag), and from it its branch's whole heat flow,
+    /// P14.T24.b's non-tidal `F_nt` with its tide, `F_ocean` on the ocean branch
+    /// ([`MoonTides::heat_flow`]; decision-p14-moons §F-ocean F3).
+    #[must_use]
+    pub const fn ocean_heat_flow(&self) -> WattsPerSquareMetre {
+        self.tide.ocean_heat_flow
+    }
+
+    /// Its tides by composition and state from [`MOONS_VERSION`] (P14.T56.d): its k₂, Q, loss,
+    /// branch and whole heat flow; `None` below it, where its heat reads Io's response and its
+    /// locking its class's pair.
+    #[must_use]
+    pub const fn tides(&self) -> Option<MoonTides> {
+        self.tide.tides
+    }
+
+    /// The tides its spin's locking reads: its own pair from [`MOONS_VERSION`] and its class's
+    /// below it, as its stored rotation law takes them (P14.T56.d).
+    #[must_use]
+    pub fn spin_tides(&self) -> SpinTides {
+        self.tide
+            .tides
+            .map_or(SpinTides::OfClass, |tides| tides.spin_tides())
     }
 
     /// Its volcanism level, from the heat flux.
     #[must_use]
     pub const fn volcanism(&self) -> Volcanism {
-        self.volcanism
+        self.tide.volcanism
     }
 
-    /// Whether it holds liquid water under its ice ([`has_subsurface_ocean`]).
+    /// Whether it holds liquid water under its ice: [`has_subsurface_ocean`] at its tidal flux
+    /// below [`MOONS_VERSION`], and from it whether its tides are on the ocean branch, where that
+    /// test holds at its whole heat flow ([`ocean_heat_flow`](Self::ocean_heat_flow)).
     #[must_use]
     pub const fn subsurface_ocean(&self) -> bool {
-        self.subsurface_ocean
+        matches!(self.tide.subsurface, Subsurface::Ocean(_))
+    }
+
+    /// Its subsurface ocean as P14.T24.b's figures read it ([`Subsurface::of_regular_moon`]),
+    /// from the very layers its flag was decided on: the ice and water of the bulk its tides read
+    /// under its surface at its equilibrium temperature, with the heat flow its flag reads; none
+    /// where its flag holds none.
+    #[must_use]
+    pub(crate) const fn subsurface(&self) -> Subsurface {
+        self.tide.subsurface
     }
 
     /// How long its planet's tides take to lock its spin ([`locking_time`]).
     #[must_use]
     pub const fn locking_time(&self) -> Seconds {
-        self.locking_time
+        self.tide.locking_time
     }
 }
 
@@ -1331,13 +1477,15 @@ pub(crate) struct OceanLayers {
 /// [`tidal_locking_time`](crate::planetary::derive::rotation::tidal_locking_time), with the
 /// moon's one moment of inertia,
 /// [`moment_of_inertia_factor`](crate::planetary::derive::rotation::moment_of_inertia_factor)
-/// (P14.T46.a, which retired the moons' own 0.35), and its class's tides, a rocky body's k₂ = 0.3
-/// and Q = 100 (P14.T14.b's pair; the despinning time is Gladman et al. 1996's, Icarus 122, 166),
-/// for P14.T17.b's "all regular moons lock".
+/// (P14.T46.a, which retired the moons' own 0.35), and the tides `tides` say: its class's, a rocky
+/// body's k₂ = 0.3 and Q = 100 (P14.T14.b's pair; the despinning time is Gladman et al. 1996's,
+/// Icarus 122, 166), below [`MOONS_VERSION`], or its own (k₂, Q) by composition and state from it
+/// ([`MoonTides`], P14.T56.d), for P14.T17.b's "all regular moons lock" as amended.
 ///
 /// # Panics
 ///
-/// If `mass` or `radius` is not positive and finite, which a derived moon's never is.
+/// If `mass` or `radius` is not positive and finite, or a given pair is not, which a derived
+/// moon's never is.
 #[must_use]
 pub fn locking_time(
     planet_mass: Kilograms,
@@ -1346,9 +1494,10 @@ pub fn locking_time(
     a: Metres,
     class: PlanetClass,
     fractions: &MassFractions,
+    tides: SpinTides,
 ) -> Seconds {
-    let moon = SpinningBody::of_class(mass, radius, class, fractions)
-        .expect("a moon's mass and radius are positive and finite");
+    let moon = SpinningBody::with_tides(mass, radius, class, fractions, tides)
+        .expect("a moon's mass, radius and tides are positive and finite");
     tidal_locking_time(
         &moon,
         Seconds::new(MOON_PRIMORDIAL_PERIOD_HOURS * 3_600.0),
@@ -1444,107 +1593,80 @@ pub fn derive_regular_moon(
     t: UniverseTime,
 ) -> Result<DerivedMoon, DeriveMoonError> {
     derive_moon(
-        moon.mass,
-        &moon.orbit,
+        &MoonInputs {
+            mass: moon.mass,
+            orbit: moon.orbit,
+            radius_rank,
+            volatiles: MoonVolatiles {
+                draws: volatiles,
+                site: VolatileSite::Nursery,
+            },
+            bulk: MoonBulk::Derived,
+        },
         parent,
         nursery,
         sky,
-        radius_rank,
-        MoonVolatiles {
-            draws: volatiles,
-            site: VolatileSite::Nursery,
-        },
-        MoonBulk::Derived,
         age,
         t,
     )
 }
 
-/// A moon of mass `mass` on `orbit` about `parent`, derived as [`derive_regular_moon`] derives a
-/// regular one, with the volatiles `volatiles` and, from [`MOONS_VERSION`], its inventory and
-/// atmosphere read at its own bulk `bulk`: what P14.T22.a's satellites share, whatever their
-/// origin (a giant-impact moon's or a capture's flux and temperature come from here, beside their
-/// own radius and density, and from P14.T56.c their inventory from their parent's zone,
-/// [`VolatileSite::ParentZone`], and its follow-up their air at that radius, [`MoonBulk::Stated`]).
+/// The moon `moon` of `parent`, derived as [`derive_regular_moon`] derives a regular one, with
+/// its volatiles and, from [`MOONS_VERSION`], its inventory, atmosphere and tides read at its own
+/// bulk ([`MoonInputs::bulk`]): what P14.T22.a's satellites share, whatever their origin (a
+/// giant-impact moon's or a capture's flux and temperature come from here, beside their own radius
+/// and density, and from P14.T56.c their inventory from their parent's zone,
+/// [`VolatileSite::ParentZone`], its follow-up their air at that radius, [`MoonBulk::Stated`], and
+/// P14.T56.d their tides by composition and state, [`MoonTides`]).
 ///
 /// Below [`MOONS_VERSION`] the inventory and atmosphere are read at the composition solve's bulk,
-/// version 22's, whatever `bulk` says ([`MoonBulk`]).
+/// and the tides are version 22's at the nursery's radius, whatever the bulk says ([`MoonBulk`]).
 ///
 /// # Errors
 ///
 /// As [`derive_regular_moon`], and [`DeriveMoonError::StatedRadius`] for a stated bulk whose
 /// radius is not positive and finite, at any version.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "derive_regular_moon's inputs with the moon's mass, orbit and bulk in place of the \
-              moon"
-)]
 pub fn derive_moon(
-    mass: EarthMasses,
-    orbit: &KeplerElements,
+    moon: &MoonInputs,
     parent: &MoonParent,
     nursery: &MoonNursery,
     sky: &MoonSky,
-    radius_rank: UnitUniform,
-    volatiles: MoonVolatiles,
-    bulk: MoonBulk,
     age: Years,
     t: UniverseTime,
 ) -> Result<DerivedMoon, DeriveMoonError> {
-    derive_moon_under(
-        NitrogenLine::in_force(),
-        MoonBulkRule::in_force(),
-        mass,
-        orbit,
-        parent,
-        nursery,
-        sky,
-        radius_rank,
-        volatiles,
-        bulk,
-        age,
-        t,
-    )
+    derive_moon_under(MoonHolds::in_force(), moon, parent, nursery, sky, age, t)
 }
 
-/// [`derive_moon`] with nitrogen's boost beyond the line `line` and its inventory and atmosphere
-/// read at the bulk `rule` gives, for the holds' tests and the system's hold (P14.T50.c,
-/// P14.T56.c and its follow-up): [`derive_moon`] is this under [`NitrogenLine::in_force`] and
-/// [`MoonBulkRule::in_force`].
+/// [`derive_moon`] under the holds `holds`: nitrogen's boost beyond its line, its inventory and
+/// atmosphere read at the bulk its rule gives, and its tides by its rule, for the holds' tests and
+/// the system's hold (P14.T50.c, P14.T56.c and its follow-up, P14.T56.d): [`derive_moon`] is this
+/// under [`MoonHolds::in_force`].
 ///
 /// # Errors
 ///
 /// As [`derive_moon`].
-#[expect(
-    clippy::too_many_arguments,
-    reason = "derive_moon's inputs with the nitrogen line and the bulk rule its holds choose"
-)]
 pub(crate) fn derive_moon_under(
-    line: NitrogenLine,
-    rule: MoonBulkRule,
-    mass: EarthMasses,
-    orbit: &KeplerElements,
+    holds: MoonHolds,
+    moon: &MoonInputs,
     parent: &MoonParent,
     nursery: &MoonNursery,
     sky: &MoonSky,
-    radius_rank: UnitUniform,
-    volatiles: MoonVolatiles,
-    bulk: MoonBulk,
     age: Years,
     t: UniverseTime,
 ) -> Result<DerivedMoon, DeriveMoonError> {
+    let MoonInputs {
+        mass,
+        orbit,
+        radius_rank,
+        volatiles,
+        bulk,
+    } = *moon;
     if let MoonBulk::Stated { radius, .. } = bulk
         && !(radius.value().is_finite() && radius.value() > 0.0)
     {
         return Err(DeriveMoonError::StatedRadius);
     }
-    let moon = RegularMoon {
-        ordinal: 1,
-        mass,
-        orbit: *orbit,
-        resonance: Resonance::None,
-    };
-    let a = moon.orbit.semi_major_axis();
+    let a = orbit.semi_major_axis();
     let icy = nursery.ice_line().is_some_and(|line| a >= line);
     let ice_fraction = if icy {
         let (lo, hi) = ICY_MOON_ICE_FRACTION;
@@ -1552,19 +1674,19 @@ pub(crate) fn derive_moon_under(
     } else {
         0.0
     };
-    let radius = moon_radius(moon.mass, ice_fraction);
+    let radius = moon_radius(mass, ice_fraction);
     let formation = match nursery.ice_line() {
         Some(_) => a,
         None => Metres::new(a.value().min(0.5 * nursery.disc.snow_line().value())),
     };
-    let placed = PlacedBody::new(moon.mass, moon.orbit, formation, radius_rank)
+    let placed = PlacedBody::new(mass, orbit, formation, radius_rank)
         .map_err(DeriveMoonError::Placed)?
         .with_volatiles(volatiles.draws);
     let placed = match volatiles.site {
         VolatileSite::Nursery => placed,
         VolatileSite::ParentZone => placed.with_volatiles_from(nursery.parent_zone),
     };
-    let placed = match (rule, bulk) {
+    let placed = match (holds.bulk, bulk) {
         (MoonBulkRule::Solved, _) => placed,
         (MoonBulkRule::Own, MoonBulk::Derived) => {
             placed.with_bulk(GivenBulk::new(radius, GivenFractions::Water(ice_fraction)))
@@ -1584,52 +1706,200 @@ pub(crate) fn derive_moon_under(
         &sky.stars,
     )
     .map_err(DeriveMoonError::Hosts)?;
-    let body = derive_body_under(line, &placed, &hosts, &nursery.disc, age, t)
+    let body = derive_body_under(holds.line, &placed, &hosts, &nursery.disc, age, t)
         .map_err(DeriveMoonError::Body)?;
-    let volume = 4.0 / 3.0 * core::f64::consts::PI * math::powi(radius.value(), 3);
-    let density = KilogramsPerCubicMetre::new(Kilograms::from(moon.mass).value() / volume);
-    let e = moon.orbit.eccentricity().value();
-    let n = core::f64::consts::TAU / moon.orbit.period().value();
-    let heat = tidal_heating(
-        Kilograms::from(parent.mass()),
-        radius,
-        MOON_TIDAL_RESPONSE,
-        a,
-        e,
-        n,
-    );
-    let area = 4.0 * core::f64::consts::PI * radius.value() * radius.value();
-    let flux = WattsPerSquareMetre::new(heat.value() / area);
-    let ocean = has_subsurface_ocean(
+    let density = mean_density(Kilograms::from(mass), radius);
+    let at = TideOf {
+        planet: Kilograms::from(parent.mass()),
+        mass,
+        orbit: &orbit,
+        body: &body,
         radius,
         density,
         ice_fraction,
-        body.equilibrium_temperature(),
-        flux,
-    );
-    let mut derived = DerivedMoon {
+    };
+    let tide = match holds.tides {
+        MoonTideRule::ClassPair => class_tides(&at),
+        MoonTideRule::ByState => {
+            let age_now = Years::new(age.value() + t.since_epoch().as_julian_years_f64());
+            own_tides(&at, bulk, sky.composition.fe_h(), age_now)
+        }
+    };
+    Ok(DerivedMoon {
         body,
         ice_fraction,
         radius,
         density,
+        tide,
+    })
+}
+
+/// What a moon's tide reads (crate-private): its planet's mass, its own mass and orbit about the
+/// planet, its derivation, and the radius, density and ice fraction its derivation gives it.
+#[derive(Debug, Clone, Copy)]
+struct TideOf<'a> {
+    planet: Kilograms,
+    mass: EarthMasses,
+    orbit: &'a KeplerElements,
+    body: &'a DerivedBody,
+    radius: Metres,
+    density: KilogramsPerCubicMetre,
+    ice_fraction: f64,
+}
+
+/// A moon's orbit as its eccentricity tide reads it ([`TideOf::elements`]).
+#[derive(Debug, Clone, Copy)]
+struct TideElements {
+    a: Metres,
+    e: f64,
+    mean_motion_rad_per_s: f64,
+}
+
+impl TideOf<'_> {
+    /// The orbit's semi-major axis, eccentricity and mean motion.
+    #[must_use]
+    fn elements(&self) -> TideElements {
+        TideElements {
+            a: self.orbit.semi_major_axis(),
+            e: self.orbit.eccentricity().value(),
+            mean_motion_rad_per_s: core::f64::consts::TAU / self.orbit.period().value(),
+        }
+    }
+
+    /// The fractions its derivation gives it, [`DerivedMoon::fractions`]'s.
+    #[must_use]
+    fn fractions(&self) -> MassFractions {
+        self.body.fractions().with_water(self.ice_fraction)
+    }
+}
+
+/// Version 22's tides (P14.T17.b, held by [`MOONS_VERSION`]): Io's response for its heat at its
+/// nursery's radius, the ocean flag and its layers at that tidal flux, and the class pair for its
+/// locking at the class and fractions its record states (`PlanetClass::of`, as the system's bulk
+/// section takes them), so that the locking time is the stored rotation law's (P14.T46.a).
+#[must_use]
+fn class_tides(at: &TideOf<'_>) -> TideState {
+    let TideElements {
+        a,
+        e,
+        mean_motion_rad_per_s: n,
+    } = at.elements();
+    let radius = at.radius;
+    let heat = tidal_heating(at.planet, radius, MOON_TIDAL_RESPONSE, a, e, n);
+    let area = 4.0 * core::f64::consts::PI * radius.value() * radius.value();
+    let flux = WattsPerSquareMetre::new(heat.value() / area);
+    let surface = at.body.equilibrium_temperature();
+    let fractions = at.fractions();
+    TideState {
         tidal_heating: heat,
         heat_flux: flux,
         volcanism: Volcanism::of(flux),
-        subsurface_ocean: ocean,
-        locking_time: Seconds::new(f64::INFINITY),
-    };
-    // The class and fractions the moon's record states (`PlanetClass::of`, as the system's bulk
-    // section takes them), so that the locking time is the stored rotation law's (P14.T46.a).
-    let fractions = derived.fractions();
-    derived.locking_time = locking_time(
-        Kilograms::from(parent.mass()),
-        Kilograms::from(moon.mass),
-        radius,
+        subsurface: Subsurface::of_regular_moon(radius, at.density, at.ice_fraction, surface, flux),
+        ocean_heat_flow: flux,
+        locking_time: locking_time(
+            at.planet,
+            Kilograms::from(at.mass),
+            radius,
+            a,
+            PlanetClass::of(at.mass, &fractions),
+            &fractions,
+            SpinTides::OfClass,
+        ),
+        tides: None,
+    }
+}
+
+/// Its own tides by composition and state (P14.T56.d; decision-p14-moons §3 and §F-ocean), at its
+/// own bulk `bulk` (a regular moon's its derivation's, a giant-impact moon's or a capture's its
+/// record's) about a host of \[Fe/H\] `fe_h`, at the system age `age`: its branch's loss for its
+/// heat over that bulk's surface, its branch's ocean, and its (k₂, Q) for its locking, at the
+/// class and moment of inertia its record states.
+///
+/// `F_nt` is P14.T24.b's at its record's bulk with its own air and water
+/// ([`non_tidal_heat_flow`]), with no tide and no ocean given, which the branch decides; the
+/// shell's top is at its equilibrium temperature, as its ocean flag reads it. Its ocean's layers
+/// are those its branch was decided on, at that bulk's mean density ([`mean_density`]), which is
+/// its derivation's to the bit for a regular moon.
+#[must_use]
+fn own_tides(at: &TideOf<'_>, bulk: MoonBulk, fe_h: Dex, age: Years) -> TideState {
+    let TideElements {
         a,
-        PlanetClass::of(moon.mass, &fractions),
-        &fractions,
+        e,
+        mean_motion_rad_per_s: n,
+    } = at.elements();
+    let (radius, fractions) = match bulk {
+        MoonBulk::Derived => (at.radius, at.fractions()),
+        MoonBulk::Stated { radius, fractions } => (radius, fractions),
+    };
+    let class = PlanetClass::of(at.mass, &fractions);
+    let kilograms = Kilograms::from(at.mass);
+    let r = radius.value();
+    let non_tidal = non_tidal_heat_flow(
+        &HeatInputs {
+            mass: at.mass,
+            radius,
+            surface_gravity: MetresPerSecondSquared::new(GM_EARTH * at.mass.value() / (r * r)),
+            class,
+            fractions,
+            inventory_water: at.body.inventory().water(),
+            fe_h,
+            tidal_heat_flow: WattsPerSquareMetre::new(0.0),
+            subsurface_ocean: Subsurface::NotComputed,
+        },
+        age,
+        at.body.atmosphere().state(),
+    )
+    // A moon's class is rocky or icy, so it always has one; none is a body with no solid heat.
+    .unwrap_or(WattsPerSquareMetre::new(0.0));
+    let surface = at.body.equilibrium_temperature();
+    let tides = MoonTides::of(&TideInputs {
+        material: TidalMaterial::of_water(fractions.water()),
+        moment_factor: moment_of_inertia_factor(class, &fractions),
+        mass: kilograms,
+        radius,
+        water: fractions.water(),
+        surface_temperature: surface,
+        non_tidal_heat_flow: non_tidal,
+        forcing: tidal_forcing(at.planet, radius, a, e, n),
+        mean_motion_rad_per_s: n,
+    });
+    let heat = tidal_heating(at.planet, radius, tides.loss(), a, e, n);
+    let area = 4.0 * core::f64::consts::PI * r * r;
+    let flux = WattsPerSquareMetre::new(heat.value() / area);
+    let ocean = tides.branch() == TidalBranch::Ocean;
+    let subsurface = if ocean {
+        Subsurface::of_regular_moon(
+            radius,
+            mean_density(kilograms, radius),
+            fractions.water(),
+            surface,
+            tides.heat_flow(),
+        )
+    } else {
+        Subsurface::NoOcean
+    };
+    debug_assert_eq!(
+        matches!(subsurface, Subsurface::Ocean(_)),
+        ocean,
+        "an ocean-branch moon's layers are those its branch was decided on"
     );
-    Ok(derived)
+    TideState {
+        tidal_heating: heat,
+        heat_flux: flux,
+        volcanism: Volcanism::of(flux),
+        subsurface,
+        ocean_heat_flow: tides.heat_flow(),
+        locking_time: locking_time(
+            at.planet,
+            kilograms,
+            radius,
+            a,
+            class,
+            &fractions,
+            tides.spin_tides(),
+        ),
+        tides: Some(tides),
+    }
 }
 
 /// A moon could not be derived.
@@ -2171,6 +2441,13 @@ mod tests {
         assert!(icy > 100 && dry > 100, "{icy} icy, {dry} dry");
     }
 
+    /// P14.T17.b's test (b) as built at version 22: at measured elements the class pair
+    /// (k₂ = 0.3, Q = 100) locks Io, Callisto, Titan, Iapetus and Oberon within 100 Myr, and every
+    /// generated moon of the table's Jupiter locks within the Sun's age under it. From
+    /// `MOONS_VERSION` T17.b's test (b) is the amended one
+    /// (`moons::tides::tests::the_measured_moons_lock_as_t17b_amended` and
+    /// `the_share_of_generated_regular_moons_unlocked_at_the_epoch_is_recorded`); P14.T54.a deletes
+    /// the class-pair half.
     #[test]
     fn the_solar_system_s_regular_moons_lock_and_so_do_the_generated_ones() {
         let gm_mass = |gm: f64| Kilograms::new(gm / GRAVITATIONAL_CONSTANT);
@@ -2194,6 +2471,7 @@ mod tests {
                 Metres::new(a_km * 1e3),
                 PlanetClass::of(EarthMasses::from(mass), &fractions),
                 &fractions,
+                SpinTides::OfClass,
             );
             assert!(
                 t.value() < 1e8 * 3.156e7,
@@ -2234,7 +2512,12 @@ mod tests {
                     UniverseTime::EPOCH,
                 )
                 .unwrap();
-                assert!(d.locking_time().value() < SOLAR_AGE.value() * 3.156e7);
+                // Under version 22's class pair every one locks; under a moon's own tides
+                // (P14.T56.d) the share unlocked is recorded instead
+                // (`the_share_of_generated_regular_moons_unlocked_at_the_epoch_is_recorded`).
+                if d.tides().is_none() {
+                    assert!(d.locking_time().value() < SOLAR_AGE.value() * 3.156e7);
+                }
                 assert!(d.density() >= PLACEMENT_DENSITY, "{:?}", d.density());
                 assert!(moon.orbit().periapsis() > p.roche_limit_fluid(d.density()));
                 assert!(d.equilibrium_temperature().value() < 200.0);
@@ -2329,23 +2612,42 @@ mod tests {
     /// bulk `bulk`.
     fn moon_read_at(
         (line, rule): (NitrogenLine, MoonBulkRule),
+        mass: (f64, UnitUniform),
+        orbit: &KeplerElements,
+        giant: &(MoonParent, MoonNursery, MoonSky),
+        volatiles: &MoonVolatiles,
+        bulk: MoonBulk,
+    ) -> DerivedMoon {
+        let holds = MoonHolds {
+            line,
+            bulk: rule,
+            tides: MoonTideRule::ClassPair,
+        };
+        moon_held(holds, mass, orbit, giant, volatiles, bulk)
+    }
+
+    /// [`moon_under`]'s moon under the holds `holds`, with the bulk `bulk`.
+    fn moon_held(
+        holds: MoonHolds,
         (kg, rank): (f64, UnitUniform),
         orbit: &KeplerElements,
         (parent, nursery, sky): &(MoonParent, MoonNursery, MoonSky),
         volatiles: &MoonVolatiles,
         bulk: MoonBulk,
     ) -> DerivedMoon {
+        let inputs = MoonInputs {
+            mass: EarthMasses::new(kg / crate::units::consts::EARTH_MASS_KG),
+            orbit: *orbit,
+            radius_rank: rank,
+            volatiles: *volatiles,
+            bulk,
+        };
         derive_moon_under(
-            line,
-            rule,
-            EarthMasses::new(kg / crate::units::consts::EARTH_MASS_KG),
-            orbit,
+            holds,
+            &inputs,
             parent,
             nursery,
             sky,
-            rank,
-            *volatiles,
-            bulk,
             SOLAR_AGE,
             UniverseTime::EPOCH,
         )
@@ -2735,18 +3037,28 @@ mod tests {
                 radius: Metres::new(bad),
                 fractions,
             };
-            for rule in [MoonBulkRule::Solved, MoonBulkRule::Own] {
+            for (rule, tides) in [
+                (MoonBulkRule::Solved, MoonTideRule::ClassPair),
+                (MoonBulkRule::Own, MoonTideRule::ByState),
+            ] {
+                let holds = MoonHolds {
+                    line: NitrogenLine::Ammonia,
+                    bulk: rule,
+                    tides,
+                };
+                let inputs = MoonInputs {
+                    mass: EarthMasses::new(kg / crate::units::consts::EARTH_MASS_KG),
+                    orbit,
+                    radius_rank: keep,
+                    volatiles: MoonVolatiles::SHARED,
+                    bulk,
+                };
                 let refused = derive_moon_under(
-                    NitrogenLine::Ammonia,
-                    rule,
-                    EarthMasses::new(kg / crate::units::consts::EARTH_MASS_KG),
-                    &orbit,
+                    holds,
+                    &inputs,
                     &jupiter.0,
                     &jupiter.1,
                     &jupiter.2,
-                    keep,
-                    MoonVolatiles::SHARED,
-                    bulk,
                     SOLAR_AGE,
                     UniverseTime::EPOCH,
                 )
@@ -2944,6 +3256,418 @@ mod tests {
         assert_same_bits(at.parent_zone().distance().value(), line);
         assert_same_bits(at.parent_zone().snow_line().value(), line);
         assert_eq!(nursery(line * (1.0 - 1e-12)).unwrap().ice_line(), None);
+    }
+
+    // P14.T56.d: moons' Love numbers and dissipation by state.
+
+    /// A spread of radius ranks for the `i`th moon of a sample: the golden ratio's sequence.
+    fn spread_rank(i: u32) -> UnitUniform {
+        let x = (0.5 + f64::from(i) * 0.618_033_988_749_895).fract();
+        UnitUniform::new(x.clamp(1e-6, 1.0 - 1e-6)).unwrap()
+    }
+
+    /// The regular moon `moon` of the giant `giant`'s system `p`, derived at the radius rank
+    /// `rank` with the median volatiles under the holds `holds` in a system aged `age`.
+    fn regular_under(
+        holds: MoonHolds,
+        moon: &RegularMoon,
+        p: &MoonParent,
+        (_, nursery, sky): &(MoonParent, MoonNursery, MoonSky),
+        rank: UnitUniform,
+        age: Years,
+    ) -> DerivedMoon {
+        let inputs = MoonInputs {
+            mass: moon.mass(),
+            orbit: *moon.orbit(),
+            radius_rank: rank,
+            volatiles: MoonVolatiles::SHARED,
+            bulk: MoonBulk::Derived,
+        };
+        derive_moon_under(holds, &inputs, p, nursery, sky, age, UniverseTime::EPOCH).unwrap()
+    }
+
+    /// The table's Jupiter, Saturn, Uranus and Neptune as their moons read them: the giants of
+    /// the tide checks, which each test renames over its own systems.
+    fn table_giants() -> [(MoonParent, MoonNursery, MoonSky); 4] {
+        [
+            table_giant("Jupiter", 5, None),
+            table_giant("Saturn", 6, None),
+            table_giant("Uranus", 7, None),
+            table_giant("Neptune", 8, None),
+        ]
+    }
+
+    /// P14.T56.d: below the bump a moon's tides are version 22's, bit for bit, whatever its bulk,
+    /// and it carries none of its own; under its own tides a regular moon's heat is its loss's,
+    /// its flag its branch's and its locking its own pair's, at its own radius.
+    #[test]
+    fn a_moon_s_tides_are_version_22_s_below_the_bump_and_its_own_from_it() {
+        let jupiter = table_giant("Jupiter", 5, None);
+        let class_pair = MoonHolds {
+            tides: MoonTideRule::ClassPair,
+            ..MoonHolds::BATCH
+        };
+        let mut moons = 0;
+        for i in 0..40 {
+            let p = renamed(&jupiter.0, i, 5);
+            for moon in regular_moons(Seed::new(6), &p).moons() {
+                let rank = spread_rank(i);
+                let v22 = regular_under(class_pair, moon, &p, &jupiter, rank, SOLAR_AGE);
+                assert_eq!(v22.tides(), None);
+                assert_eq!(v22.spin_tides(), SpinTides::OfClass);
+                let (a, e) = (
+                    moon.orbit().semi_major_axis(),
+                    moon.orbit().eccentricity().value(),
+                );
+                let n = core::f64::consts::TAU / moon.orbit().period().value();
+                let planet = Kilograms::from(p.mass());
+                let heat = tidal_heating(planet, v22.radius(), MOON_TIDAL_RESPONSE, a, e, n);
+                assert_same_bits(v22.tidal_heating().value(), heat.value());
+                assert_same_bits(v22.ocean_heat_flow().value(), v22.heat_flux().value());
+                let own = regular_under(MoonHolds::BATCH, moon, &p, &jupiter, rank, SOLAR_AGE);
+                let tides = own.tides().expect("its own tides");
+                // Its published ocean is the very one its flag was decided on, at either rule.
+                for moon in [&own, &v22] {
+                    let ocean = matches!(moon.subsurface(), Subsurface::Ocean(_));
+                    assert_eq!(ocean, moon.subsurface_ocean());
+                }
+                let heat = tidal_heating(planet, own.radius(), tides.loss(), a, e, n);
+                assert_same_bits(own.tidal_heating().value(), heat.value());
+                assert_eq!(own.subsurface_ocean(), tides.branch() == TidalBranch::Ocean);
+                assert_eq!(own.spin_tides(), tides.spin_tides());
+                // Its air and bulk are the tides' to read, not theirs to move.
+                assert_eq!(own.atmosphere(), v22.atmosphere());
+                assert_same_bits(own.radius().value(), v22.radius().value());
+                let fractions = own.fractions();
+                let lock = locking_time(
+                    planet,
+                    Kilograms::from(moon.mass()),
+                    own.radius(),
+                    a,
+                    PlanetClass::of(moon.mass(), &fractions),
+                    &fractions,
+                    tides.spin_tides(),
+                );
+                assert_same_bits(own.locking_time().value(), lock.value());
+                moons += 1;
+            }
+        }
+        assert!(moons > 100, "{moons}");
+    }
+
+    /// P14.T56.d: a cold rocky moon's heat flux is k₂ ÷ (38 × 0.015) of version 22's, which read
+    /// Io's response for every moon; a heated one's is version 22's, bit for bit (generated moons
+    /// of the table's Jupiter inside its ice line).
+    #[test]
+    fn a_cold_rocky_moon_s_heat_is_its_loss_over_io_s_and_a_heated_one_s_is_unchanged() {
+        use crate::planetary::moons::tides::TidalBranch;
+        use crate::planetary::params::COLD_ROCK_TIDAL_Q;
+        let jupiter = table_giant("Jupiter", 5, None);
+        let class_pair = MoonHolds {
+            tides: MoonTideRule::ClassPair,
+            ..MoonHolds::BATCH
+        };
+        let (mut cold, mut heated) = (0, 0);
+        let (mut least, mut most) = (f64::INFINITY, 0.0_f64);
+        for i in 0..300 {
+            let p = renamed(&jupiter.0, i, 5);
+            for moon in regular_moons(Seed::new(6), &p).moons() {
+                let rank = spread_rank(i);
+                let own = regular_under(MoonHolds::BATCH, moon, &p, &jupiter, rank, SOLAR_AGE);
+                if own.class() != PlanetClass::Rocky {
+                    continue;
+                }
+                let v22 = regular_under(class_pair, moon, &p, &jupiter, rank, SOLAR_AGE);
+                let tides = own.tides().unwrap();
+                match tides.branch() {
+                    TidalBranch::Cold => {
+                        let ratio = tides.k2() / (COLD_ROCK_TIDAL_Q * MOON_TIDAL_RESPONSE);
+                        let moved = own.heat_flux().value() / v22.heat_flux().value();
+                        assert!((moved / ratio - 1.0).abs() < 1e-12, "{moved} {ratio}");
+                        assert!(ratio > 0.0 && ratio < 0.1, "{ratio}");
+                        (least, most) = (least.min(ratio), most.max(ratio));
+                        cold += 1;
+                    }
+                    TidalBranch::Heated => {
+                        assert_same_bits(own.heat_flux().value(), v22.heat_flux().value());
+                        heated += 1;
+                    }
+                    TidalBranch::Ocean => panic!("a dry moon holds no ocean"),
+                }
+            }
+        }
+        eprintln!(
+            "{cold} cold and {heated} heated rocky moons; the cold ones' heat × {least:.4}–{most:.4} \
+             of version 22's"
+        );
+        assert!(cold > 20 && heated > 20, "{cold} cold, {heated} heated");
+    }
+
+    /// P14.T56.d: a regular moon's ocean is its branch's, and an ocean once frozen never returns
+    /// in time: over 0.5–13.5 Gyr of its system's age, a moon's flag never goes from ocean to none
+    /// and back (generated moons of the table's giants, their skies held at the epoch's).
+    #[test]
+    fn an_ocean_once_frozen_never_returns() {
+        let ages: Vec<Years> = (0..=52)
+            .map(|k| Years::new(0.5e9 + 0.25e9 * f64::from(k)))
+            .collect();
+        let (mut moons, mut frozen, mut always) = (0, 0, 0);
+        for giant in &table_giants() {
+            let slot = giant.0.id().body_index().to_be_bytes()[0];
+            for i in 0..25 {
+                let p = renamed(&giant.0, i, slot);
+                for moon in regular_moons(Seed::new(11), &p).moons() {
+                    let rank = spread_rank(i);
+                    let flags: Vec<bool> = ages
+                        .iter()
+                        .map(|&age| {
+                            regular_under(MoonHolds::BATCH, moon, &p, giant, rank, age)
+                                .subsurface_ocean()
+                        })
+                        .collect();
+                    let lost = flags.windows(2).position(|w| w[0] && !w[1]);
+                    if let Some(at) = lost {
+                        assert!(
+                            !flags[at + 1..].contains(&true),
+                            "{:?} moon {}: {flags:?}",
+                            p.id(),
+                            moon.ordinal()
+                        );
+                        frozen += 1;
+                    }
+                    always += usize::from(flags.iter().all(|&ocean| ocean));
+                    moons += 1;
+                }
+            }
+        }
+        eprintln!("{moons} moons: {always} keep an ocean throughout, {frozen} freeze once");
+        assert!(moons > 200, "{moons}");
+    }
+
+    /// P14.T56.d: over 10⁴ generated moons every moon's tides are finite and positive, every
+    /// ocean-branch heat flow lies under its small-Λ root, and the largest of them, those at 1 W m⁻²
+    /// or more, the shares of the three branches and of the thin-shell branch are recorded, with no
+    /// bound in W m⁻² (decision-p14-t56d-membrane §7.1: physical for a held eccentricity; its limit,
+    /// the eccentricity's damping and a resonance's budget, is P14.T55.j's).
+    #[test]
+    fn the_largest_ocean_branch_flux_of_ten_thousand_generated_moons_is_recorded() {
+        use crate::planetary::moons::tides::TidalBranch;
+        let mut counts = [0_u32; 3];
+        let mut largest: Option<(f64, f64, f64)> = None;
+        let (mut moons, mut past_one, mut beyond) = (0_u32, Vec::new(), Vec::new());
+        'giants: for i in 0..2_000 {
+            for giant in &table_giants() {
+                let slot = giant.0.id().body_index().to_be_bytes()[0];
+                let p = renamed(&giant.0, i, slot);
+                for moon in regular_moons(Seed::new(12), &p).moons() {
+                    let own = regular_under(
+                        MoonHolds::BATCH,
+                        moon,
+                        &p,
+                        giant,
+                        spread_rank(moons),
+                        SOLAR_AGE,
+                    );
+                    let tides = own.tides().unwrap();
+                    assert!(tides.k2().is_finite() && tides.k2() > 0.0, "{tides:?}");
+                    assert!(tides.q().is_finite() && tides.q() > 0.0, "{tides:?}");
+                    assert!(own.locking_time().value().is_finite());
+                    counts[match tides.branch() {
+                        TidalBranch::Cold => 0,
+                        TidalBranch::Ocean => 1,
+                        TidalBranch::Heated => 2,
+                    }] += 1;
+                    if tides.branch() == TidalBranch::Ocean {
+                        let f = tides.heat_flow().value();
+                        let state = ocean_state(moon, &p, &own);
+                        // Every ocean-branch flux is finite and under its small-Λ root
+                        // (decision-p14-t56d-membrane §7.1), and none is bounded in W m⁻²: a moon
+                        // at 1 W m⁻² or more is recorded (P14.T55.j's eccentricity damping).
+                        assert!(f.is_finite(), "{:?}: {f} W m⁻²", p.id());
+                        assert!(f <= state.small * (1.0 + 1e-12), "{:?}: {f}", p.id());
+                        let orbit = moon.orbit();
+                        let e = orbit.eccentricity().value();
+                        if state.stiff && state.gain >= 1.0 {
+                            past_one.push(e);
+                        }
+                        let km = own.radius().value() / 1e3;
+                        if f >= 1.0 {
+                            let parent_radii = orbit.semi_major_axis().value() / p.radius().value();
+                            beyond.push((f, km, e, parent_radii));
+                        }
+                        if largest.is_none_or(|(most, ..)| f > most) {
+                            largest = Some((f, km, e));
+                        }
+                    }
+                    moons += 1;
+                    if moons >= 10_000 {
+                        break 'giants;
+                    }
+                }
+            }
+        }
+        past_one.sort_by(f64::total_cmp);
+        eprintln!(
+            "{moons} moons: {} cold, {} on the ocean branch, {} heated; the largest ocean-branch \
+             heat flow {largest:?} (W m⁻², km, e); {} on the thin-shell branch, stiff with X ≥ 1 \
+             ({:.4} of the ocean branch), at e {:?}–{:?}",
+            counts[0],
+            counts[1],
+            counts[2],
+            past_one.len(),
+            f64::from(u32::try_from(past_one.len()).unwrap()) / f64::from(counts[1].max(1)),
+            past_one.first(),
+            past_one.last()
+        );
+        eprintln!(
+            "{} ocean-branch moons at 1 W m⁻² or more (W m⁻², km, e, parent radii): {beyond:?}",
+            beyond.len()
+        );
+        assert_eq!(moons, 10_000);
+        assert!(counts.iter().all(|&n| n > 0), "{counts:?}");
+    }
+
+    /// What [`the_largest_ocean_branch_flux_of_ten_thousand_generated_moons_is_recorded`] reads
+    /// of an ocean-branch moon: its stiff shell's gain X, whether its shell is stiff at its rock's
+    /// heat alone, h°|K| ÷ `F_nt` > 1 (`F_nt` its whole heat less its tide), and its small-Λ root.
+    struct OceanState {
+        gain: f64,
+        stiff: bool,
+        small: f64,
+    }
+
+    /// [`OceanState`] of the regular moon `moon` of `p`, derived under its own tides as `own`.
+    fn ocean_state(moon: &RegularMoon, p: &MoonParent, own: &DerivedMoon) -> OceanState {
+        use crate::planetary::moons::tides::{
+            ocean_love_number, shell_modulus, shell_stiffness, stiff_shell_gain, tidal_forcing,
+        };
+        use crate::planetary::params::ICE_POISSON_RATIO;
+        let tides = own.tides().unwrap();
+        let orbit = moon.orbit();
+        let radius = own.radius();
+        let motion = core::f64::consts::TAU / orbit.period().value();
+        let surface = own.equilibrium_temperature();
+        let gravity = crate::units::MetresPerSecondSquared::new(
+            GM_EARTH * moon.mass().value() / (radius.value() * radius.value()),
+        );
+        let stiffness = shell_stiffness(
+            shell_modulus(surface, motion),
+            ICE_POISSON_RATIO,
+            surface,
+            gravity,
+            radius,
+        );
+        let forcing = tidal_forcing(
+            Kilograms::from(p.mass()),
+            radius,
+            orbit.semi_major_axis(),
+            orbit.eccentricity().value(),
+            motion,
+        );
+        let ocean = ocean_love_number(own.density());
+        let non_tidal = tides.heat_flow().value() - forcing.value() * tides.loss();
+        let shell = 1.0 + ocean;
+        let size = crate::math::hypot(stiffness.real.value(), stiffness.imaginary.value());
+        let drive = forcing.value() * ocean * shell * stiffness.imaginary.value();
+        OceanState {
+            gain: stiff_shell_gain(forcing, ocean, stiffness),
+            stiff: shell * size > non_tidal,
+            small: f64::midpoint(non_tidal, (non_tidal * non_tidal + 4.0 * drive).sqrt()),
+        }
+    }
+
+    /// P14.T17.b's test (b) as amended, its second half (decision-p14-moons §3.4 (a)): the share
+    /// of generated regular moons unlocked at the epoch under their own tides is recorded, beside
+    /// version 22's, which locked them all.
+    #[test]
+    fn the_share_of_generated_regular_moons_unlocked_at_the_epoch_is_recorded() {
+        let class_pair = MoonHolds {
+            tides: MoonTideRule::ClassPair,
+            ..MoonHolds::BATCH
+        };
+        let seconds = SOLAR_AGE.value() * crate::units::consts::SECONDS_PER_JULIAN_YEAR;
+        let (mut moons, mut unlocked, mut unlocked_v22) = (0_u32, 0_u32, 0_u32);
+        for giant in &table_giants() {
+            let slot = giant.0.id().body_index().to_be_bytes()[0];
+            for i in 0..150 {
+                let p = renamed(&giant.0, i, slot);
+                for moon in regular_moons(Seed::new(13), &p).moons() {
+                    let rank = spread_rank(moons);
+                    let own = regular_under(MoonHolds::BATCH, moon, &p, giant, rank, SOLAR_AGE);
+                    let v22 = regular_under(class_pair, moon, &p, giant, rank, SOLAR_AGE);
+                    unlocked += u32::from(own.locking_time().value() > seconds);
+                    unlocked_v22 += u32::from(v22.locking_time().value() > seconds);
+                    moons += 1;
+                }
+            }
+        }
+        let share = f64::from(unlocked) / f64::from(moons);
+        eprintln!(
+            "{unlocked} of {moons} generated regular moons unlocked at the Sun's age ({share:.4}); \
+             version 22's {unlocked_v22}"
+        );
+        assert!(moons > 1_000, "{moons}");
+        assert!(share < 0.5, "{share}");
+    }
+
+    /// P14.T56.c's follow-up's finding, built by P14.T56.d: a capture's tides read its own bulk,
+    /// its record's, not the nursery's radius. The table's Triton, about the table's Neptune at
+    /// its own 1,352.6 km and the ice its density holds, against the nursery's 1,474 km.
+    #[test]
+    fn a_capture_s_tides_read_its_own_bulk() {
+        let neptune = table_giant("Neptune", 8, None);
+        let ((kg, rank), orbit) = table_moon(TRITON, &neptune);
+        let (bulk, ice) = captured_bulk(kg, TRITON.1);
+        let volatiles = MoonVolatiles {
+            draws: VolatileDraws::MEDIAN,
+            site: VolatileSite::ParentZone,
+        };
+        let own = moon_held(
+            MoonHolds::BATCH,
+            (kg, rank),
+            &orbit,
+            &neptune,
+            &volatiles,
+            bulk,
+        );
+        let class_pair = MoonHolds {
+            tides: MoonTideRule::ClassPair,
+            ..MoonHolds::BATCH
+        };
+        let v22 = moon_held(class_pair, (kg, rank), &orbit, &neptune, &volatiles, bulk);
+        // Version 22's tides read the nursery's radius, some 1,474 km, not its own.
+        assert!(
+            (v22.radius().value() - 1.3526e6).abs() > 5e4,
+            "{:?}",
+            v22.radius()
+        );
+        let tides = own.tides().unwrap();
+        let fractions = MassFractions::solid(0.0, 1.0 - ice, ice);
+        let class = PlanetClass::of(
+            EarthMasses::new(kg / crate::units::consts::EARTH_MASS_KG),
+            &fractions,
+        );
+        let mass = Kilograms::from(EarthMasses::new(kg / crate::units::consts::EARTH_MASS_KG));
+        let lock = locking_time(
+            Kilograms::from(neptune.0.mass()),
+            mass,
+            Metres::new(TRITON.1 * 1e3),
+            orbit.semi_major_axis(),
+            class,
+            &fractions,
+            tides.spin_tides(),
+        );
+        assert_same_bits(own.locking_time().value(), lock.value());
+        // On its circular orbit it feels no eccentricity tide.
+        assert_same_bits(own.tidal_heating().value(), 0.0);
+        eprintln!(
+            "Triton: {:?}, k2 {:.4}, Q {:.1}, F {:.2} mW m⁻², locks in {:.3e} yr",
+            tides.branch(),
+            tides.k2(),
+            tides.q(),
+            1e3 * tides.heat_flow().value(),
+            own.locking_time().value() / crate::units::consts::SECONDS_PER_JULIAN_YEAR
+        );
     }
 
     fn parts(p: &MoonParent) -> MoonParentParts {

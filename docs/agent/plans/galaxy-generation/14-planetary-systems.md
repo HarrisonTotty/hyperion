@@ -15959,3 +15959,264 @@ tables::gauss_legendre`.
     Moon's silicate mass, 22% of Mercury's, 8% of Mars's and 1.4% of Earth's (the lane's
     estimate), a possible physical edge for the flotation crust, against plagioclase's saturation
     at 70–80% solidification.
+- **Deviations in P14.T56.d, as built (`p14-moons`, 2026-10-16).** Moons' Love numbers and
+  dissipation by state (decision-p14-moons §3 and §F-ocean F3, and decision-p14-t56d-membrane,
+  which replaces §F-ocean F2's membrane and its δ), held behind `MOONS_VERSION` = 23 with T56.a's
+  tripwire, which now also checks `MoonTideRule::in_force()` and `MoonRules::in_force()`. Below
+  23 every moon's tides are version 22's to the bit: Io's response for its heat at the nursery's
+  radius, the ocean flag at that tidal flux, and the class pair (k₂ = 0.3, Q = 100) for its
+  locking and its stored rotation law. `GENERATOR_VERSION` stays 22 and `golden_diff.py` reports
+  no golden moved.
+  - _The hold's switch (the handoff's crux)._ The tides move what generation reads (the rotation
+    law reads the locking pair, and the branch reads the moon's air and heat), so the hold is a
+    switch of generation, not a setter: `moons::MoonRules { planes, inventories, tides }`
+    (crate-private, with `in_force()` and the tests' `BATCH`, every rule of the batch), which
+    `system::generate_with(seed, ctx, rules)` takes in place of T56.a's `SatellitePlanes`
+    (`generate` passes `MoonRules::in_force()`; the tests' four Laplace calls pass
+    `LAPLACE_SURFACE`, version 22's rules but the planes). `PlanetarySystem` holds
+    `moon_tides: MoonTideRule` (`ClassPair`, `ByState`) beside `moon_inventories`. Under
+    `ByState` every moon's law waits, as on the Laplace surface, and is derived after the planets'
+    by `moon_rotations` on its own derivation at `parent_time`; `derive_rotation`'s moon arm then
+    re-derives the moon at `parent_time` through the new `parent_now`, so that the held law is its
+    record's (tested). `with_moon_inventories` now refuses a system under `ByState`, where it
+    would no longer be generating with its rule.
+  - _Signatures._ `derive_moon(moon: &MoonInputs, parent, nursery, sky, age, t)`: the moon's
+    mass, orbit, radius rank, volatiles and bulk grouped into the public `MoonInputs`, as T56.c's
+    follow-up's rust review advised, so the `too_many_arguments` expect goes;
+    `derive_moon_under(holds: MoonHolds, &MoonInputs, ...)` takes the crate-private
+    `MoonHolds { line, bulk, tides }` (T50.c's nitrogen line, the follow-up's bulk rule and this
+    task's tide rule). `regular::locking_time` gains a `SpinTides` parameter.
+    `derive_rotation::SpinTides { OfClass, Given { love_number, tidal_q } }`,
+    `SpinningBody::with_tides` (which `of_class` is at `OfClass`) and `SpinInputs::tides`, which
+    `BodyRotation::derive` reads; `rotation_from` takes it, `OfClass` for every planet and member.
+  - _The membrane, as ruled_ (decision-p14-t56d-membrane §2). k₂ = `k_oc` ÷ (1 + h°Λ), h° =
+    1 + `k_oc`, with Λ over `WATER_DENSITY` (Beuthe 2015, Icarus 248, 109, eqs. 28 and 43–44),
+    complex through the shell's Maxwell rigidity averaged over its conductive profile in ln T
+    (`shell_modulus`, 512 midpoint nodes; Beuthe 2019's Arrhenius ice,
+    `ICE_MELTING_VISCOSITY_PA_S` = 10¹⁴ Pa s and `ICE_CREEP_ACTIVATION_ENERGY_J_PER_MOL` =
+    5.94 × 10⁴, with `substance::phase::MOLAR_GAS_CONSTANT`; the crate-private
+    `shell_modulus_with` and `IceRheology` let a benchmark read his 10¹³ Pa s).
+    `SHELL_LOSS_FACTOR` is gone: each moon's loss factor is its own, from its period and surface.
+    `TideInputs` carries the moon's mean motion for it. The constants carry the ruling's unit in
+    their names (`_PA_S`, `_J_PER_MOL`), since the units crate has no viscosity or molar energy.
+  - _Names beyond Provides._ In `moons/tides.rs`: `ComplexLoveNumber { real, imaginary }` with
+    `modulus()` and `loss()`; `MembraneStiffness` (Λ); `ShellModulus { storage, loss }` with
+    `loss_factor()`; `SHELL_QUADRATURE_NODES`; `IceRheology` (crate-private); `ShellStiffness`
+    (K = ΛF, with `at(F)`) and
+    `shell_stiffness`; `stiff_shell_gain` (X); `tidal_forcing` (Φ); `ROOT_STEPS` (64);
+    `TidalMaterial { Rock, Ice }` with `of_water` (ice from `ICY_WATER_FRACTION`, as
+    `PlanetClass::of`); `TideInputs`. `MoonTides` carries, beyond the plan's { k2, q, branch }, its
+    `loss` (Im k₂, exactly Io's 0.015 on the heated branch, so that a heated moon's heat is version
+    22's bit for bit) and its branch's whole `heat_flow`, and gives its `spin_tides()`; the
+    crate-private `mean_density` is the one density a moon's derivation and its tides read, to the
+    bit, and `shell_modulus_with` serves the quadrature's convergence test. `DerivedMoon` gains
+    `ocean_heat_flow()`, `tides()` (`None` below 23) and `spin_tides()`, and the crate-private
+    `subsurface()`, which the published figures read: its tide state is built once by its rule
+    (`class_tides` or `own_tides`), and its published ocean is stored from the very layers its flag
+    was decided on, so the two cannot part (the determinism audit's and rust review's point). In
+    `hooks/figures.rs`: the crate-private `HeatInputs`, the part of `FiguresInputs` that `heat_at`
+    and `interior_of` read, and `non_tidal_heat_flow`, T24.b's `F_nt`, which a test holds to the
+    figures' own bit for bit for Io (a heat pipe) and the measured Europa (an ice shell); the relief
+    tests' call sites follow.
+  - _The convention._ k₂ is |k₂| and Q = |k₂| ÷ Im k₂, with Q⁻¹ = sin ε and k₂ ÷ Q = −Im k₂
+    (Park et al. 2025's convention, as the science check read it): on the ocean branch the
+    despinning and the figure read the modulus. The ruling's "k₂ (the real part)" is the elastic
+    branches', which are real.
+  - _The branch rule's choices_ (each the smallest reversible; for "main" in the report).
+    - The ocean test runs for any moon with water, not only for an `Icy` one, so that Europa at 8%
+      water (class `Rocky`) takes it, as the plan's Europa check needs; then the heated test for
+      rock; an icy moon that fails the ocean test is cold ice.
+    - `F_nt` is T24.b's own non-tidal heat flow at the moon's own bulk, air and water, with no
+      tide and no ocean given, which the branch decides: only a mobile lid's Urey ratio differs
+      from every other regime's, and a tide or an ocean moves the regime only to a heat pipe or an
+      ice shell, which take the stagnant lid's. A convecting moon of 0.3 M⊕ or more that T24.b's
+      regime puts on a mobile lid without its tide but on a heat pipe or an ice shell with it would
+      read the mobile lid's `F_nt` for its branch and the stagnant lid's in its record; the batch's
+      test finds the two equal to 10⁻⁹ for every moon of its sample.
+    - The shell's top, in its thickness and its Maxwell profile, reads the equilibrium
+      temperature, as P14.T17.b's flag does (Titan's 82 K, against its 94 K surface).
+    - A captured or giant-impact moon takes the branch for its own tides, but its published ocean
+      stays `NotComputed`, since F3 publishes a regular moon's flag only, until P14.T51.g.
+    - An ocean-branch shell with no loss at all, which a finite viscosity never gives, would
+      despin nothing; the branch then falls to the cold one.
+  - _Whose bulk (T56.c's follow-up's finding, built)._ From 23 the tides read the moon's own bulk,
+    `MoonBulk`: a regular moon's derivation's, and a giant-impact moon's or a capture's record's,
+    radius and fractions, with its class and moment of inertia, for its heat (over that bulk's
+    surface), its ocean and its locking. The table's Triton is read at 1,352.6 km, not the
+    nursery's 1,474 (tested): on the ocean branch at its rock's 4.31 mW m⁻² (k₂ 0.145, Q 61),
+    with no eccentricity tide on its circular orbit, and locked in some 4.3 kyr.
+  - _Figures at measured elements_ (`tides/tests.rs`: JPL's GM and mean radii, JPL's and NASA's
+    fact sheets' axes and sidereal periods, read 2026-10-16; the ruling's surface temperatures and
+    water fractions; `F_nt` by T24.b at the Sun's age). They reproduce decision-p14-t56d-membrane
+    §3:
+    - the Moon, k₂ 0.0241 at its measured C ÷ MR² 0.392863 (GRAIL 0.0242 ± 2%); its heat on the
+      cold branch × 0.0274 of version 22's (k₂ ÷ (38 × 0.015));
+    - Io, k₂ 0.1245 at its C 0.37685 (Juno 0.125 ± 0.047), on the heated branch with 2.23 W m⁻²,
+      and 0.089 at the rocky class's C (Q 6.0);
+    - Europa on the ocean branch: δ 0.0395 and `S_R` 0.974; k₂ 0.2285, Im k₂ 7.3 × 10⁻⁴, Q 312;
+      F 19.3 mW m⁻² under a 33.2 km shell (`F_nt` 8.2: it is `Rocky` at 8% water, so it
+      convects), against Juno's 29 ± 10 km conductive layer (Levin et al. 2026, Nature Astronomy
+      10, 84, as the ruling read it);
+    - Titan: δ 0.051, k₂ 0.410 (Cassini's 0.589 ± 0.150 at 2σ and 0.616 ± 0.067 at 1σ), 5.23 mW
+      m⁻² under 133 km; Ganymede (δ 0.054, k₂ 0.395, 4.36 mW m⁻² under 136 km) and Callisto (δ
+      0.072, k₂ 0.417, 4.02 under 127 km), on the ocean branch from their rock's heat alone too
+      (k₂ 0.394 and 0.416 there);
+    - cold: Enceladus, its shell's hot root 0.33 GW against Howett et al.'s 15.8 GW (× 0.021) at
+      X 0.014; Dione, 0.74 mW m⁻² at X 0.025; Mimas, X 0.23 at its own period (δ 0.011); Rhea and
+      Iapetus cold ice;
+    - Beuthe 2019's benchmark: at his 10¹³ Pa s a uniform 23 km Enceladus shell dissipates
+      1.015 GW, against his 0.96 GW (UNI-L), and 0.39 GW at the constant's 10¹⁴;
+    - a Dione at e = 0.02 on the thin-shell branch, X 2.03, 51.4 mW m⁻² under 14.5 km, its
+      cubic's only root above `F_nt`;
+    - Beuthe's coefficient at the elastic limit: Λ R ÷ d 3.405 for Europa and 244.3 for Enceladus,
+      his "3.4 d/R" and "240 d/R"; his (1 + Λ)h₂ = 1 + k₂ to 10⁻¹² over |Λ| 10⁻³–10³;
+    - the small-Λ root above the exact one for every moon with water: Europa 6.5%, Titan 4.4%,
+      Ganymede 0.65%, Callisto 0.56%; the 512-node modulus within 1.2 × 10⁻³ of 16,384 nodes over
+      10–270 K and 0.2–100 d, and its limits at `T_s` → `T_m` (`S_R` 0.255, δ 1.709 at Europa's
+      period: the ruling's §7.3, as corrected on this build's finding);
+    - locking from 15 h at the class moments of inertia (T17.b's test (b) as amended): Io 9 yr,
+      Europa 2,700 yr, Ganymede 8,600 yr, Callisto 0.14 Myr, Titan 0.20 Myr, Rhea (cold ice, k₂
+      0.0074) 29 kyr, Iapetus (cold ice, k₂ 0.0053) 3.37 Gyr, against the class pair's 0.060 Gyr.
+  - _Generated moons_ (the table's four giants renamed; median volatiles):
+    - 3 of 2,025 regular moons are unlocked at the Sun's age (0.15%), against none at 22;
+    - over 10⁴ regular moons, 49% are cold, 36% on the ocean branch and 15% heated; 2,186
+      ocean-branch moons (61% of the branch, at e 0.0009–0.040) are stiff at their rock's heat
+      alone, (1 + `k_oc`)|K| > `F_nt`, with X ≥ 1, so on the thin-shell branch (the stiffness
+      condition is this test's, since a soft shell's X carries no such meaning); every ocean-branch
+      flux lies under its small-Λ root; 42 reach 1 W m⁻² or more, the largest 3.45 W m⁻² (a
+      2,113 km moon at 3.9 parent radii and e = 0.034), icy moons of 240–2,100 km at 3.5–5.4
+      parent radii with e 0.0095–0.040: physical for a held eccentricity, recorded with no bound
+      (decision-p14-t56d-membrane §7.1; P14.T55.j);
+    - over 0.5–13.5 Gyr of age (their skies held at the epoch's) 39 of 342 moons' oceans freeze
+      once and none returns; 95 keep theirs throughout;
+    - a cold rocky moon's heat is k₂ ÷ (38 × 0.015) of version 22's to 10⁻¹², × 0.0003–0.04 over
+      the sample (the plan's "0.4–9%" was at Moon-sized moons; small dry moons are stiffer), and a
+      heated one's is version 22's bit for bit;
+    - under the batch's rules (150 sample systems): the systems are the same twice and
+      order-independent; every moon's held law is its record's, a regular moon's locking time its
+      derivation's to 10⁻¹²; every moon's published heat flow is its branch's to 10⁻⁹; a regular
+      moon's published ocean is its branch's, under the shell 651 ln(273 K ÷ T_eq) ÷ F; and every
+      ice-rich surface's published age is at most its τ under version 23's calibration, some at it,
+      so that the system's tide rule reaches its surfaces.
+  - _Europa's surface age and `ICE_RESURFACING_HEAT_FLOW`_ (T48.c's hand-off;
+    decision-p14-t56d-membrane §4.6 and §7.2). T48.c's 0.0386 W m⁻² was the measured Europa's heat
+    under §F-ocean F2's superseded membrane. From `MOONS_VERSION` the constant is the measured Europa's whole heat
+    flow at its own tides as built, 0.019 239 4 W m⁻², which
+    `europa_s_surface_at_its_own_tides_is_its_calibration` refits to 10⁻⁶ W m⁻² and at which its
+    surface is 60.0 Myr (the test holds 60 Myr ± 3%). Below 23 every ice-rich crust reads
+    `ICE_RESURFACING_HEAT_FLOW_AT_22` (0.0386), so version 22 is unchanged. The switch is the tide
+    hold's: `surface_age::ice_resurfacing_heat_flow(MoonTideRule)`, read by the crate-private
+    `resurfacing_time_under`, `surface_age_under` and `GlobalFigures::derive_under`, which the
+    published surface calls with the system's `moon_tides`; the public `resurfacing_time`,
+    `surface_age` and `GlobalFigures::derive` read the rule in force. _For T54.a's bless note:_ at
+    a given heat flow an ice-rich surface's resurfacing time shrinks by (0.01924 ÷ 0.0386)^n ≈ 0.13
+    from 23, so every ice-rich surface whose τ is under its age (icy moons, icy dwarf planets and
+    snowballs) becomes younger, with its craters.
+  - _T17.b's old test (b)._ Its class-pair half (Io, Callisto, Titan, Iapetus and Oberon within
+    100 Myr at k₂ = 0.3, Q = 100) is labelled version 22's, for T54.a to delete; its "every
+    generated moon locks" now asserts only under version 22's tides, and the amended tests carry
+    T17.b's test (b) from 23.
+  - _Sulphur._ T56.d reads no sulphur (its heated branch is calibrated on Io's measured pair), so
+    the chondritic-sulphur gap left to "T56.d or T55.a" stays P14.T55.a's.
+  - _Plan text against the build_ (technical corrections, for a docs batch, beside
+    decision-p14-t56d-membrane §5's).
+    - "k_f is exactly 1.5 at C = 0.4": 0.4 has no exact double, so it is 1.5 to 10⁻¹⁵.
+    - decision-p14-t56d-membrane's first "at `T_s` → `T_m`, `S_R` → 0", which its §7.3 corrects
+      on this build's finding: `S_R` → 1 ÷ (1 + m₀²) and δ → m₀; the test holds that.
+    - _Beuthe 2019's tables._ The ice's μ, ν, `η_m` and `E_a` are his Table 1 and the Arrhenius
+      form his Table 2 (the build's science check, on arXiv:1903.02520); the ruling cites Table 2
+      for both, and the code cites Table 1 for the values.
+    - _The benchmark against UNI-L_ (for "main"). The ruled "1.0 GW against his 0.96" is not like
+      for like: his Table 6 UNI-L is a 22.8 km shell under his eq. 63's k(T), a 51–62 K surface,
+      with bending and the 0.12° forced libration (+28%, his eq. 49), whose membrane share is about
+      0.65 GW; the model's 23 km shell at a 75 K surface under 651 ÷ T gives 1.015. The test holds
+      the ruled 0.8–1.2 GW, and adds the exact check: at his §4 settings (59 K, 651 ÷ T, 23 km,
+      10¹³ Pa s) its Λ is his Table 3's 21.267 + 0.730i, to 0.1% (21.276 + 0.730i at JPL's GM and
+      mean radius).
+    - _The constant's precision._ `ICE_RESURFACING_HEAT_FLOW` is written to six figures,
+      0.019 239 4 W m⁻², so that its test's refit to 10⁻⁶ W m⁻² holds; the ruling's "three
+      significant figures" could not.
+  - _The citations_ (the science check's corrections, applied): GRAIL's two k₂ were swapped
+    between Konopliv et al. 2013 (0.02405 ± 0.00018) and Williams et al. 2014 (0.02416 ±
+    0.00022); the Moon's C ÷ MR² is Williams et al.'s 0.392863 at 1,738 km; ice Ih's 3.521 × 10⁹ Pa
+    and 0.325 are Gammon, Kiefte, Clouter and Denner 1983, J. Glaciol. 29, 433, Table VIII; Park et
+    al. rule out a shallow magma ocean (Re k₂ ≥ 0.8), not every one.
+  - _Files beyond the task's._ `planetary/moons/{mod, tides/tests}.rs`;
+    `planetary/hooks/figures.rs` (`HeatInputs`, `non_tidal_heat_flow`, `derive_under`);
+    `planetary/hooks/figures/{tests, relief/tests, surface_age}.rs` (the recalibration);
+    `planetary/system/tests.rs`.
+  - _The acceptance commands._ `cargo test -p hyperion-sim planetary::moons` and
+    `planetary::derive::rotation` select the pure checks; the system's run under
+    `planetary::system::tests::under_their_own_tides` and `the_batch_s_moons`. `just smart-ci`
+    runs them all.
+  - _For T51.g._ `ocean_heat_flow` solves the cubic that Λ = K ÷ F gives, the planar shell. T51.g's
+    spherical d(F) breaks that form, so its bump needs a bracketed root of F − `F_nt` − Φ Im k₂
+    (Λ(d(F))) in place of this one, not "T56.d's root" as it stands; its base temperature, the
+    ocean's liquidus, also bounds `shell_modulus`'s integral (decision-p14-t56d-membrane §5 (3)).
+  - _For T54.a._ Delete `MoonTideRule`, `class_tides`, `MoonHolds`'s and `MoonRules`'s tide and
+    inventory members with the holds, the `OfClass` arm of the moons' rotation,
+    `ICE_RESURFACING_HEAT_FLOW_AT_22` and the `_under` arms of the figures' surface age, so that
+    every moon reads `MoonTides`; `DerivedMoon::tides()` then need not be an `Option`. The bless note
+    accounts for every moon's tidal heat, ocean flag, locking time, rotation section and figure
+    (the synchronous factor where a moon is now unlocked), and the surface age, regime and craters
+    that read the heat. Every tides test holds a tolerance, so the determinism audit suggests
+    pinning `MoonTides::of` for the measured moons by bits (`GoldenWriter`, as
+    `global_figures.golden`'s measured Europa) with the bump, when `planetary/moons` is re-blessed.
+- **Deferred findings (2026-10-13 rule)**, from P14.T56.d's build:
+  - _Unverified sources._ Gladman et al. 1996's μ = 4 × 10⁹ Pa and Q = 100 and Moore and
+    Schubert 2000's ≈ 0.25 were not reached by the science check (Meyer and Wisdom 2007 take the
+    4 × 10⁹ Pa); the four-figure eccentricities of the Galilean moons (0.0041, 0.0094, 0.0013,
+    0.0074) are decision-p14-moons's and the earlier tests', where JPL and NASA print three
+    decimals; Goldsby and Kohlstedt 2001's 59.4 kJ mol⁻¹ is as Beuthe 2018 and 2019 give it, not
+    read at first hand (decision-p14-t56d-membrane §8).
+  - _No bit pin before the bump._ Every tides test holds a tolerance; the determinism audit
+    suggests pinning `MoonTides::of` for the measured moons by bits with T54.a's re-bless.
+- **P14.T56.d's membrane, as ruled (decision-p14-t56d-membrane, 2026-10-16).**
+  - _The finding._ The build's science check found that decision-p14-moons §F-ocean F2's
+    membrane was not Beuthe's (2015, Icarus 248, 109). Its Λ read the mean density where Beuthe's
+    eq. 28 reads the ocean's, and it dropped his h° = 1 + k_oc (eqs. 43–44). So its shell was
+    2.4–3.8 times too soft, by (1 + k_oc)ρ̄ ÷ ρ_w. F2's δ = 0.71, calibrated on Enceladus's
+    15.8 GW, held only through that factor: under Beuthe's form no δ gives Enceladus more than
+    0.56 GW.
+  - _What T56.d builds._ Beuthe's form, with the shell's loss factor derived from a Maxwell ice
+    over its conductive profile: 10¹⁴ Pa s at the melting point and 59.4 kJ mol⁻¹, in Beuthe
+    2019's (Icarus 332, 66) Arrhenius form. There is no fitted δ.
+  - _Its checks._ Europa reaches 19.3 mW m⁻² under 33 km, against Juno's 29 ± 10 km conductive
+    layer (Levin et al. 2026, Nature Astronomy 10, 84). At Beuthe 2019's own 10¹³ Pa s,
+    Enceladus's uniform 23 km shell gives 1.0 GW, against his 0.96 GW.
+  - _Deferred findings:_
+    - _Enceladus is cold at 23._ Its shell's own heat at equilibrium is 0.33 GW, and about 1 GW
+      at its observed thickness at the most dissipative viscosity. That is against the 15.8 GW
+      of its south polar terrain (Howett et al. 2011) and the 25–40 GW conducted in all. The
+      literature finds the same for a shell (Beuthe 2019; Souček et al. 2019). At 22 Enceladus
+      kept an ocean only through Io's Im k₂.
+      - Its ocean returns with a porous core's dissipation (Choblet et al. 2017, Nature
+        Astronomy 1, 841): **P14.T56.e**.
+      - Dione's and Mimas's inferred oceans are missing too: T56.e, P14.T55.k (non-uniform and
+        porous shells) and P14.T55.j (eccentricity history).
+    - _The thin-shell branch._ Mid-sized icy moons past X = Φ k_oc κ_I ÷ (κ_R² + κ_I²) = 1 have
+      it as their only equilibrium: a Dione or an Ariel-like moon at e ≳ 0.014, Rhea at 0.020,
+      and an Enceladus at 0.039.
+      - The lane measured it over 10⁴ generated moons (at 50 kJ mol⁻¹, before the final
+        constant). The branch split was 48% cold, 37% ocean and 15% heated. 62% of the ocean
+        branch was past X = 1. 49 moons reached 1 W m⁻² or more, the largest 3.75 W m⁻²: icy
+        moons of 240–2,100 km at 3.4–5.9 parent radii with forced e of 0.009–0.04. The test
+        prints the counts at 59.4 (as built: 49% cold, 36% ocean and 15% heated; 61% of the
+        ocean branch past X = 1; 42 moons at 1 W m⁻² or more, the largest 3.45 W m⁻²).
+      - The physics is real for a held eccentricity. The share and the extremes come from
+        T17.a's forced e, drawn log-uniform in 0.004–0.04 at any distance and never damped.
+      - Most such states would damp their eccentricity within a few Myr, unless a resonance
+        pays their heat, as Io's does. A Dione at e = 0.02 dissipates 0.2 TW.
+      - The resonance's energy budget and the damping of e are **P14.T55.j's**, which this
+        raises in priority (decision-p14-t56d-membrane §7.1).
+    - _Titan's k₂_ is 0.41, against Iess et al.'s 0.589 ± 0.150 (2σ) and Durante et al.'s
+      0.616 ± 0.067 (1σ). The ocean is pure water. A denser one (Baland et al. 2014) belongs to
+      T51.g's solutes.
+    - _The membrane's error_ is of order d ÷ R (Beuthe 2015 §7.4.2): about 5% for the large
+      moons, and up to 20% for a Dione near X = 1.
+    - _The rheology._ It is Maxwell, not Andrade. Convection's warm interior (P14.T55.k) would
+      raise a thick shell's loss. From 24, T51.g's base temperature, below 273 K with ammonia,
+      bounds the shell's integral.
+  - _Europa's surface age._ T48.c's `ICE_RESURFACING_HEAT_FLOW` is recalibrated at 23, behind
+    `MOONS_VERSION`, on the measured Europa under T56.d. It keeps 0.0386 below 23, so Europa's
+    60 Myr holds (decision-p14-t56d-membrane §7.2).

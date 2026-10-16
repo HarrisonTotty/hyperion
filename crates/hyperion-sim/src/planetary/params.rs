@@ -12,7 +12,7 @@ use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::disc::{ROCK_MASS_FRACTION, WATER_ICE_MASS_FRACTION};
 use crate::units::{
     Degrees, EarthMasses, Gigayears, JupiterMasses, JupiterRadii, Kelvin, Megayears, Metres,
-    Seconds, WattsPerSquareMetre,
+    Pascals, Seconds, WattsPerSquareMetre,
 };
 
 /// How far out a prograde satellite on a circular orbit about a planet on a circular orbit stays
@@ -449,3 +449,81 @@ pub const FLATTENING_CAP: f64 = 0.2;
 /// Earth's measured mean is 0.0916 W m⁻² (Davies and Davies 2010, Solid Earth 1, 5). P14.T56.d's
 /// heated rocky branch reads it too (decision-p14-moons, item 3).
 pub const SURFACE_MELT_HEAT_FLOW: WattsPerSquareMetre = WattsPerSquareMetre::new(0.025);
+
+/// The rigidity μ of a cold rocky moon, for its elastic Love number: 5.8 × 10¹⁰ Pa (P14.T56.d;
+/// decision-p14-moons §3.2), calibrated on the Moon.
+///
+/// The homogeneous elastic body's k₂ = `k_f` ÷ (1 + 19μ ÷ 2ρ̄gR)
+/// ([`elastic_love_number`](crate::planetary::moons::tides::elastic_love_number)) at the Moon's
+/// measured C ÷ MR² = 0.392863 at R = 1,738 km (`k_f` = 1.43; mean 0.392728 ± 0.000012, Williams
+/// et al. 2014, JGR Planets 119, 1546), 7.346 × 10²² kg and 1,737.4 km, gives GRAIL's k₂ = 0.0242
+/// at 5.79 × 10¹⁰ Pa (Konopliv et al. 2013, JGR Planets 118, 1415: 0.02405 ± 0.00018; Williams et
+/// al. 2014: 0.02416 ± 0.00022, the mean of the JPL and GSFC solutions at R = 1,738 km). It lies in
+/// PREM's lower-crust-to-lid range, 4.4–6.8 × 10¹⁰ Pa (Dziewonski and Anderson 1981, PEPI 25, 297;
+/// from its density and shear velocity, as the science check computed them).
+/// The generator's rocky moons take C = 0.33 (`k_f` = 0.93), so their k₂ comes out about 35% under
+/// the Moon's (decision-p14-moons §5, F3, for C's owner).
+pub const ROCK_RIGIDITY: Pascals = Pascals::new(5.8e10);
+
+/// The rigidity of a tidally heated rocky moon's partially molten interior: 1.14 × 10¹⁰ Pa
+/// (P14.T56.d; decision-p14-moons §3.2), calibrated on Io.
+///
+/// At Io's measured C ÷ MR² = 0.37685 (`k_f` = 1.29; Anderson et al. 2001, JGR 106, 32963),
+/// 8.932 × 10²² kg and 1,821.6 km, the homogeneous body's k₂ is Juno's Re k₂ = 0.125 ± 0.047 (1σ;
+/// Park et al. 2025, Nature 638, 69) at 1.14 × 10¹⁰ Pa, where a solid Io at [`ROCK_RIGIDITY`]
+/// gives 0.027. A shallow global magma ocean would give Re k₂ ≥ 0.8, which Park et al. rule out.
+pub const HEATED_ROCK_RIGIDITY: Pascals = Pascals::new(1.14e10);
+
+/// The rigidity of a cold icy moon's ice, and of the ice shell over an ocean: 3.5 × 10⁹ Pa
+/// (P14.T56.d; decision-p14-moons §3.2), the shear modulus of polycrystalline ice Ih from its
+/// single-crystal elastic constants at −16 °C, 3.521 × 10⁹ Pa (Gammon, Kiefte, Clouter and Denner
+/// 1983, J. Glaciol. 29, 433, Table VIII).
+///
+/// Gladman et al. (1996, Icarus 122, 166) and Meyer and Wisdom (2007, Icarus 188, 535, eq. 21)
+/// take 4 × 10⁹ Pa for icy satellites; 3.5 × 10⁹ Pa is Beuthe 2019's (Icarus 332, 66, Table 1) for
+/// an ice shell. No icy moon's solid-body k₂ is measured to check it against.
+pub const ICE_RIGIDITY: Pascals = Pascals::new(3.5e9);
+
+/// Poisson's ratio of an ice shell, ν: 0.33 (P14.T56.d; decision-p14-moons §F-ocean F2 and
+/// decision-p14-t56d-membrane §2.1), which
+/// the membrane's degree-2 stiffness 8(1 + ν) ÷ (5 + ν) reads. It is Beuthe's (2015, Icarus 248,
+/// 109, §3.3) ν̄, ν weighted by μ ÷ (1 − ν) over the shell, which equals ν for a constant ν, as he
+/// takes it, and Beuthe 2019's (Icarus 332, 66, Table 1); Gammon et al. (1983, J. Glaciol. 29,
+/// 433, Table VIII) give polycrystalline ice Ih 0.325.
+pub const ICE_POISSON_RATIO: f64 = 0.33;
+
+/// The tidal quality factor Q of a cold rocky moon: 38 (P14.T56.d; decision-p14-moons §3.2), the
+/// Moon's at a month from lunar laser ranging (Williams and Boggs 2015, JGR Planets 120, 689: 38 ±
+/// 4 at one month, 41 ± 9 at one year).
+pub const COLD_ROCK_TIDAL_Q: f64 = 38.0;
+
+/// The tidal quality factor Q of a cold icy moon: 100 (P14.T56.d; decision-p14-moons §3.2),
+/// Gladman et al.'s (1996, Icarus 122, 166) satellite value (as the ruling read it; the paper was
+/// not reached by the science check), since no icy moon's is measured.
+pub const COLD_ICE_TIDAL_Q: f64 = 100.0;
+
+/// The viscosity of an ice shell's ice at its melting point, `η_m`: 1.0 × 10¹⁴ Pa s (P14.T56.d;
+/// decision-p14-t56d-membrane §2.2), for the Maxwell ice whose rigidity, averaged over the
+/// shell's conductive profile, gives an ocean-branch moon's loss
+/// ([`shell_modulus`](crate::planetary::moons::tides::shell_modulus)).
+///
+/// The middle of the 10¹³–10¹⁵ Pa s that the grain size sets (Tobie, Choblet and Sotin 2003, JGR
+/// 108, 5124; Beuthe 2019, Icarus 332, 66, Table 1). Beuthe 2019's nominal 10¹³ is the low-stress
+/// lower bound, which he takes "to maximize shell dissipation". The range is the model's honest
+/// uncertainty: it gives Europa 19.3 mW m⁻² under 33 km at 10¹⁴, 22.0 under 29 km at 10¹³ and
+/// 11.0 under 58 km at 10¹⁵ (the ruling's figures), against Juno's 29 ± 10 km conductive layer
+/// (Levin et al. 2026, Nature Astronomy 10, 84), which rules out 10¹⁵. Čadek et al. 2019 argue for
+/// more than 3 × 10¹⁴ Pa s to keep Enceladus's shell's basal topography (as Beuthe 2019 §5.2
+/// records it): a recorded tension.
+pub const ICE_MELTING_VISCOSITY_PA_S: f64 = 1.0e14;
+
+/// The activation energy of an ice shell's creep, `E_a`: 5.94 × 10⁴ J mol⁻¹ (P14.T56.d;
+/// decision-p14-t56d-membrane §2.2), by which the ice's viscosity rises from
+/// [`ICE_MELTING_VISCOSITY_PA_S`] as the shell cools in the Arrhenius form η(T) = `η_m`
+/// exp((`E_a` ÷ R)(1 ÷ T − 1 ÷ `T_m`)).
+///
+/// The value of Beuthe 2019's Table 1 (Icarus 332, 66), with his Table 2's Arrhenius form: "the
+/// activation energy for diffusion creep" (Beuthe 2018, Icarus 302, 145, eq. 57; Goldsby and
+/// Kohlstedt 2001, JGR 106, 11017, not read at first hand). Tobie, Choblet and Sotin's (2003)
+/// 50 kJ mol⁻¹ belongs to a linearised law with `T_m` = 270 K, not to this one.
+pub const ICE_CREEP_ACTIVATION_ENERGY_J_PER_MOL: f64 = 5.94e4;

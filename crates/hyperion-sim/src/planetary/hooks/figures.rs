@@ -131,6 +131,7 @@ use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceState};
 use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
 use crate::planetary::hooks::surface::{OceanWeight, SurfaceConditions};
 use crate::planetary::moons::CaptureKind;
+use crate::planetary::moons::regular::MoonTideRule;
 use crate::planetary::moons::regular::{ICE_MELTING_POINT, ocean_layers};
 use crate::planetary::record::BeltKind;
 use crate::substance::{self, SubstanceId};
@@ -2007,18 +2008,34 @@ impl GlobalFigures {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn derive(inputs: &FiguresInputs<'_>) -> Result<Option<Self>, DeriveFiguresError> {
+        Self::derive_under(inputs, MoonTideRule::in_force())
+    }
+
+    /// [`derive`](Self::derive) under the moons' tide rule `tides`, which picks an ice-rich
+    /// crust's resurfacing calibration (P14.T56.d's hold, decision-p14-t56d-membrane §4.6:
+    /// [`surface_age::ICE_RESURFACING_HEAT_FLOW`] from `MOONS_VERSION`, version 22's below it), for
+    /// the system's batch switch and the tests.
+    ///
+    /// # Errors
+    ///
+    /// As [`derive`](Self::derive).
+    pub(crate) fn derive_under(
+        inputs: &FiguresInputs<'_>,
+        tides: MoonTideRule,
+    ) -> Result<Option<Self>, DeriveFiguresError> {
         let air = inputs.atmosphere;
         if matches!(air.state(), SurfaceState::GasEnvelope) {
             return Ok(None);
         }
-        let Some((interior, rock_core)) = interior_of(inputs) else {
+        let heat_inputs = inputs.heat();
+        let Some((interior, rock_core)) = interior_of(&heat_inputs) else {
             return Ok(None);
         };
         let age = inputs.age;
         if !non_negative(age.value()) {
             return Err(DeriveFiguresError::Age(age));
         }
-        let heat = heat_at(inputs, (interior, rock_core), age, air.state());
+        let heat = heat_at(&heat_inputs, (interior, rock_core), age, air.state());
         let field = magnetic_field(&interior::FieldInputs {
             class: inputs.class,
             interior,
@@ -2031,7 +2048,7 @@ impl GlobalFigures {
             rotation_period: inputs.rotation_period,
         });
         let (surface_age, impactors, craters) =
-            crater_contract(inputs, heat.water, heat.heat_flow)?;
+            crater_contract(inputs, heat.water, heat.heat_flow, tides)?;
         let outgassing = outgassing(heat.heat_flow);
         let crust = impactors.crust();
         let surface_temperature = air.surface_temperature();
@@ -2046,7 +2063,7 @@ impl GlobalFigures {
             radius: inputs.radius,
             iron_share: heat.iron_share,
             heat_flow_at: |t: Years| {
-                heat_at(inputs, (interior, rock_core), t, air.state()).heat_flow
+                heat_at(&heat_inputs, (interior, rock_core), t, air.state()).heat_flow
             },
         });
         // Steps 4 and 5: the continents, by the regime and T48.b's start condition, and the relief.
@@ -2466,13 +2483,78 @@ impl GlobalFigures {
     }
 }
 
+/// What a body's heat flow reads of it ([`heat_at`]; P14.T24.b), as plain values: the part of
+/// [`FiguresInputs`] its interior, regime and heat take, which P14.T56.d's tides also read for a
+/// moon's non-tidal heat flow ([`non_tidal_heat_flow`]) before its tide is known.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct HeatInputs {
+    /// Its mass at the time.
+    pub(crate) mass: EarthMasses,
+    /// Its mean radius, the bulk section's.
+    pub(crate) radius: Metres,
+    /// Its mean surface gravity, the bulk section's.
+    pub(crate) surface_gravity: MetresPerSecondSquared,
+    /// Its class, the bulk section's.
+    pub(crate) class: PlanetClass,
+    /// Its mass fractions, the bulk section's.
+    pub(crate) fractions: MassFractions,
+    /// The water of its volatile inventory ([`FiguresInputs::inventory_water`]).
+    pub(crate) inventory_water: Kilograms,
+    /// Its host's \[Fe/H\].
+    pub(crate) fe_h: Dex,
+    /// The tidal heat raised in it over its surface ([`FiguresInputs::tidal_heat_flow`]).
+    pub(crate) tidal_heat_flow: WattsPerSquareMetre,
+    /// Its ocean under the surface, as its rule computes it.
+    pub(crate) subsurface_ocean: Subsurface,
+}
+
+impl FiguresInputs<'_> {
+    /// What its heat flow reads ([`HeatInputs`]).
+    #[must_use]
+    fn heat(&self) -> HeatInputs {
+        HeatInputs {
+            mass: self.mass,
+            radius: self.radius,
+            surface_gravity: self.surface_gravity,
+            class: self.class,
+            fractions: self.fractions,
+            inventory_water: self.inventory_water,
+            fe_h: self.fe_h,
+            tidal_heat_flow: self.tidal_heat_flow,
+            subsurface_ocean: self.subsurface_ocean,
+        }
+    }
+}
+
 /// How a body's interior loses its heat, with its rock's radius ([`Interior::of`]); `None` for a
 /// class with no solid surface.
 #[must_use]
-fn interior_of(inputs: &FiguresInputs<'_>) -> Option<(Interior, Metres)> {
+fn interior_of(inputs: &HeatInputs) -> Option<(Interior, Metres)> {
     let kilograms = Kilograms::from(inputs.mass).value();
     let rock_core = rock_core_radius(kilograms * (1.0 - inputs.fractions.water()));
     Interior::of(inputs.class, rock_core).map(|interior| (interior, rock_core))
+}
+
+/// The non-tidal heat flow `F_nt` of the body `inputs` describe at the system age `age` under the
+/// surface state `state`, W m⁻²: [`GlobalFigures::derive`]'s, the radiogenic term with its
+/// interior's residual, the regime that residual reads decided on `inputs` as given (P14.T24.b).
+/// `None` for a body in the gas-envelope state or of a class with no solid surface, which takes no
+/// solid heat flow, as [`GlobalFigures::derive`] gives none.
+///
+/// P14.T56.d's tidal branch reads it for a moon with no tide and no ocean given, before its branch
+/// decides them (decision-p14-moons §F-ocean F3): only a mobile lid's Urey ratio parts from every
+/// other regime's ([`interior::convecting_heat_flow`]), and the tide and the ocean move the regime
+/// only to a heat pipe or an ice shell, which take the stagnant lid's.
+#[must_use]
+pub(crate) fn non_tidal_heat_flow(
+    inputs: &HeatInputs,
+    age: Years,
+    state: SurfaceState,
+) -> Option<WattsPerSquareMetre> {
+    if matches!(state, SurfaceState::GasEnvelope) {
+        return None;
+    }
+    interior_of(inputs).map(|interior| heat_at(inputs, interior, age, state).non_tidal)
 }
 
 /// A body's heat at a system age ([`heat_at`]): its radiogenic and non-tidal heat flows, its heat
@@ -2494,12 +2576,12 @@ struct HeatAt {
 /// interior's residual then and the tide as given.
 #[must_use]
 fn heat_at(
-    inputs: &FiguresInputs<'_>,
+    inputs: &HeatInputs,
     (interior, rock_core): (Interior, Metres),
     age: Years,
     state: SurfaceState,
 ) -> HeatAt {
-    let FiguresInputs {
+    let HeatInputs {
         mass,
         radius,
         surface_gravity,
@@ -2672,17 +2754,20 @@ pub fn past_outgassing(inputs: &FiguresInputs<'_>, age: Years) -> f64 {
     {
         return 0.0;
     }
-    interior_of(inputs).map_or(0.0, |interior| {
-        outgassing(heat_at(inputs, interior, age, SurfaceState::Temperate).heat_flow)
+    let heat = inputs.heat();
+    interior_of(&heat).map_or(0.0, |interior| {
+        outgassing(heat_at(&heat, interior, age, SurfaceState::Temperate).heat_flow)
     })
 }
 
 /// The surface age, the impactors and the crater contract of the body `inputs` describe, holding
-/// `water` and of heat flow `heat_flow` ([`GlobalFigures::derive`]'s, whose age is checked).
+/// `water` and of heat flow `heat_flow` ([`GlobalFigures::derive`]'s, whose age is checked), its
+/// ice-rich crust's resurfacing under the moons' tide rule `tides`.
 fn crater_contract(
     inputs: &FiguresInputs<'_>,
     water: Kilograms,
     heat_flow: WattsPerSquareMetre,
+    tides: MoonTideRule,
 ) -> Result<(Years, Impactors, CraterParams), DeriveFiguresError> {
     let (air, crater_inputs, gravity) = (inputs.atmosphere, inputs.craters, inputs.surface_gravity);
     let impactors = impactors(&ImpactorBody {
@@ -2695,13 +2780,16 @@ fn crater_contract(
         sources: crater_inputs.sources,
     })
     .map_err(DeriveFiguresError::Impactors)?;
-    let surface_age = surface_age::surface_age(&surface_age::SurfaceAgeInputs {
-        age: inputs.age,
-        molten_until: crater_inputs.molten_until,
-        last_giant_impact: crater_inputs.last_giant_impact,
-        heat_flow,
-        crust: impactors.crust(),
-    });
+    let surface_age = surface_age::surface_age_under(
+        tides,
+        &surface_age::SurfaceAgeInputs {
+            age: inputs.age,
+            molten_until: crater_inputs.molten_until,
+            last_giant_impact: crater_inputs.last_giant_impact,
+            heat_flow,
+            crust: impactors.crust(),
+        },
+    );
     let gyr = |years: Years| Gigayears::new(years.value() / YEARS_PER_GIGAYEAR);
     let system_age = gyr(inputs.age);
     let n_1km = craters::lunar_chronology(gyr(surface_age), system_age) * impactors.rate();
