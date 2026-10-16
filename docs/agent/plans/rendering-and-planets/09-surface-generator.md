@@ -6788,10 +6788,10 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     plates. The tag table's "crust type per plate" is the continental nucleus.
   - _The raster is a fitted power diagram._ Design note 6's "largest dot product" gains a weight
     per plate, score x′ · p + w, ties to the lower index, since an unweighted diagram of uniform
-    seeds has near-equal cells and its areas would fail the tail-law test. The weights are fitted
-    (the semi-discrete transport problem) by damped Newton steps on the Laplacian of the plates'
-    shared boundaries, ℓ_kj ÷ |∇(s_k − s_j)| with ℓ from the edges crossed (π ÷ 4 a cell side
-    each), an empty plate coupled to its seed's host and stepped by its deficit there, halving
+    seeds has cells of comparable size and cannot follow Design note 6's size law. The weights are
+    fitted (the semi-discrete transport problem) by damped Newton steps on the Laplacian of the
+    plates' shared boundaries, ℓ_kj ÷ |∇(s_k − s_j)| with ℓ from the edges crossed (π ÷ 4 a cell
+    side each), an empty plate coupled to its seed's host and stepped by its deficit there, halving
     until Σ (error ÷ tolerance)² falls, at levels 6, 7, … up to the field's, then single-plate
     sweeps; the tolerance is 1% or two mean cells. `assign` sets aside, per level-4 block, every
     plate whose chordal upper bound falls short of the best lower bound by 10⁻⁹, so its result
@@ -7312,4 +7312,6 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
   - _The plan's older text_ (§4's docs batch, ruled there) still reads the old forms: Provides'
     `for_body(record, ctx) -> Result<Self, SurfaceInputsError>` and `SurfaceInputsError` as its
     answer, and `InputsSource`'s `inputs(&self, record, ctx)`, answering `SurfaceInputsError`;
-    T17's as-built `SurfaceJobError::Inputs(SurfaceInputsError)`.
+    T17's as-built `SurfaceJobError::Inputs(SurfaceInputsError)`. _Corrected 2026-10-16 by
+    docs-batch-20: Provides, the `InputsSource` paragraph and T17's record now read R09.T10.f's
+    forms._

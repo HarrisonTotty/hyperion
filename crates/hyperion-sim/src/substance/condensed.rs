@@ -24,10 +24,12 @@
 //!   substance takes; a liquid's is its frozen form's.
 //!
 //! [`Substance::grain_density`] resolves the density of a phase at a temperature, which is what
-//! P14.T49.c's palette resolution reads. P14.T49.c extends the group with the condensed optics and
-//! the thermal and geomorphic columns (specific heat, conductivity, `k_comp`, `k_target`,
-//! erodibility); P14.T49.h adds the liquids' optical and transport columns, and the melts'
-//! densities, in their own group.
+//! P14.T49.c's palette resolution reads. P14.T49.c adds the condensed optics. P14.T49.j gives the
+//! rows that can form a surface their solid's specific heat and conductivity, in
+//! `substance::thermal`'s table by key, with the airless regolith's thermal-inertia law; the
+//! geomorphic columns (`k_comp`, `k_target`, erodibility) are not part of the 22 → 23 batch
+//! (decision-p14-t49c-split §1.3). P14.T49.h adds the liquids' optical and transport columns, and
+//! the melts' densities, in their own group.
 //!
 //! Generator version 22 publishes none of it: nothing on the record reads these columns until
 //! P14.T54.a wires the palette (decision-bump-plan-after-22 §1.2).
