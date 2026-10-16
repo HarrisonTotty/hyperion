@@ -49,7 +49,10 @@ import {
   liquidCheckExcess,
   logLinearAbsorptionPerM,
   lorentzLorenzIndex,
+  MARTONCHIK_TABLE_I_ROWS,
+  martonchikUltravioletLineK,
   MASON_2016_ABSORPTION_PER_M,
+  T5B_AMMONIA_ICE_550,
   MASON_DISSERTATION_ROWS,
   MASON_ROWS,
   MATERIAL_GRID_NM,
@@ -87,6 +90,7 @@ import {
   QUAN_FRY_COEFFICIENTS,
   quanFryIndex,
   quanFrySalinityIncrement,
+  reduceSource,
   resample,
   S8_MOLTEN_INDEX_D,
   S8_PRINCIPAL_INDICES,
@@ -103,6 +107,9 @@ import {
   WATER_K_SPANS_NM,
   WATER_TEMPERATURE_K,
   waterIndex,
+  wavenumberFill,
+  wavenumberFraction,
+  withoutVisibleAbsorption,
 } from "./materials";
 
 const MATERIALS = new URL("../renderer/src/view/atmosphere/materials/", import.meta.url);
@@ -677,6 +684,188 @@ describe("acid_uv_absorber's k_UA (science-r08-unowned-absorbers; decision-r08-t
       );
     }
   });
+});
+
+/** A committed material file's value at a wavelength on its grid, nm. */
+function committedAt(file: string, field: "n" | "k", nm: number): number {
+  const values = committed(file);
+  return values[field][values.wavelengthsNm.indexOf(nm)] ?? Number.NaN;
+}
+
+/** The normal-incidence reflectance of a surface of index n + ik under vacuum. */
+function normalReflectance(n: number, k: number): number {
+  return ((n - 1) ** 2 + k ** 2) / ((n + 1) ** 2 + k ** 2);
+}
+
+/** The absorption length λ ÷ 4πk, µm, at a wavelength, nm. */
+function absorptionLengthUm(k: number, nm: number): number {
+  return (nm * 1e-3) / (4 * Math.PI * k);
+}
+
+/** A row of Martonchik et al.'s Table I by its wavenumber, cm⁻¹. */
+function tableIRow(wavenumberPerCm: number): (typeof MARTONCHIK_TABLE_I_ROWS)[number] {
+  const row = MARTONCHIK_TABLE_I_ROWS.find((r) => r.wavenumberPerCm === wavenumberPerCm);
+  if (row === undefined) {
+    throw new Error(`no Table I row at ${wavenumberPerCm} cm⁻¹`);
+  }
+  return row;
+}
+
+describe("the solids' visible absorption (R08.T5.i, decision-p14-t49c-split §5.3)", () => {
+  const ammonia = FETCHED_MATERIALS.find((spec) => spec.file === "ammonia-ice.json");
+  if (ammonia === undefined) {
+    throw new Error("the tool has no ammonia-ice.json entry");
+  }
+  const lo = tableIRow(6840);
+  const hi = tableIRow(31_250);
+  const visible = [tableIRow(14_976.7), tableIRow(23_113.3)];
+
+  it("sets k to 0 and keeps n as reduced", () => {
+    const reduced = { n: [1.46729, 1.43606], k: [7.82362e-6, 2.88714e-5] };
+    expect(withoutVisibleAbsorption(reduced)).toEqual({ n: reduced.n, k: [0, 0] });
+  });
+
+  it("gives NH3 ice k = 0 at every grid point and the reduced n, as a stand-in", () => {
+    // Table I's rows at 320, 433, 668 and 1,462 nm, in µm as optool's copy lists them.
+    const lnk =
+      "# rows\n4 0.75\n0.32 1.488 2.546e-6\n0.43265 1.449 2.109e-5\n0.6677 1.423 3.963e-5\n1.46199 1.408 5.817e-5\n";
+    const file = reduceSource(ammonia, lnk);
+    expect(file.k).toEqual(MATERIAL_GRID_NM.map(() => 0));
+    expect(file.n).toEqual(resample(parseLnk(lnk), ammonia.resample).n);
+    expect(file.provenance).toBe("standIn");
+  });
+
+  it("finds Table I's 668 and 433 nm rows at one and two thirds of the 1,462–320 nm interval", () => {
+    expect(visible.map((row) => wavenumberFraction(lo, hi, row.wavenumberPerCm))).toEqual([
+      expect.closeTo(1 / 3, 5),
+      expect.closeTo(2 / 3, 5),
+    ]);
+  });
+
+  it("finds those rows' k the linear fill in k to four figures, not the fill in log k", () => {
+    const fills = visible.map((row) => wavenumberFill(lo, hi, row.wavenumberPerCm));
+    expect(fills.map((fill) => Number(fill.kLinear.toPrecision(4)))).toEqual(
+      visible.map((row) => row.k),
+    );
+    expect(fills.map((fill) => Number(fill.kLogLinear.toPrecision(3)))).toEqual([2.05e-5, 7.22e-6]);
+  });
+
+  it("finds Table I's rows from 200 to 320 nm on one straight line in wavelength, to their last figure", () => {
+    const ultraviolet = MARTONCHIK_TABLE_I_ROWS.filter((row) => row.wavenumberPerCm >= 31_250);
+    expect(ultraviolet).toHaveLength(8);
+    // k is printed to four figures, a unit of 10⁻⁹ here; the 210 nm row lies half a unit off,
+    // the line's 1.6715 × 10⁻⁶ printed 1.671.
+    const off = ultraviolet.filter(
+      (row) => Math.abs(row.k - martonchikUltravioletLineK(1e7 / row.wavenumberPerCm)) >= 1e-9,
+    );
+    expect(off).toEqual([]);
+  });
+
+  it("finds the visible rows' n off the straight line in n, 1.4347 and 1.4613, so n is no fill", () => {
+    const line = visible.map((row) => wavenumberFill(lo, hi, row.wavenumberPerCm).nLinear);
+    expect([line.map((n) => n.toFixed(4)), visible.map((row) => row.n)]).toEqual([
+      ["1.4347", "1.4613"],
+      [1.423, 1.449],
+    ]);
+  });
+
+  it("states the fill's figures, the line and T5.b's absorption length in ammonia-ice.json", () => {
+    const length = absorptionLengthUm(T5B_AMMONIA_ICE_550.k, 550);
+    expect(length / 1000).toBeCloseTo(1.516, 3);
+    const reduction = committedText("ammonia-ice.json", "reduction");
+    for (const text of [
+      "3.9629 × 10⁻⁵ and 2.1087 × 10⁻⁵",
+      "2.05 × 10⁻⁵ and 7.22 × 10⁻⁶",
+      "k = 1.592 × 10⁻⁶ + 7.95 × 10⁻⁹ (λ − 200 nm)",
+      "1.4347 and 1.4613",
+      `k was 2.88714 × 10⁻⁵ at 550 nm, an absorption length of ${(length / 1000).toFixed(1)} mm`,
+    ]) {
+      expect(reduction).toContain(text);
+    }
+  });
+
+  it("states CaTiO3's figures from its own index: reflectance blind to its k, a section not colourless", () => {
+    const file = "calcium-titanate.json";
+    const [n, k] = [committedAt(file, "n", 550), committedAt(file, "k", 550)];
+    const length = [450, 550].map((nm) => absorptionLengthUm(committedAt(file, "k", nm), nm));
+    const through30 = length.map((um) => Math.exp(-30 / um));
+    const figures = [
+      normalReflectance(n, 0).toFixed(7),
+      normalReflectance(n, k).toFixed(7),
+      Number((normalReflectance(n, k) - normalReflectance(n, 0)).toPrecision(2)),
+      `${(100 * (through30[0] ?? Number.NaN)).toFixed(1)}% at 450 nm and ${(100 * (through30[1] ?? Number.NaN)).toFixed(0)}% at 550 nm`,
+      `${(length[0] ?? Number.NaN).toFixed(1)} and ${(length[1] ?? Number.NaN).toFixed(0)} µm`,
+    ];
+    expect(figures).toEqual([
+      "0.1598728",
+      "0.1598730",
+      2.5e-7,
+      "2.1% at 450 nm and 29% at 550 nm",
+      "7.8 and 24 µm",
+    ]);
+    const reduction = committedText(file, "reduction");
+    for (const text of [
+      "0.1598728 with k = 0 and 0.1598730",
+      "2.5 × 10⁻⁷",
+      figures[3],
+      figures[4],
+    ]) {
+      expect(reduction).toContain(text);
+    }
+  });
+
+  it("states CaTiO3's visible span below its band gap: 3.26–1.59 eV", () => {
+    // hc = 1239.84198 eV nm (CODATA 2018's exact h, c and e).
+    const ev = [380, 780].map((nm) => (1239.841_98 / nm).toFixed(2));
+    expect(ev).toEqual(["3.26", "1.59"]);
+    expect(committedText("calcium-titanate.json", "reduction")).toContain("3.26–1.59 eV");
+  });
+
+  it("states Na2S's figures from its own index: a flat k, a 30 µm crystal not clear", () => {
+    const file = "sodium-sulphide.json";
+    const length = absorptionLengthUm(committedAt(file, "k", 550), 550);
+    const { wavelengthsNm, k } = committed(file);
+    const red = k.filter((_, i) => (wavelengthsNm[i] ?? 0) >= 600);
+    expect([
+      Math.exp(-30 / length).toExponential(1),
+      length.toFixed(1),
+      committedAt(file, "k", 550).toPrecision(3),
+      Math.min(...red).toPrecision(3),
+      Math.max(...red).toPrecision(3),
+    ]).toEqual(["4.4e-5", "3.0", "0.0146", "0.0126", "0.0127"]);
+    const reduction = committedText(file, "reduction");
+    for (const text of [
+      "1.46 × 10⁻² at 550 nm and 1.26–1.27 × 10⁻² over 600–780 nm",
+      "would transmit 4.4 × 10⁻⁵ at 550 nm, an absorption length of 3.0 µm",
+    ]) {
+      expect(reduction).toContain(text);
+    }
+  });
+});
+
+describe("the fetched files' headers", () => {
+  const FIELDS = [
+    "name",
+    "provenance",
+    "paper",
+    "source",
+    "licence",
+    "reduction",
+    "standIn",
+  ] as const;
+
+  it.each(FETCHED_MATERIALS.map((spec) => [spec.file, spec] as const))(
+    "write %s's header as the tool states it",
+    (file, spec) => {
+      // The by-hand regeneration's text half, which needs no fetched source.
+      const raw: unknown = JSON.parse(
+        readFileSync(fileURLToPath(new URL(file, MATERIALS)), "utf8"),
+      );
+      const header = (field: (typeof FIELDS)[number]): unknown =>
+        typeof raw === "object" && raw !== null ? Reflect.get(raw, field) : undefined;
+      expect(FIELDS.map(header)).toEqual(FIELDS.map((field) => spec.header[field]));
+    },
+  );
 });
 
 describe("the molecular ices' estimates (decision-r08-t5d rulings 3 and 5)", () => {

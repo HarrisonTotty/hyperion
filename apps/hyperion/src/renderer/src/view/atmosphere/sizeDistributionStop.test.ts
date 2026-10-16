@@ -392,9 +392,11 @@ const HELD_MODES: ReadonlyArray<HeldMode> = [
     asymmetry: 0.5797485676345534,
   },
   {
-    name: "NH3 ice of 10 µm",
+    // T5.b's ammonia-ice.json at 550 nm, Martonchik et al.'s n and k: the held optics are T5.b's,
+    // and since R08.T5.i the file's k is 0 (decision-p14-t49c-split §5.3), so the index is pinned.
+    name: "NH3 ice of 10 µm at T5.b's index",
     sizes: gamma(10, 0.1),
-    index: material("NH3", { phase: "solid" }),
+    index: fixed({ n: 1.43606, k: 2.88714e-5 }),
     wavelengthNm: 550,
     nodes: 3912,
     qExt: 2.0891048075491843,

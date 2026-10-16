@@ -590,8 +590,11 @@ describe("the other ices, on water ice's table as named analogues", () => {
     expect(optics.phaseNote).toBe(
       "NH3 ice drawn on H2O ice's roughened 8-column table, a named analogue; its g expected -0.056 from H2O ice's (van Diedenhoven et al. 2014)",
     );
+    // Since R08.T5.i NH₃ ice's k is 0 (decision-p14-t49c-split §5.3), so its own index gives ω = 1
+    // to rounding, where water ice's absorbs.
     const water = nonSphericalModeOptics({ material: "H2O", form: { phase: "solid" }, sizes }, 550);
-    expect(optics.singleScatteringAlbedo).toBeLessThan(water.singleScatteringAlbedo);
+    expect(optics.singleScatteringAlbedo).toBeCloseTo(1, 12);
+    expect(optics.singleScatteringAlbedo).toBeGreaterThan(water.singleScatteringAlbedo);
   }, 60_000); // M2 worst 1.7 s, M3 2.4 s, desktop over 15 s (2026-10-15): over 2× desktop
 
   it("draws CH₄ and CO₂ ices as analogues too", () => {
