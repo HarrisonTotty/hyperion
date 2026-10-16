@@ -41,10 +41,12 @@
 //! three given, which P14.T54.a connects to the record. R09.T10.f gave [`CoarseInputs::for_body`]
 //! a moon's planet's record, the one [`CoarseInputs::planet_of`] names, which the server fetches at
 //! [`RECORD_TIME`] beside the body's, and [`ReadCoarseInputsError`] for its answer: the signature
-//! P14.T54.a connects (decision-backlog-2 §3). Run on any inputs, the pass so far yields its
-//! initial state: a smooth, dry sphere at the datum under a still climate at the body's mean
-//! surface temperature, with the inputs' palette. R09.T11–T15 fill the steps and R09.T16 pins the
-//! reference worlds' fields.
+//! P14.T54.a connects (decision-backlog-2 §3). R09.T11 filled the plates, and R09.T12.a began the
+//! coarse elevation: a mobile lid's continental and oceanic populations with its sea floor, a
+//! stagnant lid's one population, all dry about the datum until R09.T12.e places the sea. The
+//! later steps are still no-ops: run on any inputs, the pass yields that relief, dry, under a still
+//! climate at the body's mean surface temperature, with the inputs' palette. R09.T12.b–T15 fill
+//! the rest and R09.T16 pins the reference worlds' fields.
 //!
 //! # Consumed items, by their paths in the code
 //!
@@ -249,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn a_no_op_pass_yields_a_valid_field_twice_with_identical_bytes() {
+    fn the_pass_yields_a_valid_field_twice_with_identical_bytes() {
         for (name, inputs, level) in [
             ("Ceres", reference::ceres_like(), 5),
             ("Moon", reference::moon_like(), 6),
@@ -276,10 +278,6 @@ mod tests {
                 "{name}"
             );
             assert_eq!(first.header().main_liquid(), inputs.main_liquid(), "{name}");
-            assert!(
-                first.synthesis().iter().all(|c| c.elevation_mm == 0),
-                "{name}"
-            );
         }
     }
 

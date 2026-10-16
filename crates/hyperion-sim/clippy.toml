@@ -2,9 +2,10 @@
 # not merge, so this file shadows the workspace root's `clippy.toml` completely and has to repeat
 # everything this crate needs of it.
 
-# Author names, journal abbreviations, supernova types, a mission's name (InSight) and the units
+# Author names, journal abbreviations, supernova types, a mission's name (InSight), a dataset's
+# (GlobSed, Straume et al. 2019's sediment grid) and the units
 # MeV, GPa and MPa that `doc_markdown` would otherwise take for code; ".." keeps Clippy's defaults.
-doc-valid-idents = ["McMillan", "McConnell", "McCord", "McKee", "McKay", "McDonough", "McDonald", "McElroy", "McCray", "McEwen", "McLennan", "McGovern", "McNutt", "McCubbin", "McCammon", "McBride", "McGehee", "McGetchin", "McSween", "McDaniel", "InSight", "MeV", "GPa", "MPa", "IJspeert", "JeongAhn", "ApJ", "ApJS", "IIb", "WebBook", "CoolProp", ".."]
+doc-valid-idents = ["McMillan", "McConnell", "McCord", "McKee", "McKay", "McDonough", "McDonald", "McElroy", "McCray", "McEwen", "McLennan", "McGovern", "McNutt", "McCubbin", "McCammon", "McBride", "McGehee", "McGetchin", "McSween", "McDaniel", "GlobSed", "InSight", "MeV", "GPa", "MPa", "IJspeert", "JeongAhn", "ApJ", "ApJS", "IIb", "WebBook", "CoolProp", ".."]
 
 # Every transcendental function goes through `hyperion_sim::math` (`hyperion_base::math`), which
 # wraps the exactly pinned `libm`. The platform's own versions differ between operating systems and

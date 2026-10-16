@@ -284,7 +284,7 @@ const fn has_plates(regime: TectonicRegime) -> bool {
 ///
 /// Never on the targets the sim builds for: a `u32` fits a `usize` on 32- and 64-bit targets.
 #[must_use]
-fn slot(cell: u32) -> usize {
+pub(super) fn slot(cell: u32) -> usize {
     usize::try_from(cell).expect("a cell index fits a usize on every target the sim builds for")
 }
 
@@ -294,7 +294,7 @@ fn slot(cell: u32) -> usize {
 ///
 /// If `n` is not below 2³², which no coarse level reaches.
 #[must_use]
-fn cell_of(n: usize) -> u32 {
+pub(super) fn cell_of(n: usize) -> u32 {
     u32::try_from(n).expect("a coarse level has under 2^32 cells")
 }
 
@@ -1219,11 +1219,11 @@ impl Contact {
 
 /// A transform's result at one cell: the distance to its nearest source and that source.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Reach {
-    /// The shortest path's length over the plate's cells, metres.
-    distance_m: f64,
+pub(super) struct Reach {
+    /// The shortest path's length over the region's cells, metres.
+    pub(super) distance_m: f64,
     /// The source cell.
-    source: u32,
+    pub(super) source: u32,
 }
 
 /// A distance transform's heap entry, ordered by (distance, cell, source).
@@ -1264,13 +1264,21 @@ fn shorter(d: f64, source: u32, best: Option<Reach>) -> bool {
     })
 }
 
-/// The multi-source shortest paths from `sources` (ascending cells) over each plate's own cells
-/// on `grid`, through edge and vertex neighbours with great-circle edge lengths on a sphere of
-/// `radius_m`, settled in (distance, cell, source) order: each cell's nearest source on its own
-/// plate and the distance to it, or `None` where its plate has none it reaches.
+/// The multi-source shortest paths from `sources` (ascending cells) over each region of `region`
+/// on `grid`, a region being the cells of one label (each plate's own cells, as this step calls
+/// it), through edge and vertex neighbours with great-circle edge lengths on a sphere of
+/// `radius_m`, settled in (distance, cell, source) order: each cell's nearest source in its own
+/// region and the distance to it, or `None` where its region has none it reaches.
+///
+/// R09.T12.a reads it too, over each plate's oceanic cells, for the distance to a passive margin.
 #[must_use]
-fn reach(grid: &CellGraph, plate: &[u8], sources: &[u32], radius_m: f64) -> Vec<Option<Reach>> {
-    let mut best: Vec<Option<Reach>> = vec![None; plate.len()];
+pub(super) fn reach<L: Copy + PartialEq>(
+    grid: &CellGraph,
+    region: &[L],
+    sources: &[u32],
+    radius_m: f64,
+) -> Vec<Option<Reach>> {
+    let mut best: Vec<Option<Reach>> = vec![None; region.len()];
     let mut heap = BinaryHeap::new();
     for &s in sources {
         best[slot(s)] = Some(Reach {
@@ -1290,13 +1298,13 @@ fn reach(grid: &CellGraph, plate: &[u8], sources: &[u32], radius_m: f64) -> Vec<
         if !current {
             continue;
         }
-        let own = plate[slot(entry.cell)];
+        let own = region[slot(entry.cell)];
         let neighbours = grid
             .edge_neighbours(entry.cell)
             .into_iter()
             .chain(grid.vertex_neighbours(entry.cell));
         for m in neighbours {
-            if plate[slot(m)] != own {
+            if region[slot(m)] != own {
                 continue;
             }
             let d =
