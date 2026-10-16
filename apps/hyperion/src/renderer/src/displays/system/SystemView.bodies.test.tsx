@@ -119,6 +119,15 @@ function reading(label: string): string {
   return terms(label)[0]?.nextElementSibling?.textContent ?? "";
 }
 
+/** The `dd` that holds the value a readout label reads. */
+function readingOf(label: string): HTMLElement {
+  const value = terms(label)[0]?.nextElementSibling;
+  if (!(value instanceof HTMLElement)) {
+    throw new Error(`the readout reads ${label}`);
+  }
+  return value;
+}
+
 /** The populated answer's planet `A b`, whose moon `A b I` is `/257`. */
 const PLANET_ID = `${FIXTURE_SYSTEM}.0100`;
 
@@ -182,6 +191,30 @@ function airlessEarth(): ResponseFor<"body_detail"> {
     mean_molar_mass_g_per_mol: null,
     heat_capacity_over_r: null,
   }));
+}
+
+/**
+ * The fixture's Earth sent as `close_binary`'s dwarf planet `e101` is (P14.T35.f): a magma ocean at
+ * 1,684 K whose volatiles are gone, its volatile air empty and its mixture figures none, and no
+ * `silicate_vapour` key; then changed by `change`.
+ */
+function e101Earth(
+  change: (surface: BodySurfaceDto) => BodySurfaceDto = (surface) => surface,
+): ResponseFor<"body_detail"> {
+  return earthWithSurface((surface) => {
+    if ("silicate_vapour" in surface) {
+      throw new Error("the fixture's Earth sends no silicate vapour");
+    }
+    return change({
+      ...surface,
+      state: "magma_ocean",
+      mean_surface_temperature_k: 1684.4,
+      surface_pressure_pa: 0,
+      gases: [],
+      mean_molar_mass_g_per_mol: null,
+      heat_capacity_over_r: null,
+    });
+  });
 }
 
 /**
@@ -482,6 +515,97 @@ describe("SystemView's body readout", () => {
     expect(reading("SURFACE PRESSURE")).toBe("NONE");
     expect(reading("MOLE FRACTION")).toBe("NONE");
     expect(reading("EXOSPHERE")).toBe("NOT YET MODELLED");
+  });
+
+  it("reads e101's empty air over its melt as the em dash, and its silicate vapour as NOT YET MODELLED", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    // As this server and T35.e's send it: no `silicate_vapour` key.
+    await answerDetail(socket, e101Earth());
+
+    expect(reading("SURFACE")).toBe("MAGMA OCEAN");
+    expect(reading("T SURF")).toBe("1684 K");
+    for (const label of ["SURFACE PRESSURE", "MOLE FRACTION"]) {
+      expect(reading(label)).toBe("—");
+      expect(within(readingOf(label)).getByText("—")).toHaveClass("readout__missing");
+    }
+    expect(within(readout()).queryByText("NONE")).not.toBeInTheDocument();
+    expect(reading("SILICATE VAPOUR")).toBe("NOT YET MODELLED");
+    expect(terms("EXOSPHERE")).toHaveLength(0);
+  });
+
+  it("reads a magma ocean's steam air by its figures, beside its silicate vapour NOT YET MODELLED", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      e101Earth((surface) => ({
+        ...surface,
+        surface_pressure_pa: 2.5e7,
+        gases: [
+          { species: "H2O", mole_fraction: 0.75 },
+          { species: "CO2", mole_fraction: 0.25 },
+        ],
+      })),
+    );
+
+    expect(reading("SURFACE PRESSURE")).toBe("25.0 MPa");
+    expect(reading("MOLE FRACTION")).toBe(partsReading("H2O 75.0 %", "CO2 25.0 %"));
+    expect(reading("SILICATE VAPOUR")).toBe("NOT YET MODELLED");
+  });
+
+  it("reads a melt's empty air as NONE where its silicate vapour is computed as none", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      e101Earth((surface) => ({ ...surface, silicate_vapour: null })),
+    );
+
+    expect(reading("SURFACE PRESSURE")).toBe("NONE");
+    expect(reading("MOLE FRACTION")).toBe("NONE");
+    expect(terms("SILICATE VAPOUR")).toHaveLength(0);
+  });
+
+  it("reads a melt's empty air as the em dash beside a newer server's silicate vapour, with no row", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      e101Earth((surface): BodySurfaceDto => ({
+        ...surface,
+        // @ts-expect-error -- SilicateVapourDto has no members until P14.T55.b, and a newer server's value must still read.
+        silicate_vapour: { vapour_pressure_pa: 10 },
+      })),
+    );
+
+    expect(reading("SURFACE PRESSURE")).toBe("—");
+    expect(reading("MOLE FRACTION")).toBe("—");
+    expect(terms("SILICATE VAPOUR")).toHaveLength(0);
+  });
+
+  it("shows no SILICATE VAPOUR row for a temperate world", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, earthDetail());
+
+    expect(terms("SILICATE VAPOUR")).toHaveLength(0);
+  });
+
+  it("shows no SILICATE VAPOUR row for an airless world, whose air still reads NONE", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, airlessEarth());
+
+    expect(reading("SURFACE PRESSURE")).toBe("NONE");
+    expect(reading("MOLE FRACTION")).toBe("NONE");
+    expect(terms("SILICATE VAPOUR")).toHaveLength(0);
   });
 
   it("names a gas the console does not know as UNLISTED MATERIAL, never by its key", async () => {

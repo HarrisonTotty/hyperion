@@ -37,8 +37,10 @@ import type {
   BodySurface,
   BulkProperties,
   GasShare,
+  Modelled,
   Population,
   Section,
+  SilicateVapour,
   SystemBody,
 } from "../../lib/system/model";
 import { formatBodyIdHex } from "../../lib/seed";
@@ -196,6 +198,48 @@ function pressureShown(pressurePa: number): Shown {
 }
 
 /**
+ * Whether a surface holds melt, where a vapour of its own, the melt's silicate vapour, lies over
+ * it: the state `magma_ocean`, which the wire states (P14.T35.f).
+ *
+ * @remarks
+ * P14.T54.a's client follow-up adds a `crust.melt_area_fraction` above 0, and P14.T53.b decides
+ * `steam_envelope`; neither is read here.
+ */
+function holdsMelt(surface: BodySurface): boolean {
+  return surface.state === "magma_ocean";
+}
+
+/** What a melt's own vapour, as the wire sends it, lets its surface's rows read. */
+interface VapourReading {
+  /** Whether an empty volatile air reads Missing, the em dash, rather than `NONE`. */
+  readonly emptyAirMissing: boolean;
+  /** Whether the `SILICATE VAPOUR NOT YET MODELLED` row stands. */
+  readonly notModelledRow: boolean;
+}
+
+/**
+ * How a melt's own vapour reads: not modelled, Missing air and its row; computed as none, `NONE`
+ * and no row (decision-backlog-2 §2.4); a value, Missing air and no row.
+ */
+function vapourReading(vapour: Modelled<SilicateVapour>): VapourReading {
+  let reading: VapourReading;
+  switch (vapour.kind) {
+    case "not_modelled":
+      reading = { emptyAirMissing: true, notModelledRow: true };
+      break;
+    case "none":
+      reading = { emptyAirMissing: false, notModelledRow: false };
+      break;
+    case "value":
+      // `NOT YET MODELLED` would be false, and this client has no figures to read: P14.T55.b, which
+      // gives the vapour its members, adds its row (plan 14, P14.T43.e's record).
+      reading = { emptyAirMissing: true, notModelledRow: false };
+      break;
+  }
+  return reading;
+}
+
+/**
  * The rows of a surface section (plan 14, P14.T43.b, _Amended for T35.e_): its state in words under
  * the section's own name, so that `SURFACE` keeps its place whether the section is shown or stands
  * in; the mean surface temperature; the surface pressure; and the air's gases by mole fraction.
@@ -210,8 +254,25 @@ function pressureShown(pressurePa: number): Shown {
  * Data states). The note follows the `airless` state, as the view's `EXOSPHERE: NOT YET MODELLED`
  * does (rendering plan R08, R08.T10.a). The section's other members (its material, climate regime
  * and global figures) are on the wire and not yet read here.
+ *
+ * A surface holding melt, the state `magma_ocean` (P14.T35.f), has a vapour of its own, the melt's
+ * silicate vapour, which no rule computes before P14.T55.b. While the wire leaves it out, its row
+ * reads `SILICATE VAPOUR NOT YET MODELLED`, and an empty volatile air reads its pressure and gases
+ * Missing, the em dash, never `NONE`, since the pressure over a melt is at least the melt's own
+ * vapour pressure (the guide's Data states; decision-backlog-2 §2.4, decision-triton-and-e101
+ * §2.3). A volatile air it holds, a young magma ocean's steam and CO2, reads its figures beside the
+ * row; a vapour computed as none reads `NONE` as an airless body's air does. `SILICATE VAPOUR` is
+ * drafted for the owner (decision-triton-and-e101 §2.3), as one name with the view's
+ * `SILICATE VAPOUR: NOT YET MODELLED` note, which R08.T10.a adds.
+ *
+ * A vapour the wire sends as a value, which no server does before P14.T55.b, reads its empty
+ * volatile air as Missing too, and has no row: its figures are T55.b's to read.
  */
 function surfaceRows(surface: BodySurface): ReactNode {
+  const vapour = holdsMelt(surface) ? vapourReading(surface.silicateVapour) : null;
+  // Ruled on the empty gases, not on the pressure (decision-backlog-2 §2.4): only a vapour computed
+  // as none lets the volatile air's zero read as `NONE` over a melt.
+  const airMissing = vapour !== null && vapour.emptyAirMissing && surface.gases.length === 0;
   return (
     <>
       <ReadoutRow label="SURFACE" shown={value(surfaceStateLabel(surface.state))} wide />
@@ -220,10 +281,21 @@ function surfaceRows(surface: BodySurface): ReactNode {
         shown={value(formatTemperatureK(surface.meanSurfaceTemperatureK), "K")}
         wide
       />
-      <ReadoutRow label="SURFACE PRESSURE" shown={pressureShown(surface.surfacePressurePa)} wide />
-      <ReadoutRow label="MOLE FRACTION" shown={gasesShown(surface.gases)} wide />
+      <ReadoutRow
+        label="SURFACE PRESSURE"
+        shown={airMissing ? MISSING : pressureShown(surface.surfacePressurePa)}
+        wide
+      />
+      <ReadoutRow
+        label="MOLE FRACTION"
+        shown={airMissing ? MISSING : gasesShown(surface.gases)}
+        wide
+      />
       {surface.state === "airless" ? (
         <ReadoutRow label="EXOSPHERE" shown={value(sectionStateLabel("not_modelled"))} wide />
+      ) : null}
+      {vapour?.notModelledRow === true ? (
+        <ReadoutRow label="SILICATE VAPOUR" shown={value(sectionStateLabel("not_modelled"))} wide />
       ) : null}
     </>
   );
@@ -448,13 +520,13 @@ export interface BodyRecordReadingsProps {
  * radius in `km`, density, gravity, equilibrium temperature and its layers' mass fractions; its
  * moons and rings, counted; for a ring, a belt or the cometary halo, what the population is and
  * where it lies; and, from the whole record only, its surface (its state, mean temperature,
- * pressure and gases), a gas-envelope body's envelope in the surface's place, read as its
- * `ATMOSPHERE` (its gases), and its hooks, whose detail seed is the one hook the wire carries, the
- * em dash until the server derives it. A section withheld or not modelled reads so, once, in place
- * of its rows; one that does not apply is left out. A server since P14.T35.e sends one of `surface`
- * and `envelope` as not applicable for every planet it resolves to the `surface` level, so the
- * planet's air is read from the other; an older server sends no envelope, which reads
- * `ATMOSPHERE NOT YET MODELLED`.
+ * pressure and gases, and, over a melt, its own vapour's state), a gas-envelope body's envelope in
+ * the surface's place, read as its `ATMOSPHERE` (its gases), and its hooks, whose detail seed is
+ * the one hook the wire carries, the em dash until the server derives it. A section withheld or not
+ * modelled reads so, once, in place of its rows; one that does not apply is left out. A server
+ * since P14.T35.e sends one of `surface` and `envelope` as not applicable for every planet it
+ * resolves to the `surface` level, so the planet's air is read from the other; an older server
+ * sends no envelope, which reads `ATMOSPHERE NOT YET MODELLED`.
  *
  * The distance is the one reading the display derives: from the server's elements at the display
  * time, by the solver that agrees with the server's to 10⁻⁹ (P14.T39), since the answer is up to a

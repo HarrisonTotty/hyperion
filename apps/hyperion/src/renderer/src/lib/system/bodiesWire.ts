@@ -43,6 +43,7 @@ import {
   type ProfileNodeDto,
   type RequestOf,
   type SectionDto,
+  type SilicateVapourDto,
   type SizeDistributionDto,
   type SubstanceAreaDto,
   type SubstancePhaseDto,
@@ -91,6 +92,7 @@ import type {
   ProfileNode,
   RotationLock,
   Section,
+  SilicateVapour,
   SizeDistribution,
   SubstanceArea,
   SubsurfaceOcean,
@@ -1242,6 +1244,14 @@ function toBiosphere(biosphere: BiosphereDto): Biosphere {
 }
 
 /**
+ * A melt's own vapour (P14.T35.f), checked for nothing, since its type has no members until
+ * P14.T55.b: a newer server's value reads as a value, never as a fault in the record.
+ */
+function toSilicateVapour(vapour: SilicateVapourDto): SilicateVapour {
+  return vapour;
+}
+
+/**
  * A surface section, checked as the photometry is (plan 14, P14.T35.e): temperatures positive,
  * contrasts finite and the day–night one not negative, pressures, fluxes and figures not
  * negative, every fraction in `[0, 1]`, the gases summing to 1 and largest first, the liquids and
@@ -1318,6 +1328,7 @@ function toSurface(surface: BodySurfaceDto): BodySurface {
     crust: modelled(surface.crust, toCrust),
     modifiers: modelled(surface.modifiers, toModifiers),
     biosphere: modelled(surface.biosphere, toBiosphere),
+    silicateVapour: modelled(surface.silicate_vapour, toSilicateVapour),
   };
 }
 
