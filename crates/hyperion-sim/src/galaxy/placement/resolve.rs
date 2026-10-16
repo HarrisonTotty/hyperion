@@ -310,8 +310,8 @@ mod tests {
 
     /// P08.T13: with a claim that says yes to every recent death, a layer-E record whose primary
     /// dies inside the interval resolves to no such system and its candidate is the catalogue's,
-    /// while under the production stub it resolves to itself, and a record whose primary dies
-    /// outside the interval resolves to itself under either.
+    /// while with no claim set it resolves to itself, and a record whose primary dies outside the
+    /// interval resolves to itself under either.
     ///
     /// Neither `resolve` nor the candidate's evaluation takes a time, so the outcome is the same
     /// at every query time, on both sides of the death, by construction.

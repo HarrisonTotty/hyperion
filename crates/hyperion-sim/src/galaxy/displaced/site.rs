@@ -12,9 +12,10 @@
 //!   primary, and plan 09's `claims` is the second half (P09.T17).
 //! - [`explosion_site`] is that predicate on a grid record's marks, with the site the record's
 //!   epoch position moved along its velocity to the death (Design note 22's x + v T).
-//! - `recent_death_claims` is the claim plan 03's carve-out hook passes each site to. It claims
-//!   nothing until plan 09's P09.T35 replaces its body, with its version bump, so no generated
-//!   output depends on this module yet.
+//! - `RECENT_DEATH_CLAIM` is the gate: the claim plan 03's carve-out hook passes each site to,
+//!   `None` until plan 09's P09.T35 gives it, with its version bump. While it is `None` the hook
+//!   asks for no site, so placement reads no tier of the predicate, and no generated output depends
+//!   on this module yet (P08.T13.b).
 //!
 //! `W_cap` is plan 09's [`SHELL_WINDOW_CAP`] (4 Myr), the ceiling of every shell window; L is
 //! [`LIGHT_CROSSING_L`] (2¹⁸ Julian years) and H is [`CLOCK_WINDOW_H`] (1,000 Julian years). So
@@ -226,10 +227,11 @@ pub fn death_in_interval(
 /// already dead backs it out to where it exploded. The velocity is drawn only then, and a galaxy
 /// built without its kinematic tables has none, so its sites are the epoch positions.
 ///
-/// Plan 03's carve-out hook calls this for every accepted layer-E record and passes the site to
-/// the claim plan 09 supplies (P09.T35); until then the claim is a stub, and nothing generated
-/// reads a site. It is a pure function of the galaxy and the record: `resolve`, `generate_cell`
-/// and plan 09 get the same answer in any order.
+/// Once plan 09 supplies the claim (P09.T35, which sets `RECENT_DEATH_CLAIM`), plan 03's carve-out
+/// hook calls this for every accepted layer-E record and passes the site to the claim; until then
+/// the hook calls it for none, and nothing generated reads a site (P08.T13.b). It is a pure
+/// function of the galaxy and the record: `resolve`, `generate_cell` and plan 09 get the same
+/// answer in any order.
 ///
 /// # Panics
 ///
@@ -311,21 +313,24 @@ pub fn explosion_site(galaxy: &Galaxy, record: &SystemRecord) -> Option<Explosio
     Some(ExplosionSite::new(position, death))
 }
 
-/// Whether a catalogue class claims the grid record `record`, whose primary dies at `site` inside
-/// the interval: always `false`, until plan 09 (plan 08, P08.T13).
+/// A recent-death claim: whether a catalogue class claims the grid record, whose primary dies at
+/// the site inside the interval (plan 08, P08.T13.b).
+pub(crate) type RecentDeathClaim = fn(&Galaxy, &ExplosionSite, &SystemRecord) -> bool;
+
+/// The claim plan 03's carve-out hook passes each layer-E record's [`explosion_site`] to: `None`
+/// until plan 09's P09.T35 gives it (plan 08, P08.T13.b).
 ///
-/// Plan 03's carve-out hook passes every layer-E site here. Plan 09's P09.T35 replaces the body
-/// with `claims(galaxy, &site, &DeathMarks::of(..), ShellEnvironment::Field)` and bumps the
-/// generator version in the same commit; until then no candidate is claimed, and no generated
-/// output reads a site.
-#[must_use]
-pub(crate) fn recent_death_claims(
-    _galaxy: &Galaxy,
-    _site: &ExplosionSite,
-    _record: &SystemRecord,
-) -> bool {
-    false
-}
+/// P09.T35 writes `recent_death_claims(galaxy, &site, &record)`: the record's [`SystemStars`],
+/// `DeathMarks::of`, then `claims(galaxy, &site, &marks, ShellEnvironment::Field)`. It sets this to
+/// `Some(recent_death_claims)` in its bump commit. While it is `None` the hook asks for no site, so
+/// placement reads no tier of the predicate: neither [`LifetimeBracket::shared`], nor the fate
+/// table, nor `lifetime`.
+///
+/// It is one item on purpose: giving a claim and switching the hook on are the same edit (main's
+/// ruling on P08.T13's cost, 2026-10-15). A flag beside a stub's body would be two edits, and a
+/// claim written with the flag left off would keep on the grid every recent death the catalogue
+/// claims, a silent double count.
+pub(crate) const RECENT_DEATH_CLAIM: Option<RecentDeathClaim> = None;
 
 /// The predicate's core: [`death_in_interval`] of a primary of initial mass `m0` and age at the
 /// epoch `age_at_epoch`, whose other `marks` are read only where a tier needs them, with the exact
@@ -1220,13 +1225,13 @@ mod tests {
 
     // --- The benches' centre ---
 
-    /// A cell cache that generates every cell it is asked for and counts the layer-E records.
+    /// A cell cache that generates every cell it is asked for and keeps the layer-E records.
     #[derive(Debug, Default)]
-    struct CountingCache {
-        layer_e: u64,
+    struct RecordingCache {
+        layer_e: Vec<SystemRecord>,
     }
 
-    impl CellCache for CountingCache {
+    impl CellCache for RecordingCache {
         fn with_cell<R>(
             &mut self,
             galaxy: &Galaxy,
@@ -1236,7 +1241,7 @@ mod tests {
             let mut cell = Vec::new();
             generate_cell(galaxy, key, &mut cell);
             if key.layer() == Layer::E {
-                self.layer_e += u64::try_from(cell.len()).unwrap();
+                self.layer_e.extend_from_slice(&cell);
             }
             f(&cell)
         }
@@ -1244,10 +1249,22 @@ mod tests {
 
     /// Each tier's share of the verdicts at the benches' centre: the layer-E cell at the Sun-like
     /// point of `benches/placement.rs`'s `cell_by_layer`, and the 50 ly query of
-    /// `benches/range_query.rs`'s `range_50ly_cold`, each on its bench's seed. There is one
-    /// verdict per accepted layer-E record, and none from another layer.
+    /// `benches/range_query.rs`'s `range_50ly_cold`, each on its bench's seed, from
+    /// [`explosion_site`] called on each placed layer-E record: one verdict per record. Placing
+    /// them, the production hook gives one verdict per layer-E record once a claim is set, and none
+    /// while [`RECENT_DEATH_CLAIM`] is `None` (P08.T13.b); another layer gives none either way.
     #[test]
-    fn the_hook_gives_one_verdict_per_layer_e_record_at_the_benches_centre() {
+    fn the_benches_centre_gives_one_verdict_per_layer_e_record_and_the_hook_needs_a_claim() {
+        // One per placed record: every verdict here is the bracket's, so no record has a site a
+        // claim could take, and the placed records are the accepted candidates.
+        let per_record = |records: usize| {
+            let records = u64::try_from(records).unwrap();
+            if RECENT_DEATH_CLAIM.is_some() {
+                records
+            } else {
+                0
+            }
+        };
         let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).unwrap();
         let milky_way = |seed: u64| {
             Galaxy::from_params(Seed::new(seed), GalaxyParams::milky_way_like())
@@ -1261,13 +1278,19 @@ mod tests {
             CellKey::containing(Layer::E, &sun).unwrap(),
             &mut cell,
         );
+        assert_eq!(take_verdicts().total(), per_record(cell.len()));
+        let cell_sites = cell
+            .iter()
+            .filter_map(|record| explosion_site(&galaxy, record))
+            .count();
         let one_cell = take_verdicts();
         assert_eq!(one_cell.total(), u64::try_from(cell.len()).unwrap());
+        let mut other = Vec::new();
         for layer in [Layer::A, Layer::B, Layer::C, Layer::D] {
             generate_cell(
                 &galaxy,
                 CellKey::containing(layer, &sun).unwrap(),
-                &mut cell,
+                &mut other,
             );
         }
         assert_eq!(take_verdicts().total(), 0);
@@ -1276,12 +1299,19 @@ mod tests {
         let query = RangeQuery::builder(sun, LightYears::new(50.0))
             .build()
             .unwrap();
-        let mut cache = CountingCache::default();
+        let mut cache = RecordingCache::default();
         let result = range_query(&galaxy, &mut cache, &[], &query);
+        assert_eq!(take_verdicts().total(), per_record(cache.layer_e.len()));
+        let query_sites = cache
+            .layer_e
+            .iter()
+            .filter_map(|record| explosion_site(&galaxy, record))
+            .count();
         let queried = take_verdicts();
-        assert_eq!(queried.total(), cache.layer_e);
+        assert_eq!(queried.total(), u64::try_from(cache.layer_e.len()).unwrap());
         println!(
-            "cell_by_layer (E, Sun-like point): {}; range_50ly_cold ({} cells): {}",
+            "cell_by_layer (E, Sun-like point): {}, {cell_sites} sites; range_50ly_cold ({} \
+             cells): {}, {query_sites} sites",
             one_cell.shares(),
             result.stats().cells_visited(),
             queried.shares()

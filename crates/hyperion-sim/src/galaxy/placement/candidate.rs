@@ -18,7 +18,7 @@
 use super::record::{SystemKind, SystemRecord};
 use super::{CellKey, layer_bound, rogue_planet_saturation_density};
 use crate::coords::GalacticPosition;
-use crate::galaxy::displaced::site::{ExplosionSite, explosion_site, recent_death_claims};
+use crate::galaxy::displaced::site::{ExplosionSite, RECENT_DEATH_CLAIM, explosion_site};
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
 use crate::galaxy::imf::MassBand;
 #[cfg(doc)]
@@ -134,20 +134,20 @@ pub(super) fn evaluate_with_hook(
 /// The hook sits after the marks are drawn because a class is a deterministic test on a candidate's
 /// own marks (brainstorm, "Rare events are found by carving out their hosts, not the events"), and
 /// the cells draw conditional on not being in the class. It is asked for stellar records only
-/// (plan 13, P13.T3.c). For a layer-E record it computes the record's
-/// [`explosion_site`] and, where the primary dies inside the interval, passes the site to
-/// [`recent_death_claims`] (plan 08, P08.T13); every other layer is answered no without a site.
-/// Until plan 09 fills that claim in (P09.T35), the field keeps every candidate it accepts, and
-/// [`CandidateOutcome::ClaimedByCatalogue`] never appears.
+/// (plan 13, P13.T3.c). Once plan 09 gives the claim, [`RECENT_DEATH_CLAIM`] (P09.T35), it computes
+/// the [`explosion_site`] of every accepted layer-E record and, where the primary dies inside the
+/// interval, passes the site to the claim (plan 08, P08.T13); every other layer is answered no
+/// without a site. Before that it computes the site of no record (P08.T13.b), the field keeps every
+/// candidate it accepts, and [`CandidateOutcome::ClaimedByCatalogue`] never appears.
 #[must_use]
 pub(super) fn catalogue_claims(galaxy: &Galaxy, record: &SystemRecord) -> bool {
-    claims_with(galaxy, record, explosion_site, recent_death_claims)
+    RECENT_DEATH_CLAIM.is_some_and(|claim| claims_with(galaxy, record, explosion_site, claim))
 }
 
 /// [`catalogue_claims`] with the site and the claim given: for a layer-E record, `claim` of its
 /// `site` where it has one, and no for every other layer, which asks neither (P08.T13). Production
-/// passes [`explosion_site`] and [`recent_death_claims`]; a test passes counting or always-yes
-/// closures, which needs no hidden state.
+/// passes [`explosion_site`] and the claim [`RECENT_DEATH_CLAIM`] holds, once it holds one
+/// (P08.T13.b); a test passes counting or always-yes closures, which needs no hidden state.
 #[must_use]
 pub(super) fn claims_with(
     galaxy: &Galaxy,
@@ -290,9 +290,11 @@ mod tests {
     use hyperion_testkit::stats::{ALPHA, assert_p_value, chi_square_gof};
 
     use super::*;
-    use crate::galaxy::displaced::site::take_verdicts;
+    use crate::galaxy::displaced::site::{Verdicts, take_verdicts};
     use crate::galaxy::params::GalaxyParams;
-    use crate::galaxy::placement::{STELLAR_LAYERS, SystemOrigin, candidate_count, generate_cell};
+    use crate::galaxy::placement::{
+        STELLAR_LAYERS, SystemOrigin, candidate_count, generate_cell, resolve,
+    };
     use crate::id::SystemIdKind;
     use crate::rng::{Seed, Threshold};
     use crate::units::consts::METRES_PER_LIGHT_YEAR;
@@ -623,13 +625,13 @@ mod tests {
         );
     }
 
-    /// P08.T13: the hook asks for a site exactly once for each candidate the thinning accepts in
-    /// layer E and never in layers A–D, and passes each site there is to the claim exactly once;
-    /// and the production hook gives one verdict of the interval predicate per accepted layer-E
-    /// record and none elsewhere.
-    #[test]
-    fn hook_asks_for_a_site_once_per_accepted_layer_e_candidate() {
-        let galaxy = galaxy();
+    /// The seam half of `hook_asks_for_a_site_once_per_accepted_layer_e_candidate`, T12.b's
+    /// regression check (P08.T13): through `claims_with` and `evaluate_with_hook` with counting
+    /// closures, the hook asks for a site exactly once for each candidate the thinning accepts in
+    /// layer E and never in layers A–D, gives one verdict for each site it asks for, and passes
+    /// each site there is to the claim exactly once. It returns every cell it walked, and each
+    /// layer-E cell with its verdicts.
+    fn walk_the_seam(galaxy: &Galaxy) -> (Vec<CellKey>, Vec<(CellKey, Verdicts)>) {
         let asked = std::cell::Cell::new(0_u32);
         let (sites, claimed) = (std::cell::Cell::new(0_u32), std::cell::Cell::new(0_u32));
         let site = |g: &Galaxy, r: &SystemRecord| {
@@ -643,23 +645,26 @@ mod tests {
             false
         };
         let hook = |g: &Galaxy, r: &SystemRecord| claims_with(g, r, site, claim);
-        let mut cells = Vec::new();
+        let (mut cells, mut layer_e) = (Vec::new(), Vec::new());
         let mut accepted_e = 0_u32;
+        take_verdicts();
         for spec in &STELLAR_LAYERS {
             let layer = spec.layer();
             let [x, y, z] = CellKey::containing(layer, &sunlike())
                 .unwrap()
                 .gen_cell()
                 .to_array();
-            // Enough layer-E cells that some hold a death in the interval (about one in 28).
+            // Enough layer-E cells that the exact tier runs in some: one of these 160 holds a death
+            // in the interval.
             let count = if layer == Layer::E { 160 } else { 2 };
             for dx in 0..count {
                 let key = CellKey::new(layer, [x + dx, y, z]).unwrap();
                 cells.push(key);
-                let bound = layer_bound(&galaxy, key);
-                for index in 0..candidate_count(&galaxy, key) {
+                let bound = layer_bound(galaxy, key);
+                let asked_before = asked.get();
+                for index in 0..candidate_count(galaxy, key) {
                     let before = asked.get();
-                    let outcome = evaluate_with_hook(&galaxy, key, index, bound, hook);
+                    let outcome = evaluate_with_hook(galaxy, key, index, bound, hook);
                     let asks = asked.get() - before;
                     match outcome {
                         CandidateOutcome::Accepted(_) if layer == Layer::E => {
@@ -674,24 +679,105 @@ mod tests {
                         }
                     }
                 }
+                let verdicts = take_verdicts();
+                assert_eq!(
+                    verdicts.total(),
+                    u64::from(asked.get() - asked_before),
+                    "one verdict per site asked for in {key:?}"
+                );
+                if layer == Layer::E {
+                    layer_e.push((key, verdicts));
+                }
             }
         }
         assert_eq!(asked.get(), accepted_e);
         assert!(sites.get() > 0, "no site in {accepted_e} layer-E records");
         assert_eq!(claimed.get(), sites.get());
-        // The production hook, through the whole-cell walk: one verdict per accepted layer-E
-        // record, from the one site it computes.
-        take_verdicts();
+        (cells, layer_e)
+    }
+
+    /// P08.T13 and P08.T13.b: the seam half ([`walk_the_seam`]) reaches the exact tier; and over
+    /// the same cells, through the whole-cell walk and through `resolve`, the production hook gives
+    /// one verdict of the interval predicate per accepted layer-E candidate once a claim is set,
+    /// placed or claimed, and none while [`RECENT_DEATH_CLAIM`] is `None`, even in the cells where
+    /// the seam reached the exact tier.
+    #[test]
+    fn hook_asks_for_a_site_once_per_accepted_layer_e_candidate() {
+        let galaxy = galaxy();
+        let (cells, seam) = walk_the_seam(&galaxy);
+        let sum = |tier: fn(&Verdicts) -> u64| seam.iter().map(|(_, v)| tier(v)).sum::<u64>();
+        let seam_verdicts = Verdicts {
+            no_death: sum(|v| v.no_death),
+            bracket: sum(|v| v.bracket),
+            table: sum(|v| v.table),
+            exact_inside: sum(|v| v.exact_inside),
+            exact_outside: sum(|v| v.exact_outside),
+        };
+        // The seam's sites imply it, since only the exact tier gives a site; said outright, these
+        // cells reach tier 3.
+        assert!(
+            seam_verdicts.exact() > 0,
+            "the seam reached no exact tier: {}",
+            seam_verdicts.shares()
+        );
+        let exact_cells: Vec<CellKey> = seam
+            .iter()
+            .filter(|(_, v)| v.exact() > 0)
+            .map(|&(key, _)| key)
+            .collect();
+
+        // The production hook over the same cells, through the whole-cell walk and then through
+        // `resolve` of each record of the cells where the seam reached the exact tier: once a
+        // claim is set, one verdict per accepted layer-E candidate, from the one site it computes,
+        // and none before (P08.T13.b). A claimed candidate has its verdict and is not placed.
+        let per_record = |records: u64| {
+            if RECENT_DEATH_CLAIM.is_some() {
+                records
+            } else {
+                0
+            }
+        };
+        // The seam asked for one site, and so one verdict, per accepted layer-E candidate.
+        let accepted_e = seam_verdicts.total();
         let mut systems = Vec::new();
+        let mut exact_records = Vec::new();
         let mut placed_e = 0;
-        for key in cells {
+        for &key in &cells {
             generate_cell(&galaxy, key, &mut systems);
             if key.layer() == Layer::E {
                 placed_e += u64::try_from(systems.len()).unwrap();
             }
+            if exact_cells.contains(&key) {
+                exact_records.extend_from_slice(&systems);
+            }
         }
-        assert_eq!(placed_e, u64::from(accepted_e));
-        assert_eq!(take_verdicts().total(), placed_e);
+        // The walk places every candidate the seam accepted, less any a claim takes.
+        assert!(placed_e <= accepted_e);
+        if RECENT_DEATH_CLAIM.is_none() {
+            assert_eq!(placed_e, accepted_e);
+        }
+        let walked = take_verdicts();
+        assert_eq!(walked.total(), per_record(accepted_e));
+        for record in &exact_records {
+            assert_eq!(resolve(&galaxy, record.id()), Ok(*record));
+        }
+        let resolved = take_verdicts();
+        let resolved_e = u64::try_from(exact_records.len()).unwrap();
+        assert_eq!(resolved.total(), per_record(resolved_e));
+        println!(
+            "seam, {} layer-E cells: {}; production ({}): {} verdicts over {placed_e} placed \
+             layer-E records, {} over {resolved_e} resolved in the {} cells the exact tier reached",
+            seam.len(),
+            seam_verdicts.shares(),
+            if RECENT_DEATH_CLAIM.is_some() {
+                "a claim set"
+            } else {
+                "no claim set"
+            },
+            walked.total(),
+            resolved.total(),
+            exact_cells.len(),
+        );
     }
 
     /// Every draw of a candidate, re-derived from plan 03's Design notes 1–4 with nothing of this
