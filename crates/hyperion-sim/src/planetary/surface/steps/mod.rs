@@ -29,8 +29,9 @@
 //! As built by R09.T10, every step was a no-op, so the pass yielded its initial state: a smooth
 //! sphere at the datum ([`Working::initial`]). R09.T11 filled [`plates`]: on a mobile lid it writes
 //! each cell's plate, crust and nearest boundary, and each oceanic cell's
-//! [`SeafloorOrigin`]. R09.T12.a began [`relief`]'s coarse elevation: the crust's populations and
-//! the sea floor, before T12.e's `σ_h` and sea level. The other steps are still no-ops.
+//! [`SeafloorOrigin`]. R09.T12.a began [`relief`]'s coarse elevation, the crust's populations and
+//! the sea floor, and R09.T12.b its convergent landforms, before T12.e's `σ_h` and sea level. The
+//! other steps are still no-ops.
 
 pub mod classes;
 pub mod climate;
@@ -194,6 +195,13 @@ pub struct CellState {
     /// triangular area–age distribution, which GDH1, the pelagic drape and the plains read
     /// (`decision-r09-t12-coarse.md` item 1). It does not travel.
     pub seafloor_age: Option<Seconds>,
+    /// Whether the cell's plate subducts at its nearest boundary (R09.T11's polarity): true on a
+    /// subduction boundary's subducting side, its boundary cells, at +0, included, so that a cell's
+    /// signed distance is negative exactly where this holds and the distance is above +0; false
+    /// without a boundary and at any boundary that is not a subduction. R09.T12.b reads it to put a
+    /// trench on the subducting side and to measure an arc from the trench's axis. It does not
+    /// travel.
+    pub subducts: bool,
 }
 
 /// Where an oceanic cell's floor formed (R09.T11; `decision-r09-t5.md` item 5): the ridge of its
@@ -323,6 +331,7 @@ impl Working {
             ponded_sediment: Metres::ZERO,
             seafloor_origin: None,
             seafloor_age: None,
+            subducts: false,
         };
         let climate = ClimateState {
             sea_level_temperature: pass.inputs().mean_surface_temperature(),

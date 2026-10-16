@@ -61,19 +61,22 @@ pub(crate) const EARTH_OCEANIC_SHARE: f64 = 1.0 - EARTH_CONTINENTAL_FRACTION;
 /// (Canup 2004). Medium confidence on Earth (`decision-r09-t12-coarse.md` item 3).
 pub(crate) const MANTLE_DENSITY: KilogramsPerCubicMetre = KilogramsPerCubicMetre::new(3_300.0);
 
-/// Seawater's density over the floor, 1,030 kg m⁻³, the load under which GDH1's floor subsides
-/// (from memory; `decision-r09-t12-coarse.md` item 1).
+/// Seawater's density over the sediment, 1,030 kg m⁻³ (from memory; `decision-r09-t12-coarse.md`
+/// item 1; Watts, Karner and Steckler 1982 take 1.03 g cm⁻³, while GDH1's own fit takes 1,000).
 pub(crate) const SEAWATER_DENSITY: KilogramsPerCubicMetre = KilogramsPerCubicMetre::new(1_030.0);
 
 /// The surface porosity φ₀ of Athy's law φ = φ₀ e^(−cz), 0.63: Sclater and Christie 1980's shale
-/// (JGR 85, 3711, Table 2), one law for the whole column (labelled).
+/// (JGR 85, 3711, Table 2; not re-read, the original behind a paywall, but Sheldon and Retallack
+/// 2001's Table 1, Geology 29, 247, quotes it so), one law for the whole column (labelled).
 pub(crate) const SEDIMENT_SURFACE_POROSITY: f64 = 0.63;
 
 /// The porosity's decay constant c of Athy's law, 0.51 km⁻¹, as metres⁻¹ (Sclater and Christie
-/// 1980's shale, Table 2).
+/// 1980's shale, Table 2, quoted as [`SEDIMENT_SURFACE_POROSITY`] is).
 pub(crate) const SEDIMENT_POROSITY_DECAY_PER_M: f64 = 0.51e-3;
 
-/// The sediment's grain density, 2,720 kg m⁻³ (Sclater and Christie 1980's shale, Table 2).
+/// The sediment's grain density, 2,720 kg m⁻³ (Sclater and Christie 1980's shale, Table 2, from
+/// memory in `decision-r09-t12-coarse.md`; not read, and a secondary table, pyBacktrack's, gives
+/// 2,700 for its shale).
 pub(crate) const SEDIMENT_GRAIN_DENSITY: KilogramsPerCubicMetre =
     KilogramsPerCubicMetre::new(2_720.0);
 
@@ -98,9 +101,10 @@ const GDH1_RATE_PER_MYR: f64 = 0.0278;
 /// The age at which GDH1 changes branch, 20 Myr.
 const GDH1_BREAK_MYR: f64 = 20.0;
 
-/// The basement depth of floor `age` old, GDH1's (Stein and Stein 1992, Nature 359, 123–129,
-/// after Renkin and Sclater 1988's sediment-corrected depths): d = 2,600 + 365 √t m below 20 Myr,
-/// 5,651 − 2,473 e^(−0.0278 t) m above, t in Myr. It is the floor unloaded of sediment; the two
+/// The basement depth of floor `age` old, GDH1's (Stein and Stein 1992, Nature 359, 123–129, p.
+/// 126, read by R09.T12's science check; its depths "corrected for sediment thicknesses", p. 124,
+/// after Renkin and Sclater 1988): d = 2,600 + 365 √t m below 20 Myr, 5,651 − 2,473 e^(−0.0278 t)
+/// m above, t in Myr. It is the floor unloaded of sediment; the two
 /// branches meet at 20 Myr within 0.41 m, and at 200 Myr it is 9.5 m short of its asymptote.
 ///
 /// # Panics
@@ -181,7 +185,9 @@ const DRAPE_LATITUDE_LIMIT_DEG: f64 = 72.0;
 /// 0.045 φ²) m, φ in degrees, GlobSed's eq. 2a with its ocean factor 1 (Straume et al. 2019, G³ 20,
 /// 1756–1772), valid to 82 Myr and |φ| ≤ 72°, extended beyond both by the same √t and the
 /// clamped latitude (labelled). It is Earth's biogenic rain; a lifeless ocean's is lower (for the
-/// biosphere plan). 468 m at 81 Myr on the equator.
+/// biosphere plan). 468 m at 81 Myr on the equator. Eq. 2a prints 52 m where the paper's Table 4
+/// gives its world fit's C₁ as 53.02 (the accepted manuscript, as R09.T12's science check read
+/// it); the ruling's 52 is kept.
 ///
 /// # Panics
 ///

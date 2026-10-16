@@ -10,9 +10,11 @@
 //! R09.T12.a writes the crust's populations, about the datum, which stands for sea level until
 //! R09.T12.e places it:
 //!
-//! - **On a mobile lid** (R09.T11 laid out plates), the continental population is plan 14's width
-//!   [`CONTINENTAL_WIDTH`] about [`CONTINENTAL_MEAN`], Earth2014's above −2 km, skewed as a
-//!   log-normal of shape [`CONTINENTAL_SKEW`] so that its mode is Earth2014's +125 m; and the
+//! - **On a mobile lid** (R09.T11 laid out plates), the continental population is a core of
+//!   width [`CONTINENTAL_CORE_WIDTH`] about [`CONTINENTAL_CORE_MEAN`], skewed as a log-normal of
+//!   shape [`CONTINENTAL_SKEW`] so that its mode is Earth2014's +125 m, which with R09.T12.b's
+//!   convergent landforms on it gives the continental crust Earth2014's mean [`CONTINENTAL_MEAN`]
+//!   and width above −2 km; and the
 //!   oceanic crust is the sea floor of [`seafloor`]: GDH1's basement at the floor's steady-state
 //!   age, lifted by its sediment's isostatic load, with the oceanic noise, whose RMS makes the
 //!   oceanic s.d. plan 14's [`OCEANIC_WIDTH`] with GDH1's own spread. Each oceanic cell also gets
@@ -25,6 +27,11 @@
 //!   red field, its degree variance ∝ l^−β₁ from degree 2 with no degree-1 term, β₁ its crust
 //!   class's ([`crust_shape`]), its area mean zero and its area RMS the constant (ruled:
 //!   `decision-r09-t12-coarse.md`'s addendum of 2026-10-16).
+//!
+//! R09.T12.b adds a mobile lid's convergent landforms ([`convergent`]): collisional belts on
+//! continental crust, trenches on a subduction's subducting side, and arcs with their volcanic
+//! fronts behind it, by the overriding crust, their heights scaled by the height factor
+//! h = g⊕ ÷ g ([`convergent::height_factor`]; `decision-r09-t12-coarse.md` item 2), their distances Earth's.
 //!
 //! Each population's spread is the coarse landform noise ([`noise`]), which holds no power finer
 //! than the coarse cell's Nyquist wavelength, the synthesis's structural share owning what is
@@ -42,7 +49,10 @@
 //! - instance 0 ([`noise::LANDFORM_INSTANCE`]): the coarse landform noise, at levels 2 to the
 //!   field's on a mobile lid and 1 to the field's on a stagnant one (whose red field adds the
 //!   level-1 octave and weights the others by its β₁).
+//! - instance 1 ([`convergent::STRIKE_INSTANCE`]), level 5 alone: the convergent landforms'
+//!   along-strike draw.
 
+pub(crate) mod convergent;
 mod noise;
 mod seafloor;
 
@@ -57,27 +67,43 @@ use super::plates::{cell_of, reach, slot};
 use super::{Pass, Working};
 use crate::math;
 use crate::planetary::derive::atmosphere::SurfaceMaterial;
-use crate::planetary::hooks::figures::relief::{
-    CONTINENTAL_WIDTH, OCEANIC_WIDTH, STAGNANT_LID_RELIEF,
-};
+use crate::planetary::hooks::figures::relief::{OCEANIC_WIDTH, STAGNANT_LID_RELIEF};
 use crate::planetary::surface::inputs::{CoarseInputs, TectonicRegime};
 use crate::units::{Metres, Radians};
 
-/// The continental population's mean elevation over sea level, +405 m: Earth2014's cells above
-/// −2 km (Hirt and Rexer 2015, Int. J. Appl. Earth Obs. Geoinf. 39, 103–112, its TBI layer at 5′,
-/// recomputed by `decision-r09-t12-coarse.md`, 2026-10-16: +404.9 m, s.d. 1,084.1 m); Design note
-/// 7's +406 m is superseded.
+/// The continental crust's mean elevation over sea level, +405 m: Earth2014's cells above −2 km
+/// (Hirt and Rexer 2015, Int. J. Appl. Earth Obs. Geoinf. 39, 103–112, its TBI layer at 5′,
+/// recomputed by `decision-r09-t12-coarse.md`, 2026-10-16: +404.9 m, s.d. 1,084.1 m, which plan
+/// 14's [`CONTINENTAL_WIDTH`](crate::planetary::hooks::figures::relief::CONTINENTAL_WIDTH) rounds
+/// to 1.08 km); Design note 7's +406 m is superseded. The
+/// continental population and R09.T12.b's convergent landforms realise it together.
 pub const CONTINENTAL_MEAN: Metres = Metres::new(405.0);
 
-/// The shape s of the continental population's skew, 0.1784: the population is
+/// The continental population's core mean, +222.6 m: [`CONTINENTAL_MEAN`] less the convergent
+/// landforms' mean lift over the continental crust, so that the crust with them keeps Earth2014's
+/// mean (ruled: `decision-r09-t12-coarse.md`'s addendum, item 3, "net the belts out"), calibrated
+/// once on the reference Earth under its reference seed (`reference::SEED`), never per world. There
+/// the belts' plateau profile averages 0.035 over the continental crust and the arcs lift it by
+/// 14.7 m, so the mean μ solves μ + 0.035 09 (5,000 m − μ) + 14.7 m = 405 m
+/// (`calibrate_the_continental_population_net_of_the_landforms`, by hand).
+pub(crate) const CONTINENTAL_CORE_MEAN: Metres = Metres::new(222.6);
+
+/// The continental population's core width, 628.5 m: √(1,084² − 883.2²) m, Earth2014's width
+/// above −2 km less the variance of the convergent landforms' lift over the continental crust on
+/// the reference Earth (the addendum's item 3, calibrated with [`CONTINENTAL_CORE_MEAN`]). Earth2014's
+/// own continents are a narrow core with long tails (an interquartile range of 723 m and a
+/// skewness of 1.20, the addendum's figures), which this core's 0.10 skew does not reach.
+pub(crate) const CONTINENTAL_CORE_WIDTH: Metres = Metres::new(628.5);
+
+/// The shape s of the continental population's skew, 0.1047: the population is
 /// μ + σ (e^(s n) − e^(s² ÷ 2)) ÷ √((e^(s²) − 1) e^(s²)) of a unit normal n, a log-normal shifted
-/// and scaled to Earth2014's mean [`CONTINENTAL_MEAN`] and width [`CONTINENTAL_WIDTH`], whose mode
-/// μ + σ (e^(−s²) − e^(s² ÷ 2)) ÷ √((e^(s²) − 1) e^(s²)) is then Earth2014's land mode, +125 m,
-/// the 250 m bin from 0 to +250 m (Design note 7, recomputed 2026-09-29; 125.06 m, s solved to
-/// four places). An illustration of Earth's skewed land hypsometry (a long upper tail
-/// of uplands over lowlands near sea level), labelled: a Gaussian of that mean puts its mode at
-/// +405 m, between two 250 m bins of nearly equal weight.
-pub(crate) const CONTINENTAL_SKEW: f64 = 0.178_4;
+/// and scaled to the core's mean [`CONTINENTAL_CORE_MEAN`] and width [`CONTINENTAL_CORE_WIDTH`],
+/// whose mode μ + σ (e^(−s²) − e^(s² ÷ 2)) ÷ √((e^(s²) − 1) e^(s²)) is then Earth2014's land mode,
+/// +125 m, the 250 m bin from 0 to +250 m (Design note 7, recomputed 2026-09-29; s solved to four
+/// places, refitted with the core by the addendum's item 3). An illustration of Earth's skewed land
+/// hypsometry, a long upper tail of uplands over lowlands near sea level, labelled: a Gaussian
+/// puts its mode at its mean.
+pub(crate) const CONTINENTAL_SKEW: f64 = 0.104_7;
 
 /// Runs the step on `working`: the coarse elevation of R09.T12.a's populations, each cell's ground
 /// and dry water surface, each oceanic cell's steady-state age and sea floor, and the interim sea
@@ -97,6 +123,7 @@ pub fn run(pass: &Pass<'_>, working: &mut Working) {
             pass.level().get(),
         );
         crust_populations(pass, working, &noise);
+        let _ = convergent::run(pass, working);
     }
     interim_figures(pass, working);
 }
@@ -208,7 +235,9 @@ fn crust_populations(pass: &Pass<'_>, working: &mut Working, noise: &[f64]) {
     for (n, cell) in working.cells.iter_mut().enumerate() {
         let z = match cell.crust {
             Crust::Oceanic => floor[n] + noise_rms * ocean_noise[n],
-            Crust::Continental => CONTINENTAL_MEAN.value() + CONTINENTAL_WIDTH.value() * land[n],
+            Crust::Continental => {
+                CONTINENTAL_CORE_MEAN.value() + CONTINENTAL_CORE_WIDTH.value() * land[n]
+            }
             Crust::Lid | Crust::Province => cell.elevation.value(),
         };
         let z = Metres::new(num::assert_finite(z));
