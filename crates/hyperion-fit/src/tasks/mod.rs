@@ -26,5 +26,6 @@ pub mod sky_phase_envelope;
 pub mod star_colour;
 pub mod stellar_fates;
 pub mod stripping;
+pub mod substance_albedos;
 pub mod type_ia_delay;
 pub mod wd_cooling;

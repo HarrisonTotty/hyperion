@@ -56,6 +56,7 @@ pub mod element;
 pub mod helmholtz;
 pub mod liquid;
 pub mod mix;
+pub mod optics;
 pub mod phase;
 mod rows;
 pub mod thermal;
@@ -77,6 +78,7 @@ pub use liquid::{
     pure_liquid_scattering_per_m,
 };
 pub use mix::{GasColumns, HeatCapacityClass, heat_capacity_over_r, mean_molar_mass_g_per_mol};
+pub use optics::{CondensedOptics, ReferenceForm, ResolvePaletteEntryError, resolve_palette_entry};
 pub use phase::{
     MOLAR_GAS_CONSTANT, Phase, PhaseColumns, ice_ih_density, phase_at, saturation_pressure,
 };

@@ -138,7 +138,7 @@ pub trait FitTask: Sync + std::fmt::Debug {
 }
 
 /// Every task, in name order. A new task is one more entry (see the module's documentation).
-pub static REGISTRY: [&dyn FitTask; 37] = [
+pub static REGISTRY: [&dyn FitTask; 38] = [
     &tasks::binary_cooling_floor::BinaryCoolingFloorTask,
     &tasks::binary_pair_light::C_TASK,
     &tasks::binary_pair_light::D_TASK,
@@ -174,6 +174,7 @@ pub static REGISTRY: [&dyn FitTask; 37] = [
     &tasks::stellar_fates::LOW_TASK,
     &tasks::stellar_fates::MID_TASK,
     &tasks::stripping::StrippingTask,
+    &tasks::substance_albedos::SubstanceAlbedosTask,
     &tasks::type_ia_delay::TypeIaDelayTask,
     &tasks::wd_cooling::WdCoolingTask,
 ];
@@ -293,6 +294,7 @@ mod tests {
                 "stellar_fates_low",
                 "stellar_fates_mid",
                 "stripping",
+                "substance_albedos",
                 "type_ia_delay",
                 "wd_cooling"
             ]

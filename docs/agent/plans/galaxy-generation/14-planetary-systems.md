@@ -282,6 +282,18 @@ pub fn thermal::reference_regolith_thermal_inertia(id: SubstanceId, temperature:
     -> Result<RegolithInertia, EvaluateRegolithInertiaError>; // the family's reference form
 // RegolithInertia::{inertia_j_per_m2_k_sqrt_s, conductivity_w_per_m_k, bulk_density,
 // heat_capacity_j_per_kg_k, contact_ and radiative_conductivity_w_per_m_k, …}.
+// T49.c: the solids' condensed optics in B, V and R at each row's reference form (fresh snow's
+// frost or the lunar regolith), fitted from R08's index files by hyperion-fit's
+// `substance_albedos`, in `substance::optics`; nothing on the record calls them until T54.a.
+impl Substance { pub fn condensed_optics(&self) -> Option<&'static CondensedOptics>; }
+// CondensedOptics::{single_scattering_albedo_bvr, normal_albedo_bvr, spherical_albedo_bvr}()
+// -> [f64; 3]; ::directional_hemispherical_albedo_bvr(i) -> Option<[f64; 3]>, at
+// HEMISPHERICAL_INCIDENCE_COSINES[i]; ::{key, reference_form, index_file, is_stand_in, sources}.
+pub enum ReferenceForm { Frost, Regolith } // ::{of_family, grain_diameter, photometry}
+impl CondensedColumns { pub const fn phase_law(&self) -> PhaseLaw; } // R10's for_family
+pub fn optics::rows() -> impl Iterator<Item = (SubstanceId, &'static CondensedOptics)>;
+pub fn resolve_palette_entry(id: SubstanceId, role: PaletteRole, temperature: Kelvin)
+    -> Result<PaletteEntry, ResolvePaletteEntryError>;
 pub enum Element { H, He, C, N, O, Ne, Na, Mg, Al, Si, P, S, Cl, Ar, K, Ca, Ti, V, Cr, Mn, Fe, Ni, Zn, Kr, Xe }
 ```
 
@@ -16220,3 +16232,248 @@ tables::gauss_legendre`.
   - _Europa's surface age._ T48.c's `ICE_RESURFACING_HEAT_FLOW` is recalibrated at 23, behind
     `MOONS_VERSION`, on the measured Europa under T56.d. It keeps 0.0386 below 23, so Europa's
     60 Myr holds (decision-p14-t56d-membrane §7.2).
+- **Deviations in P14.T49.c, as built: the frosts and the regoliths of R08's index files
+  (`p14-optics`, 2026-10-16).** `GENERATOR_VERSION` stays 22, and no generated value moves.
+  - _The split_ (decision-p14-t49c-split §1, ruled 2026-10-16). T49.c is this commit, part 1 as
+    built with the ruling's four amendments (§1.2). **P14.T49.i** (lab spectra, the infrared, the
+    anchors space weathering does not set; this lane, next) and **P14.T49.j** (the thermal columns
+    and the regolith's inertia law; landed as `substance::thermal`) are the other two parts. The
+    geomorphic columns (k_comp, k_target, erodibility, fluid density) leave 23, a closed set for the
+    composition audit, added by their first reader. The space-weathered anchors (the Moon's
+    highlands and maria, Mercury, Europa's in-range check) move to P14.T51.d.
+  - _Held at 22_ (decision-bump-plan-after-22 §1.2). Nothing on the record calls
+    `substance::optics`. The table `substance_albedo` (task `substance_albedos`, revision 0, fast)
+    is stamped since 22; **P14.T54.a** restamps it `--since 23` and wires `resolve_palette_entry`
+    into the palette's sources. The registry golden gains `[albedo]`, an extension at 22. Until
+    T54.a a changed value re-blesses it and refits the table at the version in force, with no bump.
+  - _Added public items_ (the sim's sketched in Provides, beside T49.j's).
+    - In `hyperion_sim::substance::optics`:
+      - `CondensedOptics` (`key`, `reference_form`, `index_file`, `is_stand_in`,
+        `single_scattering_albedo_bvr`, `normal_albedo_bvr`, `spherical_albedo_bvr`,
+        `directional_hemispherical_albedo_bvr(incidence)`, `sources`), which
+        `Substance::condensed_optics` gives;
+      - `ReferenceForm` (`Frost`, `Regolith`; `of_family`, `grain_diameter`, `photometry`),
+        `Photometry` (`phase_function`, `opposition`, `source`, `opposition_amplitude`),
+        `PhaseFunction` (`HenyeyGreenstein`, `Legendre`; `at`, `asymmetry`), `OppositionEffect`
+        (`None`, `ShadowHiding`), `FRESH_SNOW`, `LUNAR_REGOLITH`, `FRESH_SNOW_GRAIN_DIAMETER`,
+        `REGOLITH_MAX_SINGLE_SCATTERING_ALBEDO`;
+      - `HEMISPHERICAL_INCIDENCE_COSINES`, `ALBEDO_ROW_LEN`, `BAND_WAVELENGTHS_NM`, `rows()`;
+      - `resolve_palette_entry(id, role, temperature)` and `ResolvePaletteEntryError`, re-exported
+        at `substance::` with `CondensedOptics` and `ReferenceForm`;
+      - `CondensedColumns::phase_law`, R10's `PhaseLaw::for_family` of the row's family.
+    - In `hyperion-fit`'s `tasks::substance_albedos`: `VERSION`, `ITEMS`, `item_name`,
+      `single_scattering_albedo`, `h_function`, `isotropic_plane_albedo`,
+      `similar_isotropic_albedo`, `energy_albedos`, `Medium` (`new`, `from_parts`,
+      `opposition_amplitude`, `normal_albedo`, `directional_hemispherical_albedo`,
+      `spherical_albedo`), `AlbedoRow`, `row_optics`, `index_at`, `row_files`,
+      `row_index(id, file)`, `FitAlbedoError`, `fit(manifest)`, `render` and `SubstanceAlbedosTask`.
+  - _The model._ For each row and band (440, 550 and 640 nm), from the index file's n and k found by
+    wavelength on the file's own grid:
+    - w is Hapke's equivalent slab with no internal scatterers and Hapke 2012's surface-reflection
+      fits (`S_e`, `S_i` from R(0)), read through Davalos 2026 (RMxAA 62, 197, eqs. 7–14) and
+      Lapotre et al. 2017 (eqs. 4 and 7–10). Every reproduction of the older `S_i` ≈ 1 − 4 ÷ [n(n +
+      1)²] prints 1.014 − … (Lucey 1998's), so Hapke 2012's fits are taken;
+    - **`A_N`** is Hapke's IMSA (Hapke, Denevi, Sato, Braden and Robinson 2012, eqs. 2–4, read
+      through the Wayback Machine's copy of the publisher's text), with Chandrasekhar's exact
+      H-function by its integral representation (Kawabata 2016, eqs. 2–3; tested to his Tables 2, 3
+      and 6 to 10⁻⁸), no roughness (R10 draws the relief) and no coherent backscatter: the model
+      both reference forms' photometry was fitted with;
+    - **the directional-hemispherical and spherical albedos** (amendment 1, decision-p14-t49c-split
+      §1.2 and §5.1) are the similarity relation's: an isotropic medium of w* = w (1 − ξ) ÷ (1 −
+      wξ), ξ the phase function's asymmetry (+0.503 for the frost's lobe, −b ÷ 3 = −0.11 for the
+      lunar Legendre function, Hapke's g being the phase angle), whose plane albedo is exactly 1 −
+      √(1 − w*) H(μ₀; w*), with no opposition term (van de Hulst 1974, A&A 35, 209, eq. 14, p. 211,
+      read in the ADS scan: the isotropic medium that keeps his similarity parameter s = √[(1 − a) ÷
+      (1 − ag)], eq. 13). Its spherical albedo is within 0.004 of the anisotropic medium's, each
+      within 0.002 of his z(s) (summary, p. 209; §3, Fig. 1c, p. 212), shown for Henyey–Greenstein
+      media of g 0 to 0.875 (§3, p. 211): the frost's lobe lies inside, and the regolith's
+      backscattering Legendre function (ξ −0.11, a P₂ coefficient of 0.37) extrapolates his test.
+      Its directional-hemispherical albedo is an approximation (§4, p. 213; below). The IMSA's own
+      albedos were 11% low for a lossless frost (0.88) and above 1 on a bright regolith (1.03 at w →
+      1); they serve the energy test of `A_N` alone;
+    - why the IMSA and not Hapke 2002's AMSA for `A_N`: both reference forms' photometry was fitted
+      under the IMSA, and the AMSA (its P(μ) and P̄ confirmed through Déau 2007's thesis, eq. E.79,
+      and an energy check of P̄'s sign) gave a lossless frost 1.6% more than it receives at normal
+      incidence.
+  - _The reference forms._
+    - **Frost** (water and volatile ices; R10's "fresh snow or fine frost", decision-p14-t49c-split
+      §5.9): newly fallen snow's photometry with no opposition effect, one forward Henyey–Greenstein
+      lobe of asymmetry 0.503 (Domingue, Hartman and Verbiscer 1997, Table III), grains of 100 µm
+      (Wiscombe and Warren 1980's new snow, r 50 µm, p. 2714).
+    - **Regolith** (every other family): the Moon's average terrains' photometry (Helfenstein and
+      Veverka 1987, Table 1: Legendre b 0.33, c 0.37; S(0) 0.78, h 0.06), the shadow-hiding
+      amplitude `B₀` = S(0) ÷ (w p(0)) **held at 1** (Hapke et al. 2012, ¶21: 0 ≤ `B_S0` ≤ 1; their
+      ¶31 puts the Moon's fitted excess in the coherent backscatter), grains of 70 µm: **the one
+      constant `substance::thermal::LUNAR_SOIL_GRAIN_DIAMETER`**, P14.T49.j's silicate regolith's
+      (the Lunar Sourcebook's average median, p. 478), which `ReferenceForm::Regolith` reads.
+      T49.j's tripwire (`substance_thermal_nothing_on_the_record_reads_the_inertia_yet`) gains a
+      `SHARED` list that passes that one path, `super::thermal::LUNAR_SOIL_GRAIN_DIAMETER`, on
+      `substance/optics.rs`'s lines and nothing else there; its held list stays empty. The grain's
+      citation is repeated in `rows/optics.rs`'s `REGOLITH_GRAINS`, not shared (thermal's sits
+      inline in its row's sources). The photometry was fitted at w 0.12–0.33 and is extrapolated
+      above it (below).
+    - The two photometries split the families as R10's `for_family` does (frost ⇔ the `Ice` law),
+      which a test holds; neither is `Lambert`.
+  - _The rows_, in registry order: `H2O`, `CH4`, `NH3`, `N2`, `O2`, `CO2`, `Ar`, `CO`, `H2S`,
+    `NH4SH` (frosts) and `ZnS`, `Na2S`, `MnS`, `MgSiO3`, `Mg2SiO4`, `CaTiO3`, `tholin`, `basalt`,
+    `basalt_fe`, `lava_glass` (regoliths). Their normal albedos in V: the lossless frosts (`NH3`
+    among them, at R08.T5.i's k = 0) 0.959 (`CO2` 0.955, `H2O` 0.949, bluish: 0.958, 0.949 and 0.938
+    in B, V and R), `ZnS` 0.769, `MgSiO3` 0.623, `Mg2SiO4` 0.264, `basalt_fe` 0.189, `lava_glass`
+    0.168, `MnS` 0.127, `basalt` 0.093, `CaTiO3` 0.092, `Na2S` 0.058 and `tholin` 0.051. Their
+    spherical albedos in V: the lossless frosts 1.000, `CO2` 0.996, `H2O` 0.991 (0.998, 0.991 and
+    0.981 in B, V and R), `ZnS` 0.675 (0.173 in B, below), `MgSiO3` 0.552, `Mg2SiO4` 0.187,
+    `basalt_fe` 0.116, `lava_glass` 0.101, `MnS` 0.075, `basalt` 0.053, `CaTiO3` 0.052, `Na2S` 0.032
+    and `tholin` 0.028.
+    - **Stand-ins** (amendment 2, decision-p14-t49c-split §5.3 and §5.10): a row's provenance is the
+      stricter of its file's flag and the ruling's finding. `NH3` (Martonchik, Orton and Appleby
+      1984's visible k a linear interpolation in k, no measurement) and `CaTiO3` (Ueda et al. 1998's
+      sub-gap k a Kramers–Kronig value) are stand-ins by their files' own flags: R08.T5.i, merged
+      before this commit, flagged both, drew ammonia's k as 0 (an upper bound on its brightness,
+      where the old fill gave a dark frost of `A_N` 0.285) and kept titanate's as an upper bound on
+      its absorption, so no override remains for them. `Na2S`'s and `basalt_fe`'s sources gain the
+      reason they are too dark and too bright. No value is overridden.
+    - **`CH4` and `Ar` are stand-ins too** (the lane's reading, not named by the ruling): their
+      files say measured, but methane's visible k of 0 is "a gap in the source, not a measurement"
+      (its file's reduction) and argon's source gives n only, with k = 0 stated. Both fit §7's rule
+      ("a row whose file's visible k is not a measurement of its absorption is labelled a stand-in")
+      and §5.6's "k = 0 stand-ins", though §1.2 names only four rows; both take w = 1, an upper
+      bound, so `is_stand_in()` says so to T51.b and T54.a's bless note. Reversible by one flag
+      each; main's to confirm. Eleven of the twenty rows are stand-ins.
+    - **Not modelled** (closed set, for the composition audit; `rows/optics.rs` names each with its
+      reason; P14.T49.i's): every row without an index file; the transparent minerals (`Al2O3`,
+      `KCl`, `NaCl`, `SiO2`, `S8`, and `TiO2`, whose w in V and R passes the lunar photometry's
+      limit, 0.9995); the opaque solids with k above 0.1 (`Fe`, `Cr`, `graphite`, `FeS`, `soot`),
+      0.1 being the lane's threshold for the slab's k ≪ 1 (Emran and Chevrier 2022, pp. 3–4, give no
+      number); `mars_dust`, whose grains (0.1–2 µm) are below geometric optics; and the giant
+      planets' hazes. `REGOLITH_MAX_SINGLE_SCATTERING_ALBEDO` = 0.9995 is the lane's computation:
+      under the lunar photometry the IMSA's `A_h`(1) passes 1 between w 0.9995 and 0.9998, an energy
+      bound and not a calibration limit.
+    - **One grain class** per form (decision-p14-t49c-split §3): the visible does not depend on
+      grain size; the classes are deferred to the infrared, with their size, not dropped.
+  - _The anchors_ (decision-p14-t49c-split §1.2), against each row's reference form:
+    - Enceladus: `H2O`'s `A_N` in B and V within 0.9–1.4 (Verbiscer and Veverka 1994, abstract). The
+      convention: the anchor is a normal albedo, the column's quantity; NASA's Saturnian satellite
+      fact sheet gives Enceladus's visual geometric albedo as 1.0, the 1.08 beside it being its mass
+      in 10²⁰ kg (the plan's "1.08 geometric in V" took the mass column), and 1.375 ± 0.008 at 550
+      nm at true opposition, the surge included (Verbiscer et al. 2007, read through a secondary);
+    - Pluto's N₂ plains: `N2`'s in V and R within 0.8–1.0 (Buratti et al. 2017, pp. 10, 17–18);
+    - Europa, **as a bound**: its normal reflectances, 0.48–0.85, all below `H2O`'s; its in-range
+      check is P14.T51.d's.
+  - _Tests_, as the plan lists them and as decision-p14-t49c-split §1.2 amends them:
+    - every row's IMSA `A_h` at μ₀ = 1, 0.5, 0.2 and 0.05, from the same w, phase function and
+      opposition amplitude as its `A_N`, at most 1 in every band, and `A_N` at most 1.35
+      (decision-r10-limb §4), in the fit; the tabled albedos in (0, 1], in the sim and the fit;
+    - a lossless row's tabled `A_h` and spherical albedo 1 to 10⁻⁶; `H2O`'s `A_h` in V at μ₀ = 0.5
+      within 0.95–1.0 (0.992; fresh snow 0.96–0.98, Grenfell, Warren and Mullen 1994);
+    - every row names its sources and their basis (the fit, the photometry, the grain size, the
+      index file by name);
+    - the similarity relation against van de Hulst 1974's exact media (Table 1, p. 212, and Table 2,
+      p. 213): the isotropic spherical and plane albedos within 6 × 10⁻⁵ of his printed values, and
+      a Henyey–Greenstein medium's spherical albedo within 0.004 (+0.0009, +0.0016, +0.0028 and
+      +0.0001 at his four), the sum of his two "at most 0.002"; his plane albedo, which the relation
+      does not keep, within 0.015, 0.045 and 0.02 at μ = 1 and 0.5 (below). The ruling's optional
+      frost case, "within 2 %": at a 0.99, g 0.75 the spherical albedo is 0.02% off, the plane
+      albedo 3% at μ = 1 and 1% at 0.5, so the 2% holds for the quantity T51.b reads and not for
+      `A_h` at normal incidence;
+    - the index found by wavelength (a node's values, the midpoint's geometric-mean k, k linear to a
+      zero node, nothing off the grid), and the refusals of a file off its grid, an n below 1 and a
+      manifest whose `materials` are not the rows' files; the acceptance line refused past its
+      bounds (and with no row), so that the table's header is true when written; and
+      `tests/substance_albedos.rs`, the committed table reproduced end to end by the pipeline's
+      `rerender`, as `tests/liquid_optics.rs` holds T49.h's;
+    - the H-function against Kawabata 2016 and its zeroth moment; the hemisphere's quadrature exact,
+      to 10⁻⁷, for isotropic grains (`A_h` = 1 − √(1 − w) H(μ₀)), and the similarity relation's
+      medium the grain's own when ξ = 0;
+    - Hapke et al. 2012's lunar normal albedos reproduced from their own Table 1 parameters within
+      2% (the closed form with their Hapke 1981 H and coherent backscatter gives 0.238 for their
+      0.240 at 566 nm), and decision-r10-limb's 1.351 for Enceladus;
+    - the palette entry resolved for water ice and a basalt crust (and carbon dioxide frost in the
+      doctest), and refused for a liquid, a row without optics, a row without condensed columns, a
+      solid above its triple point and a temperature that is not finite. A liquid entry is not
+      resolved here (`LiquidNotModelled`): the ruled entry resolves "from these and T49.b's
+      condensed columns", the solids'; a liquid's record and Fresnel albedo are P14.T49.h's
+      `liquid_properties`, which P14.T54.a builds into the palette, and its Bond albedo is
+      P14.T51.b's r_d (decision-p14-t49c-split §2);
+    - **a tripwire**, `substance_optics_nothing_on_the_record_reads_the_held_columns_yet` (amendment
+      4, decision-p14-t49c-split §8.2). It walks `hyperion-sim/src` with T49.j's tripwire's helpers
+      (`rust_files`, `out_of_line_test_modules`, `before_inline_tests`, now visible to the substance
+      module), leaving out each inline test module, every file an out-of-line test module declares,
+      comment lines, `substance/mod.rs`'s declaring lines and the optics' own three files, and
+      matches with every whitespace removed, so that a chain rustfmt splits is found. Outside
+      `substance/` it fails on `condensed_optics(`, `resolve_palette_entry(`,
+      `Substance::condensed`, `.substance().condensed()`, `CondensedColumns`, `.grain_density(`,
+      `Substance::grain_density`, `.phase_law()` and the optics' paths and types
+      (`substance::optics`, `super::optics`, `optics::rows(`, `CondensedOptics`, `ReferenceForm`,
+      `ResolvePaletteEntryError`, `substance_albedo::`); inside it, which reads the condensed
+      columns itself, on the optics' own ten. A second test holds the scan to a split chain, an
+      out-of-line test module's declaration and a test-only item.
+    - **Its held list is not empty** (the ruling's §1.2 item 4 has it start empty; main's order of
+      2026-10-16): it passes P14.T51.a's `planetary/chem/partition.rs` (whose held follow-up calls
+      the condensed columns behind the p14-snapshot hold; the file at 93a0e0fd names none) and
+      P14.T51.c's `planetary/hooks/crust.rs` (a pure module nothing calls until P14.T54.a, which
+      reads its lid's first melt through `.condensed()`). Each entry names what holds it, and the
+      test asserts each is a source file. P14.T51.b adds `planetary/derive/photometry.rs`.
+      **P14.T54.a deletes the tripwire** with the other holds.
+  - _Acceptance:_ the plan's two commands, which select every new unit test and doctest, and
+    `cargo test -p hyperion-sim --features testing --test substance_golden` and
+    `cargo run -p hyperion-fit -- check`.
+  - _The index files_ (amendment 3, decision-p14-t49c-split §8.1), at R08.T5.i's versions, are read
+    in place through P14.T49.h's shared `hyperion-fit` `materials` module: each row's file is
+    listed, in the rows' registry order, in the manifest's `materials`, whose data hashes the inputs
+    hash covers, and the task refuses a manifest whose list is not the rows'. The fingerprint probes
+    the sim's side alone: the bands, the four incidence cosines, each reference form's constants,
+    evaluated phase function, asymmetry and opposition amplitude, and each row's form. The run
+    refuses a fit whose highest `A_N` passes 1.35 or `A_h` passes 1, so the table's acceptance line
+    is true when written. This lane's own `include_str!` reader was not committed.
+  - _Files beyond the task's_: `substance/rows/optics.rs` (the rows' data), `substance/mod.rs`,
+    `substance/rows.rs`, `substance/thermal.rs` (`pub(super) mod tests`) and
+    `substance/thermal/tests.rs` (its tripwire's `SHARED` pass and its walk's helpers, shared),
+    `tests/substance_golden.rs` and its golden, `tables/mod.rs`; in `hyperion-fit`,
+    `src/tasks/substance_albedos/tests.rs`, `tests/substance_albedos.rs`, `src/task.rs`,
+    `src/tasks/mod.rs`, `manifests/substance_albedos.toml` and `tables.lock`.
+- **Deferred findings (2026-10-13 rule)**, from P14.T49.c, as decision-p14-t49c-split §5 routes
+  them:
+  - _No infrared_ (§5.2): R08's files stop at 780 nm, so the table holds B, V and R only. A Bond
+    albedo over a star's spectrum needs the near infrared, where ice absorbs; P14.T49.i's, inside
+    23, before P14.T57.a and P14.T54.a.
+  - _Lossless grains_ (§5.6): the files with k = 0 (N₂, O₂, CO, H₂S and NH₄SH stand-ins, NH₃'s since
+    R08.T5.i, argon's n-only source, and methane's gap) give w = 1, an upper bound: real frosts
+    carry impurities, solid O₂ is pale blue and CH₄ ice has weak visible bands (from memory). Notes
+    for R08, and P14.T49.i's infrared.
+  - _The lunar photometry beyond its fit_ (§5.4, to P14.T49.i): H&V87's solutions span w 0.12–0.33;
+    the bright regoliths' `A_N` rests on it extrapolated, about 30% above isotropic grains with no
+    surge for `ZnS`, `MgSiO3` and `Mg2SiO4`. The energy albedos barely depend on it. With the `B₀`
+    bound, H&V's own average and bright terrains give `A_N` 0.113 and 0.153, inside their classes,
+    and the dark 0.047, below its 0.06–0.09.
+  - _R10's reference for the forms' factors_ (§5.5): `FRESH_SNOW_V` = 0.97, a hemispherical albedo,
+    against `H2O`'s normal 0.949; the two are different quantities, and `H2O`'s similarity `A_h` is
+    about 0.99. T54.a's bless note and R10's next re-validation.
+  - _R09's reference rows_ (§5.8, for P14.T54.a's bless note): `basalt` 0.10 → 0.093 in V,
+    `basalt_fe` 0.10 → 0.189 (a simulant's stand-in), water ice 0.965 → 0.949, CO₂ ice 0.6 → 0.955
+    (pure frost; Mars's caps are dusty, dust cover not modelled). `granite`, `feldspathic`,
+    `phyllosilicate`, `Na2CO3` and `mars_dust` are P14.T49.i's, with no hand values at 23 (§4).
+  - _The model's primaries_ (§5.7): Hapke 1981, 1986, 1993, 2001, 2002 and 2012 were not reached;
+    each formula rests on the reproductions named. The fresh-snow photometry was fitted with Hapke
+    1981's H; with the exact H a lossless frost's `A_N` is 0.959, against 1.028 with H₁₉₈₁.
+    Helfenstein and Veverka 1987 is their conference abstract (NTRS 19870013999). Verbiscer and
+    Veverka 1990, Buratti and Veverka 1983 and Verbiscer and Veverka 1994 were read as abstracts.
+  - _The similar plane albedo_ (to P14.T49.i, with the infrared): van de Hulst's similarity keeps
+    the spherical albedo, not the plane albedo (1974, summary, p. 209; §4, p. 213). Against his
+    exact Henyey–Greenstein media the table's `A_h` is too high near normal incidence and too low
+    toward grazing: at a 0.99, g 0.75, +0.017 (3%) at μ 1, −0.0075 at 0.5, −0.040 at 0.1 and −0.060
+    at 0 (about −0.027 and −0.050 at the table's μ₀ 0.2 and 0.05, interpolating his values); at a
+    0.9, g 0.875, +0.040 (46%) at 1, −0.009 at 0.5 and −0.31 (−50%) at 0. The table's frosts sit
+    near w 1 (the lossless ones exact) and its regoliths near isotropic (ξ −0.11), where the
+    relation is exact at ξ = 0; an absorbing forward-scattering frost would sit between his two
+    examples (before R08.T5.i, `NH3` at w 0.89–0.90, s about 0.44). A reader that needs `A_h` at one
+    incidence better than that needs an anisotropic multiple-scattering solution; T51.b's Bond
+    albedo reads the spherical albedo.
+  - _`ZnS` in B_ (for R08.T5.i): w 0.53, `A_N` 0.25 and the spherical albedo 0.173 at 440 nm,
+    against w 0.97, `A_N` 0.77 and the spherical albedo 0.675 in V, from `zinc-sulphide.json`'s k of
+    9.0 × 10⁻⁵ at 440 nm, its reduction's log-k interpolation from the source's 0.04 at 413 nm,
+    which the file calls suspect (longward of cubic ZnS's band gap, near 340–350 nm, 3.5–3.7 eV; the
+    figure not read in a handbook here, R08.T5.i's to cite), to 7.4 × 10⁻⁶ at 451 nm. The row stays
+    measured, as its file says, with no ruling to make it a stand-in; a corrected file moves it at a
+    refit.
+  - _Space weathering_ (§5.11) is not in any row, by design: a fresh basalt regolith's `A_N`, 0.093,
+    sits at the top of the mature maria's 0.06–0.09. P14.T51.d's.

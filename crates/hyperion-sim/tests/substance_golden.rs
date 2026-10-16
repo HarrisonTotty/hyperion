@@ -7,9 +7,10 @@
 //!   molecular constants, and `c_p` ÷ R, H̃ and S̃ at fixed temperatures; P14.T49.b), its phase
 //!   columns, its phase diagram (its points, anchors, curve, densities and enthalpies at fixed
 //!   fractions of its triple and critical temperatures; P14.T49.b), and its condensed columns
-//!   (grain density, transition and mechanics family; P14.T49.b). A changed value is moved output,
-//!   which bumps the version; until P14.T54.a nothing on the record reads the diagram and
-//!   condensed sections, which re-bless at the version in force.
+//!   (grain density, transition and mechanics family; P14.T49.b), and its condensed optics (each
+//!   modelled row's reference form, index file, phase law and fitted albedos; P14.T49.c). A changed
+//!   value is moved output, which bumps the version; until P14.T54.a nothing on the record reads
+//!   the diagram, condensed and albedo sections, which re-bless at the version in force.
 //! - `packages/protocol/fixtures/substances.json` mirrors the rows for the client (index, key,
 //!   kind, molar mass, `c_p` ÷ R and the three optics flags), which rendering plan R08's parity
 //!   check and P14.T35.e's decode tests read. `just bless` (`HYPERION_BLESS=1`) writes it, and
@@ -357,6 +358,54 @@ fn condensed_section(w: &mut GoldenWriter) {
     }
 }
 
+/// The golden's albedo section: each row with condensed optics, its reference form, its index file
+/// (a stand-in or not), its phase law, and its fitted values in B, V and R: w, the normal albedo,
+/// the spherical albedo and the directional-hemispherical albedo at each incidence (P14.T49.c).
+fn albedo_section(w: &mut GoldenWriter) {
+    w.line("[albedo]");
+    for (id, optics) in substance::optics::rows() {
+        let label = format!("albedo {} {}", id.index(), id.substance().key());
+        let law = id
+            .substance()
+            .condensed()
+            .expect("a row with optics has condensed columns")
+            .phase_law();
+        w.line(&format!(
+            "{label}: {:?} from {}{}, phase law {law:?}",
+            optics.reference_form(),
+            optics.index_file(),
+            if optics.is_stand_in() {
+                " (stand-in)"
+            } else {
+                ""
+            }
+        ));
+        for (name, values) in [
+            ("w", optics.single_scattering_albedo_bvr()),
+            ("normal_albedo", optics.normal_albedo_bvr()),
+            ("spherical_albedo", optics.spherical_albedo_bvr()),
+        ] {
+            for (band, value) in ["B", "V", "R"].into_iter().zip(values) {
+                w.f64(&format!("{label}: {name} {band}"), value);
+            }
+        }
+        for (incidence, mu0) in substance::optics::HEMISPHERICAL_INCIDENCE_COSINES
+            .into_iter()
+            .enumerate()
+        {
+            let values = optics
+                .directional_hemispherical_albedo_bvr(incidence)
+                .expect("each incidence has its albedos");
+            for (band, value) in ["B", "V", "R"].into_iter().zip(values) {
+                w.f64(
+                    &format!("{label}: hemispherical_albedo at mu0 {mu0} {band}"),
+                    value,
+                );
+            }
+        }
+    }
+}
+
 /// The golden's text.
 fn registry_golden() -> String {
     let mut w = GoldenWriter::new();
@@ -424,6 +473,7 @@ fn registry_golden() -> String {
     }
     diagram_section(&mut w);
     condensed_section(&mut w);
+    albedo_section(&mut w);
     w.finish()
 }
 

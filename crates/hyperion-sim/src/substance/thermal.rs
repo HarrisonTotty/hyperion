@@ -93,7 +93,7 @@ use crate::units::{Kelvin, KilogramsPerCubicMetre, Metres, Pascals};
 
 mod rows;
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
 
 /// How one piece of a thermal column follows temperature.
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -491,6 +491,16 @@ fn substance_thermal_columns_name_their_sources() {
 /// The files whose calls of this module sit behind a named hold, each with its hold: none yet.
 const HELD: &[(&str, &str)] = &[];
 
+/// The constants of this module that another module shares, each with the file that reads it and
+/// the path by which it does: P14.T49.c's condensed optics take their regolith's grains from
+/// [`super::LUNAR_SOIL_GRAIN_DIAMETER`], the one 70 µm grain of both (main, 2026-10-16: "share
+/// one, don't duplicate it"). The tripwire passes that path on that file's lines, and nothing
+/// else there.
+const SHARED: [(&str, &str); 1] = [(
+    "substance/optics.rs",
+    "super::thermal::LUNAR_SOIL_GRAIN_DIAMETER",
+)];
+
 /// The forms by which other code would name this module's API: its unambiguous calls and its
 /// paths (decision-p14-t49c-split §8.2: never bare words such as `.thermal()`).
 const API_PATTERNS: [&str; 5] = [
@@ -532,7 +542,7 @@ fn test_module(lines: &[&str], index: usize) -> Option<(String, bool)> {
 
 /// The paths, relative to the crate's `src/`, of the test modules `relative` declares out of line:
 /// each one's `name.rs` beside the declaring module's children, and its `name/` directory.
-fn out_of_line_test_modules(relative: &str, text: &str) -> Vec<String> {
+pub(in crate::substance) fn out_of_line_test_modules(relative: &str, text: &str) -> Vec<String> {
     let lines: Vec<&str> = text.lines().collect();
     let directory = if relative == "lib.rs" {
         String::new()
@@ -552,7 +562,7 @@ fn out_of_line_test_modules(relative: &str, text: &str) -> Vec<String> {
 }
 
 /// The lines of `text` before its inline test module, the first `#[cfg(test)]` of a `mod name {`.
-fn before_inline_tests(text: &str) -> Vec<&str> {
+pub(in crate::substance) fn before_inline_tests(text: &str) -> Vec<&str> {
     let lines: Vec<&str> = text.lines().collect();
     let end = (0..lines.len())
         .find(|&index| matches!(test_module(&lines, index), Some((_, true))))
@@ -561,7 +571,11 @@ fn before_inline_tests(text: &str) -> Vec<&str> {
 }
 
 /// Every `.rs` file under `dir`, in sorted order, as paths relative to `root` joined by `/`.
-fn rust_files(root: &Path, dir: &Path, found: &mut Vec<(String, PathBuf)>) {
+pub(in crate::substance) fn rust_files(
+    root: &Path,
+    dir: &Path,
+    found: &mut Vec<(String, PathBuf)>,
+) {
     let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
         .map(|entry| entry.expect("a directory entry reads").path())
@@ -588,9 +602,10 @@ fn rust_files(root: &Path, dir: &Path, found: &mut Vec<(String, PathBuf)>) {
 /// No code of the crate outside this module names its API ([`API_PATTERNS`]). Every file of
 /// `src/` is read, in sorted order, but this module's own, the declaring lines of
 /// `substance/mod.rs` ([`DECLARATIONS`]), comment lines, each inline test module (from its
-/// `#[cfg(test)]`), every file an out-of-line test module declares, and the files held behind a
-/// named hold ([`HELD`], empty). `hyperion-fit` and `hyperion-server`, which depend on the sim, are
-/// left to review: a fitted table would hold this module's numbers, not its calls.
+/// `#[cfg(test)]`), every file an out-of-line test module declares, the files held behind a named
+/// hold ([`HELD`], empty) and, in its one file, a shared constant's path ([`SHARED`]).
+/// `hyperion-fit` and `hyperion-server`, which depend on the sim, are left to review: a fitted
+/// table would hold this module's numbers, not its calls.
 #[test]
 fn substance_thermal_nothing_on_the_record_reads_the_inertia_yet() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -608,6 +623,14 @@ fn substance_thermal_nothing_on_the_record_reads_the_inertia_yet() {
         std::fs::read_to_string(path)
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
     };
+    for (file, path) in SHARED {
+        assert!(
+            files
+                .iter()
+                .any(|(relative, source)| relative == file && read(source).contains(path)),
+            "{file} reads {path}"
+        );
+    }
     let mut tests = Vec::new();
     for (relative, path) in &files {
         tests.extend(out_of_line_test_modules(relative, &read(path)));
@@ -637,6 +660,10 @@ fn substance_thermal_nothing_on_the_record_reads_the_inertia_yet() {
             if code.starts_with("//") || declaration {
                 continue;
             }
+            let line = SHARED
+                .iter()
+                .filter(|(file, _)| file == relative)
+                .fold((*line).to_owned(), |line, (_, path)| line.replace(path, ""));
             for pattern in API_PATTERNS {
                 if line.contains(pattern) {
                     readers.push(format!("{relative}:{}: {pattern}", n + 1));

@@ -419,6 +419,18 @@ provisional = false
 acceptance = "at the centres of 330 cells, the share within 0.0688 of the exact (median 6.5e-4), the core-helium-burning radius within 0.023 relative where the cell's four radii agree to 25% (62 cells spread more)"
 
 [[table]]
+name = "substance_albedos"
+path = "substance_albedo.rs"
+task = "substance_albedos"
+revision = 0
+inputs_sha256 = "c15300b202ebf31c32cec387abd18a91f1a78e7027f1cf26f228e01ec0ca6c17"
+body_sha256 = "73adc51ea971705a54c1044b08920895bf665f85423e6246750739d7cf90c168"
+fingerprint = [440.0, 550.0, 640.0, 1.0, 0.5, 0.2, 0.05, 0.0001, 0.503, 0.2200079769491843, 0.532579056190227, 6.084798529608233, 0.503, 0.0, 0.0, 0.00007, 0.33, 0.37, 0.78, 0.06, 1.7000000000000002, 0.815, 1.04, -0.11, 1.0, 0.5098039215686274, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+since_generator_version = 22
+provisional = false
+acceptance = "20 rows (10 frosts, 10 regoliths); the highest `A_N` 0.9594 (`CH4`), the highest `A_h` 1.0000 (`CH4`, B at μ₀ = 1), both within the bounds of 1.35 and 1; `A_N` in V: `H2O` 0.949, `CH4` 0.959, `NH3` 0.959, `N2` 0.959, `O2` 0.959, `CO2` 0.955, `Ar` 0.959, `CO` 0.959, `H2S` 0.959, `NH4SH` 0.959, `ZnS` 0.769, `Na2S` 0.058, `MnS` 0.127, `MgSiO3` 0.623, `Mg2SiO4` 0.264, `CaTiO3` 0.092, `tholin` 0.051, `basalt` 0.093, `basalt_fe` 0.189, `lava_glass` 0.168"
+
+[[table]]
 name = "type_ia_delay"
 path = "type_ia_delay.rs"
 task = "type_ia_delay"
