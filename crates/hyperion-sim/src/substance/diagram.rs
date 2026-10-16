@@ -45,7 +45,7 @@ use crate::math;
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
 
 /// The Avogadro constant, mol⁻¹ (exact in the 2019 SI).
-const AVOGADRO_PER_MOL: f64 = 6.022_140_76e23;
+pub(super) const AVOGADRO_PER_MOL: f64 = 6.022_140_76e23;
 
 /// Bisections of [`PhaseDiagram::saturation_temperature`]: 64 halve a bracket of a thousand
 /// kelvin to under 10⁻¹⁶ K, past the last bit of a temperature.

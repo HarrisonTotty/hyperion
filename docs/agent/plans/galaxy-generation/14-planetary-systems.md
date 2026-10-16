@@ -16477,3 +16477,230 @@ tables::gauss_legendre`.
     refit.
   - _Space weathering_ (§5.11) is not in any row, by design: a fresh basalt regolith's `A_N`, 0.093,
     sits at the top of the mature maria's 0.06–0.09. P14.T51.d's.
+- **Deviations in P14.T49.h, as built: step 2, the pure fluids' transport and scattering, and the
+  fill (`p14-liquids`, 2026-10-16).** `GENERATOR_VERSION` stays 22. Nothing on the record reads
+  `liquid_properties` or `tables::liquid_optics` before P14.T54.a (decision-bump-plan-after-22
+  §1.2), so `liquids.golden` is re-blessed at 22, and `liquid_optics` refitted by
+  decision-p14-t49h-liquids §5. The fill re-blesses `wire/payloads.golden` at 22, before the
+  serve gate (decision-r10-t10b-r09-t2e §7, condition 2).
+  - _Rulings taken_ (decision-p14-t49h-gas-index, 2026-10-16, on this step's two questions):
+    - **The nine rows with no R08 file stay `NotALiquid`.** R08.T5.k writes their nine liquid
+      files with R08's materials tool, each a measured index where one exists or a scaled molar
+      refraction (its §1.2 and §2.3); fallback (A), a Rust copy of R08's gas data, is refused.
+      **Step 2b** wires them after T5.k lands: `liquid_optics`' manifest, `FILES` and `ITEMS` grow
+      to sixteen files, the nine rows gain `LiquidOptics` (Ar, Kr and Xe with `index_checked`
+      windows over Sinnock and Smith's tables), §5 refits the table and `liquids.golden` is
+      re-blessed at 22. If T5.k slips past T54.a, the palette leaves those entries' `liquid` as
+      `None` and the wiring rides 23 → 24 (§1.3).
+    - **Carbon dioxide's columns are built and not yet listed** (§1.3): its κ_T (Span and Wagner
+      1996), surface tension and viscosity (Laesecke and Muzny 2017) are tested, and the row
+      answers `NotALiquid` until its index lands in step 2b.
+    - **The depolarisation is the liquid's, from an anisotropy ratio x** (§3–§4), an algorithm
+      change made in this step: `LiquidScattering` carries x in place of a fixed δ, and at the
+      record's state the sim takes `S_0` = ρ R T κ_T (the equation's own R, so 1 ÷ (1 + 2δφʳ_δ +
+      δ²φʳ_δδ)), `ρ_v` = (x ÷ 15) ÷ (`S_0` + 4x ÷ 45) and δ = 2`ρ_v` ÷ (1 + `ρ_v`). Water keeps
+      §7(g)'s 0.039, as x = 0.019 027 at 298.15 K (δ 0.0378 at the triple point, 0.0391 at 20 °C,
+      0.0302 at 100 °C). Methane takes x = 0.006, CCl₄'s calibrated interaction part (δ about
+      0.025 at its triple point); nitrogen, carbon dioxide, ethane and ammonia take the gas's x
+      from its measured `ρ_v` plus 0.006 (δ about 0.38, 0.46, 0.29 and 0.07 at their triple
+      points, nitrogen's 0.25 at 77 K). b is `Derived` for all five.
+  - _The equations of state_ (`substance/rows/equations.rs`). Setzmann and Wagner 1991 (CH4),
+    Span et al. 2000 (N2), Bücker and Wagner 2006 (C2H6), Gao et al. 2023 (NH3) and Span and
+    Wagner 1996 (CO2), their residuals' 182 terms as CoolProp's fluid files hold them (the files
+    T49.b's diagrams read, MIT), each number the file's shortest round-trip decimal. The files'
+    SHA-256: `Methane.json` a74d4225…735d65f9, `Nitrogen.json` adc6637f…48867ade, `Ethane.json`
+    cdc71e1c…fe93e19, `Ammonia.json` 37670304…615636ce3 and `CarbonDioxide.json` 9d3ebf8f…a32af75e,
+    as T49.b's research lists them in full. Each is
+    checked through `κ_T` = `c_p` ÷ (`c_v` ρ w²), which a table's heat capacities and sound speed
+    give at its states:
+    - CH4 against Table 39 at 90.694, 100 and 120 K within 2 × 10⁻⁴ (its five figures); N2 against
+      its saturation table (p. 1403) at 63.151, 70 and 77 K within 3 × 10⁻⁴ (four figures); CO2
+      against Table 34 at five states to 300 K within 10⁻⁴, and its pressure at 300 K within
+      10⁻⁵; NH3 against Gao et al.'s Table 7, pressure and `κ_T`, within 2 × 10⁻⁶ at all eight
+      states;
+    - each but NH3 also against the WebBook's evaluation of the same equation within 10⁻⁶ (C2H6
+      3 × 10⁻⁶), the only check for ethane, whose paper was not reachable.
+    - **`HelmholtzResidual` gains `AssociatingTerm`**, Gao et al.'s n δ^d τ^t exp(−η(δ − ε)² + 1 ÷
+      [β(τ − γ)² + b]), with η as their Table 5 prints it: CoolProp's file holds its negation.
+      Its sign was settled by Table 7 (the other sign misses by orders of magnitude). The
+      Gaussian loop is unchanged, so water's values keep their bits.
+  - _The viscosities_, each in its paper's own form and checked against its own values for
+    computer verification:
+    - N2, Huber, Perkins and Lemmon 2024: Table 7 to its printed 10⁻⁸ μPa s; `Derived` within 3%
+      of `T_c` and 25% of `ρ_c` (their Sec. 2.3);
+    - CH4, Sotiriadou et al. 2026: Sec. 3.2's three points to 10⁻⁴ μPa s and Table 8;
+    - CO2, Laesecke and Muzny 2017: Table 6 to half a unit of its fifth figure; `Derived` in
+      Vesovic et al.'s 300–310 K and 300–600 kg m⁻³ (their Sec. 5.6);
+    - NH3, Monogenidou, Assael and Huber 2018: its three verification points, Table 6 within 10⁻⁴,
+      and the WebBook, which evaluates it, within 2 × 10⁻⁷;
+    - C2H6, **Friend, Ingham and Ely 1991, not Vogel, Span and Herrmann 2015**: Vogel is closed
+      (OpenAlex, 2026-10-16: no open or repository copy), so decision-p14-t49h-liquids §6's
+      fallback is taken. Its coefficients (Tables 1, 8 and 9, Eqs. 8, 10a, 12 and 15a) were read
+      in NIST's scan and match CoolProp's hardcoded copy; Table A2 is met within 3 × 10⁻³, the
+      reach of its four-figure densities. It is `Measured` over its stated range, approximately
+      90–500 K below 60 MPa (the abstract; its data span 95–500 K and 0.1–69 MPa).
+    - A correlation that states no critical region (CH4, NH3, C2H6) is `Derived` in Vesovic et
+      al.'s reduced box, 0.986 < `T_r` < 1.019 and 0.642 < `ρ_r` < 1.283, as Sotiriadou et al.
+      quote it.
+  - _The surface tensions_, Mulero et al. 2012's coefficients as CoolProp's files hold them, the
+    paper closed (OpenAlex, Semantic Scholar and Unpaywall: no open copy), so its fitted ranges
+    were not read and each is `Measured` from the triple point to `T_c`. Each takes the reference
+    equation's `T_c`, as the WebBook evaluates them: they then meet its column within 2 × 10⁻⁶.
+    CoolProp's ammonia file holds 405.4 K, 4.7 × 10⁻³ off the WebBook, where the equation's
+    405.56 K meets it within 2 × 10⁻⁷. A tension a correlation gives as 0 is absent.
+    - **The CH4 conflict at 93.65 K is recorded, not settled** (decision-p14-t49h-liquids §9, item
+      3: "settled by reading Mulero if it is reachable, else recorded"): Mulero's 16.48 mN m⁻¹
+      (the WebBook's) against Jasper 1972's 17.95 (Fuks and Bellemans 1966). The record takes
+      Mulero's, the newer critical evaluation.
+  - _b near a critical point_ (decision-p14-t49h-liquids §7(c)). `CorrelationLength` computes ξ in
+    the Olchowy–Sengers form of R12-08's Eqs. (20)–(21a) from the row's equation of state, and the
+    scattering is `Derived` where `q_max` ξ passes `CRITICAL_SCATTERING_LIMIT` = 0.1, `q_max` = 4π n
+    ÷ 380 nm with the record's index in the shortest bin. It reproduces Huber et al.'s Table 8
+    (nitrogen's ξ at three near-critical states) within 10⁻⁸. The amplitudes are each fluid's:
+    water's R12-08's, N2's Huber et al.'s, CO2's Laesecke and Muzny's Table 5, C2H6's Friend et
+    al.'s Table 10 (`T_R` = 2 `T_c`), NH3's Monogenidou et al.'s thermal-conductivity paper's as
+    CoolProp's file quotes it (not read), and **methane's R12-08's water amplitudes**, the constants
+    the decision names, in want of methane's own (recorded below).
+    - **No record shows the rule yet.** Every state where `q_max` ξ passes 0.1 is `Derived` by
+      another member: water's above its index window's 373.15 K, and the other rows by their
+      stand-in x. So `LiquidScattering::basis_at`, which the record calls, holds it in a test
+      (water's scattering `Measured` at 600 K and `Derived` at 647 K), and `liquids.golden` pins
+      each row at 0.999 of its range, where the rule acts.
+  - _The supercooled viscosity_ (decision-p14-t49b-condensed §2.5). `SupercooledViscosity`, a
+    Vogel–Fulcher–Tammann form anchored at the correlation's value at the triple point, so
+    continuous there to the bit, and valid on (`T_0`, `T_t`]. `hyperion-fit`'s `liquid_optics` fits
+    its B and `T_0` (revision 1; the plan's rule that fits live in `hyperion-fit`, and
+    decision-r11-palette-liquids §4's "and any transport fit") in ln μ, `T_0` held in [0, `T_t`).
+    Its fingerprint probes every viscosity it reads.
+    - **The window is the liquid's range at one atmosphere**, from the triple point to the normal
+      boiling point, not the whole range to the critical point that "over the liquid range" could
+      mean (§2.5; decision-r11-palette-liquids §4). The form describes a dense liquid's activated
+      flow; towards the critical point the saturated liquid's viscosity falls with its density,
+      which no form in T alone follows, so the whole range would pull the fit away from the
+      triple point it extrapolates from. The choice moves Titan's 71.15 K values (below).
+      **Ruled by main** (2026-10-16): kept as built; the measured-range alternative is deferred.
+    - Methane fits super-Arrhenius, B = 166.337 K and `T_0` = 21.925 K, within 2.6 × 10⁻³ of
+      Sotiriadou over 90.694–111.667 K. Ethane fits at `T_0` = 0, Arrhenius, B = 353.486 K: along
+      the record's saturated liquid Friend's correlation's effective activation energy rises with
+      temperature over the window (about 361 K at 150 K, 427 K at 184.6 K), and the ancillary
+      density, 0.066% low at the triple point and 16% low in slope there, flattens it further below
+      about 100 K (to 318 K at the triple point; d ln μ ÷ d ln ρ is 16.7 there), which no `T_0` ≥ 0
+      follows; worst 3.3 × 10⁻² over 90.368–184.565 K. At Titan's 71.15 K they give about 538 μPa s
+      and 3.6 mPa s.
+    - The refit took §5's path (the table deleted, the prebuilt binary run `--since 22`): the
+      optical bins are byte-identical, the four items are new, `tables.lock`'s one entry moved
+      (revision 1, its fingerprint now the bins' edges and, for each supercooled row, its triple
+      and boiling points and all 64 viscosities the fit reads), and the fit's `check` passes. The binary was rebuilt and the table re-emitted after the rows took the new
+      items, so the committed table is the committed tree's fit.
+    - Only the viscosity's rule is built here. The rest of §2.5's below-range rule for a
+      solution's components (the density's line, which step 1 built; κ_T held at the triple
+      point; the index at the line's density) is step 3's, where the mixing rules read it.
+  - _The fill_ (decision-r10-t10b-r09-t2e §7, condition 1). `liquid_properties`' b, copied as
+    shortest round-trip decimals, into water at 298.15 K (`hyperion_surface::testing::liquid_water`
+    and the reference Earth's `WATER_RECORD`) and Titan's methane at 93.65 K
+    (`testing::liquid_methane_titan` and `planetary/surface/inputs.rs`'s `methane_sea`): water's
+    0.005 47 m⁻¹ in the bin about 393 nm to 0.000 370 about 747 nm, methane's 0.003 87 to
+    0.000 269. A test beside each copy holds it to the registry's to the bit (the surface crate's
+    two through the sim's `testing` feature). Only b is filled, as the condition names; the
+    records' other members stay R09.T2.e's hand values, whose densities are at their stated
+    pressures. The client's `paletteLiquids.test.ts` gains a scattering rule per record
+    ("registry" for the four, "absent" for the melt) and holds each liquid's two copies equal.
+    `wire/payloads.golden` is re-blessed at 22: the Earth-like world's two lines (its bytes grow
+    by 120, water's 15 bins of b). No other world, and not the frozen `Liquids whole` line, moves.
+  - _Tests and golden._ `substance::liquid` has 45 tests (step 1's 23 and 22 new): each
+    equation against its table and the WebBook, each viscosity against its verification values
+    and its ranges, ξ against Huber's Table 8, the critical rule (`LiquidScattering::basis_at`), an
+    absent negative tension, water's x against its closed form to the bit, the depolarisation
+    against the ruling's figures, the Morel test (Morel's λ^−4.32 law meaned over each bin), Mulero
+    against the WebBook, carbon dioxide's columns, the supercooled forms' continuity, and the
+    testing worlds' fill. Zhang, Hu and He's oracle takes the record's δ, which now follows the
+    state (it is their 0.039 at 298.15 K, where the oracle is theirs as published).
+    `planetary::surface`'s reference and inputs tests gain a test each, holding their copies, and
+    `hyperion-fit` adds `liquid_optics_the_supercooled_fits_are_least_squares`.
+    - `liquids.golden` is re-blessed at 22 (golden_diff against step 1: 75 changed, 527 new, 48
+      gone; no basis line moves). Water's b moves with its state-dependent δ at five of its six
+      temperatures; at 298.15 K its δ is 0.039 to the bit, so b keeps step 1's bits. Methane's,
+      nitrogen's, ethane's and ammonia's records gain b, σ and μ, whose `none` lines go. Each row
+      is pinned at 0.999 of its range too, where the critical-point rules act (water's record
+      `Derived`, methane's surface tension absent), and a `[supercooled]` section pins each
+      continued viscosity from its triple point to 71.15 K.
+    - **The server's sea test.** `hyperion-server`'s `a_field_header_carries_its_liquid_records`
+      held the synthetic water's scattering as not modelled; it now holds it as the fill's value.
+  - _Files beyond the task's:_ `substance/{helmholtz, rows, rows/equations, diagram}.rs`,
+    `planetary/surface/{reference, inputs}.rs`, the surface crate's `testing/liquids.rs`, the
+    fit's `tables.lock`, `tables/mod.rs`'s manifest line, `tests/liquids_golden.rs`, the server's
+    `convert/surface.rs` (its sea test), the client's `paletteLiquids.test.ts`, the sim's
+    `clippy.toml` ("McDaniel" in `doc-valid-idents`), and `NOTICE` (CoolProp's entry).
+  - _Added public items._
+    - **`substance::liquid`:** `CRITICAL_SCATTERING_LIMIT`; `CorrelationLength`
+      (`correlation_length_m`); `LiquidScattering`'s `anisotropy_ratio`, `structure_factor`,
+      `fluctuations` and `depolarisation_ratio(density, temperature)`, which replaces step 1's
+      fixed `depolarisation_ratio()`; `SupercooledViscosity` and its getter on `LiquidColumns`;
+      `ViscosityCorrelation`'s five new variants and their structs
+      (`Huber2024Viscosity`, `Sotiriadou2026Viscosity`, `LaeseckeMuzny2017Viscosity`,
+      `Monogenidou2018Viscosity`, `Friend1991Viscosity`), with `ViscosityRange` and
+      `CriticalRegion`.
+    - **`substance::helmholtz`:** the crate-private `AssociatingTerm`, and the residual's
+      `associating` list.
+    - **`hyperion-fit`'s `liquid_optics`:** `SUPERCOOLED`, `VFT_SAMPLES`, `VFT_SCAN`,
+      `SupercooledFit`, `saturated_viscosities` and `fit_supercooled`; `render` takes the fits.
+  - _The steps left_, in order:
+    1. **Step 2b, the nine rows** (decision-p14-t49h-gas-index §1.2), after R08.T5.k lands, as the
+       ruling above gives it. If R08's methane re-reduction (decision-p14-t49h-liquids §2.4)
+       lands after this fill, the fill is redone before the serve gate (§9.7); the bit tests
+       fail until it is. Carbon dioxide's columns join `LIQUIDS` then, and the other eight
+       rows take κ_T, σ, μ and b only where a ruled source exists (§4.3's x for their b; SO₂'s
+       stays absent).
+    2. **Step 3, the solutions**, unchanged, now with §2.5's whole below-range rule for the
+       components (the density's line, κ_T held, the index at the line's density, and this step's
+       supercooled viscosity).
+    3. **Step 4, the melts**, unchanged.
+  - _Accept_ as step 1's, and:
+    - `cargo test -p hyperion-sim --features testing substance::liquid` (the testing worlds' bit
+      test is gated on the feature);
+    - `cargo test -p hyperion-sim --features testing carries_the_registry_s_scattering`;
+    - `cargo test -p hyperion-surface --features testing wire_payloads_match_their_golden`;
+    - `cargo test -p hyperion-server convert::surface`;
+    - `cargo test -p hyperion-fit --lib liquid_optics`;
+    - the client's `paletteLiquids.test.ts`, by
+      `pnpm --filter hyperion exec vitest run <its path>`.
+- **Deferred findings (2026-10-13 rule)**, from P14.T49.h's step 2:
+  - _The liquids' depolarisation_ (decision-p14-t49h-gas-index §4.4): no measured total δ of
+    liquid CH4, N2, C2H6, NH3 or CO2 was read. The reading list: Varshneya et al. 1981, Gornall,
+    Howard-Lock and Stoicheff 1970, Howard-Lock and Taylor 1974, Thibeau, Oksengorn and Vodar 1968
+    (HAL, behind its bot wall), Fabelinskii 1968's tables, and Coumou et al. 1964 and Bender et al.
+    1986 for the calibration liquids. The CCl₄ calibration's inputs (its density, κ_T and σ) are
+    from memory, about ±50% in methane's x. The anisotropic rows' x neglects the orientational pair
+    correlation (benzene 30% high by the same method), so they are upper estimates, band −40% /
+    +0%; at N2's 77 K the low end lowers b about 17%.
+  - _Methane's correlation length_ takes R12-08's water amplitudes (`ξ_0` 0.13 nm, `Γ_0` 0.06): no
+    methane crossover amplitudes were read (Sotiriadou et al. set the viscosity's enhancement to
+    zero; CoolProp's methane conductivity is Friend et al. 1989's older form). It only places the
+    critical rule, within a few kelvin of 190.564 K.
+  - _Ammonia's correlation length_ is Monogenidou, Assael and Huber's thermal-conductivity paper's
+    (J. Phys. Chem. Ref. Data 47, 043101, Sec. 2.3), as CoolProp's file quotes it, not read.
+  - _Mulero et al. 2012_ is closed: its fitted ranges are not read, so each tension is `Measured`
+    over its row's whole liquid range, where the viscosities are `Measured` only inside their
+    stated ranges (as main ruled, 2026-10-16; main checks the ranges later from an open copy or
+    CoolProp's files); and the CH4 conflict at 93.65 K (16.48 against Jasper's 17.95 mN m⁻¹, 8%)
+    stands.
+  - _Ethane's viscosity_: the WebBook's (probably Vogel, Span and Herrmann 2015, REFPROP 10's
+    default; unverified) lies 0.9% above Friend et al. at the triple point and +0.25% / −0.6% at
+    234 and 297 K (computed here at the WebBook's states), inside Friend's 2%.
+  - _Ethane's ancillary density_ (T49.b's, CoolProp's fit) is 0.066% below Bücker and Wagner's
+    equation at the triple point (651.096 against 651.529 kg m⁻³) and 16% low in its slope there.
+    The viscosity, with d ln μ ÷ d ln ρ = 16.7, comes out 1.1% low, and its effective activation
+    energy flattens below about 100 K (the science check's figures); κ_T and b move with it. A
+    T49.b refit, or Bücker and Wagner's own ancillary if it becomes reachable.
+  - _The WebBook's own viscosities_ for methane and nitrogen are older correlations, 6.1% and 0.3%
+    below Sotiriadou's and Huber's at their triple points: the ruled sources stand.
+  - _Bücker and Wagner 2006_ (ethane's equation) is unread: its constants are CoolProp's, checked
+    only against the WebBook.
+  - _The supercooled forms_ extrapolate 19–20 K below the triple points to Titan's 71.15 K: methane
+    to about 538 μPa s, ethane to about 3.6 mPa s. The window's choice moves methane's over about
+    475–609 μPa s there (a 38 K window gives 475, a 10 K one 609). Ethane's fit is Arrhenius
+    (`T_0` = 0, worst 3.3%): along the saturated liquid its effective activation energy rises
+    with temperature, and the ancillary density flattens it near the triple point. The window
+    stays the one-atmosphere range, as main ruled (2026-10-16); fitting each correlation over its
+    data's range only (Friend's from 95 K, which still gives `T_0` = 0, B 356.3 K) is the deferred
+    alternative.

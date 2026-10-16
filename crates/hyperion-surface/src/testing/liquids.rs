@@ -7,8 +7,9 @@
 //! uniform means over R08's fifteen bake bins of R08's committed material files
 //! (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`), each file's 5 nm grid
 //! interpolated linearly in n and in a = 4πk ÷ λ, as decision-r11-palette-liquids §1.8 takes them,
-//! n to six decimal places and a to six significant figures. A member left out is not modelled
-//! here, never 0.
+//! n to six decimal places and a to six significant figures. The water's and the methane's
+//! scattering is the registry's (P14.T49.h), copied to the bit (decision-r10-t10b-r09-t2e §7). A
+//! member left out is not modelled here, never 0.
 //!
 //! The client's `view/atmosphere/materials/paletteLiquids.test.ts` reads these records, and the
 //! sim's copies of two of them, from their sources, and holds each bin to its file's bin mean, so
@@ -41,8 +42,11 @@ use crate::field::{LIQUID_BINS, LiquidBasis, LiquidProperties};
 ///   (1 − 0.625 τ), τ = 1 − T ÷ 647.096 K, at 298.15 K, against its own vapour.
 /// - **Viscosity:** 8.900 × 10⁻⁴ Pa s, IAPWS R12-08's (Huber et al. 2009, J. Phys. Chem. Ref. Data
 ///   38, 101), its eqs. (10)–(12) at 298.15 K and IAPWS-95's density at 100 kPa: 0.890 02 mPa s.
-/// - **Scattering:** not modelled here (P14.T49.h's Einstein–Smoluchowski–Cabannes fills a
-///   generated body's).
+/// - **Scattering:** P14.T49.h's, `hyperion_sim::substance::liquid_properties`' b at 298.15 K, the
+///   registry's Einstein–Smoluchowski–Cabannes (Zhang, Hu and He 2009's density term with
+///   IAPWS-95's `κ_T` at the saturated liquid's density and δ = 0.039 there), copied as shortest
+///   round-trip decimals (decision-r10-t10b-r09-t2e §7): 0.005 47 m⁻¹ in the bin about 393 nm and
+///   0.000 370 in the bin about 747 nm. A sim test holds it to the registry's to the bit.
 ///
 /// A sea warmer than an Earth's mean, about 18 °C at its surface: the temperature is the file's
 /// and its index's, at which every member but the absorption was measured. The absorption was
@@ -76,7 +80,23 @@ pub fn liquid_water() -> LiquidProperties {
             1.442_47,
             2.800_88,
         ]),
-        scattering_per_m: None,
+        scattering_per_m: Some([
+            0.005_469_387_272_826_296,
+            0.004_181_643_650_890_754,
+            0.003_254_641_324_180_969_4,
+            0.002_572_758_840_890_256_4,
+            0.002_061_546_784_888_825,
+            0.001_671_864_057_626_776,
+            0.001_370_471_055_788_929_3,
+            0.001_134_243_878_283_069,
+            0.000_946_934_327_145_038_1,
+            0.000_796_821_586_256_235_6,
+            0.000_675_356_514_061_437_1,
+            0.000_576_186_174_358_237_9,
+            0.000_494_570_413_029_009_8,
+            0.000_426_895_418_578_785_24,
+            0.000_370_397_943_504_135_35,
+        ]),
         surface_tension_n_per_m: Some(0.071_97),
         viscosity_pa_s: Some(8.900e-4),
     }
@@ -100,9 +120,15 @@ pub const LIQUID_WATER_DENSITY_KG_M3: f64 = 997.047;
 ///   ÷ (n² + 2) times 447.6 ÷ 452.4: 452.4 kg m⁻³ is the saturated-liquid line extrapolated to
 ///   90 K, 0.69 K below the triple point (90.694 K), an extrapolation, so the record is `Derived`.
 ///   About 0.0034 lower, 1.2903 in the bin about 545 nm.
+/// - **Scattering:** P14.T49.h's, `hyperion_sim::substance::liquid_properties`' b at 93.65 K, the
+///   registry's Einstein–Smoluchowski–Cabannes with Setzmann and Wagner 1991's `κ_T` at the
+///   saturated liquid's 447.53 kg m⁻³ and the depolarisation from methane's anisotropy ratio
+///   (decision-p14-t49h-gas-index §4.3), `Derived`, copied as shortest round-trip decimals
+///   (decision-r10-t10b-r09-t2e §7): 0.003 87 m⁻¹ in the bin about 393 nm and 0.000 269 in the bin
+///   about 747 nm. A sim test holds it to the registry's to the bit.
 /// - **Not modelled here:** the absorption (the file holds k = 0 at 380–400 nm, below its source's
 ///   sensitivity with no bound stated, and its visible k is indicative between band extrema), the
-///   scattering, the surface tension and the viscosity.
+///   surface tension and the viscosity, which the registry resolves for a generated body.
 #[must_use]
 pub fn liquid_methane_titan() -> LiquidProperties {
     LiquidProperties {
@@ -114,7 +140,23 @@ pub fn liquid_methane_titan() -> LiquidProperties {
             1.288_562, 1.287_754, 1.287_153, 1.286_718, 1.286_668, 1.286_660, 1.286_355,
         ],
         absorption_per_m: None,
-        scattering_per_m: None,
+        scattering_per_m: Some([
+            0.003_865_809_149_989_438_4,
+            0.002_989_879_265_953_119,
+            0.002_339_992_177_513_175_5,
+            0.001_855_513_682_522_143_7,
+            0.001_488_726_493_932_331_1,
+            0.001_207_091_327_156_444_5,
+            0.000_988_092_827_130_07,
+            0.000_815_891_544_344_150_6,
+            0.000_681_679_037_661_234_1,
+            0.000_572_882_364_591_951_5,
+            0.000_485_555_912_859_613_3,
+            0.000_414_686_511_108_925_1,
+            0.000_357_392_279_184_591_24,
+            0.000_309_766_467_640_019_4,
+            0.000_269_111_878_909_328_93,
+        ]),
         surface_tension_n_per_m: None,
         viscosity_pa_s: None,
     }

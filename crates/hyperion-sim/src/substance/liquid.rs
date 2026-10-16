@@ -16,7 +16,9 @@
 //!   absent (§1.4);
 //! - **the scattering** is the pure liquid's, by Einstein–Smoluchowski–Cabannes from the row's
 //!   reference equation of state ([`HelmholtzResidual`]), as Zhang, Hu and He 2009 compute it for
-//!   water at zero salinity ([`pure_liquid_scattering_per_m`]);
+//!   water at zero salinity ([`pure_liquid_scattering_per_m`]), and `Derived` near a critical
+//!   point, where the correlation length ([`CorrelationLength`]) passes
+//!   [`CRITICAL_SCATTERING_LIMIT`];
 //! - **the surface tension** is a reference correlation in Mulero, Cachadiña and Parra 2012's form
 //!   ([`SurfaceTensionEquation`]), and **the viscosity** a reference correlation
 //!   ([`ViscosityCorrelation`]);
@@ -30,8 +32,11 @@
 //!
 //! P14.T49.h's first step: the pure liquids with an R08 file (water, methane, ammonia, nitrogen,
 //! ethane and the 75 wt% sulphuric acid), with water's scattering, surface tension and viscosity.
-//! Its later steps add the other liquids' transport and scattering, the rows with no file (their
-//! index from the gas's refractivity), the solutions' mixing rules and the melts
+//! Its second: methane's, nitrogen's, ethane's, ammonia's and carbon dioxide's equations of state,
+//! scattering, surface tensions and viscosities, with methane's and ethane's viscosity continued
+//! below their triple points ([`SupercooledViscosity`]). Its later steps add the nine rows R08.T5.k
+//! gives liquid files (carbon dioxide's columns, built, join them; decision-p14-t49h-gas-index §1),
+//! the solutions' mixing rules and the melts
 //! (`docs/agent/plans/galaxy-generation/14-planetary-systems.md`, P14.T49.h's record). Until then
 //! [`liquid_properties`] answers [`ResolveLiquidError::NotALiquid`] for those, and a given
 //! composition is [`ResolveLiquidError::CompositionNotModelled`].
@@ -46,13 +51,13 @@ use hyperion_surface::field::{LIQUID_BINS, LiquidBasis, LiquidProperties};
 use hyperion_surface::substance_key::SubstanceKey;
 
 use super::condensed::{CondensedPhase, GrainDensity};
-use super::diagram::{DensityEquation, DensityForm, PhaseDiagram};
+use super::diagram::{AVOGADRO_PER_MOL, DensityEquation, DensityForm, PhaseDiagram};
 use super::helmholtz::HelmholtzResidual;
 use super::rows::liquids::LIQUIDS;
 use super::{Source, Substance, SubstanceId};
 use crate::math;
 use crate::units::consts::BOLTZMANN_CONSTANT;
-use crate::units::{Kelvin, KilogramsPerCubicMetre};
+use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
 
 /// The edges of the liquid bins, nm: 380 + 25.33 k for k = 0 to 15, R08's bake bins (Design note
 /// 5), whose centres are `hyperion_surface::field::LIQUID_BIN_CENTRES_NM`.
@@ -130,13 +135,25 @@ impl LiquidOptics {
     }
 }
 
-/// A row's scattering inputs: its reference equation of state, for `κ_T`, and its depolarisation
-/// ratio.
+/// A row's scattering inputs: its reference equation of state, for `κ_T`, its anisotropy ratio,
+/// from which its depolarisation ratio follows at each state, and the amplitudes of its
+/// correlation length near the critical point, for where Einstein–Smoluchowski–Cabannes holds.
+///
+/// **The depolarisation** (decision-p14-t49h-gas-index §3 and §4.2). In a liquid the scattering's
+/// isotropic part, the density fluctuations', is suppressed by the structure factor's zero-angle
+/// limit `S_0` = `ρ_N` `k_B` T `κ_T`, while its anisotropic part, the molecules' own anisotropy and
+/// what their interactions induce, is not. With the anisotropy ratio x = `γ_eff`² ÷ ᾱ² and one
+/// local-field factor on both parts, the vertically polarised light's ratio is `ρ_v` = (x ÷ 15) ÷
+/// (`S_0` + 4x ÷ 45) and natural light's δ = `ρ_u` = 2`ρ_v` ÷ (1 + `ρ_v`), which ES–Cabannes takes.
+/// So δ falls as `S_0` grows towards the critical point, and a fixed δ would misstate b across a
+/// liquid's range. `S_0` here is ρ R T `κ_T` with the equation's own specific gas constant, 1 ÷ (1
+/// + `2δφʳ_δ` + `δ²φʳ_δδ`) exactly.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LiquidScattering {
     pub(crate) equation: &'static HelmholtzResidual,
-    pub(crate) depolarisation_ratio: f64,
+    pub(crate) anisotropy_ratio: f64,
     pub(crate) basis: LiquidBasis,
+    pub(crate) fluctuations: CorrelationLength,
 }
 
 impl LiquidScattering {
@@ -146,16 +163,157 @@ impl LiquidScattering {
         self.equation
     }
 
-    /// The liquid's depolarisation ratio δ of light scattered at 90°, dimensionless.
+    /// The liquid's anisotropy ratio x = `γ_eff`² ÷ ᾱ², dimensionless, at least 0 and independent
+    /// of the state.
     #[must_use]
-    pub const fn depolarisation_ratio(&self) -> f64 {
-        self.depolarisation_ratio
+    pub const fn anisotropy_ratio(&self) -> f64 {
+        self.anisotropy_ratio
+    }
+
+    /// The structure factor's zero-angle limit `S_0` = ρ R T `κ_T` at `density` and `temperature`,
+    /// dimensionless, from the equation of state.
+    #[must_use]
+    pub fn structure_factor(&self, density: KilogramsPerCubicMetre, temperature: Kelvin) -> f64 {
+        density.value()
+            * self.equation.gas_constant_j_per_kg_k()
+            * temperature.value()
+            * self
+                .equation
+                .isothermal_compressibility_per_pa(density, temperature)
+    }
+
+    /// The liquid's depolarisation ratio δ of natural light scattered at 90° at `density` and
+    /// `temperature`, dimensionless: `ρ_u` = 2`ρ_v` ÷ (1 + `ρ_v`), `ρ_v` = (x ÷ 15) ÷ (`S_0` + 4x ÷
+    /// 45).
+    #[must_use]
+    pub fn depolarisation_ratio(
+        &self,
+        density: KilogramsPerCubicMetre,
+        temperature: Kelvin,
+    ) -> f64 {
+        let x = self.anisotropy_ratio;
+        let s0 = self.structure_factor(density, temperature);
+        let vertical = (x / 15.0) / (s0 + 4.0 * x / 45.0);
+        2.0 * vertical / (1.0 + vertical)
     }
 
     /// The basis of the equation of state and the ratio.
     #[must_use]
     pub const fn basis(&self) -> LiquidBasis {
         self.basis
+    }
+
+    /// The correlation length's amplitudes, for the critical-point rule
+    /// ([`CRITICAL_SCATTERING_LIMIT`]).
+    #[must_use]
+    pub const fn fluctuations(&self) -> &CorrelationLength {
+        &self.fluctuations
+    }
+
+    /// The scattering's basis at `density` and `temperature`, for a record whose index in the
+    /// shortest bin is `shortest_bin_index`: [`basis`](Self::basis), and at least `Derived` where
+    /// `q_max` ξ passes [`CRITICAL_SCATTERING_LIMIT`], `q_max` = 4π n ÷ 380 nm
+    /// (decision-p14-t49h-liquids §7(c)).
+    #[must_use]
+    pub fn basis_at(
+        &self,
+        shortest_bin_index: f64,
+        density: KilogramsPerCubicMetre,
+        temperature: Kelvin,
+    ) -> LiquidBasis {
+        let xi = self
+            .fluctuations
+            .correlation_length_m(self.equation, density, temperature);
+        let q_max =
+            4.0 * std::f64::consts::PI * shortest_bin_index / (LIQUID_BIN_EDGES_NM[0] * 1e-9);
+        if q_max * xi > CRITICAL_SCATTERING_LIMIT {
+            self.basis.max(LiquidBasis::Derived)
+        } else {
+            self.basis
+        }
+    }
+}
+
+/// The limit on q ξ beyond which a liquid's Einstein–Smoluchowski–Cabannes scattering is
+/// `Derived` (decision-p14-t49h-liquids §7(c)): ES–Cabannes takes the density fluctuations as
+/// uncorrelated over a wavelength, which fails as the correlation length ξ grows near the critical
+/// point; at q ξ = 0.1 the Ornstein–Zernike factor 1 ÷ (1 + q² ξ²), which it omits, is 0.99. The
+/// scattering vector's largest magnitude is backscattering's in the shortest bin, `q_max` = 4π n ÷
+/// 380 nm, with n the record's index in that bin.
+pub const CRITICAL_SCATTERING_LIMIT: f64 = 0.1;
+
+/// The amplitudes of a fluid's correlation length near its critical point, in the simplified
+/// crossover form of Olchowy and Sengers 1989 that IAPWS R12-08 writes for water (its Eqs.
+/// (20)–(21a)) and Huber, Perkins and Lemmon 2024 for nitrogen (their Eqs. 20–21): ξ = `ξ_0` (Δχ̃ ÷
+/// `Γ_0`)^(ν ÷ γ), with Δχ̃ = χ̃(T, ρ) − χ̃(`T_R`, ρ) `T_R` ÷ T and χ̃ = (`p_c` ÷ `ρ_c`²) ρ (∂ρ ÷
+/// ∂p)_T = `p_c` ρ² `κ_T` ÷ `ρ_c`², taken as 0 where Δχ̃ is negative, the compressibilities from
+/// the row's equation of state.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CorrelationLength {
+    pub(crate) amplitude_m: f64,
+    pub(crate) susceptibility_amplitude: f64,
+    pub(crate) nu: f64,
+    pub(crate) gamma: f64,
+    pub(crate) reference_temperature: Kelvin,
+    pub(crate) critical_pressure: Pascals,
+    pub(crate) critical_density: KilogramsPerCubicMetre,
+}
+
+impl CorrelationLength {
+    /// The correlation length at `density` and `temperature`, m, from `equation`'s `κ_T` there and
+    /// at the reference temperature; `equation` is the row's own, its scattering's.
+    ///
+    /// # Examples
+    ///
+    /// Nitrogen's within 0.02 K of its critical point, where fluctuations span nanometres, and at
+    /// its normal boiling point, where they do not:
+    ///
+    /// ```
+    /// use hyperion_sim::substance::by_key;
+    /// use hyperion_sim::units::{Kelvin, KilogramsPerCubicMetre};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let nitrogen = by_key("N2").ok_or("the registry holds nitrogen")?;
+    /// let scattering = nitrogen
+    ///     .substance()
+    ///     .liquid()
+    ///     .and_then(|columns| columns.scattering())
+    ///     .ok_or("nitrogen scatters")?;
+    /// let xi = |rho: f64, t: f64| {
+    ///     scattering.fluctuations().correlation_length_m(
+    ///         scattering.equation(),
+    ///         KilogramsPerCubicMetre::new(rho),
+    ///         Kelvin::new(t),
+    ///     )
+    /// };
+    /// // Huber, Perkins and Lemmon 2024's Table 8: 13.96 nm at 126.212 K and 333 kg m⁻³.
+    /// assert!((xi(333.0, 126.212) * 1e9 - 13.96).abs() < 0.01);
+    /// assert!(xi(806.1, 77.355) < 1e-10);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn correlation_length_m(
+        &self,
+        equation: &HelmholtzResidual,
+        density: KilogramsPerCubicMetre,
+        temperature: Kelvin,
+    ) -> f64 {
+        let scale = self.critical_pressure.value() * density.value() * density.value()
+            / (self.critical_density.value() * self.critical_density.value());
+        let chi = scale * equation.isothermal_compressibility_per_pa(density, temperature);
+        let reference =
+            scale * equation.isothermal_compressibility_per_pa(density, self.reference_temperature);
+        let difference = chi - reference * self.reference_temperature.value() / temperature.value();
+        if difference > 0.0 {
+            self.amplitude_m
+                * math::powf(
+                    difference / self.susceptibility_amplitude,
+                    self.nu / self.gamma,
+                )
+        } else {
+            0.0
+        }
     }
 }
 
@@ -197,12 +355,409 @@ impl SurfaceTensionEquation {
     }
 }
 
-/// A reference correlation for a liquid's dynamic viscosity.
+/// A reference correlation for a liquid's dynamic viscosity (decision-p14-t49h-liquids §6: the
+/// newest reference correlation readable in full), each evaluated at the record's temperature and
+/// density without its critical enhancement.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ViscosityCorrelation {
     /// IAPWS R12-08's formulation for water, μ = μ₀(T̄) μ₁(T̄, ρ̄), with the critical
     /// enhancement μ₂ set to 1, as its §2.8 allows outside the critical region.
     Iapws2008(&'static Iapws2008Viscosity),
+    /// Huber, Perkins and Lemmon 2024's for nitrogen.
+    Huber2024(&'static Huber2024Viscosity),
+    /// Sotiriadou, Antoniadis, Assael, Martinek and Huber 2026's for methane.
+    Sotiriadou2026(&'static Sotiriadou2026Viscosity),
+    /// Laesecke and Muzny 2017's for carbon dioxide.
+    LaeseckeMuzny2017(&'static LaeseckeMuzny2017Viscosity),
+    /// Monogenidou, Assael and Huber 2018's for ammonia.
+    Monogenidou2018(&'static Monogenidou2018Viscosity),
+    /// Friend, Ingham and Ely 1991's for ethane.
+    Friend1991(&'static Friend1991Viscosity),
+}
+
+/// A box about a fluid's critical point, in temperature and density, inside which a viscosity
+/// correlation's omitted critical enhancement passes the bound its source states.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CriticalRegion {
+    pub(crate) temperatures: (Kelvin, Kelvin),
+    pub(crate) densities: (KilogramsPerCubicMetre, KilogramsPerCubicMetre),
+}
+
+impl CriticalRegion {
+    /// The box from `t_low` to `t_high` and from `rho_low` to `rho_high`, open at its edges.
+    #[must_use]
+    pub(crate) const fn new(
+        temperatures: (Kelvin, Kelvin),
+        densities: (KilogramsPerCubicMetre, KilogramsPerCubicMetre),
+    ) -> Self {
+        Self {
+            temperatures,
+            densities,
+        }
+    }
+
+    /// Whether (`temperature`, `density`) lies inside the box.
+    #[must_use]
+    pub fn contains(&self, temperature: Kelvin, density: KilogramsPerCubicMetre) -> bool {
+        temperature > self.temperatures.0
+            && temperature < self.temperatures.1
+            && density > self.densities.0
+            && density < self.densities.1
+    }
+}
+
+/// Where a viscosity correlation keeps its source's basis: its stated range of temperature, and
+/// outside the box about the critical point where the enhancement it omits passes its stated
+/// bound (`Measured` there, `Derived` elsewhere: an extrapolation, or a value missing its
+/// enhancement).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ViscosityRange {
+    pub(crate) valid_from: Kelvin,
+    pub(crate) valid_to: Kelvin,
+    pub(crate) critical_region: Option<CriticalRegion>,
+}
+
+impl ViscosityRange {
+    /// The basis at `temperature` and `density`.
+    #[must_use]
+    pub fn basis_at(&self, temperature: Kelvin, density: KilogramsPerCubicMetre) -> LiquidBasis {
+        let inside = temperature >= self.valid_from && temperature <= self.valid_to;
+        let critical = self
+            .critical_region
+            .is_some_and(|region| region.contains(temperature, density));
+        if inside && !critical {
+            LiquidBasis::Measured
+        } else {
+            LiquidBasis::Derived
+        }
+    }
+
+    /// The lowest temperature of the stated range.
+    #[must_use]
+    pub const fn valid_from(&self) -> Kelvin {
+        self.valid_from
+    }
+
+    /// The highest temperature of the stated range.
+    #[must_use]
+    pub const fn valid_to(&self) -> Kelvin {
+        self.valid_to
+    }
+}
+
+/// The reduced second viscosity virial coefficient of Rainwater–Friend theory, B*_η(T*) = Σ bᵢ
+/// T*^(−tᵢ), as Vogel, Küchenmeister, Bich and Laesecke 1998 (J. Phys. Chem. Ref. Data 27, 947)
+/// fitted it and Sotiriadou et al. 2026 (their Eq. 5), Laesecke and Muzny 2017 (Eq. 6) and
+/// Monogenidou et al. 2018 (Eq. 7 and Table 2) each print it, the terms in that order (Sotiriadou's
+/// Table 4 prints b₃ with a trailing 1, 2471.012 51).
+const RAINWATER_FRIEND: [(f64, f64); 9] = [
+    (-19.572_881, 0.0),
+    (219.739_99, 0.25),
+    (-1_015.322_6, 0.5),
+    (2_471.012_5, 0.75),
+    (-3_375.171_7, 1.0),
+    (2_491.659_7, 1.25),
+    (-787.260_86, 1.5),
+    (14.085_455, 2.5),
+    (-0.346_641_58, 5.5),
+];
+
+/// [`RAINWATER_FRIEND`]'s B*_η at the reduced temperature `t_star` = `k_B` T ÷ ε.
+#[must_use]
+fn rainwater_friend_b_star(t_star: f64) -> f64 {
+    let mut sum = 0.0;
+    for &(b, exponent) in &RAINWATER_FRIEND {
+        sum += b * math::powf(t_star, -exponent);
+    }
+    sum
+}
+
+/// The second viscosity virial coefficient `B_η` = B*_η `N_A` σ³ ÷ M, m³ kg⁻¹, at `temperature`,
+/// for the scaling parameters σ (`sigma_m`, m) and ε ÷ `k_B` (`epsilon_k`, K) and the molar mass
+/// `molar_mass_kg_per_mol`; the initial-density viscosity is η₀ `B_η` ρ.
+#[must_use]
+fn viscosity_virial_m3_per_kg(
+    temperature: Kelvin,
+    sigma_m: f64,
+    epsilon_k: f64,
+    molar_mass_kg_per_mol: f64,
+) -> f64 {
+    rainwater_friend_b_star(temperature.value() / epsilon_k)
+        * AVOGADRO_PER_MOL
+        * math::powi(sigma_m, 3)
+        / molar_mass_kg_per_mol
+}
+
+/// The dilute gas's viscosity in Xiao et al. 2020's form, μPa s: η₀(T) = η₀(298.15 K) exp[Σᵢ aᵢ
+/// (ln (T ÷ 298.15 K))ⁱ], i from 1, the terms in order.
+#[must_use]
+fn xiao_dilute_micro_pa_s(at_reference: f64, coefficients: &[f64], temperature: Kelvin) -> f64 {
+    let x = math::ln(temperature.value() / 298.15);
+    let mut sum = 0.0;
+    for (power, &a) in (1..).zip(coefficients) {
+        sum += a * math::powi(x, power);
+    }
+    at_reference * math::exp(sum)
+}
+
+/// Huber, Perkins and Lemmon 2024's correlation for nitrogen (Int. J. Thermophys. 45:146, its Eqs.
+/// 1, 3 and 5 with `Δη_c` = 1): η = η₀(T) + Σᵢ Nᵢ `T_r`^tᵢ `ρ_r`^dᵢ, μPa s, the dilute gas Xiao et
+/// al. 2020's (their Table 3) with Berg and Moldover 2012's η₀(298.15 K) = 17.7494 μPa s, and the
+/// residual their Table 4, `T_r` = T ÷ 126.192 K and `ρ_r` = ρ ÷ 11.1839 mol dm⁻³.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Huber2024Viscosity {
+    pub(crate) dilute_at_reference_micro_pa_s: f64,
+    pub(crate) dilute: &'static [f64],
+    pub(crate) critical_temperature: Kelvin,
+    pub(crate) critical_density: KilogramsPerCubicMetre,
+    pub(crate) residual: &'static [(f64, f64, f64)],
+    pub(crate) range: ViscosityRange,
+}
+
+impl Huber2024Viscosity {
+    /// Where the correlation keeps its source's basis.
+    #[must_use]
+    pub const fn range(&self) -> &ViscosityRange {
+        &self.range
+    }
+
+    /// The viscosity at `temperature` and `density`, Pa s.
+    #[must_use]
+    pub fn viscosity_pa_s(&self, temperature: Kelvin, density: KilogramsPerCubicMetre) -> f64 {
+        let dilute = xiao_dilute_micro_pa_s(
+            self.dilute_at_reference_micro_pa_s,
+            self.dilute,
+            temperature,
+        );
+        let t = temperature.value() / self.critical_temperature.value();
+        let rho = density.value() / self.critical_density.value();
+        let mut residual = 0.0;
+        for &(n, power_t, power_rho) in self.residual {
+            residual += n * math::powf(t, power_t) * math::powf(rho, power_rho);
+        }
+        (dilute + residual) * 1e-6
+    }
+}
+
+/// Sotiriadou, Antoniadis, Assael, Martinek and Huber 2026's correlation for methane (Int. J.
+/// Thermophys. 47:18, its Eqs. 1–6 with the critical term zero, as they set it): η = η₀ + η₀ `B_η`
+/// ρ + Δη, μPa s, with η₀ Xiao et al.'s form at η₀(298.15 K) = 11.0631 μPa s (their Table 3, a₃ =
+/// 3.29256 × 10⁻⁴), `B_η` Rainwater–Friend's at σ = 0.4115 nm and ε ÷ `k_B` = 112.2 K, and Δη =
+/// `ρ_r`^(2/3) `T_r`^(1/2) {(f₁ `ρ_r`² + f₂ `ρ_r`³) ÷ (f₃ + `T_r` − `ρ_r`) + (f₄ + `T_r`^f₅)(f₆
+/// `ρ_r` + f₇ `ρ_r`² + f₈ `ρ_r`³ + f₉ `ρ_r`⁴)}, `T_r` = T ÷ 190.564 K and `ρ_r` = ρ ÷ 162.66 kg
+/// m⁻³.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Sotiriadou2026Viscosity {
+    pub(crate) dilute_at_reference_micro_pa_s: f64,
+    pub(crate) dilute: &'static [f64],
+    pub(crate) sigma_m: f64,
+    pub(crate) epsilon_k: f64,
+    pub(crate) molar_mass_kg_per_mol: f64,
+    pub(crate) critical_temperature: Kelvin,
+    pub(crate) critical_density: KilogramsPerCubicMetre,
+    pub(crate) residual: [f64; 9],
+    pub(crate) range: ViscosityRange,
+}
+
+impl Sotiriadou2026Viscosity {
+    /// Where the correlation keeps its source's basis.
+    #[must_use]
+    pub const fn range(&self) -> &ViscosityRange {
+        &self.range
+    }
+
+    /// The viscosity at `temperature` and `density`, Pa s.
+    #[must_use]
+    pub fn viscosity_pa_s(&self, temperature: Kelvin, density: KilogramsPerCubicMetre) -> f64 {
+        let dilute = xiao_dilute_micro_pa_s(
+            self.dilute_at_reference_micro_pa_s,
+            self.dilute,
+            temperature,
+        );
+        let initial = dilute
+            * viscosity_virial_m3_per_kg(
+                temperature,
+                self.sigma_m,
+                self.epsilon_k,
+                self.molar_mass_kg_per_mol,
+            )
+            * density.value();
+        let t = temperature.value() / self.critical_temperature.value();
+        let rho = density.value() / self.critical_density.value();
+        let [f1, f2, f3, f4, f5, f6, f7, f8, f9] = self.residual;
+        let rho2 = rho * rho;
+        let rho3 = rho2 * rho;
+        let residual = math::powf(rho, 2.0 / 3.0)
+            * t.sqrt()
+            * ((f1 * rho2 + f2 * rho3) / (f3 + t - rho)
+                + (f4 + math::powf(t, f5)) * (f6 * rho + f7 * rho2 + f8 * rho3 + f9 * rho2 * rho2));
+        (dilute + initial + residual) * 1e-6
+    }
+}
+
+/// Laesecke and Muzny 2017's correlation for carbon dioxide (J. Phys. Chem. Ref. Data 46, 013107,
+/// its Eqs. 1, 4–6, 8 and 9 without `Δη_c`): η = η₀ + η₀ `B_η` ρ + Δη, mPa s, with η₀ = 1.0055 √T ÷
+/// [a₀ + a₁ T^(1/6) + a₂ exp(a₃ T^(1/3)) + (a₄ + a₅ T^(1/3)) ÷ exp(T^(1/3)) + a₆ √T] (T in K; their
+/// Table 2), `B_η` Rainwater–Friend's at σ = 0.378 421 nm and ε ÷ `k_B` = 200.760 K with M =
+/// 44.0095 g mol⁻¹, and Δη = `η_tL` [c₁ `T_r` `ρ_r`³ + (`ρ_r`² + `ρ_r`^γ) ÷ (`T_r` − c₂)], `T_r` =
+/// T ÷ 216.592 K and `ρ_r` = ρ ÷ 1178.53 kg m⁻³, the triple point's liquid, and `η_tL` =
+/// `ρ_tL`^(2/3) √(R `T_t`) ÷ (M^(1/6) `N_A`^(1/3)) with R = 8.314 459 8 J mol⁻¹ K⁻¹ (their Eq. 9;
+/// Table 4).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LaeseckeMuzny2017Viscosity {
+    pub(crate) dilute: [f64; 7],
+    pub(crate) sigma_m: f64,
+    pub(crate) epsilon_k: f64,
+    pub(crate) molar_mass_kg_per_mol: f64,
+    pub(crate) gas_constant_j_per_mol_k: f64,
+    pub(crate) triple_temperature: Kelvin,
+    pub(crate) triple_liquid_density: KilogramsPerCubicMetre,
+    pub(crate) residual: (f64, f64, f64),
+    pub(crate) range: ViscosityRange,
+}
+
+impl LaeseckeMuzny2017Viscosity {
+    /// Where the correlation keeps its source's basis.
+    #[must_use]
+    pub const fn range(&self) -> &ViscosityRange {
+        &self.range
+    }
+
+    /// The viscosity at `temperature` and `density`, Pa s.
+    #[must_use]
+    pub fn viscosity_pa_s(&self, temperature: Kelvin, density: KilogramsPerCubicMetre) -> f64 {
+        let t = temperature.value();
+        let cube_root = math::cbrt(t);
+        let a = self.dilute;
+        let dilute_milli = 1.0055 * t.sqrt()
+            / (a[0]
+                + a[1] * math::powf(t, 1.0 / 6.0)
+                + a[2] * math::exp(a[3] * cube_root)
+                + (a[4] + a[5] * cube_root) / math::exp(cube_root)
+                + a[6] * t.sqrt());
+        let initial = dilute_milli
+            * viscosity_virial_m3_per_kg(
+                temperature,
+                self.sigma_m,
+                self.epsilon_k,
+                self.molar_mass_kg_per_mol,
+            )
+            * density.value();
+        let triple = self.triple_temperature.value();
+        let rho_triple = self.triple_liquid_density.value();
+        let scale_milli = 1e3
+            * math::powf(rho_triple, 2.0 / 3.0)
+            * (self.gas_constant_j_per_mol_k * triple).sqrt()
+            / (math::powf(self.molar_mass_kg_per_mol, 1.0 / 6.0) * math::cbrt(AVOGADRO_PER_MOL));
+        let (gamma, c1, c2) = self.residual;
+        let tr = t / triple;
+        let rho = density.value() / rho_triple;
+        let residual = scale_milli
+            * (c1 * tr * math::powi(rho, 3) + (rho * rho + math::powf(rho, gamma)) / (tr - c2));
+        (dilute_milli + initial + residual) * 1e-3
+    }
+}
+
+/// Monogenidou, Assael and Huber 2018's correlation for ammonia (J. Phys. Chem. Ref. Data 47,
+/// 023102, its Eqs. 1–8 and Tables 2 and 3): η = η₀ + η₀ `B_η` ρ + Δη, μPa s, with η₀ = 0.021357
+/// √(M T) ÷ (σ² S*_η), ln S*_η = Σᵢ αᵢ (ln T*)ⁱ, T* = T ÷ 386.0 K, σ = 0.2957 nm and M = 17.030 52
+/// g mol⁻¹; `B_η` Rainwater–Friend's; and Δη = `ρ_r`^(2/3) `T_r`^(1/2) {c₀ + c₁ `ρ_r` + c₂ `ρ_r`⁴ +
+/// c₃ `ρ_r`⁸ ÷ `T_r`⁴ + c₄ `T_r` `ρ_r`²}, `T_r` = T ÷ 405.56 K and `ρ_r` = ρ ÷ 233.25 kg m⁻³.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Monogenidou2018Viscosity {
+    pub(crate) molar_mass_g_per_mol: f64,
+    pub(crate) sigma_nm: f64,
+    pub(crate) epsilon_k: f64,
+    pub(crate) cross_section: [f64; 5],
+    pub(crate) critical_temperature: Kelvin,
+    pub(crate) critical_density: KilogramsPerCubicMetre,
+    pub(crate) residual: [f64; 5],
+    pub(crate) range: ViscosityRange,
+}
+
+impl Monogenidou2018Viscosity {
+    /// Where the correlation keeps its source's basis.
+    #[must_use]
+    pub const fn range(&self) -> &ViscosityRange {
+        &self.range
+    }
+
+    /// The viscosity at `temperature` and `density`, Pa s.
+    #[must_use]
+    pub fn viscosity_pa_s(&self, temperature: Kelvin, density: KilogramsPerCubicMetre) -> f64 {
+        let t = temperature.value();
+        let ln_t_star = math::ln(t / self.epsilon_k);
+        let mut ln_s = 0.0;
+        for (power, &alpha) in (0..).zip(&self.cross_section) {
+            ln_s += alpha * math::powi(ln_t_star, power);
+        }
+        let dilute = 0.021_357 * (self.molar_mass_g_per_mol * t).sqrt()
+            / (self.sigma_nm * self.sigma_nm * math::exp(ln_s));
+        let initial = dilute
+            * viscosity_virial_m3_per_kg(
+                temperature,
+                self.sigma_nm * 1e-9,
+                self.epsilon_k,
+                self.molar_mass_g_per_mol * 1e-3,
+            )
+            * density.value();
+        let tr = t / self.critical_temperature.value();
+        let rho = density.value() / self.critical_density.value();
+        let [c0, c1, c2, c3, c4] = self.residual;
+        let rho2 = rho * rho;
+        let rho4 = rho2 * rho2;
+        let residual = math::powf(rho, 2.0 / 3.0)
+            * tr.sqrt()
+            * (c0 + c1 * rho + c2 * rho4 + c3 * rho4 * rho4 / math::powi(tr, 4) + c4 * tr * rho2);
+        (dilute + initial + residual) * 1e-6
+    }
+}
+
+/// Friend, Ingham and Ely 1991's correlation for ethane (J. Phys. Chem. Ref. Data 20, 275, its
+/// Eqs. 8, 10a, 12 and 15a with Tables 1, 8 and 9): η = η₀ + `η_ex`, μPa s, with η₀ = 12.0085 √t
+/// Σᵢ Cᵢ t^((i − 1)/3 − 1), t = T ÷ 245.0 K, and `η_ex` = 15.977 Σ₁⁹ gᵢ δ^rᵢ τ^sᵢ ÷ (1 + Σ₁₀¹¹ gᵢ
+/// δ^rᵢ τ^sᵢ), δ = ρ ÷ 6.87 mol dm⁻³ at M = 30.070 g mol⁻¹ and τ = 305.33 K ÷ T (their Table 1's
+/// critical point, on IPTS-68).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Friend1991Viscosity {
+    pub(crate) epsilon_k: f64,
+    pub(crate) collision: [f64; 9],
+    pub(crate) critical_temperature: Kelvin,
+    pub(crate) critical_density: KilogramsPerCubicMetre,
+    pub(crate) numerator: &'static [(f64, i32, f64)],
+    pub(crate) denominator: &'static [(f64, i32, f64)],
+    pub(crate) range: ViscosityRange,
+}
+
+impl Friend1991Viscosity {
+    /// Where the correlation keeps its source's basis.
+    #[must_use]
+    pub const fn range(&self) -> &ViscosityRange {
+        &self.range
+    }
+
+    /// The viscosity at `temperature` and `density`, Pa s.
+    #[must_use]
+    pub fn viscosity_pa_s(&self, temperature: Kelvin, density: KilogramsPerCubicMetre) -> f64 {
+        let t_star = temperature.value() / self.epsilon_k;
+        let mut sum = 0.0;
+        for (i, &c) in (0..).zip(&self.collision) {
+            sum += c * math::powf(t_star, f64::from(i) / 3.0 - 1.0);
+        }
+        let dilute = 12.008_5 * t_star.sqrt() * sum;
+        let delta = density.value() / self.critical_density.value();
+        let tau = self.critical_temperature.value() / temperature.value();
+        let term = |&(g, r, s): &(f64, i32, f64)| g * math::powi(delta, r) * math::powf(tau, s);
+        let mut numerator = 0.0;
+        for t in self.numerator {
+            numerator += term(t);
+        }
+        let mut denominator = 1.0;
+        for t in self.denominator {
+            denominator += term(t);
+        }
+        (dilute + 15.977 * numerator / denominator) * 1e-6
+    }
 }
 
 /// IAPWS R12-08's coefficients (IAPWS 2008, "Release on the IAPWS Formulation 2008 for the
@@ -275,7 +830,96 @@ impl ViscosityCorrelation {
                 c.viscosity_pa_s(temperature, density),
                 c.basis_at(temperature, density),
             ),
+            Self::Huber2024(c) => (
+                c.viscosity_pa_s(temperature, density),
+                c.range.basis_at(temperature, density),
+            ),
+            Self::Sotiriadou2026(c) => (
+                c.viscosity_pa_s(temperature, density),
+                c.range.basis_at(temperature, density),
+            ),
+            Self::LaeseckeMuzny2017(c) => (
+                c.viscosity_pa_s(temperature, density),
+                c.range.basis_at(temperature, density),
+            ),
+            Self::Monogenidou2018(c) => (
+                c.viscosity_pa_s(temperature, density),
+                c.range.basis_at(temperature, density),
+            ),
+            Self::Friend1991(c) => (
+                c.viscosity_pa_s(temperature, density),
+                c.range.basis_at(temperature, density),
+            ),
         }
+    }
+}
+
+/// A Vogel–Fulcher–Tammann continuation of a row's viscosity below its triple point, for a
+/// solution whose first melt lies below its component's (decision-p14-t49b-condensed §2.5): ln
+/// μ(T) = ln μ(`T_t`) + B [1 ÷ (T − `T_0`) − 1 ÷ (`T_t` − `T_0`)], anchored at the reference
+/// correlation's value at the triple point, so continuous there, with B and `T_0` fitted by
+/// `hyperion-fit`'s `liquid_optics` to the correlation along the saturated liquid from the triple
+/// point to the normal boiling point (decision-r11-palette-liquids §4), `T_0` held in [0, `T_t`):
+/// the supercooled liquid's form, evaluated as fitted, and `Derived`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SupercooledViscosity {
+    pub(crate) b_kelvin: f64,
+    pub(crate) divergence: Kelvin,
+    pub(crate) triple: Kelvin,
+}
+
+impl SupercooledViscosity {
+    /// B, K.
+    #[must_use]
+    pub const fn b_kelvin(&self) -> f64 {
+        self.b_kelvin
+    }
+
+    /// `T_0`, the temperature at which the form diverges, K.
+    #[must_use]
+    pub const fn divergence_temperature(&self) -> Kelvin {
+        self.divergence
+    }
+
+    /// `T_t`, the row's triple point, where the form is anchored and was fitted from.
+    #[must_use]
+    pub const fn triple_temperature(&self) -> Kelvin {
+        self.triple
+    }
+
+    /// The viscosity at `temperature`, Pa s, from `at_triple_pa_s`, the row's own correlation's
+    /// value at its triple point (its record's there). It holds for `temperature` in (`T_0`,
+    /// `T_t`], where it rises steadily as the liquid cools; at `T_t` it is `at_triple_pa_s` itself.
+    ///
+    /// # Examples
+    ///
+    /// Methane's viscosity at Titan's first melt, 71.15 K, for a sea that holds it there:
+    ///
+    /// ```
+    /// use hyperion_sim::substance::{Composition, by_key, liquid_properties};
+    /// use hyperion_sim::units::Kelvin;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let methane = by_key("CH4").ok_or("the registry holds methane")?; let columns =
+    /// methane.substance().liquid().ok_or("methane is a liquid")?; let form =
+    /// columns.supercooled_viscosity().ok_or("methane's continues below T_t")?; let at_triple =
+    /// liquid_properties(methane, form.triple_temperature(), Composition::Reference)?
+    ///     .viscosity_pa_s
+    ///     .ok_or("methane has a viscosity")?;
+    /// let titan = form.viscosity_pa_s(at_triple, Kelvin::new(71.15));
+    /// // About 0.54 mPa s, against 0.21 at its triple point.
+    /// assert!(titan > 2.0 * at_triple && titan < 3.5 * at_triple);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn viscosity_pa_s(&self, at_triple_pa_s: f64, temperature: Kelvin) -> f64 {
+        let t0 = self.divergence.value();
+        at_triple_pa_s
+            * math::exp(
+                self.b_kelvin
+                    * (1.0 / (temperature.value() - t0) - 1.0 / (self.triple.value() - t0)),
+            )
     }
 }
 
@@ -286,6 +930,7 @@ pub struct LiquidColumns {
     pub(crate) scattering: Option<LiquidScattering>,
     pub(crate) surface_tension: Option<SurfaceTensionEquation>,
     pub(crate) viscosity: Option<ViscosityCorrelation>,
+    pub(crate) supercooled_viscosity: Option<SupercooledViscosity>,
     pub(crate) sources: &'static [Source],
 }
 
@@ -312,6 +957,13 @@ impl LiquidColumns {
     #[must_use]
     pub const fn viscosity(&self) -> Option<&ViscosityCorrelation> {
         self.viscosity.as_ref()
+    }
+
+    /// The viscosity's continuation below the triple point, for a row that is a solution's
+    /// component there (decision-p14-t49b-condensed §2.5).
+    #[must_use]
+    pub const fn supercooled_viscosity(&self) -> Option<&SupercooledViscosity> {
+        self.supercooled_viscosity.as_ref()
     }
 
     /// Where every value comes from, with its licence basis.
@@ -651,7 +1303,7 @@ fn mean_inverse_fourth(low_nm: f64, high_nm: f64) -> f64 {
 /// # Examples
 ///
 /// A record's scattering is this, at the record's index and temperature, with `κ_T` from the row's
-/// equation of state at the record's density and the row's depolarisation ratio:
+/// equation of state at the record's density and the row's depolarisation ratio there:
 ///
 /// ```
 /// use hyperion_sim::substance::{
@@ -670,7 +1322,7 @@ fn mean_inverse_fourth(low_nm: f64, high_nm: f64) -> f64 {
 ///     .ok_or("water scatters")?;
 /// let density = KilogramsPerCubicMetre::new(sea.density_kg_m3);
 /// let kappa = inputs.equation().isothermal_compressibility_per_pa(density, t);
-/// let delta = inputs.depolarisation_ratio();
+/// let delta = inputs.depolarisation_ratio(density, t);
 /// let b = pure_liquid_scattering_per_m(&sea.refractive_index, t, kappa, delta);
 /// assert_eq!(Some(b), sea.scattering_per_m);
 /// # Ok(())
@@ -712,8 +1364,10 @@ pub fn pure_liquid_scattering_per_m(
 ///   **the density** is the condensed columns'; both are required.
 /// - **The absorption** is the file's where it is modelled; **the scattering** is
 ///   [`pure_liquid_scattering_per_m`] at the record's index, temperature and the equation of
-///   state's `κ_T` at the record's density; **the surface tension and viscosity** are the row's
-///   correlations at the record's state. Each is absent where the row has no source.
+///   state's `κ_T` at the record's density, `Derived` where `q_max` ξ passes
+///   [`CRITICAL_SCATTERING_LIMIT`]; **the surface tension and viscosity** are the row's
+///   correlations at the record's state. Each is absent where the row has no source, and the
+///   surface tension where its correlation gives none.
 /// - **The basis** is the least direct of the members'.
 ///
 /// # Errors
@@ -811,18 +1465,20 @@ pub fn liquid_properties(
             .equation
             .isothermal_compressibility_per_pa(density, temperature);
         (kappa.is_finite() && kappa > 0.0).then(|| {
-            basis = basis.max(scattering.basis);
-            pure_liquid_scattering_per_m(
-                &refractive_index,
-                temperature,
-                kappa,
-                scattering.depolarisation_ratio,
-            )
+            let depolarisation = scattering.depolarisation_ratio(density, temperature);
+            basis = basis.max(scattering.basis_at(refractive_index[0], density, temperature));
+            pure_liquid_scattering_per_m(&refractive_index, temperature, kappa, depolarisation)
         })
     });
-    let surface_tension_n_per_m = columns.surface_tension.map(|equation| {
-        basis = basis.max(equation.basis_at(temperature));
-        equation.surface_tension_n_per_m(temperature)
+    // A correlation can give no tension at a state: methane's Mulero sum, whose last term is
+    // negative, falls below 0 within about 0.18 K of its critical point. It is absent there, never
+    // 0 or negative.
+    let surface_tension_n_per_m = columns.surface_tension.and_then(|equation| {
+        let sigma = equation.surface_tension_n_per_m(temperature);
+        (sigma > 0.0).then(|| {
+            basis = basis.max(equation.basis_at(temperature));
+            sigma
+        })
     });
     let viscosity_pa_s = columns.viscosity.map(|correlation| {
         let (mu, viscosity_basis) = correlation.viscosity_pa_s(temperature, density);

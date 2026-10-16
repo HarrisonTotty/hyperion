@@ -5,10 +5,11 @@
 //! A multiparameter reference equation (IAPWS-95; Setzmann and Wagner 1991; Span et al. 2000; and
 //! the rest) writes the Helmholtz energy f of the fluid as φ(δ, τ) = f ÷ (RT) = φ°(δ, τ) + φʳ(δ,
 //! τ), in the reduced density δ = ρ ÷ `ρ_r` and the inverse reduced temperature τ = `T_r` ÷ T. Its
-//! residual part φʳ is a sum of terms of three published kinds ([`HelmholtzResidual`]), each with
-//! its coefficients as printed. Every property follows from its derivatives (IAPWS R6-95(2018),
-//! Table 3); a liquid's record needs only the pressure's derivative along an isotherm, so only
-//! `φʳ_δ` and `φʳ_δδ` are evaluated here:
+//! residual part φʳ is a sum of terms of four published kinds ([`HelmholtzResidual`]): power and
+//! exponential terms, Gaussian bell-shaped terms, non-analytic critical terms and Gao et al. 2023's
+//! associating terms, each with its coefficients as printed. Every property follows from its
+//! derivatives (IAPWS R6-95(2018), Table 3); a liquid's record needs only the pressure's derivative
+//! along an isotherm, so only `φʳ_δ` and `φʳ_δδ` are evaluated here:
 //!
 //! - p = `ρRT` (1 + `δφʳ_δ`);
 //! - `κ_T` = ρ⁻¹ (∂ρ ÷ ∂p)_T = 1 ÷ [`ρRT` (1 + `2δφʳ_δ` + `δ²φʳ_δδ`)].
@@ -75,6 +76,55 @@ impl GaussianTerm {
     }
 }
 
+/// An associating term: n δ^d τ^t exp(−η(δ − ε)² + 1 ÷ [β(τ − γ)² + b]) (Gao, Wu, Bell, Harvey
+/// and Lemmon 2023, J. Phys. Chem. Ref. Data 52, 013102, the term of their Sec. 2.4 and Table 5's
+/// terms 19–20, for ammonia). It has a Gaussian term's shape in δ, so its δ-derivatives are a
+/// Gaussian term's with exp(1 ÷ [β(τ − γ)² + b]) in place of exp(−β(τ − γ)²).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct AssociatingTerm {
+    pub(crate) n: f64,
+    pub(crate) d: i32,
+    pub(crate) t: f64,
+    pub(crate) eta: f64,
+    pub(crate) beta: f64,
+    pub(crate) gamma: f64,
+    pub(crate) epsilon: f64,
+    pub(crate) b: f64,
+}
+
+impl AssociatingTerm {
+    /// The term n δ^d τ^t exp(−η(δ − ε)² + 1 ÷ [β(τ − γ)² + b]): d, t and n first, as
+    /// [`GaussianTerm::new`] takes them, then η, β, γ, ε and b in the order Gao et al.'s Table 5
+    /// prints them.
+    #[must_use]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the term's eight published parameters, the last five in the order its source \
+                  prints them"
+    )]
+    pub(crate) const fn new(
+        d: i32,
+        t: f64,
+        n: f64,
+        eta: f64,
+        beta: f64,
+        gamma: f64,
+        epsilon: f64,
+        b: f64,
+    ) -> Self {
+        Self {
+            n,
+            d,
+            t,
+            eta,
+            beta,
+            gamma,
+            epsilon,
+            b,
+        }
+    }
+}
+
 /// A non-analytic term for the critical region: n Δ^b δ ψ, with Δ = θ² + B[(δ − 1)²]^a,
 /// θ = (1 − τ) + A[(δ − 1)²]^(1 ÷ 2β) and ψ = exp(−C(δ − 1)² − D(τ − 1)²) (IAPWS R6-95(2018),
 /// Eq. (6), its terms 55–56; Span and Wagner 1996's for carbon dioxide alike).
@@ -131,6 +181,7 @@ pub struct HelmholtzResidual {
     pub(crate) power: &'static [PowerTerm],
     pub(crate) gaussian: &'static [GaussianTerm],
     pub(crate) non_analytic: &'static [NonAnalyticTerm],
+    pub(crate) associating: &'static [AssociatingTerm],
 }
 
 /// φʳ's first and second derivatives in δ at fixed τ.
@@ -213,6 +264,21 @@ impl HelmholtzResidual {
             let (first_term, second_term) = term.density_derivatives(delta, tau);
             first += first_term;
             second += second_term;
+        }
+        for term in self.associating {
+            let d = f64::from(term.d);
+            let dd = delta - term.epsilon;
+            let tt = tau - term.gamma;
+            let e = math::exp(-term.eta * dd * dd + 1.0 / (term.beta * tt * tt + term.b));
+            let tau_t = math::powf(tau, term.t);
+            let delta_d = math::powi(delta, term.d);
+            first += term.n * delta_d * tau_t * e * (d / delta - 2.0 * term.eta * dd);
+            second += term.n
+                * tau_t
+                * e
+                * (-2.0 * term.eta * delta_d + 4.0 * term.eta * term.eta * delta_d * dd * dd
+                    - 4.0 * d * term.eta * math::powi(delta, term.d - 1) * dd
+                    + d * (d - 1.0) * math::powi(delta, term.d - 2));
         }
         DensityDerivatives { first, second }
     }

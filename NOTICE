@@ -232,6 +232,13 @@ the triple-point states' pressures and the enthalpy of vaporisation they give, a
 melting equation. The equations of state they rest on are Lemmon and Span 2006, Gao et al. 2016 and
 Bücker and Wagner 2006, cited in that file.
 
+From the same fetch's dev/fluids/{Methane, Nitrogen, Ethane, Ammonia, CarbonDioxide}.json, the
+residual Helmholtz energies' coefficients and exponents of Setzmann and Wagner 1991, Span et al.
+2000, Bücker and Wagner 2006, Gao et al. 2023 and Span and Wagner 1996 are copied into
+crates/hyperion-sim/src/substance/rows/equations.rs, and their surface_tension ancillaries'
+coefficients (Mulero, Cachadiña and Parra 2012) into crates/hyperion-sim/src/substance/rows/
+liquids.rs (galaxy plan 14, P14.T49.h's second step), each cited there.
+
 ================================================================================
 Data
 

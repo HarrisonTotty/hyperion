@@ -11,16 +11,30 @@
 //!   turned into a at each grid point and then interpolated linearly in a;
 //! - **the temperature** the file states, K, its label to the kelvin.
 //!
-//! Nothing is fitted: every value is the files' own, reduced by stated arithmetic. R09.T2.e's
-//! hand-entered records took their bins the same way (`binmeans.py` in its lane's scratch), so a
-//! record the registry resolves at a file's own state reproduces them. Which of a file's members
-//! the registry takes, and on what basis, is the sim's per liquid (`substance::liquid`): the task
-//! reduces every file whole, and a k that a file holds at zero, unmeasured, becomes an a of zero
-//! here that the sim may leave unread.
+//! The optical values are not fitted: every one is the files' own, reduced by stated arithmetic.
+//! R09.T2.e's hand-entered records took their bins the same way (`binmeans.py` in its lane's
+//! scratch), so a record the registry resolves at a file's own state reproduces them. Which of a
+//! file's members the registry takes, and on what basis, is the sim's per liquid
+//! (`substance::liquid`): the task reduces every file whole, and a k that a file holds at zero,
+//! unmeasured, becomes an a of zero here that the sim may leave unread.
+//!
+//! **The transport fit** (decision-r11-palette-liquids §4: "and any transport fit"). For each row
+//! whose liquid a solution holds below the row's own triple point (methane and ethane in Titan's
+//! seas, whose first melt is 71.15 K; decision-p14-t49b-condensed §2.5), the task fits the
+//! Vogel–Fulcher–Tammann form `substance::liquid::SupercooledViscosity` evaluates, ln μ(T) = ln
+//! μ(`T_t`) + B [1 ÷ (T − `T_0`) − 1 ÷ (`T_t` − `T_0`)], anchored at the row's own viscosity at its
+//! triple point, to that viscosity along the saturated liquid from the triple point to the normal
+//! boiling point (101,325 Pa), as `hyperion_sim::substance::liquid_properties` resolves it: least
+//! squares in ln μ over [`VFT_SAMPLES`] even temperatures, B linear for each `T_0`, and `T_0` the
+//! minimiser over [0, `T_t` − 1 K] by a scan of [`VFT_SCAN`] steps and a golden-section search,
+//! held at 0 where the minimum lies below it (an Arrhenius form, VFT's limit). The fit reads the
+//! sim's viscosities, which the fingerprint probes.
 
 use std::num::NonZeroUsize;
 
-use hyperion_sim::substance::LIQUID_BIN_EDGES_NM;
+use hyperion_sim::math;
+use hyperion_sim::substance::{Composition, LIQUID_BIN_EDGES_NM, by_key, liquid_properties};
+use hyperion_sim::units::{Kelvin, Pascals};
 use hyperion_surface::field::LIQUID_BINS;
 
 use crate::emit::{RustTable, TableItem};
@@ -28,8 +42,8 @@ use crate::manifest::{Manifest, SimFingerprint};
 use crate::materials::MaterialFile;
 use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput, check_manifest};
 
-/// The task's revision.
-pub const VERSION: u32 = 0;
+/// The task's revision: 1 adds the transport fit.
+pub const VERSION: u32 = 1;
 
 /// The files the manifest names, in its order (by name), each one of R08's liquid files.
 pub const FILES: [&str; 7] = [
@@ -42,9 +56,20 @@ pub const FILES: [&str; 7] = [
     "water.json",
 ];
 
+/// The rows whose viscosity the task continues below the triple point, by registry key, with
+/// their items' prefix.
+pub const SUPERCOOLED: [(&str, &str); 2] = [("CH4", "METHANE"), ("C2H6", "ETHANE")];
+
+/// The temperatures the transport fit samples, evenly from the triple point to the normal boiling
+/// point, both included.
+pub const VFT_SAMPLES: u32 = 64;
+
+/// The steps of the scan for `T_0` over [0, `T_t` − 1 K] before the golden-section search.
+pub const VFT_SCAN: u32 = 400;
+
 /// The table's items: for each file in [`FILES`]'s order, its bins of n, its bins of a and its
-/// temperature.
-pub const ITEMS: [&str; 21] = [
+/// temperature; then for each row of [`SUPERCOOLED`], its B and its `T_0`.
+pub const ITEMS: [&str; 25] = [
     "AMMONIA_LIQUID_N",
     "AMMONIA_LIQUID_A",
     "AMMONIA_LIQUID_TEMPERATURE_K",
@@ -66,6 +91,10 @@ pub const ITEMS: [&str; 21] = [
     "WATER_N",
     "WATER_A",
     "WATER_TEMPERATURE_K",
+    "METHANE_SUPERCOOLED_VISCOSITY_B_K",
+    "METHANE_SUPERCOOLED_VISCOSITY_T0_K",
+    "ETHANE_SUPERCOOLED_VISCOSITY_B_K",
+    "ETHANE_SUPERCOOLED_VISCOSITY_T0_K",
 ];
 
 /// The bins' edges, nm: the sim's `substance::LIQUID_BIN_EDGES_NM`, 380 + 25.33 k for k = 0 to
@@ -202,10 +231,170 @@ pub fn fit(manifest: &Manifest) -> Result<Vec<Reduced>, RunTaskError> {
         .collect()
 }
 
-/// The table's contents for `reduced`, in its order.
+/// One row's Vogel–Fulcher–Tammann fit to its viscosity along the saturated liquid.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SupercooledFit {
+    /// The row's key.
+    pub key: &'static str,
+    /// The items' prefix.
+    pub prefix: &'static str,
+    /// The triple point, K, where the form is anchored.
+    pub triple_k: f64,
+    /// The window's top, the normal boiling point, K.
+    pub boiling_k: f64,
+    /// B, K.
+    pub b_k: f64,
+    /// `T_0`, K.
+    pub t0_k: f64,
+    /// The largest relative miss of the fitted form against the viscosity over the window.
+    pub worst: f64,
+}
+
+/// The pressure of the window's top, Pa: one standard atmosphere.
+const ONE_ATMOSPHERE: Pascals = Pascals::new(101_325.0);
+
+/// A row's viscosity along its saturated liquid, from the sim, which the transport fit reads.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SaturatedViscosities {
+    /// The triple point, where the form is anchored.
+    pub triple: Kelvin,
+    /// The normal boiling point, the window's top.
+    pub boiling: Kelvin,
+    /// The [`VFT_SAMPLES`] even temperatures from the triple point to the boiling point, both
+    /// included, each with the viscosity there, Pa s.
+    pub samples_pa_s: Vec<(Kelvin, f64)>,
+}
+
+/// `key`'s viscosity along its saturated liquid from the sim ([`SaturatedViscosities`]).
+///
+/// # Errors
+///
+/// [`RunTaskError::Input`] if `key` is not a row with a phase diagram, does not boil at one
+/// atmosphere above its triple point, `liquid_properties` refuses a sample's state, or a sample's
+/// record lacks a viscosity.
+pub fn saturated_viscosities(key: &'static str) -> Result<SaturatedViscosities, RunTaskError> {
+    let bad = |why: String| RunTaskError::Input {
+        task: "liquid_optics",
+        source: format!("{key}: {why}").into(),
+    };
+    let id = by_key(key).ok_or_else(|| bad("not a registry row".to_owned()))?;
+    let diagram = id
+        .substance()
+        .phase_diagram()
+        .ok_or_else(|| bad("no phase diagram".to_owned()))?;
+    let triple = diagram.triple_temperature();
+    let boiling = diagram
+        .saturation_temperature(ONE_ATMOSPHERE)
+        .filter(|&b| b > triple)
+        .ok_or_else(|| {
+            bad("it does not boil at one atmosphere above its triple point".to_owned())
+        })?;
+    let last = f64::from(VFT_SAMPLES - 1);
+    let mut samples_pa_s = Vec::with_capacity(usize::try_from(VFT_SAMPLES).unwrap_or(0));
+    for i in 0..VFT_SAMPLES {
+        let t =
+            Kelvin::new(triple.value() + (boiling.value() - triple.value()) * f64::from(i) / last);
+        let record =
+            liquid_properties(id, t, Composition::Reference).map_err(|e| bad(e.to_string()))?;
+        let mu = record
+            .viscosity_pa_s
+            .ok_or_else(|| bad(format!("no viscosity at {} K", t.value())))?;
+        samples_pa_s.push((t, mu));
+    }
+    Ok(SaturatedViscosities {
+        triple,
+        boiling,
+        samples_pa_s,
+    })
+}
+
+/// For a given `T_0`, K, the least-squares B, K, of the anchored form over `samples` (the first
+/// is the anchor) and the sum of squared misses in ln μ.
 #[must_use]
-pub fn render(reduced: &[Reduced]) -> RustTable {
-    let mut items = Vec::with_capacity(3 * reduced.len());
+fn vft_misses(samples: &[(Kelvin, f64)], t0: f64) -> (f64, f64) {
+    let (triple, anchor) = samples[0];
+    let triple = triple.value();
+    let ln_anchor = math::ln(anchor);
+    let mut xy = 0.0;
+    let mut xx = 0.0;
+    for &(t, mu) in samples {
+        let t = t.value();
+        let x = 1.0 / (t - t0) - 1.0 / (triple - t0);
+        let y = math::ln(mu) - ln_anchor;
+        xy += x * y;
+        xx += x * x;
+    }
+    let b = xy / xx;
+    let mut sum = 0.0;
+    for &(t, mu) in samples {
+        let t = t.value();
+        let x = 1.0 / (t - t0) - 1.0 / (triple - t0);
+        let miss = math::ln(mu) - ln_anchor - b * x;
+        sum += miss * miss;
+    }
+    (b, sum)
+}
+
+/// Fits the anchored form to `key`'s viscosity (the module's note).
+///
+/// # Errors
+///
+/// As [`saturated_viscosities`].
+pub fn fit_supercooled(
+    key: &'static str,
+    prefix: &'static str,
+) -> Result<SupercooledFit, RunTaskError> {
+    let viscosities = saturated_viscosities(key)?;
+    let samples = &viscosities.samples_pa_s;
+    let triple = viscosities.triple.value();
+    let top = triple - 1.0;
+    let step = top / f64::from(VFT_SCAN);
+    let mut best = (f64::INFINITY, 0.0);
+    for k in 0..=VFT_SCAN {
+        let t0 = step * f64::from(k);
+        let (_, misses) = vft_misses(samples, t0);
+        if misses < best.0 {
+            best = (misses, t0);
+        }
+    }
+    let mut low = (best.1 - step).max(0.0);
+    let mut high = (best.1 + step).min(top);
+    let ratio = (5.0_f64.sqrt() - 1.0) / 2.0;
+    for _ in 0..200 {
+        let a = high - ratio * (high - low);
+        let b = low + ratio * (high - low);
+        if vft_misses(samples, a).1 < vft_misses(samples, b).1 {
+            high = b;
+        } else {
+            low = a;
+        }
+    }
+    let mut t0 = f64::midpoint(low, high);
+    if vft_misses(samples, 0.0).1 <= vft_misses(samples, t0).1 {
+        t0 = 0.0;
+    }
+    let (b, _) = vft_misses(samples, t0);
+    let anchor = samples[0].1;
+    let mut worst = 0.0_f64;
+    for &(t, mu) in samples {
+        let fitted = anchor * math::exp(b * (1.0 / (t.value() - t0) - 1.0 / (triple - t0)));
+        worst = worst.max((fitted / mu - 1.0).abs());
+    }
+    Ok(SupercooledFit {
+        key,
+        prefix,
+        triple_k: triple,
+        boiling_k: viscosities.boiling.value(),
+        b_k: b,
+        t0_k: t0,
+        worst,
+    })
+}
+
+/// The table's contents for `reduced` and `supercooled`, in their order.
+#[must_use]
+pub fn render(reduced: &[Reduced], supercooled: &[SupercooledFit]) -> RustTable {
+    let mut items = Vec::with_capacity(3 * reduced.len() + 2 * supercooled.len());
     for file in reduced {
         let prefix = item_prefix(file.file);
         items.push(TableItem::Array {
@@ -239,6 +428,30 @@ pub fn render(reduced: &[Reduced]) -> RustTable {
             value: file.temperature_k,
         });
     }
+    for fit in supercooled {
+        items.push(TableItem::Scalar {
+            name: format!("{}_SUPERCOOLED_VISCOSITY_B_K", fit.prefix),
+            doc: vec![
+                format!(
+                    "B of {}'s Vogel–Fulcher–Tammann viscosity below its triple point, K,",
+                    fit.key
+                ),
+                format!(
+                    "fitted over {:.4}–{:.4} K (worst miss {:.2e}).",
+                    fit.triple_k, fit.boiling_k, fit.worst
+                ),
+            ],
+            value: fit.b_k,
+        });
+        items.push(TableItem::Scalar {
+            name: format!("{}_SUPERCOOLED_VISCOSITY_T0_K", fit.prefix),
+            doc: vec![format!(
+                "`T_0` of {}'s Vogel–Fulcher–Tammann viscosity, K.",
+                fit.key
+            )],
+            value: fit.t0_k,
+        });
+    }
     RustTable {
         summary: vec![
             "The liquids' optical constants by bin (plan 14, P14.T49.h), which".to_owned(),
@@ -253,7 +466,11 @@ pub fn render(reduced: &[Reduced]) -> RustTable {
                 .to_owned(),
             "fitted: the values are the files', reduced. Which members the registry reads, and on what"
                 .to_owned(),
-            "basis, is `substance::liquid`'s.".to_owned(),
+            "basis, is `substance::liquid`'s. Then each supercooled row's Vogel–Fulcher–Tammann B and"
+                .to_owned(),
+            "`T_0`, fitted to its viscosity along the saturated liquid from its triple point to its"
+                .to_owned(),
+            "normal boiling point, anchored at its triple point (`SupercooledViscosity`).".to_owned(),
         ],
         items,
     }
@@ -284,21 +501,41 @@ impl FitTask for LiquidOpticsTask {
         &ITEMS
     }
 
-    /// The bins' edges, the one sim value the reduction reads; the material files are the inputs
-    /// hash's.
+    /// The sim values the task reads: the bins' edges, and each supercooled row's triple point,
+    /// normal boiling point and viscosity at every one of the fit's samples; the material files
+    /// are the inputs hash's.
     fn fingerprint(&self) -> SimFingerprint {
-        SimFingerprint::new(
-            bin_edges()
-                .iter()
-                .enumerate()
-                .map(|(k, edge)| (format!("liquid bin edge {k} nm"), *edge))
-                .collect(),
-        )
+        let mut probes: Vec<(String, f64)> = bin_edges()
+            .iter()
+            .enumerate()
+            .map(|(k, edge)| (format!("liquid bin edge {k} nm"), *edge))
+            .collect();
+        for (key, _) in SUPERCOOLED {
+            match saturated_viscosities(key) {
+                Ok(viscosities) => {
+                    probes.push((format!("{key} triple point K"), viscosities.triple.value()));
+                    probes.push((
+                        format!("{key} normal boiling point K"),
+                        viscosities.boiling.value(),
+                    ));
+                    for (t, mu) in viscosities.samples_pa_s {
+                        probes.push((format!("{key} viscosity at {:.6} K, Pa s", t.value()), mu));
+                    }
+                }
+                // A row the sim cannot resolve probes as NaN, which matches no lock file's value.
+                Err(_) => probes.push((format!("{key} unresolved"), f64::NAN)),
+            }
+        }
+        SimFingerprint::new(probes)
     }
 
     fn run(&self, manifest: &Manifest, _threads: NonZeroUsize) -> Result<TaskOutput, RunTaskError> {
         check_manifest(self, manifest)?;
         let reduced = fit(manifest)?;
+        let supercooled = SUPERCOOLED
+            .iter()
+            .map(|&(key, prefix)| fit_supercooled(key, prefix))
+            .collect::<Result<Vec<_>, _>>()?;
         let water_file = manifest.load_material("water.json").map_err(|e| {
             RunTaskError::Dataset(crate::data::LoadDatasetError::Material(Box::new(e)))
         })?;
@@ -313,24 +550,35 @@ impl FitTask for LiquidOpticsTask {
                 |i| format!("{:.5}", water_a[i]),
             )
         };
+        let fits: Vec<String> = supercooled
+            .iter()
+            .map(|f| {
+                format!(
+                    "{} B {:.3} K, `T_0` {:.3} K, worst {:.1e} over {:.3}–{:.3} K",
+                    f.key, f.b_k, f.t0_k, f.worst, f.triple_k, f.boiling_k
+                )
+            })
+            .collect();
         let acceptance = format!(
             "{} liquid files, each to {LIQUID_BINS} bins over 380–760 nm; water.json's a on its grid: \
              {} m⁻¹ at 440 nm (Mason, Cone and Fry 2016's 0.00522), {} at 550 nm and {} at 700 nm \
-             (Pope and Fry 1997's 0.0565 and 0.624)",
+             (Pope and Fry 1997's 0.0565 and 0.624); supercooled viscosity: {}",
             reduced.len(),
             at(440.0),
             at(550.0),
             at(700.0),
+            fits.join("; "),
         );
         Ok(TaskOutput {
-            table: render(&reduced),
+            table: render(&reduced, &supercooled),
             source: "rendering plan R08's committed liquid material files \
                      (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`), each citing its \
                      own primaries: IAPWS R9-97, Mason, Cone and Fry 2016, Pope and Fry 1997 and \
                      Kou, Labrie and Chýlek 1993 (water); Martonchik and Orton 1994 (methane); \
                      Augustin 1915 (nitrogen); Hagermann et al. 2005 with Loria 1909 (ethane); \
                      Wong and Anderson 1972 with Cuthbertson 1914 (ammonia); Palmer and Williams \
-                     1975 (sulphuric acid)"
+                     1975 (sulphuric acid); and the sim's own liquid viscosities, Sotiriadou et al. \
+                     2026 (methane) and Friend, Ingham and Ely 1991 (ethane), for the transport fit"
                 .to_owned(),
             acceptance,
             provisional: None,
@@ -475,11 +723,12 @@ mod tests {
         assert!(matches!(fit(&other), Err(RunTaskError::Input { .. })));
     }
 
-    /// The manifest names the task's files, and the items follow them.
+    /// The manifest names the task's files, and the items follow them and then the supercooled
+    /// rows.
     #[test]
     fn liquid_optics_the_items_follow_the_files() {
         assert_eq!(manifest().materials(), FILES);
-        let names: Vec<String> = FILES
+        let mut names: Vec<String> = FILES
             .iter()
             .flat_map(|f| {
                 let p = item_prefix(f);
@@ -490,6 +739,35 @@ mod tests {
                 ]
             })
             .collect();
+        for (_, prefix) in SUPERCOOLED {
+            names.push(format!("{prefix}_SUPERCOOLED_VISCOSITY_B_K"));
+            names.push(format!("{prefix}_SUPERCOOLED_VISCOSITY_T0_K"));
+        }
         assert_eq!(names, ITEMS);
+    }
+
+    /// Each supercooled fit is anchored at the row's triple point, holds `T_0` in [0, `T_t`), meets
+    /// the viscosity over its window within 1% for methane (a super-Arrhenius liquid, `T_0` above
+    /// 0) and 4% for ethane (whose fit is Arrhenius, `T_0` = 0: along the saturated liquid its
+    /// correlation's effective activation energy rises with temperature), and is no worse than the
+    /// form at any other `T_0` of its scan.
+    #[test]
+    fn liquid_optics_the_supercooled_fits_are_least_squares() {
+        for ((key, prefix), worst) in SUPERCOOLED.iter().zip([0.01, 0.04]) {
+            let fit = fit_supercooled(key, prefix).unwrap();
+            assert!(fit.t0_k >= 0.0 && fit.t0_k < fit.triple_k, "{fit:?}");
+            assert!(fit.worst < worst, "{fit:?}");
+            let samples = saturated_viscosities(key).unwrap().samples_pa_s;
+            let (_, at_fit) = vft_misses(&samples, fit.t0_k);
+            for k in 0..20 {
+                let t0 = (fit.triple_k - 1.0) * f64::from(k) / 20.0;
+                assert!(
+                    at_fit <= vft_misses(&samples, t0).1 * (1.0 + 1e-12),
+                    "{key}: {t0}"
+                );
+            }
+        }
+        let methane = fit_supercooled("CH4", "METHANE").unwrap();
+        assert!(methane.t0_k > 10.0, "{methane:?}");
     }
 }

@@ -826,9 +826,11 @@ mod tests {
     }
 
     /// Decision-r11-palette-liquids §1.5 and §2: a sea's and a melt's records reach the wire with
-    /// every member to the bit, a member the field does not model absent, an entry that is not
-    /// liquid with none; the header names its main liquid and carries the two fractions plan 14
-    /// fills, once they are filled; and every basis has its wire name.
+    /// every member to the bit (the sea's scattering, the registry's since P14.T49.h filled it,
+    /// decision-r10-t10b-r09-t2e §7), a member the field does not model absent (the melt's
+    /// scattering), an entry that is not liquid with none; the header names its main liquid and
+    /// carries the two fractions plan 14 fills, once they are filled; and every basis has its wire
+    /// name.
     #[test]
     fn a_field_header_carries_its_liquid_records() {
         let entry = |key, role, density, liquid| PaletteEntry {
@@ -891,7 +893,10 @@ mod tests {
             sent.absorption_per_m,
             Modelled::Value(record.absorption_per_m.unwrap())
         );
-        assert!(sent.scattering_per_m.is_not_modelled(), "{sent:?}");
+        assert_eq!(
+            sent.scattering_per_m,
+            Modelled::Value(record.scattering_per_m.unwrap())
+        );
         assert_eq!(
             sent.surface_tension_n_per_m,
             Modelled::Value(record.surface_tension_n_per_m.unwrap())

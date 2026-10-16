@@ -66,6 +66,12 @@ interface LiquidRecordCase {
   readonly index: IndexRule;
   /** Whether the record carries the file's absorption, or leaves it not modelled. */
   readonly absorption: "file" | "absent";
+  /**
+   * Whether the record carries the registry's scattering (P14.T49.h's Einstein–Smoluchowski–Cabannes,
+   * which the sim's tests hold each copy to, bit for bit; decision-r10-t10b-r09-t2e §7), or leaves
+   * it not modelled. No material file holds a scattering coefficient.
+   */
+  readonly scattering: "registry" | "absent";
 }
 
 const WATER = parseMaterialFile(waterFile, "water.json");
@@ -96,6 +102,7 @@ const RECORDS: ReadonlyArray<LiquidRecordCase> = [
     file: WATER,
     index: { kind: "file" },
     absorption: "file",
+    scattering: "registry",
   },
   {
     name: "hyperion_sim::planetary::surface::reference's WATER_RECORD",
@@ -105,6 +112,7 @@ const RECORDS: ReadonlyArray<LiquidRecordCase> = [
     file: WATER,
     index: { kind: "file" },
     absorption: "file",
+    scattering: "registry",
   },
   {
     name: "hyperion_surface::testing::liquid_methane_titan",
@@ -114,6 +122,7 @@ const RECORDS: ReadonlyArray<LiquidRecordCase> = [
     file: METHANE,
     index: METHANE_CARRY,
     absorption: "absent",
+    scattering: "registry",
   },
   {
     name: "hyperion_sim::planetary::surface::inputs's methane_sea",
@@ -123,6 +132,7 @@ const RECORDS: ReadonlyArray<LiquidRecordCase> = [
     file: METHANE,
     index: METHANE_CARRY,
     absorption: "absent",
+    scattering: "registry",
   },
   {
     name: "hyperion_surface::testing::basaltic_melt",
@@ -132,6 +142,7 @@ const RECORDS: ReadonlyArray<LiquidRecordCase> = [
     file: BASALTIC_GLASS,
     index: { kind: "file" },
     absorption: "file",
+    scattering: "absent",
   },
 ];
 
@@ -257,6 +268,8 @@ interface HeldRecord {
   readonly absorptionPerM: ReadonlyArray<number> | undefined;
   /** Whether its scattering is `None`. */
   readonly scatteringAbsent: boolean;
+  /** Its scattering by bin, m⁻¹, or `undefined` where it is `None`. */
+  readonly scatteringPerM: ReadonlyArray<number> | undefined;
 }
 
 /** The record `opens` opens in `source`. */
@@ -276,6 +289,9 @@ function heldRecord(source: string, opens: string): HeldRecord {
     throw new Error(`the record "${opens}" opens has no index by bin`);
   }
   const absorptionBins = bins(absorption[2], absorption[3]);
+  const scattering =
+    /scattering_per_m:\s*(None|Some\(\s*(?:\[([^\]]*)\]|([A-Z][A-Z0-9_]*))\s*\))/.exec(text);
+  const scatteringBins = scattering === null ? undefined : bins(scattering[2], scattering[3]);
   return {
     densityKgM3: rustFloat(constOrLiteral(source, density.trim(), "f64")),
     index: rustFloats(indexBins),
@@ -284,6 +300,10 @@ function heldRecord(source: string, opens: string): HeldRecord {
         ? undefined
         : rustFloats(absorptionBins),
     scatteringAbsent: /scattering_per_m:\s*None\s*,/.test(text),
+    scatteringPerM:
+      scattering === null || scattering[1] === "None" || scatteringBins === undefined
+        ? undefined
+        : rustFloats(scatteringBins),
   };
 }
 
@@ -368,9 +388,45 @@ describe("the surface palettes' liquid records", () => {
     },
   );
 
-  // No material file holds a scattering coefficient, so no record takes one from a file.
-  it.each(RECORDS)("$name leaves its scattering not modelled", (record) => {
-    expect(heldRecord(record.source, record.opens).scatteringAbsent).toBe(true);
+  // No material file holds a scattering coefficient, so no record takes one from a file: the
+  // water and methane records carry the registry's, which the sim holds to the bit; the melt's is
+  // not modelled.
+  it.each(RECORDS.filter((record) => record.scattering === "absent"))(
+    "$name leaves its scattering not modelled",
+    (record) => {
+      expect(heldRecord(record.source, record.opens).scatteringAbsent).toBe(true);
+    },
+  );
+
+  it.each(RECORDS.filter((record) => record.scattering === "registry"))(
+    "$name carries the registry's scattering, falling with wavelength",
+    (record) => {
+      const held = heldRecord(record.source, record.opens).scatteringPerM;
+      expect(held).toHaveLength(BAKE_BIN_COUNT);
+      const bins = held ?? [];
+      expect(bins.every((b) => b > 0)).toBe(true);
+      expect(bins.every((b, k) => k === 0 || b < at(bins, k - 1))).toBe(true);
+    },
+  );
+
+  it("holds the same scattering in each liquid's two copies", () => {
+    const held = (name: string): ReadonlyArray<number> => {
+      const record = RECORDS.find((r) => r.name === name);
+      if (record === undefined) {
+        throw new Error(`no record is named ${name}`);
+      }
+      const bins = heldRecord(record.source, record.opens).scatteringPerM;
+      if (bins === undefined) {
+        throw new Error(`${name} carries no scattering`);
+      }
+      return bins;
+    };
+    expect(held("hyperion_sim::planetary::surface::reference's WATER_RECORD")).toEqual(
+      held("hyperion_surface::testing::liquid_water"),
+    );
+    expect(held("hyperion_sim::planetary::surface::inputs's methane_sea")).toEqual(
+      held("hyperion_surface::testing::liquid_methane_titan"),
+    );
   });
 
   // A record's `basis` is its one required member that names no array, so it counts the records

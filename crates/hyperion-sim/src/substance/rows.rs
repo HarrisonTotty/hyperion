@@ -40,6 +40,7 @@
 
 mod condensed;
 mod diagrams;
+pub(super) mod equations;
 pub(super) mod liquids;
 pub(super) mod optics;
 

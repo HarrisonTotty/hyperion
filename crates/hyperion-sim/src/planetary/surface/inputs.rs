@@ -2251,7 +2251,10 @@ mod tests {
     /// and sources these are, which this crate's tests cannot reach without its `testing`
     /// feature): Setzmann and Wagner 1991's 447.6 kg m⁻³ at 93.65 K and Huygens's 1,467 hPa, and
     /// Martonchik and Orton 1994's n at 90 K carried to it by Lorentz–Lorenz from 452.4 kg m⁻³,
-    /// the other members not modelled (decision-r11-palette-liquids §1.8). The client's
+    /// the registry's scattering at 93.65 K (P14.T49.h; decision-r10-t10b-r09-t2e §7), copied as
+    /// shortest round-trip decimals and held to the bit by
+    /// `the_methane_sea_carries_the_registry_s_scattering`, the other members not modelled
+    /// (decision-r11-palette-liquids §1.8). The client's
     /// `view/atmosphere/materials/paletteLiquids.test.ts` holds its bins to the file's.
     fn methane_sea() -> LiquidProperties {
         LiquidProperties {
@@ -2264,7 +2267,23 @@ mod tests {
                 1.286_355,
             ],
             absorption_per_m: None,
-            scattering_per_m: None,
+            scattering_per_m: Some([
+                0.003_865_809_149_989_438_4,
+                0.002_989_879_265_953_119,
+                0.002_339_992_177_513_175_5,
+                0.001_855_513_682_522_143_7,
+                0.001_488_726_493_932_331_1,
+                0.001_207_091_327_156_444_5,
+                0.000_988_092_827_130_07,
+                0.000_815_891_544_344_150_6,
+                0.000_681_679_037_661_234_1,
+                0.000_572_882_364_591_951_5,
+                0.000_485_555_912_859_613_3,
+                0.000_414_686_511_108_925_1,
+                0.000_357_392_279_184_591_24,
+                0.000_309_766_467_640_019_4,
+                0.000_269_111_878_909_328_93,
+            ]),
             surface_tension_n_per_m: None,
             viscosity_pa_s: None,
         }
@@ -4170,5 +4189,24 @@ mod tests {
             "{bodies} bodies: {moons} moons, {airless} airless, {aired} with air, \
              {drifting} on drifting orbits, {dry} listing a share with no area"
         );
+    }
+
+    /// The surface tests' methane sea carries the registry's scattering, to the bit: its copy, as
+    /// shortest round-trip decimals, is `liquid_properties`' b at the record's temperature
+    /// (P14.T49.h; decision-r10-t10b-r09-t2e §7, condition 1).
+    #[test]
+    fn the_methane_sea_carries_the_registry_s_scattering() {
+        use crate::substance::{Composition, by_key, liquid_properties};
+        let sea = methane_sea();
+        let methane = by_key("CH4").unwrap();
+        let resolved = liquid_properties(methane, sea.temperature, Composition::Reference).unwrap();
+        for (h, r) in sea
+            .scattering_per_m
+            .unwrap()
+            .iter()
+            .zip(&resolved.scattering_per_m.unwrap())
+        {
+            assert_same_bits(*h, *r);
+        }
     }
 }

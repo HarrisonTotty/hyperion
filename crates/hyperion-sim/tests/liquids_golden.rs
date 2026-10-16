@@ -2,8 +2,11 @@
 //!
 //! `tests/golden/substance/liquids.golden` pins, by their bits at the generator version, the
 //! record [`liquid_properties`] resolves for every row with liquid columns: at its first melt, at
-//! a quarter, a half and three quarters of its liquid range (to its critical point, or 100 K above
-//! the first melt for a row that states none), and, for water, at 15 and 25 °C. It is a file of
+//! a quarter, a half, three quarters and 0.999 of its liquid range (to its critical point, or 100 K
+//! above the first melt for a row that states none), where the critical-point rules act, and, for
+//! water, at 15 and 25 °C; and, in `[supercooled]`, each continued viscosity
+//! ([`SupercooledViscosity`](hyperion_sim::substance::liquid::SupercooledViscosity)) from its
+//! triple point down to 71.15 K, Titan's seas' first melt. It is a file of
 //! its own, beside `registry.golden`, so that the liquids' columns extend the registry without
 //! changing a committed line of it. Nothing on the record reads them until P14.T54.a, so until
 //! then a change re-blesses this golden at the version in force (decision-bump-plan-after-22
@@ -60,7 +63,7 @@ fn liquids_golden() {
             .map_or(lowest + STATED_SPAN_K, |d: &PhaseDiagram| {
                 d.critical_temperature().value()
             });
-        let mut temperatures: Vec<f64> = [0.0, 0.25, 0.5, 0.75]
+        let mut temperatures: Vec<f64> = [0.0, 0.25, 0.5, 0.75, 0.999]
             .iter()
             .map(|f| lowest + f * (top - lowest))
             .collect();
@@ -98,6 +101,29 @@ fn liquids_golden() {
                 &mut w,
                 &format!("{label}: viscosity_pa_s"),
                 record.viscosity_pa_s,
+            );
+        }
+    }
+    w.line("[supercooled]");
+    for id in substance::ids() {
+        let row = id.substance();
+        let Some(form) = row.liquid().and_then(|c| c.supercooled_viscosity()) else {
+            continue;
+        };
+        let triple = form.triple_temperature();
+        let at_triple = liquid_properties(id, triple, Composition::Reference)
+            .expect("a supercooled row resolves at its triple point")
+            .viscosity_pa_s
+            .expect("a supercooled row has a viscosity");
+        for k in 0..=4 {
+            let t = triple.value() - (triple.value() - 71.15) * f64::from(k) / 4.0;
+            w.f64(
+                &format!(
+                    "supercooled {} {} at {t:.3} K: viscosity_pa_s",
+                    id.index(),
+                    row.key()
+                ),
+                form.viscosity_pa_s(at_triple, Kelvin::new(t)),
             );
         }
     }

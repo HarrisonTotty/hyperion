@@ -363,7 +363,11 @@ const WATER: Substance = Substance {
 /// - **Surface tension:** IAPWS R1-76(2014)'s 0.071 97 N m⁻¹ at 298.15 K.
 /// - **Viscosity:** IAPWS R12-08's 8.900 × 10⁻⁴ Pa s at 298.15 K and 100 kPa (Huber et al. 2009,
 ///   J. Phys. Chem. Ref. Data 38, 101).
-/// - **Scattering:** not modelled here.
+/// - **Scattering:** P14.T49.h's, `hyperion_sim::substance::liquid_properties`' b at 298.15 K, the
+///   registry's Einstein–Smoluchowski–Cabannes (Zhang, Hu and He 2009's density term with
+///   IAPWS-95's `κ_T` at the saturated liquid's density and δ = 0.039 there), copied as shortest
+///   round-trip decimals (decision-r10-t10b-r09-t2e §7): 0.005 47 m⁻¹ in the bin about 393 nm and
+///   0.000 370 in the bin about 747 nm. A sim test holds it to the registry's to the bit.
 ///
 /// The reference Earth's mean surface temperature is 288 K, so the generated world's record would
 /// be resolved colder (§1.7); this one keeps its file's temperature, its index's, at which every
@@ -393,7 +397,23 @@ const WATER_RECORD: LiquidProperties = LiquidProperties {
         1.442_47,
         2.800_88,
     ]),
-    scattering_per_m: None,
+    scattering_per_m: Some([
+        0.005_469_387_272_826_296,
+        0.004_181_643_650_890_754,
+        0.003_254_641_324_180_969_4,
+        0.002_572_758_840_890_256_4,
+        0.002_061_546_784_888_825,
+        0.001_671_864_057_626_776,
+        0.001_370_471_055_788_929_3,
+        0.001_134_243_878_283_069,
+        0.000_946_934_327_145_038_1,
+        0.000_796_821_586_256_235_6,
+        0.000_675_356_514_061_437_1,
+        0.000_576_186_174_358_237_9,
+        0.000_494_570_413_029_009_8,
+        0.000_426_895_418_578_785_24,
+        0.000_370_397_943_504_135_35,
+    ]),
     surface_tension_n_per_m: Some(0.071_97),
     viscosity_pa_s: Some(8.900e-4),
 };
@@ -1469,5 +1489,21 @@ mod tests {
         let ceres = ceres_like();
         let fitted = sigma(ceres.gravity().value(), 0.16);
         assert!((fitted - ceres.sigma_h().value()).abs() < 1.0, "{fitted} m");
+    }
+
+    /// The reference Earth's water carries the registry's scattering, to the bit: its copy, as
+    /// shortest round-trip decimals, is `liquid_properties`' b at the record's temperature
+    /// (P14.T49.h; decision-r10-t10b-r09-t2e §7, condition 1).
+    #[test]
+    fn the_reference_water_carries_the_registry_s_scattering() {
+        use crate::substance::{Composition, by_key, liquid_properties};
+        use hyperion_testkit::float::assert_same_bits;
+        let water = by_key("H2O").unwrap();
+        let resolved =
+            liquid_properties(water, WATER_RECORD.temperature, Composition::Reference).unwrap();
+        let held = WATER_RECORD.scattering_per_m.unwrap();
+        for (h, r) in held.iter().zip(&resolved.scattering_per_m.unwrap()) {
+            assert_same_bits(*h, *r);
+        }
     }
 }

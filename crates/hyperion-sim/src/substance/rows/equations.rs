@@ -1,0 +1,317 @@
+//! The liquids' reference equations of state beyond water's (plan 14, P14.T49.h's second step):
+//! methane, nitrogen, ethane, ammonia and carbon dioxide, the residual part of each one's
+//! dimensionless Helmholtz energy ([`HelmholtzResidual`]), for their isothermal compressibility
+//! and so their scattering (decision-r11-palette-liquids §1.8; decision-p14-t49h-liquids §9).
+//!
+//! Every coefficient is the published one as CoolProp's fluid files hold it (Bell, Wronski, Quoilin
+//! and Lemort 2014, Ind. Eng. Chem. Res. 53, 2498; master of 2026-10-14, the files the registry's
+//! phase diagrams read, under the MIT licence, `NOTICE`; their SHA-256 in plan 14's T49.h step 2
+//! record), each number written as the file's shortest round-trip decimal, in the paper's term
+//! order: CoolProp's carbon dioxide file rounds Span and Wagner's Table 31, printed to 14 figures,
+//! to 12 (an effect under 10⁻¹⁰). Each equation is checked against its paper's own table where the
+//! paper was read, and against NIST's Chemistry WebBook (SRD 69), whose fluid tables evaluate the
+//! same equations, where it was not: the isothermal compressibility `κ_T` = 1 ÷ [ρ (∂p ÷ ∂ρ)_T]
+//! that this crate computes is a table's `c_p` ÷ (`c_v` ρ w²), so a saturation table's heat
+//! capacities and sound speed check it at each of its saturated-liquid states (the tests in
+//! `liquid/tests.rs`).
+//!
+//! The gas constant of each is the one its coefficients were fitted with, divided by the molar
+//! mass the paper takes, J kg⁻¹ K⁻¹.
+
+use super::super::helmholtz::{
+    AssociatingTerm, GaussianTerm, HelmholtzResidual, NonAnalyticTerm, PowerTerm,
+};
+use crate::units::{Kelvin, KilogramsPerCubicMetre};
+
+/// Methane: Setzmann and Wagner 1991 (J. Phys. Chem. Ref. Data 20, 1061), valid from the melting
+/// line to 625 K, its Eq. (5.1)'s residual, 36 power and exponential terms and 4 Gaussian: `T_c` =
+/// 190.564 K, `ρ_c` = 162.66 kg m⁻³, R = 8.314 51 J mol⁻¹ K⁻¹ and M = 16.0428 g mol⁻¹. Its `κ_T`
+/// reproduces Table 39's `c_p` ÷ (`c_v` ρ′ w²) at 90.694, 100 and 120 K within 2 × 10⁻⁴, its five
+/// printed figures, and the WebBook's within 10⁻⁶.
+pub(in crate::substance) const METHANE: HelmholtzResidual = HelmholtzResidual {
+    reducing_temperature: Kelvin::new(190.564),
+    reducing_density: KilogramsPerCubicMetre::new(162.66),
+    gas_constant_j_per_kg_k: 8.314_51 / 0.016_042_8,
+    power: &[
+        PowerTerm::new(0, 1, -0.5, 0.043_679_010_28),
+        PowerTerm::new(0, 1, 0.5, 0.670_923_619_9),
+        PowerTerm::new(0, 1, 1.0, -1.765_577_859),
+        PowerTerm::new(0, 2, 0.5, 0.858_233_024_1),
+        PowerTerm::new(0, 2, 1.0, -1.206_513_052),
+        PowerTerm::new(0, 2, 1.5, 0.512_046_722),
+        PowerTerm::new(0, 2, 4.5, -0.000_400_001_079_1),
+        PowerTerm::new(0, 3, 0.0, -0.012_478_424_23),
+        PowerTerm::new(0, 4, 1.0, 0.031_002_697_01),
+        PowerTerm::new(0, 4, 3.0, 0.001_754_748_522),
+        PowerTerm::new(0, 8, 1.0, -3.171_921_605e-6),
+        PowerTerm::new(0, 9, 3.0, -2.240_346_84e-6),
+        PowerTerm::new(0, 10, 3.0, 2.947_056_156e-7),
+        PowerTerm::new(1, 1, 0.0, 0.183_048_790_9),
+        PowerTerm::new(1, 1, 1.0, 0.151_188_367_9),
+        PowerTerm::new(1, 1, 2.0, -0.428_936_387_7),
+        PowerTerm::new(1, 2, 0.0, 0.068_940_024_46),
+        PowerTerm::new(1, 4, 0.0, -0.014_083_139_96),
+        PowerTerm::new(1, 5, 2.0, -0.030_630_548_3),
+        PowerTerm::new(1, 6, 2.0, -0.029_699_067_08),
+        PowerTerm::new(2, 1, 5.0, -0.019_320_408_31),
+        PowerTerm::new(2, 2, 5.0, -0.110_573_995_9),
+        PowerTerm::new(2, 3, 5.0, 0.099_525_489_95),
+        PowerTerm::new(2, 4, 2.0, 0.008_548_437_825),
+        PowerTerm::new(2, 4, 4.0, -0.061_505_556_62),
+        PowerTerm::new(3, 3, 12.0, -0.042_917_924_23),
+        PowerTerm::new(3, 5, 8.0, -0.018_132_072_9),
+        PowerTerm::new(3, 5, 10.0, 0.034_459_047_6),
+        PowerTerm::new(3, 8, 10.0, -0.002_385_919_45),
+        PowerTerm::new(4, 2, 10.0, -0.011_590_949_39),
+        PowerTerm::new(4, 3, 14.0, 0.066_416_936_02),
+        PowerTerm::new(4, 4, 12.0, -0.023_715_495_9),
+        PowerTerm::new(4, 4, 18.0, -0.039_616_249_05),
+        PowerTerm::new(4, 4, 22.0, -0.013_872_920_44),
+        PowerTerm::new(4, 5, 18.0, 0.033_894_895_99),
+        PowerTerm::new(4, 6, 14.0, -0.002_927_378_753),
+    ],
+    gaussian: &[
+        GaussianTerm::new(2, 2.0, 9.324_799_946e-5, 20.0, 200.0, 1.07, 1.0),
+        GaussianTerm::new(0, 0.0, -6.287_171_518, 40.0, 250.0, 1.11, 1.0),
+        GaussianTerm::new(0, 1.0, 12.710_694_67, 40.0, 250.0, 1.11, 1.0),
+        GaussianTerm::new(0, 2.0, -6.423_953_466, 40.0, 250.0, 1.11, 1.0),
+    ],
+    non_analytic: &[],
+    associating: &[],
+};
+
+/// Nitrogen: Span, Lemmon, Jacobsen, Wagner and Yokozeki 2000 (J. Phys. Chem. Ref. Data 29, 1361),
+/// valid from 63.151 to 1000 K, its residual part, 32 power and exponential terms and 4 Gaussian:
+/// `T_c` = 126.192 K, `ρ_c` = 11.1839 mol dm⁻³, R = 8.314 51 J mol⁻¹ K⁻¹ and M = 28.013 48 g mol⁻¹.
+/// Its `κ_T` reproduces the saturation table's (p. 1403) at 63.151, 70 and 77 K within 3 × 10⁻⁴,
+/// its four printed figures, and the WebBook's within 10⁻⁶.
+pub(in crate::substance) const NITROGEN: HelmholtzResidual = HelmholtzResidual {
+    reducing_temperature: Kelvin::new(126.192),
+    reducing_density: KilogramsPerCubicMetre::new(11_183.9 * 0.028_013_48),
+    gas_constant_j_per_kg_k: 8.314_51 / 0.028_013_48,
+    power: &[
+        PowerTerm::new(0, 1, 0.25, 0.924_803_575_275),
+        PowerTerm::new(0, 1, 0.875, -0.492_448_489_428),
+        PowerTerm::new(0, 2, 0.5, 0.661_883_336_938),
+        PowerTerm::new(0, 2, 0.875, -1.929_026_492_01),
+        PowerTerm::new(0, 3, 0.375, -0.062_246_930_962_9),
+        PowerTerm::new(0, 3, 0.75, 0.349_943_957_581),
+        PowerTerm::new(1, 1, 0.5, 0.564_857_472_498),
+        PowerTerm::new(1, 1, 0.75, -1.617_200_059_87),
+        PowerTerm::new(1, 1, 2.0, -0.481_395_031_883),
+        PowerTerm::new(1, 3, 1.25, 0.421_150_636_384),
+        PowerTerm::new(1, 3, 3.5, -0.016_196_223_082_5),
+        PowerTerm::new(1, 4, 1.0, 0.172_100_994_165),
+        PowerTerm::new(1, 6, 0.5, 0.007_354_489_249_33),
+        PowerTerm::new(1, 6, 3.0, 0.016_807_730_547_9),
+        PowerTerm::new(1, 7, 0.0, -0.001_076_266_641_79),
+        PowerTerm::new(1, 7, 2.75, -0.013_731_808_851_3),
+        PowerTerm::new(1, 8, 0.75, 0.000_635_466_899_859),
+        PowerTerm::new(1, 8, 2.5, 0.003_044_322_794_19),
+        PowerTerm::new(2, 1, 4.0, -0.043_576_233_604_5),
+        PowerTerm::new(2, 2, 6.0, -0.072_317_488_931_6),
+        PowerTerm::new(2, 3, 6.0, 0.038_964_431_527_2),
+        PowerTerm::new(2, 4, 3.0, -0.021_220_136_391),
+        PowerTerm::new(2, 5, 3.0, 0.004_088_229_815_09),
+        PowerTerm::new(2, 8, 6.0, -5.519_900_179_84e-5),
+        PowerTerm::new(3, 4, 16.0, -0.046_201_671_647_9),
+        PowerTerm::new(3, 5, 11.0, -0.003_003_117_160_11),
+        PowerTerm::new(3, 5, 15.0, 0.036_882_589_120_8),
+        PowerTerm::new(3, 8, 12.0, -0.002_558_568_462_2),
+        PowerTerm::new(4, 3, 12.0, 0.008_969_152_645_58),
+        PowerTerm::new(4, 5, 7.0, -0.004_415_133_703_5),
+        PowerTerm::new(4, 6, 4.0, 0.001_337_229_248_58),
+        PowerTerm::new(4, 9, 16.0, 0.000_264_832_491_957),
+    ],
+    gaussian: &[
+        GaussianTerm::new(1, 0.0, 19.668_819_401_5, 20.0, 325.0, 1.16, 1.0),
+        GaussianTerm::new(1, 1.0, -20.911_560_073, 20.0, 325.0, 1.16, 1.0),
+        GaussianTerm::new(3, 2.0, 0.016_778_830_698_9, 15.0, 300.0, 1.13, 1.0),
+        GaussianTerm::new(2, 3.0, 2_627.675_662_74, 25.0, 275.0, 1.25, 1.0),
+    ],
+    non_analytic: &[],
+    associating: &[],
+};
+
+/// Ethane: Bücker and Wagner 2006 (J. Phys. Chem. Ref. Data 35, 205), valid from the melting line
+/// to 675 K, its residual, 39 power and exponential terms and 5 Gaussian: `T_c` = 305.322 K, `ρ_c`
+/// = 6.856 886 685 mol dm⁻³, R = 8.314 472 J mol⁻¹ K⁻¹ and M = 30.069 04 g mol⁻¹. The paper was not
+/// reachable (T49.b's research), so its constants are CoolProp's reading of it; its `κ_T`
+/// reproduces the WebBook's evaluation of the same equation within 3 × 10⁻⁶ at four
+/// saturated-liquid states from the triple point to 303.7 K.
+pub(in crate::substance) const ETHANE: HelmholtzResidual = HelmholtzResidual {
+    reducing_temperature: Kelvin::new(305.322),
+    reducing_density: KilogramsPerCubicMetre::new(6_856.886_685 * 0.030_069_04),
+    gas_constant_j_per_kg_k: 8.314_472 / 0.030_069_04,
+    power: &[
+        PowerTerm::new(0, 1, 0.25, 0.834_407_457_352_41),
+        PowerTerm::new(0, 1, 1.0, -1.428_736_060_717_1),
+        PowerTerm::new(0, 2, 0.25, 0.344_302_422_109_27),
+        PowerTerm::new(0, 2, 0.75, -0.420_966_779_202_65),
+        PowerTerm::new(0, 4, 0.75, 0.012_094_500_886_549),
+        PowerTerm::new(1, 1, 2.0, -0.579_762_015_973_41),
+        PowerTerm::new(1, 1, 4.25, -0.033_127_037_870_838),
+        PowerTerm::new(1, 2, 0.75, -0.117_516_548_941_3),
+        PowerTerm::new(1, 2, 2.25, -0.111_609_578_330_67),
+        PowerTerm::new(1, 3, 3.0, 0.062_181_592_654_406),
+        PowerTerm::new(1, 6, 1.0, 0.098_481_795_434_443),
+        PowerTerm::new(1, 6, 1.25, -0.098_268_582_682_358),
+        PowerTerm::new(1, 7, 2.75, -0.000_239_778_310_070_49),
+        PowerTerm::new(1, 9, 1.0, 0.000_698_856_633_288_21),
+        PowerTerm::new(1, 10, 2.0, 1.966_598_780_330_5e-5),
+        PowerTerm::new(2, 2, 2.5, -0.014_586_152_207_928),
+        PowerTerm::new(2, 4, 5.5, 0.046_354_100_536_781),
+        PowerTerm::new(2, 4, 7.0, 0.006_076_462_218_064_5),
+        PowerTerm::new(2, 5, 0.5, -0.002_644_733_014_782_8),
+        PowerTerm::new(2, 5, 5.5, -0.042_931_872_689_904),
+        PowerTerm::new(2, 6, 2.5, 0.002_998_778_651_726_3),
+        PowerTerm::new(2, 8, 4.0, 0.005_291_933_517_501),
+        PowerTerm::new(2, 9, 2.0, -0.001_038_389_779_819_8),
+        PowerTerm::new(3, 2, 10.0, -0.054_260_348_214_694),
+        PowerTerm::new(3, 3, 16.0, -0.219_593_629_184_93),
+        PowerTerm::new(3, 3, 18.0, 0.353_624_566_503_54),
+        PowerTerm::new(3, 3, 20.0, -0.124_773_901_737_14),
+        PowerTerm::new(3, 4, 14.0, 0.184_256_935_915_17),
+        PowerTerm::new(3, 4, 18.0, -0.161_922_564_367_54),
+        PowerTerm::new(3, 5, 12.0, -0.082_770_876_149_064),
+        PowerTerm::new(3, 5, 19.0, 0.050_160_758_096_437),
+        PowerTerm::new(3, 6, 7.0, 0.009_361_432_633_665_5),
+        PowerTerm::new(3, 11, 15.0, -0.000_278_391_862_428_64),
+        PowerTerm::new(3, 14, 9.0, 2.356_027_407_148_1e-5),
+        PowerTerm::new(4, 3, 26.0, 0.003_923_832_973_852_7),
+        PowerTerm::new(4, 3, 28.0, -0.000_764_883_258_136_18),
+        PowerTerm::new(4, 4, 28.0, -0.004_994_430_444_073),
+        PowerTerm::new(4, 8, 22.0, 0.001_859_338_640_718_6),
+        PowerTerm::new(4, 10, 13.0, -0.000_614_043_533_311_99),
+    ],
+    gaussian: &[
+        GaussianTerm::new(1, 0.0, -0.002_331_217_936_792_4, 15.0, 150.0, 1.05, 1.0),
+        GaussianTerm::new(1, 3.0, 0.002_930_104_790_876, 15.0, 150.0, 1.05, 1.0),
+        GaussianTerm::new(3, 3.0, -0.000_269_124_728_428_83, 15.0, 150.0, 1.05, 1.0),
+        GaussianTerm::new(3, 0.0, 184.138_341_118_14, 20.0, 275.0, 1.22, 1.0),
+        GaussianTerm::new(2, 3.0, -10.397_127_984_854, 20.0, 400.0, 1.16, 1.0),
+    ],
+    non_analytic: &[],
+    associating: &[],
+};
+
+/// Ammonia: Gao, Wu, Bell, Harvey and Lemmon 2023 (J. Phys. Chem. Ref. Data 52, 013102), valid from
+/// the triple point to 725 K, its residual of Table 5, 8 power and exponential terms, 10 Gaussian
+/// and 2 associating: `T_c` = 405.56 K, `ρ_c` = 13.696 mol dm⁻³, R = 8.314 462 618 J mol⁻¹ K⁻¹
+/// (their Table 1, where CoolProp's file holds 8.314 459 8) and M = 17.030 52 g mol⁻¹. Read in
+/// NIST's author manuscript: the associating terms' η as its Table 5 prints it, positive in
+/// exp(−η(δ − ε)² …), where CoolProp's file holds its negation. Its pressure and `κ_T` reproduce
+/// Table 7's values for computer verification (seven figures) within 2 × 10⁻⁶ at all eight liquid,
+/// vapour and supercritical states.
+pub(in crate::substance) const AMMONIA: HelmholtzResidual = HelmholtzResidual {
+    reducing_temperature: Kelvin::new(405.56),
+    reducing_density: KilogramsPerCubicMetre::new(13_696.0 * 0.017_030_52),
+    gas_constant_j_per_kg_k: 8.314_462_618 / 0.017_030_52,
+    power: &[
+        PowerTerm::new(0, 4, 1.0, 0.006_132_232),
+        PowerTerm::new(0, 1, 0.382, 1.739_586_6),
+        PowerTerm::new(0, 1, 1.0, -2.226_179_2),
+        PowerTerm::new(0, 2, 1.0, -0.301_275_53),
+        PowerTerm::new(0, 3, 0.677, 0.089_670_23),
+        PowerTerm::new(2, 3, 2.915, -0.076_387_037),
+        PowerTerm::new(2, 2, 3.51, -0.840_639_63),
+        PowerTerm::new(1, 3, 1.063, -0.270_263_27),
+    ],
+    gaussian: &[
+        GaussianTerm::new(1, 0.655, 6.212_578, 0.427_76, 1.708, 1.036, -0.072_6),
+        GaussianTerm::new(1, 1.3, -5.784_435_7, 0.642_4, 1.486_5, 1.277_7, -0.127_4),
+        GaussianTerm::new(1, 3.1, 2.481_754_2, 0.817_5, 2.091_5, 1.083, 0.752_7),
+        GaussianTerm::new(2, 1.439_5, -2.373_916_8, 0.799_5, 2.43, 1.290_6, 0.57),
+        GaussianTerm::new(2, 1.623, 0.014_936_97, 0.91, 0.488, 0.928, 2.2),
+        GaussianTerm::new(1, 0.643, -3.774_926_4, 0.357_4, 1.1, 0.934, -0.243),
+        GaussianTerm::new(3, 1.13, 0.000_625_434_8, 1.21, 0.85, 0.919, 2.96),
+        GaussianTerm::new(3, 4.5, -1.735_9e-5, 4.14, 1.14, 1.852, 3.02),
+        GaussianTerm::new(1, 1.0, -0.134_620_33, 22.56, 945.64, 1.058_97, 0.957_4),
+        GaussianTerm::new(1, 4.0, 0.077_490_728_39, 22.68, 993.85, 1.052_77, 0.957_6),
+    ],
+    non_analytic: &[],
+    associating: &[
+        AssociatingTerm::new(
+            1,
+            4.331_5,
+            -1.690_985_8,
+            2.845_2,
+            0.369_6,
+            1.108,
+            0.447_8,
+            1.244,
+        ),
+        AssociatingTerm::new(
+            1,
+            4.015,
+            0.937_390_74,
+            2.834_2,
+            0.296_2,
+            1.313,
+            0.446_89,
+            0.682_6,
+        ),
+    ],
+};
+
+/// Carbon dioxide: Span and Wagner 1996 (J. Phys. Chem. Ref. Data 25, 1509), valid from the triple
+/// point to 1100 K, its residual part, 34 power and exponential terms, 5 Gaussian
+/// and 3 non-analytic: `T_c` = 304.1282 K, `ρ_c` = 467.6 kg m⁻³, R = 8.314 51 J mol⁻¹ K⁻¹ and M =
+/// 44.0098 g mol⁻¹ (its R = 0.188 924 1 kJ kg⁻¹ K⁻¹). Every non-analytic term has β = 0.3 < ½ and
+/// a ≥ 3 > 1, the condition under which [`NonAnalyticTerm`]'s limit at δ = 1 holds. Its `κ_T`
+/// reproduces Table 34's at 216.592, 250, 270, 290 and 300 K within 10⁻⁴ (five figures), and its
+/// pressure Table 34's at 300 K, 4.1 K from the critical point, within 10⁻⁵.
+pub(in crate::substance) const CARBON_DIOXIDE: HelmholtzResidual = HelmholtzResidual {
+    reducing_temperature: Kelvin::new(304.128_2),
+    reducing_density: KilogramsPerCubicMetre::new(467.6),
+    gas_constant_j_per_kg_k: 8.314_51 / 0.044_009_8,
+    power: &[
+        PowerTerm::new(0, 1, 0.0, 0.388_568_232_032),
+        PowerTerm::new(0, 1, 0.75, 2.938_547_594_27),
+        PowerTerm::new(0, 1, 1.0, -5.586_718_853_5),
+        PowerTerm::new(0, 1, 2.0, -0.767_531_995_925),
+        PowerTerm::new(0, 2, 0.75, 0.317_290_055_804),
+        PowerTerm::new(0, 2, 2.0, 0.548_033_158_978),
+        PowerTerm::new(0, 3, 0.75, 0.122_794_112_203),
+        PowerTerm::new(1, 1, 1.5, 2.165_896_154_32),
+        PowerTerm::new(1, 2, 1.5, 1.584_173_510_97),
+        PowerTerm::new(1, 4, 2.5, -0.231_327_054_055),
+        PowerTerm::new(1, 5, 0.0, 0.058_116_916_431_4),
+        PowerTerm::new(1, 5, 1.5, -0.553_691_372_054),
+        PowerTerm::new(1, 5, 2.0, 0.489_466_159_094),
+        PowerTerm::new(1, 6, 0.0, -0.024_275_739_843_5),
+        PowerTerm::new(1, 6, 1.0, 0.062_494_790_501_7),
+        PowerTerm::new(1, 6, 2.0, -0.121_758_602_252),
+        PowerTerm::new(2, 1, 3.0, -0.370_556_852_701),
+        PowerTerm::new(2, 1, 6.0, -0.016_775_879_700_4),
+        PowerTerm::new(2, 4, 3.0, -0.119_607_366_38),
+        PowerTerm::new(2, 4, 6.0, -0.045_619_362_508_8),
+        PowerTerm::new(2, 4, 8.0, 0.035_612_789_270_3),
+        PowerTerm::new(2, 7, 6.0, -0.007_442_772_713_21),
+        PowerTerm::new(2, 8, 0.0, -0.001_739_570_490_24),
+        PowerTerm::new(3, 2, 7.0, -0.021_810_121_289_5),
+        PowerTerm::new(3, 3, 12.0, 0.024_332_166_559_2),
+        PowerTerm::new(3, 3, 16.0, -0.037_440_133_423_5),
+        PowerTerm::new(4, 5, 22.0, 0.143_387_157_569),
+        PowerTerm::new(4, 5, 24.0, -0.134_919_690_833),
+        PowerTerm::new(4, 6, 16.0, -0.023_151_225_053_5),
+        PowerTerm::new(4, 7, 24.0, 0.012_363_125_492_9),
+        PowerTerm::new(4, 8, 8.0, 0.002_105_832_197_29),
+        PowerTerm::new(4, 10, 2.0, -0.000_339_585_190_264),
+        PowerTerm::new(5, 4, 28.0, 0.005_599_365_177_16),
+        PowerTerm::new(6, 8, 14.0, -0.000_303_351_180_556),
+    ],
+    gaussian: &[
+        GaussianTerm::new(2, 1.0, -213.654_886_883, 25.0, 325.0, 1.16, 1.0),
+        GaussianTerm::new(2, 0.0, 26_641.569_149_3, 25.0, 300.0, 1.19, 1.0),
+        GaussianTerm::new(2, 1.0, -24_027.212_204_6, 25.0, 300.0, 1.19, 1.0),
+        GaussianTerm::new(3, 3.0, -283.416_034_24, 15.0, 275.0, 1.25, 1.0),
+        GaussianTerm::new(3, 3.0, 212.472_844_002, 20.0, 275.0, 1.22, 1.0),
+    ],
+    non_analytic: &[
+        NonAnalyticTerm::new(3.5, 0.875, 0.3, -0.666_422_765_408, 10.0, 275.0, 0.7, 0.3),
+        NonAnalyticTerm::new(3.5, 0.925, 0.3, 0.726_086_323_499, 10.0, 275.0, 0.7, 0.3),
+        NonAnalyticTerm::new(3.0, 0.875, 1.0, 0.055_068_668_612_8, 12.5, 275.0, 0.7, 0.3),
+    ],
+    associating: &[],
+};
