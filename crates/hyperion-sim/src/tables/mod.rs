@@ -41,6 +41,7 @@ pub mod gauss_legendre;
 pub mod giant_cooling;
 pub mod helium;
 pub mod kick_rank;
+pub mod lifetime_bracket;
 pub mod limb_darkening;
 pub mod mge;
 pub mod period_correction;
@@ -157,6 +158,12 @@ pub const MANIFEST: &[TableInfo] = &[
         revision: 1,
         since_generator_version: 16,
         provisional: true,
+    },
+    TableInfo {
+        name: "lifetime_bracket",
+        revision: 0,
+        since_generator_version: 22,
+        provisional: false,
     },
     TableInfo {
         name: "limb_darkening",
