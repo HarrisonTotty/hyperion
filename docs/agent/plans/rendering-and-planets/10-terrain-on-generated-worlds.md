@@ -667,9 +667,10 @@ targets at header 21 (below).
    linearly across `TRANSITION_HALF_WIDTH` either side of each threshold for the image only, and
    their largest weight is always the authoritative class, ties broken by discriminant. A test holds
    the weights at every coarser level to within ten percentage points of the fractions counted by
-   brute force from the finest level. This is the plan's reading of "the shader blends the class's
-   textures across a transition band but never re-decides the class": the worker decides everything,
-   and the shader only mixes the photometric parameters it was handed.
+   brute force from the finest level. This is the plan's reading of the brainstorm's rule that the
+   shader never re-decides the material: the worker decides everything, and the shader only sums, by
+   the weights it was handed, the radiances its classes reflect, each through its own law
+   (Design note 8).
 4. **Collision reads one function.** The brainstorm defines the authoritative ground as "the
    piecewise-linear surface through the finest level's vertices, on the same triangle diagonal as
    the mesh". R05 builds it, `finest_surface_height`, for its test planet, with the patch bake and
@@ -5183,6 +5184,8 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
     the materials' photometric parameters"; Design note 8 and decision-r07-t8b rule that it sums
     their radiances (the parameters' blend is 1.7× too bright). Lean: a brainstorm edit to
     "radiances", for the owner. _Ruled 2026-10-15: drafted for the owner, sign-off queue item 23._
+    _Signed off 2026-10-16 (`signoff-11.md`, item 23): applied to the brainstorm and the README, and
+    Design note 3 corrected with them._
   - _The readout's class at the vertex._ Lean: T12's test, at a finest-level bake, that the
     largest weight's palette pair is the worker's `material` answer. _Ruled 2026-10-15: T12's._
 - **Deferred findings (2026-10-13 rule) (R10.T10.b)** (recorded, not ruled; each leaves the algorithm

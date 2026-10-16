@@ -36,8 +36,9 @@
 
 When this plan is done, every body with a solid surface has a coarse field: a pure function of its
 surface seed and plan 14's global figures, computed on the server at one cube-sphere level per body,
-cached while it is wanted and never stored. The field holds plates rasterised as a Voronoi diagram,
-elevation scaled so that the reconstructed surface's hypsometric standard deviation σ_h is plan
+cached while it is wanted and never stored. The field holds plates rasterised as a power diagram,
+its weights fitted so that the plates' areas follow their size law, elevation scaled so that the
+reconstructed surface's hypsometric standard deviation σ_h is plan
 14's, a seasonal moist energy-balance climate with a labelled precipitation heuristic, stream-power
 erosion above a depression-filled base level, climate or surface-state classes, and the list of
 craters of the boundary diameter D_b and wider. The field is quantised once, and the quantised field
@@ -740,8 +741,10 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    medium confidence in 0.31, high in the counts). The tail is drawn first and the seven large
    plates share whatever of 4π it leaves, since the law's expected tail area, about 3.1 sr, exceeds
    Earth's 2.39.
-   Each cell takes the seed of largest dot product with its centre, the product perturbed by the
-   low-frequency warp on `surface.coarse.warp`, ties to the lower seed index. Boundaries are cell
+   Each cell takes the plate of largest score x′ · p + w, x′ its centre moved by the low-frequency
+   warp on `surface.coarse.warp`, p the plate's seed and w a weight fitted so that the plate's cells
+   cover its drawn area (a power diagram; "Deviations in T11, as built"), ties to the lower seed
+   index; a part cut off a plate joins the neighbour it shares most edges with. Boundaries are cell
    adjacencies. The distance transform is a multi-source shortest path over the cell graph with
    great-circle edge lengths, settled in (distance, cell index) order, giving each cell its signed
    distance to the nearest boundary, that boundary's kind (convergent with subduction, convergent
@@ -2849,15 +2852,12 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
   Moore neighbour, a 3 × 3 search not 5 × 5, one extended network not stacked instances), and
   Design note 15's crater reach is 1.27 D, not "about twice its radius"; all four are now in the
   roadmap's brainstorm corrections ("Terrain, the surface and Knowledge"), awaiting the revision.
-  R09.T11 adds a fifth, drafted for the owner (its "Deviations in T11, as built"): the brainstorm's
-  "Each coarse cell takes the nearest plate seed, by the largest dot product … in milliseconds"
-  and its Decisions' "rasterises plates as a Voronoi diagram" become a power diagram, x′ · p + w
-  with a weight fitted per plate, since an unweighted diagram of uniform seeds has near-equal
-  cells and cannot follow Design note 6's tail law; the fit costs some 0.2–0.4 s at level 8. The
-  roadmap's row (for "main" to add): The coarse global pass (step 1) | "Each coarse cell takes the
-  nearest plate seed, by the largest dot product … in milliseconds" | The largest dot product
-  plus a weight fitted per plate (a power diagram), so that the plates' areas follow Bird 2003's
-  tail law; some 0.2–0.4 s at level 8 | R09 Design note 6; R09.T11.
+  R09.T11 adds a fifth, signed off 2026-10-16 (`signoff-11.md`, item 20) and applied to the
+  brainstorm with the roadmap's row: the brainstorm's "Each coarse cell takes the nearest plate
+  seed, by the largest dot product … in milliseconds" and its Decisions' "rasterises plates as a
+  Voronoi diagram" become a power diagram, x′ · p + w with a weight fitted per plate, since an
+  unweighted diagram of uniform seeds has cells of comparable size and cannot follow Design note 6's
+  size law; the fit costs some 0.2–0.4 s at level 8 (provisional).
 - **Asked by R11, not yet designed here** (the roadmap's asks table carries it). The height datum is
   settled as the rotational spheroid (Design note 17, after R07's Design note 19), with the sea
   level a height above it, so R10's datum ask is met. R11 asks for the terrain-independent zonal
@@ -6799,8 +6799,8 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     plate cut off from its largest part joins the neighbouring plate it shares most edges with
     (`join_parts`), and the field's level is fitted with its parts joined, so every plate is one
     region and its area its drawn one. This departs from the brainstorm's Voronoi diagram "in
-    milliseconds" as well as from Design note 6, drafted for the owner under "Brainstorm
-    departures for its revision".
+    milliseconds" as well as from Design note 6; signed off 2026-10-16 (`signoff-11.md`, item 20),
+    with the brainstorm, the Goal and Design note 6 corrected.
   - _The warp._ A vector of three uniforms in [−1, 1) at each cell of a level-4 lattice on
     `surface.coarse.warp` (`surface_cell` keys), their Shepard mean under the compact kernel
     (1 − r² ÷ h²)³ within the chord h = 0.21, C² across face edges; a cell's centre moves by 0.12
@@ -6909,7 +6909,9 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     bisector, since a power cell is the intersection of caps about (p_k − p_j) ÷ |p_k − p_j|, not
     about its seed. An additively weighted score, w − θ(x′, p), keeps every cell star-shaped about
     its seed and connected, at an angle per score. Lean: T12.b's re-validation decides, as it reads
-    the boundaries.
+    the boundaries. _Seen at the sign-off (signoff-11, item 20): left to T12.b's re-validation,
+    which measures the slivers on the reference Earths; the additively weighted score is its first
+    candidate, not adopted._
   - _Small plates are not in orogens._ Seeds are uniform; Bird 2003 places most small plates in
     the orogens about the large ones' boundaries. Lean: with the slivers.
   - _No speed–size or slab-pull relation._ Each plate's ω is drawn alone; on Earth small plates

@@ -1048,17 +1048,25 @@ What the pass does, in order:
    Tectonic Planets built it with Renka's STRIPACK, a general-purpose spherical Delaunay package, and
    the convex hull of the points on the sphere, which is their Delaunay triangulation (Brown 1979), is
    the modern method. With tens of plates on a fixed grid neither is needed. Each coarse cell takes
-   the nearest plate seed, by the largest dot product, with ties broken by seed index and the
-   distance warped by low-frequency noise so that boundaries are not great-circle arcs: the diagram
-   rasterised onto the coarse field's own cells, deterministically, in milliseconds. Plate boundaries
-   are then cell adjacencies, and a distance transform over the cells gives each cell its signed
-   distance to the nearest boundary and that boundary's type. Each boundary is classed by the plates'
-   relative motion across it, and the landforms that read as geology are built from that — mountain
-   belts at convergent boundaries, ridges at divergent ones, island arcs at subduction — following
-   the procedural-tectonics line of work rather than a full geodynamic simulation. A stagnant-lid
-   world, as Mars is and as Venus is usually modelled, gets no plate boundaries: its large-scale
-   structure is one lid, with volcanic provinces sized by plan 14's volcanism level and impact basins
-   where its crater density puts them.
+   the plate of largest score, its centre's dot product with the plate's seed plus a weight of the
+   plate's own, with ties broken by seed index and the centre warped by low-frequency noise so that
+   boundaries are not great-circle arcs: a power diagram rasterised onto the coarse field's own
+   cells, deterministically. The weights give the plates their sizes. Uniform seeds alone give cells
+   of comparable size, while Earth's plates follow a size law, seven of a steradian or more and a
+   tail of smaller plates down to 0.002 sr (Bird 2003), so each plate's weight is fitted until its
+   cells cover the area drawn for it: the semi-discrete transport problem, solved by damped Newton
+   steps, in a few tenths of a second at level 8 (provisional). A fragment the raster cuts off a
+   plate joins the neighbour it shares most edges with, so that each plate is one region. _Signed
+   off 2026-10-16 by the sign-off agent (owner's delegation; `signoff-11.md`), in place of an
+   unweighted diagram "in milliseconds", whose cells cannot follow the size law (R09.T11)._ Plate
+   boundaries are then cell adjacencies, and a distance transform over the cells gives each cell its
+   signed distance to the nearest boundary and that boundary's type. Each boundary is classed by the
+   plates' relative motion across it, and the landforms that read as geology are built from that —
+   mountain belts at convergent boundaries, ridges at divergent ones, island arcs at subduction —
+   following the procedural-tectonics line of work rather than a full geodynamic simulation. A
+   stagnant-lid world, as Mars is and as Venus is usually modelled, gets no plate boundaries: its
+   large-scale structure is one lid, with volcanic provinces sized by plan 14's volcanism level and
+   impact basins where its crater density puts them.
 2. **Coarse elevation**, with continental and oceanic crust distinguished, scaled so that the
    realised surface's **hypsometric standard deviation** σ_h, the area-weighted RMS elevation about
    the mean, equals plan 14's. The coarse pass targets σ_h² less the local synthesis's expected
@@ -1488,14 +1496,17 @@ Kept brief, because it is the least uncertain part and the most easily changed:
   has no ice cap and a tidally locked world's ice sits where the climate model puts it. The
   material carries the physical properties that landing and consoles read, from its form and its
   substance: albedo in each band, friction, bearing strength. The worker bakes the material into
-  each patch beside its heights, and the shader blends the materials' photometric parameters across
-  a transition band but never re-decides the material, since an `f32` shader recomputing it would
-  flip materials at every threshold, so the ground drawn and the ground quoted cannot disagree. A
+  each patch beside its heights, and across a transition band the shader sums the radiances the
+  materials reflect, each through its own photometric law and weighted by its share, but never
+  re-decides the material, since an `f32` shader recomputing it would flip materials at every
+  threshold, so the ground drawn and the ground quoted cannot disagree. A
   coarser patch bakes each material's expected share of its texels instead, from the resolved slope
   and the variance finer than its level, since a material decided from a smoothed slope would lose
   every cliff. Colour variation, micro-detail below the band limit and any texture beyond the baked
   data are decoration. _Signed off 2026-10-09 by the sign-off agent (owner's delegation), from
-  decision-composition and the roadmap's correction for this section._
+  decision-composition and the roadmap's correction for this section._ _Amended 2026-10-16 by the
+  sign-off agent (owner's delegation; `signoff-11.md`): the materials' radiances are summed, not
+  their parameters blended (decision-r07-t8b)._
 - **Triplanar projection** for rock and detail textures, blended by the surface normal, which avoids
   the UV distortion any spherical parameterisation produces. Biplanar is the cheaper variant if three
   samples per fragment costs too much on the Intel part.
@@ -2949,11 +2960,11 @@ Recommended here, as technical choices rather than rulings, each argued in the s
 - **The coarse field.** Computed **on the server** at one cube-sphere level per body, the shallowest
   with cells of about 40 km or less, between levels 5 and 8, and sent to the client as binary frames,
   with all fine detail synthesised locally; Knowledge gates its coverage but never its accuracy. Its
-  pass rasterises plates as a Voronoi diagram on its own cells, matches plan 14's hypsometric
-  standard deviation σ_h, runs a seasonal energy-balance climate with a labelled precipitation
-  heuristic, erodes where the world has or had surface liquid, and hands craters wider than D_b,
-  twice the level's largest cell edge, to the client as a list
-  ([The coarse global pass](#the-coarse-global-pass-once-per-planet)).
+  pass rasterises plates as a power diagram on its own cells, each plate's weight fitted so that its
+  area follows the plates' size law, matches plan 14's hypsometric standard deviation σ_h, runs a
+  seasonal energy-balance climate with a labelled precipitation heuristic, erodes where the world
+  has or had surface liquid, and hands craters wider than D_b, twice the level's largest cell edge,
+  to the client as a list ([The coarse global pass](#the-coarse-global-pass-once-per-planet)).
 - **Seeds.** The surface seed is server-only. The client's local synthesis takes a detail seed, a
   block output of the universe seed on its own tag, `body.surface.detail`, which is a discipline for
   an honest client rather than a security boundary; plan 14's `BodyHooksDto` carries `detail_seed` in
@@ -3709,6 +3720,9 @@ than read: its details, and the figure it supports, must be checked before eithe
 - Brown 1979, _Voronoi diagrams from convex hulls_, Information Processing Letters 9, 223,
   doi:10.1016/0020-0190(79)90074-7: the convex hull of points on a sphere is their Delaunay
   triangulation.
+- Bird 2003, _An updated digital model of plate boundaries_, Geochemistry, Geophysics, Geosystems
+  4, 1027: the plates' sizes, seven plates of 1 sr or more and a power-law tail down to 0.002 sr,
+  which Bird fits by eye with N(>A) ∝ A^−1/3 (R09 Design note 6 takes 0.31 from his Table 1).
 - Tzathas, Gailleton, Steer et al. 2024, _Physically-based analytical erosion for fast terrain
   generation_, Computer Graphics Forum — closed-form in time but evaluated numerically over space,
   with receivers, a topological sort, an upstream pass and multigrid fixed-point iteration; Table 2
