@@ -811,7 +811,7 @@ export interface SpeciesRayleigh {
  *
  * - `dispersion`: a measured visible dispersion, read as {@link GAS_DISPERSION}'s are, with a King
  *   factor not yet vetted, or F_K = 1 where none has been read (SO₂, O₃ and CH₃OH since CO, H₂S and
- *   C₂H₆ were promoted): {@link crossSectionFromDispersionM2}.
+ *   C₂H₆ were promoted, and HCl since R08.T19): {@link crossSectionFromDispersionM2}.
  * - `polarisability`: a mean dipole polarisability α with F_K = 1, σ = (128π⁵ ÷ 3) α² ÷ λ⁴
  *   ({@link polarisabilityCrossSectionM2}), α static or dispersed by one oscillator.
  */
@@ -849,7 +849,8 @@ export interface PolarisabilityEstimate {
    * The factor, either way, within which the true σ lies of the estimate over 440–680 nm, the
    * render channels' span: α's own uncertainty (twice over, in σ), the King factor the rule leaves
    * out, and the dispersion it omits. `undefined` where no bound is known: the species' lines or
-   * bands lie inside that span, where no polarisability rule holds.
+   * bands lie inside that span, where no polarisability rule holds. A line too weak to move σ
+   * beyond 0.1 nm of its centre is excepted, and its basis names it (Mn's intercombination lines).
    */
   readonly uncertaintyFactor: number | undefined;
   /** α's primary source, its uncertainty, and the rule where α is not measured for the species. */
@@ -890,31 +891,49 @@ function noKingFactor(why: string): KingFactor {
  * registry's order (§1.1). Their keys are plan 14's substance keys, as {@link GASES}' are.
  *
  * @remarks
+ * It holds 27 rows: SO₂ to FeH (20, R08.T3.c's, as T3.b's follow-up left them), then the rows
+ * P14.T49.b appended with `rayleigh` set, Al, V, Mn, Ni, Zn, HCl and Cr (7, R08.T19). Every gas row
+ * the registry's fixture flags `rayleigh` is one of these or of {@link GASES} (R08.T19's
+ * `parity.test.ts`).
+ *
  * Where a measured visible dispersion exists, the row takes it (the brainstorm's "Atmosphere": the
  * optics registry holds measured dispersions, and an estimate only where no measurement exists):
- * SO₂ and O₃ from C. and M. Cuthbertson and CH₃OH from Ramaswamy. Each stays `estimated` because no
- * measured King factor has been read for it, and none has been vetted to {@link GAS_DISPERSION}'s
- * standard (its reference state read in the paper, its Z from NIST's equation of state). CO, H₂S
- * and C₂H₆, once rows here, passed that vetting and are {@link GASES} (R08's Risks, "Deviations in
- * T3.b's follow-up, as built").
+ * SO₂, O₃ and HCl from C. and M. Cuthbertson and CH₃OH from Ramaswamy. Each stays `estimated`
+ * because no measured King factor has been read for it, and none has been vetted to
+ * {@link GAS_DISPERSION}'s standard (its reference state read in the paper, its Z from NIST's
+ * equation of state). CO, H₂S and C₂H₆, once rows here, passed that vetting and are {@link GASES}
+ * (R08's Risks, "Deviations in T3.b's follow-up, as built").
  *
  * The rest take a polarisability: the static electronic α, never a dielectric value, which holds
- * vibrational polarisability; for the atoms, Schwerdtfeger and Nagle's recommended values. H, Mg
- * and Fe, whose dispersion one line or continuum carries, take one oscillator, H's from its exact
- * dynamic polarisability (Lee and Kim, MNRAS 347 (2004) 802), Mg's and Fe's from their resonance
- * lines (NIST ASD). NIST's CCCBDB served as a finding aid, and its own calculations are cited only
- * where no other value was found (SiO, TiO, VO and, through TiH, FeH).
+ * vibrational polarisability; for the atoms, Schwerdtfeger and Nagle's recommended values. H, Mg,
+ * Fe, Mn, Ni and Zn, whose dispersion one line or continuum carries, take one oscillator, H's from
+ * its exact dynamic polarisability (Lee and Kim, MNRAS 347 (2004) 802), the others' from their
+ * strongest resonance lines below 300 nm (NIST ASD). NIST's CCCBDB served as a finding aid, and
+ * its own calculations are cited only where no other value was found (SiO, TiO, VO and, through
+ * TiH, FeH).
  *
  * A static α leaves out the dispersion and the King factor, so for a molecule whose resonances lie
  * in the ultraviolet the estimate runs low, and lower towards the violet: for HCN, C₂H₂, C₂H₄ and
  * PH₃ by about 8–16% at 550 nm. For an atom or radical with lines in or near the visible (Na, K,
- * Ca, Ti, TiO and VO) no polarisability rule is meaningful near them: α changes sign across each
- * line, so σ diverges at the line and vanishes between lines, and a static α is many times wrong
- * near one (K's 5× high at 440 nm, Na's 46× low at 550 nm, Ca's 150–170× low at 440 nm). With
- * solar abundances in the gas phase their true far-wing scattering reaches about a third of a hot
- * giant's Rayleigh optical depth at 440 nm (Ca) and a tenth at 550 nm (Na), which these estimates
- * put at under 1.2% (the science check's budget at 2,000 K and 0.1 bar). Their lines are their
- * visible opacity, and R08.T4.e's absorbers.
+ * Al, Ca, Ti, V, Cr, Mn, TiO and VO) no polarisability rule is meaningful near them: α changes sign
+ * across each line, so σ diverges at the line and vanishes between lines, and a static α is many
+ * times wrong near one (K's 5× high at 440 nm, Na's 46× low at 550 nm, Ca's 150–170× and Cr's 46×
+ * low at 440 nm). With solar abundances in the gas phase their true far-wing scattering reaches
+ * about a third of a hot giant's Rayleigh optical depth at 440 nm (Ca) and a tenth at 550 nm (Na),
+ * which these estimates put at under 1.2% (the science check's budget at 2,000 K and 0.1 bar).
+ * Their lines are their visible opacity, and R08.T4.e's absorbers.
+ *
+ * The six atoms of R08.T19 (Al, V, Mn, Ni, Zn and Cr) rest on the same table and line list; HCl is
+ * the Cuthbertsons' dispersion. Each atom's uncertainty factor is the sum over its lines from NIST
+ * ASD (f from each line's A and statistical weights), with the rest of α(0) taken static or
+ * dispersed at the ionisation energy, against the estimate over 440–680 nm, times (1 + δα ÷ α)²
+ * for α's own uncertainty, rounded up to two figures; V has none, its lines lying inside the span.
+ * Where low levels share the atoms in a hot gas (Al's ²P₃/₂, 112 cm⁻¹ up; Ni's 3d⁹4s a³D, 205–1,713
+ * cm⁻¹ up), the sum is over their thermal mixture at 1,000–3,000 K. Zn's F_K is 1 (J = 0); Mn's
+ * and Cr's, from their resolved fine structure, lie within 0.01% and 1.1% of 1 over 440–680 nm, and
+ * Al's open 3p shell scatters anisotropically near its lines (F_K about 1.2 for ²P₁/₂ and 1.8 for
+ * ²P₃/₂ at 440 nm), all counted. Ni's anisotropic share is not bounded: NIST ASD lacks the partner
+ * of its strongest line's multiplet, so a sum over its listed lines would not hold it.
  */
 export const ESTIMATED_RAYLEIGH: ReadonlyArray<EstimatedRayleigh> = [
   {
@@ -1106,6 +1125,76 @@ export const ESTIMATED_RAYLEIGH: ReadonlyArray<EstimatedRayleigh> = [
     resonanceNm: undefined,
     uncertaintyFactor: undefined,
     basis: `an analogy, α(Fe) times α(TiH) ÷ α(Ti), 0.89–1.02 with TiH's B3LYP 13.19 and MP2 15.15 Å³ (${CCCBDB_COMPUTED}), 8.2 ± 2.2 Å³, no published value found; its bands' share of α (the Wing–Ford band near 990 nm) is not known`,
+  },
+  {
+    kind: "polarisability",
+    species: "Al",
+    polarisabilityM3: 57.8 * BOHR_CUBED_M3,
+    resonanceNm: undefined,
+    uncertaintyFactor: 6.2,
+    basis: `57.8 ± 1.0 a.u., computed (${SCHWERDTFEGER_NAGLE}, from Buchachenko 2010's SI-SOCI, 57.8 ± 1.0 for ²P₁/₂, and Fuentealba 2004's CCSD(T), 58.0 ± 0.4), where Milani, Moullet and de Heer, Phys. Rev. A 42 (1990) 5150, measured 46 ± 2 and Sarkisov et al., Phys. Rev. A 73 (2006) 042501, 55.3 ± 5.5; its resonance lines at 394.51 and 396.26 nm (vacuum, f = 0.116; NIST ASD), with its 308.30 and 309.36 nm lines (f = 0.167 and 0.157) below them, put the true scattering of the thermal mixture of its ²P₁/₂ and ²P₃/₂ levels, 112 cm⁻¹ apart, 1.3–1.5 times the estimate at 680 nm, 1.6–1.9 times at 550 nm and 3.5–4.1 times at 440 nm against the sum over its lines; its open 3p shell's anisotropic scattering (F_K about 1.2 for ²P₁/₂ and 1.8 for ²P₃/₂ at 440 nm) raises these to 1.4–1.6, 1.8–2.1 and 5.2–6.0 times`,
+  },
+  {
+    kind: "polarisability",
+    species: "V",
+    polarisabilityM3: 87 * BOHR_CUBED_M3,
+    resonanceNm: undefined,
+    uncertaintyFactor: undefined,
+    basis: `87 ± 10 a.u., computed (${SCHWERDTFEGER_NAGLE}, from Kłos 2005's MRCI, 87.3 ± 8.7), where Ma et al., Phys. Rev. A 91 (2015) 010501, measured 68.2 ± 5.4; its ground-level lines at 457.85, 483.38 and 485.28 nm (vacuum; NIST ASD) lie inside 440–680 nm, where σ diverges at each line, and longward of them the sum over its ground level's lines puts the true scattering 2.6 times the estimate at 550 nm and 1.7 times at 680 nm`,
+  },
+  {
+    kind: "polarisability",
+    species: "Mn",
+    polarisabilityM3: 68 * BOHR_CUBED_M3,
+    resonanceNm: 279.56,
+    uncertaintyFactor: 2.3,
+    basis: `68 ± 9 a.u., computed (${SCHWERDTFEGER_NAGLE}, from Buchachenko 2011's CCSD(T), 68.5, and Roos et al. 2005's CASPT2, 66.8 ± 6.7); λ_r = 279.56 nm, the strongest line of its resonance triplet at 279.56–280.19 nm (vacuum, f = 0.58; NIST ASD), the triplet carrying 72% of α(0); against the sum over its lines its 403.19–403.56 nm triplet (f = 0.055–0.026) puts the true scattering 1.03–1.05 times the estimate at 680 nm and 1.8 times at 440 nm, 0.1 nm or more from its 539.6 and 543.4 nm intercombination lines (f = 5.2 and 2.7 × 10⁻⁵)`,
+  },
+  {
+    kind: "polarisability",
+    species: "Ni",
+    polarisabilityM3: 49 * BOHR_CUBED_M3,
+    resonanceNm: 232.07,
+    uncertaintyFactor: 2.2,
+    basis: `49 ± 3 a.u., computed for its 3d⁸4s² a³F₄ ground level (${SCHWERDTFEGER_NAGLE}, from Kłos 2005's MRCI, 47.4 ± 4.7, and Pou-Amérigo et al. 1995's MCPF, 51.1 ± 7.7); λ_r = 232.07 nm, its strongest resonance line (vacuum, f = 0.68; NIST ASD), which leaves σ 2–12% high against the sum over the level's lines; its 3d⁹4s a³D levels, 205–1,713 cm⁻¹ up and holding about two-fifths of the atoms above 1,000 K, have no tabulated α, and their 300–360 nm lines alone give 42–44 a.u., so that a hot gas's true scattering may reach 1.9 times the estimate; its anisotropic scattering is not bounded here`,
+  },
+  {
+    kind: "polarisability",
+    species: "Zn",
+    polarisabilityM3: 38.67 * BOHR_CUBED_M3,
+    resonanceNm: 213.92,
+    uncertaintyFactor: 1.1,
+    basis: `38.67 ± 0.30 a.u., computed (${SCHWERDTFEGER_NAGLE}, from Singh and Sahoo 2014's CCSDT, 38.666 ± 0.096), where Goebel, Hohm and Maroulis, Phys. Rev. A 54 (1996) 1973, measured 38.8 ± 0.8; λ_r = 213.92 nm, its resonance line (vacuum, f = 1.47 from its A of 7.14 × 10⁸ s⁻¹; NIST ASD), which carries 84% of α(0) and leaves σ 2–8% high against the sum over its lines`,
+  },
+  {
+    kind: "dispersion",
+    species: "HCl",
+    dispersion: {
+      nMinusOne: oneTermNMinusOne(0.051_583, 118.49),
+      referenceK: ZERO_CELSIUS_K,
+      referencePa: STANDARD_ATMOSPHERE_PA,
+      // The paper reduces every gas to hydrogen's number density at 0 °C and 76 cm (p. 5), so Z is
+      // H₂'s there, as the materials tool's `HCL_REFRACTIVITY` reads it.
+      compressibility: GAS_DISPERSION.H2.compressibility,
+      source:
+        "C. and M. Cuthbertson, Phil. Trans. R. Soc. Lond. A 213 (1914) 1, p. 12, Table V: (μ − 1)D ÷ (d₀76) = 4.6425 × 10²⁷ ÷ (10,664 × 10²⁷ − n²) with the paper's frequencies n = 3 × 10¹⁰ ÷ λ cm s⁻¹, n − 1 = 0.051 583 ÷ (118.49 − λ⁻²), at hydrogen's number density at 0 °C and 76 cm (pp. 5 and 11: Gray and Burt's volume ratio 1.0079 and Leduc's expansion coefficient), over 4799.9–6707.85 Å in air, read as vacuum wavelengths (2 × 10⁻⁵ of n − 1)",
+      dataFile: undefined,
+      measuredNm: [480, 670.8],
+    },
+    kingFactor: noKingFactor(
+      "no measured depolarisation of HCl was read (Bridge and Buckingham 1966 and Bogaard et al. 1978 not read)",
+    ),
+    uncertaintyFactor: 1.03,
+    basis:
+      "no King factor; 1.03 covers the scatter between measurements, Mascart's D-line 1.000 444 (as the paper quotes it) lying 1.2% below the Cuthbertsons' own unreduced index there, 2.4% in σ, and a near-isotropic hydride's F_K, unread, of perhaps 1.002–1.005",
+  },
+  {
+    kind: "polarisability",
+    species: "Cr",
+    polarisabilityM3: 83 * BOHR_CUBED_M3,
+    resonanceNm: undefined,
+    uncertaintyFactor: 62,
+    basis: `83 ± 12 a.u., computed (${SCHWERDTFEGER_NAGLE}, from Buchachenko 2011's CCSD(T), 83.2), where Ma et al., Phys. Rev. A 91 (2015) 010501, measured 60 ± 24; its resonance lines at 425.55, 427.60 and 429.09 nm (vacuum, f = 0.110, 0.084 and 0.062; NIST ASD), with its 357.97–360.64 nm triplet (f = 0.37–0.23), put the true scattering 2.1 times the estimate at 680 nm, 3.6–3.7 times at 550 nm and 46 times at 440 nm, where its resolved fine structure gives F_K = 1.011`,
   },
 ];
 

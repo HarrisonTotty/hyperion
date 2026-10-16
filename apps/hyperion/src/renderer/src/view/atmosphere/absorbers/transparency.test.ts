@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import registry from "../../../../../../../../packages/protocol/fixtures/substances.json" with { type: "json" };
-import { ABSORBER_CROSS_SECTIONS, crossSectionAt } from "../absorbers";
+import { ABSORBER_CROSS_SECTIONS } from "../absorbers";
 import exomolBounds from "./exomol/bounds.json" with { type: "json" };
 import { committedLineSpecies } from "./kDistribution";
 import {
@@ -24,21 +23,6 @@ function cellMeans(bound: AbsorberBound): ReadonlyArray<Float64Array> {
 function pendingBound(key: string): AbsorberBound | undefined {
   return PENDING_ABSORBERS.find((p) => p.key === key)?.bound;
 }
-
-describe("the registry's absorbers", () => {
-  it("each have cross-sections, a line table, a pending entry with its cell means, or a stated none", () => {
-    const flagged = registry.substances.filter((row) => row.absorber).map((row) => row.key);
-    const tables = committedLineSpecies();
-    const unaccounted = flagged.filter(
-      (key) =>
-        crossSectionAt(key, 250) === undefined &&
-        !tables.includes(key) &&
-        !PENDING_ABSORBERS.some((p) => p.key === key) &&
-        !NO_VISIBLE_ABSORPTION.some((n) => n.species === key),
-    );
-    expect([flagged.length > 0, unaccounted]).toEqual([true, []]);
-  });
-});
 
 describe("the stated transparency", () => {
   it("names He below 5,000 K, N₂ below 1,800 K and e⁻ at every temperature, and nothing else", () => {

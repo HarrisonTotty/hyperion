@@ -9020,7 +9020,8 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     same HITRAN archive) and Krishnan, Yugawa and Nordine 1997's liquid iron are closer analogues,
     the science check's notes.
   - _Waiting:_ R08.T19 checks every file's key against `substances.json` once P14.T49.a's fixture
-    exists; the keys are tested as ASCII of at most 16 bytes. The labels' C4 TSDoc is in, with the
+    exists; the keys are tested as ASCII of at most 16 bytes. _Done 2026-10-16_ by R08.T19
+    (`parity.test.ts`). The labels' C4 TSDoc is in, with the
     general stand-in clause beside the NH₄SH one.
 - **Deviations in T5.b's follow-up, as built** (2026-10-10; `apps/hyperion/src/tools/materials.ts`
   and its test, `materials/ammonium-hydrosulphide.json`, `materials/mars-dust.json`,
@@ -9843,7 +9844,7 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     Plan 14 says a changed index file "so bumps" there; the brief says the refit needs none.
   - _The parity check._ R08.T19's `parity.test.ts` is not built. `materials.test.ts`'s key lists
     gain `T5G_KEYS` (C₂H₆) and `T5G_LIQUIDS` (each key, variant and provenance). The fixture's nine
-    rows hold no C₂H₆.
+    rows hold no C₂H₆. _Built 2026-10-16_ (R08.T19): every file's key, C₂H₆'s included, is a row.
   - _The acceptance._ The task's command selects `materials/materials.test.ts`. The tool's tests
     (`src/tools/materials.test.ts`) run under `pnpm test` and the gate.
   - _Names beyond the sketch._
@@ -11553,13 +11554,14 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     order (GASES, then CO … FeH), without e⁻ and H⁻: those are R08.T4.c's continua, and
     `rayleighOf` gives them `none`. P14.T49.b is to flag both `rayleigh: false`, and T10.a not to
     count them once T4.c draws them. `rayleigh.test.ts` reads the fixture once it lands, beside
-    R08.T19.
+    R08.T19. _Done 2026-10-16_ by R08.T19: `REGISTRY_GAS_ROWS` is the fixture's `rayleigh` rows in
+    index order (43), and P14.T49.b flags e⁻, H⁻ and the ions `rayleigh: false`.
   - _The estimated rows_ (23, CO to FeH, in the registry's order; 20, SO₂ to FeH, since T3.b's
-    follow-up). The plan's rule is a static α
-    with F_K = 1. The brainstorm, signed off at 78a8c520 after the plan text ("Atmosphere": the
-    optics registry holds measured dispersions and King factors, and an estimate only where no
-    measurement exists), wins where they differ, and T3.c's science check found measured visible
-    dispersions:
+    follow-up; 27 since R08.T19 appended Al, V, Mn, Ni, Zn, HCl and Cr). The plan's rule is a
+    static α with F_K = 1. The brainstorm, signed off at 78a8c520 after the plan text
+    ("Atmosphere": the optics registry holds measured dispersions and King factors, and an estimate
+    only where no measurement exists), wins where they differ, and T3.c's science check found
+    measured visible dispersions:
     - _`dispersion` rows_, read as `GAS_DISPERSION`'s are: CO (C. and M. Cuthbertson 1920, with
       Bridge and Buckingham 1966's ρₚ as Sneep and Ubachs quote it), SO₂ and H₂S (Cuthbertson
       1910), O₃ (Cuthbertson 1914, a two-point fit), C₂H₆ (Loria 1909, refitted, with Z = 1 ÷ 1.0148
@@ -11779,7 +11781,9 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     depolarisation is measured (Bogaard et al. 1978; Baas and van den Hout 1979, both closed),
     and the three theses were not searched for it. None was found for O₃ or CH₃OH.
   - _Closed set, for the composition audit:_ none added. `GASES` is 16 and `ESTIMATED_RAYLEIGH`
-    20 (SO₂ to FeH), and every registry gas row keeps measured or estimated optics.
+    20 (SO₂ to FeH), and every registry gas row keeps measured or estimated optics. Since R08.T19,
+    `ESTIMATED_RAYLEIGH` is 27 (P14.T49.b's Al, V, Mn, Ni, Zn, HCl and Cr appended) and `GASES`
+    stays 16; `parity.test.ts` holds every `rayleigh` row of the fixture to one of them.
   - _Not read_ (closed; their numbers come through the theses): Bridge and Buckingham 1966,
     Bogaard et al. 1978, Bogaard, Buckingham and Ritchie 1982, Monan et al. 1982, Baas and van den
     Hout 1979 and Haverkort et al. 1983.
@@ -13241,6 +13245,186 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     cm⁻¹ atm⁻¹ with n 0.737, S-weighted (0.0681–0.0962), against TYM's default 0.0709 with n 0.5:
     9% narrower at 296 K and about 30% at 100 K. Taking HITRAN's means for TYM's lines, or its
     J-dependence, would be a change of the estimate, for R08.T4.f's hot N₂O to weigh.
+- **Deviations in T19, as built** (2026-10-16; `view/atmosphere/parity.test.ts`, new; `rayleigh.ts`
+  and `rayleigh.test.ts`; `channels.json` and `channels.ts`; `absorbers/transparency.test.ts` and
+  `materials/materials.test.ts`). Rulings: decision-composition §1.1 and §1.9, science-r08-gases-2
+  §1.4, decision-bump-plan-after-22 and P14.T49.b's rows and flags as built (plan 14's record).
+  - _The check._ `parity.test.ts` reads the fixture as a JSON import, and of each row only its key,
+    its molar mass and its three flags, never `heat_capacity_over_r`, which P14.T54.a renames
+    (`heat_capacity_over_r_298k`). It fails if:
+    1. a `rayleigh` row's `rayleighOf(key).provenance` is `none` (one test a row);
+    2. an `absorber` row has no cross-sections (`crossSectionAt`, H⁻'s closed form included), no
+       committed line table (`committedLineSpecies()`, R08.T4.d's and T4.g's), no
+       `PENDING_ABSORBERS` entry with its cell means and no `NO_VISIBLE_ABSORPTION` entry with its
+       evidence. The task's text predates the line tables; they are counted, as
+       `transparency.test.ts`'s check counted them;
+    3. an `aerosol_material` row resolves to no file of its own (`resolveMaterial(key).file`, as
+       R08.T5.d's test had it): a stated stand-in is a file of provenance `standIn` whose text says
+       what stands in, which is also checked, and the generic stand-in alone fails. The reverse,
+       which T5.b's text gives T19: every key of `MATERIAL_FILES` is a row of the fixture;
+    4. `GAS_MOLAR_MASS_G_PER_MOL` differs from the fixture's `molar_mass_g_per_mol` by more than
+       10⁻¹² g mol⁻¹ for a key in both (each of `GASES`). There is no c_p row (science-r08-gases-2
+       §1.4, which supersedes decision-composition §1.9's c_p ÷ R).
+  - _τ(550): held, not built_ (decision-bump-plan-after-22). The tripwire, "is held until
+    P14.T54.b's version 24 (decision-bump-plan-after-22): the protocol fixture carries no
+    aerosols", asserts that no message of `packages/protocol/fixtures/planetary.json` carries an
+    `aerosols` member (`BodySurfaceDto.aerosols`, P14.T24.c's inventory, absent until then), since
+    the client has no generator version. When it fires: if the fixture's modes carry the sim's
+    τ(550) (P14.T54.b, version 24), the fifth row is built in its place, the client's τ(550) for
+    each of the fixture's modes within 1% of the record's; otherwise the hold's condition is
+    restated and recorded here.
+    - oxlint's `vitest/valid-expect` refuses `expect`'s message argument, so the instruction rides
+      in the asserted object beside the members found.
+    - The member's name is `"aerosols" satisfies keyof BodySurfaceDto`, so that a rename in the
+      generated type fails the type check rather than leaving the hold to outlive its member.
+    - It reads the raw fixture, not `test/planetaryFixture.ts`'s decoded messages, so that a member
+      the decoder would drop is still seen. A second test holds the walk to find the member at any
+      depth.
+    - The Jupiter envelope's deck in `body_detail_jupiter` carries a τ(550) of 8.0, the fixture's
+      illustrative value, not the sim's, so the row cannot run against it now (the test's doc says
+      so).
+  - _One check in one place._ Moved, not copied: `transparency.test.ts`'s "the registry's
+    absorbers" (its fixture and `crossSectionAt` imports dropped), `materials.test.ts`'s "serve
+    every aerosol-material row of the registry's fixture with a file of their own" (the rest of its
+    block stays) and `rayleigh.test.ts`'s "give %s measured or estimated optics".
+    `rayleigh.test.ts`'s `REGISTRY_GAS_ROWS` is now the fixture's `rayleigh` rows in index order, in
+    place of the hand list (T3.c's test, "a mixture built from `substances.json`'s gas rows"), and
+    the block's other tests run over all 43. It sorts by `index`, though the fixture is written in
+    that order, so that the order holds whatever the file's.
+    - _Tightened in the move:_ a pending absorber counts only with cell means at one node or more,
+      and a stated none only with its evidence (the task's "with its cell means" and "with its
+      reason"); before, each matched on the key alone. Each flag's check first asserts that the
+      fixture holds rows with the flag, so that it cannot pass empty.
+  - _At 5622cb95, before the rows below:_ condition 1 checked 43 rows and failed seven, `Al`, `V`,
+    `Mn`, `Ni`, `Zn`, `HCl` and `Cr`; condition 2 checked 35 and failed none (H⁻ through the closed
+    form, e⁻ through its stated none); condition 3 checked 37 rows and the 53 files' keys and failed
+    none; condition 4 checked 16 and failed none, each key's molar mass equal to the fixture's. The
+    112 rows, 43 flagged `rayleigh`, 35 `absorber` and 37 `aerosol_material`, were counted by the
+    run. With one of the seven rows deleted, the check fails that row (tried with Ni's, restored).
+  - _The seven rows_, which P14.T49.b's record assigns to "R08.T19's extension", by T3.c's rule,
+    appended to `ESTIMATED_RAYLEIGH` after FeH in the registry's order (Al, V, Mn, Ni, Zn, HCl,
+    Cr), so that "keep the registry's order" holds. `ESTIMATED_RAYLEIGH` goes from 20 to 27, and
+    `GASES` stays 16.
+    - _The six atoms_ take `polarisability` rows from Schwerdtfeger and Nagle's 2018 table (the
+      CTCP copy last updated 27 November 2018, read through the Wayback Machine's 2019-01-22
+      snapshot), each the table's recommended value, computed: Al 57.8 ± 1.0, V 87 ± 10, Mn 68 ± 9,
+      Ni 49 ± 3, Zn 38.67 ± 0.30 and Cr 83 ± 12 a.u. Each basis names the calculation the value
+      rests on and the measurements beside it (Al's 46 ± 2 and 55.3 ± 5.5, V's 68.2 ± 5.4, Cr's
+      60 ± 24, Zn's 38.8 ± 0.8).
+    - _Oscillators_, as Mg's and Fe's rows have them, at the strongest resonance line below 300 nm
+      (NIST ASD, vacuum): Mn 279.56 nm (its triplet carries 72% of α(0)), Ni 232.07 nm and Zn
+      213.92 nm (84%). Al's, V's and Cr's strong lines lie above 300 nm (Al 308–396, V 305–386, Cr
+      358–429 nm), so they take the static rule.
+    - _Uncertainty factors_: the sum over each atom's lines from its ground level (NIST ASD, every f
+      from the line's A and statistical weights), with the rest of α(0) static or dispersed at the
+      ionisation energy, against the estimate over 440–680 nm, the King factor the rule leaves out,
+      and (1 + δα ÷ α)², rounded up to two figures:
+      - Al 6.2: its ²P₃/₂ level, 112 cm⁻¹ up, holds most of the atoms, and the thermal mixture puts
+        the true σ 1.3–4.1 times the estimate; its open 3p shell's anisotropic scattering (F_K
+        about 1.2 for ²P₁/₂ and 1.8 for ²P₃/₂ at 440 nm) raises that to 1.4–6.0;
+      - Mn 2.3 (1.03–1.79), Zn 1.1 (0.93–0.98), with F_K within 0.01% of 1 for Mn and 1 for Zn;
+      - Ni 2.2: the thermal mixture of its a³F and 3d⁹4s a³D levels (205–1,713 cm⁻¹ up, about
+        two-fifths of the atoms above 1,000 K), the a³D levels given the ground level's rest, puts
+        the true σ 1.3–1.9 times the estimate, against 0.90–0.98 for the ground level alone. Its
+        anisotropic share is not bounded: NIST ASD lacks the partner of its 232.0 nm line's
+        multiplet, so a line sum would not hold it;
+      - Cr 62 (2.1–46, its F_K 1.011 at 440 nm from its resolved fine structure);
+      - V `undefined`: its ground-level lines at 457.85, 483.38 and 485.28 nm lie inside the span,
+        as Na's and Ti's do.
+    - _A reading._ The brief's "`undefined` where the atom's lines from its ground term lie in or
+      near that span" is read as the existing rows have it: `undefined` where a line lies inside
+      440–680 nm (V, as Na and Ti), and a factor from the sum over lines where they lie outside it
+      (Al, Cr and Mn, as K's 13 and Ca's 180). Mn's 539.6 and 543.4 nm intercombination lines
+      (f = 5.2 and 2.7 × 10⁻⁵) lie inside it; its bound fails only within 0.07 and 0.04 nm of
+      them, so `uncertaintyFactor`'s doc excepts a line too weak to move σ beyond 0.1 nm of its
+      centre, and Mn's basis names them.
+    - _The science check_ (the `science-checker` agent, 2026-10-16) confirmed every α, its
+      uncertainty and its label against the table, each cited calculation and measurement, each
+      wavelength and f against NIST ASD, the oscillator choices and HCl's row against the paper.
+      It corrected three factors, which stand as above: Al's from 4.1 (its ground level alone),
+      Ni's from 2.0 (its rest static only) and Cr's from 61 (its F_K left out). Al's anisotropic
+      F_K, from a sum of the rank-1 and rank-2 polarisability over ASD's lines with the rest taken
+      isotropic, is its own calculation, to about ±30% in F_K − 1, and was checked here only in
+      size: a single J = 3/2 → 1/2 line scatters six times its isotropic part.
+    - _NIST ASD's printed f_ for Zn I's lines is ten times what their A and weights give (213.9 nm:
+      10.35 against 1.47; 307.7 nm: 1.6 × 10⁻³ against 1.6 × 10⁻⁴), and 3.6 times at 110.8 nm. The
+      rows use the f from A.
+    - _HCl_ takes a `dispersion` row, as SO₂'s Cuthbertson row does: C. and M. Cuthbertson 1914,
+      re-read in archive.org's public-domain scan (item philtrans08506476). Its formula, p. 12, is
+      (μ − 1)D ÷ (d₀76) = 4.6425 × 10²⁷ ÷ (10,664 × 10²⁷ − n²) with n = 3 × 10¹⁰ ÷ λ (p. 6, stated
+      with chlorine's formula), that is n − 1 = 0.051 583 ÷ (118.49 − λ⁻²), the materials tool's
+      `HCL_REFRACTIVITY`; the paper reduces every gas to hydrogen's number density at 0 °C and
+      76 cm (p. 5; HCl's own correction on p. 11), so Z is H₂'s there,
+      `GAS_DISPERSION.H2.compressibility`, 1.000 624. Its wavelengths are air wavelengths, read as
+      vacuum (2 × 10⁻⁵ of n − 1), as NH₃'s row from the same paper reads them, over Table V's
+      4799.9–6707.85 Å. F_K = 1 (`noKingFactor`), and `uncertaintyFactor` 1.03: the
+      scatter between measurements, Mascart's D-line 1.000 444 (as the paper quotes it) lying 1.2%
+      below the Cuthbertsons' own unreduced index there, 2.4% in σ, and an unread King factor that
+      a near-isotropic hydride holds to perhaps 1.002–1.005.
+    - _HCl's tests_: the row is the printed formula with n = 3 × 10¹⁰ ÷ λ to 2 × 10⁻⁵ over
+      480–670 nm, and reproduces Table V's 44,803 × 10⁻⁸ at 5460.7 Å to 5 × 10⁻⁵, the figure the
+      tool's test holds its copy to. Table V's other calculated values stray from the printed
+      formula by up to 1.9 × 10⁻⁴ (44,994 at 5085.8 Å against 45,002.7, its difference column's −13
+      agreeing with the print), so only the one is asserted.
+  - _The channel fit._ HCl, an estimated molecule, joins `CHANNEL_FIT_GASES` (27 gases to 28). The
+    re-bless changes only `channels.json`'s `airs` (HCl after FeH): `wavelengthsNm` (645, 544,
+    433.625), the objective (0.007693) and every recorded comparison are unchanged, since HCl alone
+    at dry air's τ(550) gives 0.0074 at the triple. The six atoms stay out (`isAtom`): Al, V and Cr
+    alone give 0.0072, and Mn's, Ni's and Zn's oscillators, steepening σ to λ^−5.5, λ^−4.9 and
+    λ^−4.8 over 450–650 nm, would give 0.019, 0.012 and 0.011, out of the family's range, as Mg's
+    and Fe's (T4.a's record). `CHANNEL_FIT_GASES`' remarks name the six with their figures and HCl
+    with its own, beyond the brief's "only if HCl's membership needs a sentence": the remarks named
+    the atoms left out, and the list would have gone stale.
+- **Known gaps (R08.T19), recorded, not fixed.**
+  - _Fifteen rows carry `absorber: false`_ until R08 answers them: `Al`, `V`, `Mn`, `Ni`, `Zn`,
+    `HCl`, `Na+`, `Al+`, `Si+`, `K+`, `V+`, `Cr+`, `Mn+`, `Ni+` and `Zn+`. Their flags turn on at
+    P14.T54.a's bump, once answered (plan 14's P14.T49.b record). The answers, each needing cell
+    means or a line-list reduction:
+    - R08.T4.e: the lines of Al, V, Mn, Ni, Zn, V⁺, Cr⁺ and Mn⁺, and the third reason's stated none
+      for Na⁺, Al⁺, Si⁺, K⁺, Ni⁺ and Zn⁺ (T4.e's entry builds the third reason into T4.c's
+      `NO_VISIBLE_ABSORPTION`, which is why T4.e's text calls them "T4.c's stated none");
+    - R08.T4.c: HCl, the overtone ladder's stated none (see the deferred findings).
+  - _At P14.T54.a_ H₂, He, N₂ and CO₂ also turn `absorber` on. Each has its answer already: H₂ and
+    CO₂ a committed line table, He and N₂ a stated none (below 5,000 and 1,800 K, pending above).
+  - _Aerosol materials._ Kr, Xe, N₂O and SO₂ have liquid files (R08.T5.k) and no `aerosol_material`
+    flag, as expected: the files serve the surface's liquids. Plan 14 flags SO₂, HCN and C₂H₂ at
+    P14.T54.a if R08 has a file for them by then; SO₂ has `sulphur-dioxide-liquid.json` (its liquid,
+    not its ice), HCN and C₂H₂ none.
+- **Rows added since T19's text** (R08.T19). T19's text dates from decision-composition
+  (2026-10-09), when the fixture did not exist. P14.T49.a wrote rows 0–8 and P14.T49.b (51ec060a)
+  appended rows 9–111; P14.T49.h added none, and the fixture is unchanged since 51ec060a. Beyond
+  decision-composition §1.1's list, P14.T49.b added:
+  - `Al`, `V`, `Mn`, `Ni`, `Zn`, the 13 first ions and `HCl` (rows 38–56);
+  - `acid_uv_absorber` (79), which has `sulphuric-acid-uv-absorber.json`;
+  - the surfaces audit's rows (80–111), of which only `basalt`, `basalt_fe` and `lava_glass` are
+    flagged, as aerosol materials, and have files.
+- **Deferred findings (2026-10-13 rule)** (R08.T19). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _HCl's absorber answer is in no task entry._ science-r08-unowned-absorbers §2.3 item 4 rules
+    HCl the overtone ladder's stated none, and P14.T49.b's record expects it (T4.c's reason), but
+    no entry of this plan carries it: T4.c's lists no HCl, and T4.e's third reason is for atoms and
+    ions. A docs pass adds it to T4.c's entry, so that the flag can turn on at P14.T54.a.
+  - _Zn's measured dispersion._ Goebel, Hohm and Maroulis 1996 measured zinc vapour's
+    refractivity, the source of the table's measured 38.8 ± 0.8 a.u.; not read (closed). A
+    `dispersion` row from it would be preferred under decision-composition §1.9.
+  - _Hot atoms' excited levels._ The table gives each atom's ground level. Where low levels hold a
+    large share of a hot gas (Ni's a³D, 205–1,713 cm⁻¹ up), their α is not tabulated; Ni's factor
+    covers it with the ground level's rest assumed. A calculation of those levels' α would tighten
+    it, and Ni's anisotropic share is not bounded (Kłos 2005's anisotropy not read).
+  - _The earlier atoms' anisotropic scattering._ O, Si (its ³P₁ and ³P₂ levels populated), Fe and
+    Ti are open-shell atoms whose rows leave the anisotropic share out of their factors, as Al's
+    did before the science check. Counting it would widen their factors, not move σ.
+  - _HCl's King factor._ No measured depolarisation of HCl was read (Bridge and Buckingham 1966 and
+    Bogaard et al. 1978 are closed); one would take HCl from `noKingFactor` to a cited F_K and
+    tighten its 1.03.
+  - _HCl's dispersion is held twice._ The materials tool's `HCL_REFRACTIVITY` and the client's row
+    carry the same constants, each held by its own test to Table V's 44,803 × 10⁻⁸. The tool reads
+    SO₂'s row from `ESTIMATED_RAYLEIGH`; reading HCl's the same way would leave one copy (no output
+    moves while the values match). The tool is outside T19's scope.
+  - _Plan 14's P14.T49.b record points at the old tests._ Its flags bullet says the client's
+    `transparency.test.ts` holds every flagged absorber row, and its Rayleigh bullet that no client
+    test reads the fixture's `rayleigh`; both checks are `parity.test.ts`'s since R08.T19. A plan-14
+    docs pass updates them, for P14.T54.a, which turns the fifteen flags on.
 - **Composition (decision-composition, 2026-10-09).** Every species and material is a plan-14
   registry key. The client's tables are keyed by those strings, with measured, estimated, derived
   or stand-in provenance, and the labelled fallback never drops a species. R08.T19 holds the client
