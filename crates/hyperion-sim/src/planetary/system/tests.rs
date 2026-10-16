@@ -4154,3 +4154,112 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
         "{ice_rich} ice-rich surfaces, none at its τ"
     );
 }
+
+/// P14.T51.b: under the `p14-snapshot` lane's batch, over the sample's first 60 systems generated
+/// whole (`whole`, 400 real systems at the solar circle), every present planet's, member's and
+/// moon's photometry states, to the bit, the Bond albedo its derivation's equilibrium temperature
+/// was taken at, `DerivedBody::albedo` (retiring P14.T47's exception, as built); every icy member's
+/// air reads its record's ice. The passes' counts are recorded: they converge to 10⁻⁹ in the
+/// equilibrium temperature below the cap but for the bodies the passes' stand-ins make oscillate,
+/// 25 of 954 when measured (P14.T51.b's Risks: visible-only lossless frosts at an albedo of 1, the
+/// isothermal climate's step cover, the airless ice edge's dominance), which T49.i and T54.a take
+/// away; at most 5% of the sample is held here, a guard against a regression, not the plan's test,
+/// which this does not yet pass (reported to the lane).
+#[test]
+fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
+    use std::collections::BTreeMap;
+
+    use crate::planetary::derive::ATMOSPHERE_PASS_CAP;
+    use crate::planetary::derive::atmosphere::SnapshotRules;
+    let t = UniverseTime::EPOCH;
+    let mut counts: BTreeMap<u32, u32> = BTreeMap::new();
+    let (mut bodies, mut moons, mut icy) = (0_u32, 0_u32, 0_u32);
+    let mut capped = Vec::new();
+    let mut tally = |passes: u32, what: String| {
+        *counts.entry(passes).or_default() += 1;
+        if passes >= ATMOSPHERE_PASS_CAP {
+            capped.push(what);
+        }
+    };
+    for (ctx, system) in whole().iter().take(60) {
+        if ctx.age_at_epoch().value() <= 0.0 {
+            continue;
+        }
+        let system = system.clone().with_snapshot_rules(SnapshotRules::Batch);
+        let epoch = Epoch::new(&system, ctx, t);
+        for body in system.bodies() {
+            if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+                continue;
+            }
+            let host = fate_host(ctx, system.zone_of(body));
+            let fate = system.fate_of(body, &host);
+            let label = label::label(&system, body.index).unwrap();
+            let (record, now) = system.primary_record(&epoch, body, label, &fate);
+            let (Section::Ok(photometry), Some(derived)) = (record.photometry(), now.derived)
+            else {
+                continue;
+            };
+            assert_same_bits(photometry.bond_albedo().value(), derived.albedo().value());
+            if let (Some(ice), Section::Ok(bulk)) = (icy_member_ice(body), record.bulk()) {
+                assert!((bulk.fractions().water() - ice).abs() < 1e-15);
+                icy += 1;
+            }
+            tally(
+                derived.atmosphere_passes(),
+                format!(
+                    "{:?} {:?}: {:?} {:?}, read {:.4}, gives {:.4}, T_eq {:.2} K, T_s {:.2} K, water {:.3}",
+                    ctx.id(),
+                    body.index,
+                    derived.class(),
+                    derived.atmosphere().state(),
+                    derived.albedo().value(),
+                    derived.atmosphere().albedo().value(),
+                    derived.equilibrium_temperature().value(),
+                    derived.atmosphere().surface_temperature().value(),
+                    derived.fractions().water(),
+                ),
+            );
+            bodies += 1;
+            for child in system.children(body.index) {
+                let Part::Moon(moon) = &child.part else {
+                    continue;
+                };
+                let label = label::label(&system, child.index).unwrap();
+                let record = system.satellite_record(&epoch, child, label, &now, &fate);
+                let Section::Ok(photometry) = record.photometry() else {
+                    continue;
+                };
+                let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
+                let derived = system.moon_derived(&epoch, moon, &orbit, &now).unwrap();
+                assert_same_bits(photometry.bond_albedo().value(), derived.albedo().value());
+                tally(
+                    derived.atmosphere_passes(),
+                    format!(
+                        "{:?} {:?}: moon {:?}, read {:.4}, gives {:.4}, T_eq {:.2} K, T_s {:.2} K",
+                        ctx.id(),
+                        child.index,
+                        derived.atmosphere().state(),
+                        derived.albedo().value(),
+                        derived.atmosphere().albedo().value(),
+                        derived.equilibrium_temperature().value(),
+                        derived.atmosphere().surface_temperature().value(),
+                    ),
+                );
+                moons += 1;
+            }
+        }
+    }
+    eprintln!(
+        "under the batch: {bodies} planets and members ({icy} icy members) and {moons} moons; \
+         passes taken {counts:?}; at the cap {}:\n{}",
+        capped.len(),
+        capped.join("\n")
+    );
+    let total = bodies + moons;
+    let oscillating = u32::try_from(capped.len()).unwrap();
+    assert!(20 * oscillating <= total, "{oscillating} of {total}");
+    assert!(
+        bodies > 100 && moons > 10 && icy > 0,
+        "{bodies} {moons} {icy}"
+    );
+}

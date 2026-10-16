@@ -35,8 +35,10 @@
 //!
 //! # The cloud (§4.4)
 //!
-//! P14.T13.c's [`SurfaceState::cloud_fraction`], unchanged, since T13.c's Bond albedo was solved
-//! with it: a cover weighted by θ or the climate here would publish one the albedo does not have.
+//! The atmosphere's cloud fraction, unchanged, since its Bond albedo was solved with it: P14.T13.c's
+//! [`SurfaceState::cloud_fraction`], and under the `p14-snapshot` lane's batch P14.T51.b's area mix's
+//! (the state's share times its condensable's availability). A cover weighted by θ or the climate
+//! here would publish one the albedo does not have.
 
 use crate::math;
 use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SnapshotRules, SurfaceState};

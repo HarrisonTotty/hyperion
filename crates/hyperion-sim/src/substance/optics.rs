@@ -780,9 +780,9 @@ mod tests {
 
     /// The files outside the substance module whose calls into the held columns sit behind a
     /// named hold, each with it: the tripwire below passes them. A lane that adds a call behind its
-    /// hold adds its file here (P14.T51.b adds `planetary/derive/photometry.rs` behind
-    /// `SNAPSHOT_VERSION`; decision-p14-t49c-split §8.2).
-    const HELD: [(&str, &str); 2] = [
+    /// hold adds its file here (P14.T51.b adds `planetary/derive/photometry/area_mix.rs`, the
+    /// photometry's area-mix module, behind `SNAPSHOT_VERSION`; decision-p14-t49c-split §8.2).
+    const HELD: [(&str, &str); 3] = [
         (
             "planetary/chem/partition.rs",
             "P14.T51.a's partition, which the record calls only behind the p14-snapshot lane's \
@@ -792,6 +792,11 @@ mod tests {
             "planetary/hooks/crust.rs",
             "P14.T51.c's crust, a pure module the record calls only from P14.T54.a, which reads \
              its lid's first melt, the condensed columns' transition, through `.condensed()`",
+        ),
+        (
+            "planetary/derive/photometry/area_mix.rs",
+            "P14.T51.b's area-mix Bond albedo, which T13.c's passes call only behind the \
+             p14-snapshot lane's hold until P14.T54.a",
         ),
     ];
 

@@ -1,11 +1,12 @@
 use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
+use crate::planetary::derive::atmosphere::SnapshotRules;
 use crate::planetary::derive::atmosphere::volatile_inventory;
 use crate::planetary::derive::solar::{
     SOLAR_AGE, derive_historic, historic_sun, placed_about_the_sun, solar_disc, table_bodies,
 };
-use crate::planetary::derive::{BodyHosts, DerivedBody, derive_body_under};
+use crate::planetary::derive::{BodyHolds, BodyHosts, DerivedBody, derive_body_under};
 use crate::stellar::Composition;
 use crate::time::UniverseTime;
 use crate::units::consts::{METRES_PER_AU, SOLAR_MASS_KG};
@@ -50,7 +51,19 @@ fn table_body_under(name: &str, line: NitrogenLine) -> DerivedBody {
         &[],
     )
     .unwrap();
-    derive_body_under(line, &placed, &hosts, &disc, SOLAR_AGE, UniverseTime::EPOCH).unwrap()
+    let holds = BodyHolds {
+        line,
+        snapshot: SnapshotRules::in_force(),
+    };
+    derive_body_under(
+        holds,
+        &placed,
+        &hosts,
+        &disc,
+        SOLAR_AGE,
+        UniverseTime::EPOCH,
+    )
+    .unwrap()
 }
 
 /// Ranks to try: the median, both one-sigma ranks and the extremes, in each field.

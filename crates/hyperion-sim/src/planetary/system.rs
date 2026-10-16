@@ -110,15 +110,18 @@ use crate::planetary::context::{SystemContext, XuvHistory};
 use crate::planetary::derive::atmosphere::{
     Atmosphere, NitrogenLine, SnapshotRules, SurfaceMaterial, VolatileDraws, VolatileInventory,
 };
+#[cfg(doc)]
+use crate::planetary::derive::derive_body;
 use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
-use crate::planetary::derive::irradiation::luminosity_flux;
+use crate::planetary::derive::irradiation::{BondAlbedo, luminosity_flux};
 use crate::planetary::derive::photometry::{BodyPhotometry, PhotometryInputs};
 use crate::planetary::derive::rotation::{
     BodyRotation, ObliquityLaw, SpinDraws, SpinInputs, SpinTides,
 };
 use crate::planetary::derive::{
-    BodyHosts, DerivedBody, HabitableZone, HostLight, Illumination, MassFractions, PlacedBody,
-    PlanetClass, derive_body, habitable_zone_of, radius_chen_kipping,
+    BodyHolds, BodyHosts, DerivedBody, GivenBulk, GivenFractions, HabitableZone, HostLight,
+    Illumination, MassFractions, PlacedBody, PlanetClass, derive_body_under, habitable_zone_of,
+    radius_chen_kipping,
 };
 use crate::planetary::disc::{self, Disc, DiscProfile, Truncation};
 use crate::planetary::drift::{DriftingOrbit, drift_cell};
@@ -646,27 +649,46 @@ impl Body {
     }
 }
 
-/// The photometry of a present body whose bulk is `bulk` and whose last atmosphere pass is
-/// `atmosphere` (P14.T47.c): its surface state with the material of its record's composition,
-/// whose albedo is the state's on that material (P14.T13.c). A moon's and an icy member's
-/// composition is their record's, not the one their derivation assumed.
+/// The photometry of a present body whose bulk is `bulk`, whose last atmosphere pass is
+/// `atmosphere` and whose equilibrium temperature was taken at the albedo `albedo` (P14.T47.c),
+/// under the `p14-snapshot` lane's rules `rules`: its surface state with the material of its
+/// record's composition.
+///
+/// - Under [`SnapshotRules::Held`] its Bond albedo is the state's on that material (P14.T13.c),
+///   since a moon's and an icy member's derivation read another composition than their record's
+///   (P14.T47's exception, as built).
+/// - Under [`SnapshotRules::Batch`] it is `albedo` itself, the area mix's, whose passes read the
+///   record's composition (P14.T51.b), so that the two agree to the bit by construction, and its
+///   template's reference is the batch's ([`BodyPhotometry::derive_under`]).
 #[must_use]
-fn photometry_of(atmosphere: &Atmosphere, bulk: &BulkProperties) -> BodyPhotometry {
+fn photometry_of(
+    rules: SnapshotRules,
+    albedo: BondAlbedo,
+    atmosphere: &Atmosphere,
+    bulk: &BulkProperties,
+) -> BodyPhotometry {
     let fractions = bulk.fractions();
     let material = SurfaceMaterial::of(&fractions);
     let state = atmosphere.state();
-    BodyPhotometry::derive(&PhotometryInputs {
-        state,
-        material,
-        surface_pressure: atmosphere.surface_pressure(),
-        cloud_fraction: atmosphere.cloud_fraction(),
-        surface_temperature: atmosphere.surface_temperature(),
-        equilibrium_temperature: bulk.equilibrium_temperature(),
-        surface_gravity: bulk.surface_gravity(),
-        class: bulk.class(),
-        fractions,
-        bond: state.albedo(material),
-    })
+    let bond = match rules {
+        SnapshotRules::Held => state.albedo(material),
+        SnapshotRules::Batch => albedo,
+    };
+    BodyPhotometry::derive_under(
+        rules,
+        &PhotometryInputs {
+            state,
+            material,
+            surface_pressure: atmosphere.surface_pressure(),
+            cloud_fraction: atmosphere.cloud_fraction(),
+            surface_temperature: atmosphere.surface_temperature(),
+            equilibrium_temperature: bulk.equilibrium_temperature(),
+            surface_gravity: bulk.surface_gravity(),
+            class: bulk.class(),
+            fractions,
+            bond,
+        },
+    )
 }
 
 /// The density of a sphere of `mass` and `radius`.
@@ -696,14 +718,7 @@ fn primordial_radius(mass: EarthMasses) -> Metres {
 /// which stay dry.
 #[must_use]
 fn icy_member_bulk(body: &Body, derived: &DerivedBody) -> Option<BulkProperties> {
-    let Part::Member(member) = &body.part else {
-        return None;
-    };
-    if member.member.composition() != BeltComposition::Icy {
-        return None;
-    }
-    let (lo, hi) = ICY_MOON_ICE_FRACTION;
-    let ice = lo + member.member.radius_rank().value() * (hi - lo);
+    let ice = icy_member_ice(body)?;
     let mass = derived.mass();
     let radius = moon_radius(mass, ice);
     let fractions = MassFractions::solid(0.0, 1.0 - ice, ice);
@@ -717,6 +732,48 @@ fn icy_member_bulk(body: &Body, derived: &DerivedBody) -> Option<BulkProperties>
         fractions,
         derived.equilibrium_temperature(),
     ))
+}
+
+/// The ice fraction of `body` if it is an icy belt's member (ruling 112.8): ruling 83.7's
+/// [`ICY_MOON_ICE_FRACTION`], 0.35–0.50 at its radius rank, which its record's bulk states
+/// ([`icy_member_bulk`]) and, from the 22 → 23 bump, its air and albedo read
+/// ([`icy_member_given_bulk`]). `None` for anything else, a rocky belt's members included.
+#[must_use]
+fn icy_member_ice(body: &Body) -> Option<f64> {
+    let Part::Member(member) = &body.part else {
+        return None;
+    };
+    if member.member.composition() != BeltComposition::Icy {
+        return None;
+    }
+    let (lo, hi) = ICY_MOON_ICE_FRACTION;
+    Some(lo + member.member.radius_rank().value() * (hi - lo))
+}
+
+/// The bulk the derivation of `body`, of mass `mass` before derivation, reads for its inventory,
+/// its air and its albedo if it is an icy belt's member (P14.T51.b, "The passes take the record's
+/// composition"; decision-triton-and-e101 §1.7): its record's ([`icy_member_bulk`]), the radius
+/// [`moon_radius`] gives its ice ([`icy_member_ice`]) at that mass and its rock-and-ice fractions,
+/// known before the derivation. `None` for anything else.
+#[must_use]
+fn icy_member_given_bulk(body: &Body, mass: EarthMasses) -> Option<GivenBulk> {
+    let ice = icy_member_ice(body)?;
+    Some(GivenBulk::new(
+        moon_radius(mass, ice),
+        GivenFractions::Exactly(MassFractions::solid(0.0, 1.0 - ice, ice)),
+    ))
+}
+
+/// `placed`, the placement of `body`, under the `p14-snapshot` lane's rules `rules`: with its
+/// record's bulk ([`icy_member_given_bulk`]) under [`SnapshotRules::Batch`] for an icy belt's
+/// member, so that its air and albedo read the material its bulk section states (P14.T51.b), and
+/// as it is otherwise, version 22's below the bump.
+#[must_use]
+fn with_record_bulk(rules: SnapshotRules, body: &Body, placed: &PlacedBody) -> PlacedBody {
+    match (rules, icy_member_given_bulk(body, placed.mass())) {
+        (SnapshotRules::Batch, Some(bulk)) => placed.with_bulk(bulk),
+        (SnapshotRules::Held, _) | (SnapshotRules::Batch, None) => *placed,
+    }
 }
 
 /// The circularisations of a host's planets `planets`, in slot order, about a host of initial
@@ -899,6 +956,10 @@ pub struct PlanetarySystem {
     /// [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION), each moon's own by composition
     /// and state from it.
     moon_tides: MoonTideRule,
+    /// Which rules its records' passes follow (the `p14-snapshot` lane's hold, P14.T51.a–b):
+    /// version 22's below the bump, and the batch's area-mix albedo, on the bulk its record
+    /// states, from it.
+    snapshot: SnapshotRules,
 }
 
 /// A system's cometary halo and the orbit host it surrounds.
@@ -1189,6 +1250,7 @@ pub fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
         halo: None,
         moon_inventories: MoonInventories::in_force(),
         moon_tides: MoonTideRule::in_force(),
+        snapshot: SnapshotRules::in_force(),
     }
 }
 
@@ -1232,7 +1294,11 @@ fn parent_at_epoch(
     // masses, which placement never makes; `MoonParent::from_derived` and `RingParent::new`
     // only for a mass, radius or temperature that is not positive and finite.
     let hosts = BodyHosts::new(host_mass, *ctx.composition(), &orbited, &companions).ok()?;
-    let derived = derive_body(&placed, &hosts, profile, ctx.age_at_epoch(), t).ok()?;
+    // An icy member's bulk moves only its air, albedo and temperatures, none of which its moons'
+    // parent reads (its mass, its bulk's radius and class, its moon limit and its orbit).
+    let holds = BodyHolds::in_force();
+    let placed = with_record_bulk(holds.snapshot, body, &placed);
+    let derived = derive_body_under(holds, &placed, &hosts, profile, ctx.age_at_epoch(), t).ok()?;
     let id = body.index.body_id(ctx.id());
     let parent = match icy_member_bulk(body, &derived) {
         // Ruling 112.8: an icy belt's member is its moons' parent as rock and ice.
@@ -1602,6 +1668,21 @@ impl PlanetarySystem {
         );
         Self {
             moon_inventories: rule,
+            ..self
+        }
+    }
+
+    /// The same system with its records' passes under the `p14-snapshot` lane's rules `rules`
+    /// (P14.T51.a–b), for the tests to reach the batch's area-mix albedo ahead of the bump: its
+    /// planets', members' and moons' derivations at a record's time and their photometry. What
+    /// generation derived (its moons' parents and its held rotation laws) stays as the rules in
+    /// force derived it; an icy member's parent reads none of its air or albedo. P14.T54.a deletes
+    /// it with the hold.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_snapshot_rules(self, rules: SnapshotRules) -> Self {
+        Self {
+            snapshot: rules,
             ..self
         }
     }
@@ -2749,7 +2830,7 @@ impl PlanetarySystem {
                     Part::Member(_) => section.about(body.host),
                     Part::Planet(_) | Part::Moon(_) | Part::Ring(_) => section,
                 };
-                let placed = Self::placed_now(body, orbit, at.mass());
+                let placed = self.placed_now(body, orbit, at.mass());
                 let (derived, sky) =
                     self.derive(epoch, body, zone, &placed, fate.host_mass(epoch.t));
                 let position = epoch.position(
@@ -2781,7 +2862,12 @@ impl PlanetarySystem {
                     .bulk(Section::Ok(bulk))
                     .surface(surface)
                     .envelope(envelope)
-                    .photometry(Section::Ok(photometry_of(derived.atmosphere(), &bulk)))
+                    .photometry(Section::Ok(photometry_of(
+                        self.snapshot,
+                        derived.albedo(),
+                        derived.atmosphere(),
+                        &bulk,
+                    )))
                     .figure(body.figure_section(Some(&bulk), derived.mass(), epoch.t))
                     .orbit(Section::Ok(section))
                     .position(position)
@@ -2819,15 +2905,16 @@ impl PlanetarySystem {
     }
 
     /// The planet or member `body` on its orbit `orbit` at the time, of mass `mass` then, as
-    /// [`derive_body`] reads it.
+    /// [`derive_body`] reads it, with its record's bulk under the batch's rules for an icy
+    /// member ([`with_record_bulk`]).
     #[must_use]
-    fn placed_now(body: &Body, orbit: &KeplerElements, mass: EarthMasses) -> PlacedBody {
+    fn placed_now(&self, body: &Body, orbit: &KeplerElements, mass: EarthMasses) -> PlacedBody {
         let placed = match &body.part {
             Part::Planet(planet) => planet.placed_body(mass),
             Part::Member(member) => member.member.placed_body(),
             Part::Moon(_) | Part::Ring(_) => unreachable!("a satellite is derived by its own rule"),
         };
-        placed.with_orbit_now(*orbit)
+        with_record_bulk(self.snapshot, body, &placed.with_orbit_now(*orbit))
     }
 
     /// Where the moons of `body` formed (P14.T17.b), if it has any.
@@ -2897,7 +2984,12 @@ impl PlanetarySystem {
                     .as_ref()
                     .map(|derived| (Self::moon_bulk_of(moon, derived, parent), derived));
                 let photometry = bulk.map_or(Section::NotModelled, |(bulk, derived)| {
-                    Section::Ok(photometry_of(derived.atmosphere(), &bulk))
+                    Section::Ok(photometry_of(
+                        self.snapshot,
+                        derived.albedo(),
+                        derived.atmosphere(),
+                        &bulk,
+                    ))
                 });
                 // P14.T48.e: a moon's surface section, and its envelope's tag, as a planet's. A
                 // moon's fractions hold no envelope, so its class always has a solid surface.
@@ -2985,6 +3077,7 @@ impl PlanetarySystem {
             line: NitrogenLine::in_force(),
             bulk: rule,
             tides: self.moon_tides,
+            snapshot: self.snapshot,
         };
         let inputs = MoonInputs {
             mass: satellite.mass(),
@@ -3277,7 +3370,12 @@ impl PlanetarySystem {
             &companions,
         )
         .expect("a present body orbits a positive mass and at least one star");
-        let derived = derive_body(placed, &hosts, disc, epoch.ctx.age_at_epoch(), epoch.t).expect(
+        let holds = BodyHolds {
+            line: NitrogenLine::in_force(),
+            snapshot: self.snapshot,
+        };
+        let age = epoch.ctx.age_at_epoch();
+        let derived = derive_body_under(holds, placed, &hosts, disc, age, epoch.t).expect(
             "a present body's system is born, and a placed planet lies below 13 Jupiter masses",
         );
         let has_moons = self.children(body.index).next().is_some();

@@ -51,11 +51,14 @@ use core::f64::consts::PI;
 
 use crate::math;
 use crate::planetary::derive::PlanetClass;
-use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
+use crate::planetary::derive::atmosphere::{Gas, SnapshotRules, SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::composition::MassFractions;
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::params::{JUPITER_HEAVY_ELEMENT_FRACTION, SATURN_HEAVY_ELEMENT_FRACTION};
+use crate::units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K;
 use crate::units::{Kelvin, MetresPerSecondSquared, Pascals, Radians};
+
+pub(crate) mod area_mix;
 
 /// The ceiling on the phase factor f: 4, R07's `PHASE_F_CLAMP` (a Lambert crescent vanishes faster
 /// than a cloudy one: Venus's f would reach 61 at 170°).
@@ -290,6 +293,65 @@ pub struct TemplateRow {
     pub source: &'static str,
 }
 
+impl TemplateRow {
+    /// `A_ref` under the `p14-snapshot` lane's rules `rules` (P14.T51.b): the
+    /// [`reference_bond`](Self::reference_bond) under [`SnapshotRules::Held`], and under
+    /// [`SnapshotRules::Batch`] the Bond albedo the batch's area mix gives the analogue body, which
+    /// differs from it only where the batch's rule changes the analogue's albedo in closed form
+    /// ([`batch_reference_bond`]): so that an analogue in its own state is still drawn with its
+    /// row's p (ruling 9).
+    #[must_use]
+    pub(crate) fn reference_bond_under(&self, rules: SnapshotRules) -> BondAlbedo {
+        match rules {
+            SnapshotRules::Held => self.reference_bond,
+            SnapshotRules::Batch => {
+                batch_reference_bond(self.template).unwrap_or(self.reference_bond)
+            }
+        }
+    }
+}
+
+/// The Bond albedo the batch's area mix (P14.T51.b, [`area_mix`]) gives the analogue of `template`
+/// about a Sun (5,772 K), where it differs from [`TemplateRow::reference_bond`] in closed form, each
+/// computed from the registry when it is called; `None` where it does not:
+///
+/// - the four giants' (Jupiter, Saturn, Uranus and Neptune), class I's of Sudarsky, Burrows and
+///   Pinto 2000 about a 5,772 K host ([`area_mix::class_i_bond`]), every analogue's effective
+///   temperature lying below class I's 130 K model planet (Jupiter's 124.4 K the warmest, Hanel et
+///   al. 1981, from memory), where a giant's albedo is held at class I's;
+/// - airless ice's, `H2O`'s fresh frost ([`area_mix::solid_bond`]);
+/// - the airless rock analogues' (the Moon's and Mercury's), an airless rocky body's whose lid the
+///   passes do not know, the Moon's 0.11 ([`area_mix::Regolith::bond`]), which is the held
+///   reference until P14.T54.a passes T51.c's lid.
+///
+/// Earth's and the temperate references keep their calibrated 0.294 and Venus's 0.76, which the
+/// batch's cloud calibration and its runaway deck give exactly; the snowball's Europa's measured
+/// 0.68; and the thin magma ocean's 0.11, since a melt keeps T13.c's 0.10 under the batch.
+#[must_use]
+fn batch_reference_bond(template: PhaseTemplate) -> Option<BondAlbedo> {
+    let sun = Kelvin::new(SOLAR_EFFECTIVE_TEMPERATURE_K);
+    let value = match template {
+        PhaseTemplate::Jupiter
+        | PhaseTemplate::Saturn
+        | PhaseTemplate::Uranus
+        | PhaseTemplate::Neptune => area_mix::class_i_bond(sun),
+        PhaseTemplate::AirlessIce => {
+            area_mix::solid_bond(Gas::Water.substance(), &area_mix::sun_bands()).bond
+        }
+        PhaseTemplate::Moon | PhaseTemplate::Mercury => {
+            area_mix::Regolith::of_material(SurfaceMaterial::Rock)
+                .bond(SurfaceState::Airless, &area_mix::sun_bands())
+                .bond
+        }
+        PhaseTemplate::Mars
+        | PhaseTemplate::Venus
+        | PhaseTemplate::Earth
+        | PhaseTemplate::Snowball
+        | PhaseTemplate::Magma => return None,
+    };
+    BondAlbedo::new(value)
+}
+
 /// Degrees to radians, for the rows' ranges.
 const DEG: f64 = PI / 180.0;
 
@@ -325,8 +387,10 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
         valid_to: Radians::new(169.5 * DEG),
         provisional: false,
         source: "Mallama and Hilton 2018, Astronomy and Computing 25, 10, eq. 2, to 169.5°; \
-                 Mallama, Krobusek and Pavlov 2017, Icarus 282, 19, Table 7; measured Bond \
-                 albedo 0.088 (NASA's fact sheet), the generator's airless rock 0.11",
+                 Mallama, Krobusek and Pavlov 2017, Icarus 282, 19, Table 7; measured bolometric \
+                 Bond albedo 0.088 ± 0.003 (Mallama 2017, arXiv:1703.02670, Table 1; NASA's fact \
+                 sheet's 0.068 is the V-band spherical albedo, p_V q_V = 0.142 × 0.478), the \
+                 generator's airless rock 0.11",
     },
     TemplateRow {
         template: PhaseTemplate::Mars,
@@ -671,9 +735,19 @@ impl BodyPhotometry {
     /// solves nothing: s and q are the template's.
     #[must_use]
     pub fn derive(inputs: &PhotometryInputs) -> Self {
+        Self::derive_under(SnapshotRules::Held, inputs)
+    }
+
+    /// [`derive`](Self::derive) under the `p14-snapshot` lane's rules `rules` (P14.T51.b): its p
+    /// scaled by the template's reference under them
+    /// ([`TemplateRow::reference_bond_under`]). [`derive`](Self::derive) is this under
+    /// [`SnapshotRules::Held`], T47's rule as built, which the generator's records take until
+    /// P14.T54.a.
+    #[must_use]
+    pub(crate) fn derive_under(rules: SnapshotRules, inputs: &PhotometryInputs) -> Self {
         let template = choose(inputs);
         let row = template.row();
-        let scale = inputs.bond.value() / row.reference_bond.value();
+        let scale = inputs.bond.value() / row.reference_bond_under(rules).value();
         let q = row.phase_integral;
         let p = Bands {
             b: (row.albedo.b * scale).min(1.0 / q.b),
@@ -1083,6 +1157,58 @@ mod tests {
         ] {
             assert_same_bits(x, y);
         }
+    }
+
+    /// P14.T51.b: under the batch each template's reference is the Bond albedo the area mix gives
+    /// its analogue about a Sun, where the batch's rule changes it in closed form (the giants'
+    /// class I of Sudarsky, Burrows and Pinto, airless ice's fresh `H2O` frost), read from the
+    /// registry, and the airless rock analogues' the Moon's 0.11 while no lid is known; the rest keep
+    /// their held references, and under the held rules every reference is its row's to the bit.
+    /// An analogue in its own state at its batch reference is drawn with its row's p.
+    #[test]
+    fn under_the_batch_the_references_are_the_area_mix_s() {
+        let sun = area_mix::sun_bands();
+        let water = area_mix::solid_bond(Gas::Water.substance(), &sun).bond;
+        for template in PhaseTemplate::ALL {
+            let row = template.row();
+            let held = row.reference_bond_under(SnapshotRules::Held).value();
+            assert_same_bits(held, row.reference_bond.value());
+            let batch = row.reference_bond_under(SnapshotRules::Batch).value();
+            let expected = match template {
+                PhaseTemplate::Jupiter
+                | PhaseTemplate::Saturn
+                | PhaseTemplate::Uranus
+                | PhaseTemplate::Neptune => {
+                    area_mix::class_i_bond(Kelvin::new(SOLAR_EFFECTIVE_TEMPERATURE_K))
+                }
+                PhaseTemplate::AirlessIce => water,
+                PhaseTemplate::Moon
+                | PhaseTemplate::Mercury
+                | PhaseTemplate::Mars
+                | PhaseTemplate::Venus
+                | PhaseTemplate::Earth
+                | PhaseTemplate::Snowball
+                | PhaseTemplate::Magma => held,
+            };
+            assert_same_bits(batch, expected);
+            eprintln!("{template:?}: held {held:.5}, batch {batch:.5}");
+        }
+        let ice = BondAlbedo::new(water).unwrap();
+        let drawn = BodyPhotometry::derive_under(
+            SnapshotRules::Batch,
+            &PhotometryInputs {
+                bond: ice,
+                ..airless(SurfaceMaterial::Ice, SurfaceState::Airless, 0.35)
+            },
+        );
+        assert!((drawn.geometric_albedo().v - 0.43).abs() < 1e-12);
+        let table =
+            BodyPhotometry::derive(&airless(SurfaceMaterial::Ice, SurfaceState::Airless, 0.35));
+        let under = BodyPhotometry::derive_under(
+            SnapshotRules::Held,
+            &airless(SurfaceMaterial::Ice, SurfaceState::Airless, 0.35),
+        );
+        assert_eq!(format!("{table:?}"), format!("{under:?}"));
     }
 
     /// (b) A gas giant at an equilibrium temperature of 300 K is provisional, one at 120 K is not

@@ -93,14 +93,14 @@ use crate::GENERATOR_VERSION;
 use crate::Seed;
 use crate::math;
 use crate::orbit::KeplerElements;
-use crate::planetary::derive::atmosphere::{NitrogenLine, VolatileDraws};
+use crate::planetary::derive::atmosphere::{NitrogenLine, SnapshotRules, VolatileDraws};
 use crate::planetary::derive::rotation::{
     SpinTides, SpinningBody, moment_of_inertia_factor, tidal_locking_time,
 };
 use crate::planetary::derive::{
-    BodyHosts, BuildBodyHostsError, BuildFormationZoneError, BuildPlacedBodyError, DeriveBodyError,
-    DerivedBody, FormationZone, GivenBulk, GivenFractions, HostLight, Illumination, MassFractions,
-    PlacedBody, PlanetClass, SnowLineSide, derive_body_under,
+    BodyHolds, BodyHosts, BuildBodyHostsError, BuildFormationZoneError, BuildPlacedBodyError,
+    DeriveBodyError, DerivedBody, FormationZone, GivenBulk, GivenFractions, HostLight,
+    Illumination, MassFractions, PlacedBody, PlanetClass, SnowLineSide, derive_body_under,
 };
 use crate::planetary::disc::{self, DiscDraws, DiscHost, DiscProfile, Truncation};
 use crate::planetary::hooks::figures::{HeatInputs, Subsurface, non_tidal_heat_flow};
@@ -1025,7 +1025,8 @@ impl MoonTideRule {
 }
 
 /// The holds a moon's derivation is read under (crate-private): P14.T50.c's nitrogen line, the
-/// bulk its air is read at (P14.T56.c's follow-up) and its tides (P14.T56.d).
+/// bulk its air is read at (P14.T56.c's follow-up), its tides (P14.T56.d) and the rules its
+/// atmosphere's passes follow (the `p14-snapshot` lane's, P14.T51.a–b).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct MoonHolds {
     /// The line beyond which its nitrogen takes the icy boost.
@@ -1034,6 +1035,9 @@ pub(crate) struct MoonHolds {
     pub(crate) bulk: MoonBulkRule,
     /// Its tides.
     pub(crate) tides: MoonTideRule,
+    /// The rules its atmosphere's passes follow: the condensate partition and the area-mix Bond
+    /// albedo under [`SnapshotRules::Batch`].
+    pub(crate) snapshot: SnapshotRules,
 }
 
 impl MoonHolds {
@@ -1044,16 +1048,20 @@ impl MoonHolds {
             line: NitrogenLine::in_force(),
             bulk: MoonBulkRule::in_force(),
             tides: MoonTideRule::in_force(),
+            snapshot: SnapshotRules::in_force(),
         }
     }
 
-    /// Every hold of the 22 → 23 batch released, as version 23 takes them: what the tests reach
-    /// ahead of the bump.
+    /// Every hold of the moons' 22 → 23 batch released, as version 23 takes them: what the tests
+    /// reach ahead of the bump. Its passes keep version 22's rules ([`SnapshotRules::Held`]), so
+    /// that the moons' tests hold their figures until P14.T54.a re-measures them under the
+    /// snapshot lane's batch, which the tests that read it set ([`MoonHolds::snapshot`]).
     #[cfg(test)]
     pub(crate) const BATCH: Self = Self {
         line: NitrogenLine::Ammonia,
         bulk: MoonBulkRule::Own,
         tides: MoonTideRule::ByState,
+        snapshot: SnapshotRules::Held,
     };
 }
 
@@ -1187,6 +1195,21 @@ impl DerivedMoon {
     #[must_use]
     pub const fn atmosphere(&self) -> &crate::planetary::derive::atmosphere::Atmosphere {
         self.body.atmosphere()
+    }
+
+    /// The Bond albedo the moon's equilibrium temperature was taken at, from P14.T16's
+    /// [`derive_body`](crate::planetary::derive::derive_body): the one its photometry states
+    /// under the `p14-snapshot` lane's batch (P14.T51.b).
+    #[must_use]
+    pub(crate) const fn albedo(&self) -> crate::planetary::derive::BondAlbedo {
+        self.body.albedo()
+    }
+
+    /// How many passes its derivation took (P14.T51.b; [`DerivedBody::atmosphere_passes`]).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn atmosphere_passes(&self) -> u32 {
+        self.body.atmosphere_passes()
     }
 
     /// The moon's own Hill radius about its planet, from P14.T16's
@@ -1706,7 +1729,11 @@ pub(crate) fn derive_moon_under(
         &sky.stars,
     )
     .map_err(DeriveMoonError::Hosts)?;
-    let body = derive_body_under(holds.line, &placed, &hosts, &nursery.disc, age, t)
+    let body_holds = BodyHolds {
+        line: holds.line,
+        snapshot: holds.snapshot,
+    };
+    let body = derive_body_under(body_holds, &placed, &hosts, &nursery.disc, age, t)
         .map_err(DeriveMoonError::Body)?;
     let density = mean_density(Kilograms::from(mass), radius);
     let at = TideOf {
@@ -2622,6 +2649,7 @@ mod tests {
             line,
             bulk: rule,
             tides: MoonTideRule::ClassPair,
+            snapshot: SnapshotRules::Held,
         };
         moon_held(holds, mass, orbit, giant, volatiles, bulk)
     }
@@ -3045,6 +3073,7 @@ mod tests {
                     line: NitrogenLine::Ammonia,
                     bulk: rule,
                     tides,
+                    snapshot: SnapshotRules::Held,
                 };
                 let inputs = MoonInputs {
                     mass: EarthMasses::new(kg / crate::units::consts::EARTH_MASS_KG),
@@ -3667,6 +3696,141 @@ mod tests {
             tides.q(),
             1e3 * tides.heat_flow().value(),
             own.locking_time().value() / crate::units::consts::SECONDS_PER_JULIAN_YEAR
+        );
+    }
+
+    /// P14.T51.b: under the `p14-snapshot` lane's batch a capture whose density makes it icy
+    /// (Triton's mass and measured radius about the generated Jupiter, 0.24 of ice) and a
+    /// giant-impact moon of a rocky planet (a sphere of the Moon's 3,344 kg m⁻³ of rock about half
+    /// an Earth at 3 au) take the albedo, and so the equilibrium temperature, of their bulk
+    /// section's material, which their air reads (`MoonBulk::Stated`): the capture its fresh frost
+    /// (with its ices), above 0.5, and the giant-impact moon's rock, its lid not known, the Moon's
+    /// 0.11 by the space-weathering stand-in. Below the bump, version 22's table.
+    #[test]
+    fn a_capture_and_a_giant_impact_moon_take_their_bulk_s_albedo() {
+        use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
+        use crate::planetary::derive::equilibrium_temperature;
+        use crate::planetary::derive::photometry::area_mix::{Regolith, sun_bands};
+        use crate::units::consts::{EARTH_MASS_KG, METRES_PER_AU};
+        let batch = MoonHolds {
+            snapshot: SnapshotRules::Batch,
+            tides: MoonTideRule::ClassPair,
+            ..MoonHolds::BATCH
+        };
+        let held = MoonHolds {
+            snapshot: SnapshotRules::Held,
+            ..batch
+        };
+        let volatiles = MoonVolatiles {
+            draws: VolatileDraws::MEDIAN,
+            site: VolatileSite::ParentZone,
+        };
+        let home = table_giant("Jupiter", 5, None);
+        let (kg, km) = (TRITON.0, TRITON.1);
+        let orbit = about(&home.0, 714_920.0, 0.0);
+        let (captured, ice) = captured_bulk(kg, km);
+        assert!(ice >= crate::planetary::params::ICY_WATER_FRACTION, "{ice}");
+        let mass = (kg, UnitUniform::HALF);
+        let capture = moon_held(batch, mass, &orbit, &home, &volatiles, captured);
+        assert!(capture.albedo().value() > 0.5, "{:?}", capture.albedo());
+        let disc = solar::solar_disc();
+        let (parent_kg, a_au) = (0.5 * EARTH_MASS_KG, 3.0);
+        let derived = solar::derive(&solar::placed(parent_kg, a_au, 0.02, 0.5), &disc).unwrap();
+        let parent_orbit = solar::orbit(a_au, 0.02);
+        let host = Kilograms::new(SOLAR_MASS_KG);
+        let parent = MoonParent::from_derived(
+            planet_id(0, 3),
+            ParentKind::Planet,
+            &derived,
+            parent_orbit,
+            host,
+        )
+        .unwrap();
+        assert_eq!(parent.class(), PlanetClass::Rocky);
+        let lights = [solar::sun()];
+        let hosts = BodyHosts::new(host, Composition::SOLAR, &lights, &[]).unwrap();
+        let sky = MoonSky::new(&derived, &parent_orbit, &hosts).unwrap();
+        let nursery = MoonNursery::new(
+            &parent,
+            &Composition::SOLAR,
+            &disc,
+            Metres::new(a_au * METRES_PER_AU),
+        )
+        .unwrap();
+        let rocky = (parent, nursery, sky);
+        let moon_kg = 0.012 * parent_kg;
+        let density = 3_344.0;
+        let radius = math::cbrt(3.0 * moon_kg / (4.0 * core::f64::consts::PI * density));
+        let impact = MoonBulk::Stated {
+            radius: Metres::new(radius),
+            fractions: MassFractions::solid(0.0, 1.0, 0.0),
+        };
+        let orbit = about(&rocky.0, 10.0 * rocky.0.radius().value() / 1e3, 0.0);
+        let mass = (moon_kg, UnitUniform::HALF);
+        let moon = moon_held(batch, mass, &orbit, &rocky, &volatiles, impact);
+        let rock = Regolith::of_material(SurfaceMaterial::Rock)
+            .bond(SurfaceState::Airless, &sun_bands())
+            .bond;
+        assert_eq!(moon.atmosphere().state(), SurfaceState::Airless);
+        assert_same_bits(moon.albedo().value(), rock);
+        for derived in [&capture, &moon] {
+            assert_same_bits(
+                derived.equilibrium_temperature().value(),
+                equilibrium_temperature(derived.flux(), derived.albedo()).value(),
+            );
+        }
+        let held_moon = moon_held(held, mass, &orbit, &rocky, &volatiles, impact);
+        assert_same_bits(
+            held_moon.albedo().value(),
+            SurfaceState::Airless.albedo(SurfaceMaterial::Rock).value(),
+        );
+        eprintln!(
+            "under the batch: a Triton-like capture {:.5} at {:.2} K; a giant-impact moon of rock \
+             {:.5} at {:.2} K (22: {:.2} K)",
+            capture.albedo().value(),
+            capture.equilibrium_temperature().value(),
+            moon.albedo().value(),
+            moon.equilibrium_temperature().value(),
+            held_moon.equilibrium_temperature().value()
+        );
+    }
+
+    /// The table's Triton at its own inventory under the `p14-snapshot` lane's batch, about the
+    /// table's Neptune: airless with no N₂ until P14.T53.c, recorded, not asserted
+    /// (decision-triton-and-e101 §1.6).
+    #[test]
+    fn the_table_s_triton_at_its_own_inventory_is_recorded() {
+        let batch = MoonHolds {
+            snapshot: SnapshotRules::Batch,
+            tides: MoonTideRule::ClassPair,
+            ..MoonHolds::BATCH
+        };
+        let held = MoonHolds {
+            snapshot: SnapshotRules::Held,
+            ..batch
+        };
+        let volatiles = MoonVolatiles {
+            draws: VolatileDraws::MEDIAN,
+            site: VolatileSite::ParentZone,
+        };
+        let neptune = table_giant("Neptune", 8, None);
+        let ((kg, rank), orbit) = table_moon(TRITON, &neptune);
+        let (own, _) = captured_bulk(kg, TRITON.1);
+        let triton = moon_held(batch, (kg, rank), &orbit, &neptune, &volatiles, own);
+        let v22 = moon_held(held, (kg, rank), &orbit, &neptune, &volatiles, own);
+        eprintln!(
+            "the table's Triton at its own inventory under the batch: {:?}, Bond albedo {:.5}, \
+             T_eq {:.2} K (22: {:?} at {:.2} K), N2 {:.3e} Pa",
+            triton.atmosphere().state(),
+            triton.albedo().value(),
+            triton.equilibrium_temperature().value(),
+            v22.atmosphere().state(),
+            v22.equilibrium_temperature().value(),
+            triton
+                .atmosphere()
+                .partial_pressures()
+                .of(crate::planetary::derive::atmosphere::Gas::Nitrogen)
+                .value()
         );
     }
 

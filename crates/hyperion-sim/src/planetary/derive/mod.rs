@@ -52,7 +52,9 @@
 //!    and class.
 //! 4. **The atmosphere** (T12 and T13, three passes, [`ATMOSPHERE_PASSES`]): the equilibrium
 //!    temperature at an albedo, from 0.3 on the first pass, gives the atmosphere its escape leaves
-//!    and its greenhouse holds, whose surface state sets the albedo of the next pass.
+//!    and its greenhouse holds, whose surface state sets the albedo of the next pass. From the
+//!    22 → 23 bump (the `p14-snapshot` lane's hold) the albedo is P14.T51.b's area mix under the
+//!    light of the body's hosts, and the passes run until the equilibrium temperature converges.
 //! 5. **Rotation and tides** (T14) are not run here: a body's spin reads its drawn pole against
 //!    its orbit's normal and whether it had a giant impact, which only the generator knows (a moon
 //!    of its is a body of its system), so the generator derives it from this assembly's radius,
@@ -110,9 +112,9 @@ pub use rotation::tidal_locking_time;
 
 use crate::orbit::KeplerElements;
 use crate::planetary::derive::atmosphere::{
-    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, NitrogenLine, SurfaceMaterial,
-    VolatileDraws, VolatileInventory, atmosphere, energy_limited_loss, formation_temperature,
-    volatile_inventory_under,
+    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, NitrogenLine, PassSurface,
+    SnapshotRules, SurfaceMaterial, VolatileDraws, VolatileInventory, atmosphere_under,
+    energy_limited_loss, formation_temperature, volatile_inventory_under,
 };
 use crate::planetary::derive::composition::{
     SolveCompositionError, dry_composition, formed_with_envelope,
@@ -121,6 +123,7 @@ use crate::planetary::derive::envelope::radius_with_envelope;
 use crate::planetary::derive::habitable_zone::HabitableLimit;
 use crate::planetary::derive::irradiation::luminosity_flux;
 use crate::planetary::derive::limits::TidalPlanet;
+use crate::planetary::derive::photometry::area_mix::{HostShade, HostShadeSum};
 use crate::planetary::derive::rotation::tides;
 use crate::planetary::disc::DiscProfile;
 use crate::planetary::params::{
@@ -673,6 +676,7 @@ pub struct DerivedBody {
     effective_temperature: Option<Kelvin>,
     inventory: VolatileInventory,
     atmosphere: Atmosphere,
+    atmosphere_passes: u32,
     internal_luminosity: Watts,
     radius: EarthRadii,
     density: KilogramsPerCubicMetre,
@@ -780,10 +784,27 @@ impl DerivedBody {
     }
 
     /// The Bond albedo the equilibrium temperature was taken at: the one the body's surface state
-    /// gives, after the fixed three passes of P14.T12 and T13 ([`ATMOSPHERE_PASSES`]).
+    /// gives, after the fixed three passes of P14.T12 and T13 ([`ATMOSPHERE_PASSES`]). From the
+    /// 22 → 23 bump (the `p14-snapshot` lane's hold), the area mix's that the last of the passes
+    /// read, which converge to 10⁻⁹ in the equilibrium temperature (P14.T51.b).
     #[must_use]
     pub const fn albedo(&self) -> BondAlbedo {
         self.albedo
+    }
+
+    /// How many passes of P14.T12 and T13 the derivation took: [`ATMOSPHERE_PASSES`] under version
+    /// 22's rules, and under the batch's as many as converge, at most [`ATMOSPHERE_PASS_CAP`]
+    /// (P14.T51.b).
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the batch's convergence tests read it until P14.T54.a"
+        )
+    )]
+    #[must_use]
+    pub(crate) const fn atmosphere_passes(&self) -> u32 {
+        self.atmosphere_passes
     }
 
     /// The body's atmosphere and surface at the time (P14.T13).
@@ -1114,18 +1135,45 @@ pub fn derive_body(
     age: Years,
     t: UniverseTime,
 ) -> Result<DerivedBody, DeriveBodyError> {
-    derive_body_under(NitrogenLine::in_force(), placed, hosts, disc, age, t)
+    derive_body_under(BodyHolds::in_force(), placed, hosts, disc, age, t)
 }
 
-/// [`derive_body`] with nitrogen's boost beyond the line `line`, for the hold's tests
-/// (P14.T50.c): [`derive_body`] is this under [`NitrogenLine::in_force`]. Only the volatile
-/// inventory reads the line.
+/// The holds a body's derivation is read under (crate-private): P14.T50.c's nitrogen line, which
+/// only the volatile inventory reads, and the `p14-snapshot` lane's rules (P14.T51.a–b), which its
+/// passes follow, each version 22's until the 22 → 23 bump.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct BodyHolds {
+    /// The line beyond which its nitrogen takes the icy boost.
+    pub(crate) line: NitrogenLine,
+    /// The rules its passes follow.
+    pub(crate) snapshot: SnapshotRules,
+}
+
+impl BodyHolds {
+    /// The holds the generator version in force takes.
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        Self {
+            line: NitrogenLine::in_force(),
+            snapshot: SnapshotRules::in_force(),
+        }
+    }
+}
+
+/// [`derive_body`] under the holds `holds`, for the holds' tests and the system's switches
+/// (P14.T50.c, P14.T51.a–b): [`derive_body`] is this under [`BodyHolds::in_force`].
+///
+/// Under [`SnapshotRules::Held`] the passes are P14.T13.c's fixed three ([`ATMOSPHERE_PASSES`]).
+/// Under [`SnapshotRules::Batch`] they take the area-mix albedo (P14.T51.b) and run from
+/// [`BondAlbedo::BEFORE_ATMOSPHERES`] until the equilibrium temperature changes by at most
+/// [`ATMOSPHERE_CONVERGENCE`] of itself between passes, at most [`ATMOSPHERE_PASS_CAP`] of them,
+/// under the light of its hosts built once before them.
 ///
 /// # Errors
 ///
 /// As [`derive_body`].
 pub(crate) fn derive_body_under(
-    line: NitrogenLine,
+    holds: BodyHolds,
     placed: &PlacedBody,
     hosts: &BodyHosts<'_>,
     disc: &DiscProfile,
@@ -1141,7 +1189,7 @@ pub(crate) fn derive_body_under(
     // T12, at the time: the light now, the worst it has been, and the X-rays so far.
     let a = placed.orbit_now.semi_major_axis();
     let e = placed.orbit_now.eccentricity().value();
-    let sky = Sky::of(placed, hosts, age_now);
+    let sky = Sky::of(placed, hosts, age_now, holds.snapshot);
 
     // T13.b, energy-limited escape, and T11, the radius at the time.
     let escape = envelope_escape(placed, hosts, disc, solved.as_ref(), sky.xuv_fluence);
@@ -1161,47 +1209,29 @@ pub(crate) fn derive_body_under(
     });
     let mass_kg = Kilograms::from(mass);
 
-    // T12 and T13, three passes (T13.c): the albedo of one pass's surface state sets the
+    // T12 and T13's passes (T13.c, P14.T51.b): the albedo of one pass's surface sets the
     // equilibrium temperature the next pass reads, at the bulk its air reads, with its inventory.
-    let bulk = placed.air_of(line, disc, formed, (mass, radius, &fractions), age_now);
+    let bulk = placed.air_of(
+        holds.line,
+        disc,
+        formed,
+        (mass, radius, &fractions),
+        age_now,
+    );
     let crust = match placed.molten_until {
         Some(until) if age_now < until => Crust::Molten,
         Some(_) | None => Crust::Solid,
     };
-    let pass = |albedo: BondAlbedo| {
-        let irradiated = equilibrium_temperature(sky.flux, albedo);
-        let heated = if internal_luminosity > Watts::ZERO {
-            with_internal_heat(irradiated, internal_luminosity, Metres::new(r))
-        } else {
-            irradiated
-        };
-        let inputs = AtmosphereInputs {
-            mass: bulk.mass,
-            radius: bulk.radius,
-            material: SurfaceMaterial::of(&bulk.fractions),
-            envelope_fraction: bulk.fractions.envelope(),
-            inventory: bulk.inventory,
-            formed: bulk.side,
-            equilibrium: irradiated,
-            worst_equilibrium: equilibrium_temperature(sky.peak_flux, albedo),
-            heated,
-            xuv_fluence: sky.xuv_fluence,
-            saturated_xuv_flux: sky.saturated_xuv_flux,
-            insolation: sky.insolation,
-            crust,
-            molten_for: placed.molten_until.unwrap_or(Years::ZERO),
-            age: age_now,
-            hottest_host: sky.hottest,
-        };
-        let air = atmosphere(&inputs);
-        (irradiated, heated, air)
-    };
-    let mut albedo = BondAlbedo::BEFORE_ATMOSPHERES;
-    let (mut irradiated, mut heated, mut air) = pass(albedo);
-    for _ in 1..ATMOSPHERE_PASSES {
-        albedo = air.albedo();
-        (irradiated, heated, air) = pass(albedo);
+    let passes = PassBody {
+        placed,
+        sky: &sky,
+        bulk: &bulk,
+        crust,
+        internal_luminosity,
+        radius: Metres::new(r),
+        age: age_now,
     }
+    .passes(holds.snapshot);
 
     let volume = 4.0 / 3.0 * core::f64::consts::PI * (r * r * r);
     let density = KilogramsPerCubicMetre::new(mass_kg.value() / volume);
@@ -1228,11 +1258,12 @@ pub(crate) fn derive_body_under(
         xuv_flux: sky.xuv_flux,
         initial_envelope_fraction: escape.initial,
         envelope_lost: escape.lost,
-        albedo,
-        equilibrium_temperature: irradiated,
-        effective_temperature: (internal_luminosity > Watts::ZERO).then_some(heated),
+        albedo: passes.albedo,
+        equilibrium_temperature: passes.irradiated,
+        effective_temperature: (internal_luminosity > Watts::ZERO).then_some(passes.heated),
         inventory: bulk.inventory,
-        atmosphere: air,
+        atmosphere: passes.air,
+        atmosphere_passes: passes.count,
         internal_luminosity,
         radius,
         density,
@@ -1276,6 +1307,118 @@ fn tidal_planet(
 /// (P14.T13.c), from the 0.3 of [`BondAlbedo::BEFORE_ATMOSPHERES`].
 pub const ATMOSPHERE_PASSES: u32 = 3;
 
+/// The most passes [`derive_body`] takes under the batch's rules (P14.T51.b, the `p14-snapshot`
+/// lane's hold): 64, the lane's cap, far above the passes a body takes to converge (P14.T51.b's
+/// sample measures them), so that a body whose state flips between passes ends.
+pub(crate) const ATMOSPHERE_PASS_CAP: u32 = 64;
+
+/// The change in the equilibrium temperature between passes, as a share of it, at which the
+/// batch's passes have converged: 10⁻⁹ (plan 14, P14.T51.b, "the passes converge to 10⁻⁹ in
+/// `T_eq`").
+pub(crate) const ATMOSPHERE_CONVERGENCE: f64 = 1e-9;
+
+/// What each of T12's and T13's passes reads of a body (P14.T13.c): its placement, its sky, the
+/// bulk its air reads, its crust, its own luminosity and radius, and its age.
+#[derive(Debug, Clone, Copy)]
+struct PassBody<'a> {
+    placed: &'a PlacedBody,
+    sky: &'a Sky,
+    bulk: &'a AirBulk,
+    crust: Crust,
+    internal_luminosity: Watts,
+    radius: Metres,
+    age: Years,
+}
+
+/// What the passes leave (P14.T13.c, P14.T51.b): the albedo the last pass read, its equilibrium and
+/// heated temperatures and its atmosphere, and how many passes were taken.
+#[derive(Debug, Clone, Copy)]
+struct Passes {
+    albedo: BondAlbedo,
+    irradiated: Kelvin,
+    heated: Kelvin,
+    air: Atmosphere,
+    count: u32,
+}
+
+impl PassBody<'_> {
+    /// One pass under the lane's rules `rules` at the albedo `albedo`: the equilibrium temperature
+    /// it gives, the temperature with the body's own heat, and the atmosphere they hold, over the
+    /// passes' stand-in surface under the body's hosts' light ([`PassSurface::stand_in`]).
+    #[must_use]
+    fn pass(&self, rules: SnapshotRules, albedo: BondAlbedo) -> (Kelvin, Kelvin, Atmosphere) {
+        let (sky, bulk) = (self.sky, self.bulk);
+        let irradiated = equilibrium_temperature(sky.flux, albedo);
+        let heated = if self.internal_luminosity > Watts::ZERO {
+            with_internal_heat(irradiated, self.internal_luminosity, self.radius)
+        } else {
+            irradiated
+        };
+        let inputs = AtmosphereInputs {
+            mass: bulk.mass,
+            radius: bulk.radius,
+            material: SurfaceMaterial::of(&bulk.fractions),
+            envelope_fraction: bulk.fractions.envelope(),
+            inventory: bulk.inventory,
+            formed: bulk.side,
+            equilibrium: irradiated,
+            worst_equilibrium: equilibrium_temperature(sky.peak_flux, albedo),
+            heated,
+            xuv_fluence: sky.xuv_fluence,
+            saturated_xuv_flux: sky.saturated_xuv_flux,
+            insolation: sky.insolation,
+            crust: self.crust,
+            molten_for: self.placed.molten_until.unwrap_or(Years::ZERO),
+            age: self.age,
+            hottest_host: sky.hottest,
+        };
+        let surface = PassSurface::stand_in(sky.shade.as_ref());
+        let air = atmosphere_under(rules, &inputs, &surface);
+        (irradiated, heated, air)
+    }
+
+    /// The passes under the lane's rules `rules`, from the 0.3 of
+    /// [`BondAlbedo::BEFORE_ATMOSPHERES`], each taking the albedo the last one's atmosphere gave:
+    /// a fixed [`ATMOSPHERE_PASSES`] under [`SnapshotRules::Held`], and under
+    /// [`SnapshotRules::Batch`] until the equilibrium temperature changes by at most
+    /// [`ATMOSPHERE_CONVERGENCE`] of itself, at most [`ATMOSPHERE_PASS_CAP`] of them.
+    #[must_use]
+    fn passes(&self, rules: SnapshotRules) -> Passes {
+        let mut albedo = BondAlbedo::BEFORE_ATMOSPHERES;
+        let (mut irradiated, mut heated, mut air) = self.pass(rules, albedo);
+        let mut count = 1;
+        match rules {
+            SnapshotRules::Held => {
+                for _ in 1..ATMOSPHERE_PASSES {
+                    albedo = air.albedo();
+                    (irradiated, heated, air) = self.pass(rules, albedo);
+                    count += 1;
+                }
+            }
+            SnapshotRules::Batch => {
+                while count < ATMOSPHERE_PASS_CAP {
+                    let next = air.albedo();
+                    let (now, warmed, held) = self.pass(rules, next);
+                    count += 1;
+                    let change = (now.value() - irradiated.value()).abs();
+                    let settled = change <= ATMOSPHERE_CONVERGENCE * now.value();
+                    (albedo, irradiated, heated, air) = (next, now, warmed, held);
+                    if settled {
+                        break;
+                    }
+                }
+            }
+        }
+        Passes {
+            albedo,
+            irradiated,
+            heated,
+            air,
+            count,
+        }
+    }
+}
+
 /// What a body's hosts give it at a time, as its atmosphere reads it.
 #[derive(Debug, Clone, Copy)]
 struct Sky {
@@ -1294,6 +1437,9 @@ struct Sky {
     insolation: Insolation,
     /// The hottest effective temperature among the luminous hosts; zero if none shines.
     hottest: Kelvin,
+    /// The hosts' light by band as the batch's area mix reads it (P14.T51.b), built under its rules
+    /// alone; `None` under version 22's.
+    shade: Option<HostShade>,
 }
 
 impl Sky {
@@ -1304,7 +1450,11 @@ impl Sky {
     /// The zone is judged as Kopparapu et al.'s limits are in a multiple system (P14.T12.b): the
     /// body is inside the runaway limit when Σ Fᵢ ÷ `S_eff,i` reaches 1 at the hosts' largest past
     /// luminosities, and beyond the maximum-greenhouse limit when it falls below 1 now.
-    fn of(placed: &PlacedBody, hosts: &BodyHosts<'_>, age: Years) -> Self {
+    ///
+    /// Under the lane's rules `rules`' [`SnapshotRules::Batch`] it also sums the luminous hosts'
+    /// light by band, each weighted by its flux now ([`HostShadeSum`]), for the area mix
+    /// (P14.T51.b): once per body, before its passes.
+    fn of(placed: &PlacedBody, hosts: &BodyHosts<'_>, age: Years, rules: SnapshotRules) -> Self {
         let (a, e) = (
             placed.orbit_now.semi_major_axis(),
             placed.orbit_now.eccentricity().value(),
@@ -1321,6 +1471,11 @@ impl Sky {
             saturated_xuv_flux: WattsPerSquareMetre::ZERO,
             insolation: Insolation::Habitable,
             hottest: Kelvin::ZERO,
+            shade: None,
+        };
+        let mut shade = match rules {
+            SnapshotRules::Held => None,
+            SnapshotRules::Batch => Some(HostShadeSum::EMPTY),
         };
         let (mut runaway, mut maximum) = (0.0, 0.0);
         let mut add = |host: &HostLight, (a, e): (Metres, f64), (xuv_a, xuv_e): (Metres, f64)| {
@@ -1342,6 +1497,9 @@ impl Sky {
                 if t_eff > sky.hottest {
                     sky.hottest = t_eff;
                 }
+                if let Some(shade) = shade.as_mut() {
+                    shade.add(flux.value(), t_eff);
+                }
             }
         };
         for host in hosts.orbited {
@@ -1358,6 +1516,7 @@ impl Sky {
         } else {
             Insolation::Habitable
         };
+        sky.shade = shade.map(HostShadeSum::finish);
         sky
     }
 }

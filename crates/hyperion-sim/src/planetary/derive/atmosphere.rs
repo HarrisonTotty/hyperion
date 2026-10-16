@@ -28,7 +28,10 @@
 //!   follow ([`SurfaceState`]). From version 23 (`SNAPSHOT_VERSION`, the `p14-snapshot` lane's
 //!   hold) each condensable is held in the greenhouse by P14.T51.a's condensate partition
 //!   ([`partition`](crate::planetary::chem::partition)) over the body's climate, on the
-//!   registry's phase diagrams.
+//!   registry's phase diagrams, and the Bond albedo and cloud fraction are P14.T51.b's area mix
+//!   over the condensates the pass publishes, its regolith and its cloud
+//!   ([`area_mix`](crate::planetary::derive::photometry::area_mix)), in place of the state's
+//!   table.
 //! - **Carbon speciation and oxygen** (P14.T24.f). A body formed beyond the snow line that lies
 //!   beyond the maximum-greenhouse limit carries its carbon as methane, held where a reservoir lies
 //!   on its surface at [`METHANE_RELATIVE_HUMIDITY`] of its saturation pressure; a runaway world
@@ -46,10 +49,14 @@
 //! a giant's internal heat enters only its gas envelope's temperature, so that the two can be
 //! told apart (ruling 112.7).
 
+mod surface_mix;
+
+pub(crate) use surface_mix::PassSurface;
+
 use crate::id::BodyId;
 use crate::math;
 use crate::planetary::chem::partition::{
-    AirborneWeights, Basins, BuildColumnInventoryError, ClimateSpan, ColumnInventory, Ground,
+    AirborneWeights, BuildColumnInventoryError, ClimateSpan, ColumnInventory, Ground,
 };
 use crate::planetary::chem::redox::SNOW_LINE_TEMPERATURE;
 use crate::planetary::context::XuvHistory;
@@ -500,8 +507,9 @@ impl NitrogenLine {
 /// §1.2, "The lane's hold").
 ///
 /// It is the one hold of the lane's edits on the record path: P14.T51.a's condensate partition in
-/// the greenhouse ([`SnapshotRules::Batch`], [`atmosphere_under`]), and P14.T51.b's area-mix albedo
-/// and P14.T57.a's refitted greenhouse constants, which take its `Batch` arm as they land. Below
+/// the greenhouse ([`SnapshotRules::Batch`], [`atmosphere_under`]), P14.T51.b's area-mix albedo
+/// with its converging passes, its record bulk for icy members and its photometry's references, and
+/// P14.T57.a's refitted greenhouse constants, which take its `Batch` arm as they land. Below
 /// it [`SnapshotRules::in_force`] is [`SnapshotRules::Held`], so that every atmosphere is version
 /// 22's bit for bit until P14.T54.a's wiring, which gives the passes the body's climate and removes
 /// this hold and its tripwire (`the_snapshot_lane_is_held_only_until_the_batch_s_bump`).
@@ -1860,13 +1868,13 @@ fn partitioned_greenhouse(
 #[must_use]
 pub fn atmosphere(inputs: &AtmosphereInputs) -> Atmosphere {
     // Until P14.T54.a gives the passes the body's climate, which `derive_body` has not (its range
-    // is T24.a's, of the body's spin), the batch's partition would read a climate with no contrast.
-    // The hold's tripwire stops the bump until it does.
+    // is T24.a's, of the body's spin), the batch's partition would read a climate with no contrast,
+    // and its area mix a cover, basins and a regolith that stand in for the body's. The hold's
+    // tripwire stops the bump until it does.
     atmosphere_under(
         SnapshotRules::in_force(),
         inputs,
-        &|t, _| ClimateSpan::isothermal(t),
-        (&Basins::UNKNOWN, 1.0),
+        &PassSurface::stand_in(None),
     )
 }
 
@@ -1908,24 +1916,47 @@ fn greenhouse_under(
     }
 }
 
-/// [`atmosphere`] under the lane's rules `rules`, with the climate the condensate partition reads
-/// given by `climate_of` (P14.T51.a, held by [`SNAPSHOT_VERSION`]): [`atmosphere`] is this under
-/// [`SnapshotRules::in_force`].
+/// [`atmosphere`] under the lane's rules `rules`, over the surface `surface` (P14.T51.a–b, held by
+/// [`SNAPSHOT_VERSION`]): [`atmosphere`] is this under [`SnapshotRules::in_force`] on the passes'
+/// stand-in surface ([`PassSurface::stand_in`]).
 ///
-/// Under [`SnapshotRules::Held`] step 4 is P14.T13.c's ([`greenhouse`]) and `climate_of` is not
-/// read. Under [`SnapshotRules::Batch`] it is the partition's ([`partitioned_greenhouse`]): after
-/// escape (step 2) and the climate's division (step 3), each greenhouse step holds every
-/// condensable as [`partition`](crate::planetary::chem::partition) does over the climate
-/// `climate_of` gives for the step's mean surface temperature and the previous step's partial
-/// pressures, on the basins and with the water's surface share that `(basins, water_at_surface)`
-/// give its own seas' weight (decision-p14-t51a-partition §4; decision-p14-t51a-part2 §4.2): the
-/// previous pass's, from P14.T54.a. Every other step is the same.
+/// Under [`SnapshotRules::Held`] step 4 is P14.T13.c's ([`greenhouse`]), `surface` is not read, and
+/// the Bond albedo and cloud fraction are T13.c's table's ([`SurfaceState::albedo`],
+/// [`SurfaceState::cloud_fraction`]). Under [`SnapshotRules::Batch`]:
+///
+/// - step 4 is the partition's ([`partitioned_greenhouse`]): after escape (step 2) and the
+///   climate's division (step 3), each greenhouse step holds every condensable as
+///   [`partition`](crate::planetary::chem::partition) does over the climate `surface.climate_of`
+///   gives for the step's mean surface temperature and the previous step's partial pressures, on
+///   the basins and with the water's surface share `surface` gives its own seas' weight
+///   (decision-p14-t51a-partition §4; decision-p14-t51a-part2 §4.2): the previous pass's, from
+///   P14.T54.a;
+/// - after step 5 the Bond albedo and cloud fraction are the area mix's (P14.T51.b) over the
+///   condensates the pass's partition publishes at its final climate, its regolith and its cloud
+///   (`surface_mix::area_mixed`).
+///
+/// Every other step is the same.
 #[must_use]
 pub(crate) fn atmosphere_under(
     rules: SnapshotRules,
     inputs: &AtmosphereInputs,
-    climate_of: &ClimateOf<'_>,
-    (basins, water_at_surface): (&Basins, f64),
+    surface: &PassSurface<'_>,
+) -> Atmosphere {
+    let air = state_and_greenhouse(rules, inputs, surface);
+    match rules {
+        SnapshotRules::Held => air,
+        SnapshotRules::Batch => surface_mix::area_mixed(air, inputs, surface),
+    }
+}
+
+/// Steps 1 to 5 of [`atmosphere_under`] under the lane's rules `rules`, over the surface `surface`:
+/// the state, the greenhouse and the partial pressures, with T13.c's table's Bond albedo and cloud
+/// fraction of the state.
+#[must_use]
+fn state_and_greenhouse(
+    rules: SnapshotRules,
+    inputs: &AtmosphereInputs,
+    surface: &PassSurface<'_>,
 ) -> Atmosphere {
     let cap = inputs.hottest_host.value();
     let saturate = |t: f64| Kelvin::new(if cap > 0.0 { t.min(cap) } else { t });
@@ -1982,8 +2013,8 @@ pub(crate) fn atmosphere_under(
     let weight = gravity.value() / (4.0 * core::f64::consts::PI * r * r);
     let how = Greenhouse {
         rules,
-        climate_of,
-        ground: Ground::new(gravity, *basins, water_at_surface),
+        climate_of: surface.climate_of,
+        ground: Ground::new(gravity, surface.basins, surface.water_at_surface),
     };
     let step = greenhouse_under(&how, &airborne, weight, equilibrium, &saturate);
     let Some((mut t, mut partials, tau)) = step else {

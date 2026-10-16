@@ -5776,14 +5776,34 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
   - _Files:_ `planetary/chem/partition.rs`, `planetary/derive/atmosphere.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::chem::partition`;
     `cargo test -p hyperion-sim planetary::derive::atmosphere`.
-- **P14.T51.b The area-mix Bond albedo** (22 → 23; amends T13.c's table and T47's choice of p).
+- **P14.T51.b The area-mix Bond albedo** (22 → 23; amends T13.c's table and T47's choice of p;
+  after T51.a, P14.T49.c and P14.T49.h's step 1).
   - Inside the three passes, A = Σ aᵢAᵢ over:
     - the crust's regolith;
-    - each condensate's area, at its frost or liquid albedo (T49.c);
+    - each condensate's area at its Bond albedo:
+      - a solid's from P14.T49.c's spherical albedo by band, never its A_N, a radiance factor;
+      - a liquid's from P14.T49.h's record: the cosine-weighted Fresnel reflectance r_d(n) =
+        2∫R_F(μ) μ dμ (water's 0.066, against 0.020 at normal incidence), plus the body's light,
+        (1 − r_d)(1 − r_i) R∞ ÷ (1 − r_i R∞), with R∞ = 0.33 b_b ÷ (a + b_b) (Morel and
+        Prieur 1977) and r_i the interface's internal diffuse reflectance;
+      - the body term absent where a or b is: a deep, flat, pure liquid, stated
+        (decision-p14-t49c-split §2);
     - the cloud term, the snapshot path's cloud fraction times the cloud albedo of the state.
       That cloud fraction comes from the state and the condensable's availability (a runaway world
       with sulphur keeps 1; a dry, thin-aired world falls to the condensable's), never from the
       Surface path's decks.
+  - Each component's Bond albedo weights its band albedos by the host's flux in each band's edges
+    (a Planck curve at T_eff, or the sim's stellar spectrum where it reaches, stated), over the
+    bands the optics carry. These are B, V and R until P14.T49.i adds the infrared, whose commit
+    asserts the anchors that need it.
+  - A row with no condensed optics takes a labelled stand-in the builder states, never a silent
+    default.
+  - Until P14.T54.b weathers the area mix (R10.T1.d's law over P14.T51.d's maturity and rate;
+    decision-p14-t51d-weathering), an airless body's silicate crust takes the smaller of its row's
+    Bond albedo and the Moon's measured 0.11 (NASA's fact sheet, T13.c's present value), labelled
+    as a stand-in for space weathering. P14.T54.b deletes the rule.
+  - Its call into `condensed_optics` sits behind the lane's hold, and its file joins T49.c's
+    tripwire's held list.
   - **The passes take the record's composition** (science-p14-t24a-climate.md §6, item 3): the
     material and the crust that a body's bulk section states, not its placement's.
     - That composition is fixed before the passes for an icy belt member (`icy_member_bulk`), a
@@ -5803,7 +5823,9 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
     in T_eq across each class boundary, so that the albedo and T_eq converge in the three passes.
   - The phase template's p follows the new Bond albedo (T47's rule).
   - _Tests:_
-    - Mercury's 0.088 and the Moon's 0.11 kept;
+    - the Moon's 0.11 kept, by the space-weathering stand-in; Mercury's 0.088, the bolometric Bond
+      albedo (Mallama 2017), and its 0.068 in V move to P14.T54.b (decision-p14-t51d-weathering
+      §3);
     - Earth's 0.294 and Venus's 0.76 kept by their calibrations;
     - a Pluto and a Triton given their measured N₂, CH₄ and CO by hand (T51.a's fixtures) take a
       Bond albedo within 0.6–0.8 and 0.72–0.92: Buratti et al. 2017 (Icarus 287, 207) give Pluto
@@ -5811,8 +5833,9 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
       (decision-triton-and-e101 §1.6). At their own inventories both are `Airless` with no N₂
       until P14.T53.c, which the test records rather than asserts. Triton's N₂ pressure, 1.4 Pa,
       is P14.T53.c's test: it is set by the ice's own temperature and emissivity, not by this
-      albedo;
-    - an Enceladus near 0.8 (Howett et al. 2010, from memory);
+      albedo (asserted from P14.T49.i's commit, which adds the bands they need);
+    - an Enceladus near 0.8 (Howett et al. 2010, from memory) (asserted from P14.T49.i's commit,
+      which adds the bands they need);
     - a 1,200 K giant between class IV's and V's albedos, and Jupiter's within 0.05 of its table
       value;
     - an icy belt member whose placement holds under 10% water, a capture whose density makes it
@@ -16898,3 +16921,248 @@ tables::gauss_legendre`.
     threshold; its ice belt reads water's.
   - _Overlapping ices_ (several solids in one cold zone) are scaled down to the whole surface in
     proportion, a stand-in for their layering.
+- **Deviations in P14.T51.b, as built (`p14-snapshot`, 2026-10-16).** The area-mix Bond albedo,
+  wholly behind the lane's hold (`SnapshotRules::Batch`, `SNAPSHOT_VERSION` = 23): under `Held`, in
+  force at 22, every output is version 22's to the bit and no golden moves. The rulings are
+  decision-p14-t49c-split §1.5, §2 and §7 change 3, decision-triton-and-e101 §1.6–§1.7,
+  decision-p14-t51a-part2 §3.5 and decision-p14-t51d-weathering (the successors and Mercury's
+  albedo). Every optical value is read through the registry when it is used (`condensed_optics`'s
+  `spherical_albedo_bvr` and `liquid_properties`), with no copied value (main, 2026-10-16).
+  - _Where it is._ The pure module is `planetary/derive/photometry/area_mix.rs` (a submodule of
+    `photometry.rs`, which grew past the brief's 800 lines), the one file that calls the optics,
+    on T49.c's tripwire's held list ("P14.T51.b's area-mix Bond albedo, which T13.c's passes call
+    only behind the p14-snapshot lane's hold until P14.T54.a"). The passes' seam and their batch
+    arm are `planetary/derive/atmosphere/surface_mix.rs`.
+  - _The host's light._ Each band's share of a black body's light by the sim's 8-point
+    Gauss–Legendre table (`tables::gauss_legendre`) in x = c₂ ÷ λT (c₂ CODATA 2018), within 1.2 ×
+    10⁻¹⁴ of a 20,000-interval Simpson sum from 2,000 to 40,000 K. The optics' bands are 380, 495,
+    595 and 760 nm (`VISIBLE_BAND_EDGES_NM`, the midpoints of 440, 550 and 640 nm and R08's bake
+    range's ends), T51.b's own until P14.T49.i states its contiguous bins; the liquids' are T49.h's
+    fifteen. A Sun sends 0.141, 0.128 and 0.178 of its light into B, V and R (0.447). The weighting
+    reads slices of matching lengths, normalised over the bands given, so T49.i's bins are data. The
+    luminous hosts' shares are summed weighted by their flux at the body, with their gas-envelope
+    albedos by class (`HostShadeSum`), once per body in `Sky::of` under `Batch` alone; a body with
+    no luminous host takes a 5,772 K Planck curve, labelled. `sky::colour::star_colour` is not used:
+    P14.T12's `HostLight` carries no surface gravity.
+  - _A solid_ takes its spherical albedo by band, never `A_N`: `H2O`'s fresh frost 0.98937 about a
+    Sun, `N2`'s (and every k = 0 frost's) 1.00000, `basalt`'s 0.05187. A row without condensed
+    optics takes water frost's, labelled (`StandIn::FrostForAnUnmodelledSolid`): none of today's
+    partition condensables (H₂O, CH₄, N₂, CO₂, Ar) hits it; a lid row T54.a gives without optics
+    would (every lithology T51.c names but `basalt`, `basalt_fe` and `lava_glass`, until T49.i).
+  - _A liquid_ (`liquid_bond`): per bin r_d(n) by the classical closed form (derived here from the
+    Fresnel equations, printed in the literature as Walsh's 1926, from memory, unread), within
+    10⁻¹⁰ of a 200,000-step midpoint integral: 0.066406 at 1.333 and 0.067511 at 1.34, the lane's
+    figures. r_i = 1 − (1 − r_d) ÷ n² (derived; Lekner and Dorf 1988 unread): 0.474591 at 1.333,
+    within 10⁻⁷ of the direct internal integral with total internal reflection. The body term as
+    ruled, absent without a or b. Water's sea at 288 K about a Sun is 0.08310, its surface alone
+    0.06680: its body term is 0.104 in the 380–405 nm bin, 0.034 at 431–456 nm and under 0.002
+    from 531 nm.
+    - The record is read at the temperature its condensate lies at (`Condensate::lies_at`), held
+      into the liquid's range (P14.T54.a's clamp).
+    - _A solution without a record_ (Titan's `ch4_c2h6_n2`: P14.T49.h's step 3 gives no
+      solution's index yet) takes its solvent's, the partition's condensable whose liquid it is,
+      methane, the largest species of its reference composition (0.739 by mole), labelled: Titan's
+      seas 0.07916.
+    - _A row without a record_ (CO₂, Ar and O₂ liquids) takes r_d at liquid nitrogen's index at
+      550 nm read from its record at its normal boiling point, 77.355 K (NIST, from memory), with
+      no body term, labelled: a CO₂ sea 0.04414. A deviation from the ruling's lean, the frozen
+      form's index at 550 nm, which the sim does not carry (the solids' index files are the
+      client's); the light molecular liquids' visible indices are about 1.19–1.23 (from memory),
+      nitrogen's 1.198.
+    - _A melt_ takes T13.c's 0.10 (Essack et al. 2020), read from its table, labelled.
+  - _The regolith_ is an input (`Regolith`, its lid's row an `Option`), a seam T54.a fills from
+    T51.c's lid; until then the lid is not known (`Regolith::of_material`, the lane's decision,
+    2026-10-16), and the row is a stand-in, not the body's crust: an airless rocky body takes the
+    Moon's 0.11 exactly (NASA's fact sheet, T13.c's present value, read from its table; labelled
+    "until P14.T54.a passes T51.c's lid"), so the stand-in neither brightens nor darkens it; under
+    air rock takes T49.c's `basalt` (Earth's cloud calibration absorbs it), and ice `H2O`'s fresh
+    frost, airless or not, each labelled. With a known lid's row, an airless silicate body takes the
+    smaller of the row's Bond albedo and 0.11 (`airless_silicate_stand_in`, a function of its own),
+    and any other the row as it is. `basalt`'s fresh Bond albedo about a 5,772 K host is 0.0519.
+    Its weathering is the lane's second seam (`RegolithWeathering`): `StandIn`, the rules above; and
+    `Weathered { spherical_bvr }`, band albedos weighed by the host's bands like any solid's,
+    through which P14.T51.d's tests reach the area mix with no wiring. P14.T54.b deletes the
+    `StandIn` arm when it weathers the area mix with R10.T1.d's law over T51.d's maturity and rate
+    (decision-p14-t51d-weathering).
+  - _The cloud_ (the lane's stand-in, for main's review): f_c = f_state × availability. f_state:
+    a runaway greenhouse 1 (Venus's deck, T13.c's table; it keeps 1 with or without sulphur); a
+    temperate world and a snowball 0.67 (Earth's, King et al. 2013, T13.c's table); a gas envelope
+    1 (its class's albedo includes its clouds); airless and molten surfaces 0. Availability =
+    min(1, (1 − d) W ÷ `W_ref`), W = x_s p ÷ g of P14.T48.d's condensable (`climate_condensable`
+    over the pass's partition, its reservoirs included), d its dominance in T51.a's partition (its
+    continuous weight; the lane's decision, 2026-10-16: a dominant condensable cold-traps at the
+    surface, Wordsworth 2015 as T48.d cites it, and forms no Earth-like cover), `W_ref` = 0.77 ×
+    `p_sat`(273.15 K) ÷ 9.82 m s⁻² = 47.9 kg m⁻² on the registry's T49.b curve. Measured: Earth
+    0.670 (its water minor, d = 0); a dry, thin-aired Mars-like world (600 Pa of N₂ and Ar over
+    150–240 K, its water the condensable) 2.0 × 10⁻³; T51.a's Mars with its CO₂ caps by hand 0 (CO₂
+    its condensable at d = 1); Venus 1; the table's Titan 0.67 (its methane minor), its albedo
+    0.58714 (its haze, organics and convective limit are T24.c's and T51.d's).
+  - _The cloud's albedo_: a runaway greenhouse's Venus's 0.76 (Haus et al. 2016), so Venus keeps
+    0.76 exactly; a temperate world's and a snowball's one water cloud calibrated so that the
+    reference Earth gives NASA's 0.294 (T13.c's table), `A_cloud` = (0.294 − 0.33 `A_clear`) ÷
+    0.67, `A_clear` computed from the registry once per body (in `HostShade`, never across bodies)
+    over the reference Earth about a 5,772 K host: ocean 0.708 (science-p14-t24a-climate.md §1;
+    Eakins and Sharman 2010's 0.7095) at water's liquid albedo at 288 K, perennial ice 0.0289
+    (grounded land ice, decision-p14-t51a-part2 §3.1 and §8; sea ice left in the ocean) at `H2O`'s
+    frost, and the rest, 0.2631, at `basalt`'s regolith. Measured: `A_clear` 0.10107, `A_cloud`
+    0.38902, the reference Earth 0.294000. T51.a's by-hand Earth (`earth()` over Earth's basins,
+    the cover of `earth_publishes_its_ocean_and_its_ice`) gives 0.30054, within the test's 0.01.
+  - _A gas envelope_ (Sudarsky, Burrows and Pinto 2000, Tables 1A–1B, the Fiducial column, read):
+    the six hosts' albedos piecewise-linear in the host's T_eff (Pecaut and Mamajek 2013's T_eff
+    for M4V–A8V), held beyond 3,200 and 7,500 K (labelled), the three "<0.01" taken as 0.01, an
+    upper bound; then piecewise-linear in the planet's effective temperature, the passes' `heated`,
+    between the classes' model planets at 130, 250, 600, 1,200 and 1,700 K (p. 887), held beyond.
+    _Deviation:_ the classes are by T_eff, as the paper has them, not by the plan's T_eq (main
+    noted the lean, 2026-10-16). A 1,200 K giant about G2V takes 0.03; a 1,500 K one 0.342; class I
+    about a Sun 0.570085, the table's Jupiter 0.57009 at its 121.2 K.
+  - _The passes' surface_ (`PassSurface`, replacing the basins and water share that
+    `atmosphere_under` took as a pair): the climate, the basins, the water's share, a cover
+    provider, the hosts' light and the regolith row. Its stand-ins until P14.T54.a
+    (`PassSurface::stand_in`): an isothermal climate at each step's mean, so the cover is a step;
+    no basins, so no liquid fills any area; all the condensed water at the surface; the water's
+    cover from the pass's own partition (T24.b's gate, its ice the cold area below
+    `ice_threshold` capped on a silicate crust by its water at 1.93 km of ice Ih). After the state
+    is set the pass's inventory is partitioned once more at its final climate and published over
+    that cover, as `condensates_under` does on the record path. `atmosphere()` keeps its
+    signature and, under `Batch`, takes a host at its hottest host's T_eff. The area-mix albedo is
+    held below 1 at the type's bound (the largest `f64` below 1), which a lossless visible-only
+    frost reaches.
+  - _The passes converge_ (`derive_body_under` under `BodyHolds { line, snapshot }`, its pass
+    extracted to `PassBody`): under `Held` T13.c's fixed three, bit for bit; under `Batch` from
+    0.3 until T_eq changes by at most 10⁻⁹ of itself (`ATMOSPHERE_CONVERGENCE`), at most 64
+    passes (`ATMOSPHERE_PASS_CAP`); `DerivedBody::albedo` is the albedo the last pass read
+    (`DerivedBody::atmosphere_passes`, crate-private, counts them). The table takes 3 passes (Mars
+    and Ganymede 6).
+    - _Measured over the sample_ (the first 60 systems of the 400 at the solar circle generated
+      whole, 793 planets and members, 326 of them icy members, and 161 moons): passes {3: 764, 4:
+      100, 5: 12, 6: 14, 7: 12, 8: 2, 9: 1, 10: 3, 11: 4, 12: 1, 13: 2, 14: 2, 15: 3, 16: 6, 17: 5,
+      18: 2, 19: 1, 64: 20}. The plan's test "the passes converge to 10⁻⁹ in T_eq" is met for 934
+      of 954 bodies, 97.9%, at 23's stand-in inputs (97.4% before the lane's decisions on the lid
+      and the cloud); P14.T54.a and P14.T49.i re-check it. The 20 that reach the cap fall in three
+      classes, each a deferred finding below. A capped body publishes the albedo its 64th pass
+      read, deterministically. The sample test asserts the bit equality strictly and at most 5% at
+      the cap, recording the list; the cap stays 64 and no other solver was added (the lane's
+      decision, 2026-10-16).
+  - _The record's composition_ (decision-triton-and-e101 §1.7): `icy_member_bulk`'s ice fraction
+    is split out (`icy_member_ice`) and given before derivation (`icy_member_given_bulk`: the
+    radius `moon_radius` gives it at the placed mass, its rock-and-ice fractions as
+    `GivenFractions::Exactly`), applied by `with_record_bulk` under `Batch` alone in `placed_now`
+    and `parent_at_epoch` (the latter under the rules in force; an icy member's moons'
+    parent reads none of its air). A moon's bulk is `derive_moon`'s `MoonBulk`, read as before; the
+    snapshot rules reach `derive_body_under` through `MoonHolds::snapshot` (`MoonHolds::BATCH`
+    keeps `Held` passes, so that the moons' tests keep their figures), no second bulk input. An
+    icy member of 10²¹ kg at 43 au placed under 10% water: 0.11000 at 41.24 K as placed, 0.98937
+    at 13.63 K at its record's ice; a Triton-like capture about Jupiter 0.98937 at 39.20 K; a
+    giant-impact moon of rock of half an Earth at 3 au 0.11000 at 156.09 K (as at 22).
+  - _The photometry_ (`photometry_of`): under `Batch` its Bond albedo is `DerivedBody::albedo`
+    (`DerivedMoon::albedo`, crate-private, for a moon), so they agree to the bit (tested over the
+    sample), retiring P14.T47's exception, and its template's reference is the batch's
+    (`TemplateRow::reference_bond_under`, `BodyPhotometry::derive_under`): the four giants class
+    I about a 5,772 K host, 0.57009 (every analogue's T_eff lies below 130 K); airless ice `H2O`'s
+    frost, 0.98937; the Moon and Mercury an airless rocky body's whose lid is not known, 0.11, as
+    held; Mars, Venus, Earth, the snowball (Europa's 0.68) and the thin magma ocean (0.11: a melt
+    keeps 0.10) keep theirs.
+  - _The record's cloud_: `GlobalFigures` publishes the atmosphere's cloud fraction
+    (`air_cloud_fraction`, the state's under `Held`, to the bit), so the figures and the albedo
+    agree under `Batch`; the record path's figures and partition keep `SnapshotRules::in_force()`.
+  - _The system's switch_: `PlanetarySystem::snapshot`, the rules in force, and
+    `with_snapshot_rules` (tests) for the records' derivations and photometry.
+  - _The Moon's 0.11 is kept_ (the lane's decision, 2026-10-16): the table's Moon takes 0.11
+    exactly under `Batch`, its lid not known (T_eq 270.35 K, as at 22), asserted; Mercury and
+    Ceres keep 0.11 too (recorded). Before the decision the seam gave an airless rock `basalt`'s
+    fresh 0.0519 by min(row, 0.11), which would have darkened them; min(row, 0.11) now applies to
+    a known lid's row alone, as T54.a's lid rows take it.
+  - _Mercury's albedo._ Mercury's 0.088 is Mallama 2017's bolometric Bond albedo; NASA's 0.068 is
+    p_V q_V. P14.T54.b tests both (decision-p14-t51d-weathering §3); the template's source now says
+    so, and no value moves.
+  - _At their own inventories_ (recorded, not asserted): a Pluto (NASA's mass and radius, from
+    memory, at 39.48 au) and the table's Triton about Neptune are airless with no N₂ (P14.T53.c), as
+    at 22, but under their lossless visible-only frosts take an albedo of 1 and a T_eq of about 0 K
+    (40.09 and 45.57 K at 22, at 0.35). The table's bodies through the passes under `Batch`: Venus
+    0.76000 (cloud 1); the Moon, Mercury and Ceres 0.11000 (as at 22); Earth 0.27776 under 0.67 of
+    cloud (T_eq 256.59 K against 255.14, T_s 286.92 K; no basins, so no sea, and its land
+    `basalt`'s), within the test's 0.02 of 0.294; Mars 0.58734 under 1 × 10⁻⁴ of cloud (T_eq 180.92
+    K against 206.91 K: all its condensed water at the surface caps 0.56 of it in ice; T54.a's share
+    of 0.02 gives 0.011); Ganymede, as a body at 5.2 au, 0.98998 (T_eq 38.62 against 109.59 K);
+    Titan, as a body at 9.58 au, a snowball at 0.58714 under 0.67 of cloud (methane its condensable,
+    its column some 6,500 kg m⁻²; T_eq 72.10 against 75.64 K, T_s 90.88 K); Pluto and Triton by hand
+    0.99027 and 0.99009 over 3 bands (their N₂ ice over 0.083 and 0.066, at `N2`'s own frost,
+    1.00000); an Enceladus 0.98937.
+  - _The cost_ (release, the shared machine, provisional; one test thread under a 400% CPU quota
+    at a 1-minute load of 10, `time_the_batch_passes`, ignored, asserting nothing): a table body's
+    `derive_body` takes 0.011–0.168 ms under `Held` and 0.053–0.672 ms under `Batch` (3–6 passes,
+    0.018–0.200 ms a pass: the Moon, Mercury and Ceres 0.05 ms, Earth 0.33, Mars 0.40, Titan 0.60,
+    Ganymede 0.67), the hosts' light and the cloud's calibration (water's record at 288 K) built
+    once per body included, measured before the lane's decisions on the lid and the cloud, which
+    add no work. A body that oscillates to the cap takes some 64 ÷ 3 of its cost.
+  - _Tests_ (and where the acceptance filter `planetary::derive` does not reach them):
+    `photometry::area_mix::tests` (r_d against its integral, r_i, the body term, water's sea, the
+    Planck rule, the band-agnostic weighting, several hosts, every Sudarsky node and the clamps, a
+    hot giant, the frost stand-in and the labels, the regolith's lid known and not known, the
+    space-weathering stand-in never brightening,
+    the cloud, the reference Earth, a solution's and an unrecorded liquid's stand-ins, Enceladus,
+    gated); `photometry::tests::under_the_batch_the_references_are_the_area_mix_s`; in
+    `atmosphere::tests`, `under_the_held_rules_the_passes_are_t13c_s_three`,
+    `under_the_batch_the_table_takes_the_area_mix`,
+    `an_icy_member_takes_the_albedo_of_its_record_s_ice`, `a_pluto_at_its_own_inventory_is_recorded`
+    and `time_the_batch_passes` (ignored, a timing). Outside it, in
+    `planetary::chem::partition::tests`, `the_by_hand_earth_takes_a_bond_albedo_near_0_294`,
+    `a_pluto_and_a_triton_given_their_ices_take_their_bond_albedos` and
+    `a_mars_with_its_caps_takes_almost_no_cloud`; in `planetary::moons::regular::tests`,
+    `a_capture_and_a_giant_impact_moon_take_their_bulk_s_albedo` and
+    `the_table_s_triton_at_its_own_inventory_is_recorded`; and
+    `planetary::system::tests::under_the_batch_the_photometry_states_the_derivation_s_albedo`.
+    The anchors that need the infrared (Pluto 0.6–0.8, Triton 0.72–0.92, Enceladus 0.7–0.9) are
+    written and gated on the optics' band count exceeding three, not ignored. The hold's tripwire
+    lists what T54.a deletes of T51.b.
+  - _For T49.i and T54.a_ (main's note): the T51.b values that read `basalt` are the rock
+    regolith under air (the passes' land, a lid not known) and the reference Earth's land in the
+    cloud's calibration; an airless rocky body whose lid is not known reads none (0.11), and none
+    reads `basalt_fe`. When T49.i lands, P14.T54.a's bless note for 22 → 23 checks Mars's Bond
+    albedo (T49.i's `basalt_fe` mixture raises a Mars-like lid from about 0.12 to 0.35, which
+    reaches the passes through T51.c's lid).
+  - _Files beyond the task's:_ `planetary/derive/mod.rs`,
+    `planetary/derive/atmosphere/surface_mix.rs`, `planetary/derive/photometry/area_mix.rs` and its
+    tests, `planetary/system.rs` and its tests, `planetary/moons/regular.rs`,
+    `planetary/hooks/figures.rs` and `figures/cover.rs` (the cloud),
+    `planetary/chem/{partition, inventory}/tests.rs`, `substance/optics.rs` (the tripwire's list).
+- **Deferred findings (2026-10-13 rule)**, from P14.T51.b:
+  - _The regolith and lid stand-ins._ Until T54.a passes T51.c's lid, an airless rocky body takes
+    the Moon's 0.11 (Mercury's 0.088 is P14.T54.b's) and a rocky surface under air `basalt`'s fresh
+    0.052, which darkens the generated Mars's land; ice takes `H2O`'s fresh frost.
+  - _The cloud rule_ weights the condensable's column by 1 − d, so a dominant condensable makes no
+    cover (a Mars with its CO₂ caps 0); a minor one keeps its whole airborne column, so Titan's
+    methane gives 0.67, its albedo 0.587 against its measured 0.265 (its haze, organics and
+    convective limit are T24.c's and T51.d's).
+  - _T_eff for T_eq_ in the giants' classes, as the paper has them.
+  - _Class V's low gravity_ (g ≲ 10³ cm s⁻² is class V below 1,500 K, Sudarsky et al. p. 897) is
+    not modelled.
+  - _Sudarsky et al.'s 10–15%_ covers only the cut-off wavelengths; condensation and hazes move
+    the values far more (at G2V, 1% condensation takes I 0.57 → 0.47 and II 0.81 → 0.37; a tholin
+    haze I 0.57 → 0.48, p. 901).
+  - _Jupiter_: 0.570 against Li et al. 2018's measured 0.503 ± 0.012, 0.067 above, within SBP's
+    10–15%; Hanel et al. 1981's 0.343 ± 0.032.
+  - _Visible-only icy albedos_ are 0.99 (water frost) and 1.00 (the k = 0 frosts), above the
+    ruling's 0.95: an icy body's T_eq falls by some 65% (Ganymede as a body 38.6 K against 109.6
+    K), and a body wholly under a lossless frost to about 0 K, until T49.i's infrared; no
+    visible-only Bond albedo reaches the record (decision-p14-t49c-split §1.4).
+  - _Titan's albedo_ has no haze or organics (T24.c, T51.d): 0.587 against 0.265.
+  - _A thin frost's thickness_ (its reservoir over its area) does not lower its albedo over a
+    darker floor (T51.b and T51.f).
+  - _Solids without optics and liquids without records_ take their labelled stand-ins (water
+    frost; a solvent's record; nitrogen's index).
+  - _Water's sea_ at 0.083 about a Sun, its pure, deep, flat body's light in the blue, against the
+    open ocean's measured some 0.06 (Payne 1972, from memory), which wind and dissolved matter
+    lower.
+  - _The passes' water cover_ until T54.a puts all a body's condensed water at its surface (the
+    default share of 1): the generated Mars ices over 0.56 of its surface (T_eq 180.9 against 206.9
+    K); T54.a gives the passes the real share (0.02 for Mars, 0.011 of ice).
+  - _The passes' convergence_, 20 of the sample's 954 bodies at the cap, in three classes:
+    - 9 airless bodies under a lossless frost at an albedo of about 1, their T_eq falling to about
+      0 K: visible-only optics, until P14.T49.i's infrared;
+    - 6 snowballs and airless moons whose albedo flips between their frost (0.99) and their rock or
+      thinner ice (0.15–0.64) as T crosses an ice edge: the isothermal stand-in climate's step
+      cover (with the airless edge's dominance, decision-p14-t51a-part2 §3.3), until T54.a's cold
+      profile;
+    - 5 rocky temperate worlds alternating between about 0.15–0.27 and 0.278.
+  - _The passes' convergence_: 25 of the sample's 954 bodies oscillate to the cap (above).

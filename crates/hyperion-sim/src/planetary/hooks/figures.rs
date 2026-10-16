@@ -1887,6 +1887,8 @@ pub struct GlobalFigures {
     surface_liquids: Vec<(SubstanceId, f64)>,
     surface_ices: Vec<(SubstanceId, f64)>,
     cloud_fraction: f64,
+    /// The atmosphere's cloud fraction, which the second stage publishes.
+    air_cloud_fraction: f64,
 }
 
 impl GlobalFigures {
@@ -2118,6 +2120,7 @@ impl GlobalFigures {
             surface_liquids: Vec::new(),
             surface_ices: Vec::new(),
             cloud_fraction: 0.0,
+            air_cloud_fraction: air.cloud_fraction(),
         }))
     }
 
@@ -2139,7 +2142,9 @@ impl GlobalFigures {
     /// - **The ice** ([`cover::ice_fraction`]): the conditions' cold area, a `Snowball`'s whole
     ///   sphere, capped on a silicate crust by the surface water;
     ///   [`surface_ices`](Self::surface_ices) is `[(H2O, f_ice)]`.
-    /// - **The cloud**: P14.T13.c's state's ([`SurfaceState::cloud_fraction`]).
+    /// - **The cloud**: the atmosphere's ([`Atmosphere::cloud_fraction`]), with which its Bond
+    ///   albedo was solved: P14.T13.c's state's ([`SurfaceState::cloud_fraction`]), and under the
+    ///   `p14-snapshot` lane's batch the area mix's (P14.T51.b).
     ///
     /// [`derive`](Self::derive) alone gives the first stage, with no wet epoch, no ocean, ice or
     /// cloud listed and [`from_colder`](Self::from_colder) false: the figures
@@ -2322,8 +2327,8 @@ impl GlobalFigures {
             from_colder: history.from_colder(),
             surface_liquids,
             surface_ices,
-            // Step 12: the cloud.
-            cloud_fraction: self.state.cloud_fraction(),
+            // Step 12: the cloud, the atmosphere's: the state's below the bump, bit for bit.
+            cloud_fraction: self.air_cloud_fraction,
             ..self
         }
     }
@@ -2584,8 +2589,9 @@ impl GlobalFigures {
         &self.surface_ices
     }
 
-    /// The cloud fraction, 0 to 1: P14.T13.c's [`SurfaceState::cloud_fraction`], with which its
-    /// Bond albedo was solved; zero before the second stage.
+    /// The cloud fraction, 0 to 1: the atmosphere's, P14.T13.c's [`SurfaceState::cloud_fraction`]
+    /// and the area mix's under the `p14-snapshot` lane's batch (P14.T51.b), with which its Bond
+    /// albedo was solved; zero before the second stage.
     #[must_use]
     pub const fn cloud_fraction(&self) -> f64 {
         self.cloud_fraction

@@ -1646,3 +1646,108 @@ fn a_solid_whose_density_was_not_read_has_a_stand_in_cap_and_no_layer() {
         "{ice:?} against {cap}"
     );
 }
+
+// P14.T51.b: the area-mix Bond albedo over the published condensates of T51.a's bodies by hand.
+
+use crate::planetary::derive::atmosphere::SurfaceMaterial;
+use crate::planetary::derive::photometry::area_mix::{
+    HostShade, OPTICS_BANDS, Regolith, cloud_albedo, cloud_fraction, solid_bond, surface_bond,
+    under_cloud,
+};
+
+/// The area-mix Bond albedo of the partition `p`, published over `cover`, of a body of `material`
+/// in the cover's state about a Sun: the published condensates over the material's regolith, under
+/// the state's cloud.
+fn area_mix(p: &Partition, cover: &Cover<'_>, material: SurfaceMaterial) -> (f64, f64) {
+    let sun = HostShade::sun();
+    let published = p.publish(cover);
+    let regolith = Regolith::of_material(material)
+        .bond(cover.state, sun.bands())
+        .bond;
+    let ground = surface_bond(&published, p, regolith, &sun);
+    let cloud = cloud_fraction(cover.state, p);
+    let bond = under_cloud(ground, cloud, cloud_albedo(cover.state, &sun));
+    (bond, cloud)
+}
+
+/// T51.a's by-hand Earth over Earth's basins, its cover as `earth_publishes_its_ocean_and_its_ice`
+/// builds it (an ocean of 0.70–0.76 and 5% of ice), takes a Bond albedo within 0.01 of NASA's
+/// 0.294, by the water cloud's calibration on the reference Earth (`area_mix`'s 0.708 of ocean and
+/// 0.0289 of land ice): its ice's larger share and its ocean's own make the difference. Its cloud is
+/// Earth's 0.67, its water's column well above the reference's.
+#[test]
+fn the_by_hand_earth_takes_a_bond_albedo_near_0_294() {
+    let body = earth();
+    let earth = partition(&body.climate, &on_earth(EARTH_GRAVITY), &body.inventory);
+    let profile = linear_cold_area(260.0, 325.0);
+    let cover = Cover {
+        cold_area: &profile,
+        state: SurfaceState::Temperate,
+        water: water_cover(&earth, &profile, 1.0),
+    };
+    let (bond, cloud) = area_mix(&earth, &cover, SurfaceMaterial::Rock);
+    assert_same_bits(cloud, SurfaceState::Temperate.cloud_fraction());
+    assert!((bond - 0.294).abs() < 0.01, "{bond}");
+    eprintln!("T51.a's Earth by hand: Bond albedo {bond:.5} under {cloud} of cloud");
+}
+
+/// A Pluto and a Triton given their measured N₂, CH₄ and CO by hand (T51.a's fixtures), airless
+/// over water frost's regolith, take a Bond albedo within 0.6–0.8 and 0.72–0.92 (Buratti et al.
+/// 2017, Icarus 287, 207: Pluto 0.72 ± 0.07; Hillier et al. 1990, Science 250, 419: Triton 0.82 ±
+/// 0.05; decision-triton-and-e101 §1.6), asserted from P14.T49.i's commit, which adds the infrared
+/// bands they need (decision-p14-t49c-split §1.3); until then the visible-only values are recorded.
+/// Their nitrogen ice's frost albedo is the `N2` row's own, not a stand-in. Their covers are by
+/// hand, their annual means linear in area from 35 to 47 K, as `pluto_keeps_its_nitrogen_ice`'s.
+#[test]
+fn a_pluto_and_a_triton_given_their_ices_take_their_bond_albedos() {
+    let profile = linear_cold_area(35.0, 47.0);
+    for (body, (low, high)) in [(pluto(), (0.6, 0.8)), (triton(), (0.72, 0.92))] {
+        let p = body.partition();
+        let cover = Cover {
+            cold_area: &profile,
+            state: SurfaceState::Airless,
+            water: water_cover(&p, &profile, 1.0),
+        };
+        let published = p.publish(&cover);
+        let nitrogen = published.entry(id("N2"), CondensatePhase::Solid).unwrap();
+        let frost = solid_bond(id("N2"), HostShade::sun().bands());
+        assert_eq!(frost.stand_in, None, "{}", body.name);
+        let (bond, cloud) = area_mix(&p, &cover, SurfaceMaterial::Ice);
+        assert_same_bits(cloud, 0.0);
+        eprintln!(
+            "{} by hand, over {OPTICS_BANDS} bands: Bond albedo {bond:.5}, its N2 ice over {:.3} at \
+             {:.5}",
+            body.name,
+            nitrogen.area_fraction(),
+            frost.bond
+        );
+        if OPTICS_BANDS > 3 {
+            assert!((low..=high).contains(&bond), "{}: {bond}", body.name);
+        }
+    }
+}
+
+/// T51.a's Mars given its measured air by hand, with its carbon dioxide caps and its water ice,
+/// takes almost no cloud: its cloud-forming condensable is carbon dioxide (P14.T48.d's, the largest
+/// partial pressure whose phase changes inside the climate, its caps a reservoir), whose airborne
+/// column is its whole air's, some 160 kg m⁻², but which is dominant, cold-trapped at its surface
+/// (Wordsworth 2015), and weighs by 1 − d (the lane's rule, 2026-10-16), so its cloud falls near
+/// none, as the measured Mars's thin water-ice and carbon dioxide clouds have it.
+#[test]
+fn a_mars_with_its_caps_takes_almost_no_cloud() {
+    let body = mars();
+    let mars = body.partition();
+    let profile = linear_cold_area(140.0, 250.0);
+    let cover = Cover {
+        cold_area: &profile,
+        state: SurfaceState::Temperate,
+        water: water_cover(&mars, &profile, cover::DRY_SURFACE_WATER_SHARE),
+    };
+    let (bond, cloud) = area_mix(&mars, &cover, SurfaceMaterial::Rock);
+    let dominance = of(&mars, "CO2").dominance();
+    eprintln!(
+        "Mars by hand, with its caps: CO2's dominance {dominance:.4}, cloud {cloud:.2e}, Bond \
+         albedo {bond:.5}"
+    );
+    assert!(cloud < 0.05, "{cloud}");
+}
