@@ -8,6 +8,9 @@
 //! - [`envelope_abundances`]: a gas envelope's elements relative to hydrogen
 //!   ([`EnvelopeAbundances`](envelope_abundances::EnvelopeAbundances), P14.T50.b), on the Surface
 //!   path, which nothing on the record reads until P14.T54.b.
+//! - [`partition`]: the condensate partition at the ground (P14.T51.a), how much of each
+//!   condensable a body's air holds over its climate, how much lies on its surface, and in which
+//!   phase.
 //! - Here, the host's C/O and Mg/Si ([`HostAbundances`]), drawn per system on
 //!   `system.abundances` ([`AbundanceDraws`]), since a star's planets share its photospheric
 //!   ratios, until plan 06 carries them on the star. Plan 06 may adopt the stream without moving
@@ -55,6 +58,7 @@
 
 pub mod envelope_abundances;
 pub mod inventory;
+pub mod partition;
 pub mod redox;
 
 use crate::Seed;
