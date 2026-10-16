@@ -269,7 +269,7 @@ fn worker_fields_report_each_payloads_surveyed_cells_and_nothing_for_a_block_aga
     assert_eq!(second, indices(&f.second));
     let held = fields.field(f.body).unwrap().clone();
     for block in f.blocks() {
-        assert!(fields.chunk(f.body, block).unwrap().is_empty());
+        assert!(fields.chunk(f.body, block).unwrap().surveys_nothing());
     }
     assert_eq!(fields.field(f.body), Some(&held));
 }
@@ -278,16 +278,28 @@ fn worker_fields_report_each_payloads_surveyed_cells_and_nothing_for_a_block_aga
 fn worker_survey_change_answers_by_runs() {
     let mut change = SurveyChange::default();
     for index in [3, 4, 5, 9, 11, 12] {
-        change.push(index);
+        push_run(&mut change.runs, index);
+    }
+    for index in [1, 2, 3, 7] {
+        push_run(&mut change.held, index);
     }
     assert_eq!(change.runs(), &[(3, 6), (9, 10), (11, 13)]);
+    assert_eq!(change.held_runs(), &[(1, 4), (7, 8)]);
     for index in 0..15 {
-        let held = [3, 4, 5, 9, 11, 12].contains(&index);
-        assert_eq!(change.surveys(index), held, "{index}");
+        let surveyed = [3, 4, 5, 9, 11, 12].contains(&index);
+        assert_eq!(change.surveys(index), surveyed, "{index}");
+        assert_eq!(
+            change.brings(index),
+            [1, 2, 3, 7].contains(&index),
+            "{index}"
+        );
     }
     assert!(change.surveys_any(&[0, 1, 12]));
     assert!(!change.surveys_any(&[0, 6, 10, 13]));
+    assert!(change.brings_any(&[0, 7]));
+    assert!(!change.brings_any(&[0, 4, 8]));
     assert!(!SurveyChange::default().surveys_any(&[0, 1]));
+    assert!(!SurveyChange::default().brings_any(&[0, 1]));
 }
 
 #[test]
@@ -502,7 +514,7 @@ fn worker_level_table_is_the_datum_before_any_cell() {
         FIXTURE_BLOCK_BYTES,
     ));
     assert_eq!(empty.len(), 1);
-    assert!(fields.init(f.body, &empty[0]).unwrap().is_empty());
+    assert!(fields.init(f.body, &empty[0]).unwrap().surveys_nothing());
     assert_eq!(fields.field(f.body).unwrap().header(), &header);
     let table = fields.level_table(f.body).unwrap();
     for row in table.chunks(LEVEL_TABLE_STRIDE) {
@@ -668,48 +680,239 @@ fn worker_rebake_rule_misses_no_bake_a_block_changes() {
     assert!(rebaked < probes().len());
 }
 
-#[test]
-fn worker_rebake_rule_takes_an_incomplete_horizon_as_an_incomplete_bake() {
-    let f = fixture();
+/// `opts` with the horizon map, as the lit style's workers bake (R10.T8.b).
+pub(super) fn lit(opts: TerrainBakeOptions) -> TerrainBakeOptions {
+    TerrainBakeOptions {
+        horizon: HorizonLayer::Baked,
+        ..opts
+    }
+}
+
+/// A worker holding the fixture's first payload alone.
+fn first_survey(f: &Fixture) -> WorkerFields {
     let mut fields = WorkerFields::new();
     fields.init(f.body, &f.first_blocks[0]).unwrap();
     for block in &f.first_blocks[1..] {
         fields.chunk(f.body, block).unwrap();
     }
-    let lit = |opts: TerrainBakeOptions| TerrainBakeOptions {
-        horizon: HorizonLayer::Baked,
-        ..opts
-    };
+    fields
+}
+
+/// The blocks of a delta payload from the fixture's first survey to it and `cells` more, surveyed
+/// at 20 m.
+fn delta_blocks(cells: &BTreeSet<PatchKey>) -> Vec<Vec<u8>> {
+    let f = fixture();
+    let first_cover = cover(&f.first, |_| code(50.0));
+    let both: BTreeSet<PatchKey> = f.first.union(cells).copied().collect();
+    let both_cover = cover(&both, |c| {
+        if f.first.contains(&c) {
+            code(50.0)
+        } else {
+            code(20.0)
+        }
+    });
+    split(&encode_within(
+        world(WORLD),
+        &both_cover,
+        Some(&first_cover),
+        SYNTHESIS_MARGIN_CELLS,
+        FIXTURE_BLOCK_BYTES,
+    ))
+}
+
+/// The probes baked with the map over a worker holding the first survey, each block of `blocks`
+/// posted after them, and the bakes again: each probe's name, its bake before and after, and
+/// whether the rule took it on some block; every bake the rule passes over is the same bytes after
+/// the blocks, its horizon map's words and refused cells included.
+fn rule_over(blocks: &[Vec<u8>]) -> Vec<(&'static str, BodyBake, BodyBake, bool)> {
+    let f = fixture();
+    let mut fields = first_survey(&f);
     let before: Vec<BodyBake> = probes()
         .into_iter()
         .map(|(_, key, opts)| fields.bake(f.body, SEED, key, &lit(opts)).unwrap())
         .collect();
-    let mut changed = [false; 6];
-    for block in &f.second_blocks {
+    let mut taken = vec![false; before.len()];
+    for block in blocks {
         let change = fields.chunk(f.body, block).unwrap();
         for (n, old) in before.iter().enumerate() {
-            changed[n] |= old.needs_rebake(&change);
+            taken[n] |= old.needs_rebake(&change);
         }
     }
-    for (n, ((name, key, opts), old)) in probes().into_iter().zip(&before).enumerate() {
-        let new = fields.bake(f.body, SEED, key, &lit(opts)).unwrap();
-        if !changed[n] {
-            assert_eq!(new.terrain(), old.terrain(), "{name} changed, unflagged");
+    probes()
+        .into_iter()
+        .zip(before)
+        .zip(taken)
+        .map(|(((name, key, opts), old), taken)| {
+            let new = fields.bake(f.body, SEED, key, &lit(opts)).unwrap();
+            if !taken {
+                assert_eq!(new, old, "{name} changed, unflagged");
+            }
+            (name, old, new, taken)
+        })
+        .collect()
+}
+
+#[test]
+fn worker_fields_report_the_cells_each_block_brings() {
+    let f = fixture();
+    let mut fields = WorkerFields::new();
+    let mut held = BTreeSet::new();
+    let mut blocks = f.blocks();
+    let first = fields
+        .init(f.body, blocks.next().expect("a payload has a block 0"))
+        .unwrap();
+    let mut changes = vec![first];
+    for block in blocks {
+        changes.push(fields.chunk(f.body, block).unwrap());
+    }
+    for (block, change) in f.blocks().zip(&changes) {
+        let carried: BTreeSet<u32> = decode_block(block).unwrap().cover().cells().collect();
+        let brought: Vec<u32> = change.held_runs().iter().flat_map(|&(a, b)| a..b).collect();
+        // Exactly the block's cells not held before it, each once and rising.
+        let expected: Vec<u32> = carried.difference(&held).copied().collect();
+        assert_eq!(brought, expected);
+        assert!(brought.iter().all(|&i| change.brings(i)));
+        assert!(change.brings_any(&brought) || brought.is_empty());
+        // A cell surveyed anew that was not held is brought; one held as margin is not.
+        for i in cells_of(change) {
+            assert_eq!(change.brings(i), !held.contains(&i), "{i}");
         }
-        if !old.terrain().layers().horizon().is_complete() {
-            assert!(
-                changed[n],
-                "{name}: an incomplete horizon is rebaked on any block"
-            );
-        }
-        if name == "inside" {
-            // Surveyed whole and complete, its far field reaching past the surveys.
-            let layers = old.terrain().layers();
+        held.extend(carried);
+    }
+    // A block again brings nothing.
+    let again = fields.chunk(f.body, &f.second_blocks[0]).unwrap();
+    assert_eq!(again, SurveyChange::default());
+}
+
+#[test]
+fn worker_rebake_rule_passes_over_a_block_elsewhere() {
+    // A survey on the far face, beyond every probe's reach.
+    let elsewhere: BTreeSet<PatchKey> =
+        [PatchKey::new(Face::NegY, world(WORLD).header().level().get(), 30, 30).unwrap()]
+            .into_iter()
+            .collect();
+    let rule = rule_over(&delta_blocks(&elsewhere));
+    for (name, old, _, taken) in &rule {
+        let layers = old.terrain().layers();
+        // An incomplete bake is taken on any block; a complete one only by a cell it names.
+        assert_eq!(*taken, !layers.is_complete(), "{name}");
+        if *name == "inside" {
             assert!(
                 layers.is_complete() && !layers.horizon().is_complete(),
                 "{name}"
             );
-            assert!(changed[n], "{name}");
+            assert!(!layers.horizon().refused_cells().is_empty(), "{name}");
+        }
+    }
+    assert!(
+        rule.iter().any(|(_, _, _, taken)| !taken),
+        "a bake is passed over"
+    );
+}
+
+#[test]
+fn worker_rebake_rule_takes_a_block_that_brings_a_refused_cell_as_margin() {
+    let f = fixture();
+    let mut fields = first_survey(&f);
+    let (_, key, opts) = probes()[0];
+    let inside = fields.bake(f.body, SEED, key, &lit(opts)).unwrap();
+    let refused = inside.terrain().layers().horizon().refused_cells().to_vec();
+    let field = fields.field(f.body).unwrap();
+    let level = field.header().level().get();
+    let named = |c: PatchKey| refused.binary_search(&cell_index(c)).is_ok();
+    // A cell the field does not hold and the map does not name, within a margin of one it does.
+    let margin = i64::from(SYNTHESIS_MARGIN_CELLS);
+    let side = i64::from(1_u32 << level);
+    let (r, c) = refused
+        .iter()
+        .map(|&i| cell_at_index(level, i).unwrap())
+        .find_map(|r| {
+            let (ri, rj) = (i64::from(r.i()), i64::from(r.j()));
+            (-margin..=margin)
+                .flat_map(|di| (-margin..=margin).map(move |dj| (ri + di, rj + dj)))
+                .filter(|&(i, j)| (0..side).contains(&i) && (0..side).contains(&j))
+                .map(|(i, j)| {
+                    PatchKey::new(
+                        r.face(),
+                        level,
+                        u32::try_from(i).unwrap(),
+                        u32::try_from(j).unwrap(),
+                    )
+                    .unwrap()
+                })
+                .find(|&c| field.resolution(c).is_none() && !named(c))
+                .map(|c| (r, c))
+        })
+        .expect("a refused cell lies within a margin of ground the map does not name");
+    let blocks = delta_blocks(&[c].into_iter().collect());
+    let mut brought_as_margin = false;
+    for block in &blocks {
+        let change = fields.chunk(f.body, block).unwrap();
+        brought_as_margin |= change.brings(cell_index(r)) && !change.surveys(cell_index(r));
+        assert!(
+            !change.surveys_any(&refused),
+            "no refused cell is surveyed by the block"
+        );
+    }
+    assert!(brought_as_margin, "{r:?} comes as {c:?}'s margin");
+    let rule = rule_over(&blocks);
+    let (_, old, new, taken) = &rule[0];
+    assert!(*taken, "a refused cell brought as margin takes the bake");
+    assert!(
+        new.terrain()
+            .layers()
+            .horizon()
+            .refused_cells()
+            .binary_search(&cell_index(r))
+            .is_err(),
+        "the cell brought is not named again"
+    );
+    assert_eq!(old, &inside);
+}
+
+#[test]
+fn worker_rebake_rule_takes_a_block_that_surveys_a_refused_cell() {
+    let f = fixture();
+    let mut fields = first_survey(&f);
+    let (_, key, opts) = probes()[0];
+    let inside = fields.bake(f.body, SEED, key, &lit(opts)).unwrap();
+    let refused = inside.terrain().layers().horizon().refused_cells();
+    let level = fields.field(f.body).unwrap().header().level().get();
+    let r = cell_at_index(level, refused[refused.len() / 2]).unwrap();
+    let blocks = delta_blocks(&[r].into_iter().collect());
+    let rule = rule_over(&blocks);
+    let (name, old, new, taken) = &rule[0];
+    assert!(*taken, "{name}: a refused cell surveyed takes the bake");
+    assert_eq!(
+        old.unsurveyed_cells(),
+        new.unsurveyed_cells(),
+        "{name}'s mask is whole"
+    );
+    assert!(
+        new.terrain()
+            .layers()
+            .horizon()
+            .refused_cells()
+            .binary_search(&cell_index(r))
+            .is_err(),
+        "{name}: the cell surveyed is not named again"
+    );
+}
+
+#[test]
+fn worker_rebake_rule_misses_no_bake_the_second_survey_changes_with_the_map() {
+    let f = fixture();
+    let rule = rule_over(&f.second_blocks);
+    for (name, old, new, taken) in &rule {
+        let layers = old.terrain().layers();
+        if !layers.is_complete() {
+            assert!(*taken, "{name}: an incomplete bake is rebaked on any block");
+        }
+        if !taken {
+            assert_eq!(new, old, "{name}");
+        }
+        if *name == "astride" {
+            assert!(*taken, "{name}: the second survey changes its mask");
         }
     }
 }

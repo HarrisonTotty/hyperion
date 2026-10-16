@@ -85,6 +85,24 @@ export interface TerrainLayers {
    */
   readonly unsurveyedCells: Uint32Array;
   /**
+   * The horizon map's near field (R10.T8.a's layout, `src/wasm.rs`'s `horizonNear`): four words a
+   * vertex, vertex (x, y) at `4 (65 y + x)`, azimuth 2w in word w's low half and 2w + 1 in its
+   * high half as `pack2x16snorm` packs e ÷ 90°; empty where the map was skipped.
+   */
+  readonly horizonNear: Uint32Array;
+  /** The horizon map's far field, four words a point, point (a, b) at `4 (9 b + a)`; or empty. */
+  readonly horizonFar: Uint32Array;
+  /**
+   * Whether the map's far field read only ground the field holds; `false` where it read the
+   * reference surface for want of a cell (`HorizonMap::is_complete`).
+   */
+  readonly horizonComplete: boolean;
+  /**
+   * The index of each cell the map's far field was refused for, rising, each once: a block that
+   * brings one, surveyed or margin, may change the map (R10's rebake rule, `rebake.ts`).
+   */
+  readonly horizonRefusedCells: Uint32Array;
+  /**
    * The photometry the lit terrain draws each palette slot with (R10.T10.b; `src/wasm.rs`'s
    * `photometry`), 8 × {@link PHOTOMETRY_STRIDE}, slot k at `5 k`: its normal albedo in the
    * Johnson B, V and R bands under the field's albedo scale, its law's code (`PhaseLaw`, 1 to 3)
@@ -104,7 +122,10 @@ export const PHOTOMETRY_STRIDE = 5;
  */
 export type TestPlanetRidges = "off" | "on";
 
-/** Whether a body's bake makes R10's class weights: the lit style's do, the wireframe's do not. */
+/**
+ * Whether a body's bake makes R10's class weights: the lit style's do, the wireframe's do not. The
+ * lit style's bakes make the horizon map with them (R10.T8.b), and the wireframe's skip both.
+ */
 export type WeightsLayerSetting = "baked" | "skipped";
 
 /**
@@ -144,6 +165,11 @@ export interface FieldBlockAnswer {
    * cell index and the index past the last, flat, rising and disjoint.
    */
   readonly newlySurveyed: Uint32Array;
+  /**
+   * The cells the block brought, surveyed or margin, that the field did not hold at all, as runs
+   * laid out as {@link newlySurveyed}'s (R10.T8.b's rebake rule).
+   */
+  readonly newlyHeld: Uint32Array;
   /**
    * The body's level table, 25 × 4 as the test planet's `levelTable` (bound, lowest and highest
    * height, largest vertex spacing, metres), as the field now holds it (`worker::level_table`).
@@ -225,13 +251,25 @@ export function bakeTransferables(bake: BakedPatch): Transferable[] {
     buffers.push(bake.offsets.buffer);
   }
   if (bake.layers !== null) {
-    const { palette, weights, surveyMask, unsurveyedCells, photometry } = bake.layers;
+    const {
+      palette,
+      weights,
+      surveyMask,
+      unsurveyedCells,
+      photometry,
+      horizonNear,
+      horizonFar,
+      horizonRefusedCells,
+    } = bake.layers;
     buffers.push(
       palette.buffer,
       weights.buffer,
       surveyMask.buffer,
       unsurveyedCells.buffer,
       photometry.buffer,
+      horizonNear.buffer,
+      horizonFar.buffer,
+      horizonRefusedCells.buffer,
     );
   }
   return buffers;
@@ -239,5 +277,7 @@ export function bakeTransferables(bake: BakedPatch): Transferable[] {
 
 /** The buffers a worker transfers with a block's answer. */
 export function blockTransferables(block: FieldBlockAnswer | null): Transferable[] {
-  return block === null ? [] : [block.newlySurveyed.buffer, block.levels.buffer];
+  return block === null
+    ? []
+    : [block.newlySurveyed.buffer, block.newlyHeld.buffer, block.levels.buffer];
 }

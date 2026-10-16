@@ -10,8 +10,16 @@
 // The TypeScript twin of the blend is `terrainMaterial.ts`' `terrainReflectance`.
 //
 // Composed after frame.wgsl, patchVertex.wgsl, R08's surface lighting (`SURFACE_LIGHTING_WGSL`:
-// preciseTrig.wgsl, common.wgsl, oblate.wgsl, surfaceLighting.wgsl), R07's litBody.wgsl and
-// terrainPatch.wgsl, with one of the two vertex paths (`terrainMaterial.ts`).
+// preciseTrig.wgsl, common.wgsl, oblate.wgsl, surfaceLighting.wgsl), R07's litBody.wgsl,
+// terrainPatch.wgsl and the horizon map's lookup (`shadows/horizon.wgsl`, R10.T8.b), with one of
+// the two vertex paths (`terrainMaterial.ts`).
+//
+// Each star's horizon term takes its local horizon from the patch's horizon map (R10.T8.b; Design
+// note 10): `terrain_horizon` looks the horizon up towards the star's grid azimuth, blends it to the
+// parent's map by the morph factor, and carries it into the element's frame, as R07's
+// `sphere_irradiance(h, phi, horizon)` takes it (used unchanged), whose visible fraction of the disc
+// is then Design note 10's lit fraction about the horizon. R08 draws no refraction yet, so the star's
+// direction is the geometric one. Planetshine is not shadowed by the map (R10's Risks).
 //
 // Each lookup of R08's takes the texel's geodetic height above the datum (the baked heights,
 // mixed by the morph factor, never |P| − R), its geodetic latitude from the datum's normal ν
@@ -46,8 +54,8 @@ struct Draw {
 // CLASS_LAW_WORD, the palette as laws (`terrainMaterial.ts`' `packClassLaws`), TERRAIN_CLASSES of
 // two `vec4f` as `f32` words: A = c A_N per display channel (r, g, b) and its L(0); its row of
 // `phase_factor_table`, −1 for a slot with no law (empty, or of an unnamed substance), whose
-// weight goes to law 0. One buffer for both, so that the material leaves storage bindings below
-// WebGPU's default eight a stage for T8.b's horizon map and T10.c's mask.
+// weight goes to law 0. One buffer for both. Read by the fragment stage alone, as the lights and
+// the horizon map are, the vertex stage reading R05's five (decision-r10-t10b-r09-t2e §5).
 @group(2) @binding(6) var<storage, read> class_layers : array<u32>;
 
 // The frame's phase table (`litBody.wgsl`): row 0 the body's uniform law, `elsewhere`, then one row
@@ -118,8 +126,8 @@ fn terrain_decoration(p : vec3f, normal : vec3f) -> TerrainDecoration {
   return TerrainDecoration(vec3f(1.0), normal);
 }
 
-// The direct sun's lit fraction: this plan's terrain shadow (T8's horizon map, T9's cascades),
-// into which R11's cloud shadows multiply; 1 until T8 and T9 land.
+// The direct sun's lit fraction beyond the horizon map's, which enters each star's horizon term
+// (R10.T8.b): T9's cascades, into which R11's cloud shadows multiply; 1 until T9 lands.
 fn terrain_shadow_factor(p : vec3f) -> f32 {
   return 1.0;
 }
@@ -163,11 +171,20 @@ struct LitVertexOut {
   @location(3) datumNormal : vec3f,
   // The geodetic height above the datum, metres.
   @location(4) heightM : f32,
+  // The vertex's cell coordinates (s, t) on its patch's face, for the star's grid azimuth.
+  @location(5) horizonSt : vec2f,
+  // The vertex's morph factor, which blends the horizon to the parent's map as it mixes the heights.
+  @location(6) morph : f32,
+  @location(7) @interpolate(flat) horizonFace : u32,
+  // The parent's slot (`HORIZON_NO_PARENT` for none) and the patch's quadrant in it.
+  @location(8) @interpolate(flat) parent : vec2u,
 }
 
 @vertex
 fn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32) -> LitVertexOut {
   let v = patchVertexOf(grid, instance);
+  let inst = instances[instance];
+  let rec = slots[inst.slot];
   let rotation = mat3x3f(draw.bodyRotation[0].xyz, draw.bodyRotation[1].xyz, draw.bodyRotation[2].xyz);
   var out : LitVertexOut;
   out.clip = frame.clipProjection * frame.viewRotation * vec4f(v.fromCameraM, 1.0);
@@ -176,6 +193,11 @@ fn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32
   out.fromCameraBf = transpose(rotation) * v.fromCameraM;
   out.datumNormal = v.datumNormal;
   out.heightM = v.heightM;
+  // A skirt vertex takes its edge vertex's (x, y), so its shadows are the edge's.
+  out.horizonSt = horizon_face_st(rec, u32(grid.x), u32(grid.y));
+  out.morph = v.morph;
+  out.horizonFace = horizon_face_of(rec);
+  out.parent = vec2u(inst.parentSlot, inst.parentQuadrant);
   return out;
 }
 
@@ -349,8 +371,15 @@ fn shade_terrain(in : LitVertexOut, terrain_normal : vec3f) -> TerrainShaded {
     // The sky's light at the star's cosine against the datum, before the horizon's `continue`, so
     // that a star just set still lights the twilight ground (`bodyDisc.wgsl`).
     let sky = atmosphere_sky_irradiance(height, mu_datum, local.latitude, j) * sky_factor;
-    // The horizon term on the terrain's normal; T8's horizon map gives its local horizon.
-    let horizon = sphere_irradiance(distance / light.w, angle_between(normal, towards), 0.0);
+    // The horizon term on the terrain's normal, above the local horizon of the patch's horizon map
+    // towards the star (R10.T8.b).
+    let phi = angle_between(normal, towards);
+    let local_horizon = terrain_horizon(
+      in.slot, in.parent, in.horizonFace, in.horizonSt, in.patchUv, in.morph, nu, towards, phi
+    );
+    let horizon = sphere_irradiance(
+      terrain_star_distance_radii(distance, light.w), phi, local_horizon
+    );
     if (horizon <= 0.0 && !any(sky > vec3f(0.0))) {
       continue;
     }

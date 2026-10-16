@@ -68,12 +68,30 @@ export const CLASS_LAWS_BYTES = 8 * 2 * 16;
  */
 export const CLASS_LAYERS_BYTES = CLASS_WEIGHTS_BYTES + CLASS_LAWS_BYTES;
 
+/** `u32` words a horizon-map texel takes: eight azimuths, two to a word (R10.T8.a). */
+export const HORIZON_WORDS_PER_TEXEL = 4;
+
+/** The horizon map's far-field points along a patch's side: every eighth vertex, 9. */
+export const HORIZON_FAR_SIDE = 9;
+
+/**
+ * Texels of a patch's horizon map: the near field's 65 × 65 vertices, then the far field's 9 × 9
+ * points, 4,306 (`hyperion_surface::bake::horizon`'s layout).
+ */
+export const HORIZON_TEXELS = VERTICES + HORIZON_FAR_SIDE * HORIZON_FAR_SIDE;
+
+/**
+ * Bytes of a patch's horizon map (R10.T8.b): {@link HORIZON_TEXELS} of four `u32` words, an
+ * `array<vec4u>`, 68,896 B, the near field's 67,600 then the far field's 1,296.
+ */
+export const HORIZON_MAP_BYTES = HORIZON_TEXELS * HORIZON_WORDS_PER_TEXEL * 4;
+
 /**
  * A field of a slot.
  *
  * @remarks
- * R10 adds its own fields to this union (the class layers, R10.T10.b) and sizes `horizon-map` (T8,
- * T14).
+ * R10 adds its own fields to this union (the class layers, R10.T10.b) and sizes `horizon-map`
+ * (R10.T8.b; T14 settles the budgets).
  */
 export type SlotFieldName = "heights" | "offsets" | "normals" | "horizon-map" | "class-layers";
 
@@ -141,8 +159,9 @@ export function slotLayout(fields: ReadonlyArray<SlotField>, budgetBytes: number
 
 /**
  * This plan's fields for a terrain setting: heights and morph targets, the offsets on the
- * `baked-offsets` path, the normals at the setting's resolution, and the horizon map at zero bytes
- * until R10 sizes it; with R10's lit shading, the class layers, weights and laws (R10.T10.b), so
+ * `baked-offsets` path, the normals at the setting's resolution, and the horizon map; with R10's
+ * lit shading, the horizon map at {@link HORIZON_MAP_BYTES} (R10.T8.b) and the class layers,
+ * weights and laws (R10.T10.b), and at zero bytes on R05's spike shading, which draws no shadow, so
  * that R05's test planet and its spike keep their slots.
  */
 export function terrainSlotFields(
@@ -169,7 +188,11 @@ export function terrainSlotFields(
       break;
   }
   fields.push({ name: "normals", storage: "texture", bytes: normalsBytes });
-  fields.push({ name: "horizon-map", storage: "storage-buffer", bytes: 0 });
+  fields.push({
+    name: "horizon-map",
+    storage: "storage-buffer",
+    bytes: shading === "lit" ? HORIZON_MAP_BYTES : 0,
+  });
   switch (shading) {
     case "lit":
       fields.push({ name: "class-layers", storage: "storage-buffer", bytes: CLASS_LAYERS_BYTES });

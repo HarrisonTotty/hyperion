@@ -210,7 +210,10 @@ export const MAX_REQUESTED_BUFFER_BYTES = 2 ** 30;
  * @remarks
  * A pure function of the adapter, so a rebuild after a device loss asks the same of the same
  * hardware and less of a lesser adapter, and `requestDevice` cannot reject on limits. With the
- * harness's `defaultLimits` override, nothing is raised.
+ * harness's `defaultLimits` override, nothing is raised. No binding-count limit is raised:
+ * `maxStorageBuffersPerShaderStage` stays WebGPU's eight, which Metal's adapters exceed by two under
+ * Dawn, and a material that reads more storage buffers across its stages declares each one's own
+ * stages instead (`StorageBufferSpec.stages`; R10's decision-r10-t10b-r09-t2e §5).
  */
 export function requiredLimits(
   adapter: GPUAdapter,

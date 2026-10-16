@@ -64,19 +64,29 @@
 //!   `FieldBlock`, or throws naming why the block was refused, the field then as it was. A
 //!   `FieldBlock`'s `newlySurveyed()` is a `Uint32Array` of runs, each the first cell index and the
 //!   index past the last, at the field's level, `fieldLevel`, of the cells the block surveyed
-//!   anew, and its `levelTable()` the body's level table in `levelTable(ridges)`'s layout
+//!   anew; its `newlyHeld()` the runs, laid out alike, of the cells it brought, surveyed or margin,
+//!   that the field did not hold ([`SurveyChange::held_runs`], R10.T8.b's rebake rule); and its
+//!   `levelTable()` the body's level table in `levelTable(ridges)`'s layout
 //!   ([`WorkerFields::level_table`]). `fieldRelease(system, body)` drops it, `true` if one was
 //!   held, and `heldBytes` is what every field holds on the heap.
-//! - `bake(system, body, seed, face, level, i, j, vertexPath, normals, weights, skirtM)` bakes the
-//!   patch as `bakePatch` does, `weights` a `WeightsLayer`, `Baked` (0) or `Skipped` (1), and
-//!   returns a `BakedTerrain`, or `undefined` where the field cannot make it yet: none is held, or
-//!   a surveyed vertex reads a cell still to come. A `BakedTerrain` has `BakedPatch`'s getters and
-//!   R10's layers: `palette()`, a `Uint8Array` of 8 × 2, each slot its class code then its entry
-//!   (255 for no entry; both 255 for an empty slot); `weights()`, a `Uint8Array` of 65 × 65 × 8,
-//!   vertex (x, y) at `8 (65 y + x)`, each byte over the palette's slot of its place, empty when
-//!   skipped; `surveyMask()`, a `Uint8Array` of 65 × 65, 255 surveyed and 0 not; `boundM` and
-//!   `sigmaM`, metres; `complete`; and `unsurveyedCells()`, a `Uint32Array` of the cell indices
-//!   its mask holds unsurveyed, rising ([`BodyBake::unsurveyed_cells`]).
+//! - `bake(system, body, seed, face, level, i, j, vertexPath, normals, weights, horizon, skirtM)`
+//!   bakes the patch as `bakePatch` does, `weights` a `WeightsLayer` and `horizon` a
+//!   `HorizonLayer`, each `Baked` (0) or `Skipped` (1), and returns a `BakedTerrain`, or
+//!   `undefined` where the field cannot make it yet: none is held, or a surveyed vertex reads a
+//!   cell still to come. A `BakedTerrain` has `BakedPatch`'s getters and R10's layers:
+//!   `palette()`, a `Uint8Array` of 8 × 2, each slot its class code then its entry (255 for no
+//!   entry; both 255 for an empty slot); `weights()`, a `Uint8Array` of 65 × 65 × 8, vertex (x, y)
+//!   at `8 (65 y + x)`, each byte over the palette's slot of its place, empty when skipped;
+//!   `surveyMask()`, a `Uint8Array` of 65 × 65, 255 surveyed and 0 not; `boundM` and `sigmaM`,
+//!   metres; `complete`; `unsurveyedCells()`, a `Uint32Array` of the cell indices its mask holds
+//!   unsurveyed, rising ([`BodyBake::unsurveyed_cells`]); and the horizon map (R10.T8.a's layout,
+//!   `bake::horizon`): `horizonNear()`, a `Uint32Array` of 65 × 65 × 4 words, vertex (x, y) at
+//!   `4 (65 y + x)`, azimuth 2w in word w's low half and 2w + 1 in its high half as
+//!   `pack2x16snorm` packs them, and `horizonFar()`, of 9 × 9 × 4 words, point (a, b) at
+//!   `4 (9 b + a)`, both empty when skipped; `horizonComplete`
+//!   ([`HorizonMap::is_complete`](crate::bake::HorizonMap::is_complete)); and
+//!   `horizonRefusedCells()`, a `Uint32Array` of the cell indices its far field was refused for,
+//!   rising ([`HorizonMap::refused_cells`](crate::bake::HorizonMap::refused_cells)).
 //! - `reading(system, body, seed, face, u, v, slopeBaselineM)` returns a `Reading`
 //!   ([`SurveyedReading`]'s getters, in metres and radians), or `undefined` where the ground is
 //!   not surveyed or no field is held: the readout's `NOT SURVEYED`.
@@ -390,6 +400,16 @@ pub enum JsWeightsLayer {
     Skipped = 1,
 }
 
+/// Whether the horizon map is baked, as the client names it (R10.T8.a's `HorizonLayer`).
+#[wasm_bindgen(js_name = HorizonLayer)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsHorizonLayer {
+    /// [`HorizonLayer::Baked`].
+    Baked = 0,
+    /// [`HorizonLayer::Skipped`].
+    Skipped = 1,
+}
+
 /// Where a line of sight meets the ground, as the client names it ([`LineOfSight`]).
 #[wasm_bindgen(js_name = LineOfSightKind)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -447,6 +467,7 @@ pub struct JsSurfaceFields {
 pub struct FieldBlock {
     level: u8,
     runs: Vec<u32>,
+    held: Vec<u32>,
     table: Vec<f64>,
 }
 
@@ -458,6 +479,14 @@ impl FieldBlock {
     #[must_use]
     pub fn newly_surveyed(&self) -> Vec<u32> {
         self.runs.clone()
+    }
+
+    /// The runs of cells the block brought, surveyed or margin, that the field did not hold, each
+    /// its first index and the index past its last, flat.
+    #[wasm_bindgen(js_name = newlyHeld)]
+    #[must_use]
+    pub fn newly_held(&self) -> Vec<u32> {
+        self.held.clone()
     }
 
     /// The field's level, 5 to 8, which the runs' indices are of.
@@ -592,6 +621,34 @@ impl BakedTerrain {
     #[must_use]
     pub fn unsurveyed_cells(&self) -> Vec<u32> {
         self.unsurveyed.clone()
+    }
+
+    /// The horizon map's near field, four words a vertex, empty when skipped.
+    #[wasm_bindgen(js_name = horizonNear)]
+    #[must_use]
+    pub fn horizon_near(&self) -> Vec<u32> {
+        self.layers.horizon().near_words().to_vec()
+    }
+
+    /// The horizon map's far field, four words a point, empty when skipped.
+    #[wasm_bindgen(js_name = horizonFar)]
+    #[must_use]
+    pub fn horizon_far(&self) -> Vec<u32> {
+        self.layers.horizon().far_words().to_vec()
+    }
+
+    /// Whether the horizon map's far field read only ground the field holds.
+    #[wasm_bindgen(getter, js_name = horizonComplete)]
+    #[must_use]
+    pub fn horizon_complete(&self) -> bool {
+        self.layers.horizon().is_complete()
+    }
+
+    /// The cell indices the horizon map's far field was refused for, rising.
+    #[wasm_bindgen(js_name = horizonRefusedCells)]
+    #[must_use]
+    pub fn horizon_refused_cells(&self) -> Vec<u32> {
+        self.layers.horizon().refused_cells().to_vec()
     }
 }
 
@@ -936,6 +993,7 @@ impl JsSurfaceFields {
         vertex_path: JsVertexPath,
         normals: JsNormalScale,
         weights: JsWeightsLayer,
+        horizon: JsHorizonLayer,
         skirt_m: f64,
     ) -> Result<Option<BakedTerrain>, JsError> {
         let key = patch_key(face, level, i, j)?;
@@ -945,9 +1003,10 @@ impl JsSurfaceFields {
                 JsWeightsLayer::Baked => WeightsLayer::Baked,
                 JsWeightsLayer::Skipped => WeightsLayer::Skipped,
             },
-            // No client reads the horizon map yet: R10.T8.b bakes it for the lit style and hands
-            // its words over with the shadow lookup.
-            horizon: HorizonLayer::Skipped,
+            horizon: match horizon {
+                JsHorizonLayer::Baked => HorizonLayer::Baked,
+                JsHorizonLayer::Skipped => HorizonLayer::Skipped,
+            },
         };
         let answer = self
             .fields
@@ -1142,9 +1201,11 @@ impl JsSurfaceFields {
             .fields
             .field(body)
             .expect("a block taken leaves its body's field held");
+        let flat = |runs: &[(u32, u32)]| runs.iter().flat_map(|&(a, b)| [a, b]).collect();
         FieldBlock {
             level: field.header().level().get(),
-            runs: change.runs().iter().flat_map(|&(a, b)| [a, b]).collect(),
+            runs: flat(change.runs()),
+            held: flat(change.held_runs()),
             table: self
                 .fields
                 .level_table(body)

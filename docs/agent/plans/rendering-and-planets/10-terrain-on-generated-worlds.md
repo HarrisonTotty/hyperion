@@ -5424,3 +5424,196 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
     1/255; T8.b recomputes it if it darkens the limb (the science check).
   - _Datum shadows._ Far ground the view does not hold stands at the reference surface, as it is
     drawn, so a deep surveyed valley at a survey's edge is shaded by the datum until the next block.
+- **Deviations in T8.b, as built** (2026-10-16; lane r10-shadow, on `rendering-and-planets` at
+  `8c052086`; decision-r10-t8a §1–3 and decision-r10-t10b-r09-t2e §5 built as ruled, except where
+  stated).
+  - _Files._ In the crate: `bake/horizon.rs` (`HorizonMap::refused_cells`), `worker.rs`
+    (`SurveyChange::held_runs`, `brings`, `brings_any`; `BodyBake::needs_rebake` rules 1–3),
+    `wasm.rs` (`bake`'s `horizon` argument, `BakedTerrain`'s map getters, `FieldBlock.newlyHeld`),
+    `worker/golden.rs` and `worker/tests.rs`, `bake/horizon/tests.rs`, and the goldens
+    `horizon/grid_azimuth.golden`, `horizon/blend.golden` and `worker/moon_like.golden`
+    (re-blessed at 22). In the client: `view/engine/types.ts` (`StorageBufferSpec.stages`,
+    `ShaderStageName`), `view/engine/webgpu/materials.ts` (`stageVisibility`,
+    `storageBuffersPerStage`, `resourceLayoutEntries`), `view/engine/platform.ts` (the
+    `requiredLimits` rule); in `view/terrain/shadows/`, `horizon.wgsl`, `gridAzimuth.ts`,
+    `horizonLookup.ts` and `litFraction.ts` with their tests; `shaders/{terrainPatch,terrainLit}.wgsl`,
+    `terrainMaterial.ts`, `gpu/{material,uniforms,resources}.ts`, `slotLayout.ts`, `terrainPass.ts`,
+    `workers/{messages,heightBake,rebake,pool}.ts`; R07's `view/shaders/smoothMesh.wgsl` (its
+    instance struct follows the record's new words, unread); the smoke harness's `litTerrain.ts`;
+    and `src/test/wgslStages.ts`. `cascades.ts` is T9's. R07's `litBody.wgsl` is unchanged: the
+    terrain's call is in `terrainLit.wgsl` (T10.b's file), not at "the call sites in R07's
+    `shaders/litBody.wgsl`" the task names.
+  - _The storage visibility split is built here_ (decision-r10-t10b-r09-t2e §5; T10.c has not
+    landed). `StorageBufferSpec` gains `stages`, both by default; `resourceLayoutEntries` writes each
+    storage entry's own visibility and refuses one visible to no stage. Both terrain materials
+    declare their stages, R05's spike shading too (its five are the vertex stage's, its fragment
+    reading the normals texture alone), so that "declared stages match the entry points" holds for
+    every terrain material: the lit material's vertex stage reads 5 (4 on `face-differences`) and
+    its fragment stage 3, the class layers, the lights and the horizon map. The stage match is a
+    static walk of the composed WGSL's call graphs from `vertexMain` and `fragmentMain`
+    (`src/test/wgslStages.ts`), since the machine has no naga and no `compose.py`; Tint validates the
+    layout against the shaders in `just test-render`. The per-stage counts and the match are in
+    `terrainPass.test.ts` over all four terrain materials; `resources.test.ts` holds the horizon
+    field's buffer and writes.
+  - _The horizon enters R07's horizon term in the element's frame._ The ruling passes the blended
+    horizon e to `sphere_irradiance(h, phi, horizon)`. R07's `horizon` is an elevation above the
+    element's own tangent plane towards the star (its oracle's cone about the normal), and the map's
+    is against the datum's horizontal, so passed raw it would light a slope facing the Sun under a
+    Sun below the horizon by up to the slope (tested: a 20° slope, the Sun 1° below a 5° horizon,
+    lit at 0.41 of face-on by the raw horizon). `terrain_horizon` passes
+    e − (e★ − (π ÷ 2 − φ)), e★ the star's elevation above the datum and φ its angle from the
+    terrain's normal: the disc is then cut exactly where its centre stands at e above the datum,
+    and by the element's own plane where that hides more (R07 takes a negative horizon as the
+    plane). On the smooth figure (n = ν) it is e itself, and with e = 0 the term is R07's smooth
+    value bit for bit (tested on the twin). The conversion is one function, `element_horizon`
+    (`elementHorizonRad` in the twin), so that a ruling can change it in one place. The science
+    check confirmed it: the cut stands at x = (e★ − e) ÷ ρ for any slope, since a small disc's
+    visible share depends on the cut's distance from its centre alone, and an independent integral
+    over the disc above the datum's horizon and the slope's plane agrees to 7.3 × 10⁻⁴ of cos φ on a
+    slope tilted across the Sun's bearing (tested to 10⁻³); over horizons of 0.5° to 60°, slopes to
+    45° facing towards, across and away from the Sun, and the Sun within ±1.5ρ of the horizon, the
+    term is held within 1.5 × 10⁻³ of face-on of that integral, taken exact in azimuth ring by ring
+    (decision-r10-t8b §5 L1; the ruling measured 1.34 × 10⁻³ at worst).
+  - _The lit fraction is R07's._ Design note 10's lit fraction is R07's `disc_visible_fraction`
+    inside `sphere_irradiance`, which is the same formula with x measured from the cut, so the
+    shader takes no second factor (one would darken the half-light point to a quarter);
+    `terrain_shadow_factor` stays 1, T9's cascades' and R11's clouds'. `shadows/litFraction.ts` is
+    the formula's twin and `terrainHorizonFactor` the shader's composition. The plan's "the lit
+    fraction's arccos x is `preciseAtan2(√(1 − x²), x)`" is therefore not built: R07's function,
+    used unchanged as the task says, keeps WGSL's `acos` and `asin` (a deferred finding below). The
+    star's elevation and grid azimuth do go through `preciseAtan2`.
+  - _No hard step under 20″_ (main's ruling, 2026-10-16: accepted as built). Design note 10's hard
+    step for stars under 20″ is not built, because R07's soft edge converges to it and the
+    quantisation dominates there: under 20″ the edge is 2ρ, under four of the map's 9.9″ steps, a
+    band of centimetres on the ground, and the quantisation moves the lit fraction by up to
+    2 δ ÷ (π ρ), 16% at 20″, no more visible than a hard step's edge moving by δ. The condition's
+    test: at ρ = 0.1″ and at ρ = 0 the lit fraction and the term are finite, in [0, 1], and the hard
+    step away from the edge. At ρ = 0, H infinite, R07's term alone is ∞ × 0, NaN, so the shadow
+    code takes H at most 10¹⁸ (`terrain_star_distance_radii`, `MAX_STAR_DISTANCE_RADII`; ρ of
+    10⁻¹⁸ rad, H² finite in `f32`), R07 unchanged, and `litFraction` takes ρ = 0 as the step.
+  - _The grid azimuth at a fragment._ The vertex stage passes each vertex's cell coordinates (s, t)
+    from its slot record (s₀ + (x − 32) step, linear across a quad, a skirt's its edge vertex's) and
+    its face (from the record's centre axis); the fragment forms p and the tangents on the patch's
+    own face from them, never from its `f32` position. The zenith guard is |t|² ≤ 10⁻¹² |s|², about
+    0.2″ from the zenith, where the azimuth is 0; `preciseAtan2`'s half-plane form with the sign of b
+    gives [0, 2π] (2π, at a rounding, is azimuth 0's knot). The guard is f32's resolution
+    (decision-r10-t8a §2), not the crate's and the twin's 10⁻¹² of the length, which are `f64`'s.
+    `gridAzimuth.ts` is the crate's `grid_azimuth` in `f64`, held to its fixture.
+  - _The blend_ (decision-r10-t8a §1), as specified: the instance record's spare words are
+    `parentSlot` and `parentQuadrant` (bit 0 i & 1, bit 1 j & 1), `NO_PARENT_SLOT` 0xffffffff for a
+    root, a parent not resident (`PatchCache.residentOver`), or one whose slot holds no map
+    (`TerrainResources.holdsHorizon`); the morph factor rides to the fragment as `PatchVertex.morph`,
+    and the parent is read at ((q_x 64 + x) ÷ 2, (q_y 64 + y) ÷ 2) only where k > 0, by WGSL's
+    `mix`. `INSTANCE_RECORD_BYTES` stays 32, and R05's spike shading writes no parent. The fixture is
+    a Moon-like rim patch at L + 3 and its parent baked within the reach: both far fields whole, the
+    near fields at every eighth vertex of the child and four odd ones, and `elevation_at` at five
+    azimuths (63.8 kB).
+  - _The slot field._ `horizon-map` takes 68,896 B on a lit layout alone, `HORIZON_MAP_BYTES`; R05's
+    spike layout keeps 0, so the descent spike keeps its slots. A lit slot whose bake has no map
+    is written words of no horizon (0x80018001, −90° in every azimuth) and holds no map to blend to.
+    The low lit slot is 154,708 B, 433 slots in 64 MiB (782 before), against Design note 15's rule of
+    430; the high lit slot 306,796 B, 1,303 slots in 400 MB, whose offsets now fit WebGPU's default
+    128 MiB binding (132.1 MB) where before the horizon map they did not.
+  - _The worker._ `bake` takes the horizon layer as its own argument, `JsHorizonLayer`, rather than
+    tying it to the weights inside the module, so that the module's arguments stay explicit; the
+    client passes the weights' setting for both (`WASM_HORIZON_LAYER[source.weights]`): the lit
+    style bakes the map, the wireframe skips both.
+  - _`SurveyChange::is_empty` is renamed `surveys_nothing`_ (the review): a block that brings only
+    margin surveys nothing yet may take a bake by rule 3, so a name that read as "changed nothing"
+    was a trap; its callers were tests alone.
+  - _The rebake rule_ (decision-r10-t8a §3), as ruled: the far field's refused cells are recorded
+    where `FarGround` names a refused vertex's `NotSurveyed` cell; a block's change carries its
+    newly held runs, every cell of its cover the field did not hold before it; rules 1–3 in
+    `needs_rebake` and `needsRebake`; in flight, `staleInFlight` takes a bake as stale unless it is
+    complete, its map complete and its mask whole. The worker golden gains each block's `held`
+    runs and two lit bakes' `horizon` records (the words' digests, completeness and refused cells),
+    which `fieldsWasm.test.ts` holds the module to. There, with the maps on, the second survey
+    takes the patch surveyed whole by the third case alone (it brings cells its far field was
+    refused for), and a block sent again, which brings nothing, passes over every complete bake,
+    which bakes the same bytes, its map's words and refused cells too; the margin and surveyed
+    cases are held in the crate, whose worker tests run
+    on the browser target too, and on `needsRebake`, not on the module through blocks of its own.
+    T8.a's `worker_rebake_rule_takes_an_incomplete_horizon_as_an_incomplete_bake` goes with the rule
+    it held; rules 1–3 are held by `worker_rebake_rule_passes_over_a_block_elsewhere`,
+    `…_takes_a_block_that_brings_a_refused_cell_as_margin`, `…_takes_a_block_that_surveys_a_refused_cell`
+    and `…_misses_no_bake_the_second_survey_changes_with_the_map`.
+  - _The smoke run._ The lit check also bakes the 3 × 3 block's four parents into the slots after
+    it and draws the block at a morph of about ¼ to ½ (0 to 120 km), so that SwiftShader runs the
+    blend's parent reads as well as the lookup.
+  - _Tests._ Crate (`bake::horizon`, 21, three new; `worker::`, 26 with the golden's two, five new
+    and T8.a's rule test replaced): the refused cells named, rising, not held,
+    within the reach, never named again once held, the same from a cache warmed under the smaller
+    view, none within the reach's view; the fixtures;
+    the held runs exactly the block's cells not held; a block elsewhere passed over, the bakes the
+    same bytes; a refused cell brought as margin alone taken; one surveyed taken; the second survey
+    with the maps on, the passed-over bakes the same bytes. Client: `shadows/` (the lit fraction by
+    hand; the term bit for bit on the smooth figure; against R07's oracle in the element's frame
+    to 10⁻⁶ wholly up or down and to 2 × 10⁻³ cos φ + 10⁻⁶ across the cut, a consistency check of
+    R07's own function kept as built (decision-r10-t8b §1); the cut at e★ = e_h on four slopes, the
+    half-light point to ±0.05; against an independent integral within 1.5 × 10⁻³ of face-on over the
+    cases of a grid of 324 (horizon, slope, bearing, elevation) whose slope's plane does not hide
+    the whole disc; `gridAzimuth` against its fixture to 10⁻⁵ rad; the encoding against its fixture;
+    the lookup against `elevation_at` to 10⁻¹² rad; the blend at k = 0, at k = 1 on the even
+    vertices, continuous in k, and with no parent); `rebake.test.ts`; `pool.test.ts`;
+    `uniforms.test.ts`; `slotLayout.test.ts`; `resources.test.ts`; `terrainPass.test.ts`;
+    `terrainMaterial.test.ts`; `materials.test.ts`; `fieldsWasm.test.ts`.
+  - _Acceptance, as built:_
+    `cargo test -p hyperion-surface --features testing -- bake::horizon worker::`;
+    `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain src/renderer/src/view/engine/webgpu`
+    (the task's `…/terrain/shadows` is a part of it); the
+    smoke run (`just test-render`, with and without f16); the wasm targets through smart-ci, whose
+    gate log the lane's report names.
+  - _By hand, pending._ The sunset over a generated range on the low setting, its three places
+    (a coarse–fine edge, a same-level edge, a face edge near a cube corner) and the pass's GPU time
+    with the blend, on the development machine and the owner's UHD 620: no view yet draws a
+    generated world's lit terrain under a moving sun to run it in (T15's descent), so neither could
+    be captured hidden here. The eight azimuths' missing peaks wait on the same run.
+  - _Limb darkening_ (T8.a's deferred item): R07's term is a uniform disc's, so the 0.33% bound
+    stands and there is nothing to recompute.
+  - _Generator version._ 22, untouched: the map and its fixtures are presentation, and the worker
+    golden's new `held` and `horizon` lines are; its payload bytes are unchanged.
+- **Questions for "main" (R10.T8.b)** (each built to the lean and ruled: the first three in
+  decision-r10-t8b, the fourth by main).
+  - _The horizon in the element's frame._ Passing the map's e to R07's term unconverted would
+    light sun-facing slopes under a set Sun. Lean: as built, e − (e★ − (π ÷ 2 − φ)), which is e on
+    flat ground. _Ruled 2026-10-16 (decision-r10-t8b §1): the lean, exact in the disc's share; the
+    irradiance errs by at most (2 ÷ 3π) ρ sin φ (1 − cos β) of face-on, β the angle at the star
+    between the great circles to n and ν, measured at most 1.3 × 10⁻³._
+  - _One lit fraction, R07's._ The plan names both R07's horizon argument and Design note 10's lit
+    fraction; they are one formula, so the shader applies it once, in R07's function, and the
+    plan's `preciseAtan2` for its arccos is not built. Lean: as built; T9, which combines the map
+    with its cascades by minimum, takes the map's share at R07's binding cut,
+    `disc_visible_fraction(h, φ + max(η, 0))`, and multiplies the term by min(1, c ÷ m), 1 where
+    m = 0. _Ruled 2026-10-16 (decision-r10-t8b §2): the lean, R07's trigonometry deferred._
+  - _The horizon layer as an argument._ Lean: as built, the client deciding it with the weights.
+    _Ruled 2026-10-16 (§3): as built._
+  - _The hard step under 20″_ (above). Lean: as built, R07's soft edge at every size, its edge
+    under four of the map's steps there. _Ruled 2026-10-16 by main: accepted as built, with the
+    test at ρ = 0.1″ and ρ = 0 (built), and the point star's NaN guarded in the shadow code._
+- **Deferred findings (2026-10-13 rule) (R10.T8.b)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _R07's horizon term in WGSL's trigonometry._ Under T8.b's conversion φ cancels from the cut,
+    and the arccos of the visible share costs at most 2.2 × 10⁻⁵ at WGSL's 6.77 × 10⁻⁵, and ρ =
+    asin(1/H) at most 0.47% of the share at asin's 6.81 × 10⁻⁵ (2 × 10⁻¹⁰ on Mesa). The exposure is
+    Howell's partial branch, whose terms (h² ÷ π) arctan z and x sin φ √(1 − y²) ÷ π cancel to
+    1/68 of themselves at 1 au (H ÷ π), so `atan`'s relative error is amplified 68-fold. Mesa's
+    `nir_atan` (ANV, the UHD 620's Linux driver; RADV; lavapipe; leading coefficient 0.99997931)
+    takes 1.42 × 10⁻³ of face-on off: R07's smooth terminator at 90° reads −4.4 × 10⁻⁴ against
+    9.87 × 10⁻⁴, and a flat element's shadow edge errs by 8.1%, 1.6% and 0.25% of its light at
+    horizons of 1°, 5° and 30°. At `atan`'s 4,096 ULP it is 3.3 × 10⁻²; correctly rounded f32,
+    1.2 × 10⁻⁵. SwiftShader is accurate here. The lever (R07's): h² atan z − x sin φ √(1 − y²) =
+    z + h² (atan z − z), atan z − z by its series, on `preciseTrig.wgsl`, and the η = 0 return
+    clamped at 0; before the owner's UHD 620 sunset (decision-r10-t8b §2).
+  - _R07's horizon term is NaN for a point star._ `sphere_irradiance` and `sphereIrradianceFactor`
+    form H² F with H infinite as ∞ × 0; R07's own disc shading takes no guard (T8.b's shadow code
+    does, above). The lever is R07's, with its trigonometry.
+  - _Planetshine is not shadowed by the terrain._ A neighbour's light reaches a crater floor behind
+    its rim; the map would shadow it with one more lookup a source.
+  - _The high setting's fallback holds the horizon field at its limit._ On `face-differences` the
+    field is 1,947 × 68,896 = 134,140,512 B, 77 kB under WebGPU's default 128 MiB storage binding;
+    for T14's budgets.
+  - _"Same bytes" by `PartialEq`._ The rule tests compare bakes by the derived equality, as T6.b's
+    do, which takes +0.0 and −0.0 as one; the map's words are `u32` and exact (the determinism
+    review).
+  - _The low setting's cache._ 433 lit slots in 64 MiB against the rule's 430, as Risks' "The low
+    setting's cache is at its edge" has it; T14.

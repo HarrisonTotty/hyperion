@@ -150,13 +150,23 @@ export interface MeshSpec {
   readonly instanceAttributes?: Readonly<Record<string, VertexAttribute>>;
 }
 
+/** A shader stage a `@group(2)` binding may be visible to. */
+export type ShaderStageName = "vertex" | "fragment";
+
 /**
- * A storage buffer a material reads, read-only in the vertex and fragment stages, at
- * `@group(2) @binding(binding)` (Design note 23).
+ * A storage buffer a material reads, read-only, at `@group(2) @binding(binding)` (Design note 23).
+ *
+ * @remarks
+ * Visible to both stages unless {@link stages} names fewer. WebGPU counts a storage buffer against
+ * `maxStorageBuffersPerShaderStage` in each stage its entry is visible to, and the engine never
+ * raises that limit from its default of eight (R10's decision-r10-t10b-r09-t2e §5), so a material
+ * that reads more than eight across its two stages declares each binding's own stages.
  */
 export interface StorageBufferSpec {
   readonly name: string;
   readonly binding: number;
+  /** The stages that read it, both by default; the composed WGSL must read it in no other. */
+  readonly stages?: ReadonlyArray<ShaderStageName>;
 }
 
 /**

@@ -17,6 +17,7 @@ const PLANET = keptBody(2);
 function emptyBlock(): WasmFieldBlock {
   return {
     newlySurveyed: () => new Uint32Array(),
+    newlyHeld: () => new Uint32Array(),
     levelTable: () => new Float64Array(100),
     fieldLevel: 6,
     free: () => {},
@@ -122,6 +123,7 @@ describe("a height worker's fields", () => {
     expect(chunk.reply.block.fieldLevel).toBe(6);
     expect(chunk.transfer).toEqual([
       chunk.reply.block.newlySurveyed.buffer,
+      chunk.reply.block.newlyHeld.buffer,
       chunk.reply.block.levels.buffer,
     ]);
     expect(held.size).toBe(1);

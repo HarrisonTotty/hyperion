@@ -10,6 +10,8 @@ import {
   postProcessPipelineDescriptor,
   resourceLayoutEntries,
   samplerDescriptor,
+  stageVisibility,
+  storageBuffersPerStage,
 } from "./materials";
 
 const SPEC: WgslMaterialSpec = {
@@ -94,6 +96,19 @@ describe("a material's pipeline", () => {
   });
 });
 
+/** Storage buffers of every visibility: both stages by default, one stage each, and both named. */
+const STAGED = {
+  owner: "material lit",
+  textures: [],
+  samplers: [],
+  storageBuffers: [
+    { name: "both", binding: 0 },
+    { name: "vertex", binding: 1, stages: ["vertex"] },
+    { name: "fragment", binding: 2, stages: ["fragment"] },
+    { name: "named both", binding: 3, stages: ["fragment", "vertex"] },
+  ],
+} as const;
+
 describe("a material's resources", () => {
   it("are laid out at their declared bindings, in both stages", () => {
     expect(resourceLayoutEntries(materialBindings(SPEC))).toEqual([
@@ -102,6 +117,29 @@ describe("a material's resources", () => {
       { binding: 2, visibility: 3, buffer: { type: "read-only-storage" } },
       { binding: 3, visibility: 3, texture: { sampleType: "depth", viewDimension: "2d" } },
     ]);
+  });
+
+  it("make each storage buffer visible to its declared stages alone, both by default", () => {
+    expect(resourceLayoutEntries(STAGED).map((e) => [e.binding, e.visibility])).toEqual([
+      [0, 3],
+      [1, 1],
+      [2, 2],
+      [3, 3],
+    ]);
+    expect(stageVisibility(undefined)).toBe(3);
+  });
+
+  it("count each stage's storage buffers by their declared stages", () => {
+    expect(storageBuffersPerStage(STAGED)).toEqual({ vertex: 3, fragment: 3 });
+  });
+
+  it("refuse a storage buffer visible to no stage, naming it", () => {
+    expect(() =>
+      resourceLayoutEntries({
+        ...STAGED,
+        storageBuffers: [{ name: "nowhere", binding: 4, stages: [] }],
+      }),
+    ).toThrow("material lit declares storage buffer nowhere visible to no stage");
   });
 
   it("refuse two resources at one binding, naming the material", () => {

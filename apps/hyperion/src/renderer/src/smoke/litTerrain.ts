@@ -5,9 +5,11 @@
  * @remarks
  * The world is `hyperion_surface`'s Moon-like synthetic world, its first survey's payload blocks
  * as the worker fixture pins them (`tests/golden/worker/moon_like.golden`), which a height worker
- * takes into its field and bakes a 3 × 3 block of level-7 patches over, with their class weights
- * and their palette's photometry. They are drawn from 30 km above the block, 60° below the
- * horizon, under one Sun-like star and one planetshine source through a body without air. The
+ * takes into its field and bakes a 3 × 3 block of level-7 patches over, with their class weights,
+ * their palette's photometry and their horizon maps, and their four parents, whose maps the block's
+ * shadows blend to by a morph factor of about ¼ to ½ (R10.T8.b). They are drawn from 30 km above
+ * the block, 60° below the horizon, under one Sun-like star and one planetshine source through a
+ * body without air. The
  * frame must be finite at every texel, mostly terrain, and lit. A buffer or texture beyond the
  * device's limits, or a write outside one, raises an uncaptured validation error, which the
  * harness's main process counts against the run.
@@ -33,8 +35,13 @@ import type {
 import { annulusEdges } from "../view/lighting/annuli";
 import { TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
 import { TerrainResources } from "../view/terrain/gpu/resources";
-import { ContactRecords, InstanceRecords, patchTerms } from "../view/terrain/gpu/uniforms";
-import type { PatchKey } from "../view/terrain/patchKey";
+import {
+  ContactRecords,
+  InstanceRecords,
+  parentQuadrant,
+  patchTerms,
+} from "../view/terrain/gpu/uniforms";
+import { parentKey, type PatchKey } from "../view/terrain/patchKey";
 import { type TerrainLighting, terrainLitMaterialSpec } from "../view/terrain/terrainMaterial";
 import type {
   BakedPatch,
@@ -103,6 +110,25 @@ function keys(): PatchKey[] {
   }
   return out;
 }
+
+/** The parents of `children`, each once, in the order first met. */
+function parentsOf(children: ReadonlyArray<PatchKey>): PatchKey[] {
+  const out: PatchKey[] = [];
+  for (const child of children) {
+    const parent = parentKey(child);
+    if (parent !== null && !out.some((p) => p.i === parent.i && p.j === parent.j)) {
+      out.push(parent);
+    }
+  }
+  return out;
+}
+
+/**
+ * The morph's start and end distances the block is drawn with, metres: the block lies 30 to about
+ * 60 km from the camera, so that its morph factor is about ¼ to ½ and the horizon is blended to the
+ * parents' maps (R10.T8.b).
+ */
+const MORPH_M = [0, 120_000] as const;
 
 /** Posts the fixture's field to a fresh height worker and bakes `wanted` over it. */
 async function bakeOverField(
@@ -227,8 +253,10 @@ async function drawInto(
 ): Promise<LitFrame> {
   const settings = TERRAIN_SETTINGS[setting];
   const { layout } = resources;
-  const bakes = await bakeOverField(
-    keys(),
+  const children = keys();
+  const parents = parentsOf(children);
+  const baked = await bakeOverField(
+    [...children, ...parents],
     {
       vertexPath: layout.vertexPath,
       normals: settings.normals,
@@ -236,12 +264,17 @@ async function drawInto(
     },
     field,
   );
-  bakes.forEach((bake, slot) => {
+  baked.forEach((bake, slot) => {
     const result = resources.upload({ slot, ...bake });
     if (result.kind !== "uploaded") {
       throw new Error(`slot ${String(slot)} refused: ${result.reason}`);
     }
+    if (!resources.holdsHorizon(slot)) {
+      throw new Error(`slot ${String(slot)} holds no horizon map`);
+    }
   });
+  // The block alone is drawn; its parents' maps, in the slots after it, are what it blends to.
+  const bakes = baked.slice(0, children.length);
   const centre = bakes[0];
   if (centre === undefined) {
     throw new Error("no centre patch was baked");
@@ -263,11 +296,19 @@ async function drawInto(
   ]);
   const instances = new InstanceRecords(layout.slots.slotCount);
   bakes.forEach((bake, slot) => {
+    const parent = parentKey(bake.key);
+    const index = parents.findIndex((p) => p.i === parent?.i && p.j === parent.j);
+    if (index < 0) {
+      throw new Error(`no parent of slot ${String(slot)} was baked`);
+    }
+    const parentSlot = children.length + index;
     instances.push(
       slot,
       { x: bake.originM.x - camera.x, y: bake.originM.y - camera.y, z: bake.originM.z - camera.z },
-      0,
-      0,
+      MORPH_M[0],
+      MORPH_M[1],
+      parentSlot,
+      parentQuadrant(bake.key),
     );
   });
   resources.writeFrame(instances, new ContactRecords());
@@ -308,7 +349,8 @@ async function drawInto(
   resources.setLighting(lighting);
   const lit = resources.lit;
   const classLayers = resources.field("class-layers");
-  if (lit === null || classLayers === null) {
+  const horizonMap = resources.field("horizon-map");
+  if (lit === null || classLayers === null || horizonMap === null) {
     throw new Error("the lit layout has no lit resources");
   }
   const storageBuffers: Record<string, BufferHandle> = {
@@ -317,6 +359,7 @@ async function drawInto(
     contacts: resources.contacts,
     classLayers,
     terrainLights: lit.lights,
+    horizonMap,
   };
   for (const name of ["heights", "offsets"] as const) {
     const buffer = resources.field(name);

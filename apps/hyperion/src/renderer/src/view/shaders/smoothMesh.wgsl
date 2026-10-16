@@ -34,13 +34,15 @@ struct Draw {
 // a drawn patch, both in the frame's order.
 @group(2) @binding(3) var<storage, read> slots : array<SlotRecord>;
 
-// R05's `INSTANCE_RECORD_BYTES`.
+// R05's `INSTANCE_RECORD_BYTES`. The last two words are the terrain's horizon blend's parent slot
+// and quadrant (R10.T8.b), which the smooth figure does not read.
 struct PatchInstance {
   originM : vec3f,
   slot : u32,
   morphStartM : f32,
   morphEndM : f32,
-  pad : vec2f,
+  parentSlot : u32,
+  parentQuadrant : u32,
 }
 
 @group(2) @binding(4) var<storage, read> instances : array<PatchInstance>;
