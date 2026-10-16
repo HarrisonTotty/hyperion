@@ -33,6 +33,12 @@
 //! fronts behind it, by the overriding crust, their heights scaled by the height factor
 //! h = g⊕ ÷ g ([`convergent::height_factor`]; `decision-r09-t12-coarse.md` item 2), their distances Earth's.
 //!
+//! R09.T12.c adds a stagnant lid's volcanic provinces ([`provinces`]): fields of edifices at plan
+//! 14's edifice cap, gathered into provinces, covering the share of the surface whose cone field
+//! has plan 14's constructional share, each sinking under its load with a moat filled to the
+//! surrounding level and a bulge about it, by the lid's elastic thickness from its heat flow and
+//! its crust's substance (`decision-r09-t12-coarse.md` items 3 and 4).
+//!
 //! Each population's spread is the coarse landform noise ([`noise`]), which holds no power finer
 //! than the coarse cell's Nyquist wavelength, the synthesis's structural share owning what is
 //! finer (`decision-r09-t5.md` item 3).
@@ -51,9 +57,12 @@
 //!   level-1 octave and weights the others by its β₁).
 //! - instance 1 ([`convergent::STRIKE_INSTANCE`]), level 5 alone: the convergent landforms'
 //!   along-strike draw.
+//! - instances 2 and 3 ([`provinces::PROVINCE_INSTANCE`], [`provinces::EDIFICE_INSTANCE`]), level 0's
+//!   first cell alone: the provinces' count and centres, and the edifices' offsets.
 
 pub(crate) mod convergent;
 mod noise;
+pub(crate) mod provinces;
 mod seafloor;
 
 #[cfg(test)]
@@ -115,6 +124,7 @@ pub(crate) const CONTINENTAL_SKEW: f64 = 0.104_7;
 pub fn run(pass: &Pass<'_>, working: &mut Working) {
     if working.plates.is_empty() {
         lid_population(pass, working);
+        let _ = provinces::run(pass, working);
     } else {
         let noise = noise::unit_field(
             pass,

@@ -2261,8 +2261,9 @@ capped at 200 Myr; a plate with no divergent boundary has 200 Myr and 23 mm a⁻
   and the flexural moat and bulge about each load, with T_e = k (870 K − T_s) ÷ F (T0.b's ruling,
   Design note 3). T_e's isotherm and conductivity come from the crust's substance: the ice lean of
   Risks becomes the `H2O` row's (decision-composition). Tests: a line load's bulge crest lies at πα
-  with height 0.043 w₀; α at T_e = 70
-  km under Mars's gravity is 180 km ± 10; T_e is 108 km ± 1 at Mars's 19 mW m⁻² and 210 K, and
+  with height 0.043 w₀; α at T_e = 70 km under Mars's gravity (3.71 m s⁻²) and radius (3,389.5 km),
+  with ρ_m 3,300 kg m⁻³ and an open moat (ρ_fill = 0), is 180 km ± 10 (its value 175.5 km;
+  `decision-r09-t12-coarse.md` item 3); T_e is 108 km ± 1 at Mars's 19 mW m⁻² and 210 K, and
   zero where T_s ≥ 870 K, where each load is compensated locally (α = 0).
 - **R09.T12.d Coarse craters.** `steps/craters.rs`, Design notes 5 and 10, after T7.e. Each
   crater's shape is T7.a's `crater_shape`, so the coarse elevation and the client's T7.c rims are
@@ -7487,6 +7488,61 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     gives 2,700 kg m⁻³); GlobSed's eq. 2a prints 52 m where its Table 4 gives 53.02; its 404 m is
     the deep ocean's, farther than 200 km from the continent–ocean boundary, as the test reads it;
     Goff's Table 2 has 222 m at 35 mm a⁻¹ and 90 m at 55, which the test's comment now lists.
+- **Deviations in T12.c, as built** (2026-10-16; the same lane, on `a4dcf814`; rulings
+  `decision-r09-t12-coarse.md` items 3 and 4; the province law is the lane's own, not put to main;
+  no bump).
+  - _Files and items._ `relief/provinces.rs`, a `pub(crate)` module: `elastic_thickness`,
+    `conductivity_integral`, `mantle_density`, `foundation`, `flexural_parameter`,
+    `step_response`, the cone field and its constants; `relief::run` calls it after a stagnant
+    lid's population. Tests in `relief::tests`.
+  - _The province law (the lane's; sources in the module)._ Plan 14's own constructional model,
+    below its saturation: edifices at the edifice cap `h_max` = 21.9 km × (3.71 ÷ g) × min(1,
+    `T_e` ÷ 70 km) (plan 14's `TALLEST_EDIFICE_RELIEF`, Plescia 2004), cones of basal radius
+    `h_max` ÷ (21.9 ÷ 370) (Olympus Mons's relief over the mean half of its 840 × 640 km base,
+    Plescia 2004, Table 1 and ¶32), no narrower than the boundary diameter; covering the share f of
+    the surface whose cone field has σ_volc's RMS, f ÷ 6 − f² ÷ 9 = (σ_volc ÷ `h_max`)² (the RMS of
+    plan 14's `VOLCANISM_SATURATION` argument, ¾ at its V bound), so f is V's alone (0.10 at V =
+    1); gathered into a Poisson count of 4 V provinces (Mars's Tharsis, Elysium, circum-Hellas and
+    Syrtis Major: Werner 2009 and Plescia 2004), each centre uniform, the edifices dealt in turn and
+    set off by a two-dimensional normal of angular s.d. `r_e` √(n ÷ P) ÷ R; overlapping loads
+    summed and held at `h_max`. Where the flexure leaves the realised s.d. short of σ_volc, one
+    correction widens f by the variances' ratio (at most ¾) and lays the field again. Mobile lids
+    get no provinces; nor do worlds of no volcanism (the reference Moon's maria and Ceres are not
+    modelled, V = 0), nor lids of no rule (below), nor palettes with no `Province` entry.
+  - _The flexure (ruled, item 3)._ α = [4D ÷ ((`ρ_m` − `ρ_fill`) g + E `T_e` ÷ R²)]^¼, D = E `T_e`³
+    ÷ 12(1 − ν²), E 100 GPa and ν 0.25 (Belleguic et al. 2005's Table 2, read by the science
+    check). DN7's line load is applied to an edifice along its diameter, as if it were an infinite
+    ridge of its own cross-section (labelled; the axisymmetric Kelvin-function solution is not
+    used): 64 strips of uniform load, each convolved exactly through the line load's step response
+    (1 − ½ e^(−t) cos t under the load, ½ e^(−t) cos t beyond, a step at α = 0, the local Airy
+    balance), tabulated at 512 distances out to the base plus 2πα (held to πR). The moat is filled
+    to the surrounding level: Δz = max(h − w, 0), h the summed load (at most `h_max`) and w the
+    summed deflection. `ρ_m` by the lid entry's family: `Silicate` the named `MANTLE_DENSITY`
+    (3,300 kg m⁻³, the sediment's too); `WaterIce` the lid entry's own grain density; `Metal`,
+    `VolatileIce`, `Salt` and `Organic` no rule and no provinces (a closed set for the composition
+    audit). The fill is the `Province` entry's grain density × 0.8 (the reference Mars's
+    2,648 kg m⁻³), asserted below `ρ_m`; the load its grain density (3,310 kg m⁻³ on Mars, near
+    Belleguic et al.'s 3,200 ± 100). A cell takes the `Province` crust where its load or its moat's
+    fill is at least 10 m (an illustration); a moat below a sea is not modelled, since no sea is
+    placed before T12.e.
+  - _`T_e` (ruled, item 4)._ `Silicate`: plan 14's `lithosphere_thickness` (3.1 W m⁻¹ K⁻¹ ×
+    (870 K − `T_s`) ÷ F, zero at 870 K and above). `WaterIce`: ∫ k dT ÷ F from `T_s` to plan 14's
+    `ICE_LITHOSPHERE_ISOTHERM` (170 K, kept), k the lid substance's conductivity row
+    (`conductivity_integral`: `Reciprocal` and `Constant` pieces in closed form, the first piece's
+    form extended below its range, any other form by 64-point Gauss–Legendre), so the `H2O` row's
+    567 ÷ T gives (567 W m⁻¹ ÷ F) ln(170 K ÷ `T_s`). Every `T_e` is min(the law's, R).
+  - _`09`'s T12.c text edited_ (§2.3.5): the 180 km clause (lines 2264–2266) now names the radius,
+    `ρ_m` and the open moat and gives its value, 175.5 km, citing the ruling.
+  - _Measured._ α open at 70 km on Mars: 175.5 km (177.7 km planar); with the fill, 251.7 km at
+    70 km (the ruling's 251.9) and 337.4 km at the reference Mars's own 107.0 km, the bulge crest
+    near 1,060 km; beside `ρ_m` 3,500 kg m⁻³, 238.2 and 321.0 km. `T_e`: the reference Earth 19.7 km,
+    Mars 107.0 km, the Moon 103.3 km, Ceres 469.7 km (its radius; the law's 2,192.9 km). The ice
+    rule's test value: 2.516 km at 200 mW m⁻² and 70 K, 1.86 km at 270. The reference Mars: 6
+    provinces; the first coverage 0.10 gave a realised s.d. of 1,268 m against σ_volc's 2,747 m,
+    so the correction laid 163 edifices of a 368 km base and 21,795 m over 0.480 of the surface,
+    realising 2,094 m (0.76 of σ_volc); the lift reaches 28.5% of the surface, at most 19,371 m,
+    and the `Province` crust covers 71.4% (the moats' fill). After T12.a–c the reference Mars's
+    s.d. is 2,325 m and its relief 22,829 m.
 - **Deferred findings (2026-10-13 rule)** (R09.T12.a–d; recorded, not ruled).
   - _Intraplate volcanism on mobile lids_ is not modelled (Harris et al. 2014's GSFM plateaus,
     seamounts, guyots and non-spreading ridges, 10.2% of the ocean, and hotspot swells: some
@@ -7528,3 +7584,26 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     core with long tails (an interquartile range of 723 m and a skewness of 1.20, against the
     first population's 1,427 m and 0.54, the addendum's figures), and the ice sheets' surfaces,
     2–4 km over Antarctica and Greenland, are a tail no population or landform holds.
+  - _The ruled flexure compensates broad provinces:_ a load much wider than α sinks by
+    `ρ_l` ÷ (`ρ_m` − `ρ_fill`) of its height, 5.1 times on Mars, so only edifices about α across
+    stand. To approach σ_volc the cone field covers half of the reference Mars with 163
+    Olympus-sized edifices and still realises 0.76 of it, and their moats make 71% of it province
+    crust. Tharsis-scale rises, held up by thickened crust of low density, are not modelled; nor is
+    a size distribution of edifices (one size, Mars's style, on every lid).
+  - _`ρ_m` per body from plan 14's mantle composition_ (Mars nearer 3,500 kg m⁻³, from memory,
+    which lowers its filled α by 5–7%) is an ask for P14.T54.a: a density at the lithosphere's base
+    from `hooks::crust::mantle_iron_oxide_mass_fraction` and `MantleNorm`.
+  - _An ocean beneath an ice shell, and sea-filled moats,_ are not modelled.
+  - _The shell term is the shallow shell's,_ valid for α ≪ R; low-degree membrane support is not
+    modelled.
+  - _The ice isotherm of 170 K is of low confidence,_ and the conductivity's spread (Klinger's
+    567, Carnahan et al.'s 612 and Slack's about 651 ÷ T) is 15%.
+  - _Internal heating is absent from the `T_e` laws,_ which overstates `T_e` on small cold bodies
+    (Ceres's law passes its radius).
+  - _Lids of other mechanics families_ (`Metal`, `VolatileIce`, `Salt`, `Organic`) have no T12.c
+    rule.
+  - _The plate model's conductivity is 3.138 W m⁻¹ K⁻¹_ (Parsons and Sclater's, which GDH1 keeps:
+    Stein and Stein 1992, p. 125, read by the science check), which Design note 3 and plan 14
+    round to 3.1; the ruled 3.1 stands.
+  - _Isherwood et al. 2013 does not support "no open moat"_ on Olympus Mons: its abstract speaks
+    of "the present-day flexural trough" (the science check). The filled moat stays ruled.

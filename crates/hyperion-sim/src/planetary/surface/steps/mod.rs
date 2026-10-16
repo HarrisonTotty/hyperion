@@ -30,8 +30,8 @@
 //! sphere at the datum ([`Working::initial`]). R09.T11 filled [`plates`]: on a mobile lid it writes
 //! each cell's plate, crust and nearest boundary, and each oceanic cell's
 //! [`SeafloorOrigin`]. R09.T12.a began [`relief`]'s coarse elevation, the crust's populations and
-//! the sea floor, and R09.T12.b its convergent landforms, before T12.e's `σ_h` and sea level. The
-//! other steps are still no-ops.
+//! the sea floor, R09.T12.b its convergent landforms and R09.T12.c a stagnant lid's provinces, before
+//! T12.e's `σ_h` and sea level. The other steps are still no-ops.
 
 pub mod classes;
 pub mod climate;
