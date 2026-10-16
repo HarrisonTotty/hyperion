@@ -1640,7 +1640,7 @@ orbital plane well beyond it.
 - **P14.T17.b Derivation for moons.** T16's `derive_body` with the planet as the tidal primary and
   the star as the source of light. Composition from a circumplanetary ice line at T = 170 K in the
   planet's own early luminosity. Each moon draws its own volatile ranks, and its nitrogen is boosted
-  only below its carrier's 131 K (P14.T56.c). Tidal heating H = (21⁄2)(k₂ ÷ Q)(G M_p² R⁵ n e² ÷ a⁶)
+  only below its carrier's 123 K (P14.T56.c). Tidal heating H = (21⁄2)(k₂ ÷ Q)(G M_p² R⁵ n e² ÷ a⁶)
   (Peale, Cassen and Reynolds 1979), with the moon's own k₂ and Q by composition and state
   (P14.T56.d), gives a surface heat flux, a volcanism level and the subsurface-ocean flag for icy
   moons whose flux exceeds what keeps a water layer liquid under their ice, which P14.T51.g's ocean
@@ -6256,8 +6256,8 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
   ones (its literature check was cut off by a restart). Each builder checks them in the source
   before they become a constant or a test's bound: the Moon's GRAIL k₂ (Konopliv et al. 2013;
   Williams et al. 2014), Io's Juno k₂ (Park et al. 2025), the Moon's Q at a month (Williams and
-  Boggs 2015), ice Ih's shear modulus (Gammon et al. 1983), ammonia hydrate's 131 K (Lodders 2003,
-  Table 8), the measured planes and fact-sheet J₂, radii, masses and orbits of T56.a's checks, and
+  Boggs 2015), ice Ih's shear modulus (Gammon et al. 1983), ammonia hydrate's 123 K (Lodders 2003,
+  Table 8 col. 4, read: decision-ammonia-line), the measured planes and fact-sheet J₂, radii, masses and orbits of T56.a's checks, and
   the Tremaine et al. 2009 equations and the 68.875° onset (reproduced by the ruling's `band.py`:
   68.8749°).
 
@@ -6338,7 +6338,7 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
     its radius rank uses (`satellites.rs`'s `candidate_key`; ruling 112.5). That is words 0–5 of
     `planet.volatiles`, T50.a's layout. `derive_moon` takes the draws. `PlacedBody::new`'s
     `MEDIAN` default stays for the Solar System table and for tools.
-  - Nitrogen takes T50.c's carrier rule (`AMMONIA_HYDRATE_CONDENSATION`, 131 K) at the
+  - Nitrogen takes T50.c's carrier rule (`AMMONIA_HYDRATE_CONDENSATION`, 123 K) at the
     circumplanetary disc's temperature at the moon's a, 170 K × √(d_ice ÷ a). Water and carbon
     keep the 170 K line, as built.
   - Captured moons are derived with the inventory of a body formed at their parent's formation
@@ -6347,11 +6347,11 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
   - _Tests:_
     - two moons of one planet draw different ranks;
     - removing a moon in T22.a's pruning moves no other moon's ranks;
-    - the generated Jupiter's ammonia line lies at 1.68 times its ice line, so a Ganymede
-      analogue has Earth's nitrogen per unit mass and a Callisto analogue 100 times it;
-    - the table's Titan, at median ranks, keeps at least 1 bar of N₂. Its T_f must lie under
-      131 K; if the generated Saturn's nursery puts it above, that is a finding for "main", not a
-      refit;
+    - the generated Jupiter's ammonia line lies at 1.91 times its ice line (22.7 R_J), so a
+      Ganymede analogue has Earth's nitrogen per unit mass and a Callisto analogue 100 times it;
+    - the table's Titan, at median ranks, keeps at least 1 bar of N₂. Its T_f must lie at or
+      under 123 K (the generated Saturn's ice line within 10.6 R_S, was 12.0); if the generated
+      Saturn's nursery puts it above, that is a finding for "main", not a refit;
     - the table's Ganymede and Callisto stay airless;
     - over 10⁴ generated moons, each rank is uniform (Kolmogorov–Smirnov);
     - the hold: below 23, every golden is unchanged, bit for bit.
@@ -6362,7 +6362,7 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
   - _Moves at 23 (estimated):_ every moon's inventory, by 10^(0.5 z) in water, carbon and
     nitrogen; its sulphur, chlorine and ΔIW drawn rather than median, new at 23 and blessed with
     T50.a's; Titan-like moons' pressures by ×/÷ 3.2 at one sigma, none expected to cross the 100 Pa
-    airless line; moons formed between 131 and 170 K lose 99% of their nitrogen; captured moons
+    airless line; moons formed between 123 and 170 K lose 99% of their nitrogen; captured moons
     take their parent's zone; every `planetary/systems` golden with moons, and the moons' rows of
     the Solar System table's tests.
 - **P14.T56.d Moons' Love numbers and dissipation by state** (22 → 23; after the 21 → 22 batch's
@@ -10045,7 +10045,7 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   and ΔIW. Drawing their own ranks on their own `BodyId` keys would move every moon, so it needs a
   ruling and a bump of its own. **Ruled** (decision-p14-moons, item 2): every moon draws its own
   ranks, keyed by its candidate; nitrogen's icy boost needs the circumplanetary disc below ammonia
-  hydrate's 131 K; captured moons take their parent's formation zone. Built by P14.T56.c in the
+  hydrate's 123 K; captured moons take their parent's formation zone. Built by P14.T56.c in the
   22 → 23 batch.
 - **The host's C/O and Mg/Si** are drawn here, on `system.abundances`, until plan 06 carries them
   on the star. Plan 06 may adopt the stream without moving a value.
@@ -13628,3 +13628,131 @@ tables::gauss_legendre`.
       species is a fact within §5, as the plan's own `Na2CO3` already takes it.
     - **§1.8's Titan composition** names the wrong paper and basis (above).
     - decision-backlog-2 §1.5: no task yet puts `ferric` on a surface.
+- **Deviations in P14.T56.c, as built (`p14-moons`, 2026-10-15).** Moons' own volatile ranks and
+  where their volatiles formed, held behind `MOONS_VERSION` = 23 with T56.a's tripwire, which now
+  also checks `MoonInventories::in_force()`. Below 23 every moon is derived at
+  `MoonVolatiles::SHARED` (every rank at its median, its volatiles formed in its nursery at its
+  own distance), version 22's to the bit. `GENERATOR_VERSION` stays 22 and `golden_diff.py`
+  reports no golden moved.
+  - _The hold's switch._ `moons::regular::MoonInventories` (`Shared`, `Own`) with `in_force()`,
+    crate-private, as nothing outside the crate reads it. `PlanetarySystem` holds it (`moon_inventories`, set by `generate_planets`) and `moon_derived`
+    reads it, now a method. The tests reach `Own` ahead of the bump through
+    `PlanetarySystem::with_moon_inventories` (`#[cfg(test)]`). Setting it after `generate` is
+    generating with it, since nothing generation reads depends on a moon's inventory: a moon's
+    rotation law reads its bulk's class, fractions and radius and its orbit
+    (`under_their_own_volatiles_the_moons_move_nothing_their_rotation_reads`). T54.a derives
+    every moon with `Satellite::own_volatiles()` and deletes `MoonInventories`, the field, the
+    setter, `derive_moon_under` (with T50.c's seams) and the tripwire's line.
+    `MoonVolatiles::SHARED` stays, as the table's and tools' median convention, as
+    `VolatileDraws::MEDIAN` does for planets.
+  - _The draws._ `Satellite` gains its `volatiles`, `VolatileDraws::for_body` on its candidate
+    key's `BodyId`, the radius rank's, drawn in `numbered` at every version: a pure draw on its own
+    stream, which moves nothing at 22. `Satellite` grows by 48 bytes to 288, so `Body::moon` takes
+    it by reference (Clippy's `large_types_passed_by_value`).
+  - _The site._ In `moons/regular.rs`: `VolatileSite` (`Nursery`, `ParentZone`) and
+    `MoonVolatiles { draws, site }`, public plain fields as `VolatileDraws`' are. `Satellite`
+    gains `volatile_site()` (by origin) and `own_volatiles()`. `MoonNursery` gains
+    `parent_zone()`: the formation distance it is built with and the star's disc's snow line,
+    where the parent's own inventory reads (a planet's placed formation distance, a member's
+    orbit). A captured or giant-impact moon's volatiles take it. Its `ice` flag goes, since
+    `ice_line()` reads the zone's side, the same comparison for positive, finite distances. A
+    formation distance that is not one is refused with the new
+    `DeriveMoonError::ParentZone(BuildFormationZoneError)`, where the nursery used to have no
+    ice line; the generator never gives one.
+  - _`derive_body`'s part._ `planetary::derive::FormationZone` (with `BuildFormationZoneError`,
+    `side()` and `temperature()`) and `PlacedBody::with_volatiles_from` and `volatile_zone()`.
+    `derive_body`'s inventory takes the zone's side and formation temperature, T50.c's rule
+    included; `inventory_of` returns the side with the inventory. `AtmosphereInputs::formed`,
+    which the carbon's carrier reads (methane beyond the maximum-greenhouse limit), is the
+    volatiles' side too, since its doc ties it to the inventory: a choice made here, lean keep.
+    `DerivedBody::formed`, the radius window, the composition solve and every bulk value stay the
+    moon's own, so "their bulk is unchanged" holds bit for bit (tested).
+  - _Signatures._ `derive_moon` takes `volatiles: MoonVolatiles` after `radius_rank`;
+    `derive_regular_moon` takes `volatiles: VolatileDraws` there, its site the nursery. Both by
+    value, as `PlacedBody::with_volatiles` takes them. The
+    crate-private `derive_moon_under` takes T50.c's `NitrogenLine`, so that the tests derive
+    moons under the ammonia line ahead of its bump; `derive_moon` is it under
+    `NitrogenLine::in_force()`.
+  - _"The table's" moons._ The plan's table tests take Ganymede, Callisto and Titan as moons of
+    the table's Jupiter and Saturn, at JPL's GM, mean radius and mean elements (read 2026-10-15),
+    the median volatile ranks, and the radius rank at which `derive_body` keeps each one's
+    measured radius in its nursery (`solar::rank_for`): the table's convention for its bodies.
+    Jupiter's nursery ice line lies at 11.86 nominal radii and its ammonia line at 22.66.
+    Ganymede formed at 151.3 K and Callisto at 114.1 K. The ruling's 151.6 and 114.3 K are at its
+    rounded 11.9 radii, so the test holds them within 0.35 K, the span of that last digit.
+    Saturn's ice line lies at 4.46 equatorial radii, so Titan formed near 80 K, well under 123 K
+    (no finding); it keeps over a bar of N₂. The moons' rows are JPL's, not `SMALL_BODIES`'
+    fact-sheet rows, because a moon needs its elements about its planet, and JPL's two tables
+    give those with the GM and mean radius in one source.
+  - _The regular moons' line._ Nitrogen's circumplanetary line is T50.c's rule, which
+    `derive_body` reads in the nursery's disc, held by `AMMONIA_LINE_VERSION`; `MOONS_VERSION`
+    holds only the ranks and the site. `volatile_inventory` is not edited: the zone is read in
+    `derive/mod.rs`'s `inventory_of`.
+  - _A capture's water._ Its bulk is unchanged, so the inventory's water floor beyond the snow
+    line (the larger of the drawn water and the bulk's) reads the moon's own solve in the
+    nursery. A Triton-like capture inside the nursery's ice line therefore takes carbon's and
+    nitrogen's boosts from its parent's zone while its water stays the drawn inventory, its bulk
+    dry: a body formed at the parent's distance would hold its ice. For "main" with the deferred
+    finding below, which it shares a cause with.
+  - _The pruning test_ removes moons by lowering the moon-mass limit (T15's `keep_inside`), so the
+    captures move down the dense numbering. The keys depend only on the candidate, so it stands
+    for any removal; `each_moon_draws_its_own_volatile_ranks_by_its_candidate` checks the
+    sample's own T22.a removals (moons keyed apart from their index).
+  - _The tests._ In `moons/regular.rs`:
+    `the_generated_jupiter_s_ammonia_line_lies_between_ganymede_and_callisto`,
+    `the_table_s_titan_forms_below_123_k_and_keeps_a_bar_of_nitrogen`,
+    `the_table_s_ganymede_and_callisto_stay_airless`,
+    `a_captured_moon_takes_the_volatiles_of_its_parent_s_zone` (an irregular of a Jupiter formed
+    at 3 au loses the nursery's nitrogen boost; a Triton-like capture inside the nursery's ice line
+    gains carbon's and nitrogen's) and `a_giant_impact_moon_takes_its_parent_s_zone_as_it_recedes`
+    (no step in time). In `satellites/tests.rs`:
+    `each_moon_draws_its_own_volatile_ranks_by_its_candidate` (every pair of a parent's moons
+    differs in all six), `a_moon_s_volatiles_formed_where_its_origin_says`,
+    `pruning_a_moon_moves_no_other_moon_s_volatile_ranks` and
+    `each_volatile_rank_of_ten_thousand_generated_moons_is_uniform`. In `system/tests.rs`, the
+    hold's test above. In `derive/mod.rs`,
+    `a_formation_zone_is_a_place_judged_as_a_formation_distance_is` and
+    `a_body_s_carbon_carrier_follows_where_its_volatiles_formed`; in `moons/regular.rs` also
+    `a_nursery_holds_where_its_planet_formed`.
+  - _The acceptance commands._ The _Accept_ filters select the tests in `moons/regular.rs` and
+    the tripwire only. The rest run under `cargo test -p hyperion-sim planetary::satellites`,
+    `cargo test -p hyperion-sim planetary::derive::tests::a_` and
+    `cargo test -p hyperion-sim planetary::system::tests::under_their_own_volatiles`. The gate,
+    `just smart-ci`, runs them all.
+  - _Plan text._ T56.c's 123 K lines, and the ruling's three other T56 lines (T17.b's amendment,
+    T56's "Figures from memory", Risks' "Moons' volatile ranks"), now read 123 K
+    (decision-ammonia-line). T51.g's two (its ammonia bullet and its observational figures) are
+    left for the docs batch.
+  - _Files beyond the task's._ `planetary/moons/mod.rs` (the tripwire and `MOONS_VERSION`'s doc),
+    `planetary/hooks/figures/tests.rs` (`jovian` passes `MoonVolatiles::SHARED`), and the tests
+    above.
+  - _For T54.a._ When it builds a moon's `InventoryInputs` for T50.a's `ElementInventory`, a
+    captured or giant-impact moon's distance and snow line are its `PlacedBody::volatile_zone`'s,
+    so that its carriers stay its inventory's. The determinism audit suggests pinning a few
+    moons' six ranks (a capture and a giant-impact moon among them) in `planetary/moons`'s golden
+    with the bump, so that the bless note shows the draws stayed and only the switch moved.
+- **Deferred findings (2026-10-13 rule)**, from P14.T56.c:
+  - _A moon's atmosphere reads `derive_body`'s radius, not its own._ `derive_moon` derives a
+    moon through `derive_body` at its radius rank in the nursery. That radius is the planets'
+    composition solve's, 2,281 km for Ganymede's mass at the median rank and 2,085 km for
+    Callisto's, while the moon's bulk is `moon_radius` by its ice fraction, 2,653 and 2,464 km.
+    Escape, the greenhouse and the surface state read the former, and the inventory's water floor
+    reads that solve's water fraction, not the ice fraction. So a generated moon of Ganymede's
+    mass and orbit at the median rank holds 3.6 bar (2.8 of N₂, 0.8 of CH₄) at 22, and 0.31 bar,
+    mostly CH₄, under the ammonia line: N₂'s Jeans parameter is 28.5 at 2,281 km and 24.7 at its
+    measured 2,631 km at that body's 513 K exobase (23.1 at the airless body's 548 K), against the
+    threshold of 25. The plan's "stay
+    airless" holds at the table's radius-keeping rank. It moves every moon's atmosphere, so it is
+    for "main": lean, derive a moon's atmosphere at its bulk radius and gravity, in this lane
+    behind `MOONS_VERSION`.
+  - _A moon's birthplace for its craters._ `hooks::figures::MoonBirth::formed`
+    (science-p14-t24b-laws §2.4) puts a rocky planet's small capture beside an icy belt beyond the
+    snow line, and a giant-impact moon inside it unless its parent is an icy belt's member, while
+    the inventory now takes the parent's zone (decision-p14-moons §2.2 (b)). They disagree for
+    small captures beside an icy belt of a planet formed inside the snow line, and for
+    giant-impact moons of rocky planets formed beyond it.
+  - _The captures' warm bound._ A giant formed between the snow and ammonia lines gives its
+    irregulars Earth's nitrogen per unit mass, though irregulars come from the outer planetesimal
+    disc (Nesvorný, Vokrouhlický and Morbidelli 2007; Nesvorný et al. 2014, ApJ 784, 22, for
+    Jupiter's): the ruling's warm bound, as ruled. A rocky planet's small captures, which neither
+    paper covers, take the same rule.

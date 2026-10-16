@@ -34,13 +34,31 @@
 //!
 //! # The derivation (P14.T17.b)
 //!
-//! [`derive_regular_moon`] runs P14.T16's [`derive_body`] with the planet as the tidal primary and
-//! the star as the source of light: the moon orbits the planet's mass, is lit by the planet's own
-//! glow at its own distance and by the star at the planet's orbit, and its composition is set by
-//! which side of the circumplanetary ice line it formed on ([`MoonNursery`]): 170 K in the planet's
-//! own early luminosity, its luminosity when its star's disc disperses, when the last generation of
-//! satellites forms. Tidal heating ([`tidal_heating`]) gives a surface heat flux, a volcanism level
-//! and the subsurface-ocean flag ([`has_subsurface_ocean`]).
+//! [`derive_regular_moon`] runs P14.T16's [`derive_body`](crate::planetary::derive::derive_body)
+//! with the planet as the tidal primary and the star as the source of light: the moon orbits the
+//! planet's mass, is lit by the planet's own glow at its own distance and by the star at the
+//! planet's orbit, and its composition is set by which side of the circumplanetary ice line it
+//! formed on ([`MoonNursery`]): 170 K in the planet's own early luminosity, its luminosity when its
+//! star's disc disperses, when the last generation of satellites forms. Tidal heating
+//! ([`tidal_heating`]) gives a surface heat flux, a volcanism level and the subsurface-ocean flag
+//! ([`has_subsurface_ocean`]).
+//!
+//! # Volatiles (P14.T56.c)
+//!
+//! A moon's volatile inventory reads [`MoonVolatiles`]: its own ranks, words 0–5 of its
+//! `planet.volatiles` stream keyed by its candidate as its radius rank is
+//! ([`Satellite::volatiles`](crate::planetary::satellites::Satellite::volatiles); ruling 112.5),
+//! and where its volatiles formed ([`VolatileSite`]). A regular moon's formed in the nursery at
+//! its own distance, so its nitrogen takes the icy boost only where the circumplanetary disc was
+//! at or below ammonia hydrate's 123 K, 170 K × √(`d_ice` ÷ a) (P14.T50.c's rule, which
+//! [`derive_body`](crate::planetary::derive::derive_body) reads in the nursery's disc), and its
+//! water and carbon beyond the 170 K ice line. A captured or giant-impact moon's formed in its
+//! parent's zone of the star's disc ([`MoonNursery::parent_zone`]), as the parent's own did, with
+//! T50.c's rule there; its bulk is still its own (decision-p14-moons §2.2).
+//!
+//! Held behind [`MOONS_VERSION`]: below it every moon is derived at the median ranks in its
+//! nursery at its own distance, version 22's inventory bit for bit (`MoonInventories::in_force`,
+//! crate-private).
 //!
 //! # Draws
 //!
@@ -51,16 +69,21 @@
 use std::error::Error;
 use std::fmt;
 
+use crate::GENERATOR_VERSION;
 use crate::Seed;
 use crate::math;
 use crate::orbit::KeplerElements;
+use crate::planetary::derive::atmosphere::{NitrogenLine, VolatileDraws};
 use crate::planetary::derive::rotation::{SpinningBody, tidal_locking_time};
 use crate::planetary::derive::{
-    BodyHosts, BuildBodyHostsError, BuildPlacedBodyError, DeriveBodyError, DerivedBody, HostLight,
-    Illumination, MassFractions, PlacedBody, PlanetClass, derive_body,
+    BodyHosts, BuildBodyHostsError, BuildFormationZoneError, BuildPlacedBodyError, DeriveBodyError,
+    DerivedBody, FormationZone, HostLight, Illumination, MassFractions, PlacedBody, PlanetClass,
+    SnowLineSide, derive_body_under,
 };
 use crate::planetary::disc::{self, DiscDraws, DiscHost, DiscProfile, Truncation};
-use crate::planetary::moons::{MoonParent, decide, draw_rank, log_uniform, moon_orbit, rayleigh};
+use crate::planetary::moons::{
+    MOONS_VERSION, MoonParent, decide, draw_rank, log_uniform, moon_orbit, rayleigh,
+};
 use crate::planetary::placement::spacing::{
     MAX_SPACING_REDRAWS, Neighbour, PAIR_SPACING_SIGMA, mutual_hill_factor, next_semi_major_axis,
     satisfies_floor, spacing_floor,
@@ -742,11 +765,15 @@ fn keep_inside(parent: &MoonParent, placed: Vec<(Placed, MoonDraws)>) -> Vec<Reg
 /// A planet that formed inside its star's snow line, where the star alone keeps grains above 170
 /// K, has no ice line: every moon forms dry. Beyond it, the star's heat, under 170 K, is left out
 /// (for Jupiter it would move the line out by 11%).
+///
+/// It also holds where the planet itself formed in its star's disc
+/// ([`parent_zone`](Self::parent_zone)), whose volatiles a captured or giant-impact moon takes
+/// (P14.T56.c).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MoonNursery {
     early_luminosity: SolarLuminosities,
     disc: DiscProfile,
-    ice: bool,
+    parent_zone: FormationZone,
 }
 
 impl MoonNursery {
@@ -756,7 +783,8 @@ impl MoonNursery {
     /// # Errors
     ///
     /// [`DeriveMoonError::GiantCooling`] if plan 13's cooling refuses the planet's mass (over 13
-    /// `M_J`); [`DeriveMoonError::Nursery`] if the circumplanetary disc could not be built.
+    /// `M_J`); [`DeriveMoonError::Nursery`] if the circumplanetary disc could not be built; and
+    /// [`DeriveMoonError::ParentZone`] if the formation distance is not positive and finite.
     pub fn new(
         parent: &MoonParent,
         composition: &Composition,
@@ -796,10 +824,12 @@ impl MoonNursery {
             Truncation::NONE,
         );
         let disc = *disc.profile().ok_or(DeriveMoonError::Nursery)?;
+        let parent_zone = FormationZone::new(formation_distance, star_disc.snow_line())
+            .map_err(DeriveMoonError::ParentZone)?;
         Ok(Self {
             early_luminosity,
             disc,
-            ice: formation_distance >= star_disc.snow_line(),
+            parent_zone,
         })
     }
 
@@ -810,10 +840,81 @@ impl MoonNursery {
     }
 
     /// The circumplanetary ice line, or `None` for a planet formed inside its star's snow line,
-    /// about which no ice condensed.
+    /// about which no ice condensed ([`parent_zone`](Self::parent_zone)'s side: for its positive,
+    /// finite distances, "not inside" is "at or beyond").
     #[must_use]
     pub fn ice_line(&self) -> Option<Metres> {
-        self.ice.then(|| self.disc.snow_line())
+        (self.parent_zone.side() == SnowLineSide::Beyond).then(|| self.disc.snow_line())
+    }
+
+    /// Where the planet formed in its star's disc: its formation distance and the star's disc's
+    /// snow line, whose volatiles a captured or giant-impact moon takes (P14.T56.c,
+    /// [`VolatileSite::ParentZone`]), as the planet's own inventory reads them.
+    #[must_use]
+    pub const fn parent_zone(&self) -> &FormationZone {
+        &self.parent_zone
+    }
+}
+
+/// Where a moon's volatiles formed, as its inventory reads them (P14.T56.c; decision-p14-moons
+/// §2.2 (b)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum VolatileSite {
+    /// In its planet's circumplanetary disc at its own distance: a regular moon's, formed there,
+    /// and every moon's below [`MOONS_VERSION`].
+    Nursery,
+    /// In its parent's zone of the star's disc ([`MoonNursery::parent_zone`]): a captured moon's,
+    /// which formed in the star's disc and not its planet's, and a giant-impact moon's, made of
+    /// its parent's mantle and the impactor (Canup 2012, Science 338, 1052, abstract read by the
+    /// science check; the zone takes the impactor to have formed near its target).
+    ParentZone,
+}
+
+/// What a moon's volatile inventory reads (P14.T56.c): its ranks and where its volatiles formed.
+///
+/// The fields are plain values with no invariant between them, so they are public, as
+/// [`VolatileDraws`]'s are.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MoonVolatiles {
+    /// The ranks of its water, carbon, nitrogen, sulphur, chlorine and ΔIW: a generated moon's
+    /// own ([`Satellite::volatiles`](crate::planetary::satellites::Satellite::volatiles)).
+    pub draws: VolatileDraws,
+    /// Where its volatiles formed.
+    pub site: VolatileSite,
+}
+
+impl MoonVolatiles {
+    /// Every rank at its median, the volatiles formed in the nursery at the moon's own distance:
+    /// version 22's for every moon, below [`MOONS_VERSION`], and the Solar System table's and
+    /// tools' convention, as [`VolatileDraws::MEDIAN`] is a planet's.
+    pub const SHARED: Self = Self {
+        draws: VolatileDraws::MEDIAN,
+        site: VolatileSite::Nursery,
+    };
+}
+
+/// Which volatiles a generated system's moons are derived with (P14.T56.c, held by
+/// [`MOONS_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum MoonInventories {
+    /// Version 22's: every moon at [`MoonVolatiles::SHARED`].
+    Shared,
+    /// Each moon's own ranks, and a captured or giant-impact moon's volatiles from its parent's
+    /// zone ([`Satellite::own_volatiles`](crate::planetary::satellites::Satellite::own_volatiles)).
+    Own,
+}
+
+impl MoonInventories {
+    /// The volatiles the generator version in force takes: [`Own`](Self::Own) from
+    /// [`MOONS_VERSION`], and [`Shared`](Self::Shared) below it, so that every value below it is
+    /// version 22's, bit for bit. P14.T54.a deletes the hold.
+    #[must_use]
+    pub(crate) const fn in_force() -> Self {
+        if GENERATOR_VERSION.get() >= MOONS_VERSION.get() {
+            Self::Own
+        } else {
+            Self::Shared
+        }
     }
 }
 
@@ -884,40 +985,46 @@ pub struct DerivedMoon {
 }
 
 impl DerivedMoon {
-    /// The moon's volatile inventory at the time, from P14.T16's [`derive_body`] (P14.T13.a),
-    /// which P14.T23's [`BulkComposition`](crate::planetary::hooks::BulkComposition) holds.
+    /// The moon's volatile inventory at the time, from P14.T16's
+    /// [`derive_body`](crate::planetary::derive::derive_body) (P14.T13.a), which P14.T23's
+    /// [`BulkComposition`](crate::planetary::hooks::BulkComposition) holds.
     #[must_use]
     pub const fn inventory(&self) -> &crate::planetary::derive::atmosphere::VolatileInventory {
         self.body.inventory()
     }
 
-    /// The flux the moon receives from its planet and the stars, from P14.T16's [`derive_body`].
+    /// The flux the moon receives from its planet and the stars, from P14.T16's
+    /// [`derive_body`](crate::planetary::derive::derive_body).
     #[must_use]
     pub const fn flux(&self) -> crate::units::EarthFluxes {
         self.body.flux()
     }
 
-    /// The moon's equilibrium temperature, from P14.T16's [`derive_body`].
+    /// The moon's equilibrium temperature, from P14.T16's
+    /// [`derive_body`](crate::planetary::derive::derive_body).
     #[must_use]
     pub const fn equilibrium_temperature(&self) -> Kelvin {
         self.body.equilibrium_temperature()
     }
 
     /// The X-ray and ultraviolet flux the stars give the moon at its planet's orbit, from
-    /// P14.T16's [`derive_body`] (P14.T24.a's radiation class reads it).
+    /// P14.T16's [`derive_body`](crate::planetary::derive::derive_body) (P14.T24.a's radiation
+    /// class reads it).
     #[must_use]
     pub const fn xuv_flux(&self) -> crate::units::WattsPerSquareMetre {
         self.body.xuv_flux()
     }
 
-    /// The moon's atmosphere and surface at the time, from P14.T16's [`derive_body`] (P14.T13),
-    /// which its photometry reads (P14.T47.b).
+    /// The moon's atmosphere and surface at the time, from P14.T16's
+    /// [`derive_body`](crate::planetary::derive::derive_body) (P14.T13), which its photometry reads
+    /// (P14.T47.b).
     #[must_use]
     pub const fn atmosphere(&self) -> &crate::planetary::derive::atmosphere::Atmosphere {
         self.body.atmosphere()
     }
 
-    /// The moon's own Hill radius about its planet, from P14.T16's [`derive_body`].
+    /// The moon's own Hill radius about its planet, from P14.T16's
+    /// [`derive_body`](crate::planetary::derive::derive_body).
     #[must_use]
     pub const fn hill_radius(&self) -> Metres {
         self.body.hill_radius()
@@ -1204,17 +1311,21 @@ pub fn locking_time(
 
 /// The regular moon `moon` of `parent`, formed in `nursery` and lit by `sky`, derived at `t` in a
 /// system aged `age` at the epoch, with the radius rank `radius_rank` its own `planet.radius`
-/// stream gives it (P14.T17.b; see the [module](self) documentation).
+/// stream gives it and the ranks `volatiles` of its volatile inventory (P14.T17.b, P14.T56.c; see
+/// the [module](self) documentation).
 ///
 /// The moon is a [`PlacedBody`] on its orbit about the planet, formed at its own distance from the
 /// planet in the circumplanetary disc, or, about a planet with no ice line, at a point inside the
-/// disc's line; [`derive_body`] reads it with the planet's mass as its primary, the planet's glow
-/// as the host it orbits, and the stars at the planet's orbit as the companions that light it.
+/// disc's line; [`derive_body`](crate::planetary::derive::derive_body) reads it with the planet's
+/// mass as its primary, the planet's glow as the host it orbits, and the stars at the planet's
+/// orbit as the companions that light it. Its volatiles formed there too
+/// ([`VolatileSite::Nursery`]).
 ///
 /// # Errors
 ///
-/// [`DeriveMoonError::Body`] where [`derive_body`] refuses (a system not yet born at `t`), and
-/// [`DeriveMoonError::Placed`] or [`DeriveMoonError::Hosts`] for inputs it cannot take.
+/// [`DeriveMoonError::Body`] where [`derive_body`](crate::planetary::derive::derive_body)
+/// refuses (a system not yet born at `t`), and [`DeriveMoonError::Placed`] or
+/// [`DeriveMoonError::Hosts`] for inputs it cannot take.
 ///
 /// # Examples
 ///
@@ -1228,6 +1339,7 @@ pub fn locking_time(
 /// use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
 /// use hyperion_sim::planetary::derive::{BodyHosts, HostLight, PlacedBody, derive_body};
 /// use hyperion_sim::planetary::disc::{self, DiscDraws, DiscHost, Truncation};
+/// use hyperion_sim::planetary::derive::atmosphere::VolatileDraws;
 /// use hyperion_sim::planetary::moons::regular::{MoonNursery, MoonSky, derive_regular_moon};
 /// use hyperion_sim::planetary::moons::{MoonParent, ParentKind, regular_moons};
 /// use hyperion_sim::planetary::{BodyIndex, BodySlot, BodySub};
@@ -1260,20 +1372,25 @@ pub fn locking_time(
 /// let nursery = MoonNursery::new(&parent, &Composition::SOLAR, disc, a)?;
 /// let sky = MoonSky::new(&jupiter, &orbit, &hosts)?;
 /// for moon in regular_moons(Seed::new(7), &parent).moons() {
-///     let rank = UnitUniform::HALF;
-///     let derived = derive_regular_moon(moon, &parent, &nursery, &sky, rank, age, UniverseTime::EPOCH)?;
+///     let (rank, volatiles) = (UnitUniform::HALF, VolatileDraws::MEDIAN);
+///     let derived = derive_regular_moon(moon, &parent, &nursery, &sky, rank, volatiles, age, UniverseTime::EPOCH)?;
 ///     // Far from the Sun and locked to Jupiter.
 ///     assert!(derived.equilibrium_temperature().value() < 150.0);
 ///     assert!(derived.locking_time().value() < 1e16);
 /// }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the moon, where it formed and what lights it, its two draws and the times"
+)]
 pub fn derive_regular_moon(
     moon: &RegularMoon,
     parent: &MoonParent,
     nursery: &MoonNursery,
     sky: &MoonSky,
     radius_rank: UnitUniform,
+    volatiles: VolatileDraws,
     age: Years,
     t: UniverseTime,
 ) -> Result<DerivedMoon, DeriveMoonError> {
@@ -1284,14 +1401,20 @@ pub fn derive_regular_moon(
         nursery,
         sky,
         radius_rank,
+        MoonVolatiles {
+            draws: volatiles,
+            site: VolatileSite::Nursery,
+        },
         age,
         t,
     )
 }
 
 /// A moon of mass `mass` on `orbit` about `parent`, derived as [`derive_regular_moon`] derives a
-/// regular one: what P14.T22.a's satellites share, whatever their origin (a giant-impact moon's
-/// or a capture's flux and temperature come from here, beside their own radius and density).
+/// regular one, with the volatiles `volatiles`: what P14.T22.a's satellites share, whatever their
+/// origin (a giant-impact moon's or a capture's flux and temperature come from here, beside their
+/// own radius and density, and from P14.T56.c their inventory from their parent's zone,
+/// [`VolatileSite::ParentZone`]).
 ///
 /// # Errors
 ///
@@ -1307,6 +1430,43 @@ pub fn derive_moon(
     nursery: &MoonNursery,
     sky: &MoonSky,
     radius_rank: UnitUniform,
+    volatiles: MoonVolatiles,
+    age: Years,
+    t: UniverseTime,
+) -> Result<DerivedMoon, DeriveMoonError> {
+    derive_moon_under(
+        NitrogenLine::in_force(),
+        mass,
+        orbit,
+        parent,
+        nursery,
+        sky,
+        radius_rank,
+        volatiles,
+        age,
+        t,
+    )
+}
+
+/// [`derive_moon`] with nitrogen's boost beyond the line `line`, for the holds' tests (P14.T50.c,
+/// P14.T56.c): [`derive_moon`] is this under [`NitrogenLine::in_force`].
+///
+/// # Errors
+///
+/// As [`derive_moon`].
+#[expect(
+    clippy::too_many_arguments,
+    reason = "derive_moon's inputs with the nitrogen line its hold's tests choose"
+)]
+pub(crate) fn derive_moon_under(
+    line: NitrogenLine,
+    mass: EarthMasses,
+    orbit: &KeplerElements,
+    parent: &MoonParent,
+    nursery: &MoonNursery,
+    sky: &MoonSky,
+    radius_rank: UnitUniform,
+    volatiles: MoonVolatiles,
     age: Years,
     t: UniverseTime,
 ) -> Result<DerivedMoon, DeriveMoonError> {
@@ -1322,7 +1482,12 @@ pub fn derive_moon(
         None => Metres::new(a.value().min(0.5 * nursery.disc.snow_line().value())),
     };
     let placed = PlacedBody::new(moon.mass, moon.orbit, formation, radius_rank)
-        .map_err(DeriveMoonError::Placed)?;
+        .map_err(DeriveMoonError::Placed)?
+        .with_volatiles(volatiles.draws);
+    let placed = match volatiles.site {
+        VolatileSite::Nursery => placed,
+        VolatileSite::ParentZone => placed.with_volatiles_from(nursery.parent_zone),
+    };
     let hosts = BodyHosts::new(
         Kilograms::from(parent.mass()),
         sky.composition,
@@ -1330,8 +1495,8 @@ pub fn derive_moon(
         &sky.stars,
     )
     .map_err(DeriveMoonError::Hosts)?;
-    let body =
-        derive_body(&placed, &hosts, &nursery.disc, age, t).map_err(DeriveMoonError::Body)?;
+    let body = derive_body_under(line, &placed, &hosts, &nursery.disc, age, t)
+        .map_err(DeriveMoonError::Body)?;
     let icy = nursery.ice_line().is_some_and(|line| a >= line);
     let ice_fraction = if icy {
         let (lo, hi) = ICY_MOON_ICE_FRACTION;
@@ -1393,6 +1558,9 @@ pub enum DeriveMoonError {
     GiantCooling(crate::stellar::substellar::EvaluateGiantCoolingError),
     /// The circumplanetary disc could not be built.
     Nursery,
+    /// Where the planet formed in its star's disc could not be stated (P14.T56.c): a formation
+    /// distance or a snow line that is not positive and finite.
+    ParentZone(BuildFormationZoneError),
     /// The planet's light could not be built.
     Sky,
     /// The moon could not be placed for the derivation.
@@ -1408,6 +1576,7 @@ impl fmt::Display for DeriveMoonError {
         f.write_str(match self {
             Self::GiantCooling(_) => "the planet's early luminosity could not be evaluated",
             Self::Nursery => "the circumplanetary disc could not be built",
+            Self::ParentZone(_) => "where the planet formed could not be stated",
             Self::Sky => "the planet's light could not be built",
             Self::Placed(_) => "the moon could not be placed",
             Self::Hosts(_) => "the moon's hosts could not be built",
@@ -1420,6 +1589,7 @@ impl Error for DeriveMoonError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::GiantCooling(e) => Some(e),
+            Self::ParentZone(e) => Some(e),
             Self::Placed(e) => Some(e),
             Self::Hosts(e) => Some(e),
             Self::Body(e) => Some(e),
@@ -1896,6 +2066,7 @@ mod tests {
                     &nursery,
                     &sky,
                     rank,
+                    VolatileDraws::MEDIAN,
                     SOLAR_AGE,
                     UniverseTime::EPOCH,
                 )
@@ -1974,6 +2145,7 @@ mod tests {
                     &nursery,
                     &sky,
                     UnitUniform::HALF,
+                    VolatileDraws::MEDIAN,
                     SOLAR_AGE,
                     UniverseTime::EPOCH,
                 )
@@ -1986,6 +2158,374 @@ mod tests {
             }
         }
         assert!(derived_moons > 500);
+    }
+
+    /// The table's giant `name` in slot `slot` as its moons read it (P14.T56.c): the parent,
+    /// derived at the epoch about the present Sun, its nursery, formed at `formed_au` in the
+    /// zero-age Sun's disc (its own distance unless a test moves it), and its moons' sky.
+    fn table_giant(
+        name: &str,
+        slot: u8,
+        formed_au: Option<f64>,
+    ) -> (MoonParent, MoonNursery, MoonSky) {
+        let disc = solar::solar_disc();
+        let (parent, derived) = derived_parent(name, planet_id(0, slot));
+        let lights = [solar::sun()];
+        let hosts = BodyHosts::new(
+            Kilograms::new(SOLAR_MASS_KG),
+            Composition::SOLAR,
+            &lights,
+            &[],
+        )
+        .unwrap();
+        let sky = MoonSky::new(&derived, parent.orbit(), &hosts).unwrap();
+        let formed = formed_au.map_or(parent.orbit().semi_major_axis(), |au| {
+            Metres::new(au * crate::units::consts::METRES_PER_AU)
+        });
+        let nursery = MoonNursery::new(&parent, &Composition::SOLAR, &disc, formed).unwrap();
+        (parent, nursery, sky)
+    }
+
+    /// An orbit of semi-major axis `a_km` and eccentricity `e` about `parent`, in its reference
+    /// plane.
+    fn about(parent: &MoonParent, a_km: f64, e: f64) -> KeplerElements {
+        use crate::orbit::{Eccentricity, Orientation};
+        let flat = Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO).unwrap();
+        KeplerElements::from_semi_major_axis(
+            Metres::new(a_km * 1e3),
+            crate::units::GravitationalParameter::from_earth_masses(parent.mass()),
+            Eccentricity::new(e).unwrap(),
+            flat,
+            Radians::ZERO,
+        )
+        .unwrap()
+    }
+
+    /// A moon of `kg` on `orbit` about `parent`, from `nursery` under `sky`, derived at the epoch
+    /// at the radius rank `rank` with `volatiles`, under the nitrogen line `line`.
+    fn moon_under(
+        line: NitrogenLine,
+        (kg, rank): (f64, UnitUniform),
+        orbit: &KeplerElements,
+        (parent, nursery, sky): &(MoonParent, MoonNursery, MoonSky),
+        volatiles: &MoonVolatiles,
+    ) -> DerivedMoon {
+        derive_moon_under(
+            line,
+            EarthMasses::new(kg / crate::units::consts::EARTH_MASS_KG),
+            orbit,
+            parent,
+            nursery,
+            sky,
+            rank,
+            *volatiles,
+            SOLAR_AGE,
+            UniverseTime::EPOCH,
+        )
+        .unwrap()
+    }
+
+    /// The table's moon `(kg, km, a_km, e)` about the giant `giant`: its mass and orbit, and the
+    /// radius rank at which [`derive_body`](crate::planetary::derive::derive_body) keeps its
+    /// measured mean radius `km` in the giant's nursery, the table's convention
+    /// ([`solar::rank_for`]; `table_bodies`, "each at the rank that keeps its radius").
+    fn table_moon(
+        (kg, km, a_km, e): (f64, f64, f64, f64),
+        giant: &(MoonParent, MoonNursery, MoonSky),
+    ) -> ((f64, UnitUniform), KeplerElements) {
+        let orbit = about(&giant.0, a_km, e);
+        let a_au = orbit.semi_major_axis().value() / crate::units::consts::METRES_PER_AU;
+        let rank = solar::rank_for(&giant.1.disc, kg, km, a_au, e);
+        ((kg, UnitUniform::new(rank).unwrap()), orbit)
+    }
+
+    /// A moon's nitrogen, carbon (as CO₂) and water per unit of its mass over Earth's.
+    fn per_earth(moon: &DerivedMoon, kg: f64) -> (f64, f64, f64) {
+        use crate::planetary::derive::atmosphere::{
+            EARTH_CARBON_DIOXIDE_PER_MASS, EARTH_NITROGEN_PER_MASS, EARTH_WATER_PER_MASS,
+        };
+        let inventory = moon.inventory();
+        (
+            inventory.nitrogen().value() / (kg * EARTH_NITROGEN_PER_MASS),
+            inventory.carbon_dioxide().value() / (kg * EARTH_CARBON_DIOXIDE_PER_MASS),
+            inventory.water().value() / (kg * EARTH_WATER_PER_MASS),
+        )
+    }
+
+    /// Ganymede's mass (kg), mean radius (km), semi-major axis (km) and eccentricity: JPL's
+    /// "Planetary Satellite Physical Parameters" GM (JUP365) over G and mean radius (Archinal et
+    /// al. 2018), and its "Planetary Satellite Mean Elements" (JUP365, to the local Laplace
+    /// plane), both read 2026-10-15.
+    const GANYMEDE: (f64, f64, f64, f64) = (
+        9_887.832_75e9 / GRAVITATIONAL_CONSTANT,
+        2_631.20,
+        1_070_400.0,
+        0.001,
+    );
+    /// Callisto's (the same tables, JUP365).
+    const CALLISTO: (f64, f64, f64, f64) = (
+        7_179.283_40e9 / GRAVITATIONAL_CONSTANT,
+        2_410.30,
+        1_882_700.0,
+        0.007,
+    );
+    /// Titan's (the same tables, SAT441).
+    const TITAN: (f64, f64, f64, f64) = (
+        8_978.137_10e9 / GRAVITATIONAL_CONSTANT,
+        2_574.76,
+        1_221_900.0,
+        0.029,
+    );
+
+    /// P14.T56.c: about the generated Jupiter the circumplanetary ammonia line lies at
+    /// (170 ÷ 123)² = 1.910 ice lines, 22.7 Jupiter radii (decision-ammonia-line), between
+    /// Ganymede, which at 15.0 radii formed at about 151.6 K and takes Earth's nitrogen per unit
+    /// mass, and Callisto, which at 26.3 formed at about 114.3 K and takes a hundred times it.
+    /// The ruling's temperatures are at an ice line of 11.9 radii as rounded, so they hold within
+    /// the 0.35 K that its last digit spans (the generated line is 11.86 radii). Below the ammonia
+    /// line's hold both take the boost, as at version 22; their water and carbon do not move.
+    #[test]
+    fn the_generated_jupiter_s_ammonia_line_lies_between_ganymede_and_callisto() {
+        use crate::planetary::derive::atmosphere::{
+            ammonia_line, formation_temperature, nitrogen_boosted,
+        };
+        let jupiter = table_giant("Jupiter", 5, None);
+        let line = jupiter
+            .1
+            .ice_line()
+            .expect("Jupiter formed beyond the snow line");
+        // In Jupiter's nominal equatorial radius, as decision-ammonia-line states the line.
+        let radii = |d: Metres| d.value() / crate::units::consts::JUPITER_RADIUS_M;
+        let ammonia = ammonia_line(line);
+        assert!((ammonia.value() / line.value() - 1.910).abs() < 5e-4);
+        assert!((radii(line) - 11.9).abs() < 0.05, "{} R_J", radii(line));
+        assert!(
+            (radii(ammonia) - 22.7).abs() < 0.05,
+            "{} R_J",
+            radii(ammonia)
+        );
+        let shared = MoonVolatiles::SHARED;
+        for (moon, t_f, boost) in [(GANYMEDE, 151.6, 1.0), (CALLISTO, 114.3, 100.0)] {
+            let (mass, orbit) = table_moon(moon, &jupiter);
+            let (kg, a_km) = (moon.0, moon.2);
+            let formed = formation_temperature(orbit.semi_major_axis(), line).value();
+            assert!((formed - t_f).abs() < 0.35, "{a_km} km: {formed} K");
+            assert_eq!(nitrogen_boosted(Kelvin::new(formed)), boost > 1.0);
+            let ammonia = moon_under(NitrogenLine::Ammonia, mass, &orbit, &jupiter, &shared);
+            let snow = moon_under(NitrogenLine::Snow, mass, &orbit, &jupiter, &shared);
+            let (n, c, w) = per_earth(&ammonia, kg);
+            assert!(
+                (n / boost - 1.0).abs() < 1e-12,
+                "{a_km} km: {n}× Earth's nitrogen"
+            );
+            let (n22, c22, w22) = per_earth(&snow, kg);
+            assert!((n22 / 100.0 - 1.0).abs() < 1e-12, "{n22}");
+            assert_same_bits(c, c22);
+            assert_same_bits(w, w22);
+            assert!((c / 100.0 - 1.0).abs() < 1e-12, "{c}");
+        }
+    }
+
+    /// P14.T56.c: the table's Titan, at the median volatile ranks about the generated Saturn,
+    /// formed at or below 123 K, so it keeps the nitrogen boost and at least a bar of N₂; that
+    /// needs the generated Saturn's ice line within (123 ÷ 170)² of Titan's distance, 10.6 of
+    /// Saturn's 60,268 km equatorial radii (decision-ammonia-line; NASA's Saturn fact sheet). The
+    /// generated line lies at 4.5 of them, so Titan formed near 80 K.
+    #[test]
+    fn the_table_s_titan_forms_below_123_k_and_keeps_a_bar_of_nitrogen() {
+        use crate::planetary::derive::atmosphere::{
+            AMMONIA_HYDRATE_CONDENSATION, Gas, formation_temperature,
+        };
+        let saturn = table_giant("Saturn", 6, None);
+        let line = saturn
+            .1
+            .ice_line()
+            .expect("Saturn formed beyond the snow line");
+        let (mass, orbit) = table_moon(TITAN, &saturn);
+        let formed = formation_temperature(orbit.semi_major_axis(), line);
+        assert!(
+            formed <= AMMONIA_HYDRATE_CONDENSATION,
+            "Titan formed at {} K, the ice line at {} equatorial radii",
+            formed.value(),
+            line.value() / 6.0268e7
+        );
+        let shared = MoonVolatiles::SHARED;
+        let titan = moon_under(NitrogenLine::Ammonia, mass, &orbit, &saturn, &shared);
+        let nitrogen = titan.atmosphere().partial_pressures().of(Gas::Nitrogen);
+        assert!(nitrogen.value() >= 1e5, "{nitrogen:?}");
+        let version_22 = moon_under(NitrogenLine::Snow, mass, &orbit, &saturn, &shared);
+        assert_eq!(titan.atmosphere(), version_22.atmosphere());
+    }
+
+    /// P14.T56.c: the table's Ganymede and Callisto, each at the rank that keeps its measured
+    /// radius, stay airless under either line: Jeans escape removes what nitrogen and methane
+    /// they hold (decision-p14-moons §2.1, Ganymede's λ near the threshold).
+    #[test]
+    fn the_table_s_ganymede_and_callisto_stay_airless() {
+        use crate::planetary::derive::atmosphere::SurfaceState;
+        let jupiter = table_giant("Jupiter", 5, None);
+        for moon in [GANYMEDE, CALLISTO] {
+            let (mass, orbit) = table_moon(moon, &jupiter);
+            for line in [NitrogenLine::Snow, NitrogenLine::Ammonia] {
+                let derived = moon_under(line, mass, &orbit, &jupiter, &MoonVolatiles::SHARED);
+                let air = derived.atmosphere();
+                assert_eq!(air.state(), SurfaceState::Airless, "{} km: {air:?}", moon.2);
+            }
+        }
+    }
+
+    /// P14.T56.c: a captured moon's volatiles are those of a body formed at its parent's formation
+    /// distance in the star's disc, the ammonia line's rule included, and its bulk is its own.
+    ///
+    /// - Himalia (JPL's GM, JUP344, and ecliptic mean elements, JUP347: 11,439,000 km, e = 0.160,
+    ///   of which only a and e are read) about a Jupiter formed at 3 au, beyond the snow line and
+    ///   inside the ammonia line, keeps its icy carbon but loses the nitrogen boost the cold outer
+    ///   nursery gave it.
+    /// - A Triton-like capture of Triton's mass (JPL's GM, NEP097) at 10 Jupiter radii, inside
+    ///   the generated Jupiter's circumplanetary ice line, formed in the nursery would be dry of
+    ///   icy carbon and nitrogen; from Jupiter's own zone, at 5.2 au and 112 K, it takes both
+    ///   boosts.
+    #[test]
+    fn a_captured_moon_takes_the_volatiles_of_its_parent_s_zone() {
+        use crate::planetary::derive::atmosphere::volatile_inventory_under;
+        let himalia = (0.151_55e9 / GRAVITATIONAL_CONSTANT, 11_439_000.0, 0.160);
+        let triton = (1_428.495_46e9 / GRAVITATIONAL_CONSTANT, 714_920.0, 0.0);
+        let at_3_au = table_giant("Jupiter", 5, Some(3.0));
+        let home = table_giant("Jupiter", 5, None);
+        assert!(home.1.ice_line().unwrap().value() > triton.1 * 1e3);
+        let draws = VolatileDraws {
+            nitrogen: UnitUniform::new(0.7).unwrap(),
+            carbon: UnitUniform::new(0.2).unwrap(),
+            ..VolatileDraws::MEDIAN
+        };
+        let site = |site| MoonVolatiles { draws, site };
+        for ((kg, a_km, e), giant, ratios) in [
+            (himalia, &at_3_au, (0.01, 1.0)),
+            (triton, &home, (100.0, 100.0)),
+        ] {
+            let orbit = about(&giant.0, a_km, e);
+            let line = NitrogenLine::Ammonia;
+            let mass = (kg, UnitUniform::HALF);
+            let nursery = moon_under(line, mass, &orbit, giant, &site(VolatileSite::Nursery));
+            let zone = moon_under(line, mass, &orbit, giant, &site(VolatileSite::ParentZone));
+            let (n, c, _) = per_earth(&zone, kg);
+            let (n_nursery, c_nursery, _) = per_earth(&nursery, kg);
+            assert!(
+                (n / n_nursery / ratios.0 - 1.0).abs() < 1e-12,
+                "{a_km} km: {n} {n_nursery}"
+            );
+            assert!(
+                (c / c_nursery / ratios.1 - 1.0).abs() < 1e-12,
+                "{a_km} km: {c} {c_nursery}"
+            );
+            // The inventory is the parent's zone's, at the moon's own mass and solve.
+            let parent_zone = giant.1.parent_zone();
+            let expected = volatile_inventory_under(
+                line,
+                zone.body.mass(),
+                &zone.body.fractions(),
+                parent_zone.side(),
+                parent_zone.temperature(),
+                &draws,
+                SOLAR_AGE,
+            );
+            assert_eq!(*zone.inventory(), expected, "{a_km} km");
+            // Its bulk does not move.
+            assert_same_bits(zone.radius().value(), nursery.radius().value());
+            assert_same_bits(zone.density().value(), nursery.density().value());
+            assert_same_bits(zone.ice_fraction(), nursery.ice_fraction());
+            assert_eq!(zone.fractions(), nursery.fractions());
+            assert_same_bits(
+                zone.tidal_heating().value(),
+                nursery.tidal_heating().value(),
+            );
+            assert_same_bits(zone.locking_time().value(), nursery.locking_time().value());
+        }
+    }
+
+    /// P14.T56.c: a giant-impact moon takes its parent's zone at every distance, so its nitrogen
+    /// does not step as it recedes. Its parent, half an Earth mass formed at 3 au, between the
+    /// snow and ammonia lines, gives it carbon's boost and not nitrogen's; in the parent's tiny
+    /// nursery it formed far below 123 K at either distance and took both.
+    #[test]
+    fn a_giant_impact_moon_takes_its_parent_s_zone_as_it_recedes() {
+        use crate::units::consts::{EARTH_MASS_KG, METRES_PER_AU};
+        let disc = solar::solar_disc();
+        let (kg, a_au) = (0.5 * EARTH_MASS_KG, 3.0);
+        let derived = solar::derive(&solar::placed(kg, a_au, 0.02, 0.5), &disc).unwrap();
+        let orbit = solar::orbit(a_au, 0.02);
+        let host = Kilograms::new(SOLAR_MASS_KG);
+        let parent =
+            MoonParent::from_derived(planet_id(0, 3), ParentKind::Planet, &derived, orbit, host)
+                .unwrap();
+        let lights = [solar::sun()];
+        let hosts = BodyHosts::new(host, Composition::SOLAR, &lights, &[]).unwrap();
+        let sky = MoonSky::new(&derived, &orbit, &hosts).unwrap();
+        let nursery = MoonNursery::new(
+            &parent,
+            &Composition::SOLAR,
+            &disc,
+            Metres::new(a_au * METRES_PER_AU),
+        )
+        .unwrap();
+        let rocky = (parent, nursery, sky);
+        let moon_kg = (0.012 * kg, UnitUniform::HALF);
+        let r = rocky.0.radius().value() / 1e3;
+        let mut steps = Vec::new();
+        for radii in [8.0, 40.0] {
+            let orbit = about(&rocky.0, radii * r, 0.0);
+            let line = NitrogenLine::Ammonia;
+            let draws = VolatileDraws::MEDIAN;
+            let site = |site| MoonVolatiles { draws, site };
+            let zone = moon_under(
+                line,
+                moon_kg,
+                &orbit,
+                &rocky,
+                &site(VolatileSite::ParentZone),
+            );
+            let nursery = moon_under(line, moon_kg, &orbit, &rocky, &site(VolatileSite::Nursery));
+            let (n, c, _) = per_earth(&zone, moon_kg.0);
+            assert!(
+                (n - 1.0).abs() < 1e-12 && (c / 100.0 - 1.0).abs() < 1e-12,
+                "{n} {c}"
+            );
+            let (n_nursery, ..) = per_earth(&nursery, moon_kg.0);
+            assert!(
+                (n_nursery / 100.0 - 1.0).abs() < 1e-12,
+                "{radii} radii: {n_nursery}"
+            );
+            steps.push(n);
+        }
+        assert_same_bits(steps[0], steps[1]);
+    }
+
+    /// P14.T56.c: a nursery holds where its planet formed in the star's disc, refuses a
+    /// formation distance that is not a place with its own error, and has an ice line exactly
+    /// where its planet formed at or beyond the star's snow line, as before.
+    #[test]
+    fn a_nursery_holds_where_its_planet_formed() {
+        use crate::planetary::derive::BuildFormationZoneError;
+        let disc = solar::solar_disc();
+        let (jupiter, _) = derived_parent("Jupiter", planet_id(0, 5));
+        let nursery =
+            |d: f64| MoonNursery::new(&jupiter, &Composition::SOLAR, &disc, Metres::new(d));
+        for bad in [f64::NAN, 0.0, -1.0, f64::INFINITY] {
+            let refused = nursery(bad).unwrap_err();
+            assert_eq!(
+                refused,
+                DeriveMoonError::ParentZone(BuildFormationZoneError::DistanceNotPositive)
+            );
+            assert!(refused.source().is_some());
+            let text = refused.to_string();
+            assert_eq!(text, text.to_lowercase());
+        }
+        let line = disc.snow_line().value();
+        let at = nursery(line).unwrap();
+        assert!(at.ice_line().is_some());
+        assert_same_bits(at.parent_zone().distance().value(), line);
+        assert_same_bits(at.parent_zone().snow_line().value(), line);
+        assert_eq!(nursery(line * (1.0 - 1e-12)).unwrap().ice_line(), None);
     }
 
     fn parts(p: &MoonParent) -> MoonParentParts {

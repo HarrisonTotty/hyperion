@@ -2776,7 +2776,7 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
             let (_, now) = system.primary_record(&epoch, planet, label, &fate);
             let seasonal = *fate.at(t).orbit().unwrap();
             let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
-            let derived = PlanetarySystem::moon_derived(&epoch, part, &orbit, &now).unwrap();
+            let derived = system.moon_derived(&epoch, part, &orbit, &now).unwrap();
             let bulk = PlanetarySystem::moon_bulk_of(part, &derived, &now);
             // The greenhouse gain reads T13.c's terms at the published equilibrium temperature,
             // which is the one the moon's τ was computed at.
@@ -3129,8 +3129,7 @@ fn the_published_figures_read_each_body_s_interior() {
                     let label = label::label(system, planet.index).unwrap();
                     let (_, now) = system.primary_record(&epoch, planet, label, &fate);
                     let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
-                    let derived =
-                        PlanetarySystem::moon_derived(&epoch, part, &orbit, &now).unwrap();
+                    let derived = system.moon_derived(&epoch, part, &orbit, &now).unwrap();
                     // Every moon's tide is its derivation's, P14.T17.b's.
                     assert_same_bits(
                         figures.heat_flow().value(),
@@ -3869,4 +3868,69 @@ fn on_the_laplace_surface_every_law_is_its_record_s() {
         assert_order_independent(&indices, |&index| held(index));
     }
     assert!(laws > 300, "{laws} laws");
+}
+
+/// P14.T56.c's hold, reached ahead of the bump (`with_moon_inventories`). Under their own
+/// volatiles every moon's rotation law is still its record's at `parent_time`, so that setting the
+/// rule after `generate` is generating with it; every moon's inventory is the one its own ranks
+/// and site give ([`Satellite::own_volatiles`](crate::planetary::satellites::Satellite::own_volatiles)),
+/// and differs from version 22's.
+#[test]
+fn under_their_own_volatiles_the_moons_move_nothing_their_rotation_reads() {
+    use crate::planetary::moons::regular::MoonInventories;
+    let (mut laws, mut moved) = (0, 0);
+    for (ctx, system) in whole().iter().take(150) {
+        let own = system.clone().with_moon_inventories(MoonInventories::Own);
+        assert_eq!(
+            system
+                .clone()
+                .with_moon_inventories(MoonInventories::Shared),
+            *system
+        );
+        let t = UniverseTime::EPOCH;
+        for body in system.bodies() {
+            let (Part::Moon(part), OrbitHost::Body(parent)) = (&body.part, body.host) else {
+                continue;
+            };
+            let index = body.index();
+            let record = own.body_at(ctx, index, parent_time(ctx)).unwrap();
+            let law = own.derive_rotation(ctx, body, &record);
+            assert_eq!(own.rotation_of(ctx, index).unwrap(), law, "{index:?}");
+            laws += usize::from(law.is_some());
+            let inventory = |of: &PlanetarySystem| {
+                of.hooks_at(ctx, index, t)
+                    .unwrap()
+                    .and_then(|hooks| hooks.bulk().ok().map(|bulk| *bulk.inventory()))
+            };
+            let (Some(shared), Some(mine)) = (inventory(system), inventory(&own)) else {
+                continue;
+            };
+            assert_ne!(shared, mine, "{index:?}");
+            let planet = system.body(parent).unwrap();
+            let epoch = Epoch::new(system, ctx, t);
+            let host = fate_host(ctx, system.zone_of(planet));
+            let fate = system.fate_of(planet, &host);
+            let label = label::label(system, planet.index).unwrap();
+            let (_, now) = system.primary_record(&epoch, planet, label, &fate);
+            let satellite = &part.satellite;
+            let derived = derive_moon(
+                satellite.mass(),
+                &satellite.orbit_at(&part.parent, ctx.age_at(t)),
+                &part.parent,
+                now.nursery.as_ref().unwrap(),
+                now.sky.as_ref().unwrap(),
+                satellite.radius_rank(),
+                satellite.own_volatiles(),
+                ctx.age_at_epoch(),
+                t,
+            )
+            .unwrap();
+            assert_eq!(*derived.inventory(), mine, "{index:?}");
+            moved += 1;
+        }
+    }
+    assert!(
+        laws > 100 && moved > 100,
+        "{laws} laws, {moved} moons moved"
+    );
 }

@@ -38,12 +38,12 @@
 //!
 //! A planet's moons take the sub-indices `0x01` upward in the order above (regular moons inside
 //! out, the giant-impact moon, then the captures kept in their ordinals), densely, and its rings
-//! `0x80` upward, the dusty ring first ([`generate_rings`]). A moon's own draw, its radius rank,
-//! is keyed by its candidate's identity rather than its sub-index (ruling 112.5), so that pruning
-//! one moon moves no other's draw: `candidate_key` gives the layout. A belt's member (P14.T21.c) numbers its one
-//! possible moon, a giant-impact moon, `0x80` above its own sub-index in its belt's slot: member
-//! k's moon is `Member(0x80 + k)` (design note 3's row, ruling 95.1), whose
-//! [`BodyIndex::parent`] is member k.
+//! `0x80` upward, the dusty ring first ([`generate_rings`]). A moon's own draws, its radius rank
+//! and its volatile ranks (P14.T56.c), are keyed by its candidate's identity rather than its
+//! sub-index (ruling 112.5), so that pruning one moon moves no other's draw: `candidate_key` gives
+//! the layout. A belt's member (P14.T21.c) numbers its one possible moon, a giant-impact moon,
+//! `0x80` above its own sub-index in its belt's slot: member k's moon is `Member(0x80 + k)`
+//! (design note 3's row, ruling 95.1), whose [`BodyIndex::parent`] is member k.
 //!
 //! # Frames
 //!
@@ -68,8 +68,10 @@
 use crate::Seed;
 use crate::orbit::KeplerElements;
 use crate::planetary::context::SystemContext;
+use crate::planetary::derive::atmosphere::VolatileDraws;
 use crate::planetary::index::{BodyIndex, BodySlot, BodySub, LAST_MOON_SUB};
 use crate::planetary::laplace::{self, InnerMoon, LaplaceFrame, LocalLaplace, PoleSense};
+use crate::planetary::moons::regular::{MoonVolatiles, VolatileSite};
 use crate::planetary::moons::{
     CaptureKind, CapturedMoon, ImpactMoon, IrregularPopulation, MoonParent, NearestBelt,
     RegularMoon, captures, giant_impact_moon, regular_moons,
@@ -130,12 +132,14 @@ impl<'f> SatelliteFrame<'f> {
     }
 }
 
-/// One moon of a planet with its index, its own radius rank and its plane (P14.T22.a, P14.T56.a).
+/// One moon of a planet with its index, its own radius rank and volatile ranks, and its plane
+/// (P14.T22.a, P14.T56.a, P14.T56.c).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Satellite {
     index: BodyIndex,
     moon: SatelliteMoon,
     radius_rank: UnitUniform,
+    volatiles: VolatileDraws,
     plane: MoonPlane,
 }
 
@@ -178,6 +182,36 @@ impl Satellite {
     #[must_use]
     pub const fn radius_rank(&self) -> UnitUniform {
         self.radius_rank
+    }
+
+    /// Its volatile ranks, words 0–5 of its own `planet.volatiles` stream
+    /// ([`VolatileDraws::for_body`]), keyed by its candidate's identity as its
+    /// [`radius_rank`](Self::radius_rank) is (P14.T56.c, ruling 112.5): each moon's own, as each
+    /// planet's is, so that the moons of one planet do not move together.
+    #[must_use]
+    pub const fn volatiles(&self) -> &VolatileDraws {
+        &self.volatiles
+    }
+
+    /// Where its volatiles formed (P14.T56.c): a regular moon's in its planet's nursery, a captured
+    /// or giant-impact moon's in its parent's zone of the star's disc.
+    #[must_use]
+    pub const fn volatile_site(&self) -> VolatileSite {
+        match self.moon {
+            SatelliteMoon::Regular(_) => VolatileSite::Nursery,
+            SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_) => VolatileSite::ParentZone,
+        }
+    }
+
+    /// The volatiles it is derived with from
+    /// [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION): its own
+    /// [`volatiles`](Self::volatiles) at its [`volatile_site`](Self::volatile_site) (P14.T56.c).
+    #[must_use]
+    pub const fn own_volatiles(&self) -> MoonVolatiles {
+        MoonVolatiles {
+            draws: self.volatiles,
+            site: self.volatile_site(),
+        }
     }
 
     /// The plane its elements are referred to (see the [module](self) documentation).
@@ -478,10 +512,12 @@ fn numbered(
         .collect();
     made.iter()
         .map(|&(index, moon)| {
-            // Ruling 112.5: the moon's own draw is keyed by what it is, not by where the moons
+            // Ruling 112.5: the moon's own draws are keyed by what it is, not by where the moons
             // kept before it leave it in the dense numbering, so that pruning one moon moves no
             // other.
-            let key = candidate_key(parent_index, &moon).unwrap_or(index);
+            let key = candidate_key(parent_index, &moon)
+                .unwrap_or(index)
+                .body_id(system);
             let plane = frame.map_or(MoonPlane::OrbitalPlane, |frame| {
                 MoonPlane::Laplace(local_plane(
                     frame,
@@ -493,7 +529,8 @@ fn numbered(
             Satellite {
                 index,
                 moon,
-                radius_rank: crate::planetary::system::radius_rank(seed, key.body_id(system)),
+                radius_rank: crate::planetary::system::radius_rank(seed, key),
+                volatiles: VolatileDraws::for_body(seed, key),
                 plane,
             }
         })

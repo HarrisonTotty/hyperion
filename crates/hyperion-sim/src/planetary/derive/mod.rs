@@ -155,6 +155,7 @@ pub struct PlacedBody {
     formation_distance: Metres,
     radius_rank: UnitUniform,
     volatiles: VolatileDraws,
+    volatile_zone: Option<FormationZone>,
     molten_until: Option<Years>,
 }
 
@@ -189,6 +190,7 @@ impl PlacedBody {
             formation_distance,
             radius_rank,
             volatiles: VolatileDraws::MEDIAN,
+            volatile_zone: None,
             molten_until: None,
         })
     }
@@ -200,6 +202,24 @@ impl PlacedBody {
     #[must_use]
     pub const fn with_volatiles(self, volatiles: VolatileDraws) -> Self {
         Self { volatiles, ..self }
+    }
+
+    /// The same body with its volatiles formed in `zone` rather than where the body is derived to
+    /// have formed (P14.T56.c): a captured or a giant-impact moon's, which [`derive_body`] reads
+    /// in its planet's circumplanetary disc while its water, carbon and nitrogen came from its
+    /// parent's zone of the star's disc (decision-p14-moons §2.2 (b)).
+    ///
+    /// Only the volatile inventory reads it, with the carbon's carrier that follows the inventory
+    /// ([`AtmosphereInputs::formed`]): the side of the snow line the volatiles formed on and their
+    /// formation temperature are `zone`'s ([`FormationZone::side`],
+    /// [`FormationZone::temperature`]). The radius, composition and every other value are the
+    /// body's own. A body built without it takes its volatiles where it formed.
+    #[must_use]
+    pub const fn with_volatiles_from(self, zone: FormationZone) -> Self {
+        Self {
+            volatile_zone: Some(zone),
+            ..self
+        }
     }
 
     /// The same body with a young magma ocean until its system is `until` old (design note 12;
@@ -218,6 +238,13 @@ impl PlacedBody {
     #[must_use]
     pub const fn volatiles(&self) -> &VolatileDraws {
         &self.volatiles
+    }
+
+    /// Where the body's volatiles formed, if not where it formed
+    /// ([`with_volatiles_from`](Self::with_volatiles_from)).
+    #[must_use]
+    pub const fn volatile_zone(&self) -> Option<&FormationZone> {
+        self.volatile_zone.as_ref()
     }
 
     /// The system age until which the body's surface is a young magma ocean, if it has one.
@@ -285,6 +312,117 @@ impl fmt::Display for BuildPlacedBodyError {
 }
 
 impl Error for BuildPlacedBodyError {}
+
+/// A place in a disc where something formed (P14.T56.c): its distance from the disc's host and
+/// the disc's snow line, which together fix the side of the snow line it formed on and the
+/// disc's temperature there, [`formation_temperature`]'s 170 K × √(`d_snow` ÷ `d_form`).
+///
+/// A captured or giant-impact moon's volatiles formed in its parent's zone of the star's disc
+/// ([`PlacedBody::with_volatiles_from`]; decision-p14-moons §2.2 (b)).
+///
+/// - A capture formed in the star's disc, not its planet's. For a giant's irregulars and
+///   Triton-like captures the parent's formation distance is the nearest place the generator has
+///   to the outer planetesimal disc they are captured from in planetary encounters (Nesvorný,
+///   Vokrouhlický and Morbidelli 2007, AJ 133, 1962; Nesvorný et al. 2014, ApJ 784, 22, for
+///   Jupiter's), a warm bound. A rocky planet's small captures take it as the ruling does.
+/// - A giant-impact moon is made of its parent's mantle and the impactor (Canup 2012, Science
+///   338, 1052), so the zone takes the impactor to have formed near its target.
+///
+/// # Examples
+///
+/// A giant formed at 3 au in the zero-age Sun's disc, whose snow line is at 2.26 au, formed beyond
+/// the snow line but inside the ammonia line, so its captures' nitrogen takes no icy boost:
+///
+/// ```
+/// use hyperion_sim::planetary::derive::atmosphere::nitrogen_boosted;
+/// use hyperion_sim::planetary::derive::{FormationZone, SnowLineSide};
+/// use hyperion_sim::units::Metres;
+/// use hyperion_sim::units::consts::METRES_PER_AU;
+///
+/// let au = |x: f64| Metres::new(x * METRES_PER_AU);
+/// let zone = FormationZone::new(au(3.0), au(2.26))?;
+/// assert_eq!(zone.side(), SnowLineSide::Beyond);
+/// assert!((zone.temperature().value() - 147.5).abs() < 0.1);
+/// assert!(!nitrogen_boosted(zone.temperature()));
+/// # Ok::<(), hyperion_sim::planetary::derive::BuildFormationZoneError>(())
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct FormationZone {
+    distance: Metres,
+    snow_line: Metres,
+}
+
+impl FormationZone {
+    /// The place `distance` from a disc's host whose snow line lies at `snow_line`.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildFormationZoneError::DistanceNotPositive`] or
+    /// [`BuildFormationZoneError::SnowLineNotPositive`] for a value that is not positive and
+    /// finite.
+    pub fn new(distance: Metres, snow_line: Metres) -> Result<Self, BuildFormationZoneError> {
+        let positive = |x: Metres| x.value().is_finite() && x.value() > 0.0;
+        if !positive(distance) {
+            return Err(BuildFormationZoneError::DistanceNotPositive);
+        }
+        if !positive(snow_line) {
+            return Err(BuildFormationZoneError::SnowLineNotPositive);
+        }
+        Ok(Self {
+            distance,
+            snow_line,
+        })
+    }
+
+    /// The distance from the disc's host.
+    #[must_use]
+    pub const fn distance(&self) -> Metres {
+        self.distance
+    }
+
+    /// The disc's snow line.
+    #[must_use]
+    pub const fn snow_line(&self) -> Metres {
+        self.snow_line
+    }
+
+    /// The side of the snow line the place lies on, as [`derive_body`] judges a body's
+    /// formation distance: inside only where it lies strictly inside the line.
+    #[must_use]
+    pub fn side(&self) -> SnowLineSide {
+        if self.distance.value() < self.snow_line.value() {
+            SnowLineSide::Inside
+        } else {
+            SnowLineSide::Beyond
+        }
+    }
+
+    /// The disc's temperature there ([`formation_temperature`]).
+    #[must_use]
+    pub fn temperature(&self) -> Kelvin {
+        formation_temperature(self.distance, self.snow_line)
+    }
+}
+
+/// A [`FormationZone`] could not be built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BuildFormationZoneError {
+    /// The distance was not positive and finite.
+    DistanceNotPositive,
+    /// The snow line was not positive and finite.
+    SnowLineNotPositive,
+}
+
+impl fmt::Display for BuildFormationZoneError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::DistanceNotPositive => "a formation zone's distance must be positive and finite",
+            Self::SnowLineNotPositive => "a formation zone's snow line must be positive and finite",
+        })
+    }
+}
+
+impl Error for BuildFormationZoneError {}
 
 /// A body's hosts as the derivation reads them at the time: the mass it orbits, and the light of
 /// every star (ruling 34: each host as plain values of L, `T_eff` and R from its `StarState`).
@@ -961,7 +1099,9 @@ pub(crate) fn derive_body_under(
 
     // T12 and T13, three passes (T13.c): the albedo of one pass's surface state sets the
     // equilibrium temperature the next pass reads.
-    let inventory = inventory_of(line, placed, disc, formed, mass, &fractions, age_now);
+    // The side of the snow line the body's volatiles formed on, which its carbon's carrier
+    // follows: its own, or a captured or giant-impact moon's parent's (P14.T56.c).
+    let (side, inventory) = inventory_of(line, placed, disc, formed, mass, &fractions, age_now);
     let crust = match placed.molten_until {
         Some(until) if age_now < until => Crust::Molten,
         Some(_) | None => Crust::Solid,
@@ -979,7 +1119,7 @@ pub(crate) fn derive_body_under(
             material: SurfaceMaterial::of(&fractions),
             envelope_fraction: fractions.envelope(),
             inventory,
-            formed,
+            formed: side,
             equilibrium: irradiated,
             worst_equilibrium: equilibrium_temperature(sky.peak_flux, albedo),
             heated,
@@ -1242,10 +1382,12 @@ fn envelope_escape(
     }
 }
 
-/// The volatile inventory of `placed`, of mass `mass` and fractions `fractions` at age `age`,
-/// formed on `formed`'s side of `disc`'s snow line, with nitrogen's boost beyond `nitrogen_line`
-/// (T13.a; P14.T50.c): [`volatile_inventory_under`] at its formation temperature in `disc`
-/// ([`formation_temperature`]) and with its ranks.
+/// The side of the snow line the volatiles of `placed` formed on, and its volatile inventory, of
+/// mass `mass` and fractions `fractions` at age `age`, with nitrogen's boost beyond
+/// `nitrogen_line` (T13.a; P14.T50.c; P14.T56.c): [`volatile_inventory_under`] with its ranks, at
+/// the side and formation temperature of its [`volatile_zone`](PlacedBody::volatile_zone) where
+/// it has one, and otherwise at `formed`, the side of `disc`'s snow line it formed on, and its
+/// formation temperature in `disc` ([`formation_temperature`]).
 #[must_use]
 fn inventory_of(
     nitrogen_line: NitrogenLine,
@@ -1255,16 +1397,24 @@ fn inventory_of(
     mass: EarthMasses,
     fractions: &MassFractions,
     age: Years,
-) -> VolatileInventory {
-    volatile_inventory_under(
+) -> (SnowLineSide, VolatileInventory) {
+    let (side, temperature) = match placed.volatile_zone {
+        Some(zone) => (zone.side(), zone.temperature()),
+        None => (
+            formed,
+            formation_temperature(placed.formation_distance, disc.snow_line()),
+        ),
+    };
+    let inventory = volatile_inventory_under(
         nitrogen_line,
         mass,
         fractions,
-        formed,
-        formation_temperature(placed.formation_distance, disc.snow_line()),
+        side,
+        temperature,
         &placed.volatiles,
         age,
-    )
+    );
+    (side, inventory)
 }
 
 /// What [`derive_body`] fixes at formation (T11): the side of the disc's snow line the body formed
@@ -2661,5 +2811,76 @@ mod tests {
                 assert_eq!(solved.unwrap(), expected);
             }
         }
+    }
+
+    /// P14.T56.c: a formation zone is a place, two positive, finite distances, and it lies inside
+    /// the snow line only strictly inside it, as `derive_body` judges a formation distance.
+    #[test]
+    fn a_formation_zone_is_a_place_judged_as_a_formation_distance_is() {
+        let au = |x: f64| Metres::new(x * METRES_PER_AU);
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                FormationZone::new(Metres::new(bad), au(2.0)),
+                Err(BuildFormationZoneError::DistanceNotPositive)
+            );
+            assert_eq!(
+                FormationZone::new(au(2.0), Metres::new(bad)),
+                Err(BuildFormationZoneError::SnowLineNotPositive)
+            );
+        }
+        let text = BuildFormationZoneError::DistanceNotPositive.to_string();
+        assert_eq!(text, text.to_lowercase());
+        assert!(!text.ends_with('.'));
+        let disc = solar_disc();
+        let line = disc.snow_line();
+        for (d, side) in [
+            (line, SnowLineSide::Beyond),
+            (
+                Metres::new(line.value() * (1.0 - 1e-12)),
+                SnowLineSide::Inside,
+            ),
+        ] {
+            let zone = FormationZone::new(d, line).unwrap();
+            assert_eq!(zone.side(), side);
+            let placed =
+                PlacedBody::new(EarthMasses::new(1.0), orbit(1.0, 0.0), d, UnitUniform::HALF)
+                    .unwrap();
+            assert_eq!(formation(&placed, &disc).unwrap().0, side);
+            assert_same_bits(
+                zone.temperature().value(),
+                formation_temperature(d, line).value(),
+            );
+        }
+    }
+
+    /// P14.T56.c: a body's volatiles taken from another zone set its inventory's side and its
+    /// carbon's carrier, and nothing of its bulk. An Earth formed at 2 au, inside the zero-age
+    /// Sun's snow line and beyond the present Sun's maximum-greenhouse limit, carries its carbon
+    /// as carbon dioxide; with its volatiles from 3 au, beyond the line, as methane, with a
+    /// hundred times its carbon.
+    #[test]
+    fn a_body_s_carbon_carrier_follows_where_its_volatiles_formed() {
+        use crate::planetary::derive::atmosphere::CarbonCarrier;
+        let disc = solar_disc();
+        let own = placed(EARTH_MASS_KG, 2.0, 0.0, 0.5);
+        let zone = FormationZone::new(Metres::new(3.0 * METRES_PER_AU), disc.snow_line()).unwrap();
+        let moved = own.with_volatiles_from(zone);
+        assert_eq!(moved.volatile_zone(), Some(&zone));
+        let (a, b) = (derive(&own, &disc).unwrap(), derive(&moved, &disc).unwrap());
+        assert_eq!(a.formed(), SnowLineSide::Inside);
+        assert_eq!(b.formed(), SnowLineSide::Inside);
+        assert_eq!(
+            a.atmosphere().carbon_carrier(),
+            Some(CarbonCarrier::CarbonDioxide)
+        );
+        assert_eq!(
+            b.atmosphere().carbon_carrier(),
+            Some(CarbonCarrier::Methane)
+        );
+        let ratio = b.inventory().carbon_dioxide().value() / a.inventory().carbon_dioxide().value();
+        assert!((ratio / 100.0 - 1.0).abs() < 1e-12, "{ratio}");
+        assert_same_bits(a.radius().value(), b.radius().value());
+        assert_eq!(a.fractions(), b.fractions());
+        assert_same_bits(a.surface_gravity().value(), b.surface_gravity().value());
     }
 }

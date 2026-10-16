@@ -410,10 +410,13 @@ pub const AMMONIA_HYDRATE_CONDENSATION: Kelvin = Element::N.condensation_tempera
 ///
 /// Both distances are positive and finite. A planet's, dwarf planet's or belt member's disc is
 /// its star's, at the host's zero-age luminosity, so `T_f` does not change with time, and a body
-/// that migrated keeps its formation distance's, as its [`SnowLineSide`] does. A moon derived in
-/// its planet's nursery reads the nursery's (P14.T56.c). Outside that range the temperature is
-/// infinite at a formation distance of +0 and not a number for a negative distance, a negative
-/// snow line or a NaN, none of which [`nitrogen_boosted`] boosts; a snow line of zero gives 0 K.
+/// that migrated keeps its formation distance's, as its [`SnowLineSide`] does. A regular moon,
+/// derived in its planet's nursery, reads the nursery's at its own distance, 170 K × √(`d_ice` ÷
+/// a); a captured or giant-impact moon reads its parent's zone of the star's disc
+/// ([`FormationZone`](crate::planetary::derive::FormationZone), P14.T56.c). Outside that range
+/// the temperature is infinite at a formation distance of +0 and not a number for a negative
+/// distance, a negative snow line or a NaN, none of which [`nitrogen_boosted`] boosts; a snow line
+/// of zero gives 0 K.
 ///
 /// # Examples
 ///
@@ -1183,8 +1186,10 @@ pub struct AtmosphereInputs {
     pub envelope_fraction: f64,
     /// Its volatile inventory ([`volatile_inventory`]).
     pub inventory: VolatileInventory,
-    /// The side of the snow line it formed on, which its inventory and, beyond the
-    /// maximum-greenhouse limit, its carbon's carrier follow (P14.T24.f).
+    /// The side of the snow line its volatiles formed on, which its inventory and, beyond the
+    /// maximum-greenhouse limit, its carbon's carrier follow (P14.T24.f): where the body formed,
+    /// or for a captured or giant-impact moon its parent's zone of the star's disc (P14.T56.c,
+    /// [`FormationZone`](crate::planetary::derive::FormationZone)).
     pub formed: SnowLineSide,
     /// Its equilibrium temperature from its hosts' light at the time, at the albedo in use.
     pub equilibrium: Kelvin,
@@ -1286,8 +1291,8 @@ impl Atmosphere {
     }
 
     /// The species the body's carbon is airborne as (P14.T24.f): [`CarbonCarrier::Methane`] on a
-    /// body formed beyond the snow line that lies beyond the maximum-greenhouse limit with a solid
-    /// crust, and [`CarbonCarrier::CarbonDioxide`] otherwise; `None` for a gas envelope, whose
+    /// body whose volatiles formed beyond the snow line that lies beyond the maximum-greenhouse
+    /// limit with a solid crust, and [`CarbonCarrier::CarbonDioxide`] otherwise; `None` for a gas envelope, whose
     /// composition is not this module's, and for a body of no mass or radius. It names the species
     /// whether or not any carbon is airborne: a cold airless moon formed beyond the snow line,
     /// which kept none, reads methane.
@@ -1312,12 +1317,13 @@ impl Atmosphere {
 /// The species a body's carbon is airborne as (P14.T24.f, [`Atmosphere::carbon_carrier`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum CarbonCarrier {
-    /// Carbon dioxide, CO₂: a body formed inside the snow line, and one beyond it within the
-    /// maximum-greenhouse limit or with a molten crust.
+    /// Carbon dioxide, CO₂: a body whose volatiles formed inside the snow line, and one whose
+    /// volatiles formed beyond it within the maximum-greenhouse limit or with a molten crust.
     CarbonDioxide,
-    /// Methane, CH₄, mole for mole: a body formed beyond the snow line that lies beyond the
-    /// maximum-greenhouse limit ([`Insolation::BeyondMaximumGreenhouse`]) with a solid crust
-    /// (science-p14-t24f §5).
+    /// Methane, CH₄, mole for mole: a body whose volatiles formed beyond the snow line
+    /// ([`AtmosphereInputs::formed`]: where it formed, or a captured or giant-impact moon's
+    /// parent's zone, P14.T56.c) that lies beyond the maximum-greenhouse limit
+    /// ([`Insolation::BeyondMaximumGreenhouse`]) with a solid crust (science-p14-t24f §5).
     ///
     /// Beyond that limit no pressure of carbon dioxide keeps a surface
     /// above water's freezing point, since its Rayleigh scattering outweighs its added greenhouse

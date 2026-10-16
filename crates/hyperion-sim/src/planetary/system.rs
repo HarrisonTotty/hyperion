@@ -141,7 +141,8 @@ use crate::planetary::index::{BodyIndex, LAST_PLANET_SLOT};
 use crate::planetary::label::{self, BodyLabel};
 use crate::planetary::laplace::{LaplaceFrame, LaplaceFrameParts, SatellitePlanes, hydrostatic_j2};
 use crate::planetary::moons::regular::{
-    DerivedMoon, MOON_ICE_DENSITY, MOON_ROCK_DENSITY, MoonNursery, MoonSky, derive_moon,
+    DerivedMoon, MOON_ICE_DENSITY, MOON_ROCK_DENSITY, MoonInventories, MoonNursery, MoonSky,
+    MoonVolatiles, derive_moon,
 };
 use crate::planetary::moons::regular::{ICY_MOON_ICE_FRACTION, moon_radius};
 use crate::planetary::moons::{
@@ -422,12 +423,12 @@ impl Body {
 
     /// The moon `satellite` of `parent`.
     #[must_use]
-    fn moon(satellite: Satellite, parent: &MoonParent, parent_index: BodyIndex) -> Self {
+    fn moon(satellite: &Satellite, parent: &MoonParent, parent_index: BodyIndex) -> Self {
         Self {
             index: satellite.index(),
             host: OrbitHost::Body(parent_index),
             part: Part::Moon(MoonPart {
-                satellite,
+                satellite: *satellite,
                 parent: *parent,
                 orbit: satellite.orbit_at(parent, Years::new(0.0)),
             }),
@@ -885,6 +886,9 @@ pub struct PlanetarySystem {
     satellites: Vec<Satellites>,
     belts: Vec<Belt>,
     halo: Option<SystemHalo>,
+    /// Which volatiles its moons are derived with (P14.T56.c's hold): version 22's below
+    /// [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION), each moon's own from it.
+    moon_inventories: MoonInventories,
 }
 
 /// A system's cometary halo and the orbit host it surrounds.
@@ -1046,7 +1050,7 @@ fn satellite_bodies(found: &[Satellites]) -> Vec<Body> {
                 satellites
                     .moons()
                     .iter()
-                    .map(|&moon| Body::moon(moon, parent, satellites.parent_index())),
+                    .map(|moon| Body::moon(moon, parent, satellites.parent_index())),
             );
         }
         bodies.extend(
@@ -1162,6 +1166,7 @@ pub fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
         satellites: Vec::new(),
         belts: Vec::new(),
         halo: None,
+        moon_inventories: MoonInventories::in_force(),
     }
 }
 
@@ -1549,6 +1554,23 @@ impl PlanetarySystem {
     #[must_use]
     pub fn satellites(&self) -> &[Satellites] {
         &self.satellites
+    }
+
+    /// The same system with its moons derived with the volatiles `rule` gives (P14.T56.c's hold),
+    /// for the tests to reach each moon's own ahead of the bump.
+    ///
+    /// Setting it after [`generate`] is generating with it: nothing generation reads depends on a
+    /// moon's inventory, since a moon's rotation law reads its bulk's class, fractions and radius
+    /// and its orbit, which no inventory reaches
+    /// (`under_their_own_volatiles_the_moons_move_nothing_their_rotation_reads`). P14.T54.a deletes
+    /// it with the hold.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_moon_inventories(self, rule: MoonInventories) -> Self {
+        Self {
+            moon_inventories: rule,
+            ..self
+        }
     }
 
     /// The satellites of the body `parent`: [`Satellites::none`] for a body with none.
@@ -2048,7 +2070,7 @@ impl PlanetarySystem {
                 let state = moon_state(now.state, &moon.satellite, ctx.age_at_epoch(), t);
                 let bulk = if state == BodyState::Present && now.position.is_some() {
                     let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
-                    match Self::moon_derived(&epoch, moon, &orbit, &now) {
+                    match self.moon_derived(&epoch, moon, &orbit, &now) {
                         Some(derived) => {
                             let properties = Self::moon_bulk_of(moon, &derived, &now);
                             bulk_composition(ctx, properties.fractions(), *derived.inventory())
@@ -2434,7 +2456,7 @@ impl PlanetarySystem {
             return None;
         }
         let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(epoch.t));
-        let derived = Self::moon_derived(epoch, moon, &orbit, now)?;
+        let derived = self.moon_derived(epoch, moon, &orbit, now)?;
         let bulk = Self::moon_bulk_of(moon, &derived, now);
         self.rotation_from(ctx, body, &orbit, &bulk, body.mass())
     }
@@ -2767,6 +2789,10 @@ impl PlanetarySystem {
             Part::Member(member) => member.member.orbit().semi_major_axis(),
             Part::Moon(_) | Part::Ring(_) => return None,
         };
+        // A nursery refused is a parent beyond the cooling fit's 13 Jupiter masses, which
+        // placement never makes: its moons' bulk is not computed (`moon_derived`). Its zone
+        // (P14.T56.c) is never refused here, since a placed planet's formation distance and a
+        // member's orbit are positive and finite, and so is a disc's snow line.
         MoonNursery::new(parent, ctx.composition(), profile, formation).ok()
     }
 
@@ -2811,7 +2837,7 @@ impl PlanetarySystem {
             (Part::Moon(moon), true, Some(centre)) => {
                 let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
                 let (trajectory, valid_until) = moon_trajectory(ctx, moon, t, parent.changes_at);
-                let derived = Self::moon_derived(epoch, moon, &orbit, parent);
+                let derived = self.moon_derived(epoch, moon, &orbit, parent);
                 let bulk = derived
                     .as_ref()
                     .map(|derived| (Self::moon_bulk_of(moon, derived, parent), derived));
@@ -2876,9 +2902,12 @@ impl PlanetarySystem {
     }
 
     /// The derivation of the present moon `moon` on `orbit` at the epoch's time, whose parent is
-    /// as `parent` says (P14.T17.b); `None` where this generator version does not compute it.
+    /// as `parent` says (P14.T17.b), with the volatiles the system's moons take (P14.T56.c's
+    /// hold: version 22's at the median ranks in the nursery, or the moon's own); `None` where
+    /// this generator version does not compute it.
     #[must_use]
     fn moon_derived(
+        &self,
         epoch: &Epoch<'_>,
         moon: &MoonPart,
         orbit: &KeplerElements,
@@ -2891,6 +2920,10 @@ impl PlanetarySystem {
             return None;
         };
         let satellite = &moon.satellite;
+        let volatiles = match self.moon_inventories {
+            MoonInventories::Shared => MoonVolatiles::SHARED,
+            MoonInventories::Own => satellite.own_volatiles(),
+        };
         // As above: the derivation refuses only inputs the generator never makes, so its error
         // carries nothing a caller could act on.
         derive_moon(
@@ -2900,6 +2933,7 @@ impl PlanetarySystem {
             nursery,
             sky,
             satellite.radius_rank(),
+            volatiles,
             epoch.ctx.age_at_epoch(),
             epoch.t,
         )

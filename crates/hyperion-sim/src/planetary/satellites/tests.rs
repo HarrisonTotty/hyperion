@@ -1,5 +1,7 @@
 //! Tests of the satellite assembly (P14.T22.a) on whole systems of the planetary sample.
 
+use hyperion_testkit::float::assert_same_bits;
+
 use super::*;
 use crate::planetary::index::BodySlot;
 use crate::planetary::system::tests::{SEED, whole};
@@ -394,4 +396,172 @@ fn a_regular_moon_in_the_band_is_dropped_with_every_regular_moon_beyond_it() {
         cut += 1;
     }
     assert!(cut > 10, "{cut} parents cut");
+}
+
+/// The six volatile ranks of `draws`, in their words' order, with their names.
+fn ranks(draws: &VolatileDraws) -> [(&'static str, UnitUniform); 6] {
+    [
+        ("water", draws.water),
+        ("carbon", draws.carbon),
+        ("nitrogen", draws.nitrogen),
+        ("sulphur", draws.sulphur),
+        ("chlorine", draws.chlorine),
+        ("redox", draws.redox),
+    ]
+}
+
+/// P14.T56.c: each moon draws its own volatile ranks, words 0–5 of its `planet.volatiles`
+/// stream, on the candidate key its radius rank uses (ruling 112.5), whatever sub-index the dense
+/// numbering gives it; and two moons of one planet draw different ranks, every one of the six.
+#[test]
+fn each_moon_draws_its_own_volatile_ranks_by_its_candidate() {
+    let (mut moons, mut shifted, mut pairs) = (0, 0, 0);
+    for (_, system) in whole() {
+        for found in system.satellites() {
+            let parent = found.parent_index();
+            for moon in found.moons() {
+                let key = candidate_key(parent, moon.moon()).unwrap_or(moon.index());
+                let expected = VolatileDraws::for_body(SEED, key.body_id(system.system()));
+                assert_eq!(*moon.volatiles(), expected, "{:?}", moon.index());
+                assert_eq!(moon.own_volatiles().draws, expected);
+                shifted += usize::from(key != moon.index());
+                moons += 1;
+            }
+            for (i, a) in found.moons().iter().enumerate() {
+                for b in &found.moons()[i + 1..] {
+                    for ((name, x), (_, y)) in
+                        ranks(a.volatiles()).into_iter().zip(ranks(b.volatiles()))
+                    {
+                        assert_ne!(x, y, "{name} of {:?} and {:?}", a.index(), b.index());
+                    }
+                    pairs += 1;
+                }
+            }
+        }
+    }
+    assert!(
+        moons > 100 && shifted > 20 && pairs > 50,
+        "{moons} moons, {shifted} keyed apart from their index, {pairs} pairs"
+    );
+}
+
+/// P14.T56.c: a regular moon's volatiles formed in its planet's nursery, a captured or
+/// giant-impact moon's in its parent's zone of the star's disc.
+#[test]
+fn a_moon_s_volatiles_formed_where_its_origin_says() {
+    let mut seen = [0_u32; 3];
+    for (_, system) in whole() {
+        for moon in system.satellites().iter().flat_map(Satellites::moons) {
+            let (expected, n) = match moon.origin() {
+                MoonOrigin::Regular => (VolatileSite::Nursery, 0),
+                MoonOrigin::GiantImpact => (VolatileSite::ParentZone, 1),
+                MoonOrigin::Captured => (VolatileSite::ParentZone, 2),
+            };
+            assert_eq!(moon.volatile_site(), expected, "{:?}", moon.index());
+            assert_eq!(moon.own_volatiles().site, expected);
+            seen[n] += 1;
+        }
+    }
+    assert!(
+        seen.iter().all(|&n| n > 10),
+        "{seen:?} regular, giant-impact and captured"
+    );
+}
+
+/// P14.T56.c's "removing a moon in T22.a's pruning moves no other moon's ranks": under a moon-mass
+/// limit that keeps only a Jupiter's innermost regular moon, the moons beyond it go, the captures
+/// kept move down the dense numbering, and every moon kept in both draws the same ranks.
+#[test]
+fn pruning_a_moon_moves_no_other_moon_s_volatile_ranks() {
+    let age = Years::new(4.5e9);
+    let (mut compared, mut renumbered) = (0, 0);
+    for index in 0..150 {
+        let (at, parent) = jupiter_at(index);
+        let free = satellites_of(
+            SEED,
+            at,
+            &parent,
+            None,
+            None,
+            age,
+            SatelliteFrame::OrbitalPlane,
+        );
+        let Some(first) = free
+            .moons()
+            .iter()
+            .find(|moon| moon.origin() == MoonOrigin::Regular)
+        else {
+            continue;
+        };
+        let limited = MoonParent::new(crate::planetary::moons::MoonParentParts {
+            id: parent.id(),
+            kind: parent.kind(),
+            mass: parent.mass(),
+            radius: parent.radius(),
+            class: parent.class(),
+            orbit: *parent.orbit(),
+            host_mass: parent.host_mass(),
+            maximum_moon_mass: first.mass(),
+        })
+        .unwrap();
+        let pruned = satellites_of(
+            SEED,
+            at,
+            &limited,
+            None,
+            None,
+            age,
+            SatelliteFrame::OrbitalPlane,
+        );
+        assert!(pruned.moons().len() <= free.moons().len());
+        for moon in pruned.moons() {
+            let Some(same) = free
+                .moons()
+                .iter()
+                .find(|other| other.moon() == moon.moon())
+            else {
+                continue;
+            };
+            assert_eq!(moon.volatiles(), same.volatiles(), "{:?}", moon.index());
+            assert_same_bits(moon.radius_rank().value(), same.radius_rank().value());
+            renumbered += usize::from(moon.index() != same.index());
+            compared += 1;
+        }
+    }
+    assert!(
+        compared > 200 && renumbered > 20,
+        "{compared} moons compared, {renumbered} renumbered"
+    );
+}
+
+/// P14.T56.c: over 10⁴ generated moons each of the six volatile ranks is uniform
+/// (Kolmogorov–Smirnov at the suite's α).
+#[test]
+fn each_volatile_rank_of_ten_thousand_generated_moons_is_uniform() {
+    use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample};
+    let age = Years::new(4.5e9);
+    let mut all: [Vec<f64>; 6] = Default::default();
+    let mut index = 0;
+    while all[0].len() < 10_000 {
+        let (at, parent) = jupiter_at(index);
+        let found = satellites_of(
+            SEED,
+            at,
+            &parent,
+            None,
+            None,
+            age,
+            SatelliteFrame::OrbitalPlane,
+        );
+        for moon in found.moons() {
+            for (column, (_, rank)) in all.iter_mut().zip(ranks(moon.volatiles())) {
+                column.push(rank.value());
+            }
+        }
+        index += 1;
+    }
+    for (column, (name, _)) in all.iter_mut().zip(ranks(&VolatileDraws::MEDIAN)) {
+        let ks = ks_one_sample(column, |x| x.clamp(0.0, 1.0));
+        assert_p_value(name, ks.p_value, ALPHA);
+    }
 }
