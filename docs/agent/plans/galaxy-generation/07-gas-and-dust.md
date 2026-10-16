@@ -2210,8 +2210,9 @@ Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::
     `EXTINCTION REJECTED: no such system` for a target the server resolves to none, as a refusal
     with no `RETRY`, and shows the link's state once: not again for the extinction while the
     summary's status shows it. `E(B−V)` has U+2212 in the readout's row, the doc comments and the
-    tests. No caption under the overlay's legends (§2.3). Built to D0 §2.4's drafts, pending the
-    owner's sign-off (the sign-off queue's item 22); the guide is not edited here.
+    tests. No caption under the overlay's legends (§2.3). Built to D0 §2.4's drafts, signed off
+    2026-10-16 (`signoff-11.md`, item 22: (d) widened to the display's present state, the rest as
+    drafted) and applied to the guide; P07.T11.d builds (j)'s line.
   - _Ruling 3, the room (D0 §3.2)._ The compact page's scroll rule is deleted, and nothing on the
     page scrolls. `mapLayout.ts` gains the measured `WORDS_REM` (the tallest words of each view,
     plain and under the overlay, in each layout, plus 0.5 rem), and three rules on the page's size
