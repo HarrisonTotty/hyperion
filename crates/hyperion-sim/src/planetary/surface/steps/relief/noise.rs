@@ -43,30 +43,140 @@ pub(super) const LANDFORM_INSTANCE: u16 = 0;
 /// Earth): continents rise and fall as wholes, as Africa and Australia do.
 pub(super) const LANDFORM_FIRST_LEVEL: u8 = 2;
 
+/// The coarsest lattice level of a stagnant lid's red field, 1 (24 cells): its octave holds about
+/// degrees 2–3, so that the field's degree variance runs from degree 2 (`decision-r09-t12-coarse.md`,
+/// the addendum of 2026-10-16).
+pub(super) const RED_FIRST_LEVEL: u8 = 1;
+
 /// A unit field over `pass`'s cells, instance `instance`, from lattice level `first` to `last`
-/// (held to the field's level): zero-mean and unit-RMS over the sphere, area-weighted (the module
-/// documentation).
+/// (held to the field's level), each octave's RMS 1 ÷ √2 of the next coarser one's (β = 2):
+/// zero-mean and unit-RMS over the sphere, area-weighted (the module documentation).
 ///
 /// # Panics
 ///
 /// If `first` is above the held `last`, or a field has no area, which no grid has.
 #[must_use]
 pub(super) fn unit_field(pass: &Pass<'_>, instance: u16, first: u8, last: u8) -> Vec<f64> {
+    let mut sum = octave_sum(pass, instance, first, last, 2.0);
+    standardise(&mut sum, pass.grid().solid_angles_sr());
+    sum
+}
+
+/// A red unit field over `pass`'s cells, instance `instance`: a per-degree variance ∝ l^−β of
+/// exponent `exponent` from degree 2 to the cell's Nyquist degree, with no degree-1 term
+/// (`decision-r09-t12-coarse.md`'s addendum, after Turcotte 1987): octaves from
+/// [`RED_FIRST_LEVEL`] to the field's level, each octave's RMS 2^(−(β − 1) ÷ 2) of the next
+/// coarser one's, so that degrees 2–5 carry about 72% of the variance at β = 2; then its
+/// degree-0 and degree-1 parts removed by area-weighted least squares on 1, x, y and z; then
+/// zero-mean and unit-RMS over the sphere.
+///
+/// # Panics
+///
+/// If `exponent` is not finite, or a field has no area.
+#[must_use]
+pub(super) fn red_field(pass: &Pass<'_>, instance: u16, exponent: f64) -> Vec<f64> {
+    assert!(exponent.is_finite(), "a spectrum's exponent is finite");
     let grid = pass.grid();
-    let level = grid.level();
-    let last = last.min(level);
+    let mut sum = octave_sum(pass, instance, RED_FIRST_LEVEL, grid.level(), exponent);
+    remove_degree_one(&mut sum, grid.centres(), grid.solid_angles_sr());
+    standardise(&mut sum, grid.solid_angles_sr());
+    sum
+}
+
+/// The sum of the unit octaves of instance `instance` from lattice level `first` to `last` (held
+/// to the field's level), each octave's amplitude 2^(−(β − 1) ÷ 2) of the next coarser one's.
+///
+/// # Panics
+///
+/// If `first` is above the held `last`.
+#[must_use]
+fn octave_sum(pass: &Pass<'_>, instance: u16, first: u8, last: u8, exponent: f64) -> Vec<f64> {
+    let grid = pass.grid();
+    let last = last.min(grid.level());
     assert!(first <= last, "a noise's levels {first}..={last} are empty");
-    let weights = grid.solid_angles_sr();
-    let mut sum = vec![0.0; weights.len()];
+    let mut sum = vec![0.0; grid.solid_angles_sr().len()];
     for lattice_level in first..=last {
         let octave = octave(pass, instance, lattice_level);
-        let amplitude = math::powf(0.5, 0.5 * f64::from(lattice_level - first));
+        let amplitude = math::powf(
+            0.5,
+            0.5 * (exponent - 1.0) * f64::from(lattice_level - first),
+        );
         for (s, o) in sum.iter_mut().zip(&octave) {
             *s += amplitude * o;
         }
     }
-    standardise(&mut sum, weights);
     sum
+}
+
+/// Removes from `values` its least-squares fit, under the area weights `weights`, by 1, x, y and
+/// z of the cells' `centres`: its degree-0 and degree-1 parts, which those four span on the
+/// sphere. The 4 × 4 normal equations are summed in cell order and solved by Gaussian elimination
+/// with partial pivoting, in index order.
+///
+/// # Panics
+///
+/// If the normal equations are singular, which no grid of cells on a sphere gives.
+pub(super) fn remove_degree_one(values: &mut [f64], centres: &[[f64; 3]], weights: &[f64]) {
+    let basis = |c: [f64; 3]| [1.0, c[0], c[1], c[2]];
+    let mut matrix = [[0.0; 5]; 4];
+    for ((&v, &c), &w) in values.iter().zip(centres).zip(weights) {
+        let b = basis(c);
+        for (row, &bi) in matrix.iter_mut().zip(&b) {
+            for (entry, &bj) in row.iter_mut().zip(&b) {
+                *entry += w * bi * bj;
+            }
+            row[4] += w * bi * v;
+        }
+    }
+    let coefficients = solve_four(matrix);
+    for (v, &c) in values.iter_mut().zip(centres) {
+        let b = basis(c);
+        *v -= coefficients[0] * b[0]
+            + coefficients[1] * b[1]
+            + coefficients[2] * b[2]
+            + coefficients[3] * b[3];
+    }
+}
+
+/// The solution of the 4 × 4 system whose augmented rows are `rows`, by Gaussian elimination with
+/// partial pivoting (the first of equal pivots), in index order.
+///
+/// # Panics
+///
+/// If a pivot is zero.
+#[must_use]
+fn solve_four(mut rows: [[f64; 5]; 4]) -> [f64; 4] {
+    for k in 0..4 {
+        let pivot = (k..4).fold(k, |best, i| {
+            if rows[i][k].abs() > rows[best][k].abs() {
+                i
+            } else {
+                best
+            }
+        });
+        rows.swap(k, pivot);
+        let p = rows[k][k];
+        assert!(
+            p != 0.0,
+            "the degree-one fit's normal equations are regular"
+        );
+        let pivot_row = rows[k];
+        for row in &mut rows[k + 1..] {
+            let factor = row[k] / p;
+            for (entry, &above) in row.iter_mut().zip(&pivot_row).skip(k) {
+                *entry -= factor * above;
+            }
+        }
+    }
+    let mut x = [0.0; 4];
+    for k in (0..4).rev() {
+        let mut value = rows[k][4];
+        for j in k + 1..4 {
+            value -= rows[k][j] * x[j];
+        }
+        x[k] = value / rows[k][k];
+    }
+    x
 }
 
 /// Makes `values` zero-mean and unit-RMS under the area weights `weights`, summed in index order;

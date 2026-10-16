@@ -21,8 +21,10 @@
 //!   item 5).
 //! - **On a stagnant lid** (every other regime, and a mobile lid R09.T11 could not lay out), the
 //!   one lid is one population about the datum, of plan 14's width [`STAGNANT_LID_RELIEF`] (Design
-//!   note 3's structural share on such a lid, Venus's), Gaussian, which no other step realises (a
-//!   lean of this batch's, recorded in the plan).
+//!   note 3's structural share on such a lid, Venus's), Gaussian, which no other step realises: a
+//!   red field, its degree variance ∝ l^−β₁ from degree 2 with no degree-1 term, β₁ its crust
+//!   class's ([`crust_shape`]), its area mean zero and its area RMS the constant (ruled:
+//!   `decision-r09-t12-coarse.md`'s addendum of 2026-10-16).
 //!
 //! Each population's spread is the coarse landform noise ([`noise`]), which holds no power finer
 //! than the coarse cell's Nyquist wavelength, the synthesis's structural share owning what is
@@ -37,7 +39,9 @@
 //! All on `surface.coarse.relief`, keyed `surface_cell(face, ℓ, i, j, instance)` of a lattice
 //! cell, one standard normal (two words) each:
 //!
-//! - instance 0 ([`noise::LANDFORM_INSTANCE`]), levels 2 to the field's: the coarse landform noise.
+//! - instance 0 ([`noise::LANDFORM_INSTANCE`]): the coarse landform noise, at levels 2 to the
+//!   field's on a mobile lid and 1 to the field's on a stagnant one (whose red field adds the
+//!   level-1 octave and weights the others by its β₁).
 
 mod noise;
 mod seafloor;
@@ -47,13 +51,16 @@ mod tests;
 
 use hyperion_surface::field::Crust;
 use hyperion_surface::num;
+use hyperion_surface::synth::SpectrumShape;
 
 use super::plates::{cell_of, reach, slot};
 use super::{Pass, Working};
 use crate::math;
+use crate::planetary::derive::atmosphere::SurfaceMaterial;
 use crate::planetary::hooks::figures::relief::{
     CONTINENTAL_WIDTH, OCEANIC_WIDTH, STAGNANT_LID_RELIEF,
 };
+use crate::planetary::surface::inputs::{CoarseInputs, TectonicRegime};
 use crate::units::{Metres, Radians};
 
 /// The continental population's mean elevation over sea level, +405 m: Earth2014's cells above
@@ -80,24 +87,50 @@ pub(crate) const CONTINENTAL_SKEW: f64 = 0.178_4;
 ///
 /// Never on valid inputs: every value it writes is finite and within its code.
 pub fn run(pass: &Pass<'_>, working: &mut Working) {
-    let noise = noise::unit_field(
-        pass,
-        noise::LANDFORM_INSTANCE,
-        noise::LANDFORM_FIRST_LEVEL,
-        pass.level().get(),
-    );
     if working.plates.is_empty() {
-        lid_population(working, &noise);
+        lid_population(pass, working);
     } else {
+        let noise = noise::unit_field(
+            pass,
+            noise::LANDFORM_INSTANCE,
+            noise::LANDFORM_FIRST_LEVEL,
+            pass.level().get(),
+        );
         crust_populations(pass, working, &noise);
     }
     interim_figures(pass, working);
 }
 
-/// A stagnant lid's one population: each cell's elevation [`STAGNANT_LID_RELIEF`] times the unit
-/// `noise`, about the datum.
-fn lid_population(working: &mut Working, noise: &[f64]) {
-    for (cell, &n) in working.cells.iter_mut().zip(noise) {
+/// The structural spectrum's shape of the body of `inputs`' crust class, as R09.T12.e's anchored
+/// spectrum will choose it from the surface material and the regime (`decision-r09-t5.md` item 2):
+/// an ice shell or an ice surface takes [`SpectrumShape::ICE_RICH`], every rock surface in any
+/// other regime [`SpectrumShape::SILICATE`].
+#[must_use]
+pub(crate) const fn crust_shape(inputs: &CoarseInputs) -> SpectrumShape {
+    match (inputs.surface_material(), inputs.tectonics()) {
+        (SurfaceMaterial::Ice, _) | (SurfaceMaterial::Rock, TectonicRegime::IceShell) => {
+            SpectrumShape::ICE_RICH
+        }
+        (
+            SurfaceMaterial::Rock,
+            TectonicRegime::MobileLid
+            | TectonicRegime::StagnantLid
+            | TectonicRegime::HeatPipe
+            | TectonicRegime::Episodic,
+        ) => SpectrumShape::SILICATE,
+    }
+}
+
+/// A stagnant lid's one population: each cell's elevation [`STAGNANT_LID_RELIEF`] times the red
+/// unit field of the crust class's β₁ ([`noise::red_field`], [`crust_shape`]), about the datum,
+/// its area mean zero and its area RMS the constant (`decision-r09-t12-coarse.md`'s addendum).
+fn lid_population(pass: &Pass<'_>, working: &mut Working) {
+    let noise = noise::red_field(
+        pass,
+        noise::LANDFORM_INSTANCE,
+        crust_shape(pass.inputs()).exponent(),
+    );
+    for (cell, &n) in working.cells.iter_mut().zip(&noise) {
         let z = Metres::new(STAGNANT_LID_RELIEF.value() * n);
         cell.elevation = z;
         cell.water_surface = z;

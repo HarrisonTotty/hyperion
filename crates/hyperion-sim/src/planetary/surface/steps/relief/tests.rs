@@ -456,6 +456,191 @@ fn the_populations_have_their_widths() {
     assert!((ocean_spread / 930.0 - 1.0).abs() < 0.1, "{ocean_spread} m");
 }
 
+/// The builder values of `inputs`, as a builder to vary.
+fn builder_of(inputs: &CoarseInputs) -> crate::planetary::surface::inputs::CoarseInputsBuilder {
+    let mut builder = CoarseInputs::builder()
+        .body(inputs.body())
+        .figure(inputs.figure())
+        .gravity(inputs.gravity())
+        .sigma_h(inputs.sigma_h())
+        .liquids(inputs.liquids().iter().copied())
+        .ices(inputs.ices().iter().copied())
+        .mean_surface_temperature(inputs.mean_surface_temperature())
+        .equator_pole_contrast_k(inputs.equator_pole_contrast_k())
+        .day_night_contrast_k(inputs.day_night_contrast_k())
+        .spin(*inputs.spin())
+        .host_flux(inputs.host_flux())
+        .surface_pressure(inputs.surface_pressure())
+        .gases(inputs.gases().iter().copied())
+        .surface(inputs.surface_state(), inputs.surface_material())
+        .tectonics(inputs.tectonics(), inputs.continental_fraction())
+        .volcanism(inputs.volcanism())
+        .heat_flow(inputs.heat_flow())
+        .surface_age(inputs.surface_age())
+        .craters(*inputs.craters())
+        .climate(*inputs.climate())
+        .crust(*inputs.crust())
+        .condensates(inputs.condensates().iter().copied())
+        .palette(inputs.palette().clone());
+    if let Some(orbit) = inputs.seasonal_orbit() {
+        builder = builder.seasonal_orbit(*orbit);
+    }
+    if let Some(epoch) = inputs.wet_epoch() {
+        builder = builder.wet_epoch(*epoch);
+    }
+    builder
+}
+
+/// Every lid without plates is one population of plan 14's `STAGNANT_LID_RELIEF` about the datum:
+/// its area mean zero and its area RMS the constant, both to 10⁻⁹, on the four regimes and on a
+/// mobile lid R09.T11 lays out no plates for; and a mobile lid with plates has none
+/// (`decision-r09-t12-coarse.md`'s addendum).
+#[test]
+fn every_lid_without_plates_is_one_population_about_the_datum() {
+    let small = |regime: TectonicRegime| {
+        builder_of(&reference::earth_like())
+            .figure(hyperion_surface::spheroid::Spheroid::sphere(1.0e6))
+            .tectonics(regime, 0.0)
+            .build()
+            .unwrap()
+    };
+    let ceres_mobile = builder_of(&reference::ceres_like())
+        .tectonics(TectonicRegime::MobileLid, 0.0)
+        .build()
+        .unwrap();
+    for (name, inputs) in [
+        ("stagnant", small(TectonicRegime::StagnantLid)),
+        ("heat pipe", small(TectonicRegime::HeatPipe)),
+        ("episodic", small(TectonicRegime::Episodic)),
+        ("ice shell", small(TectonicRegime::IceShell)),
+        ("mobile Ceres", ceres_mobile),
+    ] {
+        let world = relieve(inputs);
+        assert!(world.relief.plates.is_empty(), "{name}");
+        let z: Vec<f64> = world
+            .relief
+            .cells
+            .iter()
+            .map(|c| c.elevation.value())
+            .collect();
+        let (mean, spread) = noise::mean_and_spread(&z, world.world.grid.solid_angles_sr());
+        let width = STAGNANT_LID_RELIEF.value();
+        assert!(mean.abs() < 1e-9 * width, "{name}: {mean} m");
+        assert!((spread / width - 1.0).abs() < 1e-9, "{name}: {spread} m");
+    }
+    // The mobile Earth's two populations are not one about the datum.
+    let earth = earth();
+    let z: Vec<f64> = earth
+        .relief
+        .cells
+        .iter()
+        .map(|c| c.elevation.value())
+        .collect();
+    let (mean, _) = noise::mean_and_spread(&z, earth.world.grid.solid_angles_sr());
+    assert!(mean < -1_000.0, "{mean} m");
+}
+
+/// The lid's red field has no degree-1 term, and its degrees 2–5 carry about 72% of its variance
+/// at β = 2 (`decision-r09-t12-coarse.md`'s addendum): on the reference Moon, the share the
+/// polynomials of degree 5 and less (the spherical harmonics to degree 5) explain by area-weighted
+/// least squares, a realisation's of 32 modes, within 0.55–0.9; and an ice shell's β₁ of 1.8 is
+/// redder at the cell than silicate's 2.0.
+#[test]
+fn the_lid_s_field_is_red_from_degree_two() {
+    let world = World::new(reference::moon_like());
+    let pass = world.pass(reference::SEED);
+    let omega = world.grid.solid_angles_sr();
+    let centres = world.grid.centres();
+    let field = noise::red_field(&pass, noise::LANDFORM_INSTANCE, 2.0);
+    // Its degree-0 and degree-1 parts are gone: a second removal moves nothing.
+    let mut again = field.clone();
+    noise::remove_degree_one(&mut again, centres, omega);
+    let moved = field
+        .iter()
+        .zip(&again)
+        .fold(0.0, |m: f64, (a, b)| m.max((a - b).abs()));
+    assert!(moved < 1e-9, "{moved}");
+    let share = low_degree_share(&field, centres, omega, 5);
+    eprintln!(
+        "degrees 2–5 carry {:.1}% of the lid's variance",
+        100.0 * share
+    );
+    assert!((0.55..=0.9).contains(&share), "{share}");
+    let ice = noise::red_field(&pass, noise::LANDFORM_INSTANCE, 1.8);
+    let neighbour_difference = |f: &[f64]| {
+        let mut sum = 0.0;
+        for n in 0..f.len() {
+            for m in world.grid.edge_neighbours(cell_of(n)) {
+                sum += (f[n] - f[slot(m)]) * (f[n] - f[slot(m)]);
+            }
+        }
+        sum
+    };
+    assert!(neighbour_difference(&ice) > neighbour_difference(&field));
+    // The class: an ice shell or an ice surface is ice-rich, any other rock surface silicate.
+    let ice_shell = builder_of(&reference::moon_like())
+        .tectonics(TectonicRegime::IceShell, 0.0)
+        .build()
+        .unwrap();
+    assert_eq!(crust_shape(&ice_shell), SpectrumShape::ICE_RICH);
+    assert_eq!(
+        crust_shape(&reference::mars_like()),
+        SpectrumShape::SILICATE
+    );
+}
+
+/// The share of `values`' area variance that the polynomials in x, y and z of `centres` of degree
+/// `degree` and less explain under `weights`: modified Gram–Schmidt over the monomials, dropping
+/// those the sphere makes dependent (x² + y² + z² = 1).
+fn low_degree_share(values: &[f64], centres: &[[f64; 3]], weights: &[f64], degree: u32) -> f64 {
+    let dot = |a: &[f64], b: &[f64]| -> f64 {
+        a.iter()
+            .zip(b)
+            .zip(weights)
+            .map(|((x, y), w)| x * y * w)
+            .sum()
+    };
+    let mut basis: Vec<Vec<f64>> = Vec::new();
+    for total in 0..=degree {
+        for a in 0..=total {
+            for b in 0..=total - a {
+                let c = total - a - b;
+                let mut v: Vec<f64> = centres
+                    .iter()
+                    .map(|p| {
+                        math::powi(p[0], i32::try_from(a).unwrap())
+                            * math::powi(p[1], i32::try_from(b).unwrap())
+                            * math::powi(p[2], i32::try_from(c).unwrap())
+                    })
+                    .collect();
+                let norm0 = dot(&v, &v).sqrt();
+                for u in &basis {
+                    let k = dot(&v, u);
+                    for (x, y) in v.iter_mut().zip(u) {
+                        *x -= k * y;
+                    }
+                }
+                let norm = dot(&v, &v).sqrt();
+                if norm > 1e-8 * norm0 {
+                    for x in &mut v {
+                        *x /= norm;
+                    }
+                    basis.push(v);
+                }
+            }
+        }
+    }
+    let total = dot(values, values);
+    let explained: f64 = basis
+        .iter()
+        .map(|u| {
+            let p = dot(values, u);
+            p * p
+        })
+        .sum();
+    explained / total
+}
+
 /// A stagnant lid's one population is plan 14's 0.9 km about the datum.
 #[test]
 fn a_stagnant_lid_is_one_population_about_the_datum() {
