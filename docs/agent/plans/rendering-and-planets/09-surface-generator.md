@@ -345,10 +345,15 @@ pub fn detail_seed(seed: Seed, body: BodyId) -> DetailSeed;    // R09's, on `bod
 // in `planetary::surface`:
 pub struct CoarseInputs { /* Design note 3 */ }
 impl CoarseInputs {
-    pub fn for_body(record: &BodyRecord, ctx: &SystemContext) -> Result<Self, SurfaceInputsError>;
+    pub fn for_body(record: &BodyRecord, planet: Option<&BodyRecord>, ctx: &SystemContext)
+        -> Result<Self, ReadCoarseInputsError>;                   // R09.T10.f
+    pub fn planet_of(record: &BodyRecord) -> Option<BodyIndex>;   // `Some` for a moon
     pub fn builder() -> CoarseInputsBuilder;
 }
+pub const RECORD_TIME: UniverseTime;   // the epoch: the time `for_body`'s records are taken at
 pub enum SurfaceInputsError { NoSolidSurface, NotModelled(RecordSection), .. }
+pub enum ReadCoarseInputsError { Section(SurfaceInputsError), PlanetMissing(BodyId),
+    NotItsPlanet { .. }, NotAtRecordTime, SeasonalOrbit(..), Build(..) }
 pub fn coarse_pass(seed: SurfaceSeed, inputs: &CoarseInputs) -> CoarseField;
 pub mod steps { plates, relief, craters, climate, erosion, classes }   // each pub for tests
 pub mod reference { earth_like, mars_like, moon_like, ceres_like }     // feature `testing`
@@ -360,8 +365,12 @@ pub mod reference { earth_like, mars_like, moon_like, ceres_like }     // featur
 flux over the orbit (P14.T12's `Illumination` gives only its orbit average). The record's `surface`
 section is uninhabited (`record::Surface` is an empty enum), and the atmosphere (`SurfaceState`,
 `SurfaceMaterial`, pressure and gases, in `derive::atmosphere`) is reachable only through the
-private `DerivedBody`, so `for_body` answers `NotModelled(RecordSection::Surface)` until plan 14's
-surface section is inhabited (P14.T24 and the asks drafted as P14.T48).
+private `DerivedBody`, so `for_body` answers `Section(NotModelled(RecordSection::Surface))` until
+plan 14's surface section is inhabited (P14.T24 and the asks drafted as P14.T48). As built by
+R09.T10.f (Risks, "Deviations in T10.f, as built"; decision-backlog-2 §3), `for_body` takes a moon's
+planet's record beside its own, both taken at `RECORD_TIME`, and checks the surface section's tag,
+then the planet, then the crust; a planet not given, or not the moon's, is `PlanetMissing` or
+`NotItsPlanet`, which a server answers `internal`.
 
 ### Server (`hyperion_server`)
 
@@ -372,8 +381,10 @@ pub mod knowledge::surveys { SurveyPass, SurveySource, SurveyLog, Coverage, Load
 pub const MAX_SURVEY_RANGES: usize = 256;   // `limits.rs`: ranges a `survey_pass` may carry
 ```
 
-`InputsSource` is the seam between the service and plan 14: `fn inputs(&self, record: &BodyRecord,
-ctx: &SystemContext) -> Result<CoarseInputs, SurfaceInputsError>`. Production uses `RecordInputs`,
+`InputsSource` is the seam between the service and plan 14: its one method,
+`inputs(record, planet, ctx)`, takes `for_body`'s three arguments and answers
+`Result<CoarseInputs, ReadCoarseInputsError>`, the service fetching a moon's planet's record at
+`RECORD_TIME` beside the body's (R09.T10.f). Production uses `RecordInputs`,
 which calls `CoarseInputs::for_body`; the server's tests use one built from
 `reference::{earth_like, …}` (feature `testing`), so that the service and the wire are tested
 before plan 14's asks land.
@@ -4421,7 +4432,11 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
 - **Rulings of "main" for T10's findings** (2026-10-10).
   - `for_body`'s missing arguments, the record's time and a moon's planet's orbit, are settled by
     P14.T54.a, which owns `planetary/surface/inputs.rs`. R09.T17 and R09.T19.a take `for_body` as
-    T54.a leaves it.
+    T54.a leaves it. _Amended 2026-10-15 (decision-backlog-2 §3):_ `for_body`'s signature is
+    R09.T10.f's, `for_body(record, planet, ctx)`, which carries a moon's planet's record, both
+    records taken at `RECORD_TIME` (the epoch, the sim's constant since R09.T10.e), and it is frozen
+    at 23. P14.T54.a only connects the crust, the condensates and the palette's resolution, and
+    R09.T17 and R09.T19.a take the signature from T10.f.
   - The airless mean temperature is imposed as the radiative mean ⟨T⁴⟩^¼ in R09.T13.c–d, T10's
     lean, with T13's science check to confirm. `CoarseInputs::mean_surface_temperature`'s
     documentation says so.
@@ -4440,8 +4455,10 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
       `LruCounters`, and `computed()`, the passes run).
     - `FieldKey::new(GalaxyKey, BodyId)` with `galaxy()` and `body()`; `FieldCache` (`new`, `get`,
       `insert`, `charge`, `counters`) and `impl HeapBytes for CoarseField`.
-    - `SurfaceJobError`, Provides' name kept: `Body(ResolveBodyError)`,
-      `Inputs(SurfaceInputsError)` and `Compute(ComputeError)`, with `From<ComputeError>`.
+    - `SurfaceJobError`, Provides' name kept: `Body(ResolveBodyError)`, `Inputs(SurfaceInputsError)`
+      and `Compute(ComputeError)`, with `From<ComputeError>`. (Amended by R09.T10.f:
+      `Inputs(ReadCoarseInputsError)`, whose `Section(..)` arm carries the `SurfaceInputsError`
+      answers below, every other arm answered `internal`; Risks, "Deviations in T10.f, as built".)
     - `InputsSource: Debug + Send + Sync`, whose one method is Provides' `inputs`, and
       `RecordInputs`.
     - `RECORD_TIME`, the time the record is read at (below).
@@ -6922,8 +6939,8 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     rules its header (21 or 22).
 - **Deviations in the fused interpolant pass, as built** (2026-10-14 and 15; lane r09-fused,
   R09.T8's performance follow-up as "main" logged it (T8's and T9's deferred findings, and
-  R10.T6.a's bake's); begun on `373a0158`, brought to `3c921671`, merged with `2955006e` before
-  the gate).
+  R10.T6.a's bake's); begun on `373a0158`, brought to `3c921671`, merged with `2955006e` and then
+  with `9e3915ab`, on which its gate ran, and landed squashed as `13fb4bf1`).
   - _What it is._ The base elevation (T4's interpolant over the cells' elevations) and the
     relief's three style values (T5's amplitude, belt and shear weights) were four interpolations
     a point, each walking the same stencils over the same cells, and each style read the cell's

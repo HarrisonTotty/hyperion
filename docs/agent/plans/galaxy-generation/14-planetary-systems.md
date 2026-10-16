@@ -727,9 +727,11 @@ Order and parallelism:
   - **22 → 23**, P14.T54.a's "the surface": the snapshot path and the surface members, everything
     R09's `for_body` reads. Compute subtasks are pure modules, called by nothing on the record
     until T54.a, so each keeps `just ci` green and moves no golden. Its membership is closed:
-    T49.b → T49.c; T50.a → T50.c → T51.a → T51.b (lane `p14-snapshot`, one lane: all four edit
-    `derive/atmosphere.rs`) → T57.a (decision-p14-moons), which stays in 23 since only its water
-    refit holds Earth at 288 K once T51.a moves Earth's water column; T51.c after T50.a and T49.c
+    T49.b → T49.c, with T49.h after T49.b's rows (lane `p14-liquids`; T49.b's liquid part, so it
+    reopens nothing; decision-r11-palette-liquids §3, 2026-10-14); T50.a → T50.c → T51.a → T51.b
+    (lane `p14-snapshot`, one lane: all four edit `derive/atmosphere.rs`) → T57.a
+    (decision-p14-moons), which stays in 23 since only its water refit holds Earth at 288 K once
+    T51.a moves Earth's water column; T51.c after T50.a and T49.c
     (lane `p14-crust`); T56.a → T56.c → T56.d (lane `p14-moons`; T56.c after T50.a and T50.c),
     with T56.b in the client after T56.a; then T54.a, which wires them onto the record and bumps.
     Three holds at 22, each with a tripwire: `MOONS_VERSION` = 23, `AMMONIA_LINE_VERSION` = 23,
@@ -2563,16 +2565,20 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
     Venus levels moved by c_p(T); the table's Saturn's T_skin lies within 2 K of 2^(−1/4) × its
     T_eff, and Earth's within 0.05 K of the sunlight-only form. A Venus given its measured state
     by hand (90.4 bar of CO₂ and 2.09 of N₂ by weight, 735 K) gives 350.5 K at 1.066 bar by the
-    dry α's fit. At VIRA's 47.4, 22.5, 9.85 and 3.50 bar it gives 665, 592, 518 and 435 K, against
-    VIRA's 658, 581, 497 and 418 K [M], because VIRA's 30–45 km layer is sub-adiabatic; they are
-    printed and recorded (science-r08-gases-2.md §1.4, in place of signoff-3.md's 321 K under the
-    fixed c_p ÷ R). A world whose only condensable is water at a Mars's partial pressure takes the
-    dry α. T49.a's class test (R ÷ c_p 3/13 for pure CO₂ and 2/7 for pure N₂) moves to T49.b's
+    dry α's fit. At VIRA's 47.4, 22.5, 9.581 and 3.50 bar it gives 665, 592, 517 and 435 K (VIRA's
+    30 km is 9.581 bar, not 9.85: updated 2026-10-16, Risks, "Deviations in P14.T24.e, as built"),
+    against VIRA's 658, 581, 497 and 418 K [M], because VIRA's 30–45 km layer is sub-adiabatic; they
+    are printed and recorded (science-r08-gases-2.md §1.4, in place of signoff-3.md's 321 K under
+    the fixed c_p ÷ R). A world whose only condensable is water at a Mars's partial pressure takes
+    the dry α. T49.a's class test (R ÷ c_p 3/13 for pure CO₂ and 2/7 for pure N₂) moves to T49.b's
     heat-capacity tests.
   - _Files:_ `planetary/hooks/{structure, mod}.rs`, `planetary/record.rs`, `planetary/mod.rs`
-    (the re-export of `temperature_at`), `tests/planetary_structure_golden.rs` and its golden.
-  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::structure` and
-    `cargo test -p hyperion-sim --test planetary_structure_golden`.
+    (the re-export of `temperature_at`), `planetary/hooks/structure/tests.rs`, and the golden
+    `tests/golden/planetary/vertical_structure.golden`, which the unit test
+    `the_structure_is_pinned` pins, since the Solar System table is crate-private test data (updated
+    2026-10-16: Risks, "Deviations in P14.T24.e, as built").
+  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::structure`, which runs the golden's test
+    too.
 - **P14.T24.f Carbon speciation and O₂** (R08.T1's draft; first of the four, since every later rule
   reads the gases). It amends T13.c's inventory, in `derive/atmosphere.rs`, through the registry's
   rows (`CH4`, `O2`), with CH₄'s saturation curve T49.a's (its triple point 90.69 K and 11.70 kPa,
@@ -5149,7 +5155,12 @@ rows' values.
       and Mg(ClO₄)₂ 206 K, Chevrier, Hanley and Altheide 2009; NH₃–H₂O 176.15 K, Kargel 1992, via
       Hammond et al. 2018, checked at build; NaCl–H₂O 251.95 K at 23.3 wt%, Bodnar 1993, from
       memory);
-    - the liquids' viscosity, surface tension, index and absorption (R11's);
+    - NIST-JANAF's single transition temperatures are facts cited with their table, one per species,
+      and a value reduced from its tables by stated arithmetic is `Reduced`; no JANAF table is
+      fitted or committed (decision-composition §5, as read by decision-p14-t49b-condensed §3);
+    - not the liquids' R11 optics and transport (index, absorption and scattering by bin, surface
+      tension and viscosity), which are P14.T49.h's; this task keeps their densities, above
+      (decision-r11-palette-liquids §3, 2026-10-14; updated 2026-10-16);
     - heat capacities by temperature: the first step's c_p(T) above. T49.a's c_p ÷ R classes,
       fixed degrees of freedom after Robinson and Catling 2012, hold only where a molecule's
       torsions and bends are frozen: C₂H₆'s N = 6, which R08's gas column takes at its c_p near
@@ -5220,7 +5231,10 @@ rows' values.
   - _Tests:_
     - three tabulated values per species to 10⁻⁴ in log K;
     - every gas row that T52.a or T52.b names has an entry (a completeness test);
-    - no extrapolation outside a row's stated range.
+    - no extrapolation outside a row's stated range;
+    - the registry's MgSO₄ decomposition and graphite sublimation, reduced from NIST-JANAF, within
+      10 K of the CEA-based log K_f; the CEA value replaces a row's beyond it
+      (decision-p14-t49b-condensed §3).
   - _Files:_ `substance/thermo.rs`, `tables/thermo.rs`, `tasks/thermo_equilibrium.rs`.
   - _Accept:_ `cargo test -p hyperion-sim substance::thermo`;
     `cargo test -p hyperion-fit thermo_equilibrium`.
@@ -5757,6 +5771,13 @@ Snapshot path, `planetary/chem/`.
       particle dose, giving a tholin cover;
     - a resurfacing rate from volcanism or tidal heat, which gives Io its SO₂ frost and sulphur
       from T24.g's outgassing.
+  - _The units_ (decision-r11-palette-liquids §2 item 4, 2026-10-14): the maturity and the organic
+    cover are dimensionless in [0, 1], maturity 0 for fresh ground and 1 for saturated space
+    weathering, and the organic cover the covered fraction of the ground that can take one.
+    P14.T54.b carries them to rendering plan R09's reserved header parts `maturity` and
+    `organic_cover`. This task fixes their exact definitions inside that contract; a shape it cannot
+    fit goes to "main" before T54.b. The resurfacing rate stays off the header, since the surface
+    age carries it for R10 and R11.
   - _Tests:_
     - the Moon's regolith mature;
     - a magnetised twin less weathered;
@@ -6182,6 +6203,12 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - `MOONS_VERSION` and its tripwire are deleted (T56.a, T56.c, T56.d), so that the moons' Laplace
     planes, own ranks and tides, and the rings' normals, take effect with the batch. The bless note
     accounts for them by subtask.
+  - The server's conversion sends every ring's `normal`. Its `MOONS_VERSION` test goes, and
+    `a_ring_s_normal_is_sent_from_the_batch_s_bump` becomes a test that every golden ring carries
+    `Ring::normal()`. `scene_systems.golden` gains the field. The shared fixture's ring
+    (`packages/protocol/fixtures/planetary.json`) gains a unit normal on its planet's pole's side,
+    and the client's tests build the absent case by removing it. The field stays optional on the
+    wire, for older servers (decision-p14-t56a §1).
   - `AMMONIA_LINE_VERSION` and its tripwire are deleted (T50.c), so that the planets' ammonia line
     takes effect with the batch.
   - The `p14-snapshot` lane's hold, on T51.a's, T51.b's and T57.a's edits on the record path, is
@@ -6193,7 +6220,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - The server's conversion fills `condensates` and `crust` on the wire. The envelope's
     `match envelope {}` stays until T54.b.
   - R09's `for_body` reads `crust`, `condensates` and the palette's sources (T49.b–c's rows, R11's
-    liquid members included) from the record, on R09.T10.e's reading of the other sections. It
+    liquid members included) from the record, on R09.T10.e's reading of the other sections, with
+    R09.T10.f's signature, `for_body(record, planet, ctx)`, frozen at 23 (decision-backlog-2 §3). It
     answers `Ok` for generated solid bodies. It settles the record's time: the lean is R09.T17's
     `RECORD_TIME`, the epoch, and any other choice goes to "main" before the serve gate opens.
     An airless body's palette carries no cold-trapped `Ice` entry until P14.T51.f, wired by T54.b,
@@ -6201,6 +6229,30 @@ feeding back into p_s, T_s, the albedo or the bulk.
     lists cold-trapped `H2O` and `CO2` as unreached until then, and where a console row shows an
     airless body's condensates it labels its cold traps NOT YET MODELLED (P14.T43.b's `SURFACE`
     rows; science-composition-crusts.md §6).
+  - The palette resolution fills each `Liquid` entry's record, and each melting crust entry's,
+    through P14.T49.h's `liquid_properties` (decision-r11-palette-liquids §1.7, 2026-10-14;
+    decision-p14-t49b-condensed §2, 2026-10-15):
+    - _the temperature:_ for a liquid, the area-mean surface temperature of its own area where
+      T51.a's partition gives one, else the record's mean surface temperature; for a melt, its
+      temperature where the record gives one (a locked world's dayside above the solidus, or an
+      eruption temperature T51.c states), else a rule the resolution's doc comment states, basis
+      `Derived`; either way clamped into the liquid's range at the surface pressure, from its
+      transition, its first melt, to its boiling point on T49.b's liquid saturation branch;
+    - _the composition:_ a solution's on the record where T51.a carries it, else its row's reference
+      composition, basis `Derived`; between a solution's first melt and its reference composition's
+      liquidus the record is that composition's supercooled liquid, a stated stand-in, basis
+      `Derived`, as the resolution's doc comment says;
+    - a `Liquid` entry's `grain_density_kg_m3` is its record's `density_kg_m3`, T49.h's at the
+      record's temperature and composition; for a pure fluid it equals
+      `Substance::grain_density(CondensedPhase::Liquid, T)`;
+    - no liquid member is scaled by `albedo_scale`, and palette sources write phase rows 0–2 only
+      (decision-r11-palette-liquids §2 item 6);
+    - one palette holds one entry for each (role, key), so seas of one key at two compositions share
+      one entry, a recorded limitation.
+  - The header's `surface_pressure` is exactly 0 for an `Airless` state, which R09.T2.e's
+    `header_pressure` already writes, so `for_body` need not; a `Tenuous` body keeps its positive
+    pressure once P14.T53.c gives that state (decision-r11-palette-liquids §2 item 5; rendering plan
+    R09's Risks, "Deviations in T2.e, as built").
   - _The serve gate._ At 23 `for_body` is `Ok` in the sim, but the server's `RecordInputs` keeps
     answering generated bodies `not_modelled` until the gate's version. T54.a adds the gate, a
     constant with a tripwire in `crates/hyperion-server/src/surface/inputs.rs` (for example
@@ -6220,6 +6272,10 @@ feeding back into p_s, T_s, the albedo or the bulk.
     - an Earth's `condensates` holds `H2O`;
     - the test that pinned `NotModelled(Surface)` on a generated rocky body now pins `Ok`;
     - the protocol fixture gains a Titan with its lakes;
+    - a Titan-like generated body's `ch4_c2h6_n2` entry carries its record, each member without a
+      source absent, never 0; a generated Earth-like body's sea record is `Measured`; a lava world's
+      lid crust entry carries a melt record; a generated airless body's header pressure is exactly
+      0; and no palette source writes phase row 3 (decision-r11-palette-liquids §4);
     - `golden_diff.py` accounts for every change.
   - _Files:_ `planetary/{record, hooks/mod}.rs`, `planetary/hooks/surface.rs`,
     `crates/hyperion-server/src/convert/planetary.rs`,
@@ -6249,8 +6305,12 @@ feeding back into p_s, T_s, the albedo or the bulk.
     hot-Jupiter envelope and a Jupiter whose envelope is `Ok` with an NH₃ deck (both from T54.a),
     the escape, steam and tenuous wiring into `derive/atmosphere.rs`, and P14.T31's event
     goldens. It restamps `thermo` and `condensate_extinction` `--since 24`, and it opens the serve
-    gate (T54.a) if R09.T16 has landed. It deletes `OCEAN_VERSION` and every hold at 24, then
-    bumps.
+    gate (T54.a) if R09.T16 has landed. It deletes `OCEAN_VERSION` and every hold at 24, then bumps.
+    It re-checks T24.e's 300–370 K Venus test on T57.a's Venus and deletes T24.e's tripwire
+    `the_venus_test_is_rechecked_at_the_23_to_24_bump`, with the rest of T24.e's "Held for
+    P14.T54.b" list (Risks, "Deviations in P14.T24.e, as built"). It fills rendering plan R09's
+    header parts `maturity` and `organic_cover`, and their `SurfaceHeaderDto` mirrors, from T51.d if
+    T51.d rides 24, and otherwise leaves them absent (decision-r11-palette-liquids §4).
   - _The escape valve._ If T52.c still cannot start when every other member of 24 has landed,
     T54.b leaves without T52.c, T24.c with T24.g, T24.d with T52.d, T53.c and T53.d. Their members
     stay `NotModelled`, and those tasks take the next planetary bump.
@@ -6342,6 +6402,11 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
     - `laplace_pole(spin_pole, orbit_normal, laplace_radius, a) -> [f64; 3]`, by
       tan 2φ = sin 2ε′ ÷ (cos 2ε′ + 2 (r_L ÷ a)⁵), with ε′ the acute angle between the axes and
       the spin's sense kept;
+    - a capture's plane takes the same axis with its pole on the orbit normal's side
+      (`PoleSense::Orbit`; `LocalLaplace::pole_at`). Its sense, prograde or retrograde, is drawn
+      about its parent's orbit (T19, ruling 83), as T15's stability limit reads it. Regular and
+      giant-impact moons and rings keep the spin's side. Each moon keeps its sense where it formed
+      (decision-p14-t56a §2);
     - `eccentricity_unstable(obliquity, a_over_rl) -> bool`, the band: unstable if and only if
       0 < 4 + γ < 10 sin²θ, with γ = (2/3)(r_L ÷ a)⁵ (9 cos²φ − 3) − 2 cos²θ and θ = ε′ − φ.
     - The sources: Tremaine, Touma and Namouni 2009 (AJ 137, 3706), the classical Laplace surface,
@@ -6362,10 +6427,16 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
     obliquity" becomes "lies on the parent's Laplace surface at its present distance: the
     equator while it is well inside the Laplace radius".
   - The wire: `RingDto` gains the optional `normal: [f64; 3]`, a unit vector along the galactic
-    axes, `#[serde(default)]` and `#[ts(optional)]`. The server's conversion fills it.
+    axes, `#[serde(default)]` and `#[ts(optional)]`. The server's conversion fills it from
+    `MOONS_VERSION`.
     - `PROTOCOL_VERSION` stays 2: an optional field (plan 04 Design note 15; decision-p14-t35e-wire
       §1.3, the P14.T46.f precedent).
-    - Below `MOONS_VERSION` the normal is the parent's orbit normal, today's convention.
+    - Below `MOONS_VERSION` no ring carries it, which says that the ring lies in its planet's
+      orbital plane, version 22's convention, so that `scene_systems.golden` keeps its bytes at 22.
+      Its shape is fixed by agreement from this subtask's landing, since T56.b builds on it: a unit
+      vector along the galactic axes, on the spin's side, never `null`, and absent for the orbital
+      plane. It is first sent, and frozen with its values, at 23, when T54.a sends it on every ring
+      (decision-p14-t56a §1).
   - _Tests:_
     - with fact-sheet values (from memory): Titan's φ is 0.55–0.70°, Iapetus's 14–17° with Titan
       counted, Callisto's 0.4–0.6°, the Moon's plane within 0.01° of the ecliptic, and Triton's
@@ -6375,11 +6446,20 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
     - the band's onset lies at 68.875 ± 0.001°, and its edges at 90° at 0.922 and 1.149 r_L,
       ± 0.002;
     - a parent at ε = 98° keeps its regular moons prograde about its spin;
-    - every ring's normal lies within 10⁻⁹ rad of its parent's pole where its radius is under
-      0.1 r_L;
+    - about a parent spinning retrograde, a capture's pole lies on its orbit normal's side and a
+      regular moon's, a giant-impact moon's and a ring's on its spin's; about a prograde spinner the
+      two agree;
+    - every ring's normal is its parent's local Laplace pole at √(r_in r_out), on the spin's side,
+      with the regular moons inside that radius counted in r_L. Where its outer edge lies under 0.1
+      r_L, its tilt from the parent's spin pole is within the law's small-radius tilt, ¼ sin 2ε′
+      (r_out ÷ r_L)⁵ (1 + 10⁻⁶). At any obliquity that tilt is at most ½ arcsin(½ (r ÷ r_L)⁵), 2.5 ×
+      10⁻⁶ rad at 0.1 r_L (Saturn's rings, at 0.063 r_L, tilt about 2 × 10⁻⁷ rad). The tilt is
+      within 10⁻⁹ rad wherever that bound is under 10⁻⁹ rad (decision-p14-t56a §3);
     - the largest step of a giant-impact moon's plane between drift cells is recorded;
     - T22.b's properties are unchanged, since no a, e or mass moves;
-    - the hold: below 23, every golden is unchanged, bit for bit.
+    - the hold: below 23, every golden is unchanged, bit for bit;
+    - the server sends no ring's `normal` below `MOONS_VERSION`, and from it every ring's, equal to
+      `Ring::normal()`.
   - _Files:_ `planetary/{laplace, satellites, system, rings}.rs`,
     `planetary/moons/{mod, impact}.rs`, `placement/classes/orbits.rs` (`SystemPlane::from_pole`),
     `crates/hyperion-protocol/src/planetary/population.rs`,
@@ -6395,13 +6475,27 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
 - **P14.T56.b The client's ring and equatorial planes** (no bump; after T56.a; TypeScript, with
   the console-ux skill).
   - `lib/system/model.ts`'s `Ring` gains `normal?`.
-  - `view/scene/fromServer.ts` (R07's scene seam, by agreement) draws a ring in its normal's
-    plane, and in the orbital plane when the field is absent (an older server).
+  - `view/scene/fromServer.ts` (R07's scene seam, by agreement) draws a ring in its normal's plane,
+    and in its planet's orbital plane when the field is absent (a server below generator version 23,
+    or one older than T56.a). It branches on the field's presence, never on the version
+    (decision-p14-t56a §1).
   - `displays/system/bodyFrame.ts`'s `EQUATORIAL PLANE` is the plane normal to the rotation
-    section's pole, or to the orbit's normal without one (R07 Design note 14's rule).
-  - The three docs drop "which this generator version takes to be its orbital plane".
-  - _Tests:_ `bodyFrame.test.ts`'s ring case under a tilted pole; a ring without `normal` is
-    drawn as today.
+    section's pole, or to the orbit's normal without one (rendering plan R02's Design note 14's
+    rule; corrected 2026-10-16 from "R07": Risks, "Deviations in P14.T56.b, as built").
+  - A ring is drawn in its own plane, its `normal`'s or without one its planet's orbital plane,
+    never assumed to lie in the reference plane. Below 23 an oblique planet's rings lie off its
+    `EQUATORIAL PLANE` by the obliquity, and that is drawn as it is.
+  - `displays/system/useSystemView.ts` reads a moon's inclination to its planet's equator by the
+    same rule: normal to the rotation section's pole, or to the planet's orbit normal without one.
+  - The three docs, and those of `useSystemView.ts` and `BodyRecordReadings.tsx`, drop "which this
+    generator version takes to be its orbital plane" and its variants. These two files, with their
+    tests, and `spatial/marks.ts` with its renderer where an annulus takes a plane of its own, join
+    the task's files (decision-p14-t56a §1).
+  - _Tests:_ `bodyFrame.test.ts`'s ring case under a tilted pole, with `normal` (in its plane) and
+    without it (in the planet's orbital plane, as today, off the `EQUATORIAL PLANE` by the
+    obliquity); the scene's ring takes `normal` when present and the planet's orbit normal
+    otherwise; a moon's inclination under a tilted pole reads to the equator. The present case is a
+    variation built on the shared fixture's ring.
   - _Accept:_ the touched files' vitest suites, `pnpm typecheck` and the console-ux lint.
 - **P14.T56.c Moons' own volatile ranks, and the circumplanetary ammonia line** (22 → 23; after
   T50.a, T50.c and T56.a; amends T17.b, T18 and T19; decision-p14-moons §2).
@@ -6530,8 +6624,10 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
     - Earth is 288 ± 2 K and Titan 94 ± 3 K;
     - the table's median Venus holds 55–60 bar and reaches 680–710 K;
     - T13.c's "within eight per cent" test takes the measured Venus;
-    - the re-check of T24.e's Venus test moves to T24.e, at 24 (decision-bump-plan-after-22,
-      2026-10-14; updated 2026-10-15);
+    - the re-check of T24.e's Venus test on this task's Venus moves to P14.T54.b, at 24, held by
+      T24.e's tripwire `the_venus_test_is_rechecked_at_the_23_to_24_bump`
+      (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-16: Risks, "Deviations in P14.T24.e,
+      as built");
     - every golden that moves is accounted for in T54.a's bless note.
   - _Files:_ `planetary/derive/atmosphere.rs`, `planetary/derive/atmosphere/tests.rs`,
     `planetary/derive/mod.rs` (the table's tests).
@@ -6638,7 +6734,7 @@ it:
     moon's plane, inventory and tides, every ring's plane, and the CO₂ and water greenhouses.
     T56.c reads words 0–5 of `planet.volatiles` on each moon's candidate key, which the moons'
     radius ranks already use, and adds no domain tag. T56.a adds the optional `RingDto.normal`, with
-    `PROTOCOL_VERSION` at 2.
+    `PROTOCOL_VERSION` at 2. It is first sent at 23, by T54.a (decision-p14-t56a §1).
   - The 23 → 24 batch, "the air and the rest of the minimum" (decision-bump-plan-after-22,
     2026-10-14; updated 2026-10-15), carries the chemistry and structure (T49.d, T49.e, T24.e,
     T50.b, T52, T24.c with T24.g, and T24.d with T52.d) with T51.d–g, T53, T48.g and T31's event
@@ -6657,14 +6753,15 @@ it:
     `GENERATED_SURFACES_FROM` = 24). It opens at the first bump after R09.T16 has landed and R11's
     liquid members are in the codec, expected to be 24; otherwise the wiring lane raises the
     constant to the next bump, and "main" may open it at an earlier bump if an R10 task needs a
-    generated world served sooner. Before it opens, the testing worlds' liquid records carry
-    P14.T49.h's scattering (main's ruling for R09.T2.e, 2026-10-15); if T49.h slips past the gate,
-    the fill rides the next bump. Until it opens, R09 and R10 changes re-bless at the version in
-    force with no bump. That bump is the first send: from it, every change to the coarse pass,
-    quantisation, synthesis, material classes or payload layout moves served output and rides a
-    bump, and a layout change also bumps `SURFACE_PAYLOAD_FORMAT`.
+    generated world served sooner. Before it opens, the testing worlds' and the reference Earth's
+    liquid records carry P14.T49.h's scattering (main's ruling for R09.T2.e, 2026-10-15); if T49.h
+    slips past the gate, the fill rides the next bump. Until it opens, R09 and R10 changes re-bless
+    at the version in force with no bump. That bump is the first send: from it, every change to the
+    coarse pass, quantisation, synthesis, material classes or payload layout moves served output and
+    rides a bump, and a layout change also bumps `SURFACE_PAYLOAD_FORMAT`.
     - Frozen at 23: `for_body`'s signature and the record's time, `BodySurfaceDto`'s `condensates`
-      and `crust`, `substances.json`'s schema and `RingDto.normal`'s values.
+      and `crust`, `substances.json`'s schema, and `RingDto.normal`'s shape and values (its shape
+      fixed by agreement since T56.a landed; decision-p14-t56a §1).
     - Frozen at the gate: `SURFACE_PAYLOAD_FORMAT` 1's layout, `FieldHeader` with `albedo_scale`,
       `PaletteEntry` with R11's liquid members, the codes table (which only gains rows),
       `RECORD_TIME`, and the coarse pass and synthesis as versioned output.
@@ -12180,8 +12277,10 @@ tables::gauss_legendre`.
   58 bar, 37% under the real surface pressure. R08 gates both: its Venus-class fixture uses the
   real 92 bar (τ_R(550) ≈ 15.5) and a second case this plan's 58 bar (τ_R ≈ 9.8), so that both the
   physics and the generated world are checked (R08 Design note 16). It is a finding for T13.c's
-  owner, not a correction R08 makes. T24.e's Venus test, 300–370 K at 1 bar, holds at either
-  pressure. T24.g's deck on the 58-bar Venus lies at the right pressures (1.34–0.04 bar, as Venus's
+  owner, not a correction R08 makes. T24.e's Venus test, 300–370 K at 1 bar, holds on the measured
+  Venus (347.7 K) but not on the table's 58-bar Venus before T57.a (381.1 K), and P14.T54.b
+  re-checks it on T57.a's Venus (updated 2026-10-16: Risks, "Deviations in P14.T24.e, as built").
+  T24.g's deck on the 58-bar Venus lies at the right pressures (1.34–0.04 bar, as Venus's
   48–70 km), about 6 km lower than Venus's, at 42.6–62.7 km, because the column is lighter.
   **Ruled** (decision-p14-moons, item 4). The 58 bar is the median inventory, all airborne: the
   table is built at median ranks, and the real Venus holds 1.58 times Earth's carbon and 3.4 times
@@ -13140,13 +13239,19 @@ tables::gauss_legendre`.
     A capture's plane (`PoleSense::Orbit`) takes the pole on its parent's orbit normal's side,
     because its drawn sense (retrograde with probability 0.8) is about the orbit, as its
     stability limit (Domingos et al. 2006) reads it. The two differ only about a parent spinning
-    retrograde, such as an impact-struck rocky planet with small captures. Lean: keep.
+    retrograde, such as an impact-struck rocky planet with small captures. Lean: keep. **Ruled**
+    (decision-p14-t56a §2): kept. The axis, and so every plane, r_L and the band, is the same either
+    way. A capture's drawn sense and its stability limit are about the orbit, and its sense is
+    continuous with its capture beyond r_L.
   - _The wire's first send_ (a choice made here; question for "main"). `RingDto.normal` is
     optional, and the server fills it only from `MOONS_VERSION`
     (`a_ring_s_normal_is_sent_from_the_batch_s_bump`), so `scene_systems.golden` keeps its bytes
     at 22. Its shape is therefore first sent, and frozen, at 23, with its values, where
     decision-bump-plan-after-22 §1.4 had the shape freeze when T56.a landed. The protocol fixture
-    is unchanged. Lean: keep; T54.a sends it always.
+    is unchanged. Lean: keep; T54.a sends it always. **Ruled** (decision-p14-t56a §1): kept. The
+    contract is fixed by agreement from this subtask's landing. It is first sent, and frozen with
+    its values, at 23. Sending the orbit normal at 22 is rejected: it would re-bless a served golden
+    with no bump, and would tell no reader anything absence does not.
   - _The band._ `eccentricity_unstable` is the ruling's criterion. Its test against Tremaine et
     al. (2009) uses eq. 34 (eq. 33 with eq. 22 substituted), on a 0.1° × 1,001-point grid: the
     arXiv text of eq. 33 differs from eq. 34 by the sign of its 6 sin 2φ sin 2(φ − φ⊙) term, and
@@ -13165,7 +13270,11 @@ tables::gauss_legendre`.
     φ ≈ ¼ sin 2ε′ (r ÷ r_L)⁵, up to 2.5 × 10⁻⁶ rad at 0.1 r_L (Saturn's rings, at 2.27 R_S
     against r_L = 36.1 R_S from J₂ alone, tilt about 2.0 × 10⁻⁷ rad). A docs batch amends T56.a's
     _Tests_ text. The test holds every ring's normal to the law bit for bit, under 0.1 r_L
-    within ¼ sin 2ε′ (r_out ÷ r_L)⁵, and within 10⁻⁹ rad wherever that bound is.
+    within ¼ sin 2ε′ (r_out ÷ r_L)⁵, and within 10⁻⁹ rad wherever that bound is under 10⁻⁹ rad.
+    **Confirmed** (decision-p14-t56a §3). By Tremaine et al.'s eq. 23, φ = ¼ sin 2ε′ x⁵ − ⅛ sin 2ε′
+    cos 2ε′ x¹⁰ + … at x = r ÷ r_L. Its largest value at any obliquity is ½ arcsin(½ x⁵), 2.5 × 10⁻⁶
+    rad at 0.1 r_L. The plan's 10⁻⁹ rad held there only for ε′ ≤ 0.0115°. The test stands: the plane
+    is taken at √(r_in r_out), below the r_out of its bound.
   - _The giant-impact moon's step._ Its plane is held where its drift law anchors its elements
     ("Read once"). The largest turn of its local Laplace plane across the clock window, which
     bounds every step between its drift cells, is 5.0 × 10⁻⁴° over the 1,000-system sample's
@@ -13211,6 +13320,10 @@ tables::gauss_legendre`.
   - _Unread sources._ Murray and Dermott 1999 §4.6 (cited instead: Gao and Stevenson 2013,
     eqs. 2–3; Ragazzo 2020, eq. 2.74, as the science check read them), and Ward 1981's value for
     Iapetus.
+  - _A capture's sense about the spin._ About a parent spinning retrograde, a capture's sense about
+    the spin is the opposite of its drawn sense, which is about the orbit (decision-p14-t56a §2). No
+    capture drifts today. A later capture-drift law reads the sign of its orbit normal · the spin
+    pole, since a close-in retrograde capture decays as Triton does.
 - **Deviations in P14.T56.b, as built (`p14-moons`, 2026-10-15).** The client's ring and
   equatorial planes, to decision-p14-t56a §1.3 and §5. No bump, and nothing the server sends
   moves.
