@@ -61,8 +61,28 @@ import {
 } from "./mapCursor";
 import { usePageTabFocus } from "./pageTabFocus";
 
-/** Bits per code of the map the display asks for: the ramp has 256 levels (plan 05, D5). */
+/** Bits per code of the density map the display asks for: the ramp has 256 levels (plan 05, D5). */
 const MAP_BITS = 8;
+
+/**
+ * Bits per code of the extinction map the display asks for: 16, so that the map holds the two
+ * decimals A(V) is written to (decision-gg-port-a2 §4).
+ *
+ * @remarks
+ * `CURSOR A(V)` writes A(V) in `mag` to two decimals, as the readout's `FROM CHART CENTRE` rows
+ * do. The map's codes are linear in log₁₀ A(V) from the floor of 0.01 mag to the map's own
+ * ceiling (plan 04's quantiser with plan 07's floor, design note 19), so a code step is the span
+ * ÷ 254 dex at 8 bits. With the centres the ruling read at 1920 × 1080, 40.47 mag edge-on and
+ * 2.12 mag face-on, that is at least 3.3 % edge-on, about 1.3 mag at 40.47 mag, and 2.1 %
+ * face-on, so that the second decimal would not be held above about 0.3 mag edge-on and 0.5 mag
+ * face-on. At 16 bits the step is the span ÷ 65,534 dex, 0.013 % edge-on (0.005 mag at 40.47 mag)
+ * and 0.008 % face-on, and the second decimal is held up to about 79 mag edge-on and 120 mag
+ * face-on. The picture keeps the ramp's 256 levels: under `EXTINCTION` it is unchanged but for one
+ * level where a code's rounding falls on a boundary, and under the dust overlay the dimming is read
+ * at the finer step, which moves a dusty edge-on pixel by up to 4 levels towards the value
+ * computed for it. The density map stays at {@link MAP_BITS}.
+ */
+const EXTINCTION_MAP_BITS = 16;
 
 /**
  * How long a map may take before it is reported as timed out, in milliseconds.
@@ -769,7 +789,7 @@ function MapViewBody({
       : null;
   const extinctionBody: RequestOf<"extinction_map"> | null =
     backingWidthPx > 0 && needsExtinction(question)
-      ? { kind: "extinction_map", universe, view, resolution, bits: MAP_BITS }
+      ? { kind: "extinction_map", universe, view, resolution, bits: EXTINCTION_MAP_BITS }
       : null;
   const densityState = useServerRequest<"density_map">(densityBody, MAP_TIMEOUT_MS);
   const extinctionState = useServerRequest<"extinction_map">(extinctionBody, MAP_TIMEOUT_MS);
@@ -1061,8 +1081,9 @@ function MapViewBody({
  * waits for both.
  *
  * The picture is `pictureWidthPx` wide, in its view's proportions. It asks for the narrowest
- * `density_map` at 8 bits (plan 05, design note D5) that, enlarged at most 1.25 times, covers the
- * picture's device pixels (`mapResolutionFor`), allowing it two minutes, and shows the request's
+ * map that, enlarged at most 1.25 times, covers the picture's device pixels (`mapResolutionFor`):
+ * the `density_map` at 8 bits (plan 05, design note D5), the `extinction_map` at 16 bits
+ * (decision-gg-port-a2 §4), or both, allowing each two minutes, and shows the request's
  * state until it is answered, asking again when the picture grows or shrinks past a resolution the
  * protocol offers. Until that map arrives the last picture stays, resampled to the new size and
  * marked stale as the guide has a stale value shown: painted on a ramp up to `--text-muted`, with a

@@ -1205,6 +1205,21 @@ variants exist.
   the rows show the guide's missing state — the em dash `—` in `--text-muted`, which
   `SystemReadout`'s own `Reading` already renders for a `null` value — with `RequestStatus` beside
   them, never zero.
+- **P07.T11.e The extinction map at 16 bits** (needs T11.b; decision-gg-port-a2 §4).
+  `GalaxyMapView` asks for the `extinction_map` at `EXTINCTION_MAP_BITS = 16`; the `density_map`
+  stays at `MAP_BITS = 8` (plan 05, D5). `CURSOR A(V)` is written to two decimals, as every A(V)
+  on the console is; an 8-bit code step is the map's span ÷ 254 dex, at least 3.3 % edge-on
+  (about 1.3 mag at the 40.47 mag read at the edge-on centre at 1920 × 1080) and 2.1 % face-on,
+  so the second decimal is not held above about 0.3 mag edge-on and 0.5 mag face-on; at 16 bits
+  (span ÷ 65,534) it is held to about 79 mag edge-on and 120 mag face-on. The constant's doc says
+  so. The decoder, `codeToLevel`, `turnClockwise` and `dustOverlay` take 16-bit codes already;
+  no server, protocol or golden change, and the picture is unchanged (the ramp's 256 levels).
+  - Tests: the request bodies ask 16 bits for the extinction map and 8 for the density; a 16-bit
+    extinction map reads `CURSOR A(V)` to two decimals at a code whose 8-bit neighbours would read
+    more than 1 mag apart; `dustOverlay` dims an 8-bit density by a 16-bit extinction.
+  - Record: the base64 sizes (512 px: 699,052 characters face-on and 349,528 edge-on; 1,024 px:
+    2,796,204 and 1,398,104) beside D5's.
+  - Commit: `fix(galaxy): P07.T11.e The extinction map at 16 bits`.
 - Files: under `apps/hyperion/src/renderer/src/`: in `displays/galaxy/`, `GalaxyMapPanel.tsx`,
   `GalaxyMapView.tsx`, a new `ExtinctionLegend.tsx` beside `DensityLegend.tsx`, `SystemReadout.tsx`,
   `SystemsPanel.tsx`, `useLocalChart.ts` and a new `useExtinction.ts` beside `useRangeQuery.ts`;
@@ -2362,3 +2377,68 @@ Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::
     - `LocalChartPanel.test.tsx`'s "asks again for a new centre, keeping every setting but the
       selection" took 15.4 s and failed once under a load of about 30 with the galaxy suites beside
       it; it passes alone (24 of 24).
+- **P07.T11.e, as built (lane `lane/26-p07-t11e-extinction-16bit`, 2026-10-15, at version 22).**
+  Built on `rendering-and-planets` under main's ruling, decision-gg-port-a2 §4, which answers the
+  A2 record's question on `CURSOR A(V)`'s precision. The client and this plan only: no server,
+  protocol or golden change, `GENERATOR_VERSION` 22 and `PROTOCOL_VERSION` 2 as they were, nothing
+  new on the wire (the protocol offers 8 or 16 bits), and the layout unchanged.
+  - _What changed._ `GalaxyMapView.tsx` gains `EXTINCTION_MAP_BITS = 16` beside `MAP_BITS`, its
+    doc giving the ruling's reason and precision; `MAP_BITS`'s doc names the density map, which
+    stays at 8 bits (plan 05, D5); `extinctionBody` asks at `EXTINCTION_MAP_BITS`; and
+    `GalaxyMapView`'s doc names the `extinction_map` at 16 bits. Nothing else in the file moves.
+    The fixtures' `anExtinctionMap` takes an optional `bits` of 8 or 16, 8 by default, so that
+    every earlier caller is unchanged, and at 16 writes each code as two bytes, little-endian, as
+    `CodeDepth::Sixteen` and `readLittleEndianU16` have them, throwing for a code outside 0 to
+    65,535; `aDensityMap` stays 8-bit. `mapPicture.ts` and `ramp.ts` are unchanged: no 16-bit test
+    found a defect in them.
+  - _The cost_, in characters of base64 (4 ⌈bytes ÷ 3⌉), beside D5's 8-bit density map, 349,528
+    face-on at 512 px and 1,398,104 at 1,024 px (D5's "about 350 kB"): the 16-bit extinction map
+    is 699,052 face-on and 349,528 edge-on at 512 px, and 2,796,204 and 1,398,104 at 1,024 px. It
+    is asked for only under `EXTINCTION` or the dust overlay. The maps' framing is unchanged
+    (plans 04 and R03 would send them as bulk frames).
+  - _Tests._ `GalaxyMapView.test.tsx`: "asks for the extinction map alone under EXTINCTION, at the
+    density map's resolution" now expects `bits: 16`; a new test asks under the overlay for the
+    `density_map` at 8 bits and the `extinction_map` at 16, both at 512 px; and a new table reads
+    `CURSOR A(V)` from a 16-bit map from 0.01 to 50 mag (3.69897 dex) at codes 63,817, 63,818 and
+    63,819 as `39.99`, `40.00` and `40.00 mag` (39.9945, 39.9997 and 40.0049 mag by the decode
+    rule), where at 8 bits the nearest code, 248, stands for 39.54 mag and its neighbours for 38.24
+    and 40.89 mag, 1.30 and 1.35 mag away. `mapPicture.test.ts`: `dustOverlay` dims an 8-bit
+    density spanning 5 dex by a 16-bit extinction from 0.01 to 100 mag, codes 32,768, 44,220, 1,
+    65,535 and 0 (1, 5.0003, 0.01 and 100 mag, and below the floor), taking density codes 255,
+    255, 200, 100 and 128 to 235, 153, 200, 0 and 128, an 8-bit map (`Uint8Array`, `maxCode` 255).
+    The tests that answer a 16-bit request with an 8-bit `anExtinctionMap` stay as they are: the
+    decoder takes either depth.
+  - _Deviations._
+    - **The picture.** The task's "the picture is unchanged" holds under `EXTINCTION`, but for one
+      level where a 16-bit code's level and the 8-bit code round apart (about 0.1 % of values).
+      Under the dust overlay `dustOverlay` now takes A(V) at the 16-bit step rather than at the
+      centre of an 8-bit code, so the edge-on picture moves by up to 4 of the ramp's levels where
+      A(V) is about 10–17 mag (the density's span 7 dex), and the face-on picture by at most 1,
+      each towards the value computed for the pixel: the gain the ruling names for the overlay's
+      arithmetic (swept over the server's `code_of` and the overlay's rule). The constant's doc
+      says so. No test pins it.
+    - **T11.b in part.** T11.b's "at `MAP_BITS` and `MAP_TIMEOUT_MS` as the density map's is" now
+      holds for the timeout only: the extinction map is asked for at `EXTINCTION_MAP_BITS`. T11.b's
+      text is left as written.
+    - **The ruling's example.** It gives code 248's 8-bit neighbours as each about 1.35 mag away;
+      by the decode rule they are 1.30 mag below and 1.35 mag above, both over the 1 mag the test
+      asks for.
+    - **The size, against the brainstorm.** Its Visualiser lean has the map "quantised to 8 or 16
+      bits and base64-encoded, a few hundred kilobytes": the 16-bit extinction map at 512 px is
+      699,052 characters, and under the overlay at 1920 × 1080 the face-on view's two maps are
+      1,048,580 together. The 1,024 px maps were past it at 8 bits already.
+  - _Deferred findings (2026-10-13 rule)._
+    - The view does not compare an answer's `bits` with the request's, for either map. An 8-bit
+      answer to the 16-bit request would be drawn, and `CURSOR A(V)` would write two decimals from
+      8-bit codes without `MAP DATA INVALID`. The server quantises at the request's depth, so this
+      is a server fault only; the brief adds no such check.
+    - `anExtinctionMap`'s 16-bit path has no test of its own (a round trip through
+      `decodeExtinctionMap` and a refused code), as `aDensityMap` has in `galaxyFixtures.test.ts`,
+      which is outside this task's files; the view's 16-bit reading pins its byte order (swapped
+      bytes read about 0.12 mag).
+    - `MapViewBody`'s comment "Decoding 350 kB of base64 takes milliseconds" predates T11.e; under
+      the overlay the two maps at 512 px are now 350 kB and 700 kB. Left as written, so that the
+      file's diff stays to the constant, the body and the two doc sentences for T11.d's merge.
+    - The 79 and 120 mag to which 16 bits hold the second decimal are for the spans read at
+      1920 × 1080. A higher ceiling widens the span: at a ceiling of 100 mag the step at the
+      ceiling is 0.014 mag (span 4 dex), 1.4 units of the last place.
