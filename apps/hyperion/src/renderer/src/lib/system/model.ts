@@ -751,6 +751,16 @@ export interface Biosphere {
 }
 
 /**
+ * The vapour a surface's melt evaporates over it, its silicate vapour (the protocol's
+ * `SilicateVapourDto`, on the wire by plan 14's P14.T35.f): uninhabited, as the wire's type is.
+ *
+ * @remarks
+ * Its members are P14.T55.b's, which gives this type them; until then it has no value, and the
+ * client reads none of a newer server's figures.
+ */
+export type SilicateVapour = never;
+
+/**
  * A body's surface section (the protocol's `BodySurfaceDto`, plan 14's P14.T35.e): its state and
  * material, its surface conditions and climate regime, its global figures, and the members of later
  * tasks.
@@ -767,13 +777,22 @@ export interface BodySurface {
   /** T(0°) − T(90°): negative where the poles are the warmer. */
   readonly equatorPoleContrastK: number;
   readonly dayNightContrastK: number;
-  /** Zero for an airless body. */
+  /**
+   * The volatile air's: zero for an airless body, and for a surface holding melt whose volatiles
+   * are gone.
+   *
+   * @remarks
+   * It does not include the melt's own vapour, {@link BodySurface.silicateVapour}.
+   */
   readonly surfacePressurePa: number;
-  /** Largest first, summing to 1; empty for an airless body. */
+  /**
+   * Largest first, summing to 1; empty for an airless body, or for a surface holding melt with no
+   * volatile air, which does not deny the melt's own vapour.
+   */
   readonly gases: ReadonlyArray<GasShare>;
-  /** `null` for an airless body. */
+  /** `null` with an empty {@link BodySurface.gases}. */
   readonly meanMolarMassGPerMol: number | null;
-  /** `c_p` ÷ R, dimensionless; `null` for an airless body. */
+  /** `c_p` ÷ R, dimensionless; `null` with an empty {@link BodySurface.gases}. */
   readonly heatCapacityOverR: number | null;
   readonly stellarFluxWM2: number;
   readonly radiationClass: RadiationClassDto;
@@ -811,6 +830,15 @@ export interface BodySurface {
   readonly crust: Modelled<CrustComposition>;
   readonly modifiers: Modelled<SurfaceModifiers>;
   readonly biosphere: Modelled<Biosphere>;
+  /**
+   * The melt's own vapour (P14.T35.f), which is not part of the volatile air of
+   * {@link BodySurface.surfacePressurePa} and {@link BodySurface.gases}.
+   *
+   * @remarks
+   * Not modelled from every server until P14.T55.b; from then, `none` on a surface computed to hold
+   * no melt, and a value over melt, whose members this client does not read yet.
+   */
+  readonly silicateVapour: Modelled<SilicateVapour>;
 }
 
 /** An envelope's irradiated grey profile's parameters (Guillot 2010, Eq. 29). */

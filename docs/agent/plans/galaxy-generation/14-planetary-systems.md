@@ -3939,6 +3939,42 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
     `N2 100 %`. `bodyWords.test.ts`: `tenuous` reads `TENUOUS ATMOSPHERE`.
   - _Accept:_ `pnpm test`; the console-ux skill's lint on the changed files; a ux-reviewer pass.
   - _Commit:_ `fix(client): P14.T43.d The readout's names as signed off`.
+- **P14.T43.e A molten surface's air in the readout** (decision-backlog-2 §2.4, there "T43.b's
+  second amendment"; decision-triton-and-e101 §2; a display change only, with no wire, output or
+  protocol change; after P14.T35.f, whose bindings it reads, and P14.T43.d, which edits the same
+  rows).
+  - `lib/system/{bodiesWire.ts, model.ts}` read `silicate_vapour` as a `Modelled` member: absent
+    is not modelled, `null` is none, and a value is the vapour, which no server sends before
+    P14.T55.b.
+  - `displays/system/BodyRecordReadings.tsx`'s `surfaceRows`, on a surface holding melt (the
+    state `magma_ocean`; T54.a's client follow-up adds `crust.melt_area_fraction > 0`):
+    - with the member absent, a row of its own reads `SILICATE VAPOUR NOT YET MODELLED`;
+    - an empty `gases` makes `SURFACE PRESSURE` and `MOLE FRACTION` Missing, the em dash in
+      `--text-muted`, never `NONE`, unless the member is `null`. The pressure over a melt is at
+      least the melt's own vapour pressure, which no rule computes, and "A single value the
+      generator does not compute, inside a section that is shown, is Missing" (the guide's
+      Data states);
+    - a non-empty `gases` (a young magma ocean's steam and CO₂) reads its figures, and the
+      `SILICATE VAPOUR` row says what they leave out;
+    - with the member `null`, `NONE` reads as today.
+  - Elsewhere nothing changes: an `airless` body keeps `NONE` and `EXOSPHERE NOT YET MODELLED`.
+  - `e101` reads `SURFACE MAGMA OCEAN`, `T SURF 1684 K`, `SURFACE PRESSURE —`, `MOLE FRACTION —`
+    and `SILICATE VAPOUR NOT YET MODELLED`, from this server and from T35.e's, which sends no
+    member.
+  - _Drafted for the owner_ (to the sign-off queue), with R08.T10.a's note as one name:
+    - the `SILICATE VAPOUR` row (decision-backlog-2's draft was `ROCK VAPOUR`; amended by
+      signoff-11's one-name rule, as the wire's member and T55.b's term);
+    - the `SURFACE PRESSURE` and `MOLE FRACTION` rows' clause: "the em dash over a surface
+      holding melt whose own vapour is not modelled".
+  - _Tests_ (`SystemView.bodies.test.tsx`, `bodiesWire.test.ts`):
+    - `e101`'s case reads —, — and `SILICATE VAPOUR NOT YET MODELLED`, and no `NONE`;
+    - a steam-air magma ocean reads its figures and the row;
+    - an airless body is unchanged;
+    - a temperate body has no row;
+    - a melt surface whose member is `null` reads `NONE` twice and no row;
+    - a record with no key reads not modelled.
+  - _Accept:_ `pnpm test`; the console-ux skill's lint on the changed files; a ux-reviewer pass.
+  - _Commit:_ `feat(client): P14.T43.e A molten surface's air in the readout`.
 
 #### P14.T44 Time control
 
@@ -14236,3 +14272,112 @@ tables::gauss_legendre`.
     say "`None` for an airless body", while the wire's now say `null` with an empty `gases`: an
     airless body, or a surface holding melt with no volatile air, as on `e101`. The entry limits
     the sim's edit to `surface_pressure` and `gases`; for a docs batch.
+- **Deviations in P14.T43.e, as built (`lane/35-p14-t43e-silicate-vapour-readout`, 2026-10-16).**
+  A molten surface's air in the readout (decision-backlog-2 §2.4; decision-triton-and-e101 §2), in
+  the client only. No layout, wire, protocol or output moves: `GENERATOR_VERSION` stays 22 and
+  `PROTOCOL_VERSION` 2, no binding, fixture or golden changes, and no CSS: the new row is `wide`,
+  as `EXOSPHERE` is.
+  - _The member._ `lib/system/model.ts`'s `BodySurface` gains
+    `silicateVapour: Modelled<SilicateVapour>`, last, after `biosphere`, as the wire's member is:
+    the melt's own vapour (P14.T35.f), not part of the volatile air of `surfacePressurePa` and
+    `gases`; not modelled from every server until P14.T55.b, then `none` on a surface computed to
+    hold no melt and a value over melt, whose members the client does not read yet.
+    `SilicateVapour` is the client's own type, an alias of `never` whose TSDoc says that T55.b
+    gives it its members (the brief's lean). The air members' docs say what the wire's do:
+    `surfacePressurePa` is the volatile air's, zero for an airless body and for a surface holding
+    melt whose volatiles are gone, with "It does not include the melt's own vapour" under
+    `@remarks`, so that the summary stays one sentence (`.claude/rules/typescript-dev.md`,
+    Documentation); `gases` is empty also for a surface holding melt with no volatile air, which
+    does not deny the melt's own vapour; μ and c_p ÷ R are `null` with an empty `gases`.
+  - _Its decoding._ `bodiesWire.ts`'s `toSurface` reads
+    `silicateVapour: modelled(surface.silicate_vapour, toSilicateVapour)`, last.
+    `toSilicateVapour` returns the wire's value unchecked, with no cast (both types are `never`),
+    and never throws, so that a newer server's value reads as a value, never as a fault.
+  - _The rule and the row._ In `displays/system/BodyRecordReadings.tsx`, a module-private
+    `holdsMelt` is true for the state `magma_ocean`; its TSDoc names T54.a's client follow-up
+    (`crust.melt_area_fraction` above 0) and T53.b (`steam_envelope`), neither read here. A second,
+    `vapourReading`, takes the member's three kinds in one exhaustive `switch` (the TypeScript
+    review's consider, `.claude/rules/typescript-dev.md`, Types), so that a new kind of `Modelled`
+    fails to compile there. `surfaceRows` reads `SURFACE PRESSURE` and `MOLE FRACTION` as `MISSING`
+    where the surface holds melt, its `gases` is empty and its `silicateVapour` is not `none`,
+    ruled on the empty `gases`, not on the pressure; otherwise through `pressureShown` and
+    `gasesShown` as before. Neither function changes, nor `sharesReading`, the envelope's
+    `MOLE FRACTION` or the airless rows. Where the surface holds melt and the member is
+    `not_modelled`, `SILICATE VAPOUR` reads `NOT YET MODELLED` (`sectionStateLabel`, no new word),
+    after `MOLE FRACTION`, where an airless body's `EXOSPHERE` stands. `surfaceRows`' TSDoc gains the brief's paragraph, its drafted name
+    marked "(decision-triton-and-e101 §2.3)" and the view's note named as R08.T10.a's to add, since
+    it is not built yet, and a sentence more on a value's reading. The component's TSDoc lists
+    "and, over a melt, its own vapour's state" among the surface's rows.
+  - _The readings, as the tests pin them._ `e101`'s case (a magma ocean at 1,684.4 K, 0 Pa, no gas,
+    μ and c_p ÷ R `null`, and no `silicate_vapour` key, as this server and T35.e's send it) reads
+    `SURFACE MAGMA OCEAN`, `T SURF 1684 K`, `SURFACE PRESSURE —` and `MOLE FRACTION —`, each em dash
+    of the class `readout__missing`, no `NONE` anywhere in the readout,
+    `SILICATE VAPOUR NOT YET MODELLED`, and no `EXOSPHERE`. A steam air (H2O at 0.75, CO2 at 0.25,
+    25 MPa, no key) reads `SURFACE PRESSURE 25.0 MPa`, `MOLE FRACTION H2O 75.0 % · CO2 25.0 %` and
+    the row. With the member `null`: `NONE` twice and no row. With a newer server's value: `—`
+    twice and no row. A temperate Earth and an airless one have no row, the airless one still
+    `NONE` twice beside its `EXOSPHERE`.
+  - _No label wraps._ By T43.d's method (B612's advance widths at 0.875rem with 0.15em tracking,
+    no kerning, which gives T43.d's 3.76, 10.46, 10.76 and 16.32rem again), `SILICATE VAPOUR` is
+    9.45rem, inside the 11.5rem label track.
+  - _Drafted for the owner_ (nomenclature rows; the client is built to them), as one name with
+    R08.T10.a's view note `SILICATE VAPOUR: NOT YET MODELLED` (decision-triton-and-e101 §2.3);
+    main queues them for the sign-off, and the guide is not edited here:
+
+    | Name               | Kind  | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                 |
+    | ------------------ | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+    | `SILICATE VAPOUR`  | Label | In the `SURFACE` section of a body whose surface holds melt, as a `MAGMA OCEAN`'s does, the vapour the melt evaporates, over a melt with no volatiles chiefly Na, O2, O and SiO: `SILICATE VAPOUR NOT YET MODELLED` while the generator does not compute it, as the view's `SILICATE VAPOUR: NOT YET MODELLED` note says of the same bodies. It is not part of the air that `SURFACE PRESSURE` and `MOLE FRACTION` read |
+    | `SURFACE PRESSURE` | Label | The signed-off row, then: "; the em dash over a surface holding melt whose own vapour is not modelled and whose volatile air holds no gas"                                                                                                                                                                                                                                                                              |
+    | `MOLE FRACTION`    | Label | The signed-off row, then: "; the em dash over a surface holding melt whose own vapour is not modelled and whose volatile air holds no gas"                                                                                                                                                                                                                                                                              |
+
+    The two rows' clause extends the entry's ("the em dash over a surface holding melt whose own
+    vapour is not modelled", the decision's) with "and whose volatile air holds no gas", the
+    rule's own condition, an empty `gases`: a steam air over a melt reads its figures, and the
+    decision's words alone would take it in.
+
+  - _For P14.T55.b: a value's reading_ (not ruled; the smallest reversible choice, the brief's
+    lean). A `silicate_vapour` value, which no server sends and `SilicateVapourDto` cannot hold,
+    decodes as a value and leaves the record usable. It reads an empty volatile air Missing, as
+    the ruling's "unless the member is `null`" requires, and has no `SILICATE VAPOUR` row, since
+    `NOT YET MODELLED` would be false and this build has no figures to read. T55.b, which gives the
+    type its members, adds its row and rules what older consoles read.
+  - _Not read:_ `steam_envelope` (P14.T53.b's) and a `crust.melt_area_fraction` above 0 (P14.T54.a's
+    client follow-up), though the client model already reads `crust`.
+  - _T35.f's last bullet:_ the `SURFACE PRESSURE NONE` and `MOLE FRACTION NONE` it names for `e101`
+    now read the em dash, beside `SILICATE VAPOUR NOT YET MODELLED`, and T43.b's "_An open gap_"
+    is closed. Their records, and the "**Ruled**" marks, are left to the docs batch.
+  - _Tests._ `SystemView.bodies.test.tsx`, six new, after the airless test: "reads e101's empty
+    air over its melt as the em dash, and its silicate vapour as NOT YET MODELLED", "reads a magma
+    ocean's steam air by its figures, beside its silicate vapour NOT YET MODELLED", "reads a melt's
+    empty air as NONE where its silicate vapour is computed as none", "reads a melt's empty air as
+    the em dash beside a newer server's silicate vapour, with no row", "shows no SILICATE VAPOUR
+    row for a temperate world" and "shows no SILICATE VAPOUR row for an airless world, whose air
+    still reads NONE"; with the helpers `e101Earth` (the fixture's Earth sent as `e101` is, which
+    fails if the fixture gains a `silicate_vapour` key) and `readingOf`. `bodiesWire.test.ts`:
+    "reads every member of a later task left out as not modelled, never as none" adds
+    `silicateVapour`, the record with no key; "reads a later member's null as none" adds
+    `silicate_vapour: null`; and the new "reads a newer server's silicate vapour as a value, never
+    as a fault". Both value cases write `@ts-expect-error` with the brief's reason. No other
+    existing test changes. The console-ux lint on the three renderer files:
+    `0 error(s), 0 check(s) in 3 file(s) scanned`, as at the base.
+  - _Reviews._ The UX, TypeScript and plan-conformance reviewers: no must-fix. The UX review has
+    no should-fix; its notes on the drafted rows are deferred below, for the sign-off. The
+    TypeScript review's one consider, the exhaustive `switch`, is applied. The plan-conformance
+    review's should-fix items are this record's clause note and this bullet, and the deferred
+    findings below.
+  - _Pending:_ the visual check at 1920×1080 and 1280×720, as for T43.b and T43.d.
+- **Deferred findings (2026-10-13 rule)**, from P14.T43.e:
+  - No task owns "T54.a's client follow-up": T54.a's entry lists no client subtask. From 23, T54.a
+    sends `crust`, and T51.c's locked lava world (`airless`, with a dayside pool) then reads
+    `SURFACE PRESSURE NONE`, `MOLE FRACTION NONE` and `EXOSPHERE NOT YET MODELLED`, with no
+    `SILICATE VAPOUR` row, until a client subtask reads a `crust.melt_area_fraction` above 0. For a
+    docs batch: a client subtask under T54.a.
+  - Rendering plan R08 holds no `SILICATE VAPOUR: NOT YET MODELLED` view note: its Design note 12
+    and R08.T10.a name only `EXOSPHERE: NOT YET MODELLED`, while `surfaceRows`' TSDoc and the
+    drafted `SILICATE VAPOUR` row name the note as R08.T10.a's. For a docs batch, from
+    decision-triton-and-e101 §2.3.
+  - For the sign-off (the UX review's notes): the drafted clause says "not modelled", while a
+    vapour sent as a value, which this client cannot read, also reads the em dash (the lean for
+    T55.b above); and the signed-off `SURFACE PRESSURE` row, "The pressure at a body's surface",
+    does not say that it leaves out a melt's own vapour, as the drafted `SILICATE VAPOUR` row
+    does, so that the two may be made to agree.

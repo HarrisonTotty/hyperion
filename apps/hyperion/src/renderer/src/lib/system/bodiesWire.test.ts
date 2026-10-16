@@ -597,6 +597,7 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
       surface.crust,
       surface.modifiers,
       surface.biosphere,
+      surface.silicateVapour,
     ];
 
     expect(later).toEqual(Array.from({ length: later.length }, () => ({ kind: "not_modelled" })));
@@ -604,11 +605,35 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
 
   it("reads a later member's null as none", () => {
     const none = okSection(
-      recordOf(earthWithSurface({ ...earthSurface(), subsurface_ocean: null, aerosols: null }))
-        .surface,
+      recordOf(
+        earthWithSurface({
+          ...earthSurface(),
+          subsurface_ocean: null,
+          aerosols: null,
+          silicate_vapour: null,
+        }),
+      ).surface,
     );
 
-    expect([none.subsurfaceOcean, none.aerosols]).toEqual([{ kind: "none" }, { kind: "none" }]);
+    expect([none.subsurfaceOcean, none.aerosols, none.silicateVapour]).toEqual([
+      { kind: "none" },
+      { kind: "none" },
+      { kind: "none" },
+    ]);
+  });
+
+  it("reads a newer server's silicate vapour as a value, never as a fault", () => {
+    const result = earthWithSurface({
+      ...earthSurface(),
+      // @ts-expect-error -- SilicateVapourDto has no members until P14.T55.b, and a newer server's value must still read.
+      silicate_vapour: { vapour_pressure_pa: 10 },
+    });
+
+    expect(result.kind).toBe("ok");
+    expect(okSection(recordOf(result).surface).silicateVapour).toEqual({
+      kind: "value",
+      value: { vapour_pressure_pa: 10 },
+    });
   });
 
   it("reads a later member's value in the display's units", () => {
