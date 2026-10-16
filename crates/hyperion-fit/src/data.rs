@@ -188,6 +188,10 @@ pub enum LoadDatasetError {
         /// The hash found.
         found: String,
     },
+    /// A rendering plan R08 material file that a manifest names could not be read
+    /// ([`crate::materials`]).
+    #[error(transparent)]
+    Material(Box<crate::materials::ReadMaterialError>),
 }
 
 #[cfg(test)]

@@ -40,6 +40,7 @@
 
 mod condensed;
 mod diagrams;
+pub(super) mod liquids;
 
 use super::mix::{GasColumns, HeatCapacityClass};
 use super::phase::PhaseColumns;

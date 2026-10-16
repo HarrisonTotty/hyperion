@@ -108,6 +108,12 @@ RUST_READERS: List[Tuple[str, str, str, str]] = [
     (r"^crates/[^/]+/Cargo\.toml$", "hyperion-testkit", "native", "read by hyperion-testkit's clippy_bans"),
     (r"^crates/hyperion-(base|surface|sim)/.*\.rs$", "hyperion-testkit", "native",
      "read by hyperion-testkit's clippy_bans"),
+    # The fitting crate's `liquid_optics` task reads rendering plan R08's material files at run time
+    # (`hyperion_fit::materials`, galaxy plan 14's P14.T49.h), and its inputs hash covers their data,
+    # so a changed file runs its rerender test (`tests/liquid_optics.rs`) and the fit check
+    # (decision-p14-t49h-liquids §8, item 4).
+    (r"^apps/hyperion/src/renderer/src/view/atmosphere/materials/[^/]+\.json$", "hyperion-fit", "native",
+     "read by hyperion-fit's liquid_optics"),
 ]
 # The sources of the tests that the justfile's `wasm_sky` leaves out of the wasip1 runs, of the test
 # code they reach (the sky's modules and the sim's shared test fixtures) and of the testkit's golden

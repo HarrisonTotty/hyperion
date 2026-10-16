@@ -26,6 +26,7 @@
 //! - [`emit`]: the Rust source emitter, the header grammar and the guards on writing a table;
 //! - [`check`]: the staleness check, `just fit-check`;
 //! - [`data`]: external datasets and their provenance;
+//! - [`materials`]: rendering plan R08's committed material files, read as a fit's input;
 //! - [`parallel`]: the deterministic map-reduce;
 //! - [`optimise`]: hand-written optimisers (golden section, Nelder–Mead);
 //! - [`cli`]: the command line, which `main.rs` parses and hands to [`cli::run`].
@@ -36,6 +37,7 @@ pub mod cli;
 pub mod data;
 pub mod emit;
 pub mod manifest;
+pub mod materials;
 pub mod optimise;
 pub mod parallel;
 pub mod pipeline;

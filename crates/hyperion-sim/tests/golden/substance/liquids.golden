@@ -1,0 +1,854 @@
+# generator_version = 22
+[liquid]
+liquid 2 H2O at 273.160 K: basis Measured
+liquid 2 H2O at 273.160 K: temperature = 0x4071128f5c28f5c3  # 273.16
+liquid 2 H2O at 273.160 K: density_kg_m3 = 0x408f3e5025d3f691  # 999.789134651148
+liquid 2 H2O at 273.160 K: refractive_index bin 0 = 0x3ff58484e922ba0a  # 1.3448533160077454
+liquid 2 H2O at 273.160 K: refractive_index bin 1 = 0x3ff57b036eaaafe2  # 1.3425325701637054
+liquid 2 H2O at 273.160 K: refractive_index bin 2 = 0x3ff573274c3f22c0  # 1.3406136492141485
+liquid 2 H2O at 273.160 K: refractive_index bin 3 = 0x3ff56c92275f0b30  # 1.3390065706195848
+liquid 2 H2O at 273.160 K: refractive_index bin 4 = 0x3ff566f78e5880b4  # 1.3376384315852592
+liquid 2 H2O at 273.160 K: refractive_index bin 5 = 0x3ff56220951585c9  # 1.3364568542095745
+liquid 2 H2O at 273.160 K: refractive_index bin 6 = 0x3ff55de8fbf2adf2  # 1.3354272691457223
+liquid 2 H2O at 273.160 K: refractive_index bin 7 = 0x3ff55a2ca10367d3  # 1.3345152177412174
+liquid 2 H2O at 273.160 K: refractive_index bin 8 = 0x3ff556d7f63eaa7f  # 1.333702051061351
+liquid 2 H2O at 273.160 K: refractive_index bin 9 = 0x3ff553d7c64a3c87  # 1.3329694505407887
+liquid 2 H2O at 273.160 K: refractive_index bin 10 = 0x3ff5511e4cc63ec4  # 1.332304286861402
+liquid 2 H2O at 273.160 K: refractive_index bin 11 = 0x3ff54e9c43088e7a  # 1.3316919916623235
+liquid 2 H2O at 273.160 K: refractive_index bin 12 = 0x3ff54c4a5d240af9  # 1.3311256063759045
+liquid 2 H2O at 273.160 K: refractive_index bin 13 = 0x3ff54a1f532bf426  # 1.330596279992514
+liquid 2 H2O at 273.160 K: refractive_index bin 14 = 0x3ff548166305f928  # 1.330099474725623
+liquid 2 H2O at 273.160 K: absorption_per_m bin 0 = 0x3f5eb84e77038c94  # 0.0018749967821854218
+liquid 2 H2O at 273.160 K: absorption_per_m bin 1 = 0x3f6904cf0ccef0a7  # 0.0030540508218717846
+liquid 2 H2O at 273.160 K: absorption_per_m bin 2 = 0x3f799373a9dd1639  # 0.0062441366297370455
+liquid 2 H2O at 273.160 K: absorption_per_m bin 3 = 0x3f8518d115ab1727  # 0.010301240419163428
+liquid 2 H2O at 273.160 K: absorption_per_m bin 4 = 0x3f92241972f9cd22  # 0.01771583332306393
+liquid 2 H2O at 273.160 K: absorption_per_m bin 5 = 0x3fa3fca6e74a919d  # 0.039036956533240665
+liquid 2 H2O at 273.160 K: absorption_per_m bin 6 = 0x3faa8083aa43124f  # 0.051761736425338094
+liquid 2 H2O at 273.160 K: absorption_per_m bin 7 = 0x3fb2b22969b069b4  # 0.07303103285122498
+liquid 2 H2O at 273.160 K: absorption_per_m bin 8 = 0x3fc713dc95af0fd0  # 0.18029362973004348
+liquid 2 H2O at 273.160 K: absorption_per_m bin 9 = 0x3fd1c40a91a595d9  # 0.2775904104549603
+liquid 2 H2O at 273.160 K: absorption_per_m bin 10 = 0x3fd566e38248a159  # 0.3344048282911181
+liquid 2 H2O at 273.160 K: absorption_per_m bin 11 = 0x3fdc4bfe02094af2  # 0.4421381969342938
+liquid 2 H2O at 273.160 K: absorption_per_m bin 12 = 0x3fe33eb03f4a011b  # 0.6014024005999404
+liquid 2 H2O at 273.160 K: absorption_per_m bin 13 = 0x3ff7145ec6a43fdf  # 1.442473197883366
+liquid 2 H2O at 273.160 K: absorption_per_m bin 14 = 0x400668346509ed58  # 2.800881184926464
+liquid 2 H2O at 273.160 K: scattering_per_m bin 0 = 0x3f7745dd2e5b689f  # 0.0056818618665720735
+liquid 2 H2O at 273.160 K: scattering_per_m bin 1 = 0x3f71cafc795e07c3  # 0.004343973376196022
+liquid 2 H2O at 273.160 K: scattering_per_m bin 2 = 0x3f6bb247cb18a0e0  # 0.003380909177185129
+liquid 2 H2O at 273.160 K: scattering_per_m bin 3 = 0x3f65e4af5d94492b  # 0.0026725220783500223
+liquid 2 H2O at 273.160 K: scattering_per_m bin 4 = 0x3f618af3b5711e0d  # 0.002141452783266612
+liquid 2 H2O at 273.160 K: scattering_per_m bin 5 = 0x3f5c740134eca7b4  # 0.001736642054036325
+liquid 2 H2O at 273.160 K: scattering_per_m bin 6 = 0x3f5752d1cefa9362  # 0.001423554316638952
+liquid 2 H2O at 273.160 K: scattering_per_m bin 7 = 0x3f534d94d13fa45a  # 0.0011781647963238413
+liquid 2 H2O at 273.160 K: scattering_per_m bin 8 = 0x3f501d7cd578d76e  # 0.0009835928993999449
+liquid 2 H2O at 273.160 K: scattering_per_m bin 9 = 0x3f4b1eee58cc8658  # 0.0008276618769722062
+liquid 2 H2O at 273.160 K: scattering_per_m bin 10 = 0x3f46fc86d145bcf4  # 0.0007014902389936004
+liquid 2 H2O at 273.160 K: scattering_per_m bin 11 = 0x3f439c661954a23b  # 0.000598478177072321
+liquid 2 H2O at 273.160 K: scattering_per_m bin 12 = 0x3f40d53d79fdd357  # 0.000513701455914099
+liquid 2 H2O at 273.160 K: scattering_per_m bin 13 = 0x3f3d0f1e17f339a4  # 0.00044340595918592796
+liquid 2 H2O at 273.160 K: scattering_per_m bin 14 = 0x3f39368d03627467  # 0.00038472120957939174
+liquid 2 H2O at 273.160 K: surface_tension_n_per_m = 0x3fb35d8dd4746502  # 0.07564627110368252
+liquid 2 H2O at 273.160 K: viscosity_pa_s = 0x3f5d598fdf6cce63  # 0.0017913727767337121
+liquid 2 H2O at 366.644 K: basis Derived
+liquid 2 H2O at 366.644 K: temperature = 0x4076ea4dd2f1a9fc  # 366.644
+liquid 2 H2O at 366.644 K: density_kg_m3 = 0x408e17577579df37  # 962.9177045365567
+liquid 2 H2O at 366.644 K: refractive_index bin 0 = 0x3ff54b22131b079f  # 1.3308430429756084
+liquid 2 H2O at 366.644 K: refractive_index bin 1 = 0x3ff5420ff4e443ec  # 1.3286284986572765
+liquid 2 H2O at 366.644 K: refractive_index bin 2 = 0x3ff53a8fbe480de2  # 1.3267972405309298
+liquid 2 H2O at 366.644 K: refractive_index bin 3 = 0x3ff534477906bc39  # 1.3252634742346017
+liquid 2 H2O at 366.644 K: refractive_index bin 4 = 0x3ff52eee3d8fd571  # 1.3239576725730695
+liquid 2 H2O at 366.644 K: refractive_index bin 5 = 0x3ff52a4fa9324b90  # 1.3228298768269475
+liquid 2 H2O at 366.644 K: refractive_index bin 6 = 0x3ff5264928a9ed12  # 1.3218471134594592
+liquid 2 H2O at 366.644 K: refractive_index bin 7 = 0x3ff522b842d8d544  # 1.3209765063487149
+liquid 2 H2O at 366.644 K: refractive_index bin 8 = 0x3ff51f8a502089fa  # 1.3202002649273923
+liquid 2 H2O at 366.644 K: refractive_index bin 9 = 0x3ff51cacfc9d86e6  # 1.3195009105478959
+liquid 2 H2O at 366.644 K: refractive_index bin 10 = 0x3ff51a13257c3956  # 1.3188659157054494
+liquid 2 H2O at 366.644 K: refractive_index bin 11 = 0x3ff517ae36a1407e  # 1.3182813772182551
+liquid 2 H2O at 366.644 K: refractive_index bin 12 = 0x3ff5157739b1a00f  # 1.3177406552949866
+liquid 2 H2O at 366.644 K: refractive_index bin 13 = 0x3ff51365531a20b7  # 1.3172353025602612
+liquid 2 H2O at 366.644 K: refractive_index bin 14 = 0x3ff51173f876a88f  # 1.3167609887700882
+liquid 2 H2O at 366.644 K: absorption_per_m bin 0 = 0x3f5eb84e77038c94  # 0.0018749967821854218
+liquid 2 H2O at 366.644 K: absorption_per_m bin 1 = 0x3f6904cf0ccef0a7  # 0.0030540508218717846
+liquid 2 H2O at 366.644 K: absorption_per_m bin 2 = 0x3f799373a9dd1639  # 0.0062441366297370455
+liquid 2 H2O at 366.644 K: absorption_per_m bin 3 = 0x3f8518d115ab1727  # 0.010301240419163428
+liquid 2 H2O at 366.644 K: absorption_per_m bin 4 = 0x3f92241972f9cd22  # 0.01771583332306393
+liquid 2 H2O at 366.644 K: absorption_per_m bin 5 = 0x3fa3fca6e74a919d  # 0.039036956533240665
+liquid 2 H2O at 366.644 K: absorption_per_m bin 6 = 0x3faa8083aa43124f  # 0.051761736425338094
+liquid 2 H2O at 366.644 K: absorption_per_m bin 7 = 0x3fb2b22969b069b4  # 0.07303103285122498
+liquid 2 H2O at 366.644 K: absorption_per_m bin 8 = 0x3fc713dc95af0fd0  # 0.18029362973004348
+liquid 2 H2O at 366.644 K: absorption_per_m bin 9 = 0x3fd1c40a91a595d9  # 0.2775904104549603
+liquid 2 H2O at 366.644 K: absorption_per_m bin 10 = 0x3fd566e38248a159  # 0.3344048282911181
+liquid 2 H2O at 366.644 K: absorption_per_m bin 11 = 0x3fdc4bfe02094af2  # 0.4421381969342938
+liquid 2 H2O at 366.644 K: absorption_per_m bin 12 = 0x3fe33eb03f4a011b  # 0.6014024005999404
+liquid 2 H2O at 366.644 K: absorption_per_m bin 13 = 0x3ff7145ec6a43fdf  # 1.442473197883366
+liquid 2 H2O at 366.644 K: absorption_per_m bin 14 = 0x400668346509ed58  # 2.800881184926464
+liquid 2 H2O at 366.644 K: scattering_per_m bin 0 = 0x3f7a5f3c314739ad  # 0.006438479544569037
+liquid 2 H2O at 366.644 K: scattering_per_m bin 1 = 0x3f742b6025ec8193  # 0.004924178675338803
+liquid 2 H2O at 366.644 K: scattering_per_m bin 2 = 0x3f6f67a4fde16419  # 0.00383360123582267
+liquid 2 H2O at 366.644 K: scattering_per_m bin 3 = 0x3f68d4ae6acbac12  # 0.0030311018548352464
+liquid 2 H2O at 366.644 K: scattering_per_m bin 4 = 0x3f63e6919d0438ee  # 0.00242927970987871
+liquid 2 H2O at 366.644 K: scattering_per_m bin 5 = 0x3f60243ffe1818f5  # 0.00197041033311784
+liquid 2 H2O at 366.644 K: scattering_per_m bin 6 = 0x3f5a7798c37136e4  # 0.0016154281454591685
+liquid 2 H2O at 366.644 K: scattering_per_m bin 7 = 0x3f55e86671274d5b  # 0.001337146798154296
+liquid 2 H2O at 366.644 K: scattering_per_m bin 8 = 0x3f524ac0bd814065  # 0.0011164552907026112
+liquid 2 H2O at 366.644 K: scattering_per_m bin 9 = 0x3f4ec9a2e31a6084  # 0.0009395642611762654
+liquid 2 H2O at 366.644 K: scattering_per_m bin 10 = 0x3f4a18cbc8c1ca11  # 0.0007964129486153789
+liquid 2 H2O at 366.644 K: scattering_per_m bin 11 = 0x3f46444235069d64  # 0.0006795237805378549
+liquid 2 H2O at 366.644 K: scattering_per_m bin 12 = 0x3f431d35416afce7  # 0.000583315852814706
+liquid 2 H2O at 366.644 K: scattering_per_m bin 13 = 0x3f407ff2d07efae3  # 0.000503533899056521
+liquid 2 H2O at 366.644 K: scattering_per_m bin 14 = 0x3f3ca25c11a36b1a  # 0.00043692348266481803
+liquid 2 H2O at 366.644 K: surface_tension_n_per_m = 0x3faeccc4f7cd29ca  # 0.06015601658744492
+liquid 2 H2O at 366.644 K: viscosity_pa_s = 0x3f33cb88f4e09507  # 0.0003020486227590245
+liquid 2 H2O at 460.128 K: basis Derived
+liquid 2 H2O at 460.128 K: temperature = 0x407cc20c49ba5e36  # 460.12800000000004
+liquid 2 H2O at 460.128 K: density_kg_m3 = 0x408b7b762ceede05  # 879.4327028905396
+liquid 2 H2O at 460.128 K: refractive_index bin 0 = 0x3ff4cb1dce9cc24f  # 1.2995889731211212
+liquid 2 H2O at 460.128 K: refractive_index bin 1 = 0x3ff4c2ff78872a55  # 1.2976069172024343
+liquid 2 H2O at 460.128 K: refractive_index bin 2 = 0x3ff4bc488ad23f56  # 1.2959676192003449
+liquid 2 H2O at 460.128 K: refractive_index bin 3 = 0x3ff4b6a8a56a65c0  # 1.2945944272563423
+liquid 2 H2O at 460.128 K: refractive_index bin 4 = 0x3ff4b1de9c7d06e8  # 1.2934251892879107
+liquid 2 H2O at 460.128 K: refractive_index bin 5 = 0x3ff4adbb98c27f71  # 1.292415234296609
+liquid 2 H2O at 460.128 K: refractive_index bin 6 = 0x3ff4aa20af5ca067  # 1.2915350771018212
+liquid 2 H2O at 460.128 K: refractive_index bin 7 = 0x3ff4a6ef0894e75c  # 1.2907553038807782
+liquid 2 H2O at 460.128 K: refractive_index bin 8 = 0x3ff4a415f4b99fd0  # 1.290060001332666
+liquid 2 H2O at 460.128 K: refractive_index bin 9 = 0x3ff4a1850d50562c  # 1.2894335289069074
+liquid 2 H2O at 460.128 K: refractive_index bin 10 = 0x3ff49f309113174d  # 1.2888646761870917
+liquid 2 H2O at 460.128 K: refractive_index bin 11 = 0x3ff49d0b72eefdac  # 1.28834099670335
+liquid 2 H2O at 460.128 K: refractive_index bin 12 = 0x3ff49b0f77d41a59  # 1.2878565483857953
+liquid 2 H2O at 460.128 K: refractive_index bin 13 = 0x3ff49934b1839fee  # 1.2874037679812278
+liquid 2 H2O at 460.128 K: refractive_index bin 14 = 0x3ff497770f924f3f  # 1.286978779627091
+liquid 2 H2O at 460.128 K: absorption_per_m bin 0 = 0x3f5eb84e77038c94  # 0.0018749967821854218
+liquid 2 H2O at 460.128 K: absorption_per_m bin 1 = 0x3f6904cf0ccef0a7  # 0.0030540508218717846
+liquid 2 H2O at 460.128 K: absorption_per_m bin 2 = 0x3f799373a9dd1639  # 0.0062441366297370455
+liquid 2 H2O at 460.128 K: absorption_per_m bin 3 = 0x3f8518d115ab1727  # 0.010301240419163428
+liquid 2 H2O at 460.128 K: absorption_per_m bin 4 = 0x3f92241972f9cd22  # 0.01771583332306393
+liquid 2 H2O at 460.128 K: absorption_per_m bin 5 = 0x3fa3fca6e74a919d  # 0.039036956533240665
+liquid 2 H2O at 460.128 K: absorption_per_m bin 6 = 0x3faa8083aa43124f  # 0.051761736425338094
+liquid 2 H2O at 460.128 K: absorption_per_m bin 7 = 0x3fb2b22969b069b4  # 0.07303103285122498
+liquid 2 H2O at 460.128 K: absorption_per_m bin 8 = 0x3fc713dc95af0fd0  # 0.18029362973004348
+liquid 2 H2O at 460.128 K: absorption_per_m bin 9 = 0x3fd1c40a91a595d9  # 0.2775904104549603
+liquid 2 H2O at 460.128 K: absorption_per_m bin 10 = 0x3fd566e38248a159  # 0.3344048282911181
+liquid 2 H2O at 460.128 K: absorption_per_m bin 11 = 0x3fdc4bfe02094af2  # 0.4421381969342938
+liquid 2 H2O at 460.128 K: absorption_per_m bin 12 = 0x3fe33eb03f4a011b  # 0.6014024005999404
+liquid 2 H2O at 460.128 K: absorption_per_m bin 13 = 0x3ff7145ec6a43fdf  # 1.442473197883366
+liquid 2 H2O at 460.128 K: absorption_per_m bin 14 = 0x400668346509ed58  # 2.800881184926464
+liquid 2 H2O at 460.128 K: scattering_per_m bin 0 = 0x3f853c409c5d4a8a  # 0.010368828555930482
+liquid 2 H2O at 460.128 K: scattering_per_m bin 1 = 0x3f8040ce1363d8c3  # 0.007936105696427003
+liquid 2 H2O at 460.128 K: scattering_per_m bin 2 = 0x3f79529c8b998ee6  # 0.006182300095676862
+liquid 2 H2O at 460.128 K: scattering_per_m bin 3 = 0x3f74083e05965d38  # 0.004890672943836542
+liquid 2 H2O at 460.128 K: scattering_per_m bin 4 = 0x3f700fd7b26c9bef  # 0.003921358648574887
+liquid 2 H2O at 460.128 K: scattering_per_m bin 5 = 0x3f6a10d4c4a00fa9  # 0.0031818538309397915
+liquid 2 H2O at 460.128 K: scattering_per_m bin 6 = 0x3f65607abec700b1  # 0.00260948156048365
+liquid 2 H2O at 460.128 K: scattering_per_m bin 7 = 0x3f61b315596ee734  # 0.0021605889300787776
+liquid 2 H2O at 460.128 K: scattering_per_m bin 8 = 0x3f5d9072da430fee  # 0.0018044587714465227
+liquid 2 H2O at 460.128 K: scattering_per_m bin 9 = 0x3f58e2ca38e43648  # 0.0015189146830069267
+liquid 2 H2O at 460.128 K: scattering_per_m bin 10 = 0x3f5519486ce166ed  # 0.0012877661970577784
+liquid 2 H2O at 460.128 K: scattering_per_m bin 11 = 0x3f52016f56517476  # 0.0010989749219086054
+liquid 2 H2O at 460.128 K: scattering_per_m bin 12 = 0x3f4eeb1216e41cb3  # 0.000943549950336206
+liquid 2 H2O at 460.128 K: scattering_per_m bin 13 = 0x3f4ab1a5a444b2f9  # 0.0008146342084152928
+liquid 2 H2O at 460.128 K: scattering_per_m bin 14 = 0x3f472a9597fec1f9  # 0.000706980747045504
+liquid 2 H2O at 460.128 K: surface_tension_n_per_m = 0x3fa4cd055ab70a0a  # 0.04062668545113375
+liquid 2 H2O at 460.128 K: viscosity_pa_s = 0x3f22ef68a908167c  # 0.00014446404067329835
+liquid 2 H2O at 553.612 K: basis Derived
+liquid 2 H2O at 553.612 K: temperature = 0x40814ce560418938  # 553.6120000000001
+liquid 2 H2O at 553.612 K: density_kg_m3 = 0x40876cf0b4dc49d1  # 749.61753246403
+liquid 2 H2O at 553.612 K: refractive_index bin 0 = 0x3ff408f9bb7725ea  # 1.252191288267904
+liquid 2 H2O at 553.612 K: refractive_index bin 1 = 0x3ff402417aabe52b  # 1.250550727067387
+liquid 2 H2O at 553.612 K: refractive_index bin 2 = 0x3ff3fcb25a8a8107  # 1.2491935288199458
+liquid 2 H2O at 553.612 K: refractive_index bin 3 = 0x3ff3f809fec56d4d  # 1.2480564071655238
+liquid 2 H2O at 553.612 K: refractive_index bin 4 = 0x3ff3f4128df6fe18  # 1.247088007497842
+liquid 2 H2O at 553.612 K: refractive_index bin 5 = 0x3ff3f0a550618887  # 1.2462514057047274
+liquid 2 H2O at 553.612 K: refractive_index bin 6 = 0x3ff3eda8b73ff025  # 1.2455222280687022
+liquid 2 H2O at 553.612 K: refractive_index bin 7 = 0x3ff3eb033eab5a45  # 1.2448761413594565
+liquid 2 H2O at 553.612 K: refractive_index bin 8 = 0x3ff3e8a719f32573  # 1.2442999852813414
+liquid 2 H2O at 553.612 K: refractive_index bin 9 = 0x3ff3e686b6fa373b  # 1.243780817752351
+liquid 2 H2O at 553.612 K: refractive_index bin 10 = 0x3ff3e4985b90a12b  # 1.243309362102148
+liquid 2 H2O at 553.612 K: refractive_index bin 11 = 0x3ff3e2d13960b4db  # 1.2428753129309402
+liquid 2 H2O at 553.612 K: refractive_index bin 12 = 0x3ff3e12c2861db1e  # 1.242473752730525
+liquid 2 H2O at 553.612 K: refractive_index bin 13 = 0x3ff3dfa297478469  # 1.2420984181738055
+liquid 2 H2O at 553.612 K: refractive_index bin 14 = 0x3ff3de3128d7063a  # 1.2417461009321316
+liquid 2 H2O at 553.612 K: absorption_per_m bin 0 = 0x3f5eb84e77038c94  # 0.0018749967821854218
+liquid 2 H2O at 553.612 K: absorption_per_m bin 1 = 0x3f6904cf0ccef0a7  # 0.0030540508218717846
+liquid 2 H2O at 553.612 K: absorption_per_m bin 2 = 0x3f799373a9dd1639  # 0.0062441366297370455
+liquid 2 H2O at 553.612 K: absorption_per_m bin 3 = 0x3f8518d115ab1727  # 0.010301240419163428
+liquid 2 H2O at 553.612 K: absorption_per_m bin 4 = 0x3f92241972f9cd22  # 0.01771583332306393
+liquid 2 H2O at 553.612 K: absorption_per_m bin 5 = 0x3fa3fca6e74a919d  # 0.039036956533240665
+liquid 2 H2O at 553.612 K: absorption_per_m bin 6 = 0x3faa8083aa43124f  # 0.051761736425338094
+liquid 2 H2O at 553.612 K: absorption_per_m bin 7 = 0x3fb2b22969b069b4  # 0.07303103285122498
+liquid 2 H2O at 553.612 K: absorption_per_m bin 8 = 0x3fc713dc95af0fd0  # 0.18029362973004348
+liquid 2 H2O at 553.612 K: absorption_per_m bin 9 = 0x3fd1c40a91a595d9  # 0.2775904104549603
+liquid 2 H2O at 553.612 K: absorption_per_m bin 10 = 0x3fd566e38248a159  # 0.3344048282911181
+liquid 2 H2O at 553.612 K: absorption_per_m bin 11 = 0x3fdc4bfe02094af2  # 0.4421381969342938
+liquid 2 H2O at 553.612 K: absorption_per_m bin 12 = 0x3fe33eb03f4a011b  # 0.6014024005999404
+liquid 2 H2O at 553.612 K: absorption_per_m bin 13 = 0x3ff7145ec6a43fdf  # 1.442473197883366
+liquid 2 H2O at 553.612 K: absorption_per_m bin 14 = 0x400668346509ed58  # 2.800881184926464
+liquid 2 H2O at 553.612 K: scattering_per_m bin 0 = 0x3f9771b551ac392a  # 0.02289470015517129
+liquid 2 H2O at 553.612 K: scattering_per_m bin 1 = 0x3f91f66574f68aa6  # 0.017541489852770063
+liquid 2 H2O at 553.612 K: scattering_per_m bin 2 = 0x3f8c028e9d728570  # 0.013676752262031328
+liquid 2 H2O at 553.612 K: scattering_per_m bin 3 = 0x3f862c89f1c7fa01  # 0.010827138606143373
+liquid 2 H2O at 553.612 K: scattering_per_m bin 4 = 0x3f81ca3f6c65b6ce  # 0.008686538215182973
+liquid 2 H2O at 553.612 K: scattering_per_m bin 5 = 0x3f7ce2ab593880a1  # 0.007052106218481098
+liquid 2 H2O at 553.612 K: scattering_per_m bin 6 = 0x3f77b33e70fe5fea  # 0.0057861746899092546
+liquid 2 H2O at 553.612 K: scattering_per_m bin 7 = 0x3f73a191341a4aeb  # 0.004792754365228839
+liquid 2 H2O at 553.612 K: scattering_per_m bin 8 = 0x3f7066b6e37d4831  # 0.0040042060935139715
+liquid 2 H2O at 553.612 K: scattering_per_m bin 9 = 0x3f6b9ee166c136f6  # 0.003371658551293839
+liquid 2 H2O at 553.612 K: scattering_per_m bin 10 = 0x3f676c9885c2740b  # 0.0028593996958776783
+liquid 2 H2O at 553.612 K: scattering_per_m bin 11 = 0x3f63fedb1a933ec3  # 0.0024408606883311325
+liquid 2 H2O at 553.612 K: scattering_per_m bin 12 = 0x3f612c020a0ad717  # 0.002096179945818909
+liquid 2 H2O at 553.612 K: scattering_per_m bin 13 = 0x3f5da88bf9dc4223  # 0.0018102042153637164
+liquid 2 H2O at 553.612 K: scattering_per_m bin 14 = 0x3f59bea3041e089e  # 0.0015713302568376784
+liquid 2 H2O at 553.612 K: surface_tension_n_per_m = 0x3f935691b330e703  # 0.018884922563507277
+liquid 2 H2O at 553.612 K: viscosity_pa_s = 0x3f187c07d69e9f62  # 9.340093461551521e-5
+liquid 2 H2O at 288.150 K: basis Measured
+liquid 2 H2O at 288.150 K: temperature = 0x4072026666666666  # 288.15
+liquid 2 H2O at 288.150 K: density_kg_m3 = 0x408f386be3fcf8c8  # 999.0526809466764
+liquid 2 H2O at 288.150 K: refractive_index bin 0 = 0x3ff5835e230b14e9  # 1.3445721978071623
+liquid 2 H2O at 288.150 K: refractive_index bin 1 = 0x3ff579dee7e9f91a  # 1.3422535952700572
+liquid 2 H2O at 288.150 K: refractive_index bin 2 = 0x3ff57204a05be9c0  # 1.3403364433312248
+liquid 2 H2O at 288.150 K: refractive_index bin 3 = 0x3ff56b7108956009  # 1.3387308440487706
+liquid 2 H2O at 288.150 K: refractive_index bin 4 = 0x3ff565d7c130c772  # 1.337363962793884
+liquid 2 H2O at 288.150 K: refractive_index bin 5 = 0x3ff56101eb34ce36  # 1.3361834705109579
+liquid 2 H2O at 288.150 K: refractive_index bin 6 = 0x3ff55ccb4fa430e5  # 1.3351548300734575
+liquid 2 H2O at 288.150 K: refractive_index bin 7 = 0x3ff5590fd52585b1  # 1.3342436147726
+liquid 2 H2O at 288.150 K: refractive_index bin 8 = 0x3ff555bbf2568e05  # 1.3334311930019578
+liquid 2 H2O at 288.150 K: refractive_index bin 9 = 0x3ff552bc766a0788  # 1.3326992631486707
+liquid 2 H2O at 288.150 K: refractive_index bin 10 = 0x3ff55003a042c6b7  # 1.332034708041119
+liquid 2 H2O at 288.150 K: refractive_index bin 11 = 0x3ff54d822cd11048  # 1.3314229727411817
+liquid 2 H2O at 288.150 K: refractive_index bin 12 = 0x3ff54b30d1e1e2d2  # 1.330857105114934
+liquid 2 H2O at 288.150 K: refractive_index bin 13 = 0x3ff5490649b82d64  # 1.3303282622972228
+liquid 2 H2O at 288.150 K: refractive_index bin 14 = 0x3ff546fdd3597220  # 1.3298319106899115
+liquid 2 H2O at 288.150 K: absorption_per_m bin 0 = 0x3f5eb84e77038c94  # 0.0018749967821854218
+liquid 2 H2O at 288.150 K: absorption_per_m bin 1 = 0x3f6904cf0ccef0a7  # 0.0030540508218717846
+liquid 2 H2O at 288.150 K: absorption_per_m bin 2 = 0x3f799373a9dd1639  # 0.0062441366297370455
+liquid 2 H2O at 288.150 K: absorption_per_m bin 3 = 0x3f8518d115ab1727  # 0.010301240419163428
+liquid 2 H2O at 288.150 K: absorption_per_m bin 4 = 0x3f92241972f9cd22  # 0.01771583332306393
+liquid 2 H2O at 288.150 K: absorption_per_m bin 5 = 0x3fa3fca6e74a919d  # 0.039036956533240665
+liquid 2 H2O at 288.150 K: absorption_per_m bin 6 = 0x3faa8083aa43124f  # 0.051761736425338094
+liquid 2 H2O at 288.150 K: absorption_per_m bin 7 = 0x3fb2b22969b069b4  # 0.07303103285122498
+liquid 2 H2O at 288.150 K: absorption_per_m bin 8 = 0x3fc713dc95af0fd0  # 0.18029362973004348
+liquid 2 H2O at 288.150 K: absorption_per_m bin 9 = 0x3fd1c40a91a595d9  # 0.2775904104549603
+liquid 2 H2O at 288.150 K: absorption_per_m bin 10 = 0x3fd566e38248a159  # 0.3344048282911181
+liquid 2 H2O at 288.150 K: absorption_per_m bin 11 = 0x3fdc4bfe02094af2  # 0.4421381969342938
+liquid 2 H2O at 288.150 K: absorption_per_m bin 12 = 0x3fe33eb03f4a011b  # 0.6014024005999404
+liquid 2 H2O at 288.150 K: absorption_per_m bin 13 = 0x3ff7145ec6a43fdf  # 1.442473197883366
+liquid 2 H2O at 288.150 K: absorption_per_m bin 14 = 0x400668346509ed58  # 2.800881184926464
+liquid 2 H2O at 288.150 K: scattering_per_m bin 0 = 0x3f767fb78219feb6  # 0.005492894009534835
+liquid 2 H2O at 288.150 K: scattering_per_m bin 1 = 0x3f7133872331e7aa  # 0.004199531441480811
+liquid 2 H2O at 288.150 K: scattering_per_m bin 2 = 0x3f6ac68fbcfe2909  # 0.0032685096156842603
+liquid 2 H2O at 288.150 K: scattering_per_m bin 3 = 0x3f652a61d01d1e08  # 0.002583685913950754
+liquid 2 H2O at 288.150 K: scattering_per_m bin 4 = 0x3f60f5b03d82ee0e  # 0.0020702783768606963
+liquid 2 H2O at 288.150 K: scattering_per_m bin 5 = 0x3f5b81ef74a02d71  # 0.0016789282258312355
+liquid 2 H2O at 288.150 K: scattering_per_m bin 6 = 0x3f568c68d493a9ad  # 0.0013762496694719004
+liquid 2 H2O at 288.150 K: scattering_per_m bin 7 = 0x3f52a962d70c0088  # 0.0011390176043164797
+liquid 2 H2O at 288.150 K: scattering_per_m bin 8 = 0x3f4f28d673fd8b0a  # 0.0009509131559578287
+liquid 2 H2O at 288.150 K: scattering_per_m bin 9 = 0x3f4a38449e92bbec  # 0.0008001647048753147
+liquid 2 H2O at 288.150 K: scattering_per_m bin 10 = 0x3f463909c7367971  # 0.0006781862015719354
+liquid 2 H2O at 288.150 K: scattering_per_m bin 11 = 0x3f42f5a05af2bd7d  # 0.0005785973534297297
+liquid 2 H2O at 288.150 K: scattering_per_m bin 12 = 0x3f4046194ba4eb9e  # 0.0004966376793967724
+liquid 2 H2O at 288.150 K: scattering_per_m bin 13 = 0x3f3c18058b8db67b  # 0.00042867789630105624
+liquid 2 H2O at 288.150 K: scattering_per_m bin 14 = 0x3f38602add55f7ee  # 0.00037194296358922143
+liquid 2 H2O at 288.150 K: surface_tension_n_per_m = 0x3fb2cff732e55c28  # 0.0734858035333309
+liquid 2 H2O at 288.150 K: viscosity_pa_s = 0x3f52a38d1cd9ff34  # 0.0011376264623379042
+liquid 2 H2O at 298.150 K: basis Measured
+liquid 2 H2O at 298.150 K: temperature = 0x4072a26666666666  # 298.15
+liquid 2 H2O at 298.150 K: density_kg_m3 = 0x408f27feb49d073a  # 996.9993679302054
+liquid 2 H2O at 298.150 K: refractive_index bin 0 = 0x3ff5802891641b46  # 1.3437886885964914
+liquid 2 H2O at 298.150 K: refractive_index bin 1 = 0x3ff576af99141e3d  # 1.341476057017544
+liquid 2 H2O at 298.150 K: refractive_index bin 2 = 0x3ff56eda7c712311  # 1.3395638333333333
+liquid 2 H2O at 298.150 K: refractive_index bin 3 = 0x3ff5684b36f2267d  # 1.3379623552631579
+liquid 2 H2O at 298.150 K: refractive_index bin 4 = 0x3ff562b59c2adad4  # 1.3365989780701755
+liquid 2 H2O at 298.150 K: refractive_index bin 5 = 0x3ff55de2f1a8ce82  # 1.33542150877193
+liquid 2 H2O at 298.150 K: refractive_index bin 6 = 0x3ff559af1886df82  # 1.3343954999999998
+liquid 2 H2O at 298.150 K: refractive_index bin 7 = 0x3ff555f60f4ef39f  # 1.333486614035088
+liquid 2 H2O at 298.150 K: refractive_index bin 8 = 0x3ff552a45994197f  # 1.33267626754386
+liquid 2 H2O at 298.150 K: refractive_index bin 9 = 0x3ff54fa6d336771e  # 1.3319462061403509
+liquid 2 H2O at 298.150 K: refractive_index bin 10 = 0x3ff54cefc42e3a6a  # 1.3312833464912281
+liquid 2 H2O at 298.150 K: refractive_index bin 11 = 0x3ff54a6ff3755ee4  # 1.3306731710526316
+liquid 2 H2O at 298.150 K: refractive_index bin 12 = 0x3ff548201ba892e7  # 1.3301087456140352
+liquid 2 H2O at 298.150 K: refractive_index bin 13 = 0x3ff545f6fd21ff2f  # 1.3295812500000002
+liquid 2 H2O at 298.150 K: refractive_index bin 14 = 0x3ff543efda08fcfb  # 1.3290861622807018
+liquid 2 H2O at 298.150 K: absorption_per_m bin 0 = 0x3f5eb84e77038c94  # 0.0018749967821854218
+liquid 2 H2O at 298.150 K: absorption_per_m bin 1 = 0x3f6904cf0ccef0a7  # 0.0030540508218717846
+liquid 2 H2O at 298.150 K: absorption_per_m bin 2 = 0x3f799373a9dd1639  # 0.0062441366297370455
+liquid 2 H2O at 298.150 K: absorption_per_m bin 3 = 0x3f8518d115ab1727  # 0.010301240419163428
+liquid 2 H2O at 298.150 K: absorption_per_m bin 4 = 0x3f92241972f9cd22  # 0.01771583332306393
+liquid 2 H2O at 298.150 K: absorption_per_m bin 5 = 0x3fa3fca6e74a919d  # 0.039036956533240665
+liquid 2 H2O at 298.150 K: absorption_per_m bin 6 = 0x3faa8083aa43124f  # 0.051761736425338094
+liquid 2 H2O at 298.150 K: absorption_per_m bin 7 = 0x3fb2b22969b069b4  # 0.07303103285122498
+liquid 2 H2O at 298.150 K: absorption_per_m bin 8 = 0x3fc713dc95af0fd0  # 0.18029362973004348
+liquid 2 H2O at 298.150 K: absorption_per_m bin 9 = 0x3fd1c40a91a595d9  # 0.2775904104549603
+liquid 2 H2O at 298.150 K: absorption_per_m bin 10 = 0x3fd566e38248a159  # 0.3344048282911181
+liquid 2 H2O at 298.150 K: absorption_per_m bin 11 = 0x3fdc4bfe02094af2  # 0.4421381969342938
+liquid 2 H2O at 298.150 K: absorption_per_m bin 12 = 0x3fe33eb03f4a011b  # 0.6014024005999404
+liquid 2 H2O at 298.150 K: absorption_per_m bin 13 = 0x3ff7145ec6a43fdf  # 1.442473197883366
+liquid 2 H2O at 298.150 K: absorption_per_m bin 14 = 0x400668346509ed58  # 2.800881184926464
+liquid 2 H2O at 298.150 K: scattering_per_m bin 0 = 0x3f76671177748571  # 0.005469387272826296
+liquid 2 H2O at 298.150 K: scattering_per_m bin 1 = 0x3f7120c56b95ebcd  # 0.004181643650890754
+liquid 2 H2O at 298.150 K: scattering_per_m bin 2 = 0x3f6aa97a4185ac10  # 0.0032546413241809694
+liquid 2 H2O at 298.150 K: scattering_per_m bin 3 = 0x3f65137762a0b704  # 0.0025727588408902564
+liquid 2 H2O at 298.150 K: scattering_per_m bin 4 = 0x3f60e36080a61050  # 0.002061546784888825
+liquid 2 H2O at 298.150 K: scattering_per_m bin 5 = 0x3f5b644e5cdaf84c  # 0.001671864057626776
+liquid 2 H2O at 298.150 K: scattering_per_m bin 6 = 0x3f56742c1757b44a  # 0.0013704710557889293
+liquid 2 H2O at 298.150 K: scattering_per_m bin 7 = 0x3f52955d1739fb95  # 0.001134243878283069
+liquid 2 H2O at 298.150 K: scattering_per_m bin 8 = 0x3f4f0775fbb7d5cd  # 0.0009469343271450381
+liquid 2 H2O at 298.150 K: scattering_per_m bin 9 = 0x3f4a1c3953ad02cd  # 0.0007968215862562356
+liquid 2 H2O at 298.150 K: scattering_per_m bin 10 = 0x3f46214d120d6a9a  # 0.0006753565140614371
+liquid 2 H2O at 298.150 K: scattering_per_m bin 11 = 0x3f42e166633c3e56  # 0.0005761861743582379
+liquid 2 H2O at 298.150 K: scattering_per_m bin 12 = 0x3f4034c1dff08f5e  # 0.0004945704130290098
+liquid 2 H2O at 298.150 K: scattering_per_m bin 13 = 0x3f3bfa1ddc92596d  # 0.00042689541857878524
+liquid 2 H2O at 298.150 K: scattering_per_m bin 14 = 0x3f38463f0dc9805a  # 0.00037039794350413535
+liquid 2 H2O at 298.150 K: surface_tension_n_per_m = 0x3fb26cc53baf5170  # 0.07197220523022962
+liquid 2 H2O at 298.150 K: viscosity_pa_s = 0x3f4d2a2ccebd9385  # 0.0008900374209416117
+liquid 3 CH4 at 90.694 K: basis Derived
+liquid 3 CH4 at 90.694 K: temperature = 0x4056ac6c226809d5  # 90.6941
+liquid 3 CH4 at 90.694 K: density_kg_m3 = 0x407c379841dd406e  # 451.4746721880573
+liquid 3 CH4 at 90.694 K: refractive_index bin 0 = 0x3ff4c9f957526166  # 1.2993100558288346
+liquid 3 CH4 at 90.694 K: refractive_index bin 1 = 0x3ff4c6dc302e3637  # 1.2985498315860136
+liquid 3 CH4 at 90.694 K: refractive_index bin 2 = 0x3ff4c256c8d82c4a  # 1.2974460454450019
+liquid 3 CH4 at 90.694 K: refractive_index bin 3 = 0x3ff4bdcfde72f77a  # 1.296340817395928
+liquid 3 CH4 at 90.694 K: refractive_index bin 4 = 0x3ff4b94bc2288415  # 1.295238264494633
+liquid 3 CH4 at 90.694 K: refractive_index bin 5 = 0x3ff4b4c66ba08574  # 1.2941345409566027
+liquid 3 CH4 at 90.694 K: refractive_index bin 6 = 0x3ff4b03ef122e870  # 1.2930287761105568
+liquid 3 CH4 at 90.694 K: refractive_index bin 7 = 0x3ff4abbbdfd23cd8  # 1.2919272177712653
+liquid 3 CH4 at 90.694 K: refractive_index bin 8 = 0x3ff4a90e338c348b  # 1.2912733090954898
+liquid 3 CH4 at 90.694 K: refractive_index bin 9 = 0x3ff4a5b55360218a  # 1.2904561287742546
+liquid 3 CH4 at 90.694 K: refractive_index bin 10 = 0x3ff4a338ed937bdb  # 1.2898492126766914
+liquid 3 CH4 at 90.694 K: refractive_index bin 11 = 0x3ff4a16c2d6ab363  # 1.2894098066419353
+liquid 3 CH4 at 90.694 K: refractive_index bin 12 = 0x3ff4a13724856a30  # 1.2893592287642939
+liquid 3 CH4 at 90.694 K: refractive_index bin 13 = 0x3ff4a12f0cc0a581  # 1.2893515108247302
+liquid 3 CH4 at 90.694 K: refractive_index bin 14 = 0x3ff49feb9ff91911  # 1.2890430687853647
+liquid 3 CH4 at 90.694 K: absorption_per_m bin 0 = 0x3f1ed8c95498d00e  # 0.00011767128776157839
+liquid 3 CH4 at 90.694 K: absorption_per_m bin 1 = 0x3f6dba9e49ccb214  # 0.003629025608822065
+liquid 3 CH4 at 90.694 K: absorption_per_m bin 2 = 0x3f80f2d9a3e893f7  # 0.008275699915495578
+liquid 3 CH4 at 90.694 K: absorption_per_m bin 3 = 0x3f896f746f6f529c  # 0.012419614458772536
+liquid 3 CH4 at 90.694 K: absorption_per_m bin 4 = 0x3f908687ba1dfd4b  # 0.016138191923798655
+liquid 3 CH4 at 90.694 K: absorption_per_m bin 5 = 0x3f93f62b0edee92f  # 0.019493744642866403
+liquid 3 CH4 at 90.694 K: absorption_per_m bin 6 = 0x3f9713ed6cf7d36d  # 0.022536954666026277
+liquid 3 CH4 at 90.694 K: absorption_per_m bin 7 = 0x3f99e74cea0b951d  # 0.02529640367983631
+liquid 3 CH4 at 90.694 K: absorption_per_m bin 8 = 0x3faaf3096f6d92b5  # 0.05263547406392403
+liquid 3 CH4 at 90.694 K: absorption_per_m bin 9 = 0x3ffd4142c3e2b254  # 1.8284328128603606
+liquid 3 CH4 at 90.694 K: absorption_per_m bin 10 = 0x3fe5cf8654fd4d69  # 0.6815826091719092
+liquid 3 CH4 at 90.694 K: absorption_per_m bin 11 = 0x3fb9ff3fce680828  # 0.10155104436128737
+liquid 3 CH4 at 90.694 K: absorption_per_m bin 12 = 0x3fbd2f8e9774993f  # 0.11400691220896862
+liquid 3 CH4 at 90.694 K: absorption_per_m bin 13 = 0x3ff7f42e107cba35  # 1.4971142429382216
+liquid 3 CH4 at 90.694 K: absorption_per_m bin 14 = 0x3ff42be71b8ac4dd  # 1.2607184482442826
+liquid 3 CH4 at 90.694 K: scattering_per_m none
+liquid 3 CH4 at 90.694 K: surface_tension_n_per_m none
+liquid 3 CH4 at 90.694 K: viscosity_pa_s none
+liquid 3 CH4 at 115.662 K: basis Derived
+liquid 3 CH4 at 115.662 K: temperature = 0x405cea573eab367a  # 115.661575
+liquid 3 CH4 at 115.662 K: density_kg_m3 = 0x407a076550732357  # 416.46223492599296
+liquid 3 CH4 at 115.662 K: refractive_index bin 0 = 0x3ff4635e880628d2  # 1.2742600739898546
+liquid 3 CH4 at 115.662 K: refractive_index bin 1 = 0x3ff4608ab48cf32c  # 1.2735697796590086
+liquid 3 CH4 at 115.662 K: refractive_index bin 2 = 0x3ff45c6fb1728b0f  # 1.2725674563923268
+liquid 3 CH4 at 115.662 K: refractive_index bin 3 = 0x3ff4585338a33992  # 1.271563740959753
+liquid 3 CH4 at 115.662 K: refractive_index bin 4 = 0x3ff4543935dab11b  # 1.2705623725588058
+liquid 3 CH4 at 115.662 K: refractive_index bin 5 = 0x3ff4501dff9401e2  # 1.2695598586579924
+liquid 3 CH4 at 115.662 K: refractive_index bin 6 = 0x3ff44c00c176f1c7  # 1.268555408211897
+liquid 3 CH4 at 115.662 K: refractive_index bin 7 = 0x3ff447e76f1654cd  # 1.2675546969742755
+liquid 3 CH4 at 115.662 K: refractive_index bin 8 = 0x3ff445787e57b154  # 1.266960614705643
+liquid 3 CH4 at 115.662 K: refractive_index bin 9 = 0x3ff4426df8b2e15f  # 1.266218158225534
+liquid 3 CH4 at 115.662 K: refractive_index bin 10 = 0x3ff4402bbc7ed572  # 1.2656667101958559
+liquid 3 CH4 at 115.662 K: refractive_index bin 11 = 0x3ff43e89143d1bca  # 1.2652674475264
+liquid 3 CH4 at 115.662 K: refractive_index bin 12 = 0x3ff43e58e37b5027  # 1.2652214895251832
+liquid 3 CH4 at 115.662 K: refractive_index bin 13 = 0x3ff43e5188f2bc08  # 1.2652144765413613
+liquid 3 CH4 at 115.662 K: refractive_index bin 14 = 0x3ff43d2ba5f0f25e  # 1.2649342042997413
+liquid 3 CH4 at 115.662 K: absorption_per_m bin 0 = 0x3f1ed8c95498d00e  # 0.00011767128776157839
+liquid 3 CH4 at 115.662 K: absorption_per_m bin 1 = 0x3f6dba9e49ccb214  # 0.003629025608822065
+liquid 3 CH4 at 115.662 K: absorption_per_m bin 2 = 0x3f80f2d9a3e893f7  # 0.008275699915495578
+liquid 3 CH4 at 115.662 K: absorption_per_m bin 3 = 0x3f896f746f6f529c  # 0.012419614458772536
+liquid 3 CH4 at 115.662 K: absorption_per_m bin 4 = 0x3f908687ba1dfd4b  # 0.016138191923798655
+liquid 3 CH4 at 115.662 K: absorption_per_m bin 5 = 0x3f93f62b0edee92f  # 0.019493744642866403
+liquid 3 CH4 at 115.662 K: absorption_per_m bin 6 = 0x3f9713ed6cf7d36d  # 0.022536954666026277
+liquid 3 CH4 at 115.662 K: absorption_per_m bin 7 = 0x3f99e74cea0b951d  # 0.02529640367983631
+liquid 3 CH4 at 115.662 K: absorption_per_m bin 8 = 0x3faaf3096f6d92b5  # 0.05263547406392403
+liquid 3 CH4 at 115.662 K: absorption_per_m bin 9 = 0x3ffd4142c3e2b254  # 1.8284328128603606
+liquid 3 CH4 at 115.662 K: absorption_per_m bin 10 = 0x3fe5cf8654fd4d69  # 0.6815826091719092
+liquid 3 CH4 at 115.662 K: absorption_per_m bin 11 = 0x3fb9ff3fce680828  # 0.10155104436128737
+liquid 3 CH4 at 115.662 K: absorption_per_m bin 12 = 0x3fbd2f8e9774993f  # 0.11400691220896862
+liquid 3 CH4 at 115.662 K: absorption_per_m bin 13 = 0x3ff7f42e107cba35  # 1.4971142429382216
+liquid 3 CH4 at 115.662 K: absorption_per_m bin 14 = 0x3ff42be71b8ac4dd  # 1.2607184482442826
+liquid 3 CH4 at 115.662 K: scattering_per_m none
+liquid 3 CH4 at 115.662 K: surface_tension_n_per_m none
+liquid 3 CH4 at 115.662 K: viscosity_pa_s none
+liquid 3 CH4 at 140.629 K: basis Derived
+liquid 3 CH4 at 140.629 K: temperature = 0x406194212d773190  # 140.62905
+liquid 3 CH4 at 140.629 K: density_kg_m3 = 0x40777bb3c0e16449  # 375.7313851169934
+liquid 3 CH4 at 140.629 K: refractive_index bin 0 = 0x3ff3edfaf7cdb603  # 1.245600669844294
+liquid 3 CH4 at 140.629 K: refractive_index bin 1 = 0x3ff3eb7940285928  # 1.2449886804730088
+liquid 3 CH4 at 140.629 K: refractive_index bin 2 = 0x3ff3e7d56438795d  # 1.2440999903552303
+liquid 3 CH4 at 140.629 K: refractive_index bin 3 = 0x3ff3e430277c8591  # 1.243209985965539
+liquid 3 CH4 at 140.629 K: refractive_index bin 4 = 0x3ff3e08d040ad453  # 1.2423219831373629
+liquid 3 CH4 at 140.629 K: refractive_index bin 5 = 0x3ff3dce8ba94ca7d  # 1.2414328850105953
+liquid 3 CH4 at 140.629 K: refractive_index bin 6 = 0x3ff3d9428eb83e49  # 1.240541989802198
+liquid 3 CH4 at 140.629 K: refractive_index bin 7 = 0x3ff3d59fc7e1de99  # 1.2396543319609121
+liquid 3 CH4 at 140.629 K: refractive_index bin 8 = 0x3ff3d3772d3f2750  # 1.239127327675721
+liquid 3 CH4 at 140.629 K: refractive_index bin 9 = 0x3ff3d0c484549f57  # 1.2384686631357533
+liquid 3 CH4 at 140.629 K: refractive_index bin 10 = 0x3ff3cec382bac4cc  # 1.2379794222472809
+liquid 3 CH4 at 140.629 K: refractive_index bin 11 = 0x3ff3cd5010b2319b  # 1.237625184268018
+liquid 3 CH4 at 140.629 K: refractive_index bin 12 = 0x3ff3cd254eef4ebb  # 1.2375844081297334
+liquid 3 CH4 at 140.629 K: refractive_index bin 13 = 0x3ff3cd1ec8a834c9  # 1.2375781858602741
+liquid 3 CH4 at 140.629 K: refractive_index bin 14 = 0x3ff3cc1a078dfe80  # 1.2373295111755453
+liquid 3 CH4 at 140.629 K: absorption_per_m bin 0 = 0x3f1ed8c95498d00e  # 0.00011767128776157839
+liquid 3 CH4 at 140.629 K: absorption_per_m bin 1 = 0x3f6dba9e49ccb214  # 0.003629025608822065
+liquid 3 CH4 at 140.629 K: absorption_per_m bin 2 = 0x3f80f2d9a3e893f7  # 0.008275699915495578
+liquid 3 CH4 at 140.629 K: absorption_per_m bin 3 = 0x3f896f746f6f529c  # 0.012419614458772536
+liquid 3 CH4 at 140.629 K: absorption_per_m bin 4 = 0x3f908687ba1dfd4b  # 0.016138191923798655
+liquid 3 CH4 at 140.629 K: absorption_per_m bin 5 = 0x3f93f62b0edee92f  # 0.019493744642866403
+liquid 3 CH4 at 140.629 K: absorption_per_m bin 6 = 0x3f9713ed6cf7d36d  # 0.022536954666026277
+liquid 3 CH4 at 140.629 K: absorption_per_m bin 7 = 0x3f99e74cea0b951d  # 0.02529640367983631
+liquid 3 CH4 at 140.629 K: absorption_per_m bin 8 = 0x3faaf3096f6d92b5  # 0.05263547406392403
+liquid 3 CH4 at 140.629 K: absorption_per_m bin 9 = 0x3ffd4142c3e2b254  # 1.8284328128603606
+liquid 3 CH4 at 140.629 K: absorption_per_m bin 10 = 0x3fe5cf8654fd4d69  # 0.6815826091719092
+liquid 3 CH4 at 140.629 K: absorption_per_m bin 11 = 0x3fb9ff3fce680828  # 0.10155104436128737
+liquid 3 CH4 at 140.629 K: absorption_per_m bin 12 = 0x3fbd2f8e9774993f  # 0.11400691220896862
+liquid 3 CH4 at 140.629 K: absorption_per_m bin 13 = 0x3ff7f42e107cba35  # 1.4971142429382216
+liquid 3 CH4 at 140.629 K: absorption_per_m bin 14 = 0x3ff42be71b8ac4dd  # 1.2607184482442826
+liquid 3 CH4 at 140.629 K: scattering_per_m none
+liquid 3 CH4 at 140.629 K: surface_tension_n_per_m none
+liquid 3 CH4 at 140.629 K: viscosity_pa_s none
+liquid 3 CH4 at 165.597 K: basis Derived
+liquid 3 CH4 at 165.597 K: temperature = 0x4064b316bb98c7e2  # 165.59652499999999
+liquid 3 CH4 at 165.597 K: density_kg_m3 = 0x407428e859a2df62  # 322.55672610876184
+liquid 3 CH4 at 165.597 K: refractive_index bin 0 = 0x3ff357b160ad3e42  # 1.2089093948778928
+liquid 3 CH4 at 165.597 K: refractive_index bin 1 = 0x3ff3559629015055  # 1.2083951570284814
+liquid 3 CH4 at 165.597 K: refractive_index bin 2 = 0x3ff3528712c9a073  # 1.2076483472719957
+liquid 3 CH4 at 165.597 K: refractive_index bin 3 = 0x3ff34f76be8063d6  # 1.2069003526178128
+liquid 3 CH4 at 165.597 K: refractive_index bin 4 = 0x3ff34c6818456bdd  # 1.2061539600460869
+liquid 3 CH4 at 165.597 K: refractive_index bin 5 = 0x3ff34958656d2d0b  # 1.205406566807883
+liquid 3 CH4 at 165.597 K: refractive_index bin 6 = 0x3ff346470789f8f6  # 1.204657582711261
+liquid 3 CH4 at 165.597 K: refractive_index bin 7 = 0x3ff343386ed9fba0  # 1.2039112405907204
+liquid 3 CH4 at 165.597 K: refractive_index bin 8 = 0x3ff34167c3b576e7  # 1.2034680981518535
+liquid 3 CH4 at 165.597 K: refractive_index bin 9 = 0x3ff33f22f7b95136  # 1.2029142071451822
+liquid 3 CH4 at 165.597 K: refractive_index bin 10 = 0x3ff33d738917beac  # 1.20250276138169
+liquid 3 CH4 at 165.597 K: refractive_index bin 11 = 0x3ff33c3b2379d409  # 1.202204836442663
+liquid 3 CH4 at 165.597 K: refractive_index bin 12 = 0x3ff33c172d8a3283  # 1.2021705416583763
+liquid 3 CH4 at 165.597 K: refractive_index bin 13 = 0x3ff33c11b0bf8de0  # 1.202165308401952
+liquid 3 CH4 at 165.597 K: refractive_index bin 14 = 0x3ff33b366104a665  # 1.201956156708911
+liquid 3 CH4 at 165.597 K: absorption_per_m bin 0 = 0x3f1ed8c95498d00e  # 0.00011767128776157839
+liquid 3 CH4 at 165.597 K: absorption_per_m bin 1 = 0x3f6dba9e49ccb214  # 0.003629025608822065
+liquid 3 CH4 at 165.597 K: absorption_per_m bin 2 = 0x3f80f2d9a3e893f7  # 0.008275699915495578
+liquid 3 CH4 at 165.597 K: absorption_per_m bin 3 = 0x3f896f746f6f529c  # 0.012419614458772536
+liquid 3 CH4 at 165.597 K: absorption_per_m bin 4 = 0x3f908687ba1dfd4b  # 0.016138191923798655
+liquid 3 CH4 at 165.597 K: absorption_per_m bin 5 = 0x3f93f62b0edee92f  # 0.019493744642866403
+liquid 3 CH4 at 165.597 K: absorption_per_m bin 6 = 0x3f9713ed6cf7d36d  # 0.022536954666026277
+liquid 3 CH4 at 165.597 K: absorption_per_m bin 7 = 0x3f99e74cea0b951d  # 0.02529640367983631
+liquid 3 CH4 at 165.597 K: absorption_per_m bin 8 = 0x3faaf3096f6d92b5  # 0.05263547406392403
+liquid 3 CH4 at 165.597 K: absorption_per_m bin 9 = 0x3ffd4142c3e2b254  # 1.8284328128603606
+liquid 3 CH4 at 165.597 K: absorption_per_m bin 10 = 0x3fe5cf8654fd4d69  # 0.6815826091719092
+liquid 3 CH4 at 165.597 K: absorption_per_m bin 11 = 0x3fb9ff3fce680828  # 0.10155104436128737
+liquid 3 CH4 at 165.597 K: absorption_per_m bin 12 = 0x3fbd2f8e9774993f  # 0.11400691220896862
+liquid 3 CH4 at 165.597 K: absorption_per_m bin 13 = 0x3ff7f42e107cba35  # 1.4971142429382216
+liquid 3 CH4 at 165.597 K: absorption_per_m bin 14 = 0x3ff42be71b8ac4dd  # 1.2607184482442826
+liquid 3 CH4 at 165.597 K: scattering_per_m none
+liquid 3 CH4 at 165.597 K: surface_tension_n_per_m none
+liquid 3 CH4 at 165.597 K: viscosity_pa_s none
+liquid 4 NH3 at 195.490 K: basis Derived
+liquid 4 NH3 at 195.490 K: temperature = 0x40686fae147ae148  # 195.49
+liquid 4 NH3 at 195.490 K: density_kg_m3 = 0x4086ef248ab0976c  # 733.8928426548205
+liquid 4 NH3 at 195.490 K: refractive_index bin 0 = 0x3ff698e874293a46  # 1.4123310601750219
+liquid 4 NH3 at 195.490 K: refractive_index bin 1 = 0x3ff68846760a02b4  # 1.4082703219320765
+liquid 4 NH3 at 195.490 K: refractive_index bin 2 = 0x3ff67a6b1b5a87d5  # 1.404887301302087
+liquid 4 NH3 at 195.490 K: refractive_index bin 3 = 0x3ff66ebf885124b3  # 1.4020381283647054
+liquid 4 NH3 at 195.490 K: refractive_index bin 4 = 0x3ff664d4715ea1bc  # 1.3996166637899554
+liquid 4 NH3 at 195.490 K: refractive_index bin 5 = 0x3ff65c57f646d328  # 1.3975448246175777
+liquid 4 NH3 at 195.490 K: refractive_index bin 6 = 0x3ff655035a624b27  # 1.3957551508544357
+liquid 4 NH3 at 195.490 K: refractive_index bin 7 = 0x3ff64e9f578a7b53  # 1.394194929081739
+liquid 4 NH3 at 195.490 K: refractive_index bin 8 = 0x3ff649094d1645da  # 1.3928311358653134
+liquid 4 NH3 at 195.490 K: refractive_index bin 9 = 0x3ff64422527f7c35  # 1.3916342947557159
+liquid 4 NH3 at 195.490 K: refractive_index bin 10 = 0x3ff63fcb7dd1a5d8  # 1.3905749239732952
+liquid 4 NH3 at 195.490 K: refractive_index bin 11 = 0x3ff63beec73d866f  # 1.3896320135903826
+liquid 4 NH3 at 195.490 K: refractive_index bin 12 = 0x3ff6387cd6ddbfa3  # 1.3887909310542248
+liquid 4 NH3 at 195.490 K: refractive_index bin 13 = 0x3ff635638d24c571  # 1.3880343926833485
+liquid 4 NH3 at 195.490 K: refractive_index bin 14 = 0x3ff6329c136944f6  # 1.3873558767557461
+liquid 4 NH3 at 195.490 K: absorption_per_m none
+liquid 4 NH3 at 195.490 K: scattering_per_m none
+liquid 4 NH3 at 195.490 K: surface_tension_n_per_m none
+liquid 4 NH3 at 195.490 K: viscosity_pa_s none
+liquid 4 NH3 at 248.007 K: basis Derived
+liquid 4 NH3 at 248.007 K: temperature = 0x406f003d70a3d70a  # 248.0075
+liquid 4 NH3 at 248.007 K: density_kg_m3 = 0x4084fb12cf3924ac  # 671.3841843094174
+liquid 4 NH3 at 248.007 K: refractive_index bin 0 = 0x3ff5f790c440972f  # 1.3729407945733774
+liquid 4 NH3 at 248.007 K: refractive_index bin 1 = 0x3ff5e8c207cc552a  # 1.3693256668678466
+liquid 4 NH3 at 248.007 K: refractive_index bin 2 = 0x3ff5dc6ad2dd064c  # 1.366312812504833
+liquid 4 NH3 at 248.007 K: refractive_index bin 3 = 0x3ff5d2055af49a69  # 1.3637746384571534
+liquid 4 NH3 at 248.007 K: refractive_index bin 4 = 0x3ff5c92ed9dc0464  # 1.3616169462332204
+liquid 4 NH3 at 248.007 K: refractive_index bin 5 = 0x3ff5c19e9bbb4793  # 1.3597704013122651
+liquid 4 NH3 at 248.007 K: refractive_index bin 6 = 0x3ff5bb15c241e11e  # 1.3581750477006334
+liquid 4 NH3 at 248.007 K: refractive_index bin 7 = 0x3ff5b563272d642e  # 1.3567840128291766
+liquid 4 NH3 at 248.007 K: refractive_index bin 8 = 0x3ff5b06801d3f664  # 1.3555679389386563
+liquid 4 NH3 at 248.007 K: refractive_index bin 9 = 0x3ff5ac08d3a6b536  # 1.3545006053567028
+liquid 4 NH3 at 248.007 K: refractive_index bin 10 = 0x3ff5a82a17791e91  # 1.3535557667654852
+liquid 4 NH3 at 248.007 K: refractive_index bin 11 = 0x3ff5a4b8305f1120  # 1.3527147187715585
+liquid 4 NH3 at 248.007 K: refractive_index bin 12 = 0x3ff5a1a575c240d0  # 1.3519644355729277
+liquid 4 NH3 at 248.007 K: refractive_index bin 13 = 0x3ff59ee1c243aa50  # 1.3512895191621688
+liquid 4 NH3 at 248.007 K: refractive_index bin 14 = 0x3ff59c670040eab8  # 1.3506841668992546
+liquid 4 NH3 at 248.007 K: absorption_per_m none
+liquid 4 NH3 at 248.007 K: scattering_per_m none
+liquid 4 NH3 at 248.007 K: surface_tension_n_per_m none
+liquid 4 NH3 at 248.007 K: viscosity_pa_s none
+liquid 4 NH3 at 300.525 K: basis Derived
+liquid 4 NH3 at 300.525 K: temperature = 0x4072c86666666666  # 300.525
+liquid 4 NH3 at 300.525 K: density_kg_m3 = 0x4082bbdcbcd141ab  # 599.4827820156255
+liquid 4 NH3 at 300.525 K: refractive_index bin 0 = 0x3ff543338666d873  # 1.3289065599506358
+liquid 4 NH3 at 300.525 K: refractive_index bin 1 = 0x3ff5365cd2d050ee  # 1.3257721171294707
+liquid 4 NH3 at 300.525 K: refractive_index bin 2 = 0x3ff52ba8a6624a7c  # 1.3231588839886674
+liquid 4 NH3 at 300.525 K: refractive_index bin 3 = 0x3ff522a378a218b3  # 1.3209566795572243
+liquid 4 NH3 at 300.525 K: refractive_index bin 4 = 0x3ff51af7ed8f2dc6  # 1.3190840987834789
+liquid 4 NH3 at 300.525 K: refractive_index bin 5 = 0x3ff51467283f3c66  # 1.3174811908864057
+liquid 4 NH3 at 300.525 K: refractive_index bin 6 = 0x3ff50ebabf414d6d  # 1.3160960646535742
+liquid 4 NH3 at 300.525 K: refractive_index bin 7 = 0x3ff509c8232fb483  # 1.3148881315676426
+liquid 4 NH3 at 300.525 K: refractive_index bin 8 = 0x3ff50574ad89f396  # 1.3138319758283834
+liquid 4 NH3 at 300.525 K: refractive_index bin 9 = 0x3ff501a88cdcb663  # 1.3129048826625869
+liquid 4 NH3 at 300.525 K: refractive_index bin 10 = 0x3ff4fe4be511ca31  # 1.3120840976740846
+liquid 4 NH3 at 300.525 K: refractive_index bin 11 = 0x3ff4fb4db4dbb493  # 1.311353403546751
+liquid 4 NH3 at 300.525 K: refractive_index bin 12 = 0x3ff4f8a224d53763  # 1.3107015074524149
+liquid 4 NH3 at 300.525 K: refractive_index bin 13 = 0x3ff4f63b3286952a  # 1.3101150487576185
+liquid 4 NH3 at 300.525 K: refractive_index bin 14 = 0x3ff4f41398439697  # 1.3095889995396754
+liquid 4 NH3 at 300.525 K: absorption_per_m none
+liquid 4 NH3 at 300.525 K: scattering_per_m none
+liquid 4 NH3 at 300.525 K: surface_tension_n_per_m none
+liquid 4 NH3 at 300.525 K: viscosity_pa_s none
+liquid 4 NH3 at 353.043 K: basis Derived
+liquid 4 NH3 at 353.043 K: temperature = 0x407610ae147ae148  # 353.0425
+liquid 4 NH3 at 353.043 K: density_kg_m3 = 0x407f9e874a639cd0  # 505.9080299273601
+liquid 4 NH3 at 353.043 K: refractive_index bin 0 = 0x3ff460033b566592  # 1.2734405820723151
+liquid 4 NH3 at 353.043 K: refractive_index bin 1 = 0x3ff4558dbbe1b0af  # 1.2708871211171233
+liquid 4 NH3 at 353.043 K: refractive_index bin 2 = 0x3ff44cd47c2be04f  # 1.268757329029558
+liquid 4 NH3 at 353.043 K: refractive_index bin 3 = 0x3ff44579cf6c6b4d  # 1.2669618704300831
+liquid 4 NH3 at 353.043 K: refractive_index bin 4 = 0x3ff43f387052f0d1  # 1.265434683576178
+liquid 4 NH3 at 353.043 K: refractive_index bin 5 = 0x3ff439dd52d5f3fd  # 1.2641270862361573
+liquid 4 NH3 at 353.043 K: refractive_index bin 6 = 0x3ff4353c3b1362f9  # 1.2629968936582243
+liquid 4 NH3 at 353.043 K: refractive_index bin 7 = 0x3ff431328a5c6bf7  # 1.2620110897757948
+liquid 4 NH3 at 353.043 K: refractive_index bin 8 = 0x3ff42daa949a298a  # 1.2611490063451094
+liquid 4 NH3 at 353.043 K: refractive_index bin 9 = 0x3ff42a90f78918c5  # 1.2603921574932866
+liquid 4 NH3 at 353.043 K: refractive_index bin 10 = 0x3ff427d24391447a  # 1.2597220076898155
+liquid 4 NH3 at 353.043 K: refractive_index bin 11 = 0x3ff425609e5485ab  # 1.2591253456852012
+liquid 4 NH3 at 353.043 K: refractive_index bin 12 = 0x3ff423326294f4c2  # 1.2585929728368659
+liquid 4 NH3 at 353.043 K: refractive_index bin 13 = 0x3ff4213c2412fb17  # 1.2581139954706424
+liquid 4 NH3 at 353.043 K: refractive_index bin 14 = 0x3ff41f79981f9e18  # 1.2576843206715065
+liquid 4 NH3 at 353.043 K: absorption_per_m none
+liquid 4 NH3 at 353.043 K: scattering_per_m none
+liquid 4 NH3 at 353.043 K: surface_tension_n_per_m none
+liquid 4 NH3 at 353.043 K: viscosity_pa_s none
+liquid 5 N2 at 63.151 K: basis Derived
+liquid 5 N2 at 63.151 K: temperature = 0x404f9353f7ced917  # 63.151
+liquid 5 N2 at 63.151 K: density_kg_m3 = 0x408b19b1a96116fb  # 867.2117488465441
+liquid 5 N2 at 63.151 K: refractive_index bin 0 = 0x3ff380551d28e570  # 1.2188311709454318
+liquid 5 N2 at 63.151 K: refractive_index bin 1 = 0x3ff37cb6ded5bbdb  # 1.2179478363502685
+liquid 5 N2 at 63.151 K: refractive_index bin 2 = 0x3ff379b8ab5d69f4  # 1.2172171300832106
+liquid 5 N2 at 63.151 K: refractive_index bin 3 = 0x3ff3772bdc1038b1  # 1.2165945621705243
+liquid 5 N2 at 63.151 K: refractive_index bin 4 = 0x3ff37502f87df16d  # 1.2160672861783397
+liquid 5 N2 at 63.151 K: refractive_index bin 5 = 0x3ff37329b11fab67  # 1.215615932359208
+liquid 5 N2 at 63.151 K: refractive_index bin 6 = 0x3ff37192665aab06  # 1.2152275083741997
+liquid 5 N2 at 63.151 K: refractive_index bin 7 = 0x3ff3702d25a36751  # 1.2148868055578144
+liquid 5 N2 at 63.151 K: refractive_index bin 8 = 0x3ff36efa01622020  # 1.2145938924823056
+liquid 5 N2 at 63.151 K: refractive_index bin 9 = 0x3ff36de62e0b9735  # 1.2143308447497934
+liquid 5 N2 at 63.151 K: refractive_index bin 10 = 0x3ff36cf494335036  # 1.2141004361228744
+liquid 5 N2 at 63.151 K: refractive_index bin 11 = 0x3ff36c1d7c14a480  # 1.2138953062915618
+liquid 5 N2 at 63.151 K: refractive_index bin 12 = 0x3ff36b5c706a9aab  # 1.2137112036959177
+liquid 5 N2 at 63.151 K: refractive_index bin 13 = 0x3ff36ab11cb26eb4  # 1.213547813508666
+liquid 5 N2 at 63.151 K: refractive_index bin 14 = 0x3ff36a1548b899c3  # 1.2133992043178388
+liquid 5 N2 at 63.151 K: absorption_per_m none
+liquid 5 N2 at 63.151 K: scattering_per_m none
+liquid 5 N2 at 63.151 K: surface_tension_n_per_m none
+liquid 5 N2 at 63.151 K: viscosity_pa_s none
+liquid 5 N2 at 78.911 K: basis Derived
+liquid 5 N2 at 78.911 K: temperature = 0x4053ba51eb851eb8  # 78.91125
+liquid 5 N2 at 78.911 K: density_kg_m3 = 0x4088f7e1dd8db916  # 798.9852858612164
+liquid 5 N2 at 78.911 K: refractive_index bin 0 = 0x3ff33624a51eb6a0  # 1.2007185411452284
+liquid 5 N2 at 78.911 K: refractive_index bin 1 = 0x3ff332d8055a631d  # 1.1999130448441016
+liquid 5 N2 at 78.911 K: refractive_index bin 2 = 0x3ff3301d4cbf1c10  # 1.1992466924582494
+liquid 5 N2 at 78.911 K: refractive_index bin 3 = 0x3ff32dc9f512b30a  # 1.1986789296308324
+liquid 5 N2 at 78.911 K: refractive_index bin 4 = 0x3ff32bd1b8831eb3  # 1.1981980521685898
+liquid 5 N2 at 78.911 K: refractive_index bin 5 = 0x3ff32a2213427f06  # 1.1977864029249203
+liquid 5 N2 at 78.911 K: refractive_index bin 6 = 0x3ff328ae9a044302  # 1.1974321380877773
+liquid 5 N2 at 78.911 K: refractive_index bin 7 = 0x3ff32768c24e50b8  # 1.1971213903498619
+liquid 5 N2 at 78.911 K: refractive_index bin 8 = 0x3ff326509db0cbc3  # 1.196854225138609
+liquid 5 N2 at 78.911 K: refractive_index bin 9 = 0x3ff32555082065e9  # 1.1966142957156711
+liquid 5 N2 at 78.911 K: refractive_index bin 10 = 0x3ff32478a9242206  # 1.1964041335178321
+liquid 5 N2 at 78.911 K: refractive_index bin 11 = 0x3ff323b476e698fa  # 1.1962170261918446
+liquid 5 N2 at 78.911 K: refractive_index bin 12 = 0x3ff3230460a23ea2  # 1.1960490965611048
+liquid 5 N2 at 78.911 K: refractive_index bin 13 = 0x3ff32268196f8c78  # 1.195900058134411
+liquid 5 N2 at 78.911 K: refractive_index bin 14 = 0x3ff321d9f51969d7  # 1.1957645010175975
+liquid 5 N2 at 78.911 K: absorption_per_m none
+liquid 5 N2 at 78.911 K: scattering_per_m none
+liquid 5 N2 at 78.911 K: surface_tension_n_per_m none
+liquid 5 N2 at 78.911 K: viscosity_pa_s none
+liquid 5 N2 at 94.671 K: basis Derived
+liquid 5 N2 at 94.671 K: temperature = 0x4057aaf9db22d0e5  # 94.6715
+liquid 5 N2 at 94.671 K: density_kg_m3 = 0x408680e6ab3248d6  # 720.112631218765
+liquid 5 N2 at 94.671 K: refractive_index bin 0 = 0x3ff2e14ebacec1ab  # 1.1800067231343785
+liquid 5 N2 at 94.671 K: refractive_index bin 1 = 0x3ff2de5e227da5f4  # 1.179288992624035
+liquid 5 N2 at 94.671 K: refractive_index bin 2 = 0x3ff2dbef82772764  # 1.178695211058277
+liquid 5 N2 at 94.671 K: refractive_index bin 3 = 0x3ff2d9dcfa9fc213  # 1.1781892576219704
+liquid 5 N2 at 94.671 K: refractive_index bin 4 = 0x3ff2d81b9e250aca  # 1.1777607133414443
+liquid 5 N2 at 94.671 K: refractive_index bin 5 = 0x3ff2d69aef2baa38  # 1.177393850574516
+liquid 5 N2 at 94.671 K: refractive_index bin 6 = 0x3ff2d54fddc5256d  # 1.1770781195540068
+liquid 5 N2 at 94.671 K: refractive_index bin 7 = 0x3ff2d42d755f9532  # 1.176801165094116
+liquid 5 N2 at 94.671 K: refractive_index bin 8 = 0x3ff2d333c662f517  # 1.1765630483126353
+liquid 5 N2 at 94.671 K: refractive_index bin 9 = 0x3ff2d2538a683477  # 1.1763492018247044
+liquid 5 N2 at 94.671 K: refractive_index bin 10 = 0x3ff2d18f1f780c32  # 1.1761618832831684
+liquid 5 N2 at 94.671 K: refractive_index bin 11 = 0x3ff2d0e03fe6ad29  # 1.1759951110969473
+liquid 5 N2 at 94.671 K: refractive_index bin 12 = 0x3ff2d0434c43f47c  # 1.1758454302901375
+liquid 5 N2 at 94.671 K: refractive_index bin 13 = 0x3ff2cfb8003135ef  # 1.1757125861653284
+liquid 5 N2 at 94.671 K: refractive_index bin 14 = 0x3ff2cf394d6777f6  # 1.1755917571640544
+liquid 5 N2 at 94.671 K: absorption_per_m none
+liquid 5 N2 at 94.671 K: scattering_per_m none
+liquid 5 N2 at 94.671 K: surface_tension_n_per_m none
+liquid 5 N2 at 94.671 K: viscosity_pa_s none
+liquid 5 N2 at 110.432 K: basis Derived
+liquid 5 N2 at 110.432 K: temperature = 0x405b9ba1cac08312  # 110.43175
+liquid 5 N2 at 110.432 K: density_kg_m3 = 0x40835081bb221e33  # 618.063345209643
+liquid 5 N2 at 110.432 K: refractive_index bin 0 = 0x3ff274f004b2ecee  # 1.1535492118408075
+liquid 5 N2 at 110.432 K: refractive_index bin 1 = 0x3ff272731191b9b7  # 1.1529417692469062
+liquid 5 N2 at 110.432 K: refractive_index bin 2 = 0x3ff2706414c2e76f  # 1.1524391947736736
+liquid 5 N2 at 110.432 K: refractive_index bin 3 = 0x3ff26ea3041fbf44  # 1.152010933026717
+liquid 5 N2 at 110.432 K: refractive_index bin 4 = 0x3ff26d26a35015ed  # 1.1516481761367416
+liquid 5 N2 at 110.432 K: refractive_index bin 5 = 0x3ff26be0febd2b4e  # 1.1513376188983844
+liquid 5 N2 at 110.432 K: refractive_index bin 6 = 0x3ff26ac8ba9a20ab  # 1.1510703362601287
+liquid 5 N2 at 110.432 K: refractive_index bin 7 = 0x3ff269d2e0477d85  # 1.150835872736793
+liquid 5 N2 at 110.432 K: refractive_index bin 8 = 0x3ff268ff7e6cd045  # 1.1506342829207068
+liquid 5 N2 at 110.432 K: refractive_index bin 9 = 0x3ff26841a70929fc  # 1.1504532360874
+liquid 5 N2 at 110.432 K: refractive_index bin 10 = 0x3ff2679b5b93cd04  # 1.1502946450462455
+liquid 5 N2 at 110.432 K: refractive_index bin 11 = 0x3ff267074cf19dd7  # 1.1501534467332613
+liquid 5 N2 at 110.432 K: refractive_index bin 12 = 0x3ff266826a240665  # 1.1500267168161369
+liquid 5 N2 at 110.432 K: refractive_index bin 13 = 0x3ff2660c797641ed  # 1.1499142403227964
+liquid 5 N2 at 110.432 K: refractive_index bin 14 = 0x3ff265a13334c8e6  # 1.149811935447866
+liquid 5 N2 at 110.432 K: absorption_per_m none
+liquid 5 N2 at 110.432 K: scattering_per_m none
+liquid 5 N2 at 110.432 K: surface_tension_n_per_m none
+liquid 5 N2 at 110.432 K: viscosity_pa_s none
+liquid 20 C2H6 at 90.368 K: basis Derived
+liquid 20 C2H6 at 90.368 K: temperature = 0x4056978d4fdf3b64  # 90.368
+liquid 20 C2H6 at 90.368 K: density_kg_m3 = 0x408458c540fc785f  # 651.0963153576121
+liquid 20 C2H6 at 90.368 K: refractive_index bin 0 = 0x3ff689f9ba0910fb  # 1.4086854235657131
+liquid 20 C2H6 at 90.368 K: refractive_index bin 1 = 0x3ff67d0afa490152  # 1.4055280472531035
+liquid 20 C2H6 at 90.368 K: refractive_index bin 2 = 0x3ff67240055faf04  # 1.402893086425082
+liquid 20 C2H6 at 90.368 K: refractive_index bin 3 = 0x3ff669323e73b791  # 1.4006826819927236
+liquid 20 C2H6 at 90.368 K: refractive_index bin 4 = 0x3ff6617930ed8262  # 1.3987972174874348
+liquid 20 C2H6 at 90.368 K: refractive_index bin 5 = 0x3ff65ade27013b65  # 1.397184517252492
+liquid 20 C2H6 at 90.368 K: refractive_index bin 6 = 0x3ff65526445793c3  # 1.3957884473431796
+liquid 20 C2H6 at 90.368 K: refractive_index bin 7 = 0x3ff6502fdcf4f000  # 1.3945768958210465
+liquid 20 C2H6 at 90.368 K: refractive_index bin 8 = 0x3ff64bda07c2fbaf  # 1.3935184767903868
+liquid 20 C2H6 at 90.368 K: refractive_index bin 9 = 0x3ff64805f18f387a  # 1.3925837932506782
+liquid 20 C2H6 at 90.368 K: refractive_index bin 10 = 0x3ff644a4371f3ded  # 1.3917581704334865
+liquid 20 C2H6 at 90.368 K: refractive_index bin 11 = 0x3ff641a36a81ae2c  # 1.3910249863064434
+liquid 20 C2H6 at 90.368 K: refractive_index bin 12 = 0x3ff63ef54b3b7a26  # 1.3903706492197982
+liquid 20 C2H6 at 90.368 K: refractive_index bin 13 = 0x3ff63c8f9818af6f  # 1.3897853795305897
+liquid 20 C2H6 at 90.368 K: refractive_index bin 14 = 0x3ff63a60836a5d40  # 1.3892521985452078
+liquid 20 C2H6 at 90.368 K: absorption_per_m none
+liquid 20 C2H6 at 90.368 K: scattering_per_m none
+liquid 20 C2H6 at 90.368 K: surface_tension_n_per_m none
+liquid 20 C2H6 at 90.368 K: viscosity_pa_s none
+liquid 20 C2H6 at 144.106 K: basis Derived
+liquid 20 C2H6 at 144.106 K: temperature = 0x4062036872b020c4  # 144.10649999999998
+liquid 20 C2H6 at 144.106 K: density_kg_m3 = 0x40828084fdd35b21  # 592.0649372589288
+liquid 20 C2H6 at 144.106 K: refractive_index bin 0 = 0x3ff5e01f7d5c7be9  # 1.3672175309109156
+liquid 20 C2H6 at 144.106 K: refractive_index bin 1 = 0x3ff5d4b1c4ca5a33  # 1.3644273459555165
+liquid 20 C2H6 at 144.106 K: refractive_index bin 2 = 0x3ff5cb276abb552d  # 1.3620981377801613
+liquid 20 C2H6 at 144.106 K: refractive_index bin 3 = 0x3ff5c3261601c56e  # 1.3601437434811845
+liquid 20 C2H6 at 144.106 K: refractive_index bin 4 = 0x3ff5bc51a7d8bea9  # 1.3584763103971602
+liquid 20 C2H6 at 144.106 K: refractive_index bin 5 = 0x3ff5b679e701305a  # 1.3570498489016445
+liquid 20 C2H6 at 144.106 K: refractive_index bin 6 = 0x3ff5b16adff170bb  # 1.3558148143556952
+liquid 20 C2H6 at 144.106 K: refractive_index bin 7 = 0x3ff5ad06dd359aad  # 1.3547428742400982
+liquid 20 C2H6 at 144.106 K: refractive_index bin 8 = 0x3ff5a930cf53c7d8  # 1.353806314346448
+liquid 20 C2H6 at 144.106 K: refractive_index bin 9 = 0x3ff5a5cd7a333308  # 1.3529791615903282
+liquid 20 C2H6 at 144.106 K: refractive_index bin 10 = 0x3ff5a2cf4796a734  # 1.352248458521399
+liquid 20 C2H6 at 144.106 K: refractive_index bin 11 = 0x3ff5a026d07e1fce  # 1.3515995163197547
+liquid 20 C2H6 at 144.106 K: refractive_index bin 12 = 0x3ff59dc77c220063  # 1.351020321744749
+liquid 20 C2H6 at 144.106 K: refractive_index bin 13 = 0x3ff59ba83a3c1a79  # 1.3505022311016133
+liquid 20 C2H6 at 144.106 K: refractive_index bin 14 = 0x3ff599b94acd6c57  # 1.3500302240343183
+liquid 20 C2H6 at 144.106 K: absorption_per_m none
+liquid 20 C2H6 at 144.106 K: scattering_per_m none
+liquid 20 C2H6 at 144.106 K: surface_tension_n_per_m none
+liquid 20 C2H6 at 144.106 K: viscosity_pa_s none
+liquid 20 C2H6 at 197.845 K: basis Derived
+liquid 20 C2H6 at 197.845 K: temperature = 0x4068bb0a3d70a3d7  # 197.845
+liquid 20 C2H6 at 197.845 K: density_kg_m3 = 0x4080753e168c9023  # 526.6553164464461
+liquid 20 C2H6 at 197.845 K: refractive_index bin 0 = 0x3ff5295b520d851a  # 1.3225968556583383
+liquid 20 C2H6 at 197.845 K: refractive_index bin 1 = 0x3ff51f7ced03db1c  # 1.3201874979401458
+liquid 20 C2H6 at 197.845 K: refractive_index bin 2 = 0x3ff5173f4c9e4a41  # 1.3181756012824197
+liquid 20 C2H6 at 197.845 K: refractive_index bin 3 = 0x3ff51054b681889c  # 1.3164870385303749
+liquid 20 C2H6 at 197.845 K: refractive_index bin 4 = 0x3ff50a6dc89fb163  # 1.3150461041323858
+liquid 20 C2H6 at 197.845 K: refractive_index bin 5 = 0x3ff50560fa76daa1  # 1.3138131889115032
+liquid 20 C2H6 at 197.845 K: refractive_index bin 6 = 0x3ff501017e1766f2  # 1.3127455640264398
+liquid 20 C2H6 at 197.845 K: refractive_index bin 7 = 0x3ff4fd35b6ad1472  # 1.3118188033852474
+liquid 20 C2H6 at 197.845 K: refractive_index bin 8 = 0x3ff4f9e4913d219a  # 1.3110089944258108
+liquid 20 C2H6 at 197.845 K: refractive_index bin 9 = 0x3ff4f6f68a83c39e  # 1.3102937136393176
+liquid 20 C2H6 at 197.845 K: refractive_index bin 10 = 0x3ff4f45fe9876ed6  # 1.309661781523507
+liquid 20 C2H6 at 197.845 K: refractive_index bin 11 = 0x3ff4f213617e95e7  # 1.309100514257233
+liquid 20 C2H6 at 197.845 K: refractive_index bin 12 = 0x3ff4f0061140fe61  # 1.3085995363216159
+liquid 20 C2H6 at 197.845 K: refractive_index bin 13 = 0x3ff4ee3024e71d68  # 1.3081513825908022
+liquid 20 C2H6 at 197.845 K: refractive_index bin 14 = 0x3ff4ec83fef3e988  # 1.3077430686085751
+liquid 20 C2H6 at 197.845 K: absorption_per_m none
+liquid 20 C2H6 at 197.845 K: scattering_per_m none
+liquid 20 C2H6 at 197.845 K: surface_tension_n_per_m none
+liquid 20 C2H6 at 197.845 K: viscosity_pa_s none
+liquid 20 C2H6 at 251.584 K: basis Derived
+liquid 20 C2H6 at 251.584 K: temperature = 0x406f72ac083126ea  # 251.58350000000002
+liquid 20 C2H6 at 251.584 K: density_kg_m3 = 0x407bcfc31d012cde  # 444.98513508280837
+liquid 20 C2H6 at 251.584 K: refractive_index bin 0 = 0x3ff44c618f349fe8  # 1.2686477273909933
+liquid 20 C2H6 at 251.584 K: refractive_index bin 1 = 0x3ff44452a6b55422  # 1.266680384830814
+liquid 20 C2H6 at 251.584 K: refractive_index bin 2 = 0x3ff43d977ad692d8  # 1.2650370405546507
+liquid 20 C2H6 at 251.584 K: refractive_index bin 3 = 0x3ff437f0d72170b9  # 1.2636574176349724
+liquid 20 C2H6 at 251.584 K: refractive_index bin 4 = 0x3ff4331e100604a9  # 1.2624798417967134
+liquid 20 C2H6 at 251.584 K: refractive_index bin 5 = 0x3ff42efd54f7cf40  # 1.2614720648825397
+liquid 20 C2H6 at 251.584 K: refractive_index bin 6 = 0x3ff42b6a1d696c90  # 1.2605992459200799
+liquid 20 C2H6 at 251.584 K: refractive_index bin 7 = 0x3ff4284f89187786  # 1.259841475991807
+liquid 20 C2H6 at 251.584 K: refractive_index bin 8 = 0x3ff4259923524312  # 1.2591792468776402
+liquid 20 C2H6 at 251.584 K: refractive_index bin 9 = 0x3ff42333ba3c034e  # 1.258594253042435
+liquid 20 C2H6 at 251.584 K: refractive_index bin 10 = 0x3ff42115bdbb463d  # 1.2580773745907117
+liquid 20 C2H6 at 251.584 K: refractive_index bin 11 = 0x3ff41f3451b48ba6  # 1.2576182548152501
+liquid 20 C2H6 at 251.584 K: refractive_index bin 12 = 0x3ff41d86937cc051  # 1.2572084199164417
+liquid 20 C2H6 at 251.584 K: refractive_index bin 13 = 0x3ff41c061e84ad40  # 1.2568417732353083
+liquid 20 C2H6 at 251.584 K: refractive_index bin 14 = 0x3ff41aa7d144552f  # 1.2565076994408846
+liquid 20 C2H6 at 251.584 K: absorption_per_m none
+liquid 20 C2H6 at 251.584 K: scattering_per_m none
+liquid 20 C2H6 at 251.584 K: surface_tension_n_per_m none
+liquid 20 C2H6 at 251.584 K: viscosity_pa_s none
+liquid 58 H2SO4 at 242.000 K: basis Derived
+liquid 58 H2SO4 at 242.000 K: temperature = 0x406e400000000000  # 242.0
+liquid 58 H2SO4 at 242.000 K: density_kg_m3 = 0x4099fa6666666666  # 1662.6
+liquid 58 H2SO4 at 242.000 K: refractive_index bin 0 = 0x3ff71462ace5178d  # 1.4424769166666664
+liquid 58 H2SO4 at 242.000 K: refractive_index bin 1 = 0x3ff6fc59d443db7d  # 1.4366091052631582
+liquid 58 H2SO4 at 242.000 K: refractive_index bin 2 = 0x3ff6ed9c105d4cde  # 1.4330101622807017
+liquid 58 H2SO4 at 242.000 K: refractive_index bin 3 = 0x3ff6e8bad2d6ce45  # 1.4318187938596492
+liquid 58 H2SO4 at 242.000 K: refractive_index bin 4 = 0x3ff6e7bf9a2d811f  # 1.4315792105263154
+liquid 58 H2SO4 at 242.000 K: refractive_index bin 5 = 0x3ff6e6c7473ef7bd  # 1.431342390350877
+liquid 58 H2SO4 at 242.000 K: refractive_index bin 6 = 0x3ff6e5cb34c6711d  # 1.431101995614035
+liquid 58 H2SO4 at 242.000 K: refractive_index bin 7 = 0x3ff6e429e42c4e47  # 1.4307040131578945
+liquid 58 H2SO4 at 242.000 K: refractive_index bin 8 = 0x3ff6e2098c073e9e  # 1.4301848859649122
+liquid 58 H2SO4 at 242.000 K: refractive_index bin 9 = 0x3ff6dfe7e7df0a87  # 1.4296645219298243
+liquid 58 H2SO4 at 242.000 K: refractive_index bin 10 = 0x3ff6ddc5b2e67d07  # 1.4291436184210526
+liquid 58 H2SO4 at 242.000 K: refractive_index bin 11 = 0x3ff6dba510952697  # 1.4286242149122808
+liquid 58 H2SO4 at 242.000 K: refractive_index bin 12 = 0x3ff6d93688560df4  # 1.4280305219298244
+liquid 58 H2SO4 at 242.000 K: refractive_index bin 13 = 0x3ff6d52b40983a3d  # 1.4270432017543861
+liquid 58 H2SO4 at 242.000 K: refractive_index bin 14 = 0x3ff6d4fdf3b645a0  # 1.4269999999999996
+liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 0 = 0x3fe534db9991624a  # 0.6627023696301617
+liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 1 = 0x3fe3eb9cd838eea3  # 0.622511312779768
+liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 2 = 0x3fe2c807cc05feed  # 0.5869177803833431
+liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 3 = 0x3fe1c3ff2b1bc3ce  # 0.5551753847085992
+liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 4 = 0x3fe0daa72c0aea15  # 0.5266910419662191
+liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 5 = 0x3fe00816febd0a42  # 0.5009875274047959
+liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 6 = 0x3fde92407077b577  # 0.4776764963451891
+liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 7 = 0x3fdd364ab4bac79d  # 0.4564387097299177
+liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 8 = 0x3fdbf7f5eaefd816  # 0.43700931494766004
+liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 9 = 0x3fdad3a0b73b7c12  # 0.4191667355898413
+liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 10 = 0x3fd9c63ba1acf673  # 0.4027241782058361
+liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 11 = 0x3fd8cd2d898d5e82  # 0.38752306397280034
+liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 12 = 0x3fd8a5d9f33cc9b4  # 0.3851227641454458
+liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 13 = 0x3fe328d93f998f99  # 0.5987364046272773
+liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 14 = 0x3ff1c8d4c9f9ea32  # 1.1115310563751675
+liquid 58 H2SO4 at 242.000 K: scattering_per_m none
+liquid 58 H2SO4 at 242.000 K: surface_tension_n_per_m none
+liquid 58 H2SO4 at 242.000 K: viscosity_pa_s none
+liquid 58 H2SO4 at 267.000 K: basis Derived
+liquid 58 H2SO4 at 267.000 K: temperature = 0x4070b00000000000  # 267.0
+liquid 58 H2SO4 at 267.000 K: density_kg_m3 = 0x4099fa6666666666  # 1662.6
+liquid 58 H2SO4 at 267.000 K: refractive_index bin 0 = 0x3ff71462ace5178d  # 1.4424769166666664
+liquid 58 H2SO4 at 267.000 K: refractive_index bin 1 = 0x3ff6fc59d443db7d  # 1.4366091052631582
+liquid 58 H2SO4 at 267.000 K: refractive_index bin 2 = 0x3ff6ed9c105d4cde  # 1.4330101622807017
+liquid 58 H2SO4 at 267.000 K: refractive_index bin 3 = 0x3ff6e8bad2d6ce45  # 1.4318187938596492
+liquid 58 H2SO4 at 267.000 K: refractive_index bin 4 = 0x3ff6e7bf9a2d811f  # 1.4315792105263154
+liquid 58 H2SO4 at 267.000 K: refractive_index bin 5 = 0x3ff6e6c7473ef7bd  # 1.431342390350877
+liquid 58 H2SO4 at 267.000 K: refractive_index bin 6 = 0x3ff6e5cb34c6711d  # 1.431101995614035
+liquid 58 H2SO4 at 267.000 K: refractive_index bin 7 = 0x3ff6e429e42c4e47  # 1.4307040131578945
+liquid 58 H2SO4 at 267.000 K: refractive_index bin 8 = 0x3ff6e2098c073e9e  # 1.4301848859649122
+liquid 58 H2SO4 at 267.000 K: refractive_index bin 9 = 0x3ff6dfe7e7df0a87  # 1.4296645219298243
+liquid 58 H2SO4 at 267.000 K: refractive_index bin 10 = 0x3ff6ddc5b2e67d07  # 1.4291436184210526
+liquid 58 H2SO4 at 267.000 K: refractive_index bin 11 = 0x3ff6dba510952697  # 1.4286242149122808
+liquid 58 H2SO4 at 267.000 K: refractive_index bin 12 = 0x3ff6d93688560df4  # 1.4280305219298244
+liquid 58 H2SO4 at 267.000 K: refractive_index bin 13 = 0x3ff6d52b40983a3d  # 1.4270432017543861
+liquid 58 H2SO4 at 267.000 K: refractive_index bin 14 = 0x3ff6d4fdf3b645a0  # 1.4269999999999996
+liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 0 = 0x3fe534db9991624a  # 0.6627023696301617
+liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 1 = 0x3fe3eb9cd838eea3  # 0.622511312779768
+liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 2 = 0x3fe2c807cc05feed  # 0.5869177803833431
+liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 3 = 0x3fe1c3ff2b1bc3ce  # 0.5551753847085992
+liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 4 = 0x3fe0daa72c0aea15  # 0.5266910419662191
+liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 5 = 0x3fe00816febd0a42  # 0.5009875274047959
+liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 6 = 0x3fde92407077b577  # 0.4776764963451891
+liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 7 = 0x3fdd364ab4bac79d  # 0.4564387097299177
+liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 8 = 0x3fdbf7f5eaefd816  # 0.43700931494766004
+liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 9 = 0x3fdad3a0b73b7c12  # 0.4191667355898413
+liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 10 = 0x3fd9c63ba1acf673  # 0.4027241782058361
+liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 11 = 0x3fd8cd2d898d5e82  # 0.38752306397280034
+liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 12 = 0x3fd8a5d9f33cc9b4  # 0.3851227641454458
+liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 13 = 0x3fe328d93f998f99  # 0.5987364046272773
+liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 14 = 0x3ff1c8d4c9f9ea32  # 1.1115310563751675
+liquid 58 H2SO4 at 267.000 K: scattering_per_m none
+liquid 58 H2SO4 at 267.000 K: surface_tension_n_per_m none
+liquid 58 H2SO4 at 267.000 K: viscosity_pa_s none
+liquid 58 H2SO4 at 292.000 K: basis Derived
+liquid 58 H2SO4 at 292.000 K: temperature = 0x4072400000000000  # 292.0
+liquid 58 H2SO4 at 292.000 K: density_kg_m3 = 0x4099fa6666666666  # 1662.6
+liquid 58 H2SO4 at 292.000 K: refractive_index bin 0 = 0x3ff71462ace5178d  # 1.4424769166666664
+liquid 58 H2SO4 at 292.000 K: refractive_index bin 1 = 0x3ff6fc59d443db7d  # 1.4366091052631582
+liquid 58 H2SO4 at 292.000 K: refractive_index bin 2 = 0x3ff6ed9c105d4cde  # 1.4330101622807017
+liquid 58 H2SO4 at 292.000 K: refractive_index bin 3 = 0x3ff6e8bad2d6ce45  # 1.4318187938596492
+liquid 58 H2SO4 at 292.000 K: refractive_index bin 4 = 0x3ff6e7bf9a2d811f  # 1.4315792105263154
+liquid 58 H2SO4 at 292.000 K: refractive_index bin 5 = 0x3ff6e6c7473ef7bd  # 1.431342390350877
+liquid 58 H2SO4 at 292.000 K: refractive_index bin 6 = 0x3ff6e5cb34c6711d  # 1.431101995614035
+liquid 58 H2SO4 at 292.000 K: refractive_index bin 7 = 0x3ff6e429e42c4e47  # 1.4307040131578945
+liquid 58 H2SO4 at 292.000 K: refractive_index bin 8 = 0x3ff6e2098c073e9e  # 1.4301848859649122
+liquid 58 H2SO4 at 292.000 K: refractive_index bin 9 = 0x3ff6dfe7e7df0a87  # 1.4296645219298243
+liquid 58 H2SO4 at 292.000 K: refractive_index bin 10 = 0x3ff6ddc5b2e67d07  # 1.4291436184210526
+liquid 58 H2SO4 at 292.000 K: refractive_index bin 11 = 0x3ff6dba510952697  # 1.4286242149122808
+liquid 58 H2SO4 at 292.000 K: refractive_index bin 12 = 0x3ff6d93688560df4  # 1.4280305219298244
+liquid 58 H2SO4 at 292.000 K: refractive_index bin 13 = 0x3ff6d52b40983a3d  # 1.4270432017543861
+liquid 58 H2SO4 at 292.000 K: refractive_index bin 14 = 0x3ff6d4fdf3b645a0  # 1.4269999999999996
+liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 0 = 0x3fe534db9991624a  # 0.6627023696301617
+liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 1 = 0x3fe3eb9cd838eea3  # 0.622511312779768
+liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 2 = 0x3fe2c807cc05feed  # 0.5869177803833431
+liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 3 = 0x3fe1c3ff2b1bc3ce  # 0.5551753847085992
+liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 4 = 0x3fe0daa72c0aea15  # 0.5266910419662191
+liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 5 = 0x3fe00816febd0a42  # 0.5009875274047959
+liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 6 = 0x3fde92407077b577  # 0.4776764963451891
+liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 7 = 0x3fdd364ab4bac79d  # 0.4564387097299177
+liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 8 = 0x3fdbf7f5eaefd816  # 0.43700931494766004
+liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 9 = 0x3fdad3a0b73b7c12  # 0.4191667355898413
+liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 10 = 0x3fd9c63ba1acf673  # 0.4027241782058361
+liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 11 = 0x3fd8cd2d898d5e82  # 0.38752306397280034
+liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 12 = 0x3fd8a5d9f33cc9b4  # 0.3851227641454458
+liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 13 = 0x3fe328d93f998f99  # 0.5987364046272773
+liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 14 = 0x3ff1c8d4c9f9ea32  # 1.1115310563751675
+liquid 58 H2SO4 at 292.000 K: scattering_per_m none
+liquid 58 H2SO4 at 292.000 K: surface_tension_n_per_m none
+liquid 58 H2SO4 at 292.000 K: viscosity_pa_s none
+liquid 58 H2SO4 at 317.000 K: basis Derived
+liquid 58 H2SO4 at 317.000 K: temperature = 0x4073d00000000000  # 317.0
+liquid 58 H2SO4 at 317.000 K: density_kg_m3 = 0x4099fa6666666666  # 1662.6
+liquid 58 H2SO4 at 317.000 K: refractive_index bin 0 = 0x3ff71462ace5178d  # 1.4424769166666664
+liquid 58 H2SO4 at 317.000 K: refractive_index bin 1 = 0x3ff6fc59d443db7d  # 1.4366091052631582
+liquid 58 H2SO4 at 317.000 K: refractive_index bin 2 = 0x3ff6ed9c105d4cde  # 1.4330101622807017
+liquid 58 H2SO4 at 317.000 K: refractive_index bin 3 = 0x3ff6e8bad2d6ce45  # 1.4318187938596492
+liquid 58 H2SO4 at 317.000 K: refractive_index bin 4 = 0x3ff6e7bf9a2d811f  # 1.4315792105263154
+liquid 58 H2SO4 at 317.000 K: refractive_index bin 5 = 0x3ff6e6c7473ef7bd  # 1.431342390350877
+liquid 58 H2SO4 at 317.000 K: refractive_index bin 6 = 0x3ff6e5cb34c6711d  # 1.431101995614035
+liquid 58 H2SO4 at 317.000 K: refractive_index bin 7 = 0x3ff6e429e42c4e47  # 1.4307040131578945
+liquid 58 H2SO4 at 317.000 K: refractive_index bin 8 = 0x3ff6e2098c073e9e  # 1.4301848859649122
+liquid 58 H2SO4 at 317.000 K: refractive_index bin 9 = 0x3ff6dfe7e7df0a87  # 1.4296645219298243
+liquid 58 H2SO4 at 317.000 K: refractive_index bin 10 = 0x3ff6ddc5b2e67d07  # 1.4291436184210526
+liquid 58 H2SO4 at 317.000 K: refractive_index bin 11 = 0x3ff6dba510952697  # 1.4286242149122808
+liquid 58 H2SO4 at 317.000 K: refractive_index bin 12 = 0x3ff6d93688560df4  # 1.4280305219298244
+liquid 58 H2SO4 at 317.000 K: refractive_index bin 13 = 0x3ff6d52b40983a3d  # 1.4270432017543861
+liquid 58 H2SO4 at 317.000 K: refractive_index bin 14 = 0x3ff6d4fdf3b645a0  # 1.4269999999999996
+liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 0 = 0x3fe534db9991624a  # 0.6627023696301617
+liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 1 = 0x3fe3eb9cd838eea3  # 0.622511312779768
+liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 2 = 0x3fe2c807cc05feed  # 0.5869177803833431
+liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 3 = 0x3fe1c3ff2b1bc3ce  # 0.5551753847085992
+liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 4 = 0x3fe0daa72c0aea15  # 0.5266910419662191
+liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 5 = 0x3fe00816febd0a42  # 0.5009875274047959
+liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 6 = 0x3fde92407077b577  # 0.4776764963451891
+liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 7 = 0x3fdd364ab4bac79d  # 0.4564387097299177
+liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 8 = 0x3fdbf7f5eaefd816  # 0.43700931494766004
+liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 9 = 0x3fdad3a0b73b7c12  # 0.4191667355898413
+liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 10 = 0x3fd9c63ba1acf673  # 0.4027241782058361
+liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 11 = 0x3fd8cd2d898d5e82  # 0.38752306397280034
+liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 12 = 0x3fd8a5d9f33cc9b4  # 0.3851227641454458
+liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 13 = 0x3fe328d93f998f99  # 0.5987364046272773
+liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 14 = 0x3ff1c8d4c9f9ea32  # 1.1115310563751675
+liquid 58 H2SO4 at 317.000 K: scattering_per_m none
+liquid 58 H2SO4 at 317.000 K: surface_tension_n_per_m none
+liquid 58 H2SO4 at 317.000 K: viscosity_pa_s none

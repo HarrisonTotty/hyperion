@@ -43,6 +43,7 @@ pub mod helium;
 pub mod kick_rank;
 pub mod lifetime_bracket;
 pub mod limb_darkening;
+pub mod liquid_optics;
 pub mod mge;
 pub mod period_correction;
 pub mod saturation;
@@ -169,6 +170,12 @@ pub const MANIFEST: &[TableInfo] = &[
         name: "limb_darkening",
         revision: 0,
         since_generator_version: 19,
+        provisional: false,
+    },
+    TableInfo {
+        name: "liquid_optics",
+        revision: 0,
+        since_generator_version: 22,
         provisional: false,
     },
     TableInfo {

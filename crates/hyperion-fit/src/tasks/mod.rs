@@ -15,6 +15,7 @@ pub mod giant_cooling;
 pub mod kick_rank;
 pub mod lifetime_bracket;
 pub mod limb_darkening;
+pub mod liquid_optics;
 pub mod mge;
 pub mod period_correction;
 pub mod pulsars;

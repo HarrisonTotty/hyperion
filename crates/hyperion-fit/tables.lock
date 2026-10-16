@@ -180,6 +180,18 @@ provisional = false
 acceptance = "the Sun (5,772 K, log g 4.438) in V: c 0.7837, α 0.6884, disc average 0.7993 (Design note 16: 0.7837, 0.6893, 0.799)"
 
 [[table]]
+name = "liquid_optics"
+path = "liquid_optics.rs"
+task = "liquid_optics"
+revision = 0
+inputs_sha256 = "bc60cd41d3b60b37f9f649f24accde6900c7e70904e0ea5fa7df526debb4d1d8"
+body_sha256 = "d861ed58a17f7153f001bfbc4f4d6cf42eada3876be683ec4eae59bab8a13537"
+fingerprint = [380.0, 405.3333333333333, 430.6666666666667, 456.0, 481.3333333333333, 506.6666666666667, 532.0, 557.3333333333334, 582.6666666666666, 608.0, 633.3333333333334, 658.6666666666667, 684.0, 709.3333333333333, 734.6666666666667, 760.0]
+since_generator_version = 22
+provisional = false
+acceptance = "7 liquid files, each to 15 bins over 380–760 nm; water.json's a on its grid: 0.00522 m⁻¹ at 440 nm (Mason, Cone and Fry 2016's 0.00522), 0.05650 at 550 nm and 0.62400 at 700 nm (Pope and Fry 1997's 0.0565 and 0.624)"
+
+[[table]]
 name = "mge"
 path = "mge.rs"
 task = "mge"

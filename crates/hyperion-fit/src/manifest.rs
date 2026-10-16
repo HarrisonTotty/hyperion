@@ -2,12 +2,14 @@
 //! notes 6, 7, 8 and 11).
 //!
 //! A task's *manifest* is a TOML file in `crates/hyperion-fit/manifests/`: its seeds, sample sizes,
-//! grids and parameter ranges under `[params]`, and the datasets it reads under `datasets`. A slow
+//! grids and parameter ranges under `[params]`, the datasets it reads under `datasets`, and the
+//! rendering plan R08 material files it reads under `materials` ([`crate::materials`]). A slow
 //! task also has `<name>.smoke.toml`, a reduced run of a few seconds that the crate's tests execute.
 //!
-//! The *inputs hash* is the SHA-256 of the task's name, its revision, the manifest file's bytes and
-//! the recorded hash of each dataset the manifest names, in that order ([`InputsHash::compute`]).
-//! It does not cover source code: a change to a task's algorithm bumps its revision.
+//! The *inputs hash* is the SHA-256 of the task's name, its revision, the manifest file's bytes,
+//! the recorded hash of each dataset the manifest names and the data hash of each material file it
+//! names, in that order ([`InputsHash::compute`]). It does not cover source code: a change to a
+//! task's algorithm bumps its revision.
 //!
 //! The *lock file*, `crates/hyperion-fit/tables.lock`, records for every table its revision,
 //! inputs hash, body hash, fingerprint values, `since-generator-version`, whether it is
@@ -24,6 +26,7 @@ use sha2::{Digest, Sha256};
 
 use crate::data::{Dataset, LoadDatasetError, Provenance, load_dataset};
 use crate::emit::{Workspace, hex, sha256_hex};
+use crate::materials::{MATERIALS_FROM_CRATE, MaterialFile, ReadMaterialError};
 
 /// A task's manifest, as loaded from its TOML file.
 #[derive(Debug, Clone, PartialEq)]
@@ -32,9 +35,11 @@ pub struct Manifest {
     bytes: Vec<u8>,
     task: String,
     datasets: Vec<String>,
+    materials: Vec<String>,
     params: toml::Table,
     data_root: PathBuf,
     data_dirs: BTreeMap<String, PathBuf>,
+    materials_dir: PathBuf,
 }
 
 /// The fields of a manifest file.
@@ -44,6 +49,8 @@ struct ManifestFile {
     task: String,
     #[serde(default)]
     datasets: Vec<String>,
+    #[serde(default)]
+    materials: Vec<String>,
     #[serde(default)]
     params: toml::Table,
 }
@@ -75,16 +82,19 @@ impl Manifest {
         };
         let text = std::str::from_utf8(&bytes).map_err(|e| parse(e.to_string()))?;
         let file: ManifestFile = toml::from_str(text).map_err(|e| parse(e.to_string()))?;
+        let crate_dir = path.parent().and_then(Path::parent);
         Ok(Self {
             path: path.to_owned(),
             task: file.task,
             datasets: file.datasets,
+            materials: file.materials,
             params: file.params,
-            data_root: path
-                .parent()
-                .and_then(Path::parent)
-                .map_or_else(|| PathBuf::from("data"), |crate_dir| crate_dir.join("data")),
+            data_root: crate_dir.map_or_else(|| PathBuf::from("data"), |dir| dir.join("data")),
             data_dirs: BTreeMap::new(),
+            materials_dir: crate_dir.map_or_else(
+                || PathBuf::from(MATERIALS_FROM_CRATE),
+                |dir| dir.join(MATERIALS_FROM_CRATE),
+            ),
             bytes,
         })
     }
@@ -111,6 +121,37 @@ impl Manifest {
     #[must_use]
     pub fn datasets(&self) -> &[String] {
         &self.datasets
+    }
+
+    /// The rendering plan R08 material files the task reads, by file name, in the order their
+    /// data hashes enter the inputs hash.
+    #[must_use]
+    pub fn materials(&self) -> &[String] {
+        &self.materials
+    }
+
+    /// The directory the material files are read from: R08's `materials/`, found from the
+    /// manifest's crate directory ([`MATERIALS_FROM_CRATE`]), unless
+    /// [`with_materials_dir`](Self::with_materials_dir) gave another.
+    #[must_use]
+    pub fn materials_dir(&self) -> &Path {
+        &self.materials_dir
+    }
+
+    /// Reads the material files from `dir` instead of R08's directory.
+    #[must_use]
+    pub fn with_materials_dir(mut self, dir: PathBuf) -> Self {
+        self.materials_dir = dir;
+        self
+    }
+
+    /// Reads material file `name` from [`materials_dir`](Self::materials_dir).
+    ///
+    /// # Errors
+    ///
+    /// As [`MaterialFile::read`].
+    pub fn load_material(&self, name: &str) -> Result<MaterialFile, ReadMaterialError> {
+        MaterialFile::read(&self.materials_dir, name)
     }
 
     /// The `[params]` table.
@@ -269,15 +310,16 @@ impl ManifestParamError {
 pub struct InputsHash([u8; 32]);
 
 impl InputsHash {
-    /// The hash of task `name` at `revision` run on `manifest`, whose datasets' recorded hashes are
-    /// `dataset_hashes`, in the manifest's order. Each field is preceded by its length as eight
-    /// little-endian bytes, so that no two different inputs run together into one byte string.
+    /// The hash of task `name` at `revision` run on `manifest`, whose datasets' recorded hashes and
+    /// then material files' data hashes are `input_hashes`, in the manifest's order. Each field
+    /// is preceded by its length as eight little-endian bytes, so that no two different inputs run
+    /// together into one byte string.
     ///
     /// # Panics
     ///
     /// Never: no field is 2⁶⁴ bytes long.
     #[must_use]
-    pub fn compute(name: &str, revision: u32, manifest: &[u8], dataset_hashes: &[String]) -> Self {
+    pub fn compute(name: &str, revision: u32, manifest: &[u8], input_hashes: &[String]) -> Self {
         let mut hasher = Sha256::new();
         let mut field = |bytes: &[u8]| {
             let len = u64::try_from(bytes.len()).expect("a field is shorter than 2^64 bytes");
@@ -287,28 +329,37 @@ impl InputsHash {
         field(name.as_bytes());
         field(&revision.to_le_bytes());
         field(manifest);
-        for hash in dataset_hashes {
+        for hash in input_hashes {
             field(hash.as_bytes());
         }
         Self(hasher.finalize().into())
     }
 
     /// The hash of `task`'s inputs with `manifest`, the datasets' recorded hashes read from their
-    /// `PROVENANCE.toml` under the workspace's data directory.
+    /// `PROVENANCE.toml` under the workspace's data directory, and the material files' data hashes
+    /// read from the manifest's [`materials_dir`](Manifest::materials_dir), each named
+    /// `materials/<file>` in the list returned beside the hash.
     ///
     /// # Errors
     ///
-    /// As [`Provenance::load`].
+    /// As [`Provenance::load`], and [`LoadDatasetError::Material`] for a material file that cannot
+    /// be read.
     pub fn of_task(
         name: &str,
         revision: u32,
         manifest: &Manifest,
         workspace: &Workspace,
     ) -> Result<(Self, Vec<(String, String)>), LoadDatasetError> {
-        let mut hashes = Vec::with_capacity(manifest.datasets().len());
+        let mut hashes = Vec::with_capacity(manifest.datasets().len() + manifest.materials().len());
         for dataset in manifest.datasets() {
             let provenance = Provenance::load(&workspace.data_dir, dataset)?;
             hashes.push((dataset.clone(), provenance.recorded_hash()));
+        }
+        for material in manifest.materials() {
+            let file = manifest
+                .load_material(material)
+                .map_err(|e| LoadDatasetError::Material(Box::new(e)))?;
+            hashes.push((format!("materials/{material}"), file.data_sha256()));
         }
         let recorded: Vec<String> = hashes.iter().map(|(_, h)| h.clone()).collect();
         Ok((
@@ -624,6 +675,55 @@ mod tests {
         assert_eq!(base.to_hex().len(), 64);
     }
 
+    /// A manifest's material files enter the inputs hash after its datasets, by their data alone:
+    /// a prose edit leaves the hash, a changed number moves it, and so does the files' order.
+    #[test]
+    fn the_inputs_hash_covers_the_material_files_data() {
+        let root = tempfile::tempdir().unwrap();
+        let materials = root.path().join("materials");
+        fs::create_dir_all(&materials).unwrap();
+        let file = |name: &str, n: f64, prose: &str| {
+            fs::write(
+                materials.join(name),
+                format!(
+                    r#"{{"key":"X","phase":"liquid","shape":"sphere","provenance":"measured","name":"{prose}","temperatureK":90,"wavelengthsNm":[380,760],"n":[{n},1.3],"k":[0,0]}}"#
+                ),
+            )
+            .unwrap();
+        };
+        let ws = Workspace::under(root.path());
+        let hash = |order: &str| {
+            let manifest = Manifest::from_bytes(
+                &root.path().join("manifests/toy.toml"),
+                format!("task = \"toy\"\nmaterials = [{order}]\n").into_bytes(),
+            )
+            .unwrap()
+            .with_materials_dir(materials.clone());
+            let (hash, data) = InputsHash::of_task("toy", 0, &manifest, &ws).unwrap();
+            assert!(data.iter().all(|(name, _)| name.starts_with("materials/")));
+            hash
+        };
+        file("a.json", 1.30, "first");
+        file("b.json", 1.40, "second");
+        let base = hash(r#""a.json", "b.json""#);
+        file("a.json", 1.30, "renamed");
+        assert_eq!(hash(r#""a.json", "b.json""#), base);
+        assert_ne!(hash(r#""b.json", "a.json""#), base);
+        file("a.json", 1.31, "renamed");
+        assert_ne!(hash(r#""a.json", "b.json""#), base);
+        file("c.json", 0.0, "bad");
+        let missing = Manifest::from_bytes(
+            &root.path().join("manifests/toy.toml"),
+            b"task = \"toy\"\nmaterials = [\"c.json\"]\n".to_vec(),
+        )
+        .unwrap()
+        .with_materials_dir(materials.clone());
+        assert!(matches!(
+            InputsHash::of_task("toy", 0, &missing, &ws),
+            Err(LoadDatasetError::Material(_))
+        ));
+    }
+
     #[test]
     fn a_manifests_params_are_read_and_checked() {
         let manifest = Manifest::from_bytes(
@@ -634,6 +734,7 @@ mod tests {
         .unwrap();
         assert_eq!(manifest.task(), "toy");
         assert_eq!(manifest.datasets(), ["census"]);
+        assert!(manifest.materials().is_empty());
         assert_eq!(manifest.u64("draws").unwrap(), 200);
         assert!(manifest.f64("scale").unwrap().total_cmp(&0.5).is_eq());
         assert!(manifest.f64("draws").unwrap().total_cmp(&200.0).is_eq());

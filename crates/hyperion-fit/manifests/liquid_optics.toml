@@ -1,0 +1,14 @@
+# The liquids' optical constants by bin (plan 14, P14.T49.h; decision-r11-palette-liquids §1.2 and
+# §1.8): rendering plan R08's committed liquid files, reduced to the fifteen bake bins. The inputs
+# hash covers each file's data fields (`hyperion_fit::materials`); the task takes no parameters
+# and no dataset, and reads one sim value, the bins' edges, which its fingerprint probes.
+task = "liquid_optics"
+materials = [
+    "ammonia-liquid.json",
+    "ethane-liquid.json",
+    "methane-liquid.json",
+    "nitrogen-liquid.json",
+    "sulphuric-acid-75.json",
+    "sulphuric-acid-84.json",
+    "water.json",
+]

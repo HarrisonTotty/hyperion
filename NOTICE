@@ -652,3 +652,18 @@ Geophys. Res. 109, D06303) join this list when their values are quoted; neither 
   Astrophys. J. Lett. 931 (2022) L4, DOI: 10.3847/2041-8213/ac6b32, licensed under CC BY 4.0
   (https://creativecommons.org/licenses/by/4.0/), Table 1's index and density of amorphous H2S
   ice at 19 K (two values, cited).
+
+- Liquid water's thermophysical properties in the substance registry's liquid columns (galaxy
+  plan 14, P14.T49.h), in crates/hyperion-sim/src/substance/rows/liquids.rs: the residual
+  Helmholtz energy of IAPWS R6-95(2018), Revised Release on the IAPWS Formulation 1995 for the
+  Thermodynamic Properties of Ordinary Water Substance for General and Scientific Use (after W.
+  Wagner and A. Pruss, J. Phys. Chem. Ref. Data 31 (2002) 387-535), its Table 2's coefficients;
+  the viscosity of IAPWS R12-08, Release on the IAPWS Formulation 2008 for the Viscosity of
+  Ordinary Water Substance (after M. L. Huber et al., J. Phys. Chem. Ref. Data 38 (2009) 101), its
+  Tables 1 and 2; and the surface tension of IAPWS R1-76(2014), Revised Release on Surface Tension
+  of Ordinary Water Substance. Each release allows publication in whole or in part provided that
+  attribution is given to the International Association for the Properties of Water and Steam, as
+  it is here. The pure liquid's scattering follows the method of X. Zhang, L. Hu and M.-X. He,
+  "Scattering by pure seawater: effect of salinity", Opt. Express 17 (2009) 5698-5710, DOI:
+  10.1364/OE.17.005698, re-implemented from its equations as its published code
+  (betasw_ZHH2009.m) states them, at zero salinity; no code of it is copied.

@@ -15210,3 +15210,296 @@ tables::gauss_legendre`.
   - _Figures from memory in the tests' inputs:_ Pluto's 11.5 µbar (New Horizons) and its CO,
     about 5 × 10⁻⁴ of its N₂ (Lellouch et al. 2011 and 2017); Titan's seas and lakes, of the order
     of a tenth of its air's methane.
+- **Deviations in P14.T49.h, as built: step 1, the frame, the liquids' optics and water
+  (`p14-liquids`, 2026-10-16).** `GENERATOR_VERSION` stays 22, and no generated value moves.
+  - _The entry._ Plan 14 had no T49.h entry when this step started, so the lane wrote it from
+    docs-batch-19's item B3 (laptop issue #27), verbatim, at B3's place after T49.f's block.
+    docs-batch-19 landed the same entry first (d5385c72), so the merge kept that copy.
+  - _Held at 22._ Nothing on the record calls `liquid_properties` or `Substance::liquid` before
+    P14.T54.a (decision-bump-plan-after-22 §1.2). Until then a change to a value re-blesses
+    `liquids.golden` at the version in force, each re-bless citing §1.2. **P14.T54.a, at the
+    bump:** strike that rule from `tests/liquids_golden.rs`'s note and this record, since from
+    then a changed value is moved output; and restamp `liquid_optics` `--since 23`, as T49.b's
+    tables are.
+  - _The split._ T49.h is several agents' work.
+    - **This step** builds:
+      - the module and its function;
+      - the fit task and its reading of R08's files;
+      - an equation-of-state evaluator;
+      - every pure liquid with an R08 file (H2O, CH4, NH3, N2, C2H6 and the 75 wt% H2SO4), with
+        its index, its absorption where modelled, and its density;
+      - water's scattering, surface tension and viscosity.
+    - **The steps left, in order:**
+      1. **Step 2: the pure fluids' transport and scattering, and the fill.** It lands before the
+         serve gate (decision-r10-t10b-r09-t2e §7, condition 2).
+         - **κ_T** for CH4, N2, C2H6, NH3 and CO2, through `HelmholtzResidual`, from each
+           reference equation. Where the paper is closed, CoolProp's fluid files serve, as they do
+           for T49.b's diagrams.
+         - **Surface tensions:** Mulero et al. 2012's.
+         - **Viscosity,** as ruled (decision-p14-t49h-liquids §6): the newest reference
+           correlation readable in full, each tested against its paper's check table and
+           `Measured` inside its stated range. N2: Huber, Perkins and Lemmon 2024. CH4: Sotiriadou
+           et al. 2026. CO2: Laesecke and Muzny 2017. NH3: Monogenidou, Assael and Huber 2018.
+           C2H6: Vogel, Span and Herrmann 2015 if read in full, else Friend, Ingham and Ely 1991,
+           with the reason. The registry lane's research implemented several
+           (`.git/rm45-scratch/p14-registry/research/ices_liquids/`).
+         - **b's validity near a critical point** (§7(c)): `Derived` wherever q_max ξ > 0.1, by
+           R12-08's correlation length; and a checked window for any member whose source states
+           its range (§9).
+         - **The diagram rows with no R08 file** (O2, CO2, Ar, Kr, Xe, N2O, CO, SO2, H2S), whose
+           index comes by Lorentz–Lorenz from the gas refractivity. Until then they answer
+           `NotALiquid`.
+         - **The fill** of decision-r10-t10b-r09-t2e §7's condition 1: the testing worlds' and the
+           reference Earth's water and methane records, with the sim test holding each copy to
+           the bit. r09-water-refresh has landed (4908897b), so nothing now blocks it. It stays in
+           step 2 because methane's b needs Setzmann and Wagner's κ_T. The fill meets this:
+           those copies hold 997.047 and 447.6 kg m⁻³, densities at their stated pressures,
+           against the registry's saturated 996.999 and about 447.53.
+         - **Morel 1974's pure-water column** (decision-p14-t49h-liquids §7(d), through
+           Twardowski et al. 2007's Table 2): 0.00350 m⁻¹ at 450 nm and 0.00149 at 550 nm, at δ =
+           0.09. Step 2 tests water's b at 20 °C in bins 2 and 6 within 6% of it, rescaled by
+           f(0.039) ÷ f(0.09) = 0.9148.
+      2. **Step 3: the solutions.** `brine_*`, `nh3_h2o`, `ch4_c2h6_n2` and the acid's mass
+         fraction, by the ruled mixing rules and reference compositions (below), with
+         decision-p14-t49b-condensed §2.5's below-range rule for the components. The acid's
+         surface tension (Myhre, Nielsen and Saastad 1998, 220–300 K) and viscosity (Williams and
+         Long 1995) come with it. R08's `seawater.json` is its oracle for the brines' salinity
+         increment (decision-p14-t49h-liquids §4).
+      3. **Step 4: the melts.** The lithologies' major oxides, Giordano et al. 2008's viscosity,
+         Lange and Carmichael's density, and molten S8 once T49.b's last piece gives its liquid
+         density.
+  - _Added public items._
+    - **`substance::helmholtz`:** `HelmholtzResidual`, with `pressure`,
+      `isothermal_compressibility_per_pa` and its reducing parameters. Its term types and
+      `density_derivatives` are crate-private: rows build an equation, and nothing outside the
+      crate does.
+    - **`substance::liquid`:**
+      - `LiquidColumns` (`Substance::liquid`);
+      - `LiquidOptics`, whose `absorption_per_m` is an `Option` with its basis, so that an
+        unmodelled absorption is never read as zeros, and whose `index_checked` gives the range
+        the carried index was checked over;
+      - `LiquidScattering`;
+      - `SurfaceTensionEquation` (`surface_tension_n_per_m`);
+      - `ViscosityCorrelation` (`Iapws2008`; `viscosity_pa_s`) and `Iapws2008Viscosity`;
+      - `Composition` (`Reference` or `Given`);
+      - `LiquidComposition` (mole fractions), whose `new` returns `BuildLiquidCompositionError`;
+      - `LiquidMember` and `ResolveLiquidError`;
+      - `liquid_properties`, `pure_liquid_scattering_per_m` and `LIQUID_BIN_EDGES_NM`.
+
+      All are re-exported at `substance::`.
+
+    - **`hyperion-fit`:**
+      - the `materials` module (`MaterialFile`, read and checked, with private fields;
+        `ReadMaterialError`; `MATERIALS_FROM_CRATE`);
+      - a manifest's `materials` list, whose files' data hashes join the inputs hash after the
+        datasets' (`Manifest::materials`, `materials_dir`, `with_materials_dir` and
+        `load_material`, and `LoadDatasetError::Material`; `InputsHash::compute`'s list is
+        renamed `input_hashes`);
+      - the fast task `liquid_optics`, emitting `tables/liquid_optics.rs`.
+  - _The signature._ The function takes `composition: Composition<'_>` and returns
+    `Result<LiquidProperties, ResolveLiquidError>`, not the entry's bare `LiquidProperties`.
+    - `Composition::Reference` is the row's own: a pure liquid's, or a solution's stated
+      reference.
+    - `Composition::Given` carries mole fractions (decision-p14-t49b-condensed §1.4).
+    - The `Result` names its refusals:
+      - `NotALiquid` for a row with no liquid columns;
+      - `OutOfRange` for a temperature outside [first melt, critical point), which T54.a clamps
+        into first (§1.7);
+      - `NotModelled` for a missing index or density;
+      - `CompositionNotModelled` for a given composition, until step 3.
+  - _The fit reads R08's files where they lie._ T49.e's `condensate_extinction` is not built, so
+    this step defines the reading it shares.
+    - A manifest names the files, and each file's data hash joins the inputs hash.
+    - The hash covers key, phase, variant, shape, `temperatureK`, provenance, wavelengths, n and k.
+      That is T49.e's field list ("only") plus the temperature and provenance this task reads.
+      **For T49.e's builder:** the shared hash covers those two fields too. A prose edit stales
+      no table.
+    - `check` (in `ci`) catches a changed number through the inputs hash, and
+      `tests/liquid_optics.rs` rerenders the table byte for byte.
+    - The bins are each file's uniform mean, linear in n and in a = 4πk ÷ λ, the method R09.T2.e's
+      hand records took. Their edges are the sim's `LIQUID_BIN_EDGES_NM`, which the task's
+      fingerprint probes, so the table's bins and the scattering's are one set.
+    - Files: `ammonia-liquid`, `ethane-liquid`, `methane-liquid`, `nitrogen-liquid`,
+      `sulphuric-acid-75` and `-84`, and `water`. The 84.5 wt% file waits for step 3's mass
+      fraction.
+    - **A refit before 23.** The fit tool refuses a changed table body at an unchanged
+      `since-generator-version` (`ChangedBodyWithoutNewSince`). So a refit before 23 that moves
+      the body (step 2, or an R08 edit to one of these files) re-emits through the tool's
+      first-emission path: the table file is removed and the prebuilt task run again. This step
+      did that once, when the edges moved to the sim's constant by an ulp. **Ruled**
+      (decision-p14-t49h-liquids §5): sanctioned for a table no record function reads, under
+      its six conditions (the binary built from the same tree first, `hyperion-fit check`
+      passing after, only that table's lock entry changing, every golden that reads it
+      re-blessed and counted in the commit message citing §5), until the commit in which a
+      record function first reads it: T54.a for `liquid_optics`. No tool flag.
+  - _The index_ is each file's, carried by Lorentz–Lorenz at constant specific refraction.
+    - Both densities are the row's own: at the file's state and at the record's temperature. So a
+      record at the file's state reproduces the file's bins, to 4 × 10⁻¹⁶.
+    - Each state is its file's reduction's, which its `temperatureK` rounds: water 298.15 K, CH4
+      90 K, NH3 239.80 K, N2 77.32 K, C2H6 94 K, H2SO4 300 K. A test holds each to its table
+      label within half a kelvin.
+    - **Water's index is the file's carried, not R9-97 evaluated.** decision-r08-t5g §1 left this
+      to T49.h, and R08's file is the one source of n and k. Its worst-bin miss against R9-97 at
+      the record's own state is:
+      - −4.59 × 10⁻⁴ at 273.16 K (380–405 nm) and −1.33 × 10⁻⁴ at 288.15 K;
+      - +7.7 × 10⁻⁵ at 303.15 K and +2.69 × 10⁻⁴ at 353.15 K;
+      - inside §1.8's 5 × 10⁻⁴ over 273–303 K, as the tests hold.
+    - **Water's index is `Measured` only over the range it was checked in**, 273.16–373.15 K
+      (`index_checked`). Above it the miss grows (−4.0 × 10⁻⁴ at 423 K, −1.0 × 10⁻³ at 473 K,
+      −2.8 × 10⁻³ at 623 K, the science check's), past R9-97's own 10⁻³. So a hotter record is
+      `Derived`. This qualifies §1.1's "Lorentz–Lorenz over one substance's liquid range keeps
+      its inputs' basis": the carry is an extrapolation beyond where it was checked.
+    - **The state density is the ancillary's, not the file's 997.0476 kg m⁻³.** Starting from
+      997.0476 would lower every carried index by 1.8 × 10⁻⁵. That improves 303–373 K but worsens
+      the triple point to −4.77 × 10⁻⁴, and it gives up reproducing the file at its own state.
+    - **Methane's file state, 90 K, lies 0.694 K below its triple point.** Its density there is the
+      ancillary's triple-point line (decision-p14-t49b-condensed §2.5), about 0.20% denser than
+      at the triple point. So its index is `Derived`, and methane's record is `Derived`, not
+      §1.8's expected `Measured`. R09.T2.e's hand record extrapolated the ancillary itself.
+  - _The absorption._
+    - **Water's** is the 22–23 °C measurement, held. **Ruled** (decision-p14-t49h-liquids §1): it
+      is `Measured` over 273.16–303.15 K (`absorption_checked`, §1.8's checking range) and
+      `Derived` outside. By Röttgers, McKee and Utschig 2014's da ÷ dT (IOCCG 2018's Table 1.1)
+      the held a departs by at most 3.4% at 15 and 30 °C and 10.1% at the triple point in the
+      worst bin (735–760 nm), and by 17% at 60 °C. So the golden's water lines at 366.644 K read
+      `Derived`, as above 373.15 K. Carrying da ÷ dT is deferred (§7(b)).
+    - **Methane's** is the file's, and `Derived`. **Ruled as built** (decision-p14-t49h-liquids
+      §2; holding the shortest measured k, or leaving it absent, refused). Martonchik and
+      Orton's Table 2 holds local maxima only. They measured nothing shortward of 552.5 nm, and
+      their 400 nm zero is an unmarked anchor. Their 90 K values are the 111 K spectrum scaled
+      by density, uncertain by 25% (§2.1). R08's re-reduction of the file's visible k is a new
+      R08.T5 task (§2.4), which T49.h refits by §5 before T54.a.
+    - **The acid's** is the file's upper bound, `Derived`.
+    - **Absent:** NH3 (decision-r08-t5g §5), C2H6 (§1.8) and N2, **confirmed**
+      (decision-p14-t49h-liquids §3): Liveing and Dewar's "colourless" bounds a near 1 m⁻¹, where
+      a sea needs about 10⁻³ m⁻¹.
+    - No absorption's temperature dependence is carried.
+  - _Water's scattering._
+    - **The method** is Zhang, Hu and He 2009's density term at S = 0, as their published code
+      writes it (`betasw_ZHH2009.m`, ooici/ion-functions at aaf3cfa3, SHA-256 089a2d5d…6db9fdb):
+      ES–Cabannes with the PMH model's ρ ∂n² ÷ ∂ρ. The paper was not reachable (Optica's bot
+      check), and the entry allows the code.
+    - **κ_T** is IAPWS-95's at the record's state. That is the ancillary density, whose pressure
+      in the equation lies within 0.11 MPa of zero below 373 K.
+    - **δ = 0.039, ruled** (decision-p14-t49h-liquids §7(g)). It is Jonasz and Fournier 2007's
+      value from Farinato and Rowell 1976's data, as Twardowski et al. 2007 (Biogeosciences 4,
+      1041, p. 1055) report. ZHH adopt it, and with it Zhang and Hu 2009's PMH model meets
+      Morel 1968 within 2%. The alternatives are Buiteveld et al. 1994's 0.051 (+2.1% in b,
+      consistent with Farinato and Rowell's unfiltered ρ_v = 0.026) and Morel's 0.09 (+9.3%).
+      Farinato and Rowell's body is closed, so the entry's science check holds this through
+      secondaries.
+    - **Against ZHH at S = 0** (their κ_T Millero et al. 1980's, their n Quan and Fry's), water's
+      b lies within 0.41% in every bin over 273.16–303.15 K. The oracle writes PMH out itself.
+    - **At 20 °C** it is 0.003 26 m⁻¹ in the bin across 443 nm and 0.001 37 in the one across
+      545 nm, pure water's. Morel 1974's 0.0045 and 0.0019 m⁻¹, which §1.8 quotes from memory,
+      are seawater's. Against Morel's pure-water column (0.00350 and 0.00149 m⁻¹ at δ 0.09,
+      through Twardowski et al. 2007), these bins are 4.9% and 3.4% lower at a common δ = 0.039
+      (decision-p14-t49h-liquids §7(d)); step 2 adds the test.
+    - The index's variation within a bin moves b by under 5 × 10⁻⁴ (4.4 × 10⁻⁴ in 380–405 nm).
+    - **The checks.** IAPWS-95 reproduces its release's Table 6 and Table 7 to nine figures, and
+      its κ_T lies within 0.1% of Millero et al.'s at one atmosphere, 0–30 °C.
+    - A state where the equation gives a non-positive κ_T would leave b absent. Water's ancillary
+      states stay stable to T_c.
+  - _Water's transport._
+    - **The surface tension** is R1-76, written in Mulero et al.'s two-term form. It reproduces
+      Table 1's calculated column to 0.005 mN m⁻¹.
+    - **The viscosity** is R12-08 with μ₂ = 1. It reproduces Table 4 to 10⁻⁶ µPa s, and it is
+      `Derived` inside the release's Eq. (13) critical region.
+  - _Water's density_ is T49.b's saturated-liquid ancillary, as decision-p14-t49b-condensed §2.6
+    rules for a pure fluid (`Substance::grain_density(Liquid, T)`). It is not the density at the
+    surface pressure that §1.1 names: at 1 bar and 15 °C it lies 4.9 × 10⁻⁵ below, of which
+    4.6 × 10⁻⁵ is saturation against 1 bar. It is held to IAPWS-95's Table 8 saturated liquid
+    within 10⁻⁵ at 275 and 450 K, in place of the entry's "IAPWS-95's ρ".
+  - _The tests that changed._
+    - **Water's a** holds Mason, Cone and Fry 2016's 0.00522 m⁻¹ at 440 nm, not Pope and Fry's
+      0.00635. decision-r08-t5g §2 moved 380–495 nm to Mason, and R08.T5.h's `water.json` carries
+      it. Pope and Fry's 0.0565 and 0.624 m⁻¹ at 550 and 700 nm stand.
+      - Each is held within 1% on the file's own grid
+        (`liquid_optics_water_s_absorption_is_its_sources`), since the figures are single
+        wavelengths.
+      - The record's bins equal the table's to the bit.
+    - **Methane's n is tested at its triple point, 90.694 K.** Its file's 90 K lies below the first
+      melt, where `liquid_properties` answers `OutOfRange`. Each bin is the file's n carried, to
+      10⁻¹⁵, and lies under 10⁻³ below it.
+    - **R11's rows.**
+      - Ethane is held at 1.3887 in the bin across 670 nm at 94 K, Hagermann et al. 2005's level
+        (decision-r08-t5g §7). That replaces both of the entry's choices: Lorentz–Lorenz gives
+        1.37 nowhere in the liquid range, and 1.40 was the estimate before T5.h.
+      - Seawater's 1.339 is **retired** from T49.h, with no `seawater` key
+        (decision-p14-t49h-liquids §4). It is Quan and Fry's at S = 35, and `seawater.json` is
+        step 3's brine oracle. Earth-like seas resolve as pure H2O until a sea's salinity is a sim
+        quantity: n 0.0064 low at 589 nm and b about 30% low, labelled "pure liquid".
+      - Water's 1.333 and methane's 1.29 are held in the bin across 589 nm, within 5 × 10⁻⁴ and
+        2 × 10⁻³.
+    - **"Every liquid-range row has n and ρ"** holds over the six rows with columns. Steps 2–4
+      widen it.
+  - _Accept_ gains `cargo test -p hyperion-sim --test liquids_golden` and
+    `cargo test -p hyperion-fit materials`, which the entry's two filters do not select.
+  - _Rulings taken_ (decision-p14-t49b-condensed, relayed by main on 2026-10-15; binding on the
+    steps left):
+    1. **Titan's sea.** Its reference composition is held as derived mole fractions: CH4 0.7391,
+       C2H6 0.0965, N2 0.1644. Those are 0.739146, 0.096503 and 0.164352, exactly, from the
+       rows' saturated-liquid densities at 93.65 K and their molar masses, so the printed N2 is
+       0.1644 where decision-p14-t49b-condensed's table rounds to 0.1643. They come from
+       Mastrogiuseppe et al. 2016's volume fractions (IEEE TGRS 54, 5646, §V.B: 71/12/17 vol%),
+       never read as mole fractions. Le Gall et al. 2016 is corroboration only.
+    2. **Its density** is ideal mixing at the record's temperature, ρ = Σxᵢ Mᵢ ÷ Σ(xᵢ Mᵢ ÷ ρᵢ),
+       tested to 518.9 kg m⁻³ at 93.65 K within 0.05.
+    3. **Below a component's triple point** (CH4 90.69 K, C2H6 90.37 K) no ancillary is evaluated:
+       - the density is linear at the triple-point slope;
+       - the viscosity is the fitted VFT and the surface tension Mulero's, as they stand;
+       - the index is Lorentz–Lorenz at that density;
+       - κ_T is held at its triple-point value;
+       - each rule is tested continuous at the triple point.
+
+       This step's `extended_liquid_density` is that density rule, used for methane's file state
+       and tested continuous.
+
+    4. **Reference compositions.** The brines and `nh3_h2o` take their eutectic columns';
+       `ch4_c2h6_n2` takes Ligeia's, and `H2SO4` its 75.0 wt%.
+    5. **Mixtures.** A solution's density at its reference state equals T49.b's fixed value. Mole
+       fractions feed the mixing rules (Grunberg–Nissan, the parachor, Lorentz–Lorenz,
+       ES–Cabannes's concentration term); volume fractions at the record's temperature feed
+       Beer's additivity of absorption.
+    6. **The transition** is read as the first melt for every kind, with no `Liquidus` arm. The
+       acid's becomes 233.67 K in p14-registry's next fix, which moves this golden's acid lines.
+    7. **T54.a** takes a `Liquid` entry's grain density from the record's density.
+  - _The gate rule_ (decision-p14-t49h-liquids §8, item 4). smart-ci's `RUST_READERS` gains R08's
+    material files (`apps/hyperion/src/renderer/src/view/atmosphere/materials/*.json`), read
+    natively by `hyperion-fit`: a changed file runs its suite, the rerender test among them, and
+    the fit check. `tools/smart-ci/test_smart_ci.py` holds it. R08.T5.i waits on it.
+  - _Files beyond the task's:_
+    - the sim: `substance/{helmholtz, rows/liquids, liquid/tests}.rs` and
+      `tests/liquids_golden.rs`;
+    - the fit: `materials.rs`, `manifest.rs`, `data.rs`, `task.rs`, `lib.rs`,
+      `manifests/liquid_optics.toml`, `tests/liquid_optics.rs` and `tables.lock`;
+    - `NOTICE`, for the IAPWS releases and ZHH's method;
+    - `tools/smart-ci/{smart_ci, test_smart_ci}.py`, the gate rule.
+  - _Tests and golden._ The sim has 23 tests in `substance::liquid` and two doctests; the fit has
+    5 in `liquid_optics`, 2 in `materials`, one in `manifest` and the rerender test.
+    `liquids.golden` is new, at header 22. `golden_diff.py` reports one new golden and no changed
+    value.
+- **Deferred findings (2026-10-13 rule)**, from P14.T49.h's step 1:
+  - Constant specific refraction carries water's index away from 25 °C with a growing miss
+    (above). R9-97 evaluated at the record's state would remove it, and most of the 0.41% gap to
+    ZHH at 273 K. That is a second implementation of R9-97 beside the client tool's.
+  - Ruled to stay (decision-p14-t49h-liquids §7(a)): the 373.15 K index window, which could reach
+    about 420 K on the same test; R9-97 evaluated directly is a value change, after 23.
+  - No liquid's absorption follows its temperature: water's window bounds it (§1); carrying
+    da ÷ dT goes to R08 or a T49.h follow-up after 23 (§7(b)).
+  - ES–Cabannes is not bounded near a critical point: step 2's rule (§7(c)).
+  - The PMH paper (Proutière, Megnassan and Hucteau 1992, ACS) stays unread. Against R9-97's own
+    ρ ∂n² ÷ ∂ρ it is 1.8–2.2% lower at 0–25 °C (b 3.5–4.3% lower), consistent with Zhang and Hu
+    2009's 3.5% convergence (§7(e)).
+  - The acid's index and density are held at their 300 K values away from 300 K.
+  - _Ruled_ (decision-p14-t49h-liquids, 2026-10-16; the six questions this step sent):
+    - R08's seven liquid files are generator inputs from P14.T54.a. The guard is the smart-ci
+      rule above. A docs batch adds `materials/README.md` and a line in R08's plan, and T54.a
+      updates both at its bump (§7(f), §10).
+    - Water's absorption: `Measured` over 273.16–303.15 K, `Derived` outside (§1).
+    - Methane's blue absorption: as built, `Derived`, with R08's re-reduction to come (§2).
+    - N2's absorption: absent, confirmed (§3).
+    - R11's seawater 1.339: retired, no `seawater` key (§4).
+    - The refit before 23: delete and re-emit under §5's conditions, until the first reader's
+      commit; no tool flag (§5).
+    - Step 2's viscosities: the newest reference correlation readable in full (§6).

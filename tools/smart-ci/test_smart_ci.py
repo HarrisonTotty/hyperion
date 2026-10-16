@@ -182,6 +182,7 @@ FILES: Dict[str, str] = {
     "apps/hyperion/src/main/results.ts": "",
     "apps/hyperion/src/main/results.test.ts": 'const dir = join(__dirname, "../../../../docs/measurements/descent-spike");',
     "apps/hyperion/src/smoke/main.ts": "",
+    "apps/hyperion/src/renderer/src/view/atmosphere/materials/water.json": "",
     "apps/hyperion/src/tools/atmosphereData.ts": "",
     "apps/hyperion/src/tools/atmosphereData.test.ts": 'import { read } from "./atmosphereData";\n'
     'const csv = resolve(here, "../../../../crates/hyperion-fit/data/cie_cmf/CIE_xyz_1931_2deg.csv");',
@@ -465,6 +466,17 @@ class TheRules(unittest.TestCase):
         self.assertEqual(packages(p, "_nextest-run"), [FIT, SIM, TESTKIT])
         self.assertEqual(packages(p, "_doctest-run"), [FIT, SIM])
         self.assertEqual(packages(p, "_clippy-for"), [SIM])
+
+    def test_r08s_material_files_run_the_fitting_crates_tests_and_check(self) -> None:
+        # `liquid_optics` reads them at run time and hashes their data (P14.T49.h): the fitting
+        # crate's native suite, with its rerender test, and the staleness check its build makes.
+        p = plan("apps/hyperion/src/renderer/src/view/atmosphere/materials/water.json")
+        self.assertIn(FIT, packages(p, "_nextest-run"))
+        self.assertIn("_fit-check-built", calls(p))
+        self.assertNotIn("_wasip1-build", calls(p))
+        # A file beside them that is not a material file reads nothing of the fitting crate.
+        self.assertFalse(re.search(smart_ci.RUST_READERS[-1][0],
+                                   "apps/hyperion/src/renderer/src/view/atmosphere/materials/materials.ts"))
 
     def test_the_surface_crates_tables_run_the_fitting_crates_tests_and_check(self) -> None:
         p = plan("crates/hyperion-surface/src/tables/bowl_permanent_shadow.rs")

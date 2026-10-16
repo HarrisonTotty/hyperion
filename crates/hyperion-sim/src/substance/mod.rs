@@ -27,12 +27,14 @@
 //! groups of columns, each `None` where the substance has no such data: so far the gas columns
 //! ([`GasColumns`], with each gas's [`MolecularConstants`], over which [`thermo`] sums its heat
 //! capacity, enthalpy and entropy by temperature), the held phase columns ([`PhaseColumns`]), the
-//! phase diagrams ([`PhaseDiagram`], whose functions are [`diagram`]'s) and the condensed columns
+//! phase diagrams ([`PhaseDiagram`], whose functions are [`diagram`]'s), the condensed columns
 //! ([`CondensedColumns`]: a solid's or a liquid's grain density, its transition and its mechanics
-//! family). Every value names its sources and their licence basis ([`Source`], [`Basis`];
-//! decision-composition §5). P14.T49.b adds the later rows, the gases' molecular constants, the
-//! phase diagrams and the condensed columns; P14.T49.c–e the condensed optics, the
-//! thermochemistry and the aerosols' extinction.
+//! family) and the liquid columns ([`LiquidColumns`]: a surface liquid's optics and transport,
+//! which [`liquid_properties`] resolves into a palette's liquid record). Every value names its
+//! sources and their licence basis ([`Source`], [`Basis`]; decision-composition §5). P14.T49.b
+//! adds the later rows, the gases' molecular constants, the phase diagrams and the condensed
+//! columns; P14.T49.c–e the condensed optics, the thermochemistry and the aerosols' extinction;
+//! P14.T49.h the liquid columns.
 //!
 //! # Rows
 //!
@@ -51,6 +53,8 @@
 pub mod condensed;
 pub mod diagram;
 pub mod element;
+pub mod helmholtz;
+pub mod liquid;
 pub mod mix;
 pub mod phase;
 mod rows;
@@ -65,7 +69,13 @@ pub use diagram::{
     SolidDensity, SolidPhase, SublimationEquation, SublimationPiece, WagnerEquation,
 };
 pub use element::Element;
+pub use helmholtz::HelmholtzResidual;
 pub use hyperion_surface::substance_key::{SubstanceKey, SubstanceKeyForm};
+pub use liquid::{
+    BuildLiquidCompositionError, Composition, LIQUID_BIN_EDGES_NM, LiquidColumns,
+    LiquidComposition, LiquidMember, ResolveLiquidError, liquid_properties,
+    pure_liquid_scattering_per_m,
+};
 pub use mix::{GasColumns, HeatCapacityClass, heat_capacity_over_r, mean_molar_mass_g_per_mol};
 pub use phase::{
     MOLAR_GAS_CONSTANT, Phase, PhaseColumns, ice_ih_density, phase_at, saturation_pressure,
