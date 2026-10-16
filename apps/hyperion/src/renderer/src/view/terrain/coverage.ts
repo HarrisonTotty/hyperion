@@ -21,7 +21,8 @@ import { TEXTURE_USAGE } from "../engine/gpuFlags";
 import type { TextureSpec } from "../engine/memory";
 import type { RenderEngine, TextureHandle } from "../engine/types";
 import { stToUv } from "./cube";
-import type { Face, PatchKey } from "./patchKey";
+import { type Edge, EDGES, edgeNeighbour, type Face, type PatchKey } from "./patchKey";
+import type { FieldBlockAnswer } from "./workers/messages";
 
 /** The shallowest coarse-field level R09 serves (`SurfaceHeaderDto.level`). */
 export const MIN_FIELD_LEVEL = 5;
@@ -352,6 +353,54 @@ export class CoverageView {
 }
 
 /**
+ * One piece of a survey's edge (R10.T10.c, Design note 12): a side of a surveyed coarse cell across
+ * which the neighbouring cell, on the same face or across a face's edge, is not surveyed, a margin
+ * cell or one not held.
+ */
+export interface SurveyEdge {
+  /** The surveyed cell, at the coverage's level. */
+  readonly cell: PatchKey;
+  /**
+   * Its side the edge runs along, towards the unsurveyed cell: R05's patch edges, `UMin` towards
+   * i − 1, `UMax` towards i + 1, `VMin` towards j − 1, `VMax` towards j + 1.
+   */
+  readonly side: Edge;
+}
+
+/**
+ * The survey's edge on `face` (R10.T10.c): each side of each surveyed cell of the face whose
+ * neighbour across it is not surveyed, margin cells counted unsurveyed, in the order of the cells,
+ * row j then column i, and of their sides, `UMin`, `UMax`, `VMin`, `VMax`.
+ *
+ * @remarks
+ * Each piece is listed once, by the face of its surveyed cell, so that the six faces' lists are
+ * the whole edge, a piece on a face's edge included, its unsurveyed side on the neighbouring face.
+ * Provides' `surveyEdges(face, level)`: the level is the coverage's own.
+ */
+export function surveyEdges(coverage: CoverageView, face: Face): ReadonlyArray<SurveyEdge> {
+  const { level } = coverage;
+  const n = 2 ** level;
+  const texels = coverage.maskTexels();
+  const surveyed = (cell: PatchKey): boolean =>
+    (texels[(cell.face * n + cell.j) * n + cell.i] ?? 0) !== 0;
+  const edges: SurveyEdge[] = [];
+  for (let j = 0; j < n; j += 1) {
+    for (let i = 0; i < n; i += 1) {
+      const cell: PatchKey = { face, level, i, j };
+      if (!surveyed(cell)) {
+        continue;
+      }
+      for (const side of EDGES) {
+        if (!surveyed(edgeNeighbour(cell, side))) {
+          edges.push({ cell, side });
+        }
+      }
+    }
+  }
+  return edges;
+}
+
+/**
  * The GPU coverage mask's format: one unsigned normalised byte a texel, so that a shader may
  * filter it, where a cell's code would need `r8uint`, which is not filterable.
  */
@@ -380,18 +429,28 @@ export function coverageMaskTextureSpec(name: string, level: number): TextureSpe
 
 /**
  * One body's coverage mask on the GPU, made through the engine under `coarse-field-gpu` and
- * rewritten from each new coverage.
+ * rewritten from each new coverage and from each block the height workers take.
  *
  * @remarks
- * The texture is made at the first {@link CoverageMask.update} and again when the field's level
- * changes. After a device loss, {@link CoverageMask.release} and update again: `ResilientEngine`
- * drops the release of a handle a lost engine made.
+ * The mask holds every cell surveyed by the coverages and the blocks given since it was made: a
+ * cell once surveyed stays so, as `CoverageView.merged` keeps it. It follows the workers' blocks
+ * ({@link CoverageMask.survey}, from the pool's `onFieldChange`) as well as the store's answers, so
+ * that the reference surface it discards (R07's mesh figure, `smoothMesh.wgsl`) and the terrain's
+ * own masks, each a bake's over the workers' field, agree while a payload streams and after the
+ * link cuts one off, which the store's coverage would name only at the next answer (main's ruling
+ * on R10.T6.b's question, 2026-10-14; R10.T10.c).
+ *
+ * The texture is made at the first update and again, empty, when the field's level changes. After
+ * a device loss, {@link CoverageMask.release} and update again: `ResilientEngine` drops the release
+ * of a handle a lost engine made.
  */
 export class CoverageMask {
   readonly #engine: Pick<RenderEngine, "createTexture" | "writeTexture" | "releaseTexture">;
   readonly #name: string;
   #texture: TextureHandle | null = null;
   #level: number | null = null;
+  /** The texels written, face then row j then column i, as {@link CoverageView.maskTexels}. */
+  #texels: Uint8Array | null = null;
 
   constructor(
     engine: Pick<RenderEngine, "createTexture" | "writeTexture" | "releaseTexture">,
@@ -406,32 +465,80 @@ export class CoverageMask {
     return this.#texture;
   }
 
-  /** Writes `coverage`'s mask, making the texture first if it has none of that level. */
+  /** Adds `coverage`'s surveyed cells to the mask, making the texture first if it has none of that level. */
   update(coverage: CoverageView): void {
-    if (this.#texture !== null && this.#level !== coverage.level) {
-      this.release();
+    const texels = this.#texelsOf(coverage.level);
+    const surveyed = coverage.maskTexels();
+    for (let at = 0; at < texels.length; at += 1) {
+      if ((surveyed[at] ?? 0) !== 0) {
+        texels[at] = COVERAGE_MASK_SURVEYED;
+      }
     }
-    const side = 2 ** coverage.level;
-    if (this.#texture === null) {
-      this.#texture = this.#engine.createTexture(
-        coverageMaskTextureSpec(this.#name, coverage.level),
-      );
-      this.#level = coverage.level;
-    }
-    this.#engine.writeTexture(
-      this.#texture,
-      { x: 0, y: 0, z: 0 },
-      { width: side, height: side, depthOrArrayLayers: 6 },
-      coverage.maskTexels(),
-    );
+    this.#write(coverage.level, texels);
   }
 
-  /** Releases the texture, if it has one. */
+  /**
+   * Adds the cells a block surveyed anew (`FieldBlockAnswer.newlySurveyed`'s runs of cell
+   * indices at `fieldLevel`) to the mask, making the texture first if it has none of that level.
+   *
+   * @throws RangeError for a level R09 does not serve, or a run that is not one of its cells.
+   */
+  survey(change: Pick<FieldBlockAnswer, "fieldLevel" | "newlySurveyed">): void {
+    const { fieldLevel: level, newlySurveyed: runs } = change;
+    if (!isFieldLevel(level)) {
+      throw new RangeError(`a coarse field is at level 5 to 8, not ${String(level)}`);
+    }
+    const count = fieldCellCount(level);
+    for (let r = 0; r + 1 < runs.length; r += 2) {
+      const start = runs[r] ?? 0;
+      const end = runs[r + 1] ?? 0;
+      if (!(start < end && end <= count)) {
+        throw new RangeError(
+          `cells ${String(start)}..${String(end)} are not a run of level ${String(level)}'s`,
+        );
+      }
+    }
+    const texels = this.#texelsOf(level);
+    const n = 2 ** level;
+    for (let r = 0; r + 1 < runs.length; r += 2) {
+      for (let index = runs[r] ?? 0; index < (runs[r + 1] ?? 0); index += 1) {
+        const cell = fieldCellAt(level, index);
+        texels[(cell.face * n + cell.j) * n + cell.i] = COVERAGE_MASK_SURVEYED;
+      }
+    }
+    this.#write(level, texels);
+  }
+
+  /** Releases the texture, if it has one, and forgets the cells it held. */
   release(): void {
     if (this.#texture !== null) {
       this.#engine.releaseTexture(this.#texture);
     }
     this.#texture = null;
     this.#level = null;
+    this.#texels = null;
+  }
+
+  /** The texels held at `level`, all unsurveyed where the mask held another level or none. */
+  #texelsOf(level: number): Uint8Array {
+    if (this.#level !== level) {
+      this.release();
+    }
+    this.#texels ??= new Uint8Array(fieldCellCount(level));
+    return this.#texels;
+  }
+
+  #write(level: number, texels: Uint8Array): void {
+    const side = 2 ** level;
+    if (this.#texture === null) {
+      this.#texture = this.#engine.createTexture(coverageMaskTextureSpec(this.#name, level));
+      this.#level = level;
+    }
+    this.#engine.writeTexture(
+      this.#texture,
+      { x: 0, y: 0, z: 0 },
+      { width: side, height: side, depthOrArrayLayers: 6 },
+      texels,
+    );
   }
 }

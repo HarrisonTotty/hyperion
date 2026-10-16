@@ -16,7 +16,9 @@
  * A lit layout (R10.T10.b, `slotLayout.ts`' `TerrainShading`) adds each slot's class weights and
  * class laws, the frame's lights (`terrainMaterial.ts`' `packTerrainLighting`) and the terrain's
  * phase table, whose rows (`TerrainPhaseRows`) the slots' class laws name: kept across a device
- * restore, so that a row's index never changes, and uploaded again whenever one is added.
+ * restore, so that a row's index never changes, and uploaded again whenever one is added. It also
+ * holds each slot's survey mask and draws the lit material's own mesh, whose skirts and fins join
+ * the terrain to the reference surface at the survey's edge (R10.T10.c, Design note 12).
  */
 
 import { PHASE_TABLE_SAMPLES } from "../../appearance/law";
@@ -36,6 +38,8 @@ import {
   PATCH_VERTICES_PER_SIDE,
   type SlotFieldName,
   type SlotLayout,
+  SURVEY_CELL_CODE_BYTE,
+  SURVEY_MASK_BYTES,
   type TerrainShading,
   terrainSlotLayout,
   NORMALS_GUTTER_TEXELS,
@@ -76,6 +80,40 @@ export const GRID_INDICES = QUADS * QUADS * 6;
 export const PATCH_INDICES = GRID_INDICES + 4 * QUADS * 6;
 /** Bytes of `drawIndexedIndirect`'s arguments: five `u32`. */
 export const INDIRECT_ARGS_BYTES = 20;
+
+/**
+ * What each vertex of the lit material's mesh is ({@link litPatchMeshData}), carried in its
+ * `position` attribute's z and, for the first vertex of each triangle, its draw's flat `kind`
+ * (`terrainLit.wgsl`): a grid vertex; the foot of an edge's skirt, at min(h − skirt depth, 0)
+ * above the datum, R05's skirt hung to the datum as well; the head of an edge's skirt, at
+ * max(h, 0), which rises to the datum from ground below it; and the datum's foot of a fin along a
+ * column (x constant) or a row (y constant) inside the patch, at the datum (R10.T10.c, Design
+ * note 12).
+ */
+export const LIT_VERTEX_CODE = {
+  grid: 0,
+  skirtFoot: 1,
+  skirtHead: 2,
+  columnFin: 4,
+  rowFin: 5,
+} as const;
+
+/**
+ * The columns (x) and rows (y) inside a patch that carry a fin at the survey edge (R10.T10.c): every
+ * sixteenth, so that a coarse cell's edge has its skirt in every patch down to two levels coarser
+ * than the coarse field, where a cell spans 16 quads.
+ */
+export const SURVEY_FIN_LINES: ReadonlyArray<number> = [16, 32, 48];
+
+/** The fins' datum vertices: 65 along each fin line, columns then rows. */
+const FIN_VERTICES = 2 * SURVEY_FIN_LINES.length * PATCH_VERTICES_PER_SIDE;
+
+/**
+ * Indices of the lit material's mesh: the shared mesh's, the skirts' heads' 4 × 64 quads, and the
+ * fins' 6 × 64 quads, each in both windings.
+ */
+export const LIT_PATCH_INDICES =
+  PATCH_INDICES + 4 * QUADS * 6 + 2 * SURVEY_FIN_LINES.length * QUADS * 12;
 
 /**
  * The rows a lit layout's phase table is first made with: row 0 and the three laws at L(0) = 1 and
@@ -333,6 +371,160 @@ export function patchMeshData(): {
   return { positions, indices };
 }
 
+/**
+ * The lit material's mesh (R10.T10.c, Design note 12): {@link patchMeshData}'s grid and skirts,
+ * with what joins the terrain to the reference surface at the survey's edge.
+ *
+ * @remarks
+ * Each vertex's `position` is (x, y, code), the code one of {@link LIT_VERTEX_CODE}. The vertices
+ * are the shared mesh's, its skirts' now each edge skirt's foot, then each edge vertex's skirt head
+ * at {@link GRID_VERTICES} + {@link SKIRT_VERTICES} + 65 e + k (edge e's k-th vertex,
+ * anticlockwise, as the feet are), then the fins' datum vertices, 65 along each of
+ * {@link SURVEY_FIN_LINES}' columns and then its rows, vertex k of a line at y = k (a column) or
+ * x = k (a row).
+ *
+ * The first vertex of every triangle names its part, which the fragment reads flat: the grid's
+ * triangles are the shared mesh's; each skirt quad under edge vertices p then q is (p′, q′, p) and
+ * (q′, q, p), and its head's quad above them (p″, p, q) and (p″, q, q″), both anticlockwise seen
+ * from outside the patch as R05's skirt is; each fin quad, between grid vertices p and q of its line
+ * and their datum vertices p′ and q′, is drawn in both windings, (p′, q′, q) and (p′, q, p), then
+ * (p′, q, q′) and (p′, p, q), since a fin is seen from the side whose ground lies lower, which the
+ * survey decides.
+ */
+export function litPatchMeshData(): {
+  readonly positions: Float32Array;
+  readonly indices: Uint32Array;
+} {
+  const shared = patchMeshData();
+  const heads = GRID_VERTICES + SKIRT_VERTICES;
+  const fins = heads + SKIRT_VERTICES;
+  const positions = new Float32Array((fins + FIN_VERTICES) * 3);
+  positions.set(shared.positions);
+  for (const e of EDGES) {
+    for (let k = 0; k <= QUADS; k += 1) {
+      const [x, y] = edge(e, k);
+      positions.set(
+        [x, y, LIT_VERTEX_CODE.skirtHead],
+        3 * (heads + e * PATCH_VERTICES_PER_SIDE + k),
+      );
+    }
+  }
+  const finVertex = (axis: 0 | 1, line: number, k: number): number =>
+    fins + (axis * SURVEY_FIN_LINES.length + line) * PATCH_VERTICES_PER_SIDE + k;
+  SURVEY_FIN_LINES.forEach((c, line) => {
+    for (let k = 0; k <= QUADS; k += 1) {
+      positions.set([c, k, LIT_VERTEX_CODE.columnFin], 3 * finVertex(0, line, k));
+      positions.set([k, c, LIT_VERTEX_CODE.rowFin], 3 * finVertex(1, line, k));
+    }
+  });
+  const indices = new Uint32Array(LIT_PATCH_INDICES);
+  indices.set(shared.indices.subarray(0, GRID_INDICES));
+  let n = GRID_INDICES;
+  for (const e of EDGES) {
+    for (let k = 0; k < QUADS; k += 1) {
+      const [px, py] = edge(e, k);
+      const [qx, qy] = edge(e, k + 1);
+      const p = gridIndex(px, py);
+      const q = gridIndex(qx, qy);
+      const pFoot = GRID_VERTICES + e * PATCH_VERTICES_PER_SIDE + k;
+      const pHead = heads + e * PATCH_VERTICES_PER_SIDE + k;
+      indices.set([pFoot, pFoot + 1, p, pFoot + 1, q, p], n);
+      indices.set([pHead, p, q, pHead, q, pHead + 1], n + 6);
+      n += 12;
+    }
+  }
+  for (const axis of [0, 1] as const) {
+    SURVEY_FIN_LINES.forEach((c, line) => {
+      for (let k = 0; k < QUADS; k += 1) {
+        const p = axis === 0 ? gridIndex(c, k) : gridIndex(k, c);
+        const q = axis === 0 ? gridIndex(c, k + 1) : gridIndex(k + 1, c);
+        const pDatum = finVertex(axis, line, k);
+        const qDatum = pDatum + 1;
+        indices.set([pDatum, qDatum, q, pDatum, q, p, pDatum, q, qDatum, pDatum, p, q], n);
+        n += 12;
+      }
+    });
+  }
+  return { positions, indices };
+}
+
+/**
+ * How many quads of a patch of `patchLevel` a coarse cell of a field of `fieldLevel` spans along a
+ * side, as the code the survey mask carries ({@link SURVEY_CELL_CODE_BYTE}): log₂ of it, the patch
+ * level plus 6 less the field's, clamped to [0, 6] (R10.T10.c).
+ *
+ * @remarks
+ * A coarse cell is a quadtree node of the field's level, so its edges lie on a patch's vertex lines
+ * every 2^code quads from the patch's corner, or, at 6, on no line inside the patch (the patch is
+ * one cell or inside one). The terrain's discard then reads each fragment's cell's state at the
+ * vertex at the cell's centre within the patch, which lies on none of its edges, wherever the code
+ * is 1 or more; a vertex on a cell's edge is the bake's mask of either cell, as the rounding of its
+ * direction falls (`hyperion_surface::bake`'s `PatchKey::containing`). At 0 a cell spans one quad
+ * or less, a patch six or more levels coarser than the field, and the interpolated mask's half
+ * stands in (Design note 12's).
+ *
+ * @throws RangeError for a level that is not an integer.
+ */
+export function surveyCellCode(patchLevel: number, fieldLevel: number): number {
+  if (!Number.isInteger(patchLevel) || !Number.isInteger(fieldLevel)) {
+    throw new RangeError(`levels ${String(patchLevel)} and ${String(fieldLevel)} are not integers`);
+  }
+  return Math.min(6, Math.max(0, patchLevel + 6 - fieldLevel));
+}
+
+/**
+ * A slot's `survey-mask` field (R10.T10.c; `slotLayout.ts`' {@link SURVEY_MASK_BYTES}): the bake's
+ * 65 × 65 mask bytes, vertex (x, y) at byte 65 y + x, four to a little-endian `u32`, then the cell
+ * code ({@link surveyCellCode}) at byte {@link SURVEY_CELL_CODE_BYTE}, the rest zero.
+ *
+ * @throws RangeError for a mask of another size, or a code outside [0, 6].
+ */
+export function packSurveyMask(mask: Uint8Array, cellCode: number): Uint8Array {
+  if (mask.length !== GRID_VERTICES) {
+    throw new RangeError(
+      `a survey mask of ${String(mask.length)} B, where a patch has ${String(GRID_VERTICES)}`,
+    );
+  }
+  if (!Number.isInteger(cellCode) || cellCode < 0 || cellCode > 6) {
+    throw new RangeError(`a survey cell code of ${String(cellCode)}, not 0 to 6`);
+  }
+  const packed = new Uint8Array(SURVEY_MASK_BYTES);
+  packed.set(mask);
+  packed[SURVEY_CELL_CODE_BYTE] = cellCode;
+  return packed;
+}
+
+/**
+ * Whether the fragment at (x, y) of a patch, in quads from its corner, lies on surveyed ground by
+ * its slot's survey-mask field `packed` ({@link packSurveyMask}): the shader's `survey_surveyed`
+ * (`terrainLit.wgsl`), its twin in `f64`.
+ *
+ * @remarks
+ * With a cell code c of 1 or more, the state of the coarse cell holding the point, read at that
+ * cell's centre vertex within the patch: 2^c quads a cell, the cell ⌊x ÷ 2^c⌋ clamped into the
+ * patch, its centre vertex 2^(c − 1) further on. With 0, the mask interpolated bilinearly between
+ * the quad's four vertices, at half or more (Design note 12's rule).
+ */
+export function surveyedAt(packed: Uint8Array, x: number, y: number): boolean {
+  const code = packed[SURVEY_CELL_CODE_BYTE] ?? 0;
+  const at = (vx: number, vy: number): number =>
+    (packed[vy * PATCH_VERTICES_PER_SIDE + vx] ?? 0) / 255;
+  if (code === 0) {
+    const bx = Math.min(QUADS - 1, Math.max(0, Math.floor(x)));
+    const by = Math.min(QUADS - 1, Math.max(0, Math.floor(y)));
+    const fx = Math.min(1, Math.max(0, x - bx));
+    const fy = Math.min(1, Math.max(0, y - by));
+    const low = at(bx, by) + fx * (at(bx + 1, by) - at(bx, by));
+    const high = at(bx, by + 1) + fx * (at(bx + 1, by + 1) - at(bx, by + 1));
+    return low + fy * (high - low) >= 0.5;
+  }
+  const quads = 2 ** code;
+  const cells = Math.max(1, QUADS / quads);
+  const cell = (f: number): number => Math.min(cells - 1, Math.max(0, Math.floor(f / quads)));
+  const centre = (f: number): number => Math.min(QUADS - 1, cell(f) * quads + quads / 2);
+  return at(centre(x), centre(y)) >= 0.5;
+}
+
 /** One baked patch for a slot, as the pool hands it over (T10's `BakedPatch` with its slot). */
 export interface SlotUpload {
   readonly slot: number;
@@ -352,12 +544,12 @@ export interface SlotUpload {
 }
 
 /**
- * The slot fields kept in storage buffers: R05's, R10.T10.b's class weights and laws, and
- * R10.T8.b's horizon map.
+ * The slot fields kept in storage buffers: R05's, R10.T10.b's class weights and laws, R10.T8.b's
+ * horizon map and R10.T10.c's survey mask.
  */
 export type SlotBufferField = Extract<
   SlotFieldName,
-  "heights" | "offsets" | "class-layers" | "horizon-map"
+  "heights" | "offsets" | "class-layers" | "horizon-map" | "survey-mask"
 >;
 
 /**
@@ -464,7 +656,11 @@ export class TerrainResources {
     return this.#made.layout;
   }
 
-  /** The shared 65 × 65 mesh with skirts ({@link patchMeshData}). */
+  /**
+   * The 65 × 65 mesh with skirts the layout draws: R05's shared one ({@link patchMeshData}) on
+   * R05's spike shading, and the lit material's ({@link litPatchMeshData}), with the survey edge's
+   * skirt heads and fins, on a lit layout.
+   */
   get mesh(): MeshHandle {
     return this.#made.mesh;
   }
@@ -495,8 +691,8 @@ export class TerrainResources {
   }
 
   /**
-   * The storage buffer of a slot field (`heights`, `offsets`, and a lit layout's `class-layers`
-   * and `horizon-map`), or `null` where the layout has none.
+   * The storage buffer of a slot field (`heights`, `offsets`, and a lit layout's `class-layers`,
+   * `horizon-map` and `survey-mask`), or `null` where the layout has none.
    */
   field(name: SlotBufferField): BufferHandle | null {
     return this.#made.fields.get(name) ?? null;
@@ -553,16 +749,17 @@ export class TerrainResources {
    * record and its normals tile with the gutter filled from the tile's edge.
    *
    * On a lit layout it also writes the slot's class layers, its class weights (zeros where the
-   * bake skipped them) then its class laws, adding their rows to the phase table, and its horizon
+   * bake skipped them) then its class laws, adding their rows to the phase table, its horizon
    * map, the near field's words then the far field's (R10.T8.b), or words of no horizon where the
-   * bake skipped it.
+   * bake skipped it, and its survey mask with the code of its survey's cell size
+   * ({@link packSurveyMask}, R10.T10.c).
    *
    * @returns `refused` with nothing written for a bake that no longer fits the layout: one baked
    * before a restore re-derived it ({@link TerrainResources.onRebuilt}), whose slot is past the new
    * count or whose offsets the new vertex path does not take; or, on a lit layout, a bake without
    * R10's layers; else `uploaded`.
-   * @throws RangeError also for class weights or a horizon map of another size than a slot's,
-   * before any write.
+   * @throws RangeError also for class weights, a horizon map or a survey mask of another size than
+   * a slot's, or a field level that is not an integer, before any write.
    * @throws RangeError if an array's length is not the layout's, which no bake of the setting gives.
    */
   upload(patch: SlotUpload): SlotUploadResult {
@@ -595,6 +792,10 @@ export class TerrainResources {
         `a horizon map of ${String(horizonBytes)} B, where a slot holds ${String(HORIZON_MAP_BYTES)} B`,
       );
     }
+    const surveyMask =
+      this.#made.lit !== null && layers !== null
+        ? packSurveyMask(layers.surveyMask, surveyCellCode(patch.key.level, layers.fieldLevel))
+        : null;
     this.#checkLength("heights", patch.heights.byteLength);
     if (patch.offsets !== null) {
       this.#checkLength("offsets", patch.offsets.byteLength);
@@ -636,6 +837,9 @@ export class TerrainResources {
       );
       this.#writeTable(lit);
       this.#writeHorizon(slot, layers);
+    }
+    if (surveyMask !== null) {
+      this.#writeField("survey-mask", slot, surveyMask);
     }
     return UPLOADED;
   }
@@ -828,9 +1032,10 @@ export class TerrainResources {
       usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
       category: "height-cache",
     });
-    const { positions, indices } = patchMeshData();
+    const lit = layout.shading === "lit";
+    const { positions, indices } = lit ? litPatchMeshData() : patchMeshData();
     const mesh = engine.createMesh({
-      name: "terrain patch",
+      name: lit ? "terrain lit patch" : "terrain patch",
       positions,
       indices,
       topology: "triangle-list",
@@ -855,8 +1060,21 @@ export class TerrainResources {
       category: "other",
     });
     // indexCount, instanceCount, firstIndex, baseVertex, firstInstance: only the count changes.
-    engine.writeBuffer(indirect, 0, new Uint32Array([PATCH_INDICES, 0, 0, 0, 0]));
-    const lit = layout.shading === "lit" ? this.#makeLit() : null;
-    return { layout, lit, fields, slotRecords, normals, mesh, instances, contacts, indirect };
+    engine.writeBuffer(
+      indirect,
+      0,
+      new Uint32Array([lit ? LIT_PATCH_INDICES : PATCH_INDICES, 0, 0, 0, 0]),
+    );
+    return {
+      layout,
+      lit: lit ? this.#makeLit() : null,
+      fields,
+      slotRecords,
+      normals,
+      mesh,
+      instances,
+      contacts,
+      indirect,
+    };
   }
 }

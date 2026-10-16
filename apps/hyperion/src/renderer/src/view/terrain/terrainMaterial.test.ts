@@ -84,10 +84,12 @@ describe("the lit terrain's material (R10.T10.b)", () => {
       "classLayers",
       "terrainLights",
       "horizonMap",
+      "surveyMask",
     ]);
-    // Eight storage buffers on the baked-offsets path, five read by the vertex stage alone and
-    // three by the fragment stage alone (decision-r10-t10b-r09-t2e §5).
-    expect(offsets.storageBuffers).toHaveLength(8);
+    // Nine storage buffers on the baked-offsets path, five read by the vertex stage alone, three by
+    // the fragment stage alone, and the survey mask by both (decision-r10-t10b-r09-t2e §5;
+    // R10.T10.c).
+    expect(offsets.storageBuffers).toHaveLength(9);
     expect(
       (offsets.storageBuffers ?? []).map((buffer) => [buffer.name, buffer.stages?.join(" ")]),
     ).toEqual([
@@ -99,6 +101,7 @@ describe("the lit terrain's material (R10.T10.b)", () => {
       ["classLayers", "fragment"],
       ["terrainLights", "fragment"],
       ["horizonMap", "fragment"],
+      ["surveyMask", "vertex fragment"],
     ]);
     const textures = differences.textures ?? [];
     expect(textures.map((t) => t.binding)).toEqual([4, 7, 9, 10, 11, 12, 13, 14, 15]);
@@ -108,6 +111,7 @@ describe("the lit terrain's material (R10.T10.b)", () => {
       ["terrain_lights", TERRAIN_LIT_BINDINGS.terrainLights],
       ["atmosphere_body", TERRAIN_LIT_BINDINGS.atmosphere],
       ["horizon_map", TERRAIN_LIT_BINDINGS.horizonMap],
+      ["survey_mask", TERRAIN_LIT_BINDINGS.surveyMask],
     ] as const) {
       expect(terrainLitWgsl + horizonWgsl).toMatch(
         new RegExp(`@binding\\(${String(binding)}\\) var[^\\n]* ${name}`, "u"),

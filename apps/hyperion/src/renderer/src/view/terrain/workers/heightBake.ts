@@ -460,6 +460,8 @@ export class WorkerFields {
   readonly #standIns = new StandInFields();
   /** Each body held and its form, in the order the fields were started. */
   readonly #forms = new Map<BodyIdHex, FieldForm>();
+  /** Each payload field's level, 5 to 8, as its blocks' answers state it (R10.T10.c). */
+  readonly #levels = new Map<BodyIdHex, number>();
 
   constructor(module: HeightModule) {
     this.#module = module.createFields();
@@ -494,6 +496,7 @@ export class WorkerFields {
       // Deleted first, so that the body moves to the end of the order of starts.
       this.#forms.delete(body);
       this.#forms.set(body, "payload");
+      this.#noteLevel(body, taken);
     }
     return taken;
   }
@@ -508,10 +511,22 @@ export class WorkerFields {
       case "stand-in":
         this.#standIns.chunk(body, block);
         return { kind: "taken", block: null };
-      case "payload":
-        return this.#take(() => this.#module.fieldChunk(...bodyArgs(body), new Uint8Array(block)));
+      case "payload": {
+        const taken = this.#take(() =>
+          this.#module.fieldChunk(...bodyArgs(body), new Uint8Array(block)),
+        );
+        this.#noteLevel(body, taken);
+        return taken;
+      }
     }
     return unreachable(form);
+  }
+
+  /** Keeps the level a taken block of `body`'s payload states, which its bakes carry. */
+  #noteLevel(body: BodyIdHex, taken: FieldTake): void {
+    if (taken.kind === "taken" && taken.block !== null) {
+      this.#levels.set(body, taken.block.fieldLevel);
+    }
   }
 
   /** Drops `body`'s field, if one is held. */
@@ -527,6 +542,7 @@ export class WorkerFields {
         break;
     }
     this.#forms.delete(body);
+    this.#levels.delete(body);
   }
 
   /**
@@ -559,6 +575,10 @@ export class WorkerFields {
       return null;
     }
     try {
+      const fieldLevel = this.#levels.get(source.body);
+      if (fieldLevel === undefined) {
+        throw new Error(`${source.body} was baked over a field whose level no block stated`);
+      }
       const palette = baked.palette();
       // The palette's photometry from the field the bake was made over, in the same message.
       const photometry = this.#module.photometry(...bodyArgs(source.body), palette);
@@ -569,6 +589,7 @@ export class WorkerFields {
         palette,
         weights: baked.weights(),
         surveyMask: baked.surveyMask(),
+        fieldLevel,
         boundM: baked.boundM,
         sigmaM: baked.sigmaM,
         complete: baked.complete,

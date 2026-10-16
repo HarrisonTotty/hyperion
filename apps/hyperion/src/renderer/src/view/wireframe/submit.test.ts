@@ -286,6 +286,7 @@ describe("packWireframe", () => {
     strokeScale: 2,
     markStrokePx: 2,
     occluderSlopePx: 5,
+    surveyEdges: [],
   };
   const packed = packWireframe(list, CAMERA, VIEWPORT);
   const summary = packed.draws.map((d) => [

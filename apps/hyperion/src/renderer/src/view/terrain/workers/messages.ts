@@ -70,6 +70,12 @@ export interface TerrainLayers {
   readonly weights: Uint8Array;
   /** Each vertex's survey mask, 65 × 65: 255 surveyed, 0 not (Design note 12). */
   readonly surveyMask: Uint8Array;
+  /**
+   * The level, 5 to 8, of the coarse field the bake was made over, whose cells {@link surveyMask}
+   * and {@link unsurveyedCells} are of: the terrain's discard finds each fragment's coarse cell by
+   * it (R10.T10.c, `gpu/resources.ts`' `surveyCellCode`).
+   */
+  readonly fieldLevel: number;
   /** The patch's hard bound, metres. */
   readonly boundM: number;
   /** The patch's σ, the largest omitted RMS over its surveyed cells, metres. */

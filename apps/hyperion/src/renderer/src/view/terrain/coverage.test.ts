@@ -14,8 +14,17 @@ import {
   fieldCellCount,
   fieldCellIndex,
   resolutionOfCodeM,
+  type SurveyEdge,
+  surveyEdges,
 } from "./coverage";
-import type { Face, PatchKey } from "./patchKey";
+import {
+  EDGES,
+  edgeNeighbour,
+  edgeNeighbourAndBack,
+  type Face,
+  FACES,
+  type PatchKey,
+} from "./patchKey";
 
 /** The IEEE 754 bits of `x`, `0x` and 16 hexadecimal digits, as the golden writes them. */
 function bitsHex(x: number): string {
@@ -184,6 +193,84 @@ describe("a body's coverage", () => {
   });
 });
 
+/** Survey edges as `face i,j side`. */
+function named(edges: ReadonlyArray<SurveyEdge>): string[] {
+  return edges.map(
+    ({ cell: c, side }) => `${String(c.face)} ${String(c.i)},${String(c.j)} ${side}`,
+  );
+}
+
+/** Texel (i, j) of `face` in a level-5 mask's write, or −1 where nothing was written. */
+function writtenTexel(
+  data: ArrayBufferView | undefined,
+  face: number,
+  i: number,
+  j: number,
+): number {
+  return data instanceof Uint8Array ? (data[(face * 32 + j) * 32 + i] ?? -1) : -1;
+}
+
+describe("the survey's edge (R10.T10.c)", () => {
+  // Level 5 of face 0: an L of three surveyed cells beside a margin cell; a corner cell alone; and a
+  // cell on the face's edge whose neighbour across it, on another face, is surveyed too.
+  const across = edgeNeighbour({ face: 0, level: 5, i: 31, j: 10 }, "UMax");
+  const view = merged(
+    CoverageView.empty(5),
+    cover(
+      [cell(0, 3, 3), cell(0, 3, 3) + 1, 12],
+      [cell(0, 4, 3), cell(0, 4, 3) + 1, 12],
+      [cell(0, 3, 4), cell(0, 3, 4) + 1, 30],
+      [cell(0, 5, 3), cell(0, 5, 3) + 1, 0],
+      [cell(0, 0, 0), cell(0, 0, 0) + 1, 1],
+      [cell(0, 31, 10), cell(0, 31, 10) + 1, 8],
+      [fieldCellIndex(across), fieldCellIndex(across) + 1, 8],
+    ),
+    1,
+  );
+
+  it("is exactly the sides between surveyed and unsurveyed cells of the fixture, margin cells unsurveyed", () => {
+    expect(named(surveyEdges(view, 0))).toEqual([
+      "0 0,0 UMin",
+      "0 0,0 UMax",
+      "0 0,0 VMin",
+      "0 0,0 VMax",
+      "0 3,3 UMin",
+      "0 3,3 VMin",
+      // Its UMax side faces the margin cell (5, 3), held but not surveyed.
+      "0 4,3 UMax",
+      "0 4,3 VMin",
+      "0 4,3 VMax",
+      "0 3,4 UMin",
+      "0 3,4 UMax",
+      "0 3,4 VMax",
+      // Its UMax side faces a surveyed cell across the face's edge: no edge there.
+      "0 31,10 UMin",
+      "0 31,10 VMin",
+      "0 31,10 VMax",
+    ]);
+  });
+
+  it("lists a piece on a face's edge once, by the face of its surveyed cell", () => {
+    const [neighbour, back] = edgeNeighbourAndBack({ face: 0, level: 5, i: 31, j: 10 }, "UMax");
+    const there = surveyEdges(view, neighbour.face).filter(
+      ({ cell: c }) => c.i === neighbour.i && c.j === neighbour.j,
+    );
+    expect(there.map(({ side }) => side).toSorted()).toEqual(
+      EDGES.filter((side) => side !== back).toSorted(),
+    );
+    // Every face's lists together: the perimeter of each surveyed region, each side once.
+    const all = FACES.flatMap((face) => named(surveyEdges(view, face)));
+    expect(new Set(all).size).toBe(all.length);
+    expect(all).toHaveLength(4 + 2 + 3 + 3 + 3 + 3);
+  });
+
+  it("is empty with no cell surveyed, and with every cell", () => {
+    expect(FACES.flatMap((face) => surveyEdges(CoverageView.empty(5), face))).toEqual([]);
+    const whole = merged(CoverageView.empty(5), cover([0, fieldCellCount(5), 30]), 1);
+    expect(FACES.flatMap((face) => surveyEdges(whole, face))).toEqual([]);
+  });
+});
+
 describe("the GPU coverage mask", () => {
   it("is a byte a cell a face, face then row j then column i, surveyed cells set", () => {
     const margin = cell(1, 4, 4);
@@ -233,5 +320,46 @@ describe("the GPU coverage mask", () => {
       format: "r8unorm",
       category: "coarse-field-gpu",
     });
+  });
+
+  it("follows the workers' blocks as well as the store's coverage, keeping every cell surveyed (R10.T10.c)", async () => {
+    const engine = await countingRenderEngine();
+    const mask = new CoverageMask(engine, "coverage mask");
+    // A block's cells, before the store's answer names them.
+    mask.survey({
+      fieldLevel: 5,
+      newlySurveyed: Uint32Array.from([cell(2, 7, 9), cell(2, 7, 9) + 1]),
+    });
+    const afterBlock = engine.textureWritten.at(-1)?.data;
+    expect(writtenTexel(afterBlock, 2, 7, 9)).toBe(COVERAGE_MASK_SURVEYED);
+    expect(writtenTexel(afterBlock, 2, 8, 9)).toBe(0);
+    // The store's coverage, behind the workers, unsurveys nothing the block surveyed.
+    mask.update(merged(CoverageView.empty(5), cover([cell(4, 1, 1), cell(4, 1, 1) + 1, 3]), 1));
+    const afterAnswer = engine.textureWritten.at(-1)?.data;
+    expect(writtenTexel(afterAnswer, 2, 7, 9)).toBe(COVERAGE_MASK_SURVEYED);
+    expect(writtenTexel(afterAnswer, 4, 1, 1)).toBe(COVERAGE_MASK_SURVEYED);
+    expect(engine.textureSpecs.filter((spec) => spec.name === "coverage mask")).toHaveLength(1);
+    // A release forgets them; a field of another level starts a mask afresh.
+    mask.release();
+    mask.survey({ fieldLevel: 6, newlySurveyed: Uint32Array.from([0, 1]) });
+    const afresh = engine.textureWritten.at(-1)?.data;
+    expect(afresh).toHaveLength(6 * 64 * 64);
+    expect(
+      afresh instanceof Uint8Array ? afresh.reduce((n, t) => n + (t === 0 ? 0 : 1), 0) : 0,
+    ).toBe(1);
+  });
+
+  it("refuses a block's runs that are not cells of a level R09 serves", async () => {
+    const mask = new CoverageMask(await countingRenderEngine(), "coverage mask");
+    expect(() => mask.survey({ fieldLevel: 4, newlySurveyed: Uint32Array.from([0, 1]) })).toThrow(
+      /level 5 to 8/u,
+    );
+    expect(() => mask.survey({ fieldLevel: 5, newlySurveyed: Uint32Array.from([3, 3]) })).toThrow(
+      /not a run/u,
+    );
+    expect(() =>
+      mask.survey({ fieldLevel: 5, newlySurveyed: Uint32Array.from([0, fieldCellCount(5) + 1]) }),
+    ).toThrow(/not a run/u);
+    expect(mask.texture).toBeNull();
   });
 });

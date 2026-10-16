@@ -38,6 +38,7 @@ import { norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec
 import type { DiscSurface } from "../appearance/bodyAppearance";
 import type { BodyFigure, BodyPhotometry } from "../appearance/fromWire";
 import type { QualitySetting } from "../quality/qualitySetting";
+import { coverageMaskTextureSpec } from "../terrain/coverage";
 import { patchMeshData } from "../terrain/gpu/resources";
 import patchVertexWgsl from "../terrain/shaders/patchVertex.wgsl?raw";
 import { limbShareAt, PHASE_TABLE_SAMPLES, type PhotometricLaw } from "../appearance/law";
@@ -65,7 +66,7 @@ import {
   surfaceLightingTextures,
 } from "../atmosphere/surfaceLighting";
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
-import { type Rotation3, rotateToBody } from "../coords/rotation";
+import { IDENTITY_ROTATION, type Rotation3, rotateToBody } from "../coords/rotation";
 import { discEclipseVisible } from "../lighting/discEclipse";
 import { hostAnnuli, type LightAtPoint, lightsAt, type PlacedLight } from "../lighting/hostLights";
 import { type LightingBody, type LightingSphere, occludersFor } from "../lighting/occluders";
@@ -150,6 +151,21 @@ export interface LitBodyInput {
    * draws a body's atmosphere in the view, no caller gives one.
    */
   readonly atmosphere?: SurfaceLightingTables;
+  /**
+   * The GPU's coverage mask of its survey (plan R10, R10.T10.c; `terrain/coverage.ts`'
+   * `CoverageMask.texture`), with which its figure, drawn as a mesh, is the reference surface
+   * beneath its terrain: discarded wherever the mask holds a cell surveyed, so that the terrain
+   * alone draws that ground (R10's Design note 12). Read in the axes of its `rotation`, so ignored
+   * without one; absent, the figure is drawn whole.
+   */
+  readonly surveyCoverage?: TextureHandle;
+}
+
+/** A mesh body's coverage mask and the body-fixed axes it is read in (R10.T10.c). */
+export interface MeshBodyCoverage {
+  readonly mask: TextureHandle;
+  /** The body's rotation, body-fixed to galactic axes. */
+  readonly rotation: Rotation3;
 }
 
 /** What the plan needs of the view. */
@@ -182,6 +198,11 @@ export interface MeshBodyPlan {
   readonly mesh: SmoothMesh;
   /** Its limb draw's corner depths, on the limb's plane. */
   readonly limbDepths: LimbDepths;
+  /**
+   * Its survey's coverage mask, which discards its figure where the terrain draws the ground
+   * (R10.T10.c), or `null` for a body without one, or without a rotation to read it in.
+   */
+  readonly coverage: MeshBodyCoverage | null;
 }
 
 /** A point body's sprite: R02's sprite record, its depth its own (decision-r07-t8a, item 2). */
@@ -555,6 +576,10 @@ export function planLitBodies(
           camera,
           viewport,
         ),
+        coverage:
+          body.surveyCoverage === undefined || body.rotation === undefined
+            ? null
+            : { mask: body.surveyCoverage, rotation: body.rotation },
       });
     } else {
       steps.push({ kind: "disc", index: discs.length });
@@ -641,10 +666,15 @@ export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMater
 
 const SMOOTH_MESH_SOURCE = LIT_SOURCE + patchVertexWgsl + smoothMeshWgsl;
 
+/** The group 2 binding of a mesh body's coverage mask (`smoothMesh.wgsl`, R10.T10.c), past the disc's. */
+const COVERAGE_MASK_BINDING = 13;
+
 /**
  * The mesh regime's material (T9): R05's patches of a body's spheroid at zero height, one
  * instanced draw a body, opaque with depth, shading the pixels the body covers wholly from its
- * disc record (`shaders/smoothMesh.wgsl`).
+ * disc record (`shaders/smoothMesh.wgsl`), and, beneath a body's surveyed terrain, discarding the
+ * pixels whose ground the coverage mask holds surveyed (plan R10, R10.T10.c): the reference
+ * surface drawn with the inverse mask.
  */
 export const SMOOTH_MESH_MATERIAL: WgslMaterialSpec = {
   name: "bodies:smoothMesh",
@@ -655,9 +685,13 @@ export const SMOOTH_MESH_MATERIAL: WgslMaterialSpec = {
     { name: "disc", type: "u32" },
     { name: "firstInstance", type: "u32" },
     { name: "bodyRotation", type: "mat4x4f" },
+    { name: "coverageAxes", type: "mat4x4f" },
   ],
   samplers: [],
-  textures: DISC_TEXTURES,
+  textures: [
+    ...DISC_TEXTURES,
+    { name: "coverageMask", binding: COVERAGE_MASK_BINDING, viewDimension: "2d-array" },
+  ],
   storageBuffers: [
     { name: "discs", binding: 0 },
     { name: "slots", binding: 3 },
@@ -767,6 +801,11 @@ interface DeviceResources {
   /** A texel of no weight, bound where a disc's surface is uniform and never read. */
   readonly noClassMap: TextureHandle;
   /**
+   * A coverage mask of no surveyed cell, one texel a face, bound where a mesh body has no survey
+   * (R10.T10.c): its figure is drawn whole.
+   */
+  readonly noCoverage: TextureHandle;
+  /**
    * The one-texel atmosphere tables of a body without one (plan R08, R08.T9.b), and the `disc
    * cells` pass's always: the lookups read 1 and 0 through them.
    */
@@ -842,6 +881,7 @@ export class LitBodyRenderer {
         category: "other",
       }),
       noAtmosphere: createAirlessTables(engine, "bodies:no atmosphere"),
+      noCoverage: this.#noCoverage(),
       mesh: engine.createMaterial(SMOOTH_MESH_MATERIAL),
       patch: engine.createMesh({
         name: "bodies:smooth patch",
@@ -854,6 +894,21 @@ export class LitBodyRenderer {
       cellJobs: this.#buffer("bodies:disc cell jobs", MIN_BUFFER_BYTES),
       cellSums: this.#buffer("bodies:disc cell sums", MIN_BUFFER_BYTES),
     };
+  }
+
+  /** {@link DeviceResources.noCoverage}: one 0 texel a face, of the coverage mask's format. */
+  #noCoverage(): TextureHandle {
+    const texture = this.#engine.createTexture({
+      ...coverageMaskTextureSpec("bodies:no coverage", 0),
+      category: "other",
+    });
+    this.#engine.writeTexture(
+      texture,
+      { x: 0, y: 0, z: 0 },
+      { width: 1, height: 1, depthOrArrayLayers: 6 },
+      new Uint8Array(6),
+    );
+    return texture;
   }
 
   #buffer(name: string, bytes: number): BufferHandle {
@@ -1064,8 +1119,12 @@ export class LitBodyRenderer {
             disc: new Float32Array([body.index]),
             firstInstance: new Float32Array([first]),
             bodyRotation: rotationColumns(body.mesh.axes),
+            coverageAxes: rotationColumns(body.coverage?.rotation ?? IDENTITY_ROTATION),
           },
-          textures: this.#recordTextures(record),
+          textures: {
+            ...this.#recordTextures(record),
+            coverageMask: body.coverage?.mask ?? resources.noCoverage,
+          },
           storageBuffers: {
             discs: resources.discs,
             slots: resources.slots,
@@ -1170,6 +1229,7 @@ export class LitBodyRenderer {
     }
     this.#engine.releaseTexture(resources.table);
     this.#engine.releaseTexture(resources.noClassMap);
+    this.#engine.releaseTexture(resources.noCoverage);
     this.#engine.releaseTexture(resources.noAtmosphere.body);
   }
 }

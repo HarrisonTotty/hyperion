@@ -34,6 +34,17 @@
 //
 // The ground's thermal emission (`Melt`'s, and any texel's above R08.T18's visibility cut) is not
 // drawn: it waits on R08.T18's shared function (decision-composition).
+//
+// The survey's edge (R10.T10.c, Design note 12): a fragment of the terrain outside the survey is
+// discarded, so that R07's reference surface, drawn beneath with the inverse of the GPU's coverage
+// mask (`smoothMesh.wgsl`), shows there, and each coarse cell is the terrain's or the reference
+// surface's, never both. The state of the fragment's cell is the bake's survey mask at that cell's
+// centre vertex (`survey_surveyed`; `gpu/resources.ts`' `surveyedAt`), since a vertex on a cell's
+// edge holds either cell's; the mask's half between the quad's vertices stands in where a cell spans
+// one quad or less. Where the two surfaces meet at different heights, the lit mesh's skirts and fins
+// (`gpu/resources.ts`' `litPatchMeshData`) join them, each drawn by the side whose surface stands
+// higher above it, in the reference surface's appearance: the body's uniform law (law 0) under the
+// datum's normal, without the horizon map's shadows, as R07's disc draws the reference surface.
 
 struct Draw {
   // Zero: each instance carries its own origin.
@@ -84,6 +95,14 @@ struct Draw {
 @group(2) @binding(14) var atmosphere_absorber_curves : texture_2d<f32>;
 @group(2) @binding(15) var atmosphere_irradiance : texture_2d_array<f32>;
 
+// Each slot's survey mask, SURVEY_MASK_WORDS words (`slotLayout.ts`' `survey-mask` field): vertex
+// (x, y)'s byte at 65 y + x, four to a word from its low byte, 255 surveyed and 0 not, then at byte
+// SURVEY_CELL_CODE_BYTE log₂ of the quads a coarse cell of the survey spans along the patch's side,
+// 1 to 6, or 0 where a cell spans one quad or less (`gpu/resources.ts`' `packSurveyMask`). Read by
+// both stages: the vertex stage places the fins on the cells' edges by the code, the fragment stage
+// discards by the mask (decision-r10-t10b-r09-t2e §5).
+@group(2) @binding(17) var<storage, read> survey_mask : array<u32>;
+
 // A palette's slots (`hyperion_surface`'s `MAX_CLASSES`), and the laws a texel shades with: law 0
 // and one per slot.
 const TERRAIN_CLASSES : u32 = 8u;
@@ -99,6 +118,16 @@ const TERRAIN_SECONDARY_ROWS_EACH : u32 = 2u;
 const MAX_TERRAIN_LIGHTS : u32 = 2u;
 const MAX_TERRAIN_OCCLUDERS : u32 = 2u;
 const MAX_TERRAIN_SECONDARIES : u32 = 2u;
+// A slot's survey mask in words, 4,228 B, and the byte of its cell code (`slotLayout.ts`).
+const SURVEY_MASK_WORDS : u32 = 1057u;
+const SURVEY_CELL_CODE_BYTE : u32 = 4225u;
+// The lit mesh's vertex codes (`gpu/resources.ts`' `LIT_VERTEX_CODE`), each triangle's first
+// vertex's its part: the grid, a skirt's foot strip, a skirt's head strip, a column's fin, a row's.
+const LIT_GRID : u32 = 0u;
+const LIT_SKIRT_FOOT : u32 = 1u;
+const LIT_SKIRT_HEAD : u32 = 2u;
+const LIT_COLUMN_FIN : u32 = 4u;
+const LIT_ROW_FIN : u32 = 5u;
 
 // `METER_CLASS.unlitBody` and `other` (`view/post/meter.ts`).
 const METER_UNLIT_BODY : f32 = 3.0;
@@ -178,26 +207,133 @@ struct LitVertexOut {
   @location(7) @interpolate(flat) horizonFace : u32,
   // The parent's slot (`HORIZON_NO_PARENT` for none) and the patch's quadrant in it.
   @location(8) @interpolate(flat) parent : vec2u,
+  // The triangle's part of the lit mesh, its first vertex's code (LIT_GRID to LIT_ROW_FIN).
+  @location(9) @interpolate(flat) kind : u32,
+}
+
+// The mask byte at `index` of `slot`'s survey mask.
+fn survey_byte(slot : u32, index : u32) -> u32 {
+  let word = survey_mask[slot * SURVEY_MASK_WORDS + index / 4u];
+  return (word >> (8u * (index % 4u))) & 0xffu;
+}
+
+// Vertex (x, y)'s survey mask, 1 surveyed and 0 not.
+fn survey_vertex(slot : u32, x : u32, y : u32) -> f32 {
+  return f32(survey_byte(slot, y * VERTICES_PER_SIDE + x)) / 255.0;
+}
+
+// log₂ of the quads a coarse cell spans along `slot`'s patch's side, 1 to 6, or 0.
+fn survey_cell_code(slot : u32) -> u32 {
+  return min(survey_byte(slot, SURVEY_CELL_CODE_BYTE), 6u);
+}
+
+// Whether the point `f` of `slot`'s patch, in quads from its corner, lies on surveyed ground
+// (`gpu/resources.ts`' `surveyedAt`): the coarse cell holding it, read at that cell's centre vertex,
+// which lies on none of its edges; where a cell spans one quad or less, the mask interpolated
+// between the quad's four vertices, at a half or more (Design note 12).
+fn survey_surveyed(slot : u32, f : vec2f) -> bool {
+  let code = survey_cell_code(slot);
+  let g = max(f, vec2f(0.0));
+  if (code == 0u) {
+    let base = min(vec2u(floor(g)), vec2u(63u));
+    let t = clamp(g - vec2f(base), vec2f(0.0), vec2f(1.0));
+    let m00 = survey_vertex(slot, base.x, base.y);
+    let m10 = survey_vertex(slot, base.x + 1u, base.y);
+    let m01 = survey_vertex(slot, base.x, base.y + 1u);
+    let m11 = survey_vertex(slot, base.x + 1u, base.y + 1u);
+    return mix(mix(m00, m10, t.x), mix(m01, m11, t.x), t.y) >= 0.5;
+  }
+  let quads = 1u << code;
+  let cells = max(64u / quads, 1u);
+  let cell = min(vec2u(floor(g / f32(quads))), vec2u(cells - 1u));
+  let centre = min(cell * quads + vec2u(quads / 2u), vec2u(63u));
+  return survey_vertex(slot, centre.x, centre.y) >= 0.5;
+}
+
+// Whether column or row `c` of `slot`'s patch lies on an edge of its survey's coarse cells inside
+// the patch, where its fin may join the terrain to the reference surface: a multiple of a cell's
+// quads, where a cell is narrower than the patch and two quads or more.
+fn survey_cell_line(slot : u32, c : u32) -> bool {
+  let code = survey_cell_code(slot);
+  if (code == 0u || code >= 6u) {
+    return false;
+  }
+  return c % (1u << code) == 0u;
+}
+
+// Whether the fragment `in` is drawn at the survey's edge: the grid's on surveyed ground; a skirt's
+// foot strip, hanging from the terrain's edge to the datum and below it, by the surveyed side; its
+// head strip, rising from the terrain's edge to the datum, by the unsurveyed side; a fin where the
+// cells either side of its line differ. So the side whose surface stands higher draws each skirt,
+// and a skirt between two cells of one state lies beneath their surfaces. A skirt's state is the
+// cell inside the patch at its place along the edge, read half a quad in.
+fn survey_kept(in : LitVertexOut) -> bool {
+  let f = in.patchUv * 64.0;
+  switch in.kind {
+    case LIT_SKIRT_FOOT: {
+      return survey_surveyed(in.slot, clamp(f, vec2f(0.5), vec2f(63.5)));
+    }
+    case LIT_SKIRT_HEAD: {
+      return !survey_surveyed(in.slot, clamp(f, vec2f(0.5), vec2f(63.5)));
+    }
+    case LIT_COLUMN_FIN: {
+      let c = round(f.x);
+      return survey_surveyed(in.slot, vec2f(c - 0.5, f.y)) != survey_surveyed(in.slot, vec2f(c + 0.5, f.y));
+    }
+    case LIT_ROW_FIN: {
+      let c = round(f.y);
+      return survey_surveyed(in.slot, vec2f(f.x, c - 0.5)) != survey_surveyed(in.slot, vec2f(f.x, c + 0.5));
+    }
+    default: {
+      return survey_surveyed(in.slot, f);
+    }
+  }
 }
 
 @vertex
 fn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32) -> LitVertexOut {
-  let v = patchVertexOf(grid, instance);
+  // Every vertex is its grid vertex's, moved along the datum's normal to the height its part
+  // stands at: a skirt's foot at min(h − skirt depth, 0), its head at max(h, 0), a fin's datum end
+  // at 0 on a cell's edge and at h, collapsed, elsewhere.
+  let code = u32(grid.z + 0.5);
+  let v = patchVertexOf(vec3f(grid.xy, 0.0), instance);
   let inst = instances[instance];
   let rec = slots[inst.slot];
   let rotation = mat3x3f(draw.bodyRotation[0].xyz, draw.bodyRotation[1].xyz, draw.bodyRotation[2].xyz);
+  var height = v.heightM;
+  switch code {
+    case LIT_SKIRT_FOOT: {
+      height = min(v.heightM - rec.skirtDepthM, 0.0);
+    }
+    case LIT_SKIRT_HEAD: {
+      height = max(v.heightM, 0.0);
+    }
+    case LIT_COLUMN_FIN: {
+      if (survey_cell_line(v.slot, u32(grid.x))) {
+        height = 0.0;
+      }
+    }
+    case LIT_ROW_FIN: {
+      if (survey_cell_line(v.slot, u32(grid.y))) {
+        height = 0.0;
+      }
+    }
+    default: {}
+  }
+  let fromCameraM = v.fromCameraM + rotation * ((height - v.heightM) * v.datumNormal);
   var out : LitVertexOut;
-  out.clip = frame.clipProjection * frame.viewRotation * vec4f(v.fromCameraM, 1.0);
+  out.clip = frame.clipProjection * frame.viewRotation * vec4f(fromCameraM, 1.0);
   out.patchUv = v.patchUv;
   out.slot = v.slot;
-  out.fromCameraBf = transpose(rotation) * v.fromCameraM;
+  out.fromCameraBf = transpose(rotation) * fromCameraM;
   out.datumNormal = v.datumNormal;
-  out.heightM = v.heightM;
-  // A skirt vertex takes its edge vertex's (x, y), so its shadows are the edge's.
+  out.heightM = height;
+  // A skirt's or a fin's vertex takes its grid vertex's (x, y), so its shadows are the grid's.
   out.horizonSt = horizon_face_st(rec, u32(grid.x), u32(grid.y));
   out.morph = v.morph;
   out.horizonFace = horizon_face_of(rec);
   out.parent = vec2u(inst.parentSlot, inst.parentQuadrant);
+  out.kind = code;
   return out;
 }
 
@@ -323,24 +459,35 @@ struct TerrainShaded {
   lit : bool,
 }
 
-// The radiance of the texel `in` with the terrain's normal `terrain_normal`, both body-fixed.
-fn shade_terrain(in : LitVertexOut, terrain_normal : vec3f) -> TerrainShaded {
+// The radiance of the texel `in` with the terrain's normal `terrain_normal`, both body-fixed; with
+// `reference`, a skirt's or a fin's in the reference surface's appearance (R10.T10.c): law 0 alone
+// under `terrain_normal`, the datum's, seen from either side, with no decoration and no horizon map.
+fn shade_terrain(in : LitVertexOut, terrain_normal : vec3f, reference : bool) -> TerrainShaded {
   var out : TerrainShaded;
   out.radiance = vec3f(0.0);
   out.lit = false;
   // The texel from the body's centre ÷ a.
   let q = (in.fromCameraBf + draw.cameraBodyFixedM.xyz) * draw.cameraBodyFixedM.w;
-  let decoration = terrain_decoration(q, terrain_normal);
+  var decoration = TerrainDecoration(vec3f(1.0), terrain_normal);
+  if (!reference) {
+    decoration = terrain_decoration(q, terrain_normal);
+  }
   let normal = decoration.normal;
   let ray = normalize(in.fromCameraBf);
-  let mu = dot(normal, -ray);
+  let facing = dot(normal, -ray);
+  let mu = select(facing, abs(facing), reference);
   if (mu <= 0.0) {
     return out;
   }
   let counts = terrain_row(0u);
   let misc = terrain_row(2u);
   let annulus_count = u32(counts.w);
-  let shares = terrain_shares(in.slot, in.patchUv);
+  var shares : array<f32, TERRAIN_LAWS>;
+  if (reference) {
+    shares[0] = 1.0;
+  } else {
+    shares = terrain_shares(in.slot, in.patchUv);
+  }
   // The texel's mean A, for R08's sky light on the Lambert share's flat term.
   var mean_a = vec3f(0.0);
   for (var m = 0u; m < TERRAIN_LAWS; m = m + 1u) {
@@ -374,9 +521,12 @@ fn shade_terrain(in : LitVertexOut, terrain_normal : vec3f) -> TerrainShaded {
     // The horizon term on the terrain's normal, above the local horizon of the patch's horizon map
     // towards the star (R10.T8.b).
     let phi = angle_between(normal, towards);
-    let local_horizon = terrain_horizon(
-      in.slot, in.parent, in.horizonFace, in.horizonSt, in.patchUv, in.morph, nu, towards, phi
-    );
+    var local_horizon = 0.0;
+    if (!reference) {
+      local_horizon = terrain_horizon(
+        in.slot, in.parent, in.horizonFace, in.horizonSt, in.patchUv, in.morph, nu, towards, phi
+      );
+    }
     let horizon = sphere_irradiance(
       terrain_star_distance_radii(distance, light.w), phi, local_horizon
     );
@@ -460,8 +610,13 @@ fn shade_terrain(in : LitVertexOut, terrain_normal : vec3f) -> TerrainShaded {
 
 @fragment
 fn fragmentMain(in : LitVertexOut) -> @location(0) vec4f {
+  if (!survey_kept(in)) {
+    discard;
+  }
   // One call of the shading: a compiler that inlines every call (SwiftShader's) takes one copy.
-  let shaded = shade_terrain(in, patchNormalAt(in.slot, in.patchUv));
+  let reference = in.kind != LIT_GRID;
+  let normal = select(patchNormalAt(in.slot, in.patchUv), normalize(in.datumNormal), reference);
+  let shaded = shade_terrain(in, normal, reference);
   var meter = METER_OTHER;
   if (u32(terrain_row(0u).x) > 0u) {
     meter = select(METER_UNLIT_BODY, METER_LIT_BODY, shaded.lit);

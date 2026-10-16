@@ -792,14 +792,16 @@ export class TerrainPass {
       };
     }
     const horizonMap = resources.field("horizon-map");
-    if (lit === null || classLayers === null || horizonMap === null) {
+    const surveyMask = resources.field("survey-mask");
+    if (lit === null || classLayers === null || horizonMap === null || surveyMask === null) {
       throw new Error(
-        "a lit terrain's draw has no lit layout: its class layers, horizon maps or lights",
+        "a lit terrain's draw has no lit layout: its class layers, horizon maps, survey masks or lights",
       );
     }
     storageBuffers["classLayers"] = classLayers;
     storageBuffers["terrainLights"] = lit.lights;
     storageBuffers["horizonMap"] = horizonMap;
+    storageBuffers["surveyMask"] = surveyMask;
     return {
       mesh: resources.mesh,
       material,

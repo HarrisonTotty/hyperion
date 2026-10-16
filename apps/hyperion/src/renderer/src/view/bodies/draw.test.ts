@@ -42,7 +42,10 @@ import {
   type LitBodyInput,
   planLitBodies,
   pointFlux,
+  SMOOTH_MESH_MATERIAL,
 } from "./draw";
+import { bindingStages } from "../../test/wgslStages";
+import { rotation3FromRows } from "../coords/rotation";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import type { DrawItem, TextureHandle } from "../engine/types";
@@ -1368,6 +1371,8 @@ describe("the renderer", () => {
         "bodies:phase table",
         "bodies:no class map",
         "bodies:no atmosphere",
+        // R10.T10.c's mask of no surveyed cell, bound where a mesh body has no survey.
+        "bodies:no coverage",
       ].toSorted(),
     );
   });
@@ -1542,6 +1547,72 @@ describe("mesh bodies (T9)", () => {
       Array.from(DISC_LIMB_DEPTHS),
     ]);
     renderer.dispose();
+  });
+
+  it("draws a surveyed body's figure as the reference surface beneath its terrain, with the inverse coverage mask (R10.T10.c)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const { bodies, hosts } = sceneOfThree();
+    const mask: TextureHandle = { kind: "texture", name: "coverage mask" };
+    const rotation = rotation3FromRows([vec3(0, 1, 0), vec3(-1, 0, 0), vec3(0, 0, 1)]);
+    // The planet carries its survey and its rotation; the moon a survey but no rotation to read it in.
+    const surveyed: LitBodyInput[] = bodies.map((body) =>
+      body.id === PLANET
+        ? { ...body, rotation, surveyCoverage: mask }
+        : body.id === MOON
+          ? { ...body, surveyCoverage: mask }
+          : body,
+    );
+    const [planet] = bodies;
+    const writer =
+      planet === undefined ? null : sphereFootprint(planet.centreM, 6.371e6, CAMERA, VIEWPORT);
+    const plan = planLitBodies(
+      surveyed,
+      hosts,
+      { ...OPTIONS, depthWriters: writer === null ? [] : [writer] },
+      new Map(bodies.map((b) => [b.id, "disc" as const])),
+    );
+    expect(
+      plan.meshes.map((m) => [plan.discs[m.index]?.body, m.coverage?.mask.name ?? null]),
+    ).toEqual(
+      expect.arrayContaining([
+        [PLANET, "coverage mask"],
+        [MOON, null],
+      ]),
+    );
+    const draws = renderer.meshDraws(plan);
+    const byBody = new Map(
+      draws.map((draw) => [plan.discs[draw.uniforms["disc"]?.[0] ?? -1]?.body, draw]),
+    );
+    const planetDraw = byBody.get(PLANET);
+    const moonDraw = byBody.get(MOON);
+    expect(planetDraw?.textures["coverageMask"]?.name).toBe("coverage mask");
+    expect(Array.from(planetDraw?.uniforms["coverageAxes"] ?? [])).toEqual(
+      Array.from(rotationColumns(rotation)),
+    );
+    // A body without a survey binds the mask of no surveyed cell, and draws its figure whole.
+    expect(moonDraw?.textures["coverageMask"]?.name).toBe("bodies:no coverage");
+    expect(engine.textureWritten.find((w) => w.texture === "bodies:no coverage")?.data).toEqual(
+      new Uint8Array(6),
+    );
+    renderer.dispose();
+  });
+
+  it("reads the coverage mask in the mesh material's fragment stage alone", () => {
+    expect(SMOOTH_MESH_MATERIAL.textures?.find((t) => t.name === "coverageMask")).toEqual({
+      name: "coverageMask",
+      binding: 13,
+      viewDimension: "2d-array",
+    });
+    expect([...(bindingStages(SMOOTH_MESH_MATERIAL.vertexWgsl).get(13) ?? [])]).toEqual([
+      "fragment",
+    ]);
+    expect(SMOOTH_MESH_MATERIAL.uniforms.map((u) => u.name)).toEqual([
+      "disc",
+      "firstInstance",
+      "bodyRotation",
+      "coverageAxes",
+    ]);
   });
 
   it("writes a plan's records once for its figures and its sequence", async () => {

@@ -87,13 +87,28 @@ export const HORIZON_TEXELS = VERTICES + HORIZON_FAR_SIDE * HORIZON_FAR_SIDE;
 export const HORIZON_MAP_BYTES = HORIZON_TEXELS * HORIZON_WORDS_PER_TEXEL * 4;
 
 /**
+ * Bytes of a patch's survey mask as stored (R10.T10.c; Design note 15): its 65 × 65 vertices' mask
+ * bytes, four to a `u32`, 4,225 B, then the byte of its survey's cell size
+ * ({@link SURVEY_CELL_CODE_BYTE}), in 1,057 words, 4,228 B.
+ */
+export const SURVEY_MASK_BYTES = Math.ceil((VERTICES + 1) / 4) * 4;
+
+/**
+ * The survey mask's byte that states how many quads of the patch a coarse cell of its survey spans
+ * along a side (`gpu/resources.ts`' `surveyCellCode`), past the 4,225 vertex bytes: in the last
+ * word's spare bytes, which the field's 1,057 words hold anyway.
+ */
+export const SURVEY_CELL_CODE_BYTE = VERTICES;
+
+/**
  * A field of a slot.
  *
  * @remarks
- * R10 adds its own fields to this union (the class layers, R10.T10.b) and sizes `horizon-map`
- * (R10.T8.b; T14 settles the budgets).
+ * R10 adds its own fields to this union (the class layers, R10.T10.b; the survey mask, R10.T10.c)
+ * and sizes `horizon-map` (R10.T8.b; T14 settles the budgets).
  */
-export type SlotFieldName = "heights" | "offsets" | "normals" | "horizon-map" | "class-layers";
+export type SlotFieldName =
+  "heights" | "offsets" | "normals" | "horizon-map" | "class-layers" | "survey-mask";
 
 /**
  * How a terrain's patches are shaded: R05's spike shading, one hand albedo (the test planet, and a
@@ -160,9 +175,10 @@ export function slotLayout(fields: ReadonlyArray<SlotField>, budgetBytes: number
 /**
  * This plan's fields for a terrain setting: heights and morph targets, the offsets on the
  * `baked-offsets` path, the normals at the setting's resolution, and the horizon map; with R10's
- * lit shading, the horizon map at {@link HORIZON_MAP_BYTES} (R10.T8.b) and the class layers,
- * weights and laws (R10.T10.b), and at zero bytes on R05's spike shading, which draws no shadow, so
- * that R05's test planet and its spike keep their slots.
+ * lit shading, the horizon map at {@link HORIZON_MAP_BYTES} (R10.T8.b), the class layers, weights
+ * and laws (R10.T10.b), and the survey mask at {@link SURVEY_MASK_BYTES} (R10.T10.c), and the
+ * horizon map at zero bytes on R05's spike shading, which draws no shadow and no survey, so that
+ * R05's test planet and its spike keep their slots.
  */
 export function terrainSlotFields(
   terrain: TerrainSettings,
@@ -196,6 +212,7 @@ export function terrainSlotFields(
   switch (shading) {
     case "lit":
       fields.push({ name: "class-layers", storage: "storage-buffer", bytes: CLASS_LAYERS_BYTES });
+      fields.push({ name: "survey-mask", storage: "storage-buffer", bytes: SURVEY_MASK_BYTES });
       break;
     case "spike":
       break;

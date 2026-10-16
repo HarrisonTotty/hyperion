@@ -5646,3 +5646,172 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
     review).
   - _The low setting's cache._ 433 lit slots in 64 MiB against the rule's 430, as Risks' "The low
     setting's cache is at its edge" has it; T14.
+- **Deviations in T10.c, as built** (2026-10-16; lane r10-shader, on `rendering-and-planets` at
+  `5da24214`).
+  - _Files._ In `view/terrain/`: `shaders/terrainLit.wgsl` (the discard, the skirts' and fins'
+    heights, their shading), `terrainMaterial.ts` (`surveyMask` at binding 17), `slotLayout.ts`
+    (`survey-mask`, `SURVEY_MASK_BYTES`, `SURVEY_CELL_CODE_BYTE`), `gpu/resources.ts`
+    (`litPatchMeshData`, `LIT_VERTEX_CODE`, `SURVEY_FIN_LINES`, `LIT_PATCH_INDICES`,
+    `surveyCellCode`, `packSurveyMask`, `surveyedAt`; the field's upload; the lit layout's mesh and
+    index count), `terrainPass.ts` (binds the field), `coverage.ts` (`surveyEdges`, `SurveyEdge`,
+    `CoverageMask.survey`), a new `surveyEdge.ts` (the mark), and `workers/{messages,heightBake}.ts`
+    (`TerrainLayers.fieldLevel`). R07's `shaders/smoothMesh.wgsl` and `bodies/draw.ts`
+    (`SMOOTH_MESH_MATERIAL`'s `coverageMask` at binding 13 and `coverageAxes`,
+    `LitBodyInput.surveyCoverage`, `MeshBodyPlan.coverage`, `MeshBodyCoverage`); `bodies/smoothMesh.ts`
+    is unchanged, the discard being its shader's. R02's `view/wireframe/drawList.ts`
+    (`DrawOptions.surveyEdges`, `WireframeDrawList.surveyEdges`, `DrawnSurveyEdge`). The smoke
+    harness's new `smoke/surveyEdge.ts` in `page.ts`'s part 6, and `smoke/litTerrain.ts` (binds the
+    field; shares its fixture). `view/engine/types.ts`, `webgpu/materials.ts` and `platform.ts` are
+    unchanged (below).
+  - _The storage split was T8.b's._ `StorageBufferSpec.stages`, `stageVisibility`,
+    `storageBuffersPerStage`, `resourceLayoutEntries`' per-entry visibility, the `requiredLimits` doc
+    (no binding-count limit raised), `src/test/wgslStages.ts` and the counts and stage match in
+    `terrainPass.test.ts` are T8.b's ("Deviations in T8.b, as built"), checked against this task's
+    text and kept. This task adds the `survey-mask` field's declaration and the counts with it: the
+    lit material's vertex stage reads 6 (5 on `face-differences`) and its fragment stage 4; R05's
+    spike shading 5 (4) and none.
+  - _The mask binds to both stages._ The fragment stage discards by it; the vertex stage reads its
+    cell code alone, to stand the fins on the coarse cells' edges and fold the rest flat, which would
+    otherwise raster six fins of the patch's full relief in every patch, all discarded.
+  - _The discard is the coarse cell's, not the mask's half._ Design note 12's half of the
+    interpolated mask stands half a quad from the cell's edge: a vertex on a cell's edge holds either
+    cell's state, as the rounding of its direction falls (`PatchKey::containing`), so the half lies
+    inside the surveyed cell (neither surface draws) or inside the unsurveyed one (both draw), and
+    the task's smoke check fails either way. As built, a fragment reads its coarse cell's state at
+    that cell's centre vertex within the patch (`survey_surveyed`, its twin `surveyedAt`), on none
+    of the cell's edges, from the cell's size in quads, 2^(P + 6 − L) for a patch of level P over a
+    field of level L, carried as a code in the field's spare byte 4,225 (`surveyCellCode`, log₂
+    clamped to 0–6). So the terrain's edge is the cell's exactly wherever a cell spans two quads or
+    more, a patch at most five levels coarser than the field; coarser still (a sixth of a face or
+    more), the half of the mask between the quad's vertices stands in, as Design note 12 has it. On
+    the generated world (`surveyEdge.wasm.test.ts`), over the 14 patches of levels 2 to 7 baked
+    across the Moon-like fixture's first survey (a 15th, the face's root, codes 0), every quad's
+    centre and the points by two of its corners read the coverage's cell exactly.
+  - _Each bake carries its field's level._ `TerrainLayers.fieldLevel`, the level its mask's and
+    `unsurveyedCells`' cells are of, which the worker keeps from each block's answer
+    (`WorkerFields`), so that the upload can code the cell's size. A client message alone; the
+    module, its golden and the wire are unchanged.
+  - _The skirts and fins_ are the lit material's own mesh (`litPatchMeshData`; R05's spike and R07's
+    figure keep the shared one): R05's edge skirts as each edge's foot strip, its foot at
+    min(h − skirt depth, 0), still R05's crack filler and now reaching the datum from ground above
+    it; a head strip over each edge vertex up to max(h, 0), rising to the datum from ground below it;
+    and fins along columns and rows 16, 32 and 48, from the ground to the datum on a coarse cell's
+    edge, folded flat elsewhere. The side that stands higher draws each: a surveyed cell its foot
+    strips, an unsurveyed cell its head strips, a fin where its line's two cells differ; a strip
+    between cells of one state lies beneath their surfaces. So no skirt needs its neighbour patch's
+    survey, which a vertex on the edge cannot tell. Each triangle's first vertex names its part, read
+    flat (`kind`). They are drawn in the reference surface's appearance: law 0 alone under the
+    datum's normal, |μ| so either face is lit, without decoration or the horizon map, as R07's disc
+    draws the reference surface. A crack between levels, which R05 closes at morph 1, now shows law
+    0's colour rather than the edge vertex's.
+  - _The reference surface's inverse mask._ `smoothMesh.wgsl` discards a pixel whose ray (the
+    disc's `hit_spheroid` at the pixel's centre) meets the spheroid in a cell the GPU's coverage
+    mask holds surveyed, its direction taken into the body's own body-fixed axes (`coverageAxes`,
+    the rotation's: the figure's patches are about its pole, not the body's faces) and read as the
+    disc reads a class map (`class_map_texel`). `LitBodyInput.surveyCoverage` gives the mask, which
+    is ignored without a `rotation`; a body without one binds a mask of no surveyed cell (one texel
+    a face), and draws as before.
+  - _The GPU mask follows the workers' blocks_ (main's ruling on R10.T6.b's question):
+    `CoverageMask.survey(change)` adds a block's `newlySurveyed` runs as the pool's
+    `onFieldChange` reports them, and `update(coverage)` now adds the store's cells to the cells it
+    holds, rather than replacing them, so that an answer behind the workers unsurveys nothing; a
+    release, or a field of another level, starts it afresh.
+  - _`surveyEdges(coverage, face)`._ Provides' `surveyEdges(face, level)`: the level is the
+    coverage's own. Each piece (`SurveyEdge`) is a side of a surveyed cell whose neighbour across it,
+    on the same face or across a face's edge (`edgeNeighbour`), is not surveyed, margin cells
+    unsurveyed; each listed once, by its surveyed cell's face.
+  - _The mark_ (`surveyEdgeMark`). The pieces are joined through their corners into runs, the
+    surveyed cell on the left seen from outside the body; each side is drawn on the spheroid in
+    pieces of at most 8 px on the view, at the rim of the step, max(drawn height, 0) (the view's
+    `heightAtM`; the datum where it holds none), as view-space segments, so that a depth test hides
+    it behind nearer ground, and not beyond the spheroid's horizon or behind the camera; a tick 0.25
+    rem long every 1 rem of each drawn run, the first half a rem in, at right angles on the view,
+    towards the unsurveyed side, its far end at its foot's depth, none within 0.5 rem of
+    `options.keepClear` (the line-of-sight mark's ticks); and the range to its nearest drawn point
+    inside the view, from the own ship (`options.rangeFromM`) or the camera.
+    `buildWireframeDrawList` draws it from `DrawOptions.surveyEdges` in both styles, the overlay
+    casing the wireframe list's lines: a batch a body, `survey-edge:<body>`, `--text` at 1 px with
+    the lines' casing, never dashed, its nearest range in `WireframeDrawList.surveyEdges`.
+    `surveyEdgeNote` writes the list's note, `SURVEY EDGE 4.21 km`, with `FROM CAMERA` where there is
+    no own ship (`rangeText`'s form).
+  - _Not wired into a view._ No view draws a body's terrain yet. Its terrain pass, the store and the
+    pool's `onFieldChange` feeding a `CoverageMask`, `litBodiesOf`'s `surveyCoverage` and the draw
+    list's `surveyEdges` with heights from the resident bakes wait for the first view that draws it,
+    R10.T10.e's hand-over or T11's wireframe; the list's note and the tripod's give-way
+    (`keepClear`) are T12's, whose text lists the note. The edge hidden by nearer terrain needs that
+    terrain's depth in the symbology's pass: T11's depth-only terrain in the wireframe; over the
+    image, the overlay's depth holds none yet.
+  - _Tests_ (`slotLayout.test.ts`, `gpu/resources.test.ts`, `terrainMaterial.test.ts`,
+    `terrainPass.test.ts`, `coverage.test.ts`, `surveyEdge.test.ts`, `surveyEdge.wasm.test.ts`,
+    `draw.test.ts`, `drawList.test.ts`, `submit.test.ts`): as the task lists them, `surveyEdges` on
+    a fixture coverage of level 5 (an L of three cells beside a margin cell, a corner cell alone,
+    a cell on a face's edge whose neighbour across it is surveyed) exactly the sides listed by hand,
+    each once over the six faces; and in `gpu/resources.test.ts` and `terrainPass.test.ts` every
+    terrain material on both paths, lit and spike, at most 8 storage buffers a stage by its declared
+    stages, each binding's stages those of the WGSL walk, and (in `gpu/resources.test.ts`) each
+    storage field its layout makes bound by its material. Beside them: the lit mesh's parts,
+    windings and first vertices; the mask's packing, code and refusals; the centre vertex read
+    against edge vertices that hold the neighbour's state; the discard against the coverage on the
+    generated world; the GPU mask following blocks and unsurveying nothing on a lagging answer; the
+    mark's closed line, tick count, length and side, its rim's height, the horizon, its ranges, its
+    give-way and its note; the mesh draw's mask and axes, and the default.
+  - _The smoke run_, `R10.T10.c the survey edge` (part 6): a 4 × 4 block of level-7 patches across
+    the first survey's +i edge, two columns surveyed and two not, seen from 30 km over the survey's
+    side about 60° below the horizon, the camera pitched so that the edge on the datum falls between
+    two rows of pixels (`poseOver`: the reference surface finds a pixel's cell from an `f32` hit
+    some tenths of a metre off, so that a pixel's centre within that of the edge could go to both
+    or neither). With their heights, the reference surface then the terrain into one target: every
+    texel finite and every pixel drawn, the skirts closing the step to the datum (the terrain 150 to
+    830 m below it at the edge). On the datum, each surface alone: no pixel drawn by both. Run with
+    `just test-render --part=6` (2026-10-16, both variants pass, 4.0 s and 6.0 s): with relief,
+    finite and no pixel undrawn of 3,072; on the datum, the terrain 1,147 pixels, the reference
+    surface 1,921, both 0; and T10.b's lit terrain unchanged (53.9% terrain, 1,655 lit pixels), its
+    block inside the survey.
+  - _Acceptance, as built:_
+    `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain src/renderer/src/view/engine`
+    (65 files, 841 tests), with `src/renderer/src/view/bodies`, `view/wireframe`, `smoke/` and
+    `view/atmosphere/surfaceLighting.test.ts`, whose files it changes too (90 files, 2,419 tests);
+    and `just test-render --part=6`, the part that holds both lit-terrain groups (part 1's
+    catalogue and R07.T9's mesh bodies, whose material this task changes, are the gate's).
+  - _By hand, run here._ The skirt heights seen at the edge on a flattened generated world: on the
+    Moon-like fixture (flattening 0.0012), along the five sides of four surveyed patches of levels 6
+    and 7 that meet unsurveyed cells, the skirts span 0 to 831 m (the terrain 831 m below the datum
+    at most and 476 m above it), within each patch's own relief, 766 to 1,339 m
+    (`surveyEdge.wasm.test.ts` holds each vertex's span to its patch's): the two surfaces share the
+    spheroid's datum. The edge's look by eye, on the development machine and the owner's UHD 620,
+    stays pending by hand until a view draws a generated world's terrain (T10.e, T15).
+  - _Generator version._ Untouched (22): presentation alone, no golden moved.
+- **Questions for "main" (R10.T10.c)** (none touches the server's contracts; each built to its
+  lean).
+  - _The discard's rule._ Design note 12's "interpolated mask below one half" draws both surfaces,
+    or neither, along a half-quad strip at each coarse cell's edge; as built, the fragment's cell at
+    its centre vertex (above), the half only where a cell spans one quad or less. Lean: as built,
+    Design note 12 amended to "discards fragments outside a surveyed coarse cell, read from the
+    survey mask at the cell's centre vertex".
+  - _The field's code byte and stages._ The `survey-mask` field's 4,228 B carry the cell code in
+    the last word's spare byte, and the field binds to both stages, where decision-r10-t10b-r09-t2e
+    §5 foresaw one. Lean: as built; T11's wireframe reads the same field and code.
+- **Deferred findings (2026-10-13 rule) (R10.T10.c)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _A hole while a rebake is due._ The GPU mask takes a block's cells at once and a patch's mask
+    takes them at its rebake, so for a rebake's latency (a bake, 40 to 140 ms) a newly surveyed cell
+    is discarded by both surfaces along the survey's advancing edge. The lever: the terrain's
+    discard reading the GPU mask too, or the GPU mask taking a block's cells once its patches'
+    rebakes land.
+  - _Fins at every sixteenth line._ Patches three to five levels coarser than the field (cells of
+    8, 4 or 2 quads) have no fin on a coarse cell's edge that lies off lines 16, 32 and 48; such
+    patches are drawn from a distance at which a step of a kilometre subtends a pixel or so. The
+    lever: a fin every eighth line (half again the fins' vertices), or a fin draw of its own.
+  - _The reference surface's edge in `f32`._ The reference surface's cell comes from an `f32` hit on
+    the analytic spheroid, a few tenths of a metre to a metre off at a body's radius, the terrain's
+    from its patch's coordinates, exact: across that width a pixel may be drawn by both (the depth
+    test picks one) or by neither (the surveyed side's foot strip shows below). Seen only with metre
+    pixels at the edge. The lever: the reference surface's cell from patch-relative coordinates.
+  - _The limb draw keeps no mask._ A mesh body's limb, the disc's second draw, is drawn whole, over
+    any surveyed terrain at the limb. The lever: the same discard in `bodyDiscDraw.wgsl` for a mesh
+    body's limb.
+  - _A skirt seen edge-on_ is shaded under the datum's normal at |μ|, which is 0 exactly edge-on,
+    where it reflects nothing: a line one pixel wide at most.
+  - _The cache's slots._ The `survey-mask` field takes 4,228 B a lit slot: 158,936 B, 422 slots in
+    64 MiB on the low setting, against Design note 15's rule of 430; 311,024 B, 1,286 slots in
+    400 MB on the high one. T14.

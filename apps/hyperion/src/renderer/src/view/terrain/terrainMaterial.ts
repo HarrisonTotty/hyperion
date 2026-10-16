@@ -71,6 +71,8 @@ export const TERRAIN_LIT_BINDINGS = {
   atmosphere: 9,
   /** Each slot's horizon map (`slotLayout.ts`' `horizon-map`, R10.T8.b). */
   horizonMap: 16,
+  /** Each slot's survey mask (`slotLayout.ts`' `survey-mask`, R10.T10.c). */
+  surveyMask: 17,
 } as const;
 
 /** The console names of the two paths' lit materials. */
@@ -85,10 +87,14 @@ const DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
  * (`shadows/horizon.wgsl`, R10.T8.b), `terrainLit.wgsl` and the path's source.
  *
  * @remarks
- * Each storage buffer is visible only to the stage that reads it (decision-r10-t10b-r09-t2e §5):
- * R05's five, four on `face-differences`, to the vertex stage, and the class layers, the lights and
- * the horizon map to the fragment stage, so that neither stage counts more than WebGPU's default
- * eight, which the engine never raises.
+ * Each storage buffer is visible only to the stages that read it (decision-r10-t10b-r09-t2e §5):
+ * R05's five, four on `face-differences`, to the vertex stage, the class layers, the lights and
+ * the horizon map to the fragment stage, and the survey mask to both (R10.T10.c), the vertex stage
+ * placing the survey edge's fins by its cell code and the fragment stage discarding by its mask:
+ * six and four, five and four on `face-differences`, so that neither stage counts more than
+ * WebGPU's default eight, which the engine never raises. It draws the lit mesh
+ * (`gpu/resources.ts`' `litPatchMeshData`), whose skirts and fins join the terrain to the reference
+ * surface at the survey's edge.
  */
 export function terrainLitMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
   const source =
@@ -107,6 +113,7 @@ export function terrainLitMaterialSpec(path: TerrainVertexPath): WgslMaterialSpe
     { name: "classLayers", binding: b.classLayers, stages: fragment },
     { name: "terrainLights", binding: b.terrainLights, stages: fragment },
     { name: "horizonMap", binding: b.horizonMap, stages: fragment },
+    { name: "surveyMask", binding: b.surveyMask, stages: ["vertex", "fragment"] },
   ];
   return {
     name: `terrain-lit-${path}`,

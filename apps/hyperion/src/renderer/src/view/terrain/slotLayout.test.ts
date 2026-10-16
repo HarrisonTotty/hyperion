@@ -11,6 +11,8 @@ import {
   MESH_NORMALS_BYTES,
   OFFSETS_BYTES,
   type SlotField,
+  SURVEY_CELL_CODE_BYTE,
+  SURVEY_MASK_BYTES,
   slotLayout,
   terrainSlotFields,
   terrainSlotLayout,
@@ -58,12 +60,34 @@ describe("the slot layout", () => {
     const spike = terrainSlotLayout(SETTINGS.low.terrain);
     const lit = terrainSlotLayout(SETTINGS.low.terrain, "lit");
     expect(spike.fields.map((f) => f.name)).not.toContain("class-layers");
-    expect(lit.fields.at(-1)).toEqual({
+    expect(lit.fields.at(-2)).toEqual({
       name: "class-layers",
       storage: "storage-buffer",
       bytes: CLASS_LAYERS_BYTES,
     });
-    expect(lit.bytesPerSlot - spike.bytesPerSlot).toBe(CLASS_LAYERS_BYTES + HORIZON_MAP_BYTES);
+    expect(lit.bytesPerSlot - spike.bytesPerSlot).toBe(
+      CLASS_LAYERS_BYTES + HORIZON_MAP_BYTES + SURVEY_MASK_BYTES,
+    );
+  });
+
+  it("adds R10.T10.c's survey mask to a lit layout alone, 65 × 65 bytes four to a word, 4,228 B a slot", () => {
+    expect(SURVEY_MASK_BYTES).toBe(4_228);
+    expect(SURVEY_MASK_BYTES % 4).toBe(0);
+    // The cell code's byte is the first past the vertices', in the last word's spare bytes.
+    expect(SURVEY_CELL_CODE_BYTE).toBe(65 * 65);
+    expect(SURVEY_CELL_CODE_BYTE).toBeLessThan(SURVEY_MASK_BYTES);
+    const lit = terrainSlotLayout(SETTINGS.low.terrain, "lit");
+    expect(lit.fields.at(-1)).toEqual({
+      name: "survey-mask",
+      storage: "storage-buffer",
+      bytes: SURVEY_MASK_BYTES,
+    });
+    expect(terrainSlotFields(SETTINGS.high.terrain).map((f) => f.name)).not.toContain(
+      "survey-mask",
+    );
+    // The low lit slot is 158,936 B: 422 slots in 64 MiB, against Design note 15's rule of 430.
+    expect(lit.bytesPerSlot).toBe(158_936);
+    expect(lit.slotCount).toBe(422);
   });
 
   it("carries offsets on the baked-offsets path only", () => {

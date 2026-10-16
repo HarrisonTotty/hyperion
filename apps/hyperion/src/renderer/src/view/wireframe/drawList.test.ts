@@ -15,6 +15,8 @@ import type { Viewport } from "../camera/projection";
 import type { CameraTarget } from "../camera/state";
 import type { ViewPosition } from "../coords/position";
 import { relativeToCamera } from "../coords/relative";
+import { IDENTITY_ROTATION } from "../coords/rotation";
+import { CoverageView, fieldCellIndex } from "../terrain/coverage";
 import { MIN_STROKE_DEVICE_PX } from "../../lib/strokes";
 import {
   DESTINATION_LABEL_PLACES,
@@ -271,6 +273,50 @@ describe("buildWireframeDrawList", () => {
     expect(onThePlate(segments, 2)).toBe(4);
   });
 
+  it("marks a body's survey edge as a cased --text line 1 px wide in view space, with its nearest range (R10.T10.c)", () => {
+    const input = scene();
+    const centreM = relativeToCamera(centre(FIXTURE_PLANET), CAMERA.pose, sceneOrigins(input));
+    // The camera looks at the planet from along +z: four cells about face +z's centre surveyed.
+    const start = fieldCellIndex({ face: 2, level: 5, i: 14, j: 14 });
+    const merged = CoverageView.empty(5).merged(
+      { ranges: [{ start, end: start + 4, resolution: 12 }] },
+      1,
+    );
+    if (!merged.ok) {
+      throw new Error(merged.message);
+    }
+    const list = build(
+      {
+        surveyEdges: [
+          {
+            body: FIXTURE_PLANET,
+            coverage: merged.coverage,
+            figure: { equatorialRadiusM: 6.371e6, polarRadiusM: 6.371e6 },
+            rotation: IDENTITY_ROTATION,
+            centreM,
+            heightAtM: () => null,
+          },
+        ],
+      },
+      input,
+    );
+    const batch = list.lines.find((line) => line.id === `survey-edge:${FIXTURE_PLANET}`);
+    expect([
+      batch?.space,
+      batch?.token,
+      batch?.colour,
+      batch?.widthPx,
+      batch?.dash,
+      batch?.casingWidthPx,
+      batch?.casingColour,
+    ]).toEqual(["view", "text", "colour-text", 1, null, CASING_PX, "colour-surface-0"]);
+    expect(batch?.segments.length ?? 0).toBeGreaterThan(0);
+    expect(list.surveyEdges).toHaveLength(1);
+    // From the own ship, some 3 × 10⁷ m from the planet's near side.
+    expect(list.surveyEdges[0]?.nearestRangeM).toBeGreaterThan(1e7);
+    expect(build().surveyEdges).toEqual([]);
+  });
+
   it("draws occluders, then lines, then sprites, and carries its strokes and slope term", () => {
     expect(Object.keys(build())).toEqual([
       "occluderSpheres",
@@ -281,6 +327,7 @@ describe("buildWireframeDrawList", () => {
       "strokeScale",
       "markStrokePx",
       "occluderSlopePx",
+      "surveyEdges",
     ]);
   });
 

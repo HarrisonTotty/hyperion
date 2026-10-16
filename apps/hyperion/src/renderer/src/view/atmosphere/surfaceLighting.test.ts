@@ -588,8 +588,10 @@ describe("the surface lighting's WGSL (R08.T9.b)", () => {
       BODY_DISC_MATERIALS.limb,
       SMOOTH_MESH_MATERIAL,
     ]) {
-      expect(spec.textures?.slice(2)).toEqual(expected);
+      // The mesh's coverage mask (plan R10, R10.T10.c) follows the tables, at binding 13.
+      expect(spec.textures?.slice(2, 9)).toEqual(expected);
     }
+    expect(SMOOTH_MESH_MATERIAL.textures?.slice(9).map(({ binding }) => binding)).toEqual([13]);
     for (const [i, name] of [
       "atmosphere_body",
       "atmosphere_transmittance",

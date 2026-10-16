@@ -16,6 +16,12 @@
 // shading functions, with the meter class in alpha, and only where the body covers the pixel
 // wholly. Elsewhere it is discarded, writing no depth; the limb is the disc's second draw at the
 // limb's depth, in the painter's sequence. So a promoted disc and its mesh draw the same light.
+//
+// Beneath a body's surveyed terrain (plan R10, R10.T10.c, Design note 12) the figure is the
+// reference surface, drawn with the inverse of the GPU's coverage mask: a pixel whose ray meets the
+// spheroid in a coarse cell the mask holds surveyed is discarded, so that no reference surface
+// shows through a surveyed valley and no ground is claimed twice. A body without a survey binds a
+// mask of no surveyed cell, which discards nothing.
 
 struct Draw {
   // Zero: each instance carries its own origin.
@@ -26,6 +32,9 @@ struct Draw {
   firstInstance : u32,
   // The body-fixed axes into the galactic axes, as `mat4x4f`.
   bodyRotation : mat4x4f,
+  // The coverage mask's axes, the body's own body-fixed axes (its rotation's), into the galactic
+  // axes, as `mat4x4f`; any where the body has no survey (R10.T10.c).
+  coverageAxes : mat4x4f,
 }
 
 @group(1) @binding(0) var<uniform> draw : Draw;
@@ -49,6 +58,11 @@ struct PatchInstance {
 
 // The `disc cells` pass's sums, which a small body's figure reads (R07.T8.d; `pixel_cells`).
 @group(2) @binding(5) var<storage, read> cell_sums : array<vec4f>;
+
+// The body's coverage mask (plan R10, `terrain/coverage.ts`' `CoverageMask`): one `r8unorm` layer a
+// face of R05's cube sphere, 2ᴸ × 2ᴸ texels at the coarse field's level L, 1 where the cell is
+// surveyed; a 1 × 1 layer of 0 a face for a body without a survey.
+@group(2) @binding(13) var coverage_mask : texture_2d_array<f32>;
 
 struct MeshVarying {
   @builtin(position) position : vec4f,
@@ -108,8 +122,30 @@ fn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32
   return out;
 }
 
+// Whether the pixel whose centre is `position` sees the spheroid in a surveyed cell, where the
+// terrain draws the ground: the ray through its centre against the analytic spheroid, the hit's
+// direction on R05's cube sphere (the spheroid's point of unit direction d is M d, so d is the hit
+// stretched along the pole) in the body-fixed axes, and its cell's texel, as the disc reads a class
+// map (`class_map_texel`).
+fn surveyed_beneath(position : vec2f) -> bool {
+  let body = body_of();
+  let hit = hit_spheroid(body, view_ray(floor(position) + 0.5));
+  if (hit.w == 0.0) {
+    return false;
+  }
+  let d = normalize(stretch_along(body, hit.xyz));
+  let x = to_view(draw.coverageAxes[0].xyz);
+  let y = to_view(draw.coverageAxes[1].xyz);
+  let z = to_view(draw.coverageAxes[2].xyz);
+  let texel = class_map_texel(vec3f(dot(d, x), dot(d, y), dot(d, z)), textureDimensions(coverage_mask).x);
+  return textureLoad(coverage_mask, texel.xy, texel.z, 0).r >= 0.5;
+}
+
 @fragment
 fn fragmentMain(v : MeshVarying) -> @location(0) vec4f {
+  if (surveyed_beneath(v.position.xy)) {
+    discard;
+  }
   let pixel = disc_pixel(v.position.xy, 0u);
   if (!pixel.drawn) {
     discard;

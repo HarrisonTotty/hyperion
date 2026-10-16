@@ -94,6 +94,7 @@ function layers(
     palette: new Uint8Array(16),
     weights: new Uint8Array(),
     surveyMask: new Uint8Array(),
+    fieldLevel: 8,
     boundM: 1,
     sigmaM: 0,
     complete,

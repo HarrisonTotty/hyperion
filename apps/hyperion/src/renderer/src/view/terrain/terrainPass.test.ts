@@ -975,6 +975,7 @@ function bodyLayers(): TerrainLayers {
     palette,
     weights,
     surveyMask: new Uint8Array(65 * 65).fill(255),
+    fieldLevel: 8,
     boundM: 1,
     sigmaM: 0,
     complete: true,
@@ -1047,9 +1048,11 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
       "horizonMap",
       "instances",
       "slots",
+      "surveyMask",
       "terrainLights",
     ]);
     expect(draw.storageBuffers?.["horizonMap"]?.name).toBe("terrain horizon-map");
+    expect(draw.storageBuffers?.["surveyMask"]?.name).toBe("terrain survey-mask");
     expect(Object.keys(draw.textures).toSorted()).toEqual([
       "atmosphereAbsorberColumns",
       "atmosphereAbsorberCurves",
@@ -1211,14 +1214,15 @@ describe("the terrain materials' storage bindings by stage (decision-r10-t10b-r0
       return Math.max(counts.vertex, counts.fragment) > DEFAULT_STORAGE_BUFFERS_PER_STAGE;
     });
     expect(over.map((spec) => spec.name)).toEqual([]);
-    // The lit material's: R05's five (four on face-differences) in the vertex stage, and the class
-    // layers, the lights and the horizon map in the fragment stage.
+    // The lit material's: R05's five (four on face-differences) in the vertex stage, the class
+    // layers, the lights and the horizon map in the fragment stage, and R10.T10.c's survey mask in
+    // both.
     expect(
       storageBuffersPerStage(materialBindings(terrainLitMaterialSpec("baked-offsets"))),
-    ).toEqual({ vertex: 5, fragment: 3 });
+    ).toEqual({ vertex: 6, fragment: 4 });
     expect(
       storageBuffersPerStage(materialBindings(terrainLitMaterialSpec("face-differences"))),
-    ).toEqual({ vertex: 4, fragment: 3 });
+    ).toEqual({ vertex: 5, fragment: 4 });
   });
 
   it("declare each storage buffer to the stages whose entry points read it, and no other", () => {
@@ -1232,8 +1236,10 @@ describe("the terrain materials' storage bindings by stage (decision-r10-t10b-r0
       });
     });
     expect(mismatched).toEqual([]);
-    // The walk finds the reads at all: the lit material's horizon map in its fragment stage.
+    // The walk finds the reads at all: the lit material's horizon map in its fragment stage, and
+    // its survey mask in both (R10.T10.c).
     const lit = bindingStages(terrainLitMaterialSpec("face-differences").vertexWgsl);
     expect([...(lit.get(16) ?? [])]).toEqual(["fragment"]);
+    expect([...(lit.get(17) ?? [])].toSorted()).toEqual(["fragment", "vertex"]);
   });
 });

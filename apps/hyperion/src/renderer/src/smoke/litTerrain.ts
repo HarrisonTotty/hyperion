@@ -10,7 +10,8 @@
  * shadows blend to by a morph factor of about ¼ to ½ (R10.T8.b). They are drawn from 30 km above
  * the block, 60° below the horizon, under one Sun-like star and one planetshine source through a
  * body without air. The
- * frame must be finite at every texel, mostly terrain, and lit. A buffer or texture beyond the
+ * frame must be finite at every texel, mostly terrain, and lit. The block lies within the survey,
+ * so that R10.T10.c's discard keeps all of it. A buffer or texture beyond the
  * device's limits, or a write outside one, raises an uncaptured validation error, which the
  * harness's main process counts against the run.
  */
@@ -56,7 +57,10 @@ import { type Checks, halfTexels, projection } from "./harness";
  * radius, 1,737.4 km, at a flattening of 0.0012, `Spheroid::from_volumetric`'s a = R ÷ ∛(1 − f)).
  */
 const MOON_LIKE_A_M = 1.7374e6 / Math.cbrt(1 - 0.0012);
-const MOON_LIKE = { equatorialRadiusM: MOON_LIKE_A_M, polarRadiusM: MOON_LIKE_A_M * (1 - 0.0012) };
+export const MOON_LIKE = {
+  equatorialRadiusM: MOON_LIKE_A_M,
+  polarRadiusM: MOON_LIKE_A_M * (1 - 0.0012),
+};
 
 /** The frames' size, pixels. */
 const FRAME = { widthPx: 64, heightPx: 48 } as const;
@@ -74,8 +78,8 @@ const CENTRE: PatchKey = { face: 1, level: 7, i: 45, j: 45 };
 const HEIGHT_M = 30_000;
 const DEPRESSION_DEG = 60;
 
-/** The fixture's body, seed and first payload's blocks. */
-function parseFixture(): { body: string; seed: string; blocks: ArrayBuffer[] } {
+/** The fixture's body, seed and first payload's blocks, which R10.T10.c's check shares. */
+export function parseFixture(): { body: string; seed: string; blocks: ArrayBuffer[] } {
   let body = "";
   let seed = "";
   const blocks: ArrayBuffer[] = [];
@@ -350,7 +354,8 @@ async function drawInto(
   const lit = resources.lit;
   const classLayers = resources.field("class-layers");
   const horizonMap = resources.field("horizon-map");
-  if (lit === null || classLayers === null || horizonMap === null) {
+  const surveyMask = resources.field("survey-mask");
+  if (lit === null || classLayers === null || horizonMap === null || surveyMask === null) {
     throw new Error("the lit layout has no lit resources");
   }
   const storageBuffers: Record<string, BufferHandle> = {
@@ -360,6 +365,7 @@ async function drawInto(
     classLayers,
     terrainLights: lit.lights,
     horizonMap,
+    surveyMask,
   };
   for (const name of ["heights", "offsets"] as const) {
     const buffer = resources.field(name);

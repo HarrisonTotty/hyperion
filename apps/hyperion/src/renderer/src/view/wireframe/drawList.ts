@@ -31,6 +31,7 @@ import { behindLimb, sphereInFrustum } from "./cull";
 import type { Polyline } from "./curve";
 import { hullEdges, hullFaces } from "./hulls";
 import { orbitPath } from "./orbits";
+import { surveyEdgeMark, type SurveyEdgeView } from "../terrain/surveyEdge";
 import {
   anchorRadiusPx,
   bracketHalfSizePx,
@@ -316,6 +317,21 @@ export interface WireframeDrawList {
   readonly markStrokePx: number;
   /** Both occluders' slope term, device px: {@link occluderSlopePxAt} the stroke scale. */
   readonly occluderSlopePx: number;
+  /**
+   * The bodies' survey edges drawn (plan R10, R10.T10.c), each with the range to its nearest point
+   * in the picture, for the view's list note `SURVEY EDGE` (T12's).
+   */
+  readonly surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
+}
+
+/** A survey edge the list draws (R10.T10.c). */
+export interface DrawnSurveyEdge {
+  readonly body: string;
+  /**
+   * The range to its nearest point inside the view, m, from the own ship where there is one, else
+   * from the camera; `null` where none of it is drawn there.
+   */
+  readonly nearestRangeM: number | null;
 }
 
 /** A list that draws nothing, with a view's strokes: for a frame whose symbology is not drawn. */
@@ -331,6 +347,7 @@ export function emptyDrawList(
     strokeScale: strokes.strokeScale,
     markStrokePx: strokes.markStrokePx,
     occluderSlopePx: occluderSlopePxAt(strokes.strokeScale),
+    surveyEdges: [],
   };
 }
 
@@ -370,6 +387,11 @@ export interface DrawOptions extends ViewStrokes {
    * arrived; `undefined` or `null` draws the scene's stars.
    */
   readonly skyStars?: ReadonlyArray<SpriteStar> | null;
+  /**
+   * The bodies' surveys whose edges the list marks (plan R10, R10.T10.c; the guide's
+   * `SURVEY EDGE`), in both styles; none until a view draws a body's terrain (R10.T10.e, T11).
+   */
+  readonly surveyEdges?: ReadonlyArray<SurveyEdgeView>;
 }
 
 /** A star as the sprite path takes it: its direction from the camera and its light per channel. */
@@ -662,12 +684,32 @@ export function buildWireframeDrawList(
     );
   }
 
+  const own = scene.craft.find((craft) => craft.id === scene.ownShip);
+  // The survey edges (R10.T10.c): a `--text` line, its ticks into the unsurveyed side, cased as
+  // every line, in view space, so that nearer ground hides it; ranges from the own ship.
+  const surveyEdges: DrawnSurveyEdge[] = [];
+  for (const edge of options.surveyEdges ?? []) {
+    const mark = surveyEdgeMark(edge, projection, viewport, {
+      remPx: options.remPx,
+      keepClear: [],
+      rangeFromM: own === undefined ? null : fromCamera(own.pose.position),
+    });
+    const segments = new Float32Array(mark.line.length + mark.ticks.length);
+    segments.set(mark.line);
+    segments.set(mark.ticks, mark.line.length);
+    if (segments.length > 0) {
+      lines.push(
+        batch(`survey-edge:${edge.body}`, "view", segments, "text", drawnPx(STROKE_PX.thin)),
+      );
+    }
+    surveyEdges.push({ body: edge.body, nearestRangeM: mark.nearestRangeM });
+  }
+
   // Symbology: body symbols, anchors, reticles and the flight path marker, in screen space.
   const markAt = (pointM: Vec3): ScreenPx | null => {
     const p = project(pointM, projection, viewport);
     return p.inFront ? { xPx: p.xPx, yPx: p.yPx } : null;
   };
-  const own = scene.craft.find((craft) => craft.id === scene.ownShip);
   const symbologyAnchors: SymbologyAnchor[] = [];
   for (const target of cameraSceneOf(scene).targets) {
     const pointM = fromCamera(targetPosition(target, origins));
@@ -799,6 +841,7 @@ export function buildWireframeDrawList(
     strokeScale,
     markStrokePx,
     occluderSlopePx: occluderSlopePxAt(strokeScale),
+    surveyEdges,
   };
 }
 

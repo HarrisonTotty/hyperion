@@ -18,8 +18,15 @@ import {
   HEIGHTS_BYTES,
   HORIZON_MAP_BYTES,
   OFFSETS_BYTES,
+  type SlotFieldName,
+  SURVEY_CELL_CODE_BYTE,
+  SURVEY_MASK_BYTES,
   terrainSlotLayout,
 } from "../slotLayout";
+import { bindingStages } from "../../../test/wgslStages";
+import { materialBindings, storageBuffersPerStage } from "../../engine/webgpu/materials";
+import { terrainLitMaterialSpec } from "../terrainMaterial";
+import { terrainMaterialSpec } from "./material";
 import type { TerrainLayers } from "../workers/messages";
 import { allocationTally } from "./allocationTally";
 import {
@@ -27,12 +34,19 @@ import {
   GRID_INDICES,
   GRID_VERTICES,
   INDIRECT_ARGS_BYTES,
+  LIT_PATCH_INDICES,
+  LIT_VERTEX_CODE,
+  litPatchMeshData,
   NO_HORIZON_WORD,
   normalsAtlasLayout,
   PATCH_INDICES,
+  packSurveyMask,
   patchMeshData,
   type SlotUpload,
   SKIRT_VERTICES,
+  SURVEY_FIN_LINES,
+  surveyCellCode,
+  surveyedAt,
   TerrainResources,
   terrainLayout,
 } from "./resources";
@@ -82,6 +96,7 @@ function mappedLayers(): TerrainLayers {
     palette: new Uint8Array(16),
     weights: new Uint8Array(),
     surveyMask: new Uint8Array(65 * 65),
+    fieldLevel: 8,
     boundM: 1,
     sigmaM: 0,
     complete: true,
@@ -152,6 +167,290 @@ describe("the shared patch mesh", () => {
       segments += 1;
     }
     expect(segments).toBe(4 * 64);
+  });
+});
+
+describe("the lit material's mesh (R10.T10.c)", () => {
+  const { positions, indices } = litPatchMeshData();
+  const shared = patchMeshData();
+  const at = (v: number): readonly [number, number, number] => [
+    positions[3 * v] ?? Number.NaN,
+    positions[3 * v + 1] ?? Number.NaN,
+    positions[3 * v + 2] ?? Number.NaN,
+  ];
+  const triangle = (t: number): readonly [number, number, number] => [
+    indices[3 * t] ?? -1,
+    indices[3 * t + 1] ?? -1,
+    indices[3 * t + 2] ?? -1,
+  ];
+  const C = LIT_VERTEX_CODE;
+
+  it("keeps the shared mesh's vertices and grid, then adds the skirts' heads and the fins' datum ends", () => {
+    expect(positions.subarray(0, shared.positions.length)).toEqual(shared.positions);
+    expect(indices.subarray(0, GRID_INDICES)).toEqual(shared.indices.subarray(0, GRID_INDICES));
+    expect(positions).toHaveLength(3 * (GRID_VERTICES + 2 * SKIRT_VERTICES + 6 * 65));
+    expect(indices).toHaveLength(LIT_PATCH_INDICES);
+    expect(LIT_PATCH_INDICES).toBe(PATCH_INDICES + 4 * 64 * 6 + 6 * 64 * 12);
+    expect(Math.max(...indices)).toBe(positions.length / 3 - 1);
+    const codes = new Set<number>();
+    for (let v = 0; v < positions.length / 3; v += 1) {
+      codes.add(at(v)[2]);
+    }
+    expect([...codes].toSorted((x, y) => x - y)).toEqual([
+      C.grid,
+      C.skirtFoot,
+      C.skirtHead,
+      C.columnFin,
+      C.rowFin,
+    ]);
+  });
+
+  it("starts every triangle with a vertex of its own part, which the fragment reads flat", () => {
+    const parts = new Map<number, number>();
+    for (let t = 0; t < LIT_PATCH_INDICES / 3; t += 1) {
+      const [first, second, third] = triangle(t).map((v) => at(v)[2]);
+      parts.set(first ?? -1, (parts.get(first ?? -1) ?? 0) + 1);
+      // Every other vertex of a skirt's or a fin's triangle is its own part's or the grid's.
+      for (const code of [second, third]) {
+        expect([first, C.grid]).toContain(code);
+      }
+    }
+    expect(Object.fromEntries(parts)).toEqual({
+      [C.grid]: 64 * 64 * 2,
+      [C.skirtFoot]: 4 * 64 * 2,
+      [C.skirtHead]: 4 * 64 * 2,
+      [C.columnFin]: 3 * 64 * 4,
+      [C.rowFin]: 3 * 64 * 4,
+    });
+  });
+
+  it("hangs each skirt's foot and raises its head under and over every edge segment, anticlockwise from outside", () => {
+    const start = GRID_INDICES / 3;
+    for (let segment = 0; segment < 4 * 64; segment += 1) {
+      const [pFoot, qFoot, p] = triangle(start + 4 * segment);
+      const [qFoot2, q, p2] = triangle(start + 4 * segment + 1);
+      const [pHead, p3, q3] = triangle(start + 4 * segment + 2);
+      const [pHead2, q4, qHead] = triangle(start + 4 * segment + 3);
+      expect([qFoot2, p2, p3, q3, pHead2, q4]).toEqual([qFoot, p, p, q, pHead, q]);
+      const [px, py] = at(p);
+      const [qx, qy] = at(q);
+      expect(onEdge(px, py) && onEdge(qx, qy)).toBe(true);
+      expect(at(pFoot)).toEqual([px, py, C.skirtFoot]);
+      expect(at(qFoot)).toEqual([qx, qy, C.skirtFoot]);
+      expect(at(pHead)).toEqual([px, py, C.skirtHead]);
+      expect(at(qHead)).toEqual([qx, qy, C.skirtHead]);
+    }
+    // The foot strips are R05's skirt quads, each triangle's corners turned to start at its foot,
+    // which keeps its winding.
+    const r05 = (t: number): number[] => [...shared.indices.subarray(3 * t, 3 * t + 3)];
+    for (let segment = 0; segment < 4 * 64; segment += 1) {
+      for (const k of [0, 1]) {
+        const [a, b, c] = triangle(start + 4 * segment + k);
+        expect([c, a, b]).toEqual(r05(start + 2 * segment + k));
+      }
+    }
+  });
+
+  it("stands a fin in both windings along columns and rows 16, 32 and 48", () => {
+    expect(SURVEY_FIN_LINES).toEqual([16, 32, 48]);
+    const start = PATCH_INDICES / 3 + 4 * 64 * 2;
+    const lines = new Set<string>();
+    for (let quad = 0; quad < 6 * 64; quad += 1) {
+      const t = start + 4 * quad;
+      const [pDatum, qDatum, q] = triangle(t);
+      const [pDatum2, q2, p] = triangle(t + 1);
+      expect([pDatum2, q2]).toEqual([pDatum, q]);
+      expect([...triangle(t + 2)]).toEqual([pDatum, q, qDatum]);
+      expect([...triangle(t + 3)]).toEqual([pDatum, p, q]);
+      const [px, py] = at(p);
+      const [qx, qy, qCode] = at(qDatum);
+      const code = at(pDatum)[2];
+      expect(qCode).toBe(code);
+      expect(at(pDatum).slice(0, 2)).toEqual([px, py]);
+      expect([qx, qy]).toEqual(at(q).slice(0, 2));
+      lines.add(code === C.columnFin ? `x ${String(px)}` : `y ${String(py)}`);
+    }
+    expect([...lines].toSorted()).toEqual(["x 16", "x 32", "x 48", "y 16", "y 32", "y 48"]);
+  });
+});
+
+/** A survey mask of a patch whose vertices are surveyed where `surveyed(x, y)` says. */
+function maskOf(surveyed: (x: number, y: number) => boolean): Uint8Array {
+  const mask = new Uint8Array(65 * 65);
+  for (let y = 0; y <= 64; y += 1) {
+    for (let x = 0; x <= 64; x += 1) {
+      mask[65 * y + x] = surveyed(x, y) ? 255 : 0;
+    }
+  }
+  return mask;
+}
+
+/** Whether a vertex coordinate lies strictly inside the cell of quads 16 to 32. */
+function inCell(f: number): boolean {
+  return f > 16 && f < 32;
+}
+
+describe("the survey mask (R10.T10.c)", () => {
+  it("codes a coarse cell's quads along a patch's side as log₂, clamped to 0 to 6", () => {
+    expect(surveyCellCode(8, 8)).toBe(6);
+    expect(surveyCellCode(19, 5)).toBe(6);
+    expect(surveyCellCode(7, 8)).toBe(5);
+    expect(surveyCellCode(3, 8)).toBe(1);
+    expect(surveyCellCode(2, 8)).toBe(0);
+    expect(surveyCellCode(0, 8)).toBe(0);
+    expect(() => surveyCellCode(2.5, 8)).toThrow(RangeError);
+  });
+
+  it("packs 65 × 65 bytes four to a word, then the code, in 4,228 bytes", () => {
+    const mask = maskOf((x, y) => (x + y) % 3 === 0);
+    const packed = packSurveyMask(mask, 4);
+    expect(packed).toHaveLength(SURVEY_MASK_BYTES);
+    const words = new Uint32Array(packed.buffer);
+    expect(words).toHaveLength(1_057);
+    // Vertex (x, y)'s byte at 65 y + x, byte k of word w for vertex 4 w + k, from its low byte.
+    for (const [x, y] of [
+      [0, 0],
+      [3, 0],
+      [7, 9],
+      [64, 64],
+    ] as const) {
+      const n = 65 * y + x;
+      expect(((words[Math.floor(n / 4)] ?? 0) >>> (8 * (n % 4))) & 0xff).toBe(mask[n]);
+    }
+    expect(packed[SURVEY_CELL_CODE_BYTE]).toBe(4);
+    expect(((words[1_056] ?? 0) >>> 8) & 0xff).toBe(4);
+    expect(() => packSurveyMask(new Uint8Array(4_224), 4)).toThrow(RangeError);
+    expect(() => packSurveyMask(mask, 7)).toThrow(RangeError);
+  });
+
+  it("reads a fragment's cell at its centre vertex, whatever its edge vertices hold", () => {
+    // Cells of 16 quads (code 4): the cell at quads 16 to 32 surveyed, its edge vertices (on x or y
+    // 16 or 32) holding the neighbours' state, as a vertex on a cell's edge may.
+    const mask = maskOf((x, y) => inCell(x) && inCell(y));
+    const packed = packSurveyMask(mask, 4);
+    expect(surveyedAt(packed, 16.01, 16.01)).toBe(true);
+    expect(surveyedAt(packed, 31.99, 24)).toBe(true);
+    expect(surveyedAt(packed, 32.01, 24)).toBe(false);
+    expect(surveyedAt(packed, 15.99, 24)).toBe(false);
+    // Read by the interpolated mask instead, the surveyed cell would lose half a quad at its edge.
+    expect(surveyedAt(packSurveyMask(mask, 0), 16.4, 24)).toBe(false);
+    expect(surveyedAt(packSurveyMask(mask, 0), 16.6, 24)).toBe(true);
+    // A patch inside one cell (code 6) reads its centre vertex, an edge vertex aside.
+    const inside = packSurveyMask(
+      maskOf((x) => x !== 0),
+      6,
+    );
+    expect(surveyedAt(inside, 0.2, 0.2)).toBe(true);
+    expect(surveyedAt(inside, 64, 64)).toBe(true);
+  });
+
+  it("write each lit slot's mask and code, from its bake's mask and level", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit");
+    expect(resources.field("survey-mask")?.bytes).toBe(
+      resources.layout.slots.slotCount * SURVEY_MASK_BYTES,
+    );
+    const mask = maskOf((x) => x < 20);
+    const bake = upload(5, 65, false);
+    resources.upload({ ...bake, layers: { ...mappedLayers(), surveyMask: mask, fieldLevel: 9 } });
+    const write = engine.writes.findLast((w) => w.buffer === "terrain survey-mask");
+    expect([write?.offsetBytes, write?.bytes]).toEqual([5 * SURVEY_MASK_BYTES, SURVEY_MASK_BYTES]);
+    const written = new Uint8Array(write?.data.slice().buffer ?? new ArrayBuffer(0));
+    // The bake's key is at level 12 over a field at level 9: cells of 2^(12 + 6 − 9) quads, code 6.
+    expect(written).toEqual(packSurveyMask(mask, 6));
+    resources.dispose();
+  });
+
+  it("refuse a mask of another size before any write", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit");
+    engine.resetCounts();
+    const short = { ...mappedLayers(), surveyMask: new Uint8Array(64 * 64) };
+    expect(() => resources.upload({ ...upload(4, 65, false), layers: short })).toThrow(RangeError);
+    expect(engine.counts.bufferWrites).toBe(0);
+    resources.dispose();
+  });
+
+  it("make the lit mesh and its index count for a lit layout, R05's for the spike", async () => {
+    const engine = await countingRenderEngine();
+    // The indirect draw's index count, as the resources made last wrote it.
+    const indexCount = (): number => {
+      const write = engine.writes.findLast(
+        (w) => w.buffer === "terrain indirect" && w.offsetBytes === 0,
+      );
+      return new Uint32Array(write?.data.slice().buffer ?? new ArrayBuffer(4))[0] ?? -1;
+    };
+    const lit = new TerrainResources(engine, LOW, WGS84, "lit");
+    expect([lit.mesh.name, indexCount()]).toEqual(["terrain lit patch", LIT_PATCH_INDICES]);
+    const spike = new TerrainResources(engine, LOW, WGS84);
+    expect([spike.mesh.name, indexCount()]).toEqual(["terrain patch", PATCH_INDICES]);
+    expect(spike.field("survey-mask")).toBeNull();
+    lit.dispose();
+    spike.dispose();
+  });
+});
+
+/** The material's name of each slot field kept in a storage buffer. */
+const STORAGE_NAMES: Readonly<Record<SlotFieldName, string>> = {
+  heights: "heights",
+  offsets: "offsets",
+  normals: "normals",
+  "horizon-map": "horizonMap",
+  "class-layers": "classLayers",
+  "survey-mask": "surveyMask",
+};
+
+describe("the terrain materials' storage by stage (R10.T10.c; decision-r10-t10b-r09-t2e §5)", () => {
+  // Every terrain material, on both vertex paths, in lit and spike shading, with the storage
+  // fields its layout makes.
+  const cases = (["baked-offsets", "face-differences"] as const).flatMap((path) => [
+    { spec: terrainMaterialSpec(path), shading: "spike" as const, path },
+    { spec: terrainLitMaterialSpec(path), shading: "lit" as const, path },
+  ]);
+
+  it("count at most WebGPU's default eight storage buffers in each stage, by their declared stages", () => {
+    const over = cases.filter(({ spec }) => {
+      const counts = storageBuffersPerStage(materialBindings(spec));
+      return Math.max(counts.vertex, counts.fragment) > 8;
+    });
+    expect(over.map(({ spec }) => spec.name)).toEqual([]);
+    expect(
+      cases.map(({ spec }) => [spec.name, storageBuffersPerStage(materialBindings(spec))]),
+    ).toEqual([
+      ["terrain-baked-offsets", { vertex: 5, fragment: 0 }],
+      ["terrain-lit-baked-offsets", { vertex: 6, fragment: 4 }],
+      ["terrain-face-differences", { vertex: 4, fragment: 0 }],
+      ["terrain-lit-face-differences", { vertex: 5, fragment: 4 }],
+    ]);
+  });
+
+  it("declare each binding to the stages whose entry points read it, and bind every storage field its layout makes", async () => {
+    const engine = await countingRenderEngine();
+    for (const { spec, shading, path } of cases) {
+      const read = bindingStages(spec.vertexWgsl);
+      for (const buffer of spec.storageBuffers ?? []) {
+        const declared = [...(buffer.stages ?? ["vertex", "fragment"])].toSorted();
+        expect([spec.name, buffer.name, ...declared]).toEqual([
+          spec.name,
+          buffer.name,
+          ...[...(read.get(buffer.binding) ?? [])].toSorted(),
+        ]);
+      }
+      // Each slot field kept in a storage buffer with bytes is one the material declares.
+      const resources = new TerrainResources(
+        engine,
+        { ...LOW, vertexPath: path, cacheBytes: 2 ** 25 },
+        WGS84,
+        shading,
+      );
+      const names = new Set((spec.storageBuffers ?? []).map((buffer) => buffer.name));
+      const unbound = resources.layout.slots.fields
+        .filter((field) => field.storage === "storage-buffer" && field.bytes > 0)
+        .filter((field) => !names.has(STORAGE_NAMES[field.name]))
+        .map((field) => field.name);
+      expect([spec.name, ...unbound]).toEqual([spec.name]);
+      resources.dispose();
+    }
   });
 });
 
@@ -397,6 +696,7 @@ describe("the terrain's resources", () => {
       palette: new Uint8Array(16),
       weights: new Uint8Array(),
       surveyMask: new Uint8Array(65 * 65),
+      fieldLevel: 8,
       boundM: 1,
       sigmaM: 0,
       complete: true,
