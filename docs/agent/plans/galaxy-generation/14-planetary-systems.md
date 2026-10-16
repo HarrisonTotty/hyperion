@@ -13705,8 +13705,9 @@ tables::gauss_legendre`.
       least one given, and `OfDiagram`;
     - `CondensedPhase` (`Solid`, `Liquid`);
     - `Transition` (`kind`, `temperature`);
-    - `TransitionKind` (`Melting`, `Solidus`, `Liquidus`, `Eutectic { solute_mass_fraction }`,
-      `Decomposition`, `Sublimation`, `TriplePoint`; `name`);
+    - `TransitionKind` (`Melting`, `Solidus`, `Eutectic { solute_mass_fraction }`,
+      `Decomposition`, `Sublimation`, `TriplePoint`; `name`), built with a `Liquidus` for the
+      acid, removed after decision-p14-t49b-condensed (below);
     - `Substance::condensed`, and `Substance::grain_density(phase, temperature)`, which resolves
       a phase's density at a temperature.
 
@@ -13715,7 +13716,8 @@ tables::gauss_legendre`.
       was not read gets `None`, not modelled, rather than the other phase's figure: a rock's melt
       is T49.h's (decision-r11-palette-liquids §1.8), and a row with both a measured solid and a
       measured liquid (molten sulphur) fits;
-    - `Liquidus` is added, for the 75 wt% acid, whose eutectic composition is not its own;
+    - `Liquidus` was added, for the 75 wt% acid, whose eutectic composition is not its own. It is
+      removed after decision-p14-t49b-condensed (below): the acid takes its hydrates' eutectic;
     - `TriplePoint` holds its diagram's triple temperature, copied in a `const` and held to it to
       the bit by a test, so a `Transition` is always a kind and a temperature.
 
@@ -13778,7 +13780,8 @@ tables::gauss_legendre`.
       stoichiometry, an assumption.
     - `ch4_c2h6_n2`: **518.9 kg m⁻³ at 93.65 K**, Ligeia Mare's best-fit composition by
       **volume**, "71% CH4, 12% C2H6, and 17% N2" (Mastrogiuseppe et al. 2016, IEEE TGRS 54, 5646,
-      §V.B; read by the science check), by ideal mixing, ρ = Σ φᵢ ρᵢ, of the rows' own
+      §V.B, p. 5654; read by the science check, and ruled by decision-p14-t49b-condensed §1,
+      below), by ideal mixing, ρ = Σ φᵢ ρᵢ, of the rows' own
       saturated-liquid ancillaries, each under its own vapour's pressure; a test re-derives it.
       decision-r11-palette-liquids §1.8 gives these figures as Le Gall et al. 2016's, from
       memory, and reads them as mole fractions (525.8 kg m⁻³ so). Le Gall et al. 2016, read in
@@ -13786,11 +13789,14 @@ tables::gauss_legendre`.
       the N₂-free binary's (Engle et al. 2021).
     - `H2SO4`: **the row is aqueous sulphuric acid at 75.0 wt%**, the client's
       `sulphuric-acid-75.json`'s acid: 1,662.6 kg m⁻³ at 300 K (International Critical Tables
-      III). Its transition is that acid's liquidus, **242 ± 2 K**, read off Zeleznik 1991's Fig. 1
-      calculated monohydrate curve at x = 0.3553 by the science check (the research read
-      240 ± 4). It is not the research's 98 wt% figure, 271.6 K. The frozen acid first melts lower,
-      at the dihydrate–monohydrate eutectic, which lies between 228 and 233.67 K on the same
-      figure, unresolved. `acid_uv_absorber` shares both constants.
+      III). Its transition is the frozen acid's first melt, the dihydrate–monohydrate eutectic,
+      `Eutectic { solute_mass_fraction: 0.738 }` at **233.67 K**, an upper bound: the dihydrate's
+      congruent melting (Zeleznik 1991, Table 5), with the eutectic read off Fig. 1 at
+      233.4 ± 0.4 K and 73.8 ± 0.3 wt% (decision-p14-t49b-condensed §2.3). The 75 wt% acid's
+      liquidus, 242 ± 2 K off Fig. 1's calculated monohydrate curve at x = 0.3553 (the research
+      read 240 ± 4), stays in the source text only, with the metastable 220 K eutectic. It is not
+      the research's 98 wt% figure, 271.6 K. `acid_uv_absorber` shares both constants. (As
+      fixed after decision-p14-t49b-condensed, below; it was built as the liquidus.)
   - _Contradictions recorded_ (the research's findings against the plan, with the values built):
     - **Chondrites:**
       - `chondrite_cv`: 3,540 kg m⁻³ (Macke 2010, Table 22), not the plan's 3,420, which was from
@@ -13870,6 +13876,57 @@ tables::gauss_legendre`.
     `cargo test -p hyperion-sim --features testing substance`.
 
   - The registry golden gains `[condensed]` (71 rows), an extension at 22.
+  - _Fixed after decision-p14-t49b-condensed_ (2026-10-15, its own commit,
+    `fix(substance): P14.T49.b The acid's first melt, and no liquidus kind`). Nothing reads the
+    columns before T54.a, so the golden is re-blessed at 22 with no bump.
+    - **The transition is the first melt, for every row** (§2): the lowest temperature at about
+      one atmosphere at which the frozen assemblage holds any liquid at equilibrium; a
+      decomposition or a sublimation for a solid that never melts there; an upper bound where
+      only a bound is read.
+      `condensed.rs`'s module note and `Transition`'s, `TransitionKind`'s and
+      `CondensedColumns::transition`'s docs state it, and "above a solution's liquidus all of it"
+      is deleted. **`TransitionKind::Liquidus`**, added above for the acid, **is removed** with
+      its name. Readers (T49.c, T51.a, T49.h) read `transition().temperature()` as the first melt
+      and write no `Liquidus` arm.
+    - **The acid** (§2.3): `H2SO4` and `acid_uv_absorber` take
+      `Eutectic { solute_mass_fraction: 0.738 }` at 233.67 K, through one shared pair of constants,
+      `SULPHURIC_ACID_EUTECTIC_K` and `SULPHURIC_ACID_EUTECTIC_MASS_FRACTION` (renamed from
+      `SULPHURIC_ACID_75_LIQUIDUS_K`). The source, `SULPHURIC_ACID_FIRST_MELT`, labels it an upper
+      bound, as `iron_nickel`'s and the chondrites' are, `Fact` for Table 5's printed value, and
+      gives Fig. 1's 233.4 ± 0.4 K and 73.8 ± 0.3 wt%. The liquidus (242 ± 2 K), the metastable
+      220.0 K eutectic and the droplets' supercooling stay in its text only.
+    - **A test changed:** `substance_condensed_columns_cover_the_condensed_rows` holds a eutectic
+      to a `Solution` row except `H2SO4`, a `Molecule` row whose condensed columns are its
+      aqueous acid's. **A test added:** `substance_the_acid_first_melts_at_its_hydrates_eutectic`
+      holds both rows at 233.67 K and 0.738, to the bit, the fraction between the dihydrate's
+      0.7313 and 0.75, below the liquidus's lower bound.
+    - **The golden:** `[condensed]`'s rows 58 `H2SO4` and 79 `acid_uv_absorber` move, and nothing
+      else: in each, `transition liquidus` becomes `transition eutectic`, `transition_k` 242.0
+      becomes 233.67, and a `eutectic solute_mass_fraction` line (0.738) is added after
+      `transition_k` (four lines changed, two added).
+    - **Titan's liquid** (§1.4): its density source cites Mastrogiuseppe et al. 2016's §V.B,
+      p. 5654, and doi:10.1109/TGRS.2016.2563426; "decision-p14-t49b-condensed §1 corrects
+      decision-r11-palette-liquids §1.8's attribution and basis" replaces the Le Gall sentence. It
+      states why ideal volume additivity is the density the fractions define (the retrieval's
+      Lorentz–Lorenz mixing is in volume fractions), and the mole fractions derived from them,
+      CH₄ 0.7391, C₂H₆ 0.0965 and N₂ 0.1644, each rounded to four places from its own exact
+      value. `substance_titan_liquid_is_its_components_mixed_ideally` now re-derives them from the
+      rows' densities and molar masses, each within 5 × 10⁻⁵, its rounding. 518.9 kg m⁻³ is
+      unchanged.
+    - **NIST-JANAF** (§3): `rows/condensed.rs`'s module note cites the ruling beside
+      decision-composition §5, with its conditions (single values `Fact` with their table, one
+      per species; a value reduced from the tables `Reduced`, every table cited and the arithmetic
+      stated; no table fitted from, committed or copied; a modern primary wins, as for Fe and Cr;
+      T49.d's CEA cross-check). Graphite's and MgSO₄'s transitions (`Reduced`) and SiC's recorded
+      3,242 K now state their arithmetic: log K_f to partial pressures with the solids at unit
+      activity (MgSO₄'s gas its own, p(O₂) = p(SO₂) ÷ 2), and the sum's log₁₀ linear in 1 ÷ T
+      between the tables' adjacent rows (4,000–4,100, 1,200–1,300 and 3,200–3,300 K). SiC's
+      3,242 K moves to its own `transition` source, `Reduced`, as §3.1's condition 2 names it;
+      the row's 3,103.15 K stays `Fact`. No table value is committed, and no value moves.
+    - **Left to main's docs batch** (§1.4, §2.6, §3.3): the _For main_ lines below, the deferred
+      "the acid's 242 ± 2 K", and the appends to decision-r11-palette-liquids and
+      decision-composition. T49.b's, T49.d's and T54.a's plan text already carry the ruling
+      (docs-batch-20).
 - **Deferred findings (2026-10-13 rule)**, from P14.T49.b's step 2, part 2, first piece:
   - _Unverified figures, each labelled:_
     - granite's 960 °C (`reference.rs`, from memory), below the Ab–Qz bound of 1,062 °C;
@@ -13891,6 +13948,18 @@ tables::gauss_legendre`.
       measured.
   - _Mixing:_ ideal mixing for Titan's liquid ignores methane–ethane's negative excess volume, and
     N₂ is liquid at 93.65 K only in solution. Tan, Kargel and Marion 2013's cross-check is unread.
+    - **Ruled by main (2026-10-16):** each derived mole fraction is printed rounded to four places
+      from its own exact value, and independently rounded figures need not sum to 1. By the rows'
+      own ancillaries at 93.65 K (447.5258, 647.9651 and 725.7076 kg m⁻³) the exact fractions are
+      0.7391456, 0.0965025 and 0.1643519, so N₂ is **0.1644**, not the 0.1643 the ruling first
+      printed. decision-p14-t49b-condensed's three places (§1, §1.2's table, §4) now print
+      0.1644. The ideal mix there is 518.869 kg m⁻³, within 0.05 of the row's 518.9 (found by the
+      fix after decision-p14-t49b-condensed).
+  - _The first melt's wording_ (the same fix's science check): CO₂'s triple point, at 5.18 bar,
+    lies above one atmosphere, where its solid sublimes at about 194.7 K. So "a diagram row takes
+    its triple point" is no first melt at about one atmosphere for CO₂. The row keeps its triple
+    point, as the ruling says, and `TriplePoint`'s doc ("the lowest pressure at which its liquid
+    exists") is right.
   - _Spreads:_
     - `brine_mgclo4`'s eutectic spans 205–216 K in the literature;
     - Apollo 60025, a lunar ferroan anorthosite, measures 2,750–2,770, below `anorthosite`'s

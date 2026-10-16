@@ -917,10 +917,51 @@ mod tests {
                     solute_mass_fraction > 0.0 && solute_mass_fraction < 1.0,
                     "{key}: {solute_mass_fraction}"
                 );
-                assert_eq!(row.kind(), SubstanceKind::Solution, "{key}");
+                // `H2SO4` is a molecule whose condensed columns are its 75 wt% aqueous acid's.
+                let expected = if key.as_str() == "H2SO4" {
+                    SubstanceKind::Molecule
+                } else {
+                    SubstanceKind::Solution
+                };
+                assert_eq!(row.kind(), expected, "{key}");
             }
         }
         assert_eq!(count, 71);
+    }
+
+    /// The first melt is every row's transition (decision-p14-t49b-condensed §2): the frozen
+    /// 75 wt% acid, and the absorber it carries, first melt at the dihydrate–monohydrate
+    /// eutectic: at its upper bound, the dihydrate's 233.67 K, below the 75 wt% acid's liquidus,
+    /// with the eutectic's 0.738 `H2SO4` by mass, between the dihydrate's composition and the
+    /// row's own.
+    #[test]
+    fn substance_the_acid_first_melts_at_its_hydrates_eutectic() {
+        for key in ["H2SO4", "acid_uv_absorber"] {
+            let transition = by_key(key)
+                .unwrap()
+                .substance()
+                .condensed()
+                .unwrap()
+                .transition();
+            let TransitionKind::Eutectic {
+                solute_mass_fraction,
+            } = transition.kind()
+            else {
+                panic!("{key}: {:?} is no eutectic", transition.kind());
+            };
+            let t = transition.temperature().value();
+            assert_same_bits(t, 233.67);
+            assert_same_bits(solute_mass_fraction, 0.738);
+            assert!(
+                (0.7313..0.75).contains(&solute_mass_fraction),
+                "{key}: {solute_mass_fraction} lies between the dihydrate's and the row's own"
+            );
+            let liquidus_lower_k = 242.0 - 2.0;
+            assert!(
+                t < liquidus_lower_k,
+                "{key}: the first melt, {t} K, lies below the 75 wt% acid's liquidus"
+            );
+        }
     }
 
     /// A row resolves its grain density as its columns give it: a diagram row through its
@@ -979,14 +1020,40 @@ mod tests {
 
     /// Titan's sea liquid's density is its components' rows' saturated liquids mixed ideally by
     /// volume at its reference composition, volume fractions CH₄ 0.71, C₂H₆ 0.12 and N₂ 0.17
-    /// (Mastrogiuseppe et al. 2016), and 93.65 K: the pinned figure to its last place.
+    /// (Mastrogiuseppe et al. 2016, §V.B), and 93.65 K: the pinned figure to its last place.
+    ///
+    /// The mole fractions its density source derives, 0.7391, 0.0965 and 0.1644, follow from the
+    /// volume fractions by the same densities and the rows' molar masses, each rounded to four
+    /// places from its own exact value, so the three need not sum to 1
+    /// (decision-p14-t49b-condensed §1.2).
     #[test]
     fn substance_titan_liquid_is_its_components_mixed_ideally() {
         let at = Kelvin::new(93.65);
         let mut mixed = 0.0;
-        for (key, phi) in [("CH4", 0.71), ("C2H6", 0.12), ("N2", 0.17)] {
-            let diagram = by_key(key).unwrap().substance().phase_diagram().unwrap();
-            mixed += phi * diagram.liquid_density(at).unwrap().value();
+        let mut moles = [0.0; 3];
+        let components = [
+            ("CH4", 0.71, 0.7391),
+            ("C2H6", 0.12, 0.0965),
+            ("N2", 0.17, 0.1644),
+        ];
+        for ((key, phi, _), mol) in components.iter().zip(&mut moles) {
+            let row = by_key(key).unwrap().substance();
+            let rho = row
+                .phase_diagram()
+                .unwrap()
+                .liquid_density(at)
+                .unwrap()
+                .value();
+            mixed += phi * rho;
+            *mol = phi * rho / row.molar_mass_g_per_mol().unwrap();
+        }
+        let total: f64 = moles.iter().sum();
+        for ((key, _, stated), mol) in components.iter().zip(moles) {
+            let x = mol / total;
+            assert!(
+                (x - stated).abs() <= 5e-5,
+                "{key}: mole fraction {x} rounds to four places as {stated}"
+            );
         }
         let titan = by_key("ch4_c2h6_n2").unwrap().substance();
         let GrainDensity::Fixed {

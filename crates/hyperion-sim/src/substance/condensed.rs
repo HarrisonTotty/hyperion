@@ -1,5 +1,5 @@
 //! The condensed columns: what a row is as a solid or a liquid on a surface or in a cloud, its
-//! grain density, the transition at which its solid gives way, and the family of its mechanical
+//! grain density, its transition (its first melt), and the family of its mechanical
 //! rows (plan 14, P14.T49.b's second step; decision-composition §1.7;
 //! science-composition-crusts.md §1.3, §2, §3, §4 and §7).
 //!
@@ -13,10 +13,13 @@
 //!   keeps one value for each phase that was read, at a stated temperature
 //!   ([`GrainDensity::Fixed`]): a rock or a salt at room temperature, with its error recorded in
 //!   its sources (science-composition-crusts.md §3.2), a solution at its reference composition;
-//! - **the transition** ([`Transition`]) is the temperature at which the solid gives way: above a
-//!   lithology's solidus, a pure substance's melting or triple point and a solution's eutectic
-//!   some of it is liquid, above a solution's liquidus all of it, and a solid that never melts at
-//!   one atmosphere decomposes or sublimes there ([`TransitionKind`] says which);
+//! - **the transition** ([`Transition`]) is the row's first melt, for every kind: the lowest
+//!   temperature at about one atmosphere at which its frozen assemblage holds any liquid at
+//!   equilibrium, a pure substance's melting or triple point, a lithology's solidus, or a
+//!   solution's eutectic of the solids its reference composition freezes to. Above it some of it
+//!   is liquid; a solid that never melts at one atmosphere decomposes or sublimes there; an upper
+//!   bound where only a bound is read, labelled one in its source ([`TransitionKind`] says which
+//!   kind; decision-p14-t49b-condensed §2);
 //! - **the mechanics family** ([`MechanicsFamily`]) is the family of R10's material rows the
 //!   substance takes; a liquid's is its frozen form's.
 //!
@@ -87,21 +90,23 @@ pub enum GrainDensity {
     OfDiagram,
 }
 
-/// What a row's transition is.
+/// What kind of first melt a row's transition is (the [module documentation](self)).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TransitionKind {
     /// A pure solid's melting point at one atmosphere.
     Melting,
     /// A lithology's solidus at about one atmosphere: where it first melts.
     Solidus,
-    /// A solution's liquidus at its reference composition: where its first solid crystallises as
-    /// it cools, above which it is all liquid.
-    Liquidus,
-    /// A solution's eutectic at one atmosphere: the lowest temperature at which any of its liquid
-    /// remains.
+    /// A solution's eutectic at one atmosphere, of the two solids its reference composition
+    /// freezes to: the lowest temperature at which any of its liquid remains at equilibrium.
+    ///
+    /// For the brines, ammonia–water and Titan's liquid it is the solute–solvent eutectic; for
+    /// the 75 wt% sulphuric acid, the dihydrate–monohydrate one (decision-p14-t49b-condensed
+    /// §2.1). A metastable assemblage or a supercooled liquid can hold liquid below it.
     Eutectic {
         /// The solute's mass fraction at the eutectic, in (0, 1): a brine's salt, ammonia in the
-        /// ammonia–water system, ethane in Titan's methane–ethane liquid.
+        /// ammonia–water system, ethane in Titan's methane–ethane liquid, `H2SO4` in the aqueous
+        /// acid.
         solute_mass_fraction: f64,
     },
     /// The temperature at which a solid decomposes at one atmosphere before it can melt.
@@ -121,7 +126,6 @@ impl TransitionKind {
         match self {
             Self::Melting => "melting",
             Self::Solidus => "solidus",
-            Self::Liquidus => "liquidus",
             Self::Eutectic { .. } => "eutectic",
             Self::Decomposition => "decomposition",
             Self::Sublimation => "sublimation",
@@ -130,9 +134,9 @@ impl TransitionKind {
     }
 }
 
-/// The temperature at which a substance's solid gives way, with what kind of transition it is:
-/// above it the substance is partly or wholly liquid, or, for a solid that never melts at one
-/// atmosphere, decomposed or sublimed ([`TransitionKind`]).
+/// A substance's first melt, with what kind of transition it is: above it some of the substance
+/// is liquid, or, for a solid that never melts at one atmosphere, decomposed or sublimed
+/// ([`TransitionKind`]); an upper bound where only a bound was read.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Transition {
     pub(super) kind: TransitionKind,
@@ -170,7 +174,7 @@ impl CondensedColumns {
         self.grain_density
     }
 
-    /// The temperature at which its solid gives way.
+    /// Its first melt, above which some of it is liquid, decomposed or sublimed.
     #[must_use]
     pub const fn transition(&self) -> Transition {
         self.transition

@@ -10,9 +10,15 @@
 //! `granite`, `feldspathic`, `phyllosilicate`, `Na2CO3`, `mars_dust`) are
 //! `planetary::surface::reference`'s, to the bit, which its tests hold.
 //!
-//! NIST-JANAF (Chase 1998, NIST SRD 13) gives single transition temperatures, each a fact with
-//! its table cited, and the two decompositions computed from its tables below; no table of it is
-//! fitted or committed (decision-composition §5).
+//! NIST-JANAF (Chase 1998, NIST SRD 13) gives single transition temperatures, one per species,
+//! each a fact ([`Basis::Fact`]) with its table cited. A single value reduced from its tables by
+//! stated arithmetic is [`Basis::Reduced`], with every table cited and the arithmetic stated: the
+//! decomposition of `MgSO4` and the sublimation of `graphite`, and `SiC`'s vapour, recorded in a
+//! source of its own beside its value, DOE PAC's [`Basis::Fact`]. No
+//! table of it is fitted from, committed or copied, and a modern primary that differs beyond
+//! JANAF's uncertainty is the value, JANAF's recorded, as for `Fe` and `Cr` (decision-composition
+//! §5, as decision-p14-t49b-condensed §3 reads it). P14.T49.d cross-checks the two reduced values
+//! against the sim's own thermochemistry from NASA's CEA data.
 
 use hyperion_surface::field::MechanicsFamily;
 
@@ -344,8 +350,14 @@ pub(in crate::substance) const AMMONIUM_HYDROSULPHIDE: CondensedColumns = Conden
 /// `sulphuric-acid-75.json`'s acid (Palmer and Williams 1975), which `acid_uv_absorber` shares.
 const SULPHURIC_ACID_75_DENSITY_KG_M3: f64 = 1_662.6;
 
-/// The liquidus of aqueous sulphuric acid at 75.0 wt%, kelvin, which `acid_uv_absorber` shares.
-const SULPHURIC_ACID_75_LIQUIDUS_K: f64 = 242.0;
+/// The first melt of the frozen 75.0 wt% sulphuric acid, kelvin, its dihydrate–monohydrate
+/// eutectic's upper bound, the dihydrate's congruent melting point (Zeleznik 1991, Table 5;
+/// decision-p14-t49b-condensed §2.3), which `acid_uv_absorber` shares.
+const SULPHURIC_ACID_EUTECTIC_K: f64 = 233.67;
+
+/// The `H2SO4` mass fraction at the dihydrate–monohydrate eutectic, read off Zeleznik 1991's
+/// Fig. 1 (decision-p14-t49b-condensed §2.3), which `acid_uv_absorber` shares.
+const SULPHURIC_ACID_EUTECTIC_MASS_FRACTION: f64 = 0.738;
 
 /// The 75 wt% acid's density source.
 const SULPHURIC_ACID_75_DENSITY: Source = source(
@@ -360,16 +372,23 @@ const SULPHURIC_ACID_75_DENSITY: Source = source(
     Basis::Reduced,
 );
 
-/// The 75 wt% acid's liquidus source.
-const SULPHURIC_ACID_75_LIQUIDUS: Source = source(
+/// The 75 wt% acid's first-melt source.
+const SULPHURIC_ACID_FIRST_MELT: Source = source(
     "transition",
-    "the 75 wt% acid's liquidus, where its monohydrate first crystallises, 242 ± 2 K, read off \
-     the calculated monohydrate curve of Zeleznik 1991, J. Phys. Chem. Ref. Data 20, 1157, \
-     Fig. 1, at x = 0.3553 (the lane's research read 240 ± 4; Gable, Betz and Maron 1950; \
-     Kunzler and Giauque 1952), between the dihydrate's congruent melting (73.13 wt%, 233.67 K) \
-     and the monohydrate's (84.48 wt%, 281.63 K; Table 5); not the 98 wt% acid's 271.6 K. The \
-     frozen acid first melts lower, at the dihydrate–monohydrate eutectic, between 228 and \
-     233.67 K by the same figure, unresolved. Venus's droplets supercool well below both",
+    "the frozen 75 wt% acid's first melt, its dihydrate–monohydrate eutectic, as an upper bound: \
+     233.67 K, the dihydrate's congruent melting point (Zeleznik 1991, J. Phys. Chem. Ref. Data \
+     20, 1157, Table 5; 73.13 wt% by stoichiometry), which bounds the eutectic above by the phase \
+     rule. The 75.0 wt% acid, x = 0.3553, lies between the dihydrate and the monohydrate \
+     (281.63 K, Table 5; 84.48 wt%), and freezes to those two hydrates. Zeleznik's Fig. 1, \
+     read at its scan's full resolution, puts the eutectic at 233.4 ± 0.4 K and \
+     x = 0.341 ± 0.003, 73.8 ± 0.3 wt%, between the dihydrate's 73.13 and 75 \
+     (decision-p14-t49b-condensed §2.3). \
+     Recorded, not used: the 75 wt% acid's liquidus, where its monohydrate first crystallises, \
+     242 ± 2 K off the figure's calculated monohydrate curve (the lane's research read 240 ± 4; \
+     Gable, Betz and Maron 1950; Kunzler and Giauque 1952); the metastable eutectic at 220.0 K of \
+     an acid frozen without its dihydrate, through Gable, Betz and Maron's invariant points on \
+     the same figure; and the 98 wt% acid's 271.6 K. Venus's droplets supercool well below \
+     these",
     Basis::Fact,
 );
 
@@ -383,11 +402,16 @@ const SULPHURIC_ACID_FAMILY: Source = source(
 /// Aqueous sulphuric acid at 75 wt%, Venus's clouds (T24.g).
 pub(in crate::substance) const SULPHURIC_ACID: CondensedColumns = CondensedColumns {
     grain_density: liquid(SULPHURIC_ACID_75_DENSITY_KG_M3, 300.0),
-    transition: at(TransitionKind::Liquidus, SULPHURIC_ACID_75_LIQUIDUS_K),
+    transition: at(
+        TransitionKind::Eutectic {
+            solute_mass_fraction: SULPHURIC_ACID_EUTECTIC_MASS_FRACTION,
+        },
+        SULPHURIC_ACID_EUTECTIC_K,
+    ),
     mechanics: MechanicsFamily::Salt,
     sources: &[
         SULPHURIC_ACID_75_DENSITY,
-        SULPHURIC_ACID_75_LIQUIDUS,
+        SULPHURIC_ACID_FIRST_MELT,
         SULPHURIC_ACID_FAMILY,
     ],
 };
@@ -396,11 +420,16 @@ pub(in crate::substance) const SULPHURIC_ACID: CondensedColumns = CondensedColum
 /// the same constant, with its transition (the absorber's own mass not counted).
 pub(in crate::substance) const ACID_UV_ABSORBER: CondensedColumns = CondensedColumns {
     grain_density: liquid(SULPHURIC_ACID_75_DENSITY_KG_M3, 300.0),
-    transition: at(TransitionKind::Liquidus, SULPHURIC_ACID_75_LIQUIDUS_K),
+    transition: at(
+        TransitionKind::Eutectic {
+            solute_mass_fraction: SULPHURIC_ACID_EUTECTIC_MASS_FRACTION,
+        },
+        SULPHURIC_ACID_EUTECTIC_K,
+    ),
     mechanics: MechanicsFamily::Salt,
     sources: &[
         SULPHURIC_ACID_75_DENSITY,
-        SULPHURIC_ACID_75_LIQUIDUS,
+        SULPHURIC_ACID_FIRST_MELT,
         SULPHURIC_ACID_FAMILY,
     ],
 };
@@ -762,10 +791,12 @@ pub(in crate::substance) const GRAPHITE: CondensedColumns = CondensedColumns {
         ),
         source(
             "transition",
-            "4,080 K, where the summed vapour of C1–C5 over graphite reaches one bar, computed \
+            "4,080 K, where the summed vapour of C1–C5 over graphite reaches one bar, reduced \
              from NIST-JANAF's log K_f (tables C-003, C-113, C-138, C-143 and C-148; Chase 1998): \
-             4,079 K; TRC's boiling point in the NIST WebBook, 4,100 ± 100 K (Honig and Kramer \
-             1969), agrees. Graphite does not melt at one bar",
+             with graphite, the reference state, at unit activity each p(Cn) in bar is K_f(Cn); \
+             their sum's log₁₀, linear in 1 ÷ T between the tables' 4,000 and 4,100 K rows, \
+             crosses zero at 4,079 K. TRC's boiling point in the NIST WebBook, 4,100 ± 100 K \
+             (Honig and Kramer 1969), agrees. Graphite does not melt at one bar",
             Basis::Reduced,
         ),
         source(
@@ -1165,13 +1196,19 @@ pub(in crate::substance) const TITAN_LIQUID: CondensedColumns = CondensedColumns
             "the components' saturated liquids by ideal mixing (volume additivity, ρ = Σ φᵢ ρᵢ) at \
              the reference composition, Ligeia Mare's best fit to its measured loss tangent, by \
              volume \"71% CH4, 12% C2H6, and 17% N2\" (Mastrogiuseppe, Hayes, Poggiali, Seu, \
-             Lunine and Hofgartner 2016, IEEE Trans. Geosci. Remote Sens. 54, 5646, §V.B; \
-             decision-r11-palette-liquids §1.8 gives these figures as Le Gall et al. 2016's, which \
-             states no such composition), at Titan's surface temperature, 93.65 K (Huygens's \
-             HASI, Fulchignoni et al. 2005, Nature 438, 785): the rows' own ancillary densities \
-             there, each under its own vapour's pressure, methane's 447.53 (Setzmann and Wagner \
-             1991), ethane's 647.97 (CoolProp's fit to Bücker and Wagner 2006) and nitrogen's \
-             725.71 kg m⁻³ (Span et al. 2000), give 518.9 kg m⁻³. Ideal mixing errs: methane and \
+             Lunine and Hofgartner 2016, IEEE Trans. Geosci. Remote Sens. 54, 5646, §V.B, \
+             p. 5654, doi:10.1109/TGRS.2016.2563426; decision-p14-t49b-condensed §1 corrects \
+             decision-r11-palette-liquids §1.8's attribution and basis), at Titan's surface \
+             temperature, 93.65 K (Huygens's HASI, Fulchignoni et al. 2005, Nature 438, 785): the \
+             rows' own ancillary densities there, each under its own vapour's pressure, methane's \
+             447.53 (Setzmann and Wagner 1991), ethane's 647.97 (CoolProp's fit to Bücker and \
+             Wagner 2006) and nitrogen's 725.71 kg m⁻³ (Span et al. 2000), give 518.9 kg m⁻³. The \
+             retrieval mixes by Lorentz–Lorenz, a rule in the pure liquids' volume fractions, so \
+             ideal volume additivity is the density consistent with its fractions. The \
+             composition's mole fractions are derived from the volume fractions, never read as \
+             them: CH4 0.7391, C2H6 0.0965 and N2 0.1644 by those densities and the rows' molar \
+             masses, each rounded from its own exact value (decision-p14-t49b-condensed §1.2). \
+             Ideal mixing errs: methane and \
              ethane mix with a negative excess volume (Engle et al. 2021), and nitrogen at \
              93.65 K is a liquid only in solution. Tan, Kargel and Marion 2013's cross-check not \
              read",
@@ -1546,10 +1583,18 @@ pub(in crate::substance) const SILICON_CARBIDE: CondensedColumns = CondensedColu
             "2,830 °C, 3,103.15 K, which DOE PAC gives through PubChem as a melting point (HSDB \
              gives 2,600 °C, and NIOSH that it sublimes at 2,700 °C); its kind is a \
              decomposition, an assumption, the peritectic to graphite and a silicon-rich liquid \
-             being from memory, not read. Its vapour over SiC and graphite reaches one bar at \
-             3,242 K by NIST-JANAF's tables (C-100, Si-005, Si-008, Si-009, C-103 and C-137; \
-             Chase 1998), recorded",
+             being from memory, not read. JANAF's vapour, the next source, is recorded",
             Basis::Fact,
+        ),
+        source(
+            "transition",
+            "recorded, not the row's value: SiC's vapour over SiC and graphite, each at unit \
+             activity, reaches one bar at 3,242 K, reduced from NIST-JANAF's log K_f (tables \
+             C-100, Si-005, Si-008, Si-009, C-103 and C-137; Chase 1998). Each of Si, Si2, Si3, \
+             Si2C and SiC2 has p in bar = K_f ÷ K_f(SiC)ⁿ, n its silicon atoms; their sum's \
+             log₁₀, linear in 1 ÷ T between the tables' 3,200 and 3,300 K rows, crosses zero \
+             there, ignoring the silicon-rich liquid a peritectic forms",
+            Basis::Reduced,
         ),
         source(
             "mechanics",
@@ -1577,9 +1622,13 @@ pub(in crate::substance) const MAGNESIUM_SULPHATE: CondensedColumns = CondensedC
         source(
             "transition",
             "1,272 K, where MgSO4's decomposition to MgO with SO3, SO2 and O2 reaches one bar in \
-             all, computed from NIST-JANAF's tables Mg-018, Mg-008, O-058 and O-034 (Chase \
-             1998), in an open system; JANAF's MgSO4 melts at 1,400 K (table Mg-020), which a \
-             dense SO2-bearing air approaches",
+             all, reduced from NIST-JANAF's log K_f (tables Mg-018, Mg-008, O-058 and O-034; \
+             Chase 1998), in an open system whose gas is the decomposition's own: with both \
+             solids at unit activity, log₁₀ p(SO3) = log K_f(MgO) + log K_f(SO3) − log \
+             K_f(MgSO4), and MgSO4 → MgO + SO2 + ½O2 with p(O2) = p(SO2) ÷ 2 gives p(SO2)^1.5 ÷ \
+             √2 = K_f(MgO) K_f(SO2) ÷ K_f(MgSO4); the total's log₁₀, linear in 1 ÷ T between the \
+             tables' 1,200 and 1,300 K rows, crosses zero at 1,272 K. JANAF's MgSO4 melts at \
+             1,400 K (table Mg-020), which a dense SO2-bearing air approaches",
             Basis::Reduced,
         ),
         SALT_FAMILY,

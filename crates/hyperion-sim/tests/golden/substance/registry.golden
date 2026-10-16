@@ -1609,8 +1609,9 @@ condensed 58 H2SO4: grain density fixed
 condensed 58 H2SO4: solid grain_density_kg_per_m3 none
 condensed 58 H2SO4: liquid grain_density_kg_per_m3 = 0x4099fa6666666666  # 1662.6
 condensed 58 H2SO4: liquid grain_density_at_k = 0x4072c00000000000  # 300.0
-condensed 58 H2SO4: transition liquidus
-condensed 58 H2SO4: transition_k = 0x406e400000000000  # 242.0
+condensed 58 H2SO4: transition eutectic
+condensed 58 H2SO4: transition_k = 0x406d3570a3d70a3d  # 233.67
+condensed 58 H2SO4: eutectic solute_mass_fraction = 0x3fe79db22d0e5604  # 0.738
 condensed 58 H2SO4: mechanics Salt
 condensed 59 S8: grain density fixed
 condensed 59 S8: solid grain_density_kg_per_m3 = 0x40a0260000000000  # 2067.0
@@ -1756,8 +1757,9 @@ condensed 79 acid_uv_absorber: grain density fixed
 condensed 79 acid_uv_absorber: solid grain_density_kg_per_m3 none
 condensed 79 acid_uv_absorber: liquid grain_density_kg_per_m3 = 0x4099fa6666666666  # 1662.6
 condensed 79 acid_uv_absorber: liquid grain_density_at_k = 0x4072c00000000000  # 300.0
-condensed 79 acid_uv_absorber: transition liquidus
-condensed 79 acid_uv_absorber: transition_k = 0x406e400000000000  # 242.0
+condensed 79 acid_uv_absorber: transition eutectic
+condensed 79 acid_uv_absorber: transition_k = 0x406d3570a3d70a3d  # 233.67
+condensed 79 acid_uv_absorber: eutectic solute_mass_fraction = 0x3fe79db22d0e5604  # 0.738
 condensed 79 acid_uv_absorber: mechanics Salt
 condensed 80 brine_nacl: grain density fixed
 condensed 80 brine_nacl: solid grain_density_kg_per_m3 none
