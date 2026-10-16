@@ -4,7 +4,7 @@ import registry from "../../../../../../../../packages/protocol/fixtures/substan
 import { substanceName, UNLISTED_MATERIAL } from "../../../lib/substances";
 import { aerosolModeOptics } from "../aerosol";
 import { mieSphere } from "../mie";
-import { type Dispersion, GAS_DISPERSION } from "../rayleigh";
+import { type Dispersion, ESTIMATED_RAYLEIGH, GAS_DISPERSION, GASES } from "../rayleigh";
 import { CLOUD_DECK_SPLIT_OPTICAL_DEPTH } from "../thick/regime";
 import {
   GENERIC_STAND_IN_INDEX,
@@ -15,6 +15,7 @@ import {
   parseMaterialFile,
   refractiveIndex,
   resolveMaterial,
+  type ScaledMolarRefractionFit,
   variantWords,
 } from "./materials";
 import waterFile from "./water.json" with { type: "json" };
@@ -81,6 +82,70 @@ const T5G_LIQUIDS = [
 
 /** The key R08.T5.g adds to the registry's files: liquid ethane (the others add a phase). */
 const T5G_KEYS = ["C2H6"];
+
+/**
+ * The liquids R08.T5.k adds (decision-p14-t49h-gas-index §2.5 and A.4), each by its key with its
+ * file's provenance, its temperature by §2.5's rule, K, and its registry row's triple point, K
+ * (`crates/hyperion-sim/src/substance/rows/diagrams.rs` at 47ffd02a).
+ */
+const T5K_LIQUIDS = [
+  ["O2", "derived", 90.19, 54.361],
+  ["Ar", "measured", 83.81, 83.8058],
+  ["Kr", "measured", 115.77, 115.77],
+  ["Xe", "measured", 161.4, 161.4],
+  ["CO", "standIn", 68.16, 68.16],
+  ["CO2", "derived", 216.6, 216.592],
+  ["N2O", "derived", 184.67, 182.33],
+  ["SO2", "derived", 197.7, 197.7],
+  ["H2S", "standIn", 187.7, 187.7],
+] as const;
+
+/** The keys R08.T5.k adds to the registry's files: each liquid is its key's only file. */
+const T5K_KEYS = ["Kr", "Xe", "N2O", "SO2"];
+
+/** A scaled molar refraction's fields, O₂'s, for the format's cases (decision-p14-t49h-gas-index A.1). */
+const SCALED_FIT = {
+  form: "scaledMolarRefraction",
+  molarDensityMolPerL: 35.662_63,
+  factor: 0.986_155,
+  anchoredFromUm: 0.5461,
+  anchoredToUm: 0.5461,
+} as const;
+
+/** The ideal gas's molar volume at a row's reference state, cm³ mol⁻¹, times its Z. */
+function gasMolarVolumeCm3PerMol(gas: Dispersion): number {
+  return (
+    ((gas.compressibility * 6.022_140_76e23 * 1.380_649e-23 * gas.referenceK) / gas.referencePa) *
+    1e6
+  );
+}
+
+/** A gas row's Lorentz–Lorenz molar refraction at a wavelength, nm, cm³ mol⁻¹. */
+function rowMolarRefractionCm3PerMol(gas: Dispersion, nm: number): number {
+  return lorentz(1 + gas.nMinusOne(nm)) * gasMolarVolumeCm3PerMol(gas);
+}
+
+/** A liquid's index from its gas row's molar refraction scaled by c at ρ_m, mol/l: x = cRρ_m. */
+function scaledIndex(gas: Dispersion, nm: number, molPerL: number, factor: number): number {
+  const x = (factor * rowMolarRefractionCm3PerMol(gas, nm) * molPerL) / 1_000;
+  return Math.sqrt((1 + 2 * x) / (1 - x));
+}
+
+/** A T5.k key's gas row in rayleigh.ts: its GAS_DISPERSION row, or SO₂'s ESTIMATED_RAYLEIGH dispersion. */
+function gasRowOf(key: string): Dispersion {
+  if (key === "SO2") {
+    const so2 = ESTIMATED_RAYLEIGH.find((row) => row.species === "SO2");
+    if (so2?.kind !== "dispersion") {
+      throw new Error("rayleigh.ts holds no SO2 dispersion");
+    }
+    return so2.dispersion;
+  }
+  const row = GASES.find((gas) => gas === key);
+  if (row === undefined) {
+    throw new Error(`rayleigh.ts holds no gas row for ${key}`);
+  }
+  return GAS_DISPERSION[row];
+}
 
 /** A liquid's own file, by key and variant: never a named analogue. */
 function liquidOf(key: string, variant?: string): (typeof MATERIAL_FILES)[number] {
@@ -221,6 +286,14 @@ describe("the material files", () => {
     expect(parseMaterialFile(waterFile, "water.json").key).toBe("H2O");
   });
 
+  it("accept a derived file with a scaled molar refraction, and keep its four fields", () => {
+    const parsed = parseMaterialFile(
+      { ...waterFile, provenance: "derived", fit: SCALED_FIT },
+      "scaled.json",
+    );
+    expect(parsed.fit).toEqual(SCALED_FIT);
+  });
+
   it("accept a grid that starts at 360 nm", () => {
     const longer = {
       ...waterFile,
@@ -256,6 +329,22 @@ describe("the material files", () => {
     ["a measured file that states a stand-in", { standIn: "something" }],
     ["a derived file without its fit", { provenance: "derived" }],
     ["a bad shape class", { shape: "cube" }],
+    // decision-p14-t49h-gas-index A.1: the fit is a union by `form`, and the second form's density
+    // and factor are positive, its anchors in order.
+    ["a fit of another form", { provenance: "derived", fit: { ...SCALED_FIT, form: "sellmeier" } }],
+    [
+      "a scaled fit whose density is not positive",
+      { provenance: "derived", fit: { ...SCALED_FIT, molarDensityMolPerL: 0 } },
+    ],
+    [
+      "a scaled fit whose factor is not positive",
+      { provenance: "derived", fit: { ...SCALED_FIT, factor: -0.98 } },
+    ],
+    [
+      "a scaled fit whose anchors run backwards",
+      { provenance: "derived", fit: { ...SCALED_FIT, anchoredFromUm: 0.6, anchoredToUm: 0.5 } },
+    ],
+    ["a measured file that carries a scaled fit", { fit: SCALED_FIT }],
   ])("refuse %s", (_, broken) => {
     expect(() => parseMaterialFile({ ...waterFile, ...broken }, "broken.json")).toThrow(
       /broken\.json/u,
@@ -380,11 +469,13 @@ describe("refractiveIndex", () => {
   });
 
   it("states a sample's temperature in its name in kelvin, as its file holds it", () => {
+    // A name gives whole kelvins (decision-ux-numbers-names ruling 1); since R08.T5.k a file's
+    // temperature may carry 0.01 K, so the name binds it rounded.
     const misstated = MATERIAL_FILES.filter((file) => {
       const kelvin = /(?:at|near) ([0-9]+) K\b/u.exec(file.name)?.[1];
-      return (
-        file.name.includes("°C") || (kelvin !== undefined && Number(kelvin) !== file.temperatureK)
-      );
+      const temperature =
+        file.temperatureK === undefined ? undefined : Math.round(file.temperatureK);
+      return file.name.includes("°C") || (kelvin !== undefined && Number(kelvin) !== temperature);
     }).map((file) => file.name);
     expect(misstated).toEqual([]);
   });
@@ -460,8 +551,8 @@ describe("Mars dust", () => {
 describe("CO₂ ice, a derived file", () => {
   const file = fileOf("CO2");
   const fit = file.fit;
-  if (fit === undefined) {
-    throw new Error("CO₂ ice carries no fit");
+  if (fit?.form !== "cauchy") {
+    throw new Error("CO₂ ice carries no Cauchy fit");
   }
   const fitN = (wavelengthNm: number): number => fit.a + fit.bUm2 / (wavelengthNm / 1000) ** 2;
 
@@ -864,6 +955,17 @@ describe("the liquids (R08.T5.g)", () => {
       "solid",
     ]);
     expect(resolveMaterial("C2H6").file?.phase).toBe("liquid");
+    // R08.T5.k: the keys with an ice keep it as their default; the four new keys' liquid is their
+    // only file.
+    expect(["O2", "Ar", "CO", "CO2", "H2S"].map((key) => resolveMaterial(key).file?.phase)).toEqual(
+      ["solid", "solid", "solid", "solid", "solid"],
+    );
+    expect(T5K_KEYS.map((key) => resolveMaterial(key).file?.phase)).toEqual([
+      "liquid",
+      "liquid",
+      "liquid",
+      "liquid",
+    ]);
   });
 
   it("hold every key of R08.T5.g's list", () => {
@@ -976,8 +1078,8 @@ describe("the liquids (R08.T5.g)", () => {
     for (const key of ["N2", "NH3", "C2H6"]) {
       const file = liquidOf(key);
       const fit = file.fit;
-      if (fit === undefined) {
-        throw new Error(`liquid ${key} carries no fit`);
+      if (fit?.form !== "cauchy") {
+        throw new Error(`liquid ${key} carries no Cauchy fit`);
       }
       for (const [i, nm] of file.wavelengthsNm.entries()) {
         const fitN = fit.a + fit.bUm2 / (nm / 1000) ** 2;
@@ -996,4 +1098,333 @@ describe("the liquids (R08.T5.g)", () => {
       materialLabels([{ material: "S8", form: { phase: "liquid" }, opticalDepthAbove550: 0 }]),
     ).toEqual(["atmosphereApproximate"]);
   });
+});
+
+/**
+ * Sinnock and Smith 1969's liquid tables at their melting points (Phys. Rev. 181, 1297, through
+ * refractiveindex.info's CC0 copies, `main/{Ar,Kr,Xe}/nk/Sinnock-liquid-*.yml`), λ in nm and n,
+ * cited as facts: the measured inputs of R08.T5.k's three noble-gas files.
+ */
+const SINNOCK_LIQUID_ROWS = {
+  Ar: [
+    [361.2, 1.2395],
+    [365, 1.2392],
+    [406.3, 1.2372],
+    [435.8, 1.2361],
+    [475.3, 1.2349],
+    [508.6, 1.2341],
+    [546.1, 1.2334],
+    [578, 1.2328],
+    [643.9, 1.2321],
+  ],
+  Kr: [
+    [363.1, 1.312],
+    [406.3, 1.309],
+    [435.8, 1.3074],
+    [475.3, 1.3056],
+    [508.6, 1.3042],
+    [546.1, 1.3032],
+    [578, 1.3024],
+    [643.9, 1.3011],
+  ],
+  Xe: [
+    [361.2, 1.4111],
+    [365, 1.4103],
+    [406.3, 1.4041],
+    [435.8, 1.4001],
+    [470, 1.3967],
+    [480.6, 1.3957],
+    [508.6, 1.3937],
+    [546.1, 1.3918],
+    [578, 1.39],
+    [643.9, 1.3876],
+  ],
+} as const;
+
+/** The rows' linear interpolation at a wavelength, nm, between the rows. */
+function rowsAt(rows: ReadonlyArray<readonly [number, number]>, nm: number): number {
+  const upper = rows.findIndex(([at]) => at >= nm);
+  const hi = rows[upper];
+  const lo = rows[upper - 1];
+  if (hi === undefined || lo === undefined) {
+    throw new Error(`no rows bracket ${nm} nm`);
+  }
+  return lo[1] + ((nm - lo[0]) / (hi[0] - lo[0])) * (hi[1] - lo[1]);
+}
+
+/** The factor c minimising the squared misses in n of a scaled gas row, by ternary search. */
+function leastSquaresC(
+  gas: Dispersion,
+  molPerL: number,
+  points: ReadonlyArray<readonly [nm: number, n: number]>,
+): number {
+  const misses = (c: number): number =>
+    points.reduce((sum, [nm, n]) => sum + (scaledIndex(gas, nm, molPerL, c) - n) ** 2, 0);
+  let low = 0.9;
+  let high = 1.1;
+  for (let step = 0; step < 200; step += 1) {
+    const a = low + (high - low) / 3;
+    const b = high - (high - low) / 3;
+    if (misses(a) < misses(b)) {
+      high = b;
+    } else {
+      low = a;
+    }
+  }
+  return (low + high) / 2;
+}
+
+/** A T5.k liquid's scaled molar refraction, which each of its derived files must carry. */
+function scaledFitOf(key: string): ScaledMolarRefractionFit {
+  const fit = liquidOf(key).fit;
+  if (fit?.form !== "scaledMolarRefraction") {
+    throw new Error(`liquid ${key} carries no scaled molar refraction`);
+  }
+  return fit;
+}
+
+describe("the liquids from their gases and their measurements (R08.T5.k)", () => {
+  it.each(T5K_LIQUIDS)(
+    "file liquid %s as a sphere, %s, at %f K, not below its row's triple point, %f K",
+    (key, provenance, temperatureK, tripleK) => {
+      const file = liquidOf(key);
+      expect([file.shape, file.provenance, file.temperatureK]).toEqual([
+        "sphere",
+        provenance,
+        temperatureK,
+      ]);
+      expect(file.temperatureK).toBeGreaterThanOrEqual(tripleK);
+    },
+  );
+
+  it.each(T5K_LIQUIDS)("resolve a liquid-phase %s mode to its own file", (key) => {
+    expect(resolveMaterial(key, { phase: "liquid" }).file).toBe(liquidOf(key));
+  });
+
+  it.each(T5K_LIQUIDS)(
+    "give liquid %s, %s, a scaled fit exactly when derived and a stand-in exactly when a stand-in",
+    (key, provenance) => {
+      // A.1 and A.4: the four anchored liquids carry the second form; the measured and the
+      // stand-ins carry none, and a stand-in, and only one, states its stand-in.
+      const file = liquidOf(key);
+      expect([file.fit?.form, file.standIn !== undefined]).toEqual([
+        provenance === "derived" ? "scaledMolarRefraction" : undefined,
+        provenance === "standIn",
+      ]);
+    },
+  );
+
+  it("hold every key of R08.T5.k's list", () => {
+    const keys = new Set(MATERIAL_FILES.map((f) => f.key));
+    expect(T5K_KEYS.filter((key) => !keys.has(key))).toEqual([]);
+  });
+
+  it("give the eight colourless liquids no absorption", () => {
+    const absorbing = T5K_LIQUIDS.filter(([key]) => key !== "O2").filter(([key]) =>
+      liquidOf(key).k.some((k) => k !== 0),
+    );
+    expect(absorbing).toEqual([]);
+  });
+
+  it.each(["O2", "N2O", "SO2", "CO2"])(
+    "rebuild %s's n at every grid point from its fit's density and factor and rayleigh.ts's row, to 10⁻⁵",
+    (key) => {
+      // decision-p14-t49h-gas-index A.1: the tool holds its own copies of the rows; this catches
+      // drift. n is held, not the Lorentz–Lorenz function: at six figures, n ≈ 1.22's rounding
+      // alone moves (n² − 1) ÷ (n² + 2) by up to 2.3 × 10⁻⁵ of itself.
+      const file = liquidOf(key);
+      const fit = scaledFitOf(key);
+      const gas = gasRowOf(key);
+      for (const [i, nm] of file.wavelengthsNm.entries()) {
+        const n = file.n[i] ?? Number.NaN;
+        const rebuilt = scaledIndex(gas, nm, fit.molarDensityMolPerL, fit.factor);
+        expect(Math.abs(n - rebuilt)).toBeLessThan(1e-5);
+      }
+    },
+  );
+
+  it.each([
+    // Ar's c is the least-squares fit to Sinnock and Smith's nine rows at the WebBook's 35.46464
+    // mol/l at 83.81 K (decision-p14-t49h-gas-index A.2; the file's source); CO's and H2S's are 1,
+    // at the WebBook's 30.32971 mol/l at 68.16 K and 29.11633 mol/l at 187.7 K (A.4).
+    ["Ar", 35.464_64, 0.990_053],
+    ["CO", 30.329_71, 1],
+    ["H2S", 29.116_33, 1],
+  ])(
+    "give %s the scaled index of rayleigh.ts's row at %f mol/l and c = %f, to 10⁻⁵",
+    (key, molPerL, factor) => {
+      const file = liquidOf(key);
+      const gas = gasRowOf(key);
+      for (const [i, nm] of file.wavelengthsNm.entries()) {
+        const n = file.n[i] ?? Number.NaN;
+        expect(Math.abs(n - scaledIndex(gas, nm, molPerL, factor))).toBeLessThan(1e-5);
+      }
+      expect(file.source).toContain(`${molPerL} mol/l`);
+    },
+  );
+
+  it.each([
+    // The method's record rows of the two files whose n is their table, not the method's: the
+    // WebBook's 29.18115 mol/l at 115.95 K and 22.59209 mol/l at 161.405 K, against Sinnock and
+    // Smith's 1.3032 and 1.3918 at 546.1 nm. The tool holds its own copies of the gas rows; this
+    // catches drift in the record the files state.
+    ["Kr", 29.181_15, 1.3032, "liquid Kr at 115.95 K against Sinnock and Smith 1969"],
+    [
+      "Xe",
+      22.592_09,
+      1.3918,
+      "liquid Xe at 161.35 K (the WebBook's 161.405 K) against Sinnock and Smith 1969",
+    ],
+  ])(
+    "state liquid %s's record row from rayleigh.ts's row at the WebBook's %f mol/l",
+    (key, molPerL, measured, what) => {
+      const excess = scaledIndex(gasRowOf(key), 546.1, molPerL, 1) - measured;
+      const stated = `${excess < 0 ? "−" : "+"}${Math.abs(excess).toFixed(4)}`;
+      expect(liquidOf(key).source).toContain(`${what}, ${stated} at 546.1 nm`);
+    },
+  );
+
+  it("meet Johns and Wilhelm 1937's 1.2242 at 546.1 nm for liquid O2, to 10⁻⁵", () => {
+    // Can. J. Res. 15a, 101, their abstract: the normal boiling point, by a Wollaston cell.
+    const { n } = refractiveIndex("O2", 546.1, { phase: "liquid" }).index;
+    expect(Math.abs(n - 1.2242)).toBeLessThan(1e-5);
+  });
+
+  it("fit liquid N2O's factor by least squares to Liveing and Dewar 1892's five lines, to 10⁻⁵", () => {
+    // Phil. Mag. (5) 34, 205, p. 209: the C, D, F and G lines and indium's 4509.6 Å, at the boiling
+    // point; the lithium line is left out (its printed index contradicts its deviation).
+    const lines = [
+      [656.3, 1.329],
+      [589.3, 1.3305],
+      [486.1, 1.3345],
+      [430.8, 1.3378],
+      [450.96, 1.3368],
+    ] as const;
+    const fit = scaledFitOf("N2O");
+    expect(fit.molarDensityMolPerL).toBe(27.957_49);
+    const c = leastSquaresC(gasRowOf("N2O"), fit.molarDensityMolPerL, lines);
+    expect(Math.abs(c - fit.factor)).toBeLessThan(1e-5);
+  });
+
+  it("set liquid SO2's factor to the mean of Ketteler's, Bichat's and Bleekrode's molar refractions over the gas's, to 10⁻⁵", () => {
+    // Bleekrode 1884 (Proc. R. Soc. Lond. 37, 339, pp. 349–350): Ketteler's 1.3384 at 24 °C,
+    // Bichat's 1.344 at 18.5 °C and his own 1.350 at 15 °C, at the sodium lines, each at the
+    // WebBook's saturated-liquid density at its temperature, mol/l.
+    const gas = gasRowOf("SO2");
+    const measurements = [
+      [1.3384, 21.379_59],
+      [1.344, 21.619_56],
+      [1.35, 21.770_4],
+    ] as const;
+    const ratios = measurements.map(
+      ([n, molPerL]) => lorentz(n) / ((rowMolarRefractionCm3PerMol(gas, 589.3) * molPerL) / 1_000),
+    );
+    const mean = ratios.reduce((sum, r) => sum + r, 0) / ratios.length;
+    expect(Math.abs(mean - scaledFitOf("SO2").factor)).toBeLessThan(1e-5);
+  });
+
+  it("set liquid CO2's factor by Phillips 1920's law at its density, 1 ÷ (1 + 0.0172ρ²), to 10⁻⁵", () => {
+    // Proc. R. Soc. Lond. A 97, 225, p. 236, ρ in g cm⁻³: the WebBook's mol/l × 44.0095 ÷ 1,000.
+    const fit = scaledFitOf("CO2");
+    const density = (fit.molarDensityMolPerL * 44.0095) / 1_000;
+    expect(Math.abs(1 / (1 + 0.0172 * density ** 2) - fit.factor)).toBeLessThan(1e-5);
+    expect(fit.molarDensityMolPerL).toBe(26.776_63);
+  });
+
+  it.each([
+    ["O2", 0.5461, 0.5461],
+    ["N2O", 0.4308, 0.6563],
+    ["SO2", 0.5893, 0.5893],
+    ["CO2", 0.5461, 0.5461],
+  ])("state %s's anchors as the measurements' %f–%f µm (A.1)", (key, from, to) => {
+    const fit = scaledFitOf(key);
+    expect([fit.anchoredFromUm, fit.anchoredToUm]).toEqual([from, to]);
+  });
+
+  it("meet each of Sinnock and Smith's liquid Ar rows from 380 nm within 2 × 10⁻⁴", () => {
+    const rows = SINNOCK_LIQUID_ROWS.Ar.filter(([nm]) => nm >= 380);
+    expect(rows).toHaveLength(7);
+    for (const [nm, n] of rows) {
+      const { index } = refractiveIndex("Ar", nm, { phase: "liquid" });
+      expect(Math.abs(index.n - n)).toBeLessThan(2e-4);
+    }
+  });
+
+  it.each([
+    // The red tails, n = a + b ÷ λ², fitted to the rows from 435.8 nm (A.3), as each file's
+    // reduction states them.
+    ["Kr", 1.295_77, 0.002_208_01],
+    ["Xe", 1.377_05, 0.004_346_56],
+  ] as const)(
+    "give liquid %s its rows' linear interpolation over 380–640 nm and its red tail from 645 nm, to 10⁻⁵",
+    (key, a, b) => {
+      const file = liquidOf(key);
+      const rows = SINNOCK_LIQUID_ROWS[key];
+      for (const [i, nm] of file.wavelengthsNm.entries()) {
+        const expected = nm <= 640 ? rowsAt(rows, nm) : a + b / (nm / 1_000) ** 2;
+        expect(Math.abs((file.n[i] ?? Number.NaN) - expected)).toBeLessThan(1e-5);
+      }
+      expect(file.reduction).toContain(`n = ${a} + ${b} µm² ÷ λ²`);
+    },
+  );
+
+  it.each([
+    ["Ar", 3e-4],
+    ["Kr", 5e-4],
+    ["Xe", 5e-4],
+  ] as const)("keep %s's rows from 380 nm within its stated band, ±%f", (key, band) => {
+    // decision-p14-t49h-gas-index §2.5; the rows at 361.2, 363.1 and 365.0 nm lie below the grid.
+    for (const [nm, n] of SINNOCK_LIQUID_ROWS[key].filter(([at]) => at >= 380)) {
+      const { index } = refractiveIndex(key, nm, { phase: "liquid" });
+      expect(Math.abs(index.n - n)).toBeLessThanOrEqual(band);
+    }
+  });
+
+  it.each([
+    // Thalman and Volkamer 2013's O2–O2 σ at 203 K, their coldest, as HITRAN2024's O2-O2_2024.cia
+    // gives it (linear in wavenumber between its points), cm⁵ a molecule pair: oxygen-liquid.json's
+    // reduction states both (decision-p14-t49h-gas-index §2.6, path 2).
+    [575, 1.191_78e-45],
+    [630, 8.642_97e-46],
+  ])(
+    "give liquid O2 at %d nm the pairs' absorption at its density squared, σ %f cm⁵, as k = aλ ÷ 4π to the file's six figures",
+    (nm, sigma) => {
+      const oxygen = liquidOf("O2");
+      const perCm3 = (scaledFitOf("O2").molarDensityMolPerL / 1_000) * 6.022_140_76e23;
+      const expected = absorptionK(100 * sigma * perCm3 ** 2, nm);
+      const k = valueAt(oxygen.k, oxygen, nm);
+      expect(k).toBeGreaterThan(0);
+      expect(Math.abs(k / expected - 1)).toBeLessThan(1e-5);
+    },
+  );
+
+  it("give liquid O2 no k from 655 nm, past Thalman and Volkamer's sets, as its file says", () => {
+    const oxygen = liquidOf("O2");
+    expect(kFrom(oxygen, 655).filter((k) => k !== 0)).toEqual([]);
+    expect(oxygen.reduction).toContain("k = 0 from 655 nm");
+  });
+
+  it("draw a deck of each of the seven measured or derived liquids at τ 0 with no label", () => {
+    const decks = T5K_LIQUIDS.filter(([, provenance]) => provenance !== "standIn").map(([key]) => ({
+      material: key,
+      form: { phase: "liquid" as const },
+      opticalDepthAbove550: 0,
+    }));
+    expect(decks).toHaveLength(7);
+    expect(materialLabels(decks)).toEqual([]);
+  });
+
+  it.each(["CO", "H2S"])(
+    "give atmosphereApproximate for a liquid-%s deck at τ 0, its file's stand-in the reason",
+    (key) => {
+      const layer = { material: key, form: { phase: "liquid" as const }, opticalDepthAbove550: 0 };
+      const file = liquidOf(key);
+      expect(materialLabels([layer])).toEqual(["atmosphereApproximate"]);
+      expect(materialApproximations([layer])).toEqual([{ material: key, reason: file.standIn }]);
+      expect(file.standIn).toMatch(
+        /^a non-absorbing liquid whose real index is a Lorentz–Lorenz estimate from the gas's dispersion at the liquid's density, since its measured values contradict themselves: /u,
+      );
+      expect(file.name).toMatch(/ \(an estimated index\)$/u);
+    },
+  );
 });

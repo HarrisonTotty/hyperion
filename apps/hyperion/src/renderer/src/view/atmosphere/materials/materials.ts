@@ -31,21 +31,26 @@ import ammoniaIce from "./ammonia-ice.json" with { type: "json" };
 import ammoniaLiquid from "./ammonia-liquid.json" with { type: "json" };
 import ammoniumHydrosulphide from "./ammonium-hydrosulphide.json" with { type: "json" };
 import argonIce from "./argon-ice.json" with { type: "json" };
+import argonLiquid from "./argon-liquid.json" with { type: "json" };
 import basaltFile from "./basalt.json" with { type: "json" };
 import basalticGlass from "./basaltic-glass.json" with { type: "json" };
 import calciumTitanate from "./calcium-titanate.json" with { type: "json" };
 import carbonDioxideIce from "./carbon-dioxide-ice.json" with { type: "json" };
+import carbonDioxideLiquid from "./carbon-dioxide-liquid.json" with { type: "json" };
 import carbonMonoxideIce from "./carbon-monoxide-ice.json" with { type: "json" };
+import carbonMonoxideLiquid from "./carbon-monoxide-liquid.json" with { type: "json" };
 import chromium from "./chromium.json" with { type: "json" };
 import enstatiteGlass from "./enstatite-glass.json" with { type: "json" };
 import ethaneLiquid from "./ethane-liquid.json" with { type: "json" };
 import forsteriteAmorphous from "./forsterite-amorphous.json" with { type: "json" };
 import graphiteFile from "./graphite.json" with { type: "json" };
 import hydrogenSulphideIce from "./hydrogen-sulphide-ice.json" with { type: "json" };
+import hydrogenSulphideLiquid from "./hydrogen-sulphide-liquid.json" with { type: "json" };
 import iceGiantHaze from "./ice-giant-haze.json" with { type: "json" };
 import ironSulphide from "./iron-sulphide.json" with { type: "json" };
 import iron from "./iron.json" with { type: "json" };
 import jovianChromophore from "./jovian-chromophore.json" with { type: "json" };
+import kryptonLiquid from "./krypton-liquid.json" with { type: "json" };
 import manganeseSulphide from "./manganese-sulphide.json" with { type: "json" };
 import marsDust from "./mars-dust.json" with { type: "json" };
 import marsRegolithSimulant from "./mars-regolith-simulant.json" with { type: "json" };
@@ -53,13 +58,16 @@ import methaneIce from "./methane-ice.json" with { type: "json" };
 import methaneLiquid from "./methane-liquid.json" with { type: "json" };
 import nitrogenIce from "./nitrogen-ice.json" with { type: "json" };
 import nitrogenLiquid from "./nitrogen-liquid.json" with { type: "json" };
+import nitrousOxideLiquid from "./nitrous-oxide-liquid.json" with { type: "json" };
 import oxygenIce from "./oxygen-ice.json" with { type: "json" };
+import oxygenLiquid from "./oxygen-liquid.json" with { type: "json" };
 import potassiumChloride from "./potassium-chloride.json" with { type: "json" };
 import seawater from "./seawater.json" with { type: "json" };
 import siliconDioxide from "./silicon-dioxide.json" with { type: "json" };
 import sodiumChloride from "./sodium-chloride.json" with { type: "json" };
 import sodiumSulphide from "./sodium-sulphide.json" with { type: "json" };
 import soot from "./soot.json" with { type: "json" };
+import sulphurDioxideLiquid from "./sulphur-dioxide-liquid.json" with { type: "json" };
 import sulphurLiquid from "./sulphur-liquid.json" with { type: "json" };
 import sulphur from "./sulphur.json" with { type: "json" };
 import sulphuricAcid75 from "./sulphuric-acid-75.json" with { type: "json" };
@@ -69,6 +77,7 @@ import tholin from "./tholin.json" with { type: "json" };
 import titaniumDioxide from "./titanium-dioxide.json" with { type: "json" };
 import waterIce from "./water-ice.json" with { type: "json" };
 import water from "./water.json" with { type: "json" };
+import xenonLiquid from "./xenon-liquid.json" with { type: "json" };
 import zincSulphide from "./zinc-sulphide.json" with { type: "json" };
 
 /** The phase a material file describes. */
@@ -102,6 +111,31 @@ export interface CauchyFit {
   readonly fittedToUm: number;
 }
 
+/**
+ * A derived file's real index from its gas's molar refraction scaled to the liquid (R08.T5.k;
+ * decision-p14-t49h-gas-index A.1): at each wavelength x = c R(λ) ρ_m and n = √((1 + 2x) ÷ (1 − x)),
+ * R the Lorentz–Lorenz molar refraction of the gas row of the file's key in `../rayleigh.ts`
+ * (`GAS_DISPERSION`, or for SO₂ the dispersion of its `ESTIMATED_RAYLEIGH` row) at the row's own
+ * reference state and compressibility.
+ *
+ * @remarks
+ * The form describes n alone: the file's k is its arrays, its derivation stated in `reduction`.
+ */
+export interface ScaledMolarRefractionFit {
+  readonly form: "scaledMolarRefraction";
+  /** ρ_m, the saturated liquid's molar density at the file's temperature, mol/l. */
+  readonly molarDensityMolPerL: number;
+  /** c, the one factor on the gas's molar refraction. */
+  readonly factor: number;
+  /** The shortest wavelength of the measurements that set c, µm. */
+  readonly anchoredFromUm: number;
+  /** The longest wavelength of the measurements that set c, µm. */
+  readonly anchoredToUm: number;
+}
+
+/** A derived file's parameterisation, by its `form`. */
+export type DerivedFit = CauchyFit | ScaledMolarRefractionFit;
+
 /** One material file: its header and its index on its own grid. */
 export interface MaterialIndexFile {
   /** The sim's substance key (P14.T49.b). */
@@ -128,7 +162,7 @@ export interface MaterialIndexFile {
   /** For a stand-in file, what stands in and why. */
   readonly standIn: string | undefined;
   /** For a derived file, its parameterisation. */
-  readonly fit: CauchyFit | undefined;
+  readonly fit: DerivedFit | undefined;
   /**
    * The file's own grid, nm: λ₀, λ₀ + 5, …, 780, with λ₀ a whole multiple of 5 nm at or below
    * 380 nm, so that it covers {@link MATERIAL_WAVELENGTHS_NM} (decision-r08-t5d ruling 1).
@@ -221,12 +255,20 @@ function numbers(
   return Float64Array.from(value, Number);
 }
 
-function fitOf(value: unknown, file: string): CauchyFit | undefined {
+/** The forms a derived file's fit may take. */
+const FIT_FORMS: ReadonlyArray<DerivedFit["form"]> = ["cauchy", "scaledMolarRefraction"];
+
+/**
+ * A file's fit checked and typed: null, a Cauchy fit or a scaled molar refraction (whose density
+ * and factor are positive, and whose anchors run from the shorter wavelength to the longer).
+ */
+function fitOf(value: unknown, file: string): DerivedFit | undefined {
   if (value === null) {
     return undefined;
   }
-  if (!isRecord(value) || value["form"] !== "cauchy") {
-    throw new Error(`${file}: "fit" must be null or a Cauchy fit`);
+  const form = isRecord(value) ? value["form"] : undefined;
+  if (!isRecord(value) || !member(FIT_FORMS, form)) {
+    throw new Error(`${file}: "fit" must be null, a Cauchy fit or a scaled molar refraction`);
   }
   const field = (name: string): number => {
     const v = value[name];
@@ -235,14 +277,30 @@ function fitOf(value: unknown, file: string): CauchyFit | undefined {
     }
     return v;
   };
-  return {
-    form: "cauchy",
-    a: field("a"),
-    bUm2: field("bUm2"),
-    absorptionPerM: field("absorptionPerM"),
-    fittedFromUm: field("fittedFromUm"),
-    fittedToUm: field("fittedToUm"),
+  if (form === "cauchy") {
+    return {
+      form,
+      a: field("a"),
+      bUm2: field("bUm2"),
+      absorptionPerM: field("absorptionPerM"),
+      fittedFromUm: field("fittedFromUm"),
+      fittedToUm: field("fittedToUm"),
+    };
+  }
+  const fit: ScaledMolarRefractionFit = {
+    form,
+    molarDensityMolPerL: field("molarDensityMolPerL"),
+    factor: field("factor"),
+    anchoredFromUm: field("anchoredFromUm"),
+    anchoredToUm: field("anchoredToUm"),
   };
+  if (!(fit.molarDensityMolPerL > 0 && fit.factor > 0)) {
+    throw new Error(`${file}: the fit's density and factor must be positive`);
+  }
+  if (!(fit.anchoredFromUm <= fit.anchoredToUm)) {
+    throw new Error(`${file}: the fit's "anchoredFromUm" must not exceed "anchoredToUm"`);
+  }
+  return fit;
 }
 
 /**
@@ -309,10 +367,12 @@ export function parseMaterialFile(raw: unknown, file: string): MaterialIndexFile
  * mode names no phase or variant (liquid water before ice, liquid methane before its ice, 75 wt%
  * sulphuric acid before 84.5 wt%, a choice: both lie inside Hansen and Hovenier 1974's 1.44 ±
  * 0.015 at 550 nm, who name only "a concentrated solution of sulfuric acid"). R08.T5.d's
- * condensates, hazes, ices and dusts follow T5.b's (decision-r08-t5d); O₂, CO, H₂S and Ar have their
- * ices alone, so a liquid of one takes its ice as a named analogue. R08.T5.g's liquids come last, so
- * that every key's default is unchanged: seawater as liquid H₂O's `S35` variant, liquid N₂, NH₃ and
- * S₈ after their solids, and liquid C₂H₆, the key's only file.
+ * condensates, hazes, ices and dusts follow T5.b's (decision-r08-t5d). R08.T5.g's liquids come
+ * next, so that every key's default is unchanged: seawater as liquid H₂O's `S35` variant, liquid
+ * N₂, NH₃ and S₈ after their solids, and liquid C₂H₆, the key's only file. R08.T5.k's nine liquids
+ * come last (decision-p14-t49h-gas-index): liquid O₂, Ar, CO, CO₂ and H₂S after their solids,
+ * which stay their keys' defaults, so that a liquid of one is its own file and no longer its ice
+ * as a named analogue; and liquid Kr, Xe, N₂O and SO₂, each its key's only file.
  */
 export const MATERIAL_FILES: ReadonlyArray<MaterialIndexFile> = [
   parseMaterialFile(water, "water.json"),
@@ -359,6 +419,15 @@ export const MATERIAL_FILES: ReadonlyArray<MaterialIndexFile> = [
   parseMaterialFile(ammoniaLiquid, "ammonia-liquid.json"),
   parseMaterialFile(ethaneLiquid, "ethane-liquid.json"),
   parseMaterialFile(sulphurLiquid, "sulphur-liquid.json"),
+  parseMaterialFile(argonLiquid, "argon-liquid.json"),
+  parseMaterialFile(kryptonLiquid, "krypton-liquid.json"),
+  parseMaterialFile(xenonLiquid, "xenon-liquid.json"),
+  parseMaterialFile(oxygenLiquid, "oxygen-liquid.json"),
+  parseMaterialFile(nitrousOxideLiquid, "nitrous-oxide-liquid.json"),
+  parseMaterialFile(sulphurDioxideLiquid, "sulphur-dioxide-liquid.json"),
+  parseMaterialFile(carbonDioxideLiquid, "carbon-dioxide-liquid.json"),
+  parseMaterialFile(carbonMonoxideLiquid, "carbon-monoxide-liquid.json"),
+  parseMaterialFile(hydrogenSulphideLiquid, "hydrogen-sulphide-liquid.json"),
 ];
 
 const FILES_BY_KEY: ReadonlyMap<string, ReadonlyArray<MaterialIndexFile>> = (() => {
