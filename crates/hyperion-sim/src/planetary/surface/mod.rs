@@ -43,10 +43,10 @@
 //! [`RECORD_TIME`] beside the body's, and [`ReadCoarseInputsError`] for its answer: the signature
 //! P14.T54.a connects (decision-backlog-2 §3). R09.T11 filled the plates, and R09.T12.a began the
 //! coarse elevation: a mobile lid's continental and oceanic populations with its sea floor, and
-//! R09.T12.b its belts, trenches and arcs; a stagnant lid's one population; all dry about the datum
-//! until R09.T12.e places the sea. The later steps are still no-ops: run on any inputs, the pass
+//! R09.T12.b its belts, trenches and arcs; a stagnant lid's one population, and R09.T12.c its
+//! volcanic provinces; all dry about the datum until R09.T12.e places the sea. The later steps are still no-ops: run on any inputs, the pass
 //! yields that relief, dry, under a still climate at the body's mean surface temperature, with the
-//! inputs' palette. R09.T12.c–T15 fill the rest and R09.T16 pins the reference worlds' fields.
+//! inputs' palette. R09.T12.d–T15 fill the rest and R09.T16 pins the reference worlds' fields.
 //!
 //! # Consumed items, by their paths in the code
 //!

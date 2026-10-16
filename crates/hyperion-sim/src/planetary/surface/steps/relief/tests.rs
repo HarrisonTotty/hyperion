@@ -3,7 +3,9 @@
 
 use std::sync::OnceLock;
 
-use hyperion_surface::field::{BoundaryKind, CoarseField, Crust, FieldView, coarse_level};
+use hyperion_surface::field::{
+    BoundaryKind, CoarseField, Crust, FieldView, PaletteEntry, coarse_level,
+};
 use hyperion_surface::synth::relief::ReliefStyle;
 use hyperion_testkit::float::assert_same_bits;
 
@@ -43,13 +45,14 @@ impl World {
 
 /// A world's state after the plates and this step, and that state quantised; and, on a mobile
 /// lid, the state after the populations and before the convergent landforms, with the arcs'
-/// layout.
+/// layout, or on a stagnant one the provinces' layout.
 struct Relieved {
     world: World,
     relief: Working,
     field: CoarseField,
     populations: Option<Working>,
     arcs: Option<convergent::Arcs>,
+    provinces: Option<provinces::Provinces>,
 }
 
 /// The plates and this step on `inputs` under the reference seed, its stages kept: the step's
@@ -59,9 +62,10 @@ fn relieve(inputs: CoarseInputs) -> Relieved {
     let pass = world.pass(reference::SEED);
     let mut relief = Working::initial(&pass);
     crate::planetary::surface::steps::plates::run(&pass, &mut relief);
-    let (populations, arcs) = if relief.plates.is_empty() {
+    let (populations, arcs, laid) = if relief.plates.is_empty() {
         lid_population(&pass, &mut relief);
-        (None, None)
+        let laid = provinces::run(&pass, &mut relief);
+        (None, None, laid)
     } else {
         let noise = noise::unit_field(
             &pass,
@@ -72,7 +76,7 @@ fn relieve(inputs: CoarseInputs) -> Relieved {
         crust_populations(&pass, &mut relief, &noise);
         let populations = relief.clone();
         let arcs = convergent::run(&pass, &mut relief);
-        (Some(populations), arcs)
+        (Some(populations), arcs, None)
     };
     interim_figures(&pass, &mut relief);
     let field = quantise(&world.inputs, relief.clone()).expect("the step's state quantises");
@@ -82,6 +86,7 @@ fn relieve(inputs: CoarseInputs) -> Relieved {
         field,
         populations,
         arcs,
+        provinces: laid,
     }
 }
 
@@ -95,6 +100,7 @@ fn the_staged_step_is_the_step() {
             .build()
             .unwrap(),
         reference::ceres_like(),
+        reference::mars_like(),
     ] {
         let staged = relieve(inputs.clone());
         let world = World::new(inputs);
@@ -566,10 +572,12 @@ fn builder_of(inputs: &CoarseInputs) -> crate::planetary::surface::inputs::Coars
 /// (`decision-r09-t12-coarse.md`'s addendum).
 #[test]
 fn every_lid_without_plates_is_one_population_about_the_datum() {
+    // No volcanism, so that T12.c's provinces leave the population alone.
     let small = |regime: TectonicRegime| {
         builder_of(&reference::earth_like())
             .figure(hyperion_surface::spheroid::Spheroid::sphere(1.0e6))
             .tectonics(regime, 0.0)
+            .volcanism(0.0)
             .build()
             .unwrap()
     };
@@ -1523,5 +1531,278 @@ fn calibrate_the_continental_population_net_of_the_landforms() {
          {sigma:.1} m, skew {lo:.5} (mode {:.2} m)",
         lift_var.sqrt(),
         mu + sigma * mode_of(lo)
+    );
+}
+
+/// A line load's bulge crest lies at πα with height e^(−π) `w₀` = 0.043 `w₀` above the
+/// undeflected plate, and the step response is the line load integrated (Design note 7).
+#[test]
+fn a_line_load_s_bulge_crest_lies_at_pi_alpha() {
+    let alpha = Metres::new(100e3);
+    let (k, weight) = (1e4, 1e12);
+    let peak = provinces::line_load_deflection(0.0, alpha, k, weight);
+    assert!((peak - weight / (2.0 * k * alpha.value())).abs() < 1e-9 * peak);
+    let (mut crest, mut lowest) = (0.0, f64::INFINITY);
+    for i in 0..=200_000 {
+        let x = alpha.value() * (2.0 + 2.5 * f64::from(i) / 200_000.0);
+        let w = provinces::line_load_deflection(x, alpha, k, weight);
+        if w < lowest {
+            (crest, lowest) = (x, w);
+        }
+    }
+    assert!(
+        (crest / alpha.value() - core::f64::consts::PI).abs() < 1e-4,
+        "{crest}"
+    );
+    assert!((lowest / peak + math::exp(-core::f64::consts::PI)).abs() < 1e-9);
+    assert!((lowest / peak + 0.043).abs() < 5e-4);
+    // The step response's slope is the line load's, per unit weight and foundation.
+    for u in [-2.5e5, -3e4, 1e3, 4e4, 3e5] {
+        let delta = 1.0;
+        let slope = (provinces::step_response(u + delta, alpha)
+            - provinces::step_response(u - delta, alpha))
+            / (2.0 * delta);
+        let line = provinces::line_load_deflection(u, alpha, 1.0, 1.0);
+        assert!(
+            (slope - line).abs() < 1e-9 / alpha.value(),
+            "{u}: {slope} {line}"
+        );
+    }
+    assert_same_bits(
+        provinces::step_response(-1.0, alpha) + provinces::step_response(1.0, alpha) - 1.0,
+        0.0,
+    );
+}
+
+/// α at `T_e` = 70 km under Mars's gravity (3.71 m s⁻²) and radius (3,389.5 km), with `ρ_m`
+/// 3,300 kg m⁻³ and an open moat (`ρ_fill` = 0), is 180 km ± 10 (`decision-r09-t12-coarse.md` item
+/// 3: its value is 175.5 km, 177.7 km planar; Design note 7's "as observed" was the formula's own
+/// value). The filled moat of the reference Mars's provinces (2,648 kg m⁻³) gives 251.9 km at 70 km
+/// and 337.4 km at its own 107.0 km.
+#[test]
+fn alpha_at_70_km_under_mars_s_gravity_is_180_km() {
+    let (g, r) = (
+        crate::units::MetresPerSecondSquared::new(3.71),
+        Metres::new(3_389.5e3),
+    );
+    let t_e = Metres::new(70e3);
+    let open = provinces::flexural_parameter(t_e, 3_300.0, 0.0, g, r).value();
+    assert!((open - 180e3).abs() <= 10e3, "{open} m");
+    assert!((open - 175.5e3).abs() < 100.0, "{open} m");
+    let planar = provinces::flexural_parameter(t_e, 3_300.0, 0.0, g, Metres::new(1e15)).value();
+    assert!((planar - 177.7e3).abs() < 100.0, "{planar} m");
+    let mars = reference::mars_like();
+    let fill = 3_310.0 * (1.0 - provinces::FILL_POROSITY);
+    let filled =
+        provinces::flexural_parameter(t_e, 3_300.0, fill, mars.gravity(), mars.radius()).value();
+    let own = provinces::elastic_thickness(&mars).unwrap();
+    let at_own =
+        provinces::flexural_parameter(own, 3_300.0, fill, mars.gravity(), mars.radius()).value();
+    eprintln!(
+        "α filled: {:.1} km at 70 km, {:.1} km at the reference Mars's {:.1} km",
+        filled / 1e3,
+        at_own / 1e3,
+        own.value() / 1e3
+    );
+    assert!((filled - 251.9e3).abs() < 500.0, "{filled} m");
+    assert!((at_own - 337.4e3).abs() < 500.0, "{at_own} m");
+}
+
+/// `T_e` is 108 km ± 1 at Mars's 19 mW m⁻² and 210 K, and zero where `T_s` ≥ 870 K, where each
+/// load is compensated locally (α = 0); on a water-ice lid it is 2.516 km at 200 mW m⁻² and 70 K
+/// and zero at 170 K and above; and it is the body's radius where the law passes it (the
+/// reference Ceres's 2,192 km).
+#[test]
+fn the_elastic_thickness_follows_the_lid_s_substance() {
+    let at = |temperature: f64, flux: f64| {
+        builder_of(&reference::mars_like())
+            .mean_surface_temperature(crate::units::Kelvin::new(temperature))
+            .heat_flow(WattsPerSquareMetre::new(flux))
+            .build()
+            .unwrap()
+    };
+    let mars = provinces::elastic_thickness(&at(210.0, 0.019))
+        .unwrap()
+        .value();
+    assert!((mars - 108e3).abs() <= 1e3, "{mars} m");
+    let hot = provinces::elastic_thickness(&at(900.0, 0.019)).unwrap();
+    assert_same_bits(hot.value(), 0.0);
+    let g = reference::mars_like().gravity();
+    let r = reference::mars_like().radius();
+    assert_same_bits(
+        provinces::flexural_parameter(hot, 3_300.0, 2_648.0, g, r).value(),
+        0.0,
+    );
+    // Airy: a load's deflection under it is its whole compensation, and nothing beyond it.
+    assert_same_bits(provinces::step_response(0.0, Metres::ZERO), 1.0);
+    assert_same_bits(provinces::step_response(-1.0, Metres::ZERO), 0.0);
+    let ice = PaletteEntry {
+        substance: hyperion_surface::substance_key::SubstanceKey::new("H2O").unwrap(),
+        role: hyperion_surface::field::PaletteRole::PrimaryCrust,
+        normal_albedo_bvr: [0.6; 3],
+        phase_row: 0,
+        grain_density_kg_m3: 930.0,
+        transition: crate::units::Kelvin::new(273.15),
+        mechanics: hyperion_surface::field::MechanicsFamily::WaterIce,
+        liquid: None,
+    };
+    let shell = |t: f64, f: f64| {
+        provinces::ice_thickness(
+            &ice,
+            crate::units::Kelvin::new(t),
+            WattsPerSquareMetre::new(f),
+        )
+        .unwrap()
+        .value()
+    };
+    assert!(
+        (shell(70.0, 0.2) - 2_516.0).abs() < 1.0,
+        "{} m",
+        shell(70.0, 0.2)
+    );
+    assert_same_bits(shell(170.0, 0.2), 0.0);
+    assert_same_bits(shell(200.0, 0.2), 0.0);
+    assert!((shell(70.0, 0.27) - 1_860.0).abs() < 10.0);
+    assert_eq!(provinces::mantle_density(&ice), Some(930.0));
+    let ceres = reference::ceres_like();
+    let rigid = provinces::elastic_thickness(&ceres).unwrap();
+    assert_same_bits(rigid.value(), ceres.radius().value());
+}
+
+/// The reference Mars's provinces: edifices at the cap about Mars's provinces, never lowering the
+/// ground, the `Province` crust where their load or fill is at least 10 m; none on the Moon (V = 0)
+/// or on a mobile lid.
+#[test]
+fn the_reference_mars_has_volcanic_provinces() {
+    let mars = relieve(reference::mars_like());
+    let laid = mars
+        .provinces
+        .as_ref()
+        .expect("the reference Mars has provinces");
+    eprintln!(
+        "Mars: T_e {:.1} km, α {:.1} km, h_max {:.0} m, {} provinces, {} edifices over {:.3} of \
+         the surface; realised s.d. {:.0} m ({:.0} m before the correction) against σ_volc {:.0} m",
+        laid.elastic.value() / 1e3,
+        laid.alpha.value() / 1e3,
+        laid.cap,
+        laid.count,
+        laid.edifices,
+        laid.coverage,
+        laid.realised,
+        laid.first,
+        laid.target
+    );
+    assert!(laid.count >= 1 && laid.edifices >= 1);
+    assert!(laid.lift.iter().all(|&l| l >= 0.0));
+    assert!(laid.realised > 0.3 * laid.target, "{} m", laid.realised);
+    let provinces = mars
+        .relief
+        .cells
+        .iter()
+        .filter(|c| c.crust == Crust::Province)
+        .count();
+    assert!(provinces > 0);
+    assert!(
+        mars.relief
+            .cells
+            .iter()
+            .all(|c| matches!(c.crust, Crust::Lid | Crust::Province))
+    );
+    assert!(relieve(reference::moon_like()).provinces.is_none());
+    assert!(earth().provinces.is_none());
+    assert!(
+        earth()
+            .relief
+            .cells
+            .iter()
+            .all(|c| c.crust != Crust::Province)
+    );
+}
+
+/// Measurements for the record, run by hand: `T_e` on each reference world, α beside a mantle of
+/// 3,500 kg m⁻³, and the reference Mars's provinces in detail.
+#[test]
+#[ignore = "measurement: the lithospheres and the reference Mars's provinces, printed"]
+fn measure_the_lithospheres_and_the_provinces() {
+    for (name, inputs) in [
+        ("Earth", reference::earth_like()),
+        ("Mars", reference::mars_like()),
+        ("Moon", reference::moon_like()),
+        ("Ceres", reference::ceres_like()),
+    ] {
+        let t_e = provinces::elastic_thickness(&inputs).map(Metres::value);
+        let law = crate::planetary::hooks::figures::relief::lithosphere_thickness(
+            crate::planetary::hooks::figures::Crust::Silicate,
+            inputs.mean_surface_temperature(),
+            inputs.heat_flow(),
+        );
+        eprintln!(
+            "{name}: T_e {:.1} km (the law {:.1} km, R {:.1} km), V {}",
+            t_e.unwrap_or(f64::NAN) / 1e3,
+            law.value() / 1e3,
+            inputs.radius().value() / 1e3,
+            inputs.volcanism()
+        );
+    }
+    let mars = reference::mars_like();
+    let own = provinces::elastic_thickness(&mars).unwrap();
+    let fill = 3_310.0 * (1.0 - provinces::FILL_POROSITY);
+    for mantle in [3_300.0, 3_500.0] {
+        let at = |t: Metres| {
+            provinces::flexural_parameter(t, mantle, fill, mars.gravity(), mars.radius()).value()
+                / 1e3
+        };
+        eprintln!(
+            "ρ_m {mantle}: α {:.1} km at 70 km, {:.1} km at {:.1} km; bulge crest near {:.0} km",
+            at(Metres::new(70e3)),
+            at(own),
+            own.value() / 1e3,
+            core::f64::consts::PI * at(own)
+        );
+    }
+    let world = relieve(mars);
+    let laid = world.provinces.as_ref().unwrap();
+    let omega = world.world.grid.solid_angles_sr();
+    let sphere: f64 = omega.iter().sum();
+    let province_area: f64 = world
+        .relief
+        .cells
+        .iter()
+        .zip(omega)
+        .filter(|(c, _)| c.crust == Crust::Province)
+        .map(|(_, w)| w)
+        .sum();
+    let highest = laid.lift.iter().copied().fold(0.0, f64::max);
+    let raised: f64 = laid
+        .lift
+        .iter()
+        .zip(omega)
+        .filter(|(l, _)| **l > 0.0)
+        .map(|(_, w)| w)
+        .sum();
+    eprintln!(
+        "Mars's provinces: {} of them, {} edifices of {:.0} km base and {:.0} m height, coverage \
+         {:.3}; raised {:.1}% of the surface, the Province crust over {:.1}%, the highest lift \
+         {highest:.0} m; realised s.d. {:.0} m against σ_volc {:.0} m",
+        laid.count,
+        laid.edifices,
+        laid.cap / provinces::EDIFICE_ASPECT / 1e3,
+        laid.cap,
+        laid.coverage,
+        100.0 * raised / sphere,
+        100.0 * province_area / sphere,
+        laid.realised,
+        laid.target
+    );
+    let z: Vec<f64> = world
+        .relief
+        .cells
+        .iter()
+        .map(|c| c.elevation.value())
+        .collect();
+    let (_, spread) = noise::mean_and_spread(&z, omega);
+    eprintln!(
+        "Mars after T12.a–c: s.d. {spread:.0} m (lid 900 m with provinces), relief {:.0} m",
+        world.relief.realised_relief.value()
     );
 }
