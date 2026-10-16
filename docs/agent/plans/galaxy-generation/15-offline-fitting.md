@@ -1447,9 +1447,10 @@ reads bumps `GENERATOR_VERSION` by the rule of Design note 10. Known bumps from 
 P15.T4.b, P15.T5.a (through P06.T19.e), any moved default of P15.T5.b, P15.T7.b (only members with a
 helium excess change), P15.T8, P15.T9, P15.T10 and P15.T11.b. Moving a constant into a table at the
 same value is not a bump. P15.T6 lands with plan 08's own bump at version 26 (S2); T6.b's
-production run runs once, from version 25's landed commit, under the potential freeze
-(decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15). P15.T6.g's re-emission lands with
-the 21 → 22 batch, or as one unit with 22 → 23 if it misses it.
+production run runs once, from version 25's landed commit, under the potential freeze: from that
+commit until 26 lands, nothing may change plan 02's potential tables or the birth populations the
+run samples (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15). P15.T6.g's re-emission
+lands with the 21 → 22 batch, or as one unit with 22 → 23 if it misses it.
 
 Reserved so that later tables move nothing they need not: table paths and item names are final from
 the scratch stage on; the node arrays of `displaced_forms`, so that a finer dependence on the halo

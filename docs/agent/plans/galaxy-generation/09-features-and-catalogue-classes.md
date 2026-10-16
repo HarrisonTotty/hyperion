@@ -281,10 +281,12 @@ change, the owning plan wins and only call sites here change.
   (`KinematicTables::ellipsoid`; `draw_velocity` and `epoch_velocity` take a `SystemRecord`, so a
   feature draws its bulk motion through the crate-private `kinematics::draw_on`, which P09.T4.a
   added); `kick_bins::speed_bin_shares` (the kick distribution by remnant
-  kind and mode); `displaced::{explosion_site, ExplosionSite}` and the stub
-  `recent_death_claims(galaxy, &site, &record) -> bool`, whose body this plan supplies, with
-  `SHELL_WINDOW_CAP` (4 Myr there), which this plan takes over; `displaced::ClassTable` with the
-  split between budget-fed `class_weight` and field-fed `stay_share`; the zero-weight hypervelocity
+  kind and mode); `displaced::{explosion_site, ExplosionSite}` and the gate
+  `RECENT_DEATH_CLAIM: Option<fn(&Galaxy, &ExplosionSite, &SystemRecord) -> bool>`, `None` until
+  P09.T35 writes `recent_death_claims` and sets it to `Some` (main's ruling on P08.T13's cost,
+  2026-10-15), with `SHELL_WINDOW_CAP` (4 Myr there), which this plan takes over;
+  `displaced::ClassTable` with the split between budget-fed `class_weight` and field-fed
+  `stay_share`; the zero-weight hypervelocity
   class (`DisplacedKind::HypervelocitySurvivor`); `runaway::RunawayModel`;
   `SystemRecord::{placement_class, formation_site, kick_constraint, mark_attempt}`;
   `pad_speed(Layer)` with `UNBOUND_PAD_SPEED`. At `d2787a2` only P08.T1–T7 are built: `kick_bins`,
@@ -1135,24 +1137,34 @@ target about 10 ms.
 #### P09.T30 The black hole's own events
 
 - **P09.T30.a Flares and disruptions.** On the black hole's event key (`EventKey::derive` with the
-  black hole's ID as subject), with plan 06's `PoissonBins`: flares at about one a day with a
-  power-law energy distribution (Neilsen et al. 2013), tag `0x0200 CENTRE_FLARE`, in bins of one
-  day; tidal disruptions at 10⁻⁴ per year × (M_bh ÷ 4.3 × 10⁶ M☉)^−0.4 (Stone and Metzger 2016), tag
+  black hole's ID as subject), with plan 06's `PoissonBins`: flares at 1.1 a day above a mean
+  unabsorbed 2–10 keV luminosity of 10³⁴ erg/s, their mean luminosity (dN/dL ∝ L^−1.9 on
+  10³⁴–1.925 × 10³⁵ erg/s) and duration (dN/dT ∝ T^−0.9 on 400–8,175 s) drawn independently and
+  their energy the product (Neilsen et al. 2013, §5 and Table 2), tag `0x0200 CENTRE_FLARE`, in bins
+  of one day; tidal disruptions at 2.9 × 10⁻⁵ per year × (M_bh ÷ 10⁸ M☉)^−0.404 (Stone and Metzger
+  2016, equation 27 as printed; 1.03 × 10⁻⁴ a year at the Milky Way's mass), tag
   `0x0201 TIDAL_DISRUPTION`, in bins of 1,024 years so that the source horizon is a few hundred
   bins. Both tags are registered in `event_tags!` here, inside plan 06's block for this plan. Tests:
-  the same events in any order of asking; 0.06–0.2 disruptions expected in ±H and about 26 in the
-  horizon at Milky Way values; about 365 flares a year.
+  the same events in any order of asking; 0.06–0.21 disruptions expected in ±H and about 27 (27.31)
+  in the horizon at Milky Way values; 401.775 flares a Julian year (1.1 a day) (corrected 2026-10-15
+  to the as-built law: Risks, "P09.T30.a as built").
 
   _Done (issue #20, 2026-10-15, at `GENERATOR_VERSION` 22): see Risks, "P09.T30.a as built"._
 
 - **P09.T30.b Victims and luminosity.** Each disruption inside the source horizon has a victim, a
   feature-level member of class `TIDAL_DISRUPTION_VICTIM`, first in the centre's list order, on a
   near-parabolic orbit whose pericentre passage is the event time; its mass is drawn from the
-  centre's living classes and its state after the event is "no system". `luminosity_at(t)` =
-  quiescence + flares + the t^(−5⁄3) tails of the disruptions in the horizon, by looking back over
-  their bins. Tests: a victim resolves from its ID and is at pericentre at the event time; 0.3–3 ×
-  10³⁹ erg/s a thousand years after a disruption (Ponti et al. 2010); the Kepler members' loss cone
-  stays empty.
+  centre's living classes and its state after the event is "no system". Its draws start at word 0 of
+  its disruption's event stream, where T30.a draws none, so no T30.a ID or time moves. Each victim
+  has an outcome, disrupted or swallowed whole: swallowed when the black hole's mass is at or above
+  the victim's Hills mass, where r_t = 2 r_g (Stone and Metzger 2016, §2 and near equation 33, §4.2;
+  1.14 × 10⁸ M☉ for a 1 M☉, 1 R☉ star). The outcome is recorded on the event, never dropped, and
+  only a disrupted victim adds a tail (updated 2026-10-15). `luminosity_at(t)` = quiescence +
+  flares + the t^(−5⁄3) tails of the disruptions in the horizon, by looking back over their bins
+  with this task's own look-back (T30.a's disruptions look back 0 bins). Tests: a victim resolves
+  from its ID and is at pericentre at the event time; 0.3–3 × 10³⁹ erg/s a thousand years after a
+  disruption (Ponti et al. 2010); the Kepler members' loss cone stays empty; at Milky Way values
+  every main-sequence victim is disrupted.
 
 #### P09.T31 Centre tests
 
@@ -1190,12 +1202,16 @@ resolution, canonical IDs, no cell above 2²⁴ candidates.
   the site + velocity × (t − T) before the explosion and at site + (velocity + kick) × (t − T) after
   it. Tests: entries per galaxy 3,000–21,000 more than distinct shells; 20–160 core collapses in ±H
   over seeds and about 40 at two a century; every kept entry's window is under its cap; no entry
-  travels more than 4,096 ly from its site within its lifetime.
+  travels more than 4,096 ly from its site within its lifetime. (Bound by P08.T13's interval
+  predicate: see "From P08.T13: the interval predicate is part of the one shared test", after
+  P09.T35; main's ruling, 2026-10-15.)
 - **P09.T33.b Runaway and walkaway deaths.** A second site density in the same class: plan 08's
   runaway and walkaway classes of band E, whose members die away from their birthplace, with the
   death rate conditional on the class's ejection-age marks. The grid side of these classes is carved
   in P09.T35. Tests: their share of field core collapses against the closed form from
-  `RunawayModel`; complementarity for sampled runaway candidates.
+  `RunawayModel`; complementarity for sampled runaway candidates. (Bound by P08.T13's interval
+  predicate: see "From P08.T13: the interval predicate is part of the one shared test", after
+  P09.T35; main's ruling, 2026-10-15.)
 
 #### P09.T34 The Type Ia class and the ancient survivors
 
@@ -1248,19 +1264,55 @@ else; complementarity as in P09.T38; hosts per galaxy recorded in a golden summa
 
 #### P09.T35 The carve-out on the grid side
 
-Plan 03's `catalogue_claims` already computes `displaced::explosion_site` for every layer-E record,
+Plan 03's `catalogue_claims` computes `displaced::explosion_site` for every layer-E record,
 field or displaced, whose death time falls within (−(`SHELL_WINDOW_CAP` + L + H), +H], backing a
-displaced candidate out to its birth site along a straight line, and passes it to plan 08's stub
-`recent_death_claims(galaxy, &site, &record)`. This task replaces the stub's body: it generates the
-record's `SystemStars`, builds `DeathMarks::of` and returns
-`claims(galaxy, &site, &marks, ShellEnvironment::Field)`. Only records that pass plan 08's prefilter
-pay for a stellar evaluation. A claimed candidate resolves to "no such system". Runaway classes do
-the same, and the luminous blue variables' test of P09.T43 is asked beside it. Layer D's share loses
-`ancient_share`; recent Type Ia need no carve-out here because plan 11's binaries redraw any
-explosion before +H, which this task records as a requirement in plan 11's consumed interface and
-guards with a `debug_assert` hook. Bump `GENERATOR_VERSION`, regenerate goldens. Tests: the
+displaced candidate out to its birth site along a straight line, once a claim is set. This task
+writes `recent_death_claims(galaxy, &site, &record)` (the record's `SystemStars`, `DeathMarks::of`,
+`claims(galaxy, &site, &marks, ShellEnvironment::Field)`) and sets `RECENT_DEATH_CLAIM` to
+`Some(recent_death_claims)` in its bump commit (main's ruling on P08.T13's cost, 2026-10-15). Only
+records that pass plan 08's prefilter pay for a stellar evaluation. A claimed candidate resolves to
+"no such system". Runaway classes do the same, and the luminous blue variables' test of P09.T43 is
+asked beside it. Layer D's share loses `ancient_share`; recent Type Ia need no carve-out here
+because plan 11's binaries redraw any explosion before +H, which this task records as a requirement
+in plan 11's consumed interface and guards with a `debug_assert` hook. Bump `GENERATOR_VERSION`,
+regenerate goldens. It requires `LifetimeBracket` baked as a `hyperion-fit` table, P08.T13's second
+follow-up, which lands before P08.T12.c or this task, whichever is first. It measures the sim's fast
+suite before and after setting the claim, and benches the hook at the Sun-like point, on a young arm
+ridge and at the centre (with P08.T16, which should bench an arm ridge too). Tests: the
 complementarity test of P09.T38 for sampled candidates; a grid star due to die at +1,500 yr is still
 a grid star, dies in place and has a shell when evaluated then.
+
+> **From P08.T13: the interval predicate is part of the one shared test** (main's ruling,
+> 2026-10-15).
+>
+> Plan 08's `displaced::death_in_interval(m0, &composition, eta, age_at_epoch, draws)` decides
+> whether a primary's death falls in (−(`SHELL_WINDOW_CAP` + L + H), +H]. It decides in three
+> tiers: plan 08's `LifetimeBracket`, then the fate table at the range brief's margin, then the
+> exact `lifetime`. Its `None`s rest on validated bounds, not proved ones. So:
+>
+> 1. **Every side calls it.** That means:
+>    - the grid's `catalogue_claims`, through `explosion_site`;
+>    - P09.T33.a's field candidates;
+>    - T33.b's runaways and walkaways;
+>    - T36.a–b's members and the centre's.
+>
+>    Each calls `death_in_interval` on its own candidate's primary marks. It keeps an entry only if
+>    that is `Some` and `claims` is true. No side tests T against the interval by any other route.
+>    A catalogue candidate whose T was drawn inside the interval, but which the tiers put outside,
+>    is dropped, because the grid keeps that system.
+>
+> 2. **The inputs belong to the version.** From T35's bump on, the predicate's inputs are
+>    generator-version items: the fate tables, `LifetimeBracket` and its widening, and
+>    `STATED_FACTOR` and `DEAD_MARGIN_FLOOR`. A change to any of them is a bump, and re-runs
+>    P08.T13's soundness tests.
+> 3. **A failed bound costs a shell, never a double count:** the system stays on the grid without a
+>    shell. P08.T13's slow test bounds the rate below 3 × 10⁻⁴ per death in the interval: at 95%,
+>    about two of the Milky Way's roughly 7,000 shells. P09.T38 records the measured figure beside
+>    the shell counts.
+> 4. **P09.T38 tests the reject path.** Its complementarity test includes the predicate's reject
+>    path, forced through a test-only margin, and checks that both sides agree there.
+> 5. **The same rule binds P09.T43.** Its prefilter on the record alone binds its catalogue side in
+>    the same way.
 
 #### P09.T36 The recently dead inside features and the centre
 
@@ -1274,14 +1326,16 @@ a grid star, dies in place and has a shell when evaluated then.
   galaxy are in features, which hold about a quarter (0.15–0.35) of distinct shells; a chart finds
   every shell of an association from the catalogue without touching its nested grid (asserted with a
   counting cache); complementarity between a feature's band-E cells and its list over 10⁴ sampled
-  members.
+  members. (Bound by P08.T13's interval predicate: see "From P08.T13: the interval predicate is part
+  of the one shared test", after P09.T35; main's ruling, 2026-10-15.)
 - **P09.T36.b Globulars and the centre.** Globular clusters have no core-collapse entries and no
   shells; their Type Ia hosts are drawn from the delay-time distribution on their mass (0.1–0.5
   expected over the whole system) and are listed as hosts whose window is zero. The centre's list
   takes a handful of core collapses from its young class and its Type Ia from its old classes, and
   the centre's band-D and band-E cells carve them by the same test, with the smooth gas at the
   origin as the site. Tests: a handful (1–20) of entries at the centre at Milky Way values; no
-  globular entry ever reports a shell.
+  globular entry ever reports a shell. (Bound by P08.T13's interval predicate: see "From P08.T13:
+  the interval predicate is part of the one shared test", after P09.T35; main's ruling, 2026-10-15.)
 
 #### P09.T37 Merge into the range query
 
@@ -1308,7 +1362,9 @@ population's budget within Poisson error in twelve test volumes. **Shells at Mil
 (about two core collapses and half a Type Ia a century): 3,000–30,000 distinct shells over seeds and
 about 7,000 at those rates; one to two thousand non-radiative; counts by phase recorded in a golden
 summary; sizes 10–800 ly; the longest window under `SHELL_WINDOW_CAP`, with the longest seen
-recorded against the brainstorm's 2–4 Myr and the 4.3 Myr of the oldest known remnant.
+recorded against the brainstorm's 2–4 Myr and the 4.3 Myr of the oldest known remnant. (Bound by
+P08.T13's interval predicate: see "From P08.T13: the interval predicate is part of the one shared
+test", after P09.T35; main's ruling, 2026-10-15.)
 
 ### Phase 8: protocol, server and display
 
@@ -1394,12 +1450,12 @@ selector steps, unit switching, formatting under the guide's number rules.
 This plan changes generated output four times, each a bump with regenerated goldens: P09.T2.c (the
 field gives up φ), P09.T28.b (the Kepler regime and the grid's loss cone), P09.T28.d (the secular
 rates, away from the epoch only), P09.T35 (the supernova and luminous-blue-variable carve-outs,
-layer D's ancient share and the hypervelocity class's weight). T28.b and T28.d ride version 25
-(S1) and T35 rides 26 (S2), and each boards a later train if not ready
-(decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15). It reserves, so that later plans
-move nothing: the `ClassId` values 2, 3, 5, 6 and 8 for plan 11 and the rule that feature-level
-lists append classes in the list order of design note 16; event tags 0x0203–0x02FF of this plan's
-block; the `10` sub-kinds `01` and `10` for plan 10 (`11` stays rejected);
+layer D's ancient share and the hypervelocity class's weight). T28.b and T28.d ride version 25 (S1),
+and T35 and T2.c (with rendering plan R06's R06.T16.a) ride 26 (S2); each boards a later train if
+not ready (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15). It reserves, so that later
+plans move nothing: the `ClassId` values 2, 3, 5, 6 and 8 for plan 11 and the rule that
+feature-level lists append classes in the list order of design note 16; event tags 0x0203–0x02FF of
+this plan's block; the `10` sub-kinds `01` and `10` for plan 10 (`11` stays rejected);
 `FeatureKind::{Stream, DwarfCore}`; `FeatureShares::set_halo_discrete`; the binary classes of the
 class table with scratch fractions; member 1–15 of a catalogue system; domain-tag prefixes
 `feature.`, `member.`, `centre.`, `snr.`, `class.`. Parameters that belong to the generator version

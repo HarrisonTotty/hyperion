@@ -777,8 +777,10 @@ targets at header 21 (below).
    Design note 5), so R07's `body_brdf(law: LunarLambert, mu0, mu, alpha)` carries it and this plan
    calls it once per class, with that class's `LunarLambert` (T10.b). Each law's L(α) is tabulated
    beside its f, in the alpha channel of its `phase_factor_table` row, and f against that L(α):
-   Φ_shape(α; L) = [L(α) Φ_LS(α) + ⅔(1 − L(α)) Φ_Lam(α)] ÷ [L(0) + ⅔(1 − L(0))], so p and q are
-   unchanged and only the limb profile moves; `body_brdf` reads L from the row and `LunarLambert.l`
+   Φ_shape(α; L) = [L(α) Φ_LS(α) + ⅔(1 − L(α)) Φ_Lam(α)] ÷ [L(0) + ⅔(1 − L(0))], so p is unchanged,
+   and inside each template's range Φ and q are too and only the limb profile moves; past it the
+   held f draws L(α)'s own tail, which lowers q by at most 6.8 × 10⁻⁴ (R10.T10.b's record);
+   `body_brdf` reads L from the row and `LunarLambert.l`
    is L(0) (decision-r07-t8b). A texel reflects its classes' `body_brdf` radiances summed by weight,
    each law through its own row, as R07's disc sums its class map's, not one law built from weighted
    parameters, which differs from the sum wherever classes of different A_N and L blend (1.7× at
@@ -1041,10 +1043,15 @@ targets at header 21 (below).
     Hence the layout: the cache is preallocated as fixed slots from the byte budget; heights, parent
     heights, the horizon map and the mask, all read by `textureLoad`, live in storage buffers
     addressed by slot index, tight and untiled (the default `maxStorageBufferBindingSize` is 128
-    MiB); normals and class weights, which want filtering, live in 2D arrays (at most the adapter's
-    `maxTextureArrayLayers`, 256 by default) or atlases with a one-texel gutter; and each style's
-    terrain is one instanced draw over R05's shared 65 × 65 index buffer with a slot index per
-    instance, which also keeps the CPU's per-draw cost down. R05 already packs its octahedral
+    MiB); each storage binding is visible only to the stages that read it, so WebGPU's default eight
+    a stage, never raised (Metal's adapters report 10 under Dawn), counts per stage: the lit
+    material's vertex stage reads the heights, slot records, instances, contacts and, on
+    `baked-offsets`, the offsets, and its fragment stage the class layers and the lights; the
+    horizon map and the survey mask are each their own slot field (main's ruling for R10.T10.b,
+    2026-10-15); normals and class weights, which want filtering, live in 2D arrays (at most the
+    adapter's `maxTextureArrayLayers`, 256 by default) or atlases with a one-texel gutter; and each
+    style's terrain is one instanced draw over R05's shared 65 × 65 index buffer with a slot index
+    per instance, which also keeps the CPU's per-draw cost down. R05 already packs its octahedral
     normals as core, filterable `rg16float` (its Design note 5; the `rg16snorm` alternative would
     need `texture-formats-tier1`) and already builds `PatchCache` on this layout's fixed slots (its
     Design note 10); this plan supplies the `SlotLayout` and the budget, and the eviction rule stays
@@ -1478,7 +1485,9 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   called by R09's `SurfaceService` once the field is built, with plan 14's visual
   geometric albedo p (the photometry section R07.T1 asks of plan 14), so that c ships in
   `FieldHeader.albedo_scale`. Filling the header changes the payload, which R09's Design note 17
-  puts under `GENERATOR_VERSION`, so this task bumps it (see Generator version). As built
+  puts under `GENERATOR_VERSION`; as built it bumps nothing, since the payload's layout freezes only
+  at the first send and no generated body is served before it (main's ruling for T10.a, 2026-10-14:
+  Generator version, and Risks, "Deviations in T10.a, as built"; updated 2026-10-15). As built
   (R09's "Deviations in T17, as built"): the call site is `surface/service.rs`'s `compute`, after
   `coarse_pass`, where the body's record is in hand, its p the photometry's `geometric_albedo()`
   (by band); the tests that compare the served field with `coarse_pass` bit for bit
@@ -1521,9 +1530,13 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   `struct LunarLambert { a, l, s, table_row }` (a = A_N × c, l = L(0), the class's s and row),
   passed to R07's `body_brdf(law: LunarLambert, mu0, mu, alpha)`, whose signature R07.T4.c creates
   and this task uses unchanged. _The limb ruling (decision-r10-limb, folded in): `LunarLambert.l`
-  is `PhaseLaw::limb_parameter(c A_N)` of the class's law, and the class laws' rows are three:
-  Regolith, Ice, and Lambert (f ≡ 1, alpha 0), from R07's `lambert` template, provisional and
-  labelled as R07 has it; a consolidated class's row is Lambert's whatever its entry's code._ The
+  is `PhaseLaw::limb_parameter(c A_N)` of the class's law, and the class laws are three, Regolith,
+  Ice and Lambert (f ≡ 1, alpha 0, from R07's `lambert` template, provisional and labelled as R07
+  has it), with a row for each distinct (law, L(0)), the law fixing its template and s: f is
+  tabulated against L(α) = L(0) × McEwen's profile, so a particulate class at L(0) < 1 (a bright
+  frost) takes a row of its own, and the Lambert law one row whatever its classes' albedos; row 0 is
+  the body's uniform law (main's ruling for R10.T10.b, 2026-10-15); a consolidated class's row is
+  Lambert's whatever its entry's code._ The
   texel reflects the classes' `body_brdf` radiances summed by its
   weights, skipping zero weights, not one `LunarLambert` built from weighted parameters, which
   differs from the sum by the covariance of A_N and L: 1.7× too bright at μ₀ = 0.5, μ = 0.1 for an
@@ -1536,8 +1549,10 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   the spheroid integral at L(α) and `oblateAlbedoScale` at L(0) in `bodies/oblate.ts` and
   `bodies/draw.ts`; `shaders/litBody.wgsl` and `shaders/bodyDisc.wgsl`. It moves R07's L = 1
   templates (`moon`, `mercury`, `airless-ice`, `snowball`, `magma`) to McEwen 1996's L(α), which
-  changes no q, p or point flux. Files: `terrainMaterial.ts`, `shaders/terrainLit.wgsl`; R07's
-  `appearance/law.ts`, `shapes.ts`, `phase.ts`, `brdf.ts` and `templates.ts`, `bodies/oblate.ts` and
+  changes no p, and no q or point flux inside each template's range (past it the held f draws L(α)'s
+  own tail: Risks, "Deviations in T10.b, as built"). Files: `terrainMaterial.ts`,
+  `shaders/terrainLit.wgsl`; R07's `appearance/law.ts`, `shapes.ts`, `phase.ts`, `brdf.ts` and
+  `templates.ts`, `bodies/oblate.ts` and
   `bodies/draw.ts`, `shaders/litBody.wgsl` and `shaders/bodyDisc.wgsl`, with
   `appearance/litBodyProbe.ts`'s `packPhaseFactorRows`, which writes the rows' alpha (0 as built);
   `displays/view/photorealFrame.ts` for the footprint. Tests: a pure test that a
@@ -1555,7 +1570,9 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   law of that class in R07.T4.c's twin; the smoke harness renders a generated world's patch set on
   SwiftShader with every texel finite; a law without a curve draws R07's disc and twin unchanged
   (the row's alpha is its L); L(α) is 1 at 0°, 0.6084 at 30° and 0.1859 at 90°, and 0 from 103.9°;
-  under it, the Moon template's p, q and point flux equal the constant-L law's to 10⁻⁴, and its
+  under it, the Moon template's p equals the constant-L law's exactly, its point flux to 10⁻⁴ at
+  30°–120°, and its q falls by the held tail's 1.80 × 10⁻⁴, pinned to 5 × 10⁻⁶ and within 2 × 10⁻⁴
+  (main's ruling for R10.T10.b, 2026-10-15), and its
   CPU-rasterised disc flux equals its point's to 1% at 30°, 90° and 120°. Acceptance:
   `pnpm --filter hyperion test` (the client suite: the Files reach R07's `appearance/`, `bodies/`
   and `shaders/`, which the view's `lighting`, `photoreal`, `post` and `scenes` tests also read) and
@@ -1563,11 +1580,27 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
 - **R10.T10.c The survey edge.** The survey mask's discard, the skirts at the survey edge, and the
   reference surface drawn beneath with the inverse mask from the GPU coverage mask (Design note 12),
   in `terrainLit.wgsl` and the `mesh`-regime body's material; the edge mark over the image from
-  `surveyEdges`, the guide's `SURVEY EDGE`. Files: `shaders/terrainLit.wgsl`, `coverage.ts`, R07's
-  `mesh`-regime material (`bodies/smoothMesh.ts`, `shaders/smoothMesh.wgsl`, `SMOOTH_MESH_MATERIAL`
-  in `bodies/draw.ts`). Tests: `surveyEdges` returns exactly the boundary between surveyed and
-  unsurveyed cells on a fixture coverage, margin cells counted unsurveyed; the smoke harness renders
-  a half-surveyed patch set with no fragment where both terrain and the reference surface write. By
+  `surveyEdges`, the guide's `SURVEY EDGE`. It first builds the per-stage storage visibility of
+  Design note 15, unless R10.T8.b has built it: `StorageBufferSpec` gains an optional `stages`
+  (`"vertex"`, `"fragment"` or both, both by default), `resourceLayoutEntries` writes each entry's
+  own visibility, and the lit material declares `heights`, `slots`, `instances`, `contacts` and, on
+  `baked-offsets`, `offsets` vertex only, and `class_layers` and `terrain_lights` fragment only; the
+  mask is its own `survey-mask` slot field (65 × 65 bytes, four to a `u32`), bound to the vertex
+  stage if read per vertex and interpolated, or to the fragment stage if bilinear by hand; if the
+  split cannot be built, the mask joins R05's `heights` field, read as `u32` words through
+  `bitcast<f32>`, never the reverse (main's ruling for R10.T10.b, 2026-10-15). Files:
+  `shaders/terrainLit.wgsl`, `coverage.ts`, R07's `mesh`-regime material (`bodies/smoothMesh.ts`,
+  `shaders/smoothMesh.wgsl`, `SMOOTH_MESH_MATERIAL` in `bodies/draw.ts`), `view/engine/types.ts`
+  (`StorageBufferSpec.stages`), `view/engine/webgpu/materials.ts` (`resourceLayoutEntries`),
+  `view/engine/platform.ts` (`requiredLimits`' doc: no binding-count limit is raised),
+  `slotLayout.ts` (the `survey-mask` field, 4,228 B a slot) and `gpu/resources.ts`. Tests:
+  `surveyEdges` returns exactly the boundary between surveyed and unsurveyed cells on a fixture
+  coverage, margin cells counted unsurveyed; the smoke harness renders a half-surveyed patch set
+  with no fragment where both terrain and the reference surface write; in `resources.test.ts` and
+  `terrainPass.test.ts`, every terrain material, on both vertex paths and in lit and spike shading
+  (and T11's wire once it lands), counts at most 8 storage buffers per stage by its declared
+  visibility, and each binding's declared stages match the entry points that use it (a static check
+  over the composed WGSL; the smoke harness's pipeline creation on SwiftShader validates it too). By
   hand, recorded: the skirt heights seen at the edge on a flattened generated world, which stay
   within the terrain's local relief. Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` and the smoke run.
@@ -1662,7 +1695,8 @@ src/renderer/src/view/bodies src/renderer/src/displays/view` and `just test-rend
 ### R10.T11 The wireframe's terrain
 
 Depth-only terrain in the wireframe style at τ = 4 px from the same bounds and bakes (heights and
-mask only), as one instanced draw, with the contours of Design note 14 evaluated in the same pass,
+mask only, the mask from the same `survey-mask` slot field as T10.c's), as one instanced draw, with
+the contours of Design note 14 evaluated in the same pass,
 the interval and index stated in the label block (`CONTOUR INTERVAL 200 m · INDEX 1 km`; the `DATUM`
 line is T12's, in both styles) through R02's label API (as built `displays/view/viewRun.ts`'s
 `labelStatements`, drawn by `ViewLabelBlock.tsx`), analytic line antialiasing and no MSAA, and the
@@ -1744,10 +1778,14 @@ a craft's ticks or the flight path marker, and its return only beyond 0.75 rem; 
 ticks absent within 0.5 rem of its ticks; no tripod at `NO GROUND` or without a readout; its note
 first in the list, unselectable, with its accessible name; stale on link loss; keyboard reach of the
 readout's target through the DOM list; the console-ux skill's lint, contrast and glyph checks pass,
-with no `σ` anywhere (B612 has none). By hand, recorded: in both styles at a device-pixel ratio of
-1, at the 80% and 100% interface scales, the tripod's open centre, the tripod over the survey edge,
-and the tripod beside the flight path marker at 0.5 rem; and at 1280×720 the label block's longest
-lines, `ULTIMATE BEARING CAPACITY ~0.95 MPa S · PAD WIDTH 1.0 m` and
+with no `σ` anywhere (B612 has none); at a finest-level bake of a synthetic world whose patch holds
+at least three classes, at every vertex, `dominantSlot` of the baked weights (`terrainMaterial.ts`,
+T10.b) names the palette slot whose (form, entry) is the worker's `material` answer at that vertex,
+ties broken as `dominantSlot` breaks them (main's ruling for R10.T10.b, 2026-10-15); between
+vertices the texel blends and no claim is made. By hand, recorded: in both styles at a device-pixel
+ratio of 1, at the 80% and 100% interface scales, the tripod's open centre, the tripod over the
+survey edge, and the tripod beside the flight path marker at 0.5 rem; and at 1280×720 the label
+block's longest lines, `ULTIMATE BEARING CAPACITY ~0.95 MPa S · PAD WIDTH 1.0 m` and
 `PAD FRICTION ~0.08 S · AT 243 K S`. If the centre closes at either scale, the ticks start 0.25 rem
 out, keeping their length, and the guide's figures change in the same commit (signoff-10).
 Acceptance:
@@ -4999,8 +5037,11 @@ shareAtPhase = l0)`; `PhaseTemplate.lommelSeeligerCurve` on `moon`, `mercury`, `
     2 × 10⁻⁴ (`phase.test.ts`), recorded here; the decision's own figure was 2 × 10⁻⁴. So `lawFor`,
     solving s under the curve, meets the generator's constant-L q at an s lower by 1.38 × 10⁻⁴ (the
     Moon), 2.58 × 10⁻⁴, 4.32 × 10⁻⁴ and 9 × 10⁻⁷: `templatesGolden.test.ts` recovers the other seven
-    templates' exponents to 6 places as before, and pins the five curved templates' shifts with
-    the golden's q met to 10⁻⁶.
+    templates' exponents to 6 places as before, and pins the five curved templates' shifts with the
+    golden's q met to 10⁻⁶. Past 150° the Moon's point dims under the curve, 0.838× at 155°, 0.673×
+    (−0.43 mag) at 160° and 0.339× at 170°, toward Allen's table (7.5 mag at 160°, `templates.ts`;
+    the constant-L tail gives 6.80, the curve 7.23). _Ruled 2026-10-15 (main's ruling for
+    R10.T10.b): accepted; the shift is the held tail's alone, computed independently._
   - _The class laws and their rows_ (`terrainMaterial.ts`). The worker resolves each palette slot's
     photometry (`TerrainLayers.photometry`, 8 × 5 `f32`: c `A_N` in B, V and R, the law's code and
     L(0); `SurfaceFields.photometry(system, body, palette)` over `WorkerFields::photometry`, the
@@ -5019,7 +5060,9 @@ shareAtPhase = l0)`; `PhaseTemplate.lommelSeeligerCurve` on `moon`, `mercury`, `
     (bilinearly between the quad's four vertices, no gutter needed), and with one buffer for both
     the `baked-offsets` lit material binds seven storage buffers, one below WebGPU's default eight
     a stage, left for T8.b's horizon map; T10.c's survey mask must then join a buffer or take a
-    texture. `TerrainShading` (`"spike" | "lit"`) adds the field to
+    texture. _Ruled 2026-10-15 (main's ruling for R10.T10.b): neither; the bindings take per-stage
+    visibility (T10.c), and the mask and the horizon map keep their own storage fields._
+    `TerrainShading` (`"spike" | "lit"`) adds the field to
     `terrainSlotFields(terrain, shading)` for a body baked with its weights alone, so R05's test
     planet, the spike and their slot counts are unchanged (T14 sizes). The bindings: R05's 0–5,
     then 6 `class_layers`, 7 the phase table, 8 `terrain_lights`, 9–15 R08's tables.
@@ -5078,7 +5121,8 @@ h, μ₀, μ, ρ)`, R07's disc term under an extended source, as `bodyDisc.wgsl`
     on a tie, the class a readout names; T2's
     `material_weights_at_the_finest_level_the_largest_is_the_class` holds the finest-level
     weights' largest to the classifier's class, and the tie to the worker's `material` answer,
-    which T12's readout shows, is T12's (asked of main).
+    which T12's readout shows, is T12's (asked of main). _Ruled 2026-10-15 (main's ruling for
+    R10.T10.b): T12's._
   - _The energy bound's grid_ starts at A_N 0.60: below it L(0) is 1 and A_h = A_N η rises with
     A_N, so 0.60 stands for it.
   - _Not built, as planned._ The ground's thermal emission waits on R08.T18 (decision-composition).
@@ -5109,16 +5153,17 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
 - **Questions for "main" (R10.T10.b)** (none touches a contract; each built to the lean).
   - _"Three rows"._ The folded-in limb ruling says three rows; with L(α) = L(0) × McEwen's profile a
     bright frost needs its own, so rows are keyed by (law, L(0)). Lean: as built, and the task's
-    text corrected to "three laws, a row per (law, L(0))".
+    text corrected to "three laws, a row per (law, L(0))". _Ruled 2026-10-15 (main's ruling for
+    R10.T10.b): as built; the text corrected._
   - _q to 2 × 10⁻⁴._ The task's 10⁻⁴ on the Moon's q misses by the held tail past 150°. Lean: as
     built (the decision's own figure); the alternative, holding Φ rather than f past a template's
-    range, changes R07's rule.
+    range, changes R07's rule. _Ruled 2026-10-15: as built._
   - _The brainstorm's wording._ "Materials, and what a surface looks like" says the shader "blends
     the materials' photometric parameters"; Design note 8 and decision-r07-t8b rule that it sums
     their radiances (the parameters' blend is 1.7× too bright). Lean: a brainstorm edit to
-    "radiances", for the owner.
+    "radiances", for the owner. _Ruled 2026-10-15: drafted for the owner, sign-off queue item 23._
   - _The readout's class at the vertex._ Lean: T12's test, at a finest-level bake, that the
-    largest weight's palette pair is the worker's `material` answer.
+    largest weight's palette pair is the worker's `material` answer. _Ruled 2026-10-15: T12's._
 - **Deferred findings (2026-10-13 rule) (R10.T10.b)** (recorded, not ruled; each leaves the algorithm
   and the contracts as built).
   - _Sky light on particulate ground is A, not its Bond albedo._ The diffuse sky's reflected share

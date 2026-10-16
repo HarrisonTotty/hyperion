@@ -1640,11 +1640,11 @@ orbital plane well beyond it.
 - **P14.T17.b Derivation for moons.** T16's `derive_body` with the planet as the tidal primary and
   the star as the source of light. Composition from a circumplanetary ice line at T = 170 K in the
   planet's own early luminosity. Each moon draws its own volatile ranks, and its nitrogen is boosted
-  only below its carrier's 131 K (P14.T56.c). Tidal heating H = (21⁄2)(k₂ ÷ Q)(G M_p² R⁵ n e² ÷ a⁶)
-  (Peale, Cassen and Reynolds 1979), with the moon's own k₂ and Q by composition and state
-  (P14.T56.d), gives a surface heat flux, a volcanism level and the subsurface-ocean flag for icy
-  moons whose flux exceeds what keeps a water layer liquid under their ice, which P14.T51.g's ocean
-  replaces for every body at 24.
+  only below its carrier's 123 K (P14.T56.c; updated 2026-10-15). Tidal heating
+  H = (21⁄2)(k₂ ÷ Q)(G M_p² R⁵ n e² ÷ a⁶) (Peale, Cassen and Reynolds 1979), with the moon's own k₂
+  and Q by composition and state (P14.T56.d), gives a surface heat flux, a volcanism level and the
+  subsurface-ocean flag for icy moons whose flux exceeds what keeps a water layer liquid under their
+  ice, which P14.T51.g's ocean replaces for every body at 24.
   - _Tests:_ (a) Jupiter's and Saturn's masses give total satellite masses within a factor of 3 of
     the real ones in the median; every moon lies inside a twentieth of the Hill radius and outside
     the fluid Roche limit. (b) Io's elements give a heat flux of 1–4 W/m²; Europa's give the
@@ -4722,6 +4722,11 @@ its source when it becomes a constant. Their order with T24 and with rendering p
       memory, read at build);
     - T48.f's Solar-System, Mars ÷ Moon, regular-moon and Pluto tests still pass;
     - the population means are deterministic: the same bits natively and as WebAssembly.
+  - _Held_ behind a hold at 24, in `belts.rs` and `hooks/figures.rs`, with a tripwire, so that it
+    lands at once: below 24 every value is the version in force's, bit for bit. T54.b deletes the
+    hold and its tripwire. If T48.g has not landed when T54.b's wiring starts, it takes the next
+    bump and its hold is renumbered (Tasks, "Order and parallelism"; decision-bump-plan-after-22,
+    2026-10-14; added 2026-10-15).
   - _Moves:_ every belt's recorded mean eccentricity and inclination, and every impact velocity
     and mapped crater density, at the 23 → 24 bump (T54.b).
   - _Accept:_ `cargo test -p hyperion-sim planetary::belts`;
@@ -5285,6 +5290,69 @@ rows' values.
 
   - _Files:_ `apps/hyperion/src/renderer/src/lib/{substances, substances.test}.ts`.
   - _Accept:_ `pnpm --filter hyperion exec vitest run lib/substances`.
+- **P14.T49.h The liquids' columns** (22 → 23, split from T49.b; lane `p14-liquids`; after T49.b's
+  rows, before T54.a and the serve gate; decision-r11-palette-liquids §4, 2026-10-14, with main's
+  ruling for R09.T2.e, 2026-10-15; new 2026-10-15). The ID skips `g`, which decision-composition
+  §3.3 maps from the surfaces audit's draft "P14.T49.g" to T51.e. Nothing on the record reads the
+  columns until T54.a, and T49.b keeps the liquids' densities.
+  - _The module._ `substance/liquid.rs`'s `LiquidColumns`, on every row with a liquid range and on
+    every lithology that can melt:
+    - molar refraction by bin (from R08's liquid file where one exists, else the gas's
+      refractivity);
+    - absorption by bin (R08's file, else absent);
+    - scattering's inputs: κ_T(T) from the reference equation of state, or a fit of it, and the
+      depolarisation ratio;
+    - surface tension (Mulero et al. 2012's coefficients, or a cited constant);
+    - viscosity (each reference correlation, fitted offline to a Vogel–Fulcher–Tammann form over the
+      liquid range where its own form is costly);
+    - for solutions, the mixing rules and the reference composition;
+    - for lithologies, the major oxides, with Giordano et al.'s and Lange and Carmichael's models;
+    - the sources, with their bases, per value (decision-r11-palette-liquids §1.8's table).
+  - _The function._ `liquid_properties(id, temperature, composition) -> LiquidProperties`, the
+    surface crate's type, for T54.a. A member that is not modelled is absent, never 0, and each
+    value carries its basis: measured, derived or stand-in.
+  - _The fit._ A `hyperion-fit` task, `liquid_optics`, reads R08's committed files as
+    `condensate_extinction` reads them, with any transport fit, and emits `tables/liquid_optics.rs`
+    with its manifest line.
+  - _The testing worlds and the reference Earth_ (main's ruling for R09.T2.e, 2026-10-15). It writes
+    `liquid_properties`' b by bin into water at 298.15 K (the surface crate's
+    `testing::liquid_water` and the sim's reference `WATER_RECORD`) and into Titan's methane at
+    93.65 K (`testing::liquid_methane_titan` and the sim's `methane_sea` in
+    `planetary/surface/inputs.rs`, where Setzmann and Wagner's κ_T gives it). It re-blesses
+    `wire/payloads.golden` at the version in force; the scattering-present form is already frozen in
+    that golden's `Liquids whole` line, so no layout moves. It lands before the serve gate, since
+    from the first send a change to the `testing` worlds bumps both `GENERATOR_VERSION` and
+    `SURFACE_PAYLOAD_FORMAT` (rendering plan R09's Generator version). If it slips past the gate,
+    the fill rides the next bump.
+  - _The golden._ `tests/golden/substance/liquids.golden`, new.
+  - _Tests:_
+    - water at 288.15 K against IAPWS R9-97's n (5 × 10⁻⁴), IAPWS R12-08's μ, R1-76's γ and
+      IAPWS-95's ρ;
+    - water's a against Pope and Fry 1997 at 440, 550 and 700 nm (0.00635, 0.0565 and 0.624 m⁻¹,
+      R11's Design note 12 oracle);
+    - water's b at S = 0 against Zhang, Hu and He 2009's model (their equations 1, 2 and 9 and Table
+      1, or their published code), with Morel 1974's pure-water column, not his seawater, as the
+      cross-check: the 0.0045 and 0.0019 m⁻¹ at 450 and 550 nm that decision-r11-palette-liquids
+      §1.8 quotes are seawater's;
+    - CH₄ at 90 K against Martonchik and Orton's n;
+    - N₂ at 77.35 K: the Lorentz–Lorenz n within 0.5% of 1.20;
+    - R11's `liquids.ts` four rows as test values: water 1.333, seawater 1.339, methane about 1.29,
+      and ethane at the temperature where Lorentz–Lorenz gives 1.37, or the row corrected to 1.40 at
+      94 K, recorded;
+    - every liquid-range row has n and ρ, no absent member is 0, and a solution with an unknown
+      component's absorption has it absent;
+    - a basaltic melt's μ from Giordano et al. at 1,473 K within that model's stated error of its
+      paper's example;
+    - with `hyperion-surface/testing`, each copy in the testing worlds' and the reference Earth's
+      records equals `liquid_properties` at the record's temperature, to the bit (copied as shortest
+      round-trip decimals);
+    - the golden is new and checked.
+  - _Science check:_ every figure the liquids ruling marks "from memory" is read against its primary
+    before it is committed.
+  - _Files:_ `substance/liquid.rs`, `tables/liquid_optics.rs`, `tasks/liquid_optics.rs`, the testing
+    worlds' and the reference Earth's liquid records, and the goldens.
+  - _Accept:_ `cargo test -p hyperion-sim substance::liquid`;
+    `cargo test -p hyperion-fit liquid_optics`; `cargo run -p hyperion-fit -- check`.
 
 #### P14.T50 Elements and redox
 
@@ -5800,10 +5868,10 @@ Snapshot path, `planetary/chem/`.
       shell's base. Heat dissipated inside the shell would thicken it, which is recorded.
   - **The solutes** stay in the liquid, since ice Ih excludes them:
     - **Chloride:** all the body's chlorine (T50.a) as NaCl, 58.44 ÷ 35.45 of its mass.
-    - **Ammonia:** for a body whose nitrogen took the icy boost (formed at or below 131 K: T50.c,
-      T56.c), `ACCRETED_AMMONIA` = 0.0063 of its water's mass (comets' NH₃ at about 0.7% of H₂O
-      by number: Mumma and Charnley 2011; Rubin et al. 2019; from memory), times the body's
-      nitrogen multiple from its rank.
+    - **Ammonia:** for a body whose nitrogen took the icy boost (formed at or below 123 K: T50.c,
+      T56.c; updated 2026-10-15), `ACCRETED_AMMONIA` = 0.0063 of its water's mass (comets' NH₃ at
+      about 0.7% of H₂O by number: Mumma and Charnley 2011; Rubin et al. 2019; from memory), times
+      the body's nitrogen multiple from its rank.
   - **The structure.**
     - The water is spread over the rock at 1,000 kg m⁻³ to r_w (at least 0.001 R).
     - P(r) = ρ_w G [(M − (4π/3)ρ_w R³)(1/r − 1/R) + (2π/3)ρ_w(R² − r²)].
@@ -5851,7 +5919,7 @@ Snapshot path, `planetary/chem/`.
     (Callisto); and sulphate and methanol solutes (P14.T55.k).
   - **Held** behind `OCEAN_VERSION` = 24, with a tripwire; T54.b deletes both.
   - _Tests_ (inputs by hand; chlorine at CI's per unit rock; NH₃ at 0.0063 where the body formed
-    beyond 131 K; observational figures from memory, checked at build):
+    beyond 123 K; observational figures from memory, checked at build):
     - **Europa** (1,560.8 km, 4.80 × 10²² kg, x_w 0.08, 102 K, 50 mW m⁻²): ocean under 10–16 km,
       floor `Rock`, `brine_nacl`.
     - **Ganymede** (2,634.1 km, 1.482 × 10²³ kg, 0.45, 110 K, 4.6 mW m⁻², no NH₃): under
@@ -6107,8 +6175,10 @@ feeding back into p_s, T_s, the albedo or the bulk.
     bless note accounts for the airless nights it moves.
   - T13's passes call T51.a and T51.b, and T57.a's constants take effect. T49.b's fitted curves
     replace the five Clausius–Clapeyron sets, and its c_p(T) replaces `HeatCapacityClass`.
-    `registry.golden`'s gas columns and `substances.json` (`heat_capacity_over_r_298k`; H₂'s and
-    He's `absorber` flags) are re-blessed.
+    `registry.golden`'s gas columns and `substances.json` (`heat_capacity_over_r_298k`; the
+    `absorber` flags T49.b's rows hold off until this bump: H₂'s, He's, N₂'s and CO₂'s, and the
+    fifteen rows R08.T19 owes answers, once answered (Risks, "Deviations in P14.T49.b, as built"))
+    are re-blessed.
   - `MOONS_VERSION` and its tripwire are deleted (T56.a, T56.c, T56.d), so that the moons' Laplace
     planes, own ranks and tides, and the rings' normals, take effect with the batch. The bless note
     accounts for them by subtask.
@@ -6256,8 +6326,9 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
   ones (its literature check was cut off by a restart). Each builder checks them in the source
   before they become a constant or a test's bound: the Moon's GRAIL k₂ (Konopliv et al. 2013;
   Williams et al. 2014), Io's Juno k₂ (Park et al. 2025), the Moon's Q at a month (Williams and
-  Boggs 2015), ice Ih's shear modulus (Gammon et al. 1983), ammonia hydrate's 131 K (Lodders 2003,
-  Table 8), the measured planes and fact-sheet J₂, radii, masses and orbits of T56.a's checks, and
+  Boggs 2015), ice Ih's shear modulus (Gammon et al. 1983), ammonia hydrate's 123 K (Lodders 2003,
+  Table 8 col. 4, read; main's ruling on the ammonia line, 2026-10-15), the measured planes and
+  fact-sheet J₂, radii, masses and orbits of T56.a's checks, and
   the Tremaine et al. 2009 equations and the 68.875° onset (reproduced by the ruling's `band.py`:
   68.8749°).
 
@@ -6586,7 +6657,9 @@ it:
     `GENERATED_SURFACES_FROM` = 24). It opens at the first bump after R09.T16 has landed and R11's
     liquid members are in the codec, expected to be 24; otherwise the wiring lane raises the
     constant to the next bump, and "main" may open it at an earlier bump if an R10 task needs a
-    generated world served sooner. Until it opens, R09 and R10 changes re-bless at the version in
+    generated world served sooner. Before it opens, the testing worlds' liquid records carry
+    P14.T49.h's scattering (main's ruling for R09.T2.e, 2026-10-15); if T49.h slips past the gate,
+    the fill rides the next bump. Until it opens, R09 and R10 changes re-bless at the version in
     force with no bump. That bump is the first send: from it, every change to the coarse pass,
     quantisation, synthesis, material classes or payload layout moves served output and rides a
     bump, and a layout change also bumps `SURFACE_PAYLOAD_FORMAT`.
@@ -10045,7 +10118,8 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   and ΔIW. Drawing their own ranks on their own `BodyId` keys would move every moon, so it needs a
   ruling and a bump of its own. **Ruled** (decision-p14-moons, item 2): every moon draws its own
   ranks, keyed by its candidate; nitrogen's icy boost needs the circumplanetary disc below ammonia
-  hydrate's 131 K; captured moons take their parent's formation zone. Built by P14.T56.c in the
+  hydrate's 123 K (updated 2026-10-15: nitrogen's 50% condensation temperature, main's ruling on the
+  ammonia line); captured moons take their parent's formation zone. Built by P14.T56.c in the
   22 → 23 batch.
 - **The host's C/O and Mg/Si** are drawn here, on `system.abundances`, until plan 06 carries them
   on the star. Plan 06 may adopt the stream without moving a value.
