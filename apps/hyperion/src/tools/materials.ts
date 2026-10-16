@@ -4289,7 +4289,7 @@ export const N2O_LIQUID_DENSITY = webBookDensity(
 
 /** SO₂'s equation of state as the WebBook's page cites it. */
 const SO2_EQUATION_OF_STATE =
-  "K. Gao, J. Wu, P. Zhang and E. W. Lemmon, J. Chem. Eng. Data 61 (2016) 2859, DOI 10.1021/acs.jced.6b00195, density uncertain by 0.1% in the liquid";
+  "K. Gao, J. Wu, P. Zhang and E. W. Lemmon, J. Chem. Eng. Data 61 (2016) 2859, DOI 10.1021/acs.jced.6b00195, the saturated liquid's density uncertain by 0.2% below 410 K, the equation stated for densities up to 25.3 mol/l";
 
 /** Saturated liquid SO₂ at 197.7 K, the registry row's triple point (Gao et al. 2016). */
 export const SO2_LIQUID_DENSITY = webBookDensity(
@@ -4587,6 +4587,41 @@ export const OXYGEN_PAIR_COOLING: ReadonlyArray<readonly [temperatureK: number, 
     [293, 1.11e-45],
     [203, 1.36e-45],
   ];
+
+/**
+ * O₂ gas's number density at 203 K and 101,325 Pa, cm⁻³: p ÷ k_B T, the scale Thalman and
+ * Volkamer's sets were measured near ("at atmospherically relevant pressure", their title).
+ */
+export const OXYGEN_GAS_203K_PER_CM3 =
+  (101_325 / (BOLTZMANN_J_PER_K * OXYGEN_PAIR_COLDEST_K)) * 1e-6;
+
+/**
+ * The condensed phase's local-field factor for absorption, ((n² + 2) ÷ 3)² ÷ n, at liquid O₂'s n at
+ * 575 nm: what the file's k leaves out, stated, not applied.
+ */
+export function oxygenLocalField(): number {
+  const n = scaledLiquidIndex(O2_DISPERSION, 575, O2_LIQUID_DENSITY.molPerL, O2_LIQUID_FACTOR);
+  return ((n * n + 2) / 3) ** 2 / n;
+}
+
+/**
+ * SO₂ gas's ã–X̃ band tail at two grid points, cm²: 2.4 × 10⁻²² at 383 nm and 1.2 × 10⁻²⁴ at 400 nm,
+ * as `view/atmosphere/absorbers.ts`'s SO₂ row states it (Hermans, Vandaele and Fally 2009 at 298 K):
+ * what sulphur-dioxide-liquid.json's k = 0 leaves out.
+ */
+export const SO2_TAIL_CM2: readonly [
+  readonly [wavelengthNm: number, sigmaCm2: number],
+  readonly [wavelengthNm: number, sigmaCm2: number],
+] = [
+  [383, 2.4e-22],
+  [400, 1.2e-24],
+];
+
+/** Liquid SO₂'s k from a molecular cross-section at a wavelength, nm: a = σN, k = aλ ÷ 4π. */
+export function so2TailK(sigmaCm2: number, wavelengthNm: number): number {
+  const perCm3 = (SO2_LIQUID_DENSITY.molPerL / 1_000) * AVOGADRO_PER_MOL;
+  return absorptionIndex(100 * sigmaCm2 * perCm3, wavelengthNm);
+}
 
 /** Liquid O₂'s number density at {@link O2_LIQUID_DENSITY}, cm⁻³: N = ρ_m N_A. */
 export const O2_LIQUID_NUMBER_DENSITY_PER_CM3 =
@@ -5055,7 +5090,7 @@ function liquidOxygenKText(): string {
     const perM = oxygenPairAbsorptionPerM(sigma);
     return `σ ${timesTen(sigma, 5)} cm⁵ at ${nm} nm, a = ${perM.toFixed(1)} m⁻¹ and k = ${timesTen(rounded(oxygenPairK(sigma, nm)), 5)}`;
   }).join("; ");
-  return `k = aλ ÷ 4π with a(λ) = σ(λ) N² (decision-p14-t49h-gas-index §2.6, path 2, Martonchik and Orton's method for liquid methane's unmeasured range, the gas scaled to the liquid's density), σ the O2–O2 collision-induced absorption of Thalman and Volkamer 2013 (Phys. Chem. Chem. Phys. 15, 15371, DOI 10.1039/c3cp50968k) in HITRAN2024's file (its sets of reference ${THALMAN_VOLKAMER_REFERENCE}), at their coldest temperature, ${OXYGEN_PAIR_COLDEST_K} K, where the liquid is at ${O2_LIQUID_DENSITY.temperatureK} K, linear in wavenumber between the sets' points 1 cm⁻¹ apart, and N = ρ_m N_A = ${timesTen(n, 5)} cm⁻³ the liquid's number density, so N² = ${timesTen(n * n, 4)} cm⁻⁶ and a pair's absorption scales with the square of the density: ${at}, to six significant figures. The sets reach 336–${OXYGEN_PAIR_LONGEST_NM.toFixed(1)} nm, so k = 0 from 655 nm (the B band near 688 nm and the A band near 762 nm are other measurements' and are not drawn), and k = 0 at ${OXYGEN_PAIR_ZERO_NM.join(", ")} nm, where the set's σ lies at or below 0 between the bands, within ${timesTen(OXYGEN_PAIR_SCATTER_CM5, 0)} cm⁵ of it. The bands' σ grows on cooling (at 577 nm, ${OXYGEN_PAIR_COOLING.map(([kelvin, sigma]) => `${timesTen(sigma, 2)} cm⁵ at ${kelvin} K`).join(" and ")} in the same sets), so at 90 K the liquid's bands are presumably stronger; the 203 K values are not extrapolated. Liveing and Dewar 1892 found the bands "all of exceptional strength" through about 3 inches of the liquid (p. 206), and Liveing and Dewar 1895 "very much more strongly developed by 0.4 centim. of liquid oxygen than by five times that thickness of liquid air" (p. 271), as the file's k has them: at 575 nm it transmits ${(100 * Math.exp(-oxygenPairPerM(575) * 0.0762)).toFixed(1)}% through 3 inches and ${(100 * Math.exp(-oxygenPairPerM(575) * 0.004)).toFixed(0)}% through 0.4 cm (computed). Liquid O2 is blue (Liveing and Dewar 1892, p. 207)`;
+  return `k = aλ ÷ 4π with a(λ) = σ(λ) N² (decision-p14-t49h-gas-index §2.6, path 2, Martonchik and Orton's method for liquid methane's unmeasured range, the gas scaled to the liquid's density), σ the O2–O2 collision-induced absorption of Thalman and Volkamer 2013 (Phys. Chem. Chem. Phys. 15, 15371, DOI 10.1039/c3cp50968k) in HITRAN2024's file (its sets of reference ${THALMAN_VOLKAMER_REFERENCE}), at their coldest temperature, ${OXYGEN_PAIR_COLDEST_K} K, where the liquid is at ${O2_LIQUID_DENSITY.temperatureK} K, linear in wavenumber between the sets' points 1 cm⁻¹ apart, and N = ρ_m N_A = ${timesTen(n, 5)} cm⁻³ the liquid's number density, so N² = ${timesTen(n * n, 4)} cm⁻⁶ and a pair's absorption scales with the square of the density: ${at}, to six significant figures. The sets reach 336–${OXYGEN_PAIR_LONGEST_NM.toFixed(1)} nm, so k = 0 from 655 nm (the B band near 688 nm and the A band near 762 nm are other measurements' and are not drawn), and k = 0 at ${OXYGEN_PAIR_ZERO_NM.join(", ")} nm, where the set's σ lies at or below 0 between the bands, within ${timesTen(OXYGEN_PAIR_SCATTER_CM5, 0)} cm⁵ of it. The bands narrow and their peaks rise on cooling (at 577 nm, ${OXYGEN_PAIR_COOLING.map(([kelvin, sigma]) => `${timesTen(sigma, 2)} cm⁵ at ${kelvin} K`).join(" and ")} in the same sets); the 203 K values are not extrapolated to 90 K. k is an extrapolation of the gas's pair absorption, measured near 1 atm, to the liquid, ${Math.round(O2_LIQUID_NUMBER_DENSITY_PER_CM3 / OXYGEN_GAS_203K_PER_CM3)} times its number density at 203 K and 1 atm (computed): the liquid's pair correlation at contact, the condensed phase's local-field factor ((n² + 2) ÷ 3)² ÷ n, ${oxygenLocalField().toFixed(2)} at 575 nm (computed, not applied), and the liquid's band shape are not modelled, so k carries an unmeasured uncertainty. Liveing and Dewar 1892 found the bands "all of exceptional strength" through about 3 inches of the liquid (p. 206), and Liveing and Dewar 1895 "very much more strongly developed by 0.4 centim. of liquid oxygen than by five times that thickness of liquid air" (p. 271), as the file's k has them: at 575 nm it transmits ${(100 * Math.exp(-oxygenPairPerM(575) * 0.0762)).toFixed(1)}% through 3 inches and ${(100 * Math.exp(-oxygenPairPerM(575) * 0.004)).toFixed(0)}% through 0.4 cm (computed). Liquid O2 is blue (Liveing and Dewar 1892, p. 207)`;
 }
 
 /** The record of liquid O₂'s checks, as oxygen-liquid.json's `source` states them. */
@@ -5242,7 +5277,7 @@ const T5K_DERIVED_LIQUIDS: ReadonlyArray<MaterialFile> = [
     reduction: scaledReductionText(
       N2O_LIQUID_FACTOR,
       "±0.003 in n",
-      "k = 0: the liquid is colourless in the visible. The lines' air wavelengths are read as vacuum wavelengths (under 5 × 10⁻⁶ in n)",
+      "k = 0: the liquid is colourless in the visible. The lines' air wavelengths are read as vacuum wavelengths (under 1 × 10⁻⁵ in n)",
     ),
     standIn: null,
     fit: {
@@ -5270,7 +5305,7 @@ const T5K_DERIVED_LIQUIDS: ReadonlyArray<MaterialFile> = [
     reduction: scaledReductionText(
       SO2_LIQUID_FACTOR,
       "±0.003 in n",
-      "k = 0: the liquid is colourless in the visible; its absorption lies in the ultraviolet",
+      `k = 0, as ruled (decision-p14-t49h-gas-index §2.6): the liquid is colourless in the visible. Not drawn: the tail of the gas's ã–X̃ band, which view/atmosphere/absorbers.ts's SO2 cross-sections put at ${timesTen(SO2_TAIL_CM2[0][1], 1)} cm² at ${SO2_TAIL_CM2[0][0]} nm and ${timesTen(SO2_TAIL_CM2[1][1], 1)} cm² at ${SO2_TAIL_CM2[1][0]} nm (Hermans, Vandaele and Fally 2009, the gas at 298 K); at the liquid's number density, σN would give k of ${SO2_TAIL_CM2.map(([nm, sigma]) => `${timesTen(so2TailK(sigma, nm), 0)} at ${nm} nm`).join(" and ")} (computed), so the liquid's violet edge is not drawn. The triple point's ${SO2_LIQUID_DENSITY.molPerL} mol/l lies ${signedPercent(SO2_LIQUID_DENSITY.molPerL / 25.3 - 1)} past the equation's stated 25.3 mol/l, about 0.001 in n, inside the band`,
     ),
     standIn: null,
     fit: {
@@ -5349,7 +5384,7 @@ const T5K_DERIVED_LIQUIDS: ReadonlyArray<MaterialFile> = [
     shape: "sphere",
     provenance: "standIn",
     paper: `the estimate's inputs: ${H2S_DISPERSION.source}, for H2S's gas dispersion; ${LEMMON_SPAN_2006}, as the NIST Chemistry WebBook gives it, for the liquid's density`,
-    source: `a Lorentz–Lorenz estimate, not a measurement (decision-p14-t49h-gas-index §2.5 and A.4): ${gasRowText(H2S_DISPERSION, [486.1, 656.3], `${RAYLEIGH_ROW} for H2S`)}, unscaled (c = 1), at ${densityText(H2S_LIQUID_DENSITY)}, the registry row's triple point. Bleekrode 1884 measured the liquid at the sodium lines (Proc. R. Soc. Lond. 37, 339, p. 351; public domain; ${fetchedSource("the archive.org copy, its text", "https://archive.org/download/paper-doi-10_1098_rspl_1884_0039/paper-doi-10_1098_rspl_1884_0039_djvu.txt", "2d7fa8df25c59fbaec00207ed98b89ba7b53e2264e163b5b8065a0375377048d", FETCHED_T5K)}), in 1879 with the compression pump and later in a Faraday tube under its own pressure: ${againstEstimateText(H2S_DISPERSION, BLEEKRODE_H2S, SODIUM_D_NM)}, at the WebBook's densities (${nistSaturation(...H2S_ROOM_QUERY)}, SHA-256 ${H2S_ROOM_SHA256}, fetched ${FETCHED_T5K}). They run the wrong way with temperature, the warmer liquid's index the higher, so neither anchors the file; both are recorded. This is the one liquid of the method's record whose estimate runs low. ${t5kRecordText()}`,
+    source: `a Lorentz–Lorenz estimate, not a measurement (decision-p14-t49h-gas-index §2.5 and A.4): ${gasRowText(H2S_DISPERSION, [486.1, 656.3], `${RAYLEIGH_ROW} for H2S`)}, unscaled (c = 1), at ${densityText(H2S_LIQUID_DENSITY)}, the registry row's triple point. Bleekrode 1884 measured the liquid at the sodium lines (Proc. R. Soc. Lond. 37, 339, p. 351; public domain; ${fetchedSource("the archive.org copy, its text", "https://archive.org/download/paper-doi-10_1098_rspl_1884_0039/paper-doi-10_1098_rspl_1884_0039_djvu.txt", "2d7fa8df25c59fbaec00207ed98b89ba7b53e2264e163b5b8065a0375377048d", FETCHED_T5K)}), in 1879 with the compression pump and later in a Faraday tube under its own pressure: ${againstEstimateText(H2S_DISPERSION, BLEEKRODE_H2S, SODIUM_D_NM)}, at the WebBook's densities (${nistSaturation(...H2S_ROOM_QUERY)}, SHA-256 ${H2S_ROOM_SHA256}, fetched ${FETCHED_T5K}). They run the wrong way with temperature, the warmer liquid's index the higher, so neither anchors the file; both are recorded. This is the one molecular liquid of the method's record whose estimate runs low at every measurement, by 0.010–0.021, far beyond the measurements' errors (Kr's and Xe's run low too, by under 0.003, as the heavy atoms' liquids do). ${t5kRecordText()}`,
     licence:
       "estimated values from the gas dispersion view/atmosphere/rayleigh.ts cites and the NIST Chemistry WebBook's density (NIST Standard Reference Data), with two measured values cited as facts; no data set is copied",
     reduction:
