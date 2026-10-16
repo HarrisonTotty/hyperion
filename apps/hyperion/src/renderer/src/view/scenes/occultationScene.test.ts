@@ -207,7 +207,7 @@ describe("the scripted occultation (R07.T9)", () => {
     expect(last?.drawnMoonPx).toBe(0);
     expect(last?.oracleMoonPx).toBe(0);
     expect(steps.some((each) => each.oracleMoonPx > 10 && each.oracleMoonPx < 90)).toBe(true);
-  });
+  }, 60_000); // M2 worst 4.0 s, M3 7.5 s (2026-10-16): 10× M2, CPU-bound
 
   it("draws the same light with the planet as a disc, where nothing writes depth", () => {
     const discs = plans(false);
