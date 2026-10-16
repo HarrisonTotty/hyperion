@@ -31,12 +31,13 @@ import type { CameraPose } from "../../view/camera/pose";
 import type { DrawItem, FrameSubmission } from "../../view/engine/types";
 import { hostLights, placeLights, sceneHostDiscs } from "../../view/lighting/hostLights";
 import { isLitBody, type LitBodyLighting, lightingFramesOf } from "../../view/lighting/retarded";
-import type { PhotorealFrame } from "../../view/photoreal/renderer";
+import type { FrameTerrain, PhotorealFrame } from "../../view/photoreal/renderer";
 import type { MeterMode } from "../../view/post/meter";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
 import { sceneOrigins, type ViewScene } from "../../view/scene/model";
 import type { BandLayer } from "../../view/sky/band";
 import type { ClassMapSource } from "../../view/terrain/classMap";
+import type { HandoverReliefSource } from "../../view/terrain/handover";
 import { type HostDiscLayer, hostPlacements } from "../../view/sky/disc";
 import {
   exposedSpriteRecord,
@@ -82,6 +83,26 @@ export interface PhotorealInputs {
    * live.
    */
   readonly classMaps?: ClassMapSource | undefined;
+  /**
+   * The lit bodies' reliefs, by which a body hands over to terrain (plan R10, R10.T10.e;
+   * `storeReliefSource` over the view's `CoarseFieldStore`), or absent, when none hands over.
+   * None until a view holds bodies' fields live.
+   */
+  readonly reliefs?: HandoverReliefSource | undefined;
+  /**
+   * The terrain of the bodies handed over (plan R10, R10.T10.e), with their surveys' coverage
+   * masks, or absent, when a body handed over is drawn as a mesh body is, its figure whole. None
+   * until a view draws a body's terrain live.
+   */
+  readonly terrain?: FrameTerrain | undefined;
+}
+
+/** What the lit bodies take of a view's terrain (plan R10, R10.T10.e). */
+export interface LitBodiesTerrain {
+  /** Their reliefs, for the hand-over. */
+  readonly reliefs?: HandoverReliefSource | undefined;
+  /** Their surveys' coverage masks, from the terrain the view draws. */
+  readonly terrain?: Pick<FrameTerrain, "surveyCoverage"> | undefined;
 }
 
 /** A wireframe sprite as a record at infinity. */
@@ -102,12 +123,14 @@ export function litLabelsOf(scene: ViewScene): ReadonlyArray<AppearanceLabel> {
 }
 
 /**
- * A lit body of the scene as the frame lights it, with its rotation where it has one and its class
- * map where `classMaps` holds one.
+ * A lit body of the scene as the frame lights it, with its rotation where it has one, its class
+ * map where `classMaps` holds one, and its relief and survey's coverage mask where `terrain` holds
+ * them.
  */
 function litBodyOf(
   { body, centreM, frame }: LitBodyLighting,
   classMaps: ClassMapSource | undefined,
+  terrain: LitBodiesTerrain,
 ): LitBodyInput {
   const id = body.id;
   const figure = body.appearance?.figure ?? {
@@ -117,6 +140,8 @@ function litBodyOf(
   };
   const photometry = body.appearance?.photometry ?? PROVISIONAL_PHOTOMETRY;
   const surface = classMaps?.classMapOf(id, photometry.law) ?? null;
+  const reliefM = terrain.reliefs?.reliefM(id) ?? null;
+  const coverage = terrain.terrain?.surveyCoverage(id) ?? null;
   return {
     id,
     centreM,
@@ -124,6 +149,8 @@ function litBodyOf(
     photometry,
     ...(body.rotation === null ? {} : { rotation: body.rotation }),
     ...(surface === null ? {} : { surface }),
+    ...(reliefM === null ? {} : { handoverReliefM: reliefM }),
+    ...(coverage === null ? {} : { surveyCoverage: coverage }),
     lighting: frame,
   };
 }
@@ -141,16 +168,21 @@ function litBodyOf(
  * `rotationAt`); a body whose rotation is not known (`null`) is passed none, and R07's disc shades
  * its class map with `elsewhere` alone.
  *
+ * Each body takes its relief from `terrain.reliefs`, by which it hands over to terrain, and the
+ * coverage mask of its survey from the terrain the view draws (plan R10, R10.T10.e).
+ *
  * @param discs - The scene's host discs (`sceneHostDiscs`).
  * @param classMaps - The bodies' class maps; absent, every disc is uniform.
+ * @param terrain - The bodies' reliefs and coverage masks; absent, none hands over.
  */
 export function litBodiesOf(
   scene: ViewScene,
   pose: CameraPose,
   discs: ReadonlyArray<HostDiscDto>,
   classMaps?: ClassMapSource,
+  terrain: LitBodiesTerrain = {},
 ): LitBodyInput[] {
-  return lightingFramesOf(scene, pose, discs).map((lit) => litBodyOf(lit, classMaps));
+  return lightingFramesOf(scene, pose, discs).map((lit) => litBodyOf(lit, classMaps, terrain));
 }
 
 /** The photorealistic frame of a stage's run. */
@@ -208,10 +240,14 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     hostDraws,
     glareSources: inputs.discs.glareSources(camera, viewport, run.camera.role),
     lights,
-    bodies: litBodiesOf(scene, pose, discs, inputs.classMaps),
+    bodies: litBodiesOf(scene, pose, discs, inputs.classMaps, {
+      reliefs: inputs.reliefs,
+      terrain: inputs.terrain,
+    }),
     // R10's terrain, where the view draws it; lit craft will add theirs.
     depthWriters: inputs.terrainFootprints ?? [],
     previousRegimes: inputs.previousRegimes,
+    terrain: inputs.terrain,
     overlay: inputs.overlay,
     meter: inputs.meter,
   };

@@ -10,6 +10,7 @@ import { angularDiameterPx } from "../wireframe/bodies";
 import { OUTSIDE_VIEW_MARGIN_PX, sphereOutsideView, sphereScreenRect } from "../wireframe/submit";
 import { type DiscRecord, rasteriseDisc } from "./discShading";
 import {
+  drawnAsMesh,
   type LitRegime,
   type LitSphere,
   litRegimes,
@@ -79,6 +80,12 @@ describe("litRegimes", () => {
     const atBoundary = sphereOf(3, viewport);
     expect(regimeOf(atBoundary, viewport, "point")).toBe("point");
     expect(regimeOf(atBoundary, viewport, "disc")).toBe("disc");
+  });
+
+  it("keeps a body that was handed over to terrain on the disc side of the switch (R10.T10.e)", () => {
+    const viewport = HD;
+    expect(regimeOf(sphereOf(2.99, viewport), viewport, "terrain")).toBe("disc");
+    expect(regimeOf(sphereOf(2.69, viewport), viewport, "terrain")).toBe("point");
   });
 
   it("starts a new body as a point, so it must clear 3.3 px", () => {
@@ -186,6 +193,22 @@ describe("promoteOverlapping", () => {
       [SECOND, "point"],
     ]);
     expect(promoteOverlapping(regimes, footprints, []).get(SECOND)).toBe("point");
+  });
+
+  it("promotes a disc overlapping a body handed over to terrain, which keeps its regime (R10.T10.e)", () => {
+    const regimes = new Map<BodyIdHex, LitRegime>([
+      [FIRST, "terrain"],
+      [SECOND, "disc"],
+      [THIRD, "disc"],
+    ]);
+    const promoted = promoteOverlapping(regimes, footprints, []);
+    expect([...promoted.values()]).toEqual(["terrain", "mesh", "disc"]);
+    expect((["point", "disc", "mesh", "terrain"] as const).map(drawnAsMesh)).toEqual([
+      false,
+      false,
+      true,
+      true,
+    ]);
   });
 });
 

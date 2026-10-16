@@ -212,6 +212,14 @@ export const TERRAIN_SETTINGS: Readonly<Record<QualitySetting, TerrainSettings>>
 };
 
 /**
+ * The wireframe style's screen-space error tolerance τ, px, on either setting: its depth-only
+ * terrain's (plan R10, T11) and the disc's hand-over to it (R10 Design note 13: τ is the style's
+ * own, {@link TerrainSettings.tauPx} in the photorealistic style, 1 px high and 2 px low, and
+ * 4 px in the wireframe).
+ */
+export const WIREFRAME_TERRAIN_TAU_PX = 4;
+
+/**
  * A terrain variant for the spike's runs (T13.c's `--vertex-path` and `--normals`, T17's): the
  * fields given replace the setting's own; nothing else is overridable.
  */

@@ -233,6 +233,7 @@ describe("the class laws (decision-r10-limb; decision-r07-t8b)", () => {
         [0.9, 0.92, 0.94, 3, 0],
       ]),
       rows,
+      1,
     );
     expect(packed).toHaveLength(CLASS_LAW_ROWS * 4);
     expect([...packed.subarray(0, 5)]).toEqual([
@@ -254,6 +255,33 @@ describe("the class laws (decision-r10-limb; decision-r07-t8b)", () => {
       expect(packed[8 * k + 4]).toBe(-1);
     }
     expect(rows.laws).toHaveLength(3);
+  });
+
+  it("scales each class's A for an oblate figure as law 0's and R07's disc's laws are (R10.T10.e)", () => {
+    const cOverA = 0.9;
+    const photometry = photometryOf([
+      [0.1, 0.12, 0.14, 1, 1],
+      [0.8, 0.85, 0.9, 2, 0.6],
+      [0.9, 0.92, 0.94, 3, 0],
+    ]);
+    const packed = packClassLaws(photometry, new TerrainPhaseRows(classRowLaw(3, 0)), cOverA);
+    const expected = [
+      [0.14, 0.12, 0.1, 1],
+      [0.9, 0.85, 0.8, 0.6],
+      [0.94, 0.92, 0.9, 0],
+    ] as const;
+    expected.forEach(([r, g, b, l0], k) => {
+      const factor = oblateAlbedoScale(Math.fround(l0), cOverA);
+      // A factor of order the flattening wherever the law limb-darkens, 1 under Lommel–Seeliger's
+      // (L(0) = 1), whose disc reaches p on any figure.
+      expect(factor === 1).toBe(l0 === 1);
+      expect([...packed.subarray(8 * k, 8 * k + 4)]).toEqual([
+        Math.fround(Math.fround(r) * factor),
+        Math.fround(Math.fround(g) * factor),
+        Math.fround(Math.fround(b) * factor),
+        Math.fround(l0),
+      ]);
+    });
   });
 });
 
@@ -408,7 +436,7 @@ describe("a texel's blend (R10.T10.b; Design note 8)", () => {
     });
     for (const [mu0, mu, deg] of geometries) {
       expect(
-        terrainReflectance([null, classTexelLaw(photometry)], [0, 1], mu0, mu, deg * RAD),
+        terrainReflectance([null, classTexelLaw(photometry, 1)], [0, 1], mu0, mu, deg * RAD),
       ).toEqual(brdf(perBody, mu0, mu, deg * RAD));
     }
   });

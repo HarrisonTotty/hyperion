@@ -53,7 +53,8 @@ import {
   surfaceLightingDrawTextures,
   type SurfaceLightingTables,
 } from "../atmosphere/surfaceLighting";
-import { sphereFootprint } from "./regime";
+import { type LitRegime, sphereFootprint } from "./regime";
+import { limbDistanceM } from "../terrain/handover";
 import { DISC_LIMB_DEPTHS, rotationColumns } from "./smoothMesh";
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
@@ -1555,29 +1556,40 @@ describe("mesh bodies (T9)", () => {
     const { bodies, hosts } = sceneOfThree();
     const mask: TextureHandle = { kind: "texture", name: "coverage mask" };
     const rotation = rotation3FromRows([vec3(0, 1, 0), vec3(-1, 0, 0), vec3(0, 0, 1)]);
-    // The planet carries its survey and its rotation; the moon a survey but no rotation to read it in.
+    // The planet is handed over to its terrain (R10.T10.e: a relief of 2 px from here) and carries
+    // its survey and its rotation; the moon, a mesh by its overlap alone, a survey but no rotation
+    // to read it in.
     const surveyed: LitBodyInput[] = bodies.map((body) =>
       body.id === PLANET
-        ? { ...body, rotation, surveyCoverage: mask }
+        ? {
+            ...body,
+            rotation,
+            surveyCoverage: mask,
+            handoverReliefM: (2 * norm(body.centreM)) / PX_PER_RAD,
+          }
         : body.id === MOON
           ? { ...body, surveyCoverage: mask }
           : body,
     );
-    const [planet] = bodies;
-    const writer =
-      planet === undefined ? null : sphereFootprint(planet.centreM, 6.371e6, CAMERA, VIEWPORT);
     const plan = planLitBodies(
       surveyed,
       hosts,
-      { ...OPTIONS, depthWriters: writer === null ? [] : [writer] },
+      OPTIONS,
       new Map(bodies.map((b) => [b.id, "disc" as const])),
     );
     expect(
-      plan.meshes.map((m) => [plan.discs[m.index]?.body, m.coverage?.mask.name ?? null]),
+      [PLANET, MOON, CLEAR].map((id) => (id === undefined ? id : plan.regimes.get(id))),
+    ).toEqual(["terrain", "mesh", "disc"]);
+    expect(
+      plan.meshes.map((m) => [
+        plan.discs[m.index]?.body,
+        m.handedOver,
+        m.coverage?.mask.name ?? null,
+      ]),
     ).toEqual(
       expect.arrayContaining([
-        [PLANET, "coverage mask"],
-        [MOON, null],
+        [PLANET, true, "coverage mask"],
+        [MOON, false, null],
       ]),
     );
     const draws = renderer.meshDraws(plan);
@@ -1624,5 +1636,74 @@ describe("mesh bodies (T9)", () => {
     renderer.draws(plan);
     expect(engine.writes.length).toBe(writes);
     renderer.dispose();
+  });
+});
+
+describe("the hand-over to terrain (R10.T10.e)", () => {
+  /** A body 10⁸ m ahead, 212 px across, whose relief subtends `reliefPx` at its limb. */
+  function bodyWithRelief(reliefPx: number | null): ReturnType<typeof scene> {
+    const distanceM = 1e8;
+    const limbM = limbDistanceM(distanceM, 6.371e6);
+    return scene(
+      distanceM,
+      30,
+      reliefPx === null ? {} : { handoverReliefM: (reliefPx * limbM) / PX_PER_RAD },
+    );
+  }
+
+  function regimeOf(
+    reliefPx: number | null,
+    setting: "high" | "low",
+    previous: LitRegime = "disc",
+  ): LitRegime | undefined {
+    const { body, hosts } = bodyWithRelief(reliefPx);
+    return planLitBodies(
+      [body],
+      hosts,
+      { ...OPTIONS, setting },
+      new Map([[body.id, previous]]),
+    ).regimes.get(body.id);
+  }
+
+  it("hands a disc over once its relief subtends the setting's τ, 1 px high and 2 px low", () => {
+    expect(regimeOf(1.5, "high")).toBe("terrain");
+    expect(regimeOf(1.5, "low")).toBe("disc");
+    expect(regimeOf(2.5, "low")).toBe("terrain");
+    expect(regimeOf(null, "high")).toBe("disc");
+  });
+
+  it("keeps a body handed over, or not, within R07's 10% about τ", () => {
+    expect(regimeOf(1, "high", "disc")).toBe("disc");
+    expect(regimeOf(1, "high", "terrain")).toBe("terrain");
+    expect(regimeOf(0.89, "high", "terrain")).toBe("disc");
+    expect(regimeOf(1.11, "high", "disc")).toBe("terrain");
+  });
+
+  it("draws a body handed over as a mesh body, its limb in the sequence and its figure the reference surface", () => {
+    const { body, hosts } = bodyWithRelief(4);
+    const plan = planLitBodies([body], hosts, OPTIONS, new Map([[body.id, "disc"]]));
+    expect(plan.meshes).toHaveLength(1);
+    expect(plan.meshes[0]?.handedOver).toBe(true);
+    expect(plan.steps.filter((step) => step.kind === "limb")).toEqual([{ kind: "limb", mesh: 0 }]);
+    expect(plan.steps.filter((step) => step.kind === "disc")).toEqual([]);
+    expect(plan.discs.map((record) => record.body)).toEqual([body.id]);
+  });
+
+  it("draws the figure of a body promoted but not handed over whole, its survey's mask unread", () => {
+    const { body, hosts } = bodyWithRelief(null);
+    const surveyed: LitBodyInput = {
+      ...body,
+      rotation: rotation3FromRows([vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)]),
+      surveyCoverage: { kind: "texture", name: "coverage mask" },
+    };
+    const writer = sphereFootprint(body.centreM, 6.371e6, CAMERA, VIEWPORT);
+    const plan = planLitBodies(
+      [surveyed],
+      hosts,
+      { ...OPTIONS, depthWriters: writer === null ? [] : [writer] },
+      new Map([[body.id, "disc"]]),
+    );
+    expect(plan.regimes.get(body.id)).toBe("mesh");
+    expect(plan.meshes.map((m) => [m.handedOver, m.coverage])).toEqual([[false, null]]);
   });
 });

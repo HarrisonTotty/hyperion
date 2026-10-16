@@ -829,10 +829,11 @@ export class TerrainResources {
         slot,
         weights.length === 0 ? new Uint8Array(CLASS_WEIGHTS_BYTES) : weights,
       );
+      const { equatorialRadiusM: a, polarRadiusM: c } = this.#figure;
       this.#writeField(
         "class-layers",
         slot,
-        packClassLaws(layers.photometry, this.#rows),
+        packClassLaws(layers.photometry, this.#rows, c / a),
         CLASS_WEIGHTS_BYTES,
       );
       this.#writeTable(lit);

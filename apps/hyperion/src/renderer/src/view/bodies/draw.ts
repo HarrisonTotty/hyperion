@@ -31,6 +31,13 @@
  * covered pixels with depth in the `bodies` pass, before the painter's sequence, and its limb is the
  * disc's limb draw at its place in the sequence, on the limb's plane. Both shade from its disc
  * record, so a promoted disc and its mesh draw the same light.
+ *
+ * A disc whose relief subtends the photorealistic style's τ at its limb (plan R10, R10.T10.e; R10
+ * Design note 13) is handed over to terrain (`terrain/handover.ts`' `handOverRegimes`), before
+ * the promotion: its regime is `terrain`, drawn as a mesh body is, its figure the reference surface
+ * beneath its terrain, discarded where its survey's coverage mask holds the ground surveyed
+ * (R10.T10.c), and its terrain the view's own (`PhotorealFrame.terrain`); a view that draws none
+ * draws its figure whole, as a mesh body's.
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
@@ -40,6 +47,12 @@ import type { BodyFigure, BodyPhotometry } from "../appearance/fromWire";
 import type { QualitySetting } from "../quality/qualitySetting";
 import { coverageMaskTextureSpec } from "../terrain/coverage";
 import { patchMeshData } from "../terrain/gpu/resources";
+import {
+  type HandoverSphere,
+  handOverRegimes,
+  handoverTauPx,
+  pixelAngleRad,
+} from "../terrain/handover";
 import patchVertexWgsl from "../terrain/shaders/patchVertex.wgsl?raw";
 import { limbShareAt, PHASE_TABLE_SAMPLES, type PhotometricLaw } from "../appearance/law";
 import { packPhaseFactorRows } from "../appearance/litBodyProbe";
@@ -104,8 +117,8 @@ import { CLASS_MAP_FORMAT, discSurfaceLaws } from "./discSurface";
 import { bodyReflection, figurePole } from "./oblate";
 import { type HostSphere, type PainterEntry, painterOrder } from "./painter";
 import {
+  drawnAsMesh,
   type LitRegime,
-  type LitSphere,
   litRegimes,
   promoteOverlapping,
   type ScreenCircle,
@@ -153,12 +166,19 @@ export interface LitBodyInput {
   readonly atmosphere?: SurfaceLightingTables;
   /**
    * The GPU's coverage mask of its survey (plan R10, R10.T10.c; `terrain/coverage.ts`'
-   * `CoverageMask.texture`), with which its figure, drawn as a mesh, is the reference surface
-   * beneath its terrain: discarded wherever the mask holds a cell surveyed, so that the terrain
-   * alone draws that ground (R10's Design note 12). Read in the axes of its `rotation`, so ignored
-   * without one; absent, the figure is drawn whole.
+   * `CoverageMask.texture`), given by a view that draws its terrain, with which its figure, once it
+   * is handed over (`terrain`), is the reference surface beneath that terrain: discarded wherever
+   * the mask holds a cell surveyed, so that the terrain alone draws that ground (R10's Design note
+   * 12). Read in the axes of its `rotation`, so ignored without one, and by no other regime;
+   * absent, the figure is drawn whole.
    */
   readonly surveyCoverage?: TextureHandle;
+  /**
+   * Its relief for the hand-over to terrain (plan R10, R10.T10.e; `terrain/handover.ts`'
+   * `handoverReliefM`: R09's realised relief, m, where its field's header is held and its survey
+   * covers ground); absent, it never hands over.
+   */
+  readonly handoverReliefM?: number;
 }
 
 /** A mesh body's coverage mask and the body-fixed axes it is read in (R10.T10.c). */
@@ -199,8 +219,14 @@ export interface MeshBodyPlan {
   /** Its limb draw's corner depths, on the limb's plane. */
   readonly limbDepths: LimbDepths;
   /**
+   * Whether it is handed over to terrain (`terrain`, R10.T10.e), whose ground R05's quadtree draws
+   * over its figure, rather than promoted by its overlaps alone.
+   */
+  readonly handedOver: boolean;
+  /**
    * Its survey's coverage mask, which discards its figure where the terrain draws the ground
-   * (R10.T10.c), or `null` for a body without one, or without a rotation to read it in.
+   * (R10.T10.c), or `null` for a body not handed over, without a mask, or without a rotation to
+   * read it in.
    */
   readonly coverage: MeshBodyCoverage | null;
 }
@@ -455,11 +481,14 @@ function pointSpriteOf(
  * sprites.
  *
  * @remarks
- * A disc whose footprint overlaps one of `options.depthWriters` or a mesh body is promoted to a
- * mesh (`promoteOverlapping`). A mesh body's limb is drawn in the sequence as a disc's is, so the
- * order takes it as a disc (Design note 2); its figure's pixels are drawn before the sequence, with
- * depth. The order is the drawing's, by the drawn centres; each body is lit by its own lighting
- * frame where it has one (T10.a).
+ * A disc whose relief subtends the photorealistic style's τ on `options.setting` (R10's
+ * `handoverTauPx`) at its limb, in the view's centre pixels, which the 3 px switch measures, is
+ * handed over to terrain (`handOverRegimes`, plan R10, R10.T10.e). A disc whose footprint
+ * overlaps one of `options.depthWriters`, a mesh body or a body handed over is promoted to a mesh
+ * (`promoteOverlapping`). A mesh body's limb, a handed-over body's included, is drawn in the
+ * sequence as a disc's is, so the order takes it as a disc (Design note 2); its figure's pixels are
+ * drawn before the sequence, with depth. The order is the drawing's, by the drawn centres; each
+ * body is lit by its own lighting frame where it has one (T10.a).
  *
  * @param hosts - The host stars where they are drawn, which keep their place in the order and
  *   light each body that has no lighting frame of its own (`LitBodyInput.lighting`).
@@ -471,11 +500,13 @@ export function planLitBodies(
   options: BodyFrameOptions,
   previous: ReadonlyMap<BodyIdHex, LitRegime>,
 ): BodyFramePlan {
-  const spheres: LitSphere[] = bodies.map((body) => ({
+  const spheres: HandoverSphere[] = bodies.map((body) => ({
     id: body.id,
     centreM: body.centreM,
     radiusM: body.figure.equatorialRadiusM,
+    reliefM: body.handoverReliefM,
   }));
+  const { camera, viewport } = options;
   const footprints = new Map<BodyIdHex, ScreenCircle>();
   for (const sphere of spheres) {
     const footprint = sphereFootprint(
@@ -488,11 +519,14 @@ export function planLitBodies(
       footprints.set(sphere.id, footprint);
     }
   }
-  const regimes = promoteOverlapping(
-    litRegimes(spheres, options.camera, options.viewport, previous),
-    footprints,
-    options.depthWriters ?? [],
+  const handed = handOverRegimes(
+    litRegimes(spheres, camera, viewport, previous),
+    spheres,
+    handoverTauPx("photorealistic", options.setting),
+    pixelAngleRad(camera, viewport),
+    previous,
   );
+  const regimes = promoteOverlapping(handed, footprints, options.depthWriters ?? []);
   const hostSpheres: HostSphere[] = hosts.map((host) => ({
     star: host.disc.star,
     centreM: host.centreM,
@@ -500,7 +534,7 @@ export function planLitBodies(
   }));
   // A mesh body's limb takes its place in the sequence as a disc's does.
   const ordered = new Map<BodyIdHex, LitRegime>(
-    [...regimes].map(([id, regime]) => [id, regime === "mesh" ? "disc" : regime]),
+    [...regimes].map(([id, regime]) => [id, drawnAsMesh(regime) ? "disc" : regime]),
   );
   const order = painterOrder(spheres, ordered, hostSpheres);
   const byId = new Map(bodies.map((body) => [body.id, body]));
@@ -554,8 +588,9 @@ export function planLitBodies(
       continue;
     }
     closeRun();
-    if (regimes.get(body.id) === "mesh") {
-      const { camera, viewport } = options;
+    const regime = regimes.get(body.id);
+    if (drawnAsMesh(regime)) {
+      const handedOver = regime === "terrain";
       steps.push({ kind: "limb", mesh: meshes.length });
       meshes.push({
         index: discs.length,
@@ -576,8 +611,10 @@ export function planLitBodies(
           camera,
           viewport,
         ),
+        handedOver,
+        // Only a body handed over has terrain over its figure to give the surveyed ground to.
         coverage:
-          body.surveyCoverage === undefined || body.rotation === undefined
+          !handedOver || body.surveyCoverage === undefined || body.rotation === undefined
             ? null
             : { mask: body.surveyCoverage, rotation: body.rotation },
       });

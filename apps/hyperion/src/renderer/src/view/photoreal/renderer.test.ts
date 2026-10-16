@@ -18,6 +18,7 @@ import { AU_M } from "../scenes/kept";
 import { BloomChain } from "../post/bloomChain";
 import { histogramParams, histogramWorkgroups } from "../post/histogram";
 import type { QualitySetting } from "../quality/qualitySetting";
+import { limbDistanceM, pixelAngleRad } from "../terrain/handover";
 import { type PhotorealFrame, PhotorealRenderer } from "./renderer";
 import { PHOTOREAL_PASS_LABELS, SKY_PASS_LABEL } from "./passes";
 
@@ -133,6 +134,54 @@ describe("the photorealistic renderer", () => {
       [PHOTOREAL_PASS_LABELS.bodies, "load", ["bodies:smoothMesh"]],
       [PHOTOREAL_PASS_LABELS.discs, "load", ["bodies:discLimb"]],
     ]);
+    renderer.dispose();
+  });
+
+  it("draws a body handed over as a mesh, and its terrain after its figure in the bodies pass where the frame has one (R10.T10.e)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    const frame = frameWith([]);
+    // The planet's relief subtends 4 px at its limb, 10⁸ m off: handed over.
+    const bodies = frame.bodies.map((body) => ({
+      ...body,
+      handoverReliefM:
+        4 * limbDistanceM(1e8, body.figure.equatorialRadiusM) * pixelAngleRad(camera, VIEWPORT),
+    }));
+    const terrainDraw: DrawItem = {
+      mesh: { kind: "mesh", name: "terrain patches" },
+      material: { kind: "material", name: "terrain-lit-baked-offsets" },
+      offsetFromCameraM: new Float32Array(3),
+      uniforms: {},
+      textures: {},
+    };
+    const asked: BodyFramePlan[] = [];
+    const terrain = {
+      surveyCoverage: () => null,
+      draws: (plan: BodyFramePlan) => {
+        asked.push(plan);
+        return plan.meshes.some((mesh) => mesh.handedOver) ? [terrainDraw] : [];
+      },
+    };
+    const bodiesPass = (from: number): ReadonlyArray<string> | undefined =>
+      engine.targetFrames
+        .slice(from)
+        .find((f) => f.label === PHOTOREAL_PASS_LABELS.bodies)
+        ?.draws.map((draw) => draw.material.name);
+    // Without a terrain the body is drawn as a mesh body is.
+    const bare = renderer.render(new RecordingView(), { ...frame, bodies });
+    expect(bare?.regimes.get(bodies[0]?.id ?? "")).toBe("terrain");
+    expect(bodiesPass(0)).toEqual(["bodies:smoothMesh"]);
+    const from = engine.targetFrames.length;
+    const plan = renderer.render(new RecordingView(), {
+      ...frame,
+      bodies,
+      previousRegimes: bare?.regimes ?? new Map(),
+      terrain,
+    });
+    expect(asked).toEqual([plan]);
+    expect(bodiesPass(from)).toEqual(["bodies:smoothMesh", "terrain-lit-baked-offsets"]);
     renderer.dispose();
   });
 

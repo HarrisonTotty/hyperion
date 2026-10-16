@@ -18,7 +18,7 @@
  *   drawn by both, and each drawing its half.
  */
 
-import { add, scale, type Vec3, vec3 } from "../geometry/vec3";
+import { add, norm, scale, type Vec3, vec3 } from "../geometry/vec3";
 import { PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
 import { withTemplateCurve } from "../view/appearance/phase";
 import {
@@ -53,6 +53,7 @@ import { METER_CLASS } from "../view/post/meter";
 import { TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
 import { AU_M } from "../view/scenes/kept";
 import { CoverageMask } from "../view/terrain/coverage";
+import { handoverTauPx, limbDistanceM, pixelAngleRad } from "../view/terrain/handover";
 import { TerrainResources } from "../view/terrain/gpu/resources";
 import { vertexDir } from "../view/terrain/cube";
 import { ContactRecords, InstanceRecords } from "../view/terrain/gpu/uniforms";
@@ -367,6 +368,8 @@ function referenceDraws(
   }
   const centreM = scale(pose.cameraM, -1);
   const figure = { ...MOON_LIKE, pole: vec3(0, 0, 1) };
+  // Handed over to its terrain (R10.T10.e): a relief of four times the setting's τ at its limb.
+  const limbM = limbDistanceM(norm(centreM), figure.equatorialRadiusM);
   const body: LitBodyInput = {
     id: "5e5e000000000000.0003",
     centreM,
@@ -374,9 +377,11 @@ function referenceDraws(
     photometry: PROVISIONAL_PHOTOMETRY,
     rotation: IDENTITY_ROTATION,
     surveyCoverage: texture,
+    handoverReliefM:
+      4 * handoverTauPx("photorealistic", "low") * limbM * pixelAngleRad(pose.camera, VIEWPORT),
     lighting: undefined,
   };
-  // The terrain writes depth over the whole view, so the body is drawn as a mesh.
+  // The terrain writes depth over the whole view, and the body is drawn as a mesh beneath it.
   const writer = sphereFootprint(centreM, figure.equatorialRadiusM, pose.camera, VIEWPORT);
   const options: BodyFrameOptions = {
     camera: pose.camera,
@@ -393,8 +398,8 @@ function referenceDraws(
     options,
     new Map([[body.id, "disc"]]),
   );
-  if (plan.meshes.length !== 1) {
-    throw new Error("the body was not drawn as a mesh");
+  if (plan.meshes.length !== 1 || plan.meshes[0]?.handedOver !== true) {
+    throw new Error("the body was not handed over to its terrain and drawn as a mesh");
   }
   return renderer.meshDraws(plan);
 }

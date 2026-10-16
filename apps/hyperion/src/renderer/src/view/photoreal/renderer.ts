@@ -9,7 +9,9 @@
  * and host discs under three pixels); then the `disc cells` dispatch, which shades every cell of
  * the discs under 32 px at once for the draws after it to read (R07.T8.d), where the frame has
  * such a disc; then the mesh bodies' figures, opaque with depth, as the
- * `bodies` pass where the frame has any (T9), then the painter's sequence of Design note 2: host
+ * `bodies` pass where the frame has any (T9), with the terrain of the bodies handed over to it
+ * where the frame has a {@link FrameTerrain} (plan R10, R10.T10.e), drawn after their figures, the
+ * reference surface beneath it; then the painter's sequence of Design note 2: host
  * discs (R06's pass, meter class 0), disc bodies, mesh bodies' limbs and point bodies, back to
  * front by power. Then the bloom
  * chain over the light above the display's range, the tone-mapping pass with each host disc's glare
@@ -76,6 +78,31 @@ import { WIREFRAME_MESHES } from "../wireframe/submit";
 import { PHOTOREAL_PASS_LABELS, SKY_PASS_LABEL } from "./passes";
 import { createSceneTarget } from "./sceneTarget";
 
+/**
+ * What draws the terrain of a photorealistic frame's bodies handed over to it (plan R10, R10.T10.e;
+ * R10 Design note 13): the view's terrain passes, one a body (`TerrainPass`, lit by its disc
+ * record's lights), with the GPU coverage masks of their surveys (`CoverageMask`).
+ *
+ * @remarks
+ * No view draws a body's terrain live yet: the store, the pool and a pass per view and body are a
+ * later task's (R10's Risks, "Questions for "main" (R10.T10.e)"). Without one, a body handed over
+ * is drawn as a mesh body is, its figure whole.
+ */
+export interface FrameTerrain {
+  /**
+   * The GPU coverage mask of `body`'s survey (`terrain/coverage.ts`' `CoverageMask.texture`),
+   * beneath whose surveyed cells its figure gives the ground to its terrain once it is handed
+   * over; `null` where it has none.
+   */
+  surveyCoverage(body: BodyIdHex): TextureHandle | null;
+  /**
+   * The draws of the terrain of each body `plan` hands over (`LitRegime` `terrain`, a
+   * `MeshBodyPlan` with `handedOver`, its record its lights), opaque with depth, drawn in the
+   * `bodies` pass after the mesh bodies' figures; none for a body with nothing resident.
+   */
+  draws(plan: BodyFramePlan): ReadonlyArray<DrawItem>;
+}
+
 /** What one photorealistic frame draws. */
 export interface PhotorealFrame {
   readonly camera: ProjectionCamera;
@@ -105,6 +132,11 @@ export interface PhotorealFrame {
   readonly depthWriters: ReadonlyArray<ScreenCircle>;
   /** Each body's regime on the previous frame, for the hysteresis. */
   readonly previousRegimes: ReadonlyMap<BodyIdHex, LitRegime>;
+  /**
+   * The terrain of the bodies handed over to it (plan R10, R10.T10.e), or absent, when a body
+   * handed over is drawn as a mesh body is.
+   */
+  readonly terrain?: FrameTerrain | undefined;
   /** The symbology's canvas pass, drawn loading the tone-mapped image, or `null`. */
   readonly overlay: FrameSubmission | null;
   /**
@@ -430,8 +462,9 @@ export class PhotorealRenderer {
       projection,
       size: { widthPx: viewport.widthPx, heightPx: viewport.heightPx },
     });
-    // The mesh bodies' figures, with depth, before the sequence; no pass where there are none.
-    const meshes = this.#bodies.meshDraws(plan);
+    // The mesh bodies' figures, with depth, before the sequence, then the terrain of the bodies
+    // handed over to it over them; no pass where there are none.
+    const meshes = [...this.#bodies.meshDraws(plan), ...(frame.terrain?.draws(plan) ?? [])];
     if (meshes.length > 0) {
       resources.target.render({
         label: PHOTOREAL_PASS_LABELS.bodies,

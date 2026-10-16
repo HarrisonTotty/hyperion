@@ -39,6 +39,7 @@ import {
   phaseFactorFromTable,
   type PhaseFactorTable,
   phaseFactorTableOf,
+  type PhotometricLaw,
 } from "../appearance/law";
 import { type ProjectionCamera, toViewAxes, type Viewport } from "../camera/projection";
 import type { AnnulusSet } from "../lighting/annuli";
@@ -374,14 +375,23 @@ function scaledLaws(record: DiscRecord): ScaledLaw[] {
     if (tableRow === undefined) {
       throw new Error(`law ${m} of disc ${record.body} has no row of the phase table`);
     }
-    const k = oblateAlbedoScale(law.lommelSeeligerShare, record.polarOverEquatorial);
-    return {
-      a: [law.a[0] * k, law.a[1] * k, law.a[2] * k],
-      share: law.lommelSeeligerShare,
-      table: phaseFactorTableOf(law),
-      tableRow,
-    };
+    return scaledLawOf(law, record.polarOverEquatorial, tableRow);
   });
+}
+
+/** A law as the shader holds it, its A scaled for a figure of c ÷ a `polarOverEquatorial`. */
+function scaledLawOf(
+  law: PhotometricLaw,
+  polarOverEquatorial: number,
+  tableRow: number,
+): ScaledLaw {
+  const k = oblateAlbedoScale(law.lommelSeeligerShare, polarOverEquatorial);
+  return {
+    a: [law.a[0] * k, law.a[1] * k, law.a[2] * k],
+    share: law.lommelSeeligerShare,
+    table: phaseFactorTableOf(law),
+    tableRow,
+  };
 }
 
 /** The body-fixed x and y axes along the galactic axes: the rotation's first two columns. */
@@ -647,6 +657,32 @@ function surfaceReflectance(
     }
   });
   return reflectance;
+}
+
+/**
+ * The I/F of a disc's laws by their shares at a point lit by one point source wholly above its
+ * horizon, by the disc's own arithmetic (`surface_reflectance` with h = μ₀ and no source radius),
+ * each law's A scaled for the figure as a record's laws are: the twin R10's hand-over holds the
+ * terrain's to (plan R10, R10.T10.e). Nothing where μ₀ or μ is not positive.
+ *
+ * @param laws - The surface's laws in their order (`discSurfaceLaws`).
+ * @param polarOverEquatorial - The figure's c ÷ a, 1 for a sphere.
+ * @param shares - Each law's share at the point.
+ * @param alphaRad - The phase angle, rad.
+ */
+export function discReflectance(
+  laws: ReadonlyArray<PhotometricLaw>,
+  polarOverEquatorial: number,
+  shares: ReadonlyArray<number>,
+  mu0: number,
+  mu: number,
+  alphaRad: number,
+): Rgb {
+  if (!(mu0 > 0 && mu > 0)) {
+    return [0, 0, 0];
+  }
+  const scaled = laws.map((law, m) => scaledLawOf(law, polarOverEquatorial, m));
+  return surfaceReflectance(scaled, shares, mu0, mu0, mu, alphaRad, 0);
 }
 
 /**

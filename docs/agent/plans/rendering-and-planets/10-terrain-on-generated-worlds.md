@@ -1710,6 +1710,11 @@ src/renderer/src/view/bodies src/renderer/src/displays/view` and `just test-rend
   1/3 stop and, averaged over each class-map texel, by less than 1/3 stop on a fully surveyed
   generated world; the residuals of T10.a against plan 14's p and q. Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` and the recorded check.
+  _As built (Risks, "Deviations in T10.e, as built"): the hand-over is `view/terrain/handover.ts`,
+  R07's regime `terrain` and an optional terrain input to the frame, measured to the body's limb;
+  the terrain's class laws take the disc's figure scale; the live pipeline that would feed the
+  input is not built (asked of main), so the check by hand ran scripted on the Moon-like fixture
+  and stays pending on screen._
 - **R10.T10.f The point under a class map.**
   - **What it does.** R07's point regime (`pointFlux` in `bodies/draw.ts`) integrates the body's
     class map wherever its `surface` is a class map and its `rotation` is known, so that the flux
@@ -5239,7 +5244,8 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
     is a step. T10.e's look will say whether a floor on μ is wanted.
   - _The class laws carry no figure scale._ Law 0's A is scaled for an oblate disc, the classes' are
     not (T10.a's c is solved on the sphere's p), a difference of order f; T10.d draws both and may
-    align them.
+    align them. _Aligned by R10.T10.e: each class's A takes the disc's factor of its L(0) ("Deviations
+    in T10.e, as built")._
   - _Bilinear weights across the quad's diagonal._ The mesh splits each quad on its diagonal while
     the weights are read bilinearly over its four vertices: a different interpolant from the
     triangles', harmless for smooth fields; T14's measurements may say otherwise at class edges.
@@ -5978,3 +5984,211 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
   - _At a cube's corner_ three texels meet and the gutter's corner is empty, so within half a texel
     of a corner the reconstruction renormalises over three: continuous across each edge, not
     exactly at the corner.
+- **Deviations in T10.e, as built** (2026-10-16; lane r10-shader, on `rendering-and-planets` at
+  `05da4caf`).
+  - _Files._ A new `view/terrain/handover.ts` (`pixelAngleRad`, `handoverRangeM`,
+    `handoverReliefM`, `limbDistanceM`, `handoverTauPx`, `handsOver`, `handoverRangeRatio`,
+    `HandoverSphere`, `handOverRegimes`, `HandoverReliefSource`, `storeReliefSource`) with
+    `handover.test.ts` and `handover.wasm.test.ts`; `view/quality/qualitySetting.ts`
+    (`WIREFRAME_TERRAIN_TAU_PX`); R07's `bodies/regime.ts` (`LitRegime`'s `terrain`, `drawnAsMesh`,
+    the promotion's writers), `bodies/draw.ts` (`LitBodyInput.handoverReliefM`,
+    `MeshBodyPlan.handedOver`, `planLitBodies`' hand-over, the coverage mask's reader),
+    `bodies/discShading.ts` (`discReflectance`, `scaledLawOf`) and `photoreal/renderer.ts`
+    (`FrameTerrain`, `PhotorealFrame.terrain`, its draws in the `bodies` pass);
+    `displays/view/photorealFrame.ts` (`PhotorealInputs.reliefs` and `terrain`,
+    `LitBodiesTerrain`, `litBodiesOf`'s fifth argument) and `viewFrameDrawer.ts`
+    (`ViewFrameInputs.reliefs` and `terrain`); `view/terrain/terrainMaterial.ts` (`figureScaledA`,
+    `packClassLaws`' and `classTexelLaw`'s c ÷ a, `terrainTexelLaws`), `gpu/resources.ts` (passes
+    the figure's c ÷ a), `shaders/terrainLit.wgsl` (a comment alone) and `coarseFieldStore.ts`
+    (`FieldCandidate.rangeRatio`'s documentation); the smoke harness's `smoke/surveyEdge.ts`, whose
+    reference body is now handed over. Tests beside them in `terrainMaterial.test.ts`,
+    `draw.test.ts`, `regime.test.ts`, `renderer.test.ts` and `photorealFrame.test.ts`.
+  - _The range, pure_ (the lane lead's decision). `handoverRangeM(reliefM, tauPx, radPerPx)` is
+    relief ÷ (τ · rad a pixel), refusing a relief negative or not finite and a τ or pixel not
+    positive: at Design note 13's 5.45 × 10⁻⁴ rad a pixel, 1.835 × 10⁷ m for 10 km at 1 px and
+    4.587 × 10⁶ m at 4 px (the task's 1.8 × 10⁷ and 4.6 × 10⁶ m). The view passes R07's own pixel,
+    `pixelAngleRad` = 2 tan(fov ÷ 2) ÷ width, the inverse of `angularDiameterPx`'s centre-pixel
+    scale that `litRegimes` measures its 3 px switch by, so that both switches count pixels alike:
+    6.014 × 10⁻⁴ rad at 1080p across 60°, where 10 km hands over at 1.663 × 10⁷ m (4.157 × 10⁶ m at
+    4 px), as R07's orchestrator ruling of 2026-10-03 took the centre pixel for its own figures.
+  - _The distance is the limb's_ (beyond the decisions; asked below). `handsOver` sets the range
+    against the camera's distance to the body's limb, √(D² − a²) for a camera D from the centre of
+    a body of equatorial radius a (`limbDistanceM`, 0 from inside), not the centre's: there the
+    relief stands against the sky across the line of sight. Far off the two agree (the centre is
+    7% farther at an Earth's 1.663 × 10⁷ m, which a live 1080p view so reaches from 1.781 × 10⁷ m
+    off its centre); near the ground the limb's goes to 0, so a body whose relief is small beside
+    its radius still hands over as the camera nears it. From the centre it would not: a Venus of
+    6,051.8 km and 13 km of relief has a wireframe range of 5.40 × 10⁶ m, inside its radius, and
+    would never hand over there, landed or not; from its limb it hands over some 1,740 km up
+    (`handover.test.ts`). `handoverRangeRatio(limbM, reliefM, tauPx, radPerPx)` gives
+    `FieldCandidate.rangeRatio` by the same distance, `Infinity` with no relief (R10.T7's lean),
+    and that field's documentation now says so (T7 computed none), so that a body's field is wanted
+    before it hands over.
+  - _τ per style_ (the lane lead's decision). `handoverTauPx(style, setting)`: the settings'
+    `TerrainSettings.tauPx` in the photorealistic style (1 px high, 2 px low) and
+    `WIREFRAME_TERRAIN_TAU_PX` = 4 in the wireframe on both settings, a named constant beside
+    `TERRAIN_SETTINGS`.
+  - _The relief_ (the lane lead's decision). `handoverReliefM(header, coverage)` is the header's
+    `realised_relief_m`, as Design note 13 names R09's `realised_relief`, where a header and a
+    coverage whose `surveyedFraction()` is above 0 are held, and `null` otherwise (and for a relief
+    of 0 or not finite): `null` never hands over, at any distance. `storeReliefSource(store)` reads
+    a `CoarseFieldStore`'s `header` and `coverage` through it. Design note 13's one-sided example is
+    a deferred finding below.
+  - _The hysteresis applies naturally, and is R07's_ (the lane lead's decision). `handsOver` takes
+    `REGIME_HYSTERESIS` on the relief's subtense as R07's switch takes it on the diameter: a body
+    hands over once its relief subtends τ (1 + h) px at its limb, the limb within range ÷ 1.1, and
+    hands back once under τ (1 − h), past range ÷ 0.9. The previous frame's state is the regime
+    map's own `terrain`, which the views already carry (`previousRegimes`); `litRegimes` keeps a
+    `terrain` body on the disc side of its 3 px switch as it keeps a `mesh`.
+  - _The decision, per view and style_ (the lane lead's decision). `LitRegime` gains `terrain`, the
+    mesh regime whose ground R05's quadtree draws (Design note 13: "the `mesh` regime hands its
+    geometry to R05's quadtree"), a fourth value rather than `mesh` with a flag, so that the
+    hysteresis reads the previous frame from the map R07 already passes and a mesh by promotion
+    is not taken for one handed over (asked below). `planLitBodies` runs `litRegimes`, then
+    `handOverRegimes` (each disc with a relief, at the photorealistic style's τ on
+    `options.setting` and `pixelAngleRad` of the frame's camera and viewport, the pixel the 3 px
+    switch measures), then `promoteOverlapping`, whose writers now include a body handed over
+    (`drawnAsMesh`), so that a disc overlapping it is promoted. A point never hands over: its flux
+    is the point regime's, T10.f's. A body handed over is drawn as a mesh body is (its smooth figure
+    in the `bodies` pass, its limb in the sequence), its `MeshBodyPlan.handedOver` set, its figure
+    the reference surface beneath its terrain: T10.c's coverage mask is now read for a body handed
+    over alone, so that a body promoted by its overlaps draws its figure whole (T10.c read any
+    mesh body's; no view gave one). The terrain input is `PhotorealFrame.terrain?: FrameTerrain`,
+    the view's: `surveyCoverage(body)`, which `litBodiesOf` passes as each body's
+    `surveyCoverage`, and `draws(plan)`, drawn in the `bodies` pass after the figures; the reliefs
+    are `PhotorealInputs.reliefs` (a `HandoverReliefSource`), which `litBodiesOf` passes as each
+    body's `handoverReliefM`. `ViewFrameInputs` takes both, optional. Without a terrain input a body
+    handed over is drawn as a mesh body is, its figure whole; without reliefs none hands over.
+  - _Not built_ (the lane lead's decision; asked below). The live pipeline: no view makes a
+    `CoarseFieldStore` over `surface_field`, a `HeightWorkerPool`, a `TerrainPass` per view and
+    body handed over (a `FrameTerrain`), a `TerrainLighting` from the body's disc record, the
+    `AtmosphereScene` draw of the terrain, a `CoverageMask` or the draw list's `surveyEdges`;
+    `ViewStage` passes neither input, so no body hands over live. The wireframe: the decision at
+    its τ is built and tested (`handoverTauPx("wireframe", …)`, `handsOver` at 4 px), its draw is
+    T11's.
+  - _One row, one figure scale_ (the lane lead's decision). The terrain's class laws now take the
+    body's figure scale as the disc's laws do (`scaledLaws`): each class's A is c A_N times
+    `oblateAlbedoScale` of its L(0) and the body's c ÷ a (`figureScaledA`, in `packClassLaws`, which
+    `TerrainResources.upload` calls with its figure's c ÷ a, and in the twins `classTexelLaw` and
+    `terrainTexelLaws`, the latter the twin of `packTerrainLighting`'s law 0 and `packClassLaws`'
+    slots), retiring T10.b's deferred "The class laws carry no figure scale". The factor is 1 under
+    Lommel–Seeliger's L(0) = 1, whose disc reaches p on any figure, 1.0062 for the Ice row at
+    L(0) 0.628 and 1.0224 under Lambert's at c ÷ a 0.9, and 1 + 2.8 × 10⁻⁴ under Lambert's on the
+    Moon-like world (c ÷ a 0.9988). It is right as the disc's is: T10.a's c is solved on the
+    sphere's p, and the factor takes the disc to that p equator-on, so the terrain under it draws
+    the disc's light a class. T10.b's tests are unchanged but for the new argument (1, a sphere).
+    `discShading.ts` exports `discReflectance(laws, c ÷ a, shares, μ₀, μ, α)`, the disc's own
+    `surfaceReflectance` at h = μ₀ with no source radius, through the same scaling.
+  - _The agreement_ (`handover.test.ts`). Per class law, Regolith (A 0.172, 0.142, 0.105 in r, g,
+    b at L(0) 1), Ice (0.92, 0.90, 0.86 at L(0) 0.628) and Lambert (0.81, 0.80, 0.78), each from
+    T10.d's `classMapLawsOf` on the disc's side and `terrainTexelLaws` on the terrain's, and law 0
+    (Mercury's template at the Moon-like world's p): the disc's and the terrain's I/F at 16 (μ₀, μ)
+    pairs at 30° and 90° of phase, on a sphere and at c ÷ a 0.9, agree exactly (the test holds
+    10⁻⁶), and each law's row packed by `packPhaseFactorRows` from the disc's law and from
+    `TerrainPhaseRows`' row is the same, bit for bit: one row read by both.
+  - _Tests._ `handover.test.ts`: the range at Design note 13's pixel and at a live view's, τ per
+    style, the refusals, the range ratio, the relief and a body with no survey, coverage or header
+    never handing over at any distance, the store's source, the hysteresis both ways at the range's
+    ends, the limb's distance and a Venus handing over near its ground, the wireframe's quarter
+    range, a disc alone handed over by its own relief whatever the input order, the agreement
+    above, and the classes' q (below). `draw.test.ts`: the setting's τ (1.5 px hands over on high
+    and not on low), R07's 10% about τ, a body handed over drawn as a mesh body with its limb, and
+    one promoted but not handed over drawing its figure whole; T10.c's mask test now hands its
+    planet over. `regime.test.ts`: a body handed over promotes the disc it overlaps and keeps the
+    disc side of the 3 px switch. `renderer.test.ts`: a body handed over drawn as a mesh without a
+    terrain, and the terrain's draws after its figure in the `bodies` pass with one.
+    `photorealFrame.test.ts`: each body's relief and coverage mask where the inputs hold them, and
+    none without. `terrainMaterial.test.ts`: each class's packed A scaled for an oblate figure.
+  - _By hand: what ran scripted_ (`handover.wasm.test.ts`, the real module). The Moon-like fixture's
+    every block (eight surveyed cells of level 6 on face +y, `moon_like.golden`) held by a worker's
+    fields; its class map (T10.d) for the disc's twin; and for the terrain's twin each patch over
+    the survey baked at levels 0 (the root face, where Design note 13's quadtree takes the ground
+    over), 2, 4, 6 (the field's) and 7 (44 patches). At 30° and 90° of phase, the sun and the camera
+    far off in the plane of the survey's mean normal, each twin's I/F weighted by μ over a 16 × 16
+    grid a texel on the spheroid's normal (both twins at the same points and normals, so the
+    resolved slopes of the bake are not in it): the per-texel and the survey's mean brightness
+    change by 0 stops at every level. The fixture's surveyed ground is one law, every named
+    material there resolving to A 0.20 at L(0) 1 on the Regolith row (deferred below), so the case
+    reduces to the reconstruction; as a sensitivity, the one material the bakes weigh but the map
+    leaves out (palette pair (0, 0), up to 16% of a level-7 vertex's weight) given Lambert's law at
+    half the albedo on both sides moves a texel by at most 1.27 × 10⁻³ stop at level 7 (30°; 1.26 ×
+    10⁻³ at 90°), 4.33 × 10⁻⁴ at level 6, and 0 at levels 0 to 4, and the survey by at most 2.02 ×
+    10⁻⁴: all under the task's 1/3 stop, which the test holds.
+  - _By hand: pending, for the development machine and the owner's UHD 620_, until a view draws a
+    generated world's terrain live (asked below). On a thin-aired generated world fully surveyed
+    (a served Moon-like or Mars-like analogue, after P14.T54.a and the live pipeline), in `VIEW`
+    at 1080p on the high setting and again on the low: (1) lock the exposure (the display's manual
+    control) and set the operator's meter to `average`; (2) place the camera so that the phase at
+    the body is 30°, at three times its hand-over range (1.663 × 10⁷ m from the limb for 10 km of
+    relief on high, half that on low), and close along the line of sight at no more than 1% of
+    the range a second until the regime map shows the body `terrain`, then back out past
+    range ÷ 0.9 until it shows `disc`; (3) at the frame before and the frame after each switch,
+    take the scene target's HDR read-back (hidden, as the smoke harness's `readBack`), sum the
+    body's pixels' luminance, and per class-map texel the pixels whose rays meet that texel
+    (`classMapSharesAt`'s texel, from `rasteriseDisc`'s hit), and state log₂ of each after ÷ before:
+    each under 1/3 stop; (4) repeat at 90°. Also by eye there: the survey's edge at the hand-over
+    level on a partly surveyed world (deferred below) and T10.b's "Back-facing shading normals draw
+    black" at grazing views, whose floor on μ T10.e's look was to decide.
+  - _The residuals of T10.a against plan 14's p and q._ p: T10.a's own record ("Deviations in
+    T10.a, as built", the table): in V zero to rounding (at most 2 × 10⁻¹⁶ relative) on every
+    served world, in B and R +35% and −17% on Mercury's colour and +93% and −41% on Mars's, the grey
+    palettes'. q, computed now (`handover.test.ts`): a patterned sphere's orientation-averaged phase
+    integral is Σ aᵢ pᵢ qᵢ ÷ Σ aᵢ pᵢ, as its p is the area average (T10.a's module documentation),
+    so on a world whose ground takes one class law it is that law's whatever the albedos. The
+    airless worlds of T10.a's table (the Moon- and Ceres-like and the reference Moon and Ceres, all
+    regolith or bedrock of silicate families, the Regolith row by `PhaseLaw::for_family`) and the
+    reference Mars's dust take the Regolith row, q 0.62600 under McEwen's L(α) (V), against plan
+    14's 0.47980 on Mercury's template (+30.5%) and 1.08465 on Mars's at L 0.5 (−42.3%) (deferred
+    below). The Mars-like world, whose glaciers take Lambert's row (q 3/2) on 1.5% of its area at
+    their clamped albedos, waits on T10.f's point integral or those albedos; the Earth-like is not
+    served a scale.
+  - _Generator version._ Untouched (22): presentation alone, no golden moved.
+- **Questions for "main" (R10.T10.e)** (none touches a contract of the server's; each built to its
+  lean).
+  - _Who builds the live terrain pipeline._ No plan-10 task names it: the store over
+    `surface_field` with each view's `FieldCandidate`s (`handoverRangeRatio`), the pool, a
+    `TerrainPass` per view and body handed over as the frame's `FrameTerrain` (lit by a
+    `TerrainLighting` from its disc record, drawn into the `AtmosphereScene`), T10.c's
+    `CoverageMask` and the draw list's `surveyEdges`, and T10.d's `ClassMapStore`, fed through
+    `ViewStage` (the lane lead has told main; the scoping agent's `decision-r10-live-path.md`).
+    Lean: a task main assigns.
+  - _The limb's distance._ Design note 13 says when the relief "subtends τ pixels" without the
+    distance it is measured over; as built, the camera's to the limb, so that a body of little
+    relief beside its radius hands over near it (above). Lean: as built, Design note 13 amended to
+    "subtends τ pixels at the body's limb", and Design note 16's want range with it.
+  - _`terrain`, a fourth regime._ Lean: as built, R07's regime text ("a `mesh` … or R10 hands it to
+    terrain") reading "`terrain`, the mesh regime handed to R05's quadtree".
+  - _T10.c's mask on a body handed over alone._ Lean: as built (a promoted body's terrain is not
+    drawn, so its figure is the ground).
+- **Deferred findings (2026-10-13 rule) (R10.T10.e)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _Design note 13's example is one-sided; the header's relief is peak to trough._ Its "10 km of
+    relief either side of the datum" is 20 km from peak to trough, while `realised_relief_m` is
+    the highest elevation less the lowest, so a symmetric world of ±10 km takes 20 km and hands
+    over twice as far as the one-sided reading (the range is linear in the relief); the example's
+    1.8 × 10⁷ m is a peak-to-trough relief of 10 km. The lever: the largest deviation from the
+    datum, half the relief on a symmetric world, which the header does not carry.
+  - _The hand-over moves with the frame's internal scale._ The plan measures the frame's own
+    viewport, the render resolution at the budget's scale (720 rows on the low setting, scales
+    0.5 to 1), as the 3 px switch does, while `TerrainSettings.tauPx` is stated at the presented
+    resolution and `TerrainPass` selects at it; so the range falls with the scale, to half at 0.5,
+    and a body near its range may hand over and back as the resolution controller moves by more
+    than the 10% hysteresis. The lever: both switches on the presented pixel.
+  - _The classes' q is the Regolith row's, not plan 14's._ The airless rocks take Mercury's q
+    (0.480) while their classes draw the Regolith row's (0.626, the Moon's curve), and the
+    reference Mars's dust Mars's (1.085) against the same 0.626: +30.5% and −42.3%. So away from
+    zero phase surveyed ground on the disc and the terrain alike differs from unsurveyed ground,
+    `lawFor`'s, by the two curves' ratio, and T10.f's point under a class map will differ from the
+    photometry's point by as much in phase-integrated light. For plan 14 and R10.T1.a's rows (the
+    template a family's row draws, or the photometry's q from the classes).
+  - _The scripted world is one law._ The Moon-like fixture's surveyed ground resolves every named
+    material to one photometry (A 0.20, L(0) 1, the Regolith row), so the scripted check reduces to
+    the reconstruction, and its sensitivity case stands in for a contrast. The lever: a fixture
+    survey with contrasting classes (a Mars-like survey with its glaciers, or an Iapetus).
+  - _The survey's edge at the hand-over level._ At the hand-over the quadtree takes the ground from
+    the root faces (Design note 13), where a quad spans a cell of a level-6 field or more and
+    T10.c's discard falls back on the interpolated mask's half (its code 0): along the edge of a
+    partial survey both surfaces draw, or neither, over a strip up to a quad wide, which at the
+    range spans π a τ ÷ (128 · relief) px, about 16 px on an Earth of 10 km and 3 px on a Moon-like
+    of 15 km. The lever: the terrain's discard reading the GPU coverage mask at the fragment, as the
+    reference surface does, where the patch is coarser than its code can carry.

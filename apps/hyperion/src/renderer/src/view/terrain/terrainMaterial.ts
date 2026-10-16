@@ -13,8 +13,11 @@
  *   nothing, and the largest weight's class is the one a readout names ({@link dominantSlot}).
  * - **A class's law** is its palette slot's photometry, as the worker resolves it from R10.T10.a's
  *   scaled albedo and R10.T1.a's law (`TerrainLayers.photometry`): A = c A_N per display channel
- *   (Johnson R, V and B as r, g and b, as R07's `modelledPhotometry` maps them), L(0) the law's at
- *   c A_N, and the law's template and exponent s ({@link CLASS_LAW_TEMPLATES}). Its row of R07's
+ *   (Johnson R, V and B as r, g and b, as R07's `modelledPhotometry` maps them), times the figure's
+ *   factor R07's disc gives each of its laws, its class-map classes' included (`oblateAlbedoScale`
+ *   of the class's L(0), 1 for a sphere; R10.T10.e), so that the disc and the terrain draw one
+ *   law a class on an oblate body too; L(0) the law's at c A_N, and the law's template and
+ *   exponent s ({@link CLASS_LAW_TEMPLATES}). Its row of R07's
  *   phase table holds its f against its L(α), L(0) times McEwen's profile for the particulate laws
  *   and 0 for Lambert's, in alpha ({@link TerrainPhaseRows}): one row per (law, L(0)), so the
  *   materials of L(0) = 1, every one up to A_N 0.60, share one row of their law, and a bright
@@ -278,11 +281,29 @@ export class TerrainPhaseRows {
 export const CLASS_LAW_ROWS = 2 * TERRAIN_CLASSES;
 
 /**
- * A patch's class laws as `terrainLit.wgsl`'s `class_layers` holds them after its slot's weights,
- * each palette slot two `vec4f`: A per display channel and L(0), then its row (−1 for a slot with
- * no law), the rows taken from `rows`, which adds any it lacks.
+ * A class's A as a texel draws it, per display channel: c A_N times the figure's factor
+ * (`oblateAlbedoScale` of its L(0)), as R07's disc scales each of its laws' A (R10.T10.e).
+ *
+ * @param polarOverEquatorial - The body's c ÷ a, 1 for a sphere.
  */
-export function packClassLaws(photometry: Float32Array, rows: TerrainPhaseRows): Float32Array {
+export function figureScaledA(photometry: ClassPhotometry, polarOverEquatorial: number): Rgb {
+  const k = oblateAlbedoScale(photometry.l0, polarOverEquatorial);
+  return [photometry.a[0] * k, photometry.a[1] * k, photometry.a[2] * k];
+}
+
+/**
+ * A patch's class laws as `terrainLit.wgsl`'s `class_layers` holds them after its slot's weights,
+ * each palette slot two `vec4f`: A per display channel, scaled for the figure ({@link
+ * figureScaledA}), and L(0), then its row (−1 for a slot with no law), the rows taken from `rows`,
+ * which adds any it lacks.
+ *
+ * @param polarOverEquatorial - The body's c ÷ a, 1 for a sphere.
+ */
+export function packClassLaws(
+  photometry: Float32Array,
+  rows: TerrainPhaseRows,
+  polarOverEquatorial: number,
+): Float32Array {
   const out = new Float32Array(CLASS_LAW_ROWS * 4);
   for (let k = 0; k < TERRAIN_CLASSES; k += 1) {
     const law = classPhotometryOf(photometry, k);
@@ -290,7 +311,7 @@ export function packClassLaws(photometry: Float32Array, rows: TerrainPhaseRows):
       out[8 * k + 4] = -1;
       continue;
     }
-    out.set([...law.a, law.l0], 8 * k);
+    out.set([...figureScaledA(law, polarOverEquatorial), law.l0], 8 * k);
     out[8 * k + 4] = rows.rowOf(law.code, law.l0);
   }
   return out;
@@ -461,14 +482,44 @@ export function texelLawOf(law: PhotometricLaw): TexelLaw {
 }
 
 /**
- * A class's law as a texel draws it: its A, and the table of its row's law, f against its L(α)
- * ({@link classRowLaw}).
+ * A class's law as a texel draws it: its A scaled for the figure ({@link figureScaledA}), and the
+ * table of its row's law, f against its L(α) ({@link classRowLaw}).
+ *
+ * @param polarOverEquatorial - The body's c ÷ a, 1 for a sphere.
  */
-export function classTexelLaw(photometry: ClassPhotometry): TexelLaw {
+export function classTexelLaw(photometry: ClassPhotometry, polarOverEquatorial: number): TexelLaw {
   return {
-    a: photometry.a,
+    a: figureScaledA(photometry, polarOverEquatorial),
     table: phaseFactorTableOf(classRowLaw(photometry.code, photometry.l0)),
   };
+}
+
+/**
+ * A bake's {@link TERRAIN_LAWS} laws as the lit terrain draws them, the twin of {@link
+ * packTerrainLighting}'s law 0 and {@link packClassLaws}' slots: law 0, `elsewhere` with its A
+ * scaled for the figure (`oblateAlbedoScale` of its L(0)), then each palette slot's ({@link
+ * classTexelLaw}), `null` for a slot with none.
+ *
+ * @param photometry - The bake's `TerrainLayers.photometry`.
+ * @param polarOverEquatorial - The body's c ÷ a, 1 for a sphere.
+ */
+export function terrainTexelLaws(
+  photometry: Float32Array,
+  elsewhere: PhotometricLaw,
+  polarOverEquatorial: number,
+): Array<TexelLaw | null> {
+  const k = oblateAlbedoScale(elsewhere.lommelSeeligerShare, polarOverEquatorial);
+  const law0: TexelLaw = {
+    a: [elsewhere.a[0] * k, elsewhere.a[1] * k, elsewhere.a[2] * k],
+    table: phaseFactorTableOf(elsewhere),
+  };
+  return [
+    law0,
+    ...Array.from({ length: TERRAIN_CLASSES }, (_, slot): TexelLaw | null => {
+      const law = classPhotometryOf(photometry, slot);
+      return law === null ? null : classTexelLaw(law, polarOverEquatorial);
+    }),
+  ];
 }
 
 /**

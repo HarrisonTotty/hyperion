@@ -164,9 +164,10 @@ export interface FieldCandidate {
   /** Whether it is the view's camera's local body. */
   readonly local: boolean;
   /**
-   * The view's camera's distance from the body's centre over the body's hand-over range in that
-   * view's style, dimensionless: the range is where the body's relief subtends the style's τ pixels
-   * (Design note 13: 1 px high, 2 px low, 4 px in the wireframe), so each view has its own.
+   * The view's camera's distance to the body's limb over the body's hand-over range in that view's
+   * style, dimensionless (`handover.ts`' `handoverRangeRatio`, R10.T10.e): the range is where the
+   * body's relief subtends the style's τ pixels (Design note 13: 1 px high, 2 px low, 4 px in the
+   * wireframe), so each view has its own.
    */
   readonly rangeRatio: number;
 }

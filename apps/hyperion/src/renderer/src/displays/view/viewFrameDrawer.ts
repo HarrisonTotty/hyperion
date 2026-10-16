@@ -31,7 +31,11 @@ import {
   spritesAtScale,
 } from "../../view/photoreal/internalScale";
 import { overlaySubmission } from "../../view/photoreal/overlay";
-import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
+import {
+  type FrameTerrain,
+  PhotorealRenderer,
+  type PhotorealStatus,
+} from "../../view/photoreal/renderer";
 import type { Histogram } from "../../view/post/histogram";
 import type { MeterMode } from "../../view/post/meter";
 import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
@@ -44,6 +48,7 @@ import { SkyCubeLayer } from "../../view/sky/cubeLayer";
 import { HostDiscLayer } from "../../view/sky/disc";
 import { skySpriteStars } from "../../view/sky/sprites";
 import type { ClassMapSource } from "../../view/terrain/classMap";
+import type { HandoverReliefSource } from "../../view/terrain/handover";
 import {
   buildWireframeDrawList,
   type DrawAnchor,
@@ -97,6 +102,16 @@ export interface ViewFrameInputs {
    * engine; absent, every disc is uniform. No view feeds one until a body's terrain is drawn live.
    */
   readonly classMaps?: ClassMapSource | undefined;
+  /**
+   * Its lit bodies' reliefs, by which a body hands over to terrain (plan R10, R10.T10.e); absent,
+   * none hands over. No view feeds them until a body's field is held live.
+   */
+  readonly reliefs?: HandoverReliefSource | undefined;
+  /**
+   * The terrain of the bodies handed over, made on the drawer's engine (plan R10, R10.T10.e);
+   * absent, a body handed over is drawn as a mesh body is. No view feeds one yet.
+   */
+  readonly terrain?: FrameTerrain | undefined;
 }
 
 /** What a frame drew. */
@@ -293,6 +308,8 @@ export class ViewFrameDrawer {
           previousRegimes: this.#regimes,
           meter: inputs.meter,
           classMaps: inputs.classMaps,
+          reliefs: inputs.reliefs,
+          terrain: inputs.terrain,
           // The marks cased over the tone-mapped image at the canvas's resolution (R07.T16.a), and
           // the craft on their silhouettes (R07.T16.e).
           overlay: overlaySubmission(this.#wireframe, list, tokens, camera, viewport),

@@ -63,7 +63,8 @@ struct Draw {
 // each vertex's eight class-weight bytes over its patch's palette, two words a vertex (the bake's
 // `weights`, vertex (x, y) at 65 y + x; 0 where the vertex has no weights); then, from word
 // CLASS_LAW_WORD, the palette as laws (`terrainMaterial.ts`' `packClassLaws`), TERRAIN_CLASSES of
-// two `vec4f` as `f32` words: A = c A_N per display channel (r, g, b) and its L(0); its row of
+// two `vec4f` as `f32` words: A = c A_N per display channel (r, g, b), scaled for the figure as
+// law 0's is (R10.T10.e), and its L(0); its row of
 // `phase_factor_table`, −1 for a slot with no law (empty, or of an unnamed substance), whose
 // weight goes to law 0. One buffer for both. Read by the fragment stage alone, as the lights and
 // the horizon map are, the vertex stage reading R05's five (decision-r10-t10b-r09-t2e §5).

@@ -217,6 +217,26 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
     expect(lit.filter((body) => body.surface !== undefined)).toEqual([]);
   });
 
+  it("give each body its relief and its survey's coverage mask where the view's terrain holds them, and none hands over without (R10.T10.e)", () => {
+    const { scene, pose } = sliceScene();
+    const mask: TextureHandle = { kind: "texture", name: "slice coverage mask" };
+    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null), undefined, {
+      reliefs: { reliefM: (body) => (body === FIXTURE_EARTH ? 18_000 : null) },
+      terrain: { surveyCoverage: (body) => (body === FIXTURE_EARTH ? mask : null) },
+    });
+    const earth = lit.find((body) => body.id === FIXTURE_EARTH);
+    const jupiter = lit.find((body) => body.id === FIXTURE_JUPITER);
+    expect([earth?.handoverReliefM, earth?.surveyCoverage]).toEqual([18_000, mask]);
+    expect(jupiter).not.toHaveProperty("handoverReliefM");
+    expect(jupiter).not.toHaveProperty("surveyCoverage");
+    const bare = litBodiesOf(scene, pose, sceneHostDiscs(scene, null));
+    expect(
+      bare.filter(
+        (body) => body.handoverReliefM !== undefined || body.surveyCoverage !== undefined,
+      ),
+    ).toEqual([]);
+  });
+
   it("state the provisional photometry's label while one lit body takes it", () => {
     expect(litLabelsOf(sliceScene().scene)).toEqual(["BODY PHOTOMETRY: NOT YET MODELLED"]);
   });
