@@ -61,6 +61,8 @@ import {
   O2_LIQUID_DENSITY,
   O2_LIQUID_FACTOR,
   O2_LIQUID_NUMBER_DENSITY_PER_CM3,
+  OXYGEN_GAS_203K_PER_CM3,
+  oxygenLocalField,
   OXYGEN_PAIR_CROSS_SECTIONS_CM5,
   OXYGEN_PAIR_LONGEST_NM,
   OXYGEN_PAIR_ZERO_NM,
@@ -78,6 +80,8 @@ import {
   scaledShapeMiss,
   SO2_LIQUID_CHECKS,
   SO2_LIQUID_FACTOR,
+  SO2_TAIL_CM2,
+  so2TailK,
   T5K_LIQUID_RECORD,
   tableWithRedTail,
   THALMAN_VOLKAMER_REFERENCE,
@@ -1884,6 +1888,24 @@ describe("R08.T5.k's liquids (decision-p14-t49h-gas-index)", () => {
     expect(Math.abs(onPoint / 3e-46 - 1)).toBeLessThan(1e-9);
     expect(oxygenPairCrossSectionCm5(sets, 1e7 / 16_003)).toBeUndefined();
     expect(oxygenPairCrossSectionCm5(sets, 1e7 / 16_001, 293)).toBeUndefined();
+  });
+
+  it("find liquid O2 at 594 times the gas's number density at 203 K and 1 atm, with a local field of 1.11 at 575 nm", () => {
+    // What oxygen-liquid.json's reduction states of its k's extrapolation (the science check).
+    expect(Math.round(O2_LIQUID_NUMBER_DENSITY_PER_CM3 / OXYGEN_GAS_203K_PER_CM3)).toBe(594);
+    expect(oxygenLocalField().toFixed(2)).toBe("1.11");
+    expect(committedText("oxygen-liquid.json", "reduction")).toContain(
+      "594 times its number density at 203 K and 1 atm",
+    );
+  });
+
+  it("find the gas SO2 band's tail at the liquid's density giving k of 1 × 10⁻⁵ at 383 nm and 6 × 10⁻⁸ at 400 nm", () => {
+    // absorbers.ts's 2.4 × 10⁻²² and 1.2 × 10⁻²⁴ cm², the file's k = 0 recording what it leaves out.
+    expect(SO2_TAIL_CM2.map(([nm, sigma]) => so2TailK(sigma, nm).toExponential(0))).toEqual([
+      "1e-5",
+      "6e-8",
+    ]);
+    expect(committed("sulphur-dioxide-liquid.json").k.every((k) => k === 0)).toBe(true);
   });
 
   it("refuse an O2–O2 file whose coldest Thalman and Volkamer set is not at 203 K", () => {

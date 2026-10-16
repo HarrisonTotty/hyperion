@@ -10306,6 +10306,15 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     `rayleigh.ts`'s row to 10⁻⁵, the brief's first form. Its equivalent, the Lorentz–Lorenz function
     constant to 2 × 10⁻⁵ relative, cannot hold for O₂: six-figure rounding alone moves (n² − 1) ÷
     (n² + 2) by up to 2.3 × 10⁻⁵ of itself at n ≈ 1.22, so it is not asserted.
+  - _The science check's corrections._ H₂S's text says it is the one molecular liquid of the record
+    whose estimate runs low at every measurement, by 0.010–0.021 (the brief's "the one row where LL
+    runs low" is false of the record, where Kr and Xe run low by under 0.003). SO₂'s equation of
+    state is cited as the saturated liquid's 0.2% below 410 K, and its triple point's 25.41132 mol/l
+    is recorded 0.44% past the equation's stated 25.3 mol/l (about 0.001 in n). N₂O's air-wavelength
+    reading is "under 1 × 10⁻⁵ in n". O₂'s `reduction` states its k's extrapolation, and SO₂'s its
+    violet edge (deferred below). CO₂'s critical density and molecular weight cite their WebBook
+    pages with their SHA-256s (the plan-conformance review). Liveing and Dewar 1895's checks lie up
+    to 0.0025 below the file, outside its ±0.0015, as the brief's 0.002–0.003 anticipated.
   - _The inputs._ Ar, Kr, Xe and O₂ are `CombinedSpec`s, each reduction in one place: the three
     tables' rows are held as constants (`AR_LIQUID_ROWS`, `KR_LIQUID_ROWS`, `XE_LIQUID_ROWS`),
     cited, and `checkedRows` refuses an input whose rows differ; O₂'s reduction reads the O₂–O₂ file
@@ -10332,7 +10341,8 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     `PHILLIPS_1920`, `phillipsFactor`, `co2DensityGPerCm3`, `CO2_LIQUID_FACTOR`, `BLEEKRODE_CO2`,
     `BLEEKRODE_CO2_FIRST_TABLE`, `CO2_CRITICAL_MOL_PER_L`, `co2FormIndex`, `co2CarryMiss`,
     `GAGNON_CO`, `gagnonSlopeExcess`, `GAGNON_COMBINED_ERROR`, `BLEEKRODE_H2S` and
-    `T5K_LIQUID_RECORD`. In the client: `ScaledMolarRefractionFit` and `DerivedFit`.
+    `T5K_LIQUID_RECORD`, and from the reviews `OXYGEN_GAS_203K_PER_CM3`, `oxygenLocalField`,
+    `SO2_TAIL_CM2` and `so2TailK`. In the client: `ScaledMolarRefractionFit` and `DerivedFit`.
   - _The defaults and labels._ O₂, Ar, CO, CO₂ and H₂S keep their ices as defaults, so a liquid of
     one is now its own file rather than its ice as a named analogue (`MATERIAL_FILES`' doc says so);
     Kr, Xe, N₂O and SO₂ have the liquid alone. A liquid CO or H₂S deck raises
@@ -10370,13 +10380,13 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     that read a Cauchy fit's `a` and `bUm2` narrow on `form`. In the tool's test: the builder
     against `molecularIceIndex`, the least-squares factor, each c's arithmetic, the lithium line,
     Phillips's limit, the carry, Ar's worst row, the tails, the shape misses, `tableWithRedTail` and
-    `checkedRows`, the record, Gagnon's excess, O₂'s a and k, its zeros, the pair interpolation,
-    `liquidOxygenK`'s refusals of an O₂–O₂ file whose coldest set is not at 203 K or whose σ at 575
-    nm differs (the TypeScript review), the nine headers against the committed files, the five
-    derived files and the four combined files' n against their derivations, and the four new options
-    asked once. The TypeScript review's other points: a unit in each name
-    (`PHILLIPS_1920.coefficientCm6PerG2`; the client test's `gasMolarVolumeCm3PerMol` and
-    `rowMolarRefractionCm3PerMol`) and one reason to fail a test.
+    `checkedRows`, the record, Gagnon's excess, O₂'s a and k, its zeros, its extrapolation's figures
+    and SO₂'s tail's, the pair interpolation, `liquidOxygenK`'s refusals of an O₂–O₂ file whose
+    coldest set is not at 203 K or whose σ at 575 nm differs (the TypeScript review), the nine
+    headers against the committed files, the five derived files and the four combined files' n
+    against their derivations, and the four new options asked once. The TypeScript review's other
+    points: a unit in each name (`PHILLIPS_1920.coefficientCm6PerG2`; the client test's
+    `gasMolarVolumeCm3PerMol` and `rowMolarRefractionCm3PerMol`) and one reason to fail a test.
   - _`NOTICE`_ gains one entry: Sinnock and Smith's liquid tables (CC0), Johns and Wilhelm, Liveing
     and Dewar 1892 and 1895, Bleekrode 1884 (with Ketteler and Bichat through him), Phillips 1920,
     Gagnon et al. (recorded), Sinnock 1980, Seidel et al. and Grace et al. (checks), Thalman and
@@ -10395,8 +10405,20 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     `ethane-liquid.json` with `scaledLiquidIndex` would remove the Cauchy line's 4.4 × 10⁻⁴ and 3.4
     × 10⁻⁵ residuals and leave one method; it moves `liquid_optics` and needs §5's refit.
   - _Liquid O₂'s bands at 90 K and beyond 654 nm._ The 203 K σ is not extrapolated, though the bands
-    grow on cooling; the liquid's A and B bands, which Liveing and Dewar 1892 saw (pp. 206–207), and
-    its infrared bands are not drawn (k = 0 from 655 nm). A liquid measurement would replace both.
+    narrow and their peaks rise on cooling; the liquid's A and B bands, which Liveing and Dewar 1892
+    saw (pp. 206–207), and its infrared bands are not drawn (k = 0 from 655 nm). HITRAN2024's same
+    file holds the pair bands there (Tran et al. 2006, reference 4, at 296 K; Spiering et al. 2011,
+    reference 30, at 293 K): at σN² they would give a = 12.0 m⁻¹ at 762 nm and 1.1 m⁻¹ at 688 nm
+    (the science check, confirmed), against 55.0 m⁻¹ at 575 nm. The ruling takes Thalman and
+    Volkamer alone. A liquid measurement would replace all of them.
+  - _Liquid O₂'s k uncertainty._ σN² carries the gas's pair absorption, measured near 1 atm, to the
+    liquid at 594 times the gas's number density at 203 K and 1 atm; the liquid's pair correlation,
+    the local-field factor (1.11 at 575 nm) and the liquid's band shape are not modelled, and the
+    file states k's uncertainty as unmeasured (the science check).
+  - _Liquid SO₂'s violet edge._ The file's k = 0 is the ruling's; the gas's ã–X̃ band tail
+    (`absorbers.ts`'s 2.4 × 10⁻²² cm² at 383 nm, 1.2 × 10⁻²⁴ at 400 nm, Hermans et al. 2009 at 298
+    K) at the liquid's number density would give k ≈ 1 × 10⁻⁵ at 383 nm and 6 × 10⁻⁸ at 400 nm.
+    Drawing it changes the file's data and the ruled k; the file records it (the science check).
   - _Kr's two methods._ Sinnock 1980 finds Kr's total-internal-reflection values outside the
     minimum-deviation ones' errors; the closed paper's values could replace the 1969 table.
   - _CO₂'s Bleekrode values._ Main's middle check value is the first table's 15.5 °C; the file takes
