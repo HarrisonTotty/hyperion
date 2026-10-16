@@ -3870,15 +3870,19 @@ fn on_the_laplace_surface_every_law_is_its_record_s() {
     assert!(laws > 300, "{laws} laws");
 }
 
-/// P14.T56.c's hold, reached ahead of the bump (`with_moon_inventories`). Under their own
-/// volatiles every moon's rotation law is still its record's at `parent_time`, so that setting the
-/// rule after `generate` is generating with it; every moon's inventory is the one its own ranks
-/// and site give ([`Satellite::own_volatiles`](crate::planetary::satellites::Satellite::own_volatiles)),
-/// and differs from version 22's.
+/// P14.T56.c's hold and its follow-up's, reached ahead of the bump (`with_moon_inventories`).
+/// Under their own volatiles, read at their own bulk, every moon's rotation law is still its
+/// record's at `parent_time`, so that setting the rule after `generate` is generating with it;
+/// every moon's inventory is the one its own ranks and site give
+/// ([`Satellite::own_volatiles`](crate::planetary::satellites::Satellite::own_volatiles)) at its
+/// own bulk ([`PlanetarySystem::moon_own_bulk`]), and differs from version 22's; and its
+/// atmosphere's escape is judged at its record's own radius and mass, which for a regular moon is
+/// its derivation's ([`DerivedMoon::radius`]).
 #[test]
 fn under_their_own_volatiles_the_moons_move_nothing_their_rotation_reads() {
-    use crate::planetary::moons::regular::MoonInventories;
-    let (mut laws, mut moved) = (0, 0);
+    use crate::planetary::derive::atmosphere::Retention;
+    use crate::planetary::moons::regular::{MoonBulk, MoonBulkRule, MoonInventories};
+    let (mut laws, mut moved, mut stated) = (0, 0, 0);
     for (ctx, system) in whole().iter().take(150) {
         let own = system.clone().with_moon_inventories(MoonInventories::Own);
         assert_eq!(
@@ -3913,7 +3917,10 @@ fn under_their_own_volatiles_the_moons_move_nothing_their_rotation_reads() {
             let label = label::label(system, planet.index).unwrap();
             let (_, now) = system.primary_record(&epoch, planet, label, &fate);
             let satellite = &part.satellite;
-            let derived = derive_moon(
+            let bulk = PlanetarySystem::moon_own_bulk(part, &now);
+            let derived = derive_moon_under(
+                NitrogenLine::in_force(),
+                MoonBulkRule::Own,
                 satellite.mass(),
                 &satellite.orbit_at(&part.parent, ctx.age_at(t)),
                 &part.parent,
@@ -3921,16 +3928,36 @@ fn under_their_own_volatiles_the_moons_move_nothing_their_rotation_reads() {
                 now.sky.as_ref().unwrap(),
                 satellite.radius_rank(),
                 satellite.own_volatiles(),
+                bulk,
                 ctx.age_at_epoch(),
                 t,
             )
             .unwrap();
             assert_eq!(*derived.inventory(), mine, "{index:?}");
+            // The air's escape reads the record's own radius and mass: the stated bulk's, or a
+            // regular moon's derivation's.
+            let radius = match bulk {
+                MoonBulk::Stated { radius, .. } => {
+                    stated += 1;
+                    radius
+                }
+                MoonBulk::Derived => derived.radius(),
+            };
+            let record = PlanetarySystem::moon_bulk_of(part, &derived, &now);
+            assert_same_bits(EarthRadii::from(radius).value(), record.radius().value());
+            let air = derived.atmosphere();
+            let escape = Retention::of(
+                Kilograms::from(satellite.mass()),
+                radius,
+                air.exobase_temperature(),
+            )
+            .with_methane_as_nitrogen();
+            assert_eq!(air.retention(), escape, "{index:?}");
             moved += 1;
         }
     }
     assert!(
-        laws > 100 && moved > 100,
-        "{laws} laws, {moved} moons moved"
+        laws > 100 && moved > 100 && stated > 10,
+        "{laws} laws, {moved} moons moved, {stated} stated bulks"
     );
 }

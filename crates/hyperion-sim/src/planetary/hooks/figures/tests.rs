@@ -1565,7 +1565,9 @@ pub(in crate::planetary::hooks::figures) fn jovian(kg: f64, a_km: f64, e: f64) -
     use crate::orbit::{Eccentricity, KeplerElements, Orientation};
     use crate::planetary::derive::BodyHosts;
     use crate::planetary::derive::solar::{self, PLANETS};
-    use crate::planetary::moons::regular::{MoonNursery, MoonSky, MoonVolatiles, derive_moon};
+    use crate::planetary::moons::regular::{
+        MoonBulk, MoonNursery, MoonSky, MoonVolatiles, derive_moon,
+    };
     use crate::planetary::moons::testing::planet_id;
     use crate::planetary::moons::{MoonParent, ParentKind};
     use crate::stellar::Composition;
@@ -1612,6 +1614,7 @@ pub(in crate::planetary::hooks::figures) fn jovian(kg: f64, a_km: f64, e: f64) -
         &sky,
         UnitUniform::HALF,
         MoonVolatiles::SHARED,
+        MoonBulk::Derived,
         SOLAR_AGE,
         UniverseTime::EPOCH,
     )

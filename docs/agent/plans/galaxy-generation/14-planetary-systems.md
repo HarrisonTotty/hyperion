@@ -13767,7 +13767,9 @@ tables::gauss_legendre`.
     nursery. A Triton-like capture inside the nursery's ice line therefore takes carbon's and
     nitrogen's boosts from its parent's zone while its water stays the drawn inventory, its bulk
     dry: a body formed at the parent's distance would hold its ice. For "main" with the deferred
-    finding below, which it shares a cause with.
+    finding below, which it shares a cause with. _Mended_ at 23 by T56.c's follow-up below, where
+    the capture's own bulk is icy; a capture whose parent formed inside the snow line keeps the
+    drawn water (the follow-up's deferred findings).
   - _The pruning test_ removes moons by lowering the moon-mass limit (T15's `keep_inside`), so the
     captures move down the dense numbering. The keys depend only on the candidate, so it stands
     for any removal; `each_moon_draws_its_own_volatile_ranks_by_its_candidate` checks the
@@ -13818,7 +13820,8 @@ tables::gauss_legendre`.
     threshold of 25. The plan's "stay
     airless" holds at the table's radius-keeping rank. It moves every moon's atmosphere, so it is
     for "main": lean, derive a moon's atmosphere at its bulk radius and gravity, in this lane
-    behind `MOONS_VERSION`.
+    behind `MOONS_VERSION`. _Built_ by T56.c's follow-up below (main: an error, not a modelling
+    choice).
   - _A moon's birthplace for its craters._ `hooks::figures::MoonBirth::formed`
     (science-p14-t24b-laws §2.4) puts a rocky planet's small capture beside an icy belt beyond the
     snow line, and a giant-impact moon inside it unless its parent is an icy belt's member, while
@@ -13830,3 +13833,126 @@ tables::gauss_legendre`.
     disc (Nesvorný, Vokrouhlický and Morbidelli 2007; Nesvorný et al. 2014, ApJ 784, 22, for
     Jupiter's): the ruling's warm bound, as ruled. A rocky planet's small captures, which neither
     paper covers, take the same rule.
+- **P14.T56.c's follow-up: a moon's air at its own radius and gravity, as built (`p14-moons`,
+  2026-10-16).** Main accepted T56.c's first deferred finding: reading a moon's atmosphere at
+  `derive_body`'s radius for its rank, not its own bulk's, is an error. From `MOONS_VERSION` = 23
+  a moon's volatile inventory and atmosphere are read at its own bulk: its radius, its mass (and
+  so its surface gravity), and its mass fractions, as its record's bulk section states them. Below
+  23 they are read at the composition solve's, version 22's to the bit; `GENERATOR_VERSION` stays
+  22 and `golden_diff.py` reports no golden moved.
+  - _What reads the bulk._ The atmosphere's Jeans retention (`Retention::of`), the weight of its
+    air over the surface (G M ÷ R² ÷ 4πR²), a runaway's oxygen escape, and an airless surface's
+    material; the inventory's water floor beyond the snow line (the larger of the drawn water and
+    the bulk's), and its argon by rock. The equilibrium temperature, the photometry and the
+    surface follow the albedo the new state gives, and with it the ocean flag's T_s. Nothing else
+    of `derive_body` moves: the moon's `DerivedBody` keeps the solve's radius, density, gravity,
+    class, fractions and core, which `DerivedMoon` does not publish, and `DerivedMoon`'s own radius,
+    density, fractions, tidal heat and locking time are unchanged (tested).
+  - _Whose bulk._ A regular moon's is ruling 83.7's (`moon_radius` at its ice fraction, the ice over
+    the solve's iron-to-rock split: `DerivedMoon::fractions`), `MoonBulk::Derived`. A giant-impact
+    moon's (a sphere at its own density, its icy parent's fractions or rock) and a capture's (its
+    own radius, the ice its density holds) are what `PlanetarySystem::moon_bulk_of` states for its
+    record, `MoonBulk::Stated`, from one function (`stated_moon_bulk`), so the record and its air
+    agree by construction. So T56.c's _A capture's water_ (its deviations above), a Triton-like
+    capture inside the nursery's ice line keeping the drawn water beside its parent zone's carbon
+    and nitrogen, is mended where its own bulk is icy: its water floor is its ice (0.24 of its mass
+    at Triton's measured radius, where the nursery's dry solve gave the drawn water; tested).
+  - _A moon's material, and T51.b._ The airless surface's material (`SurfaceMaterial::of`) is read
+    at the moon's own fractions too, so from 23 a moon's albedo and T_eq follow its bulk section's
+    material. That is the moons' half of P14.T51.b's "The passes take the record's composition",
+    built here behind `MOONS_VERSION` because the air's inputs are one struct. T51.b builds on
+    `PlacedBody::with_bulk` and `GivenBulk`, adding `icy_member_bulk`'s members, rather than a
+    second input.
+  - _The code._ `planetary::derive::{GivenBulk, GivenFractions}` (crate-private) and
+    `PlacedBody::with_bulk`, which `derive_body` reads for the inventory and the atmosphere only,
+    through the private `PlacedBody::air_of` and its `AirBulk` (in place of `inventory_of`);
+    `MassFractions::with_water`, which `DerivedMoon::fractions` now calls (the same operations, bit
+    for bit). `moons::regular::MoonBulk` (public: `Derived`, `Stated { radius, fractions }`);
+    `derive_moon` takes it after `volatiles`, and `derive_regular_moon` passes `Derived`; a stated
+    radius that is not positive and finite is refused with the new
+    `DeriveMoonError::StatedRadius`, at any version, rather than read as an airless moon. The hold
+    is the crate-private `MoonBulkRule` (`Solved`, `Own`, `in_force()`), a parameter of
+    `derive_moon_under` after the nitrogen line; `MoonInventories::Own` now means own volatiles
+    read at the own bulk, so `moon_derived` calls `derive_moon_under` with `Own` and
+    `PlanetarySystem::moon_own_bulk`. The tripwire checks `MoonBulkRule::in_force()` and its
+    message lists what T54.a deletes (`MoonBulkRule` with `MoonInventories`).
+  - _Figures, before → after_ (the table's moons about the table's Jupiter, Saturn and Neptune at
+    JPL's GM, mean radius and mean elements, the median volatile ranks; "before" is version 22's
+    solve at the snow line, "T56.c" its solve under the ammonia line, "after" version 23's path):
+    - Ganymede at the median rank (solve 2,281 km, own 2,653 km): 3.61 bar (2.80 N₂, 0.81 CH₄)
+      → 0.31 bar (0.28 CH₄) → airless (15 Pa of argon). At the lowest rank (solve 1,757 km):
+      9.4 bar → 0.39 bar → airless. At the radius-keeping rank, airless throughout.
+    - Callisto at the lowest rank (solve 1,594 km, own 2,387 km): 7.4 bar → airless (it formed
+      beyond the ammonia line, so T56.c left it at 7.4 bar); after, airless at every rank tested.
+    - Titan at the median rank (solve 2,220 km, own 2,591 km): 2.65 bar at 98.4 K → 1.44 bar at
+      93.8 K, of which N₂ weighs 1.39 and CH₄ 0.05 (about 6% by mole, against Huygens's
+      5.65 ± 0.18%, Niemann et al. 2010, JGR 115, E12006), against Huygens's 1,467 hPa and
+      93.65 K (HASI, Fulchignoni et al. 2005, Nature 438, 785); 1.28–1.62 bar and 93.0–94.7 K
+      across the ranks.
+    - Io (own 1,943 km) and Europa (own 1,514 km), formed dry: airless before and after; Io's air
+      is 7 Pa of CO₂ frost's vapour, its argon (up to 42 Pa before) lost at its own radius.
+    - Triton (own 1,352.6 km, a capture's measured radius): airless before and after, with no N₂
+      (λ ≈ 15.6 at its 228 K exobase); its water floor rises to its ice, 0.238 of its mass.
+  - _Tests._ In `moons/regular.rs`: `the_table_s_ganymede_and_callisto_stay_airless` (rewritten:
+    at their own bulk at six ranks, the radius-keeping one, 0.001, the quartiles, the median and
+    0.999, under either line), `the_table_s_moons_take_their_air_at_their_own_bulk` (the six
+    moons at those ranks: escape judged at the own radius and mass, the water floor the own ice,
+    Io, Europa, Ganymede, Callisto and Triton airless under 1 mbar, Titan over a bar of N₂ and
+    within 15% and 2 K of HASI), `a_regular_moon_s_own_bulk_is_its_radius_and_fractions` (the
+    pure check: `Derived` is `Stated` at `DerivedMoon::radius` and `fractions` bit for bit, and
+    `Solved` reads no bulk), `a_capture_s_water_floor_is_its_own_ice` and
+    `a_stated_radius_that_is_not_a_radius_is_refused`; T56.c's
+    `the_table_s_titan_forms_below_123_k_and_keeps_a_bar_of_nitrogen` now reads Titan at its own
+    bulk, the path that ships. In `derive/mod.rs`:
+    `a_given_bulk_is_what_the_inventory_and_the_atmosphere_read` (a Titan-mass body: every
+    non-air value its solve's bit for bit, the solve's own bulk changes nothing, the N₂ weighed
+    at the given radius to 10⁻¹²). In `system/tests.rs`, the hold's test now also checks that
+    each generated moon's escape is judged at its record's radius (over 10 stated bulks among
+    them) and that its rotation law still does not move.
+  - _Deviation from the brief._ "Triton's thin N₂": the model's Triton holds none, as the plan's
+    recorded limitation already says ("Pluto and Triton are `Airless` until T53.c"). Its measured
+    N₂, some 14 µbar (1.4 Pa: Voyager 2's radio occultation as Gurrola 1995, PhD thesis, Stanford
+    University, re-analysed it, 14 ± 2 µbar as Marques Oliveira et al. 2022, A&A 659, A136, §1,
+    quote it; Tyler et al. 1989, Science 246, 1466, gave a preliminary 1.6 ± 0.3 Pa), lies under
+    the 100 Pa airless line, so the state agrees. The test pins "airless, under 1 mbar, no N₂", a
+    pin that P14.T53.c's sublimation air replaces.
+  - _For T54.a._ `element_inventory` for a moon takes the placed mass and the fractions its air is
+    read at: `DerivedMoon::fractions` for a regular moon, `moon_bulk_of`'s for a giant-impact moon
+    or a capture, not `DerivedBody::fractions`. That keeps its carriers `VolatileInventory`'s to
+    the bit, since the water floor and the argon by rock read them. The bless note accounts for
+    the follow-up apart from T56.c: every moon's air, albedo and T_eq; Ganymede- and Callisto-like
+    moons away from the radius-keeping rank go airless (3.6 and 7.4 bar at 22); Titan-like moons
+    fall by about (R_solve ÷ R_own)⁴, 2.65 → 1.44 bar for the table's Titan.
+  - _Files beyond T56.c's._ `planetary/derive/composition.rs` (`with_water`),
+    `planetary/hooks/figures/tests.rs` (`jovian` passes `MoonBulk::Derived`).
+- **Deferred findings (2026-10-13 rule)**, from T56.c's follow-up:
+  - _Triton's N₂._ At its own radius the table's Triton has λ(N₂) ≈ 15.6 at the 228 K exobase
+    that `EXOBASE_MULTIPLE` (5 T_eq) gives it, against the threshold of 25, so it keeps none. Its
+    real 14 µbar is held in vapour equilibrium with its N₂ ice (38.0 +2.0/−1.0 K; Tryka et al.
+    1993, Science 261, 751) and escapes slowly at λ ≈ 21 at its real 102 K exobase, 870 km up
+    (Voyager 2's ultraviolet spectrometer; Krasnopolsky et al. 1993, JGR 98, 3065), which a
+    retained-or-lost Jeans test cannot hold. The 100 Pa airless line already labels it airless, so
+    the state agrees; its thin, ice-buffered air is P14.T53.c's (23 → 24). P14.T51.b's "a
+    Triton's N₂ pressure within a factor of 3 of 1.4 Pa at its distance" cannot pass on the Jeans
+    verdict at Triton's radius, at either bulk, unless T51.b gives the N₂ by hand: for "main".
+  - _Two states near the threshold._ At the lowest radius ranks a Ganymede at its own radius
+    (2,574 km) would keep its N₂ under a snowball's 513 K exobase (λ 25.2) and loses it under the
+    airless body's 548 K (λ 23.6). Both are self-consistent; the passes, starting from an albedo
+    of 0.3, settle on the airless one. Recorded beside decision-p14-moons §2.1's "near the
+    threshold".
+  - _A non-regular moon's tides read the nursery's radius._ `DerivedMoon::radius` and `density`,
+    which `tidal_heating`, the ocean flag and `locking_time` read, are `moon_radius`'s at the
+    nursery's ice fraction for every origin, while a giant-impact moon's and a capture's record
+    states its own (`stated_moon_bulk`): for the table's Triton 1,474 km against its 1,352.6 km.
+    Its rotation law reads the record's. For T56.d, which rebuilds the tides.
+  - _Ocean flags move with the air._ `has_subsurface_ocean` reads the equilibrium temperature,
+    which now follows the moon's own air: a Ganymede at the median rank goes from a snowball's
+    102.6 K to an airless body's 109.6 K. T56.d's ocean branch (F_ocean's root and
+    d = 651 ln(273 K ÷ T_s) ÷ F) reads that T_s, so its Ganymede and Callisto ocean-branch tests,
+    and its "regular moons' ocean flags turn on where their whole heat flow keeps an ocean", are
+    measured against this subtask's temperatures.
+  - _A capture's ice where its parent formed inside the snow line._ A small capture's own bulk is
+    0.375 ice (`ice_fraction_of` at P14.T19's 1,700 kg m⁻³) wherever it is, but the inventory's
+    water floor applies only beyond the snow line, so a rocky planet's capture from a zone inside
+    it keeps the drawn water beside an icy bulk. With T56.c's `MoonBirth` finding, for the
+    composition audit.

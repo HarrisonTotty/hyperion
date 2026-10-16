@@ -107,7 +107,7 @@ use crate::planetary::belts::{
 };
 use crate::planetary::context::{SystemContext, XuvHistory};
 use crate::planetary::derive::atmosphere::{
-    Atmosphere, SurfaceMaterial, VolatileDraws, VolatileInventory,
+    Atmosphere, NitrogenLine, SurfaceMaterial, VolatileDraws, VolatileInventory,
 };
 use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
 use crate::planetary::derive::irradiation::luminosity_flux;
@@ -141,8 +141,8 @@ use crate::planetary::index::{BodyIndex, LAST_PLANET_SLOT};
 use crate::planetary::label::{self, BodyLabel};
 use crate::planetary::laplace::{LaplaceFrame, LaplaceFrameParts, SatellitePlanes, hydrostatic_j2};
 use crate::planetary::moons::regular::{
-    DerivedMoon, MOON_ICE_DENSITY, MOON_ROCK_DENSITY, MoonInventories, MoonNursery, MoonSky,
-    MoonVolatiles, derive_moon,
+    DerivedMoon, MOON_ICE_DENSITY, MOON_ROCK_DENSITY, MoonBulk, MoonBulkRule, MoonInventories,
+    MoonNursery, MoonSky, MoonVolatiles, derive_moon_under,
 };
 use crate::planetary::moons::regular::{ICY_MOON_ICE_FRACTION, moon_radius};
 use crate::planetary::moons::{
@@ -886,7 +886,8 @@ pub struct PlanetarySystem {
     satellites: Vec<Satellites>,
     belts: Vec<Belt>,
     halo: Option<SystemHalo>,
-    /// Which volatiles its moons are derived with (P14.T56.c's hold): version 22's below
+    /// Which volatiles its moons are derived with, and at which bulk their inventory and
+    /// atmosphere are read (P14.T56.c's hold and its follow-up's): version 22's below
     /// [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION), each moon's own from it.
     moon_inventories: MoonInventories,
 }
@@ -1556,12 +1557,13 @@ impl PlanetarySystem {
         &self.satellites
     }
 
-    /// The same system with its moons derived with the volatiles `rule` gives (P14.T56.c's hold),
-    /// for the tests to reach each moon's own ahead of the bump.
+    /// The same system with its moons derived with the volatiles, and read at the bulk, that
+    /// `rule` gives (P14.T56.c's hold and its follow-up's), for the tests to reach each moon's own
+    /// ahead of the bump.
     ///
     /// Setting it after [`generate`] is generating with it: nothing generation reads depends on a
-    /// moon's inventory, since a moon's rotation law reads its bulk's class, fractions and radius
-    /// and its orbit, which no inventory reaches
+    /// moon's inventory or atmosphere, since a moon's rotation law reads its bulk's class,
+    /// fractions and radius and its orbit, which neither reaches
     /// (`under_their_own_volatiles_the_moons_move_nothing_their_rotation_reads`). P14.T54.a deletes
     /// it with the hold.
     #[cfg(test)]
@@ -2902,9 +2904,11 @@ impl PlanetarySystem {
     }
 
     /// The derivation of the present moon `moon` on `orbit` at the epoch's time, whose parent is
-    /// as `parent` says (P14.T17.b), with the volatiles the system's moons take (P14.T56.c's
-    /// hold: version 22's at the median ranks in the nursery, or the moon's own); `None` where
-    /// this generator version does not compute it.
+    /// as `parent` says (P14.T17.b), with the volatiles the system's moons take and the bulk their
+    /// inventory and atmosphere are read at (P14.T56.c's hold: version 22's at the median ranks in
+    /// the nursery, read at the composition solve's bulk, or the moon's own volatiles at its own
+    /// bulk, [`moon_own_bulk`](Self::moon_own_bulk)); `None` where this generator version does not
+    /// compute it.
     #[must_use]
     fn moon_derived(
         &self,
@@ -2920,13 +2924,15 @@ impl PlanetarySystem {
             return None;
         };
         let satellite = &moon.satellite;
-        let volatiles = match self.moon_inventories {
-            MoonInventories::Shared => MoonVolatiles::SHARED,
-            MoonInventories::Own => satellite.own_volatiles(),
+        let (volatiles, rule) = match self.moon_inventories {
+            MoonInventories::Shared => (MoonVolatiles::SHARED, MoonBulkRule::Solved),
+            MoonInventories::Own => (satellite.own_volatiles(), MoonBulkRule::Own),
         };
         // As above: the derivation refuses only inputs the generator never makes, so its error
         // carries nothing a caller could act on.
-        derive_moon(
+        derive_moon_under(
+            NitrogenLine::in_force(),
+            rule,
             satellite.mass(),
             orbit,
             &moon.parent,
@@ -2934,42 +2940,72 @@ impl PlanetarySystem {
             sky,
             satellite.radius_rank(),
             volatiles,
+            Self::moon_own_bulk(moon, parent),
             epoch.ctx.age_at_epoch(),
             epoch.t,
         )
         .ok()
     }
 
-    /// The bulk of the moon `moon` derived as `derived`, whose parent is as `parent` says: a
-    /// regular moon's from its own derivation, a giant-impact moon's of its own density and a
-    /// capture's of its own radius, each with the flux and temperature of the derivation.
+    /// The bulk the moon `moon`, whose parent is as `parent` says, states, at which its inventory
+    /// and atmosphere are read from [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION)
+    /// (P14.T56.c's follow-up): a regular moon's as its derivation gives it, and a giant-impact
+    /// moon's or a capture's radius and fractions as its record's bulk
+    /// ([`moon_bulk_of`](Self::moon_bulk_of)) states them.
     #[must_use]
-    fn moon_bulk_of(moon: &MoonPart, derived: &DerivedMoon, parent: &ParentNow) -> BulkProperties {
+    fn moon_own_bulk(moon: &MoonPart, parent: &ParentNow) -> MoonBulk {
+        match Self::stated_moon_bulk(moon, parent) {
+            Some((radius, _, fractions)) => MoonBulk::Stated { radius, fractions },
+            None => MoonBulk::Derived,
+        }
+    }
+
+    /// The radius, density and mass fractions that the origin of the moon `moon`, whose parent is
+    /// as `parent` says, states apart from its derivation: a giant-impact moon's of its own
+    /// density, with its parent's fractions if the parent is icy and rock otherwise, and a
+    /// capture's of its own radius, with the ice its density holds. `None` for a regular moon,
+    /// whose are its derivation's.
+    #[must_use]
+    fn stated_moon_bulk(
+        moon: &MoonPart,
+        parent: &ParentNow,
+    ) -> Option<(Metres, KilogramsPerCubicMetre, MassFractions)> {
         let satellite = &moon.satellite;
         let mass = satellite.mass();
-        let (radius, density, fractions) = match satellite.moon() {
-            SatelliteMoon::Regular(_) => (derived.radius(), derived.density(), derived.fractions()),
+        match satellite.moon() {
+            SatelliteMoon::Regular(_) => None,
             SatelliteMoon::GiantImpact(impact) => {
                 let fractions = match (moon.parent.class(), &parent.derived) {
                     (PlanetClass::Icy, Some(planet)) => planet.fractions(),
                     _ => MassFractions::solid(0.0, 1.0, 0.0),
                 };
-                (
+                Some((
                     sphere_radius(mass, impact.density()),
                     impact.density(),
                     fractions,
-                )
+                ))
             }
             SatelliteMoon::Captured(captured) => {
                 let density = sphere_density(mass, captured.radius());
                 let ice = ice_fraction_of(density);
-                (
+                Some((
                     captured.radius(),
                     density,
                     MassFractions::solid(0.0, 1.0 - ice, ice),
-                )
+                ))
             }
-        };
+        }
+    }
+
+    /// The bulk of the moon `moon` derived as `derived`, whose parent is as `parent` says: a
+    /// regular moon's from its own derivation, a giant-impact moon's of its own density and a
+    /// capture's of its own radius ([`stated_moon_bulk`](Self::stated_moon_bulk)), each with the
+    /// flux and temperature of the derivation.
+    #[must_use]
+    fn moon_bulk_of(moon: &MoonPart, derived: &DerivedMoon, parent: &ParentNow) -> BulkProperties {
+        let mass = moon.satellite.mass();
+        let (radius, density, fractions) = Self::stated_moon_bulk(moon, parent)
+            .unwrap_or_else(|| (derived.radius(), derived.density(), derived.fractions()));
         let r = radius.value();
         let gravity = MetresPerSecondSquared::new(GM_EARTH * mass.value() / (r * r));
         BulkProperties::new(

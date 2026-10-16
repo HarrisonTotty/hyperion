@@ -157,6 +157,7 @@ pub struct PlacedBody {
     volatiles: VolatileDraws,
     volatile_zone: Option<FormationZone>,
     molten_until: Option<Years>,
+    bulk: Option<GivenBulk>,
 }
 
 impl PlacedBody {
@@ -192,6 +193,7 @@ impl PlacedBody {
             volatiles: VolatileDraws::MEDIAN,
             volatile_zone: None,
             molten_until: None,
+            bulk: None,
         })
     }
 
@@ -218,6 +220,17 @@ impl PlacedBody {
     pub const fn with_volatiles_from(self, zone: FormationZone) -> Self {
         Self {
             volatile_zone: Some(zone),
+            ..self
+        }
+    }
+
+    /// The same body with the bulk `bulk` its caller states, which its volatile inventory and
+    /// atmosphere read in place of its composition solve's ([`GivenBulk`]): a moon's own
+    /// (P14.T56.c's follow-up). A body built without it is read at its solve's bulk throughout.
+    #[must_use]
+    pub(crate) const fn with_bulk(self, bulk: GivenBulk) -> Self {
+        Self {
+            bulk: Some(bulk),
             ..self
         }
     }
@@ -423,6 +436,57 @@ impl fmt::Display for BuildFormationZoneError {
 }
 
 impl Error for BuildFormationZoneError {}
+
+/// A body's bulk as its caller states it, which [`derive_body`] reads for the body's volatile
+/// inventory and atmosphere in place of its composition solve's (P14.T56.c's follow-up;
+/// [`PlacedBody::with_bulk`]): a moon's own, which phase D derives apart from the planets' curves
+/// (ruling 83.7; P14.T22.a's record of a moon).
+///
+/// With it the inventory reads the body's placed mass and these fractions: the water floor
+/// beyond the snow line, the larger of the drawn water and the bulk's, and the argon by its rock.
+/// The atmosphere reads this radius at that mass, so its Jeans escape, the weight of its air over
+/// the surface (its surface gravity) and an oxygen-losing runaway's escape are the stated bulk's,
+/// and its airless surface's material is these fractions'. The albedo the air's state gives, and
+/// the equilibrium and effective temperatures it sets, follow. Every other value of the derivation
+/// stays the solve's: its radius, density, gravity, class, fractions and core, its moon limit and
+/// its Hill radius.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct GivenBulk {
+    radius: Metres,
+    fractions: GivenFractions,
+}
+
+impl GivenBulk {
+    /// The bulk of radius `radius` and mass fractions `fractions`. A radius that is not positive
+    /// and finite gives an airless body, as [`atmosphere::atmosphere`] takes one.
+    #[must_use]
+    pub(crate) const fn new(radius: Metres, fractions: GivenFractions) -> Self {
+        Self { radius, fractions }
+    }
+}
+
+/// The mass fractions of a [`GivenBulk`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum GivenFractions {
+    /// Water of this share of the body's mass, in [0, 1], over the solids its composition solve
+    /// splits between iron and rock ([`MassFractions::with_water`]): a regular moon's ice (ruling
+    /// 83.7), as [`DerivedMoon::fractions`](crate::planetary::moons::DerivedMoon::fractions)
+    /// states it.
+    Water(f64),
+    /// These fractions: a giant-impact moon's or a capture's, as its record's bulk states them.
+    Exactly(MassFractions),
+}
+
+impl GivenFractions {
+    /// The fractions of a body whose composition solve gave `solved`.
+    #[must_use]
+    fn over(self, solved: &MassFractions) -> MassFractions {
+        match self {
+            Self::Water(water) => solved.with_water(water),
+            Self::Exactly(fractions) => fractions,
+        }
+    }
+}
 
 /// A body's hosts as the derivation reads them at the time: the mass it orbits, and the light of
 /// every star (ruling 34: each host as plain values of L, `T_eff` and R from its `StarState`).
@@ -1098,10 +1162,8 @@ pub(crate) fn derive_body_under(
     let mass_kg = Kilograms::from(mass);
 
     // T12 and T13, three passes (T13.c): the albedo of one pass's surface state sets the
-    // equilibrium temperature the next pass reads.
-    // The side of the snow line the body's volatiles formed on, which its carbon's carrier
-    // follows: its own, or a captured or giant-impact moon's parent's (P14.T56.c).
-    let (side, inventory) = inventory_of(line, placed, disc, formed, mass, &fractions, age_now);
+    // equilibrium temperature the next pass reads, at the bulk its air reads, with its inventory.
+    let bulk = placed.air_of(line, disc, formed, (mass, radius, &fractions), age_now);
     let crust = match placed.molten_until {
         Some(until) if age_now < until => Crust::Molten,
         Some(_) | None => Crust::Solid,
@@ -1114,12 +1176,12 @@ pub(crate) fn derive_body_under(
             irradiated
         };
         let inputs = AtmosphereInputs {
-            mass: mass_kg,
-            radius: Metres::new(r),
-            material: SurfaceMaterial::of(&fractions),
-            envelope_fraction: fractions.envelope(),
-            inventory,
-            formed: side,
+            mass: bulk.mass,
+            radius: bulk.radius,
+            material: SurfaceMaterial::of(&bulk.fractions),
+            envelope_fraction: bulk.fractions.envelope(),
+            inventory: bulk.inventory,
+            formed: bulk.side,
             equilibrium: irradiated,
             worst_equilibrium: equilibrium_temperature(sky.peak_flux, albedo),
             heated,
@@ -1169,7 +1231,7 @@ pub(crate) fn derive_body_under(
         albedo,
         equilibrium_temperature: irradiated,
         effective_temperature: (internal_luminosity > Watts::ZERO).then_some(heated),
-        inventory,
+        inventory: bulk.inventory,
         atmosphere: air,
         internal_luminosity,
         radius,
@@ -1382,39 +1444,72 @@ fn envelope_escape(
     }
 }
 
-/// The side of the snow line the volatiles of `placed` formed on, and its volatile inventory, of
-/// mass `mass` and fractions `fractions` at age `age`, with nitrogen's boost beyond
-/// `nitrogen_line` (T13.a; P14.T50.c; P14.T56.c): [`volatile_inventory_under`] with its ranks, at
-/// the side and formation temperature of its [`volatile_zone`](PlacedBody::volatile_zone) where
-/// it has one, and otherwise at `formed`, the side of `disc`'s snow line it formed on, and its
-/// formation temperature in `disc` ([`formation_temperature`]).
-#[must_use]
-fn inventory_of(
-    nitrogen_line: NitrogenLine,
-    placed: &PlacedBody,
-    disc: &DiscProfile,
-    formed: SnowLineSide,
-    mass: EarthMasses,
-    fractions: &MassFractions,
-    age: Years,
-) -> (SnowLineSide, VolatileInventory) {
-    let (side, temperature) = match placed.volatile_zone {
-        Some(zone) => (zone.side(), zone.temperature()),
-        None => (
-            formed,
-            formation_temperature(placed.formation_distance, disc.snow_line()),
-        ),
-    };
-    let inventory = volatile_inventory_under(
-        nitrogen_line,
-        mass,
-        fractions,
-        side,
-        temperature,
-        &placed.volatiles,
-        age,
-    );
-    (side, inventory)
+/// What a body's volatile inventory and atmosphere read (T13; P14.T50.c; P14.T56.c and its
+/// follow-up): the bulk its air is weighed at, and the side of the snow line its volatiles formed
+/// on with the inventory they give.
+#[derive(Debug, Clone, Copy)]
+struct AirBulk {
+    /// The mass its air is weighed at.
+    mass: Kilograms,
+    /// The radius its air is weighed and escapes at.
+    radius: Metres,
+    /// The mass fractions its inventory and its airless surface read.
+    fractions: MassFractions,
+    /// The side of the snow line its volatiles formed on, which its carbon's carrier follows: its
+    /// own, or a captured or giant-impact moon's parent's (P14.T56.c).
+    side: SnowLineSide,
+    /// Its volatile inventory.
+    inventory: VolatileInventory,
+}
+
+impl PlacedBody {
+    /// The [`AirBulk`] of this body at age `age`, with nitrogen's boost beyond `nitrogen_line`,
+    /// whose solve gives it the mass, radius and fractions `solved` at the time.
+    ///
+    /// - Its bulk is the one [`with_bulk`](Self::with_bulk) states, at its placed mass, where it
+    ///   has one (a moon's own, P14.T56.c's follow-up), and `solved` otherwise.
+    /// - Its inventory is [`volatile_inventory_under`] with its ranks at that mass and those
+    ///   fractions, at the side and formation temperature of its
+    ///   [`volatile_zone`](Self::volatile_zone) where it has one, and otherwise at `formed`, the
+    ///   side of `disc`'s snow line it formed on, and its formation temperature in `disc`
+    ///   ([`formation_temperature`]).
+    #[must_use]
+    fn air_of(
+        &self,
+        nitrogen_line: NitrogenLine,
+        disc: &DiscProfile,
+        formed: SnowLineSide,
+        solved: (EarthMasses, EarthRadii, &MassFractions),
+        age: Years,
+    ) -> AirBulk {
+        let (mass, radius, fractions) = match self.bulk {
+            Some(bulk) => (self.mass, bulk.radius, bulk.fractions.over(solved.2)),
+            None => (solved.0, Metres::from(solved.1), *solved.2),
+        };
+        let (side, temperature) = match self.volatile_zone {
+            Some(zone) => (zone.side(), zone.temperature()),
+            None => (
+                formed,
+                formation_temperature(self.formation_distance, disc.snow_line()),
+            ),
+        };
+        let inventory = volatile_inventory_under(
+            nitrogen_line,
+            mass,
+            &fractions,
+            side,
+            temperature,
+            &self.volatiles,
+            age,
+        );
+        AirBulk {
+            mass: Kilograms::from(mass),
+            radius,
+            fractions,
+            side,
+            inventory,
+        }
+    }
 }
 
 /// What [`derive_body`] fixes at formation (T11): the side of the disc's snow line the body formed
@@ -2882,5 +2977,86 @@ mod tests {
         assert_same_bits(a.radius().value(), b.radius().value());
         assert_eq!(a.fractions(), b.fractions());
         assert_same_bits(a.surface_gravity().value(), b.surface_gravity().value());
+    }
+
+    /// P14.T56.c's follow-up: a body given its own bulk ([`PlacedBody::with_bulk`]) has its
+    /// inventory read at its placed mass and that bulk's fractions, and its atmosphere at that
+    /// radius and mass: its Jeans escape and the weight of its air are the bulk's. Every other
+    /// value is its solve's, bit for bit, and given its solve's own radius and fractions it is the
+    /// body without one, bit for bit.
+    ///
+    /// A body of Titan's mass placed at Saturn's 9.58 au, beyond the snow and ammonia lines,
+    /// holds an unsaturated N₂ air, whose partial pressure `M_N₂ G M ÷ (4π R⁴)` gives back the
+    /// radius it was weighed at.
+    #[test]
+    fn a_given_bulk_is_what_the_inventory_and_the_atmosphere_read() {
+        use crate::planetary::derive::atmosphere::{Gas, Retention, volatile_inventory};
+        use crate::units::consts::GRAVITATIONAL_CONSTANT;
+        let disc = solar_disc();
+        let own = placed(1.3452e23, 9.5826, 0.0565, 0.5);
+        let solved = derive(&own, &disc).unwrap();
+        let solved_radius = Metres::from(solved.radius());
+        let as_solved = GivenBulk::new(solved_radius, GivenFractions::Exactly(solved.fractions()));
+        assert_eq!(derive(&own.with_bulk(as_solved), &disc).unwrap(), solved);
+
+        let radius = Metres::new(1.15 * solved_radius.value());
+        let fractions = MassFractions::solid(0.0, 0.6, 0.4);
+        let bulk = GivenBulk::new(radius, GivenFractions::Exactly(fractions));
+        let given = derive(&own.with_bulk(bulk), &disc).unwrap();
+        // Nothing but the inventory and the air, and the albedo and temperatures they set, moves.
+        assert_same_bits(given.radius().value(), solved.radius().value());
+        assert_same_bits(given.density().value(), solved.density().value());
+        assert_same_bits(
+            given.surface_gravity().value(),
+            solved.surface_gravity().value(),
+        );
+        assert_eq!(given.fractions(), solved.fractions());
+        assert_eq!(given.class(), solved.class());
+        assert_same_bits(given.mass().value(), solved.mass().value());
+        assert_same_bits(given.hill_radius().value(), solved.hill_radius().value());
+        assert_same_bits(
+            given.maximum_moon_mass().value(),
+            solved.maximum_moon_mass().value(),
+        );
+        assert_same_bits(given.flux().value(), solved.flux().value());
+        // The inventory: the placed mass and the bulk's fractions, its water floor their ice.
+        let formed = formation_temperature(own.formation_distance(), disc.snow_line());
+        let inventory = volatile_inventory(
+            own.mass(),
+            &fractions,
+            SnowLineSide::Beyond,
+            formed,
+            own.volatiles(),
+            SOLAR_AGE,
+        );
+        assert_eq!(*given.inventory(), inventory);
+        let kg = Kilograms::from(own.mass()).value();
+        assert_same_bits(given.inventory().water().value(), 0.4 * kg);
+        // The air: escape at the bulk's radius, and N₂ weighed at it.
+        let air = given.atmosphere();
+        let mass = Kilograms::from(own.mass());
+        let escape = Retention::of(mass, radius, air.exobase_temperature());
+        assert_eq!(air.retention(), escape.with_methane_as_nitrogen());
+        assert!(air.retention().retains(Gas::Nitrogen), "{air:?}");
+        let nitrogen = air.partial_pressures().of(Gas::Nitrogen).value();
+        let weighed_at = crate::math::powf(
+            given.inventory().nitrogen().value() * GRAVITATIONAL_CONSTANT * kg
+                / (4.0 * core::f64::consts::PI * nitrogen),
+            0.25,
+        );
+        assert!(
+            (weighed_at / radius.value() - 1.0).abs() < 1e-12,
+            "{weighed_at} m against {} m",
+            radius.value()
+        );
+        let unweighed = solved
+            .atmosphere()
+            .partial_pressures()
+            .of(Gas::Nitrogen)
+            .value();
+        assert!(
+            (nitrogen / unweighed - crate::math::powi(1.15, -4)).abs() < 1e-9,
+            "{nitrogen} Pa against {unweighed} Pa"
+        );
     }
 }

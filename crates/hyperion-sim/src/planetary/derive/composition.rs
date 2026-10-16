@@ -126,6 +126,23 @@ impl MassFractions {
         }
     }
 
+    /// The fractions of a solid body with no envelope whose water is `water` of its mass, a
+    /// dimensionless share in [0, 1], and whose rest is split between iron and rock as these
+    /// fractions split their solids (all rock where they hold none): a moon's, ruling 83.7's ice
+    /// over the solids P14.T16's derivation gives a rocky body of its mass and radius rank
+    /// (P14.T22.a's record of a moon).
+    #[must_use]
+    pub(crate) fn with_water(&self, water: f64) -> Self {
+        let solids = self.iron + self.rock;
+        let iron_share = if solids > 0.0 {
+            self.iron / solids
+        } else {
+            0.0
+        };
+        let rest = 1.0 - water;
+        Self::solid(rest * iron_share, rest * (1.0 - iron_share), water)
+    }
+
     /// The mass fraction of iron.
     #[must_use]
     pub const fn iron(&self) -> f64 {

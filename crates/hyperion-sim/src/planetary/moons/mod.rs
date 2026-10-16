@@ -72,12 +72,14 @@ pub use irregular::{
 pub use regular::{DerivedMoon, RegularMoon, RegularMoons, Volcanism, regular_moons};
 
 /// The generator version from which every moon and ring lies on its parent's Laplace surface
-/// (P14.T56.a), and its later subtasks' moons' own ranks and tides (P14.T56.c, T56.d): 23, the
+/// (P14.T56.a), and its later subtasks' moons' own ranks, read at their own bulk, and tides
+/// (P14.T56.c and its follow-up, T56.d): 23, the
 /// 22 → 23 batch's bump (plan 14, P14.T56; decision-bump-plan-after-22 §1.2).
 ///
 /// Below it every value is version 22's, bit for bit
 /// ([`SatellitePlanes::in_force`](crate::planetary::laplace::SatellitePlanes::in_force), and the
-/// crate-private `MoonInventories::in_force` for the moons' volatiles).
+/// crate-private `MoonInventories::in_force` and `MoonBulkRule::in_force` for the moons' volatiles
+/// and the bulk their inventory and atmosphere are read at).
 /// P14.T54.a deletes the hold with its tripwire (`the_moons_are_held_only_until_the_batch_s_bump`)
 /// and blesses the moved goldens with its bump.
 pub const MOONS_VERSION: GeneratorVersion = GeneratorVersion::new(23);
@@ -540,24 +542,27 @@ pub(crate) mod testing {
     /// P14.T56's subtasks are held until the 22 → 23 batch's bump, so that the batch's goldens
     /// move once: until then `generate` refers every moon and ring to its parent's orbital plane,
     /// as version 22 does, the server sends no ring normal, and every moon is derived at the
-    /// median ranks in its nursery. The bump removes the hold, and this test with it.
+    /// median ranks in its nursery, its inventory and atmosphere read at its composition solve's
+    /// bulk. The bump removes the hold, and this test with it.
     #[test]
     fn the_moons_are_held_only_until_the_batch_s_bump() {
         use crate::GENERATOR_VERSION;
         use crate::planetary::laplace::SatellitePlanes;
-        use crate::planetary::moons::regular::MoonInventories;
+        use crate::planetary::moons::regular::{MoonBulkRule, MoonInventories};
         assert!(
             GENERATOR_VERSION < MOONS_VERSION,
             "the 22 → 23 bump puts every moon and ring on its parent's Laplace surface and gives \
-             every moon its own volatiles: make `generate` take \
+             every moon its own volatiles, read at its own bulk: make `generate` take \
              `SatellitePlanes::LaplaceSurface` and the server send every ring's normal (P14.T56.a \
-             as built), derive every moon with `Satellite::own_volatiles` and drop \
-             `MoonInventories`, `PlanetarySystem::with_moon_inventories` and `derive_moon_under` \
-             (P14.T56.c as built), and remove `SatellitePlanes::in_force`, \
-             `MOONS_VERSION` and this test (plan 14)"
+             as built), derive every moon with `Satellite::own_volatiles` and \
+             `PlanetarySystem::moon_own_bulk` and drop `MoonInventories`, `MoonBulkRule`, \
+             `PlanetarySystem::with_moon_inventories` and `derive_moon_under` (P14.T56.c and its \
+             follow-up as built), and remove `SatellitePlanes::in_force`, `MOONS_VERSION` and \
+             this test (plan 14)"
         );
         assert_eq!(SatellitePlanes::in_force(), SatellitePlanes::OrbitalPlane);
         assert_eq!(MoonInventories::in_force(), MoonInventories::Shared);
+        assert_eq!(MoonBulkRule::in_force(), MoonBulkRule::Solved);
     }
 
     #[test]
