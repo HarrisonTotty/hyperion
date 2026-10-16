@@ -252,7 +252,8 @@ pub struct Plate {
 }
 
 /// Runs the step on `working`: on a mobile lid, every cell's plate, crust, nearest boundary (its
-/// kind, signed distance and obliquity) and, on oceanic crust, its sea floor's origin and the
+/// kind, signed distance and obliquity, and whether its plate subducts there, for R09.T12.b) and,
+/// on oceanic crust, its sea floor's origin and the
 /// reference hill relief, and the working state's plates; on every other regime nothing (see the
 /// module documentation).
 ///
@@ -1278,15 +1279,31 @@ pub(super) fn reach<L: Copy + PartialEq>(
     sources: &[u32],
     radius_m: f64,
 ) -> Vec<Option<Reach>> {
+    let starts: Vec<(u32, f64)> = sources.iter().map(|&s| (s, 0.0)).collect();
+    reach_from(grid, region, &starts, radius_m)
+}
+
+/// [`reach`] from sources that start at a distance of their own: each of `sources` a cell
+/// (ascending) and its distance at the start, metres, finite and non-negative, which its paths
+/// carry on. R09.T12.b starts each overriding boundary cell of a subduction at its half-link from
+/// the trench's axis.
+#[must_use]
+pub(super) fn reach_from<L: Copy + PartialEq>(
+    grid: &CellGraph,
+    region: &[L],
+    sources: &[(u32, f64)],
+    radius_m: f64,
+) -> Vec<Option<Reach>> {
     let mut best: Vec<Option<Reach>> = vec![None; region.len()];
     let mut heap = BinaryHeap::new();
-    for &s in sources {
+    for &(s, start) in sources {
+        let start = num::assert_finite(start);
         best[slot(s)] = Some(Reach {
-            distance_m: 0.0,
+            distance_m: start,
             source: s,
         });
         heap.push(Reverse(Entry {
-            distance_m: 0.0,
+            distance_m: start,
             cell: s,
             source: s,
         }));
@@ -1497,6 +1514,7 @@ impl Layout {
                     d
                 }));
                 state.boundary_obliquity = Radians::new(boundary.obliquity_rad);
+                state.subducts = boundary.subducts;
             }
             state.seafloor_origin = self.seafloor(n);
             if is_oceanic(self.crust[n]) {

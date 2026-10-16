@@ -3,7 +3,7 @@
 
 use std::sync::OnceLock;
 
-use hyperion_surface::field::{CoarseField, Crust, FieldView, coarse_level};
+use hyperion_surface::field::{BoundaryKind, CoarseField, Crust, FieldView, coarse_level};
 use hyperion_surface::synth::relief::ReliefStyle;
 use hyperion_testkit::float::assert_same_bits;
 
@@ -41,25 +41,68 @@ impl World {
     }
 }
 
-/// A world's state after the plates and this step, and that state quantised.
+/// A world's state after the plates and this step, and that state quantised; and, on a mobile
+/// lid, the state after the populations and before the convergent landforms, with the arcs'
+/// layout.
 struct Relieved {
     world: World,
     relief: Working,
     field: CoarseField,
+    populations: Option<Working>,
+    arcs: Option<convergent::Arcs>,
 }
 
-/// The plates and this step on `inputs` under the reference seed.
+/// The plates and this step on `inputs` under the reference seed, its stages kept: the step's
+/// [`run`] taken apart, which `the_staged_step_is_the_step` holds to it.
 fn relieve(inputs: CoarseInputs) -> Relieved {
     let world = World::new(inputs);
     let pass = world.pass(reference::SEED);
     let mut relief = Working::initial(&pass);
     crate::planetary::surface::steps::plates::run(&pass, &mut relief);
-    run(&pass, &mut relief);
+    let (populations, arcs) = if relief.plates.is_empty() {
+        lid_population(&pass, &mut relief);
+        (None, None)
+    } else {
+        let noise = noise::unit_field(
+            &pass,
+            noise::LANDFORM_INSTANCE,
+            noise::LANDFORM_FIRST_LEVEL,
+            pass.level().get(),
+        );
+        crust_populations(&pass, &mut relief, &noise);
+        let populations = relief.clone();
+        let arcs = convergent::run(&pass, &mut relief);
+        (Some(populations), arcs)
+    };
+    interim_figures(&pass, &mut relief);
     let field = quantise(&world.inputs, relief.clone()).expect("the step's state quantises");
     Relieved {
         world,
         relief,
         field,
+        populations,
+        arcs,
+    }
+}
+
+/// The staged step of the tests' `relieve` is the step's [`run`], bit for bit, on a small mobile
+/// lid and on a stagnant one.
+#[test]
+fn the_staged_step_is_the_step() {
+    for inputs in [
+        builder_of(&reference::earth_like())
+            .figure(hyperion_surface::spheroid::Spheroid::sphere(2.0e6))
+            .build()
+            .unwrap(),
+        reference::ceres_like(),
+    ] {
+        let staged = relieve(inputs.clone());
+        let world = World::new(inputs);
+        let pass = world.pass(reference::SEED);
+        let mut working = Working::initial(&pass);
+        crate::planetary::surface::steps::plates::run(&pass, &mut working);
+        run(&pass, &mut working);
+        assert_eq!(staged.relief, working);
     }
 }
 
@@ -113,11 +156,13 @@ fn the_sediment_s_load_lifts_its_top_by_athy_s_column() {
     );
 }
 
-/// Goff, Smith and Marks 2004's Table 2 (Oceanography 17(1), 24–37), abyssal-hill RMS height H by
-/// region and full spreading rate: northern MAR 235.8 m at 28 mm a⁻¹; an entry of 207.3 m at 35;
-/// PAR slow 140 m and southern MAR 200.9 m at 40; PAR fast 116.0 m at 55; SEIR axial high 61.7 m,
-/// intermediate 97.4 m and axial valley 169.8 m at 75; Pacific–Cocos 56.1 m at 110; Pacific–Nazca
-/// 58.7 m at 160 (`decision-r09-t12-coarse.md` item 5a). The fit is held within 30% of the mean of
+/// Goff, Smith and Marks 2004's Table 2 (Oceanography 17(1), 24–37, p. 30), abyssal-hill RMS height
+/// H by region and full spreading rate, as R09.T12's science check read it: northern MAR 235.8 m at
+/// 28 mm a⁻¹; southern MAR (after Neumann and Forsyth 1995) 222 m at 35; PAR slow 140 m and
+/// southern MAR 200.9 m at 40; PAR fast 90 m at 55; SEIR axial high 61.7 m, intermediate 97.4 m and
+/// axial valley 169.8 m at 75; Pacific–Cocos 56.1 m at 110; Pacific–Nazca 58.7 m at 160
+/// (`decision-r09-t12-coarse.md` item 5a). Untested: the fit's 207.3 m at 35 (−6.6%) and 116.0 m at
+/// 55 (+28.9%). The fit is held within 30% of the mean of
 /// the entries at each tested rate, the axial high alone at 75 mm a⁻¹ (the SEIR's other two entries
 /// are other morphologies at that rate).
 #[test]
@@ -422,34 +467,58 @@ fn the_wedge_never_crosses_a_plate_boundary() {
     }
 }
 
-/// The continental population has Earth2014's mean and width, and its skew puts its mode at
-/// Earth2014's +125 m; the oceanic crust's spread is plan 14's 0.93 km within the noise's
-/// correlation with the floor.
+/// The continental population is its core's mean and width exactly, its skew putting its mode at
+/// Earth2014's +125 m, and with the convergent landforms on it the continental crust has
+/// Earth2014's mean and width within the addendum's 100 m and 10%; the oceanic crust's spread is
+/// plan 14's 0.93 km within the noise's correlation with the floor.
 #[test]
 fn the_populations_have_their_widths() {
     let s = CONTINENTAL_SKEW;
     let mode = (math::exp(-s * s) - math::exp(0.5 * s * s))
         / (math::exp_m1(s * s) * math::exp(s * s)).sqrt();
-    let mode_m = CONTINENTAL_MEAN.value() + CONTINENTAL_WIDTH.value() * mode;
+    let mode_m = CONTINENTAL_CORE_MEAN.value() + CONTINENTAL_CORE_WIDTH.value() * mode;
     // Earth2014's land mode, +125 m.
     assert!((mode_m - 125.0).abs() < 0.5, "{mode_m} m");
     let earth = earth();
     let omega = earth.world.grid.solid_angles_sr();
-    let z: Vec<f64> = earth
-        .relief
+    // The populations as T12.a leaves them, before the convergent landforms.
+    let populations = earth.populations.as_ref().unwrap();
+    let z: Vec<f64> = populations
         .cells
         .iter()
         .map(|c| c.elevation.value())
         .collect();
-    let land: Vec<bool> = earth
-        .relief
+    let land: Vec<bool> = populations
         .cells
         .iter()
         .map(|c| c.crust == Crust::Continental)
         .collect();
     let (mean, spread) = subset_mean_and_spread(&z, omega, &land);
-    assert!((mean - 405.0).abs() < 1e-6, "{mean} m");
-    assert!((spread - 1_080.0).abs() < 1e-6, "{spread} m");
+    assert!(
+        (mean - CONTINENTAL_CORE_MEAN.value()).abs() < 1e-6,
+        "{mean} m"
+    );
+    assert!(
+        (spread - CONTINENTAL_CORE_WIDTH.value()).abs() < 1e-6,
+        "{spread} m"
+    );
+    // With the convergent landforms on it, the continental crust keeps Earth2014's mean within
+    // 100 m and its width within 10% (the addendum's item 3).
+    let with: Vec<f64> = earth
+        .relief
+        .cells
+        .iter()
+        .map(|c| c.elevation.value())
+        .collect();
+    let (crust_mean, crust_spread) = subset_mean_and_spread(&with, omega, &land);
+    eprintln!(
+        "continental crust with its landforms: mean {crust_mean:.0} m, s.d. {crust_spread:.0} m"
+    );
+    assert!((crust_mean - 405.0).abs() <= 100.0, "{crust_mean} m");
+    assert!(
+        (crust_spread / 1_084.1 - 1.0).abs() <= 0.1,
+        "{crust_spread} m"
+    );
     let sea: Vec<bool> = land.iter().map(|&l| !l).collect();
     let (ocean_mean, ocean_spread) = subset_mean_and_spread(&z, omega, &sea);
     eprintln!("oceanic mean {ocean_mean:.0} m, s.d. {ocean_spread:.0} m");
@@ -970,5 +1039,489 @@ fn hypsometry_line(label: &str, z: &[f64], weights: &[f64]) {
         quantile(0.25),
         quantile(0.5),
         quantile(0.75)
+    );
+}
+
+#[test]
+fn the_height_factor_is_g_earth_over_g() {
+    assert_same_bits(
+        convergent::height_factor(reference::earth_like().gravity()),
+        1.0,
+    );
+    let mars = convergent::height_factor(reference::mars_like().gravity());
+    assert!((mars - 2.6343).abs() < 1e-4, "{mars}");
+    let doubled =
+        crate::units::MetresPerSecondSquared::new(2.0 * convergent::EARTH_GRAVITY.value());
+    assert_same_bits(convergent::height_factor(doubled), 0.5);
+    assert!((convergent::EARTH_GRAVITY.value() - 9.820_25).abs() < 5e-6);
+}
+
+/// Each cell's lift by the convergent landforms on the reference Earth, metres: its elevation
+/// less the populations'.
+fn earth_lift() -> Vec<f64> {
+    let earth = earth();
+    let before = earth.populations.as_ref().unwrap();
+    earth
+        .relief
+        .cells
+        .iter()
+        .zip(&before.cells)
+        .map(|(after, before)| after.elevation.value() - before.elevation.value())
+        .collect()
+}
+
+/// Whether cell `n` lies in an arc's band on the reference Earth, its rise included.
+fn in_arc(arcs: &convergent::Arcs, n: usize) -> bool {
+    match (arcs.distance_m[n], arcs.front_m[n], arcs.width_m[n]) {
+        (Some(y), Some(g), Some(w)) => y > g - 0.25 * w && y < g + w,
+        _ => false,
+    }
+}
+
+/// Belts lie within their stated distance of collision boundaries, on continental crust: every
+/// lift outside an arc's band is a belt's, within the widest half-width (250 km), and every
+/// continental cell within the narrowest plateau (50 km) of a collision is lifted.
+#[test]
+fn belts_lie_within_their_distance_of_collisions() {
+    let earth = earth();
+    let arcs = earth.arcs.as_ref().unwrap();
+    let lift = earth_lift();
+    let mut belts = 0;
+    for (n, cell) in earth.relief.cells.iter().enumerate() {
+        let d = cell.boundary_distance.map(|d| d.value().abs());
+        if lift[n] > 0.0 && !in_arc(arcs, n) {
+            assert_eq!(cell.boundary, BoundaryKind::Collision, "cell {n}");
+            assert_eq!(cell.crust, Crust::Continental, "cell {n}");
+            assert!(d.is_some_and(|d| d <= 250e3), "cell {n}: {d:?}");
+            belts += 1;
+        }
+        if cell.boundary == BoundaryKind::Collision
+            && cell.crust == Crust::Continental
+            && d.is_some_and(|d| d <= 50e3)
+        {
+            assert!(lift[n] > 4_000.0, "cell {n}: {}", lift[n]);
+        }
+    }
+    assert!(belts > 100, "{belts} belt cells");
+}
+
+/// Trenches lie 2–4 km (times h, 1 here) below the sea floor they cut, at the subducting side's
+/// boundary cells, and only on the subducting side.
+#[test]
+fn trenches_lie_two_to_four_km_below_their_floor() {
+    let earth = earth();
+    let arcs = earth.arcs.as_ref().unwrap();
+    let lift = earth_lift();
+    let mut axis = 0;
+    for (n, cell) in earth.relief.cells.iter().enumerate() {
+        if lift[n] < 0.0 {
+            assert!(cell.subducts, "cell {n}");
+            assert_eq!(cell.boundary, BoundaryKind::Subduction);
+        }
+        let boundary_cell = cell.boundary_distance.is_some_and(|d| d.value() == 0.0);
+        if cell.subducts && boundary_cell && !in_arc(arcs, n) {
+            assert!(
+                (-4_000.0 - 1e-6..=-2_000.0 + 1e-6).contains(&lift[n]),
+                "cell {n}: {} m",
+                lift[n]
+            );
+            axis += 1;
+        }
+    }
+    assert!(axis > 100, "{axis} trench cells");
+}
+
+/// The fronts on the reference Earth: each arc cell within half its spacing of its G, with its
+/// distance from the nearest axis point of its plate's trenches by brute force, grouped by the
+/// overriding crust at its source (oceanic first); and each front cell's path distance over its
+/// great-circle one, the 8-connected excess.
+fn fronts() -> ([Vec<f64>; 2], Vec<f64>) {
+    let earth = earth();
+    let arcs = earth.arcs.as_ref().unwrap();
+    let grid = &earth.world.grid;
+    let radius_m = earth.world.inputs.radius().value();
+    let cells = &earth.relief.cells;
+    let mut axes: std::collections::BTreeMap<u8, Vec<[f64; 3]>> = std::collections::BTreeMap::new();
+    for (n, point) in arcs.axis.iter().enumerate() {
+        if let Some(p) = point {
+            axes.entry(cells[n].plate).or_default().push(*p);
+        }
+    }
+    let mut groups = [Vec::new(), Vec::new()];
+    let mut excess = Vec::new();
+    for n in 0..cells.len() {
+        let (Some(y), Some(g), Some(source), Some(path)) = (
+            arcs.distance_m[n],
+            arcs.front_m[n],
+            arcs.source[n],
+            arcs.path_m[n],
+        ) else {
+            continue;
+        };
+        let cell = cell_of(n);
+        let spacing = grid
+            .edge_neighbours(cell)
+            .iter()
+            .map(|&m| grid.arc(cell, m).value() * radius_m)
+            .sum::<f64>()
+            / 4.0;
+        if (y - g).abs() > 0.5 * spacing {
+            continue;
+        }
+        let x = grid.centre(cell);
+        let nearest = axes[&cells[n].plate]
+            .iter()
+            .map(|p| {
+                let gap = [x[0] - p[0], x[1] - p[1], x[2] - p[2]];
+                let chord = (gap[0] * gap[0] + gap[1] * gap[1] + gap[2] * gap[2]).sqrt();
+                2.0 * math::asin(0.5 * chord) * radius_m
+            })
+            .fold(f64::INFINITY, f64::min);
+        let group = usize::from(cells[slot(source)].crust != Crust::Oceanic);
+        groups[group].push(nearest);
+        excess.push(path / y - 1.0);
+    }
+    for g in &mut groups {
+        g.sort_by(f64::total_cmp);
+    }
+    excess.sort_by(f64::total_cmp);
+    (groups, excess)
+}
+
+/// The `q` quantile of the sorted `values`.
+fn quantile(values: &[f64], q: f64) -> f64 {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss,
+        reason = "an index into a short sorted list"
+    )]
+    let k = ((values.len() - 1) as f64 * q).round() as usize;
+    values[k]
+}
+
+/// The arcs' volcanic fronts lie behind their trenches with medians within 15 km of 190 km
+/// (oceanic overriding plate) and 260 km (continental), 80% of fronts within 140–250 and
+/// 180–330 km (`decision-r09-t5.md` item 6; Syracuse and Abers 2006), measured from the trench's
+/// axis by brute force.
+#[test]
+fn the_fronts_lie_at_syracuse_and_abers_s_distances() {
+    let ([oceanic, continental], excess) = fronts();
+    for (name, values, median, range) in [
+        ("oceanic", &oceanic, 190e3, 140e3..=250e3),
+        ("continental", &continental, 260e3, 180e3..=330e3),
+    ] {
+        assert!(values.len() > 30, "{name}: {} fronts", values.len());
+        let m = quantile(values, 0.5);
+        #[expect(clippy::cast_precision_loss, reason = "a count of fronts")]
+        let inside =
+            values.iter().filter(|&&v| range.contains(&v)).count() as f64 / values.len() as f64;
+        eprintln!(
+            "{name} fronts: {} cells, median {:.0} km, 10–90% {:.0}–{:.0} km, {:.0}% in range",
+            values.len(),
+            m / 1e3,
+            quantile(values, 0.1) / 1e3,
+            quantile(values, 0.9) / 1e3,
+            100.0 * inside
+        );
+        assert!((m - median).abs() <= 15e3, "{name}: median {m} m");
+        assert!(inside >= 0.8, "{name}: {inside}");
+    }
+    eprintln!(
+        "the 8-connected path's excess at the fronts: median {:.1}%, 90% {:.1}%, most {:.1}%",
+        100.0 * quantile(&excess, 0.5),
+        100.0 * quantile(&excess, 0.9),
+        100.0 * excess.last().copied().unwrap_or(0.0)
+    );
+}
+
+/// Measurements for the record, run by hand: the reference Earth's continental crust with the
+/// convergent landforms in (`decision-r09-t12-coarse.md`'s addendum, item 3's condition), the
+/// trenches against the floor beyond them, the belts' widths and heights, and h on each reference
+/// world.
+#[test]
+#[ignore = "measurement: the reference Earth's convergent landforms, printed"]
+fn measure_the_reference_earth_s_convergent_landforms() {
+    let earth = earth();
+    let omega = earth.world.grid.solid_angles_sr();
+    let cells = &earth.relief.cells;
+    let lift = earth_lift();
+    let land: Vec<bool> = cells
+        .iter()
+        .map(|c| c.crust == Crust::Continental)
+        .collect();
+    let z: Vec<f64> = cells.iter().map(|c| c.elevation.value()).collect();
+    let (mean, spread) = subset_mean_and_spread(&z, omega, &land);
+    let land_z: Vec<f64> = z
+        .iter()
+        .zip(&land)
+        .map(|(&e, &l)| if l { e } else { f64::NAN })
+        .collect();
+    let bins = histogram(
+        &land_z
+            .iter()
+            .copied()
+            .filter(|e| !e.is_nan())
+            .collect::<Vec<_>>(),
+        &omega
+            .iter()
+            .zip(&land)
+            .filter(|(_, l)| **l)
+            .map(|(w, _)| *w)
+            .collect::<Vec<_>>(),
+    );
+    let modal = modal_centre(&bins, |_| true);
+    let (lift_mean, lift_spread) = subset_mean_and_spread(&lift, omega, &land);
+    eprintln!(
+        "continental crust with the landforms: mean {mean:.0} m, s.d. {spread:.0} m, modal bin \
+         {modal} m; the landforms' lift there mean {lift_mean:.0} m, s.d. {lift_spread:.0} m"
+    );
+    // Belts alone (lifted cells outside arcs), and arcs alone.
+    let arcs = earth.arcs.as_ref().unwrap();
+    let (mut belt_area, mut arc_area, mut land_area) = (0.0, 0.0, 0.0);
+    for (n, &w) in omega.iter().enumerate() {
+        if !land[n] {
+            continue;
+        }
+        land_area += w;
+        if lift[n] > 0.0 && in_arc(arcs, n) {
+            arc_area += w;
+        } else if lift[n] > 0.0 {
+            belt_area += w;
+        }
+    }
+    eprintln!(
+        "lifted continental area: belts {:.1}%, continental arcs {:.1}%",
+        100.0 * belt_area / land_area,
+        100.0 * arc_area / land_area
+    );
+    // The belts' plateau heights at |d| ≤ 50 km.
+    let plateau: Vec<f64> = cells
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| {
+            c.boundary == BoundaryKind::Collision
+                && c.crust == Crust::Continental
+                && c.boundary_distance.is_some_and(|d| d.value().abs() <= 50e3)
+        })
+        .map(|(n, _)| z[n])
+        .collect();
+    let plateau_mean =
+        plateau.iter().sum::<f64>() / f64::from(u32::try_from(plateau.len()).unwrap());
+    let plateau_max = plateau.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    eprintln!(
+        "belt plateaus within 50 km: {} cells, mean {plateau_mean:.0} m, highest {plateau_max:.0} m",
+        plateau.len()
+    );
+}
+
+/// Measurements for the record, run by hand: the reference Earth's trenches against the floor
+/// beyond them, and h on each reference world.
+#[test]
+#[ignore = "measurement: the reference Earth's trenches and the height factors, printed"]
+fn measure_the_trenches_and_the_height_factors() {
+    let earth = earth();
+    let omega = earth.world.grid.solid_angles_sr();
+    let cells = &earth.relief.cells;
+    let z: Vec<f64> = cells.iter().map(|c| c.elevation.value()).collect();
+    // Trenches: the axis cells' depth against the subducting plate's floor 150–300 km out.
+    let mut gaps: Vec<f64> = Vec::new();
+    let mut floor_by_plate: std::collections::BTreeMap<u8, (f64, f64)> =
+        std::collections::BTreeMap::new();
+    for (n, c) in cells.iter().enumerate() {
+        let d = c.boundary_distance.map_or(0.0, Metres::value);
+        if c.subducts && (-300e3..=-150e3).contains(&d) && c.crust == Crust::Oceanic {
+            let e = floor_by_plate.entry(c.plate).or_insert((0.0, 0.0));
+            e.0 += z[n] * omega[n];
+            e.1 += omega[n];
+        }
+    }
+    let mut axis_depths: Vec<f64> = Vec::new();
+    for (n, c) in cells.iter().enumerate() {
+        let boundary_cell = c.boundary_distance.is_some_and(|d| d.value() == 0.0);
+        if c.subducts && boundary_cell {
+            axis_depths.push(z[n]);
+            if let Some(&(sum, area)) = floor_by_plate.get(&c.plate) {
+                gaps.push(sum / area - z[n]);
+            }
+        }
+    }
+    gaps.sort_by(f64::total_cmp);
+    axis_depths.sort_by(f64::total_cmp);
+    eprintln!(
+        "trench axis cells {}: depth median {:.0} m, deepest {:.0} m; below their plate's floor \
+         150–300 km out: median {:.0} m, 10–90% {:.0}–{:.0} m",
+        axis_depths.len(),
+        quantile(&axis_depths, 0.5),
+        axis_depths[0],
+        quantile(&gaps, 0.5),
+        quantile(&gaps, 0.1),
+        quantile(&gaps, 0.9)
+    );
+    for (name, inputs) in [
+        ("Earth", reference::earth_like()),
+        ("Mars", reference::mars_like()),
+        ("Moon", reference::moon_like()),
+        ("Ceres", reference::ceres_like()),
+    ] {
+        eprintln!(
+            "h on the reference {name}: {:.4}",
+            convergent::height_factor(inputs.gravity())
+        );
+    }
+}
+
+/// Measurements for the record, run by hand: R09.T11's slivers (plates whose widest interior
+/// point lies within 100 km of their boundary) and transforms (their share of the boundary and
+/// their runs' lengths) on four reference Earths.
+#[test]
+#[ignore = "measurement: slivers and transforms on four reference Earths, printed"]
+fn measure_slivers_and_transforms() {
+    for seed in [
+        reference::SEED,
+        SurfaceSeed::new(0x0dd5),
+        SurfaceSeed::new(0x5eed_0001),
+        SurfaceSeed::new(0x5eed_0002),
+    ] {
+        let world = World::new(reference::earth_like());
+        let pass = world.pass(seed);
+        let mut working = Working::initial(&pass);
+        crate::planetary::surface::steps::plates::run(&pass, &mut working);
+        let grid = &world.grid;
+        let r = world.inputs.radius().value();
+        let mut widest = vec![0.0_f64; working.plates.len()];
+        for c in &working.cells {
+            if let Some(d) = c.boundary_distance {
+                let k = usize::from(c.plate);
+                widest[k] = widest[k].max(d.value().abs());
+            }
+        }
+        let slivers: Vec<String> = widest
+            .iter()
+            .zip(&working.plates)
+            .filter(|(w, p)| **w <= 100e3 && p.area_sr > 0.0)
+            .map(|(w, p)| format!("{:.0} km wide over {:.4} sr", 2.0 * w / 1e3, p.area_sr))
+            .collect();
+        let (mut transform, mut total) = (0.0, 0.0);
+        let mut runs = 0;
+        let mut seen = vec![false; working.cells.len()];
+        for (n, c) in working.cells.iter().enumerate() {
+            let boundary_cell = c.boundary_distance.is_some_and(|d| d.value() == 0.0);
+            if !boundary_cell {
+                continue;
+            }
+            for m in grid.edge_neighbours(cell_of(n)) {
+                if working.cells[slot(m)].plate != c.plate {
+                    let length = core::f64::consts::FRAC_PI_4 * grid.arc(cell_of(n), m).value() * r;
+                    total += 0.5 * length;
+                    if c.boundary == BoundaryKind::Transform {
+                        transform += 0.5 * length;
+                    }
+                }
+            }
+            if c.boundary == BoundaryKind::Transform && !seen[n] {
+                runs += 1;
+                let mut stack = vec![n];
+                seen[n] = true;
+                while let Some(k) = stack.pop() {
+                    for m in grid
+                        .edge_neighbours(cell_of(k))
+                        .into_iter()
+                        .chain(grid.vertex_neighbours(cell_of(k)))
+                    {
+                        let o = &working.cells[slot(m)];
+                        if !seen[slot(m)]
+                            && o.boundary == BoundaryKind::Transform
+                            && o.boundary_distance.is_some_and(|d| d.value() == 0.0)
+                        {
+                            seen[slot(m)] = true;
+                            stack.push(slot(m));
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "seed {seed:?}: {} plates, {} slivers [{}]; transforms {:.1}% of {:.0} km of boundary, \
+             {runs} runs, mean {:.0} km (both sides' cells together)",
+            working.plates.len(),
+            slivers.len(),
+            slivers.join("; "),
+            100.0 * transform / total,
+            total / 1e3,
+            2.0 * transform / 1e3 / f64::from(runs.max(1))
+        );
+    }
+}
+
+/// The calibration of the continental population net of the convergent landforms
+/// (`decision-r09-t12-coarse.md`'s addendum, item 3), run once by hand on the reference Earth under
+/// `reference::SEED`: the mean μ that leaves the crust with them at +405 m, the width √(1,084² −
+/// their variance there) and the skew whose mode at that mean and width is +125 m. The belts'
+/// lift goes as (plateau − μ), so μ solves μ + B̄ (5,000 − μ) + Ā = 405, with B the belts' shape
+/// and A the arcs' lift over the continental cells.
+#[test]
+#[ignore = "measurement: the continental population net of the landforms, calibrated"]
+fn calibrate_the_continental_population_net_of_the_landforms() {
+    let earth = earth();
+    let pass = earth.world.pass(reference::SEED);
+    let omega = earth.world.grid.solid_angles_sr();
+    let before = earth.populations.as_ref().unwrap();
+    let mut strike = noise::unit_field(
+        &pass,
+        convergent::STRIKE_INSTANCE,
+        convergent::STRIKE_LEVEL,
+        convergent::STRIKE_LEVEL,
+    );
+    for n in &mut strike {
+        *n = n.clamp(-convergent::STRIKE_CLAMP, convergent::STRIKE_CLAMP);
+    }
+    let lift = earth_lift();
+    let span = convergent::BELT_PLATEAU.value() - CONTINENTAL_CORE_MEAN.value();
+    let (mut area, mut b_sum, mut a_sum) = (0.0, 0.0, 0.0);
+    let mut parts = Vec::new();
+    for (n, cell) in before.cells.iter().enumerate() {
+        if cell.crust != Crust::Continental {
+            continue;
+        }
+        let b = convergent::belt_lift(cell, strike[n], 1.0) / span;
+        let a = lift[n] - b * span;
+        area += omega[n];
+        b_sum += b * omega[n];
+        a_sum += a * omega[n];
+        parts.push((omega[n], b, a));
+    }
+    let (b_bar, a_bar) = (b_sum / area, a_sum / area);
+    let target_mean = 405.0;
+    let plateau = convergent::BELT_PLATEAU.value();
+    let mu = (target_mean - plateau * b_bar - a_bar) / (1.0 - b_bar);
+    let lift_at = |w: &(f64, f64, f64)| w.1 * (plateau - mu) + w.2;
+    let lift_mean = parts.iter().map(|w| w.0 * lift_at(w)).sum::<f64>() / area;
+    let lift_var = parts
+        .iter()
+        .map(|w| w.0 * (lift_at(w) - lift_mean) * (lift_at(w) - lift_mean))
+        .sum::<f64>()
+        / area;
+    let sigma = (1_084.0_f64 * 1_084.0 - lift_var).sqrt();
+    let mode_of = |s: f64| {
+        let s2 = s * s;
+        (math::exp(-s2) - math::exp(0.5 * s2)) / (math::exp_m1(s2) * math::exp(s2)).sqrt()
+    };
+    let target = (125.0 - mu) / sigma;
+    let (mut lo, mut hi) = (1e-6, 1.0);
+    for _ in 0..100 {
+        let mid = f64::midpoint(lo, hi);
+        if mode_of(mid) > target {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    eprintln!(
+        "belts' shape over the continents B̄ {b_bar:.5}, arcs' lift Ā {a_bar:.1} m; netted mean \
+         {mu:.1} m, the landforms' lift there {lift_mean:.1} m (s.d. {:.1} m), netted width \
+         {sigma:.1} m, skew {lo:.5} (mode {:.2} m)",
+        lift_var.sqrt(),
+        mu + sigma * mode_of(lo)
     );
 }

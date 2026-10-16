@@ -56,6 +56,7 @@ use super::inputs::{
     AreaShare, ClimateRegime, CoarseInputs, Condensate, CondensatePhase, CrustInputs, Forcing,
     GasShare, LidCrust, Persistence, SeasonalOrbit, Spin, TectonicRegime, ThermalRegime, WetEpoch,
 };
+use super::steps::relief::convergent::EARTH_GRAVITY;
 use crate::math;
 use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::irradiation;
@@ -619,7 +620,9 @@ fn figure(radius_m: f64, f: f64) -> Spheroid {
 #[must_use]
 pub fn earth_like() -> CoarseInputs {
     let radius_m = 6_371.0e3;
-    let gravity = MetresPerSecondSquared::new(3.986_004_418e14 / (radius_m * radius_m));
+    // GM ÷ R² over this radius, the one constant the coarse pass's height factor reads, so that the
+    // reference Earth's is 1 to the bit (R09.T12.b; `decision-r09-t12-coarse.md` item 2).
+    let gravity = EARTH_GRAVITY;
     let pressure = Pascals::new(98_550.0);
     let year = Seconds::new(SIDEREAL_YEAR_DAYS * SECONDS_PER_DAY);
     let rotation = Seconds::new(23.9345 * 3_600.0);

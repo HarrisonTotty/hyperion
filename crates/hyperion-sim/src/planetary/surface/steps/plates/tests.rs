@@ -399,6 +399,70 @@ fn boundary_kinds_follow_the_relative_motion_on_hand_placed_plates() {
     assert_eq!(ocean_subducts[0].map(|s| !s), ocean_subducts[1]);
 }
 
+/// `layout` written into a working state on its level-6 grid.
+fn written(layout: Layout) -> Working {
+    let inputs = reference::moon_like();
+    let level = CoarseLevel::new(PLACED_LEVEL).unwrap();
+    let (grid, climate) = (CellGraph::for_field(level), CellGraph::for_climate(level));
+    let pass = Pass::new(reference::SEED, &inputs, &grid, &climate);
+    let mut working = Working::initial(&pass);
+    layout.write(&mut working);
+    working
+}
+
+/// Each cell carries whether its plate subducts at its nearest boundary (R09.T12.b's contract,
+/// `decision-r09-t12-coarse.md`'s addendum): a signed distance is negative exactly where it holds
+/// and the distance is above +0, it implies a subduction, and on hand-placed hemispheres the
+/// oceanic side's boundary cells hold it beneath a continent and the older side's of two oceans.
+#[test]
+fn each_cell_carries_whether_its_plate_subducts() {
+    for cell in &earth().working.cells {
+        let d = cell.boundary_distance.map_or(0.0, Metres::value);
+        assert_eq!(d < 0.0, cell.subducts && d.abs() > 0.0, "{cell:?}");
+        if cell.subducts {
+            assert_eq!(cell.boundary, BoundaryKind::Subduction);
+        }
+    }
+    assert!(earth().working.cells.iter().any(|c| c.subducts));
+    let grid = CellGraph::new(PLACED_LEVEL).unwrap();
+    let mixed = written(hemispheres(&grid, [0.0, 0.0, OMEGA], |k| {
+        if k == 0 {
+            Crust::Continental
+        } else {
+            Crust::Oceanic
+        }
+    }));
+    let oceans_layout = hemispheres(&grid, [0.0, 0.0, OMEGA], |_| Crust::Oceanic);
+    // The older side of the two oceans, by T11's own polarity over their floor's kinematic ages
+    // (the higher index at a tie, which these mirrored hemispheres come near).
+    let ages: Vec<f64> = (0..oceans_layout.plate.len())
+        .map(|n| oceans_layout.seafloor(n).map_or(0.0, |o| o.age.value()))
+        .collect();
+    let polarity = older_sides(
+        &oceans_layout.plate,
+        &oceans_layout.crust,
+        &oceans_layout.contact,
+        &ages,
+    );
+    let older = u8::from(!polarity[&(0, 1)]);
+    let oceans = written(oceans_layout);
+    let (mut continental, mut oceanic) = (0, 0);
+    for (n, (mix, ocean)) in mixed.cells.iter().zip(&oceans.cells).enumerate() {
+        let boundary_cell = mix.boundary_distance.is_some_and(|d| d.value() == 0.0);
+        if mix.boundary != BoundaryKind::Subduction || !boundary_cell {
+            continue;
+        }
+        assert_eq!(mix.subducts, mix.crust == Crust::Oceanic, "cell {n}");
+        match mix.crust {
+            Crust::Continental => continental += 1,
+            Crust::Oceanic | Crust::Lid | Crust::Province => oceanic += 1,
+        }
+        assert_eq!(ocean.boundary, BoundaryKind::Subduction, "cell {n}");
+        assert_eq!(ocean.subducts, ocean.plate == older, "cell {n}");
+    }
+    assert!(continental > 20 && oceanic > 20, "{continental} {oceanic}");
+}
+
 #[test]
 fn the_older_oceanic_side_subducts() {
     let plate = [0, 1, 0, 1];
