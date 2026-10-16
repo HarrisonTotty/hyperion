@@ -136,10 +136,11 @@ describe("overlayHasRoom", () => {
     },
   );
 
-  it("needs the edge-on view as tall as its words under the overlay, 14.125 rem stacked", () => {
-    // A stacked page whose edge-on picture is 225 px, one short of the words' 226.
-    expect(overlayHasRoom(page(922, 723), "stacked")).toBe(false);
-    expect(overlayHasRoom(page(924, 726), "stacked")).toBe(true);
+  it("needs the face-on view as tall as its words and the controls under the overlay, 31.125 rem stacked", () => {
+    // Stacked pages whose pictures are 496 px, one step short of the words' 498, and 498 px. The
+    // edge-on words, 14.125 rem, then fit too: half a 498 px picture is 249 px, over their 226.
+    expect(overlayHasRoom(page(968, 800), "stacked")).toBe(false);
+    expect(overlayHasRoom(page(970, 800), "stacked")).toBe(true);
   });
 
   it("has no room before the page has room for any picture", () => {

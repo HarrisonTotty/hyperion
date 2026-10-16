@@ -1158,8 +1158,17 @@ body {
   min-height: 7.5rem;
 }
 
-/* Why the choices are held back, in the tabs' row at its right, so that the row keeps its height. */
-.galaxy-map__grid--compact > .galaxy-map__controls > .panel__inhibit {
+/*
+ * The page's one line for the views' wait (GalaxyMapPanel): the link's state, why the choices are
+ * held back, or a stale view's new map in flight, in the same place and the same look, so that
+ * nothing moves as it changes. A block, the output for PENDING included.
+ */
+.galaxy-map__wait {
+  display: block;
+}
+
+/* Compact, it stands in the tabs' row at its right, so that the row keeps its height. */
+.galaxy-map__grid--compact > .galaxy-map__controls > .galaxy-map__wait {
   position: absolute;
   top: 0;
   right: 0;
@@ -1216,6 +1225,15 @@ body {
   flex: 1 1 12rem;
   margin: 0;
   letter-spacing: 0.15em;
+}
+
+/*
+ * What the overlay's pictures show, a sentence after the overlay's name, on a line of its own: in
+ * mixed case and without the labels' letter-spacing (decision-gg-port-a2 §5).
+ */
+.galaxy-map__overlay-brightness {
+  flex: 1 1 100%;
+  margin: 0;
 }
 
 /* The frame and the scale, which the two pictures share. */

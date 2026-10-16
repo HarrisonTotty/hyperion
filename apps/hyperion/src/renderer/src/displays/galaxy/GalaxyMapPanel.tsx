@@ -1,5 +1,5 @@
 import type { MapPopulation } from "@hyperion/protocol";
-import { type CSSProperties, useEffect, useId, useState } from "react";
+import { type CSSProperties, useEffect, useId, useState, useSyncExternalStore } from "react";
 
 import { formatScaleLength } from "../../lib/format";
 import type { CentreLy } from "../../lib/galaxy/model";
@@ -9,9 +9,16 @@ import { isTextEntry } from "../../lib/textEntry";
 import { useUniverse } from "../../lib/universe";
 import { useElementSize } from "../../lib/useElementSize";
 import { ScaleBar } from "../../spatial/ScaleBar";
-import { DUST_OVERLAY_LABEL, GalaxyMapView, type MapQuantity, takesOverlay } from "./GalaxyMapView";
+import {
+  DUST_OVERLAY_BRIGHTNESS,
+  DUST_OVERLAY_LABEL,
+  GalaxyMapView,
+  type MapQuantity,
+  takesOverlay,
+} from "./GalaxyMapView";
 import { MAP_ACROSS_LY } from "./mapCursor";
 import { mapLayout, mapPictureWidth, mapRows, overlayHasRoom } from "./mapLayout";
+import { StaleWaits, staleWaitText } from "./staleWaits";
 
 /**
  * The name of each population a map may count, in the order offered.
@@ -87,27 +94,33 @@ interface GalaxyMapPanelProps {
  * population they count.
  *
  * @remarks
- * The page is measured once and both pictures are given one width, as large as the page allows:
- * the edge-on picture is half the face-on picture's height, which is their true proportion (the
- * map extents of plan 04, design note 12), so both are at one scale, and one scale bar and one
- * frame name serve them. Each view's words (title, key hint, density under the cursor, legend)
- * stand in a column beside its picture, so that the pictures take the page's height. `ALL` counts
- * every system; `YOUNG THIN DISC` the population where the arms show. The page owns the population;
+ * The page is measured once and both pictures are given one width, as large as the page allows: the
+ * edge-on picture is half the face-on picture's height, which is their true proportion (the map
+ * extents of plan 04, design note 12), so both are at one scale, and one scale bar and one frame
+ * name serve them. Each view's words (title, key hint, density under the cursor, legend) stand in a
+ * column beside its picture, so that the pictures take the page's height. `ALL` counts every
+ * system; `YOUNG THIN DISC` the population where the arms show. The page owns the population;
  * changing it asks for both maps again. It needs the server, so while the link is down it is held
- * back, described by the link's reason, and the maps on show stay (plan 05, design note D4). The
- * page owns the quantity too (plan 07, P07.T11.b): `COLUMN DENSITY`, or `EXTINCTION`, the visual
- * extinction through the galaxy, which `Q` steps through; and under `COLUMN DENSITY` the
- * `DUST OVERLAY`, which dims the density by the dust along each pixel's line of sight and which `D`
- * puts on and takes off. Both keys are held back with the choices while the link is down. While
- * the overlay is on, the page names it and its quantity once, beside its toggle,
- * `DUST OVERLAY: A(V), WHOLE LINE OF SIGHT`, as the guide requires. The overlay is offered only
- * where the page has room for its words beside the pictures ({@link overlayHasRoom}, a rule on the
- * page's size alone); elsewhere, and under `EXTINCTION`, its toggle is held back rather than
- * removed, keeping its focus and described by why, `OVERLAY_NO_ROOM` taking precedence over
- * `OVERLAY_DENSITY_ONLY`: `D` does nothing, and the choice is kept for when it is offered again
- * (decision-gg-port-d0 §3.2.3). The map cursor and the chart's
- * centre belong to the display, which reads the cursor out and enters it in its `CURSOR` panel
- * beside the map; both are marked on both maps.
+ * back, described by the link's reason, and the maps on show stay, marked stale (plan 05's T11
+ * ruling (8); decision-gg-port-a2 §3). The link's reason stands in the page's one line for the
+ * views' wait, the tabs' row compact and the controls' first line stacked; with the link up the
+ * same line states a stale view's new map in flight, `PENDING`, or `EXTINCTION PENDING` while the
+ * views await only the overlay's extinction map, as each view reports it (`StaleWaits`), so that a
+ * stale view sets no line among its own words and the page's height never depends on it
+ * (decision-gg-port-a2 §2). The page owns the quantity too (plan 07, P07.T11.b): `COLUMN DENSITY`,
+ * or `EXTINCTION`, the visual extinction through the galaxy, which `Q` steps through; and under
+ * `COLUMN DENSITY` the `DUST OVERLAY`, which dims the density by the dust along each pixel's line
+ * of sight and which `D` puts on and takes off. Both keys are held back with the choices while the
+ * link is down. While the overlay is on, the page names it and its quantity once, beside its
+ * toggle, `DUST OVERLAY: A(V), WHOLE LINE OF SIGHT`, as the guide requires, and says after it what
+ * the pictures' brightness then shows, `Brightness is COLUMN DENSITY dimmed by A(V)`, a sentence
+ * (decision-gg-port-a2 §5). The overlay is offered only where the page has room for its words
+ * beside the pictures ({@link overlayHasRoom}, a rule on the page's size alone); elsewhere, and
+ * under `EXTINCTION`, its toggle is held back rather than removed, keeping its focus and described
+ * by why, `OVERLAY_NO_ROOM` taking precedence over `OVERLAY_DENSITY_ONLY`: `D` does nothing, and
+ * the choice is kept for when it is offered again (decision-gg-port-d0 §3.2.3). The map cursor and
+ * the chart's centre belong to the display, which reads the cursor out and enters it in its
+ * `CURSOR` panel beside the map; both are marked on both maps.
  *
  * A page shorter than the local chart's threshold, as at 1280 × 720, is laid out `compact`
  * ({@link mapLayout}): the controls stand in a row across the page above the pictures, the words
@@ -123,14 +136,18 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
   const populationName = useId();
   const quantityName = useId();
   const overlayReasonId = useId();
-  const linkReasonId = useId();
+  const waitId = useId();
   const { status } = useServerLink();
   const { open } = useUniverse();
   const [population, setPopulation] = useState<MapPopulation>("all");
   const [quantity, setQuantity] = useState<MapQuantity>("column_density");
   const [overlay, setOverlay] = useState(false);
   const { ref, size } = useElementSize();
+  const [staleWaits] = useState(() => new StaleWaits());
+  const waits = useSyncExternalStore(staleWaits.subscribe, staleWaits.getSnapshot);
   const linkReason = linkDownReason(status);
+  // The views' stale wait, which the page states where the link's state stands, and never with it.
+  const staleWait = linkReason === null ? staleWaitText(waits) : null;
   const inhibited = linkReason !== null;
   const layout = mapLayout(size);
   const pictureWidthPx = size === null ? 0 : mapPictureWidth(size, layout);
@@ -146,7 +163,7 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
   const overlayShown = overlay && overlayOffered;
   // Why the overlay's toggle does not act, as the description of it (the link's reason and the
   // overlay's own, each where it holds), or `null` when it does.
-  const heldBy = [inhibited ? linkReasonId : null, overlayOffered ? null : overlayReasonId].filter(
+  const heldBy = [inhibited ? waitId : null, overlayOffered ? null : overlayReasonId].filter(
     (id) => id !== null,
   );
   const overlayHeldBy = heldBy.length > 0 ? heldBy.join(" ") : null;
@@ -203,10 +220,20 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
       ) : (
         <div className={`galaxy-map__grid galaxy-map__grid--${layout}`} style={gridStyle}>
           <div className="galaxy-map__controls">
+            {/*
+             * The page's one line for the views' wait: the link's state while it is down, which
+             * holds the choices back, and otherwise a stale view's new map in flight; each stale
+             * picture is described by it (decision-gg-port-a2 §2).
+             */}
             {linkReason === null ? null : (
-              <p className="panel__inhibit" id={linkReasonId}>
+              <p className="panel__inhibit galaxy-map__wait" id={waitId}>
                 {linkReason}
               </p>
+            )}
+            {staleWait === null ? null : (
+              <output className="panel__inhibit galaxy-map__wait" id={waitId}>
+                {staleWait}
+              </output>
             )}
             <fieldset className="form-choice galaxy-map__population">
               <legend className="form-field__label">POPULATION</legend>
@@ -220,7 +247,7 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
                       checked={population === value}
                       // Held back rather than disabled, so that it keeps focus and can say why.
                       aria-disabled={inhibited ? "true" : undefined}
-                      aria-describedby={inhibited ? linkReasonId : undefined}
+                      aria-describedby={inhibited ? waitId : undefined}
                       onChange={() => {
                         if (!inhibited) {
                           setPopulation(value);
@@ -246,7 +273,7 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
                         value={value}
                         checked={quantity === value}
                         aria-disabled={inhibited ? "true" : undefined}
-                        aria-describedby={inhibited ? linkReasonId : undefined}
+                        aria-describedby={inhibited ? waitId : undefined}
                         onChange={() => {
                           if (!inhibited) {
                             setQuantity(value);
@@ -284,7 +311,10 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
                 </span>
               )}
               {overlayShown ? (
-                <p className="galaxy-map__overlay-name">{DUST_OVERLAY_LABEL}</p>
+                <>
+                  <p className="galaxy-map__overlay-name">{DUST_OVERLAY_LABEL}</p>
+                  <p className="galaxy-map__overlay-brightness">{DUST_OVERLAY_BRIGHTNESS}</p>
+                </>
               ) : null}
             </div>
             <div className="galaxy-map__furniture">
@@ -311,6 +341,8 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
             cursorLy={cursorLy}
             onCursor={onCursor}
             centreLy={centreLy}
+            staleWaits={staleWaits}
+            pageWaitId={waitId}
           />
           <GalaxyMapView
             universe={open.id}
@@ -323,6 +355,8 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
             cursorLy={cursorLy}
             onCursor={onCursor}
             centreLy={centreLy}
+            staleWaits={staleWaits}
+            pageWaitId={waitId}
           />
         </div>
       )}

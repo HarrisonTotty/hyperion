@@ -1205,6 +1205,47 @@ variants exist.
   the rows show the guide's missing state — the em dash `—` in `--text-muted`, which
   `SystemReadout`'s own `Reading` already renders for a `null` value — with `RequestStatus` beside
   them, never zero.
+- **P07.T11.d The map's stale state and the overlay's brightness line** (needs T11.b and T11.c;
+  decision-gg-port-a2 §2, §3 and §5).
+  - **Stale on a link loss.** `GalaxyMapView` marks a picture on show stale while the link is down
+    (`linkDownReason(status) !== null`), as `useLocalChart` marks the chart: the ramp up to
+    `--text-muted`, the trailing `S`, the canvas named `…, stale`, `CURSOR DENSITY`, `CURSOR A(V)`
+    and `BELOW FLOOR` muted with their `S`, the legends on the stale ramp. The answer is kept and
+    not asked again (`useServerRequest` unchanged), and the mark goes when the link returns. This
+    meets T11.b's "a map kept after the link drops is marked stale" and plan 05's T11 ruling (8).
+  - **No status line among a stale view's words.** A stale view whose new map is awaited keeps its
+    stale picture, and the page states the wait once, in the place the link's state stands (the
+    tabs' row compact, the controls' first line stacked): the link's state while the link is down,
+    as now; otherwise `PENDING`, or `EXTINCTION PENDING` where the stale views await only the
+    extinction map; never both. Each stale canvas is described by that line beside its hint. A
+    stale view whose new map fails (`REJECTED: <reason>`, `TIMED OUT`, `MAP DATA INVALID: <cause>`)
+    drops its stale picture and shows the failure with `RETRY` in the picture's place, as a first
+    load's failure stands (amends plan 05's T10 ruling (3)). The panel still holds no request: a
+    view reports its stale wait to the page.
+  - **The overlay's brightness line.** While the overlay is shown, the page states once, after
+    `DUST OVERLAY: A(V), WHOLE LINE OF SIGHT`, `Brightness is COLUMN DENSITY dimmed by A(V)`, a
+    sentence (mixed case, no letter spacing), drafted for the owner (sign-off item 22 (j)). It
+    counts in `WORDS_REM.stacked.overlay.faceOn`, re-measured; compact, where the overlay is never
+    offered at the current constants, it stands after the name.
+  - **Measured** in hidden runs as decision-gg-port-d0 §3.4 has them (seed 0x4d2; both shell
+    states), at 1280 × 720, 1280 × 1024 and 1920 × 1080: the link down after both maps loaded, now
+    stale, its `S` marks inside the cursor lines' fixed fields; the page's `PENDING` after a resize
+    across a resolution step (1920 × 1080 to 1280 × 720 and back); the overlay with its line at
+    1920 × 1080. Acceptance: D0 §3.4's 1–5 in every state; a constant moves only from these lines;
+    the 1280 × 720 pictures stay 256 px (254 under the banner); the overlay is still offered at
+    1920 × 1080.
+  - **Tests.** `GalaxyMapView.test.tsx`: an answered map goes stale on the link's loss (ramp, `S`,
+    the canvas's name, both cursor readings) and current on its return with no request sent; a
+    resize's wait sets no status line among the view's words and is reported to the page; a
+    resize's failure replaces the stale picture with the failure and `RETRY`. `GalaxyMapPanel.test.tsx`:
+    the page's `PENDING` while a stale view waits, the link's state in its place while the link is
+    down, never both; the brightness line only under the overlay, once; the layout unchanged by
+    either. `mapLayout.test.ts` re-pinned if a constant moves.
+  - **Records.** This task's as-built record; plan 05's D4 and T10 ruling (3) noted as amended
+    (decision-gg-port-a2 §2–§3); `useServerRequest`'s and `GalaxyMapView`'s docs; the A2 record's
+    "For main" questions marked ruled (decision-gg-port-a2 §1–§7) and its stacked-rows deviation
+    accepted (§1).
+  - Commit: `fix(galaxy): P07.T11.d The map's stale state and the overlay's brightness line`.
 - **P07.T11.e The extinction map at 16 bits** (needs T11.b; decision-gg-port-a2 §4).
   `GalaxyMapView` asks for the `extinction_map` at `EXTINCTION_MAP_BITS = 16`; the `density_map`
   stays at `MAP_BITS = 8` (plan 05, D5). `CURSOR A(V)` is written to two decimals, as every A(V)
@@ -2233,7 +2274,8 @@ Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::
       keeps the height of its tallest plain words where they are taller than the picture, which
       stands at its top (`mapRows`); the edge-on view likewise. At every size whose pictures are
       the taller, 1920 × 1080 among them, the layout is unchanged. The smallest change that keeps
-      ruling 149.2's 44 rem switch, which the local chart shares; for main, as a question (below).
+      ruling 149.2's 44 rem switch, which the local chart shares; accepted (decision-gg-port-a2
+      §1).
     - **The overlay's legends side by side in both layouts (D0 §3.2.4's fallback).** Measured at
       the narrowest stacked column (24 rem, at 1280 × 1024), the edge-on words under the overlay
       were 270 px, 278 with the headroom, against the 276–277 px of the 1920 × 1080 edge-on
@@ -2328,7 +2370,12 @@ Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::
     - The measured build predates the review's changes, none of which moves the layout.
   - _New name, for the sign-off queue._ `EXTINCTION DATA INVALID`, beside the guide's
     `MAP DATA INVALID` and `CHART DATA INVALID` in the `SYSTEM DATA INVALID` row.
-  - _For main (questions, each with the lean built)._
+  - _For main (questions, each with the lean built)._ All seven ruled by decision-gg-port-a2
+    (2026-10-15): the stacked rows as built (§1); a stale view's own line moved to the page, and a
+    failure to the picture's place (§2), and a kept map stale while the link is down (§3), both
+    built in P07.T11.d; the extinction map at 16 bits (§4, built in P07.T11.e); the overlay's
+    brightness line (§5, built in P07.T11.d); the density map's status as built (§6); one form for
+    `STATE: cause` lines (§7, P05.T13, after sign-off item 24).
     - **The stacked rows.** Whether a stacked page too narrow for its pictures to hold its words
       should give the face-on view their height (built, `mapRows`), or go compact, as 1280 × 1024
       would then be (pictures 278 px under the controls' row, the local chart staying stacked).
@@ -2443,3 +2490,140 @@ Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::
     - The 79 and 120 mag to which 16 bits hold the second decimal are for the spans read at
       1920 × 1080. A higher ceiling widens the span: at a ceiling of 100 mag the step at the
       ceiling is 0.014 mag (span 4 dex), 1.4 units of the last place.
+- **P07.T11.d, as built (lane `gg-port-a2-d`, 2026-10-16, at version 22).** Built on
+  `rendering-and-planets` under decision-gg-port-a2 §2, §3 and §5, and
+  decision-p07-t11d-stale-waits. The client and plans 05 and 07 only: no server, protocol or golden
+  change, `GENERATOR_VERSION` 22 and `PROTOCOL_VERSION` 2 as they were.
+  - _What changed._ `GalaxyMapView` reads the link (`useServerLink`) and marks a picture on show
+    stale while it is down; a kept picture (the same question at another resolution) stays only
+    while its new map is awaited, and a failure (`REJECTED`, `TIMED OUT`, or `MAP DATA INVALID`)
+    drops it, so the failure and `RETRY` stand in the picture's place; the view's words carry no
+    status line in any state; a stale canvas is described by its key hint and the page's line
+    (`pageWaitId`). `GalaxyMapPanel` gives the page one line for the views' wait,
+    `.galaxy-map__wait`: the link's reason (the `p` as built) or, with the link up, a stale view's
+    new map in flight, `PENDING` or `EXTINCTION PENDING` (an `output`, a live region, with the same
+    classes), one ID for both (`waitId`, formerly `linkReasonId`), never both at once. It shows
+    `DUST_OVERLAY_BRIGHTNESS`, `Brightness is COLUMN DENSITY dimmed by A(V)`, exported beside
+    `DUST_OVERLAY_LABEL`, after the overlay's name on a line of its own
+    (`.galaxy-map__overlay-brightness`, `flex: 1 1 100%`, `--text`, no letter spacing). The line
+    was signed off as drafted on 2026-10-16 (`signoff-11.md`, item 22 (j)); the guide's raster
+    rule takes it in the sign-off's commit, not here.
+    `styles.css`'s compact rule for the line now selects `.galaxy-map__wait`, not
+    `.panel__inhibit`. Docs: `useServerRequest` (§3's sentence), `GalaxyMapView`,
+    `GalaxyMapPanel` and `WORDS_REM`.
+  - _Deviations._
+    - **The page's wait under `EXTINCTION`.** It reads plain `PENDING`. `EXTINCTION PENDING`
+      stands only under the overlay, once the density map has answered. The task's "where the
+      stale views await only the extinction map" is read through §6 and draft (k): the map of the
+      quantity shown reads plain, as the view's own status does. If main reads §2.2 literally, the
+      change is one condition on `stateSubject` in `GalaxyMapView.tsx` and one test.
+    - **A new file.** `displays/galaxy/staleWaits.ts` (`StaleWaits`, `StaleWait`, `ViewWaits`,
+      `staleWaitText`) and `staleWaits.test.ts` are beyond T11's Files list; `GalaxyMapViewProps`
+      gains the required `staleWaits` and `pageWaitId`.
+    - **A failure the link clears.** `useServerRequest` drops a failure when the link changes
+      ("only an answer outlives the link"), so after a failed new map a link drop brings the stale
+      picture back under the page's link state, and the map is asked for again when the link
+      returns; a later resize after a failure likewise brings it back while the new map is
+      `PENDING`.
+    - **The failure's subject under the overlay.** The extinction map's failure keeps its subject in
+      the picture's place (`EXTINCTION REJECTED: <reason>`, `EXTINCTION TIMED OUT`), as §6 has it.
+    - **The commit's type.** `feat(galaxy)`, as main's brief has it, where §9.1's text says
+      `fix(galaxy)`.
+  - _A recorded exception to the TypeScript rules (decision-p07-t11d-stale-waits)._ The views
+    report their stale waits to the page through `StaleWaits` (`displays/galaxy/staleWaits.ts`).
+    The page creates this store once and reads it with `useSyncExternalStore`, and each
+    `GalaxyMapView` writes its own wait from a layout effect. That is an effect notifying a
+    parent, which `.claude/rules/typescript-dev.md` (React) forbids. The rule's remedy is to lift
+    both views' requests, decodes and kept pictures into the page, with `RETRY` as a generation
+    bump. That would reverse T11.b's "the panel holds **no** request", this task's "The panel
+    still holds no request" and decision-gg-port-a2 §2.2's "`RETRY` mounts the view afresh",
+    all for one transient line.
+    - _Bounds._ The exception holds only within these:
+      - the wait is derived during render, and the effect only writes it;
+      - the store belongs to one page and goes to its two views alone;
+      - a report that changes nothing tells no one, so the page renders again once per change,
+        before the paint;
+      - the effect's cleanup clears the view's wait, so a view unmounted by `RETRY`, or hidden
+        under `Activity`, leaves none behind.
+    - _Scope._ It is not a pattern for other displays. It lapses if the map requests ever leave
+      `GalaxyMapView`, as they would if maps move to bulk frames (decision-gg-port-a2, "Seen,
+      not ruled" 4). The page then derives the wait during render, and the store goes.
+    - _Rejected._ Reporting from the request's own callbacks was weighed and rejected.
+      `useServerRequest`'s `pending` is derived during render and it sends from a passive
+      effect, so the same write would only move into the hook's effect, after the paint, with
+      the wait worked out twice.
+  - _Measured_ (D0 §3.4): hidden runs of the lane's build, the client offscreen and never shown
+    (A2's `--require` hook, extended, in the lane's `target/a2d-layout/`, not committed), against
+    the lane's `hyperion-server` with seed 0x4d2's universe, under the GPU lock, all after the
+    machine's reboot of 2026-10-16 07:22 on binaries built after it (an earlier set, taken before
+    the hold, gave the same figures). The resize runs hold the server with `SIGSTOP` while each new
+    map is asked for, so that the page's `PENDING` stands to be measured, and continue it after.
+    Clipping excludes the visually hidden `stale` word that follows each `S` (1 px by design).
+    Figures as words/overrun px, P the pictures; the safe mode's banner in brackets:
+    - 1280 × 720 (compact): P 256 (254); plain words face-on 150/−106 (−104) and edge-on 128/0 with
+      the page's foot 8 px below, in every state; the toggle held back. The link down after both
+      maps loaded, under `COLUMN DENSITY` and under `EXTINCTION`: both pictures stale (named
+      `…, stale`, described by `NO CARRIER`), `NO CARRIER` in the tabs' row (32 px, the line it
+      held before), the words unchanged, each cursor line one line with its `S`, 118 px (120) to
+      spare in the 27 rem column (`CURSOR A(V)` 207 px (209)). The resize from 1920 × 1080:
+      `PENDING` (an `output`) in the same place and height, both pictures stale and described by
+      it, the words unchanged; the maps then current, nothing on the page's line.
+    - 1536 × 864 (compact): P 296; words face-on 150/−146, edge-on 128/−20, the page's foot 92 px
+      (90) below; link down stale, the cursor lines' `S` 96 px to spare.
+    - 1920 × 1080 (stacked): P 554 (552); plain face-on 168/−206 (−204), edge-on 128/−149 (−148).
+      The page's line, `NO CARRIER` with the link down or `PENDING` after the resize back from
+      1280 × 720, is one 18 px line at the head of the controls (212 → 238 px), the face-on words
+      then 168/−180 (−178); the cursor lines' `S` 58 px (60) to spare. The overlay is offered,
+      named once, with its brightness line on one line (18 px, letter spacing `normal`): face-on
+      words 258/−90 (−88), edge-on 218/−59 (−58), the face-on words with the controls 29.0 rem;
+      with the link down as well, the pictures stale and all four cursor lines with their `S`
+      (58 px and 147 px to spare), 258/−64 (−62) and 30.625 rem.
+    - 1280 × 1024 (stacked): P 326; the face-on view 462 px, its words with the controls 24.25 rem,
+      186/−34, and with `NO CARRIER` 25.875 rem, 186/−8 (the plain reserve's 25.875 + 0.5 holds);
+      edge-on 146/−17; the page's foot 191 px (189) below; the toggle held back; link down stale,
+      the cursor lines' `S` 48 px to spare (`CURSOR A(V)` 137 px).
+    - The probe (the overlay offered at every size, a build not committed), at 1280 × 1024's 24 rem
+      column: the brightness line one line; the face-on words with the controls 29.0 rem, and
+      30.625 rem with the page's line above them, as at 1920 × 1080. So
+      `WORDS_REM.stacked.overlay.faceOn` moves from 28.125 to 30.625 + 0.5 = **31.125 rem**
+      (498 px), the tallest state's (the link's reason or a stale view's `PENDING`, one line of
+      one height). The overlay is still offered at 1920 × 1080 (a 552–554 px face-on row) and
+      held back at 1280 × 1024 (422 px); a stacked page now offers it from 498 px pictures, where
+      it did from 450 px. Checked on the final build at 1920 × 1080 and 1280 × 1024, both shells.
+    - Nothing scrolls or clips in any state measured; the tabs stand clear of the pictures.
+    - `mapLayout.test.ts`: its edge-on threshold test (a 450 px picture against 452) is re-pinned
+      as the face-on one (496 px against 498): with 31.125 rem face-on, more than twice the
+      edge-on's 14.125, the face-on words bind first in every stacked page, and the edge-on
+      comparison in `overlayHasRoom` no longer decides at the current constants.
+  - _Tests._ `GalaxyMapView.test.tsx`: a resize's wait sets no status line and is reported
+    (`map`), and cleared on the new map's arrival, with the link down, while the display is
+    hidden and once the view unmounts; the stale canvas described by the page's line; a rejection,
+    a timeout and invalid data after a resize each drop the stale picture for the failure and
+    `RETRY`, and `RETRY` asks again from `PENDING`; with the link down an answered picture is
+    stale (its name, description and `S`, the ramp up to `--text-muted`, the legend's bar on the
+    stale ramp, both cursor readings under the overlay and `BELOW FLOOR` muted with their `S`),
+    and current again on the link's return with nothing asked; under the overlay a wait on the
+    extinction map alone is reported as `extinction`, and under `EXTINCTION` as `map`.
+    `GalaxyMapPanel.test.tsx`: the page's `PENDING` once (a `status`) while the stale views wait,
+    no status in either view, each canvas described by it, `NO CARRIER` in its place with the link
+    down and never both, nothing once the maps arrive, the layout unchanged by it, and
+    `EXTINCTION PENDING` under the overlay; the brightness line once, after the overlay's name,
+    only under the overlay, and the layout unchanged with it; the link-down test now finds the
+    pictures stale. `staleWaits.test.ts`: the store and the page's wording.
+  - _From review_ (TypeScript, UX and plan-conformance reviewers). The store as an effect that
+    notifies a parent: ruled a recorded exception (above). A timeout after a resize had no test;
+    added. `staleWaitText` returns its two words' literal union. The page's `PENDING` is asserted
+    by role. The overlay's layout test compares the grid's whole style. The legend's stale ramp is
+    tested. `ux_lint.py` 0 errors (its 10 checks on old lines of `styles.css`); no new glyph or
+    colour pairing.
+  - _Superseded:_ the A2 record's "Found: the link down after both maps loaded is not a stale
+    state…" and its lean on whether a link drop makes a kept map stale.
+  - _Deferred findings (2026-10-13 rule)._
+    - The legends' tick labels and `FLOOR …` value stay in `--text` with no `S` while the picture is
+      stale; ruling §3 asks for the stale ramp only, and the resize case was built so (UX
+      reviewer). For the owner: whether a legend's figures are values from the answer or the key of
+      a picture that carries its own `S`.
+    - A focused stale picture that a failure drops leaves the focus on the document's body, as a
+      `Q` pressed on a focused picture already does; `RETRY` takes the focus to the page's tab.
+    - The guide's stale state has "the age is available on request"; no stale value on the console
+      offers its age (the chart and `SYSTEMS` likewise).

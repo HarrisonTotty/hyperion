@@ -71,13 +71,17 @@ interface LayoutWordsRem {
  *
  * @remarks
  * `plain` is the tallest of `COLUMN DENSITY` and `EXTINCTION` in every data state the ruling names
- * (nominal, pending, refused, and with the link down, whose reason the page states once for both
- * views, so that a stale view adds no line of its own: §3.3); `overlay` is the `DUST OVERLAY`'s,
+ * (nominal, pending, refused, and with the link down). A stale view adds no line of its own in any
+ * state: the page states the link's reason, or a stale view's `PENDING`, once for both views in one
+ * line where the link's reason stands, and a new map's failure stands in the picture's place
+ * (§3.3; decision-gg-port-a2 §2); `overlay` is the `DUST OVERLAY`'s,
  * its two readings and its two legends side by side. Stacked, the face-on words stand under the
  * page's controls, so theirs include the controls, less the tabs' clearance, which the picture's
  * own top keeps too. Each is the tallest across the sizes and shell states measured, so at the
  * narrowest words column its layout gives (24 rem stacked, 27 rem compact), where the words wrap
- * the most. The figures and the runs are plan 07's P07.T11.b record.
+ * the most. The figures and the runs are plan 07's P07.T11.b record, and its P07.T11.d record for
+ * the stacked overlay's face-on words, which since then count the overlay's brightness line and
+ * the page's line for the views' wait.
  */
 const WORDS_REM: Readonly<Record<MapLayout, LayoutWordsRem>> = {
   // 150 px face-on and 128 px edge-on plain, 222 px and 200 px under the overlay, at 1280 × 720 and
@@ -87,11 +91,13 @@ const WORDS_REM: Readonly<Record<MapLayout, LayoutWordsRem>> = {
     overlay: { faceOn: 14.375, edgeOn: 13 },
   },
   // Face-on with the controls: 414 px plain at 1280 × 1024 (the 24 rem column, the link's reason
-  // and the room's above the words), 442 px under the overlay; edge-on 146 px plain and 218 px
-  // under the overlay, at 1280 × 1024 and 1920 × 1080 alike.
+  // and the room's above the words); 490 px under the overlay, its name and brightness line among
+  // the controls and the page's line for the views' wait above them, the link's reason or a stale
+  // view's PENDING (P07.T11.d; 464 px without that line), at 1280 × 1024 and 1920 × 1080 alike;
+  // edge-on 146 px plain and 218 px under the overlay, at both sizes too.
   stacked: {
     plain: { faceOn: 26.375, edgeOn: 9.625 },
-    overlay: { faceOn: 28.125, edgeOn: 14.125 },
+    overlay: { faceOn: 31.125, edgeOn: 14.125 },
   },
 };
 

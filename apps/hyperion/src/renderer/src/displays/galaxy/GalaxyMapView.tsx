@@ -39,6 +39,7 @@ import {
 } from "../../lib/galaxy/mapPicture";
 import type { CentreLy } from "../../lib/galaxy/model";
 import { buildRamp, type DecodedCodes, parseHexColour, rasterise } from "../../lib/galaxy/ramp";
+import { linkDownReason, useServerLink } from "../../lib/serverLink";
 import { type RequestState, useServerRequest } from "../../lib/useServerRequest";
 import { DensityLegend } from "./DensityLegend";
 import { ExtinctionLegend } from "./ExtinctionLegend";
@@ -60,6 +61,7 @@ import {
   stepCursor,
 } from "./mapCursor";
 import { usePageTabFocus } from "./pageTabFocus";
+import type { StaleWait, StaleWaits } from "./staleWaits";
 
 /** Bits per code of the density map the display asks for: the ramp has 256 levels (plan 05, D5). */
 const MAP_BITS = 8;
@@ -160,6 +162,20 @@ export type MapQuantity = "column_density" | "extinction";
  * requires; once for the page, not in each view.
  */
 export const DUST_OVERLAY_LABEL = "DUST OVERLAY: A(V), WHOLE LINE OF SIGHT";
+
+/**
+ * What the picture's brightness shows while the overlay is on, which the page says once after
+ * {@link DUST_OVERLAY_LABEL} (decision-gg-port-a2 §5; signed off as drafted, `signoff-11.md`, item
+ * 22 (j), the guide's raster rule).
+ *
+ * @remarks
+ * No pixel is then painted by the A(V) ramp, although the A(V) legend stands beside the density's
+ * with a bar of the same look, so the page says what the one ramp shows: the density's ramp at
+ * log₁₀ N − 0.4 A(V) ({@link dustOverlay}), and "dimmed by A(V)" is exactly the factor
+ * 10^(−0.4 A(V)). A sentence, so in mixed case without the labels' letter-spacing, the names on
+ * the guide's list in upper case.
+ */
+export const DUST_OVERLAY_BRIGHTNESS = "Brightness is COLUMN DENSITY dimmed by A(V)";
 
 /** Whether the dust overlay may dim a quantity's picture: the column density's alone. */
 export function takesOverlay(quantity: MapQuantity): boolean {
@@ -753,6 +769,34 @@ interface GalaxyMapViewProps {
   readonly onCursor: (cursorLy: CentreLy) => void;
   /** The chart's centre, marked with a small diagonal cross, or `null` before one is chosen. */
   readonly centreLy: CentreLy | null;
+  /** Where the view reports its stale wait, which the page states once for both views. */
+  readonly staleWaits: StaleWaits;
+  /**
+   * The ID of the page's line that states the views' wait, the link's state or `PENDING`, which
+   * describes the canvas while its picture is stale.
+   */
+  readonly pageWaitId: string;
+}
+
+/**
+ * Whether a request state is a failure, which leaves no answer to the question the view asks: a
+ * refusal, a fault or a timeout, never a wait.
+ */
+function isFailure(state: RequestState<RequestKind>): boolean {
+  let failure: boolean;
+  switch (state.kind) {
+    case "rejected":
+    case "timed_out":
+      failure = true;
+      break;
+    case "idle":
+    case "pending":
+    case "ok":
+    case "link_down":
+      failure = false;
+      break;
+  }
+  return failure;
 }
 
 interface MapViewBodyProps extends GalaxyMapViewProps {
@@ -772,10 +816,14 @@ function MapViewBody({
   cursorLy,
   onCursor,
   centreLy,
+  staleWaits,
+  pageWaitId,
   onRetry,
 }: MapViewBodyProps) {
   const titleId = useId();
   const hintId = useId();
+  const { status: linkStatus } = useServerLink();
+  const linkDown = linkDownReason(linkStatus) !== null;
   const pictureHeightPx = pictureWidthPx / SCREEN_ASPECT[view];
   const backingWidthPx = Math.round(pictureWidthPx * devicePixelRatio);
   const backingHeightPx = Math.round(pictureHeightPx * devicePixelRatio);
@@ -816,15 +864,41 @@ function MapViewBody({
   const answered = decoding.kind === "ok" ? decoding.picture : null;
 
   // The last picture drawn stays, stale, while a map of another resolution for the same question is
-  // on its way, or failed: a resize past a resolution step never blanks the view. A map of another
-  // universe, view, population or quantity, or with the overlay put on or taken off, is other data,
-  // and is waited for from `PENDING`.
+  // awaited, from the server or from the link: a resize past a resolution step never blanks the
+  // view. A new map that fails leaves no answer to the question the view now asks, since the
+  // resolution is part of it, so the stale picture goes and the failure stands in its place
+  // (decision-gg-port-a2 §2). A map of another universe, view, population or quantity, or with the
+  // overlay put on or taken off, is other data, and is waited for from `PENDING`.
   const [shown, setShown] = useState<ShownPicture | null>(null);
   if (answered !== null && shown?.picture !== answered) {
     setShown({ picture: answered, question });
   }
-  const stale = answered === null && shown !== null && sameQuestion(shown.question, question);
-  const picture = answered ?? (stale ? shown.picture : null);
+  const failed = decoding.kind === "invalid" || isFailure(state);
+  const kept =
+    answered === null && !failed && shown !== null && sameQuestion(shown.question, question)
+      ? shown.picture
+      : null;
+  const picture = answered ?? kept;
+  // A kept picture is stale, and so is any picture while the link is down: the guide's "loss of
+  // the server link makes every live value on the console stale at once", as the local chart is
+  // (plan 05's T11 ruling (8); decision-gg-port-a2 §3). The answer itself is kept, and is current
+  // again when the link returns.
+  const stale = picture !== null && (kept !== null || linkDown);
+  // What the page states for this view, once for both: a kept picture's new map in flight. A wait
+  // on the link is the page's own to state, and a failure stands in the picture's place.
+  let staleWait: StaleWait | null = null;
+  if (kept !== null && state.kind === "pending") {
+    staleWait = stateSubject === undefined ? "map" : "extinction";
+  }
+  // The page holds no request, so the view keeps the page's record of its wait in step with it,
+  // before the browser paints (see `StaleWaits`, a recorded exception:
+  // decision-p07-t11d-stale-waits); it has none once the view goes.
+  useLayoutEffect(() => {
+    staleWaits.report(view, staleWait);
+    return () => {
+      staleWaits.report(view, null);
+    };
+  }, [staleWaits, view, staleWait]);
 
   const rootRef = useRef<HTMLElement>(null);
   // Whether the picture has focus, which decides whether this view's density reading announces
@@ -983,7 +1057,9 @@ function MapViewBody({
           role="application"
           tabIndex={0}
           aria-label={`Galaxy map, ${VIEW_NAME[view]}${LAYER_NAME[layerKind(question)]}${stale ? ", stale" : ""}`}
-          aria-describedby={hintId}
+          // A stale picture is described by why, too: the page's line, the link's state or the
+          // new map's PENDING (decision-gg-port-a2 §2).
+          aria-describedby={stale ? `${hintId} ${pageWaitId}` : hintId}
           onClick={pick}
           onKeyDown={step}
           onFocus={() => {
@@ -1020,11 +1096,6 @@ function MapViewBody({
             </p>
           )}
         </div>
-        {
-          // A stale view waiting on the link leaves the link's state to the page, which states it
-          // once for both views (decision-gg-port-d0 §3.3): its S marks and muted ramp stay.
-          stale && state.kind !== "link_down" ? status : null
-        }
         {view === "face_on" ? (
           <p className="map-view__rotation">ROTATION COUNTER-CLOCKWISE</p>
         ) : null}
@@ -1074,7 +1145,8 @@ function MapViewBody({
  * the `density_map`, and with the dust overlay the `extinction_map` of the same resolution too: the
  * density's codes are then lowered by 0.4 A(V) in dex before the ramp ({@link dustOverlay}), and
  * both legends are shown, side by side (the page names the overlay once, `DUST OVERLAY: A(V),
- * WHOLE LINE OF SIGHT`, as the guide requires); the density read under the cursor stays the map's
+ * WHOLE LINE OF SIGHT`, as the guide requires, and says what the brightness shows,
+ * {@link DUST_OVERLAY_BRIGHTNESS}); the density read under the cursor stays the map's
  * own, with A(V) beside it. Under `EXTINCTION` it asks for the `extinction_map` alone and shows
  * A(V) on the same ramp, logarithmic in magnitudes, with `ExtinctionLegend`. Each map is checked
  * as a density map is, and waits, goes stale and fails as one does, below; a picture of two maps
@@ -1087,9 +1159,15 @@ function MapViewBody({
  * state until it is answered, asking again when the picture grows or shrinks past a resolution the
  * protocol offers. Until that map arrives the last picture stays, resampled to the new size and
  * marked stale as the guide has a stale value shown: painted on a ramp up to `--text-muted`, with a
- * trailing `S` and its legend and density reading likewise, the request's state beside it, but for
- * the link's, which the page states once for both views; a failure of the new request leaves it
- * so, with the failure and `RETRY`, which asks again from `PENDING`. A map of another universe or
+ * trailing `S` and its legend and readings likewise, and its canvas named `…, stale`. While the
+ * link is down a picture on show is marked stale the same way, the answer kept and not asked for
+ * again, and current once the link returns (plan 05's T11 ruling (8); decision-gg-port-a2 §3). A
+ * stale view sets no status line among its words: it reports a new map in flight to the page
+ * (`staleWaits`), which states it once for both views where the link's state stands, `PENDING`,
+ * or `EXTINCTION PENDING` while only the overlay's extinction map is awaited, and its canvas is
+ * described by that line (`pageWaitId`) beside its hint. A failure of the new request drops the
+ * stale picture and stands in its place with `RETRY`, as a first load's failure does, which
+ * amends plan 05's T10 ruling (3) (decision-gg-port-a2 §2). A map of another universe or
  * population is other data and is waited for from `PENDING`. A map that is not the one asked for,
  * is not of the M1 extents, cannot be drawn or does not decode reads `MAP DATA INVALID` with the
  * cause, a server fault. After any failure `RETRY` asks again from `PENDING`: the view is mounted

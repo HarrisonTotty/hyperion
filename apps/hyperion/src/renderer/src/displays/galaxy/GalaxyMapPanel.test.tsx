@@ -16,7 +16,7 @@ import {
 import { stubCanvas } from "../../test/RecordingContext2D";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import { GalaxyMapPanel, OVERLAY_DENSITY_ONLY, OVERLAY_NO_ROOM } from "./GalaxyMapPanel";
-import { DUST_OVERLAY_LABEL } from "./GalaxyMapView";
+import { DUST_OVERLAY_BRIGHTNESS, DUST_OVERLAY_LABEL } from "./GalaxyMapView";
 import { UniversePanel } from "./UniversePanel";
 
 /** Plays the server's side, letting the outcomes it settles reach React. */
@@ -228,7 +228,7 @@ describe("GalaxyMapPanel", () => {
     ]);
   });
 
-  it("holds the population back while the link is down, and keeps the maps on show", async () => {
+  it("holds the population back while the link is down, and keeps the maps on show, stale", async () => {
     const { user, socket } = await renderPanel();
     await openUniverse(user, socket);
     await answerBothMaps(socket);
@@ -244,11 +244,99 @@ describe("GalaxyMapPanel", () => {
     expect(young).toHaveAccessibleDescription("NO CARRIER");
     expect(socket.requestsOfKind("density_map")).toHaveLength(2);
     expect(
-      within(panel()).getByRole("application", { name: "Galaxy map, face-on" }),
-    ).toBeInTheDocument();
+      within(panel()).getByRole("application", { name: "Galaxy map, face-on, stale" }),
+    ).toHaveAccessibleDescription("ARROWS MOVE CURSOR NO CARRIER");
     expect(
-      within(panel()).getByRole("application", { name: "Galaxy map, edge-on" }),
-    ).toBeInTheDocument();
+      within(panel()).getByRole("application", { name: "Galaxy map, edge-on, stale" }),
+    ).toHaveAccessibleDescription("↑ ↓ MOVE CURSOR NO CARRIER");
+  });
+
+  describe("a stale view's wait (decision-gg-port-a2 §2)", () => {
+    /** The page at 1920 × 1080 with both maps answered, then resized to 1280 × 720's. */
+    async function renderResized() {
+      stubPageSize(...PAGE_1920_1080);
+      const rendered = await renderPanel();
+      await openUniverse(rendered.user, rendered.socket);
+      await answerBothMaps(rendered.socket);
+      // The 554 px pictures take the 512-pixel maps, the 256 px ones the 256-pixel maps.
+      resizePage(PAGE_1280_720);
+      return rendered;
+    }
+
+    it("states PENDING once for the page while the stale views wait", async () => {
+      const { socket } = await renderResized();
+
+      expect(socket.requestsOfKind("density_map").map(({ body }) => body.resolution)).toEqual([
+        512, 512, 256, 256,
+      ]);
+      expect(within(panel()).getByRole("status")).toHaveTextContent(/^PENDING$/);
+      expect(within(panel()).getAllByText("PENDING")).toHaveLength(1);
+      for (const name of ["FACE-ON FROM NORTH", "EDGE-ON ALONG +Y"]) {
+        expect(
+          within(within(panel()).getByRole("region", { name })).queryByRole("status"),
+        ).not.toBeInTheDocument();
+      }
+    });
+
+    it("describes each stale picture by the page's PENDING", async () => {
+      await renderResized();
+
+      expect(
+        within(panel()).getByRole("application", { name: "Galaxy map, face-on, stale" }),
+      ).toHaveAccessibleDescription("ARROWS MOVE CURSOR PENDING");
+      expect(
+        within(panel()).getByRole("application", { name: "Galaxy map, edge-on, stale" }),
+      ).toHaveAccessibleDescription("↑ ↓ MOVE CURSOR PENDING");
+    });
+
+    it("states the link's state in PENDING's place while the link is down, never both", async () => {
+      const { socket } = await renderResized();
+
+      act(() => {
+        socket.close();
+      });
+
+      expect(within(panel()).getByText("NO CARRIER")).toBeInTheDocument();
+      expect(within(panel()).queryByText("PENDING")).not.toBeInTheDocument();
+    });
+
+    it("states nothing once the new maps arrive", async () => {
+      const { socket } = await renderResized();
+
+      await answerBothMaps(socket);
+
+      expect(within(panel()).queryByText("PENDING")).not.toBeInTheDocument();
+      expect(
+        within(panel()).getByRole("application", { name: "Galaxy map, face-on" }),
+      ).toBeInTheDocument();
+    });
+
+    it("lays the page out the same while it states the wait as once the maps arrive", async () => {
+      const { socket } = await renderResized();
+      const grid = panel().querySelector<HTMLElement>(".galaxy-map__grid");
+      const waiting = [pictureWidth(), grid?.getAttribute("style"), grid?.className];
+
+      await answerBothMaps(socket);
+
+      expect([pictureWidth(), grid?.getAttribute("style"), grid?.className]).toEqual(waiting);
+    });
+
+    it("states EXTINCTION PENDING while the stale views await only the extinction maps", async () => {
+      stubPageSize(...PAGE_1920_1080);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+      await answerBothMaps(socket);
+      await user.keyboard("d");
+      await answerBothExtinctionMaps(socket);
+      // A larger page, which still has room for the overlay: the 768 px pictures take the
+      // 1,024-pixel maps.
+      resizePage([1_500, 1_200]);
+
+      await answerBothMaps(socket);
+
+      expect(within(panel()).getByRole("status")).toHaveTextContent(/^EXTINCTION PENDING$/);
+      expect(within(panel()).queryByText("PENDING")).not.toBeInTheDocument();
+    });
   });
 
   it("offers the quantity with its key, column density first, and the dust overlay with its own", async () => {
@@ -516,6 +604,29 @@ describe("GalaxyMapPanel", () => {
     },
   );
 
+  it("says once, after the overlay's name, what the brightness shows, only under the overlay", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+    await answerBothMaps(socket);
+
+    expect(within(panel()).queryByText(DUST_OVERLAY_BRIGHTNESS)).not.toBeInTheDocument();
+
+    await user.keyboard("d");
+
+    const [line] = within(panel()).getAllByText(DUST_OVERLAY_BRIGHTNESS);
+    expect(within(panel()).getAllByText(DUST_OVERLAY_BRIGHTNESS)).toHaveLength(1);
+    expect(
+      within(panel())
+        .getByText(DUST_OVERLAY_LABEL)
+        .compareDocumentPosition(line ?? panel()),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    await user.keyboard("q");
+
+    expect(within(panel()).queryByText(DUST_OVERLAY_BRIGHTNESS)).not.toBeInTheDocument();
+  });
+
   it("names the overlay once for the page while it is on, and not under EXTINCTION", async () => {
     stubPageSize(...PAGE_1920_1080);
     const { user, socket } = await renderPanel();
@@ -639,12 +750,15 @@ describe("GalaxyMapPanel", () => {
       const { user, socket } = await renderPanel();
       await openUniverse(user, socket);
       await answerBothMaps(socket);
-      const before = pictureWidth();
+      const grid = panel().querySelector<HTMLElement>(".galaxy-map__grid");
+      const before = [pictureWidth(), grid?.getAttribute("style")];
 
       await user.keyboard("d");
 
-      expect(pictureWidth()).toBe(before);
-      expect(panel().querySelector(".galaxy-map__grid")).toHaveClass("galaxy-map__grid--stacked");
+      // With the overlay's name and its brightness line on the page, and both legends in each view.
+      expect(within(panel()).getByText(DUST_OVERLAY_BRIGHTNESS)).toBeInTheDocument();
+      expect([pictureWidth(), grid?.getAttribute("style")]).toEqual(before);
+      expect(grid).toHaveClass("galaxy-map__grid--stacked");
     });
   });
 });
