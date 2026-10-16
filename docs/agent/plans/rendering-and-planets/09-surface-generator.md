@@ -7348,11 +7348,20 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     a Gaussian of mean +405 m puts its modal 250 m bin at 375 or 625 m with nearly even odds, the
     second failing the land-mode test. The realised population is made exactly that mean and width
     over the continental cells (before T12.b's belts).
-  - _A stagnant lid's population (a lean; commented on the issue)._ Every regime T11 leaves on one
-    lid (and a mobile lid it cannot lay out) takes one Gaussian population about the datum, of plan
-    14's `STAGNANT_LID_RELIEF` (0.9 km), from the same noise: Design note 3's structural share on
-    such a lid, which no other step realises (the synthesis's share below the cell is about 60 m).
-    It writes only `Lid`, so an undifferentiated body names no entry it lacks.
+  - _A stagnant lid's population (a lean, then ruled: `decision-r09-t12-coarse.md`'s addendum of
+    2026-10-16)._ Every regime T11 leaves on one lid (`StagnantLid`, `HeatPipe`, `Episodic`,
+    `IceShell`, and a mobile lid it cannot lay out) takes one Gaussian population about the datum,
+    of plan 14's `STAGNANT_LID_RELIEF` (0.9 km), its area mean zero and its area RMS the constant
+    exactly, drawn before T12.c and T12.d: Design note 3's structural share on such a lid, which no
+    other step realises (the synthesis's share below the cell is about 60 m), and plan 14's own
+    `Hypsometry::One`. As ruled, its field is red, not cell-scale noise: `noise::red_field`, the
+    octaves from lattice level 1 (about degrees 2–3) to the field's, each octave's RMS
+    2^(−(β₁ − 1) ÷ 2) of the next coarser one's, β₁ 2.0 on silicate crusts and 1.8 on ice-rich ones
+    (`relief::crust_shape`: an ice surface or an ice shell is ice-rich, as T12.e's anchored
+    spectrum will choose), its degree-0 and degree-1 parts removed by area-weighted least squares
+    on 1, x, y, z. Degrees 2–5 carry 68.4% of the reference Moon's lid variance (the ruling's
+    about 72% at β 2, Turcotte 1987). It writes only `Lid`, so an undifferentiated body names no
+    entry it lacks. Built in the batch's fix commit, after T12.a's.
   - _The noise and its draw layout._ `surface.coarse.relief`, keyed
     `surface_cell(face, ℓ, i, j, 0)` of each lattice cell at levels ℓ = 2 to the field's, one
     standard normal (two words) each;
@@ -7424,3 +7433,9 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
   - _The e-folding length sits at the low end_ of ordinary margins' 200–500 km (200 km): T11's
     passive margins are many and its continents ragged, so at 350 km the wedge buries half the deep
     floor. Deep-sea fans are left to T14.d.
+  - _Plan 14's stagnant-lid 0.9 km has no radius term_ (the addendum): at the coarse cell it sits
+    1.5× (the Moon) and 2.95× (Ceres) above the synthesis's law in amplitude.
+  - _An ice shell's lid also takes 0.9 km,_ Venus's figure, for want of an icy calibration.
+  - _Dichotomies are not modelled:_ Mars's hemispheric step is in none of the shares' terms.
+  - _T12.e's affine scale also acts on the craters,_ whose profile T7.c's one-profile rule and
+    Pike's rims fix: each of plan 14's shares needs its own term, so that the scale stays near 1.
