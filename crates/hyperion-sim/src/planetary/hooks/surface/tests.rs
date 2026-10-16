@@ -11,6 +11,7 @@ use crate::planetary::derive::solar::{
 };
 use crate::planetary::derive::{DerivedBody, PlacedBody};
 use crate::planetary::frames::FrameSpin;
+use crate::planetary::hooks::figures::cover::PERENNIAL_ICE_TEMPERATURE;
 use crate::planetary::hooks::figures::table_figures;
 use crate::stellar::draws::UnitUniform;
 use crate::units::consts::SECONDS_PER_DAY;
@@ -470,6 +471,7 @@ fn earth_s_measured_state_takes_north_cahalan_and_coakley_s_partition() {
             column.surface_temperature.value(),
             &transport(albedo),
             spin.obliquity,
+            SnapshotRules::Held,
         );
         equator - pole
     };
@@ -1030,8 +1032,12 @@ fn the_zonal_ends_follow_a_nonlinear_diffusive_balance() {
     };
     for (degrees, six_d_over_b, equator, pole) in BALANCE {
         let obliquity = Radians::from(Degrees::new(degrees));
-        let (modal_equator, modal_pole) =
-            zonal_ends_under(1.0, &transport(six_d_over_b), obliquity);
+        let (modal_equator, modal_pole) = zonal_ends_under(
+            1.0,
+            &transport(six_d_over_b),
+            obliquity,
+            SnapshotRules::Held,
+        );
         let contrast = (modal_equator - modal_pole) / (equator - pole) - 1.0;
         assert!(
             contrast.abs() < 0.06
@@ -1042,7 +1048,8 @@ fn the_zonal_ends_follow_a_nonlinear_diffusive_balance() {
         );
         // With no transport the ends are the radiative ones, to the bit.
         let (q_eq, q_pole) = annual_insolation(obliquity);
-        let (bare_equator, bare_pole) = zonal_ends_under(1.0, &transport(0.0), obliquity);
+        let (bare_equator, bare_pole) =
+            zonal_ends_under(1.0, &transport(0.0), obliquity, SnapshotRules::Held);
         assert_same_bits(bare_equator, math::powf(q_eq, 0.25));
         assert_same_bits(bare_pole, math::powf(q_pole, 0.25));
     }
@@ -1052,6 +1059,7 @@ fn the_zonal_ends_follow_a_nonlinear_diffusive_balance() {
             1.0,
             &transport(six_d_over_b),
             Radians::from(Degrees::new(degrees)),
+            SnapshotRules::Held,
         )
     };
     for (degrees, six_d_over_b, adopted_equator, adopted_pole) in
@@ -2106,7 +2114,7 @@ fn a_europa_at_102_k_is_cold_everywhere() {
         rotation_period: Seconds::new(3.551 * SECONDS_PER_DAY),
         solar_day: Some(Seconds::new(3.554 * SECONDS_PER_DAY)),
     };
-    let profile = ZonalProfile::of(&column, &spin, OceanWeight::NONE);
+    let profile = ZonalProfile::of(&column, &spin, OceanWeight::NONE, SnapshotRules::Held);
     let points = profile.points();
     let warmest = points.iter().fold(0.0_f64, |high, &(_, t)| high.max(t));
     assert!((warmest - 108.3).abs() < 0.1, "{warmest} K");
@@ -2218,5 +2226,446 @@ fn the_annual_insolation_at_a_latitude_meets_the_closed_forms() {
             mean += q / 256.0;
         }
         assert!((mean - 1.0).abs() < 1e-4, "{degrees}°: {mean}");
+    }
+}
+
+/// T13.c's passes read the record's own range (decision-p14-t51a-partition §6, condition 1): for
+/// every body of the table, on both arms of the lane's hold, the passes' climate at the body's own
+/// surface temperature and partial pressures is the record's [`SurfaceConditions::climate_range`],
+/// bit for bit, about its mean.
+#[test]
+fn the_passes_climate_is_the_record_s_range() {
+    let mut compared = 0;
+    for rules in [SnapshotRules::Held, SnapshotRules::Batch] {
+        for (name, body) in historic_table() {
+            let spin = spin_of(name);
+            let Some(conditions) = SurfaceConditions::derive_under(rules, &inputs_of(&body, spin))
+            else {
+                continue;
+            };
+            let air = body.atmosphere();
+            let passes = step_climate(
+                rules,
+                &climate_body(&body, spin),
+                ocean_weight_of(&body),
+                air.surface_temperature(),
+                air.partial_pressures(),
+            );
+            let (cold, warm) = conditions.climate_range();
+            let mean = conditions.mean_surface_temperature();
+            assert_same_bits(passes.mean().value(), mean.value());
+            // The ends are the record's, widened to the mean only where the range does not hold
+            // it.
+            assert_same_bits(passes.coldest().value(), cold.value().min(mean.value()));
+            assert_same_bits(passes.warmest().value(), warm.value().max(mean.value()));
+            compared += 1;
+        }
+    }
+    assert!(compared >= 16, "{compared} bodies compared");
+}
+
+/// What the passes' climate reads of the table's derived body `body` under the spin `spin`.
+fn climate_body(body: &DerivedBody, spin: SeasonalSpin) -> ClimateBody {
+    ClimateBody {
+        equilibrium_temperature: body.equilibrium_temperature(),
+        surface_gravity: body.surface_gravity(),
+        radius: Metres::from(body.radius()),
+        material: SurfaceMaterial::of(&body.fractions()),
+        spin,
+        heat_flow: heat_flow_of(body),
+    }
+}
+
+/// The cost of the passes' climate on both arms, against a partition step's (P14.T51.a's second
+/// part, decision-p14-t51a-part2 §1.3: at most 5 µs a call with air under the batch's Newton
+/// steps): run by name, in release, and recorded in plan 14's Risks.
+#[test]
+#[ignore = "a timing, run by name in release"]
+fn time_the_passes_climate() {
+    use crate::planetary::chem::partition::{AirborneWeights, ColumnInventory, Ground};
+    for (name, body) in historic_table() {
+        let spin = spin_of(name);
+        if conditions_of(&body, spin).is_none() {
+            continue;
+        }
+        let air = body.atmosphere();
+        let climate = climate_body(&body, spin);
+        let weight = ocean_weight_of(&body);
+        let n = 2_000;
+        let mut sink = 0.0;
+        let mut each = [0.0; 2];
+        for (k, rules) in [SnapshotRules::Held, SnapshotRules::Batch]
+            .into_iter()
+            .enumerate()
+        {
+            let start = std::time::Instant::now();
+            for i in 0..n {
+                let t = Kelvin::new(air.surface_temperature().value() + 1e-9 * f64::from(i));
+                sink += step_climate(rules, &climate, weight, t, air.partial_pressures())
+                    .coldest()
+                    .value();
+            }
+            each[k] = start.elapsed().as_secs_f64() / f64::from(n) * 1e6;
+        }
+        let partials = air.partial_pressures();
+        let inv = ColumnInventory::new(Gas::ALL.iter().filter_map(|&g| {
+            let p = partials.of(g);
+            (p.value() > 0.0).then(|| (g.substance(), Pascals::new(p.value() * 1.5)))
+        }))
+        .unwrap();
+        let passes = step_climate(
+            SnapshotRules::Batch,
+            &climate,
+            weight,
+            air.surface_temperature(),
+            partials,
+        );
+        let mut w = AirborneWeights::new();
+        let ground = Ground::without_basins(body.surface_gravity());
+        let start = std::time::Instant::now();
+        for _ in 0..n {
+            w.solve(&passes, &ground, &inv);
+            sink += w.weights().first().map_or(0.0, |p| p.value());
+        }
+        let solve = start.elapsed().as_secs_f64() / f64::from(n) * 1e6;
+        eprintln!(
+            "{name}: climate {:.2} µs held, {:.2} µs batch; partition step {solve:.2} µs ({sink:e})",
+            each[0], each[1]
+        );
+    }
+}
+
+/// From generator version 23 the safeguarded Newton steps ([`zonal_point_newton`],
+/// [`ZONAL_NEWTON_STEPS`]) solve every zonal point within 10⁻¹² `T_s` of version 22's 64-step
+/// bisection (decision-p14-t51a-part2 §1.4): at the equator, the pole and every eighth area point,
+/// over obliquities of 0–180°, mean temperatures of 40–737 K, 6D ÷ `B_eff` of 10⁻⁴ to 50, Koll's W
+/// of 0 or `B_P`, `B_eff` ÷ `B_P` of 1 or 0.3, and Φ of 1 or Φ⊕. The dark pole at 0° and weak
+/// transport, where E → 0, is among them. Two steps fewer still hold 10⁻¹³ `T_s`: the count is the
+/// least that does, plus two.
+#[test]
+fn the_newton_zonal_points_are_the_bisection_s() {
+    let (mut worst, mut fewer) = (0.0_f64, 0.0_f64);
+    let cosines = hour_cosines();
+    for degrees in [
+        0.0, 10.0, 23.44, 45.0, 54.74, 60.0, 90.0, 98.0, 120.0, 180.0,
+    ] {
+        let obliquity = Radians::from(Degrees::new(degrees));
+        let modes = insolation_modes(obliquity);
+        let (q_eq, q_pole) = annual_insolation(obliquity);
+        let mut points = vec![
+            (q_eq, modes.map(|mode| mode.at_equator)),
+            (q_pole, [1.0; ZONAL_MODES]),
+        ];
+        for k in (0..ZONAL_AREA_POINTS).step_by(8) {
+            let x = (f64::from(k) + 0.5) / f64::from(ZONAL_AREA_POINTS);
+            points.push((insolation_with(obliquity, x, &cosines), legendre_at(x)));
+        }
+        for t_s in [40.0, 94.0, 214.0, 288.0, 737.0] {
+            for six_d in [1e-4, 1e-2, 1.0, 50.0] {
+                for weak in [0.0, 1.0] {
+                    for effective in [1.0, 0.3] {
+                        for albedo in [1.0, WET_ALBEDO_GRADIENT] {
+                            let transport = ZonalTransport {
+                                planck: 1.0,
+                                effective,
+                                conductance: six_d * effective / 6.0,
+                                weak,
+                                albedo,
+                            };
+                            for (q, legendre) in &points {
+                                let bisection = zonal_point(t_s, &transport, &modes, *q, legendre);
+                                let newton =
+                                    zonal_point_newton(t_s, &transport, &modes, *q, legendre);
+                                let (at, (low, high)) = newton_point(
+                                    t_s,
+                                    &transport,
+                                    &modes,
+                                    (*q, legendre),
+                                    ZONAL_NEWTON_STEPS,
+                                );
+                                assert_same_bits(at, newton);
+                                assert!(low <= newton && newton <= high, "{low} {newton} {high}");
+                                let miss = (newton - bisection).abs() / t_s;
+                                worst = worst.max(miss);
+                                assert!(
+                                    miss <= 1e-12,
+                                    "{degrees}° {t_s} K 6D/B {six_d} W {weak} B_eff {effective} \
+                                     Φ {albedo} q {q}: {newton} against {bisection}"
+                                );
+                                let (short, _) = newton_point(
+                                    t_s,
+                                    &transport,
+                                    &modes,
+                                    (*q, legendre),
+                                    ZONAL_NEWTON_STEPS - 2,
+                                );
+                                fewer = fewer.max((short - bisection).abs() / t_s);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(fewer <= 1e-13, "two steps fewer miss by {fewer:e} T_s");
+    eprintln!(
+        "the Newton zonal points miss the bisection by at most {worst:e} T_s, and by {fewer:e} \
+         two steps fewer"
+    );
+}
+
+/// The Newton zonal points against the bisection over a wider sweep (decision-p14-t51a-part2 §1.4):
+/// every area point, obliquities every 5° from 0 to 180°, 6D ÷ `B_eff` of 10⁻⁴ to 50 by decades,
+/// W of 0, ½ or 1 `B_P`, `B_eff` ÷ `B_P` of 1, 0.6, 0.3 or 0.1 and Φ of 1, 1.25 or Φ⊕, at 40 and
+/// 288 K, within 10⁻¹² `T_s`, and within 10⁻¹³ two steps fewer: the count is this sweep's least,
+/// plus two. Slow, run by name in release; its worst is [`ZONAL_NEWTON_STEPS`]'s doc's.
+#[test]
+#[ignore = "slow: a wider sweep, run by name in release"]
+fn the_newton_zonal_points_are_the_bisection_s_over_a_wider_sweep() {
+    let (mut worst, mut fewer) = (0.0_f64, 0.0_f64);
+    let cosines = hour_cosines();
+    for step in 0..=36 {
+        let obliquity = Radians::from(Degrees::new(5.0 * f64::from(step)));
+        let modes = insolation_modes(obliquity);
+        let (q_eq, q_pole) = annual_insolation(obliquity);
+        let mut points = vec![
+            (q_eq, modes.map(|mode| mode.at_equator)),
+            (q_pole, [1.0; ZONAL_MODES]),
+        ];
+        for k in 0..ZONAL_AREA_POINTS {
+            let x = (f64::from(k) + 0.5) / f64::from(ZONAL_AREA_POINTS);
+            points.push((insolation_with(obliquity, x, &cosines), legendre_at(x)));
+        }
+        for t_s in [40.0, 288.0] {
+            for six_d in [1e-4, 1e-3, 1e-2, 0.1, 1.0, 10.0, 50.0] {
+                for weak in [0.0, 0.5, 1.0] {
+                    for effective in [1.0, 0.6, 0.3, 0.1] {
+                        for albedo in [1.0, 1.25, WET_ALBEDO_GRADIENT] {
+                            let transport = ZonalTransport {
+                                planck: 1.0,
+                                effective,
+                                conductance: six_d * effective / 6.0,
+                                weak,
+                                albedo,
+                            };
+                            for (q, legendre) in &points {
+                                let bisection = zonal_point(t_s, &transport, &modes, *q, legendre);
+                                let newton =
+                                    zonal_point_newton(t_s, &transport, &modes, *q, legendre);
+                                let miss = (newton - bisection).abs() / t_s;
+                                worst = worst.max(miss);
+                                assert!(miss <= 1e-12, "{step} {t_s} {six_d} {weak} {effective}");
+                                let (short, _) = newton_point(
+                                    t_s,
+                                    &transport,
+                                    &modes,
+                                    (*q, legendre),
+                                    ZONAL_NEWTON_STEPS - 2,
+                                );
+                                fewer = fewer.max((short - bisection).abs() / t_s);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(fewer <= 1e-13, "two steps fewer miss by {fewer:e} T_s");
+    eprintln!(
+        "over the wider sweep the Newton zonal points miss by at most {worst:e} T_s, and by \
+         {fewer:e} two steps fewer"
+    );
+}
+
+/// The table's bodies under the batch's solver: their ranges, contrasts and zonal ends within
+/// 10⁻¹² `T_s` of version 22's, and their cold areas below 263.15 K within 10⁻⁹
+/// (decision-p14-t51a-part2 §1.4).
+#[test]
+fn the_batch_s_zonal_solver_moves_the_table_only_at_its_last_bits() {
+    let mut compared = 0;
+    for (name, body) in historic_table() {
+        let inputs = inputs_of(&body, spin_of(name));
+        let (Some(held), Some(batch)) = (
+            SurfaceConditions::derive_under(SnapshotRules::Held, &inputs),
+            SurfaceConditions::derive_under(SnapshotRules::Batch, &inputs),
+        ) else {
+            continue;
+        };
+        let t_s = held.mean_surface_temperature().value();
+        let near = |a: f64, b: f64| (a - b).abs() <= 1e-12 * t_s;
+        let (ranges, ends) = (
+            (held.climate_range(), batch.climate_range()),
+            (held.zonal.ends, batch.zonal.ends),
+        );
+        assert!(
+            near(ranges.0.0.value(), ranges.1.0.value())
+                && near(ranges.0.1.value(), ranges.1.1.value())
+                && near(ends.0.0, ends.1.0)
+                && near(ends.0.1, ends.1.1)
+                && near(
+                    held.equator_pole_contrast_k(),
+                    batch.equator_pole_contrast_k()
+                ),
+            "{name}: {ranges:?} {ends:?}"
+        );
+        let threshold = PERENNIAL_ICE_TEMPERATURE;
+        let (a, b) = (held.cold_area(threshold), batch.cold_area(threshold));
+        assert!((a - b).abs() <= 1e-9, "{name}: {a} against {b}");
+        compared += 1;
+    }
+    assert!(compared >= 8, "{compared}");
+}
+
+/// The batch's record path on the table (P14.T51.a's second part; decision-p14-t51a-part2 §3.7 and
+/// §4.4): every wet world keeps its surface water, Earth's published water ice is T24.b's
+/// `ice_fraction` to the bit at the same surface water, Earth holds liquid water and the regime's
+/// reservoirs are the partition's; under the held rules nothing is partitioned on the record.
+#[test]
+fn the_batch_publishes_the_table_s_condensates() {
+    use crate::planetary::chem::partition::CondensatePhase;
+    use crate::planetary::hooks::figures::{VolatileHistory, cover, table_figures_under};
+
+    let water = Gas::Water.substance();
+    let mut wet = 0;
+    for (name, body) in historic_table() {
+        let (Some(held), Some(batch)) = (
+            table_figures_under(SnapshotRules::Held, &body),
+            table_figures_under(SnapshotRules::Batch, &body),
+        ) else {
+            continue;
+        };
+        if held.surface_water().value() > 0.0 {
+            wet += 1;
+            assert!(
+                batch.surface_water().value() > 0.0,
+                "{name} loses its water"
+            );
+        }
+        let inputs = SurfaceInputs {
+            heat_flow: batch.heat_flow(),
+            ocean_weight: batch.ocean_weight(),
+            ..inputs_of(&body, spin_of(name))
+        };
+        let Some(conditions) = SurfaceConditions::derive_under(SnapshotRules::Batch, &inputs)
+        else {
+            continue;
+        };
+        let gravity = body.surface_gravity();
+        let atmosphere = body.atmosphere();
+        assert!(
+            batch
+                .condensates_under(SnapshotRules::Held, atmosphere, &conditions, gravity)
+                .is_none()
+        );
+        let (partition, published) = batch
+            .condensates_under(SnapshotRules::Batch, atmosphere, &conditions, gravity)
+            .expect("the batch partitions the record");
+        if let Some(ice) = published.entry(water, CondensatePhase::Solid) {
+            let t24b = cover::ice_fraction(&cover::IceInputs {
+                conditions: &conditions,
+                state: atmosphere.state(),
+                crust: batch.impactors().crust(),
+                surface_water: batch.surface_water(),
+            });
+            assert_same_bits(ice.area_fraction(), t24b);
+        }
+        // The same twice (the sim-determinism skill).
+        let again = batch
+            .condensates_under(SnapshotRules::Batch, atmosphere, &conditions, gravity)
+            .expect("the batch partitions the record");
+        assert_eq!(
+            format!("{:?}", (&partition, &published)),
+            format!("{again:?}")
+        );
+        // Every surface water the held rules keep, the batch keeps to the bit: the saturation
+        // test that the batch drops holds on every held atmosphere.
+        if held.surface_water().value() > 0.0 {
+            assert_same_bits(held.surface_water().value(), batch.surface_water().value());
+        }
+        // T24.b's gate on the state holds under the batch: an airless body has no surface water.
+        if body.atmosphere().state() == SurfaceState::Airless {
+            assert_same_bits(batch.surface_water().value(), 0.0);
+        }
+        // Water's ice where the partition holds none is T24.b's.
+        if published.entry(water, CondensatePhase::Solid).is_none() {
+            let figures = batch.clone().with_surface_under(
+                &conditions,
+                VolatileHistory::NONE,
+                Some(&published),
+            );
+            let t24b = cover::ice_fraction(&cover::IceInputs {
+                conditions: &conditions,
+                state: atmosphere.state(),
+                crust: batch.impactors().crust(),
+                surface_water: batch.surface_water(),
+            });
+            let &(_, listed) = figures
+                .surface_ices()
+                .iter()
+                .find(|&&(id, _)| id == water)
+                .unwrap_or_else(|| panic!("{name} lists its water ice"));
+            assert_same_bits(listed, t24b);
+        }
+        if name == "Earth" {
+            let ocean = published.entry(water, CondensatePhase::Liquid);
+            assert!(ocean.is_some(), "{published:?}");
+            // T24.b's bound on the generated Earth's perennial ice holds under the batch.
+            let ice = published
+                .entry(water, CondensatePhase::Solid)
+                .expect("Earth's ice");
+            assert!((0.01..=0.07).contains(&ice.area_fraction()), "{ice:?}");
+            assert!(
+                conditions
+                    .clone()
+                    .with_condensates(&published)
+                    .liquid_water()
+            );
+            assert_eq!(partition.reservoirs(), [water]);
+            let figures =
+                batch.with_surface_under(&conditions, VolatileHistory::NONE, Some(&published));
+            assert_same_bits(figures.ocean_fraction(), batch_ocean(&published));
+        }
+    }
+    assert!(wet >= 2, "{wet} wet worlds");
+}
+
+/// The ocean fraction the published condensates `published` give: their liquids' areas summed.
+fn batch_ocean(published: &crate::planetary::chem::partition::Condensates) -> f64 {
+    published
+        .surface_liquids()
+        .iter()
+        .fold(0.0, |sum, &(_, f)| sum + f)
+}
+
+/// The conditions' gases are one computation with `mole_fractions` (the sim-determinism skill's
+/// precomputed path): `GasFractions`, which the passes' columns and the record's share, gives the
+/// generic form's fractions, mean molar mass and `c_p` ÷ R bit for bit on every atmosphere of the
+/// table, and on a single gas.
+#[test]
+fn the_conditions_gases_are_the_mole_fractions() {
+    for (_, body) in historic_table() {
+        let partials = body.atmosphere().partial_pressures();
+        let generic =
+            mole_fractions(Gas::ALL.map(|gas| (gas.substance(), partials.of(gas)))).unwrap();
+        let ours = GasFractions::of(partials, false).unwrap();
+        assert_eq!(format!("{:?}", ours.as_slice()), format!("{generic:?}"));
+        for (a, b) in [
+            (
+                ours.mean_molar_mass_g_per_mol,
+                mean_molar_mass_g_per_mol(&generic),
+            ),
+            (ours.heat_capacity_over_r, heat_capacity_over_r(&generic)),
+        ] {
+            match (a, b) {
+                (Some(a), Some(b)) => assert_same_bits(a, b),
+                (a, b) => assert_eq!(a.is_none(), b.is_none()),
+            }
+        }
+        assert!(
+            GasFractions::of(partials, true)
+                .unwrap()
+                .as_slice()
+                .is_empty()
+        );
     }
 }

@@ -2813,3 +2813,17 @@ pub(crate) fn pin_cover(
     }
     w.f64(&format!("{name}_cloud_fraction"), figures.cloud_fraction());
 }
+
+/// Area shares that would cover more than the whole surface are scaled down to it in proportion,
+/// and any others kept as they are (P14.T51.a's second part: ices of several substances compete for
+/// one cold zone).
+#[test]
+fn shares_beyond_the_whole_surface_are_scaled_to_it() {
+    let (water, co2) = (Gas::Water.substance(), Gas::CarbonDioxide.substance());
+    let within = within_the_surface(vec![(water, 0.3), (co2, 0.5)]);
+    assert_eq!(within, [(water, 0.3), (co2, 0.5)]);
+    let over = within_the_surface(vec![(water, 0.9), (co2, 0.6)]);
+    let total = over.iter().fold(0.0, |sum, &(_, f)| sum + f);
+    assert!((total - 1.0).abs() < 1e-15, "{over:?}");
+    assert!((over[0].1 / over[1].1 - 1.5).abs() < 1e-12, "{over:?}");
+}

@@ -306,12 +306,18 @@ pub enum CondensatePhase {
     Supercritical,
 }
 
-/// Whether a condensate stays through the year (P14.T51.a's `seasonal`).
+/// Whether a condensate stays through the year (P14.T51.a's per-phase `seasonal`,
+/// [`Condensate::is_seasonal_as`](crate::planetary::chem::partition::Condensate::is_seasonal_as)).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Persistence {
-    /// It stays all year.
+    /// It stays all year: the warmest zone keeps its phase on the surface.
     Perennial,
-    /// The warmest zone rises above its frost point, so part of it comes and goes.
+    /// The warmest zone takes its phase off the surface, so part of it comes and goes: a solid
+    /// that melts there, or, held toward its cold trap, sublimes there at its own partial
+    /// pressure; or a liquid that boils there at the surface pressure
+    /// (decision-p14-t51a-partition §3). Earth's ocean is perennial and its ice seasonal, Mars's
+    /// carbon dioxide ice seasonal and its water ice perennial. It is a spatial proxy for the
+    /// seasons, from the orbit-averaged climate's warmest zone, until P14.T55.e's frost by month.
     Seasonal,
 }
 

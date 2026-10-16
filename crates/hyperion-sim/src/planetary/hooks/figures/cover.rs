@@ -39,7 +39,7 @@
 //! with it: a cover weighted by θ or the climate here would publish one the albedo does not have.
 
 use crate::math;
-use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceState};
+use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SnapshotRules, SurfaceState};
 use crate::planetary::hooks::figures::Crust;
 use crate::planetary::hooks::figures::interior::REGIME_WATER_DENSITY;
 use crate::planetary::hooks::figures::relief::Hypsometry;
@@ -66,8 +66,9 @@ pub const DRY_SURFACE_WATER_SHARE: f64 = 0.02;
 
 /// The mean annual surface temperature below which water ice lasts the year under air: 263.15 K,
 /// −10 °C, the classical annual-mean ice edge of energy-balance models, standing for the seasonal
-/// cycle (Budyko 1969, Tellus 21, 611; North 1975, J. Atmos. Sci. 32, 1301; North, Cahalan and
-/// Coakley 1981, Rev. Geophys. 19, 91; from memory; science-p14-t24b-laws §4.3).
+/// cycle (Budyko 1969, Tellus 21, 611, the edge at 72°N's present temperature; North, Cahalan and
+/// Coakley 1981, Rev. Geophys. Space Phys. 19, 91: "Budyko's rule: Ts = −10°C";
+/// decision-p14-t51a-part2 §8; science-p14-t24b-laws §4.3).
 pub const PERENNIAL_ICE_TEMPERATURE: Kelvin = Kelvin::new(263.15);
 
 /// The temperature below which water ice lasts on an airless body: 110 K, where its Hertz–Knudsen
@@ -80,6 +81,11 @@ pub const AIRLESS_ICE_TEMPERATURE: Kelvin = Kelvin::new(110.0);
 /// The thickness of ice a silicate crust's surface water is spread at to cap its ice cover: 1.93
 /// km, the ruling's rounding of Antarctica's mean, 1,937 m, 26.92 × 10⁶ km³ over 13.924 × 10⁶ km²
 /// (Fretwell et al. 2013, The Cryosphere 7, 375, Bedmap2, Table 7; science-p14-t24b-laws §4.3).
+///
+/// From 22 → 23 it is every solid's, P14.T51.a's published condensates' cap, as Antarctica's
+/// calibration: basal melting gives about 2 km for CO₂ on Mars and N₂ on Pluto
+/// (decision-p14-t51a-part2 §3.4), and Sputnik Planitia's N₂ is several kilometres thick,
+/// nominally 4.5 km (Glein and Waite 2018, Icarus 313, 79; decision-p14-t51a-part2 §8).
 pub const ICE_SHEET_THICKNESS: Metres = Metres::new(1_930.0);
 
 /// The melting point at the base of a `Snowball`'s conducting ice: 273.15 K
@@ -218,12 +224,66 @@ pub fn surface_water(
     if condensed.is_nan() || condensed <= 0.0 {
         return KilogramsPerSquareMetre::ZERO;
     }
-    let share = if outgassing >= VOLCANIC_GREENHOUSE_OUTGASSING {
+    KilogramsPerSquareMetre::new(condensed * water_surface_share(outgassing))
+}
+
+/// [`surface_water`] under the `p14-snapshot` lane's rules `rules` (decision-p14-t51a-part2 §4.2):
+/// T24.b's under [`SnapshotRules::Held`], and under [`SnapshotRules::Batch`] the share of
+/// P14.T51.a's condensed water that lies at the surface.
+///
+/// That share is all of it while the volcanic greenhouse runs and [`DRY_SURFACE_WATER_SHARE`]
+/// after, as T24.b's, of the water condensed at the surface, `M` ÷ 4πR² − `p_H₂O` ÷ g, with T24.b's
+/// gate on the state and the retention, but with no test of the vapour's saturation: the partition
+/// holds a minor condensable's vapour at its humidity, 0.77 of saturation for water, on T49.b's
+/// curve, which that test, on the held curve, would read as no reservoir on every wet world. The
+/// condensed water is the partition's, the vapour its airborne weight: the one water that the
+/// potential ocean, its weight θ, the ice, the ocean under a `Snowball`'s ice, the own sea's weight
+/// in the partition and the published water entries all read.
+#[must_use]
+pub(crate) fn surface_water_under(
+    rules: SnapshotRules,
+    atmosphere: &Atmosphere,
+    water: Kilograms,
+    radius: Metres,
+    surface_gravity: MetresPerSecondSquared,
+    outgassing: f64,
+) -> KilogramsPerSquareMetre {
+    match rules {
+        SnapshotRules::Held => {
+            return surface_water(atmosphere, water, radius, surface_gravity, outgassing);
+        }
+        SnapshotRules::Batch => {}
+    }
+    let holds = match atmosphere.state() {
+        SurfaceState::Temperate | SurfaceState::Snowball => true,
+        SurfaceState::GasEnvelope
+        | SurfaceState::MagmaOcean
+        | SurfaceState::Airless
+        | SurfaceState::RunawayGreenhouse => false,
+    };
+    let (kg, r, g) = (water.value(), radius.value(), surface_gravity.value());
+    // By comparison, so that a NaN water, radius or gravity holds none.
+    if !(holds && atmosphere.retention().retains(Gas::Water) && kg > 0.0 && r > 0.0 && g > 0.0) {
+        return KilogramsPerSquareMetre::ZERO;
+    }
+    let vapour = atmosphere.partial_pressures().of(Gas::Water);
+    let condensed = kg / (4.0 * core::f64::consts::PI * r * r) - vapour.value() / g;
+    if condensed.is_nan() || condensed <= 0.0 {
+        return KilogramsPerSquareMetre::ZERO;
+    }
+    KilogramsPerSquareMetre::new(condensed * water_surface_share(outgassing))
+}
+
+/// The share of a body's condensed water that lies at its surface at the present outgassing
+/// `outgassing` ([`surface_water`]): all of it while O is at least
+/// [`VOLCANIC_GREENHOUSE_OUTGASSING`], and [`DRY_SURFACE_WATER_SHARE`] after.
+#[must_use]
+pub fn water_surface_share(outgassing: f64) -> f64 {
+    if outgassing >= VOLCANIC_GREENHOUSE_OUTGASSING {
         1.0
     } else {
         DRY_SURFACE_WATER_SHARE
-    };
-    KilogramsPerSquareMetre::new(condensed * share)
+    }
 }
 
 /// The standard normal's cumulative distribution Φ(z).
@@ -358,6 +418,33 @@ impl Hypsometry {
         }
         let level = Metres::new(low + (high - low) * 0.5);
         (level, self.area_below(level))
+    }
+
+    /// The global layer that fills the share `area` of the surface, 0 to 1.
+    ///
+    /// It is the [`volume_below`](Self::volume_below) the level whose
+    /// [`area_below`](Self::area_below) is `area`, found by [`OCEAN_LEVEL_HALVINGS`] halvings over
+    /// the populations' span, as [`fill`](Self::fill) finds its level. It inverts
+    /// [`fill`](Self::fill): a layer at least this deep fills at least `area`. Nothing for a share
+    /// that is not positive.
+    #[must_use]
+    pub fn layer_filling(&self, area: f64) -> Metres {
+        let (bottom, top) = self.span();
+        // By comparison, so that a NaN share fills nothing.
+        if !(area > 0.0 && bottom.value().is_finite()) {
+            return Metres::ZERO;
+        }
+        let (mut low, mut high) = (bottom.value(), top.value());
+        for _ in 0..OCEAN_LEVEL_HALVINGS {
+            let middle = low + (high - low) * 0.5;
+            if self.area_below(Metres::new(middle)) < area {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+        // The upper end of the bracket, whose area is at least `area`.
+        self.volume_below(Metres::new(high))
     }
 }
 
@@ -504,7 +591,16 @@ pub struct IceInputs<'a> {
 /// ocean), as R09's cover convention has it.
 #[must_use]
 pub fn ice_fraction(inputs: &IceInputs<'_>) -> f64 {
-    let cold = inputs.conditions.cold_area(ice_threshold(inputs.state));
+    ice_fraction_over(
+        inputs,
+        inputs.conditions.cold_area(ice_threshold(inputs.state)),
+    )
+}
+
+/// [`ice_fraction`] over the cold area `cold` its conditions give below its threshold, read off a
+/// profile built once (decision-p14-t51a-part2 §3.5): [`ice_fraction`] to the bit.
+#[must_use]
+pub(crate) fn ice_fraction_over(inputs: &IceInputs<'_>, cold: f64) -> f64 {
     match inputs.state {
         SurfaceState::Snowball => return cold,
         SurfaceState::GasEnvelope
