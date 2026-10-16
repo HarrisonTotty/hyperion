@@ -30,6 +30,9 @@ import type { PatchKey } from "../patchKey";
 import {
   CLASS_WEIGHTS_BYTES,
   DOUBLE_NORMALS_PER_SIDE,
+  HORIZON_FAR_SIDE,
+  HORIZON_MAP_BYTES,
+  HORIZON_WORDS_PER_TEXEL,
   PATCH_VERTICES_PER_SIDE,
   type SlotFieldName,
   type SlotLayout,
@@ -65,6 +68,8 @@ const QUADS = PATCH_VERTICES_PER_SIDE - 1;
 export const GRID_VERTICES = PATCH_VERTICES_PER_SIDE * PATCH_VERTICES_PER_SIDE;
 /** The skirts' vertices: 65 along each of the four edges, after the grid's. */
 export const SKIRT_VERTICES = 4 * PATCH_VERTICES_PER_SIDE;
+/** Bytes of a horizon map's far field: 9 × 9 points of four `u32` words. */
+const HORIZON_FAR_BYTES = HORIZON_FAR_SIDE * HORIZON_FAR_SIDE * HORIZON_WORDS_PER_TEXEL * 4;
 /** Indices of the grid's triangles: 64 × 64 quads of two. */
 export const GRID_INDICES = QUADS * QUADS * 6;
 /** Indices of the shared mesh: the grid's and the skirts' 4 × 64 quads. */
@@ -346,8 +351,20 @@ export interface SlotUpload {
   readonly layers: TerrainLayers | null;
 }
 
-/** The slot fields kept in storage buffers: R05's, and R10.T10.b's class weights and laws. */
-export type SlotBufferField = Extract<SlotFieldName, "heights" | "offsets" | "class-layers">;
+/**
+ * The slot fields kept in storage buffers: R05's, R10.T10.b's class weights and laws, and
+ * R10.T8.b's horizon map.
+ */
+export type SlotBufferField = Extract<
+  SlotFieldName,
+  "heights" | "offsets" | "class-layers" | "horizon-map"
+>;
+
+/**
+ * A horizon-map word of two codes of −32,767, −90° each (`hyperion_surface`'s `NO_HORIZON`): no
+ * ground ahead, so a slot whose bake has no map shades as though nothing rose about it.
+ */
+export const NO_HORIZON_WORD = 0x8001_8001;
 
 /** What {@link TerrainResources.upload} did. */
 export type SlotUploadResult =
@@ -414,6 +431,10 @@ export class TerrainResources {
   readonly #instanceCount = new Uint32Array(1);
   #made: Made;
   #normalsScratch: Uint16Array;
+  /** Whether each slot holds a bake's horizon map (R10.T8.b), cleared with the slots on a restore. */
+  #horizonHeld: Uint8Array;
+  /** A slot's horizon map of {@link NO_HORIZON_WORD}s, made once a slot is written without one. */
+  #noHorizon: Uint32Array | null = null;
 
   constructor(
     engine: RenderEngine,
@@ -427,9 +448,11 @@ export class TerrainResources {
     this.#shading = shading;
     this.#made = this.#make();
     this.#normalsScratch = this.#scratchFor(this.#made.layout);
+    this.#horizonHeld = new Uint8Array(this.#made.layout.slots.slotCount);
     this.#offRestored = engine.onRestored(() => {
       this.#made = this.#make();
       this.#normalsScratch = this.#scratchFor(this.#made.layout);
+      this.#horizonHeld = new Uint8Array(this.#made.layout.slots.slotCount);
       for (const listener of this.#rebuilt) {
         listener(this.#made.layout);
       }
@@ -472,11 +495,20 @@ export class TerrainResources {
   }
 
   /**
-   * The storage buffer of a slot field (`heights`, `offsets`, and a lit layout's `class-layers`),
-   * or `null` where the layout has none.
+   * The storage buffer of a slot field (`heights`, `offsets`, and a lit layout's `class-layers`
+   * and `horizon-map`), or `null` where the layout has none.
    */
   field(name: SlotBufferField): BufferHandle | null {
     return this.#made.fields.get(name) ?? null;
+  }
+
+  /**
+   * Whether `slot` holds a bake's horizon map, which a child's may blend to (R10.T8.b): `false`
+   * on a layout without the field, for a slot not written since the layout was made, and for one
+   * whose bake had no map.
+   */
+  holdsHorizon(slot: number): boolean {
+    return this.#horizonHeld[slot] === 1;
   }
 
   /** A lit layout's lights buffer and phase table, or `null` for R05's spike shading. */
@@ -521,13 +553,16 @@ export class TerrainResources {
    * record and its normals tile with the gutter filled from the tile's edge.
    *
    * On a lit layout it also writes the slot's class layers, its class weights (zeros where the
-   * bake skipped them) then its class laws, adding their rows to the phase table.
+   * bake skipped them) then its class laws, adding their rows to the phase table, and its horizon
+   * map, the near field's words then the far field's (R10.T8.b), or words of no horizon where the
+   * bake skipped it.
    *
    * @returns `refused` with nothing written for a bake that no longer fits the layout: one baked
    * before a restore re-derived it ({@link TerrainResources.onRebuilt}), whose slot is past the new
    * count or whose offsets the new vertex path does not take; or, on a lit layout, a bake without
    * R10's layers; else `uploaded`.
-   * @throws RangeError also for class weights of another size than a slot's, before any write.
+   * @throws RangeError also for class weights or a horizon map of another size than a slot's,
+   * before any write.
    * @throws RangeError if an array's length is not the layout's, which no bake of the setting gives.
    */
   upload(patch: SlotUpload): SlotUploadResult {
@@ -547,6 +582,17 @@ export class TerrainResources {
     if (this.#made.lit !== null && weightsBytes !== 0 && weightsBytes !== CLASS_WEIGHTS_BYTES) {
       throw new RangeError(
         `class weights of ${String(weightsBytes)} B, where a slot holds ${String(CLASS_WEIGHTS_BYTES)} B`,
+      );
+    }
+    const horizonBytes =
+      (layers?.horizonNear.byteLength ?? 0) + (layers?.horizonFar.byteLength ?? 0);
+    if (
+      this.#made.lit !== null &&
+      horizonBytes !== 0 &&
+      (horizonBytes !== HORIZON_MAP_BYTES || layers?.horizonFar.byteLength !== HORIZON_FAR_BYTES)
+    ) {
+      throw new RangeError(
+        `a horizon map of ${String(horizonBytes)} B, where a slot holds ${String(HORIZON_MAP_BYTES)} B`,
       );
     }
     this.#checkLength("heights", patch.heights.byteLength);
@@ -589,6 +635,7 @@ export class TerrainResources {
         CLASS_WEIGHTS_BYTES,
       );
       this.#writeTable(lit);
+      this.#writeHorizon(slot, layers);
     }
     return UPLOADED;
   }
@@ -644,6 +691,23 @@ export class TerrainResources {
       throw new RangeError(`the layout has no ${name} buffer`);
     }
     this.#engine.writeBuffer(buffer, slot * this.#slotBytes(name) + withinBytes, data);
+  }
+
+  /**
+   * Writes `slot`'s horizon map from `layers`, the near field's words then the far field's, or
+   * words of no horizon where the bake skipped it, and notes whether the slot holds one.
+   */
+  #writeHorizon(slot: number, layers: TerrainLayers): void {
+    const { horizonNear, horizonFar } = layers;
+    if (horizonNear.length === 0) {
+      this.#noHorizon ??= new Uint32Array(HORIZON_MAP_BYTES / 4).fill(NO_HORIZON_WORD);
+      this.#writeField("horizon-map", slot, this.#noHorizon);
+      this.#horizonHeld[slot] = 0;
+      return;
+    }
+    this.#writeField("horizon-map", slot, horizonNear);
+    this.#writeField("horizon-map", slot, horizonFar, horizonNear.byteLength);
+    this.#horizonHeld[slot] = 1;
   }
 
   #writeNormals(slot: number, normals: Float16Array): void {

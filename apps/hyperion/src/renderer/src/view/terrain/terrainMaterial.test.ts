@@ -16,6 +16,7 @@ import { WGSL_CATALOGUE } from "../engine/catalogue";
 import type { WgslMaterialSpec } from "../engine/types";
 import { annulusEdges } from "../lighting/annuli";
 import terrainLitWgsl from "./shaders/terrainLit.wgsl?raw";
+import horizonWgsl from "./shadows/horizon.wgsl?raw";
 import { CLASS_LAWS_BYTES, CLASS_LAYERS_BYTES, CLASS_WEIGHTS_BYTES } from "./slotLayout";
 import {
   AIRLESS_ICE_EXPONENT,
@@ -82,9 +83,23 @@ describe("the lit terrain's material (R10.T10.b)", () => {
       "contacts",
       "classLayers",
       "terrainLights",
+      "horizonMap",
     ]);
-    // Seven storage buffers on the baked-offsets path, below WebGPU's default eight a stage.
-    expect(offsets.storageBuffers).toHaveLength(7);
+    // Eight storage buffers on the baked-offsets path, five read by the vertex stage alone and
+    // three by the fragment stage alone (decision-r10-t10b-r09-t2e §5).
+    expect(offsets.storageBuffers).toHaveLength(8);
+    expect(
+      (offsets.storageBuffers ?? []).map((buffer) => [buffer.name, buffer.stages?.join(" ")]),
+    ).toEqual([
+      ["heights", "vertex"],
+      ["slots", "vertex"],
+      ["instances", "vertex"],
+      ["contacts", "vertex"],
+      ["offsets", "vertex"],
+      ["classLayers", "fragment"],
+      ["terrainLights", "fragment"],
+      ["horizonMap", "fragment"],
+    ]);
     const textures = differences.textures ?? [];
     expect(textures.map((t) => t.binding)).toEqual([4, 7, 9, 10, 11, 12, 13, 14, 15]);
     for (const [name, binding] of [
@@ -92,8 +107,9 @@ describe("the lit terrain's material (R10.T10.b)", () => {
       ["phase_factor_table", TERRAIN_LIT_BINDINGS.phaseFactorTable],
       ["terrain_lights", TERRAIN_LIT_BINDINGS.terrainLights],
       ["atmosphere_body", TERRAIN_LIT_BINDINGS.atmosphere],
+      ["horizon_map", TERRAIN_LIT_BINDINGS.horizonMap],
     ] as const) {
-      expect(terrainLitWgsl).toMatch(
+      expect(terrainLitWgsl + horizonWgsl).toMatch(
         new RegExp(`@binding\\(${String(binding)}\\) var[^\\n]* ${name}`, "u"),
       );
     }

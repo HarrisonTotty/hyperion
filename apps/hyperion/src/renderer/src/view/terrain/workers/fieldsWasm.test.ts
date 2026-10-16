@@ -10,6 +10,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import fixture from "../../../../../../../../crates/hyperion-surface/tests/golden/worker/moon_like.golden?raw";
 import {
   bakePatch,
+  HorizonLayer,
   initSync,
   LineOfSightKind,
   SurfaceFields,
@@ -24,6 +25,7 @@ import {
   type FacePoint,
   type HeightModule,
   packNormals,
+  WASM_HORIZON_LAYER,
   WASM_LINE_OF_SIGHT,
   WASM_NORMAL_SCALE,
   WASM_VERTEX_PATH,
@@ -117,13 +119,15 @@ interface Fixture {
   readonly payloads: ReadonlyArray<number>;
   /** Each block's change, as its runs' words, `-` for none. */
   readonly changes: ReadonlyArray<ReadonlyArray<string>>;
+  /** Each block's newly held cells, as its runs' words, `-` for none (R10.T8.b). */
+  readonly held: ReadonlyArray<ReadonlyArray<string>>;
   /** The level table's rows after the first block and after the last, as bits. */
   readonly levels: Readonly<Record<"first" | "last", ReadonlyArray<string>>>;
   readonly records: ReadonlyArray<FixtureRecord>;
 }
 
 /** The record heads: each starts a record of the lines under it. */
-const HEADS = new Set(["patch", "reading", "slant", "material"]);
+const HEADS = new Set(["patch", "horizon", "reading", "slant", "material"]);
 
 function parseFixture(): Fixture {
   let body = "";
@@ -131,6 +135,7 @@ function parseFixture(): Fixture {
   const blocks: ArrayBuffer[] = [];
   const payloads: number[] = [];
   const changes: string[][] = [];
+  const held: string[][] = [];
   const levels: Record<"first" | "last", string[]> = { first: [], last: [] };
   const records: { head: string[]; bits: Map<string, string>; lines: Map<string, string[]> }[] = [];
   for (const line of fixture.split("\n").slice(1)) {
@@ -149,6 +154,8 @@ function parseFixture(): Fixture {
       payloads.push(Number(rest[0]));
     } else if (head === "change") {
       changes.push(rest.slice(1));
+    } else if (head === "held") {
+      held.push(rest.slice(1));
     } else if (head === "level") {
       const when = rest[0];
       if (when === "first" || when === "last") {
@@ -162,7 +169,7 @@ function parseFixture(): Fixture {
       current.lines.set(head, rest);
     }
   }
-  return { body, seed, blocks, payloads, changes, levels, records };
+  return { body, seed, blocks, payloads, changes, held, levels, records };
 }
 
 const FIXTURE = parseFixture();
@@ -256,14 +263,23 @@ function lookup<T extends Record<string, string>>(table: T, word: string | undef
   return table[word];
 }
 
+/** The arrays of each bake of `bakes` the rule did not take, by `taken`, as a test compares them. */
+function passedOver(bakes: readonly BakedPatch[], taken: readonly boolean[]): unknown[] {
+  return bakes.flatMap((bake, n) =>
+    taken[n] === true ? [] : [[bake.heights, bake.normals, bake.layers]],
+  );
+}
+
 describe("the height worker's fields on the real module", () => {
   beforeAll(() => {
     initSync({ module: wasmBytes() });
   });
 
-  it("maps the bake's weights and the line of sight to the module's enum values", () => {
+  it("maps the bake's weights, its horizon map and the line of sight to the module's enum values", () => {
     expect(WASM_WEIGHTS_LAYER.baked).toBe(WeightsLayer.Baked);
     expect(WASM_WEIGHTS_LAYER.skipped).toBe(WeightsLayer.Skipped);
+    expect(WASM_HORIZON_LAYER.baked).toBe(HorizonLayer.Baked);
+    expect(WASM_HORIZON_LAYER.skipped).toBe(HorizonLayer.Skipped);
     expect(WASM_LINE_OF_SIGHT.ground).toBe(LineOfSightKind.Ground);
     expect(WASM_LINE_OF_SIGHT["no-ground"]).toBe(LineOfSightKind.NoGround);
     expect(WASM_LINE_OF_SIGHT["not-surveyed"]).toBe(LineOfSightKind.NotSurveyed);
@@ -287,8 +303,14 @@ describe("the height worker's fields on the real module", () => {
     });
     expect(answers.map((a) => a.body)).toEqual(FIXTURE.blocks.map(() => FIXTURE.body));
     expect(answers.map((a) => runWords(a.block.newlySurveyed))).toEqual(FIXTURE.changes);
+    expect(answers.map((a) => runWords(a.block.newlyHeld))).toEqual(FIXTURE.held);
+    expect(FIXTURE.held).toHaveLength(FIXTURE.blocks.length);
     expect(answers.map((a) => a.transfer)).toEqual(
-      answers.map((a) => [a.block.newlySurveyed.buffer, a.block.levels.buffer]),
+      answers.map((a) => [
+        a.block.newlySurveyed.buffer,
+        a.block.newlyHeld.buffer,
+        a.block.levels.buffer,
+      ]),
     );
     expect(answers.map((a) => a.block.fieldLevel)).toEqual(FIXTURE.blocks.map(() => 6));
     const tables = answers.map((a) => [...a.block.levels].map(bitsHex));
@@ -392,6 +414,7 @@ describe("the height worker's fields on the real module", () => {
         WASM_VERTEX_PATH[settings.vertexPath],
         WASM_NORMAL_SCALE[settings.normals],
         WASM_WEIGHTS_LAYER[lookup(WEIGHTS, weights)],
+        WASM_HORIZON_LAYER[lookup(WEIGHTS, weights)],
         0,
       );
       if (raw === undefined) {
@@ -434,8 +457,58 @@ describe("the height worker's fields on the real module", () => {
       expect(unsurveyed.length === 0 ? ["-"] : unsurveyed).toEqual(record.lines.get("unsurveyed"));
       expect(transfer).toContain(layers.weights.buffer);
       expect(transfer).toContain(layers.unsurveyedCells.buffer);
+      expect(transfer).toContain(layers.horizonNear.buffer);
+      expect(transfer).toContain(layers.horizonRefusedCells.buffer);
+      // The lit style's bakes make the horizon map with the weights; the wireframe's skip both.
+      const mapped = layers.weights.length > 0;
+      expect([layers.horizonNear.length, layers.horizonFar.length]).toEqual(
+        mapped ? [65 * 65 * 4, 9 * 9 * 4] : [0, 0],
+      );
     }
     direct.free();
+  });
+
+  it("bakes the horizon maps the native bake does, their words, completeness and refused cells", () => {
+    const fields = heldFields();
+    const maps = recordsOf("horizon");
+    expect(maps).toHaveLength(2);
+    for (const record of maps) {
+      const [, name, face, level, i, j] = record.head;
+      const patch = recordsOf("patch").find((p) => p.head[1] === name);
+      if (patch === undefined) {
+        throw new Error(`the fixture has no patch ${String(name)}`);
+      }
+      const [, , , , , , path, normals] = patch.head;
+      const settings: BakeSettings = {
+        vertexPath: lookup(VERTEX_PATHS, path),
+        normals: lookup(NORMALS, normals),
+        source: { kind: "body", body: FIXTURE.body, detailSeed: FIXTURE.seed, weights: "baked" },
+      };
+      const key = { face: faceOf(face), level: Number(level), i: Number(i), j: Number(j) };
+      const { reply } = answerRequest(
+        module,
+        { kind: "bake", id: 4, key, generation: 1, settings },
+        fields,
+      );
+      if (reply.kind !== "baked" || reply.bake.layers === null) {
+        throw new Error(`${String(name)} was not baked: ${JSON.stringify(reply)}`);
+      }
+      const layers = reply.bake.layers;
+      const wordDigest = (words: Uint32Array): string =>
+        digestHex(f64Digest(Float64Array.from(words)));
+      expect({
+        name,
+        near: wordDigest(layers.horizonNear),
+        far: wordDigest(layers.horizonFar),
+      }).toEqual({
+        name,
+        near: bitsOf(record, "near"),
+        far: bitsOf(record, "far"),
+      });
+      expect(String(layers.horizonComplete)).toBe(record.lines.get("horizon_complete")?.[0]);
+      const refused = [...layers.horizonRefusedCells].map(String);
+      expect(refused.length === 0 ? ["-"] : refused).toEqual(record.lines.get("refused"));
+    }
   });
 
   it("gives each bake's palette the photometry of its materials, as the native materials name them", () => {
@@ -696,14 +769,34 @@ describe("the height worker's fields on the real module", () => {
       });
     }
     const after = bakeAll();
-    const passedOver = (bakes: readonly BakedPatch[]): unknown[] =>
-      bakes.flatMap((bake, n) =>
-        flagged[n] === true ? [] : [[bake.heights, bake.normals, bake.layers]],
-      );
-    expect(passedOver(after)).toEqual(passedOver(before));
-    // The second survey changes the masks of patches beside it, and the incomplete ones.
+    // The bakes passed over are the same bytes, their horizon maps' words and refused cells too.
+    expect(passedOver(after, flagged)).toEqual(passedOver(before, flagged));
+    // The second survey changes the masks of patches beside it and the incomplete ones, and, with
+    // the lit bakes' maps on, a patch surveyed whole by the cells it brings that the patch's far
+    // field was refused for (R10.T8.b's third case).
     expect(flagged.filter(Boolean).length).toBeGreaterThan(0);
-    expect(flagged.filter((f) => !f).length).toBeGreaterThan(0);
+    const byMapAlone = before.filter(
+      (bake, n) =>
+        flagged[n] === true &&
+        bake.layers?.complete === true &&
+        bake.layers.unsurveyedCells.length === 0 &&
+        bake.layers.horizonRefusedCells.length > 0,
+    );
+    expect(byMapAlone.length).toBeGreaterThan(0);
+    // A block sent again brings nothing: every complete bake is passed over, and bakes the same.
+    const again = FIXTURE.blocks.at(-1);
+    if (again === undefined) {
+      throw new Error("the fixture has blocks");
+    }
+    const resent = fields.chunk(FIXTURE.body, again);
+    if (resent.kind !== "taken" || resent.block === null) {
+      throw new Error("the block sent again was not taken");
+    }
+    const { block: none } = resent;
+    expect([none.newlySurveyed.length, none.newlyHeld.length]).toEqual([0, 0]);
+    const kept = after.map((bake) => needsRebake(bake.layers, none));
+    expect(kept.filter((k) => !k).length).toBeGreaterThan(0);
+    expect(passedOver(bakeAll(), kept)).toEqual(passedOver(after, kept));
   });
 
   it("answers no reading, material or bake of a body whose field is not held", () => {
@@ -762,9 +855,9 @@ describe("the height worker's fields on the real module", () => {
     expect(() => direct.fieldRelease(id, 70_000)).toThrow(/body index/u);
     expect(() => direct.material(id, 3, 0n, 6, 0, 0)).toThrow(/face/u);
     expect(() => direct.material(id, 3, 0n, 263, 0, 0)).toThrow(/face/u);
-    expect(() => direct.bake(id, 3, 0n, 1, 300, 0, 0, 0, 0, 0, 0)).toThrow(/level/u);
-    expect(() => direct.bake(id, 3, 0n, 1, 5, 99, 0, 0, 0, 0, 0)).toThrow(/outside level 5/u);
-    expect(() => direct.bake(id, 3, 0n, 1, 5, 0, 0, 0, 0, 0, -1)).toThrow(/skirt/u);
+    expect(() => direct.bake(id, 3, 0n, 1, 300, 0, 0, 0, 0, 0, 0, 0)).toThrow(/level/u);
+    expect(() => direct.bake(id, 3, 0n, 1, 5, 99, 0, 0, 0, 0, 0, 0)).toThrow(/outside level 5/u);
+    expect(() => direct.bake(id, 3, 0n, 1, 5, 0, 0, 0, 0, 0, 0, -1)).toThrow(/skirt/u);
     // The palette's photometry (R10.T10.b): none without a field, and a palette refused whole.
     const empty = new Uint8Array(16).fill(PALETTE_NONE);
     expect(direct.photometry(id, 3, empty)).toBeUndefined();

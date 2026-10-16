@@ -10,6 +10,8 @@ import {
   INSTANCE_RECORD_BYTES,
   InstanceRecords,
   MAX_CONTACTS,
+  NO_PARENT_SLOT,
+  parentQuadrant,
   patchTerms,
   SLOT_RECORD_BYTES,
   writeSlotRecord,
@@ -116,6 +118,36 @@ describe("an instance record", () => {
     expect(Math.fround(origin.x) - Math.fround(camera.x)).not.toBe(f[0]);
     expect([f[1], f[2], u[3], f[4], f[5]]).toEqual([-12.25, 4, 7, 100, 200]);
     expect(records.bytes().byteLength).toBe(INSTANCE_RECORD_BYTES);
+  });
+
+  it("carries the parent's slot and the patch's quadrant for the horizon's blend, or no parent", () => {
+    const records = new InstanceRecords(2);
+    records.push(1, vec3(0, 0, 0), 0, 1);
+    records.push(2, vec3(0, 0, 0), 0, 1, 9, 1);
+    const u = new Uint32Array(records.buffer);
+    expect([u[6], u[7]]).toEqual([NO_PARENT_SLOT, 0]);
+    expect([u[8 + 6], u[8 + 7]]).toEqual([9, 1]);
+    expect(NO_PARENT_SLOT).toBe(0xffff_ffff);
+  });
+
+  it("names a patch's quadrant in its parent by the low bits of its i and j", () => {
+    const key = { face: 2, level: 5, i: 6, j: 4 } as const;
+    expect(parentQuadrant(key)).toBe(0);
+    expect(parentQuadrant({ ...key, i: 7 })).toBe(1);
+    expect(parentQuadrant({ ...key, j: 5 })).toBe(2);
+    expect(parentQuadrant({ ...key, i: 7, j: 5 })).toBe(3);
+  });
+
+  it("refuses a quadrant past 3", () => {
+    expect(() => {
+      new InstanceRecords(1).push(3, vec3(0, 0, 0), 0, 1, 9, 4);
+    }).toThrow(RangeError);
+  });
+
+  it("refuses a parent slot that is not a u32", () => {
+    expect(() => {
+      new InstanceRecords(1).push(3, vec3(0, 0, 0), 0, 1, -1, 0);
+    }).toThrow(RangeError);
   });
 
   it("refuses more records than its capacity", () => {

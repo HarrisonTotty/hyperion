@@ -5,6 +5,12 @@
 //!   [`VolatileInventory`](crate::planetary::derive::atmosphere::VolatileInventory) is the view.
 //! - [`redox`]: the mantle's one redox figure, ΔIW, and its banding,
 //!   [`RedoxClass`](redox::RedoxClass).
+//! - [`envelope_abundances`]: a gas envelope's elements relative to hydrogen
+//!   ([`EnvelopeAbundances`](envelope_abundances::EnvelopeAbundances), P14.T50.b), on the Surface
+//!   path, which nothing on the record reads until P14.T54.b.
+//! - [`partition`]: the condensate partition at the ground (P14.T51.a), how much of each
+//!   condensable a body's air holds over its climate, how much lies on its surface, and in which
+//!   phase.
 //! - Here, the host's C/O and Mg/Si ([`HostAbundances`]), drawn per system on
 //!   `system.abundances` ([`AbundanceDraws`]), since a star's planets share its photospheric
 //!   ratios, until plan 06 carries them on the star. Plan 06 may adopt the stream without moving
@@ -50,7 +56,9 @@
 //! Grevesse's (2021) photospheric 0.59 ± 0.08 is the recorded alternative (plan 14's Risks).
 //! Both are scales on which a relative \[C/O\] is laid, which is what the surveys measure.
 
+pub mod envelope_abundances;
 pub mod inventory;
+pub mod partition;
 pub mod redox;
 
 use crate::Seed;
@@ -235,6 +243,18 @@ impl HostAbundances {
                     + magnesium_offset
                     + MAGNESIUM_TO_SILICON_SCATTER.value() * normal(draws.magnesium_to_silicon),
             ),
+        }
+    }
+
+    /// The Sun's own protosolar ratios, Lodders's C/O of 0.457 and Mg/Si of 1.023, off the trends:
+    /// what P14.T50.b's tests compare the measured Solar System against, where a generated host of
+    /// solar metallicity is [`of`](Self::of) the trends.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn protosolar() -> Self {
+        Self {
+            log_carbon_to_oxygen: Dex::new(protosolar_log_ratio(Element::C, Element::O)),
+            log_magnesium_to_silicon: Dex::new(protosolar_log_ratio(Element::Mg, Element::Si)),
         }
     }
 

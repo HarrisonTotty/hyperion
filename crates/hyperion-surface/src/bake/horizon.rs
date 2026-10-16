@@ -80,7 +80,10 @@
 //! at the reference surface. A far sample whose vertex the view cannot make takes the reference
 //! surface too, height 0, the datum the client draws there (Design note 12), and the map is then
 //! not [complete](HorizonMap::is_complete): a later block may bring the ground that casts the
-//! shadow.
+//! shadow. The map names the cells it was refused for ([`HorizonMap::refused_cells`]): each the
+//! first cell a refused height's reads lacked, the one whose arrival alone can change that height,
+//! so that a patch is baked again exactly on a block that brings one of them (decision-r10-t8a §3,
+//! R10.T8.b).
 //!
 //! # Determinism
 //!
@@ -100,7 +103,7 @@ use crate::cube::{
     Face, FaceUv, MAX_LEVEL, PATCH_QUADS, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir, uv_on_face,
     uv_to_st, xyz_to_face_uv,
 };
-use crate::field::FieldView;
+use crate::field::{FieldView, cell_index};
 use crate::geometry::vertex_spacing;
 use crate::num;
 use crate::patch::PATCH_VERTICES;
@@ -174,7 +177,7 @@ pub enum HorizonLayer {
     /// The near and far fields, for the lit style's shadows (R10.T8.b) on both settings.
     Baked,
     /// None: the map is empty, for a style that draws no shadow, as the wireframe's depth-only
-    /// terrain (R10.T11), or a worker whose client does not read it yet.
+    /// terrain (R10.T11) and R05's spike shading.
     Skipped,
 }
 
@@ -186,6 +189,7 @@ pub struct HorizonMap {
     near: Vec<u32>,
     far: Vec<u32>,
     refused: bool,
+    refused_cells: Vec<u32>,
 }
 
 impl HorizonMap {
@@ -217,6 +221,20 @@ impl HorizonMap {
     #[must_use]
     pub const fn is_complete(&self) -> bool {
         !self.refused
+    }
+
+    /// The cells the far field was refused for, as rising [`cell_index`]es at the field's level.
+    ///
+    /// Each is, for a height the view could not make, the first cell its reads lacked
+    /// ([`QueryHeightError::NotSurveyed`]), each once. Every read before that cell was held and is final, so
+    /// the height can change only once that cell is held: a block that brings none of these cells,
+    /// surveyed or margin, leaves the map's words as they are (decision-r10-t8a §3). Empty for a
+    /// map whose far field read only ground the view holds, and for one not baked; a map whose
+    /// bake was not complete may be incomplete with none, its own heights standing at the
+    /// reference surface.
+    #[must_use]
+    pub fn refused_cells(&self) -> &[u32] {
+        &self.refused_cells
     }
 
     /// The near field's horizon at vertex (`x`, `y`) in azimuth `k` (the index of
@@ -509,6 +527,7 @@ pub(super) fn bake_horizon<F: FieldView>(
         own: heights,
         cells: vec![None; usize::try_from(CELLS_KEPT).expect("4,096 cells fit a usize")],
         refused_here: BTreeSet::new(),
+        refused_cells: BTreeSet::new(),
         // The bake's own heights stand at the reference surface where it was not complete.
         refused: !complete,
     };
@@ -520,6 +539,7 @@ pub(super) fn bake_horizon<F: FieldView>(
         near: pack(&near),
         far: pack(&far),
         refused: ground.refused,
+        refused_cells: ground.refused_cells.into_iter().collect(),
     }
 }
 
@@ -856,6 +876,8 @@ struct FarGround<'s, 'a, F> {
     cells: Vec<Option<(u64, [f64; 4])>>,
     /// The vertices the view refused in this bake, so that each is asked once.
     refused_here: BTreeSet<u64>,
+    /// The [`cell_index`] of the cell each refusal named, the first cell its reads lacked.
+    refused_cells: BTreeSet<u32>,
     /// Whether any vertex took the reference surface.
     refused: bool,
 }
@@ -925,9 +947,11 @@ impl<F: FieldView> FarGround<'_, '_, F> {
                 kept.heights.insert(key, sample.height_m);
                 sample.height_m
             }
-            Err(QueryHeightError::NotSurveyed(_)) => {
-                // A cell the view does not hold: the reference surface, until a block brings it.
+            Err(QueryHeightError::NotSurveyed(cell)) => {
+                // A cell the view does not hold: the reference surface, until a block brings it,
+                // and the cell named so that the block that does is known.
                 self.refused_here.insert(key);
+                self.refused_cells.insert(cell_index(cell));
                 self.refused = true;
                 0.0
             }

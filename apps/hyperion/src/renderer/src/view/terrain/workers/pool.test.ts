@@ -81,8 +81,15 @@ function forms(w: ScriptedHeightWorker): string[] {
   return w.fieldMessages.flatMap((m) => (m.kind === "field-init" ? [m.form] : []));
 }
 
-/** The layers of a body's bake, complete or not, with `unsurveyed` cells. */
-function layers(complete: boolean, unsurveyed: readonly number[]): TerrainLayers {
+/**
+ * The layers of a body's bake, complete or not, with `unsurveyed` cells, its horizon map complete
+ * or not.
+ */
+function layers(
+  complete: boolean,
+  unsurveyed: readonly number[],
+  horizonComplete = true,
+): TerrainLayers {
   return {
     palette: new Uint8Array(16),
     weights: new Uint8Array(),
@@ -92,6 +99,10 @@ function layers(complete: boolean, unsurveyed: readonly number[]): TerrainLayers
     complete,
     unsurveyedCells: Uint32Array.from(unsurveyed),
     photometry: new Float32Array(40),
+    horizonNear: new Uint32Array(),
+    horizonFar: new Uint32Array(),
+    horizonComplete,
+    horizonRefusedCells: horizonComplete ? new Uint32Array() : Uint32Array.of(3),
   };
 }
 
@@ -121,6 +132,7 @@ function answerBlock(w: ScriptedHeightWorker, n: number, first: number): void {
     block: {
       fieldLevel: 6,
       newlySurveyed: Uint32Array.from([first, first + 2]),
+      newlyHeld: Uint32Array.from([first, first + 3]),
       levels: new Float64Array(100).fill(first),
     },
   });
@@ -457,11 +469,12 @@ describe("the height-worker pool", () => {
     expect(w.pendingBakes).toHaveLength(0);
   });
 
-  it("bakes again a bake in flight while a block came, unless it is complete and surveyed whole", () => {
+  it("bakes again a bake in flight while a block came, unless it is complete, its map complete and surveyed whole", () => {
     const cases: ReadonlyArray<readonly [TerrainLayers, boolean]> = [
       [layers(true, []), true],
       [layers(true, [5]), false],
       [layers(false, []), false],
+      [layers(true, [], false), false],
     ];
     const outcomes = cases.map(([made]) => {
       const { pool, created, baked } = poolOf(1, MOON_SOURCE);
@@ -490,9 +503,11 @@ describe("the height-worker pool", () => {
     answerBlock(workerAt(created, 0), 0, 10);
     answerBlock(workerAt(created, 0), 1, 20);
     answerBlock(workerAt(created, 1), 1, 20);
-    expect(changes.map((c) => [c.body, c.sequence, [...c.newlySurveyed]])).toEqual([
-      [MOON, 0, [10, 12]],
-      [MOON, 1, [20, 22]],
+    expect(
+      changes.map((c) => [c.body, c.sequence, [...c.newlySurveyed], [...c.newlyHeld]]),
+    ).toEqual([
+      [MOON, 0, [10, 12], [10, 13]],
+      [MOON, 1, [20, 22], [20, 23]],
     ]);
   });
 

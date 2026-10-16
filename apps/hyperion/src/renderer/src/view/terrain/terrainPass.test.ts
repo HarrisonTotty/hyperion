@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { countingRenderEngine, type CountingRenderEngine } from "../../test/countingRenderEngine";
+import { bindingStages } from "../../test/wgslStages";
+import { materialBindings, storageBuffersPerStage } from "../engine/webgpu/materials";
 import { goldenLevelTable, WGS84_FIGURE } from "../../test/terrainFixtures";
 import { NEAR_PLANE_M } from "../camera/projection";
 import { lookAlong } from "../camera/quaternion";
@@ -14,7 +16,7 @@ import { distanceToBoxM, relativeBounds } from "./bounds";
 import type { DrawSet } from "./cache";
 import { vertexDir } from "./cube";
 import { finestPatchSizeM } from "./grounded";
-import { INSTANCE_RECORD_BYTES } from "./gpu/uniforms";
+import { INSTANCE_RECORD_BYTES, NO_PARENT_SLOT } from "./gpu/uniforms";
 import { type Edge, EDGES, edgeNeighbour, parentKey, patchKeyString } from "./patchKey";
 import { planetGeometry, surfacePoint } from "./planet";
 import {
@@ -57,6 +59,9 @@ import {
 } from "./workers/messages";
 
 const PLANET = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
+
+/** WebGPU's default `maxStorageBuffersPerShaderStage`, which the engine never raises. */
+const DEFAULT_STORAGE_BUFFERS_PER_STAGE = 8;
 
 /** A pool that records the demand and bakes on the test's command. */
 class FakePool implements TerrainPool {
@@ -975,7 +980,23 @@ function bodyLayers(): TerrainLayers {
     complete: true,
     unsurveyedCells: new Uint32Array(),
     photometry,
+    // A horizon map of 0° everywhere, the codes 0.
+    horizonNear: new Uint32Array(65 * 65 * 4),
+    horizonFar: new Uint32Array(9 * 9 * 4),
+    horizonComplete: true,
+    horizonRefusedCells: new Uint32Array(),
   };
+}
+
+/** The parent slots and quadrants of the instance records last written. */
+function writtenParents(engine: CountingRenderEngine): Array<readonly [number, number]> {
+  const write = engine.writes.findLast((w) => w.buffer === "terrain instances");
+  const u = new Uint32Array(write?.data.slice().buffer ?? new ArrayBuffer(0));
+  const parents: Array<readonly [number, number]> = [];
+  for (let i = 0; i < u.length / (INSTANCE_RECORD_BYTES / 4); i += 1) {
+    parents.push([u[i * 8 + 6] ?? -1, u[i * 8 + 7] ?? -1]);
+  }
+  return parents;
 }
 
 describe("the lit terrain of a body (R10.T10.b)", () => {
@@ -1023,10 +1044,12 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
       "classLayers",
       "contacts",
       "heights",
+      "horizonMap",
       "instances",
       "slots",
       "terrainLights",
     ]);
+    expect(draw.storageBuffers?.["horizonMap"]?.name).toBe("terrain horizon-map");
     expect(Object.keys(draw.textures).toSorted()).toEqual([
       "atmosphereAbsorberColumns",
       "atmosphereAbsorberCurves",
@@ -1099,6 +1122,73 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     expect(after).not.toBe(before);
   });
 
+  it("gives each drawn patch its parent's slot where the parent's horizon map is resident, and no parent otherwise", async () => {
+    const { pass, pool, engine } = await passOn("low", { source: BODY });
+    pool().layers = bodyLayers();
+    const view = northPole(2_000_000);
+    pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    for (const face of [0, 1, 2, 3, 4, 5] as const) {
+      pool().deliver(pass, { face, level: 0, i: 0, j: 0 });
+    }
+    // Face 2's level-1 patches, three with their parent's map resident and one under a root whose
+    // slot holds none.
+    for (const [i, j] of [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [1, 1],
+    ] as const) {
+      pool().deliver(pass, { face: 2, level: 1, i, j });
+    }
+    const frame = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    const parents = writtenParents(engine);
+    expect(parents).toHaveLength(frame.drawSet.count);
+    const roots = new Map(
+      frame.drawSet.patches
+        .filter(({ patch }) => patch.key.level === 0)
+        .map(({ patch }) => [patch.key.face, patch.slot]),
+    );
+    const records = frame.drawSet.patches.map(({ patch }, n) => ({
+      level: patch.key.level,
+      face: patch.key.face,
+      quadrant: (patch.key.i & 1) | ((patch.key.j & 1) << 1),
+      written: parents[n] ?? [-1, -1],
+    }));
+    // A root has no parent; every other patch names its parent's slot and its quadrant there.
+    expect(records.filter((r) => r.level === 0 && r.written[0] !== NO_PARENT_SLOT)).toEqual([]);
+    const children = records.filter((r) => r.level > 0);
+    expect(children.length).toBeGreaterThan(0);
+    expect(
+      children.filter((r) => r.written[0] === NO_PARENT_SLOT || r.written[1] !== r.quadrant),
+    ).toEqual([]);
+    expect(children.filter((r) => roots.has(r.face) && r.written[0] !== roots.get(r.face))).toEqual(
+      [],
+    );
+    // A parent whose slot holds no map is no parent to blend to.
+    pool().layers = {
+      ...bodyLayers(),
+      horizonNear: new Uint32Array(),
+      horizonFar: new Uint32Array(),
+    };
+    pool().deliver(pass, { face: 2, level: 0, i: 0, j: 0 });
+    const again = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    const after = writtenParents(engine);
+    const underBlank = again.drawSet.patches.flatMap(({ patch }, n) =>
+      patch.key.face === 2 && patch.key.level === 1 ? [after[n]?.[0]] : [],
+    );
+    expect(underBlank.length).toBeGreaterThan(0);
+    expect(underBlank.filter((slot) => slot !== NO_PARENT_SLOT)).toEqual([]);
+  });
+
+  it("gives R05's spike shading no parent's map, which it does not draw", async () => {
+    const { pass, pool, engine } = await passOn("high");
+    const view = northPole(2_000_000);
+    pass.frame(inputAt(view));
+    pool().bakeDemand(pass);
+    pass.frame(inputAt(view));
+    expect(writtenParents(engine).every(([slot]) => slot === NO_PARENT_SLOT)).toBe(true);
+  });
+
   it("refuses a bake without R10's layers into a lit layout's slots", async () => {
     const { pass, pool } = await passOn("low", { source: BODY });
     const view = northPole(2_000_000);
@@ -1106,5 +1196,44 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     expect(pool().bakeDemand(pass)).toBeGreaterThan(0);
     const frame = pass.frame({ ...inputAt(view), lighting: LIGHTING });
     expect(frame.drawSet.count).toBe(0);
+  });
+});
+
+describe("the terrain materials' storage bindings by stage (decision-r10-t10b-r09-t2e §5)", () => {
+  const materials = (["baked-offsets", "face-differences"] as const).flatMap((path) => [
+    terrainMaterialSpec(path),
+    terrainLitMaterialSpec(path),
+  ]);
+
+  it("count at most WebGPU's default eight storage buffers in each stage, by their declared stages", () => {
+    const over = materials.filter((spec) => {
+      const counts = storageBuffersPerStage(materialBindings(spec));
+      return Math.max(counts.vertex, counts.fragment) > DEFAULT_STORAGE_BUFFERS_PER_STAGE;
+    });
+    expect(over.map((spec) => spec.name)).toEqual([]);
+    // The lit material's: R05's five (four on face-differences) in the vertex stage, and the class
+    // layers, the lights and the horizon map in the fragment stage.
+    expect(
+      storageBuffersPerStage(materialBindings(terrainLitMaterialSpec("baked-offsets"))),
+    ).toEqual({ vertex: 5, fragment: 3 });
+    expect(
+      storageBuffersPerStage(materialBindings(terrainLitMaterialSpec("face-differences"))),
+    ).toEqual({ vertex: 4, fragment: 3 });
+  });
+
+  it("declare each storage buffer to the stages whose entry points read it, and no other", () => {
+    expect(materials.filter((spec) => spec.vertexWgsl !== spec.fragmentWgsl)).toEqual([]);
+    const mismatched = materials.flatMap((spec) => {
+      const read = bindingStages(spec.vertexWgsl);
+      return (spec.storageBuffers ?? []).flatMap((buffer) => {
+        const declared = [...(buffer.stages ?? ["vertex", "fragment"])].toSorted();
+        const used = [...(read.get(buffer.binding) ?? [])].toSorted();
+        return declared.join(" ") === used.join(" ") ? [] : [[spec.name, buffer.name, used]];
+      });
+    });
+    expect(mismatched).toEqual([]);
+    // The walk finds the reads at all: the lit material's horizon map in its fragment stage.
+    const lit = bindingStages(terrainLitMaterialSpec("face-differences").vertexWgsl);
+    expect([...(lit.get(16) ?? [])]).toEqual(["fragment"]);
   });
 });

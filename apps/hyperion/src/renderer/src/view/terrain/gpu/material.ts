@@ -45,18 +45,29 @@ const DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
   "face-differences": "TERRAIN",
 };
 
+/**
+ * The storage buffers of `terrainPatch.wgsl` and the path's source, which only the vertex stage
+ * reads: the heights, slot records, instances and contacts, and on `baked-offsets` the offsets
+ * (R10's decision-r10-t10b-r09-t2e §5).
+ */
+export function terrainVertexStorage(path: TerrainVertexPath): StorageBufferSpec[] {
+  const vertex = ["vertex"] as const;
+  const storageBuffers: StorageBufferSpec[] = [
+    { name: "heights", binding: TERRAIN_BINDINGS.heights, stages: vertex },
+    { name: "slots", binding: TERRAIN_BINDINGS.slots, stages: vertex },
+    { name: "instances", binding: TERRAIN_BINDINGS.instances, stages: vertex },
+    { name: "contacts", binding: TERRAIN_BINDINGS.contacts, stages: vertex },
+  ];
+  if (path === "baked-offsets") {
+    storageBuffers.push({ name: "offsets", binding: TERRAIN_BINDINGS.offsets, stages: vertex });
+  }
+  return storageBuffers;
+}
+
 /** The terrain material of a vertex path. */
 export function terrainMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
   const source = frameWgsl + patchVertexWgsl + terrainPatchWgsl + terrainWgsl + PATH_SOURCES[path];
-  const storageBuffers: StorageBufferSpec[] = [
-    { name: "heights", binding: TERRAIN_BINDINGS.heights },
-    { name: "slots", binding: TERRAIN_BINDINGS.slots },
-    { name: "instances", binding: TERRAIN_BINDINGS.instances },
-    { name: "contacts", binding: TERRAIN_BINDINGS.contacts },
-  ];
-  if (path === "baked-offsets") {
-    storageBuffers.push({ name: "offsets", binding: TERRAIN_BINDINGS.offsets });
-  }
+  const storageBuffers = terrainVertexStorage(path);
   return {
     name: `terrain-${path}`,
     displayName: DISPLAY_NAMES[path],

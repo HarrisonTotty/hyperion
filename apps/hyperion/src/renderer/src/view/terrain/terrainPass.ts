@@ -56,7 +56,7 @@ import { distanceToBoxM, relativeBounds } from "./bounds";
 import { type DrawSet, DrawSetResolver, PatchCache } from "./cache";
 import { terrainMaterialSpec } from "./gpu/material";
 import { type TerrainLayout, TerrainResources } from "./gpu/resources";
-import { ContactRecords, InstanceRecords } from "./gpu/uniforms";
+import { ContactRecords, InstanceRecords, NO_PARENT_SLOT, parentQuadrant } from "./gpu/uniforms";
 import { MAX_LEVEL, type PatchKey, patchKeyString } from "./patchKey";
 import type { PlanetGeometry } from "./planet";
 import { finestPatchSizeM, type GroundContact, heldRadiusM, morphRampM } from "./grounded";
@@ -660,6 +660,8 @@ export class TerrainPass {
         r2.x * o.x + r2.y * o.y + r2.z * o.z - cameraM.z,
         morph[2 * level] ?? 0,
         morph[2 * level + 1] ?? 0,
+        this.#parentSlotOf(device, patch.key),
+        parentQuadrant(patch.key),
       );
     }
     this.#contacts.clear();
@@ -693,6 +695,23 @@ export class TerrainPass {
     u.sunRadiance[1] = green * k;
     u.sunRadiance[2] = blue * k;
     return device.draw;
+  }
+
+  /**
+   * The slot of `key`'s parent whose horizon map the patch's blends to by its morph factor
+   * (R10.T8.b; decision-r10-t8a §1), or {@link NO_PARENT_SLOT} where there is none to blend to: a
+   * root, a parent not resident, or one whose slot holds no map. R05's streaming gate splits only
+   * baked patches and `PatchCache.retain` pins the drawn patches' ancestors, so outside a forced
+   * region the parent is nearly always resident; inside one the grounded hold keeps the morph at 0.
+   */
+  #parentSlotOf(device: Device, key: PatchKey): number {
+    if (key.level === 0) {
+      return NO_PARENT_SLOT;
+    }
+    const parent = device.cache.residentOver(key, key.level - 1);
+    return parent !== undefined && device.resources.holdsHorizon(parent.slot)
+      ? parent.slot
+      : NO_PARENT_SLOT;
   }
 
   /** A lit frame's uniforms and lights, and its draw, made again where its tables changed. */
@@ -772,11 +791,15 @@ export class TerrainPass {
         indirect: { buffer: resources.indirect, offsetBytes: 0 },
       };
     }
-    if (lit === null || classLayers === null) {
-      throw new Error("a lit terrain's draw has no lit layout: its class layers or lights");
+    const horizonMap = resources.field("horizon-map");
+    if (lit === null || classLayers === null || horizonMap === null) {
+      throw new Error(
+        "a lit terrain's draw has no lit layout: its class layers, horizon maps or lights",
+      );
     }
     storageBuffers["classLayers"] = classLayers;
     storageBuffers["terrainLights"] = lit.lights;
+    storageBuffers["horizonMap"] = horizonMap;
     return {
       mesh: resources.mesh,
       material,

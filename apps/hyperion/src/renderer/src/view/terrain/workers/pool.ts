@@ -21,7 +21,8 @@
  * started, and its field alone makes them stale (per-body epochs): a bake in flight when the field
  * starts again or is released is baked again, and one in flight while blocks arrive is baked again
  * by R10's rebake rule, conservatively, since the blocks' changes may not be known yet: unless it
- * is complete with its survey mask whole. A bake the field cannot make yet, a survey whose margin
+ * is complete, its horizon map complete, with its survey mask whole (`rebake.ts`' `staleInFlight`).
+ * A bake the field cannot make yet, a survey whose margin
  * is still to come, waits for the body's next block. Each block's change of the survey is reported
  * once ({@link HeightWorkerPool.onFieldChange}), for the bakes already delivered (`rebake.ts`).
  */
@@ -39,6 +40,7 @@ import type {
   HeightWorkerRequest,
   TerrainLayers,
 } from "./messages";
+import { staleInFlight } from "./rebake";
 
 /** The part of a `Worker` the pool uses, so that tests can stand in for one. */
 export interface WorkerLike {
@@ -97,8 +99,9 @@ export interface FieldRefusal {
 
 /**
  * What one block of a body's payload changed in the workers' fields, reported once, from the first
- * worker to answer it: the cells it surveyed anew, which R10's rebake rule reads
- * (`rebake.ts`'s `needsRebake`), and the body's level table after it.
+ * worker to answer it: the cells it surveyed anew and the cells it brought that the fields did not
+ * hold, which R10's rebake rule reads (`rebake.ts`'s `needsRebake`), and the body's level table
+ * after it.
  */
 export interface FieldChange extends FieldBlockAnswer {
   readonly body: BodyIdHex;
@@ -732,8 +735,9 @@ export class HeightWorkerPool {
   /**
    * Whether a bake made after `inFlight` was sent is stale on arrival: its body's field started
    * anew or was released since, or blocks came since and R10's rebake rule may take it, being
-   * incomplete or with a survey mask a block could change. The blocks' own changes may not have
-   * been answered yet, so the rule is taken conservatively here.
+   * incomplete, with a horizon map whose far field a block could change, or with a survey mask a
+   * block could change (`rebake.ts`' `staleInFlight`). The blocks' own changes may not have been
+   * answered yet, so the rule is taken conservatively here.
    */
   private madeStale(inFlight: InFlight, layers: TerrainLayers | null): boolean {
     if (this.sourceBody === null) {
@@ -746,7 +750,7 @@ export class HeightWorkerPool {
     if (field === null || field.blocks.length === inFlight.blocksAtSend) {
       return false;
     }
-    return layers === null || !layers.complete || layers.unsurveyedCells.length > 0;
+    return staleInFlight(layers);
   }
 
   /** After a block of `body`'s field: the requests waiting for it are asked again. */

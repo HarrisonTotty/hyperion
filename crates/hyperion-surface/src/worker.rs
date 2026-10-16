@@ -18,9 +18,10 @@
 //! [`PartialField::insert`] (R10's Design note 16). A block is taken whole or refused whole
 //! ([`TakeBlockError`]), the field then as it was. [`WorkerFields::release`] drops the body.
 //!
-//! Each block taken answers with what it changed of the survey ([`SurveyChange`]): the cells it
-//! surveyed that the field did not hold as surveyed. A block can change a baked patch only there,
-//! or where the patch was not complete, which is the rebake rule below.
+//! Each block taken answers with what it changed of the field ([`SurveyChange`]): the cells it
+//! surveyed that the field did not hold as surveyed, and the cells it brought, surveyed or margin,
+//! that the field did not hold at all. A block can change a baked patch only there, or where the
+//! patch was not complete, which is the rebake rule below.
 //!
 //! # The rebake rule (Design note 16, as built)
 //!
@@ -28,19 +29,24 @@
 //! field held before it, surveyed or answered from a margin, and a resolution code alone changes no
 //! byte (R10.T6.a). A patch baked before a block is baked again after it exactly where
 //!
-//! - the block surveys a cell that holds one of the patch's vertices outside the survey, so that
-//!   its survey mask changes: the change meets the bake's [`BodyBake::unsurveyed_cells`]; or
-//! - the bake was not [complete](crate::bake::TerrainLayers::is_complete): some vertex took the
-//!   reference surface, or has no weights, because the field lacked a cell its reads reach, which
-//!   any block may bring, whether or not it changes the mask (main's ruling of 2026-10-14 on
-//!   R10.T6.a's question); or its horizon map was not
-//!   [complete](crate::bake::HorizonMap::is_complete): its far field, which reads ground far
-//!   beyond the patch, took the reference surface somewhere for want of a cell (R10.T8.a), and is
-//!   taken as an incomplete bake is.
+//! 1. the bake was not [complete](crate::bake::TerrainLayers::is_complete): some vertex took the
+//!    reference surface, or has no weights, because the field lacked a cell its reads reach, which
+//!    any block may bring, whether or not it changes the mask (main's ruling of 2026-10-14 on
+//!    R10.T6.a's question);
+//! 2. the block surveys a cell that holds one of the patch's vertices outside the survey, so that
+//!    its survey mask changes: the change meets the bake's [`BodyBake::unsurveyed_cells`]; or
+//! 3. the block brings a cell, surveyed or margin, that the bake's horizon map's far field was
+//!    refused for ([`HorizonMap::refused_cells`](crate::bake::HorizonMap::refused_cells)): a
+//!    refused height names the first cell its reads lacked, every read before it held and final,
+//!    so it can change only once that cell is held, and a block that brings none of them leaves
+//!    the map's words as they are (decision-r10-t8a §3, R10.T8.b). A margin cell answers a far
+//!    height with the true ground, so "brings" counts margin as well as surveyed ground.
 //!
 //! The client's `workers/rebake.ts` (`needsRebake`) applies the rule to the bakes it holds, from
-//! each bake's [`unsurveyed_cells`](BodyBake::unsurveyed_cells) and completeness and each block's
-//! [`SurveyChange`].
+//! each bake's [`unsurveyed_cells`](BodyBake::unsurveyed_cells), its horizon map's refused cells
+//! and its completeness, and each block's [`SurveyChange`]. A bake in flight while its body's blocks
+//! arrive is taken conservatively there: baked again unless it is complete, its horizon map is
+//! [complete](crate::bake::HorizonMap::is_complete), and its mask is whole.
 //!
 //! # The synthesis
 //!
@@ -61,7 +67,9 @@ use hyperion_base::units::Metres;
 
 use crate::bake::{TerrainBake, TerrainBakeOptions, UNSURVEYED, bake_terrain};
 use crate::cube::{FaceUv, MAX_LEVEL, PATCH_QUADS, PatchKey, face_uv_to_xyz, unit_dir};
-use crate::field::{BodyRef, FieldView, InsertBlockError, PartialField, cell_at_index, cell_index};
+use crate::field::{
+    BodyRef, FieldView, InsertBlockError, PartialField, ResolutionCode, cell_at_index, cell_index,
+};
 use crate::geometry::vertex_spacing;
 use crate::material::{
     GroundMaterial, Material, MaterialProperties, PhaseLaw, ResolvePropertiesError, material_at,
@@ -115,34 +123,48 @@ impl BodyField {
     }
 }
 
-/// The cells a block surveyed that its body's field did not hold as surveyed, as runs of cell
-/// indices at the field's level ([`cell_index`]): where a baked patch's survey mask can change.
-/// Empty for a block that surveys nothing new: a margin, a finer survey of cells held, or a block
-/// sent again.
+/// What a block changed of its body's field: the cells it surveyed anew, and those it brought.
+///
+/// Both are runs of cell indices at the field's level ([`cell_index`]): the cells the block
+/// surveyed that the field did not hold as surveyed, where a baked patch's survey mask can change,
+/// and the cells it brought, surveyed or margin, that the field did not hold at all, where a horizon
+/// map's refused far field can change (the [module documentation](self)'s rebake rule). Both are
+/// empty for a block sent again; a margin, or a finer survey of cells held, surveys nothing new,
+/// though a margin may bring cells.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct SurveyChange {
     runs: Vec<(u32, u32)>,
+    held: Vec<(u32, u32)>,
 }
 
 impl SurveyChange {
-    /// The runs, each its first cell index and the index past its last, sorted, disjoint and with
-    /// no two adjacent.
+    /// The runs of the cells surveyed anew, each its first cell index and the index past its last,
+    /// sorted, disjoint and with no two adjacent.
     #[must_use]
     pub fn runs(&self) -> &[(u32, u32)] {
         &self.runs
     }
 
-    /// Whether the block surveyed no cell anew.
+    /// The runs of the cells the field did not hold before the block, surveyed or margin.
+    ///
+    /// They are laid out as [`runs`](Self::runs) are. Every cell surveyed anew that the field did
+    /// not hold as margin is among them.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub fn held_runs(&self) -> &[(u32, u32)] {
+        &self.held
+    }
+
+    /// Whether the block surveyed no cell anew; it may still have brought cells as margin
+    /// ([`held_runs`](Self::held_runs)), which the rebake rule's third case reads.
+    #[must_use]
+    pub fn surveys_nothing(&self) -> bool {
         self.runs.is_empty()
     }
 
     /// Whether the block surveyed the cell of index `index` anew.
     #[must_use]
     pub fn surveys(&self, index: u32) -> bool {
-        let after = self.runs.partition_point(|&(start, _)| start <= index);
-        after > 0 && index < self.runs[after - 1].1
+        holds(&self.runs, index)
     }
 
     /// Whether the block surveyed anew any of `indices`.
@@ -151,12 +173,32 @@ impl SurveyChange {
         indices.iter().any(|&index| self.surveys(index))
     }
 
-    /// Adds the cell of index `index`, the next in rising order.
-    fn push(&mut self, index: u32) {
-        match self.runs.last_mut() {
-            Some((_, end)) if *end == index => *end = index + 1,
-            _ => self.runs.push((index, index + 1)),
-        }
+    /// Whether the block brought the cell of index `index`, surveyed or margin, which the field did
+    /// not hold before it.
+    #[must_use]
+    pub fn brings(&self, index: u32) -> bool {
+        holds(&self.held, index)
+    }
+
+    /// Whether the block brought any of `indices` that the field did not hold before it.
+    #[must_use]
+    pub fn brings_any(&self, indices: &[u32]) -> bool {
+        indices.iter().any(|&index| self.brings(index))
+    }
+}
+
+/// Whether `runs`, sorted and disjoint, hold `index`.
+#[must_use]
+fn holds(runs: &[(u32, u32)], index: u32) -> bool {
+    let after = runs.partition_point(|&(start, _)| start <= index);
+    after > 0 && index < runs[after - 1].1
+}
+
+/// Adds the cell of index `index`, the next in rising order, to `runs`.
+fn push_run(runs: &mut Vec<(u32, u32)>, index: u32) {
+    match runs.last_mut() {
+        Some((_, end)) if *end == index => *end = index + 1,
+        _ => runs.push((index, index + 1)),
     }
 }
 
@@ -344,16 +386,18 @@ impl BodyBake {
         &self.unsurveyed_cells
     }
 
-    /// Whether a block that made `change` makes this bake stale, so that the patch is baked again
-    /// (the [module documentation](self)'s rebake rule): the bake or its horizon map is not
-    /// complete, or the block surveys a cell its mask holds unsurveyed. Where it is `false`, the
-    /// patch bakes the same bytes after the block.
+    /// Whether a block that made `change` makes this bake stale, so that the patch is baked again.
+    ///
+    /// It is the [module documentation](self)'s rebake rule: the bake is not complete, the block
+    /// surveys a cell its mask holds unsurveyed, or it brings a cell its horizon map's far field
+    /// was refused for. Where it is `false`, the patch bakes the same bytes after the block, its
+    /// horizon map's words and refused cells included.
     #[must_use]
     pub fn needs_rebake(&self, change: &SurveyChange) -> bool {
         let layers = self.terrain.layers();
         !layers.is_complete()
-            || !layers.horizon().is_complete()
             || change.surveys_any(&self.unsurveyed_cells)
+            || change.brings_any(layers.horizon().refused_cells())
     }
 
     /// The two parts, to hand on without a copy.
@@ -416,7 +460,7 @@ impl WorkerFields {
     }
 
     /// Starts `body`'s field from `bytes`, one block 0, replacing any field of `body` held, and
-    /// answers with the cells it surveys.
+    /// answers with the cells it surveys and brings ([`SurveyChange`]).
     ///
     /// It builds the body's level bounds from the header ([`LevelBounds::new`], a few to some
     /// tens of milliseconds) and starts its cache afresh.
@@ -445,7 +489,8 @@ impl WorkerFields {
         Ok(change)
     }
 
-    /// Adds `bytes`, one block, to `body`'s field, and answers with the cells it surveys anew.
+    /// Adds `bytes`, one block, to `body`'s field, and answers with the cells it surveys anew and
+    /// brings ([`SurveyChange`]).
     ///
     /// # Errors
     ///
@@ -710,9 +755,10 @@ fn check_body(named: BodyRef, block: &DecodedBlock) -> Result<(), TakeBlockError
     }
 }
 
-/// The cells `block` surveys that `field` does not hold as surveyed. A cell `field` already holds
-/// keeps the finer of its codes and a cell it does not takes the block's, so a surveyed code in the
-/// block makes the cell surveyed whatever was held ([`PartialField::insert`]).
+/// The cells `block` surveys that `field` does not hold as surveyed, and the cells it carries,
+/// surveyed or margin, that `field` does not hold. A cell `field` already holds keeps the finer of
+/// its codes and a cell it does not takes the block's, so a surveyed code in the block makes the
+/// cell surveyed whatever was held ([`PartialField::insert`]).
 ///
 /// # Panics
 ///
@@ -723,13 +769,15 @@ fn survey_change(field: &PartialField, block: &DecodedBlock) -> SurveyChange {
     let level = field.header().level();
     let mut change = SurveyChange::default();
     for range in block.cover().ranges() {
-        if !range.code().is_surveyed() {
-            continue;
-        }
+        let surveyed = range.code().is_surveyed();
         for index in range.start()..range.end() {
             let cell = cell_at_index(level.get(), index).expect("a cover's cells are the level's");
-            if !field.is_surveyed(cell) {
-                change.push(index);
+            let held = field.resolution(cell);
+            if held.is_none() {
+                push_run(&mut change.held, index);
+            }
+            if surveyed && !held.is_some_and(ResolutionCode::is_surveyed) {
+                push_run(&mut change.runs, index);
             }
         }
     }

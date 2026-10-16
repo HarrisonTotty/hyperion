@@ -782,6 +782,73 @@ fn horizon_is_incomplete_where_the_far_field_reaches_beyond_the_view() {
 }
 
 #[test]
+fn horizon_names_the_cells_its_far_field_was_refused_for() {
+    let (w, _, surveyed) = straddling();
+    let field = world(w);
+    let coarse = field.header().level().get();
+    let inside = patch_in(*surveyed.first().unwrap(), coarse + 2);
+    let view = client(w, &surveyed, |_| code(50.0));
+    let synth = Synthesiser::new(&view, SEED);
+    let map = horizon_of(&synth, &mut SynthCache::new(), inside);
+    let refused = map.refused_cells().to_vec();
+    assert!(!map.is_complete());
+    assert!(!refused.is_empty(), "the far field reaches past the survey");
+    assert!(refused.is_sorted_by(|a, b| a < b), "rising, each once");
+    let header = field.header();
+    let reach = far_reach(&header.figure(), header.realised_relief().value()).value();
+    // A cell's centre lies within half its diagonal, about 1.2 of its mean side, of any point in it.
+    let cell = 1.7 * FRAC_PI_2 / f64::from(1_u32 << coarse);
+    for &index in &refused {
+        let c = cell_at_index(coarse, index).unwrap();
+        assert_eq!(
+            view.resolution(c),
+            None,
+            "a refused cell is one the view lacks"
+        );
+        let off = angle_between(c.vertex_dir(32, 32), inside.vertex_dir(32, 32));
+        assert!(
+            off <= reach + 2.0 * cell,
+            "{c:?} lies {off} rad off, past the reach"
+        );
+    }
+    // A view that gains every cell named answers each height that named one: none is named again.
+    let mut cells = surveyed.clone();
+    cells.extend(refused.iter().map(|&i| cell_at_index(coarse, i).unwrap()));
+    let grown = client_of(field, &cells);
+    let again = horizon_of(
+        &Synthesiser::new(&grown, SEED),
+        &mut SynthCache::new(),
+        inside,
+    );
+    assert!(
+        again
+            .refused_cells()
+            .iter()
+            .all(|i| refused.binary_search(i).is_err()),
+        "a cell held is never named"
+    );
+    assert_ne!(again, map);
+    // A worker's cache serves the field as it grows: warmed under the smaller view, it bakes the
+    // grown view's map, its refused cells too, as a cold cache does.
+    let mut warm = SynthCache::new();
+    assert_eq!(horizon_of(&synth, &mut warm, inside), map);
+    assert_eq!(
+        horizon_of(&Synthesiser::new(&grown, SEED), &mut warm, inside),
+        again
+    );
+    // A view within the reach names none, and the map is complete; a map skipped names none.
+    let whole = client_within_reach(field, inside);
+    let complete = horizon_of(
+        &Synthesiser::new(&whole, SEED),
+        &mut SynthCache::new(),
+        inside,
+    );
+    assert!(complete.is_complete());
+    assert!(complete.refused_cells().is_empty());
+    assert!(HorizonMap::default().refused_cells().is_empty());
+}
+
+#[test]
 fn horizon_skipped_leaves_the_map_empty_and_the_rest_as_baked() {
     let (w, edge, surveyed) = straddling();
     let view = client(w, &surveyed, |_| code(50.0));
@@ -910,12 +977,195 @@ fn horizon_azimuth_interpolation_is_continuous() {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// R10.T8.b's fixtures: the grid azimuth and a parent's and child's maps.
+// ---------------------------------------------------------------------------------------------
+
+/// A direction's bits, three 16-digit words.
+fn dir_bits(v: [f64; 3]) -> String {
+    format!(
+        "{:016x} {:016x} {:016x}",
+        bits(v[0]),
+        bits(v[1]),
+        bits(v[2])
+    )
+}
+
+/// The fixture of [`grid_azimuth`] that R10.T8.b's TypeScript twin `gridAzimuth` reads
+/// (decision-r10-t8a §2): `azimuth <face> <at ×3> <towards ×3> <φ>` by bits, φ `none` where the
+/// direction has no tangential part, over every face, the centres of faces 2 and 5 (the poles), a
+/// cube corner, both sides of s = ½, a point just past a face's edge (a skirt's) and the zenith.
+fn grid_azimuth_text() -> String {
+    let mut out = GoldenWriter::new();
+    out.header(crate::generator_version());
+    let mut rng = Lcg::new(0x6772_6964_617a_6930);
+    let unit = |rng: &mut Lcg| loop {
+        let v = [
+            2.0 * rng.next_f64() - 1.0,
+            2.0 * rng.next_f64() - 1.0,
+            2.0 * rng.next_f64() - 1.0,
+        ];
+        let n = dot(v, v).sqrt();
+        if n > 0.1 && n <= 1.0 {
+            break scale(v, 1.0 / n);
+        }
+    };
+    let half_less = st_to_uv(0.5 - 1e-6);
+    let half_more = st_to_uv(0.5 + 1e-6);
+    // (u, v) on each face: two general points, the centre, a corner, both sides of s = ½ in u and
+    // in v, and a point just past the edge u = 1.
+    let places = [
+        (0.3, -0.4),
+        (-0.7, 0.6),
+        (0.0, 0.0),
+        (1.0, 1.0),
+        (half_less, 0.2),
+        (half_more, 0.2),
+        (-0.5, half_less),
+        (-0.5, half_more),
+        (1.02, -0.3),
+    ];
+    for face in Face::ALL {
+        for &(u, v) in &places {
+            let at = face_uv_to_xyz(FaceUv { face, u, v });
+            let p = unit_dir(at);
+            let mut towards = vec![unit(&mut rng), unit(&mut rng), unit(&mut rng)];
+            // A sun low over the ground and one high, both in a general azimuth.
+            let t = unit_dir(sub(towards[0], scale(p, dot(towards[0], p))));
+            towards.push(add(scale(p, math::sin(0.05)), scale(t, math::cos(0.05))));
+            towards.push(add(scale(p, math::sin(1.4)), scale(t, math::cos(1.4))));
+            // The zenith and the nadir have none.
+            towards.extend([p, scale(p, -2.0)]);
+            for w in towards {
+                let phi = grid_azimuth(face, at, w).map_or_else(
+                    || "none".to_owned(),
+                    |a| format!("{:016x}", bits(a.value())),
+                );
+                out.line(&format!(
+                    "azimuth {} {} {} {phi}",
+                    face.index(),
+                    dir_bits(at),
+                    dir_bits(w)
+                ));
+            }
+        }
+    }
+    out.finish()
+}
+
+#[test]
+fn horizon_grid_azimuth_matches_its_fixture() {
+    golden!("horizon/grid_azimuth", &grid_azimuth_text());
+}
+
+/// The child's vertices the blend fixture samples: its even vertices every eighth (its parent's
+/// vertices), and a few odd ones.
+fn blend_samples() -> Vec<(u8, u8)> {
+    let mut samples: Vec<(u8, u8)> = (0..=8_u8)
+        .flat_map(|b| (0..=8_u8).map(move |a| (8 * a, 8 * b)))
+        .collect();
+    samples.extend([(5, 3), (13, 51), (63, 1), (34, 18)]);
+    samples
+}
+
+/// The azimuths the blend fixture's lookups are taken at, radians: on knots and between, and
+/// round the turn.
+const BLEND_AZIMUTHS: [f64; 5] = [0.0, 0.3, 1.9, PI, 5.9];
+
+/// The words of `map`'s texel `texel` of `words`, as a fixture line's tail.
+fn texel_words(words: &[u32], texel: usize) -> String {
+    words[texel * WORDS_PER_TEXEL..(texel + 1) * WORDS_PER_TEXEL]
+        .iter()
+        .map(|w| format!("{w:08x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The fixture of a child's and its parent's maps that R10.T8.b's blend twin reads
+/// (decision-r10-t8a §1): `patch <child|parent> <face> <level> <i> <j>`, each map's far field
+/// whole as `far <map> <a> <b> <words ×4>`, its near field at the sampled vertices as `near <map>
+/// <x> <y> <words ×4>` (the child's at [`blend_samples`], the parent's at the parent vertices under
+/// the child's even ones), and `elevation <map> <x> <y> <azimuth> <elevation>` by bits,
+/// [`HorizonMap::elevation_at`] there, at [`BLEND_AZIMUTHS`].
+fn blend_text() -> String {
+    let w = SyntheticWorld::MoonLike;
+    let field = world(w);
+    let coarse = field.header().level().get();
+    let child = patch_in(rim_cells(field, 1)[0], coarse + 3);
+    let parent = child.parent().unwrap();
+    let view = client_within_reach(field, child);
+    let synth = Synthesiser::new(&view, SEED);
+    let mut cache = SynthCache::new();
+    let maps = [
+        ("child", child, horizon_of(&synth, &mut cache, child)),
+        ("parent", parent, horizon_of(&synth, &mut cache, parent)),
+    ];
+    let (qx, qy) = (child.i() & 1, child.j() & 1);
+    let to_parent = |(x, y): (u8, u8)| {
+        let q = |q: u32, n: u8| u8::try_from(u32::midpoint(64 * q, u32::from(n))).unwrap();
+        (q(qx, x), q(qy, y))
+    };
+    let mut out = GoldenWriter::new();
+    out.header(crate::generator_version());
+    for (name, key, map) in &maps {
+        out.line(&format!(
+            "patch {name} {} {} {} {}",
+            key.face().index(),
+            key.level(),
+            key.i(),
+            key.j()
+        ));
+        let vertices: Vec<(u8, u8)> = if *name == "child" {
+            blend_samples()
+        } else {
+            blend_samples()
+                .into_iter()
+                .filter(|&(x, y)| x % 2 == 0 && y % 2 == 0)
+                .map(to_parent)
+                .collect()
+        };
+        for b in 0..=8_u8 {
+            for a in 0..=8_u8 {
+                let texel = usize::from(b) * FAR_SIDE + usize::from(a);
+                out.line(&format!(
+                    "far {name} {a} {b} {}",
+                    texel_words(map.far_words(), texel)
+                ));
+            }
+        }
+        for &(x, y) in &vertices {
+            let texel = usize::from(y) * PATCH_VERTICES + usize::from(x);
+            out.line(&format!(
+                "near {name} {x} {y} {}",
+                texel_words(map.near_words(), texel)
+            ));
+        }
+        for &(x, y) in &vertices {
+            for phi in BLEND_AZIMUTHS {
+                let e = map.elevation_at(x, y, Radians::new(phi)).value();
+                out.line(&format!(
+                    "elevation {name} {x} {y} {:016x} {:016x}",
+                    bits(phi),
+                    bits(e)
+                ));
+            }
+        }
+    }
+    out.finish()
+}
+
+#[test]
+fn horizon_blend_fixture_matches() {
+    golden!("horizon/blend", &blend_text());
+}
+
 /// The tests that read files, which the browser target cannot (plan R04, Design note 12).
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod native_only {
     use std::path::Path;
 
-    /// Every golden file of `tests/golden/horizon/` carries `GENERATOR_VERSION`, and there is one.
+    /// Every golden file of `tests/golden/horizon/` carries `GENERATOR_VERSION`, and there are
+    /// three: the encoding's, the grid azimuth's and the blend's.
     #[test]
     fn every_horizon_golden_carries_the_generator_version() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -935,6 +1185,6 @@ mod native_only {
             );
             seen += 1;
         }
-        assert_eq!(seen, 1);
+        assert_eq!(seen, 3);
     }
 }

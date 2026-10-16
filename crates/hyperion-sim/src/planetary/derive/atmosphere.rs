@@ -25,7 +25,10 @@
 //!   condenses at the surface temperature, give the partial pressures from the body's gravity; a
 //!   grey atmosphere warms the surface to `T_s` = `T_eq` (1 + ¾τ)^¼ ([`atmosphere`]). The state,
 //!   and from it the Bond albedo and cloud fraction that the equilibrium temperature reads next,
-//!   follow ([`SurfaceState`]).
+//!   follow ([`SurfaceState`]). From version 23 (`SNAPSHOT_VERSION`, the `p14-snapshot` lane's
+//!   hold) each condensable is held in the greenhouse by P14.T51.a's condensate partition
+//!   ([`partition`](crate::planetary::chem::partition)) over the body's climate, on the
+//!   registry's phase diagrams.
 //! - **Carbon speciation and oxygen** (P14.T24.f). A body formed beyond the snow line that lies
 //!   beyond the maximum-greenhouse limit carries its carbon as methane, held where a reservoir lies
 //!   on its surface at [`METHANE_RELATIVE_HUMIDITY`] of its saturation pressure; a runaway world
@@ -45,6 +48,9 @@
 
 use crate::id::BodyId;
 use crate::math;
+use crate::planetary::chem::partition::{
+    AirborneWeights, BuildColumnInventoryError, ClimateSpan, ColumnInventory,
+};
 use crate::planetary::chem::redox::SNOW_LINE_TEMPERATURE;
 use crate::planetary::context::XuvHistory;
 use crate::planetary::derive::composition::{MassFractions, SnowLineSide};
@@ -485,6 +491,44 @@ impl NitrogenLine {
             Self::Ammonia
         } else {
             Self::Snow
+        }
+    }
+}
+
+/// The generator version from which T13.c's passes take the `p14-snapshot` lane's rules: 23, the
+/// 22 → 23 batch's bump (plan 14, "Order and parallelism", Phase L; decision-bump-plan-after-22
+/// §1.2, "The lane's hold").
+///
+/// It is the one hold of the lane's edits on the record path: P14.T51.a's condensate partition in
+/// the greenhouse ([`SnapshotRules::Batch`], [`atmosphere_under`]), and P14.T51.b's area-mix albedo
+/// and P14.T57.a's refitted greenhouse constants, which take its `Batch` arm as they land. Below
+/// it [`SnapshotRules::in_force`] is [`SnapshotRules::Held`], so that every atmosphere is version
+/// 22's bit for bit until P14.T54.a's wiring, which gives the passes the body's climate and removes
+/// this hold and its tripwire (`the_snapshot_lane_is_held_only_until_the_batch_s_bump`).
+pub(crate) const SNAPSHOT_VERSION: GeneratorVersion = GeneratorVersion::new(23);
+
+/// Which rules T13.c's passes follow (the `p14-snapshot` lane's hold, [`SNAPSHOT_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum SnapshotRules {
+    /// Version 22's: P14.T13.c's greenhouse, each condensable held at its saturation pressure at
+    /// the mean surface temperature on the held Clausius–Clapeyron curves, and methane at its
+    /// humidity ([`greenhouse`]).
+    Held,
+    /// The 22 → 23 batch's: the condensate partition over the body's climate
+    /// ([`partition`](crate::planetary::chem::partition), P14.T51.a) on the registry's phase
+    /// diagrams.
+    Batch,
+}
+
+impl SnapshotRules {
+    /// The rules this generator version gives: the batch's from [`SNAPSHOT_VERSION`], and version
+    /// 22's below it.
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        if GENERATOR_VERSION >= SNAPSHOT_VERSION {
+            Self::Batch
+        } else {
+            Self::Held
         }
     }
 }
@@ -1450,6 +1494,36 @@ impl Airborne {
     const fn carbon_carrier(&self) -> CarbonCarrier {
         self.carrier
     }
+
+    /// What the climate leaves free to fill the air, as the condensate partition reads it: each
+    /// gas's column weight, its mass times `weight` pascals per kilogram, in registry order, with
+    /// the carbon as its carrier and the oxygen only where there is some, as [`greenhouse`] takes
+    /// them (P14.T51.a).
+    ///
+    /// # Errors
+    ///
+    /// [`BuildColumnInventoryError::NotAWeight`] where a weight is not finite: a body so small
+    /// that its weight per kilogram overflows, or a mass whose weight does.
+    fn column(&self, weight: f64) -> Result<ColumnInventory, BuildColumnInventoryError> {
+        let carbon = match self.carrier {
+            CarbonCarrier::CarbonDioxide => (Gas::CarbonDioxide, self.carbon_dioxide),
+            CarbonCarrier::Methane => (Gas::Methane, self.methane),
+        };
+        let oxygen = (self.oxygen > 0.0).then_some((Gas::Oxygen, self.oxygen));
+        let gases = [
+            Some((Gas::Water, self.water)),
+            Some(carbon),
+            Some((Gas::Nitrogen, self.nitrogen)),
+            oxygen,
+            Some((Gas::Argon, self.argon)),
+        ];
+        ColumnInventory::new(
+            gases
+                .into_iter()
+                .flatten()
+                .map(|(gas, mass)| (gas.substance(), Pascals::new(mass * weight))),
+        )
+    }
 }
 
 /// The weight of methane over a surface whose inventory would weigh `inventory` and whose
@@ -1556,6 +1630,79 @@ fn greenhouse(
         t = saturate(grey_surface_temperature(equilibrium, tau).value()).value();
     }
     let partials = partials_at(t);
+    let tau = optical_depth(&partials, equilibrium);
+    (t, partials, tau)
+}
+
+/// The climate the condensate partition reads at a step of the greenhouse: a function of the
+/// step's mean surface temperature and of the partial pressures the previous step gave (P14.T51.a;
+/// [`atmosphere_under`]).
+pub(crate) type ClimateOf<'a> = dyn Fn(Kelvin, &PartialPressures) -> ClimateSpan + 'a;
+
+/// The partial pressures, as column weights, of the airborne inventory `inventory` over the climate
+/// `climate` (the condensate partition's, [`AirborneWeights::solve`]), with `weights` the scratch
+/// it solves in.
+#[must_use]
+fn partitioned_partials(
+    inventory: &ColumnInventory,
+    climate: &ClimateSpan,
+    weights: &mut AirborneWeights,
+) -> PartialPressures {
+    weights.solve(climate, inventory);
+    let mut p = [Pascals::ZERO; 9];
+    for ((substance, _), &w) in inventory.species().zip(weights.weights()) {
+        if let Some(gas) = substance.gas() {
+            p[gas.index()] = w;
+        }
+    }
+    PartialPressures(p)
+}
+
+/// The partial pressures, as column weights, of the airborne inventory `inventory` with none of it
+/// condensed: the column the partitioned greenhouse's first step reads its climate from.
+#[must_use]
+fn whole_column(inventory: &ColumnInventory) -> PartialPressures {
+    let mut p = [Pascals::ZERO; 9];
+    for (substance, w) in inventory.species() {
+        if let Some(gas) = substance.gas() {
+            p[gas.index()] = w;
+        }
+    }
+    PartialPressures(p)
+}
+
+/// [`greenhouse`] under the condensate partition (P14.T51.a, [`SnapshotRules::Batch`]): the
+/// temperature iterated [`GREENHOUSE_STEPS`] times upward from the equilibrium temperature through
+/// the grey greenhouse its partial pressures give, each step's partial pressures the partition's
+/// of the airborne inventory `inventory`, as column weights ([`Airborne::column`]), over the climate
+/// `climate` gives for the step's temperature and the previous step's partial pressures, and held
+/// by `saturate` at the hottest host's.
+///
+/// The climate reads the column of the step before, so that a column's contrasts can follow its
+/// pressure: a thin air's large contrast holds its dominant condensable at a cold trap, which keeps
+/// it thin (Wordsworth 2015's collapse). The first step's column is the whole airborne inventory,
+/// the largest it can be and so the smallest contrasts, as a body's outgassed air starts: an empty
+/// column's contrasts, an airless body's, would freeze out even a bar of nitrogen that a full
+/// column's transport keeps airborne (the collapse is bistable, Wordsworth 2015), and the
+/// iteration keeps the state the full column leads to.
+#[must_use]
+fn partitioned_greenhouse(
+    inventory: &ColumnInventory,
+    equilibrium: Kelvin,
+    saturate: &impl Fn(f64) -> Kelvin,
+    climate: &ClimateOf<'_>,
+) -> (f64, PartialPressures, f64) {
+    let mut weights = AirborneWeights::new();
+    let mut partials = whole_column(inventory);
+    let mut t = equilibrium.value();
+    for _ in 0..GREENHOUSE_STEPS {
+        let span = climate(Kelvin::new(t), &partials);
+        partials = partitioned_partials(inventory, &span, &mut weights);
+        let tau = optical_depth(&partials, equilibrium);
+        t = saturate(grey_surface_temperature(equilibrium, tau).value()).value();
+    }
+    let span = climate(Kelvin::new(t), &partials);
+    partials = partitioned_partials(inventory, &span, &mut weights);
     let tau = optical_depth(&partials, equilibrium);
     (t, partials, tau)
 }
@@ -1674,6 +1821,55 @@ fn greenhouse(
 /// ```
 #[must_use]
 pub fn atmosphere(inputs: &AtmosphereInputs) -> Atmosphere {
+    // Until P14.T54.a gives the passes the body's climate, which `derive_body` has not (its range
+    // is T24.a's, of the body's spin), the batch's partition would read a climate with no contrast.
+    // The hold's tripwire stops the bump until it does.
+    atmosphere_under(SnapshotRules::in_force(), inputs, &|t, _| {
+        ClimateSpan::isothermal(t)
+    })
+}
+
+/// Step 4 of [`atmosphere_under`] under the rules `rules`: the surface temperature, partial
+/// pressures and optical depth of the airborne masses `airborne`, each weighing `weight` pascals
+/// per kilogram, over a surface in equilibrium at `equilibrium`, by [`greenhouse`] or, under the
+/// batch's rules, [`partitioned_greenhouse`] over the climate `climate_of` gives.
+///
+/// `None` only under the batch's rules, where a weight is not finite and the partition cannot
+/// weigh the inventory ([`Airborne::column`]'s error, which says no more than that).
+#[must_use]
+fn greenhouse_under(
+    rules: SnapshotRules,
+    airborne: &Airborne,
+    weight: f64,
+    equilibrium: Kelvin,
+    saturate: &impl Fn(f64) -> Kelvin,
+    climate_of: &ClimateOf<'_>,
+) -> Option<(f64, PartialPressures, f64)> {
+    match rules {
+        SnapshotRules::Held => Some(greenhouse(airborne, weight, equilibrium, saturate)),
+        SnapshotRules::Batch => airborne
+            .column(weight)
+            .ok()
+            .map(|inventory| partitioned_greenhouse(&inventory, equilibrium, saturate, climate_of)),
+    }
+}
+
+/// [`atmosphere`] under the lane's rules `rules`, with the climate the condensate partition reads
+/// given by `climate_of` (P14.T51.a, held by [`SNAPSHOT_VERSION`]): [`atmosphere`] is this under
+/// [`SnapshotRules::in_force`].
+///
+/// Under [`SnapshotRules::Held`] step 4 is P14.T13.c's ([`greenhouse`]) and `climate_of` is not
+/// read. Under [`SnapshotRules::Batch`] it is the partition's ([`partitioned_greenhouse`]): after
+/// escape (step 2) and the climate's division (step 3), each greenhouse step holds every
+/// condensable as [`partition`](crate::planetary::chem::partition) does over the climate
+/// `climate_of` gives for the step's mean surface temperature and the previous step's partial
+/// pressures. Every other step is the same.
+#[must_use]
+pub(crate) fn atmosphere_under(
+    rules: SnapshotRules,
+    inputs: &AtmosphereInputs,
+    climate_of: &ClimateOf<'_>,
+) -> Atmosphere {
     let cap = inputs.hottest_host.value();
     let saturate = |t: f64| Kelvin::new(if cap > 0.0 { t.min(cap) } else { t });
     let exobase = exobase_temperature(inputs.worst_equilibrium, inputs.xuv_fluence);
@@ -1725,7 +1921,17 @@ pub fn atmosphere(inputs: &AtmosphereInputs) -> Atmosphere {
     // Step 4: the partial pressures and the greenhouse they hold.
     let equilibrium = inputs.equilibrium;
     let weight = GRAVITATIONAL_CONSTANT * m / (r * r) / (4.0 * core::f64::consts::PI * r * r);
-    let (mut t, mut partials, tau) = greenhouse(&airborne, weight, equilibrium, &saturate);
+    let step = greenhouse_under(rules, &airborne, weight, equilibrium, &saturate, climate_of);
+    let Some((mut t, mut partials, tau)) = step else {
+        // A weight that is not finite, of a body far smaller than any the generator makes, holds
+        // nothing it can weigh: the body is airless, as one of no mass or radius is.
+        return airless(
+            SurfaceState::Airless,
+            PartialPressures::default(),
+            equilibrium.value(),
+            None,
+        );
+    };
     let carrier = Some(airborne.carbon_carrier());
 
     // Step 5: the state.

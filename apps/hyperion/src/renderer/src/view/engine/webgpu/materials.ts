@@ -13,6 +13,7 @@ import { COLOUR_WRITE_ALL } from "../gpuFlags";
 import {
   POST_PROCESS_BINDINGS,
   type SamplerSpec,
+  type ShaderStageName,
   type StorageBufferSpec,
   type TextureBindingSpec,
   type WgslMaterialSpec,
@@ -94,15 +95,60 @@ export function postProcessBindings(spec: WgslPostProcessSpec): ResourceBindings
   };
 }
 
+/** The visibility flags of `stages`, both stages where none is named. */
+export function stageVisibility(stages: ReadonlyArray<ShaderStageName> | undefined): number {
+  if (stages === undefined) {
+    return SHADER_STAGE.VERTEX | SHADER_STAGE.FRAGMENT;
+  }
+  let flags = 0;
+  for (const stage of stages) {
+    switch (stage) {
+      case "vertex":
+        flags |= SHADER_STAGE.VERTEX;
+        break;
+      case "fragment":
+        flags |= SHADER_STAGE.FRAGMENT;
+        break;
+    }
+  }
+  return flags;
+}
+
 /**
- * The `@group(2)` layout entries of `bindings`, visible to both stages.
+ * The storage buffers `bindings` makes visible to each stage, by their declared stages: what
+ * WebGPU counts against `maxStorageBuffersPerShaderStage` (R10's decision-r10-t10b-r09-t2e §5).
+ */
+export function storageBuffersPerStage(
+  bindings: Pick<ResourceBindings, "storageBuffers">,
+): Readonly<Record<ShaderStageName, number>> {
+  let vertex = 0;
+  let fragment = 0;
+  for (const buffer of bindings.storageBuffers) {
+    const flags = stageVisibility(buffer.stages);
+    vertex += (flags & SHADER_STAGE.VERTEX) === 0 ? 0 : 1;
+    fragment += (flags & SHADER_STAGE.FRAGMENT) === 0 ? 0 : 1;
+  }
+  return { vertex, fragment };
+}
+
+/**
+ * The `@group(2)` layout entries of `bindings`: textures and samplers visible to both stages, each
+ * storage buffer to its declared stages ({@link StorageBufferSpec.stages}).
  *
- * @throws Error naming the owner when two resources share a binding.
+ * @throws Error naming the owner when two resources share a binding, or a storage buffer names no
+ * stage.
  */
 export function resourceLayoutEntries(
   bindings: ResourceBindings,
 ): ReadonlyArray<GPUBindGroupLayoutEntry> {
   const visibility = SHADER_STAGE.VERTEX | SHADER_STAGE.FRAGMENT;
+  for (const buffer of bindings.storageBuffers) {
+    if (stageVisibility(buffer.stages) === 0) {
+      throw new Error(
+        `${bindings.owner} declares storage buffer ${buffer.name} visible to no stage`,
+      );
+    }
+  }
   const entries: GPUBindGroupLayoutEntry[] = [
     ...bindings.textures.map((texture) => ({
       binding: texture.binding,
@@ -119,7 +165,7 @@ export function resourceLayoutEntries(
     })),
     ...bindings.storageBuffers.map((buffer) => ({
       binding: buffer.binding,
-      visibility,
+      visibility: stageVisibility(buffer.stages),
       buffer: { type: "read-only-storage" } as const,
     })),
   ];

@@ -46,7 +46,8 @@ import type { Rgb } from "../photometry/toneCurve";
 import type { TerrainVertexPath } from "../quality/qualitySetting";
 import frameWgsl from "../shaders/frame.wgsl?raw";
 import litBodyWgsl from "../shaders/litBody.wgsl?raw";
-import { PATH_SOURCES, TERRAIN_BINDINGS } from "./gpu/material";
+import { PATH_SOURCES, TERRAIN_BINDINGS, terrainVertexStorage } from "./gpu/material";
+import horizonWgsl from "./shadows/horizon.wgsl?raw";
 import patchVertexWgsl from "./shaders/patchVertex.wgsl?raw";
 import terrainLitWgsl from "./shaders/terrainLit.wgsl?raw";
 import terrainPatchWgsl from "./shaders/terrainPatch.wgsl?raw";
@@ -68,6 +69,8 @@ export const TERRAIN_LIT_BINDINGS = {
   terrainLights: 8,
   /** The first of the seven tables of R08's surface lighting. */
   atmosphere: 9,
+  /** Each slot's horizon map (`slotLayout.ts`' `horizon-map`, R10.T8.b). */
+  horizonMap: 16,
 } as const;
 
 /** The console names of the two paths' lit materials. */
@@ -78,7 +81,14 @@ const DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
 
 /**
  * The lit terrain material of a vertex path: `frame.wgsl`, `patchVertex.wgsl`, R08's surface
- * lighting, R07's `litBody.wgsl`, `terrainPatch.wgsl`, `terrainLit.wgsl` and the path's source.
+ * lighting, R07's `litBody.wgsl`, `terrainPatch.wgsl`, the horizon map's lookup
+ * (`shadows/horizon.wgsl`, R10.T8.b), `terrainLit.wgsl` and the path's source.
+ *
+ * @remarks
+ * Each storage buffer is visible only to the stage that reads it (decision-r10-t10b-r09-t2e §5):
+ * R05's five, four on `face-differences`, to the vertex stage, and the class layers, the lights and
+ * the horizon map to the fragment stage, so that neither stage counts more than WebGPU's default
+ * eight, which the engine never raises.
  */
 export function terrainLitMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
   const source =
@@ -87,20 +97,17 @@ export function terrainLitMaterialSpec(path: TerrainVertexPath): WgslMaterialSpe
     SURFACE_LIGHTING_WGSL +
     litBodyWgsl +
     terrainPatchWgsl +
+    horizonWgsl +
     terrainLitWgsl +
     PATH_SOURCES[path];
   const b = TERRAIN_LIT_BINDINGS;
+  const fragment = ["fragment"] as const;
   const storageBuffers: StorageBufferSpec[] = [
-    { name: "heights", binding: b.heights },
-    { name: "slots", binding: b.slots },
-    { name: "instances", binding: b.instances },
-    { name: "contacts", binding: b.contacts },
-    { name: "classLayers", binding: b.classLayers },
-    { name: "terrainLights", binding: b.terrainLights },
+    ...terrainVertexStorage(path),
+    { name: "classLayers", binding: b.classLayers, stages: fragment },
+    { name: "terrainLights", binding: b.terrainLights, stages: fragment },
+    { name: "horizonMap", binding: b.horizonMap, stages: fragment },
   ];
-  if (path === "baked-offsets") {
-    storageBuffers.push({ name: "offsets", binding: b.offsets });
-  }
   return {
     name: `terrain-lit-${path}`,
     displayName: DISPLAY_NAMES[path],

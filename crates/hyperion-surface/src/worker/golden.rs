@@ -21,12 +21,16 @@
 //! - `block <payload> <index> <bytes>` for each block in the order posted, the first payload's (1)
 //!   first, its bytes in lowercase hexadecimal;
 //! - `change <ordinal> <runs>`, the [`SurveyChange`] of the block posted `ordinal`th from 0, each run
-//!   `<first>-<past last>`, or `-` for none;
+//!   `<first>-<past last>`, or `-` for none, then `held <ordinal> <runs>`, its
+//!   [`held_runs`](SurveyChange::held_runs) alike (R10.T8.b);
 //! - `level <when> <n> <bits> <bits> <bits> <bits>`, the level table's row n after the first block
 //!   (`first`) and after the last (`last`);
 //! - for each bake, `patch <name> <face> <level> <i> <j> <vertex path> <normals> <weights>`, then
 //!   R10.T6.a's lines (`tests/golden/terrain_bake/`'s), then `unsurveyed <indices>` or
 //!   `unsurveyed -`;
+//! - for two of those bakes with the horizon map (R10.T8.b), `horizon <name> <face> <level> <i>
+//!   <j>`, the digests `near` and `far` of the map's words (each as an `f64`), `horizon_complete
+//!   <bool>`, and `refused <indices>` or `refused -`;
 //! - for each reading, `reading <face> <u bits> <v bits> <baseline bits>`, then `none` or its
 //!   values' bits and `resolved <bool>`;
 //! - for each line of sight, `slant <origin bits ×3> <direction bits ×3> <reach bits>`, then
@@ -41,7 +45,7 @@ use hyperion_testkit::golden::{GoldenWriter, f32_digest, f64_digest};
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
-use super::tests::{cell, face_uv, fixture, probes, sight_lines};
+use super::tests::{cell, face_uv, fixture, lit, probes, sight_lines};
 use super::*;
 use crate::bake::WeightsLayer;
 use crate::patch::{NormalScale, VertexPath};
@@ -73,18 +77,48 @@ fn hex(bytes: &[u8]) -> String {
         })
 }
 
-/// A change's runs in the golden's form.
-fn runs(change: &SurveyChange) -> String {
-    if change.is_empty() {
+/// Runs in the golden's form.
+fn runs(runs: &[(u32, u32)]) -> String {
+    if runs.is_empty() {
         "-".to_owned()
     } else {
-        change
-            .runs()
-            .iter()
+        runs.iter()
             .map(|(a, b)| format!("{a}-{b}"))
             .collect::<Vec<_>>()
             .join(" ")
     }
+}
+
+/// Indices in the golden's form, `-` for none.
+fn indices(cells: &[u32]) -> String {
+    if cells.is_empty() {
+        "-".to_owned()
+    } else {
+        cells
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+/// Writes the horizon map of `bake`, the bake named `name`.
+fn write_horizon(out: &mut GoldenWriter, name: &str, bake: &BodyBake) {
+    let k = bake.terrain().patch().key;
+    let map = bake.terrain().layers().horizon();
+    out.line(&format!(
+        "horizon {name} {} {} {} {}",
+        k.face().index(),
+        k.level(),
+        k.i(),
+        k.j()
+    ));
+    let digest =
+        |words: &[u32]| f64_digest(&words.iter().copied().map(f64::from).collect::<Vec<_>>());
+    out.u64_hex("near", digest(map.near_words()));
+    out.u64_hex("far", digest(map.far_words()));
+    out.line(&format!("horizon_complete {}", map.is_complete()));
+    out.line(&format!("refused {}", indices(map.refused_cells())));
 }
 
 /// Writes `table`'s rows, as of `when`.
@@ -153,15 +187,7 @@ fn write_bake(out: &mut GoldenWriter, name: &str, opts: &TerrainBakeOptions, bak
     out.f64("bound", l.bound().value());
     out.f64("sigma", l.sigma().value());
     out.line(&format!("complete {}", l.is_complete()));
-    let cells: Vec<String> = bake.unsurveyed_cells().iter().map(u32::to_string).collect();
-    out.line(&format!(
-        "unsurveyed {}",
-        if cells.is_empty() {
-            "-".to_owned()
-        } else {
-            cells.join(" ")
-        }
-    ));
+    out.line(&format!("unsurveyed {}", indices(bake.unsurveyed_cells())));
 }
 
 /// The golden's points: two in the surveys, one in the margin and one not held.
@@ -198,7 +224,8 @@ fn moon_text() -> String {
             fields.chunk(f.body, block)
         }
         .expect("the fixture's blocks are taken");
-        out.line(&format!("change {ordinal} {}", runs(&change)));
+        out.line(&format!("change {ordinal} {}", runs(change.runs())));
+        out.line(&format!("held {ordinal} {}", runs(change.held_runs())));
         if ordinal == 0 {
             write_levels(
                 &mut out,
@@ -211,6 +238,13 @@ fn moon_text() -> String {
     for (name, key, opts) in probes() {
         let bake = fields.bake(f.body, SEED, key, &opts).expect("held");
         write_bake(&mut out, name, &opts, &bake);
+    }
+    for (name, key, opts) in probes()
+        .into_iter()
+        .filter(|(name, ..)| matches!(*name, "inside" | "astride"))
+    {
+        let bake = fields.bake(f.body, SEED, key, &lit(opts)).expect("held");
+        write_horizon(&mut out, name, &bake);
     }
     write_readings(&mut out, &mut fields, f.body);
     write_sight_lines(&mut out, &mut fields, f.body);

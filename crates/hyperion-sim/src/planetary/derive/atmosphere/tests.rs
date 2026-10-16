@@ -2157,3 +2157,228 @@ fn the_ammonia_line_is_held_only_until_the_batch_s_bump() {
     );
     assert_eq!(format!("{ceres:?}"), format!("{held:?}"));
 }
+
+// P14.T51.a: the condensate partition in T13.c's passes, held at 22 by the lane's hold.
+
+use crate::planetary::chem::partition::ClimateSpan;
+use crate::planetary::hooks::surface::{
+    OceanWeight, SeasonalSpin, SurfaceConditions, SurfaceInputs,
+};
+use crate::units::consts::STEFAN_BOLTZMANN;
+use crate::units::{Degrees, MetresPerSecondSquared, Radians, Seconds};
+
+/// An Earth's inputs, with its median inventory at its median ranks (the planets' own,
+/// [`volatile_inventory`] at Earth's mass and fractions), at the equilibrium temperature
+/// `equilibrium` and against the habitable zone as `insolation` puts it.
+fn earth_inputs(equilibrium: f64, insolation: Insolation) -> AtmosphereInputs {
+    let mass = EARTH_MASS_KG;
+    AtmosphereInputs {
+        mass: Kilograms::new(mass),
+        radius: Metres::new(crate::units::consts::EARTH_RADIUS_M),
+        material: SurfaceMaterial::Rock,
+        envelope_fraction: 0.0,
+        inventory: VolatileInventory::new(
+            Kilograms::new(EARTH_WATER_PER_MASS * mass),
+            Kilograms::new(EARTH_CARBON_DIOXIDE_PER_MASS * mass),
+            Kilograms::new(EARTH_NITROGEN_PER_MASS * mass),
+            Kilograms::new(6.6e16),
+        ),
+        formed: SnowLineSide::Inside,
+        equilibrium: Kelvin::new(equilibrium),
+        worst_equilibrium: Kelvin::new(equilibrium),
+        heated: Kelvin::new(equilibrium),
+        xuv_fluence: earth_xuv_fluence(),
+        saturated_xuv_flux: WattsPerSquareMetre::new(0.3),
+        insolation,
+        crust: Crust::Solid,
+        molten_for: Years::ZERO,
+        age: SOLAR_AGE,
+        hottest_host: Kelvin::new(5_772.0),
+    }
+}
+
+/// The span of the climate T24.a gives the body `inputs` describes for a column of partial
+/// pressures `partials` over a mean surface at `t`, with Earth's spin (23.44° of obliquity, a
+/// sidereal day of 86,164.1 s and a solar day of 24 h), Earth's heat flow, 0.0925 W m⁻², and no
+/// ocean: what P14.T54.a's wiring gives the passes from a body's own spin.
+fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) -> ClimateSpan {
+    let total = partials.total();
+    let state = if total < AIRLESS_PRESSURE {
+        SurfaceState::Airless
+    } else {
+        SurfaceState::Snowball
+    };
+    let air = Atmosphere {
+        state,
+        surface_temperature: t,
+        surface_pressure: Some(total),
+        partials: *partials,
+        retention: Retention::default(),
+        exobase_temperature: Kelvin::new(0.0),
+        optical_depth: optical_depth(partials, inputs.equilibrium),
+        albedo: state.albedo(inputs.material),
+        cloud_fraction: 0.0,
+        carbon_carrier: None,
+    };
+    let (m, r) = (inputs.mass.value(), inputs.radius.value());
+    let absorbed = 4.0 * STEFAN_BOLTZMANN * math::powi(inputs.equilibrium.value(), 4);
+    let flux = absorbed / (1.0 - state.albedo(inputs.material).value());
+    let conditions = SurfaceConditions::derive(&SurfaceInputs {
+        atmosphere: &air,
+        equilibrium_temperature: inputs.equilibrium,
+        surface_gravity: MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r)),
+        radius: inputs.radius,
+        material: inputs.material,
+        stellar_flux: WattsPerSquareMetre::new(flux),
+        xuv_flux: WattsPerSquareMetre::ZERO,
+        spin: SeasonalSpin {
+            obliquity: Radians::from(Degrees::new(23.44)),
+            rotation_period: Seconds::new(86_164.1),
+            solar_day: Some(Seconds::new(86_400.0)),
+        },
+        heat_flow: WattsPerSquareMetre::new(0.0925),
+        ocean_weight: OceanWeight::NONE,
+    })
+    .expect("a body with a surface has its conditions");
+    let (cold, warm) = conditions.climate_range();
+    let (cold, warm) = (cold.value().min(t.value()), warm.value().max(t.value()));
+    ClimateSpan::new(Kelvin::new(cold), t, Kelvin::new(warm)).expect("a span about its mean")
+}
+
+/// P14.T51.a's partition in T13.c's passes is held, with the `p14-snapshot` lane's P14.T51.b and
+/// P14.T57.a, until the 22 → 23 batch's bump (P14.T54.a), so that the batch's goldens move once:
+/// below `SNAPSHOT_VERSION` the rules in force are version 22's, and [`atmosphere`] is P14.T13.c's
+/// greenhouse, which reads no climate, bit for bit. The bump removes the hold, and this test with it.
+#[test]
+fn the_snapshot_lane_is_held_only_until_the_batch_s_bump() {
+    assert!(
+        GENERATOR_VERSION < SNAPSHOT_VERSION,
+        "the 22 → 23 bump moves every atmosphere onto the condensate partition: give T13.c's \
+         passes each body's climate (T24.a's range from its spin) through `atmosphere_under`, \
+         delete `SNAPSHOT_VERSION`, `SnapshotRules` and its `Held` arm, `greenhouse` and \
+         `capped_methane_weight`, and this test (plan 14, P14.T51.a as built)"
+    );
+    assert_eq!(SnapshotRules::in_force(), SnapshotRules::Held);
+    let unread = |_: Kelvin, _: &PartialPressures| -> ClimateSpan {
+        panic!("the held rules read no climate")
+    };
+    let mut cases = vec![
+        earth_inputs(255.0, Insolation::Habitable),
+        earth_inputs(229.0, Insolation::InsideRunaway),
+        earth_inputs(165.6, Insolation::BeyondMaximumGreenhouse),
+    ];
+    let mut titan = earth_inputs(75.6, Insolation::BeyondMaximumGreenhouse);
+    titan.mass = Kilograms::new(1.345e23);
+    titan.radius = Metres::new(2.575e6);
+    titan.formed = SnowLineSide::Beyond;
+    titan.inventory = VolatileInventory::new(
+        Kilograms::new(1e22),
+        Kilograms::new(1e21),
+        Kilograms::new(9e18),
+        Kilograms::ZERO,
+    );
+    cases.push(titan);
+    for inputs in &cases {
+        let held = atmosphere_under(SnapshotRules::Held, inputs, &unread);
+        assert_eq!(format!("{:?}", atmosphere(inputs)), format!("{held:?}"));
+    }
+}
+
+/// A Titan's inputs: its mass and radius, formed beyond the snow line, beyond the
+/// maximum-greenhouse limit, with the cold moon's inventory of [`cold_moon`].
+fn titan_inputs() -> AtmosphereInputs {
+    let mut titan = earth_inputs(75.6, Insolation::BeyondMaximumGreenhouse);
+    titan.mass = Kilograms::new(1.345e23);
+    titan.radius = Metres::new(2.575e6);
+    titan.material = SurfaceMaterial::Ice;
+    titan.formed = SnowLineSide::Beyond;
+    titan.worst_equilibrium = Kelvin::new(82.0);
+    titan.inventory = VolatileInventory::new(
+        Kilograms::new(1e22),
+        Kilograms::new(1e21),
+        Kilograms::new(9e18),
+        Kilograms::ZERO,
+    );
+    titan
+}
+
+/// Under the batch's rules the passes hold each condensable as the partition does: Earth's water,
+/// a minor condensable, at Manabe and Wetherald's 0.77 of its saturation at the mean (version 22
+/// held it at 1, so Earth cools some 5 K, which P14.T57.a's water refit takes up), and Titan's
+/// methane on the minor branch at its humidity, within 1% of version 22's (the registry's fitted
+/// curve against the held one; plan 14's test keeps Titan minor).
+#[test]
+fn the_batch_holds_earth_s_water_and_titan_s_methane_on_the_minor_branch() {
+    let earth = earth_inputs(255.0, Insolation::Habitable);
+    let climate = |t: Kelvin, p: &PartialPressures| t24a_span(&earth, t, p);
+    let air = atmosphere_under(SnapshotRules::Batch, &earth, &climate);
+    assert_eq!(air.state(), SurfaceState::Temperate);
+    let water = mole_fraction(&air, Gas::Water) * air.surface_pressure().unwrap().value();
+    let held = crate::planetary::chem::partition::WATER_SURFACE_HUMIDITY
+        * crate::substance::diagram::saturation_pressure(
+            Gas::Water.substance(),
+            air.surface_temperature(),
+        )
+        .unwrap()
+        .value();
+    assert!(
+        (water / held - 1.0).abs() < 1e-9,
+        "{water} Pa against {held}"
+    );
+    let version_22 = atmosphere(&earth).surface_temperature().value();
+    let cooler = version_22 - air.surface_temperature().value();
+    assert!((3.0..8.0).contains(&cooler), "{cooler} K cooler");
+    let titan = titan_inputs();
+    let climate = |t: Kelvin, p: &PartialPressures| t24a_span(&titan, t, p);
+    let batch = atmosphere_under(SnapshotRules::Batch, &titan, &climate);
+    let held = atmosphere(&titan);
+    let (now, then) = (methane_in_the_air(&batch), methane_in_the_air(&held));
+    assert!((now / then - 1.0).abs() < 0.01, "{now} Pa against {then}");
+}
+
+/// A dry Earth formed inside the snow line at 2 au of a Sun, beyond the maximum-greenhouse limit,
+/// stores no carbon: its 70 bar of carbon dioxide ran T13.c's √p greenhouse away to some 570 K
+/// (science-p14-t24f, finding 1), and P14.T51.a's cold trap was to hold it at `p_sat`(`T_cold`).
+/// Under the partition, with T24.a's own contrasts of each step's column (Earth's spin, no ocean),
+/// it does not: from its equilibrium temperature to 273 K, every surface holding its carbon dioxide
+/// at its cold trap is warmed above itself by T13.c's grey greenhouse, so no state below freezing
+/// holds itself and the iteration runs to the whole inventory's.
+///
+/// The states that fail hold 18 Pa to 0.2 bar of carbon dioxide, two to three orders of magnitude
+/// below the some 8 bar at which Kopparapu et al. (2013, arXiv:1301.6674v2, §3.3, read) put the
+/// maximum greenhouse, `S_eff` 0.325 at 1.70 au, so the cause is that the √p term, whose CO₂
+/// constant Venus fixes, overstates a thin carbon dioxide air: given Mars's measured 607 Pa it
+/// gives τ = 1.44 and 252 K at the fact sheet's 209.8 K black-body temperature, where Mars has
+/// 214 K (NASA's Mars fact sheet). This test pins the finding until its fix, a carbon dioxide
+/// greenhouse that holds Venus, Earth and Mars together, P14.T53.a's, takes the plan's test over
+/// (decision-p14-t51a-partition §1).
+#[test]
+fn a_dry_earth_beyond_the_maximum_greenhouse_still_runs_away_past_its_cold_trap() {
+    let earth = earth_inputs(165.6, Insolation::BeyondMaximumGreenhouse);
+    let climate = |t: Kelvin, p: &PartialPressures| t24a_span(&earth, t, p);
+    let air = atmosphere_under(SnapshotRules::Batch, &earth, &climate);
+    assert!(air.surface_temperature().value() > 500.0, "{air:?}");
+    // No state below freezing holds itself: at each, with its column held by the partition over
+    // its own climate, the greenhouse warms the surface above it.
+    let retention = air.retention();
+    let mut airborne = Airborne::kept(&earth, retention);
+    assert_eq!(airborne.divide(&earth, retention), SurfaceState::Snowball);
+    let (m, r) = (earth.mass.value(), earth.radius.value());
+    let weight = GRAVITATIONAL_CONSTANT * m / (r * r) / (4.0 * core::f64::consts::PI * r * r);
+    let inventory = airborne.column(weight).unwrap();
+    let mut weights = AirborneWeights::new();
+    for step in 0..=107 {
+        let t = Kelvin::new(166.0 + f64::from(step));
+        // From the whole column, as the greenhouse starts.
+        let mut partials = whole_column(&inventory);
+        for _ in 0..8 {
+            let span = t24a_span(&earth, t, &partials);
+            partials = partitioned_partials(&inventory, &span, &mut weights);
+        }
+        let warmed = grey_surface_temperature(
+            earth.equilibrium,
+            optical_depth(&partials, earth.equilibrium),
+        );
+        assert!(warmed > t, "{t:?} holds itself at {warmed:?}: {partials:?}");
+    }
+}

@@ -14792,6 +14792,457 @@ tables::gauss_legendre`.
   - _A re-bless before P14.T54.a_: decision-p14-t49c-split lets this golden re-bless at 22 with no
     bump, but `golden_diff.py` will report its changed values as unbumped (exit 1), as it does for
     P14.T49.b's held sections; the re-blessing commit cites the ruling.
+- **Deviations in P14.T50.b, as built (`p14-chem`, 2026-10-16), as decision-p14-t50b-envelope
+  rules them.** `GENERATOR_VERSION` stays 22, and no generated value moves:
+  `chem/envelope_abundances.rs` lands as a pure module that nothing on the record calls
+  (decision-bump-plan-after-22 §1.3 and §6). It adds no draw or domain tag. Its one golden,
+  `tests/golden/planetary/envelope_abundances.golden`, is new at header 22, pinned by the unit test
+  `planetary::chem::envelope_abundances::tests::the_envelope_abundances_are_pinned`, since the Solar
+  System table is crate-private test data (as T24.e's). T52.a speciates the abundances and T52.d
+  publishes them at T54.b. The decision upholds the four deviations below (E(M), the ice-line
+  factor, the rain on `T_eff` and age, the Surface path) and changed the rain before the commit
+  (§6: gravity-keyed, with the primordial He/H an input); its §7 holds the plan-text changes for a
+  docs batch, among them the new P14.T50.d.
+  - _Public items_ (`planetary::chem::envelope_abundances`):
+    - `EnvelopeAbundances::derive(&EnvelopeInputs)` with `per_hydrogen(Element)`, `elements()`,
+      `enrichment()`, `carbon_to_oxygen()`, `ice_line_factor()`, `helium_depletion()`,
+      `helium_to_molecular_hydrogen()` and `mass_fractions()`;
+    - `EnvelopeInputs` (mass, `MassFractions`, formation distance, snow line, \[Fe/H\], \[α/Fe\],
+      `HostAbundances`, `T_eff`, age, surface gravity and the primordial He/H; plain public
+      fields);
+    - `DeriveEnvelopeAbundancesError` (`Mass`, `NotAnEnvelope`, `FormationDistance`, `SnowLine`,
+      `FeH`, `AlphaFe`, `EffectiveTemperature`, `Age`, `SurfaceGravity`, `PrimordialHelium`);
+    - the free functions `mass_enrichment`, `ice_line_factor`, `rain_temperature`,
+      `helium_depletion`, `helium_rain_onset`, `helium_rain_onset_at`,
+      `jupiter_helium_to_molecular_hydrogen` and `solar_nitrogen_to_oxygen`;
+    - the constants `ENRICHMENT_AT_ONE_JUPITER_MASS` 2.65, `ENRICHMENT_MASS_INDEX` 0.986,
+      `ALPHA_ELEMENTS`, `DiscCarrier` (`line`, `oxygen_per_hydrogen`, `carbon_per_hydrogen`) with
+      `DISC_CARRIERS`, `HELIUM_RAIN_LEAST_MASS` 0.15 M_J, `HELIUM_RAIN_EARLIEST_AGE` 0.7 Gyr,
+      `HELIUM_RAIN_SATURN_AGE` 1.5 Gyr, `JUPITER_EFFECTIVE_TEMPERATURE` 125.57 K,
+      `JUPITER_HELIUM_MOLE_FRACTION` 0.1359, `JUPITER_SURFACE_GRAVITY` 25.92 m s⁻²,
+      `SATURN_EFFECTIVE_TEMPERATURE` 96.67 K, `SATURN_HELIUM_PER_HYDROGEN` 0.0394,
+      `SATURN_SURFACE_GRAVITY` 11.19 m s⁻², `HUBBARD_INDICES` (0.167, 1.243), `RAINED_NEON` 0.043
+      and `METALLICITY_BOUND` 10 dex (\[Fe/H\] and \[α/Fe\] beyond it are refused, so that every
+      output stays finite: the determinism review's ask).
+
+    `chem/mod.rs` declares the module and gains the test-only `HostAbundances::protosolar()`, the
+    Sun's own Lodders ratios off the trends, against which the tests compare the measured Solar
+    System.
+
+  - _The path._ Plan 14 files T50 under the snapshot path (decision-composition §3.1), but only
+    T52.d's envelope section reads T50.b (§3.4). So T54.b calls it where it builds that section, on
+    the Surface path, and `snapshot_at` never does: nothing counts against T33.a's snapshot budget.
+    Upheld (decision-p14-t50b-envelope §4): should a later task feed the envelope's Z or μ into the
+    radius, `T_eff`, the albedo or the state, the module moves to the snapshot path.
+  - _Every element._ The abundances cover all 25 of `Element::ALL`, the plan's 21 with Ne, Ar, Kr
+    and Xe, so that the envelope's metal mass is the whole registry's (neon is a tenth of the
+    protosolar metals by mass) and Galileo's noble gases check it.
+  - _E(M) is the measured envelopes' trend, bounded by Thorngren et al. 2016, not their bulk
+    relation itself_ (upheld, §1). Thorngren et al.'s Z_planet ÷ Z_star = 9.7 (M ÷ M_J)^−0.45
+    (their §5.3, read) is the bulk's enrichment and would put Jupiter's carbon near 11 times solar
+    against Galileo's 4.3, failing the plan's own Jupiter test. Thorngren and Fortney (2019, ApJL
+    874, L31, read) make the bulk an upper limit, Z_atm = f Z_p with 0 ≤ f ≤ 1. So:
+    - E = 2.65 (M ÷ M_J)^−0.986 is the lane's unweighted log fit to the four giants' measured C/H
+      (Guillot et al. 2022, Table 2, read: Wong et al. 2004, Fletcher et al. 2009, Sromovsky et al.
+      2019, Karkoschka and Tomasko 2011), through the module's own carbon share, rms 0.086 dex;
+    - it is held at most to the bulk's metal fraction, `Z_p` = 1 − the envelope share, which for a
+      giant is Thorngren et al.'s 57.9 M⊕ M^0.61 (f = 1), and at least to 1, the host's gas, which
+      it reaches at 2.69 M_J (supported by Snellen 2025's solar metallicities for hot Jupiters and
+      imaged super-Jupiters, as the ruling reads it);
+    - Welbanks et al.'s (2019, read) error-weighted fit to the same methane, −1.11 log M + 0.38, is
+      the recorded alternative. It passes Saturn and puts Jupiter's carbon at 2.4.
+  - _The ice-line factor is the disc gas's C/O over the disc's_, by zone, from Öberg, Murray-Clay
+    and Bergin's (2011) Table 1 (read), with no dependence on E: 11/10 inside the snow line, 11/7
+    to the CO₂ line (47 K), 11/6 to the CO line (20 K) and 1 beyond it. Upheld (§2) as Öberg et
+    al.'s gas-dominated limit applied at every E, calibrated on the four giants, all of which hold
+    more carbon than sulphur, against their §4 and Espinoza et al. 2017's sub-stellar C/O for
+    solid-polluted envelopes. Their Eq. 2, with the zone's own solids, would put Jupiter's sulphur
+    and noble gases 0.4 dex high. The table's Jupiter about the Sun's own ratios has C/H 3.7, O/H
+    and N/H 2.3, S/H and the heavy noble gases 2.65 times protosolar and C/O 0.72, against
+    Galileo's C 4.3, S 2.7 and Ar, Kr, Xe 2.1–2.6 and Juno's O 2.4 (+2.1, −1.5) and N 2.5. Added to
+    the plan's three lines: Table 1's carbon grains at its adopted 500 K (its range "> 150 K"),
+    P14.T50.a's soot line (22/15 inside it), and silicates at 1,500 K (1 inside). Water's line is
+    the generator's 170 K snow line, for Table 1's adopted 135 K. The solids' share as a drawn rank
+    is P14.T50.d's.
+  - _The host._ Carbon is the host's C/O (T50.a) times its oxygen, nitrogen the protosolar N/O
+    times it, and magnesium the host's Mg/Si times its silicon, so that a giant's envelope and its
+    siblings' crusts read one star (an addition: the plan's α rule alone would leave Mg/Si
+    protosolar). The α elements are O, Ne, Mg, Si, S, Ar, Ca and Ti (`ALPHA_ELEMENTS`: Bensby et
+    al. 2014's Fig. 15 and Hayden et al. 2015's Appendix B, read, with neon and argon by the α
+    chain, the lane's). Carbon, nitrogen and oxygen are shared out at E times the host's mass of the
+    three, so the metals before the rain sum to E times the host's by mass (the plan's 10⁻⁹ test,
+    with the rained neon put back), with the envelope's C/O the host's times the factor and N/O
+    protosolar. `enrichment()` is that E; `mass_fractions()`'s Z is after the rain, lower by the
+    neon it took.
+  - _Carbon and nitrogen follow \[α/Fe\]_ through oxygen, where the plan's α rule alone would raise
+    neither (upheld, §5; Nissen et al. 2014 find thick-disc stars on the halo's \[C/O\] trend). The
+    host's C/O has no \[α/Fe\] term (T50.a), so a thick-disc host's envelope keeps the thin disc's
+    C/O at its \[Fe/H\]: for plan 06, when the star carries its own ratios.
+  - _Helium rain reads `T_eff`, gravity and age, not `T_int`_ (upheld, with gravity added before
+    the commit, §3 and §6). Keyed on `T_int`, every gas giant under 0.3 M_J, whose record has no
+    internal luminosity and so a `T_int` of 0, would rain at any insolation, a hot Saturn among
+    them.
+    - Only a `PlanetClass::GasGiant` of at least 0.15 M_J rains (Fortney and Hubbard 2004, §3.1,
+      read: "approximately the lowest mass a planet can be while still having some liquid metallic
+      hydrogen", "dependent on the mass of the core").
+    - The onset is where the deep adiabat meets the H–He phase curve near 2 Mbar (Mankovich and
+      Fortney 2020, Fig. 1, read: the T1 = 149 K adiabat; ΔT_phase = 539 ± 23 K), one adiabat for
+      every mass. The adiabat follows Hubbard's T₀ = K g^−0.167 `T_eff`^1.243 (Fortney et al. 2011,
+      Eq. 1, read), so the rain reads x = `T_eff` (g_J ÷ g)^(0.167 ÷ 1.243), `T_eff` the planet's
+      own, (`T_int`⁴ + `T_eq`⁴)^¼ (Fortney and Hubbard's eqs. 4 and 6).
+    - He/H over the primordial falls linearly in x through Jupiter's 0.812 at x = 125.57 K
+      (He/H₂ 0.157, von Zahn et al. 1998's 0.1359 mole fraction, as Mankovich and Fortney's
+      Table 1 and Guillot et al.'s Table 2 list it; `T_eff` from Li et al. 2018's 14.098 W m⁻²,
+      read) and Saturn's 0.407 at x = 108.22 K (96.67 K at 11.19 m s⁻²; the mean of Guillot et
+      al.'s three Cassini values, 2.87, 6.20 and 2.75 × 10⁻² He/H), from none at 133.61 K, and is
+      held at Saturn's below. The gravities are GM over the mean radius squared (Jupiter's nominal
+      GM, IAU 2015 B3; Saturn's from the Solar System table's mass; the radii 69,911 and 58,232 km,
+      Seidelmann et al. 2007, as Mankovich and Fortney's Table 1 lists them).
+    - So the onset is 133.61 K at Jupiter's gravity and 119.35 K at Saturn's, inside the "∼100 -
+      120 K" Fortney and Hubbard quote for Saturn; a 3 M_J giant rains only below about 153 K and a
+      0.15 M_J one below about 106 K, as "the greater the planet's mass, the later" requires.
+      Saturn's T1 over Jupiter's on the fit is 0.831, against Mankovich and Fortney's 140 ÷ 166 =
+      0.843. Fortney and Hubbard's own diagram starts Jupiter's rain only "at T_eff below 123 K",
+      which leaves its measured depletion unexplained (their §1).
+    - It waits on age: a giant under 0.3 M_J has no internal luminosity on the record, so its
+      `T_eff` is its `T_eq` at every age. Of the line's depletion it takes none before 0.7 Gyr
+      (Fortney and Hubbard's 0.15 M_J onset, the earliest of their range) and all from 1.5 Gyr
+      (Saturn's, Guillot et al. 2022 §2.1.2 after Mankovich and Fortney), linearly between.
+    - Hot giants never rain: "representative exoplanets … are fully miscible because of their high
+      entropies, either because they are close to their star, or because they are massive"
+      (Guillot et al. 2022, §2.1.2), who place the rain in "planets with masses between about ∼ 40
+      and 400 M⊕ and effective temperatures below about ∼ 150 K".
+    - Neon, which the droplets dissolve, falls with the helium by a fixed fraction of what is left
+      at each step (0.043^p, p the helium's depletion in units of Jupiter's), through 0.043 of the
+      other metals at Jupiter's, Jupiter's 0.0985 of protosolar against its heavy noble gases' 2.29
+      (Mahaffy et al. 2000, through Atreya et al. 2016's Table 2.1, read), and on, to 5 × 10⁻⁵ at
+      Saturn's: Mankovich and Fortney (§4.3) expect Saturn's neon depletion "even more advanced
+      than in Jupiter's". The form, fast at the onset, is the lane's. An addition (upheld, §5).
+    - The builder's check that a sub-Neptune keeps its helium: the 0.15 M_J limit above, against
+      Uranus's and Neptune's 14.5 and 17.1 M⊕, and Uranus's solar helium (Conrath et al. 1987,
+      abstract read). The ice giants keep it too.
+
+    The rain is continuous in x, gravity and age. At a fixed cold `T_eff` it steps where a giant
+    crosses 0.15 M_J or `GAS_GIANT_ENVELOPE_FRACTION` (a change of class), which T52.d's
+    continuity test must not sample, or must name as a state change. The table's Saturn (no
+    luminosity of its own, its `T_eq` at its own gravity) takes Saturn's helium; the table's
+    Jupiter, at 127.84 K, 2.3 K above the measured, He/H₂ 0.171 and neon 0.37 of protosolar
+    (0.157 and 0.0985 measured); at Jupiter's measured `T_eff` and gravity, 0.157 and 0.11.
+
+  - _The primordial He/H is an input_ (§6), the envelope's helium before any rain, which the rain
+    multiplies: T54.b gives it (the host star's Y ÷ X over the Sun's, times protosolar, then T53.a's
+    fractionation); the tests pass the protosolar value, and one carries a non-protosolar value
+    through.
+  - _Tests beyond the plan's four:_ the ice-line factor's steps and Öberg's gas C/O values; the
+    rain's gates, line, onset at Jupiter's and Saturn's gravity (Saturn's within 100–120 K), the T1
+    ratio within 2% of 140/166, a Jupiter-gravity giant at `T_eff` ≥ 134 K keeping its helium,
+    continuity in x, gravity and age, the gravities as GM ÷ R², the neon, and a non-protosolar
+    primordial He/H; the table's four giants against their measured C/H (within 0.15 dex), and
+    Jupiter's O, S, Ar, Kr, Xe and Ne against Galileo and Juno at its measured state; the bound and
+    the floor; the α and \[Fe/H\] scalings with the host's Mg/Si; each error; and the same inputs
+    twice. The Jupiter carbon test runs about the Sun's own ratios and about a generated host of
+    solar metallicity at the median ranks (0.067 dex poorer in carbon); both pass.
+  - _Inputs for T54.b and T52.d._ The record's `T_eff` (its `T_eq` where it has none), surface
+    gravity and age; T50.a's formation distance and snow line; `SystemContext::alpha_fe()`, where
+    `None` makes the envelope `NotModelled`, never solar (ruling 33); and the primordial He/H above.
+    The golden's header moves to 24 with the bump.
+  - _For T24.d._ The envelope's He/H₂ and X, Y and Z, which T24.d's c_p(T) and μ read, are
+    `helium_to_molecular_hydrogen()` and `mass_fractions()`; its sub-Neptune check is met here.
+    Whatever `T_int` T24.d states for a sub-Neptune or a giant under 0.3 M_J, T54.b passes this
+    module the same `T_eff`, (`T_eq`⁴ + `T_int`⁴)^¼, so the profile and the helium read one
+    temperature; a `T_int` for a cold giant of 0.15–0.3 M_J moves its helium.
+  - _Closed sets, for the composition audit:_ `DISC_CARRIERS` (Öberg et al.'s five: CO, CO₂, water,
+    carbon grains, silicates; no CH₄, NH₃ or N₂ ice, so nitrogen follows oxygen by the plan's N/O
+    rule) and `ALPHA_ELEMENTS` (eight).
+- **Deferred findings (2026-10-13 rule)**, from P14.T50.b, as decision-p14-t50b-envelope §5 leaves
+  them:
+  - E is fitted from 14.5 to 318 M⊕ and extrapolated: 80 at 10 M⊕, 160 at 5 and 390 at 2, where
+    the envelope's metals per hydrogen atom are about 0.1, 0.2 and 0.5 by number. Below about 5 M⊕
+    the envelope is no longer hydrogen-dominated: T52.a states where Heng and Tsai's solution stops
+    and what the record says beyond it (P14.T53.a's hybrid airs). E draws no scatter: P14.T50.d.
+  - Between the CO₂ and CO lines the factor 11/6 puts the envelope's C/O above 1 about any host
+    richer in carbon than 0.545: T52.a accepts C/O above 1; T50.d's draw should bring most below.
+    Neptune's factor in the fit rests on its 46.55 K, 1% inside the 47 K CO₂ line (42–52 K in
+    Öberg et al.'s range).
+  - The C/O dichotomy: the Solar System's giants are carbon-rich over sulphur, while JWST's hot
+    Jupiters are sub-stellar (Fu et al. 2024 and 2025, as the ruling reads them). P14.T50.d.
+  - The rain's phase curve depends on Y and Z, which one onset adiabat does not follow.
+  - Saturn's helium is the mean of three Cassini values that disagree beyond their errors (0.29 to
+    0.64 of protosolar). The inverse-variance mean, 3.27 × 10⁻², would put the onset near 132.5 K;
+    Mankovich and Fortney predict Y ÷ (X + Y) = 0.07 ± 0.01.
+  - The table's Jupiter, 2.3 K warmer than measured, rains less than Galileo found (He/H₂ 0.171
+    against 0.157): T11.d's cooling.
+  - The 0.15 M_J limit depends on the core mass (Fortney and Hubbard, §3.1).
+  - The envelope's metals are taken from the radius model's heavy elements, whose envelope is
+    hydrogen and helium alone: a sub-Neptune's envelope at 80 times solar is about half metal by
+    mass and so denser than the radius model's. The radius is not recomputed for it (plan 13 and
+    P14.T11).
+  - The four primary C/H papers, von Zahn et al. 1998, Mahaffy et al. 2000 and Conrath et al. 1987
+    in full were not read; their figures are Guillot et al.'s, Atreya et al.'s and Mankovich and
+    Fortney's tables' and their abstracts'. Saturn's C/H is 2.50 × 10⁻³ in Guillot et al. and
+    2.65 × 10⁻³ in Atreya et al. from the same 4.7 × 10⁻³ of methane, by the He/H each assumes; the
+    fit takes Guillot et al.'s.
+  - The abundances run over `Element::ALL`, so P14.T55.l's appended elements join at protosolar ×
+    10^\[Fe/H\] × E with no change here, and the golden gains their lines.
+- **Deviations in P14.T51.a, as built: part 1, the partition's pressures, reservoirs and phases
+  (`p14-snapshot`, 2026-10-15).** T51.a is two agents' work. This first part builds the partition
+  at the body level, a pure module that nothing on the record calls, and its call into T13.c's
+  passes behind the lane's hold. No output moves: `GENERATOR_VERSION` stays 22, and no existing
+  golden changes. One golden is new, `planetary/partition`, an extension at header 22.
+  - _The lane's hold, as built._ `SNAPSHOT_VERSION` = 23 (`derive/atmosphere.rs`, crate-private)
+    and `SnapshotRules { Held, Batch }`, whose `in_force()` is `Held` below 23.
+    - It is the one hold for T51.a's, T51.b's and T57.a's edits on the record path
+      (decision-bump-plan-after-22 §1.2). T51.b's area mix and T57.a's refitted constants take its
+      `Batch` arm.
+    - The seam is `atmosphere_under(rules, inputs, climate_of)`, and `atmosphere(inputs)` is it
+      under `in_force()`. Step 4 goes through `greenhouse_under`, which keeps `atmosphere_under`
+      within Clippy's 100 lines.
+    - Under `Held` that step is T13.c's `greenhouse`, which reads no climate, so every atmosphere
+      is version 22's to the bit (tested on four bodies). The tripwire is
+      `the_snapshot_lane_is_held_only_until_the_batch_s_bump`.
+    - T54.a gives the passes each body's climate through `atmosphere_under`. It deletes the hold,
+      its `Held` arm, `greenhouse` and `capped_methane_weight`, and the tripwire.
+  - _Where the partition runs._ It runs at every greenhouse step of each pass, not once "before the
+    greenhouse", because its caps read each step's temperature, as T13.c's caps do. Escape, step
+    2, and the climate's division, step 3, come before it, as ruled.
+  - _The climate in the passes._ `derive_body` has no spin, so T24.a's range cannot be computed
+    inside its passes. The seam therefore takes the climate as a function,
+    `ClimateOf = dyn Fn(Kelvin, &PartialPressures) -> ClimateSpan`, of each greenhouse step's mean
+    temperature and the previous step's column. A thin column's large contrast then holds its
+    dominant condensable at a cold trap, which keeps it thin.
+    - The first step reads the whole airborne inventory, the largest column and so the smallest
+      contrasts. An empty column's contrasts are an airless body's (about 36 K at an Earth's poles'
+      night), and they collapse even a bar of nitrogen that a full column's transport keeps
+      airborne. The collapse is bistable (Wordsworth 2015).
+    - Until T54.a, `atmosphere()` passes an isothermal span, `ClimateSpan::isothermal(T)`. It is
+      unreachable at 22.
+    - The tests' climate is `t24a_span`: `SurfaceConditions::derive` on each step's column, with
+      Earth's spin and no ocean. It costs about 700 µs an atmosphere.
+    - _Ruled_ (decision-p14-t51a-partition §6, 2026-10-16): T51.a's second part builds the closed
+      form, and T54.a derives the rotation law before the passes (`SpinInputs` reads only what
+      `derive_body_under` knows before them). Its conditions and inputs:
+      - one function: the partition's span at the passes' last step and the record's published
+        `climate_range` are the same computation, either T24.a's range factored into the pure
+        function the passes call (and `SurfaceConditions::derive` then calls, bit for bit at 22),
+        or T24.a publishing the closed form's ends from 23 with the bless note counting the moved
+        ranges. An approximation that differs from the published range is refused;
+      - its cost: about a partition step's, of the order of a microsecond, allocating nothing,
+        measured in part 2;
+      - its inputs: the step's column (pressure, μ, c_p), the ocean weight from the step's
+        partition (the own-liquid weight c, and T24.a's θ, never `NONE` for a wet world), the spin,
+        T24.b's heat flow, the surface material and the flux. An input that reads what the passes
+        give, such as σ_h, takes the previous pass's value, as the Bond albedo does.
+    - `derive_body_under` is not touched. Its call into the passes is T54.a's, through a helper,
+      since `derive_body_under` sits at Clippy's 100 lines.
+  - _Public items_, in `planetary::chem::partition` (`chem/partition.rs`, a new module beside
+    `inventory` and `redox`):
+    - `ClimateSpan { coldest, mean, warmest }`, with `isothermal` and `new`, whose error is
+      `BuildClimateSpanError { NotATemperature, OutOfOrder }`;
+    - `ColumnInventory`, the inventory after escape as column weights M g ÷ 4πR², gas rows in
+      registry order (`new` → `BuildColumnInventoryError { NotAGas, Repeated, NotAWeight }`);
+    - `WATER_SURFACE_HUMIDITY` (0.77), `surface_humidity(SubstanceId)`, `DOMINANCE_ONSET` (0.1),
+      `DOMINANCE_FULL` (0.9) and `dominance(share)`;
+    - `partition(climate, gravity, inventory) -> Partition`, with `Partitioned` (inventory,
+      airborne, condensed, partial pressure, dominance, `lies_at`), `Condensate` (substance, phase,
+      reservoir, `lies_at`, `is_seasonal`, `phases`), `CondensatePhases` and
+      `CondensatePhase { Solid, Liquid, Supercritical }`;
+    - crate-private: `AirborneWeights` (the pressures alone, the passes' scratch),
+      `weight_meeting_cap` (the quadratic of signoff-3 item 1.7, for every condensable) and
+      `PARTITION_SWEEPS` (8). `CondensatePhase` is named apart from d6c4abf1's
+      `substance::condensed::CondensedPhase { Solid, Liquid }`, what a grain density is the
+      density of, by its supercritical fluid.
+  - _The rules, as built._
+    - **The cap** is on the partial pressure x p, for every condensable (signoff-3 F-g). A minor
+      one is held at h `p_sat`(`T_mean`), a dominant one at `p_sat`(`T_cold`). Between them, the
+      controlling temperature `T_mean` − d (`T_mean` − `T_cold`) and the humidity h^(1 − d) move
+      with the dominance d.
+      - The plan names the minor branch for "a non-condensing background". As built it holds every
+        minor condensable, whatever its background, Mars's water in its CO₂ among them (a finding,
+        below).
+    - **The dominance** d is a smooth step, 3s² − 2s³, of the condensable's mole fraction on the
+      minor branch, from 0 at a share of 0.1 to 1 at 0.9.
+      - It is continuous with its slope, a closed form, and needs no iteration of its own. It
+        stands for the change from a dilute to a non-dilute condensable (Pierrehumbert 2010; Ding
+        and Pierrehumbert 2016; both from memory).
+      - The weight is the share that P14.T24.a's greenhouse gain already takes out of the local
+        feedback, 1 − x (science-p14-t24a-climate §1).
+      - The ends are set by the bodies the ramp must hold apart: Titan's 5.65% wholly minor and
+        Mars's 95.1% wholly dominant. The lane's, provisional.
+    - **The humidity** is Manabe and Wetherald 1967's 0.77 for water (read: p. 243, below eq. 2)
+      and T24.f's 0.5 for methane. Every other condensable takes 1, saturation, an upper bound:
+      both measured cases lie below it. That is a closed set, for the composition audit.
+    - **The solve.** The species are solved in turn in registry order, each against the others'
+      weights. Each starts from the least of its inventory and its two caps, and eight sweeps run,
+      a fixed count from a deterministic start (decision-composition §1.3).
+      - From that start, one condensable over a background that does not condense is solved
+        exactly in the first sweep. A minor one in a condensing background meets its cap to 10⁻⁹,
+        and so does every air with one condensable held toward its cold trap.
+      - Two that both near dominance (nitrogen with krypton at 60–95 K) gain only a factor of about
+        3 a sweep. They leave every species of that air, a minor one's too, within 10⁻⁴ of its cap
+        (6.7 × 10⁻⁵ at worst; the tests hold them to 10⁻³). So the plan's test "a minor
+        condensable's partial pressure x_s p equals h p_sat,s to 10⁻⁹" is held wherever at most
+        one condensable is held toward its cold trap, every plan body included. That is a
+        technical correction, recorded here; a few more sweeps would close it at their cost.
+      - A plain three sweeps from the whole inventory left a condensable 7 × 10⁻⁷ off its cap where
+        a dominant gas collapses by orders of magnitude. An early stop on a tolerance, tried
+        first, was refused: its count would not be fixed, and a last-bit difference between targets
+        could change it.
+    - **Supercritical** is judged by a species' own partial pressure and its temperature, both
+      above its critical point, for the label, the phases over the range and seasonality alike. So
+      a minor gas of a dense air is not called supercritical. Such a condensate's reservoir is
+      zero: the fluid is the air at the surface.
+    - **The phase where it lies** is the registry diagram's `phase_at` at the controlling
+      temperature and the surface pressure. If the vapour pressure exceeds the surface pressure
+      there, it is read at the coldest zone, and failing that by the triple temperature.
+    - **Seasonal** means that part of it comes and goes over the year (R09's `Persistence`), in
+      any of three ways:
+      - its range crosses its melting line (Earth's water, whose ice comes and goes);
+      - its warmest zone takes its phase off the surface at the surface pressure (a liquid that
+        boils);
+      - or, held toward its cold trap (d > 0), its warmest zone rises above its frost point at its
+        own partial pressure (Mars's CO₂, Pluto's and Triton's N₂);
+      - this is the plan's "rises above the frost point", where sublimation goes as a vapour's
+        pressure over its own partial pressure. Read literally for a minor condensable held below
+        saturation, that rule would make Earth's ocean and Titan's crust seasonal, since the air's
+        frost point always lies below the warmest zone. Ruled as built (below).
+    - **The reservoir** is a column mass, kg m⁻² (as R09's `Condensate::reservoir`). The record's
+      `reservoir_gel_m` divides it by the condensate's grain density, which d6c4abf1's
+      `Substance::grain_density` now gives, in T51.a's second part. A gravity that is not positive
+      and finite leaves every reservoir zero.
+    - **`phases()`** lists the phases a reservoir takes over the climate's range (Earth's water:
+      liquid and solid). The reservoir is not yet divided between them.
+    - **One condensate per substance**, sorted by reservoir, largest first, with ties by registry
+      order. T51.a's second part publishes at most eight entries, one for each substance and phase,
+      as T51.f's merge expects.
+    - **Oxygen** is partitioned like any row with a phase diagram on the `Batch` arm. The held
+      greenhouse exempted it.
+    - **Every saturation pressure** is the registry's diagram's (T49.b's fitted curves), never the
+      held Clausius–Clapeyron sets. Frost and boiling points are compared through `p_sat`, so
+      `saturation_temperature` (measured at 2.4 µs a call, not the feared 10 µs) is not on the
+      snapshot path.
+    - **The cost** (provisional: the shared machine, the heavy lock held) is 9–47 µs an
+      atmosphere, for each of the three passes, against 4–8 µs for T13.c's greenhouse. Most of it
+      is the fitted curves, two Wagner evaluations a condensable a step (53 ns each). That misses
+      decision-composition §1.3's "under 1 µs a body added", as T49.b's curves alone would; port
+      C's bench measures it.
+  - _Tests, as built_, in `chem/partition/tests.rs`, run by
+    `cargo test -p hyperion-sim planetary::chem::partition`. The plan's bodies are given by hand, each climate and inventory
+    cited in its builder, since the table's own bodies wait for the passes' climate:
+    - Earth (the generated inventory over science-p14-t24a-climate §3's range) holds liquid and
+      solid water;
+    - a Mars given its measured air (NASA's fact sheet: 636 Pa, 95.1% CO₂) holds perennial,
+      seasonal CO₂ ice at the frost point of its caps, and water ice;
+    - Titan holds liquid CH₄ on the minor branch at 5.7% over a water-ice crust (Jennings et al.
+      2016's 89.7–93.65 K). Its seas' solid at the pure substance's poles is not asserted (main's
+      ruling, decision-p14-t49b-condensed §2.4: Titan's sea is liquid down to 71.15 K);
+    - Triton and Pluto hold N₂ ice with CH₄ ice, their CH₄ within a factor of 3 of the measured
+      (Lellouch et al. 2010; the plan's 3–8 mPa for Pluto);
+    - the 0.2-bar N₂ world at 120 K holds its CH₄ within 10% of `p_sat`(`T_cold`);
+    - Venus holds none at 57 bar, and at 92 bar a supercritical CO₂ surface;
+    - the 10-bar CO₂ world at 250 K holds a liquid sea;
+    - beyond the plan: an airless icy moon, a hot world's steam (vapour at 100 bar, supercritical
+      at 300 bar), and every one of the registry's fourteen condensables below its triple point,
+      between its triple and critical points, above its critical point, and as a minor gas in
+      nitrogen;
+    - the invariants over 1,400 mixes and the bodies:
+      - conservation, airborne plus condensed equal to the inventory to 10⁻⁹;
+      - the cap met (above);
+      - the fixed sweeps within 10⁻³ of 256 run out, and 10⁻¹² for the bodies;
+      - the same bits twice and in any order of calls, with a shared scratch
+        (`assert_order_independent`);
+      - continuity in inventory across the ramp and in temperature across the triple point, but
+        not in time, which needs the passes' climate;
+      - the dominance's shape, the sort and the validation;
+    - `the_partition_is_pinned` writes `planetary/partition.golden`: each body's species and
+      condensates, so that the wasip1 run compares the partition's bits before the bump that
+      first reads them. Nothing on the record reads it at 22, so it is re-blessed with the rules
+      it pins, at the version in force, until P14.T54.a.
+    - In `derive/atmosphere/tests.rs`: the hold's tripwire;
+      `the_batch_holds_earth_s_water_and_titan_s_methane_on_the_minor_branch`; and
+      `a_dry_earth_beyond_the_maximum_greenhouse_still_runs_away_past_its_cold_trap`, which pins
+      ruling 1 (below).
+  - _Not built in this part (T51.a's second part):_
+    - the published `Condensates` (at most eight) and the record's type for them
+      (`record::Condensates` stays uninhabited);
+    - the area fractions by T24.b's cover (each liquid's logistic over the basin capacity, each
+      solid's cold area);
+    - the split of a reservoir between its phases (with `ICE_SHEET_THICKNESS`'s rule for water,
+      generalised);
+    - each reservoir's `reservoir_gel_m`, over `Substance::grain_density`;
+    - T24.b's `surface_liquids` and `surface_ices` by substance, T24.a's liquid-water flag read
+      from the partition, and P14.T48.d's condensable as the largest partial pressure among those
+      whose phase changes inside the range;
+    - the closed form of T24.a's ends for the passes, with the passes' ocean weight from each
+      step's partition (above; decision-p14-t51a-partition §6);
+    - the own-liquid ocean weight c in the controlling temperature, `T_mean` − d (1 − c)
+      (`T_mean` − `T_cold`), and its tests (decision-p14-t51a-partition §4);
+    - the per-phase seasonal flag (an entry seasonal where the warmest zone takes that phase off
+      the surface, so Earth's ocean perennial and its ice seasonal) and R09's
+      `Persistence::Seasonal` doc, which follows the code (decision-p14-t51a-partition §3);
+    - the bless-note list of bodies whose surface pressure moves, which needs the passes' climate
+      (T54.a);
+    - a solution's first melt: Titan's seas, liquid down to the methane–ethane eutectic, 71.15 K,
+      read as the transition column's first melt with no `Liquidus` arm
+      (decision-p14-t49b-condensed §2). Every condensable is its pure substance here.
+  - _Deferred to T54.a (or T51.a's second part, if it lands first): a solution's composition on its
+    condensate entry_, decision-r11-palette-liquids' ask of T51.a (§1.7, its table's item 24, and
+    its lane list: "an ask (no gate)", additive on the wire whenever it comes), so that T54.a's
+    palette resolution follows Titan's CH₄–C₂H₆–N₂ seas. It does not fit the snapshot path
+    cheaply: the passes carry no ethane, which is a photochemical product of the Surface path
+    (P14.T52.b), and no solubility of nitrogen in the liquid, so the partition has no composition
+    to carry. Until one is computed, T54.a's resolution takes the row's stated reference
+    composition (Ligeia Mare's), basis `Derived`, as §1.7 provides.
+  - _Files beyond the task's:_ `planetary/chem/mod.rs` (the module), `chem/partition/tests.rs`,
+    `derive/atmosphere/tests.rs`, `tests/golden/planetary/partition.golden`.
+- **Ruled by "main"** (decision-p14-t51a-partition, 2026-10-16), on the six items part 1 left
+  open:
+  1. The 2-au dry Earth's test moves to P14.T53.a's CO₂ form (23 → 24); part 1's pin stays.
+  2. Escape stays before the partition at 23; the reorder, for every condensable, is P14.T53.c's
+     at 24, with T53.a's loss rates.
+  3. "Seasonal" as built; the plan's and R09's wording follow the code.
+  4. The dominance ramp is kept. Part 2 adds the own-liquid ocean weight c (above); Mars's water
+     is recorded for P14.T55.e.
+  5. The supercritical phase as built; the critical-isochore cap above T_c is P14.T53.b's, for
+     every condensable.
+  6. Part 2 builds the passes' closed form as T24.a's own function, at a partition step's cost,
+     and T54.a derives the rotation first (above).
+- **Deferred findings (2026-10-13 rule)**, from P14.T51.a's first part:
+  - _Solid solutions._ Triton's and Pluto's CO and CH₄ lie dissolved in N₂ ice, where Raoult's law
+    holds them far below a pure ice's vapour (Lellouch et al. 2010, §3). Pure CO ice at 40 K gives
+    about 1 Pa against the measured 2.4 mPa. The partition takes each condensable as its pure
+    substance, and the tests give CO as its measured air.
+  - _Methane over ice._ Titan's 0.5 humidity over Pluto's and Triton's methane ice halves it.
+    Triton's 0.39 mPa is 0.40 of its measured 0.98 mPa. Pluto's 1.6 mPa is 0.53 of the plan's
+    3 mPa lower end, and 0.31–0.21 of the 5.1–7.5 mPa that Lellouch et al. (2015) predicted for
+    2015 (0.44% of 11.5–17 µbar), outside a factor of 3 of their figure. Saturation over the
+    methane-rich terrain, or the partition by terrain (T55.e), is closer.
+  - _The minor-branch share as the weight_ can exceed the self-consistent share. For 70 bar of CO₂
+    over 0.76 bar of N₂, with a 160 K cold trap and a 200 K mean, the dominance is 0.69. That holds
+    the CO₂ at 12.9 kPa, a share of 0.14, between its minor branch's cap and its cold trap's.
+  - _A minor condensable held by an ice_, Mars's water, is held at the mean's humidity: 0.93 Pa
+    against 0.057–0.134 Pa, 7–16 times (Jakosky and Farmer 1982; NASA's Mars fact sheet). Its vapour
+    is set by its reservoir's warm season (the north residual cap), which an orbit-averaged span
+    cannot see: P14.T55.e's (decision-p14-t51a-partition §4).
+  - _The seasonal flag is a spatial proxy._ The span's ends are orbit-averaged zonal ends with no
+    seasonal forcing, so a body with no obliquity on a circular orbit still flags its caps
+    seasonal, and an airless body's warm-zone ice is flagged seasonal for a geological-time loss.
+    The seasons' amplitude is P14.T55.e's frost by month (decision-p14-t51a-partition §3).
+  - _Titan's poles_, at 89.7 K, lie below pure methane's 90.69 K triple point, so its sea's
+    `phases()` include the solid and it reads seasonal. Its seas are a solution, liquid down to
+    71.15 K (main's ruling), which T51.a's second part reads.
+  - _The critical point._ The cap jumps from p_c to unbounded as the controlling temperature
+    crosses T_c, a discontinuity where an inventory exceeds the critical pressure there. P14.T53.b's
+    critical-isochore cap, which meets the saturation curve in value and slope at T_c, removes it
+    (decision-p14-t51a-partition §5).
+  - _Water's column weight._ The model's weight x (μ ÷ μ̄) p puts some 85 kg m⁻² of water over
+    Earth, against the measured 25 kg m⁻² of precipitable water (Trenberth et al. 2005, from
+    memory), since water's scale height is about 2 km against the air's 8 km. The convention is
+    the plan's. It is for P14.T24.e's vertical structure.
+  - _Earth cools some 5 K_ under the batch's 0.77 water humidity, which P14.T57.a's water refit
+    absorbs (decision-p14-moons). This is expected, not a defect.
+  - _Figures from memory in the tests' inputs:_ Pluto's 11.5 µbar (New Horizons) and its CO,
+    about 5 × 10⁻⁴ of its N₂ (Lellouch et al. 2011 and 2017); Titan's seas and lakes, of the order
+    of a tenth of its air's methane.
 - **Deviations in P14.T51.c, as built (`lane/36-p14-t51c-crust`, 2026-10-16).** A solid body's
   crust by substance, a pure `hooks/crust.rs` with `hooks/crust/history.rs` and its tests in
   `hooks/crust/tests.rs`, built ahead of the 22 → 23 bump.

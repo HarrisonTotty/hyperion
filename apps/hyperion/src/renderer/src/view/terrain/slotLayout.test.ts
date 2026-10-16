@@ -7,14 +7,21 @@ import {
   CLASS_WEIGHTS_BYTES,
   DOUBLE_NORMALS_BYTES,
   HEIGHTS_BYTES,
+  HORIZON_MAP_BYTES,
   MESH_NORMALS_BYTES,
   OFFSETS_BYTES,
+  type SlotField,
   slotLayout,
   terrainSlotFields,
   terrainSlotLayout,
 } from "./slotLayout";
 
 const MIB = 1024 * 1024;
+
+/** The low setting's horizon-map field under `shading`. */
+function horizon(shading: "spike" | "lit"): SlotField | undefined {
+  return terrainSlotFields(SETTINGS.low.terrain, shading).find((f) => f.name === "horizon-map");
+}
 
 function fieldNames(path: TerrainVertexPath): string[] {
   return terrainSlotFields({ ...SETTINGS.high.terrain, vertexPath: path }).map((f) => f.name);
@@ -34,9 +41,14 @@ describe("the slot layout", () => {
     expect(layout.slotCount).toBe(1_296);
   });
 
-  it("declares the horizon map with zero bytes until R10 sizes it", () => {
-    const horizon = terrainSlotFields(SETTINGS.low.terrain).find((f) => f.name === "horizon-map");
-    expect(horizon?.bytes).toBe(0);
+  it("sizes the horizon map on a lit layout alone, 68,896 B a slot, and none on R05's spike", () => {
+    expect(horizon("spike")?.bytes).toBe(0);
+    expect(HORIZON_MAP_BYTES).toBe((65 * 65 + 9 * 9) * 16);
+    expect(horizon("lit")).toEqual({
+      name: "horizon-map",
+      storage: "storage-buffer",
+      bytes: HORIZON_MAP_BYTES,
+    });
   });
 
   it("adds R10.T10.b's class layers, its weights then its laws, to a lit layout alone, 34,056 B a slot", () => {
@@ -51,7 +63,7 @@ describe("the slot layout", () => {
       storage: "storage-buffer",
       bytes: CLASS_LAYERS_BYTES,
     });
-    expect(lit.bytesPerSlot - spike.bytesPerSlot).toBe(CLASS_LAYERS_BYTES);
+    expect(lit.bytesPerSlot - spike.bytesPerSlot).toBe(CLASS_LAYERS_BYTES + HORIZON_MAP_BYTES);
   });
 
   it("carries offsets on the baked-offsets path only", () => {

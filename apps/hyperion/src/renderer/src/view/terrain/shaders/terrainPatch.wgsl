@@ -19,13 +19,16 @@ const METER_LIT_BODY : f32 = 2.0;
 // rgba16float's largest finite value (R02's HALF_FLOAT_MAX).
 const HALF_FLOAT_MAX : f32 = 65504.0;
 
-// uniforms.ts's INSTANCE_RECORD_BYTES.
+// uniforms.ts's INSTANCE_RECORD_BYTES. The parent's slot and the patch's quadrant in it (bit 0
+// i & 1, bit 1 j & 1) are for the horizon map's blend (R10.T8.b; decision-r10-t8a §1), the slot
+// 0xffffffff where no parent's map is resident.
 struct Instance {
   originM : vec3f,
   slot : u32,
   morphStartM : f32,
   morphEndM : f32,
-  pad : vec2f,
+  parentSlot : u32,
+  parentQuadrant : u32,
 }
 
 // uniforms.ts's CONTACT_RECORD_BYTES. The centre is camera-relative in the instance origins' frame
@@ -90,6 +93,8 @@ struct PatchVertex {
   // Its place in its patch, (x, y) ÷ 64.
   patchUv : vec2f,
   slot : u32,
+  // Its morph factor k, CDLOD's with the grounded hold (`morphFactor`), which mixes its heights.
+  morph : f32,
 }
 
 // The vertex at `grid` (x, y and 1 for a skirt's) of instance `instance`.
@@ -115,6 +120,7 @@ fn patchVertexOf(grid : vec3f, instance : u32) -> PatchVertex {
   v.datumNormal = nu;
   v.patchUv = vec2f(f32(x), f32(y)) / 64.0;
   v.slot = inst.slot;
+  v.morph = k;
   return v;
 }
 

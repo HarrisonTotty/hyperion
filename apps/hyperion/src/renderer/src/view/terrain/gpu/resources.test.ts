@@ -16,6 +16,7 @@ import {
   CLASS_WEIGHTS_BYTES,
   DOUBLE_NORMALS_BYTES,
   HEIGHTS_BYTES,
+  HORIZON_MAP_BYTES,
   OFFSETS_BYTES,
   terrainSlotLayout,
 } from "../slotLayout";
@@ -26,6 +27,7 @@ import {
   GRID_INDICES,
   GRID_VERTICES,
   INDIRECT_ARGS_BYTES,
+  NO_HORIZON_WORD,
   normalsAtlasLayout,
   PATCH_INDICES,
   patchMeshData,
@@ -72,6 +74,24 @@ function upload(slot: number, normalsPerSide: number, offsets: boolean, fill = 1
 /** Whether grid vertex (x, y) lies on the patch's edge. */
 function onEdge(x: number, y: number): boolean {
   return x === 0 || x === 64 || y === 0 || y === 64;
+}
+
+/** A lit bake's layers with a horizon map of distinct words in its two fields. */
+function mappedLayers(): TerrainLayers {
+  return {
+    palette: new Uint8Array(16),
+    weights: new Uint8Array(),
+    surveyMask: new Uint8Array(65 * 65),
+    boundM: 1,
+    sigmaM: 0,
+    complete: true,
+    unsurveyedCells: new Uint32Array(),
+    photometry: new Float32Array(40),
+    horizonNear: new Uint32Array(65 * 65 * 4).fill(0x0001_0002),
+    horizonFar: new Uint32Array(9 * 9 * 4).fill(0x0003_0004),
+    horizonComplete: false,
+    horizonRefusedCells: Uint32Array.of(5),
+  };
 }
 
 describe("the shared patch mesh", () => {
@@ -382,6 +402,10 @@ describe("the terrain's resources", () => {
       complete: true,
       unsurveyedCells: new Uint32Array(),
       photometry,
+      horizonNear: new Uint32Array(),
+      horizonFar: new Uint32Array(),
+      horizonComplete: true,
+      horizonRefusedCells: new Uint32Array(),
     };
     expect(resources.upload({ ...upload(3, 65, false), layers }).kind).toBe("uploaded");
     // The slot's class layers: its weights, then its laws.
@@ -401,6 +425,72 @@ describe("the terrain's resources", () => {
     );
     const table = engine.textureWritten.findLast((w) => w.texture === "terrain phase table");
     expect(table?.size).toEqual({ width: PHASE_TABLE_SAMPLES, height: 3 });
+    resources.dispose();
+  });
+
+  it("write a lit layout's horizon map for each slot, the near field then the far", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit");
+    expect(resources.field("horizon-map")?.bytes).toBe(
+      resources.layout.slots.slotCount * HORIZON_MAP_BYTES,
+    );
+    expect(resources.holdsHorizon(2)).toBe(false);
+    expect(resources.upload({ ...upload(2, 65, false), layers: mappedLayers() }).kind).toBe(
+      "uploaded",
+    );
+    expect(resources.holdsHorizon(2)).toBe(true);
+    const [nearWrite, farWrite] = engine.writes.filter((w) => w.buffer === "terrain horizon-map");
+    expect([nearWrite?.offsetBytes, nearWrite?.bytes]).toEqual([2 * HORIZON_MAP_BYTES, 67_600]);
+    expect([farWrite?.offsetBytes, farWrite?.bytes]).toEqual([
+      2 * HORIZON_MAP_BYTES + 67_600,
+      1_296,
+    ]);
+    resources.dispose();
+  });
+
+  it("write no horizon, −90° in every azimuth, to a lit slot whose bake has no map, and no map to blend to", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit");
+    resources.upload({ ...upload(2, 65, false), layers: mappedLayers() });
+    const none = {
+      ...mappedLayers(),
+      horizonNear: new Uint32Array(),
+      horizonFar: new Uint32Array(),
+    };
+    expect(resources.upload({ ...upload(2, 65, false), layers: none }).kind).toBe("uploaded");
+    expect(resources.holdsHorizon(2)).toBe(false);
+    const blank = engine.writes.findLast((w) => w.buffer === "terrain horizon-map");
+    expect([blank?.offsetBytes, blank?.bytes]).toEqual([2 * HORIZON_MAP_BYTES, HORIZON_MAP_BYTES]);
+    const words = new Uint32Array(blank?.data.slice().buffer ?? new ArrayBuffer(0));
+    expect(words.every((w) => w === NO_HORIZON_WORD)).toBe(true);
+    expect(NO_HORIZON_WORD).toBe(0x8001_8001);
+    resources.dispose();
+  });
+
+  it("refuse a horizon map of another size before any write", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit");
+    engine.resetCounts();
+    const short = { ...mappedLayers(), horizonFar: new Uint32Array(4) };
+    expect(() => resources.upload({ ...upload(4, 65, false), layers: short })).toThrow(RangeError);
+    expect(engine.counts.bufferWrites).toBe(0);
+    resources.dispose();
+  });
+
+  it("forget every slot's horizon map on a restore", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit");
+    resources.upload({ ...upload(2, 65, false), layers: mappedLayers() });
+    engine.restore();
+    expect(resources.holdsHorizon(2)).toBe(false);
+    resources.dispose();
+  });
+
+  it("make no horizon-map buffer for R05's spike shading", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84);
+    expect(resources.field("horizon-map")).toBeNull();
+    expect(resources.holdsHorizon(0)).toBe(false);
     resources.dispose();
   });
 

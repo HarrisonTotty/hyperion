@@ -44,15 +44,29 @@ export const SLOT_RECORD_BYTES = 112;
  *
  * ```wgsl
  * struct Instance {
- *   originM : vec3f,      // the patch origin less the camera, metres, narrowed once from f64
- *   slot : u32,           // the cache slot whose heights, offsets, normals and record it reads
- *   morphStartM : f32,    // the distance at which the morph to the parent begins, metres
- *   morphEndM : f32,      // the distance at which it is complete, metres
- *   _pad : vec2f,
+ *   originM : vec3f,        // the patch origin less the camera, metres, narrowed once from f64
+ *   slot : u32,             // the cache slot whose heights, offsets, normals and record it reads
+ *   morphStartM : f32,      // the distance at which the morph to the parent begins, metres
+ *   morphEndM : f32,        // the distance at which it is complete, metres
+ *   parentSlot : u32,       // the parent's slot, whose horizon map the patch's blends to, or
+ *                           // NO_PARENT_SLOT (R10.T8.b; decision-r10-t8a §1)
+ *   parentQuadrant : u32,   // the patch's quadrant in its parent: bit 0 i & 1, bit 1 j & 1
  * }
  * ```
  */
 export const INSTANCE_RECORD_BYTES = 32;
+
+/**
+ * The instance record's parent slot where the patch has no parent's horizon map to blend to: a
+ * root, a parent not resident, or one whose slot holds no map (R10.T8.b; `shadows/horizon.wgsl`'s
+ * `HORIZON_NO_PARENT`).
+ */
+export const NO_PARENT_SLOT = 0xffff_ffff;
+
+/** The quadrant of `key` in its parent, as the instance record carries it: bit 0 i & 1, bit 1 j & 1. */
+export function parentQuadrant(key: PatchKey): number {
+  return (key.i & 1) | ((key.j & 1) << 1);
+}
 
 /**
  * Bytes of the contacts buffer's header, `count : u32` and three words of padding:
@@ -291,9 +305,20 @@ export class InstanceRecords {
    * @param originMinusCameraM - The patch origin less the camera, metres, differenced in `f64`
    * (R02's `originMinusCamera`, the body-fixed origin rotated into the body's frame first); it is
    * narrowed here, once.
-   * @throws RangeError past {@link capacity}, or for a slot that is not a whole number.
+   * @param parentSlot - The slot of the parent whose horizon map the patch's blends to, or
+   * {@link NO_PARENT_SLOT} (R10.T8.b).
+   * @param quadrant - The patch's quadrant in that parent ({@link parentQuadrant}), 0 to 3.
+   * @throws RangeError past {@link capacity}, or for a slot, parent slot or quadrant that is not a
+   * whole number in its range.
    */
-  push(slot: number, originMinusCameraM: Vec3, morphStartM: number, morphEndM: number): void {
+  push(
+    slot: number,
+    originMinusCameraM: Vec3,
+    morphStartM: number,
+    morphEndM: number,
+    parentSlot = NO_PARENT_SLOT,
+    quadrant = 0,
+  ): void {
     this.pushXyz(
       slot,
       originMinusCameraM.x,
@@ -301,6 +326,8 @@ export class InstanceRecords {
       originMinusCameraM.z,
       morphStartM,
       morphEndM,
+      parentSlot,
+      quadrant,
     );
   }
 
@@ -312,12 +339,20 @@ export class InstanceRecords {
     zM: number,
     morphStartM: number,
     morphEndM: number,
+    parentSlot = NO_PARENT_SLOT,
+    quadrant = 0,
   ): void {
     if (this.#count >= this.capacity) {
       throw new RangeError(`more than ${this.capacity} instances in a frame`);
     }
     if (!Number.isInteger(slot) || slot < 0) {
       throw new RangeError(`slot ${slot} is not a whole number`);
+    }
+    if (!Number.isInteger(parentSlot) || parentSlot < 0 || parentSlot > NO_PARENT_SLOT) {
+      throw new RangeError(`parent slot ${parentSlot} is not a u32`);
+    }
+    if (!Number.isInteger(quadrant) || quadrant < 0 || quadrant > 3) {
+      throw new RangeError(`quadrant ${quadrant} is not 0 to 3`);
     }
     const base = this.#count * F32_WORDS_PER_INSTANCE;
     this.#f32[base] = xM;
@@ -326,8 +361,8 @@ export class InstanceRecords {
     this.#u32[base + 3] = slot;
     this.#f32[base + 4] = morphStartM;
     this.#f32[base + 5] = morphEndM;
-    this.#f32[base + 6] = 0;
-    this.#f32[base + 7] = 0;
+    this.#u32[base + 6] = parentSlot;
+    this.#u32[base + 7] = quadrant;
     this.#count += 1;
   }
 

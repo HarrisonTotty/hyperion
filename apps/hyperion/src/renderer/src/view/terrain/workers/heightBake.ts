@@ -61,6 +61,16 @@ export const WASM_WEIGHTS_LAYER = { baked: 0, skipped: 1 } as const satisfies Re
   number
 >;
 
+/**
+ * The module's `HorizonLayer` enum values (`src/wasm.rs`'s `JsHorizonLayer`), by the body's weights
+ * setting: the lit style bakes the horizon map with its weights, and the wireframe skips both
+ * (R10.T8.b).
+ */
+export const WASM_HORIZON_LAYER = { baked: 0, skipped: 1 } as const satisfies Record<
+  WeightsLayerSetting,
+  number
+>;
+
 /** The module's `LineOfSightKind` enum values (`src/wasm.rs`'s `JsLineOfSightKind`). */
 export const WASM_LINE_OF_SIGHT = { ground: 0, "no-ground": 1, "not-surveyed": 2 } as const;
 
@@ -84,14 +94,19 @@ export interface WasmBakedTerrain extends WasmBakedPatch {
   weights(): Uint8Array;
   surveyMask(): Uint8Array;
   unsurveyedCells(): Uint32Array;
+  horizonNear(): Uint32Array;
+  horizonFar(): Uint32Array;
+  horizonRefusedCells(): Uint32Array;
   readonly boundM: number;
   readonly sigmaM: number;
   readonly complete: boolean;
+  readonly horizonComplete: boolean;
 }
 
 /** The module's `FieldBlock`: what a block taken changed, and the body's level table after it. */
 export interface WasmFieldBlock {
   newlySurveyed(): Uint32Array;
+  newlyHeld(): Uint32Array;
   levelTable(): Float64Array;
   readonly fieldLevel: number;
   free(): void;
@@ -158,6 +173,7 @@ export interface WasmSurfaceFields {
     vertexPath: number,
     normals: number,
     weights: number,
+    horizon: number,
     skirtM: number,
   ): WasmBakedTerrain | undefined;
   reading(
@@ -514,9 +530,9 @@ export class WorkerFields {
   }
 
   /**
-   * Bakes `key` of `source`'s body over its field (no extra skirt margin), with R10's layers; `null`
-   * where the field cannot make it yet: none is held, or a surveyed vertex reads a cell still to
-   * come.
+   * Bakes `key` of `source`'s body over its field (no extra skirt margin), with R10's layers, the
+   * horizon map with the weights ({@link WASM_HORIZON_LAYER}); `null` where the field cannot make
+   * it yet: none is held, or a surveyed vertex reads a cell still to come.
    *
    * @throws Whatever the module throws for a key out of range.
    */
@@ -536,6 +552,7 @@ export class WorkerFields {
       WASM_VERTEX_PATH[settings.vertexPath],
       WASM_NORMAL_SCALE[settings.normals],
       WASM_WEIGHTS_LAYER[source.weights],
+      WASM_HORIZON_LAYER[source.weights],
       0,
     );
     if (baked === undefined) {
@@ -557,6 +574,10 @@ export class WorkerFields {
         complete: baked.complete,
         unsurveyedCells: baked.unsurveyedCells(),
         photometry,
+        horizonNear: baked.horizonNear(),
+        horizonFar: baked.horizonFar(),
+        horizonComplete: baked.horizonComplete,
+        horizonRefusedCells: baked.horizonRefusedCells(),
       });
     } finally {
       baked.free();
@@ -676,6 +697,7 @@ export class WorkerFields {
         block: {
           fieldLevel: block.fieldLevel,
           newlySurveyed: block.newlySurveyed(),
+          newlyHeld: block.newlyHeld(),
           levels: block.levelTable(),
         },
       };
