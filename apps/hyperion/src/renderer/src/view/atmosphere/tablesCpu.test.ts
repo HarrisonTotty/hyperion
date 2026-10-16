@@ -35,6 +35,7 @@ import {
   r05EarthWithOzoneAbsorber,
   venusClassMedium,
 } from "../../test/atmosphereFixtures";
+import { memoised } from "../../test/memo";
 import { quaternion } from "../camera/quaternion";
 import type { Rgb } from "../photometry/toneCurve";
 import { fromHalfBits, HALF_MAX, toHalfBits } from "../sky/half";
@@ -77,6 +78,8 @@ import {
   opticalDepth,
   opticalDepthToTop,
   ORACLE_STEPS,
+  type RadiusAndCosine,
+  type Shell,
   transmittanceRMuToUv,
   transmittanceUvToRMu,
   unitFromTexelUv,
@@ -1446,11 +1449,39 @@ describe("a Venus-class transmittance stored as optical depth", () => {
 describe("four absorbers, one a molecule pair, under their curves of growth", () => {
   const { medium: four, curves } = fourAbsorberMedium();
   const size = { widthTexels: 16, heightTexels: 8 };
+  const texelCount = size.widthTexels * size.heightTexels;
   // At 20,000 midpoint steps, so that the layers' sharp edges converge as the oracle's do.
   const tables = transmittanceTablesTwin(four, R1, curves, size, 20_000);
+  const shell: Shell = { bottomRadiusM: R1, topRadiusM: R1 + four.topHeightM };
+  /** Texel `i`'s (r, μ), at its centre. */
+  const texelRMu = (i: number): RadiusAndCosine =>
+    transmittanceUvToRMu(
+      shell,
+      unitFromTexelUv(((i % size.widthTexels) + 0.5) / size.widthTexels, size.widthTexels),
+      unitFromTexelUv(
+        (Math.floor(i / size.widthTexels) + 0.5) / size.heightTexels,
+        size.heightTexels,
+      ),
+    );
+  // Each texel's oracle columns and depth, each a Simpson integral of ORACLE_STEPS along its ray,
+  // made once for the three tests that read them: each is a pure function of this block's medium
+  // and the texel, which no test writes to.
+  const columnsAt = memoised(
+    (i: number) => {
+      const { rM, mu } = texelRMu(i);
+      return absorberAmountsToTop(four, R1, rM, mu);
+    },
+    (i) => String(i),
+  );
+  const depthAt = memoised(
+    (i: number) => {
+      const { rM, mu } = texelRMu(i);
+      return opticalDepthToTop(four, R1, rM, mu);
+    },
+    (i) => String(i),
+  );
 
   it("fill the transmittance table's alpha and the absorber-column table's first three channels", () => {
-    const shell = { bottomRadiusM: R1, topRadiusM: R1 + four.topHeightM };
     const slots = absorberSlots(four);
     expect(slots.map((slot) => slot.term.name)).toEqual([
       "absorber:O3",
@@ -1459,33 +1490,25 @@ describe("four absorbers, one a molecule pair, under their curves of growth", ()
       "absorber:O3 (troposphere)",
     ]);
     let worst = 0;
-    for (let y = 0; y < size.heightTexels; y += 1) {
-      for (let x = 0; x < size.widthTexels; x += 1) {
-        const i = y * size.widthTexels + x;
-        const { rM, mu } = transmittanceUvToRMu(
-          shell,
-          unitFromTexelUv((x + 0.5) / size.widthTexels, size.widthTexels),
-          unitFromTexelUv((y + 0.5) / size.heightTexels, size.heightTexels),
+    for (let i = 0; i < texelCount; i += 1) {
+      const oracle = columnsAt(i);
+      const stored = [
+        tables.transmittance.texels[i * 4 + 3] ?? Number.NaN,
+        tables.absorberColumns.texels[i * 4] ?? Number.NaN,
+        tables.absorberColumns.texels[i * 4 + 1] ?? Number.NaN,
+        tables.absorberColumns.texels[i * 4 + 2] ?? Number.NaN,
+      ];
+      for (const [k, slot] of slots.entries()) {
+        const amount = oracle[k];
+        const expected =
+          (amount === undefined ? Number.NaN : amountValue(amount)) /
+          amountValue(slot.verticalAmount);
+        worst = Math.max(
+          worst,
+          Math.abs((stored[k] ?? Number.NaN) - expected) / Math.max(expected, 1e-3),
         );
-        const oracle = absorberAmountsToTop(four, R1, rM, mu);
-        const stored = [
-          tables.transmittance.texels[i * 4 + 3] ?? Number.NaN,
-          tables.absorberColumns.texels[i * 4] ?? Number.NaN,
-          tables.absorberColumns.texels[i * 4 + 1] ?? Number.NaN,
-          tables.absorberColumns.texels[i * 4 + 2] ?? Number.NaN,
-        ];
-        for (const [k, slot] of slots.entries()) {
-          const amount = oracle[k];
-          const expected =
-            (amount === undefined ? Number.NaN : amountValue(amount)) /
-            amountValue(slot.verticalAmount);
-          worst = Math.max(
-            worst,
-            Math.abs((stored[k] ?? Number.NaN) - expected) / Math.max(expected, 1e-3),
-          );
-        }
-        expect(tables.absorberColumns.texels[i * 4 + 3]).toBe(0);
       }
+      expect(tables.absorberColumns.texels[i * 4 + 3]).toBe(0);
     }
     // Measured 2.3 × 10⁻⁴: each layer's edge is a ramp over one of the column's levels, about
     // 120 m, which both quadratures resolve to a fraction of their steps.
@@ -1493,30 +1516,18 @@ describe("four absorbers, one a molecule pair, under their curves of growth", ()
   });
 
   it("give every texel the oracle's transmittance, each column through its own curve", () => {
-    const shell = { bottomRadiusM: R1, topRadiusM: R1 + four.topHeightM };
     let worst = 0;
-    for (let y = 0; y < size.heightTexels; y += 1) {
-      for (let x = 0; x < size.widthTexels; x += 1) {
-        const { rM, mu } = transmittanceUvToRMu(
-          shell,
-          unitFromTexelUv((x + 0.5) / size.widthTexels, size.widthTexels),
-          unitFromTexelUv((y + 0.5) / size.heightTexels, size.heightTexels),
-        );
-        const tau = opticalDepthToTop(four, R1, rM, mu);
-        const absorbed = curvesOpticalDepth(
-          curves[0] ?? [],
-          absorberAmountsToTop(four, R1, rM, mu),
-          [],
-        );
-        const t = texelTransmittance(tables, four, y * size.widthTexels + x);
-        for (const c of CHANNELS) {
-          const oracle = Math.exp(-(tau[c] + absorbed[c]));
-          worst = Math.max(worst, Math.abs(t[c] - oracle) / Math.max(oracle, 1e-6));
-        }
+    for (let i = 0; i < texelCount; i += 1) {
+      const tau = depthAt(i);
+      const absorbed = curvesOpticalDepth(curves[0] ?? [], columnsAt(i), []);
+      const t = texelTransmittance(tables, four, i);
+      for (const c of CHANNELS) {
+        const oracle = Math.exp(-(tau[c] + absorbed[c]));
+        worst = Math.max(worst, Math.abs(t[c] - oracle) / Math.max(oracle, 1e-6));
       }
     }
     expect(worst).toBeLessThan(1e-3);
-  });
+  }, 30_000); // M2 worst 1.6 s, M3 3.6 s (2026-10-16): 10× M2, CPU-bound
 
   it("are read on a march's own path by its whole column, never step by step (Design note 5)", () => {
     const planet: PlanetTwin = {
@@ -1558,27 +1569,16 @@ describe("four absorbers, one a molecule pair, under their curves of growth", ()
       multiScattering: { widthTexels: 1, heightTexels: 1, texels: new Float64Array(4) },
     };
     const sources = tableSources(planet);
-    const shell = { bottomRadiusM: R1, topRadiusM: R1 + four.topHeightM };
     const out: Rgb3 = [0, 0, 0];
     let worst = 0;
-    for (let y = 0; y < size.heightTexels; y += 1) {
-      for (let x = 0; x < size.widthTexels; x += 1) {
-        const { rM, mu } = transmittanceUvToRMu(
-          shell,
-          unitFromTexelUv((x + 0.5) / size.widthTexels, size.widthTexels),
-          unitFromTexelUv((y + 0.5) / size.heightTexels, size.heightTexels),
-        );
-        sources.sunTransmittance(rM - R1, mu, out, 0);
-        const tau = opticalDepthToTop(four, R1, rM, mu);
-        const absorbed = curvesOpticalDepth(
-          curves[0] ?? [],
-          absorberAmountsToTop(four, R1, rM, mu),
-          [],
-        );
-        for (const c of CHANNELS) {
-          const oracle = Math.exp(-(tau[c] + absorbed[c]));
-          worst = Math.max(worst, Math.abs(out[c] - oracle) / Math.max(oracle, 1e-6));
-        }
+    for (let i = 0; i < texelCount; i += 1) {
+      const { rM, mu } = texelRMu(i);
+      sources.sunTransmittance(rM - R1, mu, out, 0);
+      const tau = depthAt(i);
+      const absorbed = curvesOpticalDepth(curves[0] ?? [], columnsAt(i), []);
+      for (const c of CHANNELS) {
+        const oracle = Math.exp(-(tau[c] + absorbed[c]));
+        worst = Math.max(worst, Math.abs(out[c] - oracle) / Math.max(oracle, 1e-6));
       }
     }
     expect(worst).toBeLessThan(1e-3);

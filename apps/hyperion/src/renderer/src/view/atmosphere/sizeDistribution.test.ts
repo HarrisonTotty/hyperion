@@ -290,11 +290,9 @@ describe("a mode's optics", () => {
   });
 
   it("mark a non-sphere's Mie values by its shape and carry no matrix for it", () => {
-    const sizes: SizeDistribution = {
-      kind: "gamma",
-      effectiveRadiusUm: 1.5,
-      effectiveVariance: 0.3,
-    };
+    // The next test's mode: a mode's shape, and whether it carries a matrix, do not depend on its
+    // sizes, and r_eff 1.5 µm at v_eff 0.3 took the droplets 22,392 nodes, each at 256 angles.
+    const sizes: SizeDistribution = { kind: "gamma", effectiveRadiusUm: 1, effectiveVariance: 0.1 };
     const dust = modeOptics({ material: "mars_dust", sizes }, 550);
     expect(dust.shape).toBe("nonSphericalMineral");
     expect(dust.matrix).toBeUndefined();
