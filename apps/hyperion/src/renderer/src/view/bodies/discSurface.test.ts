@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { add, dot, scale, type Vec3, vec3 } from "../../geometry/vec3";
+import { add, cross, dot, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
 import { aHostDisc } from "../../test/litFixtures";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
@@ -19,7 +19,8 @@ import type { TextureHandle } from "../engine/types";
 import type { PlacedLight } from "../lighting/hostLights";
 import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
 import { AU_M } from "../scenes/kept";
-import { vertexDir } from "../terrain/cube";
+import { faceUvToXyz, stToUv, vertexDir } from "../terrain/cube";
+import { EDGES, type Edge, edgeNeighbour, type Face } from "../terrain/patchKey";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import {
   type CompositePixel,
@@ -34,6 +35,8 @@ import {
   type ClassMapTexel,
   type ClassMapTexels,
   classMapLayers,
+  classMapSharesAt,
+  classMapSide,
   classMapSurface,
   classMapTexelOf,
   classWeightsAt,
@@ -183,7 +186,10 @@ function worstRatio(measured: ReadonlyArray<number>, expected: ReadonlyArray<num
 /**
  * The cube-sphere direction under a pixel's centre, by an `f64` ray–spheroid hit of its own in
  * the body-fixed axes: the hit's body-fixed point over (a, a, c), which R05's `spheroidPoint` maps
- * back to it.
+ * back to it. In that space the spheroid is the unit sphere, and the hit is the ray's foot nearest
+ * the centre, r̂ × (o × r̂), less √(1 − |foot|²) along r̂: cross products, so that no two large
+ * numbers cancel, as the reconstruction's shares, which vary across a texel (R10.T10.d), need
+ * the hit to some 10⁻¹⁵ where T8.b's nearest read did not.
  */
 function cubeDirectionAt(
   body: LitBodyInput,
@@ -196,15 +202,17 @@ function cubeDirectionAt(
     return vec3(fixed.x / a, fixed.y / a, fixed.z / c);
   };
   const origin = toScaled(scale(body.centreM, -1));
-  const ray = toScaled(viewRay(xPx + 0.5, yPx + 0.5, CAMERA, VIEWPORT));
-  const b = dot(origin, ray);
-  const rr = dot(ray, ray);
-  const disc = b * b - rr * (dot(origin, origin) - 1);
-  if (disc < 0) {
+  const ray = normalise(toScaled(viewRay(xPx + 0.5, yPx + 0.5, CAMERA, VIEWPORT)));
+  if (dot(origin, ray) >= 0) {
     return null;
   }
-  const t = (-b - Math.sqrt(disc)) / rr;
-  return [origin.x + t * ray.x, origin.y + t * ray.y, origin.z + t * ray.z];
+  const foot = cross(ray, cross(origin, ray));
+  const h2 = 1 - dot(foot, foot);
+  if (h2 < 0) {
+    return null;
+  }
+  const h = Math.sqrt(h2);
+  return [foot.x - h * ray.x, foot.y - h * ray.y, foot.z - h * ray.z];
 }
 
 /** Values as the shader reads them, rounded to `f32`. */
@@ -234,9 +242,11 @@ describe("the class map's layout", () => {
       t.face === texel.face && t.i === texel.i && t.j === texel.j ? [0, 0, 0, 0, 0, 1] : null,
     );
     expect(classMapLayers(6)).toBe(12);
-    expect(map.data).toHaveLength(12 * 4 * 4 * 4);
-    // Class 5: channel 1 of layer 4 + 6.
-    const at = (((4 + 6) * 4 + 1) * 4 + 2) * 4 + 1;
+    // Six texels a side: the face's four and the gutter.
+    expect(classMapSide(4)).toBe(6);
+    expect(map.data).toHaveLength(12 * 6 * 6 * 4);
+    // Class 5: channel 1 of layer 4 + 6, at (i + 1, j + 1).
+    const at = (((4 + 6) * 6 + 2) * 6 + 3) * 4 + 1;
     expect(map.data[at]).toBe(255);
     expect(map.data.reduce((sum, b) => sum + b, 0)).toBe(255);
   });
@@ -286,19 +296,20 @@ describe("the class map's layout", () => {
     );
   });
 
-  it("uploads a class map as a 2D array of rgba8unorm texels, every layer at once", async () => {
+  it("uploads a class map as a 2D array of rgba8unorm texels, gutter and every layer at once, under coarse-field-gpu", async () => {
     const engine = await countingRenderEngine();
     const map = twoClassMap(4);
     const surface = classMapSurface(engine, "moon class map", map, [DARK, BRIGHT], UNIFORM);
     expect(surface).toMatchObject({ kind: "class-map", laws: [DARK, BRIGHT], elsewhere: UNIFORM });
     expect(engine.textureSpecs.at(-1)).toMatchObject({
       name: "moon class map",
-      size: { width: 4, height: 4, depthOrArrayLayers: 6 },
+      size: { width: 6, height: 6, depthOrArrayLayers: 6 },
       dimension: "2d",
       format: CLASS_MAP_FORMAT,
+      category: "coarse-field-gpu",
     });
     const write = engine.textureWritten.at(-1);
-    expect(write?.size).toEqual({ width: 4, height: 4, depthOrArrayLayers: 6 });
+    expect(write?.size).toEqual({ width: 6, height: 6, depthOrArrayLayers: 6 });
     expect(write?.data).toEqual(map.data);
   });
 
@@ -309,7 +320,7 @@ describe("the class map's layout", () => {
 });
 
 describe("a disc under a class map", () => {
-  it("shades surveyed texels by their classes' laws and the rest by the uniform law", () => {
+  it("shades each point by its laws' reconstructed shares, the uniform law's alone in unsurveyed texels", () => {
     // 64 px across, f = 0.1, its pole tilted towards the camera; one sample a pixel inside.
     const map = twoClassMap(4);
     const { body, hosts } = bodyAt(
@@ -335,7 +346,7 @@ describe("a disc under a class map", () => {
       if (d === null) {
         throw new Error(`pixel ${key} misses the body`);
       }
-      const shares = surfaceShares(classWeightsAt(map, d));
+      const shares = classMapSharesAt(map, d);
       shares.forEach((share, m) => {
         seen[m] = (seen[m] ?? 0) + (share > 0 ? 1 : 0);
       });
@@ -349,6 +360,23 @@ describe("a disc under a class map", () => {
     }
     expect(seen.every((count) => count > 100)).toBe(true);
     expect(worst).toBeLessThan(1e-12);
+  });
+
+  it("draws the uniform disc to 10⁻⁴ under a map of one class equal to the uniform law surveyed whole (R10.T10.d)", () => {
+    const map = packClassMap(4, 1, () => [1]);
+    const same = lawFor([0.2, 0.2, 0.2], [1.5, 1.5, 1.5], "lambert");
+    const { body, hosts } = bodyAt(40, 60, {}, 0.9);
+    const uniform = drawn(body, hosts);
+    const mapped = drawn({ ...body, surface: classMap([same]), rotation: ROTATION }, hosts, map);
+    expect(mapped.size).toBe(uniform.size);
+    let worst = 0;
+    for (const [key, pixel] of uniform) {
+      for (const c of [0, 1, 2] as const) {
+        const other = mapped.get(key)?.rgb[c] ?? Number.NaN;
+        worst = Math.max(worst, Math.abs(other - pixel.rgb[c]) / Math.max(pixel.rgb[c], 1e-30));
+      }
+    }
+    expect(worst).toBeLessThan(1e-4);
   });
 
   it("draws the uniform disc to 10⁻⁵ under a map of one class equal to the uniform law", () => {
@@ -387,7 +415,8 @@ describe("a disc under a class map", () => {
 
   it("integrates to the area-weighted p of its classes and the uniform law when half surveyed", () => {
     // 16 texels a face, the pattern fine against the disc; each law's area over 2 × 10⁵ directions
-    // spread evenly on the sphere.
+    // spread evenly on the sphere, its shares as the reconstruction gives them (R10.T10.d's 1%;
+    // T8.b's 0.3% holds).
     const map = twoClassMap(16);
     const points = 200_000;
     const area = [0, 0, 0];
@@ -395,11 +424,9 @@ describe("a disc under a class map", () => {
       const z = 1 - (2 * (n + 0.5)) / points;
       const r = Math.sqrt(1 - z * z);
       const phi = n * Math.PI * (3 - Math.sqrt(5));
-      surfaceShares(classWeightsAt(map, [r * Math.cos(phi), r * Math.sin(phi), z])).forEach(
-        (share, m) => {
-          area[m] = (area[m] ?? 0) + share / points;
-        },
-      );
+      classMapSharesAt(map, [r * Math.cos(phi), r * Math.sin(phi), z]).forEach((share, m) => {
+        area[m] = (area[m] ?? 0) + share / points;
+      });
     }
     const byLaw = [UNIFORM, DARK, BRIGHT].map((law) =>
       fullFlux({ surface: { kind: "uniform", law } }),
@@ -537,5 +564,182 @@ describe("a class-map disc's record", () => {
     expect(bound.filter((name) => name === "test class map")).toHaveLength(2);
     expect(bound.filter((name) => name === "bodies:no class map")).toHaveLength(2);
     renderer.dispose();
+  });
+});
+
+/** The body-fixed direction of face coordinates (s, t) on `face`. */
+function directionAt(face: Face, s: number, t: number): readonly [number, number, number] {
+  return faceUvToXyz(face, stToUv(s), stToUv(t));
+}
+
+/** The bytes of class `k` at stored texel (x, y) of `face`, as the layout documents them. */
+function storedByte(map: ClassMapTexels, face: Face, x: number, y: number, k: number): number {
+  const side = classMapSide(map.faceTexels);
+  const layer = face + 6 * Math.floor(k / 4);
+  return map.data[((layer * side + y) * side + x) * 4 + (k % 4)] ?? Number.NaN;
+}
+
+describe("the survey-masked reconstruction (R10.T10.d)", () => {
+  it("fills each face's gutter with the edge texels across its edges, its corners empty", () => {
+    // Every texel its own weights: class 0 at (1 + its index) ÷ 255.
+    const n = 4;
+    const id = (face: number, i: number, j: number): number => (face * n + j) * n + i + 1;
+    const map = packClassMap(n, 2, ({ face, i, j }) => [
+      id(face, i, j) / 255,
+      1 - id(face, i, j) / 255,
+    ]);
+    const wrong: string[] = [];
+    const gutter = (edge: Edge, at: number): readonly [number, number, number, number] => {
+      // The face texel beside the gutter texel, and the gutter texel's stored place.
+      switch (edge) {
+        case "UMin":
+          return [0, at, 0, at + 1];
+        case "UMax":
+          return [n - 1, at, n + 1, at + 1];
+        case "VMin":
+          return [at, 0, at + 1, 0];
+        case "VMax":
+          return [at, n - 1, at + 1, n + 1];
+      }
+      throw new Error(`no edge ${String(edge)}`);
+    };
+    for (const face of [0, 1, 2, 3, 4, 5] as const) {
+      for (const edge of EDGES) {
+        for (let at = 0; at < n; at += 1) {
+          const [i, j, x, y] = gutter(edge, at);
+          // The quadtree's own neighbour across the edge (R05's `edgeNeighbour`), independently.
+          const across = edgeNeighbour({ face, level: 2, i, j }, edge);
+          const expected = id(across.face, across.i, across.j);
+          const found = storedByte(map, face, x, y, 0);
+          if (found !== expected) {
+            wrong.push(`face ${face} ${edge} ${at}: ${found}, not ${expected}`);
+          }
+        }
+      }
+      for (const [x, y] of [
+        [0, 0],
+        [n + 1, 0],
+        [0, n + 1],
+        [n + 1, n + 1],
+      ] as const) {
+        if (storedByte(map, face, x, y, 0) !== 0 || storedByte(map, face, x, y, 1) !== 0) {
+          wrong.push(`face ${face} corner (${x}, ${y}) holds weight`);
+        }
+      }
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it("gives a surveyed texel's own shares at its centre, a partly surveyed one's with elsewhere's rest", () => {
+    // Half surveyed, and of the rest a quarter partly surveyed: half the texel, its weights halved.
+    const n = 4;
+    const map = packClassMap(n, 2, ({ i, j }) => {
+      if ((i + j) % 2 === 0) {
+        return i % 2 === 0 ? [1, 0] : [0.25, 0.75];
+      }
+      return i % 2 === 0 && j % 2 === 1 ? [0.25, 0.25] : null;
+    });
+    let worst = 0;
+    let partly = 0;
+    for (const face of [0, 1, 2, 3, 4, 5] as const) {
+      for (let j = 0; j < n; j += 1) {
+        for (let i = 0; i < n; i += 1) {
+          const d = directionAt(face, (i + 0.5) / n, (j + 0.5) / n);
+          const own = surfaceShares(classWeightsAt(map, d));
+          if (own[0] === 1) {
+            continue;
+          }
+          partly += own[0] === 0 ? 0 : 1;
+          const shares = classMapSharesAt(map, d);
+          worst = Math.max(worst, ...shares.map((share, m) => Math.abs(share - (own[m] ?? 0))));
+        }
+      }
+    }
+    expect(partly).toBe(6 * 4);
+    expect(worst).toBeLessThan(1e-12);
+    // The partly surveyed texel at (0, 1) of face 2: half `elsewhere`'s.
+    // Each quarter is 63.75 bytes, kept as 64 by the largest remainder.
+    expect(classMapSharesAt(map, directionAt(2, 0.5 / n, 1.5 / n))).toEqual([
+      expect.closeTo(1 - 128 / 255, 12),
+      expect.closeTo(64 / 255, 12),
+      expect.closeTo(64 / 255, 12),
+    ]);
+  });
+
+  it("gives a sample in an unsurveyed texel no surveyed weight, however near the survey", () => {
+    const n = 4;
+    const map = twoClassMap(n);
+    let samples = 0;
+    const leaked: string[] = [];
+    for (const face of [0, 1, 2, 3, 4, 5] as const) {
+      // Eight points across each texel, its edges' near sides among them.
+      for (let a = 0; a < 8 * n; a += 1) {
+        for (let b = 0; b < 8 * n; b += 1) {
+          const s = (a + (a % 8 === 7 ? 0.999 : a % 8 === 0 ? 0.001 : 0.5)) / (8 * n);
+          const t = (b + (b % 8 === 7 ? 0.999 : b % 8 === 0 ? 0.001 : 0.5)) / (8 * n);
+          const d = directionAt(face, s, t);
+          if (classWeightsAt(map, d).some((w) => w > 0)) {
+            continue;
+          }
+          samples += 1;
+          const shares = classMapSharesAt(map, d);
+          if (shares[0] !== 1 || shares.slice(1).some((share) => share !== 0)) {
+            leaked.push(`${face} (${s}, ${t}): ${shares.join(", ")}`);
+          }
+        }
+      }
+    }
+    // Half of each face's texels, 64 points each.
+    expect(samples).toBe((6 * n * n * 64) / 2);
+    expect(leaked).toEqual([]);
+  });
+
+  it("keeps a linear ramp of weights linear across a face's edge to 10⁻⁶, through the gutter", () => {
+    // Faces +x (0) and +y (1) meet where u = 1 on +x and u = −1 on +y, v along the edge on both.
+    // With t the cell coordinate's distance from the edge, + on face 0 and − on face 1, class 0's
+    // weight at the two texel columns either side is 0.5 + 0.2 N t at their centres: bytes 153 and
+    // 204 on face 0, 102 and 51 on face 1; every other texel unsurveyed.
+    const n = 8;
+    const map = packClassMap(n, 2, ({ face, i }) => {
+      let byte: number | null = null;
+      if (face === 0 && i >= n - 2) {
+        byte = 153 + 51 * (n - 1 - i);
+      } else if (face === 1 && i <= 1) {
+        byte = 102 - 51 * i;
+      }
+      return byte === null ? null : [byte / 255, 1 - byte / 255];
+    });
+    const along = (n / 2 + 0.5) / n;
+    let worst = 0;
+    let crossed = 0;
+    for (let k = -29; k <= 29; k += 1) {
+      const t = (k / 29) * (1.45 / n);
+      const d = t > 0 ? directionAt(0, 1 - t, along) : directionAt(1, -t, along);
+      crossed += t > 0 ? 1 : 0;
+      const w = 0.5 + 0.2 * n * t;
+      const [elsewhere = Number.NaN, first = Number.NaN, second = Number.NaN] = classMapSharesAt(
+        map,
+        d,
+      );
+      worst = Math.max(worst, Math.abs(elsewhere), Math.abs(first - w), Math.abs(second - (1 - w)));
+    }
+    expect(crossed).toBe(29);
+    expect(worst).toBeLessThan(1e-6);
+  });
+
+  it("refuses no direction on a face's edge or at a cube's corner, its shares summing to 1", () => {
+    const map = twoClassMap(4);
+    const corner = 1 / Math.sqrt(3);
+    for (const d of [
+      [1, 1, 0.3],
+      [1, -1, 0],
+      [corner, corner, corner],
+      [-corner, corner, -corner],
+      [0, 0, -1],
+    ] as const) {
+      const shares = classMapSharesAt(map, d);
+      expect(shares.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1, 12);
+      expect(shares.every((share) => share >= 0 && Number.isFinite(share))).toBe(true);
+    }
   });
 });

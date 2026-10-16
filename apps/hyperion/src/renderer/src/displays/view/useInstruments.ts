@@ -47,6 +47,7 @@ import type { PhotorealStatus } from "../../view/photoreal/renderer";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
 import { cameraKinematics } from "../../view/scene/fromServer";
 import type { ViewStar } from "../../view/scene/model";
+import type { ClassMapSource } from "../../view/terrain/classMap";
 import type { DrawAnchor } from "../../view/wireframe/drawList";
 import { availabilityOf, styleRefusals } from "./styleRefusals";
 import type { SkyModel } from "../../view/sky/model";
@@ -138,6 +139,11 @@ export interface InstrumentsFrame {
   readonly stars: ReadonlyArray<ViewStar>;
   /** Reports each instrument's camera to the server's scene, or `null` for a kept scene. */
   readonly reportCamera: ((view: ViewId, pose: SceneKinematics) => void) | null;
+  /**
+   * The class maps the lit bodies' discs shade with (plan R10, R10.T10.d), the primary's, or `null`:
+   * every disc uniform.
+   */
+  readonly classMaps: ClassMapSource | null;
 }
 
 /** What `useInstruments` reads. */
@@ -576,6 +582,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         availability: inputs.availability,
         // The primary is the exposure's source: an instrument meters nothing (Design note 11).
         meter: null,
+        classMaps: each.classMaps ?? undefined,
       });
       if (drawn !== null) {
         loop.anchors = drawn.anchors;

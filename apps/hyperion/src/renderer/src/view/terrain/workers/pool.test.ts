@@ -4,7 +4,7 @@ import { keptBody } from "../../scenes/kept";
 import { bakeOf, ScriptedHeightWorker } from "../../../test/scriptedHeightWorker";
 import { type PatchKey, patchKeyString } from "../patchKey";
 import type { PatchRequest } from "../select";
-import type { BakedPatch, HeightSourceSetting, TerrainLayers } from "./messages";
+import type { BakedPatch, ClassMapAnswer, HeightSourceSetting, TerrainLayers } from "./messages";
 import {
   type FieldChange,
   type FieldRefusal,
@@ -640,5 +640,124 @@ describe("the height-worker pool", () => {
     }
     expect(baked).toEqual([]);
     expect(() => pool.reprioritise([])).toThrow(/terminated/u);
+  });
+});
+
+/** A worker's answer of a class map of no texel, at the map's level. */
+function emptyMap(): ClassMapAnswer {
+  return {
+    level: 6,
+    fieldLevel: 6,
+    classes: Uint8Array.from([1, 0]),
+    photometry: new Float32Array(5),
+    texels: new Uint32Array(0),
+    fractions: new Float32Array(0),
+    weights: new Uint8Array(0),
+    complete: true,
+  };
+}
+
+/** Answers `worker`'s oldest class-map query with `map`. */
+function answerClassMap(worker: ScriptedHeightWorker, map: ClassMapAnswer | null): void {
+  const query = worker.pendingClassMaps[0];
+  if (query === undefined) {
+    throw new Error("no class map is asked");
+  }
+  worker.reply({ kind: "class-map", id: query.id, body: query.body, map });
+}
+
+describe("the height-worker pool's class maps (R10.T10.d)", () => {
+  const SEED = "0123456789abcdef";
+
+  it("asks one worker, the least loaded, after the body's blocks, and answers with its map", async () => {
+    const { pool, created } = poolOf(2);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.reprioritise([req(1, 9)]);
+    const asked = pool.classMap(MOON, SEED);
+    // The bake went to the first worker; the query to the second, after the field's block.
+    const second = workerAt(created, 1);
+    expect(second.received.map((m) => m.kind)).toEqual(["field-init", "class-map"]);
+    expect(second.pendingClassMaps[0]).toMatchObject({ body: MOON, detailSeed: SEED });
+    expect(workerAt(created, 0).pendingClassMaps).toEqual([]);
+    const map = emptyMap();
+    answerClassMap(second, map);
+    await expect(asked).resolves.toBe(map);
+  });
+
+  it("answers null at once for a body whose field it does not keep", async () => {
+    const { pool, created } = poolOf(1);
+    await expect(pool.classMap(MOON, SEED)).resolves.toBeNull();
+    expect(workerAt(created, 0).received).toEqual([]);
+  });
+
+  it("answers null where the worker holds no field of the body, and rejects with the module's refusal", async () => {
+    const { pool, created } = poolOf(1);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    const none = pool.classMap(MOON, SEED);
+    answerClassMap(workerAt(created, 0), null);
+    await expect(none).resolves.toBeNull();
+    const refused = pool.classMap(MOON, SEED);
+    const query = workerAt(created, 0).pendingClassMaps[0];
+    if (query === undefined) {
+      throw new Error("no class map is asked");
+    }
+    workerAt(created, 0).reply({
+      kind: "class-map-failed",
+      id: query.id,
+      body: MOON,
+      message: "a body index above 65,535",
+    });
+    await expect(refused).rejects.toThrow(/class map of .* was refused: a body index above/u);
+  });
+
+  it("asks a failed worker's replacement again, once the fields are posted to it", async () => {
+    const { pool, created } = poolOf(1);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.fieldChunk(MOON, blockOf(4, 1));
+    const asked = pool.classMap(MOON, SEED);
+    workerAt(created, 0).fail();
+    const replacement = workerAt(created, 1);
+    expect(replacement.received.map((m) => m.kind)).toEqual([
+      "field-init",
+      "field-chunk",
+      "class-map",
+    ]);
+    const map = emptyMap();
+    answerClassMap(replacement, map);
+    await expect(asked).resolves.toBe(map);
+  });
+
+  it("asks another worker where a failed one's place is given up, and answers null with none left", async () => {
+    const { pool, created } = poolOf(2);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    const asked = pool.classMap(MOON, SEED);
+    // The first worker, and each of its replacements, fails.
+    let failing = workerAt(created, 0);
+    for (let n = 0; n < MAX_CONSECUTIVE_WORKER_FAILURES; n += 1) {
+      expect(failing.pendingClassMaps).toHaveLength(1);
+      failing.fail();
+      failing = workerAt(created, created.length - 1);
+    }
+    expect(pool.lostWorkers).toBe(1);
+    const survivor = workerAt(created, 1);
+    const map = emptyMap();
+    answerClassMap(survivor, map);
+    await expect(asked).resolves.toBe(map);
+    const alone = poolOf(1);
+    alone.pool.fieldInit(MOON, blockOf(4, 0));
+    const unanswered = alone.pool.classMap(MOON, SEED);
+    for (let n = 0; n < MAX_CONSECUTIVE_WORKER_FAILURES; n += 1) {
+      workerAt(alone.created, alone.created.length - 1).fail();
+    }
+    expect(alone.pool.lostWorkers).toBe(1);
+    await expect(unanswered).resolves.toBeNull();
+  });
+
+  it("answers null to a query out when terminated", async () => {
+    const { pool } = poolOf(1);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    const asked = pool.classMap(MOON, SEED);
+    pool.terminate();
+    await expect(asked).resolves.toBeNull();
   });
 });

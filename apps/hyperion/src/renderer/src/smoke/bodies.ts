@@ -606,7 +606,10 @@ function worstRelative(a: Float32Array, b: Float32Array): number {
 /**
  * T8.b: a disc under a class map on the GPU: a half-surveyed two-class map (a dark lunar and a
  * bright terrestrial class, the provisional Lambert law elsewhere) against the CPU rasteriser, and a
- * map of one class equal to the uniform law against the uniform disc.
+ * map of one class equal to the uniform law against the uniform disc. R10.T10.d: each read by the
+ * survey-masked bilinear reconstruction with the face gutter, and a half-surveyed map at R10's 64
+ * texels a face, its survey's edge column partly surveyed, against the rasteriser, every texel
+ * finite.
  */
 export async function checkClassMap(engine: RenderEngine, checks: Checks): Promise<void> {
   const uniform = PROVISIONAL_PHOTOMETRY.law;
@@ -662,6 +665,51 @@ export async function checkClassMap(engine: RenderEngine, checks: Checks): Promi
       "T8.b a disc under a half-surveyed two-class map equals the CPU rasteriser's",
       agreement.worst <= 1 && agreement.classes && drawn.expected.length > 0,
       `${String(drawn.expected.length)} pixels; worst error ${agreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(agreement.classes)}${agreement.mismatches.length > 0 ? `: ${agreement.mismatches.slice(0, 6).join("; ")}` : ""}`,
+    );
+    // R10.T10.d: a map at R10's level, 64 texels a face with its gutter, half of every face
+    // surveyed (i < 32), the column at the survey's edge (i = 31) half surveyed, its weights halved,
+    // two classes in a pattern that varies texel to texel; read by the survey-masked bilinear
+    // reconstruction on the GPU and in the rasteriser alike.
+    const level = packClassMap(64, 2, ({ i, j }) => {
+      if (i >= 32) {
+        return null;
+      }
+      const w = ((i + 2 * j) % 8) / 7;
+      const share = i === 31 ? 0.5 : 1;
+      return [w * share, (1 - w) * share];
+    });
+    const atLevel = classMapSurface(
+      engine,
+      "smoke class map at R10's level",
+      level,
+      [
+        lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+        lawFor([0.5, 0.45, 0.4], [1.3, 1.3, 1.3], "earth"),
+      ],
+      uniform,
+    );
+    made.push(atLevel);
+    const reconstructed = await drawDisc(
+      engine,
+      renderer,
+      viewport,
+      40,
+      60,
+      TILTED_OBLATE,
+      [0, 0],
+      CAMERA,
+      null,
+      { surface: atLevel, rotation: TILTED, texels: level },
+    );
+    const finite = reconstructed.texels.every((value) => Number.isFinite(value));
+    const levelAgreement = texelAgreement(reconstructed);
+    checks.check(
+      "R10.T10.d a disc under a half-surveyed class map at 64 texels a face equals the CPU rasteriser's, every texel finite",
+      finite &&
+        levelAgreement.worst <= 1 &&
+        levelAgreement.classes &&
+        reconstructed.expected.length > 0,
+      `${String(reconstructed.expected.length)} pixels; every texel finite ${String(finite)}; worst error ${levelAgreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(levelAgreement.classes)}${levelAgreement.mismatches.length > 0 ? `: ${levelAgreement.mismatches.slice(0, 6).join("; ")}` : ""}`,
     );
     const results: string[] = [];
     let worst = 0;

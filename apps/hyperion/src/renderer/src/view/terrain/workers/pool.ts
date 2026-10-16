@@ -25,15 +25,19 @@
  * A bake the field cannot make yet, a survey whose margin
  * is still to come, waits for the body's next block. Each block's change of the survey is reported
  * once ({@link HeightWorkerPool.onFieldChange}), for the bakes already delivered (`rebake.ts`).
+ *
+ * A body's coarse class map for R07's disc (plan R10, T10.d) is asked of one worker
+ * ({@link HeightWorkerPool.classMap}), after the blocks posted before it, which it reads.
  */
 
-import type { BodyIdHex } from "@hyperion/protocol";
+import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
 
 import { patchKeyString } from "../patchKey";
 import type { PatchRequest } from "../select";
 import type {
   BakedPatch,
   BakeSettings,
+  ClassMapAnswer,
   FieldBlockAnswer,
   FieldForm,
   HeightWorkerReply,
@@ -150,11 +154,21 @@ interface InFlight {
   readonly blocksAtSend: number;
 }
 
+/** A class-map query posted to a worker and not yet answered. */
+interface PendingClassMap {
+  readonly body: BodyIdHex;
+  readonly detailSeed: DetailSeedHex;
+  readonly resolve: (map: ClassMapAnswer | null) => void;
+  readonly reject: (error: Error) => void;
+}
+
 interface Slot {
   worker: WorkerLike;
   readonly onMessage: (event: MessageEvent<HeightWorkerReply>) => void;
   readonly onError: () => void;
   readonly inFlight: Map<number, InFlight>;
+  /** The class-map queries posted to this worker and not yet answered, by message ID. */
+  readonly queries: Map<number, PendingClassMap>;
   /** The blocks posted to this worker and not yet answered, by message ID. */
   readonly posted: Map<number, PostedBlock>;
   /** What the worker last said it holds of every body's field, bytes. */
@@ -163,6 +177,11 @@ interface Slot {
   failures: number;
   /** Given up after {@link MAX_CONSECUTIVE_WORKER_FAILURES}: no worker runs in this place. */
   lost: boolean;
+}
+
+/** A worker's requests out: its bakes and class-map queries in flight. */
+function loadOf(slot: Slot): number {
+  return slot.inFlight.size + slot.queries.size;
 }
 
 /** Orders requests: forced first, then higher priority, then by key string. */
@@ -223,6 +242,7 @@ export class HeightWorkerPool {
           this.replace(slot);
         },
         inFlight: new Map(),
+        queries: new Map(),
         posted: new Map(),
         fieldBytes: 0,
         failures: 0,
@@ -482,6 +502,30 @@ export class HeightWorkerPool {
     }
   }
 
+  /**
+   * `body`'s coarse class map for R07's disc (plan R10, T10.d), answered by one worker over the field
+   * it holds of the body with the body's detail seed `detailSeed`: the least loaded running worker,
+   * posted after every block posted so far, which it reads.
+   *
+   * @remarks
+   * A worker that fails before it answers is replaced and the query asked again, of its replacement
+   * once the fields are posted to it, or of another worker where its place is given up. A pool
+   * terminated before the answer answers `null`.
+   *
+   * @returns The map, or `null` where the pool keeps no field of `body`, no worker runs, or the
+   *   worker holds no payload field of it; rejected with the module's message where the module
+   *   refused the query.
+   */
+  classMap(body: BodyIdHex, detailSeed: DetailSeedHex): Promise<ClassMapAnswer | null> {
+    this.assertLive();
+    if (!this.fields.has(body)) {
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve, reject) => {
+      this.postQuery({ body, detailSeed, resolve, reject });
+    });
+  }
+
   /** Stops every worker and drops every listener; the pool cannot be used afterwards. */
   terminate(): void {
     if (this.terminated) {
@@ -493,6 +537,10 @@ export class HeightWorkerPool {
       slot.worker.terminate();
       slot.inFlight.clear();
       slot.posted.clear();
+      for (const query of slot.queries.values()) {
+        query.resolve(null);
+      }
+      slot.queries.clear();
     }
     this.queue.clear();
     this.waiting.clear();
@@ -661,6 +709,18 @@ export class HeightWorkerPool {
         }
         break;
       }
+      case "class-map": {
+        const query = slot.queries.get(reply.id);
+        slot.queries.delete(reply.id);
+        query?.resolve(reply.map);
+        break;
+      }
+      case "class-map-failed": {
+        const query = slot.queries.get(reply.id);
+        slot.queries.delete(reply.id);
+        query?.reject(new Error(`the class map of ${reply.body} was refused: ${reply.message}`));
+        break;
+      }
       case "field-refused": {
         slot.fieldBytes = reply.heldBytes;
         slot.posted.delete(reply.id);
@@ -694,6 +754,8 @@ export class HeightWorkerPool {
     slot.inFlight.clear();
     // The failed worker will never answer its blocks; a replacement is posted them afresh.
     slot.posted.clear();
+    const queries = [...slot.queries.values()];
+    slot.queries.clear();
     slot.fieldBytes = 0;
     slot.failures += 1;
     if (slot.failures >= MAX_CONSECUTIVE_WORKER_FAILURES) {
@@ -707,7 +769,31 @@ export class HeightWorkerPool {
         });
       }
     }
+    // Asked again after the fields, of the replacement or of another worker.
+    for (const query of queries) {
+      this.postQuery(query);
+    }
     this.pump();
+  }
+
+  /** Posts a class-map query to the least loaded running worker, or answers `null` with none. */
+  private postQuery(query: PendingClassMap): void {
+    let slot: Slot | null = null;
+    for (const each of this.slots) {
+      if (!each.lost && (slot === null || loadOf(each) < loadOf(slot))) {
+        slot = each;
+      }
+    }
+    if (slot === null) {
+      query.resolve(null);
+      return;
+    }
+    const id = this.takeId();
+    slot.queries.set(id, query);
+    slot.worker.postMessage(
+      { kind: "class-map", id, body: query.body, detailSeed: query.detailSeed },
+      [],
+    );
   }
 
   /** Posts block `sequence` of `body`'s field `kept` to a running worker. */

@@ -7069,7 +7069,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     quadtree's cell (f, L, i, j), tested against `vertexDir` at level 2. Class k's weight is
     channel k mod 4 of layer f + 6 ⌊k ÷ 4⌋, and the shader reads N by `textureDimensions`. At
     most 16 laws per body (R10.T1's fifteen `MaterialClass`es; a body carrying all three
-    `FrostSpecies` would need 17), 24 layers.
+    `FrostSpecies` would need 17), 24 layers. _Changed by R10.T10.d: (N + 2) × (N + 2) texels a
+    layer, a one-texel gutter from the neighbouring faces, N = dim − 2, read by a survey-masked
+    bilinear reconstruction (R10's Risks, "Deviations in T10.d, as built")._
   - **Weights and shares.** An unsurveyed texel holds no weight. Each shaded sample takes each
     class's weight as its share and gives `elsewhere` 1 − Σ w; weights summing past 1 are scaled
     down to 1. `packClassMap` rounds a texel's weights to bytes that keep their sum (largest

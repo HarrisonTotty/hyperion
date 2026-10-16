@@ -52,11 +52,10 @@ import { METER_CLASS, type MeterClass } from "../post/meter";
 import { type Rotation3, rotateToBody } from "../coords/rotation";
 import type { ScreenRect } from "../wireframe/submit";
 import {
+  classMapSharesAt,
   type ClassMapTexels,
-  classWeightsAt,
   discSurfaceLaws,
   MAX_DISC_CLASSES,
-  surfaceShares,
 } from "./discSurface";
 import { oblateAlbedoScale } from "./oblate";
 
@@ -602,9 +601,10 @@ interface Shaded {
 
 /**
  * The share of each of the body's laws at the point `q` (from the centre ÷ a): the uniform law's
- * alone, or under a class map the shares of the texel the point's cube-sphere direction falls in.
- * R05's spheroid point of the unit direction d is M d (`spheroidPoint`), so d is q stretched along
- * the pole by a ÷ c, taken along the body-fixed axes.
+ * alone, or under a class map the shares the survey-masked bilinear reconstruction gives at the
+ * point's cube-sphere direction (`classMapSharesAt`, R10.T10.d). R05's spheroid point of the unit
+ * direction d is M d (`spheroidPoint`), so d is q stretched along the pole by a ÷ c, taken along
+ * the body-fixed axes.
  */
 function sharesAt(body: ViewBody, q: Vec3): number[] {
   if (body.classMap === null) {
@@ -612,7 +612,7 @@ function sharesAt(body: ViewBody, q: Vec3): number[] {
   }
   const d = normalise(stretchAlong(body.pole, body.stretch, q));
   const [x, y, z] = body.classMap.axes;
-  return surfaceShares(classWeightsAt(body.classMap.texels, [dot(d, x), dot(d, y), dot(d, z)]));
+  return classMapSharesAt(body.classMap.texels, [dot(d, x), dot(d, y), dot(d, z)]);
 }
 
 /**

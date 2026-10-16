@@ -182,6 +182,9 @@ async function bakeOverField(
           case "bake-failed":
           case "bake-unsurveyed":
           case "field-refused":
+          // No class map is asked here (R10.T10.d).
+          case "class-map":
+          case "class-map-failed":
             fail(`the worker answered ${JSON.stringify(reply)}`);
             return;
         }

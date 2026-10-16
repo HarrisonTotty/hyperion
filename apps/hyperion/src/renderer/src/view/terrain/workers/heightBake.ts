@@ -30,6 +30,7 @@ import { vec3 } from "../../../geometry/vec3";
 import type {
   BakedPatch,
   BakeSettings,
+  ClassMapAnswer,
   FieldBlockAnswer,
   FieldForm,
   HeightSourceSetting,
@@ -39,7 +40,7 @@ import type {
   TestPlanetRidges,
   WeightsLayerSetting,
 } from "./messages";
-import { bakeTransferables, blockTransferables } from "./messages";
+import { bakeTransferables, blockTransferables, classMapTransferables } from "./messages";
 
 /** The version of the test planet this client's code was written against, the surface crate's
  * `TEST_PLANET_VERSION` (pinned to it by `heightWasm.test.ts`). A module that bakes another
@@ -151,6 +152,19 @@ export interface WasmGround {
   free(): void;
 }
 
+/** The module's `ClassMapAnswer`, `WorkerFields::class_map`'s (R10.T10.d): its getters copy out. */
+export interface WasmClassMap {
+  readonly level: number;
+  readonly fieldLevel: number;
+  classes(): Uint8Array;
+  photometry(): Float32Array;
+  texels(): Uint32Array;
+  fractions(): Float32Array;
+  weights(): Uint8Array;
+  readonly complete: boolean;
+  free(): void;
+}
+
 /**
  * The module's `SurfaceFields`: a client's field a body (`src/wasm.rs`'s module documentation). A
  * body is its system's raw ID and its index; a seed is the body's detail seed.
@@ -213,6 +227,11 @@ export interface WasmSurfaceFields {
    *   or no entry of the body's palette).
    */
   photometry(system: bigint, body: number, palette: Uint8Array): Float32Array | undefined;
+  /**
+   * The body's coarse class map for R07's disc (R10.T10.d); `undefined` where no field of the body
+   * is held.
+   */
+  classMap(system: bigint, body: number, seed: bigint): WasmClassMap | undefined;
   free(): void;
 }
 
@@ -696,6 +715,35 @@ export class WorkerFields {
     }
   }
 
+  /**
+   * `body`'s coarse class map for R07's disc over its field, with its detail seed (R10.T10.d,
+   * `WorkerFields::class_map`), copied out; `null` where no payload field of it is held (none, or a
+   * stand-in's, which holds no ground).
+   */
+  classMap(body: BodyIdHex, detailSeed: DetailSeedHex): ClassMapAnswer | null {
+    if (this.#forms.get(body) !== "payload") {
+      return null;
+    }
+    const map = this.#module.classMap(...bodyArgs(body), hexToU64(detailSeed));
+    if (map === undefined) {
+      return null;
+    }
+    try {
+      return {
+        level: map.level,
+        fieldLevel: map.fieldLevel,
+        classes: map.classes(),
+        photometry: map.photometry(),
+        texels: map.texels(),
+        fractions: map.fractions(),
+        weights: map.weights(),
+        complete: map.complete,
+      };
+    } finally {
+      map.free();
+    }
+  }
+
   /** Frees the module's fields; the object cannot be used afterwards. */
   free(): void {
     this.#module.free();
@@ -820,7 +868,9 @@ export interface HeightAnswer {
  * (`WebAssembly.RuntimeError`, a Rust panic) is a bug that may leave the instance broken, so it is
  * rethrown: the worker raises it as its error and the pool replaces the worker. A body's field
  * blocks go to `fields` (R10.T6.b: decoded into the module's field, or held undecoded for a
- * stand-in), each answered with what the worker then holds and what a payload's block changed.
+ * stand-in), each answered with what the worker then holds and what a payload's block changed. A
+ * class-map query is answered over the body's field (R10.T10.d), or refused with the module's
+ * message.
  */
 export function answerRequest(
   module: HeightModule,
@@ -847,8 +897,33 @@ export function answerRequest(
     case "field-release":
       fields.release(request.body);
       return fieldAnswer(request.id, request.body, fields, { kind: "taken", block: null });
+    case "class-map":
+      return answerClassMap(request, fields);
   }
   return unreachable(request);
+}
+
+/**
+ * Answers a class-map query: the map, `null` where no payload field of the body is held, or the
+ * module's refusal; a trap is rethrown, as a bake's is.
+ */
+function answerClassMap(
+  request: Extract<HeightWorkerRequest, { kind: "class-map" }>,
+  fields: WorkerFields,
+): HeightAnswer {
+  const { id, body } = request;
+  try {
+    const map = fields.classMap(body, request.detailSeed);
+    return { reply: { kind: "class-map", id, body, map }, transfer: classMapTransferables(map) };
+  } catch (error: unknown) {
+    if (isTrap(error)) {
+      throw error;
+    }
+    return {
+      reply: { kind: "class-map-failed", id, body, message: messageOf(error) },
+      transfer: [],
+    };
+  }
 }
 
 /** Answers a bake request. */

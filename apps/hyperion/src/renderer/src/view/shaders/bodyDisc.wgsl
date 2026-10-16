@@ -2,8 +2,9 @@
 // and 24): each pixel's rays intersected with the body's spheroid and shaded by `body_brdf`'s law
 // under the horizon, eclipse, ring-shadow and atmosphere terms of `litBody.wgsl`, and by the
 // planetshine of up to two lit neighbours. The law is the disc's surface's (`DiscSurface`): one law,
-// or under R10's class map each class's law by its weight at the hit and the uniform law by what
-// the weights leave. The TypeScript twin is `view/bodies/discShading.ts`.
+// or under R10's class map each class's law by its share at the hit and the uniform law by the
+// rest, the shares reconstructed from the map's texels (`surface_shares`, R10.T10.d). The
+// TypeScript twin is `view/bodies/discShading.ts`.
 //
 // A library composed by concatenation after frame.wgsl, preciseTrig.wgsl, R08's common.wgsl,
 // oblate.wgsl and surfaceLighting.wgsl (plan R08, R08.T9.b) and litBody.wgsl, with no entry point of
@@ -54,9 +55,11 @@
 // The phase factors of the frame's laws, one row each (`litBody.wgsl`).
 @group(2) @binding(1) var phase_factor_table : texture_2d<f32>;
 
-// The disc's class map (`discSurface.ts`): N × N texels per face of R05's cube sphere, class k's
-// weight in channel k mod 4 of layer face + 6 ⌊k ÷ 4⌋, read unfiltered; any one texture where the
-// surface is uniform, unread.
+// The disc's class map (`discSurface.ts`): (N + 2) × (N + 2) texels a layer, the N × N of a face of
+// R05's cube sphere at (1, 1) to (N, N) and a one-texel gutter about them from the neighbouring
+// faces' edge texels, its corners empty (R10.T10.d); class k's weight in channel k mod 4 of layer
+// face + 6 ⌊k ÷ 4⌋, read by texel (`textureLoad`) and reconstructed here (`surface_shares`); any one
+// texture where the surface is uniform, unread.
 @group(2) @binding(2) var class_weights : texture_2d_array<f32>;
 
 // The body's atmosphere, which `surfaceLighting.wgsl` reads (plan R08, R08.T9.b; `draw.ts`'s
@@ -164,10 +167,15 @@ fn texel_index(s : f32, n : u32) -> u32 {
   return u32(clamp(floor(s * f32(n)), 0.0, f32(n - 1u)));
 }
 
-// The class map's texel of a body-fixed direction: (i, j, face), R05's face of the largest
-// |component| (ties to the lowest face: +x 0, +y 1, +z 2, −x 3, −y 4, −z 5) and its (u, v) there
-// (`xyzToFaceUv`), warped and scaled by n (`classMapTexelOf`).
-fn class_map_texel(p : vec3f, n : u32) -> vec3u {
+// A body-fixed direction's face of R05's cube sphere and its (u, v) there.
+struct CubeFaceUv {
+  face : u32,
+  uv : vec2f,
+}
+
+// R05's face of the largest |component| of `p` (ties to the lowest face: +x 0, +y 1, +z 2, −x 3,
+// −y 4, −z 5) and its (u, v) there (`xyzToFaceUv`).
+fn cube_face_uv(p : vec3f) -> CubeFaceUv {
   let faces = vec3u(select(3u, 0u, p.x > 0.0), select(4u, 1u, p.y > 0.0), select(5u, 2u, p.z > 0.0));
   let size = abs(p);
   var face = faces.x;
@@ -187,14 +195,55 @@ fn class_map_texel(p : vec3f, n : u32) -> vec3u {
     case 4u: { uv = vec2f(p.z / p.y, -p.x / p.y); }
     default: { uv = vec2f(-p.y / p.z, -p.x / p.z); }
   }
-  return vec3u(texel_index(uv_to_st(uv.x), n), texel_index(uv_to_st(uv.y), n), face);
+  var out : CubeFaceUv;
+  out.face = face;
+  out.uv = uv;
+  return out;
+}
+
+// The texel of an n × n grid a face holding a body-fixed direction: (i, j, face), its (u, v)
+// warped and scaled by n (`classMapTexelOf`), with no gutter (R10.T10.c's coverage mask).
+fn class_map_texel(p : vec3f, n : u32) -> vec3u {
+  let at = cube_face_uv(p);
+  return vec3u(texel_index(uv_to_st(at.uv.x), n), texel_index(uv_to_st(at.uv.y), n), at.face);
+}
+
+// One class-map texel's share of each of the disc's laws, and whether it holds any weight: each
+// class's weight at stored texel `texel` of `face`'s layers, the gutter included, scaled down to sum
+// to 1 where it sums to more, and law 0 (`elsewhere`) what they leave (`surfaceShares`).
+struct TexelShares {
+  shares : array<f32, SURFACE_LAWS>,
+  surveyed : bool,
+}
+
+fn texel_shares(texel : vec2u, face : u32, count : u32) -> TexelShares {
+  var out : TexelShares;
+  var total = 0.0;
+  for (var group = 0u; group * 4u < count; group = group + 1u) {
+    let weights = textureLoad(class_weights, texel, face + 6u * group, 0);
+    for (var c = 0u; c < min(4u, count - group * 4u); c = c + 1u) {
+      out.shares[group * 4u + c + 1u] = weights[c];
+      total = total + weights[c];
+    }
+  }
+  if (total > 1.0) {
+    for (var k = 1u; k <= count; k = k + 1u) {
+      out.shares[k] = out.shares[k] / total;
+    }
+  }
+  out.shares[0] = select(1.0 - total, 0.0, total >= 1.0);
+  out.surveyed = total > 0.0;
+  return out;
 }
 
 // The share of each of the disc's laws at the point `q` (from the body's centre ÷ a): law 0's
-// alone on a uniform surface; under a class map, each class's weight at the texel the point's
-// cube-sphere direction falls in (R05's spheroid point of the unit direction d is M d, so d is q
-// stretched along the pole), scaled down to sum to 1 where it sums to more, and law 0 (`elsewhere`)
-// what they leave (`surfaceShares`).
+// alone on a uniform surface; under a class map, by the survey-masked bilinear reconstruction
+// (R10.T10.d, decision-r07-t8b; `classMapSharesAt`) at the point's cube-sphere direction (R05's
+// spheroid point of the unit direction d is M d, so d is q stretched along the pole): law 0 alone
+// where the texel holding it holds no weight, and otherwise the shares of the four texels whose
+// centres are nearest, the gutter's at a face's edge, by their bilinear weights, those holding
+// weight alone, renormalised. The texel holding the point is one of the four, at a bilinear weight
+// of at least ¼.
 fn surface_shares(body : Body, q : vec3f, classes : u32) -> array<f32, SURFACE_LAWS> {
   var shares : array<f32, SURFACE_LAWS>;
   shares[0] = 1.0;
@@ -203,23 +252,41 @@ fn surface_shares(body : Body, q : vec3f, classes : u32) -> array<f32, SURFACE_L
   }
   let d = normalize(stretch_along(body, q));
   let p = vec3f(dot(d, body.axis_x), dot(d, body.axis_y), dot(d, body.axis_z));
-  let texel = class_map_texel(p, textureDimensions(class_weights).x);
+  let at = cube_face_uv(p);
+  // N, the texels along a face's side, the gutter apart.
+  let n = textureDimensions(class_weights).x - 2u;
+  let last = f32(n - 1u);
+  let st_n = vec2f(uv_to_st(at.uv.x), uv_to_st(at.uv.y)) * f32(n);
+  let holding = vec2i(clamp(floor(st_n), vec2f(0.0), vec2f(last)));
+  let corner_at = st_n - 0.5;
+  let first = vec2i(clamp(floor(corner_at), vec2f(-1.0), vec2f(last)));
+  let f = corner_at - vec2f(first);
   let count = min(classes, MAX_DISC_CLASSES);
-  var total = 0.0;
-  for (var group = 0u; group * 4u < count; group = group + 1u) {
-    let weights = textureLoad(class_weights, texel.xy, texel.z + 6u * group, 0);
-    for (var c = 0u; c < min(4u, count - group * 4u); c = c + 1u) {
-      shares[group * 4u + c + 1u] = weights[c];
-      total = total + weights[c];
+  var sum : array<f32, SURFACE_LAWS>;
+  var norm = 0.0;
+  for (var corner = 0u; corner < 4u; corner = corner + 1u) {
+    let step = vec2i(i32(corner & 1u), i32(corner >> 1u));
+    let texel = first + step;
+    let one = texel_shares(vec2u(texel + vec2i(1)), at.face, count);
+    if (all(texel == holding) && !one.surveyed) {
+      return shares;
     }
-  }
-  if (total > 1.0) {
-    for (var k = 1u; k <= count; k = k + 1u) {
-      shares[k] = shares[k] / total;
+    if (!one.surveyed) {
+      continue;
     }
+    let b = select(1.0 - f.x, f.x, step.x == 1) * select(1.0 - f.y, f.y, step.y == 1);
+    for (var m = 0u; m <= count; m = m + 1u) {
+      sum[m] = sum[m] + b * one.shares[m];
+    }
+    norm = norm + b;
   }
-  shares[0] = select(1.0 - total, 0.0, total >= 1.0);
-  return shares;
+  if (!(norm > 0.0)) {
+    return shares;
+  }
+  for (var m = 0u; m <= count; m = m + 1u) {
+    sum[m] = sum[m] / norm;
+  }
+  return sum;
 }
 
 // Law m of the disc: 0 from rows 4 and 5, class m − 1 from its rows.

@@ -105,6 +105,15 @@
 //!   substance. It returns `undefined` where no field of the body is held, and throws for a
 //!   palette of another length, a class code no class has, an entry no palette holds, or one past
 //!   the body's palette.
+//! - `classMap(system, body, seed)` returns a `ClassMapAnswer`, the body's coarse class map for
+//!   R07's disc ([`WorkerFields::class_map`], plan R10, T10.d), or `undefined` where no field of the
+//!   body is held: its `level` (6, 64 texels along a face's side) and `fieldLevel`; `classes()`, a
+//!   `Uint8Array` of two bytes a class, its class code then its entry (255 for none), at most 16;
+//!   `photometry()`, a `Float32Array` of 5 a class as `photometry`'s; `texels()`, a `Uint32Array`
+//!   of the cell index at `level` of each texel the survey touches, rising; `fractions()`, a
+//!   `Float32Array` of each texel's surveyed share; `weights()`, a `Uint8Array` of each texel's
+//!   bytes over the classes, texel t's at `classes · t`; and `complete`, `false` where some texel's
+//!   weights read a cell the field does not hold yet.
 
 use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::Metres;
@@ -113,14 +122,17 @@ use wasm_bindgen::prelude::wasm_bindgen;
 
 use crate::bake::{HorizonLayer, TerrainBakeOptions, TerrainLayers, WeightsLayer};
 use crate::cube::{Face, FaceUv, PatchKey};
-use crate::field::{BodyRef, FieldView};
+use crate::field::{BodyRef, FieldView, cell_index};
 use crate::geometry::{BAND_LIMIT_M, FINEST_SPACING_M};
 use crate::material::{MAX_CLASSES, Material, MaterialClass, MaterialProperties};
 use crate::noise::LatticeCache;
 use crate::patch::{BakeOptions, NormalScale, PatchBake, VertexPath};
 use crate::reading::{LineOfSight, SlantRange, SurveyedReading};
 use crate::test_planet::{Ridges, TEST_PLANET};
-use crate::worker::{BodyBake, QueryBodyError, SurveyChange, SurveyedMaterial, WorkerFields};
+use crate::worker::{
+    BodyBake, CLASS_MAP_LEVEL, ClassMap, DrawnPhotometry, QueryBodyError, SurveyChange,
+    SurveyedMaterial, WorkerFields,
+};
 
 /// The generator version this module computes surfaces for, the crate's `generator_version`.
 ///
@@ -1174,22 +1186,151 @@ impl JsSurfaceFields {
                 .fields
                 .photometry(body, material)
                 .map_err(|e| JsError::new(&e.to_string()))?;
-            let [b, v, r] = drawn.normal_albedo_bvr();
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "the shader reads f32; a normal albedo of at most 1.35 and an L(0) in \
-                          [0, 1] narrow far inside its range"
-            )]
-            let narrowed = [
-                b as f32,
-                v as f32,
-                r as f32,
-                f32::from(u8::from(drawn.phase_law())),
-                drawn.limb_parameter() as f32,
-            ];
-            *values = narrowed;
+            *values = photometry_values(&drawn);
         }
         Ok(Some(out))
+    }
+
+    /// The body's class map for R07's disc (see the module documentation), or `undefined` where no
+    /// field of the body is held.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` if the body's index is above 65,535.
+    #[wasm_bindgen(js_name = classMap)]
+    pub fn class_map(
+        &mut self,
+        system: u64,
+        body: u32,
+        seed: u64,
+    ) -> Result<Option<ClassMapAnswer>, JsError> {
+        let answer = self
+            .fields
+            .class_map(body_ref(system, body)?, DetailSeed::new(seed));
+        Ok(unless_unsurveyed(answer).map(|map| ClassMapAnswer { map }))
+    }
+}
+
+/// A material's photometry as the `photometry` and `classMap` exports give it: `A_N` in B, V and
+/// R, the law's code and its L(0), narrowed to `f32`.
+#[must_use]
+fn photometry_values(drawn: &DrawnPhotometry) -> [f32; PHOTOMETRY_STRIDE] {
+    let [b, v, r] = drawn.normal_albedo_bvr();
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the shader reads f32; a normal albedo of at most 1.35 and an L(0) in [0, 1] \
+                  narrow far inside its range"
+    )]
+    let narrowed = [
+        b as f32,
+        v as f32,
+        r as f32,
+        f32::from(u8::from(drawn.phase_law())),
+        drawn.limb_parameter() as f32,
+    ];
+    narrowed
+}
+
+/// A body's class map for R07's disc ([`ClassMap`]; see the module documentation).
+#[wasm_bindgen]
+#[derive(Debug)]
+pub struct ClassMapAnswer {
+    map: ClassMap,
+}
+
+#[wasm_bindgen]
+impl ClassMapAnswer {
+    /// The map's quadtree level, [`CLASS_MAP_LEVEL`]: 2^level texels along a face's side.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    #[expect(
+        clippy::unused_self,
+        reason = "a getter of the exported object is a method; the level is the crate's constant"
+    )]
+    pub fn level(&self) -> u8 {
+        CLASS_MAP_LEVEL
+    }
+
+    /// The level of the field the map was made from, 5 to 8.
+    #[wasm_bindgen(getter, js_name = fieldLevel)]
+    #[must_use]
+    pub fn field_level(&self) -> u8 {
+        self.map.field_level()
+    }
+
+    /// Its classes, two bytes each: the form's class code, then the palette entry (255 for none).
+    #[must_use]
+    pub fn classes(&self) -> Vec<u8> {
+        self.map
+            .classes()
+            .iter()
+            .flat_map(|class| {
+                let material = class.material();
+                [
+                    u8::from(material.class()),
+                    material.entry().unwrap_or(NONE_BYTE),
+                ]
+            })
+            .collect()
+    }
+
+    /// Each class's photometry, [`PHOTOMETRY_STRIDE`] values a class as `photometry`'s; all 0, law
+    /// code 0, where the palette names no substance.
+    #[must_use]
+    pub fn photometry(&self) -> Vec<f32> {
+        self.map
+            .classes()
+            .iter()
+            .flat_map(|class| {
+                class
+                    .photometry()
+                    .map_or([0.0; PHOTOMETRY_STRIDE], |drawn| photometry_values(&drawn))
+            })
+            .collect()
+    }
+
+    /// The cell index ([`cell_index`]) at the map's level of each texel the survey touches, rising.
+    #[must_use]
+    pub fn texels(&self) -> Vec<u32> {
+        self.map
+            .texels()
+            .iter()
+            .map(|t| cell_index(t.cell()))
+            .collect()
+    }
+
+    /// Each texel's surveyed share, (0, 1], in [`texels`](Self::texels)' order.
+    #[must_use]
+    pub fn fractions(&self) -> Vec<f32> {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "a share of at most 16 cells, k ÷ 16, is exact in f32"
+        )]
+        let narrow = |share: f64| share as f32;
+        self.map
+            .texels()
+            .iter()
+            .map(|t| narrow(t.surveyed_fraction()))
+            .collect()
+    }
+
+    /// Each texel's weight bytes over the classes, texel t's at `classes · t`, in
+    /// [`texels`](Self::texels)' order.
+    #[must_use]
+    pub fn weights(&self) -> Vec<u8> {
+        let classes = self.map.classes().len();
+        self.map
+            .texels()
+            .iter()
+            .flat_map(|t| t.weights().into_iter().take(classes))
+            .collect()
+    }
+
+    /// Whether every texel the survey touches was answered ([`ClassMap::is_complete`]).
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn complete(&self) -> bool {
+        self.map.is_complete()
     }
 }
 

@@ -96,7 +96,15 @@ export class ScriptedHeightWorker implements WorkerLike {
 
   /** The field messages received, oldest first. */
   get fieldMessages(): FieldMessage[] {
-    return this.received.flatMap((m) => (m.kind === "bake" ? [] : [m]));
+    return this.received.flatMap((m) =>
+      m.kind === "field-init" || m.kind === "field-chunk" || m.kind === "field-release" ? [m] : [],
+    );
+  }
+
+  /** The class-map queries still awaiting an answer, oldest first (R10.T10.d). */
+  get pendingClassMaps(): Extract<HeightWorkerRequest, { kind: "class-map" }>[] {
+    const answered = new Set(this.answered);
+    return this.received.flatMap((m) => (m.kind === "class-map" && !answered.has(m.id) ? [m] : []));
   }
 
   reply(message: HeightWorkerReply): void {

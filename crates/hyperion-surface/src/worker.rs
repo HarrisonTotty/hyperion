@@ -59,6 +59,13 @@
 //!
 //! Nothing here draws from a stream, so the module opens no domain tag; the answers are
 //! presentation, under no generator version but R09's and R10's functions'.
+//!
+//! # The disc's class map (plan R10, T10.d)
+//!
+//! [`WorkerFields::class_map`] answers R07's disc with the body's coarse class weights over the
+//! survey: a texel a cell of [`CLASS_MAP_LEVEL`] (64 × 64 a face), each texel touched by the
+//! survey with its weights over the body's classes, at most [`CLASS_MAP_CLASSES`], and the share of
+//! it surveyed. The render thread packs it into R07's map (`view/terrain/classMap.ts`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -66,14 +73,14 @@ use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::Metres;
 
 use crate::bake::{TerrainBake, TerrainBakeOptions, UNSURVEYED, bake_terrain};
-use crate::cube::{FaceUv, MAX_LEVEL, PATCH_QUADS, PatchKey, face_uv_to_xyz, unit_dir};
+use crate::cube::{FaceUv, MAX_LEVEL, PATCH_QUADS, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir};
 use crate::field::{
     BodyRef, FieldView, InsertBlockError, PartialField, ResolutionCode, cell_at_index, cell_index,
 };
 use crate::geometry::vertex_spacing;
 use crate::material::{
-    GroundMaterial, Material, MaterialProperties, PhaseLaw, ResolvePropertiesError, material_at,
-    properties, scaled_normal_albedo,
+    GroundMaterial, Material, MaterialProperties, PhaseLaw, ResolvePropertiesError, WEIGHT_TOTAL,
+    material_at, properties, scaled_normal_albedo, weights_at,
 };
 use crate::num;
 use crate::reading::{LineOfSight, SurveyedReading, slant_range, surveyed_reading};
@@ -407,6 +414,239 @@ impl BodyBake {
     }
 }
 
+/// The quadtree level of the disc's class map (plan R10, T10.d): 64 × 64 texels a face, each the
+/// cell (face, 6, i, j) of R05's cube sphere, as R07's `classMapTexelOf` finds it.
+///
+/// A texel of band level n is a cell of quadtree level n + 6 ([`weights_at`]), so a texel here takes
+/// its weights at band level 0 ([`CLASS_MAP_BAND`]): inside Design note 8's "level 4 or shallower"
+/// (main's provisional ruling on R10.T2's question, a map at quadtree level L reading band level
+/// L − 6, so L at most 10), and of Design note 8's "a few hundred kilobytes": 66 × 66 texels a
+/// layer with R07's gutter, 24 layers at 16 classes, 418 KB, where a map at L = 10 would take about
+/// 100 MB.
+pub const CLASS_MAP_LEVEL: u8 = 6;
+
+/// The band level a class-map texel's weights are taken at: [`CLASS_MAP_LEVEL`] − 6.
+pub const CLASS_MAP_BAND: u8 = CLASS_MAP_LEVEL - 6;
+
+/// The classes a class map holds at most: R07's `MAX_DISC_CLASSES`, the laws its disc carries.
+pub const CLASS_MAP_CLASSES: usize = 16;
+
+/// One class of a [`ClassMap`]: a form of a palette entry, with the photometry it is drawn with.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClassMapClass {
+    material: GroundMaterial,
+    photometry: Option<DrawnPhotometry>,
+}
+
+impl ClassMapClass {
+    /// The form and, where the palette names one, the substance.
+    #[must_use]
+    pub const fn material(&self) -> GroundMaterial {
+        self.material
+    }
+
+    /// Its photometry ([`WorkerFields::photometry`]), `None` where the palette names no substance:
+    /// the disc then shades it with the body's uniform law, as the lit terrain does its law 0.
+    #[must_use]
+    pub const fn photometry(&self) -> Option<DrawnPhotometry> {
+        self.photometry
+    }
+}
+
+/// One texel of a [`ClassMap`] that the survey touches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ClassMapTexel {
+    cell: PatchKey,
+    surveyed: u32,
+    cells: u32,
+    weights: [u8; CLASS_MAP_CLASSES],
+}
+
+impl ClassMapTexel {
+    /// The texel: a cell of [`CLASS_MAP_LEVEL`].
+    #[must_use]
+    pub const fn cell(&self) -> PatchKey {
+        self.cell
+    }
+
+    /// The field's cells under the texel that are surveyed, at least 1.
+    #[must_use]
+    pub const fn surveyed_cells(&self) -> u32 {
+        self.surveyed
+    }
+
+    /// The field's cells under the texel: 4^(field level − 6), or 1 where the field's level is 6 or
+    /// shallower, its one cell holding the texel.
+    #[must_use]
+    pub const fn cells(&self) -> u32 {
+        self.cells
+    }
+
+    /// The share of the texel the survey covers, (0, 1]: its field cells surveyed over its cells,
+    /// a margin cell counting as unsurveyed; 1 where the field's level is 6 or shallower.
+    #[must_use]
+    pub fn surveyed_fraction(&self) -> f64 {
+        f64::from(self.surveyed) / f64::from(self.cells)
+    }
+
+    /// Its weight bytes over the map's classes, in their order, the rest 0: summing to 255
+    /// ([`WEIGHT_TOTAL`]), or less where a class past [`CLASS_MAP_CLASSES`] was left out.
+    #[must_use]
+    pub const fn weights(&self) -> [u8; CLASS_MAP_CLASSES] {
+        self.weights
+    }
+}
+
+/// A body's coarse class map for R07's disc (plan R10, T10.d; Design note 8), from its field.
+///
+/// Each texel is a cell of [`CLASS_MAP_LEVEL`], and the map holds those the survey touches, in
+/// rising [`cell_index`], with:
+///
+/// - the share of it surveyed ([`ClassMapTexel::surveyed_fraction`]): of the field's cells under
+///   it, those surveyed, a margin cell counting as unsurveyed;
+/// - its weights over the map's classes: [`weights_at`] at the texel's centre at band level
+///   [`CLASS_MAP_BAND`] where the field's cell holding the centre is surveyed, and otherwise the
+///   mean of [`weights_at`] at the centres of the field's surveyed cells under it, at that band
+///   level, as bytes summing to 255 by the largest remainder (ties to the earlier class).
+///
+/// The classes are the materials the texels' weights name, in [`GroundMaterial`]'s order: a form
+/// of a palette entry, or a form whose palette names no substance. Past [`CLASS_MAP_CLASSES`] the
+/// lightest, by their weight summed over the texels times each texel's surveyed share (ties to the
+/// later material), are left out, and their weight with them, which the disc gives the body's
+/// uniform law.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassMap {
+    field_level: u8,
+    classes: Vec<ClassMapClass>,
+    texels: Vec<ClassMapTexel>,
+    complete: bool,
+}
+
+impl ClassMap {
+    /// The level of the field it was made from, 5 to 8.
+    #[must_use]
+    pub const fn field_level(&self) -> u8 {
+        self.field_level
+    }
+
+    /// Its classes, at most [`CLASS_MAP_CLASSES`], in the order the texels' weights take them.
+    #[must_use]
+    pub fn classes(&self) -> &[ClassMapClass] {
+        &self.classes
+    }
+
+    /// The texels the survey touches, in rising [`cell_index`].
+    #[must_use]
+    pub fn texels(&self) -> &[ClassMapTexel] {
+        &self.texels
+    }
+
+    /// Whether every texel the survey touches was answered: `false` where a texel's weights read a
+    /// cell the field does not hold yet (a survey's margin in a later block), which leaves the
+    /// texel out until a later block.
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        self.complete
+    }
+}
+
+/// A texel's surveyed cells and its weight bytes, per material, as means: before the map's
+/// classes are chosen.
+struct TexelReading {
+    cell: PatchKey,
+    surveyed: u32,
+    cells: u32,
+    weights: BTreeMap<GroundMaterial, f64>,
+}
+
+/// A class map's classes from its texels' readings ([`ClassMap`]): every material they name, in
+/// [`GroundMaterial`]'s order, or past [`CLASS_MAP_CLASSES`] the heaviest, by weight summed over
+/// the texels times each one's surveyed share, ties to the earlier material.
+fn kept_classes(readings: &[TexelReading]) -> Vec<GroundMaterial> {
+    let mut totals = BTreeMap::<GroundMaterial, f64>::new();
+    for reading in readings {
+        let share = f64::from(reading.surveyed) / f64::from(reading.cells);
+        for (&material, &weight) in &reading.weights {
+            *totals.entry(material).or_insert(0.0) += weight * share;
+        }
+    }
+    let mut ranked: Vec<(GroundMaterial, f64)> = totals.into_iter().collect();
+    ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    ranked.truncate(CLASS_MAP_CLASSES);
+    let mut kept: Vec<GroundMaterial> = ranked.into_iter().map(|(m, _)| m).collect();
+    kept.sort_unstable();
+    kept
+}
+
+/// The field's cells of `level` under, or holding, the class-map texel `texel`.
+fn field_cells_of(texel: PatchKey, level: u8) -> Vec<PatchKey> {
+    if level <= CLASS_MAP_LEVEL {
+        let shift = CLASS_MAP_LEVEL - level;
+        vec![
+            PatchKey::new(texel.face(), level, texel.i() >> shift, texel.j() >> shift)
+                .expect("a texel's ancestor is a cell of its level"),
+        ]
+    } else {
+        let shift = level - CLASS_MAP_LEVEL;
+        let side = 1_u32 << shift;
+        (0..side)
+            .flat_map(|dj| (0..side).map(move |di| (di, dj)))
+            .map(|(di, dj)| {
+                PatchKey::new(
+                    texel.face(),
+                    level,
+                    (texel.i() << shift) + di,
+                    (texel.j() << shift) + dj,
+                )
+                .expect("a texel's descendants are cells of their level")
+            })
+            .collect()
+    }
+}
+
+/// The centre of `cell` in face coordinates.
+fn centre_of(cell: PatchKey) -> FaceUv {
+    let side = f64::from(1_u32 << cell.level());
+    FaceUv {
+        face: cell.face(),
+        u: st_to_uv((f64::from(cell.i()) + 0.5) / side),
+        v: st_to_uv((f64::from(cell.j()) + 0.5) / side),
+    }
+}
+
+/// `values` as bytes keeping their rounded sum, at most 255: each rounded down, and the bytes that
+/// leaves short given to the largest remainders, ties to the earlier.
+fn bytes_by_largest_remainder(values: &[f64]) -> Vec<u8> {
+    let total: f64 = values.iter().sum();
+    let floors: Vec<f64> = values.iter().map(|v| v.floor()).collect();
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "each value and their sum lie in [0, 255], so the rounded sum and the floors are \
+                  whole numbers a u8 holds"
+    )]
+    let (target, mut bytes) = (
+        num::min(total.round(), f64::from(WEIGHT_TOTAL)) as u32,
+        floors.iter().map(|&f| f as u8).collect::<Vec<u8>>(),
+    );
+    let mut order: Vec<usize> = (0..values.len()).collect();
+    order.sort_by(|&a, &b| {
+        (values[b] - floors[b])
+            .total_cmp(&(values[a] - floors[a]))
+            .then(a.cmp(&b))
+    });
+    let held: u32 = bytes.iter().map(|&b| u32::from(b)).sum();
+    let mut short = target.saturating_sub(held);
+    for &k in &order {
+        if short == 0 {
+            break;
+        }
+        bytes[k] = bytes[k].saturating_add(1);
+        short -= 1;
+    }
+    bytes
+}
+
 /// The material at a surveyed point and, where the palette names its substance, its properties.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SurveyedMaterial {
@@ -732,6 +972,122 @@ impl WorkerFields {
             normal_albedo_bvr,
             phase_law,
             limb_parameter: phase_law.limb_parameter(normal_albedo_bvr[1]),
+        })
+    }
+
+    /// `body`'s coarse class map for R07's disc ([`ClassMap`]), with the body's detail seed `seed`.
+    ///
+    /// Every cell of [`CLASS_MAP_LEVEL`] is a texel, and those under which the field holds a
+    /// surveyed cell are answered: 24,576 texels, each surveyed one at one [`weights_at`] or, where
+    /// its centre's field cell is not surveyed, one a surveyed field cell under it. A texel whose
+    /// weights read a cell the field does not hold yet is left out, and the map is then not
+    /// [complete](ClassMap::is_complete).
+    ///
+    /// # Errors
+    ///
+    /// [`QueryBodyError::NotStarted`] if no field of `body` is held.
+    ///
+    /// # Panics
+    ///
+    /// If the classifier names an entry past the body's palette, which its tests rule out (a bug).
+    pub fn class_map(
+        &mut self,
+        body: BodyRef,
+        seed: DetailSeed,
+    ) -> Result<ClassMap, QueryBodyError> {
+        let BodyField { field, cache, .. } = self.held(body)?;
+        let level = field.header().level().get();
+        let band = BandLevel::new(CLASS_MAP_BAND).expect("band level 0 is a band level");
+        let synth = Synthesiser::new(&*field, seed);
+        let texel_count = 6_u32 << (2 * u32::from(CLASS_MAP_LEVEL));
+        let mut readings = Vec::new();
+        let mut complete = true;
+        for index in 0..texel_count {
+            let texel =
+                cell_at_index(CLASS_MAP_LEVEL, index).expect("an index below 6 · 4⁶ is a texel");
+            let cells = field_cells_of(texel, level);
+            let surveyed: Vec<PatchKey> = cells
+                .iter()
+                .copied()
+                .filter(|&cell| field.is_surveyed(cell))
+                .collect();
+            if surveyed.is_empty() {
+                continue;
+            }
+            let centre = centre_of(texel);
+            let centre_cell = PatchKey::containing(level, unit_dir(face_uv_to_xyz(centre)))
+                .expect("a coarse level is a quadtree level");
+            let points: Vec<FaceUv> = if field.is_surveyed(centre_cell) {
+                vec![centre]
+            } else {
+                surveyed.iter().map(|&cell| centre_of(cell)).collect()
+            };
+            let mut weights = BTreeMap::<GroundMaterial, f64>::new();
+            let mut answered = true;
+            for &at in &points {
+                match weights_at(&synth, cache, at, band) {
+                    Ok(at_point) => {
+                        for (material, byte) in at_point.iter() {
+                            *weights.entry(material).or_insert(0.0) += f64::from(byte);
+                        }
+                    }
+                    Err(QueryHeightError::NotSurveyed(_)) => {
+                        // A read past the cells held: the texel waits for a later block.
+                        answered = false;
+                        break;
+                    }
+                }
+            }
+            if !answered {
+                complete = false;
+                continue;
+            }
+            let count = |n: usize| u32::try_from(n).expect("a texel holds at most 16 field cells");
+            for value in weights.values_mut() {
+                *value /= f64::from(count(points.len()));
+            }
+            readings.push(TexelReading {
+                cell: texel,
+                surveyed: count(surveyed.len()),
+                cells: count(cells.len()),
+                weights,
+            });
+        }
+        let kept = kept_classes(&readings);
+        let texels = readings
+            .iter()
+            .map(|reading| {
+                let values: Vec<f64> = kept
+                    .iter()
+                    .map(|m| reading.weights.get(m).copied().unwrap_or(0.0))
+                    .collect();
+                let mut weights = [0_u8; CLASS_MAP_CLASSES];
+                for (slot, byte) in weights.iter_mut().zip(bytes_by_largest_remainder(&values)) {
+                    *slot = byte;
+                }
+                ClassMapTexel {
+                    cell: reading.cell,
+                    surveyed: reading.surveyed,
+                    cells: reading.cells,
+                    weights,
+                }
+            })
+            .collect();
+        let classes = kept
+            .into_iter()
+            .map(|material| ClassMapClass {
+                material,
+                photometry: material.material().map(|m| {
+                    self.photometry(body, m)
+                        .expect("the classifier names only entries of the body's palette")
+                }),
+            })
+            .collect();
+        Ok(ClassMap {
+            field_level: level,
+            classes,
+            texels,
+            complete,
         })
     }
 

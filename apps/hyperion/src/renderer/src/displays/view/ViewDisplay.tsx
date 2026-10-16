@@ -126,6 +126,7 @@ import {
   ViewMarkLabels,
 } from "./ViewMarkLabels";
 import { styleName } from "../../view/photoreal/style";
+import type { ClassMapSource } from "../../view/terrain/classMap";
 import { ViewMarkList } from "./ViewMarkList";
 import { ViewSceneContext } from "./ViewSceneProvider";
 import {
@@ -314,6 +315,12 @@ interface ViewStageProps {
   readonly setting: QualitySetting;
   /** The platform's primary modifier, whose chord with the arrows steps the rate (R07.T19.f). */
   readonly modifier: PrimaryModifier;
+  /**
+   * The class maps every view's lit bodies' discs shade with (plan R10, R10.T10.d), a store made
+   * over `engineState`'s engine and the height workers' pool, or `null`: every disc then its
+   * photometry's uniform law.
+   */
+  readonly classMaps: ClassMapSource | null;
 }
 
 /** What the drawing loop reads of the several views' budgets, kept current by an effect. */
@@ -381,6 +388,8 @@ interface LoopInputs {
   readonly meter: MeterMode;
   /** Takes the exposure the view's `AutoExposure` moved to, into the display's state. */
   readonly onExposureChange: (exposure: ExposureControl) => void;
+  /** The class maps the lit bodies' discs shade with (R10.T10.d), or `null`. */
+  readonly classMaps: ClassMapSource | null;
 }
 
 /** What the loop publishes for the DOM, at most every {@link READOUT_INTERVAL_MS}. */
@@ -564,6 +573,7 @@ function ViewStage({
   universe,
   setting,
   modifier,
+  classMaps,
 }: ViewStageProps) {
   const legendId = useId();
   const server = source.kind === "server" ? source.server : null;
@@ -605,6 +615,7 @@ function ViewStage({
     availability: WIREFRAME_ONLY,
     meter: "average",
     onExposureChange,
+    classMaps,
   });
 
   // The sky replaces the interim field once it arrives, asked on the published run (R06.T13.c).
@@ -703,6 +714,7 @@ function ViewStage({
       availability,
       meter,
       onExposureChange,
+      classMaps,
     };
   }, [
     exposure,
@@ -715,6 +727,7 @@ function ViewStage({
     availability,
     meter,
     onExposureChange,
+    classMaps,
   ]);
 
   // The drawing loop reads the server's scene, as the latest render holds it, through a ref.
@@ -887,6 +900,7 @@ function ViewStage({
           availability: inputs.availability,
           // The exposure's source: its frames take the histogram its meter reads (Design note 11).
           meter: auto.meter,
+          classMaps: inputs.classMaps ?? undefined,
         });
         if (drawn !== null && inputs.size !== null) {
           anchors = drawn.anchors;
@@ -919,6 +933,7 @@ function ViewStage({
         stars: inputs.stars,
         reportCamera:
           run.source.kind === "server" && current !== null ? current.reportCamera : null,
+        classMaps: inputs.classMaps,
       });
       if (publish) {
         publishedMs = nowMs;
@@ -1732,6 +1747,10 @@ function ViewPanels({
         universe={universe}
         setting={setting}
         modifier={primaryModifierOf(platform)}
+        // No view feeds a body's class map yet: the task that first draws a body's terrain live
+        // makes the store over the engine and the height workers' pool (R10's Risks, "Questions for
+        // main (R10.T10.d)"), until when every disc is uniform.
+        classMaps={null}
       />
     </div>
   );

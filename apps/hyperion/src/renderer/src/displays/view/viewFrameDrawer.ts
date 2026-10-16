@@ -43,6 +43,7 @@ import { cameraFromObserverM } from "../../view/sky/camera";
 import { SkyCubeLayer } from "../../view/sky/cubeLayer";
 import { HostDiscLayer } from "../../view/sky/disc";
 import { skySpriteStars } from "../../view/sky/sprites";
+import type { ClassMapSource } from "../../view/terrain/classMap";
 import {
   buildWireframeDrawList,
   type DrawAnchor,
@@ -91,6 +92,11 @@ export interface ViewFrameInputs {
    * meters nothing, an instrument (Design note 11), whose frames take none.
    */
   readonly meter: MeterMode | null;
+  /**
+   * The class maps its lit bodies' discs shade with (plan R10, R10.T10.d), made on the drawer's
+   * engine; absent, every disc is uniform. No view feeds one until a body's terrain is drawn live.
+   */
+  readonly classMaps?: ClassMapSource | undefined;
 }
 
 /** What a frame drew. */
@@ -286,6 +292,7 @@ export class ViewFrameDrawer {
           cube: cube === null ? null : this.#cubes.draw(cube, "hdr", exposed),
           previousRegimes: this.#regimes,
           meter: inputs.meter,
+          classMaps: inputs.classMaps,
           // The marks cased over the tone-mapped image at the canvas's resolution (R07.T16.a), and
           // the craft on their silhouettes (R07.T16.e).
           overlay: overlaySubmission(this.#wireframe, list, tokens, camera, viewport),

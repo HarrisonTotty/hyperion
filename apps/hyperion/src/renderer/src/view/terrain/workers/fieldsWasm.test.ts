@@ -18,6 +18,10 @@ import {
   WeightsLayer,
 } from "../../../generated/surface/hyperion_surface";
 import wasmDataUrl from "../../../generated/surface/hyperion_surface_bg.wasm?inline";
+import { classWeightsAt } from "../../bodies/discSurface";
+import { CLASS_MAP_LEVEL, classMapTexelsOf } from "../classMap";
+import { fieldCellAt } from "../coverage";
+import { faceUvToXyz, stToUv } from "../cube";
 import type { Face } from "../patchKey";
 import { f32Digest, f64Digest } from "./f32Digest";
 import {
@@ -579,6 +583,73 @@ describe("the height worker's fields on the real module", () => {
     for (const [values, pinned] of pinnedPairs) {
       expect(values).toEqual(pinned);
     }
+  });
+
+  it("answers the fixture's class map, a texel for each surveyed cell, packed with none elsewhere (R10.T10.d)", () => {
+    const fields = heldFields();
+    const { reply, transfer } = answerRequest(
+      module,
+      { kind: "class-map", id: 4, body: FIXTURE.body, detailSeed: FIXTURE.seed },
+      fields,
+    );
+    if (reply.kind !== "class-map" || reply.map === null) {
+      throw new Error(`no class map: ${JSON.stringify(reply)}`);
+    }
+    const { map } = reply;
+    expect(transfer).toContain(map.weights.buffer);
+    // The Moon-like field is at the map's level: a texel is a field cell, surveyed whole or not.
+    expect([map.level, map.fieldLevel, map.complete]).toEqual([CLASS_MAP_LEVEL, 6, true]);
+    const surveyed = FIXTURE.changes.flatMap((runs) =>
+      runs.flatMap((run) => {
+        if (run === "-") {
+          return [];
+        }
+        const [first = 0, past = 0] = run.split("-").map(Number);
+        return Array.from({ length: past - first }, (_, k) => first + k);
+      }),
+    );
+    expect([...map.texels]).toEqual([...new Set(surveyed)].toSorted((a, b) => a - b));
+    expect([...map.fractions].every((share) => share === 1)).toBe(true);
+    const classes = map.classes.length / 2;
+    expect(classes).toBeGreaterThan(0);
+    for (let t = 0; t < map.texels.length; t += 1) {
+      const bytes = map.weights.subarray(t * classes, (t + 1) * classes);
+      expect(bytes.reduce((sum, b) => sum + b, 0)).toBe(255);
+    }
+    // Each class named by the palette drawn as the lit terrain draws its slot, the rest all 0.
+    const unnamed: number[][] = [];
+    const named: number[][] = [];
+    for (let k = 0; k < classes; k += 1) {
+      const values = [
+        ...map.photometry.subarray(PHOTOMETRY_STRIDE * k, PHOTOMETRY_STRIDE * (k + 1)),
+      ];
+      (map.classes[2 * k + 1] === PALETTE_NONE ? unnamed : named).push(values);
+    }
+    expect(unnamed.filter((values) => values.some((value) => value !== 0))).toEqual([]);
+    expect(named.filter((values) => !lawfulPhotometry(values))).toEqual([]);
+    const packed = classMapTexelsOf(map);
+    if (packed === null) {
+      throw new Error("the map has classes");
+    }
+    const held = new Set(map.texels);
+    const totals: number[] = [];
+    for (let index = 0; index < 6 * 4 ** CLASS_MAP_LEVEL; index += 1) {
+      const cell = fieldCellAt(CLASS_MAP_LEVEL, index);
+      const side = 2 ** CLASS_MAP_LEVEL;
+      const centre = faceUvToXyz(
+        cell.face,
+        stToUv((cell.i + 0.5) / side),
+        stToUv((cell.j + 0.5) / side),
+      );
+      const total = classWeightsAt(packed, centre).reduce((sum, w) => sum + w, 0);
+      if (held.has(index)) {
+        totals.push(total);
+      } else if (total !== 0) {
+        throw new Error(`cell ${String(index)}, not surveyed, holds weight ${String(total)}`);
+      }
+    }
+    expect(totals).toHaveLength(map.texels.length);
+    expect(totals.filter((total) => Math.abs(total - 1) > 1e-12)).toEqual([]);
   });
 
   it("reads the fixture's points as the native readings do", () => {

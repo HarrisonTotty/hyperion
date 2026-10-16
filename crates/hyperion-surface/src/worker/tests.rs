@@ -1187,3 +1187,204 @@ fn worker_photometry_is_the_palette_s_properties_under_the_field_s_scale() {
         ))
     );
 }
+
+/// The class map's texel (`i`, `j`) of face +y.
+fn texel(i: u32, j: u32) -> PatchKey {
+    PatchKey::new(Face::PosY, CLASS_MAP_LEVEL, i, j).unwrap()
+}
+
+#[test]
+fn worker_class_map_holds_each_surveyed_cell_with_the_weights_at_its_centre() {
+    let f = fixture();
+    let mut fields = f.worker();
+    let field = f.field();
+    let synth = Synthesiser::new(&field, SEED);
+    let map = fields.class_map(f.body, SEED).unwrap();
+    assert_eq!(
+        map.field_level(),
+        CLASS_MAP_LEVEL,
+        "the Moon-like field is at the map's level, a texel a cell"
+    );
+    assert!(map.is_complete());
+    // No texel for a margin cell or one not held: the surveyed cells, each once, rising.
+    let surveyed: BTreeSet<PatchKey> = f.first.union(&f.second).copied().collect();
+    assert_eq!(
+        map.texels()
+            .iter()
+            .map(|t| cell_index(t.cell()))
+            .collect::<Vec<_>>(),
+        indices(&surveyed)
+    );
+    let classes: Vec<GroundMaterial> = map.classes().iter().map(ClassMapClass::material).collect();
+    assert!(!classes.is_empty() && classes.len() <= CLASS_MAP_CLASSES);
+    assert!(
+        classes.windows(2).all(|w| w[0] < w[1]),
+        "the classes once each, in GroundMaterial's order: {classes:?}"
+    );
+    let band = BandLevel::new(CLASS_MAP_BAND).unwrap();
+    for t in map.texels() {
+        assert_eq!((t.surveyed_cells(), t.cells()), (1, 1));
+        assert_eq!(bits(t.surveyed_fraction()), bits(1.0));
+        let at = face_uv(t.cell(), 0.5, 0.5);
+        let expected = weights_at(&synth, &mut SynthCache::new(), at, band).unwrap();
+        let mut bytes = [0_u8; CLASS_MAP_CLASSES];
+        for (material, byte) in expected.iter() {
+            let k = classes
+                .iter()
+                .position(|&c| c == material)
+                .expect("every material a texel's weights name is a class");
+            bytes[k] = byte;
+        }
+        assert_eq!(t.weights(), bytes, "texel {:?}", t.cell());
+    }
+    for class in map.classes() {
+        assert_eq!(
+            class.photometry(),
+            class
+                .material()
+                .material()
+                .map(|m| fields.photometry(f.body, m).unwrap()),
+            "{:?}",
+            class.material()
+        );
+    }
+    // From the body's cache again, the same map.
+    assert_eq!(fields.class_map(f.body, SEED).unwrap(), map);
+}
+
+#[test]
+fn worker_class_map_needs_the_body_s_field() {
+    let f = fixture();
+    let mut fields = f.worker();
+    let other = BodyRef::new(f.body.raw_system_id(), f.body.body_index() ^ 1);
+    assert_eq!(
+        fields.class_map(other, SEED),
+        Err(QueryBodyError::NotStarted(other))
+    );
+}
+
+#[test]
+fn worker_class_map_weighs_a_partly_surveyed_texel_by_its_surveyed_cells() {
+    // The Mars-like world, at level 7: four cells a texel.
+    let mars = world(SyntheticWorld::MarsLike);
+    let level = mars.header().level().get();
+    assert_eq!(level, CLASS_MAP_LEVEL + 1);
+    let whole = texel(20, 20);
+    let part = texel(22, 20);
+    let centre_cell = PatchKey::containing(level, point(part, 0.5, 0.5)).unwrap();
+    let mut cells: BTreeSet<PatchKey> = whole.children().into_iter().collect();
+    // Three of the part's four, not the one holding its centre.
+    cells.extend(part.children().into_iter().filter(|&c| c != centre_cell));
+    assert_eq!(cells.len(), 7);
+    let blocks = split(&encode_within(
+        mars,
+        &cover(&cells, |_| code(50.0)),
+        None,
+        SYNTHESIS_MARGIN_CELLS,
+        FIXTURE_BLOCK_BYTES,
+    ));
+    let body = mars.header().body();
+    let mut fields = WorkerFields::new();
+    fields.init(body, &blocks[0]).unwrap();
+    for block in &blocks[1..] {
+        fields.chunk(body, block).unwrap();
+    }
+    let map = fields.class_map(body, SEED).unwrap();
+    assert_eq!(map.field_level(), level);
+    assert!(map.is_complete());
+    let texels: Vec<PatchKey> = map.texels().iter().map(ClassMapTexel::cell).collect();
+    assert_eq!(texels, [whole, part]);
+    let [w, p] = [map.texels()[0], map.texels()[1]];
+    assert_eq!((w.surveyed_cells(), w.cells()), (4, 4));
+    assert_eq!((p.surveyed_cells(), p.cells()), (3, 4));
+    assert_eq!(bits(p.surveyed_fraction()), bits(0.75));
+    let classes: Vec<GroundMaterial> = map.classes().iter().map(ClassMapClass::material).collect();
+    let field = fields.field(body).unwrap().clone();
+    let synth = Synthesiser::new(&field, SEED);
+    let band = BandLevel::new(CLASS_MAP_BAND).unwrap();
+    let bytes_at = |at: FaceUv| {
+        let weights = weights_at(&synth, &mut SynthCache::new(), at, band).unwrap();
+        let mut bytes = [0_u8; CLASS_MAP_CLASSES];
+        for (material, byte) in weights.iter() {
+            let k = classes.iter().position(|&c| c == material).unwrap();
+            bytes[k] = byte;
+        }
+        bytes
+    };
+    // The whole texel: the weights at its centre, its centre's cell surveyed.
+    assert_eq!(
+        w.weights(),
+        bytes_at(face_uv(whole, 0.5, 0.5)),
+        "the whole texel's weights are its centre's"
+    );
+    // The part: the mean of its three surveyed cells' centres, as bytes summing to 255.
+    let points: Vec<[u8; CLASS_MAP_CLASSES]> = cells
+        .iter()
+        .filter(|c| part.children().contains(c))
+        .map(|&c| bytes_at(face_uv(c, 0.5, 0.5)))
+        .collect();
+    assert_eq!(points.len(), 3);
+    for (k, &byte) in p.weights().iter().enumerate() {
+        let mean = points.iter().map(|b| f64::from(b[k])).sum::<f64>() / 3.0;
+        assert!(
+            (f64::from(byte) - mean).abs() < 1.0,
+            "class {k}: byte {byte} against the mean {mean}"
+        );
+    }
+    assert_eq!(
+        p.weights().iter().map(|&b| u32::from(b)).sum::<u32>(),
+        u32::from(WEIGHT_TOTAL)
+    );
+}
+
+#[test]
+fn worker_class_map_bytes_keep_their_sum_by_the_largest_remainder() {
+    assert_eq!(
+        bytes_by_largest_remainder(&[85.0, 85.0, 85.0]),
+        [85, 85, 85]
+    );
+    // Ties to the earlier.
+    assert_eq!(bytes_by_largest_remainder(&[127.5, 127.5]), [128, 127]);
+    assert_eq!(
+        bytes_by_largest_remainder(&[255.0 / 3.0, 510.0 / 3.0]),
+        [85, 170]
+    );
+    assert_eq!(
+        bytes_by_largest_remainder(&[100.4, 100.4, 54.2]),
+        [101, 100, 54]
+    );
+    // A sum short of 255, a class left out: the rounded sum.
+    assert_eq!(bytes_by_largest_remainder(&[60.6, 60.6]), [61, 60]);
+}
+
+#[test]
+fn worker_class_map_keeps_the_heaviest_classes_past_sixteen() {
+    // Seventeen materials, each on its own texel, the k-th at a weight of k + 1 in a whole texel,
+    // and the heaviest also at a quarter on a quarter-surveyed texel.
+    let materials: Vec<GroundMaterial> = (0..17_u8)
+        .map(|k| GroundMaterial::of(MaterialClass::Regolith, Some(k)))
+        .collect();
+    let mut readings: Vec<TexelReading> = materials
+        .iter()
+        .enumerate()
+        .map(|(k, &m)| TexelReading {
+            cell: texel(u32::try_from(k).unwrap(), 0),
+            surveyed: 1,
+            cells: 1,
+            weights: BTreeMap::from([(m, f64::from(u8::try_from(k + 1).unwrap()))]),
+        })
+        .collect();
+    readings.push(TexelReading {
+        cell: texel(0, 1),
+        surveyed: 1,
+        cells: 4,
+        weights: BTreeMap::from([(materials[0], 4.0)]),
+    });
+    // Material 0 now weighs 1 + 1, the same as material 1, and the lighter by the order is left
+    // out: of the two at 2, material 1, the later.
+    let kept = kept_classes(&readings);
+    assert_eq!(kept.len(), CLASS_MAP_CLASSES);
+    assert!(kept.contains(&materials[0]));
+    assert!(!kept.contains(&materials[1]));
+    assert_eq!(kept, [&materials[..1], &materials[2..]].concat());
+}

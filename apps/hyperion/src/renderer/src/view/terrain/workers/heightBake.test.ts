@@ -5,6 +5,7 @@ import {
   answerRequest,
   type HeightModule,
   StandInFields,
+  type WasmClassMap,
   type WasmFieldBlock,
   type WasmSurfaceFields,
   WorkerFields,
@@ -20,6 +21,21 @@ function emptyBlock(): WasmFieldBlock {
     newlyHeld: () => new Uint32Array(),
     levelTable: () => new Float64Array(100),
     fieldLevel: 6,
+    free: () => {},
+  };
+}
+
+/** The fake module's class map: one texel of one class, wholly surveyed. */
+function oneTexelMap(): WasmClassMap {
+  return {
+    level: 6,
+    fieldLevel: 6,
+    classes: () => Uint8Array.from([1, 0]),
+    photometry: () => Float32Array.from([0.1, 0.1, 0.1, 1, 1]),
+    texels: () => Uint32Array.from([7]),
+    fractions: () => Float32Array.from([1]),
+    weights: () => Uint8Array.from([255]),
+    complete: true,
     free: () => {},
   };
 }
@@ -70,6 +86,16 @@ function fakeModule(): { module: HeightModule; held: Map<string, number> } {
     },
     material: () => undefined,
     photometry: () => undefined,
+    // A held body's map of one texel; seed 0xdead the module's refusal, 0xffff a trap.
+    classMap: (system, body, seed) => {
+      if (seed === 0xdeadn) {
+        throw new Error("a body index above 65,535");
+      }
+      if (seed === 0xffffn) {
+        throw new WebAssembly.RuntimeError("unreachable");
+      }
+      return held.has(key(system, body)) ? oneTexelMap() : undefined;
+    },
     free: () => {},
   };
   return {
@@ -232,6 +258,65 @@ describe("a height worker's fields", () => {
       block: null,
     });
     expect(fields.bodies).toEqual([]);
+  });
+
+  it("answers a class-map query with the module's map, its arrays transferred (R10.T10.d)", () => {
+    const { module } = fakeModule();
+    const fields = new WorkerFields(module);
+    answerRequest(
+      module,
+      { kind: "field-init", id: 1, body: MOON, block: new ArrayBuffer(8), form: "payload" },
+      fields,
+    );
+    const answer = answerRequest(
+      module,
+      { kind: "class-map", id: 2, body: MOON, detailSeed: "00000000000000a5" },
+      fields,
+    );
+    if (answer.reply.kind !== "class-map" || answer.reply.map === null) {
+      throw new Error(`no map: ${JSON.stringify(answer.reply)}`);
+    }
+    const { map } = answer.reply;
+    expect(map).toMatchObject({ level: 6, fieldLevel: 6, complete: true });
+    expect([...map.texels, ...map.weights]).toEqual([7, 255]);
+    expect(answer.transfer).toEqual([
+      map.classes.buffer,
+      map.photometry.buffer,
+      map.texels.buffer,
+      map.fractions.buffer,
+      map.weights.buffer,
+    ]);
+  });
+
+  it("answers no class map of a body with no field or a stand-in's, refuses the module's refusal and rethrows a trap", () => {
+    const { module } = fakeModule();
+    const fields = new WorkerFields(module);
+    const ask = (body: string, detailSeed: string): ReturnType<typeof answerRequest> =>
+      answerRequest(module, { kind: "class-map", id: 3, body, detailSeed }, fields);
+    expect(ask(MOON, "00000000000000a5").reply).toEqual({
+      kind: "class-map",
+      id: 3,
+      body: MOON,
+      map: null,
+    });
+    answerRequest(
+      module,
+      { kind: "field-init", id: 1, body: PLANET, block: new ArrayBuffer(8), form: "stand-in" },
+      fields,
+    );
+    expect(ask(PLANET, "00000000000000a5").reply).toMatchObject({ kind: "class-map", map: null });
+    answerRequest(
+      module,
+      { kind: "field-init", id: 2, body: MOON, block: new ArrayBuffer(8), form: "payload" },
+      fields,
+    );
+    expect(ask(MOON, "000000000000dead").reply).toEqual({
+      kind: "class-map-failed",
+      id: 3,
+      body: MOON,
+      message: "a body index above 65,535",
+    });
+    expect(() => ask(MOON, "000000000000ffff")).toThrow(WebAssembly.RuntimeError);
   });
 
   it("answers a body's bake the field cannot make yet as bake-unsurveyed", () => {

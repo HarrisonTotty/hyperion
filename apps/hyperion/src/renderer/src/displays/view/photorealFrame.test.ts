@@ -20,7 +20,12 @@ import {
   viewSceneOf,
 } from "../../test/sceneFixture";
 import { PROVISIONAL_PHOTOMETRY } from "../../view/appearance/fromWire";
+import type { PhotometricLaw } from "../../view/appearance/law";
+import { lawFor } from "../../view/appearance/phase";
 import type { ScreenCircle } from "../../view/bodies/regime";
+import { IDENTITY_QUATERNION } from "../../view/camera/quaternion";
+import type { TextureHandle } from "../../view/engine/types";
+import type { ClassMapSource } from "../../view/terrain/classMap";
 import { sceneHostDiscs } from "../../view/lighting/hostLights";
 import type { ViewScene } from "../../view/scene/model";
 import { litBodiesOf, litLabelsOf, photorealFrame } from "./photorealFrame";
@@ -159,6 +164,57 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
     expect(lit?.photometry).toBe(PROVISIONAL_PHOTOMETRY);
     expect(lit).toBeDefined();
     expect(lit).not.toHaveProperty("rotation");
+  });
+
+  it("shade each body's disc with its class map, oriented where its rotation is known and elsewhere's alone where it is null (R10.T10.d)", () => {
+    const { scene, pose } = sliceScene();
+    const weights: TextureHandle = { kind: "texture", name: "slice class map" };
+    const dark = lawFor([0.05, 0.05, 0.05], [0.6, 0.6, 0.6], "moon");
+    const asked: Array<readonly [string, PhotometricLaw]> = [];
+    const classMaps: ClassMapSource = {
+      classMapOf: (body, elsewhere) => {
+        asked.push([body, elsewhere]);
+        return { kind: "class-map", weights, laws: [dark], elsewhere };
+      },
+    };
+    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null), classMaps);
+    const earth = lit.find((body) => body.id === FIXTURE_EARTH);
+    const jupiter = lit.find((body) => body.id === FIXTURE_JUPITER);
+    if (earth === undefined || jupiter === undefined) {
+      throw new Error("the slice lights its Earth and its Jupiter");
+    }
+    // Each asked with its own photometry's law as `elsewhere`.
+    expect(asked).toContainEqual([FIXTURE_EARTH, earth.photometry.law]);
+    expect(asked).toContainEqual([FIXTURE_JUPITER, PROVISIONAL_PHOTOMETRY.law]);
+    expect(earth.surface).toMatchObject({ kind: "class-map", laws: [dark] });
+    expect(earth.rotation).toEqual(viewBodyOf(scene, FIXTURE_EARTH).rotation);
+    expect(jupiter.surface?.kind).toBe("class-map");
+    expect(jupiter).not.toHaveProperty("rotation");
+    // Drawn as discs straight ahead: Earth's map oriented by its rotation, Jupiter's elsewhere alone.
+    const options = {
+      camera: { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 },
+      viewport: VIEWPORT,
+      exposureScale: 1e-3,
+      annuli: DISC_ANNULI_HIGH,
+      planetshine: PLANETSHINE_SOURCES_HIGH,
+      setting: "high" as const,
+    };
+    const ahead = (body: LitBodyInput): LitBodyInput => ({
+      ...drawnOnly(body),
+      centreM: vec3(0, 0, -40 * body.figure.equatorialRadiusM),
+    });
+    const surfaces = [earth, jupiter].map((body) => {
+      const plan = planLitBodies([ahead(body)], [], options, new Map([[body.id, "disc"]]));
+      return plan.discs[0]?.surface;
+    });
+    expect(surfaces[0]).toMatchObject({ kind: "class-map", rotation: earth.rotation });
+    expect(surfaces[1]).toEqual({ kind: "uniform", law: PROVISIONAL_PHOTOMETRY.law });
+  });
+
+  it("shade every disc uniform without class maps", () => {
+    const { scene, pose } = sliceScene();
+    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null));
+    expect(lit.filter((body) => body.surface !== undefined)).toEqual([]);
   });
 
   it("state the provisional photometry's label while one lit body takes it", () => {

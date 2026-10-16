@@ -36,6 +36,7 @@ import type { MeterMode } from "../../view/post/meter";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
 import { sceneOrigins, type ViewScene } from "../../view/scene/model";
 import type { BandLayer } from "../../view/sky/band";
+import type { ClassMapSource } from "../../view/terrain/classMap";
 import { type HostDiscLayer, hostPlacements } from "../../view/sky/disc";
 import {
   exposedSpriteRecord,
@@ -75,6 +76,12 @@ export interface PhotorealInputs {
    * until a view draws a body's terrain (R10.T10.c, T11).
    */
   readonly terrainFootprints?: ReadonlyArray<ScreenCircle>;
+  /**
+   * The class maps the lit bodies' discs shade with (plan R10, R10.T10.d; `ClassMapStore`), or
+   * absent, every disc then its photometry's uniform law. None until a view draws a body's terrain
+   * live.
+   */
+  readonly classMaps?: ClassMapSource | undefined;
 }
 
 /** A wireframe sprite as a record at infinity. */
@@ -94,8 +101,14 @@ export function litLabelsOf(scene: ViewScene): ReadonlyArray<AppearanceLabel> {
   return [...new Set(labels)];
 }
 
-/** A lit body of the scene as the frame lights it, with its rotation where it has one. */
-function litBodyOf({ body, centreM, frame }: LitBodyLighting): LitBodyInput {
+/**
+ * A lit body of the scene as the frame lights it, with its rotation where it has one and its class
+ * map where `classMaps` holds one.
+ */
+function litBodyOf(
+  { body, centreM, frame }: LitBodyLighting,
+  classMaps: ClassMapSource | undefined,
+): LitBodyInput {
   const id = body.id;
   const figure = body.appearance?.figure ?? {
     equatorialRadiusM: body.radiusM,
@@ -103,9 +116,16 @@ function litBodyOf({ body, centreM, frame }: LitBodyLighting): LitBodyInput {
     pole: body.rotation === null ? null : rotateToBody(body.rotation, { x: 0, y: 0, z: 1 }),
   };
   const photometry = body.appearance?.photometry ?? PROVISIONAL_PHOTOMETRY;
-  return body.rotation === null
-    ? { id, centreM, figure, photometry, lighting: frame }
-    : { id, centreM, figure, photometry, rotation: body.rotation, lighting: frame };
+  const surface = classMaps?.classMapOf(id, photometry.law) ?? null;
+  return {
+    id,
+    centreM,
+    figure,
+    photometry,
+    ...(body.rotation === null ? {} : { rotation: body.rotation }),
+    ...(surface === null ? {} : { surface }),
+    lighting: frame,
+  };
 }
 
 /**
@@ -114,14 +134,23 @@ function litBodyOf({ body, centreM, frame }: LitBodyLighting): LitBodyInput {
  * orients a class map; a body with no appearance, or none with a figure, a sphere of its radius
  * about its rotation's pole with the provisional photometry.
  *
+ * @remarks
+ * Each body's disc shades with its class map where `classMaps` holds one (plan R10, R10.T10.d), its
+ * unsurveyed ground with its photometry's law (`elsewhere`). The rotation, body-fixed to the body
+ * frame, whose axes are the galactic ones, is the scene body's at its drawn time (R07.T10.a's
+ * `rotationAt`); a body whose rotation is not known (`null`) is passed none, and R07's disc shades
+ * its class map with `elsewhere` alone.
+ *
  * @param discs - The scene's host discs (`sceneHostDiscs`).
+ * @param classMaps - The bodies' class maps; absent, every disc is uniform.
  */
 export function litBodiesOf(
   scene: ViewScene,
   pose: CameraPose,
   discs: ReadonlyArray<HostDiscDto>,
+  classMaps?: ClassMapSource,
 ): LitBodyInput[] {
-  return lightingFramesOf(scene, pose, discs).map(litBodyOf);
+  return lightingFramesOf(scene, pose, discs).map((lit) => litBodyOf(lit, classMaps));
 }
 
 /** The photorealistic frame of a stage's run. */
@@ -179,7 +208,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     hostDraws,
     glareSources: inputs.discs.glareSources(camera, viewport, run.camera.role),
     lights,
-    bodies: litBodiesOf(scene, pose, discs),
+    bodies: litBodiesOf(scene, pose, discs, inputs.classMaps),
     // R10's terrain, where the view draws it; lit craft will add theirs.
     depthWriters: inputs.terrainFootprints ?? [],
     previousRegimes: inputs.previousRegimes,

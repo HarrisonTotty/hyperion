@@ -13,7 +13,8 @@
  * A bake names its height source (R10.T6.b): the test planet with its ridges, which reads no field,
  * or a body, whose patches the worker bakes over the field it holds of it with the body's detail
  * seed. A worker answers each block of a payload with what it changed of the survey and the body's
- * level table after it, and a body's bake with R10's layers.
+ * level table after it, and a body's bake with R10's layers. A `class-map` query asks one worker for
+ * a body's coarse class map over the field it holds (R10.T10.d), the disc's surface.
  */
 
 import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
@@ -183,6 +184,39 @@ export interface FieldBlockAnswer {
   readonly levels: Float64Array;
 }
 
+/**
+ * A body's coarse class map for R07's disc, as a worker answers it (plan R10, T10.d; `src/wasm.rs`'s
+ * `ClassMapAnswer`, the crate's `WorkerFields::class_map`): each texel the survey touches, a cell
+ * of {@link ClassMapAnswer.level}, with its surveyed share and its weights over the body's classes.
+ */
+export interface ClassMapAnswer {
+  /** The map's quadtree level, 6: 2^level texels along a face's side. */
+  readonly level: number;
+  /** The level, 5 to 8, of the field the map was made from. */
+  readonly fieldLevel: number;
+  /**
+   * Its classes, at most 16, two bytes each: the form's class code, then the palette entry,
+   * {@link PALETTE_NONE} where the palette names no substance.
+   */
+  readonly classes: Uint8Array;
+  /**
+   * Each class's photometry, {@link PHOTOMETRY_STRIDE} values a class as
+   * {@link TerrainLayers.photometry}'s: law code 0 where the palette names no substance.
+   */
+  readonly photometry: Float32Array;
+  /** The cell index at {@link ClassMapAnswer.level} (`fieldCellIndex`'s) of each texel, rising. */
+  readonly texels: Uint32Array;
+  /** Each texel's surveyed share, (0, 1]: its field cells surveyed over its cells. */
+  readonly fractions: Float32Array;
+  /**
+   * Each texel's weight bytes over the classes, texel t's at `classes · t`, summing to 255 but where
+   * a class past the 16 was left out.
+   */
+  readonly weights: Uint8Array;
+  /** Whether every texel the survey touches was answered; `false` where a read lacked a cell. */
+  readonly complete: boolean;
+}
+
 /** A message from the pool to a height worker. */
 export type HeightWorkerRequest =
   /** Bake a patch; the answer carries the same `id`. */
@@ -212,7 +246,17 @@ export type HeightWorkerRequest =
       readonly block: ArrayBuffer;
     }
   /** Drop `body`'s field; one not held is no error. */
-  | { readonly kind: "field-release"; readonly id: number; readonly body: BodyIdHex };
+  | { readonly kind: "field-release"; readonly id: number; readonly body: BodyIdHex }
+  /**
+   * Answer `body`'s class map for R07's disc over the field the worker holds of it, with its detail
+   * seed (R10.T10.d).
+   */
+  | {
+      readonly kind: "class-map";
+      readonly id: number;
+      readonly body: BodyIdHex;
+      readonly detailSeed: DetailSeedHex;
+    };
 
 /** A message from a height worker to the pool. */
 export type HeightWorkerReply =
@@ -248,6 +292,23 @@ export type HeightWorkerReply =
       readonly body: BodyIdHex;
       readonly message: string;
       readonly heldBytes: number;
+    }
+  /**
+   * Class-map query `id`'s answer: `body`'s map, or `null` where the worker holds no payload field
+   * of it.
+   */
+  | {
+      readonly kind: "class-map";
+      readonly id: number;
+      readonly body: BodyIdHex;
+      readonly map: ClassMapAnswer | null;
+    }
+  /** Class-map query `id` was refused by the module, which names why. */
+  | {
+      readonly kind: "class-map-failed";
+      readonly id: number;
+      readonly body: BodyIdHex;
+      readonly message: string;
     };
 
 /** The buffers a worker transfers with a bake, so that none is copied twice. */
@@ -286,4 +347,17 @@ export function blockTransferables(block: FieldBlockAnswer | null): Transferable
   return block === null
     ? []
     : [block.newlySurveyed.buffer, block.newlyHeld.buffer, block.levels.buffer];
+}
+
+/** The buffers a worker transfers with a class map. */
+export function classMapTransferables(map: ClassMapAnswer | null): Transferable[] {
+  return map === null
+    ? []
+    : [
+        map.classes.buffer,
+        map.photometry.buffer,
+        map.texels.buffer,
+        map.fractions.buffer,
+        map.weights.buffer,
+      ];
 }
