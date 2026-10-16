@@ -470,21 +470,29 @@ export function aDensityMap({
 
 /** What {@link anExtinctionMap} builds. */
 export interface ExtinctionMapSpec {
-  /** One 8-bit code per pixel, row by row from the top. */
+  /** One code per pixel of the map's depth, row by row from the top. */
   readonly codes: ReadonlyArray<number>;
   readonly widthPx?: number;
   readonly heightPx?: number;
   readonly view?: MapView;
   readonly floorLog10Mag?: number;
   readonly ceilingLog10Mag?: number;
+  /** Bits per code, as the protocol offers them: 8 unless told otherwise. */
+  readonly bits?: 8 | 16;
   readonly universe?: UniverseIdHex;
 }
 
 /**
- * The answer to `extinction_map`: a small 8-bit map, 8 × 4 pixels unless told otherwise, spanning
- * the M1 extent of 131,072 ly across, from the floor of 0.01 mag to 10 mag unless told otherwise.
+ * The answer to `extinction_map`: a small map, 8 × 4 pixels at 8 bits unless told otherwise,
+ * spanning the M1 extent of 131,072 ly across, from the floor of 0.01 mag to 10 mag unless told
+ * otherwise.
  *
- * @throws Error when the codes do not fill the map or one is not a byte.
+ * @remarks
+ * At 16 bits each code takes two bytes, the low byte first, as the server's `CodeDepth::Sixteen`
+ * writes them and the protocol's decoder reads them.
+ *
+ * @throws Error when the codes do not fill the map or one is not a code of its depth: a byte at 8
+ *   bits, a whole number from 0 to 65,535 at 16.
  */
 export function anExtinctionMap({
   codes,
@@ -493,9 +501,13 @@ export function anExtinctionMap({
   view = "face_on",
   floorLog10Mag = -2,
   ceilingLog10Mag = 1,
+  bits = 8,
   universe = UNIVERSE_ID,
 }: ExtinctionMapSpec): ResponseFor<"extinction_map"> {
-  const { data_base64: dataBase64 } = aDensityMap({ codes, widthPx, heightPx, view, universe });
+  const dataBase64 =
+    bits === 16
+      ? sixteenBitBase64(codes, widthPx, heightPx)
+      : aDensityMap({ codes, widthPx, heightPx, view, universe }).data_base64;
   return {
     kind: "extinction_map",
     universe,
@@ -504,11 +516,30 @@ export function anExtinctionMap({
     height_px: heightPx,
     centre_ly: [0, 0],
     ly_per_px: 131_072 / widthPx,
-    bits: 8,
+    bits,
     floor_log10_mag: floorLog10Mag,
     ceiling_log10_mag: ceilingLog10Mag,
     data_base64: dataBase64,
   };
+}
+
+/**
+ * A map's 16-bit codes as the wire carries them: two bytes each, little-endian, in base64.
+ *
+ * @throws Error when the codes do not fill the map or one is not a 16-bit code.
+ */
+function sixteenBitBase64(codes: ReadonlyArray<number>, widthPx: number, heightPx: number): string {
+  if (codes.length !== widthPx * heightPx) {
+    throw new Error(`${codes.length} codes do not fill a ${widthPx} × ${heightPx} map`);
+  }
+  let binary = "";
+  for (const code of codes) {
+    if (!Number.isInteger(code) || code < 0 || code > 0xffff) {
+      throw new Error(`${code} is not a 16-bit code`);
+    }
+    binary += String.fromCharCode(code & 0xff, code >> 8);
+  }
+  return btoa(binary);
 }
 
 /** What {@link anExtinctionResult} answers for its one target. */

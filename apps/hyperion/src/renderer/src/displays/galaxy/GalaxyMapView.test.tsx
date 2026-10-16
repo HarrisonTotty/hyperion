@@ -879,9 +879,20 @@ describe("GalaxyMapView", () => {
           universe: UNIVERSE_ID,
           view: "edge_on",
           resolution: 512,
-          bits: 8,
+          bits: 16,
         },
       ]);
+    });
+
+    it("asks under the overlay for the density map at 8 bits and the extinction map at 16, at one resolution", () => {
+      const { socket } = renderView({ dustOverlay: true });
+
+      const depths = (kind: "density_map" | "extinction_map") =>
+        socket.requestsOfKind(kind).map(({ body }) => [body.resolution, body.bits]);
+      expect({ density: depths("density_map"), extinction: depths("extinction_map") }).toEqual({
+        density: [[512, 8]],
+        extinction: [[512, 16]],
+      });
     });
 
     it("shows the extinction with its own legend, unit and floor, and A(V) under the cursor", async () => {
@@ -907,6 +918,38 @@ describe("GalaxyMapView", () => {
       );
       expect(within(view).queryByText(DUST_OVERLAY_LABEL)).not.toBeInTheDocument();
     });
+
+    // From the floor of 0.01 mag to a ceiling of 50 mag the span is log₁₀ 50 + 2 = 3.69897 dex, and
+    // a 16-bit code stands for 10^(−2 + (code − 1) × 3.69897 ÷ 65,534) mag: 63,817 for 39.9945,
+    // 63,818 for 39.9997 and 63,819 for 40.0049. At 8 bits the nearest code to 40 mag, 248, stands
+    // for 10^(−2 + 247 × 3.69897 ÷ 254) = 39.54 mag, and its neighbours for 38.24 and 40.89 mag,
+    // 1.30 and 1.35 mag away, so only the 16-bit map holds the second decimal.
+    it.each([
+      [63_817, "39.99"],
+      [63_818, "40.00"],
+      [63_819, "40.00"],
+    ])(
+      "reads A(V) under the cursor to two decimals from a 16-bit map: code %i as %s mag",
+      async (code, reading) => {
+        const { socket } = renderView({ quantity: "extinction" });
+
+        await server(() => {
+          socket.serverAnswers("extinction_map", () =>
+            anExtinctionMap({
+              codes: Array<number>(64).fill(code),
+              widthPx: 8,
+              heightPx: 8,
+              ceilingLog10Mag: Math.log10(50),
+              bits: 16,
+            }),
+          );
+        });
+
+        expect(within(faceOn()).getByText("CURSOR A(V)").parentElement).toHaveTextContent(
+          `CURSOR A(V) ${reading} mag`,
+        );
+      },
+    );
 
     it("waits for both maps under the overlay, then shows both legends", async () => {
       const { socket } = renderView({ dustOverlay: true });

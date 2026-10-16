@@ -188,6 +188,12 @@ function log10Mag(code: number): number | null {
   return LOG10_MAG[code] ?? null;
 }
 
+// A 16-bit extinction map from 0.01 to 100 mag, by the protocol's rule: a code stands for
+// 10^(−2 + (code − 1) × 4 ÷ 65,534) mag, and code 0 is below the floor.
+function log10MagAt16Bits(code: number): number | null {
+  return code === 0 ? null : -2 + ((code - 1) * 4) / 65_534;
+}
+
 // A density map spanning 5 dex: 254 ÷ 5 = 50.8 codes a decade, so 1 mag (0.4 dex) is 20.32 codes.
 const SPAN_DEX = 5;
 
@@ -210,6 +216,33 @@ describe("dustOverlay", () => {
 
     // 99 − 203.2 and 20 − 20.32 are at or below the floor.
     expect([...dimmed.codes]).toEqual([0, 0, 0]);
+  });
+
+  it("dims an 8-bit density by a 16-bit extinction, on the density map's own scale", () => {
+    // Codes 32,768 for 1 mag, 44,220 for 5.0003 mag, 1 for 0.01 mag and 65,535 for 100 mag; code
+    // 0 is below the floor.
+    const extinction = {
+      widthPx: 5,
+      heightPx: 1,
+      codes: Uint16Array.from([32_768, 44_220, 1, 65_535, 0]),
+      maxCode: 65_535,
+    };
+
+    const dimmed = dustOverlay(
+      codesOf(5, [255, 255, 200, 100, 128]),
+      SPAN_DEX,
+      extinction,
+      log10MagAt16Bits,
+    );
+
+    // 1 + round(254 − 20.32), 1 + round(254 − 101.61) and 1 + round(199 − 0.20); 99 − 2,032 is
+    // below the floor; no dust leaves 128 where it was. The result is still an 8-bit map.
+    expect(dimmed).toEqual({
+      widthPx: 5,
+      heightPx: 1,
+      codes: Uint8Array.from([235, 153, 200, 0, 128]),
+      maxCode: 255,
+    });
   });
 
   it("returns a map with nothing above its floor unchanged", () => {
