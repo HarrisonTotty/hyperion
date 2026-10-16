@@ -445,7 +445,9 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
 /// octave's cells ([`CraterCache`], R09.T7.b), which starts afresh at 16,384 cells; and, for
 /// R10's classifier ([`crate::material::material_at`]), each cell's cut of the shadowed ground
 /// its partial ice share lies on, kept as the channels' part is, which starts afresh at 16,384
-/// cells. No height, and no material, depends on what it holds, only the time a query takes, so
+/// cells; and, for R10's horizon maps ([`crate::bake::horizon`]), the far field's vertex heights by
+/// face, level and lattice vertex, kept as the channels' part is, which starts afresh at 131,072
+/// heights. No height, and no material, depends on what it holds, only the time a query takes, so
 /// long as it is used with views of one field whose held cells only grow, as a worker's are: a
 /// result it holds answers a later query that a view lacking one of the cells it read would
 /// refuse.
@@ -469,6 +471,7 @@ pub struct SynthCache {
     craters: CraterCache,
     ice_cuts: crate::material::IceCuts,
     controls: BakeControls,
+    far_heights: crate::bake::horizon::FarHeights,
 }
 
 /// The fused pass's control points a [`SynthCache`] keeps from a bake's cover on, for one field.
@@ -511,6 +514,7 @@ impl SynthCache {
                 field: None,
                 memo: interp::ControlMemo::new(),
             },
+            far_heights: crate::bake::horizon::FarHeights::new(),
         }
     }
 
@@ -537,6 +541,12 @@ impl SynthCache {
     #[must_use]
     pub(crate) fn ice_cuts_mut(&mut self) -> &mut crate::material::IceCuts {
         &mut self.ice_cuts
+    }
+
+    /// R10's horizon maps' far-field vertex heights.
+    #[must_use]
+    pub(crate) fn far_heights_mut(&mut self) -> &mut crate::bake::horizon::FarHeights {
+        &mut self.far_heights
     }
 }
 

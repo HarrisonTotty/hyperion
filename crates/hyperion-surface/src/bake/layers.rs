@@ -1,11 +1,12 @@
 //! What this plan adds to R05's patch bake (plan R10, Provides' `TerrainLayers`): the class
-//! palette and weights, the survey mask, the patch's bound and σ, the horizon map's slot and R11's
-//! layers.
+//! palette and weights, the survey mask, the patch's bound and σ, the horizon map (R10.T8.a's,
+//! [`super::horizon`]) and R11's layers.
 
 use std::collections::BTreeMap;
 
 use hyperion_base::units::Metres;
 
+use super::horizon::HorizonMap;
 use crate::material::{ClassWeights, GroundMaterial, MAX_CLASSES, WEIGHT_TOTAL};
 use crate::scatter::ExtraLayer;
 
@@ -15,35 +16,6 @@ pub const SURVEYED: u8 = u8::MAX;
 /// A vertex's survey mask where its coarse cell is not surveyed: a survey's margin, or a cell the
 /// view does not hold (Design note 12).
 pub const UNSURVEYED: u8 = 0;
-
-/// A patch's horizon map: its slot in [`TerrainLayers`], empty until R10.T8.a bakes it (Design
-/// note 10), when it holds each texel's horizon elevation in eight azimuths, linear signed 16-bit
-/// two to a word, near (65 × 65) and far (9 × 9).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct HorizonMap {
-    near: Vec<u32>,
-    far: Vec<u32>,
-}
-
-impl HorizonMap {
-    /// The near field's words, texel by texel, row by row: none until R10.T8.a.
-    #[must_use]
-    pub fn near_words(&self) -> &[u32] {
-        &self.near
-    }
-
-    /// The far field's words: none until R10.T8.a.
-    #[must_use]
-    pub fn far_words(&self) -> &[u32] {
-        &self.far
-    }
-
-    /// Whether the map holds nothing: always, until R10.T8.a.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.near.is_empty() && self.far.is_empty()
-    }
-}
 
 /// What this plan adds to R05's [`PatchBake`](crate::patch::PatchBake) of a patch (Provides): the
 /// patch's class palette and each vertex's weights over it, its survey mask, its bound and σ, its
@@ -92,7 +64,9 @@ impl TerrainLayers {
         &self.survey_mask
     }
 
-    /// The patch's horizon map: empty until R10.T8.a.
+    /// The patch's horizon map (R10.T8.a): each vertex's and far-field point's horizon in eight
+    /// azimuths, empty where the bake skips it
+    /// ([`HorizonLayer::Skipped`](super::HorizonLayer::Skipped)).
     #[must_use]
     pub const fn horizon(&self) -> &HorizonMap {
         &self.horizon
@@ -115,11 +89,13 @@ impl TerrainLayers {
         self.sigma
     }
 
-    /// Whether the view answered every query of the bake. It is false where a vertex outside the
-    /// survey took the reference surface, for want of a cell its reads reach (Design note 12):
-    /// such a patch can bake otherwise once a block brings that cell, though its survey mask stays
-    /// as it was, so a client rebakes it on any new block, and every other patch only where a
-    /// block changes its mask (Design note 16).
+    /// Whether the view answered every query of the bake's heights, normals, weights and σ. It is
+    /// false where a vertex outside the survey took the reference surface, for want of a cell its
+    /// reads reach (Design note 12): such a patch can bake otherwise once a block brings that
+    /// cell, though its survey mask stays as it was, so a client rebakes it on any new block, and
+    /// every other patch only where a block changes its mask (Design note 16). The horizon map's
+    /// far field, which reads ground far beyond the patch, states its own
+    /// ([`HorizonMap::is_complete`]).
     #[must_use]
     pub const fn is_complete(&self) -> bool {
         self.complete

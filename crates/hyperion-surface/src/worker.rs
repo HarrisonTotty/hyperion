@@ -33,7 +33,10 @@
 //! - the bake was not [complete](crate::bake::TerrainLayers::is_complete): some vertex took the
 //!   reference surface, or has no weights, because the field lacked a cell its reads reach, which
 //!   any block may bring, whether or not it changes the mask (main's ruling of 2026-10-14 on
-//!   R10.T6.a's question).
+//!   R10.T6.a's question); or its horizon map was not
+//!   [complete](crate::bake::HorizonMap::is_complete): its far field, which reads ground far
+//!   beyond the patch, took the reference surface somewhere for want of a cell (R10.T8.a), and is
+//!   taken as an incomplete bake is.
 //!
 //! The client's `workers/rebake.ts` (`needsRebake`) applies the rule to the bakes it holds, from
 //! each bake's [`unsurveyed_cells`](BodyBake::unsurveyed_cells) and completeness and each block's
@@ -342,12 +345,15 @@ impl BodyBake {
     }
 
     /// Whether a block that made `change` makes this bake stale, so that the patch is baked again
-    /// (the [module documentation](self)'s rebake rule): the bake is not complete, or the block
-    /// surveys a cell its mask holds unsurveyed. Where it is `false`, the patch bakes the same
-    /// bytes after the block.
+    /// (the [module documentation](self)'s rebake rule): the bake or its horizon map is not
+    /// complete, or the block surveys a cell its mask holds unsurveyed. Where it is `false`, the
+    /// patch bakes the same bytes after the block.
     #[must_use]
     pub fn needs_rebake(&self, change: &SurveyChange) -> bool {
-        !self.terrain.layers().is_complete() || change.surveys_any(&self.unsurveyed_cells)
+        let layers = self.terrain.layers();
+        !layers.is_complete()
+            || !layers.horizon().is_complete()
+            || change.surveys_any(&self.unsurveyed_cells)
     }
 
     /// The two parts, to hand on without a copy.

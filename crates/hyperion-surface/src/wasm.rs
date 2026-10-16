@@ -101,7 +101,7 @@ use hyperion_base::units::Metres;
 use wasm_bindgen::JsError;
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use crate::bake::{TerrainBakeOptions, TerrainLayers, WeightsLayer};
+use crate::bake::{HorizonLayer, TerrainBakeOptions, TerrainLayers, WeightsLayer};
 use crate::cube::{Face, FaceUv, PatchKey};
 use crate::field::{BodyRef, FieldView};
 use crate::geometry::{BAND_LIMIT_M, FINEST_SPACING_M};
@@ -945,6 +945,9 @@ impl JsSurfaceFields {
                 JsWeightsLayer::Baked => WeightsLayer::Baked,
                 JsWeightsLayer::Skipped => WeightsLayer::Skipped,
             },
+            // No client reads the horizon map yet: R10.T8.b bakes it for the lit style and hands
+            // its words over with the shadow lookup.
+            horizon: HorizonLayer::Skipped,
         };
         let answer = self
             .fields

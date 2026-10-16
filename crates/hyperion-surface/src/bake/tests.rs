@@ -30,6 +30,7 @@ pub(super) const MESH: TerrainBakeOptions = TerrainBakeOptions {
         skirt_m: 0.0,
     },
     weights: WeightsLayer::Baked,
+    horizon: HorizonLayer::Baked,
 };
 
 /// The high setting's: baked offsets and normals at twice the mesh's resolution.
@@ -40,6 +41,7 @@ pub(super) const DOUBLE: TerrainBakeOptions = TerrainBakeOptions {
         skirt_m: 0.5,
     },
     weights: WeightsLayer::Baked,
+    horizon: HorizonLayer::Baked,
 };
 
 /// A resolution code of `metres`.
@@ -138,6 +140,7 @@ fn bake_bits(bake: &TerrainBake) -> Vec<u64> {
     out.extend(l.horizon().far_words().iter().map(|&w| u64::from(w)));
     out.extend([bits(l.bound().value()), bits(l.sigma().value())]);
     out.push(u64::from(l.is_complete()));
+    out.push(u64::from(l.horizon().is_complete()));
     out.push(u64::try_from(l.extra().len()).unwrap());
     out
 }
@@ -445,7 +448,7 @@ fn bake_a_block_of_new_cells_changes_nothing_at_a_vertex_surveyed_before_it() {
         }
         assert!(seen > 0, "{key:?}");
         let mask_unchanged = new.layers().survey_mask() == old.layers().survey_mask();
-        if mask_unchanged && old.layers().is_complete() {
+        if mask_unchanged && old.layers().is_complete() && old.layers().horizon().is_complete() {
             // Its mask as it was, and every query answered before: the same bytes.
             assert_eq!(bake_bits(&new), bake_bits(old), "{key:?}");
         }
@@ -702,7 +705,10 @@ fn bake_hands_each_hook_the_patch_and_its_heights_in_turn() {
         assert_eq!(*hook.calls.borrow(), vec![(key, heights.clone(), 0)]);
     }
     assert!(bake.layers().extra().is_empty());
-    assert!(bake.layers().horizon().is_empty());
+    assert!(
+        !bake.layers().horizon().is_empty(),
+        "the horizon map is baked beside the hooks"
+    );
     let without = bake_terrain(&synth, &mut SynthCache::new(), key, &MESH, &[]).unwrap();
     assert_eq!(bake_bits(&without), bake_bits(&bake));
 }

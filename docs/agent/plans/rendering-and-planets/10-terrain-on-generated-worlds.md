@@ -265,7 +265,14 @@ pub fn far_field_point(face: Face, level: u8, i: u32, j: u32) -> FaceUv;
 /// As built by T6.a (Risks, "Deviations in T6.a, as built"): the bake over a client's field, R05's
 /// arrays and this plan's layers; `WeightsLayer::{Baked, Skipped}`; `TerrainLayers`' fields
 /// private, with getters and `is_complete()` (no vertex took the reference surface); the mask's
-/// `SURVEYED` (255) and `UNSURVEYED` (0); `HorizonMap` empty until T8.a.
+/// `SURVEYED` (255) and `UNSURVEYED` (0); `HorizonMap` empty until T8.a. As built by T8.a (Risks,
+/// "Deviations in T8.a, as built"): `bake/horizon.rs` (`pub mod horizon`, its items re-exported by
+/// `bake`); `TerrainBakeOptions` gains `horizon: HorizonLayer::{Baked, Skipped}`; the azimuths are
+/// the patch grid's `AZIMUTH_STEPS` at k × 45° of `grid_azimuth(face, at, towards)`; `HorizonMap`'s
+/// `near_words`, `far_words` (4 words a texel, `pack2x16snorm`'s halves), `near(x, y, k)`,
+/// `far(a, b, k)`, `elevation_at(x, y, azimuth)` (the shader's lookup at a vertex) and
+/// `is_complete()` (the far field read only ground the view holds); `NO_HORIZON`, `AZIMUTHS`,
+/// `FAR_SIDE`, `FAR_STRIDE`, `WORDS_PER_TEXEL`, `ZENITH_TOLERANCE`.
 pub struct TerrainBakeOptions { pub patch: BakeOptions, pub weights: WeightsLayer }
 pub struct TerrainBake { /* patch: PatchBake, layers: TerrainLayers */ } // patch, layers, into_parts
 pub fn bake_terrain<F: SurveyView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCache,
@@ -5145,3 +5152,199 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
   - _Bilinear weights across the quad's diagonal._ The mesh splits each quad on its diagonal while
     the weights are read bilinearly over its four vertices: a different interpolant from the
     triangles', harmless for smooth fields; T14's measurements may say otherwise at class edges.
+- **Deviations in T8.a, as built** (2026-10-15; lane r10-horizon, on `rendering-and-planets` at
+  `298f51ca`).
+  - _Files._ `crates/hyperion-surface/src/bake/horizon.rs` with `horizon/tests.rs` (18 tests) and
+    one golden, `tests/golden/horizon/encoding.golden` (header 22, the fixture T8.b's TypeScript
+    twin reads); `bake/mod.rs` (`pub mod horizon`, its items re-exported, `TerrainBakeOptions`'
+    new field, the call); `bake/layers.rs` (`HorizonMap` moved out, two doc comments); R09's
+    `synth.rs` (`SynthCache` gains the far field's memo, additively, as it holds T1.b's ice cuts);
+    T6.b's `worker.rs` (the rebake rule counts the map, below); `wasm.rs` (the field set to
+    `Skipped`, below); `tests/panics.rs`'s `bake::horizon` (5); `benches/bake.rs` (the
+    `bake/horizon` group); the option literals and the hook test's map assertion in
+    `bake/tests.rs`, and in `worker/tests.rs` a test of the rule; Provides' `bake` as-built note.
+  - _The azimuths are the patch grid's._ Azimuth k looks along the grid step `AZIMUTH_STEPS[k]`,
+    (1, 0), (1, 1), (0, 1) and on round, counterclockwise from +x seen from outside; a direction's
+    grid azimuth, `grid_azimuth(face, at, towards)`, is atan2(b, a) of its components on S2's grid
+    tangents ∂p/∂x ∝ (U − p (p · U)) du/ds and ∂p/∂y ∝ (V − p (p · V)) dv/dt, so azimuth k is at
+    k × 45° exactly, whatever the grid's skew. The task names no frame; T8.b's "each patch's local
+    frame" is this one. The near field then reads only the patch's vertices along its grid lines,
+    with no interpolation, and sweeps each line once. On the ground the eight are 45° apart at a
+    face's centre, within 12° of it over 97% of a face (15° at worst), and 30° to 60° apart at a
+    cube corner, where the grid's lines meet at 120° (the science check). They turn across a face's
+    edge: a frame the same on both sides of every face edge has singular points (east and north,
+    at the poles), and the grid's was taken so that the near field reads its own lines.
+  - _The near field is the line sweep, from the start._ Timonen and Westerholm 2010's convex-hull
+    sweep, O(n) a line, rather than the march with the sweep as its fallback, since the grid's
+    azimuths make the lines the patch's own and the sweep costs no more to write: each grid line is
+    walked from its far end back, the hull of the vertices passed kept in the plane through the
+    body's centre and the line's ends (a row or a column of S2's grid is a great circle in it; a
+    diagonal, bent a little off it by S2's warp, and a spheroid's heights along ν are projected
+    onto it). It equals brute force over the line's vertices to one code on the Moon- and
+    Earth-like worlds' rough ground, under 50 of each world's 33,800 codes a step off (tested). The
+    near field's ground is the drawn mesh: its edges along a row or a column join its vertices, so
+    a line's highest point seen from a vertex is one of them. Design note 10's 2–6 ms for the march
+    is not measured; `bake/horizon` measures the sweep.
+  - _Exact elevations._ Each horizon is taken from the two points' body-fixed positions on R07's
+    spheroid and the datum's normal ν, atan2 of the rise along ν and the run across it, so the
+    curvature drop is exact rather than Design note 10's d² ÷ 2R. The cliff test holds the plan's
+    arctan((H − d² ÷ 2R) ÷ d) to two half-steps (9.9″) at H ÷ R = 1.6 × 10⁻⁵, where the two
+    differ by at most (H ÷ R) ÷ 2, 1.6″ (the science check), and the exact form to the code.
+  - _The far march._ From each lattice point, at θₖ = θ₀ 2^(k ÷ 4), θ₀ one vertex spacing of the
+    patch's level, growing by 2^¼ ≈ 1.19 (the note's 1.15–1.25), four steps to each exact doubling;
+    the sample's level is the patch's own for the first twelve steps (to 2^(11/4) θ₀, 6.7 θ₀) and
+    one coarser every four steps after, its vertex spacing 0.79–1.32 of the step's length from the
+    thirteenth step (tested to 0.6–1.7); the samples bilinear between that level's four vertex
+    heights about them, in (s, t); the point standing at its own drawn height. The patch's own
+    vertex heights, and its parent level's at its even vertices, are read from the bake, the same
+    bits `height_at` gives there. Design note 10 starts the march one texel beyond the patch's
+    edge; it starts one vertex spacing from each point instead, so that the far field is a function
+    of the point (below), and an edge point looking out reads the ground beyond the edge from the
+    first vertex spacing.
+  - _The reach_ is √(2 Δh ÷ c), Design note 10's √(2 R Δh) as an angle with R the datum's polar
+    radius c, where an oblate datum drops least below its tangent plane (the science check), Δh the
+    header's `realised_relief`, and π ÷ 2 at most for a small rough body (tested). On the plan's
+    Earth, a sphere of 6,371 km with 20 km of relief, 504.8 km.
+  - _The far field is a level's, not the same across levels._ The task asks it bit-identical at
+    shared points "across levels"; as built it is so between adjacent patches of one level on a
+    face (tested: the shared edges and corner of four patches), not across levels nor a face's
+    edge. A level's march starts at its own vertex spacing, reads its own ground near, and stands
+    on its own height; a march the same at every level would have to start at the finest level's
+    spacing and read every level's ground about every point, tens of thousands of heights a patch
+    at the 5 to 8 µs a height measured below. A march from the patch's edge, as the note puts it, would differ between
+    the two patches that share a point. The lattice's points are the same bits at every level
+    (`far_field_point` at (i, j) and level L is (2i, 2j) at L + 1, tested), and so are the march's
+    step distances (a level's are its parent's four steps on, to the bit, tested), and, from the
+    parent's ninth step on, the levels they read. A seam at a level boundary is of the near fields' own
+    kind, fine ground against coarse.
+  - _`far_field_point`_ names the lattice as (face, u, v). The bake takes each point's direction
+    by `PatchKey::vertex_dir`'s canonical rule (within 10⁻¹⁵ rad of the lattice's on the face,
+    tested), so that a point on a face edge is the same bits from either face, and its tangents
+    from the exact s and t.
+  - _The far field's memo._ The vertex heights the bake does not hold are kept in the worker's
+    `SynthCache` by face, level and lattice vertex, for one field at a time (R09's `NetworkId`), in
+    a `BTreeMap` that starts afresh at 131,072 heights (about 4 MB a body and worker, which
+    `heldBytes` does not count; for T14 and R12's memory line), answered heights only; a refused
+    one is asked again by the next bake. A bake whose heights were all answered adds the band of
+    its own that its neighbours' marches read, its vertices within eight of its edges at its level
+    and its parent's (2,600 or so), so that a neighbour baked after it asks some 750 to 950 heights
+    where a cold bake asks 4,300 to 5,200 (below). A bake keeps a direct-mapped 4,096 cells' four
+    heights of its own in front of the map, 1–15% off the march (the doc comment's figures).
+  - _The survey and the rebake rule._ A far sample whose vertex the view cannot make takes the
+    reference surface, height 0, as the bake's own heights do, and the map then says so:
+    `HorizonMap::is_complete()` is false where the far field read the reference surface or the
+    bake's own heights stood at it. `TerrainLayers::is_complete()` keeps its meaning (the heights,
+    normals, weights and σ). T6.b's `BodyBake::needs_rebake` takes an incomplete map as an
+    incomplete bake, baked again on any block (the determinism review: a patch surveyed whole
+    whose far field reaches past the survey would otherwise keep a map the next block changes);
+    the module's rule says so, and `worker_rebake_rule_takes_an_incomplete_horizon_as_an_incomplete_bake`
+    holds it. T6.a's block test compares the bytes only where the map was complete too.
+  - _`HorizonLayer`._ `TerrainBakeOptions` gains `horizon: HorizonLayer::{Baked, Skipped}`, beside
+    `WeightsLayer`, so that the wireframe's depth-only bake, and a worker whose client reads no
+    map, skip it; the bake makes it on both settings when asked. `bake/patch_65`'s cases skip it,
+    so that T6.a's figures stay comparable; T6.a's tests bake it, so their order, cache and block
+    tests cover it; T6.b's skip it, as the module does, beside the new rule test.
+  - _The worker skips it._ `src/wasm.rs`'s `bake` passes `HorizonLayer::Skipped`: no client reads
+    the map before T8.b, which turns it on for the lit style with its transfer.
+  - _The layout_ (decision-r10-t10b-r09-t2e §5, a storage buffer): four `u32` words a texel, vertex
+    by vertex, row by row, azimuth 2w in word w's low half and 2w + 1 in its high half
+    (`pack2x16snorm`'s order); the near field's 65 × 65 (67,600 B) then the far field's 9 × 9
+    (1,296 B), point (a, b) at vertex (8a, 8b): an `array<vec4u>`, 68,896 B a slot in `horizon-map`,
+    1,296 B over Design note 15's and the brainstorm's 67.6 kB, which counted the near field
+    alone. T14.a's `bytesPerPatch` takes 68,896.
+  - _The encoding._ `encode_horizon` is ⌊½ + 32,767 × clamp(e ÷ 90°, −1, 1)⌋ in real arithmetic:
+    the product exactly as two `f64`s (`math::two_product`), the floor decided on their sum, so that
+    for any input it is WGSL's formula, tested against an integer oracle over the `f64`s and
+    `f32`s either side of every code boundary and 10⁵ more. The plan's "integer only" is read as
+    that exactness. `decode_horizon` is `unpack2x16snorm`'s max(c ÷ 32,767, −1) × 90°.
+  - _Added to Provides:_ `HorizonLayer`, `AZIMUTHS`, `AZIMUTH_STEPS`, `FAR_SIDE`, `FAR_STRIDE`,
+    `WORDS_PER_TEXEL`, `NO_HORIZON` (−32,767, −90°: no ground ahead in the patch, or no sample in
+    the reach), `grid_azimuth` with `ZENITH_TOLERANCE` (10⁻¹²: no azimuth where a direction's part
+    normal to the point's is below that share of it), and `HorizonMap`'s `near`, `far`,
+    `elevation_at` and `is_complete`; `elevation_at(x, y, azimuth)` is the shader's lookup at a
+    vertex (each field linear in azimuth, the far bilinear between its points, the larger), T8.b's
+    oracle.
+  - _The test worlds._ The cliff test feeds a sharp step through `near_codes` as synthetic
+    `PatchHeights`, since `FieldBuilder`'s spline spreads a cliff over two coarse cells, wider than
+    a patch; `flat_field` is the test module's own, `tests/common/worlds.rs` not existing (as
+    T1.b's `cliff_field` is the classifier's). A `FieldBuilder` basin's wall tests the far field to
+    a bracket.
+  - _Tests_ (`bake::horizon::tests`, 18; `tests/panics.rs`'s `bake::horizon`, 5): the round trip
+    within 4.95″ over 10⁶ elevations and both sides of every code boundary, reaching the half step;
+    the decode rising with the code; the rounding exact against an integer oracle; the fixture; the
+    Sun's lit fraction at 1 au moved by at most 2 δ ÷ (π ρ), 0.33%, under 1/255; a flat field's near
+    horizon −θ ÷ 2 to the next vertex and never above zero, its far field empty (no relief, no
+    reach); a cliff; the sweep against brute force; the march's steps and reach; a basin's wall of
+    10 km at 150 km seen by the far field within the bracket a wall of H can give; the shared
+    points' bits; order and cache independence (`assert_order_independent`, warm and fresh, over a
+    patch, its neighbour, parent and child and the survey's edge patch); a cache warmed under a
+    smaller view baking as a cold one under the grown view; the survey's completeness; the layer
+    skipped; the grid azimuth k × 45° along the grid's steps on every face, and none at the zenith;
+    the lookup continuous in azimuth round the turn.
+  - _Acceptance, as built:_ `cargo test -p hyperion-surface --features testing bake::horizon` (18
+    and 5); the bench below; the wasm targets through smart-ci.
+  - _The bench_, `bake/horizon` (2026-10-15 at 18:10–18:19, on the development machine, a Ryzen 7
+    3700X: the bench profile, one thread, under the heavy lock with `HEAVY_CPU_QUOTA=1200%`,
+    schedutil; load 10.3, 8.6 and 11.5 at the start and 22.3, 22.0 and 17.1 at the end, so
+    provisional). Each patch at the low setting with the weights, as `bake/patch_65`'s are; the
+    map's cost is the bake with it less the bake without it:
+
+    | Patch                     | Without | Warm    | Beside 8 baked | Cold, without | Cold     |
+    | ------------------------- | ------- | ------- | -------------- | ------------- | -------- |
+    | Earth-like, L + 4 (12)    | 59.2 ms | 67.5 ms | 70.1 ms        | 65.1 ms       | 109.6 ms |
+    | Earth-like, 19            | 63.9 ms | 80.1 ms | 77.5 ms        | 68.7 ms       | 138.3 ms |
+    | Moon-like rim, L + 4 (10) | 51.7 ms | 59.4 ms | 59.8 ms        | 53.1 ms       | 90.4 ms  |
+    - The map: warm 8.4, 16.1 and 7.7 ms; beside its eight neighbours baked, at most 10.9, 13.5 and
+      8.0 ms (the bake's own heights there partly cold too); cold 44.5, 69.6 and 37.3 ms. Against
+      the plan's quarter of the patch's 40 ms, 10 ms: the L + 4 patches baked beside their
+      neighbours, as a worker bakes a descent, are about at it, the finest level's 1.4 to 1.6
+      times it, and a cold patch four to seven times it.
+    - The lane's own timing test (release without LTO, the least of five, load 8 to 18, not
+      committed) splits it: the sweep 1.9–2.0 ms against Design note 10's 2–6 ms estimate of the
+      march; the far march warm 5.1 ms at L + 4 and 9.2 at the finest level (55 and 83 steps of 648
+      rays; the Earth-like world's relief 13.3 km and reach 411 km); and a cold bake asking 4,275
+      to 5,181 heights, 4.8 to 7.9 µs a point (the cold less the warm time over them), against
+      R09.T8's provisional 14 µs and Design note 10's 2–4 µs.
+
+  - _Generator version._ Untouched (22). The map is presentation: no golden pins it; the
+    encoding's fixture carries 22 and pins only `pack2x16snorm`'s rounding.
+- **Questions for "main" (R10.T8.a)** (none touches a contract of the server's; each built to the
+  lean).
+  - _The far field across levels and face edges._ The task's test asks bit-identical bits across
+    levels, and Design note 10 says no seam can open; as built they are a level's and a face's
+    (above). Lean: as built, with the task's text and the plan's Verification line narrowed to
+    "adjacent patches of a level on a face".
+  - _The azimuth frame._ The patch grid's, turning across face edges (above). Lean: as built; the
+    alternative, east and north, is singular at the poles, where faces 2 and 5 are centred.
+  - _The map's rebake rule._ As built, an incomplete map is baked again on any block, which on a
+    survey smaller than the far field's reach is nearly every patch near it. Lean: T8.b, when it
+    turns the map on, carries the cells the far field refused with each bake, as T6.b's
+    `unsurveyed_cells` are, and narrows the rule to a block that brings one.
+- **Deferred findings (2026-10-13 rule) (R10.T8.a)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _The bake's budget._ A cold map, 37–70 ms (above), is four to seven times the quarter of the
+    patch's 40 ms; one baked beside its neighbours is about at it at L + 4 and 1.4 times it at the
+    finest level. Levers: the march's step count (83 at
+    an Earth's finest level), the early stop below, sharing coarse samples between the 81 points,
+    and the far field of a coarser patch's map. The quiet figures and the WebAssembly ones (the
+    worker runs the bake as WebAssembly) are pending; the owner's i7-8665U figures stay pending by
+    hand.
+  - _Edges between far points._ An edge vertex between two far points has the far field
+    interpolated from theirs, eight vertex spacings apart, so ground just beyond the edge narrower
+    than that shades the neighbour's vertex there at its own resolution and this patch's only
+    approximately: a seam of fine detail along patch edges at low sun, of the near fields' own
+    kind. The lever is a near field that reads a margin of the neighbours' heights.
+  - _The reach and negative horizons._ Seen from a peak, ground just past the reach can stand
+    higher than anything within it (−2.3° against −4.5° on the plan's Earth, the science check),
+    for a sun below the peak's horizontal plane. The lever, which also stops sooner in valleys: stop
+    where (h_max − h₀) ÷ d − d ÷ 2R falls below the best elevation found.
+  - _The reach's small-angle form._ The reach's square root is the small-angle form of
+    arccos(1 − Δh ÷ (R + h_max)); a few percent short on a small rough body.
+  - _The Sun's radius in the task._ The task's ρ = 959.6″ is the older standard 959.63″ (Allen
+    1976); IAU 2015 B3's nominal radius at 1 au gives 959.23″ (the Astronomical Almanac's), which
+    the test takes from the crate's constants; the bound moves by 0.0001%.
+  - _Limb darkening_ moves no half-light point (by symmetry), but steepens the mid-transit slope
+    by about 9% for a linear law with u = 0.6, raising the 0.33% bound to 0.36%, still under
+    1/255; T8.b recomputes it if it darkens the limb (the science check).
+  - _Datum shadows._ Far ground the view does not hold stands at the reference surface, as it is
+    drawn, so a deep surveyed valley at a survey's edge is shaded by the datum until the next block.

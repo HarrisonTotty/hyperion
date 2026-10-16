@@ -1364,7 +1364,7 @@ mod weights {
 /// patch heights are another patch's.
 mod bake {
     use hyperion_base::rng::DetailSeed;
-    use hyperion_surface::bake::{TerrainBakeOptions, WeightsLayer, bake_terrain};
+    use hyperion_surface::bake::{HorizonLayer, TerrainBakeOptions, WeightsLayer, bake_terrain};
     use hyperion_surface::cube::{Face, PatchKey};
     use hyperion_surface::field::{CoarseField, FieldView, PartialField};
     use hyperion_surface::height::HeightSample;
@@ -1443,6 +1443,7 @@ mod bake {
                 skirt_m: -1.0,
             },
             weights: WeightsLayer::Baked,
+            horizon: HorizonLayer::Baked,
         };
         let _ = bake_terrain(
             &synth,
@@ -1451,5 +1452,46 @@ mod bake {
             &opts,
             &[],
         );
+    }
+
+    /// R10.T8.a's horizon map: a far-field point past its level's lattice, an elevation that is
+    /// not a number, a lookup at an azimuth that is not finite, and a grid azimuth at a point
+    /// behind its face or of a direction that is not finite are refused.
+    mod horizon {
+        use hyperion_base::units::Radians;
+        use hyperion_surface::bake::{HorizonMap, encode_horizon, far_field_point, grid_azimuth};
+        use hyperion_surface::cube::Face;
+        #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+        use wasm_bindgen_test::wasm_bindgen_test as test;
+
+        #[test]
+        #[should_panic(expected = "far-field point (17, 0) is past level 1's 16 intervals")]
+        fn a_far_field_point_past_its_lattice_is_refused() {
+            let _ = far_field_point(Face::PosX, 1, 17, 0);
+        }
+
+        #[test]
+        #[should_panic(expected = "a horizon's elevation is a number")]
+        fn an_elevation_that_is_not_a_number_is_refused() {
+            let _ = encode_horizon(Radians::new(f64::NAN));
+        }
+
+        #[test]
+        #[should_panic(expected = "an azimuth must be finite, got inf")]
+        fn a_lookup_at_an_azimuth_that_is_not_finite_is_refused() {
+            let _ = HorizonMap::default().elevation_at(0, 0, Radians::new(f64::INFINITY));
+        }
+
+        #[test]
+        #[should_panic(expected = "[-1.0, 0.2, 0.1] is not in front of face PosX")]
+        fn a_grid_azimuth_behind_its_face_is_refused() {
+            let _ = grid_azimuth(Face::PosX, [-1.0, 0.2, 0.1], [0.0, 1.0, 0.0]);
+        }
+
+        #[test]
+        #[should_panic(expected = "a grid azimuth's directions must be finite")]
+        fn a_grid_azimuth_of_a_direction_that_is_not_finite_is_refused() {
+            let _ = grid_azimuth(Face::PosX, [1.0, 0.2, 0.1], [0.0, f64::NAN, 0.0]);
+        }
     }
 }

@@ -1,4 +1,4 @@
-//! Benchmarks of the bake on real terrain (plan R10, T6.a; T8.a adds `bake/horizon`).
+//! Benchmarks of the bake on real terrain (plan R10, T6.a), and its horizon map (T8.a).
 //!
 //! `bake/patch_65/<world>-<level>/<case>` bakes one patch of a synthetic world over a client's
 //! field holding the cells under it with their margin (`hyperion_surface::bake::bake_terrain`):
@@ -16,7 +16,19 @@
 //! rim, against the brainstorm's 40 ms a patch on two of the UHD 620 laptop's cores (about 10 µs a
 //! point with its gradient; the plan's Risks: the desktop records its own and fails only if over
 //! it). Figures taken while other work shares the machine are provisional. CI compiles these and
-//! never runs them: `just bench -- bake/patch`.
+//! never runs them: `just bench -- bake/patch`. Every `bake/patch_65` case skips the horizon map,
+//! as T6.a measured it.
+//!
+//! `bake/horizon/<world>-<level>/<case>` bakes the same patches with the horizon map
+//! (`HorizonLayer::Baked`) and without it, with the weights, at the low setting, so that the map's
+//! cost is the difference, against the plan's quarter of the 40 ms (R10.T8.a): `without` and
+//! `warm`, each from a cache a first bake of the patch with its map filled, so that the far field's
+//! vertex heights are kept and the map costs its sweep and its march; `neighbour`, from a cache
+//! that the bakes of the patch's eight neighbours filled, as a worker's next bake beside them;
+//! and `cold` and `cold-without`, from an empty cache each iteration, where the far field asks
+//! every vertex height it reads. The client's field holds every coarse cell within the far field's
+//! reach of the patch, so that the far field reads real ground throughout. `just bench --
+//! bake/horizon`.
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod bench {
@@ -24,10 +36,11 @@ mod bench {
     use std::hint::black_box;
     use std::time::Duration;
 
+    use criterion::BatchSize;
     use criterion::Criterion;
     use hyperion_base::math;
     use hyperion_base::rng::DetailSeed;
-    use hyperion_surface::bake::{TerrainBakeOptions, WeightsLayer, bake_terrain};
+    use hyperion_surface::bake::{HorizonLayer, TerrainBakeOptions, WeightsLayer, bake_terrain};
     use hyperion_surface::cube::{PatchKey, SampleGrid, unit_dir};
     use hyperion_surface::field::{
         CoarseField, Cover, CoverRange, FieldView, PartialField, ResolutionCode, cell_at_index,
@@ -170,7 +183,11 @@ mod bench {
                 runs.push(("double", HIGH, WeightsLayer::Baked));
             }
             for (case, patch, weights) in runs {
-                let opts = TerrainBakeOptions { patch, weights };
+                let opts = TerrainBakeOptions {
+                    patch,
+                    weights,
+                    horizon: HorizonLayer::Skipped,
+                };
                 let mut warm = SynthCache::new();
                 let first = bake_terrain(&synth, &mut warm, key, &opts, &[]).expect("held");
                 assert!(first.layers().is_complete(), "the patch is surveyed");
@@ -195,8 +212,135 @@ mod bench {
                 let opts = TerrainBakeOptions {
                     patch: LOW,
                     weights: WeightsLayer::Baked,
+                    horizon: HorizonLayer::Skipped,
                 };
                 group.bench_function(format!("{name}/weights-cold"), |b| {
+                    b.iter(|| {
+                        black_box(bake_terrain(
+                            &synth,
+                            &mut SynthCache::new(),
+                            key,
+                            &opts,
+                            &[],
+                        ))
+                    });
+                });
+            }
+        }
+        group.finish();
+    }
+
+    /// The patch's eight neighbours at its level on its face, those that exist.
+    fn neighbours(key: PatchKey) -> Vec<PatchKey> {
+        let last = (1_i64 << key.level()) - 1;
+        let mut out = Vec::new();
+        for dj in -1_i64..=1 {
+            for di in -1_i64..=1 {
+                let (i, j) = (i64::from(key.i()) + di, i64::from(key.j()) + dj);
+                if (di, dj) != (0, 0) && (0..=last).contains(&i) && (0..=last).contains(&j) {
+                    let index = |n: i64| u32::try_from(n).expect("an index on the face");
+                    out.push(
+                        PatchKey::new(key.face(), key.level(), index(i), index(j))
+                            .expect("a patch on the face"),
+                    );
+                }
+            }
+        }
+        out
+    }
+
+    /// A client's field holding the cells under `keys`' samples, as [`client`] makes it, and every
+    /// coarse cell whose centre lies within the far field's reach of `keys[0]`'s centre, √(2 Δh ÷
+    /// a), and two cells' widths more, so that the far field reads ground the view holds.
+    fn client_within_reach(field: &CoarseField, keys: &[PatchKey]) -> PartialField {
+        let header = field.header();
+        let level = header.level().get();
+        let figure = header.figure();
+        let reach = (2.0 * header.realised_relief().value() / figure.equatorial_radius_m).sqrt();
+        let cell_width = 1.7 * std::f64::consts::FRAC_PI_2 / f64::from(1_u32 << level);
+        let centre = keys[0].vertex_dir(32, 32);
+        let near = math::cos(reach + 2.0 * cell_width);
+        let mut cells: BTreeSet<u32> = (0..header.level().cell_count())
+            .filter(|&n| {
+                let cell = cell_at_index(level, n).expect("a cell of the level");
+                let d = cell.vertex_dir(32, 32);
+                d[0] * centre[0] + d[1] * centre[1] + d[2] * centre[2] >= near
+            })
+            .collect();
+        for &key in keys {
+            for y in 0..=128 {
+                for x in 0..=128 {
+                    let dir = key.sample_dir(x, y, SampleGrid::Double);
+                    cells.insert(cell_index(
+                        PatchKey::containing(level, dir).expect("a coarse level"),
+                    ));
+                }
+            }
+        }
+        let code = ResolutionCode::from_resolution(hyperion_base::units::Metres::new(10.0))
+            .expect("10 m is a resolution");
+        let cover = Cover::from_ranges(
+            cells
+                .iter()
+                .map(|&i| CoverRange::new(i, i + 1, code).expect("a cell's range")),
+        )
+        .expect("ranges in order");
+        let blocks = decode_payload(&encode_payload(field, &cover, None)).expect("a payload");
+        let header = blocks[0]
+            .header()
+            .expect("block 0 carries the header")
+            .clone();
+        let mut view = PartialField::new(header);
+        for block in &blocks {
+            view.insert(block).expect("a block of the payload");
+        }
+        view
+    }
+
+    pub fn horizon(c: &mut Criterion) {
+        let mut group = c.benchmark_group("bake/horizon");
+        group.sample_size(10);
+        group.measurement_time(Duration::from_secs(10));
+        let with = TerrainBakeOptions {
+            patch: LOW,
+            weights: WeightsLayer::Baked,
+            horizon: HorizonLayer::Baked,
+        };
+        let without = TerrainBakeOptions {
+            horizon: HorizonLayer::Skipped,
+            ..with
+        };
+        for (world, field, key) in cases() {
+            let mut keys = vec![key];
+            keys.extend(neighbours(key));
+            let view = client_within_reach(&field, &keys);
+            let synth = Synthesiser::new(&view, SEED);
+            let name = format!("{world}-{}", key.level());
+            let mut warm = SynthCache::new();
+            let first = bake_terrain(&synth, &mut warm, key, &with, &[]).expect("held");
+            assert!(first.layers().is_complete(), "the patch is surveyed");
+            assert!(
+                first.layers().horizon().is_complete(),
+                "the view holds the far field's reach"
+            );
+            for (case, opts) in [("without", without), ("warm", with)] {
+                group.bench_function(format!("{name}/{case}"), |b| {
+                    b.iter(|| black_box(bake_terrain(&synth, &mut warm, key, &opts, &[])));
+                });
+            }
+            let mut beside = SynthCache::new();
+            for &n in keys.iter().filter(|&&n| n != key) {
+                bake_terrain(&synth, &mut beside, n, &with, &[]).expect("held");
+            }
+            group.bench_function(format!("{name}/neighbour"), |b| {
+                b.iter_batched(
+                    || beside.clone(),
+                    |mut cache| black_box(bake_terrain(&synth, &mut cache, key, &with, &[])),
+                    BatchSize::LargeInput,
+                );
+            });
+            for (case, opts) in [("cold", with), ("cold-without", without)] {
+                group.bench_function(format!("{name}/{case}"), |b| {
                     b.iter(|| {
                         black_box(bake_terrain(
                             &synth,
@@ -214,7 +358,7 @@ mod bench {
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-criterion::criterion_group!(benches, bench::patch_65);
+criterion::criterion_group!(benches, bench::patch_65, bench::horizon);
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 criterion::criterion_main!(benches);
 

@@ -7,8 +7,9 @@
 //! heights and gradients ([`Synthesiser::bake_patch`], the structural octaves' lattice covered once
 //! for the patch first), and extended with [`TerrainLayers`]: the class palette and weights
 //! (R10.T2's [`weights_at`](crate::material::weights_at), at each vertex, from the height the bake
-//! has made there), the survey mask, the patch's bound and σ, the horizon map's slot, empty until
-//! R10.T8, and R11's layers through [`BakeHook`]. Normals are at R05's
+//! has made there), the survey mask, the patch's bound and σ, the horizon map (R10.T8.a's
+//! [`horizon`] module, from the bake's own heights and the ground beyond the patch), and R11's
+//! layers through [`BakeHook`]. Normals are at R05's
 //! [`NormalScale`](crate::patch::NormalScale), which the worker packs as `rg16float` (R05's Design
 //! note 5).
 //!
@@ -40,6 +41,7 @@
 //! presentation (the plan's Generator version section); nothing is drawn from a stream, so the
 //! module opens no domain tag.
 
+pub mod horizon;
 mod layers;
 
 use std::cell::{Cell, RefCell};
@@ -47,7 +49,12 @@ use std::collections::BTreeSet;
 
 use hyperion_base::units::Metres;
 
-pub use layers::{HorizonMap, SURVEYED, TerrainLayers, UNSURVEYED};
+pub use horizon::{
+    AZIMUTH_STEPS, AZIMUTHS, FAR_SIDE, FAR_STRIDE, HorizonLayer, HorizonMap, NO_HORIZON,
+    WORDS_PER_TEXEL, ZENITH_TOLERANCE, decode_horizon, encode_horizon, far_field_point,
+    grid_azimuth,
+};
+pub use layers::{SURVEYED, TerrainLayers, UNSURVEYED};
 
 use crate::cube::{PATCH_QUADS, PatchKey};
 use crate::field::ResolutionCode;
@@ -79,13 +86,16 @@ pub enum WeightsLayer {
     Skipped,
 }
 
-/// What [`bake_terrain`] makes: R05's options, and whether the class weights are baked.
+/// What [`bake_terrain`] makes: R05's options, and whether the class weights and the horizon map
+/// are baked.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TerrainBakeOptions {
     /// R05's: the vertex path, the normals' resolution and the skirts' margin.
     pub patch: BakeOptions,
     /// Whether the class weights are baked.
     pub weights: WeightsLayer,
+    /// Whether the horizon map is baked (R10.T8.a), on either setting.
+    pub horizon: HorizonLayer,
 }
 
 /// A patch baked on real terrain: R05's arrays and this plan's layers.
@@ -129,7 +139,8 @@ const REFERENCE_SURFACE: HeightSample = HeightSample {
 /// it serves views of one field whose held cells only grow, as [`SynthCache`]'s rule is and a
 /// worker's view is: a cache filled under a view holding more cells than this one could answer a
 /// query this view refuses, and so bake real ground where this view's bake takes the reference
-/// surface.
+/// surface. It keeps the horizon's far-field vertex heights too ([`horizon`]), which a patch's
+/// neighbours and children read again.
 ///
 /// # Errors
 ///
@@ -162,6 +173,8 @@ pub fn bake_terrain<F: SurveyView>(
         ..
     } = ground;
     let (reference, mut complete) = (reference.into_inner(), complete.get());
+    // Whether every height was the view's own, before the weights' reads.
+    let heights_complete = complete;
 
     let (palette, weights) = match opts.weights {
         WeightsLayer::Baked => {
@@ -189,6 +202,10 @@ pub fn bake_terrain<F: SurveyView>(
         WeightsLayer::Skipped => ([None; MAX_CLASSES], Vec::new()),
     };
     let sigma = sigma(synth, cache, key, level, &survey_mask)?;
+    let horizon = match opts.horizon {
+        HorizonLayer::Baked => horizon::bake_horizon(synth, cache, key, &heights, heights_complete),
+        HorizonLayer::Skipped => HorizonMap::default(),
+    };
     let mut extra = Vec::new();
     for hook in hooks {
         hook.bake(key, &patch.heights, &mut extra);
@@ -197,7 +214,7 @@ pub fn bake_terrain<F: SurveyView>(
         palette,
         weights,
         survey_mask,
-        horizon: HorizonMap::default(),
+        horizon,
         bound: Metres::new(synth.level_bound_m(level)),
         sigma,
         complete,

@@ -9,7 +9,7 @@ use hyperion_testkit::order::assert_order_independent;
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
 use super::*;
-use crate::bake::{SURVEYED, WeightsLayer};
+use crate::bake::{HorizonLayer, SURVEYED, WeightsLayer};
 use crate::cube::{Face, st_to_uv};
 use crate::field::{
     CoarseField, CoarseLevel, Cover, CoverRange, ResolutionCode, SYNTHESIS_MARGIN_CELLS,
@@ -28,7 +28,8 @@ pub(super) const WORLD: SyntheticWorld = SyntheticWorld::MoonLike;
 /// blocks, a block 0 with the header and later ones without.
 const FIXTURE_BLOCK_BYTES: usize = 4096;
 
-/// The low setting's options with the weights.
+/// The low setting's options with the weights, and without the horizon map, as the client's
+/// workers bake until R10.T8.b reads it.
 pub(super) const MESH: TerrainBakeOptions = TerrainBakeOptions {
     patch: BakeOptions {
         vertex_path: VertexPath::FaceDifferences,
@@ -36,6 +37,7 @@ pub(super) const MESH: TerrainBakeOptions = TerrainBakeOptions {
         skirt_m: 0.0,
     },
     weights: WeightsLayer::Baked,
+    horizon: HorizonLayer::Skipped,
 };
 
 /// The high setting's: baked offsets and doubled normals, with no extra skirt margin, as the
@@ -47,6 +49,7 @@ pub(super) const DOUBLE: TerrainBakeOptions = TerrainBakeOptions {
         skirt_m: 0.0,
     },
     weights: WeightsLayer::Baked,
+    horizon: HorizonLayer::Skipped,
 };
 
 /// The wireframe's: no weights.
@@ -57,6 +60,7 @@ pub(super) const DEPTH_ONLY: TerrainBakeOptions = TerrainBakeOptions {
         skirt_m: 0.0,
     },
     weights: WeightsLayer::Skipped,
+    horizon: HorizonLayer::Skipped,
 };
 
 /// The fixture: two surveys of the Moon-like world's face +y and their payloads, the second a
@@ -662,6 +666,52 @@ fn worker_rebake_rule_misses_no_bake_a_block_changes() {
         }
     }
     assert!(rebaked < probes().len());
+}
+
+#[test]
+fn worker_rebake_rule_takes_an_incomplete_horizon_as_an_incomplete_bake() {
+    let f = fixture();
+    let mut fields = WorkerFields::new();
+    fields.init(f.body, &f.first_blocks[0]).unwrap();
+    for block in &f.first_blocks[1..] {
+        fields.chunk(f.body, block).unwrap();
+    }
+    let lit = |opts: TerrainBakeOptions| TerrainBakeOptions {
+        horizon: HorizonLayer::Baked,
+        ..opts
+    };
+    let before: Vec<BodyBake> = probes()
+        .into_iter()
+        .map(|(_, key, opts)| fields.bake(f.body, SEED, key, &lit(opts)).unwrap())
+        .collect();
+    let mut changed = [false; 6];
+    for block in &f.second_blocks {
+        let change = fields.chunk(f.body, block).unwrap();
+        for (n, old) in before.iter().enumerate() {
+            changed[n] |= old.needs_rebake(&change);
+        }
+    }
+    for (n, ((name, key, opts), old)) in probes().into_iter().zip(&before).enumerate() {
+        let new = fields.bake(f.body, SEED, key, &lit(opts)).unwrap();
+        if !changed[n] {
+            assert_eq!(new.terrain(), old.terrain(), "{name} changed, unflagged");
+        }
+        if !old.terrain().layers().horizon().is_complete() {
+            assert!(
+                changed[n],
+                "{name}: an incomplete horizon is rebaked on any block"
+            );
+        }
+        if name == "inside" {
+            // Surveyed whole and complete, its far field reaching past the surveys.
+            let layers = old.terrain().layers();
+            assert!(
+                layers.is_complete() && !layers.horizon().is_complete(),
+                "{name}"
+            );
+            assert!(changed[n], "{name}");
+        }
+    }
 }
 
 #[test]
