@@ -38,11 +38,13 @@
 //! record's hooks section ([`record::Hooks`](crate::planetary::record::Hooks)) carries the body's
 //! [`DetailSeed`] in the surface seed's place (R09.T1.b), and nothing server-only.
 
+pub mod crust;
 pub mod figures;
 pub mod seed;
 pub mod structure;
 pub mod surface;
 
+pub use crust::{CrustComposition, CrustCompositionInputs, CrustLithology, DeriveCrustError};
 pub use figures::{
     GlobalFigures, Impactors, MagneticField, OceanFloor, Subsurface, SubsurfaceOcean,
     TectonicRegime, impactors,
