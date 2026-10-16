@@ -398,7 +398,8 @@ async function playTo(stage: Stage): Promise<Session> {
   return session;
 }
 
-describe("the GALAXY display, end to end", () => {
+// M2 worst 1.23 s, desktop over 15 s under load (2026-10-15): 100× M2
+describe("the GALAXY display, end to end", { timeout: 300_000 }, () => {
   beforeEach(() => {
     FakeWebSocket.instances = [];
     vi.stubGlobal("WebSocket", FakeWebSocket);

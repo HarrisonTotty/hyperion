@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { inlinePart } from "../../../test/kDistributionFixtures";
+import { memoised } from "../../../test/memo";
 import { absorberTransmittance, type AbsorberCurve } from "../absorbers";
 import {
   cellSigmasAt,
@@ -8,6 +9,7 @@ import {
   type KDistributionTable,
   kDistributionAt,
   loadKDistributions,
+  type SpeciesKDistribution,
 } from "./kDistribution";
 import nitrousOxide from "./exomol/lineReferencesN2O.json" with { type: "json" };
 import ammonia from "./exomol/lineReferencesNH3.json" with { type: "json" };
@@ -40,40 +42,52 @@ const CHAIN_BOUND = 2e-3;
 /** The 16-bit storage's bound against the reduction's `f64` curves (its tests). */
 const QUANTISATION_BOUND = 2e-4;
 
+/** A table's σ at one temperature, read at a row of curve for every stored pressure. */
+interface TableRows {
+  readonly kd: SpeciesKDistribution;
+  readonly rowPressuresPa: ReadonlyArray<number>;
+  /** Each cell's g-point σ at each row, m²: `sigmas[row][cell]`. */
+  readonly sigmas: ReadonlyArray<ReadonlyArray<Float64Array>>;
+}
+
 /**
- * The client's chain for one cell at a state, through the curves' own read: the cell's g-point σ
- * cubic in T at arrival, a row of curve at every stored pressure, and `absorberTransmittance`'s
- * read in ln p̄ on τ, at each of the state's columns.
+ * The rows of a table's σ at a temperature, as the client reads them: every cell's g-point σ at
+ * every stored pressure times `rowShift`.
  *
  * @param rowShift - The rows' pressures over the stored nodes': 1 for a profile's dominant line
  *   species, whose rows are its nodes; otherwise a species sharing another's rows, its σ read
  *   between its own nodes at each row (`absorbers.ts`'s `absorberCurvePressures`).
  */
-function clientCurve(
-  table: KDistributionTable,
-  cellNm: number,
-  state: ReferenceState,
-  rowShift = 1,
-): number[] {
-  const kd = kDistributionAt(table, state.temperatureK);
-  const c = kd.cells.findIndex((cell) => cell.cellNm === cellNm);
-  const cell = kd.cells[c];
+function tableRows(kd: SpeciesKDistribution, rowShift: number): TableRows {
+  const rowPressuresPa = kd.pressuresPa.map((p) => p * rowShift);
+  return { kd, rowPressuresPa, sigmas: rowPressuresPa.map((p) => cellSigmasAt(kd, p)) };
+}
+
+/**
+ * The client's chain for one cell at a state, through the curves' own read: the cell's g-point σ
+ * cubic in T at arrival, a row of curve at every stored pressure, and `absorberTransmittance`'s
+ * read in ln p̄ on τ, at each of the state's columns.
+ *
+ * @param rows - The table's rows at the state's temperature ({@link tableRows}).
+ */
+function clientCurve(rows: TableRows, cellNm: number, state: ReferenceState): number[] {
+  const c = rows.kd.cells.findIndex((cell) => cell.cellNm === cellNm);
+  const cell = rows.kd.cells[c];
   if (cell === undefined) {
-    throw new Error(`${table.species}'s table holds no ${cellNm} nm cell`);
+    throw new Error(`${rows.kd.species}'s table holds no ${cellNm} nm cell`);
   }
   const columnsM2 = state.columnsCm2.map((u) => u * 1e4);
-  const rowPressuresPa = table.pressuresPa.map((p) => p * rowShift);
-  const rows = rowPressuresPa.map((p) => cellSigmasAt(kd, p)[c] ?? new Float64Array(0));
   const depth = Float64Array.from(
-    rows.flatMap((sigmas) =>
-      columnsM2.map((u) => -Math.log(cellTransmittance(cell.weights, sigmas, u))),
-    ),
+    rows.sigmas.flatMap((row) => {
+      const sigmas = row[c] ?? new Float64Array(0);
+      return columnsM2.map((u) => -Math.log(cellTransmittance(cell.weights, sigmas, u)));
+    }),
   );
   // One column node a reference column, so that the read is exact in u and the cubic acts in p.
   const curve: AbsorberCurve = {
     kind: "column",
     logColumns: Float64Array.from(columnsM2, Math.log),
-    logPressures: Float64Array.from(rowPressuresPa, Math.log),
+    logPressures: Float64Array.from(rows.rowPressuresPa, Math.log),
     readTopLogPressure: Math.log(1e7),
     transmittance: [
       depth.map((d) => Math.exp(-d)),
@@ -102,17 +116,31 @@ describe.each([
   let table: KDistributionTable | undefined;
   beforeAll(async () => {
     [table] = await loadKDistributions([references.species], inlinePart);
-  });
+  }, 120_000); // M2 worst 0.65 s, desktop over 10 s under load (2026-10-15): 100× M2
   const states = references.cells.flatMap((cell) =>
     cell.states.map((state) => [cell.nm, state] as const),
   );
 
+  // The block's states share two temperatures, so the table is read once at each, and once more
+  // for each row shift there, by the first test that needs it, rather than whole in every test.
+  const kdAt = memoised(
+    (temperatureK: number): SpeciesKDistribution => {
+      if (table === undefined) {
+        throw new Error(`no committed table for ${references.species}`);
+      }
+      return kDistributionAt(table, temperatureK);
+    },
+    (temperatureK) => String(temperatureK),
+  );
+  const rowsAt = memoised(
+    ([temperatureK, rowShift]: readonly [number, number]): TableRows =>
+      tableRows(kdAt(temperatureK), rowShift),
+    ([temperatureK, rowShift]) => `${String(temperatureK)} ${String(rowShift)}`,
+  );
+
   /** The client's curve at a state, from the loaded table. */
   function client(nm: number, state: ReferenceState, rowShift = 1): number[] {
-    if (table === undefined) {
-      throw new Error(`no committed table for ${references.species}`);
-    }
-    return clientCurve(table, nm, state, rowShift);
+    return clientCurve(rowsAt([state.temperatureK, rowShift]), nm, state);
   }
 
   it.each(states)(

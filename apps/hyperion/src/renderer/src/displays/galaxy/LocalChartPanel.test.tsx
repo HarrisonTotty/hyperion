@@ -176,7 +176,8 @@ function reading(label: string): string {
   return term?.nextElementSibling?.textContent ?? "";
 }
 
-describe("LocalChartPanel", () => {
+// M2 worst 1.07 s, desktop 24.1 s under load (2026-10-15): 100× M2
+describe("LocalChartPanel", { timeout: 120_000 }, () => {
   beforeEach(() => {
     FakeWebSocket.instances = [];
     vi.stubGlobal("WebSocket", FakeWebSocket);
