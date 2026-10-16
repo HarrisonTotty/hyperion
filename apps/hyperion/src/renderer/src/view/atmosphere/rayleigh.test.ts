@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import registry from "../../../../../../../packages/protocol/fixtures/substances.json" with { type: "json" };
 import { type AtmosphereColumn, hydrostaticColumn } from "./column";
 import { CHANNEL_WAVELENGTHS_NM } from "./medium";
 import {
@@ -832,6 +833,23 @@ describe("the estimated rows", () => {
     expect(relative(rayleighOf("H").crossSectionM2(nm) * CM2_PER_M2, exactCm2)).toBeLessThan(1e-3);
   });
 
+  /** HCl's row: C. and M. Cuthbertson 1914's dispersion. */
+  const hcl = DISPERSION_ROWS.find((row) => row.species === "HCl");
+
+  it("read HCl's row as the Cuthbertsons print it, with n = 3 × 10¹⁰ ÷ λ, to 2 × 10⁻⁵", () => {
+    // 1914, p. 12: (μ − 1) D ÷ (d₀76) = 4.6425 × 10²⁷ ÷ (10,664 × 10²⁷ − n²).
+    for (const nm of wavelengthsNm(480, 670, 5)) {
+      const frequencyPerS = 3e10 / (nm * 1e-7);
+      const printed = 4.6425e27 / (10_664e27 - frequencyPerS * frequencyPerS);
+      expect(relative(hcl?.dispersion.nMinusOne(nm) ?? Number.NaN, printed)).toBeLessThan(2e-5);
+    }
+  });
+
+  it("reproduce Table V's calculated 44,803 × 10⁻⁸ for HCl at 5460.7 Å", () => {
+    // 1914, p. 12, as the materials tool's test holds its copy of the row (`HCL_REFRACTIVITY`).
+    expect(relative(hcl?.dispersion.nMinusOne(546.07) ?? Number.NaN, 44_803e-8)).toBeLessThan(5e-5);
+  });
+
   it("put (128π⁵ ÷ 3) α² ÷ λ⁴ equal to the dispersion route for a dilute gas", () => {
     // (n² − 1) ÷ (n² + 2) = (4π ÷ 3) N α: a molecule of N₂'s refractivity at 550 nm with F_K = 1.
     const dispersion = GAS_DISPERSION.N2;
@@ -1050,54 +1068,21 @@ describe("the molecular term", () => {
 });
 
 /**
- * The substance registry's gas rows, in its order (decision-composition §1.1): P14.T49.a's nine,
- * then P14.T49.b's measured four and the gases of the chemistry. Until P14.T49.a writes
- * `packages/protocol/fixtures/substances.json` this list stands for its gas rows, and R08.T19's
- * parity check then reads the fixture itself. e⁻ and H⁻ are left out: their scattering and
- * absorption are R08.T4.c's continua (Thomson; bound–free and free–free), not a Rayleigh row.
+ * The substance registry's gas rows with Rayleigh optics, in its index order: the rows
+ * `packages/protocol/fixtures/substances.json`, the registry's public mirror, flags `rayleigh`
+ * (decision-composition §1.1; P14.T49.a's nine, then P14.T49.b's). e⁻, H⁻ and the ions carry
+ * `rayleigh: false`: their scattering and absorption are R08.T4.c's continua (Thomson; bound–free
+ * and free–free) and R08.T4.e's lines, not a Rayleigh row. That each has measured or estimated
+ * optics is R08.T19's parity check (`parity.test.ts`); these tests hold the tables' shape to them.
  */
-const REGISTRY_GAS_ROWS = [
-  "H2",
-  "He",
-  "H2O",
-  "CH4",
-  "NH3",
-  "N2",
-  "O2",
-  "CO2",
-  "Ar",
-  "Ne",
-  "Kr",
-  "Xe",
-  "N2O",
-  "CO",
-  "SO2",
-  "H2S",
-  "O3",
-  "HCN",
-  "C2H2",
-  "C2H4",
-  "C2H6",
-  "PH3",
-  "CH3OH",
-  "H",
-  "O",
-  "Na",
-  "K",
-  "Fe",
-  "Mg",
-  "Si",
-  "Ca",
-  "Ti",
-  "SiO",
-  "TiO",
-  "VO",
-  "FeH",
-] as const;
+const REGISTRY_GAS_ROWS: ReadonlyArray<string> = registry.substances
+  .toSorted((a, b) => a.index - b.index)
+  .filter((row) => row.rayleigh)
+  .map((row) => row.key);
 
 describe("the registry's gas rows", () => {
-  it.each(REGISTRY_GAS_ROWS)("give %s measured or estimated optics", (species) => {
-    expect(rayleighOf(species).provenance).not.toBe("none");
+  it("are found in the fixture", () => {
+    expect(REGISTRY_GAS_ROWS.length).toBeGreaterThan(0);
   });
 
   it("are the measured gases and the estimated rows, each once", () => {

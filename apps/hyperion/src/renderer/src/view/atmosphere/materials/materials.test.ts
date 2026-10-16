@@ -760,13 +760,8 @@ describe("the stand-in label", () => {
 });
 
 describe("the registry's aerosol materials (R08.T5.d)", () => {
-  it("serve every aerosol-material row of the registry's fixture with a file of their own", () => {
-    // A row the generic stand-in alone serves fails: its key would have no file.
-    const rows = registry.substances.filter((row) => row.aerosol_material);
-    const unserved = rows.filter((row) => resolveMaterial(row.key).file === undefined);
-    expect(unserved.map((row) => row.key)).toEqual([]);
-  });
-
+  // That every aerosol-material row has a file of its own, and every file's key is a row, is
+  // R08.T19's parity check (`../parity.test.ts`).
   it("find O2 and Ar among the fixture's aerosol-material rows (decision-r08-t5d ruling 3)", () => {
     const keys = new Set(
       registry.substances.filter((row) => row.aerosol_material).map((row) => row.key),

@@ -525,16 +525,18 @@ function isAtom(formula: string): boolean {
  *
  * @remarks
  * SiO, TiO, VO and FeH are hot vapours rather than bulk gases, but stay: their estimates are a
- * static polarisability, a plain λ⁻⁴, and change nothing (0.0072 at the fitted triple).
+ * static polarisability, a plain λ⁻⁴, and change nothing (0.0072 at the fitted triple). HCl,
+ * chlorine's gas in hydrogen envelopes (R08.T19), joins as a molecule: alone it gives 0.0074.
  *
- * The estimated atoms (H, O, Na, K, Fe, Mg, Si, Ca, Ti) are left out, on plausibility: none is an
- * atmosphere's bulk gas at an Earth-like Rayleigh depth. They are the dissociation and vapour
- * products of hot envelopes and lava worlds, beside the bulk gas, and Na's, K's, Ca's and Ti's
- * visible optics are their resonance lines (R08.T4.e). For all but two the omission changes
- * nothing: each alone at dry air's τ(550) gives 0.0075 (H) or 0.0072 (O, Na, K, Si, Ca, Ti) at the
- * fitted triple, under the objective. Mg's and Fe's one oscillators, at 285.3 and 248.4 nm, steepen
- * σ to λ^−5.6 and λ^−5.1 over 450–650 nm, and would give 0.020 and 0.014: out of the family's
- * range, and recorded (R08's Risks, T4.a).
+ * The estimated atoms (H, O, Na, K, Fe, Mg, Si, Ca, Ti, and R08.T19's Al, V, Mn, Ni, Zn and Cr) are
+ * left out, on plausibility: none is an atmosphere's bulk gas at an Earth-like Rayleigh depth. They
+ * are the dissociation and vapour products of hot envelopes and lava worlds, beside the bulk gas,
+ * and Na's, K's, Al's, Ca's, Ti's, V's, Cr's and Mn's visible optics are their lines (R08.T4.e). For
+ * all but five the omission changes nothing: each alone at dry air's τ(550) gives 0.0075 (H) or
+ * 0.0072 (O, Na, K, Si, Ca, Ti, Al, V, Cr) at the fitted triple, under the objective. Mg's, Mn's,
+ * Fe's, Ni's and Zn's one oscillators, at 285.3, 279.56, 248.4, 232.07 and 213.92 nm, steepen σ to
+ * λ^−5.6, λ^−5.5, λ^−5.1, λ^−4.9 and λ^−4.8 over 450–650 nm, and would give 0.020, 0.019, 0.014,
+ * 0.012 and 0.011: out of the family's range, and recorded (R08's Risks, T4.a and T19).
  */
 export const CHANNEL_FIT_GASES: ReadonlyArray<string> = [
   ...GASES,
