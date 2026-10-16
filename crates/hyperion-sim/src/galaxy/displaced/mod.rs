@@ -14,9 +14,9 @@
 //! [`scales`]), the binarity seam and the kick bins (P08.T8), the forms (P08.T10) and their bounds
 //! (P08.T11), and the explosion-site hook (P08.T13): the interval predicate
 //! [`death_in_interval`] and [`explosion_site`], which plan 03's carve-out hook asks for every
-//! layer-E record and whose claim answers no until plan 09's P09.T35. The class table, the marks
-//! and the runaway model are built by the tasks named in their modules, and nothing generated
-//! reads a displaced class until P08.T12 switches them on with its version bump.
+//! layer-E record once plan 09's P09.T35 gives its claim, and for none before (P08.T13.b). The
+//! class table, the marks and the runaway model are built by the tasks named in their modules, and
+//! nothing generated reads a displaced class until P08.T12 switches them on with its version bump.
 //!
 //! Speeds are in units of the galaxy's circular speed `v_c` and times in units of `R_d ÷ v_c`
 //! ([`GalaxyScales`]), as plan 15's form table has them.
