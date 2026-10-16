@@ -174,13 +174,18 @@ target-subvolume:
     rm -rf "$old"
     echo "converted $target to a btrfs subvolume in $((SECONDS - start)) s" >&2
 
-# Install the git pre-commit and pre-push hooks into this clone.
+# Install the git pre-commit and pre-push hooks into this clone. Their expensive checks (Clippy,
+# oxlint, tsc, the bindings' check, and `just test` on push) skip, printing why, when `just
+# smart-ci` passed on the exact tree being committed or pushed and its plan covered the check: its
+# gate stamp (`tools/smart-ci/stamp.py`; Clippy and the bindings' check only by the workspace's
+# own, which `just smart-ci --hook-checks` runs). Otherwise they run as before; the other hooks
+# always run.
 hooks:
     uvx pre-commit install --install-hooks
 
-# Run every pre-commit hook against all files.
+# Run every pre-commit hook against all files, every check whatever the gate stamps.
 pre-commit:
-    uvx pre-commit run --all-files
+    SMART_CI_NO_STAMPS=1 uvx pre-commit run --all-files
 
 # Run the game server.
 server *args:
@@ -1309,7 +1314,12 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
 # `SMART_CI_SLOT` names the command; `--full` and test-render's run always take it.
 # `SMART_CI_PRIORITY=1` (integration's runs, over its unpushed commits or with `--full`) gives any
 # plan that takes the lock priority on it, and integration's runs timestamp every recipe line
-# (`JUST_TIMESTAMP=true`).
+# (`JUST_TIMESTAMP=true`). A run that passes writes a gate stamp, keyed by the tree it checked
+# (untracked files included), under `<git common dir>/smart-ci/stamps/`: the git hooks skip the
+# checks it covers when that tree is committed or pushed (`hooks` above; the workspace Clippy and
+# bindings' check only when the plan ran the workspace's own, which `--hook-checks` runs in place of
+# the changed crates'), and `python3 -I tools/smart-ci/stamp.py check <commit>` says whether a tree has one. A
+# failed run writes none.
 # The gate a change needs, chosen from its diff: `ci`'s steps, only those the change reaches.
 [positional-arguments]
 smart-ci *args:

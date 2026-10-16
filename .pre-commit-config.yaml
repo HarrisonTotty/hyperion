@@ -2,6 +2,12 @@
 # Run `just hooks` to install, or `just pre-commit` to run against every file.
 #
 # Fast checks run on commit; tests run on push. `just ci-slow` remains the full gate.
+#
+# The expensive checks (Clippy, oxlint, tsc, the bindings' check, `just test`) run through
+# `tools/smart-ci/stamp.py hook`, which skips one, printing why, when `just smart-ci` passed on the
+# exact tree being committed or pushed and its plan covered that check (its gate stamp), and
+# otherwise runs it as written after the `--`. `SMART_CI_NO_STAMPS=1` runs them all whatever the
+# stamps, as `just pre-commit` does. The others always run. `verbose` shows the line saying which.
 default_install_hook_types: [pre-commit, commit-msg, pre-push]
 default_stages: [pre-commit]
 
@@ -54,10 +60,11 @@ repos:
 
       - id: cargo-clippy
         name: cargo clippy
-        entry: cargo clippy --workspace --all-targets -- -D warnings
+        entry: python3 -I tools/smart-ci/stamp.py hook clippy -- cargo clippy --workspace --all-targets -- -D warnings
         language: system
         files: (\.rs|Cargo\.(toml|lock))$
         pass_filenames: false
+        verbose: true
 
       - id: prettier
         name: prettier
@@ -68,32 +75,37 @@ repos:
 
       - id: oxlint
         name: oxlint (type-aware)
-        entry: just _with-surface pnpm lint
+        entry: python3 -I tools/smart-ci/stamp.py hook oxlint -- just _with-surface pnpm lint
         language: system
         types_or: [ts, tsx, javascript, jsx]
         pass_filenames: false
+        verbose: true
 
       - id: typecheck
         name: tsc
-        entry: just _with-surface pnpm typecheck
+        entry: python3 -I tools/smart-ci/stamp.py hook typecheck -- just _with-surface pnpm typecheck
         language: system
         files: (\.(ts|tsx|mts|cts)|tsconfig.*\.json|package\.json|pnpm-lock\.yaml)$
         pass_filenames: false
+        verbose: true
 
       - id: protocol-bindings
         name: protocol bindings are up to date
-        entry: just gen-protocol-check
+        entry: python3 -I tools/smart-ci/stamp.py hook protocol-bindings -- just gen-protocol-check
         language: system
         files: ^(crates/hyperion-protocol/|packages/protocol/src/generated/)
         pass_filenames: false
+        verbose: true
 
       # `just test`: the native suites under nextest, the doctests and vitest, built first and then
       # run under the heavy-test lock that every worktree's test runs share, so that a push does
-      # not run a full suite beside another lane's and fail its timing-sensitive tests.
+      # not run a full suite beside another lane's and fail its timing-sensitive tests. Skipped when
+      # smart-ci passed on the pushed commit's tree.
       - id: just-test
         name: just test (cargo nextest, doctests, vitest)
-        entry: just test
+        entry: python3 -I tools/smart-ci/stamp.py hook test -- just test
         language: system
         stages: [pre-push]
         pass_filenames: false
         always_run: true
+        verbose: true

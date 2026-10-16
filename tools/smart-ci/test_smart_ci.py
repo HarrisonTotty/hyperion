@@ -40,12 +40,15 @@ sys.path.insert(0, str(HERE))
 import rust_graph  # noqa: E402
 import smart_ci  # noqa: E402
 from smart_ci import Crate, Plan, Workspace, make_plan  # noqa: E402
+import stamp  # noqa: E402
 import test_rust_graph  # noqa: E402
+import test_stamp  # noqa: E402
 
 
 def load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite, pattern: Optional[str]) -> unittest.TestSuite:
-    """These tests and the Rust graph's own, every class of them: `just ci` runs this file."""
+    """These tests, the Rust graph's and the gate stamps', every class of them: `just ci` runs this file."""
     tests.addTests(loader.loadTestsFromModule(test_rust_graph))
+    tests.addTests(loader.loadTestsFromModule(test_stamp))
     return tests
 
 
@@ -1064,6 +1067,123 @@ class Execution(unittest.TestCase):
         self.assertIsNone(smart_ci.slot_command({}))
         self.assertIsNone(smart_ci.slot_command({"SMART_CI_SLOT": " "}))
         self.assertEqual(smart_ci.slot_command({"SMART_CI_SLOT": "bash /opt/build-slot"}), ["bash", "/opt/build-slot"])
+
+
+class TheGateStamp(unittest.TestCase):
+    """What a plan gives its gate stamp (`stamp.py`): with `--hook-checks`, the workspace's Clippy and
+    bindings' check, the ones that cover the commit hooks'; the run's record; and that a completed run
+    stamps or withdraws, an interrupted one neither, and a range's only where the working tree is its
+    end's."""
+
+    BEGAN = {"tree": "a" * 40, "toolchain": {"rustc": "r"}, "environment": {}, "configuration": {}}
+
+    @classmethod
+    def record(cls, p: Plan, paths: Sequence[str] = ("crates/hyperion-base/src/math.rs",)) -> dict:
+        change = smart_ci.Change([(path, False) for path in paths], "x", False, "c" * 40)
+        return smart_ci.stamp_run(p, cls.BEGAN, "b" * 40, change, "rendering-and-planets", {})
+
+    def test_only_the_workspaces_clippy_covers_the_hooks(self) -> None:
+        # The changed crate's Clippy, a `-p` selection, as by default: the hook's is not covered, and the
+        # plan says how to cover it.
+        p = plan("crates/hyperion-base/src/math.rs")
+        self.assertEqual(packages(p, "_clippy-for"), [BASE])
+        self.assertFalse(stamp.covers(self.record(p), "clippy")[0])
+        self.assertTrue(any("--hook-checks" in note for note in p.notes))
+        # Nor with its dependents', whose external dependencies resolve with fewer features than the workspace's.
+        self.assertFalse(stamp.covers(self.record(plan("crates/hyperion-base/src/math.rs", dependents=True)), "clippy")[0])
+        w = make_plan([("crates/hyperion-base/src/math.rs", False)], workspace(), False, hook_checks=True)
+        self.assertEqual(args(w, "_clippy-for"), ["--workspace"])
+        self.assertEqual(calls(w).count("_clippy-for"), 1)
+        self.assertTrue(stamp.covers(self.record(w), "clippy")[0])
+        self.assertFalse(any("--hook-checks" in note for note in w.notes))
+        # The rest of the plan is the same: the browser crates' Clippy, the tests.
+        self.assertEqual([s.recipe for s in w.steps if s.recipe[0] != "_clippy-for"],
+                         [s.recipe for s in p.steps if s.recipe[0] != "_clippy-for"])
+        # With no Rust in the change, there is no Clippy to run.
+        ts = make_plan([("apps/hyperion/src/renderer/src/lib/format.ts", False)], workspace(), False, hook_checks=True)
+        self.assertNotIn("_clippy-for", calls(ts))
+
+    def test_only_the_workspaces_bindings_check_covers_the_hooks(self) -> None:
+        # The hook's `--workspace` run builds, links and runs every crate's library tests; the plan's own
+        # covers the bindings' freshness over its selection alone.
+        path = "crates/hyperion-protocol/src/lib.rs"
+        p = plan(path)
+        self.assertNotEqual(args(p, "_gen-protocol-check-for"), ["--workspace"])
+        self.assertFalse(stamp.covers(self.record(p, [path]), "protocol-bindings")[0])
+        self.assertTrue(any("Clippy and bindings' check" in note for note in p.notes))
+        w = make_plan([(path, False)], workspace(), False, hook_checks=True)
+        self.assertEqual(args(w, "_gen-protocol-check-for"), ["--workspace"])
+        record = self.record(w, [path])
+        self.assertTrue(all(stamp.covers(record, check)[0] for check in stamp.CHECKS))
+        generated = make_plan([("packages/protocol/src/generated/BodyId.ts", False)], workspace(), False, hook_checks=True)
+        self.assertEqual(args(generated, "_gen-protocol-check-for"), ["--workspace"])
+        self.assertNotIn("_clippy-for", calls(generated))
+
+    def test_the_record_holds_every_cause_of_each_step_and_a_full_plan_covers_every_hook(self) -> None:
+        docs = [f"docs/note{i}.md" for i in range(6)]
+        p = plan(*docs)
+        record = self.record(p, docs)
+        (prettier,) = record["steps"]
+        self.assertEqual(prettier["recipe"][0], "_prettier-check")
+        self.assertEqual(prettier["causes"], docs)
+        self.assertEqual(record["changes"], [[path, False] for path in docs])
+        self.assertEqual((record["tree"], record["head"], record["base"], record["base_ref"], record["exit"]),
+                         ("a" * 40, "b" * 40, "c" * 40, "rendering-and-planets", 0))
+        self.assertEqual(record["toolchain"], {"rustc": "r"})
+        for check in stamp.CHECKS:
+            with self.subTest(check=check):
+                self.assertEqual(stamp.covers(record, check)[0], check == "test")
+        full = smart_ci.stamp_run(plan("justfile"), self.BEGAN, "b" * 40, None, "--full", {})
+        self.assertTrue(full["full"])
+        self.assertIsNone(full["base"])
+        self.assertTrue(all(stamp.covers(full, check)[0] for check in stamp.CHECKS))
+
+    def test_a_completed_run_stamps_or_withdraws_and_an_interrupted_or_planned_one_does_neither(self) -> None:
+        change = smart_ci.Change([("crates/hyperion-server/src/main.rs", False)], "x", False, "c" * 40)
+        patches = [unittest.mock.patch.object(smart_ci, "changed_paths", return_value=change),
+                   unittest.mock.patch.object(smart_ci, "load_workspace", return_value=workspace()),
+                   unittest.mock.patch.object(smart_ci, "node_floor_met", return_value=True),
+                   unittest.mock.patch.object(smart_ci, "stamp_before", return_value=self.BEGAN),
+                   unittest.mock.patch.dict(os.environ)]  # main() may set JUST_TIMESTAMP
+        with contextlib.ExitStack() as stack, contextlib.redirect_stdout(io.StringIO()):
+            for patcher in patches:
+                stack.enter_context(patcher)
+            for status in (0, 1):
+                with self.subTest(status=status), unittest.mock.patch.object(smart_ci, "execute", return_value=status), \
+                        unittest.mock.patch.object(smart_ci, "stamp_after") as after:
+                    self.assertEqual(smart_ci.main(["--hook-checks"]), status)
+                    ((root, began, ended, p, given, base_ref, options), _), = after.call_args_list
+                    self.assertEqual((root, began, ended, given, base_ref), (ROOT, self.BEGAN, status, change,
+                                                                             smart_ci.INTEGRATION_BRANCH))
+                    self.assertEqual(options, {"dependents": False, "all_tests": False, "hook_checks": True})
+                    self.assertEqual(args(p, "_clippy-for"), ["--workspace"])
+            with unittest.mock.patch.object(smart_ci, "execute", side_effect=KeyboardInterrupt), \
+                    unittest.mock.patch.object(smart_ci, "stamp_after") as after:
+                with self.assertRaises(KeyboardInterrupt):
+                    smart_ci.main([])
+                after.assert_not_called()
+            with unittest.mock.patch.object(smart_ci, "execute") as run, \
+                    unittest.mock.patch.object(smart_ci, "stamp_before") as before:
+                self.assertEqual(smart_ci.main(["--plan"]), 0)
+                run.assert_not_called()
+                before.assert_not_called()
+
+    def test_a_ranges_run_is_stamped_only_on_its_ends_tree_and_stamping_never_fails_a_run(self) -> None:
+        p = plan("crates/hyperion-server/src/main.rs")
+        ranged = smart_ci.Change([("crates/hyperion-server/src/main.rs", False)], "x", True, "c" * 40, "d" * 40)
+        with contextlib.redirect_stderr(io.StringIO()) as said, \
+                unittest.mock.patch.object(stamp, "record") as record:
+            with unittest.mock.patch.object(stamp, "tree_of", return_value="e" * 40):
+                smart_ci.stamp_after(ROOT, self.BEGAN, 0, p, ranged, "x", {})
+            record.assert_not_called()
+            self.assertIn("not the working tree", said.getvalue())
+            with unittest.mock.patch.object(stamp, "tree_of", return_value=self.BEGAN["tree"]):
+                smart_ci.stamp_after(ROOT, self.BEGAN, 0, p, ranged, "x", {})
+            record.assert_called_once()
+        with contextlib.redirect_stderr(io.StringIO()) as said, \
+                unittest.mock.patch.object(stamp, "record", side_effect=RuntimeError("disk")):
+            smart_ci.stamp_after(ROOT, self.BEGAN, 0, p, None, "x", {})
+        self.assertIn("no stamp: disk", said.getvalue())
 
 
 class SmallSuites(unittest.TestCase):

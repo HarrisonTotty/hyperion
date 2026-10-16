@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """`just smart-ci`: the part of `just ci` that a change needs, chosen from its diff.
 
-Usage: smart_ci.py [BASE | A...B] [--plan] [--dependents] [--all-tests] [--explain] [--full]
+Usage: smart_ci.py [BASE | A...B] [--plan] [--dependents] [--all-tests] [--explain] [--hook-checks] [--full]
 
 The change is every path that differs between the merge-base of HEAD and BASE (by default the
 integration branch, `rendering-and-planets`) and the working tree, untracked files included, so it
@@ -27,6 +27,13 @@ test of the changed crates instead. `--dependents` adds the Clippy of every crat
 changed crate, and with `--all-tests` their every test (`just smart-ci --help`). `--full` runs the
 full `just ci` whatever the diff, its build phases inside the build slot `SMART_CI_SLOT` names and
 its suites outside it: integration's run.
+
+A run that passes writes a gate stamp (`stamp.py` beside it), keyed by the tree it checked, the
+working tree's with its untracked files: its base, its plan's steps and their causes, the changed
+paths, the toolchain, environment and configuration it ran with, and the time. The git hooks skip
+the checks a stamp covers when that tree is committed or pushed; a failed run writes no stamp and
+withdraws the tree's earlier one. The commit hooks' workspace checks (Clippy, the bindings' check) are
+covered only by the workspace's own runs: `--hook-checks` runs them in place of the changed crates'.
 
 Standard library only, Python 3.9 or later (the Command Line Tools' Python on macOS), so that it
 runs wherever the justfile does. `test_smart_ci.py` beside it holds the rules to their table and
@@ -55,6 +62,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import rust_graph  # noqa: E402  (beside this file: the Rust code's graph)
+import stamp  # noqa: E402  (beside this file: the gate stamps that the git hooks honour)
 
 # The branch that lanes start from and the orchestrator integrates onto: the default base, unless
 # SMART_CI_BASE names another.
@@ -896,7 +904,8 @@ class Step:
     phase: str  # setup, side, main, locked
     title: str
     recipe: List[str]  # `just`'s arguments: a recipe and its arguments
-    causes: List[str]
+    causes: List[str]  # the paths (or reasons) that caused it, `short`ened for the plan's print
+    every_cause: List[str] = field(default_factory=list)  # all of them, for the gate stamp
 
 
 @dataclass
@@ -1646,7 +1655,7 @@ def less_wasm_sky(selection: str, wasm_sky: str) -> str:
 
 
 def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bool,
-              all_tests: bool = False, explain: bool = False) -> Plan:
+              all_tests: bool = False, explain: bool = False, hook_checks: bool = False) -> Plan:
     needs = Needs()
     for path, deleted in changes:
         classify(path, deleted, ws, needs)
@@ -1715,7 +1724,8 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
     steps: List[Step] = []
 
     def step(phase: str, title: str, recipe: List[str], causes: Iterable[str]) -> None:
-        steps.append(Step(phase, title, recipe, short(causes)))
+        every = sorted(set(causes))
+        steps.append(Step(phase, title, recipe, short(every), every))
 
     vitest_any = bool(needs.vitest_all or needs.vitest_package or needs.vitest_files)
     clippy = sorted(needs.clippy)
@@ -1834,13 +1844,21 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
                 step("unlocked", f"vitest: {package}, {len(rel)} file(s) that read the change",
                      ["_vitest-run", package, " ".join(rel)], causes_of(tests_here))
 
-    # The cargo steps, one after another.
-    if clippy:
+    # The cargo steps, one after another. With --hook-checks, the workspace's own Clippy and bindings'
+    # check in place of the changed crates': the commit hooks' commands, so that the gate stamp covers
+    # them (`stamp.py`).
+    if clippy and hook_checks:
+        step("main", "Clippy: the workspace, as the commit hook runs it (for " + ", ".join(clippy) + ")",
+             ["_clippy-for", "--workspace"], causes_of(needs.clippy))
+    elif clippy:
         step("main", "Clippy: " + ", ".join(clippy), ["_clippy-for", ws.cargo_packages(clippy)], causes_of(needs.clippy))
     if browser_clippy:
         step("main", "Clippy for wasm32-unknown-unknown: " + ", ".join(browser_clippy),
              ["_browser-clippy-for", " ".join(browser_clippy)], causes_of(needs.clippy, browser_clippy))
-    if needs.gen_protocol:
+    if needs.gen_protocol and hook_checks:
+        step("main", "the protocol bindings are fresh, over the workspace as the commit hook checks them",
+             ["_gen-protocol-check-for", "--workspace"], needs.gen_protocol)
+    elif needs.gen_protocol:
         # Over the test build's selection, as `ci` runs it over the workspace's: the same build.
         step("main", "the protocol bindings are fresh",
              ["_gen-protocol-check-for", ws.cargo_packages(set(native) | {PROTOCOL_CRATE})], needs.gen_protocol)
@@ -1900,6 +1918,13 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
                "`--dependents` adds their Clippy and tests. ")
             + "Integration's `just ci` runs them anyway."
         )
+    if (clippy or needs.gen_protocol) and not hook_checks:
+        notes.append(
+            "The commit's git hooks run the workspace's " + " and ".join(
+                (["Clippy"] if clippy else []) + (["bindings' check"] if needs.gen_protocol else []))
+            + ", which this plan's do not cover (a `-p` selection is not the workspace's build, nor does it reach "
+            "the crates that depend on the change): `--hook-checks` runs the workspace's in their place, inside the "
+            "gate's build slot, and the hooks then skip them (`tools/smart-ci/stamp.py`).")
     plan = Plan({}, steps, needs.render, needs.why, notes, suites=weighed)
     if chosen is not None:
         plan.details = chosen.describe(graph_crates, whole, explain)
@@ -2760,6 +2785,67 @@ def browser_binaries(root: Path, env: Mapping[str, str]) -> Dict[str, str]:
     return found
 
 
+# --------------------------------------------------------------------------------------------------
+# The gate stamp: what a passing run checked, for the git hooks (`stamp.py`).
+
+
+def stamp_run(plan: Plan, began: Mapping[str, object], head: str, change: Optional[Change], base_ref: str,
+              options: Mapping[str, bool]) -> dict:
+    """A passing run's record in its tree's stamp: the tree and HEAD, the base it diffed against (none for
+    `--full`), the plan (full, or its steps with every path that caused each), the changed paths, what
+    it ran with (`stamp.start`: the toolchain, the environment, the configuration), and the time."""
+    return {
+        "tree": began["tree"],
+        "head": head,
+        "base": change.base if change is not None else None,
+        "base_ref": base_ref,
+        "full": plan.is_full,
+        "full_because": sorted(plan.full),
+        "options": dict(options),
+        "steps": [{"phase": step.phase, "title": step.title, "recipe": list(step.recipe),
+                   "causes": list(step.every_cause or step.causes)} for step in plan.steps],
+        "changes": [[path, deleted] for path, deleted in (change.paths if change is not None else [])],
+        "toolchain": dict(began["toolchain"]),  # type: ignore[call-overload]
+        "environment": dict(began["environment"]),  # type: ignore[call-overload]
+        "configuration": dict(began["configuration"]),  # type: ignore[call-overload]
+        "time": stamp.now_text(),
+        "exit": 0,
+    }
+
+
+def stamp_before(root: Path) -> Optional[Dict[str, object]]:
+    """What a run checks, for its stamp, read before it reads the change (`stamp.start`); None, said why,
+    if the tree cannot be stamped."""
+    try:
+        return stamp.start(root)
+    except Exception as err:  # noqa: BLE001  (a tree that cannot be stamped leaves the run as it was)
+        print(f"smart-ci: this run will write no gate stamp: {err}", file=sys.stderr)
+        return None
+
+
+def stamp_after(root: Path, began: Optional[Mapping[str, object]], status: int, plan: Plan, change: Optional[Change],
+                base_ref: str, options: Mapping[str, bool]) -> None:
+    """Stamp the tree if the run passed on it unchanged, withdraw its stamp if it failed (`stamp.record`).
+    A range's plan reads the tree at its end, so its run is stamped only where that is the working tree.
+    Nothing here changes the run's status."""
+    try:
+        before = str(began["tree"]) if began is not None else None
+        if before is not None and change is not None and change.end is not None:
+            end = stamp.tree_of(root, change.end)
+            if end != before:
+                print(f"smart-ci: no stamp: the plan read {change.end[:10]}'s tree, not the working tree",
+                      file=sys.stderr, flush=True)
+                return
+
+        def make_run(tree: str) -> dict:
+            assert began is not None
+            return stamp_run(plan, began, stamp.git(root, "rev-parse", "HEAD"), change, base_ref, options)
+
+        print(stamp.record(root, before, status, make_run), file=sys.stderr, flush=True)
+    except Exception as err:  # noqa: BLE001  (a stamp that cannot be written leaves the run's status as it is)
+        print(f"smart-ci: no stamp: {err}", file=sys.stderr, flush=True)
+
+
 HELP = """\
 Runs the part of `just ci` that the change needs, chosen from its diff.
 
@@ -2833,6 +2919,13 @@ A test with no recorded time counts as large, as does one that reads a fixture b
 it steps aside until they hold it (`_locked`'s `HYPERION_HEAVY_PRIORITY`); a lane's own runs never
 set it. Integration's runs, with {priority}=1 or `--full`, also set {timestamp}=true unless it is set:
 just prints the time before each recipe line, so that their logs show each phase's wall time.
+
+A run that passes writes a gate stamp keyed by the tree it checked (untracked files included), in
+<git common dir>/smart-ci/stamps/: the git hooks skip the checks it covers when that exact tree is
+committed or pushed (`tools/smart-ci/stamp.py`). The commit hooks' workspace Clippy and bindings'
+check are covered only by the workspace's own, which `--hook-checks` runs in place of the changed
+crates' (a `-p` selection is not the workspace's build, nor does it reach their dependents).
+`python3 -I tools/smart-ci/stamp.py check <commit>` says whether a tree has one.
 """.format(branch=INTEGRATION_BRANCH, slot=SLOT_VAR, priority=PRIORITY_VAR, timings=TIMINGS_FILE,
            tests=SMALL_TESTS, seconds=SMALL_SECONDS, timestamp=TIMESTAMP_VAR)
 
@@ -2852,6 +2945,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                              "change: smart-ci's selection before the graph")
     parser.add_argument("--explain", action="store_true",
                         help="list every test the graph chose, with the chain of items that reaches the change")
+    parser.add_argument("--hook-checks", action="store_true",
+                        help="run the workspace's Clippy and bindings' check in place of the changed crates', as "
+                             "the commit hooks run them, so that the gate stamp covers the hooks' checks")
     parser.add_argument("--full", action="store_true",
                         help="run the full `just ci`, whatever the diff, as integration does: its own phases, "
                              f"with the build slot that {SLOT_VAR} names held only while they build")
@@ -2866,6 +2962,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         phases = json.loads(Path(args.build_phases).read_text(encoding="utf-8"))
         return run_build_phases(phases, Runner(root, just))
     timings = Timings.load(build_dir(root) / "smart-ci" / TIMINGS_FILE)
+    options = {"dependents": args.dependents, "all_tests": args.all_tests, "hook_checks": args.hook_checks}
+    # What a run checks, for its gate stamp, read before anything reads the working tree.
+    before = None if args.plan else stamp_before(root)
     if args.full:
         # Integration's run: `ci`'s phases (`CI_PHASES`, which `just ci` defines and the agreement
         # tests hold to it), no test-render, as `ci` has none.
@@ -2876,9 +2975,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return 0
         print(flush=True)
         if needs_node_floor(plan) and not node_floor_met(root):
-            return 1
-        os.environ.update(timestamps(True, os.environ))
-        return execute(plan, root, just, timings=timings)
+            status = 1
+        else:
+            os.environ.update(timestamps(True, os.environ))
+            status = execute(plan, root, just, timings=timings)
+        stamp_after(root, before, status, plan, None, "--full", options)
+        return status
     try:
         change = changed_paths(root, args.base)
         if change.is_range and not args.plan:
@@ -2893,7 +2995,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"smart-ci: nothing changed ({what}): nothing to run.")
         return 0
     try:
-        plan = make_plan(changes, load_workspace(root, just, change), args.dependents, args.all_tests, args.explain)
+        plan = make_plan(changes, load_workspace(root, just, change), args.dependents, args.all_tests, args.explain,
+                         args.hook_checks)
     except (ToolError, KeyError, ValueError) as err:
         plan = Plan({f"smart-ci could not read the workspace ({err})": {"every path"}}, [], set(), {}, [])
     weigh(plan, timings)
@@ -2902,9 +3005,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
     print(flush=True)
     if needs_node_floor(plan) and not node_floor_met(root):
-        return 1
-    os.environ.update(timestamps(False, os.environ))
-    return execute(plan, root, just, timings=timings)
+        status = 1
+    else:
+        os.environ.update(timestamps(False, os.environ))
+        status = execute(plan, root, just, timings=timings)
+    # A completed run stamps the tree it checked, or withdraws its stamp; an interrupted one does neither.
+    stamp_after(root, before, status, plan, change, args.base or INTEGRATION_BRANCH, options)
+    return status
 
 
 if __name__ == "__main__":

@@ -380,6 +380,40 @@ reach, for a change to what other crates use (a public item's name or signature)
 on a small workspace of its own, and the agreement with `ci`, which fails if `ci` gains a step, or a
 step gains a command, that smart-ci does not know.
 
+**Gate stamps: the git hooks don't repeat a passing gate.** A run of `just smart-ci` that passes
+writes a stamp keyed by the tree it checked: the git tree id of the working tree, uncommitted and
+untracked files included (what `git add -A` would commit), so that any change of content gives
+another key. Stamps live in `<git common dir>/smart-ci/stamps/<tree>.json`, shared by every
+worktree of the clone, and record the run's base, its plan's steps with the paths that caused each,
+the changed paths, what it ran with (the toolchain, the cargo, rustc, Clippy, nextest and
+`HYPERION_*` environment, cargo's configuration in `CARGO_HOME`, the node_modules installed) and the
+time. A failed run writes none and withdraws the tree's earlier one. The hooks' expensive checks run
+through `tools/smart-ci/stamp.py hook`, which skips a check, printing why, when a stamp of the exact
+tree being committed (the index's) or pushed covers it and the working tree the check would read is
+that tree, and otherwise runs it as before:
+
+- the workspace Clippy and the bindings' check (on commit), only when the plan ran the hook's own
+  command: a full plan, or `just smart-ci --hook-checks`, which runs `cargo clippy --workspace`, and
+  the bindings' check over `--workspace`, in place of the changed crates' runs, inside the gate's
+  build slot. smart-ci's usual `-p` selection is not the hook's check: it leaves out the crates that
+  depend on the change, which a workspace run builds again and can newly fail, and outside
+  `--workspace` the dependencies resolve with fewer features. A plan with a Rust or protocol change
+  says so in a note;
+- oxlint and tsc (on commit), when the plan ran them (both are whole-tree runs);
+- `just test` (on push), when smart-ci passed on the pushed commit's tree: the tests that reach the
+  change, by its graph, ran, and the rest are as the base's earlier gates left them. This is the
+  premise of smart-ci's gate itself, and stricter than a push with `--no-verify` after it.
+
+A stamp counts only when its base is an ancestor of `origin/rendering-and-planets` (a full plan's
+whatever its base): pushed by integration after its smart-ci gate, and checked later by the owner's
+full CI. A base on picks not yet pushed counts once they are. It counts only with the
+toolchain (rustc, cargo, node, pnpm), environment and configuration it recorded, and not when its
+change edits `tools/smart-ci/`, whose rules would decide their own coverage. The other hooks
+(formatting, whitespace, large files, session links, the commit message) always run.
+`SMART_CI_NO_STAMPS=1` runs every check whatever the stamps, as `just pre-commit` does, and
+`python3 -I tools/smart-ci/stamp.py check <commit>` prints whether a tree has a valid stamp, against
+which base, and which hooks it covers.
+
 Measured on 2026-10-10 on the recommended machine, with nothing else running and the builds warm:
 the full `just ci` took 3,400 s, 3,085 s of it in the suites (native 1,278 s, wasip1 1,418 s,
 vitest 49 s), and a Markdown change under `just smart-ci` 1.3 s. With the graph (measured on
