@@ -3133,8 +3133,8 @@ body {
 /*
  * Everything known about the selected body, two labelled values to a line. A label's track holds
  * the readouts' labels on one line, up to `COMETS OVER 1 km` and `NEBULA EXPANSION` (10.8rem in
- * B612 at this size), and a longer one, `MEAN SURFACE TEMPERATURE`, wraps at its spaces, so that
- * no label pushes the values past the column (the guide's § Layout: never scroll horizontally).
+ * B612 at this size), and a longer one would wrap at its spaces, so that no label pushes the
+ * values past the column (the guide's § Layout: never scroll horizontally).
  */
 .body-readout__values {
   grid-template-columns: repeat(2, fit-content(11.5rem) minmax(0, 1fr));

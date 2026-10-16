@@ -158,16 +158,27 @@ function sharesReading(shares: ReadonlyArray<Share>): string {
  * by {@link substanceName} in a label's case, never by its key, with its mole fraction to the
  * guide's three significant figures (`Ar 0.934 %`), in E notation below 0.001 % (`1.00E-4 %`);
  * `NONE` for no gas, which is data.
+ *
+ * @remarks
+ * A gas below the whole whose three figures round to `100` reads `ABOVE 99.9 %`, as the guide's
+ * survey coverage does, so that no part claims the whole beside another; only a gas that is the
+ * whole reads `100 %` (signoff-11, item 21).
  */
 function gasesShown(gases: ReadonlyArray<GasShare>): Shown {
   return gases.length === 0
     ? value("NONE")
     : value(
         sharesReading(
-          gases.map((gas) => ({
-            name: substanceName(gas.species, "upper"),
-            percentage: formatSignificant(gas.moleFraction * 100),
-          })),
+          gases.map((gas) => {
+            const figure = formatSignificant(gas.moleFraction * 100);
+            return {
+              name: substanceName(gas.species, "upper"),
+              // Ruled on the figure as shown, so that the rule and the reading agree at every
+              // rounding edge; `ABOVE` keeps its figure across a no-break space, as `%` does.
+              percentage:
+                gas.moleFraction < 1 && figure === "100" ? `ABOVE${NO_BREAK_SPACE}99.9` : figure,
+            };
+          }),
         ),
       );
 }
@@ -190,8 +201,8 @@ function pressureShown(pressurePa: number): Shown {
  * in; the mean surface temperature; the surface pressure; and the air's gases by mole fraction.
  *
  * @remarks
- * The temperature and the pressure take a line each, so that their long labels share the label
- * track that wraps rather than widening the second one.
+ * The temperature and the pressure take a line each, so that `SURFACE PRESSURE`, the section's
+ * longest label, stays in the first label track rather than widening the second.
  *
  * An airless body's air is computed, with none in it: its pressure and its gases read `NONE`, and
  * its exosphere, a quantity of its own that the generator does not yet compute (P14.T55.c), reads
@@ -205,7 +216,7 @@ function surfaceRows(surface: BodySurface): ReactNode {
     <>
       <ReadoutRow label="SURFACE" shown={value(surfaceStateLabel(surface.state))} wide />
       <ReadoutRow
-        label="MEAN SURFACE TEMPERATURE"
+        label="T SURF"
         shown={value(formatTemperatureK(surface.meanSurfaceTemperatureK), "K")}
         wide
       />

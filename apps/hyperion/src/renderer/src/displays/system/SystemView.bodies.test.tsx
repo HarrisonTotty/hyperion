@@ -2,7 +2,13 @@
  * The `SYSTEM` display's planets over a fake socket, against the shared wire fixture (plan 14,
  * P14.T41.b, T42 and T43 for bodies).
  */
-import type { BodyEnvelopeDto, BodySurfaceDto, ResponseFor, SectionDto } from "@hyperion/protocol";
+import type {
+  BodyEnvelopeDto,
+  BodySurfaceDto,
+  GasShareDto,
+  ResponseFor,
+  SectionDto,
+} from "@hyperion/protocol";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -439,7 +445,8 @@ describe("SystemView's body readout", () => {
 
     expect(terms("SURFACE")).toHaveLength(1);
     expect(reading("SURFACE")).toBe("TEMPERATE");
-    expect(reading("MEAN SURFACE TEMPERATURE")).toBe("288 K");
+    expect(reading("T SURF")).toBe("288 K");
+    expect(terms("MEAN SURFACE TEMPERATURE")).toHaveLength(0);
     expect(reading("SURFACE PRESSURE")).toBe("101 kPa");
     // Largest first, each by its formula, the quantity named once in the label.
     expect(reading("MOLE FRACTION")).toBe(
@@ -497,6 +504,41 @@ describe("SystemView's body readout", () => {
       `${partsReading("N2 99.0 %")} · UNLISTED MATERIAL 1.00\u00A0%`,
     );
     expect(within(readout()).queryByText(/novel_gas/)).not.toBeInTheDocument();
+  });
+
+  // signoff-11, item 21: no part claims the whole beside another, as the survey's coverage reads.
+  it.each<readonly [string, ReadonlyArray<GasShareDto>, string]>([
+    [
+      "reads a gas below the whole whose figures round to 100 as ABOVE 99.9 %",
+      [
+        { species: "N2", mole_fraction: 0.9996 },
+        { species: "CH4", mole_fraction: 0.0004 },
+      ],
+      partsReading("N2 ABOVE 99.9 %", "CH4 0.0400 %"),
+    ],
+    [
+      "reads a gas just below the edge of the whole at its three figures",
+      [
+        { species: "N2", mole_fraction: 0.9994 },
+        { species: "CH4", mole_fraction: 0.0006 },
+      ],
+      partsReading("N2 99.9 %", "CH4 0.0600 %"),
+    ],
+    [
+      "reads a single gas, the whole, as 100 %",
+      [{ species: "N2", mole_fraction: 1 }],
+      partsReading("N2 100 %"),
+    ],
+  ])("%s", async (_name, gases, moleFraction) => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      earthWithSurface((surface) => ({ ...surface, gases: [...gases] })),
+    );
+
+    expect(reading("MOLE FRACTION")).toBe(moleFraction);
   });
 
   it("reads an older server's surface and atmosphere as NOT YET MODELLED", async () => {

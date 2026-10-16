@@ -151,11 +151,12 @@ export function planetClassLabel(planetClass: PlanetClassDto): string {
  * `TEMPERATE`, `MAGMA OCEAN`, `RUNAWAY GREENHOUSE`.
  *
  * @remarks
- * Drafted for the owner with P14.T43.b's `SURFACE` rows. Two are reserved, produced by no rule
- * yet. `SUPERCRITICAL H2O` is the wire's `steam_envelope` (P14.T53.b): water above its critical
- * point with no interface, named by its formula, never by "steam", a common name for it (the
- * guide's Voice and nomenclature). `TENUOUS AIR` is `tenuous` (P14.T53.c), a thin or transient air
- * as Pluto's, since `TENUOUS` alone would not say what is tenuous.
+ * Signed off with P14.T43.b's `SURFACE` rows (signoff-11, item 21). Two are reserved, produced by
+ * no rule yet. `SUPERCRITICAL H2O` is the wire's `steam_envelope` (P14.T53.b): water above its
+ * critical point with no interface, named by its formula, never by "steam", a common name for it
+ * (the guide's Voice and nomenclature). `TENUOUS ATMOSPHERE` is `tenuous` (P14.T53.c), a thin or
+ * transient atmosphere as Pluto's, the literature's term for it: never "air", since the console has
+ * one name for a body's gas, `ATMOSPHERE`, and `TENUOUS` alone would not say what is tenuous.
  */
 export function surfaceStateLabel(state: SurfaceStateDto): string {
   let label: string;
@@ -179,7 +180,7 @@ export function surfaceStateLabel(state: SurfaceStateDto): string {
       label = "SUPERCRITICAL H2O";
       break;
     case "tenuous":
-      label = "TENUOUS AIR";
+      label = "TENUOUS ATMOSPHERE";
       break;
   }
   return label;
