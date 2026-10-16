@@ -21,13 +21,19 @@
 //     --aluminium-oxide-extraordinary <Al2O3/nk/Malitson-e.yml> \
 //     --graphite-perpendicular <callindex.out_CpeD03_0.01> \
 //     --graphite-parallel <callindex.out_CpaD03_0.01> --pope-fry <pope97.txt> \
-//     --mason <purewater_abs_coefficients_v3.txt>
+//     --mason <purewater_abs_coefficients_v3.txt> \
+//     --argon-liquid <Ar/nk/Sinnock-liquid-83.81K.yml> \
+//     --krypton-liquid <Kr/nk/Sinnock-liquid-115.95K.yml> \
+//     --xenon-liquid <Xe/nk/Sinnock-liquid-161.35K.yml> --o2o2 <O2-O2_2024.cia>
 //   pnpm exec prettier --write src/renderer/src/view/atmosphere/materials/*.json
 // The two .tex files are the e-prints' members, extracted from their archives as data; the .dat
 // files are Kitzmann and Heng 2018's compilation's (R08.T5.d). `pope97.txt` is omlc.org's table of
 // Pope and Fry 1997 (R08.T5.g), and `purewater_abs_coefficients_v3.txt` WOPP v3's, which holds Mason,
 // Cone and Fry 2016's table (R08.T5.h): the water and seawater files take k from both. Since R08.T5.h
-// no file reads Hale and Querry's table.
+// no file reads Hale and Querry's table. Since R08.T5.k the three `Sinnock-liquid-*.yml` files,
+// refractiveindex.info's copies of Sinnock and Smith 1969's liquid tables, make argon-liquid.json,
+// krypton-liquid.json and xenon-liquid.json, and `O2-O2_2024.cia`, HITRAN2024's collision-induced
+// absorption file (the atmosphere tool's `--o2o2`), gives oxygen-liquid.json its k.
 import { fileURLToPath } from "node:url";
 
 import { runnerImport } from "vite";

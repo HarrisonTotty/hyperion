@@ -579,6 +579,39 @@ ruled 2026-10-09 and 2026-10-10).
   20 (1991) 1061 (methane), with liquid argon's measured index from A. C. Sinnock and B. L. Smith
   1969 through refractiveindex.info (as above).
 
+- Refractive indices of nine more liquids (plan R08, R08.T5.k), each the gas dispersion
+  view/atmosphere/rayleigh.ts cites scaled to the liquid, or a measured table: liquid argon,
+  krypton and xenon, A. C. Sinnock and B. L. Smith, Phys. Rev. 181 (1969) 1297-1307,
+  DOI: 10.1103/PhysRev.181.1297, their liquid tables through the refractiveindex.info database
+  (CC0 1.0, as above), in argon-liquid.json, krypton-liquid.json and xenon-liquid.json; liquid
+  oxygen's at 546.1 nm, H. E. Johns and J. O. Wilhelm, Can. J. Res. 15a (1937) 101-108,
+  DOI: 10.1139/cjr37a-013 (one value from its abstract), with G. D. Liveing and J. Dewar, Phil.
+  Mag. (5) 34 (1892) 205-209, DOI: 10.1080/14786449208620308, and (5) 40 (1895) 268-272,
+  DOI: 10.1080/14786449508620770 (public domain), as checks, in oxygen-liquid.json; liquid nitrous
+  oxide's, Liveing and Dewar 1892 (as above), in nitrous-oxide-liquid.json; liquid sulphur
+  dioxide's, L. Bleekrode, Proc. R. Soc. Lond. 37 (1884) 339-362, DOI: 10.1098/rspl.1884.0039
+  (public domain), with E. Ketteler's (1865) and Bichat's (J. Phys. 9 (1880) 279) values as he
+  quotes them, in sulphur-dioxide-liquid.json; liquid carbon dioxide's density law, P. Phillips,
+  Proc. R. Soc. Lond. A 97 (1920) 225-240, DOI: 10.1098/rspa.1920.0029 (public domain), with
+  Bleekrode 1884's values as checks, in carbon-dioxide-liquid.json; and, recorded against the
+  Lorentz-Lorenz estimates in carbon-monoxide-liquid.json and hydrogen-sulphide-liquid.json,
+  liquid carbon monoxide's, R. E. Gagnon, P. H. Gammon, H. Kiefte and M. J. Clouter, Appl. Opt. 18
+  (1979) 1237-1239, DOI: 10.1364/AO.18.001237 (two values from its abstract), and liquid hydrogen
+  sulphide's, Bleekrode 1884 (as above). The noble-gas files cite as checks A. C. Sinnock, J.
+  Phys. C 13 (1980) 2375, DOI: 10.1088/0022-3719/13/12/018 (its abstract), and G. M. Seidel,
+  R. E. Lanou and W. Yao, "Rayleigh scattering in rare-gas liquids", arXiv:hep-ex/0111054
+  (three pairs of values from its Table II), and record E. Grace, A. Butcher, J. Monroe and
+  J. A. Nikkel, arXiv:1502.04213 (two values from its Table 2) as not used. Liquid oxygen's
+  imaginary index is reduced from the collision-induced absorption of O2-O2 of R. Thalman and
+  R. Volkamer, Phys. Chem. Chem. Phys. 15 (2013) 15371, DOI: 10.1039/c3cp50968k, as the HITRAN2024
+  file O2-O2_2024.cia gives it (as above), at the liquid's number density squared. The liquids'
+  densities are the NIST Chemistry WebBook's fluid properties (NIST Standard Reference Database
+  69), after R. Schmidt and W. Wagner, Fluid Phase Equilib. 19 (1985) 175 (oxygen), Ch. Tegeler,
+  R. Span and W. Wagner (as above; argon), E. W. Lemmon and R. Span, J. Chem. Eng. Data 51 (2006)
+  785 (krypton, xenon, carbon monoxide, nitrous oxide and hydrogen sulphide), R. Span and
+  W. Wagner, J. Phys. Chem. Ref. Data 25 (1996) 1509 (carbon dioxide) and K. Gao, J. Wu, P. Zhang
+  and E. W. Lemmon, J. Chem. Eng. Data 61 (2016) 2859 (sulphur dioxide).
+
 - Single-scattering properties of irregular hexahedral particles: M. Saito, TAMUdust2020
   Database, version 1.0.0, Zenodo, DOI 10.5281/zenodo.4711247, licensed under CC BY 4.0
   (https://creativecommons.org/licenses/by/4.0/), described in M. Saito, P. Yang, J. Ding and

@@ -3371,6 +3371,46 @@ Acceptance for T5.b and T5.c:
   - Accept: `pnpm --filter hyperion exec vitest run src/renderer/src/view/atmosphere` and
     `pnpm --filter hyperion exec vitest run src/tools/materials`.
 
+- **R08.T5.k Nine liquids from their gases and their measurements** (decision-p14-t49h-gas-index
+  and its addendum, 2026-10-16; client data, the tool and tests only; no `GENERATOR_VERSION` bump,
+  no contract change). After T5.i; before galaxy plan 14's P14.T54.a, whose palette reads the files
+  through P14.T49.h.
+  - Nine new liquid spheres on 380–780 nm every 5 nm, to six figures, each at a stated state never
+    below its registry row's triple point, with the NIST WebBook's saturated-liquid density:
+    `oxygen-liquid.json`, `argon-liquid.json`, `krypton-liquid.json`, `xenon-liquid.json`,
+    `carbon-monoxide-liquid.json`, `carbon-dioxide-liquid.json`, `nitrous-oxide-liquid.json`,
+    `sulphur-dioxide-liquid.json` and `hydrogen-sulphide-liquid.json` (keys `O2`, `Ar`, `Kr`,
+    `Xe`, `CO`, `CO2`, `N2O`, `SO2` and `H2S`).
+  - The method: the gas's Lorentz–Lorenz molar refraction from `rayleigh.ts`'s row, at its own
+    reference state and Z, scaled by one factor c and evaluated at each grid point, x = c R(λ) ρ_m
+    and n = √((1 + 2x) ÷ (1 − x)). T5.h's Cauchy line is not used: it would leave up to
+    6.5 × 10⁻⁴.
+    - Measured: Ar, Kr and Xe, from Sinnock and Smith 1969's liquid tables. Ar's grid is the scaled
+      gas shape, c fitted by least squares to its nine rows; Kr's and Xe's are linear between their
+      rows, with a red tail fitted by least squares to the rows from 435.8 nm.
+    - Anchored, `derived`: O₂ to Johns and Wilhelm 1937's 1.2242 at 546.1 nm; N₂O to Liveing and
+      Dewar 1892's five lines; SO₂ to the mean of Ketteler's, Bichat's and Bleekrode's; CO₂ by
+      Phillips 1920's density law.
+    - Unscaled estimates, `standIn` "(an estimated index)": CO and H₂S, whose measurements
+      contradict themselves; both recorded.
+    - Each file states its band: ±0.0003 to ±0.0005 for the atoms, ±0.0015 to ±0.007 for the
+      anchored molecules, +0/−0.015 for CO and −0.005/+0.021 for H₂S.
+  - A derived file's `fit` gains a second form, `scaledMolarRefraction` (`molarDensityMolPerL`,
+    `factor`, `anchoredFromUm`, `anchoredToUm`), describing n alone, on the four anchored files.
+    `hyperion-fit` reads and hashes no `fit`.
+  - Liquid O₂'s collision-induced bands near 577 and 630 nm get a visible k: a liquid measurement,
+    or Thalman and Volkamer 2013's O₂–O₂ cross-sections at the liquid's number density squared, or
+    k = 0 with the reason. The other eight have k = 0.
+  - `liquid_optics` reads none of the nine: its manifest names its seven files, so nothing goes
+    stale and nothing is refitted. P14.T49.h's step 2b wires them; until then the nine registry
+    rows answer `NotALiquid`.
+  - Tests: every scaled file's n rebuilt from its density and factor against `rayleigh.ts`'s row
+    to 10⁻⁵; each anchor to 10⁻⁵; each measured file meets its source rows; CO's and H₂S's
+    stand-in label; every key's default file unchanged; every other material file regenerating
+    byte for byte.
+  - Accept: `pnpm --filter hyperion exec vitest run src/renderer/src/view/atmosphere/materials` and
+    `pnpm --filter hyperion exec vitest run src/tools/materials`.
+
 - **R08.T5.e Venus's ultraviolet absorber, fitted** (science-r08-unowned-absorbers). After T5.d
   and R08.T12.e, on the reference tracer's Venus deck: R08.T12's `venus-92bar` case, with
   T24.g's four modes, mode 2 `acid_uv_absorber`. It moves no generated output, since k_UA is 0
@@ -10172,6 +10212,207 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     Kramers–Kronig n as compiled.
   - _Na₂S's floor._ Whether Na₂S's flat k is the calculation's or the digitising's is not settled;
     Khachai et al.'s figure is in a closed paper.
+- **Deviations in T5.k, as built** (2026-10-16; decision-p14-t49h-gas-index and its addendum;
+  `view/atmosphere/materials/` (nine new index files, `materials.ts` and its test),
+  `apps/hyperion/src/tools/materials.ts` and its test, `scripts/materials.mjs`, `NOTICE`).
+  - _The files._ `argon-liquid.json`, `krypton-liquid.json`, `xenon-liquid.json`,
+    `oxygen-liquid.json`, `nitrous-oxide-liquid.json`, `sulphur-dioxide-liquid.json`,
+    `carbon-dioxide-liquid.json`, `carbon-monoxide-liquid.json` and `hydrogen-sulphide-liquid.json`,
+    8–13 kB each. _The regeneration, by hand:_ every one of the tool's 39 inputs was fetched anew on
+    2026-10-16, each into its own directory, and checked by the tool's SHA-256 (HITRAN2024's tar and
+    both e-prints' archives by theirs, one member read from each); through the tool and Prettier the
+    44 existing index files regenerate byte for byte and only the nine appear. No phase file is
+    touched.
+  - _Each file_ (its temperature, the WebBook's saturated-liquid density, c, and n at 380, 550 and
+    780 nm):
+    - Ar, `measured`, 83.81 K, 35.46464 mol/l, c 0.990053: 1.23835, 1.23337, 1.23117.
+    - Kr, `measured`, 115.77 K (the row's triple point; Sinnock and Smith's 115.95 K recorded): the
+      rows, 1.31083, 1.3031, 1.2994; no density (the WebBook's saturation table starts at 115.775
+      K), its record at 115.95 K's 29.18115 mol/l.
+    - Xe, `measured`, 161.4 K (Sinnock and Smith's 161.35 K recorded): the rows, 1.40805, 1.39158,
+      1.38419; its record at the WebBook's lowest state, 161.405 K, 22.59209 mol/l.
+    - O₂, `derived`, 90.19 K, 35.66263 mol/l, c 0.986155: 1.23081, 1.22412, 1.22127.
+    - N₂O, `derived`, 184.67 K, 27.95749 mol/l, c 0.969096: 1.34347, 1.33165, 1.32669.
+    - SO₂, `derived`, 197.7 K, 25.41132 mol/l, c 0.994335: 1.43382, 1.41519, 1.40717.
+    - CO₂, `derived`, 216.6 K, 26.77663 mol/l (1.17843 g cm⁻³), c 0.976672: 1.2862, 1.27873, 1.2752.
+    - CO, `standIn`, 68.16 K, 30.32971 mol/l, c 1: 1.24855, 1.24059, 1.23711.
+    - H₂S, `standIn`, 187.7 K, 29.11633 mol/l, c 1: 1.49752, 1.47232, 1.4616.
+    - Each density's page, equation of state and SHA-256 is in its file's `source`: Schmidt and
+      Wagner 1985 (O₂), Tegeler, Span and Wagner 1999 (Ar), Lemmon and Span 2006 (Kr, Xe, CO, N₂O
+      and H₂S), Span and Wagner 1996 (CO₂) and Gao, Wu, Zhang and Lemmon 2016 (SO₂, where the
+      brief's sketch named none).
+  - _The fit's second form_ (A.1). `ScaledMolarRefractionFit` (`form: "scaledMolarRefraction"`,
+    `molarDensityMolPerL`, `factor`, `anchoredFromUm`, `anchoredToUm`) joins `CauchyFit` in a union,
+    `DerivedFit`, in the tool's `MaterialHeader.fit` and the client's `MaterialIndexFile.fit`.
+    `fitOf` parses both and refuses any other form, a density or factor that is not positive, and
+    anchors that run backwards. O₂ (0.5461–0.5461 µm), N₂O (0.4308–0.6563), SO₂ (0.5893–0.5893) and
+    CO₂ (0.5461–0.5461) carry it; Ar, Kr and Xe (`measured`) and CO and H₂S (`standIn`) carry
+    `fit: null`. `hyperion-fit`'s `RawMaterialFile` deserialises no `fit` and refuses no unknown
+    field, and its data hash covers the data fields alone, so nothing in Rust changes and no table
+    goes stale.
+  - _The method's record at the WebBook's densities_ (A.2), the unscaled estimate less each
+    measurement (`T5K_LIQUID_RECORD`, beside `LIQUID_CHECKS`, which is unchanged): Ar +0.0025
+    (−1.01%), Kr −0.0027 (+0.82%), Xe −0.0018 (+0.40%), O₂ +0.0033 (−1.38%), N₂O +0.0113 to +0.0124
+    (−3.01% to −3.21%), SO₂ +0.0042, +0.0028 and −0.0005 (−1.10%, −0.73%, +0.13%), CO₂ (Bleekrode's
+    tube II) +0.0002, +0.0045 and −0.0026, CO +0.0076 and +0.0142 (−3.15%, −5.93%), H₂S −0.0100 and
+    −0.0212 (+2.41%, +5.21%). Against main's CoolProp-based figures, three differ by more than 5 ×
+    10⁻⁴ in n:
+    - N₂O: +0.0113 to +0.0124, where main had +0.0106 to +0.0117, so its least-squares c is 0.969096
+      (−3.09%), not "about 0.971 (−2.9%)", and its n runs about 7 × 10⁻⁴ below the brief's "about
+      1.3442, 1.3324, 1.3274". The five lines meet the file within 5 × 10⁻⁴ (G's −0.0005 the worst).
+    - CO₂: main's +0.0002, +0.0010 and −0.0026 are plain Lorentz–Lorenz at 12.5 °C and 24 °C from
+      Bleekrode's air-free tube II and at 15.5 °C from his first table (p. 353). The file records
+      tube II's three, 1.199, 1.184 and 1.173 at 12.5, 17.5 and 24 °C (the brief's 285.7–297.2 K),
+      and the first table's 1.192 and 1.186 at 15.5 and 18.5 °C besides. Against the file's form
+      (Phillips's c at each state) tube II's three lie at −0.0023, +0.0023 and −0.0042 (the form
+      less each), so the brief's "within 0.0026 of the form" is plain Lorentz–Lorenz's; the form's
+      misses stay inside Bleekrode's ±0.005 (±0.0048, p. 346) and the file's ±0.007.
+    - O₂: Liveing and Dewar 1895's five lines lie 0.0012–0.0025 below the file (the brief: 0.002–
+      0.003); Liveing and Dewar 1892's prism value at the D line, 1.2236 (p. 208), lies 0.0002 above
+      it, and Johns and Wilhelm's liquid N₂ 1.7 × 10⁻⁴ below Augustin's.
+    - Ar's worst row is 1.51 × 10⁻⁴, at 578.0 nm, A.2's "within 1.5 × 10⁻⁴" to rounding.
+  - _Kr's and Xe's red tails_ (A.3), two-term Cauchy lines over the rows from 435.8 nm, a and b to
+    six figures: Kr 1.29577 + 0.00220801 µm² ÷ λ², worst row 1.1 × 10⁻⁴, step −4.5 × 10⁻⁶ at 643.9
+    nm, 1.2994 at 780 nm; Xe 1.37705 + 0.00434656 µm² ÷ λ², worst row 1.8 × 10⁻⁴, step −6.6 × 10⁻⁵,
+    1.38419 at 780 nm. (The brief's Kr a, 1.295771, is seven figures, its step −3 × 10⁻⁶.) The gas's
+    scaled shape misses the Kr and Xe rows by over 10⁻³ (the files state each), so their rows are
+    taken.
+  - _CO and H₂S_ (A.4): `standIn`, c = 1, named "(an estimated index)", their `standIn` the ruled
+    words, then the measured values with their temperatures in kelvins, the estimate at the file's
+    own temperature and the band with its lean ("likely high", "likely low"), with the hyphen-minus
+    (the UX review's wording). Gagnon et al.'s two values differ by 0.0065 beyond the gas's slope
+    (main's 0.0066), about twice their combined 0.0034. For step 2b: the record basis for both will
+    be `LiquidBasis::Derived` (the record's vocabulary puts an estimation method there), though the
+    files are `standIn`.
+  - _N₂O's lithium line._ Liveing and Dewar 1892 (p. 209) print deviations as well as indices; the
+    five lines' printed pairs imply a prism of 59° 15′ to 0.015°, their liquid-oxygen prism (p.
+    208), at which the lithium line's 22° 52′ gives 1.3287, against its printed 1.3257 (implying
+    59.68°). The file gives 1.3284 there.
+  - _O₂'s absorption, path 2_ (§2.6). Path 1 could not be read: Dianov-Klokov's papers have no open
+    copy (Crossref indexes none), and Ellis and Kneser 1933 (Phys. Rev. 44, 420) is closed. Thalman
+    and Volkamer 2013's sets in HITRAN2024's `O2-O2_2024.cia` (reference 32; the file the atmosphere
+    tool reads, the same SHA-256), at their coldest, 203 K, against the liquid's 90.19 K: a = σN², N
+    = 2.14765 × 10²² cm⁻³. σ 1.19178 × 10⁻⁴⁵ cm⁵ at 575 nm gives a = 55.0 m⁻¹ and k = 2.51526 ×
+    10⁻⁶; σ 8.64297 × 10⁻⁴⁶ at 630 nm, 39.9 m⁻¹ and 1.99858 × 10⁻⁶. k = 0 where the set's σ is at or
+    below 0 (390–430, 455, 595, 600 and 650 nm, within 7 × 10⁻⁴⁸ cm⁵ of it) and from 655 nm, past
+    the sets' 654.0 nm. The tool's reduction refuses an input whose coldest set, those two σ, the
+    577 nm cooling figures or the zeros differ from the file's text.
+    - _Against main's estimate._ The ruling's "a few m⁻¹" took σ at about 10⁻⁴⁶; the source's peaks
+      are 0.86–1.36 × 10⁻⁴⁵ at 203 K, so a is 40–55 m⁻¹ in the bands. The method is the ruled one;
+      Liveing and Dewar's bands "all of exceptional strength" through about 3 inches (1892, p. 206;
+      1.5% transmitted at 575 nm by the file) and "very much more strongly developed" in 0.4 cm than
+      in five times that of liquid air (1895, p. 271; 80%) fit the larger scale.
+  - _The parity test's form._ The client's test rebuilds each scaled file's n from its fit and
+    `rayleigh.ts`'s row to 10⁻⁵, the brief's first form. Its equivalent, the Lorentz–Lorenz function
+    constant to 2 × 10⁻⁵ relative, cannot hold for O₂: six-figure rounding alone moves (n² − 1) ÷
+    (n² + 2) by up to 2.3 × 10⁻⁵ of itself at n ≈ 1.22, so it is not asserted.
+  - _The inputs._ Ar, Kr, Xe and O₂ are `CombinedSpec`s, each reduction in one place: the three
+    tables' rows are held as constants (`AR_LIQUID_ROWS`, `KR_LIQUID_ROWS`, `XE_LIQUID_ROWS`),
+    cited, and `checkedRows` refuses an input whose rows differ; O₂'s reduction reads the O₂–O₂ file
+    through the atmosphere tool's `parseCia` and `OXYGEN_PAIR_SOURCE`. The five others are
+    `DERIVED_MATERIALS`. `COMBINED_MATERIALS` is now defined after T5.k's section (its T5.d–T5.h
+    part kept in place as `COMBINED_MATERIALS_T5D_T5H`), since its new entries read gas rows defined
+    later in the module.
+  - _Names beyond the sketch._ In the tool: `ScaledMolarRefractionFit`, `DerivedFit`, `FETCHED_T5K`,
+    `gasRowMolarRefractionCm3PerMol` (which `molecularIceIndex` now calls, the same arithmetic; the
+    regeneration proves it), `KR_DISPERSION`, `XE_DISPERSION`, `CO2_DISPERSION`, `N2O_DISPERSION`,
+    `SO2_DISPERSION`, `scaledLiquidIndex`, `leastSquaresFactor`, `molarRefractionRatio`,
+    `WebBookDensity` and the nine `*_LIQUID_DENSITY` constants (and CO's at 78.3 K),
+    `NamedIndexPoint`, `checkedRows`, `AR_LIQUID_FACTOR`, `arWorstRow`, `RED_TAIL_FROM_UM`,
+    `redTailFit`, `redTailIndex`, `redTailWorst`, `redTailStep`, `tableWithRedTail`,
+    `KR_LIQUID_TAIL`, `XE_LIQUID_TAIL`, `scaledShapeMiss`, `O2_LIQUID_ANCHOR`, `O2_LIQUID_FACTOR`,
+    `LIVEING_DEWAR_1895_O2`, `LIVEING_DEWAR_1892_O2_D`, `JOHNS_WILHELM_N2_546`, the O₂–O₂ constants
+    and functions (`THALMAN_VOLKAMER_REFERENCE`, `OXYGEN_PAIR_COLDEST_K`, `OXYGEN_PAIR_LONGEST_NM`,
+    `OXYGEN_PAIR_ZERO_NM`, `OXYGEN_PAIR_CROSS_SECTIONS_CM5`, `OXYGEN_PAIR_SCATTER_CM5`,
+    `OXYGEN_PAIR_COOLING`, `O2_LIQUID_NUMBER_DENSITY_PER_CM3`, `oxygenPairK`,
+    `oxygenPairAbsorptionPerM`, `oxygenPairCrossSectionCm5`, `liquidOxygenK`), `PrismReading`,
+    `LIVEING_DEWAR_1892_N2O`, `LIVEING_DEWAR_1892_N2O_LITHIUM`, `LIVEING_DEWAR_PRISM_ARCMIN`,
+    `prismIndex`, `prismApexArcmin`, `N2O_LIQUID_FACTOR`, `LiquidMeasurement`,
+    `SO2_LIQUID_MEASUREMENTS`, `SO2_LIQUID_CHECKS`, `SO2_LIQUID_FACTOR`, `CO2_MOLAR_MASS_G_PER_MOL`,
+    `PHILLIPS_1920`, `phillipsFactor`, `co2DensityGPerCm3`, `CO2_LIQUID_FACTOR`, `BLEEKRODE_CO2`,
+    `BLEEKRODE_CO2_FIRST_TABLE`, `CO2_CRITICAL_MOL_PER_L`, `co2FormIndex`, `co2CarryMiss`,
+    `GAGNON_CO`, `gagnonSlopeExcess`, `GAGNON_COMBINED_ERROR`, `BLEEKRODE_H2S` and
+    `T5K_LIQUID_RECORD`. In the client: `ScaledMolarRefractionFit` and `DerivedFit`.
+  - _The defaults and labels._ O₂, Ar, CO, CO₂ and H₂S keep their ices as defaults, so a liquid of
+    one is now its own file rather than its ice as a named analogue (`MATERIAL_FILES`' doc says so);
+    Kr, Xe, N₂O and SO₂ have the liquid alone. A liquid CO or H₂S deck raises
+    `atmosphereApproximate` with its file's stand-in as the reason; the seven others raise nothing.
+  - _For step 2b._ `temperatureK` is now given to 0.01 K (83.81, 115.77, 161.4, 90.19, 68.16, 216.6,
+    184.67, 197.7, 187.7 K), where T5.g's files carry whole-kelvin labels, and `hyperion-fit`'s
+    `MaterialFile::temperature_k` doc still reads "a label to the kelvin"; the client's name test
+    now binds a name's kelvins to the rounded temperature. The carry from each scaled file needs its
+    density exactly as stated: for Ar, O₂, N₂O, SO₂, CO₂, CO and H₂S it is the WebBook's at the
+    file's own `temperatureK`. Kr's and Xe's files are their tables, measured at 115.95 and 161.35 K
+    and filed at the rows' triple points, 115.77 and 161.4 K, below the WebBook's saturation tables
+    (from 115.775 and 161.405 K). Each states a WebBook density only for its record (29.18115 mol/l
+    at 115.95 K, 22.59209 mol/l at 161.405 K), so step 2b takes theirs at `temperatureK` from the
+    row's own equation; the 0.18 and 0.05 K are recorded, not applied (the plan-conformance review's
+    wording).
+  - _`liquid_optics` stays fresh._ Its manifest names its seven files; none of the nine is in it,
+    and nothing was refitted.
+  - _Sources read_ (2026-10-16), each with its SHA-256 in the file it bears on:
+    refractiveindex.info's three liquid tables (the brief's SHA-256s); the WebBook's tables and
+    pages; Liveing and Dewar 1892 and 1895 in the archive.org scans of the Philosophical Magazine
+    (the text, and the pages' images for every value taken); Bleekrode 1884 and Phillips 1920 in
+    archive.org's copies (the Royal Society's PDF refused the fetch); Johns and Wilhelm's and Gagnon
+    et al.'s records through Crossref and the journal's page; Sinnock 1980's abstract through
+    OpenAlex; Seidel, Lanou and Yao's and Grace et al.'s arXiv PDFs; HITRAN2024's O₂–O₂ file.
+  - _Tests._ In the client's test: the nine files' provenance, temperature and triple point, fit
+    form and stand-in; T5.k's four keys; no k but O₂'s; the four scaled files rebuilt from their
+    fits and `rayleigh.ts` to 10⁻⁵, and Ar, CO and H₂S at their cited densities and factors; each
+    anchor (O₂'s 1.2242, N₂O's least-squares c, SO₂'s mean, CO₂'s law, the four fits' anchors); Ar's
+    rows, Kr's and Xe's interpolation and tails, each table within its band, and Kr's and Xe's
+    record rows rebuilt from `rayleigh.ts` (the plan-conformance review: no other test reads the
+    tool's copies of those two rows); O₂'s k at 575 and 630 nm from the cited σ, and none from 655
+    nm; the labels; the defaults; the format's refusals (another form, a density or factor not
+    positive, anchors backwards, a measured file with a fit) and its acceptance. Rewritten: "states
+    a sample's temperature in its name in kelvin" compares the rounded temperature; the two tests
+    that read a Cauchy fit's `a` and `bUm2` narrow on `form`. In the tool's test: the builder
+    against `molecularIceIndex`, the least-squares factor, each c's arithmetic, the lithium line,
+    Phillips's limit, the carry, Ar's worst row, the tails, the shape misses, `tableWithRedTail` and
+    `checkedRows`, the record, Gagnon's excess, O₂'s a and k, its zeros, the pair interpolation,
+    `liquidOxygenK`'s refusals of an O₂–O₂ file whose coldest set is not at 203 K or whose σ at 575
+    nm differs (the TypeScript review), the nine headers against the committed files, the five
+    derived files and the four combined files' n against their derivations, and the four new options
+    asked once. The TypeScript review's other points: a unit in each name
+    (`PHILLIPS_1920.coefficientCm6PerG2`; the client test's `gasMolarVolumeCm3PerMol` and
+    `rowMolarRefractionCm3PerMol`) and one reason to fail a test.
+  - _`NOTICE`_ gains one entry: Sinnock and Smith's liquid tables (CC0), Johns and Wilhelm, Liveing
+    and Dewar 1892 and 1895, Bleekrode 1884 (with Ketteler and Bichat through him), Phillips 1920,
+    Gagnon et al. (recorded), Sinnock 1980, Seidel et al. and Grace et al. (checks), Thalman and
+    Volkamer through HITRAN2024, and the WebBook's equations of state.
+- **Deferred findings (2026-10-13 rule)** (R08.T5.k). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _Measurements wanted_ (decision-p14-t49h-gas-index §2.5): Gagnon et al. 1979 in full (CO;
+    closed); a modern liquid-H₂S index; a low-temperature liquid-CO₂ index (Michels and Hamers 1937;
+    Besserer and Robinson 1973; both closed). Any one re-anchors its file through T5.k's builder and
+    decision-p14-t49h-liquids §5's refit, before P14.T54.a or under a bump after it.
+  - _CO₂'s near-critical carry._ The sim's carry of `carbon-dioxide-liquid.json` at constant
+    Lorentz–Lorenz function misses Phillips's form by −0.0024, −0.0025 and −0.0025 at Bleekrode's
+    12.5, 17.5 and 24 °C states and −0.0022 at the critical density, at 589.3 nm: recorded, not
+    corrected (§2.4).
+  - _The ammonia and ethane files_ (§2.8). Re-deriving `ammonia-liquid.json` and
+    `ethane-liquid.json` with `scaledLiquidIndex` would remove the Cauchy line's 4.4 × 10⁻⁴ and 3.4
+    × 10⁻⁵ residuals and leave one method; it moves `liquid_optics` and needs §5's refit.
+  - _Liquid O₂'s bands at 90 K and beyond 654 nm._ The 203 K σ is not extrapolated, though the bands
+    grow on cooling; the liquid's A and B bands, which Liveing and Dewar 1892 saw (pp. 206–207), and
+    its infrared bands are not drawn (k = 0 from 655 nm). A liquid measurement would replace both.
+  - _Kr's two methods._ Sinnock 1980 finds Kr's total-internal-reflection values outside the
+    minimum-deviation ones' errors; the closed paper's values could replace the 1969 table.
+  - _CO₂'s Bleekrode values._ Main's middle check value is the first table's 15.5 °C; the file takes
+    tube II's 17.5 °C. Either stays inside the stated band.
+  - _P14's step 2_ (the plan-conformance review). Galaxy plan 14's P14.T49.h step 2 still says the
+    nine rows have no R08 file and take their index from the gas refractivity, and names no step 2b;
+    the ruling's edit to plan 14 is a docs batch's, outside T5.k's scope.
+  - _A named analogue's phase word_ (the UX review). With SO₂, N₂O, Kr and Xe liquid alone, a solid
+    mode of one now reads `no solid SO2 on file: liquid SO2 at 198 K stands in, a named analogue`
+    (`resolveMaterial`'s template, unchanged), where the guide names a molecular ice `SO2 ice`.
+    Liquid C₂H₆ already reached the template; changing it is outside T5.k's brief.
+  - _The stand-in label's cause_ (the UX review; the owner's). The guide's row for the
+    `atmosphereApproximate` label reads "because no measurement exists or this console does not know
+    the substance"; CO's and H₂S's ruled reason is that their measurements contradict themselves, as
+    H₂S ice's already is. And liquid O₂, `derived` as ruled, raises no label, though its k is a gas
+    pair's 203 K cross-sections carried to the liquid and its A and B bands are not drawn.
 - **Deviations in T12.a, as built** (2026-10-09; `crates/hyperion-fit/src/atmosphere/`, the
   `atmosphere-reference` command in `cli.rs`, `RunFitError` in `lib.rs`).
   - _Signatures._ `trace_reference` returns `Result<ReferenceRadiances, TraceReferenceError>`: the

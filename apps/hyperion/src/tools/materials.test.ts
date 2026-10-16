@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import type { CiaSet } from "./atmosphereData";
 import {
   type AbsorptionRow,
   absorptionIndex,
@@ -14,16 +15,76 @@ import {
   AR_DISPERSION,
   AR_ICE_CELL,
   AR_ICE_MEASURED_546,
+  AR_LIQUID_DENSITY,
+  AR_LIQUID_FACTOR,
+  AR_LIQUID_ROWS,
+  arWorstRow,
   AUGUSTIN_N2,
   averagedUniaxial,
+  BLEEKRODE_CO2,
   C2H6_LIQUID_FIT,
   C2H6_LIQUID_MEASURED,
   cauchyIndex,
   cauchyResidual,
   cellMolarVolumeCm3PerMol,
   CH4_LIQUID_670_NM_N,
+  checkedRows,
+  CO2_CRITICAL_MOL_PER_L,
+  CO2_DISPERSION,
   CO2_ICE_FIT,
+  CO2_LIQUID_DENSITY,
+  CO2_LIQUID_FACTOR,
+  CO2_MOLAR_MASS_G_PER_MOL,
+  co2CarryMiss,
+  co2DensityGPerCm3,
+  CO_DISPERSION,
   COMBINED_MATERIALS,
+  GAGNON_COMBINED_ERROR,
+  gagnonSlopeExcess,
+  gasRowMolarRefractionCm3PerMol,
+  KR_DISPERSION,
+  KR_LIQUID_DENSITY,
+  KR_LIQUID_ROWS,
+  KR_LIQUID_TAIL,
+  leastSquaresFactor,
+  liquidOxygenK,
+  LIVEING_DEWAR_1892_N2O,
+  LIVEING_DEWAR_1892_N2O_LITHIUM,
+  LIVEING_DEWAR_PRISM_ARCMIN,
+  type MaterialHeader,
+  molarRefractionRatio,
+  molecularIceIndex,
+  N2O_DISPERSION,
+  N2O_LIQUID_DENSITY,
+  N2O_LIQUID_FACTOR,
+  O2_DISPERSION,
+  O2_LIQUID_DENSITY,
+  O2_LIQUID_FACTOR,
+  O2_LIQUID_NUMBER_DENSITY_PER_CM3,
+  OXYGEN_PAIR_CROSS_SECTIONS_CM5,
+  OXYGEN_PAIR_LONGEST_NM,
+  OXYGEN_PAIR_ZERO_NM,
+  oxygenPairAbsorptionPerM,
+  oxygenPairCrossSectionCm5,
+  oxygenPairK,
+  PHILLIPS_1920,
+  phillipsFactor,
+  prismApexArcmin,
+  prismIndex,
+  redTailIndex,
+  redTailStep,
+  redTailWorst,
+  scaledLiquidIndex,
+  scaledShapeMiss,
+  SO2_LIQUID_CHECKS,
+  SO2_LIQUID_FACTOR,
+  T5K_LIQUID_RECORD,
+  tableWithRedTail,
+  THALMAN_VOLKAMER_REFERENCE,
+  XE_DISPERSION,
+  XE_LIQUID_DENSITY,
+  XE_LIQUID_ROWS,
+  XE_LIQUID_TAIL,
   DAIMON_24C,
   daimonExcess,
   DERIVED_MATERIALS,
@@ -1486,5 +1547,411 @@ describe("R08.T5.g's derived liquids", () => {
       ).toHaveLength(2);
     }
     expect(sourceOptions().some((input) => input.option === "water")).toBe(false);
+  });
+});
+
+/** T5.k's nine files, by name, with their keys. */
+const T5K_FILES = [
+  ["argon-liquid.json", "Ar"],
+  ["krypton-liquid.json", "Kr"],
+  ["xenon-liquid.json", "Xe"],
+  ["oxygen-liquid.json", "O2"],
+  ["nitrous-oxide-liquid.json", "N2O"],
+  ["sulphur-dioxide-liquid.json", "SO2"],
+  ["carbon-dioxide-liquid.json", "CO2"],
+  ["carbon-monoxide-liquid.json", "CO"],
+  ["hydrogen-sulphide-liquid.json", "H2S"],
+] as const;
+
+/** The squared misses of Liveing and Dewar's five N₂O lines by the gas scaled by c. */
+function n2oMisses(c: number): number {
+  return LIVEING_DEWAR_1892_N2O.reduce(
+    (sum, r) =>
+      sum + (scaledLiquidIndex(N2O_DISPERSION, r.wavelengthUm * 1_000, 27.957_49, c) - r.n) ** 2,
+    0,
+  );
+}
+
+/** Liquid CO₂'s scaled index at 546.1 nm and its file's density, at a factor. */
+function co2At546(c: number): number {
+  return scaledLiquidIndex(CO2_DISPERSION, 546.1, CO2_LIQUID_DENSITY.molPerL, c);
+}
+
+/** A refractiveindex.info `tabulated n` file's text around its rows. */
+function tabulatedN(rows: string): string {
+  return `DATA:\n  - type: tabulated n\n    data: |\n${rows}\nCONDITIONS:\n`;
+}
+
+/**
+ * A HITRAN collision-induced absorption file of one O₂–O₂ set, in the format `parseCia` reads (its
+ * header's fixed columns, then a wavenumber and a coefficient a line), cm⁻¹ and cm⁵.
+ */
+function oneSetCia(
+  temperatureK: number,
+  reference: string,
+  points: ReadonlyArray<readonly [number, number]>,
+): string {
+  const low = points[0]?.[0] ?? 0;
+  const high = points.at(-1)?.[0] ?? 0;
+  const header =
+    "O2-O2".padStart(20) +
+    low.toFixed(3).padStart(10) +
+    high.toFixed(3).padStart(10) +
+    String(points.length).padStart(7) +
+    temperatureK.toFixed(1).padStart(7) +
+    "1.000E-45".padStart(10) +
+    "-.999".padStart(6) +
+    "".padStart(21) +
+    reference.padStart(3);
+  return [
+    header,
+    ...points.map(([nu, value]) => `${nu.toFixed(3)} ${value.toExponential(4)}`),
+  ].join("\n");
+}
+
+/** A scaled gas's n on the grid, to six figures. */
+function scaledGrid(
+  gas: typeof AR_DISPERSION,
+  molPerL: number,
+  factor: number,
+): ReadonlyArray<number> {
+  return MATERIAL_GRID_NM.map((nm) =>
+    Number(scaledLiquidIndex(gas, nm, molPerL, factor).toPrecision(6)),
+  );
+}
+
+/** A T5.k file's header as the tool states it: a combined spec's, or a derived liquid's. */
+function t5kHeader(file: string, key: string): MaterialHeader {
+  const combined = COMBINED_MATERIALS.find((spec) => spec.file === file)?.header;
+  const derived = DERIVED_MATERIALS.find((f) => f.key === key && f.phase === "liquid");
+  const header = combined ?? derived;
+  if (header === undefined) {
+    throw new Error(`the tool states no header for ${file}`);
+  }
+  return header;
+}
+
+describe("R08.T5.k's liquids (decision-p14-t49h-gas-index)", () => {
+  it("scale a gas's molar refraction by c as the molecular estimate at V_m ÷ c", () => {
+    for (const nm of [380, 546.1, 780]) {
+      expect(scaledLiquidIndex(O2_DISPERSION, nm, 35.662_63, 0.97)).toBe(
+        molecularIceIndex(O2_DISPERSION, nm, 1_000 / 35.662_63 / 0.97),
+      );
+    }
+    expect(scaledLiquidIndex(CO_DISPERSION, 550, 30.329_71, 1)).toBe(
+      molecularIceIndex(CO_DISPERSION, 550, 1_000 / 30.329_71),
+    );
+  });
+
+  it("form the gas row's molar refraction as the molecular estimate does: x = R ÷ V_m", () => {
+    const r = gasRowMolarRefractionCm3PerMol(AR_DISPERSION, 546.1);
+    const x = r / 28.2;
+    expect(molecularIceIndex(AR_DISPERSION, 546.1, 28.2)).toBe(Math.sqrt((1 + 2 * x) / (1 - x)));
+  });
+
+  it("find the least-squares factor: exactly on points made at one, and at a minimum of the misses", () => {
+    const made = [400, 500, 650].map((nm) => ({
+      wavelengthUm: nm / 1_000,
+      n: scaledLiquidIndex(N2O_DISPERSION, nm, 27.957_49, 0.97),
+    }));
+    expect(leastSquaresFactor(N2O_DISPERSION, 27.957_49, made)).toBeCloseTo(0.97, 12);
+    const c = leastSquaresFactor(N2O_DISPERSION, 27.957_49, LIVEING_DEWAR_1892_N2O);
+    expect(n2oMisses(c)).toBeLessThan(n2oMisses(c + 1e-6));
+    expect(n2oMisses(c)).toBeLessThan(n2oMisses(c - 1e-6));
+  });
+
+  it("refuse a least-squares factor with no points", () => {
+    expect(() => leastSquaresFactor(N2O_DISPERSION, 27.957_49, [])).toThrow(/no points/u);
+  });
+
+  it("set O2's factor to meet Johns and Wilhelm's 1.2242 at 546.1 nm: 0.986155", () => {
+    expect(O2_LIQUID_FACTOR).toBe(0.986_155);
+    const n = scaledLiquidIndex(O2_DISPERSION, 546.1, O2_LIQUID_DENSITY.molPerL, O2_LIQUID_FACTOR);
+    expect(Math.abs(n - 1.2242)).toBeLessThan(1e-6);
+    expect(O2_LIQUID_DENSITY.molPerL).toBe(35.662_63);
+  });
+
+  it("fit N2O's factor to Liveing and Dewar 1892's five lines: 0.969096, every line within 5 × 10⁻⁴", () => {
+    expect(N2O_LIQUID_FACTOR).toBe(0.969_096);
+    for (const r of LIVEING_DEWAR_1892_N2O) {
+      const n = scaledLiquidIndex(
+        N2O_DISPERSION,
+        r.wavelengthUm * 1_000,
+        N2O_LIQUID_DENSITY.molPerL,
+        N2O_LIQUID_FACTOR,
+      );
+      expect(Math.abs(n - r.n)).toBeLessThan(5e-4);
+    }
+  });
+
+  it("find Liveing and Dewar's lithium line's printed 1.3257 against its own deviation, which gives 1.3287", () => {
+    // Their prism, 59° 15′ (p. 208), at the lithium line's 22° 52′; the five other lines' printed
+    // pairs imply that angle to 0.015° (0.9′), the lithium line's 59.68°.
+    const fromDeviation = prismIndex(
+      LIVEING_DEWAR_PRISM_ARCMIN,
+      LIVEING_DEWAR_1892_N2O_LITHIUM.deviationArcmin,
+    );
+    expect(fromDeviation.toFixed(4)).toBe("1.3287");
+    expect(LIVEING_DEWAR_1892_N2O_LITHIUM.n).toBe(1.3257);
+    for (const r of LIVEING_DEWAR_1892_N2O) {
+      expect(Math.abs(prismApexArcmin(r) - LIVEING_DEWAR_PRISM_ARCMIN)).toBeLessThan(0.9);
+      expect(
+        Math.abs(prismIndex(LIVEING_DEWAR_PRISM_ARCMIN, r.deviationArcmin) - r.n),
+      ).toBeLessThan(1.5e-4);
+    }
+    expect(prismApexArcmin(LIVEING_DEWAR_1892_N2O_LITHIUM) / 60).toBeCloseTo(59.68, 2);
+  });
+
+  it("set SO2's factor to the mean of the three molar-refraction ratios: +0.13%, −0.73% and −1.10%, 0.994335", () => {
+    expect(
+      SO2_LIQUID_CHECKS.map((check) => (100 * (molarRefractionRatio(check) - 1)).toFixed(2)),
+    ).toEqual(["-1.10", "-0.73", "0.13"]);
+    expect(SO2_LIQUID_FACTOR).toBe(0.994_335);
+  });
+
+  it("set CO2's factor by Phillips's law at 1.17843 g cm⁻³: 0.976672, −0.0072 in n at 546.1 nm", () => {
+    expect(co2DensityGPerCm3(CO2_LIQUID_DENSITY.molPerL).toFixed(5)).toBe("1.17843");
+    expect(CO2_LIQUID_FACTOR).toBe(0.976_672);
+    expect((co2At546(CO2_LIQUID_FACTOR) - co2At546(1)).toFixed(4)).toBe("-0.0072");
+  });
+
+  it("leave the gas's molar refraction unscaled at Phillips's zero density", () => {
+    expect(phillipsFactor(0)).toBe(1);
+  });
+
+  it("find Phillips's ρ → 0 limit, 6.687 cm³ mol⁻¹, within 0.1% of the gas row's at 546.1 nm", () => {
+    const limit = CO2_MOLAR_MASS_G_PER_MOL / PHILLIPS_1920.limitGPerCm3;
+    expect(limit.toFixed(3)).toBe("6.687");
+    expect(
+      Math.abs(limit / gasRowMolarRefractionCm3PerMol(CO2_DISPERSION, 546.1) - 1),
+    ).toBeLessThan(1e-3);
+  });
+
+  it("find the sim's carry of liquid CO2 at constant Lorentz–Lorenz function within 0.003 of the form at warm states", () => {
+    for (const molPerL of [...BLEEKRODE_CO2.map((m) => m.molPerL), CO2_CRITICAL_MOL_PER_L]) {
+      expect(Math.abs(co2CarryMiss(molPerL, 589.3))).toBeLessThan(3e-3);
+    }
+    // At the file's own density the carry is the file, the form there unrounded: c's sixth figure.
+    expect(Math.abs(co2CarryMiss(CO2_LIQUID_DENSITY.molPerL, 589.3))).toBeLessThan(1e-6);
+  });
+
+  it("fit Ar's factor to Sinnock and Smith's nine rows: 0.990053, the worst row 1.51 × 10⁻⁴ at 578.0 nm", () => {
+    expect(AR_LIQUID_FACTOR).toBe(0.990_053);
+    const misses = AR_LIQUID_ROWS.map((row) =>
+      Math.abs(
+        scaledLiquidIndex(
+          AR_DISPERSION,
+          row.wavelengthUm * 1_000,
+          AR_LIQUID_DENSITY.molPerL,
+          AR_LIQUID_FACTOR,
+        ) - row.n,
+      ),
+    );
+    expect(Math.max(...misses)).toBeCloseTo(1.51e-4, 6);
+    expect(misses.indexOf(Math.max(...misses))).toBe(7);
+    expect(arWorstRow().wavelengthNm).toBeCloseTo(578, 9);
+    expect(arWorstRow().miss).toBe(Math.max(...misses));
+  });
+
+  it.each([
+    ["Kr", KR_LIQUID_ROWS, KR_LIQUID_TAIL, 1.295_77, 0.002_208_01, 1.2994],
+    ["Xe", XE_LIQUID_ROWS, XE_LIQUID_TAIL, 1.377_05, 0.004_346_56, 1.3842],
+  ] as const)(
+    "fit %s's red tail to its rows from 435.8 nm, each within 3 × 10⁻⁴ and a step under 3 × 10⁻⁴ at 643.9 nm",
+    (_, rows, tail, a, b, at780) => {
+      expect(tail).toEqual({ a, bUm2: b });
+      expect(redTailWorst(rows, tail)).toBeLessThan(3e-4);
+      expect(Math.abs(redTailStep(rows, tail))).toBeLessThan(3e-4);
+      expect(redTailIndex(tail, 780).toFixed(4)).toBe(at780.toFixed(4));
+    },
+  );
+
+  it("find Kr's and Xe's tails' worst rows 1.1 × 10⁻⁴ and 1.8 × 10⁻⁴, their steps −4.5 × 10⁻⁶ and −6.6 × 10⁻⁵", () => {
+    expect(redTailWorst(KR_LIQUID_ROWS, KR_LIQUID_TAIL).toExponential(1)).toBe("1.1e-4");
+    expect(redTailWorst(XE_LIQUID_ROWS, XE_LIQUID_TAIL).toExponential(1)).toBe("1.8e-4");
+    expect(redTailStep(KR_LIQUID_ROWS, KR_LIQUID_TAIL).toExponential(1)).toBe("-4.5e-6");
+    expect(redTailStep(XE_LIQUID_ROWS, XE_LIQUID_TAIL).toExponential(1)).toBe("-6.6e-5");
+  });
+
+  it("find the gas's scaled shape missing Kr's and Xe's tables by over 1 × 10⁻³, so their rows are taken", () => {
+    expect(
+      scaledShapeMiss(KR_DISPERSION, KR_LIQUID_DENSITY.molPerL, KR_LIQUID_ROWS),
+    ).toBeGreaterThan(1e-3);
+    expect(
+      scaledShapeMiss(XE_DISPERSION, XE_LIQUID_DENSITY.molPerL, XE_LIQUID_ROWS),
+    ).toBeGreaterThan(1e-3);
+    expect(scaledShapeMiss(AR_DISPERSION, AR_LIQUID_DENSITY.molPerL, AR_LIQUID_ROWS)).toBeLessThan(
+      1.6e-4,
+    );
+  });
+
+  it("put a measured table on the grid linear between its rows and its red tail beyond, with k = 0", () => {
+    const { n, k } = tableWithRedTail(KR_LIQUID_ROWS);
+    expect(n).toHaveLength(MATERIAL_GRID_NM.length);
+    // 545 nm lies between the 508.6 and 546.1 nm rows, 1.3042 and 1.3032.
+    const between = 1.3042 + ((545 - 508.6) / (546.1 - 508.6)) * (1.3032 - 1.3042);
+    expect(Math.abs(gridValue(n, 545) - between)).toBeLessThan(1e-6);
+    expect(gridValue(n, 645)).toBe(Number(redTailIndex(KR_LIQUID_TAIL, 645).toPrecision(6)));
+    expect(k.every((v) => v === 0)).toBe(true);
+  });
+
+  it("refuse a liquid table whose rows differ from the rows the tool holds", () => {
+    const held = KR_LIQUID_ROWS.map((r) => `        ${r.wavelengthUm} ${r.n}`).join("\n");
+    expect(checkedRows(tabulatedN(held), KR_LIQUID_ROWS)).toBe(KR_LIQUID_ROWS);
+    expect(() => checkedRows(tabulatedN(held.replace("1.3032", "1.3033")), KR_LIQUID_ROWS)).toThrow(
+      /differ/u,
+    );
+  });
+
+  it("read the method's record at the WebBook's densities, as the files state it", () => {
+    // decision-p14-t49h-gas-index §2.3, recomputed (A.2): the unscaled estimate less each
+    // measurement, in the record's order.
+    expect(T5K_LIQUID_RECORD.map((check) => liquidCheckExcess(check).toFixed(4))).toEqual([
+      "0.0025",
+      "-0.0027",
+      "-0.0018",
+      "0.0033",
+      "0.0113",
+      "0.0115",
+      "0.0118",
+      "0.0124",
+      "0.0118",
+      "0.0042",
+      "0.0028",
+      "-0.0005",
+      "0.0002",
+      "0.0045",
+      "-0.0026",
+      "0.0076",
+      "0.0142",
+      "-0.0100",
+      "-0.0212",
+    ]);
+    expect(
+      T5K_LIQUID_RECORD.slice(0, 4).map((check) =>
+        (100 * (molarRefractionRatio(check) - 1)).toFixed(2),
+      ),
+    ).toEqual(["-1.01", "0.82", "0.40", "-1.38"]);
+  });
+
+  it("find Gagnon et al.'s two CO values 0.0065 apart beyond the gas's slope, about twice their combined error", () => {
+    expect(gagnonSlopeExcess().toFixed(4)).toBe("0.0065");
+    expect(GAGNON_COMBINED_ERROR.toFixed(4)).toBe("0.0034");
+  });
+
+  it("give liquid O2 k = aλ ÷ 4π with a = σN²: 55.0 and 39.9 m⁻¹ at 575 and 630 nm", () => {
+    expect(O2_LIQUID_NUMBER_DENSITY_PER_CM3.toPrecision(6)).toBe("2.14765e+22");
+    const [at575, at630] = OXYGEN_PAIR_CROSS_SECTIONS_CM5.map(([nm, sigma]) => ({
+      a: oxygenPairAbsorptionPerM(sigma).toFixed(1),
+      k: Number(oxygenPairK(sigma, nm).toPrecision(6)),
+    }));
+    expect([at575, at630]).toEqual([
+      { a: "55.0", k: 2.515_26e-6 },
+      { a: "39.9", k: 1.998_58e-6 },
+    ]);
+    const committedK = committed("oxygen-liquid.json").k;
+    expect([gridValue(committedK, 575), gridValue(committedK, 630)]).toEqual([
+      2.515_26e-6, 1.998_58e-6,
+    ]);
+  });
+
+  it("give liquid O2 k = 0 where the coldest sets' σ is at or below 0, and from 655 nm, past them", () => {
+    const k = committed("oxygen-liquid.json").k;
+    const zeros = MATERIAL_GRID_NM.filter((nm) => nm < 655 && gridValue(k, nm) === 0);
+    expect(zeros).toEqual([...OXYGEN_PAIR_ZERO_NM]);
+    expect(MATERIAL_GRID_NM.filter((nm) => nm >= 655 && gridValue(k, nm) !== 0)).toEqual([]);
+    expect(Math.floor(OXYGEN_PAIR_LONGEST_NM)).toBe(654);
+  });
+
+  it("read an O2–O2 set's σ linearly in wavenumber, and none where no set at its temperature reaches", () => {
+    const sets: ReadonlyArray<CiaSet> = [
+      {
+        pair: "O2-O2",
+        minPerCm: 16_000,
+        maxPerCm: 16_002,
+        temperatureK: 203,
+        reference: THALMAN_VOLKAMER_REFERENCE,
+        points: [
+          [16_000, 1e-46],
+          [16_001, 3e-46],
+          [16_002, 5e-46],
+        ],
+      },
+    ];
+    const midway = oxygenPairCrossSectionCm5(sets, 1e7 / 16_000.5) ?? Number.NaN;
+    expect(Math.abs(midway / 2e-46 - 1)).toBeLessThan(1e-9);
+    const onPoint = oxygenPairCrossSectionCm5(sets, 1e7 / 16_001) ?? Number.NaN;
+    expect(Math.abs(onPoint / 3e-46 - 1)).toBeLessThan(1e-9);
+    expect(oxygenPairCrossSectionCm5(sets, 1e7 / 16_003)).toBeUndefined();
+    expect(oxygenPairCrossSectionCm5(sets, 1e7 / 16_001, 293)).toBeUndefined();
+  });
+
+  it("refuse an O2–O2 file whose coldest Thalman and Volkamer set is not at 203 K", () => {
+    const text = oneSetCia(293, THALMAN_VOLKAMER_REFERENCE, [
+      [15_000, 1e-46],
+      [30_000, 1e-46],
+    ]);
+    expect(() => liquidOxygenK(text)).toThrow(/coldest .* 293 K/u);
+  });
+
+  it("refuse an O2–O2 file whose σ at 575 nm is not the one oxygen-liquid.json states", () => {
+    // 575 nm is 17,391.3 cm⁻¹: a 203 K set across it at another σ.
+    const text = oneSetCia(203, THALMAN_VOLKAMER_REFERENCE, [
+      [17_390, 1e-45],
+      [17_392, 1e-45],
+    ]);
+    expect(() => liquidOxygenK(text)).toThrow(/σ at 575 nm/u);
+  });
+
+  it.each(T5K_FILES)("write %s's header as the tool states it", (file, key) => {
+    // The by-hand regeneration's text half, which needs no fetched source.
+    const raw: unknown = JSON.parse(readFileSync(fileURLToPath(new URL(file, MATERIALS)), "utf8"));
+    const header = t5kHeader(file, key);
+    const fields = [
+      "key",
+      "phase",
+      "name",
+      "temperatureK",
+      "provenance",
+      "paper",
+      "source",
+      "licence",
+      "reduction",
+      "standIn",
+      "fit",
+    ] as const;
+    const read = (field: (typeof fields)[number]): unknown =>
+      typeof raw === "object" && raw !== null ? Reflect.get(raw, field) : undefined;
+    expect(fields.map(read)).toEqual(fields.map((field) => header[field]));
+  });
+
+  it.each([
+    ["nitrous-oxide-liquid.json", "N2O"],
+    ["sulphur-dioxide-liquid.json", "SO2"],
+    ["carbon-dioxide-liquid.json", "CO2"],
+    ["carbon-monoxide-liquid.json", "CO"],
+    ["hydrogen-sulphide-liquid.json", "H2S"],
+  ])("hold the committed %s to its derivation", (file, key) => {
+    const derived = DERIVED_MATERIALS.find((f) => f.key === key && f.phase === "liquid");
+    expect(committed(file).n).toEqual(derived?.n);
+    expect(committed(file).k).toEqual(derived?.k);
+  });
+
+  it("hold the committed liquid Kr and Xe to their tables, and liquid Ar and O2's n to their factors", () => {
+    expect(committed("krypton-liquid.json").n).toEqual(tableWithRedTail(KR_LIQUID_ROWS).n);
+    expect(committed("xenon-liquid.json").n).toEqual(tableWithRedTail(XE_LIQUID_ROWS).n);
+    expect(committed("argon-liquid.json").n).toEqual(
+      scaledGrid(AR_DISPERSION, AR_LIQUID_DENSITY.molPerL, AR_LIQUID_FACTOR),
+    );
+    expect(committed("oxygen-liquid.json").n).toEqual(
+      scaledGrid(O2_DISPERSION, O2_LIQUID_DENSITY.molPerL, O2_LIQUID_FACTOR),
+    );
+  });
+
+  it("ask for each of T5.k's four inputs once: the three liquid tables and HITRAN2024's O2–O2 file", () => {
+    const options = sourceOptions().map((input) => input.option);
+    for (const option of ["argon-liquid", "krypton-liquid", "xenon-liquid", "o2o2"]) {
+      expect(options.filter((o) => o === option)).toHaveLength(1);
+    }
   });
 });

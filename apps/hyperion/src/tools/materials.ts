@@ -44,13 +44,20 @@
  * - since R08.T5.g, omlc.org's table of Pope and Fry 1997, and since R08.T5.h R. Röttgers's WOPP v3
  *   compilation, for Mason, Cone and Fry 2016's table ({@link FETCHED_T5H}); the two water files
  *   take k from both, and IAPWS R9-97's n and Kou et al.'s k are constants here
- *   (decision-r08-t5g).
+ *   (decision-r08-t5g);
+ * - since R08.T5.k ({@link FETCHED_T5K}), refractiveindex.info's copies of Sinnock and Smith 1969's
+ *   liquid Ar, Kr and Xe tables, and HITRAN2024's O₂–O₂ collision-induced absorption file, for
+ *   Thalman and Volkamer 2013's cross-sections (decision-p14-t49h-gas-index). The other T5.k
+ *   liquids are scaled from their gas rows to measured values and densities cited here
+ *   ({@link scaledLiquidIndex}).
  */
 
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+
+import { type CiaSet, OXYGEN_PAIR_SOURCE, parseCia } from "./atmosphereData";
 
 /**
  * The grid material files are written on by default, nm: 380 to 780 in steps of 5. The two files
@@ -113,7 +120,7 @@ export interface MaterialHeader {
   /** For a stand-in, what stands in and why; otherwise null. */
   readonly standIn: string | null;
   /** For a derived file, the parameterisation its values are computed from; otherwise null. */
-  readonly fit: CauchyFit | null;
+  readonly fit: DerivedFit | null;
 }
 
 /**
@@ -130,6 +137,31 @@ export interface CauchyFit {
   readonly fittedFromUm: number;
   readonly fittedToUm: number;
 }
+
+/**
+ * A derived real index from its gas's molar refraction scaled to the liquid (R08.T5.k;
+ * decision-p14-t49h-gas-index A.1): at each wavelength x = c R(λ) ρ_m and n = √((1 + 2x) ÷ (1 − x)),
+ * with R the Lorentz–Lorenz molar refraction of the gas row of the file's key in
+ * `view/atmosphere/rayleigh.ts` (its `GAS_DISPERSION` row, or for SO₂ the dispersion of its
+ * `ESTIMATED_RAYLEIGH` row), at the row's own reference state and Z ({@link scaledLiquidIndex}).
+ *
+ * @remarks
+ * The form describes n alone: the file's k is its arrays, with k's derivation in its `reduction`.
+ */
+export interface ScaledMolarRefractionFit {
+  readonly form: "scaledMolarRefraction";
+  /** ρ_m, the NIST WebBook's saturated-liquid molar density at the file's `temperatureK`, mol/l. */
+  readonly molarDensityMolPerL: number;
+  /** c, the file's one factor on the gas's molar refraction. */
+  readonly factor: number;
+  /** The shortest wavelength of the measurements that set c, µm. */
+  readonly anchoredFromUm: number;
+  /** The longest wavelength of the measurements that set c, µm. */
+  readonly anchoredToUm: number;
+}
+
+/** A derived file's parameterisation, discriminated by `form`. */
+export type DerivedFit = CauchyFit | ScaledMolarRefractionFit;
 
 /** A material file as written: its header and the index on {@link MATERIAL_GRID_NM}. */
 export interface MaterialFile extends MaterialHeader {
@@ -915,6 +947,9 @@ export const FETCHED_T5H = "2026-10-15";
 
 /** The day R08.T5.i's sources were fetched (decision-p14-t49c-split §5.3). */
 export const FETCHED_T5I = "2026-10-16";
+
+/** The day R08.T5.k's sources were fetched (decision-p14-t49h-gas-index). */
+export const FETCHED_T5K = "2026-10-16";
 
 /**
  * The a-priori k of Venus's ultraviolet absorber at 365 nm, k₃₆₅: the ruled value
@@ -2434,8 +2469,12 @@ function waterKRecordText(): string {
   return `k = aλ ÷ 4π, to six significant figures (decision-r08-t5g ruling 2): Mason, Cone and Fry 2016's Table 2 over 380–495 nm, linear in log a between its rows every 2 nm (a three-point moving average of rows every 2 nm, at 23 ± 0.5 °C: Mason's dissertation pp. 75 and 80); Pope and Fry 1997's rows over 500–725 nm, every grid point on a row (at 22 °C); and Kou et al. 1993's over 730–780 nm, every 5 nm (at 22 °C), as IOCCG 2018 lists them (${IOCCG_2018}, Table 1.1). The seam at 495/500 nm is where the two cross: Pope and Fry's 0.0173 m⁻¹ at 495 nm lies between Mason et al.'s 0.01648 and 0.01774 at 494 and 496 nm, and their 0.0204 at 500 nm within 1.6% of Mason et al.'s 0.02073. The seam at 725/730 nm is IOCCG's: Kou et al. run about 0.04 m⁻¹ above Pope and Fry at 670 nm and 0.07 m⁻¹ at 725 nm over their overlap (IOCCG §1.1.1), and IOCCG keeps Pope and Fry there, as this file does. R08.T5.h's change from R08.T5.g's file, whose k was Pope and Fry's over 380–725 nm and Hale and Querry's from 750 nm, log-linear between over 730–745 nm: ${waterKChangeText(waterKFromConstants)}; Hale and Querry give nothing to this file. The alternative below 500 nm is Pope and Fry's, which runs ${masonCrossCheckText()} times Mason et al.'s: the original integrating cavity's sensitivity falls slowly over 410–500 nm and rapidly below 410 nm, and Mason et al. agree with Pope and Fry above 440 nm (Mason's dissertation pp. 81–89); the IOCCG protocol (§1.1.1–1.1.2) takes Pope and Fry as the state of the art over about 420–725 nm only, their ultraviolet values "significantly higher than these other careful works, indicating possible contamination". Mason et al.'s 520, 540 and 550 nm rows are the cross-check of Pope and Fry's there. Temperatures: k is at 23 °C to 495 nm and 22 °C from 500 nm, n at 25 °C. Below 550 nm water's temperature coefficient is near zero; near 740 nm it is 0.0161 m⁻¹ °C⁻¹ (IOCCG's Table 1.1, after Röttgers et al. 2014), so 22 → 25 °C would raise a there by about 1.7%, not drawn (one temperature per liquid)`;
 }
 
-/** The material files made from fetched sources by their own reductions, after {@link FETCHED_MATERIALS}. */
-export const COMBINED_MATERIALS: ReadonlyArray<CombinedSpec> = [
+/**
+ * R08.T5.d's to T5.h's files made from fetched sources by their own reductions, the first part of
+ * {@link COMBINED_MATERIALS}, which T5.k's liquid tables follow once the gas rows they read are
+ * defined.
+ */
+const COMBINED_MATERIALS_T5D_T5H: ReadonlyArray<CombinedSpec> = [
   {
     file: "potassium-chloride.json",
     inputs: [
@@ -3157,6 +3196,21 @@ export const CH4_DISPERSION: GasDispersionCopy = {
 };
 
 /**
+ * A gas row's Lorentz–Lorenz molar refraction at a vacuum wavelength, nm, cm³ mol⁻¹: (n² − 1) ÷
+ * (n² + 2) × Z N_A k_B T ÷ p at the row's own reference state.
+ */
+export function gasRowMolarRefractionCm3PerMol(
+  gas: GasDispersionCopy,
+  wavelengthNm: number,
+): number {
+  const gasMolarVolumeCm3PerMol =
+    ((gas.compressibility * AVOGADRO_PER_MOL * BOLTZMANN_J_PER_K * gas.referenceK) /
+      gas.referencePa) *
+    1e6;
+  return lorentzLorenzFactor(1 + gas.nMinusOne(wavelengthNm)) * gasMolarVolumeCm3PerMol;
+}
+
+/**
  * A molecular ice's real index by Lorentz–Lorenz from its gas's refractivity (decision-r08-t5d
  * ruling 5, the method of NH₄SH's estimate with no increment, since the solid is molecular): the
  * molar refraction R = (n² − 1) ÷ (n² + 2) × Z × N_A k_B T ÷ p at the gas's reference state, then x =
@@ -3169,13 +3223,7 @@ export function molecularIceIndex(
   wavelengthNm: number,
   molarVolumeCm3PerMol: number,
 ): number {
-  const gasMolarVolumeCm3PerMol =
-    ((gas.compressibility * AVOGADRO_PER_MOL * BOLTZMANN_J_PER_K * gas.referenceK) /
-      gas.referencePa) *
-    1e6;
-  const x =
-    (lorentzLorenzFactor(1 + gas.nMinusOne(wavelengthNm)) * gasMolarVolumeCm3PerMol) /
-    molarVolumeCm3PerMol;
+  const x = gasRowMolarRefractionCm3PerMol(gas, wavelengthNm) / molarVolumeCm3PerMol;
   if (!(x > 0 && x < 1)) {
     throw new RangeError(`Lorentz–Lorenz: x = ${x} is not in (0, 1)`);
   }
@@ -3948,6 +3996,1380 @@ export function cauchyResidual(fit: CauchyFit, curve: (wavelengthNm: number) => 
  */
 export const S8_MOLTEN_INDEX_D = 1.929;
 
+// R08.T5.k: nine liquids from their gases' molar refraction and their own measurements
+// (decision-p14-t49h-gas-index and its addendum A.1–A.4, 2026-10-16).
+
+/** Börzsönyi et al. 2008, `rayleigh.ts`'s source of the noble gases' Sellmeier forms. */
+const BORZSONYI_2008 =
+  "Börzsönyi, Heiner, Kalashnikov, Kovács and Osvay, Appl. Opt. 47 (2008) 4856";
+
+/**
+ * n − 1 from a two-term Sellmeier form, n² − 1 = B₁λ² ÷ (λ² − C₁) + B₂λ² ÷ (λ² − C₂), λ in µm and C
+ * in µm², written as (n² − 1) ÷ (n + 1): `view/atmosphere/rayleigh.ts`'s `sellmeierNMinusOne`,
+ * copied.
+ */
+function sellmeierNMinusOne(
+  wavelengthNm: number,
+  b1: number,
+  c1Um2: number,
+  b2: number,
+  c2Um2: number,
+): number {
+  const l2 = (wavelengthNm / 1_000) ** 2;
+  const nSquaredMinusOne = (b1 * l2) / (l2 - c1Um2) + (b2 * l2) / (l2 - c2Um2);
+  return nSquaredMinusOne / (Math.sqrt(1 + nSquaredMinusOne) + 1);
+}
+
+/**
+ * Kr's refractivity, as `rayleigh.ts` holds it, for liquid Kr's checks (R08.T5.k): Börzsönyi et al.
+ * 2008's Sellmeier form, B₁ = 26,102.88 × 10⁻⁸, C₁ = 2.01 × 10⁻⁶ µm², B₂ = 56,946.82 × 10⁻⁸ and C₂ =
+ * 10.043 × 10⁻³ µm², at 0 °C and 1,000 mbar, Z = 0.997 282.
+ */
+export const KR_DISPERSION: GasDispersionCopy = {
+  nMinusOne: (wavelengthNm) =>
+    sellmeierNMinusOne(wavelengthNm, 26_102.88e-8, 2.01e-6, 56_946.82e-8, 10.043e-3),
+  referenceK: 273.15,
+  referencePa: 100_000,
+  compressibility: 0.997_282,
+  source: BORZSONYI_2008,
+};
+
+/**
+ * Xe's refractivity, as `rayleigh.ts` holds it, for liquid Xe's checks (R08.T5.k): Börzsönyi et al.
+ * 2008's Sellmeier form, B₁ = 103,701.61 × 10⁻⁸, C₁ = 12.75 × 10⁻³ µm² (refractiveindex.info's
+ * correction of the paper's 12.75 × 10⁻⁶), B₂ = 31,228.61 × 10⁻⁸ and C₂ = 0.561 × 10⁻³ µm², at 0 °C
+ * and 1,000 mbar, Z = 0.993 245.
+ */
+export const XE_DISPERSION: GasDispersionCopy = {
+  nMinusOne: (wavelengthNm) =>
+    sellmeierNMinusOne(wavelengthNm, 103_701.61e-8, 12.75e-3, 31_228.61e-8, 0.561e-3),
+  referenceK: 273.15,
+  referencePa: 100_000,
+  compressibility: 0.993_245,
+  source: BORZSONYI_2008,
+};
+
+/**
+ * CO₂'s refractivity, as `rayleigh.ts` holds it, for liquid CO₂'s estimate (R08.T5.k):
+ * Bideau-Mehu, Guern, Abjean and Johannin-Gilles, Opt. Commun. 9 (1973) 432, as Sneep and Ubachs
+ * 2005 (eq. 13) correct it, n − 1 = 6.991 00 × 10⁻² ÷ (166.175 − σ²) + 1.447 20 × 10⁻³ ÷ (79.609 −
+ * σ²) + 6.429 41 × 10⁻⁵ ÷ (56.306 4 − σ²) + 5.213 06 × 10⁻⁵ ÷ (46.019 6 − σ²) + 1.468 47 × 10⁻⁶ ÷
+ * (0.058 473 8 − σ²), at 0 °C and 101,325 Pa, Z = 0.993 265.
+ */
+export const CO2_DISPERSION: GasDispersionCopy = {
+  nMinusOne: (wavelengthNm) => {
+    const s2 = wavenumberSquaredPerUm2(wavelengthNm);
+    return (
+      6.991_00e-2 / (166.175 - s2) +
+      1.447_20e-3 / (79.609 - s2) +
+      6.429_41e-5 / (56.306_4 - s2) +
+      5.213_06e-5 / (46.019_6 - s2) +
+      1.468_47e-6 / (0.058_473_8 - s2)
+    );
+  },
+  referenceK: 273.15,
+  referencePa: 101_325,
+  compressibility: 0.993_265,
+  source:
+    "Bideau-Mehu, Guern, Abjean and Johannin-Gilles, Opt. Commun. 9 (1973) 432, as corrected by Sneep and Ubachs 2005, eq. 13",
+};
+
+/**
+ * N₂O's refractivity, as `rayleigh.ts` holds it, for liquid N₂O's estimate (R08.T5.k): He, Fang,
+ * Shoshanim, Brown and Rudich, Atmos. Chem. Phys. 21 (2021) 14927, eq. 9, 10⁸(n − 1) = 22,095 +
+ * 1.662 91 × 10¹⁴ ÷ (6.752 26 × 10⁹ − ν²), at 15 °C and 101,325 Pa, Z = 1.
+ */
+export const N2O_DISPERSION: GasDispersionCopy = {
+  nMinusOne: (wavelengthNm) =>
+    (22_095 + 1.662_91e14 / (6.752_26e9 - wavenumberSquaredPerCm2(wavelengthNm))) * 1e-8,
+  referenceK: 288.15,
+  referencePa: 101_325,
+  compressibility: 1,
+  source: "He, Fang, Shoshanim, Brown and Rudich, Atmos. Chem. Phys. 21 (2021) 14927, eq. 9",
+};
+
+/**
+ * SO₂'s refractivity, as `rayleigh.ts`'s `ESTIMATED_RAYLEIGH` row holds its dispersion, for liquid
+ * SO₂'s estimate (R08.T5.k): C. and M. Cuthbertson, Proc. R. Soc. Lond. A 83 (1910) 171, n − 1 =
+ * 0.063 733 ÷ (99.349 − λ⁻²) at 0 °C and 760 mm, Z = 1.
+ */
+export const SO2_DISPERSION: GasDispersionCopy = {
+  nMinusOne: (wavelengthNm) => 0.063_733 / (99.349 - wavenumberSquaredPerUm2(wavelengthNm)),
+  referenceK: 273.15,
+  referencePa: 101_325,
+  compressibility: 1,
+  source:
+    "C. and M. Cuthbertson, Proc. R. Soc. Lond. A 83 (1910) 171, its scale from Cuthbertson and Metcalfe, Proc. R. Soc. Lond. A 80 (1908) 406",
+};
+
+/**
+ * A liquid's real index from its gas's molar refraction scaled by one factor (R08.T5.k;
+ * decision-p14-t49h-gas-index §1.2): x = c R(λ) ρ_m and n = √((1 + 2x) ÷ (1 − x)), R the gas row's
+ * Lorentz–Lorenz molar refraction at its own reference state and Z. It is
+ * {@link molecularIceIndex} at the molar volume V_m ÷ c, V_m = 1,000 ÷ ρ_m.
+ *
+ * @param molarDensityMolPerL - ρ_m, the liquid's molar density, mol/l.
+ * @param factor - c, the file's one factor on the gas's molar refraction: 1 where nothing anchors
+ *   it.
+ * @throws RangeError as {@link molecularIceIndex} does.
+ */
+export function scaledLiquidIndex(
+  gas: GasDispersionCopy,
+  wavelengthNm: number,
+  molarDensityMolPerL: number,
+  factor: number,
+): number {
+  return molecularIceIndex(gas, wavelengthNm, molarVolumeOf(molarDensityMolPerL) / factor);
+}
+
+/**
+ * The factor c on a gas's molar refraction that meets a liquid's measured indices by least squares
+ * in n ({@link scaledLiquidIndex}; R08.T5.k), by Gauss–Newton iteration from c = 1, unrounded.
+ *
+ * @throws Error for no points, or no convergence in 50 steps.
+ */
+export function leastSquaresFactor(
+  gas: GasDispersionCopy,
+  molarDensityMolPerL: number,
+  points: ReadonlyArray<IndexPoint>,
+): number {
+  if (points.length === 0) {
+    throw new Error("leastSquaresFactor: no points");
+  }
+  let factor = 1;
+  for (let step = 0; step < 50; step += 1) {
+    let gradient = 0;
+    let curvature = 0;
+    for (const point of points) {
+      const nm = point.wavelengthUm * 1_000;
+      const n = scaledLiquidIndex(gas, nm, molarDensityMolPerL, factor);
+      const x = (factor * gasRowMolarRefractionCm3PerMol(gas, nm) * molarDensityMolPerL) / 1_000;
+      // dn/dc = dn/dx × x ÷ c, with dn/dx = 3 ÷ (2n(1 − x)²).
+      const slope = (3 * x) / (2 * n * (1 - x) ** 2 * factor);
+      gradient += (n - point.n) * slope;
+      curvature += slope * slope;
+    }
+    const change = gradient / curvature;
+    factor -= change;
+    if (Math.abs(change) < 1e-14) {
+      return factor;
+    }
+  }
+  throw new Error("leastSquaresFactor: no convergence");
+}
+
+/** A liquid check's measured molar refraction over its gas row's: (n² − 1) ÷ (n² + 2) × V_m ÷ R. */
+export function molarRefractionRatio(check: LiquidCheck): number {
+  return (
+    (lorentzLorenzFactor(check.measured) * check.molarVolumeCm3PerMol) /
+    gasRowMolarRefractionCm3PerMol(check.gas, check.wavelengthNm)
+  );
+}
+
+/** A saturated liquid's molar density as the NIST Chemistry WebBook's fluid properties give it. */
+export interface WebBookDensity {
+  /** ρ_m, mol/l, to the page's seven figures. */
+  readonly molPerL: number;
+  /** The temperature, K. */
+  readonly temperatureK: number;
+  /** The equation of state the page cites, with the density uncertainty it states. */
+  readonly equationOfState: string;
+  /** The query's URL and the table's SHA-256, with the date fetched. */
+  readonly source: string;
+}
+
+/** A {@link WebBookDensity} read from `nistSaturation`'s query, fetched {@link FETCHED_T5K}. */
+function webBookDensity(
+  molPerL: number,
+  temperatureK: number,
+  equationOfState: string,
+  query: readonly [id: string, low: string, high: string, step: string],
+  sha256: string,
+): WebBookDensity {
+  const [id, low, high, step] = query;
+  return {
+    molPerL,
+    temperatureK,
+    equationOfState,
+    source: `${nistSaturation(id, low, high, step)}, SHA-256 ${sha256}, fetched ${FETCHED_T5K}`,
+  };
+}
+
+/** Lemmon and Span 2006, the WebBook's equation of state for Kr, Xe, CO, N₂O and H₂S. */
+const LEMMON_SPAN_2006 =
+  "E. W. Lemmon and R. Span, J. Chem. Eng. Data 51 (2006) 785, DOI 10.1021/je050186n";
+
+/** Saturated liquid O₂ at 90.19 K, its normal boiling point (Schmidt and Wagner 1985). */
+export const O2_LIQUID_DENSITY = webBookDensity(
+  35.662_63,
+  90.19,
+  "R. Schmidt and W. Wagner, Fluid Phase Equilib. 19 (1985) 175, DOI 10.1016/0378-3812(85)87016-3, density uncertain by 0.1%",
+  ["C7782447", "90.19", "90.2", "0.01"],
+  "7e0c2e5ffaa0cadd4d2d13af6892cffbcdc5cade4f39b4b832119c4325ad21a6",
+);
+
+/** Saturated liquid Ar at 83.81 K, Sinnock and Smith's melting point (Tegeler, Span and Wagner 1999). */
+export const AR_LIQUID_DENSITY = webBookDensity(
+  35.464_64,
+  83.81,
+  "Ch. Tegeler, R. Span and W. Wagner, J. Phys. Chem. Ref. Data 28 (1999) 779, DOI 10.1063/1.556037, density uncertain by under 0.02% to 12 MPa and 340 K",
+  ["C7440371", "83.81", "83.82", "0.01"],
+  "f142e38077b182eac6fe46b6eeae96267af125707c7ec7a3db23fb972202c1b1",
+);
+
+/** Saturated liquid Kr at Sinnock and Smith's 115.95 K, for the method's record (Lemmon and Span 2006). */
+export const KR_LIQUID_DENSITY = webBookDensity(
+  29.181_15,
+  115.95,
+  `${LEMMON_SPAN_2006}, density uncertain by 0.2% below 100 MPa`,
+  ["C7439909", "115.95", "115.96", "0.01"],
+  "44dcd0af865ee46d7edd16db112b6a04f563cabaa1640c9943425353ad0aeb02",
+);
+
+/**
+ * Saturated liquid Xe at 161.405 K, the WebBook's lowest saturated state, standing for Sinnock and
+ * Smith's 161.35 K in the method's record (Lemmon and Span 2006).
+ */
+export const XE_LIQUID_DENSITY = webBookDensity(
+  22.592_09,
+  161.405,
+  `${LEMMON_SPAN_2006}, density uncertain by 0.2% up to 100 MPa`,
+  ["C7440633", "161.405", "161.415", "0.01"],
+  "36a7482bc8c8e3143d7abb04ef673813285cc0db24fe49bd2de80218e8f2ef7a",
+);
+
+/** CO's density uncertainty as the WebBook's page states Lemmon and Span 2006's. */
+const CO_EQUATION_OF_STATE = `${LEMMON_SPAN_2006}, density uncertain by 0.3%`;
+
+/** Saturated liquid CO at 68.16 K, the registry row's triple point (Lemmon and Span 2006). */
+export const CO_LIQUID_DENSITY = webBookDensity(
+  30.329_71,
+  68.16,
+  CO_EQUATION_OF_STATE,
+  ["C630080", "68.16", "68.17", "0.01"],
+  "8110ea2f642cf1dde596cf8714e398fcee517c5cf50c4e60c6ff3d14619474e3",
+);
+
+/** Saturated liquid CO at Gagnon et al.'s 78.3 K, for the method's record. */
+export const CO_LIQUID_78K_DENSITY = webBookDensity(
+  28.832_82,
+  78.3,
+  CO_EQUATION_OF_STATE,
+  ["C630080", "78.3", "78.31", "0.01"],
+  "fff895d46e5357673ec0668370c616f0534e04d9d1522f005fbf2e04371116a4",
+);
+
+/** CO₂'s equation of state as the WebBook's page cites it. */
+const CO2_EQUATION_OF_STATE =
+  "R. Span and W. Wagner, J. Phys. Chem. Ref. Data 25 (1996) 1509, DOI 10.1063/1.555991, density uncertain by 0.03–0.05% to 30 MPa and 523 K";
+
+/** Saturated liquid CO₂ at 216.6 K, the registry row's triple point, 216.592 K, rounded up. */
+export const CO2_LIQUID_DENSITY = webBookDensity(
+  26.776_63,
+  216.6,
+  CO2_EQUATION_OF_STATE,
+  ["C124389", "216.6", "216.61", "0.01"],
+  "e276ec7e0bfa52c5fd438baea2655f8699aab160d7f76c4ed37633be70486615",
+);
+
+/** The WebBook's query for saturated liquid CO₂ over Bleekrode's states, 285.65–297.15 K every 0.5 K. */
+const CO2_ROOM_QUERY = ["C124389", "285.65", "297.15", "0.5"] as const;
+
+/** That query's SHA-256. */
+const CO2_ROOM_SHA256 = "8b98026a63d71d07318db1307cd1c4cbfd3c6fb265e53eea5a3f1f770c3da7cc";
+
+/** Saturated liquid N₂O at 184.67 K, its normal boiling point (Lemmon and Span 2006). */
+export const N2O_LIQUID_DENSITY = webBookDensity(
+  27.957_49,
+  184.67,
+  `${LEMMON_SPAN_2006}, density uncertain by 0.25% below 220 K`,
+  ["C10024972", "184.67", "184.68", "0.01"],
+  "4fe65961efe63c2a961fe28c160f3d7a30c3557518e61dd325af71771f9040a2",
+);
+
+/** SO₂'s equation of state as the WebBook's page cites it. */
+const SO2_EQUATION_OF_STATE =
+  "K. Gao, J. Wu, P. Zhang and E. W. Lemmon, J. Chem. Eng. Data 61 (2016) 2859, DOI 10.1021/acs.jced.6b00195, density uncertain by 0.1% in the liquid";
+
+/** Saturated liquid SO₂ at 197.7 K, the registry row's triple point (Gao et al. 2016). */
+export const SO2_LIQUID_DENSITY = webBookDensity(
+  25.411_32,
+  197.7,
+  SO2_EQUATION_OF_STATE,
+  ["C7446095", "197.7", "197.71", "0.01"],
+  "4a264e71e640a1e815e1344a6e53f4155b3ff87a87ba8a6593ee319720ed9f20",
+);
+
+/** The WebBook's query for saturated liquid SO₂ over 288.15–297.15 K every 0.5 K. */
+const SO2_ROOM_QUERY = ["C7446095", "288.15", "297.15", "0.5"] as const;
+
+/** That query's SHA-256. */
+const SO2_ROOM_SHA256 = "ec9c096d0eef9a2ea36c4e61c37e660d09f7c0096a84da7adfab7dd830517590";
+
+/** H₂S's equation of state as the WebBook's page cites it. */
+const H2S_EQUATION_OF_STATE = `${LEMMON_SPAN_2006}, density uncertain by 0.1% in the liquid`;
+
+/** Saturated liquid H₂S at 187.7 K, the registry row's triple point (Lemmon and Span 2006). */
+export const H2S_LIQUID_DENSITY = webBookDensity(
+  29.116_33,
+  187.7,
+  H2S_EQUATION_OF_STATE,
+  ["C7783064", "187.7", "187.71", "0.01"],
+  "43945332d433fac4e2fb492644a740fa14e726ce79b4a4b0ee5b96f7c4cc1d16",
+);
+
+/** The WebBook's query for saturated liquid H₂S at 285.65 and 291.65 K. */
+const H2S_ROOM_QUERY = ["C7783064", "285.65", "291.65", "6"] as const;
+
+/** That query's SHA-256. */
+const H2S_ROOM_SHA256 = "82c2f290c1512b903d3e410d27f2288934f86d2a6805fcc5037c064ebc340d12";
+
+/** A measured index at a named line or state, a T5.k anchor or check. */
+export interface NamedIndexPoint extends IndexPoint {
+  /** The line, or the source and its state, in words. */
+  readonly line: string;
+}
+
+/**
+ * Sinnock and Smith 1969's liquid Ar at 83.81 K, its melting point (Phys. Rev. 181, 1297, as
+ * refractiveindex.info's CC0 `main/Ar/nk/Sinnock-liquid-83.81K.yml` gives the table): λ, µm, and n.
+ * The input checked by SHA-256 must hold these rows exactly.
+ */
+export const AR_LIQUID_ROWS: ReadonlyArray<IndexPoint> = [
+  { wavelengthUm: 0.3612, n: 1.2395 },
+  { wavelengthUm: 0.365, n: 1.2392 },
+  { wavelengthUm: 0.4063, n: 1.2372 },
+  { wavelengthUm: 0.4358, n: 1.2361 },
+  { wavelengthUm: 0.4753, n: 1.2349 },
+  { wavelengthUm: 0.5086, n: 1.2341 },
+  { wavelengthUm: 0.5461, n: 1.2334 },
+  { wavelengthUm: 0.578, n: 1.2328 },
+  { wavelengthUm: 0.6439, n: 1.2321 },
+];
+
+/** Sinnock and Smith 1969's liquid Kr at 115.95 K (`main/Kr/nk/Sinnock-liquid-115.95K.yml`). */
+export const KR_LIQUID_ROWS: ReadonlyArray<IndexPoint> = [
+  { wavelengthUm: 0.3631, n: 1.312 },
+  { wavelengthUm: 0.4063, n: 1.309 },
+  { wavelengthUm: 0.4358, n: 1.3074 },
+  { wavelengthUm: 0.4753, n: 1.3056 },
+  { wavelengthUm: 0.5086, n: 1.3042 },
+  { wavelengthUm: 0.5461, n: 1.3032 },
+  { wavelengthUm: 0.578, n: 1.3024 },
+  { wavelengthUm: 0.6439, n: 1.3011 },
+];
+
+/** Sinnock and Smith 1969's liquid Xe at 161.35 K (`main/Xe/nk/Sinnock-liquid-161.35K.yml`). */
+export const XE_LIQUID_ROWS: ReadonlyArray<IndexPoint> = [
+  { wavelengthUm: 0.3612, n: 1.4111 },
+  { wavelengthUm: 0.365, n: 1.4103 },
+  { wavelengthUm: 0.4063, n: 1.4041 },
+  { wavelengthUm: 0.4358, n: 1.4001 },
+  { wavelengthUm: 0.47, n: 1.3967 },
+  { wavelengthUm: 0.4806, n: 1.3957 },
+  { wavelengthUm: 0.5086, n: 1.3937 },
+  { wavelengthUm: 0.5461, n: 1.3918 },
+  { wavelengthUm: 0.578, n: 1.39 },
+  { wavelengthUm: 0.6439, n: 1.3876 },
+];
+
+/**
+ * A liquid table's rows from its input, as the tool holds them.
+ *
+ * @throws Error if the input's rows differ from the rows held, in number, wavelength or n.
+ */
+export function checkedRows(
+  text: string,
+  held: ReadonlyArray<IndexPoint>,
+): ReadonlyArray<IndexPoint> {
+  const rows = parseRefractiveIndexInfoN(text);
+  const same =
+    rows.length === held.length &&
+    rows.every((row, i) => {
+      const kept = held[i];
+      return (
+        kept !== undefined &&
+        row.wavelengthUm === kept.wavelengthUm &&
+        row.n === kept.n &&
+        row.k === 0
+      );
+    });
+  if (!same) {
+    throw new Error("a liquid table's rows differ from the rows the tool holds");
+  }
+  return held;
+}
+
+/**
+ * Liquid Ar's factor on its gas's molar refraction (decision-p14-t49h-gas-index A.2): the least
+ * squares fit in n to {@link AR_LIQUID_ROWS} at {@link AR_LIQUID_DENSITY}, to six figures.
+ */
+export const AR_LIQUID_FACTOR = rounded(
+  leastSquaresFactor(AR_DISPERSION, AR_LIQUID_DENSITY.molPerL, AR_LIQUID_ROWS),
+);
+
+/** Liquid Ar's worst row against its scaled curve: the largest miss in n and its wavelength, nm. */
+export function arWorstRow(): { readonly miss: number; readonly wavelengthNm: number } {
+  let worst = { miss: 0, wavelengthNm: Number.NaN };
+  for (const row of AR_LIQUID_ROWS) {
+    const nm = row.wavelengthUm * 1_000;
+    const miss = Math.abs(
+      scaledLiquidIndex(AR_DISPERSION, nm, AR_LIQUID_DENSITY.molPerL, AR_LIQUID_FACTOR) - row.n,
+    );
+    if (miss > worst.miss) {
+      worst = { miss, wavelengthNm: nm };
+    }
+  }
+  return worst;
+}
+
+/** The shortest row a liquid table's red tail is fitted from, µm (decision-p14-t49h-gas-index A.3). */
+export const RED_TAIL_FROM_UM = 0.4358;
+
+/**
+ * A liquid table's red tail (decision-p14-t49h-gas-index A.3): the least-squares two-term Cauchy line
+ * over its rows from {@link RED_TAIL_FROM_UM}, a and b to six figures.
+ */
+export function redTailFit(rows: ReadonlyArray<IndexPoint>): Pick<CauchyFit, "a" | "bUm2"> {
+  return fitCauchy(rows.filter((row) => row.wavelengthUm >= RED_TAIL_FROM_UM));
+}
+
+/** A red tail's n at a wavelength, nm: a + b ÷ λ², λ in µm. */
+export function redTailIndex(tail: Pick<CauchyFit, "a" | "bUm2">, wavelengthNm: number): number {
+  const um = wavelengthNm / 1_000;
+  return tail.a + tail.bUm2 / (um * um);
+}
+
+/** The largest departure of a red tail from the rows it was fitted to. */
+export function redTailWorst(
+  rows: ReadonlyArray<IndexPoint>,
+  tail: Pick<CauchyFit, "a" | "bUm2">,
+): number {
+  return Math.max(
+    ...rows
+      .filter((row) => row.wavelengthUm >= RED_TAIL_FROM_UM)
+      .map((row) => Math.abs(redTailIndex(tail, row.wavelengthUm * 1_000) - row.n)),
+  );
+}
+
+/** A red tail's step from a table's last row, at that row's wavelength: the tail less the row. */
+export function redTailStep(
+  rows: ReadonlyArray<IndexPoint>,
+  tail: Pick<CauchyFit, "a" | "bUm2">,
+): number {
+  const last = rows.at(-1);
+  if (last === undefined) {
+    throw new Error("redTailStep: no rows");
+  }
+  return redTailIndex(tail, last.wavelengthUm * 1_000) - last.n;
+}
+
+/**
+ * A measured liquid table on {@link MATERIAL_GRID_NM} (R08.T5.k): n linear in wavelength between its
+ * rows up to its last, and its red tail ({@link redTailFit}) beyond, to six figures; k = 0, which
+ * the table does not give.
+ */
+export function tableWithRedTail(rows: ReadonlyArray<IndexPoint>): ReducedIndex {
+  const lastUm = rows.at(-1)?.wavelengthUm ?? Number.NaN;
+  const inner = MATERIAL_GRID_NM.filter((nm) => nm / 1_000 <= lastUm);
+  const outer = MATERIAL_GRID_NM.filter((nm) => nm / 1_000 > lastUm);
+  const tail = redTailFit(rows);
+  const reduced = resample(
+    rows.map((row) => ({ wavelengthUm: row.wavelengthUm, n: row.n, k: 0 })),
+    { holdNm: 0, grid: inner },
+  );
+  return {
+    n: [...reduced.n, ...outer.map((nm) => rounded(redTailIndex(tail, nm)))],
+    k: MATERIAL_GRID_NM.map(() => 0),
+  };
+}
+
+/** Liquid Kr's red tail over its six rows from 435.8 nm. */
+export const KR_LIQUID_TAIL = redTailFit(KR_LIQUID_ROWS);
+
+/** Liquid Xe's red tail over its seven rows from 435.8 nm. */
+export const XE_LIQUID_TAIL = redTailFit(XE_LIQUID_ROWS);
+
+/**
+ * The largest departure of a gas's shape, scaled by least squares to a liquid table, from the
+ * table's rows: why Kr's and Xe's files take their rows (decision-p14-t49h-gas-index §2.2).
+ */
+export function scaledShapeMiss(
+  gas: GasDispersionCopy,
+  molarDensityMolPerL: number,
+  rows: ReadonlyArray<IndexPoint>,
+): number {
+  const factor = leastSquaresFactor(gas, molarDensityMolPerL, rows);
+  return Math.max(
+    ...rows.map((row) =>
+      Math.abs(
+        scaledLiquidIndex(gas, row.wavelengthUm * 1_000, molarDensityMolPerL, factor) - row.n,
+      ),
+    ),
+  );
+}
+
+/**
+ * Johns and Wilhelm 1937's liquid O₂ at its normal boiling point, 1.2242 at 546.1 nm (Can. J. Res.
+ * 15a, 101, DOI 10.1139/cjr37a-013, its abstract through Crossref): oxygen-liquid.json's anchor.
+ */
+export const O2_LIQUID_ANCHOR: LiquidCheck = {
+  what: "liquid O2 at 90.19 K against Johns and Wilhelm 1937 (Can. J. Res. 15a, 101)",
+  gas: O2_DISPERSION,
+  molarVolumeCm3PerMol: molarVolumeOf(O2_LIQUID_DENSITY.molPerL),
+  wavelengthNm: 546.1,
+  measured: 1.2242,
+};
+
+/** Liquid O₂'s factor: the one that meets {@link O2_LIQUID_ANCHOR}, to six figures. */
+export const O2_LIQUID_FACTOR = rounded(molarRefractionRatio(O2_LIQUID_ANCHOR));
+
+/**
+ * Liveing and Dewar 1895's liquid O₂ at its boiling point (Phil. Mag. (5) 40, 268, p. 269; public
+ * domain): the cadmium spark's blue and red lines, thallium's green, lithium's red and sodium's
+ * yellow, at the wavelengths the paper prints, Å as µm. A recorded check on oxygen-liquid.json.
+ */
+export const LIVEING_DEWAR_1895_O2: ReadonlyArray<NamedIndexPoint> = [
+  { line: "cadmium's blue line, 4416 Å", wavelengthUm: 0.4416, n: 1.2249 },
+  { line: "cadmium's red line, 6438 Å", wavelengthUm: 0.6438, n: 1.2211 },
+  { line: "thallium's green line, printed λ535, 5350 Å", wavelengthUm: 0.535, n: 1.2219 },
+  { line: "lithium's red line, 6705 Å", wavelengthUm: 0.6705, n: 1.221 },
+  { line: "sodium's yellow lines, 5892 Å", wavelengthUm: 0.5892, n: 1.2214 },
+];
+
+/** Liveing and Dewar 1892's liquid O₂ at the D line by a prism of 59° 15′, 1.2236 (p. 208). */
+export const LIVEING_DEWAR_1892_O2_D = { wavelengthNm: 589.3, n: 1.2236 } as const;
+
+/** Johns and Wilhelm 1937's liquid N₂ at its normal boiling point, 1.1990 at 546.1 nm (their abstract). */
+export const JOHNS_WILHELM_N2_546 = 1.199;
+
+/** The O₂–O₂ set's reference number for Thalman and Volkamer 2013 in HITRAN2024's file. */
+export const THALMAN_VOLKAMER_REFERENCE = "32";
+
+/** Thalman and Volkamer 2013's coldest sets' temperature in that file, K. */
+export const OXYGEN_PAIR_COLDEST_K = 203;
+
+/** The coldest sets' longest wavelength, nm: their 15,290 cm⁻¹. */
+export const OXYGEN_PAIR_LONGEST_NM = 1e7 / 15_290;
+
+/**
+ * The grid points the coldest sets reach where their σ is at or below 0, nm: the measurement's
+ * scatter about its baseline between the bands, where liquid O₂'s k is 0.
+ */
+export const OXYGEN_PAIR_ZERO_NM: ReadonlyArray<number> = [
+  390, 395, 400, 405, 410, 415, 420, 425, 430, 455, 595, 600, 650,
+];
+
+/**
+ * Thalman and Volkamer 2013's O₂–O₂ σ at 203 K at two grid points, cm⁵ a molecule pair, to six
+ * figures: near the 577 and 630 nm bands' peaks, as HITRAN2024's file gives them (linear in
+ * wavenumber between its points 1 cm⁻¹ apart).
+ */
+export const OXYGEN_PAIR_CROSS_SECTIONS_CM5: ReadonlyArray<
+  readonly [wavelengthNm: number, sigmaCm5: number]
+> = [
+  [575, 1.191_78e-45],
+  [630, 8.642_97e-46],
+];
+
+/**
+ * How far below 0 the coldest sets' σ reaches at the grid's points, cm⁵: their scatter about the
+ * baseline between the bands (the 650 nm point's −6.53 × 10⁻⁴⁸).
+ */
+export const OXYGEN_PAIR_SCATTER_CM5 = 7e-48;
+
+/**
+ * Thalman and Volkamer's σ at 577 nm, cm⁵, at 293 and 203 K, to three figures: how the 577 nm band
+ * grows on cooling in the same sets.
+ */
+export const OXYGEN_PAIR_COOLING: ReadonlyArray<readonly [temperatureK: number, sigmaCm5: number]> =
+  [
+    [293, 1.11e-45],
+    [203, 1.36e-45],
+  ];
+
+/** Liquid O₂'s number density at {@link O2_LIQUID_DENSITY}, cm⁻³: N = ρ_m N_A. */
+export const O2_LIQUID_NUMBER_DENSITY_PER_CM3 =
+  (O2_LIQUID_DENSITY.molPerL / 1_000) * AVOGADRO_PER_MOL;
+
+/**
+ * Liquid O₂'s k from a pair cross-section at a wavelength, nm (decision-p14-t49h-gas-index §2.6,
+ * path 2): a = σN², N the liquid's number density, so a in cm⁻¹, and k = aλ ÷ 4π.
+ *
+ * @param sigmaCm5 - σ, cm⁵ a molecule pair.
+ */
+export function oxygenPairK(sigmaCm5: number, wavelengthNm: number): number {
+  return absorptionIndex(oxygenPairAbsorptionPerM(sigmaCm5), wavelengthNm);
+}
+
+/** Liquid O₂'s absorption coefficient from a pair cross-section, m⁻¹: 100 σN². */
+export function oxygenPairAbsorptionPerM(sigmaCm5: number): number {
+  return 100 * sigmaCm5 * O2_LIQUID_NUMBER_DENSITY_PER_CM3 ** 2;
+}
+
+/** Liquid O₂'s absorption coefficient at a grid point of {@link OXYGEN_PAIR_CROSS_SECTIONS_CM5}, m⁻¹. */
+function oxygenPairPerM(wavelengthNm: number): number {
+  const sigma = OXYGEN_PAIR_CROSS_SECTIONS_CM5.find(([nm]) => nm === wavelengthNm)?.[1];
+  if (sigma === undefined) {
+    throw new Error(`no O2-O2 cross-section held at ${wavelengthNm} nm`);
+  }
+  return oxygenPairAbsorptionPerM(sigma);
+}
+
+/**
+ * Thalman and Volkamer 2013's O₂–O₂ σ at a vacuum wavelength, nm, in their sets at a temperature
+ * (their coldest unless another is given), cm⁵ a molecule pair, linear in wavenumber between the
+ * set's points; undefined where no such set reaches.
+ *
+ * @throws Error if two of those sets reach the wavelength.
+ */
+export function oxygenPairCrossSectionCm5(
+  sets: ReadonlyArray<CiaSet>,
+  wavelengthNm: number,
+  temperatureK: number = OXYGEN_PAIR_COLDEST_K,
+): number | undefined {
+  const perCm = 1e7 / wavelengthNm;
+  const reaching = sets.filter(
+    (set) =>
+      set.reference === THALMAN_VOLKAMER_REFERENCE &&
+      set.temperatureK === temperatureK &&
+      perCm >= set.minPerCm &&
+      perCm <= set.maxPerCm,
+  );
+  if (reaching.length > 1) {
+    throw new Error(`two O2-O2 sets at ${temperatureK} K reach ${wavelengthNm} nm`);
+  }
+  const points = reaching[0]?.points ?? [];
+  const upper = points.findIndex(([nu]) => nu >= perCm);
+  const hi = points[upper];
+  const lo = points[upper - 1] ?? hi;
+  if (hi === undefined || lo === undefined) {
+    return undefined;
+  }
+  return hi[0] === lo[0] ? hi[1] : lo[1] + ((perCm - lo[0]) / (hi[0] - lo[0])) * (hi[1] - lo[1]);
+}
+
+/**
+ * Liquid O₂'s k on {@link MATERIAL_GRID_NM} from HITRAN2024's O₂–O₂ file (R08.T5.k;
+ * decision-p14-t49h-gas-index §2.6, path 2), to six figures: {@link oxygenPairK} of Thalman and
+ * Volkamer's 203 K sets, and 0 where they do not reach or their σ is at or below 0.
+ *
+ * @throws Error if the file's coldest Thalman and Volkamer sets are not at
+ *   {@link OXYGEN_PAIR_COLDEST_K}, its σ at a point of {@link OXYGEN_PAIR_CROSS_SECTIONS_CM5} is
+ *   another, or its zeros are not {@link OXYGEN_PAIR_ZERO_NM}'s: the file's text states them.
+ */
+export function liquidOxygenK(text: string): ReadonlyArray<number> {
+  const sets = parseCia(text);
+  const coldest = Math.min(
+    ...sets
+      .filter((set) => set.reference === THALMAN_VOLKAMER_REFERENCE)
+      .map((s) => s.temperatureK),
+  );
+  if (coldest !== OXYGEN_PAIR_COLDEST_K) {
+    throw new Error(`O2-O2: the coldest Thalman and Volkamer set is at ${coldest} K`);
+  }
+  for (const [nm, sigma] of OXYGEN_PAIR_CROSS_SECTIONS_CM5) {
+    if (rounded(oxygenPairCrossSectionCm5(sets, nm) ?? Number.NaN) !== sigma) {
+      throw new Error(`O2-O2: σ at ${nm} nm is not the ${sigma} the file states`);
+    }
+  }
+  for (const [kelvin, sigma] of OXYGEN_PAIR_COOLING) {
+    const read = oxygenPairCrossSectionCm5(sets, 577, kelvin) ?? Number.NaN;
+    if (Number(read.toPrecision(3)) !== sigma) {
+      throw new Error(`O2-O2: σ at 577 nm and ${kelvin} K is not the ${sigma} the file states`);
+    }
+  }
+  const sigmas = MATERIAL_GRID_NM.map((nm) => oxygenPairCrossSectionCm5(sets, nm));
+  const zeros = MATERIAL_GRID_NM.filter((_, i) => {
+    const sigma = sigmas[i];
+    return sigma !== undefined && sigma <= 0;
+  });
+  const reached = MATERIAL_GRID_NM.filter((_, i) => sigmas[i] !== undefined);
+  if (
+    zeros.join() !== OXYGEN_PAIR_ZERO_NM.join() ||
+    sigmas.some((sigma) => sigma !== undefined && sigma < -OXYGEN_PAIR_SCATTER_CM5) ||
+    reached.at(-1) !== Math.floor(OXYGEN_PAIR_LONGEST_NM / 5) * 5 ||
+    reached[0] !== MATERIAL_GRID_NM[0]
+  ) {
+    throw new Error("O2-O2: the sets' zeros or reach differ from the file's text");
+  }
+  return MATERIAL_GRID_NM.map((nm, i) => {
+    const sigma = sigmas[i];
+    return sigma === undefined || sigma <= 0 ? 0 : rounded(oxygenPairK(sigma, nm));
+  });
+}
+
+/** One of Liveing and Dewar 1892's prism readings of liquid N₂O (Phil. Mag. (5) 34, 205, p. 209). */
+export interface PrismReading extends NamedIndexPoint {
+  /** The minimum deviation, arcminutes. */
+  readonly deviationArcmin: number;
+}
+
+/**
+ * Liveing and Dewar 1892's liquid N₂O at its boiling point (p. 209; public domain): the C, D, F and G
+ * lines and indium's 4509.6 Å, each with its minimum deviation and the index printed. The C, D, F and
+ * G lines are read at 656.3, 589.3, 486.1 and 430.8 nm. N₂O's anchor.
+ */
+export const LIVEING_DEWAR_1892_N2O: ReadonlyArray<PrismReading> = [
+  { line: "C", wavelengthUm: 0.6563, deviationArcmin: 22 * 60 + 53, n: 1.329 },
+  { line: "D", wavelengthUm: 0.5893, deviationArcmin: 23 * 60, n: 1.3305 },
+  { line: "F", wavelengthUm: 0.4861, deviationArcmin: 23 * 60 + 18, n: 1.3345 },
+  { line: "G", wavelengthUm: 0.4308, deviationArcmin: 23 * 60 + 33, n: 1.3378 },
+  { line: "In", wavelengthUm: 0.450_96, deviationArcmin: 23 * 60 + 28, n: 1.3368 },
+];
+
+/** Their lithium line, 6705.5 Å: 22° 52′ and a printed 1.3257, which its deviation contradicts. */
+export const LIVEING_DEWAR_1892_N2O_LITHIUM: PrismReading = {
+  line: "Li",
+  wavelengthUm: 0.670_55,
+  deviationArcmin: 22 * 60 + 52,
+  n: 1.3257,
+};
+
+/**
+ * The prism's angle, arcminutes: 59° 15′, the angle of their liquid-oxygen prism (p. 208), which the
+ * five other N₂O readings' printed pairs imply to 0.015° ({@link prismApexArcmin}).
+ */
+export const LIVEING_DEWAR_PRISM_ARCMIN = 59 * 60 + 15;
+
+/** A prism's index from its angle and the minimum deviation, both arcminutes: sin((A + D) ÷ 2) ÷ sin(A ÷ 2). */
+export function prismIndex(apexArcmin: number, deviationArcmin: number): number {
+  const radiansPerArcmin = Math.PI / (180 * 60);
+  return (
+    Math.sin(((apexArcmin + deviationArcmin) * radiansPerArcmin) / 2) /
+    Math.sin((apexArcmin * radiansPerArcmin) / 2)
+  );
+}
+
+/** The prism angle a reading's printed index and deviation imply, arcminutes, by bisection. */
+export function prismApexArcmin(reading: PrismReading): number {
+  let low = 20 * 60;
+  let high = 89 * 60;
+  for (let step = 0; step < 100; step += 1) {
+    const mid = (low + high) / 2;
+    if (prismIndex(mid, reading.deviationArcmin) > reading.n) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+  return (low + high) / 2;
+}
+
+/** Liquid N₂O's factor: the least-squares fit to {@link LIVEING_DEWAR_1892_N2O}, to six figures. */
+export const N2O_LIQUID_FACTOR = rounded(
+  leastSquaresFactor(N2O_DISPERSION, N2O_LIQUID_DENSITY.molPerL, LIVEING_DEWAR_1892_N2O),
+);
+
+/** A saturated liquid's measured index at the sodium D lines and a temperature, with its WebBook density. */
+export interface LiquidMeasurement {
+  /** Who measured it, as the files name them. */
+  readonly who: string;
+  readonly temperatureC: number;
+  readonly n: number;
+  /** The WebBook's saturated-liquid density at the temperature, mol/l. */
+  readonly molPerL: number;
+}
+
+/** A measurement at the sodium D lines as a {@link LiquidCheck} of a gas row. */
+function sodiumCheck(
+  liquid: string,
+  gas: GasDispersionCopy,
+  measurement: LiquidMeasurement,
+): LiquidCheck {
+  return {
+    what: `${liquid} at ${measurement.temperatureC} °C against ${measurement.who}`,
+    gas,
+    molarVolumeCm3PerMol: molarVolumeOf(measurement.molPerL),
+    wavelengthNm: SODIUM_D_NM,
+    measured: measurement.n,
+  };
+}
+
+/**
+ * Liquid SO₂'s three measured indices at the sodium D lines, each at the WebBook's density at its
+ * temperature: Ketteler 1865's 1.3384 at 24 °C and Bichat 1880's 1.344 at 18.5 °C, as Bleekrode
+ * 1884 quotes them, and Bleekrode's own 1.350 at 15 °C (Proc. R. Soc. Lond. 37, 339, p. 350;
+ * public domain). Their molar refractions' mean sets SO₂'s factor.
+ */
+export const SO2_LIQUID_MEASUREMENTS: ReadonlyArray<LiquidMeasurement> = [
+  {
+    who: "Ketteler 1865, as Bleekrode 1884 quotes it",
+    temperatureC: 24,
+    n: 1.3384,
+    molPerL: 21.379_59,
+  },
+  {
+    who: "Bichat 1880 (J. Phys. 9, 279), as Bleekrode 1884 quotes it",
+    temperatureC: 18.5,
+    n: 1.344,
+    molPerL: 21.619_56,
+  },
+  { who: "Bleekrode 1884", temperatureC: 15, n: 1.35, molPerL: 21.770_4 },
+];
+
+/** {@link SO2_LIQUID_MEASUREMENTS} as checks of SO₂'s gas row. */
+export const SO2_LIQUID_CHECKS: ReadonlyArray<LiquidCheck> = SO2_LIQUID_MEASUREMENTS.map(
+  (measurement) => sodiumCheck("liquid SO2", SO2_DISPERSION, measurement),
+);
+
+/** Liquid SO₂'s factor: the mean of {@link SO2_LIQUID_CHECKS}' molar-refraction ratios, to six figures. */
+export const SO2_LIQUID_FACTOR = rounded(
+  SO2_LIQUID_CHECKS.reduce((sum, check) => sum + molarRefractionRatio(check), 0) /
+    SO2_LIQUID_CHECKS.length,
+);
+
+/** CO₂'s molar mass, g mol⁻¹: the WebBook's molecular weight, 44.0095 (decision-p14-t49h-gas-index A.2). */
+export const CO2_MOLAR_MASS_G_PER_MOL = 44.0095;
+
+/**
+ * Phillips 1920's Lorentz–Lorenz law for CO₂ at 34 °C and 546.1 nm (Proc. R. Soc. Lond. A 97, 225,
+ * p. 236; public domain): (n² + 2)ρ ÷ (n² − 1) = 6.581(1 + 0.0172ρ²), ρ in g cm⁻³, measured up to
+ * his greatest density, 0.73692 g cm⁻³ (p. 235's table).
+ */
+export const PHILLIPS_1920 = {
+  limitGPerCm3: 6.581,
+  coefficientCm6PerG2: 0.0172,
+  wavelengthNm: 546.1,
+  greatestDensityGPerCm3: 0.736_92,
+} as const;
+
+/** Phillips's factor on the gas's molar refraction at a density, g cm⁻³: 1 ÷ (1 + 0.0172ρ²). */
+export function phillipsFactor(densityGPerCm3: number): number {
+  return 1 / (1 + PHILLIPS_1920.coefficientCm6PerG2 * densityGPerCm3 ** 2);
+}
+
+/** A molar density of CO₂, mol/l, in g cm⁻³. */
+export function co2DensityGPerCm3(molPerL: number): number {
+  return (molPerL * CO2_MOLAR_MASS_G_PER_MOL) / 1_000;
+}
+
+/** Liquid CO₂'s factor: Phillips's at {@link CO2_LIQUID_DENSITY}, to six figures. */
+export const CO2_LIQUID_FACTOR = rounded(
+  phillipsFactor(co2DensityGPerCm3(CO2_LIQUID_DENSITY.molPerL)),
+);
+
+/**
+ * Bleekrode 1884's liquid CO₂ under its own vapour pressure (p. 353): his tube II, "nearly free from
+ * air", at 12.5, 17.5 and 24 °C, the light unstated and read as his sodium light, with the WebBook's
+ * densities at those temperatures. ±0.005 is his error estimate (p. 346: "probably it may be
+ * expressed by ±√(E² + E₁²) = ±0.0048").
+ */
+export const BLEEKRODE_CO2: ReadonlyArray<LiquidMeasurement> = [
+  { who: "Bleekrode 1884", temperatureC: 12.5, n: 1.199, molPerL: 19.130_33 },
+  { who: "Bleekrode 1884", temperatureC: 17.5, n: 1.184, molPerL: 18.145_16 },
+  { who: "Bleekrode 1884", temperatureC: 24, n: 1.173, molPerL: 16.474_06 },
+];
+
+/** Bleekrode's other two sodium-light values (p. 353's first table): 1.192 at 15.5 °C and 1.186 at 18.5 °C. */
+export const BLEEKRODE_CO2_FIRST_TABLE: ReadonlyArray<LiquidMeasurement> = [
+  { who: "Bleekrode 1884", temperatureC: 15.5, n: 1.192, molPerL: 18.560_6 },
+  { who: "Bleekrode 1884", temperatureC: 18.5, n: 1.186, molPerL: 17.924_24 },
+];
+
+/** CO₂'s critical density, mol/l, as the WebBook's page gives Span and Wagner's: 10.6249. */
+export const CO2_CRITICAL_MOL_PER_L = 10.6249;
+
+/** The WebBook's fluid page for CO₂ that gives {@link CO2_CRITICAL_MOL_PER_L}, with its SHA-256. */
+const CO2_CRITICAL_PAGE = fetchedSource(
+  "its fluid page's critical density",
+  "https://webbook.nist.gov/cgi/fluid.cgi?Action=Load&ID=C124389&Type=SatP&Digits=7&THigh=216.61&TLow=216.6&TInc=0.01&RefState=DEF&TUnit=K&PUnit=MPa&DUnit=mol%2Fl&HUnit=kJ%2Fmol&WUnit=m%2Fs&VisUnit=uPa*s&STUnit=N%2Fm",
+  "445c0564eb90a35bfe3ab272d3c02a46d1a3c15e06c3b92176bbdb93918d2c68",
+  FETCHED_T5K,
+);
+
+/** The WebBook's species page for CO₂ that gives {@link CO2_MOLAR_MASS_G_PER_MOL}, with its SHA-256. */
+const CO2_SPECIES_PAGE = fetchedSource(
+  "its species page",
+  "https://webbook.nist.gov/cgi/cbook.cgi?ID=C124389&Units=SI",
+  "2c9c9ec9dee087961fa10324e5c26397f4d3bfcfb691af9700b7f16cc5a57e48",
+  FETCHED_T5K,
+);
+
+/** The form's n of liquid CO₂ at a density, mol/l, and wavelength, nm: the gas row at Phillips's factor. */
+export function co2FormIndex(molPerL: number, wavelengthNm: number): number {
+  return scaledLiquidIndex(
+    CO2_DISPERSION,
+    wavelengthNm,
+    molPerL,
+    phillipsFactor(co2DensityGPerCm3(molPerL)),
+  );
+}
+
+/**
+ * The sim's carry of carbon-dioxide-liquid.json's n to another density at constant Lorentz–Lorenz
+ * function, less the form's there (decision-p14-t49h-gas-index §2.4): what the carry misses.
+ */
+export function co2CarryMiss(molPerL: number, wavelengthNm: number): number {
+  const fileX = lorentzLorenzFactor(
+    scaledLiquidIndex(CO2_DISPERSION, wavelengthNm, CO2_LIQUID_DENSITY.molPerL, CO2_LIQUID_FACTOR),
+  );
+  return (
+    indexOfLorentzLorenz((fileX * molPerL) / CO2_LIQUID_DENSITY.molPerL) -
+    co2FormIndex(molPerL, wavelengthNm)
+  );
+}
+
+/** Gagnon, Gammon, Kiefte and Clouter 1979's liquid CO at 78.3 ± 0.5 K, ±0.2% (Appl. Opt. 18, 1237). */
+export const GAGNON_CO: ReadonlyArray<NamedIndexPoint> = [
+  { line: "514.5 nm", wavelengthUm: 0.5145, n: 1.2213 },
+  { line: "632.8 nm", wavelengthUm: 0.6328, n: 1.2122 },
+];
+
+/**
+ * How far Gagnon et al.'s two values differ beyond the gas's slope between their wavelengths: the
+ * estimate's miss of the 632.8 nm value less its miss of the 514.5 nm value, at the WebBook's
+ * 78.3 K density.
+ */
+export function gagnonSlopeExcess(): number {
+  const [blue, red] = GAGNON_CO;
+  if (blue === undefined || red === undefined) {
+    throw new Error("Gagnon et al.'s two values are missing");
+  }
+  const miss = (point: NamedIndexPoint): number =>
+    scaledLiquidIndex(CO_DISPERSION, point.wavelengthUm * 1_000, CO_LIQUID_78K_DENSITY.molPerL, 1) -
+    point.n;
+  return miss(red) - miss(blue);
+}
+
+/** Gagnon et al.'s two values' combined error in n, their 0.2% each in quadrature. */
+export const GAGNON_COMBINED_ERROR = Math.hypot(...GAGNON_CO.map((point) => 0.002 * point.n));
+
+/** Bleekrode 1884's liquid H₂S at the sodium D lines (p. 351): 1.380 at 12.5 °C and 1.384 at 18.5 °C. */
+export const BLEEKRODE_H2S: ReadonlyArray<LiquidMeasurement> = [
+  { who: "Bleekrode 1884", temperatureC: 12.5, n: 1.38, molPerL: 23.625_73 },
+  { who: "Bleekrode 1884", temperatureC: 18.5, n: 1.384, molPerL: 23.211_97 },
+];
+
+/**
+ * The method's record (decision-p14-t49h-gas-index §2.1): each measured liquid's unscaled estimate
+ * at its WebBook density against its measured n, R08.T5.k's beside {@link LIQUID_CHECKS}, which
+ * stay as T5.g left them.
+ */
+export const T5K_LIQUID_RECORD: ReadonlyArray<LiquidCheck> = [
+  {
+    what: "liquid Ar at 83.81 K against Sinnock and Smith 1969",
+    gas: AR_DISPERSION,
+    molarVolumeCm3PerMol: molarVolumeOf(AR_LIQUID_DENSITY.molPerL),
+    wavelengthNm: 546.1,
+    measured: 1.2334,
+  },
+  {
+    what: "liquid Kr at 115.95 K against Sinnock and Smith 1969",
+    gas: KR_DISPERSION,
+    molarVolumeCm3PerMol: molarVolumeOf(KR_LIQUID_DENSITY.molPerL),
+    wavelengthNm: 546.1,
+    measured: 1.3032,
+  },
+  {
+    what: "liquid Xe at 161.35 K (the WebBook's 161.405 K) against Sinnock and Smith 1969",
+    gas: XE_DISPERSION,
+    molarVolumeCm3PerMol: molarVolumeOf(XE_LIQUID_DENSITY.molPerL),
+    wavelengthNm: 546.1,
+    measured: 1.3918,
+  },
+  O2_LIQUID_ANCHOR,
+  ...LIVEING_DEWAR_1892_N2O.map((reading) => ({
+    what: `liquid N2O at 184.67 K against Liveing and Dewar 1892's ${reading.line} line`,
+    gas: N2O_DISPERSION,
+    molarVolumeCm3PerMol: molarVolumeOf(N2O_LIQUID_DENSITY.molPerL),
+    wavelengthNm: rounded(reading.wavelengthUm * 1_000),
+    measured: reading.n,
+  })),
+  ...SO2_LIQUID_CHECKS,
+  ...BLEEKRODE_CO2.map((measurement) => sodiumCheck("liquid CO2", CO2_DISPERSION, measurement)),
+  ...GAGNON_CO.map((point) => ({
+    what: `liquid CO at 78.3 K against Gagnon et al. 1979 at ${point.line}`,
+    gas: CO_DISPERSION,
+    molarVolumeCm3PerMol: molarVolumeOf(CO_LIQUID_78K_DENSITY.molPerL),
+    wavelengthNm: rounded(point.wavelengthUm * 1_000),
+    measured: point.n,
+  })),
+  ...BLEEKRODE_H2S.map((measurement) => sodiumCheck("liquid H2S", H2S_DISPERSION, measurement)),
+];
+
+/** A figure as a percentage with its sign, as the files write it: −1.01%. */
+function signedPercent(fraction: number): string {
+  return `${signed(100 * fraction, 2)}%`;
+}
+
+/** The method's record as a T5.k file's `source` states it. */
+function t5kRecordText(): string {
+  const row = (check: LiquidCheck): string =>
+    `${check.what}, ${signed(liquidCheckExcess(check), 4)} at ${check.wavelengthNm} nm (R_liquid ÷ R_gas − 1 = ${signedPercent(molarRefractionRatio(check) - 1)})`;
+  return `The method's record (decision-p14-t49h-gas-index §2.1 and A.2), each measured liquid's unscaled estimate (c = 1, its gas row as view/atmosphere/rayleigh.ts holds it, at the NIST Chemistry WebBook's saturated-liquid density) less the measurement, and the measurement's molar refraction over the gas row's: ${[...T5K_LIQUID_RECORD, ...LIQUID_CHECKS].map(row).join("; ")}`;
+}
+
+/** A gas row as a T5.k file's `source` names it, with its state, Z and measured range. */
+function gasRowText(
+  gas: GasDispersionCopy,
+  measuredNm: readonly [number, number],
+  row: string,
+): string {
+  return `${row} (${gas.source}), stated at ${gas.referenceK} K and ${gas.referencePa} Pa with Z = ${Number(gas.compressibility.toPrecision(6))}, measured over ${measuredNm[0]}–${measuredNm[1]} nm and extrapolated beyond`;
+}
+
+/** A WebBook density as a T5.k file's `source` states it. */
+function densityText(density: WebBookDensity): string {
+  return `${density.molPerL.toPrecision(7)} mol/l at ${density.temperatureK} K, the NIST Chemistry WebBook's saturated liquid (SRD 69, after ${density.equationOfState}; ${density.source})`;
+}
+
+/** Seidel, Lanou and Yao 2002's specific refractions of the liquefied noble gases (their Table II). */
+const SEIDEL_TEXT = `Seidel, Lanou and Yao 2002's specific refractions (arXiv:hep-ex/0111054, Table II, after Sinnock 1980; ${fetchedSource("the arXiv PDF", "https://arxiv.org/pdf/hep-ex/0111054", "851f31ed333ec5dc669da52154ae294c42ae6225e0c02b9c31c4cf7a85a45574", FETCHED_T5K)}) put the liquid's against the dilute gas's at 0.1045 and 0.1050 cm³ g⁻¹ for Ar, 0.0771 and 0.0765 for Kr and 0.0801 and 0.0788 for Xe: the heavy atoms' liquids run above the gas, as the record's Kr and Xe rows do`;
+
+/** The licence of a T5.k file whose values are cited measurements and a reduction made here. */
+const T5K_DERIVED_LICENCE =
+  "measured values cited as facts, the gas dispersion view/atmosphere/rayleigh.ts cites and the NIST Chemistry WebBook's densities (NIST Standard Reference Data), with a factor made here; no data set is copied";
+
+/** Where a T5.k file's measured range of its gas row is stated: `rayleigh.ts`'s `measuredNm`. */
+const RAYLEIGH_ROW = "view/atmosphere/rayleigh.ts's GAS_DISPERSION row";
+
+/** A scaled file's n on the grid, to six figures. */
+function scaledOnGrid(
+  gas: GasDispersionCopy,
+  density: WebBookDensity,
+  factor: number,
+): ReadonlyArray<number> {
+  return MATERIAL_GRID_NM.map((nm) => rounded(scaledLiquidIndex(gas, nm, density.molPerL, factor)));
+}
+
+/** A scaled file's n at 380, 550 and 780 nm, as its text states it. */
+function scaledAtThree(gas: GasDispersionCopy, density: WebBookDensity, factor: number): string {
+  return [380, 550, 780]
+    .map((nm) => `${rounded(scaledLiquidIndex(gas, nm, density.molPerL, factor))} at ${nm} nm`)
+    .join(", ");
+}
+
+/** The reduction of a file whose n is a scaled gas, with its band and k. */
+function scaledReductionText(factor: number, band: string, k: string): string {
+  return `n = √((1 + 2x) ÷ (1 − x)) with x = c R(λ) ρ_m, c = ${factor}, evaluated at each wavelength of 380–780 nm every 5 nm, to six significant figures (decision-p14-t49h-gas-index §1.2); the stated band: ${band}. ${k}`;
+}
+
+/** The O₂–O₂ file's citation and checksum, as oxygen-liquid.json's `source` states it. */
+const OXYGEN_PAIR_TEXT = `${OXYGEN_PAIR_SOURCE.citation}, ${OXYGEN_PAIR_SOURCE.url}, SHA-256 ${OXYGEN_PAIR_SOURCE.sha256}, fetched ${FETCHED_T5K} (the same file as fetched ${OXYGEN_PAIR_SOURCE.fetched} for the client's O2-O2 absorber)`;
+
+/** oxygen-liquid.json's k, as its `reduction` derives it. */
+function liquidOxygenKText(): string {
+  const n = O2_LIQUID_NUMBER_DENSITY_PER_CM3;
+  const at = OXYGEN_PAIR_CROSS_SECTIONS_CM5.map(([nm, sigma]) => {
+    const perM = oxygenPairAbsorptionPerM(sigma);
+    return `σ ${timesTen(sigma, 5)} cm⁵ at ${nm} nm, a = ${perM.toFixed(1)} m⁻¹ and k = ${timesTen(rounded(oxygenPairK(sigma, nm)), 5)}`;
+  }).join("; ");
+  return `k = aλ ÷ 4π with a(λ) = σ(λ) N² (decision-p14-t49h-gas-index §2.6, path 2, Martonchik and Orton's method for liquid methane's unmeasured range, the gas scaled to the liquid's density), σ the O2–O2 collision-induced absorption of Thalman and Volkamer 2013 (Phys. Chem. Chem. Phys. 15, 15371, DOI 10.1039/c3cp50968k) in HITRAN2024's file (its sets of reference ${THALMAN_VOLKAMER_REFERENCE}), at their coldest temperature, ${OXYGEN_PAIR_COLDEST_K} K, where the liquid is at ${O2_LIQUID_DENSITY.temperatureK} K, linear in wavenumber between the sets' points 1 cm⁻¹ apart, and N = ρ_m N_A = ${timesTen(n, 5)} cm⁻³ the liquid's number density, so N² = ${timesTen(n * n, 4)} cm⁻⁶ and a pair's absorption scales with the square of the density: ${at}, to six significant figures. The sets reach 336–${OXYGEN_PAIR_LONGEST_NM.toFixed(1)} nm, so k = 0 from 655 nm (the B band near 688 nm and the A band near 762 nm are other measurements' and are not drawn), and k = 0 at ${OXYGEN_PAIR_ZERO_NM.join(", ")} nm, where the set's σ lies at or below 0 between the bands, within ${timesTen(OXYGEN_PAIR_SCATTER_CM5, 0)} cm⁵ of it. The bands' σ grows on cooling (at 577 nm, ${OXYGEN_PAIR_COOLING.map(([kelvin, sigma]) => `${timesTen(sigma, 2)} cm⁵ at ${kelvin} K`).join(" and ")} in the same sets), so at 90 K the liquid's bands are presumably stronger; the 203 K values are not extrapolated. Liveing and Dewar 1892 found the bands "all of exceptional strength" through about 3 inches of the liquid (p. 206), and Liveing and Dewar 1895 "very much more strongly developed by 0.4 centim. of liquid oxygen than by five times that thickness of liquid air" (p. 271), as the file's k has them: at 575 nm it transmits ${(100 * Math.exp(-oxygenPairPerM(575) * 0.0762)).toFixed(1)}% through 3 inches and ${(100 * Math.exp(-oxygenPairPerM(575) * 0.004)).toFixed(0)}% through 0.4 cm (computed). Liquid O2 is blue (Liveing and Dewar 1892, p. 207)`;
+}
+
+/** The record of liquid O₂'s checks, as oxygen-liquid.json's `source` states them. */
+function oxygenChecksText(): string {
+  const at = (nm: number): number =>
+    scaledLiquidIndex(O2_DISPERSION, nm, O2_LIQUID_DENSITY.molPerL, O2_LIQUID_FACTOR);
+  const lines = LIVEING_DEWAR_1895_O2.map(
+    (p) => `${p.n.toFixed(4)} at ${p.line} (${signed(p.n - at(p.wavelengthUm * 1_000), 4)})`,
+  ).join(", ");
+  return `Checks, each measurement less the file: Liveing and Dewar 1895's five lines at the boiling point by the method of Terquem and Trannin (Phil. Mag. (5) 40, 268, p. 269; public domain; ${fetchedSource("the archive.org scan of the volume, its text", "https://archive.org/download/londonedinburg5401895lon/londonedinburg5401895lon_djvu.txt", "14c064d3befa142c445a7baec235e0d8c99008fd2b39b302d783a918e613e386", FETCHED_T5K)}, and its page image, https://archive.org/download/londonedinburg5401895lon/page/n282_w1600.jpg, SHA-256 fac216dbc970c340d48d7da2e06dcc707f005b2aad87ec26014b7c7b9f7f3ff8), ${lines}, the authors trusting their cadmium lines over the thallium and sodium; Liveing and Dewar 1892's prism value at the D line, ${LIVEING_DEWAR_1892_O2_D.n} (Phil. Mag. (5) 34, 205, p. 208, ${signed(LIVEING_DEWAR_1892_O2_D.n - at(LIVEING_DEWAR_1892_O2_D.wavelengthNm), 4)}); and Johns and Wilhelm's own liquid N2, ${JOHNS_WILHELM_N2_546.toFixed(4)} at 546.1 nm, ${signed(JOHNS_WILHELM_N2_546 - 1.199_17, 5)} from Augustin 1915's 1.19917 (nitrogen-liquid.json's)`;
+}
+
+/** The T5.k files made from fetched liquid tables and O₂–O₂'s file, by their own reductions. */
+const LIQUID_TABLE_MATERIALS: ReadonlyArray<CombinedSpec> = [
+  {
+    file: "argon-liquid.json",
+    inputs: [
+      {
+        option: "argon-liquid",
+        sha256: "6e3e9986914b0a3eade6cf787647e311b54225e200ebc61b81e414f52e94361b",
+      },
+    ],
+    reduce: (texts) => {
+      checkedRows(textAt(texts, 0), AR_LIQUID_ROWS);
+      return {
+        n: scaledOnGrid(AR_DISPERSION, AR_LIQUID_DENSITY, AR_LIQUID_FACTOR),
+        k: MATERIAL_GRID_NM.map(() => 0),
+      };
+    },
+    header: {
+      key: "Ar",
+      phase: "liquid",
+      variant: null,
+      name: "liquid Ar at 84 K",
+      temperatureK: 83.81,
+      shape: "sphere",
+      provenance: "measured",
+      paper: `A. C. Sinnock and B. L. Smith, "Refractive indices of the condensed inert gases", Phys. Rev. 181 (1969) 1297–1307, DOI 10.1103/PhysRev.181.1297, for the table; ${AR_DISPERSION.source}, for the dispersion's shape`,
+      source: `${fetchedSource(
+        "refractiveindex.info, main/Ar/nk/Sinnock-liquid-83.81K.yml, their table for the liquid at its melting point, 83.81 K: nine rows over 361.2–643.9 nm",
+        `${RI_URL}/main/Ar/nk/Sinnock-liquid-83.81K.yml`,
+        "6e3e9986914b0a3eade6cf787647e311b54225e200ebc61b81e414f52e94361b",
+        FETCHED_T5K,
+      )}. The grid's n is the gas's shape scaled to the table (decision-p14-t49h-gas-index §2.5 and A.2): ${gasRowText(AR_DISPERSION, [467.9, 2_058.6], `${RAYLEIGH_ROW} for Ar`)}, its molar refraction scaled by c = ${AR_LIQUID_FACTOR}, fitted by least squares in n to the nine rows at ${densityText(AR_LIQUID_DENSITY)}; the rows less the file's curve: ${AR_LIQUID_ROWS.map((row) => `${signedScientific(row.n - scaledLiquidIndex(AR_DISPERSION, row.wavelengthUm * 1_000, AR_LIQUID_DENSITY.molPerL, AR_LIQUID_FACTOR))} at ${(row.wavelengthUm * 1_000).toFixed(1)} nm`).join(", ")}. ${SEIDEL_TEXT}. ${t5kRecordText()}`,
+      licence: `${RI_LICENCE}; the gas dispersion and the NIST Chemistry WebBook's density (NIST Standard Reference Data) cited, with a factor made here`,
+      reduction: `${scaledReductionText(AR_LIQUID_FACTOR, "±0.0003 in n over the table's rows, and +0.0002 more over 644–780 nm, past its last row, where the curve is the gas's", "k = 0, stated: the source gives n only, and the liquid is colourless.")} c is the least-squares fit in n to the table's nine rows at the WebBook's ${AR_LIQUID_DENSITY.molPerL.toPrecision(7)} mol/l, the worst row ${timesTen(arWorstRow().miss, 2)} at ${arWorstRow().wavelengthNm.toFixed(1)} nm (decision-p14-t49h-gas-index A.2); the rows at 361.2 and 365.0 nm set c but lie below the grid. 83.81 K is the table's melting point, above the registry row's triple point, 83.8058 K`,
+      standIn: null,
+      fit: null,
+    },
+  },
+  {
+    file: "krypton-liquid.json",
+    inputs: [
+      {
+        option: "krypton-liquid",
+        sha256: "8b768f8878e36c74113db3b356871fbb11e0a417ada7b3a37315d2ee46f99644",
+      },
+    ],
+    reduce: (texts) => tableWithRedTail(checkedRows(textAt(texts, 0), KR_LIQUID_ROWS)),
+    header: {
+      key: "Kr",
+      phase: "liquid",
+      variant: null,
+      name: "liquid Kr at 116 K",
+      temperatureK: 115.77,
+      shape: "sphere",
+      provenance: "measured",
+      paper:
+        'A. C. Sinnock and B. L. Smith, "Refractive indices of the condensed inert gases", Phys. Rev. 181 (1969) 1297–1307, DOI 10.1103/PhysRev.181.1297',
+      source: `${fetchedSource(
+        "refractiveindex.info, main/Kr/nk/Sinnock-liquid-115.95K.yml, their table for the liquid at its melting point, 115.95 K: eight rows over 363.1–643.9 nm",
+        `${RI_URL}/main/Kr/nk/Sinnock-liquid-115.95K.yml`,
+        "8b768f8878e36c74113db3b356871fbb11e0a417ada7b3a37315d2ee46f99644",
+        FETCHED_T5K,
+      )}. The rows themselves are the file (decision-p14-t49h-gas-index §2.5): ${gasRowText(KR_DISPERSION, [400, 1_000], `${RAYLEIGH_ROW} for Kr`)}, scaled by least squares to the eight rows at ${densityText(KR_LIQUID_DENSITY)}, misses them by up to ${timesTen(scaledShapeMiss(KR_DISPERSION, KR_LIQUID_DENSITY.molPerL, KR_LIQUID_ROWS), 1)}, the liquid being more dispersive than the gas. Sinnock and Smith state the table as the melting point's, 115.95 K, 0.18 K above the registry row's triple point, 115.77 K, which the file takes, so that the sim's carry starts at the row's state; the difference is recorded, not applied. Sinnock 1980 (J. Phys. C 13, 2375, DOI 10.1088/0022-3719/13/12/018; its abstract, ${fetchedSource("through OpenAlex", "https://api.openalex.org/works/doi:10.1088/0022-3719/13/12/018", "ae4a1333216d5a49a141bf8784598d71a5bc88c053e8133eb6b5249fe69fa817", FETCHED_T5K)}) measured the condensed noble gases again by total internal reflection: "values for krypton obtained by the two methods differ by more than the combined experimental error". ${SEIDEL_TEXT}. ${t5kRecordText()}`,
+      licence: RI_LICENCE,
+      reduction: `n linear in wavelength between the source's rows over 380–640 nm, to six significant figures (its 363.1 and 406.3 nm rows bracket 380 nm), and from 645 nm the red tail n = ${KR_LIQUID_TAIL.a} + ${KR_LIQUID_TAIL.bUm2} µm² ÷ λ², a two-term Cauchy line fitted by least squares to the six rows from 435.8 nm (decision-p14-t49h-gas-index A.3), which meets them within ${timesTen(redTailWorst(KR_LIQUID_ROWS, KR_LIQUID_TAIL), 1)} and steps by ${signedScientific(redTailStep(KR_LIQUID_ROWS, KR_LIQUID_TAIL))} from the 643.9 nm row; ${rounded(redTailIndex(KR_LIQUID_TAIL, 780))} at 780 nm. k = 0, stated: the source gives n only, and the liquid is colourless. The stated band: ±0.0005 in n`,
+      standIn: null,
+      fit: null,
+    },
+  },
+  {
+    file: "xenon-liquid.json",
+    inputs: [
+      {
+        option: "xenon-liquid",
+        sha256: "e5f4b87d73eacc5fc9f0a0e9cedca1a9f52e5b4110fc7031847d1fcd67bb8e40",
+      },
+    ],
+    reduce: (texts) => tableWithRedTail(checkedRows(textAt(texts, 0), XE_LIQUID_ROWS)),
+    header: {
+      key: "Xe",
+      phase: "liquid",
+      variant: null,
+      name: "liquid Xe at 161 K",
+      temperatureK: 161.4,
+      shape: "sphere",
+      provenance: "measured",
+      paper:
+        'A. C. Sinnock and B. L. Smith, "Refractive indices of the condensed inert gases", Phys. Rev. 181 (1969) 1297–1307, DOI 10.1103/PhysRev.181.1297',
+      source: `${fetchedSource(
+        "refractiveindex.info, main/Xe/nk/Sinnock-liquid-161.35K.yml, their table for the liquid at its melting point, 161.35 K: ten rows over 361.2–643.9 nm",
+        `${RI_URL}/main/Xe/nk/Sinnock-liquid-161.35K.yml`,
+        "e5f4b87d73eacc5fc9f0a0e9cedca1a9f52e5b4110fc7031847d1fcd67bb8e40",
+        FETCHED_T5K,
+      )}. The rows themselves are the file (decision-p14-t49h-gas-index §2.5): ${gasRowText(XE_DISPERSION, [400, 1_000], `${RAYLEIGH_ROW} for Xe`)}, scaled by least squares to the ten rows at ${densityText(XE_LIQUID_DENSITY)}, which stands for 161.35 K (the WebBook's saturation table starts at 161.405 K), misses them by up to ${timesTen(scaledShapeMiss(XE_DISPERSION, XE_LIQUID_DENSITY.molPerL, XE_LIQUID_ROWS), 1)}, the liquid being more dispersive than the gas. Sinnock and Smith state the table as the melting point's, 161.35 K, 0.05 K below the registry row's triple point, 161.4 K, which the file takes, so that its temperature is not below the row's; the difference is recorded, not applied. Grace et al. 2017's Sellmeier fits to Sinnock and Smith's liquid (arXiv:1502.04213v4, Table 2; ${fetchedSource("the arXiv PDF", "https://arxiv.org/pdf/1502.04213v4", "29094376730461bf507366981343a00bf84157ba969748f8a8021590bc462309", FETCHED_T5K)}) carry a₀ = 1.5 ± 0.02 at 162.35 K and 1.4 ± 0.2 at 178 K, too coarse to use, and are not. ${SEIDEL_TEXT}. ${t5kRecordText()}`,
+      licence: RI_LICENCE,
+      reduction: `n linear in wavelength between the source's rows over 380–640 nm, to six significant figures (its 365.0 and 406.3 nm rows bracket 380 nm), and from 645 nm the red tail n = ${XE_LIQUID_TAIL.a} + ${XE_LIQUID_TAIL.bUm2} µm² ÷ λ², a two-term Cauchy line fitted by least squares to the seven rows from 435.8 nm (decision-p14-t49h-gas-index A.3), which meets them within ${timesTen(redTailWorst(XE_LIQUID_ROWS, XE_LIQUID_TAIL), 1)} and steps by ${signedScientific(redTailStep(XE_LIQUID_ROWS, XE_LIQUID_TAIL))} from the 643.9 nm row; ${rounded(redTailIndex(XE_LIQUID_TAIL, 780))} at 780 nm. The rows below 435.8 nm lie towards xenon's resonance near 147 nm, which a two-term line cannot follow, and are not fitted. k = 0, stated: the source gives n only, and the liquid is colourless. The stated band: ±0.0005 in n`,
+      standIn: null,
+      fit: null,
+    },
+  },
+  {
+    file: "oxygen-liquid.json",
+    inputs: [{ option: "o2o2", sha256: OXYGEN_PAIR_SOURCE.sha256 }],
+    reduce: (texts) => ({
+      n: scaledOnGrid(O2_DISPERSION, O2_LIQUID_DENSITY, O2_LIQUID_FACTOR),
+      k: liquidOxygenK(textAt(texts, 0)),
+    }),
+    header: {
+      key: "O2",
+      phase: "liquid",
+      variant: null,
+      name: "liquid O2 at 90 K",
+      temperatureK: 90.19,
+      shape: "sphere",
+      provenance: "derived",
+      paper: `H. E. Johns and J. O. Wilhelm, "The refractive indices of liquid oxygen, nitrogen, and hydrogen", Can. J. Res. 15a (1937) 101–108, DOI 10.1139/cjr37a-013, for n at 546.1 nm; ${O2_DISPERSION.source}, for the dispersion; R. Thalman and R. Volkamer, Phys. Chem. Chem. Phys. 15 (2013) 15371, DOI 10.1039/c3cp50968k, as HITRAN2024 gives their O2–O2 cross-sections, for k`,
+      source: `n from the gas's dispersion scaled to one measurement (decision-p14-t49h-gas-index §2.5): ${gasRowText(O2_DISPERSION, [400, 1_800], `${RAYLEIGH_ROW} for O2`)}, at ${densityText(O2_LIQUID_DENSITY)}, its molar refraction scaled by c = (n² − 1) ÷ (n² + 2) × V_m ÷ R(546.1 nm) = ${O2_LIQUID_FACTOR} (${signedPercent(O2_LIQUID_FACTOR - 1)}), so that n(546.1 nm) = ${O2_LIQUID_ANCHOR.measured}, Johns and Wilhelm's at the normal boiling point by a Wollaston cell, from their abstract (${fetchedSource("through Crossref", "https://api.crossref.org/works/10.1139/cjr37a-013", "838e11e8c42914a1ebac42e7e6bb433552f53e52ee72ef1c4c1fbc0e4d3d9432", FETCHED_T5K)}; the article is closed): the residual there is ${timesTen(Math.abs(scaledLiquidIndex(O2_DISPERSION, 546.1, O2_LIQUID_DENSITY.molPerL, O2_LIQUID_FACTOR) - O2_LIQUID_ANCHOR.measured), 1)}, the factor's sixth figure. n is ${scaledAtThree(O2_DISPERSION, O2_LIQUID_DENSITY, O2_LIQUID_FACTOR)}. ${oxygenChecksText()}. k from ${OXYGEN_PAIR_TEXT}. No measured visible absorption of the liquid could be read: Dianov-Klokov's spectra of condensed oxygen (Opt. Spectrosc. 1959–1966) have no open copy, and Ellis and Kneser 1933 (Phys. Rev. 44, 420, DOI 10.1103/PhysRev.44.420) is closed. ${t5kRecordText()}`,
+      licence: `one published index cited as a fact and a factor made here, with the gas dispersion and density (NIST Standard Reference Data) cited, and k reduced from HITRAN2024's O2–O2 file: ${OXYGEN_PAIR_SOURCE.terms}`,
+      reduction: scaledReductionText(
+        O2_LIQUID_FACTOR,
+        "±0.0015 in n, the anchor's own uncertainty plus 0.001 (decision-p14-t49h-gas-index §2.4)",
+        `${liquidOxygenKText()}.`,
+      ),
+      standIn: null,
+      fit: {
+        form: "scaledMolarRefraction",
+        molarDensityMolPerL: O2_LIQUID_DENSITY.molPerL,
+        factor: O2_LIQUID_FACTOR,
+        anchoredFromUm: 0.5461,
+        anchoredToUm: 0.5461,
+      },
+    },
+  },
+];
+
+/**
+ * Every material file made from fetched sources by its own reduction, after
+ * {@link FETCHED_MATERIALS}: R08.T5.d's to T5.h's, then R08.T5.k's liquid tables and liquid O₂.
+ */
+export const COMBINED_MATERIALS: ReadonlyArray<CombinedSpec> = [
+  ...COMBINED_MATERIALS_T5D_T5H,
+  ...LIQUID_TABLE_MATERIALS,
+];
+
+/** The text of a liquid whose measurements a T5.k file records against its estimate. */
+function againstEstimateText(
+  gas: GasDispersionCopy,
+  values: ReadonlyArray<LiquidMeasurement>,
+  wavelengthNm: number,
+): string {
+  return values
+    .map(
+      (value) =>
+        `${value.n.toFixed(3)} at ${value.temperatureC} °C (${value.molPerL.toPrecision(7)} mol/l), the estimate less it ${signed(scaledLiquidIndex(gas, wavelengthNm, value.molPerL, 1) - value.n, 4)}`,
+    )
+    .join("; ");
+}
+
+/** The T5.k liquids the tool derives from no fetched table, after T5.g's (decision-p14-t49h-gas-index). */
+const T5K_DERIVED_LIQUIDS: ReadonlyArray<MaterialFile> = [
+  {
+    key: "N2O",
+    phase: "liquid",
+    variant: null,
+    name: "liquid N2O at 185 K",
+    temperatureK: 184.67,
+    shape: "sphere",
+    provenance: "derived",
+    paper: `G. D. Liveing and J. Dewar, "On the spectrum of liquid oxygen, and on the refractive indices of liquid oxygen, nitrous oxide, and ethylene", Phil. Mag. (5) 34 (1892) 205–209, DOI 10.1080/14786449208620308, for n at five lines; ${N2O_DISPERSION.source}, for the dispersion`,
+    source: `n from the gas's dispersion scaled to Liveing and Dewar's liquid at its boiling point (decision-p14-t49h-gas-index §2.5): ${gasRowText(N2O_DISPERSION, [307, 725], `${RAYLEIGH_ROW} for N2O`)}, at ${densityText(N2O_LIQUID_DENSITY)}, its molar refraction scaled by c = ${N2O_LIQUID_FACTOR} (${signedPercent(N2O_LIQUID_FACTOR - 1)}), fitted by least squares in n to their indices at the C, D, F and G lines and indium's 4509.6 Å, ${LIVEING_DEWAR_1892_N2O.map((r) => `${r.n} (${r.line})`).join(", ")}, from minimum deviations of ${LIVEING_DEWAR_1892_N2O.map((r) => `${Math.floor(r.deviationArcmin / 60)}° ${r.deviationArcmin % 60}′`).join(", ")} (p. 209; public domain; ${fetchedSource("the archive.org scan of the volume, its text", "https://archive.org/download/londonedinburgh5341892lon/londonedinburgh5341892lon_djvu.txt", "ee6e15a840fa2b9383fc70fdb200c3ea80a909604092e7622052be3a11b285f4", FETCHED_T5K)}, and its page image, https://archive.org/download/londonedinburgh5341892lon/page/n222_w600.jpg, SHA-256 742aeaf02092f31bf6877ae6aa00038b0d5d633c73517364ae4c58149459cbfc), the lines read at 656.3, 589.3, 486.1, 430.8 and 450.96 nm; the residuals, measurement less the file, ${LIVEING_DEWAR_1892_N2O.map((r) => `${signed(r.n - scaledLiquidIndex(N2O_DISPERSION, r.wavelengthUm * 1_000, N2O_LIQUID_DENSITY.molPerL, N2O_LIQUID_FACTOR), 4)} (${r.line})`).join(", ")}. The lithium line, 6705.5 Å, is left out: its printed ${LIVEING_DEWAR_1892_N2O_LITHIUM.n} contradicts its own deviation, ${Math.floor(LIVEING_DEWAR_1892_N2O_LITHIUM.deviationArcmin / 60)}° ${LIVEING_DEWAR_1892_N2O_LITHIUM.deviationArcmin % 60}′, 1′ less than the C line's, which gives ${prismIndex(LIVEING_DEWAR_PRISM_ARCMIN, LIVEING_DEWAR_1892_N2O_LITHIUM.deviationArcmin).toFixed(4)} through a prism of 59° 15′ (their liquid-oxygen prism, p. 208, the angle the five other lines' printed pairs imply to 0.015°), where the file gives ${scaledLiquidIndex(N2O_DISPERSION, 670.55, N2O_LIQUID_DENSITY.molPerL, N2O_LIQUID_FACTOR).toFixed(4)}. Their own density, 1.255 g cm⁻³ at −90 °C, is not used. Bleekrode 1884's 1.193 at 16 °C and 1.194 at 15 °C at the sodium lines (Proc. R. Soc. Lond. 37, 339, p. 351), in a cell filled at about 60 atmospheres, of unknown density, are recorded, not used. n is ${scaledAtThree(N2O_DISPERSION, N2O_LIQUID_DENSITY, N2O_LIQUID_FACTOR)}. ${t5kRecordText()}`,
+    licence: T5K_DERIVED_LICENCE,
+    reduction: scaledReductionText(
+      N2O_LIQUID_FACTOR,
+      "±0.003 in n",
+      "k = 0: the liquid is colourless in the visible. The lines' air wavelengths are read as vacuum wavelengths (under 5 × 10⁻⁶ in n)",
+    ),
+    standIn: null,
+    fit: {
+      form: "scaledMolarRefraction",
+      molarDensityMolPerL: N2O_LIQUID_DENSITY.molPerL,
+      factor: N2O_LIQUID_FACTOR,
+      anchoredFromUm: 0.4308,
+      anchoredToUm: 0.6563,
+    },
+    wavelengthsNm: MATERIAL_GRID_NM,
+    n: scaledOnGrid(N2O_DISPERSION, N2O_LIQUID_DENSITY, N2O_LIQUID_FACTOR),
+    k: MATERIAL_GRID_NM.map(() => 0),
+  },
+  {
+    key: "SO2",
+    phase: "liquid",
+    variant: null,
+    name: "liquid SO2 at 198 K",
+    temperatureK: 197.7,
+    shape: "sphere",
+    provenance: "derived",
+    paper: `L. Bleekrode, "On the experimental determination of the index of refraction of liquefied gases", Proc. R. Soc. Lond. 37 (1884) 339–362, DOI 10.1098/rspl.1884.0039, for n at the sodium lines, his own and Ketteler's and Bichat's as he quotes them; ${SO2_DISPERSION.source}, for the dispersion`,
+    source: `n from the gas's dispersion scaled to the liquid's measurements (decision-p14-t49h-gas-index §2.5): ${gasRowText(SO2_DISPERSION, [500, 670], "view/atmosphere/rayleigh.ts's ESTIMATED_RAYLEIGH row for SO2, its dispersion")}, at ${densityText(SO2_LIQUID_DENSITY)}, its molar refraction scaled by c = ${SO2_LIQUID_FACTOR} (${signedPercent(SO2_LIQUID_FACTOR - 1)}), the mean of the three measurements' molar refractions over the gas's at 589.3 nm, each at the WebBook's density at its own temperature (${nistSaturation(...SO2_ROOM_QUERY)}, SHA-256 ${SO2_ROOM_SHA256}, fetched ${FETCHED_T5K}): ${SO2_LIQUID_MEASUREMENTS.map((m) => `${m.n.toFixed(4)} at ${m.temperatureC} °C (${m.who}), at ${m.molPerL.toPrecision(7)} mol/l, ${signedPercent(molarRefractionRatio(sodiumCheck("liquid SO2", SO2_DISPERSION, m)) - 1)}`).join("; ")} (Bleekrode, pp. 349–350; public domain; ${fetchedSource("the archive.org copy, its text", "https://archive.org/download/paper-doi-10_1098_rspl_1884_0039/paper-doi-10_1098_rspl_1884_0039_djvu.txt", "2d7fa8df25c59fbaec00207ed98b89ba7b53e2264e163b5b8065a0375377048d", FETCHED_T5K)}). Bleekrode judges his own value about 0.003 high: "if, therefore, a quantity of 0.003 is subtracted from the value obtained in my experiments, there results 1.347, approaching nearly to the amount 1.344", from Ketteler's and Bichat's change of nearly 0.001 a degree; the mean is kept, as ruled. n is ${scaledAtThree(SO2_DISPERSION, SO2_LIQUID_DENSITY, SO2_LIQUID_FACTOR)}. ${t5kRecordText()}`,
+    licence: T5K_DERIVED_LICENCE,
+    reduction: scaledReductionText(
+      SO2_LIQUID_FACTOR,
+      "±0.003 in n",
+      "k = 0: the liquid is colourless in the visible; its absorption lies in the ultraviolet",
+    ),
+    standIn: null,
+    fit: {
+      form: "scaledMolarRefraction",
+      molarDensityMolPerL: SO2_LIQUID_DENSITY.molPerL,
+      factor: SO2_LIQUID_FACTOR,
+      anchoredFromUm: 0.5893,
+      anchoredToUm: 0.5893,
+    },
+    wavelengthsNm: MATERIAL_GRID_NM,
+    n: scaledOnGrid(SO2_DISPERSION, SO2_LIQUID_DENSITY, SO2_LIQUID_FACTOR),
+    k: MATERIAL_GRID_NM.map(() => 0),
+  },
+  {
+    key: "CO2",
+    phase: "liquid",
+    variant: null,
+    name: "liquid CO2 at 217 K",
+    temperatureK: 216.6,
+    shape: "sphere",
+    provenance: "derived",
+    paper: `P. Phillips, "The relation between the refractivity and density of carbon dioxide", Proc. R. Soc. Lond. A 97 (1920) 225–240, DOI 10.1098/rspa.1920.0029, for the density law; ${CO2_DISPERSION.source}, for the dispersion`,
+    source: `n from the gas's dispersion scaled by Phillips's measured density law (decision-p14-t49h-gas-index §2.5): ${gasRowText(CO2_DISPERSION, [180.7, 1_694.5], `${RAYLEIGH_ROW} for CO2`)}, at ${densityText(CO2_LIQUID_DENSITY)}, ${co2DensityGPerCm3(CO2_LIQUID_DENSITY.molPerL).toFixed(5)} g cm⁻³ at the WebBook's molecular weight, ${CO2_MOLAR_MASS_G_PER_MOL} (${CO2_SPECIES_PAGE}). Phillips measured CO2's Lorentz–Lorenz function at 34 °C and 546.1 nm with a Fabry–Perot etalon up to ${PHILLIPS_1920.greatestDensityGPerCm3} g cm⁻³: (n² + 2)ρ ÷ (n² − 1) = ${PHILLIPS_1920.limitGPerCm3}(1 + ${PHILLIPS_1920.coefficientCm6PerG2}ρ²) (p. 236; public domain; ${fetchedSource("the archive.org copy, its text", "https://archive.org/download/philtrans01698142/01698142_djvu.txt", "f1470244531e81dfcb236cebc31f779990f7ea9b4fc56b533a9b2927e6431529", FETCHED_T5K)}, and its page image, https://archive.org/download/philtrans01698142/page/n11_w1300.jpg, SHA-256 a0faa688f4e36a5a94caecfa514737020d77acc832529fb627cd238211d12b69), so the molar refraction is the gas's times c = 1 ÷ (1 + ${PHILLIPS_1920.coefficientCm6PerG2}ρ²) = ${CO2_LIQUID_FACTOR} here, ${signed(scaledLiquidIndex(CO2_DISPERSION, 546.1, CO2_LIQUID_DENSITY.molPerL, CO2_LIQUID_FACTOR) - scaledLiquidIndex(CO2_DISPERSION, 546.1, CO2_LIQUID_DENSITY.molPerL, 1), 4)} in n at 546.1 nm, the law extrapolated from his ${PHILLIPS_1920.greatestDensityGPerCm3} to ${co2DensityGPerCm3(CO2_LIQUID_DENSITY.molPerL).toFixed(3)} g cm⁻³. His ρ → 0 limit, ${CO2_MOLAR_MASS_G_PER_MOL} ÷ ${PHILLIPS_1920.limitGPerCm3} = ${(CO2_MOLAR_MASS_G_PER_MOL / PHILLIPS_1920.limitGPerCm3).toFixed(3)} cm³ mol⁻¹ at 546.1 nm, lies ${signedPercent(CO2_MOLAR_MASS_G_PER_MOL / PHILLIPS_1920.limitGPerCm3 / gasRowMolarRefractionCm3PerMol(CO2_DISPERSION, 546.1) - 1)} from the gas row's ${gasRowMolarRefractionCm3PerMol(CO2_DISPERSION, 546.1).toFixed(3)}. Bleekrode 1884's saturated liquid at the sodium lines, his air-free tube II (p. 353; public domain; ${fetchedSource("the archive.org copy's page image", "https://archive.org/download/paper-doi-10_1098_rspl_1884_0039/page/n14_w1400.jpg", "1edc75295d81d2a91e85f92747cc042e12cc9f8a691d89943e4fc9d584970786", FETCHED_T5K)}; ±0.005, his error estimate), at the WebBook's densities (${nistSaturation(...CO2_ROOM_QUERY)}, SHA-256 ${CO2_ROOM_SHA256}, fetched ${FETCHED_T5K}): ${BLEEKRODE_CO2.map((value) => `${value.n.toFixed(3)} at ${value.temperatureC} °C, the file's form less it ${signed(co2FormIndex(value.molPerL, SODIUM_D_NM) - value.n, 4)} and the unscaled estimate less it ${signed(scaledLiquidIndex(CO2_DISPERSION, SODIUM_D_NM, value.molPerL, 1) - value.n, 4)}`).join("; ")}; his first table's two sodium values, ${BLEEKRODE_CO2_FIRST_TABLE.map((value) => `${value.n.toFixed(3)} at ${value.temperatureC} °C (the form less it ${signed(co2FormIndex(value.molPerL, SODIUM_D_NM) - value.n, 4)})`).join(" and ")}, are recorded too; his tube I held air, which lowers the index. Near the critical point the form needs no rule of its own: Phillips's law runs smoothly through the near-critical densities, and the errors there are the density's and the scattering's. The sim's carry of this file to another state at a constant Lorentz–Lorenz function misses the form by ${BLEEKRODE_CO2.map((value) => `${signed(co2CarryMiss(value.molPerL, SODIUM_D_NM), 4)} at ${value.temperatureC} °C`).join(", ")} and ${signed(co2CarryMiss(CO2_CRITICAL_MOL_PER_L, SODIUM_D_NM), 4)} at the critical density, ${CO2_CRITICAL_MOL_PER_L} mol/l (Span and Wagner's, as the WebBook's page gives it: ${CO2_CRITICAL_PAGE}), at 589.3 nm: recorded, not corrected (decision-p14-t49h-gas-index §2.4). n is ${scaledAtThree(CO2_DISPERSION, CO2_LIQUID_DENSITY, CO2_LIQUID_FACTOR)}. ${t5kRecordText()}`,
+    licence: T5K_DERIVED_LICENCE,
+    reduction: scaledReductionText(
+      CO2_LIQUID_FACTOR,
+      "±0.007 in n",
+      "k = 0: the liquid is colourless in the visible. 216.6 K is the registry row's triple point, 216.592 K, rounded up to 0.01 K",
+    ),
+    standIn: null,
+    fit: {
+      form: "scaledMolarRefraction",
+      molarDensityMolPerL: CO2_LIQUID_DENSITY.molPerL,
+      factor: CO2_LIQUID_FACTOR,
+      anchoredFromUm: 0.5461,
+      anchoredToUm: 0.5461,
+    },
+    wavelengthsNm: MATERIAL_GRID_NM,
+    n: scaledOnGrid(CO2_DISPERSION, CO2_LIQUID_DENSITY, CO2_LIQUID_FACTOR),
+    k: MATERIAL_GRID_NM.map(() => 0),
+  },
+  {
+    key: "CO",
+    phase: "liquid",
+    variant: null,
+    name: "liquid CO at 68 K (an estimated index)",
+    temperatureK: 68.16,
+    shape: "sphere",
+    provenance: "standIn",
+    paper: `the estimate's inputs: ${CO_DISPERSION.source}, for CO's gas dispersion; ${LEMMON_SPAN_2006}, as the NIST Chemistry WebBook gives it, for the liquid's density`,
+    source: `a Lorentz–Lorenz estimate, not a measurement (decision-p14-t49h-gas-index §2.5 and A.4): ${gasRowText(CO_DISPERSION, [480, 670.8], `${RAYLEIGH_ROW} for CO`)}, unscaled (c = 1), at ${densityText(CO_LIQUID_DENSITY)}, the registry row's triple point. Gagnon, Gammon, Kiefte and Clouter 1979 (Appl. Opt. 18, 1237, DOI 10.1364/AO.18.001237; its abstract, ${fetchedSource("on the journal's page", "https://opg.optica.org/ao/abstract.cfm?uri=ao-18-8-1237", "7e549bbfface71135d799643abb6abd5431b4f54ed426ebf8090adba6d5c7aab", FETCHED_T5K)}; the article is closed) measured the liquid at 78.3 ± 0.5 K by interferometry, ${GAGNON_CO.map((p) => `${p.n} at ${p.line}`).join(" and ")}, with 0.2% uncertainty: at the WebBook's ${densityText(CO_LIQUID_78K_DENSITY)} the estimate less them is ${GAGNON_CO.map((p) => signed(scaledLiquidIndex(CO_DISPERSION, p.wavelengthUm * 1_000, CO_LIQUID_78K_DENSITY.molPerL, 1) - p.n, 4)).join(" and ")}, and the two differ from each other by ${gagnonSlopeExcess().toFixed(4)} beyond the gas's slope between their wavelengths, about twice their combined error (0.2% each, ${GAGNON_COMBINED_ERROR.toFixed(4)} in quadrature), so neither anchors the file; both are recorded. ${t5kRecordText()}`,
+    licence:
+      "estimated values from the gas dispersion view/atmosphere/rayleigh.ts cites and the NIST Chemistry WebBook's density (NIST Standard Reference Data), with two measured values cited as facts; no data set is copied",
+    reduction:
+      "n = √((1 + 2x) ÷ (1 − x)) with x = R(λ) ρ_m, the gas's molar refraction at the liquid's density, unscaled (c = 1), evaluated at each wavelength of 380–780 nm every 5 nm, to six significant figures; k = 0: the liquid is colourless in the visible. The stated band: +0.000 and −0.015 in n, the estimate likely high, as against Gagnon et al.'s values",
+    standIn: `a non-absorbing liquid whose real index is a Lorentz–Lorenz estimate from the gas's dispersion at the liquid's density, since its measured values contradict themselves: 1.2213 at 514.5 nm and 1.2122 at 632.8 nm at 78 K, ${GAGNON_CO.map((p) => (scaledLiquidIndex(CO_DISPERSION, p.wavelengthUm * 1_000, CO_LIQUID_78K_DENSITY.molPerL, 1) - p.n).toFixed(3)).join(" and ")} below the estimate there; at ${Math.round(CO_LIQUID_DENSITY.temperatureK)} K the estimate is ${[
+      380, 550, 780,
+    ]
+      .map(
+        (nm) =>
+          `${scaledLiquidIndex(CO_DISPERSION, nm, CO_LIQUID_DENSITY.molPerL, 1).toFixed(3)} at ${nm} nm`,
+      )
+      .join(", ")
+      .replace(/, (?=[^,]*$)/u, " and ")}, within +0.000 and -0.015, likely high`,
+    fit: null,
+    wavelengthsNm: MATERIAL_GRID_NM,
+    n: scaledOnGrid(CO_DISPERSION, CO_LIQUID_DENSITY, 1),
+    k: MATERIAL_GRID_NM.map(() => 0),
+  },
+  {
+    key: "H2S",
+    phase: "liquid",
+    variant: null,
+    name: "liquid H2S at 188 K (an estimated index)",
+    temperatureK: 187.7,
+    shape: "sphere",
+    provenance: "standIn",
+    paper: `the estimate's inputs: ${H2S_DISPERSION.source}, for H2S's gas dispersion; ${LEMMON_SPAN_2006}, as the NIST Chemistry WebBook gives it, for the liquid's density`,
+    source: `a Lorentz–Lorenz estimate, not a measurement (decision-p14-t49h-gas-index §2.5 and A.4): ${gasRowText(H2S_DISPERSION, [486.1, 656.3], `${RAYLEIGH_ROW} for H2S`)}, unscaled (c = 1), at ${densityText(H2S_LIQUID_DENSITY)}, the registry row's triple point. Bleekrode 1884 measured the liquid at the sodium lines (Proc. R. Soc. Lond. 37, 339, p. 351; public domain; ${fetchedSource("the archive.org copy, its text", "https://archive.org/download/paper-doi-10_1098_rspl_1884_0039/paper-doi-10_1098_rspl_1884_0039_djvu.txt", "2d7fa8df25c59fbaec00207ed98b89ba7b53e2264e163b5b8065a0375377048d", FETCHED_T5K)}), in 1879 with the compression pump and later in a Faraday tube under its own pressure: ${againstEstimateText(H2S_DISPERSION, BLEEKRODE_H2S, SODIUM_D_NM)}, at the WebBook's densities (${nistSaturation(...H2S_ROOM_QUERY)}, SHA-256 ${H2S_ROOM_SHA256}, fetched ${FETCHED_T5K}). They run the wrong way with temperature, the warmer liquid's index the higher, so neither anchors the file; both are recorded. This is the one liquid of the method's record whose estimate runs low. ${t5kRecordText()}`,
+    licence:
+      "estimated values from the gas dispersion view/atmosphere/rayleigh.ts cites and the NIST Chemistry WebBook's density (NIST Standard Reference Data), with two measured values cited as facts; no data set is copied",
+    reduction:
+      "n = √((1 + 2x) ÷ (1 − x)) with x = R(λ) ρ_m, the gas's molar refraction at the liquid's density, unscaled (c = 1), evaluated at each wavelength of 380–780 nm every 5 nm, to six significant figures; k = 0: the liquid is colourless in the visible. The stated band: −0.005 and +0.021 in n, the estimate likely low, as against Bleekrode's values",
+    standIn: `a non-absorbing liquid whose real index is a Lorentz–Lorenz estimate from the gas's dispersion at the liquid's density, since its measured values contradict themselves: ${BLEEKRODE_H2S.map((value) => `${value.n.toFixed(3)} at ${Math.round(value.temperatureC + 273.15)} K`).join(" and ")}, at 589 nm, ${BLEEKRODE_H2S.map((value) => (value.n - scaledLiquidIndex(H2S_DISPERSION, SODIUM_D_NM, value.molPerL, 1)).toFixed(3)).join(" and ")} above the estimate there; at ${Math.round(H2S_LIQUID_DENSITY.temperatureK)} K the estimate is ${[
+      380, 550, 780,
+    ]
+      .map(
+        (nm) =>
+          `${scaledLiquidIndex(H2S_DISPERSION, nm, H2S_LIQUID_DENSITY.molPerL, 1).toFixed(3)} at ${nm} nm`,
+      )
+      .join(", ")
+      .replace(/, (?=[^,]*$)/u, " and ")}, within +0.021 and -0.005, likely low`,
+    fit: null,
+    wavelengthsNm: MATERIAL_GRID_NM,
+    n: scaledOnGrid(H2S_DISPERSION, H2S_LIQUID_DENSITY, 1),
+    k: MATERIAL_GRID_NM.map(() => 0),
+  },
+];
+
 /** The files made from no fetched table. */
 export const DERIVED_MATERIALS: ReadonlyArray<MaterialFile> = [
   {
@@ -4098,6 +5520,8 @@ export const DERIVED_MATERIALS: ReadonlyArray<MaterialFile> = [
     n: MATERIAL_GRID_NM.map(() => rounded(S8_MOLTEN_INDEX_D)),
     k: MATERIAL_GRID_NM.map(() => 0),
   },
+  // R08.T5.k's liquids made from no fetched table (decision-p14-t49h-gas-index).
+  ...T5K_DERIVED_LIQUIDS,
 ];
 
 /**
@@ -4140,6 +5564,11 @@ const DERIVED_FILES: Readonly<Record<string, string>> = {
   "NH3/liquid": "ammonia-liquid.json",
   "C2H6/liquid": "ethane-liquid.json",
   "S8/liquid": "sulphur-liquid.json",
+  "N2O/liquid": "nitrous-oxide-liquid.json",
+  "SO2/liquid": "sulphur-dioxide-liquid.json",
+  "CO2/liquid": "carbon-dioxide-liquid.json",
+  "CO/liquid": "carbon-monoxide-liquid.json",
+  "H2S/liquid": "hydrogen-sulphide-liquid.json",
 };
 
 /** The command-line options of every fetched source, each once, in the lists' order. */
