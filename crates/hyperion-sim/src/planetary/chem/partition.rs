@@ -19,7 +19,9 @@
 //!     nitrogen are held.
 //!   - Between them the change is continuous in the condensable's share of the air
 //!     ([`dominance`]): its controlling temperature moves from the mean to the coldest zone, and its
-//!     humidity from h to 1, as the weight d rises from 0 to 1.
+//!     humidity from h to 1, as the weight d rises from 0 to 1. Over its own sea at the mean the
+//!     pull is weakened by that sea's ocean weight c, `T_mean` − d (1 − c)(`T_mean` − `T_cold`)
+//!     ([`Partitioned::own_ocean_weight`]; decision-p14-t51a-partition §4).
 //!   - Its airborne weight is the smaller of its inventory's and the weight that meets the cap.
 //!     The species are solved in turn, in registry order, each against the others' weights, a
 //!     fixed number of times from a deterministic start (decision-composition §1.3): each
@@ -30,30 +32,28 @@
 //!   temperature its reservoir lies at, the controlling temperature above, and the surface
 //!   pressure: solid below the melting line, liquid inside its window, and **supercritical** where a
 //!   species' own partial pressure and its temperature both exceed its critical point, which has no
-//!   interface (Venus's carbon dioxide).
+//!   interface (Venus's carbon dioxide). A liquid that lies as a solution of its air
+//!   (`AIR_SOLUTIONS`: Titan's seas) is liquid down to that solution's first melt.
 //! - **Seasonal** where part of it comes and goes over the year: where its range crosses its
 //!   melting line, where the warmest zone takes its phase off the surface at the surface pressure
 //!   (a liquid that boils), or, for a condensable held toward its cold trap, where the warmest zone
-//!   rises above its frost point at its own partial pressure (Mars's carbon dioxide).
+//!   rises above its frost point at its own partial pressure (Mars's carbon dioxide); and by phase,
+//!   where the warmest zone takes that phase off ([`Condensate::is_seasonal_as`]).
+//!
+//! [`Partition::publish`] lists a body's condensates as its record will carry them, at most eight
+//! entries, one for each substance and phase, each with its reservoir, its global equivalent layer,
+//! its area by P14.T24.b's cover, generalised by substance ([`Cover`]), and its seasonal flag.
 //!
 //! # What this module is, and is not, yet
 //!
-//! It is P14.T51.a's first part, the partition's pressures, reservoirs and phases: a pure module
-//! that nothing on the record calls. Its call into T13's passes is `atmosphere_under` in
-//! [`atmosphere`](crate::planetary::derive::atmosphere), held at generator version 22 by the
-//! `p14-snapshot` lane's hold (`SNAPSHOT_VERSION`). From that version its rules and constants are
-//! output, and a change to any of them a generator-version change. Left to T51.a's second part and
-//! to P14.T54.a:
-//!
-//! - the passes' climate, a closed form of T24.a's range from the body's spin (`derive_body` has
-//!   none), which the passes take as a function of each step's column;
-//! - the published `Condensates` (at most eight, one entry for each substance and phase), their
-//!   area fractions by T24.b's cover, the split of a reservoir between its phases over the range,
-//!   each reservoir's global equivalent layer over the registry's grain density, T24.a's
-//!   liquid-water flag and P14.T48.d's condensable read from them;
-//! - a solution's first melt and composition (Titan's seas: liquid down to the methane–ethane
-//!   eutectic, 71.15 K, decision-p14-t49b-condensed §2.4), from the registry's condensed columns:
-//!   every condensable is taken here as its pure substance.
+//! It is P14.T51.a: a pure module that nothing on the record calls at generator version 22. Its
+//! call into T13's passes is `atmosphere_under` in
+//! [`atmosphere`](crate::planetary::derive::atmosphere), and its call on the record
+//! `GlobalFigures::condensates_under`, both held at generator version 22 by the `p14-snapshot`
+//! lane's hold (`SNAPSHOT_VERSION`). From that version its rules and constants are output, and a
+//! change to any of them a generator-version change. Left to P14.T54.a: the record's `condensates`
+//! member, which takes [`Condensates`], and the passes' climate (P14.T24.a's range,
+//! `step_climate`, from the body's spin derived before them).
 //!
 //! Every saturation pressure is the registry's phase diagram's
 //! ([`diagram::saturation_pressure`](crate::substance::diagram::saturation_pressure), P14.T49.b's
@@ -67,10 +67,26 @@ use std::error::Error;
 use std::fmt;
 
 use crate::math;
-use crate::planetary::derive::atmosphere::{Gas, METHANE_RELATIVE_HUMIDITY};
+use crate::planetary::derive::atmosphere::{
+    Gas, METHANE_RELATIVE_HUMIDITY, MOLAR_GAS_CONSTANT, SurfaceState,
+};
+#[cfg(doc)]
+use crate::planetary::hooks::figures::cover::{
+    self, AIRLESS_ICE_TEMPERATURE, DRY_SURFACE_WATER_SHARE,
+};
+use crate::planetary::hooks::figures::cover::{
+    ICE_SHEET_THICKNESS, PERENNIAL_ICE_TEMPERATURE, melting_point,
+};
+use crate::planetary::hooks::figures::relief::Hypsometry;
+use crate::planetary::hooks::surface::{FULL_OCEAN_FRACTION, OceanWeight};
+use crate::planetary::surface::MAX_CONDENSATES;
 use crate::substance::diagram::PhaseDiagram;
-use crate::substance::{Phase, SubstanceId};
-use crate::units::{Kelvin, KilogramsPerSquareMetre, MetresPerSecondSquared, Pascals};
+use crate::substance::{CondensedPhase, Phase, Substance, SubstanceId, by_key};
+use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
+use crate::units::{
+    Kelvin, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared,
+    Pascals,
+};
 
 /// The relative humidity of water vapour at the surface over a reservoir that lies across it: 0.77.
 ///
@@ -201,6 +217,21 @@ impl ClimateSpan {
         }
     }
 
+    /// The span of a climate whose range is `range`, coldest then warmest (P14.T24.a's
+    /// [`climate_range`](crate::planetary::hooks::surface::SurfaceConditions::climate_range)),
+    /// about the mean `mean`: the range's ends, widened to the mean where the range does not hold
+    /// it, a climate whose zonal ends both lie on one side of its mean.
+    ///
+    /// A mean that [`isothermal`](Self::isothermal) would not keep, or an end that is not a
+    /// temperature, gives the isothermal span at the mean.
+    #[must_use]
+    pub fn about(range: (Kelvin, Kelvin), mean: Kelvin) -> Self {
+        let (cold, warm) = range;
+        let coldest = if cold < mean { cold } else { mean };
+        let warmest = if warm > mean { warm } else { mean };
+        Self::new(coldest, mean, warmest).unwrap_or_else(|_| Self::isothermal(mean))
+    }
+
     /// The coldest zone, where a dominant condensable's reservoir cold-traps.
     #[must_use]
     pub const fn coldest(&self) -> Kelvin {
@@ -219,18 +250,20 @@ impl ClimateSpan {
         self.warmest
     }
 
-    /// The temperature that controls a condensable of dominance `dominance`, d in [0, 1]:
-    /// `T_mean` − d (`T_mean` − `T_cold`), the mean for a minor condensable and the coldest zone for a
-    /// dominant one.
+    /// The temperature that controls a condensable pulled toward its cold trap by `pull`, in
+    /// [0, 1]: `T_mean` − p (`T_mean` − `T_cold`), with p = d (1 − c) for its dominance d and its
+    /// own sea's ocean weight c ([`Partitioned::own_ocean_weight`]). It is the mean for a minor
+    /// condensable, and for a dominant one over its own full ocean; the coldest zone for a dominant
+    /// one with no sea of its own.
     #[must_use]
-    fn controlling(&self, dominance: f64) -> Kelvin {
+    fn controlling(&self, pull: f64) -> Kelvin {
         let (cold, mean) = (self.coldest.value(), self.mean.value());
-        if dominance <= 0.0 {
+        if pull <= 0.0 {
             self.mean
-        } else if dominance >= 1.0 {
+        } else if pull >= 1.0 {
             self.coldest
         } else {
-            Kelvin::new(mean - dominance * (mean - cold))
+            Kelvin::new(mean - pull * (mean - cold))
         }
     }
 }
@@ -348,6 +381,204 @@ pub(crate) fn weight_meeting_cap(
     Pascals::new(root)
 }
 
+/// The basins a body's liquids fill, as the partition reads them: P14.T24.b's capacity, the
+/// hypsometry of P14.T48.a ([`Hypsometry::fill`]), or none known.
+///
+/// A liquid reservoir of a global layer h fills the share f of the surface that h fills of the
+/// hypsometry, and weighs c = min(1, f ÷ [`FULL_OCEAN_FRACTION`]) in its climate, as P14.T24.a's θ
+/// weighs water's potential ocean ([`OceanWeight::of_potential_ocean`]; decision-p14-t51a-partition
+/// §4). The layer that fills that fraction is found once, so that a deeper one weighs fully with no
+/// search of its own.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Basins {
+    of: Option<Filled>,
+}
+
+/// A known hypsometry, with the layer that fills [`FULL_OCEAN_FRACTION`] of it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Filled {
+    hypsometry: Hypsometry,
+    full_ocean: Metres,
+}
+
+impl Basins {
+    /// No basins known: no liquid fills any share of the surface, and none weighs in its climate,
+    /// so that a condensable's own sea does not hold it at the mean (part 1's rule, c = 0).
+    pub const UNKNOWN: Self = Self { of: None };
+
+    /// The basins of the hypsometry `hypsometry`.
+    #[must_use]
+    pub fn of(hypsometry: &Hypsometry) -> Self {
+        Self {
+            of: Some(Filled {
+                hypsometry: *hypsometry,
+                full_ocean: hypsometry.layer_filling(FULL_OCEAN_FRACTION),
+            }),
+        }
+    }
+
+    /// The share of the surface, 0 to 1, that a liquid of global layer `depth` fills
+    /// ([`Hypsometry::fill`]); none where no basins are known.
+    #[must_use]
+    pub fn area_filled(&self, depth: Metres) -> f64 {
+        self.of
+            .map_or(0.0, |filled| filled.hypsometry.fill(depth).1)
+    }
+
+    /// The weight c, 0 to 1, of a liquid of global layer `depth` in its climate: min(1,
+    /// f ÷ [`FULL_OCEAN_FRACTION`]) of the share f it fills ([`area_filled`](Self::area_filled)),
+    /// and 0 where no basins are known.
+    ///
+    /// From the layer that fills that fraction upward it is 1 by this rule, found once, with no
+    /// search of its own: within a part in 10⁹ of that layer the direct share may lie a few bits
+    /// under 0.708.
+    #[must_use]
+    pub fn ocean_weight(&self, depth: Metres) -> f64 {
+        let Some(filled) = self.of else {
+            return 0.0;
+        };
+        if depth >= filled.full_ocean && depth.value() > 0.0 {
+            return 1.0;
+        }
+        OceanWeight::of_potential_ocean(filled.hypsometry.fill(depth).1).get()
+    }
+}
+
+/// The ground the partition lies on (P14.T51.a): the surface gravity that weighs its reservoirs,
+/// the basins its liquids fill and the share of its condensed water that lies at the surface.
+///
+/// A gravity that is not positive and finite gives no reservoir a mass, and [`Basins::UNKNOWN`]
+/// weighs no sea.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Ground {
+    gravity: MetresPerSecondSquared,
+    basins: Basins,
+    water_at_surface: f64,
+}
+
+impl Ground {
+    /// The ground of surface gravity `gravity`, m s⁻², over the basins `basins`, with the share
+    /// `water_at_surface` of its condensed water at the surface, held to [0, 1] (none for a share
+    /// that is not a number).
+    ///
+    /// The share is P14.T24.b's, all of it while the volcanic greenhouse runs and
+    /// [`DRY_SURFACE_WATER_SHARE`] after ([`cover::water_surface_share`]), the rest in the crust and
+    /// the ground ice: its own sea's weight reads that share of its water
+    /// (decision-p14-t51a-part2 §4.2).
+    #[must_use]
+    pub fn new(gravity: MetresPerSecondSquared, basins: Basins, water_at_surface: f64) -> Self {
+        let share = if water_at_surface.is_nan() {
+            0.0
+        } else {
+            water_at_surface.clamp(0.0, 1.0)
+        };
+        Self {
+            gravity,
+            basins,
+            water_at_surface: share,
+        }
+    }
+
+    /// A ground of surface gravity `gravity` whose basins are not known, all of its water at the
+    /// surface: part 1's partition, with no own sea weighed.
+    #[must_use]
+    pub const fn without_basins(gravity: MetresPerSecondSquared) -> Self {
+        Self {
+            gravity,
+            basins: Basins::UNKNOWN,
+            water_at_surface: 1.0,
+        }
+    }
+
+    /// The mean surface gravity.
+    #[must_use]
+    pub const fn gravity(&self) -> MetresPerSecondSquared {
+        self.gravity
+    }
+
+    /// The basins its liquids fill.
+    #[must_use]
+    pub const fn basins(&self) -> &Basins {
+        &self.basins
+    }
+
+    /// The share of its condensed water at the surface, 0 to 1.
+    #[must_use]
+    pub const fn water_at_surface(&self) -> f64 {
+        self.water_at_surface
+    }
+}
+
+/// A solution a condensable's liquid lies as under an air whose largest gas besides it is a given
+/// background (decision-p14-t51a-part2 §2.2): one row of [`AIR_SOLUTIONS`], each a registry key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AirSolution {
+    /// The condensable whose liquid it is, the solvent.
+    pub(crate) solvent: &'static str,
+    /// The air's largest gas besides the solvent, under which its liquid is the solution.
+    pub(crate) background: &'static str,
+    /// The solution's row.
+    pub(crate) solution: &'static str,
+}
+
+/// The solutions a condensable's liquid lies as, by its air (decision-p14-t51a-part2 §2.2): one row,
+/// methane's liquid under an air whose largest gas besides it is nitrogen, Titan's seas'
+/// `ch4_c2h6_n2`. Its nitrogen is that air's, dissolved, and its ethane the photolysis of its methane,
+/// which survives where the hydrogen escapes, as on Titan ("The CH4 in Titan's atmosphere is
+/// irreversibly destroyed by photolysis because one of the most abundant photolysis products, H2,
+/// escapes": Hörst 2017, J. Geophys. Res. Planets 122, 432, doi:10.1002/2016JE005240, read). Under
+/// an air of hydrogen methane's products recombine to methane, and its liquid is pure (from memory;
+/// decision-p14-t51a-part2 §2.1).
+///
+/// It is a closed set, for the composition audit. The registry's solution rows carry no components
+/// and no Henry's constants yet (P14.T49.h's mixing rules); water's seas stay pure, since the
+/// brines' rows are their eutectics, far saltier than a sea, and their salts the crust's (P14.T51.c
+/// with T51.g); ammonia–water and the acids need a coupled partition of two condensables (P14.T52.b–c).
+/// The vapour's cap is the pure substance's, at its humidity: no Raoult factor, since T24.f's 0.5
+/// already stands for Titan's measured methane.
+pub(crate) const AIR_SOLUTIONS: [AirSolution; 1] = [AirSolution {
+    solvent: "CH4",
+    background: "N2",
+    solution: "ch4_c2h6_n2",
+}];
+
+/// The solution whose liquid the condensable `substance` lies as under the air `air`, its species'
+/// airborne weights over their molar masses in registry order, if any ([`AIR_SOLUTIONS`]): where the
+/// air's largest gas besides it, ties by registry order, is a row's background.
+#[must_use]
+fn solution_of(substance: SubstanceId, air: &[(SubstanceId, f64)]) -> Option<SubstanceId> {
+    AIR_SOLUTIONS.iter().find_map(|row| {
+        if by_key(row.solvent) != Some(substance) {
+            return None;
+        }
+        let mut largest: Option<(SubstanceId, f64)> = None;
+        for &(id, moles) in air {
+            if id != substance && moles > 0.0 && largest.is_none_or(|(_, most)| moles > most) {
+                largest = Some((id, moles));
+            }
+        }
+        let background = by_key(row.background)?;
+        (largest.map(|(id, _)| id) == Some(background))
+            .then(|| by_key(row.solution))
+            .flatten()
+    })
+}
+
+/// The first melt of a condensable's frozen assemblage: its liquid's solution's transition where it
+/// lies as one ([`solution_of`]), and otherwise its own row's, its triple point; read as
+/// [`Transition::temperature`](crate::substance::Transition::temperature) for every kind
+/// (decision-p14-t49b-condensed §2). A row with no condensed columns takes its diagram's triple
+/// point.
+#[must_use]
+fn first_melt_of(row: &Substance, solution: Option<&Substance>, diagram: &PhaseDiagram) -> Kelvin {
+    solution
+        .or(Some(row))
+        .and_then(Substance::condensed)
+        .map_or(diagram.triple_temperature(), |c| {
+            c.transition().temperature()
+        })
+}
+
 /// A body's exchangeable inventory after escape, by species, as the partition reads it: each
 /// species' column weight M g ÷ 4πR², in registry order.
 ///
@@ -455,7 +686,8 @@ impl ColumnInventory {
 }
 
 /// What the sweeps keep of one condensable over one partition: its saturation pressures at the
-/// climate's two ends, computed once, and its dominance as last solved.
+/// climate's two ends, computed once, and its dominance and its own sea's ocean weight as last
+/// solved.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Caps {
     /// h `p_sat`(`T_mean`), the minor branch's cap.
@@ -463,6 +695,59 @@ struct Caps {
     /// `p_sat`(`T_cold`), the dominant branch's.
     cold_cap: Pascals,
     dominance: f64,
+    /// c, the ocean weight of its own liquid reservoir at the mean ([`own_ocean_weight`]).
+    own_ocean: f64,
+}
+
+/// The ocean weight c, 0 to 1, of the own liquid reservoir of the condensable `species`, of
+/// phase diagram `diagram`, at the mean of the climate `climate`, on the ground `ground`, where on
+/// the minor branch the others weigh `others` and it weighs `minor` (decision-p14-t51a-partition
+/// §4).
+///
+/// It is its reservoir at the mean, its inventory less its minor branch's weight (water's at its
+/// ground's surface share, [`Ground::water_at_surface`]), where its pure substance's phase at the
+/// mean and the surface pressure that branch gives is liquid ([`condensed_phase_at`]): that
+/// liquid's global layer, over its grain density at the mean, weighed by the basins
+/// ([`Basins::ocean_weight`]). A closed form of the inventory and the climate, as the dominance's
+/// share is, so that it needs no iteration of its own. A solution's first melt labels the phases
+/// after the solve and never moves the cap (decision-p14-t51a-part2 §2.2). Zero where the
+/// condensable would boil or freeze at the mean, where all of it is airborne there, and where the
+/// gravity or the liquid's density is not known.
+#[must_use]
+fn own_ocean_weight(
+    species: &Species,
+    diagram: &PhaseDiagram,
+    climate: &ClimateSpan,
+    ground: &Ground,
+    others: Pascals,
+    minor: Pascals,
+) -> f64 {
+    let share = if species.substance == Gas::Water.substance() {
+        ground.water_at_surface
+    } else {
+        1.0
+    };
+    let reservoir = (species.weight - minor).value() * share;
+    let g = ground.gravity.value();
+    // By comparison, so that a NaN holds no sea.
+    if !(reservoir > 0.0 && g > 0.0 && g.is_finite()) {
+        return 0.0;
+    }
+    let pressure = others + minor;
+    let pure = diagram.triple_temperature();
+    let phase = condensed_phase_at(diagram, pure, climate.mean, pressure, minor);
+    if phase != Some(CondensatePhase::Liquid) {
+        return 0.0;
+    }
+    let Some(density) = species
+        .substance
+        .substance()
+        .grain_density(CondensedPhase::Liquid, climate.mean)
+    else {
+        return 0.0;
+    };
+    let depth = reservoir / g / density.value();
+    ground.basins.ocean_weight(Metres::new(depth))
 }
 
 /// The weights and weights over molar mass of every species but `skip`, summed in registry order.
@@ -518,13 +803,24 @@ impl AirborneWeights {
     ///
     /// Each condensable starts at the least of its inventory and its two caps, and
     /// [`PARTITION_SWEEPS`] sweeps run in registry order.
-    pub(crate) fn solve(&mut self, climate: &ClimateSpan, inventory: &ColumnInventory) {
-        self.solve_sweeping(climate, inventory, PARTITION_SWEEPS);
+    pub(crate) fn solve(
+        &mut self,
+        climate: &ClimateSpan,
+        ground: &Ground,
+        inventory: &ColumnInventory,
+    ) {
+        self.solve_sweeping(climate, ground, inventory, PARTITION_SWEEPS);
     }
 
     /// [`solve`](Self::solve) with `sweeps` sweeps, for the tests that compare the count with
     /// more.
-    fn solve_sweeping(&mut self, climate: &ClimateSpan, inventory: &ColumnInventory, sweeps: u32) {
+    fn solve_sweeping(
+        &mut self,
+        climate: &ClimateSpan,
+        ground: &Ground,
+        inventory: &ColumnInventory,
+        sweeps: u32,
+    ) {
         let Self { weights, caps } = self;
         weights.clear();
         caps.clear();
@@ -536,6 +832,7 @@ impl AirborneWeights {
                     ),
                     cold_cap: diagram.saturation_pressure(climate.coldest),
                     dominance: 0.0,
+                    own_ocean: 0.0,
                 }),
                 Some(_) | None => None,
             };
@@ -573,18 +870,27 @@ impl AirborneWeights {
                 };
                 let minor = at_cap(held.minor_cap);
                 let d = dominance(share(minor, species.molar_mass, moles));
+                // Its own sea, where it has one at the mean, holds it there (§4); a minor
+                // condensable is held there already.
+                let c = if d > 0.0 {
+                    own_ocean_weight(species, diagram, climate, ground, total, minor)
+                } else {
+                    0.0
+                };
+                let pull = d * (1.0 - c);
                 let cap = if d <= 0.0 {
                     held.minor_cap
-                } else if d >= 1.0 {
+                } else if pull >= 1.0 {
                     held.cold_cap
                 } else {
                     let humidity = math::powf(species.humidity, 1.0 - d);
-                    let at = diagram.saturation_pressure(climate.controlling(d));
+                    let at = diagram.saturation_pressure(climate.controlling(pull));
                     Pascals::new(humidity * at.value())
                 };
                 weights[k] = if d <= 0.0 { minor } else { at_cap(cap) };
                 caps[k] = Some(Caps {
                     dominance: d,
+                    own_ocean: c,
                     ..held
                 });
             }
@@ -666,6 +972,7 @@ pub struct Partitioned {
     airborne: Pascals,
     partial_pressure: Pascals,
     dominance: f64,
+    own_ocean_weight: f64,
     lies_at: Kelvin,
 }
 
@@ -702,14 +1009,31 @@ impl Partitioned {
     }
 
     /// Its dominance d ([`dominance`]): 0 for a minor condensable and for a species with no phase
-    /// diagram, 1 for one held at its cold trap.
+    /// diagram, 1 for one held toward its cold trap.
     #[must_use]
     pub const fn dominance(&self) -> f64 {
         self.dominance
     }
 
-    /// The temperature that controls its vapour and at which its reservoir lies: the mean for a
-    /// minor species, the coldest zone for a dominant one.
+    /// The ocean weight c of its own liquid reservoir at the mean, 0 to 1
+    /// (decision-p14-t51a-partition §4): min(1, f ÷ 0.708) of the share f of the surface that
+    /// reservoir fills of its ground's basins ([`Basins::ocean_weight`]), where its phase at the
+    /// mean is liquid with more of it than its air holds there; 0 otherwise, and for a minor
+    /// condensable, which its own sea already holds at the mean.
+    ///
+    /// It weakens the pull toward the cold trap, `T_mean` − d (1 − c)(`T_mean` − `T_cold`): a
+    /// non-dilute condensable over its own ocean holds its vapour where the ocean lies, its weak
+    /// horizontal gradients and its latent heat keeping no colder zone in control (Pierrehumbert and
+    /// Ding 2016, Proc. R. Soc. A 472, 20160107; Ding and Pierrehumbert 2016, ApJ 822, 24; both
+    /// abstracts read).
+    #[must_use]
+    pub const fn own_ocean_weight(&self) -> f64 {
+        self.own_ocean_weight
+    }
+
+    /// The temperature that controls its vapour and at which its reservoir lies,
+    /// `T_mean` − d (1 − c)(`T_mean` − `T_cold`): the mean for a minor species and for a dominant
+    /// one over its own full ocean, the coldest zone for a dominant one with no sea of its own.
     #[must_use]
     pub const fn lies_at(&self) -> Kelvin {
         self.lies_at
@@ -726,6 +1050,9 @@ pub struct Condensate {
     lies_at: Kelvin,
     seasonal: bool,
     phases: CondensatePhases,
+    seasonal_phases: CondensatePhases,
+    liquid: SubstanceId,
+    first_melt: Kelvin,
 }
 
 impl Condensate {
@@ -744,10 +1071,9 @@ impl Condensate {
     /// Its condensed reservoir, M − `M_air` over the body's whole surface: a column mass, finite and
     /// not negative.
     ///
-    /// A supercritical fluid's is none, since the fluid is the air at the surface. Its global
-    /// equivalent layer is this over the condensate's grain density, the registry's
-    /// [`Substance::grain_density`](crate::substance::Substance::grain_density) (T51.a's second
-    /// part).
+    /// A supercritical fluid's is none, since the fluid is the air at the surface. Its published
+    /// entries divide it between its phases, each with its global equivalent layer over its grain
+    /// density ([`Partition::publish`]).
     #[must_use]
     pub const fn reservoir(&self) -> KilogramsPerSquareMetre {
         self.reservoir
@@ -767,23 +1093,51 @@ impl Condensate {
         self.seasonal
     }
 
+    /// Whether its reservoir in the phase `phase` is seasonal (decision-p14-t51a-partition §3).
+    ///
+    /// It is where the warmest zone takes that phase off the surface: a solid that melts there, or,
+    /// held toward its cold trap, sublimes there at its own partial pressure; a liquid that boils
+    /// there at the surface pressure. Earth's ocean is perennial and its ice seasonal; Mars's carbon
+    /// dioxide ice is seasonal and its water ice, a minor condensable's, perennial. False for a
+    /// phase its reservoir does not take, and for a supercritical fluid, which has no reservoir.
+    #[must_use]
+    pub const fn is_seasonal_as(&self, phase: CondensatePhase) -> bool {
+        self.seasonal_phases.contains(phase)
+    }
+
     /// The phases its reservoir takes over the climate's range, at the surface pressure.
     ///
     /// It holds its own phase, with the solid where the coldest zone freezes a liquid (Earth's ice),
-    /// or the liquid where the warmest zone melts a solid. A reservoir is not yet divided between
-    /// them (T51.a's second part, by T24.b's cover).
+    /// or the liquid where the warmest zone melts a solid. [`Partition::publish`] divides the
+    /// reservoir between them.
     #[must_use]
     pub const fn phases(&self) -> CondensatePhases {
         self.phases
     }
+
+    /// The row its liquid lies as: its own, or the solution it is the solvent of (Titan's seas'
+    /// `ch4_c2h6_n2` for methane under nitrogen).
+    #[must_use]
+    pub const fn liquid(&self) -> SubstanceId {
+        self.liquid
+    }
+
+    /// Its frozen assemblage's first melt, below which its reservoir is solid: its row's
+    /// transition, or its liquid's solution's (decision-p14-t49b-condensed §2).
+    #[must_use]
+    pub const fn first_melt(&self) -> Kelvin {
+        self.first_melt
+    }
 }
 
 /// A body's condensate partition (P14.T51.a; [`partition`]).
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Partition {
     species: Vec<Partitioned>,
     condensates: Vec<Condensate>,
     surface_pressure: Pascals,
+    climate: ClimateSpan,
+    ground: Ground,
 }
 
 impl Partition {
@@ -806,8 +1160,8 @@ impl Partition {
     }
 
     /// The condensates, by reservoir mass, largest first, with ties by registry order: every one,
-    /// one for each substance, which T51.a's second part publishes as at most eight entries, one
-    /// for each substance and phase.
+    /// one for each substance, which [`publish`](Self::publish) lists as at most
+    /// [`MAX_CONDENSATES`] entries, one for each substance and phase.
     #[must_use]
     pub fn condensates(&self) -> &[Condensate] {
         &self.condensates
@@ -818,19 +1172,61 @@ impl Partition {
     pub fn condensate(&self, substance: SubstanceId) -> Option<&Condensate> {
         self.condensates.iter().find(|c| c.substance == substance)
     }
+
+    /// The condensables its surface holds a reservoir of, in registry order.
+    ///
+    /// They are those with a condensed reservoir, which P14.T48.d's climate regime reads in place
+    /// of [`surface_reservoirs`](crate::planetary::hooks::surface::regime::surface_reservoirs)
+    /// from 22 → 23. A supercritical fluid is none.
+    #[must_use]
+    pub fn reservoirs(&self) -> Vec<SubstanceId> {
+        let mut held: Vec<SubstanceId> = self
+            .condensates
+            .iter()
+            .filter(|c| c.reservoir.value() > 0.0)
+            .map(|c| c.substance)
+            .collect();
+        held.sort_unstable();
+        held
+    }
+
+    /// The climate it was solved over.
+    #[must_use]
+    pub const fn climate(&self) -> &ClimateSpan {
+        &self.climate
+    }
+
+    /// The ground it lies on.
+    #[must_use]
+    pub const fn ground(&self) -> &Ground {
+        &self.ground
+    }
 }
 
-/// The condensate phase of a reservoir of the substance of `diagram`, whose partial pressure in the
-/// air is `partial`, at `temperature` under the surface pressure `pressure`, or `None` where it
-/// cannot lie condensed there.
+/// Whether a condensable of `diagram`, whose frozen assemblage first melts at `first_melt`, is a
+/// solution's liquid at `temperature` where its pure substance would be solid: between its first
+/// melt and its pure triple point (decision-p14-t49b-condensed §2.4: Titan's seas are liquid down to
+/// the methane–ethane eutectic). A pure substance, whose first melt is its triple point, never is.
+#[must_use]
+fn solution_liquid_at(diagram: &PhaseDiagram, first_melt: Kelvin, temperature: Kelvin) -> bool {
+    first_melt < diagram.triple_temperature()
+        && temperature >= first_melt
+        && temperature < diagram.triple_temperature()
+}
+
+/// The condensate phase of a reservoir of the substance of `diagram`, whose frozen assemblage first
+/// melts at `first_melt` and whose partial pressure in the air is `partial`, at `temperature`
+/// under the surface pressure `pressure`, or `None` where it cannot lie condensed there.
 ///
 /// At or above its critical temperature it is supercritical where its own partial pressure is at
 /// least its critical pressure, and otherwise vapour, as [`condensate_of`]'s label is judged.
 /// Below it, it is the diagram's phase at the surface pressure, and none where its vapour pressure
-/// exceeds the surface pressure, so that it boils.
+/// exceeds the surface pressure, so that it boils; a solution's liquid where its pure substance
+/// would be solid above its first melt ([`solution_liquid_at`]).
 #[must_use]
 fn condensed_phase_at(
     diagram: &PhaseDiagram,
+    first_melt: Kelvin,
     temperature: Kelvin,
     pressure: Pascals,
     partial: Pascals,
@@ -838,18 +1234,57 @@ fn condensed_phase_at(
     if temperature >= diagram.critical_temperature() {
         return (partial >= diagram.critical_pressure()).then_some(CondensatePhase::Supercritical);
     }
-    diagram
+    match diagram
         .phase_at(temperature, pressure)
         .and_then(CondensatePhase::of)
+    {
+        Some(CondensatePhase::Solid) if solution_liquid_at(diagram, first_melt, temperature) => {
+            Some(CondensatePhase::Liquid)
+        }
+        phase => phase,
+    }
 }
 
-/// The condensate of the species `species` of a body's air, its row's `diagram` and its partition
-/// `partitioned`, over `climate` under the surface pressure `pressure` at surface gravity `gravity`;
-/// `None` for a species with nothing condensed that is not supercritical either.
+/// Whether the warmest zone, at `warmest`, takes the reservoir of the substance of `diagram` in the
+/// phase `phase` off the surface (decision-p14-t51a-partition §3): a solid that is not solid there
+/// at the surface pressure `pressure`, so that it melts, or, held toward its cold trap (its
+/// dominance `dominance` above 0), whose vapour pressure there exceeds its own partial pressure
+/// `partial`, so that it sublimes; a liquid that is neither liquid nor solid there, so that it
+/// boils. A supercritical fluid has no reservoir to take.
+///
+/// A minor solid is held below saturation at the mean, so its frost point always lies below the
+/// warmest zone: the sublimation test is a dominant one's only, as the species' own flag reads it
+/// (the part 1 ruling's §3), or Titan's crust and Mars's water ice would read seasonal.
+#[must_use]
+fn taken_off(
+    (diagram, first_melt): (&PhaseDiagram, Kelvin),
+    phase: CondensatePhase,
+    warmest: Kelvin,
+    (pressure, partial): (Pascals, Pascals),
+    dominance: f64,
+) -> bool {
+    let there = condensed_phase_at(diagram, first_melt, warmest, pressure, partial);
+    match phase {
+        CondensatePhase::Solid => {
+            there != Some(CondensatePhase::Solid)
+                || (dominance > 0.0 && diagram.saturation_pressure(warmest) > partial)
+        }
+        CondensatePhase::Liquid => !matches!(
+            there,
+            Some(CondensatePhase::Liquid | CondensatePhase::Solid)
+        ),
+        CondensatePhase::Supercritical => false,
+    }
+}
+
+/// The condensate of the species `species` of a body's air, its row's `diagram`, the solution its
+/// liquid lies as, if any ([`solution_of`]), and its partition `partitioned`, over `climate` under
+/// the surface pressure `pressure` at surface gravity `gravity`; `None` for a species with nothing
+/// condensed that is not supercritical either.
 #[must_use]
 fn condensate_of(
     species: &Species,
-    diagram: &PhaseDiagram,
+    (diagram, solution): (&PhaseDiagram, Option<SubstanceId>),
     partitioned: &Partitioned,
     climate: &ClimateSpan,
     pressure: Pascals,
@@ -857,6 +1292,12 @@ fn condensate_of(
 ) -> Option<Condensate> {
     let lies_at = partitioned.lies_at;
     let condensed = partitioned.condensed().value();
+    let first_melt = first_melt_of(
+        species.substance.substance(),
+        solution.map(SubstanceId::substance),
+        diagram,
+    );
+    let liquid = solution.unwrap_or(species.substance);
     if condensed.is_nan() || condensed <= 0.0 {
         // Nothing condensed: a supercritical fluid at the surface, where the species makes one of
         // its own, or nothing.
@@ -871,28 +1312,33 @@ fn condensate_of(
                 lies_at,
                 seasonal: false,
                 phases: CondensatePhases::default().with(phase),
+                seasonal_phases: CondensatePhases::default(),
+                liquid,
+                first_melt,
             }
         });
     }
     // Its reservoir lies where its vapour is controlled; where its vapour pressure there exceeds
     // the surface pressure, at the coldest zone; and where it cannot lie condensed even there, by
-    // its triple point.
+    // its first melt.
     let partial = partitioned.partial_pressure;
-    let phase = condensed_phase_at(diagram, lies_at, pressure, partial)
-        .or_else(|| condensed_phase_at(diagram, climate.coldest, pressure, partial))
-        .unwrap_or(if climate.coldest < diagram.triple_temperature() {
-            CondensatePhase::Solid
-        } else {
-            CondensatePhase::Liquid
-        });
+    let at = |t: Kelvin| condensed_phase_at(diagram, first_melt, t, pressure, partial);
+    let phase =
+        at(lies_at)
+            .or_else(|| at(climate.coldest))
+            .unwrap_or(if climate.coldest < first_melt {
+                CondensatePhase::Solid
+            } else {
+                CondensatePhase::Liquid
+            });
     let mut phases = CondensatePhases::default().with(phase);
-    let triple = diagram.triple_temperature();
-    let inside = (climate.coldest < triple && triple < climate.warmest).then_some(triple);
+    let inside =
+        (climate.coldest < first_melt && first_melt < climate.warmest).then_some(first_melt);
     for t in [Some(climate.coldest), Some(climate.warmest), inside]
         .into_iter()
         .flatten()
     {
-        if let Some(found) = condensed_phase_at(diagram, t, pressure, partial) {
+        if let Some(found) = at(t) {
             phases = phases.with(found);
         }
     }
@@ -901,10 +1347,24 @@ fn condensate_of(
     // above its frost point at its own partial pressure: sublimation goes as its vapour pressure
     // over its own partial pressure, not over the surface pressure, which sets only boiling.
     let melts = phases.contains(CondensatePhase::Solid) && phases.contains(CondensatePhase::Liquid);
-    let leaves = condensed_phase_at(diagram, climate.warmest, pressure, partial) != Some(phase);
+    let leaves = at(climate.warmest) != Some(phase);
     let sublimes =
         partitioned.dominance > 0.0 && diagram.saturation_pressure(climate.warmest) > partial;
     let seasonal = melts || leaves || sublimes;
+    let mut seasonal_phases = CondensatePhases::default();
+    for each in [CondensatePhase::Solid, CondensatePhase::Liquid] {
+        if phases.contains(each)
+            && taken_off(
+                (diagram, first_melt),
+                each,
+                climate.warmest,
+                (pressure, partial),
+                partitioned.dominance,
+            )
+        {
+            seasonal_phases = seasonal_phases.with(each);
+        }
+    }
     // A gravity that is not positive and finite gives no column mass a weight can be read as.
     let kg = condensed / gravity.value();
     let reservoir = if kg.is_finite() && kg > 0.0 { kg } else { 0.0 };
@@ -915,6 +1375,9 @@ fn condensate_of(
         lies_at,
         seasonal,
         phases,
+        seasonal_phases,
+        liquid,
+        first_melt,
     })
 }
 
@@ -927,14 +1390,13 @@ fn reservoir_order(a: &Condensate, b: &Condensate) -> Ordering {
         .then(a.substance.cmp(&b.substance))
 }
 
-/// The condensate partition of a body of surface gravity `gravity`, m s⁻², positive and finite,
-/// whose exchangeable inventory after escape is `inventory`, over the climate `climate` ([the
-/// module](self)'s rules): each species' airborne and condensed weights and partial pressure, and
-/// its condensate, if any.
+/// The condensate partition of a body on the ground `ground`, whose exchangeable inventory after
+/// escape is `inventory`, over the climate `climate` ([the module](self)'s rules): each species'
+/// airborne and condensed weights and partial pressure, and its condensate, if any.
 ///
 /// For every species the airborne and condensed weights sum to its inventory's, and the surface
 /// pressure is the airborne weights summed in registry order. A gravity that is not positive and
-/// finite leaves every reservoir zero.
+/// finite leaves every reservoir zero, and weighs no condensable's own sea.
 ///
 /// # Examples
 ///
@@ -944,7 +1406,7 @@ fn reservoir_order(a: &Condensate, b: &Condensate) -> Ordering {
 ///
 /// ```
 /// use hyperion_sim::planetary::chem::partition::{
-///     ClimateSpan, ColumnInventory, CondensatePhase, partition,
+///     ClimateSpan, ColumnInventory, CondensatePhase, Ground, partition,
 /// };
 /// use hyperion_sim::planetary::derive::atmosphere::Gas;
 /// use hyperion_sim::substance::diagram;
@@ -957,7 +1419,8 @@ fn reservoir_order(a: &Condensate, b: &Condensate) -> Ordering {
 ///     (Gas::Nitrogen.substance(), Pascals::new(11.0)),
 ///     (Gas::Argon.substance(), Pascals::new(12.0)),
 /// ])?;
-/// let mars = partition(&climate, MetresPerSecondSquared::new(3.72), &inventory);
+/// let ground = Ground::without_basins(MetresPerSecondSquared::new(3.72));
+/// let mars = partition(&climate, &ground, &inventory);
 /// let cap = diagram::saturation_pressure(co2, climate.coldest()).expect("CO2 has a diagram");
 /// let held = mars.of(co2).expect("named").partial_pressure();
 /// assert!((held.value() / cap.value() - 1.0).abs() < 1e-9);
@@ -967,13 +1430,9 @@ fn reservoir_order(a: &Condensate, b: &Condensate) -> Ordering {
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[must_use]
-pub fn partition(
-    climate: &ClimateSpan,
-    gravity: MetresPerSecondSquared,
-    inventory: &ColumnInventory,
-) -> Partition {
+pub fn partition(climate: &ClimateSpan, ground: &Ground, inventory: &ColumnInventory) -> Partition {
     let mut solved = AirborneWeights::new();
-    solved.solve(climate, inventory);
+    solved.solve(climate, ground, inventory);
     let AirborneWeights {
         weights,
         caps: held,
@@ -983,6 +1442,13 @@ pub fn partition(
         pressure += w.value();
         moles += w.value() / species.molar_mass;
     }
+    // What each liquid lies as reads the solved air (decision-p14-t51a-part2 §2.2).
+    let air: Vec<(SubstanceId, f64)> = inventory
+        .species
+        .iter()
+        .zip(&weights)
+        .map(|(s, w)| (s.substance, w.value() / s.molar_mass))
+        .collect();
     let mut species = Vec::with_capacity(inventory.len());
     let mut condensates = Vec::new();
     for ((s, &airborne), state) in inventory.species.iter().zip(&weights).zip(&held) {
@@ -991,23 +1457,24 @@ pub fn partition(
         } else {
             0.0
         };
-        let d = state.map_or(0.0, |state| state.dominance);
+        let (d, c) = state.map_or((0.0, 0.0), |state| (state.dominance, state.own_ocean));
         let partitioned = Partitioned {
             substance: s.substance,
             inventory: s.weight,
             airborne,
             partial_pressure: Pascals::new(x * pressure),
             dominance: d,
-            lies_at: climate.controlling(d),
+            own_ocean_weight: c,
+            lies_at: climate.controlling(d * (1.0 - c)),
         };
         if let Some(diagram) = s.diagram
             && let Some(condensate) = condensate_of(
                 s,
-                diagram,
+                (diagram, solution_of(s.substance, &air)),
                 &partitioned,
                 climate,
                 Pascals::new(pressure),
-                gravity,
+                ground.gravity,
             )
         {
             condensates.push(condensate);
@@ -1019,7 +1486,557 @@ pub fn partition(
         species,
         condensates,
         surface_pressure: Pascals::new(pressure),
+        climate: *climate,
+        ground: *ground,
     }
+}
+
+/// What the published condensates read of a body's surface beyond its partition (P14.T51.a's
+/// second part): P14.T24.b's cover, generalised by substance ([`Partition::publish`]).
+///
+/// Plain data with public fields.
+#[derive(Clone, Copy)]
+pub struct Cover<'a> {
+    /// The share of the surface, 0 to 1, whose annual-mean climate lies below a temperature:
+    /// P14.T24.a's [`cold_area`](crate::planetary::hooks::surface::SurfaceConditions::cold_area),
+    /// read off one profile of the body for every solid (decision-p14-t51a-part2 §3.5).
+    pub cold_area: &'a dyn Fn(Kelvin) -> f64,
+    /// The surface state (P14.T13.c), which sets where a solid lasts the year: P14.T24.b's edges
+    /// for water, and for any other solid its first melt's share under air, blended with its
+    /// sublimation edge where airless.
+    pub state: SurfaceState,
+    /// Water's own cover, P14.T24.b's, which the water entries take.
+    pub water: WaterCover,
+}
+
+impl fmt::Debug for Cover<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Cover")
+            .field("state", &self.state)
+            .field("water", &self.water)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Water's cover at a body's surface, P14.T24.b's at its surface water (decision-p14-t51a-part2
+/// §4.2): what the published water entries take, so that they are T24.b's to the bit.
+///
+/// Plain data with public fields.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WaterCover {
+    /// The surface water `σ_s` ([`cover::surface_water_under`]): the share of the partition's
+    /// condensed water that lies at the surface.
+    pub surface_water: KilogramsPerSquareMetre,
+    /// The potential ocean `f_pot` it fills ([`cover::potential_ocean`]), the liquid entry's area.
+    pub potential_ocean: f64,
+    /// Its perennial ice's share of the surface ([`cover::ice_fraction`]), the solid entry's area.
+    pub ice_fraction: f64,
+    /// The density of its ice, ice Ih's at the mean surface temperature
+    /// ([`ice_ih_density`](crate::substance::ice_ih_density)), at which T24.b caps the ice.
+    pub ice_density: KilogramsPerCubicMetre,
+}
+
+/// The net sublimation rate at which an airless surface keeps a solid over the Solar System's age:
+/// 144 kg m⁻² Gyr⁻¹, water ice's Hertz–Knudsen loss at 110 K (Schorghofer and Williams 2020, PSJ 1,
+/// 54, doi:10.3847/PSJ/abb6ff, eq. 8 and Table 1, read, with a sublimation coefficient α of 1, as
+/// P14.T24.b's [`AIRLESS_ICE_TEMPERATURE`] and plan 14's P14.T51.f state it;
+/// decision-p14-t51a-part2 §3.3, whose arithmetic from Murphy and Koop's 2005 curve gives 144.0 at
+/// 110.0 K). The ruling's `AIRLESS_ICE_LOSS_RATE`, its unit in its name.
+pub const AIRLESS_ICE_LOSS_KG_PER_M2_GYR: f64 = 144.0;
+
+/// The temperature, below its first melt `first_melt`, at which a solid of `diagram` and molar mass
+/// `molar_mass_g_per_mol` loses [`AIRLESS_ICE_LOSS_KG_PER_M2_GYR`] by net Hertz–Knudsen sublimation
+/// against its own partial pressure `partial`: α (`p_sat`(T) − p) √(M ÷ 2πRT) = J* with α = 1
+/// (Schorghofer and Williams 2020, eq. 8; decision-p14-t51a-part2 §3.3), by [`EDGE_HALVINGS`]
+/// halvings over [0, `first_melt`]. Its first melt where it loses less even there.
+#[must_use]
+fn sublimation_edge(
+    diagram: &PhaseDiagram,
+    molar_mass_g_per_mol: f64,
+    first_melt: Kelvin,
+    partial: Pascals,
+) -> Kelvin {
+    let rate = AIRLESS_ICE_LOSS_KG_PER_M2_GYR / (1e9 * SECONDS_PER_JULIAN_YEAR);
+    let kg_per_mol = molar_mass_g_per_mol * 1e-3;
+    let loss = |t: f64| {
+        let vapour = diagram.saturation_pressure(Kelvin::new(t)).value();
+        let speed = (kg_per_mol / (2.0 * core::f64::consts::PI * MOLAR_GAS_CONSTANT * t)).sqrt();
+        (vapour - partial.value()) * speed
+    };
+    let top = first_melt.value();
+    // A NaN loss keeps the first melt.
+    let at_top = loss(top);
+    if at_top.is_nan() || at_top <= rate {
+        return first_melt;
+    }
+    let (mut low, mut high) = (0.0, top);
+    for _ in 0..EDGE_HALVINGS {
+        let middle = f64::midpoint(low, high);
+        if loss(middle) > rate {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
+    Kelvin::new(f64::midpoint(low, high))
+}
+
+/// How many halvings locate an airless solid's sublimation edge: 64, always that many, past the
+/// last bit of its first melt ([`sublimation_edge`]).
+const EDGE_HALVINGS: u32 = 64;
+
+/// The ratio of a solid's annual-mean edge under air to its first melt: P14.T24.b's perennial
+/// edge over water's melting point, [`PERENNIAL_ICE_TEMPERATURE`] ÷ [`melting_point`] = 263.15 ÷
+/// 273.16 = 0.963 355 (decision-p14-t51a-part2 §3.2). The seasonal excess a perennial ice must lie
+/// below its melt goes as the temperature, (T ÷ 4)(δF ÷ F) on a radiatively controlled surface, so
+/// the margin is a ratio, not water's 10 K.
+#[must_use]
+fn perennial_ratio() -> f64 {
+    PERENNIAL_ICE_TEMPERATURE.value() / melting_point().value()
+}
+
+/// The annual-mean temperature below which a solid condensate of `diagram`, molar mass
+/// `molar_mass_g_per_mol` and first melt `first_melt`, of dominance `dominance` and partial pressure
+/// `partial` in its air, lasts the year at the surface of a body in the state `state`
+/// (decision-p14-t51a-part2 §3.2–3.3), for every solid but water, which keeps P14.T24.b's edges:
+///
+/// - under air, a `Snowball` included, its first melt times [`perennial_ratio`];
+/// - airless, that edge weighted by its dominance d, d r `T_fm` + (1 − d) `T_HK`, with `T_HK` its
+///   sublimation edge at its own partial pressure ([`sublimation_edge`]): a dominant ice sets its
+///   own air and buffers its own temperature (Pluto's and Triton's nitrogen), a minor one is lost
+///   where it is warmer than its own air can hold. It is continuous in d and in the pressure.
+#[must_use]
+fn ice_line(
+    (diagram, molar_mass_g_per_mol): (&PhaseDiagram, f64),
+    first_melt: Kelvin,
+    (dominance, partial): (f64, Pascals),
+    state: SurfaceState,
+) -> Kelvin {
+    let under_air = perennial_ratio() * first_melt.value();
+    match state {
+        SurfaceState::Airless => {
+            let edge = sublimation_edge(diagram, molar_mass_g_per_mol, first_melt, partial);
+            let d = dominance.clamp(0.0, 1.0);
+            Kelvin::new(d * under_air + (1.0 - d) * edge.value())
+        }
+        SurfaceState::GasEnvelope
+        | SurfaceState::MagmaOcean
+        | SurfaceState::RunawayGreenhouse
+        | SurfaceState::Temperate
+        | SurfaceState::Snowball => Kelvin::new(under_air),
+    }
+}
+
+/// One published condensate (P14.T51.a): a substance in one phase at a body's surface, with its
+/// share of the substance's reservoir, its global equivalent layer, the area it covers and whether
+/// it is seasonal ([`Partition::publish`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CondensateEntry {
+    substance: SubstanceId,
+    phase: CondensatePhase,
+    reservoir: KilogramsPerSquareMetre,
+    reservoir_gel: Option<Metres>,
+    area_fraction: f64,
+    seasonal: bool,
+}
+
+impl CondensateEntry {
+    /// The substance: the condensable's row, or for a liquid the solution it lies as
+    /// ([`Condensate::liquid`]).
+    #[must_use]
+    pub const fn substance(&self) -> SubstanceId {
+        self.substance
+    }
+
+    /// Its phase.
+    #[must_use]
+    pub const fn phase(&self) -> CondensatePhase {
+        self.phase
+    }
+
+    /// Its reservoir, its mass over the body's whole surface, kg m⁻²: its share of the substance's
+    /// reservoir at the surface; none for a supercritical fluid.
+    #[must_use]
+    pub const fn reservoir(&self) -> KilogramsPerSquareMetre {
+        self.reservoir
+    }
+
+    /// Its global equivalent layer, plan 14's `reservoir_gel_m`.
+    ///
+    /// It is its reservoir over its grain density in its phase at the temperature it lies at
+    /// ([`Substance::grain_density`]); `None` where the registry has not read that density, which
+    /// P14.T54.a sends as absent. Zero for a supercritical fluid.
+    #[must_use]
+    pub const fn reservoir_gel(&self) -> Option<Metres> {
+        self.reservoir_gel
+    }
+
+    /// The share of the surface it covers, 0 to 1: a liquid's by its volume over the basins, a
+    /// solid's its climate's cold area below its ice line, capped by its mass at
+    /// [`ICE_SHEET_THICKNESS`]; none for a supercritical fluid, which is the air at the surface.
+    #[must_use]
+    pub const fn area_fraction(&self) -> f64 {
+        self.area_fraction
+    }
+
+    /// Whether it is seasonal: the warmest zone takes this phase off the surface
+    /// ([`Condensate::is_seasonal_as`]).
+    #[must_use]
+    pub const fn is_seasonal(&self) -> bool {
+        self.seasonal
+    }
+}
+
+/// A body's published condensates (P14.T51.a; [`Partition::publish`]).
+///
+/// At most [`MAX_CONDENSATES`] entries, one for each substance and phase, sorted by reservoir mass,
+/// largest first, with ties by `SubstanceId`, then phase. P14.T54.a puts this type in the place of
+/// the record's [`Condensates`](crate::planetary::record::Condensates).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Condensates {
+    entries: Vec<CondensateEntry>,
+}
+
+impl Condensates {
+    /// The entries, in their order.
+    #[must_use]
+    pub fn entries(&self) -> &[CondensateEntry] {
+        &self.entries
+    }
+
+    /// The entry of `substance` in `phase`, if there is one.
+    #[must_use]
+    pub fn entry(
+        &self,
+        substance: SubstanceId,
+        phase: CondensatePhase,
+    ) -> Option<&CondensateEntry> {
+        self.entries
+            .iter()
+            .find(|e| e.substance == substance && e.phase == phase)
+    }
+
+    /// The liquids as `(SubstanceId, area fraction)`, in the entries' order: P14.T24.b's
+    /// `surface_liquids`, whose sum is the ocean fraction.
+    #[must_use]
+    pub fn surface_liquids(&self) -> Vec<(SubstanceId, f64)> {
+        self.areas(CondensatePhase::Liquid)
+    }
+
+    /// The solids as `(SubstanceId, area fraction)`, in the entries' order: P14.T24.b's
+    /// `surface_ices`.
+    #[must_use]
+    pub fn surface_ices(&self) -> Vec<(SubstanceId, f64)> {
+        self.areas(CondensatePhase::Solid)
+    }
+
+    /// The entries in `phase` as `(SubstanceId, area fraction)`.
+    #[must_use]
+    fn areas(&self, phase: CondensatePhase) -> Vec<(SubstanceId, f64)> {
+        self.entries
+            .iter()
+            .filter(|e| e.phase == phase)
+            .map(|e| (e.substance, e.area_fraction))
+            .collect()
+    }
+}
+
+/// The order of the published entries: by reservoir mass, largest first, with ties by
+/// `SubstanceId`, then phase.
+#[must_use]
+fn entry_order(a: &CondensateEntry, b: &CondensateEntry) -> Ordering {
+    b.reservoir
+        .total_cmp(&a.reservoir)
+        .then(a.substance.cmp(&b.substance))
+        .then(a.phase.cmp(&b.phase))
+}
+
+/// A condensed entry's mass and grain density, before the liquids share their basins.
+#[derive(Debug, Clone, Copy)]
+struct Part {
+    substance: SubstanceId,
+    phase: CondensatePhase,
+    mass_kg_per_m2: f64,
+    density_kg_per_m3: Option<f64>,
+    area: f64,
+    seasonal: bool,
+}
+
+impl Part {
+    /// The entry it publishes, at the area `area`.
+    #[must_use]
+    fn entry(&self, area: f64) -> CondensateEntry {
+        CondensateEntry {
+            substance: self.substance,
+            phase: self.phase,
+            reservoir: KilogramsPerSquareMetre::new(self.mass_kg_per_m2),
+            reservoir_gel: self
+                .density_kg_per_m3
+                .map(|rho| Metres::new(self.mass_kg_per_m2 / rho)),
+            area_fraction: area,
+            seasonal: self.seasonal,
+        }
+    }
+}
+
+impl Partition {
+    /// The published condensates of the partition over the cover `cover` (P14.T51.a's second
+    /// part; decision-p14-t51a-part2 §3–4): each condensate's reservoir divided between its
+    /// phases, each part with its global equivalent layer, its area and its own seasonal flag; at
+    /// most [`MAX_CONDENSATES`] entries, the smallest reservoirs dropped beyond them.
+    ///
+    /// - **Water** is P14.T24.b's to the bit ([`WaterCover`]): its reservoir the surface water
+    ///   `σ_s`, its ice T24.b's perennial ice at its sheet of [`ICE_SHEET_THICKNESS`], at most the
+    ///   whole, and its liquid, where it lies as one, the rest, over the potential ocean.
+    /// - **Any other solid** covers its climate's cold area below its edge (r × its first melt under
+    ///   air, r = 263.15 ÷ 273.16; airless, blended by its dominance with its net Hertz–Knudsen edge
+    ///   at its own partial pressure; decision-p14-t51a-part2 §3.2–3.3), at most the area its
+    ///   reservoir covers at [`ICE_SHEET_THICKNESS`] of its grain density at the temperature it
+    ///   lies at, within its solid range. A solid whose density the registry has not read (argon,
+    ///   and oxygen's β phase) is capped at its liquid's density at its triple point, 13–20% below
+    ///   argon's solid (from memory) and some 7% below oxygen's, and has no layer.
+    /// - **The split.** A reservoir that lies as a liquid and freezes in its coldest zones gives its
+    ///   solid the mass of its cover, at most the whole, and its liquid the rest; one that lies as a
+    ///   solid is solid whole, its area still capped, so that a frozen body's shell is its whole
+    ///   reservoir (decision-p14-t51a-part2 §3.4 leaves no phase for the rest).
+    /// - **Any other liquid** fills the basins ([`Basins::area_filled`]): those liquids' layers
+    ///   together fill their share of the surface, divided between them by volume. A liquid's layer
+    ///   is its mass over its liquid row's grain density ([`Condensate::liquid`]) at the
+    ///   temperature it lies at, within its liquid range.
+    /// - **A supercritical fluid** is listed with no reservoir and no area.
+    ///
+    /// A part with no mass is not listed.
+    ///
+    /// # Examples
+    ///
+    /// A Mars given its measured air by hand publishes its carbon dioxide's caps, their area the
+    /// layer of their reservoir spread at 1.93 km of ice, and seasonal:
+    ///
+    /// ```
+    /// use hyperion_sim::planetary::chem::partition::{
+    ///     ClimateSpan, ColumnInventory, CondensatePhase, Cover, Ground, WaterCover, partition,
+    /// };
+    /// use hyperion_sim::planetary::derive::atmosphere::{Gas, SurfaceState};
+    /// use hyperion_sim::units::{
+    ///     Kelvin, KilogramsPerCubicMetre, KilogramsPerSquareMetre, MetresPerSecondSquared, Pascals,
+    /// };
+    ///
+    /// let co2 = Gas::CarbonDioxide.substance();
+    /// let climate = ClimateSpan::new(Kelvin::new(147.0), Kelvin::new(214.0), Kelvin::new(242.0))?;
+    /// let inventory = ColumnInventory::new([
+    ///     (co2, Pascals::new(1_200.0)),
+    ///     (Gas::Nitrogen.substance(), Pascals::new(11.0)),
+    ///     (Gas::Argon.substance(), Pascals::new(12.0)),
+    /// ])?;
+    /// let ground = Ground::without_basins(MetresPerSecondSquared::new(3.72));
+    /// let mars = partition(&climate, &ground, &inventory);
+    /// // Its annual mean runs from 150 K at its poles to 225 K, by hand, and it holds no water.
+    /// let cold_area = |t: Kelvin| ((t.value() - 150.0) / 75.0).clamp(0.0, 1.0);
+    /// let water = WaterCover {
+    ///     surface_water: KilogramsPerSquareMetre::ZERO,
+    ///     potential_ocean: 0.0,
+    ///     ice_fraction: 0.0,
+    ///     ice_density: KilogramsPerCubicMetre::new(917.0),
+    /// };
+    /// let published = mars.publish(&Cover { cold_area: &cold_area, state: SurfaceState::Temperate, water });
+    /// let caps = published.entry(co2, CondensatePhase::Solid).expect("its caps");
+    /// let layer = caps.reservoir_gel().expect("solid CO2's density is read").value();
+    /// assert!((caps.area_fraction() - layer / 1_930.0).abs() < 1e-12);
+    /// assert!(caps.is_seasonal());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn publish(&self, cover: &Cover<'_>) -> Condensates {
+        let mut entries: Vec<CondensateEntry> = Vec::new();
+        let mut liquids: Vec<Part> = Vec::new();
+        for c in &self.condensates {
+            let Some(diagram) = c.substance.substance().phase_diagram() else {
+                continue;
+            };
+            if c.phase == CondensatePhase::Supercritical {
+                entries.push(CondensateEntry {
+                    substance: c.substance,
+                    phase: CondensatePhase::Supercritical,
+                    reservoir: KilogramsPerSquareMetre::ZERO,
+                    reservoir_gel: Some(Metres::ZERO),
+                    area_fraction: 0.0,
+                    seasonal: false,
+                });
+                continue;
+            }
+            let [solid, liquid] = if c.substance == Gas::Water.substance() {
+                water_parts(c, diagram, &cover.water)
+            } else {
+                let held = self
+                    .of(c.substance)
+                    .map_or((0.0, Pascals::ZERO), |s| (s.dominance, s.partial_pressure));
+                parts_of(c, diagram, held, cover)
+            };
+            if let Some(solid) = solid {
+                entries.push(solid.entry(solid.area));
+            }
+            match liquid {
+                Some(liquid) if c.substance == Gas::Water.substance() => {
+                    entries.push(liquid.entry(liquid.area));
+                }
+                Some(liquid) => liquids.push(liquid),
+                None => {}
+            }
+        }
+        // Every liquid but water's shares the basins by volume.
+        let depth = |p: &Part| {
+            p.density_kg_per_m3
+                .map_or(0.0, |rho| p.mass_kg_per_m2 / rho)
+        };
+        let volume = liquids.iter().fold(0.0, |sum, p| sum + depth(p));
+        let filled = if volume > 0.0 {
+            self.ground.basins.area_filled(Metres::new(volume))
+        } else {
+            0.0
+        };
+        for part in &liquids {
+            let area = if volume > 0.0 {
+                filled * depth(part) / volume
+            } else {
+                0.0
+            };
+            entries.push(part.entry(area));
+        }
+        entries.sort_by(entry_order);
+        entries.truncate(MAX_CONDENSATES);
+        Condensates { entries }
+    }
+}
+
+/// The ice and the sea of water's condensate `c`, of `diagram`, over its cover `water`
+/// (decision-p14-t51a-part2 §4.2): P14.T24.b's surface water, ice and potential ocean.
+#[must_use]
+fn water_parts(c: &Condensate, diagram: &PhaseDiagram, water: &WaterCover) -> [Option<Part>; 2] {
+    let reservoir = water.surface_water.value();
+    // A NaN holds none.
+    if reservoir.is_nan() || reservoir <= 0.0 {
+        return [None, None];
+    }
+    let lies_as_liquid = c.phase == CondensatePhase::Liquid;
+    let rho = water.ice_density.value();
+    let solid_mass = if !c.phases.contains(CondensatePhase::Solid) {
+        0.0
+    } else if lies_as_liquid {
+        let sheet = water.ice_fraction * rho * ICE_SHEET_THICKNESS.value();
+        if sheet < reservoir { sheet } else { reservoir }
+    } else {
+        reservoir
+    };
+    let solid = (solid_mass > 0.0).then_some(Part {
+        substance: c.substance,
+        phase: CondensatePhase::Solid,
+        mass_kg_per_m2: solid_mass,
+        density_kg_per_m3: (rho > 0.0).then_some(rho),
+        area: water.ice_fraction,
+        seasonal: c.is_seasonal_as(CondensatePhase::Solid),
+    });
+    let liquid_mass = reservoir - solid_mass;
+    let liquid = (lies_as_liquid && liquid_mass > 0.0).then(|| Part {
+        substance: c.liquid,
+        phase: CondensatePhase::Liquid,
+        mass_kg_per_m2: liquid_mass,
+        density_kg_per_m3: liquid_density_kg_per_m3(c, diagram),
+        area: water.potential_ocean,
+        seasonal: c.is_seasonal_as(CondensatePhase::Liquid),
+    });
+    [solid, liquid]
+}
+
+/// The grain density, kg m⁻³, of the liquid row of the condensate `c` of `diagram` at the
+/// temperature it lies at, held within its liquid range, from its first melt to its critical point.
+#[must_use]
+fn liquid_density_kg_per_m3(c: &Condensate, diagram: &PhaseDiagram) -> Option<f64> {
+    let critical = diagram.critical_temperature();
+    let at = if c.lies_at < c.first_melt {
+        c.first_melt
+    } else if c.lies_at > critical {
+        critical
+    } else {
+        c.lies_at
+    };
+    c.liquid
+        .substance()
+        .grain_density(CondensedPhase::Liquid, at)
+        .map(KilogramsPerCubicMetre::value)
+}
+
+/// The solid and liquid parts of the condensed reservoir `c` of `diagram`, held at the dominance
+/// and the partial pressure `held`, over the cover `cover`, for every condensable but water
+/// ([`Partition::publish`]'s split).
+#[must_use]
+fn parts_of(
+    c: &Condensate,
+    diagram: &PhaseDiagram,
+    held: (f64, Pascals),
+    cover: &Cover<'_>,
+) -> [Option<Part>; 2] {
+    let reservoir = c.reservoir.value();
+    let lies_as_liquid = c.phase == CondensatePhase::Liquid;
+    let row = c.substance.substance();
+    let solid_at = if c.lies_at < c.first_melt {
+        c.lies_at
+    } else {
+        c.first_melt
+    };
+    let solid_kg_per_m3 = row
+        .grain_density(CondensedPhase::Solid, solid_at)
+        .map(KilogramsPerCubicMetre::value);
+    // A solid whose density was not read is capped at its liquid's at the triple point.
+    let cap_kg_per_m3 = solid_kg_per_m3.or_else(|| {
+        row.grain_density(CondensedPhase::Liquid, diagram.triple_temperature())
+            .map(KilogramsPerCubicMetre::value)
+    });
+    let mut solid_mass = 0.0;
+    let mut solid = None;
+    if c.phases.contains(CondensatePhase::Solid) {
+        let molar_mass = row.molar_mass_g_per_mol().expect(
+            "a partition's condensable is a gas row with a molar mass, as its inventory holds",
+        );
+        let line = ice_line((diagram, molar_mass), c.first_melt, held, cover.state);
+        let cold = (cover.cold_area)(line);
+        let cold = if cold.is_nan() {
+            0.0
+        } else {
+            cold.clamp(0.0, 1.0)
+        };
+        let (mass, area) = match cap_kg_per_m3 {
+            Some(rho) if rho > 0.0 => {
+                let sheet = rho * ICE_SHEET_THICKNESS.value();
+                let mass = if lies_as_liquid && cold * sheet < reservoir {
+                    cold * sheet
+                } else {
+                    reservoir
+                };
+                let covers = mass / sheet;
+                (mass, if cold < covers { cold } else { covers })
+            }
+            Some(_) | None => (if lies_as_liquid { 0.0 } else { reservoir }, cold),
+        };
+        solid_mass = mass;
+        solid = (mass > 0.0).then_some(Part {
+            substance: c.substance,
+            phase: CondensatePhase::Solid,
+            mass_kg_per_m2: mass,
+            density_kg_per_m3: solid_kg_per_m3,
+            area,
+            seasonal: c.is_seasonal_as(CondensatePhase::Solid),
+        });
+    }
+    let liquid_mass = reservoir - solid_mass;
+    let liquid = (lies_as_liquid && liquid_mass > 0.0).then(|| Part {
+        substance: c.liquid,
+        phase: CondensatePhase::Liquid,
+        mass_kg_per_m2: liquid_mass,
+        density_kg_per_m3: liquid_density_kg_per_m3(c, diagram),
+        area: 0.0,
+        seasonal: c.is_seasonal_as(CondensatePhase::Liquid),
+    });
+    [solid, liquid]
 }
 
 #[cfg(test)]

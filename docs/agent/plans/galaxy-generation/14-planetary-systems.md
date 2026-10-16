@@ -16704,3 +16704,197 @@ tables::gauss_legendre`.
     stays the one-atmosphere range, as main ruled (2026-10-16); fitting each correlation over its
     data's range only (Friend's from 95 K, which still gives `T_0` = 0, B 356.3 K) is the deferred
     alternative.
+- **Deviations in P14.T51.a, as built: part 2, the published condensates, their areas and the
+  passes' climate (`p14-snapshot`, 2026-10-16).** The second part completes T51.a below the bump:
+  everything is pure or behind the lane's hold (`SNAPSHOT_VERSION` = 23), so below 23 every output
+  is version 22's to the bit. One golden moves at 22, `planetary/partition.golden`, re-blessed at
+  22: Titan's seas' one line (`seasonal false, phases liquid`, its solution now liquid down to
+  71.15 K), with new lines for each species' own ocean weight, three ocean worlds and every body's
+  published entries. The rulings are decision-p14-t51a-partition §3, §4 and §6 and
+  decision-p14-t51a-part2 (2026-10-16).
+  - _The passes' climate_ (`hooks/surface.rs`; decision-p14-t51a-partition §6,
+    decision-p14-t51a-part2 §1).
+    - T24.a's range is one function, `climate_of` (the column's zonal profile, its diurnal
+      response, its day and night and its range). `SurfaceConditions::derive_under(rules, inputs)`
+      publishes it, `derive` being it under `in_force()`, and
+      `step_climate(rules, body, θ, T, partials)` gives it to the passes over a `ClimateBody` (the
+      equilibrium temperature, the gravity, the radius, the material, the spin and the heat flow).
+    - Both build their column by `StepColumn::column`, its gases' mole fractions on the stack
+      (`GasFractions`, `mole_fractions`' arithmetic to the bit), so the passes allocate nothing. The
+      passes' climate is the record's `climate_range` bit for bit on both arms, about its mean
+      (`ClimateSpan::about` widens a range that does not hold its mean), tested on the table.
+    - Under `Held` every zonal point keeps the 64-step bisection. Under `Batch` every point, both
+      ends and the 64 area points, takes `zonal_point_newton`: `ZONAL_NEWTON_STEPS` = 16
+      safeguarded Newton steps from the mean (u = 1), inside the bisection's own bracket and
+      doubling, the bracket's middle wherever a step leaves it, with no tolerance stop and no warm
+      start. Each point's terms (its weights and dampings, `PointTerms`) are read once.
+    - _Deviation:_ the steps are taken on g(u) = u⁴ − E(u³), u = t ÷ `T_s`, in w = ln u, not on the
+      ruling's f(t) = t − `T_s` E^¼. The root and the sign are the same, but g is smooth where
+      E → 0: at a dark pole, and in a cold zone of a thin air under a strong vapour feedback
+      (`B_eff` = 0.3 `B_P`), where f's slope is infinite and Newton on f, or on its logarithm, took
+      up to 28 steps. The bracket's lower end is raised to where P₂ is damped to a part in 10⁶,
+      wherever g confirms the point lies below there, and its middle is geometric once that end is
+      above 0.
+    - _Deviation, the count:_ the ruling's default sweep (obliquities of 0–180°, 40–737 K, 6D ÷
+      `B_eff` of 10⁻⁴ to 50, W of 0 or `B_P`, `B_eff` ÷ `B_P` of 1 or 0.3, Φ of 1 or Φ⊕) holds 10⁻¹³
+      `T_s` from 9 steps, which would give 11. The wider sweep (ignored: every area point,
+      obliquities every 5°, finer grids, `B_eff` ÷ `B_P` down to 0.1) needs 14 at 26 of its 1.2
+      million points, cold zones of a thin air (6D ÷ `B_eff` ≤ 10⁻³) under a strong feedback, which
+      at 11 steps missed by up to 2 × 10⁻³ `T_s`. So the count is the wider sweep's least, plus
+      two: 16. At 16 the default sweep misses by at most 7.9 × 10⁻¹⁶ `T_s` and the wider one by 6.8
+      × 10⁻¹⁵, and both hold 10⁻¹³ two steps fewer. The table's ranges, contrasts and ends move by
+      at most 10⁻¹² `T_s`, and their cold areas by 10⁻⁹.
+    - _The cost_ (release, the shared machine, provisional): with air 3.4–3.5 µs a call under
+      `Batch`, against 17.8–17.9 µs under `Held` in the same run, and 4.5–5.2 against 22–24 µs at
+      a heavier load (load 20–30); airless 1.2–1.5 µs either way; a partition step 0.2–2.0 µs
+      (Venus 0.2–0.4, Earth 1.2–1.8, Titan 1.5–2.0). So about 0.35 ms over a body's 99 calls,
+      within the ruling's 5 µs, and some 2–15 times a partition step. The ignored `time_the_passes_climate`
+      measures both arms. It times the partition step with no basins; with a partial sea held
+      toward its cold trap each sweep's own ocean weight reads `Hypsometry::fill`'s 64 halvings,
+      which T54.a times with the passes' basins.
+    - The answer lies inside its final bracket by construction, and the sweep asserts it.
+    - `cold_area` reads one profile per body (`SurfaceConditions::cold_profile`, bit for bit), so
+      that every solid's edge reads the same points (decision-p14-t51a-part2 §3.5).
+  - _The own-liquid ocean weight c_ (decision-p14-t51a-partition §4). The controlling temperature
+    is `T_mean` − d (1 − c)(`T_mean` − `T_cold`), with c = min(1, f ÷ 0.708) of the condensable's own
+    sea at the mean (`Partitioned::own_ocean_weight`).
+    - It is read on the minor branch, as the dominance's share is: the inventory less the minor
+      branch's weight, where the pure substance's phase at the mean and that branch's surface
+      pressure is liquid, over its grain density at the mean, weighed by the ground's basins
+      (`Ground`, `Basins::of(hypsometry)`; `Basins::ocean_weight`, 1 at once beyond the layer that
+      fills 0.708, `Hypsometry::layer_filling`). So it is a closed form, computed only where d > 0.
+    - Water's reads its surface share (`Ground::water_at_surface`, decision-p14-t51a-part2 §4.2). A
+      solution's first melt labels the phases after the solve and never moves the cap.
+    - With c = 0 every bit is part 1's. The plan's bodies are unmoved by Earth's basins (tested).
+      The ocean worlds at 360 and 373 K under a bar of nitrogen and at 310 K under 0.1 bar hold
+      their water at 0.82, 0.87 and 0.82 of `p_sat`(`T_mean`), and below 0.77 without their basins.
+      The partition is continuous through a sea's first formation, whose area grows as the square
+      root of its volume at a Gaussian's floor.
+    - The cold methane world's sea boils at its mean on the minor branch (0.12 MPa against 0.19), so
+      its methane stays at its trap, as ruled. Over its own sea at the mean the same world would
+      hold itself too, a bistable pair; the sweeps' start from the least cap picks the cold trap's.
+  - _Solutions_ (decision-p14-t51a-part2 §2). `AIR_SOLUTIONS`, a one-row table (CH₄ under N₂ →
+    `ch4_c2h6_n2`), read from the solved air: where N₂ is the largest gas besides methane, methane's
+    liquid is the solution, its first melt the row's transition (71.15 K, read as
+    `transition().temperature()`, no `Liquidus` arm). Its ice and its species stay `CH4`, water and
+    every other liquid their pure rows, and the cap has no Raoult factor. Titan's seas are liquid
+    at its 89.7 K poles and perennial; part 1's finding "_Titan's poles_" is resolved. A closed
+    set, for the composition audit.
+  - _The published `Condensates`_ (`Partition::publish(&Cover)`, `CondensateEntry`): at most eight
+    entries, one for each substance and phase, by reservoir mass, ties by `SubstanceId`, then phase.
+    Each has its reservoir (kg m⁻²), its global equivalent layer `reservoir_gel` over
+    `Substance::grain_density(phase, T)` at the temperature it lies at (none where the density was
+    not read), its area and its own seasonal flag. A supercritical fluid has neither reservoir nor
+    area. P14.T54.a puts the type in `record::Condensates`' place; the record's member stays
+    `NotModelled`.
+  - _The areas and the split_ (decision-p14-t51a-part2 §3–4).
+    - Water's entries are T24.b's to the bit (`WaterCover`): reservoir `σ_s`, its ice T24.b's
+      `ice_fraction` at its sheet of ice Ih at the mean, at most the whole, and its liquid, where it
+      lies as one, the rest, over the potential ocean.
+    - Every other solid covers the cold area below its edge: r × its first melt under air, r =
+      263.15 ÷ 273.16, a `Snowball` included; airless, d r `T_fm` + (1 − d) `T_HK`, with `T_HK` the
+      net Hertz–Knudsen edge at its own partial pressure at `AIRLESS_ICE_LOSS_KG_PER_M2_GYR` = 144
+      (`sublimation_edge`, 64 halvings). Its area is capped by its reservoir at 1.93 km of its grain
+      density; a liquid-lying reservoir's solid takes that cover's mass and its liquid the rest.
+    - Every other liquid fills the basins with the others by volume.
+    - A reservoir that lies as a solid publishes its whole mass in its solid entry, its area still
+      the smaller of its cold area and its reservoir spread at `ICE_SHEET_THICKNESS`: the ruling's
+      §3.4 leaves no phase for the rest where nothing is liquid where it lies. So Titan's and an
+      icy moon's water ice publish their whole shell, a layer of some 750–800 km (T53.c divides a
+      frozen body's water between the condensate, the crust and the shell).
+    - The edge's jump at 100 Pa is a recorded state change (decision-p14-t51a-part2 §3.3): a minor
+      solid other than water moves between r `T_fm` and `T_HK` where T13.c's state crosses
+      `AIRLESS_PRESSURE`, as water's does between 263.15 and 110 K. One at d = 1 is continuous.
+    - The loss rate is `AIRLESS_ICE_LOSS_KG_PER_M2_GYR`, the ruling's `AIRLESS_ICE_LOSS_RATE` with
+      its unit in its name.
+    - By hand: Earth's ice and ocean are T24.b's; Mars's CO₂ ice 5 × 10⁻⁵, seasonal, and its
+      water ice 0.015, perennial; Pluto's N₂ 0.083, and its CH₄'s edge within 10⁻⁸ K of its frost
+      point; the edges N₂ 60.84, CH₄ 87.37, CO₂ 208.65 and NH₃ 188.33 K; at vacuum water's `T_HK`
+      within 1 K of 110 K and CO₂'s at 55–59 K.
+  - _Water at the surface_ (decision-p14-t51a-part2 §4). `cover::surface_water_under(rules, …)`:
+    under `Batch` the share s(O) (`water_surface_share`) of the condensed water, `M` ÷ 4πR² −
+    `p_H₂O` ÷ g, under T24.b's state gate, with no saturation test. `GlobalFigures::derive_under`
+    reads it, so the potential ocean, θ, the ice, the ocean under ice and the published water read
+    one surface water. Every wet world of the table keeps it under `Batch` (tested).
+  - _The per-phase seasonal flag_ (decision-p14-t51a-partition §3): `Condensate::is_seasonal_as`,
+    a solid that melts at its warmest zone or, held toward its cold trap (d > 0), sublimes there
+    at its own partial pressure; a liquid that boils there. A minor solid's sublimation is not
+    read, since its frost point always lies below its warmest zone (that ruling's §3). Earth's
+    ocean is perennial and its ice seasonal; Mars's CO₂ ice seasonal and its water ice perennial.
+    R09's `Persistence` doc (`surface/inputs.rs`) follows it.
+  - _The record path, behind the hold._ `published_surface` takes `GlobalFigures::condensates_under`
+    under `in_force()`: nothing under `Held`, and under `Batch` the partition of the atmosphere's
+    inventory before condensation (`Atmosphere::column_inventory`, a new private member) over the
+    record's range on the relief's basins, and its published entries. From it the conditions'
+    liquid-water flag (`with_condensates`), T24.b's `surface_liquids` and `surface_ices`
+    (`with_surface_under`, each scaled to the whole surface where several overlap, water's ice and
+    ocean under ice T24.b's where the partition holds none) and T48.d's reservoirs
+    (`Partition::reservoirs`) are read.
+  - _The seam._ `atmosphere_under(rules, inputs, climate_of, (basins, water_at_surface))`; step 4's
+    rules travel in `Greenhouse`, which keeps `atmosphere_under` within Clippy's 100 lines.
+  - _Left to P14.T54.a:_ the record's `condensates` member, whose `reservoir_gel` is an
+    `Option` (none where the registry has not read the phase's density), sent as absent; the
+    passes' `ClimateBody` from the rotation derived before them, their basins, water share and θ
+    from the previous pass, and their state (`step_climate` takes a column below
+    `AIRLESS_PRESSURE` as airless, where T13.c calls a molten one `MagmaOcean`; nothing condenses
+    there); the bless note (every transported range at the last bits, decision-p14-t51a-part2
+    §1.5); moving the bisection under `#[cfg(test)]` as the oracle.
+  - _Acceptance, as built:_ also `cargo test -p hyperion-sim planetary::hooks::surface::tests`,
+    which holds the Newton sweep, the passes' range and the table's batch arm, and
+    `planetary::hooks::figures`.
+  - _Files beyond the task's:_ `hooks/surface.rs` and its tests, `hooks/surface/regime/tests.rs`,
+    `hooks/figures.rs`, `hooks/figures/cover.rs`, `planetary/system.rs`, `surface/inputs.rs`
+    (`Persistence`'s doc).
+- **Ruled by "main"** (decision-p14-t51a-part2, 2026-10-16), on part 2's four questions:
+  1. _The climate's cost._ No bit-for-bit form of T24.a's range reaches a partition step's cost
+     (20.6 µs a call with air, 130 flux evaluations of the 64-step bisection). From 23 every zonal
+     point is solved by a fixed-count (`ZONAL_NEWTON_STEPS`), bracket-safeguarded Newton iteration
+     with the analytic derivative, within 10⁻¹² `T_s` of the bisection. The record publishes it and
+     the passes read it, so they agree to the bit (decision-p14-t51a-partition §6's second option).
+     The `Held` arm keeps the bisection, and T54.a moves it into the tests as the oracle.
+  2. _Solutions._ Methane's liquid is `ch4_c2h6_n2` where N₂ is the largest gas of the air other
+     than methane, and pure methane otherwise; solid methane stays `CH4`; every other liquid is its
+     pure row. It is a closed, one-row table. Solution components (T49.h), coupled condensables
+     (T52.b–c with T51.g), crustal salinity (T51.c with T51.g) and solid solutions (T55.e) are
+     deferred.
+  3. _Solids' areas._ Water keeps T24.b's edges. Another solid's edge under air is its first melt
+     × 263.15 ÷ 273.16, the seasonal excess scaling with temperature. On an `Airless` body it is
+     that edge weighted by its dominance, blended with T51.f's net Hertz–Knudsen edge at its own
+     partial pressure (144 kg m⁻² Gyr⁻¹). A `Snowball`'s first melt is water's alone. Every area is
+     capped by its reservoir at 1.93 km, but water on an ice-rich crust.
+  4. _Water at the surface._ From 23 the surface water is the share of T24.b (1, or 0.02 once the
+     volcanic greenhouse has failed) of the partition's water reservoir, under T24.b's state gate.
+     It replaces `surface_water`'s saturation test, which the partition's 0.77 humidity would fail
+     on every wet world. The partition keeps the whole inventory.
+- **Deferred findings (2026-10-13 rule)**, from P14.T51.a's second part:
+  - _A self-buffered ice's area_ (Pluto's and Triton's N₂) is its reservoir's alone, and a minor
+    ice that sublimes under a thick air is bounded by its reservoir alone (P14.T55.e).
+  - _The margin_ r stands for the seasons, with a latent-heat budget waiting for P14.T55.e.
+  - _The supercooled liquid's vapour_, up to 38% above the ice's curve for a Titan sea at 72 K: the
+    cap reads the diagram's ice curve below 90.69 K.
+  - _1.93 km is Antarctica's thickness_, applied to every ice.
+  - _The generated Mars publishes 20 m_ of its about 1 km of water, the rest unplaced until T51.f
+    and T53.c.
+  - _Solid densities not read_ for argon and oxygen's β phase (23.14–43.78 K), of the partition's
+    condensables, and for H₂S, C₂H₆ and CO's β phase once they are `Gas` rows: their ice is capped
+    at their liquid's density at the triple point, 13–20% below argon's solid (from memory) and
+    some 7% below oxygen's, and has no layer. The ruling's registry test that every partition
+    condensable has a solid density cannot hold until the registry reads them (p14-registry).
+  - _For P14.T51.f._ A condensable alone in an exosphere has d = 1 and takes the under-air edge, so
+    a cold airless body that keeps one lays a deposit, capped by its reservoir, where its ice would
+    migrate; T51.f's cold traps place it at 24 (decision-p14-t51a-part2 §3.3).
+  - _Ammonia–water._ NH₃ ice is pure at 188.33 K; its solution with water is deferred (§2.3),
+    which overstates the first melt by about 19 K, 195.49 K against the eutectic's 176.15 K (§3.6).
+  - _Pluto's CO_ (about 0.4 mPa) has an edge near 30 K and so holds no ice, being dissolved in the
+    N₂ ice (P14.T55.e; §3.3).
+  - _The solution's key._ N₂ as the largest other gas is narrower than the mechanism the doc gives
+    (ethane survives where the hydrogen escapes): a methane sea under an air of methane alone, or
+    of helium or argon, would also melt first at the binary's eutectic, but lies as pure CH₄ here.
+    For P14.T49.h or T52.b.
+  - _The record's partition_ is solved again over the record's range, which equals the passes'
+    last step to their convergence (10⁻⁹), not to the bit; T54.a may carry the passes' last
+    partition instead.
+  - _The climate regime's ice fraction_ (P14.T48.d) sums every solid's area against water's
+    threshold; its ice belt reads water's.
+  - _Overlapping ices_ (several solids in one cold zone) are scaled down to the whole surface in
+    proportion, a stand-in for their layering.

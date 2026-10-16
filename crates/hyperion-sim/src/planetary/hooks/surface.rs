@@ -124,10 +124,12 @@ use std::error::Error;
 
 use crate::math;
 use crate::orbit::KeplerElements;
+use crate::planetary::chem::partition::{ClimateSpan, CondensatePhase, Condensates};
 use crate::planetary::context::XuvHistory;
 use crate::planetary::derive::atmosphere::{
-    Atmosphere, EARTH_REFERENCE_AGE, Gas, MOLAR_GAS_CONSTANT, PartialPressures,
-    REFERENCE_SUN_ZAMS_LUMINOSITY, SurfaceMaterial, SurfaceState, optical_depth_terms,
+    AIRLESS_PRESSURE, Atmosphere, EARTH_REFERENCE_AGE, Gas, MOLAR_GAS_CONSTANT, PartialPressures,
+    REFERENCE_SUN_ZAMS_LUMINOSITY, SnapshotRules, SurfaceMaterial, SurfaceState, optical_depth,
+    optical_depth_terms,
 };
 use crate::planetary::derive::rotation::{SpinOrbitResonance, SpinState};
 use crate::planetary::frames::BodyFixedFrame;
@@ -807,6 +809,15 @@ impl SurfaceConditions {
     /// ```
     #[must_use]
     pub fn derive(inputs: &SurfaceInputs<'_>) -> Option<Self> {
+        Self::derive_under(SnapshotRules::in_force(), inputs)
+    }
+
+    /// [`derive`](Self::derive) under the `p14-snapshot` lane's rules `rules`: its zonal points
+    /// solved by the 64-step bisection under [`SnapshotRules::Held`], version 22's, and by the
+    /// safeguarded Newton steps under [`SnapshotRules::Batch`] (decision-p14-t51a-part2 §1), so
+    /// that the tests can run the batch's arm at 22.
+    #[must_use]
+    pub(crate) fn derive_under(rules: SnapshotRules, inputs: &SurfaceInputs<'_>) -> Option<Self> {
         let Surface {
             column,
             gases,
@@ -814,12 +825,20 @@ impl SurfaceConditions {
             heat_capacity_over_r,
         } = Surface::of(inputs)?;
         let floor = night_floor(inputs.heat_flow);
-        let zonal = ZonalProfile::of(&column, &inputs.spin, inputs.ocean_weight);
-        let ends = zonal.ends;
-        let equator_pole = ends.0 - ends.1;
-        let response = diurnal_response(&column, &inputs.spin, inputs.material, floor);
-        let (day, night) = day_and_night_of(&column, response);
-        let range = climate_range(column.surface_temperature, ends, day, night, floor);
+        let ColumnClimate {
+            zonal,
+            response,
+            day_and_night: (day, night),
+            range,
+        } = climate_of(
+            &column,
+            &inputs.spin,
+            inputs.ocean_weight,
+            inputs.material,
+            floor,
+            rules,
+        );
+        let equator_pole = zonal.ends.0 - zonal.ends.1;
         let air = AirTransport {
             redistribution: heat_redistribution(&column),
             diurnal_storage: response.and_then(|r| r.storage),
@@ -950,10 +969,22 @@ impl SurfaceConditions {
     /// Whether water can be liquid at the surface pressure somewhere in the climate's range of
     /// temperature ([`climate_range`](Self::climate_range), [`liquid_water`]): a condition of the
     /// surface, whether or not the body holds water. From 22 → 23 P14.T51.a derives it from the
-    /// partition.
+    /// partition ([`with_condensates`](Self::with_condensates)).
     #[must_use]
     pub const fn liquid_water(&self) -> bool {
         self.liquid_water
+    }
+
+    /// The conditions with their liquid-water flag read from P14.T51.a's published condensates
+    /// `condensates` (P14.T51.a's second part, held by the `p14-snapshot` lane's hold): true where
+    /// they hold liquid water, a condition of the body's own water, no longer of its surface alone.
+    #[must_use]
+    pub(crate) fn with_condensates(self, condensates: &Condensates) -> Self {
+        let water = Gas::Water.substance();
+        Self {
+            liquid_water: condensates.entry(water, CondensatePhase::Liquid).is_some(),
+            ..self
+        }
     }
 
     /// The conditions with their climate regime (P14.T48.d, [`ClimateRegime::of`]), from what the
@@ -1104,25 +1135,69 @@ impl SurfaceConditions {
     ///   where the substellar point, `E_n` + (3/2)(`E_d` − `E_n`), is below the threshold.
     #[must_use]
     pub fn cold_area(&self, threshold: Kelvin) -> f64 {
-        let t_ice = threshold.value();
+        self.cold_profile().area_below(threshold)
+    }
+
+    /// The profile [`cold_area`](Self::cold_area) reads, built once, so that the cold areas
+    /// below many thresholds read one profile (decision-p14-t51a-part2 §3.5: P14.T51.a's solids
+    /// each read their own edge): a rotating world's zonal points, or a locked world's day and
+    /// night.
+    #[must_use]
+    pub(crate) fn cold_profile(&self) -> ColdProfile {
         if self.locked {
-            let (day, night) = (self.day_and_night.0.value(), self.day_and_night.1.value());
-            if night.is_nan() || night >= t_ice {
-                return 0.0;
+            ColdProfile::Eyeball {
+                day_k: self.day_and_night.0.value(),
+                night_k: self.day_and_night.1.value(),
             }
-            let (e_d, e_n, e_ice) = (
-                math::powi(day, 4),
-                math::powi(night, 4),
-                math::powi(t_ice, 4),
-            );
-            let reach = if e_d > e_n {
-                ((e_ice - e_n) / (EYEBALL_SLOPE * (e_d - e_n))).clamp(0.0, 1.0)
-            } else {
-                1.0
-            };
-            return f64::midpoint(1.0, reach);
+        } else {
+            ColdProfile::Zonal(self.zonal.points())
         }
-        area_below(&self.zonal.points(), threshold)
+    }
+}
+
+/// A climate's annual-mean profile as [`SurfaceConditions::cold_area`] reads it
+/// ([`SurfaceConditions::cold_profile`]).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ColdProfile {
+    /// A world locked 1:1 to its seasonal host: its day's and night's mean temperatures, K.
+    Eyeball {
+        /// The dayside's, K.
+        day_k: f64,
+        /// The nightside's, K.
+        night_k: f64,
+    },
+    /// A rotating world: its zonal profile's points, `(x, T)`, from the equator to the pole.
+    Zonal(Vec<(f64, f64)>),
+}
+
+impl ColdProfile {
+    /// The share of the surface whose annual-mean climate lies below `threshold`, 0 to 1:
+    /// [`SurfaceConditions::cold_area`]'s rule, to the bit.
+    #[must_use]
+    pub(crate) fn area_below(&self, threshold: Kelvin) -> f64 {
+        let t_ice = threshold.value();
+        match self {
+            &Self::Eyeball {
+                day_k: day,
+                night_k: night,
+            } => {
+                if night.is_nan() || night >= t_ice {
+                    return 0.0;
+                }
+                let (e_d, e_n, e_ice) = (
+                    math::powi(day, 4),
+                    math::powi(night, 4),
+                    math::powi(t_ice, 4),
+                );
+                let reach = if e_d > e_n {
+                    ((e_ice - e_n) / (EYEBALL_SLOPE * (e_d - e_n))).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
+                f64::midpoint(1.0, reach)
+            }
+            Self::Zonal(points) => area_below(points, threshold),
+        }
     }
 }
 
@@ -1197,8 +1272,11 @@ fn mole_fractions_by(
 /// Never: every [`Gas`] row of the registry has a molar mass (the registry's tests).
 #[must_use]
 pub fn atmosphere_mole_fractions(partials: &PartialPressures) -> Vec<(SubstanceId, f64)> {
-    mole_fractions(Gas::ALL.map(|gas| (gas.substance(), partials.of(gas))))
+    // One computation with the conditions' and the passes' columns ([`StepColumn::column`]).
+    GasFractions::of(partials, false)
         .expect("every `Gas` row of the registry has a molar mass")
+        .as_slice()
+        .to_vec()
 }
 
 /// [`mole_fractions`] was given a weight it cannot count in molecules.
@@ -1325,6 +1403,9 @@ struct Surface {
 impl Surface {
     /// The surface of the body `inputs` describe; `None` in the gas-envelope state. An airless
     /// body's column holds no air, whatever residue its partial pressures hold.
+    ///
+    /// Its column is [`StepColumn::column`]'s, the one computation T13.c's passes read too
+    /// ([`step_climate`]).
     #[must_use]
     fn of(inputs: &SurfaceInputs<'_>) -> Option<Self> {
         let air = inputs.atmosphere;
@@ -1336,46 +1417,284 @@ impl Surface {
             | SurfaceState::Temperate
             | SurfaceState::Snowball => false,
         };
-        let (surface_pressure, gases) = if airless {
-            (Pascals::ZERO, Vec::new())
-        } else {
-            (
-                air.surface_pressure().unwrap_or(Pascals::ZERO),
-                atmosphere_mole_fractions(air.partial_pressures()),
-            )
-        };
-        let mean_molar_mass = mean_molar_mass_g_per_mol(&gases);
-        let heat_capacity = heat_capacity_over_r(&gases);
-        let column = Column {
+        let (column, fractions) = StepColumn {
             surface_temperature: air.surface_temperature(),
+            partials: air.partial_pressures(),
+            surface_pressure: air.surface_pressure().unwrap_or(Pascals::ZERO),
+            optical_depth: air.optical_depth(),
+            airless,
             equilibrium_temperature: inputs.equilibrium_temperature,
-            surface_pressure,
-            air_mass_kg_per_m2: column_mass_kg_per_m2(surface_pressure, inputs.surface_gravity),
-            specific_heat_j_per_kg_k: match (mean_molar_mass, heat_capacity) {
-                (Some(mu), Some(cp)) => specific_heat_j_per_kg_k(cp, mu),
-                (None, _) | (_, None) => 0.0,
-            },
-            molar_mass_g_per_mol: mean_molar_mass.unwrap_or(0.0),
             surface_gravity: inputs.surface_gravity,
-            optical_depth: if airless { 0.0 } else { air.optical_depth() },
-            greenhouse_gain: if airless {
-                0.0
-            } else {
-                greenhouse_gain(air, &gases, inputs.equilibrium_temperature)
-            },
             radius: inputs.radius,
-        };
+        }
+        .column()
+        .expect("every `Gas` row of the registry has a molar mass");
         Some(Self {
             column,
-            gases,
-            mean_molar_mass_g_per_mol: mean_molar_mass,
-            heat_capacity_over_r: heat_capacity,
+            gases: fractions.as_slice().to_vec(),
+            mean_molar_mass_g_per_mol: fractions.mean_molar_mass_g_per_mol,
+            heat_capacity_over_r: fractions.heat_capacity_over_r,
         })
     }
 }
 
-/// The greenhouse gain g of the atmosphere `air`, whose published mole fractions are `gases`,
-/// over a surface in equilibrium at `equilibrium`: the share of the grey column's Planck
+/// The gases of a column as mole fractions, on the stack, with their mean molar mass and mixed
+/// `c_p` ÷ R ([`StepColumn::column`]): what [`atmosphere_mole_fractions`] lists, without the
+/// allocation T13.c's passes cannot afford at every step.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct GasFractions {
+    list: [(SubstanceId, f64); Gas::ALL.len()],
+    len: usize,
+    mean_molar_mass_g_per_mol: Option<f64>,
+    heat_capacity_over_r: Option<f64>,
+}
+
+impl GasFractions {
+    /// The gases of the partial pressures `partials`, largest first with ties by `SubstanceId`,
+    /// by [`mole_fractions`]'s arithmetic to the bit: each gas of positive weight, in
+    /// [`Gas::ALL`]'s order, counted as its weight over its row's molar mass, then the counts over
+    /// their sum, added in that order; none for an airless column.
+    ///
+    /// # Errors
+    ///
+    /// As [`mole_fractions`]:
+    /// - [`CountMolesError::NoMolarMass`] for a gas of positive weight whose row has no molar
+    ///   mass, which no [`Gas`] row lacks;
+    /// - [`CountMolesError::NotFinite`] for a weight that is not finite.
+    fn of(partials: &PartialPressures, airless: bool) -> Result<Self, CountMolesError> {
+        let mut list = [(Gas::Hydrogen.substance(), 0.0); Gas::ALL.len()];
+        let mut len = 0;
+        if !airless {
+            for gas in Gas::ALL {
+                let id = gas.substance();
+                let p = partials.of(gas).value();
+                if !p.is_finite() {
+                    return Err(CountMolesError::NotFinite(id));
+                }
+                if p > 0.0 {
+                    let mu = id
+                        .substance()
+                        .molar_mass_g_per_mol()
+                        .ok_or(CountMolesError::NoMolarMass(id))?;
+                    list[len] = (id, p / mu);
+                    len += 1;
+                }
+            }
+        }
+        let gases = &mut list[..len];
+        let total = gases.iter().fold(0.0, |sum, &(_, n)| sum + n);
+        for gas in gases.iter_mut() {
+            gas.1 /= total;
+        }
+        // A total order with no ties, each row named once: the stable sort's order, in place.
+        gases.sort_unstable_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        let gases = &list[..len];
+        Ok(Self {
+            list,
+            len,
+            mean_molar_mass_g_per_mol: mean_molar_mass_g_per_mol(gases),
+            heat_capacity_over_r: heat_capacity_over_r(gases),
+        })
+    }
+
+    /// The fractions, largest first.
+    #[must_use]
+    fn as_slice(&self) -> &[(SubstanceId, f64)] {
+        &self.list[..self.len]
+    }
+}
+
+/// What a column of P14.T24.a's contrasts is built from, at a step of T13.c's passes or on the
+/// record ([`StepColumn::column`]).
+#[derive(Debug, Clone, Copy)]
+struct StepColumn<'a> {
+    /// The mean surface temperature.
+    surface_temperature: Kelvin,
+    /// The partial pressures, as column weights.
+    partials: &'a PartialPressures,
+    /// The surface pressure, the partial pressures' sum.
+    surface_pressure: Pascals,
+    /// The greenhouse's grey optical depth at those partial pressures.
+    optical_depth: f64,
+    /// Whether the column holds no air ([`SurfaceState::Airless`]): no gases and no pressure,
+    /// whatever residue the partial pressures hold.
+    airless: bool,
+    /// The equilibrium temperature.
+    equilibrium_temperature: Kelvin,
+    /// The mean surface gravity.
+    surface_gravity: MetresPerSecondSquared,
+    /// The mean radius.
+    radius: Metres,
+}
+
+impl StepColumn<'_> {
+    /// The column, with its gases' mole fractions, mean molar mass and `c_p` ÷ R.
+    ///
+    /// # Errors
+    ///
+    /// As [`GasFractions::of`]: [`CountMolesError::NoMolarMass`] for a gas row with no molar
+    /// mass, which none lacks, and [`CountMolesError::NotFinite`] for a partial pressure that is
+    /// not finite.
+    fn column(&self) -> Result<(Column, GasFractions), CountMolesError> {
+        let airless = self.airless;
+        let fractions = GasFractions::of(self.partials, airless)?;
+        let surface_pressure = if airless {
+            Pascals::ZERO
+        } else {
+            self.surface_pressure
+        };
+        let column = Column {
+            surface_temperature: self.surface_temperature,
+            equilibrium_temperature: self.equilibrium_temperature,
+            surface_pressure,
+            air_mass_kg_per_m2: column_mass_kg_per_m2(surface_pressure, self.surface_gravity),
+            specific_heat_j_per_kg_k: match (
+                fractions.mean_molar_mass_g_per_mol,
+                fractions.heat_capacity_over_r,
+            ) {
+                (Some(mu), Some(cp)) => specific_heat_j_per_kg_k(cp, mu),
+                (None, _) | (_, None) => 0.0,
+            },
+            molar_mass_g_per_mol: fractions.mean_molar_mass_g_per_mol.unwrap_or(0.0),
+            surface_gravity: self.surface_gravity,
+            optical_depth: if airless { 0.0 } else { self.optical_depth },
+            greenhouse_gain: if airless {
+                0.0
+            } else {
+                greenhouse_gain(
+                    self.surface_temperature,
+                    self.partials,
+                    self.optical_depth,
+                    fractions.as_slice(),
+                    self.equilibrium_temperature,
+                )
+            },
+            radius: self.radius,
+        };
+        Ok((column, fractions))
+    }
+}
+
+/// The climate of a column ([`climate_of`]): its zonal profile, its diurnal response, its day and
+/// night, and its range, coldest then warmest.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ColumnClimate {
+    zonal: ZonalProfile,
+    response: Option<DiurnalResponse>,
+    day_and_night: (Kelvin, Kelvin),
+    range: (Kelvin, Kelvin),
+}
+
+/// The climate of the column `column` under the spin `spin` at the ocean weight `weight`, its
+/// ground of the material `material`, over a night floored at `floor`, its zonal points solved
+/// under the rules `rules` ([`zonal_point_under`]): P14.T24.a's range and what it is made of, the
+/// one computation [`SurfaceConditions::derive`] publishes and T13.c's passes read
+/// ([`step_climate`]; decision-p14-t51a-partition §6, condition 1).
+#[must_use]
+fn climate_of(
+    column: &Column,
+    spin: &SeasonalSpin,
+    weight: OceanWeight,
+    material: SurfaceMaterial,
+    floor: Kelvin,
+    rules: SnapshotRules,
+) -> ColumnClimate {
+    let zonal = ZonalProfile::of(column, spin, weight, rules);
+    let response = diurnal_response(column, spin, material, floor);
+    let (day, night) = day_and_night_of(column, response);
+    let range = climate_range(column.surface_temperature, zonal.ends, day, night, floor);
+    ColumnClimate {
+        zonal,
+        response,
+        day_and_night: (day, night),
+        range,
+    }
+}
+
+/// What the climate of T13.c's passes reads of a body beyond each step's column and ocean weight
+/// ([`step_climate`]; decision-p14-t51a-partition §6): the inputs of
+/// [`SurfaceConditions::derive`] that the passes do not change.
+///
+/// P14.T54.a derives the spin before the passes (its rotation law reads nothing they give), and
+/// takes the heat flow, an input the figures give after them, from the previous pass.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P14.T54.a's passes are the first callers")
+)]
+pub(crate) struct ClimateBody {
+    /// The equilibrium temperature from the hosts' light at the albedo in use.
+    pub(crate) equilibrium_temperature: Kelvin,
+    /// The mean surface gravity.
+    pub(crate) surface_gravity: MetresPerSecondSquared,
+    /// The mean radius.
+    pub(crate) radius: Metres,
+    /// The surface's material, whose regolith carries the day's heat into the night.
+    pub(crate) material: SurfaceMaterial,
+    /// How it turns under its seasonal host.
+    pub(crate) spin: SeasonalSpin,
+    /// Its internal heat flow at the surface, which raises the night's floor.
+    pub(crate) heat_flow: WattsPerSquareMetre,
+}
+
+/// The span of the climate of the body `body` at a step of T13.c's passes whose mean surface
+/// temperature is `surface_temperature` over the column of partial pressures `partials`, at the
+/// ocean weight `ocean_weight`, its zonal points solved under the rules `rules` (P14.T51.a's
+/// second part; decision-p14-t51a-partition §6): the passes reach it only under
+/// [`SnapshotRules::Batch`], whose safeguarded Newton steps make it a partition step's cost
+/// (decision-p14-t51a-part2 §1).
+///
+/// It is P14.T24.a's range by the one computation the record's
+/// [`climate_range`](SurfaceConditions::climate_range) is (`climate_of`), on the column the
+/// conditions would build of an atmosphere of that temperature and those partial pressures: its
+/// greenhouse's optical depth T13.c's ([`optical_depth`]), and airless below
+/// [`AIRLESS_PRESSURE`], as T13.c's state is but for a molten surface, which T13.c calls a
+/// `MagmaOcean` and on which nothing condenses. So a body's last step reads the range its record
+/// publishes, but where the range does not hold the mean, whose ends are then widened to it
+/// ([`ClimateSpan::about`]). It allocates nothing.
+#[must_use]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "P14.T54.a's passes are the first callers")
+)]
+pub(crate) fn step_climate(
+    rules: SnapshotRules,
+    body: &ClimateBody,
+    ocean_weight: OceanWeight,
+    surface_temperature: Kelvin,
+    partials: &PartialPressures,
+) -> ClimateSpan {
+    let surface_pressure = partials.total();
+    let step = StepColumn {
+        surface_temperature,
+        partials,
+        surface_pressure,
+        optical_depth: optical_depth(partials, body.equilibrium_temperature),
+        airless: surface_pressure < AIRLESS_PRESSURE,
+        equilibrium_temperature: body.equilibrium_temperature,
+        surface_gravity: body.surface_gravity,
+        radius: body.radius,
+    };
+    let Ok((column, _)) = step.column() else {
+        // A partial pressure that is not finite has no climate the contrasts can give.
+        return ClimateSpan::isothermal(surface_temperature);
+    };
+    let floor = night_floor(body.heat_flow);
+    let climate = climate_of(
+        &column,
+        &body.spin,
+        ocean_weight,
+        body.material,
+        floor,
+        rules,
+    );
+    ClimateSpan::about(climate.range, surface_temperature)
+}
+
+/// The greenhouse gain g of an air over a surface at `surface` under the partial pressures
+/// `partials`, whose greenhouse's optical depth is `optical_depth` and whose published mole
+/// fractions are `gases`, over a surface in equilibrium at `equilibrium` ([`StepColumn::column`],
+/// at a step of T13.c's passes as on the record): the share of the grey column's Planck
 /// restoring that its condensing gases' vapour feedback takes back, `B_eff` = `B_P` (1 − g)
 /// (science-p14-t24a-climate.md §1).
 ///
@@ -1398,17 +1717,17 @@ impl Surface {
 /// Showman's prescribed τ, which they state stands in for water vapour, with no feedback of its
 /// own. Zero where no gas is held, or at a surface not above 0 K.
 #[must_use]
-pub(crate) fn greenhouse_gain(
-    air: &Atmosphere,
+fn greenhouse_gain(
+    surface: Kelvin,
+    partials: &PartialPressures,
+    optical_depth: f64,
     gases: &[(SubstanceId, f64)],
     equilibrium: Kelvin,
 ) -> f64 {
-    let surface = air.surface_temperature();
     let t = surface.value();
     if t.is_nan() || t <= 0.0 {
         return 0.0;
     }
-    let partials = air.partial_pressures();
     let slope =
         optical_depth_terms(partials, equilibrium)
             .into_iter()
@@ -1431,7 +1750,7 @@ pub(crate) fn greenhouse_gain(
                     .map_or(0.0, |&(_, x)| x);
                 sum + (1.0 - share) * 0.5 * term * enthalpy / (MOLAR_GAS_CONSTANT * t * t)
             });
-    grey_gain(surface, air.optical_depth(), slope)
+    grey_gain(surface, optical_depth, slope)
 }
 
 /// The gain (`T_s` ÷ 4) ¾ τ′ ÷ (1 + ¾τ) of a grey column of optical depth `optical_depth` over a
@@ -1744,6 +2063,203 @@ fn zonal_point(
     f64::midpoint(low, high)
 }
 
+/// The safeguarded Newton steps that solve each zonal point from generator version 23: 16, a fixed
+/// count from a fixed start (decision-composition §1.3; decision-p14-t51a-part2 §1.3).
+///
+/// The ruling's default sweep (`the_newton_zonal_points_are_the_bisection_s`: obliquities of
+/// 0–180°, mean temperatures of 40–737 K, 6D ÷ `B_eff` of 10⁻⁴ to 50, Koll's W of 0 or `B_P`,
+/// `B_eff` ÷ `B_P` of 1 or 0.3, Φ of 1 or Φ⊕, at the equator, the pole and every eighth area point)
+/// holds every point within 10⁻¹³ `T_s` of the 64-step bisection ([`ZONAL_END_STEPS`]) from 9
+/// steps. Its wider sweep (`…_over_a_wider_sweep`: every area point, obliquities every 5°, finer
+/// grids and `B_eff` ÷ `B_P` down to 0.1) needs 14, at its slowest points: cold zones of a thin
+/// air under a strong vapour feedback, whose flux nears nothing. The count is the wider sweep's
+/// least, plus two. At 16 the default sweep misses by at most 7.9 × 10⁻¹⁶ `T_s` and the wider one
+/// by 6.8 × 10⁻¹⁵.
+pub(crate) const ZONAL_NEWTON_STEPS: u32 = 16;
+
+/// The terms of a point's emitted flux over the mean, for [`zonal_point_newton`]: E = `base` +
+/// Σₖ wₖ rₖ(s), each term's weight wₖ and damping Xₖ = max(n(n + 1)D, W `B_P`) read once, so that
+/// each of the Newton steps reads only its responses rₖ = `B_P` ÷ (`B_eff` + Xₖ ÷ s).
+///
+/// The terms are [`point_flux`]'s: the albedo's, (Φ − 1) q₂ `P₂` at P₂'s damping; each mode's,
+/// qₙ Pₙ; and the tail's, q − 1 − Σ qₙ Pₙ at degree 34's. The base is the insolation less the
+/// modes' and the tail's weights, their responses' 1.
+#[derive(Debug, Clone, Copy)]
+struct PointTerms {
+    base: f64,
+    terms: [(f64, f64); ZONAL_MODES + 2],
+}
+
+impl PointTerms {
+    /// The terms of the point of insolation `insolation` and Legendre values `legendre` under the
+    /// transport `transport` with the modes `modes`.
+    #[must_use]
+    fn of(
+        insolation: f64,
+        modes: &[InsolationMode; ZONAL_MODES],
+        legendre: &ModeValues,
+        transport: &ZonalTransport,
+    ) -> Self {
+        let damping =
+            |degree: f64| (degree * (degree + 1.0) * transport.conductance).max(transport.weak);
+        let first = modes[0];
+        let mut terms = [(0.0, 0.0); ZONAL_MODES + 2];
+        terms[0] = (
+            (transport.albedo - 1.0) * first.coefficient * legendre[0],
+            damping(first.degree),
+        );
+        let (mut base, mut partial) = (insolation, 1.0);
+        for (k, (mode, &at)) in modes.iter().zip(legendre).enumerate() {
+            let value = mode.coefficient * at;
+            terms[k + 1] = (value, damping(mode.degree));
+            base -= value;
+            partial += value;
+        }
+        let tail = insolation - partial;
+        terms[ZONAL_MODES + 1] = (tail, damping(modes[ZONAL_MODES - 1].degree + 2.0));
+        Self {
+            base: base - tail,
+            terms,
+        }
+    }
+
+    /// E and its slope dE ÷ ds at the restoring's scale `scale`, s: Σₖ wₖ rₖ, and
+    /// Σₖ wₖ rₖ² Xₖ ÷ (`B_P` s²), since drₖ ÷ ds = rₖ² Xₖ ÷ (`B_P` s²) (decision-p14-t51a-part2
+    /// §1.3).
+    #[must_use]
+    fn flux_and_slope(&self, transport: &ZonalTransport, scale: f64) -> (f64, f64) {
+        let inverse = 1.0 / scale;
+        let (mut flux, mut slope) = (self.base, 0.0);
+        for &(weight, damping) in &self.terms {
+            let r = transport.planck / (transport.effective + damping * inverse);
+            flux += weight * r;
+            slope += weight * r * r * damping;
+        }
+        (flux, slope * inverse * inverse / transport.planck)
+    }
+}
+
+/// [`zonal_point`] from generator version 23: the same point, the root of
+/// t = `T_s` max(0, E(s))^¼ with s = (t ÷ `T_s`)³, by [`ZONAL_NEWTON_STEPS`] Newton steps
+/// safeguarded by the bisection's bracket (decision-p14-t51a-part2 §1.3).
+///
+/// The steps are taken on g(u) = u⁴ − E(u³), u = t ÷ `T_s`, whose root is the same: g > 0 exactly
+/// where t exceeds `T_s` max(0, E)^¼, E ≤ 0 included, so the bracket narrows on the same sign as
+/// the bisection's. It is smooth through E = 0, where t − `T_s` E^¼ has an infinite slope: at a dark
+/// pole, and where a strong vapour feedback (`B_eff` well under `B_P`) drives a cold zone's flux to
+/// nothing. Its slope is g′ = 4u³ − 3u² dE ÷ ds ([`PointTerms`]).
+///
+/// - The bracket is the bisection's, [0, high] with high doubled from 2 `T_s` while the point lies
+///   below its own temperature there, its lower end raised to where the slowest mode, P₂'s, is
+///   damped to a part in 10⁶ wherever g confirms it lies below there. At s = 0 every mode is
+///   damped out and E = 1, so u = 0 lies below.
+/// - The start is u = 1, the mean's temperature, the bisection's own first middle.
+/// - Each step evaluates g and g′ at u, narrows the bracket on g's sign, and takes the Newton
+///   candidate in w = ln u, u e^(−g ÷ (u g′)), where it is finite and inside the bracket, and
+///   otherwise the bracket's middle, geometric once its lower end is above 0: a cold zone's
+///   transition spans decades in s. The bracket and the candidate read the one g, so that at the
+///   root they agree to the last bit.
+///
+/// A point with no transport is [`zonal_point`]'s, its radiative temperature, bit for bit.
+#[must_use]
+fn zonal_point_newton(
+    surface_k: f64,
+    transport: &ZonalTransport,
+    modes: &[InsolationMode; ZONAL_MODES],
+    insolation: f64,
+    legendre: &ModeValues,
+) -> f64 {
+    newton_point(
+        surface_k,
+        transport,
+        modes,
+        (insolation, legendre),
+        ZONAL_NEWTON_STEPS,
+    )
+    .0
+}
+
+/// [`zonal_point_newton`] with `steps` steps, K, with the bracket it ends in, K: for the tests that
+/// find the least count and hold the answer inside its bracket.
+#[must_use]
+fn newton_point(
+    surface_k: f64,
+    transport: &ZonalTransport,
+    modes: &[InsolationMode; ZONAL_MODES],
+    (insolation, legendre): (f64, &ModeValues),
+    steps: u32,
+) -> (f64, (f64, f64)) {
+    let transported = transport.conductance > 0.0 || transport.weak > 0.0;
+    if !transported {
+        let t = zonal_point(surface_k, transport, modes, insolation, legendre);
+        return (t, (t, t));
+    }
+    // g and g′ at u, the point's terms read once.
+    let terms = PointTerms::of(insolation, modes, legendre, transport);
+    let excess = |u: f64| {
+        let (e, slope) = terms.flux_and_slope(transport, math::powi(u, 3));
+        let square = u * u;
+        (square * square - e, 4.0 * square * u - 3.0 * square * slope)
+    };
+    let mut high = 2.0;
+    for _ in 0..ZONAL_END_STEPS {
+        if excess(high).0 > 0.0 {
+            break;
+        }
+        high *= 2.0;
+    }
+    // A lower end above 0, where the slowest mode, P₂'s, is damped to a part in 10⁶: E is 1 there,
+    // the mean, to that part, far above u⁴. It is taken where g confirms it, and 0 otherwise.
+    let slowest = (6.0 * transport.conductance).max(transport.weak);
+    let floor = math::cbrt(1e-6 * slowest / transport.planck);
+    let mut low = if floor > 0.0 && floor < high && excess(floor).0 <= 0.0 {
+        floor
+    } else {
+        0.0
+    };
+    // The start, the mean's temperature: the bisection's own first middle.
+    let mut u = 1.0;
+    for _ in 0..steps {
+        let (g, slope) = excess(u);
+        if g > 0.0 {
+            high = u;
+        } else {
+            low = u;
+        }
+        // The step in w = ln u, whose slope is u g′: a cold zone's transition spans decades in s.
+        let candidate = u * math::exp(-g / (u * slope));
+        u = if candidate.is_finite() && low <= candidate && candidate <= high {
+            candidate
+        } else if low > 0.0 {
+            // The bracket's geometric middle, its middle in w.
+            (low * high).sqrt()
+        } else {
+            f64::midpoint(low, high)
+        };
+    }
+    (surface_k * u, (surface_k * low, surface_k * high))
+}
+
+/// The zonal point [`zonal_point`] solves, under the `p14-snapshot` lane's rules `rules`: by its
+/// 64-step bisection under [`SnapshotRules::Held`], version 22's, and by
+/// [`zonal_point_newton`] under [`SnapshotRules::Batch`] (decision-p14-t51a-part2 §1).
+#[must_use]
+fn zonal_point_under(
+    rules: SnapshotRules,
+    surface_k: f64,
+    transport: &ZonalTransport,
+    modes: &[InsolationMode; ZONAL_MODES],
+    insolation: f64,
+    legendre: &ModeValues,
+) -> f64 {
+    match rules {
+        SnapshotRules::Held => zonal_point(surface_k, transport, modes, insolation, legendre),
+        SnapshotRules::Batch => {
+            zonal_point_newton(surface_k, transport, modes, insolation, legendre)
+        }
+    }
+}
+
 /// The annual-mean surface temperatures at the equator and at a pole of the column `column` under
 /// the spin `spin` at the ocean weight `weight`, K ([`zonal_ends_under`];
 /// science-p14-t24a-climate.md §7). Their difference is the equator–pole contrast. Both are `T_s`
@@ -1758,7 +2274,7 @@ pub(crate) fn zonal_ends_k(
     spin: &SeasonalSpin,
     weight: OceanWeight,
 ) -> (f64, f64) {
-    ZonalProfile::of(column, spin, weight).ends
+    ZonalProfile::of(column, spin, weight, SnapshotRules::Held).ends
 }
 
 /// The annual-mean surface temperatures at the equator and at a pole, K, of a profile about the
@@ -1779,8 +2295,9 @@ pub(crate) fn zonal_ends_k(
 /// - The sum runs to degree 32, and the tail beyond takes degree 34's response; the modes sum to
 ///   q at each end.
 /// - Φ multiplies the `P₂` forcing, the coalbedo gradient it stands for.
-/// - Each end solves for its own s by bisection over a fixed number of steps, since
-///   T − T(E(T)) rises with T.
+/// - Each end solves for its own s, since T − T(E(T)) rises with T: by bisection over a fixed
+///   number of steps under the rules `rules`' [`SnapshotRules::Held`], and from generator
+///   version 23 by safeguarded Newton steps ([`zonal_point_under`]).
 ///
 /// The limits:
 /// - With no transport the ends are the radiative ones, `T_s` q^¼, bit for bit on an airless
@@ -1798,6 +2315,7 @@ pub(crate) fn zonal_ends_under(
     surface_k: f64,
     transport: &ZonalTransport,
     obliquity: Radians,
+    rules: SnapshotRules,
 ) -> (f64, f64) {
     if !restored(transport) {
         return (surface_k, surface_k);
@@ -1805,9 +2323,12 @@ pub(crate) fn zonal_ends_under(
     let modes = insolation_modes(obliquity);
     let (equator, pole) = annual_insolation(obliquity);
     let at_equator = modes.map(|mode| mode.at_equator);
+    let point = |insolation: f64, legendre: &ModeValues| {
+        zonal_point_under(rules, surface_k, transport, &modes, insolation, legendre)
+    };
     (
-        zonal_point(surface_k, transport, &modes, equator, &at_equator),
-        zonal_point(surface_k, transport, &modes, pole, &[1.0; ZONAL_MODES]),
+        point(equator, &at_equator),
+        point(pole, &[1.0; ZONAL_MODES]),
     )
 }
 
@@ -1885,14 +2406,22 @@ pub(crate) struct ZonalProfile {
     modal: Option<(ZonalTransport, Radians)>,
     /// The temperatures at the equator and at a pole, K: the contrast's ends.
     ends: (f64, f64),
+    /// Which solver its points take ([`zonal_point_under`]).
+    rules: SnapshotRules,
 }
 
 impl ZonalProfile {
     /// The profile of the column `column` under the spin `spin` at the ocean weight `weight`,
     /// whose transport keeps ½ + ½θ of the meridional conductance and whose cold zones brighten by
-    /// 1 + (Φ⊕ − 1)θ ([`OceanWeight`]).
+    /// 1 + (Φ⊕ − 1)θ ([`OceanWeight`]), its points solved under the rules `rules`
+    /// ([`zonal_point_under`]).
     #[must_use]
-    pub(crate) fn of(column: &Column, spin: &SeasonalSpin, weight: OceanWeight) -> Self {
+    pub(crate) fn of(
+        column: &Column,
+        spin: &SeasonalSpin,
+        weight: OceanWeight,
+        rules: SnapshotRules,
+    ) -> Self {
         let t_s = column.surface_temperature.value();
         let planck = column.restoring_w_per_m2_k();
         if !(planck.is_finite() && planck > 0.0 && t_s > 0.0) {
@@ -1900,6 +2429,7 @@ impl ZonalProfile {
                 surface_k: t_s,
                 modal: None,
                 ends: (t_s, t_s),
+                rules,
             };
         }
         let transport = ZonalTransport {
@@ -1912,7 +2442,8 @@ impl ZonalProfile {
         Self {
             surface_k: t_s,
             modal: restored(&transport).then_some((transport, spin.obliquity)),
-            ends: zonal_ends_under(t_s, &transport, spin.obliquity),
+            ends: zonal_ends_under(t_s, &transport, spin.obliquity, rules),
+            rules,
         }
     }
 
@@ -1965,7 +2496,8 @@ impl ZonalProfile {
         x: f64,
         (modes, cosines): (&[InsolationMode; ZONAL_MODES], &[f64]),
     ) -> f64 {
-        zonal_point(
+        zonal_point_under(
+            self.rules,
             self.surface_k,
             transport,
             modes,

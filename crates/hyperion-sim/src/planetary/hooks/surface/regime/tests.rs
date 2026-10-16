@@ -311,7 +311,12 @@ fn a_mars_given_its_measured_air_by_hand_takes_carbon_dioxide_not_water() {
     let mars = measured_mars();
     let spin = spin_of("Mars");
     let floor = night_floor(WattsPerSquareMetre::new(0.019));
-    let zonal = ZonalProfile::of(&mars, &spin, OceanWeight::NONE);
+    let zonal = ZonalProfile::of(
+        &mars,
+        &spin,
+        OceanWeight::NONE,
+        crate::planetary::derive::atmosphere::SnapshotRules::Held,
+    );
     let (day, night) = day_and_night(&mars, &spin, SurfaceMaterial::Rock, floor);
     let range = climate_range(mars.surface_temperature, zonal.ends, day, night, floor);
     eprintln!(

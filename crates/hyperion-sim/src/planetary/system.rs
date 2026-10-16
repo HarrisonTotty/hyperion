@@ -105,9 +105,10 @@ use crate::planetary::architecture::{
 use crate::planetary::belts::{
     Belt, BeltComposition, BeltHost, BeltMember, FIRST_BELT_SLOT, LAST_BELT_SLOT, host_belts,
 };
+use crate::planetary::chem::partition::{Condensates, Partition};
 use crate::planetary::context::{SystemContext, XuvHistory};
 use crate::planetary::derive::atmosphere::{
-    Atmosphere, NitrogenLine, SurfaceMaterial, VolatileDraws, VolatileInventory,
+    Atmosphere, NitrogenLine, SnapshotRules, SurfaceMaterial, VolatileDraws, VolatileInventory,
 };
 use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
 use crate::planetary::derive::irradiation::luminosity_flux;
@@ -3595,7 +3596,8 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
             window: entry,
         },
     };
-    let derived = GlobalFigures::derive_under(&figure_inputs, time.tides);
+    let derived =
+        GlobalFigures::derive_under(&figure_inputs, time.tides, SnapshotRules::in_force());
     // The generator's bodies are in the figures' range: a refusal is a bug, which the tests'
     // debug builds catch, and it carries nothing a caller could act on, so the body's figures are
     // not modelled, as an uncomputed derivation's.
@@ -3621,6 +3623,8 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
     let Some(conditions) = SurfaceConditions::derive(&inputs) else {
         return Section::NotApplicable;
     };
+    let (conditions, condensates) =
+        with_partition(&figures, sky.atmosphere, conditions, bulk.surface_gravity());
     // The second stage: the volatile history reads the conditions' liquid-water flag, the hosts'
     // light over the body's past and its outgassing then (P14.T48.b), and the ocean and the ice
     // read the conditions (science-p14-t24b-laws §4.6, steps 8–12).
@@ -3634,11 +3638,18 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         window,
         outgassing: |age: Years| past_outgassing(&figure_inputs, age),
     });
-    let figures = figures.with_surface(&conditions, history);
+    let figures = figures.with_surface_under(
+        &conditions,
+        history,
+        condensates.as_ref().map(|(_, published)| published),
+    );
     // Step 10, the climate regime (P14.T48.d): it reads the cover, which reads no regime (an ice
     // belt's band is the profile's cold equator, science-p14-t24b-laws §4.3), so it follows the
     // second stage with no loop.
-    let reservoirs = surface_reservoirs(sky.atmosphere);
+    let reservoirs = match &condensates {
+        Some((partition, _)) => partition.reservoirs(),
+        None => surface_reservoirs(sky.atmosphere),
+    };
     let conditions = conditions.with_climate(&ClimateInputs {
         mass: interior.mass,
         reservoirs: &reservoirs,
@@ -3651,6 +3662,26 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
             "conditions exist only off the gas-envelope state, and `with_climate` gives their regime",
         ),
     )
+}
+
+/// The conditions `conditions` of the body whose atmosphere is `atmosphere`, figures `figures` and
+/// surface gravity `gravity` with P14.T51.a's partition on the record, held by the `p14-snapshot`
+/// lane's hold ([`GlobalFigures::condensates_under`]): from 23 the conditions' liquid-water flag,
+/// the ocean and ices, and the regime's reservoirs read it; below 23 nothing.
+#[must_use]
+fn with_partition(
+    figures: &GlobalFigures,
+    atmosphere: &Atmosphere,
+    conditions: SurfaceConditions,
+    gravity: MetresPerSecondSquared,
+) -> (SurfaceConditions, Option<(Partition, Condensates)>) {
+    let condensates =
+        figures.condensates_under(SnapshotRules::in_force(), atmosphere, &conditions, gravity);
+    let conditions = match &condensates {
+        Some((_, published)) => conditions.with_condensates(published),
+        None => conditions,
+    };
+    (conditions, condensates)
 }
 
 /// The state at `t` of the moon `satellite`, in a system aged `age_at_epoch` at the epoch, whose
