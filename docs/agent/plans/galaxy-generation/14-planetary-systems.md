@@ -3358,6 +3358,51 @@ hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/s
     `packages/protocol/fixtures/substances.json` (read).
   - _Accept:_ `cargo test -p hyperion-protocol`; `cargo test -p hyperion-server convert`;
     `just gen-protocol-check`; `pnpm --filter hyperion exec vitest run src/renderer/src/lib/system`.
+- **P14.T35.f A molten surface's own vapour on the wire** (no bump; after T35.e; decision-backlog-2
+  §2, confirmed by decision-triton-and-e101 §2).
+  - `crates/hyperion-protocol/src/planetary/record/surface.rs`:
+    - `BodySurfaceDto.silicate_vapour: Modelled<SilicateVapourDto>`, declared as the other later
+      members are: `#[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]` and
+      `#[ts(as = "Option<Option<SilicateVapourDto>>", optional)]`. Absent means not modelled,
+      `null` means computed as none, and a value is the melt's vapour.
+    - `pub enum SilicateVapourDto {}`, uninhabited (TypeScript `never`), as `BodySurfaceDto` was
+      before T35.e. P14.T55.b gives it its members, and may reshape it until a build first
+      sends a value (plan 04 Design note 15).
+    - The four air members keep their shapes and values, and their docs say what they hold:
+      - `surface_pressure_pa`: "the mean pressure of the modelled air, the volatiles': zero for
+        an airless body, and for a surface holding melt whose volatiles are gone. It does not
+        include the melt's own vapour (`silicate_vapour`)";
+      - `gases`: "empty for an airless body, or for a surface holding melt with no volatile air,
+        which does not deny the melt's vapour";
+      - μ and c_p ÷ R stay `null` with an empty `gases`.
+    - The module doc's list of later members gains `silicate_vapour` (P14.T55.b).
+  - **Where the member applies.** It applies where a surface holds melt, a fact on the wire:
+    - the state `magma_ocean`, and T53.b's `steam_envelope` if its surface section is the
+      applicable one;
+    - from P14.T54.a, a `crust.melt_area_fraction` above 0 (T51.c's locked lava world, `airless`
+      with a dayside pool).
+      Its absence means something only there, as the `EXOSPHERE` row's does on an `airless`
+      surface.
+  - `crates/hyperion-server/src/convert/planetary.rs` writes `Modelled::NotModelled` for every
+    surface, since the record holds no such member. The doc of
+    `the_surface_s_mixture_and_fractions_are_in_range` on `e101` is rewritten: its zero is the
+    volatiles', and its own vapour is not modelled.
+  - The sim's `SurfaceConditions::{surface_pressure, gases}` docs (`planetary/hooks/surface.rs`)
+    say the same as the wire's.
+  - `PROTOCOL_VERSION` stays 2 (an optional member). `GENERATOR_VERSION` does not move, and no
+    golden changes: the server's output is byte-identical.
+  - _Tests:_
+    - in `hyperion-protocol`: an absent member writes no key; a record with no key reads
+      `NotModelled`; `null` round-trips as `Modelled::Null`;
+    - in `hyperion-server`: every golden system's surface sends the member absent, with
+      `close_binary`'s `e101` (`magma_ocean`, 0 Pa, empty `gases`) pinned;
+    - `@hyperion/protocol`'s vitest reads a surface with and without the key.
+  - _Files:_ `crates/hyperion-protocol/src/planetary/record/surface.rs`,
+    `crates/hyperion-server/src/convert/planetary.rs`,
+    `crates/hyperion-sim/src/planetary/hooks/surface.rs` (docs), `packages/protocol/src/planetary.test.ts`,
+    and the generated bindings (`just gen-protocol`).
+  - _Accept:_ `cargo test -p hyperion-protocol`; `cargo test -p hyperion-server convert`;
+    `just gen-protocol-check`; `pnpm --filter @hyperion/protocol exec vitest run`.
 
 #### P14.T36 Server handlers
 
@@ -14132,3 +14177,62 @@ tables::gauss_legendre`.
   - `MASS FRACTION`, at one decimal and kept as built by the sign-off, can still read a layer as
     the whole beside another (`IRON 0.0 % · ROCK 100.0 %` for a rock at 0.99996), as a gas did
     before this task. The UX review's note; for the owner, should the coverage form reach it.
+- **Deviations in P14.T35.f, as built (`lane/33-p14-t35f-silicate-vapour`, 2026-10-16).** A molten
+  surface's own vapour on the wire (decision-backlog-2 §2, confirmed by decision-triton-and-e101
+  §2), with no output moved: `PROTOCOL_VERSION` stays 2 and `GENERATOR_VERSION` 22, and no golden,
+  `packages/protocol/fixtures/planetary.json` or `ProtocolVersion.ts` changes. The verdict of
+  `golden_diff.py --base HEAD` is "Nothing to reconcile."
+  - _The member and its type._ `BodySurfaceDto.silicate_vapour: Modelled<SilicateVapourDto>`, last
+    in the section after `biosphere`, declared as the other later members are. Its doc says that it
+    is not part of the volatile air, that the melt's temperature sets it where melt lies, where it
+    applies (`magma_ocean`; T53.b's `steam_envelope` where its surface section is the applicable
+    one; from T54.a a `crust.melt_area_fraction` above 0), that its absence says nothing elsewhere,
+    and that from T55.b it is `null` on a surface holding no melt. `pub enum SilicateVapourDto {}`
+    sits directly before `BodySurfaceDto`, with `BodyEventDto`'s derives and no `Eq`, `Hash` or
+    `Copy`, since T55.b's figures will be `f64`. Its doc names the species over a volatile-free
+    melt, chiefly Na, O₂, O and `SiO` (Schaefer and Fegley 2009, Astrophys. J. 703, L113), and says
+    that T55.b's quantities carry their units in their names and that T55.b may reshape it while no
+    build has sent a value (plan 04's Design note 15). ts-rs writes
+    `silicate_vapour?: SilicateVapourDto | null` and `export type SilicateVapourDto = never;`.
+  - _The citation's form._ The brief's draft wrote "ApJ" and a bare SiO. Clippy's pedantic
+    `doc_markdown` reads both as code under the root `clippy.toml`, which governs
+    `hyperion-protocol` and lists neither (the sim's lists `ApJ`), so the doc writes
+    "Astrophys. J.", as `VerticalStructureDto`'s citation in the same file does, and `SiO` as a
+    registry key. No word of the claim changes.
+  - _The air members' docs._ Their shapes, serde attributes and values are unchanged.
+    `surface_pressure_pa` is the mean surface pressure of the modelled air, the volatiles', zero
+    also for a surface holding melt whose volatiles are gone, and does not include the melt's own
+    vapour; `gases` is empty also for a surface holding melt with no volatile air, which does not
+    deny the melt's own vapour; μ and c_p ÷ R are `null` with an empty `gases`. The module doc's
+    list of later members gains T55.b. The sim's `SurfaceConditions::{surface_pressure, gases}`
+    say the same, and nothing else in the sim changes. In `surface_pressure_pa` and the sim's
+    `surface_pressure`, "It does not include …" opens a paragraph of its own, so that the summary
+    stays one sentence (the Rust review's should-fix; `.claude/rules/rust-dev.md`, Documentation).
+  - _The server._ `surface` writes `silicate_vapour: Modelled::NotModelled` directly, not through
+    `later`, since the record holds no such member; a `//` comment and `surface`'s doc say so. The
+    sim's `record::Surface` gains no member: that is T55.b's. The range test's doc reads `e101`'s
+    zero as the volatiles', its code unchanged.
+  - _Files beyond the entry's_: the re-export lists of `hyperion-protocol/src/planetary/record.rs`,
+    `planetary.rs` and `lib.rs`, and `packages/protocol/src/index.ts` (one import, one export).
+  - _Tests._ `surface.rs`'s `the_melt_s_vapour_is_absent_or_null_and_holds_no_value_yet`: the
+    Earth's member is absent with no key and round-trips, a surface with no key reads
+    `NotModelled`, `null` round-trips as `Modelled::Null`, and `{ "Na": 1.0 }` is refused ("there
+    are no variants"). `convert/planetary.rs`: `the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed`
+    holds seven members absent, the vapour among them; the new
+    `every_surface_sends_the_melt_s_vapour_absent_and_e101_the_volatiles_zero` holds every golden
+    `ok` surface's member `NotModelled` and its JSON without the key, the close binary's `e101`,
+    `e102` and `e103` among the magma oceans, and `e101` pinned (`magma_ocean`, `rock`, 0 Pa by
+    its bits, no gas, μ and c_p ÷ R `null`), failing if `e101` is not found.
+    `@hyperion/protocol`'s "decodes an Earth's surface, every substance a registry key
+    (P14.T35.e)" lists `silicate_vapour` among the absent members, and "reads a melt's own vapour absent as not modelled and null as none (P14.T35.f)"
+    decodes the fixture's frame with the key added as `null` by spread copies, with a typed line,
+    `const vapour: null | undefined`, that stops compiling if the binding admits a value.
+    `each_later_member_round_trips_absent_null_and_a_value` is unchanged: it needs a value, which
+    this member cannot have.
+  - _The console_ still reads `e101` as `SURFACE PRESSURE NONE` and `MOLE FRACTION NONE` until
+    P14.T43.e reads the member.
+- **Deferred findings (2026-10-13 rule)**, from P14.T35.f:
+  - The sim's `SurfaceConditions::{mean_molar_mass_g_per_mol, heat_capacity_over_r}` docs still
+    say "`None` for an airless body", while the wire's now say `null` with an empty `gases`: an
+    airless body, or a surface holding melt with no volatile air, as on `e101`. The entry limits
+    the sim's edit to `surface_pressure` and `gases`; for a docs batch.

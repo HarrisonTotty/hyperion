@@ -23,9 +23,9 @@
 //! with no condensable's `condensable`, a world never wet's `wet_epoch`, a body computed to hold no
 //! subsurface ocean's `subsurface_ocean`. A member this generator version does not compute is
 //! absent ([`Modelled::NotModelled`]), and a reader takes it as not modelled, never as none. The
-//! members whose tasks land later (P14.T24.c, T24.e, T51.a, T51.c, T51.d and T53.d) are absent
-//! until they do, and each task may reshape its own member's type while no build has sent a value
-//! of it; once a build has, a change bumps [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION).
+//! members whose tasks land later (P14.T24.c, T24.e, T51.a, T51.c, T51.d, T53.d and T55.b) are
+//! absent until they do, and each task may reshape its own member's type while no build has sent a
+//! value of it; once a build has, a change bumps [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION).
 //!
 //! # Closed classes
 //!
@@ -600,6 +600,19 @@ pub struct BiosphereDto {
     pub fluxes: Vec<BiosphereFluxDto>,
 }
 
+/// The vapour a surface's melt holds over it: the rock-forming species the melt evaporates,
+/// over a volatile-free melt chiefly Na, O₂, O and `SiO` (Schaefer and Fegley 2009, Astrophys. J.
+/// 703, L113), which plan 14's P14.T55.b models as silicate-vapour atmospheres.
+///
+/// Its members are P14.T55.b's, which no task has built, so the type has no value yet and
+/// every server sends [`BodySurfaceDto::silicate_vapour`] absent. TypeScript sees it as
+/// `never`. P14.T55.b gives it its members, each quantity's name carrying its unit as here, and
+/// may reshape it while no build has sent a value (plan 04's Design note 15). It derives only
+/// what a vapour of figures and registry keys can keep.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub enum SilicateVapourDto {}
+
 /// A body's surface section: its surface state and material, its surface conditions and climate
 /// regime, its global figures and the members whose tasks land later (design note 16; plan 14,
 /// P14.T48.e and P14.T35.e).
@@ -624,16 +637,21 @@ pub struct BodySurfaceDto {
     /// The day–night contrast, the dayside's less the nightside's temperature, K, not negative:
     /// about the substellar axis for a world locked 1:1 to its seasonal host.
     pub day_night_contrast_k: f64,
-    /// The mean surface pressure, Pa, not negative: zero for an airless body.
+    /// The mean surface pressure of the modelled air, the volatiles', Pa, not negative: zero for an
+    /// airless body, and for a surface holding melt whose volatiles are gone.
+    ///
+    /// It does not include the melt's own vapour ([`silicate_vapour`](Self::silicate_vapour)).
     pub surface_pressure_pa: f64,
     /// The gases at the surface by number, largest first with ties by registry order, their mole
-    /// fractions summing to 1 to 10⁻⁹; empty for an airless body.
+    /// fractions summing to 1 to 10⁻⁹; empty for an airless body, or for a surface holding melt
+    /// with no volatile air, which does not deny the melt's own vapour (`silicate_vapour`).
     pub gases: Vec<GasShareDto>,
-    /// The gases' mean molar mass μ = Σ xᵢ μᵢ, g mol⁻¹, positive; `null` for an airless body.
+    /// The gases' mean molar mass μ = Σ xᵢ μᵢ, g mol⁻¹, positive; `null` with an empty `gases`: an
+    /// airless body, or a surface holding melt with no volatile air.
     pub mean_molar_mass_g_per_mol: Option<f64>,
     /// The gases' mixed `c_p` ÷ R, Σ xᵢ (`c_p,ᵢ` ÷ R), dimensionless and positive, at the mean
     /// surface temperature (each registry row's class value until P14.T49.b's function); `null`
-    /// for an airless body.
+    /// with an empty `gases`: an airless body, or a surface holding melt with no volatile air.
     pub heat_capacity_over_r: Option<f64>,
     /// The flux of the hosts' light at the body, orbit-averaged, W m⁻², not negative.
     pub stellar_flux_w_m2: f64,
@@ -711,6 +729,19 @@ pub struct BodySurfaceDto {
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<BiosphereDto>>", optional)]
     pub biosphere: Modelled<BiosphereDto>,
+    /// The melt's own vapour, its silicate vapour (P14.T55.b); absent until that task, from
+    /// every server.
+    ///
+    /// It is not part of the volatile air that `surface_pressure_pa` and `gases` hold: the
+    /// melt's temperature sets it where melt lies, not a volatile inventory's weight over the
+    /// globe. It applies where a surface holds melt, a fact on the wire: the state `magma_ocean`
+    /// (and P14.T53.b's `steam_envelope`, where its surface section is the applicable one) and,
+    /// from P14.T54.a, a `crust.melt_area_fraction` above 0. Elsewhere its absence says
+    /// nothing. From P14.T55.b it is `null` on a surface holding no melt, and the vapour over
+    /// melt (decision-backlog-2 §2.3).
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<SilicateVapourDto>>", optional)]
+    pub silicate_vapour: Modelled<SilicateVapourDto>,
 }
 
 /// The parameters of an envelope's irradiated grey profile above its join to the adiabat: Guillot
@@ -854,6 +885,7 @@ pub(crate) mod tests {
             crust: Modelled::NotModelled,
             modifiers: Modelled::NotModelled,
             biosphere: Modelled::NotModelled,
+            silicate_vapour: Modelled::NotModelled,
         }
     }
 
@@ -1571,6 +1603,39 @@ pub(crate) mod tests {
         assert_eq!(
             serde_json::from_value::<BodySurfaceDto>(wire).unwrap(),
             earth_surface()
+        );
+    }
+
+    /// P14.T35.f (decision-backlog-2 §2.3): the melt's own vapour is written with no key while it
+    /// is not modelled and a surface with no key reads it so, `null` round-trips as computed none,
+    /// and no value decodes until P14.T55.b gives its type members.
+    #[test]
+    fn the_melt_s_vapour_is_absent_or_null_and_holds_no_value_yet() {
+        let absent = earth_surface_json();
+        assert_eq!(earth_surface().silicate_vapour, Modelled::NotModelled);
+        assert!(absent.get("silicate_vapour").is_none(), "{absent}");
+        assert_wire_form(&earth_surface(), earth_surface_json());
+        // A surface with no key, read on its own: plan 14's T35.f names it apart from the round trip.
+        assert_eq!(
+            serde_json::from_value::<BodySurfaceDto>(absent)
+                .unwrap()
+                .silicate_vapour,
+            Modelled::NotModelled
+        );
+
+        let mut wire = earth_surface_json();
+        wire["silicate_vapour"] = Value::Null;
+        let none = BodySurfaceDto {
+            silicate_vapour: Modelled::Null,
+            ..earth_surface()
+        };
+        assert_wire_form(&none, wire.clone());
+
+        wire["silicate_vapour"] = json!({ "Na": 1.0 });
+        let error = serde_json::from_value::<BodySurfaceDto>(wire).unwrap_err();
+        assert!(
+            error.to_string().contains("there are no variants"),
+            "unexpected error: {error}"
         );
     }
 

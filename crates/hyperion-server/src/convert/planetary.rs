@@ -939,7 +939,8 @@ fn later<T, U>(member: RecordModelled<&T>, value: impl FnOnce(&T) -> Option<U>) 
 /// [`Surface`] in its unit and every substance by its registry key.
 ///
 /// The members of later tasks are absent, as the record holds them not modelled; each task fills
-/// its own here when it lands.
+/// its own here when it lands. The melt's own vapour, `silicate_vapour`, has no member in the
+/// record and is sent absent from every surface until P14.T55.b.
 #[must_use]
 fn surface(surface: &Surface) -> BodySurfaceDto {
     let conditions = surface.conditions();
@@ -995,6 +996,9 @@ fn surface(surface: &Surface) -> BodySurfaceDto {
         crust: later(surface.crust(), |crust| match *crust {}),
         modifiers: later(surface.modifiers(), |modifiers| match *modifiers {}),
         biosphere: later(surface.biosphere(), |biosphere| match *biosphere {}),
+        // P14.T55.b's: the record holds no such member, so every server sends it absent until
+        // then (P14.T35.f).
+        silicate_vapour: Modelled::NotModelled,
     }
 }
 
@@ -1422,9 +1426,9 @@ mod tests {
         assert!(surfaces > 50, "{surfaces} surfaces");
     }
 
-    /// P14.T35.e: the members of later tasks are absent, as the record holds them, and a
-    /// subsurface ocean is computed for a regular moon alone, an object or `null`, until
-    /// P14.T51.g.
+    /// P14.T35.e: the members of later tasks are absent, as the record holds them, with
+    /// P14.T35.f's `silicate_vapour`, which the record does not hold, and a subsurface ocean is
+    /// computed for a regular moon alone, an object or `null`, until P14.T51.g.
     #[test]
     fn the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed() {
         let mut moons = 0;
@@ -1437,9 +1441,11 @@ mod tests {
                     dto.crust.is_not_modelled(),
                     dto.modifiers.is_not_modelled(),
                     dto.biosphere.is_not_modelled(),
+                    dto.silicate_vapour.is_not_modelled(),
                 ],
-                [true; 6],
-                "{}: the structure, aerosols, condensates, crust, modifiers and biosphere",
+                [true; 7],
+                "{}: the structure, aerosols, condensates, crust, modifiers, biosphere and silicate \
+                 vapour",
                 wire.id
             );
             let regular = wire.kind
@@ -1468,8 +1474,10 @@ mod tests {
     /// no gas has no mixture figures (`null`), and every fraction lies in `[0, 1]`, the liquids and
     /// ices summing to the ocean and ice fractions.
     ///
-    /// A body of another state may hold no gas either: the close binary's dwarf planet `e101`, a
-    /// magma ocean at 1,684 K with no volatiles, has none.
+    /// A body of another state may hold no volatile air either: the close binary's dwarf planet
+    /// `e101`, a magma ocean at 1,684 K whose volatiles escape has taken, sends 0 Pa and no gas.
+    /// That zero is the volatiles'; the melt's own vapour is not modelled, and `silicate_vapour` is
+    /// absent (P14.T35.f).
     #[test]
     fn the_surface_s_mixture_and_fractions_are_in_range() {
         let mut airless = 0;
@@ -1516,6 +1524,50 @@ mod tests {
             }
         }
         assert!(airless > 0, "no airless body was checked");
+    }
+
+    /// P14.T35.f (decision-backlog-2 §2): every surface sends the melt's own vapour absent, with
+    /// no key, the close binary's magma oceans among them; and its dwarf planet `e101`, a magma
+    /// ocean at 1,684 K, sends its volatiles' zero: 0 Pa, no gas and no mixture figures.
+    #[test]
+    fn every_surface_sends_the_melt_s_vapour_absent_and_e101_the_volatiles_zero() {
+        let close_binary = 0x4200_2cb2_0000_0009;
+        let e101 = BodyIdHex::from_parts(close_binary, 0xe101);
+        let mut magma_oceans = Vec::new();
+        let mut pinned = None;
+        for (_, dto, wire) in ok_surfaces() {
+            let id = wire.id.as_str();
+            assert_eq!(dto.silicate_vapour, Modelled::NotModelled, "{id}");
+            let sent = serde_json::to_value(dto).expect("a surface section serializes");
+            assert!(sent.get("silicate_vapour").is_none(), "{id}: {sent}");
+            if dto.state == SurfaceStateDto::MagmaOcean {
+                magma_oceans.push(wire.id.clone());
+            }
+            if wire.id == e101 {
+                pinned = Some(dto);
+            }
+        }
+        for index in [0xe101, 0xe102, 0xe103] {
+            let id = BodyIdHex::from_parts(close_binary, index);
+            assert!(
+                magma_oceans.contains(&id),
+                "{id} is not among the magma oceans {magma_oceans:?}"
+            );
+        }
+        let Some(dto) = pinned else {
+            panic!("{e101} has no ok surface: a re-pin of the golden systems re-pins this test");
+        };
+        assert_eq!(
+            (dto.state, dto.material),
+            (SurfaceStateDto::MagmaOcean, SurfaceMaterialDto::Rock)
+        );
+        assert_eq!(dto.surface_pressure_pa.to_bits(), 0.0_f64.to_bits());
+        assert!(dto.gases.is_empty(), "{:?}", dto.gases);
+        assert_eq!(
+            (dto.mean_molar_mass_g_per_mol, dto.heat_capacity_over_r),
+            (None, None)
+        );
+        assert_eq!(dto.silicate_vapour, Modelled::NotModelled);
     }
 
     /// P14.T35.e: every substance the server sends is a registry key, by construction from the

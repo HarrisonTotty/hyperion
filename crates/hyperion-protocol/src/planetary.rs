@@ -27,9 +27,9 @@ pub use record::{
     DestructionCauseDto, FigureDatumDto, FigureLawDto, GasShareDto, GuillotProfileDto,
     MagneticFieldClassDto, MassFractionsDto, MixingRatioNodeDto, MoonOriginDto, OceanFloorDto,
     PhaseTemplateDto, PlanetClassDto, ProfileNodeDto, RadiationClassDto, RedoxClassDto,
-    SizeDistributionDto, SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto,
-    SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto,
-    TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
+    SilicateVapourDto, SizeDistributionDto, SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto,
+    SubsurfaceOceanDto, SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto,
+    SurfaceStateDto, TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
 };
 pub use requests::{
     BodyDetailRequest, BodyEventDto, BodyEventsDto, BodyEventsRequest, SystemBodiesDto,

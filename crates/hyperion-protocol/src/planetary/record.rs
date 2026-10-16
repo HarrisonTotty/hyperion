@@ -28,9 +28,9 @@ pub use surface::{
     CondensateDeckDto, CraterContractDto, CraterScreeningDto, CraterTargetClassDto,
     CrustCompositionDto, CrustLidDto, GasShareDto, GuillotProfileDto, MagneticFieldClassDto,
     MixingRatioNodeDto, OceanFloorDto, ProfileNodeDto, RadiationClassDto, RedoxClassDto,
-    SizeDistributionDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto,
-    SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto,
-    TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
+    SilicateVapourDto, SizeDistributionDto, SubstanceAreaDto, SubstancePhaseDto,
+    SubsurfaceOceanDto, SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto,
+    SurfaceStateDto, TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
 };
 
 use crate::planetary::{BodyOrbitDto, DetailLevelDto, OrbitHostDto, PopulationDto, SectionDto};

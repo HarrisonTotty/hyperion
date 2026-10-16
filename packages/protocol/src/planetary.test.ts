@@ -232,9 +232,39 @@ describe("body_detail", () => {
       "crust",
       "modifiers",
       "biosphere",
+      "silicate_vapour",
     ]) {
       expect(member in surface).toBe(false);
     }
+  });
+
+  it("reads a melt's own vapour absent as not modelled and null as none (P14.T35.f)", () => {
+    const absent = okValue(response("body_detail_response", "body_detail").record.surface);
+    const frame = fixture.body_detail_response;
+    const { record } = frame.body;
+    const computedNone = {
+      ...frame,
+      body: {
+        ...frame.body,
+        record: {
+          ...record,
+          surface: { ...record.surface, value: { ...record.surface.value, silicate_vapour: null } },
+        },
+      },
+    };
+    const message = decodeServerMessage(JSON.stringify(computedNone));
+    if (message.type !== "response" || !isResponseOf(message.body, "body_detail")) {
+      throw new Error("the frame with the vapour computed as none is not a body_detail response");
+    }
+    const surface = okValue(message.body.record.surface);
+    // The binding admits no value until P14.T55.b gives the vapour its members: this line stops
+    // compiling if the type does.
+    const vapour: null | undefined = surface.silicate_vapour;
+
+    expect(absent.silicate_vapour).toBeUndefined();
+    expect("silicate_vapour" in surface).toBe(true);
+    expect(surface.silicate_vapour).toBeNull();
+    expect(vapour).toBeNull();
   });
 
   it("decodes a Jupiter's envelope, its surface not applicable (P14.T35.e)", () => {
