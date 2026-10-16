@@ -7,6 +7,7 @@ import type { CrustCompositionDto } from "./CrustCompositionDto";
 import type { GasShareDto } from "./GasShareDto";
 import type { MagneticFieldClassDto } from "./MagneticFieldClassDto";
 import type { RadiationClassDto } from "./RadiationClassDto";
+import type { SilicateVapourDto } from "./SilicateVapourDto";
 import type { SubstanceAreaDto } from "./SubstanceAreaDto";
 import type { SubsurfaceOceanDto } from "./SubsurfaceOceanDto";
 import type { SurfaceCondensateDto } from "./SurfaceCondensateDto";
@@ -52,22 +53,27 @@ equator_pole_contrast_k: number,
  */
 day_night_contrast_k: number, 
 /**
- * The mean surface pressure, Pa, not negative: zero for an airless body.
+ * The mean surface pressure of the modelled air, the volatiles', Pa, not negative: zero for an
+ * airless body, and for a surface holding melt whose volatiles are gone.
+ *
+ * It does not include the melt's own vapour ([`silicate_vapour`](Self::silicate_vapour)).
  */
 surface_pressure_pa: number, 
 /**
  * The gases at the surface by number, largest first with ties by registry order, their mole
- * fractions summing to 1 to 10⁻⁹; empty for an airless body.
+ * fractions summing to 1 to 10⁻⁹; empty for an airless body, or for a surface holding melt
+ * with no volatile air, which does not deny the melt's own vapour (`silicate_vapour`).
  */
 gases: Array<GasShareDto>, 
 /**
- * The gases' mean molar mass μ = Σ xᵢ μᵢ, g mol⁻¹, positive; `null` for an airless body.
+ * The gases' mean molar mass μ = Σ xᵢ μᵢ, g mol⁻¹, positive; `null` with an empty `gases`: an
+ * airless body, or a surface holding melt with no volatile air.
  */
 mean_molar_mass_g_per_mol: number | null, 
 /**
  * The gases' mixed `c_p` ÷ R, Σ xᵢ (`c_p,ᵢ` ÷ R), dimensionless and positive, at the mean
  * surface temperature (each registry row's class value until P14.T49.b's function); `null`
- * for an airless body.
+ * with an empty `gases`: an airless body, or a surface holding melt with no volatile air.
  */
 heat_capacity_over_r: number | null, 
 /**
@@ -183,4 +189,17 @@ modifiers?: SurfaceModifiersDto | null,
 /**
  * The biosphere's fluxes (P14.T53.d); absent until a life plan exists.
  */
-biosphere?: BiosphereDto | null, };
+biosphere?: BiosphereDto | null, 
+/**
+ * The melt's own vapour, its silicate vapour (P14.T55.b); absent until that task, from
+ * every server.
+ *
+ * It is not part of the volatile air that `surface_pressure_pa` and `gases` hold: the
+ * melt's temperature sets it where melt lies, not a volatile inventory's weight over the
+ * globe. It applies where a surface holds melt, a fact on the wire: the state `magma_ocean`
+ * (and P14.T53.b's `steam_envelope`, where its surface section is the applicable one) and,
+ * from P14.T54.a, a `crust.melt_area_fraction` above 0. Elsewhere its absence says
+ * nothing. From P14.T55.b it is `null` on a surface holding no melt, and the vapour over
+ * melt (decision-backlog-2 §2.3).
+ */
+silicate_vapour?: SilicateVapourDto | null, };

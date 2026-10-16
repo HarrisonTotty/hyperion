@@ -900,15 +900,19 @@ impl SurfaceConditions {
         self.climate_range
     }
 
-    /// The surface pressure: the sum of the gases' weights, and zero for an airless body.
+    /// The surface pressure of the modelled air, the volatiles': the sum of the gases' weights,
+    /// zero for an airless body and for a surface holding melt whose volatiles are gone.
+    ///
+    /// It does not include the melt's own vapour, which no rule computes until P14.T55.b.
     #[must_use]
     pub const fn surface_pressure(&self) -> Pascals {
         self.surface_pressure
     }
 
     /// The gases at the surface as `(SubstanceId, x)` mole fractions, largest first with ties by
-    /// `SubstanceId`, summing to 1; empty for an airless body ([`mole_fractions`]). Every gas the
-    /// atmosphere holds is listed, whatever its share.
+    /// `SubstanceId`, summing to 1 ([`mole_fractions`]); empty for an airless body, or for a
+    /// surface holding melt with no volatile air, which does not deny the melt's own vapour
+    /// (P14.T55.b). Every gas the atmosphere holds is listed, whatever its share.
     #[must_use]
     pub fn gases(&self) -> &[(SubstanceId, f64)] {
         &self.gases

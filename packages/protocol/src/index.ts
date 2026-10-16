@@ -63,6 +63,7 @@ import type { OceanFloorDto } from "./generated/OceanFloorDto";
 import type { ProfileNodeDto } from "./generated/ProfileNodeDto";
 import type { RadiationClassDto } from "./generated/RadiationClassDto";
 import type { RedoxClassDto } from "./generated/RedoxClassDto";
+import type { SilicateVapourDto } from "./generated/SilicateVapourDto";
 import type { SizeDistributionDto } from "./generated/SizeDistributionDto";
 import type { SubstanceAreaDto } from "./generated/SubstanceAreaDto";
 import type { SubstancePhaseDto } from "./generated/SubstancePhaseDto";
@@ -271,6 +272,7 @@ export type {
   ProfileNodeDto,
   RadiationClassDto,
   RedoxClassDto,
+  SilicateVapourDto,
   SizeDistributionDto,
   SubstanceAreaDto,
   SubstancePhaseDto,
