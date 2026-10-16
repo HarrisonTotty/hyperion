@@ -229,6 +229,26 @@ pub fn entropy_over_r(id: SubstanceId, temperature: Kelvin) -> Option<f64>;     
 pub fn mixture_heat_capacity_over_r_at(mixture: &[(SubstanceId, f64)], temperature: Kelvin) -> Option<f64>;
 pub fn mixture_enthalpy_over_r(mixture: &[(SubstanceId, f64)], temperature: Kelvin) -> Option<Kelvin>;
 pub fn mixture_entropy_over_r(mixture: &[(SubstanceId, f64)], temperature: Kelvin) -> Option<f64>;
+// T49.j: the solid's c(T) and k(T) by row, and the airless regolith's inertia
+// Γ = √(k_eff ρ_bulk c) (Gundlach and Blum 2013's k_eff), in `substance::thermal`; nothing on the
+// record calls them until T54.a.
+impl Substance { pub fn thermal_columns(&self) -> Option<&'static ThermalColumns>; }
+pub struct ThermalColumns { /* heat_capacity, conductivity: ThermalColumn; sources: &[Source] */ }
+// ThermalColumns::{heat_capacity_j_per_kg_k(T), conductivity_w_per_m_k(T)} -> f64, ends held;
+// ::{heat_capacity(), conductivity()} -> &ThermalColumn { pieces: &[ThermalPiece], provenance };
+// ::is_stand_in(); thermal::{ThermalPiece { phase, low, high, form }, ThermalForm, Provenance}.
+// thermal::rows(), every row with columns, in registry order:
+pub fn thermal::rows() -> impl Iterator<Item = (SubstanceId, &'static ThermalColumns)>;
+pub struct RegolithForm { /* family, porosity, grain_diameter, emissivity, contact, sources */ }
+// RegolithForm::reference(MechanicsFamily) -> Option<RegolithForm>;
+// RegolithForm::new(MechanicsFamily, porosity: f64, grain_diameter: Metres)
+//     -> Result<RegolithForm, BuildRegolithFormError>;
+pub fn regolith_thermal_inertia(id: SubstanceId, form: &RegolithForm, temperature: Kelvin)
+    -> Result<RegolithInertia, EvaluateRegolithInertiaError>;
+pub fn thermal::reference_regolith_thermal_inertia(id: SubstanceId, temperature: Kelvin)
+    -> Result<RegolithInertia, EvaluateRegolithInertiaError>; // the family's reference form
+// RegolithInertia::{inertia_j_per_m2_k_sqrt_s, conductivity_w_per_m_k, bulk_density,
+// heat_capacity_j_per_kg_k, contact_ and radiative_conductivity_w_per_m_k, …}.
 pub enum Element { H, He, C, N, O, Ne, Na, Mg, Al, Si, P, S, Cl, Ar, K, Ca, Ti, V, Cr, Mn, Fe, Ni, Zn, Kr, Xe }
 ```
 
@@ -727,12 +747,14 @@ Order and parallelism:
   - **22 → 23**, P14.T54.a's "the surface": the snapshot path and the surface members, everything
     R09's `for_body` reads. Compute subtasks are pure modules, called by nothing on the record
     until T54.a, so each keeps `just ci` green and moves no golden. Its membership is closed:
-    T49.b → T49.c, with T49.h after T49.b's rows (lane `p14-liquids`; T49.b's liquid part, so it
-    reopens nothing; decision-r11-palette-liquids §3, 2026-10-14); T50.a → T50.c → T51.a → T51.b
-    (lane `p14-snapshot`, one lane: all four edit `derive/atmosphere.rs`) → T57.a
-    (decision-p14-moons), which stays in 23 since only its water refit holds Earth at 288 K once
-    T51.a moves Earth's water column; T51.c after T50.a and T49.c
-    (lane `p14-crust`); T56.a → T56.c → T56.d (lane `p14-moons`; T56.c after T50.a and T50.c),
+    T49.b → T49.h's step 1 (lane `p14-liquids`; T49.b's liquid part, so it reopens nothing;
+    decision-r11-palette-liquids §3, 2026-10-14), which lands the shared `materials` module before
+    T49.c; T49.b → T49.c → T49.i (lane `p14-optics`) and T49.j (lane `p14-thermal`), T49.c split
+    in three (decision-p14-t49c-split, 2026-10-16); T50.a → T50.c → T51.a → T51.b, after T49.c and
+    T49.h's step 1 (lane `p14-snapshot`, one lane: all four edit `derive/atmosphere.rs`) → T57.a,
+    after T51.b and T49.i (decision-p14-moons), which stays in 23 since only its water refit holds
+    Earth at 288 K once T51.a moves Earth's water column; T51.c after T50.a (lane `p14-crust`);
+    T56.a → T56.c → T56.d (lane `p14-moons`; T56.c after T50.a and T50.c),
     with T56.b in the client after T56.a; then T54.a, which wires them onto the record and bumps.
     Three holds at 22, each with a tripwire: `MOONS_VERSION` = 23, `AMMONIA_LINE_VERSION` = 23,
     and one `p14-snapshot` lane hold for T51.a's, T51.b's and T57.a's edits on the record path.
@@ -5270,6 +5292,32 @@ rows' values.
     - every row names its source and basis.
   - _Files:_ `substance/optics.rs`, `tables/substance_albedo.rs`, `tasks/substance_albedos.rs`.
   - _Accept:_ `cargo test -p hyperion-sim substance::optics`; `cargo test -p hyperion-fit substance_albedos`.
+- **P14.T49.j The condensed thermal columns and the regolith's inertia** (22 → 23; lane
+  `p14-thermal`, after T49.b; decision-p14-t49c-split, 2026-10-16).
+  - For every row that can form a surface: the solid's specific heat c(T) and thermal
+    conductivity k(T) over its range, each with its source and basis.
+  - The regolith's thermal inertia, Γ = √(k_eff ρ_bulk c), a pure function of a substance at its
+    regolith form's porosity and grain size (science-r09-drainage.md §3). Its bulk density is
+    the grain density times one less the porosity. k_eff comes from a cited granular model of
+    contact conduction and radiation across the pores. It is the one law R09.T13.c's airless
+    model reuses.
+  - Not here: k_comp, k_target, erodibility and fluid density. T48.f's `Crust` predicate gives
+    the first two, T49.b and T49.h the liquids' densities, and R09.T14.b its bed factor. A
+    per-row column is added by its first reader (closed set, for the composition audit).
+  - Held at 22: nothing on the record calls it until P14.T54.a, which passes it at T51.c's lid
+    to T24.a.
+  - _Tests,_ in J m⁻² K⁻¹ s^−½:
+    - the Moon's `feldspathic` within 45–65 (Hayne et al. 2017's 55 ± 2);
+    - a Ceres-like `phyllosilicate` within 15–60 (Spencer 1990 to Rognini et al. 2020, via Li
+      et al. 2020);
+    - an icy satellite's `H2O` within 5–70 (Howett et al. 2010);
+    - every value names its source and basis.
+  - _Files:_ `substance/{thermal, thermal/rows}.rs` and a golden of its own,
+    `tests/golden/substance/thermal.golden` (`tests/thermal_golden.rs`), so that it shares no
+    file with P14.T49.c or P14.T49.h but `substance/mod.rs`'s module list (main's brief,
+    2026-10-16); a fit task only if the builder fits one.
+  - _Accept:_ `cargo test -p hyperion-sim substance::thermal`;
+    `cargo test -p hyperion-sim --features testing --test thermal_golden`.
 - **P14.T49.d Gas thermochemistry** (23 → 24, updated 2026-10-15).
   - A new `hyperion-fit` task, `thermo_equilibrium`: log K_f(T), the equilibrium constant of
     formation from the elements, for every gas row a speciation rule may produce, over 100–6,000 K
@@ -5668,7 +5716,7 @@ Snapshot path, `planetary/chem/`.
     - the passes converge to 10⁻⁹ in T_eq.
   - _Files:_ `planetary/derive/{atmosphere, photometry}.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive`.
-- **P14.T51.c Crust composition, redox class and melt area** (22 → 23; after T50.a and T49.c).
+- **P14.T51.c Crust composition, redox class and melt area** (22 → 23; after T50.a).
   - `hooks/crust.rs`:
     `CrustComposition { primary: Option<SubstanceId>, secondary: Option<SubstanceId>, tertiary: Option<SubstanceId>, bulk: Option<SubstanceId>, lid: LidCrust, provinces: SubstanceId, redox: RedoxClass, melt_area_fraction: f64 }`
     and `LidCrust { Primary, Secondary, Bulk }`. The inputs are:
@@ -5769,12 +5817,9 @@ Snapshot path, `planetary/chem/`.
     lava world has a dayside pool and a solid nightside (Léger et al. 2011; Kite et al. 2016).
     `MagmaOcean` stays the global state. R09.T13.c applies each cell's own entry's solidus.
   - **The provinces** are the lid's own substance on a body with no constructional volcanism.
-  - **The regolith's thermal inertia** (science-p14-t24a-climate.md §6, item 2): a pure function
-    of the lid, the inertia √(k ρ c) of its regolith layer. It is computed from T49.c's row (the
-    solid's specific heat and conductivity, and its grain density) at the regolith form's
-    porosity and grain size (science-r09-drainage.md §3, by the law T49.c settles with R09.T13.c's
-    airless model). A body's dark, hydrated or icy regolith follows from its lid, with no class of
-    its own. P14.T54.a passes it to T24.a.
+  - **The regolith's thermal inertia** (science-p14-t24a-climate.md §6, item 2) is P14.T49.j's law
+    at the lid this task gives, which P14.T54.a passes to T24.a. A body's dark, hydrated or icy
+    regolith follows from its lid, with no class of its own.
   - _Tests:_
     - the Moon a `feldspathic` primary lid with `basalt_fe` provinces;
     - Mercury reduced and low-FeO: a `basalt_reduced` lid over a graphite primary crust;
@@ -5799,11 +5844,6 @@ Snapshot path, `planetary/chem/`.
       - a 10 km icy body at 1 Myr or later, and a 200 km Kuiper-belt body at 5 Myr, are
         `cometary`;
       - a `Reduced` dry body that never melted is `chondrite_e`;
-    - the lid's regolith inertia, in J m⁻² K⁻¹ s^−½:
-      - a Ceres-like body's within 15–60 (Spencer 1990 to Rognini et al. 2020, via Li et al.
-        2020);
-      - the Moon's `feldspathic` lid's within 45–65 (Hayne et al. 2017's 55 ± 2);
-      - an icy satellite's `H2O` lid's within 5–70 (Howett et al. 2010);
     - `bulk` excludes every crust; `lid` names a present member;
     - the series within 1% of 400 terms;
     - the formation time's draw is deterministic, and no existing value moves.
@@ -14236,3 +14276,272 @@ tables::gauss_legendre`.
     say "`None` for an airless body", while the wire's now say `null` with an empty `gases`: an
     airless body, or a surface holding melt with no volatile air, as on `e101`. The entry limits
     the sim's edit to `surface_pressure` and `gases`; for a docs batch.
+- **Deviations in P14.T49.j, as built (`lane/34-p14-t49j-thermal-columns`, 2026-10-16).** The
+  condensed phases' thermal columns and the airless regolith's thermal-inertia law, a pure module,
+  `substance::thermal` (`substance/thermal.rs`; its rows in `substance/thermal/rows.rs`, its tests
+  in `substance/thermal/tests.rs`), with a golden of its own.
+  - _Held at 22._ Nothing on the record calls the module, so `GENERATOR_VERSION` stays 22 and no
+    existing golden, `registry.golden` or `substances.json` changes. The tripwire,
+    `substance_thermal_nothing_on_the_record_reads_the_inertia_yet`, walks the crate's `src/` in
+    sorted order and fails on `thermal_columns(`, `regolith_thermal_inertia(`, `RegolithForm::`,
+    `substance::thermal` or `thermal::`. Its held list of (file, hold) pairs is empty, and
+    P14.T54.a deletes it. Stricter than the brief, on the determinism and Rust reviews: it reads
+    `substance/` too, leaving out only this module's files and `substance/mod.rs`'s two declaring
+    lines; it leaves out an inline test module from its `#[cfg(test)] mod name {` and every file an
+    out-of-line `#[cfg(test)] mod name;` declares, rather than cutting each file at its first
+    `#[cfg(test)]`, which would skip most of `hooks/structure.rs`; and comment lines. A probe call
+    added to `hooks/structure.rs` past its test-module declaration trips it (checked by hand, not
+    committed). `hyperion-fit` and `hyperion-server` are left to review, as its doc says. The
+    golden, `tests/golden/substance/thermal.golden`, was blessed at 22; until T54.a a change
+    re-blesses it at the version in force (its module doc says so).
+  - _Added public items_ (in `substance::thermal`; `RegolithForm`, `RegolithInertia`,
+    `ThermalColumns` and `regolith_thermal_inertia` are re-exported from `substance` by its one
+    `pub use` line):
+    - `Substance::thermal_columns`, found by key in `thermal/rows.rs`'s table, so `Substance`
+      gains no field; `rows()`, in registry order;
+    - `ThermalColumns` (`heat_capacity_j_per_kg_k`, `conductivity_w_per_m_k`, `heat_capacity`,
+      `conductivity`, `sources`, `is_stand_in`);
+    - `ThermalColumn` (`pieces`, `provenance`, `is_stand_in`, `low`, `high`, `at`), one
+      `ThermalPiece` (`phase`, `low`, `high`, `form`) per solid phase or fitted segment; outside
+      the range the end value is held, and at a piece's upper bound the lower piece's;
+    - `ThermalForm`: `Constant`, `Polynomial` (Σ cᵢ Tⁱ), `HalfPowers` (Σ cᵢ T^(i/2), for Winter
+      and Saari), `LogPolynomial` (exp Σ aᵢ (ln T)ⁱ, for CO₂'s conductivity), `Reciprocal`
+      (a ÷ T + b, for ice Ih's 567 ÷ T), `Points` (linear in T) and `IceIh` (IAPWS R10-06's c_p);
+      `Provenance` (`Own`, `StandIn`);
+    - `RegolithForm` (`reference`, `new`, `family`, `porosity`, `grain_diameter`, `emissivity`,
+      `contact`, `sources`), `ContactConstants`, `SurfaceEnergy` (`j_per_m2_at`) and
+      `BuildRegolithFormError`;
+    - `RegolithInertia` (Γ, `k_eff` and its contact and radiative parts, `k_s`, `ρ_g`, `ρ_bulk`, c
+      and the dense solid's own inertia) and `EvaluateRegolithInertiaError` (`Temperature`,
+      `NotCondensed`, `NoSolid`, `NoThermalColumns`, `NoRegolithForm`, `FamilyMismatch`);
+    - `regolith_thermal_inertia`, and `reference_regolith_thermal_inertia`, the law at the row's
+      family's reference form, for T54.a;
+    - crate-private, the model's and the forms' constants (`CONTACT_STRUCTURE_F1`,
+      `CONTACT_STRUCTURE_F2`, `IRREGULAR_GRAIN_FACTOR`, `PHOTON_PATH_FACTOR`,
+      `LUNAR_DIURNAL_SKIN_DEPTH`, `LUNAR_SOIL_GRAIN_DIAMETER`, `ICY_REGOLITH_POROSITY`,
+      `ICY_REGOLITH_GRAIN_DIAMETER`), which the forms' getters give.
+
+    Renamed from the brief's leans: the law's error is `EvaluateRegolithInertiaError` and the
+    form's `BuildRegolithFormError`, verb-object as `.claude/rules/rust-dev.md` names errors.
+    `RegolithForm::reference` returns the form by value, not `&'static`: the silicate form reads
+    R10's porosity through `form_row`, which is not `const`, and a lazily filled static would be a
+    cache. The law refuses a form of another family (`FamilyMismatch`), whose contact constants are
+    not the row's grains', and a row above its transition (`NoSolid`), though a fixed grain
+    density would give a value there. `RegolithForm::new` keeps its family's reference sources,
+    its porosity and grain size being the caller's.
+
+  - _The model_ is Gundlach and Blum's granular conductivity in vacuum (2013, Icarus 223, 479,
+    arXiv:1212.3108, eq. 5, after their 2012 model, Icarus 219, 618, arXiv:1111.0535; both read):
+    `k_eff` = `k_s` [(9π ÷ 4)(1 − ν²) ÷ E · γ(T) ÷ r]^⅓ · f₁ exp(f₂ φ) · χ + 8σεT³ · e₁ (1 − φ) ÷ φ
+    · r, with φ = 1 − ψ the filling factor and r the grain radius; Γ = √(`k_eff` `ρ_bulk` c),
+    `ρ_bulk` = `ρ_g` (1 − ψ) and c the solid's c(T). Its constants:
+    - f₁ 5.18 × 10⁻² (± 3.45 × 10⁻²) and f₂ 5.26 ± 0.94 (2012, eq. 18), a fit to Chan and Tien's
+      three cubic packings (filling 0.52–0.74), which the 2013 paper applies at 0.1–0.6;
+    - χ 0.41 ± 0.02 (stat.) ± 0.10 (syst.), calibrated on the Apollo 11 and 12 regolith at r 20 µm,
+      φ 0.43 and a solid conductivity of 1.78 W m⁻¹ K⁻¹ (2013, §4 and Table 2);
+    - e₁ 1.34 ± 0.01 (2012, eq. 13).
+
+    It is chosen over Sakatani et al. 2017 (AIP Advances 7, 015310; read in abstract, its PDF not
+    reachable) for three reasons. Its χ is calibrated on returned lunar regolith, not glass beads.
+    Its contact force is the grains' adhesion, so it needs no body's gravity or compressional
+    stress (Sakatani's does), and the law stays a function of the substance, the form and the
+    temperature. And the same equations serve silicate and icy regoliths. There is no pore gas, as
+    ruled; the module doc says that gas raises a regolith's conductivity under an atmosphere
+    (Presley and Christensen 1997; Piqueux and Christensen 2009; neither re-read).
+
+  - _The regolith forms._ Every form's emissivity is `REGOLITH_EMISSIVITY`, 0.95, read by path.
+    - `Silicate`: porosity from `form_row(Regolith, Silicate).shear()`, the narrowest layer from
+      the surface holding the diurnal skin depth, 7 cm (Hayne et al. 2017's 4–7 cm): the 0–15 cm
+      layer, 1 − 1.50 ÷ 3.1 = 0.5161 (a test holds the same layer at 4 cm). Grain diameter 70 µm,
+      "The median particle size is 40 to 130 µm, with an average of 70 µm" (Lunar Sourcebook, ch. 9,
+      p. 478, read). E 7.8 × 10¹⁰ Pa and ν 0.25, a basalt's (Gundlach and Blum 2013, Table 1, after
+      Schultz 1995, not re-read); γ = 6.67 × 10⁻⁵ T J m⁻² (2012, eq. 11, an assumption there).
+    - `WaterIce`: Europa's top-centimetres regolith, as main ruled on this issue (2026-10-16):
+      porosity 0.64 ± 0.08, the global weighted average of ALMA's 1.25 mm band (Thelen et al. 2024,
+      arXiv:2402.01952, Table 3), which Galileo PPR's lower bound, 0.61 ± 0.1 in the upper
+      centimetres, about 0.66 for grains under 1 mm (Lange et al. 2026, arXiv:2604.14374), agrees
+      with; grain diameter 100 µm, Thelen et al.'s nominal (a diameter by assumption). E 9.332 GPa
+      and ν 0.325, polycrystalline ice at −16 °C (Gammon et al. 1983, J. Glaciol. 29, 433, Table
+      VIII); γ 0.19 J m⁻² (Gundlach et al. 2011, Icarus 214, 717; ± 0.04, Gundlach and Blum 2015).
+    - Without a form: `Metal`, `VolatileIce`, `Salt` and `Organic`, none with cited grain-contact
+      constants. For a comet's `Organic`, Kofman et al. 2015's 75–85 per cent porosity (Science 349,
+      aab0639) and Blum et al. 2017's pebbles of 1–6 mm radius (arXiv:1710.07846) were read.
+  - _The rows_ (28; "own" or stand-in "SI"; U.S. Geological Survey and NBS sources are U.S.
+    public domain; CU is 0.4184 W m⁻¹ K⁻¹):
+
+    | Row              | c(T): form, range, source, basis                                                            | k(T): form, range, source, basis                                                                 |
+    | ---------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+    | `H2O`            | IAPWS R10-06 c_p, 10–273.15 K, fact                                                         | 567 ÷ T, 25–273.15 K, Klinger 1980 via Huebner et al. 2006 (not re-read), fact                   |
+    | `CH4`            | phase I polynomial, 20.4–90.6 K, Ziegler, Mullins and Kirk 1962 (NBS contract, A-460), fact | phase I points, 22–80 K, NBS Monograph 131 Fig. 66 (Manzhelii and Krupskii 1968), read off, fact |
+    | `N2`             | α and β polynomials, 10–63.15 K, Ziegler and Mullins 1963 (A-663), fact                     | α and β points, 19–58 K, Konstantinov et al. 2005 Fig. 2, read off, fact                         |
+    | `O2`             | α, β and γ polynomials, 8–54.35 K, Mullins, Ziegler and Kirk 1962 (A-593), fact             | γ points, 44–54 K, Konstantinov et al. Fig. 2, read off, fact                                    |
+    | `CO2`            | three polynomials, 15–195 K, Mullins, Kirk and Ziegler 1963 (A-663), fact                   | ln κ cubic in ln T, 110–216 K, Saiduzzaman et al. 2025 (CC BY), fact                             |
+    | `Ar`             | three polynomials, 11–83.8 K, Ziegler, Mullins and Kirk 1962 (A-460), fact                  | points, 25–75 K, Krupskii and Manzhelii 1969, fact                                               |
+    | `CO`             | α (two) and β polynomials, 14.36–68.1 K, Mullins, Kirk and Ziegler 1963, fact               | α constant 0.315, 45–61.585 K, Umurhan et al. 2017's range's middle, adopted                     |
+    | `MgSiO3`         | enstatite points, 20–350 K, Krupka et al. 1985, fact                                        | 11.8 CU, 0–100 °C, Horai and Simmons 1969, fact                                                  |
+    | `Mg2SiO4`        | forsterite points, 20–350 K, Robie et al. 1982, fact                                        | SI: Balsam Gap dunite, 11.1 CU, 0–100 °C, adopted                                                |
+    | `mars_dust`      | SI: `basalt_fe`'s                                                                           | SI: `basalt`'s                                                                                   |
+    | `anorthosite`    | mode (An95 plagioclase 95, enstatite 5 vol%), 20–350 K, reduced                             | 4.3 CU, 0–100 °C, Horai and Simmons 1969, fact                                                   |
+    | `feldspathic`    | Apollo 16 highland soil 60601 points, 90–360 K, Hemingway et al. 1973 Table 6, fact         | SI: anorthosite's                                                                                |
+    | `basalt`         | SI: mare basalt 15555's                                                                     | 6.1 CU, 0–100 °C, Robertson 1988's fully solid basalt, fact                                      |
+    | `basalt_fe`      | mare basalt 15555 points, 83.56–363.53 K, Hemingway et al. 1973 Table 4, fact               | SI: `basalt`'s                                                                                   |
+    | `komatiite`      | mode (olivine 40, augite 45, glass 15 vol%), 20–350 K, reduced                              | SI: dunite's                                                                                     |
+    | `basalt_reduced` | SI: 15555's                                                                                 | SI: `basalt`'s                                                                                   |
+    | `granite`        | SI: alkali feldspars, 20–350 K, adopted                                                     | SI: felsic rocks' 7.5 CU, 0–100 °C, adopted                                                      |
+    | `ultramafic`     | mode (olivine Mg# 90 60, enstatite 40 wt%), 20–350 K, reduced                               | SI: dunite's                                                                                     |
+    | `ferric`         | SI: `basalt_fe`'s                                                                           | SI: `basalt`'s                                                                                   |
+    | `phyllosilicate` | SI: `chondrite_cm`'s                                                                        | SI: `chondrite_cm`'s                                                                             |
+    | `chondrite_ci`   | Orgueil cubic, 90–290 K, Piqueux et al. 2021, fact                                          | SI: C-type                                                                                       |
+    | `chondrite_cm`   | Cold Bokkeveld quartic, 2–300 K, Opeil et al. 2020, fact                                    | C-type, 1.19 + 2.1 × 10⁻³ T, 100–300 K, Gundlach and Blum 2013, reduced                          |
+    | `chondrite_cv`   | Allende cubic, 90–290 K, Piqueux et al. 2021, fact                                          | C-type, reduced                                                                                  |
+    | `chondrite_h`    | H average cubic, 70–300 K, Macke et al. 2019, fact                                          | S-type 2.18, 100–300 K, Gundlach and Blum 2013, reduced                                          |
+    | `chondrite_l`    | L average cubic, 70–300 K, Macke et al. 2019, fact                                          | S-type, reduced                                                                                  |
+    | `chondrite_ll`   | LL average cubic, 70–300 K, Macke et al. 2019, fact                                         | SI: S-type                                                                                       |
+    | `chondrite_e`    | SAH 97158 cubic, 90–290 K, Piqueux et al. 2021, fact                                        | Abee 5.33 at 200 K, Maxwell-corrected to 5.51, 100–300 K, reduced                                |
+    | `cometary`       | SI: Winter and Saari 1969's silicate dust, 40–400 K, adopted                                | SI: C-type                                                                                       |
+
+    The minerals' calorimetry (USGS): forsterite and fayalite (Robie et al. 1982), enstatite and
+    diopside (Krupka et al. 1985), anorthite and CaAl₂Si₂O₈ glass (Robie, Hemingway and Wilson
+    1978), low albite and microcline (Openshaw et al. 1976), each table's smoothed C_p at 20, 40,
+    60, 70, 80, 100, 150, 200, 250, 273.15, 298.15 and 350 K read off its page and converted with
+    its printed formula weight (fayalite's λ peak near 65 K falls between the points). A mode is
+    Σ wᵢ cᵢ by mass, computed in `const fn`s from the mode and densities each row's grain density
+    states. A dense rock's conductivity was read only near room temperature, so it is held over
+    0–100 °C (Robertson 1988, p. 41: plagioclase's roughly constant, other minerals' falling 10–30
+    per cent). A diagram row's pieces carry its diagram's phase names and begin each new phase at
+    its diagram's start, to the bit (a test).
+
+  - _Not modelled_ (the closed list in `thermal/rows.rs`'s module doc, which a test holds to the
+    table): of the required rows, `graphite` (its c below 298 K not reached), `ca_al_residue` (no
+    hibonite's or corundum's figures), `Na2CO3` (Waterfield et al. 1968 not reached; Bulletin 2131
+    gives no c_p for it) and `carbonaceous` (no organic matter's c below 300 K; coal's at 30–100 °C
+    would overstate it twofold at 100 K); and the 39 other condensed rows without columns, each
+    with its reason, among them, as never, the hazes `chromophore` and `ice_giant_haze` and the six
+    solutions, whose frozen forms' solids are their components'. Also not modelled: a per-row
+    infrared emissivity, and the geomorphic columns (k_comp, k_target, erodibility, fluid density),
+    as ruled.
+  - _The anchors as computed_ (J m⁻² K⁻¹ s^−½), each at its family's reference form:
+    - the Moon's `feldspathic` at 273.15 K: Γ 46.93, with `k_s` 1.799 W m⁻¹ K⁻¹, `k_eff` 2.162
+      × 10⁻³ (contact 1.722 × 10⁻³, radiative 0.439 × 10⁻³), `ρ_bulk` 1,403.2 kg m⁻³ and c 726.0
+      J kg⁻¹ K⁻¹, inside 45–65 (Hayne et al. 2017's 55 ± 2); 273.15 K is Hayne's 273 K as 0 °C,
+      where the rock's held conductivity begins;
+    - a Ceres-like `phyllosilicate` at 235 K (Saint-Pé et al. 1993's, via Gundlach and Blum 2013):
+      Γ 40.30, `k_s` 1.684, `k_eff` 1.813 × 10⁻³, `ρ_bulk` 1,209.7, c 740.7; at 173 K (Li et al.
+      2020's brightness temperature), 31.41; inside 15–60;
+    - an icy satellite's `H2O` at 90 K: Γ 57.13, `k_s` 6.300, `k_eff` 1.222 × 10⁻², `ρ_bulk`
+      336.0, c 794.9; 57.21 at 60 K and 56.23 at 120 K; inside 5–70 (the plan's range from Howett
+      et al. 2010, not re-read), and inside Europa's 56 ± 17 (Lange et al. 2026).
+  - _Own and stand-in figures by class._ The chondrites' conductivities are Gundlach and Blum
+    2013's class figures, the S-type's 2.18 from an H5 and an L6 and the C-type's 1.19 + 2.1 × 10⁻³
+    T from a CM2 and a CK4: each row's own where its class gave a sample (`chondrite_h`,
+    `chondrite_l`, `chondrite_cm`, and `chondrite_cv`, which stands for CV, CO and CK), a stand-in
+    where it gave none (`chondrite_ll`, `chondrite_ci`, `phyllosilicate`, `cometary`). Where no
+    registry row holds a figure, a stand-in takes a class's: a dunite's 11.1 CU, one constant for
+    `Mg2SiO4`, `ultramafic` and `komatiite`; the alkali feldspars' heat capacity and the felsic
+    rocks' 7.5 CU for `granite`; Winter and Saari 1969's silicate dust for `cometary`'s c. The rows
+    that share one take the same named constant.
+  - _The anchors' temperatures and cross-checks._ The Moon at 273.15 K; Ceres at 235 and 173 K;
+    the icy satellite at 50–110 K (Ferrari and Lucas 2016: Howett et al.'s fits "vary between 50
+    and more than 100 K"). The optional cross-checks share the test and its 5–70: Europa at 67 and
+    148 K, by Lange et al. 2026's 56 ± 17 from Galileo PPR in place of the brief's Rathbun et al.
+    2010, not reached (its "about 70" is Spencer et al. 1999's, as Thelen et al. 2024's Table 4
+    gives them), and Pluto at 40 and 63 K (Lellouch et al. 2011's 20–30), though Pluto's ice is
+    mostly nitrogen's. A test holds every anchor temperature inside both of its row's column
+    ranges.
+  - _Held ends, the dense rocks._ A rock's conductivity is held below 0 °C at its 0–100 °C value,
+    so the law at a lunar night or on a cold asteroid (the golden's 40–200 K) takes the room
+    temperature's `k_s`, too low for a crystal and too high for a glass.
+  - _The golden_ pins, beyond the brief's three sections, the forms' sources' bases, `k_eff`'s
+    contact and radiative terms, and a `[built form]` section of three layers built by
+    `RegolithForm::new` at a caller's porosity and grain size, as R09.T13.c will pass them.
+  - _Main's deviations from the ruling's Files_ (main's brief, 2026-10-16), recorded as main's: a
+    golden of its own, `tests/golden/substance/thermal.golden` (`tests/thermal_golden.rs`), not
+    a `[thermal]` section of `registry.golden`; and the rows' data in `substance/thermal/rows.rs`,
+    a child of `thermal.rs`, not `substance/rows/thermal.rs`. Both so that this lane shares no file
+    with P14.T49.c, P14.T49.h or T49.b's last piece but `substance/mod.rs`'s module list: other
+    lanes in flight edit `registry.golden`, `substance_golden.rs` and `substance/rows.rs`. No fit
+    task: every source gives a closed form or a few points.
+  - _For P14.T54.a._
+    - _The temperature_: the lean is the column's equilibrium temperature, which
+      `ground_redistribution` already reads, held to each column's range by the columns
+      themselves; an ice's law gives `NoSolid` above its transition.
+    - _Lids without a law_: `graphite` (no columns; Mercury's lid is `basalt_reduced`'s, and
+      its buried graphite needs none), `ca_al_residue` (no columns; a lava world's lag, near its
+      solidus, where T24.a's rock constant can stand), and every `Organic` lid, `cometary` and
+      `carbonaceous`, whose family has no form (`NoRegolithForm`): the lean is T24.a's
+      provisional ice constant, 20, until main rules an organic form.
+    - _`Na2CO3`_ has no columns, but no lid needs it: T51.c names no salt crust (salts are minor
+      substances there), and `Salt` has no form.
+  - _For main_:
+    - _Mars_ (no test, as ruled): the vacuum law at the silicate form at Mars's mean surface
+      temperature, about 214 K (NASA's Mars fact sheet), gives `basalt_fe` 48.1 and `mars_dust`
+      42.6, against Mars's measured 24–800, its dusty bright regions 24–130 and its global mode
+      180–250 (Jakosky et al. 2000; Putzig et al. 2003, LPSC 34, 1429, Table 1; Mellon et al. 2000;
+      abstracts only, Putzig and Mellon 2007 not reached). The gap is the pore gas the law leaves
+      out: under Mars's 600 Pa of CO₂ it raises a fine regolith's conductivity several-fold. A
+      Mars-like body's inertia needs a gas term, or a ruling that T54.a keep the vacuum law there.
+    - _The 70 µm grain_, `LUNAR_SOIL_GRAIN_DIAMETER`, is also P14.T49.c's (unlanded); main merges
+      the two into one.
+    - _`substance/mod.rs`'s "# Columns" paragraph_ is another lane's to rewrite, so it is
+      untouched. The sentence to add after "P14.T49.c–e the condensed optics, the
+      thermochemistry and the aerosols' extinction": "P14.T49.j gives the rows that can form a
+      surface their solid's specific heat and conductivity, in [`thermal`]'s table by key, with
+      the airless regolith's thermal-inertia law."
+    - _`condensed.rs`'s stale sentence_: "P14.T49.c extends the group with the condensed optics
+      and the thermal and geomorphic columns (specific heat, conductivity, `k_comp`, `k_target`,
+      erodibility)". The thermal columns are P14.T49.j's, in `substance::thermal`, and the
+      geomorphic columns left 23.
+    - _One grain size for every body_: small bodies' regoliths are coarser (Gundlach and Blum
+      2013's millimetres to centimetres below about 100 km), and near-Earth asteroids' inertias run
+      to hundreds (Delbo et al. 2007, Icarus 190, 236, not re-read), so a lid's inertia on a small
+      body is understated.
+    - _R09.T13.c_ reuses this law (an edge T49.j → R09.T13.c, decision-p14-t49c-split); its entry
+      in plan R09 could name `regolith_thermal_inertia` and `RegolithForm::new`.
+    - _The icy anchor's top_: Howett et al.'s per-moon inertias, as Ferrari and Lucas 2016's Table 2
+      quotes them (Enceladus 6–39, Tethys 5–19, Dione 5–29, Rhea 3–20), reach 39, so the 5–70's
+      upper end is not theirs; the icy form's 57 lies above every Saturnian moon's and inside
+      Europa's. The test keeps the plan's 5–70, as main ruled; the credit is for the plan's text.
+    - _For main's docs batch_, plan text this lane must not edit, now out of step with the ruling:
+      T49.c's entry still lists the solid's specific heat and conductivity and the geomorphic
+      columns; T49.i, named in the Order bullet, has no entry; that bullet's "T49.b → T49.c → T49.i
+      (lane `p14-optics`) and T49.j" may read as T49.j after T49.c, against its "after T49.b"; an
+      older T24.a record still says "P14.T49.c's layer inertia"; and T54.a's inertia line credits
+      it to "(T51.c)" alone.
+- **Deferred findings (2026-10-13 rule)**, from P14.T49.j:
+  - _The Saturnian moons_ (main's ruling, 2026-10-16): their regoliths are likely more porous than
+    Europa's (Ferrari and Lucas 2016: above 0.8 for tight contacts), so lower in Γ (about 28 at
+    0.80), consistent with the low end of Howett et al. 2010's range. A porosity by body class or
+    formation zone is for a later task.
+  - _Grain size_ (main's ruling): it moves the icy Γ by about 22 per cent between 100 and 30 µm.
+    One reference grain is used, as decision-p14-t49c-split's one grain class.
+  - _O₂'s α–β transition_: the diagram's 23.14 K is where its sublimation polynomials cross ("the
+    transitions unread"); the calorimetry's is 23.781 K. The heat capacity's β piece begins at the
+    diagram's, 0.64 K below its fit's own start. For the diagram's owner.
+  - _Gundlach and Blum's C-type conductivity_ takes Cold Bokkeveld's porosity as 0.373; Opeil et
+    al. 2012 and 2020 give 15.0 per cent, which would lower the class's figure about a tenth. The
+    S-type's porosities, 0.167 and 0.191, were not found in any read source.
+  - _Hemingway et al. 1973's Table 6_ basalt column stands 12 per cent above its own Table 4
+    measurements at 100 K; the row takes Table 4.
+  - _The feldspathic conductivity_ is the anorthosite rock's; the crust's 20 per cent mafics would
+    raise it about a fifth by Robertson's geometric mean, and Γ by about a tenth.
+  - _Held ends_: CO₂'s c above 195 K, and the volatile ices' k outside their read spans (below 110 K
+    for CO₂, below 19 K for N₂, α's and β's for O₂), are held; a crystal's k rises as it cools.
+  - _Not used_: Soini et al. 2020 (MAPS 55, 402), whose self-archived copy is for non-commercial
+    use; Ho, Powell and Liley 1972 (JPCRD), treated as NIST reference data, a cross-check only.
+  - _Argon's conductivity_: the row takes Krupskii and Manzhelii 1969's smoothed values of their
+    earlier argon data; Christen 1974's measurements lie within 6 per cent at 25–45 K but 20–50
+    per cent above at 65–76 K, and Ho, Powell and Liley 1972 recommend 0.99 W m⁻¹ K⁻¹ at 25 K, 31
+    per cent below.
+  - _Heat capacities held in the cold_ (the physical review): below a column's lowest read point
+    its value is held, which overstates c. The minerals' modes now reach 20 K, but the lunar
+    samples' series begin at 83.56–90 K, Piqueux et al.'s and Macke et al.'s at 90 and 70 K, where
+    c is a fifth to a third of its 273 K value, so Γ below about 90 K is overstated there; and a
+    rock's held conductivity there errs the other way for a crystal.
+  - _Basalt's 6.1 CU_ is computed from its mode without the impedance correction (Robertson 1988,
+    near eqs. 3–4); its measured samples extrapolate to 3.78 CU dry and 4.70 water-saturated at no
+    porosity, which would lower the basalts' Γ by up to about a fifth.
+  - _Abee's porosity_: Opeil et al. 2012's text gives its sample's 2.19 per cent and its Table 2
+    the population's 3.0, which would give 5.58 W m⁻¹ K⁻¹ for `chondrite_e`, not 5.51.
+  - _A re-bless before P14.T54.a_: decision-p14-t49c-split lets this golden re-bless at 22 with no
+    bump, but `golden_diff.py` will report its changed values as unbumped (exit 1), as it does for
+    P14.T49.b's held sections; the re-blessing commit cites the ruling.

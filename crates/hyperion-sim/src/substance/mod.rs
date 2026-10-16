@@ -54,6 +54,7 @@ pub mod element;
 pub mod mix;
 pub mod phase;
 mod rows;
+pub mod thermal;
 pub mod thermo;
 
 pub use condensed::{
@@ -70,6 +71,7 @@ pub use phase::{
     MOLAR_GAS_CONSTANT, Phase, PhaseColumns, ice_ih_density, phase_at, saturation_pressure,
 };
 pub use rows::EQUILIBRIUM_HYDROGEN;
+pub use thermal::{RegolithForm, RegolithInertia, ThermalColumns, regolith_thermal_inertia};
 pub use thermo::{
     Level, LevelSet, MolecularConstants, NuclearSpin, Rotation, RovibrationalTerms, Vibration,
     enthalpy_over_r, entropy_over_r, heat_capacity_over_r_at, mixture_enthalpy_over_r,
