@@ -11,6 +11,12 @@
 //! star's lifetime ([`time_since_death`]), so nothing is added to the distribution. P08.T12.c
 //! draws the marks on the `displaced.*` tags; this module holds the tables and the maps from
 //! uniforms to marks.
+//!
+//! The lifetime bracket depends on no galaxy and draws nothing: it is plan 06's lifetimes at the
+//! median draws, computed by [`LifetimeBracket::new`] and baked by `hyperion-fit` into
+//! [`tables::lifetime_bracket`](crate::tables::lifetime_bracket), which
+//! [`LifetimeBracket::shared`] reads (P08.T9.d's follow-up, main's ruling on P08.T13's cost,
+//! 2026-10-15).
 
 use super::{AgeBin, DisplacedKind, SPEED_BINS, SpeedBin};
 use crate::galaxy::ages::AgeDistribution;
@@ -471,6 +477,14 @@ pub(crate) fn age_between(ages: &AgeDistribution, a: Years, b: Years, u: f64) ->
 /// greatest, since lifetime falls with mass, and the tenth's widening covers the draws and the
 /// metallicities between samples (P08.T9.d's test holds it over 10⁵ random stars). Masses above
 /// [`MAX_INITIAL_MASS`] take the tracks' heaviest, as `StarModel` does.
+///
+/// The numbers are plan 06's lifetimes, which [`new`](Self::new) computes and which
+/// `hyperion-fit`'s `lifetime_bracket` task bakes from it into
+/// [`tables::lifetime_bracket`](crate::tables::lifetime_bracket), the bracket
+/// [`shared`](Self::shared) gives: a locked table since generator version 22, whose fingerprint
+/// probes the lifetimes and constants it is made of. `new` stays the reference that computes, and
+/// the test `the_shared_bracket_is_new_bit_for_bit` holds the table to it, natively and under
+/// wasip1, so that a change to plan 06's tracks cannot leave the table behind.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LifetimeBracket {
     masses: [[f64; MARK_MASS_NODES]; 2],
@@ -485,7 +499,10 @@ impl Default for LifetimeBracket {
 }
 
 impl LifetimeBracket {
-    /// The bracket, from 2 × 33 × 13 lifetimes.
+    /// The bracket, computed from 2 × 33 × 13 lifetimes.
+    ///
+    /// It is the reference that [`tables::lifetime_bracket`](crate::tables::lifetime_bracket) is
+    /// baked from. Readers take [`shared`](Self::shared), which computes none of them.
     #[must_use]
     pub fn new() -> Self {
         let masses = [band_masses(MassBand::D), band_masses(MassBand::E)];
@@ -516,15 +533,33 @@ impl LifetimeBracket {
         Self { masses, bounds }
     }
 
-    /// The process's one bracket, computed lazily on first read from constants alone: the same
-    /// bits as [`new`](Self::new) whoever reads it first, since it depends on no galaxy, draws
-    /// nothing and never reads itself (the sim-determinism skill's lazy-value exception; the test
-    /// `the_shared_bracket_is_new_bit_for_bit` pins it). It saves the 858 lifetimes, about 0.7 s,
-    /// each build would otherwise repeat (ruling 128.5).
+    /// The committed bracket, read from [`tables::lifetime_bracket`](crate::tables::lifetime_bracket).
+    ///
+    /// The table is [`new`](Self::new)'s masses and bounds, bit for bit, baked by `hyperion-fit`'s
+    /// `lifetime_bracket` task at generator version 22 (P08.T9.d's follow-up, main's ruling on
+    /// P08.T13's cost, 2026-10-15). This is a `static`, so its first read costs nanoseconds, where
+    /// computing it costs `new`'s 858 lifetimes, 0.43–0.70 s in a release build (plan 08's record
+    /// "The lifetime bracket as a fitted table"). The test `the_shared_bracket_is_new_bit_for_bit`
+    /// holds it to a fresh `new`.
     #[must_use]
     pub fn shared() -> &'static Self {
-        static SHARED: std::sync::OnceLock<LifetimeBracket> = std::sync::OnceLock::new();
-        SHARED.get_or_init(Self::new)
+        use crate::tables::lifetime_bracket as table;
+        static SHARED: LifetimeBracket = LifetimeBracket {
+            masses: [table::BAND_D_MASSES_MSUN, table::BAND_E_MASSES_MSUN],
+            bounds: [table::BAND_D_LIFETIMES_YEARS, table::BAND_E_LIFETIMES_YEARS],
+        };
+        &SHARED
+    }
+
+    /// The unwidened least and greatest [`lifetime`], years, per band (D, E) and mass node.
+    ///
+    /// They are the extremes over the bracket's metallicities, which [`bracket`](Self::bracket)
+    /// reads before its tenth of widening (plan 08, P08.T9.d); the nodes are each band's
+    /// [`MassNodes`] masses. `hyperion-fit`'s `lifetime_bracket` task reads them from
+    /// [`new`](Self::new) to write [`tables::lifetime_bracket`](crate::tables::lifetime_bracket).
+    #[must_use]
+    pub fn bounds_years(&self) -> &[[(f64, f64); MARK_MASS_NODES]; 2] {
+        &self.bounds
     }
 
     /// The bracket on the lifetime of a star of initial mass `m`, or `None` outside bands D and E
@@ -550,6 +585,12 @@ impl LifetimeBracket {
 mod tests {
     use super::*;
 
+    /// The baked table, `tables::lifetime_bracket`, is a fresh `new()` bit for bit: `Debug`
+    /// writes each `f64` as its shortest round-trip decimal, so equal text is equal bits. It is
+    /// the guard that a change to plan 06's tracks cannot leave the table behind, and under wasip1
+    /// a cross-target check of the 858 lifetimes. Keep it in the fast suite and out of every
+    /// filter: the table's fingerprint, at 10⁻⁹ and at the metallicities' ends, cannot see a drift
+    /// of a few ulps.
     #[test]
     fn the_shared_bracket_is_new_bit_for_bit() {
         assert_eq!(

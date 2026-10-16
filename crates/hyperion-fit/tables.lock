@@ -157,6 +157,18 @@ provisional = true
 acceptance = "100000 fresh scores through the table give ln(v ÷ km/s) of mean 5.6000 and standard deviation 0.6774, rank clamped and untruncated; knots strictly increasing; largest shift of a knot's rank from the committed table 0.06227"
 
 [[table]]
+name = "lifetime_bracket"
+path = "lifetime_bracket.rs"
+task = "lifetime_bracket"
+revision = 0
+inputs_sha256 = "c07f89ef768f526ef9c0f425111a24cd6194a00d2ed482e3e8bbd66204e6d135"
+body_sha256 = "837c227f7d5a022acfcf93b6f1b5845f4bb30ad7a99506da7dd67003036f0607"
+fingerprint = [495286679.0645464, 41120225.717763394, 10963201.340789307, 2751693.9715536297, 848636206.7161552, 41598879.237608194, 9326246.457168067, 3277732.618513564, 0.0001, 0.03, 13.0, 33.0, 2.5, 8.0, 150.0, 150.0, 0.02]
+since_generator_version = 22
+provisional = false
+acceptance = "the table is `LifetimeBracket::new()` bit for bit (read from it, and held to a fresh build by the sim's `the_shared_bracket_is_new_bit_for_bit`); band D's lifetimes 4.0917e7–8.4864e8 years, its widest node's greatest 1.713 times its least; band E's 2.7517e6–4.3548e7 years and 1.210; least and greatest fall with mass at every node (passes)"
+
+[[table]]
 name = "limb_darkening"
 path = "limb_darkening.rs"
 task = "limb_darkening"

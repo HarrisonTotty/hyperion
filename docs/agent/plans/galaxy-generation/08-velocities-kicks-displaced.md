@@ -155,7 +155,9 @@ pub mod forms { pub struct FlaredLayer; pub struct CoredPowerLaw; pub struct Bal
                 pub struct OwnFormMixture; pub struct FlareFactor; /* impl UnimodalFactor */ }
 pub mod marks { pub struct ConditionalMarks; pub struct DisplacedMarks; /* initial mass, time since
                 death or ejection, birth component, origin speed bin, kick constraint */
-                pub struct LifetimeBracket; /* per mass node, bounds on plan 06's lifetime */ }
+                pub struct LifetimeBracket; /* per mass node, bounds on plan 06's lifetime;
+                shared() reads tables::lifetime_bracket (P08.T9.d's follow-up), and
+                bounds_years(&self) -> &[[(f64, f64); MARK_MASS_NODES]; 2], unwidened */ }
 pub mod runaway { pub struct RunawayModel; /* shares, speeds and ejection ages; constants */ }
 pub mod binarity { pub fn stripped_share(m: SolarMasses, comp: &Composition) -> f64; } // the seam:
                   // plan 11's built stellar::multiplicity::stripped_share behind it (T8.a)
@@ -991,6 +993,79 @@ MILKY_WAY_IA_RATE_PER_YEAR, survivor_odds, survivors_inside}` and
     this lane's timings (load 9–20), against the "about 2 s" its documentation gives for the grid
     (plan 02, R15), and over ten times the class table. It is not the class table's to fix, but
     P08.T16's `kinematic_tables_build` should say whether it counts it.
+- **The lifetime bracket as a fitted table (P08.T9.d's follow-up, main's ruling on P08.T13's cost,
+  2026-10-15; at `GENERATOR_VERSION` 22; no output moves).** Issue #28.
+  - _The table._ The bracket is `tables::lifetime_bracket`, since generator version 22, written by
+    `hyperion-fit`'s fast task `lifetime_bracket` (revision 0; `manifests/lifetime_bracket.toml`,
+    no parameters and no dataset). Its four items bake the masses as well as the bounds:
+    `BAND_D_MASSES_MSUN` and `BAND_E_MASSES_MSUN` (`[f64; 33]`, M☉, each band's `MassNodes`
+    masses, which are `band_masses`'s) and `BAND_D_LIFETIMES_YEARS` and `BAND_E_LIFETIMES_YEARS`
+    (`[(f64, f64); 33]`, the least and greatest lifetime, years, unwidened). The task calls
+    `LifetimeBracket::new()` and reads its bounds through the accessor below; nothing of
+    `lifetime` or of the loop is copied. The tenth of widening stays at the read, in `bracket()`,
+    so it is no input of the table. The source names Hurley, Pols and Tout (2000) with ruling 92's
+    giant radii and, above 100 M☉, P06.T14's factors fitted to Yusof et al. (2013). The acceptance
+    line records band D's lifetimes at 4.09 × 10⁷–8.49 × 10⁸ years and band E's at 2.75 × 10⁶–4.35
+    × 10⁷, a node's greatest at most 1.713 times its least (D) and 1.210 (E), and both columns
+    falling with mass at every node, which `bracket()`'s reading between nodes assumes; a run in
+    which a column rose with mass would write the table as provisional.
+  - _Its probes_ (17): `lifetime` at 2.5, 8, 20 and 150 M☉ at Z 10⁻⁴ and 0.03, median draws, each
+    composed as `new()` composes its metallicities (the only metallicities the task composes);
+    `BRACKET_Z_RANGE`'s two ends, `BRACKET_Z_SAMPLES`, `MARK_MASS_NODES`, `MASS_BAND_EDGES[3]`,
+    `[4]` and `[5]`, `MAX_INITIAL_MASS` and `Z_SOLAR`. They match to 10⁻⁹ and at the
+    metallicities' ends, so `hyperion-fit check` alone cannot see a drift of a few ulps in
+    `lifetime`; the bit-level guards are the two tests below, which stay in the fast suites.
+  - _The reader._ `LifetimeBracket::shared()` returns a `static` built from the four items; it is
+    no longer a `OnceLock`, so no lazy value is left and the sim-determinism skill's lazy-value
+    exception no longer applies to it. `new()` stays public as the reference that computes, and
+    the class-table bench keeps `LifetimeBracket::new`. `new()`'s loop, `bracket()`,
+    `BRACKET_WIDENING`, `BRACKET_Z_RANGE`, `BRACKET_Z_SAMPLES` and `band_masses` are unchanged.
+  - _The accessor_, the one public item added:
+    `LifetimeBracket::bounds_years(&self) -> &[[(f64, f64); MARK_MASS_NODES]; 2]`, per band (D,
+    E) and node, unwidened. The fit task reads the node masses through
+    `MassNodes::of(band, &Kroupa).masses()`, whose masses are the band's alone (the mass function
+    sets only their weights), so no second accessor is needed.
+  - _Deviations._
+    - The brief's lean named the accessor `bounds()`. It and the table's items carry their units
+      in their names, as `.claude/rules/rust-dev.md` asks of physical quantities and as
+      `mass_node_msun` and `age_bin_years` do (the review's finding).
+    - `hyperion-fit run` writes the table, its `tables.lock` entry and its row of
+      `tables::MANIFEST` (between the markers, `emit.rs`), not the `pub mod lifetime_bracket;` line
+      in `tables/mod.rs`. That line is written by hand, as the fit crate's "Adding a task" item 4
+      lists it beside the run.
+    - The review's renames changed the table's body after its first run, and `run` refuses a
+      changed body at an unchanged `since-generator-version`. Since the table was not yet
+      committed, its file was removed and the task run again into a fresh table, which wrote the
+      lock entry and the `MANIFEST` row anew; the values and the fingerprint did not move.
+  - _Tests._ `the_shared_bracket_is_new_bit_for_bit` stays in the fast suite and now compares the
+    baked table with a fresh `new()`:
+    `cargo test -p hyperion-sim --lib -- galaxy::displaced::marks` passes 4 tests in 0.65 s.
+    Under wasip1 it is a cross-target check of the 858 lifetimes: the natively baked table against
+    `new()` computed on wasmtime, which passes alone in 0.87 s (`just _wasip1-nextest` with its
+    filter, at load 3.0).
+    `hyperion-fit`'s new `tests/lifetime_bracket.rs` has `lifetime_bracket_table_is_reproduced`:
+    `cargo test -p hyperion-fit --test lifetime_bracket` passes it in 0.62 s. The task has three
+    unit tests (its items and their lengths, the node masses spanning bands D and E, the
+    fall-with-mass check), and the registry's tests pass with it.
+    `cargo run -q -p hyperion-fit -- check --rerun-fast`: the table fresh, 30 fresh, 8 warnings
+    (six provisional tables, two datasets not fetched on this machine), 0 failures, in 1 min 50 s
+    at load 3.2. The slow
+    `the_lifetime_bracket_holds_for_many_stars` (10⁵ stars) passes unchanged in 59.0 s, alone and
+    capped, at load 2.0. Its fast form and every golden, the class table's (the bracket at 3, 7.5,
+    9, 20 and 120 M☉) included, are unchanged, and `golden_diff.py --base HEAD` has nothing to
+    reconcile.
+  - _Times_ (i7-8665U, 4 cores and 8 threads; no other lane running; each alone, capped as the
+    brief gives; nextest's own time in the test profile). Before is the branch point `7ea01ece`,
+    with its sim test binaries built before the change; after is this lane.
+    - `the_draws_are_made_once_and_only_where_needed`: **0.569 s → 0.006 s** (load 3.0 and 0.1).
+    - `death_in_interval_keeps_every_death_inside_the_interval`: **0.717 s → 0.175 s** (load 2.5
+      and 0.1).
+    - Each loses the bracket's build, some 0.55 s in the test profile here, not the 1 s the brief
+      expected. The before loads were the decay of this lane's own build; the tests take one
+      thread of eight, and the 0.55 s they lose is the build itself.
+    - `LifetimeBracket::shared()`'s first read in a release build, timed once in a process of its
+      own by a throwaway ignored test (`Instant` around the first call; not committed): **433 ms →
+      56 ns** (load 2.3 and 0.6). `bracket(20 M☉)` gave the same bits in both.
 
 ### P08.T10 Forms and normalisation
 
@@ -1801,6 +1876,10 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
     (It binds P09.T33.a, P09.T33.b, P09.T35, P09.T36.a, P09.T36.b, P09.T38 and P09.T43; main
     carries it into plan 09.)
 
+    Item 2's `LifetimeBracket` is `tables::lifetime_bracket`, a locked table since generator
+    version 22 (P08.T9.d's follow-up, "The lifetime bracket as a fitted table"), which main carries
+    into plan 09.
+
   - **P08.T13.b, the cost follow-up** (2026-10-15, issue #25, at `GENERATOR_VERSION` 22; main's
     ruling on P08.T13's cost, 2026-10-15; no output moves).
     - **The gate.** `site.rs`'s crate-private `RECENT_DEATH_CLAIM: Option<RecentDeathClaim>`, which
@@ -1895,6 +1974,8 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
       needs the baked bracket, the fast suite measured before and after setting the claim, and
       benches at the Sun-like point, on a young arm ridge and at the centre. P09.T43's
       `lbv_claims` sits beside the gated call.
+    - **Baked** (issue #28): the bracket is now `tables::lifetime_bracket`, and its first read
+      costs nanoseconds; see "The lifetime bracket as a fitted table" under P08.T9.
 
 - **Deferred findings (2026-10-13 rule) (P08.T13).**
   - Design note 28's 5 µs `lifetime` does not hold: plan 06 measures 0.49–0.95 ms for a layer-E
@@ -1907,7 +1988,8 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
     second order in m and covered by `STATED_FACTOR`. For plan 06.
   - `LifetimeBracket::shared()`'s first read, 0.70 s in a release build, now falls on the first
     layer-E cell of every process, the server's first query included. For the server (warm it at
-    start) or for a baked table. (Amended by P08.T13.b.)
+    start) or for a baked table. (Amended by P08.T13.b.) (Baked: `tables::lifetime_bracket`,
+    P08.T9.d's follow-up.)
   - The exact tier runs for every layer-E record whose death falls in the interval or whose
     brackets leave it open. Counted over the Milky Way fixture's layer-E cells (seed
     `0x0311_0000_0000_0000`): 5 of 65,491 records in 2,048 cells around the Sun (2 inside), 3,206
@@ -1939,3 +2021,16 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
     as shared by its parent, since no earlier subtask uses those labels, so
     `plan_task.py P08.T13 --acceptance` lists T13.b's criteria as T13's too. The plan keeps the
     form the brief asks for. For the `implement-task` skill's owner.
+
+- **Deferred findings (2026-10-13 rule) (P08.T9.d's table).**
+  - `site.rs`'s module docs (the paragraph from "Nothing here draws or caches anything") still say
+    the predicate reads one lazy value, `LifetimeBracket::shared`, under the sim-determinism
+    skill's exception for lazy constants. It is now a `static` of `tables::lifetime_bracket`, and
+    the predicate reads no lazy value. The brief kept `site.rs` unchanged: a doc-only edit for
+    P09.T35, which edits `site.rs`, or for main's next docs batch.
+  - `benches/class_table.rs`'s module docs say `LifetimeBracket::shared` "keeps one a process"; it
+    is now the baked table. Doc only, outside this brief's files; the bench keeps
+    `LifetimeBracket::new`.
+  - Rendering plan 06 (the sky's `PhaseEnvelope::shared`) cites `LifetimeBracket::shared` as an
+    example of the lazy-value exception, which it no longer is. For main; that plan is not edited
+    here.
