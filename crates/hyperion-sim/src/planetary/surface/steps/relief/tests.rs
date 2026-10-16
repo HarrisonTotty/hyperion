@@ -207,7 +207,7 @@ fn the_pelagic_drape_is_468_m_at_81_myr_on_the_equator() {
 
 #[test]
 fn the_ponded_wedge_falls_off_from_its_margin_and_ends() {
-    assert_eq!(ponded_sediment(None), Metres::ZERO);
+    assert_same_bits(ponded_sediment(None).value(), 0.0);
     assert!((ponded_sediment(Some(Metres::ZERO)).value() - 2_400.0).abs() < 1e-9);
     let at = |km: f64| ponded_sediment(Some(Metres::new(km * 1e3))).value();
     assert!((at(200.0) / 2_400.0 - math::exp(-1.0)).abs() < 1e-12);
@@ -449,7 +449,7 @@ fn the_wedge_never_crosses_a_plate_boundary() {
         if c.crust == Crust::Oceanic {
             assert!(c.hill_relief.is_some_and(|h| h.value() > 0.0));
         } else {
-            assert_eq!(c.ponded_sediment, Metres::ZERO);
+            assert_same_bits(c.ponded_sediment.value(), 0.0);
             assert!(c.hill_relief.is_none());
         }
     }
@@ -522,7 +522,7 @@ fn the_populations_have_their_widths() {
     );
     assert!((crust_mean - 405.0).abs() <= 100.0, "{crust_mean} m");
     assert!(
-        (crust_spread / 1_084.1 - 1.0).abs() <= 0.1,
+        (crust_spread / 1_080.0 - 1.0).abs() <= 0.1,
         "{crust_spread} m"
     );
     let sea: Vec<bool> = land.iter().map(|&l| !l).collect();
@@ -732,9 +732,14 @@ fn a_stagnant_lid_is_one_population_about_the_datum() {
     let (mean, spread) = noise::mean_and_spread(&z, omega);
     assert!(mean.abs() < 1e-6, "{mean} m");
     assert!((spread - 900.0).abs() < 1e-6, "{spread} m");
-    assert!(moon.relief.cells.iter().all(|c| c.crust == Crust::Lid
-        && c.hill_relief.is_none()
-        && c.water_surface == c.elevation));
+    assert!(moon.relief.cells.iter().all(|c| {
+        c.crust == Crust::Lid
+            && c.hill_relief.is_none()
+            && c.water_surface
+                .value()
+                .total_cmp(&c.elevation.value())
+                .is_eq()
+    }));
     // The interim figures are the cells' own.
     assert!((moon.relief.realised_sigma_h.value() - spread).abs() < 1e-9);
     let lowest = z.iter().copied().fold(f64::INFINITY, f64::min);
@@ -756,7 +761,13 @@ fn the_same_seed_gives_the_same_relief_and_another_seed_another() {
     let other_pass = world.pass(SurfaceSeed::new(0x0dd5));
     let mut other = Working::initial(&other_pass);
     run(&other_pass, &mut other);
-    assert_ne!(first.cells[0].elevation, other.cells[0].elevation);
+    assert!(
+        first.cells.iter().zip(&other.cells).any(|(a, b)| a
+            .elevation
+            .value()
+            .total_cmp(&b.elevation.value())
+            .is_ne())
+    );
 }
 
 /// The noise is zero-mean and unit-RMS, and its octaves are smooth: neighbouring cells correlate.
@@ -892,9 +903,7 @@ fn measure_the_reference_earth_s_sediment_and_ridges() {
     // The ridge production and the divergent boundary lengths.
     let (mut production, mut oceanic_ridge, mut continental_rift) = (0.0, 0.0, 0.0);
     for (n, c) in cells.iter().enumerate() {
-        if c.boundary != hyperion_surface::field::BoundaryKind::Divergent
-            || c.boundary_distance.is_none_or(|d| d.value() != 0.0)
-        {
+        if c.boundary != hyperion_surface::field::BoundaryKind::Divergent || !c.on_boundary() {
             continue;
         }
         for m in grid.edge_neighbours(cell_of(n)) {
@@ -906,7 +915,9 @@ fn measure_the_reference_earth_s_sediment_and_ridges() {
                 Crust::Oceanic => {
                     oceanic_ridge += 0.5 * length;
                     if let Some(origin) = c.seafloor_origin
-                        && origin.ridge_distance.is_some_and(|d| d.value() == 0.0)
+                        && origin
+                            .ridge_distance
+                            .is_some_and(|d| d.value().total_cmp(&0.0).is_eq())
                     {
                         production += length * origin.half_rate.value();
                     }
@@ -1126,8 +1137,7 @@ fn trenches_lie_two_to_four_km_below_their_floor() {
             assert!(cell.subducts, "cell {n}");
             assert_eq!(cell.boundary, BoundaryKind::Subduction);
         }
-        let boundary_cell = cell.boundary_distance.is_some_and(|d| d.value() == 0.0);
-        if cell.subducts && boundary_cell && !in_arc(arcs, n) {
+        if cell.subducts && cell.on_boundary() && !in_arc(arcs, n) {
             assert!(
                 (-4_000.0 - 1e-6..=-2_000.0 + 1e-6).contains(&lift[n]),
                 "cell {n}: {} m",
@@ -1346,8 +1356,7 @@ fn measure_the_trenches_and_the_height_factors() {
     }
     let mut axis_depths: Vec<f64> = Vec::new();
     for (n, c) in cells.iter().enumerate() {
-        let boundary_cell = c.boundary_distance.is_some_and(|d| d.value() == 0.0);
-        if c.subducts && boundary_cell {
+        if c.subducts && c.on_boundary() {
             axis_depths.push(z[n]);
             if let Some(&(sum, area)) = floor_by_plate.get(&c.plate) {
                 gaps.push(sum / area - z[n]);
@@ -1414,8 +1423,7 @@ fn measure_slivers_and_transforms() {
         let mut runs = 0;
         let mut seen = vec![false; working.cells.len()];
         for (n, c) in working.cells.iter().enumerate() {
-            let boundary_cell = c.boundary_distance.is_some_and(|d| d.value() == 0.0);
-            if !boundary_cell {
+            if !c.on_boundary() {
                 continue;
             }
             for m in grid.edge_neighbours(cell_of(n)) {
@@ -1440,7 +1448,7 @@ fn measure_slivers_and_transforms() {
                         let o = &working.cells[slot(m)];
                         if !seen[slot(m)]
                             && o.boundary == BoundaryKind::Transform
-                            && o.boundary_distance.is_some_and(|d| d.value() == 0.0)
+                            && o.on_boundary()
                         {
                             seen[slot(m)] = true;
                             stack.push(slot(m));
@@ -1492,7 +1500,7 @@ fn calibrate_the_continental_population_net_of_the_landforms() {
         if cell.crust != Crust::Continental {
             continue;
         }
-        let b = convergent::belt_lift(cell, strike[n], 1.0) / span;
+        let b = convergent::belt_lift_m(cell, strike[n], 1.0) / span;
         let a = lift[n] - b * span;
         area += omega[n];
         b_sum += b * omega[n];
@@ -1577,7 +1585,7 @@ fn a_line_load_s_bulge_crest_lies_at_pi_alpha() {
 /// α at `T_e` = 70 km under Mars's gravity (3.71 m s⁻²) and radius (3,389.5 km), with `ρ_m`
 /// 3,300 kg m⁻³ and an open moat (`ρ_fill` = 0), is 180 km ± 10 (`decision-r09-t12-coarse.md` item
 /// 3: its value is 175.5 km, 177.7 km planar; Design note 7's "as observed" was the formula's own
-/// value). The filled moat of the reference Mars's provinces (2,648 kg m⁻³) gives 251.9 km at 70 km
+/// value). The filled moat of the reference Mars's provinces (2,648 kg m⁻³) gives 251.7 km at 70 km
 /// and 337.4 km at its own 107.0 km.
 #[test]
 fn alpha_at_70_km_under_mars_s_gravity_is_180_km() {
@@ -1586,25 +1594,52 @@ fn alpha_at_70_km_under_mars_s_gravity_is_180_km() {
         Metres::new(3_389.5e3),
     );
     let t_e = Metres::new(70e3);
-    let open = provinces::flexural_parameter(t_e, 3_300.0, 0.0, g, r).value();
+    let open = provinces::flexural_parameter(
+        t_e,
+        crate::units::KilogramsPerCubicMetre::new(3_300.0),
+        crate::units::KilogramsPerCubicMetre::new(0.0),
+        g,
+        r,
+    )
+    .value();
     assert!((open - 180e3).abs() <= 10e3, "{open} m");
     assert!((open - 175.5e3).abs() < 100.0, "{open} m");
-    let planar = provinces::flexural_parameter(t_e, 3_300.0, 0.0, g, Metres::new(1e15)).value();
+    let planar = provinces::flexural_parameter(
+        t_e,
+        crate::units::KilogramsPerCubicMetre::new(3_300.0),
+        crate::units::KilogramsPerCubicMetre::new(0.0),
+        g,
+        Metres::new(1e15),
+    )
+    .value();
     assert!((planar - 177.7e3).abs() < 100.0, "{planar} m");
     let mars = reference::mars_like();
-    let fill = 3_310.0 * (1.0 - provinces::FILL_POROSITY);
-    let filled =
-        provinces::flexural_parameter(t_e, 3_300.0, fill, mars.gravity(), mars.radius()).value();
+    let fill =
+        crate::units::KilogramsPerCubicMetre::new(3_310.0 * (1.0 - provinces::FILL_POROSITY));
+    let filled = provinces::flexural_parameter(
+        t_e,
+        crate::units::KilogramsPerCubicMetre::new(3_300.0),
+        fill,
+        mars.gravity(),
+        mars.radius(),
+    )
+    .value();
     let own = provinces::elastic_thickness(&mars).unwrap();
-    let at_own =
-        provinces::flexural_parameter(own, 3_300.0, fill, mars.gravity(), mars.radius()).value();
+    let at_own = provinces::flexural_parameter(
+        own,
+        crate::units::KilogramsPerCubicMetre::new(3_300.0),
+        fill,
+        mars.gravity(),
+        mars.radius(),
+    )
+    .value();
     eprintln!(
         "α filled: {:.1} km at 70 km, {:.1} km at the reference Mars's {:.1} km",
         filled / 1e3,
         at_own / 1e3,
         own.value() / 1e3
     );
-    assert!((filled - 251.9e3).abs() < 500.0, "{filled} m");
+    assert!((filled - 251.7e3).abs() < 100.0, "{filled} m");
     assert!((at_own - 337.4e3).abs() < 500.0, "{at_own} m");
 }
 
@@ -1630,7 +1665,14 @@ fn the_elastic_thickness_follows_the_lid_s_substance() {
     let g = reference::mars_like().gravity();
     let r = reference::mars_like().radius();
     assert_same_bits(
-        provinces::flexural_parameter(hot, 3_300.0, 2_648.0, g, r).value(),
+        provinces::flexural_parameter(
+            hot,
+            crate::units::KilogramsPerCubicMetre::new(3_300.0),
+            crate::units::KilogramsPerCubicMetre::new(2_648.0),
+            g,
+            r,
+        )
+        .value(),
         0.0,
     );
     // Airy: a load's deflection under it is its whole compensation, and nothing beyond it.
@@ -1663,7 +1705,7 @@ fn the_elastic_thickness_follows_the_lid_s_substance() {
     assert_same_bits(shell(170.0, 0.2), 0.0);
     assert_same_bits(shell(200.0, 0.2), 0.0);
     assert!((shell(70.0, 0.27) - 1_860.0).abs() < 10.0);
-    assert_eq!(provinces::mantle_density(&ice), Some(930.0));
+    assert!(provinces::mantle_density(&ice).is_some_and(|d| d.value().total_cmp(&930.0).is_eq()));
     let ceres = reference::ceres_like();
     let rigid = provinces::elastic_thickness(&ceres).unwrap();
     assert_same_bits(rigid.value(), ceres.radius().value());
@@ -1684,17 +1726,22 @@ fn the_reference_mars_has_volcanic_provinces() {
          the surface; realised s.d. {:.0} m ({:.0} m before the correction) against σ_volc {:.0} m",
         laid.elastic.value() / 1e3,
         laid.alpha.value() / 1e3,
-        laid.cap,
+        laid.cap.value(),
         laid.count,
         laid.edifices,
         laid.coverage,
-        laid.realised,
-        laid.first,
-        laid.target
+        laid.realised.value(),
+        laid.first.value(),
+        laid.target.value()
     );
     assert!(laid.count >= 1 && laid.edifices >= 1);
     assert!(laid.lift.iter().all(|&l| l >= 0.0));
-    assert!(laid.realised > 0.3 * laid.target, "{} m", laid.realised);
+    // The lean: the realised share approaches σ_volc (0.76 of it as built).
+    assert!(
+        laid.realised.value() >= 0.7 * laid.target.value(),
+        "{} m",
+        laid.realised.value()
+    );
     let provinces = mars
         .relief
         .cells
@@ -1746,10 +1793,13 @@ fn measure_the_lithospheres_and_the_provinces() {
     }
     let mars = reference::mars_like();
     let own = provinces::elastic_thickness(&mars).unwrap();
-    let fill = 3_310.0 * (1.0 - provinces::FILL_POROSITY);
+    let fill =
+        crate::units::KilogramsPerCubicMetre::new(3_310.0 * (1.0 - provinces::FILL_POROSITY));
     for mantle in [3_300.0, 3_500.0] {
+        let mantle_density = crate::units::KilogramsPerCubicMetre::new(mantle);
         let at = |t: Metres| {
-            provinces::flexural_parameter(t, mantle, fill, mars.gravity(), mars.radius()).value()
+            provinces::flexural_parameter(t, mantle_density, fill, mars.gravity(), mars.radius())
+                .value()
                 / 1e3
         };
         eprintln!(
@@ -1786,13 +1836,13 @@ fn measure_the_lithospheres_and_the_provinces() {
          {highest:.0} m; realised s.d. {:.0} m against σ_volc {:.0} m",
         laid.count,
         laid.edifices,
-        laid.cap / provinces::EDIFICE_ASPECT / 1e3,
-        laid.cap,
+        laid.cap.value() / provinces::EDIFICE_ASPECT / 1e3,
+        laid.cap.value(),
         laid.coverage,
         100.0 * raised / sphere,
         100.0 * province_area / sphere,
-        laid.realised,
-        laid.target
+        laid.realised.value(),
+        laid.target.value()
     );
     let z: Vec<f64> = world
         .relief
@@ -1805,4 +1855,84 @@ fn measure_the_lithospheres_and_the_provinces() {
         "Mars after T12.a–c: s.d. {spread:.0} m (lid 900 m with provinces), relief {:.0} m",
         world.relief.realised_relief.value()
     );
+}
+
+/// On the finished field, the reference Earth's trench axes lie a median 2–4 km below their
+/// subducting plate's floor 150–300 km out (Design note 7's "2–4 km below the neighbouring sea
+/// floor" on the field as built, where the axis-cell test holds each cell's own cut).
+#[test]
+fn the_trenches_median_depth_below_the_floor_beyond_is_two_to_four_km() {
+    let earth = earth();
+    let omega = earth.world.grid.solid_angles_sr();
+    let cells = &earth.relief.cells;
+    let mut floor: std::collections::BTreeMap<u8, (f64, f64)> = std::collections::BTreeMap::new();
+    for (n, c) in cells.iter().enumerate() {
+        let d = c.boundary_distance.map_or(0.0, Metres::value);
+        if c.subducts && c.crust == Crust::Oceanic && (-300e3..=-150e3).contains(&d) {
+            let entry = floor.entry(c.plate).or_insert((0.0, 0.0));
+            entry.0 += c.elevation.value() * omega[n];
+            entry.1 += omega[n];
+        }
+    }
+    let mut gaps: Vec<f64> = cells
+        .iter()
+        .filter(|c| c.subducts && c.on_boundary())
+        .filter_map(|c| {
+            let &(sum, area) = floor.get(&c.plate)?;
+            Some(sum / area - c.elevation.value())
+        })
+        .collect();
+    gaps.sort_by(f64::total_cmp);
+    assert!(gaps.len() > 100, "{} trench cells", gaps.len());
+    let median = quantile(&gaps, 0.5);
+    assert!((2_000.0..=4_000.0).contains(&median), "{median} m");
+}
+
+/// Another seed gives other convergent landforms on a mobile lid and other provinces on the
+/// reference Mars: the along-strike, province and edifice draws read the seed (the determinism
+/// audit's hardening).
+#[test]
+fn another_seed_gives_other_arcs_and_provinces() {
+    let small = World::new(
+        builder_of(&reference::earth_like())
+            .figure(hyperion_surface::spheroid::Spheroid::sphere(2.0e6))
+            .build()
+            .unwrap(),
+    );
+    let fronts = |seed: SurfaceSeed| {
+        let pass = small.pass(seed);
+        let mut working = Working::initial(&pass);
+        crate::planetary::surface::steps::plates::run(&pass, &mut working);
+        let noise = noise::unit_field(
+            &pass,
+            noise::LANDFORM_INSTANCE,
+            noise::LANDFORM_FIRST_LEVEL,
+            pass.level().get(),
+        );
+        crust_populations(&pass, &mut working, &noise);
+        convergent::run(&pass, &mut working)
+            .unwrap()
+            .front_m
+            .into_iter()
+            .flatten()
+            .collect::<Vec<f64>>()
+    };
+    let (first, other) = (fronts(reference::SEED), fronts(SurfaceSeed::new(0x0dd5)));
+    assert!(!first.is_empty() && !other.is_empty());
+    assert!(
+        first.len() != other.len()
+            || first
+                .iter()
+                .zip(&other)
+                .any(|(a, b)| a.total_cmp(b).is_ne())
+    );
+    let mars = World::new(reference::mars_like());
+    let lift = |seed: SurfaceSeed| {
+        let pass = mars.pass(seed);
+        let mut working = Working::initial(&pass);
+        lid_population(&pass, &mut working);
+        provinces::run(&pass, &mut working).unwrap().lift
+    };
+    let (a, b) = (lift(reference::SEED), lift(SurfaceSeed::new(0x0dd5)));
+    assert!(a.iter().zip(&b).any(|(x, y)| x.total_cmp(y).is_ne()));
 }

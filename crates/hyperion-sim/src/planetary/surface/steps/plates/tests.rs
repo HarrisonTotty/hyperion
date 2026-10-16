@@ -448,8 +448,7 @@ fn each_cell_carries_whether_its_plate_subducts() {
     let oceans = written(oceans_layout);
     let (mut continental, mut oceanic) = (0, 0);
     for (n, (mix, ocean)) in mixed.cells.iter().zip(&oceans.cells).enumerate() {
-        let boundary_cell = mix.boundary_distance.is_some_and(|d| d.value() == 0.0);
-        if mix.boundary != BoundaryKind::Subduction || !boundary_cell {
+        if mix.boundary != BoundaryKind::Subduction || !mix.on_boundary() {
             continue;
         }
         assert_eq!(mix.subducts, mix.crust == Crust::Oceanic, "cell {n}");
