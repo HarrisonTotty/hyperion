@@ -151,7 +151,40 @@ pub mod hooks { pub struct BodyHooks { /* surface_seed (server-only, never in a 
     pub struct SurfaceConditions; pub struct HabitabilityAssessment; pub struct ResourceAbundances;
     pub struct GlobalFigures; pub struct SubsurfaceOcean; pub enum OceanFloor;
     pub enum VerticalStructure { RadiativeConvective { /* T_s, p_s, α, T_skin, (p, T) nodes:
-        T24.e */ }, Envelope { /* Guillot parameters, join, (p, T) nodes: T24.d */ } } }
+        T24.e */ }, Envelope { /* Guillot parameters, join, (p, T) nodes: T24.d */ } }
+    // T51.c, pure until T54.a
+    pub mod crust { pub use crate::planetary::surface::LidCrust; // { Primary, Secondary, Bulk }
+        pub struct CrustComposition; // primary(), secondary(), tertiary(), bulk():
+            // Option<SubstanceId>; lid() -> LidCrust; provinces() -> SubstanceId;
+            // redox() -> RedoxClass; melt_area_fraction() -> f64;
+            // thermal_history() -> ThermalHistory; peak_central_temperature() -> Option<Kelvin>
+        impl CrustComposition { pub fn derive(inputs: &CrustCompositionInputs<'_>)
+            -> Result<Self, DeriveCrustError>; }
+        pub struct CrustCompositionInputs<'a> { /* origin: CrustOrigin, formation: Megayears,
+            age: Years, molten_until: Option<Years>, radius, mass, fractions: MassFractions,
+            snow_line_side, ammonia: AmmoniaIce, delta_iw: Dex, host_magnesium_to_silicon: f64,
+            alpha_fe, fe_h, surface_age: Years, volcanism: f64, continental_fraction: f64,
+            tidal: TidalVolcanism, state: SurfaceState, formation_temperature: Kelvin,
+            surface: &'a SurfaceConditions */ }
+        pub enum CrustOrigin { Planet, RegularMoon, ImpactMoon(ParentSurface), CapturedMoon,
+            BeltMember, Comet } pub enum ParentSurface { Rocky, Icy }
+        pub enum AmmoniaIce { Carried, Absent } pub enum TidalVolcanism { Volcanic, Quiet }
+        pub enum ThermalHistory { RockMelted(MeltCause), IceMelted(IceMeltCause), Unmelted }
+        pub enum MeltCause { MagmaOcean, ImpactDebris, Tides, Radiogenic }
+        pub enum IceMeltCause { ImpactDebris, Radiogenic }
+        pub enum CrustLithology { /* the 18 rows it names */ } pub enum MantleNorm;
+        pub enum DeriveCrustError; pub enum CrustInput;
+        pub struct FormationWindow; // new(earliest, latest), disc(lifetime)
+        pub fn formation_time(seed: Seed, body: BodyId, window: FormationWindow) -> Megayears;
+        pub fn mantle_iron_oxide_mass_fraction(core_share: f64, host_magnesium_to_silicon: f64,
+            alpha_fe: Dex) -> f64; pub fn ordinary_chondrite(delta_iw: Dex) -> CrustLithology;
+        pub fn ordinary_chondrite_edges() -> (Dex, Dex);
+        pub mod history { pub struct ConductiveSphere; pub struct HeatSource;
+            pub enum ChondriticRock { Ordinary, Carbonaceous }
+            pub fn chondritic_sources(formation: Megayears, rock: ChondriticRock,
+                rock_share: f64, fe_h: Dex) -> [HeatSource; 5];
+            pub fn peak_central_temperature(sphere: &ConductiveSphere, sources: &[HeatSource],
+                duration: Years) -> Kelvin; } } }
 pub fn temperature_at(structure: &hooks::VerticalStructure, p: Pascals) -> Kelvin; // T24.e
 pub mod fate { pub enum BodyState { NotYetFormed, Present, Destroyed { cause: DestructionCause,
     at: UniverseTime }, Unbound { at: UniverseTime } } }
@@ -183,7 +216,7 @@ halo's prefix in plans 02 and 08).
 - Scope `Body` (opened with `ObjectKey::from(BodyId)`): `planet.orbit`, `planet.radius`,
   `planet.volatiles`, `planet.spin`, `planet.origin`, `planet.scatter` (ruling 80), `moon.count`,
   `moon.mass`, `moon.orbit`, `moon.impact`, `moon.capture`, `ring.system`, `belt.member`,
-  `body.surface`, `body.resources`.
+  `body.surface`, `body.resources`, `body.formation` (T51.c: a body's formation time, word 0).
 - Scope `Event`, each also an entry of plan 01's `event_tags!` in the block 0x0400–0x04FF that plan
   06 sets aside for this plan: `0x0400 BODY_IMPACT` (`body.impact`), `0x0401 BODY_ERUPTION`
   (`body.eruption`), `0x0402 BODY_STORM` (`body.storm`), `0x0403 BODY_DUSTSTORM` (`body.duststorm`),
@@ -15503,3 +15536,300 @@ tables::gauss_legendre`.
     - The refit before 23: delete and re-emit under §5's conditions, until the first reader's
       commit; no tool flag (§5).
     - Step 2's viscosities: the newest reference correlation readable in full (§6).
+- **Deviations in P14.T51.c, as built (`lane/36-p14-t51c-crust`, 2026-10-16).** A solid body's
+  crust by substance, a pure `hooks/crust.rs` with `hooks/crust/history.rs` and its tests in
+  `hooks/crust/tests.rs`, built ahead of the 22 → 23 bump.
+  - _Held at 22._ Nothing on the record calls the module, so `GENERATOR_VERSION` stays 22 and no
+    golden moves but `rng/tags.golden`'s one appended line, `body.formation (Body)` at
+    `0x4fb44c8a523094a0`, and the new `planetary/crust.golden` (header 22, 162 lines). Until
+    P14.T54.a nothing on the record reads that golden, so a change to it re-blesses it at the
+    version in force, and the commit names it (its test's doc says so). The tripwire
+    `crust_nothing_on_the_record_reads_the_crust_yet` walks `src/` outside
+    `planetary/hooks/crust*` in sorted order and fails on `CrustComposition::derive(`,
+    `formation_time(`, `peak_central_temperature(`, `chondritic_sources(`, `hooks::crust::` or
+    `crust::{` in each file's code; it allows `hooks/mod.rs`'s one `pub use crust::{…};` and
+    asserts it and `pub mod crust;` there once. Its held list of (file, hold) pairs is empty. None
+    of the patterns matched on the base. P14.T54.a deletes it. The regolith's thermal inertia is
+    P14.T49.j's law at this task's lid (decision-p14-t49c-split), and the dependence on P14.T49.c
+    is gone.
+  - _The tripwire's scan, beyond the brief's wording._ The brief cuts each file "from its first
+    `#[cfg(test)]`", but in `planetary/system.rs` the first is a test-only method at line 1569,
+    before `hooks_at`, `surface_section`, `primary_record` and `satellite_record`, and the hooks
+    modules declare `#[cfg(test)] mod tests;` near their tops, so that cut scanned little of the
+    code T54.a wires (the determinism audit's should-fix). The scan cuts at the first
+    `#[cfg(test)]` that opens an inline `mod tests {` instead, leaves out comment lines (a doc may
+    name the module, as `rng/tags.rs`'s and the consumed-items table's do), and asserts that
+    `planetary/system.rs`'s scanned code holds `fn primary_record` and `fn satellite_record`.
+  - _Added public items_ (`planetary::hooks::crust`, with `CrustComposition`,
+    `CrustCompositionInputs`, `CrustLithology` and `DeriveCrustError` re-exported at `hooks`):
+    `CrustComposition` (its derivation and the plan's getters, and `thermal_history()` and
+    `peak_central_temperature()`, so that the record can show why), `CrustCompositionInputs`,
+    `CrustOrigin`, `ParentSurface`, `AmmoniaIce`, `TidalVolcanism`, `ThermalHistory` with
+    `MeltCause` (a rock's) and `IceMeltCause` (an ice's: `ImpactDebris`, `Radiogenic`),
+    `CrustLithology` (the closed set, with `ALL`, `key()`, `substance()` and `transition()`),
+    `NOT_MODELLED`, `MantleNorm`, `DeriveCrustError` (its range variants beside the brief's:
+    `NoSolidSurface`, `SurfaceAgeOutsideAge`, `VolcanismNegative`,
+    `ContinentalFractionOutsideUnit`) and `CrustInput` (with `name()`, the field's name its
+    message gives), `FormationWindow` and `BuildFormationWindowError`, `formation_time`,
+    `FORMATION_WORDS`, `ice_melting_point`, `ice_latent_heat_j_per_kg`,
+    `ORDINARY_CHONDRITE_DELTA_FMQ`, `ordinary_chondrite_edges`, `ordinary_chondrite`,
+    `bulk_iron_mass_fraction`, `mantle_iron_oxide_mass_fraction`, `mantle_magnesium_to_silicon`,
+    `mantle_cations_per_silicon`, `hot_mantle`, the rules' constants, and `LidCrust`
+    re-exported; and `crust::history`: `ConductiveSphere`, `HeatSource`, `ChondriticRock`,
+    `chondritic_sources`, `CHONDRITIC_SOURCES`, `central_temperature`,
+    `adiabatic_central_temperature`, `peak_central_temperature`,
+    `aluminium_26_production_w_per_kg`, `aluminium_26_decay_rate_per_s`,
+    `ice_rock_specific_heat_j_per_kg_k` and its constants, of which `crust` re-exports
+    `ChondriticRock`, `ConductiveSphere`, `HeatSource`, `chondritic_sources` and
+    `peak_central_temperature`. The sim's `clippy.toml` admits `McSween`, `InSight`, `MeV`, `GPa`
+    and `MPa` to `doc-valid-idents`.
+  - _The thermal history_ (`crust/history.rs`). The centre of a compact conductive sphere, the plan's
+    eigenfunction series (derived from the uniformly heated sphere's expansion; Carslaw and
+    Jaeger 1959, ch. IX, not read; the science check matched it to a finite-difference sphere
+    within 2 × 10⁻⁶), summed over **24 terms** tapered by the Euler transform of order 3 of
+    the last four partial sums (the last three terms weighted 7/8, 1/2 and 1/8): the plain partial
+    sums swing between about 0 and twice the answer where few modes have damped. Each quotient is
+    taken by its series where |(μ − λ) t| < 10⁻³, and the sum is held at most the adiabatic
+    limit, which the truncated series exceeds by under 10⁻⁴ of it where few modes have damped (a
+    1 km body at 100 yr; 6 × 10⁻⁵ at most over radii of 100 m to 8,000 km and times of 1 yr to 10
+    Gyr, a test). The peak is the greatest of **24 times** log-spaced from 100 yr to the
+    age since formation, refined by **12 golden-section steps** in log time about the best of
+    them. Against 400 terms the series lies within 1.38 × 10⁻⁵ over the anchors' radii (10 km to
+    2,630 km), formation times and times from 100 yr to 4.5 Gyr; the lane's prototype put the
+    peak within 4 × 10⁻⁵ of 400 terms on 200 refined times over 300 random bodies. The constants:
+    - ²⁶Al: half-life 0.717 Myr (NUBASE2020, Kondev et al. 2021; LNHB, Mougeot et al. 2025; both
+      read), (²⁶Al ÷ ²⁷Al)₀ 5.23 × 10⁻⁵ (Jacobsen et al. 2008, read), 3.123 MeV a decay without
+      its neutrinos (LNHB's emission tables, the lane's sum; Neumann et al. 2023 take 3.115,
+      Henke et al. 2012 3.188); 2.02 × 10⁻⁷ W kg⁻¹ for an H chondrite at the CAIs' time. It does
+      not scale with \[Fe/H\].
+    - Aluminium: 1.13 wt% for an ordinary chondrite inside the snow line (Ghosh and McSween
+      1999; Jarosewich 1990's Al₂O₃ 2.14 wt%; both read), 1.2 wt% for a carbonaceous rock on an
+      anhydrous basis beyond it (the lane's, between CI's 1.03–1.16 and CM2's 1.28 water-free;
+      Neumann et al. 2023's 1.21).
+    - The long-lived nuclides at the CI chondrites' K 544 ppm, Th 31.0 ppb and U 8.10 ppb per
+      their Al 8,500 ppm (Lodders, Palme and Gail 2009, Table 3; Lodders 2010; both read), times
+      the rock's aluminium, with `RadiogenicIsotope`'s shares, half-lives and specific heats and
+      `radiogenic_heat_production_w_per_kg`'s extrapolation back to `t_f`; they scale with
+      10^\[Fe/H\], as that function's do. An icy body takes them in proportion to its non-ice
+      share. Henke et al.'s and Neumann et al.'s H-chondrite K, Th and U are initial values and
+      are not taken beside present-day ratios.
+    - κ = 10⁻⁶ m² s⁻¹, `ROCK_THERMAL_DIFFUSIVITY_M2_PER_S`, within the read 0.5–1.4 × 10⁻⁶. Dry
+      rock's c = **800** J kg⁻¹ K⁻¹, an H chondrite's near its solidus (Ghosh and McSween 1999,
+      Table 1, after Robie et al. 1978: 630 at 300 K, 800 at 1,100 K, "~700–800"; read), not the
+      ruling's 850, which its own check keeps.
+    - **The calibration**, the ice–rock mixture's c and `T_s`, recorded as fitted: c = `f_ice` ×
+      866.3 + (1 − `f_ice`) × 556 J kg⁻¹ K⁻¹, its parts at the low-temperature ends of their
+      ranges (ice Ih's 866.3 at 100 K, IAPWS R10-06 Table 6; chondrites' 556 at 200 K, Flynn et
+      al. 2018's fit; both read), 672 at a water-to-rock ratio of 0.6; and `T_s` the body's present
+      equilibrium temperature, Ceres's 162.6 K for the asteroid belt (the table's; 166 K by the
+      lane's fast-rotator mean). They pass Bland and Travis's anchor: a 100 km body of
+      water-to-rock 0.6 peaks at 533.8 K at 3 Myr against its ice's 459.1 K (273.16 K plus L
+      `f_ice` ÷ c), and at 314.5 K at 4 Myr; the edge lies near 3.2 Myr. At their WR 1.0 no c
+      in the ranges passes: ²⁶Al from 3 Myr gives 192 kJ kg⁻¹ against the 245 its ice needs, since
+      the latent heat is paid whole where Bland and Travis count melting from 0 °C.
+    - The latent heat is `H2O`'s diagram's, 333.45 kJ kg⁻¹ (6,007.099 J mol⁻¹ over its molar
+      mass), within 0.1% of IAPWS R10-06's 333.44; the chondritic solidus is `chondrite_h`'s
+      transition, 1,423.15 K (Jurewicz, Jones, Weber and Mittlefehldt 1993, LPSC XXIV, 739: "the
+      solidi are probably ~1150-1160°C", read; the plan's GCA 57, 2123 is the Allende and
+      Murchison paper, and the H and LL one is GCA 59, 391, 1995), and the ice's melting point
+      `H2O`'s 273.16 K or `nh3_h2o`'s 176.15 K.
+    - _The ruling's check against ours._ At its own constants (²⁶Al alone, Al 1.13 wt%, c 850,
+      `T_s` 200 K) the series reproduces its table within 0.5% (the lane's prototype within
+      0.1%). At ours (c 800, the long-lived nuclides added) a dry 100 km body peaks at 1,407 K at
+      2 Myr (the ruling's 1,321) and 670 K at 3 Myr (627), so its melting edge lies near 1.98 Myr
+      (the ruling's 1.91 at 1,423 K).
+  - _The draw_: `body.formation` (`Body`), keyed by `ObjectKey::from(BodyId)`, word 0 one open
+    uniform u, `t_f` = `earliest` + u (`latest` − `earliest`) held to the window; words 1–7
+    reserved (`FORMATION_WORDS`). Its windows (`FormationWindow`): a regular moon's from its
+    giant's `formed_at` to the disc's lifetime L, a belt member's, a captured moon's or a comet's
+    `FormationWindow::disc(L)`, [0, L]. A planet takes T28.a's `formed_at`, and a giant-impact
+    moon its parent's. The tag was appended at the end of the macro list, after
+    `star.ns.glitch_class`, and named in plan 14's heading comment and the Provides list.
+  - _The rules as built_, in the module doc's order:
+    - the classes: rock melted for a planet, a rocky parent's impact moon, a tidally volcanic body
+      and any `T_c,max` at the chondritic solidus; then ice melted for an icy parent's impact moon
+      and for a body holding ice (beyond the snow line, water above zero) at its ice's melting
+      point plus L `f_ice` ÷ c; else nothing. Planets, rocky impact moons and tidal bodies skip
+      the series (`peak_central_temperature()` is `None`);
+    - R_ocean **200 km** (the lean, taken) and the ocean's freezing by `Crust::of` with an icy
+      birthplace beyond the snow line (the lean, taken); a class-2 body whose ocean did not freeze
+      takes the alteration ladder's `bulk` (the lane's choice);
+    - the ice shell `H2O` from **0.3** of the mass or over a melted rock, `phyllosilicate` below
+      (the lean, taken: Ceres at 0.25 is `phyllosilicate`);
+    - **110 K** for a small body's ice-keeping surface (Schorghofer and Williams 2020, Table 1,
+      read), against `climate_range`'s warmest;
+    - **900 K** for `chondrite_cv` (the lean, taken; Nakamura 2005's stages put full dehydration
+      under long heating near 923 K, read; the heated CM and CI chondrites stay their own kind,
+      and `chondrite_cv` stands in for them, stated);
+    - the CI/CM split at an ice-to-rock ratio of **0.4**, where the reacted water-to-rock mass
+      ratios part (Lee et al. 2025: CM 0.10–0.40, CI 0.38–0.43, after Alexander 2019; read),
+      replacing the lean's 0.5, under which every CI lies (Clayton and Mayeda 1999 not read);
+      main confirmed it on issue #36 (below);
+    - the ordinary chondrites at ΔIW edges **−2.74** (H/L) and **−2.14** (L/LL)
+      (`ordinary_chondrite_edges`), the midpoints of the groups' ΔFMQ centres, H −6.64, L −6.02
+      and LL −5.45, read off Righter and Neff 2007's Fig. 16B (the NTRS manuscript at 300 dpi,
+      ±0.2), moved to IW on the crate's own scale by `fmq_above_iw()`'s 3.593 (1,400 K, 1 bar), on
+      which `RedoxClass`'s edges stand: H −3.05, L −2.43, LL −1.86. The H centre falls at the
+      `Reduced` edge. The conversion is the science check's minimum consistent choice: the brief's
+      draft converted by Schaefer and Elkins-Tanton's 3.69 (1,200 °C and 1 GPa), and at the
+      chondrites' own metamorphic temperatures the crate's buffers give 4.06 (850 °C), which would
+      lift the edges about 0.5; Schaefer and Fegley 2007 put the groups nearer IW (methods spread
+      1–2 log units); Brett and Sato 1984 and McSween and Labotka 1993 not read. `Oxidised` bulk
+      rock is `chondrite_ll`, `Reduced` `chondrite_e`;
+    - the primary crust of a magma ocean: `graphite` where `Reduced`, `feldspathic` below
+      **0.0363 M⊕**, the geometric mean of the Moon's and Mars's masses (no numeric edge was read;
+      Hu, Ehlmann and Seager 2012, §3.1, and Schaefer and Elkins-Tanton 2018 give its two ends),
+      `ultramafic` from it; a frozen ocean's `H2O` shell first; a body melted by its sources or its
+      tides alone gets none (the lean, taken);
+    - the secondary: `basalt_reduced`, `komatiite` where the rock's production at the age is at
+      least **2×** the bulk silicate Earth's present (Reimink and Smye 2024's Neoarchaean "twice
+      the present-day rate", read; at \[Fe/H\] 0 an age under 1.95 Gyr, the production of 2.6 Ga)
+      or tidally volcanic, `basalt_fe` under a flotation crust or from **12 wt%** of mantle FeO by
+      the mass balance (the bulk silicate Earth's 8.05 and Dreibus and Wänke's 17.9, both read;
+      InSight's 13.8, Khan et al. 2023 as Sossi et al. 2025 give it), `basalt` otherwise. The mass
+      balance counts the solids as MgO, SiO₂ and metal Fe per silicon atom at the host's Mg/Si and
+      the protosolar Fe/(Mg + Si) times 10^(−\[α/Fe\]), 31.4 wt% of iron at the Sun's ratios
+      (the bulk Earth's 31.2 ± 1.0 or about 32, Wang et al. 2018; Sossi et al. 2025), with
+      FeO/Fe 1.2865 from the standard atomic weights and the core 0.85 iron (McDonough and
+      Arevalo 2008; Javoy et al. 2010; via Wang et al. 2018);
+    - the Mg/Si shift (the Mg-rich side, §2.3 item 4): the mantle's Mg/Si is the host's times the
+      bulk silicate Earth's **1.252** (from MgO 37.8 and SiO₂ 45.0 wt%) over the Sun's 1.023, its
+      Fe/Si from its FeO, and its molar (Mg + Fe) ÷ Si quartz-normative below **1** and
+      periclase-normative above **2** (the lane's reading of Putirka and Xu 2021's norm, which
+      states no edge); a periclase-normative mantle shifts `basalt` to `komatiite`. **An iron-rich
+      source keeps `basalt_fe`** (the lane's choice, beyond the lean): a coreless body's mass
+      balance leaves its iron in its mantle (40.4 wt% FeO, (Mg + Fe) ÷ Si 2.30, the Moon's 39.6),
+      whose periclase-normative excess is its FeO's and whose melt is iron-rich, so the lean's shift
+      would have made the Moon's maria `komatiite`. For an Earth-like mantle the edges fall at a
+      host Mg/Si of 1.488 and 0.747; at Brewer and Fischer's 0.032 dex that is 3.8σ above the
+      median at \[Fe/H\] −0.6 (7 × 10⁻⁵ of hosts) and 5.4σ at 0 for periclase, and 2.8σ below at
+      +0.4 (2.4 × 10⁻³) and 3.9σ at 0 (5 × 10⁻⁵) for quartz;
+    - the tertiary `granite` where f_c > 0 and a secondary exists;
+    - the lid: `Bulk` on an undifferentiated body; `Primary` for a frozen ocean's shell always (the
+      lean, taken), for a primary crust with no secondary, and where the surface age is at least
+      the time since the magma ocean's end (the age where `molten_until` is `None`) within 10⁻⁹
+      of it; `Secondary` otherwise. The provinces: the secondary where the lid is a rocky
+      `Primary` and V > 0, else the lid's own;
+    - the melt area: 1 − `cold_area` at the lid's transition, held to [0, 1]; 1 in the
+      `MagmaOcean` state (the lean, taken).
+  - _The anchors as computed_ (`planetary/crust.golden`):
+    - the Moon: `feldspathic` primary lid, `basalt_fe` secondary and provinces, `Intermediate`,
+      no melt; Mercury (core 0.67, surface 4.0 Gyr, Marchi et al. 2013's volcanic plains):
+      `basalt_reduced` lid over `graphite`, `Reduced`; Earth: `granite` on `basalt` over a buried
+      `ultramafic`, lid `Secondary`, `Oxidised`, mantle FeO 7.3 wt% (core 0.325); Venus: `basalt`
+      over `ultramafic`, `Oxidised`, FeO 10.9 wt% at a core of 0.30 (Venera's 7.7–9.3 wt%); Mars
+      (core 0.204): `basalt_fe` lid over a buried `ultramafic`, `Intermediate`, FeO 22.8 wt%
+      (18.7 at Stähler et al.'s 0.24); its ferric surface is P14.T51.d's. None holds melt;
+    - Io (tidal, regular, IW+0.95 from Zolotov and Fegley 2000's NNO − 3.3 at 1,440 K, by NNO =
+      FMQ + 0.7 and the crate's FMQ − IW of 3.55 there): no primary, a `komatiite`
+      secondary lid and provinces, melt area **0**, against an active share the lane estimates at
+      4 × 10⁻⁵ to 3 × 10⁻⁴ (100 TW, Veeder et al. as Mura et al. 2026 cite them, radiated at
+      600–1,000 K; Veeder's hot-spot areas not read);
+    - Ceres (470 km, a quarter water, 3 Myr, at 162.6 K): `T_c,max` 1,330.9 K (the solidus less
+      92 K), ice melted, a primary `phyllosilicate` lid, no secondary;
+    - Henke et al. 2012's 100 km at 2.3 Myr (at their 300 K): 1,207.4 K, `bulk` `chondrite_ll` at
+      ΔIW −1 (any of H, L, LL by its ΔIW); Hunt et al. 2018's 60 km at 1.4 Myr (290 K):
+      2,395.7 K, a crust; Neumann et al. 2023's 25 km at 0.1 Myr (290 K): 5,883.1 K, a crust; a
+      reduced 50 km body at 5 Myr: `chondrite_e`;
+    - Bland and Travis 2017's 100 km at 3 Myr: 533.8 K, ice melted, `chondrite_ci`; at 4, 4.5
+      and 6 Myr unmelted, `cometary`;
+    - a Pluto (1,190 km, a third ice, 5 Myr, 40 K): 2,098.7 K, rock melted, an `H2O` primary lid
+      over a buried `basalt_fe`; a 200 km Kuiper-belt body at 5 Myr: 202.2 K, `cometary`; a 10 km
+      icy body at 1 Myr: 597.6 K, its ice melted inside, `cometary` at its 43.8 K surface;
+    - a Mercury locked 1:1 at 0.09, 0.07, 0.055 and 0.045 au (`T_ss` 1,274, 1,445, 1,630 and
+      1,802 K), at a `basalt` lid: melt areas 0.033, 0.217, 0.325 and 0.383, the closed form's
+      within 10⁻⁹.
+  - _Not modelled_, the closed set (`NOT_MODELLED`): a silica-rich secondary crust, minor crust
+    substances (salts, NH₃ hydrate, clathrate) and an eruption temperature.
+  - _Main's deviations from the plan's text_ (§2.2.9 of the brief): one `LidCrust`, rendering
+    plan R09.T10.d's `planetary::surface::LidCrust` re-exported, in place of a second enum, so that
+    P14.T54.a converts nothing; the figures as plain inputs, not `&GlobalFigures`; the constants in
+    `crust.rs` and `crust/history.rs`, not `params.rs`; a golden of its own; the draw on a new `Body`
+    tag; the Mg/Si shift on its Mg-rich side alone.
+  - _The lane's further deviations._ The inputs `heat_flow`, `radiogenic_heat_flow` and `regime`
+    are not taken, since no rule reads them (the komatiite edge reads the production per kilogram
+    at the age); `state: SurfaceState` is added, for the `MagmaOcean` melt area and the refusal of
+    a gas envelope (`DeriveCrustError::NoSolidSurface`); `CrustOrigin::BeltMember` holds the
+    dwarf planets. The thermal history is a submodule, `crust/history.rs` (`crust::history`),
+    inside the scope's `hooks/crust*`, its tests in `crust/tests.rs` with the module's, as the
+    brief places them; it is not named `thermal`, since P14.T49.j's tripwire
+    (`substance_thermal_nothing_on_the_record_reads_the_inertia_yet`) fails on any `thermal::` in
+    the crate's code outside `substance/thermal*`.
+    Names are the brief's leans but `ThermalHistory`, which carries a `MeltCause` or an
+    `IceMeltCause`. `derive` refuses, beside the brief's errors, a surface age outside [0, the
+    age], a negative volcanism level and a continental fraction outside [0, 1] (the Rust review's
+    should-fix: the fields' documented ranges).
+  - _Main's ratification_ (issue #36, 2026-10-16: "your leans stand, all four"): the silica-rich
+    secondary crust and the minor crust substances stay in the closed not-modelled set, for later
+    tasks; the ruling's water-to-rock ratio of 0.6 is kept for Bland and Travis's anchor; the
+    Mercury and Venus findings stay as deferred findings, recorded on main's side for P14.T54.a;
+    and the note's other leans, the CI/CM split at 0.4 and `basalt_fe` kept off the Mg/Si shift,
+    stand with them. The entry's text keeps "at least 0.5" until a docs batch.
+  - _The redox class_ (Phase L's open point, "_T50.a and T51.c_"): `RedoxClass::of` with T50.a's
+    edges and FMQ–IW offset, unrefined, as the brief directs; T51.c adds only the ordinary
+    chondrites' H/L and L/LL edges inside `Intermediate`, on the same scale. The point is closed
+    for T51.c.
+  - _For P14.T54.a._ The inputs on the record: `origin` from the body's kind and, for an impact
+    moon, its parent's birthplace; `formation` a planet's `Formation::formed_at`, an impact moon's
+    parent's, every other body's `formation_time` in its window; `molten_until` a planet's
+    `Formation::molten_until`; `radius`, `mass` and `fractions` the bulk section's;
+    `snow_line_side` a host orbiter's own and a moon's `MoonBirth::formed`; `ammonia` from
+    P14.T50.c's `nitrogen_boosted` at the formation temperature; `delta_iw` the
+    `ElementInventory::mantle_delta_iw`; the host's Mg/Si `HostAbundances::magnesium_to_silicon`;
+    `alpha_fe` and `fe_h` the `BulkComposition`'s; `surface_age`, `volcanism` and
+    `continental_fraction` the `GlobalFigures`'; `tidal` from P14.T56.d's `TidalBranch::Heated`
+    (`Volcanic`), every other branch `Quiet`; `state` the record's; `formation_temperature` the
+    present `T_eq`; `surface` the record's `SurfaceConditions`. `record::CrustComposition` is
+    replaced by this type, and the wire's `mantle_redox_iw` comes from T50.a's inventory, not from
+    it. T49.j's inertia applies at the lid this type names. The bless note counts the belt members,
+    small moons, comets and dwarf planets that gain a `bulk` or a crust, and each Mars-like lid
+    (`basalt_fe` `Secondary` over `ultramafic`). The cost: a body that takes the series makes 38
+    evaluations of 24 terms of 5 sources, 4,560 quotients and 266 exponentials, beside
+    `cold_area`'s zonal profile; planets, rocky impact moons and tidal bodies skip it. It was not
+    timed; P14.T33.a's bench should take it, and over a microsecond a body it is a finding. An
+    `H2O` lid's melt area is read at its 273.16 K, so a warm zone on an ice-shelled body counts as
+    melt: the wire's `silicate_vapour` rule should read a silicate lid's melt alone.
+  - _For main._ P14.T49.c's tripwire, as held, fails on `.condensed()` outside `substance/`:
+    `planetary/hooks/crust.rs` calls it for the lid's and the solidus's transitions, so its held
+    list may need `planetary/hooks/crust.rs` (hold: this module's own tripwire). Io's melt area is
+    none against its hot spots, a finding for T54.a and R09. The 110 K is this module's constant
+    until P14.T51.f computes each species' threshold. The thermal history's c could read
+    P14.T49.j's columns once they land; it keeps its own, calibrated, until a ruling says so. For a
+    docs batch: the Generator version section's Phase L "Draws" bullet ("No other domain tag")
+    should gain `body.formation` (Body, P14.T51.c); T54.a's entry does not name this module's
+    tripwire, which it deletes, as it names `MOONS_VERSION`'s; and the palette resolution's "an
+    eruption temperature T51.c states" gets none, that temperature being in `NOT_MODELLED`. For
+    T54.a or a ruling: P14.T48.f's "the ice-rich test reads the primary crust" from 23, and the
+    Risks' lean "none until P14.T51.c's lid gives the crust's lithology and thickness", meet this
+    module's ocean-freeze rule, which reads `Crust::of`: `Crust::of` can read the crust only if that
+    rule stops reading it, and the crust gives no thickness or density.
+- **Deferred findings (2026-10-13 rule)**, from P14.T51.c:
+  - The generated Mercury's surface age is its age since its magma ocean (P14.T24.b: its 10.8 mW
+    m⁻² resurface nothing in 33 Gyr), so from T54.a its lid is its `graphite` primary crust,
+    where its oldest surfaces formed 4.0–4.1 Gyr ago in a global volcanic resurfacing (Marchi et
+    al. 2013); the Mercury test states the measured age. For T24.b's surface age or a later lid
+    rule.
+  - The generated Venus's core, 0.288 of its solids, gives a mantle FeO of 12.5 wt% by the mass
+    balance, `basalt_fe`: the edge lies at a core of 0.292, and the balance moves 1.4 wt% per 0.01
+    of core. Venera's basalts hold 7.7–9.3 wt%. For the bless note, or a ruling on the edge.
+  - A coreless body (the generated Moon and every capture are rock alone) gets 40 wt% of mantle
+    FeO, since the balance gives every body its host's bulk iron; its secondary is `basalt_fe`. The
+    Moon's measured mantle holds about 11 wt% (Sossi et al. 2025, Table 1).
+  - The conductive sphere melts large icy bodies' rock: a Pluto peaks at 2,099 K, and Callisto-
+    and Ganymede-sized bodies above the solidus, so they gain a buried secondary crust under
+    their `H2O` lid; the model omits the ice's convection and latent heat, which cool them.
+  - The 10^\[Fe/H\] scaling of the long-lived nuclides makes every mantle about a host of
+    \[Fe/H\] ≥ +0.30 komatiitic at 4.57 Gyr.
+  - P14.T50.a's zone term puts dry bodies formed inside the snow line between 1 and 2.26 au about
+    the Sun at ΔIW −1.55 to +1.45, so a generated inner belt is mostly `chondrite_ll`; the
+    ordinary chondrites measure IW−3.05 to −1.86 on the crate's scale.
+  - The mass balance counts the mantle's iron as metal over the mantle's mass, which holds its
+    `FeO`'s oxygen; normalised with that oxygen, Earth's mantle would hold 7.14 wt% (7.26), Mars's
+    21.7 (22.8) and the generated Venus's 12.22 (12.56), no class changing (the science check).
+  - The ice–rock mixture's c takes its parts at 100 K and 200 K while its history runs from about
+    160 K to its ice's 405–508 K, where the mixture's own c is nearer 1,000 J kg⁻¹ K⁻¹: the
+    calibration, recorded as fitted, which P14.T49.j's columns may replace.
+  - Plagioclase is stable only below about 1 GPa (not read): the shell above 1 GPa is 29% of the
+    Moon's silicate mass, 22% of Mercury's, 8% of Mars's and 1.4% of Earth's (the lane's
+    estimate), a possible physical edge for the flotation crust, against plagioclase's saturation
+    at 70–80% solidification.

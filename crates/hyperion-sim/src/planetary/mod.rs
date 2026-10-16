@@ -103,6 +103,7 @@
 //! | 06 | a star's largest past luminosity (design note 11) | [`StarModel::max_luminosity_until`](crate::stellar::system::StarModel::max_luminosity_until), which each host's [`derive::HostLight::with_history`] carries to the atmosphere (P14.T13) |
 //! | 01 | a planet's volatile inventory (P14.T13.a) | [`rng::tags::PLANET_VOLATILES`](crate::rng::tags::PLANET_VOLATILES) (`Body`), opened with `ObjectKey::from(BodyId)`, words 0–5, 3–5 read by number from [`derive::atmosphere::SULPHUR_WORD`] (P14.T50.a; [`derive::atmosphere::VolatileDraws`]) |
 //! | 01 | a host's C/O and Mg/Si (P14.T50.a) | [`rng::tags::SYSTEM_ABUNDANCES`](crate::rng::tags::SYSTEM_ABUNDANCES) (`System`), opened with `ObjectKey::from(SystemId)`, words 0–1 ([`chem::AbundanceDraws`]) |
+//! | 01 | a small body's formation time (P14.T51.c) | [`rng::tags::BODY_FORMATION`](crate::rng::tags::BODY_FORMATION) (`Body`), opened with `ObjectKey::from(BodyId)`, word 0 ([`hooks::crust::formation_time`]) |
 //! | 14 | a young magma ocean (design note 12) | [`hosts::young::Formation::molten_until`], which [`derive::PlacedBody::with_magma_ocean_until`] carries to the atmosphere |
 
 pub mod architecture;

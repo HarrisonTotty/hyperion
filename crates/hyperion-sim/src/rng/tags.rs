@@ -371,7 +371,8 @@ domain_tags! {
     // Scope `Body`, opened with `ObjectKey::from(BodyId)`: `planet.orbit`, `planet.radius`,
     // `planet.volatiles`, `planet.spin`, `planet.origin`, `planet.scatter` (ruling 80),
     // `moon.count`, `moon.mass`, `moon.orbit`, `moon.impact`, `moon.capture`, `ring.system`,
-    // `belt.member`, `body.surface`, `body.resources`, `body.continents` (P14.T48.a).
+    // `belt.member`, `body.surface`, `body.resources`, `body.continents` (P14.T48.a),
+    // `body.formation` (P14.T51.c).
     //
     // Scope `Event`, each behind an event tag of plan 06's block 0x0400–0x04FF: `body.impact`
     // (0x0400), `body.eruption` (0x0401), `body.storm` (0x0402), `body.duststorm` (0x0403),
@@ -830,6 +831,16 @@ domain_tags! {
     /// the heading, it is not a member of `stellar::draws::StarDraws`, and word 0 is read whatever
     /// the kick loop's attempt.
     STAR_NS_GLITCH_CLASS: Body = "star.ns.glitch_class";
+
+    // Plan 14, phase L: a small body's formation time (P14.T51.c), under the name and scope the
+    // "Plan 14" heading above lists. Appended here, after plan 06's `star.ns.glitch_class`,
+    // because the macro's order fixes `ALL`.
+
+    /// A body's formation time `t_f` (P14.T51.c), keyed by the body, for every body that is
+    /// neither a planet nor a giant-impact moon, whose crust's thermal history reads it: word 0,
+    /// one open uniform, its place in its window; words 1–7 are reserved
+    /// (`planetary::hooks::crust::formation_time`).
+    BODY_FORMATION: Body = "body.formation";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1059,6 +1070,15 @@ mod tests {
         assert_eq!(SYSTEM_ABUNDANCES.scope(), crate::rng::TagScope::System);
         let at = |tag| ALL.iter().position(|t| *t == tag);
         assert!(at(SYSTEM_ABUNDANCES) > at(BODY_CONTINENTS));
+    }
+
+    #[test]
+    fn plan_14_registers_the_formation_tag_with_body_scope() {
+        assert_eq!(BODY_FORMATION.name(), "body.formation");
+        assert_eq!(BODY_FORMATION.scope(), crate::rng::TagScope::Body);
+        let at = |tag| ALL.iter().position(|t| *t == tag);
+        assert_eq!(at(BODY_FORMATION), Some(ALL.len() - 1));
+        assert!(at(BODY_FORMATION) > at(STAR_NS_GLITCH_CLASS));
     }
 
     #[test]

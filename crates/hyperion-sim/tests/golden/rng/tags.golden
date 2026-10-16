@@ -190,3 +190,4 @@ system.abundances (System) = 0x266a172adc97112a
 centre.ev.flare (Event) = 0xe60651f1fe53aed5
 centre.ev.tidal_disruption (Event) = 0xa1782ed5a9226363
 star.ns.glitch_class (Body) = 0x7563dcffcc4325be
+body.formation (Body) = 0x4fb44c8a523094a0
