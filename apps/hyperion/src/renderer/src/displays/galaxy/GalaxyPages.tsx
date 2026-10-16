@@ -1,5 +1,6 @@
 import { Activity, type KeyboardEvent, useId, useLayoutEffect, useRef } from "react";
 
+import { StatusText } from "../../components/StatusText";
 import type { CentreLy } from "../../lib/galaxy/model";
 import { GalaxyMapPanel } from "./GalaxyMapPanel";
 import { HrDiagram } from "./HrDiagram";
@@ -231,9 +232,13 @@ export function GalaxyPages({
         <Activity mode={page === "hr" ? "visible" : "hidden"}>
           {chart.result === null ? (
             <p className="panel__empty">
-              {chart.fault === null
-                ? "NO CHART: centre one to plot its systems"
-                : "CHART DATA INVALID: retry on the LOCAL CHART page"}
+              <StatusText
+                text={
+                  chart.fault === null
+                    ? "NO CHART: centre one to plot its systems"
+                    : "CHART DATA INVALID: retry on the LOCAL CHART page"
+                }
+              />
             </p>
           ) : (
             <HrDiagram

@@ -17,6 +17,7 @@ import {
 } from "../../test/galaxyFixtures";
 import { stubCanvas } from "../../test/RecordingContext2D";
 import { aSummaryResponse, aSystemSummary } from "../../test/systemFixtures";
+import { statusLine } from "../../test/statusLine";
 
 /** A second universe, which the operator can open instead of the first. */
 const SURVEY_2 = aUniverse({ id: "00000000000000b2", name: "SURVEY 2", seed: "000000000000beef" });
@@ -115,7 +116,9 @@ describe("the SYSTEM display", () => {
       "page",
     );
     expect(
-      screen.getByText("NO SYSTEM SELECTED: select one on GALAXY and press OPEN SYSTEM"),
+      screen.getByText(
+        statusLine("NO SYSTEM SELECTED: select one on GALAXY and press OPEN SYSTEM"),
+      ),
     ).toBeInTheDocument();
   });
 
@@ -201,7 +204,9 @@ describe("the SYSTEM display", () => {
     await user.keyboard("{F3}");
 
     expect(
-      screen.getByText("NO SYSTEM SELECTED: select one on GALAXY and press OPEN SYSTEM"),
+      screen.getByText(
+        statusLine("NO SYSTEM SELECTED: select one on GALAXY and press OPEN SYSTEM"),
+      ),
     ).toBeInTheDocument();
   });
 

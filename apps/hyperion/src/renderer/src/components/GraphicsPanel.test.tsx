@@ -11,6 +11,7 @@ import {
   initialGraphicsStatus,
 } from "../view/engine/status";
 import { GraphicsPanel } from "./GraphicsPanel";
+import { statusLine } from "../test/statusLine";
 
 async function adapter(
   info = INTEL_UHD_620_INFO,
@@ -81,27 +82,27 @@ describe("GraphicsPanel", () => {
     expect(reading("Styles")).toHaveTextContent("WIREFRAME");
     expect(reading("GPU Timer")).toHaveTextContent("ABSENT");
     const statement = screen.getByText(
-      "GRAPHICS SOFTWARE ADAPTER: photorealistic style not available",
+      statusLine("GRAPHICS SOFTWARE ADAPTER: photorealistic style not available"),
     );
     expect(statement).not.toHaveClass("request-status__text--fault");
   });
 
   it("states no WebGPU", () => {
     renderPanel("vulkan", { kind: "adapter-outcome", outcome: { kind: "no-webgpu" } });
-    expect(screen.getByText("GRAPHICS NOT AVAILABLE: no WebGPU")).toBeInTheDocument();
+    expect(screen.getByText(statusLine("GRAPHICS NOT AVAILABLE: no WebGPU"))).toBeInTheDocument();
     expect(reading("Styles")).toHaveTextContent("NONE");
   });
 
   it("states no adapter", () => {
     renderPanel("vulkan", { kind: "adapter-outcome", outcome: { kind: "no-adapter" } });
     expect(
-      screen.getByText("GRAPHICS NO ADAPTER: views not available, relaunch to retry"),
+      screen.getByText(statusLine("GRAPHICS NO ADAPTER: views not available, relaunch to retry")),
     ).toBeInTheDocument();
   });
 
   it("reports a lost device as a fault, with its count", async () => {
     renderPanel("vulkan", { kind: "adapter-outcome", outcome: await adapter() }, LOST);
-    expect(screen.getByText("GRAPHICS DEVICE LOST: re-creating")).toHaveClass(
+    expect(screen.getByText(statusLine("GRAPHICS DEVICE LOST: re-creating"))).toHaveClass(
       "request-status__text--fault",
     );
     expect(reading("Device Losses")).toHaveTextContent("1");
@@ -115,7 +116,9 @@ describe("GraphicsPanel", () => {
     );
     expect(
       screen.getByText(
-        "GRAPHICS VIEW REFUSED: not re-created after device loss, not drawn, relaunch to retry",
+        statusLine(
+          "GRAPHICS VIEW REFUSED: not re-created after device loss, not drawn, relaunch to retry",
+        ),
       ),
     ).toHaveClass("request-status__text--fault");
   });
@@ -126,7 +129,7 @@ describe("GraphicsPanel", () => {
     act(() => {
       store.dispatch({ kind: "gpu-process-gone", count: 2 });
     });
-    expect(screen.getByText("GRAPHICS PROCESS RESTARTED: re-acquiring")).toHaveClass(
+    expect(screen.getByText(statusLine("GRAPHICS PROCESS RESTARTED: re-acquiring"))).toHaveClass(
       "request-status__text--fault",
     );
     expect(reading("Process Restarts")).toHaveTextContent("2");
@@ -142,14 +145,14 @@ describe("GraphicsPanel", () => {
     expect(reading("Mode")).toHaveTextContent(/^SAFE MODE$/);
     expect(reading("Styles")).toHaveTextContent("NONE");
     expect(
-      screen.getByText("GRAPHICS SAFE MODE: views not available, relaunch to retry"),
+      screen.getByText(statusLine("GRAPHICS SAFE MODE: views not available, relaunch to retry")),
     ).not.toHaveClass("request-status__text--fault");
   });
 
   it("states the disabled state after three losses", async () => {
     renderPanel("vulkan", { kind: "adapter-outcome", outcome: await adapter() }, LOST, LOST, LOST);
     expect(
-      screen.getByText("GRAPHICS DISABLED: 3 device losses, relaunch to retry"),
+      screen.getByText(statusLine("GRAPHICS DISABLED: 3 device losses, relaunch to retry")),
     ).not.toHaveClass("request-status__text--fault");
   });
 
@@ -158,7 +161,7 @@ describe("GraphicsPanel", () => {
       kind: "adapter-withdrawn",
     });
     expect(
-      screen.getByText("GRAPHICS DISABLED: adapter withdrawn, relaunch to retry"),
+      screen.getByText(statusLine("GRAPHICS DISABLED: adapter withdrawn, relaunch to retry")),
     ).toBeInTheDocument();
   });
 

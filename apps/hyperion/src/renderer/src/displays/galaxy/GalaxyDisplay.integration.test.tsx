@@ -35,6 +35,7 @@ import {
 } from "../../test/galaxyFixtures";
 import { announcements } from "../../test/liveRegions";
 import { type RecordingContext2D, stubCanvas } from "../../test/RecordingContext2D";
+import { statusLine } from "../../test/statusLine";
 
 /** The universe the operator creates: `SURVEY 1` from the seed typed below. */
 const UNIVERSE = aUniverse();
@@ -423,7 +424,7 @@ describe("the GALAXY display, end to end", { timeout: 300_000 }, () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "Galaxy" })).toBeInTheDocument();
     expect(socket.requestsOfKind("list_universes")).toHaveLength(1);
-    expect(screen.getByText("NO UNIVERSES: create one below")).toBeInTheDocument();
+    expect(screen.getByText(statusLine("NO UNIVERSES: create one below"))).toBeInTheDocument();
   });
 
   it("sends the name and the seed typed when CREATE is given, and waits for the answer", async () => {

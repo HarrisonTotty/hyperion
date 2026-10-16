@@ -18,6 +18,7 @@ import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import { GalaxyMapPanel, OVERLAY_DENSITY_ONLY, OVERLAY_NO_ROOM } from "./GalaxyMapPanel";
 import { DUST_OVERLAY_BRIGHTNESS, DUST_OVERLAY_LABEL } from "./GalaxyMapView";
 import { UniversePanel } from "./UniversePanel";
+import { describedText, statusLine } from "../../test/statusLine";
 
 /** Plays the server's side, letting the outcomes it settles reach React. */
 async function server(play: () => void): Promise<void> {
@@ -378,7 +379,7 @@ describe("GalaxyMapPanel", () => {
     await user.click(within(panel()).getByRole("radio", { name: "EXTINCTION" }));
 
     expect(overlayToggle()).toHaveAttribute("aria-disabled", "true");
-    expect(overlayToggle()).toHaveAccessibleDescription(OVERLAY_DENSITY_ONLY);
+    expect(describedText(overlayToggle())).toBe(OVERLAY_DENSITY_ONLY);
   });
 
   it("puts the overlay on with D", async () => {
@@ -686,8 +687,27 @@ describe("GalaxyMapPanel", () => {
       await openUniverse(user, socket);
 
       expect(overlayToggle()).toHaveAttribute("aria-disabled", "true");
-      expect(overlayToggle()).toHaveAccessibleDescription(OVERLAY_NO_ROOM);
-      expect(within(panel()).getByText(OVERLAY_NO_ROOM)).toBeInTheDocument();
+      expect(describedText(overlayToggle())).toBe(OVERLAY_NO_ROOM);
+      expect(within(panel()).getByText(statusLine(OVERLAY_NO_ROOM))).toBeInTheDocument();
+    });
+
+    it("tracks the room's NOT AVAILABLE: and leaves its sentence, DUST OVERLAY in it, untracked", async () => {
+      stubPageSize(...PAGE_1280_720);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+
+      const state = within(panel()).getByText("NOT AVAILABLE:");
+      expect([
+        state.className,
+        state.nextElementSibling?.className,
+        state.nextElementSibling?.textContent,
+        state.parentElement?.className,
+      ]).toEqual([
+        "status-text__state",
+        "status-text__sentence",
+        " no room for DUST OVERLAY at this window size",
+        "galaxy-map__overlay-reason",
+      ]);
     });
 
     it("does nothing on D or a click at 1280 × 720", async () => {
@@ -729,8 +749,8 @@ describe("GalaxyMapPanel", () => {
 
       await user.click(within(panel()).getByRole("radio", { name: "EXTINCTION" }));
 
-      expect(overlayToggle()).toHaveAccessibleDescription(OVERLAY_NO_ROOM);
-      expect(within(panel()).queryByText(OVERLAY_DENSITY_ONLY)).not.toBeInTheDocument();
+      expect(describedText(overlayToggle())).toBe(OVERLAY_NO_ROOM);
+      expect(within(panel()).queryByText(statusLine(OVERLAY_DENSITY_ONLY))).not.toBeInTheDocument();
     });
 
     it("is described by the link's reason and its own while both hold", async () => {
@@ -742,7 +762,7 @@ describe("GalaxyMapPanel", () => {
         socket.close();
       });
 
-      expect(overlayToggle()).toHaveAccessibleDescription(`NO CARRIER ${OVERLAY_NO_ROOM}`);
+      expect(describedText(overlayToggle())).toBe(`NO CARRIER ${OVERLAY_NO_ROOM}`);
     });
 
     it("lays the page out the same with the overlay on as off", async () => {

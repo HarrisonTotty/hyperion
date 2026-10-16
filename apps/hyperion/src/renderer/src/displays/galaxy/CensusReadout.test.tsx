@@ -10,6 +10,7 @@ import { aSystemsInRange } from "../../test/galaxyFixtures";
 import { announcements } from "../../test/liveRegions";
 import { CensusReadout } from "./CensusReadout";
 import { filterSystems, type StarFilter } from "./chartModel";
+import { describedText, statusLine } from "../../test/statusLine";
 
 const CENTRE = [26_000, 0, 0] as const;
 
@@ -94,9 +95,18 @@ describe("CensusReadout", () => {
   it("says what to do when nothing fits, as a limit reached", () => {
     renderReadout(aChart({ overLimit: ["a", "b", "c", "d", "e"] }));
 
-    expect(screen.getByText("NOTHING FITS: reduce radius")).toHaveClass(
+    expect(screen.getByText(statusLine("NOTHING FITS: reduce radius"))).toHaveClass(
       "census-readout__line--caution",
     );
+  });
+
+  it("tracks NOTHING FITS: as a state, and leaves what to do after it untracked", () => {
+    renderReadout(aChart({ overLimit: ["a", "b", "c", "d", "e"] }));
+
+    expect([
+      screen.getByText("NOTHING FITS:").className,
+      screen.getByText("reduce radius").className,
+    ]).toEqual(["status-text__state", "status-text__sentence"]);
   });
 
   it("counts the systems returned and those within the drive range", () => {
@@ -119,7 +129,7 @@ describe("CensusReadout", () => {
     renderReadout(aChart({ overLimit: ["a"] }));
 
     expect(
-      screen.getByText("DENSE REGION: reduce radius before raising MIN MASS"),
+      screen.getByText(statusLine("DENSE REGION: reduce radius before raising MIN MASS")),
     ).toBeInTheDocument();
   });
 
@@ -256,7 +266,7 @@ describe("CensusReadout", () => {
     });
 
     // Outside the region, so the words are not read with it unless it names them itself.
-    expect(screen.getByRole("button", { name: "RETRY" })).toHaveAccessibleDescription(
+    expect(describedText(screen.getByRole("button", { name: "RETRY" }))).toBe(
       "REJECTED: the queue is full",
     );
   });
@@ -309,15 +319,20 @@ describe("CensusReadout", () => {
     renderReadout(TWO_SYSTEMS, { kind: "link_down", reason: "NO CARRIER" });
 
     // Exactly the plain class, so that a renamed caution class cannot pass unseen.
-    expect(within(summary()).getByText("NO CARRIER")).toHaveClass("census-readout__state", {
-      exact: true,
-    });
+    expect(within(summary()).getByText(statusLine("NO CARRIER"))).toHaveClass(
+      "census-readout__state",
+      {
+        exact: true,
+      },
+    );
   });
 
   it("reads a timeout in caution, as a failed system", () => {
     renderReadout(TWO_SYSTEMS, { kind: "timed_out" });
 
-    expect(within(summary()).getByText("TIMED OUT")).toHaveClass("census-readout__state--fault");
+    expect(within(summary()).getByText(statusLine("TIMED OUT"))).toHaveClass(
+      "census-readout__state--fault",
+    );
   });
 
   it("reads a refusal in plain text, since nothing failed", () => {
@@ -327,10 +342,25 @@ describe("CensusReadout", () => {
       reason: "no such universe",
     });
 
-    expect(within(summary()).getByText("REJECTED: no such universe")).toHaveClass(
+    expect(within(summary()).getByText(statusLine("REJECTED: no such universe"))).toHaveClass(
       "census-readout__state",
       { exact: true },
     );
+  });
+
+  it("sets a refusal's state and the server's reason as two parts in the census region", () => {
+    renderReadout(TWO_SYSTEMS, {
+      kind: "rejected",
+      code: "unknown_universe",
+      reason: "no such universe",
+    });
+
+    const state = within(summary()).getByText("REJECTED:");
+    expect([
+      state.className,
+      state.nextElementSibling?.className,
+      state.parentElement?.className,
+    ]).toEqual(["status-text__state", "status-text__sentence", "census-readout__state"]);
   });
 
   it("reads the census layer by layer with its position and total, the head kept in view", async () => {

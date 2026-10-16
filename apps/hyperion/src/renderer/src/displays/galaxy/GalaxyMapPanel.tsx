@@ -1,6 +1,7 @@
 import type { MapPopulation } from "@hyperion/protocol";
 import { type CSSProperties, useEffect, useId, useState, useSyncExternalStore } from "react";
 
+import { StatusText } from "../../components/StatusText";
 import { formatScaleLength } from "../../lib/format";
 import type { CentreLy } from "../../lib/galaxy/model";
 import { populationLabel } from "../../lib/galaxy/wire";
@@ -307,7 +308,7 @@ export function GalaxyMapPanel({ cursorLy, onCursor, centreLy, shown }: GalaxyMa
               </button>
               {overlayReason === null ? null : (
                 <span className="galaxy-map__overlay-reason" id={overlayReasonId}>
-                  {overlayReason}
+                  <StatusText text={overlayReason} />
                 </span>
               )}
               {overlayShown ? (

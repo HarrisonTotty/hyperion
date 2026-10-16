@@ -16,6 +16,7 @@ import {
 import { DisclosureGlyph } from "../../components/DisclosureGlyph";
 import { StaleMark } from "../../components/StaleMark";
 import { StatusLine, type StatusStanding } from "../../components/StatusLine";
+import { StatusText } from "../../components/StatusText";
 import type { BodyDistanceUnit } from "../../lib/format";
 import type { SceneFrame } from "../../lib/scene/apparent";
 import type { SceneKinematics, SceneModel, SystemPlace } from "../../lib/scene/model";
@@ -1274,16 +1275,20 @@ function ViewStage({
         ))}
       </div>
       {folded("camera") && noOwnShip ? (
-        <p className="view-camera__reason view-folds__standing">{NO_OWN_SHIP}</p>
+        <p className="view-camera__reason view-folds__standing">
+          <StatusText text={NO_OWN_SHIP} />
+        </p>
       ) : null}
       {folded("style") && controlledFaulted && styleReason !== null ? (
         <p className="view-style__reason view-style__reason--fault view-folds__standing">
-          {styleReason}
+          <StatusText text={styleReason} />
         </p>
       ) : null}
       {folded("exposure") && exposureStanding !== null ? (
         <p className="view-exposure__reason view-folds__standing">
-          <output>{exposureNote(exposureStanding)}</output>
+          <output>
+            <StatusText text={exposureStanding} renderPart={exposureNote} />
+          </output>
         </p>
       ) : null}
     </>

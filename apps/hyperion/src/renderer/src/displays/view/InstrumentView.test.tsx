@@ -2,6 +2,7 @@ import { act, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { binaryFrame } from "../../test/binaryFrames";
+import { describedText, statusLine } from "../../test/statusLine";
 import {
   InThreadSkyWorker,
   nearestFirstCensus,
@@ -255,10 +256,12 @@ describe("VIEW's instrument views (R07.T19)", () => {
     await view.user.click(controlsButton("INSTRUMENT 1"));
     view.advance(100);
     expect(
-      within(screen.getByRole("region", { name: "Style INSTRUMENT 1" })).getByRole("button", {
-        name: "PHOTOREALISTIC",
-      }),
-    ).toHaveAccessibleDescription(ONE_PHOTOREALISTIC_VIEW);
+      describedText(
+        within(screen.getByRole("region", { name: "Style INSTRUMENT 1" })).getByRole("button", {
+          name: "PHOTOREALISTIC",
+        }),
+      ),
+    ).toBe(ONE_PHOTOREALISTIC_VIEW);
   });
 
   it("refuses a second view's key 4 on low, the CONTROLS instrument staying a wireframe", async () => {
@@ -333,16 +336,33 @@ describe("VIEW's instrument views (R07.T19)", () => {
   it("holds a closed instrument's CONTROLS button back with its reason", async () => {
     const view = await setup();
     await openInstrument(view, "INSTRUMENT 1");
-    expect(controlsButton("INSTRUMENT 2")).toHaveAccessibleDescription(
+    expect(describedText(controlsButton("INSTRUMENT 2"))).toBe(
       "NOT AVAILABLE: INSTRUMENT 2 is not open",
     );
   });
 
   it("gives both closed instruments' CONTROLS buttons one reason", async () => {
     await setup();
-    expect(controlsButton("INSTRUMENT 1")).toHaveAccessibleDescription(
+    expect(describedText(controlsButton("INSTRUMENT 1"))).toBe(
       "NOT AVAILABLE: INSTRUMENT 1 and INSTRUMENT 2 are not open",
     );
+  });
+
+  it("tracks the reason's NOT AVAILABLE: and leaves its sentence, the slots' names in it, untracked", async () => {
+    await setup();
+    const reason = screen.getByText(
+      statusLine("NOT AVAILABLE: INSTRUMENT 1 and INSTRUMENT 2 are not open"),
+    );
+    expect([
+      reason.className,
+      [...reason.children].map((part) => [part.className, part.textContent]),
+    ]).toEqual([
+      "view-instruments-panel__reason",
+      [
+        ["status-text__state", "NOT AVAILABLE:"],
+        ["status-text__sentence", " INSTRUMENT 1 and INSTRUMENT 2 are not open"],
+      ],
+    ]);
   });
 
   it("designates the target, camera and style panels with the CONTROLS view", async () => {
@@ -378,7 +398,7 @@ describe("VIEW's instrument views (R07.T19)", () => {
     const open = within(screen.getByRole("group", { name: "INSTRUMENT 1" })).getByRole("button", {
       name: "OPEN",
     });
-    expect(open).toHaveAccessibleDescription("NOT AVAILABLE: no view can be drawn");
+    expect(describedText(open)).toBe("NOT AVAILABLE: no view can be drawn");
   });
 
   it("draws an instrument opened during a device loss once the engine is restored", async () => {
@@ -442,7 +462,7 @@ describe("VIEW's instrument views (R07.T19)", () => {
     view.advance(100);
     expect(
       within(screen.getByRole("region", { name: "INSTRUMENT 1" })).getByText(
-        /^GRAPHICS NOT AVAILABLE: views could not be made/,
+        statusLine(/^GRAPHICS NOT AVAILABLE: views could not be made/),
       ),
     ).toBeInTheDocument();
   });
@@ -453,9 +473,7 @@ describe("VIEW's instrument views (R07.T19)", () => {
     const open = within(screen.getByRole("group", { name: "INSTRUMENT 2" })).getByRole("button", {
       name: "OPEN",
     });
-    expect(open).toHaveAccessibleDescription(
-      "NOT AVAILABLE: no room for INSTRUMENT 2 at this window size",
-    );
+    expect(describedText(open)).toBe("NOT AVAILABLE: no room for INSTRUMENT 2 at this window size");
   });
 });
 

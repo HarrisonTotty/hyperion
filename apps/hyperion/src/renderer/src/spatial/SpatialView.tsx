@@ -25,6 +25,7 @@ import {
   zoomLimits,
 } from "./camera";
 import { StaleMark } from "../components/StaleMark";
+import { StatusText } from "../components/StatusText";
 import { AxisTriad } from "./AxisTriad";
 import { AXIS_FALLBACK_MESSAGE, CoreArrow } from "./CoreArrow";
 import { buildDrawList, type ScreenPoint } from "./drawList";
@@ -616,7 +617,9 @@ export function SpatialView({
         )}
         {stale ? <StaleMark /> : null}
         {shownAxes.onAxis ? (
-          <p className="spatial-view__axis-note">{AXIS_FALLBACK_MESSAGE}</p>
+          <p className="spatial-view__axis-note">
+            <StatusText text={AXIS_FALLBACK_MESSAGE} />
+          </p>
         ) : null}
       </div>
     </div>

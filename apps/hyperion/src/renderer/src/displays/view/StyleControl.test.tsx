@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { RenderStyle } from "../../view/camera/state";
 import { StyleControl } from "./StyleControl";
+import { describedText, statusLine } from "../../test/statusLine";
 
 const BOTH = { wireframe: null, photorealistic: null } as const;
 const SOFTWARE = {
@@ -21,9 +22,30 @@ describe("StyleControl", () => {
         onStyle={() => undefined}
       />,
     );
-    expect(screen.getByText("GRAPHICS STYLE REFUSED: not made")).toHaveClass(
+    expect(screen.getByText(statusLine("GRAPHICS STYLE REFUSED: not made"))).toHaveClass(
       "view-style__reason--fault",
     );
+  });
+
+  it("tracks a refusal's state and leaves its sentence untracked, the fault's colour on both", () => {
+    render(
+      <StyleControl
+        renderStyle="wireframe"
+        refusals={{ wireframe: null, photorealistic: "GRAPHICS STYLE REFUSED: not made" }}
+        faulted
+        onStyle={() => undefined}
+      />,
+    );
+    const state = screen.getByText("GRAPHICS STYLE REFUSED:");
+    expect([
+      state.className,
+      state.nextElementSibling?.className,
+      state.parentElement?.className,
+    ]).toEqual([
+      "status-text__state",
+      "status-text__sentence",
+      "view-style__reason view-style__reason--fault",
+    ]);
   });
 
   it("shows the view's style as the pressed button", () => {
@@ -68,7 +90,7 @@ describe("StyleControl", () => {
     );
     const photorealistic = screen.getByRole("button", { name: "PHOTOREALISTIC" });
     expect(photorealistic).toHaveAttribute("aria-disabled", "true");
-    expect(photorealistic).toHaveAccessibleDescription(
+    expect(describedText(photorealistic)).toBe(
       "GRAPHICS SOFTWARE ADAPTER: photorealistic style not available",
     );
     await user.click(photorealistic);

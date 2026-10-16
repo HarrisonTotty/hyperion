@@ -33,6 +33,7 @@ import {
 } from "../../test/systemFixtures";
 import { fitRadiiAu, orbitPlane, orbitScene } from "./orbitMap";
 import { SystemView } from "./SystemView";
+import { statusLine } from "../../test/statusLine";
 
 /** Every element laid out 400 × 300, so that the map's stage and canvas are that size. */
 const WIDTH_PX = 400;
@@ -165,7 +166,9 @@ describe("SystemView's requests", () => {
       socket.serverRejects(request?.id ?? -1, anUnsupportedError());
     });
 
-    const status = within(mapPanel()).getByText("REJECTED: system_summary is not served yet");
+    const status = within(mapPanel()).getByText(
+      statusLine("REJECTED: system_summary is not served yet"),
+    );
     expect(status).toHaveClass("request-status__text--fault");
 
     await user.click(within(mapPanel()).getByRole("button", { name: "RETRY" }));
@@ -181,7 +184,7 @@ describe("SystemView's requests", () => {
     });
 
     const status = within(mapPanel()).getByText(
-      "REJECTED: no system 0200080020000000 in this universe",
+      statusLine("REJECTED: no system 0200080020000000 in this universe"),
     );
     expect(status).not.toHaveClass("request-status__text--fault");
   });
@@ -221,7 +224,7 @@ describe("SystemView's requests", () => {
     await answer(socket, aSystemSummary({ hierarchy: { nodes: [] } }));
 
     expect(
-      within(mapPanel()).getByText("SYSTEM DATA INVALID: hierarchy malformed"),
+      within(mapPanel()).getByText(statusLine("SYSTEM DATA INVALID: hierarchy malformed")),
     ).toBeInTheDocument();
     expect(within(mapPanel()).getByRole("button", { name: "RETRY" })).toBeInTheDocument();
   });

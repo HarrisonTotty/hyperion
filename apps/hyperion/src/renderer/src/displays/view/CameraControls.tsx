@@ -1,5 +1,6 @@
-import { useId } from "react";
+import { type ReactNode, useId } from "react";
 
+import { StatusText } from "../../components/StatusText";
 import type { PrimaryModifier } from "../../lib/platform";
 import type { ViewKeyAction } from "../../view/camera/keys";
 import { FOV_STEPS_DEG } from "../../view/camera/projection";
@@ -62,6 +63,35 @@ const PRESET_KEYS: ReadonlyArray<{ readonly preset: CameraPreset; readonly key: 
   { preset: "chase", key: "2" },
   { preset: "free", key: "3" },
 ];
+
+/** The rate's chord as the words of its limit reason name it, before the platform's is set. */
+function chordWords(arrow: "↑" | "↓"): string {
+  return `CTRL+${arrow}`;
+}
+
+/**
+ * Why the rate's step is held back at an end, as one line for `StatusText` to split, its chord
+ * in words: `NOT AVAILABLE: CTRL+↑, RATE at its highest step`.
+ */
+function rateLimitReason(arrow: "↑" | "↓"): string {
+  return `NOT AVAILABLE: ${chordWords(arrow)}, RATE at its ${arrow === "↑" ? "highest" : "lowest"} step`;
+}
+
+/** A part of the rate's limit reason with its chord as the platform reads it (`⌘↑` drawn on macOS). */
+function withRateChord(part: string, modifier: PrimaryModifier, arrow: "↑" | "↓"): ReactNode {
+  const words = chordWords(arrow);
+  const at = part.indexOf(words);
+  if (at < 0) {
+    return part;
+  }
+  return (
+    <>
+      {part.slice(0, at)}
+      <RateChord modifier={modifier} arrows={arrow} />
+      {part.slice(at + words.length)}
+    </>
+  );
+}
 
 /**
  * The view's camera controls (plan R02, R02.T15.c): the presets `SEAT`, `CHASE` and `FREE`, the
@@ -141,7 +171,7 @@ export function CameraControls({
       </fieldset>
       {anyHeldBack ? (
         <p className="view-camera__reason" id={noShipId}>
-          {NO_OWN_SHIP}
+          <StatusText text={NO_OWN_SHIP} />
         </p>
       ) : null}
       <fieldset className="preset-buttons" aria-label="Target">
@@ -204,14 +234,18 @@ export function CameraControls({
       </fieldset>
       {narrowest || widest ? (
         <p className="view-camera__reason" id={fovLimitId}>
-          NOT AVAILABLE: FOV at its {narrowest ? "narrowest" : "widest"} step
+          <StatusText
+            text={`NOT AVAILABLE: FOV at its ${narrowest ? "narrowest" : "widest"} step`}
+          />
         </p>
       ) : null}
       <CameraReadings rateStep={rateStep} place={place} sceneStale={sceneStale} />
       {slowest || fastest ? (
         <p className="view-camera__reason">
-          NOT AVAILABLE: <RateChord modifier={modifier} arrows={fastest ? "↑" : "↓"} />, RATE at its{" "}
-          {fastest ? "highest" : "lowest"} step
+          <StatusText
+            text={rateLimitReason(fastest ? "↑" : "↓")}
+            renderPart={(part) => withRateChord(part, modifier, fastest ? "↑" : "↓")}
+          />
         </p>
       ) : null}
       <div className="view-camera__setting">
@@ -229,7 +263,7 @@ export function CameraControls({
         <output aria-hidden="true">{easedMoves ? "ON" : "OFF"}</output>
         {reducedMotion ? (
           <span className="view-camera__reason" id={reducedId}>
-            NOT APPLIED: reduced motion
+            <StatusText text="NOT APPLIED: reduced motion" />
           </span>
         ) : null}
       </div>

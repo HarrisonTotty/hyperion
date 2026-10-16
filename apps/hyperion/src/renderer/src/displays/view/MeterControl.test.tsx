@@ -7,6 +7,7 @@ import { DEFAULT_EXPOSURE, type ExposureControl } from "../../view/photometry/ex
 import type { Metering } from "../../view/post/autoExposure";
 import type { MeterMode } from "../../view/post/meter";
 import { MeterControl } from "./MeterControl";
+import { describedText, statusLine } from "../../test/statusLine";
 
 const AUTO: ExposureControl = { kind: "auto", ev100: 9.6 };
 
@@ -221,9 +222,38 @@ describe("MeterControl's own statuses (R07.T16.b)", () => {
         screen.queryByText(/^EV100/u),
         screen.queryByText(/NO IMAGE TO METER/u),
       ]).toEqual(["P", null, null]);
-      expect(screen.getByRole("button", { name: label })).toHaveAccessibleDescription(words);
+      expect(describedText(screen.getByRole("button", { name: label }))).toBe(words);
     },
   );
+
+  it("tracks NO LIT SIDE: as the meter's state, and leaves what to do untracked", () => {
+    render(
+      <MeterControl
+        meter="lit"
+        exposure={INHIBITED}
+        source={SOURCE}
+        metering={{ kind: "nothing-weighed", meter: "lit" }}
+        onMeter={() => undefined}
+      />,
+    );
+    const line = screen.getByText(
+      statusLine("NO LIT SIDE: choose AVG, or bring a sunlit body into view"),
+    );
+    // The meter's status is a run of its own inside the state, which a line never breaks.
+    expect([
+      line.closest(".view-meter__reason")?.tagName,
+      [...line.children].map((part) => [
+        part.className,
+        part.querySelector(".view-label__run")?.textContent ?? null,
+      ]),
+    ]).toEqual([
+      "P",
+      [
+        ["status-text__state", "NO LIT SIDE"],
+        ["status-text__sentence", null],
+      ],
+    ]);
+  });
 
   it("describes only the chosen meter with its status, and keeps every meter choosable", async () => {
     const user = userEvent.setup();

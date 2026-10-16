@@ -3,6 +3,7 @@ import { type ReactNode, useEffect, useId, useState } from "react";
 
 import { EarthMassUnit } from "../../components/EarthMassUnit";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
+import { StatusText } from "../../components/StatusText";
 import {
   formatNumber,
   formatScaleLength,
@@ -191,7 +192,7 @@ function NumberField({
       </span>
       {refused ? (
         <p className="form-field__error chart-controls__error" id={errorId}>
-          {name} INVALID: {valid}
+          <StatusText text={`${name} INVALID: ${valid}`} />
         </p>
       ) : null}
     </div>

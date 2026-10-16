@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RequestState } from "../lib/useServerRequest";
 import { aUniverseList } from "../test/galaxyFixtures";
 import { RequestStatus } from "./RequestStatus";
+import { describedText } from "../test/statusLine";
 
 describe("RequestStatus", () => {
   it.each<[string, RequestState<RequestKind>, string, boolean]>([
@@ -101,9 +102,7 @@ describe("RequestStatus", () => {
     );
 
     // As the census's RETRY is, so that a RETRY reached by Tab says what it retries everywhere.
-    expect(screen.getByRole("button", { name: "RETRY" })).toHaveAccessibleDescription(
-      "REJECTED: busy",
-    );
+    expect(describedText(screen.getByRole("button", { name: "RETRY" }))).toBe("REJECTED: busy");
   });
 
   it("names what the request is for before its state, where one is given", () => {

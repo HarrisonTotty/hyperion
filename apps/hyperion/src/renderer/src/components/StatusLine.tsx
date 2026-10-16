@@ -1,5 +1,7 @@
 import { useId } from "react";
 
+import { StatusText } from "./StatusText";
+
 /**
  * How a status line reads: neutral while something waits, a refusal in plain text, or a fault,
  * a failed or overloaded system or an unknown result, in `--status-caution`.
@@ -35,7 +37,9 @@ interface StatusLineProps {
  * Every state is in words, never a spinner. A fault is in `--status-caution` with its words, since
  * the guide keeps yellow for alerts, limits and failed systems; waiting and a refusal are plain
  * text. The control is a display control (`.control`), not a command, and is described by the
- * status's words, so that it says what it acts on wherever it is reached from.
+ * status's words, so that it says what it acts on wherever it is reached from. The words are set
+ * through {@link StatusText}: a state and its colon tracked, the sentence after them untracked
+ * (`REJECTED: the interactive queue is full`), and a line that is upper case whole tracked whole.
  *
  * The `output` is a live region of its own, and the words are phrasing content, which is what an
  * `output` may hold. It is never rendered inside another live region: one region nested in another
@@ -57,7 +61,7 @@ export function StatusLine({ text, standing, id, action }: StatusLineProps) {
             : "request-status__text"
         }
       >
-        {text}
+        <StatusText text={text} />
       </output>
       {action === undefined ? null : (
         <button

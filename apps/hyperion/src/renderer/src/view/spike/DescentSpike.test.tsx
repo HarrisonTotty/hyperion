@@ -46,6 +46,7 @@ import {
   type SurfaceQueryRequest,
   type SurfaceQueryWorker,
 } from "./surfaceQuery";
+import { statusLine } from "../../test/statusLine";
 
 function wasmBytes(): Uint8Array {
   const comma = wasmDataUrl.indexOf(",");
@@ -252,7 +253,7 @@ describe("DescentSpike", () => {
 
   it("states the test planet as provisional, dry and hand-parameterised", () => {
     renderSpike();
-    expect(screen.getByText(TEST_PLANET_STATEMENT)).toBeDefined();
+    expect(screen.getByText(statusLine(TEST_PLANET_STATEMENT))).toBeDefined();
     expect(TEST_PLANET_STATEMENT).toMatch(/provisional, dry and hand-parameterised/);
   });
 
@@ -263,7 +264,9 @@ describe("DescentSpike", () => {
 
   it("says it is measuring the terrain, then shows the site's height", async () => {
     renderSpike();
-    expect(screen.getByText("MEASURING TERRAIN: landing site and ground track")).toBeDefined();
+    expect(
+      screen.getByText(statusLine("MEASURING TERRAIN: landing site and ground track")),
+    ).toBeDefined();
     const reading = await screen.findByText(/^[+-][\d,]+ m$/, undefined, { timeout: 20_000 });
     expect(reading.closest("dd")?.previousElementSibling?.textContent).toBe("Site Height");
   }, 30_000);
@@ -276,7 +279,9 @@ describe("DescentSpike", () => {
   it("says the terrain was not measured when the query fails", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     renderSpike({ workers: { ...WORKERS, query: () => new FailingQueryWorker() } });
-    expect(await screen.findByText(/^TERRAIN NOT MEASURED: .*relaunch to retry$/)).toBeDefined();
+    expect(
+      await screen.findByText(statusLine(/^TERRAIN NOT MEASURED: .*relaunch to retry$/)),
+    ).toBeDefined();
   });
 
   it("stops the query's worker when it goes before the answer", () => {
@@ -289,7 +294,9 @@ describe("DescentSpike", () => {
   it("says the views could not be made when the engine refuses them", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     renderSpike({ engine: refusingEngine() });
-    expect(await screen.findByText(VIEWS_NOT_MADE, undefined, { timeout: 20_000 })).toBeDefined();
+    expect(
+      await screen.findByText(statusLine(VIEWS_NOT_MADE), undefined, { timeout: 20_000 }),
+    ).toBeDefined();
   }, 30_000);
 
   it("stops and says so when the engine refuses a frame", async () => {
@@ -298,7 +305,9 @@ describe("DescentSpike", () => {
     stubLayout();
     const made = readyEngine({ refuseFrames: true });
     renderSpike({ engine: made.source });
-    expect(await screen.findByText(VIEWS_NOT_MADE, undefined, { timeout: 20_000 })).toBeDefined();
+    expect(
+      await screen.findByText(statusLine(VIEWS_NOT_MADE), undefined, { timeout: 20_000 }),
+    ).toBeDefined();
     expect(made.views().length).toBe(3);
   }, 30_000);
 
@@ -340,7 +349,9 @@ describe("DescentSpike", () => {
           new DescentRefused(5n, new RangeError("the descent cannot clear its floors")),
         ),
     });
-    expect(await screen.findByText(DESCENT_REFUSED, undefined, { timeout: 20_000 })).toBeDefined();
+    expect(
+      await screen.findByText(statusLine(DESCENT_REFUSED), undefined, { timeout: 20_000 }),
+    ).toBeDefined();
   }, 30_000);
 
   it("tells its listeners each failure that ends the run, with the status it shows", async () => {
@@ -354,7 +365,7 @@ describe("DescentSpike", () => {
           new DescentRefused(5n, new RangeError("the descent cannot clear its floors")),
         ),
     });
-    await screen.findByText(DESCENT_REFUSED, undefined, { timeout: 20_000 });
+    await screen.findByText(statusLine(DESCENT_REFUSED), undefined, { timeout: 20_000 });
     refused.unmount();
     const unmeasured = renderSpike({
       listeners,
@@ -363,7 +374,7 @@ describe("DescentSpike", () => {
     await screen.findByText(/^TERRAIN NOT MEASURED/);
     unmeasured.unmount();
     renderSpike({ listeners, engine: refusingEngine() });
-    await screen.findByText(VIEWS_NOT_MADE, undefined, { timeout: 20_000 });
+    await screen.findByText(statusLine(VIEWS_NOT_MADE), undefined, { timeout: 20_000 });
     expect(failed).toEqual([
       DESCENT_REFUSED,
       expect.stringMatching(/^TERRAIN NOT MEASURED/),

@@ -69,6 +69,7 @@ import { ViewDisplay } from "./ViewDisplay";
 import { NO_VIEW_DRAWN, PHOTOREAL_NOT_CREATED } from "./styleRefusals";
 import { ViewSceneProvider } from "./ViewSceneProvider";
 import { runPose, STAR_SOURCE, STARS_WITHOUT_POSITION, startRun, stepRun } from "./viewRun";
+import { describedText, statusLine } from "../../test/statusLine";
 
 const WIDTH_PX = 640;
 const HEIGHT_PX = 360;
@@ -353,7 +354,9 @@ describe("VIEW's style panel while no view is drawn (R07.T19.b's follow-up)", ()
     expect(screen.getByRole("application")).toBeInTheDocument();
     expect([pending, sidePanelsInOrder()]).toEqual([true, true]);
     expect(
-      within(screen.getByRole("region", { name: "Style PRIMARY" })).queryByText(NO_VIEW_DRAWN),
+      within(screen.getByRole("region", { name: "Style PRIMARY" })).queryByText(
+        statusLine(NO_VIEW_DRAWN),
+      ),
     ).toBeNull();
   });
 });
@@ -423,7 +426,9 @@ describe("the VIEW display", () => {
     });
     await settle();
     expect([
-      screen.getByText("GRAPHICS NOT AVAILABLE: views could not be made, relaunch to retry"),
+      screen.getByText(
+        statusLine("GRAPHICS NOT AVAILABLE: views could not be made, relaunch to retry"),
+      ),
       screen.queryByRole("application"),
     ]).toEqual([expect.anything(), null]);
     expect(logged).toHaveBeenCalledWith("view view could not be made:", expect.any(Error));
@@ -439,7 +444,9 @@ describe("the VIEW display", () => {
     advance(16);
     expect(
       screen.getByText(
-        "GRAPHICS VIEW REFUSED: not re-created after device loss, not drawn, relaunch to retry",
+        statusLine(
+          "GRAPHICS VIEW REFUSED: not re-created after device loss, not drawn, relaunch to retry",
+        ),
       ),
     ).toHaveClass("request-status__text--fault");
     expect(screen.getByRole("application")).toBeInTheDocument();
@@ -597,7 +604,7 @@ describe("the VIEW display", () => {
     await user.keyboard("{PageUp}");
     advance(300);
     expect(rate).toHaveTextContent("RATE 3.16 km/s");
-    expect(screen.queryByText(/NOT AVAILABLE: PAGE/)).not.toBeInTheDocument();
+    expect(screen.queryByText(statusLine(/NOT AVAILABLE: PAGE/))).not.toBeInTheDocument();
     for (let i = 0; i < 8; i += 1) {
       // Each press is one step; they are sequential by nature.
       // oxlint-disable-next-line no-await-in-loop
@@ -605,7 +612,9 @@ describe("the VIEW display", () => {
     }
     advance(300);
     expect(rate).toHaveTextContent("RATE 1.00 m/s");
-    expect(screen.getByText("NOT AVAILABLE: CTRL+↓, RATE at its lowest step")).toBeInTheDocument();
+    expect(
+      screen.getByText(statusLine("NOT AVAILABLE: CTRL+↓, RATE at its lowest step")),
+    ).toBeInTheDocument();
   });
 
   it("moves a mark's label with its mark every frame, between readouts", async () => {
@@ -1017,7 +1026,7 @@ describe("the VIEW display's server scene", () => {
     advance(300);
     expect([
       screen.getByRole("button", { name: "SERVER" }).getAttribute("aria-pressed"),
-      screen.getByText("SCENE NOT AVAILABLE: no universe open"),
+      screen.getByText(statusLine("SCENE NOT AVAILABLE: no universe open")),
       labelBlock(),
     ]).toEqual(["true", expect.anything(), expect.stringMatching(/SCENE.*PRECISION TEST/)]);
   });
@@ -1160,7 +1169,7 @@ describe("the VIEW display's server scene", () => {
     await settle();
     view.advance(300);
     expect([
-      screen.getByText("SCENE STALE: reopening the scene"),
+      screen.getByText(statusLine("SCENE STALE: reopening the scene")),
       // The time reading, its runs each in a span of its own (R07.T19.b).
       screen
         .getByText(
@@ -1195,7 +1204,7 @@ describe("the VIEW display's server scene", () => {
     await settle();
     view.advance(300);
     expect(
-      screen.getByText("CAMERA REPORT REJECTED: a camera is outside the scene's reach"),
+      screen.getByText(statusLine("CAMERA REPORT REJECTED: a camera is outside the scene's reach")),
     ).toBeInTheDocument();
   });
 
@@ -1215,7 +1224,9 @@ describe("the VIEW display's server scene", () => {
     });
     await settle();
     view.advance(300);
-    expect(screen.getByText("SCENE REJECTED: the scene could not be made")).toBeInTheDocument();
+    expect(
+      screen.getByText(statusLine("SCENE REJECTED: the scene could not be made")),
+    ).toBeInTheDocument();
     await view.user.click(screen.getByRole("button", { name: "RETRY" }));
     expect([
       view.socket.requestsOfKind("subscribe").length,
@@ -1492,7 +1503,7 @@ describe("the VIEW display's photorealistic style when its pipelines fail (R07.T
     expect([
       screen.getByRole("application", { name: /^VIEW, WIREFRAME/ }).tagName,
       screen.getByRole("button", { name: "PHOTOREALISTIC" }).getAttribute("aria-disabled"),
-      screen.getByText(PHOTOREAL_NOT_CREATED).tagName,
+      screen.getByText(statusLine(PHOTOREAL_NOT_CREATED)).tagName,
     ]).toEqual(["CANVAS", "true", "P"]);
   });
 });
@@ -1617,9 +1628,7 @@ describe("the VIEW display's meter with nothing to weigh (R07.T16.b)", () => {
       [[], expect.stringMatching(/AUTO$/u)],
       ["NO LIT SIDE"],
     ]);
-    expect(meterPanel().getByRole("button", { name: "LIT" })).toHaveAccessibleDescription(
-      NO_LIT_SIDE,
-    );
+    expect(describedText(meterPanel().getByRole("button", { name: "LIT" }))).toBe(NO_LIT_SIDE);
     expect(exposureReadout()).toMatch(/INHIBITED · NO LIT SIDE$/u);
     expect(screen.getByRole("button", { name: "ENABLE" })).toHaveAccessibleDescription(
       "NO LIT SIDE",
@@ -1638,7 +1647,7 @@ describe("the VIEW display's meter with nothing to weigh (R07.T16.b)", () => {
       screen.queryByText(/^AUTO NOT AVAILABLE/u),
       exposureReadout(),
     ];
-    expect(screen.getByRole("button", { name: "ENABLE" })).toHaveAccessibleDescription(
+    expect(describedText(screen.getByRole("button", { name: "ENABLE" }))).toBe(
       "NOT AVAILABLE: not yet metered",
     );
     await advanceReading(view, 300);
@@ -1649,7 +1658,7 @@ describe("the VIEW display's meter with nothing to weigh (R07.T16.b)", () => {
       [null, expect.stringMatching(/INHIBITED · NO LIT SIDE$/u)],
       "NO DARK SIDE: choose AVG, or bring a night side into view",
     ]);
-    expect(meterPanel().getByRole("button", { name: "DARK" })).toHaveAccessibleDescription(
+    expect(describedText(meterPanel().getByRole("button", { name: "DARK" }))).toBe(
       "NO DARK SIDE: choose AVG, or bring a night side into view",
     );
     expect(exposureReadout()).toMatch(/INHIBITED · NO DARK SIDE$/u);

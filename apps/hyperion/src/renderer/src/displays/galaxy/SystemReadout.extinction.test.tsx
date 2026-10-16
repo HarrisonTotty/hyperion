@@ -17,6 +17,7 @@ import {
   aUniverseList,
 } from "../../test/galaxyFixtures";
 import { stubCanvas } from "../../test/RecordingContext2D";
+import { statusLine } from "../../test/statusLine";
 
 /** The chart's time, at which the line is asked about. */
 const CHART_TIME_YR = 12.5;
@@ -149,7 +150,7 @@ describe("the GALAXY readout's extinction", () => {
 
     expect(
       within(systemsPanel()).getByText(
-        "EXTINCTION DATA INVALID: not one line for the one system asked",
+        statusLine("EXTINCTION DATA INVALID: not one line for the one system asked"),
       ),
     ).toHaveClass("request-status__text--fault");
     expect(within(systemsPanel()).getByRole("button", { name: "RETRY" })).toBeInTheDocument();
@@ -171,7 +172,7 @@ describe("the GALAXY readout's extinction", () => {
     });
 
     expect(
-      within(systemsPanel()).getByText("EXTINCTION DATA INVALID: figures unreadable"),
+      within(systemsPanel()).getByText(statusLine("EXTINCTION DATA INVALID: figures unreadable")),
     ).toBeInTheDocument();
   });
 
@@ -212,9 +213,9 @@ describe("the GALAXY readout's extinction", () => {
     });
 
     // A refusal is plain text: the caution class is a failed system's.
-    expect(within(systemsPanel()).getByText("EXTINCTION REJECTED: no such system")).not.toHaveClass(
-      "request-status__text--fault",
-    );
+    expect(
+      within(systemsPanel()).getByText(statusLine("EXTINCTION REJECTED: no such system")),
+    ).not.toHaveClass("request-status__text--fault");
   });
 
   it("offers no RETRY for a system the server does not know, since asking again repeats it", async () => {
@@ -295,7 +296,7 @@ describe("the GALAXY readout's extinction", () => {
 
     expect(
       within(systemsPanel()).getByText(
-        "EXTINCTION REJECTED: the server is busy; try again shortly",
+        statusLine("EXTINCTION REJECTED: the server is busy; try again shortly"),
       ),
     ).toBeInTheDocument();
     await user.click(within(systemsPanel()).getByRole("button", { name: "RETRY" }));

@@ -1,6 +1,7 @@
 import { type KeyboardEvent, useId } from "react";
 
 import { StatusLine } from "../../components/StatusLine";
+import { StatusText } from "../../components/StatusText";
 import { pick } from "../../spatial/pick";
 import type { AppearanceLabel } from "../../view/appearance/fromWire";
 import type { ViewTurn } from "../../view/camera/look";
@@ -258,7 +259,7 @@ export function InstrumentView({
         <div className="view-instrument__statements" id={statementsId}>
           {statements.map((statement) => (
             <p className="view-label__statement" key={statement}>
-              {statement}
+              <StatusText text={statement} />
             </p>
           ))}
         </div>

@@ -1,5 +1,6 @@
 import { memo, useId } from "react";
 
+import { StatusText } from "../../components/StatusText";
 import { useUniverse } from "../../lib/universe";
 import type { SystemOpening } from "./systemTarget";
 import { SystemView } from "./SystemView";
@@ -24,7 +25,7 @@ function SystemPanels({ opening }: SystemDisplayProps) {
             Orbit map
           </h2>
           <p className="panel__empty">
-            NO SYSTEM SELECTED: select one on GALAXY and press OPEN SYSTEM
+            <StatusText text="NO SYSTEM SELECTED: select one on GALAXY and press OPEN SYSTEM" />
           </p>
         </section>
       </div>

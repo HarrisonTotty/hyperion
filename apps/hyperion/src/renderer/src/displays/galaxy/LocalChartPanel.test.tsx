@@ -18,6 +18,7 @@ import { type RecordingContext2D, stubCanvas } from "../../test/RecordingContext
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import { stubMatchMedia } from "../../test/stubMatchMedia";
 import { GalaxyDisplay } from "./GalaxyDisplay";
+import { statusLine } from "../../test/statusLine";
 
 /** The chart centre every test uses, off the galactic axis so that the directions are defined. */
 const CENTRE = [26_000, 0, 0] as const;
@@ -208,7 +209,7 @@ describe("LocalChartPanel", { timeout: 120_000 }, () => {
     await user.click(screen.getByRole("tab", { name: "LOCAL CHART" }));
 
     expect(
-      within(chartPage()).getByText("NO CENTRE: pick on the map and press C"),
+      within(chartPage()).getByText(statusLine("NO CENTRE: pick on the map and press C")),
     ).toBeInTheDocument();
     expect(socket.requestsOfKind("systems_in_range")).toHaveLength(0);
   });
@@ -474,14 +475,14 @@ describe("LocalChartPanel", { timeout: 120_000 }, () => {
     });
 
     expect(
-      within(chartPage()).getByText("CHART DATA INVALID: census incomplete"),
+      within(chartPage()).getByText(statusLine("CHART DATA INVALID: census incomplete")),
     ).toBeInTheDocument();
     expect(
       within(chartPage()).queryByRole("application", { name: "Local chart" }),
     ).not.toBeInTheDocument();
     expect(
       within(screen.getByRole("region", { name: "Systems" })).getByText(
-        "CHART DATA INVALID: retry on the LOCAL CHART page",
+        statusLine("CHART DATA INVALID: retry on the LOCAL CHART page"),
       ),
     ).toBeInTheDocument();
 

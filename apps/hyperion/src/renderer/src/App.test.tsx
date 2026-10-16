@@ -16,6 +16,7 @@ import {
 import { stubCanvas } from "./test/RecordingContext2D";
 import { stubHyperionApi, TEST_GRAPHICS, TEST_SERVER_URL } from "./test/stubHyperionApi";
 import type { ViewsCheckApi } from "../../preload/api";
+import { statusLine } from "./test/statusLine";
 
 /** Plays the server's side, letting the outcomes it settles reach React. */
 async function answer(play: () => void): Promise<void> {
@@ -81,7 +82,9 @@ describe("App", () => {
 
     const panel = screen.getByRole("region", { name: "Graphics" });
     expect(within(panel).getByText("VULKAN")).toBeInTheDocument();
-    expect(await within(panel).findByText("GRAPHICS NOT AVAILABLE: no WebGPU")).toBeInTheDocument();
+    expect(
+      await within(panel).findByText(statusLine("GRAPHICS NOT AVAILABLE: no WebGPU")),
+    ).toBeInTheDocument();
   });
 
   it("opens a views-check launch on VIEW", () => {
@@ -322,7 +325,9 @@ describe("App", () => {
       });
 
       expect(modeBanner()).toHaveTextContent("TRAINING");
-      expect(screen.getByText("SCENE NOT AVAILABLE: the ship is in no system")).toBeInTheDocument();
+      expect(
+        screen.getByText(statusLine("SCENE NOT AVAILABLE: the ship is in no system")),
+      ).toBeInTheDocument();
     });
   });
 

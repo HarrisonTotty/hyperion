@@ -1,5 +1,6 @@
 import { type ReactNode, type Ref, useId, useRef, useState } from "react";
 
+import { StatusText } from "../../components/StatusText";
 import { formatNumber, formatSignificant } from "../../lib/format";
 import { isEmptyEntry, showSelected } from "../../lib/textEntry";
 import {
@@ -225,7 +226,7 @@ function ExposureCommand({
           }
           id={noteId}
         >
-          {exposureNote(note)}
+          {refused ? <StatusText text={note} renderPart={exposureNote} /> : exposureNote(note)}
         </span>
       )}
     </div>
@@ -476,7 +477,7 @@ function ManualEntry({ exposure, onChange }: ManualEntryProps) {
       )}
       {refused ? (
         <p className="form-field__error view-exposure__man-error" id={errorId}>
-          {REFUSAL_WORDS.invalid_ev100}
+          <StatusText text={REFUSAL_WORDS.invalid_ev100} />
         </p>
       ) : null}
     </div>
@@ -537,7 +538,9 @@ export function ExposurePanel({
       {standing === null ? null : (
         // A live region: the status comes, and goes, by itself.
         <p className="view-exposure__reason">
-          <output>{exposureNote(standing)}</output>
+          <output>
+            <StatusText text={standing} renderPart={exposureNote} />
+          </output>
         </p>
       )}
       <div className="view-exposure__commands">

@@ -17,6 +17,7 @@ import type { ScaleUnit } from "./scale";
 import { SpatialView, type SpatialViewProps } from "./SpatialView";
 import { textSizeRem } from "./labels";
 import { add, dot, scale, vec3, type Vec3 } from "../geometry/vec3";
+import { statusLine } from "../test/statusLine";
 
 const FRAME = localFrameAt(vec3(26_000, 0, 0));
 
@@ -1270,9 +1271,22 @@ describe("SpatialView's readouts", () => {
   it("replaces the core arrow on the galactic axis and names the fallback directions", () => {
     const { container } = setup({ scene: aScene({ frame: localFrameAt(vec3(0, 0, 0)) }) });
 
-    expect(screen.getByText("DIRECTIONS UNDEFINED: grid aligned to -X")).toBeInTheDocument();
+    expect(
+      screen.getByText(statusLine("DIRECTIONS UNDEFINED: grid aligned to -X")),
+    ).toBeInTheDocument();
     expect(container.querySelector("[data-core]")).toBeNull();
     expect(within(screen.getByRole("img", { name: "Axis triad" })).getByText("-X")).toBeVisible();
+  });
+
+  it("tracks DIRECTIONS UNDEFINED: in the axis note, and leaves the grid's sentence untracked", () => {
+    setup({ scene: aScene({ frame: localFrameAt(vec3(0, 0, 0)) }) });
+
+    const state = screen.getByText("DIRECTIONS UNDEFINED:");
+    expect([
+      state.className,
+      state.nextElementSibling?.className,
+      state.parentElement?.className,
+    ]).toEqual(["status-text__state", "status-text__sentence", "spatial-view__axis-note"]);
   });
 
   it("shortens the triad to a stage under its usual box, which the overlay would clip", () => {
@@ -2119,7 +2133,9 @@ describe("SpatialView on a system's plane, with the galactic axes given apart", 
   it("names the fallback directions from the axes given, which are the galaxy's", () => {
     renderOnTheAxis();
 
-    expect(screen.getByText("DIRECTIONS UNDEFINED: grid aligned to -X")).toBeInTheDocument();
+    expect(
+      screen.getByText(statusLine("DIRECTIONS UNDEFINED: grid aligned to -X")),
+    ).toBeInTheDocument();
     expect(within(screen.getByRole("img", { name: "Axis triad" })).getByText("-X")).toBeVisible();
   });
 

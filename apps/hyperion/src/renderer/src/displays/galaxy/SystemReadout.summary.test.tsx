@@ -43,6 +43,7 @@ import {
 } from "../../test/systemFixtures";
 import { DEFAULT_DRIVE_RANGE_LY, distanceDecimalsFor } from "./chartModel";
 import { SystemReadout } from "./SystemReadout";
+import { statusLine } from "../../test/statusLine";
 
 /** The chart's time, at which the stars are asked about. */
 const CHART_TIME_YR = 12.5;
@@ -338,7 +339,7 @@ describe("the GALAXY readout's stars", () => {
     });
 
     expect(
-      screen.getByText("REJECTED: no system 0200080020000000 in this universe"),
+      screen.getByText(statusLine("REJECTED: no system 0200080020000000 in this universe")),
     ).toBeInTheDocument();
     expect(within(readout()).queryByText(/REJECTED/)).not.toBeInTheDocument();
     expect(valuesOf("CLASS")).toEqual([]);
@@ -365,7 +366,7 @@ describe("the GALAXY readout's stars", () => {
     await selectAnswered(aSystemSummary({ stars: [], existence: "exists" }));
 
     expect(
-      within(systemsPanel()).getByText("SYSTEM DATA INVALID: star list empty"),
+      within(systemsPanel()).getByText(statusLine("SYSTEM DATA INVALID: star list empty")),
     ).toBeInTheDocument();
     expect(within(systemsPanel()).getByRole("button", { name: "RETRY" })).toBeInTheDocument();
     expect(valuesOf("CLASS")).toEqual([]);

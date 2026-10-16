@@ -32,21 +32,24 @@ export const FULL_MIN_WIDTH_REM = 99;
 /**
  * The least height of the `.view` box for the full layout, rem: the taller column's tallest state
  * with the list at two rows, rounded up to the next 0.25 rem, as measured at 1920 × 1080
- * (R07.T19.d's hidden captures, 16 px to the rem, the side column's line box 1.25).
+ * (P05.T13's hidden runs, after R07.T19.d's, 16 px to the rem, the side column's line box 1.25).
  *
  * @remarks
- * The first column's tallest, 729 px: `Instruments` 202.5 px with both closed, `Targets` 173 px at
- * two rows under its two-line `RANGE FROM CAMERA` head, `Camera` 337.5 px with `NO OWN SHIP`, both
- * limit reasons and reduced motion, and two 0.5 rem gaps. The second's, 731.5 px: `Style` 99.5 px
+ * The first column's tallest, 730.5 px: `Instruments` 202.5 px with both closed, `Targets` 173 px
+ * at two rows under its two-line `RANGE FROM CAMERA` head, `Camera` 339 px with `NO OWN SHIP`, both
+ * limit reasons and reduced motion, and two 0.5 rem gaps. The second's, 752 px: `Style` 99.5 px
  * with a two-line refusal added at 17.5 px a line and its 0.5 rem margin, 43 px (`QUALITY LOW`'s on
- * an instrument, or the software adapter's, which this machine cannot raise), the exposure
- * `INHIBITED · OPERATOR` with a refused entry and `INHIBIT` held back beside its two-line reason,
- * 365 px, the meter with `METERED`, 208 px, and two gaps. 731.5 px is 45.72 rem. It must never pass
- * 52.5 rem, so that a maximised 1920 × 1080 window (a box of about 53.5 rem) is full
- * (decision-r07-t19b-exposure-fit, item 2): a task that adds to a side panel re-measures, and asks
- * for a ruling rather than pass it.
+ * an instrument, or the software adapter's, which this machine cannot raise); the exposure
+ * `INHIBITED · OPERATOR` with nothing metered and a refused entry, 425.5 px, its
+ * `AUTO NOT AVAILABLE: NO LIT SIDE` (or `NO DARK SIDE`, or `STAR DISC ONLY`) on two lines and
+ * `INHIBIT` held back beside its three-line reason, since P05.T13 tracks their states; the meter
+ * with its status in the reading's place, 168 px; and two gaps. 752 px is 47 rem; it was 731.5 px
+ * (45.75 rem) before P05.T13, the exposure then 365 px beside a two-line reason with the meter's
+ * `METERED`, which that state now reaches at 749 px. It must never pass 52.5 rem, so that a
+ * maximised 1920 × 1080 window (a box of about 53.5 rem) is full (decision-r07-t19b-exposure-fit,
+ * item 2): a task that adds to a side panel re-measures, and asks for a ruling rather than pass it.
  */
-export const FULL_MIN_HEIGHT_REM = 45.75;
+export const FULL_MIN_HEIGHT_REM = 47;
 
 /**
  * The bound on {@link FULL_MIN_HEIGHT_REM}, rem: a maximised 1920 × 1080 window's box, about

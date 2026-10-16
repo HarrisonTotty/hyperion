@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { PrimaryModifier } from "../../lib/platform";
+import { statusLine } from "../../test/statusLine";
 import { CameraControls } from "./CameraControls";
 import type { CameraPlace } from "./cameraPlace";
 
@@ -35,7 +36,7 @@ function renderAt(rateStep: number, modifier: PrimaryModifier): void {
 
 /** The rate's limit reason's text, the drawn sign's name read in its place. */
 function rateReason(): string | null {
-  return screen.getByText(/RATE at its/u).textContent;
+  return screen.getByText(statusLine(/RATE at its/u)).textContent;
 }
 
 describe("the camera panel's rate limit (decision-r07-t19f-position, item 5)", () => {
@@ -61,6 +62,22 @@ describe("the camera panel's rate limit (decision-r07-t19f-position, item 5)", (
   it("names no PAGE key", () => {
     renderAt(12, "ctrl");
     expect(rateReason()).not.toContain("PAGE");
+  });
+
+  it("tracks NOT AVAILABLE: and sets the drawn chord inside the untracked sentence", () => {
+    renderAt(0, "meta");
+    const reason = screen.getByText(statusLine(/RATE at its/u));
+    const parts = [...reason.children].map((part) => [
+      part.className,
+      part.querySelector("svg.glyph--command") !== null,
+    ]);
+    expect([reason.className, parts]).toEqual([
+      "view-camera__reason",
+      [
+        ["status-text__state", false],
+        ["status-text__sentence", true],
+      ],
+    ]);
   });
 });
 

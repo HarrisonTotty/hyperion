@@ -11,6 +11,7 @@ import {
   TIME_SYSTEM_LABEL,
 } from "../../lib/format";
 import { StatusLine } from "../../components/StatusLine";
+import { StatusText } from "../../components/StatusText";
 import { useElementSize } from "../../lib/useElementSize";
 import { AXIS_TOLERANCE_LY, cylindrical } from "../../geometry/frame";
 import type { SpatialQuantity, SpatialReading } from "../../spatial/Reading";
@@ -132,7 +133,9 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
       ].join(" ")}
     >
       {hasCentre ? null : (
-        <p className="panel__empty local-chart__empty">NO CENTRE: pick on the map and press C</p>
+        <p className="panel__empty local-chart__empty">
+          <StatusText text="NO CENTRE: pick on the map and press C" />
+        </p>
       )}
       {fault === null ? null : (
         <StatusLine

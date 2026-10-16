@@ -1,6 +1,7 @@
 import { useId } from "react";
 
 import { DisclosureGlyph } from "../../components/DisclosureGlyph";
+import { StatusText } from "../../components/StatusText";
 import type { ViewId } from "../../view/camera/state";
 
 /** One slot as the panel shows it. */
@@ -199,12 +200,12 @@ export function InstrumentsPanel({
         </fieldset>
         {openReason === null || heldOpen.length === 0 ? null : (
           <p className="view-instruments-panel__reason" id={openReasonId}>
-            {openReason}
+            <StatusText text={openReason} />
           </p>
         )}
         {closed.length === 0 ? null : (
           <p className="view-instruments-panel__reason" id={controlsReasonId}>
-            {notOpen(closed)}
+            <StatusText text={notOpen(closed)} />
           </p>
         )}
       </div>

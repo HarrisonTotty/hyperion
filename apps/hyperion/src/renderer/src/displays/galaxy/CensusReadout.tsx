@@ -6,6 +6,7 @@ import { annunciation } from "../../components/RequestStatus";
 import { EarthMassUnit } from "../../components/EarthMassUnit";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { StaleMark } from "../../components/StaleMark";
+import { StatusText } from "../../components/StatusText";
 import {
   type FormattedSubstellarMass,
   formatListPosition,
@@ -232,10 +233,12 @@ interface CensusReadoutProps {
  * The census line is the brainstorm's rule that a result is a complete census or nothing, per
  * layer, so it stands beside every chart. Nothing fitting the census limit is an answer, not a
  * failure, and reads in `--status-caution` as a limit reached, with what the operator can do. A
- * layer the server left out adds a hint under it. The counts are of what was returned and of what
- * lies within the drive range; under a `STARS` filter other than `ALL` the first says what the
- * filter hides (`412 OF 1630 SHOWN: LIVING`), and both count the systems shown. The per-layer table, which is how placement is checked against the
- * fields by eye, folds: the chart's column cannot hold both it and the chart at 1280 px. While a
+ * layer the server left out adds a hint under it. The cautions, the hint and the request's state
+ * are set through `StatusText`: a state tracked, the sentence after it not
+ * (`NOTHING FITS: reduce radius`). The counts are of what was returned and of what lies within the
+ * drive range; under a `STARS` filter other than `ALL` the first says what the filter hides
+ * (`412 OF 1630 SHOWN: LIVING`), and both count the systems shown. The per-layer table, which is
+ * how placement is checked against the fields by eye, folds: the chart's column cannot hold both it and the chart at 1280 px. While a
  * newer query is in flight its `PENDING` stands beside the census and the answer on show stays. An
  * answer the link no longer backs reads as stale: muted, with the guide's trailing `S`.
  *
@@ -309,7 +312,7 @@ export function CensusReadout({
                   {line.text} <MassWithUnit mass={line.above} />
                 </>
               ) : (
-                line.text
+                <StatusText text={line.text} />
               )}
             </p>
           )}
@@ -322,7 +325,7 @@ export function CensusReadout({
                   : "census-readout__state"
               }
             >
-              {shown.text}
+              <StatusText text={shown.text} />
             </p>
           )}
           {result === null ? null : (
@@ -379,7 +382,11 @@ export function CensusReadout({
           </button>
         )}
       </div>
-      {hint === null ? null : <p className="census-readout__hint">{hint}</p>}
+      {hint === null ? null : (
+        <p className="census-readout__hint">
+          <StatusText text={hint} />
+        </p>
+      )}
       {result === null ? null : (
         <CensusByLayer layers={result.layers} id={tableId} hidden={!tableShown} />
       )}

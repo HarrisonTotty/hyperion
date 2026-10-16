@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { StaleMark } from "../../components/StaleMark";
 import { StatusLine } from "../../components/StatusLine";
+import { StatusText } from "../../components/StatusText";
 import { type LabelField, type LabelLine, MISSING_READING } from "./viewRun";
 
 /** Props of {@link ViewLabelBlock}. */
@@ -257,8 +258,10 @@ export function readingParts(
  * the sky's `STARS` reading sets each middle dot at the head of the part after it (R06.T11.f,
  * R06.T13.j). A graphics fault is set as `StatusLine`'s fault, in `--status-caution`,
  * apart from the steady statements (the guide's "Alerts": a console's report on its own graphics
- * is never an alert). The stars' count line is a reading of numbers, so an `output` in B612 Mono
- * (the guide's "Typography"), not a statement.
+ * is never an alert). The statements are set through `StatusText`, so one that gives a sentence
+ * after its state (the descent spike's `TEST PLANET: provisional, …`) tracks the state alone; the
+ * rest are upper case whole and tracked whole, as before (P05.T13). The stars' count line is a
+ * reading of numbers, so an `output` in B612 Mono (the guide's "Typography"), not a statement.
  */
 export function ViewLabelBlock({ lines, statements, countLine, fault, id }: ViewLabelBlockProps) {
   return (
@@ -279,7 +282,7 @@ export function ViewLabelBlock({ lines, statements, countLine, fault, id }: View
       </dl>
       {statements.map((statement) => (
         <p className="view-label__statement" key={statement}>
-          {statement}
+          <StatusText text={statement} />
         </p>
       ))}
       {countLine === null ? null : (

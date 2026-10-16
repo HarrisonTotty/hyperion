@@ -25,6 +25,7 @@ import {
 } from "../../view/engine/status";
 import { NO_VIEW_DRAWN, PHOTOREAL_NOT_CREATED } from "./styleRefusals";
 import type { ViewEngineSource } from "./useViewEngine";
+import { statusLine } from "../../test/statusLine";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -102,7 +103,9 @@ function refusingMaterialsSource(): ViewEngineSource {
 
 /** The style's fault standing under the row, or `null`. */
 function standing(): HTMLElement | null {
-  return screen.queryByText(PHOTOREAL_NOT_CREATED, { selector: ".view-folds__standing" });
+  return screen.queryByText(statusLine(PHOTOREAL_NOT_CREATED), {
+    selector: ".view-folds__standing",
+  });
 }
 
 /**
@@ -516,7 +519,7 @@ describe("VIEW's compact layout (R07.T19.b)", () => {
     const foldedLines = [onShow(PHOTOREAL_NOT_CREATED), onShow(NO_VIEW_DRAWN)];
     await view.user.click(disclosure("STYLE"));
     const reason = within(screen.getByRole("region", { name: "Style PRIMARY" })).getByText(
-      NO_VIEW_DRAWN,
+      statusLine(NO_VIEW_DRAWN),
     );
     expect([faulted, foldedLines, reason.classList.contains("view-style__reason--fault")]).toEqual([
       true,

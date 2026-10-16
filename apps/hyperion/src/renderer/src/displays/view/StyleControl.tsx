@@ -1,5 +1,6 @@
 import { useId } from "react";
 
+import { StatusText } from "../../components/StatusText";
 import type { RenderStyle } from "../../view/camera/state";
 import { RENDER_STYLES, STYLE_TOGGLE_KEY, styleName } from "../../view/photoreal/style";
 import type { StyleRefusals } from "./styleRefusals";
@@ -93,7 +94,7 @@ export function StyleControl({
           }
           id={reasonId}
         >
-          {reason}
+          <StatusText text={reason} />
         </p>
       )}
     </section>

@@ -1,7 +1,13 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { statusLine } from "../../test/statusLine";
 import { ViewLabelBlock } from "./ViewLabelBlock";
+
+/** The classes of the parts the status line reading `text` is set in. */
+function partsOf(text: string): string[] {
+  return [...screen.getByText(statusLine(text)).children].map((part) => part.className);
+}
 
 describe("the view's label block", () => {
   it("shows a terrain annunciation as a steady statement, not an alert or a fault", () => {
@@ -13,11 +19,26 @@ describe("the view's label block", () => {
         fault={null}
       />,
     );
-    const line = screen.getByText("TERRAIN: DETAIL LIMITED");
+    const line = screen.getByText(statusLine("TERRAIN: DETAIL LIMITED"));
     // The statement class carries no status colour: the plate's `--text`.
     expect(line.className).toBe("view-label__statement");
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryAllByRole("status").some((s) => s.contains(line))).toBe(false);
+  });
+
+  it("tracks a statement upper case whole as one state, and splits one that gives a sentence", () => {
+    render(
+      <ViewLabelBlock
+        lines={[{ label: "STYLE", value: "WIREFRAME" }]}
+        statements={["TERRAIN: STREAMING", "TEST PLANET: provisional, dry and hand-parameterised"]}
+        countLine={null}
+        fault={null}
+      />,
+    );
+    expect([
+      partsOf("TERRAIN: STREAMING"),
+      partsOf("TEST PLANET: provisional, dry and hand-parameterised"),
+    ]).toEqual([["status-text__state"], ["status-text__state", "status-text__sentence"]]);
   });
 });
 

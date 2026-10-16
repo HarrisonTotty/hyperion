@@ -14,6 +14,7 @@ import { type RecordingContext2D, stubCanvas } from "../../test/RecordingContext
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import { DUST_OVERLAY_LABEL, GalaxyMapView, type MapQuantity } from "./GalaxyMapView";
 import { StaleWaits } from "./staleWaits";
+import { statusLine } from "../../test/statusLine";
 
 /** An 8 × 8 face-on map: the background, then every code up to the ceiling. */
 const FACE_ON_CODES = Array.from({ length: 64 }, (_, pixel) => pixel * 4);
@@ -1279,7 +1280,9 @@ describe("GalaxyMapView", () => {
       });
 
       expect(
-        within(faceOn()).getByText("MAP DATA INVALID: density and extinction maps do not match"),
+        within(faceOn()).getByText(
+          statusLine("MAP DATA INVALID: density and extinction maps do not match"),
+        ),
       ).toBeInTheDocument();
       expect(within(faceOn()).getByRole("button", { name: "RETRY" })).toBeInTheDocument();
     });
@@ -1300,7 +1303,7 @@ describe("GalaxyMapView", () => {
       });
 
       expect(
-        within(faceOn()).getByText("MAP DATA INVALID: extinction range unusable"),
+        within(faceOn()).getByText(statusLine("MAP DATA INVALID: extinction range unusable")),
       ).toBeInTheDocument();
     });
 

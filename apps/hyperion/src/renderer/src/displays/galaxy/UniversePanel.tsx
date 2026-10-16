@@ -3,6 +3,7 @@ import { useId, useLayoutEffect, useRef, useState } from "react";
 
 import { DisclosureGlyph } from "../../components/DisclosureGlyph";
 import { RequestStatus } from "../../components/RequestStatus";
+import { StatusText } from "../../components/StatusText";
 import { formatListPosition, formatNumber } from "../../lib/format";
 import { formatHex64 } from "../../lib/seed";
 import { linkDownReason, useServerLink } from "../../lib/serverLink";
@@ -251,7 +252,7 @@ function UniverseTable({
       {anyMismatch ? (
         // Read by assistive technology as each button's description, so hidden from it here.
         <p className="universe-panel__reason" aria-hidden="true">
-          {pointedReason ?? ""}
+          {pointedReason === null ? null : <StatusText text={pointedReason} />}
         </p>
       ) : null}
       {range === null ? null : (
@@ -290,7 +291,11 @@ function UniverseList({
   }
   const { universes, server_generator_version: serverGeneratorVersion } = list.response;
   if (universes.length === 0) {
-    return <p className="panel__empty">NO UNIVERSES: create one below</p>;
+    return (
+      <p className="panel__empty">
+        <StatusText text="NO UNIVERSES: create one below" />
+      </p>
+    );
   }
   return (
     <UniverseTable

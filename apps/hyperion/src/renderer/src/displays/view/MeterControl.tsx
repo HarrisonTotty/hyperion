@@ -1,5 +1,6 @@
 import { useId } from "react";
 
+import { StatusText } from "../../components/StatusText";
 import { formatNumber } from "../../lib/format";
 import type { ViewId } from "../../view/camera/state";
 import type { ExposureControl } from "../../view/photometry/exposure";
@@ -159,7 +160,9 @@ export function MeterControl({
         </>
       ) : (
         <p className="view-meter__reason" id={reasonId}>
-          <output>{exposureNote(status)}</output>
+          <output>
+            <StatusText text={status} renderPart={exposureNote} />
+          </output>
         </p>
       )}
       <p className="field">

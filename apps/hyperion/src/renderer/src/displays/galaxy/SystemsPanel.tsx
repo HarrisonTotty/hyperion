@@ -4,6 +4,7 @@ import { type ReactNode, useId, useState } from "react";
 import { RequestStatus } from "../../components/RequestStatus";
 import { StaleMark } from "../../components/StaleMark";
 import { StatusLine } from "../../components/StatusLine";
+import { StatusText } from "../../components/StatusText";
 import { useUniverse } from "../../lib/universe";
 import { type SummaryTarget, useSystemSummary } from "../system/useSystemSummary";
 import { type SystemTarget, systemTargetFor } from "../system/systemTarget";
@@ -135,9 +136,13 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
       </h2>
       {result === null ? (
         <p className="panel__empty">
-          {fault === null
-            ? "NO CHART: centre one to list its systems"
-            : "CHART DATA INVALID: retry on the LOCAL CHART page"}
+          <StatusText
+            text={
+              fault === null
+                ? "NO CHART: centre one to list its systems"
+                : "CHART DATA INVALID: retry on the LOCAL CHART page"
+            }
+          />
         </p>
       ) : (
         <SystemList

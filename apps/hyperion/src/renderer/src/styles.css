@@ -187,7 +187,10 @@ body {
   text-transform: uppercase;
 }
 
-/* What a panel says when it has nothing to show, such as NO UNIVERSE OPEN. */
+/*
+ * What a panel says when it has nothing to show, such as NO UNIVERSE OPEN, or why and what to do,
+ * through StatusText (NO CHART: centre one to list its systems).
+ */
 .panel__empty {
   margin: 0;
   font-size: 0.875rem;
@@ -395,6 +398,21 @@ body {
 .request-status__text--fault,
 .census-readout__state--fault {
   color: var(--status-caution);
+}
+
+/*
+ * A status that names its state and then, after a colon, says in a sentence its cause, its
+ * consequence or what the operator can do (StatusText; the guide's Typography, P05.T13): the state
+ * and its colon tracked as an annunciation is, and the sentence untracked, a name inside it
+ * included. A line upper case whole is one state, tracked whole. Both parts keep the line's size,
+ * face and colour, and set their spacing whatever their container's.
+ */
+.status-text__state {
+  letter-spacing: 0.15em;
+}
+
+.status-text__sentence {
+  letter-spacing: 0;
 }
 
 /*
@@ -1208,9 +1226,10 @@ body {
 }
 
 /*
- * Why the overlay is held back, a sentence: set as the VIEW display sets its own reasons
- * (.view-instruments-panel__reason), without the labels' letter-spacing, so that the room's reason
- * takes two lines of the compact controls' row, as the overlay's name does.
+ * Why the overlay is held back, set as the VIEW display sets its own reasons
+ * (.view-instruments-panel__reason): through StatusText, NOT AVAILABLE: tracked and its sentence
+ * untracked, so that the room's reason takes two lines of the compact controls' row, as the
+ * overlay's name does (P05.T13's measurements).
  */
 .galaxy-map__overlay-reason {
   flex: 1 1 12rem;
@@ -2650,8 +2669,9 @@ body {
 
 /*
  * Why the named directions are undefined, in the create form's plain-text voice: not an alert, a
- * limit nor a failed system, and unspaced, since what follows the annunciated condition is a
- * sentence in mixed case.
+ * limit nor a failed system. Through StatusText, DIRECTIONS UNDEFINED: is tracked as an annunciation
+ * and the sentence in mixed case after it is not (P05.T13, superseding plan 05's T10 ruling (8) for
+ * the head).
  */
 .spatial-view__axis-note {
   flex-basis: 100%;

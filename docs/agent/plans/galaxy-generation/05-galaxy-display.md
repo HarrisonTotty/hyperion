@@ -79,6 +79,10 @@ All paths are under `apps/hyperion/src/renderer/src/` unless they start with `do
 - `lib/universe.ts`: `UniverseContext`, `useUniverse(): UniverseSession` (below).
 - `lib/seed.ts`: `parseSeedHex`, `formatHex64`.
 - `components/RequestStatus.tsx`: the shared presentation of a non-`ok` `RequestState`.
+- `components/StatusText.tsx` (P05.T13): `StatusText({ text, renderPart? })`, a status line's words
+  in the guide's one form, the state through the first `": "` in `.status-text__state` and a
+  sentence after it in `.status-text__sentence`; every `STATE: sentence` line on the console, and
+  `StatusLine`'s words, are set through it.
 
 ```ts
 type RequestState<K extends RequestKind> =
@@ -192,6 +196,9 @@ interface UniverseSession {
 - `galaxyFixtures.ts`: builders typed against the generated bindings (`aUniverse`, `aUniverseList`,
   `someGalaxyParameters`, `aDensityMap`, `aSystemsInRange`, `aSystemRecord`, `aCensus`).
 - `RecordingContext2D.ts`, `stubCanvas()`, `FakeResizeObserver.ts`, `stubMatchMedia(reduced)`.
+- `statusLine.ts` (P05.T13): `statusLine(text)`, a text matcher for a line `StatusText` splits, by
+  its whole words; `describedText(element)`, a control's description as Chromium reads it, where
+  jsdom runs a split line's parts together.
 
 ### Documentation
 
@@ -1606,3 +1613,136 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
     first, and a ring's or an annulus's label also tries points along its ring (Q6 (d));_
   - _stated limits: a ring that is a point on screen keeps its label across a stalk at the last
     resort (`PLANE 0.01 ly SET`), and D4 drops labels in a crowd, which the list still names._
+
+- **P05.T13, as built (lane `gg-port-p05-t13`, 2026-10-16, at version 22).** Built on
+  `rendering-and-planets` 93a0e0fd under decision-gg-port-a2 §7 and signoff-11 item 24, as
+  amended, to the guide's Typography sub-bullet. The client and this plan only: no server,
+  protocol, golden or guide change, `GENERATOR_VERSION` 22 and `PROTOCOL_VERSION` 2 as they were.
+  - _What changed._ `components/StatusText.tsx` splits a line at its first `": "`, the state and
+    its colon in `.status-text__state` (0.15em) and the space and the rest in
+    `.status-text__sentence` (0) where the rest holds a lower-case letter, else one state span.
+    Every caller the task lists goes through it: `StatusLine`, `CensusReadout`'s state, cautions
+    and hint, the `.panel__empty` lines, the form errors (the centre entry's and the chart
+    controls' composed into one string), the axis note, the `VIEW` display's instruments,
+    exposure, camera and meter reasons and its folded standing lines, and the map's overlay
+    reason. The search found two more: the style control's refusals (`.view-style__reason`) and
+    the universe panel's `GENERATOR VERSION 1: server runs version 2`. `exposureNote`'s runs stay
+    unbroken inside the parts. `.galaxy-map__overlay-reason`'s and `.spatial-view__axis-note`'s
+    comments in `styles.css` follow the form. `FULL_MIN_HEIGHT_REM` moves from 45.75 to 47 rem
+    (below).
+  - _Deviations._
+    - **`StatusText`'s second prop.** `StatusText({ text, renderPart? })`: `renderPart(part)` sets
+      each part's words, or the whole line's where it is one part. It keeps `exposureNote`'s runs
+      (`INHIBITED · OPERATOR`, `NO IMAGE TO METER`, a meter's own status) unbroken, and the
+      camera's drawn chord: the rate's reason is composed as one line,
+      `NOT AVAILABLE: CTRL+↑, RATE at its highest step`, and `RateChord` sets its `CTRL+↑` (`⌘↑`
+      on macOS) inside the sentence.
+    - **Lines with no sentence where nothing was tracked.** By the split rule, a line with no
+      `": "`, or nothing lower case after it, is one `.status-text__state`. In the `VIEW` reasons,
+      which had no letter spacing, these are now tracked whole:
+      `AUTO NOT AVAILABLE: NO IMAGE TO METER` and its twins (`NO LIT SIDE`, `NO DARK SIDE`,
+      `STAR DISC ONLY`) in the exposure panel, its folded line and the meter; `ENABLE`'s bare
+      statuses; the meter's bare `NO IMAGE TO METER`; the style control's bare `NOT AVAILABLE`
+      and `GRAPHICS NOT AVAILABLE`.
+      The task's "is unchanged" is read as "keeps the annunciation's form", which signoff-11's
+      table gives the first of these. Measured below.
+    - **The universe panel's reason** (`.universe-panel__reason`, tracked whole at 0.1em before)
+      is taken as "any other such line a search finds": its head names the universe's state, and
+      its sentence says why `OPEN UNIVERSE` is held back. It only shrinks.
+    - **The label block's statements** go through `StatusText` too (`ViewLabelBlock`,
+      `InstrumentView`; the ux-reviewer's finding), though the task puts them out of scope as "all
+      upper case": the descent spike's `TEST PLANET: provisional, dry and hand-parameterised` is
+      not. Every other statement is upper case whole and reads as before; that one tracks
+      `TEST PLANET:` alone. _For the owner's sign-off queue: the spike's statement in the one
+      form, as built, or tracked whole as a statement._
+    - **Finding a split line in tests.** `getByText`'s own matcher reads an element's own text
+      nodes only, so it finds a split line nowhere and passes an absence check for nothing.
+      `test/statusLine.ts`'s `statusLine(text)` matches the element whose direct child is a
+      `.status-text__state` and whose text is the line; every whole-line query of a status uses
+      it.
+    - **Descriptions in jsdom.** dom-accessibility-api 0.6.3 trims each element's text before it
+      joins inline siblings, so in jsdom a split line describes its control as `REJECTED:busy`.
+      Chromium keeps the space: its accessibility tree (DevTools, in a hidden run of this build)
+      gives `REJECTED: the queue is full` for the task's form, as for the space between the spans
+      or the line whole, and `NOT AVAILABLE: the exposure is INHIBITED · OPERATOR` with a run
+      inside the sentence. The structure stays the task's, and the 28 description assertions on
+      split lines read `describedText(element)`, the describing elements' text joined by a space,
+      which refuses a describing element holding an `aria-hidden`, `aria-label` or `alt` part.
+      `test/statusLine.test.tsx` pins jsdom's trimmed reading, so that the helper goes once
+      jsdom keeps the space.
+    - **A reserve raised: `FULL_MIN_HEIGHT_REM` 45.75 → 47 rem** (`displays/view/viewLayout.ts`).
+      At 1920 × 1080 the full layout's exposure panel is narrow enough that `INHIBIT`'s held-back
+      `NOT AVAILABLE: the exposure is INHIBITED · OPERATOR` takes three lines (two before) and
+      `AUTO NOT AVAILABLE: NO LIT SIDE` two (one before). Column B's tallest, the operator's
+      inhibit with nothing metered and a refused entry (E8), becomes 709 px, and 752 px with the
+      43 px two-line style refusal R07.T19.d adds (674 and 717 px before); E3, which bound it at
+      731.5 px, is now 749 px. 752 px is 47 rem. The task allows it: no 1280 × 720 picture
+      narrows, since 1280 × 720 is compact, and 47 rem stays within the 52.5 rem bound. Boxes
+      from 45.75 to 47 rem tall, such as 1920 × 1080 at about 115%, are now compact.
+    - **The commit's type** is `style(client)`, as the task names it.
+  - _Measured_ (decision-gg-port-d0 §3.4; hidden runs of this tree's build, the client offscreen
+    and never shown, under the GPU lock, in the worktree's `target/p05t13-layout/`, not committed:
+    P07.T11.d's map hook extended with the held-back reasons probed in both forms, a `chart` and a
+    `form` scenario, and R07.T19.d's `VIEW` hook extended; each line `StatusText` sets is measured
+    as set and, its parts unwrapped in a stand-in, as before). The map runs ran against
+    `hyperion-server` built at 68376d11 (after the 07:22 reboot) with seed 0x4d2's universe, as
+    T11.d's did; default shell and the graphics safe mode's banner (in brackets). Widths in CSS
+    px, before → after:
+    - _The galaxy map, compact, at 1280 × 720._ `OVERLAY_NO_ROOM`, as shown: two lines in its
+      279.7 px (280.2) box, 237.3 + 195 → 266.7 + 195. `OVERLAY_DENSITY_ONLY`, probed: two lines,
+      274.4 + 29.4 → 242.2 + 91. The controls' row 120 px (content 112) in both forms, as T11.d;
+      the words face-on 150/−106 (−104), edge-on 128/0, the page's foot 8 px; link down,
+      `NO CARRIER` in the tabs' row (32 px). At 1536 × 864, P 296, the words 150/−146 and
+      128/−20, the foot 92 (90). `COMPACT_CONTROLS_REM` stands.
+    - _Stacked, at 1280 × 1024._ `OVERLAY_NO_ROOM`, as shown: three lines in its 206.4 px box in
+      both forms, 197.4 + 204.8 + 25.2 → 203 + 173.3 + 80.5; the face-on words with the controls
+      24.25 rem (186/−34), and 25.875 rem with `NO CARRIER` (186/−8), as T11.d; the foot 191
+      (189). `OVERLAY_DENSITY_ONLY`, probed: two lines, 148.4 + 155.4 → 177.8 + 155.4,
+      23.125 rem. At 1920 × 1080, P 554 (552), plain 168/−206 (−204), `OVERLAY_DENSITY_ONLY` as
+      shown under `EXTINCTION` two lines in 216.1 px, 212.8 + 91 → 177.8 + 155.4; the overlay
+      258/−90 (−88), 29.0 rem, 30.625 rem with the link down. `WORDS_REM` stands.
+    - _The `VIEW` display at decision-r07-t19-layout's sizes_ (1920 × 1080 full; 1280 × 720 and
+      1920 × 1080 at 125% compact; T19.d's states, with the compact Instruments panel over two
+      closed slots and the compact E8; the safe mode's runs to E4). The side column's
+      `scrollHeight` equals its `clientHeight` in every state, 922, 562 and 708 px; nothing is
+      truncated, and neither the work area nor the document scrolls.
+      - `AUTO NOT AVAILABLE: NO IMAGE TO METER`: one line compact, 305.2 → 382.9 (77.7 px wider);
+        two lines in the full layout's exposure panel, 154.7 + 145.6 → 194.6 + 181.3.
+      - `NOT AVAILABLE: the exposure is INHIBITED · OPERATOR`: two lines compact,
+        219.1 + 155.4 → 248.5 + 155.4; three in full, 203.7 + 170.8 → 168 + 75.6 + 155.4.
+      - `NO LIT SIDE: choose AVG, or bring a sunlit body into view`: two lines at 1280 × 720,
+        355.3 + 30.1 → 380.5 + 30.1; at 125% one → two, 390.3 → 380.4 + 30.1; two in full,
+        286 + 99.4 → 268.5 + 142.1. `NO DARK SIDE` and `STAR DISC ONLY`, probed in its place in
+        full, take as many lines.
+      - `NO OWN SHIP: SEAT and CHASE need one`: one line, 282.5 → 307.7, in the camera panel and
+        under the compact row.
+      - The room's reason with both slots named, probed in the Instruments panel: two lines,
+        335 + 236.3 → 364.4 + 236.3, the column fitting at every size.
+      - Also one line each: the field of view's limit 286.3 → 315.7, the rate's 329.4 → 358.8,
+        `NOT APPLIED: reduced motion` 203.7 → 228.9, `EV100 INVALID: …` 245 → 274.4. Two lines
+        each: `NOT AVAILABLE: INSTRUMENT 1 and INSTRUMENT 2 are not open`,
+        383.6 + 60.2 → 387.5 + 85.8, and the style refusals probed (`QUALITY LOW`'s, the software
+        adapter's), 43 px either way.
+      - The full layout's least box: column A 730.5 px, column B 752 px with the probed refusal
+        (above). At a 752 px box (1920 × 910) every state fits, column B's spare at E8 43 px,
+        the refusal's.
+    - _The local chart, compact, at 1280 × 688_ (a centre on the galactic axis, 3,000 ly above
+      the plane): the axis note one 18 px line, 293 → 337.1, in the 798 px furniture row; the
+      page 798 × 448; with the link down the same.
+    - _The create form at 1280 × 720:_ `SEED INVALID: …` one line, 395.5 → 422.8, in the 832 px
+      `UNIVERSE` panel, and with `NAME INVALID: …` (338.5 → 365.8) one line each.
+    - Lines tracked whole before shrink: `NO CHART: …` 358.4 → 293.3,
+      `GRAPHICS SAFE MODE: …` 531.3 → 449.4, `DENSE REGION: …` 478.8 → 399.
+    - Nothing scrolls or clips at any size or in any state measured (the visually hidden
+      `stale` word, clipped to 1 px by design, excluded).
+  - _Tests._ `StatusText.test.tsx` (the task's six cases, `renderPart`, the stylesheet's two
+    rules), `StatusLine.test.tsx` (both parts in its one `output`, the standing's class on it),
+    `test/statusLine.test.tsx`, and one case per caller class: `CensusReadout` (its caution and
+    the request's state), `UniversePanel` (`NO UNIVERSES:`, `SEED INVALID:`, the mismatch
+    reason), `CentreEntry` (the composed `X, Y INVALID:`), `SpatialView` (the axis note),
+    `GalaxyMapPanel` (the room's reason), `InstrumentView` (the instruments' reason),
+    `ExposurePanel` (`INHIBITED · OPERATOR` unbroken in the sentence, and the whole-state
+    `AUTO NOT AVAILABLE: NO IMAGE TO METER`), `CameraControls` (the drawn chord in the sentence),
+    `MeterControl`, `StyleControl` and `ViewLabelBlock`. The console-ux lint on the changed files:
+    0 errors, 12 checks, all on lines the diff does not touch (the ux-reviewer's pass confirmed
+    each).

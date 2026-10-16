@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { aCensus } from "../../test/galaxyFixtures";
 import { ChartControls } from "./ChartControls";
 import { layerBands, type StarFilter } from "./chartModel";
+import { statusLine } from "../../test/statusLine";
 
 const BANDS = layerBands(aCensus().layers);
 
@@ -159,7 +160,9 @@ describe("ChartControls", () => {
     await user.clear(screen.getByLabelText("DRIVE RANGE"));
     await user.type(screen.getByLabelText("DRIVE RANGE"), "900{Enter}");
 
-    expect(screen.getByText("DRIVE RANGE INVALID: enter 0.01 to 500 ly")).toBeInTheDocument();
+    expect(
+      screen.getByText(statusLine("DRIVE RANGE INVALID: enter 0.01 to 500 ly")),
+    ).toBeInTheDocument();
     expect(onDriveRange).not.toHaveBeenCalled();
   });
 
@@ -180,7 +183,9 @@ describe("ChartControls", () => {
     await user.clear(screen.getByLabelText("CHART TIME"));
     await user.type(screen.getByLabelText("CHART TIME"), "1001{Enter}");
 
-    expect(screen.getByText("CHART TIME INVALID: enter -1000 to 1000 yr")).toBeInTheDocument();
+    expect(
+      screen.getByText(statusLine("CHART TIME INVALID: enter -1000 to 1000 yr")),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("CHART TIME")).toHaveAttribute("aria-invalid", "true");
     expect(onTime).not.toHaveBeenCalled();
   });
@@ -197,7 +202,7 @@ describe("ChartControls", () => {
 
     expect(field).toHaveValue("50");
     expect(field).not.toHaveAttribute("aria-invalid");
-    expect(screen.queryByText("DRIVE RANGE INVALID: enter 0.01 to 500 ly")).toBeNull();
+    expect(screen.queryByText(statusLine("DRIVE RANGE INVALID: enter 0.01 to 500 ly"))).toBeNull();
     expect(onDriveRange).not.toHaveBeenCalled();
   });
 
@@ -210,7 +215,7 @@ describe("ChartControls", () => {
 
     expect(numberField("CHART TIME")).toHaveValue("+12.50");
     expect(numberField("CHART TIME")).not.toHaveAttribute("aria-invalid");
-    expect(screen.queryByText("CHART TIME INVALID: enter -1000 to 1000 yr")).toBeNull();
+    expect(screen.queryByText(statusLine("CHART TIME INVALID: enter -1000 to 1000 yr"))).toBeNull();
     expect(onTime).not.toHaveBeenCalled();
   });
 

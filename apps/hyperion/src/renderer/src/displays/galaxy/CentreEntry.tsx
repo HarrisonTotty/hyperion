@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useId, useState } from "react";
 
+import { StatusText } from "../../components/StatusText";
 import { formatBearingDeg, formatLengthLy, formatNumber, formatSigned } from "../../lib/format";
 import { type CentreLy, ROOT_CUBE_HALF_LY } from "../../lib/galaxy/model";
 import { isEmptyEntry, isTextEntry, showSelected } from "../../lib/textEntry";
@@ -381,8 +382,9 @@ export function CentreEntry({ cursorLy, onCursor, onCentre, heldBack }: CentreEn
         </div>
         {refusalId === null ? null : (
           <p className="form-field__error" id={refusalId}>
-            {refusedLabels.join(", ")} INVALID: enter {formatNumber(-ROOT_CUBE_HALF_LY, 0)} to{" "}
-            {formatNumber(LARGEST_ENTRY_LY, MAX_DECIMALS)} ly
+            <StatusText
+              text={`${refusedLabels.join(", ")} INVALID: enter ${formatNumber(-ROOT_CUBE_HALF_LY, 0)} to ${formatNumber(LARGEST_ENTRY_LY, MAX_DECIMALS)} ly`}
+            />
           </p>
         )}
       </form>
