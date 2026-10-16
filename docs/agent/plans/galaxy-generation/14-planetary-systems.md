@@ -14759,3 +14759,195 @@ tables::gauss_legendre`.
   - _A re-bless before P14.T54.a_: decision-p14-t49c-split lets this golden re-bless at 22 with no
     bump, but `golden_diff.py` will report its changed values as unbumped (exit 1), as it does for
     P14.T49.b's held sections; the re-blessing commit cites the ruling.
+- **Deviations in P14.T50.b, as built (`p14-chem`, 2026-10-16), as decision-p14-t50b-envelope
+  rules them.** `GENERATOR_VERSION` stays 22, and no generated value moves:
+  `chem/envelope_abundances.rs` lands as a pure module that nothing on the record calls
+  (decision-bump-plan-after-22 §1.3 and §6). It adds no draw or domain tag. Its one golden,
+  `tests/golden/planetary/envelope_abundances.golden`, is new at header 22, pinned by the unit test
+  `planetary::chem::envelope_abundances::tests::the_envelope_abundances_are_pinned`, since the Solar
+  System table is crate-private test data (as T24.e's). T52.a speciates the abundances and T52.d
+  publishes them at T54.b. The decision upholds the four deviations below (E(M), the ice-line
+  factor, the rain on `T_eff` and age, the Surface path) and changed the rain before the commit
+  (§6: gravity-keyed, with the primordial He/H an input); its §7 holds the plan-text changes for a
+  docs batch, among them the new P14.T50.d.
+  - _Public items_ (`planetary::chem::envelope_abundances`):
+    - `EnvelopeAbundances::derive(&EnvelopeInputs)` with `per_hydrogen(Element)`, `elements()`,
+      `enrichment()`, `carbon_to_oxygen()`, `ice_line_factor()`, `helium_depletion()`,
+      `helium_to_molecular_hydrogen()` and `mass_fractions()`;
+    - `EnvelopeInputs` (mass, `MassFractions`, formation distance, snow line, \[Fe/H\], \[α/Fe\],
+      `HostAbundances`, `T_eff`, age, surface gravity and the primordial He/H; plain public
+      fields);
+    - `DeriveEnvelopeAbundancesError` (`Mass`, `NotAnEnvelope`, `FormationDistance`, `SnowLine`,
+      `FeH`, `AlphaFe`, `EffectiveTemperature`, `Age`, `SurfaceGravity`, `PrimordialHelium`);
+    - the free functions `mass_enrichment`, `ice_line_factor`, `rain_temperature`,
+      `helium_depletion`, `helium_rain_onset`, `helium_rain_onset_at`,
+      `jupiter_helium_to_molecular_hydrogen` and `solar_nitrogen_to_oxygen`;
+    - the constants `ENRICHMENT_AT_ONE_JUPITER_MASS` 2.65, `ENRICHMENT_MASS_INDEX` 0.986,
+      `ALPHA_ELEMENTS`, `DiscCarrier` (`line`, `oxygen_per_hydrogen`, `carbon_per_hydrogen`) with
+      `DISC_CARRIERS`, `HELIUM_RAIN_LEAST_MASS` 0.15 M_J, `HELIUM_RAIN_EARLIEST_AGE` 0.7 Gyr,
+      `HELIUM_RAIN_SATURN_AGE` 1.5 Gyr, `JUPITER_EFFECTIVE_TEMPERATURE` 125.57 K,
+      `JUPITER_HELIUM_MOLE_FRACTION` 0.1359, `JUPITER_SURFACE_GRAVITY` 25.92 m s⁻²,
+      `SATURN_EFFECTIVE_TEMPERATURE` 96.67 K, `SATURN_HELIUM_PER_HYDROGEN` 0.0394,
+      `SATURN_SURFACE_GRAVITY` 11.19 m s⁻², `HUBBARD_INDICES` (0.167, 1.243), `RAINED_NEON` 0.043
+      and `METALLICITY_BOUND` 10 dex (\[Fe/H\] and \[α/Fe\] beyond it are refused, so that every
+      output stays finite: the determinism review's ask).
+
+    `chem/mod.rs` declares the module and gains the test-only `HostAbundances::protosolar()`, the
+    Sun's own Lodders ratios off the trends, against which the tests compare the measured Solar
+    System.
+
+  - _The path._ Plan 14 files T50 under the snapshot path (decision-composition §3.1), but only
+    T52.d's envelope section reads T50.b (§3.4). So T54.b calls it where it builds that section, on
+    the Surface path, and `snapshot_at` never does: nothing counts against T33.a's snapshot budget.
+    Upheld (decision-p14-t50b-envelope §4): should a later task feed the envelope's Z or μ into the
+    radius, `T_eff`, the albedo or the state, the module moves to the snapshot path.
+  - _Every element._ The abundances cover all 25 of `Element::ALL`, the plan's 21 with Ne, Ar, Kr
+    and Xe, so that the envelope's metal mass is the whole registry's (neon is a tenth of the
+    protosolar metals by mass) and Galileo's noble gases check it.
+  - _E(M) is the measured envelopes' trend, bounded by Thorngren et al. 2016, not their bulk
+    relation itself_ (upheld, §1). Thorngren et al.'s Z_planet ÷ Z_star = 9.7 (M ÷ M_J)^−0.45
+    (their §5.3, read) is the bulk's enrichment and would put Jupiter's carbon near 11 times solar
+    against Galileo's 4.3, failing the plan's own Jupiter test. Thorngren and Fortney (2019, ApJL
+    874, L31, read) make the bulk an upper limit, Z_atm = f Z_p with 0 ≤ f ≤ 1. So:
+    - E = 2.65 (M ÷ M_J)^−0.986 is the lane's unweighted log fit to the four giants' measured C/H
+      (Guillot et al. 2022, Table 2, read: Wong et al. 2004, Fletcher et al. 2009, Sromovsky et al.
+      2019, Karkoschka and Tomasko 2011), through the module's own carbon share, rms 0.086 dex;
+    - it is held at most to the bulk's metal fraction, `Z_p` = 1 − the envelope share, which for a
+      giant is Thorngren et al.'s 57.9 M⊕ M^0.61 (f = 1), and at least to 1, the host's gas, which
+      it reaches at 2.69 M_J (supported by Snellen 2025's solar metallicities for hot Jupiters and
+      imaged super-Jupiters, as the ruling reads it);
+    - Welbanks et al.'s (2019, read) error-weighted fit to the same methane, −1.11 log M + 0.38, is
+      the recorded alternative. It passes Saturn and puts Jupiter's carbon at 2.4.
+  - _The ice-line factor is the disc gas's C/O over the disc's_, by zone, from Öberg, Murray-Clay
+    and Bergin's (2011) Table 1 (read), with no dependence on E: 11/10 inside the snow line, 11/7
+    to the CO₂ line (47 K), 11/6 to the CO line (20 K) and 1 beyond it. Upheld (§2) as Öberg et
+    al.'s gas-dominated limit applied at every E, calibrated on the four giants, all of which hold
+    more carbon than sulphur, against their §4 and Espinoza et al. 2017's sub-stellar C/O for
+    solid-polluted envelopes. Their Eq. 2, with the zone's own solids, would put Jupiter's sulphur
+    and noble gases 0.4 dex high. The table's Jupiter about the Sun's own ratios has C/H 3.7, O/H
+    and N/H 2.3, S/H and the heavy noble gases 2.65 times protosolar and C/O 0.72, against
+    Galileo's C 4.3, S 2.7 and Ar, Kr, Xe 2.1–2.6 and Juno's O 2.4 (+2.1, −1.5) and N 2.5. Added to
+    the plan's three lines: Table 1's carbon grains at its adopted 500 K (its range "> 150 K"),
+    P14.T50.a's soot line (22/15 inside it), and silicates at 1,500 K (1 inside). Water's line is
+    the generator's 170 K snow line, for Table 1's adopted 135 K. The solids' share as a drawn rank
+    is P14.T50.d's.
+  - _The host._ Carbon is the host's C/O (T50.a) times its oxygen, nitrogen the protosolar N/O
+    times it, and magnesium the host's Mg/Si times its silicon, so that a giant's envelope and its
+    siblings' crusts read one star (an addition: the plan's α rule alone would leave Mg/Si
+    protosolar). The α elements are O, Ne, Mg, Si, S, Ar, Ca and Ti (`ALPHA_ELEMENTS`: Bensby et
+    al. 2014's Fig. 15 and Hayden et al. 2015's Appendix B, read, with neon and argon by the α
+    chain, the lane's). Carbon, nitrogen and oxygen are shared out at E times the host's mass of the
+    three, so the metals before the rain sum to E times the host's by mass (the plan's 10⁻⁹ test,
+    with the rained neon put back), with the envelope's C/O the host's times the factor and N/O
+    protosolar. `enrichment()` is that E; `mass_fractions()`'s Z is after the rain, lower by the
+    neon it took.
+  - _Carbon and nitrogen follow \[α/Fe\]_ through oxygen, where the plan's α rule alone would raise
+    neither (upheld, §5; Nissen et al. 2014 find thick-disc stars on the halo's \[C/O\] trend). The
+    host's C/O has no \[α/Fe\] term (T50.a), so a thick-disc host's envelope keeps the thin disc's
+    C/O at its \[Fe/H\]: for plan 06, when the star carries its own ratios.
+  - _Helium rain reads `T_eff`, gravity and age, not `T_int`_ (upheld, with gravity added before
+    the commit, §3 and §6). Keyed on `T_int`, every gas giant under 0.3 M_J, whose record has no
+    internal luminosity and so a `T_int` of 0, would rain at any insolation, a hot Saturn among
+    them.
+    - Only a `PlanetClass::GasGiant` of at least 0.15 M_J rains (Fortney and Hubbard 2004, §3.1,
+      read: "approximately the lowest mass a planet can be while still having some liquid metallic
+      hydrogen", "dependent on the mass of the core").
+    - The onset is where the deep adiabat meets the H–He phase curve near 2 Mbar (Mankovich and
+      Fortney 2020, Fig. 1, read: the T1 = 149 K adiabat; ΔT_phase = 539 ± 23 K), one adiabat for
+      every mass. The adiabat follows Hubbard's T₀ = K g^−0.167 `T_eff`^1.243 (Fortney et al. 2011,
+      Eq. 1, read), so the rain reads x = `T_eff` (g_J ÷ g)^(0.167 ÷ 1.243), `T_eff` the planet's
+      own, (`T_int`⁴ + `T_eq`⁴)^¼ (Fortney and Hubbard's eqs. 4 and 6).
+    - He/H over the primordial falls linearly in x through Jupiter's 0.812 at x = 125.57 K
+      (He/H₂ 0.157, von Zahn et al. 1998's 0.1359 mole fraction, as Mankovich and Fortney's
+      Table 1 and Guillot et al.'s Table 2 list it; `T_eff` from Li et al. 2018's 14.098 W m⁻²,
+      read) and Saturn's 0.407 at x = 108.22 K (96.67 K at 11.19 m s⁻²; the mean of Guillot et
+      al.'s three Cassini values, 2.87, 6.20 and 2.75 × 10⁻² He/H), from none at 133.61 K, and is
+      held at Saturn's below. The gravities are GM over the mean radius squared (Jupiter's nominal
+      GM, IAU 2015 B3; Saturn's from the Solar System table's mass; the radii 69,911 and 58,232 km,
+      Seidelmann et al. 2007, as Mankovich and Fortney's Table 1 lists them).
+    - So the onset is 133.61 K at Jupiter's gravity and 119.35 K at Saturn's, inside the "∼100 -
+      120 K" Fortney and Hubbard quote for Saturn; a 3 M_J giant rains only below about 153 K and a
+      0.15 M_J one below about 106 K, as "the greater the planet's mass, the later" requires.
+      Saturn's T1 over Jupiter's on the fit is 0.831, against Mankovich and Fortney's 140 ÷ 166 =
+      0.843. Fortney and Hubbard's own diagram starts Jupiter's rain only "at T_eff below 123 K",
+      which leaves its measured depletion unexplained (their §1).
+    - It waits on age: a giant under 0.3 M_J has no internal luminosity on the record, so its
+      `T_eff` is its `T_eq` at every age. Of the line's depletion it takes none before 0.7 Gyr
+      (Fortney and Hubbard's 0.15 M_J onset, the earliest of their range) and all from 1.5 Gyr
+      (Saturn's, Guillot et al. 2022 §2.1.2 after Mankovich and Fortney), linearly between.
+    - Hot giants never rain: "representative exoplanets … are fully miscible because of their high
+      entropies, either because they are close to their star, or because they are massive"
+      (Guillot et al. 2022, §2.1.2), who place the rain in "planets with masses between about ∼ 40
+      and 400 M⊕ and effective temperatures below about ∼ 150 K".
+    - Neon, which the droplets dissolve, falls with the helium by a fixed fraction of what is left
+      at each step (0.043^p, p the helium's depletion in units of Jupiter's), through 0.043 of the
+      other metals at Jupiter's, Jupiter's 0.0985 of protosolar against its heavy noble gases' 2.29
+      (Mahaffy et al. 2000, through Atreya et al. 2016's Table 2.1, read), and on, to 5 × 10⁻⁵ at
+      Saturn's: Mankovich and Fortney (§4.3) expect Saturn's neon depletion "even more advanced
+      than in Jupiter's". The form, fast at the onset, is the lane's. An addition (upheld, §5).
+    - The builder's check that a sub-Neptune keeps its helium: the 0.15 M_J limit above, against
+      Uranus's and Neptune's 14.5 and 17.1 M⊕, and Uranus's solar helium (Conrath et al. 1987,
+      abstract read). The ice giants keep it too.
+
+    The rain is continuous in x, gravity and age. At a fixed cold `T_eff` it steps where a giant
+    crosses 0.15 M_J or `GAS_GIANT_ENVELOPE_FRACTION` (a change of class), which T52.d's
+    continuity test must not sample, or must name as a state change. The table's Saturn (no
+    luminosity of its own, its `T_eq` at its own gravity) takes Saturn's helium; the table's
+    Jupiter, at 127.84 K, 2.3 K above the measured, He/H₂ 0.171 and neon 0.37 of protosolar
+    (0.157 and 0.0985 measured); at Jupiter's measured `T_eff` and gravity, 0.157 and 0.11.
+
+  - _The primordial He/H is an input_ (§6), the envelope's helium before any rain, which the rain
+    multiplies: T54.b gives it (the host star's Y ÷ X over the Sun's, times protosolar, then T53.a's
+    fractionation); the tests pass the protosolar value, and one carries a non-protosolar value
+    through.
+  - _Tests beyond the plan's four:_ the ice-line factor's steps and Öberg's gas C/O values; the
+    rain's gates, line, onset at Jupiter's and Saturn's gravity (Saturn's within 100–120 K), the T1
+    ratio within 2% of 140/166, a Jupiter-gravity giant at `T_eff` ≥ 134 K keeping its helium,
+    continuity in x, gravity and age, the gravities as GM ÷ R², the neon, and a non-protosolar
+    primordial He/H; the table's four giants against their measured C/H (within 0.15 dex), and
+    Jupiter's O, S, Ar, Kr, Xe and Ne against Galileo and Juno at its measured state; the bound and
+    the floor; the α and \[Fe/H\] scalings with the host's Mg/Si; each error; and the same inputs
+    twice. The Jupiter carbon test runs about the Sun's own ratios and about a generated host of
+    solar metallicity at the median ranks (0.067 dex poorer in carbon); both pass.
+  - _Inputs for T54.b and T52.d._ The record's `T_eff` (its `T_eq` where it has none), surface
+    gravity and age; T50.a's formation distance and snow line; `SystemContext::alpha_fe()`, where
+    `None` makes the envelope `NotModelled`, never solar (ruling 33); and the primordial He/H above.
+    The golden's header moves to 24 with the bump.
+  - _For T24.d._ The envelope's He/H₂ and X, Y and Z, which T24.d's c_p(T) and μ read, are
+    `helium_to_molecular_hydrogen()` and `mass_fractions()`; its sub-Neptune check is met here.
+    Whatever `T_int` T24.d states for a sub-Neptune or a giant under 0.3 M_J, T54.b passes this
+    module the same `T_eff`, (`T_eq`⁴ + `T_int`⁴)^¼, so the profile and the helium read one
+    temperature; a `T_int` for a cold giant of 0.15–0.3 M_J moves its helium.
+  - _Closed sets, for the composition audit:_ `DISC_CARRIERS` (Öberg et al.'s five: CO, CO₂, water,
+    carbon grains, silicates; no CH₄, NH₃ or N₂ ice, so nitrogen follows oxygen by the plan's N/O
+    rule) and `ALPHA_ELEMENTS` (eight).
+- **Deferred findings (2026-10-13 rule)**, from P14.T50.b, as decision-p14-t50b-envelope §5 leaves
+  them:
+  - E is fitted from 14.5 to 318 M⊕ and extrapolated: 80 at 10 M⊕, 160 at 5 and 390 at 2, where
+    the envelope's metals per hydrogen atom are about 0.1, 0.2 and 0.5 by number. Below about 5 M⊕
+    the envelope is no longer hydrogen-dominated: T52.a states where Heng and Tsai's solution stops
+    and what the record says beyond it (P14.T53.a's hybrid airs). E draws no scatter: P14.T50.d.
+  - Between the CO₂ and CO lines the factor 11/6 puts the envelope's C/O above 1 about any host
+    richer in carbon than 0.545: T52.a accepts C/O above 1; T50.d's draw should bring most below.
+    Neptune's factor in the fit rests on its 46.55 K, 1% inside the 47 K CO₂ line (42–52 K in
+    Öberg et al.'s range).
+  - The C/O dichotomy: the Solar System's giants are carbon-rich over sulphur, while JWST's hot
+    Jupiters are sub-stellar (Fu et al. 2024 and 2025, as the ruling reads them). P14.T50.d.
+  - The rain's phase curve depends on Y and Z, which one onset adiabat does not follow.
+  - Saturn's helium is the mean of three Cassini values that disagree beyond their errors (0.29 to
+    0.64 of protosolar). The inverse-variance mean, 3.27 × 10⁻², would put the onset near 132.5 K;
+    Mankovich and Fortney predict Y ÷ (X + Y) = 0.07 ± 0.01.
+  - The table's Jupiter, 2.3 K warmer than measured, rains less than Galileo found (He/H₂ 0.171
+    against 0.157): T11.d's cooling.
+  - The 0.15 M_J limit depends on the core mass (Fortney and Hubbard, §3.1).
+  - The envelope's metals are taken from the radius model's heavy elements, whose envelope is
+    hydrogen and helium alone: a sub-Neptune's envelope at 80 times solar is about half metal by
+    mass and so denser than the radius model's. The radius is not recomputed for it (plan 13 and
+    P14.T11).
+  - The four primary C/H papers, von Zahn et al. 1998, Mahaffy et al. 2000 and Conrath et al. 1987
+    in full were not read; their figures are Guillot et al.'s, Atreya et al.'s and Mankovich and
+    Fortney's tables' and their abstracts'. Saturn's C/H is 2.50 × 10⁻³ in Guillot et al. and
+    2.65 × 10⁻³ in Atreya et al. from the same 4.7 × 10⁻³ of methane, by the He/H each assumes; the
+    fit takes Guillot et al.'s.
+  - The abundances run over `Element::ALL`, so P14.T55.l's appended elements join at protosolar ×
+    10^\[Fe/H\] × E with no change here, and the golden gains their lines.
