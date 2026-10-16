@@ -708,147 +708,147 @@ liquid 20 C2H6 at 251.584 K: absorption_per_m none
 liquid 20 C2H6 at 251.584 K: scattering_per_m none
 liquid 20 C2H6 at 251.584 K: surface_tension_n_per_m none
 liquid 20 C2H6 at 251.584 K: viscosity_pa_s none
-liquid 58 H2SO4 at 242.000 K: basis Derived
-liquid 58 H2SO4 at 242.000 K: temperature = 0x406e400000000000  # 242.0
-liquid 58 H2SO4 at 242.000 K: density_kg_m3 = 0x4099fa6666666666  # 1662.6
-liquid 58 H2SO4 at 242.000 K: refractive_index bin 0 = 0x3ff71462ace5178d  # 1.4424769166666664
-liquid 58 H2SO4 at 242.000 K: refractive_index bin 1 = 0x3ff6fc59d443db7d  # 1.4366091052631582
-liquid 58 H2SO4 at 242.000 K: refractive_index bin 2 = 0x3ff6ed9c105d4cde  # 1.4330101622807017
-liquid 58 H2SO4 at 242.000 K: refractive_index bin 3 = 0x3ff6e8bad2d6ce45  # 1.4318187938596492
-liquid 58 H2SO4 at 242.000 K: refractive_index bin 4 = 0x3ff6e7bf9a2d811f  # 1.4315792105263154
-liquid 58 H2SO4 at 242.000 K: refractive_index bin 5 = 0x3ff6e6c7473ef7bd  # 1.431342390350877
-liquid 58 H2SO4 at 242.000 K: refractive_index bin 6 = 0x3ff6e5cb34c6711d  # 1.431101995614035
-liquid 58 H2SO4 at 242.000 K: refractive_index bin 7 = 0x3ff6e429e42c4e47  # 1.4307040131578945
-liquid 58 H2SO4 at 242.000 K: refractive_index bin 8 = 0x3ff6e2098c073e9e  # 1.4301848859649122
-liquid 58 H2SO4 at 242.000 K: refractive_index bin 9 = 0x3ff6dfe7e7df0a87  # 1.4296645219298243
-liquid 58 H2SO4 at 242.000 K: refractive_index bin 10 = 0x3ff6ddc5b2e67d07  # 1.4291436184210526
-liquid 58 H2SO4 at 242.000 K: refractive_index bin 11 = 0x3ff6dba510952697  # 1.4286242149122808
-liquid 58 H2SO4 at 242.000 K: refractive_index bin 12 = 0x3ff6d93688560df4  # 1.4280305219298244
-liquid 58 H2SO4 at 242.000 K: refractive_index bin 13 = 0x3ff6d52b40983a3d  # 1.4270432017543861
-liquid 58 H2SO4 at 242.000 K: refractive_index bin 14 = 0x3ff6d4fdf3b645a0  # 1.4269999999999996
-liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 0 = 0x3fe534db9991624a  # 0.6627023696301617
-liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 1 = 0x3fe3eb9cd838eea3  # 0.622511312779768
-liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 2 = 0x3fe2c807cc05feed  # 0.5869177803833431
-liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 3 = 0x3fe1c3ff2b1bc3ce  # 0.5551753847085992
-liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 4 = 0x3fe0daa72c0aea15  # 0.5266910419662191
-liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 5 = 0x3fe00816febd0a42  # 0.5009875274047959
-liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 6 = 0x3fde92407077b577  # 0.4776764963451891
-liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 7 = 0x3fdd364ab4bac79d  # 0.4564387097299177
-liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 8 = 0x3fdbf7f5eaefd816  # 0.43700931494766004
-liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 9 = 0x3fdad3a0b73b7c12  # 0.4191667355898413
-liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 10 = 0x3fd9c63ba1acf673  # 0.4027241782058361
-liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 11 = 0x3fd8cd2d898d5e82  # 0.38752306397280034
-liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 12 = 0x3fd8a5d9f33cc9b4  # 0.3851227641454458
-liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 13 = 0x3fe328d93f998f99  # 0.5987364046272773
-liquid 58 H2SO4 at 242.000 K: absorption_per_m bin 14 = 0x3ff1c8d4c9f9ea32  # 1.1115310563751675
-liquid 58 H2SO4 at 242.000 K: scattering_per_m none
-liquid 58 H2SO4 at 242.000 K: surface_tension_n_per_m none
-liquid 58 H2SO4 at 242.000 K: viscosity_pa_s none
-liquid 58 H2SO4 at 267.000 K: basis Derived
-liquid 58 H2SO4 at 267.000 K: temperature = 0x4070b00000000000  # 267.0
-liquid 58 H2SO4 at 267.000 K: density_kg_m3 = 0x4099fa6666666666  # 1662.6
-liquid 58 H2SO4 at 267.000 K: refractive_index bin 0 = 0x3ff71462ace5178d  # 1.4424769166666664
-liquid 58 H2SO4 at 267.000 K: refractive_index bin 1 = 0x3ff6fc59d443db7d  # 1.4366091052631582
-liquid 58 H2SO4 at 267.000 K: refractive_index bin 2 = 0x3ff6ed9c105d4cde  # 1.4330101622807017
-liquid 58 H2SO4 at 267.000 K: refractive_index bin 3 = 0x3ff6e8bad2d6ce45  # 1.4318187938596492
-liquid 58 H2SO4 at 267.000 K: refractive_index bin 4 = 0x3ff6e7bf9a2d811f  # 1.4315792105263154
-liquid 58 H2SO4 at 267.000 K: refractive_index bin 5 = 0x3ff6e6c7473ef7bd  # 1.431342390350877
-liquid 58 H2SO4 at 267.000 K: refractive_index bin 6 = 0x3ff6e5cb34c6711d  # 1.431101995614035
-liquid 58 H2SO4 at 267.000 K: refractive_index bin 7 = 0x3ff6e429e42c4e47  # 1.4307040131578945
-liquid 58 H2SO4 at 267.000 K: refractive_index bin 8 = 0x3ff6e2098c073e9e  # 1.4301848859649122
-liquid 58 H2SO4 at 267.000 K: refractive_index bin 9 = 0x3ff6dfe7e7df0a87  # 1.4296645219298243
-liquid 58 H2SO4 at 267.000 K: refractive_index bin 10 = 0x3ff6ddc5b2e67d07  # 1.4291436184210526
-liquid 58 H2SO4 at 267.000 K: refractive_index bin 11 = 0x3ff6dba510952697  # 1.4286242149122808
-liquid 58 H2SO4 at 267.000 K: refractive_index bin 12 = 0x3ff6d93688560df4  # 1.4280305219298244
-liquid 58 H2SO4 at 267.000 K: refractive_index bin 13 = 0x3ff6d52b40983a3d  # 1.4270432017543861
-liquid 58 H2SO4 at 267.000 K: refractive_index bin 14 = 0x3ff6d4fdf3b645a0  # 1.4269999999999996
-liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 0 = 0x3fe534db9991624a  # 0.6627023696301617
-liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 1 = 0x3fe3eb9cd838eea3  # 0.622511312779768
-liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 2 = 0x3fe2c807cc05feed  # 0.5869177803833431
-liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 3 = 0x3fe1c3ff2b1bc3ce  # 0.5551753847085992
-liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 4 = 0x3fe0daa72c0aea15  # 0.5266910419662191
-liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 5 = 0x3fe00816febd0a42  # 0.5009875274047959
-liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 6 = 0x3fde92407077b577  # 0.4776764963451891
-liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 7 = 0x3fdd364ab4bac79d  # 0.4564387097299177
-liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 8 = 0x3fdbf7f5eaefd816  # 0.43700931494766004
-liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 9 = 0x3fdad3a0b73b7c12  # 0.4191667355898413
-liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 10 = 0x3fd9c63ba1acf673  # 0.4027241782058361
-liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 11 = 0x3fd8cd2d898d5e82  # 0.38752306397280034
-liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 12 = 0x3fd8a5d9f33cc9b4  # 0.3851227641454458
-liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 13 = 0x3fe328d93f998f99  # 0.5987364046272773
-liquid 58 H2SO4 at 267.000 K: absorption_per_m bin 14 = 0x3ff1c8d4c9f9ea32  # 1.1115310563751675
-liquid 58 H2SO4 at 267.000 K: scattering_per_m none
-liquid 58 H2SO4 at 267.000 K: surface_tension_n_per_m none
-liquid 58 H2SO4 at 267.000 K: viscosity_pa_s none
-liquid 58 H2SO4 at 292.000 K: basis Derived
-liquid 58 H2SO4 at 292.000 K: temperature = 0x4072400000000000  # 292.0
-liquid 58 H2SO4 at 292.000 K: density_kg_m3 = 0x4099fa6666666666  # 1662.6
-liquid 58 H2SO4 at 292.000 K: refractive_index bin 0 = 0x3ff71462ace5178d  # 1.4424769166666664
-liquid 58 H2SO4 at 292.000 K: refractive_index bin 1 = 0x3ff6fc59d443db7d  # 1.4366091052631582
-liquid 58 H2SO4 at 292.000 K: refractive_index bin 2 = 0x3ff6ed9c105d4cde  # 1.4330101622807017
-liquid 58 H2SO4 at 292.000 K: refractive_index bin 3 = 0x3ff6e8bad2d6ce45  # 1.4318187938596492
-liquid 58 H2SO4 at 292.000 K: refractive_index bin 4 = 0x3ff6e7bf9a2d811f  # 1.4315792105263154
-liquid 58 H2SO4 at 292.000 K: refractive_index bin 5 = 0x3ff6e6c7473ef7bd  # 1.431342390350877
-liquid 58 H2SO4 at 292.000 K: refractive_index bin 6 = 0x3ff6e5cb34c6711d  # 1.431101995614035
-liquid 58 H2SO4 at 292.000 K: refractive_index bin 7 = 0x3ff6e429e42c4e47  # 1.4307040131578945
-liquid 58 H2SO4 at 292.000 K: refractive_index bin 8 = 0x3ff6e2098c073e9e  # 1.4301848859649122
-liquid 58 H2SO4 at 292.000 K: refractive_index bin 9 = 0x3ff6dfe7e7df0a87  # 1.4296645219298243
-liquid 58 H2SO4 at 292.000 K: refractive_index bin 10 = 0x3ff6ddc5b2e67d07  # 1.4291436184210526
-liquid 58 H2SO4 at 292.000 K: refractive_index bin 11 = 0x3ff6dba510952697  # 1.4286242149122808
-liquid 58 H2SO4 at 292.000 K: refractive_index bin 12 = 0x3ff6d93688560df4  # 1.4280305219298244
-liquid 58 H2SO4 at 292.000 K: refractive_index bin 13 = 0x3ff6d52b40983a3d  # 1.4270432017543861
-liquid 58 H2SO4 at 292.000 K: refractive_index bin 14 = 0x3ff6d4fdf3b645a0  # 1.4269999999999996
-liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 0 = 0x3fe534db9991624a  # 0.6627023696301617
-liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 1 = 0x3fe3eb9cd838eea3  # 0.622511312779768
-liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 2 = 0x3fe2c807cc05feed  # 0.5869177803833431
-liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 3 = 0x3fe1c3ff2b1bc3ce  # 0.5551753847085992
-liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 4 = 0x3fe0daa72c0aea15  # 0.5266910419662191
-liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 5 = 0x3fe00816febd0a42  # 0.5009875274047959
-liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 6 = 0x3fde92407077b577  # 0.4776764963451891
-liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 7 = 0x3fdd364ab4bac79d  # 0.4564387097299177
-liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 8 = 0x3fdbf7f5eaefd816  # 0.43700931494766004
-liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 9 = 0x3fdad3a0b73b7c12  # 0.4191667355898413
-liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 10 = 0x3fd9c63ba1acf673  # 0.4027241782058361
-liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 11 = 0x3fd8cd2d898d5e82  # 0.38752306397280034
-liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 12 = 0x3fd8a5d9f33cc9b4  # 0.3851227641454458
-liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 13 = 0x3fe328d93f998f99  # 0.5987364046272773
-liquid 58 H2SO4 at 292.000 K: absorption_per_m bin 14 = 0x3ff1c8d4c9f9ea32  # 1.1115310563751675
-liquid 58 H2SO4 at 292.000 K: scattering_per_m none
-liquid 58 H2SO4 at 292.000 K: surface_tension_n_per_m none
-liquid 58 H2SO4 at 292.000 K: viscosity_pa_s none
-liquid 58 H2SO4 at 317.000 K: basis Derived
-liquid 58 H2SO4 at 317.000 K: temperature = 0x4073d00000000000  # 317.0
-liquid 58 H2SO4 at 317.000 K: density_kg_m3 = 0x4099fa6666666666  # 1662.6
-liquid 58 H2SO4 at 317.000 K: refractive_index bin 0 = 0x3ff71462ace5178d  # 1.4424769166666664
-liquid 58 H2SO4 at 317.000 K: refractive_index bin 1 = 0x3ff6fc59d443db7d  # 1.4366091052631582
-liquid 58 H2SO4 at 317.000 K: refractive_index bin 2 = 0x3ff6ed9c105d4cde  # 1.4330101622807017
-liquid 58 H2SO4 at 317.000 K: refractive_index bin 3 = 0x3ff6e8bad2d6ce45  # 1.4318187938596492
-liquid 58 H2SO4 at 317.000 K: refractive_index bin 4 = 0x3ff6e7bf9a2d811f  # 1.4315792105263154
-liquid 58 H2SO4 at 317.000 K: refractive_index bin 5 = 0x3ff6e6c7473ef7bd  # 1.431342390350877
-liquid 58 H2SO4 at 317.000 K: refractive_index bin 6 = 0x3ff6e5cb34c6711d  # 1.431101995614035
-liquid 58 H2SO4 at 317.000 K: refractive_index bin 7 = 0x3ff6e429e42c4e47  # 1.4307040131578945
-liquid 58 H2SO4 at 317.000 K: refractive_index bin 8 = 0x3ff6e2098c073e9e  # 1.4301848859649122
-liquid 58 H2SO4 at 317.000 K: refractive_index bin 9 = 0x3ff6dfe7e7df0a87  # 1.4296645219298243
-liquid 58 H2SO4 at 317.000 K: refractive_index bin 10 = 0x3ff6ddc5b2e67d07  # 1.4291436184210526
-liquid 58 H2SO4 at 317.000 K: refractive_index bin 11 = 0x3ff6dba510952697  # 1.4286242149122808
-liquid 58 H2SO4 at 317.000 K: refractive_index bin 12 = 0x3ff6d93688560df4  # 1.4280305219298244
-liquid 58 H2SO4 at 317.000 K: refractive_index bin 13 = 0x3ff6d52b40983a3d  # 1.4270432017543861
-liquid 58 H2SO4 at 317.000 K: refractive_index bin 14 = 0x3ff6d4fdf3b645a0  # 1.4269999999999996
-liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 0 = 0x3fe534db9991624a  # 0.6627023696301617
-liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 1 = 0x3fe3eb9cd838eea3  # 0.622511312779768
-liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 2 = 0x3fe2c807cc05feed  # 0.5869177803833431
-liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 3 = 0x3fe1c3ff2b1bc3ce  # 0.5551753847085992
-liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 4 = 0x3fe0daa72c0aea15  # 0.5266910419662191
-liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 5 = 0x3fe00816febd0a42  # 0.5009875274047959
-liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 6 = 0x3fde92407077b577  # 0.4776764963451891
-liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 7 = 0x3fdd364ab4bac79d  # 0.4564387097299177
-liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 8 = 0x3fdbf7f5eaefd816  # 0.43700931494766004
-liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 9 = 0x3fdad3a0b73b7c12  # 0.4191667355898413
-liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 10 = 0x3fd9c63ba1acf673  # 0.4027241782058361
-liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 11 = 0x3fd8cd2d898d5e82  # 0.38752306397280034
-liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 12 = 0x3fd8a5d9f33cc9b4  # 0.3851227641454458
-liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 13 = 0x3fe328d93f998f99  # 0.5987364046272773
-liquid 58 H2SO4 at 317.000 K: absorption_per_m bin 14 = 0x3ff1c8d4c9f9ea32  # 1.1115310563751675
-liquid 58 H2SO4 at 317.000 K: scattering_per_m none
-liquid 58 H2SO4 at 317.000 K: surface_tension_n_per_m none
-liquid 58 H2SO4 at 317.000 K: viscosity_pa_s none
+liquid 58 H2SO4 at 233.670 K: basis Derived
+liquid 58 H2SO4 at 233.670 K: temperature = 0x406d3570a3d70a3d  # 233.67
+liquid 58 H2SO4 at 233.670 K: density_kg_m3 = 0x4099fa6666666666  # 1662.6
+liquid 58 H2SO4 at 233.670 K: refractive_index bin 0 = 0x3ff71462ace5178d  # 1.4424769166666664
+liquid 58 H2SO4 at 233.670 K: refractive_index bin 1 = 0x3ff6fc59d443db7d  # 1.4366091052631582
+liquid 58 H2SO4 at 233.670 K: refractive_index bin 2 = 0x3ff6ed9c105d4cde  # 1.4330101622807017
+liquid 58 H2SO4 at 233.670 K: refractive_index bin 3 = 0x3ff6e8bad2d6ce45  # 1.4318187938596492
+liquid 58 H2SO4 at 233.670 K: refractive_index bin 4 = 0x3ff6e7bf9a2d811f  # 1.4315792105263154
+liquid 58 H2SO4 at 233.670 K: refractive_index bin 5 = 0x3ff6e6c7473ef7bd  # 1.431342390350877
+liquid 58 H2SO4 at 233.670 K: refractive_index bin 6 = 0x3ff6e5cb34c6711d  # 1.431101995614035
+liquid 58 H2SO4 at 233.670 K: refractive_index bin 7 = 0x3ff6e429e42c4e47  # 1.4307040131578945
+liquid 58 H2SO4 at 233.670 K: refractive_index bin 8 = 0x3ff6e2098c073e9e  # 1.4301848859649122
+liquid 58 H2SO4 at 233.670 K: refractive_index bin 9 = 0x3ff6dfe7e7df0a87  # 1.4296645219298243
+liquid 58 H2SO4 at 233.670 K: refractive_index bin 10 = 0x3ff6ddc5b2e67d07  # 1.4291436184210526
+liquid 58 H2SO4 at 233.670 K: refractive_index bin 11 = 0x3ff6dba510952697  # 1.4286242149122808
+liquid 58 H2SO4 at 233.670 K: refractive_index bin 12 = 0x3ff6d93688560df4  # 1.4280305219298244
+liquid 58 H2SO4 at 233.670 K: refractive_index bin 13 = 0x3ff6d52b40983a3d  # 1.4270432017543861
+liquid 58 H2SO4 at 233.670 K: refractive_index bin 14 = 0x3ff6d4fdf3b645a0  # 1.4269999999999996
+liquid 58 H2SO4 at 233.670 K: absorption_per_m bin 0 = 0x3fe534db9991624a  # 0.6627023696301617
+liquid 58 H2SO4 at 233.670 K: absorption_per_m bin 1 = 0x3fe3eb9cd838eea3  # 0.622511312779768
+liquid 58 H2SO4 at 233.670 K: absorption_per_m bin 2 = 0x3fe2c807cc05feed  # 0.5869177803833431
+liquid 58 H2SO4 at 233.670 K: absorption_per_m bin 3 = 0x3fe1c3ff2b1bc3ce  # 0.5551753847085992
+liquid 58 H2SO4 at 233.670 K: absorption_per_m bin 4 = 0x3fe0daa72c0aea15  # 0.5266910419662191
+liquid 58 H2SO4 at 233.670 K: absorption_per_m bin 5 = 0x3fe00816febd0a42  # 0.5009875274047959
+liquid 58 H2SO4 at 233.670 K: absorption_per_m bin 6 = 0x3fde92407077b577  # 0.4776764963451891
+liquid 58 H2SO4 at 233.670 K: absorption_per_m bin 7 = 0x3fdd364ab4bac79d  # 0.4564387097299177
+liquid 58 H2SO4 at 233.670 K: absorption_per_m bin 8 = 0x3fdbf7f5eaefd816  # 0.43700931494766004
+liquid 58 H2SO4 at 233.670 K: absorption_per_m bin 9 = 0x3fdad3a0b73b7c12  # 0.4191667355898413
+liquid 58 H2SO4 at 233.670 K: absorption_per_m bin 10 = 0x3fd9c63ba1acf673  # 0.4027241782058361
+liquid 58 H2SO4 at 233.670 K: absorption_per_m bin 11 = 0x3fd8cd2d898d5e82  # 0.38752306397280034
+liquid 58 H2SO4 at 233.670 K: absorption_per_m bin 12 = 0x3fd8a5d9f33cc9b4  # 0.3851227641454458
+liquid 58 H2SO4 at 233.670 K: absorption_per_m bin 13 = 0x3fe328d93f998f99  # 0.5987364046272773
+liquid 58 H2SO4 at 233.670 K: absorption_per_m bin 14 = 0x3ff1c8d4c9f9ea32  # 1.1115310563751675
+liquid 58 H2SO4 at 233.670 K: scattering_per_m none
+liquid 58 H2SO4 at 233.670 K: surface_tension_n_per_m none
+liquid 58 H2SO4 at 233.670 K: viscosity_pa_s none
+liquid 58 H2SO4 at 258.670 K: basis Derived
+liquid 58 H2SO4 at 258.670 K: temperature = 0x40702ab851eb851e  # 258.66999999999996
+liquid 58 H2SO4 at 258.670 K: density_kg_m3 = 0x4099fa6666666666  # 1662.6
+liquid 58 H2SO4 at 258.670 K: refractive_index bin 0 = 0x3ff71462ace5178d  # 1.4424769166666664
+liquid 58 H2SO4 at 258.670 K: refractive_index bin 1 = 0x3ff6fc59d443db7d  # 1.4366091052631582
+liquid 58 H2SO4 at 258.670 K: refractive_index bin 2 = 0x3ff6ed9c105d4cde  # 1.4330101622807017
+liquid 58 H2SO4 at 258.670 K: refractive_index bin 3 = 0x3ff6e8bad2d6ce45  # 1.4318187938596492
+liquid 58 H2SO4 at 258.670 K: refractive_index bin 4 = 0x3ff6e7bf9a2d811f  # 1.4315792105263154
+liquid 58 H2SO4 at 258.670 K: refractive_index bin 5 = 0x3ff6e6c7473ef7bd  # 1.431342390350877
+liquid 58 H2SO4 at 258.670 K: refractive_index bin 6 = 0x3ff6e5cb34c6711d  # 1.431101995614035
+liquid 58 H2SO4 at 258.670 K: refractive_index bin 7 = 0x3ff6e429e42c4e47  # 1.4307040131578945
+liquid 58 H2SO4 at 258.670 K: refractive_index bin 8 = 0x3ff6e2098c073e9e  # 1.4301848859649122
+liquid 58 H2SO4 at 258.670 K: refractive_index bin 9 = 0x3ff6dfe7e7df0a87  # 1.4296645219298243
+liquid 58 H2SO4 at 258.670 K: refractive_index bin 10 = 0x3ff6ddc5b2e67d07  # 1.4291436184210526
+liquid 58 H2SO4 at 258.670 K: refractive_index bin 11 = 0x3ff6dba510952697  # 1.4286242149122808
+liquid 58 H2SO4 at 258.670 K: refractive_index bin 12 = 0x3ff6d93688560df4  # 1.4280305219298244
+liquid 58 H2SO4 at 258.670 K: refractive_index bin 13 = 0x3ff6d52b40983a3d  # 1.4270432017543861
+liquid 58 H2SO4 at 258.670 K: refractive_index bin 14 = 0x3ff6d4fdf3b645a0  # 1.4269999999999996
+liquid 58 H2SO4 at 258.670 K: absorption_per_m bin 0 = 0x3fe534db9991624a  # 0.6627023696301617
+liquid 58 H2SO4 at 258.670 K: absorption_per_m bin 1 = 0x3fe3eb9cd838eea3  # 0.622511312779768
+liquid 58 H2SO4 at 258.670 K: absorption_per_m bin 2 = 0x3fe2c807cc05feed  # 0.5869177803833431
+liquid 58 H2SO4 at 258.670 K: absorption_per_m bin 3 = 0x3fe1c3ff2b1bc3ce  # 0.5551753847085992
+liquid 58 H2SO4 at 258.670 K: absorption_per_m bin 4 = 0x3fe0daa72c0aea15  # 0.5266910419662191
+liquid 58 H2SO4 at 258.670 K: absorption_per_m bin 5 = 0x3fe00816febd0a42  # 0.5009875274047959
+liquid 58 H2SO4 at 258.670 K: absorption_per_m bin 6 = 0x3fde92407077b577  # 0.4776764963451891
+liquid 58 H2SO4 at 258.670 K: absorption_per_m bin 7 = 0x3fdd364ab4bac79d  # 0.4564387097299177
+liquid 58 H2SO4 at 258.670 K: absorption_per_m bin 8 = 0x3fdbf7f5eaefd816  # 0.43700931494766004
+liquid 58 H2SO4 at 258.670 K: absorption_per_m bin 9 = 0x3fdad3a0b73b7c12  # 0.4191667355898413
+liquid 58 H2SO4 at 258.670 K: absorption_per_m bin 10 = 0x3fd9c63ba1acf673  # 0.4027241782058361
+liquid 58 H2SO4 at 258.670 K: absorption_per_m bin 11 = 0x3fd8cd2d898d5e82  # 0.38752306397280034
+liquid 58 H2SO4 at 258.670 K: absorption_per_m bin 12 = 0x3fd8a5d9f33cc9b4  # 0.3851227641454458
+liquid 58 H2SO4 at 258.670 K: absorption_per_m bin 13 = 0x3fe328d93f998f99  # 0.5987364046272773
+liquid 58 H2SO4 at 258.670 K: absorption_per_m bin 14 = 0x3ff1c8d4c9f9ea32  # 1.1115310563751675
+liquid 58 H2SO4 at 258.670 K: scattering_per_m none
+liquid 58 H2SO4 at 258.670 K: surface_tension_n_per_m none
+liquid 58 H2SO4 at 258.670 K: viscosity_pa_s none
+liquid 58 H2SO4 at 283.670 K: basis Derived
+liquid 58 H2SO4 at 283.670 K: temperature = 0x4071bab851eb851e  # 283.66999999999996
+liquid 58 H2SO4 at 283.670 K: density_kg_m3 = 0x4099fa6666666666  # 1662.6
+liquid 58 H2SO4 at 283.670 K: refractive_index bin 0 = 0x3ff71462ace5178d  # 1.4424769166666664
+liquid 58 H2SO4 at 283.670 K: refractive_index bin 1 = 0x3ff6fc59d443db7d  # 1.4366091052631582
+liquid 58 H2SO4 at 283.670 K: refractive_index bin 2 = 0x3ff6ed9c105d4cde  # 1.4330101622807017
+liquid 58 H2SO4 at 283.670 K: refractive_index bin 3 = 0x3ff6e8bad2d6ce45  # 1.4318187938596492
+liquid 58 H2SO4 at 283.670 K: refractive_index bin 4 = 0x3ff6e7bf9a2d811f  # 1.4315792105263154
+liquid 58 H2SO4 at 283.670 K: refractive_index bin 5 = 0x3ff6e6c7473ef7bd  # 1.431342390350877
+liquid 58 H2SO4 at 283.670 K: refractive_index bin 6 = 0x3ff6e5cb34c6711d  # 1.431101995614035
+liquid 58 H2SO4 at 283.670 K: refractive_index bin 7 = 0x3ff6e429e42c4e47  # 1.4307040131578945
+liquid 58 H2SO4 at 283.670 K: refractive_index bin 8 = 0x3ff6e2098c073e9e  # 1.4301848859649122
+liquid 58 H2SO4 at 283.670 K: refractive_index bin 9 = 0x3ff6dfe7e7df0a87  # 1.4296645219298243
+liquid 58 H2SO4 at 283.670 K: refractive_index bin 10 = 0x3ff6ddc5b2e67d07  # 1.4291436184210526
+liquid 58 H2SO4 at 283.670 K: refractive_index bin 11 = 0x3ff6dba510952697  # 1.4286242149122808
+liquid 58 H2SO4 at 283.670 K: refractive_index bin 12 = 0x3ff6d93688560df4  # 1.4280305219298244
+liquid 58 H2SO4 at 283.670 K: refractive_index bin 13 = 0x3ff6d52b40983a3d  # 1.4270432017543861
+liquid 58 H2SO4 at 283.670 K: refractive_index bin 14 = 0x3ff6d4fdf3b645a0  # 1.4269999999999996
+liquid 58 H2SO4 at 283.670 K: absorption_per_m bin 0 = 0x3fe534db9991624a  # 0.6627023696301617
+liquid 58 H2SO4 at 283.670 K: absorption_per_m bin 1 = 0x3fe3eb9cd838eea3  # 0.622511312779768
+liquid 58 H2SO4 at 283.670 K: absorption_per_m bin 2 = 0x3fe2c807cc05feed  # 0.5869177803833431
+liquid 58 H2SO4 at 283.670 K: absorption_per_m bin 3 = 0x3fe1c3ff2b1bc3ce  # 0.5551753847085992
+liquid 58 H2SO4 at 283.670 K: absorption_per_m bin 4 = 0x3fe0daa72c0aea15  # 0.5266910419662191
+liquid 58 H2SO4 at 283.670 K: absorption_per_m bin 5 = 0x3fe00816febd0a42  # 0.5009875274047959
+liquid 58 H2SO4 at 283.670 K: absorption_per_m bin 6 = 0x3fde92407077b577  # 0.4776764963451891
+liquid 58 H2SO4 at 283.670 K: absorption_per_m bin 7 = 0x3fdd364ab4bac79d  # 0.4564387097299177
+liquid 58 H2SO4 at 283.670 K: absorption_per_m bin 8 = 0x3fdbf7f5eaefd816  # 0.43700931494766004
+liquid 58 H2SO4 at 283.670 K: absorption_per_m bin 9 = 0x3fdad3a0b73b7c12  # 0.4191667355898413
+liquid 58 H2SO4 at 283.670 K: absorption_per_m bin 10 = 0x3fd9c63ba1acf673  # 0.4027241782058361
+liquid 58 H2SO4 at 283.670 K: absorption_per_m bin 11 = 0x3fd8cd2d898d5e82  # 0.38752306397280034
+liquid 58 H2SO4 at 283.670 K: absorption_per_m bin 12 = 0x3fd8a5d9f33cc9b4  # 0.3851227641454458
+liquid 58 H2SO4 at 283.670 K: absorption_per_m bin 13 = 0x3fe328d93f998f99  # 0.5987364046272773
+liquid 58 H2SO4 at 283.670 K: absorption_per_m bin 14 = 0x3ff1c8d4c9f9ea32  # 1.1115310563751675
+liquid 58 H2SO4 at 283.670 K: scattering_per_m none
+liquid 58 H2SO4 at 283.670 K: surface_tension_n_per_m none
+liquid 58 H2SO4 at 283.670 K: viscosity_pa_s none
+liquid 58 H2SO4 at 308.670 K: basis Derived
+liquid 58 H2SO4 at 308.670 K: temperature = 0x40734ab851eb851e  # 308.66999999999996
+liquid 58 H2SO4 at 308.670 K: density_kg_m3 = 0x4099fa6666666666  # 1662.6
+liquid 58 H2SO4 at 308.670 K: refractive_index bin 0 = 0x3ff71462ace5178d  # 1.4424769166666664
+liquid 58 H2SO4 at 308.670 K: refractive_index bin 1 = 0x3ff6fc59d443db7d  # 1.4366091052631582
+liquid 58 H2SO4 at 308.670 K: refractive_index bin 2 = 0x3ff6ed9c105d4cde  # 1.4330101622807017
+liquid 58 H2SO4 at 308.670 K: refractive_index bin 3 = 0x3ff6e8bad2d6ce45  # 1.4318187938596492
+liquid 58 H2SO4 at 308.670 K: refractive_index bin 4 = 0x3ff6e7bf9a2d811f  # 1.4315792105263154
+liquid 58 H2SO4 at 308.670 K: refractive_index bin 5 = 0x3ff6e6c7473ef7bd  # 1.431342390350877
+liquid 58 H2SO4 at 308.670 K: refractive_index bin 6 = 0x3ff6e5cb34c6711d  # 1.431101995614035
+liquid 58 H2SO4 at 308.670 K: refractive_index bin 7 = 0x3ff6e429e42c4e47  # 1.4307040131578945
+liquid 58 H2SO4 at 308.670 K: refractive_index bin 8 = 0x3ff6e2098c073e9e  # 1.4301848859649122
+liquid 58 H2SO4 at 308.670 K: refractive_index bin 9 = 0x3ff6dfe7e7df0a87  # 1.4296645219298243
+liquid 58 H2SO4 at 308.670 K: refractive_index bin 10 = 0x3ff6ddc5b2e67d07  # 1.4291436184210526
+liquid 58 H2SO4 at 308.670 K: refractive_index bin 11 = 0x3ff6dba510952697  # 1.4286242149122808
+liquid 58 H2SO4 at 308.670 K: refractive_index bin 12 = 0x3ff6d93688560df4  # 1.4280305219298244
+liquid 58 H2SO4 at 308.670 K: refractive_index bin 13 = 0x3ff6d52b40983a3d  # 1.4270432017543861
+liquid 58 H2SO4 at 308.670 K: refractive_index bin 14 = 0x3ff6d4fdf3b645a0  # 1.4269999999999996
+liquid 58 H2SO4 at 308.670 K: absorption_per_m bin 0 = 0x3fe534db9991624a  # 0.6627023696301617
+liquid 58 H2SO4 at 308.670 K: absorption_per_m bin 1 = 0x3fe3eb9cd838eea3  # 0.622511312779768
+liquid 58 H2SO4 at 308.670 K: absorption_per_m bin 2 = 0x3fe2c807cc05feed  # 0.5869177803833431
+liquid 58 H2SO4 at 308.670 K: absorption_per_m bin 3 = 0x3fe1c3ff2b1bc3ce  # 0.5551753847085992
+liquid 58 H2SO4 at 308.670 K: absorption_per_m bin 4 = 0x3fe0daa72c0aea15  # 0.5266910419662191
+liquid 58 H2SO4 at 308.670 K: absorption_per_m bin 5 = 0x3fe00816febd0a42  # 0.5009875274047959
+liquid 58 H2SO4 at 308.670 K: absorption_per_m bin 6 = 0x3fde92407077b577  # 0.4776764963451891
+liquid 58 H2SO4 at 308.670 K: absorption_per_m bin 7 = 0x3fdd364ab4bac79d  # 0.4564387097299177
+liquid 58 H2SO4 at 308.670 K: absorption_per_m bin 8 = 0x3fdbf7f5eaefd816  # 0.43700931494766004
+liquid 58 H2SO4 at 308.670 K: absorption_per_m bin 9 = 0x3fdad3a0b73b7c12  # 0.4191667355898413
+liquid 58 H2SO4 at 308.670 K: absorption_per_m bin 10 = 0x3fd9c63ba1acf673  # 0.4027241782058361
+liquid 58 H2SO4 at 308.670 K: absorption_per_m bin 11 = 0x3fd8cd2d898d5e82  # 0.38752306397280034
+liquid 58 H2SO4 at 308.670 K: absorption_per_m bin 12 = 0x3fd8a5d9f33cc9b4  # 0.3851227641454458
+liquid 58 H2SO4 at 308.670 K: absorption_per_m bin 13 = 0x3fe328d93f998f99  # 0.5987364046272773
+liquid 58 H2SO4 at 308.670 K: absorption_per_m bin 14 = 0x3ff1c8d4c9f9ea32  # 1.1115310563751675
+liquid 58 H2SO4 at 308.670 K: scattering_per_m none
+liquid 58 H2SO4 at 308.670 K: surface_tension_n_per_m none
+liquid 58 H2SO4 at 308.670 K: viscosity_pa_s none
