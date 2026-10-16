@@ -457,7 +457,11 @@ Files: `galaxy/query/segment.rs`, `lensing/{mod,walk,point_lens}.rs`. Acceptance
 
 - **P12.T5.a Types, reach, flux.** The types under Provides; a registry row per `TransientKind`:
   class, peak luminosity bound per band, longest duration D, light-curve function (plans 06, 09,
-  11); `class_reach` (Design note 5); flux = L ÷ 4πd² × 10^(−0.4 A_band), with A_band from plan 07's
+  11); the central black hole's flare row reads plan 09's
+  `flares::{BIN_SECONDS, LOOK_BACK_BINS, MAX_DURATION, MAX_PEAK_LUMINOSITY_WATTS}` and
+  `CentreFlare::luminosity_watts_at` (P09.T30.a as built: plan 09's Risks, "P09.T30.a as built"),
+  and its tidal disruptions' bound, duration and light curve are P09.T30.b's; `class_reach` (Design
+  note 5); flux = L ÷ 4πd² × 10^(−0.4 A_band), with A_band from plan 07's
   `sightline` (`NoiseMode::Realised`, `Quality::Budget`, the modifiers of plan 09's `FeatureGas`
   along the segment, the caller's `NoiseCache` from `AlertContext`) from the apparent position to
   the observer, and `Sightline::in_band`. `AlertBand::XRay` takes `xray_optical_depth` and plan 11's

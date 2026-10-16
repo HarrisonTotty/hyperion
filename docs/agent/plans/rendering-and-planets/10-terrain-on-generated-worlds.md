@@ -260,7 +260,8 @@ pub fn decode_horizon(code: i16) -> Radians;
 /// `scatter::ExtraLayer` as an empty `#[non_exhaustive]` enum, which R11 owns and gives its
 /// `Rocks(Vec<Rock>)` variant.
 pub trait BakeHook { fn bake(&self, key: PatchKey, heights: &[f32], out: &mut Vec<ExtraLayer>); }
-/// The face-wide far-field lattice, keyed by position alone (Design note 10).
+/// The face-wide far-field lattice: its points keyed by position alone, the same bits at
+/// every level; its values a level's (Design note 10; main's ruling for R10.T8.a, 2026-10-15).
 pub fn far_field_point(face: Face, level: u8, i: u32, j: u32) -> FaceUv;
 /// As built by T6.a (Risks, "Deviations in T6.a, as built"): the bake over a client's field, R05's
 /// arrays and this plan's layers; `WeightsLayer::{Baked, Skipped}`; `TerrainLayers`' fields
@@ -897,7 +898,12 @@ targets at header 21 (below).
     spacing is about the step length times the growth factor less one, memoised by (face, level, i,
     j) in the worker's `SynthCache`. The far-field points lie on a face-wide lattice at a patch
     edge's spacing ÷ 8, defined by position alone and not by the patch's level, so points on a
-    shared edge are the same point with the same value and no seam can open. Steps grow by 1.15–1.25
+    shared edge are the same point, and between patches of one level on one face the same value, so
+    that the far field opens no seam there. Across a level change the finer map differs by its
+    receiver's height and its finer near ground, as the near field does, and the shader blends a
+    patch's map to its parent's by the morph factor, as the geometry is blended (T8.b). Across a
+    face edge the azimuths turn with each face's grid, and the two sides differ by the eight
+    azimuths' interpolation (main's ruling for R10.T8.a, 2026-10-15). Steps grow by 1.15–1.25
     from one texel beyond the patch edge, the curvature drop d² ÷ 2R is included, so an obstacle at
     d stands at arctan((h − h₀ − d² ÷ 2R) ÷ d), and the march stops at √(2 R Δh), Δh the body's
     realised relief range: about 505 km for an Earth with 20 km of relief. The shader takes the
@@ -1048,9 +1054,10 @@ targets at header 21 (below).
     rule (only encoder copies do), so 520-byte rows upload as they are, but tiled layouts on Intel
     may pad a 65 × 65 texture to 1.8–2.2 times its size, so T14 measures driver-reported memory.
     Hence the layout: the cache is preallocated as fixed slots from the byte budget; heights, parent
-    heights, the horizon map and the mask, all read by `textureLoad`, live in storage buffers
-    addressed by slot index, tight and untiled (the default `maxStorageBufferBindingSize` is 128
-    MiB); each storage binding is visible only to the stages that read it, so WebGPU's default eight
+    heights, the horizon map and the mask, all read by index, never sampled (updated 2026-10-16),
+    live in storage buffers addressed by slot index, tight and untiled (the default
+    `maxStorageBufferBindingSize` is 128 MiB); each storage binding is visible only to the stages
+    that read it, so WebGPU's default eight
     a stage, never raised (Metal's adapters report 10 under Dawn), counts per stage: the lit
     material's vertex stage reads the heights, slot records, instances, contacts and, on
     `baked-offsets`, the offsets, and its fragment stage the class layers and the lights; the
@@ -1603,14 +1610,16 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   `slotLayout.ts` (the `survey-mask` field, 4,228 B a slot) and `gpu/resources.ts`. Tests:
   `surveyEdges` returns exactly the boundary between surveyed and unsurveyed cells on a fixture
   coverage, margin cells counted unsurveyed; the smoke harness renders a half-surveyed patch set
-  with no fragment where both terrain and the reference surface write; in `resources.test.ts` and
-  `terrainPass.test.ts`, every terrain material, on both vertex paths and in lit and spike shading
-  (and T11's wire once it lands), counts at most 8 storage buffers per stage by its declared
-  visibility, and each binding's declared stages match the entry points that use it (a static check
-  over the composed WGSL; the smoke harness's pipeline creation on SwiftShader validates it too). By
+  with no fragment where both terrain and the reference surface write; in `gpu/resources.test.ts`
+  (the terrain's, not `view/engine/webgpu/resources.test.ts`) and `terrainPass.test.ts`, every
+  terrain material, on both vertex paths and in lit and spike shading (and T11's wire once it
+  lands), counts at most 8 storage buffers per stage by its declared visibility, and each binding's
+  declared stages match the entry points that use it (a static check over the composed WGSL; the
+  smoke harness's pipeline creation on SwiftShader validates it too). By
   hand, recorded: the skirt heights seen at the edge on a flattened generated world, which stay
   within the terrain's local relief. Acceptance:
-  `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` and the smoke run.
+  `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain src/renderer/src/view/engine`
+  (the `view/engine/` files it changes) and the smoke run.
 - **R10.T10.d The class map on the disc.**
   - **The map.** `classMap.ts` builds the per-body coarse class-weights map over surveyed cells
     that R07's disc samples (Design note 8), under `coarse-field-gpu` with the coverage mask. It
@@ -2693,12 +2702,13 @@ committed as a fixture, and
 interpolates on R05's diagonal, agrees with `ground_at` from the same fixture to 2 mm plus the
 formation's stated error (the height texture's `f32` step at ±20 km is 2⁻⁹ m, 1.95 mm: the
 brainstorm's "about 2 mm", under The geometry); R05's descent run on a generated world at both
-settings with its metrics harness, recording patches a second sustained against the brainstorm's
-demand of (200 · v + 290 · |ḣ|) ÷ h, the level bound per level from T4.a, and pops or cracks seen;
-every golden of this plan asserted on the three targets. Acceptance: the lane's `just smart-ci`
-and `just test-wasm-fast`, this plan's slow binaries by name (`just test-slow -E 'binary(…)'`) and
-`just bench -- bake/` complete, and the descent's figures are recorded; `just ci` and the slow
-pass are the orchestrator's.
+settings with its metrics harness and the horizon map on (T8.b), recording the map's share of the
+workers' bake time and `bake/horizon`'s WebAssembly figure (main's ruling for R10.T8.a, 2026-10-15),
+patches a second sustained against the brainstorm's demand of (200 · v + 290 · |ḣ|) ÷ h, the level
+bound per level from T4.a, and pops or cracks seen; every golden of this plan asserted on the three
+targets. Acceptance: the lane's `just smart-ci` and `just test-wasm-fast`, this plan's slow binaries
+by name (`just test-slow -E 'binary(…)'`) and `just bench -- bake/` complete, and the descent's
+figures are recorded; `just ci` and the slow pass are the orchestrator's.
 
 ## Verification
 
@@ -2715,7 +2725,9 @@ pass are the orchestrator's.
   readout's uncertainty matches the pooled RMS of the unsurveyed bands (T5, T12); the image is the
   same at every survey resolution that covers it (T6.a, T10.c, T10.d).
 - **Determinism:** material and ground goldens on native and both wasm targets (T1.b, T3); bakes
-  order-independent, the horizon far field bit-identical at shared points (T6.a, T8.a).
+  order-independent, the horizon far field bit-identical at shared points of one level on one face,
+  and blended to the parent's map across a level change (T6.a, T8.a, T8.b; main's ruling for
+  R10.T8.a, 2026-10-15).
 - **Benches:** `bake/patch_65` (40 ms), `bake/horizon` (a quarter of it), taken on a quiet machine
   and recorded with the load average; a run under shared load is provisional and repeated.
 - **By hand, recorded:** on the development machine (RTX 3080), the cascades (1.5–3 ms), the
@@ -2772,7 +2784,9 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   the mark, the alternative is fading the terrain to transparency over a cell, which draws no
   invented ground either.
 - **Eight azimuths** may miss a narrow distant peak at sunset; the by-hand sunset in T8.b decides
-  whether sixteen are needed, at twice the horizon memory.
+  whether sixteen are needed, at twice the horizon memory, and whether a face edge near a cube
+  corner, where the two faces' azimuths differ most, shows a step (main's ruling for R10.T8.a,
+  2026-10-15).
 - **Figures from memory.** Most per-class albedos, friction and strength figures, and several shadow
   and contour conventions, were recalled rather than read by the research; each task that turns one
   into code checks it against the primary named in its design note first.
@@ -5358,13 +5372,17 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
   - _The far field across levels and face edges._ The task's test asks bit-identical bits across
     levels, and Design note 10 says no seam can open; as built they are a level's and a face's
     (above). Lean: as built, with the task's text and the plan's Verification line narrowed to
-    "adjacent patches of a level on a face".
+    "adjacent patches of a level on a face". _Ruled 2026-10-15 (main's ruling for R10.T8.a): the
+    lean, and T8.b blends to the parent's map by the morph factor._
   - _The azimuth frame._ The patch grid's, turning across face edges (above). Lean: as built; the
-    alternative, east and north, is singular at the poles, where faces 2 and 5 are centred.
+    alternative, east and north, is singular at the poles, where faces 2 and 5 are centred. _Ruled
+    2026-10-15: the lean; T8.b uses `grid_azimuth`'s construction on the patch's face, through
+    `preciseAtan2`._
   - _The map's rebake rule._ As built, an incomplete map is baked again on any block, which on a
     survey smaller than the far field's reach is nearly every patch near it. Lean: T8.b, when it
     turns the map on, carries the cells the far field refused with each bake, as T6.b's
-    `unsurveyed_cells` are, and narrows the rule to a block that brings one.
+    `unsurveyed_cells` are, and narrows the rule to a block that brings one. _Ruled 2026-10-15: the
+    lean, with "brings" counting margin cells; T8.b builds it._
 - **Deferred findings (2026-10-13 rule) (R10.T8.a)** (recorded, not ruled; each leaves the
   algorithm and the contracts as built).
   - _The bake's budget._ A cold map, 37–70 ms (above), is four to seven times the quarter of the
@@ -5373,12 +5391,22 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
     an Earth's finest level), the early stop below, sharing coarse samples between the 81 points,
     and the far field of a coarser patch's map. The quiet figures and the WebAssembly ones (the
     worker runs the bake as WebAssembly) are pending; the owner's i7-8665U figures stay pending by
-    hand.
+    hand. _Ruled deferred 2026-10-15 (main's ruling for R10.T8.a): T15's descent with the map on
+    decides; the early stop is the first lever._
+  - _The far memo starts afresh wholesale._ At 131,072 heights (`FAR_HEIGHTS_HELD`) `FarHeights`
+    clears everything. A complete bake adds about 2,880 band heights (2,016 at its level and 864 at
+    its parent's) plus the 750–950 it asks, so in a long descent each body's memo restarts after
+    about 35 warm bakes, or about 17 cold ones, and the bakes after a reset run partly cold, which
+    the bench's warm column does not see. The lever is a reset that keeps the coarser levels, the
+    most reused, and evicts the finest first, or a larger cap; any policy is safe for determinism,
+    since the map is cache-independent (tested). T15's descent figure includes the effect (main's
+    ruling for R10.T8.a, 2026-10-15).
   - _Edges between far points._ An edge vertex between two far points has the far field
     interpolated from theirs, eight vertex spacings apart, so ground just beyond the edge narrower
     than that shades the neighbour's vertex there at its own resolution and this patch's only
     approximately: a seam of fine detail along patch edges at low sun, of the near fields' own
-    kind. The lever is a near field that reads a margin of the neighbours' heights.
+    kind. The lever is a near field that reads a margin of the neighbours' heights. After T8.b's
+    blend this is the residual seam at every patch edge; T8.b's by-hand sunset looks for it.
   - _The reach and negative horizons._ Seen from a peak, ground just past the reach can stand
     higher than anything within it (−2.3° against −4.5° on the plan's Earth, the science check),
     for a sun below the peak's horizontal plane. The lever, which also stops sooner in valleys: stop

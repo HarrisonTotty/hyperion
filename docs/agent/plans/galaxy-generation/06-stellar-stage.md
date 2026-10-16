@@ -1645,8 +1645,8 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
 - **T28.a done (lane `14-p06-t28a-flares`, 2026-10-14; at version 22, no bump: new output on a
   new kind that moves nothing existing, as "Generator version" says of every task but T30.b and
   T19.e).** The record is under Risks ("Deviations in T28.a, as built" and "Deferred findings (2026-10-13
-  rule) (P06.T28.a)"). T28.b–g are open; T28.g composes `Flare::luminosity_factor_at` into
-  `summary_at`.
+  rule) (P06.T28.a)"). T28.b and T28.d are done (2026-10-15, above), and T28.c and T28.e–g are open;
+  T28.g composes `Flare::luminosity_factor_at` into `summary_at`.
 
 ### Phase G: system assembly and galaxy integration
 

@@ -5141,6 +5141,15 @@ P14.T35.e's change of the wire (`PROTOCOL_VERSION` is 2), each coordinated throu
 Client caches key on `ATMOSPHERE_OPTICS_VERSION` instead. The plan reserves nothing in the
 generator, and the reference's sampling needs no domain tag.
 
+A change to `water.json`, `methane-liquid.json` or `basaltic-glass.json` also reaches the surface
+generator. Rendering plan R09's hand-entered liquid records copy those files' bins (`liquid_water`,
+`liquid_methane_titan` and `basaltic_melt` in `hyperion-surface`'s `testing/liquids.rs`, and the
+sim's reference `WATER_RECORD` and `methane_sea`), and `materials/paletteLiquids.test.ts` holds each
+copy to its file's bin means. The lane that changes one of the three files updates those records
+(for water, also the two Earths' `WATER` normal albedos) and re-blesses `wire/payloads.golden`: at
+the version in force until the serve gate opens, and with a bump after it (R09's Generator version,
+and its Risks, "Deviations in T2.e, as built"; added 2026-10-16).
+
 ## Risks and open points
 
 - **The atmosphere on strongly oblate bodies** (from R05's Risks; researched 2026-09-29, resolved
