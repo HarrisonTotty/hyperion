@@ -919,7 +919,8 @@ impl SurfaceConditions {
     }
 
     /// The gases' mean molar mass μ = Σ xᵢ μᵢ, g mol⁻¹, summed over [`gases`](Self::gases) in its
-    /// order (T49.a's [`mean_molar_mass_g_per_mol`]); `None` for an airless body.
+    /// order (T49.a's [`mean_molar_mass_g_per_mol`]); `None` with an empty `gases`: an airless
+    /// body, or a surface holding melt with no volatile air.
     #[must_use]
     pub const fn mean_molar_mass_g_per_mol(&self) -> Option<f64> {
         self.mean_molar_mass_g_per_mol
@@ -927,7 +928,8 @@ impl SurfaceConditions {
 
     /// The gases' mixed `c_p` ÷ R, Σ xᵢ (`c_p,ᵢ` ÷ R), summed over [`gases`](Self::gases) in its
     /// order (T49.a's [`heat_capacity_over_r`]), each row's class value at 21 → 22 and T49.b's
-    /// function's at the mean surface temperature from 22 → 23; `None` for an airless body.
+    /// function's at the mean surface temperature from 22 → 23; `None` with an empty `gases`: an
+    /// airless body, or a surface holding melt with no volatile air.
     #[must_use]
     pub const fn heat_capacity_over_r(&self) -> Option<f64> {
         self.heat_capacity_over_r

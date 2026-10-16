@@ -1616,9 +1616,9 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
   lasts, the rate stepping smoothly over 0.05 Myr so the bound stays tight. Marks: luminosity factor
   10–100, rise of 1–10 years, decay of 20–200 years. **Done (lane `22-p06-t28d-fuor`, 2026-10-15;
   at version 22, no bump), to main's ruling of 2026-10-15, which replaces this text's rates and
-  marks and the parent's 240–830 a year:** the record is under Risks ("Deviations in T28.d, as built" and "Deferred findings
-  (2026-10-13 rule) (P06.T28.d)"); T28.g composes `Outburst::luminosity_factor_at` into
-  `summary_at`.
+  marks and the parent's 240–830 a year:** the record is under Risks ("Deviations in T28.d, as
+  built" and "Deferred findings (2026-10-13 rule) (P06.T28.d)"); T28.g composes
+  `Outburst::luminosity_factor_at` into `summary_at`.
 - **P06.T28.e LBV giant eruptions.** Poisson bins (Δ = 100 years, look-back 1 bin) while inside
   T24.a's LBV window. The rate is a generator default, provisionally one per 30,000 years per star
   in the window, which with some 500 such stars gives a Milky Way galaxy about 30 in ±H (the
@@ -1644,9 +1644,9 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
 - **Accept:** tests pass under `just test` and `just test-slow`.
 - **T28.a done (lane `14-p06-t28a-flares`, 2026-10-14; at version 22, no bump: new output on a
   new kind that moves nothing existing, as "Generator version" says of every task but T30.b and
-  T19.e).** The record is under Risks ("Deviations in T28.a, as built" and "Deferred findings (2026-10-13
-  rule) (P06.T28.a)"). T28.b and T28.d are done (2026-10-15, above), and T28.c and T28.e–g are open;
-  T28.g composes `Flare::luminosity_factor_at` into `summary_at`.
+  T19.e).** The record is under Risks ("Deviations in T28.a, as built" and "Deferred findings
+  (2026-10-13 rule) (P06.T28.a)"). T28.b and T28.d are done (2026-10-15, above), and T28.c and
+  T28.e–g are open; T28.g composes `Flare::luminosity_factor_at` into `summary_at`.
 
 ### Phase G: system assembly and galaxy integration
 

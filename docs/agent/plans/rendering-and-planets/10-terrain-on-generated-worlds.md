@@ -913,14 +913,15 @@ targets at header 21 (below).
     [−1, 1] (checked: 0, ½ and 1 at x = −1, 0, 1), without limb darkening, which moves the
     half-light point by under 0.1ρ. On terrain R07's horizon term (`sphere_irradiance`, its Design
     note 6) takes its local horizon per disc sample from this map, through the `horizon` argument of
-    R07's `sphere_irradiance(h, phi, horizon)` (R07.T6.a, T6.c; 0 on the smooth figure), with R07's
-    oracle as its test oracle; T8.b fills it. Where R08 draws the sun at its refracted elevation (on
-    an Earth about 0.57° at the horizon, more than the Sun's disc, and 0.16° at 5°; Bennett 1982),
-    the shadow test uses the same apparent elevation, or shadows and the drawn sunset disagree by
-    more than a solar diameter (as built R08 draws no refraction, so the test takes the geometric
-    elevation until it does, R08's Risks). Max, Sloan and Cohen, Stewart 1998, Timonen and
-    Westerholm and Bennett are from memory in the research; T8.a's bench and the by-hand sunset
-    settle what they support.
+    R07's `sphere_irradiance(h, phi, horizon)` (R07.T6.a, T6.c; 0 on the smooth figure), carried
+    into the element's frame as e − (e★ − (π ÷ 2 − φ)), so that R07's cut, whose visible share is
+    this lit fraction, lies at x = (e★ − e) ÷ ρ (decision-r10-t8b §1), with R07's oracle as its test
+    oracle; T8.b fills it. Where R08 draws the sun at its refracted elevation (on an Earth about
+    0.57° at the horizon, more than the Sun's disc, and 0.16° at 5°; Bennett 1982), the shadow test
+    uses the same apparent elevation, or shadows and the drawn sunset disagree by more than a solar
+    diameter (as built R08 draws no refraction, so the test takes the geometric elevation until it
+    does, R08's Risks). Max, Sloan and Cohen, Stewart 1998, Timonen and Westerholm and Bennett are
+    from memory in the research; T8.a's bench and the by-hand sunset settle what they support.
 11. **Terrain shadows are this plan's on both settings, and combine by minimum** (researched
     2026-09-29). The brainstorm's ladder gives the high setting cascaded shadows "with cloud shadows
     on terrain" and the low one the horizon map, and its budget's third rule builds the low setting
@@ -931,28 +932,30 @@ targets at header 21 (below).
     passes reaches the ground as `terrain_sky_factor` on R08's `atmosphere_sky_irradiance`, so an
     overcast sky does not draw a sharp half-bright sun (R11's Design note on cloud shadows). The
     horizon map is applied everywhere on both settings; on the high one the lit fraction is
-    min(horizon, cascade) where a cascade exists, so cascades add what the horizon map cannot,
-    casters that are not terrain (craft, R11's rocks and scatter) and sub-texel detail near the
-    camera, and there is no seam at the last cascade, which only fades to lit over its last 10%.
-    Cascades switch off when cascade 1's texel is coarser than the horizon map's, as in orbit.
-    Splits follow Zhang et al. 2006's practical scheme, Cᵢ = λ n (f ÷ n)^(i ÷ N) + (1 − λ)(n + (f −
-    n) i ÷ N) with N = 4 and λ ≈ 0.75, over a shadowed range f = min(view far, max(2 km, 20 × height
-    above ground)), continuous in that height. Each cascade is fitted to a bounding sphere of its
-    frustum slice, whose radius does not change as the camera turns, snapped to whole texels
-    (Valient 2008), with every light matrix built camera-relative in `f64` and narrowed to `f32`,
-    since snapping at planetary coordinates would jitter. An orthographic light projection has
-    linear depth, so reversed-Z buys nothing there: the maps are `depth32float`, whose worst step
-    over a 50 km range is about 3 mm, and keep the project's greater-equal convention for uniformity
-    only, which the code says so that no one tunes bias expecting precision. Casters in front of the
-    near plane are pancaked through `primitive.unclippedDepth` where the adapter offers
-    `depth-clip-control` (to be confirmed on the UHD 620 through R01's feature report), and
-    otherwise the near plane is pulled towards the sun by Δh ÷ sin(e_sun), capped. Acne is held by
-    slope-scaled bias (`depthBias`, `depthBiasSlopeScale`, `depthBiasClamp`) and a normal offset of
-    1–1.5 texels of the cascade's world-space size; filtering is 2 × 2 hardware PCF through
-    `textureSampleCompare` with a few Poisson taps, since the Sun's penumbra at 10 m from an
-    occluder is about 9 cm and PCSS is unneeded. Four 2,048² `depth32float` layers are 64 MiB, the
-    brainstorm's figure. Zhang et al.'s formula, Valient's snapping and the bias recipes are from
-    memory in the research and are checked against the sources in T9.a.
+    min(horizon, cascade) where a cascade exists: the horizon's share m is R07's visible share at
+    the cut it used, `disc_visible_fraction(h, φ + max(η, 0))`, and the cascade's c enters
+    `terrain_shadow_factor` as min(1, c ÷ m), 1 where m = 0 (decision-r10-t8b §2), so cascades add
+    what the horizon map cannot, casters that are not terrain (craft, R11's rocks and scatter) and
+    sub-texel detail near the camera, and there is no seam at the last cascade, which only fades to
+    lit over its last 10%. Cascades switch off when cascade 1's texel is coarser than the horizon
+    map's, as in orbit. Splits follow Zhang et al. 2006's practical scheme, Cᵢ = λ n (f ÷ n)^(i ÷
+    N) + (1 − λ)(n + (f − n) i ÷ N) with N = 4 and λ ≈ 0.75, over a shadowed range f = min(view far,
+    max(2 km, 20 × height above ground)), continuous in that height. Each cascade is fitted to a
+    bounding sphere of its frustum slice, whose radius does not change as the camera turns, snapped
+    to whole texels (Valient 2008), with every light matrix built camera-relative in `f64` and
+    narrowed to `f32`, since snapping at planetary coordinates would jitter. An orthographic light
+    projection has linear depth, so reversed-Z buys nothing there: the maps are `depth32float`,
+    whose worst step over a 50 km range is about 3 mm, and keep the project's greater-equal
+    convention for uniformity only, which the code says so that no one tunes bias expecting
+    precision. Casters in front of the near plane are pancaked through `primitive.unclippedDepth`
+    where the adapter offers `depth-clip-control` (to be confirmed on the UHD 620 through R01's
+    feature report), and otherwise the near plane is pulled towards the sun by Δh ÷ sin(e_sun),
+    capped. Acne is held by slope-scaled bias (`depthBias`, `depthBiasSlopeScale`, `depthBiasClamp`)
+    and a normal offset of 1–1.5 texels of the cascade's world-space size; filtering is 2 × 2
+    hardware PCF through `textureSampleCompare` with a few Poisson taps, since the Sun's penumbra at
+    10 m from an occluder is about 9 cm and PCSS is unneeded. Four 2,048² `depth32float` layers are
+    64 MiB, the brainstorm's figure. Zhang et al.'s formula, Valient's snapping and the bias recipes
+    are from memory in the research and are checked against the sources in T9.a.
 12. **Unsurveyed ground is the reference surface, and its edge is marked.** A patch's vertices whose
     coarse cell is not surveyed (R09's margin cells are held but not surveyed) carry a survey mask
     of zero, and the terrain shader discards fragments whose interpolated mask is below one half.
@@ -1101,9 +1104,11 @@ targets at header 21 (below).
     changes a value at a vertex the field held before it, surveyed or margin, and a patch is
     rebaked on a block that surveys a cell holding one of its vertices outside the survey (its
     mask changes), or on any block while its bake is incomplete, and on no other block. Each
-    worker answers a block with the cells it surveyed anew, and each bake carries its
-    completeness and the cells its mask holds unsurveyed (Risks, "Deviations in T6.b, as
-    built")._
+    worker answers a block with the cells it surveyed anew, and each bake carries its completeness
+    and the cells its mask holds unsurveyed (Risks, "Deviations in T6.b, as built")._ _From T8.b
+    (decision-r10-t8a §3): also on a block that brings a cell, surveyed or margin, that the patch's
+    horizon map's far field was refused for. Each bake carries those cells, and each block's change
+    the cells it brought that the field did not hold._
 
 ## Tasks
 
@@ -1437,34 +1442,55 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   inputs (a fixture the TypeScript twin of T8.b also reads); for the Sun at 1 au (ρ = 959.6″) the
   lit fraction from the decoded horizon is within 1/255 of the exact one at every e; azimuth
   interpolation is continuous; the far field is bit-identical at shared lattice points of adjacent
-  patches and across levels; the far field is independent of the cache's state, with bakes in any
-  order; the march stops at √(2 R Δh). Bench `bake/horizon`: at most a quarter of the patch's 40 ms,
-  recorded; over it, the near field moves to the line sweep. Presentation-only: no golden across
-  targets, though the bake is deterministic. The far field's level-m heights cost R09.T8's
-  per-point figure (provisional at 14 µs, against the 2–4 µs Design note 10's estimates assumed),
-  which the bench records. Acceptance: `cargo test -p hyperion-surface bake::horizon` and the
-  bench's figure recorded (`just bench -- bake/horizon`, in T6.a's `benches/bake.rs`).
-- **R10.T8.b The shadow lookup.** `shadows/horizon.wgsl`: the sun's apparent direction in each
-  patch's local frame from `body_fixed_at`, R07's star and R08's refraction where drawn; the compare
-  against the interpolated horizon, passed as the `horizon` argument of R07's
-  `sphere_irradiance(h, phi, horizon)` (the signature and its default of 0 on the smooth figure are
-  R07.T6.a's and T6.c's, used unchanged); the soft lit fraction of Design note 10. The sun's
-  elevation is π ÷ 2 less its zenith angle `preciseAtan2(|s × ν|, s·ν)`, since as built
-  `preciseAtan2(y, x)` takes y ≥ 0 and returns [0, π], and the lit fraction's arccos x is
-  `preciseAtan2(√(1 − x²), x)` (R08 Design note 18). R08 draws no refraction yet, so the sun's
-  direction is the geometric one. R07's `sphere_irradiance` clamps a negative horizon (a peak's)
-  to 0, so a peak's extended-source term is the flat ground's (Risks). WGSL's `asin` inherits
-  atan2's 4,096 ULP, about 50″ at 30°. That is five of the map's steps, and 3.3% of the Sun's lit
-  fraction at mid-transit, against this plan's 1/255. Files: `shadows/horizon.wgsl`,
-  `shadows/litFraction.ts`, and the call
-  sites in R07's `shaders/litBody.wgsl`. Tests: with a horizon of 0 the terrain's
-  `sphere_irradiance` equals R07's smooth-figure value bit for bit, and with the horizon map's value
-  it equals R07.T6.a's oracle for that local horizon to 10⁻⁶; the lit-fraction formula as a pure
-  TypeScript twin against hand values (0 and 1 beyond ±ρ, one half at e_sun = e_horizon); R01's
-  smoke harness compiles and runs the pass on SwiftShader with and without f16, every texel finite.
-  By hand, recorded: a sunset over a generated range on the low setting, on the development machine
-  and, by the owner, on the UHD 620, whose GPU time is the one held against the budget's 0.3–0.5 ms
-  (Performance budget, Shadows row), and whether eight azimuths show missing peaks. Acceptance:
+  patches of one level on one face, and the lattice's points and the march's step distances are the
+  same bits at every level that holds them (decision-r10-t8a §1); the far field is independent of
+  the cache's state, with bakes in any order; the march stops at √(2 R Δh). Bench `bake/horizon`: at
+  most a quarter of the patch's 40 ms, recorded; over it, the near field moves to the line sweep.
+  Presentation-only: no golden across targets, though the bake is deterministic. The far field's
+  level-m heights cost R09.T8's per-point figure (provisional at 14 µs, against the 2–4 µs Design
+  note 10's estimates assumed), which the bench records. Acceptance:
+  `cargo test -p hyperion-surface bake::horizon` and the bench's figure recorded
+  (`just bench -- bake/horizon`, in T6.a's `benches/bake.rs`).
+- **R10.T8.b The shadow lookup.** `shadows/horizon.wgsl`: the sun's apparent direction from
+  `body_fixed_at`, its elevation against the datum's normal ν and its grid azimuth in the patch's
+  face's grid frame (`grid_azimuth`, T8.a; R08's lookups keep their azimuth from local north), the
+  azimuth through `preciseAtan2`, R07's star and R08's refraction where drawn; the compare against
+  the interpolated horizon, carried into the element's frame as e − (e★ − (π ÷ 2 − φ)), e★ the
+  sun's elevation above the datum and φ its angle from the terrain's normal, and passed as the
+  `horizon` argument of R07's `sphere_irradiance(h, phi, horizon)` (the signature and its default
+  of 0 on the smooth figure are R07.T6.a's and T6.c's, used unchanged), whose visible share is the
+  soft lit fraction of Design note 10, applied once (decision-r10-t8b §1–2). The horizon is
+  blended from the patch's map to its parent's by the vertex's morph factor k, the parent's slot
+  and quadrant in the instance record's spare words, the parent read where k > 0 from the same
+  `horizon-map` buffer, and the own map where no parent's map is resident (decision-r10-t8a §1).
+  The worker bakes the map for the lit style and hands it over, with its refused cells; a patch is
+  baked again on a block that brings one of them, surveyed or margin, and each block's change
+  carries the cells it brought that the field did not hold (decision-r10-t8a §3; Design note 16).
+  The horizon map binds as the `horizon-map` slot field's storage buffer, fragment only
+  (decision-r10-t10b-r09-t2e §5). The sun's elevation is π ÷ 2 less its zenith angle
+  `preciseAtan2(|s × ν|, s·ν)`, since as built `preciseAtan2(y, x)` takes y ≥ 0 and returns
+  [0, π] (R08 Design note 18); R07's function keeps WGSL's built-ins, a deferred correction to R07
+  (decision-r10-t8b §2). R08 draws no refraction yet, so the sun's direction is the geometric one.
+  R07's clamp of a negative horizon then takes the element's own plane, exactly, where that hides
+  more. WGSL's `asin` inherits atan2's 4,096 ULP, about 50″ at 30°, so no elevation here is formed
+  by it. Files: `shadows/horizon.wgsl`, `shadows/litFraction.ts`, and the call in
+  `terrainLit.wgsl`; R07's `litBody.wgsl` is unchanged. In the crate, `bake/horizon.rs`,
+  `worker.rs` and `wasm.rs`; in the client, `workers/{messages,heightBake,rebake,pool}.ts`,
+  `slotLayout.ts`, `gpu/uniforms.ts` (with the terrain pass's instance packing) and
+  `shaders/{terrainPatch,terrainLit}.wgsl`. Tests: with a horizon of 0 the terrain's
+  `sphere_irradiance` equals R07's smooth-figure value bit for bit, and with the map's horizon in
+  the element's frame it equals R07.T6.a's oracle to 10⁻⁶ where the disc is wholly up or down, and
+  an integral over the disc above the datum's horizon and the element's plane within 1.5 × 10⁻³ of
+  face-on over slopes to 45°, every bearing and horizons to 60°; the lit-fraction formula as a pure
+  TypeScript twin against hand values (0 and 1 beyond ±ρ, one half at e_sun = e_horizon); the
+  blend's twin, `gridAzimuth` against the crate's fixture, and the rebake rule in the crate and on
+  the module (decision-r10-t8a §1–3); R01's smoke harness compiles and runs the pass on
+  SwiftShader with and without f16, every texel finite. By hand, recorded: a sunset over a
+  generated range on the low setting, on the development machine and, by the owner, on the UHD
+  620, whose GPU time, with the blend, is the one held against the budget's 0.3–0.5 ms
+  (Performance budget, Shadows row); whether eight azimuths show missing peaks; and three places
+  to look: a coarse–fine edge, with the blend, a same-level patch edge (Risks, "Edges between far
+  points") and a face edge near a cube corner (decision-r10-t8a §1). Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain/shadows` and the smoke run.
 
 ### R10.T9 Cascaded terrain shadows on the high setting
@@ -2940,7 +2966,10 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
     `onPartial` in `@hyperion/protocol`: additive, and the first R10 change in R03's package.
   - _A peak's extended-source horizon._ R07's `sphere_irradiance` clamps a negative horizon at 0,
     so a peak's planetshine and wide-source term is the flat ground's; the sun's own lit fraction
-    (Design note 10) keeps the signed horizon. Small; R07's file.
+    (Design note 10) keeps the signed horizon. Small; R07's file. _For the sun, settled by T8.b
+    (decision-r10-t8b §1): in the element's frame the clamp takes the element's own plane exactly
+    where it hides more, and a slope's signed horizon is carried by the conversion. Planetshine is
+    not shadowed by the map (Deferred findings (R10.T8.b))._
 - **Deviations in T7, as built** (2026-10-13, lane r10-store).
   - _Files._ The new `view/terrain/coarseFieldStore.ts` and `coverage.ts`, with their tests; R05's
     `workers/{pool,messages,heightBake,height.worker}.ts` and their tests, with a new

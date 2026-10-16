@@ -749,12 +749,12 @@ Order and parallelism:
     until T54.a, so each keeps `just ci` green and moves no golden. Its membership is closed:
     T49.b → T49.h's step 1 (lane `p14-liquids`; T49.b's liquid part, so it reopens nothing;
     decision-r11-palette-liquids §3, 2026-10-14), which lands the shared `materials` module before
-    T49.c; T49.b → T49.c → T49.i (lane `p14-optics`) and T49.j (lane `p14-thermal`), T49.c split
-    in three (decision-p14-t49c-split, 2026-10-16); T50.a → T50.c → T51.a → T51.b, after T49.c and
-    T49.h's step 1 (lane `p14-snapshot`, one lane: all four edit `derive/atmosphere.rs`) → T57.a,
-    after T51.b and T49.i (decision-p14-moons), which stays in 23 since only its water refit holds
-    Earth at 288 K once T51.a moves Earth's water column; T51.c after T50.a (lane `p14-crust`);
-    T56.a → T56.c → T56.d (lane `p14-moons`; T56.c after T50.a and T50.c),
+    T49.c; T49.b → T49.c → T49.i (lane `p14-optics`) and T49.b → T49.j (lane `p14-thermal`), T49.c
+    split in three (decision-p14-t49c-split, 2026-10-16); T50.a → T50.c → T51.a → T51.b, after T49.c
+    and T49.h's step 1 (lane `p14-snapshot`, one lane: all four edit `derive/atmosphere.rs`) →
+    T57.a, after T51.b and T49.i (decision-p14-moons), which stays in 23 since only its water refit
+    holds Earth at 288 K once T51.a moves Earth's water column; T51.c after T50.a (lane
+    `p14-crust`); T56.a → T56.c → T56.d (lane `p14-moons`; T56.c after T50.a and T50.c),
     with T56.b in the client after T56.a; then T54.a, which wires them onto the record and bumps.
     Three holds at 22, each with a tripwire: `MOONS_VERSION` = 23, `AMMONIA_LINE_VERSION` = 23,
     and one `p14-snapshot` lane hold for T51.a's, T51.b's and T57.a's edits on the record path.
@@ -2499,9 +2499,9 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
     It is the `Envelope` variant of T24.e's `VerticalStructure`, so that one `temperature_at`
     serves both. Whichever of T24.d and T24.e lands first creates the type and the function.
 
-  - He/H₂ at about 0.16 by number (Jupiter's, depleted by helium rain below a protosolar value near
-    0.19, both from memory). A sub-Neptune's envelope is too warm and too light to rain helium, so
-    the builder checks whether it keeps the protosolar value.
+  - He/H₂ and X, Y, Z from T50.b (`helium_to_molecular_hydrogen()`, `mass_fractions()`): Jupiter's
+    measured 0.157, protosolar 0.194. A sub-Neptune's envelope is too warm and too light to rain
+    helium, so the builder checks whether it keeps the protosolar value.
   - Its composition, decks and hazes are T52.d's: T50.b's element abundances, speciated by T52.a,
     quenched and photolysed by T52.b, condensed by T52.c. As drafted here (CH₄, NH₃, H₂S and H₂O at
     solar × E(M) × 10^[Fe/H]; decks of NH₃, NH₄SH and H₂O) it would draw every warm and hot giant
@@ -2581,19 +2581,21 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
     63.6 K: computed by R08.T1 at the fixed classes, for the builder to confirm. With T49.b's
     c_p(T) and the dry α (science-r08-gases-2.md §1.4), Earth's figures are unchanged (218.45
     against 218.40 K at 0.2 bar), and Titan's; the 1-bar Venus test holds at T57.a's 694.5 K Venus
-    (352 K) and on the measured state (346 K), while the table's pre-T57.a Venus (735 K,
-    57.8 bar) reaches 378 K, so the test reads T57.a's Venus, or 300–380 K if T24.e lands first.
-    `temperature_at` is continuous and falls or holds with height; the golden is blessed, its
-    Venus levels moved by c_p(T); the table's Saturn's T_skin lies within 2 K of 2^(−1/4) × its
-    T_eff, and Earth's within 0.05 K of the sunlight-only form. A Venus given its measured state
-    by hand (90.4 bar of CO₂ and 2.09 of N₂ by weight, 735 K) gives 350.5 K at 1.066 bar by the
-    dry α's fit. At VIRA's 47.4, 22.5, 9.581 and 3.50 bar it gives 665, 592, 517 and 435 K (VIRA's
-    30 km is 9.581 bar, not 9.85: updated 2026-10-16, Risks, "Deviations in P14.T24.e, as built"),
-    against VIRA's 658, 581, 497 and 418 K [M], because VIRA's 30–45 km layer is sub-adiabatic; they
-    are printed and recorded (science-r08-gases-2.md §1.4, in place of signoff-3.md's 321 K under
-    the fixed c_p ÷ R). A world whose only condensable is water at a Mars's partial pressure takes
-    the dry α. T49.a's class test (R ÷ c_p 3/13 for pure CO₂ and 2/7 for pure N₂) moves to T49.b's
-    heat-capacity tests.
+    (352 K) and on the measured state (346 K), while the table's pre-T57.a Venus (735 K, 57.8 bar)
+    reaches 381.1 K as built, so the 300–370 K test is held on the measured Venus (347.7 K), the
+    table's Venus only to its ordering, warmer at 1 bar than the measured one, and P14.T54.b
+    re-checks it on T57.a's Venus (updated 2026-10-16: Risks, "Deviations in P14.T24.e, as built",
+    _The table's figures_). `temperature_at` is continuous and falls or holds with height; the
+    golden is blessed, its Venus levels moved by c_p(T); the table's Saturn's T_skin lies within 2 K
+    of 2^(−1/4) × its T_eff, and Earth's within 0.05 K of the sunlight-only form. A Venus given its
+    measured state by hand (90.4 bar of CO₂ and 2.09 of N₂ by weight, 735 K) gives 350.5 K at
+    1.066 bar by the dry α's fit. At VIRA's 47.4, 22.5, 9.581 and 3.50 bar it gives 665, 592, 517
+    and 435 K (VIRA's 30 km is 9.581 bar, not 9.85: updated 2026-10-16, Risks, "Deviations in
+    P14.T24.e, as built"), against VIRA's 658, 581, 497 and 418 K [M], because VIRA's 30–45 km layer
+    is sub-adiabatic; they are printed and recorded (science-r08-gases-2.md §1.4, in place of
+    signoff-3.md's 321 K under the fixed c_p ÷ R). A world whose only condensable is water at a
+    Mars's partial pressure takes the dry α. T49.a's class test (R ÷ c_p 3/13 for pure CO₂ and 2/7
+    for pure N₂) moves to T49.b's heat-capacity tests.
   - _Files:_ `planetary/hooks/{structure, mod}.rs`, `planetary/record.rs`, `planetary/mod.rs`
     (the re-export of `temperature_at`), `planetary/hooks/structure/tests.rs`, and the golden
     `tests/golden/planetary/vertical_structure.golden`, which the unit test
@@ -5506,7 +5508,8 @@ rows' values.
 
 #### P14.T50 Elements and redox
 
-Snapshot path, `planetary/chem/`.
+`planetary/chem/`. T50.a and T50.c are on the snapshot path; T50.b is on the Surface path, built
+only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-envelope §4).
 
 - **P14.T50.a Elements, reservoirs, redox and the new draws** (22 → 23).
   - **The element registry** (`substance/element.rs`): the 25 elements of Provides, each with:
@@ -5579,14 +5582,18 @@ Snapshot path, `planetary/chem/`.
     number relative to H, of He, C, N, O, S, P, Na, K, Ti, V, Fe, Mg, Si, Ca, Al, Cl, Cr, Mn, Ni
     and Zn (Cr, Mn and Zn are the limiting elements of T52.c's `Cr`, `MnS` and `ZnS` decks, and
     all four have visible lines; science-r08-unowned-absorbers):
-    - the metals are protosolar × 10^[Fe/H], with the α elements × 10^[α/Fe], times E(M) from
-      Thorngren et al. 2016 (the radius model's heavy-element mass);
-    - C/O is the host's times an ice-line factor from the formation distance against the H₂O,
-      CO₂ and CO lines (Öberg, Murray-Clay and Bergin 2011, from memory);
-    - N/O is the host's protosolar ratio;
-    - He/H is protosolar, depleted by helium rain below a stated T_int in giants (Jupiter's He/H₂
-      about 0.16 by number, from memory), and kept in a sub-Neptune, whose envelope is too warm
-      and light to rain helium (the builder checks).
+    - every element of `Element::ALL` (these 21 with Ne, Ar, Kr and Xe), by number relative to H;
+    - the metals are the host's (protosolar × 10^[Fe/H], the α elements × 10^[α/Fe], carbon at the
+      host's C/O and magnesium at its Mg/Si, T50.a) times E(M) = 2.65 (M ÷ M_J)^−0.986, the four
+      giants' measured C/H (Guillot et al. 2022, Table 2). E is at most the radius model's bulk
+      metal fraction (Thorngren et al. 2016; Thorngren and Fortney 2019, f ≤ 1) and at least 1;
+    - C/O is the host's times the disc gas's C/O by zone over the disc's (Öberg, Murray-Clay and
+      Bergin 2011, Table 1: CO, CO₂, water at the snow line, carbon grains at the soot line,
+      silicates), at the C+N+O mass E gives. N/O is protosolar;
+    - He/H is the envelope's primordial value, depleted by helium rain in a gas giant of at least
+      0.15 M_J. The rain is linear in Hubbard's T₀ ∝ g^−0.167 T_eff^1.243 through Jupiter's and
+      Saturn's measured helium, from none at 0.7 Gyr to all of it at 1.5 Gyr. Neon falls with the
+      helium; a sub-Neptune or an ice giant keeps its helium.
   - _Tests:_
     - Jupiter's C/H within a factor of 2 of the Galileo probe's (about four times solar, from
       memory) at its E(M);
@@ -5649,6 +5656,17 @@ Snapshot path, `planetary/chem/`.
     - nothing inside the snow line or beyond the ammonia line moves;
     - goldens: the `planetary/systems` goldens with such bodies, and Ceres's row of the table.
       T54.a's bless note counts them.
+- **P14.T50.d An envelope's formation draws** (23 → 24 as a rider; otherwise the next planetary
+  bump; after T50.b; decision-p14-t50b-envelope §1–2, 2026-10-16).
+  - E's scatter as a rank-drawn log-normal about the trend, within the bound and the floor. σ is
+    stated against the giants' residuals and JWST's spread at fixed mass; Thorngren et al.'s ×1.82
+    bulk spread is the reference.
+  - The solids' share of the envelope's C, N and O as a rank, between the gas-phase factor (as
+    built) and Öberg's Eq. 2 with the zone's own solids (Espinoza et al. 2017). It is calibrated so
+    the giants' C/O spans JWST's measurements (HD 189733 b < 0.2; Fu et al. 2025), with the Solar
+    System's four giants inside the central 68%. The builder tests a lean towards solids for hot
+    Jupiters.
+  - A new Body-scope tag: `planet.volatiles` words 6–7 are reserved for phosphorus and isotopes.
 
 #### P14.T51 Surface composition
 
@@ -5726,7 +5744,10 @@ Snapshot path, `planetary/chem/`.
     - That composition is fixed before the passes for an icy belt member (`icy_member_bulk`), a
       regular moon (`DerivedMoon::fractions`, its ice fraction), a giant-impact moon and a capture
       (`moon_bulk_of`). It depends on the mass, the radius rank, the circumplanetary ice line, a
-      capture's radius or the parent's derivation, so `derive_body` takes it as an input.
+      capture's radius or the parent's derivation, so `derive_body` takes it as an input:
+      P14.T56.c's follow-up's `PlacedBody::with_bulk` and `GivenBulk`, which this subtask extends to
+      `icy_member_bulk`'s members, and for a moon `derive_moon`'s `MoonBulk`. No second bulk input
+      is added, and the albedo reads the fractions the air reads (decision-triton-and-e101 §1.7).
     - `DerivedBody::albedo` then equals the photometry section's Bond albedo for every body. That
       retires P14.T47's exception (Risks, "Deviations in P14.T47.a–c", _The Bond albedo_).
     - T24.a's regolith inertia then sits over the same material's albedo.
@@ -5739,8 +5760,13 @@ Snapshot path, `planetary/chem/`.
   - _Tests:_
     - Mercury's 0.088 and the Moon's 0.11 kept;
     - Earth's 0.294 and Venus's 0.76 kept by their calibrations;
-    - a Pluto at its inventory within 0.6–0.8 (Buratti et al. 2017's 0.72, from memory);
-    - a Triton's N₂ pressure within a factor of 3 of 1.4 Pa at its distance (from memory);
+    - a Pluto and a Triton given their measured N₂, CH₄ and CO by hand (T51.a's fixtures) take a
+      Bond albedo within 0.6–0.8 and 0.72–0.92: Buratti et al. 2017 (Icarus 287, 207) give Pluto
+      0.72 ± 0.07 and Hillier et al. 1990 (Science 250, 419) Triton 0.82 ± 0.05, both read
+      (decision-triton-and-e101 §1.6). At their own inventories both are `Airless` with no N₂
+      until P14.T53.c, which the test records rather than asserts. Triton's N₂ pressure, 1.4 Pa,
+      is P14.T53.c's test: it is set by the ice's own temperature and emissivity, not by this
+      albedo;
     - an Enceladus near 0.8 (Howett et al. 2010, from memory);
     - a 1,200 K giant between class IV's and V's albedos, and Jupiter's within 0.05 of its table
       value;
@@ -6138,6 +6164,10 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - Below 500 K the major carriers are all-in, and the composition is the quench level's.
   - A fixed-count Newton refinement on the five element potentials from the analytic start is
     added only if the asserted values below fail the stated tolerance, and is recorded.
+  - T50.b's E is fitted from 14.5 to 318 M⊕. Below about 5 M⊕ an envelope's metals exceed 0.2 per
+    H atom, so the builder states where Heng and Tsai's solution stops and what the record says
+    beyond it (decision-p14-t50b-envelope §5).
+  - The solution accepts C/O above 1 (between the CO₂ and CO lines, about hosts above 0.545).
   - **Validation:** values computed by hand with FastChem or GGchem (both GPL-3.0) outside the
     repository, asserted only, each with the code's version, its inputs and its command in the
     test's doc comment. Neither code is vendored, linked, ported or run by any recipe
@@ -6249,6 +6279,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
       greenhouse term calibrated on Pierrehumbert and Gaidos 2011 and Wordsworth and
       Pierrehumbert 2013 (the latter from memory);
     - each element's outcome recorded;
+    - each envelope's He/H after fractionation, stated, which T54.b passes to T50.b as its
+      primordial He/H (decision-p14-t50b-envelope §5);
     - the CO₂ term's form: once Mars holds its 3–10 mbar of CO₂, the grey √p form puts it at about
       241 K against its measured ~210 K (decision-p14-moons, item 4). This subtask chooses a form
       that holds the measured Venus, Earth and Mars together, and refits every greenhouse constant
@@ -6283,18 +6315,62 @@ feeding back into p_s, T_s, the albedo or the bulk.
     - Venus unchanged.
   - _Files:_ `planetary/derive/atmosphere.rs`, `planetary/record.rs` (read), `planetary/chem/escape.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive::atmosphere`.
-- **P14.T53.c Thin and transient air** (23 → 24).
+- **P14.T53.c Thin and transient air** (23 → 24; after T51.a, T51.b and T53.a; amends T13.b for
+  ice-held volatiles; decision-triton-and-e101 §1.8).
   - `chem/tenuous.rs`: `Tenuous` between a stated floor and the 100 Pa line, where a gas is held:
-    - sublimation air from T51.a's partition (Pluto, Triton), its gases listed, and its haze by
-      T24.c's methane rule where CH₄ is present;
+    - **An ice-held volatile's retention.** A condensable whose partition (T51.a) holds most of
+      its inventory as surface ice, its saturation pressure at its ice's temperature below its
+      inventory's weight, is not judged by `Retention::of`'s threshold. That threshold is T13.b's
+      calibrated classifier of whether a bulk air survives, and is not a flux. Such a condensable
+      keeps its inventory less its loss over the system's age, the escape of its own
+      vapour-pressure air integrated over the age (Schaller and Brown 2007, ApJ 659, L61;
+      Johnson et al. 2015, ApJ 809, 43; Zahnle and Catling 2017, ApJ 843, 122, §2.1). The escape
+      is taken at the cold upper atmosphere such airs have, 1.7–2.7 times the ice's temperature
+      (Pluto's 65–68 K at about 2,900 km, Young et al. 2018, Icarus 300, 174; Triton's 102 K at
+      870 km), within T53.a's regimes.
+      - The loss law is stated and cited. Pluto's measured escape is its check within a factor
+        of 10: 1 × 10²³ N₂ and 5 × 10²⁵ CH₄ s⁻¹ (Gladstone et al. 2016, Science 351, aad8866).
+        Pluto's energy-limited rate expected before the flyby, 0.7–4 × 10²⁷ s⁻¹, would empty the
+        model's median Pluto.
+      - Methane keeps following nitrogen (P14.T24.f). A species held airborne keeps T13.b's
+        verdict, so Titan's, Ganymede's and Callisto's N₂ do not move: N₂'s saturation pressure
+        at their 94 and 110 K surfaces is 5 and 14 bar.
+    - **The ice's temperature.** An ice-held dominant condensable's controlling temperature
+      (T51.a's coldest zone) is its ice's own.
+      - It is one temperature over all of its ice, which latent heat keeps uniform (Gladstone et
+        al. 2016; Young, Braga-Ribas and Johnson 2020, Fig. 5).
+      - It comes from the energy balance of the ice's area, at the ice's albedo (T49.c, T51.b) and
+        a stated, cited emissivity (Triton's 0.59 ± 0.16, Hillier et al. 1990, Science 250,
+        419), not the bare surface's 0.95.
+      - Its pressure is the registry's saturation pressure there: on β-N₂, 1.4 Pa at 37.25 K.
+    - The sublimation air from T51.a's partition (Pluto, Triton), its gases listed, and its haze
+      by T24.c's methane rule where CH₄ is present.
     - Io's patchy SO₂ air from T24.g's outgassing under `Extreme` volcanism.
-  - Exospheres are P14.T55.c's.
+  - Exospheres are P14.T55.c's, and seasonal transport and frost by month P14.T55.e's.
+  - The docs of `JEANS_RETENTION_THRESHOLD`, `Retention` and `AIRLESS_PRESSURE` name the
+    verdict's scope, a bulk air's, and this ice-held case.
   - _Tests:_
-    - a Pluto at its inventory carries N₂ with CH₄ and a haze (Gladstone et al. 2016);
+    - the table's Triton at its distance and own bulk is `Tenuous`, its N₂ within a factor of 3
+      of 1.4 Pa and its ice within 2 K of 38 ± 1 K (moved from T51.b). The 1.4 Pa is Voyager 2's
+      14 ± 2 µbar (Gurrola 1995, as Marques Oliveira et al. 2022, A&A 659, A136, quote it),
+      14.1 ± 0.4 µbar in 2017 (Marques Oliveira et al.) and 14.5 ± 0.5 µbar in 2022 (Sicardy et
+      al. 2024, arXiv:2402.02476); the 38 ± 1 K is Tryka et al. 1994, Icarus 112, 513;
+    - a Pluto at its inventory carries N₂ with CH₄ and a haze (Gladstone et al. 2016), its N₂
+      within a factor of 10 of 1.1 Pa: 11 ± 1 and 10 ± 1 µbar in 2015, 12.2 µbar in 2020 (Sicardy
+      et al. 2021, arXiv:2112.07764). The band is wider than Triton's because its measured season
+      is not its orbit mean;
+    - a Charon at Pluto's distance keeps no N₂, while Pluto and Triton keep theirs (Johnson et
+      al. 2015);
+    - the table's Titan, Ganymede and Callisto keep T13.b's N₂ verdicts;
+    - the table's Ganymede and Callisto stay `Airless`. Their radiogenic argon (Ganymede's 15 Pa
+      at 23) is not an air; their real airs are exospheres (P14.T55.c). T53.a's non-thermal term
+      or this subtask's floor settles it, or the builder records it for "main";
     - the record says `Tenuous`, not `Airless`, where a gas is held above the floor;
     - every `Airless` body has an empty gas list.
-  - _Files:_ `planetary/chem/tenuous.rs`, `planetary/derive/atmosphere.rs`.
-  - _Accept:_ `cargo test -p hyperion-sim planetary::chem::tenuous`.
+  - _Files:_ `planetary/chem/tenuous.rs`, `planetary/derive/atmosphere.rs`,
+    `planetary/chem/partition.rs` (the controlling temperature).
+  - _Accept:_ `cargo test -p hyperion-sim planetary::chem::tenuous`;
+    `cargo test -p hyperion-sim planetary::derive::atmosphere`.
 - **P14.T53.d The biosphere hook** (23 → 24).
   - `hooks/biosphere.rs`: `Biosphere { fluxes: Vec<(SubstanceId, f64)> }`, the net surface fluxes
     of O₂, CH₄ and N₂O in units of Earth's present biotic flux of each, and the palette's `Cover`
@@ -6318,10 +6394,11 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - `record::Surface` fills `condensates` (T51.a) and `crust` (T51.c), and `surface_liquids` and
     `surface_ices` gain T51.a's entries. `vertical_structure`, `aerosols` and `record::Envelope`
     stay `NotModelled` until T54.b.
-  - T24.a's `SurfaceInputs` takes the lid's regolith inertia (T51.c) in place of `SurfaceMaterial`.
-    That retires `ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S` and
-    `ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S` (science-p14-t24a-climate.md §6, item 2). The
-    bless note accounts for the airless nights it moves.
+  - T24.a's `SurfaceInputs` takes the lid's regolith inertia, P14.T49.j's
+    `reference_regolith_thermal_inertia` at T51.c's lid, in place of `SurfaceMaterial`
+    (decision-p14-t49c-split §1.3). That retires `ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`
+    and `ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S` (science-p14-t24a-climate.md §6, item 2).
+    The bless note accounts for the airless nights it moves.
   - T13's passes call T51.a and T51.b, and T57.a's constants take effect. T49.b's fitted curves
     replace the five Clausius–Clapeyron sets, and its c_p(T) replaces `HeatCapacityClass`.
     `registry.golden`'s gas columns and `substances.json` (`heat_capacity_over_r_298k`; the
@@ -6347,11 +6424,19 @@ feeding back into p_s, T_s, the albedo or the bulk.
     in P14.T50.a, as built").
   - The server's conversion fills `condensates` and `crust` on the wire. The envelope's
     `match envelope {}` stays until T54.b.
+  - _The client's melt rule_, P14.T35.f's and P14.T43.e's "T54.a's client follow-up", since from 23
+    the wire carries `crust`: `displays/system/BodyRecordReadings.tsx`'s `holdsMelt` also holds
+    for a `crust.melt_area_fraction` above 0. T51.c's locked lava world, `airless` with a dayside
+    pool, then reads `SURFACE PRESSURE —`, `MOLE FRACTION —` and
+    `SILICATE VAPOUR NOT YET MODELLED` beside `EXOSPHERE NOT YET MODELLED`, not `NONE` twice with
+    no `SILICATE VAPOUR` row, and `SystemView.bodies.test.tsx` gains its case (P14.T43.e's
+    deferred finding). Rendering plan R08.T10.a's view note reads the same rule (R08's Design
+    note 12).
   - R09's `for_body` reads `crust`, `condensates` and the palette's sources (T49.b–c's rows, R11's
     liquid members included) from the record, on R09.T10.e's reading of the other sections, with
     R09.T10.f's signature, `for_body(record, planet, ctx)`, frozen at 23 (decision-backlog-2 §3). It
-    answers `Ok` for generated solid bodies. It settles the record's time: the lean is R09.T17's
-    `RECORD_TIME`, the epoch, and any other choice goes to "main" before the serve gate opens.
+    answers `Ok` for generated solid bodies. Both records are taken at `RECORD_TIME`, the epoch, the
+    sim's constant since R09.T10.e, so the record's time is settled (decision-backlog-2 §3).
     An airless body's palette carries no cold-trapped `Ice` entry until P14.T51.f, wired by T54.b,
     since no condensate on the record names one. The bless note records it, the census (T33.c)
     lists cold-trapped `H2O` and `CO2` as unreached until then, and where a console row shows an
@@ -6408,9 +6493,12 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - _Files:_ `planetary/{record, hooks/mod}.rs`, `planetary/hooks/surface.rs`,
     `crates/hyperion-server/src/convert/planetary.rs`,
     `crates/hyperion-server/src/surface/inputs.rs`,
-    `packages/protocol/fixtures/planetary.json`, `planetary/surface/inputs.rs`,
-    `planetary/moons/mod.rs`, `planetary/derive/{mod, atmosphere}.rs`,
-    `crates/hyperion-base/src/version.rs`, and the goldens.
+    `packages/protocol/fixtures/planetary.json`, the client's ring tests, which build the absent
+    case by removing the fixture's normal (under `apps/hyperion/src/renderer/src/`:
+    `test/planetaryFixture.ts`'s `withRingNormal`, `displays/system/bodyFrame.test.ts`,
+    `lib/system/bodiesWire.test.ts` and `view/scene/fromServer.test.ts`),
+    `planetary/surface/inputs.rs`, `planetary/moons/mod.rs`,
+    `planetary/derive/{mod, atmosphere}.rs`, `crates/hyperion-base/src/version.rs`, and the goldens.
   - _Accept:_ `cargo test -p hyperion-sim planetary::record`; `cargo test -p hyperion-server convert`;
     `just gen-protocol-check`; the golden tests.
 - **P14.T54.b The 23 → 24 batch on the record, and its bump.** As T54.a, for T51.d's
@@ -6439,6 +6527,13 @@ feeding back into p_s, T_s, the albedo or the bulk.
     P14.T54.b" list (Risks, "Deviations in P14.T24.e, as built"). It fills rendering plan R09's
     header parts `maturity` and `organic_cover`, and their `SurfaceHeaderDto` mirrors, from T51.d if
     T51.d rides 24, and otherwise leaves them absent (decision-r11-palette-liquids §4).
+  - _T50.b's inputs_, passed where it wires T52.d (decision-p14-t50b-envelope §5–6):
+    - the record's T_eff (its T_eq where it has none), surface gravity and age;
+    - T50.a's formation distance and snow line;
+    - `SystemContext::alpha_fe()` (`None` → `NotModelled`);
+    - the primordial He/H: protosolar times the host star's Y/X (X = 0.76 − 3Z,
+      Y = 1 − X − Z + ΔY, from its `Composition`) over the same at solar Z, then T53.a's
+      fractionation.
   - _The escape valve._ If T52.c still cannot start when every other member of 24 has landed,
     T54.b leaves without T52.c, T24.c with T24.g, T24.d with T52.d, T53.c and T53.d. Their members
     stay `NotModelled`, and those tasks take the next planetary bump.
@@ -6453,8 +6548,17 @@ Each is labelled "not yet modelled" where a console could show it:
   Scaillet 2014 and Ortenzi et al. 2020, from memory); it replaces T24.f's insolation rule for the
   carbon carrier with ΔIW's outgassing speciation, keeping Titan's methane and the Solar System's
   carriers (science-p14-t24f §5);
-- **P14.T55.b** silicate-vapour atmospheres (`silicate_vapour`; Schaefer and Fegley 2009; Ito et al.
-  2015; Kite et al. 2016; Zilinskas et al. 2022);
+- **P14.T55.b** silicate-vapour atmospheres (`silicate_vapour`; Schaefer and Fegley 2009; Ito et
+  al. 2015; Kite et al. 2016; Zilinskas et al. 2022).
+  - It fills `BodySurfaceDto.silicate_vapour` (P14.T35.f): `null` on a surface with no melt, a
+    value over melt. It gives `SilicateVapourDto` its members.
+  - Its first send leaves no older console reading the volatiles' zero as `NONE`
+    (decision-backlog-2 §2.3).
+  - A small hot body's vapour is unbound: `e101`'s λ is 0.17–0.32 for Na, O₂, K and SiO at
+    1,684 K. Such vapour is an evaporating outflow over the melt, not a bound air's weight.
+  - Whether such a body survives its system's age is this subtask's question too: Perez-Becker
+    and Chiang 2013 find rocky bodies under 0.1 M⊕ above 2,000 K gone in under 10 Gyr
+    (decision-triton-and-e101 §2.4);
 - **P14.T55.c** exospheres, recorded, not drawn;
 - **P14.T55.d** carbon-rich surfaces and refractory carbon from the soot line (Bond, O'Brien and
   Lauretta 2010; Bergin et al. 2023);
@@ -10330,7 +10434,9 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     world has no CH₄–H₂ air and Woitke's types are not reached;
   - the H₂ below `THIN_ENVELOPE_FRACTION` is dropped until T53.a;
   - a runaway world loses all its water until T53.b;
-  - Pluto and Triton are `Airless` until T53.c;
+  - Pluto and Triton are `Airless`, and keep none of their N₂, CH₄ or CO, until T53.c: T13.b's
+    retention, a bulk air's classifier, deletes an ice-held volatile that these bodies keep, as
+    about 1 Pa of air over their ice (decision-triton-and-e101 §1);
   - the grey skin (T24.e) lacks stratospheric heating;
   - T24.e's single α runs a measured Venus up to about 21 K warm at 10–30 km, where VIRA's lower
     atmosphere is near the dry adiabat (within 5 K at α = 1) and its 30–45 km is not
@@ -11258,8 +11364,8 @@ a_moon_s_published, the_published}`.
         (science-p14-t24a-climate.md §6, item 2). Ceres's measured inertia runs from 15 (Spencer 1990) and 38 ± 14 (Saint-Pé et al. 1993) in the infrared, to some 60 over Dawn's VIR maps
         (130–140 at Haulani; Rognini et al. 2020), and 40–160 at 1.1 mm (Li et al. 2020). Rock's
         55 stands, and its night lies within 106–132 K over 15–60. Its dark hydrated regolith is
-        its lid's, P14.T51.c's, at P14.T49.c's layer inertia, wired by P14.T54.a, not a third
-        `SurfaceMaterial`.
+        its lid's, P14.T51.c's, at P14.T49.j's regolith inertia (moved from P14.T49.c by
+        decision-p14-t49c-split, 2026-10-16), wired by P14.T54.a, not a third `SurfaceMaterial`.
       - A locked airless body's night is its floor: the cosmic background's 2.725 48 K (Fixsen
         2009, unrounded) at T24.a, before T24.b's heat flow.
       - The regolith fit holds over Θ of 0.0051–1.52 and is extrapolated beyond. Mercury's Θ,
@@ -12549,7 +12655,10 @@ tables::gauss_legendre`.
 - **Deferred findings (2026-10-13 rule)**, from P14.T35.e:
   - A surface in a state other than `Airless` can hold no gas: `close_binary`'s dwarf planet
     `e101`, a `MagmaOcean` at 1,684 K, has zero surface pressure and an empty `gases`, its
-    rock-vapour air not modelled. The wire carries it as it is (no mixture figures).
+    rock-vapour air not modelled. The wire carries it as it is (no mixture figures). **Ruled**
+    (decision-backlog-2 §2, confirmed by decision-triton-and-e101 §2): the zero is the volatile
+    air's. The melt's own vapour is `silicate_vapour`, absent until P14.T55.b (P14.T35.f), and the
+    console's reading is P14.T43.e's.
   - The client does not hold `surface_age_s` to the crater contract's `system_age_s`: the two
     come through different unit conversions (years and Gyr to seconds), which can part by an ulp.
 - **Deviations in P14.T43.b's amendments, as built (`p14-surface-rows`, 2026-10-14).** The
@@ -12580,8 +12689,12 @@ tables::gauss_legendre`.
     `SURFACE PRESSURE NONE` and `MOLE FRACTION NONE`, which an operator reads as known to be
     without air. The console cannot tell without inferring a state; the fix is the wire's (an air
     no rule computes sent as not modelled), for "main". _At the sign-off (signoff-11, item 21): a
-    wire question for main's decision list, not the guide's; lean: the record sends an air no rule
-    computes as not computed, and the readout shows both readings Missing._
+    wire question for main's decision list, not the guide's._ **Ruled** (decision-backlog-2 §2;
+    decision-triton-and-e101 §2): the wire keeps the volatiles' zero and adds `silicate_vapour`
+    (P14.T35.f); the lean of an air no rule computes sent as not modelled is refused, since it
+    changes a required field and blanks the values the model computes (decision-backlog-2 §2.2). The
+    console reads `SURFACE PRESSURE —`, `MOLE FRACTION —` and `SILICATE VAPOUR NOT YET MODELLED`
+    (P14.T43.e).
   - _`%` in a reading of several parts_ is in the value's face and colour, as `HostReadings`' zone
     spans set their units, since `ReadoutRow` has one unit slot per value.
   - _Not read yet:_ the surface's material, contrasts, climate regime and global figures, and the
@@ -13973,7 +14086,8 @@ tables::gauss_legendre`.
     - `CaTiO3`'s 2,248.15 K;
     - `iron_nickel`'s alloy solidus, below pure iron's;
     - `nh3_h2o`'s eutectic composition;
-    - the acid's 242 ± 2 K, read off a figure;
+    - the acid's eutectic, 233.4 ± 0.4 K read off Zeleznik's Fig. 1, bounded by 233.67 K, and its
+      composition 0.738 ± 0.003;
     - SiC's 3,103.15 K, and ZnS's and MnS's melting points, quoted through PubChem. SiC's kind,
       a decomposition, rests on a peritectic from memory; and that ZnS sublimes and dissociates
       before it melts at one bar is the research's note, unsourced, so its `Melting` may be wrong;
@@ -14010,10 +14124,16 @@ tables::gauss_legendre`.
       point, eutectic or solidus"). Titan's liquid takes a first melt at a composition other than
       its reference: Ligeia's own liquidus lies well above 71.15 K, so §1.7's clamp would hold a
       Titan sea liquid down to 71 K. The lean: the first melt everywhere, the acid carrying its
-      liquidus, labelled by its kind, until its eutectic is read.
+      liquidus, labelled by its kind, until its eutectic is read. **Ruled**
+      (decision-p14-t49b-condensed §2): first melt everywhere; the acid at its dihydrate–monohydrate
+      eutectic, 233.67 K (upper bound), and `Liquidus` removed; §1.7's clamp confirmed with the
+      stand-in stated. Built by the fix after it (above).
     - **NIST-JANAF as a value's source** (above): the lean is that one cited transition per
-      species is a fact within §5, as the plan's own `Na2CO3` already takes it.
-    - **§1.8's Titan composition** names the wrong paper and basis (above).
+      species is a fact within §5, as the plan's own `Na2CO3` already takes it. **Ruled**
+      (decision-p14-t49b-condensed §3): within §5, with its conditions.
+    - **§1.8's Titan composition** names the wrong paper and basis (above). **Ruled**
+      (decision-p14-t49b-condensed §1): volume fractions, Mastrogiuseppe et al. 2016 §V.B,
+      518.9 kg m⁻³ as built.
     - decision-backlog-2 §1.5: no task yet puts `ferric` on a surface.
 - **Deviations in P14.T56.c, as built (`p14-moons`, 2026-10-15).** Moons' own volatile ranks and
   where their volatiles formed, held behind `MOONS_VERSION` = 23 with T56.a's tripwire, which now
@@ -14228,7 +14348,9 @@ tables::gauss_legendre`.
     University, re-analysed it, 14 ± 2 µbar as Marques Oliveira et al. 2022, A&A 659, A136, §1,
     quote it; Tyler et al. 1989, Science 246, 1466, gave a preliminary 1.6 ± 0.3 Pa), lies under
     the 100 Pa airless line, so the state agrees. The test pins "airless, under 1 mbar, no N₂", a
-    pin that P14.T53.c's sublimation air replaces.
+    pin that P14.T53.c's sublimation air replaces. Accepted for 23 as a recorded limitation
+    (decision-triton-and-e101 §1.5): the state is right, and the deleted N₂ is the limitation's
+    text.
   - _For T54.a._ `element_inventory` for a moon takes the placed mass and the fractions its air is
     read at: `DerivedMoon::fractions` for a regular moon, `moon_bulk_of`'s for a giant-impact moon
     or a capture, not `DerivedBody::fractions`. That keeps its carriers `VolatileInventory`'s to
@@ -14248,6 +14370,9 @@ tables::gauss_legendre`.
     the state agrees; its thin, ice-buffered air is P14.T53.c's (23 → 24). P14.T51.b's "a
     Triton's N₂ pressure within a factor of 3 of 1.4 Pa at its distance" cannot pass on the Jeans
     verdict at Triton's radius, at either bulk, unless T51.b gives the N₂ by hand: for "main".
+    **Ruled** (decision-triton-and-e101, 2026-10-16): the test moves to P14.T53.c, which judges an
+    ice-held volatile against its inventory and sets its ice's temperature; T51.b tests the albedo
+    of a Pluto and a Triton given their ices by hand; one bulk input.
   - _Two states near the threshold._ At the lowest radius ranks a Ganymede at its own radius
     (2,574 km) would keep its N₂ under a snowball's 513 K exobase (λ 25.2) and loses it under the
     airless body's 548 K (λ 23.6). Both are self-consistent; the passes, starting from an albedo
@@ -14375,7 +14500,8 @@ tables::gauss_legendre`.
     `each_later_member_round_trips_absent_null_and_a_value` is unchanged: it needs a value, which
     this member cannot have.
   - _The console_ still reads `e101` as `SURFACE PRESSURE NONE` and `MOLE FRACTION NONE` until
-    P14.T43.e reads the member.
+    P14.T43.e reads the member. _Read since by P14.T43.e (2026-10-16): `SURFACE PRESSURE —`,
+    `MOLE FRACTION —` and `SILICATE VAPOUR NOT YET MODELLED`._
 - **Deferred findings (2026-10-13 rule)**, from P14.T35.f:
   - The sim's `SurfaceConditions::{mean_molar_mass_g_per_mol, heat_capacity_over_r}` docs still
     say "`None` for an airless body", while the wire's now say `null` with an empty `gases`: an

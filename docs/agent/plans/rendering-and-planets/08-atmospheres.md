@@ -1471,8 +1471,8 @@ Names are those the owning plans give; the owning plan is authoritative.
       high and 3 on low, against `MAX_SKY_SOURCES` = 6 in the kernels. It also adds the thick
       table's size, and keeps both settings built together from R08.T6 on.
     - The thick bakes cost CPU at arrival, not frame time, so they run on both settings.
-12. **What the view says.** The atmosphere is computed physics, not decoration. Seven states are
-    labelled. The first four follow the guide's existing grammar for a withheld or unmodelled
+12. **What the view says.** The atmosphere is computed physics, not decoration. Eight states are
+    labelled. The first five follow the guide's existing grammar for a withheld or unmodelled
     section; the last three are new annunciations about the view's own drawing, as item 7 of "What
     the guide must gain" frames them:
     - `ATMOSPHERE: NOT RESOLVED` when the surface section is withheld, or a gas envelope's
@@ -1492,6 +1492,17 @@ Names are those the owning plans give; the owning plan is authoritative.
       light (a Mercury's sodium) is not drawn (`signoff-2.md`, item 6). It stands on its own line,
       never composed with another `NOT YET MODELLED` note, and a kept scene's body set airless
       carries none (R08.T10.a).
+    - `SILICATE VAPOUR: NOT YET MODELLED` while a generated body's surface holds melt and its
+      `silicate_vapour` member is absent (P14.T35.f; every server until P14.T55.b).
+      - "Holds melt" means the state `magma_ocean`, or from P14.T54.a a
+        `crust.melt_area_fraction` above 0.
+      - The melt's own vapour, Na, O₂, O and SiO over a volatile-free melt (Schaefer and Fegley
+        2009), is not drawn, nor its resonance light.
+      - Any volatile air the surface section computes is drawn as computed, with this note beside
+        it. It stands on its own line, beside `EXOSPHERE: NOT YET MODELLED` where an `airless`
+        body holds a melt pool.
+      - The name is drafted for the owner with P14.T43.e's console row, as one name
+        (decision-backlog-2 §2.5; decision-triton-and-e101 §2.4).
     - `ATMOSPHERE: PENDING` from a body's `body_detail` request until its reply is drawn. No
       atmosphere is drawn meanwhile.
     - `ATMOSPHERE: COMPUTING` while a gated thick bake runs.
@@ -2132,7 +2143,10 @@ with its meaning and when it clears:
   stand-in, when measured constants replace it (`decision-r08-licences.md` row 5).
 
 Design note 12's seventh, `EXOSPHERE: NOT YET MODELLED`, came after T2, from the sign-off of
-2026-10-10 (`signoff-2.md` item 6), which wrote its guide row; R08.T10.a sets it.
+2026-10-10 (`signoff-2.md` item 6), which wrote its guide row; R08.T10.a sets it. Its eighth,
+`SILICATE VAPOUR: NOT YET MODELLED`, came from decision-backlog-2 §2.5 (2026-10-15). R08.T10.a sets
+it too, reading P14.T35.f's member, with the key `silicateVapourNotYetModelled` in `labels.ts` and
+its test.
 
 None uses a status colour or the word "degraded" (item 7 of
 [What the guide must gain](../../brainstorming/rendering-and-planets.md#what-the-guide-must-gain)).
@@ -4302,14 +4316,14 @@ two calls are made once a frame.
 
 An airless body (`SurfaceState::Airless`) draws no atmosphere, and its one label is
 `EXOSPHERE: NOT YET MODELLED` (`exosphereNotYetModelled`) while the generator computes no exosphere
-(below). Until the surface
-section carries P14.T24.a's figures (R08.T1's P14.T35.e), generated bodies draw no atmosphere and
-show `ATMOSPHERE: NOT YET MODELLED`, and so does a giant, whose surface section is
-`not_applicable`, until its `envelope` section exists (decision-r08-giant-label). The task runs on
-the fixtures of Design note 16: Earth, Earth with ozone, Mars with hand dust, Venus at 92 and at
-58 bar, a hand Titan, and a hand giant. Those that need R08.T5.b's files (Venus's clouds, Mars's
-dust, Titan's haze) wait on those files. Their licences were ruled on 2026-10-09
-(`decision-r08-licences.md`).
+(below). A body whose surface holds melt carries `SILICATE VAPOUR: NOT YET MODELLED` while its
+`silicate_vapour` member is absent (Design note 12). Until the surface section carries P14.T24.a's
+figures (R08.T1's P14.T35.e), generated bodies draw no atmosphere and show
+`ATMOSPHERE: NOT YET MODELLED`, and so does a giant, whose surface section is `not_applicable`,
+until its `envelope` section exists (decision-r08-giant-label). The task runs on the fixtures of
+Design note 16: Earth, Earth with ozone, Mars with hand dust, Venus at 92 and at 58 bar, a hand
+Titan, and a hand giant. Those that need R08.T5.b's files (Venus's clouds, Mars's dust, Titan's
+haze) wait on those files. Their licences were ruled on 2026-10-09 (`decision-r08-licences.md`).
 
 By the composition ruling (decision-composition):
 
