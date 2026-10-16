@@ -12,7 +12,7 @@ describe("surfaceStateLabel", () => {
     ["temperate", "TEMPERATE"],
     ["snowball", "SNOWBALL"],
     ["steam_envelope", "SUPERCRITICAL H2O"],
-    ["tenuous", "TENUOUS AIR"],
+    ["tenuous", "TENUOUS ATMOSPHERE"],
   ])("names %s as %s", (state, word) => {
     expect(surfaceStateLabel(state)).toBe(word);
   });

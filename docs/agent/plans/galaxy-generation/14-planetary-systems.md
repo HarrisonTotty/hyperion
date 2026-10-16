@@ -3887,6 +3887,21 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
     before the display time counts `T+` and one after it `T-`, each with its time-system label.
   - _Accept:_ `pnpm test`.
   - _Slice:_ T43.c waits for T31 and `body_events`; there is no events panel in the first display.
+- **P14.T43.d The readout's names, as signed off** (signoff-11, item 21; a display change only,
+  no wire, output or protocol change).
+  - `displays/system/BodyRecordReadings.tsx`: the surface's temperature row reads `T SURF`, not
+    `MEAN SURFACE TEMPERATURE`. `styles.css`' `.body-readout__values` keeps `fit-content(11.5rem)`;
+    its comment drops the wrapped label.
+  - `lib/system/bodyWords.ts`: `surfaceStateLabel`'s `tenuous` reads `TENUOUS ATMOSPHERE`, and
+    its TSDoc says why (the console's one name for a body's gas).
+  - `gasesShown`: a gas whose mole fraction is below 1 and whose three figures round to `100`
+    reads `ABOVE 99.9 %`. `ABOVE` takes the same no-break space as its figure, so that the
+    reading breaks only after a middle dot. A single gas, the whole, reads `100 %`.
+  - _Tests:_ `SystemView.bodies.test.tsx`: the Earth reads `T SURF 288 K`; an air of N2 at
+    0.9996 and CH4 at 0.0004 reads `N2 ABOVE 99.9 % · CH4 0.0400 %`; an air of N2 alone reads
+    `N2 100 %`. `bodyWords.test.ts`: `tenuous` reads `TENUOUS ATMOSPHERE`.
+  - _Accept:_ `pnpm test`; the console-ux skill's lint on the changed files; a ux-reviewer pass.
+  - _Commit:_ `fix(client): P14.T43.d The readout's names as signed off`.
 
 #### P14.T44 Time control
 
@@ -14069,3 +14084,56 @@ tables::gauss_legendre`.
     water floor applies only beyond the snow line, so a rocky planet's capture from a zone inside
     it keeps the drawn water beside an icy bulk. With T56.c's `MoonBirth` finding, for the
     composition audit.
+- **Deviations in P14.T43.d, as built (`lane/31-p14-t43d-readout-names`, 2026-10-16).** The
+  readout's names as signoff-11, item 21 rules them, in the client only. No layout, wire, protocol
+  or output moves: `GENERATOR_VERSION` stays 22, `PROTOCOL_VERSION` 2, and no golden is touched.
+  - _The three readings._ `BodyRecordReadings.tsx`'s `surfaceRows` reads the temperature as
+    `T SURF 288 K`, not `MEAN SURFACE TEMPERATURE`, its row still `wide`. `bodyWords.ts`'s
+    `surfaceStateLabel` reads `tenuous` as `TENUOUS ATMOSPHERE`. `gasesShown` reads a gas below the
+    whole whose three figures round to `100` as `ABOVE 99.9 %` (`N2 ABOVE 99.9 % · CH4 0.0400 %`),
+    and a gas sent at 1 as `100 %`. The rule compares the string `formatSignificant` returns, so
+    that it and the reading cannot disagree at a rounding edge: 0.9995 reads `ABOVE 99.9 %` and
+    0.99949 `99.9 %`, as the guide's coverage turns at 99.95 %. It tests the gas's own fraction,
+    not how many gases there are. `ABOVE` keeps its figure across a no-break space, and a name of
+    several words keeps its plain space before `ABOVE`. `envelopeRows` reads through the same
+    function, so a giant's `MOLE FRACTION` takes the rule too, as the ruled row covers a gas
+    envelope's gases.
+  - _The doc comments._ `gasesShown`'s TSDoc gains the rule and its reason under `@remarks` (the
+    TypeScript review's should-fix: the summary sentence stays first), in the brief's words.
+    `surfaceStateLabel`'s says the words are signed off and why `ATMOSPHERE`: the console's one
+    name for a body's gas, and the literature's term for Pluto's. `surfaceRows`' remark gives the
+    reason for a line each: `SURFACE PRESSURE`, the section's longest label, stays in the first
+    label track. `styles.css`' comment over `.body-readout__values` drops the wrapped label; both
+    `fit-content(11.5rem)` rules are unchanged.
+  - _No label wraps._ By B612's advance widths at the labels' 0.875rem with 0.15em tracking (no
+    kerning; T43.b's method, which gives its 10.76rem and 16.32rem again), `T SURF` is 3.76rem and
+    `SURFACE PRESSURE` 10.46rem, inside the 11.5rem track beside `COMETS OVER 1 km` and
+    `NEBULA EXPANSION` at 10.76rem. The label track's wrap that T43.b's pending visual check names
+    has no case left. The check itself, at 1920×1080 and 1280×720, stays pending for the readings'
+    wrap after their middle dots, the scrollbar and the position line.
+  - _T43.b's first deferred finding is closed:_ `N2 100 % · CH4 0.0400 %` now reads
+    `N2 ABOVE 99.9 % · CH4 0.0400 %`. The ordinary rounding of several parts to a sum of 100.1 %
+    stays, as the sign-off rules.
+  - _Tests._ `SystemView.bodies.test.tsx`: "reads an ok surface's state, mean temperature,
+    pressure and gases" reads `T SURF` 288 K and no `MEAN SURFACE TEMPERATURE` term; a new
+    `it.each` holds "reads a gas below the whole whose figures round to 100 as ABOVE 99.9 %",
+    "reads a gas just below the edge of the whole at its three figures" (N2 at 0.9994 and CH4 at
+    0.0006, `N2 99.9 % · CH4 0.0600 %`) and "reads a single gas, the whole, as 100 %".
+    `bodyWords.test.ts`: `tenuous` reads `TENUOUS ATMOSPHERE`. The case below the edge is beyond
+    the entry's list, added on the TypeScript and UX reviews, so that a threshold on the fraction
+    in place of the figure fails a test. No test pins the envelope's path, which shares the
+    function. The console-ux lint on the three renderer files:
+    `0 error(s), 10 check(s) in 3 file(s) scanned`, every check on a line the base had.
+  - _Not here:_ T43.b's entry, its "As built, both" bullet, its drafted table and its records,
+    which still read `MEAN SURFACE TEMPERATURE` and `TENUOUS AIR`; and the guide's rows for
+    `T SURF`, the surface states and `MOLE FRACTION`. The docs batch applies them. `e101`'s `NONE`
+    readings stay as they are until its ruling.
+- **Deferred findings (2026-10-13 rule)**, from P14.T43.d:
+  - `ABOVE 99.9 %` is now the widest figure a one-word name keeps whole: 13 characters after the
+    name, against 10 for an E-notation figure (T43.b's second deferred finding). At 9.1 px a
+    character in B612 Mono, `N2 ABOVE 99.9 %` is 137 px and a three-character formula's 146 px,
+    inside the 166 px the column keeps at 1280×720; a formula of six characters or more at
+    99.95 % or more (173 px) would pass it. The registry's gases are three characters at most.
+  - `MASS FRACTION`, at one decimal and kept as built by the sign-off, can still read a layer as
+    the whole beside another (`IRON 0.0 % · ROCK 100.0 %` for a rock at 0.99996), as a gas did
+    before this task. The UX review's note; for the owner, should the coverage form reach it.
