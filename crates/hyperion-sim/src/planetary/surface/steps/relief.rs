@@ -68,6 +68,29 @@ mod seafloor;
 #[cfg(test)]
 mod tests;
 
+// The draws' instances on `surface.coarse.relief` are pairwise distinct, so that no two of the
+// step's draws share a stream (the determinism audit's hardening).
+const _: () = {
+    let instances = [
+        noise::LANDFORM_INSTANCE,
+        convergent::STRIKE_INSTANCE,
+        provinces::PROVINCE_INSTANCE,
+        provinces::EDIFICE_INSTANCE,
+    ];
+    let mut i = 0;
+    while i < instances.len() {
+        let mut j = i + 1;
+        while j < instances.len() {
+            assert!(
+                instances[i] != instances[j],
+                "two of the relief step's draws share an instance"
+            );
+            j += 1;
+        }
+        i += 1;
+    }
+};
+
 use hyperion_surface::field::Crust;
 use hyperion_surface::num;
 use hyperion_surface::synth::SpectrumShape;
@@ -80,12 +103,14 @@ use crate::planetary::hooks::figures::relief::{OCEANIC_WIDTH, STAGNANT_LID_RELIE
 use crate::planetary::surface::inputs::{CoarseInputs, TectonicRegime};
 use crate::units::{Metres, Radians};
 
-/// The continental crust's mean elevation over sea level, +405 m: Earth2014's cells above −2 km
-/// (Hirt and Rexer 2015, Int. J. Appl. Earth Obs. Geoinf. 39, 103–112, its TBI layer at 5′,
-/// recomputed by `decision-r09-t12-coarse.md`, 2026-10-16: +404.9 m, s.d. 1,084.1 m, which plan
-/// 14's [`CONTINENTAL_WIDTH`](crate::planetary::hooks::figures::relief::CONTINENTAL_WIDTH) rounds
-/// to 1.08 km); Design note 7's +406 m is superseded. The
-/// continental population and R09.T12.b's convergent landforms realise it together.
+/// The continental crust's mean elevation over sea level, +405 m.
+///
+/// Earth2014's cells above −2 km (Hirt and Rexer 2015, Int. J. Appl. Earth Obs. Geoinf. 39,
+/// 103–112, its TBI layer at 5′, recomputed by `decision-r09-t12-coarse.md`, 2026-10-16: +404.9 m,
+/// s.d. 1,084.1 m, which plan 14's
+/// [`CONTINENTAL_WIDTH`](crate::planetary::hooks::figures::relief::CONTINENTAL_WIDTH) rounds to
+/// 1.08 km); Design note 7's +406 m is superseded. The continental population and R09.T12.b's
+/// convergent landforms realise it together.
 pub const CONTINENTAL_MEAN: Metres = Metres::new(405.0);
 
 /// The continental population's core mean, +222.6 m: [`CONTINENTAL_MEAN`] less the convergent
@@ -101,7 +126,8 @@ pub(crate) const CONTINENTAL_CORE_MEAN: Metres = Metres::new(222.6);
 /// above −2 km less the variance of the convergent landforms' lift over the continental crust on
 /// the reference Earth (the addendum's item 3, calibrated with [`CONTINENTAL_CORE_MEAN`]). Earth2014's
 /// own continents are a narrow core with long tails (an interquartile range of 723 m and a
-/// skewness of 1.20, the addendum's figures), which this core's 0.10 skew does not reach.
+/// skewness of 1.20, the addendum's figures), which this core's skewness of 0.32 (its shape s
+/// 0.105) does not reach.
 pub(crate) const CONTINENTAL_CORE_WIDTH: Metres = Metres::new(628.5);
 
 /// The shape s of the continental population's skew, 0.1047: the population is

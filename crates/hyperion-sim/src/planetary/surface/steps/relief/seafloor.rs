@@ -11,8 +11,9 @@
 //! are sorted by κ = `d_r` ÷ `u_h` uncapped (then by cell index), each run of equal κ a block and
 //! the ridgeless cells the last, the oldest; walking the blocks in order, each spans [q₀, q₁] of
 //! the oceanic area, and each of its cells takes the block's mean age under the steady state's
-//! triangular area–age distribution dA ∝ (1 − t ÷ `t_m`) dt (Parsons 1982, JGR 87, 289; not
-//! re-read), whose area mean is `t_m` ÷ 3:
+//! triangular area–age distribution dA ∝ (1 − t ÷ `t_m`) dt (Parsons 1982, JGR 87, 289, its
+//! abstract's dA/dt = C₀ (1 − t ÷ `t_m`), as R09.T12's science check read it), whose area mean is
+//! `t_m` ÷ 3:
 //!
 //! > `τ_ss` = `t_m` [1 − (2/3) ((1 − q₀)^(3/2) − (1 − q₁)^(3/2)) ÷ (q₁ − q₀)].
 //!
@@ -46,7 +47,7 @@ use crate::units::{
 pub(crate) const EARTH_MEAN_FLOOR_AGE: Seconds = Seconds::new(64.3 * SECONDS_PER_MEGAYEAR);
 
 /// Earth's oldest floor under the triangular law, `t_m` = 3 × [`EARTH_MEAN_FLOOR_AGE`],
-/// 192.9 Myr: it leaves 14.2%, 4.9% and 0.45% of the floor older than 120, 150 and 180 Myr,
+/// 192.9 Myr: it leaves 14.3%, 4.9% and 0.45% of the floor older than 120, 150 and 180 Myr,
 /// against Müller et al. 2008's grid's 15.2%, 4.7% and 0.22% (`decision-r09-t12-coarse.md`
 /// item 1).
 pub(crate) const EARTH_OLDEST_FLOOR: Seconds = Seconds::new(3.0 * EARTH_MEAN_FLOOR_AGE.value());

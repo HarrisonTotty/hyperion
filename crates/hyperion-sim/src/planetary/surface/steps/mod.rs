@@ -13,7 +13,9 @@
 //! One exception to the order, Design note 5's: on a world whose wet epoch ended before its
 //! surface age ran out (a Mars), each coarse crater is drawn a formation age, and only those older
 //! than the epoch's end are smoothed in before erosion; the younger ones are applied after it.
-//! R09.T12.d and R09.T14 split the crater step for it.
+//! R09.T12.d splits the crater step for it: [`craters::run`] draws every coarse crater and smooths in
+//! the older ones, and [`craters::run_after_erosion`], which the pass calls after [`erosion`], the
+//! younger.
 //!
 //! Two hazards for the steps that fill this frame (sim-determinism, "Hazards across targets"): a
 //! value is asserted finite (`hyperion_surface::num::assert_finite`) before it is sorted or
@@ -31,7 +33,8 @@
 //! each cell's plate, crust and nearest boundary, and each oceanic cell's
 //! [`SeafloorOrigin`]. R09.T12.a began [`relief`]'s coarse elevation, the crust's populations and
 //! the sea floor, R09.T12.b its convergent landforms and R09.T12.c a stagnant lid's provinces, before
-//! T12.e's `σ_h` and sea level. The other steps are still no-ops.
+//! T12.e's `σ_h` and sea level; R09.T12.d filled [`craters`]. Climate, erosion and the classes are
+//! still no-ops.
 
 pub mod classes;
 pub mod climate;
@@ -190,18 +193,32 @@ pub struct CellState {
     /// read (R09.T12.a; `decision-r09-t5.md` item 5); `None` off oceanic crust. None of it
     /// travels: the field carries only what R09.T12.a makes of it.
     pub seafloor_origin: Option<SeafloorOrigin>,
-    /// The steady-state age `τ_ss` of the cell's sea floor, on oceanic crust, `None` elsewhere:
+    /// The steady-state age `τ_ss` of the cell's sea floor, on oceanic crust, `None` elsewhere.
+    ///
     /// R09.T12.a's rank of the kinematic age ([`SeafloorOrigin::age`]) by area onto the
     /// triangular area–age distribution, which GDH1, the pelagic drape and the plains read
     /// (`decision-r09-t12-coarse.md` item 1). It does not travel.
     pub seafloor_age: Option<Seconds>,
-    /// Whether the cell's plate subducts at its nearest boundary (R09.T11's polarity): true on a
-    /// subduction boundary's subducting side, its boundary cells, at +0, included, so that a cell's
+    /// Whether the cell's plate subducts at its nearest boundary (R09.T11's polarity).
+    ///
+    /// True on a subduction boundary's subducting side, its boundary cells, at +0, included, so that a cell's
     /// signed distance is negative exactly where this holds and the distance is above +0; false
     /// without a boundary and at any boundary that is not a subduction. R09.T12.b reads it to put a
     /// trench on the subducting side and to measure an arc from the trench's axis. It does not
     /// travel.
     pub subducts: bool,
+}
+
+impl CellState {
+    /// Whether the cell is one of a plate boundary's own cells.
+    ///
+    /// Its signed distance is exactly +0, which R09.T11 writes there and nowhere else, every link
+    /// being longer than zero (compared by `total_cmp`, so that only +0 matches).
+    #[must_use]
+    pub(crate) fn on_boundary(&self) -> bool {
+        self.boundary_distance
+            .is_some_and(|d| d.value().total_cmp(&0.0).is_eq())
+    }
 }
 
 /// Where an oceanic cell's floor formed (R09.T11; `decision-r09-t5.md` item 5): the ridge of its

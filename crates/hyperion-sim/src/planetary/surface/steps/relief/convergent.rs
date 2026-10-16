@@ -4,7 +4,8 @@
 //!
 //! - **Belts**, on continental crust whose nearest boundary is a collision: the population lifted
 //!   by a plateau profile of the distance |d| to the boundary over a half-width of 100–250 km (a
-//!   full width of 200–500 km), so that its mean stands at the plateau's [`BELT_PLATEAU`] times h.
+//!   full width of 200–500 km), by h × ([`BELT_PLATEAU`] − the population's mean), so that its mean
+//!   stands at the plateau's 5 km on the reference Earth (h = 1) and at μ + h (5 km − μ) elsewhere.
 //! - **Trenches**, on the subducting side of a subduction (where [`CellState::subducts`] holds):
 //!   the floor deepened by 2–4 km times h at the boundary, falling off as (1 − |d| ÷ 100 km)².
 //! - **Arcs**, on the overriding plate behind a subduction: a band from the volcanic front, G
@@ -173,14 +174,12 @@ pub(super) fn run(pass: &Pass<'_>, working: &mut Working) -> Option<Arcs> {
     }
     let arcs = arcs(pass, working, &strike);
     for (n, cell) in working.cells.iter_mut().enumerate() {
-        let lift = belt_lift(cell, strike[n], h)
-            + trench_lift(cell, strike[n], h)
-            + arc_lift(cell, &arcs, n, h);
-        if lift != 0.0 {
-            let z = Metres::new(num::assert_finite(cell.elevation.value() + lift));
-            cell.elevation = z;
-            cell.water_surface = z;
-        }
+        let lift = belt_lift_m(cell, strike[n], h)
+            + trench_lift_m(cell, strike[n], h)
+            + arc_lift_m(cell, &arcs, n, h);
+        let z = Metres::new(num::assert_finite(cell.elevation.value() + lift));
+        cell.elevation = z;
+        cell.water_surface = z;
     }
     Some(arcs)
 }
@@ -191,7 +190,7 @@ pub(super) fn run(pass: &Pass<'_>, working: &mut Working) -> Option<Arcs> {
 /// [`CONTINENTAL_CORE_MEAN`], the population's own mean);
 /// zero elsewhere.
 #[must_use]
-pub(super) fn belt_lift(cell: &CellState, strike: f64, factor: f64) -> f64 {
+pub(super) fn belt_lift_m(cell: &CellState, strike: f64, factor: f64) -> f64 {
     let (BoundaryKind::Collision, Some(distance), Crust::Continental) =
         (cell.boundary, cell.boundary_distance, cell.crust)
     else {
@@ -214,7 +213,7 @@ pub(super) fn belt_lift(cell: &CellState, strike: f64, factor: f64) -> f64 {
 /// height factor `factor` (h): on the subducting side of a subduction within [`TRENCH_HALF_WIDTH`] of its
 /// boundary cells, −h (3 km + 2 ÷ 3 km × n) (1 − |d| ÷ 100 km)²; zero elsewhere.
 #[must_use]
-fn trench_lift(cell: &CellState, strike: f64, factor: f64) -> f64 {
+fn trench_lift_m(cell: &CellState, strike: f64, factor: f64) -> f64 {
     let (BoundaryKind::Subduction, Some(distance), true) =
         (cell.boundary, cell.boundary_distance, cell.subducts)
     else {
@@ -253,7 +252,7 @@ fn arc_profile(u: f64, width: f64) -> f64 {
 /// rise over the cell's own crust ([`ARC_RISE_OCEANIC`], [`ARC_RISE_CONTINENTAL`]); zero where no
 /// trench of its plate reaches it.
 #[must_use]
-fn arc_lift(cell: &CellState, arcs: &Arcs, n: usize, h: f64) -> f64 {
+fn arc_lift_m(cell: &CellState, arcs: &Arcs, n: usize, h: f64) -> f64 {
     let (Some(y), Some(front), Some(width)) =
         (arcs.distance_m[n], arcs.front_m[n], arcs.width_m[n])
     else {
@@ -270,8 +269,7 @@ fn arc_lift(cell: &CellState, arcs: &Arcs, n: usize, h: f64) -> f64 {
 /// side where `subducts` holds, on the overriding side where it does not.
 #[must_use]
 fn subduction_boundary(cell: &CellState) -> bool {
-    cell.boundary == BoundaryKind::Subduction
-        && cell.boundary_distance.is_some_and(|d| d.value() == 0.0)
+    cell.boundary == BoundaryKind::Subduction && cell.on_boundary()
 }
 
 /// The arcs' layout over `working`'s cells under the along-strike draw `strike` (see the module

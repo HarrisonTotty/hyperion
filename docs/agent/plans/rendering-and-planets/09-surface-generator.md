@@ -7327,9 +7327,9 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     `seafloor_age: Option<Seconds>`, `τ_ss` on oceanic crust; `SeafloorOrigin::age`'s
     documentation now calls it the kinematic age. R09.T11's `reach` (its multi-source shortest
     path) is generic over a region label and `pub(super)`, as are its `Reach`, `slot` and
-    `cell_of`: T11 calls it with the plate
-    labels as before, so its arithmetic and its tests are unchanged, and T12.a calls it over each
-    plate's oceanic cells. `crates/hyperion-sim/clippy.toml` admits `GlobSed`.
+    `cell_of`: T11 calls it with the plate labels as before, so its arithmetic and its tests are
+    unchanged, and T12.a calls it over each plate's oceanic cells. `crates/hyperion-sim/clippy.toml`
+    admits `GlobSed`.
   - _The old floor (ruled, item 1)._ As ruled: κ = `d_r` ÷ `u_h` uncapped as T11 divides them,
     sorted by (κ, cell), blocks of equal κ, the ridgeless cells the last block; each block's mean
     age under the triangular law; `t_m` = 192.9 Myr × (`a_o` ÷ 0.595) × (Ω⊕ ÷ Ω) through T11's
@@ -7455,7 +7455,7 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     257 km, 197–291 km, 100% within 180–330 km. The 8-connected path's excess at the fronts is
     4.7% at the median, 11.0% at the 90th percentile and 30.9% at most: 9 km and 21 km at 190 km,
     which would threaten the 15 km medians, so the arcs read the great circle (corrected, as the
-    brief's lean asked).
+    issue's lean asked).
   - _The along-strike draw._ `surface.coarse.relief`, instance 1, one octave at lattice level 5,
     made unit-RMS over the sphere and clamped to ±1.5; belts and trenches read it at the cell and
     arcs at their source, so each profile across a trench takes one G.
@@ -7488,6 +7488,14 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     gives 2,700 kg m⁻³); GlobSed's eq. 2a prints 52 m where its Table 4 gives 53.02; its 404 m is
     the deep ocean's, farther than 200 km from the continent–ocean boundary, as the test reads it;
     Goff's Table 2 has 222 m at 35 mm a⁻¹ and 90 m at 55, which the test's comment now lists.
+  - _The trench tests' reading_ (the review). `trenches_lie_two_to_four_km_below_their_floor` holds
+    each subducting boundary cell's own cut at 2–4 km × h, the floor being the cell's population
+    before the cut; `the_trenches_median_depth_below_the_floor_beyond_is_two_to_four_km` holds the
+    finished field's median depth below its plate's floor 150–300 km out (3,070 m) within 2–4 km.
+    There the 10–90% range is 1.6–4.2 km, so a bound on more than the median is main's to ask.
+  - _Belts off Earth._ The plateau stands at μ + h (5,000 m − μ), μ the core's mean, which is 5 km
+    × h only where h is 1 (labelled).
+  - _The new `subducts` test_ runs under T11's acceptance filter (`steps::plates`), not T12's.
 - **Deviations in T12.c, as built** (2026-10-16; the same lane, on `a4dcf814`; rulings
   `decision-r09-t12-coarse.md` items 3 and 4; the province law is the lane's own, not put to main;
   no bump).
@@ -7543,6 +7551,100 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     realising 2,094 m (0.76 of σ_volc); the lift reaches 28.5% of the surface, at most 19,371 m,
     and the `Province` crust covers 71.4% (the moats' fill). After T12.a–c the reference Mars's
     s.d. is 2,325 m and its relief 22,829 m.
+  - _Plan 14's figures stay plan 14's_ (the review; Design note 3, never left to drift): σ_volc and
+    `h_max` are gated by plan 14's own lithosphere (`published_thickness`: its
+    `lithosphere_thickness` of the lid's class, 651 ÷ T for ice), while the flexure reads the ruled
+    `T_e` (the `H2O` row's 567 ÷ T); on an ice lid the two differ by 13%. Nothing moves on the
+    reference worlds, whose one province lid is silicate.
+  - _A fill no lighter than the mantle beneath_ (a rocky province on an ice lid, which plan 14's
+    crusts never pair but the builder accepts) gives no provinces (labelled), so the pass cannot
+    panic there; `flexural_parameter` keeps its assert for its direct callers.
+  - _The province test_ holds the realised share at 0.7 σ_volc or more (0.76 as built).
+- **Deviations in T12.d, as built** (2026-10-16; the same lane, on `a4dcf814`; main's rulings on
+  R09.T7.c and R09.T8 for T12.d's contract, and `decision-r09-t12-coarse.md` item 5b; no bump).
+  - _Files and items._ `steps/craters.rs`: `run` and `run_after_erosion` (public, as the step
+    functions are), `CoarseOctave`, `octaves`, `degradation` and `waits` (`pub(crate)`); tests in
+    `steps/craters/tests.rs`. `coarse_pass` calls `craters::run_after_erosion` after
+    `erosion::run` (`surface/mod.rs`). The reference-world tests' documentation no longer calls
+    the steps no-ops.
+  - _The count (T8's lean, accepted)._ Each coarse octave [`D_b` 2^k, `D_b` 2^(k+1)] on its own:
+    a Poisson count of mean min(production, saturation) × the body's area, production by
+    `cumulative_density` between its diameters and saturation Trask's over the same octave; the
+    area the spheroid's closed form (`craters::spheroid_area`), which a test holds to the cells'
+    true areas summed (`synth::craters::cell_area`) to 10⁻⁹.
+    The octaves run while their lower diameter is below the body's radius (labelled; the Moon's
+    last, 1,481–2,962 km, holds a South Pole–Aitken).
+  - _Each crater and the draw layout._ `surface.coarse.crater`, octave k on `surface_item(k)`:
+    the count from word 0; crater j's words from 2³² + 8j, the centre's z and longitude (uniform
+    on the sphere of directions), its diameter's uniform (`diameter_in_octave`, the production's
+    distribution within the octave, as T7.b's) and its age's (uniform in the cumulative production
+    over its octave's window τ(D), through `chronology_age` at the contract's system age, the window
+    T7.b's: the surface's density, or its share `N_sat` ÷ `N_prod` where capped). Morphology
+    `crater_shape`'s.
+  - _Degradation (ruled, item 5b)._ The byte is the nearest integer to 255 × (1 − g), g T7.b's
+    `relief_factor` of the rim radius and `diffusion_length` of the age, at most 255. Every coarse
+    crater of the four reference worlds takes 0.
+  - _The relief (ruling B) and the reach._ Each crater is smoothed in, in draw order, as its
+    `rims::kept_relief` times `CoarseRims::for_body(..).coarse_profile(D)` at the chord between
+    the cell centre's and the crater centre's spheroid points in rim radii, sampled at each cell's
+    centre, as the testing builder does. Its reach is every cell whose centre's angle from the
+    crater's, less the cell's circumradius (the widest corner), lies within 2 asin(reach ÷ (2
+    min(a, c))), with the centre's own cell, flooded through edge neighbours: the builder's rule,
+    a cover of `ResolutionCode::NONE`. A key (centre cell, diameter) drawn twice is dropped (never
+    met). Each smoothing keeps the interim sea level and realised figures true.
+  - _The wet-epoch split (Design note 5)._ A crater waits where the body's wet epoch ended before
+    its surface age ran out (its end above zero and below the surface age) and the crater is no
+    older than the end: `run` lists every crater and smooths in the rest, and `run_after_erosion`
+    the waiting ones, after the erosion step, which is still a no-op.
+  - _Measured._ The reference Moon (`D_b` 92.6 km): its octaves drew 260, 55, 7, 2 and 0 craters
+    against 262.3, 65.6, 16.4, 4.1 and 1.0 expected, each within its Poisson interval; above 100 km
+    264 against 289.1 expected, the issue's about 300 (Trask's cumulative 299.7 over 3.79 × 10⁷
+    km²: within the capped octave that straddles 100 km the draw follows the production's
+    distribution, steeper than saturation's D⁻², so fewer fall above 100 km). The reference Mars
+    (90.3 km): 325 craters (283 of 285.1, 36 of 44.9, 4 of 12.2, 2 of 3.5, 0 of 1.0 and 0 of 0.3),
+    244 older than the epoch's end at 3.6 Gyr and 81 younger. The reference Earth (84.9 km, a
+    0.1 Gyr surface): 1 crater against 2.8 in its first octave. Ceres (50.0 km): 75 (65 of 65.6, 10
+    of 15.2, 0 of 2.1, 0 of 0.4). The four worlds share one surface seed, so their octaves draw the
+    same Poisson quantiles (the third octave lies 2.3σ low on each). Mean reach entries a cell:
+    the Moon 1.61, Ceres 1.04, Mars 0.35, Earth 0.00, far under `TooManyReaches`' 32. Every listed
+    lunar crater's fresh rim is Pike 1980b's 0.236 D^0.399 to 1% (the Moon's g 1.624 m s⁻², 0.2%
+    off T7.a's identity). The largest degradation byte is 0 on every reference world.
+  - _Cost of the batch_ (provisional: the test profile, the sim at `opt-level = 2`, one thread, on
+    the laptop's Intel i7-8665U under the `powersave` governor at a load of 1.6–3.0, beside another
+    lane; each time a test binary's whole run of one probe, `craters::tests::cost`, three runs):
+    on the reference Earth at level 8 the plates 1.34–1.42 s (with the grids), the relief
+    1.10–1.20 s more (T12.a–b), the coarse craters under 0.05 s more (one crater; 0.46 s before the
+    area took its closed form and the circumradii their cells alone); the whole pass on the
+    reference Earth 2.50–2.62 s, Mars 0.50–0.52 s, the Moon 0.084 s and Ceres 0.020 s.
+  - _The batch's review_, run once over its whole diff. The `review-changes` skill's preamble
+    (`git -C` into the shared checkout) is refused in this lane's worktree, so the four reviewers
+    it routes to ran by hand from the worktree, each fix in this commit:
+    - _Rust._ Must-fix: exact float comparisons that Clippy does not flag. The boundary-cell test is
+      now one predicate, `CellState::on_boundary` (exactly +0, by `total_cmp`), the lifts are
+      written without zero guards, and the tests compare bits. Should-fix: the provinces' assert,
+      which builder inputs could reach, is guarded (above); the craters' two calls take a `Phase`,
+      not a `bool`; the flexure's API takes `KilogramsPerCubicMetre` and `Metres` (`Cone`, `Lid`,
+      `foundation_n_per_m3`, the lifts' and the area's `_m` and `_m2` names); a test pins a
+      mid-range and a full degradation byte; three doc summaries are split. Considered and done: the
+      `Province` entry is read by its variant's code. Not done: one shared test `World` for the two
+      test modules.
+    - _Determinism._ No must-fix or should-fix. Done: a compile-time check that the relief step's
+      four instances differ, and other-seed tests of the arcs (a small mobile lid) and the provinces
+      (the reference Mars). Not done: an interim golden of the coarse field, which the plan keeps
+      for T16 (no golden is added).
+    - _Plan conformance._ The trench reading, belts off Earth, plan 14's figures and the fill's
+      guard are recorded above, and the `tags.rs` docs below. The continental width's bound is
+      based on 1.08 km. Done from its considers: the belts' and the noise kernel's docs, and the
+      251.7 km comment; the province test is tightened.
+    - _Science._ Must-fix, pending main's ruling: the filled moat counts its fill twice under a
+      load. It is commented on the issue with the lane's lean and deferred below, built as ruled.
+      Should-fix, done: 14.3% (not 14.2%) older than 120 Myr under the triangular law; the core's
+      skewness, 0.32, beside Earth2014's 1.20 (not its shape's 0.10); α 251.7 km at 70 km under the
+      reference Mars's gravity; `T_e` held at R labelled an extrapolation of the thin-shell model;
+      Parsons 1982 and Wieczorek et al. 2013 read in their abstracts. Unverified, as labelled:
+      `ρ_m` 3,300, seawater's 1,030 and the shale's 2,720 kg m⁻³ (a secondary table gives 2,700 for
+      Sclater and Christie's shale, 13.5 m of load at 2.4 km), Goff 2010's eq. 5, Harris et al.
+      2014's and Sloan et al. 2012's figures, and T8's 1.24.
 - **Deferred findings (2026-10-13 rule)** (R09.T12.a–d; recorded, not ruled).
   - _Intraplate volcanism on mobile lids_ is not modelled (Harris et al. 2014's GSFM plateaus,
     seamounts, guyots and non-spreading ridges, 10.2% of the ocean, and hotspot swells: some
@@ -7607,3 +7709,33 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     round to 3.1; the ruled 3.1 stands.
   - _Isherwood et al. 2013 does not support "no open moat"_ on Olympus Mons: its abstract speaks
     of "the present-day flexural trough" (the science check). The filled moat stays ruled.
+  - _The coarse craters stay near fresh_ (item 5b): T7.b's relief factor keeps at least 99.95% of
+    every coarse crater on the Moon, so every byte is 0. What wears old large craters is not
+    modelled: later large impacts and their ejecta (which the list's overlaps represent only where
+    craters overlap), infill, and on warm or icy crusts viscous relaxation.
+  - _The draw within a capped octave follows the production's distribution_ (as T7.b's small
+    craters), not saturation's, so the octave that straddles 100 km on the Moon holds 289 craters
+    above it in expectation, against Trask's cumulative 300.
+  - _No crater is drawn from an octave whose lower diameter reaches the body's radius_ (labelled).
+  - _Positions are uniform over directions,_ not over the spheroid's area: on Ceres (f 0.075) the
+    density per area is 1 ÷ (1 − f)², 17%, higher at the poles than at the equator; labelled.
+  - _The ruled filled moat counts its fill twice under a load_ (R09.T12's science check; commented
+    on the issue). α's uniform foundation, (`ρ_m` − `ρ_fill`) g + E `T_e` ÷ R², assumes fill
+    beneath the load as well as in the moat, which puts the load's top at h above the surrounding
+    level, and Δz = max(h − w, 0) then sinks it by w again. On the reference Mars a cap-height
+    edifice (21.8 km, base radius 368 km, filled α 337 km) deflects some 38 km under its centre and
+    stands nowhere; a consistent piecewise balance (`ρ_m` g under the load) gives 13.4 km and a
+    summit standing 8.4 km. Lean: keep the ruled α and read h as the load's height above the filled
+    level (Δz = h under the load, 0 in the moat, −w on the bulge), the uniform-infill model it
+    implies, which fits `h_max`'s calibration on Olympus Mons's present 21.9 km. The ridge's
+    approximation also doubles the deflection at the cap's size against the axisymmetric cone's
+    (38.1 against 18.2 km, the science check).
+  - _`tags.rs`'s registry docs read the old keys_ (for a docs batch, which may edit it):
+    `surface.coarse.crater` is keyed by `surface_item(k)` for octave k, not crater slot k, and
+    `surface.coarse.relief` by `surface_cell` of lattice cells at levels 1–5 and the field's, and
+    level 0's first cell, by instance, not of the coarse cells alone.
+  - _Plan 14's ice-rich `T_e` reads 651 ÷ T where the `H2O` row is 567 ÷ T,_ so plan 14's σ_volc
+    on an ice lid sits 13% above what the ruled `T_e` would gate: an ask for P14 to read the row.
+  - _No golden pins the coarse field before R09.T16,_ so no test compares its new output across
+    targets until then (the determinism audit); the pass's twice and order tests run on each
+    target alone.

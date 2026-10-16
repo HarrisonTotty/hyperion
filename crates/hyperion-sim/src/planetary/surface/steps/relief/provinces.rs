@@ -49,8 +49,11 @@
 //! own cross-section (the axisymmetric load's exact solution, in Kelvin functions, is not used).
 //! The cross-section is cut into [`PROFILE_STRIPS`] strips of uniform load, each convolved exactly
 //! through the line load's step response ([`step_response`]), so the result holds for any α,
-//! the local Airy balance at α = 0 included. A load broad against α sinks by `ρ_l` h ÷ (`ρ_m` −
-//! `ρ_fill`), its whole compensation, and a narrow one is held up.
+//! the local Airy balance at α = 0 included. A load broad against α sinks by `ρ_l` g h ÷ `k_eff`
+//! (`ρ_l` h ÷ (`ρ_m` − `ρ_fill`) where the shell term is negligible), its whole compensation, and a
+//! narrow one is held up. R09.T12's science check found the ruled model counting the fill twice
+//! under a load (the uniform foundation assumes fill beneath it, and Δz takes w off it again);
+//! built as ruled, it is recorded in the plan's deferred findings for main's ruling.
 //!
 //! **The moat is filled to the surrounding level** (ruled): w is the deflection, positive
 //! downward, under the total load, h the load's thickness above the pre-load surface, and the
@@ -90,7 +93,9 @@ use crate::planetary::surface::inputs::CoarseInputs;
 use crate::rng::ObjectKey;
 use crate::substance::thermal::{ThermalColumn, ThermalForm};
 use crate::tables::gauss_legendre::{GL64_NODES, GL64_WEIGHTS};
-use crate::units::{Kelvin, Metres, MetresPerSecondSquared, WattsPerSquareMetre};
+use crate::units::{
+    Kelvin, KilogramsPerCubicMetre, Metres, MetresPerSecondSquared, WattsPerSquareMetre,
+};
 
 /// The lithosphere's Young's modulus E, 100 GPa, as pascals (Belleguic, Lognonné and Wieczorek
 /// 2005, Table 2, as R09.T12's science check read it; Design note 7).
@@ -103,7 +108,8 @@ pub(crate) const POISSON_RATIO: f64 = 0.25;
 /// crust has a bulk density of 2,582 ± 209 kg m⁻³ (Goossens et al. 2017, GRL 44, 7686, the abstract)
 /// against the shergottites' grain density of 3,310 kg m⁻³ (Macke et al. 2011, MAPS 46, 311, the
 /// abstract), a porosity of 0.22 ± 0.06; GRAIL's lunar crust's 12% lies below (Wieczorek et al.
-/// 2013, from memory). Medium-low confidence.
+/// 2013, Science 339, 671, the abstract: "an average crustal porosity of 12% to depths of at least
+/// a few kilometers", as R09.T12's science check read it). Medium-low confidence.
 pub(crate) const FILL_POROSITY: f64 = 0.2;
 
 /// An edifice's height over its basal radius, 21.9 ÷ 370: Olympus Mons's relief of 21.9 km over
@@ -148,7 +154,9 @@ const SATURATED_COVERAGE: f64 = 0.75;
 /// palette entry's mechanics family, or `None` for a family with no rule (see the module
 /// documentation): every `T_e` is the law's held to the body's radius, since both laws are planar
 /// conductive geotherms with no internal heat, and a body whose law passes its radius never
-/// reaches the isotherm, and is rigid throughout on the loads' time scale.
+/// reaches the isotherm, and is rigid throughout on the loads' time scale. There the thin-shell
+/// flexure is an extrapolation (it wants `T_e` ≪ α ≪ R, and α nears R; labelled), which only
+/// makes the loads stand: no reference world with provinces reaches it.
 ///
 /// - `Silicate`: plan 14's law, k (870 K − `T_s`) ÷ F with k = 3.1 W m⁻¹ K⁻¹ ([`lithosphere_thickness`];
 ///   T0.b's rulings, Design note 3), zero where `T_s` ≥ 870 K. 107.7 km at Mars's 19 mW m⁻² and
@@ -243,14 +251,14 @@ pub(crate) fn conductivity_integral(column: &ThermalColumn, low: f64, high: f64)
     sum
 }
 
-/// The density beneath a lid entry `entry`'s elastic lithosphere, kg m⁻³, by its mechanics family
+/// The density beneath a lid entry `entry`'s elastic lithosphere, by its mechanics family
 /// (ruled, `decision-r09-t12-coarse.md` item 3): [`MANTLE_DENSITY`] under silicate; the entry's
 /// own grain density under water ice, its own ductile ice beneath; `None` for any other family.
 #[must_use]
-pub(crate) fn mantle_density(entry: &PaletteEntry) -> Option<f64> {
+pub(crate) fn mantle_density(entry: &PaletteEntry) -> Option<KilogramsPerCubicMetre> {
     match entry.mechanics {
-        MechanicsFamily::Silicate => Some(MANTLE_DENSITY.value()),
-        MechanicsFamily::WaterIce => Some(entry.grain_density_kg_m3),
+        MechanicsFamily::Silicate => Some(MANTLE_DENSITY),
+        MechanicsFamily::WaterIce => Some(KilogramsPerCubicMetre::new(entry.grain_density_kg_m3)),
         MechanicsFamily::Metal
         | MechanicsFamily::VolatileIce
         | MechanicsFamily::Salt
@@ -259,46 +267,48 @@ pub(crate) fn mantle_density(entry: &PaletteEntry) -> Option<f64> {
 }
 
 /// The flexural stiffness's foundation `k_eff` = (`ρ_m` − `ρ_fill`) g + E `T_e` ÷ R², N m⁻³, of an
-/// elastic lid `elastic` thick over a mantle of density `mantle` (kg m⁻³), its moat filled at
-/// density `fill`, under `gravity` on a body of radius `radius` (the module documentation).
+/// elastic lid `elastic` thick over a mantle of density `mantle`, its moat filled at density
+/// `fill`, under `gravity` on a body of radius `radius` (the module documentation).
 #[must_use]
-pub(crate) fn foundation(
+pub(crate) fn foundation_n_per_m3(
     elastic: Metres,
-    mantle: f64,
-    fill: f64,
+    mantle: KilogramsPerCubicMetre,
+    fill: KilogramsPerCubicMetre,
     gravity: MetresPerSecondSquared,
     radius: Metres,
 ) -> f64 {
     let r = radius.value();
-    (mantle - fill) * gravity.value() + YOUNGS_MODULUS_PA * elastic.value() / (r * r)
+    (mantle.value() - fill.value()) * gravity.value()
+        + YOUNGS_MODULUS_PA * elastic.value() / (r * r)
 }
 
-/// The flexural parameter α = [4D ÷ `k_eff`]^¼, metres, of an elastic lid `elastic` thick (D =
-/// E `T_e`³ ÷ 12(1 − ν²)) over a mantle of density `mantle` with fill of density `fill` (kg m⁻³)
-/// under `gravity` on a body of radius `radius` ([`foundation`]); zero where the lid has no
-/// thickness, whose loads are compensated locally.
+/// The flexural parameter α = [4D ÷ `k_eff`]^¼ of an elastic lid `elastic` thick (D = E `T_e`³ ÷
+/// 12(1 − ν²)) over a mantle of density `mantle` with fill of density `fill` under `gravity` on a
+/// body of radius `radius` ([`foundation_n_per_m3`]); zero where the lid has no thickness, whose
+/// loads are compensated locally.
 ///
 /// # Panics
 ///
-/// If `mantle` is not above `fill`.
+/// If `mantle` is not denser than `fill`, which [`run`] never passes it.
 #[must_use]
 pub(crate) fn flexural_parameter(
     elastic: Metres,
-    mantle: f64,
-    fill: f64,
+    mantle: KilogramsPerCubicMetre,
+    fill: KilogramsPerCubicMetre,
     gravity: MetresPerSecondSquared,
     radius: Metres,
 ) -> Metres {
+    let (m, f) = (mantle.value(), fill.value());
     assert!(
-        mantle - fill > 0.0,
-        "a lid's mantle, {mantle} kg m⁻³, must be denser than its fill, {fill} kg m⁻³"
+        m - f > 0.0,
+        "a lid's mantle, {m} kg m⁻³, must be denser than its fill, {f} kg m⁻³"
     );
     let t = elastic.value();
     if t <= 0.0 {
         return Metres::ZERO;
     }
     let rigidity = YOUNGS_MODULUS_PA * t * t * t / (12.0 * (1.0 - POISSON_RATIO * POISSON_RATIO));
-    let k = foundation(elastic, mantle, fill, gravity, radius);
+    let k = foundation_n_per_m3(elastic, mantle, fill, gravity, radius);
     Metres::new((4.0 * rigidity / k).sqrt().sqrt())
 }
 
@@ -335,37 +345,49 @@ pub(crate) fn step_response(u: f64, alpha: Metres) -> f64 {
     if u >= 0.0 { 1.0 - half } else { half }
 }
 
-/// An edifice: a cone of `height` over a base of `radius`, with its deflection tabulated out to
-/// `reach` (see the module documentation).
+/// An edifice's cone: its height and its basal radius.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Cone {
+    /// Its height.
+    pub(super) height: Metres,
+    /// Its basal radius.
+    pub(super) radius: Metres,
+}
+
+/// The lid an edifice bends: its flexural parameter, its foundation and its gravity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Lid {
+    /// Its flexural parameter α.
+    pub(super) alpha: Metres,
+    /// Its foundation `k_eff`, N m⁻³ ([`foundation_n_per_m3`]).
+    pub(super) foundation_n_per_m3: f64,
+    /// The body's surface gravity.
+    pub(super) gravity: MetresPerSecondSquared,
+}
+
+/// An edifice: a cone with its deflection of its lid tabulated out to its reach (see the module
+/// documentation).
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Edifice {
     /// Its height, metres.
-    pub(super) height: f64,
+    pub(super) height_m: f64,
     /// Its basal radius, metres.
-    pub(super) radius: f64,
+    pub(super) radius_m: f64,
     /// The distance out to which its deflection is followed, metres.
-    pub(super) reach: f64,
-    /// Its deflection at `TABLE_NODES` distances evenly from 0 to `reach`, metres, positive down.
+    pub(super) reach_m: f64,
+    /// Its deflection at `TABLE_NODES` distances evenly from 0 to its reach, metres, positive down.
     deflection: Vec<f64>,
 }
 
 impl Edifice {
-    /// An edifice of `height` over a base of `radius` metres, whose load of density `load`
-    /// (kg m⁻³) deflects a lid of flexural parameter `alpha` and foundation `foundation` under
-    /// `gravity`, its reach held to `limit` metres.
+    /// The edifice of `cone`, whose load of density `load` bends `lid`, its reach held to `limit`.
     #[must_use]
-    fn new(
-        height: f64,
-        radius: f64,
-        load: f64,
-        alpha: Metres,
-        foundation: f64,
-        gravity: MetresPerSecondSquared,
-        limit: f64,
-    ) -> Self {
-        let reach = num::min(radius + REACH_LENGTHS * alpha.value(), limit);
+    fn new(cone: Cone, load: KilogramsPerCubicMetre, lid: Lid, limit: Metres) -> Self {
+        let (height, radius) = (cone.height.value(), cone.radius.value());
+        let alpha = lid.alpha;
+        let reach = num::min(radius + REACH_LENGTHS * alpha.value(), limit.value());
         let strip = 2.0 * radius / count_f64(PROFILE_STRIPS);
-        let pressure_over_k = load * gravity.value() / foundation;
+        let pressure_over_k = load.value() * lid.gravity.value() / lid.foundation_n_per_m3;
         let strips: Vec<(f64, f64, f64)> = (0..PROFILE_STRIPS)
             .map(|j| {
                 let a = -radius + strip * count_f64(j);
@@ -385,18 +407,18 @@ impl Edifice {
             })
             .collect();
         Self {
-            height,
-            radius,
-            reach,
+            height_m: height,
+            radius_m: radius,
+            reach_m: reach,
             deflection,
         }
     }
 
     /// Its load's thickness at `r` metres from its centre, metres: the cone.
     #[must_use]
-    pub(super) fn load(&self, r: f64) -> f64 {
-        if r < self.radius {
-            self.height * (1.0 - r / self.radius)
+    pub(super) fn load_m(&self, r: f64) -> f64 {
+        if r < self.radius_m {
+            self.height_m * (1.0 - r / self.radius_m)
         } else {
             0.0
         }
@@ -405,11 +427,11 @@ impl Edifice {
     /// Its deflection at `r` metres from its centre, metres, positive down: the table's, linear
     /// between its nodes, and zero beyond its reach.
     #[must_use]
-    pub(super) fn deflection(&self, r: f64) -> f64 {
-        if r >= self.reach || self.reach <= 0.0 {
+    pub(super) fn deflection_m(&self, r: f64) -> f64 {
+        if r >= self.reach_m || self.reach_m <= 0.0 {
             return 0.0;
         }
-        let position = r / self.reach * count_f64(TABLE_NODES - 1);
+        let position = r / self.reach_m * count_f64(TABLE_NODES - 1);
         #[expect(
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,
@@ -435,20 +457,20 @@ pub(super) struct Provinces {
     pub(super) elastic: Metres,
     /// The flexural parameter, metres.
     pub(super) alpha: Metres,
-    /// Plan 14's constructional share `σ_volc`, metres.
-    pub(super) target: f64,
-    /// The edifice cap `h_max`, metres.
-    pub(super) cap: f64,
+    /// Plan 14's constructional share `σ_volc`.
+    pub(super) target: Metres,
+    /// The edifice cap `h_max`.
+    pub(super) cap: Metres,
     /// The cone field's coverage, its last.
     pub(super) coverage: f64,
     /// The provinces' count.
     pub(super) count: u64,
     /// The edifices' count, its last.
     pub(super) edifices: usize,
-    /// The realised relief's area-weighted s.d., metres, its last.
-    pub(super) realised: f64,
-    /// The realised relief's s.d. before the correction, metres.
-    pub(super) first: f64,
+    /// The realised relief's area-weighted s.d., its last.
+    pub(super) realised: Metres,
+    /// The realised relief's s.d. before the correction.
+    pub(super) first: Metres,
     /// Each cell's lift, metres.
     pub(super) lift: Vec<f64>,
 }
@@ -460,35 +482,51 @@ pub(super) fn run(pass: &Pass<'_>, working: &mut Working) -> Option<Provinces> {
     if !working.plates.is_empty() || inputs.volcanism() <= 0.0 {
         return None;
     }
-    let province_entry = inputs.crust_palette()[3]?;
+    let province_entry = inputs.crust_palette()[usize::from(u8::from(Crust::Province))]?;
     let province = inputs.palette().get(province_entry)?;
     let lid_entry = inputs.palette().get(inputs.lid_entry())?;
     let mantle = mantle_density(lid_entry)?;
+    let fill = KilogramsPerCubicMetre::new(province.grain_density_kg_m3 * (1.0 - FILL_POROSITY));
+    // A fill no lighter than the mantle beneath (a rocky province on an ice lid, which plan 14's
+    // crusts never pair) has no flexural rule: no provinces (labelled).
+    if mantle.value() - fill.value() <= 0.0 {
+        return None;
+    }
     let elastic = elastic_thickness(inputs)?;
     if elastic.value() <= 0.0 {
         return None;
     }
     let gravity = inputs.gravity();
-    let support = num::min(elastic.value() / SUPPORTING_LITHOSPHERE.value(), 1.0);
+    // The share and the cap are plan 14's figures, so they read plan 14's own lithosphere (Design
+    // note 3: never left to drift), where the flexure reads the ruled one.
+    let support = num::min(
+        published_thickness(lid_entry, inputs).value() / SUPPORTING_LITHOSPHERE.value(),
+        1.0,
+    );
     let strength = CONSTRUCTIONAL_REFERENCE_GRAVITY.value() / gravity.value() * support;
     let target = CONSTRUCTIONAL_RELIEF.value() * strength * inputs.volcanism();
     let cap = TALLEST_EDIFICE_RELIEF.value() * strength;
-    let fill = province.grain_density_kg_m3 * (1.0 - FILL_POROSITY);
     let alpha = flexural_parameter(elastic, mantle, fill, gravity, inputs.radius());
-    let k = foundation(elastic, mantle, fill, gravity, inputs.radius());
+    let bending = Lid {
+        alpha,
+        foundation_n_per_m3: foundation_n_per_m3(elastic, mantle, fill, gravity, inputs.radius()),
+        gravity,
+    };
     let radius_m = inputs.radius().value();
     let base = num::max(
         cap / EDIFICE_ASPECT,
         boundary_diameter(pass.level(), inputs.radius()).value(),
     );
+    let cone = Cone {
+        height: Metres::new(cap),
+        radius: Metres::new(base),
+    };
+    let load = KilogramsPerCubicMetre::new(province.grain_density_kg_m3);
     let edifice = Edifice::new(
-        cap,
-        base,
-        province.grain_density_kg_m3,
-        alpha,
-        k,
-        gravity,
-        core::f64::consts::PI * radius_m,
+        cone,
+        load,
+        bending,
+        Metres::new(core::f64::consts::PI * radius_m),
     );
     let mut count_stream = pass.seed().stream(
         SURFACE_COARSE_RELIEF,
@@ -527,15 +565,32 @@ pub(super) fn run(pass: &Pass<'_>, working: &mut Working) -> Option<Provinces> {
     Some(Provinces {
         elastic,
         alpha,
-        target,
-        cap,
+        target: Metres::new(target),
+        cap: Metres::new(cap),
         coverage,
         count: provinces,
         edifices: laid.edifices,
-        realised: laid.realised,
-        first,
+        realised: Metres::new(laid.realised),
+        first: Metres::new(first),
         lift: laid.lift,
     })
+}
+
+/// Plan 14's own lithosphere for the lid entry `lid` of the body of `inputs`, by which its
+/// constructional share and edifice cap are gated: its `lithosphere_thickness` of the crust class
+/// the lid's family stands for, `IceRich` for water ice (its 651 ÷ T) and `Silicate` for every
+/// other family the provinces reach.
+#[must_use]
+fn published_thickness(lid: &PaletteEntry, inputs: &CoarseInputs) -> Metres {
+    let crust = match lid.mechanics {
+        MechanicsFamily::WaterIce => LithosphereCrust::IceRich,
+        MechanicsFamily::Silicate
+        | MechanicsFamily::Metal
+        | MechanicsFamily::VolatileIce
+        | MechanicsFamily::Salt
+        | MechanicsFamily::Organic => LithosphereCrust::Silicate,
+    };
+    lithosphere_thickness(crust, inputs.mean_surface_temperature(), inputs.heat_flow())
 }
 
 /// A cone field laid on a pass's cells ([`lay`]).
@@ -581,7 +636,7 @@ fn uniform_direction(stream: &mut crate::rng::Stream) -> [f64; 3] {
 fn lay(pass: &Pass<'_>, edifice: &Edifice, centres: &[[f64; 3]], coverage: f64) -> Laid {
     let grid = pass.grid();
     let radius_m = pass.inputs().radius().value();
-    let footprint = core::f64::consts::PI * edifice.radius * edifice.radius;
+    let footprint = core::f64::consts::PI * edifice.radius_m * edifice.radius_m;
     let sphere = 4.0 * core::f64::consts::PI * radius_m * radius_m;
     #[expect(
         clippy::cast_possible_truncation,
@@ -593,7 +648,7 @@ fn lay(pass: &Pass<'_>, edifice: &Edifice, centres: &[[f64; 3]], coverage: f64) 
         count_f64(MAX_EDIFICES),
     ) as usize;
     let provinces = u64::try_from(centres.len()).expect("a province count fits a u64");
-    let spread = edifice.radius * (count_f64(count) / count_f64(centres.len())).sqrt() / radius_m;
+    let spread = edifice.radius_m * (count_f64(count) / count_f64(centres.len())).sqrt() / radius_m;
     let mut offsets = pass.seed().stream(
         SURFACE_COARSE_RELIEF,
         ObjectKey::surface_cell(0, 0, 0, 0, EDIFICE_INSTANCE).expect("a level-0 cell is a key"),
@@ -609,7 +664,7 @@ fn lay(pass: &Pass<'_>, edifice: &Edifice, centres: &[[f64; 3]], coverage: f64) 
         let home = centres[usize::try_from(index % provinces).expect("a province index fits")];
         let (a, b) = offsets.standard_normal_pair();
         let centre = offset_direction(home, a * spread, b * spread);
-        let reach_angle = edifice.reach / radius_m;
+        let reach_angle = edifice.reach_m / radius_m;
         let start = cell_index(
             PatchKey::containing(grid.level(), centre).expect("a coarse level is a patch level"),
         );
@@ -623,8 +678,8 @@ fn lay(pass: &Pass<'_>, edifice: &Edifice, centres: &[[f64; 3]], coverage: f64) 
             let chord = (gap[0] * gap[0] + gap[1] * gap[1] + gap[2] * gap[2]).sqrt();
             let angle = 2.0 * math::asin(num::min(0.5 * chord, 1.0));
             let r = angle * radius_m;
-            load[slot(c)] += edifice.load(r);
-            deflection[slot(c)] += edifice.deflection(r);
+            load[slot(c)] += edifice.load_m(r);
+            deflection[slot(c)] += edifice.deflection_m(r);
             // A cell two links beyond the reach may still neighbour one within it.
             if angle > reach_angle + 2.0 * grid.arc(c, grid.edge_neighbours(c)[0]).value() {
                 continue;
@@ -640,7 +695,7 @@ fn lay(pass: &Pass<'_>, edifice: &Edifice, centres: &[[f64; 3]], coverage: f64) 
     let lift: Vec<f64> = load
         .iter()
         .zip(&deflection)
-        .map(|(&h, &w)| num::max(num::min(h, edifice.height) - w, 0.0))
+        .map(|(&h, &w)| num::max(num::min(h, edifice.height_m) - w, 0.0))
         .collect();
     let (_, realised) = noise::mean_and_spread(&lift, grid.solid_angles_sr());
     Laid {

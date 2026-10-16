@@ -29,7 +29,9 @@ use crate::rng::ObjectKey;
 /// The kernel's reach as a chord on the unit sphere, over the lattice's 2⁻ℓ: 1.8, about twice the
 /// level's smallest cell edge (0.947 × 2⁻ℓ radians, Design note 4), so that every centre a kernel
 /// reaches lies within [`RINGS`] rings of the point's own lattice cell, and at least one lies
-/// within it (a cell's circumradius is under 0.75 × 2⁻ℓ).
+/// within it: the nearest lattice centre to any point is nearer than the kernel's chord at every
+/// level, the coarse levels' wide cells included (level 1's circumradius is about 0.53 rad against a
+/// reach of 0.9).
 const KERNEL_REACH: f64 = 1.8;
 
 /// The rings of lattice cells about the one holding a point that its kernel can reach: 2.
@@ -157,7 +159,7 @@ fn solve_four(mut rows: [[f64; 5]; 4]) -> [f64; 4] {
         rows.swap(k, pivot);
         let p = rows[k][k];
         assert!(
-            p != 0.0,
+            p.abs() > 0.0,
             "the degree-one fit's normal equations are regular"
         );
         let pivot_row = rows[k];
