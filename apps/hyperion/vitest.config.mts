@@ -45,10 +45,16 @@ export default defineConfig({
     restoreMocks: true,
     unstubGlobals: true,
     // A display test drives the whole console through `user-event`, and the heaviest of them (the
-    // local chart's, and the end-to-end script of P05.T12.a) take about 2 s each with the suite's
-    // workers on eight cores. Vitest's default of 5 s left them failing whenever the machine was
-    // also building something else, which is a flake and not a finding, so the limit is what a
-    // test that is genuinely stuck needs to cross.
+    // local chart's, and the end-to-end script of P05.T12.a) take up to 1.1 s and 1.2 s each in
+    // the suite's run at 4 workers on eight threads, and 2.1 s with a second run beside it
+    // (2026-10-15). Vitest's default of 5 s left them failing whenever the machine was also
+    // building something else, which is a flake and not a finding, so the limit is what a test
+    // that is genuinely stuck needs to cross. A loaded desktop has stalled one of them 70 times
+    // over, so the tests a load can carry past this, and the hooks it can carry past vitest's 10 s
+    // hook limit, set their own. Each such limit's comment gives its worst time in that run (M2)
+    // and with the second beside it (M3), the desktop's, and the margin: 100 times M2, or 10 times
+    // for CPU-bound work, which the desktop's loads did not stall, and over twice the desktop's,
+    // rounded up to 30, 60, 120 or 300 s.
     testTimeout: 15_000,
     // Workers are reused across files instead of one being spawned per file, which vitest costed
     // at about 2.9 s of spawn and environment each. With the split above, the suite goes from

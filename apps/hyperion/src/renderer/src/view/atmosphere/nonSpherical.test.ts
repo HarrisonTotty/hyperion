@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { memoised } from "../../test/memo";
 import { henyeyGreenstein } from "./aerosol";
 import enstatitePhase from "./fixtures/enstatite-sample-phase.json" with { type: "json" };
 import ga from "./fixtures/granada-amsterdam.json" with { type: "json" };
@@ -337,7 +338,7 @@ describe("Mars dust (science-r08-nonspherical.md §2.1 (iii))", () => {
     for (const miss of lobeMisses(0.8974)) {
       expect(Math.abs(miss)).toBeLessThan(0.15);
     }
-  });
+  }, 60_000); // M2 worst 3.7 s, M3 6.3 s, desktop over 15 s (2026-10-15): 10× M2, CPU-bound
 
   it("is a bound that the equal-V/A size, 1.2247 µm, fails at both wavelengths", () => {
     for (const miss of lobeMisses(1.2247)) {
@@ -591,7 +592,7 @@ describe("the other ices, on water ice's table as named analogues", () => {
     );
     const water = nonSphericalModeOptics({ material: "H2O", form: { phase: "solid" }, sizes }, 550);
     expect(optics.singleScatteringAlbedo).toBeLessThan(water.singleScatteringAlbedo);
-  });
+  }, 60_000); // M2 worst 1.7 s, M3 2.4 s, desktop over 15 s (2026-10-15): over 2× desktop
 
   it("draws CH₄ and CO₂ ices as analogues too", () => {
     for (const material of ["CH4", "CO2"]) {
@@ -785,6 +786,16 @@ function particlesOfKey(material: string, index?: ComplexIndex): NonSphericalPar
   return index === undefined ? own : { ...own, index: () => index };
 }
 
+/**
+ * An ice's optics at 550 nm in a gamma mode of r_eff 10 µm: the crystals' test reads every ice's,
+ * and the notes' tests O₂'s and argon's again, each a Mie integral over the mode at the ice's own
+ * index.
+ */
+const iceOptics = memoised(
+  (key: string) => opticsOfParticles(particlesOfKey(key), gamma(10), 550),
+  (key) => key,
+);
+
 describe("every non-spherical file's phase basis (R08.T5.d)", () => {
   it("gives every non-spherical mineral its own reduced TAMUdust2020 table over 380–780 nm", () => {
     const minerals = MATERIAL_FILES.filter((file) => file.shape === "nonSphericalMineral");
@@ -813,14 +824,14 @@ describe("every non-spherical file's phase basis (R08.T5.d)", () => {
     const crystals = MATERIAL_FILES.filter((file) => file.shape === "crystal");
     expect(crystals.filter((file) => !isIce(file.key)).map((file) => file.key)).toEqual([]);
     for (const file of crystals) {
-      const optics = opticsOfParticles(particlesOfKey(file.key), gamma(10), 550);
+      const optics = iceOptics(file.key);
       expect([file.key, optics.phaseModel, optics.phaseBasis]).toEqual([
         file.key,
         "yang2013",
         file.key === "H2O" ? "model" : "analogue",
       ]);
     }
-  });
+  }, 300_000); // M2 worst 13.2 s, M3 18.8 s, desktop over 15 s (2026-10-15): 10× M2, CPU-bound
 
   it("holds O2 and Ar among the ices (decision-r08-t5d ruling 3)", () => {
     for (const key of ["O2", "Ar", "H2S", "N2", "CO"]) {
@@ -873,14 +884,14 @@ describe("the ices' expected g bias, by van Diedenhoven et al. 2014's eq. (16)",
   });
 
   it("names O2 ice's analogue and its expected g, signed, in its note", () => {
-    const optics = opticsOfParticles(particlesOfKey("O2"), gamma(10), 550);
+    const optics = iceOptics("O2");
     expect(optics.phaseNote).toBe(
       "O2 ice drawn on H2O ice's roughened 8-column table, a named analogue; its g expected +0.024 from H2O ice's (van Diedenhoven et al. 2014)",
     );
   });
 
   it("names argon, an atomic solid, as solid Ar in its note", () => {
-    const optics = opticsOfParticles(particlesOfKey("Ar"), gamma(10), 550);
+    const optics = iceOptics("Ar");
     expect(optics.phaseNote).toBe(
       "solid Ar drawn on H2O ice's roughened 8-column table, a named analogue; its g expected +0.028 from H2O ice's (van Diedenhoven et al. 2014)",
     );
@@ -958,7 +969,7 @@ describe("the kernel-edge rule (decision-r08-t5d ruling 2)", () => {
     expect(optics.phaseNote).toMatch(
       /^MnS: n 3\.400 above the longwave kernel's 3\.2; the k-floor rule exceeded \(the floor's single-scattering albedo 0\.\d{4} < 0\.99\) at n 3\.400 above 1\.7; a Henyey–Greenstein /u,
     );
-  });
+  }, 60_000); // M2 worst 2.0 s, M3 2.9 s, desktop over 15 s (2026-10-15): over 2× desktop
 
   it("keeps the edge's note alone for a small grain the floor rule keeps", () => {
     const optics = opticsOfParticles(particlesOfKey("MnS", { n: 3.4, k: 1e-5 }), tiny, 600);
