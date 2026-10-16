@@ -2238,14 +2238,16 @@ capped at 200 Myr; a plate with no divergent boundary has 200 Myr and 23 mm a⁻
   lithologies from plan 14's `crust`: `Oceanic` the secondary crust's entry, `Continental` the
   tertiary's) about sea level and GDH1's age–depth law from the distance to divergent boundaries.
   Tests: the reference Earth's hypsometry, binned as Earth2014 was (area-weighted 250 m bins, the
-  TBI layer at 5′), is bimodal with a land mode within 300 m of +125 m, an ocean mode within 600 m
-  of −4,375 m (the ocean peak is flat from −5,300 to −4,300 m) and an oceanic mean within 300 m of
-  −4,281 m (Hirt and Rexer 2015's Earth2014, recomputed 2026-09-29); a ridge's depth follows GDH1 at
-  5, 20 and 100 Myr to 1 m. The sea floor's roughness inputs (`decision-r09-t5.md` item 5): H₀ from
-  the source half-rate, the pelagic drape from the age and latitude, the ponded wedge from the
-  plate's passive margins over its own oceanic cells, quantised into `seafloor`. Tests: H₀ within
-  30% of Goff et al. 2004's Table 2 at full rates of 28, 40, 75 (axial high), 110 and
-  160 mm a⁻¹; S_p is 468 m at 81 Myr on the equator; the wedge never crosses a plate boundary; on
+  TBI layer at 5′), is bimodal with a land mode within 300 m of +125 m, an ocean modal bin among
+  the centres −5,125 to −4,125 m (Earth2014's bins within 10% of its −4,375 m peak) and a mean
+  below −2 km from −4,731 to −3,981 m (Earth2014's −4,281 m, +300 m and −450 m, the deep side
+  widened for the intraplate volcanism no task builds; `decision-r09-t12-coarse.md` item 1); the
+  unloaded basement is GDH1's at 5, 20 and 100 Myr to 1 m. The sea floor's roughness inputs
+  (`decision-r09-t5.md` item 5): H₀ from the source half-rate, the pelagic drape from the age and
+  latitude, the ponded wedge from the plate's passive margins over its own oceanic cells, quantised
+  into `seafloor`. Tests: H₀ within 30% of the mean of Goff et al. 2004's Table 2 entries at full
+  rates of 28, 40, 75 (the axial high alone), 110 and 160 mm a⁻¹ (`decision-r09-t12-coarse.md`
+  item 5a); S_p is 468 m at 81 Myr on the equator; the wedge never crosses a plate boundary; on
   the reference Earth, oceanic cells whose style amplitude is at most 0.2 cover 25–40% of the
   oceanic crust deeper than 3 km, and the mean of S_p + S_t over oceanic crust farther than 200 km
   from a passive margin is 250–600 m (GlobSed's 404 m).
@@ -7315,3 +7317,110 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     T17's as-built `SurfaceJobError::Inputs(SurfaceInputsError)`. _Corrected 2026-10-16 by
     docs-batch-20: Provides, the `InputsSource` paragraph and T17's record now read R09.T10.f's
     forms._
+- **Deviations in T12.a, as built** (2026-10-16; lane `lane/40-r09-t12-coarse-elevation`, on
+  `origin/rendering-and-planets` at `f27d0248`; rulings `decision-r09-t12-coarse.md`, items 1 and 5;
+  no bump).
+  - _Files and items._ `steps/relief.rs` (the step, `CONTINENTAL_MEAN` public, the skew and the
+    interim figures), its children `relief/seafloor.rs` (the sea floor's laws), `relief/noise.rs`
+    (the coarse landform noise) and `relief/tests.rs`. `CellState` gains
+    `seafloor_age: Option<Seconds>`, `τ_ss` on oceanic crust; `SeafloorOrigin::age`'s
+    documentation now calls it the kinematic age. R09.T11's `reach` (its multi-source shortest
+    path) is generic over a region label and `pub(super)`, as are its `Reach`, `slot` and
+    `cell_of`: T11 calls it with the plate
+    labels as before, so its arithmetic and its tests are unchanged, and T12.a calls it over each
+    plate's oceanic cells. `crates/hyperion-sim/clippy.toml` admits `GlobSed`.
+  - _The old floor (ruled, item 1)._ As ruled: κ = `d_r` ÷ `u_h` uncapped as T11 divides them,
+    sorted by (κ, cell), blocks of equal κ, the ridgeless cells the last block; each block's mean
+    age under the triangular law; `t_m` = 192.9 Myr × (`a_o` ÷ 0.595) × (Ω⊕ ÷ Ω) through T11's
+    `angular_speed_scale_rad_per_s` and `EARTH_ANGULAR_SPEED_RAD_PER_S`, at most the contract's
+    system age (`seafloor::oldest_floor_age`); 0.595 is one less plan 14's
+    `EARTH_CONTINENTAL_FRACTION`. The drape, H and the plains read `τ_ss`; H₀ reads `u_h`. T11's
+    `older_sides` keeps the kinematic τ.
+  - _The depth._ z = −`d_GDH1`(`τ_ss`) + L(S) + `n_o`, S = `S_p` + `S_t`, as ruled; `ρ_m` is a
+    named `MANTLE_DENSITY` (3,300 kg m⁻³) in `relief/seafloor.rs`, the sediment's constants Sclater
+    and Christie 1980's shale (`SEDIMENT_*`), seawater 1,030 kg m⁻³. The noise `n_o` is the
+    landform noise made zero-mean and unit-RMS over the oceanic cells, times √max(0, (930 m)² −
+    s²), 930 m plan 14's `OCEANIC_WIDTH`. The latitude the drape reads is the cell centre's
+    geodetic one, from the figure's normal.
+  - _The continental population (a lean, technical)._ Plan 14's `CONTINENTAL_WIDTH` (1.08 km)
+    about `CONTINENTAL_MEAN` (+405 m), not a Gaussian but a shifted log-normal of shape
+    `CONTINENTAL_SKEW` = 0.1784, whose mode at that mean and width is Earth2014's +125 m (125.06 m):
+    a Gaussian of mean +405 m puts its modal 250 m bin at 375 or 625 m with nearly even odds, the
+    second failing the land-mode test. The realised population is made exactly that mean and width
+    over the continental cells (before T12.b's belts).
+  - _A stagnant lid's population (a lean; commented on the issue)._ Every regime T11 leaves on one
+    lid (and a mobile lid it cannot lay out) takes one Gaussian population about the datum, of plan
+    14's `STAGNANT_LID_RELIEF` (0.9 km), from the same noise: Design note 3's structural share on
+    such a lid, which no other step realises (the synthesis's share below the cell is about 60 m).
+    It writes only `Lid`, so an undifferentiated body names no entry it lacks.
+  - _The noise and its draw layout._ `surface.coarse.relief`, keyed
+    `surface_cell(face, ℓ, i, j, 0)` of each lattice cell at levels ℓ = 2 to the field's, one
+    standard normal (two words) each;
+    a cell's octave is the Shepard mean of the lattice values within the chord 1.8 × 2⁻ℓ of its
+    centre, under (1 − r² ÷ h²)³, over the lattice cells within two rings of its own, in ascending
+    lattice index; each octave zero-mean and unit-RMS, weighted 2^(−(ℓ − 2) ÷ 2) (a per-degree
+    variance ∝ l⁻², the silicate β₁ = 2.0 carried above the coarse cell; an illustration), and the
+    sum made zero-mean and unit-RMS. Instance 0 is the landform noise; T12.b and T12.c take others.
+  - _The e-folding length, calibrated._ 200 km, not the lean's 350 km: on the reference Earth it
+    gives the plains (style amplitude ≤ 0.2) 32.8% of the oceanic crust below 3 km (Harris et al.
+    2014's 32.9% of the abyss) and 370 m of `S_p` + `S_t` beyond 200 km of a margin (GlobSed's
+    404 m); 225 km gives 36.3% and 399 m, 350 km 50.6% and 548 m, 500 km 63.1% and 718 m
+    (`calibrate_the_ponded_sediment_s_e_folding_length`, by hand). 200 km is the low end of
+    ordinary margins' 200–500 km.
+  - _Goff's Table 2 (ruled, item 5a)._ The test holds H₀ within 30% of the mean of the entries at
+    each full rate, every entry listed in its comment: 222.8 m at 28 mm a⁻¹ (235.8 m, −5.5%),
+    191.2 at 40 (170.45, +12.2%), 62.4 at 75 (61.7, +1.1%), 55.1 at 110 (56.1, −1.8%) and 55.0 at
+    160 (58.7, −6.3%). Untested: 207.3 m at 35 mm a⁻¹ and 116.0 m at 55 (PAR fast, 90 m, +28.9%).
+  - _`09`'s T12.a text edited_ (§2.3.5): the hypsometry clause (lines 2240–2245: the ocean's modal
+    bin among the centres −5,125 to −4,125 m and the mean below −2 km from −4,731 to −3,981 m, in
+    place of "an ocean mode within 600 m of −4,375 m" and "an oceanic mean within 300 m of −4,281
+    m"), the ridge clause ("the unloaded basement is GDH1's at 5, 20 and 100 Myr to 1 m") and the
+    Goff clause ("of the mean of … Table 2 entries … the axial high alone"), each citing the ruling.
+  - _Measured on the reference Earth_ (level 8, at the step's level, before T12.b and T12.e):
+    `a_o` 0.5950 and `t_m` 192.9 Myr; `τ_ss`'s area mean 64.30 Myr, `t_m` ÷ 3 to 10⁻⁹ (Earth's 64.3),
+    T11's kinematic mean 110.2 Myr with 27.6% at the cap; `τ_ss` older than 120, 150 and 180 Myr
+    14.28%, 4.95% and 0.00% (Müller's 15.2%, 4.7% and 0.22%: the oldest blocks, the ridgeless
+    cells among them, take one mean age each, so the tail past about 160 Myr is lost). The
+    hypsometry: land mode +125 m; ocean modal bin −4,625 m; below −2 km mean −4,530 m, s.d. 930 m,
+    quartiles −5,177, −4,572 and −3,928 m; the oceanic crust's mean −4,524 m and s.d. 942 m. A
+    test-only probe on T11's kinematic ages (the same noise): land +125 m, ocean modal bin
+    −4,875 m, mean −4,738 m, s.d. 908 m, quartiles −5,350, −4,804 and −4,211 m. Mean S over the
+    oceanic crust 593 m and mean load L 362 m; the floor's own s.d. 716 m, so `n_o`'s RMS is
+    593 m (about 0.60 km). T11's oceanic ridge production `P_o` = Σ (π ÷ 4) s `u_h` 0.0674 m² s⁻¹
+    against the law's 2 `A_o` ÷ `t_m` 0.0997, a ratio of 0.676 (the ruling estimated 0.55–0.60);
+    divergent boundaries 47,876 km on oceanic crust and 29,853 km on continental (38% rifts).
+  - _Interim figures, until T12.e._ No sea is placed: every cell is dry (its water surface its
+    ground), the sea level is the lowest elevation, and the realised `σ_h` and relief are the
+    cells' own (on the reference Earth after T12.a 2,618 m, 12,542 m and −7,192 m). T12.e replaces
+    them with the reconstructed field's, places the sea at plan 14's ocean fraction, fills it and
+    names the liquid, and anchors `Working::spectrum`.
+  - _Tests._ In `relief::tests`: GDH1 to a metre at 5, 20 and 100 Myr; L ÷ S at 100 m and 2.4 km to
+    10⁻³; H₀ against Goff's means; `S_p` 468 m at 81 Myr; the wedge's fall and end; `t_m` (192.9
+    Myr, ×4 at half the heat flow, the system's age without it); `τ_ss`'s mean `t_m` ÷ 3 to 10⁻⁹,
+    monotone in κ, equal for equal keys, the ridgeless oldest; the hypsometry; the plains' share
+    and the far sediment; the wedge crossing no boundary (on the reference Earth and on hand-set
+    plates); the populations' widths and the skew's mode; a stagnant lid's population and the
+    interim figures; the same seed twice; the noise's unit field. Two measurements and the
+    calibration are `#[ignore]`d, run by hand. `surface/mod.rs`'s
+    `a_no_op_pass_yields_a_valid_field_twice_with_identical_bytes` is renamed
+    `the_pass_yields_a_valid_field_twice_with_identical_bytes` and loses its all-zero elevation.
+- **Deferred findings (2026-10-13 rule)** (R09.T12.a–d; recorded, not ruled).
+  - _Intraplate volcanism on mobile lids_ is not modelled (Harris et al. 2014's GSFM plateaus,
+    seamounts, guyots and non-spreading ridges, 10.2% of the ocean, and hotspot swells: some
+    250–300 m of Earth2014's ocean mean; Design note 3 books σ_volc about 0.29 km on Earth, which no
+    task realises). The deep mean's band returns to ±300 m when it is built.
+  - _T11's continents ignore the plate boundaries,_ so 38% of the reference Earth's divergent
+    length is continental rift and its oceanic ridges make 0.676 of the law's floor (the ruling's
+    estimate 0.55–0.60); the remap compresses near-ridge ages by that ratio, so ridge flanks look
+    faster-spreading. For T11's re-validation, with its "Rifts age floor".
+  - _T11's subduction polarity_ (`older_sides`) reads the kinematic τ.
+  - _The triangular area–age shape is Earth's;_ convection models vary it with the continents'
+    configuration (Coltice et al. 2012, from memory). Its oldest blocks take one mean age each, so
+    the tail past about 160 Myr is lost on the reference Earth (0.00% older than 180 Myr against
+    Müller's 0.22%).
+  - _GDH1 is Earth's water-loaded law:_ a dry floor, or one under another liquid, would subside by
+    (`ρ_m` − `ρ_l`) ÷ (`ρ_m` − `ρ_w`) of it, not modelled.
+  - _Goff's 55 mm a⁻¹ entry_ (PAR fast, 90 m): the fit gives 116.0 m, +28.9%.
+  - _The e-folding length sits at the low end_ of ordinary margins' 200–500 km (200 km): T11's
+    passive margins are many and its continents ragged, so at 350 km the wedge buries half the deep
+    floor. Deep-sea fans are left to T14.d.

@@ -29,7 +29,8 @@
 //! As built by R09.T10, every step was a no-op, so the pass yielded its initial state: a smooth
 //! sphere at the datum ([`Working::initial`]). R09.T11 filled [`plates`]: on a mobile lid it writes
 //! each cell's plate, crust and nearest boundary, and each oceanic cell's
-//! [`SeafloorOrigin`]; the other steps are still no-ops.
+//! [`SeafloorOrigin`]. R09.T12.a began [`relief`]'s coarse elevation: the crust's populations and
+//! the sea floor, before T12.e's `σ_h` and sea level. The other steps are still no-ops.
 
 pub mod classes;
 pub mod climate;
@@ -188,6 +189,11 @@ pub struct CellState {
     /// read (R09.T12.a; `decision-r09-t5.md` item 5); `None` off oceanic crust. None of it
     /// travels: the field carries only what R09.T12.a makes of it.
     pub seafloor_origin: Option<SeafloorOrigin>,
+    /// The steady-state age `τ_ss` of the cell's sea floor, on oceanic crust, `None` elsewhere:
+    /// R09.T12.a's rank of the kinematic age ([`SeafloorOrigin::age`]) by area onto the
+    /// triangular area–age distribution, which GDH1, the pelagic drape and the plains read
+    /// (`decision-r09-t12-coarse.md` item 1). It does not travel.
+    pub seafloor_age: Option<Seconds>,
 }
 
 /// Where an oceanic cell's floor formed (R09.T11; `decision-r09-t5.md` item 5): the ridge of its
@@ -206,9 +212,9 @@ pub struct SeafloorOrigin {
     /// (symmetric spreading), which every cell the source reaches inherits; the mean half-rate,
     /// [`MEAN_HALF_RATE`](plates::MEAN_HALF_RATE), without a ridge.
     pub half_rate: MetresPerSecond,
-    /// τ, the floor's age, `d_r` ÷ `u_h` capped at [`OLDEST_FLOOR`](plates::OLDEST_FLOOR)
-    /// (200 Myr), where GDH1 is within 10 m of its asymptote (Design note 7); the cap
-    /// without a ridge.
+    /// τ, the kinematic age, `d_r` ÷ `u_h` capped at [`OLDEST_FLOOR`](plates::OLDEST_FLOOR)
+    /// (200 Myr), which R09.T12.a ranks into [`CellState::seafloor_age`]; the cap without a
+    /// ridge.
     pub age: Seconds,
 }
 
@@ -316,6 +322,7 @@ impl Working {
             hill_relief: None,
             ponded_sediment: Metres::ZERO,
             seafloor_origin: None,
+            seafloor_age: None,
         };
         let climate = ClimateState {
             sea_level_temperature: pass.inputs().mean_surface_temperature(),
