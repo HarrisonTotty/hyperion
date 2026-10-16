@@ -9,8 +9,9 @@
 //
 // The angles go through `preciseAtan2`, never WGSL's `atan2`, whose 4,096 ULP is about 1 mrad near
 // ±π, some five of the map's steps between knots 10° apart, nor `asin` or `acos` (6.8 × 10⁻⁵
-// absolute); R07's `sphere_irradiance`, which the horizon enters, keeps the built-ins (R10's Risks,
-// "Deferred findings (R10.T8.b)"; R08 Design note 18; decision-r10-t8a §2).
+// absolute); R07's `sphere_irradiance`, which the horizon enters, kept the built-ins (R10's Risks,
+// "Deferred findings (R10.T8.b)"; R08 Design note 18; decision-r10-t8a §2) until R07.T6.d gave it
+// the precise forms too.
 
 // Every slot's horizon map, HORIZON_TEXELS `vec4u` a slot (`slotLayout.ts`' `horizon-map`, the
 // bake's layout, `hyperion_surface::bake::horizon`): the near field's 65 × 65 vertices row by row,
@@ -196,8 +197,10 @@ fn horizon_blended(slot : u32, parent : vec2u, p : vec2f, knots : HorizonKnots, 
 }
 
 // `litFraction.ts`' MAX_STAR_DISTANCE_RADII: a star's distance over its radius is taken at most
-// 10¹⁸ (ρ of 10⁻¹⁸ rad), where R07's term is a hard step and H² stays finite in f32 (10³⁶); a point
-// star, H infinite, would make R07's term ∞ × 0, NaN (R10's Risks, "Deviations in T8.b, as built").
+// 10¹⁸ (ρ of 10⁻¹⁸ rad), where R07's term is a hard step (R10's Risks, "Deviations in T8.b, as
+// built"). R07's term formed H² until R07.T6.d, ∞ × 0 for a point star; it forms none now, and the
+// cap keeps its 1 ÷ H finite and inside WGSL's division bound, a point star's d ÷ 0 being no value
+// WGSL defines (its finite-math assumption, §15.7.2).
 const HORIZON_MAX_STAR_DISTANCE_RADII : f32 = 1e18;
 
 // H for R07's `sphere_irradiance`: the star's `distance` over its `radius`, in one unit, at most

@@ -31,6 +31,7 @@ import {
 import type { AtmosphereMedium } from "./medium";
 import { marchPieces, marchPiecesSteps, marchSplit } from "./marchSteps";
 import { MULTI_SCATTERING_SIZE, TRANSMITTANCE_SIZE } from "./tables";
+import { preciseAtan, preciseAtan2, preciseSinCos, TRIG_HALF_PI } from "../../test/preciseTrigF32";
 
 const f = Math.fround;
 
@@ -97,67 +98,6 @@ function crossV(a: Vec3, b: Vec3): Vec3 {
 
 function lengthV(v: Vec3): number {
   return f(Math.sqrt(dotV(v, v)));
-}
-
-// --- view/shaders/preciseTrig.wgsl --------------------------------------------------------------
-
-// The WGSL's literals, 3.14159265358979 and 1.57079632679490, round to the same f32 as π and π/2.
-const TRIG_PI = f(Math.PI);
-const TRIG_HALF_PI = f(Math.PI / 2);
-const SIN_SERIES = [
-  -1 / 6,
-  1 / 120,
-  -1 / 5040,
-  1 / 362_880,
-  -1 / 39_916_800,
-  1 / 6_227_020_800,
-  -1 / 1_307_674_368_000,
-].map(f);
-const COS_SERIES = [
-  -1 / 2,
-  1 / 24,
-  -1 / 720,
-  1 / 40_320,
-  -1 / 3_628_800,
-  1 / 479_001_600,
-  -1 / 87_178_291_200,
-].map(f);
-const ATAN_SERIES = [-1 / 3, 1 / 5, -1 / 7, 1 / 9, -1 / 11, 1 / 13, -1 / 15].map(f);
-
-/** 1 + x2 (c₁ + x2 (c₂ + … + x2 c₇)), innermost first, as the WGSL nests it. */
-function series(x2: number, coefficients: readonly number[]): number {
-  let acc = f(x2 * (coefficients.at(-1) ?? Number.NaN));
-  for (let k = coefficients.length - 2; k >= 0; k -= 1) {
-    acc = f(x2 * f((coefficients[k] ?? Number.NaN) + acc));
-  }
-  return f(1 + acc);
-}
-
-/** `preciseSinCos`: (sin θ, cos θ). */
-function preciseSinCos(theta: number): readonly [number, number] {
-  const y = f(0.5 * theta);
-  const y2 = f(y * y);
-  const s = f(y * series(y2, SIN_SERIES));
-  const c = series(y2, COS_SERIES);
-  return [f(f(2 * s) * c), f(f(c - s) * f(c + s))];
-}
-
-function preciseAtanUnit(x: number): number {
-  let t = f(x / f(1 + f(Math.sqrt(f(1 + f(x * x))))));
-  t = f(t / f(1 + f(Math.sqrt(f(1 + f(t * t))))));
-  const t2 = f(t * t);
-  return f(4 * f(t * series(t2, ATAN_SERIES)));
-}
-
-function preciseAtan(x: number): number {
-  return x > 1 ? f(TRIG_HALF_PI - preciseAtanUnit(f(1 / x))) : preciseAtanUnit(x);
-}
-
-function preciseAtan2(y: number, x: number): number {
-  const ax = Math.abs(x);
-  const a = preciseAtanUnit(f(Math.min(y, ax) / Math.max(y, ax)));
-  const b = y > ax ? f(TRIG_HALF_PI - a) : a;
-  return x < 0 ? f(TRIG_PI - b) : b;
 }
 
 // --- common.wgsl: the shell from a height -----------------------------------------------------

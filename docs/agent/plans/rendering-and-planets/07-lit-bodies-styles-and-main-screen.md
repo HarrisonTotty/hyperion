@@ -882,7 +882,10 @@ and `--port`.
    "sampled at a handful of points" is gone. It now says "Visibility sampled at a handful of points
    across the disc would be 13–26% wrong for small occluders at four to eight samples, and would
    band. Instead a lit point's visibility is the product of two closed forms", Howell's horizon
-   and the annuli "each eclipsed by an exact circle–circle overlap, which never bands"._
+   and the annuli "each eclipsed by an exact circle–circle overlap, which never bands"._ _In
+   `f32` the horizon term's partial branch is the identity z + H² (arctan z − z) of Howell's
+   H² arctan z − X sin φ √(1 − Y²), whose two terms, each about H ÷ π of face-on, cancel to under
+   1 ÷ H of it, and its WGSL calls none of WGSL's trigonometry (R07.T6.d; decision-r10-t8b §2)._
 7. **Planetshine is included** (researched 2026-09-29; figures computed from Design note 5's
    albedos). The brainstorm did not mention it; the realism ruling decides. _Resolved 2026-10-09
    (the brainstorm sign-off, `signoff-brainstorm.md`, row 624): the brainstorm now says
@@ -1415,6 +1418,25 @@ run src/renderer/src/view/lighting`.
   the stubs, which take R08.T9.b's full signatures (latitude and sun azimuth included, R08 Design
   note 17) and ignore them, return 1, 1 and 0 in the smoke harness. Acceptance: `pnpm test`,
   `just test-render`.
+- **R07.T6.d The horizon term's arithmetic in `f32`** (a correction to T6.c; decision-r10-t8b §2,
+  decision-r08-f32 §9; main's deferred list, "R07's `litBody.wgsl` trigonometry"). It follows
+  T6.c and R10.T8.b, and lands before the owner's UHD 620 sunset (R10.T8.b's by-hand run).
+  `litBody.wgsl`'s horizon term calls none of WGSL's `sin`, `cos`, `tan`, `asin`, `acos` or
+  `atan`, and takes `preciseTrig.wgsl`'s forms (R08 Design note 18). Howell's partial branch,
+  whose terms h² atan z and x sin φ √(1 − y²) are each about H ÷ π of face-on and cancel to under
+  1 ÷ H of it, becomes the identity z + h² (atan z − z), since x sin φ √(1 − y²) = x² z =
+  (h² − 1) z, with atan z − z by its series, accurate for every z the branch reaches. The η = 0
+  return is clamped at 0. The term is finite at ρ = 0, a star at infinite distance, where it was
+  ∞ × 0. The angle from the normal that `bodyDisc.wgsl` and `planetshine_irradiance` pass is
+  `preciseAtan2` of the cross and dot products. The TypeScript twin takes the same form. Tests: in
+  an `f32` emulation against the twin, with Mesa's lowerings (`nir_atan`'s −2.07 × 10⁻⁵) and at
+  WGSL's bounds, across the band at H = 3, 11.5 and 215, the smooth terminator never goes negative
+  sunward of 90°, a flat element's error under 1° and 5° horizons is far below the 8% and 1.6% of
+  its light that Mesa gave the old form, and nothing changes beyond `f32` noise where the old form
+  was accurate; the rewrite meets Howell's form as written, in `f64`. Acceptance: `pnpm --filter
+hyperion exec vitest run src/renderer/src/view/lighting src/renderer/src/view/terrain/shadows`,
+  `just test-render`. _As built (2026-10-16, lane r07-trig): see Risks, "Deviations in T6.d, as
+  built"._
 
 #### R07.T7 The photorealistic style
 
@@ -3675,11 +3697,161 @@ count }`, at most four), not c and α.
 altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` (1) and
     `atmosphere_sky_irradiance(altitude_m, mu_sun, latitude_rad) -> vec3f` (0), with R08.T9.b's
     and R11's full signatures. The lit point's lighting, which calls them, is T8.a's.
+    _Since R07.T6.d `howell_irradiance` (H² F, no H² formed) and `atan_tail` replace
+    `howell_view_factor`, and the horizon term calls no WGSL trigonometry ("Deviations in T6.d,
+    as built")._
   - **The probe.** `LIT_BODY_PROBE` gains a second case array, `LightingCase` (kind, annuli, six
     values and the annuli's edges and fluxes, 64 bytes), so one kernel holds the whole library (an `auto` layout binds only what the entry
     point uses, and the engine binds every declared binding). The smoke harness checks five
     horizon factors and five eclipse terms against their TypeScript twins to 2 × 10⁻⁴ absolute
     (WGSL's `f32` `acos` and `atan` are allowed some 10⁻⁴), and the stubs' 1, 1 and 0 exactly.
+    _Since R07.T6.d the horizon term and planetshine are held to 2 × 10⁻⁶, at eleven and four
+    points ("Deviations in T6.d, as built")._
+- **Deviations in T6.d, as built** (2026-10-16; lane r07-trig, on `rendering-and-planets` at
+  969d40ea). `sphere_irradiance(h, phi, horizon)` and `sphereIrradianceFactor(h, phiRad,
+horizonRad)` keep their signatures and their model; only the arithmetic changes. No server or
+  generator change.
+  - **The form.** In the band, |c| < 1 for c = H cos φ, with q = 1 ÷ H = sin ρ and
+    u = √(1 − c²) ÷ cos ρ (so z = q u, Y = −c cos ρ ÷ sin φ and √(1 − Y²) = √(1 − c²) ÷ sin φ),
+    the identity reads H² F = (q ÷ π) [c arccos Y + u (1 + u² B(q u))], with
+    B(z) = (atan z − z) ÷ z³ and arccos Y = atan2(√(1 − c²), −c cos ρ).
+    - As written, Howell's two terms are each about H ÷ π of face-on and cancel to about
+      2 ÷ (3H²) of themselves at 90°, 1.4 × 10⁻⁵ at 1 au, so a relative error ε in `atan` arrived
+      as (H ÷ π) ε of face-on. (decision-r10-t8b §2's "68 times the result" and the deferred
+      list's "1/68 of themselves" are this gain, in units of face-on.)
+    - The bracket's terms are of order one. 1 + u² B lies in (0, 1): about 2/3 for H ≫ 1, and
+      0.19 at H = 1.01. Only at the band's far edge, c → −1, do its two parts cancel, to order
+      (1 − c²)^(5/2), where the term is under 3 × 10⁻⁸ of face-on off and the clamp at 0 takes the
+      rounding.
+    - The branches are chosen by cos φ ≥ q and cos φ ≤ −q, in place of φ against arccos(1 ÷ H).
+      That is the same point, where the branches meet continuously.
+    - No H² is formed. So the term is finite at every finite H, H = 10³⁰ included (its H²
+      overflows `f32`), and the hard step at H = ∞ wherever infinities are kept (the twin, and
+      IEEE hardware).
+    - φ + η is clamped to [0, π], `preciseSinCos`'s domain, in the WGSL and the twin. Past π both
+      terms were already 0, so no value moves.
+  - **B(z)** (`atan_tail`, `atanTail`).
+    - Three halvings, atan z − z = 2 (atan t − t) − z³ ÷ (1 + √(1 + z²))², take any z ≥ 0 to
+      t ≤ tan(π ÷ 16) = 0.199.
+    - There the series −1/3 + t²/5 − t⁴/7 + t⁶/9 − t⁸/11 truncates at under t¹⁰/13 = 7.5 × 10⁻⁹,
+      2.3 × 10⁻⁸ of itself.
+    - Each halving, B(z) = (2 B(t) − p) ÷ p³ with p = 1 + √(1 + z²), sums two negative terms and
+      carries a relative error in B(t) at under a quarter. So B(z) is truncated by under
+      4 × 10⁻¹⁰ of itself.
+    - This goes beyond the lever's "the series where z is small, and `preciseAtan(z) − z` above
+      about 0.2": one form for every z, which grows without bound as H → 1. `preciseAtan(z) − z`
+      cancels by about 3 ÷ z², 77-fold at z = 0.2, so its 5 × 10⁻⁷ absolute bound would leave about
+      2 × 10⁻⁴ of B there.
+  - **The built-ins replaced.**
+    - `cos` and `sin` by `preciseSinCos`.
+    - arccos Y, the share's arccos(−x) and ρ = asin(1 ÷ H) by `preciseAtan2`.
+    - The WGSL's `howell_view_factor` (F) gives way to `howell_irradiance` (H² F). Its only
+      caller was `sphere_irradiance`. The twin's `howellViewFactor` (F) stays, 0 at H = ∞.
+    - `atanTail` is exported beyond Provides, for its test.
+  - **The angle passed in.** `bodyDisc.wgsl`'s horizon call and `planetshine_irradiance` took
+    φ = acos(μ₀).
+    - WGSL bounds `acos` by the worse of 6.77 × 10⁻⁵ and atan2's 4,096 ULP, which near μ₀ = 0 is
+      4.9 × 10⁻⁴ rad, 10% of the Sun's angular radius at 1 au.
+    - Mesa's `acos` is π ÷ 2 less A&S 4.4.45 times `fsign(x)`, without `asin`'s Taylor branch. It
+      is exact at μ₀ = 0 itself, and 6.75 × 10⁻⁵ low just above and as much high just below, a
+      step of 1.35 × 10⁻⁴ rad across the terminator. 6.75 × 10⁻⁵ is 1.45% of the Sun's angular
+      radius at 1 au. Behind the new form it would still be 3.4 × 10⁻⁵ of face-on at the
+      terminator, 3.4% of its value there.
+    - Both now take `preciseAtan2(|n × d|, n · d)`, decision-r08-f32 §9's lean. R10's terrain
+      already did.
+  - **Scope.** decision-r08-f32 §9 item 1 lists the lune area beside the horizon term. T6.d builds
+    decision-r10-t8b §2's lever, which names the horizon term alone; the eclipse term is deferred
+    (below).
+  - **ρ = 0.**
+    - Above a horizon, the visible share is the step for ρ = 0, ½ on the cut.
+    - R10.T8.b's cap (`MAX_STAR_DISTANCE_RADII`, `terrain_star_distance_radii`, H at most 10¹⁸) is
+      kept. R07's term no longer needs it. But on the GPU a point star's d ÷ 0 is no value WGSL
+      defines (its finite-math assumption, §15.7.2), and the cap keeps 1 ÷ H inside WGSL's
+      division bound (a divisor up to 2¹²⁶).
+    - Its comments and its test, which asserted R07's NaN at H = ∞, now say so. These are R10's
+      code.
+  - **For main's docs batch** (other plans and records, not edited here):
+    - plan 10's Risks: "Deviations in T8.b, as built" ("At ρ = 0, H infinite, R07's term alone is
+      ∞ × 0, NaN …"), and two of "Deferred findings (R10.T8.b)", "R07's horizon term in WGSL's
+      trigonometry" and "R07's horizon term is NaN for a point star", which T6.d settles;
+    - main's deferred list, the entry "R07's `litBody.wgsl` trigonometry" (built here), and its
+      "cancel to 1/68 of themselves";
+    - decision-r10-t8b §2's "each about H ÷ π ≈ 68 times the result" (of face-on, not of the
+      result).
+  - **The emulation** (`lighting/horizonPrecision.test.ts`). `preciseTrig.wgsl`'s `f32` emulation
+    moves into a shared test helper, `test/preciseTrigF32.ts`, which R08's
+    `atmosphere/precision.test.ts` now imports in place of its own copy, with the same correctly
+    rounded arithmetic. The helper adds corners of WGSL's bounds for +, −, ×, ÷ and `sqrt`: each
+    sum, difference and product rounded to one neighbour (WGSL names no rounding mode), each
+    quotient 2 ULP off, and `sqrt` as 1 ÷ `inverseSqrt` with each step 2 ULP off, up, down and by
+    three seeded signs.
+  - **Measured** (errors against the twin on the same `f32` inputs, of face-on unless stated).
+    "Before" is T6.c's form on correctly rounded arithmetic, with its built-ins correctly rounded,
+    as Mesa lowers them, and at one corner of WGSL's bounds (`acos` and `asin` at their bounds'
+    absolute terms, so this understates the old form). "After" is the worst over correctly rounded
+    arithmetic and the five corners; the new form calls no built-in trigonometry, so Mesa's
+    lowerings do not reach it.
+
+    | Case | Before: rounded | Before: Mesa | Before: WGSL corner | After |
+    | --- | --- | --- | --- | --- |
+    | Smooth terminator at 90°, 1 au (exact 9.868 × 10⁻⁴) | 9.851 × 10⁻⁴ | −4.360 × 10⁻⁴ | −2.731 × 10⁻² | 9.868–9.869 × 10⁻⁴ |
+    | Smooth band, worst: H = 3 | 1.3 × 10⁻⁷ | 6.4 × 10⁻⁶ | 7.7 × 10⁻⁴ | 2.2 × 10⁻⁷ |
+    | H = 11.5 | 7.0 × 10⁻⁷ | 5.9 × 10⁻⁵ | 1.7 × 10⁻³ | 1.7 × 10⁻⁷ |
+    | H = 215 (1 au) | 9.4 × 10⁻⁶ | 1.42 × 10⁻³ | 2.85 × 10⁻² | 1.6 × 10⁻⁷ |
+    | Flat element under 1°, of its light | 0.055% | 8.15% | 99.6% | 0.0028% |
+    | Under 5° | 0.012% | 1.63% | 33.5% | 0.0022% |
+    | Under 30° | 0.0026% | 0.25% | 5.5% | 0.0014% |
+
+    - On Mesa the old terminator is 0 or below from 0.16ρ sunward of 90°, at worst −1.04 × 10⁻³.
+      The new one, unclamped, is positive sunward of 90° at every corner.
+    - The flat element's errors of face-on: 1.42, 1.42 and 1.23 × 10⁻³ on Mesa before; 4.9 × 10⁻⁷,
+      1.9 × 10⁻⁶ and 7.2 × 10⁻⁶ after.
+    - Elsewhere on the smooth figure, after (Mesa before): 3.3 × 10⁻⁶ at H = 1.01 (1.5 × 10⁻⁵),
+      4.5 × 10⁻⁷ at 1.5 (7.1 × 10⁻⁶), 1.9 × 10⁻⁷ at 2,150 (1.42 × 10⁻²), 1.7 × 10⁻⁷ at 10⁵ (0.66).
+    - Wholly lit, the two forms differ by at most 1.8 × 10⁻⁷ on correctly rounded arithmetic,
+      `preciseSinCos`'s error against a correctly rounded `cos`, about 3 ULP of 1.
+    - At the smoke's eleven points the new form is within 3.9 × 10⁻⁷ at every corner.
+    - B(z): 2.7 × 10⁻⁷ of itself correctly rounded, 1.4 × 10⁻⁶ at the corners.
+    - The twin against Howell's form as written, in `f64`: within 10⁻¹⁰ ÷ H, the series'
+      truncation (the written form itself loses about H² ε of 1 ÷ H).
+    - A 60-digit check in the lane's scratch: with B exact, the identity meets Howell's form to
+      under 6 × 10⁻¹⁶ of 1 ÷ H from H = 1.01 to 10⁷. The science check confirmed it exact to 50
+      digits.
+  - **What remains.** The share's x = (π ÷ 2 − φ − η) ÷ ρ takes two `f32` roundings, as T6.c's
+    did: `f32`'s π ÷ 2, 4.4 × 10⁻⁸ rad off (up to 6.0 × 10⁻⁶ sin η of face-on at 1 au), and the
+    sum φ + η, up to 6 × 10⁻⁸ rad near 90° (up to 8.2 × 10⁻⁶ sin η). Together they are the flat
+    element's measured 1.4 × 10⁻⁵ sin η, the largest error left. A two-part π ÷ 2 is not used:
+    WGSL lets an implementation reassociate (§15.7.5) and fold its parts back together.
+  - **Smoke.** The horizon term and planetshine are held to 2 × 10⁻⁶, from 2 × 10⁻⁴, at six more
+    points: the 1 au terminator at 90° and 0.5ρ sunward, a flat element on a 1° horizon, and a
+    point star (H 10³⁰) up, up through a 5° horizon and behind it. The tolerance is chosen per
+    kind by an exhaustive switch; the eclipse term keeps 2 × 10⁻⁴. Planetshine's angle and
+    inverse square are not emulated, and rest on the smoke check.
+  - **Not run on Mesa.** No Mesa device was used; the emulation stands in. The owner's UHD 620
+    sunset (R10.T8.b's by-hand run) is the hardware check.
+  - **Reviewed.** TypeScript, plan conformance and the science check. None asked for a change to
+    the shader's or the twin's arithmetic; the science check's must-fix items, in comments, this
+    record and the test's bounds, are applied with every should-fix: the cancellation's ratio, Mesa's `acos` at 0 and WGSL's `acos` bound restated; the
+    bound corners made faithful (directed +, −, ×; `sqrt` through `inverseSqrt`) and the After
+    column re-measured; the shared emulation helper; the tolerance's exhaustive switch; units in
+    the test's names, read-only data, one reason per test; the unclamped terminator asserted;
+    "What remains" given both roundings; the older T6.c and T11 text annotated; the eclipse
+    finding corrected.
+  - **Gate:** `just smart-ci --hook-checks rendering-and-planets` on the committed tree; its log
+    and verdict are in the lane's handoff (`handoff-r07-trig.md`).
+  - **Deferred findings (2026-10-13 rule).**
+    - The eclipse term still takes WGSL's built-ins: `circle_overlap_area`'s `acos`, and
+      `bodyDisc.wgsl`'s `asin` of the star's and occluders' radii and `atan2` of their separation.
+      Its occluder's segment k² arccos(d₂ ÷ k) − d₂ √(k² − d₂²) cancels as Howell's branch did, by
+      about k, the occluder's radius in the star's. With Mesa's `acos` a uniform disc's hidden
+      share errs by up to 4 × 10⁻⁵ at k ≤ 1, 3.1 × 10⁻⁵ at k = 3.7, 4.8 × 10⁻⁴ at k = 30 and
+      3.6 × 10⁻³ at k = 190 (Jupiter over the Sun, seen from Io), about 1.6–1.9 × 10⁻⁵ k; at the
+      absolute term of WGSL's `acos` bound, about 2.2 × 10⁻⁵ k², 0.78 at k = 190 (`f64` estimates
+      in the lane's scratch, `lune.py`, not measured in `f32`). Lean: the same cure, the segment
+      as k² (θ − sin θ cos θ) with θ − sin θ cos θ by a series where θ is small.
+    - The phase angle's `acos` and the limb's `atan2` and `asin` in `bodyDisc.wgsl` are on the
+      built-ins too. R06's sky layers and R07's other shaders are still not audited
+      (decision-r08-f32 §9).
 - **Deviations in T3, as built.**
   - **`starIlluminance(disc, distanceM)`** returns E_c = π L̄_c sin²ρ in display order (r, g, b)
     from `HostDiscDto`'s B, V, R; inside the star sin ρ is held at 1. R06 builds the channels as
@@ -7120,7 +7292,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     rounding of sin π, and the occluder beyond the star some 10⁻¹⁰ of the sunlight.
   - **Smoke checks.** The probe's `LightingCase` gains kind 4: `planetshine_irradiance` against
     its twin at four points (wholly up, cut by the horizon, at Earth-from-the-Moon scale in the
-    soft band, and behind a 3° horizon), to 2 × 10⁻⁴. `smoke/bodies.ts`' `checkPlanetshine` draws a
+    soft band, and behind a 3° horizon), to 2 × 10⁻⁴ (_to 2 × 10⁻⁶ since R07.T6.d, its angle by
+    `preciseAtan2`_). `smoke/bodies.ts`' `checkPlanetshine` draws a
     Moon 20 px across at 150°, pre-exposed at 0.05, its night side lit by a full Earth, against
     the CPU rasteriser. `just test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-04):
     every check passes (456, none failing), T8.a's and T8.b's figures unchanged. The four

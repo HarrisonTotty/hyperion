@@ -3,7 +3,8 @@
  * catalogue's probe kernel on the run's adapter. `body_brdf` equals `view/appearance/brdf.ts` at
  * five pinned geometries to 10⁻⁵ relative, one of them with a law built per texel;
  * `sphere_irradiance` and `eclipse_visible` equal their TypeScript twins (themselves checked
- * against the `f64` oracles) at five points each; R11's stub and R08's lookups (plan R08's
+ * against the `f64` oracles) at five points each, and the horizon term at six more, the smooth
+ * terminator, a terrain shadow's edge and a point star (T6.d); R11's stub and R08's lookups (plan R08's
  * `surfaceLighting.wgsl` since R08.T9.b) return 1, 1 and 0 on a body without an atmosphere, its
  * one-texel tables bound; and `planetshine_irradiance` equals `planetshineIrradiance` at four
  * points (T11). R08.T9.b's own group holds the lookups against a body's tables' twin
@@ -72,11 +73,38 @@ function probeCases(): BrdfProbeCase[] {
 }
 
 /**
- * The lighting terms' agreement with their twins, absolute on factors of order one: WGSL's `f32`
- * `acos` and `atan` are allowed some 10⁻⁴ of error (WGSL §17.5.3's accuracy table), and both terms
- * call them.
+ * The eclipse term's agreement with its twin, absolute on factors of order one: it calls WGSL's
+ * `f32` `acos`, allowed the worse of 6.77 × 10⁻⁵ and atan2's 4,096 ULP (WGSL §15.7.4.1's accuracy
+ * table), which a correctly rounded implementation such as SwiftShader comes far inside.
  */
-const LIGHTING_TOLERANCE = 2e-4;
+const ECLIPSE_TOLERANCE = 2e-4;
+
+/**
+ * The horizon term's agreement with its twin, absolute, for a star's and planetshine's (R07.T6.d).
+ * Neither calls WGSL's trigonometry. At the star's points here the term, emulated in `f32` at
+ * WGSL's bounds, meets the twin within 4 × 10⁻⁷ of face-on (`lighting/horizonPrecision.test.ts`);
+ * planetshine's angle and inverse square are not emulated, and rest on this check alone.
+ */
+const HORIZON_TOLERANCE = 2e-6;
+
+/** The agreement a lighting case's term is held to; 0 for those that must return a value exactly. */
+function lightingTolerance(probe: LightingProbeCase): number {
+  let tolerance: number;
+  switch (probe.kind) {
+    case "sphere":
+    case "planetshine":
+      tolerance = HORIZON_TOLERANCE;
+      break;
+    case "eclipse":
+      tolerance = ECLIPSE_TOLERANCE;
+      break;
+    case "hooks":
+    case "atmosphere":
+      tolerance = 0;
+      break;
+  }
+  return tolerance;
+}
 
 /** One AU over the Sun's radius: H at 1 au. */
 const H_AT_1_AU = 1.495_978_707e11 / 6.957e8;
@@ -122,13 +150,26 @@ function lightingTermName(probe: LightingProbeCase): string {
   return name;
 }
 
-/** T6.c: five horizon factors, five eclipse terms and the stubs; T11: four planetshine factors. */
+/**
+ * T6.c: five horizon factors, five eclipse terms and the stubs; T6.d: six more horizon factors;
+ * T11: four planetshine factors.
+ */
 const LIGHTING_CASES: ReadonlyArray<LightingProbeCase> = [
   { kind: "sphere", h: 3, phiRad: 0.4, horizonRad: 0 },
   { kind: "sphere", h: 3, phiRad: 100 * RAD_PER_DEG, horizonRad: 0 },
   { kind: "sphere", h: 11.5, phiRad: 90 * RAD_PER_DEG, horizonRad: 0 },
   { kind: "sphere", h: H_AT_1_AU, phiRad: 89.9 * RAD_PER_DEG, horizonRad: 0 },
   { kind: "sphere", h: 11.5, phiRad: 70 * RAD_PER_DEG, horizonRad: 5 * RAD_PER_DEG },
+  // T6.d: the smooth terminator at 1 au, at 90° and half the Sun's radius sunward of it, where
+  // Mesa's `atan` took the old form to −4.4 × 10⁻⁴ and 1.28 × 10⁻³ against 9.87 × 10⁻⁴ and
+  // 2.51 × 10⁻³; a flat element with the Sun's centre on a 1° horizon; and a point star, H 10³⁰,
+  // whose H² overflows f32, wholly up, then up through a 5° horizon, then down behind it.
+  { kind: "sphere", h: H_AT_1_AU, phiRad: Math.PI / 2, horizonRad: 0 },
+  { kind: "sphere", h: H_AT_1_AU, phiRad: Math.PI / 2 - 0.5 / H_AT_1_AU, horizonRad: 0 },
+  { kind: "sphere", h: H_AT_1_AU, phiRad: 89 * RAD_PER_DEG, horizonRad: RAD_PER_DEG },
+  { kind: "sphere", h: 1e30, phiRad: 60 * RAD_PER_DEG, horizonRad: 0 },
+  { kind: "sphere", h: 1e30, phiRad: 80 * RAD_PER_DEG, horizonRad: 5 * RAD_PER_DEG },
+  { kind: "sphere", h: 1e30, phiRad: 88 * RAD_PER_DEG, horizonRad: 5 * RAD_PER_DEG },
   ...[
     [0.3, 0],
     [0.3, 0.8],
@@ -181,8 +222,8 @@ function checkLighting(checks: Checks, gpu: Float32Array): void {
     const worst = Math.max(
       ...reference.map((value, c) => Math.abs((read[c] ?? Number.NaN) - value)),
     );
-    const exact = probe.kind === "hooks" || probe.kind === "atmosphere";
-    let name = `${lightingTermName(probe)} equals its reference to ${LIGHTING_TOLERANCE} at point ${index + 1}`;
+    const tolerance = lightingTolerance(probe);
+    let name = `${lightingTermName(probe)} equals its reference to ${tolerance} at point ${index + 1}`;
     if (probe.kind === "hooks") {
       name = "T6.c the hooks on a body without an atmosphere return 1, 1 and 0";
     } else if (probe.kind === "atmosphere") {
@@ -190,7 +231,7 @@ function checkLighting(checks: Checks, gpu: Float32Array): void {
     }
     checks.check(
       name,
-      exact ? worst === 0 : worst <= LIGHTING_TOLERANCE,
+      worst <= tolerance,
       `GPU ${read.map((value) => value.toPrecision(7)).join(", ")} against ${reference.map((value) => value.toPrecision(7)).join(", ")}, off by ${worst.toExponential(2)}`,
     );
   });

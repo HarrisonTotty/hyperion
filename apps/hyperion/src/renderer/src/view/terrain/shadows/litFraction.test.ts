@@ -303,10 +303,11 @@ describe("the terrain's horizon term (R10.T8.b)", () => {
     expect(litFraction(horizon, horizon, 0)).toBe(0.5);
   });
 
-  it("takes a point star's distance at most 10¹⁸ radii, where R07's term alone is NaN", () => {
+  it("takes a point star's distance at most 10¹⁸ radii, the hard step R07's term gives at any distance", () => {
     const phi = 30 * RAD;
-    expect(sphereIrradianceFactor(Number.POSITIVE_INFINITY, phi)).toBeNaN();
-    expect(MAX_STAR_DISTANCE_RADII ** 2).toBeLessThan(3.4e38);
+    // R07's term was ∞ × 0, NaN, at H = ∞ until R07.T6.d; the cap keeps WGSL's 1 ÷ H finite.
+    expect(sphereIrradianceFactor(Number.POSITIVE_INFINITY, phi)).toBe(Math.cos(phi));
+    expect(MAX_STAR_DISTANCE_RADII).toBeLessThan(2 ** 126);
     expect(terrainHorizonFactor(Number.POSITIVE_INFINITY, phi, Math.PI / 2 - phi, 0)).toBeCloseTo(
       Math.cos(phi),
       12,

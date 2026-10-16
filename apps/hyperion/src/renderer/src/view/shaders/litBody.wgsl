@@ -61,37 +61,101 @@ fn body_brdf(law : LunarLambert, mu0 : f32, mu : f32, alpha : f32) -> vec3f {
 // element whose normal is φ from the sphere's centre, over that of the sphere face-on, above a local
 // horizon of elevation `horizon` towards the star (0 on the smooth figure; R10's on terrain). The
 // TypeScript twin is `view/lighting/sphereIrradiance.ts`.
-fn howell_view_factor(h : f32, phi_in : f32) -> f32 {
+//
+// It calls none of WGSL's `sin`, `cos`, `tan`, `asin`, `acos` or `atan` (R07.T6.d; R08 Design note
+// 18), and takes `preciseTrig.wgsl`'s forms, which every includer composes with R08's surface
+// lighting. Howell's partial branch is rewritten so that nothing in it cancels that matters of
+// face-on: as written, the terms of H² atan z − X sin φ √(1 − Y²) are each about H ÷ π of face-on
+// and cancel to about 2 ÷ (3H²) of themselves at 90° (1.4 × 10⁻⁵ at 1 au), so that a relative
+// error ε in `atan` arrived as (H ÷ π) ε of face-on, 68 ε at 1 au, and Mesa's `nir_atan`
+// (ε = −2.07 × 10⁻⁵, the UHD 620's driver on Linux) took 1.4 × 10⁻³ of face-on off the soft
+// terminator and every terrain shadow edge (decision-r10-t8b §2). No H² is formed, so the term is
+// finite at every finite H and, where the implementation keeps infinities, at H = ∞ (ρ = 0), the
+// hard step.
+
+// (atan z − z) ÷ z³ for z ≥ 0, −1/3 at 0: three halvings, (atan z − z) = 2 (atan t − t) −
+// z³ ÷ (1 + √(1 + z²))² with t = z ÷ (1 + √(1 + z²)), take any z to t ≤ tan(π ÷ 16) = 0.199, since
+// atan t = atan z ÷ 8 < π ÷ 16, and there the series −1/3 + t²/5 − t⁴/7 + t⁶/9 − t⁸/11 truncates at
+// under t¹⁰/13 = 7.5 × 10⁻⁹, 2.3 × 10⁻⁸ of itself. Per halving, B(z) = (2 B(t) − p) ÷ p³ with
+// p = 1 + √(1 + z²): both terms negative, so nothing cancels, and a relative error in B(t) reaches
+// B(z) at under a quarter of itself.
+fn atan_tail(z : f32) -> f32 {
+  let p0 = 1.0 + sqrt(1.0 + z * z);
+  let t1 = z / p0;
+  let p1 = 1.0 + sqrt(1.0 + t1 * t1);
+  let t2 = t1 / p1;
+  let p2 = 1.0 + sqrt(1.0 + t2 * t2);
+  let t3 = t2 / p2;
+  let t = t3 * t3;
+  var b = -1.0 / 3.0 + t * (1.0 / 5.0 + t * (-1.0 / 7.0 + t * (1.0 / 9.0 + t * (-1.0 / 11.0))));
+  b = (2.0 * b - p2) / (p2 * p2 * p2);
+  b = (2.0 * b - p1) / (p1 * p1 * p1);
+  return (2.0 * b - p0) / (p0 * p0 * p0);
+}
+
+// H² F, Howell's view factor over the sphere's face-on: cos φ with the whole disc up (cos φ ≥ q,
+// q = 1 ÷ H = sin ρ), 0 with none, and between them (Howell's partial branch, X = √(H² − 1),
+// Y = −X cot φ, z = sin φ √(1 − Y²) ÷ X)
+//
+//   π H² F = cos φ arccos Y − X sin φ √(1 − Y²) + H² atan z = cos φ arccos Y + z + H² (atan z − z),
+//
+// an identity, as X sin φ √(1 − Y²) = X² z = (H² − 1) z. In the band's coordinate c = H cos φ,
+// |c| < 1, with cos ρ = √(1 − q²): Y = −c cos ρ ÷ sin φ, √(1 − Y²) = √(1 − c²) ÷ sin φ, so arccos Y
+// = atan2(√(1 − c²), −c cos ρ) (sin φ > 0 in the band), and z = q u with u = √(1 − c²) ÷ cos ρ, so
+//
+//   H² F = (q ÷ π) [c arccos Y + u (1 + u² B(q u))],   B(z) = (atan z − z) ÷ z³ (`atan_tail`).
+//
+// The bracket's terms are of order one, and 1 + u² B = (atan z − z cos² ρ) ÷ (z sin² ρ) lies in
+// (0, 1), least at c = 0: 2/3 for H ≫ 1, 0.65 at H = 3, 0.19 at H = 1.01, where H itself is
+// coarse in f32. Only at the band's far edge, c → −1, do the bracket's two parts cancel, to order
+// (1 − c²)^(5/2) from (1 − c²)^(1/2), where the term is under 3 × 10⁻⁸ of face-on off and the
+// clamp at 0 takes its rounding.
+fn howell_irradiance(h : f32, phi_in : f32) -> f32 {
   let phi = min(abs(phi_in), LIT_PI);
-  let h2 = h * h;
-  let edge = acos(1.0 / h);
-  if (phi <= edge) {
-    return cos(phi) / h2;
+  let q = 1.0 / h;
+  let cos_phi = preciseSinCos(phi).y;
+  if (cos_phi >= q) {
+    return cos_phi;
   }
-  if (phi >= LIT_PI - edge) {
+  if (cos_phi <= -q) {
     return 0.0;
   }
-  let x = sqrt(h2 - 1.0);
-  let y = -x / tan(phi);
-  let root = sqrt(max(0.0, 1.0 - y * y));
-  return (cos(phi) * acos(clamp(y, -1.0, 1.0)) - x * sin(phi) * root) / (LIT_PI * h2)
-    + atan(sin(phi) * root / x) / LIT_PI;
+  let c = clamp(cos_phi * h, -1.0, 1.0);
+  let cos_rho = sqrt((1.0 - q) * (1.0 + q));
+  let chord = sqrt((1.0 - c) * (1.0 + c));
+  let u = chord / cos_rho;
+  let arc = preciseAtan2(chord, -c * cos_rho);
+  return q / LIT_PI * (c * arc + u * (1.0 + u * u * atan_tail(q * u)));
 }
 
+// The share of the disc above a plane at `phi` from its centre, as a flat disc of angular radius
+// ρ = asin(1 ÷ H) cut by a line at x = (π ÷ 2 − φ) ÷ ρ: (arccos(−x) + x √(1 − x²)) ÷ π, and for
+// ρ = 0 the step, ½ on the plane.
 fn disc_visible_fraction(h : f32, phi : f32) -> f32 {
-  let rho = asin(1.0 / h);
-  let x = clamp((0.5 * LIT_PI - phi) / rho, -1.0, 1.0);
-  return (acos(-x) + x * sqrt(1.0 - x * x)) / LIT_PI;
+  let q = 1.0 / h;
+  let rho = preciseAtan2(q, sqrt((1.0 - q) * (1.0 + q)));
+  let offset = 0.5 * LIT_PI - phi;
+  if (abs(offset) >= rho) {
+    return select(select(0.5, 0.0, offset < 0.0), 1.0, offset > 0.0);
+  }
+  let x = clamp(offset / rho, -1.0, 1.0);
+  let root = sqrt((1.0 - x) * (1.0 + x));
+  return (preciseAtan2(root, -x) + x * root) / LIT_PI;
 }
 
+// The horizon term above a local horizon η = max(horizon, 0): Howell's form at φ, clamped at 0,
+// where η = 0; otherwise the disc cut at φ + η and weighed by the element's own normal,
+// cos η H² F(φ + η) + sin η sin(φ + η) × the share above the cut (`sphereIrradianceFactor`).
 fn sphere_irradiance(h : f32, phi : f32, horizon : f32) -> f32 {
   let eta = max(horizon, 0.0);
   if (eta == 0.0) {
-    return h * h * howell_view_factor(h, phi);
+    return max(0.0, howell_irradiance(h, phi));
   }
-  let tilted = phi + eta;
-  let direct = cos(eta) * h * h * howell_view_factor(h, tilted);
-  let tangential = sin(eta) * sin(tilted) * disc_visible_fraction(h, tilted);
+  // Past π the disc is wholly cut off, by either term, whatever η is.
+  let tilted = clamp(phi + eta, 0.0, LIT_PI);
+  let eta_sin_cos = preciseSinCos(min(eta, LIT_PI));
+  let direct = eta_sin_cos.y * howell_irradiance(h, tilted);
+  let tangential = eta_sin_cos.x * preciseSinCos(tilted).x * disc_visible_fraction(h, tilted);
   return max(0.0, direct + tangential);
 }
 
@@ -109,7 +173,8 @@ fn lit_disc_term(l : f32, h : f32, mu0 : f32, mu : f32, source_radius : f32) -> 
 // its face-on value carried from the centre to the point by the inverse square, and it is never
 // shadow-tested against a third body. `to_source` runs from the point to the neighbour's centre;
 // it, `source_radius` and `centre_distance` share one unit of length; `normal` is the point's unit
-// normal. The TypeScript twin is `view/lighting/planetshine.ts`' `planetshineIrradiance`.
+// normal. The angle from the normal is `preciseAtan2` of the cross and dot products, never WGSL's
+// `acos` (R07.T6.d). The TypeScript twin is `view/lighting/planetshine.ts`' `planetshineIrradiance`.
 fn planetshine_irradiance(
   to_source : vec3f,
   source_radius : f32,
@@ -118,10 +183,9 @@ fn planetshine_irradiance(
   horizon : f32,
 ) -> f32 {
   let distance = length(to_source);
-  let mu0 = dot(normal, to_source) / distance;
+  let phi = preciseAtan2(length(cross(normal, to_source)), dot(normal, to_source));
   let near = centre_distance / distance;
-  return sphere_irradiance(distance / source_radius, acos(clamp(mu0, -1.0, 1.0)), horizon)
-    * near * near;
+  return sphere_irradiance(distance / source_radius, phi, horizon) * near * near;
 }
 
 // The exact area of the overlap of circles of radii r and k whose centres are z apart.

@@ -20,10 +20,14 @@ import { sphereIrradianceFactor } from "../../lighting/sphereIrradiance";
 
 /**
  * The most stellar radii a star's distance is taken as in the terrain's horizon term: 10¹⁸, ρ of
- * 10⁻¹⁸ rad, a hard step to every precision the term carries, while the H² that R07's
- * `sphereIrradianceFactor` forms stays finite in `f32` (10³⁶ against 3.4 × 10³⁸). A point star,
- * H infinite, would make R07's term ∞ × 0, NaN; the guard is the shadow code's, R07's function
- * unchanged (`shadows/horizon.wgsl`'s `terrain_star_distance_radii`).
+ * 10⁻¹⁸ rad, a hard step to every precision the term carries (`shadows/horizon.wgsl`'s
+ * `terrain_star_distance_radii`).
+ *
+ * @remarks
+ * Built (R10.T8.b) because R07's term formed H², ∞ × 0 = NaN for a point star. Since R07.T6.d it
+ * forms none and is the hard step at H = ∞ itself; the cap is kept so that the WGSL's 1 ÷ H stays
+ * finite and inside WGSL's division bound (2.5 ULP for a divisor up to 2¹²⁶), where a point star's
+ * H = d ÷ 0 is no value WGSL defines (its finite-math assumption, §15.7.2).
  */
 export const MAX_STAR_DISTANCE_RADII = 1e18;
 

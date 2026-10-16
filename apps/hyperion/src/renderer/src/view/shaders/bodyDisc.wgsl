@@ -343,8 +343,12 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
     // its light slot j's, on the Lambert share's flat term of the surface's mean A; added before
     // the horizon's `continue`, so that a star just set still lights the twilight ground.
     let sky = atmosphere_sky_irradiance(0.0, mu0, local.latitude, j);
-    // The horizon term: the star's whole disc over the element's tangent plane (Design note 6).
-    let horizon = sphere_irradiance(distance / light.w, acos(clamp(mu0, -1.0, 1.0)), 0.0);
+    // The horizon term: the star's whole disc over the element's tangent plane (Design note 6), its
+    // angle from the normal by `preciseAtan2` of the cross and dot products, never WGSL's `acos`.
+    // Its bound near μ₀ = 0 is atan2's 4,096 ULP, 4.9 × 10⁻⁴ rad, 10% of the Sun's angular radius at
+    // 1 au, and Mesa's is 6.75 × 10⁻⁵ low just above μ₀ = 0 and as much high just below (R07.T6.d).
+    let phi = preciseAtan2(length(cross(normal, towards)), mu0);
+    let horizon = sphere_irradiance(distance / light.w, phi, 0.0);
     if (horizon <= 0.0 && !any(sky > vec3f(0.0))) {
       continue;
     }
