@@ -1502,6 +1502,9 @@ _Follow-up C, runoff, grain densities and the read solidus_ (science-r09-drainag
 - _Accept:_ `cargo test -p hyperion-surface field`; `cargo test -p hyperion-surface wire`;
   `cargo test -p hyperion-sim planetary::surface`.
 
+Follow-ups A–C landed under R09.T2; D and E take R09.T2.d and R09.T2.e by their letters, and
+R09.T2.a–c are not used (main's ruling for R09.T2.e, 2026-10-15).
+
 - **R09.T2.d Follow-up D, an undifferentiated body's role and the crust ruling's synthetic rows**
   (science-composition-crusts.md §1, §3, §4, §7 and §8, 2026-10-11; after follow-up C). One lane,
   in the surface crate: it touches `field/palette.rs` and `testing/worlds.rs`, not R09.T10.c's or
@@ -3442,7 +3445,8 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
       `CrustInputs::bulk`, and `lid`, whose `LidCrust::Bulk` takes the `Bulk` entry built here.
 - **Deviations in T2.e, as built** (2026-10-15; follow-up E, decision-r11-palette-liquids §1, §2
   and §4; lane r09-palette-liquids, on R10.T10.a's `albedo_scale` and R08.T5.g's liquid files).
-  - _The ID._ R09.T2.e, after follow-up D's R09.T2.d; the ruling calls it "R09 follow-up E".
+  - _The ID._ R09.T2.e, after follow-up D's R09.T2.d; the ruling calls it "R09 follow-up E". _Ruled
+    2026-10-15: kept._
   - _The water record's temperature is 25 °C, not 15 °C._ The ruling's example is IAPWS-95's
     999.10 kg m⁻³ at 288.15 K; the records take 298.15 K, `water.json`'s and its index's
     temperature, at which IAPWS-95's density (997.047 kg m⁻³, at 0.1 MPa: the science check
@@ -3545,7 +3549,9 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
     the water record to the synthetic one, and nothing holds the methane copy to its original
     (until the guard, under "R08.T5.h's `water.json`, taken").
   - _No record carries scattering._ Einstein–Smoluchowski–Cabannes is P14.T49.h's, and R08.T5.g
-    added no scattering column.
+    added no scattering column. _Ruled 2026-10-15 (main's ruling for R09.T2.e): absent until
+    P14.T49.h, which fills the testing worlds' and the reference Earth's records before the serve
+    gate._
   - _The Earth-like world's runoff keeps 999.84 kg m⁻³._ Its sea's grain density becomes the
     record's 997.047 (the rule: a `Liquid` entry's grain density is its record's to the bit), and
     `RUNOFF_WATER_DENSITY_KG_M3` (999.84, the conversion the illustration was built with) keeps
