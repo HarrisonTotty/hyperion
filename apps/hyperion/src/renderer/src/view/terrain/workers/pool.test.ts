@@ -6,6 +6,7 @@ import { type PatchKey, patchKeyString } from "../patchKey";
 import type { PatchRequest } from "../select";
 import type { BakedPatch, ClassMapAnswer, HeightSourceSetting, TerrainLayers } from "./messages";
 import {
+  defaultHeightWorkers,
   type FieldChange,
   type FieldRefusal,
   HeightWorkerPool,
@@ -780,5 +781,69 @@ describe("the height-worker pool's class maps (R10.T10.d)", () => {
     const asked = pool.classMap(MOON, SEED);
     pool.terminate();
     await expect(asked).resolves.toBeNull();
+  });
+});
+
+/** A pool made without bake settings, as the terrain session makes its own (R10.T16.a). */
+function fieldsOnly(workers: number): {
+  readonly pool: HeightWorkerPool;
+  readonly created: ScriptedHeightWorker[];
+} {
+  const created: ScriptedHeightWorker[] = [];
+  const pool = new HeightWorkerPool({
+    workers,
+    createWorker: () => {
+      const worker = new ScriptedHeightWorker();
+      created.push(worker);
+      return worker;
+    },
+  });
+  return { pool, created };
+}
+
+describe("the height-worker pool of the terrain session (R10.T16.a)", () => {
+  it("holds fields without bake settings", () => {
+    const { pool, created } = fieldsOnly(2);
+    pool.fieldInit(MOON, blockOf(8, 1));
+    expect(created.map((w) => w.fieldMessages.map((m) => m.kind))).toEqual([
+      ["field-init"],
+      ["field-init"],
+    ]);
+  });
+
+  it("refuses a bake request without bake settings", () => {
+    expect(() => {
+      fieldsOnly(1).pool.request(req(0, 1));
+    }).toThrow(/without bake settings/u);
+  });
+
+  it("refuses a demand without bake settings", () => {
+    expect(() => {
+      fieldsOnly(1).pool.reprioritise([req(0, 1)]);
+    }).toThrow(/without bake settings/u);
+  });
+
+  it("refuses a cancellation without bake settings", () => {
+    expect(() => {
+      fieldsOnly(1).pool.cancelStale(new Set());
+    }).toThrow(/without bake settings/u);
+  });
+
+  it("counts its own copy of every field's blocks, and none once released", () => {
+    const { pool } = fieldsOnly(3);
+    pool.fieldInit(MOON, blockOf(100, 0));
+    pool.fieldChunk(MOON, blockOf(50, 1));
+    pool.fieldInit(PLANET, blockOf(10, 2));
+    const kept = pool.keptFieldBytes;
+    pool.fieldRelease(MOON);
+    expect([kept, pool.keptFieldBytes]).toEqual([160, 10]);
+  });
+
+  it("runs Design note 11's default count of workers, clamp(⌊threads ÷ 4⌋, 1, 3)", () => {
+    expect([1, 4, 7, 8, 12, 16, 32].map(defaultHeightWorkers)).toEqual([1, 1, 1, 2, 3, 3, 3]);
+  });
+
+  it("runs one worker where the browser reports no thread count", () => {
+    expect(defaultHeightWorkers(Number.NaN)).toBe(1);
   });
 });

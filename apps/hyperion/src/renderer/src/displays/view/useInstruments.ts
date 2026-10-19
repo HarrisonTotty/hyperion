@@ -10,7 +10,9 @@
  * (`ViewFrameDrawer`) but for the histogram, which it does not take. It draws at the primary's
  * exposure, which its label block says (`SOURCE PRIMARY`, Design note 11), and culls the sky for
  * its own camera. Its camera is reported to the server's scene while it is open, as the primary's
- * is. Its readouts change at most four times a second.
+ * is, and what it drew to the stage's terrain session each frame it draws, its lit bodies taking
+ * the session's class maps and reliefs (plan R10, R10.T16.a). Its readouts change at most four
+ * times a second.
  */
 import {
   type RefObject,
@@ -48,6 +50,8 @@ import type { QualitySetting } from "../../view/quality/qualitySetting";
 import { cameraKinematics } from "../../view/scene/fromServer";
 import type { ViewStar } from "../../view/scene/model";
 import type { ClassMapSource } from "../../view/terrain/classMap";
+import type { HandoverReliefSource } from "../../view/terrain/handover";
+import type { TerrainSession } from "../../view/terrain/session";
 import type { DrawAnchor } from "../../view/wireframe/drawList";
 import { availabilityOf, styleRefusals } from "./styleRefusals";
 import type { SkyModel } from "../../view/sky/model";
@@ -60,7 +64,12 @@ import {
 } from "./useViewSky";
 import type { ViewEngineState } from "./useViewEngine";
 import { type DragKind, dragKindOf } from "./useViewDrag";
-import { makeViewFrameDrawer, type ViewFrameDrawer } from "./viewFrameDrawer";
+import {
+  makeViewFrameDrawer,
+  terrainReportOf,
+  type ViewFrameDrawer,
+  type ViewFrameInputs,
+} from "./viewFrameDrawer";
 import {
   INSTRUMENT_SLOTS,
   type InstrumentSlot,
@@ -140,10 +149,16 @@ export interface InstrumentsFrame {
   /** Reports each instrument's camera to the server's scene, or `null` for a kept scene. */
   readonly reportCamera: ((view: ViewId, pose: SceneKinematics) => void) | null;
   /**
-   * The class maps the lit bodies' discs shade with (plan R10, R10.T10.d), the primary's, or `null`:
-   * every disc uniform.
+   * The class maps the lit bodies' discs shade with (plan R10, R10.T10.d), the terrain session's as
+   * the primary's frame read them (R10.T16.a), or `null` with no session: every disc uniform.
    */
   readonly classMaps: ClassMapSource | null;
+  /**
+   * The lit bodies' reliefs, by which a body hands over (plan R10, R10.T10.e), the terrain
+   * session's as the primary's frame read them (R10.T16.a), or `null` with no session: none hands
+   * over.
+   */
+  readonly reliefs: HandoverReliefSource | null;
 }
 
 /** What `useInstruments` reads. */
@@ -169,6 +184,11 @@ export interface InstrumentsInput {
   readonly setting: QualitySetting;
   /** The platform's primary modifier, whose chord with the arrows steps the rate (R07.T19.f). */
   readonly modifier: PrimaryModifier;
+  /**
+   * The stage's terrain session (plan R10, R10.T16.a), or `null`: each instrument tells it what it
+   * drew each frame it draws, and is forgotten by it when it closes or its canvas goes.
+   */
+  readonly terrain: TerrainSession | null;
 }
 
 /** The instruments, their commands and their loop. */
@@ -256,6 +276,17 @@ interface SlotLoop {
   lastMs: number | null;
   anchors: ReadonlyArray<DrawAnchor>;
   drawnStyle: RenderStyle;
+  /** The terrain session it last told what it drew, which forgets it when it goes; or `null`. */
+  reportedTo: TerrainSession | null;
+}
+
+/** Has the terrain session `loop` last reported to forget slot `slot`'s view. */
+function forgetSlot(loop: SlotLoop | undefined, slot: InstrumentSlot): void {
+  if (loop === undefined) {
+    return;
+  }
+  loop.reportedTo?.forgetView(instrumentViewId(slot));
+  loop.reportedTo = null;
 }
 
 /**
@@ -287,9 +318,16 @@ function useSlotDrawer(
     }
     // Opened during a device loss, the view waits and its drawer is made at the restore.
     const release = makeViewFrameDrawer(engine, view, name, (drawer) => {
-      loops.set(slot, { drawer, lastMs: null, anchors: [], drawnStyle: "wireframe" });
+      loops.set(slot, {
+        drawer,
+        lastMs: null,
+        anchors: [],
+        drawnStyle: "wireframe",
+        reportedTo: null,
+      });
     });
     return () => {
+      forgetSlot(loops.get(slot), slot);
       loops.delete(slot);
       release();
     };
@@ -337,6 +375,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
     exposure,
     setting,
     modifier,
+    terrain,
   } = input;
   const graphics = useGraphicsStatus();
   const [slots, setSlots] = useState<Slots>([CLOSED, CLOSED]);
@@ -358,6 +397,11 @@ export function useInstruments(input: InstrumentsInput): Instruments {
   const loopsRef = useRef(new Map<InstrumentSlot, SlotLoop>());
   const inputsRef = useRef<ReadonlyMap<InstrumentSlot, SlotInputs>>(new Map());
   const reducedMotionRef = useRef(reducedMotion);
+  // The loops read the terrain session through a ref, current after every commit (R10.T16.a).
+  const terrainRef = useRef(terrain);
+  useLayoutEffect(() => {
+    terrainRef.current = terrain;
+  }, [terrain]);
 
   const availability = useCallback(
     (slot: InstrumentSlot): StyleAvailability =>
@@ -446,6 +490,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
       runs.current.delete(slot);
       held.current.delete(slot);
       turns.current.delete(slot);
+      forgetSlot(loopsRef.current.get(slot), slot);
       removeCamera?.(instrumentViewId(slot));
       setSlots((previous) => withSlot(previous, slot, () => CLOSED));
     },
@@ -568,7 +613,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
       if (next.source.kind === "server") {
         each.reportCamera?.(instrumentViewId(slot), cameraKinematics(runPose(next), next.scene));
       }
-      const drawn = loop.drawer.draw({
+      const frameInputs: ViewFrameInputs = {
         run: next,
         size: inputs.size,
         tokens: inputs.tokens,
@@ -582,11 +627,27 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         availability: inputs.availability,
         // The primary is the exposure's source: an instrument meters nothing (Design note 11).
         meter: null,
+        // The terrain session's, as the primary's frame read them (R10.T16.a).
         classMaps: each.classMaps ?? undefined,
-      });
+        reliefs: each.reliefs ?? undefined,
+      };
+      const drawn = loop.drawer.draw(frameInputs);
       if (drawn !== null) {
         loop.anchors = drawn.anchors;
         loop.drawnStyle = drawn.drawnStyle;
+        // What it drew, for the terrain session's next step (R10.T16.a).
+        const session = terrainRef.current;
+        if (loop.reportedTo !== session) {
+          forgetSlot(loop, slot);
+          loop.reportedTo = session;
+        }
+        const report =
+          session === null
+            ? null
+            : terrainReportOf(frameInputs, loop.drawer.regimes, budget.streamPriority);
+        if (session !== null && report !== null) {
+          session.noteView(instrumentViewId(slot), report);
+        }
       }
       if (failed || each.publish) {
         const shown: InstrumentShown = {

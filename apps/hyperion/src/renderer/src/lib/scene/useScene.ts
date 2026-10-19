@@ -13,6 +13,7 @@ import type {
   SceneStateDto,
   StateOf,
   Subscription,
+  SurfaceRevisionDto,
   SystemIdHex,
   UniverseIdHex,
 } from "@hyperion/protocol";
@@ -29,6 +30,7 @@ import { renderTime } from "./sceneClock";
 import {
   applySceneNotification,
   type Designate,
+  type SceneModelResult,
   type SceneUpdate,
   toSceneModel,
 } from "./sceneWire";
@@ -85,6 +87,22 @@ export interface SceneSnapshot {
 export type CameraReportFault =
   { readonly kind: "refused"; readonly reason: string } | { readonly kind: "timed_out" };
 
+/**
+ * What the scene topic tells of the bodies' surveyed fields (plan R10, R10.T16.a; R09.T19.b), for
+ * the terrain session that keeps them.
+ *
+ * @remarks
+ * `revisions` is a push's `surface_revisions`: each body whose surveyed coverage grew, with its
+ * latest revision, whose field a holder asks again for the new cells. `resync` is the scene opened
+ * again after it could not go on (a gap or step back in the numbering, a push it could not use,
+ * the server's ending it), whose pushes meanwhile are lost: a holder asks every field it keeps
+ * again with the revision it holds, as it does when the link returns, which the link's own state
+ * tells and this does not.
+ */
+export type SceneSurfaceEvent =
+  | { readonly kind: "revisions"; readonly revisions: ReadonlyArray<SurfaceRevisionDto> }
+  | { readonly kind: "resync" };
+
 /** The scene of a universe, for R02's view: its state, its frames and its camera reports. */
 export interface SceneView extends SceneSnapshot {
   /**
@@ -101,6 +119,16 @@ export interface SceneView extends SceneSnapshot {
   readonly reportCamera: (view: ViewId, pose: SceneKinematics) => void;
   /** Stops reporting a local view's camera, as when the view closes. */
   readonly removeCamera: (view: ViewId) => void;
+  /**
+   * Listens for what the scene topic tells of the bodies' surveyed fields (plan R10, R10.T16.a);
+   * returns the unsubscribe.
+   *
+   * @remarks
+   * Handed to listeners and never to the snapshot, so that a push naming a revision renders
+   * nothing it would not otherwise. A listener that throws is reported on the console and leaves
+   * the scene and the other listeners as they were. Stable for the life of the subscription.
+   */
+  readonly onSurface: (listener: (event: SceneSurfaceEvent) => void) => () => void;
   /**
    * Opens the scene again after it was refused or went unanswered (the operator's `RETRY`); does
    * nothing in any other state.
@@ -149,7 +177,10 @@ function sceneNotification(notification: NotificationOf<"scene">): SceneNotifica
  * refused or resubscribed rather than left opening or stale for good. Any other error is a bug,
  * and is thrown on.
  */
-function unthrown<T extends SceneUpdate>(read: () => T, what: string): T | SceneFault {
+function unthrown<T extends SceneModelResult | SceneUpdate>(
+  read: () => T,
+  what: string,
+): T | SceneFault {
   try {
     return read();
   } catch (error: unknown) {
@@ -176,6 +207,7 @@ function sameStatus(a: SceneStatus, b: SceneStatus): boolean {
  */
 class SceneStore {
   readonly #listeners = new Set<() => void>();
+  readonly #surfaceListeners = new Set<(event: SceneSurfaceEvent) => void>();
   readonly #reporter = new CameraReporter();
   #designate: Designate;
   #snapshot: SceneSnapshot;
@@ -346,6 +378,25 @@ class SceneStore {
     this.#reporter.remove(view);
   };
 
+  /** See {@link SceneView.onSurface}. */
+  readonly onSurface = (listener: (event: SceneSurfaceEvent) => void): (() => void) => {
+    this.#surfaceListeners.add(listener);
+    return () => {
+      this.#surfaceListeners.delete(listener);
+    };
+  };
+
+  /** Tells every surface listener of `event`, each in turn, one that throws reported. */
+  #tellSurface(event: SceneSurfaceEvent): void {
+    for (const listener of this.#surfaceListeners) {
+      try {
+        listener(event);
+      } catch (error: unknown) {
+        console.error(`a scene surface listener failed on ${event.kind}:`, error);
+      }
+    }
+  }
+
   #adopt(subscription: Subscription<"scene">, generation: number): void {
     const opened = unthrown(
       () => toSceneModel(sceneState(subscription.state), this.#designate),
@@ -356,6 +407,9 @@ class SceneStore {
       this.#set({ status: { kind: "rejected", code: "unusable", reason: opened.fault } });
       return;
     }
+    // Opened again after it could not go on, the link up throughout: the pushes between are lost.
+    // Before the push count starts again, which a subscription opened afresh (`open`) has done.
+    const resubscribed = this.#resubscriptions > 0;
     this.#subscription = subscription;
     this.#receive(opened.model);
     subscription.onNotification((notification) => {
@@ -386,6 +440,9 @@ class SceneStore {
     this.#reporter.attach((cameras) => {
       this.#reportCameras(subscription.id, cameras);
     });
+    if (resubscribed) {
+      this.#tellSurface({ kind: "resync" });
+    }
   }
 
   /**
@@ -437,6 +494,9 @@ class SceneStore {
       case "ok":
         this.#resubscriptions = 0;
         this.#receive(update.model);
+        if (update.surfaceRevisions.length > 0) {
+          this.#tellSurface({ kind: "revisions", revisions: update.surfaceRevisions });
+        }
         break;
       case "sequence":
         this.#resubscribe(
@@ -600,6 +660,7 @@ export function useScene(universe: UniverseIdHex | null, options: SceneOptions):
     frameAt: store.frameAt,
     reportCamera: store.reportCamera,
     removeCamera: store.removeCamera,
+    onSurface: store.onSurface,
     retry: store.retry,
   };
 }

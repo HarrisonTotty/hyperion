@@ -36,6 +36,7 @@ import {
 import { GOLDEN_SYSTEMS, GOLDEN_TIMES, goldenSystemBodies } from "../../test/inSystemGolden";
 import { vec3 } from "../../geometry/vec3";
 import {
+  bodyDetailSeed,
   EARTH_MASS_KG,
   toBodiesRequest,
   toBodyDetail,
@@ -94,6 +95,11 @@ function withValidUntil(validUntil: UniverseTime) {
       ? { ...body, orbit: { state: "ok", value: { ...body.orbit.value, valid_until: validUntil } } }
       : body,
   );
+}
+
+/** A record's hooks section, `ok`, carrying `detailSeed`. */
+function withHooks(detailSeed: SectionDto<string>): Pick<BodyRecordDto, "hooks"> {
+  return { hooks: { state: "ok", value: { detail_seed: detailSeed } } };
 }
 
 /** The fixture's Earth with a hooks section that is `ok` and carries `detailSeed`, read. */
@@ -419,6 +425,21 @@ describe("toBodyDetail", () => {
       kind: "fault",
       fault: "detail seed malformed",
     });
+  });
+
+  it("gives a record's detail seed alone, for the terrain session (R10.T16.a)", () => {
+    expect(bodyDetailSeed(withHooks({ state: "ok", value: "0123456789abcdef" }))).toBe(
+      "0123456789abcdef",
+    );
+  });
+
+  it("gives no detail seed where the hooks or the seed are not ok, or the seed is malformed", () => {
+    expect([
+      bodyDetailSeed(withHooks({ state: "not_modelled" })),
+      bodyDetailSeed(withHooks({ state: "ok", value: "0123456789ABCDEF" })),
+      bodyDetailSeed({ hooks: { state: "not_applicable" } }),
+      bodyDetailSeed(earthDetail().record),
+    ]).toEqual([null, null, null, null]);
   });
 
   it("refuses a record of another system", () => {

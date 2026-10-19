@@ -7,11 +7,13 @@ import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
 import { PHASE_GIANT, PHASE_PLANETS, phaseScene } from "../../view/scenes/phaseScene";
 import {
   makeViewFrameDrawer,
+  presentedViewport,
   skyFaceSizePx,
+  terrainReportOf,
   ViewFrameDrawer,
   type ViewFrameInputs,
 } from "./viewFrameDrawer";
-import { startRun } from "./viewRun";
+import { runPose, startRun } from "./viewRun";
 
 /** A canvas view that records whether it was disposed. */
 class RecordingView implements RenderView {
@@ -160,6 +162,96 @@ describe("a view's photorealistic frame (R10.T10.d, T10.e)", () => {
       },
     });
     expect(asked).toEqual(LIT);
+  });
+});
+
+describe("what a view drew, for the terrain session (R10.T16.a)", () => {
+  const LIT = [...PHASE_PLANETS, PHASE_GIANT];
+
+  /** The phase scene's frame inputs at 320 × 180 CSS px and a ratio of `ratio`, in `style`. */
+  function inputsOf(style: "photorealistic" | "wireframe", ratio = 1): ViewFrameInputs {
+    return {
+      run: startRun(phaseScene()),
+      size: { widthPx: 320, heightPx: 180, devicePixelRatio: ratio, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      stars: [],
+      sky: null,
+      selection: null,
+      style,
+      setting: "low",
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+    };
+  }
+
+  /** A drawer that has drawn the phase scene's photorealistic frame, its pipelines made. */
+  async function plannedDrawer(): Promise<ViewFrameDrawer> {
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    // The first frame draws the wireframe while its pipelines compile, and plans no regimes.
+    drawer.draw(inputsOf("photorealistic"));
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    drawer.draw(inputsOf("photorealistic"));
+    return drawer;
+  }
+
+  it("plans no regimes before a photorealistic frame", async () => {
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const regimes = drawer.regimes.size;
+    drawer.dispose();
+    expect(regimes).toBe(0);
+  });
+
+  it("keeps its last photorealistic plan's regimes", async () => {
+    const drawer = await plannedDrawer();
+    const regimes = [...drawer.regimes.keys()];
+    drawer.dispose();
+    expect(regimes).toEqual(LIT);
+  });
+
+  it("keeps them through a frame drawn in the wireframe", async () => {
+    const drawer = await plannedDrawer();
+    const planned = drawer.regimes;
+    drawer.draw(inputsOf("wireframe"));
+    const kept = drawer.regimes;
+    drawer.dispose();
+    expect([planned.size > 0, kept === planned]).toEqual([true, true]);
+  });
+
+  it("reports its scene, pose, field of view, presented size, style, setting and priority", () => {
+    const inputs = inputsOf("wireframe", 1.5);
+    const regimes = new Map();
+    expect(terrainReportOf(inputs, regimes, "secondary")).toEqual({
+      scene: inputs.run.scene,
+      pose: runPose(inputs.run),
+      fovXRad: (inputs.run.camera.fovDeg * Math.PI) / 180,
+      presentedPx: { widthPx: 480, heightPx: 270 },
+      style: "wireframe",
+      setting: "low",
+      streamPriority: "secondary",
+      regimes,
+    });
+  });
+
+  it("reports nothing while its stage is not laid out", () => {
+    expect(terrainReportOf({ ...inputsOf("wireframe"), size: null }, new Map(), "primary")).toBe(
+      null,
+    );
+  });
+
+  it("presents at its stage's size times its ratio, rounded, at least a pixel", () => {
+    expect([
+      presentedViewport({ widthPx: 320.4, heightPx: 180, devicePixelRatio: 1.25, remPx: 16 }),
+      presentedViewport({ widthPx: 0.2, heightPx: 0.1, devicePixelRatio: 1, remPx: 16 }),
+    ]).toEqual([
+      { widthPx: 401, heightPx: 225 },
+      { widthPx: 1, heightPx: 1 },
+    ]);
   });
 });
 

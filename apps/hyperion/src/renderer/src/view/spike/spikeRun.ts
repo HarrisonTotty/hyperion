@@ -75,7 +75,7 @@ import {
   TEST_PLANET_FIGURE,
 } from "./spikeScene";
 import type { SurfaceQuery, SurfaceQueryWorker } from "./surfaceQuery";
-import { HeightWorkerPool } from "../terrain/workers/pool";
+import { defaultHeightWorkers, HeightWorkerPool } from "../terrain/workers/pool";
 
 /** The full-window view's horizontal field of view, rad: R02's default 60°. */
 export const SPIKE_FOV_X_RAD = (DEFAULT_FOV_DEG * Math.PI) / 180;
@@ -115,9 +115,13 @@ export const SPIKE_VIEW_NAMES = {
   craft: "spike-craft",
 } as const;
 
-/** The default height-worker count (Design note 11): clamp(⌊threads ÷ 4⌋, 1, 3). */
+/**
+ * The default height-worker count (Design note 11): clamp(⌊threads ÷ 4⌋, 1, 3), the terrain's own
+ * `defaultHeightWorkers` (`workers/pool.ts`, where R10.T16.a moved it for `VIEW`'s terrain session),
+ * under the name the spike's launch reads.
+ */
 export function defaultSpikeWorkers(hardwareConcurrency: number): number {
-  return Math.min(3, Math.max(1, Math.floor(hardwareConcurrency / 4)));
+  return defaultHeightWorkers(hardwareConcurrency);
 }
 
 /** The spike's own workers and pool: the browser's by default, fakes in a test. */

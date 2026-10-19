@@ -41,7 +41,9 @@ import { type FakeViewEngine, fakeViewEngineSource } from "./fakeViewEngine";
 import { FakeWebSocket } from "./FakeWebSocket";
 import { anOpenedUniverse, aUniverseList } from "./galaxyFixtures";
 import { SCENE_TIDAL_RADIUS_M, sceneClock, shipInSystem, sliceSceneSystem } from "./sceneFixture";
+import { ScriptedHeightWorker } from "./scriptedHeightWorker";
 import { ServerLinkHarness } from "./ServerLinkHarness";
+import type { WorkerLike } from "../view/terrain/workers/pool";
 
 /**
  * The stage's laid-out width in the tests, CSS px (and device px, at a ratio of 1): 80 rem, room
@@ -388,9 +390,14 @@ export interface ViewDisplayHarness {
   readonly views: () => FakeView[];
   /** The server link's socket, which the test answers as the server. */
   readonly socket: FakeWebSocket;
+  /**
+   * Every height worker the display's terrain sessions started, first first (plan R10,
+   * R10.T16.a): scripted, each answering when the test tells it.
+   */
+  readonly heightWorkers: ReadonlyArray<ScriptedHeightWorker>;
 }
 
-/** Renders `VIEW` in its providers with fake frames, layout and engine. */
+/** Renders `VIEW` in its providers with fake frames, layout, engine and height workers. */
 export function renderViewDisplay(options: {
   readonly store: GraphicsStatusStore;
   readonly source: ViewEngineSource;
@@ -412,6 +419,13 @@ export function renderViewDisplay(options: {
   );
   vi.stubGlobal("WebSocket", FakeWebSocket);
   const user = userEvent.setup({ advanceTimers });
+  const heightWorkers: ScriptedHeightWorker[] = [];
+  // One factory for the render's life: a session is made anew only when its source changes.
+  const startHeightWorker = (): WorkerLike => {
+    const worker = new ScriptedHeightWorker();
+    heightWorkers.push(worker);
+    return worker;
+  };
   render(
     <ServerLinkHarness>
       <UniverseProvider>
@@ -422,7 +436,11 @@ export function renderViewDisplay(options: {
               <Activity mode="visible">
                 {/* In the console frame's work area, as `ConsoleFrame` lays VIEW out. */}
                 <main className="console__work console__work--view">
-                  <ViewDisplay engineSource={options.source} setting={options.setting} />
+                  <ViewDisplay
+                    engineSource={options.source}
+                    setting={options.setting}
+                    heightWorkers={startHeightWorker}
+                  />
                 </main>
               </Activity>
             )}
@@ -451,6 +469,7 @@ export function renderViewDisplay(options: {
     },
     views: () => options.engines.flatMap((engine) => engine.views),
     socket,
+    heightWorkers,
   };
 }
 

@@ -76,11 +76,18 @@ import { PRECISION_SCENE_NAME, precisionScene } from "../../view/scenes/precisio
 import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
 import { type LightingState, lightingStatement } from "../../view/lighting/hostLights";
 import { closureRateMPerS } from "../../view/wireframe/symbology";
+import type { TerrainFixture } from "./useTerrainSession";
 
 /** A kept scene the `SCENE` selector offers, by the name it shows. */
 export interface SceneOption {
   readonly name: string;
   readonly make: () => KeptScene;
+  /**
+   * Its terrain fixture, for which `VIEW` makes a terrain session over the fixture's link (plan R10,
+   * R10.T16.a; `TERRAIN TEST`'s, R10.T16.d); absent, as for every kept scene before it, the scene
+   * has no terrain session.
+   */
+  readonly terrain?: TerrainFixture;
 }
 
 /**

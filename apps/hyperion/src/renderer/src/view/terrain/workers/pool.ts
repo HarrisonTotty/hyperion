@@ -28,6 +28,10 @@
  *
  * A body's coarse class map for R07's disc (plan R10, T10.d) is asked of one worker
  * ({@link HeightWorkerPool.classMap}), after the blocks posted before it, which it reads.
+ *
+ * A pool made without bake settings (plan R10, R10.T16.a: the terrain session's, whose passes
+ * bake through lanes of their own from R10.T16.b) holds the fields and answers the class maps
+ * alone, and refuses every bake request.
  */
 
 import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
@@ -72,6 +76,24 @@ export const MAX_IN_FLIGHT_PER_WORKER = 2;
  */
 export const MAX_CONSECUTIVE_WORKER_FAILURES = 3;
 
+/**
+ * The default number of height workers (R05 Design note 11): clamp(⌊threads ÷ 4⌋, 1, 3), the
+ * machine's budget for the terrain whatever the views and bodies.
+ *
+ * @remarks
+ * One pool runs them: the descent spike's (as `defaultSpikeWorkers`) and `VIEW`'s terrain session's
+ * (plan R10, R10.T16.a). A thread count the browser does not report as a finite number takes the
+ * least, one worker.
+ *
+ * @param hardwareConcurrency - The machine's logical processors, `navigator.hardwareConcurrency`.
+ */
+export function defaultHeightWorkers(hardwareConcurrency: number): number {
+  if (!Number.isFinite(hardwareConcurrency)) {
+    return 1;
+  }
+  return Math.min(3, Math.max(1, Math.floor(hardwareConcurrency / 4)));
+}
+
 /** What makes a pool. */
 export interface HeightWorkerPoolOptions {
   /** How many workers to run, at least one (Design note 11's defaults, or `--workers`). */
@@ -85,8 +107,13 @@ export interface HeightWorkerPoolOptions {
    * The setting's vertex path and normal resolution and the height source, sent with every bake.
    * A body's source holds its bakes back until its field is started, and makes them stale as its
    * field grows.
+   *
+   * @remarks
+   * Absent for a pool that holds fields and answers class maps but bakes nothing (the terrain
+   * session's, R10.T16.a, until R10.T16.b's lanes): its {@link HeightWorkerPool.request},
+   * {@link HeightWorkerPool.reprioritise} and {@link HeightWorkerPool.cancelStale} throw.
    */
-  readonly bake: BakeSettings;
+  readonly bake?: BakeSettings;
 }
 
 /** A request given up because its bake failed, for the metrics and the console. */
@@ -207,7 +234,8 @@ function before(a: Queued, b: Queued): boolean {
  */
 export class HeightWorkerPool {
   private readonly createWorker: () => WorkerLike;
-  private readonly settings: BakeSettings;
+  /** The bakes' settings, or `null` for a pool that bakes nothing (R10.T16.a). */
+  private readonly settings: BakeSettings | null;
   private readonly slots: Slot[] = [];
   private readonly queue = new Map<string, Queued>();
   private readonly wanted = new Set<string>();
@@ -230,8 +258,8 @@ export class HeightWorkerPool {
       throw new Error(`a height-worker pool needs at least one worker, not ${opts.workers}`);
     }
     this.createWorker = opts.createWorker;
-    this.settings = opts.bake;
-    this.sourceBody = opts.bake.source.kind === "body" ? opts.bake.source.body : null;
+    this.settings = opts.bake ?? null;
+    this.sourceBody = opts.bake?.source.kind === "body" ? opts.bake.source.body : null;
     for (let n = 0; n < opts.workers; n += 1) {
       const slot: Slot = {
         worker: this.createWorker(),
@@ -298,6 +326,21 @@ export class HeightWorkerPool {
   }
 
   /**
+   * The pool's own copy of every body's field together, bytes: each kept field's blocks, held on
+   * the render thread for a worker that replaces a failed one (R10.T7's "The pool's own copy"; R10.T14
+   * and R12 Design note 6 state it beside {@link HeightWorkerPool.fieldResidentBytes}).
+   */
+  get keptFieldBytes(): number {
+    let bytes = 0;
+    for (const kept of this.fields.values()) {
+      for (const block of kept.blocks) {
+        bytes += block.byteLength;
+      }
+    }
+    return bytes;
+  }
+
+  /**
    * How many requests wait for a block of the source body's field, which their surveys' margins
    * are still to come in: patches waiting on a surveyed region's chunk, which R10's Design note 16
    * counts toward R05's `TERRAIN: STREAMING` (they are among the patches it finds missing; the
@@ -330,9 +373,12 @@ export class HeightWorkerPool {
   /**
    * Queues one request, or re-scores it if queued already or waiting for a block; one in flight is
    * left alone.
+   *
+   * @throws Error once the pool is terminated, or for a pool made without bake settings.
    */
   request(r: PatchRequest): void {
     this.assertLive();
+    this.assertBakes();
     const keyString = patchKeyString(r.key);
     if (this.failedKeys.has(keyString)) {
       return;
@@ -350,9 +396,12 @@ export class HeightWorkerPool {
    * Replaces the demand, once a frame: queues new requests, re-scores queued ones and drops those
    * no longer in the demand. Requests in flight are untouched, and their results are kept if their
    * keys are still in the demand when they arrive.
+   *
+   * @throws Error once the pool is terminated, or for a pool made without bake settings.
    */
   reprioritise(demand: ReadonlyArray<PatchRequest>): void {
     this.assertLive();
+    this.assertBakes();
     this.generation += 1;
     this.wanted.clear();
     this.queue.clear();
@@ -377,9 +426,12 @@ export class HeightWorkerPool {
   /**
    * Drops every queued or waiting request, and every result yet to arrive, whose key is not in
    * `keep`.
+   *
+   * @throws Error once the pool is terminated, or for a pool made without bake settings.
    */
   cancelStale(keep: ReadonlySet<string>): void {
     this.assertLive();
+    this.assertBakes();
     for (const keyString of this.queue.keys()) {
       if (!keep.has(keyString)) {
         this.queue.delete(keyString);
@@ -558,6 +610,16 @@ export class HeightWorkerPool {
     }
   }
 
+  /** The bakes' settings, of a pool made with them. */
+  private assertBakes(): BakeSettings {
+    if (this.settings === null) {
+      throw new Error(
+        "the height-worker pool was made without bake settings: it holds fields and answers class maps alone",
+      );
+    }
+    return this.settings;
+  }
+
   private isInFlight(keyString: string): boolean {
     for (const slot of this.slots) {
       for (const inFlight of slot.inFlight.values()) {
@@ -623,7 +685,8 @@ export class HeightWorkerPool {
         id: inFlight.id,
         key: next.request.key,
         generation: inFlight.generation,
-        settings: this.settings,
+        // A pool without settings queues nothing, since its every request is refused.
+        settings: this.assertBakes(),
       },
       [],
     );

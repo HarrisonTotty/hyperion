@@ -36,6 +36,7 @@ import {
   PhotorealRenderer,
   type PhotorealStatus,
 } from "../../view/photoreal/renderer";
+import type { ViewBudget } from "../../view/budget/viewBudget";
 import type { Histogram } from "../../view/post/histogram";
 import type { MeterMode } from "../../view/post/meter";
 import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
@@ -49,6 +50,7 @@ import { HostDiscLayer } from "../../view/sky/disc";
 import { skySpriteStars } from "../../view/sky/sprites";
 import type { ClassMapSource } from "../../view/terrain/classMap";
 import type { HandoverReliefSource } from "../../view/terrain/handover";
+import type { TerrainViewReport } from "../../view/terrain/session";
 import {
   buildWireframeDrawList,
   type DrawAnchor,
@@ -99,12 +101,12 @@ export interface ViewFrameInputs {
   readonly meter: MeterMode | null;
   /**
    * The class maps its lit bodies' discs shade with (plan R10, R10.T10.d), made on the drawer's
-   * engine; absent, every disc is uniform. No view feeds one until a body's terrain is drawn live.
+   * engine: the terrain session's (R10.T16.a), every view's alike; absent, every disc is uniform.
    */
   readonly classMaps?: ClassMapSource | undefined;
   /**
-   * Its lit bodies' reliefs, by which a body hands over to terrain (plan R10, R10.T10.e); absent,
-   * none hands over. No view feeds them until a body's field is held live.
+   * Its lit bodies' reliefs, by which a body hands over to terrain (plan R10, R10.T10.e): the
+   * terrain session's (R10.T16.a), every view's alike; absent, none hands over.
    */
   readonly reliefs?: HandoverReliefSource | undefined;
   /**
@@ -120,6 +122,49 @@ export interface ViewFrameDrawn {
   readonly anchors: ReadonlyArray<DrawAnchor>;
   /** The style it was drawn in: the wireframe while the photorealistic pipelines compile. */
   readonly drawnStyle: RenderStyle;
+}
+
+/**
+ * The size a view presents its frames at, device px: its stage's laid-out size times its
+ * device-pixel ratio, rounded, at least 1 on each axis; its canvas's, which its wireframe draws at
+ * and its photorealistic frame is presented at.
+ */
+export function presentedViewport(size: ElementSize): ViewSize {
+  const ratio = size.devicePixelRatio;
+  return {
+    widthPx: Math.max(1, Math.round(size.widthPx * ratio)),
+    heightPx: Math.max(1, Math.round(size.heightPx * ratio)),
+  };
+}
+
+/**
+ * What a view drew this frame, for the terrain session (plan R10, R10.T16.a): its run's scene and
+ * pose, its field of view, its presented size, its budget's style and streaming priority, the
+ * setting and its drawer's last plan's regimes; `null` while its stage is not laid out, when it
+ * drew nothing.
+ *
+ * @param regimes - Its drawer's last photorealistic plan's regimes ({@link ViewFrameDrawer.regimes}).
+ * @param streamPriority - Its budget's terrain streaming priority (`ViewBudget.streamPriority`).
+ */
+export function terrainReportOf(
+  inputs: ViewFrameInputs,
+  regimes: ReadonlyMap<BodyIdHex, LitRegime>,
+  streamPriority: ViewBudget["streamPriority"],
+): TerrainViewReport | null {
+  const { run, size } = inputs;
+  if (size === null) {
+    return null;
+  }
+  return {
+    scene: run.scene,
+    pose: runPose(run),
+    fovXRad: (run.camera.fovDeg * Math.PI) / 180,
+    presentedPx: presentedViewport(size),
+    style: inputs.style,
+    setting: inputs.setting,
+    streamPriority,
+    regimes,
+  };
 }
 
 /**
@@ -206,6 +251,16 @@ export class ViewFrameDrawer {
   }
 
   /**
+   * Each lit body's regime in its last photorealistic plan (R07's, with T10.e's `terrain`), the
+   * hysteresis's previous frame, by which the terrain session takes the bodies it hands over
+   * (plan R10, R10.T16.a's report); none before such a frame. A frame drawn in the wireframe plans
+   * no regimes and leaves them as they were.
+   */
+  get regimes(): ReadonlyMap<BodyIdHex, LitRegime> {
+    return this.#regimes;
+  }
+
+  /**
    * The latest histogram read back since the last call (`PhotorealRenderer.takeHistogram`), or
    * `undefined` where none has arrived: always, for a view whose frames carry no meter.
    */
@@ -220,10 +275,7 @@ export class ViewFrameDrawer {
       return null;
     }
     const ratio = size.devicePixelRatio;
-    const viewport = {
-      widthPx: Math.max(1, Math.round(size.widthPx * ratio)),
-      heightPx: Math.max(1, Math.round(size.heightPx * ratio)),
-    };
+    const viewport = presentedViewport(size);
     if (this.#sized?.widthPx !== viewport.widthPx || this.#sized.heightPx !== viewport.heightPx) {
       this.#view.resize(viewport);
       this.#sized = viewport;

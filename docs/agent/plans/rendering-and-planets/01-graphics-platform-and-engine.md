@@ -3020,6 +3020,13 @@ src/renderer/src/view` passes; `just test-render` (SwiftShader, headless) passes
   Append-only, in `types.ts`, `webgpu/timing.ts`, `webgpu/engine.ts` and `resilientEngine.ts`.
 - **Device limits requested by R05.T11.a** (decisions-r06-r07.md item 7, 2026-10-02): `createWebGpuEngine` requests the adapter's `maxStorageBufferBindingSize` and `maxBufferSize`, capped at 1 GiB, through `requiredLimits` in `platform.ts`; `GpuCapabilities` carries both, read from the device; `CapabilityOverrides.defaultLimits` keeps the defaults for the harness. Additive; defaults otherwise unchanged. No binding-count limit is raised (main's ruling for R10.T10.b, 2026-10-15); materials may declare a storage binding's stages (R10.T10.c).
 - **Extended by R06** (append-only, approved 2026-10-03): `releaseBuffer`, `releaseTexture`, `createPackedCube`'s optional `name` and `createPointSplatAsync` (R06.T13.h); `writePackedCubeLevelFromBuffer`'s optional `face`, the buffer then holding that one face (R06.T13.g); `MemoryCategory` gains `sky-cube` and `sky-scratch`; `WGSL_CATALOGUE` takes a `point-splat` kind. Existing callers unchanged; recorded in R06's Risks.
+- **Extended by R10.T16.b** (decision-r10-t16-contracts §1, append-only): `releaseMesh(mesh)`, which
+  destroys the mesh's vertex and index buffers at once (one `destroyed` allocation event each, with
+  the bytes made), and `releaseMaterial(material)`, which forgets the material's record and clears
+  the draw path's bind-group cache; each refuses a handle the engine did not make or has released,
+  and a released handle is refused by every later call. `ResilientEngine` forwards them and drops a
+  lost engine's handles; the fake, counting and probed engines follow. As `releaseBuffer`'s, a
+  caller never releases a handle a frame not yet submitted holds. Recorded in R10's Risks.
 - **A `2d-array` binding takes a single-layer 2D texture** (R05.T11.a, approved by the orchestrator 2026-10-03): `drawing.ts`'s `viewDimensionBinds` lets a material declaring `viewDimension: "2d-array"` bind a 2D texture of one layer, viewed as a one-layer array, so that R05's layered normals atlas binds whatever its layer count; every other mismatch is refused as before (`engine.test.ts`). `platform.ts` gains `MAX_TEXTURE_ARRAY_LAYERS` (256, WebGPU's default, never raised). Additive.
 - **A compute binding takes the view dimension its kernel declares** (R08.T0;
   `decision-r08-design.md` item 1, 2026-10-09). `kernelBindings` reads each texture binding's
@@ -3029,3 +3036,10 @@ src/renderer/src/view` passes; `just test-render` (SwiftShader, headless) passes
   one-layer array, as R05.T11.a's rule lets a material. A cube's storage view stays a six-layer
   `2d-array`, and any other mismatch throws, naming the kernel and the binding, where WebGPU
   would refuse the submission. `ComputeBindings` is unchanged. Additive.
+- **Deferred from R10.T16 (decision-r10-t16-contracts §1, 2026-10-19).** R01-1: objects disposed
+  while the engine lives still leave their small meshes and materials, once an instrument's
+  lifetime: `PhotorealRenderer`'s sprite quad and triangle, the wireframe's, the bodies', the sky's
+  and the bloom chain's; their owners adopt `releaseMesh` and `releaseMaterial` when they next touch
+  them. R01-2 (R10.T14): each terrain hand-over compiles the terrain material afresh and allocates a
+  whole cache budget (64–400 MB), so a pass made and dropped at an instrument's zoom churns both;
+  R10.T14 measures it and decides whether passes share a material or a cache.
