@@ -94,24 +94,39 @@ pub(crate) fn place(pass: &Pass<'_>, working: &mut Working) -> Sea {
 }
 
 /// Refloods the ocean on `working` against the sea level it holds, which the climate is reduced
-/// to, after the craters that waited for the erosion step (main's ruling R4): the sea's cells,
-/// those of the main liquid, are drained, and the flood runs again from a fresh seed with the
-/// level kept.
+/// to, after the craters that waited for the erosion step (main's ruling R4): every cell under a
+/// liquid is drained, and the flood runs again from a fresh seed with the level kept.
+///
+/// The climate step has by then shared the flooded cells among the liquids by substance
+/// (R09.T13.d's `seas`), and every cell with a liquid entry is the ocean's until R09.T14's lakes.
+/// A cell flooded both before and after keeps the liquid it held; a cell the late craters newly
+/// flood takes the main liquid; and a cell they raise out of the sea is dry, with no liquid entry.
+/// Each liquid's share of the ocean then holds but for the cells the late craters moved
+/// (labelled; for R09.T14.d, whose re-match counts the late craters, ruling R4).
 ///
 /// # Panics
 ///
 /// As [`place`].
 pub(crate) fn reflood(pass: &Pass<'_>, working: &mut Working) -> Sea {
-    if let Some(main) = pass.inputs().main_liquid() {
-        for cell in &mut working.cells {
-            if cell.liquid_entry == Some(main) {
+    let held: Vec<Option<u8>> = working
+        .cells
+        .iter_mut()
+        .map(|cell| {
+            let liquid = cell.liquid_entry.take();
+            if liquid.is_some() {
                 cell.water_surface = cell.elevation;
-                cell.liquid_entry = None;
             }
+            liquid
+        })
+        .collect();
+    let kept = working.sea_level;
+    let sea = flood(pass, working, SeaLevel::Kept(kept));
+    for (cell, liquid) in working.cells.iter_mut().zip(held) {
+        if cell.liquid_entry.is_some() && liquid.is_some() {
+            cell.liquid_entry = liquid;
         }
     }
-    let kept = working.sea_level;
-    flood(pass, working, SeaLevel::Kept(kept))
+    sea
 }
 
 /// A frontier cell of the flood: its filled level and its index, ordered so that the heap pops the

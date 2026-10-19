@@ -7993,8 +7993,10 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
       0.1–0.2 mm under ℓ to exercise this.
     - Taken cells at ℓ's code are the ocean's shore: dry, and counted in its area.
     - f = 0 floods nothing and keeps the lowest elevation. f = 1 floods every cell but the highest.
-    - Lean: `reflood` drains every cell of the main liquid and floods again from a fresh seed with
-      ℓ kept. On a dry world it keeps ℓ, the lowest elevation as placed; on the reference Mars the
+    - Lean: `reflood` drains every cell with a liquid entry, which until T14's lakes are the
+      ocean's, and floods again from a fresh seed with ℓ kept. A cell flooded before and after
+      keeps the liquid it held, which T13.d's `seas` may have changed (the merge with T13.a–d,
+      below). On a dry world it keeps ℓ, the lowest elevation as placed; on the reference Mars the
       late craters cut no lower.
     - The areas are the cells' solid angles, a share of the sphere of directions, where plan 14's
       fraction is one of surface area (labelled): about 10⁻⁴ apart on an Earth, up to about 10⁻²
@@ -8077,8 +8079,9 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
 
   - _For T14.d._ Its second match books `C_c` through the same `book`, at 2 `D_b`. It must
     count the waiting craters (R4) and keep the bytes' composition: fold, never stretch, a crater
-    past its fresh shape. `reflood` drains every main-liquid cell, so T13.d's and T14's lakes of
-    the main liquid must be told apart from the sea before they reuse it.
+    past its fresh shape. `reflood` drains every cell with a liquid entry, so T14's lakes must be
+    told apart from the sea before they reuse it. A cell the late craters newly flood takes the
+    main liquid, not T13.d's share by substance.
   - _Cost_ (provisional: the test profile, one test thread, on the laptop, an Intel i7-8665U, at a
     load of about 2.2, beside no other lane; each a test binary's whole run of one probe in
     `sigma_h::cost`). With n = 3, T12.e adds 6.33 s to the reference Earth (2.47 s through the
@@ -8140,6 +8143,24 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     - _Science_: no must-fix. Its should-fix items are in `synth.rs`'s anchors, which predate this
       lane and lie outside its scope, so they are recorded below. Its considers, done: DN3 cited,
       and the area against the solid angle labelled.
+  - _The merge with T13.a–d_ (2026-10-19; `origin/rendering-and-planets` at `ad7753fd`, merged
+    into the lane, not rebased). The five conflicts were module and file documentation, rewritten
+    to read T12.e's σ_h and sea under T13.a–d's climate. The climate step now reads a real sea on
+    the reference Earth: its energy-balance model's sea shares, the lapse term at the water
+    surfaces and T13.d's `seas`. Two changes beyond the documentation:
+    - `reflood` drains every cell with a liquid entry, not only the main liquid's, since T13.d's
+      `seas` may give a flooded cell another liquid. A cell flooded before and after keeps the
+      liquid it held, a cell the late craters newly flood takes the main liquid, and a cell they
+      raise out of the sea is dry with no liquid entry. Before, a late crater's raised cell kept a
+      stale liquid entry over dry ground. `the_reflood_keeps_the_liquid_each_flooded_cell_held`
+      holds it on the small wet Mars, every other flooded cell given a stand-in second liquid:
+      8,237 cells kept their liquid, 11 newly flooded and 35 drained. No reference world has both
+      a sea and late craters, so no reference world's output changes.
+    - The slow Earth test also runs the climate step on T12.e's state: it moves no ground, water
+      surface or sea level; every flooded cell, and no dry one, has a liquid; and each keeps
+      water's entry, the main liquid's. Under it the sea covers 0.709498 of the sphere and the
+      ice 0.041000, of which 0.012231 lies on the sea. The test now takes about 21 s, up from
+      12.7 s.
 - **Deferred findings (2026-10-13 rule) (R09.T12.e)** (recorded; the first two and the cost ruled
   by main on 2026-10-19 as noted).
   - _Test 2 misses on three worlds: the crater model's sub-cell share._ Finer than λ_c, the share
@@ -8172,8 +8193,8 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     well as at the margins.
   - _The degradation byte composes two wears:_ T12.d's diffusive wear and T12.e's crater scale.
     T14.d's re-match must keep the composition, folding a crater and never stretching it.
-  - _The other liquids' shares are R09.T13.d's_ (R10): the main liquid fills the summed fraction
-    until then.
+  - _The other liquids' shares are R09.T13.d's_ (R10): the main liquid fills the summed fraction,
+    and T13.d's climate step shares the flooded cells among the liquids by substance.
   - _The header's `realised_sigma_h` documentation_ still reads "of the reconstructed field … the
     area-weighted RMS elevation about its mean", where under R5 it is the whole surface's at its
     band limit. This lane may edit only `sea_level`'s documentation there; for a docs batch.
