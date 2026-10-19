@@ -6,6 +6,7 @@ import type {
   BodyEnvelopeDto,
   BodySurfaceDto,
   GasShareDto,
+  MassFractionsDto,
   ResponseFor,
   SectionDto,
 } from "@hyperion/protocol";
@@ -178,6 +179,22 @@ function earthWithSurface(
   return {
     ...detail,
     record: { ...detail.record, surface: { state: "ok", value: change(surface.value) } },
+  };
+}
+
+/** The fixture's Earth with its `ok` bulk section's layers `massFractions`. */
+function earthWithMassFractions(massFractions: MassFractionsDto): ResponseFor<"body_detail"> {
+  const detail = earthDetail();
+  const { bulk } = detail.record;
+  if (bulk.state !== "ok") {
+    throw new Error("the fixture's Earth has a bulk section");
+  }
+  return {
+    ...detail,
+    record: {
+      ...detail.record,
+      bulk: { state: "ok", value: { ...bulk.value, mass_fractions: massFractions } },
+    },
   };
 }
 
@@ -663,6 +680,32 @@ describe("SystemView's body readout", () => {
     );
 
     expect(reading("MOLE FRACTION")).toBe(moleFraction);
+  });
+
+  // signoff-12, item 43: no layer claims the whole beside another, as MOLE FRACTION's gases read.
+  it.each<readonly [string, MassFractionsDto, string]>([
+    [
+      "reads a layer below the whole whose figure rounds to 100.0 as ABOVE 99.9 %",
+      { iron: 0.00004, rock: 0.99996, water: 0, envelope: 0 },
+      partsReading("IRON 0.0 %", "ROCK ABOVE 99.9 %", "WATER 0.0 %", "ENVELOPE 0.0 %"),
+    ],
+    [
+      "reads a body of one layer alone, the whole, as 100.0 %",
+      { iron: 0, rock: 1, water: 0, envelope: 0 },
+      partsReading("IRON 0.0 %", "ROCK 100.0 %", "WATER 0.0 %", "ENVELOPE 0.0 %"),
+    ],
+    [
+      "reads a layer just below the edge of the whole at its one decimal",
+      { iron: 0.0006, rock: 0.9994, water: 0, envelope: 0 },
+      partsReading("IRON 0.1 %", "ROCK 99.9 %", "WATER 0.0 %", "ENVELOPE 0.0 %"),
+    ],
+  ])("%s", async (_name, massFractions, massFraction) => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, earthWithMassFractions(massFractions));
+
+    expect(reading("MASS FRACTION")).toBe(massFraction);
   });
 
   it("reads an older server's surface and atmosphere as NOT YET MODELLED", async () => {

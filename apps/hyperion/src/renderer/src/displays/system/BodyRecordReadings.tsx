@@ -122,6 +122,14 @@ function percent(fraction: number): string {
   return formatNumber(fraction * 100, PERCENT_DECIMALS);
 }
 
+/**
+ * A mole fraction as a percentage to the guide's three significant figures, without its unit:
+ * `0.934`, and `1.00E-4` below 0.001 %.
+ */
+function gasPercent(fraction: number): string {
+  return formatSignificant(fraction * 100);
+}
+
 /** What joins the parts of a reading of several, as the guide's Voice joins them. */
 const PART_JOIN = " · ";
 
@@ -156,6 +164,27 @@ function sharesReading(shares: ReadonlyArray<Share>): string {
 }
 
 /**
+ * A share's percentage as its part of a reading of shares reads it, without its unit: its figure,
+ * or `ABOVE 99.9` for a share below the whole whose figure rounds to the whole's, so that no part
+ * claims the whole beside another, as the guide's survey coverage reads (signoff-11, item 21;
+ * signoff-12, item 43).
+ *
+ * @remarks
+ * Ruled on the figure as shown, not on a threshold of the fraction, so that the rule and the
+ * reading agree at every rounding edge, against the same formatter's figure for the whole. `99.9`
+ * is the last figure below the whole at both precisions the readout reads shares to, three
+ * significant figures and one decimal; a share read to another would need its own. `ABOVE` keeps
+ * its figure across a no-break space, as `%` does.
+ *
+ * @param fraction - The share, from 0 to 1.
+ * @param figure - The share's percentage as shown, without its unit, from its fraction.
+ */
+function sharePercentage(fraction: number, figure: (fraction: number) => string): string {
+  const shown = figure(fraction);
+  return fraction < 1 && shown === figure(1) ? `ABOVE${NO_BREAK_SPACE}99.9` : shown;
+}
+
+/**
  * A mixture's gases as their reading, in the order the wire gives them, largest first: each named
  * by {@link substanceName} in a label's case, never by its key, with its mole fraction to the
  * guide's three significant figures (`Ar 0.934 %`), in E notation below 0.001 % (`1.00E-4 %`);
@@ -171,16 +200,10 @@ function gasesShown(gases: ReadonlyArray<GasShare>): Shown {
     ? value("NONE")
     : value(
         sharesReading(
-          gases.map((gas) => {
-            const figure = formatSignificant(gas.moleFraction * 100);
-            return {
-              name: substanceName(gas.species, "upper"),
-              // Ruled on the figure as shown, so that the rule and the reading agree at every
-              // rounding edge; `ABOVE` keeps its figure across a no-break space, as `%` does.
-              percentage:
-                gas.moleFraction < 1 && figure === "100" ? `ABOVE${NO_BREAK_SPACE}99.9` : figure,
-            };
-          }),
+          gases.map((gas) => ({
+            name: substanceName(gas.species, "upper"),
+            percentage: sharePercentage(gas.moleFraction, gasPercent),
+          })),
         ),
       );
 }
@@ -262,7 +285,7 @@ function vapourReading(vapour: Modelled<SilicateVapour>): VapourReading {
  * vapour pressure (the guide's Data states; decision-backlog-2 §2.4, decision-triton-and-e101
  * §2.3). A volatile air it holds, a young magma ocean's steam and CO2, reads its figures beside the
  * row; a vapour computed as none reads `NONE` as an airless body's air does. `SILICATE VAPOUR` is
- * drafted for the owner (decision-triton-and-e101 §2.3), as one name with the view's
+ * signed off (signoff-12, item 27), as one name with the view's
  * `SILICATE VAPOUR: NOT YET MODELLED` note, which R08.T10.a adds.
  *
  * A vapour the wire sends as a value, which no server does before P14.T55.b, reads its empty
@@ -461,14 +484,24 @@ function populationRows(population: Population): ReactNode {
  * quantity once (signoff-5, item 8): `IRON 32.3 % · ROCK 67.7 % · WATER 0.0 % · ENVELOPE 0.0 %`.
  * A layer is not a substance and keeps its word, and the layers keep the model's order, from the
  * core out, so that each stands in the same place for every body.
+ *
+ * A layer below the whole whose one-decimal figure rounds to `100.0` reads `ABOVE 99.9 %`, as
+ * `MOLE FRACTION`'s gases do, so that no layer claims the whole beside another: a rock at 0.99996
+ * reads `IRON 0.0 % · ROCK ABOVE 99.9 % · WATER 0.0 % · ENVELOPE 0.0 %`. Only a body of one layer
+ * alone reads `100.0 %`, and a layer that rounds to `0.0 %` keeps it, as a rounded share does
+ * (signoff-12, item 43).
  */
 function bulkRows(bulk: BulkProperties): ReactNode {
   const { massFractions: fractions } = bulk;
+  const layer = (name: string, fraction: number): Share => ({
+    name,
+    percentage: sharePercentage(fraction, percent),
+  });
   const layers: ReadonlyArray<Share> = [
-    { name: "IRON", percentage: percent(fractions.iron) },
-    { name: "ROCK", percentage: percent(fractions.rock) },
-    { name: "WATER", percentage: percent(fractions.water) },
-    { name: "ENVELOPE", percentage: percent(fractions.envelope) },
+    layer("IRON", fractions.iron),
+    layer("ROCK", fractions.rock),
+    layer("WATER", fractions.water),
+    layer("ENVELOPE", fractions.envelope),
   ];
   return (
     <>
