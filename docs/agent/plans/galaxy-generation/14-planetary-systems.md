@@ -6260,6 +6260,31 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
     - planets' and dwarf planets' other values are unchanged;
     - goldens: `planetary/systems` with icy moons, `planetary/moons`, the protocol fixture.
 
+- **P14.T51.h The passes' bracketed fixed point** (22 → 23; lane `p14-snapshot`, behind
+  `SnapshotRules::Batch`; amends T51.b's passes; before T54.a; decision-p14-t51-batch §4).
+  - The batch's passes iterate as T51.b built them, to 10⁻⁹ in T_eq, for at most 24 passes
+    (the sample's slowest converging body takes 19). A body that settles keeps T51.b's bits.
+  - A body not settled by then (or earlier, on a detected 2-cycle, stated) solves
+    g(A) = F(A) − A, F(A) the albedo one pass at A gives, by bisection:
+    - the bracket is the least and greatest albedo of its passes if g changes sign across them,
+      else [0, the largest `f64` below 1], where g(0) ≥ 0 > g(1⁻) always holds;
+    - 32 halvings, each one pass at the midpoint, a fixed count (2⁻³² in albedo, 10⁻⁹ in T_eq for
+      A up to 0.94);
+    - the published pass is the bracket's end with the smaller |g|, ties to the lower albedo.
+  - `ATMOSPHERE_PASS_CAP` goes. A crate-private outcome, `Converged` or
+    `Bracketed { residual }`, is kept for the tests and the bless note. A residual above 10⁻⁶ in
+    albedo is a jump across the diagonal, a state or cover change with no self-consistent albedo,
+    labelled and listed.
+  - _Tests:_
+    - converged bodies bit for bit as T51.b's (the table's three-pass bodies, so T57.a's fits are
+      unmoved);
+    - a stub F falling with slope −2 reaches its fixed point within 10⁻¹²;
+    - a stub with a jump across the diagonal ends at the jump, its residual stated;
+    - over the sample no body ends unsettled, and at most 1% is bracketed, each listed by class;
+    - two runs agree to the bit.
+  - _Files:_ `planetary/derive/mod.rs` and its tests.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::derive`, and T51.b's widened filter.
+
 #### P14.T52 Atmospheric chemistry
 
 Surface path, `planetary/chem/`. Built only with a `surface` or `envelope` section, and never
@@ -17293,7 +17318,9 @@ tables::gauss_legendre`.
   - _The passes' water cover_ until T54.a puts all a body's condensed water at its surface (the
     default share of 1): the generated Mars ices over 0.56 of its surface (T_eq 180.9 against 206.9
     K); T54.a gives the passes the real share (0.02 for Mars, 0.011 of ice).
-  - _The passes' convergence_, 20 of the sample's 954 bodies at the cap, in three classes:
+  - _The passes' convergence_ (**ruled: P14.T51.h's bracketed fixed point**,
+    decision-p14-t51-batch §4; the cap is gone, and T51.h's record classes the 20 as built), 20 of
+    the sample's 954 bodies at the cap, in three classes:
     - 9 airless bodies under a lossless frost at an albedo of about 1, their T_eq falling to about
       0 K: visible-only optics, until P14.T49.i's infrared;
     - 6 snowballs and airless moons whose albedo flips between their frost (0.99) and their rock or
@@ -17590,6 +17617,104 @@ tables::gauss_legendre`.
     the table) keeps P14.T51.a's blended edges against the annual mean.
   - _SO₂, H₂S and CO_ have phase diagrams but no gas columns, so no inventory holds them and they
     take no traps: a closed set, for the composition audit.
+- **Deviations in P14.T51.h, as built (`p14-t51hij`, 2026-10-19).** The passes' bracketed fixed
+  point, behind the `p14-snapshot` lane's hold (`SnapshotRules::Batch`, `SNAPSHOT_VERSION` = 23):
+  under `Held`, in force at 22, nothing moves and no golden reads it. The ruling is
+  decision-p14-t51-batch §4.
+  - _Where it is._ The solver is a module of its own, `planetary/derive/passes.rs` (crate-private,
+    generic over the pass, so that its stubs test it), which `PassBody::passes` calls under `Batch`;
+    `planetary/derive/mod.rs` keeps the held arm, T13.c's three, as it was, and drives the batch's
+    passes through `PassDriver` (`derive_body_driven`; `derive_body_under` drives `Solve`), whose
+    test-only `T51b` arm is P14.T51.b's loop as it was built, for the bit-for-bit test. Files beyond
+    the plan's:
+    `derive/atmosphere.rs` and `atmosphere/surface_mix.rs` (`LARGEST_BOND_ALBEDO`, the clamp,
+    re-exported for the bracket's upper bound), `moons/regular.rs` (the test getters) and
+    `system/tests.rs` (the sample test).
+  - _The constants:_ `PLAIN_PASSES` 24, `HALVINGS` 32 and `JUMP_RESIDUAL` 10⁻⁶;
+    `ATMOSPHERE_PASS_CAP` is deleted. A body takes at most 24 + 32 + 1 = 57 passes: the one more
+    where a bound of [0, 1⁻] is still an end of the bracket after the halvings, so its g is taken
+    for the choice of end (the ruling's "at most 56" omits it). The midpoint is `f64::midpoint`, and
+    a halving whose midpoint is not strictly inside the bracket stops the halvings, which moves
+    nothing, since that pass is an end's.
+  - _The outcome_ (`passes::Convergence`, crate-private, on `DerivedBody::convergence` with a test
+    getter on `DerivedMoon`): `Converged`, `Bracketed { residual }`, and **`Fixed`, a third
+    variant** for the held rules' three passes, which neither converge nor bracket (a deviation from
+    the ruling's two, so that a held body is not called converged). `is_jump` marks a residual above
+    `JUMP_RESIDUAL`.
+  - _The bracket's signs:_ the bisection keeps the lower end's side of the diagonal, g ≥ 0 taken as
+    one side, so that a bracket from the passes in either orientation halves soundly. The bound
+    1⁻ is taken as g < 0 without a pass; where F(1⁻) = 1⁻ (a lossless frost at the area mix's
+    clamp) g is 0 there, and the bound, kept as an end, is taken and published at a residual of 0.
+  - _The detected 2-cycle (stated):_ the plain passes stop where the albedo a pass reads equals, by
+    `total_cmp`, the one read two passes before. A pass is a function of the albedo it reads alone
+    (the passes' surface is built once before the first), so the passes would repeat the cycle,
+    and the least and greatest albedos read and g at each are those 24 plain passes end with: the
+    published pass is the same to the bit, tested against the passes run on
+    (`stopping_at_a_detected_2_cycle_moves_nothing`). It saves passes only.
+  - _Bit for bit:_ `atmosphere::tests::a_body_that_settles_keeps_t51b_s_bits` derives every body of
+    the table, Jupiter, an icy member as recorded and as placed, and a Pluto under both drivers and
+    holds every field equal, the count and the outcome included (the table's three-pass bodies, so
+    T57.a's fits do not move); `passes::tests::on_stubs_the_solver_settles_as_t51b_s_loop` holds
+    the solver to the loop on 361 linear stubs. Checked once over the sample (a probe, not kept):
+    every one of the 934
+    converged bodies took the same passes as at T51.b, and 933 compared to the bit in the albedo,
+    T_eq and T_s against T51.b's loop restored (the 934th, a three-pass body, was dropped by the
+    probe's filter); the table's lines too.
+  - _The slope test:_ "a stub F falling with slope −2 reaches its fixed point within 10⁻¹²" is met
+    by a stub held into a band about its fixed point (10⁻³ below, 1.5 × 10⁻³ above, as a cloud's
+    availability is held at 1), whose passes 2-cycle at the band's edges: 2.3 × 10⁻¹³ from the
+    fixed point. Unbounded, the slope drives the passes to the clamps, and 32 halvings of a bracket
+    0.75 wide reach only 1.75 × 10⁻¹⁰ (tested at 2⁻³²); 10⁻¹² there would need 39.
+  - _The sample_ (the first 60 systems generated whole, 954 bodies, 2026-10-19): passes
+    {3: 764, 4: 100, 5: 12, 6: 14, 7: 12, 8: 2, 9: 1, 10: 3, 11: 4, 12: 1, 13: 2, 14: 2, 15: 3,
+    16: 6, 17: 5, 18: 2, 19: 1, 36: 5, 37: 8, 38: 2, 40: 2, 56: 3}. 934 converge as at T51.b, and
+    the 20 at T51.b's cap are bracketed, 2.1%, in three classes:
+    - **5 fixed points the plain passes oscillate about**, the temperate rocky worlds (residuals
+      1.0 × 10⁻¹²–4.2 × 10⁻¹¹, all under 10⁻⁹, asserted): each publishes its self-consistent albedo,
+      0.197–0.276 (T_eq 216–249 K, T_s 272–280 K), in place of whichever end of its 2-cycle the cap's
+      parity landed on. T51.h owns them, and they are settled.
+    - **8 lossless visible-only frosts at the clamp**, airless icy members and one rocky member,
+      each published at the area mix's clamp, 1⁻, a fixed point there (residual 1.1 × 10⁻¹⁶), with
+      T_eq about 0 K: P14.T49.i's infrared, which gates T54.a.
+    - **7 jumps across the diagonal** (residuals 0.015–0.41), 0.73% of the sample, under the ruling's
+      1%:
+      - 6 at **the airless threshold** (`AIRLESS_PRESSURE`, 100 Pa): an air of N₂ (93.0 Pa) and Ar
+        (7.0 Pa) buffered by its own ices reaches 100 Pa at T_eq 44.74 K. Below it the body is
+        `Airless` under its frosts; above it a `Snowball` (or, for one rocky member about an
+        evolved host, a `RunawayGreenhouse` at T_s 45.8 K, Venus's deck at 0.76) with its cloud: the
+        albedo F jumps between 0.15–0.56 and 0.73–0.99 across one temperature. They are a state
+        change of T13.c's at a fixed pressure, so T54.a's cold profile moves them but does not
+        remove them; the bisection publishes the threshold's two sides' nearer end, labelled.
+        T51.b's record called the class an ice edge of the step cover: it is this state edge.
+      - 1 **cover flip** on a 200-bar N₂ and CH₄ snowball at T_eq 112.9 K, T_s 190.6 K (0.68 against
+        0.59), the step cover's, for T54.a's cold profile.
+  - _The sample test's measures, as built_ (a deviation from "at most 1% is bracketed"): at 23's
+    stand-ins 2.1% is bracketed, 8 of them lossless frosts until T49.i, so the test asserts the
+    ruling's own escalation measure, at most 1% jumping (0.73%), a 3% guard on all the bracketed,
+    every fixed point's residual under 10⁻⁹, every body's T_eq its published albedo's to the bit,
+    and at most 57 passes, listing each bracketed body by class. **P14.T54.a's re-check holds the
+    bracketed to 1%** at its real inputs (decision-p14-t51-batch §8).
+  - _The cost:_ a bracketed body takes 36–56 passes (32 halvings after 4–8 plain passes where a
+    2-cycle is found to the bit, and after all 24 for the 3 that find none), against T51.b's 64 at
+    the cap, so the sample's passes fall from 4,646 to 4,166 under the batch.
+  - _Tests:_ `planetary::derive::passes::tests` (T51.b's loop on stubs; a contracting map, settled
+    and, too slow to settle, bracketed; slope −2 banded and to the clamps; the jump; the whole range
+    with its upper bound kept, and a kept lower bound taken at the end; ties to the lower albedo;
+    two runs; the early stop); `atmosphere::tests::a_body_that_settles_keeps_t51b_s_bits` (above);
+    `under_the_batch_the_table_takes_the_area_mix` and the Pluto and Triton recordings now assert
+    `Converged`, and the held table `Fixed`; and
+    `under_the_batch_the_photometry_states_the_derivation_s_albedo`, the sample's, which derives
+    each bracketed body twice and holds the two equal (the sim-determinism skill).
+- **Deferred findings (2026-10-13 rule)**, from P14.T51.h:
+  - _The airless threshold is a step_ (T13.c's `AIRLESS_PRESSURE`, 100 Pa): a body whose
+    ice-buffered air crosses it changes state, and its Bond albedo jumps, with no self-consistent
+    albedo between (6 of the sample's 954 at 23's stand-ins). A continuous transition, a frost's
+    and a thin air's albedos weighed across the threshold, would remove the jump; it is a T13.c
+    state-model change, not made here. For P14.T54.a's re-check and P14.T53.c's `Tenuous` state.
+  - _A runaway greenhouse at 46 K:_ one rocky member about an evolved host is `RunawayGreenhouse`
+    with Venus's full deck at T_s 45.8 K, its insolation once inside the runaway limit at its
+    host's largest past luminosity (T13.c's classification), which no cold body's air holds. For
+    T13.c's re-validation (P14.T54.a's bless note).
 - **Deviations in P14.T49.h, as built: step 3, the solutions (`p14-liquids`, 2026-10-16).**
   `GENERATOR_VERSION` stays 22. Nothing on the record reads `liquid_properties` before P14.T54.a
   (decision-bump-plan-after-22 §1.2), so `liquids.golden` is re-blessed at 22. Nothing is

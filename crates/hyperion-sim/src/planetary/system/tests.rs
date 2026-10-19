@@ -4155,30 +4155,79 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
     );
 }
 
-/// P14.T51.b: under the `p14-snapshot` lane's batch, over the sample's first 60 systems generated
-/// whole (`whole`, 400 real systems at the solar circle), every present planet's, member's and
-/// moon's photometry states, to the bit, the Bond albedo its derivation's equilibrium temperature
-/// was taken at, `DerivedBody::albedo` (retiring P14.T47's exception, as built); every icy member's
-/// air reads its record's ice. The passes' counts are recorded: they converge to 10⁻⁹ in the
-/// equilibrium temperature below the cap but for the bodies the passes' stand-ins make oscillate,
-/// 20 of 954 when measured, so that 97.9% converge (P14.T51.b's Risks: visible-only lossless frosts
-/// at an albedo of 1, the isothermal climate's step cover, the airless ice edge's dominance), which
-/// T49.i and T54.a take away; at most 5% of the sample is held here, a guard against a regression,
-/// not the plan's test, which this does not yet pass (reported to the lane).
+/// P14.T51.b and T51.h: under the `p14-snapshot` lane's batch, over the sample's first 60 systems
+/// generated whole (`whole`, 400 real systems at the solar circle), every present planet's,
+/// member's and moon's photometry states, to the bit, the Bond albedo its derivation's equilibrium
+/// temperature was taken at, `DerivedBody::albedo` (retiring P14.T47's exception, as built); every
+/// icy member's air reads its record's ice.
+///
+/// Every body's passes end (P14.T51.h): converged within the plain passes, or bracketed, its
+/// published pass a fixed point or a jump across the diagonal, each bracketed body listed by its
+/// class (decision-p14-t51-batch §4): a jump (a state or cover change with no self-consistent
+/// albedo), a lossless visible-only frost at the area mix's clamp (until P14.T49.i's infrared), or
+/// a fixed point that simple iteration oscillates about, held to a residual under 10⁻⁹. At most 1%
+/// of the sample jumps, the ruling's measure, and at most 3% is bracketed, a guard at 23's
+/// stand-ins; P14.T54.a's re-check holds the bracketed to 1% at its real inputs. The counts and the
+/// lists are recorded.
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of the sample's planets, members and moons, tallied and listed"
+)]
 fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     use std::collections::BTreeMap;
 
-    use crate::planetary::derive::ATMOSPHERE_PASS_CAP;
     use crate::planetary::derive::atmosphere::SnapshotRules;
+    use crate::planetary::derive::passes::{Convergence, HALVINGS, PLAIN_PASSES};
+    use crate::planetary::derive::{DerivedBody, equilibrium_temperature};
+
+    /// The classes of a bracketed body (decision-p14-t51-batch §4).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum Class {
+        /// A state or cover change with no self-consistent albedo.
+        Jump,
+        /// A lossless visible-only frost at the area mix's clamp, until P14.T49.i.
+        Frost,
+        /// A fixed point that simple iteration oscillates about.
+        FixedPoint,
+    }
+
     let t = UniverseTime::EPOCH;
     let mut counts: BTreeMap<u32, u32> = BTreeMap::new();
     let (mut bodies, mut moons, mut icy) = (0_u32, 0_u32, 0_u32);
-    let mut capped = Vec::new();
-    let mut tally = |passes: u32, what: String| {
+    let mut bracketed: BTreeMap<Class, Vec<String>> = BTreeMap::new();
+    let mut tally = |derived: &DerivedBody, what: String| {
+        let passes = derived.atmosphere_passes();
         *counts.entry(passes).or_default() += 1;
-        if passes >= ATMOSPHERE_PASS_CAP {
-            capped.push(what);
+        assert!(passes <= PLAIN_PASSES + HALVINGS + 1, "{what}: {passes}");
+        assert_same_bits(
+            derived.equilibrium_temperature().value(),
+            equilibrium_temperature(derived.flux(), derived.albedo()).value(),
+        );
+        match derived.convergence() {
+            Convergence::Converged => {}
+            Convergence::Fixed => panic!("{what}: the batch's passes are not the fixed three"),
+            Convergence::Bracketed { residual } => {
+                assert!(
+                    residual.is_finite() && residual >= 0.0,
+                    "{what}: {residual}"
+                );
+                let class = if derived.convergence().is_jump() {
+                    Class::Jump
+                } else if derived.albedo().value() > 1.0 - 1e-6 {
+                    Class::Frost
+                } else {
+                    assert!(
+                        residual < 1e-9,
+                        "{what}: a fixed point's residual {residual:e}"
+                    );
+                    Class::FixedPoint
+                };
+                bracketed
+                    .entry(class)
+                    .or_default()
+                    .push(format!("{what}, {passes} passes, residual {residual:.3e}"));
+            }
         }
     };
     for (ctx, system) in whole().iter().take(60) {
@@ -4200,12 +4249,21 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
                 continue;
             };
             assert_same_bits(photometry.bond_albedo().value(), derived.albedo().value());
+            // A bracketed body's bisection, the same twice (the sim-determinism skill).
+            if matches!(derived.convergence(), Convergence::Bracketed { .. }) {
+                let label = label::label(&system, body.index).unwrap();
+                let (_, again) = system.primary_record(&epoch, body, label, &fate);
+                assert_eq!(
+                    format!("{:?}", again.derived),
+                    format!("{:?}", Some(derived))
+                );
+            }
             if let (Some(ice), Section::Ok(bulk)) = (icy_member_ice(body), record.bulk()) {
                 assert!((bulk.fractions().water() - ice).abs() < 1e-15);
                 icy += 1;
             }
             tally(
-                derived.atmosphere_passes(),
+                &derived,
                 format!(
                     "{:?} {:?}: {:?} {:?}, read {:.4}, gives {:.4}, T_eq {:.2} K, T_s {:.2} K, water {:.3}",
                     ctx.id(),
@@ -4232,8 +4290,12 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
                 let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
                 let derived = system.moon_derived(&epoch, moon, &orbit, &now).unwrap();
                 assert_same_bits(photometry.bond_albedo().value(), derived.albedo().value());
+                if matches!(derived.convergence(), Convergence::Bracketed { .. }) {
+                    let again = system.moon_derived(&epoch, moon, &orbit, &now).unwrap();
+                    assert_eq!(format!("{again:?}"), format!("{derived:?}"));
+                }
                 tally(
-                    derived.atmosphere_passes(),
+                    derived.body(),
                     format!(
                         "{:?} {:?}: moon {:?}, read {:.4}, gives {:.4}, T_eq {:.2} K, T_s {:.2} K",
                         ctx.id(),
@@ -4249,15 +4311,30 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
             }
         }
     }
+    let total = bodies + moons;
+    let listed = bracketed
+        .iter()
+        .map(|(class, list)| format!("{} {class:?}:\n{}", list.len(), list.join("\n")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let held = bracketed.values().map(Vec::len).sum::<usize>();
     eprintln!(
         "under the batch: {bodies} planets and members ({icy} icy members) and {moons} moons; \
-         passes taken {counts:?}; at the cap {}:\n{}",
-        capped.len(),
-        capped.join("\n")
+         passes taken {counts:?}; bracketed {held} of {total}:\n{listed}"
     );
-    let total = bodies + moons;
-    let oscillating = u32::try_from(capped.len()).unwrap();
-    assert!(20 * oscillating <= total, "{oscillating} of {total}");
+    // The ruling's measure, decision-p14-t51-batch §4: a jump is a state or cover change with no
+    // self-consistent albedo, and more than 1% of them goes to main. At 23's stand-ins 7 of 954
+    // jump (6 at the airless threshold, 1 a cover flip), and 20 are bracketed in all, 8 of them
+    // lossless frosts until P14.T49.i: P14.T54.a's re-check holds all the bracketed to 1%.
+    let jumps = bracketed.get(&Class::Jump).map_or(0, Vec::len);
+    assert!(
+        100 * jumps <= usize::try_from(total).unwrap(),
+        "{jumps} of {total} jump"
+    );
+    assert!(
+        33 * held <= usize::try_from(total).unwrap(),
+        "{held} of {total} bracketed"
+    );
     assert!(
         bodies > 100 && moons > 10 && icy > 0,
         "{bodies} {moons} {icy}"

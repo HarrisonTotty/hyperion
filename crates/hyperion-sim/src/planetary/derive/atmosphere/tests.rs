@@ -2394,11 +2394,12 @@ fn a_dry_earth_beyond_the_maximum_greenhouse_still_runs_away_past_its_cold_trap(
 // P14.T51.b: the area-mix Bond albedo in the passes, under the batch, held at 22 by the lane's
 // hold.
 
+use crate::planetary::derive::passes::Convergence;
 use crate::planetary::derive::photometry::area_mix::{
     Regolith, airless_silicate_stand_in, solid_bond, sun_bands,
 };
 use crate::planetary::derive::{
-    ATMOSPHERE_PASS_CAP, ATMOSPHERE_PASSES, GivenBulk, GivenFractions, equilibrium_temperature,
+    ATMOSPHERE_PASSES, GivenBulk, GivenFractions, equilibrium_temperature,
 };
 use crate::planetary::moons::regular::moon_radius;
 use crate::planetary::params::ICY_WATER_FRACTION;
@@ -2432,6 +2433,70 @@ fn table_under(snapshot: SnapshotRules) -> Vec<(&'static str, DerivedBody)> {
         .collect()
 }
 
+/// P14.T51.h: a body whose batch passes settle within the plain passes keeps P14.T51.b's bits, its
+/// production wiring (the pass, the albedo it gives, the 10⁻⁹ test, the start) held against
+/// T51.b's loop as it was built, `PassDriver::T51b`: every body of the table, Jupiter, an icy
+/// belt member as recorded and as placed, and a Pluto, every field of their derivations the same,
+/// the count and the outcome included (the table's three-pass bodies among them, so T57.a's fits
+/// do not move).
+#[test]
+fn a_body_that_settles_keeps_t51b_s_bits() {
+    use crate::planetary::derive::{PassDriver, derive_body_driven};
+
+    let disc = solar_disc();
+    let lights = [historic_sun()];
+    let hosts = BodyHosts::new(
+        Kilograms::new(SOLAR_MASS_KG),
+        Composition::SOLAR,
+        &lights,
+        &[],
+    )
+    .unwrap();
+    let holds = BodyHolds {
+        line: NitrogenLine::in_force(),
+        snapshot: SnapshotRules::Batch,
+    };
+    let mut placed: Vec<(&str, PlacedBody)> = table_bodies()
+        .map(|&(name, kg, km, a, e)| (name, placed_about_the_sun(&disc, (kg, km, a, e))))
+        .collect();
+    placed.push((
+        "Jupiter",
+        crate::planetary::derive::solar::placed(1_898.13e24, 5.203_8, 0.048_9, 0.5),
+    ));
+    let member = crate::planetary::derive::solar::placed(1e21, 43.0, 0.05, 0.05);
+    let bulk = GivenBulk::new(
+        moon_radius(member.mass(), 0.35),
+        GivenFractions::Exactly(crate::planetary::derive::MassFractions::solid(
+            0.0, 0.65, 0.35,
+        )),
+    );
+    placed.push(("an icy member as recorded", member.with_bulk(bulk)));
+    placed.push(("an icy member as placed", member));
+    let rank = crate::planetary::derive::solar::rank_for(&disc, 1.303e22, 1_188.3, 39.48, 0.248_8)
+        .clamp(0.001, 0.999);
+    placed.push((
+        "Pluto",
+        crate::planetary::derive::solar::placed(1.303e22, 39.48, 0.248_8, rank),
+    ));
+    for (name, body) in &placed {
+        let derive = |driver| {
+            derive_body_driven(
+                holds,
+                driver,
+                body,
+                &hosts,
+                &disc,
+                SOLAR_AGE,
+                UniverseTime::EPOCH,
+            )
+            .unwrap()
+        };
+        let (solved, t51b) = (derive(PassDriver::Solve), derive(PassDriver::T51b));
+        assert_eq!(solved.convergence(), Convergence::Converged, "{name}");
+        assert_eq!(format!("{solved:?}"), format!("{t51b:?}"), "{name}");
+    }
+}
+
 /// Under version 22's rules the passes are T13.c's fixed three, and `derive_body_under`'s held arm
 /// is `derive_body`, bit for bit, for every body of the table.
 #[test]
@@ -2439,6 +2504,7 @@ fn under_the_held_rules_the_passes_are_t13c_s_three() {
     let held = table_under(SnapshotRules::Held);
     for ((name, body), (_, version_22)) in held.iter().zip(table()) {
         assert_eq!(body.atmosphere_passes(), ATMOSPHERE_PASSES, "{name}");
+        assert_eq!(body.convergence(), Convergence::Fixed, "{name}");
         assert_eq!(format!("{body:?}"), format!("{version_22:?}"), "{name}");
     }
 }
@@ -2456,8 +2522,8 @@ fn under_the_held_rules_the_passes_are_t13c_s_three() {
 /// - Jupiter, class I of Sudarsky, Burrows and Pinto about a Sun, lies within 0.05 of 0.57,
 ///   recorded against Li et al. 2018's measured 0.503 ± 0.012 (Nat. Commun. 9, 3709) and Hanel et
 ///   al. 1981's 0.343 ± 0.032;
-/// - every body's equilibrium temperature is its albedo's, and its passes converge under the cap;
-///   the rest are recorded.
+/// - every body's equilibrium temperature is its albedo's, and its passes converge within the plain
+///   passes (`Converged`, P14.T51.h); the rest are recorded.
 #[test]
 fn under_the_batch_the_table_takes_the_area_mix() {
     let batch = table_under(SnapshotRules::Batch);
@@ -2502,7 +2568,11 @@ fn under_the_batch_the_table_takes_the_area_mix() {
     let version_22 = table();
     for (name, body) in &batch {
         let passes = body.atmosphere_passes();
-        assert!(passes < ATMOSPHERE_PASS_CAP, "{name}: {passes} passes");
+        assert_eq!(
+            body.convergence(),
+            Convergence::Converged,
+            "{name}: {passes} passes"
+        );
         assert_same_bits(
             body.equilibrium_temperature().value(),
             equilibrium_temperature(body.flux(), body.albedo()).value(),
@@ -2585,7 +2655,8 @@ fn an_icy_member_takes_the_albedo_of_its_record_s_ice() {
 /// A Pluto at its own inventory under the batch (NASA's Pluto fact sheet's mass, 1.303 × 10²² kg,
 /// and mean radius, 1,188.3 km, from memory, at its 39.48 au and e 0.2488): airless with no N₂ until
 /// P14.T53.c, its albedo recorded, not asserted (decision-triton-and-e101 §1.6). Its cheap
-/// invariants are: the airless state, a finite albedo in [0, 1), and passes below the cap.
+/// invariants are: the airless state, a finite albedo in [0, 1), and passes that converge within
+/// the plain passes (`Converged`, P14.T51.h).
 #[test]
 fn a_pluto_at_its_own_inventory_is_recorded() {
     let disc = solar_disc();
@@ -2602,8 +2673,9 @@ fn a_pluto_at_its_own_inventory_is_recorded() {
         albedo.is_finite() && (0.0..1.0).contains(&albedo),
         "{albedo}"
     );
-    assert!(
-        batch.atmosphere_passes() < ATMOSPHERE_PASS_CAP,
+    assert_eq!(
+        batch.convergence(),
+        Convergence::Converged,
         "{} passes",
         batch.atmosphere_passes()
     );
