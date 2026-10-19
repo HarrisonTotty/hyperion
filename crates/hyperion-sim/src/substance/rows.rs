@@ -42,6 +42,7 @@ mod condensed;
 mod diagrams;
 pub(super) mod equations;
 pub(super) mod liquids;
+mod melts;
 pub(super) mod optics;
 
 use super::mix::{GasColumns, HeatCapacityClass};

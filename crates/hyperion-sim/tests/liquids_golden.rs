@@ -9,8 +9,10 @@
 //! 93.65 and 100 K, below and above their components' triple points; for the chloride and sulphate
 //! brines at 273.15, 288.15, 298.15 and 350 K, and at those and their eutectic at a given
 //! composition, 3.5 wt% salt, printed by key; for the aqueous acid at 250, 273.15, 300 and 323.15
-//! K, and at those and its first melt at 80 and 84.5 wt%, its second file's composition; a row
-//! whose record is refused (the perchlorate brines, for their index) by its refusal; and, in
+//! K, and at those and its first melt at 80 and 84.5 wt%, its second file's composition; a
+//! lithology's silicate melt at its solidus and at 1,473.15, 1,673.15, 2,073.15 and 3,000 K (its
+//! range has no upper end; a temperature below its solidus pins the refusal); a row whose record
+//! is refused (the perchlorate brines, for their index) by its refusal; and, in
 //! `[supercooled]`, each continued viscosity
 //! ([`SupercooledViscosity`](hyperion_sim::substance::liquid::SupercooledViscosity)) from its
 //! triple point down to 71.15 K, Titan's seas' first melt. It is a file of
@@ -22,7 +24,8 @@
 
 use hyperion_sim::GENERATOR_VERSION;
 use hyperion_sim::substance::{
-    self, Composition, LiquidComposition, PhaseDiagram, SubstanceId, by_key, liquid_properties,
+    self, Composition, LiquidComposition, PhaseDiagram, SubstanceId, SubstanceKind, by_key,
+    liquid_properties,
 };
 use hyperion_sim::units::Kelvin;
 use hyperion_surface::field::LiquidProperties;
@@ -43,6 +46,10 @@ const EXTRA_TEMPERATURES_K: [(&str, &[f64]); 5] = [
     ("brine_nacl", &BRINE_TEMPERATURES_K),
     ("brine_mgso4", &BRINE_TEMPERATURES_K),
 ];
+
+/// The temperatures, K, a lithology's silicate melt is pinned at beside its solidus: 1,200 °C,
+/// 1,400 °C, the viscosity model's calculator's 1,800 °C ceiling, and a lava world's 3,000 K.
+const MELT_TEMPERATURES_K: [f64; 4] = [1_473.15, 1_673.15, 2_073.15, 3_000.0];
 
 /// See [`EXTRA_TEMPERATURES_K`].
 const BRINE_TEMPERATURES_K: [f64; 4] = [273.15, 288.15, 298.15, 350.0];
@@ -171,10 +178,21 @@ fn pin_references(w: &mut GoldenWriter) {
                 );
             }
         }
-        let mut temperatures: Vec<f64> = [0.0, 0.25, 0.5, 0.75, 0.999]
-            .iter()
-            .map(|f| lowest + f * (top - lowest))
-            .collect();
+        let melt = row.kind() == SubstanceKind::Lithology;
+        let mut temperatures: Vec<f64> = if melt {
+            std::iter::once(lowest)
+                .chain(
+                    MELT_TEMPERATURES_K
+                        .into_iter()
+                        .filter(|t| (t - lowest).abs() > 1e-9),
+                )
+                .collect()
+        } else {
+            [0.0, 0.25, 0.5, 0.75, 0.999]
+                .iter()
+                .map(|f| lowest + f * (top - lowest))
+                .collect()
+        };
         for (key, extra) in EXTRA_TEMPERATURES_K {
             if row.key().as_str() == key {
                 temperatures.extend(extra);

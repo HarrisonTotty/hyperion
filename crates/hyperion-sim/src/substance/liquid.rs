@@ -31,6 +31,14 @@
 //! model at the record's temperature (decision-p14-t49b-condensed §1.4;
 //! decision-p14-t49h-step3-composition).
 //!
+//! A lithology's silicate melt's record is its major oxides' (decision-r11-palette-liquids §1.8's
+//! "Molten silicate" row; decision-p14-t49h-step4-melts), by crate-private models of the melt at
+//! the record's temperature and one bar: the viscosity by Giordano, Russell and Dingwell 2008, or,
+//! for an alkali-poor, aluminium-rich melt, by Giordano and Russell 2007's CaO–MgO–Al₂O₃–SiO₂
+//! model; the density by Lange and Carmichael's partial molar volumes; the index and absorption
+//! R08's basaltic glass's, held; the surface tension a stated constant; no scattering. Its
+//! composition is its oxides, which are not registry rows, so it has no components.
+//!
 //! A member with no source is absent from the record, never 0 (decision-r11-palette-liquids
 //! §1.4), and the record's [`LiquidBasis`] is the least direct of its members' (§1.1).
 //!
@@ -55,9 +63,23 @@
 //!   its index and absorption between Palmer and Williams's 75 and 84.5 wt% files, Vehkamäki et
 //!   al. 2002's surface tension and Williams and Long 1995's viscosity.
 //!
-//! Its later steps add the nine rows R08.T5.k gives liquid files (carbon dioxide's columns, built,
-//! join them; decision-p14-t49h-gas-index §1) and the melts
-//! (`docs/agent/plans/galaxy-generation/14-planetary-systems.md`, P14.T49.h's record). Until then
+//! Its fourth, the silicate melts of eleven lithologies (decision-p14-t49h-step4-melts; the rows
+//! and their oxides are `rows/melts.rs`'s): `basalt` and `lava_glass` (Alae's tholeiite),
+//! `basalt_fe`, `mars_dust` and `ferric` (Apollo 15 basalt 15597), `komatiite`, `basalt_reduced`
+//! (Mercury's G2), `granite` (G-1), `ultramafic` (pyrolite), `anorthosite` and `feldspathic` (the
+//! Apollo 16 soil). A melt takes Giordano and Russell 2007's viscosity where its oxides hold
+//! `Al₂O₃` of at least 15 wt%, `Na₂O` + K₂O of at most 1 wt% and at most 3 wt% of the oxides that
+//! model's mapping drops (all but `SiO₂`, `Al₂O₃`, `MgO`, `CaO`, `FeO`, `Fe₂O₃` and `MnO`), today
+//! `anorthosite` and `feldspathic`; any other melt Giordano, Russell and Dingwell 2008's; a melt
+//! that meets the first two conditions but not the third has no viscosity until a ruling (§2.3).
+//! Every melt record is `StandIn`, from its solidus with no upper end. The lithologies with no melt
+//! record (the Ca–Al residue, Fe–Ni metal, the phyllosilicate rock, the chondrites, the cometary
+//! refractory) and the minerals that decompose or melt to a salt answer
+//! [`ResolveLiquidError::NotALiquid`], each for its reason in `rows/melts.rs`. Molten sulphur
+//! (`S8`, Io's flows) is left out: its liquid density waits for P14.T49.b's last piece.
+//!
+//! Its later step adds the nine rows R08.T5.k gives liquid files (carbon dioxide's columns, built,
+//! join them; decision-p14-t49h-gas-index §1; P14.T49.h's record in galaxy plan 14). Until then
 //! [`liquid_properties`] answers [`ResolveLiquidError::NotALiquid`] for those rows.
 //!
 //! Generator version 22 publishes none of it: nothing on the record reads these columns until
@@ -78,8 +100,10 @@ use crate::math;
 use crate::units::consts::BOLTZMANN_CONSTANT;
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
 
+mod melt;
 mod solution;
 
+pub(crate) use melt::{HeldOptics, Oxide, SilicateMelt};
 pub(crate) use solution::{
     AcidOptics, AqueousAcid, AqueousElectrolyte, IdealLiquidMixing, LaliberteCooperDensity,
     LaliberteViscosity, MixingModel, MyhreDensity, RowlessSolute, SoluteAbsorption,
@@ -981,6 +1005,12 @@ pub(crate) enum LiquidConstitution {
     /// (decision-p14-t49h-step3-composition §1.3 and §6): `brine_naclo4` and `brine_mgclo4`, with
     /// their solutes' constants.
     AwaitingSolute(&'static RowlessSolute),
+    /// A lithology's silicate melt, its record made from the row's major oxides by its own models
+    /// at the record's temperature (decision-p14-t49h-step4-melts): its composition is its oxides,
+    /// which are not registry rows, so it has no components and its given composition is not
+    /// modelled (decision-p14-t49h-step3-composition §2.3); its own optics, scattering and
+    /// transport columns are `None`.
+    Melt(&'static SilicateMelt),
 }
 
 /// A row's liquid columns (decision-r11-palette-liquids §4), each `None` where not modelled.
@@ -1021,7 +1051,7 @@ impl LiquidColumns {
         match &self.constitution {
             LiquidConstitution::Pure { components, .. } => components,
             LiquidConstitution::Solution(solution) => solution.components,
-            LiquidConstitution::AwaitingSolute(_) => &[],
+            LiquidConstitution::AwaitingSolute(_) | LiquidConstitution::Melt(_) => &[],
         }
     }
 
@@ -1038,7 +1068,7 @@ impl LiquidColumns {
             LiquidConstitution::Solution(solution) => {
                 Some(LiquidComposition::of_reference(solution.reference))
             }
-            LiquidConstitution::AwaitingSolute(_) => None,
+            LiquidConstitution::AwaitingSolute(_) | LiquidConstitution::Melt(_) => None,
         }
     }
 
@@ -1264,7 +1294,7 @@ pub enum ResolveLiquidError {
         lowest: Kelvin,
         /// The temperature the range ends below: the row's critical point; for a solution, the
         /// lowest critical point among the components the composition holds; or `None` where
-        /// none states one.
+        /// none states one (a silicate melt's, whose range has no upper end).
         below: Option<Kelvin>,
     },
     /// A given composition is not modelled for the row, whose
@@ -1604,6 +1634,25 @@ pub fn pure_liquid_scattering_per_m(
 ///   ternary, the record stands in for the supercooled liquid at that composition
 ///   (decision-p14-t49b-condensed §2.4).
 ///
+/// For a lithology's silicate melt (decision-p14-t49h-step4-melts), at its reference composition
+/// alone, its major oxides:
+///
+/// - **The temperature** must lie at or above the row's first melt, its solidus, with no upper end:
+///   above its models' calibrations (2,073.15 K for the viscosity, 1,873 K for the density) each
+///   member extrapolates a continuous, bounded form.
+/// - **The viscosity** is Giordano, Russell and Dingwell 2008's model on the oxides, or, for a melt
+///   with `Al₂O₃` of at least 15 wt%, `Na₂O` + K₂O of at most 1 wt% and at most 3 wt% of other
+///   minor oxides, Giordano and Russell 2007's model of the CaO–MgO–Al₂O₃–SiO₂ melts, its iron and
+///   manganese as `MgO`: `Derived`, and absent for a melt the rule leaves to a ruling.
+/// - **The density** is Lange and Carmichael's ideal mixing of partial molar volumes, `Derived`,
+///   the compressibility neglected.
+/// - **The index and the absorption** are R08's basaltic glass's at room temperature, held, and
+///   **the surface tension** a stated constant (Walker and Mullins 1981's basaltic 0.36 N m⁻¹,
+///   Bagdassarov, Dorfman and Dingwell 2000's granitic 0.29), each `StandIn`; **the scattering** is
+///   absent.
+/// - **The basis** is `StandIn`. Between the solidus and the liquidus the record is the bulk liquid
+///   at the row's composition, not the crystal-laden residual melt.
+///
 /// [`Composition::Reference`] resolves as [`LiquidColumns::reference_composition`] given, by one
 /// path, to the bit.
 ///
@@ -1614,13 +1663,14 @@ pub fn pure_liquid_scattering_per_m(
 ///
 /// 1. [`ResolveLiquidError::NotALiquid`] for a row with no liquid columns;
 /// 2. [`ResolveLiquidError::CompositionNotModelled`] for a [`Composition::Given`] to a row with
-///    no components (the perchlorate brines);
+///    no components (the perchlorate brines and the silicate melts);
 /// 3. [`ResolveLiquidError::ComponentNotModelled`] for a given component the row's model does not
 ///    carry;
 /// 4. [`ResolveLiquidError::CompositionOutOfRange`] for a given mole fraction outside the model's
 ///    range (none for an ideal mixture; a brine's salt above its highest fraction; the acid
 ///    outside 25–85 wt%; any composition but ammonia–water's reference);
-/// 5. [`ResolveLiquidError::OutOfRange`] for a temperature outside the liquid range;
+/// 5. [`ResolveLiquidError::OutOfRange`] for a temperature outside the liquid range (for a melt,
+///    below its solidus);
 /// 6. [`ResolveLiquidError::NotModelled`] where the row's index or density, or a component's, is
 ///    not modelled.
 ///
@@ -1712,6 +1762,7 @@ pub fn liquid_properties(
             let composition = given.unwrap_or(LiquidComposition::of_reference(solution.reference));
             solution::solution_record(row, solution, composition, temperature)
         }
+        LiquidConstitution::Melt(melt) => melt::melt_record(row, melt, temperature),
     }
 }
 
@@ -1780,7 +1831,9 @@ fn pure_record(
     let lowest = condensed.transition().temperature();
     let range_row = match &columns.constitution {
         LiquidConstitution::AwaitingSolute(solute) => solute.solvent.substance(),
-        LiquidConstitution::Pure { .. } | LiquidConstitution::Solution(_) => row,
+        LiquidConstitution::Pure { .. }
+        | LiquidConstitution::Solution(_)
+        | LiquidConstitution::Melt(_) => row,
     };
     let below = range_row
         .phase_diagram()

@@ -10,7 +10,8 @@
 //! brines, aqueous electrolytes of water and a salt row; the perchlorate brines, whose solutes have
 //! no rows yet; ammonia–water at its eutectic; and aqueous sulphuric acid, the `H2SO4` row's
 //! liquid, from 25 to 85 wt% between Palmer and Williams's two measured compositions
-//! (decision-p14-t49h-step3-composition).
+//! (decision-p14-t49h-step3-composition). The lithologies' silicate melts (the fourth step) are
+//! `rows/melts.rs`'s, listed here in registry order.
 //!
 //! Every water coefficient is its release's, as printed: IAPWS R6-95(2018)'s Table 2 for the
 //! residual Helmholtz energy, R1-76(2014) for the surface tension and R12-08's Tables 1 and 2 for
@@ -39,27 +40,42 @@ use super::super::liquid::{
     ViscosityRange, WilliamsLongViscosity,
 };
 use super::super::{Basis, Source, SubstanceId};
-use super::equations;
+use super::{equations, melts};
 use crate::tables::liquid_optics as bins;
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
 
-/// Every row with liquid columns, in registry order, by key. Carbon dioxide's columns
-/// ([`CARBON_DIOXIDE`]) join when its index does, with the eight other rows R08.T5.k gives a liquid
-/// file (decision-p14-t49h-gas-index §1.2–§1.3: P14.T49.h's step 2b); until then those nine answer
+/// Every row with liquid columns, in registry order, by key: the pure liquids, the solutions and
+/// the lithologies' silicate melts (`rows/melts.rs`). Carbon dioxide's columns ([`CARBON_DIOXIDE`])
+/// join when its index does, with the eight other rows R08.T5.k gives a liquid file
+/// (decision-p14-t49h-gas-index §1.2–§1.3: P14.T49.h's step 2b); until then those nine answer
 /// `NotALiquid`.
-pub(in crate::substance) const LIQUIDS: [(SubstanceKey, LiquidColumns); 12] = [
+pub(in crate::substance) const LIQUIDS: [(SubstanceKey, LiquidColumns); 23] = [
     (SubstanceKey::new_const("H2O"), WATER),
     (SubstanceKey::new_const("CH4"), METHANE),
     (SubstanceKey::new_const("NH3"), AMMONIA),
     (SubstanceKey::new_const("N2"), NITROGEN),
     (SubstanceKey::new_const("C2H6"), ETHANE),
     (SubstanceKey::new_const("H2SO4"), SULPHURIC_ACID),
+    (SubstanceKey::new_const("mars_dust"), melts::MARS_DUST),
     (SubstanceKey::new_const("brine_nacl"), BRINE_NACL),
     (SubstanceKey::new_const("brine_mgso4"), BRINE_MGSO4),
     (SubstanceKey::new_const("brine_naclo4"), BRINE_NACLO4),
     (SubstanceKey::new_const("brine_mgclo4"), BRINE_MGCLO4),
     (SubstanceKey::new_const("nh3_h2o"), AMMONIA_WATER),
     (SubstanceKey::new_const("ch4_c2h6_n2"), TITAN_SEA),
+    (SubstanceKey::new_const("anorthosite"), melts::ANORTHOSITE),
+    (SubstanceKey::new_const("feldspathic"), melts::FELDSPATHIC),
+    (SubstanceKey::new_const("basalt"), melts::BASALT),
+    (SubstanceKey::new_const("basalt_fe"), melts::BASALT_FE),
+    (SubstanceKey::new_const("komatiite"), melts::KOMATIITE),
+    (
+        SubstanceKey::new_const("basalt_reduced"),
+        melts::BASALT_REDUCED,
+    ),
+    (SubstanceKey::new_const("granite"), melts::GRANITE),
+    (SubstanceKey::new_const("ultramafic"), melts::ULTRAMAFIC),
+    (SubstanceKey::new_const("ferric"), melts::FERRIC),
+    (SubstanceKey::new_const("lava_glass"), melts::LAVA_GLASS),
 ];
 
 /// The rows the liquid columns name as components, by registry index, which is append-only and

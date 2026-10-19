@@ -11,6 +11,14 @@
 //!   turned into a at each grid point and then interpolated linearly in a;
 //! - **the temperature** the file states, K, its label to the kelvin.
 //!
+//! **A solid held for a melt** ([`HELD_SOLIDS`]). One file is a solid's: R08's basaltic glass
+//! (`basaltic-glass.json`, Pollack, Toon and Khare 1973), whose room-temperature index and
+//! absorption the silicate melts hold as they stand, uncarried (decision-r11-palette-liquids §1.8's
+//! "Molten silicate" row). It is reduced to the bins as a liquid's file is, but it states no
+//! temperature, so its reduction has none: the table holds its n and a and no temperature item,
+//! and the sim, which never carries the glass's index, reads no state for it. No temperature is
+//! invented for it.
+//!
 //! The optical values are not fitted: every one is the files' own, reduced by stated arithmetic.
 //! R09.T2.e's hand-entered records took their bins the same way (`binmeans.py` in its lane's
 //! scratch), so a record the registry resolves at a file's own state reproduces them. Which of a
@@ -42,12 +50,15 @@ use crate::manifest::{Manifest, SimFingerprint};
 use crate::materials::MaterialFile;
 use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput, check_manifest};
 
-/// The task's revision: 1 adds the transport fit.
-pub const VERSION: u32 = 1;
+/// The task's revision: 1 adds the transport fit; 2 reads the basaltic glass, a solid held for the
+/// silicate melts ([`HELD_SOLIDS`]).
+pub const VERSION: u32 = 2;
 
-/// The files the manifest names, in its order (by name), each one of R08's liquid files.
-pub const FILES: [&str; 7] = [
+/// The files the manifest names, in its order (by name), each one of R08's liquid files or a solid
+/// of [`HELD_SOLIDS`].
+pub const FILES: [&str; 8] = [
     "ammonia-liquid.json",
+    "basaltic-glass.json",
     "ethane-liquid.json",
     "methane-liquid.json",
     "nitrogen-liquid.json",
@@ -55,6 +66,11 @@ pub const FILES: [&str; 7] = [
     "sulphuric-acid-84.json",
     "water.json",
 ];
+
+/// The files of [`FILES`] that are a solid's, whose index and absorption a liquid holds as they
+/// stand at no stated temperature: R08's basaltic glass, for the silicate melts. Their reduction
+/// has no temperature unless the file states one.
+pub const HELD_SOLIDS: [&str; 1] = ["basaltic-glass.json"];
 
 /// The rows whose viscosity the task continues below the triple point, by registry key, with
 /// their items' prefix.
@@ -68,11 +84,14 @@ pub const VFT_SAMPLES: u32 = 64;
 pub const VFT_SCAN: u32 = 400;
 
 /// The table's items: for each file in [`FILES`]'s order, its bins of n, its bins of a and its
-/// temperature; then for each row of [`SUPERCOOLED`], its B and its `T_0`.
-pub const ITEMS: [&str; 25] = [
+/// temperature (none for a solid of [`HELD_SOLIDS`] that states none); then for each row of
+/// [`SUPERCOOLED`], its B and its `T_0`.
+pub const ITEMS: [&str; 27] = [
     "AMMONIA_LIQUID_N",
     "AMMONIA_LIQUID_A",
     "AMMONIA_LIQUID_TEMPERATURE_K",
+    "BASALTIC_GLASS_N",
+    "BASALTIC_GLASS_A",
     "ETHANE_LIQUID_N",
     "ETHANE_LIQUID_A",
     "ETHANE_LIQUID_TEMPERATURE_K",
@@ -144,8 +163,9 @@ pub struct Reduced {
     pub n: [f64; LIQUID_BINS],
     /// The uniform mean of a = 4πk ÷ λ over each bin, m⁻¹.
     pub a: [f64; LIQUID_BINS],
-    /// The temperature the file states, K.
-    pub temperature_k: f64,
+    /// The temperature the file states, K: always a liquid's, and `None` for a solid of
+    /// [`HELD_SOLIDS`] that states none.
+    pub temperature_k: Option<f64>,
 }
 
 /// The absorption coefficient a = 4πk ÷ λ at each of `file`'s grid points, m⁻¹.
@@ -162,19 +182,24 @@ pub fn absorption_per_m(file: &MaterialFile) -> Vec<f64> {
 ///
 /// # Errors
 ///
-/// [`RunTaskError::Input`] if the file is not a liquid's, states no temperature, or its grid does
-/// not cover 380–760 nm.
+/// [`RunTaskError::Input`] if the file is neither a liquid's nor a solid of [`HELD_SOLIDS`], is a
+/// liquid's that states no temperature, or its grid does not cover 380–760 nm.
 pub fn reduce(name: &'static str, file: &MaterialFile) -> Result<Reduced, RunTaskError> {
     let bad = |why: String| RunTaskError::Input {
         task: "liquid_optics",
         source: format!("{name}: {why}").into(),
     };
-    if file.phase() != "liquid" {
-        return Err(bad(format!("its phase is {}, not liquid", file.phase())));
+    let held = file.phase() == "solid" && HELD_SOLIDS.contains(&name);
+    if file.phase() != "liquid" && !held {
+        return Err(bad(format!(
+            "its phase is {}, not liquid, and it is not a solid held for a melt",
+            file.phase()
+        )));
     }
-    let temperature_k = file
-        .temperature_k()
-        .ok_or_else(|| bad("it states no temperature".to_owned()))?;
+    let temperature_k = file.temperature_k();
+    if temperature_k.is_none() && !held {
+        return Err(bad("it states no temperature".to_owned()));
+    }
     let edges = bin_edges();
     let grid = file.wavelengths_nm();
     if grid[0] > edges[0] || grid[grid.len() - 1] < edges[LIQUID_BINS] {
@@ -419,14 +444,16 @@ pub fn render(reduced: &[Reduced], supercooled: &[SupercooledFit]) -> RustTable 
             ],
             values: file.a.to_vec(),
         });
-        items.push(TableItem::Scalar {
-            name: format!("{prefix}_TEMPERATURE_K"),
-            doc: vec![format!(
-                "The temperature `{}` states, K, its label to the kelvin.",
-                file.file
-            )],
-            value: file.temperature_k,
-        });
+        if let Some(temperature_k) = file.temperature_k {
+            items.push(TableItem::Scalar {
+                name: format!("{prefix}_TEMPERATURE_K"),
+                doc: vec![format!(
+                    "The temperature `{}` states, K, its label to the kelvin.",
+                    file.file
+                )],
+                value: temperature_k,
+            });
+        }
     }
     for fit in supercooled {
         items.push(TableItem::Scalar {
@@ -466,11 +493,15 @@ pub fn render(reduced: &[Reduced], supercooled: &[SupercooledFit]) -> RustTable 
                 .to_owned(),
             "fitted: the values are the files', reduced. Which members the registry reads, and on what"
                 .to_owned(),
-            "basis, is `substance::liquid`'s. Then each supercooled row's Vogel–Fulcher–Tammann B and"
+            "basis, is `substance::liquid`'s. The basaltic glass, a solid's file held for the silicate"
                 .to_owned(),
-            "`T_0`, fitted to its viscosity along the saturated liquid from its triple point to its"
+            "melts, is reduced alike; it states no temperature, so it has none here. Then each"
                 .to_owned(),
-            "normal boiling point, anchored at its triple point (`SupercooledViscosity`).".to_owned(),
+            "supercooled row's Vogel–Fulcher–Tammann B and `T_0`, fitted to its viscosity along the"
+                .to_owned(),
+            "saturated liquid from its triple point to its normal boiling point, anchored at its triple"
+                .to_owned(),
+            "point (`SupercooledViscosity`).".to_owned(),
         ],
         items,
     }
@@ -560,10 +591,19 @@ impl FitTask for LiquidOpticsTask {
             })
             .collect();
         let acceptance = format!(
-            "{} liquid files, each to {LIQUID_BINS} bins over 380–760 nm; water.json's a on its grid: \
-             {} m⁻¹ at 440 nm (Mason, Cone and Fry 2016's 0.00522), {} at 550 nm and {} at 700 nm \
-             (Pope and Fry 1997's 0.0565 and 0.624); supercooled viscosity: {}",
+            "{} material files ({} liquids' and {} solid's held for the melts), each to \
+             {LIQUID_BINS} bins over 380–760 nm; water.json's a on its grid: {} m⁻¹ at 440 nm \
+             (Mason, Cone and Fry 2016's 0.00522), {} at 550 nm and {} at 700 nm (Pope and Fry \
+             1997's 0.0565 and 0.624); supercooled viscosity: {}",
             reduced.len(),
+            reduced
+                .iter()
+                .filter(|r| !HELD_SOLIDS.contains(&r.file))
+                .count(),
+            reduced
+                .iter()
+                .filter(|r| HELD_SOLIDS.contains(&r.file))
+                .count(),
             at(440.0),
             at(550.0),
             at(700.0),
@@ -575,10 +615,12 @@ impl FitTask for LiquidOpticsTask {
                      (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`), each citing its \
                      own primaries: IAPWS R9-97, Mason, Cone and Fry 2016, Pope and Fry 1997 and \
                      Kou, Labrie and Chýlek 1993 (water); Martonchik and Orton 1994 (methane); \
-                     Augustin 1915 (nitrogen); Hagermann et al. 2005 with Loria 1909 (ethane); \
-                     Wong and Anderson 1972 with Cuthbertson 1914 (ammonia); Palmer and Williams \
-                     1975 (sulphuric acid); and the sim's own liquid viscosities, Sotiriadou et al. \
-                     2026 (methane) and Friend, Ingham and Ely 1991 (ethane), for the transport fit"
+                     Pollack, Toon and Khare 1973 (basaltic glass, a solid held for the silicate \
+                     melts); Augustin 1915 (nitrogen); Hagermann et al. 2005 with Loria 1909 \
+                     (ethane); Wong and Anderson 1972 with Cuthbertson 1914 (ammonia); Palmer and \
+                     Williams 1975 (sulphuric acid); and the sim's own liquid viscosities, \
+                     Sotiriadou et al. 2026 (methane) and Friend, Ingham and Ely 1991 (ethane), for \
+                     the transport fit"
                 .to_owned(),
             acceptance,
             provisional: None,
@@ -670,18 +712,41 @@ mod tests {
 
     /// The files' provenances are the ones `substance::liquid`'s bases were set against
     /// (decision-r08-t5g §3: water, methane and the acids measured; nitrogen, ethane and ammonia
-    /// derived). A file whose provenance changes fails here, so that its liquid's basis is
-    /// revisited.
+    /// derived; the basaltic glass a measured solid's, which the melts hold as a stand-in). A file
+    /// whose provenance changes fails here, so that its liquid's basis is revisited.
     #[test]
     fn liquid_optics_the_files_provenances_are_the_bases_assumed() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(MATERIALS_FROM_CRATE);
         let expected = [
-            "derived", "derived", "measured", "derived", "measured", "measured", "measured",
+            "derived", "measured", "derived", "measured", "derived", "measured", "measured",
+            "measured",
         ];
         for (name, provenance) in FILES.iter().zip(expected) {
             let file = MaterialFile::read(&dir, name).unwrap();
             assert_eq!(file.provenance(), provenance, "{name}");
         }
+    }
+
+    /// The basaltic glass, a held solid, is reduced with no temperature, since its file states
+    /// none, and its bins are its own: n about 1.568 and a about 10⁴ m⁻¹ in the bin across 545 nm.
+    #[test]
+    fn liquid_optics_the_held_glass_has_no_temperature() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(MATERIALS_FROM_CRATE);
+        for name in HELD_SOLIDS {
+            let file = MaterialFile::read(&dir, name).unwrap();
+            assert_eq!(file.phase(), "solid", "{name}");
+            assert_eq!(file.temperature_k(), None, "{name}");
+            let reduced = reduce(name, &file).unwrap();
+            assert_eq!(reduced.temperature_k, None, "{name}");
+        }
+        let glass = MaterialFile::read(&dir, "basaltic-glass.json").unwrap();
+        let reduced = reduce("basaltic-glass.json", &glass).unwrap();
+        assert!((reduced.n[6] - 1.568).abs() < 1e-3, "{:?}", reduced.n);
+        assert!(
+            reduced.a[6] > 0.9e4 && reduced.a[6] < 1.2e4,
+            "{:?}",
+            reduced.a
+        );
     }
 
     /// A file that is not a liquid's, that states no temperature or whose grid does not cover
@@ -723,8 +788,8 @@ mod tests {
         assert!(matches!(fit(&other), Err(RunTaskError::Input { .. })));
     }
 
-    /// The manifest names the task's files, and the items follow them and then the supercooled
-    /// rows.
+    /// The manifest names the task's files, and the items follow them, a held solid's without a
+    /// temperature, and then the supercooled rows.
     #[test]
     fn liquid_optics_the_items_follow_the_files() {
         assert_eq!(manifest().materials(), FILES);
@@ -732,11 +797,11 @@ mod tests {
             .iter()
             .flat_map(|f| {
                 let p = item_prefix(f);
-                [
-                    format!("{p}_N"),
-                    format!("{p}_A"),
-                    format!("{p}_TEMPERATURE_K"),
-                ]
+                let mut items = vec![format!("{p}_N"), format!("{p}_A")];
+                if !HELD_SOLIDS.contains(f) {
+                    items.push(format!("{p}_TEMPERATURE_K"));
+                }
+                items
             })
             .collect();
         for (_, prefix) in SUPERCOOLED {

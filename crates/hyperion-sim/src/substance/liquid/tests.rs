@@ -503,7 +503,10 @@ fn every_record_is_a_palette_s_and_no_absent_member_is_zero() {
             }
             let modelled = match columns.optics {
                 Some(optics) => optics.absorption.is_some(),
-                None => matches!(key.as_str(), "brine_nacl" | "H2SO4"),
+                None => {
+                    matches!(key.as_str(), "brine_nacl" | "H2SO4")
+                        || matches!(columns.constitution, LiquidConstitution::Melt(_))
+                }
             };
             assert_eq!(record.absorption_per_m.is_some(), modelled, "{key}");
             let entry = PaletteEntry {

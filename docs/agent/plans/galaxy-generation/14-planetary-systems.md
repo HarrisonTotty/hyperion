@@ -17839,3 +17839,186 @@ tables::gauss_legendre`.
   - _The acid's compressibility_ is unsourced (Valleau 1965, closed), so b is absent.
   - _Not from this change_: `cargo doc -p hyperion-sim` with `-D warnings` fails on broken
     intra-doc links in the galaxy, planetary, sky and stellar modules.
+- **Deviations in P14.T49.h, as built: step 4, the melts (`p14-liquids`, 2026-10-16).**
+  `GENERATOR_VERSION` stays 22. Nothing on the record reads `liquid_properties` or
+  `tables::liquid_optics` before P14.T54.a (decision-bump-plan-after-22 §1.2), so `liquids.golden`
+  is re-blessed at 22, and `liquid_optics` refitted by decision-p14-t49h-liquids §5 for R08's
+  basaltic glass.
+  - _Rulings taken_ (decision-p14-t49h-step4-melts, 2026-10-16, on this step's finding):
+    - **The two Al-rich rows take Giordano and Russell 2007's model** (GR07; J. Phys.: Condens.
+      Matter 19, 205148, Table 1's VFT column), a deviation from the entry's "Giordano et al.'s":
+      log₁₀ μ = −4.67 + B ÷ (T − C) on SiO₂, Al₂O₃, MgO and CaO in mol%, FeO(T) and MnO as MgO
+      mole for mole, Na₂O, K₂O, TiO₂, Cr₂O₃ and P₂O₅ dropped and the four renormalised, `Derived`
+      at every temperature. Giordano, Russell and Dingwell 2008 (GRD) is 2.5 log units low on
+      Scarfe et al. 1983's anorthite at 1,600 °C (−2.09 against 0.43 log Pa s): its Al₂O₃ term is
+      negative, and the alkali-balanced term that offsets it is zero in an alkali-free melt (§1).
+    - **Not Scarfe's fits** (§2.1, §4). Their Fulcher T₀ lies 110–130 K too high, so beyond their
+      spans (1,648–1,898 and 1,573–1,873 K) they run 0.5 log units too viscous at 2,400 K and 0.96
+      at 3,000 K against GR07; a measured analogue's fit would be `StandIn`, never `Measured` (§5).
+    - **The selection rule** (§2.3): a melt takes GR07 where its oxides hold Al₂O₃ ≥ 15 wt%,
+      Na₂O + K₂O ≤ 1 wt% and at most 3 wt% of the oxides the mapping drops; any other melt GRD.
+      Today it selects exactly `anorthosite` (Al₂O₃ 34.0, alkalis 0.53) and `feldspathic` (27.3,
+      0.63). A melt that meets the first two but not the third is a question for main, so its
+      viscosity is absent (`MeltViscosityModel::Unruled`); no row is there.
+    - **TiO₂'s volume** (§6): 23.16 cm³ mol⁻¹ at 1,673 K with dV/dT 7.246 × 10⁻³ cm³ mol⁻¹ K⁻¹
+      (MELTS's `liq_struct_data.h`, "2.316 J/bar, Lange and Carmichael (1990)"; Ghiorso and
+      Kress 2004's 23.448 corroborates it). DensityX's 28.32 at 1,773 K is another set's, recorded.
+  - _The rows' oxides_ (weight per cent; `substance/rows/melts.rs`, each with its source and
+    basis, and its GRD calibration where it lies outside):
+    - `basalt`: Alae lava lake's bulk (Peck 1978, USGS Professional Paper 935-B, p. B3), the row's
+      own source, its eleven oxides summing to 100.00;
+    - `lava_glass`: `basalt`'s, adopted (the glass is the quenched melt);
+    - `basalt_fe`: Apollo 15 pigeonite basalt 15597 (Lunar Sourcebook, Table A6.1, p. 261), a
+      named member standing in; `mars_dust` and `ferric` take it, adopted, as their solidus is;
+    - `komatiite`: SA 3091, the row's own sample, fused glass by microprobe (Arndt 1976, Carnegie
+      Inst. Washington Year Book 75, Table 17, col. 1; total 100.1);
+    - `basalt_reduced`: Mercury's low-Mg G2 (Charlier, Grove and Zuber 2013, EPSL 363, 50, Table
+      1), standing in, no Na₂O (XRS did not measure it);
+    - `granite`: G-1's arithmetic mean (Fairbairn et al. 1951, USGS Bulletin 980, Table 20), its
+      H₂O⁺ 0.37 dropped;
+    - `ultramafic`: McDonough and Sun 1995's pyrolite from its element abundances, standing in for
+      the row's harzburgite;
+    - `anorthosite`: the row's mode (95 wt% An95 with 5 wt% En60Fs40) by stoichiometry;
+    - `feldspathic`: the average Apollo 16 soil (Lunar Sourcebook, Table 7.15, col. 16).
+  - _The models_ (`substance/liquid/melt.rs`, crate-private, a fourth `LiquidConstitution`, `Melt`):
+    - **μ by GRD** (EPSL 271, 123): −4.55 + B ÷ (T − C), mol% with total iron as FeO, the
+      anhydrous oxides normalised to 100 − H₂O, the calculator's two-decimal coefficients
+      (`grd08.js`, SHA-256 44806e60…), 0.40 log units rms (Table 3); Cr₂O₃ and NiO dropped by the
+      normalisation, fluorine not carried. At 1,473.15 K: `basalt` 96 Pa s, `basalt_fe` 32,
+      `komatiite` 6.5, `basalt_reduced` 46, `granite` 1.6 × 10⁵ and `ultramafic` 9.3.
+    - **μ by GR07** for the two Al-rich rows: `anorthosite` 479 Pa s at its 1,533.15 K solidus and
+      33 at 1,673.15 K, `feldspathic` 75 and 7.4.
+    - **ρ by Lange and Carmichael's partial molar volumes** at 1,673 K with their dV/dT (MELTS's
+      file, SHA-256 206b298d…), ideal mixing of the nine oxides, MnO, P₂O₅, Cr₂O₃, NiO and H₂O
+      dropped and renormalised, FeO and Fe₂O₃ as analysed; the compressibility neglected at one
+      bar. `basalt` 2,700.4 kg m⁻³ at 1,473.15 K.
+    - **n and a** R08's `basaltic-glass.json` (Pollack, Toon and Khare 1973), held at room
+      temperature, not carried, since the glass's density is not stated: n 1.568 and a 1.06 × 10⁴
+      m⁻¹ in the bin across 545 nm.
+    - **σ** 0.36 N m⁻¹ for the basaltic rows (Walker and Mullins 1981, Contrib. Mineral. Petrol.
+      76, 455, its abstract: 350–370 dyn cm⁻¹ for four lavas at 1,473–1,773 K), 0.29 for
+      `granite` (Bagdassarov, Dorfman and Dingwell 2000, Am. Mineral. 85, 33, its abstract:
+      280–300 mN m⁻¹ at 1,473–1,673 K), and Walker and Mullins's 0.36 standing in for `komatiite`,
+      `ultramafic`, `anorthosite`, `feldspathic` and `basalt_reduced`, labelled.
+    - **No scattering** (decision-r11-palette-liquids §1.8). Every melt record is `StandIn`, from
+      the row's solidus with no upper end (`OutOfRange`'s `below` is `None`); above 2,073.15 K
+      (μ) and 1,873 K (ρ) the values extrapolate, stated in the module's note. A melt's `Given` is
+      `CompositionNotModelled` (decision-p14-t49h-step3-composition §2.3).
+  - _The rows without a melt record_ stay `NotALiquid`, each reason in `rows/melts.rs`'s note:
+    `ca_al_residue` (SiO₂-free, outside both models; GRD's B is negative there), `iron_nickel` (a
+    liquid metal's record is deferred), `phyllosilicate` (it dehydrates first), the seven
+    chondrites (their first melt is Fe–FeS and a partial melt, carried by a crust's row),
+    `cometary` (its organics pyrolyse first), `SiC`, `carbonaceous`, `MgSO4` and `CaCO3` (they
+    decompose) and `Na2CO3` (a carbonate liquid). **Molten S8** is left out: its liquid density
+    waits for T49.b's last piece, as `liquid.rs`'s module note says.
+  - _The refit_ (decision-p14-t49h-liquids §5): the binary built from the tree with the rows not
+    yet reading the glass, `tables/liquid_optics.rs` deleted and
+    `hyperion-fit run liquid_optics --since 22` run, then the rows wired and rebuilt; the table's
+    text did not move again.
+    - `liquid_optics` revision 2: `FILES` and the manifest gain `basaltic-glass.json`, `ITEMS`
+      `BASALTIC_GLASS_N` and `BASALTIC_GLASS_A` after ammonia's three; every other item's bits are
+      unchanged.
+    - **The glass is a solid with no `temperatureK`.** `HELD_SOLIDS` names it, `reduce` accepts it
+      with `Reduced::temperature_k` `None`, and the table holds no temperature item for it, so no
+      state is invented; the sim never carries its index.
+    - `tables.lock`: only `liquid_optics`' entry moves (revision 1 → 2, `inputs_sha256` 531f0a16…
+      → 3dbf0dfb…, `body_sha256` 5963b3d1… → d6240d06…, the acceptance text; the fingerprint
+      unchanged), with `tables/mod.rs`'s revision. `hyperion-fit check` passes (32 fresh).
+  - _The parts' departures._
+    - **Every oxide's molar mass is the registry's**, its elements' IUPAC 2021 abridged weights,
+      not GRD's calculator's or the research's CIAAW masses. B and C move by under 0.5 K and ρ by
+      under 0.01 kg m⁻³ (Alae 2,713.28 at 1,403.15 K either way). `anorthosite` and `ultramafic`'s
+      oxides are recomputed so (SiO₂ 44.839 and 44.9259 against the research's 44.84 and 44.9266).
+    - **TiO₂'s dV/dT is 7.246 × 10⁻³**, as the MELTS file prints it; DensityX's Table 1 and the
+      ruling round it to 7.24.
+    - **Fe₂O₃ counts as FeO(T)** in GR07's mapping, two FeO a mole, and so not among §2.3's
+      dropped oxides; no row has Fe₂O₃ and meets the rule's first two conditions.
+    - **GR07's Table A.2 test compares at the table's printed precision**: stoichiometric
+      diopside's B is 4,488.3, 1.3 from the "ANDI" rows' 4,487, which are analysed experimental
+      melts; rounded, it lies within 1. Anorthite gives 5,467.4 and 797.5 exactly.
+    - **Scarfe's Table 1 is typed whole**, all nine compositions and 75 points as the ruling's
+      checks read them, not only An, Di20 and Di30.
+    - **The golden pins the melts at 1,473.15, 1,673.15, 2,073.15 and 3,000 K** beside the
+      solidus, the temperatures GRD's examples and the research evaluate at; a temperature below
+      a row's solidus pins its refusal (`anorthosite` and `feldspathic` at 1,473.15 K).
+  - _Added public items_: none in `hyperion-sim` (the models, `Oxide`, `SilicateMelt` and
+    `HeldOptics` are crate-private). In `hyperion-fit`, `tasks::liquid_optics::HELD_SOLIDS`, and
+    `Reduced::temperature_k` becomes `Option<f64>`.
+  - _Tests and golden._ `substance::liquid` has 94 tests with `--features testing`, 16 new in
+    `liquid/melt/tests.rs`; the doctests stay seven.
+    - **GRD** (3): Table 4's Eifel basanite (B 4,457.2 and C 668.8 within 1 of 4,457 and 669, log
+      μ 0.992 at 1,473.15 K within 0.01 of 0.993); Table 2's andesite with 2 wt% water (B 7,720.9,
+      C 334.4, log μ 3.676 at 1,273 K); `basalt` at 1,473.15 K 0.28 log units above Shaw et al.
+      1968's about 50 Pa s for the Makaopuhi tholeiite, inside GRD's 0.40.
+    - **GR07** (4): Table A.2's anorthite and diopside; Scarfe et al. 1983's Table 1 at 0.182 rms
+      over 75 points, every point within 0.40 and anorthite at 1,873.15 K 0.413 against 0.433; the
+      two rows against Scarfe's An100 fit (within 0.13 over 1,648–1,898 K) and the Di20–Di30
+      interpolation at the soil's 17.47 mol% Al₂O₃ (within 0.35 over 1,573–1,873 K); monotonic in
+      T from the solidus to 10,000 K, above 10⁻⁴·⁶⁷ Pa s.
+    - **The rule** (1): exactly the two rows, each row citing the model it takes, and the rule's
+      edges (15 wt% and 1 wt% inside; a third condition failed is `Unruled`, its μ absent).
+    - **ρ** (1): Alae's melt at 1,130 °C, 2,713.3 kg m⁻³ against Peck 1978's 2,740 for the melt
+      fraction (p. B37; ±30 on the bulk), within 30 and within 0.5 of the research's.
+    - **The rows** (7): the oxide molar masses; each row's oxides once, positive and summing to its
+      source's total within 1 wt% of 100 (G-1 99.57 to the soil's 100.71); the rows without a melt
+      record, and S8, `NotALiquid`; a melt's `Given` `CompositionNotModelled` before the range; the
+      range from the solidus with no upper end; each record its models' and the held glass's, and
+      at 1,673.15 K the lane's independent oracle within 10⁻⁹ log units and 10⁻⁶ kg m⁻³; σ the
+      stated constants.
+    - **Changed** (2): the palette test expects the melts' absorption; the components test's match
+      gains `Melt`. `hyperion-fit`'s `liquid_optics` gains `the_held_glass_has_no_temperature`,
+      and its items and provenance tests take the glass.
+    - `liquids.golden` is re-blessed at 22 (decision-bump-plan-after-22 §1.2;
+      decision-p14-t49h-liquids §5). golden_diff against HEAD (dd04ed0d): 1,874 lines added, the
+      eleven melts at their solidus and the four temperatures (52 records, two refusals); no line
+      gone and no value moved. The script reports two of `brine_nacl`'s reference lines as gone
+      and new: its labels key on the preceding line, which `mars_dust`'s record now is. Its
+      verdict flags "changed without a bump", the ruled re-bless at 22.
+  - _Files beyond the task's_: `substance/liquid/melt.rs`, `substance/liquid/melt/tests.rs` and
+    `substance/rows/melts.rs` (new); `substance/rows.rs` (the module), `rows/liquids.rs`
+    (`LIQUIDS`, 23 rows), `liquid/tests.rs` and `liquid/solution/tests.rs`; `hyperion-fit`'s
+    manifest, `tables.lock` and the sim's `tables/mod.rs`; `tests/liquids_golden.rs`.
+  - _The steps left_: **step 2b, the nine rows**, as step 2's record gives it: R08.T5.k has landed
+    on the integration branch (c085cfff and 5622cb95).
+  - _Accept_ as step 3's, and:
+    - `cargo test -p hyperion-sim --features testing substance::liquid::melt`;
+    - `cargo test -p hyperion-fit liquid_optics`; `target/debug/hyperion-fit check`.
+- **Deferred findings (2026-10-13 rule)**, from P14.T49.h's step 4:
+  - _GRD's calibration_ (K₂O 0.3–9, FeO(T) 0–12, MgO 0–32 wt%) excludes the lunar, Mercury and
+    komatiite melts by K₂O, `basalt_fe` (20.2) and `komatiite` (12.9) by FeO(T), and `ultramafic`
+    (37.8) by MgO. GR07 with the same mapping agrees within 0.5 log units there (the ruling's §7:
+    G2 0.22, G1 0.16, 15597 0.15, a peridotite 0.29, komatiite 0.47), consistency rather than
+    validation. Its two follow-ups: Murase and McBirney 1970's Apollo 11 high-Ti synthetic (0.45
+    Pa s at 1,495 °C, Lunar Sourcebook §6.1.1) as a check of GRD on Fe-rich melts; Mercury's rows
+    carry no Na₂O, where MESSENGER's gamma-ray spectrometer found several weight per cent (on
+    Vetere et al. 2017's Na-rich analogue GRD is 0.06 log units low against measurement).
+  - _The melt's redox moves ρ by about 2%_: on the Columbia River basalt, Lange and Carmichael's
+    is 1.6–2.7% above Murase's densities (Bottinga and Weill 1970, Fig. 2) with the rock's own
+    Fe₂O₃/FeO, and +1.2 to +0.1% with all iron as Fe₂O₃. Kress and Carmichael 1991 at T50.a's
+    oxygen fugacity would set the ratio.
+  - _TiO₂'s volume_: 23.16 against DensityX's 28.32 moves Alae's ρ by 0.4%; Lange and Carmichael
+    1987's own fit is unread.
+  - _At the solidus the record is the bulk liquid_, not the crystal-laden residual melt: Shaw et
+    al. 1968 give 8,000 poise for the Makaopuhi suspension at 1,130 °C against 4,000 for its
+    liquid.
+  - _A water term_: 0.1 wt% H₂O would lower granite's μ by 0.26 log units in GRD; the record's
+    melts are anhydrous unless it carries dissolved water, an ask of T51.
+  - _A composition-general melt index_ (Gladstone–Dale or oxide refractivities, Mandarino 1976
+    and 1981, from memory) is deferred; the glass's is held. Carried by Lorentz–Lorenz with Alae
+    glass's assumed 2,760 kg m⁻³ it would give `basalt` 1.553 at 550 nm and 1,473 K (normal
+    Fresnel reflectance 0.0469 against the held 0.0489).
+  - _σ's temperature dependence_ is not carried: granite's +0.06 to +0.09 mN m⁻¹ K⁻¹ (Bagdassarov
+    et al.) would raise it by about 0.04 N m⁻¹ over 500 K; Walker and Mullins's is "small,
+    positive", unquantified in the abstract.
+  - _The glass's absorption below 400 nm_ (the 380–405 nm bin's 2.7 × 10⁴ m⁻¹) is R08's file's
+    extrapolation in log k, Pollack et al. giving no k there.
+  - _Na₂CO₃'s and Fe–Ni's liquid ranges have no record_ (a carbonate melt above 1,123 K and a
+    liquid metal), for the composition audit; so does `ca_al_residue`'s CaO–Al₂O₃ melt.
+  - _Unread_: Lange and Carmichael 1987 and 1990 (their values through MELTS's file), Walker and
+    Mullins 1981's full text, Kress and Carmichael 1991, Sehlke and Whittington 2015, Pollack et
+    al.'s glass density and composition, Murase and McBirney 1973, and Berger et al. 2016's Mars
+    dust (so `mars_dust` takes `basalt_fe`'s oxides).
+  - _The ruling's §7 items_ (above) stand as recorded, GRD kept on those rows.
+  - _The scratch's two transcription slips_ (the ruling's §1), corrected in `step4/melts.json`
+    and `extra.json`: Scarfe's Table 2 liquidus for 90 wt% diopside is 1,368 °C, not 1,358, and
+    diopside's Table 3 Fulcher B 778.7, not the OCR text's 775.7. Neither touched a value used.

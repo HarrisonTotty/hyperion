@@ -482,7 +482,7 @@ fn each_liquid_s_components_are_its_rows() {
                     }
                 }
             }
-            LiquidConstitution::AwaitingSolute(_) => {
+            LiquidConstitution::AwaitingSolute(_) | LiquidConstitution::Melt(_) => {
                 panic!("{key} states no reference composition")
             }
         }
