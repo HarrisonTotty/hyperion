@@ -33,10 +33,10 @@
 //! - **A liquid** ([`liquid_bond`]): per bin the cosine-weighted Fresnel reflectance of a flat
 //!   surface `r_d`(n) ([`diffuse_fresnel_reflectance`]) plus the light its body returns,
 //!   (1 − `r_d`)(1 − `r_i`) R∞ ÷ (1 − `r_i` R∞), with R∞ = 0.33 `b_b` ÷ (a + `b_b`) and `b_b` = b ÷ 2
-//!   (Morel and Prieur 1977, as decision-r11-palette-liquids §1.8 cites it) and `r_i` the surface's
+//!   ([`SUBSURFACE_REFLECTANCE_COEFFICIENT`]'s sources) and `r_i` the surface's
 //!   internal diffuse reflectance ([`internal_diffuse_reflectance`]), from P14.T49.h's record at
 //!   the temperature its condensate lies at. A record without a or b has no body term: a deep,
-//!   flat, pure liquid.
+//!   flat, pure liquid ([`BodyTerm`]).
 //! - **The regolith** ([`Regolith`]) on the surface the condensates leave: its lid's row, or while
 //!   the passes do not know the lid a stand-in, on an airless rocky body the Moon's 0.11 exactly
 //!   and a known lid's row at most 0.11 ([`airless_silicate_stand_in`]).
@@ -54,8 +54,9 @@
 //! # The stand-ins ([`StandIn`])
 //!
 //! Each is labelled, never a silent default: a solid without optics takes water frost's; a
-//! solution its solvent's record; a liquid without a record `r_d` at liquid nitrogen's index; an
-//! airless rocky body whose lid is not known the Moon's 0.11, a known lid's airless silicate
+//! solution its solvent's record; a liquid without a record `r_d` at liquid nitrogen's index; a
+//! liquid at a temperature no bound of its range holds its record at its first melt; an airless
+//! rocky body whose lid is not known the Moon's 0.11, a known lid's airless silicate
 //! regolith at most 0.11, any other lid not known a row by its material; a body with no luminous
 //! host a Sun's light.
 
@@ -73,8 +74,8 @@ use crate::substance::{
     liquid_properties,
 };
 use crate::tables::gauss_legendre::{GL8_NODES, GL8_WEIGHTS};
-use crate::units::Kelvin;
 use crate::units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K;
+use crate::units::{EarthFluxes, Kelvin, KilogramsPerSquareMetre, MetresPerSecondSquared, Pascals};
 
 #[cfg(test)]
 mod tests;
@@ -168,8 +169,8 @@ const SUDARSKY_HOSTS_K: [f64; 6] = [3_200.0, 4_620.0, 5_530.0, 5_770.0, 6_240.0,
 /// Burrows and Pinto 2000, ApJ 538, 885, Tables 1A–1B, p. 898, "Estimated Bond albedos of EGPs"
 /// (the insolated profiles with full condensation), each the albedo weighted by the star's spectrum
 /// over 0.3–2.5 µm (their eq. 5), read by the lane in the ApJ PDF and the arXiv source and checked
-/// here against its text. The three "<0.01" (class IV about K4V and M4V, class III's 0.01 about
-/// M4V being a value) are taken as 0.01, an upper bound, labelled.
+/// here against its text. The two "<0.01" (class IV about K4V and M4V; class III's 0.01 about M4V
+/// is a value) are taken as 0.01, an upper bound, labelled.
 const SUDARSKY_BOND: [[f64; SUDARSKY_CLASSES]; 6] = [
     [0.38, 0.56, 0.01, 0.01, 0.51],
     [0.48, 0.70, 0.05, 0.01, 0.53],
@@ -225,15 +226,16 @@ pub(crate) fn sudarsky_bonds(host: Kelvin) -> [f64; SUDARSKY_CLASSES] {
 
 /// The light a body's hosts give it, by band, as the area mix reads it (P14.T51.b): each luminous
 /// host's Planck shares in the optics' bands and the liquids' bins, weighted by its flux at the
-/// body, its gas-envelope albedos by class flux-weighted, and the water cloud's albedo calibrated
-/// on Earth ([`water_cloud_albedo`]), built once per body before its passes ([`HostShadeSum`]) and
-/// never across bodies.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// body, its gas-envelope albedos by class flux-weighted, the water cloud's albedo calibrated on
+/// Earth ([`water_cloud_albedo`]) and the reference cloud column ([`reference_cloud_column`]),
+/// built once per body before its passes ([`HostShadeSum`]) and never across bodies.
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct HostShade {
     bands: [f64; OPTICS_BANDS],
     bins: [f64; LIQUID_BINS],
     giants: [f64; SUDARSKY_CLASSES],
     water_cloud: f64,
+    cloud_column: KilogramsPerSquareMetre,
 }
 
 impl HostShade {
@@ -241,7 +243,7 @@ impl HostShade {
     #[must_use]
     pub(crate) fn of_host(host: Kelvin) -> Self {
         let mut sum = HostShadeSum::EMPTY;
-        sum.add(1.0, host);
+        sum.add(EarthFluxes::new(1.0), host);
         sum.finish()
     }
 
@@ -264,7 +266,7 @@ impl HostShade {
 /// shares times its flux at the body, and its giant albedos by class times that flux.
 ///
 /// Everything is linear in the hosts' fluxes, so it is summed once per body before the passes.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct HostShadeSum {
     bands: [f64; OPTICS_BANDS],
     bins: [f64; LIQUID_BINS],
@@ -281,11 +283,11 @@ impl HostShadeSum {
         flux: 0.0,
     };
 
-    /// Adds a host of effective temperature `host` whose flux at the body is `flux` (any unit, the
-    /// same for every host). A host of no flux, or of a temperature that is not positive and finite,
-    /// adds nothing.
-    pub(crate) fn add(&mut self, flux: f64, host: Kelvin) {
-        let t = host.value();
+    /// Adds a host of effective temperature `host` whose flux at the body is `flux`, its orbit-mean
+    /// flux there. A host of no flux, or of a temperature that is not positive and finite, adds
+    /// nothing.
+    pub(crate) fn add(&mut self, flux: EarthFluxes, host: Kelvin) {
+        let (flux, t) = (flux.value(), host.value());
         if !(flux.is_finite() && flux > 0.0 && t.is_finite() && t > 0.0) {
             return;
         }
@@ -303,8 +305,8 @@ impl HostShadeSum {
         self.flux += flux;
     }
 
-    /// The summed light, with the water cloud's calibration; a Sun's ([`HostShade::sun`],
-    /// labelled) where no host added any.
+    /// The summed light, with the water cloud's calibration and the reference cloud column, each
+    /// computed here once; a Sun's ([`HostShade::sun`], labelled) where no host added any.
     #[must_use]
     pub(crate) fn finish(self) -> HostShade {
         if self.flux.is_nan() || self.flux <= 0.0 {
@@ -315,6 +317,7 @@ impl HostShadeSum {
             bins: self.bins,
             giants: self.giants.map(|sum| sum / self.flux),
             water_cloud: water_cloud_albedo(),
+            cloud_column: reference_cloud_column(),
         }
     }
 }
@@ -388,24 +391,59 @@ pub(crate) fn internal_diffuse_reflectance(n: f64, outer: f64) -> f64 {
     1.0 - (1.0 - outer) / (n * n)
 }
 
-/// The deep subsurface reflectance's coefficient: R∞ = 0.33 `b_b` ÷ (a + `b_b`) (Morel and Prieur
-/// 1977, Limnol. Oceanogr. 22, 709, as decision-r11-palette-liquids §1.8 cites it).
+/// The deep subsurface reflectance's coefficient: R∞ = 0.33 `b_b` ÷ (a + `b_b`), as
+/// decision-r11-palette-liquids §1.8 gives it, citing Morel and Prieur 1977 (Limnol. Oceanogr. 22,
+/// 709), unread here. The `b_b` ÷ (a + `b_b`) form is the first-order term of Gordon, Brown and
+/// Jacobs 1975's computed relation (Appl. Opt. 14, 417), as the science check found through IOCCG
+/// Report 5, 2006, §1.5, which credits both papers with the subsurface reflectance's dependence on
+/// `b_b` and a.
 const SUBSURFACE_REFLECTANCE_COEFFICIENT: f64 = 0.33;
 
+/// The light a liquid's body returns through its surface, in one bin ([`liquid_bin_albedo`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum BodyTerm {
+    /// None: a record without its absorption or its scattering, a deep, flat, pure liquid
+    /// (decision-p14-t49c-split §2), whose albedo is its surface's alone.
+    Absent,
+    /// The light a deep body of these coefficients returns.
+    Coefficients {
+        /// The absorption coefficient a, m⁻¹.
+        absorption_per_m: f64,
+        /// The scattering coefficient b, m⁻¹, of which the pure liquid's symmetric phase function
+        /// sends half back.
+        scattering_per_m: f64,
+    },
+}
+
+impl BodyTerm {
+    /// The body term of `record` in its bin `k`: its coefficients where it states both, else
+    /// absent.
+    #[must_use]
+    fn of(record: &LiquidProperties, k: usize) -> Self {
+        match (record.absorption_per_m, record.scattering_per_m) {
+            (Some(a), Some(b)) => Self::Coefficients {
+                absorption_per_m: a[k],
+                scattering_per_m: b[k],
+            },
+            (None, _) | (_, None) => Self::Absent,
+        }
+    }
+}
+
 /// A flat, deep liquid's spherical albedo in one bin: its [`diffuse_fresnel_reflectance`] at the
-/// index `n` plus the light its body returns through the surface, (1 − `r_d`)(1 − `r_i`) R∞ ÷ (1 − `r_i`
-/// R∞), with R∞ = 0.33 `b_b` ÷ (a + `b_b`) of the absorption `absorption_per_m` and the
-/// backscattering `b_b`, half the scattering `scattering_per_m` (the pure liquid's symmetric phase
-/// function), m⁻¹. Without either coefficient the body term is absent: a deep, flat, pure liquid
-/// (decision-p14-t49c-split §2).
+/// index `n` plus the light its body `body` returns through the surface, (1 − `r_d`)(1 − `r_i`) R∞
+/// ÷ (1 − `r_i` R∞), with R∞ = 0.33 `b_b` ÷ (a + `b_b`) of the absorption a and the backscattering
+/// `b_b`, half the scattering b (the pure liquid's symmetric phase function). An absent body term,
+/// or coefficients of no total or one not finite, leave the surface's alone: a deep, flat, pure
+/// liquid (decision-p14-t49c-split §2).
 #[must_use]
-pub(crate) fn liquid_bin_albedo(
-    n: f64,
-    absorption_per_m: Option<f64>,
-    scattering_per_m: Option<f64>,
-) -> f64 {
+pub(crate) fn liquid_bin_albedo(n: f64, body: BodyTerm) -> f64 {
     let outer = diffuse_fresnel_reflectance(n);
-    let (Some(a), Some(b)) = (absorption_per_m, scattering_per_m) else {
+    let BodyTerm::Coefficients {
+        absorption_per_m: a,
+        scattering_per_m: b,
+    } = body
+    else {
         return outer;
     };
     let backscattering = b / 2.0;
@@ -426,11 +464,7 @@ pub(crate) fn liquid_bin_albedo(
 pub(crate) fn liquid_bond(record: &LiquidProperties, bins: &[f64; LIQUID_BINS]) -> f64 {
     let mut albedos = [0.0; LIQUID_BINS];
     for (k, albedo) in albedos.iter_mut().enumerate() {
-        *albedo = liquid_bin_albedo(
-            record.refractive_index[k],
-            record.absorption_per_m.map(|a| a[k]),
-            record.scattering_per_m.map(|b| b[k]),
-        );
+        *albedo = liquid_bin_albedo(record.refractive_index[k], BodyTerm::of(record, k));
     }
     band_weighted(&albedos, bins)
 }
@@ -451,6 +485,11 @@ pub(crate) enum StandIn {
     /// molecular liquids, whose visible indices lie at about 1.19–1.23 (from memory), with no body
     /// term.
     IndexForAnUnrecordedLiquid,
+    /// A liquid at a temperature no bound of its liquid range holds, one that is not a number or
+    /// lies above a range with no critical point, takes its own record at its first melt
+    /// ([`liquid_record`]). A solution's solvent read so keeps the solvent's label
+    /// ([`StandIn::SolventForASolution`]).
+    RecordAtItsFirstMelt,
     /// An airless silicate regolith of a known lid takes at most the Moon's 0.11: space
     /// weathering's stand-in until P14.T54.b weathers the area mix ([`airless_silicate_stand_in`]).
     SpaceWeathering,
@@ -486,6 +525,10 @@ impl StandIn {
             Self::IndexForAnUnrecordedLiquid => {
                 "a liquid without a record takes r_d at liquid nitrogen's 550 nm index, the light \
                  molecular liquids' (from memory, 1.19–1.23), until its row's record lands"
+            }
+            Self::RecordAtItsFirstMelt => {
+                "a liquid at a temperature no bound of its range holds (not a number, or above a \
+                 range with no critical point) takes its own record at its first melt"
             }
             Self::SpaceWeathering => {
                 "an airless silicate regolith takes at most the Moon's 0.11, space weathering's \
@@ -544,33 +587,101 @@ pub(crate) fn solid_bond(id: SubstanceId, bands: &[f64; OPTICS_BANDS]) -> Compon
     }
 }
 
-/// The record of the liquid `id` at `temperature` at its reference composition, the temperature
-/// held into its liquid range where it lies outside (P14.T54.a's clamp, decision-r11-palette-liquids
-/// §1.7); `None` where its row has no record.
-#[must_use]
-fn liquid_record(id: SubstanceId, temperature: Kelvin) -> Option<LiquidProperties> {
-    match liquid_properties(id, temperature, Composition::Reference) {
-        Ok(record) => Some(record),
-        Err(ResolveLiquidError::OutOfRange { lowest, below, .. }) => {
-            let held = if temperature < lowest {
-                lowest
-            } else {
-                // A part in a million below the critical point, inside the range.
-                Kelvin::new(below?.value() * (1.0 - 1e-6))
-            };
-            liquid_properties(id, held, Composition::Reference).ok()
+/// A liquid's P14.T49.h record at its reference composition as the area mix reads it
+/// ([`liquid_record`]).
+#[derive(Debug, Clone)]
+enum LiquidRecord {
+    /// Its record at its temperature, or held into its liquid range at the bound the temperature
+    /// lies beyond (P14.T54.a's clamp, decision-r11-palette-liquids §1.7).
+    InRange(LiquidProperties),
+    /// Its record at its first melt, for a temperature no bound of its range holds: one that is not
+    /// a number, or lies above a range with no critical point
+    /// ([`StandIn::RecordAtItsFirstMelt`]).
+    AtFirstMelt(LiquidProperties),
+    /// No record: its row is not modelled as a liquid, a member its record needs is not modelled,
+    /// or its composition is not.
+    Unrecorded,
+}
+
+impl LiquidRecord {
+    /// The record where it was read in its range, `None` otherwise.
+    #[must_use]
+    fn in_range(self) -> Option<LiquidProperties> {
+        match self {
+            Self::InRange(record) => Some(record),
+            Self::AtFirstMelt(_) | Self::Unrecorded => None,
         }
+    }
+}
+
+/// The record of the liquid `id` at `temperature` at its reference composition
+/// ([`LiquidRecord`]), each case named so that a row with a record is never read as having none:
+///
+/// - in its liquid range, its record there;
+/// - below its first melt, −∞ included, its record at its first melt;
+/// - at or above its critical point, +∞ included, its record a part in a million below it;
+/// - at a temperature no bound holds, not a number or above a range with no critical point, its
+///   record at its first melt, labelled ([`StandIn::RecordAtItsFirstMelt`]);
+/// - for a row not modelled as a liquid, a member its record needs not modelled (there, or at the
+///   bound), or a composition not modelled, none.
+#[must_use]
+fn liquid_record(id: SubstanceId, temperature: Kelvin) -> LiquidRecord {
+    let (lowest, below) = match liquid_properties(id, temperature, Composition::Reference) {
+        Ok(record) => return LiquidRecord::InRange(record),
+        Err(ResolveLiquidError::OutOfRange { lowest, below, .. }) => (lowest, below),
+        // The row has no record at this temperature, and holding it elsewhere would not give one.
         Err(
             ResolveLiquidError::NotALiquid { .. }
             | ResolveLiquidError::NotModelled { .. }
             | ResolveLiquidError::CompositionNotModelled { .. },
-        ) => None,
+        ) => return LiquidRecord::Unrecorded,
+    };
+    let t = temperature.value();
+    let (held, in_range) = match below {
+        _ if t < lowest.value() => (lowest, true),
+        // A part in a million below the critical point, inside the range.
+        Some(critical) if !t.is_nan() => (Kelvin::new(critical.value() * (1.0 - 1e-6)), true),
+        // Not a number, or above a range with no critical point: no bound holds it.
+        Some(_) | None => (lowest, false),
+    };
+    match liquid_properties(id, held, Composition::Reference) {
+        Ok(record) if in_range => LiquidRecord::InRange(record),
+        Ok(record) => LiquidRecord::AtFirstMelt(record),
+        // `NotModelled`: a member the record needs (its density) is not modelled at the bound's
+        // state, so the row has no record there. The rest cannot occur: the first call refused a
+        // row that is not a liquid and a given composition before it read the temperature, and
+        // either bound lies inside the range.
+        Err(
+            ResolveLiquidError::NotModelled { .. }
+            | ResolveLiquidError::NotALiquid { .. }
+            | ResolveLiquidError::CompositionNotModelled { .. }
+            | ResolveLiquidError::OutOfRange { .. },
+        ) => LiquidRecord::Unrecorded,
     }
 }
 
-/// Liquid nitrogen's normal boiling point, K: 77.355 (NIST's WebBook, from memory), at which
-/// [`StandIn::IndexForAnUnrecordedLiquid`] reads its record.
-const NITROGEN_NORMAL_BOILING_POINT_K: f64 = 77.355;
+/// One standard atmosphere, the pressure of a normal boiling point: 101,325 Pa, exact by
+/// definition (the 10th CGPM, 1954, Resolution 4, from memory).
+const STANDARD_ATMOSPHERE: Pascals = Pascals::new(101_325.0);
+
+/// Liquid nitrogen's normal boiling point, at which [`StandIn::IndexForAnUnrecordedLiquid`] reads
+/// its record: its row's saturation temperature under one [`STANDARD_ATMOSPHERE`] on the registry's
+/// T49.b curve (NIST's WebBook gives 77.355 K, from memory).
+///
+/// # Panics
+///
+/// Never: nitrogen's row has a phase diagram whose liquid boils under one atmosphere (T49.b).
+#[must_use]
+fn nitrogen_normal_boiling_point() -> Kelvin {
+    Gas::Nitrogen
+        .substance()
+        .substance()
+        .phase_diagram()
+        .and_then(|diagram| diagram.saturation_temperature(STANDARD_ATMOSPHERE))
+        .expect(
+            "nitrogen's row has a phase diagram whose liquid boils under one atmosphere (T49.b)",
+        )
+}
 
 /// The wavelength at which [`StandIn::IndexForAnUnrecordedLiquid`] reads its index, nm: V's 550.
 const STAND_IN_INDEX_WAVELENGTH_NM: f64 = 550.0;
@@ -584,15 +695,17 @@ const STAND_IN_INDEX_WAVELENGTH_NM: f64 = 550.0;
 #[must_use]
 fn unrecorded_liquid_bond() -> f64 {
     let nitrogen = Gas::Nitrogen.substance();
-    let record = liquid_record(nitrogen, Kelvin::new(NITROGEN_NORMAL_BOILING_POINT_K))
+    let record = liquid_record(nitrogen, nitrogen_normal_boiling_point())
+        .in_range()
         .expect("nitrogen's row has a liquid record at its normal boiling point (P14.T49.h)");
     diffuse_fresnel_reflectance(record.refractive_index_at(STAND_IN_INDEX_WAVELENGTH_NM))
 }
 
 /// The liquid entry `entry`'s Bond albedo under the light `bins`, from its P14.T49.h record at the
-/// temperature its condensate lies at in `partition`: a solution without a record takes its
-/// solvent's ([`StandIn::SolventForASolution`]), and a row without one `r_d` at liquid nitrogen's
-/// index ([`StandIn::IndexForAnUnrecordedLiquid`]).
+/// temperature its condensate lies at in `partition` ([`liquid_record`]): at a temperature no bound
+/// of its range holds, its record at its first melt ([`StandIn::RecordAtItsFirstMelt`]); a
+/// solution without a record takes its solvent's ([`StandIn::SolventForASolution`]), and a row
+/// without one `r_d` at liquid nitrogen's index ([`StandIn::IndexForAnUnrecordedLiquid`]).
 #[must_use]
 pub(crate) fn liquid_entry_bond(
     entry: &CondensateEntry,
@@ -605,21 +718,30 @@ pub(crate) fn liquid_entry_bond(
         .iter()
         .find(|c| c.liquid() == liquid);
     let temperature = condensate.map_or(partition.climate().mean(), Condensate::lies_at);
-    if let Some(record) = liquid_record(liquid, temperature) {
-        return Component {
-            bond: liquid_bond(&record, bins),
-            stand_in: None,
-        };
+    match liquid_record(liquid, temperature) {
+        LiquidRecord::InRange(record) => {
+            return Component {
+                bond: liquid_bond(&record, bins),
+                stand_in: None,
+            };
+        }
+        LiquidRecord::AtFirstMelt(record) => {
+            return Component {
+                bond: liquid_bond(&record, bins),
+                stand_in: Some(StandIn::RecordAtItsFirstMelt),
+            };
+        }
+        LiquidRecord::Unrecorded => {}
     }
     let solvent = condensate
         .map(Condensate::substance)
         .filter(|&solvent| solvent != liquid);
-    match solvent.and_then(|solvent| liquid_record(solvent, temperature)) {
-        Some(record) => Component {
+    match solvent.map(|solvent| liquid_record(solvent, temperature)) {
+        Some(LiquidRecord::InRange(record) | LiquidRecord::AtFirstMelt(record)) => Component {
             bond: liquid_bond(&record, bins),
             stand_in: Some(StandIn::SolventForASolution),
         },
-        None => Component {
+        Some(LiquidRecord::Unrecorded) | None => Component {
             bond: unrecorded_liquid_bond(),
             stand_in: Some(StandIn::IndexForAnUnrecordedLiquid),
         },
@@ -641,7 +763,7 @@ fn moon_bond() -> f64 {
 /// lithology would make an airless rocky body far too bright; so it never brightens an airless
 /// silicate body against today's value, and it lets an intrinsically dark row go darker. Labelled
 /// ([`StandIn::SpaceWeathering`]); P14.T54.b deletes it and weathers the area mix with R10.T1.d's
-/// law over P14.T51.d's maturity and rate, through [`RegolithWeathering::Weathered`]
+/// law over P14.T51.d's maturity and rate, through [`Regolith::weathered`]
 /// (decision-p14-t51d-weathering).
 #[must_use]
 pub(crate) fn airless_silicate_stand_in(row: f64) -> f64 {
@@ -661,7 +783,8 @@ pub(crate) enum RegolithWeathering {
     StandIn,
     /// Weathered: its spherical albedos by band, `spherical_bvr`, which P14.T54.b computes from the
     /// row by R10.T1.d's law at P14.T51.d's maturity and rate, and which weigh by the host's bands
-    /// as any solid's do. T51.d's tests reach the area mix through it with no wiring.
+    /// as any solid's do ([`Regolith::weathered`]). T51.d's tests reach the area mix through it
+    /// with no wiring.
     #[cfg_attr(
         not(test),
         expect(
@@ -679,16 +802,18 @@ pub(crate) enum RegolithWeathering {
 ///
 /// Its row is an input of the area mix, a seam that P14.T54.a fills from T51.c's lid; until then
 /// the lid is not known and the passes take a stand-in by the material of the bulk their air reads
-/// ([`Regolith::of_material`], [`Regolith::bond`]).
+/// ([`Regolith::of_material`], [`Regolith::bond`]). Its fields are private and its constructors
+/// name each case, so that a lid's row never sits unread under a weathered surface.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Regolith {
-    /// Its lid's row, T51.c's from P14.T54.a; `None` where the lid is not known.
-    pub(crate) row: Option<SubstanceId>,
+    /// Its lid's row, T51.c's from P14.T54.a; `None` where the lid is not known, and on a weathered
+    /// regolith, whose band albedos carry its row.
+    row: Option<SubstanceId>,
     /// The material of the body's bulk: rock is silicate, which the space-weathering stand-in
     /// takes on an airless body.
-    pub(crate) material: SurfaceMaterial,
+    material: SurfaceMaterial,
     /// How it is weathered.
-    pub(crate) weathering: RegolithWeathering,
+    weathering: RegolithWeathering,
 }
 
 impl Regolith {
@@ -700,6 +825,46 @@ impl Regolith {
             row: None,
             material,
             weathering: RegolithWeathering::StandIn,
+        }
+    }
+
+    /// The regolith of a known lid's row `row` on a body of `material`, weathered by the stand-in:
+    /// P14.T54.a's, from T51.c's lid.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "P14.T54.a passes T51.c's lid through it; the tests reach it now"
+        )
+    )]
+    #[must_use]
+    pub(crate) const fn with_lid(row: SubstanceId, material: SurfaceMaterial) -> Self {
+        Self {
+            row: Some(row),
+            material,
+            weathering: RegolithWeathering::StandIn,
+        }
+    }
+
+    /// A weathered regolith on a body of `material`, of spherical albedos by band `spherical_bvr`
+    /// ([`RegolithWeathering::Weathered`]): P14.T54.b's, which computes them from the lid's row,
+    /// so that it holds no row of its own.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "P14.T54.b's weathering builds it; P14.T51.d's tests and these reach it now"
+        )
+    )]
+    #[must_use]
+    pub(crate) const fn weathered(
+        material: SurfaceMaterial,
+        spherical_bvr: [f64; OPTICS_BANDS],
+    ) -> Self {
+        Self {
+            row: None,
+            material,
+            weathering: RegolithWeathering::Weathered { spherical_bvr },
         }
     }
 
@@ -812,42 +977,46 @@ pub(crate) fn cloud_share_of_state(state: SurfaceState) -> f64 {
     }
 }
 
-/// Earth's mean surface gravity, m s⁻², at which the reference cloud column is weighed: 9.820
+/// Earth's mean surface gravity, at which the reference cloud column is weighed: 9.820 m s⁻²
 /// (NASA's Earth fact sheet, as the partition's tests take it).
-const EARTH_SURFACE_GRAVITY: f64 = 9.82;
+const EARTH_SURFACE_GRAVITY: MetresPerSecondSquared = MetresPerSecondSquared::new(9.82);
 
 /// The temperature at which the reference cloud column holds water's vapour, K: 273.15, water's
 /// freezing point at one atmosphere.
 const REFERENCE_CLOUD_TEMPERATURE_K: f64 = 273.15;
 
-/// The airborne column, kg m⁻², of a condensable that makes a full cloud cover (the lane's
-/// stand-in): water's at P14.T24.c's surface humidity and its saturation at 273.15 K over Earth's
-/// gravity, h `p_sat` ÷ g = 0.77 × 611 Pa ÷ 9.82 m s⁻² ≈ 47.9 kg m⁻², in the model's own measure
-/// (the registry's T49.b curve), so that the generated Earth, whose column is some 130 kg m⁻²,
-/// keeps a full cover with margin and a Mars-like dry world falls near none.
+/// The airborne column of a condensable that makes a full cloud cover (the lane's stand-in):
+/// water's at P14.T24.c's surface humidity and its saturation at 273.15 K over Earth's gravity,
+/// h `p_sat` ÷ g = 0.77 × 611 Pa ÷ 9.82 m s⁻² ≈ 47.9 kg m⁻², in the model's own measure (the
+/// registry's T49.b curve), so that the generated Earth, whose column is some 130 kg m⁻², keeps a
+/// full cover with margin and a Mars-like dry world falls near none. Computed once a body, into
+/// its [`HostShade`].
 ///
 /// # Panics
 ///
 /// Never: water's row has a phase diagram.
 #[must_use]
-pub(crate) fn reference_cloud_column() -> f64 {
+pub(crate) fn reference_cloud_column() -> KilogramsPerSquareMetre {
     let saturation =
         diagram::saturation_pressure(water(), Kelvin::new(REFERENCE_CLOUD_TEMPERATURE_K))
             .expect("water's row has a phase diagram");
-    WATER_SURFACE_HUMIDITY * saturation.value() / EARTH_SURFACE_GRAVITY
+    KilogramsPerSquareMetre::new(
+        WATER_SURFACE_HUMIDITY * saturation.value() / EARTH_SURFACE_GRAVITY.value(),
+    )
 }
 
 /// The availability, 0 to 1, of the condensable that makes a body's cloud, from its partition
-/// `partition` (the lane's stand-in, P14.T51.b, recorded): min(1, (1 − d) W ÷ `W_ref`), with W the
-/// airborne column `x_s` p ÷ g of P14.T48.d's condensable of its air over its climate and
-/// reservoirs ([`climate_condensable`]), d its dominance in the partition (T51.a's continuous
-/// weight, [`Partitioned::dominance`](crate::planetary::chem::partition::Partitioned::dominance)),
-/// and `W_ref` the [`reference_cloud_column`]. A dominant condensable cold-traps at the surface
+/// `partition` under the light `shade` (the lane's stand-in, P14.T51.b, recorded): min(1, (1 − d) W
+/// ÷ `W_ref`), with W the airborne column `x_s` p ÷ g of P14.T48.d's condensable of its air over its
+/// climate and reservoirs ([`climate_condensable`]), d its dominance in the partition (T51.a's
+/// continuous weight,
+/// [`Partitioned::dominance`](crate::planetary::chem::partition::Partitioned::dominance)), and
+/// `W_ref` the [`reference_cloud_column`], `shade`'s. A dominant condensable cold-traps at the surface
 /// (Wordsworth 2015, as P14.T48.d cites it) and forms no Earth-like cover, so a Mars with carbon
 /// dioxide caps falls near none, while Earth's minor water keeps its whole column (the lane's
 /// rule, 2026-10-16). None where the air has no such condensable, or no pressure.
 #[must_use]
-pub(crate) fn cloud_availability(partition: &Partition) -> f64 {
+pub(crate) fn cloud_availability(partition: &Partition, shade: &HostShade) -> f64 {
     let pressure = partition.surface_pressure();
     let p = pressure.value();
     let g = partition.ground().gravity().value();
@@ -868,7 +1037,7 @@ pub(crate) fn cloud_availability(partition: &Partition) -> f64 {
     let (partial, dominance) = partition.of(condensable).map_or((0.0, 0.0), |s| {
         (s.partial_pressure().value(), s.dominance())
     });
-    let available = (1.0 - dominance) * partial / g / reference_cloud_column();
+    let available = (1.0 - dominance) * partial / g / shade.cloud_column.value();
     if available.is_nan() {
         0.0
     } else {
@@ -876,16 +1045,18 @@ pub(crate) fn cloud_availability(partition: &Partition) -> f64 {
     }
 }
 
-/// The cloud fraction of a body in the state `state` whose partition is `partition`: its state's
-/// share ([`cloud_share_of_state`]) times its condensable's availability
-/// ([`cloud_availability`]), the whole for a runaway greenhouse, which keeps its deck with or
-/// without sulphur, and a gas envelope (the plan: "never from the Surface path's decks").
+/// The cloud fraction of a body in the state `state` whose partition is `partition`, under the
+/// light `shade`: its state's share ([`cloud_share_of_state`]) times its condensable's
+/// availability ([`cloud_availability`]), the whole for a runaway greenhouse, which keeps its deck
+/// with or without sulphur, and a gas envelope (the plan: "never from the Surface path's decks").
 #[must_use]
-pub(crate) fn cloud_fraction(state: SurfaceState, partition: &Partition) -> f64 {
-    let share = cloud_share_of_state(state);
+pub(crate) fn cloud_fraction(state: SurfaceState, partition: &Partition, shade: &HostShade) -> f64 {
+    let of_state = cloud_share_of_state(state);
     match state {
-        SurfaceState::RunawayGreenhouse | SurfaceState::GasEnvelope => share,
-        SurfaceState::Temperate | SurfaceState::Snowball => share * cloud_availability(partition),
+        SurfaceState::RunawayGreenhouse | SurfaceState::GasEnvelope => of_state,
+        SurfaceState::Temperate | SurfaceState::Snowball => {
+            of_state * cloud_availability(partition, shade)
+        }
         SurfaceState::Airless | SurfaceState::MagmaOcean => 0.0,
     }
 }
@@ -905,14 +1076,17 @@ pub(crate) fn cloud_albedo(state: SurfaceState, shade: &HostShade) -> f64 {
     }
 }
 
-/// The reference Earth's ocean share, 0.708 of its surface (science-p14-t24a-climate.md §1's
-/// rounding; Eakins and Sharman 2010 give 0.7095, 361.9 × 10⁶ of 510.1 × 10⁶ km²), at water's
-/// liquid albedo.
+/// The reference Earth's ocean share, 0.708 of its surface, at water's liquid albedo: a rounded
+/// figure (science-p14-t24a-climate.md §1), where Eakins and Sharman 2010 give 0.7095 (361.9 × 10⁶
+/// of 510.1 × 10⁶ km²) and IPCC AR5 WG1 Table 4.1's note a 0.711 (an ocean of 362.5 × 10⁶ km² and a
+/// land of 147.6 × 10⁶ km²; Vaughan et al. 2013, read).
 pub(crate) const REFERENCE_EARTH_OCEAN: f64 = 0.708;
 
 /// The reference Earth's perennial ice share, 0.0289 of its surface: its grounded land ice, 10.0%
-/// of the land (decision-p14-t51a-part2 §3.1 and §8), at `H2O`'s frost. Its sea ice lies over the
-/// ocean share and is left in it.
+/// of the land (IPCC AR5 WG1, Vaughan et al. 2013, Table 4.1, read: the Antarctic ice sheet 8.3%,
+/// Greenland's 1.2% and the glaciers 0.5% of a land of 147.6 × 10⁶ km², over a surface of 510.1 ×
+/// 10⁶ km² with note a's ocean; decision-p14-t51a-part2 §3.1 and §8), at `H2O`'s frost. Its sea ice
+/// lies over the ocean share and is left in it.
 pub(crate) const REFERENCE_EARTH_ICE: f64 = 0.0289;
 
 /// The reference Earth's mean surface temperature, K, at which its ocean's record is read: 288
@@ -931,6 +1105,7 @@ const REFERENCE_EARTH_TEMPERATURE_K: f64 = 288.0;
 pub(crate) fn reference_earth_clear_sky() -> f64 {
     let sun = sun_light();
     let ocean = liquid_record(water(), Kelvin::new(REFERENCE_EARTH_TEMPERATURE_K))
+        .in_range()
         .expect("water's row has a liquid record at 288 K (P14.T49.h)");
     let land = Regolith::of_material(SurfaceMaterial::Rock).bond(SurfaceState::Temperate, &sun.0);
     let rest = 1.0 - REFERENCE_EARTH_OCEAN - REFERENCE_EARTH_ICE;

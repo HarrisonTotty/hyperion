@@ -1041,8 +1041,35 @@ fn normal_between(a: f64, b: f64) -> f64 {
 /// [h (α² (π/2 + asin(h/α)) + h √(α² − h²)) + (2/3)(α² − h²)^(3/2)] ÷ (π α²), with h the centre's
 /// elevation and α the radius. It is 2α ÷ 3π with the centre on the horizon and h when the disk
 /// clears it.
+///
+/// It is the elevation [`fraction`] takes the star at, at its highest, min(90°, e₀ + δ) for a
+/// colatitude e₀ and a greatest declination δ, and public so that a caller's flat ground sees the
+/// same star (galaxy plan 14's P14.T51.f takes the zonal annual maximum temperature at it).
+///
+/// Both angles are radians. Its domain is the centre in [0, π/2] and the radius in [0, π/2), as
+/// [`BodyParts`] bounds them. A centre in [−α, 0) gives the moment of the segment still above the
+/// horizon, falling to 0 at −α, where the disk has set. A centre below −α, a disk wholly below the
+/// horizon, gives NaN (the segment's root and arcsine then read a negative and an out-of-range
+/// argument), and so does a NaN angle. A radius of 0 is a point, whose elevation is its centre's
+/// at or above the horizon.
+///
+/// # Examples
+///
+/// The Sun at Mercury's perihelion, 0.87° in radius, with its centre on the horizon, weighs in at
+/// 2α ÷ 3π, about 0.18°, and at its full radius above it at that radius, to the bit:
+///
+/// ```
+/// use hyperion_base::units::{Degrees, Radians};
+/// use hyperion_surface::cold_trap::flux_weighted_elevation;
+///
+/// let alpha = Radians::from(Degrees::new(0.87));
+/// let rising = flux_weighted_elevation(Radians::ZERO, alpha).value();
+/// assert!((rising - 2.0 * alpha.value() / (3.0 * std::f64::consts::PI)).abs() < 1e-15);
+/// let clear = flux_weighted_elevation(alpha, alpha).value();
+/// assert_eq!(clear.to_bits(), alpha.value().to_bits());
+/// ```
 #[must_use]
-fn flux_weighted_elevation(centre: Radians, radius: Radians) -> Radians {
+pub fn flux_weighted_elevation(centre: Radians, radius: Radians) -> Radians {
     let (h, alpha) = (centre.value(), radius.value());
     if h >= alpha {
         return centre;
@@ -1332,6 +1359,25 @@ mod tests {
             assert!(e >= h, "{i}: {e} below its centre {h}");
             last = e;
         }
+    }
+
+    #[test]
+    fn the_public_flux_weighted_elevation_is_the_one_the_fraction_reads() {
+        // The Sky's sine of the star's highest elevation is the sine of the public form at
+        // min(90°, e₀ + δ), to the bit, at the pole, where a disk the horizon cuts is weighed, and
+        // at every latitude to the equator.
+        let body = real_moon();
+        let (delta, alpha) = (degrees(1.54), degrees(0.2711));
+        for i in 0..=90_u32 {
+            let lat = degrees(f64::from(i));
+            let highest = num::min(FRAC_PI_2, FRAC_PI_2 - lat.value() + delta.value());
+            let public = flux_weighted_elevation(Radians::new(highest), alpha);
+            assert_same_bits(Sky::at(lat, &body).sin_highest, math::sin(public.value()));
+        }
+        let pole = flux_weighted_elevation(delta, alpha).value();
+        assert_same_bits(pole, delta.value());
+        let below = flux_weighted_elevation(Radians::new(0.5 * alpha.value()), alpha).value();
+        assert!(below > 0.5 * alpha.value(), "{below}");
     }
 
     /// The plains alone at a directional RMS slope of `w`: no craters and no conduction share.

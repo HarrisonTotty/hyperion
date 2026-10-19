@@ -598,6 +598,37 @@ fn the_modifiers_refuse_inputs_out_of_range() {
     }
 }
 
+/// A weathering rate that is not finite on inputs each in its range is refused before the
+/// maturity, which would panic on it: a host whose G M★ is the largest `f64`, so that the
+/// micrometeoroids' speed term (G M★ ÷ r)^(3/2) overflows, and an orbit of 10⁻¹⁷⁰ m, whose
+/// semi-major axis's square underflows to 0 under the wind's flux.
+#[test]
+fn the_modifiers_refuse_a_rate_that_is_not_finite() {
+    let none = Condensates::default();
+    let heavy = ModifierInputs {
+        host: ModifierHost {
+            gravitational_parameter: GravitationalParameter::new(f64::MAX),
+            ..ModifierHost::sun()
+        },
+        ..moon(&none)
+    };
+    let close = ModifierInputs {
+        orbit: HeliocentricOrbit {
+            semi_major_axis: Metres::new(1e-170),
+            eccentricity: 0.0,
+        },
+        ..moon(&none)
+    };
+    for inputs in [heavy, close] {
+        let error = SurfaceModifiers::derive(&inputs).unwrap_err();
+        assert_eq!(error, DeriveModifiersError::RateNotFinite);
+        assert_eq!(
+            error.to_string(),
+            "the body's weathering rate is not finite"
+        );
+    }
+}
+
 /// Every `.rs` file under `dir`, recursively, in sorted order.
 fn source_files(dir: &Path, found: &mut Vec<PathBuf>) {
     let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
@@ -654,7 +685,7 @@ fn modifiers_nothing_on_the_record_reads_the_modifiers_yet() {
         "hooks::modifiers",
         "super::modifiers",
         "solar_xuv_luminosity",
-        "wind_mass_loss_rate",
+        "wind_mass_loss_kg_per_s",
         "organic_ground(",
         "body_maturity",
         "maturity_after",

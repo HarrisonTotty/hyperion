@@ -1205,6 +1205,32 @@ mod material {
     }
 }
 
+/// P14.T51.d's space-weathering maturity law: its inputs out of range are refused.
+mod maturity {
+    use hyperion_base::units::Gigayears;
+    use hyperion_surface::material::maturity_after;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    #[test]
+    #[should_panic(expected = "an exposure must be finite and non-negative")]
+    fn the_maturity_refuses_a_negative_exposure() {
+        let _ = maturity_after(Gigayears::new(-1e-9), 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "an exposure must be finite and non-negative")]
+    fn the_maturity_refuses_a_nan_exposure() {
+        let _ = maturity_after(Gigayears::new(f64::NAN), 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a weathering rate must be finite and non-negative")]
+    fn the_maturity_refuses_an_infinite_rate() {
+        let _ = maturity_after(Gigayears::new(1.0), f64::INFINITY);
+    }
+}
+
 mod reading {
     use hyperion_base::rng::DetailSeed;
     use hyperion_base::units::Metres;

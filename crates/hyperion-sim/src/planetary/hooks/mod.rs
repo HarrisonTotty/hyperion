@@ -26,9 +26,10 @@
 //!   and maturity, organic cover, resurfacing rate and an Io's volcanic deposits. It is pure until
 //!   P14.T54.b, the 23 → 24 bump, puts it in the record's surface section in the place of the
 //!   record's placeholder of the same name.
-//! - [`cold_traps`]: an airless body's cold traps (P14.T51.f), so far the exposed fraction of
-//!   their ice, `f_x`, drawn once a body on `body.cold_traps`, which nothing on the record reads
-//!   yet.
+//! - [`cold_traps`]: an airless body's cold traps (P14.T51.f): the exposed fraction of their ice,
+//!   `f_x`, drawn once a body on `body.cold_traps`, the zonal annual maximum and the cold-trap
+//!   fraction of each condensable, which the record's published condensates take behind a hold at
+//!   generator version 24, until P14.T54.b's bump.
 //!
 //! The conditions and figures are a body's record's surface section
 //! ([`record::Surface`](crate::planetary::record::Surface), P14.T48.e), from the 21 → 22 batch's

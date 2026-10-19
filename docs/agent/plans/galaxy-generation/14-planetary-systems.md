@@ -5846,7 +5846,9 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
       bit;
     - the passes converge to 10⁻⁹ in T_eq.
   - _Files:_ `planetary/derive/{atmosphere, photometry}.rs`.
-  - _Accept:_ `cargo test -p hyperion-sim planetary::derive`.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::derive` and
+    `cargo test -p hyperion-sim --lib -- planetary::chem::partition planetary::moons::regular planetary::system::tests::under_the_batch`
+    (widened as built: the tests the first filter does not reach).
 - **P14.T51.c Crust composition, redox class and melt area** (22 → 23; after T50.a).
   - `hooks/crust.rs`:
     `CrustComposition { primary: Option<SubstanceId>, secondary: Option<SubstanceId>, tertiary: Option<SubstanceId>, bulk: Option<SubstanceId>, lid: LidCrust, provinces: SubstanceId, redox: RedoxClass, melt_area_fraction: f64 }`
@@ -16987,11 +16989,17 @@ tables::gauss_legendre`.
       methane, the largest species of its reference composition (0.739 by mole), labelled: Titan's
       seas 0.07916.
     - _A row without a record_ (CO₂, Ar and O₂ liquids) takes r_d at liquid nitrogen's index at
-      550 nm read from its record at its normal boiling point, 77.355 K (NIST, from memory), with
-      no body term, labelled: a CO₂ sea 0.04414. A deviation from the ruling's lean, the frozen
-      form's index at 550 nm, which the sim does not carry (the solids' index files are the
-      client's); the light molecular liquids' visible indices are about 1.19–1.23 (from memory),
-      nitrogen's 1.198.
+      550 nm read from its record at its normal boiling point, its saturation temperature under
+      101,325 Pa on the registry's T49.b curve, 77.3553 K (NIST's 77.355 K, from memory; the batch
+      review replaced the figure from memory with the registry's), with no body term, labelled: a
+      CO₂ sea 0.04414. A deviation from the ruling's lean, the frozen form's index at 550 nm, which
+      the sim does not carry (the solids' index files are the client's); the light molecular
+      liquids' visible indices are about 1.19–1.23 (from memory), nitrogen's 1.19921.
+    - _A temperature no bound holds_ (the batch review): a liquid's record is held into its range
+      by name, below its first melt at it and at or above its critical point a part in a million
+      below it; a temperature that is not a number, or above a range with no critical point (one
+      of today's liquids with a record has none), takes its own record at its first melt, labelled
+      (`StandIn::RecordAtItsFirstMelt`), so that a row with a record is never read as having none.
     - _A melt_ takes T13.c's 0.10 (Essack et al. 2020), read from its table, labelled.
   - _The regolith_ is an input (`Regolith`, its lid's row an `Option`), a seam T54.a fills from
     T51.c's lid; until then the lid is not known (`Regolith::of_material`, the lane's decision,
@@ -17095,8 +17103,8 @@ tables::gauss_legendre`.
     Ceres keep 0.11 too (recorded). Before the decision the seam gave an airless rock `basalt`'s
     fresh 0.0519 by min(row, 0.11), which would have darkened them; min(row, 0.11) now applies to
     a known lid's row alone, as T54.a's lid rows take it.
-  - _Mercury's albedo._ Mercury's 0.088 is Mallama 2017's bolometric Bond albedo; NASA's 0.068 is
-    p_V q_V. P14.T54.b tests both (decision-p14-t51d-weathering §3); the template's source now says
+  - _Mercury's albedo._ Mercury's 0.088 is Mallama 2017's bolometric Bond albedo; NASA's 0.068
+    equals p_V q_V = 0.142 × 0.478. P14.T54.b tests both (decision-p14-t51d-weathering §3); the template's source now says
     so, and no value moves.
   - _At their own inventories_ (recorded, not asserted): a Pluto (NASA's mass and radius, from
     memory, at 39.48 au) and the table's Triton about Neptune are airless with no N₂ (P14.T53.c), as
@@ -17144,6 +17152,46 @@ tables::gauss_legendre`.
     reads `basalt_fe`. When T49.i lands, P14.T54.a's bless note for 22 → 23 checks Mars's Bond
     albedo (T49.i's `basalt_fe` mixture raises a Mars-like lid from about 0.12 to 0.35, which
     reaches the passes through T51.c's lid).
+  - _The cloud lies over the surface_: A = f_c A_cloud + (1 − f_c) Σ aᵢAᵢ (`under_cloud`), where
+    the plan lists the cloud as one more term of A = Σ aᵢAᵢ; the surface's areas sum to 1 beneath
+    it.
+  - _Earth's "kept"_: the reference Earth gives 0.294 to 10⁻⁶ by the cloud's calibration, T51.a's
+    by-hand Earth is within 0.01, and the table's Earth through the passes gives 0.278, within the
+    test's 0.02, because the passes have no basins until T54.a, so its water fills no sea.
+  - _Jupiter's table value_ is Sudarsky et al.'s class I about a G2V star, 0.57, not T13.c's 0.34;
+    it sits 0.067 (5.6σ) above Li et al. 2018's measured 0.503 ± 0.012.
+  - _The giants' nodes_ are the classes' model planets (130, 250, 600, 1,200 and 1,700 K), not
+    the classes' boundaries the plan names: a 1,200 K giant takes class IV's 0.03 at its node, and
+    the 1,500 K case (0.342) tests the strict bracket between IV and V.
+  - _Enceladus_ is tested as the airless icy regolith's fresh frost about a Sun
+    (`an_enceladus_takes_its_fresh_frost_until_the_infrared`, its 0.7–0.9 gated on the infrared),
+    not as a derived moon.
+  - _A liquid with no record_ takes r_d at liquid N₂'s index at 550 nm (n ≈ 1.199, 1.19921 at the
+    registry's 77.3553 K), not the ruling's lean of its frozen form's index, since the sim stores no
+    solid index: for main.
+  - _The acceptance, widened_ (the batch review, 2026-10-19): T51.b's _Accept_ adds
+    `cargo test -p hyperion-sim --lib -- planetary::chem::partition planetary::moons::regular planetary::system::tests::under_the_batch`,
+    which reaches the tests outside `planetary::derive` that the _Tests_ bullet above lists.
+  - _The batch review's fixes_ (2026-10-19; no value on the record moves at 22, `Held` bit for
+    bit; under `Batch` only a liquid with no record moves, in its last digits, by nitrogen's index
+    read at 77.3553 K in place of 77.355 K, and a temperature that is not a number):
+    - a liquid's record is held into its range by name (above), so that a row with a record is
+      never read as having none, and every error the hold meets is named;
+    - nitrogen's index is read at the registry's normal boiling point of N₂, not a figure from
+      memory;
+    - the reference cloud column is computed once a body, into `HostShade` (no longer
+      `PartialEq`; its tests compare its values' bits), Earth's gravity and the column are typed,
+      and `HostShadeSum::add` takes the host's flux as `EarthFluxes`;
+    - the passes build their surface once, before the first, its light a `PassLight` (the hosts'
+      shade, or for a single pass a host at the hottest host's temperature) and its regolith a
+      provider on the bulk's material (`Regolith::of_material` until T54.a);
+    - the body term is a `BodyTerm` (`Absent` or its `Coefficients`), and `Regolith`'s fields are
+      private, built by `of_material`, `with_lid` or `weathered`, so that a lid's row cannot sit
+      unread under a weathered surface;
+    - the area-mix albedo is held into [0, 1) and taken by `BondAlbedo::from_fraction`, with a
+      debug assertion, in place of a dead fallback;
+    - the Enceladus test is named for what it holds, and it and the Pluto and Triton recordings
+      assert their state, a finite albedo in [0, 1) and passes below the cap.
   - _Files beyond the task's:_ `planetary/derive/mod.rs`,
     `planetary/derive/atmosphere/surface_mix.rs`, `planetary/derive/photometry/area_mix.rs` and its
     tests, `planetary/system.rs` and its tests, `planetary/moons/regular.rs`,
@@ -17188,7 +17236,23 @@ tables::gauss_legendre`.
       cover (with the airless edge's dominance, decision-p14-t51a-part2 §3.3), until T54.a's cold
       profile;
     - 5 rocky temperate worlds alternating between about 0.15–0.27 and 0.278.
-  - _The passes' convergence_: 25 of the sample's 954 bodies oscillate to the cap (above).
+  - _The Earth calibration's split_: `A_cloud` 0.389 absorbs both the land's `basalt` (0.052) and
+    the clear sky's Rayleigh scattering, which the area mix does not model, so the split between
+    cloud and surface may not carry to other hosts or to drier worlds.
+- **For P14.T54.a: what T51.b hands it** (a docs-batch line for main, from the batch review,
+  2026-10-19). T54.a's 22 → 23 bump gives T13.c's passes four inputs that T51.b's stand-ins hold
+  until then (`PassSurface::stand_in`):
+  - T51.c's lid row into `Regolith` (`Regolith::with_lid`), in place of the lid not known;
+  - the passes' climate, T24.a's range from the body's spin, with one cold profile a pass, in
+    place of the isothermal climate and its step cover;
+  - the previous pass's basins and water share, in place of no basins and all the condensed water
+    at the surface;
+  - the convergence re-check over the sample (20 of 954 at the cap at 23's stand-ins).
+
+  Of the three classes of capped bodies, the first waits for P14.T49.i's infrared and the second
+  for the cold profile. The third, the five rocky temperate worlds that alternate between about
+  0.15–0.27 and 0.278, is T54.a's re-check's to settle, and then main's if any still alternate.
+
 - _Space weathering_ (decision-p14-t51d-weathering, 2026-10-16). Recorded and deferred, each a
   value change in the shared law, none a contract change:
   - microphase iron, a split by surface temperature (Lucey and Riner 2011; Noble and Pieters
@@ -17200,7 +17264,7 @@ tables::gauss_legendre`.
   - a steady-state factor on m_body;
   - per-system dust levels.
 
-  NASA's Mercury fact sheet's "Bond albedo 0.068" is the V-band p_V q_V; the bolometric value is
+  NASA's Mercury fact sheet's "Bond albedo 0.068" equals the V-band p_V q_V; the bolometric value is
   0.088.
 
 - **Deviations in P14.T51.d, as built (`p14-snapshot`, 2026-10-16).** The surface modifiers, pure:
@@ -17217,8 +17281,8 @@ tables::gauss_legendre`.
     either sign, and panics on a NaN, an infinite or a negative input, as the crate's chronology
     does (the sim validates first).
   - _`SurfaceModifiers`_ (`hooks::modifiers`):
-    `derive(&ModifierInputs) -> Result<Self, DeriveModifiersError>` (one variant,
-    `OutOfRange(ModifierInput)`), with `maturity`, `weathering_rate` and its two terms
+    `derive(&ModifierInputs) -> Result<Self, DeriveModifiersError>` (`OutOfRange(ModifierInput)`,
+    and `RateNotFinite` from the batch review), with `maturity`, `weathering_rate` and its two terms
     (`weathering() -> WeatheringRate { wind, dust }`), `organic_ground`, `organic_cover`,
     `resurfacing_m_per_yr` and `volcanic_deposits() -> &[VolcanicDeposit]`. The inputs take T24.b's resurfacing time τ itself, so that T54.b passes it
     under the record's tide rule, and the host as its radius, X-ray and ultraviolet luminosity and
@@ -17255,8 +17319,22 @@ tables::gauss_legendre`.
     most 1), with its tests.
   - _The tripwire_ (`modifiers_nothing_on_the_record_reads_the_modifiers_yet`) scans the sim's
     `src/` and the surface crate's, and names what T54.b wires.
+  - _The organic ground_ is the area of the perennial carbon-bearing ices other than CO₂, with N₂'s
+    counted only beside one. A pure-N₂ surface takes no cover, since nitrogen alone has no carbon
+    to make tholin: a deviation from the plan's list ("CH₄, N₂, CO or CH₃OH ices").
+  - _Mercury's ratio:_ the test asserts k ÷ 4 in [1, 3), above Braden and Robinson 2013's "up to 4
+    times faster" that the plan's test names; a difference of models (deferred findings, below),
+    for main.
+  - _The batch review's fixes_ (2026-10-19; nothing on the record calls either module): the three
+    `should_panic` tests of `material/maturity.rs` moved to `hyperion-surface`'s `tests/panics.rs`
+    (`mod maturity`), with their `expected` strings, so that the native and browser test lists
+    agree; a rate k that is not finite on inputs the checks accept (a huge G M★ through the dust
+    term's power, or a semi-major axis whose square underflows) is refused as
+    `DeriveModifiersError::RateNotFinite` before `body_maturity`, so that `derive` has two
+    variants; `wind_mass_loss_rate` is `wind_mass_loss_kg_per_s`, and the exposure's air column is
+    typed.
   - _Not applied here_ (main's docs batch): the ruling's plan text for P14.T54.b, R10.T1.d, R10.T1.c
-    and R09.T2.f, and T51.b's Mercury line.
+    and R09.T2.f. T51.b's Mercury line was applied in T51.b's own commit (c70ec278).
 - **Deferred findings (2026-10-13 rule)**, from P14.T51.d:
   - _Mercury's k against Braden and Robinson 2013_ (JGR Planets 118, 1903, abstract read: "up to
     4 times faster"): the ruling's shares and laws give 8.89, its dust term alone 7.1. The test
@@ -17320,3 +17398,130 @@ tables::gauss_legendre`.
     factor e ÷ (e − 1), only where k_irr τ ≪ 1 and the cover is small. The eligible ground sums
     its entries' areas, which may overlap, held to 1.
   - _The Moon's reference_ ignores its months in Earth's magnetotail, which cancel in k_Moon.
+  - _No ferric surface_ (decision-backlog-2 §1.5): T51.c's Mars expects its ferric surface "from
+    T51.d", which places none. The rule, and where its result goes, are unruled: for main.
+  - _Not pinned across targets:_ `maturity_after` and `exposed_fraction` have no golden bits yet.
+    Recorded for P14.T54.b, or for R10.T1.c, whichever reads them first.
+- **Deviations in P14.T51.f, as built (`p14-snapshot`, 2026-10-19).** The cold traps on airless
+  bodies, behind their own hold at 24 (`COLD_TRAPS_VERSION`, `ColdTrapRules`, with the tripwire
+  `the_cold_traps_are_held_only_until_the_24_bump`), inside the `p14-snapshot` lane's hold at 23,
+  which publishes no condensates at 22: no value on the record moves at 22 or 23
+  (decision-bump-plan-after-22 §1.3). The exposed fraction's tag `body.cold_traps` landed at its
+  own commit, `tags.golden`'s one appended line.
+  - _Files beyond the plan's list:_ `hooks/mod.rs` (the module), `hooks/figures.rs`
+    (`condensates_under` gains the cold traps' rules and sky, and `water_cover` is extracted from
+    it), `planetary/system.rs` (`with_partition` passes the sky: the obliquity, the flux and the
+    brightest zone star's angular radius at the seasonal orbit's periapsis, and the exposed
+    fraction drawn in `surface_section`), `hooks/surface/tests.rs` (the call sites),
+    `rng/tags.rs`, `planetary/mod.rs`, and R09's `hyperion-surface/src/cold_trap.rs`, whose
+    `flux_weighted_elevation` is made public, additively, with a doc, an example and a test that
+    it is the elevation `fraction` reads, so that the zonal annual maximum takes the same star.
+    `partition.rs`'s `sublimation_edge` is `pub(crate)` with its loss rate a parameter (the same
+    bits at 144 kg m⁻² Gyr⁻¹), with `exosphere_threshold`, `SolidEdges` and `publish_with` (whose
+    `Partition` arm is `publish` to the bit, the partition golden unmoved), and
+    `Condensates::with_cold_traps` with `TrappedIce`. The draw sits in `hooks/cold_traps.rs`, not
+    beside `continental_asymptote`; the grain density is read in `partition.rs`, already behind
+    its hold in the optics tripwire, so the tripwire's `HELD` list is unchanged.
+  - _The collisional test:_ a body takes the cold traps where it is airless and its column holds
+    fewer than 1 ÷ σ_c molecules per square metre, p < m̄ g ÷ σ_c, with σ_c 3 × 10⁻¹⁹ m² (a
+    hard-sphere N₂/O cross-section, _from memory_, 28% below N₂'s 4.16 × 10⁻¹⁹ m²; deferred
+    findings) and m̄ its column's mean molecular mass, or N₂'s
+    where it is empty: 2.5 × 10⁻⁷ Pa on the Moon. Pluto and Triton (about 1 Pa) are collisional
+    and keep P14.T51.a's edges; at 23 their N₂ is deleted, so they qualify until P14.T53.c gives
+    them their airs. On the table, Mercury, the Moon and Ceres qualify, and Ganymede (14.8 Pa)
+    does not. A body locked 1:1 to its star (the `Eyeball` profile) takes none.
+  - _The airless branch at 24_ (`SolidEdges::Exosphere`): every solid's edge is its threshold,
+    its net Hertz–Knudsen edge into vacuum at 144 kg m⁻² Gyr⁻¹ (its pure row's, below its first
+    melt), against the zonal annual maximum; its mass is what its zonal area holds at 1.93 km, at
+    most its reservoir, so that the rest is left for its traps (P14.T51.a gave a solid-lying
+    reservoir whole to its entry). Water takes the same rule with the partition's condensed water
+    and the registry's threshold (110.0 K, within 1 K of `AIRLESS_ICE_TEMPERATURE`), but on an
+    ice-rich crust, which keeps P14.T24.b's ice and takes no water traps. The zonal annual maximum
+    is flat ground in equilibrium with the star at its highest, σT⁴ = ((1 − A) S_p sin e + q) ÷ ε at
+    the annual-mean profile's 66 area points: the Moon's pole 158.13 K and 85° 226.87 K (A 0.11,
+    q 0.0119 W m⁻²), Mercury's pole 172.07 K with the disk and 110.27 K as a point, and a rocky
+    equator at 12.3 au 110.41 K.
+  - _The latitude rule:_ four-point Gauss–Legendre on 0, 60, 70, 80, 85, 88 and 90°, 24 nodes,
+    against a 0.02° midpoint rule over 60–90°: −3.99 × 10⁻⁴ for craters of distribution B and
+    +1.07 × 10⁻⁴ for A (the test's bound is 5 × 10⁻⁴). Nodes whose zonal annual maximum is below
+    the threshold take no trap.
+  - _The figures as built_ (the real Sun at Earth's perihelion, the Sun's 0.2711°, δ 1.54°, A
+    0.12, q 0.018 W m⁻², 20% craters, plains at RMS slope 0.1, the 0.05 cut-off): the Moon's water
+    traps 0.0922% of its surface and 5.838% of 80–90° with B, 0.0595% and 3.867% with A, none
+    below 70°; its exposed water at f_x 0.035 is 1,224 km² with B (×1.91 of 3.5% of Diviner's
+    18,300 km², ×0.87 of the all-scale 40,000 km²) and 789 km² with A (×1.23, ×0.56); half its CO₂
+    traps at 10 kg m⁻² Gyr⁻¹ (55.53 K on T49.b's curve) 194 km² with B and 187 km² with A, and at
+    the rule's own threshold, 58.18 K (not the research's estimated 57 K), 364 and 342 km²,
+    recorded, not asserted; Ceres's permanent shadow at 4° 1,049 km² with B and 7,557 km² with A,
+    about Schorghofer et al. 2024's 2,282 km², and at 20° 0 and 52.7 km²; at 30° no water or CO₂
+    traps.
+  - _The terrain stand-ins_, each labelled: a crater fraction of 0.2 × min(1, N(>100 m) ÷ Trask's
+    saturation at 100 m), Hayne et al. 2021's lunar best fit with the lane's 100 m reference; d/D
+    Hayne et al.'s distribution B, the one that passes every band test (science-r09-drainage.md
+    §8.13.3); plains at atan 0.1 (5.7°); and the lunar share under the conduction cut-off, 0.05,
+    for every body, until a crater state and a regolith give their own.
+  - _The reservoir placeholder:_ water's column over its trap area is 22.5 kg m⁻² (Lunar
+    Prospector's about 1.5 wt% if confined to the shadows, Feldman et al. 2001, _from memory_, over
+    1 m at 1,500 kg m⁻³; LCROSS's 5.6 ± 2.9 wt%, about 84 kg m⁻², the upper check), CO₂'s LCROSS's
+    2.17% of water by number (Colaprete et al. 2010, Table 1, _from memory_) × 44.01 ÷ 18.02, 1.19
+    kg m⁻², and a species of the inventory takes what is left after its zonal deposit, at most
+    water's column over its own trap area. A merged entry adds the trap's area and reservoir to
+    the zonal entry, keeps its seasonal flag, and sums the two layers, the trap's at its grain
+    density at its threshold. The angular radius is the brightest zone star's, and the flux the
+    body's orbit-mean flux from every host taken to periapsis as its seasonal host's.
+  - _The cost_ (`time_the_cold_traps`, in release, under the heavy lock at a 100% CPU quota, the
+    1-minute load 4.7): about 3.1 ms a qualifying body of the table, for its two species (Mercury
+    3.21 ms, the Moon 3.05 ms, Ceres 3.06 ms), against P14.T51.a's 0.17 ms, so about 1.5 ms a
+    species where the research estimated 0.5–0.8 ms; the bodies that do not qualify move by under
+    0.01 ms.
+  - _The passes_ (`surface_mix::pass_condensates`) keep P14.T51.a's airless branch. From 24 the
+    record takes the cold traps' branch, so P14.T54.b must give T13.c's passes the same sky and
+    rules, or the Bond albedo reads other areas than the record publishes. The cold traps'
+    tripwire names it among what T54.b settles.
+  - _The batch review's fixes_ (2026-10-19; no value moves): `Sunlit::annual_maximum` takes its
+    colatitude as `Radians` and `trap_reservoir` returns `KilogramsPerSquareMetre`;
+    `flux_weighted_elevation`'s example compares bits and its doc states its domain (a centre
+    below −α, a disk wholly set, gives NaN); the latitude rule's docs say "within 5 × 10⁻⁴", the
+    test's bound; carbon dioxide's threshold is stated as the registry's 58.18 K at 144 kg m⁻²
+    Gyr⁻¹; the regolith's 1,500 kg m⁻³ is labelled _from memory_; and σ_c's doc records N₂'s
+    kinetic diameter.
+- **Deferred findings (2026-10-13 rule)**, from P14.T51.f:
+  - _The cost per system_ (for main, before P14.T54.b): about 3.1 ms for each airless body that is
+    not locked to its star and whose air is not collisional, for its two delivered species (about
+    1.5 ms more for each further condensable), against P14.T33.a's 3.47 ms a field system and
+    decision-p14-t51a-partition §6's refusal of 2.1 ms a body. Over the 60-system sample under the
+    batch's rules (the derived planets, members and moons, 2026-10-19, a probe run once by name
+    and not kept): 688 such bodies, 170 of them moons, with 94 more locked to their star and so
+    taking none; a mean of 11.5 a system (median 8, at most 73), so about 36 ms a system (median
+    25 ms, at most 0.23 s), some ten times a field system's whole cost. At 23's stand-ins a
+    Pluto's or a Triton's N₂ is deleted, so they count until P14.T53.c.
+  - _Grazing-angle albedo_ (for main): Hayne et al. 2017 (JGR Planets 122, 2371, eq. A8 and Table
+    A1) give A(θ) = A₀ + 0.06 (θ ÷ 45°)³ + 0.25 (θ ÷ 90°)⁸ at the solar incidence angle θ. With it
+    the Moon's polar T_max falls from 158 to 111 K, its 85° from 227 to 182 K, and Mercury's pole
+    from 172 to 118 K. The current results survive, but the lunar pole's margin to water's 110 K
+    drops to 1 K. It is an algorithm change, so it is not made here.
+  - _Bodies locked to their star_ keep P14.T51.a's blended edge, so P14.T51.a's "_For
+    P14.T51.f._" item (a condensable alone in an exosphere takes the under-air edge) stays open
+    for them.
+  - _σ_c_ is 28% below N₂'s hard-sphere cross-section: N₂'s kinetic diameter is 364 pm (Ismail et
+    al. 2015, through a secondary), so π d² = 4.16 × 10⁻¹⁹ m² against the code's 3 × 10⁻¹⁹ m²,
+    kept.
+  - _Mercury's larger reservoir:_ its polar deposits are far larger than the Moon's (Lawrence et
+    al. 2013, _from memory_), against the lunar 22.5 kg m⁻² that every body takes until a delivery
+    and gardening budget exists (with P14.T55.c).
+  - _T_max at equilibrium_ with the star at its highest overstates the peak on a fast rotator of
+    high thermal inertia, where the ground does not reach equilibrium within a day.
+  - _The peak-temperature form_ understates the most volatile species' traps: Schorghofer et al.
+    2021 find about 3.5 times the CO₂ area by the time-averaged loss (science-r09-drainage.md
+    §8.13).
+  - _The model is symmetric_ about the equator, where the Moon's south holds about 60% of its
+    traps (Hayne et al. 2021).
+  - _The present obliquity_ stands for its history, which the cold traps record (Ceres's 2–20°
+    cycle; science-r09-drainage.md §4.3 item 7).
+  - _Delivered species lie only in traps:_ water and CO₂ with no inventory take their
+    placeholder columns over their traps and no zonal deposit.
+  - _Locked bodies and collisional thin airs take none:_ a body locked 1:1 to its star has no
+    star circling its sky, and an air at or above m̄ g ÷ σ_c (Pluto, Triton, Ganymede's 14.8 Pa on
+    the table) keeps P14.T51.a's blended edges against the annual mean.
+  - _SO₂, H₂S and CO_ have phase diagrams but no gas columns, so no inventory holds them and they
+    take no traps: a closed set, for the composition audit.

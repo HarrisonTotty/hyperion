@@ -51,7 +51,7 @@
 
 mod surface_mix;
 
-pub(crate) use surface_mix::PassSurface;
+pub(crate) use surface_mix::{PassLight, PassSurface};
 
 use crate::id::BodyId;
 use crate::math;
@@ -1874,7 +1874,7 @@ pub fn atmosphere(inputs: &AtmosphereInputs) -> Atmosphere {
     atmosphere_under(
         SnapshotRules::in_force(),
         inputs,
-        &PassSurface::stand_in(None),
+        &PassSurface::stand_in(PassLight::HottestHost),
     )
 }
 

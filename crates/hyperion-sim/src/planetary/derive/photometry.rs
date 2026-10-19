@@ -389,7 +389,7 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
         source: "Mallama and Hilton 2018, Astronomy and Computing 25, 10, eq. 2, to 169.5°; \
                  Mallama, Krobusek and Pavlov 2017, Icarus 282, 19, Table 7; measured bolometric \
                  Bond albedo 0.088 ± 0.003 (Mallama 2017, arXiv:1703.02670, Table 1; NASA's fact \
-                 sheet's 0.068 is the V-band spherical albedo, p_V q_V = 0.142 × 0.478), the \
+                 sheet's 0.068 equals the V-band spherical albedo, p_V q_V = 0.142 × 0.478), the \
                  generator's airless rock 0.11",
     },
     TemplateRow {

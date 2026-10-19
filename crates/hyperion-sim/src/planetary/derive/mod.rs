@@ -112,9 +112,9 @@ pub use rotation::tidal_locking_time;
 
 use crate::orbit::KeplerElements;
 use crate::planetary::derive::atmosphere::{
-    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, NitrogenLine, PassSurface,
-    SnapshotRules, SurfaceMaterial, VolatileDraws, VolatileInventory, atmosphere_under,
-    energy_limited_loss, formation_temperature, volatile_inventory_under,
+    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, NitrogenLine, PassLight,
+    PassSurface, SnapshotRules, SurfaceMaterial, VolatileDraws, VolatileInventory,
+    atmosphere_under, energy_limited_loss, formation_temperature, volatile_inventory_under,
 };
 use crate::planetary::derive::composition::{
     SolveCompositionError, dry_composition, formed_with_envelope,
@@ -1310,6 +1310,10 @@ pub const ATMOSPHERE_PASSES: u32 = 3;
 /// The most passes [`derive_body`] takes under the batch's rules (P14.T51.b, the `p14-snapshot`
 /// lane's hold): 64, the lane's cap, far above the passes a body takes to converge (P14.T51.b's
 /// sample measures them), so that a body whose state flips between passes ends.
+///
+/// A body that reaches the cap publishes the albedo its last pass read, so its value depends on
+/// the cap: retuning the cap moves it once [`SnapshotRules::Batch`] is in force. P14.T54.a's
+/// re-check over the sample should show that no body reaches it (20 of 954 did at 23's stand-ins).
 pub(crate) const ATMOSPHERE_PASS_CAP: u32 = 64;
 
 /// The change in the equilibrium temperature between passes, as a share of it, at which the
@@ -1342,11 +1346,16 @@ struct Passes {
 }
 
 impl PassBody<'_> {
-    /// One pass under the lane's rules `rules` at the albedo `albedo`: the equilibrium temperature
-    /// it gives, the temperature with the body's own heat, and the atmosphere they hold, over the
-    /// passes' stand-in surface under the body's hosts' light ([`PassSurface::stand_in`]).
+    /// One pass under the lane's rules `rules` at the albedo `albedo` over the surface `surface`:
+    /// the equilibrium temperature it gives, the temperature with the body's own heat, and the
+    /// atmosphere they hold.
     #[must_use]
-    fn pass(&self, rules: SnapshotRules, albedo: BondAlbedo) -> (Kelvin, Kelvin, Atmosphere) {
+    fn pass(
+        &self,
+        rules: SnapshotRules,
+        surface: &PassSurface<'_>,
+        albedo: BondAlbedo,
+    ) -> (Kelvin, Kelvin, Atmosphere) {
         let (sky, bulk) = (self.sky, self.bulk);
         let irradiated = equilibrium_temperature(sky.flux, albedo);
         let heated = if self.internal_luminosity > Watts::ZERO {
@@ -1372,8 +1381,7 @@ impl PassBody<'_> {
             age: self.age,
             hottest_host: sky.hottest,
         };
-        let surface = PassSurface::stand_in(sky.shade.as_ref());
-        let air = atmosphere_under(rules, &inputs, &surface);
+        let air = atmosphere_under(rules, &inputs, surface);
         (irradiated, heated, air)
     }
 
@@ -1381,24 +1389,35 @@ impl PassBody<'_> {
     /// [`BondAlbedo::BEFORE_ATMOSPHERES`], each taking the albedo the last one's atmosphere gave:
     /// a fixed [`ATMOSPHERE_PASSES`] under [`SnapshotRules::Held`], and under
     /// [`SnapshotRules::Batch`] until the equilibrium temperature changes by at most
-    /// [`ATMOSPHERE_CONVERGENCE`] of itself, at most [`ATMOSPHERE_PASS_CAP`] of them.
+    /// [`ATMOSPHERE_CONVERGENCE`] of itself, at most [`ATMOSPHERE_PASS_CAP`] of them (a body at the
+    /// cap keeps the albedo its last pass read).
+    ///
+    /// Every pass reads one surface, built once before the first: the passes' stand-in surface
+    /// ([`PassSurface::stand_in`]) under the body's hosts' light, which [`Sky::of`] builds under
+    /// the batch's rules alone (the held rules read no light).
     #[must_use]
     fn passes(&self, rules: SnapshotRules) -> Passes {
+        let light = self
+            .sky
+            .shade
+            .as_ref()
+            .map_or(PassLight::HottestHost, PassLight::Shade);
+        let surface = PassSurface::stand_in(light);
         let mut albedo = BondAlbedo::BEFORE_ATMOSPHERES;
-        let (mut irradiated, mut heated, mut air) = self.pass(rules, albedo);
+        let (mut irradiated, mut heated, mut air) = self.pass(rules, &surface, albedo);
         let mut count = 1;
         match rules {
             SnapshotRules::Held => {
                 for _ in 1..ATMOSPHERE_PASSES {
                     albedo = air.albedo();
-                    (irradiated, heated, air) = self.pass(rules, albedo);
+                    (irradiated, heated, air) = self.pass(rules, &surface, albedo);
                     count += 1;
                 }
             }
             SnapshotRules::Batch => {
                 while count < ATMOSPHERE_PASS_CAP {
                     let next = air.albedo();
-                    let (now, warmed, held) = self.pass(rules, next);
+                    let (now, warmed, held) = self.pass(rules, &surface, next);
                     count += 1;
                     let change = (now.value() - irradiated.value()).abs();
                     let settled = change <= ATMOSPHERE_CONVERGENCE * now.value();
@@ -1498,7 +1517,7 @@ impl Sky {
                     sky.hottest = t_eff;
                 }
                 if let Some(shade) = shade.as_mut() {
-                    shade.add(flux.value(), t_eff);
+                    shade.add(flux, t_eff);
                 }
             }
         };

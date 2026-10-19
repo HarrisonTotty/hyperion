@@ -979,6 +979,10 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
         ],
       },
     ],
+    [
+      "whose deposit's share is negative, which only the deposit's own check catches",
+      { volcanic_deposits: [{ substance: "SO2", area_fraction: -0.2 }] },
+    ],
   ])("refuses surface modifiers %s", (_, change) => {
     const modifiers: SurfaceModifiersDto = {
       maturity: 0.8,
@@ -989,6 +993,34 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
       ...change,
     };
     expect(surfaceFault({ modifiers })).toBe("surface modifiers unusable");
+  });
+
+  it("accepts surface modifiers whose deposits sum to 1 within the tolerance", () => {
+    const modifiers: SurfaceModifiersDto = {
+      maturity: 0.8,
+      weathering_rate: 1,
+      organic_cover: 0,
+      resurfacing_m_per_yr: 0,
+      volcanic_deposits: [
+        { substance: "SO2", area_fraction: 0.4 },
+        { substance: "S8", area_fraction: 0.6 + 5e-10 },
+      ],
+    };
+    const surface = okSection(recordOf(earthWithSurface({ ...earthSurface(), modifiers })).surface);
+
+    expect(surface.modifiers).toEqual({
+      kind: "value",
+      value: {
+        maturity: 0.8,
+        weatheringRate: 1,
+        organicCover: 0,
+        resurfacingMPerYr: 0,
+        volcanicDeposits: [
+          { substance: "SO2", areaFraction: 0.4 },
+          { substance: "S8", areaFraction: 0.6 + 5e-10 },
+        ],
+      },
+    });
   });
 
   it("refuses a biosphere flux that is not finite", () => {

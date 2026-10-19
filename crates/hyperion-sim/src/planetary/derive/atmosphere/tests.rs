@@ -2262,7 +2262,7 @@ fn the_snapshot_lane_is_held_only_until_the_batch_s_bump() {
     for inputs in &cases {
         let surface = PassSurface {
             climate_of: &unread,
-            ..PassSurface::stand_in(None)
+            ..PassSurface::stand_in(PassLight::HottestHost)
         };
         let held = atmosphere_under(SnapshotRules::Held, inputs, &surface);
         assert_eq!(format!("{:?}", atmosphere(inputs)), format!("{held:?}"));
@@ -2301,7 +2301,7 @@ fn the_batch_holds_earth_s_water_and_titan_s_methane_on_the_minor_branch() {
         &earth,
         &PassSurface {
             climate_of: &climate,
-            ..PassSurface::stand_in(None)
+            ..PassSurface::stand_in(PassLight::HottestHost)
         },
     );
     assert_eq!(air.state(), SurfaceState::Temperate);
@@ -2327,7 +2327,7 @@ fn the_batch_holds_earth_s_water_and_titan_s_methane_on_the_minor_branch() {
         &titan,
         &PassSurface {
             climate_of: &climate,
-            ..PassSurface::stand_in(None)
+            ..PassSurface::stand_in(PassLight::HottestHost)
         },
     );
     let held = atmosphere(&titan);
@@ -2360,7 +2360,7 @@ fn a_dry_earth_beyond_the_maximum_greenhouse_still_runs_away_past_its_cold_trap(
         &earth,
         &PassSurface {
             climate_of: &climate,
-            ..PassSurface::stand_in(None)
+            ..PassSurface::stand_in(PassLight::HottestHost)
         },
     );
     assert!(air.surface_temperature().value() > 500.0, "{air:?}");
@@ -2584,7 +2584,8 @@ fn an_icy_member_takes_the_albedo_of_its_record_s_ice() {
 
 /// A Pluto at its own inventory under the batch (NASA's Pluto fact sheet's mass, 1.303 × 10²² kg,
 /// and mean radius, 1,188.3 km, from memory, at its 39.48 au and e 0.2488): airless with no N₂ until
-/// P14.T53.c, its albedo recorded, not asserted (decision-triton-and-e101 §1.6).
+/// P14.T53.c, its albedo recorded, not asserted (decision-triton-and-e101 §1.6). Its cheap
+/// invariants are: the airless state, a finite albedo in [0, 1), and passes below the cap.
 #[test]
 fn a_pluto_at_its_own_inventory_is_recorded() {
     let disc = solar_disc();
@@ -2594,6 +2595,17 @@ fn a_pluto_at_its_own_inventory_is_recorded() {
     let (batch, held) = (
         derived_under(SnapshotRules::Batch, &placed, &disc),
         derived_under(SnapshotRules::Held, &placed, &disc),
+    );
+    assert_eq!(batch.atmosphere().state(), SurfaceState::Airless);
+    let albedo = batch.albedo().value();
+    assert!(
+        albedo.is_finite() && (0.0..1.0).contains(&albedo),
+        "{albedo}"
+    );
+    assert!(
+        batch.atmosphere_passes() < ATMOSPHERE_PASS_CAP,
+        "{} passes",
+        batch.atmosphere_passes()
     );
     eprintln!(
         "Pluto at its own inventory under the batch: {:?}, Bond albedo {:.5}, T_eq {:.2} K, N2 \

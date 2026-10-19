@@ -133,7 +133,8 @@ use crate::planetary::chem::partition::{
 };
 use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SnapshotRules, SurfaceState};
 use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
-use crate::planetary::hooks::surface::{OceanWeight, SurfaceConditions};
+use crate::planetary::hooks::cold_traps::{self, ColdTrapBody, ColdTrapRules, ColdTrapSky};
+use crate::planetary::hooks::surface::{ColdProfile, OceanWeight, SurfaceConditions};
 use crate::planetary::moons::CaptureKind;
 use crate::planetary::moons::regular::MoonTideRule;
 use crate::planetary::moons::regular::{ICE_MELTING_POINT, ocean_layers};
@@ -2336,7 +2337,9 @@ impl GlobalFigures {
     /// What P14.T51.a's partition gives the record of the body whose atmosphere is `atmosphere`,
     /// whose conditions are `conditions` and whose surface gravity is `gravity`, under the lane's
     /// rules `rules` (P14.T51.a's second part, held by
-    /// [`SNAPSHOT_VERSION`](crate::planetary::derive::atmosphere)): nothing under
+    /// [`SNAPSHOT_VERSION`](crate::planetary::derive::atmosphere)) and the cold traps' rules
+    /// `traps` under the sky `sky` (P14.T51.f, held by
+    /// [`COLD_TRAPS_VERSION`](crate::planetary::hooks::cold_traps)): nothing under
     /// [`SnapshotRules::Held`], and under [`SnapshotRules::Batch`] its partition and its published
     /// condensates.
     ///
@@ -2346,7 +2349,9 @@ impl GlobalFigures {
     /// condensates are published over these figures' cover ([`Cover`]): the conditions' cold
     /// area, the state, the crust and the water's surface share, all of it while the volcanic
     /// greenhouse runs and [`cover::DRY_SURFACE_WATER_SHARE`] of it after
-    /// ([`cover::surface_water`]).
+    /// ([`cover::surface_water`]). Under [`ColdTrapRules::Held`] they are P14.T51.a's; under
+    /// [`ColdTrapRules::Batch`] a body with no collisional atmosphere that is not locked to its
+    /// star takes the cold traps' airless branch and their ices ([`cold_traps::publish`]).
     #[must_use]
     pub(crate) fn condensates_under(
         &self,
@@ -2354,6 +2359,8 @@ impl GlobalFigures {
         atmosphere: &Atmosphere,
         conditions: &SurfaceConditions,
         gravity: MetresPerSecondSquared,
+        traps: ColdTrapRules,
+        sky: &ColdTrapSky,
     ) -> Option<(Partition, Condensates)> {
         match rules {
             SnapshotRules::Held => return None,
@@ -2370,6 +2377,39 @@ impl GlobalFigures {
         // One profile for every solid's cold area, water's T24.b ice included.
         let profile = conditions.cold_profile();
         let cold_area = |t: Kelvin| profile.area_below(t);
+        let cover = Cover {
+            cold_area: &cold_area,
+            state: atmosphere.state(),
+            water: self.water_cover(conditions, &profile),
+        };
+        let published = match traps {
+            ColdTrapRules::Held => solved.publish(&cover),
+            ColdTrapRules::Batch => cold_traps::publish(
+                &solved,
+                &cover,
+                &ColdTrapBody {
+                    atmosphere,
+                    profile: &profile,
+                    gravity,
+                    heat_flow: self.heat_flow,
+                    crust: self.impactors.crust(),
+                    craters: &self.craters,
+                    sky,
+                },
+            ),
+        };
+        Some((solved, published))
+    }
+
+    /// Water's cover under the conditions `conditions`, whose cold profile is `profile`: P14.T24.b's
+    /// surface water, potential ocean and ice, the ice's area read off the profile at its edge, and
+    /// ice Ih's density at the mean surface temperature ([`WaterCover`]).
+    #[must_use]
+    pub(crate) fn water_cover(
+        &self,
+        conditions: &SurfaceConditions,
+        profile: &ColdProfile,
+    ) -> WaterCover {
         let ice = cover::ice_fraction_over(
             &cover::IceInputs {
                 conditions,
@@ -2379,18 +2419,12 @@ impl GlobalFigures {
             },
             profile.area_below(cover::ice_threshold(self.state)),
         );
-        let water = WaterCover {
+        WaterCover {
             surface_water: self.surface_water,
             potential_ocean: self.potential_ocean,
             ice_fraction: ice,
             ice_density: substance::ice_ih_density(conditions.mean_surface_temperature()),
-        };
-        let published = solved.publish(&Cover {
-            cold_area: &cold_area,
-            state: atmosphere.state(),
-            water,
-        });
-        Some((solved, published))
+        }
     }
 
     /// The heat flow at the surface F, W m⁻²: the non-tidal part with the tidal heat added

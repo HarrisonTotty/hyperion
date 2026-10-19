@@ -3797,7 +3797,8 @@ mod tests {
 
     /// The table's Triton at its own inventory under the `p14-snapshot` lane's batch, about the
     /// table's Neptune: airless with no N₂ until P14.T53.c, recorded, not asserted
-    /// (decision-triton-and-e101 §1.6).
+    /// (decision-triton-and-e101 §1.6). Its cheap invariants are: the airless state, a finite
+    /// albedo in [0, 1), and passes below the cap.
     #[test]
     fn the_table_s_triton_at_its_own_inventory_is_recorded() {
         let batch = MoonHolds {
@@ -3818,6 +3819,20 @@ mod tests {
         let (own, _) = captured_bulk(kg, TRITON.1);
         let triton = moon_held(batch, (kg, rank), &orbit, &neptune, &volatiles, own);
         let v22 = moon_held(held, (kg, rank), &orbit, &neptune, &volatiles, own);
+        assert_eq!(
+            triton.atmosphere().state(),
+            crate::planetary::derive::atmosphere::SurfaceState::Airless
+        );
+        let albedo = triton.albedo().value();
+        assert!(
+            albedo.is_finite() && (0.0..1.0).contains(&albedo),
+            "{albedo}"
+        );
+        assert!(
+            triton.atmosphere_passes() < crate::planetary::derive::ATMOSPHERE_PASS_CAP,
+            "{} passes",
+            triton.atmosphere_passes()
+        );
         eprintln!(
             "the table's Triton at its own inventory under the batch: {:?}, Bond albedo {:.5}, \
              T_eq {:.2} K (22: {:?} at {:.2} K), N2 {:.3e} Pa",

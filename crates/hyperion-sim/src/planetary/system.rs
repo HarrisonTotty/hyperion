@@ -131,6 +131,7 @@ use crate::planetary::frames::BodyFixedFrame;
 use crate::planetary::halo::{
     ADIABATIC_INDEX_LIMIT, CometaryHalo, HaloBounds, HaloHost, RUNAWAY_INDEX, Scatterer, halo,
 };
+use crate::planetary::hooks::cold_traps::{self, ColdTrapRules, ColdTrapSky};
 use crate::planetary::hooks::figures::{
     BeltMembership, Continents, CraterInputs, FiguresInputs, HostOrbit, HostOrbiter, ImpactorOrbit,
     ImpactorSources, MoonBirth, SourceBelt, VolatileHistory, VolatileHistoryInputs, WindowAt,
@@ -187,7 +188,7 @@ use crate::units::consts::{
 use crate::units::{
     Dex, EarthFluxes, EarthMasses, EarthRadii, GravitationalParameter, Kelvin, Kilograms,
     KilogramsPerCubicMetre, Megayears, Metres, MetresPerSecondSquared, Radians, SolarLuminosities,
-    SolarMasses, SolarMassesPerYear, WattsPerSquareMetre, Years,
+    SolarMasses, SolarMassesPerYear, SolarRadii, WattsPerSquareMetre, Years,
 };
 
 /// Words of [`tags::PLANET_RADIUS`] a planet reads or reserves: word 0, its radius rank, then
@@ -2257,8 +2258,12 @@ impl PlanetarySystem {
         // The impactors' sources about the primary's host (P14.T48.f), as generated.
         let sources = self.impactor_sources(primary.host);
         let past = PastSky::new(ctx, self.zone_of(primary), fate, t);
-        let continental_asymptote =
-            relief::continental_asymptote(self.seed, body.index.body_id(self.system));
+        let id = body.index.body_id(self.system);
+        let continental_asymptote = relief::continental_asymptote(self.seed, id);
+        let cold_traps = ColdTrapCase {
+            exposed_fraction: cold_traps::exposed_fraction(self.seed, id),
+            star_radius: epoch.brightest_radius(self.zone_of(primary)),
+        };
         let time = SurfaceTime {
             past: &past,
             rotation,
@@ -2277,6 +2282,7 @@ impl PlanetarySystem {
                 craters: self.body_craters(body),
                 sources: sources.as_ref(),
                 continental_asymptote,
+                cold_traps,
             },
             SurfaceOf::Moon {
                 moon,
@@ -2291,6 +2297,7 @@ impl PlanetarySystem {
                 craters: self.moon_craters(primary, moon, derived, orbit),
                 sources: sources.as_ref(),
                 continental_asymptote,
+                cold_traps,
             },
         };
         let surface = published_surface(&time, &case);
@@ -3544,6 +3551,17 @@ struct SurfaceCase<'a> {
     sources: Option<&'a ImpactorSources>,
     /// Its continental asymptote f∞ (P14.T48.a), word 0 of its `body.continents` stream.
     continental_asymptote: f64,
+    /// What its cold traps read beyond its sky (P14.T51.f).
+    cold_traps: ColdTrapCase,
+}
+
+/// What a body's cold traps read beyond its sky and its spin (P14.T51.f): its exposed fraction,
+/// word 0 of its `body.cold_traps` stream, and the radius of the brightest star its zone's bodies
+/// orbit at the time, `None` before one forms.
+#[derive(Debug, Clone, Copy)]
+struct ColdTrapCase {
+    exposed_fraction: f64,
+    star_radius: Option<SolarRadii>,
 }
 
 /// What a body's water window reads of its hosts over its past (P14.T48.b; science-p14-t24b-laws
@@ -3721,8 +3739,7 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
     let Some(conditions) = SurfaceConditions::derive(&inputs) else {
         return Section::NotApplicable;
     };
-    let (conditions, condensates) =
-        with_partition(&figures, sky.atmosphere, conditions, bulk.surface_gravity());
+    let (conditions, condensates) = with_partition(&figures, case, (&spin, seasonal), conditions);
     // The second stage: the volatile history reads the conditions' liquid-water flag, the hosts'
     // light over the body's past and its outgassing then (P14.T48.b), and the ocean and the ice
     // read the conditions (science-p14-t24b-laws §4.6, steps 8–12).
@@ -3762,24 +3779,50 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
     )
 }
 
-/// The conditions `conditions` of the body whose atmosphere is `atmosphere`, figures `figures` and
-/// surface gravity `gravity` with P14.T51.a's partition on the record, held by the `p14-snapshot`
-/// lane's hold ([`GlobalFigures::condensates_under`]): from 23 the conditions' liquid-water flag,
-/// the ocean and ices, and the regime's reservoirs read it; below 23 nothing.
+/// The conditions `conditions` of the body `case` describes, of figures `figures`, spin and seasonal
+/// orbit `seasons`, with P14.T51.a's partition on the record, held by the `p14-snapshot` lane's
+/// hold ([`GlobalFigures::condensates_under`]): from 23 the conditions' liquid-water flag, the ocean
+/// and ices, and the regime's reservoirs read it; below 23 nothing. Its cold traps (P14.T51.f)
+/// take the sky [`cold_trap_sky`] gives, under their own hold at 24.
 #[must_use]
 fn with_partition(
     figures: &GlobalFigures,
-    atmosphere: &Atmosphere,
+    case: &SurfaceCase<'_>,
+    seasons: (&SeasonalSpin, &KeplerElements),
     conditions: SurfaceConditions,
-    gravity: MetresPerSecondSquared,
 ) -> (SurfaceConditions, Option<(Partition, Condensates)>) {
-    let condensates =
-        figures.condensates_under(SnapshotRules::in_force(), atmosphere, &conditions, gravity);
+    let condensates = figures.condensates_under(
+        SnapshotRules::in_force(),
+        case.sky.atmosphere,
+        &conditions,
+        case.bulk.surface_gravity(),
+        ColdTrapRules::in_force(),
+        &cold_trap_sky(case, seasons),
+    );
     let conditions = match &condensates {
         Some((_, published)) => conditions.with_condensates(published),
         None => conditions,
     };
     (conditions, condensates)
+}
+
+/// What the cold traps of the body `case` describes read of its sky (P14.T51.f), under its spin and
+/// seasonal orbit `seasons`: the greatest declination from its obliquity, the flux and the
+/// brightest star's angular radius at the seasonal orbit's periapsis ([`ColdTrapSky::at_periapsis`]),
+/// and its exposed fraction. The flux is the body's orbit-mean flux from every host, a moon's
+/// planet's light and a companion's included, taken to periapsis as its seasonal host's.
+#[must_use]
+fn cold_trap_sky(
+    case: &SurfaceCase<'_>,
+    (spin, seasonal): (&SeasonalSpin, &KeplerElements),
+) -> ColdTrapSky {
+    ColdTrapSky::at_periapsis(
+        spin.obliquity,
+        WattsPerSquareMetre::from(case.sky.flux),
+        (seasonal.semi_major_axis(), seasonal.eccentricity().value()),
+        case.cold_traps.star_radius,
+        case.cold_traps.exposed_fraction,
+    )
 }
 
 /// The state at `t` of the moon `satellite`, in a system aged `age_at_epoch` at the epoch, whose
@@ -4040,6 +4083,22 @@ impl<'c> Epoch<'c> {
             .expect("a star's state is finite and not negative, with a surface if it shines")
             .with_history(self.xuv[star], peak),
         )
+    }
+
+    /// The radius of the most luminous of the stars `zone`'s bodies orbit at the time, the first of
+    /// equals in the zone's order, or `None` before any forms (P14.T51.f's star's angular radius).
+    #[must_use]
+    fn brightest_radius(&self, zone: &OrbitZone) -> Option<SolarRadii> {
+        zone.members()
+            .filter_map(|member| self.states[usize::from(member)])
+            .fold(
+                None,
+                |brightest: Option<StarState>, state| match brightest {
+                    Some(b) if b.luminosity() >= state.luminosity() => Some(b),
+                    Some(_) | None => Some(state),
+                },
+            )
+            .map(|state| state.radius())
     }
 
     /// The light of the stars `zone`'s bodies orbit, in body order, or `None` before they form.

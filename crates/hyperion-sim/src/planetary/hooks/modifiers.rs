@@ -18,7 +18,7 @@
 //! - **The wind's term** `Φ_w` = Ṁ ÷ (4π a² √(1 − e²)) × `S_w`, the host's wind mass flux at the
 //!   body's heliocentric orbit (a moon's planet's) times the unshielded share `S_w`. The sim has no
 //!   wind for a cool main-sequence star (`stellar::sse::wind`'s main-sequence term switches on
-//!   above 4,000 L☉), so Ṁ is Wood et al. 2002's relation ([`wind_mass_loss_rate`]), with the
+//!   above 4,000 L☉), so Ṁ is Wood et al. 2002's relation ([`wind_mass_loss_kg_per_s`]), with the
 //!   host's X-ray and ultraviolet luminosity standing in for its X-ray luminosity, labelled. The
 //!   share `S_w` is 0 under air above the floor [`ION_STOPPING_COLUMN`] and for a moon inside its
 //!   planet's dayside magnetopause, and the dipole's open-field share 1 − √(1 − R ÷ `r_mp`) under
@@ -299,7 +299,7 @@ pub fn solar_xuv_luminosity() -> Watts {
 /// standing in for the X-ray surface flux (labelled) and F☉ the reference Sun's
 /// ([`solar_xuv_luminosity`]). Zero for a host with no X-ray and ultraviolet light.
 #[must_use]
-pub fn wind_mass_loss_rate(host: &ModifierHost) -> f64 {
+pub fn wind_mass_loss_kg_per_s(host: &ModifierHost) -> f64 {
     let xuv = host.xuv_luminosity.value();
     if xuv <= 0.0 {
         return 0.0;
@@ -436,6 +436,11 @@ impl ModifierInput {
 pub enum DeriveModifiersError {
     /// An input was not finite or lay outside its range, as [`ModifierInputs`] states it.
     OutOfRange(ModifierInput),
+    /// The inputs are each in range, but the weathering rate k they give is not finite: an
+    /// exposure that overflows, such as a host's G M★ so large that the micrometeoroids' speed
+    /// term (G M★ ÷ r)^(3/2) does, or a semi-major axis so small that its square underflows to 0
+    /// under the wind's flux.
+    RateNotFinite,
 }
 
 impl fmt::Display for DeriveModifiersError {
@@ -448,6 +453,7 @@ impl fmt::Display for DeriveModifiersError {
                     input.name()
                 )
             }
+            Self::RateNotFinite => f.write_str("the body's weathering rate is not finite"),
         }
     }
 }
@@ -525,8 +531,11 @@ impl SurfaceModifiers {
     ///
     /// # Errors
     ///
-    /// [`DeriveModifiersError::OutOfRange`] for an input that is not finite or lies outside the
-    /// range [`ModifierInputs`] states.
+    /// - [`DeriveModifiersError::OutOfRange`] for an input that is not finite or lies outside the
+    ///   range [`ModifierInputs`] states;
+    /// - [`DeriveModifiersError::RateNotFinite`] where the inputs are in range but the weathering
+    ///   rate k they give overflows to infinity or is not a number (a host's G M★ near the largest
+    ///   `f64`, or a semi-major axis whose square underflows), which the maturity cannot take.
     ///
     /// # Examples
     ///
@@ -572,7 +581,8 @@ impl SurfaceModifiers {
     /// ```
     pub fn derive(inputs: &ModifierInputs<'_>) -> Result<Self, DeriveModifiersError> {
         validate(inputs)?;
-        let column = inputs.surface_pressure.value() / inputs.gravity.value();
+        let column =
+            KilogramsPerSquareMetre::new(inputs.surface_pressure.value() / inputs.gravity.value());
         let exposure = Exposure::of(&ExposureInputs {
             host: &inputs.host,
             orbit: inputs.orbit,
@@ -585,7 +595,13 @@ impl SurfaceModifiers {
             wind: exposure.wind_mass_flux / moon.wind_mass_flux,
             dust: exposure.dust / moon.dust,
         };
-        let maturity = body_maturity(Gigayears::from(inputs.surface_age), weathering.value());
+        let rate = weathering.value();
+        // `body_maturity` panics on a rate that is not finite; validated inputs can still give one
+        // through an exposure that overflows.
+        if !rate.is_finite() {
+            return Err(DeriveModifiersError::RateNotFinite);
+        }
+        let maturity = body_maturity(Gigayears::from(inputs.surface_age), rate);
         let tau = inputs.resurfacing_time.value();
         // An infinite resurfacing time renews nothing: +0.
         let resurfacing_per_yr = 1.0 / tau;
@@ -826,8 +842,8 @@ struct ExposureInputs<'a> {
     orbit: HeliocentricOrbit,
     primary: Primary,
     field: MagneticField,
-    /// The air's column mass Σ = p ÷ g, kg m⁻².
-    column: f64,
+    /// The air's column mass Σ = p ÷ g.
+    column: KilogramsPerSquareMetre,
 }
 
 /// A body's surface-reaching exposure, before the Moon's divides it.
@@ -852,9 +868,9 @@ impl Exposure {
         } = inputs.orbit;
         let a = semi_major_axis.value();
         let area = 4.0 * core::f64::consts::PI * a * a * (1.0 - eccentricity * eccentricity).sqrt();
-        let wind_flux = wind_mass_loss_rate(inputs.host) / area;
+        let wind_flux = wind_mass_loss_kg_per_s(inputs.host) / area;
         let ram_pressure = wind_flux * WIND_SPEED.value();
-        let exposed = inputs.column <= ION_STOPPING_COLUMN.value();
+        let exposed = inputs.column <= ION_STOPPING_COLUMN;
         let share = if !exposed || wind_flux <= 0.0 {
             0.0
         } else if let Primary::Planet(planet) = inputs.primary
@@ -873,7 +889,7 @@ impl Exposure {
         let dust = SYSTEM_DUST_LEVEL
             * math::powf(au, -(ZODIACAL_DENSITY_INDEX + 1.5))
             * math::powf(speed_ratio, 1.5)
-            * math::exp(-inputs.column / DUST_STOPPING_COLUMN.value());
+            * math::exp(-(inputs.column / DUST_STOPPING_COLUMN));
         let light = if exposed {
             inputs.host.xuv_luminosity.value() / area
         } else {
@@ -899,7 +915,7 @@ impl Exposure {
             },
             primary: Primary::Star,
             field: MagneticField::None,
-            column: 0.0,
+            column: KilogramsPerSquareMetre::ZERO,
         })
     }
 }

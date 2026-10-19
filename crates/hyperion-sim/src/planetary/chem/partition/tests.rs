@@ -1434,6 +1434,7 @@ fn pluto_keeps_its_nitrogen_ice() {
         molar_mass("CH4"),
         Kelvin::new(triple("CH4")),
         methane.partial_pressure(),
+        AIRLESS_ICE_LOSS_KG_PER_M2_GYR,
     );
     let frost = d
         .saturation_temperature(methane.partial_pressure())
@@ -1466,7 +1467,14 @@ fn the_solids_edges_scale_with_their_first_melt() {
     }
     let at_vacuum = |key: &str| {
         let d = id(key).substance().phase_diagram().unwrap();
-        sublimation_edge(d, molar_mass(key), d.triple_temperature(), Pascals::ZERO).value()
+        sublimation_edge(
+            d,
+            molar_mass(key),
+            d.triple_temperature(),
+            Pascals::ZERO,
+            AIRLESS_ICE_LOSS_KG_PER_M2_GYR,
+        )
+        .value()
     };
     assert!(
         (at_vacuum("H2O") - 110.0).abs() < 1.0,
@@ -1665,7 +1673,7 @@ fn area_mix(p: &Partition, cover: &Cover<'_>, material: SurfaceMaterial) -> (f64
         .bond(cover.state, sun.bands())
         .bond;
     let ground = surface_bond(&published, p, regolith, &sun);
-    let cloud = cloud_fraction(cover.state, p);
+    let cloud = cloud_fraction(cover.state, p, &sun);
     let bond = under_cloud(ground, cloud, cloud_albedo(cover.state, &sun));
     (bond, cloud)
 }

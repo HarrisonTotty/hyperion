@@ -224,24 +224,6 @@ mod tests {
         }
     }
 
-    #[test]
-    #[cfg(panic = "unwind")]
-    #[should_panic(expected = "an exposure must be finite and non-negative")]
-    fn refuses_a_negative_exposure() {
-        let _ = maturity_after(Gigayears::new(-1e-9), 1.0);
-    }
-
-    #[test]
-    #[cfg(panic = "unwind")]
-    #[should_panic(expected = "an exposure must be finite and non-negative")]
-    fn refuses_a_nan_exposure() {
-        let _ = maturity_after(Gigayears::new(f64::NAN), 1.0);
-    }
-
-    #[test]
-    #[cfg(panic = "unwind")]
-    #[should_panic(expected = "a weathering rate must be finite and non-negative")]
-    fn refuses_an_infinite_rate() {
-        let _ = maturity_after(Gigayears::new(1.0), f64::INFINITY);
-    }
+    // The refusals of a negative or NaN exposure and of an infinite rate are in the crate's
+    // `tests/panics.rs` (`mod maturity`), where every `should_panic` test lives.
 }

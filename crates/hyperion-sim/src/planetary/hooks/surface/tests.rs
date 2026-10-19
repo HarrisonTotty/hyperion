@@ -2522,9 +2522,11 @@ fn the_batch_s_zonal_solver_moves_the_table_only_at_its_last_bits() {
 #[test]
 fn the_batch_publishes_the_table_s_condensates() {
     use crate::planetary::chem::partition::CondensatePhase;
+    use crate::planetary::hooks::cold_traps::{ColdTrapRules, lunar_sky};
     use crate::planetary::hooks::figures::{VolatileHistory, cover, table_figures_under};
 
     let water = Gas::Water.substance();
+    let sky = lunar_sky();
     let mut wet = 0;
     for (name, body) in historic_table() {
         let (Some(held), Some(batch)) = (
@@ -2551,14 +2553,14 @@ fn the_batch_publishes_the_table_s_condensates() {
         };
         let gravity = body.surface_gravity();
         let atmosphere = body.atmosphere();
-        assert!(
-            batch
-                .condensates_under(SnapshotRules::Held, atmosphere, &conditions, gravity)
-                .is_none()
-        );
-        let (partition, published) = batch
-            .condensates_under(SnapshotRules::Batch, atmosphere, &conditions, gravity)
-            .expect("the batch partitions the record");
+        // P14.T51.a's published condensates, with the cold traps held (P14.T51.f).
+        let under = |rules| {
+            let traps = ColdTrapRules::Held;
+            batch.condensates_under(rules, atmosphere, &conditions, gravity, traps, &sky)
+        };
+        assert!(under(SnapshotRules::Held).is_none());
+        let (partition, published) =
+            under(SnapshotRules::Batch).expect("the batch partitions the record");
         if let Some(ice) = published.entry(water, CondensatePhase::Solid) {
             let t24b = cover::ice_fraction(&cover::IceInputs {
                 conditions: &conditions,
@@ -2569,9 +2571,7 @@ fn the_batch_publishes_the_table_s_condensates() {
             assert_same_bits(ice.area_fraction(), t24b);
         }
         // The same twice (the sim-determinism skill).
-        let again = batch
-            .condensates_under(SnapshotRules::Batch, atmosphere, &conditions, gravity)
-            .expect("the batch partitions the record");
+        let again = under(SnapshotRules::Batch).expect("the batch partitions the record");
         assert_eq!(
             format!("{:?}", (&partition, &published)),
             format!("{again:?}")

@@ -1544,18 +1544,24 @@ pub struct WaterCover {
 pub const AIRLESS_ICE_LOSS_KG_PER_M2_GYR: f64 = 144.0;
 
 /// The temperature, below its first melt `first_melt`, at which a solid of `diagram` and molar mass
-/// `molar_mass_g_per_mol` loses [`AIRLESS_ICE_LOSS_KG_PER_M2_GYR`] by net Hertz–Knudsen sublimation
-/// against its own partial pressure `partial`: α (`p_sat`(T) − p) √(M ÷ 2πRT) = J* with α = 1
-/// (Schorghofer and Williams 2020, eq. 8; decision-p14-t51a-part2 §3.3), by [`EDGE_HALVINGS`]
-/// halvings over [0, `first_melt`]. Its first melt where it loses less even there.
+/// `molar_mass_g_per_mol` loses `loss_kg_per_m2_gyr` (kg m⁻² Gyr⁻¹; T51.a's is
+/// [`AIRLESS_ICE_LOSS_KG_PER_M2_GYR`]) by net Hertz–Knudsen sublimation against its own partial
+/// pressure `partial`: α (`p_sat`(T) − p) √(M ÷ 2πRT) = J* with α = 1 (Schorghofer and Williams
+/// 2020, eq. 8; decision-p14-t51a-part2 §3.3), by [`EDGE_HALVINGS`] halvings over [0,
+/// `first_melt`]. Its first melt where it loses less even there.
+///
+/// At `partial` = 0 it is P14.T51.f's cold-trap threshold ([`exosphere_threshold`]). The loss is a
+/// parameter so that T51.f's carbon dioxide test can take Schorghofer et al. 2021's 10 kg m⁻²
+/// Gyr⁻¹; at 144 it gives the bits it gave as a constant.
 #[must_use]
-fn sublimation_edge(
+pub(crate) fn sublimation_edge(
     diagram: &PhaseDiagram,
     molar_mass_g_per_mol: f64,
     first_melt: Kelvin,
     partial: Pascals,
+    loss_kg_per_m2_gyr: f64,
 ) -> Kelvin {
-    let rate = AIRLESS_ICE_LOSS_KG_PER_M2_GYR / (1e9 * SECONDS_PER_JULIAN_YEAR);
+    let rate = loss_kg_per_m2_gyr / (1e9 * SECONDS_PER_JULIAN_YEAR);
     let kg_per_mol = molar_mass_g_per_mol * 1e-3;
     let loss = |t: f64| {
         let vapour = diagram.saturation_pressure(Kelvin::new(t)).value();
@@ -1583,6 +1589,72 @@ fn sublimation_edge(
 /// How many halvings locate an airless solid's sublimation edge: 64, always that many, past the
 /// last bit of its first melt ([`sublimation_edge`]).
 const EDGE_HALVINGS: u32 = 64;
+
+/// The cold-trap threshold of the condensable `substance` at the loss `loss_kg_per_m2_gyr`, kg m⁻²
+/// Gyr⁻¹ (P14.T51.f; science-r09-drainage.md §4.3 item 4): its [`sublimation_edge`] into vacuum,
+/// at no partial pressure of its own, below its pure row's first melt (no air holds a solution in
+/// an exosphere). One rule for every species: within 1 K of 110 K for water and 58.18 K for carbon
+/// dioxide at 144 kg m⁻² Gyr⁻¹ on T49.b's curves (the partition's and the cold traps' tests), and
+/// 55.53 K for carbon dioxide at 10. `None` for a row with no phase diagram or no molar mass, which
+/// never condenses.
+#[must_use]
+pub(crate) fn exosphere_threshold(
+    substance: SubstanceId,
+    loss_kg_per_m2_gyr: f64,
+) -> Option<Kelvin> {
+    let row = substance.substance();
+    let diagram = row.phase_diagram()?;
+    let molar_mass = row.molar_mass_g_per_mol()?;
+    Some(vacuum_edge(row, (diagram, molar_mass), loss_kg_per_m2_gyr))
+}
+
+/// The [`sublimation_edge`] of the row `row`, of `diagram` and molar mass `molar_mass_g_per_mol`,
+/// at no partial pressure, below its pure first melt ([`exosphere_threshold`]).
+#[must_use]
+fn vacuum_edge(
+    row: &Substance,
+    (diagram, molar_mass_g_per_mol): (&PhaseDiagram, f64),
+    loss_kg_per_m2_gyr: f64,
+) -> Kelvin {
+    sublimation_edge(
+        diagram,
+        molar_mass_g_per_mol,
+        first_melt_of(row, None, diagram),
+        Pascals::ZERO,
+        loss_kg_per_m2_gyr,
+    )
+}
+
+/// Which edges a body's solids take where it publishes them ([`Partition::publish_with`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum SolidEdges {
+    /// P14.T51.a's: each solid's [`ice_line`] by the state, against the cover's cold area, the
+    /// annual mean's, its mass its whole reservoir where it lies as a solid; and water T24.b's
+    /// ([`WaterCover`]).
+    Partition,
+    /// P14.T51.f's on a body with no collisional atmosphere (from generator version 24, its hold):
+    /// each solid's edge is its cold-trap threshold, its sublimation edge into vacuum
+    /// ([`exosphere_threshold`] at [`AIRLESS_ICE_LOSS_KG_PER_M2_GYR`]), against the cover's cold
+    /// area, which the caller gives as the zonal annual maximum's; and its mass is what that area
+    /// holds at [`ICE_SHEET_THICKNESS`], at most its reservoir, so that the rest is left for its
+    /// cold traps (science-r09-drainage.md §4.3 item 6).
+    Exosphere {
+        /// Whether water keeps T24.b's cover ([`WaterCover`]) rather than this rule: an ice-rich
+        /// crust, which is its own ice.
+        water_keeps_cover: bool,
+    },
+}
+
+impl SolidEdges {
+    /// Whether water's entries are T24.b's ([`WaterCover`]).
+    #[must_use]
+    const fn water_keeps_cover(self) -> bool {
+        match self {
+            Self::Partition => true,
+            Self::Exosphere { water_keeps_cover } => water_keeps_cover,
+        }
+    }
+}
 
 /// The ratio of a solid's annual-mean edge under air to its first melt: P14.T24.b's perennial
 /// edge over water's melting point, [`PERENNIAL_ICE_TEMPERATURE`] ÷ [`melting_point`] = 263.15 ÷
@@ -1614,7 +1686,13 @@ fn ice_line(
     let under_air = perennial_ratio() * first_melt.value();
     match state {
         SurfaceState::Airless => {
-            let edge = sublimation_edge(diagram, molar_mass_g_per_mol, first_melt, partial);
+            let edge = sublimation_edge(
+                diagram,
+                molar_mass_g_per_mol,
+                first_melt,
+                partial,
+                AIRLESS_ICE_LOSS_KG_PER_M2_GYR,
+            );
             let d = dominance.clamp(0.0, 1.0);
             Kelvin::new(d * under_air + (1.0 - d) * edge.value())
         }
@@ -1738,6 +1816,74 @@ impl Condensates {
             .map(|e| (e.substance, e.area_fraction))
             .collect()
     }
+
+    /// These condensates with the cold-trapped ices `traps` merged in (P14.T51.f): each trap that
+    /// holds an area and a reservoir adds both to its substance's solid entry, or is inserted as
+    /// one, `{ substance, Solid, reservoir, area_fraction, seasonal: false }`; then the entries are
+    /// re-sorted in [`Partition::publish`]'s order and held to [`MAX_CONDENSATES`].
+    ///
+    /// A merged entry keeps its seasonal flag, its zonal part's, and its area is held to 1, though
+    /// the traps lie only where the zonal part does not. Its layer is the sum of its parts' layers:
+    /// its zonal part's, and the trap's reservoir over the trap's grain density at its threshold,
+    /// the coldest it lies at ([`TrappedIce::threshold`]); it has none where either part has none.
+    #[must_use]
+    pub(crate) fn with_cold_traps(mut self, traps: &[TrappedIce]) -> Self {
+        for trap in traps {
+            let (mass, area) = (trap.reservoir.value(), trap.area_fraction);
+            // A NaN holds none.
+            if !(mass > 0.0 && area > 0.0) {
+                continue;
+            }
+            let layer = trap
+                .substance
+                .substance()
+                .grain_density(CondensedPhase::Solid, trap.threshold)
+                .map(|rho| mass / rho.value());
+            let found = self
+                .entries
+                .iter_mut()
+                .find(|e| e.substance == trap.substance && e.phase == CondensatePhase::Solid);
+            match found {
+                Some(entry) => {
+                    let total = entry.area_fraction + area;
+                    entry.area_fraction = if total > 1.0 { 1.0 } else { total };
+                    entry.reservoir = KilogramsPerSquareMetre::new(entry.reservoir.value() + mass);
+                    entry.reservoir_gel = match (entry.reservoir_gel, layer) {
+                        (Some(zonal), Some(trapped)) => Some(Metres::new(zonal.value() + trapped)),
+                        (None, _) | (_, None) => None,
+                    };
+                }
+                None => self.entries.push(CondensateEntry {
+                    substance: trap.substance,
+                    phase: CondensatePhase::Solid,
+                    reservoir: trap.reservoir,
+                    reservoir_gel: layer.map(Metres::new),
+                    area_fraction: if area > 1.0 { 1.0 } else { area },
+                    seasonal: false,
+                }),
+            }
+        }
+        self.entries.sort_by(entry_order);
+        self.entries.truncate(MAX_CONDENSATES);
+        self
+    }
+}
+
+/// One condensable's ice in a body's cold traps (P14.T51.f), as
+/// [`Condensates::with_cold_traps`] merges it.
+///
+/// Plain data with crate-visible fields.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TrappedIce {
+    /// The substance, its own row.
+    pub(crate) substance: SubstanceId,
+    /// Its reservoir over the body's whole surface, kg m⁻², finite and not negative.
+    pub(crate) reservoir: KilogramsPerSquareMetre,
+    /// The share of the surface its exposed ice covers, 0 to 1: the cold-trap fraction times the
+    /// exposed fraction.
+    pub(crate) area_fraction: f64,
+    /// Its cold-trap threshold, the temperature its grain density is read at.
+    pub(crate) threshold: Kelvin,
 }
 
 /// The order of the published entries: by reservoir mass, largest first, with ties by
@@ -1846,6 +1992,14 @@ impl Partition {
     /// ```
     #[must_use]
     pub fn publish(&self, cover: &Cover<'_>) -> Condensates {
+        self.publish_with(cover, SolidEdges::Partition)
+    }
+
+    /// [`publish`](Self::publish) with the solids' edges `edges`: under
+    /// [`SolidEdges::Partition`] it is `publish` to the bit, and under [`SolidEdges::Exosphere`]
+    /// P14.T51.f's airless branch, which its hold at 24 keeps off the record until then.
+    #[must_use]
+    pub(crate) fn publish_with(&self, cover: &Cover<'_>, edges: SolidEdges) -> Condensates {
         let mut entries: Vec<CondensateEntry> = Vec::new();
         let mut liquids: Vec<Part> = Vec::new();
         for c in &self.condensates {
@@ -1863,14 +2017,15 @@ impl Partition {
                 });
                 continue;
             }
-            let [solid, liquid] = if c.substance == Gas::Water.substance() {
-                water_parts(c, diagram, &cover.water)
-            } else {
-                let held = self
-                    .of(c.substance)
-                    .map_or((0.0, Pascals::ZERO), |s| (s.dominance, s.partial_pressure));
-                parts_of(c, diagram, held, cover)
-            };
+            let [solid, liquid] =
+                if c.substance == Gas::Water.substance() && edges.water_keeps_cover() {
+                    water_parts(c, diagram, &cover.water)
+                } else {
+                    let held = self
+                        .of(c.substance)
+                        .map_or((0.0, Pascals::ZERO), |s| (s.dominance, s.partial_pressure));
+                    parts_of(c, diagram, (held, edges), cover)
+                };
             if let Some(solid) = solid {
                 entries.push(solid.entry(solid.area));
             }
@@ -1965,13 +2120,14 @@ fn liquid_density_kg_per_m3(c: &Condensate, diagram: &PhaseDiagram) -> Option<f6
 }
 
 /// The solid and liquid parts of the condensed reservoir `c` of `diagram`, held at the dominance
-/// and the partial pressure `held`, over the cover `cover`, for every condensable but water
-/// ([`Partition::publish`]'s split).
+/// and the partial pressure `held`, with the solids' edges `edges`, over the cover `cover`, for
+/// every condensable but water, and for water too under [`SolidEdges::Exosphere`] on a crust that
+/// is not its own ice ([`Partition::publish_with`]'s split).
 #[must_use]
 fn parts_of(
     c: &Condensate,
     diagram: &PhaseDiagram,
-    held: (f64, Pascals),
+    (held, edges): ((f64, Pascals), SolidEdges),
     cover: &Cover<'_>,
 ) -> [Option<Part>; 2] {
     let reservoir = c.reservoir.value();
@@ -1996,7 +2152,16 @@ fn parts_of(
         let molar_mass = row.molar_mass_g_per_mol().expect(
             "a partition's condensable is a gas row with a molar mass, as its inventory holds",
         );
-        let line = ice_line((diagram, molar_mass), c.first_melt, held, cover.state);
+        let (line, sheet_holds_it) = match edges {
+            SolidEdges::Partition => (
+                ice_line((diagram, molar_mass), c.first_melt, held, cover.state),
+                lies_as_liquid,
+            ),
+            SolidEdges::Exosphere { .. } => (
+                vacuum_edge(row, (diagram, molar_mass), AIRLESS_ICE_LOSS_KG_PER_M2_GYR),
+                true,
+            ),
+        };
         let cold = (cover.cold_area)(line);
         let cold = if cold.is_nan() {
             0.0
@@ -2006,7 +2171,7 @@ fn parts_of(
         let (mass, area) = match cap_kg_per_m3 {
             Some(rho) if rho > 0.0 => {
                 let sheet = rho * ICE_SHEET_THICKNESS.value();
-                let mass = if lies_as_liquid && cold * sheet < reservoir {
+                let mass = if sheet_holds_it && cold * sheet < reservoir {
                     cold * sheet
                 } else {
                     reservoir

@@ -741,8 +741,8 @@ export interface SurfaceModifiers {
   readonly organicCover: number;
   readonly resurfacingMPerYr: number;
   /**
-   * An Io's SO₂ frost and sulphur, by registry key, each with its share of the surface; empty for
-   * every other body.
+   * An Io's SO₂ frost and sulphur, by registry key, each with its share of the surface, together
+   * at most 1; empty for every other body.
    */
   readonly volcanicDeposits: ReadonlyArray<SubstanceArea>;
 }

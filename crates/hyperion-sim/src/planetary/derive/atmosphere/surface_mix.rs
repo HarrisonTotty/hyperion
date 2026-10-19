@@ -8,7 +8,9 @@
 //! its cold area linear in area across the pass's climate ([`linear_cold_area`]), its basins
 //! unknown and its water's cover from the pass's own water ([`pass_water_cover`]), and its
 //! regolith's lid not known ([`Regolith::of_material`]): an airless rocky body takes the Moon's
-//! 0.11, any other a row by the material of the bulk its air reads.
+//! 0.11, any other a row by the material of the bulk its air reads. Its light is the body's hosts',
+//! built once per body before its passes, or for a single pass a host at the hottest host's
+//! temperature ([`PassLight`]).
 
 use super::{
     Atmosphere, AtmosphereInputs, ClimateOf, Gas, PartialPressures, SurfaceMaterial, SurfaceState,
@@ -17,11 +19,9 @@ use crate::planetary::chem::partition::{
     Basins, ClimateSpan, Condensates, Cover, Ground, Partition, WaterCover, partition,
 };
 use crate::planetary::derive::irradiation::BondAlbedo;
-use crate::planetary::derive::photometry::area_mix::{
-    self, HostShade, Regolith, RegolithWeathering,
-};
+use crate::planetary::derive::photometry::area_mix::{self, HostShade, Regolith};
 use crate::planetary::hooks::figures::cover;
-use crate::substance::{SubstanceId, ice_ih_density};
+use crate::substance::ice_ih_density;
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
 use crate::units::{Kelvin, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared};
 
@@ -32,10 +32,26 @@ use super::{SnapshotRules, atmosphere_under};
 /// the pass's climate span: the pass's cover provider (P14.T51.b; [`PassSurface::cold_area`]).
 pub(crate) type ColdAreaOf<'a> = dyn Fn(&ClimateSpan, Kelvin) -> f64 + 'a;
 
+/// The regolith of a body whose bulk is of a material: the pass's regolith provider (P14.T51.b;
+/// [`PassSurface::regolith`]).
+pub(crate) type RegolithOf<'a> = dyn Fn(SurfaceMaterial) -> Regolith + 'a;
+
+/// The light a pass's area mix reads (P14.T51.b; [`PassSurface::light`]).
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PassLight<'a> {
+    /// A host at the hottest host's effective temperature ([`AtmosphereInputs::hottest_host`]),
+    /// built when the pass reads it: the stand-in of a single pass with no shade of its own (the
+    /// public [`atmosphere`](super::atmosphere), and the held rules, which read none).
+    HottestHost,
+    /// The light of the body's hosts, built once per body before its passes.
+    Shade(&'a HostShade),
+}
+
 /// What [`atmosphere_under`] reads of a body's surface beyond [`AtmosphereInputs`] (P14.T51.a–b):
 /// the climate its partition reads, the ground its liquids lie on, the cover its condensates are
 /// published over, the light of its hosts and its regolith. Under [`SnapshotRules::Held`] none of
-/// it is read but the climate and the ground, which T13.c's greenhouse does not read either.
+/// it is read but the climate and the ground, which T13.c's greenhouse does not read either. The
+/// passes build it once, before the first.
 #[derive(Clone, Copy)]
 pub(crate) struct PassSurface<'a> {
     /// The climate the condensate partition reads at each step, from the step's mean surface
@@ -48,32 +64,29 @@ pub(crate) struct PassSurface<'a> {
     /// The pass's cover provider: the share of the surface below a temperature over the pass's
     /// final climate, one cold profile a pass from P14.T54.a.
     pub(crate) cold_area: &'a ColdAreaOf<'a>,
-    /// The light of the body's hosts, built once per body before its passes; `None` takes a host
-    /// at the hottest host's effective temperature ([`AtmosphereInputs::hottest_host`]), the public
-    /// [`atmosphere`](super::atmosphere)'s stand-in.
-    pub(crate) shade: Option<&'a HostShade>,
-    /// The regolith's row, P14.T51.c's lid from P14.T54.a; `None` while the lid is not known,
-    /// which takes the stand-ins ([`Regolith::bond`]).
-    pub(crate) regolith: Option<SubstanceId>,
-    /// How the regolith is weathered: [`RegolithWeathering::StandIn`] until P14.T54.b.
-    pub(crate) weathering: RegolithWeathering,
+    /// The light of the body's hosts.
+    pub(crate) light: PassLight<'a>,
+    /// The pass's regolith provider, on the material of the bulk its air reads: its lid not known
+    /// ([`Regolith::of_material`], which takes the stand-ins of [`Regolith::bond`]) until P14.T54.a
+    /// gives T51.c's lid ([`Regolith::with_lid`]) and P14.T54.b weathers it
+    /// ([`Regolith::weathered`]).
+    pub(crate) regolith: &'a RegolithOf<'a>,
 }
 
 impl<'a> PassSurface<'a> {
-    /// The passes' surface until P14.T54.a gives them the body's, under the light `shade`: a
+    /// The passes' surface until P14.T54.a gives them the body's, under the light `light`: a
     /// climate with no contrast at each step's mean ([`ClimateSpan::isothermal`]), no basins
     /// known, all the condensed water at the surface, the cold area linear across the pass's
     /// climate ([`linear_cold_area`]), and the regolith's lid not known, weathered by the stand-in.
     #[must_use]
-    pub(crate) fn stand_in(shade: Option<&'a HostShade>) -> Self {
+    pub(crate) fn stand_in(light: PassLight<'a>) -> Self {
         Self {
             climate_of: &isothermal_climate,
             basins: Basins::UNKNOWN,
             water_at_surface: 1.0,
             cold_area: &linear_cold_area,
-            shade,
-            regolith: None,
-            weathering: RegolithWeathering::StandIn,
+            light,
+            regolith: &Regolith::of_material,
         }
     }
 }
@@ -193,13 +206,18 @@ const LARGEST_BOND_ALBEDO: f64 = 1.0 - f64::EPSILON / 2.0;
 
 /// The area mix's albedo `value` as a [`BondAlbedo`], held into 0 ≤ A < 1
 /// ([`LARGEST_BOND_ALBEDO`]); the state's table albedo for a value that is not a number, which no
-/// registry row gives.
+/// registry row gives (labelled).
 #[must_use]
 fn bond_albedo(value: f64, state: SurfaceState, material: SurfaceMaterial) -> BondAlbedo {
     if value.is_nan() {
         return state.albedo(material);
     }
-    BondAlbedo::new(value.clamp(0.0, LARGEST_BOND_ALBEDO)).unwrap_or(state.albedo(material))
+    let held = value.clamp(0.0, LARGEST_BOND_ALBEDO);
+    debug_assert!(
+        !held.is_nan(),
+        "a clamp of a number into [0, 1) is a number"
+    );
+    BondAlbedo::from_fraction(held)
 }
 
 /// [`atmosphere_under`]'s batch arm (P14.T51.b): the atmosphere `air` of the body `inputs`
@@ -219,11 +237,12 @@ pub(super) fn area_mixed(
     surface: &PassSurface<'_>,
 ) -> Atmosphere {
     let hottest;
-    let shade = if let Some(shade) = surface.shade {
-        shade
-    } else {
-        hottest = HostShade::of_host(inputs.hottest_host);
-        &hottest
+    let shade = match surface.light {
+        PassLight::Shade(shade) => shade,
+        PassLight::HottestHost => {
+            hottest = HostShade::of_host(inputs.hottest_host);
+            &hottest
+        }
     };
     let (albedo, cloud_fraction) = match air.state {
         SurfaceState::GasEnvelope => (
@@ -252,18 +271,14 @@ fn surface_and_cloud(
     surface: &PassSurface<'_>,
     shade: &HostShade,
 ) -> (f64, f64) {
-    let regolith = Regolith {
-        row: surface.regolith,
-        material: inputs.material,
-        weathering: surface.weathering,
-    }
-    .bond(air.state, shade.bands())
-    .bond;
+    let regolith = (surface.regolith)(inputs.material)
+        .bond(air.state, shade.bands())
+        .bond;
     let Some((solved, published)) = pass_condensates(air, inputs, surface) else {
         return (regolith, 0.0);
     };
     let ground = area_mix::surface_bond(&published, &solved, regolith, shade);
-    let cloud = area_mix::cloud_fraction(air.state, &solved);
+    let cloud = area_mix::cloud_fraction(air.state, &solved, shade);
     let albedo = area_mix::under_cloud(ground, cloud, area_mix::cloud_albedo(air.state, shade));
     (albedo, cloud)
 }

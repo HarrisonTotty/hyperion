@@ -9,7 +9,8 @@ use super::*;
 use crate::planetary::chem::partition::{
     ClimateSpan, ColumnInventory, Cover, Ground, WaterCover, partition,
 };
-use crate::units::{KilogramsPerCubicMetre, MetresPerSecondSquared, Pascals};
+use crate::substance::diagram::PhaseDiagram;
+use crate::units::{KilogramsPerCubicMetre, MetresPerSecondSquared};
 
 fn id(key: &str) -> SubstanceId {
     by_key(key).unwrap_or_else(|| panic!("{key} is a row"))
@@ -17,6 +18,29 @@ fn id(key: &str) -> SubstanceId {
 
 fn kelvin(t: f64) -> Kelvin {
     Kelvin::new(t)
+}
+
+/// A body term of the absorption `a` and the scattering `b`, m⁻¹.
+fn body(a: f64, b: f64) -> BodyTerm {
+    BodyTerm::Coefficients {
+        absorption_per_m: a,
+        scattering_per_m: b,
+    }
+}
+
+/// Two shades' every value is the same, to the bit.
+fn assert_same_shade(a: &HostShade, b: &HostShade) {
+    for (x, y) in a.bands.iter().zip(&b.bands) {
+        assert_same_bits(*x, *y);
+    }
+    for (x, y) in a.bins.iter().zip(&b.bins) {
+        assert_same_bits(*x, *y);
+    }
+    for (x, y) in a.giants.iter().zip(&b.giants) {
+        assert_same_bits(*x, *y);
+    }
+    assert_same_bits(a.water_cloud, b.water_cloud);
+    assert_same_bits(a.cloud_column.value(), b.cloud_column.value());
 }
 
 /// The unpolarised Fresnel reflectance of a flat surface of real index `n` > 1 for light from
@@ -95,16 +119,33 @@ fn the_internal_reflectance_is_reciprocity_s() {
 #[test]
 fn the_body_term_is_absent_without_absorption_or_scattering() {
     let outer = diffuse_fresnel_reflectance(1.333);
-    for (a, b) in [(None, None), (Some(0.02), None), (None, Some(0.01))] {
-        assert_same_bits(liquid_bin_albedo(1.333, a, b), outer);
+    assert_same_bits(liquid_bin_albedo(1.333, BodyTerm::Absent), outer);
+    for term in [
+        body(0.0, 0.0),
+        body(f64::NAN, 0.01),
+        body(0.02, f64::INFINITY),
+    ] {
+        assert_same_bits(liquid_bin_albedo(1.333, term), outer);
     }
-    assert_same_bits(liquid_bin_albedo(1.333, Some(0.0), Some(0.0)), outer);
-    let clear = liquid_bin_albedo(1.333, Some(0.02), Some(0.002));
-    let turbid = liquid_bin_albedo(1.333, Some(0.02), Some(0.02));
+    let clear = liquid_bin_albedo(1.333, body(0.02, 0.002));
+    let turbid = liquid_bin_albedo(1.333, body(0.02, 0.02));
     assert!(outer < clear && clear < turbid, "{outer} {clear} {turbid}");
     // A scattering body with no absorption: R∞ = 0.33, at most a third of the light below.
-    let lossless = liquid_bin_albedo(1.333, Some(0.0), Some(1.0));
+    let lossless = liquid_bin_albedo(1.333, body(0.0, 1.0));
     assert!(lossless < outer + 0.33, "{lossless}");
+    // A record that states one coefficient alone has no body term.
+    let sea = liquid_properties(id("H2O"), kelvin(288.0), Composition::Reference).unwrap();
+    let absorbing = LiquidProperties {
+        scattering_per_m: None,
+        ..sea.clone()
+    };
+    let scattering = LiquidProperties {
+        absorption_per_m: None,
+        ..sea
+    };
+    for record in [&absorbing, &scattering] {
+        assert_eq!(BodyTerm::of(record, 0), BodyTerm::Absent);
+    }
 }
 
 /// Water's sea at 288 K, from P14.T49.h's record about a Sun: its `r_d` at its index, 1.33–1.34,
@@ -122,11 +163,9 @@ fn water_s_sea_is_its_diffuse_reflectance_and_a_little_of_its_body() {
         .iter()
         .enumerate()
         .map(|(k, &n)| {
-            let a = sea.absorption_per_m.map(|a| a[k]);
-            let b = sea.scattering_per_m.map(|b| b[k]);
             format!(
                 "{:.4}",
-                liquid_bin_albedo(n, a, b) - diffuse_fresnel_reflectance(n)
+                liquid_bin_albedo(n, BodyTerm::of(&sea, k)) - diffuse_fresnel_reflectance(n)
             )
         })
         .collect();
@@ -227,9 +266,10 @@ fn the_weighting_is_band_agnostic() {
 #[test]
 fn several_hosts_weigh_by_their_flux() {
     let (sun, red) = (kelvin(5_772.0), kelvin(3_200.0));
+    let flux = EarthFluxes::new;
     let mut both = HostShadeSum::EMPTY;
-    both.add(1.0, sun);
-    both.add(3.0, red);
+    both.add(flux(1.0), sun);
+    both.add(flux(3.0), red);
     let both = both.finish();
     let (alone, dwarf) = (HostShade::of_host(sun), HostShade::of_host(red));
     for band in 0..OPTICS_BANDS {
@@ -241,7 +281,7 @@ fn several_hosts_weigh_by_their_flux() {
         assert!((both.giants[class] - mean).abs() < 1e-15);
     }
     let mut bright = HostShadeSum::EMPTY;
-    bright.add(40.0, sun);
+    bright.add(flux(40.0), sun);
     let bright = bright.finish();
     let water = id("H2O");
     assert!(
@@ -249,11 +289,11 @@ fn several_hosts_weigh_by_their_flux() {
             < 1e-15
     );
     let mut dark = HostShadeSum::EMPTY;
-    dark.add(0.0, sun);
-    dark.add(1.0, kelvin(0.0));
-    dark.add(f64::NAN, sun);
-    assert_eq!(dark.finish(), HostShade::sun());
-    assert_eq!(HostShadeSum::EMPTY.finish(), HostShade::sun());
+    dark.add(flux(0.0), sun);
+    dark.add(flux(1.0), kelvin(0.0));
+    dark.add(flux(f64::NAN), sun);
+    assert_same_shade(&dark.finish(), &HostShade::sun());
+    assert_same_shade(&HostShadeSum::EMPTY.finish(), &HostShade::sun());
 }
 
 /// Every one of Sudarsky, Burrows and Pinto's Fiducial albedos is reproduced at its tabled host and
@@ -337,6 +377,7 @@ fn a_solid_without_optics_takes_water_frost_s_labelled() {
         StandIn::FrostForAnUnmodelledSolid,
         StandIn::SolventForASolution,
         StandIn::IndexForAnUnrecordedLiquid,
+        StandIn::RecordAtItsFirstMelt,
         StandIn::SpaceWeathering,
         StandIn::MoonForAnUnknownAirlessLid,
         StandIn::RowByMaterial,
@@ -372,10 +413,8 @@ fn the_space_weathering_stand_in_never_brightens_an_airless_silicate_body() {
     let land = rock.bond(SurfaceState::Temperate, &sun);
     assert_eq!(land.stand_in, Some(StandIn::RowByMaterial));
     assert_same_bits(land.bond, basalt);
-    let lid = Regolith {
-        row: Some(id("basalt")),
-        ..rock
-    };
+    let lid = Regolith::with_lid(id("basalt"), SurfaceMaterial::Rock);
+    assert_eq!(lid.row, Some(id("basalt")));
     let airless = lid.bond(SurfaceState::Airless, &sun);
     assert_eq!(airless.stand_in, Some(StandIn::SpaceWeathering));
     assert_same_bits(airless.bond, airless_silicate_stand_in(basalt));
@@ -385,12 +424,8 @@ fn the_space_weathering_stand_in_never_brightens_an_airless_silicate_body() {
     let ice = Regolith::of_material(SurfaceMaterial::Ice).bond(SurfaceState::Airless, &sun);
     assert_eq!(ice.stand_in, Some(StandIn::RowByMaterial));
     assert_same_bits(ice.bond, solid_bond(id("H2O"), &sun).bond);
-    let weathered = Regolith {
-        weathering: RegolithWeathering::Weathered {
-            spherical_bvr: [0.06, 0.08, 0.10],
-        },
-        ..rock
-    };
+    let weathered = Regolith::weathered(SurfaceMaterial::Rock, [0.06, 0.08, 0.10]);
+    assert_eq!(weathered.row, None);
     let weighed = weathered.bond(SurfaceState::Airless, &sun);
     assert_eq!(weighed.stand_in, None);
     assert_same_bits(weighed.bond, band_weighted(&[0.06, 0.08, 0.10], &sun));
@@ -432,8 +467,10 @@ fn partitioned(span: (f64, f64, f64), weights: Vec<(SubstanceId, Pascals)>, g: f
 /// partition fixture's: `a_mars_with_its_caps_takes_almost_no_cloud`.)
 #[test]
 fn the_cloud_follows_the_state_and_the_condensable_s_availability() {
-    let reference = reference_cloud_column();
+    let reference = reference_cloud_column().value();
     assert!((reference - 47.9).abs() < 0.3, "{reference} kg m⁻²");
+    let sun = HostShade::sun();
+    assert_same_bits(sun.cloud_column.value(), reference);
     let earth_column = |kg: f64| kg * 9.82 / (4.0 * core::f64::consts::PI * 6.371e6 * 6.371e6);
     let earth = partitioned(
         (261.0, 288.0, 305.0),
@@ -447,21 +484,24 @@ fn the_cloud_follows_the_state_and_the_condensable_s_availability() {
     );
     let temperate = SurfaceState::Temperate;
     assert_same_bits(
-        cloud_fraction(temperate, &earth),
+        cloud_fraction(temperate, &earth, &sun),
         SurfaceState::Temperate.cloud_fraction(),
     );
-    assert_same_bits(cloud_fraction(SurfaceState::RunawayGreenhouse, &earth), 1.0);
+    assert_same_bits(
+        cloud_fraction(SurfaceState::RunawayGreenhouse, &earth, &sun),
+        1.0,
+    );
     for state in [SurfaceState::Airless, SurfaceState::MagmaOcean] {
-        assert_same_bits(cloud_fraction(state, &earth), 0.0);
+        assert_same_bits(cloud_fraction(state, &earth, &sun), 0.0);
     }
     let mut dry = weights_of(600.0, &[("N2", 0.98), ("Ar", 0.02)]);
     dry.push((id("H2O"), Pascals::new(2e4)));
     let dry = partitioned((150.0, 210.0, 240.0), dry, 3.72);
-    let thin = cloud_fraction(temperate, &dry);
+    let thin = cloud_fraction(temperate, &dry, &sun);
     assert!(thin < 0.02, "{thin}");
     eprintln!(
         "cloud: Earth {:.3}; a dry Mars-like world {thin:.2e}",
-        cloud_fraction(temperate, &earth)
+        cloud_fraction(temperate, &earth, &sun)
     );
 }
 
@@ -514,7 +554,7 @@ fn a_solution_takes_its_solvent_s_record_and_an_unrecorded_liquid_nitrogen_s_ind
     let solved = liquid_entry_bond(seas, &titan, &sun.bins);
     assert_eq!(solved.stand_in, Some(StandIn::SolventForASolution));
     let lies_at = titan.condensate(id("CH4")).unwrap().lies_at();
-    let methane = liquid_record(id("CH4"), lies_at).unwrap();
+    let methane = liquid_record(id("CH4"), lies_at).in_range().unwrap();
     assert_same_bits(solved.bond, liquid_bond(&methane, &sun.bins));
     let sea = partitioned(
         (225.0, 250.0, 265.0),
@@ -532,20 +572,97 @@ fn a_solution_takes_its_solvent_s_record_and_an_unrecorded_liquid_nitrogen_s_ind
     let stood = liquid_entry_bond(carbon_dioxide, &sea, &sun.bins);
     assert_eq!(stood.stand_in, Some(StandIn::IndexForAnUnrecordedLiquid));
     assert!((0.04..0.05).contains(&stood.bond), "{}", stood.bond);
+    let boiling = nitrogen_normal_boiling_point();
+    assert!((boiling.value() - 77.355).abs() < 0.01, "{boiling:?}");
+    let nitrogen = liquid_record(id("N2"), boiling).in_range().unwrap();
+    let index = nitrogen.refractive_index_at(STAND_IN_INDEX_WAVELENGTH_NM);
+    assert_same_bits(stood.bond, diffuse_fresnel_reflectance(index));
     eprintln!(
-        "Titan's seas by methane's record: {:.5}; a CO2 sea by nitrogen's index: {:.5}",
-        solved.bond, stood.bond
+        "Titan's seas by methane's record: {:.5}; a CO2 sea by nitrogen's index {index:.5} at its \
+         normal boiling point on the registry's curve, {:.4} K: {:.5}",
+        solved.bond,
+        boiling.value(),
+        stood.bond
     );
 }
 
-/// An Enceladus, an airless icy body of fresh water frost about Saturn's Sun, near 0.8 (Howett et
-/// al. 2010, from memory; Li et al. 2023's 0.76 ± 0.03 through a secondary; both read at P14.T49.i's
-/// build): asserted from P14.T49.i's commit, which adds the infrared bands its frost needs
-/// (decision-p14-t49c-split §1.3); until then its visible-only albedo is recorded.
+/// The record of a liquid at its temperature names every case, so that a row with a record is
+/// never read as having none: in its range, its record there; below its first melt (−∞ included)
+/// its record at it; at or above its critical point (+∞ included) its record a part in a million
+/// below it; at a temperature no bound holds (not a number, or above a range with no critical
+/// point) its record at its first melt, labelled apart; and a row with no record, none.
 #[test]
-fn an_enceladus_is_near_0_8_from_the_infrared() {
+fn a_liquid_s_record_is_held_into_its_range_by_name() {
+    let record = |key: &str, t: f64| liquid_properties(id(key), kelvin(t), Composition::Reference);
+    let same = |held: &LiquidRecord, read: &LiquidProperties| {
+        let held = match held {
+            LiquidRecord::InRange(record) | LiquidRecord::AtFirstMelt(record) => record,
+            LiquidRecord::Unrecorded => panic!("a record was expected"),
+        };
+        assert_eq!(format!("{held:?}"), format!("{read:?}"));
+    };
+    let mut beyond_no_critical_point = 0;
+    for key in ["H2O", "CH4", "NH3", "N2", "C2H6", "H2SO4"] {
+        let row = id(key).substance();
+        let lowest = row.condensed().unwrap().transition().temperature().value();
+        let Ok(at_lowest) = record(key, lowest) else {
+            continue;
+        };
+        for below in [lowest - 10.0, f64::NEG_INFINITY] {
+            let held = liquid_record(id(key), kelvin(below));
+            assert!(
+                matches!(held, LiquidRecord::InRange(_)),
+                "{key} at {below} K"
+            );
+            same(&held, &at_lowest);
+        }
+        let nan = liquid_record(id(key), kelvin(f64::NAN));
+        assert!(matches!(nan, LiquidRecord::AtFirstMelt(_)), "{key}");
+        same(&nan, &at_lowest);
+        let critical = row.phase_diagram().map(PhaseDiagram::critical_temperature);
+        if let Some(critical) = critical {
+            let near = record(key, critical.value() * (1.0 - 1e-6)).unwrap();
+            for above in [critical.value(), critical.value() + 50.0, f64::INFINITY] {
+                let held = liquid_record(id(key), kelvin(above));
+                assert!(
+                    matches!(held, LiquidRecord::InRange(_)),
+                    "{key} at {above} K"
+                );
+                same(&held, &near);
+            }
+        } else {
+            let infinite = liquid_record(id(key), kelvin(f64::INFINITY));
+            assert!(matches!(infinite, LiquidRecord::AtFirstMelt(_)), "{key}");
+            same(&infinite, &at_lowest);
+            beyond_no_critical_point += 1;
+        }
+    }
+    eprintln!("liquids with a record and no critical point: {beyond_no_critical_point}");
+    let inside = record("H2O", 288.0).unwrap();
+    same(&liquid_record(id("H2O"), kelvin(288.0)), &inside);
+    for (key, t) in [("CO2", 250.0), ("basalt", 1_500.0), ("CO2", f64::NAN)] {
+        let none = liquid_record(id(key), kelvin(t));
+        assert!(matches!(none, LiquidRecord::Unrecorded), "{key} at {t} K");
+        assert!(none.in_range().is_none(), "{key} at {t} K");
+    }
+}
+
+/// An Enceladus, the airless icy regolith's fresh water frost about a Sun (not a derived moon),
+/// takes `H2O`'s frost by its material, labelled, at a finite albedo in [0, 1). Near 0.8 (Howett
+/// et al. 2010, from memory; Li et al. 2023's 0.76 ± 0.03 through a secondary; both read at
+/// P14.T49.i's build) is asserted from P14.T49.i's commit, which adds the infrared bands its frost
+/// needs (decision-p14-t49c-split §1.3); until then its visible-only albedo is recorded.
+#[test]
+fn an_enceladus_takes_its_fresh_frost_until_the_infrared() {
     let sun = HostShade::sun();
     let frost = Regolith::of_material(SurfaceMaterial::Ice).bond(SurfaceState::Airless, &sun.bands);
+    assert_eq!(frost.stand_in, Some(StandIn::RowByMaterial));
+    assert!(
+        frost.bond.is_finite() && (0.0..1.0).contains(&frost.bond),
+        "{}",
+        frost.bond
+    );
+    assert_same_bits(frost.bond, solid_bond(id("H2O"), &sun.bands).bond);
     eprintln!(
         "Enceladus by its fresh frost, over {OPTICS_BANDS} bands: {:.5}",
         frost.bond

@@ -4161,10 +4161,10 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
 /// was taken at, `DerivedBody::albedo` (retiring P14.T47's exception, as built); every icy member's
 /// air reads its record's ice. The passes' counts are recorded: they converge to 10⁻⁹ in the
 /// equilibrium temperature below the cap but for the bodies the passes' stand-ins make oscillate,
-/// 25 of 954 when measured (P14.T51.b's Risks: visible-only lossless frosts at an albedo of 1, the
-/// isothermal climate's step cover, the airless ice edge's dominance), which T49.i and T54.a take
-/// away; at most 5% of the sample is held here, a guard against a regression, not the plan's test,
-/// which this does not yet pass (reported to the lane).
+/// 20 of 954 when measured, so that 97.9% converge (P14.T51.b's Risks: visible-only lossless frosts
+/// at an albedo of 1, the isothermal climate's step cover, the airless ice edge's dominance), which
+/// T49.i and T54.a take away; at most 5% of the sample is held here, a guard against a regression,
+/// not the plan's test, which this does not yet pass (reported to the lane).
 #[test]
 fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     use std::collections::BTreeMap;
