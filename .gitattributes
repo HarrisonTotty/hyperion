@@ -2,3 +2,7 @@
 # merged or normalised as text.
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/kDistributions/*.bin binary
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/kDistributions/*.bin binary
+
+# Golden files are LF text, read line by line by the Rust and TypeScript tests; a CRLF checkout
+# (Git for Windows' default) would fail every comparison (decision-r10-t16d-part1, item 6).
+*.golden text eol=lf
