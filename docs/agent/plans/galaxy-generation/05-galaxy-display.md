@@ -1295,7 +1295,8 @@ PR description, not in a new document.
 `styles.css`). Every line that names a state and then, after a colon, a sentence takes one form
 ship-wide: the state and its colon tracked at the status lines' 0.15em, the sentence untracked, in
 the line's one size, face and colour. A line with no sentence, and one whose parts are both upper
-case, is unchanged.
+case, is an annunciation and is spaced whole, gaining the spacing where it had none (signoff-12,
+item 40).
 
 - **The split, in one place.** `components/StatusText.tsx` exports `StatusText`. It takes the line
   as one string and renders phrasing content in two spans.
@@ -1653,8 +1654,8 @@ the `DisplayId` union for plan 14's `SYSTEM` display.
       `InstrumentView`; the ux-reviewer's finding), though the task puts them out of scope as "all
       upper case": the descent spike's `TEST PLANET: provisional, dry and hand-parameterised` is
       not. Every other statement is upper case whole and reads as before; that one tracks
-      `TEST PLANET:` alone. _For the owner's sign-off queue: the spike's statement in the one
-      form, as built, or tracked whole as a statement._
+      `TEST PLANET:` alone. _Signed off 2026-10-19 (`signoff-12.md`, item 40): the one form, as
+      built; the guide's Typography names it._
     - **Finding a split line in tests.** `getByText`'s own matcher reads an element's own text
       nodes only, so it finds a split line nowhere and passes an absence check for nothing.
       `test/statusLine.ts`'s `statusLine(text)` matches the element whose direct child is a

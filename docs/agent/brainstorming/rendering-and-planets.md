@@ -1146,8 +1146,13 @@ What the pass does, in order:
    the basin capacity places a sea at the paleo-ocean fraction, by the same logistic of inventory
    over capacity that plan 14 uses for the present ocean; a smaller one fills and spills closed
    basins, as Mars's crater lakes did, and those that stay closed are terminal outlets. On a
-   stagnant lid the uplift is volcanic construction and the flexural trough and bulge around each
-   load, which over a short wet epoch are the initial surface rather than a rate. A world with no
+   stagnant lid the uplift is volcanic construction: each load sinks on its flexural root, the
+   trough about it is filled with the province's own material and the bulge beyond is planed, both
+   to the surface's level before the loads, so that the construction alone stands in the
+   elevation, the plate's uniform foundation then balancing exactly. Over a short wet epoch that is
+   the initial surface rather than a rate. A standing bulge, about 100 m about a Mars-sized lid's
+   largest edifice, is not modelled. _Corrected 2026-10-19 by the sign-off agent (owner's
+   delegation; `signoff-12.md`, item 41; decision-r09-t12-coarse addenda 2 and 3)._ A world with no
    wet epoch, such as the Moon, Mercury or Venus now, has no fluvial step. The result is rescaled to
    plan 14's σ_h as in step 2. It gives the final coarse elevation, flow directions, drainage area
    and a channel-steepness index. Its published timings, 1.79 s at 512² cells and 8.18 s at 1024²,
@@ -1541,10 +1546,14 @@ Ar from Peck and Fisher 1964; CO₂ from Bideau-Mehu et al. 1973 at 0 °C, as Sn
 correct it; CH₄ and N₂O from He et al. 2021, since Sneep and Ubachs's CH₄ runs 13% high in n − 1;
 H₂O from Ciddor 1996; NH₃ from C. and M. Cuthbertson 1914; H₂ from Peck and Huang 1977, with a King
 factor from Raj, Hamaguchi and Witek 2018's ab initio anisotropy; He from Mansfield and Peck 1969;
-and Ne, Kr and Xe from Börzsönyi et al. 2008. Dalgarno and Williams 1962's H₂ cross-sections, which
+Ne, Kr and Xe from Börzsönyi et al. 2008; and CO from C. and M. Cuthbertson 1920, H₂S from C. and
+M. Cuthbertson 1910 and C₂H₆ from Loria 1909. Dalgarno and Williams 1962's H₂ cross-sections, which
 run about 6.5% below the measured refractivity, are a cross-check only. Each refractive index is
 evaluated at the density its formula states, the real gas's, not the ideal one, which would leave
-NH₃'s cross-section 3% and CO₂'s 1.4% high. The scale height follows from temperature, mean
+CO₂'s and Xe's cross-sections 1.4% high, the most of any; NH₃'s source already reduces it to a
+near-ideal "theoretic density" (Z = 0.998 14), so its error would be 0.4%. _Corrected 2026-10-19
+by the sign-off agent (owner's delegation; `signoff-12.md`, item 35)._ The scale height follows
+from temperature, mean
 molecular mass and gravity at each height, so the medium needs a vertical structure, not one
 temperature: a column isothermal at the surface temperature is three times too tall in scale
 height at Venus's cloud tops. The structure is Robinson and Catling 2012's scaled adiabat from the
@@ -3877,8 +3886,10 @@ than read: its details, and the figure it supports, must be checked before eithe
   Applied Optics 35, 1566, for H₂O; C. and M. Cuthbertson 1914, Phil. Trans. R. Soc. A 213, 1, for
   NH₃; Peck and Huang 1977, JOSA 67, 1550, for H₂, with its King factor from Raj, Hamaguchi and
   Witek 2018, J. Chem. Phys. 148, 104308; Mansfield and Peck 1969, JOSA 59, 199, for He; Börzsönyi,
-  Heiner, Kalashnikov, Kovács and Osvay 2008, Applied Optics 47, 4856, for Ne, Kr and Xe; and
-  Dalgarno and Williams 1962, ApJ 136, 690, as H₂'s cross-check. Tabulated refractive indices at
+  Heiner, Kalashnikov, Kovács and Osvay 2008, Applied Optics 47, 4856, for Ne, Kr and Xe; C. and M.
+  Cuthbertson 1920, Proc. R. Soc. Lond. A 97, 152, for CO; C. and M. Cuthbertson 1910, Proc. R. Soc.
+  Lond. A 83, 171, for H₂S; Loria 1909, Ann. Phys. 334, 605, for C₂H₆; and Dalgarno and Williams
+  1962, ApJ 136, 690, as H₂'s cross-check. Tabulated refractive indices at
   <https://refractiveindex.info> (CC0). Robinson and Catling 2012, ApJ 757, 104, for the scaled
   adiabat, and 2014, Nature Geoscience 7, 12, for its α (from R08's research). c_p(T) is a
   statistical sum over each gas's molecular constants: the vibrational fundamentals from
@@ -3960,9 +3971,15 @@ than read: its details, and the figure it supports, must be checked before eithe
   and Vonikakis 2018, Front. Psychol. 8:2079, eq. 2. Its first angular constant is 0.0046°, not
   the 0.046° the open copies print, which normalisation shows.
 - The illuminance of a magnitude-0 star, 2.54 × 10⁻⁶ lx, from Cox 2000, _Allen's Astrophysical
-  Quantities_, §15, **not seen quoted verbatim**, and Crumey 2014's zero point; cross-checked by the
-  Sun's V = −26.76 (Willmer 2018, ApJS 236, 47), which it turns into the measured 1.28 × 10⁵ lx above
-  the atmosphere, and by Bessell, Castelli and Plez 1998, A&A 333, 231, to 1% for an A0 spectrum.
+  Quantities_, §15, **not seen quoted verbatim**, and Crumey 2014's zero point; cross-checked by
+  Bessell, Castelli and Plez 1998, A&A 333, 231, to 1% for an A0 spectrum. It takes no account of a
+  star's spectrum: the Sun's V = −26.76 (Willmer 2018, ApJS 236, 47) turns into 1.28 × 10⁵ lx above
+  the atmosphere, 3.6% under the photopic integral of ASTM E-490, 1.333 × 10⁵ lx on its
+  1,366.1 W m⁻² (1.328 × 10⁵ at the IAU 2015 nominal total solar irradiance of 1,361 W m⁻², Prša et
+  al. 2016, AJ 152, 41; Kopp and Lean 2011 measured 1,360.8 ± 0.5), and the Sun's own spectrum
+  gives it 1.037 times as much, 133,462 lx, E-490's to 0.11% (R06's `lux_per_v0`; R08.T6.j). None
+  of these is a measured illuminance. _Corrected 2026-10-19 by the sign-off agent (owner's
+  delegation; `signoff-12.md`, item 14), in place of "the measured 1.28 × 10⁵ lx"._
 - Pickles 1998, PASP 110, 863 (VizieR J/PASP/110/863), the stellar spectral library, against the CIE
   1924 photopic luminosity function V(λ): a V = 0 star's photopic illuminance departs from 2.54 µlx
   by 0 to 0.10 mag from O5 to M6 (O5V 0.000, K5V 0.100, M2V 0.093, M5V 0.074, M6V 0.067, on Bessell,

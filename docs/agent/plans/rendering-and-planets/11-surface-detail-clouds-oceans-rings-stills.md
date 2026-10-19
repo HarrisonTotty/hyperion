@@ -590,9 +590,11 @@ ambiguous, the design note that reads it is named.
     water surface above the cell's coarse elevation and no ice), never re-decided by a shader;
     within a cell the shoreline comes from R10's height texture against that level. Where the coarse
     field's ice covers the sea, the ocean gives way to R10's `SeaIce`, "with no glint and no waves".
-    Over unsurveyed ground no sea is drawn, as no coastline is claimed there; the research suggests
-    a disc-statistical glint on R07's reference body (the ocean fraction times the glint at the
-    body's mean wind), which is left to the owner (Risks).
+    Over unsurveyed ground no sea is drawn, as no coastline is claimed there; a disc-statistical
+    glint is drawn on R07's reference body instead (the ocean fraction times the glint at the
+    body's mean wind, at the disc's specular point, on its unsurveyed share only, without counting
+    the ocean's specular light twice; ruled 2026-10-19, `signoff-12.md`, item 33), which R11.T8
+    builds.
 
 12. **Ocean by distance, with one slope budget.** Researched 2026-09-29. The total slope
     variance is Cox and Munk's, anisotropic along the wind: σ_u² = 3.16 × 10⁻³ U and σ_c² = 0.003 +
@@ -1249,7 +1251,7 @@ ejecta-block population), shape parameter or authoritative dip opens a new tag a
   T7.a's provisional stand-in.
 - **The sea over unsurveyed ground** is not drawn (Design note 11), which removes the glint that
   makes an ocean world recognisable before a survey. A disc-statistical glint on R07's reference
-  body is suggested and left to the owner.
+  body restores it (Design note 11; `signoff-12.md`, item 33).
 - **The decoration label's scope** (Design note 2) is this plan's reading of guide item 2; the owner
   signs off the guide, and a wider reading only lengthens the annunciation.
 - **Rings wait on plan 14** for a radial profile, a size distribution and a thickness on the wire,

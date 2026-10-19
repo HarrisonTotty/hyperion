@@ -410,7 +410,10 @@ Consumes; an open one is in the owner plan's Risks and open points.
 Nothing below is assumed by any plan: each is drafted as a task that ends in "the owner signs off",
 and the code built meanwhile is confined to a label, a constant or a gated task. During RM1 the
 owner delegated decisions to decision agents; an item so decided is marked **Decided**, with where
-it is recorded, and stays here so that the owner can review it.
+it is recorded, and stays here so that the owner can review it. Since 2026-10-19 (the owner:
+"Unless it is a fundamental change to the project or a security issue, you don't need to consult
+me") every open item goes to the sign-off queue, and only the by-hand runs on the owner's hardware
+or screen and the access gaps stay the owner's.
 
 - **Decided: the Content Security Policy** (R04.T10.a). Research reframed the brainstorm's item: a
   `file://` or dev-server worker has no policy of its own and compiles WebAssembly under today's
@@ -453,7 +456,8 @@ it is recorded, and stays here so that the owner can review it.
   seven drafts, one adopted and six amended, and its 15 questions, 14 leans accepted and
   `SITE HEIGHT`'s timing changed: `±` and the Estimated value's rounding, the readout under
   `GROUND AT LINE OF SIGHT`, the survey line, the material reading, the survey edge and the
-  contours. The span form is left to a later sign-off (queue item 18).
+  contours. The span form and the digit groups are signed off 2026-10-19 (`signoff-12.md`, item
+  18): kept, each stated as the console's choice against SP 811 and the SI Brochure.
   **Decided** (2026-10-14, signed off under the owner's delegation; `signoff-10.md`): R10.T12's two
   drafts, both amended. The material's properties are `ULTIMATE BEARING CAPACITY`, with its
   `· PAD WIDTH 1.0 m`, a reference pad until the hull has pads, and `PAD FRICTION`, with its
@@ -482,11 +486,12 @@ it is recorded, and stays here so that the owner can review it.
   `decision-r08-cmf-licence.md`): `colourMatching.json` ships as adapted material under
   CC BY-SA 4.0. Filament's AgX is Apache-2.0 and gains a `NOTICE` entry in
   R02.T10.c, which R07 includes (R02 Design note 12).
-- **The level-of-detail selection bound** (R10.T4): whether selection takes the hard bound or
-  min(hard, 4σ), ruled with T4.a's recorded ratios and the patch counts under both rules that
-  R10.T4.b records from T4.a's `level-bounds.json` fixture. R05.T6's recorded ratios for the test
-  planet go to the same ruling. Until then the hard bound selects, with no calibration factor in
-  R05.
+- **The level-of-detail selection bound** (R10.T4). **Ruled** 2026-10-19 under the owner's
+  delegation (`signoff-12.md`, item 30): selection takes min(hard, 4σ) if T4.b's counts show a
+  saving of 1.5 times or more on every sample world at τ = 1 px and T4.a's per-patch maxima exceed
+  4σ in no more than one patch in three; otherwise the hard bound. T4.b applies the rule and
+  records the result; a result within 10% of a threshold goes to the sign-off queue. Until then the
+  hard bound selects, with no calibration factor in R05.
 - **Galaxy plan amendments** drafted by R-plans, each for the galaxy plan's owner to accept.
   **Decided** (2026-09-30, delegated decisions): R04.T3.a (P14.T23), accepted as drafted, its wire
   change built in R04.T3.c (plan 14's four markers; R04's Risks); R03.T1 (plan 04's rows, a note in
@@ -495,15 +500,17 @@ it is recorded, and stays here so that the owner can review it.
   figure and photometry on the wire), accepted with amendments and built (P14.T46, T47).
   **Decided** (2026-10-10, the sign-off agent, `signoff-3.md`): R08.T1 (P14.T24.c–g and
   P14.T35.e) and R09.T0.a (P14.T48.a–e; plan 04's rows `surface_field` and `survey_pass`; R03's
-  `surface_revisions`), accepted with amendments. **Still awaiting:** R06.T1 (plan 06's A1–A4).
+  `surface_revisions`), accepted with amendments. **Decided** (2026-10-19, `signoff-12.md`, item
+  29): R06.T1 (plan 06's A1–A4).
 - **Decided: evolving orbits** (2026-10-01, delegated decision, option (d)). An evolving orbit's
   phase becomes ∫n dt, sent as drifting elements on aligned power-of-two cells (`BodyOrbitDto`'s
   optional `drift`); built as galaxy plan 14's P14.T45, which closes R03.T13's pinned discrepancy
   (R03's Risks) and supersedes protocol item 9. Its quadrature follow-up is P14.T45.d (2026-10-02).
 - **Brainstorm revisions** drafted by the plans: R12.T10's measured budget tables (not yet
   drafted, since R12.T10 is unbuilt; the hardware figures of R12 Design note 11 are applied
-  already). The other drafts are decided (below, "Decided by the brainstorm sign-off"). R04.T10.a's
-  CSP ruling is already applied to the brainstorm. **Decided:** R05.T19's edit to open question 2
+  already); they go to the sign-off queue when drafted. The other drafts are decided (below,
+  "Decided by the brainstorm sign-off"). R04.T10.a's CSP ruling is already applied to the
+  brainstorm. **Decided:** R05.T19's edit to open question 2
   (2026-10-08, delegated; `decision-r05-close-without-runs.md` §4), applied to the brainstorm with
   its status kept **Lean**, since the replay's clause is untested; and R05.T19's other findings
   (2026-10-08, delegated; `decision-r05-brainstorm-findings.md`), applied with amendments: the
@@ -511,11 +518,11 @@ it is recorded, and stays here so that the owner can review it.
   spacing; patch demand's constants and the low setting's measured patch ratio; the timestamps'
   quantisation; the atmosphere tables' cadence, reach and reference aerosol; the Rayleigh scale
   height; sun-independent horizon maps; and the normals' resolution and cost.
-- **The gate's verdict** (R05.T19): if open question 2's rule fires, the owner rules before any
-  later plan depends on the browser. Recorded 2026-10-08 (R05's Risks, "The gate's verdict"): the
-  rule does not fire. The RTX 3080 half fails, on frame skips near the ground that are ours and
-  deferred to R12.T11.b, and the UHD 620 half is not judged, R05.T16 having been waived by the
-  owner.
+- **Closed: the gate's verdict** (R05.T19; the rule did not fire): if open question 2's rule
+  fires, the owner rules before any later plan depends on the browser. Recorded 2026-10-08 (R05's
+  Risks, "The gate's verdict"): the rule does not fire. The RTX 3080 half fails, on frame skips
+  near the ground that are ours and deferred to R12.T11.b, and the UHD 620 half is not judged,
+  R05.T16 having been waived by the owner.
 - **Decided: the target hardware and the gate** (2026-09-30, delegated decisions; the
   orchestration's hardware record, items 1–7). The gate's discrete half runs on the recommended
   specification, the RTX 3080, at the display's measured vsync period ([The gate](#the-gate));
@@ -534,8 +541,9 @@ it is recorded, and stays here so that the owner can review it.
   projector, so R01's on-screen soak with `xdotool` resizes and the display blank, the on-screen
   pacing and resizes (which decide `--disable-vulkan-surface`, R01's Risks), and the by-eye checks
   of R01's and R02's displays are the owner's.
-- **The documentation layout**: `docs/measurements/` in `.claude/CLAUDE.md`'s layout, drafted by
-  R12.T1.c.
+- **The documentation layout**: `docs/measurements/` in `.claude/CLAUDE.md`'s layout (R12.T1.c).
+  **Ruled** 2026-10-19 (`signoff-12.md`, item 34); the owner applies the one line, since it edits
+  the agents' own instructions.
 - **Decided: the hybrid sky** (R13; the owner, 2026-10-08, each answer as recommended in
   `feasibility-hybrid-sky.md` in the orchestration directory, §11):
   - V_P is 4.5 for R13;
@@ -556,18 +564,21 @@ it is recorded, and stays here so that the owner can review it.
     option A). It is lifted when the census levers land.
 
   The brainstorm's subsection "The hybrid sky" is signed off, its amendment for the real limit
-  too (below, "Decided by the brainstorm sign-off"). **Still awaiting:** the label wording of
-  R13.T2.b and T8 and their guide rows, a draft for the UX decision agent by T15's route.
+  too (below, "Decided by the brainstorm sign-off"). R13.T2.b's wording and row are signed off
+  (`decision-r13-t2b-note.md`; `signoff-2.md` item 1); T8's go to the sign-off queue when T8
+  drafts them.
 
-- **Smaller rulings the plans leave open**: moving `just test-render` into `just ci` after one
-  Electron upgrade passes (R01.T9.e); the safe mode drawing no view, since a Canvas 2D wireframe
-  would be a second renderer (R01's Risks); a disc-statistical glint over unsurveyed ocean (R11
-  Design note 11); biotic O₂, which no plan owns, and the scalar-against-vector Rayleigh error
-  R08.T12.a measures (R08's Risks); whether a merged scene arrival should state its own clock
-  (R03's Risks). **Decided** (delegated decisions): the R02 depth criteria (the hidden-edge
-  criterion at 4 × 10⁻⁵ of the distance, the sphere occluder's slope term, the `TRAINING` banner
-  only over a kept scene; R02's Design note 5 and Risks) and the scene's system designation and
-  place (R03.T16).
+- **Smaller rulings the plans left open**, each now ruled. **Decided** (2026-10-19, under the
+  owner's delegation; `signoff-12.md`): the safe mode draws no view (item 32); a disc-statistical
+  glint over unsurveyed ocean, built by R11.T8 (item 33); moving `just test-render` into
+  `just ci` goes to the sign-off queue once one Electron upgrade passes the harness (R01.T9.e;
+  item 31). **Decided** earlier: biotic O₂ is a recorded gap until a biosphere plan (2026-10-10,
+  `signoff-3.md` item 1.14); the scalar-against-vector Rayleigh error is corrected in R08 by a
+  vector-minus-scalar source table (2026-10-09, `decision-r08-vector.md`); a merged scene arrival
+  states each record's own time (2026-09-30, R03's Risks). **Decided** (delegated decisions): the
+  R02 depth criteria (the hidden-edge criterion at 4 × 10⁻⁵ of the distance, the sphere occluder's
+  slope term, the `TRAINING` banner only over a kept scene; R02's Design note 5 and Risks) and the
+  scene's system designation and place (R03.T16).
 - **Decided by the brainstorm sign-off** (2026-10-09, the sign-off agent under the owner's
   delegation; `signoff-brainstorm.md` in the RM4/RM5 orchestration directory, unless another
   record is named), each applied to the brainstorm:
@@ -683,7 +694,7 @@ it is applied to the brainstorm, amended or rejected.
 | Atmosphere                  | H₂ and He from Dalgarno's cross-sections                                                          | Dalgarno and Williams 1962 runs about 6.5% below measured H₂ refractivity: Peck and Huang 1977, with a King factor from Raj, Hamaguchi and Witek 2018's ab initio anisotropy (Hohm 1993 holds none; R08.T3.b); He from Mansfield and Peck 1969; Dalgarno and Williams a cross-check only. Applied to the brainstorm 2026-10-09 (the sign-off).                                                                                                                                                          | R08 Design note 4                               |
 | Atmosphere                  | The Rayleigh sources named                                                                        | They do not cover O₂, Ar, H₂O, NH₃, the heavier noble gases or N₂O: Křen 2011's refit of Zhang et al. 2008 (R08.T3.b), Peck and Fisher 1964, Ciddor 1996, Cuthbertson 1914, Börzsönyi et al. 2008 and He et al. 2021, each at its formula's own state and the real gas's number density (R08.T3.b). Amended and applied to the brainstorm 2026-10-09 (the sign-off).                                                                                                                                    | R08 Design note 4                               |
 | Atmosphere                  | CO₂ and CH₄ from Sneep and Ubachs 2005                                                            | CO₂ from Bideau-Mehu et al. 1973 at 0 °C, as Sneep and Ubachs correct it; CH₄ from He et al. 2021, eq. 10, since Sneep and Ubachs's eq. 18 runs 13% high in n − 1, with the Sources entry's citations checked by R08.T3.b. Applied to the brainstorm 2026-10-09 (the sign-off).                                                                                                                                                                                                                         | R08 Risks, "Deviations in T3.b"                 |
-| Atmosphere                  | "the real gas's, not the ideal one, which would leave NH₃'s cross-section 3% and CO₂'s 1.4% high" | C. and M. Cuthbertson 1914 reduce NH₃ to a near-ideal "theoretic density" (Z = 0.998 14), so the ideal reading moves NH₃'s σ by 0.4%, and CO₂'s and Xe's 1.4% are the largest. The rule, each index at the density its formula states, holds. The measured gases gain CO (Cuthbertson 1920), H₂S (Cuthbertson 1910) and C₂H₆ (Loria 1909). _Drafted for the owner_ (R08.T3.b's follow-up, 2026-10-10).                                                                                                  | R08 Risks, "Deviations in T3.b's follow-up"     |
+| Atmosphere                  | "the real gas's, not the ideal one, which would leave NH₃'s cross-section 3% and CO₂'s 1.4% high" | C. and M. Cuthbertson 1914 reduce NH₃ to a near-ideal "theoretic density" (Z = 0.998 14), so the ideal reading moves NH₃'s σ by 0.4%, and CO₂'s and Xe's 1.4% are the largest. The rule, each index at the density its formula states, holds. The measured gases gain CO (Cuthbertson 1920), H₂S (Cuthbertson 1910) and C₂H₆ (Loria 1909). Signed off 2026-10-19 (`signoff-12.md`, item 35) and applied to the brainstorm.                                                                              | R08 Risks, "Deviations in T3.b's follow-up"     |
 | Atmosphere; open question 3 | Venus's cloud optical depth "near 30"; Rayleigh "near 15"                                         | About 25 at 0.63 µm (Tomasko et al. 1980; 25–40 across probes); Rayleigh near 16 at 550 nm (16.26 at 92 bar, R08.T3.b) and about 41 in the blue. Amended and applied to the brainstorm 2026-10-09 (the sign-off).                                                                                                                                                                                                                                                                                       | R08 Design note 4; its research                 |
 | Atmosphere; open question 3 | Where Hillaire's term drifts, "that table is replaced"                                            | The replacement must depend on view direction, J_ms(h, μ₀, μ_v, m); Hillaire's isotropic term is inadequate at Venus and Titan depths. Applied to the brainstorm 2026-10-09 (the sign-off).                                                                                                                                                                                                                                                                                                             | R08 Design note 9                               |
 | Atmosphere                  | The scale height "follows from temperature, mean molecular mass and gravity"                      | Only with a vertical structure: an isothermal column is 3 times wrong at Venus's cloud tops; R08 asks plan 14 for (T_s, p_s, β, T_skin), with μ and c_p ÷ R from the record (decision-composition). Amended and applied to the brainstorm 2026-10-09 (the sign-off). Superseded 2026-10-10: (T_s, p_s, α, T_skin) and the adiabat's nodes over P14.T49.b's c_p(T) (science-r08-gases-2.md §1); applied to the brainstorm 2026-10-12 (signoff-4.md).                                                     | R08 Design note 3                               |

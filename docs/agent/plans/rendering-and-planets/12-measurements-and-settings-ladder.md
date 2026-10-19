@@ -767,11 +767,11 @@ outcome in the task it falls on.
   a `virtual` record; `budget.md` agrees with `runs.v1.jsonl` (the sync test, in the package's
   suite, which `pnpm test` runs). Acceptance: `pnpm test`, `just ci`, and `just perf-table` leaves
   the tree unchanged.
-- **R12.T1.c The documentation layout, for the owner.** Draft the line `docs/measurements/` —
+- **R12.T1.c The documentation layout.** Draft the line `docs/measurements/` —
   recorded measurements of the product, one directory per run family — for `.claude/CLAUDE.md`'s
-  "Documentation Layout", in this plan's Risks and in the commit message of T1.b, and put it to the
-  owner. This plan does not edit `.claude/`. Acceptance: the drafted line is in Risks; the owner
-  signs off.
+  "Documentation Layout", in this plan's Risks and in the commit message of T1.b, ruled 2026-10-19
+  (`signoff-12.md`, item 34). This plan does not edit `.claude/`; the owner applies the line.
+  Acceptance: the line is in Risks as ruled.
 
 Files: `packages/perf/**`, `apps/hyperion/package.json`, the root `package.json`,
 `pnpm-lock.yaml`, `docs/measurements/rendering/*`, `justfile`, this plan's Risks.
@@ -1112,8 +1112,8 @@ generator version it ran at. The plan reserves nothing in the generator.
   sustained share the GPU gets is lower, estimated at 70–80% of peak for the whole machine and not
   measured here, since no benchmark runs on the shared machine.
 - **The documentation layout** (T1.c): the drafted line for `.claude/CLAUDE.md`,
-  `docs/measurements/` — recorded measurements of the product, one directory per run family — awaits
-  the owner.
+  `docs/measurements/` — recorded measurements of the product, one directory per run family — is
+  ruled (`signoff-12.md`, item 34) and left for the owner to apply to `.claude/CLAUDE.md`.
 - **Memory categories named by their owners.** The five names this plan asked for are now in the
   owning plans' tasks: `height-cache` (R05.T11.a), `atmosphere-tables` (R05.T12.b) and
   `atmosphere-view` (R05.T12.c), which R08 keeps for its widened, per-sun and thick tables (R08

@@ -1501,8 +1501,9 @@ Names are those the owning plans give; the owning plan is authoritative.
       - Any volatile air the surface section computes is drawn as computed, with this note beside
         it. It stands on its own line, beside `EXOSPHERE: NOT YET MODELLED` where an `airless`
         body holds a melt pool.
-      - The name is drafted for the owner with P14.T43.e's console row, as one name
-        (decision-backlog-2 §2.5; decision-triton-and-e101 §2.4).
+      - The name is signed off with P14.T43.e's console row, as one name (decision-backlog-2
+        §2.5; decision-triton-and-e101 §2.4; `signoff-12.md`, item 27), and the guide carries the
+        note's row.
     - `ATMOSPHERE: PENDING` from a body's `body_detail` request until its reply is drawn. No
       atmosphere is drawn meanwhile.
     - `ATMOSPHERE: COMPUTING` while a gated thick bake runs.
@@ -1913,7 +1914,9 @@ The order:
   follows T4.a. T4.c (continua, pairs and Thomson scattering) follows T4.b. T4.d (temperate
   lines) follows T4.c and T6.c, whose read it widens. T4.e (atomic and ionic lines), T4.f
   (ExoMol's hot molecules) and T4.g (ExoMol's temperate lines, split from T4.d) follow T4.d, on
-  its machinery, in any order. T4.e's ions also wait on P14.T49.b's rows for R08.T19.
+  its machinery, in any order. T4.e's ions also wait on P14.T49.b's rows for R08.T19. R08.T4.h
+  before P14.T54.a's bless. T4.e after T4.h, T4.f after T4.e, both behind critical-path work on
+  the laptop.
 - T5.a (Mie) needs nothing of T3 or T4 and can start at once; T5.b follows it, and T5.c follows
   T5.b. T5.d follows T5.b, and precedes galaxy plan 14's P14.T49.e. T5.e follows T5.d and
   R08.T12.e. It moves no generated output, so its place relative to P14.T49.e is free. T5.f (the
@@ -1975,10 +1978,9 @@ Some tasks wait on the owner or on another plan, and say so where they do:
   a thin atmosphere's gases, pressure and temperature arrive first (P14.T24.f, T24.a–b, T48.e and
   T35.e), drawn on the isothermal seam with `AEROSOLS AND ABSORBERS: NOT YET MODELLED`; the
   vertical structure (T24.e), the inventory (T24.c) and the gas envelopes (T24.d) follow.
-- **Drafts for the owner.** R08.T1's amendments and R08.T2's labels are committed marked drafted
-  for the owner, and the client is built to them meanwhile; the acceptance and the sign-off are
-  the owner's, recorded here when given. R08.T2's labels were signed off 2026-10-09 by the
-  sign-off agent (owner's delegation).
+- **Drafts, signed off.** R08.T2's labels were signed off 2026-10-09 and R08.T1's amendments
+  accepted with amendments 2026-10-10 (`signoff-3.md`, items 1.1–1.8, 1.14 and 1.15), both by the
+  sign-off agent under the owner's delegation. Later drafts go to the sign-off queue.
 - **The UHD 620.** Its runs (R08.T7, T11, T14.d's bake time, T17) are the owner's, on the owner's
   laptop; the development machine's figures are recorded beside them.
 
@@ -2095,7 +2097,7 @@ T24.c's rules read T24.e's profile and T24.f's gases, and T24.e's α reads P14.T
   - Carbon on cold bodies (T_s ≲ 150 K) beyond the snow line is CH₄, not CO₂, held at saturation,
     calibrated on Titan's 5.65%.
   - Abiotic O₂ comes from water loss in the runaway state (Luger and Barnes 2015).
-  - Biotic O₂ is a gap for the owner.
+  - Biotic O₂ is a recorded gap until a biosphere plan (`signoff-3.md` item 1.14).
 - **P14.T35.e The atmosphere on the wire.** As built, the sim's `record::Surface` and the wire's
   `BodySurfaceDto` are uninhabited enums, and no plan-14 task gives them fields (P14.T35.b only
   tags the section `not_modelled`). So `BodySurfaceDto` gains, with the record's `Surface`, first
@@ -2123,11 +2125,11 @@ P14.T35.e. Acceptance:
 This is a brainstorm-driven plan edit. It is committed marked drafted for the owner (the RM4/RM5
 rule for galaxy-plan amendments), and plan 14's owner accepts it; the acceptance is recorded here.
 
-_Done 2026-10-09, drafted for the owner and awaiting the sign-off: the five tasks are plan 14's
-P14.T24.c–f under Phase E and P14.T35.e under Phase H, reconciled with R09.T0.a's Phase K. The
-record, with what departs from the bullets above, is Risks' "The asks R08.T1 wrote into plan 14".
-The prettier check ran as `pnpm exec prettier --check`, the same tool, since this machine has no
-`npx`._
+_Done 2026-10-09; accepted with amendments 2026-10-10 by the sign-off agent (owner's delegation;
+`signoff-3.md`): the five tasks are plan 14's P14.T24.c–f under Phase E and P14.T35.e under Phase
+H, reconciled with R09.T0.a's Phase K. The record, with what departs from the bullets above, is
+Risks' "The asks R08.T1 wrote into plan 14". The prettier check ran as
+`pnpm exec prettier --check`, the same tool, since this machine has no `npx`._
 
 ### R08.T2 The atmosphere labels, drafted for the owner
 
@@ -2550,7 +2552,8 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
         mean σ alone (G = 1). No cell is dropped.
       - T4.d's committed binary is recorded. Past 40 MB, alternate nodes below 1 MPa are dropped
         where the between-node test still passes on rows at 4 a decade (rows there then cubic in
-        ln p from the stored nodes), and this is recorded.
+        ln p from the stored nodes), and this is recorded. From R08.T4.e on, the economies and cap
+        are decision-r08-t4ef-storage's.
     - **Each species' range.**
       - Its temperatures run from where its saturated column is negligible to its line list's
         limit (HITRAN's 500 K, C2018's 300 K). Negligible means R08.T10.a's Δ_c under 10⁻³ at
@@ -2747,11 +2750,21 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
     - **The reference column** for its line list and for T4.c's third reason
       (science-r08-unowned-absorbers): the stage's vertical column above 0.1 bar at g = 10 m s⁻²,
       doubled for the mean slant path. It is taken at solar abundances, with every atom of the
-      element in that stage, at Saha equilibrium, at the stage's most favourable temperature in
-      2,000–4,600 K.
+      element free (no molecules, no condensate), split among its stages by Saha, at Saha
+      equilibrium, at the stage's most favourable temperature in 2,000–4,600 K.
 
       Each drawn species takes every line in 380–760 nm, and within 20 nm outside it for its wings,
       whose equivalent width there is at least 10⁻³ nm.
+
+    - **Range** (decision-r08-t4ef-storage §3): `Na` and `K` 500–5,000 K, every other atom and
+      every ion 1,000–5,000 K, on R08.T4.f's temperature ladder. Below a floor the first node is
+      held, `estimated`; above 5,000 K the 5,000 K node. A stage under the third reason's 10⁻³ at
+      the reference column up to a node is stated none below it (`belowK`), its table starting
+      there.
+    - **Columns:** T4.d's caps (400 p_eff ÷ (m g) at g = 0.5 m s⁻², helium's Rayleigh column),
+      not a multiple of the reference column.
+    - **Lines in the tables:** every line of the spectrum's list over 360–780 nm. The reference
+      column's 10⁻³ nm selection serves the third reason only.
   - **The lines:**
     - Na D (589.0 and 589.6 nm), and K's resonance doublet (766.5 and 769.9 nm, outside the
       range, whose broadened blue wing enters it), with Allard et al.'s pressure-broadened
@@ -2781,10 +2794,11 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
       - Cr II's (455.9 and 458.8 nm and others, from 3.9–4.1 eV);
       - Mn II's (412.8 and 420.5 nm, and 432–440 nm).
 
-      Mg II, Si II, Al II, Ni II, Na II, K II and Zn II are T4.c's stated none, by the third
-      reason below. Mg II's 448.1 nm line (8.86 eV up, reaching τ 10⁻³ at 10³ km-amagat near
-      2,570 K) is pending in T4.c as built (follow-up 5), and stays pending, its line drawn here,
-      unless Kurucz's full list confirms its share under the third reason's 10⁻³;
+      Mg II, Si II, Al II, Ni II, Na II, K II and Zn II are R08.T4.h's stated none (or pending, as
+      its record says), by the third reason below. Mg II's 448.1 nm line (8.86 eV up, reaching
+      τ 10⁻³ at 10³ km-amagat near 2,570 K) is pending in T4.c as built (follow-up 5), and stays
+      pending, its line drawn here, unless Kurucz's full list confirms its share under the third
+      reason's 10⁻³;
 
     - [Fe II]'s forbidden lines from Deb and Hibbert 2011 (A&A 536, A74; CDS J/A+A/536/A74);
     - Na D's and K's far wings as pairs with H₂ and He, from Allard et al.'s profiles over
@@ -2802,9 +2816,10 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
     list:
     - `Mg+` (448.1 nm, 8.86 eV up): 7 × 10⁻⁴;
     - `Si+` (from 6.86 and 8.12 eV): 5 × 10⁻⁴;
-    - `Ni+` (forbidden lines only): 1.5 × 10⁻⁴;
+    - `Ni+` (forbidden lines only on NIST's list; Kurucz's holds 6,560 (R08.T4.h)): 1.5 × 10⁻⁴;
     - `Al+`: 5 × 10⁻⁶;
-    - `Na+`, `K+` and `Zn+`: no line from below 11 eV.
+    - `Na+` and `K+`: no line from below 20 eV; `Zn+`: Kurucz none in the range, ASD's three
+      3d¹⁰4p–3d⁹4s² lines from 6.0 eV with no A (R08.T4.h).
   - Tests:
     - Na D's depth monotone in column;
     - a class IV giant's (900–1,500 K) geometric albedo under 0.1 at 550 nm (Sudarsky et al.
@@ -2819,11 +2834,16 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
 
 - **R08.T4.f ExoMol's hot molecules** (follow-ups 2 and 3; decision-composition §5). After T4.d, on
   its machinery, for 500–4,000 K, and for H₂S at every temperature its list covers, from 296 K.
-  - **Its bytes, before its reductions run** (`decision-r08-t4d-kdist-chain.md` §9). T4.f states
-    its projected bytes, by species, on T4.d's binary format and caps, before any of its
-    reductions runs. Hot species (TiO, VO, FeH, POKAZATEL H₂O, CoYuTe NH₃) will be larger than
-    T4.d's. If T4.d's and T4.f's tables together would pass 100 MB, "main" asks for a decision:
-    Git LFS, or tables fetched with checksums.
+  - **Its bytes** (decision-r08-t4ef-storage §1). R08's line tables live in plain git under a cap
+    of 150 MB over `absorbers/kDistributions/`, `absorbers/exomol/kDistributions/` and
+    `absorbers/lines/`: T4.e within 60 MB, T4.f within what remains.
+    - Hot tables take a temperature ladder (50 K steps to 1,000 K, 100 K to 2,000 K, 200 K
+      beyond, each failing interval bisected twice) and each species' own range.
+    - Alternate pressure nodes below 1 MPa are dropped where the between-node test passes on
+      rows kept at 4 a decade (the rows the standard 30 pressures).
+    - A raised first pressure node is allowed where its hold passes the 1 Pa check generalised.
+    - Each task projects its bytes first. T4.f defers N₂, SiO, HCN and then H₂S above 500 K to
+      their pending entries while over. Otherwise "main" rules.
   - **Where the data go.** `absorbers/exomol/<species>.json`, under CC BY-SA 4.0, with a sibling
     licence note and a `NOTICE` entry offering the adapted files under CC BY-SA 4.0. Never inside
     `crossSections.json` or code.
@@ -2834,7 +2854,8 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
       recorded temperature where the two agree;
     - H₂S's visible overtones (AYT2, Azzam et al. 2016), from 296 K;
     - hot NH₃ from ExoMol's CoYuTe (Coles, Yurchenko and Tennyson 2019), which reaches 500 nm,
-      over its coverage, with C2018 below 500 nm held at its temperature, `estimated`;
+      over its coverage, with C2018 below 500 nm held at its temperature, `estimated`, deferred
+      (decision-r08-t4ef-storage §5.4): held at C2018's 300 K with its pending entry;
     - CH₄ above 300 K, where an open line list reaches 380–760 nm. As known when ruled, none
       does: HITEMP 2020's CH₄ stops at 746 nm. Failing one, CH₄ is held at Eq. 8's 300 K
       value, `estimated`;
@@ -2843,16 +2864,15 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
       an LTE band model (Huber and Herzberg's constants), `estimated`;
     - hot CO and HCN (HITEMP or ExoMol, checked at fetch), handing over from R08.T4.d's HITRAN
       at recorded temperatures;
-    - hot N₂O from TYM, over its stated temperatures. It hands over from R08.T4.g's merged table
-      (HITRAN2024's bands with TYM's others), not HITRAN's alone, at a recorded temperature at
-      or above 296 K, and the hand-over node passes T4.d's between-node test;
+    - hot N₂O: not drawn. No plan-14 rule makes it above 500 K. Its table is held above 500 K,
+      and its pending entry stays;
     - CO₂ above HITRAN's 500 K, considering ExoMol's UCL-4000 list (Yurchenko et al. 2020,
       MNRAS 496, 5282, to 20,000 cm⁻¹), checked at fetch. Venus's lowest 30 km or so, above
       500 K in VIRA (Seiff et al. 1985), is held at HITRAN's 500 K node and `estimated` until
       then;
     - any molecule P14.T52.a lists with a visible band system (AlO's B–X near 450–540 nm, CaH's,
       MgH's), from ExoMol or MoLLIST, checked at fetch. T52.a's other molecules are T4.c's stated
-      none (science-r08-unowned-absorbers).
+      none (science-r08-unowned-absorbers); of these only HCl applies, drawn in R08.T4.h.
   - Tests:
     - each reduced k-distribution passes R08.T4.d's node and between-node tests;
     - every T_c lies in [10⁻⁶, 1] and is non-increasing in u, for a 2,500 K and a 30,000 K sun;
@@ -3378,6 +3398,20 @@ Acceptance for T5.b and T5.c:
     decks.
   - Accept: `pnpm --filter hyperion exec vitest run src/renderer/src/view/atmosphere` and
     `pnpm --filter hyperion exec vitest run src/tools/materials`.
+
+- **R08.T5.j Liquid methane's visible k, re-reduced** (decision-p14-t49h-liquids §2.4,
+  2026-10-16; each § below is that decision's). The task re-reduces
+  `methane-liquid.json`'s visible k:
+  - **552–780 nm:** from M&O's (Martonchik and Orton 1994, Appl. Opt. 33, 8306) Fig. 3
+    best-estimate curve, not by interpolating between Table 2's maxima. Check bins 9, 10 and 14
+    against §2.1.
+  - **380–552 nm:** Karkoschka 1998's gas coefficients scaled to the liquid's number density, read
+    in the primary (Icarus 133, 134) or its archive. This is M&O's own method for their unmeasured
+    range. Label it `derived` and record the 1–12 times liquid-to-gas spread.
+  - **Prose:** "maxima only", "nothing measured shortward of 552.5 nm", and "90 K density-scaled
+    from 111 K, 25%".
+  - T49.h refits through §5 before T54.a and re-blesses at 22. If the refit lands after step 2's
+    fill, the fill is redone before the serve gate.
 
 - **R08.T5.k Nine liquids from their gases and their measurements** (decision-p14-t49h-gas-index
   and its addendum, 2026-10-16; client data, the tool and tests only; no `GENERATOR_VERSION` bump,
@@ -5240,6 +5274,10 @@ copy to its file's bin means. The lane that changes one of the three files updat
 the version in force until the serve gate opens, and with a bump after it (R09's Generator version,
 and its Risks, "Deviations in T2.e, as built"; added 2026-10-16).
 
+From P14.T49.h, `liquid_optics` reads the seven liquid files' data fields. An edit stales the
+table; before the first reader it is refitted by decision-p14-t49h-liquids §5, and from P14.T54.a
+it rides a bump.
+
 ## Risks and open points
 
 - **The atmosphere on strongly oblate bodies** (from R05's Risks; researched 2026-09-29, resolved
@@ -6786,7 +6824,8 @@ and its Risks, "Deviations in T2.e, as built"; added 2026-10-16).
     above the atmosphere at a zero point that takes no account of the spectrum, 3.6% under ASTM
     E-490's photopic 1.333 × 10⁵ lx (1.328 × 10⁵ at the IAU 2015 nominal TSI of 1,361 W m⁻²; Kopp
     and Lean 2011 measured 1,360.8 ± 0.5); the Sun's own spectrum gives it 1.037 times as much
-    (R06's `lux_per_v0`)".
+    (R06's `lux_per_v0`)". _Signed off 2026-10-19 (`signoff-12.md`, item 14: amended) and applied
+    to the brainstorm._
   - _The gate and the smoke._ `just smart-ci` passes on the tree merged with T6.h's follow-up
     (3d8eda8c) and `rendering-and-planets` (ea127bc5): every vitest file (375 files, 10,202 tests,
     307 s at 4 workers, so `pnpm test`), `star_colour`'s fixture test with the fixture's other
@@ -8626,9 +8665,9 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
   minimum specification. The development machine (Ryzen 7 3700X) records its own bake time beside
   it and fails only if it is over the laptop's ceiling; no separate desktop ceiling is set.
 - **The asks R08.T1 wrote into plan 14** (2026-10-09, at `62c196c3`). P14.T24.c–f sit under
-  plan 14's Phase E and P14.T35.e under Phase H, each marked drafted for the owner. **The owner's
-  sign-off is pending**: the orchestrator has a decision agent rule on them, the acceptance is
-  recorded here when given, and the client is built to the drafts meanwhile. They were reconciled
+  plan 14's Phase E and P14.T35.e under Phase H, each marked drafted for the owner. **Accepted
+  with amendments** 2026-10-10 by the sign-off agent under the owner's delegation (`signoff-3.md`,
+  items 1.1–1.8); the client is built to them. They were reconciled
   with R09.T0.a's five asks (plan 14's Phase K, P14.T48.a–e), and the reconciliation is in plan
   14's Risks too ("The rendering plans' asks of the surface section"). What departs from T1's
   bullets:
@@ -8666,7 +8705,8 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     `Envelope` variant of plan 14's `VerticalStructure`, so R08.T16.a gives `TemperatureProfile` a
     matching variant. T24.d gains H₂O for its deck; H₂S is the envelope's own species.
   - _Findings for this plan._ Plan 14 tracked no sulphur. A science agent has since drafted
-    P14.T24.g (`science-r08-sulphur-co2ice.md`, 2026-10-09; for the owner).
+    P14.T24.g (`science-r08-sulphur-co2ice.md`, 2026-10-09; amended 2026-10-10, `signoff-3.md`
+    item 1.6).
     - It gives a runaway-greenhouse world a sulphuric-acid deck of four modes. On plan 14's Venus
       the deck lies at 1.34–0.04 bar with τ(550) 33, so this plan classifies it `cloudDeck` and
       R11's boundary leaves it here.
@@ -9683,13 +9723,15 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     then 7.4 × 10⁻⁶ at 451 nm: a fall by four decades, longward of cubic ZnS's band gap near
     340 nm, where Debenham 1984 measured the crystal's n from 405 nm (Appl. Opt. 23, 2238), so it
     must transmit. At that k a 1 µm grain's ω is about 0.6 at 380 nm, and a ZnS cloud draws
-    yellow, not white. Kept as ruling 5 takes the compilation; the lean, for the owner: hold k
-    from 451 nm below (`ignoreBelowUm` 0.45), or take an open primary (refractiveindex.info's
-    Debenham 1984 or Ozaki and Adachi 1993, CC0). CaTiO₃'s visible k (1.8 × 10⁻³ at 550 nm, from
-    reflectance) may share the problem, unchecked (the science check). _CaTiO₃ taken up by
-    R08.T5.i_ (2026-10-16, decision-p14-t49c-split §5.3): its sub-gap k is the Kramers–Kronig
-    transform's, which reflectance cannot see, and the file keeps it as a labelled upper bound,
-    `standIn`. ZnS's ultraviolet k stays open.
+    yellow, not white. Kept as ruling 5 takes the compilation until R08's next materials pass,
+    which holds k at its 451 nm value below 451 nm (`ignoreBelowUm` 0.45), citing Debenham 1984's
+    measured n from 405 nm as the crystal's transmission (ruled 2026-10-19, `signoff-12.md`, item
+    36). Ozaki and Adachi 1993's k is a model's tail (0.040 at 551 nm) and Debenham gives n only,
+    so neither is taken. CaTiO₃'s visible k (1.8 × 10⁻³ at 550 nm, from reflectance) may share the
+    problem, unchecked (the science check). _CaTiO₃ taken up by R08.T5.i_ (2026-10-16,
+    decision-p14-t49c-split §5.3): its sub-gap k is the Kramers–Kronig transform's, which
+    reflectance cannot see, and the file keeps it as a labelled upper bound, `standIn`. ZnS's
+    ultraviolet k is ruled (item 36) and deferred.
   - _The retrievals' real index is held._ `chromophore` (n 1.4, fixed at 700 nm; Braude et al. do
     not say how it varies elsewhere) and `ice_giant_haze` (1.4 at 800 nm, Kramers–Kronig elsewhere
     in Irwin et al.) take n constant. A Kramers–Kronig n from each k spectrum is for a later task.
@@ -10054,6 +10096,8 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     "while any … cloud or haze … is drawn with estimated optical data". Built as ruling 3 and the
     brief ask, as liquid NH₃'s derived file already is. Lean: keep it; if the label should stand,
     the guide or ruling 5's definition of `derived` is the owner's to amend, not the code's.
+    _Ruled 2026-10-19 (`signoff-12.md`, item 38): kept; liquid C₂H₆ adds none, its k = 0 being no
+    stand-in for a clear liquid; the Δv = 6 overtone stays deferred._
   - _Liquid NH₃'s 654 nm value._ It may be the liquid's counterpart of the gas's 6475 Å band (the
     science check, medium confidence on the position). Drawing k there (at most 2.8 × 10⁻⁷) would
     depart from ruling 5; k = 0 stays.
@@ -10062,7 +10106,8 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     a spread for P14.T49.h's bin 15 to know of (low confidence).
   - _Practical salinity in the guide._ The UX guide's composition words name mass and mole
     fractions only; "practical salinity 35" follows the literature's name, and its unit-free form
-    follows the guide's dimensionless figures. For the owner to add to the guide.
+    follows the guide's dimensionless figures. For the owner to add to the guide. _Added
+    2026-10-19 (`signoff-12.md`, item 37)._
 - **Deviations in T5.i, as built** (2026-10-16; decision-p14-t49c-split §5.3;
   `view/atmosphere/materials/` (`ammonia-ice.json`, `calcium-titanate.json`, `sodium-sulphide.json`
   and `materials.test.ts`), `view/atmosphere/sizeDistributionStop.test.ts`,
@@ -10442,12 +10487,15 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
   - _A named analogue's phase word_ (the UX review). With SO₂, N₂O, Kr and Xe liquid alone, a solid
     mode of one now reads `no solid SO2 on file: liquid SO2 at 198 K stands in, a named analogue`
     (`resolveMaterial`'s template, unchanged), where the guide names a molecular ice `SO2 ice`.
-    Liquid C₂H₆ already reached the template; changing it is outside T5.k's brief.
+    Liquid C₂H₆ already reached the template; changing it is outside T5.k's brief. _Ruled
+    2026-10-19 (`signoff-12.md`, item 39): `no SO2 ice on file`; R08.T10.a builds it._
   - _The stand-in label's cause_ (the UX review; the owner's). The guide's row for the
     `atmosphereApproximate` label reads "because no measurement exists or this console does not know
     the substance"; CO's and H₂S's ruled reason is that their measurements contradict themselves, as
     H₂S ice's already is. And liquid O₂, `derived` as ruled, raises no label, though its k is a gas
-    pair's 203 K cross-sections carried to the liquid and its A and B bands are not drawn.
+    pair's 203 K cross-sections carried to the liquid and its A and B bands are not drawn. _Ruled
+    2026-10-19 (`signoff-12.md`, item 38): the guide's cause gains "the measurements disagree";
+    liquid O₂'s colour raises the label, its file staying `derived`; R08.T10.a builds it._
 - **Deviations in T12.a, as built** (2026-10-09; `crates/hyperion-fit/src/atmosphere/`, the
   `atmosphere-reference` command in `cli.rs`, `RunFitError` in `lib.rs`).
   - _Signatures._ `trace_reference` returns `Result<ReferenceRadiances, TraceReferenceError>`: the
@@ -11440,11 +11488,11 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     both, in its "CO₂ and CH₄" and "H₂ and He" rows, applied to the brainstorm by its sign-off
     (`signoff-brainstorm.md`), whose "Atmosphere" now takes CH₄ from He et al. 2021 and H₂'s King
     factor from Raj, Hamaguchi and Witek 2018.
-  - **Design note 4's dense-gas factor** (a finding for the owner; nothing computed uses it). The
-    note gives "about 1.06 at Venus's surface". A science check of NIST's CO₂ (Span–Wagner) at
-    737 K and 9.2 MPa gives Z = 1.0057 and ρk_BTκ_T = 0.985, about 1.025 with the Lorentz–Lorenz
-    local field (medium confidence). It remains a recorded omission, and the figure is the
-    owner's to correct.
+  - **Design note 4's dense-gas factor** (nothing computed uses it). The note gives "about 1.06 at
+    Venus's surface". A science check of NIST's CO₂ (Span–Wagner) at 737 K and 9.2 MPa gives
+    Z = 1.0057 and ρk_BTκ_T = 0.985, about 1.025 with the Lorentz–Lorenz local field (medium
+    confidence). It remains a recorded omission. _Corrected since: Design note 4 gives about 1.025
+    (lines 866–868)._
   - **`BOLTZMANN_J_PER_K`** lives in `rayleigh.ts`, because R08.T3.a imports it from there (main,
     2026-10-09). `lib/system/constants.ts`, which R08.T3.d made for G, is its natural home once
     both tasks land.
@@ -11799,8 +11847,8 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
   - _Not read_ (closed; their numbers come through the theses): Bridge and Buckingham 1966,
     Bogaard et al. 1978, Bogaard, Buckingham and Ritchie 1982, Monan et al. 1982, Baas and van den
     Hout 1979 and Haverkort et al. 1983.
-  - _Drafted for the owner:_ a row of the roadmap's "Brainstorm corrections" table (NH₃'s "3%"
-    in the brainstorm's "Atmosphere"; `README.md`).
+  - _Signed off 2026-10-19_ (`signoff-12.md`, item 35): the roadmap's row for NH₃'s "3%" in the
+    brainstorm's "Atmosphere", applied to the brainstorm.
 - **Deviations in T3.b's second follow-up, as built** (2026-10-10, lane r08-gases-2;
   `src/tools/materials.ts`, `materials/ammonium-hydrosulphide.json` and their tests). It builds
   `science-r08-gases-2.md` §2, NH₄Cl's optical inputs from primary data.
@@ -13415,7 +13463,8 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
   - _HCl's absorber answer is in no task entry._ science-r08-unowned-absorbers §2.3 item 4 rules
     HCl the overtone ladder's stated none, and P14.T49.b's record expects it (T4.c's reason), but
     no entry of this plan carries it: T4.c's lists no HCl, and T4.e's third reason is for atoms and
-    ions. A docs pass adds it to T4.c's entry, so that the flag can turn on at P14.T54.a.
+    ions. A docs pass adds it to T4.c's entry, so that the flag can turn on at P14.T54.a. Answered
+    by R08.T4.h (decision-r08-t4ef-storage §4).
   - _Zn's measured dispersion._ Goebel, Hohm and Maroulis 1996 measured zinc vapour's
     refractivity, the source of the table's measured 38.8 ± 0.8 a.u.; not read (closed). A
     `dispersion` row from it would be preferred under decision-composition §1.9.

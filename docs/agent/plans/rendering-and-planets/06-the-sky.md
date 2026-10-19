@@ -2982,8 +2982,9 @@ src/renderer/src/displays/view`, `just smart-ci`.
   `SkyModel.stale`), the `STARS` line's limit, `EYE` or `CAM`, is stale in the guide's form:
   muted, with its trailing `S`, after its unit and before its kind, in a field of its own sized
   for its widest reading with the mark (`V -20.2 mag S`, a camera's limit at `EV100 42` and 120°;
-  corrected 2026-10-13 from `V 11.0 mag S`). The edge's field and every note are unchanged. Build
-  to sign-off queue item 15's draft of the `EYE`, `CAM` row.
+  corrected 2026-10-13 from `V 11.0 mag S`). The edge's field and every note are unchanged. Built
+  to sign-off queue item 15's draft of the `EYE`, `CAM` row, signed off 2026-10-19
+  (`signoff-12.md`, item 15: adopted) and applied to the guide.
   - **Tests:** with the link down, the primary's line and an instrument's line each read the
     limit muted with its `S`, for an eye and for a camera; `STARS: PENDING` takes none; the
     mark clears when the link returns; the line's breaks do not move when it goes stale.
@@ -3894,9 +3895,10 @@ cube, peak, faceSizePx, path }`, and `bakeSkyCubeOnCpu`, `releaseBakedCube`, `pa
   (`decision-r06-camera-budget.md` §10.2), built to sign-off queue item 15's draft of the `EYE`,
   `CAM` row as the desktop amended it ("…, `STARS V 10.1 mag S CAM`, in a field sized for
   `V -20.2 mag S` (a camera's limit at `EV100 42` and 120°), and the sky stays drawn;
-  `STARS: PENDING` takes no mark") and the "Views" clause as drafted. Both stay out of the guide
-  until signed off. Client only: no protocol, golden or generator change. The lane's three
-  questions were ruled by the desktop on issue #8 the same day, and the rulings are built here.
+  `STARS: PENDING` takes no mark") and the "Views" clause as drafted. Both were signed off
+  2026-10-19 (`signoff-12.md`, item 15: adopted) and applied to the guide. Client only: no
+  protocol, golden or generator change. The lane's three questions were ruled by the desktop on
+  issue #8 the same day, and the rulings are built here.
   - **The `fields` array** (Q1, ruled as built). `LabelLine.field` becomes
     `fields?: ReadonlyArray<LabelField>`, in the reading's order, and `LabelField.text` may be the
     start of a run before a space. `ViewLabelBlock`'s `unbrokenRuns` and `readingParts` take the
@@ -4240,7 +4242,7 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   choose; the ask stays open in the roadmap's between-plans table (R06 owner, R08 asking).
 - **Deviations in T1, as built.** None: the R06 row of galaxy plan 04's reserved kinds and plan 06's
   "Asked by rendering plan R06" heading with A1–A4 are drafted for the galaxy plans' owner
-  (`fb5b47c`).
+  (`fb5b47c`). _Accepted 2026-10-19 (`signoff-12.md`, item 29), A2 amended._
 - **Deviations in T6.a, as built.** `generate_cell_where` draws each candidate's mass through
   `placement::record::candidate_mass` (factored out of `SystemRecord::of_candidate` with the same
   calls) and evaluates a kept candidate whole, drawing its mass word a second time. The 500-cell

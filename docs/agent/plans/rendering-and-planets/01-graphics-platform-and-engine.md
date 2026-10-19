@@ -1682,7 +1682,7 @@ break headless Ozone (it already segfaults without `offscreen`) and so block unr
 `view/engine/`, `src/smoke/` or a catalogued shader runs it as part of its own gate, and the
 `validate` skill's check plan gains it for those paths. Measure the recipe's wall time, build
 included, over ten runs, and record it with the pass count; after one Electron upgrade with no
-harness failure, propose moving it into `ci` to the owner.
+harness failure, propose moving it into `ci` to the sign-off queue (`signoff-12.md`, item 31).
 
 - Acceptance: the recorded figures; the `validate` skill's routing names the recipe for those paths.
 
@@ -1917,9 +1917,9 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
 - _Closed by Design notes 23 and 24 (2026-09-30): no Babylon code remains._ **Babylon's unawaited effect preparation** means a WGSL compile error may also surface only as an
   unhandled rejection; the backstop reports it, and `onEffectErrorObservable` covers the ordinary
   case. If an upgrade awaits it, layer (c) becomes redundant, not wrong.
-- **The safe mode draws nothing.** A reading forced by the probe (Design note 5); if the owner wants
-  a view in safe mode, the only candidate is a Canvas 2D wireframe, a second renderer the WebGPU
-  ruling declined, so it is not planned.
+- **The safe mode draws nothing.** A reading forced by the probe (Design note 5); a view in safe
+  mode would need a Canvas 2D wireframe, a second renderer the WebGPU ruling declined, so none is
+  planned (ruled 2026-10-19, `signoff-12.md`, item 32).
 - **The harness stays outside `just ci`** (T9.e), so it guards only the tasks that run it; the
   `validate` routing is what keeps it from rotting. Headless Ozone is the fragile part: an Electron
   upgrade that breaks it falls back to a hidden X11 window, which needs a display. SwiftShader

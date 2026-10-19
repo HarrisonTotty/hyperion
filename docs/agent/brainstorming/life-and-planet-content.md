@@ -1048,15 +1048,17 @@ Pappalardo 2016). Burning 10⁹–10¹⁰ mol of H₂ a year with oxygen gives 2
 Plan 14 has the start: a regular moon's tidal heat sets a conducting shell D = 651 ln(273 K ÷ T_s) ÷
 F thick, the moon has an ocean when that is thinner than its water layer
 (`moons::regular::has_subsurface_ocean`), and P14.T25 classes it `SubsurfaceOcean`; P14.T56.c
-(planned) gives each moon its own water, carbon and nitrogen ranks, the nitrogen boosted only where
-it formed below ammonia hydrate's 131 K, and P14.T56.d a Love number by state, whose heated branch
-the flag selects and which leaves the flag unchanged. Missing: shell thickness and ocean depth as
-outputs; the test reading T24.b's radiogenic heat beside the tidal, and the test for planets and
-rogues; T49.b's salt and ammonia eutectics in the test; whether high-pressure ice parts ocean from
-rock, ending serpentinisation and phosphorus; seafloor heat flux; and surface radiation dose, which
-makes oxidants. Until a later ruling on P14.T17.a's finding F2, a generated Europa analogue forms
-dry and has no ocean. **Lean:** populated by default, chemotrophic, with productivity from its
-water–rock supply; any cap on stage is [Whether life
+gives each moon its own water, carbon and nitrogen ranks, the nitrogen boosted only where it formed
+at or below 123 K, by which half of nitrogen is in ammonia hydrate (Lodders 2003, at 10⁻⁴ bar), and
+P14.T56.d a Love number by state, whose heated branch the flag selects and which leaves the flag
+unchanged; both are built, and come into force with generator version 23. Missing: shell
+thickness and ocean depth as outputs; the test reading T24.b's radiogenic heat beside the tidal,
+and the test for planets and rogues; T49.b's salt and ammonia eutectics in the test; whether
+high-pressure ice parts ocean from rock, ending serpentinisation and phosphorus; seafloor heat
+flux; and surface radiation dose, which makes oxidants. Until a later ruling on P14.T17.a's
+finding F2, a generated Europa analogue forms dry and has no ocean. **Lean:** populated by
+default, chemotrophic, with productivity from its water–rock supply; any cap on stage is
+[Whether life
 arises](#whether-life-arises-and-how-far-it-gets)'s ([open question 59](#open-questions)). It is
 detectable through a plume or surface deposits, otherwise only by drilling.
 
