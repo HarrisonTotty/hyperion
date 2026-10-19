@@ -25,21 +25,68 @@
 //! - **the density** is the condensed columns' (P14.T49.b): the saturated liquid's ancillary
 //!   equation for a row with a phase diagram, a stated value otherwise.
 //!
+//! A solution's record is its components' instead ([`LiquidColumns::components`]): each component
+//! a neutral species row with liquid columns of its own, mixed at the reference composition
+//! ([`LiquidColumns::reference_composition`]) or a given one by the solution's crate-private mixing
+//! model at the record's temperature (decision-p14-t49b-condensed §1.4;
+//! decision-p14-t49h-step3-composition).
+//!
+//! A lithology's silicate melt's record is its major oxides' (decision-r11-palette-liquids §1.8's
+//! "Molten silicate" row; decision-p14-t49h-step4-melts), by crate-private models of the melt at
+//! the record's temperature and one bar: the viscosity by Giordano, Russell and Dingwell 2008, or,
+//! for an alkali-poor, aluminium-rich melt, by Giordano and Russell 2007's CaO–MgO–Al₂O₃–SiO₂
+//! model; the density by Lange and Carmichael's partial molar volumes; the index and absorption
+//! R08's basaltic glass's, held; the surface tension a stated constant; no scattering. Its
+//! composition is its oxides, which are not registry rows, so it has no components.
+//!
 //! A member with no source is absent from the record, never 0 (decision-r11-palette-liquids
 //! §1.4), and the record's [`LiquidBasis`] is the least direct of its members' (§1.1).
 //!
 //! # What is built
 //!
-//! P14.T49.h's first step: the pure liquids with an R08 file (water, methane, ammonia, nitrogen,
-//! ethane and the 75 wt% sulphuric acid), with water's scattering, surface tension and viscosity.
-//! Its second: methane's, nitrogen's, ethane's, ammonia's and carbon dioxide's equations of state,
-//! scattering, surface tensions and viscosities, with methane's and ethane's viscosity continued
-//! below their triple points ([`SupercooledViscosity`]). Its later steps add the nine rows R08.T5.k
-//! gives liquid files (carbon dioxide's columns, built, join them; decision-p14-t49h-gas-index §1),
-//! the solutions' mixing rules and the melts
-//! (`docs/agent/plans/galaxy-generation/14-planetary-systems.md`, P14.T49.h's record). Until then
-//! [`liquid_properties`] answers [`ResolveLiquidError::NotALiquid`] for those, and a given
-//! composition is [`ResolveLiquidError::CompositionNotModelled`].
+//! P14.T49.h's first step: the pure liquids with an R08 file (water, methane, ammonia, nitrogen and
+//! ethane), with water's scattering, surface tension and viscosity. Its second: methane's,
+//! nitrogen's, ethane's, ammonia's and carbon dioxide's equations of state, scattering, surface
+//! tensions and viscosities, with methane's and ethane's viscosity continued below their triple
+//! points ([`SupercooledViscosity`]). Its third, the solutions: a given composition
+//! ([`Composition::Given`], decision-p14-t49h-step3-composition), decision-p14-t49b-condensed
+//! §2.5's rule for a component below its triple point, and
+//!
+//! - Titan's seas (`ch4_c2h6_n2`), an ideal mixture of liquid methane, nitrogen and ethane, with
+//!   its scattering from the mixture's density and concentration fluctuations;
+//! - the chloride and sulphate brines (`brine_nacl`, `brine_mgso4`), water's record with
+//!   Laliberté's empirical salt terms;
+//! - the perchlorate brines (`brine_naclo4`, `brine_mgclo4`), whose solutes have no rows yet, at
+//!   their stated densities with no index;
+//! - ammonia–water (`nh3_h2o`) at its eutectic composition alone;
+//! - aqueous sulphuric acid, `H2SO4`'s liquid, from 25 to 85 wt%: Myhre et al. 1998's density,
+//!   its index and absorption between Palmer and Williams's 75 and 84.5 wt% files, Vehkamäki et
+//!   al. 2002's surface tension and Williams and Long 1995's viscosity.
+//!
+//! Its fourth, the silicate melts of eleven lithologies (decision-p14-t49h-step4-melts; the rows
+//! and their oxides are `rows/melts.rs`'s): `basalt` and `lava_glass` (Alae's tholeiite),
+//! `basalt_fe`, `mars_dust` and `ferric` (Apollo 15 basalt 15597), `komatiite`, `basalt_reduced`
+//! (Mercury's G2), `granite` (G-1), `ultramafic` (pyrolite), `anorthosite` and `feldspathic` (the
+//! Apollo 16 soil). A melt takes Giordano and Russell 2007's viscosity where its oxides hold
+//! `Al₂O₃` of at least 15 wt%, `Na₂O` + K₂O of at most 1 wt% and at most 3 wt% of the oxides that
+//! model's mapping drops (all but `SiO₂`, `Al₂O₃`, `MgO`, `CaO`, `FeO`, `Fe₂O₃` and `MnO`), today
+//! `anorthosite` and `feldspathic`; any other melt Giordano, Russell and Dingwell 2008's; a melt
+//! that meets the first two conditions but not the third has no viscosity until a ruling (§2.3).
+//! Every melt record is `StandIn`, from its solidus with no upper end. The lithologies with no melt
+//! record (the Ca–Al residue, Fe–Ni metal, the phyllosilicate rock, the chondrites, the cometary
+//! refractory) and the minerals that decompose or melt to a salt answer
+//! [`ResolveLiquidError::NotALiquid`], each for its reason in `rows/melts.rs`. Molten sulphur
+//! (`S8`, Io's flows) is left out: its liquid density waits for P14.T49.b's last piece.
+//!
+//! Its step 2b, the nine rows R08.T5.k gives liquid files (decision-p14-t49h-gas-index §1.2):
+//! carbon dioxide's index joins the columns its second step built, and oxygen, argon, krypton,
+//! xenon, nitrous oxide, carbon monoxide, sulphur dioxide and hydrogen sulphide take their files'
+//! index, carried; oxygen its file's collision-induced absorption; all but sulphur dioxide, whose
+//! depolarisation is unread, their reference equations of state's scattering, the atoms with their
+//! interaction anisotropy alone; and Mulero et al.'s surface tensions. Their viscosity is absent,
+//! none being ruled. Argon's, krypton's and xenon's measured indices keep their basis only over the
+//! temperatures where Sinnock and Smith's warmer tables check the carry. Molten sulphur still waits
+//! for P14.T49.b's last piece.
 //!
 //! Generator version 22 publishes none of it: nothing on the record reads these columns until
 //! P14.T54.a resolves the palette (decision-bump-plan-after-22 §1.2).
@@ -48,7 +95,7 @@ use std::error::Error;
 use std::fmt;
 
 use hyperion_surface::field::{LIQUID_BINS, LiquidBasis, LiquidProperties};
-use hyperion_surface::substance_key::SubstanceKey;
+use hyperion_surface::substance_key::{SubstanceKey, SubstanceKeyForm};
 
 use super::condensed::{CondensedPhase, GrainDensity};
 use super::diagram::{AVOGADRO_PER_MOL, DensityEquation, DensityForm, PhaseDiagram};
@@ -58,6 +105,16 @@ use super::{Source, Substance, SubstanceId};
 use crate::math;
 use crate::units::consts::BOLTZMANN_CONSTANT;
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
+
+mod melt;
+mod solution;
+
+pub(crate) use melt::{HeldOptics, Oxide, SilicateMelt};
+pub(crate) use solution::{
+    AcidOptics, AqueousAcid, AqueousElectrolyte, IdealLiquidMixing, LaliberteCooperDensity,
+    LaliberteViscosity, MixingModel, MyhreDensity, RowlessSolute, SoluteAbsorption,
+    SolutionColumns, VehkamakiSurfaceTension, WilliamsLongViscosity,
+};
 
 /// The edges of the liquid bins, nm: 380 + 25.33 k for k = 0 to 15, R08's bake bins (Design note
 /// 5), whose centres are `hyperion_surface::field::LIQUID_BIN_CENTRES_NM`.
@@ -104,7 +161,8 @@ impl LiquidOptics {
     }
 
     /// The temperature the file's constants were measured or derived at: its reduction's, which
-    /// its `temperatureK` label rounds to the kelvin.
+    /// its `temperatureK` label rounds to the kelvin for R08.T5.g's and T5.h's liquids and states
+    /// to 0.01 K for T5.k's nine (decision-p14-t49h-gas-index §2.3).
     #[must_use]
     pub const fn state(&self) -> Kelvin {
         self.state
@@ -191,10 +249,10 @@ impl LiquidScattering {
         density: KilogramsPerCubicMetre,
         temperature: Kelvin,
     ) -> f64 {
-        let x = self.anisotropy_ratio;
-        let s0 = self.structure_factor(density, temperature);
-        let vertical = (x / 15.0) / (s0 + 4.0 * x / 45.0);
-        2.0 * vertical / (1.0 + vertical)
+        depolarisation_from_structure(
+            self.anisotropy_ratio,
+            self.structure_factor(density, temperature),
+        )
     }
 
     /// The basis of the equation of state and the ratio.
@@ -232,6 +290,17 @@ impl LiquidScattering {
             self.basis
         }
     }
+}
+
+/// The depolarisation ratio δ of natural light scattered at 90° by a liquid of anisotropy ratio
+/// `anisotropy_ratio` x and isotropic structure factor `structure_factor` S, dimensionless: `ρ_u` =
+/// 2`ρ_v` ÷ (1 + `ρ_v`), `ρ_v` = (x ÷ 15) ÷ (S + 4x ÷ 45) ([`LiquidScattering`]; a mixture's S
+/// counts its concentration fluctuations too).
+#[must_use]
+fn depolarisation_from_structure(anisotropy_ratio: f64, structure_factor: f64) -> f64 {
+    let x = anisotropy_ratio;
+    let vertical = (x / 15.0) / (structure_factor + 4.0 * x / 45.0);
+    2.0 * vertical / (1.0 + vertical)
 }
 
 /// The limit on q ξ beyond which a liquid's Einstein–Smoluchowski–Cabannes scattering is
@@ -923,6 +992,34 @@ impl SupercooledViscosity {
     }
 }
 
+/// What a row's liquid is made of, and so which compositions its record resolves at.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum LiquidConstitution {
+    /// A pure liquid, the row's own species, its columns its own: its one component is itself
+    /// (`components`, the row alone), and its reference composition itself at a mole fraction of
+    /// 1 (`reference`).
+    Pure {
+        /// The row alone.
+        components: &'static [SubstanceId],
+        /// The row at 1.
+        reference: &'static [(SubstanceId, f64)],
+    },
+    /// A solution of registry rows, its record made from its components' compositions by its
+    /// mixing model; its own optics, scattering and transport columns are `None`.
+    Solution(SolutionColumns),
+    /// A solution whose solute has no registry row yet, so that only its reference resolves, from
+    /// its own columns, and it has no components until the row is appended
+    /// (decision-p14-t49h-step3-composition §1.3 and §6): `brine_naclo4` and `brine_mgclo4`, with
+    /// their solutes' constants.
+    AwaitingSolute(&'static RowlessSolute),
+    /// A lithology's silicate melt, its record made from the row's major oxides by its own models
+    /// at the record's temperature (decision-p14-t49h-step4-melts): its composition is its oxides,
+    /// which are not registry rows, so it has no components and its given composition is not
+    /// modelled (decision-p14-t49h-step3-composition §2.3); its own optics, scattering and
+    /// transport columns are `None`.
+    Melt(&'static SilicateMelt),
+}
+
 /// A row's liquid columns (decision-r11-palette-liquids §4), each `None` where not modelled.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LiquidColumns {
@@ -931,10 +1028,58 @@ pub struct LiquidColumns {
     pub(crate) surface_tension: Option<SurfaceTensionEquation>,
     pub(crate) viscosity: Option<ViscosityCorrelation>,
     pub(crate) supercooled_viscosity: Option<SupercooledViscosity>,
+    pub(crate) constitution: LiquidConstitution,
     pub(crate) sources: &'static [Source],
 }
 
 impl LiquidColumns {
+    /// The components a [`Composition::Given`] may name, in registry order: a pure liquid's is
+    /// itself, a solution's its model's (the aqueous acid's, water and `H2SO4` itself); empty
+    /// where a given composition is not modelled (`brine_naclo4` and `brine_mgclo4` until their
+    /// solutes have rows, and the melts) (decision-p14-t49h-step3-composition §2.2).
+    ///
+    /// # Examples
+    ///
+    /// Titan's seas take methane, nitrogen and ethane, in the registry's order:
+    ///
+    /// ```
+    /// use hyperion_sim::substance::by_key;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let titan = by_key("ch4_c2h6_n2").ok_or("the registry holds Titan's seas")?;
+    /// let columns = titan.substance().liquid().ok_or("Titan's seas are a liquid")?;
+    /// let rows: Vec<_> = ["CH4", "N2", "C2H6"].into_iter().filter_map(by_key).collect();
+    /// assert_eq!(columns.components(), rows.as_slice());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub const fn components(&self) -> &'static [SubstanceId] {
+        match &self.constitution {
+            LiquidConstitution::Pure { components, .. } => components,
+            LiquidConstitution::Solution(solution) => solution.components,
+            LiquidConstitution::AwaitingSolute(_) | LiquidConstitution::Melt(_) => &[],
+        }
+    }
+
+    /// The reference composition by mole fraction, in registry order: a pure liquid's is itself
+    /// at 1, a solution's its stated reference (decision-p14-t49b-condensed §1.4 and §2.6);
+    /// `None` where [`components`](Self::components) is empty.
+    ///
+    /// [`Composition::Reference`] resolves as this composition given, to the bit.
+    #[must_use]
+    pub const fn reference_composition(&self) -> Option<LiquidComposition<'static>> {
+        match &self.constitution {
+            LiquidConstitution::Pure { reference, .. } => {
+                Some(LiquidComposition::of_reference(reference))
+            }
+            LiquidConstitution::Solution(solution) => {
+                Some(LiquidComposition::of_reference(solution.reference))
+            }
+            LiquidConstitution::AwaitingSolute(_) | LiquidConstitution::Melt(_) => None,
+        }
+    }
+
     /// The index and absorption, from the row's R08 file.
     #[must_use]
     pub const fn optics(&self) -> Option<&LiquidOptics> {
@@ -985,16 +1130,21 @@ impl Substance {
     }
 }
 
-/// A solution's composition by mole fraction, each component a row (decision-p14-t49b-condensed
-/// §1.4: the composition's invariant is its moles, and the mixing rules take mole fractions).
+/// A liquid's composition by mole fraction, each component a registry row that is a neutral
+/// species named by a formula key (decision-p14-t49b-condensed §1.4: the composition's invariant
+/// is its moles, and the mixing rules take mole fractions; decision-p14-t49h-step3-composition
+/// §2.1: a solution, lithology or organic row, an ion or the electron is never a component).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LiquidComposition<'a> {
     mole_fractions: &'a [(SubstanceId, f64)],
 }
 
 impl<'a> LiquidComposition<'a> {
-    /// The composition of `mole_fractions`: one or more components, each once, each fraction in
-    /// (0, 1], summing to 1 within 10⁻⁹.
+    /// The composition of `mole_fractions`: one or more components, each a neutral species with
+    /// a formula key, each once, each fraction in (0, 1], summing to 1 within 10⁻⁹.
+    ///
+    /// Each component is checked in the given order, its species first, then its fraction, then
+    /// whether it was named before.
     ///
     /// # Errors
     ///
@@ -1007,6 +1157,10 @@ impl<'a> LiquidComposition<'a> {
         }
         let mut total = 0.0;
         for (k, &(id, x)) in mole_fractions.iter().enumerate() {
+            let row = id.substance();
+            if row.key().form() != SubstanceKeyForm::Formula || row.charge() != 0 {
+                return Err(BuildLiquidCompositionError::NotASpecies { component: id });
+            }
             if x.is_nan() || x <= 0.0 || x > 1.0 {
                 return Err(BuildLiquidCompositionError::FractionOutOfRange { component: id });
             }
@@ -1019,6 +1173,14 @@ impl<'a> LiquidComposition<'a> {
             return Err(BuildLiquidCompositionError::NotWhole { total });
         }
         Ok(Self { mole_fractions })
+    }
+
+    /// A row's reference composition, `mole_fractions` as its liquid columns state it, unchecked
+    /// here: `each_liquid_s_components_are_its_rows` holds that [`new`](Self::new) accepts each
+    /// unchanged.
+    #[must_use]
+    pub(crate) const fn of_reference(mole_fractions: &'a [(SubstanceId, f64)]) -> Self {
+        Self { mole_fractions }
     }
 
     /// The components and their mole fractions, in the given order.
@@ -1048,6 +1210,12 @@ pub enum BuildLiquidCompositionError {
         /// Their sum.
         total: f64,
     },
+    /// A component is not a neutral species named by a formula key: a solution, lithology,
+    /// organic or assemblage row (a name key), an ion, or the electron.
+    NotASpecies {
+        /// The component.
+        component: SubstanceId,
+    },
 }
 
 impl fmt::Display for BuildLiquidCompositionError {
@@ -1063,6 +1231,11 @@ impl fmt::Display for BuildLiquidCompositionError {
                 write!(f, "{} is named twice", component.substance().key())
             }
             Self::NotWhole { total } => write!(f, "the mole fractions sum to {total}, not 1"),
+            Self::NotASpecies { component } => write!(
+                f,
+                "{} is not a neutral species, so not a liquid's component",
+                component.substance().key()
+            ),
         }
     }
 }
@@ -1076,6 +1249,11 @@ pub enum Composition<'a> {
     /// (decision-r11-palette-liquids §1.7; decision-p14-t49b-condensed §1.4 and §2.6).
     Reference,
     /// A given one, by mole fraction, as P14.T51.a's condensate entry will carry it.
+    ///
+    /// - **A solution's** may name any of its components ([`LiquidColumns::components`]), each
+    ///   at most once; a component it leaves out is absent from the mixture.
+    /// - **A pure liquid's** names the row itself, at 1, and resolves as its reference.
+    /// - Anything else names a component the row's model does not carry, and is refused.
     Given(LiquidComposition<'a>),
 }
 
@@ -1112,9 +1290,10 @@ pub enum ResolveLiquidError {
         /// The member.
         member: LiquidMember,
     },
-    /// The temperature lies outside the row's modelled liquid range, from its first melt to its
-    /// critical point: P14.T54.a clamps a record's temperature into it first
-    /// (decision-r11-palette-liquids §1.7; decision-p14-t49b-condensed §2).
+    /// The temperature lies outside the row's modelled liquid range, from its first melt to below
+    /// `below`: P14.T54.a clamps a record's temperature into it first
+    /// (decision-r11-palette-liquids §1.7; decision-p14-t49b-condensed §2;
+    /// decision-p14-t49h-step3-composition §3).
     OutOfRange {
         /// The row.
         key: SubstanceKey,
@@ -1122,14 +1301,43 @@ pub enum ResolveLiquidError {
         temperature: Kelvin,
         /// The range's lowest temperature, the row's first melt.
         lowest: Kelvin,
-        /// The temperature the range ends below, its critical point, or `None` where the row
-        /// states none.
+        /// The temperature the range ends below: the row's critical point; for a solution, the
+        /// lowest critical point among the components the composition holds; or `None` where
+        /// none states one (a silicate melt's, whose range has no upper end).
         below: Option<Kelvin>,
     },
-    /// A composition was given, and solutions' mixing rules are not yet modelled.
+    /// A given composition is not modelled for the row, whose
+    /// [`components`](LiquidColumns::components) are empty: a melt's, whose composition is its
+    /// oxides, or a solution's whose components are not all registry rows (`brine_naclo4` and
+    /// `brine_mgclo4`, whose perchlorate solutes have none yet).
     CompositionNotModelled {
         /// The row.
         key: SubstanceKey,
+    },
+    /// A given component is not one the row's model carries
+    /// ([`LiquidColumns::components`]): for a pure liquid, any row but itself.
+    ComponentNotModelled {
+        /// The row.
+        key: SubstanceKey,
+        /// The component named.
+        component: SubstanceKey,
+    },
+    /// A given component's mole fraction lies outside the range the row's model evaluates,
+    /// `lowest` to `highest` inclusive (its source's range, or saturation), by more than 10⁻⁹, the
+    /// tolerance a composition's sum is held to: a brine's salt above its density model's highest
+    /// fraction, the aqueous acid outside 25–85 wt%, or `nh3_h2o` at any composition but its
+    /// reference, where `lowest` and `highest` are both the reference's fraction.
+    CompositionOutOfRange {
+        /// The row.
+        key: SubstanceKey,
+        /// The component.
+        component: SubstanceKey,
+        /// Its mole fraction, dimensionless.
+        mole_fraction: f64,
+        /// The lowest mole fraction the model evaluates.
+        lowest: f64,
+        /// The highest mole fraction the model evaluates.
+        highest: f64,
     },
 }
 
@@ -1150,6 +1358,23 @@ impl fmt::Display for ResolveLiquidError {
             Self::CompositionNotModelled { key } => {
                 write!(f, "{key}'s liquid at a given composition is not modelled")
             }
+            Self::ComponentNotModelled { key, component } => {
+                write!(
+                    f,
+                    "{key}'s liquid does not model {component} as a component"
+                )
+            }
+            Self::CompositionOutOfRange {
+                key,
+                component,
+                mole_fraction,
+                lowest,
+                highest,
+            } => write!(
+                f,
+                "{component}'s mole fraction {mole_fraction} in {key}'s liquid lies outside \
+                 {lowest} to {highest}"
+            ),
         }
     }
 }
@@ -1357,6 +1582,8 @@ pub fn pure_liquid_scattering_per_m(
 /// The liquid's record for row `id` at `temperature` and `composition`
 /// (decision-r11-palette-liquids §1.7 and §4), for P14.T54.a's palette.
 ///
+/// For a pure liquid:
+///
 /// - **The temperature** must lie in the row's liquid range, from its first melt (its
 ///   condensed columns' transition, decision-p14-t49b-condensed §2) to below its critical point;
 ///   P14.T54.a clamps a body's temperature into it first.
@@ -1369,13 +1596,92 @@ pub fn pure_liquid_scattering_per_m(
 ///   correlations at the record's state. Each is absent where the row has no source, and the
 ///   surface tension where its correlation gives none.
 /// - **The basis** is the least direct of the members'.
+/// - **A given composition** must be the row itself at 1, and resolves as the reference.
+///
+/// For a solution, at its reference composition or a given one that names any of its components
+/// ([`LiquidColumns::components`]):
+///
+/// - **The temperature** must lie from the solution's first melt to below the lowest critical
+///   point among the components the composition holds (decision-p14-t49h-step3-composition §3).
+/// - **Each component** is its own record at the temperature, or, below its triple point,
+///   decision-p14-t49b-condensed §2.5's continuation: its density linear at its ancillary's
+///   triple-point slope, its index carried by Lorentz–Lorenz to that density, its `κ_T` held at its
+///   triple-point value, its viscosity its fitted Vogel–Fulcher–Tammann form
+///   ([`SupercooledViscosity`], absent where it has none) and its surface tension its correlation's
+///   form; all `Derived`.
+/// - **The members** are the solution's mixing model's of its components', summed over the model's
+///   components in registry order, each at its fraction in the composition, whatever the
+///   composition's order:
+///   - Titan's seas, an ideal mixture: its density by volume additivity, its index by
+///     Lorentz–Lorenz, its surface tension by the Macleod–Sugden parachor, its viscosity by
+///     Grunberg and Nissan, its absorption by Beer's additivity and its scattering by
+///     Einstein–Smoluchowski–Cabannes with the mixture's compressibility and an ideal-solution
+///     concentration term; a by-bin or scalar member is absent where any component present lacks
+///     it;
+///   - the chloride and sulphate brines, an aqueous electrolyte from pure water to its density
+///     model's highest salt fraction: Laliberté and Cooper 2004's density and Laliberté 2007's
+///     viscosity with water's own in place of theirs, the index by additivity of specific
+///     refraction, the absorption water's by volume fraction where the salt's transparency is
+///     cited, and no surface tension or scattering;
+///   - ammonia–water at its reference composition alone: its stated density, with the index by
+///     Lorentz–Lorenz and the surface tension by the parachor at that density, and no viscosity,
+///     absorption or scattering;
+///   - aqueous sulphuric acid, an empirical model of the whole liquid in its acid's mass fraction
+///     from 25 to 85 wt%: Myhre, Nielsen and Saastad 1998's density without its printed T⁴ column;
+///     the index by specific refraction linear in mass fraction between Palmer and Williams's 75
+///     and 84.5 wt% files at 300 K, carried by Lorentz–Lorenz to the record's density; the
+///     absorption the files' upper bounds mixed by mass, and outside 75–84.5 wt% the larger of the
+///     two held; Vehkamäki et al. 2002's surface tension, standing in for Myhre's own; Williams and
+///     Long 1995's viscosity, its mass fraction held in their 30–80 wt%; and no scattering.
+/// - **A solution whose solute has no row** (`brine_naclo4`, `brine_mgclo4`) resolves at its
+///   reference from its own columns, which hold its stated density and no index, so it is
+///   [`ResolveLiquidError::NotModelled`] for the index, from its eutectic to below water's critical
+///   point.
+/// - **The basis** is at least `Derived` (a mixing rule, and a reference composition standing in
+///   for a body's own until P14.T51.a carries one), and the least direct of the components'.
+/// - Between the solution's first melt and the liquidus of its composition, unmapped for Titan's
+///   ternary, the record stands in for the supercooled liquid at that composition
+///   (decision-p14-t49b-condensed §2.4).
+///
+/// For a lithology's silicate melt (decision-p14-t49h-step4-melts), at its reference composition
+/// alone, its major oxides:
+///
+/// - **The temperature** must lie at or above the row's first melt, its solidus, with no upper end:
+///   above its models' calibrations (2,073.15 K for the viscosity, 1,873 K for the density) each
+///   member extrapolates a continuous, bounded form.
+/// - **The viscosity** is Giordano, Russell and Dingwell 2008's model on the oxides, or, for a melt
+///   with `Al₂O₃` of at least 15 wt%, `Na₂O` + K₂O of at most 1 wt% and at most 3 wt% of other
+///   minor oxides, Giordano and Russell 2007's model of the CaO–MgO–Al₂O₃–SiO₂ melts, its iron and
+///   manganese as `MgO`: `Derived`, and absent for a melt the rule leaves to a ruling.
+/// - **The density** is Lange and Carmichael's ideal mixing of partial molar volumes, `Derived`,
+///   the compressibility neglected.
+/// - **The index and the absorption** are R08's basaltic glass's at room temperature, held, and
+///   **the surface tension** a stated constant (Walker and Mullins 1981's basaltic 0.36 N m⁻¹,
+///   Bagdassarov, Dorfman and Dingwell 2000's granitic 0.29), each `StandIn`; **the scattering** is
+///   absent.
+/// - **The basis** is `StandIn`. Between the solidus and the liquidus the record is the bulk liquid
+///   at the row's composition, not the crystal-laden residual melt.
+///
+/// [`Composition::Reference`] resolves as [`LiquidColumns::reference_composition`] given, by one
+/// path, to the bit.
 ///
 /// # Errors
 ///
-/// [`ResolveLiquidError::NotALiquid`] for a row with no liquid columns;
-/// [`ResolveLiquidError::CompositionNotModelled`] for a [`Composition::Given`], until the
-/// solutions' step; [`ResolveLiquidError::OutOfRange`] for a temperature outside the liquid range;
-/// [`ResolveLiquidError::NotModelled`] where the row's index or density is not modelled.
+/// In this order (decision-p14-t49h-step3-composition §2.3), each naming the first offence in the
+/// given composition's order:
+///
+/// 1. [`ResolveLiquidError::NotALiquid`] for a row with no liquid columns;
+/// 2. [`ResolveLiquidError::CompositionNotModelled`] for a [`Composition::Given`] to a row with
+///    no components (the perchlorate brines and the silicate melts);
+/// 3. [`ResolveLiquidError::ComponentNotModelled`] for a given component the row's model does not
+///    carry;
+/// 4. [`ResolveLiquidError::CompositionOutOfRange`] for a given mole fraction outside the model's
+///    range (none for an ideal mixture; a brine's salt above its highest fraction; the acid
+///    outside 25–85 wt%; any composition but ammonia–water's reference);
+/// 5. [`ResolveLiquidError::OutOfRange`] for a temperature outside the liquid range (for a melt,
+///    below its solidus);
+/// 6. [`ResolveLiquidError::NotModelled`] where the row's index or density, or a component's, is
+///    not modelled.
 ///
 /// # Examples
 ///
@@ -1397,6 +1703,54 @@ pub fn pure_liquid_scattering_per_m(
 /// # Ok(())
 /// # }
 /// ```
+///
+/// Titan's seas at Huygens's 93.65 K, at Ligeia Mare's composition and as a nitrogen-free
+/// methane–ethane binary, lighter without the dense dissolved nitrogen:
+///
+/// ```
+/// use hyperion_sim::substance::{Composition, LiquidComposition, by_key, liquid_properties};
+/// use hyperion_sim::units::Kelvin;
+/// use hyperion_surface::field::LiquidBasis;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let titan = by_key("ch4_c2h6_n2").ok_or("the registry holds Titan's seas")?;
+/// let t = Kelvin::new(93.65);
+/// let ligeia = liquid_properties(titan, t, Composition::Reference)?;
+/// assert!((ligeia.density_kg_m3 - 518.9).abs() < 0.05);
+/// assert_eq!(ligeia.basis, LiquidBasis::Derived);
+/// let methane = by_key("CH4").ok_or("the registry holds methane")?;
+/// let ethane = by_key("C2H6").ok_or("the registry holds ethane")?;
+/// let fractions = [(methane, 0.8), (ethane, 0.2)];
+/// let binary = Composition::Given(LiquidComposition::new(&fractions)?);
+/// let binary = liquid_properties(titan, t, binary)?;
+/// assert!(binary.density_kg_m3 < ligeia.density_kg_m3);
+/// assert!(binary.refractive_index[6] > 1.28 && binary.refractive_index[6] < 1.40);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// A 3.5 wt% chloride brine at 25 °C, sodium chloride at a mole fraction of 0.011 06, denser and
+/// more refractive than fresh water:
+///
+/// ```
+/// use hyperion_sim::substance::{Composition, LiquidComposition, by_key, liquid_properties};
+/// use hyperion_sim::units::Kelvin;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let brine = by_key("brine_nacl").ok_or("the registry holds the chloride brine")?;
+/// let water = by_key("H2O").ok_or("the registry holds water")?;
+/// let salt = by_key("NaCl").ok_or("the registry holds sodium chloride")?;
+/// let fractions = [(water, 0.988_94), (salt, 0.011_06)];
+/// let t = Kelvin::new(298.15);
+/// let sea = liquid_properties(brine, t, Composition::Given(LiquidComposition::new(&fractions)?))?;
+/// let fresh = liquid_properties(water, t, Composition::Reference)?;
+/// assert!(sea.density_kg_m3 > fresh.density_kg_m3 + 20.0);
+/// // About 0.006 more in the bin across 545 nm.
+/// let increment = sea.refractive_index[6] - fresh.refractive_index[6];
+/// assert!((increment - 0.006).abs() < 3e-4);
+/// # Ok(())
+/// # }
+/// ```
 pub fn liquid_properties(
     id: SubstanceId,
     temperature: Kelvin,
@@ -1405,16 +1759,94 @@ pub fn liquid_properties(
     let row = id.substance();
     let key = row.key();
     let columns = row.liquid().ok_or(ResolveLiquidError::NotALiquid { key })?;
-    match composition {
-        Composition::Reference => {}
-        Composition::Given(_) => return Err(ResolveLiquidError::CompositionNotModelled { key }),
+    let given = match composition {
+        Composition::Reference => None,
+        Composition::Given(given) => Some(checked_composition(key, columns, given)?),
+    };
+    match &columns.constitution {
+        LiquidConstitution::Pure { .. } | LiquidConstitution::AwaitingSolute(_) => {
+            pure_record(row, columns, temperature)
+        }
+        LiquidConstitution::Solution(solution) => {
+            let composition = given.unwrap_or(LiquidComposition::of_reference(solution.reference));
+            solution::solution_record(row, solution, composition, temperature)
+        }
+        LiquidConstitution::Melt(melt) => melt::melt_record(row, melt, temperature),
     }
+}
+
+/// `given`, checked for the row `key` with `columns` in decision-p14-t49h-step3-composition
+/// §2.3's order: the row has components, each component given is one of them, and each fraction is
+/// in its model's range. A pure liquid's `given` passing these is the row at 1
+/// ([`LiquidComposition`] names each component once and sums to 1), its reference.
+///
+/// # Errors
+///
+/// [`ResolveLiquidError::CompositionNotModelled`], [`ResolveLiquidError::ComponentNotModelled`] and
+/// [`ResolveLiquidError::CompositionOutOfRange`], each for the first offence in `given`'s order.
+fn checked_composition<'a>(
+    key: SubstanceKey,
+    columns: &LiquidColumns,
+    given: LiquidComposition<'a>,
+) -> Result<LiquidComposition<'a>, ResolveLiquidError> {
+    let components = columns.components();
+    if components.is_empty() {
+        return Err(ResolveLiquidError::CompositionNotModelled { key });
+    }
+    if let Some(&(stranger, _)) = given
+        .mole_fractions()
+        .iter()
+        .find(|(id, _)| !components.contains(id))
+    {
+        return Err(ResolveLiquidError::ComponentNotModelled {
+            key,
+            component: stranger.substance().key(),
+        });
+    }
+    if let LiquidConstitution::Solution(solution) = &columns.constitution {
+        for &(id, mole_fraction) in given.mole_fractions() {
+            let (lowest, highest) = solution.mole_fraction_range(id)?;
+            if mole_fraction < lowest - solution::MOLE_FRACTION_SLACK
+                || mole_fraction > highest + solution::MOLE_FRACTION_SLACK
+            {
+                return Err(ResolveLiquidError::CompositionOutOfRange {
+                    key,
+                    component: id.substance().key(),
+                    mole_fraction,
+                    lowest,
+                    highest,
+                });
+            }
+        }
+    }
+    Ok(given)
+}
+
+/// A liquid's record from its own columns, at `temperature` ([`liquid_properties`]): a pure
+/// liquid's, its range ending below its own critical point; or a solution's whose solute has no
+/// row, at its reference, its range ending below its solvent's (decision-p14-t49h-step3-composition
+/// §3: the brines' salts have no phase diagram), so that above it the record is
+/// [`ResolveLiquidError::OutOfRange`] before any member is [`ResolveLiquidError::NotModelled`].
+fn pure_record(
+    row: &Substance,
+    columns: &LiquidColumns,
+    temperature: Kelvin,
+) -> Result<LiquidProperties, ResolveLiquidError> {
+    let key = row.key();
     let condensed = row.condensed().ok_or(ResolveLiquidError::NotModelled {
         key,
         member: LiquidMember::Density,
     })?;
     let lowest = condensed.transition().temperature();
-    let below = row.phase_diagram().map(PhaseDiagram::critical_temperature);
+    let range_row = match &columns.constitution {
+        LiquidConstitution::AwaitingSolute(solute) => solute.solvent.substance(),
+        LiquidConstitution::Pure { .. }
+        | LiquidConstitution::Solution(_)
+        | LiquidConstitution::Melt(_) => row,
+    };
+    let below = range_row
+        .phase_diagram()
+        .map(PhaseDiagram::critical_temperature);
     let finite = temperature.value().is_finite();
     if !finite || temperature < lowest || below.is_some_and(|critical| temperature >= critical) {
         return Err(ResolveLiquidError::OutOfRange {

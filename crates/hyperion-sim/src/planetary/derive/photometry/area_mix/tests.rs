@@ -9,7 +9,6 @@ use super::*;
 use crate::planetary::chem::partition::{
     ClimateSpan, ColumnInventory, Cover, Ground, WaterCover, partition,
 };
-use crate::substance::diagram::PhaseDiagram;
 use crate::units::{KilogramsPerCubicMetre, MetresPerSecondSquared};
 
 fn id(key: &str) -> SubstanceId {
@@ -520,11 +519,13 @@ fn the_reference_earth_takes_0_294_by_its_cloud_s_calibration() {
     eprintln!("the reference Earth: A_clear {clear:.5}, A_cloud {cloud:.5}, A {earth:.6}");
 }
 
-/// A solution without a record of its own takes its solvent's: Titan's seas, `ch4_c2h6_n2`, take
-/// methane's record at the temperature their condensate lies at; a liquid without a record, a
-/// 10-bar carbon dioxide world's sea, takes `r_d` at liquid nitrogen's 550 nm index; each labelled.
+/// A liquid takes its own record where it has one, unlabelled, at the temperature its condensate
+/// lies at: Titan's seas, `ch4_c2h6_n2` (P14.T49.h step 3), and a 10-bar carbon dioxide world's
+/// sea (step 2b). A solution without one takes its solvent's, labelled; a perchlorate brine, which
+/// has no index yet, is one. A liquid without a record takes `r_d` at liquid nitrogen's 550 nm
+/// index, labelled.
 #[test]
-fn a_solution_takes_its_solvent_s_record_and_an_unrecorded_liquid_nitrogen_s_index() {
+fn a_solution_takes_its_own_record_or_its_solvent_s_and_an_unrecorded_liquid_nitrogen_s_index() {
     let sun = HostShade::sun();
     let titan = partitioned(
         (89.7, 93.65, 93.65),
@@ -552,10 +553,17 @@ fn a_solution_takes_its_solvent_s_record_and_an_unrecorded_liquid_nitrogen_s_ind
         .entry(id("ch4_c2h6_n2"), CondensatePhase::Liquid)
         .unwrap();
     let solved = liquid_entry_bond(seas, &titan, &sun.bins);
-    assert_eq!(solved.stand_in, Some(StandIn::SolventForASolution));
+    assert_eq!(solved.stand_in, None);
     let lies_at = titan.condensate(id("CH4")).unwrap().lies_at();
-    let methane = liquid_record(id("CH4"), lies_at).in_range().unwrap();
-    assert_same_bits(solved.bond, liquid_bond(&methane, &sun.bins));
+    let own = liquid_record(id("ch4_c2h6_n2"), lies_at)
+        .in_range()
+        .unwrap();
+    assert_same_bits(solved.bond, liquid_bond(&own, &sun.bins));
+    // The solvent's record remains the stand-in for a solution without one of its own.
+    assert!(matches!(
+        liquid_record(id("brine_naclo4"), kelvin(250.0)),
+        LiquidRecord::Unrecorded
+    ));
     let sea = partitioned(
         (225.0, 250.0, 265.0),
         vec![(id("CO2"), Pascals::new(1e6))],
@@ -568,21 +576,28 @@ fn a_solution_takes_its_solvent_s_record_and_an_unrecorded_liquid_nitrogen_s_ind
         state: SurfaceState::Temperate,
         water,
     });
+    // Liquid CO2 has a record of its own since P14.T49.h step 2b, R08.T5.k's file.
     let carbon_dioxide = published.entry(id("CO2"), CondensatePhase::Liquid).unwrap();
-    let stood = liquid_entry_bond(carbon_dioxide, &sea, &sun.bins);
-    assert_eq!(stood.stand_in, Some(StandIn::IndexForAnUnrecordedLiquid));
-    assert!((0.04..0.05).contains(&stood.bond), "{}", stood.bond);
+    let own_sea = liquid_entry_bond(carbon_dioxide, &sea, &sun.bins);
+    assert_eq!(own_sea.stand_in, None);
+    let lies_at = sea.condensate(id("CO2")).unwrap().lies_at();
+    let record = liquid_record(id("CO2"), lies_at).in_range().unwrap();
+    assert_same_bits(own_sea.bond, liquid_bond(&record, &sun.bins));
+    // A liquid without a record takes liquid nitrogen's index at its normal boiling point.
+    let stood = unrecorded_liquid_bond();
+    assert!((0.04..0.05).contains(&stood), "{stood}");
     let boiling = nitrogen_normal_boiling_point();
     assert!((boiling.value() - 77.355).abs() < 0.01, "{boiling:?}");
     let nitrogen = liquid_record(id("N2"), boiling).in_range().unwrap();
     let index = nitrogen.refractive_index_at(STAND_IN_INDEX_WAVELENGTH_NM);
-    assert_same_bits(stood.bond, diffuse_fresnel_reflectance(index));
+    assert_same_bits(stood, diffuse_fresnel_reflectance(index));
     eprintln!(
-        "Titan's seas by methane's record: {:.5}; a CO2 sea by nitrogen's index {index:.5} at its \
-         normal boiling point on the registry's curve, {:.4} K: {:.5}",
+        "Titan's seas by their own record: {:.5}; a CO2 sea by its own: {:.5}; a liquid without a \
+         record by nitrogen's index {index:.5} at its normal boiling point on the registry's \
+         curve, {:.4} K: {stood:.5}",
         solved.bond,
+        own_sea.bond,
         boiling.value(),
-        stood.bond
     );
 }
 
@@ -619,7 +634,12 @@ fn a_liquid_s_record_is_held_into_its_range_by_name() {
         let nan = liquid_record(id(key), kelvin(f64::NAN));
         assert!(matches!(nan, LiquidRecord::AtFirstMelt(_)), "{key}");
         same(&nan, &at_lowest);
-        let critical = row.phase_diagram().map(PhaseDiagram::critical_temperature);
+        // The range's upper bound as the record states it: the row's critical point, or for a
+        // solution (the aqueous acid, P14.T49.h step 3) its components' lowest.
+        let critical = match record(key, f64::INFINITY) {
+            Err(ResolveLiquidError::OutOfRange { below, .. }) => below,
+            other => panic!("{key} at +∞ K is out of its range: {other:?}"),
+        };
         if let Some(critical) = critical {
             let near = record(key, critical.value() * (1.0 - 1e-6)).unwrap();
             for above in [critical.value(), critical.value() + 50.0, f64::INFINITY] {
@@ -640,7 +660,12 @@ fn a_liquid_s_record_is_held_into_its_range_by_name() {
     eprintln!("liquids with a record and no critical point: {beyond_no_critical_point}");
     let inside = record("H2O", 288.0).unwrap();
     same(&liquid_record(id("H2O"), kelvin(288.0)), &inside);
-    for (key, t) in [("CO2", 250.0), ("basalt", 1_500.0), ("CO2", f64::NAN)] {
+    // Rows with no liquid record (P14.T49.h's melts leave these out).
+    for (key, t) in [
+        ("ca_al_residue", 1_500.0),
+        ("iron_nickel", 2_000.0),
+        ("ca_al_residue", f64::NAN),
+    ] {
         let none = liquid_record(id(key), kelvin(t));
         assert!(matches!(none, LiquidRecord::Unrecorded), "{key} at {t} K");
         assert!(none.in_range().is_none(), "{key} at {t} K");

@@ -1553,6 +1553,9 @@ pub const AIRLESS_ICE_LOSS_KG_PER_M2_GYR: f64 = 144.0;
 /// At `partial` = 0 it is P14.T51.f's cold-trap threshold ([`exosphere_threshold`]). The loss is a
 /// parameter so that T51.f's carbon dioxide test can take Schorghofer et al. 2021's 10 kg m⁻²
 /// Gyr⁻¹; at 144 it gives the bits it gave as a constant.
+///
+/// Crate-visible for rendering plan R09.T13.d, whose ices on an airless body are ranked against
+/// this edge at no partial pressure (decision-r09-t13d-normalisation §1.2).
 #[must_use]
 pub(crate) fn sublimation_edge(
     diagram: &PhaseDiagram,

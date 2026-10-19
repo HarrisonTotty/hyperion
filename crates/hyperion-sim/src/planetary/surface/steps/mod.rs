@@ -35,8 +35,16 @@
 //! the sea floor, R09.T12.b its convergent landforms and R09.T12.c a stagnant lid's provinces;
 //! R09.T12.d filled [`craters`]; and R09.T12.e added the relief step's second entry,
 //! [`relief::run_after_craters`], which the pass calls after the craters: it scales the elevation
-//! to plan 14's `σ_h`, places the sea and writes the realised figures. Climate, erosion and the
-//! classes are still no-ops.
+//! to plan 14's `σ_h`, places the sea and writes the realised figures. R09.T13.a filled
+//! [`climate`] for a world whose regime names the seasonal energy-balance model: its zonal model
+//! writes each climate cell's sea-level temperature and monthly anomalies, the lapse rate left 0.
+//! R09.T13.b put that model on 72 × 72 points in latitude and longitude, and a locked world's on
+//! 72 × 144 in tidally locked coordinates. R09.T13.c filled it for the other regimes: radiative
+//! equilibrium with thermal inertia, the day resolved, under a thin air's slab and frost point,
+//! and the isothermal surface. R09.T13.d normalised its field to plan 14's mean and signed
+//! contrasts and writes the lapse rate, each flooded cell's liquid and each cell's ice by
+//! substance; the water surfaces are the relief step's flood (decision-r09-t12-coarse R8).
+//! Erosion and the classes are still no-ops.
 
 pub mod classes;
 pub mod climate;

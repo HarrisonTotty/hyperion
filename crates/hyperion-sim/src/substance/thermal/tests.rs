@@ -508,6 +508,33 @@ const SHARED: [(&str, &str); 1] = [(
     "super::thermal::LUNAR_SOIL_GRAIN_DIAMETER",
 )];
 
+/// Whether `line` names `pattern` as a whole name: at the start of the line, or after a character
+/// that cannot continue an identifier. So `isothermal::` (R09.T13's isothermal climate model) does
+/// not read as `thermal::`.
+fn names(line: &str, pattern: &str) -> bool {
+    line.match_indices(pattern).any(|(at, _)| {
+        line[..at]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !(c.is_alphanumeric() || c == '_'))
+    })
+}
+
+#[test]
+fn the_tripwire_reads_whole_names_only() {
+    assert!(names(
+        "use crate::substance::thermal::ThermalColumn;",
+        "thermal::"
+    ));
+    assert!(names("thermal::regolith_thermal_inertia(x)", "thermal::"));
+    assert!(names("let a = row.thermal_columns()?;", "thermal_columns("));
+    assert!(!names(
+        "let climate = isothermal::solve(inputs, &grid);",
+        "thermal::"
+    ));
+    assert!(!names("geothermal::flux()", "thermal::"));
+}
+
 /// The forms by which other code would name this module's API: its unambiguous calls and its
 /// paths (decision-p14-t49c-split §8.2: never bare words such as `.thermal()`).
 const API_PATTERNS: [&str; 5] = [
@@ -672,7 +699,7 @@ fn substance_thermal_nothing_on_the_record_reads_the_inertia_yet() {
                 .filter(|(file, _)| file == relative)
                 .fold((*line).to_owned(), |line, (_, path)| line.replace(path, ""));
             for pattern in API_PATTERNS {
-                if line.contains(pattern) {
+                if names(&line, pattern) {
                     readers.push(format!("{relative}:{}: {pattern}", n + 1));
                 }
             }

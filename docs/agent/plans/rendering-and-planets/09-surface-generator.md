@@ -2329,21 +2329,39 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   are melt, from this task's per-cell temperature, not from the global state; the body's
   `melt_area_fraction` is the lid's crust's, the crust P14.T51.c's `lid` names (`CrustInputs::lid`,
   R09.T10.d; science-composition-crusts.md §5, which replaces "the secondary's, or the primary's
-  where there is none"). Tests: an airless world's
-  day–night contrast exceeds 300 K; the isothermal model's surface varies by under 1 K; a locked
-  lava world's melt is the dayside region above the solidus, and its nightside is solid.
-- **R09.T13.d Normalisation and ice.** Plan 14's mean and signed contrasts imposed on their
-  components (P₂, P₁, a constant after the lapse term); each ice placed per condensate, coldest
-  first against its own frost point by annual maximum, until its area matches plan 14's area for
-  that substance (`surface_ices`), but a cold-trapped one, which T13.f places in each cell's
-  cold-trap fraction, and each liquid's surface to its share of the ocean fraction
+  where there is none"). Tests: an airless world's day–night contrast exceeds 300 K; the
+  isothermal model's own field, before T13.d imposes plan 14's contrasts, varies by under 1 K; a
+  locked lava world's melt is the dayside region above the solidus, and its nightside is solid.
+- **R09.T13.d Normalisation and ice.** Plan 14's mean and signed contrasts imposed on the field
+  as plan 14 defines them (decision-r09-t13d-normalisation): the equator–pole contrast on the
+  annual field's T(0°) less its poles' mean, a locked world's day–night contrast on its μ-weighted
+  day and night means about the substellar axis, and the mean, each read in the model's kind
+  (arithmetic on the energy-balance and isothermal models; on the radiative model, which has no
+  lapse term, the brightness of the emitted flux, less the night floor's for the mean and the
+  equator–pole contrast). The corrections are c + a P₂(sin φ) + b P₁(cos γ), b on a world locked
+  1:1 only, the same at every sample and month of a model grid point. On the energy-balance and
+  isothermal models a and b come from an exact linear solve on the sea-level grid, and c is a
+  constant after the lapse term. On the radiative model all three are solved together on the
+  converged orbit's moments. No record lies below the model's lower bound (the night floor, or
+  the frost point the model holds the surface at). Each ice placed per condensate, most volatile
+  first, on the cells coldest against its own frost point by their annual radiative mean, ⟨T⁴⟩^¼
+  over the year (ties by the warmest month, then the cell's index), until its area matches plan
+  14's area for that substance (`surface_ices`), but a cold-trapped one, which T13.f places in
+  each cell's cold-trap fraction, and each liquid's surface to its share of the ocean fraction
   (`surface_liquids`); the energy-balance albedo function shifted to the climate condensable's
   freezing point, by `SubstanceId` (decision-composition). Tests: the area-weighted surface mean
-  equals the input to 0.1 K; the P₂ coefficient gives the input contrast exactly; ice area equals
-  the input fraction to one cell; a warm pole gets no cap; a 90°-obliquity world is labelled by
-  FILLET's ice-edge states (an ice belt, not caps, when plan 14's history says it started cold);
-  the reference Mars places CO₂ ice inside its water-ice cap's latitude, given by hand; a
-  Titan-like world's methane liquid fills its basins to its share.
+  equals the input to 0.1 K on the energy-balance and isothermal models, and the radiative
+  model's brightness mean of its moments equals it to 10⁻⁶ K; the annual field's ends give the
+  input contrast exactly, and on a field shaped like P₂ the P₂ coefficient is −⅔ of it; a locked
+  world's μ-weighted day and night give its day–night contrast exactly, and on a P₁ field the P₁
+  coefficient is ¾ of it; a Moon-like airless input's correction is under 0.5 K at every grid
+  point; no record lies below the model's lower bound on any reference world or on a locked lava
+  world; ice area equals the input fraction to one cell; a warm pole gets no cap; a
+  90°-obliquity world, all land at an Earth-like mean temperature, is labelled by FILLET's
+  ice-edge states (an ice belt, not caps, when plan 14's history says it started cold), and its
+  warm-start twin places the same cells; the reference Mars places CO₂ ice, placed first, inside
+  its water-ice cap's latitude, given by hand, with every iced cell poleward of 75°; a Titan-like
+  world's methane liquid fills its basins to its share.
 - **R09.T13.e Precipitation and wind.** Design note 8's heuristic, labelled in the header, and
   each month's 10 m wind. Tests:
   global precipitation equals global evaporation to 1%; the reference Earth's zonal precipitation
@@ -2888,7 +2906,9 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
     until that longitude is sampled evenly. Otherwise it is one year's weather, which the game
     would show forever. T13.b settles the averaging. Such a world's day–night circulation is then
     not in the climate layer, so R11's terrain-independent zonal function for it would need
-    sun-fixed coordinates, for R11's re-validation. The winds' cadence does not change.
+    sun-fixed coordinates, for R11's re-validation. The winds' cadence does not change. _Settled
+    2026-10-16 by R09.T13.b: the diurnal-mean sun stands, so every such month is a climatology
+    over the sun's body-fixed longitude (Risks, "Deviations in T13.b, as built")._
   - _Which worlds have one month_ (the T2 fix's science review, for the specification). Design note
     8's "a locked world on a circular orbit" read literally gives a moon locked to its planet, whose
     planet's orbit is circular, one month, though it sees its planet's obliquity (a Titan, under
@@ -8190,3 +8210,821 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     primary source or "not re-read" label, and 183 m with 50–230 m over 71% gives 188–266 m, so
     200 m is a choice within that. For a docs batch on `synth.rs`: cite GMRT (Ryan et al. 2009) and
     an abyssal-hill source, or label it.
+- **Deviations in T13.a, as built** (2026-10-16; lane r09-climate, on `c99c2ece`; the lane
+  agent's rulings for T13.a, built to).
+  - _Files._ `steps/climate.rs` became `steps/climate/mod.rs` (`git mv`): the step's `run` and the
+    pipeline (the bands' sea shares, the dispatch, the interpolation and the writing). The model
+    is `steps/climate/ebm.rs`, as the plan names it, beside three private submodules it does not
+    name: `grid.rs` (the model grid, its band geometry, the tridiagonal solve, the cubic stencil
+    and `GridClimate`, the time means a model leaves), `sun.rs` (the step clock, the months and
+    the diurnal-mean insolation) and `transport.rs` (the transport law and its two tables). The
+    tests are in `steps/climate/tests.rs` and each file's own module. Nothing public is added:
+    the submodules are private to the step and their items `pub(super)`, and `run` stays the
+    step's entry. No shared type changed (`CellState`, `Working`, `ClimateState`, `CoarseInputs`,
+    the field's types); outside `steps/climate/` only the module documentation of `steps/mod.rs`
+    and `planetary/surface/mod.rs` ("What is built"). No stream, tag, golden or wire moved, and
+    `GENERATOR_VERSION` stays 22.
+  - _The grid._ 72 bands of 2.5°, finite volumes in latitude: band k holds wₖ = sin φₖ₊₁ − sin φₖ
+    of 2πR² and exchanges with its neighbour through cos φ ÷ Δφ at their shared edge, zero at the
+    poles, so the sum of the diffusion over the bands telescopes to nothing (energy is conserved
+    to rounding) and the poles are no-flux. Points are stored band-major, `band × columns +
+column`, with one column; the latitude solve and the stencil run per band, so R09.T13.b's 72
+    columns and periodic solve, and the locked coordinates' bands about another axis, add to them
+    without rewriting them.
+  - _The moist static energy._ h = `c_p` T + L q, q = ε e ÷ (p − (1 − ε) e), e the relative
+    humidity of 0.8 times the registry's saturation pressure, capped at the surface pressure (q =
+    1 there), ε the condensable's molar mass over the air's. L is the condensable's vaporisation
+    enthalpy over its molar mass at every temperature, Siler et al.'s "latent heat of
+    vaporization", not the sublimation enthalpy below the triple point, which would make h fall
+    by L_f q across it (1.3 kJ kg⁻¹ for water at 273 K) and leave T(h) two-valued; the saturation
+    pressure keeps the registry's ice branch. h's slope in T is a centred difference of 0.01 K, so
+    the registry may change its curve's form (P14.T49.b's equations at the 22 → 23 bump) without
+    the model. `c_p` is the registry's mixture at the mean surface temperature, (Σ xᵢ `c_p,ᵢ`) ÷
+    (Σ xᵢ Mᵢ), which needs no normalised fractions (the reference Earth's: 28.96 g mol⁻¹ and
+    1,004.5 J kg⁻¹ K⁻¹); Earth's dry air (plan 14's `EARTH_AIR_*`) where the registry cannot mix
+    the gases (none, a key it lacks, a row without gas columns). A world is dry where its
+    condensable is not among its surface liquids, it has none, the row has no phase columns or
+    molar mass, or its surface pressure is not positive.
+  - _The transport._ Λ⊕ = p⊕ D⊕ ÷ (g⊕ R⊕²) = 2.914 × 10⁻⁴ kg m⁻² s⁻¹: p⊕ 1 bar (Siler et al.'s
+    p_s, "1000 hPa", their eq. 2, which is also Kaspi and Showman's reference run), D⊕
+    1.16 × 10⁶ m² s⁻¹ (read: §2 and Fig. 2b, fitted to ERA-Interim's sea-level 2 m temperature),
+    the standard gravity (theirs is unstated) and R⊕ 6,371 km; Λ⊕ `c_p⊕` is 0.293 W m⁻² K⁻¹, as
+    Design note 8 says. Ω⊕ is plan 14's `EARTH_SIDEREAL_DAY` and the dry share plan 14's
+    `DRY_TRANSPORT_SHARE`, one constant for both; Williams and Kasting's law is checked through
+    Vladilo et al. 2013 (ApJ 767, 65, arXiv:1302.4566, eq. A4: D ÷ D₀ = (p ÷ p₀)(`c_p` ÷
+    `c_p,0`)(m ÷ m₀)⁻²(Ω ÷ Ω₀)⁻²), Williams and Kasting 1997 itself unread. The cap applies after
+    the factors and the halving after the cap.
+  - _The tables are every run of the two figures._ Kaspi and Showman's Fig. 8a holds 18 rotation
+    runs (Ω⊕ ÷ 24, ÷ 20, ÷ 16, ÷ 12, ÷ 8, ÷ 6, ÷ 4, ÷ 3, ÷ 2, 2/3, 1, 4/3, 2, 3, 4, 6, 8 and 12 Ω⊕)
+    and Fig. 15c 11 pressure runs (0.2, 0.3, 0.5, 1, 2, 3, 5, 10, 20, 30, 50 bar), not the nine
+    and six Design note 8 lists; the table takes them all, since the nine alone would miss Ω⊕ ÷ 16
+    by about 3 K between nodes. Each was read from the arXiv PDF rendered at 600 dpi, the marker's
+    centre to ±0.2 K (Design note 8's readings agree within 0.6 K). The scalings' references are
+    those runs' own contrasts, 40.2 K at 1 Ω⊕ and 42.1 K at 1 bar (the plan's "40 K" and "42 K";
+    they differ because the pressure sweep runs with no convection scheme, §3.3), so both tables'
+    factor at Earth's is exactly 1.
+  - _The fit's configuration_ (Kaspi and Showman's §2, as far as the model takes it): their eq. 10
+    insolation (S₀ = 1,360 W m⁻², Δs = 1.2) at perpetual equinox, their slab's fixed albedo 0.35
+    with no ice, every band sea, no internal heat, dry air at 1,004.7 J kg⁻¹ K⁻¹ with water at 80%
+    relative humidity, and one grey τ. Theirs varies with latitude from 8.4 to 2.2 (eq. 8), which
+    a one-τ model cannot hold, so τ is solved for a reference mean of 288 K (their Fig. 14b's 1 bar
+    profile averages about 287 K over area, read roughly) and held across both sweeps, as they hold
+    theirs (§3.3, §3.5): τ 1.034, the model's own reference contrast 31.82 K. The contrast is the
+    cubic's value at the equator less its mean at the poles. Each factor is 48 bisections of ln f
+    over [10⁻³, 10³]; the refit is a fast test (the whole climate module's 24 tests take 2 s), not
+    a slow one. f_Ω runs from 2.146 at Ω⊕ ÷ 24 through 1.21 at Ω⊕ ÷ 2 to 0.728 at 2 Ω⊕, 0.292 at 8
+    and 0.201 at 12 (Design note 8's linear inversion: 2.1 and 0.26), non-monotone over Ω⊕ ÷ 4 to
+    2/3 Ω⊕ (1.16, 1.19, 1.21, 1.15) as the GCM's plateau is (36.6, 35.9, 35.5, 36.8 K). f_p runs from
+    0.308 at 0.2 bar to 5.03 at 50 bar, steeper than Design note 8's (p ÷ p⊕)^0.2 (0.72 and 2.19),
+    because the model's own q ∝ 1 ÷ p moves its latent transport with pressure at a fixed Λ, which
+    the factor takes up: the fit is through the model, as ruled.
+  - _Heat capacities and albedo_ as ruled, about the model's freezing point `T_f`, a field of its
+    configuration, 273.15 K (ice Ih's melting point at 1 atm): the albedo's midpoint is `T_f` −
+    5 K = 268.15 K and the sea's capacity steps at `T_f` and `T_f` − 10 K, Spiegel et al.'s 268,
+    273 and 263 K about their "273 K (water freezing)", so 0.15 K warmer. A band's sea share is the
+    solid angle of its cells under the sea over its cells', each cell binned by its centre's
+    latitude; a band holding no cell's centre (a polar band may hold none at level 5) takes the
+    nearest band's share, equatorward first.
+  - _The scheme._ Backward Euler linearised about the step's start, one Newton iteration a step:
+    the emission, h and the absorbed sunlight by their slopes in T, the last capped at 0.9 of the
+    band's storage and emission slopes so that the system stays diagonally dominant; the heat
+    capacity and the rest of the albedo's slope at the step's start. The unknown is h′ δT, and
+    the tridiagonal solve is Thomas's. A step's change is scaled down, whole, so that no band
+    moves by more than a tenth of its temperature, a guard for the steady state's iteration from
+    far off. The steady state iterates the same step with a pseudo-capacity of 0.1 of the emission
+    slope, to 10⁻⁹ K within 2,000 iterations: the reference Earth's ice edge is a slow mode, about
+    500 iterations at a pseudo-capacity of one emission slope with the albedo lagged, about 200 as
+    built (the prototype's counts).
+  - _τ._ Bisection of ln(1 + ¾τ) over [0, ln 10⁶], 48 iterations, each steady state from an
+    isothermal start at plan 14's mean, never warm-started: in the prototype a warm start from the
+    τ = 0 state, a snowball, carried its ice through the ice-albedo hysteresis and settled the
+    reference Earth at 239 K. The isothermal start at the mean is Spiegel et al.'s ice-free start
+    for a world whose mean is above freezing. Where τ = 0's state is already as warm as the mean (a
+    mean colder than the albedo allows), τ is 0 (the lean, recorded as `Transparent`), and the rest
+    is R09.T13.d's constant; where 10⁶ is still too cold, it is held there (`Opaque`); a body with
+    neither light nor internal heat is isothermal at the mean (`Unforced`). The reference Earth's
+    τ is 0.868.
+  - _Insolation and time._ The diurnal mean at each band's centre, (F ÷ π)(H₀ sin φ sin δ + cos φ
+    cos δ sin H₀), with polar day and night (Berger 1978, eq. 9, and Hartmann 2016, eq. 2.15, both
+    from memory; a test holds its annual mean to plan 14's closed form, `annual_insolation_at`,
+    within 2 × 10⁻³ of S ÷ 4 at every band, at 23.44°, 60° and 90° and up to e = 0.3). Kepler's
+    equation is the orbit module's `solve_kepler` (Mikkola's starter and a fixed count of Halley
+    iterations), the crate's one solver, for the brief's fixed count of Newton steps. An orbit
+    takes ⌈P ÷ 6 h⌉ steps held between 1,200 (at least four, 4.5, in the shortest month at any
+    e below 1, and 42.7 at e = 0.6) and 5,844 (four Julian years of six-hour steps; a longer orbit
+    takes longer steps, 41.7 days at 1,000 years), each evaluated and binned at its midpoint in
+    mean anomaly. The run spins up from the annual-mean steady state and takes whole orbits,
+    comparing each with the one before (so at least two), until the annual means move under 0.1 K
+    or 40 orbits have run; the reference Earth with the synthetic sea takes 9. A one-month year is
+    the steady state, with no orbit.
+  - _The output and `run`._ `GridClimate` holds the annual mean, each month's mean, the orbits run
+    and whether they converged; the model's answer adds the emission factor and how τ was found.
+    `run` writes each climate cell's sea-level temperature, the annual mean by the cubic through
+    the band centres in latitude (Catmull and Rom's, Keys 1981's cubic convolution at a = −½,
+    interpolating with a continuous slope, the bands mirrored across each pole), and each month's
+    anomaly, the month's cubic less the annual one; none past the year's months or in a one-month
+    year, and the lapse rate left 0. `LockedEnergyBalance`, `RadiativeEquilibrium` and
+    `Isothermal` leave the initial state. Until R09.T12 the field is all land, so the reference
+    Earth's coarse pass runs with land's heat capacity everywhere.
+  - _The Earth test's sea and target._ The synthetic sea gives each band Earth's land share,
+    computed from Natural Earth's 1:110m land polygons (public domain) by even–odd scanlines, 40 a
+    band weighted by cos φ (0.289 of the sphere, against Eakins and Sharman's 0.2905; Antarctica's
+    ice shelves are sea at that scale), the cells of each band in order of longitude made land up
+    to its share. ERA-Interim's curve is Siler et al.'s Fig. 2b's blue line read at 800 dpi from the
+    authors' copy (Armour's site), at each band centre, to about ±0.3 K (±0.4 K where their model's
+    red line hides it). It is the air temperature at sea level, reduced from the topography, which
+    is what the model gives; it ends near 77° S.
+  - _The Earth test waits on R09.T12 south of 58.75° S._ From 58.75° S to the North Pole the model
+    lies within 5 K of ERA-Interim (worst 4.9 K at 58.75° S, the tropics 2–3.7 K cold, the
+    Southern Ocean 4–5 K warm); south of that it is warm by 5.4 K at 61° S rising to 11.3 K at
+    76° S, which the test bounds at 12 K and prints. The cause is the ice sheet's height: the
+    model's Antarctica is at sea level, so its summer rises over the albedo's ramp and darkens it,
+    where the real ice sheet, 2–3 km up, stays bright. A diagnostic run of the prototype whose
+    albedo and emission read each band 6.5 K km⁻¹ colder over Antarctica's mean 2.2 km of land
+    brings every band from 73.75° S north within 5 K and 76.25° S to +7 K. Relief alone does not
+    bring that: under Design note 8's order the lapse term comes after the interpolation, so the
+    model never sees heights (deferred finding below).
+  - _Tests and acceptance._ `cargo test -p hyperion-sim --lib planetary::surface::steps::climate`
+    runs 24 tests in 2 s at 4 threads: the plan's Earth test, sweep test
+    (`the_contrast_follows_kaspi_and_showman_s_sweeps`, every node to 2 K, by construction to
+    about 10⁻⁹ K), stability test (the reference Earth all land at Earth's, Mars's, the Moon's,
+    Ceres's and Venus's rotations and at the cap converges at six hours to 150–350 K, within 0.5 K
+    of a 1.5 h step in the annual mean and 1 K in every month) and months test (every step's E in
+    its month's 30°; twelfths at e = 0; 0.427 twelfths at periapsis at e = 0.6, the plan's "0.4",
+    within a step), with the tables' refit, energy conservation of the steady state (net heating
+    under 10⁻⁶ of the absorbed, the diffusion's to rounding), τ's clamps, an unforced body, a dry
+    world, each month as the mean of its steps, the insolation's closed form and its polar days,
+    the tridiagonal solve, the stencil, the bands' geometry, the transport law and the step's
+    writes and dispatch. `cargo test -p hyperion-sim --lib planetary::surface::` passes (98, one
+    ignored as before), the reference worlds' coarse pass among them.
+- **Deferred findings (2026-10-13 rule)** (R09.T13.a; recorded, not ruled; each for "main"'s list).
+  - _The model never sees the relief_ (the Earth test's south; it changes T13.d's algorithm, so it
+    is "main"'s to route). Under Design note 8's order the energy balance runs at sea level and
+    the lapse term is added after the interpolation, so R09.T12's relief changes only the sea
+    shares: an ice sheet at sea level melts its albedo in summer, the reference Earth's
+    Antarctica by up to 11 K. Lean: R09.T13.d gives the model each grid point's area-mean surface
+    height, its albedo and emission reading T − Γ z̄ at T13.d's lapse rate, the output staying at
+    sea level (the diagnostic above).
+  - _Kaspi and Showman's gravity and radius sweeps_ (their §3.4, Fig. 18a: the contrast roughly
+    triples from an ice planet's density, 1,000 kg m⁻³, to an iron planet's, 7,874, at Earth's
+    radius and column mass; §3.6, Fig. 20b: larger planets at Earth's density have smaller
+    contrasts). Λ takes neither, as ruled; plan 14's contrast takes g^−0.43
+    (`GRAVITY_TRANSPORT_EXPONENT`), and R09.T13.d imposes that contrast on the field's P₂, so only
+    the profile's shape departs. Lean: record.
+  - _The pressure factor is held below 0.2 bar_ (Design note 8's end hold), at 0.308, so a thin
+    air keeps a third of Earth's transport down to no air at all, where plan 14's column factor
+    ramps linearly to zero below 0.2 m⊕ (`COLUMN_TRANSPORT_RANGE`). No reference world reaches it
+    (the reference Mars's model is radiative equilibrium). Lean: the same linear ramp below the
+    first node.
+  - _A sea of another liquid takes water's heat capacity_ (closed set, for the composition audit).
+    The sea's 40 × 5.25 × 10⁶ J m⁻² K⁻¹ is water's wind-mixed layer; a methane or ethane sea's
+    volumetric heat capacity is about a third of water's (from memory). Lean: scale it by the
+    liquid's ρ `c_p` over water's once the registry's liquid columns carry them; with R09.T13.d's
+    freezing point by `SubstanceId`.
+  - _Water's latent heat is low._ The registry's 43,500 J mol⁻¹ (P14.T13.c's effective enthalpy)
+    gives 2.415 × 10⁶ J kg⁻¹, against about 2.50 × 10⁶ at 0 °C and 2.45 × 10⁶ at 20 °C (standard
+    tables, from memory), so the moist share is 2–3% low. Lean: it follows the registry's
+    reference equations at the 22 → 23 bump.
+  - _Convergence on short orbits._ The 0.1 K move between orbits under-reads the drift left where
+    the orbit is short against the ocean's relaxation, C ÷ B of about two years on an Earth: the
+    reference Earth stops with 0.07 K moved and, by the moves' geometric decay, about 0.15 K still
+    to go, and an orbit of 0.1 year could stop several kelvin short. Lean: stop on the extrapolated
+    remainder, move × r ÷ (1 − r), r the last two moves' ratio, or count the convergence over years
+    rather than orbits (R09.T13.b, whose cost it sets).
+  - _The model's Earth against ERA-Interim, where it passes._ The tropics run 2–3.7 K cold and the
+    Southern Ocean 4–5 K warm: the albedo depends on temperature alone, with no cloud (the
+    Southern Ocean's planetary albedo is about 0.5, from memory), there is no ocean heat transport
+    beyond what D⊕ carries, and one τ serves every latitude. The seasonal run's global mean,
+    288.53 K, is 0.53 K above the steady state's 288 K, the seasons' rectification. R09.T13.d's
+    normalisation (the mean and the P₂ coefficient) removes both offsets' large-scale part. Lean:
+    record.
+- **Deviations in T13.b, as built** (2026-10-16; lane r09-climate, on `5474e2d9`; the lane
+  agent's rulings for T13.b, built to).
+  - _Files._ A fourth private submodule, `steps/climate/coordinates.rs`, holds the model frames
+    (`Coordinates::Geographic` and `Coordinates::TidallyLocked`) and `substellar_cosine`, the cos γ
+    that R09.T13.d's P₁(cos γ) will read. `grid.rs` gained the columns, the longitude coupling, the
+    point lookup, the bicubic stencil and the periodic solve; `sun.rs` the insolation per point, the
+    locked world's beam (`HostTrack`, `Sunlight::locked`) and `Sunlight::fill`; `ebm.rs` the split
+    step, `solve_locked`, the tabulated temperature functions and the spin-up on the whole grid
+    (`ZonalSolution` is now `Solution`); `mod.rs` the dispatch of both models, the sea shares by
+    point and the bicubic writing (the zonal model's band shares, `sea_shares`, are kept for its
+    tests). Nothing public is added and no shared type changed (`CellState`, `Working`,
+    `ClimateState`, `CoarseInputs`, the field's types); outside `steps/climate/` only the module
+    documentation of `steps/mod.rs` and `planetary/surface/mod.rs` ("What is built"), each edit
+    line-local. No stream, tag, golden or wire moved, and `GENERATOR_VERSION` stays 22.
+  - _The geographic grid._ `ClimateModelKind::EnergyBalance` runs on 72 × 72 points, column j
+    spanning −180° + 5° j to −180° + 5° (j + 1) east of the prime meridian, the zonal model being
+    the one-column grid. The longitude term of the isotropic Laplacian is in flux form like the
+    latitude's: a point exchanges with each neighbour in its band across their shared meridian, of
+    length Δφ, over the distance cos φ Δλ between their centres, over its own share wₖ Δλ, so its
+    coupling Δφ ÷ (cos φ Δλ) ÷ (wₖ Δλ) is 1 ÷ (cos² φ Δλ²) times Δφ ÷ (2 sin ½Δφ), 1 + 8 × 10⁻⁵,
+    and the band's sum telescopes round it. Insolation stays the diurnal mean of the band, so the
+    land–sea map is the only longitude structure.
+  - _The split._ Each step's system (D − Λ Lφ − Λ Lλ) y = r, y = h′ δT, is factorised in the
+    ruled order as (D − Λ Lλ) D⁻¹ (D − Λ Lφ): T13.a's latitude solve per column, (D − Λ Lφ) y₁ = r,
+    then a periodic solve per band, (D − Λ Lλ) y = D y₁, by the Sherman–Morrison formula about the
+    tridiagonal part with γ = −b₀ (Press et al. 2007, Numerical Recipes, 3rd ed., §2.7.2, from
+    memory). The factorisation's error is Λ² Lλ D⁻¹ Lφ y, of the step's order; where y vanishes
+    so does r, so a steady state is the unsplit equation's; and Σ w D y = Σ w r to rounding, so
+    the step conserves energy (a test, `the_split_step_conserves_energy`). A one-column grid takes
+    the latitude solve alone, T13.a's arithmetic.
+  - _The steady state is the zonal model's._ τ's bisection and the spin-up's steady state run on
+    the zonal model under each band's mean insolation over its columns, broadcast to every column.
+    On the geographic grid this is the steady state itself, exactly: only the heat capacity sees
+    the sea and the columns, and a steady state stores no heat. On the locked grid it is the
+    steady state of the tidally locked longitudes' mean sunlight, the steady state itself in a
+    one-month year, whose beam stands over the pole; in a twelve-month year, whose beam librates
+    and nods, the start is relaxed on the whole grid for 250 iterations first (`Adopted`): the
+    split's error slows the modes that vary in both directions under the relaxation's small
+    storage, so that relaxation never meets T13.a's 10⁻⁹ K (it still moves 2 × 10⁻⁶ K an iteration
+    after 2,000), but after 250 it lies within 0.012 K of the 2,000th, and it spares the orbits the
+    ocean's slow relaxation from the zonal start: the locked Earth at 20° of obliquity, all sea,
+    takes 2 orbits from it against 17 from the zonal start.
+  - _Sea shares by point._ Each field cell is binned by its centre's latitude and longitude in the
+    model's frame, a point's share the solid angle of its cells under the sea over all of its
+    cells'. A point that holds no cell's centre takes the state of the field cell that holds its
+    own centre (`PatchKey::containing`), rather than T13.a's nearest band: about a fifth of the
+    72 × 72 points hold none at level 5, and at level 8 only some near the poles (a point of the
+    last band there averages 2.6 cells).
+  - _The bicubic interpolation._ Catmull and Rom's cubic in latitude, T13.a's, and at each of its
+    four bands in longitude, periodic round the band. Across a pole the meridian continues as the
+    one half a turn round, so a band mirrored there is read 36 or 72 columns on: a field smooth on
+    the sphere is then interpolated through the pole with every term up to the cubic's along each
+    great circle through it, and its value there is the same from every meridian to the fourth
+    order of the spacing (the test reads twelve meridians within 10⁻³ K of each other and 10⁻² K
+    of the field's own value). On one column the stencil is T13.a's, to the bit.
+  - _Tidally locked coordinates_ are Koll and Abbot's (2015, ApJ 802, 21, arXiv:1412.8216,
+    Appendix B, read): `θ_TL` = sin⁻¹(cos θ cos λ), the angle from the terminator, and `λ_TL` =
+    tan⁻¹(sin λ ÷ tan θ), about the substellar point from the geographic north pole, with the
+    substellar point at (θ, λ) = (0, 0), the body frame's +x (eqs. B1–B3). The locked model's frame
+    is the body frame with its first and third axes exchanged, (z, y, x), whose latitude is
+    `θ_TL` and longitude `λ_TL`; the exchange is a reflection, so the frame is left-handed, as
+    theirs is, which the isotropic diffusion does not see. cos γ = x = sin `θ_TL`, a locked band's
+    centre sine.
+  - _The locked world's sun._ No diurnal mean: each step's insolation at a point of unit normal n̂
+    is F max(0, n̂ · ŝ), at the point's centre (the year's global mean is within 10⁻³ of F ÷ 4 on
+    both grids). In the equator's frame whose first axis points to the host at the northern spring
+    equinox, the host at the ecliptic longitude L = ν − `ν_eq` lies along (cos L, cos ε sin L,
+    sin ε sin L), its declination T13.a's; the locked law W = `W_p` + M (P14.T14.b) stands the prime
+    meridian at the host's right ascension at periapsis plus the mean anomaly, so the host's
+    body-fixed longitude is α(L) − α(−`ν_eq`) − M, ν − M on an untilted orbit, the optical
+    libration, east after periapsis. A test turns the star's direction into the body frame with
+    `frames::body_fixed_at` on a locked planet at e up to 0.1 and obliquities of 0, 0.4 and 2 rad,
+    the equinox found from the frame, and matches it to 10⁻⁹. A one-month year's beam stands at +x.
+  - _A 1:1 lock is at most e = 0.1._ P14.T14.b settles a locked body above
+    `SPIN_ORBIT_RESONANCE_ECCENTRICITY`, 0.1, into 3:2, whose solar day is two orbits, so it is not
+    `Forcing::Locked` and takes the geographic model; the locked tests use e of 0.05 to 0.1. A
+    moon locked to its planet is not `LockedEnergyBalance` either (its star moves; P14.T48.d's
+    `locked` is a solar day of `None`): it takes the geographic model, with its planet's orbit's
+    seasons at its own obliquity (`CoarseInputs::months`).
+  - _The tabulated temperature functions_ (`Adopted`, for the cost). The step evaluates h, its
+    slope and the albedo at every point: three saturation pressures (T and T ± 0.01 K) and a
+    hyperbolic tangent, two thirds of a step's time on the geographic grid as first built (167 ns a
+    point, 52 ns for a dry world of fixed albedo). A seasonal run therefore tabulates h's latent
+    part and the albedo, each with its slope, every 0.05 K on one absolute lattice over its start's
+    range ± 200 K, read by the cubic Hermite interpolant (72 ns a point). An interval whose
+    interpolant misses the direct functions at its quarter points by more than 10⁻¹⁰ of h, 10⁻⁷ of
+    its slope, 10⁻¹⁰ of albedo or 10⁻⁸ K⁻¹ of its slope is evaluated directly, whatever the curve's
+    form: the triple point's kink, and the steep approach to where 80% of the saturation pressure
+    reaches the surface pressure (377.7 K on the reference Earth); within 200–340 K only the triple
+    point's interval. The steady states that set τ evaluate directly, so T13.a's τ, its contrasts
+    and its tables' fit are unchanged; its seasonal runs move by about 10⁻¹¹ (the Earth test still
+    reads 9 orbits, τ 0.868, 288.53 K and 4.89 K).
+  - _Slow and resonant rotators' climate_ (Risks, "Found by the ruling on T2's questions";
+    settled here). `Forcing::SlowRotator` takes `EnergyBalance`, whose diurnal-mean sun stands: a
+    month's body-fixed record is a climatology over the sun's body-fixed longitude, never one
+    year's weather, at any spin, commensurate or not. Such a world's day–night circulation is not
+    in the climate layer, so R11's terrain-independent function would need sun-fixed coordinates
+    for it, for R11's re-validation.
+  - _Tests and acceptance._ `cargo test -p hyperion-sim --lib planetary::surface::steps::climate`
+    runs 38 tests in 5.2 s at 4 threads, two more ignored as slow (6.7 s together): the plan's
+    reproduction test, all land (1.9 s alone) and all sea (`#[ignore = "slow: …"]`, 6.5 s), each
+    point within 10⁻¹² K of the zonal model in every month after the same orbits (3 and 11); the
+    locked world warmest at the substellar point (one month: 340 K there, 296 K at the terminator,
+    216 K at the antistellar point, every band's columns equal, the warmest climate cell within 6°
+    of +x and the coldest of −x); the locked world's twelve months on an eccentric orbit (e =
+    0.05: warmest in the half after periapsis, coldest in the half after apoapsis) and with
+    obliquity (20°: the northern dayside 5.4 K warmer at the northern solstice and 5.4 K colder at
+    the southern), 4.1 s each; the land–sea case on a synthetic mask (`#[ignore = "slow: …"]`,
+    5.6 s: the reference Earth all sea but a continent from the equator to the north pole between
+    30° W and 30° E, whose land at 46.25° N has a seasonal amplitude of 27.6 K against the open
+    sea's 6.0 K, and is 296.6 K in its warmest month, the seventh from perihelion, against 288.4 K
+    10° off its coast); the
+    cyclic solve against a dense solve (3, 9 and 144 unknowns); the coordinates' round trip
+    against Koll and Abbot's B1–B3 and their landmarks; the frame and libration tests above; the
+    interpolation's continuity across the seam and the poles; the split step's energy; the table's
+    accuracy; the sea shares by point (geographic and tidally locked masks, the empty points'
+    fallback); and the step's writing from the geographic model (3.7 s). `cargo test -p
+hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s at 4
+    threads), the reference worlds' coarse pass among them. Times are at opt-level 2 on a shared
+    machine (load 4–9), one thread unless said.
+  - _Cost_ (provisional, the same machine; the climate step alone at level 8, one thread): the
+    reference Earth's 72 × 72 model 1.9 s all land, as the field is until R09.T12 (3 orbits;
+    T13.a's zonal model took 0.16 s), and 5.2 s with Earth's land shares as a synthetic sea (10
+    orbits); a locked Earth's 72 × 144 model on a 24-day orbit at e = 0.05, 4.3 s all land (4
+    orbits) and 2.2 s all sea (2 orbits after the spin-up).
+  - _Nothing waits on R09.T12_: the land–sea behaviour is tested on synthetic masks, on the model
+    grid and on the field's cells by hand.
+- **Deferred findings (2026-10-13 rule)** (R09.T13.b; recorded, not ruled; each for "main"'s list).
+  - _The header's documentation contradicts the sign-off_ (a docs fix for "main"'s batch; the
+    surface crate is not this lane's). `hyperion-surface/src/field/header.rs`'s
+    `ClimateModelKind::LockedEnergyBalance` reads "The same model in tidally locked coordinates
+    about the substellar axis, with no seasons (R09.T13.b)", against the sign-off of 2026-10-10
+    (`signoff-2.md` item 4; Design note 8's "A lock adds nothing"). Lean: "…, with seasons wherever
+    its orbit is eccentric or it has obliquity (R09.T13.b)".
+  - _The pass's own tests now pay for the geographic model_ (R09.T16's to route). The reference
+    Earth's climate step at level 8 went from 0.16 s to 1.9 s, and the surface module's
+    order-independence and determinism tests run its pass eight times between them (the three
+    tests of `planetary::surface::tests` take 32.6 s on one thread); with R09.T12's sea each pass
+    costs about 5 s. Lean: R09.T16's once-per-binary run of the reference worlds
+    (`tests/common/surface_worlds.rs`), or those tests' Earth moved to the slow tier.
+  - _The locked model's own day–night contrast is large._ The locked Earth on a 24-day orbit reads
+    340 K at the substellar point and 216 K at the antistellar one, 124 K apart: diffusion of moist
+    static energy at the transport law's slow end (f_Ω held at 2.15 below Ω⊕ ÷ 24) cannot carry a
+    lock's day–night overturning, which idealised GCMs find keeps an Earth-like locked aquaplanet's
+    nightside far warmer (from memory, unread here). R09.T13.d imposes plan 14's day–night contrast
+    on P₁(cos γ), so only the profile's shape departs. Lean: record, for T13.d's normalisation and
+    the offline ExoPlaSim check.
+  - _The whole-grid relaxation converges slowly_ (for R09.T13.d). Under the relaxation's small
+    pseudo-storage the split's error Λ² Lλ D⁻¹ Lφ dominates for modes that vary in both
+    directions, so a steady state on a two-dimensional grid does not meet 10⁻⁹ K in 2,000
+    iterations; the zonal steady state stands in wherever it is exact, and the spin-up needs no
+    more. If T13.d's lean on T13.a's first finding (each point's mean height in its albedo and
+    emission) makes the geographic steady state depend on longitude, τ's bisection would need the
+    whole grid. Lean: then a symmetric (Strang) or iterated split, or a pseudo-storage sized to the
+    transport, measured on the reference Earth.
+  - _Convergence on short orbits_ (T13.a's finding, now measured on a lock). From the zonal start
+    the locked Earth at 20° of obliquity, all sea, took 17 orbits of 24 days and stopped with the
+    ocean's two-year relaxation unfinished (by the moves' decay, of order 3 K short, estimated);
+    the spin-up on
+    the whole grid brings it to 2 orbits within 0.2 K of the annual-mean steady state, but the
+    0.1 K stop between orbits still under-reads whatever the seasons rectify. Lean unchanged
+    (T13.a's: stop on the extrapolated remainder, or count over years).
+- **Deviations in T13.c, as built** (2026-10-19; lane r09-climate, on `b4b4bea4`; the lane
+  agent's rulings for T13.c, built to research-c, `.git/rm45-scratch/r09-climate/research-c/`).
+  - _Files._ The plan's two, `steps/climate/airless.rs` (the radiative model) and
+    `steps/climate/isothermal.rs`, beside edits to T13.a–b's private submodules: `sun.rs` gained
+    `orbit_at` (the place on the orbit at a mean anomaly, factored out of the step clock with its
+    arithmetic unchanged, so T13.a–b's runs are the same to the bit: the Earth test still reads 9
+    orbits, τ 0.868, 288.53 K and 4.89 K), `Daylight` (the sun's height over one day, its daily
+    mean T13.a's diurnal mean and its mean over a span of hour angles the resolved day's) and
+    `reduced`; `grid.rs` gained `Stencil::apply_clamped`; `mod.rs` the dispatch of both models and
+    `Overshoot`; `tests.rs` the plan's tests in `other_regimes`, its `builder_of` now
+    `pub(super)`. Nothing public is added and no shared type changed (`CellState`, `Working`,
+    `ClimateState`, `CoarseInputs`, the field's types); outside `steps/climate/` only the module
+    documentation of `steps/mod.rs` and `planetary/surface/mod.rs` ("What is built"), each edit
+    line-local. No stream, tag, golden or wire moved, and `GENERATOR_VERSION` stays 22.
+  - _The column_ is research-c's minimum model (its §2.2): constant thermal inertia Γ, emissivity
+    and Bond albedo over the heat flow, in depths of the skin depth, so that only Γ and the period
+    reach the surface and no density or heat capacity is needed. Γ is plan 14's by
+    `surface_material()` (rock 55, ice 20 J m⁻² K⁻¹ s^−½) and ε plan 14's `REGOLITH_EMISSIVITY`,
+    as ruled. The surface also absorbs the cosmic background's εσ`T_CMB`⁴, so that a dark column
+    sits at plan 14's `night_floor` exactly. The nodes are research-c's m 5, n 3 (Hayne et al.'s
+    eqs. A32–A33), down to six skin depths of the solar day or two of the year, whichever is
+    deeper, the first spacing a fifth of the shorter period's skin depth (research-c's
+    max(6, 2√D) where the day is the shorter; a 3:2 Mercury's year is): the reference Moon's 10
+    nodes reach 7.4 skin depths, Mars's 17 reach 59.3 and Ceres's 20 reach 141.3.
+  - _The albedo_ is plan 14's Bond albedo of the body's surface state on its material,
+    `surface_state().albedo(surface_material())`: the inputs carry both, so no contract changes,
+    and it is the albedo plan 14's mean is computed with, so that the model's starlight brightness
+    is plan 14's `T_eq` by energy. The palette's albedo is a normal albedo, a radiance factor at
+    opposition (research-c §1), not a Bond albedo. The reference Moon and Ceres take the airless
+    rock's 0.11, the reference Mars plan 14's temperate 0.294 (a deferred finding).
+  - _The step_ is backward Euler with the column eliminated from the bottom up and the surface's
+    balance solved by Newton's method each step, from the step's starting temperature held under
+    the root's two upper bounds, to 10⁻⁹ K (about four iterations a step). A step conserves the
+    column's energy to rounding (a test, with and without frost).
+  - _The clock._ A world turning under its sun whose every month is at least a solar day long
+    runs whole days, at most 16 a month at 48 steps a day, each from midnight, its layers below two
+    skin depths of the day storing heat at the days' share of the month, its frost condensing and
+    subliming over each step's true duration (so that a polar night's frost is the month's, not
+    the simulated days'). A world any of whose months is shorter than a solar day runs in true time
+    with 24 phase columns a band, the choice made for the whole world rather than month by month,
+    so that each phase column's state continues through the year. A world locked 1:1
+    (`Forcing::Locked`, or no solar day) runs each point of the locked grid in 8 steps a month
+    under T13.b's beam, and in a one-month year (or with no seasonal orbit) takes the closed form
+    εσT⁴ = (1 − A) F cos γ₊ + εσ`T_CMB`⁴ + Q, never below the frost point. A one-month year of a
+    turning world is one month of the whole orbit at equinox. The reference Moon, Mars and Ceres
+    run whole days; the test's 3:2 Mercury runs true time.
+  - _The spin-up_ starts each column at 0.8 of its annual-mean radiative temperature, all of it on
+    a locked world, whose columns have no day to lower their mean (from 0.8 a nearly unlit
+    column's deep layers would warm only by the heat flow, tens of orbits). After the first orbit
+    Kieffer's jump offsets every node so that its mean over the orbit is the surface's plus the
+    heat flow's steady gradient ([109]'s offset, not research-c's prototype's replacement of every
+    layer). On a world stepped in true time the surface's mean is the column's long run's: where an
+    orbit turns the day by a whole number of phase columns (to 0.01 of one), the mean over the
+    columns whose hour angles the column takes in its later orbits, and otherwise the band's. A 3:2
+    Mercury's phase columns, each jumped to its own first orbit, alternated by ±1 K in the band's
+    annual mean for sixteen orbits without converging; with the long-run means it converges in
+    six. The run then takes whole orbits until no point's or end column's annual mean moves by
+    0.1 K, at least two and at most 16: the reference Moon takes 4, Mars 3, Ceres 4, the locked
+    Moon 4.
+  - _Lanes._ The columns advance in groups of eight in the same loops, each lane's arithmetic a
+    lone column's, so that no result depends on its group (a test holds the reference Moon's and
+    Mars's runs equal to the bit one column at a time and in eights). Each column's elimination and
+    Newton iteration are serial chains; one column at a time the reference Mars's step took
+    340 ms, in fours 148 ms and in eights 130 ms. Stepping every column through a step in turn,
+    rather than each column through the orbit, gained nothing by itself.
+  - _The thin air._ A positive surface pressure adds Kieffer's one-layer grey slab without solar
+    heating (2013, eqs. 5 and 11–12, read), its back radiation β ÷ (2 − εβ) of each point's
+    monthly-mean absorbed sunlight, of which the surface takes ε. β is solved once in closed form,
+    by energy without frost, so that the mean in the ruling's brightness kind (the emitted flux
+    less the night floor's, decision-r09-t13d-normalisation §2.2) is plan 14's: the surface emits
+    `E_nf` + ⟨S⟩ 2 ÷ (2 − εβ), so β = (2 ÷ ε)(1 − ⟨S⟩ ÷ σT\*⁴), held to [0, 1], ⟨S⟩ the grid's
+    mean absorbed sunlight. The reference Mars's is 0.265, and its run's brightness mean 214.09 K
+    against plan 14's 214 K.
+  - _The frost floor_ is the largest gas's (`gases()[0]`) saturation temperature at its mole
+    fraction of the surface pressure, from the registry's phase diagram (P14.T49.b's curves, which
+    P14.T51.a's partition reads; the energy-balance model's humidity still reads the held
+    Clausius–Clapeyron sets), with its latent heat the curve's own Clausius–Clapeyron enthalpy over
+    the gas's molar mass. It holds wherever the bulk gas condenses, the climate condensable or not,
+    the generality rule's choice. Each column carries a frost mass: a step that would fall below
+    the frost point, or starts with frost, holds the surface there and puts its unbalanced energy
+    into the frost (Kieffer's [101] and [60]); once the frost is gone the free solution stands. The
+    reference Mars's carbon dioxide at 604.8 Pa freezes at 147.66 K (Kieffer's James et al. curve
+    gives 147.68 K there) with 598 kJ kg⁻¹ (KRC's CFROST 589,944 J kg⁻¹, research-c's reading);
+    both poles sit at it for seven months, and the bare regolith, with no air, falls to 60.4 K.
+  - _The answer_ for T13.d (`RadiativeSolution`): each grid point's and end column's moments about
+    its previous orbit's mean, its coldest sample and also its warmest (which the Diviner test
+    reads), its months and its annual mean; the model's lower bound, the night floor or the frost
+    point where that is warmer; ε and `E_nf`; the thin air. `Moments::fourth_power_mean` gives
+    ⟨(T + s)⁴⟩ from them. The end columns are three on the zonal grid (the equator, which is every
+    longitude's there, and the two poles) and, on the locked grid, the two geographic poles and 144
+    columns every 2.5° round the geographic equator from the substellar point, so that T13.d reads
+    T(0°) as the ring's mean flux. In a closed form a column's moments are zero about its own
+    temperature.
+  - _Writing._ The records are written as T13.a–b write theirs, each interpolated value held to the
+    range of the values its stencil reads, the ruling's guard (§2.4), on both pointwise models; the
+    energy-balance models keep the cubic's (`Overshoot::Kept`), so that T13.a–b's records are
+    unchanged. The lapse rate stays 0.
+  - _The isothermal model_ (research-c §6): every point at plan 14's mean in the annual mean and
+    every month, on the radiative model's grid (the zonal one, or the tidally locked one on a world
+    locked 1:1, so that T13.d's P₁(cos γ) has its coordinates). The months are equal because the
+    air's column, about 1.2 × 10⁹ J m⁻² K⁻¹ on Venus over a restoring of 2.8 W m⁻² K⁻¹, holds the
+    heat of some 13 years, which damps the e = 0.0068 year's ±2.5 K to ±0.02 K (research-c's
+    figures, its inputs from memory). The plan's test now reads, as ruled
+    (decision-r09-t13d-normalisation, plan text (b)), "the isothermal model's own field, before
+    T13.d imposes plan 14's contrasts, varies by under 1 K", edited in R09.T13.c's text above.
+  - _The lava world's melt_ is no record of its own: R10's classifier reads it per cell from the
+    climate's annual mean against the cell's crust entry's transition, and the test derives it so.
+    The test world (the reference Moon locked 1:1 at 0.04 au on a circular, untilted orbit, its
+    feldspathic lid's 1,533.15 K) melts on the cap cos γ > 0.3931 (66.85°), 0.3040 of its climate
+    cells' area against the closed form's 0.3035, where the input's `melt_area_fraction`, plan 14's
+    eyeball at its unit emissivity, is 0.2931 (cos γ 0.4138, 65.56°): the regolith's ε 0.95 warms
+    the substellar point by ε^−¼ (a deferred finding). The nightside is solid, and beyond the
+    terminator's stencils at its floor.
+  - _Tests and acceptance._ `cargo test -p hyperion-sim --lib planetary::surface::steps::climate`
+    runs 54 tests in 6.0 s at 4 threads, two ignored as slow (T13.b's). The plan's: an airless
+    world's day–night contrast exceeds 300 K, on research-c's answer a locked airless world, the
+    reference Moon locked 1:1 at 1 au (substellar 387.2 K, antistellar 24.0 K at the floor,
+    363.1 K; its climate cells too), with a 3:2 Mercury's equator (88.1–698.1 K, 610 K, in true
+    time); the isothermal model's own field (737 K everywhere, every month); the locked lava world
+    above. Beside them: the reference Moon's equator against Diviner, its warmest 389.4 K in
+    382–402 K and its coldest 96.3 K in 90–100 K (Williams et al. 2017's "∼387–397 K" and "∼95 K
+    just before sunrise", ±5 K), its range 293.1 K short of 300 K, and its brightness mean 270.34 K
+    against plan 14's 270.35 K; the reference Mars's frost floor; the step's writing; the column's
+    energy, its Newton solve from any guess, its layers, its periodic diurnal cycle (the lunar
+    equator under a constant sun: noon 386.10 K, predawn 96.41 K, mean 220.97 K against
+    research-c's prototype's 386.3, 96.1 and 220.5 K at 96 steps, emitted and absorbed equal to
+    10⁻⁶); the moments, extremes, months and annual means against direct sums over the last
+    orbit's samples, and ⟨T⁴⟩ from them; the closed form on a locked one-month world, and a locked
+    world on an orbit all but circular marched to it within 2 × 10⁻⁷ K; the lanes to the bit; the
+    resolved day against the diurnal mean and a quadrature; the clamped stencil.
+    `cargo test -p hyperion-sim --lib planetary::surface::` passes, 130 with three ignored (34.4 s
+    at 4 threads), the reference Moon, Mars and Ceres through `coarse_pass` among them. Nothing
+    waits on R09.T12: the models read no relief.
+  - _Cost_ (provisional; the climate step alone at each body's level, one thread, opt-level 2, a
+    shared machine at load 5–9): the reference Moon 10 ms (level 6), Mars 130 ms (level 7), Ceres
+    157 ms (level 5), the locked lava world's closed form 2 ms (level 6). The surface module's
+    three pass tests take 35.4 s on one thread, against T13.b's 32.6 s.
+- **Deferred findings (2026-10-13 rule)** (R09.T13.c; recorded, not ruled; each for "main"'s list).
+  - _The plan's 300 K test does not hold on a lunar-like rotator_ (a plan-text item for "main"'s
+    batch). The reference Moon's equator spans 293.1 K, Diviner's 292–302 K (research-c §4): an
+    airless rotator of the Moon's surface reaches 300 K only below Γ ≈ 35 or A ≈ 0.02. The test is
+    built on a locked airless world and a 3:2 rotator, as the lane ruled. Lean: "an airless world
+    locked to its star, or a slow rotator, has a day–night contrast above 300 K".
+  - _ε and plan 14's blackbody figures_ (research-c's D1; the T13.d ruling's D4). Plan 14's airless
+    mean, its eyeball's substellar point and its melt area are a blackbody's; the regolith radiates
+    at ε 0.95, so its substellar point is ε^−¼, 1.3%, warmer, and the lava world's pool covers
+    0.304 of the surface against plan 14's 0.293. The brightness kind takes the mean's share; the
+    melt area is compared, not imposed. For plan 14.
+  - _The thin air's β_ (for the thin-air model's next revision, with the T13.d ruling's D6). The
+    brightness kind lays all of plan 14's greenhouse, 206.9 K to 214 K, on the slab, so the
+    reference Mars's β is 0.265 against Kieffer's clear carbon dioxide's 0.163 at 636 Pa; if
+    NASA's 214 K is an arithmetic mean, the slab is too opaque. Its pore gas, which raises Mars's
+    inertia to about 200 against the vacuum's 55, its frost's albedo (KRC's 0.65), the slab's own
+    heat capacity, dust and the slab's thinning with height are not modelled (research-c's D7; the
+    relief ruling's R5); with Γ 200 research-c found Mars's equatorial arithmetic mean 15 K warmer
+    and its radiative mean unchanged.
+  - _The reference Mars's albedo_ is plan 14's temperate 0.294, Earth's, against Mars's Bond
+    albedo of about 0.25 (from memory). It is plan 14's surface-state table. For plan 14.
+  - _A frost that lasts the year_ grows without bound (its mass is not output, and no reference
+    world's does: Mars's caps clear in summer without a frost albedo), and the bulk gas is an
+    endless reservoir: a thin air locked 1:1 would condense onto its nightside without collapsing.
+    The step in which a frost runs out loses its remainder, under one step's flux. Lean: record.
+  - _The registry's inertia law_ (research-c's D3, for P14.T54.a's switch): the Gundlach–Blum
+    vacuum law at the reference form, uniform with depth, gives the lunar predawn about 87 K
+    against Diviner's 95 K; constant Γ 55 gives 96 K. The column's Γ follows plan 14's constant
+    until P14.T54.a moves both.
+  - _Ice inertia_ (research-c's D4): plan 14's provisional 20 against Ferrari and Lucas 2016's
+    Table 2 (Saturnian moons 3–39, Centaurs 5, TNOs 2) and their fit 275 D^−1.21. For P14.T49.c.
+  - _The albedo has no incidence law_ (research-c's D5). Hayne et al.'s law, which Diviner needs to
+    cool the high latitudes, is a roughness proxy whose effective Bond albedo is 0.227 at its A₀
+    0.12, not plan 14's 0.11; with a constant albedo the high latitudes' noons run warmer than
+    Diviner's.
+  - _No penumbra_ (research-c's D6): a close host's disc lights a locked world past its terminator
+    (Léger et al.'s 102.7° for a 30° host); the inputs carry no host angular radius.
+  - _A 3:2 world's longitude is averaged._ The phase columns give a band's climatology over local
+    time, so Mercury's hot and warm longitudes are one record, as T13.b settled for slow and
+    resonant rotators.
+  - _The convergence's 0.1 K stop_ (T13.a's finding) here meets the jump: the remaining drift is
+    the deep column's, of the order of the move; no measurement beyond the orbits' counts.
+  - _Unread_ (research-c's list): Spencer, Lebofsky and Sykes 1989 (the thermal parameter), the
+    bodies of Vasavada et al. 2012 and Williams et al. 2017 (their abstracts read), Putzig and
+    Mellon 2007, Putzig et al. 2005, Mellon et al. 2000, Howett et al. 2010, Rathbun et al. 2010,
+    Lellouch et al. 2011 and 2013, Seiff et al. 1985 (VIRA) and Presley and Christensen 1997; the
+    Venus figures of the isothermal model's time constant and the 3:2 Mercury test's elements are
+    from memory.
+- **Deviations in T13.d, as built** (2026-10-19; lane r09-climate, on `a0a2dd57`; the lane
+  agent's rulings for T13.d, built to decision-r09-t13d-normalisation and
+  decision-r09-t13a-relief §2–§3).
+  - _Files._ Five submodules the plan does not name: `steps/climate/normalise.rs` (the
+    corrections, their measures, the radiative solve and the grid's guard), `frost.rs` (the
+    frost and freezing points), `lapse.rs` (Γ, the one function R09.T13.g reuses), and
+    `ice.rs` and `seas.rs`, `pub(crate)` so that R09.T14.d can call their placements again; the
+    tests in `steps/climate/tests/normalisation.rs`, a child of `tests.rs`. `mod.rs` holds the
+    pipeline (`run`, which drops the diagnostics its private `run_diagnosed` returns; the sim
+    logs nothing, so the guard's counts are the tests'). Outside `steps/climate/`:
+    `chem/partition.rs`'s `sublimation_edge` became `pub(crate)` (plan 14's airless ice edge,
+    read at no partial pressure); `inputs.rs` took the ruling's §3 documentation; `reference.rs`
+    the Earth's water vapour (below); `steps/mod.rs` and `planetary/surface/mod.rs` their "What
+    is built" lines. No shared type changed and no field was added (`CellState`, `Working`,
+    `ClimateState`, `CoarseInputs`, the field's types); no stream, tag, golden or wire moved, and
+    `GENERATOR_VERSION` stays 22.
+  - _The plan's text._ R09.T13.d's rule and its Tests above are decision-r09-t13d-normalisation's
+    plan text (a), edited in as built; its items (c)–(g) and decision-r09-t13a-relief's plan text
+    are for a later docs batch (its item (b), T13.c's test, went in with T13.c).
+  - _The measures, as the interpolant reads them_ (the ruling's §2.3–§2.4). On a grid in
+    geographic coordinates E's equator and poles are the latitude cubic of the band means, which
+    is the bicubic interpolant's zonal mean exactly, since Catmull and Rom's kernel integrates to
+    one round a band; in tidally locked coordinates the equator is the interpolant's mean over 144
+    points round the geographic equator, 2.5° apart, and each pole its value there. DN sums the
+    grid's points by solid angle with μ at each centre. The shapes are P₂ and cos γ at each
+    point's centre in the body frame, and (a, b) come from the 2 × 2 system by Cramer's rule, so
+    that the conditions hold to rounding (the tests: 10⁻⁹ K). On the geographic grid E(P₂) is
+    −3/2 to 2 × 10⁻⁶, and on the locked grid DN(cos γ) is 4/3 to 8 × 10⁻⁵ (a P₁ field's coefficient
+    45.0036 K against 45).
+  - _The radiative solve_ is Gauss–Seidel sweeps c → a → b (the lane's choice of the ruling's
+    §2.4), each a bracketed Newton on its unknown's physical interval, where every sample of every
+    grid point and end column stays at or above 0 K and each condition is monotone; c's upper end
+    is where every sample reaches ((σT\*⁴ + `E_nf`) ÷ εσ)^¼, at which the mean must be met. Caps:
+    100 sweeps and 200 Newton steps; a bracket whose residual keeps its sign answers its nearer
+    end, which the guard then holds. Every reference world's residuals are under 10⁻⁹ K. The
+    moments' cube, ⟨(T + s)³⟩, gives the analytic slopes (`Moments::third_power_mean`).
+  - _The guard on every model._ T13.c clamped the pointwise models' interpolation alone
+    (`Overshoot::Kept` kept the energy-balance models' cubic); the ruling's guard clamps every
+    interpolated value, so `Overshoot` is gone and every record and field cell's value is held to
+    its stencil's range. It binds near every extremum of a smooth field (59,660 values of the
+    reference Earth's at level 8) and flattens the cells within half a band of a pole to the
+    last band's value, about ⅛ of the last two bands' difference. The ends' measure reads the
+    unclamped cubic, which is linear, so the solve stays exact. Every grid point's records are
+    then held at the model's lower bound (the night floor, or the radiative model's frost point),
+    and after the mean's constant every climate record again, a cell whose records all lie above
+    it left to the bit.
+  - _The mean's constant_ (arithmetic models) is the input less the field cells' solid-angle mean
+    of each cell's climate cell's sea-level temperature less Γ (`water_surface` − `sea_level`),
+    the client's view (R10's `classify.rs` formula), added to every climate cell's sea-level
+    temperature; reduction and re-expansion share Γ and the sea level only.
+  - _The ice's key at each field cell_ is read by the bicubic interpolant of the normalised grid
+    at the cell's centre, clamped, plus the constant less the lapse term (research-d §2.4's lean),
+    not its climate cell's record, so that a climate cell's four children do not tie. On the
+    arithmetic models K is (Σₖ wₖ T⁴)^¼ over its months, wₖ the months' shares of mean anomaly
+    (`month_edges`); on the radiative model the interpolant of each point's corrected
+    ⟨(T + s)⁴⟩^¼, its warmest month from its interpolated months.
+  - _The frost points_ read the registry's phase diagrams (P14.T49.b's curves, as T13.c's frost
+    floor does), not the held Clausius–Clapeyron columns: Mars's carbon dioxide at 147.66 K, the
+    airless water edge at 110.0 K and nitrogen's at 17.3 K; an ice whose row has no diagram is
+    ranked against its palette entry's transition.
+  - _The freezing point reads the total pressure._ Research-d §5 took the condensable's partial
+    pressure against its triple pressure; the lane reads the surface pressure: a liquid can lie
+    under an air whose total pressure exceeds the triple pressure and freezes at its melting line,
+    whatever its vapour's share. On the partial pressure a generated water world colder than
+    273 K, whose vapour plan 14 holds at saturation at its own mean, would take that mean as its
+    freezing point. Below the triple pressure (Mars's carbon dioxide) the freezing point is the
+    frost point, 147.65 K in the model's terms (273.15 + 147.66 − 273.16). "Supercritical" is plan
+    14's partition's phase for the condensate (`CondensatePhase::Supercritical`); with none, or no
+    diagram, the albedo is flat at 0.280 and the sea never freezes.
+  - _The ices' placement_ (`ice::place_ices`) takes the keys and the ices to leave out
+    (T13.f's cold-trapped ones, none until then), clears only the cells that name one of the ices
+    it places and leaves a cell holding another ice alone, so that T14.d may call it again after
+    T13.f. Whole cells go while the next one fits inside the area, then the next takes the
+    remainder; each placed area is its input to one cell.
+  - _The sea is the flood the relief step writes_ (decision-r09-t12-coarse R8, adopted
+    2026-10-19; the batch review's plan-conformance finding). A cell is under liquid where its
+    water surface lies strictly above its ground (`seas::under_sea`), whatever flooded it, R09.T12.e's
+    ocean or later R09.T14's lakes, and every reader takes that one predicate: the energy-balance
+    models' sea shares (`point_sea_shares`, and the zonal `sea_shares` the tests read, which as
+    first built ignored the "wet" test), the liquids, and the ices through the lapse term at each
+    cell's water surface. The climate step writes no water surface: as first built it took every
+    cell strictly below the sea level as sea and re-flooded it (`seas::water_surfaces`), which
+    would have undone T12.e's flood; that is gone, and the enclosed depressions below ℓ stay dry
+    until T14's lakes.
+    - `seas::place_liquids` shares the flooded cells by its rule as built, after the ice: one
+      liquid takes every flooded cell; several go by basin, coldest first, the most volatile liquid
+      first, each but the last taking the next cell while its area plus half the cell's stays
+      within its share, and the last the rest; volatility is the diagram's saturation pressure at
+      the mean surface temperature. The shares are of the flooded area: a liquid's target is its
+      fraction over the ocean fraction times the area flooded, not its own fraction of the sphere,
+      so where the flood exceeds the ocean fraction (R8's depressions that join at ℓ) each liquid
+      keeps its proportion.
+    - Inside one basin larger than a liquid's share (T12.e's one ocean, or a Titan whose seas join)
+      the liquids divide it by the cells' annual mean surface temperature, the most volatile taking
+      the coldest cells: the boundary is an isotherm of the annual mean, and one liquid's cells
+      need not be connected (methane at both cold ends of one Titan ocean, ethane between them).
+    - The rule reads only which cells are flooded, so it works over any flooded set and needs no
+      copy of T12.e's flood function (R8's last line: "T13.d's per-liquid placement should use
+      the same function").
+    - No output differs before T12.e, since every world is dry: the relief and crater steps write
+      each cell's water surface at its ground, and the sea level is the lowest elevation. Checked
+      in review: the working state after the step is the staged T13.d's bit for bit on the four
+      reference worlds through plates, relief and craters and on six hand-set worlds (the
+      Titan-like basins, the Venus-like continent, two locked Earths, a locked Moon and a 3:2
+      Mercury), by a digest not kept as a test.
+    - The tests that set a sea by hand now set its flood too (`tests::set_ground`: below the sea
+      level the water surface the sea level and the main liquid's entry, above it the ground and
+      none), and the Venus-like continent its water surface; the Titan-like test's four basins
+      stand for a hand-set flood (T14's lakes would supply such basins). A world with no liquid
+      and ground below its sea level stays dry
+      (`a_world_with_no_liquid_and_ground_below_its_sea_level_stays_dry`).
+  - _Before R09.T13.g._ decision-r09-t13a-relief §4 orders T13.g before T13.d, but the batch built
+    T13.a–d first (main's batch plan), so `lapse::lapse_rate_k_per_m` and the reference Earth's
+    vapour are T13.d's and T13.g reuses them. Until T13.g the model reads no relief and τ is
+    fitted to the sea-level steady state, not the surface mean, so c carries the difference.
+  - _Γ_ is α g ÷ `c_p`(`T_s`), α plan 14's `lapse_factor` over the inputs' gases by `SubstanceId`
+    and its climate condensable, `c_p` the energy-balance model's own air (`Air::of`, the
+    registry's mixture at the mean surface temperature, Earth's dry air where a gas is not a row,
+    and then the dry α); 0 with no pressure or no gases. The reference Earth's is 5.818 K km⁻¹;
+    the Venus-like test body's, on the reference Earth's gravity, 7.574 (Venus's own 8.87 m s⁻²
+    gives the ruling's 6.6); Mars's air would take 4.36 on the registry's `c_p` (research-d §4's
+    4.0 used the class values), but the radiative model writes 0.
+  - _The reference Earth's water vapour_ is P14.T13.c's rule for a generated Earth, its partial
+    pressure the held saturation pressure at the mean surface temperature
+    (`derive::atmosphere`'s greenhouse): 1.64 kPa at 288 K, x = 0.0167 of the 98.55 kPa, the dry
+    fractions scaled by 1 − x. Its air is now 28.78 g mol⁻¹ and 1,012.8 J kg⁻¹ K⁻¹ (the moist air
+    test reads them). T13.a's ERA-Interim test still passes as built: 9 orbits, τ 0.863 (was
+    0.868), global mean 288.38 K (was 288.53), worst 4.83 K at 58.75° S (was 4.89), +11.4 K at
+    76.25° S (was 11.3).
+  - _T13.a–c's tests_ that read `run` now read what T13.d writes: the geographic and radiative
+    step-writing tests the corrected fields; T13.b's locked-world test and T13.c's isothermal
+    test (the plan's "the isothermal model's own field, before T13.d imposes plan 14's
+    contrasts") the model's own field through `write_climate`; the locked Moon and the lava world
+    of the melt test take plan 14's own airless contrasts (the tests' `with_airless_contrasts`:
+    `T_eq` (q(0)^¼ − q(1)^¼) at the obliquity, and on a lock Cowan and Agol's (8/3)^¼ `T_eq` less
+    the floor), since the reference Moon's placeholders would move them by tens of kelvin. The
+    melt test still passes on them.
+  - _The corrections, as built_ (each world through the step alone from its initial state, all
+    land):
+
+    | World                                  | a (K)   | b (K) | c (K)  | Ices placed (share of the surface; cells)                                                                   |
+    | -------------------------------------- | ------- | ----- | ------ | ----------------------------------------------------------------------------------------------------------- |
+    | Earth (level 8)                        | 2.496   | —     | 8.051  | water 0.04100 of 0.041; 14,889, both caps, the south's to 67.5° S                                           |
+    | Mars (level 7)                         | −10.289 | —     | −0.958 | carbon dioxide 0.00060 of 0.0006, 66, all in the north; water 0.00700 of 0.007, 707, to 82.4° N and 83.6° S |
+    | Moon (level 6)                         | 39.391  | —     | 2.545  | none                                                                                                        |
+    | Ceres (level 5)                        | 21.544  | —     | 1.352  | none                                                                                                        |
+    | Moon-like, plan 14's contrasts         | −0.0012 | —     | 0.0068 | none                                                                                                        |
+    | locked lava world, plan 14's contrasts | −0.50   | −0.22 | −0.01  | none                                                                                                        |
+    | 90°, all land, warm (level 6)          | 34.92   | —     | 19.90  | water 0.25 of 0.25; a belt to ±15°                                                                          |
+
+  - _Tests and acceptance._ `cargo test -p hyperion-sim --lib planetary::surface::steps::climate`
+    runs 72 tests in 4.7 s at 8 threads, two ignored as slow (T13.b's), 14 of them T13.d's
+    (`tests::normalisation`) and 4 more in `frost`, `lapse` and `normalise`; the slowest of
+    T13.d's take 3.4 s (the 90° world and its twin), 2.4 s (the reference Earth at level 8) and
+    2.2 s (every reference world's guard) alone, at opt-level 2 on a shared machine (load 6).
+    `cargo test -p hyperion-sim --lib planetary::surface::` passes, 148 with three ignored
+    (36.5 s at 8 threads), the reference worlds through `coarse_pass` among them, and so do the
+    surface crate's reference-world tests (`tests/surface_material_worlds.rs`,
+    `surface_ground_worlds.rs`, `surface_albedo_worlds.rs`). The tests build every world from
+    `Working::initial` and set any relief by hand (the Titan-like sea, the Venus-like continent),
+    so R09.T12's relief moves only the `coarse_pass` figures (the reference worlds' corrections,
+    the Earth's ice and the surface crate's tests), none of T13.d's assertions.
+  - _The batch review's tests_ (2026-10-19): `ice::tests` (a placement clears its own ice, keeps
+    a cold trap's, and breaks ties by the warmest month, then the index); the guard after the
+    mean's constant (`the_guard_holds_a_cell_s_mean_and_re_bases_its_anomalies`); the dry world
+    above; the step run twice from one state to the same bits on the locked Moon, the Venus-like
+    body, the Titan-like basins and a one-month locked Earth
+    (`the_step_writes_the_same_bits_from_the_same_state`, 8–12 s with the seasonal locked Earth, so
+    that world is its own test, ignored as slow); and the airless lanes test on every clock (a
+    3:2 Mercury and a seasonal locked Moon added, every tally field compared). The Venus-like
+    relief check now holds the continent's area-weighted surface mean Γ × 3 km under the
+    lowlands' to 10⁻⁶ K (as built 22.720 589 K both, to 10⁻⁹), and the P₂ and P₁ coefficient
+    bounds are about twice the measured leakage: E(P₂) + 3/2 = 2.04 × 10⁻⁶ (bound 3 × 10⁻⁶), the
+    P₂ coefficient −28.000 038 against −28 (bound 2 × 10⁻⁶ of the 42 K), the P₁ coefficient
+    45.003 568 against 45 (bound 10⁻⁴ of the 60 K) and the locked Venus-like b 3.750 297 against
+    3.75 (bound 1.5 × 10⁻⁴ of it).
+- **Deferred findings (2026-10-13 rule)** (R09.T13.d; recorded, not ruled; each for "main"'s list).
+  - _From decision-r09-t13d-normalisation_ (its §1.5 and §2.9):
+    - D1. Accumulation and the melt season: the radiative key ices a dry continental interior
+      before a wet maritime island of slightly warmer mean; a mass-balance key may replace it once
+      T13.e's precipitation and R09.T12's oceans exist, with its own ruling.
+    - D2. A per-cell frost point from the surface pressure at the cell's height (Mars's carbon
+      dioxide 0.63 K km⁻¹, about 12 K over Tharsis; Pluto's Sputnik basin); it waits on R09.T12,
+      and the margin K − `T_f` is written for it.
+    - D3. Plan 14's Earth calibration: its 42 K is North, Cahalan and Coakley's P₂-fit contrast,
+      while its definition is its profile's ends (ERA-Interim's 43.3 K against 38.9 K); for plan
+      14's next revision, to say that 42 K calibrates the ends.
+    - D4. Plan 14's floor and emissivity conventions (research-c D1): its mean and zonal ends
+      leave out the floor's flux, its day–night includes it; T13.d follows each figure's own.
+    - D5. No air transport in the radiative model (research-c D8): on a `Transitional` world sent
+      to it, a and b stand in for plan 14's transport and redistribution.
+    - D6. The reference Mars's 214 K is of unstated kind and imposed as a brightness; if it is
+      arithmetic, the field's arithmetic mean runs about 5 K under it.
+    - D7. Mars's hemispheric asymmetry: the ruling expected the radiative key to split the ice
+      between the poles by their equal annual energy; as built every carbon dioxide cell lies in
+      the north (below).
+    - D8. Warm-start belts: Kilic et al. 2018 against Wilhelm et al. 2022; for plan 14.
+    - D9. R10's perennial snow (`classify.rs`, the warmest month at the point's height) inherits
+      the bare-ground summer on dry worlds; for R10's re-validation.
+  - _From decision-r09-t13a-relief_ (its §5):
+    - R1. Non-grey emission: a grey τ overstates the ground's share of the outgoing radiation, so
+      a cold plateau's runs warm; for the energy-balance model's next revision.
+    - R2. Water vapour's own scale height, about 2 km, is not modelled: τ_z thins every term as a
+      well-mixed gas.
+    - R3. Surface inversions (the polar winter's, the Antarctic plateau's) are in no
+      energy-balance model.
+    - R4. The tropopause: the lapse term is linear in height; ground above it would read plan
+      14's skin, in the model and the client alike.
+    - R5. The thin-air radiative model's elevation dependence (research-c D7): its slab's β
+      thinned by the ground's pressure.
+    - R6. Erosion's heights: T14 changes them modestly and the model is not re-run; T14.d
+      re-applies the lapse term and the mean (and may call `ice::place_ices` again).
+  - _The mean's constant is large on an all-land world._ The reference Earth all land, as the
+    field is until R09.T12, takes c = +8.05 K, and the warm 90° test world +19.9 K, where T13.a's
+    Earth with a synthetic sea ran 0.53 K over its steady state: τ is solved on the annual-mean
+    steady state, while the seasonal run on land's heat capacity is colder in its annual mean, its
+    winters' ice albedo outlasting the spring. Lean: record; R09.T13.g, which solves τ for the
+    surface mean, could solve it on the seasonal run's mean if seas do not bring c under a few
+    kelvin.
+  - _The reference airless worlds' contrasts are placeholders._ The reference Moon's 120 K and
+    Ceres's 55 K equator–pole contrasts are not plan 14's airless figures, T_eq (q(0)^¼ − q(1)^¼),
+    so T13.d warms their poles by about 39 and 22 K (a); the reference Mars's 55 K against its
+    field's ends cools its poles by 10 K, where the guard then holds 192 grid records at its frost
+    point. A Moon-like input under plan 14's own figures takes 0.007 K. Lean: the reference worlds
+    take plan 14's own contrasts, for their next science review (with D6).
+  - _Every ice cell's key lies above its frost point_ on Mars's carbon dioxide (66 of 66), the 90°
+    water belt (6,024 of 6,024), the 80° airless water and Pluto's nitrogen (all): the annual
+    radiative mean of bare ground exceeds the frost point wherever the ice's own buffering at it is
+    not modelled (Design note 3 places plan 14's area all the same). Lean: record, with D1.
+  - _Mars's carbon dioxide lies in the north alone_ (66 cells, poleward of the water's edges at
+    82.4° N and 83.6° S), and the reference Earth's water ice is 76% southern, to 67.5° S, its
+    aphelion winter the longer: both are the models' seasonal asymmetries under the radiative key,
+    where the ruling expected Mars's split (D7). Lean: record.
+  - _A librating lock's night is lit._ The locked Moon on its own orbit (e 0.0167, 1.5°) takes a
+    correction of up to 1.6 K, its b +0.86 K: its sun's libration lights the terminator, lifting
+    its night's brightness above plan 14's floor, which plan 14's fixed eyeball leaves dark; under
+    a still sun the correction is 0.41 K. For plan 14, with D4.
+  - _The liquids' order is a heuristic_ (closed rule, for the composition audit): the more
+    volatile liquid takes the colder basins (research-d §3), on no measured partition of Titan's
+    methane and ethane; the Titan-like test's methane fills its three polar basins (0.7499 of the
+    sea against 0.75) and its ethane the southern one, 1.7 K warmer.
+  - _The thin air's back radiation in polar night_ (ruled 2026-10-19, decision-r09-t13-thin-air:
+    deferred to the thin-air model's revision, R09.T13.h as proposed). The slab sends down
+    β ÷ (2 − εβ) of the month's absorbed sunlight, a surface's balance with its sunlight.
+    - A frosted polar night therefore gets none, and a sunlit frost gets the back radiation of the
+      sunlight it spends on sublimation.
+    - The slab's own balance, βε⟨σT_s⁴⟩ ÷ 2, would hold Mars's polar-night slab at 122.6 K, where
+      carbon dioxide's vapour pressure is 7.3 Pa. Kieffer's [46] bounds it at the frost point one
+      scale height up, 141.1 K, and its deficit falls as snow onto the cap.
+    - With the snow, the polar night's condensation is the column's outgoing radiation, 2% below the
+      present form's, not 13–25%.
+    - In a zonal prototype at the reference Mars's figures, the caps peak at 0.392 of the air under
+      the present form, against the bounded slab's 0.404 and the unbounded balance's 0.343. Their
+      swings are 0.330, 0.334 and 0.290, against Kelly et al. 2006's about 0.25. The north polar
+      frost clears at Ls 60 against the bounded slab's 63.
+    - The bounded slab would move about 7% of the band-months, those of the spring clearing at
+      70–86°, by up to 14 K, and the annual means by at most 1.1 K.
+    - It is to be calibrated with the frost's albedo, the high latitudes' inertia, the reservoir's
+      pressure and the air's transport over the cap. The revision builds it with them; the lean
+      alone (the unbounded balance) is refused.
+  - _No ocean heat transport_ (ruled 2026-10-19, decision-r09-t13-thin-air: deferred to the
+    energy-balance model's revision, R09.T13.i as proposed).
+    - Siler et al.'s D carries the atmosphere's transport alone (their forcing is the top's net flux
+      less the ocean's heat uptake), and Kaspi and Showman's slab ocean has none, the ocean carrying
+      a third of Earth's transport (their §2.1.2).
+    - Plan 14's D⊕ and its 42 K are Earth's total, and T13.d imposes them on the ends, so only the
+      profile's interior shape, the ice edge's latitude at fixed ends and a locked aquaplanet's
+      dayside lack the ocean.
+    - Not R09.T13.g, whose scope is the relief. Kaspi and Showman's sweep test stays without an ocean
+      term.
+  - _Plan 14's sidereal day_ (the batch review's science check; for main's docs batch).
+    `hooks/surface.rs`'s `EARTH_SIDEREAL_DAY` documentation (about lines 369–373) calls its
+    86,164.0989 s 2π over IERS's nominal rate, 7.292 115 × 10⁻⁵ rad s⁻¹, which gives 86,164.1006 s;
+    the constant is the stellar day itself. The transport's rotation ratio moves by 2 × 10⁻⁸.
+  - _The reference Earth's vapour_ (the batch review's science check): its partial pressure is
+    the held curve's 1.64 kPa at 288 K, 2.9% under IAPWS's 1.689 kPa (Wagner and Pruss 2002, which
+    P14.T54.a's phase diagram takes), which moves Γ by under 0.01 K km⁻¹; it follows the curve the
+    registry holds.
+  - _Unread or from memory_: Titan's methane share (about 5%), Saturn's 9.58 au, Pluto's year,
+    day and distance, nitrogen ice's density and methane's and ethane's triple points in the
+    tests' stand-in palette entries; Leighton and Murray 1966 and Hamilton et al. 2016 as the
+    ruling read them; that Titan's north-polar seas are the richer in methane (ethane identified in
+    Ontario Lacus, Brown et al. 2008, Nature 454, 607, title read).

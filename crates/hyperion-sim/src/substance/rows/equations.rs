@@ -1,22 +1,30 @@
-//! The liquids' reference equations of state beyond water's (plan 14, P14.T49.h's second step):
-//! methane, nitrogen, ethane, ammonia and carbon dioxide, the residual part of each one's
-//! dimensionless Helmholtz energy ([`HelmholtzResidual`]), for their isothermal compressibility
-//! and so their scattering (decision-r11-palette-liquids §1.8; decision-p14-t49h-liquids §9).
+//! The liquids' reference equations of state beyond water's (plan 14, P14.T49.h): methane,
+//! nitrogen, ethane, ammonia and carbon dioxide (its second step), and oxygen, argon, krypton,
+//! xenon, carbon monoxide, nitrous oxide and hydrogen sulphide (its step 2b), the residual part of
+//! each one's dimensionless Helmholtz energy ([`HelmholtzResidual`]), for their isothermal
+//! compressibility and so their scattering (decision-r11-palette-liquids §1.8;
+//! decision-p14-t49h-liquids §9; decision-p14-t49h-gas-index §1.2). Sulphur dioxide has none here:
+//! its scattering stays absent until a depolarisation is read (§4.3), so its equation would be
+//! read by nothing.
 //!
 //! Every coefficient is the published one as CoolProp's fluid files hold it (Bell, Wronski, Quoilin
 //! and Lemort 2014, Ind. Eng. Chem. Res. 53, 2498; master of 2026-10-14, the files the registry's
 //! phase diagrams read, under the MIT licence, `NOTICE`; their SHA-256 in plan 14's T49.h step 2
-//! record), each number written as the file's shortest round-trip decimal, in the paper's term
-//! order: CoolProp's carbon dioxide file rounds Span and Wagner's Table 31, printed to 14 figures,
-//! to 12 (an effect under 10⁻¹⁰). Each equation is checked against its paper's own table where the
-//! paper was read, and against NIST's Chemistry WebBook (SRD 69), whose fluid tables evaluate the
-//! same equations, where it was not: the isothermal compressibility `κ_T` = 1 ÷ [ρ (∂p ÷ ∂ρ)_T]
-//! that this crate computes is a table's `c_p` ÷ (`c_v` ρ w²), so a saturation table's heat
-//! capacities and sound speed check it at each of its saturated-liquid states (the tests in
-//! `liquid/tests.rs`).
+//! and step 2b records), each number written as the file's shortest round-trip decimal, in the
+//! paper's term order: CoolProp's carbon dioxide file rounds Span and Wagner's Table 31, printed to
+//! 14 figures, to 12 (an effect under 10⁻¹⁰). Each equation is checked against its paper's own
+//! table where the paper was read, and against NIST's Chemistry WebBook (SRD 69), whose fluid
+//! tables evaluate the same equations, where it was not: the isothermal compressibility `κ_T` = 1 ÷
+//! [ρ (∂p ÷ ∂ρ)_T] that this crate computes is a table's `c_p` ÷ (`c_v` ρ w²), so a saturation
+//! table's heat capacities and sound speed check it at each of its saturated-liquid states (the
+//! tests in `liquid/tests.rs`). Step 2b's seven papers were not read: their constants are
+//! CoolProp's reading of them, and the WebBook is their only check.
 //!
 //! The gas constant of each is the one its coefficients were fitted with, divided by the molar
-//! mass the paper takes, J kg⁻¹ K⁻¹.
+//! mass the paper takes, J kg⁻¹ K⁻¹. The WebBook evaluates Lemmon and Span 2006's equations
+//! (krypton, xenon, carbon monoxide, nitrous oxide and hydrogen sulphide) with CODATA 2014's R =
+//! 8.314 459 8 J mol⁻¹ K⁻¹ in place of the 8.314 472 they were fitted with, so its `κ_T` lies a
+//! constant 1.47 × 10⁻⁶ above theirs, the ratio of the two; each is kept with its own.
 
 use super::super::helmholtz::{
     AssociatingTerm, GaussianTerm, HelmholtzResidual, NonAnalyticTerm, PowerTerm,
@@ -313,5 +321,259 @@ pub(in crate::substance) const CARBON_DIOXIDE: HelmholtzResidual = HelmholtzResi
         NonAnalyticTerm::new(3.5, 0.925, 0.3, 0.726_086_323_499, 10.0, 275.0, 0.7, 0.3),
         NonAnalyticTerm::new(3.0, 0.875, 1.0, 0.055_068_668_612_8, 12.5, 275.0, 0.7, 0.3),
     ],
+    associating: &[],
+};
+
+/// Oxygen: Schmidt and Wagner 1985 (Fluid Phase Equilib. 19, 175), as Stewart, Jacobsen and Wagner
+/// 1991 present it (J. Phys. Chem. Ref. Data 20, 917), its residual, 32 power and exponential
+/// terms: `T_c` = 154.581 K, `ρ_c` = 13.63 mol dm⁻³, R = 8.314 34 J mol⁻¹ K⁻¹ and M = 31.9988 g
+/// mol⁻¹, as CoolProp's `Oxygen.json` holds them (its stated limits 2000 K and 80 megapascals; the
+/// papers' range was not read). Its `κ_T` reproduces the WebBook's evaluation of the same equation
+/// within 10⁻⁶ (3 × 10⁻¹¹ as run) at four saturated-liquid states from 54.37 to 127.21 K.
+pub(in crate::substance) const OXYGEN: HelmholtzResidual = HelmholtzResidual {
+    reducing_temperature: Kelvin::new(154.581),
+    reducing_density: KilogramsPerCubicMetre::new(13_630.0 * 0.031_998_8),
+    gas_constant_j_per_kg_k: 8.314_34 / 0.031_998_8,
+    power: &[
+        PowerTerm::new(0, 1, 0.0, 0.398_376_874_9),
+        PowerTerm::new(0, 1, 1.5, -1.846_157_454),
+        PowerTerm::new(0, 1, 2.5, 0.418_347_319_7),
+        PowerTerm::new(0, 2, -0.5, 0.023_706_207_11),
+        PowerTerm::new(0, 2, 1.5, 0.097_717_305_73),
+        PowerTerm::new(0, 2, 2.0, 0.030_178_912_94),
+        PowerTerm::new(0, 3, 0.0, 0.022_733_532_12),
+        PowerTerm::new(0, 3, 1.0, 0.013_572_540_86),
+        PowerTerm::new(0, 3, 2.5, -0.040_526_989_43),
+        PowerTerm::new(0, 6, 0.0, 0.000_545_462_851_5),
+        PowerTerm::new(0, 7, 2.0, 0.000_511_318_227_7),
+        PowerTerm::new(0, 7, 5.0, 2.953_466_883e-7),
+        PowerTerm::new(0, 8, 2.0, -8.687_645_072e-5),
+        PowerTerm::new(2, 1, 5.0, -0.212_708_258_9),
+        PowerTerm::new(2, 1, 6.0, 0.087_359_419_58),
+        PowerTerm::new(2, 2, 3.5, 0.127_550_919),
+        PowerTerm::new(2, 2, 5.5, -0.090_677_010_64),
+        PowerTerm::new(2, 3, 3.0, -0.035_400_842_06),
+        PowerTerm::new(2, 3, 7.0, -0.036_232_780_59),
+        PowerTerm::new(2, 5, 6.0, 0.013_276_992_9),
+        PowerTerm::new(2, 6, 8.5, -0.000_325_411_186_5),
+        PowerTerm::new(2, 7, 4.0, -0.008_313_582_932),
+        PowerTerm::new(2, 8, 6.5, 0.002_124_570_559),
+        PowerTerm::new(2, 10, 5.5, -0.000_832_520_623_2),
+        PowerTerm::new(4, 2, 22.0, -2.626_173_276e-5),
+        PowerTerm::new(4, 3, 11.0, 0.002_599_581_482),
+        PowerTerm::new(4, 3, 18.0, 0.009_984_649_663),
+        PowerTerm::new(4, 4, 11.0, 0.002_199_923_153),
+        PowerTerm::new(4, 4, 23.0, -0.025_913_504_86),
+        PowerTerm::new(4, 5, 17.0, -0.125_963_084_8),
+        PowerTerm::new(4, 5, 18.0, 0.147_835_563_7),
+        PowerTerm::new(4, 5, 23.0, -0.010_112_510_78),
+    ],
+    gaussian: &[],
+    non_analytic: &[],
+    associating: &[],
+};
+
+/// Argon: Tegeler, Span and Wagner 1999 (J. Phys. Chem. Ref. Data 28, 779), its residual, 37 power
+/// and exponential terms and 4 Gaussian: `T_c` = 150.687 K, `ρ_c` = 535.6 kg m⁻³, R =
+/// 8.314 51 J mol⁻¹ K⁻¹ and M = 39.948 g mol⁻¹, as CoolProp's `Argon.json` holds them (its stated
+/// limits 2000 K and 1000 megapascals; the paper's range was not read). Its `κ_T` reproduces the
+/// WebBook's evaluation of the same equation within 10⁻⁶ at four saturated-liquid states, 83.81,
+/// 99.775, 115.74 and 131.705 K: within 7 × 10⁻⁹ as run at those four, at most 6.7 × 10⁻⁹ (the
+/// lane's `step2b.json`, its per-state rows; 1.0 × 10⁻⁸ at 147.67 K, outside them).
+pub(in crate::substance) const ARGON: HelmholtzResidual = HelmholtzResidual {
+    reducing_temperature: Kelvin::new(150.687),
+    reducing_density: KilogramsPerCubicMetre::new(535.6),
+    gas_constant_j_per_kg_k: 8.314_51 / 0.039_948,
+    power: &[
+        PowerTerm::new(0, 1, 0.0, 0.088_722_304_990_011),
+        PowerTerm::new(0, 1, 0.25, 0.705_148_051_672_98),
+        PowerTerm::new(0, 1, 1.0, -1.682_011_565_409),
+        PowerTerm::new(0, 1, 2.75, -0.149_090_144_314_86),
+        PowerTerm::new(0, 1, 4.0, -0.120_248_046_009_4),
+        PowerTerm::new(0, 2, 0.0, -0.121_649_787_985_99),
+        PowerTerm::new(0, 2, 0.25, 0.400_359_336_267_52),
+        PowerTerm::new(0, 2, 0.75, -0.271_360_626_991_29),
+        PowerTerm::new(0, 2, 2.75, 0.242_119_245_796_45),
+        PowerTerm::new(0, 3, 0.0, 0.005_788_958_318_557),
+        PowerTerm::new(0, 3, 2.0, -0.041_097_335_615_341),
+        PowerTerm::new(0, 4, 0.75, 0.024_710_761_541_614),
+        PowerTerm::new(1, 1, 3.0, -0.321_813_917_507_02),
+        PowerTerm::new(1, 1, 3.5, 0.332_300_176_957_94),
+        PowerTerm::new(1, 3, 1.0, 0.031_019_986_287_345),
+        PowerTerm::new(1, 4, 2.0, -0.030_777_086_002_437),
+        PowerTerm::new(1, 4, 4.0, 0.093_891_137_419_581),
+        PowerTerm::new(1, 5, 3.0, -0.090_643_210_682_031),
+        PowerTerm::new(1, 7, 0.0, -0.000_457_783_492_766_54),
+        PowerTerm::new(1, 10, 0.5, -8.265_972_902_519_7e-5),
+        PowerTerm::new(1, 10, 1.0, 0.000_130_134_156_031_47),
+        PowerTerm::new(2, 2, 1.0, -0.011_397_840_001_996),
+        PowerTerm::new(2, 2, 7.0, -0.024_455_169_960_535),
+        PowerTerm::new(2, 4, 5.0, -0.064_324_067_175_955),
+        PowerTerm::new(2, 4, 6.0, 0.058_889_471_093_674),
+        PowerTerm::new(2, 8, 6.0, -0.000_649_335_521_129_65),
+        PowerTerm::new(3, 3, 10.0, -0.013_889_862_158_435),
+        PowerTerm::new(3, 5, 13.0, 0.404_898_392_969_1),
+        PowerTerm::new(3, 5, 14.0, -0.386_125_195_947_49),
+        PowerTerm::new(3, 6, 11.0, -0.188_171_423_322_33),
+        PowerTerm::new(3, 6, 14.0, 0.159_776_475_964_82),
+        PowerTerm::new(3, 7, 8.0, 0.053_985_518_513_856),
+        PowerTerm::new(3, 7, 14.0, -0.028_953_417_958_014),
+        PowerTerm::new(3, 8, 6.0, -0.013_025_413_381_384),
+        PowerTerm::new(3, 9, 7.0, 0.002_894_869_677_577_8),
+        PowerTerm::new(4, 5, 24.0, -0.002_264_713_430_479_6),
+        PowerTerm::new(4, 6, 22.0, 0.001_761_645_619_636_8),
+    ],
+    gaussian: &[
+        GaussianTerm::new(2, 3.0, 0.005_855_245_448_277_4, 20.0, 250.0, 1.11, 1.0),
+        GaussianTerm::new(1, 1.0, -0.692_519_082_700_28, 20.0, 375.0, 1.14, 1.0),
+        GaussianTerm::new(2, 0.0, 1.531_549_003_051_6, 20.0, 300.0, 1.17, 1.0),
+        GaussianTerm::new(3, 0.0, -0.002_738_044_744_978_3, 20.0, 225.0, 1.11, 1.0),
+    ],
+    non_analytic: &[],
+    associating: &[],
+};
+
+/// Krypton: Lemmon and Span 2006 (J. Chem. Eng. Data 51, 785), its short form, its residual, 12
+/// power and exponential terms: `T_c` = 209.48 K, `ρ_c` = 10.85 mol dm⁻³, R = 8.314 472 J mol⁻¹
+/// K⁻¹ and M = 83.798 g mol⁻¹, as CoolProp's `Krypton.json` holds them (its stated limits 750 K and
+/// 200 megapascals; the paper's range was not read). Its `κ_T` meets the WebBook's at four
+/// saturated-liquid states from 115.78 to 182.9125 K within 2 × 10⁻⁶, and, scaled by the ratio of
+/// R to CODATA 2014's 8.314 459 8, which the WebBook evaluates it with, within 10⁻⁹.
+pub(in crate::substance) const KRYPTON: HelmholtzResidual = HelmholtzResidual {
+    reducing_temperature: Kelvin::new(209.48),
+    reducing_density: KilogramsPerCubicMetre::new(10_850.0 * 0.083_798),
+    gas_constant_j_per_kg_k: 8.314_472 / 0.083_798,
+    power: &[
+        PowerTerm::new(0, 1, 0.25, 0.835_61),
+        PowerTerm::new(0, 1, 1.125, -2.372_5),
+        PowerTerm::new(0, 1, 1.5, 0.545_67),
+        PowerTerm::new(0, 2, 1.375, 0.014_361),
+        PowerTerm::new(0, 3, 0.25, 0.066_502),
+        PowerTerm::new(0, 7, 0.875, 0.000_193_1),
+        PowerTerm::new(1, 2, 0.625, 0.168_18),
+        PowerTerm::new(1, 5, 1.75, -0.033_133),
+        PowerTerm::new(2, 1, 3.625, -0.150_08),
+        PowerTerm::new(2, 4, 3.625, -0.022_897),
+        PowerTerm::new(3, 3, 14.5, -0.021_454),
+        PowerTerm::new(3, 4, 12.0, 0.006_939_7),
+    ],
+    gaussian: &[],
+    non_analytic: &[],
+    associating: &[],
+};
+
+/// Xenon: Lemmon and Span 2006 (J. Chem. Eng. Data 51, 785), its short form, its residual, 12 power
+/// and exponential terms: `T_c` = 289.733 K, `ρ_c` = 8.4 mol dm⁻³, R = 8.314 472 J mol⁻¹ K⁻¹ and M
+/// = 131.293 g mol⁻¹, as CoolProp's `Xenon.json` holds them (its stated limits 750 K and 700
+/// megapascals; the paper's range was not read). Its `κ_T` meets the WebBook's at four
+/// saturated-liquid states from 161.41 to 253.3075 K within 2 × 10⁻⁶, and within 10⁻⁹ scaled by
+/// the ratio of the two R, as [`KRYPTON`]'s does.
+pub(in crate::substance) const XENON: HelmholtzResidual = HelmholtzResidual {
+    reducing_temperature: Kelvin::new(289.733),
+    reducing_density: KilogramsPerCubicMetre::new(8_400.0 * 0.131_293),
+    gas_constant_j_per_kg_k: 8.314_472 / 0.131_293,
+    power: &[
+        PowerTerm::new(0, 1, 0.25, 0.831_15),
+        PowerTerm::new(0, 1, 1.125, -2.355_3),
+        PowerTerm::new(0, 1, 1.5, 0.539_04),
+        PowerTerm::new(0, 2, 1.375, 0.014_382),
+        PowerTerm::new(0, 3, 0.25, 0.066_309),
+        PowerTerm::new(0, 7, 0.875, 0.000_196_49),
+        PowerTerm::new(1, 2, 0.625, 0.149_96),
+        PowerTerm::new(1, 5, 1.75, -0.035_319),
+        PowerTerm::new(2, 1, 3.625, -0.159_29),
+        PowerTerm::new(2, 4, 3.625, -0.027_521),
+        PowerTerm::new(3, 3, 14.5, -0.023_305),
+        PowerTerm::new(3, 4, 12.0, 0.008_694_1),
+    ],
+    gaussian: &[],
+    non_analytic: &[],
+    associating: &[],
+};
+
+/// Carbon monoxide: Lemmon and Span 2006 (J. Chem. Eng. Data 51, 785), its short form, its
+/// residual, 12 power and exponential terms: `T_c` = 132.86 K, `ρ_c` = 10.85 mol dm⁻³, R =
+/// 8.314 472 J mol⁻¹ K⁻¹ and M = 28.0101 g mol⁻¹, as CoolProp's `CarbonMonoxide.json` holds them
+/// (its stated limits 500 K and 100 megapascals; the paper's range was not read). Its `κ_T` meets
+/// the WebBook's at four saturated-liquid states from 68.16 to 114.69 K within 2 × 10⁻⁶, and within
+/// 10⁻⁹ scaled by the ratio of the two R, as [`KRYPTON`]'s does.
+pub(in crate::substance) const CARBON_MONOXIDE: HelmholtzResidual = HelmholtzResidual {
+    reducing_temperature: Kelvin::new(132.86),
+    reducing_density: KilogramsPerCubicMetre::new(10_850.0 * 0.028_010_1),
+    gas_constant_j_per_kg_k: 8.314_472 / 0.028_010_1,
+    power: &[
+        PowerTerm::new(0, 1, 0.25, 0.905_54),
+        PowerTerm::new(0, 1, 1.125, -2.451_5),
+        PowerTerm::new(0, 1, 1.5, 0.531_49),
+        PowerTerm::new(0, 2, 1.375, 0.024_173),
+        PowerTerm::new(0, 3, 0.25, 0.072_156),
+        PowerTerm::new(0, 7, 0.875, 0.000_188_18),
+        PowerTerm::new(1, 2, 0.625, 0.194_05),
+        PowerTerm::new(1, 5, 1.75, -0.043_268),
+        PowerTerm::new(2, 1, 3.625, -0.127_78),
+        PowerTerm::new(2, 4, 3.625, -0.027_896),
+        PowerTerm::new(3, 3, 14.5, -0.034_154),
+        PowerTerm::new(3, 4, 12.0, 0.016_329),
+    ],
+    gaussian: &[],
+    non_analytic: &[],
+    associating: &[],
+};
+
+/// Nitrous oxide: Lemmon and Span 2006 (J. Chem. Eng. Data 51, 785), its short form, its residual,
+/// 12 power and exponential terms: `T_c` = 309.52 K, `ρ_c` = 10.27 mol dm⁻³, R =
+/// 8.314 472 J mol⁻¹ K⁻¹ and M = 44.0128 g mol⁻¹, as CoolProp's `NitrousOxide.json` holds them (its
+/// stated limits 525 K and 50 megapascals; the paper's range was not read). Its `κ_T` meets the
+/// WebBook's at four saturated-liquid states from 182.34 to 273.0825 K within 2 × 10⁻⁶, and within
+/// 10⁻⁹ scaled by the ratio of the two R, as [`KRYPTON`]'s does.
+pub(in crate::substance) const NITROUS_OXIDE: HelmholtzResidual = HelmholtzResidual {
+    reducing_temperature: Kelvin::new(309.52),
+    reducing_density: KilogramsPerCubicMetre::new(10_270.0 * 0.044_012_8),
+    gas_constant_j_per_kg_k: 8.314_472 / 0.044_012_8,
+    power: &[
+        PowerTerm::new(0, 1, 0.25, 0.880_45),
+        PowerTerm::new(0, 1, 1.25, -2.423_5),
+        PowerTerm::new(0, 1, 1.5, 0.382_37),
+        PowerTerm::new(0, 3, 0.25, 0.068_917),
+        PowerTerm::new(0, 7, 0.875, 0.000_203_67),
+        PowerTerm::new(1, 1, 2.375, 0.131_22),
+        PowerTerm::new(1, 2, 2.0, 0.460_32),
+        PowerTerm::new(1, 5, 2.125, -0.003_698_5),
+        PowerTerm::new(2, 1, 3.5, -0.232_63),
+        PowerTerm::new(2, 1, 6.5, -0.000_428_59),
+        PowerTerm::new(2, 4, 4.75, -0.042_81),
+        PowerTerm::new(3, 2, 12.5, -0.023_038),
+    ],
+    gaussian: &[],
+    non_analytic: &[],
+    associating: &[],
+};
+
+/// Hydrogen sulphide: Lemmon and Span 2006 (J. Chem. Eng. Data 51, 785), its short form, its
+/// residual, 12 power and exponential terms: `T_c` = 373.1 K, `ρ_c` = 10.19 mol dm⁻³, R = 8.314 472
+/// J mol⁻¹ K⁻¹ and M = 34.080 88 g mol⁻¹, as CoolProp's `HydrogenSulfide.json` holds them (its
+/// stated limits 760 K and 170 megapascals; the paper's range was not read). Its `κ_T` meets the
+/// WebBook's at four saturated-liquid states from 187.7 to 321.155 K within 2 × 10⁻⁶, and within
+/// 10⁻⁹ scaled by the ratio of the two R, as [`KRYPTON`]'s does.
+pub(in crate::substance) const HYDROGEN_SULPHIDE: HelmholtzResidual = HelmholtzResidual {
+    reducing_temperature: Kelvin::new(373.1),
+    reducing_density: KilogramsPerCubicMetre::new(10_190.0 * 0.034_080_88),
+    gas_constant_j_per_kg_k: 8.314_472 / 0.034_080_88,
+    power: &[
+        PowerTerm::new(0, 1, 0.25, 0.876_41),
+        PowerTerm::new(0, 1, 1.125, -2.036_7),
+        PowerTerm::new(0, 1, 1.5, 0.216_34),
+        PowerTerm::new(0, 2, 1.375, -0.050_199),
+        PowerTerm::new(0, 3, 0.25, 0.066_994),
+        PowerTerm::new(0, 7, 0.875, 0.000_190_76),
+        PowerTerm::new(1, 2, 0.625, 0.202_27),
+        PowerTerm::new(1, 5, 1.75, -0.004_534_8),
+        PowerTerm::new(2, 1, 3.625, -0.222_3),
+        PowerTerm::new(2, 4, 3.625, -0.034_714),
+        PowerTerm::new(3, 3, 14.5, -0.014_885),
+        PowerTerm::new(3, 4, 12.0, 0.007_415_4),
+    ],
+    gaussian: &[],
+    non_analytic: &[],
     associating: &[],
 };

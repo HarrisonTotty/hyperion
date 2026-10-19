@@ -50,9 +50,17 @@
 //! the header's structural spectrum by crust class, scales the elevation so that the whole
 //! surface's `σ_h` is plan 14's, the coarse craters' share through their degradation bytes, and
 //! places the sea: the connected ocean that covers plan 14's ocean fraction, filled with the main
-//! liquid. The later steps are still no-ops: run on any inputs, the pass yields that relief and
-//! sea, with no ice, under a still climate at the body's mean surface temperature, with the inputs'
-//! palette. R09.T13–T15 fill the rest and R09.T16 pins the reference worlds' fields.
+//! liquid. R09.T13.a built the climate step's zonal moist energy-balance model, which writes the
+//! climate cells' sea-level temperatures and monthly anomalies on a world whose regime names it
+//! ([`steps::climate`]); R09.T13.b extended it in longitude, 72 × 72 points, and to a locked world
+//! in tidally locked coordinates, 72 × 144 points lit by its host's beam. R09.T13.c built the
+//! other regimes: radiative equilibrium with thermal inertia for airless and thin-air worlds, a
+//! column of regolith per point with the day resolved and averaged over local time, and the
+//! isothermal surface of a Venus. R09.T13.d normalised the climate to plan 14's mean and signed
+//! contrasts and placed the ices, and the liquids on the relief step's flood, by substance, with
+//! the lapse rate. Erosion and the classes are still no-ops: run on any inputs, the pass yields
+//! that relief and sea, with their ices and liquids, under the climate its regime names, with the
+//! inputs' palette. R09.T13.e–T15 fill the rest and R09.T16 pins the reference worlds' fields.
 //!
 //! # Consumed items, by their paths in the code
 //!

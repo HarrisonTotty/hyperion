@@ -15465,9 +15465,10 @@ tables::gauss_legendre`.
          - **b's validity near a critical point** (§7(c)): `Derived` wherever q_max ξ > 0.1, by
            R12-08's correlation length; and a checked window for any member whose source states
            its range (§9).
-         - **The diagram rows with no R08 file** (O2, CO2, Ar, Kr, Xe, N2O, CO, SO2, H2S), whose
-           index comes by Lorentz–Lorenz from the gas refractivity. Until then they answer
-           `NotALiquid`.
+         - **The diagram rows with no R08 file** until R08.T5.k landed (O2, CO2, Ar, Kr, Xe, N2O,
+           CO, SO2, H2S), whose index comes by Lorentz–Lorenz from the gas refractivity. Until
+           then they answered `NotALiquid`; step 2b wired them from T5.k's files (its record,
+           below).
          - **The fill** of decision-r10-t10b-r09-t2e §7's condition 1: the testing worlds' and the
            reference Earth's water and methane records, with the sim test holding each copy to
            the bit. r09-water-refresh has landed (4908897b), so nothing now blocks it. It stays in
@@ -15651,7 +15652,7 @@ tables::gauss_legendre`.
       - Water's 1.333 and methane's 1.29 are held in the bin across 589 nm, within 5 × 10⁻⁴ and
         2 × 10⁻³.
     - **"Every liquid-range row has n and ρ"** holds over the six rows with columns. Steps 2–4
-      widen it.
+      widen it, and step 2b to the nine gas-derived rows.
   - _Accept_ gains `cargo test -p hyperion-sim --test liquids_golden` and
     `cargo test -p hyperion-fit materials`, which the entry's two filters do not select.
   - _Rulings taken_ (decision-p14-t49b-condensed, relayed by main on 2026-10-15; binding on the
@@ -16532,9 +16533,10 @@ tables::gauss_legendre`.
   decision-p14-t49h-liquids §5. The fill re-blesses `wire/payloads.golden` at 22, before the
   serve gate (decision-r10-t10b-r09-t2e §7, condition 2).
   - _Rulings taken_ (decision-p14-t49h-gas-index, 2026-10-16, on this step's two questions):
-    - **The nine rows with no R08 file stay `NotALiquid`.** R08.T5.k writes their nine liquid
-      files with R08's materials tool, each a measured index where one exists or a scaled molar
-      refraction (its §1.2 and §2.3); fallback (A), a Rust copy of R08's gas data, is refused.
+    - **The nine rows with no R08 file** (until R08.T5.k landed) **stay `NotALiquid`.** R08.T5.k
+      writes their nine liquid files with R08's materials tool, each a measured index where one
+      exists or a scaled molar refraction (its §1.2 and §2.3); fallback (A), a Rust copy of R08's
+      gas data, is refused.
       **Step 2b** wires them after T5.k lands: `liquid_optics`' manifest, `FILES` and `ITEMS` grow
       to sixteen files, the nine rows gain `LiquidOptics` (Ar, Kr and Xe with `index_checked`
       windows over Sinnock and Smith's tables), §5 refits the table and `liquids.golden` is
@@ -16542,7 +16544,7 @@ tables::gauss_legendre`.
       `None` and the wiring rides 23 → 24 (§1.3).
     - **Carbon dioxide's columns are built and not yet listed** (§1.3): its κ_T (Span and Wagner
       1996), surface tension and viscosity (Laesecke and Muzny 2017) are tested, and the row
-      answers `NotALiquid` until its index lands in step 2b.
+      answered `NotALiquid` until its index landed in step 2b (its record, below).
     - **The depolarisation is the liquid's, from an anisotropy ratio x** (§3–§4), an algorithm
       change made in this step: `LiquidScattering` carries x in place of a fixed δ, and at the
       record's state the sim takes `S_0` = ρ R T κ_T (the equation's own R, so 1 ÷ (1 + 2δφʳ_δ +
@@ -16693,12 +16695,13 @@ tables::gauss_legendre`.
     - **`hyperion-fit`'s `liquid_optics`:** `SUPERCOOLED`, `VFT_SAMPLES`, `VFT_SCAN`,
       `SupercooledFit`, `saturated_viscosities` and `fit_supercooled`; `render` takes the fits.
   - _The steps left_, in order:
-    1. **Step 2b, the nine rows** (decision-p14-t49h-gas-index §1.2), after R08.T5.k lands, as the
-       ruling above gives it. If R08's methane re-reduction (decision-p14-t49h-liquids §2.4)
-       lands after this fill, the fill is redone before the serve gate (§9.7); the bit tests
-       fail until it is. Carbon dioxide's columns join `LIQUIDS` then, and the other eight
-       rows take κ_T, σ, μ and b only where a ruled source exists (§4.3's x for their b; SO₂'s
-       stays absent).
+    1. **Step 2b, the nine rows** (decision-p14-t49h-gas-index §1.2), after R08.T5.k lands
+       (landed as c085cfff and 5622cb95), as the ruling above gives it (built: step 2b's record,
+       below). If R08's methane
+       re-reduction (decision-p14-t49h-liquids §2.4) lands after this fill, the fill is redone
+       before the serve gate (§9.7); the bit tests fail until it is. Carbon dioxide's columns
+       join `LIQUIDS` then, and the other eight rows take κ_T, σ, μ and b only where a ruled
+       source exists (§4.3's x for their b; SO₂'s stays absent).
     2. **Step 3, the solutions**, unchanged, now with §2.5's whole below-range rule for the
        components (the density's line, κ_T held, the index at the line's density, and this step's
        supercooled viscosity).
@@ -17525,3 +17528,709 @@ tables::gauss_legendre`.
     the table) keeps P14.T51.a's blended edges against the annual mean.
   - _SO₂, H₂S and CO_ have phase diagrams but no gas columns, so no inventory holds them and they
     take no traps: a closed set, for the composition audit.
+- **Deviations in P14.T49.h, as built: step 3, the solutions (`p14-liquids`, 2026-10-16).**
+  `GENERATOR_VERSION` stays 22. Nothing on the record reads `liquid_properties` before P14.T54.a
+  (decision-bump-plan-after-22 §1.2), so `liquids.golden` is re-blessed at 22. Nothing is
+  refitted: the 84.5 wt% acid file has been in `liquid_optics` since step 1, so `tables.lock`
+  does not move.
+  - _Rulings taken_ (decision-p14-t49h-step3-composition, 2026-10-16, on this step's contract
+    question and the two choices it recorded):
+    - **The naming contract** (§1, §2.1). A component is a registry row that is a neutral species
+      with a formula key: `H2O`, `NaCl`, `MgSO4`, `NH3`, `CH4`, `C2H6`, `N2` and `H2SO4`. A
+      solution row is never one, and a `Component` enum, a `SoluteKey` and a rowless formula key
+      are refused. `H2SO4` is no exception: its row is the molecule, and its liquid columns are
+      the aqueous acid's.
+    - **The perchlorates have no rows** (§1.3). `brine_naclo4` and `brine_mgclo4` hold their
+      solutes' constants in the crate, with no components, and their `Given` is
+      `CompositionNotModelled` until `NaClO4` and `Mg(ClO4)2` are appended (Risks, below). The
+      ruling has them resolve at `Reference`; with no index they do not (the parts' departures,
+      below).
+    - **The errors and their order** (§2.3): `NotALiquid`, `CompositionNotModelled`,
+      `ComponentNotModelled`, `CompositionOutOfRange`, `OutOfRange`, `NotModelled`, each naming
+      the first offence in the given order. A pure row's `Given` is the row at 1, its
+      `Reference`; a solution's may name any subset of its components, down to one; a melt's
+      stays `CompositionNotModelled`.
+    - **Determinism** (§1.5). Every sum runs over the model's own component list in registry
+      order, each fraction read from the composition (0 where absent), and `Reference` is the
+      path of `Given(reference)`, to the bit.
+    - **(a) The range's upper end** (§3) is the lowest critical point among the components the
+      composition holds, not the solution's whole list: Titan's reference below N2's 126.192 K, a
+      CH4–C2H6 subset below methane's 190.564 K, the brines and the acid below water's 647.096 K
+      (their salts and `H2SO4` have no diagram), `nh3_h2o` below NH3's 405.56 K. The lower end
+      stays the row's first melt.
+    - **(b) No anchor** (§4). A solution's density is its model's at every state, which amends
+      decision-p14-t49b-condensed §1.4's "equals" to "agrees within". A test holds each model at
+      its fixed value's temperature and the reference composition to §4's tolerances (in kg m⁻³:
+      `brine_nacl` ±0.3, `brine_mgso4` ±0.5, the perchlorates ±10 and ±15, `nh3_h2o` ±11, `H2SO4`
+      ±0.5, `ch4_c2h6_n2` 0.05), and a miss beyond them is recorded, not anchored away.
+  - _The solutions, as built_ (`substance/liquid/solution.rs`; every solution's record is
+    `Derived`):
+    - **Titan's seas** (`ch4_c2h6_n2`), an ideal mixture of CH4, N2 and C2H6, in registry order:
+      - the density by volume additivity, ρ = Σ xᵢ Mᵢ ÷ Σ xᵢ Mᵢ ÷ ρᵢ: 518.87 kg m⁻³ at 93.65 K;
+      - the index by Lorentz–Lorenz at that ideal molar volume, from each component's molar
+        refraction, in each bin;
+      - the surface tension by the Macleod–Sugden parachor in Weinaug and Katz's form, the vapour
+        neglected, each parachor from the component's own σ and molar volume at T (15.14 mN m⁻¹
+        at 93.65 K, `mixtures.json`);
+      - the viscosity by Grunberg–Nissan, every Gᵢⱼ 0 in a table keyed by row pairs, which a test
+        holds lists each pair once, so ln μ is the mole-fraction mean (0.197 mPa s at 93.65 K);
+      - the absorption by Beer's additivity in volume fractions, absent unless every component
+        present has one, so absent while N2's and C2H6's are;
+      - the scattering: ES–Cabannes's density term at κ_T,mix = Σ φᵢ κ_T,ᵢ (exact for an ideal
+        solution, not the mole-fraction mean), plus an ideal-solution concentration term from
+        multinomial composition fluctuations, with one δ, from the mixture's anisotropy ratio and
+        `S_iso` = `S_0,mix` (1 + `β_c` ÷ `β_d`), on both terms. It is 6.96 × 10⁻³ and
+        2.91 × 10⁻³ m⁻¹ in the bins across 443 and 545 nm at 93.65 K, about half of each the
+        concentration term's (the lane's derivation, `step3/mixtures/scripts/mixtures.py`,
+        SHA-256 7f0b8304…);
+      - the reference mole fractions, held as the derivation's exact values (0.739146, 0.164352
+        and 0.096503 to six decimals), since the six-decimal ones sum to 1.000001, which
+        `LiquidComposition::new` refuses; a test recomputes them from Mastrogiuseppe et al.'s
+        71/12/17 vol%;
+      - each component below its triple point (methane's 90.694 K and ethane's 90.368 K lie inside
+        the range from 71.15 K) by decision-p14-t49b-condensed §2.5: the density's line, the index
+        carried to it, κ_T held at the triple point, step 2's VFT viscosity, Mulero's σ and the
+        file's absorption held, each `Derived` and tested continuous at the triple point.
+    - **The chloride and sulphate brines** (`brine_nacl`, `brine_mgso4`), aqueous electrolytes of
+      water and the salt row, each member water's own record with the salt's empirical term:
+      - the density Laliberté and Cooper 2004's apparent specific volume (their supporting
+        information's coefficients), with the sim's water in place of theirs (its ancillary;
+        below 273.16 K §2.5's line);
+      - the viscosity Laliberté 2007's, ln μ by mass fraction of water's and the salt's term
+        (MgSO4's the corrected set), with the sim's R12-08 water;
+      - the index by additivity of specific refraction by mass, each salt's from the
+        International Critical Tables vol. VII's air-relative tables taken to vacuum (Ciddor's
+        standard air): NaCl 1.582 06 × 10⁻⁴ m³ kg⁻¹ at 589.3 nm (±0.3%), MgSO4 1.162 65 × 10⁻⁴
+        (±2%). Its dispersion is a stand-in shaped on Quan and Fry 1995's seawater (+4.4% at
+        380 nm, −1.9% at 780 nm), since a constant one gives the increment the opposite slope;
+      - the absorption: NaCl's is water's at its volume fraction, the salt transparent (Röttgers,
+        McKee and Utschig 2014's sea salt); MgSO4's is absent;
+      - σ and b absent;
+      - the composition from water alone to the density fit's top fraction (NaCl x 0.097867,
+        w 0.2603; MgSO4 x 0.049961, w 0.26), and the temperature from the eutectic (251.9 and
+        269.29 K) to below 647.096 K, each empirical member `Derived` outside its fit (the
+        densities 0–140 and 0–125 °C, the viscosities 5–154 and 15–150 °C);
+      - the references the eutectics' 23.3 wt% NaCl and 17.30 wt% MgSO4, x 0.085627 and 0.030360.
+    - **The perchlorate brines** (`brine_naclo4`, `brine_mgclo4`), `AwaitingSolute`: their
+      solutes' elements and molar masses held (122.436 and 223.197 g mol⁻¹, IUPAC 2021's abridged
+      weights, tested), and the stated density at every temperature (1,445 and 1,394 kg m⁻³),
+      `Derived` away from its state. With no index the record is `NotModelled` for
+      `RefractiveIndex` from the eutectic to below water's 647.096 K, and `OutOfRange` outside,
+      the range checked first.
+    - **Ammonia–water** (`nh3_h2o`), evaluated at its reference composition only (the eutectic's
+      0.321 NH3 by mass, x 0.333364): the density held at the stated 946 kg m⁻³ (Hammond,
+      Parmentier and Barr 2018, after Croft et al. 1988), `Derived` away from 176.15 K; the index
+      by Lorentz–Lorenz and σ by the parachor, both at that density's molar volume from water's
+      and ammonia's records, each below its triple point by §2.5 (1.3814 in the bin across
+      545 nm and 83.8 mN m⁻¹ at 176.15 K); μ, a and b absent. Any other composition, beyond
+      10⁻⁹, is `CompositionOutOfRange`, its `lowest` and `highest` both the reference's fraction.
+    - **The aqueous acid** (`H2SO4`), water and the acid's own row, 25–85 wt% (`H2SO4` x
+      0.057698–0.510025), its reference 75.0 wt% (x 0.355286 with the row's 98.072 g mol⁻¹), from
+      its 233.67 K first melt to below water's 647.096 K:
+      - the density Myhre, Nielsen and Saastad 1998's Eq. 2 with its printed T⁴ column dropped,
+        32 terms (chempy's transcription, matched by aerosolpy's and, but k₆,₁, CARMA's):
+        1,662.59 kg m⁻³ at 75 wt% and 300 K and 1,766.66 at 84.5 wt% (the ICT's 1,766.50), and
+        0.44 kg m⁻³ rms from the ICT vol. III at 70–85 wt% and 0–50 °C;
+      - the index by specific refraction linear in mass fraction between Palmer and Williams
+        1975's 75 and 84.5 wt% files at 300 K, each at the density form's value at its state, then
+        Lorentz–Lorenz to the record's ρ(w, T): both files reproduced at 300 K, 1.43599 at 550 nm,
+        80 wt% and 300 K, and extrapolated in w outside 75–84.5 wt%;
+      - the absorption by Beer's additivity by mass of the two files' upper bounds between them,
+        and outside them the larger mass coefficient held (75 wt%'s in every bin), so it steps at
+        84.5 wt%. Mixed by mass between the two acid files, it equals
+        decision-p14-t49b-condensed §1.4's volume-fraction Beer additivity up to the mixture's
+        excess volume, the two end members being solutions of the same pair rather than pure
+        components;
+      - σ Vehkamäki et al. 2002's Eq. 9, standing in for Myhre's own: 71.30 mN m⁻¹ at 80 wt% and
+        273 K against Myhre's 71.11;
+      - μ Williams and Long 1995's (as Shi et al. 2001 and three model codes print it), W held in
+        its stated 30–80 wt% (UKCA's rule): 11.437 mPa s at 75 wt% and 300 K; at 84.5 wt% and
+        25 °C, 15% under the ICT vol. V;
+      - b absent, its κ_T unsourced.
+
+      This retires step 1's deferred finding that the acid's index and density are held at their
+      300 K values. `H2SO4`'s `LiquidColumns::optics` is now `None`, its files the model's.
+
+  - _The parts' departures._
+    - **The perchlorate brines do not resolve.** No specific refraction of NaClO₄ or Mg(ClO₄)₂ was
+      read, so their `Reference` answers `NotModelled { RefractiveIndex }` from the eutectic to
+      below 647.096 K. This departs from the ruling's "resolve at `Reference`" and from the
+      entry's "every liquid-range row has n and ρ", which skips them. No producer reaches them
+      before 24 (decision-p14-t49h-step3-composition §1.3).
+    - **Water's viscosity below 273.16 K**, where R12-08 is not evaluated and water has no
+      supercooled form, is Laliberté's water equation (as `thermo` writes it, citing
+      Laliberté 2009) scaled to R12-08 at 273.16 K, a factor of 1.000 67, so a brine's viscosity
+      is continuous there (tested within 10⁻⁶); an unchecked extrapolation, `Derived`.
+    - **The mixture's `S_0`** takes each component equation's own specific gas constant by mass
+      fraction, exact in the pure limit; it lies 3 × 10⁻⁵ from the research's `k_B` `N_A` ÷ M̄.
+    - **The 10⁻⁹ composition slack** (`MOLE_FRACTION_SLACK`, `LiquidComposition::new`'s sum
+      tolerance) applies to every model's range, so a composition converted by other arithmetic
+      from a model's reference or a file's fraction resolves.
+    - **The components are fixed registry indices** in `rows/liquids.rs` (`WATER_ID`, row 2, to
+      `MAGNESIUM_SULPHATE_ID`, row 100), append-only, each tied to its key by a test.
+  - _Added public items_ (`substance::liquid`, each re-exported at `substance::` with its type):
+    - `LiquidColumns::components` (with a doctest) and `LiquidColumns::reference_composition`;
+    - `BuildLiquidCompositionError::NotASpecies`, checked first for each component;
+    - `ResolveLiquidError::ComponentNotModelled` and `ResolveLiquidError::CompositionOutOfRange`.
+
+    No other public item is added. `CompositionNotModelled` narrows to a `Given` on a row with no
+    components (a melt, the perchlorates), and `OutOfRange::below` to the lowest critical point
+    among the components the composition holds. No registry row is added: `registry.golden`,
+    `substances.json` and the 112 rows are unchanged. The mixing models are crate-private
+    (`LiquidConstitution`, `SolutionColumns`, `MixingModel` and their parts, the perchlorates'
+    solute constants among them).
+
+  - _Tests and golden._ `substance::liquid` has 78 tests with `--features testing`: step 2's 45,
+    less `the_acid_holds_its_stated_state`, whose 300 K hold is gone, and 34 new in
+    `liquid/solution/tests.rs`. `liquid.rs` gains three doctests (`components`, Titan's binary
+    and a 3.5 wt% brine), seven in all.
+    - **Changed** (six, `liquid/tests.rs`): the palette test ranges each row to its components'
+      lowest critical point, skips the perchlorates and expects an absorption among the solutions
+      only from the chloride brine and the acid; the refusals test gives water methane
+      (`ComponentNotModelled`), the acid alone (`CompositionOutOfRange`) and a perchlorate brine
+      water (`CompositionNotModelled`), where step 1 gave water itself; the order test takes the
+      same range; the window and optics-state tests skip rows with no optics, the acid's files
+      being the solution tests'; carbon dioxide's components are itself.
+    - **The contract** (18; ruling §5): `NotASpecies` for a solution, a lithology, an ion and the
+      electron, checked first; every neutral formula row has a molar mass; `ComponentNotModelled`
+      (water or ammonia given to Titan's seas, NaCl to water, `{H2O, CH4}` to a brine and to the
+      acid); `CompositionOutOfRange` past a brine's top fraction; the perchlorates'
+      `CompositionNotModelled`; one path, to the bit, across each row's range; each liquid's
+      components its rows, in registry order, every Grunberg–Nissan pair listed once; order
+      (Titan's, a brine's, the acid's and ammonia–water's permuted `Given` give the same bits,
+      the last added in step 2b's review); the pure limits
+      within 10⁻¹² relative (Titan's components alone at 95 and 110 K, a brine's water alone at
+      288.15, 298.15 and 350 K); (a), Titan's reference refused at 126.192 K and a CH4–C2H6
+      binary resolving at 150 K and refused at 190.564 K, both from 71.15 K, and the brines' to
+      647.096 K; (b), §4's table; and the reference compositions (Titan's from its volume
+      fractions, the eutectics', the acid's 75 wt%).
+    - **Titan** (5): 518.9 kg m⁻³ within 0.05 at 93.65 K, as Σ φᵢ ρᵢ; §2.5's continuation
+      continuous at each triple point (κ_T held to the bit); the sea below its components' triple
+      points; the mixture between its components; the scattering against the research's two
+      terms, each within 2 × 10⁻⁵ relative, and the record's total to the bit.
+    - **The brines** (2): the seawater oracle, +0.006 06 against Quan and Fry's +0.006 39 within
+      6 × 10⁻⁴; the viscosity continuous at 273.16 K within 10⁻⁶ (3.09 and 6.46 mPa s at
+      273.15 K). The density misses are pinned in (b)'s test, to ±0.01.
+    - **Ammonia–water** (2): its index and σ against the research within 10⁻⁹ relative at
+      176.15 K; any other composition refused, one within 10⁻⁹ of the reference resolving.
+    - **The acid** (7): both files reproduced at 300 K within 10⁻¹²; Myhre's density without its
+      T⁴ column against the research and the ICT (within 1.7 kg m⁻³), falling as it warms; its
+      80 wt% index (1.43599 at 550 nm within 10⁻⁵); the absorption bound between the files; the
+      viscosity's clamp (84.5 and 85 wt% are 80's, 25 is 30's, to the bit); Vehkamäki's σ; its
+      refusals in §2.3's order.
+    - `liquids.golden` is re-blessed at 22 (decision-bump-plan-after-22 §1.2). golden_diff against
+      step 2's commit (559c4d7b): 31 changed, all `H2SO4`'s at its 233.67 K first melt (its
+      density, index and absorption, no longer held at 300 K); 1,926 new; 146 gone, all
+      `H2SO4`'s (its old range points, now spread to water's 647.096 K, and its absent σ and μ).
+      No other row's value moves. The new lines are the solutions' reference mole fractions by
+      key; their records over their ranges and at stated temperatures (Titan's at 80, 90, 93.65
+      and 100 K, the brines' at 273.15–350 K, the acid's at 250–323.15 K); the perchlorates'
+      refusals, over the golden's 100 K span since they have no components; and a `[given]`
+      section, the brines at 3.5 wt% and the acid at 80 and 84.5 wt%, each composition by key.
+  - _Files beyond the task's:_ `substance/liquid/solution.rs` and
+    `substance/liquid/solution/tests.rs` (new), and `tests/liquids_golden.rs`; `rows/liquids.rs`
+    and `liquid/tests.rs` as step 1's.
+  - _The steps left_, in order:
+    1. **Step 4, the melts** (decision-p14-t49h-step4-melts): the lithologies' major oxides,
+       Lange and Carmichael's density, and the viscosity by Giordano and Russell 2007's MCAS
+       model for `anorthosite` and `feldspathic` and Giordano, Russell and Dingwell 2008's for
+       the rest. A melt's `Given` stays `CompositionNotModelled`. Molten S8 waits for T49.b's
+       last piece, its liquid density.
+    2. **Step 2b, the nine rows**, as step 2's record gives it: R08.T5.k has landed on the
+       integration branch (c085cfff and 5622cb95) (built: step 2b's record, below).
+  - _Accept_ as step 2's, and:
+    - `cargo test -p hyperion-sim --features testing substance::liquid::solution`;
+    - `cargo test -p hyperion-sim --doc substance::liquid` (the three new doctests).
+  - _Risks, from decision-p14-t49h-step3-composition §6_ (none changes this step's contract):
+    - **The perchlorate rows.** The task that first produces a perchlorate brine with a
+      composition, or first reads a perchlorate species, appends `NaClO4` and `Mg(ClO4)2`, after
+      the key grammar takes one level of parenthesised groups (`hyperion-surface`'s `SubstanceKey`,
+      the sim's `parse_formula` test helper and the client's `FORMULA_KEY`; main's to brief). The
+      two brines' `components()` then gain them, and a test holds the rows' molar masses to the
+      held constants.
+    - **A mixture model above the lightest component's T_c:** GERG-2008 (Kunz and Wagner 2012),
+      for CH4, C2H6 and N2, would give the ternary's density, κ_T, bubble point and critical
+      locus; an algorithm change, after 23. Until then a producer drops a trace of supercritical
+      N2 (T52.b's at 24).
+    - **A `Given` subset's own first melt below the row's transition** is refused below 71.15 K
+      (an N2-rich CH4–N2 liquid, for one): conservative, the clamp's upper-bound convention
+      (decision-p14-t49b-condensed §2.1).
+    - **Multi-solute aqueous models** (NaCl with NH3 for T51.g; chloride with sulphate and
+      perchlorate): widening a model's `components()` is data and an algorithm, not the contract
+      (24, T51.c with T51.g).
+    - **A mass-fraction constructor** for `LiquidComposition`, additive whenever a caller wants
+      it.
+- **Deferred findings (2026-10-13 rule)**, from P14.T49.h's step 3:
+  - _Titan's density_ is ideal mixing's, 1.4–1.9% low against the measured excess volumes of Hiza,
+    Haynes and Parrish 1977 and Hiza and Haynes 1980 (reprinted in NBS Monograph 172, read; −2.65%
+    for a Titan-like ternary at 105 K): about 526–529 kg m⁻³ at Ligeia, against 518.9. So its index
+    is about 0.004–0.005 low (molar refraction is additive with the real volume) and its parachor
+    σ about 6–8% low. Ideal mixing stands, as ruled (decision-p14-t49b-condensed §1.2).
+  - _Titan's viscosity_ takes every Grunberg–Nissan Gᵢⱼ 0: Diller 1982 and 1984 and Friend 1990
+    are closed and unread. |G| ≤ 0.5 would move μ by ±11% at Ligeia's composition (|G| ≤ 1,
+    ±21%). Tan, Kargel and Marion 2013, the cross-check decision-r11-palette-liquids §1.8 names, is
+    closed and unread.
+  - _Titan's scattering_: the ideal-solution concentration term about doubles b (2.9 times pure
+    methane's at 545 nm; the term is 1.1 times the density term at 93.65 K, 1.5 times at 71 K). It
+    is a lower bound, CH4–N2 deviating positively from Raoult's law. Kirkwood and Goldberg 1950
+    and Stockmayer 1950 (the fluctuations), and Coumou, Mackor and Hijmans 1964, Kerker 1969 and
+    Bhatia and Thornton 1970 (a binary's Rayleigh ratio), are unread.
+  - _Titan's upper range_: ideal mixing carries N2's near-critical κ_T, so b grows 1.7 times by
+    110 K and 4.4 times by 120 K, which a real dilute-N2 solution would not show; the `q_max` ξ
+    rule acts only within about 0.4 K of 126.192 K. The fixed composition above 93.65 K is a
+    stand-in: at 1.5 bar the liquid is at its bubble point there and would lose N2. A sourced
+    bound needs a bubble-point model and the surface pressure (GERG-2008, Risks above).
+  - _Titan's surface tension_: the parachor's variants span 15.04–15.62 mN m⁻¹ against the built
+    15.14 at 93.65 K (two of them on parachors from memory). Against Baidakov et al. 2011's
+    measured CH4–N2 (closed; read off Kumar and Chevrier 2020's figures, arXiv:2002.07126) it meets
+    an N2 mole fraction of 0.18 at 105 K to 0.0% and is 6.6% high at 0.437 and 95 K. With Jasper's
+    methane (step 2's conflict) the mixture would be about 6% higher. Macleod 1923, Sugden 1924,
+    Weinaug and Katz 1943, Grunberg and Nissan 1949 and Poling, Prausnitz and O'Connell are cited,
+    their texts unread.
+  - _Ammonia–water_: Croft, Lunine and Kargel 1988 and Kargel et al. 1991 are closed and unread, so
+    its density is held at 946 kg m⁻³ (Hammond, Parmentier and Barr 2018's text; their own Eq. 12,
+    a fit along the liquidus, gives 957), its viscosity is absent (their Eq. 13 gives 2.75 Pa s
+    against their text's about 5) and only its reference composition is evaluated. Its σ by the
+    parachor at T is 83.8 mN m⁻¹, against 76.8 with the components' triple-point parachors, and is
+    probably high (ammonia's enrichment at the surface; King, Hall and Ware 1930 and Rice 1928 are
+    closed). No measured index of concentrated aqueous ammonia was reached (ICT VII holds
+    0.5–1 N). Ideal volume additivity would be 4.6% low (902 kg m⁻³). κ_T is unsourced, so b is
+    absent. At one atmosphere the 32 wt% liquid boils near room temperature, far below the
+    range's 405.56 K.
+  - _The brines' densities_ miss T49.b's fixed values at their states by +0.735 (NaCl) and
+    −2.165 kg m⁻³ (MgSO4), beyond ±0.3 and ±0.5: pinned, not anchored (ruling §4). The ICT values
+    are likely the better: the model sits 0.76–0.88 above ICT's NaCl at 22–24 wt% and 1.7–2.3
+    below its MgSO4 at 16–18 wt% at 0 °C, yet meets its MgSO4 at 20 °C within 0.22, a bias at the
+    fits' lowest temperature. Laliberté's 2004, 2007 and 2009 sets agree within 0.07 for NaCl but
+    spread 3.7 kg m⁻³ for MgSO4.
+  - _The brines' water below 0 °C_ is §2.5's line: at the NaCl eutectic, 251.9 K, it gives 998.34
+    against Kell's 992.69 (Laliberté and Cooper's water), so the brine is about 6 kg m⁻³ high
+    there.
+  - _The brines' viscosities_ below 5 °C (NaCl) and 15 °C (MgSO4) are extrapolations: NaCl's meets
+    ICT V's 0 °C data within +0.8 to +1.6%; MgSO4's and both eutectics' are unchecked, and below
+    273.16 K they rest on Laliberté's water equation (Laliberté 2009 unread; its form as `thermo`
+    writes it) extrapolated into supercooled water. Laliberté 2007's "Additions and Corrections",
+    MgSO4's set, is unread as text.
+  - _The brines' surface tension_ is absent: Dutcher, Wexler and Clegg 2010 is closed. Its authors'
+    E-AIM evaluation, reduced in the lane's scratch (`step3/brines/`, to 0.04 and 0.007 mN m⁻¹),
+    would be an offline fit for `hyperion-fit`. E-AIM misses ICT IV by −0.26 to −0.46 mN m⁻¹, and
+    its supercooled water lies 0.886 mN m⁻¹ above R1-76 at 251.9 K, so a fit would apply E-AIM's
+    increments to the sim's water.
+  - _The brines' scattering_ is absent, their compressibility unsourced: Rogers and Pitzer 1982 and
+    Archer 1992 for NaCl are leads not transcribed; Millero, Ward, Lepple and Hoff 1974 for MgSO4
+    is closed.
+  - _The brines' optics_: NaCl's absorption extrapolates sea salt's transparency (Röttgers, McKee
+    and Utschig 2014, its abstract read and its coefficients through WOPP v3, at S about 40) to
+    the eutectic's 233 g kg⁻¹ (about −6% to +5% of water's at 700–750 nm, extrapolated linearly);
+    MgSO4's absorption is absent; MgSO4's refraction is ±2% from one 1 N point (ICT VII, 5.7 wt%)
+    extrapolated to 17.3 wt%, its dispersion NaCl's stand-in; NaCl's own dispersion (Tan and
+    Huang 2015) is unread.
+  - _The seawater oracle_: a 3.5 wt% NaCl brine's increment in the bin across 545 nm at 25 °C is
+    +0.006 06 against Quan and Fry's +0.006 39 at S = 35, sea salt being about 78% NaCl by mass: a
+    composition effect, not a model miss.
+  - _The perchlorate brines_ have no index, viscosity, absorption, compressibility or temperature
+    law of density: Hnědkovský and Hefter 2021 (NaClO4's density, closed), Lumme 1970 and the index
+    and viscosity leads in their sources (J. Am. Chem. Soc. 79, 1789; Fajans and Johnson 1942;
+    Lumme and Högnäs 1968; Miller and Doran 1956; Janz et al. 1970; Toner et al. 2014) are unread.
+  - _The acid's density_: Myhre et al. 1998's printed T⁴ column is wrong (+7.1 kg m⁻³ at 75 wt% and
+    300 K and +85 at 323 K against the ICT) and is dropped. Oca et al. 2018 report Lund Myhre et
+    al. 2003's refit with powers of t to 3, which is closed and unread. Above about 390 K at 25–40
+    and 84.5–85 wt% the cubic in t turns over and the density rises again, far beyond its fit.
+  - _The acid's surface tension_: Myhre et al. 1998's own fit, the ruled source, is unread;
+    Vehkamäki et al. 2002 stands in, +0.19 mN m⁻¹ on Myhre's 71.11 at 80 wt% and 273 K.
+  - _The acid's viscosity above 80 wt%_ holds W at 80 (UKCA's rule), 15% under the ICT vol. V at
+    84.5 wt% and 25 °C; the cubics extrapolated would be 32% over (the ICT's ratio there is 1.163),
+    and the research's lean, 80 wt%'s value times that ratio, was not taken. Williams and Long 1995
+    and Shi et al. 2001 are closed, read through CAM, GEOS-Chem and UKCA; Das et al. 1997 is
+    unread.
+  - _The acid's index_: Palmer and Williams's visible n sits about +0.006 above Biermann and Luo's
+    at 75 wt% and 610 nm, and +0.009 above the ICT's at 95.6 wt%; at 80 wt% the rule meets
+    Biermann's within 10⁻⁴. Extrapolated to 25–50 wt% it misses Palmer and Williams's own files by
+    −0.013 to −0.006 at 359.7–449.4 nm (within ±0.005 at 555.6–701.8 nm). Luo, Krieger and Peter
+    1996 is closed.
+  - _The acid's molar mass_ is the registry's 98.072 g mol⁻¹ (IUPAC 2021), not the research brief's
+    98.079: the reference's mole fraction moves by 2 × 10⁻⁵.
+  - _The acid's compressibility_ is unsourced (Valleau 1965, closed), so b is absent.
+  - _Not from this change_: `cargo doc -p hyperion-sim` with `-D warnings` fails on broken
+    intra-doc links in the galaxy, planetary, sky and stellar modules.
+- **Deviations in P14.T49.h, as built: step 4, the melts (`p14-liquids`, 2026-10-16).**
+  `GENERATOR_VERSION` stays 22. Nothing on the record reads `liquid_properties` or
+  `tables::liquid_optics` before P14.T54.a (decision-bump-plan-after-22 §1.2), so `liquids.golden`
+  is re-blessed at 22, and `liquid_optics` refitted by decision-p14-t49h-liquids §5 for R08's
+  basaltic glass.
+  - _Rulings taken_ (decision-p14-t49h-step4-melts, 2026-10-16, on this step's finding):
+    - **The two Al-rich rows take Giordano and Russell 2007's model** (GR07; J. Phys.: Condens.
+      Matter 19, 205148, Table 1's VFT column), a deviation from the entry's "Giordano et al.'s":
+      log₁₀ μ = −4.67 + B ÷ (T − C) on SiO₂, Al₂O₃, MgO and CaO in mol%, FeO(T) and MnO as MgO
+      mole for mole, Na₂O, K₂O, TiO₂, Cr₂O₃ and P₂O₅ dropped and the four renormalised, `Derived`
+      at every temperature. Giordano, Russell and Dingwell 2008 (GRD) is 2.5 log units low on
+      Scarfe et al. 1983's anorthite at 1,600 °C (−2.09 against 0.43 log Pa s): its Al₂O₃ term is
+      negative, and the alkali-balanced term that offsets it is zero in an alkali-free melt (§1).
+    - **Not Scarfe's fits** (§2.1, §4). Their Fulcher T₀ lies 110–130 K too high, so beyond their
+      spans (1,648–1,898 and 1,573–1,873 K) they run 0.5 log units too viscous at 2,400 K and 0.96
+      at 3,000 K against GR07; a measured analogue's fit would be `StandIn`, never `Measured` (§5).
+    - **The selection rule** (§2.3): a melt takes GR07 where its oxides hold Al₂O₃ ≥ 15 wt%,
+      Na₂O + K₂O ≤ 1 wt% and at most 3 wt% of the oxides the mapping drops; any other melt GRD.
+      Today it selects exactly `anorthosite` (Al₂O₃ 34.0, alkalis 0.53) and `feldspathic` (27.3,
+      0.63). A melt that meets the first two but not the third is a question for main, so its
+      viscosity is absent (`MeltViscosityModel::Unruled`); no row is there.
+    - **TiO₂'s volume** (§6): 23.16 cm³ mol⁻¹ at 1,673 K with dV/dT 7.246 × 10⁻³ cm³ mol⁻¹ K⁻¹
+      (MELTS's `liq_struct_data.h`, "2.316 J/bar, Lange and Carmichael (1990)"; Ghiorso and
+      Kress 2004's 23.448 corroborates it). DensityX's 28.32 at 1,773 K is another set's, recorded.
+  - _The rows' oxides_ (weight per cent; `substance/rows/melts.rs`, each with its source and
+    basis, and its GRD calibration where it lies outside):
+    - `basalt`: Alae lava lake's bulk (Peck 1978, USGS Professional Paper 935-B, p. B3), the row's
+      own source, its eleven oxides summing to 100.00;
+    - `lava_glass`: `basalt`'s, adopted (the glass is the quenched melt);
+    - `basalt_fe`: Apollo 15 pigeonite basalt 15597 (Lunar Sourcebook, Table A6.1, p. 261), a
+      named member standing in; `mars_dust` and `ferric` take it, adopted, as their solidus is;
+    - `komatiite`: SA 3091, the row's own sample, fused glass by microprobe (Arndt 1976, Carnegie
+      Inst. Washington Year Book 75, Table 17, col. 1; total 100.1);
+    - `basalt_reduced`: Mercury's low-Mg G2 (Charlier, Grove and Zuber 2013, EPSL 363, 50, Table
+      1), standing in, no Na₂O (XRS did not measure it);
+    - `granite`: G-1's arithmetic mean (Fairbairn et al. 1951, USGS Bulletin 980, Table 20), its
+      H₂O⁺ 0.37 dropped;
+    - `ultramafic`: McDonough and Sun 1995's pyrolite from its element abundances, standing in for
+      the row's harzburgite;
+    - `anorthosite`: the row's mode (95 wt% An95 with 5 wt% En60Fs40) by stoichiometry;
+    - `feldspathic`: the average Apollo 16 soil (Lunar Sourcebook, Table 7.15, col. 16).
+  - _The models_ (`substance/liquid/melt.rs`, crate-private, a fourth `LiquidConstitution`, `Melt`):
+    - **μ by GRD** (EPSL 271, 123): −4.55 + B ÷ (T − C), mol% with total iron as FeO, the
+      anhydrous oxides normalised to 100 − H₂O, the calculator's two-decimal coefficients
+      (`grd08.js`, SHA-256 44806e60…), 0.40 log units rms (Table 3); Cr₂O₃ and NiO dropped by the
+      normalisation, fluorine not carried. At 1,473.15 K: `basalt` 96 Pa s, `basalt_fe` 32,
+      `komatiite` 6.5, `basalt_reduced` 46, `granite` 1.6 × 10⁵ and `ultramafic` 9.3.
+    - **μ by GR07** for the two Al-rich rows: `anorthosite` 479 Pa s at its 1,533.15 K solidus and
+      33 at 1,673.15 K, `feldspathic` 75 and 7.4.
+    - **ρ by Lange and Carmichael's partial molar volumes** at 1,673 K with their dV/dT (MELTS's
+      file, SHA-256 206b298d…), ideal mixing of the nine oxides, MnO, P₂O₅, Cr₂O₃, NiO and H₂O
+      dropped and renormalised, FeO and Fe₂O₃ as analysed; the compressibility neglected at one
+      bar. `basalt` 2,700.4 kg m⁻³ at 1,473.15 K.
+    - **n and a** R08's `basaltic-glass.json` (Pollack, Toon and Khare 1973), held at room
+      temperature, not carried, since the glass's density is not stated: n 1.568 and a 1.06 × 10⁴
+      m⁻¹ in the bin across 545 nm.
+    - **σ** 0.36 N m⁻¹ for the basaltic rows (Walker and Mullins 1981, Contrib. Mineral. Petrol.
+      76, 455, its abstract: 350–370 dyn cm⁻¹ for four lavas at 1,473–1,773 K), 0.29 for
+      `granite` (Bagdassarov, Dorfman and Dingwell 2000, Am. Mineral. 85, 33, its abstract:
+      280–300 mN m⁻¹ at 1,473–1,673 K), and Walker and Mullins's 0.36 standing in for `komatiite`,
+      `ultramafic`, `anorthosite`, `feldspathic` and `basalt_reduced`, labelled.
+    - **No scattering** (decision-r11-palette-liquids §1.8). Every melt record is `StandIn`, from
+      the row's solidus with no upper end (`OutOfRange`'s `below` is `None`); above 2,073.15 K
+      (μ) and 1,873 K (ρ) the values extrapolate, stated in the module's note. A melt's `Given` is
+      `CompositionNotModelled` (decision-p14-t49h-step3-composition §2.3).
+  - _The rows without a melt record_ stay `NotALiquid`, each reason in `rows/melts.rs`'s note:
+    `ca_al_residue` (SiO₂-free, outside both models; GRD's B is negative there), `iron_nickel` (a
+    liquid metal's record is deferred), `phyllosilicate` (it dehydrates first), the seven
+    chondrites (their first melt is Fe–FeS and a partial melt, carried by a crust's row),
+    `cometary` (its organics pyrolyse first), `SiC`, `carbonaceous`, `MgSO4` and `CaCO3` (they
+    decompose) and `Na2CO3` (a carbonate liquid). **Molten S8** is left out: its liquid density
+    waits for T49.b's last piece, as `liquid.rs`'s module note says.
+  - **For P14.T54.a:** a melting crust entry of `ca_al_residue`, a chondrite, `iron_nickel` or
+    `Na2CO3` has `liquid` `None`: they have no melt record (`NotALiquid`). A lava world's lid crust
+    of `ca_al_residue` (its lag, as this plan's "Lids without a law" has it) would fail T54.a's
+    test that a lava world's lid crust entry carries a melt record; the bless note counts the
+    rest. Sent to main.
+  - _The refit_ (decision-p14-t49h-liquids §5): the binary built from the tree with the rows not
+    yet reading the glass, `tables/liquid_optics.rs` deleted and
+    `hyperion-fit run liquid_optics --since 22` run, then the rows wired and rebuilt; the table's
+    text did not move again.
+    - `liquid_optics` revision 2: `FILES` and the manifest gain `basaltic-glass.json`, `ITEMS`
+      `BASALTIC_GLASS_N` and `BASALTIC_GLASS_A` after ammonia's three; every other item's bits are
+      unchanged.
+    - **The glass is a solid with no `temperatureK`.** `HELD_SOLIDS` names it, `reduce` accepts it
+      with `Reduced::temperature_k` `None`, and the table holds no temperature item for it, so no
+      state is invented; the sim never carries its index.
+    - `tables.lock`: only `liquid_optics`' entry moves (revision 1 → 2, `inputs_sha256` 531f0a16…
+      → 3dbf0dfb…, `body_sha256` 5963b3d1… → d6240d06…, the acceptance text; the fingerprint
+      unchanged), with `tables/mod.rs`'s revision. `hyperion-fit check` passes (32 fresh).
+  - _The parts' departures._
+    - **Every oxide's molar mass is the registry's**, its elements' IUPAC 2021 abridged weights,
+      not GRD's calculator's or the research's CIAAW masses. B and C move by under 0.5 K and ρ by
+      under 0.01 kg m⁻³ (Alae 2,713.28 at 1,403.15 K either way). `anorthosite` and `ultramafic`'s
+      oxides are recomputed so (SiO₂ 44.839 and 44.9259 against the research's 44.84 and 44.9266).
+    - **TiO₂'s dV/dT is 7.246 × 10⁻³**, as the MELTS file prints it; DensityX's Table 1 and the
+      ruling round it to 7.24.
+    - **Fe₂O₃ counts as FeO(T)** in GR07's mapping, two FeO a mole, and so not among §2.3's
+      dropped oxides; no row has Fe₂O₃ and meets the rule's first two conditions.
+    - **GR07's Table A.2 test compares at the table's printed precision**: stoichiometric
+      diopside's B is 4,488.3, 1.3 from the "ANDI" rows' 4,487, which are analysed experimental
+      melts; rounded, it lies within 1. Anorthite gives 5,467.4 and 797.5 exactly.
+    - **Scarfe's Table 1 is typed whole**, all nine compositions and 75 points as the ruling's
+      checks read them, not only An, Di20 and Di30.
+    - **The golden pins the melts at 1,473.15, 1,673.15, 2,073.15 and 3,000 K** beside the
+      solidus, the temperatures GRD's examples and the research evaluate at; a temperature below
+      a row's solidus pins its refusal (`anorthosite` and `feldspathic` at 1,473.15 K).
+  - _Added public items_: none in `hyperion-sim` (the models, `Oxide`, `SilicateMelt` and
+    `HeldOptics` are crate-private). In `hyperion-fit`, `tasks::liquid_optics::HELD_SOLIDS`, and
+    `Reduced::temperature_k` becomes `Option<f64>`.
+  - _Tests and golden._ `substance::liquid` has 94 tests with `--features testing`, 16 new in
+    `liquid/melt/tests.rs`; the doctests stay seven.
+    - **GRD** (3): Table 4's Eifel basanite (B 4,457.2 and C 668.8 within 1 of 4,457 and 669, log
+      μ 0.992 at 1,473.15 K within 0.01 of 0.993); Table 2's andesite with 2 wt% water (B 7,720.9,
+      C 334.4, log μ 3.676 at 1,273 K); `basalt` at 1,473.15 K 0.28 log units above Shaw et al.
+      1968's about 50 Pa s for the Makaopuhi tholeiite, inside GRD's 0.40.
+    - **GR07** (4): Table A.2's anorthite and diopside; Scarfe et al. 1983's Table 1 at 0.182 rms
+      over 75 points, every point within 0.40 and anorthite at 1,873.15 K 0.413 against 0.433; the
+      two rows against Scarfe's An100 fit (within 0.13 over 1,648–1,898 K) and the Di20–Di30
+      interpolation at the soil's 17.47 mol% Al₂O₃ (within 0.35 over 1,573–1,873 K); monotonic in
+      T from the solidus to 10,000 K, above 10⁻⁴·⁶⁷ Pa s.
+    - **The rule** (1): exactly the two rows, each row citing the model it takes, and the rule's
+      edges (15 wt% and 1 wt% inside; a third condition failed is `Unruled`, its μ absent).
+    - **ρ** (1): Alae's melt at 1,130 °C, 2,713.3 kg m⁻³ against Peck 1978's 2,740 for the melt
+      fraction (p. B37; ±30 on the bulk), within 30 and within 0.5 of the research's.
+    - **The rows** (7): the oxide molar masses; each row's oxides once, positive and summing to its
+      source's total within 1 wt% of 100 (G-1 99.57 to the soil's 100.71); the rows without a melt
+      record, and S8, `NotALiquid`; a melt's `Given` `CompositionNotModelled` before the range; the
+      range from the solidus with no upper end; each record its models' and the held glass's, and
+      at 1,673.15 K the lane's independent oracle within 10⁻⁹ log units and 10⁻⁶ kg m⁻³; σ the
+      stated constants.
+    - **Changed** (2): the palette test expects the melts' absorption; the components test's match
+      gains `Melt`. `hyperion-fit`'s `liquid_optics` gains `the_held_glass_has_no_temperature`,
+      and its items and provenance tests take the glass.
+    - `liquids.golden` is re-blessed at 22 (decision-bump-plan-after-22 §1.2;
+      decision-p14-t49h-liquids §5). golden_diff against HEAD (dd04ed0d): 1,874 lines added, the
+      eleven melts at their solidus and the four temperatures (52 records, two refusals); no line
+      gone and no value moved. The script reports two of `brine_nacl`'s reference lines as gone
+      and new: its labels key on the preceding line, which `mars_dust`'s record now is. Its
+      verdict flags "changed without a bump", the ruled re-bless at 22.
+  - _Files beyond the task's_: `substance/liquid/melt.rs`, `substance/liquid/melt/tests.rs` and
+    `substance/rows/melts.rs` (new); `substance/rows.rs` (the module), `rows/liquids.rs`
+    (`LIQUIDS`, 23 rows), `liquid/tests.rs` and `liquid/solution/tests.rs`; `hyperion-fit`'s
+    manifest, `tables.lock` and the sim's `tables/mod.rs`; `tests/liquids_golden.rs`.
+  - _The steps left_, in order:
+    1. **Step 2b, the nine rows**, as step 2's record gives it: R08.T5.k has landed on the
+       integration branch (c085cfff and 5622cb95) (built: step 2b's record, below).
+    2. R08's re-reduction of methane's visible k (decision-p14-t49h-liquids §2.4), refitted by
+       §5, with the fill redone before T54.a and the serve gate (§9.7).
+  - _Accept_ as step 3's, and:
+    - `cargo test -p hyperion-sim --features testing substance::liquid::melt`;
+    - `cargo test -p hyperion-fit liquid_optics`; `cargo run -p hyperion-fit -- check`.
+- **Deferred findings (2026-10-13 rule)**, from P14.T49.h's step 4:
+  - _GRD's calibration_ (K₂O 0.3–9, FeO(T) 0–12, MgO 0–32 wt%) excludes the lunar, Mercury and
+    komatiite melts by K₂O, `basalt_fe` (20.2) and `komatiite` (12.9) by FeO(T), and `ultramafic`
+    (37.8) by MgO. GR07 with the same mapping agrees within 0.5 log units there (the ruling's §7:
+    G2 0.22, G1 0.16, 15597 0.15, a peridotite 0.29, komatiite 0.47), consistency rather than
+    validation. Its two follow-ups: Murase and McBirney 1970's Apollo 11 high-Ti synthetic (0.45
+    Pa s at 1,495 °C, Lunar Sourcebook §6.1.1) as a check of GRD on Fe-rich melts; Mercury's rows
+    carry no Na₂O, where MESSENGER's gamma-ray spectrometer found several weight per cent (on
+    Vetere et al. 2017's Na-rich analogue GRD is 0.06 log units low against measurement).
+  - _The melt's redox moves ρ by about 2%_: on the Columbia River basalt, Lange and Carmichael's
+    is 1.6–2.7% above Murase's densities (Bottinga and Weill 1970, Fig. 2) with the rock's own
+    Fe₂O₃/FeO, and +1.2 to +0.1% with all iron as Fe₂O₃. Kress and Carmichael 1991 at T50.a's
+    oxygen fugacity would set the ratio.
+  - _TiO₂'s volume_: 23.16 against DensityX's 28.32 moves Alae's ρ by 0.4%; Lange and Carmichael
+    1987's own fit is unread.
+  - _At the solidus the record is the bulk liquid_, not the crystal-laden residual melt: Shaw et
+    al. 1968 give 8,000 poise for the Makaopuhi suspension at 1,130 °C against 4,000 for its
+    liquid.
+  - _A water term_: 0.1 wt% H₂O would lower granite's μ by 0.26 log units in GRD; the record's
+    melts are anhydrous unless it carries dissolved water, an ask of T51.
+  - _A composition-general melt index_ (Gladstone–Dale or oxide refractivities, Mandarino 1976
+    and 1981, from memory) is deferred; the glass's is held. Carried by Lorentz–Lorenz with Alae
+    glass's assumed 2,760 kg m⁻³ it would give `basalt` 1.553 at 550 nm and 1,473 K (normal
+    Fresnel reflectance 0.0469 against the held 0.0489).
+  - _σ's temperature dependence_ is not carried: granite's +0.06 to +0.09 mN m⁻¹ K⁻¹ (Bagdassarov
+    et al.) would raise it by about 0.04 N m⁻¹ over 500 K; Walker and Mullins's is "small,
+    positive", unquantified in the abstract.
+  - _The glass's absorption below 400 nm_ (the 380–405 nm bin's 2.7 × 10⁴ m⁻¹) is R08's file's
+    extrapolation in log k, Pollack et al. giving no k there.
+  - _Na₂CO₃'s and Fe–Ni's liquid ranges have no record_ (a carbonate melt above 1,123 K and a
+    liquid metal), for the composition audit; so does `ca_al_residue`'s CaO–Al₂O₃ melt.
+  - _Unread_: Lange and Carmichael 1987 and 1990 (their values through MELTS's file), Walker and
+    Mullins 1981's full text, Kress and Carmichael 1991, Sehlke and Whittington 2015, Pollack et
+    al.'s glass density and composition, Murase and McBirney 1973, and Berger et al. 2016's Mars
+    dust (so `mars_dust` takes `basalt_fe`'s oxides).
+  - _The ruling's §7 items_ (above) stand as recorded, GRD kept on those rows.
+  - _The scratch's two transcription slips_ (the ruling's §1), corrected in `step4/melts.json`
+    and `extra.json`: Scarfe's Table 2 liquidus for 90 wt% diopside is 1,368 °C, not 1,358, and
+    diopside's Table 3 Fulcher B 778.7, not the OCR text's 775.7. Neither touched a value used.
+- **Deviations in P14.T49.h, as built: step 2b, the nine rows from R08.T5.k's files (`p14-liquids`,
+  2026-10-19).** `GENERATOR_VERSION` stays 22. Nothing on the record reads `liquid_properties` or
+  `tables::liquid_optics` before P14.T54.a (decision-bump-plan-after-22 §1.2), so `liquids.golden`
+  is re-blessed at 22, and `liquid_optics` refitted by decision-p14-t49h-liquids §5. The research
+  is the lane's `.git/rm45-scratch/p14-liquids/step2b/step2b.json` (SHA-256 0f2d2f2c…12dbd6b1).
+  - _Rulings taken_ (decision-p14-t49h-gas-index, 2026-10-16):
+    - **§1.2.** R08.T5.k's nine files (c085cfff and 5622cb95) join `liquid_optics`, and the nine
+      rows gain `LiquidOptics`: the index the file's, carried by Lorentz–Lorenz with the row's own
+      liquid density; the absorption absent but O₂'s (§2.4); Ar, Kr and Xe `Measured` with
+      `index_checked` windows over Sinnock and Smith's tables; their other members only where a
+      ruled source exists.
+    - **§4.3.** b from an anisotropy ratio x: O₂, N₂O, CO and H₂S x_mol = 45ρ_v ÷ (3 − 4ρ_v)
+      from the gas's ρ_v as `rayleigh.ts`'s King-factor rows cite it, plus 0.006; Ar, Kr and Xe
+      the interaction part alone; SO₂'s b absent. b is `Derived` for all.
+    - **The addendum.** A.2: the files' densities are the WebBook's, and the sim carries at the
+      row's ancillary. A.4: CO's and H₂S's files are `standIn`, and the record calls their index
+      `Derived`, the record's word for an estimation method; the fit's provenance test pins both.
+  - _The refit_ (decision-p14-t49h-liquids §5). The binary was built with the rows not yet reading
+    the new items, `tables/liquid_optics.rs` deleted, `hyperion-fit run liquid_optics --since 22`
+    run, then the rows wired and the binary rebuilt; the body did not move again, and the table's
+    notes were re-emitted once more after a rewrap.
+    - `FILES` and the manifest gain the nine after the first eight, in their names' order
+      (`argon-liquid.json` … `xenon-liquid.json`), so every earlier item keeps its order. `ITEMS`
+      grows from 27 to 54: each file's n, a and temperature after `WATER_TEMPERATURE_K`, the four
+      supercooled items still last. The ruling's 48 predates step 2's supercooled and step 4's
+      glass items.
+    - Every earlier item's bits are unchanged, and the nine's bins equal the research's.
+    - `tables.lock`: only `liquid_optics`' entry moves (`inputs_sha256` 3dbf0dfb… → 54f6f4bc…,
+      `body_sha256` d6240d06… → e3aeb19f…, the acceptance's file count); the fingerprint is
+      unchanged. `hyperion-fit check` passes (32 fresh).
+    - **The revision stays 2.** The reduction is unchanged, and the manifest's new files move the
+      inputs hash (the trait's rule: a revision is bumped when the algorithm changes).
+    - The temperature items' doc now reads "as it writes it": the nine state their state to
+      0.01 K, not a label to the kelvin (`MaterialFile::temperature_k`'s doc too).
+  - _The rows, as built_ (`substance/rows/liquids.rs`; `LIQUIDS` 23 → 32 rows, in registry order):
+    - **O₂.** n `Derived` (Johns and Wilhelm 1937's 1.2242 at 546.1 nm, band ±0.0015). a the
+      file's, `Derived`: Thalman and Volkamer 2013's O₂–O₂ bands times N², 0 in the bins from
+      658.7 nm, where the set ends. Schmidt and Wagner 1985's κ_T; x 0.466 (Bates 1984's F_K at
+      550 nm, 1.102 16), δ 0.706 at the triple point and 0.499 at 90.19 K. ξ by Lemmon and
+      Jacobsen 2004's amplitudes (`ξ_0` 0.24 nm, `Γ_0` 0.055, γ 1.2415, `T_R` 309.162 K).
+    - **CO₂.** Joins `LIQUIDS` with its file's index, `Derived` (Phillips 1920's density law, band
+      ±0.007, at 216.6 K); step 2's κ_T, b, σ and μ unchanged. Its one `expect(dead_code)` mark
+      goes (`LAESECKE_MUZNY_2017` and `equations::CARBON_DIOXIDE` carried none), and the const is
+      private now.
+    - **Ar, Kr, Xe.** n `Measured` over their windows (below), `Derived` beyond. Tegeler, Span and
+      Wagner 1999's and Lemmon and Span 2006's κ_T. x the interaction part alone, methane's 0.006
+      × (L ÷ `L_CH4`)², L the Lorentz–Lorenz function at the triple point at 550 nm (the research's
+      proposal, labelled a stand-in): 0.003 93, 0.006 39 and 0.010 16, δ 0.0109, 0.0171 and 0.0270
+      at the triple points, inside the ruling's 0.009–0.012 (Ar) and 0.021–0.027 (Xe, at its top).
+      ξ: Ar Lemmon and Jacobsen's (0.13 nm, 0.055, `T_R` 301.374 K), Xe Velliadou et al. 2021's
+      (0.182 nm, 0.058, 434.6 K), Kr R12-08's water amplitudes.
+    - **N₂O.** n `Derived` (Liveing and Dewar 1892's five lines, band ±0.003). x 1.013 (Sneep and
+      Ubachs 2005's Eq. 19 at 550 nm, `ρ_v` 0.0616), δ 0.665 at the triple point.
+    - **CO.** n `Derived` (the file's unscaled estimate, `standIn`; band +0 / −0.015). x 0.0825
+      (F_K 1.017), δ 0.230.
+    - **SO₂.** n `Derived` (three room-temperature measurements, band ±0.003). σ present; b absent
+      (below).
+    - **H₂S.** n `Derived` (the file's unscaled estimate, `standIn`; band −0.005 / +0.021). x
+      0.006 70 (F_K 1.000 155, its interaction part dominating), δ 0.0252.
+    - The ρ_v of O₂, CO and H₂S are computed from their King factors, 3(`F_K` − 1) ÷ (6 + 4`F_K`),
+      and N₂O's from its formula, each written in the code as `rayleigh.ts` cites it, where step
+      2's rows took rounded `ρ_v`.
+    - **ξ, the critical rule.** Kr, N₂O, CO and H₂S take R12-08's water amplitudes, as methane
+      does. `q_max` ξ passes 0.1 at O₂ 1.17 K, Ar 0.41, Kr 0.73, Xe 1.66, N₂O 0.71, CO 0.33 and
+      H₂S 1.06 K below `T_c`.
+    - **σ.** Mulero et al. 2012's coefficients as CoolProp's files hold them, at each equation's
+      `T_c` (SO₂'s at its row's critical point, Gao et al.'s), `Measured` over the whole range,
+      as step 2's are. SO₂'s three terms' sum turns negative at 417.55 K and Xe's two at
+      289.611 K; σ is absent there, by the existing rule.
+    - **μ absent** for the eight, no correlation being ruled for them (a `NO_RULED_VISCOSITY`
+      source names CoolProp's).
+  - _The windows' narrowing._ The ruled windows were Ar 83.81–90 K, Kr 115.95–126 K and Xe
+    161.35–178 K, each to be met within 5 × 10⁻⁴ at every row. The oracle takes the file's own n
+    at each table row's wavelength (linear on its 5 nm grid), carried to the table's temperature
+    by the row's ancillary density, never a bin against a point; rows below 380 nm are left out.
+    Each window runs from the file's state to the warmest table that passes with every cooler
+    table above the state; where the first table above it fails, the window is the state alone.
+    - **Ar 83.81–90 K**, as ruled: 1.5 × 10⁻⁴ at 83.81 K, 3.7, 3.4 and 4.2 × 10⁻⁴ at 86, 88 and
+      90 K.
+    - **Kr 115.77–115.95 K**: 4.7 × 10⁻⁵ at the melting-point table; 118 K misses by
+      1.25 × 10⁻³ (pinned), 122 and 126 K by 1.72 and 1.70 × 10⁻³. The window starts at the
+      file's 115.77 K, the row's triple point, not at 115.95 K.
+    - **Xe 161.4 K alone**: 166 K misses by 8.04 × 10⁻⁴ (pinned), 170–178 K by 6.3–8.1 × 10⁻⁴,
+      and the 161.35 K table lies below the row's triple point.
+    - As water's window is `Measured` only over the range it was checked in. The misses are
+      deferred findings (below).
+  - _SO₂ without an equation._ Its b stays absent until a gas or liquid δ is read (§4.3), so Gao,
+    Wu, Zhang and Lemmon 2016's equation, which the research generated, would be dead code; it is
+    not wired.
+  - **O₂'s absorption is +0 from 658.7 nm**, in the last four bins (658.7–760 nm), where its
+    file's O₂–O₂ set ends (the B and A bands are not drawn). Between the bands the file holds
+    k = 0 at 390–430, 455, 595, 600 and 650 nm, where the set's σ lies at or below 0, but no bin's
+    mean is 0 there (the 405.3–430.7 nm bin's is 1.8 × 10⁻⁵ m⁻¹). Absence can't be marked bin by
+    bin, and dropping the member would lose the 477–630 nm bands. The palette test admits +0 only
+    in a bin the row's reduced file holds at 0. This departs from the entry's "absent, never 0"
+    (decision-r11-palette-liquids §1.4); sent to main.
+  - _The equations_ (`rows/equations.rs`): O₂ Schmidt and Wagner 1985 (as Stewart, Jacobsen and
+    Wagner 1991 present it), Ar Tegeler, Span and Wagner 1999, and Kr, Xe, CO, N₂O and H₂S Lemmon
+    and Span 2006's short forms, 133 terms as CoolProp's files hold them (the research's
+    `eos_terms.rs.txt`, SHA-256 5e53977b…6cc90f88, read back bit-identical). The files' SHA-256:
+    `Oxygen.json` b886d136…03c49ab0, `Argon.json` cf00cf96…2ecaaef8, `Krypton.json`
+    7f70e78f…be3c7639, `Xenon.json` 46774051…9812360d, `CarbonMonoxide.json` babe7375…32732800,
+    `NitrousOxide.json` 85127436…269df6be and `HydrogenSulfide.json` b214d863…f4802812. No
+    paper was read; the WebBook is each one's only check.
+    - **The WebBook's R.** It evaluates Lemmon and Span's five with CODATA 2014's R = 8.314 459 8
+      J mol⁻¹ K⁻¹, not their 8.314 472, so its κ_T lies a constant 1.47 × 10⁻⁶ above theirs. Each
+      keeps its own R (step 2's rule); the test holds them within 2 × 10⁻⁶, and within 10⁻⁹
+      scaled by the ratio. O₂ and Ar, whose R the WebBook takes, are held within 10⁻⁶.
+    - The WebBook tables, SRD 69 at twelve figures, fetched 2026-10-19: O₂ 8891798f…d43d8b85,
+      Ar 48b3f0c9…809007ee, Kr 7106c852…7eb6f9a9, Xe 5065266f…a07b1800, N₂O e4f004e7…49d0149f,
+      CO 1fdfacc8…6bb478fd, SO₂ 65ba29be…ac4eb39a and H₂S ae67a752…ed1a10e4.
+  - _Sinnock and Smith's tables_ (Phys. Rev. 181, 1297, through refractiveindex.info at
+    c5c2f188, CC0), as the window test holds them: Ar 83.81, 86, 88 and 90 K (6e3e9986…2e94361b,
+    13c01826…47992652, 1a4d8ee9…9806779e, ef2aa662…339527fd); Kr 115.95, 118, 122 and 126 K
+    (8b768f88…46f99644, 67ae3efa…83df26ca, f7ba9d53…6299717b, 3c39e23a…a379abf4); Xe 161.35,
+    166, 170, 174 and 178 K (e5f4b87d…67bb8e40, d26c1adc…cbfa6855, bf5b0d5e…86e3a0d3,
+    67cd616b…104aad23, 57db8928…a82d4b22).
+  - _Added public items_: none. In `hyperion-sim` the seven equations are
+    `pub(in crate::substance)` and the rows private; `CARBON_DIOXIDE`'s columns go from
+    `pub(in crate::substance)` to private. In `hyperion-fit`, `FILES` (8 → 17) and `ITEMS`
+    (27 → 54) grow.
+  - _Tests and golden._ `substance::liquid` has 101 tests with `--features testing`, six new (and
+    the review's `ammonia_water_s_order_does_not_move_the_record`):
+    - each equation against the WebBook (`the_gas_derived_rows_equations_reproduce_the_webbook`);
+    - each file at its own state within 4 × 10⁻¹⁶ (`…_files_are_reproduced_at_their_states`);
+    - the atoms alone have windows, from their states (`the_atoms_alone_have_index_windows`);
+    - x within 10⁻⁸ and δ at each triple point within 10⁻⁷ of the research (CO₂ 1.1 × 10⁻⁸)
+      (`…_anisotropy_is_the_research_s`);
+    - μ absent for the eight and b for SO₂ (`…_unsourced_members_are_absent`);
+    - the critical rule within 0.01 K of the research's crossings (`…_critical_rule_acts_…`).
+    - **Changed:** Mulero against the WebBook gains the eight (within 10⁻¹⁰; the research found
+      4.5 × 10⁻¹²); `carbon_dioxide_waits_on_its_index` becomes
+      `carbon_dioxide_resolves_with_its_index`; the palette test admits a +0 bin a pure liquid's
+      file holds transparent (O₂'s from 658.7 nm) and covers the nine, so "every liquid-range row
+      has n and ρ" widens to them; the optics-state test holds the nine to the bit; the negative
+      tension test gains SO₂ and Xe; the refusal test takes neon in place of CO₂; the viscosity and
+      depolarisation tests read CO₂ through its row. In `liquid/solution/tests.rs`, the
+      continuation test skips SO₂'s absent fluctuations and the reference test counts 19.
+    - `hyperion-fit` gains `liquid_optics_the_atoms_index_windows_are_sinnock_and_smith_s` (the
+      windows' oracle, each edge's miss pinned to 10⁻⁷), and the provenance test takes the nine.
+    - `liquids.golden` is re-blessed at 22 (decision-bump-plan-after-22 §1.2;
+      decision-p14-t49h-liquids §5). golden_diff against HEAD (7b2b36d0): 1,620 lines new, the
+      nine rows at their range's five fractions; none gone and no value moved. Its verdict: an
+      extension only, no inconsistency; each new label pins a record that was `NotALiquid` at
+      the base.
+  - _Files beyond the task's:_ `substance/rows/{equations, liquids}.rs`, `liquid/tests.rs`,
+    `liquid/solution/tests.rs`; `hyperion-fit`'s manifest, `tables.lock` and `materials.rs` (a
+    doc).
+  - _The steps left:_ none of T49.h's but two: molten S8, which waits for T49.b's last piece, its
+    liquid density; and R08's re-reduction of methane's visible k (decision-p14-t49h-liquids
+    §2.4), refitted by §5, with the fill redone before T54.a and the serve gate (§9.7). P14.T54.a
+    then reads the table and strikes the at-22 re-bless rule.
+  - _Accept_ as step 4's, and:
+    - `cargo test -p hyperion-fit liquid_optics_the_atoms_index_windows`;
+    - `cargo test -p hyperion-sim --features testing --lib the_gas_derived_rows`.
+- **Deferred findings (2026-10-13 rule)**, from P14.T49.h's step 2b:
+  - _Krypton's window_ misses Sinnock and Smith's 118–126 K tables by 1.25–1.72 × 10⁻³, for two
+    causes: the row's ancillary density, and their krypton itself, which misses by 1.5 × 10⁻³ at
+    126 K even at the WebBook's densities (Sinnock 1980 finds krypton's two methods disagree).
+  - _Xenon's window_ misses the 166–178 K tables by 6.3–8.1 × 10⁻⁴, the ancillary's cause (2.1–5.2
+    × 10⁻⁴ at the WebBook's densities).
+  - _T49.b's CoolProp-fitted ancillaries wiggle_ against their own equations by up to ±0.35%
+    (N₂O −0.28% to +0.29%, CO −0.12% to +0.35%, Kr −0.22% to +0.06%, Xe −0.09% to +0.07%),
+    inside CoolProp's stated maxima. They move κ_T at the file states by 1–2% (Kr +2.1%, N₂O
+    +1.9%, CO +1.2%, Xe +0.95%), and b with it. A T49.b refit to the equations.
+  - _The WebBook's R_: it evaluates Lemmon and Span 2006 (and Gao et al. 2016) with CODATA 2014's
+    8.314 459 8, so its κ_T sits 1.47 × 10⁻⁶ (2.8 × 10⁻⁷) from the papers'.
+  - _O₂'s and N₂O's δ_ (0.71 and 0.67 at their triple points) are upper estimates (−40% / +0%)
+    and dominate their b.
+  - _The atoms' x_ is a stand-in, methane's calibration scaled by L², which the ruling does not
+    give for Kr; no measured δ of liquid Ar, Kr or Xe was read.
+  - _Sinnock and Smith's 90 K argon table_ has its 365.0 nm row (1.2331) above its 361.2 nm row
+    (1.2326); both lie below the files' grid, so no test reads them.
+  - _The ruling's argon example_ (1.22698 at 546.1 nm and 90 K) is not reproduced: the carry
+    gives 1.22679 (1.22677 at the WebBook's densities); both meet the measured 1.2269 within
+    5 × 10⁻⁴.
+  - _CO's measured x_: Couling and Graham 1994's `ρ_v` = 0.005 251 at 514.5 nm gives 0.0853
+    against the row's 0.0825 (F_K 1.017), δ 0.235 against 0.230.
+  - _The R12-08 stand-in amplitudes_ (`ξ_0` 0.13 nm, `Γ_0` 0.06) for Kr, N₂O, CO and H₂S, as for
+    methane: no crossover amplitudes were read for them; they place only the critical rule.
+  - _SO₂'s and Xe's tensions are absent near `T_c`_: SO₂'s Mulero sum turns negative at
+    417.55 K, 13.1 K below 430.64 K (the WebBook prints −5.9 × 10⁻⁴ N m⁻¹ at 422.03 K); Xe's at
+    289.611 K.
+  - _The eight rows' viscosity is absent_: CoolProp holds Lemmon and Jacobsen 2004 (O₂, Ar),
+    Polychroniadou et al. 2022 (Kr), Velliadou et al. 2021 (Xe) and Quiñones-Cisneros et al.
+    2012 (H₂S), none for CO, N₂O or SO₂; none is ruled.
+  - _O₂'s absorption is 0 from 658.7 nm_: its file draws neither the O₂–O₂ set beyond 654 nm nor
+    the B and A bands; and its 203 K cross-sections are not carried to 90 K.
+  - _The item count_: decision-p14-t49h-gas-index §1.2's "48 items" predates step 2's four
+    supercooled items and step 4's two glass items; the table holds 54.

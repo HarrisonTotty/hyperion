@@ -175,7 +175,7 @@ pub const MANIFEST: &[TableInfo] = &[
     },
     TableInfo {
         name: "liquid_optics",
-        revision: 1,
+        revision: 2,
         since_generator_version: 22,
         provisional: false,
     },

@@ -138,8 +138,10 @@ impl MaterialFile {
         &self.shape
     }
 
-    /// The temperature its constants are at, K, as the file writes it (a label to the kelvin:
-    /// the file's reduction states the measured temperature), or `None` where it states none.
+    /// The temperature its constants are at, K, as the file writes it (a label to the kelvin where
+    /// the file's reduction states the measured temperature, as R08.T5.g's and T5.h's liquids do;
+    /// the state its index was computed at, to 0.01 K, for R08.T5.k's nine), or `None` where it
+    /// states none.
     #[must_use]
     pub fn temperature_k(&self) -> Option<f64> {
         self.temperature_k
