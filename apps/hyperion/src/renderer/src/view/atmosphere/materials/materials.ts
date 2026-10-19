@@ -133,8 +133,28 @@ export interface ScaledMolarRefractionFit {
   readonly anchoredToUm: number;
 }
 
+/**
+ * A derived file's absorption from its gas's coefficients scaled to the liquid (R08.T5.j;
+ * decision-p14-t49h-liquids §2.4): over `fromUm`–`toUm`, a = κN and k = aλ ÷ 4π, κ the gas's
+ * absorption coefficient per km-amagat in the file's `paper` and N the liquid's number density in
+ * amagat at `molarDensityMolPerL`.
+ *
+ * @remarks
+ * The form describes k alone over its span: the file's n, and its k elsewhere, are its arrays, their
+ * derivations stated in `reduction`.
+ */
+export interface ScaledGasAbsorptionFit {
+  readonly form: "scaledGasAbsorption";
+  /** ρ_m, the liquid's molar density at the file's state, mol/l. */
+  readonly molarDensityMolPerL: number;
+  /** The span's shortest wavelength, µm. */
+  readonly fromUm: number;
+  /** The span's longest wavelength, µm. */
+  readonly toUm: number;
+}
+
 /** A derived file's parameterisation, by its `form`. */
-export type DerivedFit = CauchyFit | ScaledMolarRefractionFit;
+export type DerivedFit = CauchyFit | ScaledMolarRefractionFit | ScaledGasAbsorptionFit;
 
 /** One material file: its header and its index on its own grid. */
 export interface MaterialIndexFile {
@@ -256,11 +276,17 @@ function numbers(
 }
 
 /** The forms a derived file's fit may take. */
-const FIT_FORMS: ReadonlyArray<DerivedFit["form"]> = ["cauchy", "scaledMolarRefraction"];
+const FIT_FORMS: ReadonlyArray<DerivedFit["form"]> = [
+  "cauchy",
+  "scaledMolarRefraction",
+  "scaledGasAbsorption",
+];
 
 /**
- * A file's fit checked and typed: null, a Cauchy fit or a scaled molar refraction (whose density
- * and factor are positive, and whose anchors run from the shorter wavelength to the longer).
+ * A file's fit checked and typed: null, a Cauchy fit, a scaled molar refraction (whose density
+ * and factor are positive, and whose anchors run from the shorter wavelength to the longer) or a
+ * scaled gas absorption (whose density is positive, and whose span runs from a positive wavelength
+ * to a longer one).
  */
 function fitOf(value: unknown, file: string): DerivedFit | undefined {
   if (value === null) {
@@ -268,7 +294,9 @@ function fitOf(value: unknown, file: string): DerivedFit | undefined {
   }
   const form = isRecord(value) ? value["form"] : undefined;
   if (!isRecord(value) || !member(FIT_FORMS, form)) {
-    throw new Error(`${file}: "fit" must be null, a Cauchy fit or a scaled molar refraction`);
+    throw new Error(
+      `${file}: "fit" must be null, a Cauchy fit, a scaled molar refraction or a scaled gas absorption`,
+    );
   }
   const field = (name: string): number => {
     const v = value[name];
@@ -286,6 +314,21 @@ function fitOf(value: unknown, file: string): DerivedFit | undefined {
       fittedFromUm: field("fittedFromUm"),
       fittedToUm: field("fittedToUm"),
     };
+  }
+  if (form === "scaledGasAbsorption") {
+    const absorption: ScaledGasAbsorptionFit = {
+      form,
+      molarDensityMolPerL: field("molarDensityMolPerL"),
+      fromUm: field("fromUm"),
+      toUm: field("toUm"),
+    };
+    if (!(absorption.molarDensityMolPerL > 0)) {
+      throw new Error(`${file}: the fit's density must be positive`);
+    }
+    if (!(absorption.fromUm > 0 && absorption.fromUm < absorption.toUm)) {
+      throw new Error(`${file}: the fit's "fromUm" must be positive and below "toUm"`);
+    }
+    return absorption;
   }
   const fit: ScaledMolarRefractionFit = {
     form,

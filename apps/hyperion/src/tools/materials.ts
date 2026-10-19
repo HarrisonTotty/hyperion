@@ -49,7 +49,12 @@
  *   liquid Ar, Kr and Xe tables, and HITRAN2024's O₂–O₂ collision-induced absorption file, for
  *   Thalman and Volkamer 2013's cross-sections (decision-p14-t49h-gas-index). The other T5.k
  *   liquids are scaled from their gas rows to measured values and densities cited here
- *   ({@link scaledLiquidIndex}).
+ *   ({@link scaledLiquidIndex});
+ * - since R08.T5.j ({@link FETCHED_T5J}), NASA's Planetary Data System's copy of Karkoschka 1998's
+ *   methane coefficients (`1995LOW.TAB`, CC0), whose rows over 377.2–782.8 nm are held here
+ *   ({@link KARKOSCHKA_1998_HELD_E4}), for liquid methane's blue k; and NASA NTRS's scan of
+ *   Martonchik and Orton 1994, read for Fig. 3's curve, whose vertices are held here
+ *   ({@link MO_FIG_3_VERTICES}), and Table 2 (decision-p14-t49h-liquids §2.4).
  */
 
 import { createHash } from "node:crypto";
@@ -160,8 +165,28 @@ export interface ScaledMolarRefractionFit {
   readonly anchoredToUm: number;
 }
 
+/**
+ * A derived absorption from its gas's coefficients scaled to the liquid (R08.T5.j;
+ * decision-p14-t49h-liquids §2.4): over `fromUm`–`toUm`, a = κ N and k = aλ ÷ 4π, with κ the gas's
+ * absorption coefficient per km-amagat in the file's `paper` and N the liquid's number density in
+ * amagat at `molarDensityMolPerL` ({@link methaneLiquidK}).
+ *
+ * @remarks
+ * The form describes k alone over its span: the file's n, and its k elsewhere, are its arrays, with
+ * their derivations in its `reduction`.
+ */
+export interface ScaledGasAbsorptionFit {
+  readonly form: "scaledGasAbsorption";
+  /** ρ_m, the liquid's molar density at the file's state, mol/l. */
+  readonly molarDensityMolPerL: number;
+  /** The span's shortest wavelength, µm. */
+  readonly fromUm: number;
+  /** The span's longest wavelength, µm. */
+  readonly toUm: number;
+}
+
 /** A derived file's parameterisation, discriminated by `form`. */
-export type DerivedFit = CauchyFit | ScaledMolarRefractionFit;
+export type DerivedFit = CauchyFit | ScaledMolarRefractionFit | ScaledGasAbsorptionFit;
 
 /** A material file as written: its header and the index on {@link MATERIAL_GRID_NM}. */
 export interface MaterialFile extends MaterialHeader {
@@ -951,6 +976,9 @@ export const FETCHED_T5I = "2026-10-16";
 /** The day R08.T5.k's sources were fetched (decision-p14-t49h-gas-index). */
 export const FETCHED_T5K = "2026-10-16";
 
+/** The day R08.T5.j's sources were fetched (decision-p14-t49h-liquids §2.4). */
+export const FETCHED_T5J = "2026-10-19";
+
 /**
  * The a-priori k of Venus's ultraviolet absorber at 365 nm, k₃₆₅: the ruled value
  * (science-r08-unowned-absorbers, adopted; decision-r08-t5d), not derived here. R08.T5.e refits it
@@ -1260,33 +1288,6 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
       fit: null,
     },
     adjust: withoutVisibleAbsorption,
-  },
-  {
-    file: "methane-liquid.json",
-    option: "methane-liquid",
-    sha256: "75b1cb8ae81a6afed2c597b524bcc16f89492eb9fba4b744813ce5cde9600d67",
-    parse: parseRefractiveIndexInfo,
-    resample: { ignoreBelowUm: 0.4, holdNm: 20 },
-    header: {
-      key: "CH4",
-      phase: "liquid",
-      variant: null,
-      name: "liquid CH4 at 90 K",
-      temperatureK: 90,
-      shape: "sphere",
-      provenance: "measured",
-      paper:
-        'J. V. Martonchik and G. S. Orton, "Optical constants of liquid and solid methane", Appl. Opt. 33 (1994) 8306–8317, DOI 10.1364/AO.33.008306',
-      source: fetchedSource(
-        "refractiveindex.info, organic/CH4 - methane/nk/Martonchik-liquid-90K.yml",
-        `${RI_URL}/organic/CH4%20-%20methane/nk/Martonchik-liquid-90K.yml`,
-        "75b1cb8ae81a6afed2c597b524bcc16f89492eb9fba4b744813ce5cde9600d67",
-      ),
-      licence: RI_LICENCE,
-      reduction: `${STANDARD_REDUCTION}. The source has no row between 133.7 and 400 nm, across methane's ultraviolet absorption edge, so its rows below 400 nm are not used and its 400 nm values (n 1.300, k 0) are held over 380–400 nm. Its visible k rows sit at band maxima and minima (the database's caution), so k between them is indicative`,
-      standIn: null,
-      fit: null,
-    },
   },
   {
     file: "methane-ice.json",
@@ -5239,12 +5240,670 @@ const LIQUID_TABLE_MATERIALS: ReadonlyArray<CombinedSpec> = [
 ];
 
 /**
+ * Martonchik and Orton 1994's paper as NASA's Technical Reports Server holds it (NASA-CR-200337, a
+ * reprint; NTRS: "public use permitted"): a 300 dpi bilevel scan, read for its text and Table 2
+ * (pp. 8309–8311) and Fig. 3 (p. 8309) (R08.T5.j).
+ */
+const MO_1994_SCAN = fetchedSource(
+  "the paper's scan, NASA Technical Reports Server 19960016949 (NASA-CR-200337, a reprint; public use permitted), its text and Table 2 (pp. 8309–8311) and Fig. 3 (p. 8309) read here",
+  "https://ntrs.nasa.gov/api/citations/19960016949/downloads/19960016949.pdf",
+  "de5333e7bd8fefaab245885ee73ab6c4f55d92bb83df73a8f6acdb8ae6712726",
+  FETCHED_T5J,
+);
+
+/**
+ * Martonchik and Orton 1994's Table 2 (Appl. Opt. 33, 8306, p. 8311) from 12,510 to 17,150 cm⁻¹
+ * (799–583 nm): each row's wavenumber, cm⁻¹, and n_i at 111 K and at 90 K, read from
+ * {@link MO_1994_SCAN}.
+ *
+ * @remarks
+ * Every row is marked "+", a local maximum by the table's footnote ("Optical constants followed by
+ * a plus or minus indicate a local maximum or minimum, respectively"); none is a minimum. The 90 K
+ * values are the 111 K values "simply" scaled "by the ratio of the methane densities at these two
+ * temperatures" (p. 8310), uncertain by 25% (p. 8309).
+ */
+export const MO_TABLE_2_VISIBLE: ReadonlyArray<
+  readonly [wavenumberPerCm: number, k111K: number, k90K: number]
+> = [
+  [12_510, 5.725e-8, 6.103e-8],
+  [12_740, 3.748e-8, 3.995e-8],
+  [13_700, 9.294e-8, 9.907e-8],
+  [13_940, 1.085e-7, 1.156e-7],
+  [14_170, 7.862e-9, 8.381e-9],
+  [14_585, 2.51e-9, 2.675e-9],
+  [14_935, 4.476e-9, 4.771e-9],
+  [16_090, 1.83e-7, 1.951e-7],
+  [16_715, 1.095e-9, 1.167e-9],
+  [17_150, 1.16e-9, 1.237e-9],
+];
+
+/**
+ * Martonchik and Orton's 90 K n_i over their 111 K: the liquid's density ratio by which they made
+ * their 90 K values from the 111 K spectrum (p. 8310), the mean over {@link MO_TABLE_2_VISIBLE}'s
+ * rows (1.0659; each row within 0.05% of it, the table's four figures).
+ */
+export const MO_90K_PER_111K =
+  MO_TABLE_2_VISIBLE.reduce((sum, [, k111, k90]) => sum + k90 / k111, 0) /
+  MO_TABLE_2_VISIBLE.length;
+
+/**
+ * Martonchik and Orton 1994's Fig. 3 best estimate ("solid curve, best estimate", p. 8309) as
+ * drawn, 12,497–18,000 cm⁻¹ (800–555.6 nm): its vertices, each [wavenumber, cm⁻¹; log₁₀ n_i], at
+ * 111 K.
+ *
+ * @remarks
+ * Read here ({@link FETCHED_T5J}) from {@link MO_1994_SCAN}'s p. 8309, the page's 300 dpi bilevel
+ * image extracted as stored and rotated upright, and recorded in plan R08's "Deviations in T5.j, as
+ * built":
+ * - **The axes.** The frame's four lines are fitted by least squares to their ink (rms 0.4–1.1
+ *   px, the figure turned 1.1–1.25° on the page), and their corners mapped bilinearly to 4,000 and
+ *   18,000 cm⁻¹ and to n_i 10⁻⁵ and 10⁻¹⁰. Every tick lies within 1.3 px of the map: 21 cm⁻¹,
+ *   0.010 dex.
+ * - **The vertices.** Each is a marker's centre (PNK's asterisks; RCM's crosses below 13,000
+ *   cm⁻¹), found as a horizontal arm of 7–15 px crossed by a vertical one, or the line's corner
+ *   where it has no marker (the spike's apex and shoulder, the line's meetings with the axis), read
+ *   from the ink's runs column by column. Every segment between two vertices lies on the ink within
+ *   1.5 px.
+ * - **The uncertainty.** About ±25 cm⁻¹ and ±0.015 dex (±3.5% in n_i) at a vertex. On the steepest
+ *   flanks, to 0.02 dex per cm⁻¹, the wavenumber's dominates.
+ * - **The check.** The figure's crosses at eight RCM-only maxima, 9,865–12,740 cm⁻¹, meet Table
+ *   2's 111 K values within 1.5% in n_i (the first and third vertices are its 12,510 and 12,740
+ *   cm⁻¹ rows), so the figure is drawn at 111 K.
+ * - **The axis.** Where the curve runs on the axis, 12,884–13,278 cm⁻¹ and at its end, 18,000
+ *   cm⁻¹, it is held at the axis, 10⁻¹⁰ ({@link MO_FIG_3_AXIS_LOG10K}): the figure's lower limit,
+ *   not a measurement, which neither of the figure's corrections moves.
+ */
+export const MO_FIG_3_VERTICES: ReadonlyArray<readonly [wavenumberPerCm: number, log10K: number]> =
+  [
+    [12_497, -7.241],
+    [12_671, -7.599],
+    [12_736, -7.421],
+    [12_884, -10.0],
+    [13_278, -10.0],
+    [13_395, -8.682],
+    [13_497, -7.729],
+    [13_600, -7.16],
+    [13_704, -6.79],
+    [13_722, -6.939],
+    [13_735, -6.995],
+    [13_753, -7.019],
+    [13_803, -7.082],
+    [13_823, -7.122],
+    [13_904, -7.345],
+    [13_945, -7.72],
+    [14_007, -8.035],
+    [14_066, -8.081],
+    [14_176, -7.854],
+    [14_187, -7.886],
+    [14_331, -8.062],
+    [14_407, -8.269],
+    [14_434, -8.308],
+    [14_517, -8.396],
+    [14_567, -8.381],
+    [14_604, -8.347],
+    [14_693, -8.691],
+    [14_730, -8.785],
+    [14_832, -8.451],
+    [14_943, -8.097],
+    [14_958, -8.131],
+    [15_107, -8.267],
+    [15_198, -8.3],
+    [15_292, -8.54],
+    [15_310, -8.562],
+    [15_408, -8.676],
+    [15_496, -8.75],
+    [15_519, -8.82],
+    [15_628, -8.895],
+    [15_648, -8.93],
+    [15_733, -9.044],
+    [15_922, -8.397],
+    [16_004, -7.811],
+    [16_103, -6.518],
+    [16_195, -6.693],
+    [16_207, -6.792],
+    [16_248, -7.715],
+    [16_331, -8.112],
+    [16_482, -8.644],
+    [16_501, -8.684],
+    [16_594, -8.82],
+    [16_725, -8.723],
+    [16_923, -9.245],
+    [17_154, -9.126],
+    [17_323, -8.692],
+    [17_341, -8.723],
+    [17_447, -8.888],
+    [17_757, -9.508],
+    [18_000, -10.0],
+  ];
+
+/** Fig. 3's last wavenumber, cm⁻¹ (555.6 nm): the figure ends there, short of PNK's 18,100. */
+export const MO_FIG_3_LAST_PER_CM = 18_000;
+
+/**
+ * Fig. 3's lower axis, log₁₀ n_i: a vertex there is the curve running on the axis, the plot's
+ * floor, which neither correction moves ({@link MethaneKOptions}).
+ */
+export const MO_FIG_3_AXIS_LOG10K = -10;
+
+/**
+ * The first wavenumber of Patel, Nelson and Kerl's data, cm⁻¹ (752 nm): their opto-acoustic
+ * spectrum covers 13,300–18,100 cm⁻¹ (p. 8307), and Fig. 3's level over it is corrected
+ * ({@link MO_FIG_3_PNK_LEVEL}).
+ */
+export const MO_PNK_FROM_PER_CM = 13_300;
+
+/**
+ * Table 2's maxima in PNK's range and Fig. 3's vertices at them, cm⁻¹: the five pairs whose
+ * frequencies agree within 20 cm⁻¹. Table 2's 13,940 and 17,150 cm⁻¹ rows fall at no maximum of
+ * the figure: the first is 10.1 times the level-corrected figure at its 13,945 cm⁻¹ vertex, a
+ * second slip of the table's, and the second carries the value of the figure's maximum at 17,323
+ * cm⁻¹, within 1.6%. Its 16,090 is the spike's ({@link MO_FIG_3_SLIPPED_PER_CM}).
+ */
+export const MO_PNK_MAXIMA: ReadonlyArray<readonly [tablePerCm: number, figurePerCm: number]> = [
+  [13_700, 13_704],
+  [14_170, 14_176],
+  [14_585, 14_604],
+  [14_935, 14_943],
+  [16_715, 16_725],
+];
+
+/**
+ * Fig. 3's vertex at a wavenumber, log₁₀ n_i at 111 K.
+ *
+ * @throws Error where it has none.
+ */
+function figureVertexLog10K(perCm: number): number {
+  const vertex = MO_FIG_3_VERTICES.find(([at]) => at === perCm);
+  if (vertex === undefined) {
+    throw new Error(`Fig. 3 has no vertex at ${perCm} cm⁻¹`);
+  }
+  return vertex[1];
+}
+
+/**
+ * Table 2's 111 K n_i at a wavenumber.
+ *
+ * @throws Error where it has no row.
+ */
+function table2K111(perCm: number): number {
+  const row = MO_TABLE_2_VISIBLE.find(([at]) => at === perCm);
+  if (row === undefined) {
+    throw new Error(`Table 2 has no row at ${perCm} cm⁻¹`);
+  }
+  return row[1];
+}
+
+/**
+ * The middle value of an odd count of values.
+ *
+ * @throws Error for an even count.
+ */
+function median(values: ReadonlyArray<number>): number {
+  const sorted = values.toSorted((a, b) => a - b);
+  const middle = sorted.length % 2 === 1 ? sorted[(sorted.length - 1) / 2] : undefined;
+  if (middle === undefined) {
+    throw new Error("a median needs an odd count of values");
+  }
+  return middle;
+}
+
+/** Fig. 3 over Table 2's 111 K n_i at each of {@link MO_PNK_MAXIMA}'s pairs. */
+export function moPnkRatios(): ReadonlyArray<number> {
+  return MO_PNK_MAXIMA.map(
+    ([table, figure]) => 10 ** figureVertexLog10K(figure) / table2K111(table),
+  );
+}
+
+/**
+ * How many times Fig. 3 lies above Table 2 over PNK's range: the median of {@link moPnkRatios},
+ * 1.780 (1.73–1.79), by which the figure is divided there (main's ruling, 2026-10-19).
+ *
+ * @remarks
+ * Below 13,300 cm⁻¹, where only RCM measured, the figure meets Table 2 within 1.5%. Over PNK's
+ * range Table 2 is the level the paper states, PNK's relative data "scaled to the RCM data at
+ * 13 700 cm⁻¹" (p. 8309), and it meets the gas at the liquid's density: Karkoschka 1998's band at
+ * 730 nm at the paper's 111 K density, 0.424 g cm⁻³, gives 9.6 × 10⁻⁸ against Table 2's 9.294 ×
+ * 10⁻⁸, where the figure's 1.62 × 10⁻⁷ is 1.7 times the gas, as Khare et al.'s finding, which the
+ * paper cites, expects. The science check's band integrals agree: over the gas, 1.12 and 0.83 in
+ * the RCM-only bands; 1.34–3.09 in PNK's six as drawn, and 0.75–1.74 divided by the level. The
+ * figure shows no RCM cross at 13,700 cm⁻¹, so RCM's value there is Table 2's, inferred. The
+ * figure as drawn is recorded as the alternative.
+ */
+export const MO_FIG_3_PNK_LEVEL = median(moPnkRatios());
+
+/**
+ * Fig. 3's vertices drawn ten times too high, cm⁻¹: its spike over 16,050–16,240 cm⁻¹ (616–623
+ * nm), divided by 10 (main's ruling, 2026-10-19).
+ *
+ * @remarks
+ * The apex and the shoulder lie 9.4–10.2 times above PNK's own points beneath them
+ * ({@link MO_FIG_3_UNDER_SPIKE}); Table 2's 16,090 cm⁻¹ row, 1.830 × 10⁻⁷, is ten times RCM's own
+ * cross there, 1.83 × 10⁻⁸ as read (±3.5%), Table 2's value ÷ 10 within the reading; no marker
+ * reaches the spike; and the gas at the
+ * paper's 111 K density gives 1.5 × 10⁻⁸ at 621.5 nm. An exponent slipped in the best estimate's
+ * values is taken. The spike as drawn is recorded as the alternative.
+ */
+export const MO_FIG_3_SLIPPED_PER_CM: ReadonlyArray<number> = [16_103, 16_195, 16_207];
+
+/** Markers read from Fig. 3, by data set: each [wavenumber, cm⁻¹; log₁₀ n_i] at 111 K. */
+export interface Fig3Markers {
+  /** Patel, Nelson and Kerl's asterisks. */
+  readonly pnk: ReadonlyArray<readonly [wavenumberPerCm: number, log10K: number]>;
+  /** Ramaprasad, Caldwell and McClure's crosses. */
+  readonly rcm: ReadonlyArray<readonly [wavenumberPerCm: number, log10K: number]>;
+}
+
+/**
+ * The markers beneath Fig. 3's spike, read from the same scan as {@link MO_FIG_3_VERTICES}: PNK's
+ * asterisks and RCM's cross.
+ */
+export const MO_FIG_3_UNDER_SPIKE: Fig3Markers = {
+  pnk: [
+    [16_090, -7.508],
+    [16_207, -7.703],
+    [16_217, -7.667],
+  ],
+  rcm: [[16_090, -7.737]],
+};
+
+/** Which of the figure's corrections methane's k takes: both as ruled, or one or neither. */
+export interface MethaneKOptions {
+  /** Whether Fig. 3 is divided by {@link MO_FIG_3_PNK_LEVEL} from {@link MO_PNK_FROM_PER_CM}. */
+  readonly pnkLevel: boolean;
+  /** Whether {@link MO_FIG_3_SLIPPED_PER_CM}'s vertices are divided by 10. */
+  readonly slip: boolean;
+}
+
+/** The corrections as ruled (main, 2026-10-19): both taken. */
+export const METHANE_K_RULED: MethaneKOptions = { pnkLevel: true, slip: true };
+
+/** Fig. 3's vertices at 90 K, log₁₀ n_i, with `options`' corrections. */
+function methaneFigureVertices(
+  options: MethaneKOptions,
+): ReadonlyArray<readonly [wavenumberPerCm: number, log10K: number]> {
+  const to90K = Math.log10(MO_90K_PER_111K);
+  const level = options.pnkLevel ? Math.log10(MO_FIG_3_PNK_LEVEL) : 0;
+  return MO_FIG_3_VERTICES.map(([perCm, log10K]) => [
+    perCm,
+    log10K <= MO_FIG_3_AXIS_LOG10K
+      ? log10K + to90K
+      : log10K +
+        to90K -
+        (perCm >= MO_PNK_FROM_PER_CM ? level : 0) -
+        (options.slip && MO_FIG_3_SLIPPED_PER_CM.includes(perCm) ? 1 : 0),
+  ]);
+}
+
+/** {@link methaneFigureVertices} with each pair of corrections, made once. */
+const METHANE_FIGURE_VERTICES = [false, true].flatMap((pnkLevel) =>
+  [false, true].map((slip) => ({
+    pnkLevel,
+    slip,
+    vertices: methaneFigureVertices({ pnkLevel, slip }),
+  })),
+);
+
+/**
+ * Liquid methane's n_i at 90 K by Fig. 3, log-linear in wavenumber between its vertices, with
+ * `options`' corrections.
+ *
+ * @throws RangeError outside 12,497–18,000 cm⁻¹.
+ */
+export function methaneFigureK(
+  wavenumberPerCm: number,
+  options: MethaneKOptions = METHANE_K_RULED,
+): number {
+  const vertices =
+    METHANE_FIGURE_VERTICES.find((v) => v.pnkLevel === options.pnkLevel && v.slip === options.slip)
+      ?.vertices ?? methaneFigureVertices(options);
+  for (let i = 1; i < vertices.length; i += 1) {
+    const low = vertices[i - 1];
+    const high = vertices[i];
+    if (
+      low !== undefined &&
+      high !== undefined &&
+      wavenumberPerCm >= low[0] &&
+      wavenumberPerCm <= high[0]
+    ) {
+      const t = (wavenumberPerCm - low[0]) / (high[0] - low[0]);
+      return 10 ** (low[1] + t * (high[1] - low[1]));
+    }
+  }
+  throw new RangeError(`${wavenumberPerCm} cm⁻¹ lies outside Fig. 3's vertices`);
+}
+
+/**
+ * The SHA-256 of Karkoschka 1998's methane coefficients as the PDS holds them, 1995LOW.TAB
+ * (101,250 bytes), recorded at the fetch.
+ */
+export const KARKOSCHKA_1998_SHA256 =
+  "d8071e071c2c0a60052ec6c164e151bd42847acf5d9bfbe1e9b2f76bf49a788b";
+
+/** Where Karkoschka 1998's table was read, with its checksum and the date fetched. */
+const KARKOSCHKA_1998_SOURCE = fetchedSource(
+  "NASA's Planetary Data System, volume GBAT_0001, data set ESO-J/S/N/U-SPECTROPHOTOMETER-4-V2.0 (DOI 10.17189/2bp8-k793), DATA/1995LOW.TAB, its methane absorption coefficients, (km amagat)⁻¹, at 1 nm resolution every 0.4 nm over 300.4–1,050.0 nm (vacuum), as its label (1995LOW.LBL) defines them",
+  "https://pds-atmospheres.nmsu.edu/PDS/data/gbat_0001/data/1995low.tab",
+  KARKOSCHKA_1998_SHA256,
+  FETCHED_T5J,
+);
+
+/** 1995LOW.TAB's row count: every 0.4 nm from 300.4 to 1,050.0 nm. */
+export const KARKOSCHKA_1998_ROWS = 1_875;
+
+/** The index in 1995LOW.TAB of {@link KARKOSCHKA_1998_HELD_E4}'s first row, 377.2 nm. */
+export const KARKOSCHKA_1998_HELD_FROM = 192;
+
+/** 1995LOW.TAB's vacuum wavelength at a row's index, nm: (3,004 + 4i) ÷ 10. */
+export function karkoschkaWavelengthNm(index: number): number {
+  return (3_004 + 4 * index) / 10;
+}
+
+/**
+ * Karkoschka 1998's methane absorption coefficients over 377.2–782.8 nm, every 0.4 nm, in units of
+ * 10⁻⁴ (km amagat)⁻¹, the table's last figure: 1995LOW.TAB's third column as printed (CC0 1.0),
+ * held so that the file's derivation is checked without the fetched table
+ * ({@link checkedKarkoschka1998} refuses a table that differs).
+ *
+ * @remarks
+ * E. Karkoschka, Icarus 133 (1998) 134, DOI 10.1006/icar.1998.5913. The coefficients are inferred
+ * from the jovian planets' and Titan's albedo spectra (Karkoschka and Tomasko 1992's method), not
+ * measured in a laboratory, and refer "strictly to an average temperature of the jovian planets"
+ * (the 1998 paper, as the volume's DOCUMENT/ICARUS98.ASC gives it). The continuum's placement is
+ * uncertain by 0.0003 (km amagat)⁻¹ at 400 nm, doubling every 100 nm (the 1994 paper,
+ * DOCUMENT/ICARUS94.ASC; the 1998 coefficients come by the same method): 0.00042 at 450 nm and
+ * 0.00052 at 480 nm. A value under it, as 57% of the rows over 400–480 nm are, is uncertain by
+ * 100% or more, and a value of 0.001 by 30–60%.
+ */
+export const KARKOSCHKA_1998_HELD_E4: ReadonlyArray<number> = [
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0,
+  0, 0, 0, 0, 1, 4, 8, 8, 7, 5, 2, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+  1, 0, 0, 0, 1, 2, 5, 8, 8, 7, 7, 4, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+  0, 0, 0, 0, 3, 5, 1, 1, 6, 7, 4, 6, 10, 7, 7, 10, 12, 14, 13, 11, 11, 5, 5, 10, 18, 35, 49, 59,
+  73, 61, 48, 37, 24, 15, 9, 6, 3, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 2, 0, 1, 1, 1, 3, 3, 3, 4, 4, 3, 4,
+  6, 8, 10, 9, 11, 11, 12, 14, 16, 17, 19, 22, 30, 36, 42, 51, 48, 36, 23, 13, 9, 6, 4, 3, 3, 3, 4,
+  4, 5, 7, 8, 8, 8, 8, 6, 5, 4, 3, 3, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 7, 9, 11, 13, 15,
+  18, 20, 22, 26, 31, 36, 43, 51, 57, 64, 72, 78, 88, 95, 96, 103, 114, 135, 191, 280, 340, 368,
+  428, 317, 191, 134, 92, 59, 37, 23, 13, 8, 7, 6, 5, 6, 5, 5, 5, 5, 4, 3, 2, 2, 3, 3, 2, 4, 4, 5,
+  6, 6, 7, 9, 11, 12, 12, 12, 15, 16, 17, 21, 24, 27, 31, 35, 39, 45, 47, 49, 56, 63, 66, 72, 82,
+  90, 103, 118, 128, 134, 145, 156, 161, 161, 151, 132, 107, 87, 69, 50, 36, 27, 21, 15, 12, 11, 10,
+  10, 11, 11, 12, 16, 20, 24, 27, 32, 39, 44, 48, 55, 60, 63, 65, 65, 64, 61, 56, 52, 47, 42, 39,
+  36, 32, 27, 26, 26, 27, 25, 26, 28, 29, 31, 33, 35, 41, 48, 57, 67, 77, 89, 101, 108, 117, 129,
+  145, 162, 182, 211, 250, 286, 328, 385, 438, 481, 509, 548, 623, 704, 818, 966, 1125, 1272, 1420,
+  1550, 1590, 1588, 1514, 1320, 1120, 899, 681, 506, 373, 269, 187, 129, 91, 63, 45, 32, 24, 17, 12,
+  9, 8, 6, 5, 5, 7, 9, 11, 14, 18, 21, 26, 29, 31, 34, 36, 37, 36, 35, 33, 31, 31, 31, 29, 28, 27,
+  25, 26, 27, 29, 30, 31, 33, 36, 40, 45, 51, 57, 65, 76, 86, 95, 104, 116, 128, 138, 143, 150, 161,
+  174, 187, 201, 216, 229, 241, 255, 271, 301, 338, 374, 408, 443, 474, 491, 490, 466, 436, 416,
+  404, 391, 361, 312, 264, 227, 191, 156, 126, 104, 87, 72, 59, 48, 40, 34, 29, 23, 18, 14, 12, 10,
+  9, 9, 8, 9, 9, 11, 15, 21, 29, 37, 46, 56, 68, 83, 97, 114, 132, 153, 175, 200, 234, 269, 288,
+  309, 333, 327, 306, 301, 303, 293, 278, 265, 253, 235, 213, 194, 182, 167, 146, 126, 111, 100, 93,
+  88, 85, 84, 89, 100, 115, 132, 159, 188, 216, 249, 295, 346, 373, 379, 387, 404, 446, 514, 605,
+  740, 923, 1141, 1431, 1836, 2247, 2575, 2913, 3167, 3273, 3413, 3691, 3888, 4076, 4587, 5411,
+  6267, 6902, 7204, 7366, 7284, 6939, 6409, 5905, 5610, 5167, 4496, 3875, 3348, 2840, 2337, 1839,
+  1435, 1169, 961, 767, 598, 481, 395, 327, 270, 205, 159, 130, 110, 91, 73, 59, 49, 42, 37, 33, 30,
+  27, 25, 26, 28, 28, 29, 33, 37, 42, 49, 55, 59, 60, 65, 77, 89, 99, 108, 117, 130, 153, 179, 195,
+  213, 228, 227, 216, 204, 189, 174, 167, 171, 184, 195, 193, 182, 168, 174, 207, 248, 277, 289,
+  299, 325, 351, 357, 348, 340, 343, 351, 366, 398, 437, 484, 530, 572, 605, 654, 749, 832, 837,
+  808, 805, 822, 836, 863, 922, 973, 971, 954, 964, 1006, 1064, 1141, 1233, 1314, 1349, 1342, 1350,
+  1369, 1382, 1437, 1572, 1733, 1818, 1816, 1779, 1766, 1724, 1622, 1556, 1480, 1366, 1254, 1129,
+  1019, 916, 792, 670, 570, 484, 418, 351, 294, 263, 221, 169, 129, 106, 92, 75, 60, 55, 53, 57, 72,
+  100, 143, 197, 247, 278, 297, 343, 440, 558, 610, 582, 563, 542, 479, 427, 423, 412, 375, 345,
+  360, 327, 273, 253, 254, 258, 238, 194, 171, 176, 182, 178, 172, 171, 182, 190, 201, 215, 238,
+  270, 303, 365, 462, 570, 702, 877, 1010, 1039, 1082, 1201, 1362, 1643, 2027, 2320, 2483, 2639,
+  2888, 3152, 3450, 3666, 3512, 3191, 3023, 3147, 3402, 3288, 2720, 2229, 2048, 2026, 2001, 1865,
+  1696, 1549, 1396, 1290, 1246, 1199, 1141, 1023, 887, 813, 793, 820, 873, 869, 800, 752, 762, 840,
+  971, 1182, 1547, 2121, 2887, 3700, 4782, 5904, 6864, 7933, 8575, 9406, 10789, 12316, 13332, 13561,
+  14028, 14963, 15465, 15400, 16042, 17409, 19081, 20980, 23137, 27904, 34082, 39185, 40042, 36962,
+  39304, 45742, 46932, 42612, 35534, 30568, 29676, 29197, 27624, 24910, 21465, 18378, 16407, 15453,
+  14944, 14510, 13278, 11345, 10083, 9152, 8043, 7661, 7159, 5804, 5153, 5213, 4738, 3952, 3470,
+  3008, 2519, 2132, 1764, 1430, 1229, 1000, 757, 629, 527, 419, 356, 304, 235, 184, 162, 149, 147,
+  147, 138, 127, 142, 153, 129, 131, 142, 124, 114, 127, 158, 152, 115, 99, 96, 109, 142, 135, 94,
+  72, 76, 94, 113, 122, 132, 149, 172, 205, 237, 266, 309, 344, 372, 410, 466, 510, 622, 779, 871,
+  950, 1074, 1111, 1118, 1167, 1252, 1382, 1517, 1566, 1572, 1546, 1463, 1472, 1660, 1780, 1589,
+  1387, 1354, 1444, 1517, 1475, 1413, 1437, 1545, 1602, 1588, 1622, 1801, 2202, 2669, 2824, 2656,
+  2447, 2402, 2562, 2803, 2997, 3151, 3225, 3356, 3555, 3768, 3978, 4136, 4377, 4919, 5618, 6463,
+  7393, 7746, 7833, 7871, 7854, 7959,
+];
+
+/** One row of Karkoschka's table: its vacuum wavelength, nm, and its coefficient, (km amagat)⁻¹. */
+export type GasCoefficientRow = readonly [wavelengthNm: number, perKmAmagat: number];
+
+/**
+ * 1995LOW.TAB's rows: the vacuum wavelength (its first column) and the methane coefficient (its
+ * third), each line's eight columns split by spaces.
+ *
+ * @throws Error if the table has another row count, a row another wavelength than
+ *   {@link karkoschkaWavelengthNm}'s or another column count, or a field that is not a number.
+ */
+export function parseKarkoschka1998(text: string): ReadonlyArray<GasCoefficientRow> {
+  const rows = text
+    .split(/\r?\n/u)
+    .filter((line) => line.trim().length > 0)
+    .map((line, i): GasCoefficientRow => {
+      const fields = line.trim().split(/\s+/u);
+      const [wavelength, , coefficient] = fields;
+      if (fields.length !== 8 || wavelength === undefined || coefficient === undefined) {
+        throw new Error(`1995LOW.TAB row ${i + 1}: ${fields.length} columns, not 8`);
+      }
+      const nm = numeric(wavelength);
+      if (Math.abs(nm - karkoschkaWavelengthNm(i)) > 1e-9) {
+        throw new Error(`1995LOW.TAB row ${i + 1}: ${nm} nm, not ${karkoschkaWavelengthNm(i)}`);
+      }
+      return [nm, numeric(coefficient)];
+    });
+  if (rows.length !== KARKOSCHKA_1998_ROWS) {
+    throw new Error(`1995LOW.TAB: ${rows.length} rows, not ${KARKOSCHKA_1998_ROWS}`);
+  }
+  return rows;
+}
+
+/**
+ * Checks 1995LOW.TAB against {@link KARKOSCHKA_1998_HELD_E4}.
+ *
+ * @throws Error if it does not parse ({@link parseKarkoschka1998}) or a held row differs.
+ */
+export function checkedKarkoschka1998(text: string): void {
+  const rows = parseKarkoschka1998(text);
+  KARKOSCHKA_1998_HELD_E4.forEach((held, i) => {
+    const row = rows[KARKOSCHKA_1998_HELD_FROM + i];
+    if (row === undefined || Math.round(row[1] * 1e4) !== held) {
+      throw new Error(
+        `1995LOW.TAB at ${karkoschkaWavelengthNm(KARKOSCHKA_1998_HELD_FROM + i)} nm: ${row?.[1] ?? "no row"}, not the held ${held / 1e4}`,
+      );
+    }
+  });
+}
+
+/**
+ * Karkoschka 1998's coefficient at a vacuum wavelength, (km amagat)⁻¹: linear between
+ * {@link KARKOSCHKA_1998_HELD_E4}'s rows.
+ *
+ * @throws RangeError outside 377.2–782.8 nm.
+ */
+export function methaneGasPerKmAmagat(wavelengthNm: number): number {
+  const position = (wavelengthNm * 10 - 3_004) / 4 - KARKOSCHKA_1998_HELD_FROM;
+  const i = Math.min(Math.floor(position), KARKOSCHKA_1998_HELD_E4.length - 2);
+  const low = KARKOSCHKA_1998_HELD_E4[i];
+  const high = KARKOSCHKA_1998_HELD_E4[i + 1];
+  if (position < 0 || position > i + 1 || low === undefined || high === undefined) {
+    throw new RangeError(`${wavelengthNm} nm lies outside the held rows, 377.2–782.8 nm`);
+  }
+  return (low + (position - i) * (high - low)) / 1e4;
+}
+
+/**
+ * Liquid CH₄'s number density, amagat: 630.8, the WebBook's saturated liquid at the triple point,
+ * 90.694 K ({@link CH4_LIQUID_TRIPLE_POINT_MOL_PER_L}, standing for the file's 90 K, within 0.2% of
+ * both the sim's line extrapolated to 90 K and Martonchik and Orton's 0.424 g cm⁻³ at 111 K times
+ * {@link MO_90K_PER_111K}), times the ideal gas's molar volume at 0 °C and 101,325 Pa.
+ */
+export const CH4_LIQUID_AMAGAT =
+  (CH4_LIQUID_TRIPLE_POINT_MOL_PER_L * IDEAL_MOLAR_VOLUME_STP_CM3_PER_MOL) / 1_000;
+
+/** The gas's absorption coefficient at the liquid's number density, a = κN, m⁻¹. */
+export function methaneGasAbsorptionPerM(wavelengthNm: number): number {
+  return (methaneGasPerKmAmagat(wavelengthNm) * CH4_LIQUID_AMAGAT) / 1_000;
+}
+
+/**
+ * Liquid methane's absorption coefficient at 90 K, a, m⁻¹, at a vacuum wavelength: Fig. 3's
+ * ({@link methaneFigureK}, a = 4πk ÷ λ) at and below {@link MO_FIG_3_LAST_PER_CM}, to 800 nm, and
+ * the gas's at the liquid's density ({@link methaneGasAbsorptionPerM}) above it, from 377.2 nm.
+ */
+export function methaneLiquidAbsorptionPerM(
+  wavelengthNm: number,
+  options: MethaneKOptions = METHANE_K_RULED,
+): number {
+  const perCm = 1e7 / wavelengthNm;
+  return perCm <= MO_FIG_3_LAST_PER_CM
+    ? (4 * Math.PI * methaneFigureK(perCm, options)) / (wavelengthNm * 1e-9)
+    : methaneGasAbsorptionPerM(wavelengthNm);
+}
+
+/** The steps of the midpoint rule over each grid point's 5 nm. */
+export const METHANE_BOX_STEPS = 500;
+
+/**
+ * The mean of `valueAt` over the 5 nm about `centreNm`, by the midpoint rule over
+ * {@link METHANE_BOX_STEPS} steps, in `valueAt`'s own unit.
+ */
+export function fiveNmMean(centreNm: number, valueAt: (wavelengthNm: number) => number): number {
+  let sum = 0;
+  for (let j = 0; j < METHANE_BOX_STEPS; j += 1) {
+    sum += valueAt(centreNm - 2.5 + (5 * (j + 0.5)) / METHANE_BOX_STEPS);
+  }
+  return sum / METHANE_BOX_STEPS;
+}
+
+/**
+ * Liquid methane's k at 90 K on {@link MATERIAL_GRID_NM}, to six significant figures: at each grid
+ * point the mean a over the 5 nm about it ({@link fiveNmMean} of
+ * {@link methaneLiquidAbsorptionPerM}), k = āλ ÷ 4π, so that a feature narrower than the grid keeps
+ * its area in the bake bins' means.
+ */
+export function methaneLiquidK(options: MethaneKOptions = METHANE_K_RULED): ReadonlyArray<number> {
+  return MATERIAL_GRID_NM.map((nm) =>
+    rounded(
+      (fiveNmMean(nm, (at) => methaneLiquidAbsorptionPerM(at, options)) * nm * 1e-9) /
+        (4 * Math.PI),
+    ),
+  );
+}
+
+/**
+ * The liquid's mean a over the 5 nm about a grid point over the gas's at the liquid's density, or
+ * undefined where the gas's is 0.
+ */
+export function methaneLiquidToGas(
+  centreNm: number,
+  options: MethaneKOptions = METHANE_K_RULED,
+): number | undefined {
+  const gas = fiveNmMean(centreNm, methaneGasAbsorptionPerM);
+  return gas > 0
+    ? fiveNmMean(centreNm, (at) => methaneLiquidAbsorptionPerM(at, options)) / gas
+    : undefined;
+}
+
+/**
+ * The least and greatest of {@link methaneLiquidToGas} over the grid points from `fromNm` to
+ * `toNm`, of those where the gas's mean κ over the 5 nm is at least `leastPerKmAmagat`.
+ *
+ * @throws Error where no grid point qualifies.
+ */
+export function methaneLiquidToGasRange(
+  fromNm: number,
+  toNm: number,
+  leastPerKmAmagat = 0,
+): readonly [least: number, greatest: number] {
+  const ratios = MATERIAL_GRID_NM.filter(
+    (nm) => nm >= fromNm && nm <= toNm && fiveNmMean(nm, methaneGasPerKmAmagat) >= leastPerKmAmagat,
+  ).flatMap((nm) => {
+    const ratio = methaneLiquidToGas(nm);
+    return ratio === undefined ? [] : [ratio];
+  });
+  if (ratios.length === 0) {
+    throw new Error(`no grid point over ${fromNm}–${toNm} nm has the gas's κ`);
+  }
+  return [Math.min(...ratios), Math.max(...ratios)];
+}
+
+/** Two significant figures. */
+function figures2(value: number): string {
+  return value.toPrecision(2);
+}
+
+/** The methane file's `reduction`: n's, then k's, every figure from the tool's constants. */
+function methaneLiquidReductionText(): string {
+  const [least, greatest] = methaneLiquidToGasRange(560, 750);
+  const [bandLeast, bandGreatest] = methaneLiquidToGasRange(560, 750, 0.1);
+  const [floorLeast, floorGreatest] = methaneLiquidToGasRange(755, 780);
+  const level = MO_FIG_3_PNK_LEVEL.toFixed(3);
+  return `n: ${STANDARD_REDUCTION}. The source has no row between 133.7 and 400 nm, across methane's ultraviolet absorption edge, so its rows below 400 nm are not used and its 400 nm n, 1.300, is held over 380–400 nm. k (R08.T5.j; decision-p14-t49h-liquids §2.4, with main's rulings of ${FETCHED_T5J}): at each grid point the mean of a = 4πk ÷ λ over the 5 nm about it, by the midpoint rule over ${METHANE_BOX_STEPS} steps, k = āλ ÷ 4π, to six significant figures, so that a feature narrower than the grid keeps its area. Over 555.6–780 nm (18,000–12,821 cm⁻¹, vacuum) a is Martonchik and Orton's Fig. 3 best estimate, log-linear in wavenumber between its vertices as read here from the scan (the tool's MO_FIG_3_VERTICES: the frame fitted to its ink, every tick within 1.3 px; about ±25 cm⁻¹ and ±3.5% in k at a vertex), not their Table 2: the table's visible rows, 12,510–17,150 cm⁻¹, are local maxima only, every one marked "+" and none a minimum, and the figure falls between them into troughs as deep as 10⁻¹⁰. Fig. 3 is drawn at 111 K, its crosses at eight RCM-only maxima, 9,865–12,740 cm⁻¹, meeting Table 2's 111 K column within 1.5%; the 90 K values are the 111 K spectrum density-scaled, as Martonchik and Orton made theirs ("simply scaling the n_i at 111 K by the ratio of the methane densities", p. 8310), by Table 2's own 90 K ÷ 111 K, ${MO_90K_PER_111K.toFixed(4)}, and are uncertain by 25% (p. 8309). Two corrections are made to the figure as drawn (main's rulings, ${FETCHED_T5J}). Over PNK's range, from 13,300 cm⁻¹ (752 nm), the figure lies ${level} times above Table 2 at the five maxima whose frequencies agree within 20 cm⁻¹ (${moPnkRatios()
+    .map((r) => r.toFixed(3))
+    .join(
+      ", ",
+    )} at 13,700, 14,170, 14,585, 14,935 and 16,715 cm⁻¹), where Table 2 meets the scaling the paper states (PNK's relative data "scaled to the RCM data at 13 700 cm⁻¹", p. 8309; Fig. 3 shows no RCM cross at 13,700 cm⁻¹, so RCM's value there is inferred from Table 2, not read from the figure) and the gas at the liquid's density, so it is divided by ${level} there. Its spike over 16,050–16,240 cm⁻¹ (616–623 nm) is divided by 10, an exponent slip: its apex at 16,103 cm⁻¹ and its shoulder at 16,195 cm⁻¹ lie 9.4–10.2 times above PNK's own points beneath them (3.1 × 10⁻⁸ at 16,090 cm⁻¹, 2.0–2.2 × 10⁻⁸ at 16,207–16,217 cm⁻¹), Table 2's 1.830 × 10⁻⁷ at 16,090 cm⁻¹ is ten times RCM's own cross there in the figure, 1.83 × 10⁻⁸ as read (±3.5%), and no marker reaches it. Where the curve runs on the figure's axis, 12,884–13,278 cm⁻¹ (776–753 nm) and at 18,000 cm⁻¹, it is held at the axis, 10⁻¹⁰ at 111 K, which neither correction moves: the figure's lower limit, not a measurement. Over 380–555.6 nm k is derived: nothing was measured shortward of 18,100 cm⁻¹, 552.5 nm ("We could find no absorption measurements of liquid methane in this spectral region", p. 8309), Fig. 3 ends at 18,000 cm⁻¹, and Table 2's 400 nm zero is an unmarked anchor, not used. a = κN: Karkoschka 1998's gas coefficient κ, (km amagat)⁻¹, linear between its rows, times the liquid's number density N = ${CH4_LIQUID_AMAGAT.toFixed(1)} amagat (the WebBook's saturated liquid at the triple point, 90.694 K, ${CH4_LIQUID_TRIPLE_POINT_MOL_PER_L} mol/l after Setzmann and Wagner 1991, standing for 90 K, times the ideal gas's molar volume at 0 °C and 101,325 Pa). That is Martonchik and Orton's own method for their unmeasured far ultraviolet (p. 8309), after Khare et al.'s finding that the gas at the liquid's density matches the liquid at low resolution in the red and near infrared. The table prints .0000, under 5 × 10⁻⁵ (km amagat)⁻¹, at most of its rows over 377–431 nm (every one over 377.2–400.8 and 422.4–429.2 nm) and at 444.8–449.2 nm, so k is 0 at 380, 385, 390, 395 and 425 nm, whose 5 nm hold nothing else. Its coefficients are inferred from the jovian planets' spectra, not measured in a laboratory, at "an average temperature of the jovian planets", and its continuum's placement is uncertain by 0.0003 (km amagat)⁻¹ at 400 nm, doubling every 100 nm (Karkoschka 1994, whose method the 1998 coefficients follow), so a value under it, as 57% of the rows over 400–480 nm are, is uncertain by 100% or more, and a value of 0.001 by 30–60%. Over 560–750 nm the liquid's 5 nm means run ${figures2(least)}–${figures2(greatest)} times the gas's at the liquid's density, ${figures2(bandLeast)}–${figures2(bandGreatest)} times where the gas's κ reaches 0.1 (km amagat)⁻¹, against 1–12 times at Table 2's maxima (decision-p14-t49h-liquids §2.1, against the 1993 table); over 755–780 nm, where the figure lies on its axis, ${figures2(floorLeast)}–${figures2(floorGreatest)} times`;
+}
+
+/**
+ * R08.T5.j's liquid methane (decision-p14-t49h-liquids §2.4): Martonchik and Orton's n and red k,
+ * and its blue k from the gas.
+ */
+const METHANE_LIQUID_MATERIALS: ReadonlyArray<CombinedSpec> = [
+  {
+    file: "methane-liquid.json",
+    inputs: [
+      {
+        option: "methane-liquid",
+        sha256: "75b1cb8ae81a6afed2c597b524bcc16f89492eb9fba4b744813ce5cde9600d67",
+      },
+      { option: "karkoschka-1998", sha256: KARKOSCHKA_1998_SHA256 },
+    ],
+    reduce: (texts) => {
+      checkedKarkoschka1998(textAt(texts, 1));
+      const { n } = resample(parseRefractiveIndexInfo(textAt(texts, 0)), {
+        ignoreBelowUm: 0.4,
+        holdNm: 20,
+      });
+      return { n, k: methaneLiquidK() };
+    },
+    header: {
+      key: "CH4",
+      phase: "liquid",
+      variant: null,
+      name: "liquid CH4 at 90 K",
+      temperatureK: 90,
+      shape: "sphere",
+      provenance: "derived",
+      paper:
+        'J. V. Martonchik and G. S. Orton, "Optical constants of liquid and solid methane", Appl. Opt. 33 (1994) 8306–8317, DOI 10.1364/AO.33.008306, for n and for k over 555.6–780 nm; E. Karkoschka, "Methane, ammonia, and temperature measurements of the jovian planets and Titan from CCD-spectrophotometry", Icarus 133 (1998) 134–146, DOI 10.1006/icar.1998.5913, for the gas\'s absorption coefficients, from which k over 380–555.6 nm is derived',
+      source: `${fetchedSource(
+        "refractiveindex.info, organic/CH4 - methane/nk/Martonchik-liquid-90K.yml, for n",
+        `${RI_URL}/organic/CH4%20-%20methane/nk/Martonchik-liquid-90K.yml`,
+        "75b1cb8ae81a6afed2c597b524bcc16f89492eb9fba4b744813ce5cde9600d67",
+      )}; ${MO_1994_SCAN}; ${KARKOSCHKA_1998_SOURCE}`,
+      licence: `${RI_LICENCE}, for n; Karkoschka 1998's table under the PDS's CC0 1.0 (its DOI's DataCite record: "Creative Commons Zero v1.0 Universal"), reduced values; Martonchik and Orton's Table 2 and Fig. 3 cited as facts, read here from NTRS's reprint, no figure copied (decision-r08-licences.md)`,
+      reduction: methaneLiquidReductionText(),
+      standIn: null,
+      fit: {
+        form: "scaledGasAbsorption",
+        molarDensityMolPerL: CH4_LIQUID_TRIPLE_POINT_MOL_PER_L,
+        fromUm: 0.38,
+        toUm: rounded(1e4 / MO_FIG_3_LAST_PER_CM),
+      },
+    },
+  },
+];
+
+/**
  * Every material file made from fetched sources by its own reduction, after
- * {@link FETCHED_MATERIALS}: R08.T5.d's to T5.h's, then R08.T5.k's liquid tables and liquid O₂.
+ * {@link FETCHED_MATERIALS}: R08.T5.d's to T5.h's, then R08.T5.k's liquid tables and liquid O₂,
+ * then R08.T5.j's liquid methane.
  */
 export const COMBINED_MATERIALS: ReadonlyArray<CombinedSpec> = [
   ...COMBINED_MATERIALS_T5D_T5H,
   ...LIQUID_TABLE_MATERIALS,
+  ...METHANE_LIQUID_MATERIALS,
 ];
 
 /** The text of a liquid whose measurements a T5.k file records against its estimate. */

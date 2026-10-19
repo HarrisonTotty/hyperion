@@ -175,6 +175,27 @@ import {
   wavenumberFill,
   wavenumberFraction,
   withoutVisibleAbsorption,
+  CH4_LIQUID_AMAGAT,
+  checkedKarkoschka1998,
+  KARKOSCHKA_1998_HELD_E4,
+  KARKOSCHKA_1998_HELD_FROM,
+  KARKOSCHKA_1998_ROWS,
+  karkoschkaWavelengthNm,
+  methaneFigureK,
+  methaneGasAbsorptionPerM,
+  methaneGasPerKmAmagat,
+  methaneLiquidAbsorptionPerM,
+  methaneLiquidK,
+  MO_90K_PER_111K,
+  MO_FIG_3_PNK_LEVEL,
+  MO_FIG_3_SLIPPED_PER_CM,
+  MO_FIG_3_UNDER_SPIKE,
+  MO_FIG_3_VERTICES,
+  MO_PNK_FROM_PER_CM,
+  MO_PNK_MAXIMA,
+  MO_TABLE_2_VISIBLE,
+  moPnkRatios,
+  parseKarkoschka1998,
 } from "./materials";
 
 const MATERIALS = new URL("../renderer/src/view/atmosphere/materials/", import.meta.url);
@@ -1975,5 +1996,240 @@ describe("R08.T5.k's liquids (decision-p14-t49h-gas-index)", () => {
     for (const option of ["argon-liquid", "krypton-liquid", "xenon-liquid", "o2o2"]) {
       expect(options.filter((o) => o === option)).toHaveLength(1);
     }
+  });
+});
+
+/** A 1995LOW.TAB of the held rows, the others 0, in the table's eight columns. */
+function karkoschkaTable(change?: (row: number) => string | undefined): string {
+  return Array.from({ length: KARKOSCHKA_1998_ROWS }, (_, i) => {
+    const held = KARKOSCHKA_1998_HELD_E4[i - KARKOSCHKA_1998_HELD_FROM] ?? 0;
+    const line = [
+      karkoschkaWavelengthNm(i).toFixed(1),
+      (karkoschkaWavelengthNm(i) - 0.09).toFixed(2),
+      (held / 1e4).toFixed(4),
+      ".2128",
+      ".2532",
+      ".5306",
+      ".6933",
+      ".0431",
+    ].join(" ");
+    return change?.(i) ?? line;
+  }).join("\r\n");
+}
+
+/** The trapezium rule's mean of a on the file's grid over [lowNm, highNm], its points inside. */
+function gridMeanPerM(k: ReadonlyArray<number>, lowNm: number, highNm: number): number {
+  const perM = MATERIAL_GRID_NM.map((nm, i) => (4 * Math.PI * (k[i] ?? Number.NaN)) / (nm * 1e-9));
+  const at = (nm: number): number => {
+    const i = Math.min(Math.floor((nm - 380) / 5), MATERIAL_GRID_NM.length - 2);
+    const t = (nm - 380 - 5 * i) / 5;
+    return (perM[i] ?? Number.NaN) + t * ((perM[i + 1] ?? Number.NaN) - (perM[i] ?? Number.NaN));
+  };
+  const points = [lowNm, ...MATERIAL_GRID_NM.filter((nm) => nm > lowNm && nm < highNm), highNm];
+  let integral = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    const from = points[i - 1] ?? Number.NaN;
+    const to = points[i] ?? Number.NaN;
+    integral += 0.5 * (at(from) + at(to)) * (to - from);
+  }
+  return integral / (highNm - lowNm);
+}
+
+describe("R08.T5.j's liquid methane (decision-p14-t49h-liquids §2.4)", () => {
+  it("read Table 2's 90 K as its 111 K times their density ratio, 1.0659, each row within 0.05%", () => {
+    expect(MO_90K_PER_111K).toBeCloseTo(1.0659, 4);
+    for (const [, k111, k90] of MO_TABLE_2_VISIBLE) {
+      expect(Math.abs(k90 / k111 / MO_90K_PER_111K - 1)).toBeLessThan(5e-4);
+    }
+  });
+
+  it("find Fig. 3 drawn at 111 K: its first and third vertices meet Table 2's 12,510 and 12,740 cm⁻¹ within 1.5%", () => {
+    for (const [table, vertex] of [
+      [0, 0],
+      [1, 2],
+    ] as const) {
+      const row = MO_TABLE_2_VISIBLE[table];
+      const at = MO_FIG_3_VERTICES[vertex];
+      expect(Math.abs((at?.[0] ?? Number.NaN) - (row?.[0] ?? Number.NaN))).toBeLessThan(20);
+      expect(Math.abs(10 ** (at?.[1] ?? Number.NaN) / (row?.[1] ?? Number.NaN) - 1)).toBeLessThan(
+        0.015,
+      );
+    }
+  });
+
+  it("find Fig. 3 1.780 times above Table 2 over PNK's range, each of the five maxima within 1.72–1.80", () => {
+    expect(MO_FIG_3_PNK_LEVEL).toBeCloseTo(1.78, 3);
+    for (const ratio of moPnkRatios()) {
+      expect(ratio).toBeGreaterThan(1.72);
+      expect(ratio).toBeLessThan(1.8);
+    }
+    for (const [table, figure] of MO_PNK_MAXIMA) {
+      expect(Math.abs(table - figure)).toBeLessThanOrEqual(20);
+      expect(table).toBeGreaterThanOrEqual(MO_PNK_FROM_PER_CM);
+    }
+  });
+
+  it("find the spike about ten times PNK's own points beneath it: each vertex less a decade within 0.1 dex of the nearest", () => {
+    for (const perCm of MO_FIG_3_SLIPPED_PER_CM) {
+      const vertex = MO_FIG_3_VERTICES.find(([at]) => at === perCm);
+      const nearest = MO_FIG_3_UNDER_SPIKE.pnk.toSorted(
+        ([a], [b]) => Math.abs(a - perCm) - Math.abs(b - perCm),
+      )[0];
+      expect(Math.abs((nearest?.[0] ?? Number.NaN) - perCm)).toBeLessThanOrEqual(20);
+      expect(Math.abs((vertex?.[1] ?? Number.NaN) - 1 - (nearest?.[1] ?? Number.NaN))).toBeLessThan(
+        0.1,
+      );
+    }
+  });
+
+  it("find Table 2's 16,090 cm⁻¹ row ten times RCM's cross there in the figure, within 1%", () => {
+    const [rcmPerCm, rcmLog10K] = MO_FIG_3_UNDER_SPIKE.rcm[0] ?? [Number.NaN, Number.NaN];
+    const row = MO_TABLE_2_VISIBLE.find(([at]) => at === rcmPerCm);
+    expect(Math.abs((row?.[1] ?? Number.NaN) / 10 / 10 ** rcmLog10K - 1)).toBeLessThan(0.01);
+  });
+
+  it("take the figure's corrections only where ruled: neither below 13,300 cm⁻¹, the level above, the slip at the spike", () => {
+    const drawn = { pnkLevel: false, slip: false };
+    const below = methaneFigureK(12_736);
+    expect(below / methaneFigureK(12_736, drawn)).toBeCloseTo(1, 12);
+    expect(below).toBeCloseTo(10 ** -7.421 * MO_90K_PER_111K, 18);
+    expect(methaneFigureK(14_943, drawn) / methaneFigureK(14_943)).toBeCloseTo(
+      MO_FIG_3_PNK_LEVEL,
+      10,
+    );
+    expect(methaneFigureK(16_103, drawn) / methaneFigureK(16_103)).toBeCloseTo(
+      10 * MO_FIG_3_PNK_LEVEL,
+      9,
+    );
+  });
+
+  it("hold the figure at its axis, 10⁻¹⁰ at 111 K, where the curve runs on it, uncorrected", () => {
+    expect(methaneFigureK(13_000)).toBeCloseTo(1e-10 * MO_90K_PER_111K, 22);
+    // The figure's last vertex lies on the axis inside PNK's range: neither correction moves it.
+    expect(methaneFigureK(18_000)).toBeCloseTo(1e-10 * MO_90K_PER_111K, 22);
+    expect(() => methaneFigureK(12_400)).toThrow(RangeError);
+    expect(() => methaneFigureK(18_001)).toThrow(RangeError);
+  });
+
+  it("give the liquid's number density as 630.8 amagat: 28.14191 mol/l times 22.414 l/mol", () => {
+    expect(CH4_LIQUID_AMAGAT).toBeCloseTo(630.772, 3);
+    expect(methaneGasAbsorptionPerM(542.8)).toBeCloseTo((0.159 * CH4_LIQUID_AMAGAT) / 1_000, 12);
+  });
+
+  it("read the gas's coefficient linearly between Karkoschka's rows, and refuse a wavelength past them", () => {
+    // 1995LOW.TAB: .1590 at 542.8 nm and .1588 at 543.2 nm.
+    expect(methaneGasPerKmAmagat(542.8)).toBeCloseTo(0.159, 12);
+    expect(methaneGasPerKmAmagat(543)).toBeCloseTo((0.159 + 0.1588) / 2, 12);
+    expect(() => methaneGasPerKmAmagat(377)).toThrow(RangeError);
+    expect(() => methaneGasPerKmAmagat(783)).toThrow(RangeError);
+  });
+
+  it("join the gas and the figure at 18,000 cm⁻¹, 555.6 nm", () => {
+    expect(methaneLiquidAbsorptionPerM(555.5)).toBe(methaneGasAbsorptionPerM(555.5));
+    const figure = methaneLiquidAbsorptionPerM(555.6);
+    expect(figure).toBeCloseTo((4 * Math.PI * methaneFigureK(1e7 / 555.6)) / 555.6e-9, 15);
+  });
+
+  it("accept 1995LOW.TAB as held", () => {
+    expect(() => checkedKarkoschka1998(karkoschkaTable())).not.toThrow();
+    expect(parseKarkoschka1998(karkoschkaTable())[KARKOSCHKA_1998_HELD_FROM]).toEqual([377.2, 0]);
+  });
+
+  it.each([
+    [
+      "a table short of a row",
+      karkoschkaTable().split("\r\n").slice(1).join("\r\n"),
+      /row 1|rows/u,
+    ],
+    [
+      "a row at another wavelength",
+      karkoschkaTable((i) => (i === 5 ? "302.8 302.71 .0000 1 2 3 4 5" : undefined)),
+      /row 6/u,
+    ],
+    [
+      "a held row of another value",
+      karkoschkaTable((i) =>
+        i === 300 ? `${karkoschkaWavelengthNm(300).toFixed(1)} 0 .9999 1 2 3 4 5` : undefined,
+      ),
+      /420\.4 nm/u,
+    ],
+  ])("refuse 1995LOW.TAB with %s", (_, table, message) => {
+    expect(() => checkedKarkoschka1998(table)).toThrow(message);
+  });
+
+  it("give k = 0 at 380–395 and 425 nm, where every row of the table's 5 nm prints .0000", () => {
+    const k = methaneLiquidK();
+    expect([380, 385, 390, 395, 425].map((nm) => k[MATERIAL_GRID_NM.indexOf(nm)])).toEqual([
+      0, 0, 0, 0, 0,
+    ]);
+    expect(k.filter((value) => value < 0)).toEqual([]);
+  });
+
+  it("keep a narrow band's area: the grid's trapezium over 600–650 nm within 1% of the fine mean", () => {
+    let fine = 0;
+    const steps = 50_000;
+    for (let j = 0; j < steps; j += 1) {
+      fine += methaneLiquidAbsorptionPerM(600 + (50 * (j + 0.5)) / steps);
+    }
+    fine /= steps;
+    expect(Math.abs(gridMeanPerM(methaneLiquidK(), 600, 650) / fine - 1)).toBeLessThan(0.01);
+  });
+
+  it("hold the committed methane-liquid.json's k to its derivation, and keep T5.b's n", () => {
+    const methane = committed("methane-liquid.json");
+    expect(methane.k).toEqual(methaneLiquidK());
+    expect([380, 550, 780].map((nm) => gridValue(methane.n, nm))).toEqual([1.3, 1.29345, 1.28909]);
+  });
+
+  it("write methane-liquid.json's header as the tool states it, derived with its gas's span", () => {
+    // The by-hand regeneration's text half, which needs no fetched source.
+    const raw: unknown = JSON.parse(
+      readFileSync(fileURLToPath(new URL("methane-liquid.json", MATERIALS)), "utf8"),
+    );
+    const header = COMBINED_MATERIALS.find((spec) => spec.file === "methane-liquid.json")?.header;
+    const fields = [
+      "key",
+      "phase",
+      "name",
+      "temperatureK",
+      "provenance",
+      "paper",
+      "source",
+      "licence",
+      "reduction",
+      "standIn",
+      "fit",
+    ] as const;
+    const read = (field: (typeof fields)[number]): unknown =>
+      typeof raw === "object" && raw !== null ? Reflect.get(raw, field) : undefined;
+    expect(fields.map(read)).toEqual(fields.map((field) => header?.[field]));
+    expect(header?.provenance).toBe("derived");
+    expect(header?.fit).toEqual({
+      form: "scaledGasAbsorption",
+      molarDensityMolPerL: 28.141_91,
+      fromUm: 0.38,
+      toUm: 0.555_556,
+    });
+  });
+
+  it("state the ruled prose: maxima only, nothing measured shortward of 552.5 nm, 90 K density-scaled from 111 K at 25%", () => {
+    const reduction = committedText("methane-liquid.json", "reduction");
+    for (const text of [
+      "local maxima only",
+      "nothing was measured shortward of 18,100 cm⁻¹, 552.5 nm",
+      "the 90 K values are the 111 K spectrum density-scaled",
+      "uncertain by 25% (p. 8309)",
+      "uncertain by 100% or more",
+    ]) {
+      expect(reduction).toContain(text);
+    }
+  });
+
+  it("ask for each of T5.j's two inputs once: M&O's liquid file and Karkoschka 1998's table", () => {
+    const options = sourceOptions().map((input) => input.option);
+    for (const option of ["methane-liquid", "karkoschka-1998"]) {
+      expect(options.filter((o) => o === option)).toHaveLength(1);
+    }
+    expect(FETCHED_MATERIALS.some((spec) => spec.file === "methane-liquid.json")).toBe(false);
   });
 });

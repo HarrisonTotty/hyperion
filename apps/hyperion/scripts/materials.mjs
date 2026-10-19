@@ -24,7 +24,8 @@
 //     --mason <purewater_abs_coefficients_v3.txt> \
 //     --argon-liquid <Ar/nk/Sinnock-liquid-83.81K.yml> \
 //     --krypton-liquid <Kr/nk/Sinnock-liquid-115.95K.yml> \
-//     --xenon-liquid <Xe/nk/Sinnock-liquid-161.35K.yml> --o2o2 <O2-O2_2024.cia>
+//     --xenon-liquid <Xe/nk/Sinnock-liquid-161.35K.yml> --o2o2 <O2-O2_2024.cia> \
+//     --karkoschka-1998 <1995LOW.TAB>
 //   pnpm exec prettier --write src/renderer/src/view/atmosphere/materials/*.json
 // The two .tex files are the e-prints' members, extracted from their archives as data; the .dat
 // files are Kitzmann and Heng 2018's compilation's (R08.T5.d). `pope97.txt` is omlc.org's table of
@@ -33,7 +34,9 @@
 // no file reads Hale and Querry's table. Since R08.T5.k the three `Sinnock-liquid-*.yml` files,
 // refractiveindex.info's copies of Sinnock and Smith 1969's liquid tables, make argon-liquid.json,
 // krypton-liquid.json and xenon-liquid.json, and `O2-O2_2024.cia`, HITRAN2024's collision-induced
-// absorption file (the atmosphere tool's `--o2o2`), gives oxygen-liquid.json its k.
+// absorption file (the atmosphere tool's `--o2o2`), gives oxygen-liquid.json its k. Since R08.T5.j
+// `1995LOW.TAB`, Karkoschka 1998's methane coefficients from NASA's Planetary Data System (volume
+// GBAT_0001), gives methane-liquid.json its k over 380–555.6 nm, with Martonchik-liquid-90K.yml's n.
 import { fileURLToPath } from "node:url";
 
 import { runnerImport } from "vite";

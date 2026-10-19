@@ -112,6 +112,17 @@ const SCALED_FIT = {
   anchoredToUm: 0.5461,
 } as const;
 
+/**
+ * A scaled gas absorption's fields, liquid methane's, for the format's cases (R08.T5.j;
+ * decision-p14-t49h-liquids §2.4).
+ */
+const GAS_ABSORPTION_FIT = {
+  form: "scaledGasAbsorption",
+  molarDensityMolPerL: 28.141_91,
+  fromUm: 0.38,
+  toUm: 0.555_556,
+} as const;
+
 /** The ideal gas's molar volume at a row's reference state, cm³ mol⁻¹, times its Z. */
 function gasMolarVolumeCm3PerMol(gas: Dispersion): number {
   return (
@@ -294,6 +305,14 @@ describe("the material files", () => {
     expect(parsed.fit).toEqual(SCALED_FIT);
   });
 
+  it("accept a derived file with a scaled gas absorption, and keep its four fields", () => {
+    const parsed = parseMaterialFile(
+      { ...waterFile, provenance: "derived", fit: GAS_ABSORPTION_FIT },
+      "absorption.json",
+    );
+    expect(parsed.fit).toEqual(GAS_ABSORPTION_FIT);
+  });
+
   it("accept a grid that starts at 360 nm", () => {
     const longer = {
       ...waterFile,
@@ -345,6 +364,25 @@ describe("the material files", () => {
       { provenance: "derived", fit: { ...SCALED_FIT, anchoredFromUm: 0.6, anchoredToUm: 0.5 } },
     ],
     ["a measured file that carries a scaled fit", { fit: SCALED_FIT }],
+    // R08.T5.j: the third form's density is positive and its span runs from a positive wavelength
+    // to a longer one.
+    [
+      "a gas absorption whose density is not positive",
+      { provenance: "derived", fit: { ...GAS_ABSORPTION_FIT, molarDensityMolPerL: -1 } },
+    ],
+    [
+      "a gas absorption whose span runs backwards",
+      { provenance: "derived", fit: { ...GAS_ABSORPTION_FIT, fromUm: 0.6, toUm: 0.5 } },
+    ],
+    [
+      "a gas absorption whose span starts at no wavelength",
+      { provenance: "derived", fit: { ...GAS_ABSORPTION_FIT, fromUm: 0 } },
+    ],
+    [
+      "a gas absorption missing its span's end",
+      { provenance: "derived", fit: { ...GAS_ABSORPTION_FIT, toUm: undefined } },
+    ],
+    ["a measured file that carries a gas absorption", { fit: GAS_ABSORPTION_FIT }],
   ])("refuse %s", (_, broken) => {
     expect(() => parseMaterialFile({ ...waterFile, ...broken }, "broken.json")).toThrow(
       /broken\.json/u,
@@ -1422,4 +1460,49 @@ describe("the liquids from their gases and their measurements (R08.T5.k)", () =>
       expect(file.name).toMatch(/ \(an estimated index\)$/u);
     },
   );
+});
+
+describe("liquid methane's visible k, re-reduced (R08.T5.j, decision-p14-t49h-liquids §2.4)", () => {
+  it("file liquid CH4 at 90 K as a derived sphere whose fit is a gas absorption over 380–555.6 nm", () => {
+    const methane = liquidOf("CH4");
+    expect([methane.shape, methane.provenance, methane.temperatureK]).toEqual([
+      "sphere",
+      "derived",
+      90,
+    ]);
+    expect(methane.fit).toEqual(GAS_ABSORPTION_FIT);
+    expect(methane.standIn).toBeUndefined();
+  });
+
+  it("keep liquid CH4's n, Martonchik and Orton's: 1.3 at 380 nm, 1.29345 at 550 nm, 1.28909 at 780 nm", () => {
+    const methane = liquidOf("CH4");
+    expect([380, 550, 780].map((nm) => valueAt(methane.n, methane, nm))).toEqual([
+      1.3, 1.29345, 1.28909,
+    ]);
+  });
+
+  it("give liquid CH4 its gas's 543 nm band in the blue, and k = 0 at 380–395 nm", () => {
+    const methane = liquidOf("CH4");
+    const blue = [380, 385, 390, 395].map((nm) => valueAt(methane.k, methane, nm));
+    expect(blue).toEqual([0, 0, 0, 0]);
+    const band = valueAt(methane.k, methane, 545);
+    for (const nm of [440, 460, 485, 510, 530, 555]) {
+      expect(valueAt(methane.k, methane, nm)).toBeLessThan(band);
+    }
+  });
+
+  it("give liquid CH4's red bands over 10⁻⁸ and its trough at 765 nm at Fig. 3's axis", () => {
+    const methane = liquidOf("CH4");
+    expect(valueAt(methane.k, methane, 620)).toBeGreaterThan(1e-8);
+    expect(valueAt(methane.k, methane, 730)).toBeGreaterThan(1e-8);
+    expect(valueAt(methane.k, methane, 765)).toBeLessThan(2e-10);
+    expect(valueAt(methane.k, methane, 640)).toBeLessThan(1e-9);
+  });
+
+  it("resolve liquid CH4 as its own derived file", () => {
+    // Whether a liquid-CH4 deck raises ATMOSPHERE: APPROXIMATE, its blue k being its gas's carried
+    // to the liquid (the guide's signoff-12 item 38(a)), is R08.T10.a's, routed with liquid O2's.
+    const resolved = resolveMaterial("CH4", { phase: "liquid" });
+    expect([resolved.file, resolved.provenance]).toEqual([liquidOf("CH4"), "derived"]);
+  });
 });

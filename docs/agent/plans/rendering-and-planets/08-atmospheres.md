@@ -10496,6 +10496,236 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     pair's 203 K cross-sections carried to the liquid and its A and B bands are not drawn. _Ruled
     2026-10-19 (`signoff-12.md`, item 38): the guide's cause gains "the measurements disagree";
     liquid O₂'s colour raises the label, its file staying `derived`; R08.T10.a builds it._
+- **Deviations in T5.j, as built** (2026-10-19; decision-p14-t49h-liquids §2.4, with main's rulings
+  of 2026-10-19 on Fig. 3's level, its spike and the file's label, status log 15:21 and 15:22;
+  `view/atmosphere/materials/` (`methane-liquid.json`, `materials.ts` and its test),
+  `apps/hyperion/src/tools/materials.ts` and its test, `scripts/materials.mjs`, `NOTICE`; the sim's
+  side is plan 14's "P14.T49.h, as built: the methane refit").
+  - _The sources._
+    - Martonchik and Orton 1994 (M&O) from NASA NTRS 19960016949, the reprint NASA-CR-200337
+      ("public use permitted"), SHA-256 `de5333e7…12726` (the decision's copy, fetched anew): Fig. 3
+      (p. 8309), the text of pp. 8309–8311 and Table 2.
+    - Karkoschka 1998 from the PDS, volume GBAT_0001, `DATA/1995LOW.TAB` (SHA-256 `d8071e07…a788b`;
+      DOI 10.17189/2bp8-k793, CC0 1.0 by its DataCite record), with its label and the volume's
+      ASCII copies of the 1994 and 1998 papers. The paper itself is closed, and its tables are not
+      in it: it points to the PDS.
+    - refractiveindex.info's `Martonchik-liquid-90K.yml`, fetched anew; its SHA-256 matches the
+      tool's.
+  - _Fig. 3, read._ The page's 300 dpi bilevel image was extracted as stored (`pdfimages`) and
+    turned upright (the figure lies 1.1–1.25° off the page's axes).
+    - **The axes.** The frame's four lines were fitted to their ink (rms 0.4–1.1 px) and their
+      corners mapped bilinearly to 4,000–18,000 cm⁻¹ and n_i 10⁻⁵–10⁻¹⁰. Every major and minor tick
+      lies within 1.3 px of the map: 21 cm⁻¹, 0.010 dex. The axis is logarithmic, its minor ticks at
+      2–9 times each decade.
+    - **The vertices.** 59 over 12,497–18,000 cm⁻¹ (`MO_FIG_3_VERTICES`), at 111 K. Each is a
+      marker's centre (a horizontal arm of 7–15 px crossed by a vertical one), or the line's corner
+      where it has no marker (the spike's apex and shoulder, its meetings with the axis). Every
+      segment lies on the ink within 1.5 px.
+    - **The uncertainty.** About ±25 cm⁻¹ and ±0.015 dex (±3.5% in k) at a vertex. On the flanks,
+      to 0.02 dex per cm⁻¹, the wavenumber's dominates.
+    - **The check.** The crosses at eight RCM-only maxima (9,865, 10,000, 10,130, 11,255, 11,530,
+      11,880, 12,510 and 12,740 cm⁻¹) meet Table 2's **111 K** column within 1.5% in k and 27
+      cm⁻¹, so the figure is drawn at 111 K. The 90 K file is the figure × 1.0659, Table 2's own 90
+      K ÷ 111 K (the mean of its ten visible rows, each within 0.05%), as M&O made their 90 K values
+      (p. 8310).
+    - The scripts (`pbm.py`, `calib.py`, `markers.py`, `trace.py`, `fitcheck.py`) and their logs
+      stay in the lane's scratch. Only the vertices are committed, cited.
+  - _Two corrections to the figure as drawn_ (main's rulings, 2026-10-19). The science check
+    (science-checker, 2026-10-19; its renders, scripts and readings in the lane's scratch,
+    `sci-check/`) read both independently from the scan, before opening the vertex list, and agrees
+    with both: the level 1.775 (1.745–1.776) against 1.780, within its ±0.01 dex; the spike's apex
+    and shoulder 9.4–10.2 times PNK's points beneath them, and RCM's cross at 16,090 cm⁻¹ 1.84 ×
+    10⁻⁸ (±3.5%), Table 2's value ÷ 10. Its band integrals over the gas at 0.424 g cm⁻³ support the
+    level: 1.12 and 0.83 in the RCM-only bands (10,886–11,971 and 12,229–12,884 cm⁻¹); 1.34–3.09 in
+    PNK's six bands as drawn, 0.75–1.74 divided by 1.780; the 619 nm band 1.84 as drawn, 1.03 with
+    the slip taken. At six RCM crosses PNK as drawn runs 1.24–1.73 times RCM, and 0.69–0.97
+    corrected, where higher-resolution data scaled at a peak should sit at or below lower-resolution
+    data on the flanks. The figure shows no RCM cross at 13,700 cm⁻¹, so RCM's value there is Table
+    2's, inferred. Its must-fix, applied: the 18,000 cm⁻¹ vertex, on the axis, had taken the level;
+    neither correction now moves a vertex on the axis (12,884–13,278 and 18,000 cm⁻¹), which raised
+    bin 6 by 0.3% and bin 7 by 1.2%.
+    - **The level over PNK's range** (from 13,300 cm⁻¹, 752 nm). The figure lies 1.780 times above
+      Table 2 at the five maxima whose frequencies agree within 20 cm⁻¹ (1.745, 1.780, 1.792, 1.787
+      and 1.728 at 13,700, 14,170, 14,585, 14,935 and 16,715 cm⁻¹), and is divided by 1.780 there.
+      Table 2 is the level the paper states (PNK's relative data "scaled to the RCM data at 13 700
+      cm⁻¹", p. 8309). It also meets the gas at the paper's 111 K density, 592 amagat: 0.97, 1.09
+      and 1.03 times the gas at 729.9, 705.7 and 669.6 nm, where the figure as drawn is 1.7, 1.9 and
+      1.8 times it.
+    - **The spike over 16,050–16,240 cm⁻¹** (616–623 nm), taken as an exponent slip and divided
+      by 10. Its apex (16,103 cm⁻¹, 3.0 × 10⁻⁷) and shoulder (16,195 cm⁻¹) lie 9.4–10.2 times above
+      PNK's own asterisks beneath them (16,090 cm⁻¹, 3.1 × 10⁻⁸; 16,207 and 16,217 cm⁻¹, 2.0 and 2.2
+      × 10⁻⁸), and no marker reaches it. The third slipped vertex, 16,207 cm⁻¹, the leg's top bend,
+      lies 8.1 times above PNK's asterisk at its own wavenumber; less a decade, it is within 0.09
+      dex of it. Table 2's 16,090 cm⁻¹ entry, 1.830 × 10⁻⁷, is ten times RCM's own cross there in
+      the figure, 1.83 × 10⁻⁸ as read (±3.5%). The gas at 111 K density gives 1.5 × 10⁻⁸ at 621.5
+      nm.
+    - **Table 2's other visible rows**, recorded:
+      - Its 13,940 cm⁻¹ entry, 1.085 × 10⁻⁷, is 9.1–10.1 times the figure's level-corrected curve
+        at 13,940–13,945 cm⁻¹ (1.19–1.07 × 10⁻⁸, on the band's flank, at no maximum): a second
+        ×10, in the table alone.
+      - Its 17,150 cm⁻¹ entry, 1.160 × 10⁻⁹, is the figure's level-corrected maximum at 17,323 cm⁻¹
+        (1.14 × 10⁻⁹), 173 cm⁻¹ away.
+      - So Table 2 is used for the level and the checks, never for the shape. refractiveindex.info's
+        file, which reproduces Table 2, carries all three.
+  - _380–555.6 nm, `derived`._ a = κN: Karkoschka 1998's coefficient κ, linear between its rows,
+    times N = 630.8 amagat (the WebBook's saturated liquid at the triple point, 28.14191 mol/l, the
+    tool's existing `CH4_LIQUID_TRIPLE_POINT_MOL_PER_L`, standing for 90 K; within 0.2% of the sim's
+    line at 90 K and of M&O's implied 90 K density).
+    - The table's rows over 377.2–782.8 nm (1,015, CC0) are held in the tool
+      (`KARKOSCHKA_1998_HELD_E4`, in its last figure), so that tests rebuild the file's k without
+      the fetched table. The reduction refuses a table that differs from them.
+    - The table prints .0000 at most of its rows over 377–431 nm, so k is 0 at 380, 385, 390, 395
+      and 425 nm. Every bin's mean is above 0 (2.1 × 10⁻⁵ m⁻¹ in bin 0).
+    - The 1998 coefficients are inferred from the jovian planets' and Titan's spectra, at "an
+      average temperature of the jovian planets". Their continuum is uncertain by 0.0003 (km
+      amagat)⁻¹ at 400 nm, doubling every 100 nm (the 1994 paper), the 1998 coefficients coming by
+      the same method: 0.00042 at 450 nm and 0.00052 at 480 nm. So the values under it, 57% of the
+      rows over 400–480 nm, are uncertain by 100% or more, and a value of 0.001 by 30–60%. The file
+      states it. That corrects main's condition 3's "about 100% under about 0.001" (the science
+      check).
+    - The decision's third-party `karkoschka_ch4.dat` is the 1993 table (`1993.TAB`, the 1994
+      paper's spectrum, in cm² per molecule), not 1998's. It differs by up to about 17%, chiefly
+      over 625–655 nm, where the 1998 paper finds the 1993 values about 10% high.
+  - _The junction is at 18,000 cm⁻¹ (555.6 nm), not 552.5 nm._ Fig. 3 ends at 18,000 cm⁻¹, short of
+    PNK's 18,100, so the gas takes 552.5–555.6 nm too. The fit's span records it: `toUm` 0.555556.
+  - _The reduction is a 5 nm box mean, not a point sample._ Each grid point's k is the mean of a
+    over the 5 nm about it (the midpoint rule over 500 steps), k = āλ ÷ 4π, so that a feature
+    narrower than the grid keeps its area in the bake bins' means. The grid's trapezium over 600–650
+    nm meets the curve's fine mean within 1% (a test). Point samples would give bin 9 0.156 m⁻¹, bin
+    10 0.0246 and bin 14 0.139 (table below).
+  - _The label_ (main's ruling, 2026-10-19). The file is `derived` as a whole, as T5.i set a file's
+    label at its weakest member. Its `fit` takes a third form, `scaledGasAbsorption`
+    (`molarDensityMolPerL` 28.14191, `fromUm` 0.38, `toUm` 0.555556), describing k alone over that
+    span. Its n and its k over 555.6–780 nm remain M&O's, as `paper` and `reduction` say.
+    - The tool's and the client's `DerivedFit` gain `ScaledGasAbsorptionFit`. `fitOf` refuses a
+      density that is not positive and a span that does not run from a positive wavelength to a
+      longer one.
+    - Nothing beyond the tool and the client's reader changes: `hyperion-fit`'s `RawMaterialFile`
+      reads no `fit`, and no wire type or protocol is touched.
+  - _The prose._ "maxima only", "nothing measured shortward of 552.5 nm" (p. 8309's sentence quoted)
+    and "90 K density-scaled from 111 K, 25%" are in the file's `reduction`. A tool test checks each
+    in the committed file.
+  - _The liquid-to-gas spread._ Over 560–750 nm the liquid's 5 nm means run 0.46–6.6 times the gas's
+    at the liquid's density, and 0.46–2.2 times where κ reaches 0.1 (km amagat)⁻¹. That is against
+    §2.1's 1–12 at Table 2's maxima, which carried the 16,090 cm⁻¹ slip and the 1993 table. Over
+    755–780 nm, where the figure lies on its axis, the spread is 0.012–0.21 (a deferred finding,
+    below).
+  - _The bins_, a, m⁻¹, by `liquid_optics`' reduction (bin k, 380 + 25.33k to 380 + 25.33(k + 1)
+    nm):
+
+    | Bin | Before (Table 2 interpolated) | As built (both corrections) | Fig. 3 as drawn | Spike as drawn | Point-sampled |
+    | --- | ----------------------------- | --------------------------- | --------------- | -------------- | ------------- |
+    | 0   | 1.18 × 10⁻⁴                   | 2.08 × 10⁻⁵                 | =               | =              | 3.51 × 10⁻⁶   |
+    | 1   | 3.63 × 10⁻³                   | 7.28 × 10⁻⁵                 | =               | =              | 1.03 × 10⁻⁴   |
+    | 2   | 8.28 × 10⁻³                   | 6.91 × 10⁻⁴                 | =               | =              | 6.50 × 10⁻⁴   |
+    | 3   | 0.0124                        | 1.16 × 10⁻³                 | =               | =              | 1.41 × 10⁻³   |
+    | 4   | 0.0161                        | 3.92 × 10⁻³                 | =               | =              | 4.79 × 10⁻³   |
+    | 5   | 0.0195                        | 3.56 × 10⁻³                 | =               | =              | 3.72 × 10⁻³   |
+    | 6   | 0.0225                        | 0.0236                      | 0.0237          | =              | 0.0209        |
+    | 7   | 0.0253                        | 0.0113                      | 0.0198          | =              | 0.0111        |
+    | 8   | 0.0526                        | 0.0171                      | 0.0305          | =              | 0.0168        |
+    | 9   | 1.83                          | 0.147                       | 1.31            | 0.737          | 0.156         |
+    | 10  | 0.682                         | 0.0250                      | 0.0446          | =              | 0.0246        |
+    | 11  | 0.102                         | 0.0517                      | 0.0921          | =              | 0.0524        |
+    | 12  | 0.114                         | 0.0831                      | 0.148           | =              | 0.0844        |
+    | 13  | 1.50                          | 0.629                       | 1.12            | =              | 0.692         |
+    | 14  | 1.26                          | 0.141                       | 0.250           | =              | 0.139         |
+
+    ("=" is the as-built value.) Each correction alone: with the level as drawn and the slip
+    taken, bin 9 is 0.262 m⁻¹, and every other bin is as "Fig. 3 as drawn".
+    - **Against §2.1** (main's condition 2). §2.1 read Fig. 3 as drawn, its level and its spike
+      included: bin 9 about 1.1, bin 10 about 0.06, bin 14 about 0.45, ±factor 2. This reading of
+      the figure as drawn meets it (1.31, 0.0446 and 0.250: ×1.2, ×0.74 and ×0.56). The corrections
+      move all three outside §2.1's band: bin 9 to 0.147 (÷7.5, the slip and the level), bin 10 to
+      0.0250 (÷2.4) and bin 14 to 0.141 (÷3.2), both by the level.
+    - §2.1's gas bin means for bins 0–6 (from the 1993 table) meet these within 16% in bins 1–6;
+      bin 0 is 2.1 × 10⁻⁵ against §2.1's 0.
+
+  - _The regeneration, by hand_, of `methane-liquid.json` alone. A scratch runner applied the tool's
+    `main` steps to that one spec from its two inputs, each checked by its SHA-256, and Prettier
+    formatted the result. Its n is byte-identical to T5.b's. No other spec changed. The other 52
+    files' inputs (about 250 MB with HITRAN2024's tar) were not fetched anew, so they were not
+    regenerated; the header tests hold the text of the fetched specs, T5.k's nine and methane's, and
+    no file's data changed.
+  - _The tables that read the file._ `liquid_optics`, refitted here at 22 (plan 14's "the methane
+    refit"). P14.T49.e's `condensate_extinction_5`, on `p14-optics-t49c` (8409c95e, not landed),
+    reads the file's n and k at 550 nm (k from 1.01 × 10⁻⁹ to 6.64 × 10⁻¹¹), so whichever of the
+    two lands second refits it at 22 through decision-p14-t49h-liquids §5 and re-blesses what reads
+    it.
+  - _The generator version._ It stays 22. The palette's hand records of methane
+    (`paletteLiquids.test.ts`) hold its n and b only, so no hand record and no
+    `wire/payloads.golden` line moves.
+  - _Names beyond the sketch._ In the tool: `ScaledGasAbsorptionFit`, `FETCHED_T5J`,
+    `MO_TABLE_2_VISIBLE`, `MO_90K_PER_111K`, `MO_FIG_3_VERTICES`, `MO_FIG_3_LAST_PER_CM`,
+    `MO_PNK_FROM_PER_CM`, `MO_PNK_MAXIMA`, `moPnkRatios`, `MO_FIG_3_PNK_LEVEL`,
+    `MO_FIG_3_SLIPPED_PER_CM`, `MO_FIG_3_UNDER_SPIKE`, `MethaneKOptions`, `METHANE_K_RULED`,
+    `methaneFigureK`, `KARKOSCHKA_1998_SHA256`, `KARKOSCHKA_1998_ROWS`, `karkoschkaWavelengthNm`,
+    `KARKOSCHKA_1998_HELD_E4`, `GasCoefficientRow`, `parseKarkoschka1998`, `checkedKarkoschka1998`,
+    `methaneGasCoefficient`, `CH4_LIQUID_AMAGAT`, `methaneGasAbsorptionPerM`,
+    `methaneLiquidAbsorptionPerM`, `METHANE_BOX_STEPS`, `boxMeanPerM`, `methaneLiquidK`,
+    `methaneLiquidToGas` and `methaneLiquidToGasRange`. The methane file moves from
+    `FETCHED_MATERIALS` to `COMBINED_MATERIALS` (`METHANE_LIQUID_MATERIALS`), with the new option
+    `--karkoschka-1998`. In the client: `ScaledGasAbsorptionFit`.
+  - _Tests._
+    - **The tool's**, 17 new:
+      - Table 2's density ratio;
+      - the figure at 111 K at its first and third vertices;
+      - the level, 1.780, each maximum within 1.72–1.80 (1.728–1.792);
+      - the slip, each slipped vertex less a decade within 0.1 dex of the nearest PNK asterisk, and
+        Table 2's 16,090 cm⁻¹ ten times RCM's cross;
+      - each correction where ruled;
+      - the axis floor and the figure's range;
+      - N and a = κN;
+      - κ's interpolation and range;
+      - the junction;
+      - 1995LOW's parser and its refusals;
+      - k = 0 where the table prints .0000;
+      - the box mean's area;
+      - the committed k rebuilt and n kept;
+      - the header and the fit;
+      - the ruled prose;
+      - the inputs asked once.
+    - **The client's**: the third form accepted and its five refusals; liquid methane `derived`
+      with its fit, its n, its blue band and zeros, its red bands and its trough, and a deck with no
+      label.
+  - _Accept_: `pnpm --filter hyperion exec vitest run src/renderer/src/view/atmosphere` and
+    `pnpm --filter hyperion exec vitest run src/tools/materials` (both pass).
+- **Deferred findings (2026-10-13 rule)** (R08.T5.j). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _753–776 nm, the figure on its axis._ Over 12,884–13,278 cm⁻¹ Fig. 3 lies at or below 10⁻¹⁰,
+    about 20–100 times below the gas at the liquid's density as 5 nm means over 760–775 nm (κ
+    0.06–0.28 (km amagat)⁻¹, k 2.4 × 10⁻⁹–1.1 × 10⁻⁸), and 4–140 times point by point over 753–776
+    nm (the science check); the gas there would raise bin 14 by 0.0034 m⁻¹ (2.4%). That is likely
+    RCM's sensitivity over its 3 cm path (k 10⁻⁸ gives τ 0.005 there), not a measured transparency.
+    - The file holds the axis as ruled (Fig. 3 over 552–780 nm). Bin 14 sees only 755–760 nm of it;
+      the client sees 760–780 nm.
+    - The gas's scaled coefficients, or a liquid measurement, would replace it.
+  - _Karkoschka and Tomasko 2010's 100 K coefficients_ (laboratory-calibrated, already reduced in
+    `absorbers/crossSections.json` through PSG) are a closer gas source for a 90 K liquid than
+    Karkoschka 1998's jovian average. They were not compared; the ruling names Karkoschka 1998.
+  - _1995HIGH.TAB_ (0.4 nm resolution, higher band peaks) was not used. The low-resolution table
+    matches the liquid's broad bands and the 5 nm grid.
+  - _Table 2's two other slips_ (13,940 cm⁻¹ ×10, and 17,150 cm⁻¹ at the 17,323 cm⁻¹ maximum's
+    value) and the figure's 1.78 level are M&O's. Any consumer of refractiveindex.info's
+    `Martonchik-liquid-90K.yml` inherits them.
+  - _The 90 K state._ The file stays at M&O's 90 K, 0.694 K below the triple point. Its gas part is
+    at the triple point's density (0.2%). M&O's "111 K" spectrum is RCM's 91–99 K and PNK's 94 K
+    data (p. 8307), so the ×1.0659 sits about 5% above a scaling from the measured state (×1.012,
+    the science check): M&O's convention, inside the 25%.
+  - _`liquid_optics`' bins from the 5 nm grid._ The table's trapezium of the grid's 5 nm means
+    departs from the continuous bin mean of the same a(λ): bin 14 0.141 against 0.125 m⁻¹ (+13%),
+    bin 3 +14%, bin 0 2.1 × 10⁻⁵ against 3.0 × 10⁻⁶ (the science check). The reduction predates
+    the task.
+  - _k = 0 at five grid points_ (380–395 and 425 nm), where the table prints .0000: within its
+    continuum's uncertainty (a ±1.9 × 10⁻⁴ m⁻¹), and every bin's mean is above 0, but
+    decision-p14-t49h-liquids §2.3's "never writes 0" no longer holds of the file's grid.
+  - _The label._ The guide's `ATMOSPHERE: APPROXIMATE` row (signoff-12 item 38(a)) stands "while a
+    liquid's colour is drawn from its gas's measured absorption carried to the liquid, where the
+    liquid's own has not been measured". Liquid methane's k over 380–555.6 nm is that case, and its
+    gas coefficients are inferred from planetary spectra. It is routed to R08.T10.a beside liquid
+    O₂'s item 38(c), and the question goes to main's sign-off agent: does 38(a) cover a liquid
+    whose red bands are its own measurement? The client's test pins only that the file resolves
+    `derived`.
 - **Deviations in T12.a, as built** (2026-10-09; `crates/hyperion-fit/src/atmosphere/`, the
   `atmosphere-reference` command in `cli.rs`, `RunFitError` in `lib.rs`).
   - _Signatures._ `trace_reference` returns `Result<ReferenceRadiances, TraceReferenceError>`: the

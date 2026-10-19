@@ -5,13 +5,18 @@
   "name": "liquid CH4 at 90 K",
   "temperatureK": 90,
   "shape": "sphere",
-  "provenance": "measured",
-  "paper": "J. V. Martonchik and G. S. Orton, \"Optical constants of liquid and solid methane\", Appl. Opt. 33 (1994) 8306–8317, DOI 10.1364/AO.33.008306",
-  "source": "refractiveindex.info, organic/CH4 - methane/nk/Martonchik-liquid-90K.yml, https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/c5c2f188e848453def5970e347399d653df2ffc2/database/data/organic/CH4%20-%20methane/nk/Martonchik-liquid-90K.yml, SHA-256 75b1cb8ae81a6afed2c597b524bcc16f89492eb9fba4b744813ce5cde9600d67, fetched 2026-10-09",
-  "licence": "CC0 1.0 (the refractiveindex.info database, M. N. Polyanskiy, Sci. Data 11, 94 (2024)); reduced values",
-  "reduction": "n linear and k linear in log k in wavelength between the source's rows, onto 380–780 nm every 5 nm, to six significant figures. The source has no row between 133.7 and 400 nm, across methane's ultraviolet absorption edge, so its rows below 400 nm are not used and its 400 nm values (n 1.300, k 0) are held over 380–400 nm. Its visible k rows sit at band maxima and minima (the database's caution), so k between them is indicative",
+  "provenance": "derived",
+  "paper": "J. V. Martonchik and G. S. Orton, \"Optical constants of liquid and solid methane\", Appl. Opt. 33 (1994) 8306–8317, DOI 10.1364/AO.33.008306, for n and for k over 555.6–780 nm; E. Karkoschka, \"Methane, ammonia, and temperature measurements of the jovian planets and Titan from CCD-spectrophotometry\", Icarus 133 (1998) 134–146, DOI 10.1006/icar.1998.5913, for the gas's absorption coefficients, from which k over 380–555.6 nm is derived",
+  "source": "refractiveindex.info, organic/CH4 - methane/nk/Martonchik-liquid-90K.yml, for n, https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/c5c2f188e848453def5970e347399d653df2ffc2/database/data/organic/CH4%20-%20methane/nk/Martonchik-liquid-90K.yml, SHA-256 75b1cb8ae81a6afed2c597b524bcc16f89492eb9fba4b744813ce5cde9600d67, fetched 2026-10-09; the paper's scan, NASA Technical Reports Server 19960016949 (NASA-CR-200337, a reprint; public use permitted), its text and Table 2 (pp. 8309–8311) and Fig. 3 (p. 8309) read here, https://ntrs.nasa.gov/api/citations/19960016949/downloads/19960016949.pdf, SHA-256 de5333e7bd8fefaab245885ee73ab6c4f55d92bb83df73a8f6acdb8ae6712726, fetched 2026-10-19; NASA's Planetary Data System, volume GBAT_0001, data set ESO-J/S/N/U-SPECTROPHOTOMETER-4-V2.0 (DOI 10.17189/2bp8-k793), DATA/1995LOW.TAB, its methane absorption coefficients, (km amagat)⁻¹, at 1 nm resolution every 0.4 nm over 300.4–1,050.0 nm (vacuum), as its label (1995LOW.LBL) defines them, https://pds-atmospheres.nmsu.edu/PDS/data/gbat_0001/data/1995low.tab, SHA-256 d8071e071c2c0a60052ec6c164e151bd42847acf5d9bfbe1e9b2f76bf49a788b, fetched 2026-10-19",
+  "licence": "CC0 1.0 (the refractiveindex.info database, M. N. Polyanskiy, Sci. Data 11, 94 (2024)); reduced values, for n; Karkoschka 1998's table under the PDS's CC0 1.0 (its DOI's DataCite record: \"Creative Commons Zero v1.0 Universal\"), reduced values; Martonchik and Orton's Table 2 and Fig. 3 cited as facts, read here from NTRS's reprint, no figure copied (decision-r08-licences.md)",
+  "reduction": "n: n linear and k linear in log k in wavelength between the source's rows, onto 380–780 nm every 5 nm, to six significant figures. The source has no row between 133.7 and 400 nm, across methane's ultraviolet absorption edge, so its rows below 400 nm are not used and its 400 nm n, 1.300, is held over 380–400 nm. k (R08.T5.j; decision-p14-t49h-liquids §2.4, with main's rulings of 2026-10-19): at each grid point the mean of a = 4πk ÷ λ over the 5 nm about it, by the midpoint rule over 500 steps, k = āλ ÷ 4π, to six significant figures, so that a feature narrower than the grid keeps its area. Over 555.6–780 nm (18,000–12,821 cm⁻¹, vacuum) a is Martonchik and Orton's Fig. 3 best estimate, log-linear in wavenumber between its vertices as read here from the scan (the tool's MO_FIG_3_VERTICES: the frame fitted to its ink, every tick within 1.3 px; about ±25 cm⁻¹ and ±3.5% in k at a vertex), not their Table 2: the table's visible rows, 12,510–17,150 cm⁻¹, are local maxima only, every one marked \"+\" and none a minimum, and the figure falls between them into troughs as deep as 10⁻¹⁰. Fig. 3 is drawn at 111 K, its crosses at eight RCM-only maxima, 9,865–12,740 cm⁻¹, meeting Table 2's 111 K column within 1.5%; the 90 K values are the 111 K spectrum density-scaled, as Martonchik and Orton made theirs (\"simply scaling the n_i at 111 K by the ratio of the methane densities\", p. 8310), by Table 2's own 90 K ÷ 111 K, 1.0659, and are uncertain by 25% (p. 8309). Two corrections are made to the figure as drawn (main's rulings, 2026-10-19). Over PNK's range, from 13,300 cm⁻¹ (752 nm), the figure lies 1.780 times above Table 2 at the five maxima whose frequencies agree within 20 cm⁻¹ (1.745, 1.780, 1.792, 1.787, 1.728 at 13,700, 14,170, 14,585, 14,935 and 16,715 cm⁻¹), where Table 2 meets the scaling the paper states (PNK's relative data \"scaled to the RCM data at 13 700 cm⁻¹\", p. 8309; Fig. 3 shows no RCM cross at 13,700 cm⁻¹, so RCM's value there is inferred from Table 2, not read from the figure) and the gas at the liquid's density, so it is divided by 1.780 there. Its spike over 16,050–16,240 cm⁻¹ (616–623 nm) is divided by 10, an exponent slip: its apex at 16,103 cm⁻¹ and its shoulder at 16,195 cm⁻¹ lie 9.4–10.2 times above PNK's own points beneath them (3.1 × 10⁻⁸ at 16,090 cm⁻¹, 2.0–2.2 × 10⁻⁸ at 16,207–16,217 cm⁻¹), Table 2's 1.830 × 10⁻⁷ at 16,090 cm⁻¹ is ten times RCM's own cross there in the figure, 1.83 × 10⁻⁸ as read (±3.5%), and no marker reaches it. Where the curve runs on the figure's axis, 12,884–13,278 cm⁻¹ (776–753 nm) and at 18,000 cm⁻¹, it is held at the axis, 10⁻¹⁰ at 111 K, which neither correction moves: the figure's lower limit, not a measurement. Over 380–555.6 nm k is derived: nothing was measured shortward of 18,100 cm⁻¹, 552.5 nm (\"We could find no absorption measurements of liquid methane in this spectral region\", p. 8309), Fig. 3 ends at 18,000 cm⁻¹, and Table 2's 400 nm zero is an unmarked anchor, not used. a = κN: Karkoschka 1998's gas coefficient κ, (km amagat)⁻¹, linear between its rows, times the liquid's number density N = 630.8 amagat (the WebBook's saturated liquid at the triple point, 90.694 K, 28.14191 mol/l after Setzmann and Wagner 1991, standing for 90 K, times the ideal gas's molar volume at 0 °C and 101,325 Pa). That is Martonchik and Orton's own method for their unmeasured far ultraviolet (p. 8309), after Khare et al.'s finding that the gas at the liquid's density matches the liquid at low resolution in the red and near infrared. The table prints .0000, under 5 × 10⁻⁵ (km amagat)⁻¹, at most of its rows over 377–431 nm (every one over 377.2–400.8 and 422.4–429.2 nm) and at 444.8–449.2 nm, so k is 0 at 380, 385, 390, 395 and 425 nm, whose 5 nm hold nothing else. Its coefficients are inferred from the jovian planets' spectra, not measured in a laboratory, at \"an average temperature of the jovian planets\", and its continuum's placement is uncertain by 0.0003 (km amagat)⁻¹ at 400 nm, doubling every 100 nm (Karkoschka 1994, whose method the 1998 coefficients follow), so a value under it, as 57% of the rows over 400–480 nm are, is uncertain by 100% or more, and a value of 0.001 by 30–60%. Over 560–750 nm the liquid's 5 nm means run 0.46–6.6 times the gas's at the liquid's density, 0.46–2.2 times where the gas's κ reaches 0.1 (km amagat)⁻¹, against 1–12 times at Table 2's maxima (decision-p14-t49h-liquids §2.1, against the 1993 table); over 755–780 nm, where the figure lies on its axis, 0.012–0.21 times",
   "standIn": null,
-  "fit": null,
+  "fit": {
+    "form": "scaledGasAbsorption",
+    "molarDensityMolPerL": 28.14191,
+    "fromUm": 0.38,
+    "toUm": 0.555556
+  },
   "wavelengthsNm": [
     380, 385, 390, 395, 400, 405, 410, 415, 420, 425, 430, 435, 440, 445, 450, 455, 460, 465, 470,
     475, 480, 485, 490, 495, 500, 505, 510, 515, 520, 525, 530, 535, 540, 545, 550, 555, 560, 565,
@@ -29,16 +34,16 @@
     1.28991, 1.28982, 1.28973, 1.28963, 1.28954, 1.28945, 1.28936, 1.28927, 1.28918, 1.28909
   ],
   "k": [
-    0, 0, 0, 0, 0, 3.37794e-11, 6.75587e-11, 1.01338e-10, 1.35117e-10, 1.68897e-10, 2.02676e-10,
-    2.36455e-10, 2.70235e-10, 3.04014e-10, 3.37794e-10, 3.71573e-10, 4.05352e-10, 4.39132e-10,
-    4.72911e-10, 5.0669e-10, 5.4047e-10, 5.74249e-10, 6.08028e-10, 6.41808e-10, 6.75587e-10,
-    7.09366e-10, 7.43146e-10, 7.76925e-10, 8.10705e-10, 8.44484e-10, 8.78263e-10, 9.12043e-10,
-    9.45822e-10, 9.79601e-10, 1.01338e-9, 1.04716e-9, 1.08094e-9, 1.11472e-9, 1.1485e-9, 1.18228e-9,
-    1.21606e-9, 1.22803e-9, 1.20472e-9, 1.18185e-9, 1.69815e-9, 5.11814e-9, 1.54258e-8, 4.64924e-8,
-    1.40125e-7, 1.48931e-7, 1.01264e-7, 6.88531e-8, 4.68158e-8, 3.18318e-8, 2.16437e-8, 1.47163e-8,
-    1.00062e-8, 6.80359e-9, 4.70248e-9, 3.92465e-9, 3.27547e-9, 2.73368e-9, 3.43475e-9, 4.56321e-9,
-    6.06243e-9, 8.05421e-9, 2.1986e-8, 6.74809e-8, 1.11949e-7, 1.05248e-7, 9.89065e-8, 9.10685e-8,
-    8.38516e-8, 7.72066e-8, 7.10882e-8, 6.54547e-8, 6.02676e-8, 5.54916e-8, 5.1094e-8, 4.7045e-8,
-    4.33168e-8
+    0, 0, 0, 0, 3.21249e-13, 5.43294e-12, 7.56317e-13, 3.33296e-13, 7.58952e-12, 0, 1.68355e-12,
+    1.7457e-11, 7.2381e-11, 1.19614e-11, 3.91899e-12, 2.31757e-11, 6.15401e-11, 1.29308e-11,
+    7.31934e-12, 2.09935e-11, 1.261e-10, 5.34104e-10, 4.88101e-11, 9.09387e-12, 3.63163e-11,
+    1.4353e-10, 3.29313e-10, 5.1281e-11, 1.12256e-10, 1.11959e-10, 1.06061e-10, 4.77989e-10,
+    2.24535e-9, 2.31628e-9, 6.64234e-11, 7.60322e-11, 1.48557e-10, 2.48273e-10, 5.0599e-10,
+    9.55022e-10, 7.76421e-10, 4.19176e-10, 3.71032e-10, 7.10407e-10, 1.02451e-9, 1.15781e-9,
+    2.92455e-9, 8.9204e-9, 1.52708e-8, 8.33033e-9, 1.72015e-9, 6.83419e-10, 7.4757e-10, 1.0019e-9,
+    1.35413e-9, 2.05927e-9, 3.11553e-9, 3.75408e-9, 3.95474e-9, 1.91429e-9, 1.24104e-9, 2.38716e-9,
+    2.58721e-9, 3.72726e-9, 5.91196e-9, 7.50274e-9, 5.63161e-9, 7.6727e-9, 2.85192e-8, 5.0468e-8,
+    7.54376e-8, 4.31236e-8, 1.42666e-8, 2.64385e-9, 3.93457e-10, 1.0827e-10, 1.06593e-10,
+    1.06593e-10, 1.06593e-10, 1.24188e-10, 2.06012e-9
   ]
 }
