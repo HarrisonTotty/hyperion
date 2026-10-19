@@ -1325,24 +1325,22 @@ pub(crate) fn as_function_of_direction(
     [0, 1, 2].map(|k| (u[k] - along * dir[k]) / radii[k])
 }
 
-/// A body's structural octaves, prepared once for its field and detail seed: each octave's RMS
-/// height from the spectrum, its ridged share and belt factor from the spectrum's break, the
-/// spectrum's tail beyond them, and its range of octaves (see the module documentation).
+/// The structural octaves' expected variance at a point, free of the detail seed: each octave's
+/// RMS height and belt factor from a body's spectrum, its coarse level and its radius, and the
+/// reference style's tail beyond the finest octave (`decision-r09-t5.md` item 8).
 ///
-/// It is plain data, a function of the header and the seed alone, and [`at`](Self::at) reads the
-/// cells' styles from the field it is given, which must be the one whose header made it. At 800
-/// bytes it is `Clone` but not `Copy`.
+/// It is what the coarse pass (R09.T12.e) reads before it has a header or a detail seed, to book
+/// the realised structural share in `σ_h`'s budget (main's ruling R2 on R09.T12.e, 2026-10-19):
+/// [`point_variance`](Self::point_variance) is [`Relief::point_variance`]'s, bit for bit, since
+/// [`Relief::new`] builds one of these from its header's spectrum, level and radius and delegates
+/// to it. Plain data, 528 bytes: `Clone` but not `Copy`.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Relief {
-    seed: DetailSeed,
+pub struct StructuralVariance {
     first: u8,
     finest: u8,
-    radius_m: f64,
     /// Each octave's RMS height at the reference style, metres, by index; 0 outside the body's
     /// octaves.
     rms_m: [f64; OCTAVES as usize],
-    /// Each octave's ridged share `ρ_m`, by index; 0 outside the body's octaves.
-    ridged_share: [f64; OCTAVES as usize],
     /// The logarithm of each octave's belt factor, ln `g_m`, by index; 0 outside the body's
     /// octaves.
     belt_log_factor: [f64; OCTAVES as usize],
@@ -1352,40 +1350,35 @@ pub struct Relief {
     tail_m2: f64,
 }
 
-impl Relief {
-    /// The structural octaves of the body of `header`, drawn from its detail seed `seed`.
+impl StructuralVariance {
+    /// The structural octaves' variance on a body of spectrum `spectrum` and mean radius `radius`
+    /// whose coarse field is at `level`: octaves [`first_octave`] of the level to
+    /// [`finest_octave`] of the radius, each its band's RMS ([`octave_rms`]) and its belt factor's
+    /// logarithm from the spectrum's break, and the reference style's variance beyond the finest
+    /// octave's Nyquist degree (or the coarse cell's, where no octave is finer than it).
+    ///
+    /// # Panics
+    ///
+    /// If `radius` is not finite and positive ([`finest_octave`]).
     #[must_use]
-    pub fn new(header: &FieldHeader, seed: DetailSeed) -> Self {
-        let first = first_octave(header.level());
-        let finest = finest_octave(header.radius());
-        let spectrum = header.spectrum();
+    pub fn new(spectrum: &BandSpectrum, level: CoarseLevel, radius: Metres) -> Self {
+        let first = first_octave(level);
+        let finest = finest_octave(radius);
         let mut rms_m = [0.0; OCTAVES as usize];
-        let mut ridged = [0.0; OCTAVES as usize];
         let mut belt = [0.0; OCTAVES as usize];
         for m in first..=finest {
             let at = usize::from(m);
             rms_m[at] = octave_rms(spectrum, m).value();
-            let ratio = break_ratio(spectrum, m);
-            ridged[at] = ridged_share(ratio);
-            belt[at] = belt_log_factor(ratio);
+            belt[at] = belt_log_factor(break_ratio(spectrum, m));
         }
-        let beyond = nyquist_degree(header.level().get()).max(nyquist_degree(finest));
+        let beyond = nyquist_degree(level.get()).max(nyquist_degree(finest));
         Self {
-            seed,
             first,
             finest,
-            radius_m: header.radius().value(),
             rms_m,
-            ridged_share: ridged,
             belt_log_factor: belt,
             tail_m2: spectrum.variance_from_degree(beyond).value(),
         }
-    }
-
-    /// The body's detail seed.
-    #[must_use]
-    pub const fn seed(&self) -> DetailSeed {
-        self.seed
     }
 
     /// The first octave, [`first_octave`] of the field's level.
@@ -1400,6 +1393,76 @@ impl Relief {
         self.finest
     }
 
+    /// The relief's expected variance at a point whose interpolated style has amplitude `amplitude`
+    /// and belt weight `belt`, square metres: the sum over the body's octaves, in octave order, of
+    /// (a `g_m`^b)² `σ_m`², plus a² times the reference style's tail beyond the finest
+    /// (`decision-r09-t5.md` item 8; [`Relief::point_variance`], which is this).
+    #[must_use]
+    pub fn point_variance(&self, amplitude: f64, belt: f64) -> SquareMetres {
+        let mut variance = 0.0;
+        for m in self.first..=self.finest {
+            let at = usize::from(m);
+            let a = amplitude * math::exp(belt * self.belt_log_factor[at]);
+            let sigma = self.rms_m[at];
+            variance += a * a * (sigma * sigma);
+        }
+        SquareMetres::new(variance + amplitude * amplitude * self.tail_m2)
+    }
+}
+
+/// A body's structural octaves, prepared once for its field and detail seed: each octave's RMS
+/// height from the spectrum, its ridged share and belt factor from the spectrum's break, the
+/// spectrum's tail beyond them, and its range of octaves (see the module documentation).
+///
+/// It is plain data, a function of the header and the seed alone, and [`at`](Self::at) reads the
+/// cells' styles from the field it is given, which must be the one whose header made it. Its
+/// variances are its [`StructuralVariance`]'s. At 800 bytes it is `Clone` but not `Copy`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Relief {
+    seed: DetailSeed,
+    radius_m: f64,
+    /// The octaves' range, RMS heights, belt factors and tail, seed-free.
+    variance: StructuralVariance,
+    /// Each octave's ridged share `ρ_m`, by index; 0 outside the body's octaves.
+    ridged_share: [f64; OCTAVES as usize],
+}
+
+impl Relief {
+    /// The structural octaves of the body of `header`, drawn from its detail seed `seed`.
+    #[must_use]
+    pub fn new(header: &FieldHeader, seed: DetailSeed) -> Self {
+        let spectrum = header.spectrum();
+        let variance = StructuralVariance::new(spectrum, header.level(), header.radius());
+        let mut ridged = [0.0; OCTAVES as usize];
+        for m in variance.first..=variance.finest {
+            ridged[usize::from(m)] = ridged_share(break_ratio(spectrum, m));
+        }
+        Self {
+            seed,
+            radius_m: header.radius().value(),
+            variance,
+            ridged_share: ridged,
+        }
+    }
+
+    /// The body's detail seed.
+    #[must_use]
+    pub const fn seed(&self) -> DetailSeed {
+        self.seed
+    }
+
+    /// The first octave, [`first_octave`] of the field's level.
+    #[must_use]
+    pub const fn first_octave(&self) -> u8 {
+        self.variance.first
+    }
+
+    /// The finest octave, [`finest_octave`] of the body's radius.
+    #[must_use]
+    pub const fn finest_octave(&self) -> u8 {
+        self.variance.finest
+    }
+
     /// Octave `m`'s RMS height at the reference style, metres ([`octave_rms`]); zero for an octave
     /// outside the body's.
     ///
@@ -1408,7 +1471,7 @@ impl Relief {
     /// If `m` is 32 or more.
     #[must_use]
     pub fn octave_rms(&self, m: u8) -> Metres {
-        Metres::new(self.rms_m[usize::from(m)])
+        Metres::new(self.variance.rms_m[usize::from(m)])
     }
 
     /// Octave `m`'s ridged share `ρ_m`, 0 to 1: a belt's octave mixes in its ridged term by
@@ -1432,7 +1495,7 @@ impl Relief {
     /// If `m` is 32 or more.
     #[must_use]
     pub fn belt_factor(&self, m: u8) -> f64 {
-        math::exp(self.belt_log_factor[usize::from(m)])
+        math::exp(self.variance.belt_log_factor[usize::from(m)])
     }
 
     /// The relief's expected variance at a point whose interpolated style has amplitude `amplitude`
@@ -1444,17 +1507,11 @@ impl Relief {
     /// independent of the style. Where b is 0 it is a² [`local_variance`] (to rounding), and on a
     /// belt more, by the belt's shape. The coarse pass (R09.T12.e) books its area mean over the
     /// reconstructed field, at the interpolated a and b, as the realised structural share in
-    /// `σ_h`'s budget.
+    /// `σ_h`'s budget, through the [`StructuralVariance`] this delegates to, which needs no header
+    /// or seed.
     #[must_use]
     pub fn point_variance(&self, amplitude: f64, belt: f64) -> SquareMetres {
-        let mut variance = 0.0;
-        for m in self.first..=self.finest {
-            let at = usize::from(m);
-            let a = amplitude * math::exp(belt * self.belt_log_factor[at]);
-            let sigma = self.rms_m[at];
-            variance += a * a * (sigma * sigma);
-        }
-        SquareMetres::new(variance + amplitude * amplitude * self.tail_m2)
+        self.variance.point_variance(amplitude, belt)
     }
 
     /// The structural octaves at the unit direction `dir`, octaves [`first_octave`] to `through`
@@ -1506,7 +1563,7 @@ impl Relief {
     /// whether `through` and the finest octave are both at or above the first.
     #[must_use]
     pub(crate) fn evaluates(&self, through: u8) -> bool {
-        through.min(self.finest) >= self.first
+        through.min(self.variance.finest) >= self.variance.first
     }
 
     /// [`at`](Self::at) at `dir` in the style `style`, interpolated there from the field of
@@ -1529,13 +1586,13 @@ impl Relief {
         debug_assert!(self.evaluates(through), "no octave through {through}");
         debug_assert_eq!(
             first_octave(header.level()),
-            self.first,
+            self.variance.first,
             "a relief read with a field other than the one whose header made it"
         );
         let key = NoiseKey::Relief(self.seed);
         let seed = self.seed;
         let table = lattice.take_octaves(key, || octave_table(seed));
-        let last = through.min(self.finest);
+        let last = through.min(self.variance.finest);
         let mut height = 0.0;
         let mut gradient = [0.0; 3];
         self.octave_terms(
@@ -1572,8 +1629,8 @@ impl Relief {
         lattice: &mut impl Lattice,
         emit: impl FnMut(Term),
     ) -> Result<(), ReadCellError> {
-        let last = through.min(self.finest);
-        if last < self.first {
+        let last = through.min(self.variance.finest);
+        if last < self.variance.first {
             return Ok(());
         }
         let style = styles(field, dir)?;
@@ -1611,9 +1668,9 @@ impl Relief {
         let mut above = [Smooth::constant(0.0); 3];
         // The raw ridge r of the octave above, which weights this one's ridged term.
         let mut coarser_ridge: Option<Smooth> = None;
-        for m in self.first..=last {
+        for m in self.variance.first..=last {
             let lambda = spacing_in_radii(m);
-            let warped = m - self.first >= WARP_START;
+            let warped = m - self.variance.first >= WARP_START;
             let scale = WARP_SCALE * lambda;
             let at = if warped {
                 [0, 1, 2].map(|k| unit[k] + shear.value * scale * above[k].value)
@@ -1676,9 +1733,9 @@ impl Relief {
                         + swing * (theta_gradient[k] * share)
                 }),
             };
-            let sigma = self.rms_m[usize::from(m)];
+            let sigma = self.variance.rms_m[usize::from(m)];
             // g_m^b, exactly 1 where b is 0, and its gradient g_m^b ln g_m ∇b.
-            let log_factor = self.belt_log_factor[usize::from(m)];
+            let log_factor = self.variance.belt_log_factor[usize::from(m)];
             let lift = math::exp(belt.value * log_factor);
             let amplitude = style.amplitude;
             let height = Smooth {
@@ -1739,7 +1796,7 @@ impl Relief {
         let key = NoiseKey::Relief(self.seed);
         let seed = self.seed;
         let table = lattice.take_octaves(key, || octave_table(seed));
-        for m in self.first..=through.min(self.finest) {
+        for m in self.variance.first..=through.min(self.variance.finest) {
             let octave = &table[usize::from(m)];
             // A warped octave is read up to its warp's reach beyond the point: each axis's
             // displacement is at most c λ B ÷ σ_noise, so the whole at most √3 times it.

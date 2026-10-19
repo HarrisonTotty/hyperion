@@ -31,8 +31,8 @@ use hyperion_surface::synth::channels::{
 };
 use hyperion_surface::synth::interp::{CellValues, interpolate};
 use hyperion_surface::synth::relief::{
-    PLAIN_STRUCTURE, RIDGED_STRUCTURE, Relief, finest_octave, nyquist_degree, octave_bound,
-    octave_rms, octave_spacing,
+    PLAIN_STRUCTURE, RIDGED_STRUCTURE, Relief, StructuralVariance, finest_octave, nyquist_degree,
+    octave_bound, octave_rms, octave_spacing,
 };
 use hyperion_surface::synth::{BandSpectrum, SpectrumShape, unresolved_variance};
 use hyperion_surface::test_planet::{TEST_PLANET, octaves};
@@ -370,6 +370,12 @@ fn an_octave_spacing_past_octave_31_is_refused() {
 #[should_panic(expected = "a body's radius must be finite and positive")]
 fn the_finest_octave_of_no_body_is_refused() {
     let _ = finest_octave(Metres::ZERO);
+}
+
+#[test]
+#[should_panic(expected = "a body's radius must be finite and positive")]
+fn the_structural_variance_of_no_body_is_refused() {
+    let _ = StructuralVariance::new(&spectrum(), CoarseLevel::MIN, Metres::ZERO);
 }
 
 #[test]
@@ -1020,9 +1026,9 @@ mod small_craters {
 
 /// The coarse craters' rims' refusals (R09.T7.c).
 mod coarse_craters_rims {
-    use hyperion_base::units::Metres;
+    use hyperion_base::units::{Gigayears, Metres};
     use hyperion_surface::craters::crater_shape;
-    use hyperion_surface::field::FieldView;
+    use hyperion_surface::field::{CoarseCrater, Cover, FieldView, Morphology};
     use hyperion_surface::synth::BandLevel;
     use hyperion_surface::synth::craters::rims::{CoarseRims, RimSharpening};
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -1070,6 +1076,39 @@ mod coarse_craters_rims {
     fn a_coarse_profile_of_no_diameter_is_refused() {
         let rims = CoarseRims::new(level_five_field().header());
         let _ = rims.coarse_profile(Metres::ZERO);
+    }
+
+    /// A listed crater of `diameter_m`, fresh, at the pole.
+    fn crater(diameter_m: f64) -> CoarseCrater {
+        CoarseCrater {
+            centre: [0.0, 0.0, 1.0],
+            diameter: Metres::new(diameter_m),
+            morphology: Morphology::PeakRing,
+            age: Gigayears::new(3.9),
+            degradation: 0,
+            reach: Cover::from_cells([0]),
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "a wavelength must be finite and positive")]
+    fn a_crater_s_sharpening_moment_at_no_wavelength_is_refused() {
+        let rims = CoarseRims::new(level_five_field().header());
+        let _ = rims.sharpening_moment_m4(&crater(100e3), Metres::new(f64::NAN));
+    }
+
+    #[test]
+    #[should_panic(expected = "a crater diameter must be finite and positive")]
+    fn a_crater_s_sharpening_moment_of_no_diameter_is_refused() {
+        let rims = CoarseRims::new(level_five_field().header());
+        let _ = rims.sharpening_moment_m4(&crater(0.0), Metres::new(1e4));
+    }
+
+    #[test]
+    #[should_panic(expected = "a crater diameter must be finite and positive")]
+    fn a_crater_s_increase_of_no_diameter_is_refused() {
+        let rims = CoarseRims::new(level_five_field().header());
+        let _ = rims.increase_m4(&crater(0.0));
     }
 
     #[test]

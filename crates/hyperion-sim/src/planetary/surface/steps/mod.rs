@@ -32,9 +32,11 @@
 //! sphere at the datum ([`Working::initial`]). R09.T11 filled [`plates`]: on a mobile lid it writes
 //! each cell's plate, crust and nearest boundary, and each oceanic cell's
 //! [`SeafloorOrigin`]. R09.T12.a began [`relief`]'s coarse elevation, the crust's populations and
-//! the sea floor, R09.T12.b its convergent landforms and R09.T12.c a stagnant lid's provinces, before
-//! T12.e's `σ_h` and sea level; R09.T12.d filled [`craters`]. Climate, erosion and the classes are
-//! still no-ops.
+//! the sea floor, R09.T12.b its convergent landforms and R09.T12.c a stagnant lid's provinces;
+//! R09.T12.d filled [`craters`]; and R09.T12.e added the relief step's second entry,
+//! [`relief::run_after_craters`], which the pass calls after the craters: it scales the elevation
+//! to plan 14's `σ_h`, places the sea and writes the realised figures. Climate, erosion and the
+//! classes are still no-ops.
 
 pub mod classes;
 pub mod climate;
@@ -304,9 +306,11 @@ pub struct Working {
     pub spectrum: BandSpectrum,
     /// The months of the year, 1 or 12.
     pub months: u8,
-    /// The reconstructed field's realised `σ_h` (R09.T12.e, and again R09.T14.d).
+    /// The whole surface's realised `σ_h`, the reconstructed field's variance with what the
+    /// synthesis adds over it at its band limit (R09.T12.e, and again R09.T14.d).
     pub realised_sigma_h: Metres,
-    /// The reconstructed field's realised greatest relief (R09.T12.e, and again R09.T14.d).
+    /// The realised greatest relief, the cells' greatest less least elevation, which bounds the
+    /// reconstructed field (R09.T12.e, and again R09.T14.d).
     pub realised_relief: Metres,
     /// The plates, in plate-index order (R09.T11): none on a world without them.
     pub plates: Vec<plates::Plate>,

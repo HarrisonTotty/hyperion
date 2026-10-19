@@ -583,8 +583,10 @@ fn no_octave_on_a_belt_exceeds_its_stated_bound() {
     for m in relief.first_octave()..=relief.finest_octave() {
         let g = relief.belt_factor(m);
         let sigma = relief.octave_rms(m).value();
-        let extreme =
-            BELT_AMPLITUDE * sigma * math::exp(relief.belt_log_factor[usize::from(m)]) * t_max();
+        let extreme = BELT_AMPLITUDE
+            * sigma
+            * math::exp(relief.variance.belt_log_factor[usize::from(m)])
+            * t_max();
         let bound = octave_bound(header.spectrum(), m).value();
         assert!(extreme <= bound, "octave {m}: {extreme} > {bound}");
         let plain = MAX_AMPLITUDE * sigma * t_max();
@@ -690,6 +692,45 @@ fn the_point_variance_off_the_belts_is_the_local_variance() {
                 );
             } else {
                 assert_same_bits(point, 0.0);
+            }
+        }
+    }
+}
+
+/// The seed-free structural variance of a header's spectrum, level and radius is the relief's
+/// point variance bit for bit at every amplitude and belt weight, on every synthetic world and on
+/// a body too small for any octave (main's ruling R2 on R09.T12.e, 2026-10-19), and has the
+/// relief's octaves; the relief's own seed does not enter.
+#[test]
+fn the_seed_free_structural_variance_is_the_relief_s_bit_for_bit() {
+    let tiny = FieldBuilder::new(Metres::new(20.0))
+        .spectrum(BandSpectrum::anchored(
+            SpectrumShape::SILICATE,
+            Metres::new(20.0),
+            Metres::new(1.0),
+        ))
+        .build();
+    let mut fields: Vec<&CoarseField> = SyntheticWorld::ALL.iter().map(|&k| world(k)).collect();
+    fields.push(&tiny);
+    for field in fields {
+        let header = field.header();
+        let relief = Relief::new(header, SEED);
+        let other = Relief::new(header, DetailSeed::new(SEED.get() ^ 0x5a5a));
+        let free = StructuralVariance::new(header.spectrum(), header.level(), header.radius());
+        assert_eq!(free.first_octave(), relief.first_octave());
+        assert_eq!(free.finest_octave(), relief.finest_octave());
+        for a in [
+            0.0,
+            1.0,
+            INTERIOR_AMPLITUDE,
+            PLAIN_AMPLITUDE,
+            0.731,
+            BELT_AMPLITUDE,
+        ] {
+            for b in [0.0, 0.25, 0.5, 0.913, 1.0] {
+                let want = relief.point_variance(a, b).value();
+                assert_same_bits(free.point_variance(a, b).value(), want);
+                assert_same_bits(other.point_variance(a, b).value(), want);
             }
         }
     }
@@ -1072,7 +1113,7 @@ fn the_stored_belt_shape_is_the_direct_one() {
             let ratio = break_ratio(header.spectrum(), m);
             assert_same_bits(relief.ridged_share(m), ridged_share(ratio));
             assert_same_bits(
-                relief.belt_log_factor[usize::from(m)],
+                relief.variance.belt_log_factor[usize::from(m)],
                 belt_log_factor(ratio),
             );
             assert_same_bits(relief.belt_factor(m), belt_factor(ratio));
@@ -1842,7 +1883,7 @@ fn plain_and_ridged(
     point: [f64; 3],
     cache: &mut LatticeCache,
 ) -> [Smooth; 2] {
-    let m = pair.first + 1;
+    let m = pair.variance.first + 1;
     let mut out = [Smooth::constant(0.0); 2];
     let style = StyleSample::uniform(ReliefStyle::REFERENCE);
     pair.octave_terms(table, point, &style, m, cache, |t| {
@@ -1870,9 +1911,10 @@ fn the_terms_structure_functions_are_pinned() {
     let table = octave_table(SEED);
     // Octave m's stack from m − 1, for m from the second octave to the finest.
     let pairs: Vec<Relief> = (relief.first_octave()..relief.finest_octave())
-        .map(|first| Relief {
-            first,
-            ..relief.clone()
+        .map(|first| {
+            let mut pair = relief.clone();
+            pair.variance.first = first;
+            pair
         })
         .collect();
     let mut cache = LatticeCache::new();
@@ -1884,7 +1926,7 @@ fn the_terms_structure_functions_are_pinned() {
     let points = uniform_points(0x7374_7266, usize::try_from(samples).unwrap());
     for (k, dir) in (0_u32..).zip(points) {
         let pair = &pairs[usize::try_from(k).unwrap() % pairs.len()];
-        let spacing = octave_spacing(header.radius(), pair.first + 1).value();
+        let spacing = octave_spacing(header.radius(), pair.variance.first + 1).value();
         let p = header.figure().point(dir);
         let r = [0, 1, 2].map(|_| rng.next_f64() * 2.0 - 1.0);
         let along = r[0] * dir[0] + r[1] * dir[1] + r[2] * dir[2];

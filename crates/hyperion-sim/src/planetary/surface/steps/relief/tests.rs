@@ -2258,3 +2258,6 @@ fn the_coverage_correction_runs_only_at_saturation() {
     assert_same_bits(laid.coverage, 0.75);
     assert_same_bits(laid.realised.value(), laid.first.value());
 }
+
+/// R09.T12.e's tests: the step's second entry, its `σ_h` budget, its scale and its sea.
+mod sigma_h;

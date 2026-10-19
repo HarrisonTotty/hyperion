@@ -263,8 +263,12 @@ fn check_count(part: &'static str, expected: u32, found: usize) -> Result<(), Qu
     }
 }
 
-/// The synthesis record of cell `n` in state `cell`.
-fn synthesis_record(n: u32, cell: &CellState) -> Result<SynthesisCell, QuantiseFieldError> {
+/// The synthesis record of cell `n` in state `cell`: the field's own codes, which R09.T12.e reads
+/// mid-pass so that the styles and channels it books are the field's bit for bit.
+pub(crate) fn synthesis_record(
+    n: u32,
+    cell: &CellState,
+) -> Result<SynthesisCell, QuantiseFieldError> {
     let at = |part: &'static str| {
         move |error| QuantiseFieldError::Cell {
             cell: n,

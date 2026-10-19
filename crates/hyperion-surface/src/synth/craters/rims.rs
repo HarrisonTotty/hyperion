@@ -431,6 +431,75 @@ impl CoarseRims {
             slope2: 0.5 * g * g * slope / (reach * reach * rim_m * rim_m),
         }
     }
+
+    /// `crater`'s sharpening finer than `finer_than` over the whole ground, m⁴: g² ∫ (F(w₂) −
+    /// F(w))² dA, with F(w) its fresh shape filleted over w ([`CraterProfile::filleted`]), w₂ the
+    /// band limit's half-width and w = ½ `finer_than`, both held to the coarse band as the
+    /// sharpening is, and g its [`kept_relief`]; zero at the band limit and below, and for a
+    /// crater whose relief is gone.
+    ///
+    /// The moments are those [`unresolved_rims`] takes for the crater's share, from the same
+    /// profiles in the same order, so that this over the area of the crater's reach, π ((1 + a)
+    /// R)², is that share's variance (to rounding): the area is the chord's, π c², which on a
+    /// sphere is the ground within the chord c exactly (R09.T7.c). The coarse pass books it per
+    /// crater over the body's area, where it has no header (R09.T12.e; main's ruling R2,
+    /// 2026-10-19).
+    ///
+    /// # Panics
+    ///
+    /// If `finer_than` is not finite and positive; or, where the moment is not zero by its rule (a
+    /// crater with relief, at a wavelength above the band limit), if the crater's diameter is not
+    /// finite and positive.
+    #[must_use]
+    pub fn sharpening_moment_m4(&self, crater: &CoarseCrater, finer_than: Metres) -> f64 {
+        let Some((finest, band)) = self.unresolved_bands(finer_than) else {
+            return 0.0;
+        };
+        let g = kept_relief(crater);
+        if g <= 0.0 {
+            return 0.0;
+        }
+        let shape = crater_shape(&self.params, crater.diameter);
+        let fine = CraterProfile::filleted(shape, Metres::new(finest));
+        let coarse = CraterProfile::filleted(shape, Metres::new(band));
+        let (square, _) = difference_moments(&fine, &coarse);
+        let rim_m = 0.5 * shape.diameter().value();
+        g * g * square * (core::f64::consts::PI * rim_m * rim_m)
+    }
+
+    /// What `crater`'s client-side sharpening adds over its coarse profile to the ground's square,
+    /// m⁴: g² ∫ (F(w₂)² − F(`w_c`)²) dA, with F, w₂ and g as in
+    /// [`sharpening_moment_m4`](Self::sharpening_moment_m4) and `w_c` the coarse band: the
+    /// sharpening's own ∫ (F(w₂) − F(`w_c`))² dA and twice its product with the coarse profile, the
+    /// crater's increase. Zero where the two fillets are one, and for a crater whose relief is
+    /// gone.
+    ///
+    /// The coarse pass divides the sum over its craters by the body's area to book the coarse
+    /// craters' increase in `σ_h`'s budget, the analytic coarse profile standing in for the
+    /// reconstructed one in the product (R09.T12.e; main's rulings R2 and R7, 2026-10-19). Each
+    /// square is the profile's eight-point Gauss–Legendre moment on its polynomial pieces, exact to
+    /// rounding.
+    ///
+    /// # Panics
+    ///
+    /// Where the increase is not zero by its rule (a crater with relief, on a body whose coarse
+    /// band is wider than the band limit's half-width), if the crater's diameter is not finite and
+    /// positive.
+    #[must_use]
+    pub fn increase_m4(&self, crater: &CoarseCrater) -> f64 {
+        let g = kept_relief(crater);
+        let w_c = self.coarse_band.value();
+        let finest = num::min(0.5 * BAND_LIMIT_M, w_c);
+        if g <= 0.0 || finest >= w_c {
+            return 0.0;
+        }
+        let shape = crater_shape(&self.params, crater.diameter);
+        let fine = CraterProfile::filleted(shape, Metres::new(finest));
+        let coarse = CraterProfile::filleted(shape, self.coarse_band);
+        let rim_m = 0.5 * shape.diameter().value();
+        let difference = fine.square_moment() - coarse.square_moment();
+        g * g * difference * (core::f64::consts::PI * rim_m * rim_m)
+    }
 }
 
 /// ∫ (f − s)² 2x dx and ∫ (f′ − s′)² 2x dx over the reach of two profiles of one shape, f

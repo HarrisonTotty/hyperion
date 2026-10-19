@@ -2278,16 +2278,23 @@ capped at 200 Myr; a plate with no divergent boundary has 200 Myr and 23 mm a⁻
   the craters' and channels' closed forms finer than λ_c. The header's spectrum is
   `BandSpectrum::anchored` of the body's crust class (`decision-r09-t5.md` item 3), chosen from
   `surface_material` and `tectonics`.
-  Tests: the reconstructed σ_h equals the input to 10⁻⁶ relative after the step; the local share,
-  the realised structural share plus the craters' and channels' closed forms finer than λ_c,
-  divided by σ_h², is 4–10% on the reference Moon, 3–8% on the reference Ceres and 0.3–1% on the
-  reference Earth and Mars (Design note 7's 7, 5 and 0.6%); craters supply at least 80% of the
-  Moon's; ⟨a²⟩ on the reference Earth is 0.6–1.2; the realised structural share equals ⟨a²⟩
-  `local_variance` to 10⁻¹² on a world with no belt, and on the reference Earth exceeds it by
-  0–15%; the realised relief lies at 6–16 σ_h on every reference world (Design note 7's observed
-  7–15 widened by one σ_h each way, since one realisation scatters about it); the ocean fraction
-  below sea level equals the input to one cell's solid angle; the header reports realised σ_h and
-  relief.
+  Tests, as main's rulings of 2026-10-19 amend them (`decision-r09-t12-coarse.md` addendum 4): the
+  whole surface's reconstructed σ_h, √(Var_recon + S_s + K_w + R_inc + C_c), the craters waiting
+  for the erosion step smoothed in, equals the input to 10⁻⁶ relative after the step; the local
+  share finer than λ_c, the realised structural share plus the small craters'
+  `unresolved_variance(λ_c)`, the coarse craters' sharpening finer than λ_c over the body and the
+  channels' at λ_c, divided by σ_h², is 4–10% on the reference Moon, 3–8% on the reference Ceres
+  and 0.3–1% on the reference Earth and Mars (Design note 7's 7, 5 and 0.6%), asserted on the Earth
+  and on each other world where it holds; craters supply at least 80% of the Moon's; ⟨a²⟩ on the
+  reference Earth is 0.6–1.2; the realised structural share equals ⟨a²⟩ `local_variance` to 10⁻¹²
+  on a world with no belt, and on the reference Earth exceeds it by 0–15%; the realised relief, the
+  cells' range, lies at 6–16 σ_h on every reference world (Design note 3's observed 7–15 widened by
+  one σ_h each way, since one realisation scatters about it); the ocean, the cells the flood took,
+  covers at least the ocean fraction and exceeds it by no more than the cells that joined at the
+  final level, no cell is flooded where the fraction is zero and every cell but the highest where
+  it is 1; the header reports the realised σ_h and relief and carries the sea level and the
+  spectrum; `structural_spectrum` takes each crust class's anchor, the ice-rich one in every regime,
+  and the mobile lid's halves at 2 g⊕.
 
 Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.a–c and e) and
 `cargo test -p hyperion-sim planetary::surface::steps::craters` (T12.d).
@@ -7860,3 +7867,326 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
   - _No golden pins the coarse field before R09.T16,_ so no test compares its new output across
     targets until then (the determinism audit); the pass's twice and order tests run on each
     target alone.
+- **Deviations in T12.e, as built** (2026-10-19; lane `lane/43-r09-t12e-sigma-h-sea-level`, on
+  `origin/rendering-and-planets` at `8c08d508`; main's rulings of 2026-10-19, R1–R10,
+  `decision-r09-t12-coarse.md` addendum 4, amending `decision-r09-t5.md` items 1, 3, 4 and 8; no
+  bump, `GENERATOR_VERSION` 22, no golden moved or added).
+  - _Files and items._ In the sim, `steps/relief.rs` gains the step's second entry,
+    `run_after_craters` (public, as the step functions are), with `structural_spectrum`,
+    `structural_anchor`, `CrustClass` and `crust_class` (`pub(crate)`; `crust_shape` now reads
+    `crust_class`, as the anchor does, so the two name one class) and `after_late_craters`
+    (`pub(super)`), and three child modules:
+    - `relief/budget.rs`, the budget, the scale and the figures: `Body`, `LocalShare`,
+      `FinerShare`, `StructuralShare`, `Booked`, `Rule`, `Match`, `Figures`, `records`, `book`,
+      `match_sigma_h` and `figures`;
+    - `relief/quadrature.rs`: `NODES`, `gauss_legendre`, `each_node`, `Values`, `Moments` and
+      `cell_mean`;
+    - `relief/sea.rs`: `Sea`, `place` and `reflood`, all `pub(crate)`.
+    - The tests are `relief/tests/sigma_h.rs`, a child of `relief/tests.rs`, so the acceptance
+      filter `steps::relief` selects them.
+    - `steps/craters.rs` makes `Phase` `pub(crate)` and gains `smoothed_in_by` and `each_lift`,
+      the one expression for a coarse crater's lift, which `apply` and the budget share (`apply`'s
+      arithmetic is unchanged).
+    - `quantise::synthesis_record` is `pub(crate)`, so the styles and channels T12.e books read
+      the field's codes bit for bit.
+    - `coarse_pass` calls `relief::run_after_craters` between `craters::run` and `climate::run`,
+      and no other line of it changed.
+  - _Provides added (the surface crate; ruling R2)._
+    - `synth::relief::StructuralVariance`, the octaves' seed-free variance:
+      `StructuralVariance::new(spectrum, level, radius)`, `first_octave`, `finest_octave` and
+      `point_variance(a, b)`. `Relief` holds one and its `point_variance` delegates to it, bit for
+      bit; its fields moved into it, and the relief tests read them there.
+    - `CoarseRims::sharpening_moment_m4(crater, finer_than)`: g² ∫ (F(w₂) − F(w))² dA over the
+      whole ground, from the moments `share` takes, so that `share`'s bits stay.
+    - `CoarseRims::increase_m4(crater)`: g² ∫ (F(w₂)² − F(`w_c`)²) dA, from
+      `CraterProfile::square_moment`, which `rims` already reaches as a child module, so no
+      visibility changed.
+    - Their new panics are in `tests/panics.rs`. Beyond these, the one surface-crate edit is
+      `FieldHeaderParts::sea_level`'s documentation, now the connected ocean's rule (R8).
+  - _R1, the scale, as ruled._ Each cell's elevation is split into C, every listed crater's lift
+    summed in list order by `each_lift` (the craters waiting for the erosion step included, R4),
+    and N, the elevation less the part of C already in it. μ is N's cell mean, and `V_N`, K and
+    `V_C` come from one quadrature. With T = σ_h² − (`S_s` + `K_w` + `C_c`),
+    s* = √(T ÷ (`V_N` + 2K + `V_C` + `R_inc`)).
+    - Where s* ≤ 1, each byte becomes the nearest integer to 255 (1 − s* g), at most 255. Where
+      every crater's old byte was alike, K′ and `V_C`′ are K and `V_C` times one factor and its
+      square, as on every reference world; otherwise a second quadrature reads C′
+      (`uneven_bytes_are_read_in_a_second_quadrature`, on the reference Moon with every other
+      crater worn to a byte of 40). `s_N` then solves the quadratic at the new bytes.
+    - Where s* > 1, the bytes are kept and `s_N` solves the same quadratic.
+    - Then z = μ + `s_N` (N − μ), with the craters that do not wait smoothed in again at their
+      bytes in list order, as `apply` smooths them.
+    - Where T or the whole variance is not positive, or no positive root exists, the elevation and
+      the bytes are left as they were (`Rule::Unscaled`, labelled); no reference world comes near
+      it (`a_sigma_h_no_scale_can_meet_leaves_the_field_unscaled`, a Moon asked for 10 m). The byte
+      cast asserts the kept relief finite, so a NaN cannot become a fresh crater's byte.
+    - Lean: of the quadratic's positive roots, `s_N` takes the one nearest s*, the larger at a tie,
+      by the root pair that does not cancel. The byte is labelled as R09.T12.d's wear times this
+      crater scale, a stand-in for the large craters' unmodelled wear, set by plan 14's σ_h.
+  - _R2._ As ruled: the point variance through `StructuralVariance`, built from `working.spectrum`,
+    the level and the radius. Tests pin the header-free forms to the `FieldView` forms. On every
+    reference world's quantised field: the point variance bit for bit; `CraterOctaves::for_body`
+    equal to `CraterOctaves::new` of the header; each cell's channels' share from its record equal
+    to the field's, bit for bit; and, on the cells one crater reaches, the crater's sharpening over
+    its reach's disc equal to the field's rims' share to 10⁻¹². In the surface crate: the
+    seed-free variance against `Relief`'s, bit for bit, on every synthetic world; `share`'s
+    variance against the new form over its disc to 10⁻¹²; and the increase against an independent
+    piecewise sum to 10⁻¹⁰, as the sharpening's own variance plus twice its product. No golden
+    moved: `closed_forms.golden` and the `weights/` goldens are unchanged.
+  - _R3 (a deviation of the plan's order)._ T12.e is the relief step's second entry, after the
+    coarse craters, whose share the budget counts. DN5's and the module docs' "relief (T12.a–c and
+    e)" now means the step's two entries. `relief::run` still ends with the interim figures and
+    `craters::run` still keeps them, so T12.d's staged tests stand unchanged.
+  - _R4._ The waiting craters join C in the solve at the bytes T12.e sets.
+    `craters::run_after_erosion` smooths them in at those bytes, then refloods the ocean against
+    the sea level as placed (`sea::reflood`) and recomputes the figures with every crater in, in
+    place of the interim figures; it does not rescale. The reference Mars's realised σ_h after the
+    whole pass is 2,900.0000 m (tested to 10⁻⁶). R09.T14.d's re-match must count these craters,
+    since `run_after_erosion` follows the erosion step.
+  - _R5, R6._ The realised σ_h is √(`Var_recon` + `S_s` + `K_w` + `R_inc` + `C_c`), the whole
+    surface's, from a quadrature of the elevation as it stands. The realised relief is the cells'
+    range, which bounds the reconstructed field; the quadrature's range is reported beside it.
+    `budget::figures` computes both, with the craters smoothed in by the end of its phase. In
+    `run_after_craters` it takes the match's book (`Booked`: the structural share and the channels'
+    cell means), since neither the scale nor the sea changes a code the book reads; a test holds a
+    fresh book of the finished state equal to it, bit for bit. `after_late_craters` books afresh.
+  - _R7, the whole budget._
+    - `S_s`: the quadrature mean of the point variance at the interpolated a and b, with ⟨a²⟩ the
+      mean of the interpolated a², each cell's style from `ReliefStyle::of` of its quantised record.
+    - `K_w`: `for_body`'s unresolved variance at 2 `D_b`.
+    - `R_inc`: Σ `increase_m4` ÷ the spheroid's area. Its product term takes the analytic coarse
+      profile for the reconstructed one (labelled).
+    - `C_c`: the channels' cell mean at 2 `D_b`, which is at least twice the coarse cell's mean
+      width (about 4.7 of them). It is zero, every cell `Terminal`, and asserted +0 on every
+      reference world, whole and finer than λ_c.
+    - Lean: one wavelength, 2 `D_b`, counts both the small craters and the channels whole. Test 2's
+      figures are kept beside the budget, at λ_c = 2πR ÷ `l_N`(L).
+  - _R8, the sea, as ruled._ The quantile walks the cells sorted by (elevation, index). The seed is
+    the largest edge-connected region at or below `ℓ_q`, ties to the least index. A priority flood
+    keyed by (filled level, index) grows it, and ℓ is the first filled level at which the area
+    taken reaches f × the grid's sphere, every cell of that level taken, or the last pop's where
+    rounding exhausts the cells (f = 1). Every taken cell whose ground's millimetre code is below
+    ℓ's takes ℓ and `main_liquid`.
+    - Lean: "at or below" the quantile, so that a fraction under one cell still has a seed.
+    - Lean: "below ℓ" is read on the codes (flooding by the codes), so that a ground a fraction of
+      a millimetre below ℓ stays dry and the quantised field shows it dry. A test lays shore cells
+      0.1–0.2 mm under ℓ to exercise this.
+    - Taken cells at ℓ's code are the ocean's shore: dry, and counted in its area.
+    - f = 0 floods nothing and keeps the lowest elevation. f = 1 floods every cell but the highest.
+    - Lean: `reflood` drains every cell of the main liquid and floods again from a fresh seed with
+      ℓ kept. On a dry world it keeps ℓ, the lowest elevation as placed; on the reference Mars the
+      late craters cut no lower.
+    - The areas are the cells' solid angles, a share of the sphere of directions, where plan 14's
+      fraction is one of surface area (labelled): about 10⁻⁴ apart on an Earth, up to about 10⁻²
+      on a strongly flattened ocean world (the science check).
+  - _R9._ `structural_anchor`: the ice-rich anchor (50 m) for an ice surface or an ice shell in
+    every regime, the ice mobile lid labelled; 200 m × `height_factor` for a silicate mobile lid;
+    and 60 m for every other silicate lid. The anchor and the shape both read `crust_class`.
+  - _R10._ The main liquid fills the summed ocean fraction. The other liquids are R09.T13.d's.
+  - _The quadrature (a lean, then the brief's rule)._ n × n Gauss–Legendre nodes in each cell's
+    (s, t), mapped by `st_to_uv` and `face_uv_to_xyz`. Each node's weight is its two Gauss
+    weights times the solid angle's density (du ÷ ds)(dv ÷ dt) ÷ (1 + u² + v²)^(3/2), scaled so
+    that each cell's weights sum to its solid angle. Sums run in cell order, then node order.
+    - Var_recon of the final field: the Moon 2.574 497, 2.574 933 and 2.574 849 × 10⁶ m² at n = 2,
+      3 and 4 (n = 2 is 1.37 × 10⁻⁴ short of n = 4; n = 3 is 3.3 × 10⁻⁵ over); Mars 8.079 293,
+      8.079 428 and 8.079 400 × 10⁶ m² (1.3 × 10⁻⁵ and 3.5 × 10⁻⁶). So `NODES` is 3, the smallest
+      within 10⁻⁴ on both. The spline's knots lie at the cell centres, so each cell spans two
+      pieces.
+    - Lean: a cell none of whose cells within `SYNTHESIS_MARGIN_CELLS` king moves differs from it
+      takes its own value at its nodes. That is the interpolant's value bit for bit, since it reads
+      no farther and gives a constant back exactly. Tests hold it over every node of the Moon and
+      Ceres, a sample of Mars's cells and, in the slow test, of the Earth's sparse fields. They hold
+      it at levels 5–8 too, beside single-cell spikes at a cube corner and at the ends and middle
+      of face edges, where the interpolant reads farthest, at every node 4–7 king moves away. So
+      the sparse fields (the crater lift, the belt weight) cost almost nothing.
+  - _Constants._ No physical constant is added. `NODES` is set by the convergence check. The
+    Gauss–Legendre nodes are in closed form (Abramowitz and Stegun 1964, §25.4.29, from memory),
+    tested as the Legendre roots and exact to x^(2n − 1).
+  - _`09`'s T12.e text edited_ (§2.3.8). Only the test clause, lines 2281–2297 (formerly
+    2281–2290), now names test 1's whole budget, test 2's terms and "where it holds", the relief's
+    cells' range, the ocean's area rule with f = 0 and 1, the header's sea level and spectrum, and
+    `structural_spectrum`'s classes, citing the ruling. Its "Design note 7's observed 7–15" is
+    corrected to Design note 3's, where the figure stands. DN7's text is left to a docs batch.
+  - _The tests._ Each check is a function of a reference world.
+    - The fast suite runs them on the reference Mars, Moon and Ceres.
+    - The reference Earth's pass with T12.e takes about 9 s natively, and nextest runs each test in
+      a process of its own, so every test that read the Earth would pay it. One slow test,
+      `the_reference_earth_holds_r09_t12e_s_tests`, runs every check on the Earth instead, run by
+      name. It also holds the tests only the Earth can: test 2's asserted band, test 4, test 7's
+      ocean, its one ocean through quantisation and its hypsometry.
+    - The reflood (ruling R4, with a sea) is held on a hand-made basin, where raised cells drain, a
+      lowered shore cell floods, ℓ is kept and twice is the same bits. It is also held on a 1,500 km
+      Mars-like world with an ocean over 0.3 and the reference Mars's wet epoch, through
+      `craters::run_after_erosion`, its late craters smoothed in, where ℓ is kept, the sea is one
+      ocean and the whole surface's σ_h is plan 14's to 10⁻⁶.
+    - A test deviation: the one-ocean check joins the flooded cells to the flood's seed (which `Sea`
+      now carries, with the cells it took) through the cells the flood took. Those include its
+      shore at ℓ's code, which the fill by the codes leaves dry, so the join is not through the
+      flooded cells alone: a depression joined at ℓ through a saddle at ℓ is flooded, and its saddle
+      dry.
+  - _Measured_ (test profile; shares of σ_h²; "cells / reconstructed" RMS; before → after the
+    scale). Plan 14's shares are 2.51 km structural on the Earth; 0.9, 2.75 and 0.89 km on Mars; 0.9
+    and 2.05 km on the Moon; and 0.9 and 1.87 km on Ceres.
+
+    |                                     | Earth                           | Mars                                                  | Moon                                              | Ceres                                             |
+    | ----------------------------------- | ------------------------------- | ----------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------- |
+    | s*, s_N, rule                       | 0.9602, 0.9602, whole           | 0.9596, 0.9595, whole                                 | 0.7892, 0.7952, whole                             | 1.7302, 2.1311, non-crater                        |
+    | largest byte                        | 10                              | 10                                                    | 54                                                | 0                                                 |
+    | T ÷ σ_h²                            | 0.9956                          | 0.9804                                                | 0.7735                                            | 0.9272                                            |
+    | V_N, K, V_C, R_inc (m²)             | 6.804 × 10⁶, −0.19, 0.20, 7.4   | 8.538 × 10⁶, 2.38 × 10⁴, 2.130 × 10⁵, 1.564 × 10⁵     | 7.815 × 10⁵, 8.26 × 10⁴, 3.182 × 10⁶, 2.096 × 10⁶ | 7.533 × 10⁵, −1.97 × 10³, 9.72 × 10⁴, 4.897 × 10⁵ |
+    | low-pass of V_N, V_C                | 2.06%, 65% (one crater)         | 2.08%, 6.0%                                           | 3.52%, 6.79%                                      | 7.0%, 27.4%                                       |
+    | whole L before → after              | 0.435% → 0.435%                 | 3.816% → 3.673%                                       | 64.47% → 48.64%                                   | 18.63%                                            |
+    | S_s; ⟨a²⟩; S_s ÷ ⟨a²⟩ L_s           | 0.434%; 0.6440; 1.0606          | 0.026%; 0.5764; 1.000 00                              | 0.079%; 1; 1.000 00                               | 0.048%; 1; 1.000 00                               |
+    | K_w (whole; finer than λ_c)         | 0.0014%; 0.0014%                | 1.931%; 1.902%                                        | 22.58%; 22.04%                                    | 7.23%; 6.89%                                      |
+    | R_inc (sharpening + cross) before   | 0.0001%                         | 1.860% (0.971 + 0.888)                                | 41.82% (27.31 + 14.51)                            | 11.35% (9.15 + 2.20)                              |
+    | rims finer than λ_c, before → after | 0.0001%                         | 0.354% → 0.327%                                       | 7.91% → 4.92%                                     | 2.89%                                             |
+    | test 2 (band)                       | 0.435% (0.3–1%)                 | 2.255% (0.3–1%)                                       | 27.04% (4–10%)                                    | 9.83% (3–8%)                                      |
+    | populations                         | 2,473 / 2,457 → 2,375 / 2,359 m | 900 / 892 → 864 / 856 m                               | 900 / 884 → 716 / 703 m                           | 900 / 868 → 1,918 / 1,850 m                       |
+    | landforms or provinces              | 633 / 587 → 607 / 564 m         | 2,854 / 2,825 → 2,739 / 2,711 m                       | none                                              | none                                              |
+    | coarse craters; as rendered         | 0.8 / 0.4 m; 2.8 → 2.7 m        | 476 / 462 → 457 / 443 m; 608 → 584 m                  | 1,848 / 1,784 → 1,456 / 1,406 m; 2,298 → 1,811 m  | 366 / 312 m; 766 m                                |
+    | realised σ_h (√Var_recon)           | 2,510.000 m (2,504.5)           | 2,890.15 m, 2,900.000 with the late craters (2,842.4) | 2,239.000 m (1,604.7)                             | 2,077.000 m (1,873.6)                             |
+    | relief ÷ σ_h (reconstructed range)  | 7.41 (6.82)                     | 9.52 (9.41)                                           | 6.37 (6.10)                                       | 6.41 (5.82)                                       |
+    | sea level                           | −170.76 m                       | −5,214.23 m                                           | −7,684.69 m                                       | −6,904.46 m                                       |
+
+    The reference Earth's sea: `ℓ_q` −234.64 m and ℓ −170.76 m; the ocean covers 0.709 501 against
+    0.7095, an excess of 1.3 × 10⁻⁶ within the final level's 2.9 × 10⁻⁶. 0.709 498 is under water
+    (279,269 cells), and dry ground below ℓ covers 0.0145 of the sphere; the seed holds 273,816
+    cells. Its hypsometry relative to ℓ: land mode +125 m; ocean modal bin −4,375 m; below −2 km,
+    mean −4,317 m, s.d. 912 m, quartiles −4,918, −4,333 and −3,723 m. All three of T12.a's bands
+    hold (tested).
+
+  - _For T14.d._ Its second match books `C_c` through the same `book`, at 2 `D_b`. It must
+    count the waiting craters (R4) and keep the bytes' composition: fold, never stretch, a crater
+    past its fresh shape. `reflood` drains every main-liquid cell, so T13.d's and T14's lakes of
+    the main liquid must be told apart from the sea before they reuse it.
+  - _Cost_ (provisional: the test profile, one test thread, on the laptop, an Intel i7-8665U, at a
+    load of about 2.2, beside no other lane; each a test binary's whole run of one probe in
+    `sigma_h::cost`). With n = 3, T12.e adds 6.33 s to the reference Earth (2.47 s through the
+    coarse craters, 8.80 s with T12.e), 1.78 s to Mars (0.35 → 2.13 s), 0.47 s to the Moon
+    (0.08 → 0.55 s) and 0.13 s to Ceres (0.02 → 0.15 s).
+    - On the Earth the cost is three interpolated fields over 3.5 × 10⁶ nodes: the style
+      amplitude, N, and the final field for the figures.
+    - At n = 2 it had been 2.8 s, and 8 s before the uniform cells' shortcut and the reuse of
+      `S_s`.
+    - A throwaway timing of 10⁶ level-8 points gave 0.75 s for two `interpolate` calls against
+      0.46 s for one `interpolate_each` of two. A public fused read of the four values would save
+      about 1.4 s of the Earth's 6.3 s. Main ruled on 2026-10-19 to keep n = 3 and the plain
+      `interpolate` (below).
+    - `surface/mod.rs`'s order test makes eight reference-Earth passes, about 70 s.
+    - The whole pass, timed later the same way but on battery power, the clocks at 0.4–0.9 GHz
+      under `powersave` (`craters::tests::cost::pass_*`): the Earth 13.97 s, Mars 4.85 s, the Moon
+      0.88 s and Ceres 0.31 s. In the same conditions the Earth took 4.00 s through the coarse
+      craters and 13.99 s with T12.e, so the whole pass is the run through T12.e within 0.1 s, the
+      later steps being no-ops but for Mars's late craters, their reflood and their figures.
+  - _The figures, checked_ (R09.T12.e's science check, recomputed from the measured models with a
+    spherical-harmonic analysis checked to 10⁻⁴ on a known field).
+    - The local shares above `l_N`: the Earth 0.53% of σ_h² from Hirt and Rexer 2015's BED fit
+      (Table 3 and eq. 6, 183.1–183.3 m above degree 556), about 0.63% with the abyssal hills; Mars
+      0.58% (MOLA MEGDR at 16 ppd, 221 m above degree 278); the Moon 6.8% (LOLA LDEM_16, 583 m
+      above degree 139). So test 2's bands stand, and the crater model overshoots them (Mars 3.9×,
+      the Moon about 4×). Ceres's 5% and Mercury's 4% were not recomputed.
+    - The greatest relief: 7.6 σ_h on the Earth, 10.1 on Mars and 8.4 on the Moon, inside 7–15.
+      Johnson and McGetchin 1973 exists, but its text was not read.
+    - Verified: σ_h of 2,510 m (TBI's 2,508.3 m), 2,900 m (MOLA's 2,901–2,902 m) and the fits'
+      2,239 and 2,077 m. The ocean fraction is 361,900,000 of 510,082,000 km², 0.709 494 (NGDC's
+      Table 1, read verbatim). Earth2014's hypsometry: land mode in the 0–250 m bin; the modal bin
+      −4,375 m, with exactly the five bins −5,125 to −4,125 m within 10% of its peak; the mean
+      below −2 km −4,281.0 m.
+    - Verified: the Gauss–Legendre rules, to 3 × 10⁻¹⁶ of numpy's; the warp's rate and the
+      gnomonic element; the cap within a chord c, π c²; the increase identity; and
+      `positive_root`, in 20,000 random cases.
+    - The structural anchors are recorded among the deferred findings.
+  - _The review_, run once over the whole diff. The `review-changes` skill's preamble (`git -C`
+    into the shared checkout) is refused in this lane's worktree, so its four reviewers ran by
+    hand over the diff:
+    - _Rust_: no must-fix.
+      - Should-fix, done: a reflood test with a sea; the shore test's name.
+      - Should-fix, done: an enum (`SeaLevel`) and a book (`Booked`) for the bare `Option`
+        parameters, and a phase for the tests' `bool`.
+      - Should-fix, done: unit-bearing names (`StructuralShare`, the flood's `Flood`, `level_m`,
+        `target_sr`, the `_share` fields); the rim forms' `# Panics`; `#[must_use]`; `records` an
+        iterator, with capacities.
+      - Considers, done: the seed's invariant comment; one `crust_class`; the dead flag.
+    - _Determinism_: no must-fix.
+      - Should-fix, done: the reflood with a sea, twice, by bits.
+      - Considers, done: the spikes at levels 5–8; the byte's finite check; the cached book against
+        a fresh one.
+    - _Plan conformance_: must-fix, done: the reflood test with a sea and waiting craters.
+      - Should-fix, done: `C_c` asserted zero; DN3's citation in the edited line; the one-ocean
+        check from the seed through the taken cells, recorded as a test deviation; the Earth's
+        tests gathered into one slow test; the whole-pass timings.
+      - Considers, done: the second-quadrature and unscaled paths tested; the record's broken code
+        spans; the test's name.
+    - _Science_: no must-fix. Its should-fix items are in `synth.rs`'s anchors, which predate this
+      lane and lie outside its scope, so they are recorded below. Its considers, done: DN3 cited,
+      and the area against the solid angle labelled.
+- **Deferred findings (2026-10-13 rule) (R09.T12.e)** (recorded; the first two and the cost ruled
+  by main on 2026-10-19 as noted).
+  - _Test 2 misses on three worlds: the crater model's sub-cell share._ Finer than λ_c, the share
+    is 27.0% on the reference Moon (band 4–10%), 2.26% on Mars (0.3–1%) and 9.83% on Ceres
+    (3–8%); the Earth's 0.435% holds. Fresh Pike profiles at Trask's saturation carry 2–4× the
+    bodies' measured shares above `l_N`, and T7.b's diffusion barely wears them above a few
+    kilometres. Ruled by main: keep as built. R09.T7.i–j (the coarse profile through the central
+    peak, and craters worn to equilibrium after Minton et al. 2019) is expected to close these
+    misses: main estimates the Moon's share finer than λ_c at about 6% after it. It re-measures
+    T12.e's figures. For T7.b's and T12.d's re-validation before R09.T16's goldens.
+  - _The reference Moon's `s_N` is 0.795, under §2.3.4's 0.8._ As the client renders them, its
+    coarse craters (2,298 m RMS with their increase) and small craters (1,064 m) overfill plan 14's
+    2.05 km basin share. So s* is 0.789 where main estimated 0.86, and the bytes are 54 where main
+    estimated about 35. The coarse craters' cells RMS is 1,848 m, against main's 1,594 m from the
+    realised counts. Ruled by main: keep as built, not tuned. The cause is the crater model's
+    calibration, which R09.T7.i–j is expected to close, putting the craters' expected relief at
+    about 1.9 km and the Moon's s* back near 1.
+  - _The coarse profile of a crater near `D_b` is inverted_ (main's figures, §2.2.9, not
+    re-measured): a 113 km crater's coarse profile stands +2,165 m at its centre and −607 m at its
+    rim, where the fresh crater is −1,080 and +1,553 m. For T7.c's and T12.d's re-validation
+    before T14's drainage.
+  - _Ceres's non-crater field carries plan 14's basin share._ Its population stretches from
+    900 m to 1,918 m RMS on the cells (`s_N` 2.13), since its craters realise about 0.77 km of
+    plan 14's 1.87 km (none of its 2.1 expected third-octave craters was drawn). For P14.T48.a,
+    with the lid's radius-free 0.9 km.
+  - _`R_inc`'s product term takes the analytic coarse profile_ for the reconstructed one (R7). On
+    the Moon that term is 14.5% of σ_h² before the scale.
+  - _Enclosed depressions below the sea level stay dry_ (R8): 1.45% of the reference Earth's
+    sphere. For T14's lakes, and for T12.a's continental population, whose low tail lies inland as
+    well as at the margins.
+  - _The degradation byte composes two wears:_ T12.d's diffusive wear and T12.e's crater scale.
+    T14.d's re-match must keep the composition, folding a crater and never stretching it.
+  - _The other liquids' shares are R09.T13.d's_ (R10): the main liquid fills the summed fraction
+    until then.
+  - _The header's `realised_sigma_h` documentation_ still reads "of the reconstructed field … the
+    area-weighted RMS elevation about its mean", where under R5 it is the whole surface's at its
+    band limit. This lane may edit only `sea_level`'s documentation there; for a docs batch.
+  - _A performance finding for R09.T16: T12.e costs 6.3 s on the reference Earth at n = 3_
+    (above). Ruled by main: keep n = 3 and the plain `interpolate`; no fused read is exposed in
+    T12.e.
+    - A public fused read of N, C, a and b would save about 1.4 s of that.
+    - Splitting each cell at its spline knot would make a lower order exact, at the cost of more
+      nodes.
+    - The suites slow with it: `surface/mod.rs`'s order test goes from about 20 s to about 70 s
+      (its eight reference-Earth passes). That test is left as it is: its property needs each pass
+      computed in several orders, so one Earth shared across its cases would not hold it.
+  - _The ice-rich anchor does not reproduce the measurement it rests on_ (a source mismatch with
+    `decision-r09-t5.md` item 3 and the plan, from R09.T12.e's science check; for main's ruling).
+    - Nimmo and Schenk 2008's Fig. 5a puts Europa's RMS deviation at 1 km at 35–50 m (log₁₀ about
+      1.55–1.7, read off the plot). Under the ice shape, `STRUCTURAL_RMS_ICE_RICH`'s 50 m below
+      72 km gives 24.7 m at 1 km, 0.49–0.71 of it; meeting it would take an anchor of about
+      71–101 m.
+    - It does match the abstract's Table 1 at 100 m: 6.5 m against 5.6–8.5 m on the ridged plains.
+      The brief and the ruling cite "Table 1" for the 1 km figure, which is Fig. 5a's;
+      `synth.rs`'s documentation cites Fig. 5a correctly.
+    - The documentation's slopes at 100 m and 10 m are recomputed at 5.3° and 9.5° (it says 5.7°
+      and 10.3°), both still inside Europa's ranges.
+    - No reference world is ice-rich, so no test reads it.
+  - _The stagnant-lid anchor (60 m) cannot be reproduced from its documentation_ (the science
+    check). `synth.rs` names no regions, detrending or statistic for its 43–55 m (Mars's plains)
+    and 89 m (the maria), and doesn't say how 60 m follows from them × 1.15, the ruling's
+    unpublished ratio: 49–63 and 102 m. On 16 ppd MOLA the 35 km-window RMS runs from 7 to 148 m
+    with the windows' bounds and statistic. Medium-low confidence, as labelled; for a docs batch on
+    `synth.rs`, which this lane may not edit.
+  - _The mobile-lid anchor's abyssal-hill part is uncited_ (the science check). The BED part is
+    verified: Hirt and Rexer 2015's Table 3 and eq. 6 give 183.1–183.3 m above degree 556, which
+    the documentation rounds to 184 m. "GMRT's multibeam … 50–230 m RMS at 2–10 km over 71%" has no
+    primary source or "not re-read" label, and 183 m with 50–230 m over 71% gives 188–266 m, so
+    200 m is a choice within that. For a docs batch on `synth.rs`: cite GMRT (Ryan et al. 2009) and
+    an abyssal-hill source, or label it.

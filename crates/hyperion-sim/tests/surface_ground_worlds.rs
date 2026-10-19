@@ -4,10 +4,11 @@
 //!
 //! The worlds are R09's reference Earth, Mars, Moon and Ceres
 //! (`planetary::surface::reference`), each run through the coarse pass once per binary, under the
-//! sim's `testing` feature. Until R09.T12.e–T16 fill the rest of the pass's steps they come out as
+//! sim's `testing` feature. Until R09.T13–T16 fill the rest of the pass's steps they come out as
 //! the steps built so far leave them, the plates, the coarse elevation and the coarse craters of
-//! R09.T11–T12.d, dry, with no ice, which exercises the whole function, its finest level and the
-//! point's foot on each figure. R09.T16's
+//! R09.T11–T12.d, scaled to their `σ_h` with the reference Earth's sea placed by R09.T12.e, with no
+//! ice, which exercises the whole function, its finest level and the point's foot on each figure.
+//! R09.T16's
 //! `sample_worlds()` (`tests/common/surface_worlds.rs`, with its icy moon and locked world) takes
 //! this list's place when it lands, under the same task ID.
 #![cfg(feature = "testing")]

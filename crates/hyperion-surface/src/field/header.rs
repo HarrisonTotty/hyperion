@@ -94,9 +94,15 @@ pub struct FieldHeaderParts {
     /// datum every height of the field is measured from along its normal (R07's Design note 19;
     /// Design note 17): plan 14's `figure()`. Its volumetric radius ∛(a² c) is `radius`.
     pub figure: Spheroid,
-    /// The height of the sea surface above the datum, metres: the area-weighted elevation
-    /// quantile that leaves plan 14's ocean fraction below it (Design note 7), so on a world with
-    /// no sea the lowest cell's elevation. The climate layer's temperatures are reduced to it.
+    /// The height of the sea surface above the datum, metres: the level of the connected ocean
+    /// that covers plan 14's ocean fraction (Design note 7; R09.T12.e, main's ruling R8). The
+    /// ocean grows by a priority flood from the largest connected region of cells at or below the
+    /// area-weighted elevation quantile that leaves the fraction below it, and the sea level is the
+    /// lowest filled level at which it covers the fraction, every cell of that level taken; the
+    /// cells it took whose ground lies below it are under water, and enclosed depressions below it
+    /// stay dry. On a world with no sea, an ocean fraction of zero, it is the lowest cell's
+    /// elevation when the pass placed the sea, and on one wholly sea, the highest cell's. The
+    /// climate layer's temperatures are reduced to it.
     pub sea_level: Metres,
     /// The rate at which the surface temperature falls with height, kelvin per metre (positive
     /// for a fall): the climate step reduces each temperature to sea level with it, and the
