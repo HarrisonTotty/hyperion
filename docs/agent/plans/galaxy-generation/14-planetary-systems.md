@@ -4045,6 +4045,18 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
     - a record with no key reads not modelled.
   - _Accept:_ `pnpm test`; the console-ux skill's lint on the changed files; a ux-reviewer pass.
   - _Commit:_ `feat(client): P14.T43.e A molten surface's air in the readout`.
+- **P14.T43.f The mass fraction's whole** (`signoff-12.md`, item 43, 2026-10-19; a display change
+  only, with no wire, output or protocol change; after P14.T43.d, whose rule it extends to the
+  layers).
+  - `displays/system/BodyRecordReadings.tsx`'s `bulkRows`: a layer whose share is below 1 and whose
+    one-decimal figure rounds to `100.0` reads `ABOVE 99.9 %`, with the same no-break space as its
+    figure, as `MOLE FRACTION`'s gases do, so that no layer claims the whole beside another. A layer
+    that rounds to `0.0 %` keeps it, as a rounded share does. A body of one layer alone reads
+    `100.0 %`.
+  - _Tests:_ `SystemView.bodies.test.tsx`: a rock at 0.99996 reads `ROCK ABOVE 99.9 %`; a body of
+    rock alone reads `ROCK 100.0 %`.
+  - _Accept:_ `pnpm test`; the console-ux skill's lint on the changed files; a ux-reviewer pass.
+  - _Commit:_ `fix(client): P14.T43.f The mass fraction's whole`.
 
 #### P14.T44 Time control
 
@@ -14539,7 +14551,42 @@ tables::gauss_legendre`.
     99.95 % or more (173 px) would pass it. The registry's gases are three characters at most.
   - `MASS FRACTION`, at one decimal and kept as built by the sign-off, can still read a layer as
     the whole beside another (`IRON 0.0 % · ROCK 100.0 %` for a rock at 0.99996), as a gas did
-    before this task. The UX review's note; for the owner, should the coverage form reach it.
+    before this task. The UX review's note. _Ruled 2026-10-19 (`signoff-12.md`, item 43): the
+    coverage form reaches it; P14.T43.f builds it._
+- **Deviations in P14.T43.f, as built (`lane/44-p14-t43f-above-99-9`, 2026-10-19).** The mass
+  fraction's whole, in the client only: no wire, protocol or output moves, `GENERATOR_VERSION`
+  stays 22 and `PROTOCOL_VERSION` 2, and no golden or fixture changes.
+  - _The reading._ A rock at 0.99996 reads
+    `IRON 0.0 % · ROCK ABOVE 99.9 % · WATER 0.0 % · ENVELOPE 0.0 %`; a layer sent at exactly 1 reads
+    `100.0 %`, and `0.0 %` stays. The rule reads the layer's own fraction, not how many layers are
+    above 0. On the record a giant-impact moon of a planet that is not icy is rock at exactly 1
+    (`ROCK 100.0 %`), and a captured moon is rock at 1 less its ice, which can read
+    `ROCK ABOVE 99.9 %`.
+  - _One rule for both readings._ T43.d's inline rule in `gasesShown` is now
+    `sharePercentage(fraction, figure)` in `BodyRecordReadings.tsx`, which both readings call. It
+    compares the figure as shown with the same formatter's figure for the whole: `percent(1)` is
+    `100.0`, and `gasPercent(1)` (`formatSignificant(100)`) is `100`, the literal T43.d compared.
+    `gasesShown`'s readings and tests are unchanged. `ABOVE 99.9` is fixed text, right for both
+    precisions, whose last figure below the whole is `99.9`; a share read to another precision needs
+    its own (the TypeScript, UX and conformance reviews' note, written into its `@remarks`).
+  - _The rider._ `surfaceRows`' TSDoc says `SILICATE VAPOUR` is signed off (signoff-12, item 27),
+    not drafted (decision-triton-and-e101 §2.3). T43.e's entry and its records, which still say
+    drafted, are the docs batch's.
+  - _Tests._ `SystemView.bodies.test.tsx`: a new `it.each` beside T43.d's, through
+    `earthWithMassFractions`, holds "reads a layer below the whole whose figure rounds to 100.0 as
+    ABOVE 99.9 %", "reads a body of one layer alone, the whole, as 100.0 %" and "reads a layer just
+    below the edge of the whole at its one decimal" (iron 0.0006, rock 0.9994:
+    `IRON 0.1 % · ROCK 99.9 % · WATER 0.0 % · ENVELOPE 0.0 %`). The case below the edge is beyond
+    the entry's list, from the brief, as T43.d's was, so that a threshold on the fraction fails a
+    test. The console-ux lint on the readout: `0 error(s), 0 check(s) in 1 file(s) scanned` (it
+    skips the test file).
+- **Deferred findings (2026-10-13 rule)**, from P14.T43.f:
+  - `ENVELOPE ABOVE 99.9 %`, 21 characters bound by no-break spaces, is 191 px at T43.d's 9.1 px a
+    character, past the 166 px the column keeps at 1280×720 (`ROCK` and `IRON` 155 px, `WATER`
+    164 px, fit). No model on the record reaches it: the composition solve stops below 0.414 M_J,
+    where the 1.5 M⊕ core floor keeps the envelope under 98.9 %, and a giant's is at most 93.3 %
+    (Thorngren et al. 2016's heavy elements at 13 M_J). A later model of an envelope above 99.95 %
+    would meet it.
 - **Deviations in P14.T35.f, as built (`lane/33-p14-t35f-silicate-vapour`, 2026-10-16).** A molten
   surface's own vapour on the wire (decision-backlog-2 §2, confirmed by decision-triton-and-e101
   §2), with no output moved: `PROTOCOL_VERSION` stays 2 and `GENERATOR_VERSION` 22, and no golden,
