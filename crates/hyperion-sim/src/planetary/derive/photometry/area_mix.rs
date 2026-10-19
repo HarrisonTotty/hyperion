@@ -630,10 +630,13 @@ fn liquid_record(id: SubstanceId, temperature: Kelvin) -> LiquidRecord {
         Ok(record) => return LiquidRecord::InRange(record),
         Err(ResolveLiquidError::OutOfRange { lowest, below, .. }) => (lowest, below),
         // The row has no record at this temperature, and holding it elsewhere would not give one.
+        // A component's errors cannot occur at the reference composition, which names none.
         Err(
             ResolveLiquidError::NotALiquid { .. }
             | ResolveLiquidError::NotModelled { .. }
-            | ResolveLiquidError::CompositionNotModelled { .. },
+            | ResolveLiquidError::CompositionNotModelled { .. }
+            | ResolveLiquidError::ComponentNotModelled { .. }
+            | ResolveLiquidError::CompositionOutOfRange { .. },
         ) => return LiquidRecord::Unrecorded,
     };
     let t = temperature.value();
@@ -649,12 +652,14 @@ fn liquid_record(id: SubstanceId, temperature: Kelvin) -> LiquidRecord {
         Ok(record) => LiquidRecord::AtFirstMelt(record),
         // `NotModelled`: a member the record needs (its density) is not modelled at the bound's
         // state, so the row has no record there. The rest cannot occur: the first call refused a
-        // row that is not a liquid and a given composition before it read the temperature, and
-        // either bound lies inside the range.
+        // row that is not a liquid and a given composition before it read the temperature, the
+        // reference composition names no component, and either bound lies inside the range.
         Err(
             ResolveLiquidError::NotModelled { .. }
             | ResolveLiquidError::NotALiquid { .. }
             | ResolveLiquidError::CompositionNotModelled { .. }
+            | ResolveLiquidError::ComponentNotModelled { .. }
+            | ResolveLiquidError::CompositionOutOfRange { .. }
             | ResolveLiquidError::OutOfRange { .. },
         ) => LiquidRecord::Unrecorded,
     }

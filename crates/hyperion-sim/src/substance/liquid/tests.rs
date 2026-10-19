@@ -17,6 +17,30 @@ fn row(key: &str) -> SubstanceId {
     by_key(key).unwrap()
 }
 
+/// The row's liquid range at its reference composition, K: its first melt, and the temperature
+/// the range ends below, the lowest critical point among its components (a pure liquid's own), or
+/// 100 K above its first melt for a row that states none.
+fn reference_range(id: SubstanceId) -> (f64, f64) {
+    let substance = id.substance();
+    let lowest = substance
+        .condensed()
+        .unwrap()
+        .transition()
+        .temperature()
+        .value();
+    let components = substance.liquid().unwrap().components();
+    let top = if components.is_empty() {
+        lowest + 100.0
+    } else {
+        components
+            .iter()
+            .filter_map(|c| c.substance().phase_diagram())
+            .map(|d| d.critical_temperature().value())
+            .fold(f64::INFINITY, f64::min)
+    };
+    (lowest, top)
+}
+
 /// The uniform mean of `f` over [`low`, `high`] by composite Simpson's rule on 64 steps: the
 /// oracles below are smooth across a bin, so this is exact to well under their tolerances.
 fn simpson_mean(f: impl Fn(f64) -> f64, low: f64, high: f64) -> f64 {
@@ -448,22 +472,22 @@ fn the_extended_density_is_continuous_at_the_triple_point() {
 }
 
 /// Every row with liquid columns gives a record across its range that a palette's liquid entry
-/// accepts, with no absent member written as 0: every present by-bin value is above zero, and a
-/// row whose file's k is not modelled leaves its absorption absent.
+/// accepts, with no absent member written as 0: every present by-bin value is above zero, a row
+/// whose file's k is not modelled leaves its absorption absent, and a solution with a component
+/// whose absorption is not modelled leaves its own absent (Titan's seas: ethane's and nitrogen's;
+/// ammonia–water: ammonia's; the sulphate brine: its salt's), so that of the solutions only the
+/// chloride brine, its salt's transparency cited, and the acid, its files' bounds, have one. The
+/// perchlorate brines, whose record is refused for its index, are the solutions' tests'.
 #[test]
 fn every_record_is_a_palette_s_and_no_absent_member_is_zero() {
     for (key, columns) in &super::super::rows::liquids::LIQUIDS {
+        if let LiquidConstitution::AwaitingSolute(_) = columns.constitution {
+            continue;
+        }
         let id = row(key.as_str());
         let substance = id.substance();
-        let lowest = substance
-            .condensed()
-            .unwrap()
-            .transition()
-            .temperature()
-            .value();
-        let highest = substance
-            .phase_diagram()
-            .map_or(lowest + 100.0, |d| d.critical_temperature().value() - 1e-6);
+        let (lowest, top) = reference_range(id);
+        let highest = top - 1e-6;
         for fraction in [0.0, 0.1, 0.5, 0.9, 1.0] {
             let t = Kelvin::new(lowest + fraction * (highest - lowest));
             let record = liquid_properties(id, t, Composition::Reference).unwrap();
@@ -477,11 +501,11 @@ fn every_record_is_a_palette_s_and_no_absent_member_is_zero() {
                     t.value()
                 );
             }
-            assert_eq!(
-                record.absorption_per_m.is_some(),
-                columns.optics.unwrap().absorption.is_some(),
-                "{key}"
-            );
+            let modelled = match columns.optics {
+                Some(optics) => optics.absorption.is_some(),
+                None => matches!(key.as_str(), "brine_nacl" | "H2SO4"),
+            };
+            assert_eq!(record.absorption_per_m.is_some(), modelled, "{key}");
             let entry = PaletteEntry {
                 substance: *key,
                 role: PaletteRole::Liquid,
@@ -513,8 +537,9 @@ fn the_liquid_rows_are_rows_in_registry_order() {
     assert_eq!(with_columns, indices.len());
 }
 
-/// A temperature outside the liquid range, a composition, and a row with no liquid columns are
-/// refused, each by its own error.
+/// A temperature outside the liquid range, a composition naming another row, a composition outside
+/// the model's range (the pure acid), a composition of a liquid whose mixing is not yet modelled (a
+/// perchlorate brine's), and a row with no liquid columns are refused, each by its own error.
 #[test]
 fn what_is_not_modelled_is_refused() {
     let water = row("H2O");
@@ -527,10 +552,27 @@ fn what_is_not_modelled_is_refused() {
             "{t} K"
         );
     }
-    let fractions = [(water, 1.0)];
+    let fractions = [(row("CH4"), 1.0)];
     let composition = LiquidComposition::new(&fractions).unwrap();
     assert!(matches!(
         liquid_properties(water, Kelvin::new(288.15), Composition::Given(composition)),
+        Err(ResolveLiquidError::ComponentNotModelled { .. })
+    ));
+    let acid = row("H2SO4");
+    let fractions = [(acid, 1.0)];
+    let composition = LiquidComposition::new(&fractions).unwrap();
+    assert!(matches!(
+        liquid_properties(acid, Kelvin::new(300.0), Composition::Given(composition)),
+        Err(ResolveLiquidError::CompositionOutOfRange { .. })
+    ));
+    let fractions = [(water, 1.0)];
+    let composition = LiquidComposition::new(&fractions).unwrap();
+    assert!(matches!(
+        liquid_properties(
+            row("brine_naclo4"),
+            Kelvin::new(300.0),
+            Composition::Given(composition)
+        ),
         Err(ResolveLiquidError::CompositionNotModelled { .. })
     ));
     assert!(matches!(
@@ -563,17 +605,7 @@ fn the_record_is_order_independent() {
     let mut cases = Vec::new();
     for (key, _) in &super::super::rows::liquids::LIQUIDS {
         let id = row(key.as_str());
-        let lowest = id
-            .substance()
-            .condensed()
-            .unwrap()
-            .transition()
-            .temperature()
-            .value();
-        let top = id
-            .substance()
-            .phase_diagram()
-            .map_or(lowest + 100.0, |d| d.critical_temperature().value());
+        let (lowest, top) = reference_range(id);
         for fraction in [0.0, 0.5, 0.9] {
             cases.push((id, lowest + fraction * (top - lowest)));
         }
@@ -660,14 +692,15 @@ fn water_outside_its_checked_windows_is_derived() {
     assert_eq!(at(303.16), LiquidBasis::Derived);
     assert_eq!(at(400.0), LiquidBasis::Derived);
     for (key, columns) in &super::super::rows::liquids::LIQUIDS {
-        if key.as_str() != "H2O" {
-            assert_eq!(columns.optics.unwrap().absorption_checked(), None, "{key}");
+        if let (Some(optics), false) = (columns.optics, key.as_str() == "H2O") {
+            assert_eq!(optics.absorption_checked(), None, "{key}");
         }
     }
 }
 
 /// Each row's optics state is its file's: within half a kelvin of the temperature the table
-/// carries from the file's label, so a file whose temperature changes fails here.
+/// carries from the file's label, so a file whose temperature changes fails here (the acid's two
+/// files are the solutions' tests').
 #[test]
 fn each_optics_state_is_its_file_s() {
     let files = [
@@ -676,7 +709,6 @@ fn each_optics_state_is_its_file_s() {
         ("NH3", bins::AMMONIA_LIQUID_TEMPERATURE_K),
         ("N2", bins::NITROGEN_LIQUID_TEMPERATURE_K),
         ("C2H6", bins::ETHANE_LIQUID_TEMPERATURE_K),
-        ("H2SO4", bins::SULPHURIC_ACID_75_TEMPERATURE_K),
     ];
     for (key, label) in files {
         let optics = row(key).substance().liquid().unwrap().optics().unwrap();
@@ -685,29 +717,6 @@ fn each_optics_state_is_its_file_s() {
             (state - label).abs() <= 0.5,
             "{key}: state {state} K against {label} K"
         );
-    }
-}
-
-/// The sulphuric acid holds its 300 K density and index away from 300 K, so it is `Derived`, and
-/// its absorption is the file's bound.
-#[test]
-fn the_acid_holds_its_stated_state() {
-    let acid = row("H2SO4");
-    let warm = liquid_properties(acid, Kelvin::new(300.0), Composition::Reference).unwrap();
-    let cold = liquid_properties(acid, Kelvin::new(250.0), Composition::Reference).unwrap();
-    assert_eq!(warm.basis, LiquidBasis::Derived);
-    assert_eq!(cold.basis, LiquidBasis::Derived);
-    assert_same_bits(cold.density_kg_m3, warm.density_kg_m3);
-    for (a, b) in cold.refractive_index.iter().zip(&bins::SULPHURIC_ACID_75_N) {
-        assert!((a - b).abs() < 4e-16);
-    }
-    for (a, file) in cold
-        .absorption_per_m
-        .unwrap()
-        .iter()
-        .zip(&bins::SULPHURIC_ACID_75_A)
-    {
-        assert_same_bits(*a, *file);
     }
 }
 
@@ -1378,6 +1387,7 @@ fn carbon_dioxide_waits_on_its_index() {
     ));
     let co2 = &super::super::rows::liquids::CARBON_DIOXIDE;
     assert!(co2.optics().is_none());
+    assert_eq!(co2.components(), [row("CO2")]);
     let t = Kelvin::new(216.592);
     let rho = row("CO2")
         .substance()
