@@ -6918,6 +6918,25 @@ feeding back into p_s, T_s, the albedo or the bulk.
     P14.T54.b" list (Risks, "Deviations in P14.T24.e, as built"). It fills rendering plan R09's
     header parts `maturity` and `organic_cover`, and their `SurfaceHeaderDto` mirrors, from T51.d if
     T51.d rides 24, and otherwise leaves them absent (decision-r11-palette-liquids §4).
+
+    It fills:
+    - `weathering_rate` beside `maturity` (decision-p14-t51d-weathering §2.3);
+    - each palette entry's `feo_mass_fraction` from the registry's FeO_T, `None` where the
+      substance's composition is not modelled or its albedo is an observed, weathered value.
+
+    It weathers the area mix with R10.T1.d's law at m_body, each regolith component's spherical
+    albedo in every band the optics carry, and deletes T51.b's space-weathering stand-in. If
+    R10.T1.d has not landed, the stand-in stays and the weathering takes the next bump.
+
+    _Tests:_
+    - Mercury's Bond albedo 0.088 ± 0.003 (Mallama 2017, arXiv:1703.02670, the spherical
+      bolometric albedo over 0–4 µm), within a tolerance stated for a generated Mercury, with the
+      band coverage stated;
+    - its V-band spherical albedo against 0.068 (p_V q_V, 0.142 × 0.478, Mallama et al. 2002);
+    - the Moon's 0.11 kept;
+    - Europa's normal reflectances within 0.48–0.85;
+    - the server's albedo scale solved on the weathered albedos.
+
   - _T50.b's inputs_, passed where it wires T52.d (decision-p14-t50b-envelope §5–6):
     - the record's T_eff (its T_eq where it has none), surface gravity and age;
     - T50.a's formation distance and snow line;

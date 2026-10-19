@@ -128,11 +128,14 @@ wire_table!(FieldHeaderParts {
     main_liquid: Option<u8>,
     maturity: Option<f64>,
     organic_cover: Option<f64>,
+    weathering_rate: Option<f64>,
 });
 
-// A palette entry (60 bytes without a liquid record, 201 to 457 with one): its key's 16 padded
-// bytes, its role, its normal albedo in B, V and R, its phase row, grain density, transition and
-// mechanics family, then its liquid record as a presence byte and the record when present.
+// A palette entry (61 to 466 bytes: 61 with neither a liquid record nor an `FeO_T`, 69 with an
+// `FeO_T` alone, and 202 to 466 with a record): its key's 16 padded bytes, its role, its normal
+// albedo in B, V and R, its phase row, grain density, transition and mechanics family, then its
+// liquid record as a presence byte and the record when present, and its `FeO_T` as a presence byte
+// and the `f64` when present.
 wire_table!(PaletteEntry {
     substance: SubstanceKey,
     role: PaletteRole,
@@ -142,9 +145,10 @@ wire_table!(PaletteEntry {
     transition: Kelvin,
     mechanics: MechanicsFamily,
     liquid: Option<LiquidProperties>,
+    feo_mass_fraction: Option<f64>,
 });
 
-/// The bytes of the shortest palette entry, one without a liquid record: 60.
+/// The bytes of the shortest palette entry, one with neither a liquid record nor an `FeO_T`: 61.
 pub(super) const PALETTE_ENTRY_MIN_BYTES: usize = SubstanceKey::BYTES
     + PaletteRole::BYTES
     + <[f64; 3]>::BYTES
@@ -153,6 +157,8 @@ pub(super) const PALETTE_ENTRY_MIN_BYTES: usize = SubstanceKey::BYTES
     + Kelvin::BYTES
     + MechanicsFamily::BYTES
     // The liquid record's presence byte.
+    + u8::BYTES
+    // The `FeO_T`'s presence byte.
     + u8::BYTES;
 
 // A liquid record (141 to 397 bytes): its temperature, density and basis, its refractive index by
@@ -457,7 +463,7 @@ impl FixedWire for SubstanceKey {
 }
 
 impl Wire for MaterialPalette {
-    /// Its entry count, a byte, then each entry, checked against the shortest entry's 60 bytes
+    /// Its entry count, a byte, then each entry, checked against the shortest entry's 61 bytes
     /// before anything is allocated.
     fn put(&self, out: &mut Vec<u8>) {
         u8::try_from(self.len())
@@ -605,8 +611,9 @@ mod tests {
     /// The records' strides are Design note 17's: 25 bytes a synthesis record (its 21, the
     /// substance byte, the sea floor's and the two runoff bytes) and 50 a climate record; the
     /// header's spectrum is 32 (β₁, V₁, the break degree and β₂); a field added to any moves them,
-    /// and the payload's size with them. A palette entry is 60 bytes without a liquid record and
-    /// 201 to 457 with one (decision-r11-palette-liquids §1.5).
+    /// and the payload's size with them. A palette entry is 61 to 466 bytes: 61 with neither a
+    /// liquid record nor an `FeO_T`, 69 with an `FeO_T` alone, and 202 to 466 with a record
+    /// (decision-r11-palette-liquids §1.5; decision-p14-t51d-weathering §1.6).
     #[test]
     fn wire_records_have_design_note_seventeens_strides() {
         assert_eq!(SynthesisCell::BYTES, 25);
@@ -616,29 +623,42 @@ mod tests {
         assert_eq!(Wind::BYTES, 2);
         assert_eq!(Spheroid::BYTES, 16);
         assert_eq!(SubstanceKey::BYTES, 16);
-        assert_eq!(PALETTE_ENTRY_MIN_BYTES, 60);
+        assert_eq!(PALETTE_ENTRY_MIN_BYTES, 61);
         let length = |entry: &PaletteEntry| {
             let mut out = Vec::new();
             entry.put(&mut out);
             out.len()
         };
         let mut sea = liquid_entry();
+        let dry = PaletteEntry {
+            liquid: None,
+            ..sea.clone()
+        };
+        assert_eq!(length(&dry), 61);
         assert_eq!(
             length(&PaletteEntry {
-                liquid: None,
-                ..sea.clone()
+                feo_mass_fraction: Some(0.0),
+                ..dry
             }),
-            60
+            69,
+            "an FeO_T alone"
         );
         let record = sea.liquid.as_mut().unwrap();
         record.scattering_per_m = Some([2e-3; LIQUID_BINS]);
-        assert_eq!(length(&sea), 457, "a full record");
+        assert_eq!(length(&sea), 458, "a full record");
+        // A melting crust entry may carry both, the longest entry.
+        let melting = PaletteEntry {
+            role: PaletteRole::PrimaryCrust,
+            feo_mass_fraction: Some(0.2),
+            ..sea.clone()
+        };
+        assert_eq!(length(&melting), 466, "a full record and an FeO_T");
         let record = sea.liquid.as_mut().unwrap();
         (record.absorption_per_m, record.scattering_per_m) = (None, None);
         (record.surface_tension_n_per_m, record.viscosity_pa_s) = (None, None);
         assert_eq!(
             length(&sea),
-            201,
+            202,
             "a record with every optional member absent"
         );
     }
@@ -655,6 +675,7 @@ mod tests {
             transition: Kelvin::new(273.15),
             mechanics: MechanicsFamily::WaterIce,
             liquid: Some(water),
+            feo_mass_fraction: None,
         }
     }
 
@@ -690,6 +711,7 @@ mod tests {
             transition: Kelvin::new(1_253.15),
             mechanics: MechanicsFamily::Silicate,
             liquid: Some(crate::testing::basaltic_melt()),
+            feo_mass_fraction: None,
         };
         round_trip(&MaterialPalette::new(vec![lava, full.clone()]).unwrap());
         // The basis byte: after the entry's 59 fixed bytes, the presence byte, the temperature and
@@ -756,6 +778,121 @@ mod tests {
                 entry: 0,
                 member: "temperature"
             })
+        );
+    }
+
+    /// A palette entry's `FeO_T` comes back to the bit after its liquid record, present or absent
+    /// on several entries of one palette (decision-p14-t51d-weathering §1.6): an ice's 0, a melting
+    /// crust's beside its record, a crust's 1, and a sea's and a deposit's absent. An entry cut
+    /// short of its `FeO_T` is refused as truncated, its presence byte is a presence byte, and a
+    /// palette shorter than its count of 61-byte entries is refused before it is read.
+    #[test]
+    fn wire_palette_entries_read_back_their_feo_mass_fractions() {
+        let entry = |key, role, feo, liquid| PaletteEntry {
+            substance: SubstanceKey::new(key).unwrap(),
+            role,
+            normal_albedo_bvr: [0.1, 0.12, 0.14],
+            phase_row: 1,
+            grain_density_kg_m3: 3_010.0,
+            transition: Kelvin::new(1_253.15),
+            mechanics: MechanicsFamily::Silicate,
+            liquid,
+            feo_mass_fraction: feo,
+        };
+        let entries = vec![
+            entry(
+                "basalt",
+                PaletteRole::PrimaryCrust,
+                Some(0.110),
+                Some(crate::testing::basaltic_melt()),
+            ),
+            entry("feldspathic", PaletteRole::SecondaryCrust, Some(1.0), None),
+            entry("H2O", PaletteRole::Ice, Some(0.0), None),
+            liquid_entry(),
+            entry("mars_dust", PaletteRole::Deposit, None, None),
+        ];
+        for e in &entries {
+            round_trip(e);
+        }
+        let palette = MaterialPalette::new(entries.clone()).unwrap();
+        round_trip(&palette);
+        // The `FeO_T` follows the liquid record: an ice's presence byte, then its 0.
+        let mut ice = Vec::new();
+        entries[2].put(&mut ice);
+        assert_eq!(ice.len(), 69);
+        assert_eq!(
+            (ice[59], ice[60]),
+            (0, 1),
+            "the record absent, the FeO_T present"
+        );
+        assert_eq!(ice[61..], [0; 8], "+0's bits");
+        // An entry cut within its `FeO_T`, and one without its presence byte.
+        assert_eq!(
+            PaletteEntry::read(&mut Reader::new(&ice[..65])),
+            Err(DecodeBlockError::Truncated {
+                needed: 69,
+                available: 65
+            })
+        );
+        assert_eq!(
+            PaletteEntry::read(&mut Reader::new(&ice[..60])),
+            Err(DecodeBlockError::Truncated {
+                needed: 61,
+                available: 60
+            })
+        );
+        let mut tagged = ice.clone();
+        tagged[60] = 2;
+        assert_eq!(
+            PaletteEntry::read(&mut Reader::new(&tagged)),
+            Err(DecodeBlockError::Tag {
+                part: "presence",
+                code: 2
+            })
+        );
+        // A palette of one entry needs 61 bytes after its count.
+        let mut short = vec![1_u8];
+        short.extend_from_slice(&ice[..60]);
+        assert_eq!(
+            MaterialPalette::read(&mut Reader::new(&short)),
+            Err(DecodeBlockError::Truncated {
+                needed: 62,
+                available: 61
+            })
+        );
+    }
+
+    /// A decoded palette refuses an `FeO_T` as [`MaterialPalette::new`] does: one outside +0 to 1,
+    /// a −0 among them, and one on a liquid.
+    #[test]
+    fn wire_palettes_refuse_feo_mass_fractions_out_of_place() {
+        let palette_of = |entry: &PaletteEntry| {
+            let mut out = vec![1_u8];
+            entry.put(&mut out);
+            MaterialPalette::read(&mut Reader::new(&out))
+        };
+        let refused = |error| Err(DecodeBlockError::Palette(error));
+        let ice = |feo| PaletteEntry {
+            role: PaletteRole::Ice,
+            liquid: None,
+            feo_mass_fraction: Some(feo),
+            ..liquid_entry()
+        };
+        for feo in [1.5, -0.0, f64::NAN] {
+            assert_eq!(
+                palette_of(&ice(feo)),
+                refused(crate::field::BuildPaletteError::FeoMassFraction { entry: 0 }),
+                "{feo:e}"
+            );
+        }
+        assert!(palette_of(&ice(0.0)).is_ok());
+        let sea = PaletteEntry {
+            feo_mass_fraction: Some(0.0),
+            ..liquid_entry()
+        };
+        assert_eq!(
+            palette_of(&sea),
+            refused(crate::field::BuildPaletteError::FeoOnLiquid { entry: 0 })
         );
     }
 
@@ -866,6 +1003,7 @@ mod tests {
             transition: Kelvin::new(390.0),
             mechanics: MechanicsFamily::VolatileIce,
             liquid: None,
+            feo_mass_fraction: None,
         };
         round_trip(&entry);
         round_trip(&MaterialPalette::new(vec![entry.clone()]).unwrap());

@@ -484,6 +484,7 @@ mod tests {
             transition: Kelvin::new(1_500.0),
             mechanics: MechanicsFamily::Silicate,
             liquid: None,
+            feo_mass_fraction: None,
         }])
         .unwrap();
         properties(Material::new(MaterialClass::Regolith, 0).unwrap(), &palette).unwrap()
@@ -596,6 +597,7 @@ mod tests {
             transition: Kelvin::new(1_253.15),
             mechanics: MechanicsFamily::Silicate,
             liquid: None,
+            feo_mass_fraction: None,
         }])
         .unwrap();
         let bedrock =
@@ -646,6 +648,7 @@ mod tests {
             transition: Kelvin::new(1_500.0),
             mechanics: MechanicsFamily::Silicate,
             liquid: None,
+            feo_mass_fraction: None,
         }])
         .unwrap();
         properties(Material::new(class, 0).unwrap(), &palette).unwrap()
@@ -765,6 +768,7 @@ mod tests {
             transition: Kelvin::new(1_253.15),
             mechanics: MechanicsFamily::Silicate,
             liquid: None,
+            feo_mass_fraction: None,
         }])
         .unwrap();
         let bedrock =

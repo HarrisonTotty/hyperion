@@ -200,6 +200,18 @@ pub struct SurfaceHeaderDto {
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<f64>>", optional)]
     pub organic_cover: Modelled<f64>,
+    /// The weathering rate k, dimensionless, finite and at least 0 with no upper bound: the body's
+    /// orbit-mean, surface-reaching space-weathering dose rate relative to the Moon's present one,
+    /// computed by the same rules, so that the Moon's is exactly 1 (decision-p14-t51d-weathering
+    /// §2.2: the stellar wind's and the micrometeoroids' shares of the Moon's weathering times
+    /// their fluxes at the surface relative to the Moon's); a close-in world of an active M dwarf
+    /// may reach 10³. Rendering plan R10 fades a crater's ejecta to the background as
+    /// `min(maturity, 1 − exp(−k t ÷ τ_L))`, `t` the crater's age and `τ_L` the lunar maturation
+    /// time, through the shared Rust law. Present exactly when [`maturity`](Self::maturity) is, and
+    /// absent until galaxy plan 14 computes it (P14.T51.d).
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<f64>>", optional)]
+    pub weathering_rate: Modelled<f64>,
 }
 
 /// The coarse model a body's climate step ran (rendering plan R09, Design note 8).
@@ -231,8 +243,9 @@ pub enum PrecipitationSourceDto {
 }
 
 /// One substance of a body's palette, with the values the main thread's photometry and ocean read:
-/// its normal albedo, its phase row and its liquid record (decision-r11-palette-liquids §1.5 and
-/// §2, item 8). Its grain density, transition and mechanics family travel in the payload alone.
+/// its normal albedo, its phase row, its liquid record (decision-r11-palette-liquids §1.5 and §2,
+/// item 8) and its `FeO_T` (decision-p14-t51d-weathering §1.6). Its grain density, transition and
+/// mechanics family travel in the payload alone.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct PaletteEntryDto {
@@ -256,6 +269,17 @@ pub struct PaletteEntryDto {
     /// the body melts (a lava lake or a magma ocean); `null` where the entry is not liquid on the
     /// body.
     pub liquid: Option<LiquidDto>,
+    /// `FeO_T`: the substance's total non-metallic iron (silicate, oxide and sulphide) expressed as
+    /// `FeO`, as a mass fraction of the substance, dimensionless from 0 to 1; metallic iron is
+    /// excluded. The npFe⁰ yield of rendering plan R10's space-weathering law scales with it
+    /// (decision-p14-t51d-weathering §1.2), and a main-thread reader takes weathered values from
+    /// the shared Rust law, never a TypeScript copy of it. 0 on an ice or an iron-free solid; never
+    /// on a [`PaletteRoleDto::Liquid`] entry; absent where not modelled: the registry has no
+    /// composition for the substance, or its normal albedo is an observed, space-weathered value,
+    /// so that nothing darkens twice.
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<f64>>", optional)]
+    pub feo_mass_fraction: Modelled<f64>,
 }
 
 /// What a liquid on the ground is to light and to waves, resolved by the server for its body at
@@ -525,6 +549,7 @@ mod tests {
                     normal_albedo_bvr: [0.094; 3],
                     phase_row: 1,
                     liquid: None,
+                    feo_mass_fraction: Modelled::NotModelled,
                 },
                 PaletteEntryDto {
                     substance: "H2O".to_owned(),
@@ -532,11 +557,13 @@ mod tests {
                     normal_albedo_bvr: [0.965, 0.96, 0.955],
                     phase_row: 0,
                     liquid: None,
+                    feo_mass_fraction: Modelled::Value(0.0),
                 },
             ],
             main_liquid: None,
             maturity: Modelled::NotModelled,
             organic_cover: Modelled::NotModelled,
+            weathering_rate: Modelled::NotModelled,
         }
     }
 
@@ -610,6 +637,7 @@ mod tests {
                     "normal_albedo_bvr": [0.965, 0.96, 0.955],
                     "phase_row": 0,
                     "liquid": null,
+                    "feo_mass_fraction": 0.0,
                 },
             ],
             "main_liquid": null,
@@ -647,10 +675,12 @@ mod tests {
             normal_albedo_bvr: [0.020_8, 0.020_4, 0.020_2],
             phase_row: 0,
             liquid: Some(liquid()),
+            feo_mass_fraction: Modelled::NotModelled,
         });
         sea.main_liquid = Some(2);
         sea.maturity = Modelled::Value(0.75);
         sea.organic_cover = Modelled::Value(0.0);
+        sea.weathering_rate = Modelled::Value(1_000.0);
         let mut sea_json = header_json();
         sea_json["palette"].as_array_mut().unwrap().push(json!({
             "substance": "H2O",
@@ -662,7 +692,52 @@ mod tests {
         sea_json["main_liquid"] = json!(2);
         sea_json["maturity"] = json!(0.75);
         sea_json["organic_cover"] = json!(0.0);
+        sea_json["weathering_rate"] = json!(1_000.0);
         assert_wire_form(&sea, sea_json);
+    }
+
+    /// An entry's `FeO_T` is a number where modelled, 0 an iron-free solid's, and an absent key
+    /// where not, never `null`; a header's weathering rate likewise, so that both are additive
+    /// (decision-p14-t51d-weathering §1.6 and §2.3).
+    #[test]
+    fn palette_feo_and_weathering_rate_wire_forms() {
+        let mut entry = header().palette.remove(0);
+        assert_wire_form(
+            &entry,
+            json!({
+                "substance": "phyllosilicate",
+                "role": "primary_crust",
+                "normal_albedo_bvr": [0.094, 0.094, 0.094],
+                "phase_row": 1,
+                "liquid": null,
+            }),
+        );
+        entry.feo_mass_fraction = Modelled::Value(0.05);
+        assert_wire_form(
+            &entry,
+            json!({
+                "substance": "phyllosilicate",
+                "role": "primary_crust",
+                "normal_albedo_bvr": [0.094, 0.094, 0.094],
+                "phase_row": 1,
+                "liquid": null,
+                "feo_mass_fraction": 0.05,
+            }),
+        );
+        let serialized = serde_json::to_value(header()).unwrap();
+        assert!(serialized.get("weathering_rate").is_none(), "{serialized}");
+        assert!(
+            serialized["palette"][0].get("feo_mass_fraction").is_none(),
+            "{serialized}"
+        );
+        assert_eq!(serialized["palette"][1]["feo_mass_fraction"], json!(0.0));
+        let mut moon = header();
+        moon.maturity = Modelled::Value(1.0);
+        moon.weathering_rate = Modelled::Value(1.0);
+        let mut moon_json = header_json();
+        moon_json["maturity"] = json!(1.0);
+        moon_json["weathering_rate"] = json!(1.0);
+        assert_wire_form(&moon, moon_json);
     }
 
     /// A liquid's by-bin member of another length than the fifteen bins is refused.

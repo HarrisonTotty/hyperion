@@ -532,6 +532,7 @@ fn every_record_is_a_palette_s_and_no_absent_member_is_zero() {
                 transition: substance.condensed().unwrap().transition().temperature(),
                 mechanics: MechanicsFamily::WaterIce,
                 liquid: Some(record),
+                feo_mass_fraction: None,
             };
             if let Err(refusal) = MaterialPalette::new(vec![entry]) {
                 panic!("{key} at {} K: {refusal:?}", t.value());

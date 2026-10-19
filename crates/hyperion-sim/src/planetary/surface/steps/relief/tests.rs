@@ -1900,6 +1900,7 @@ fn the_elastic_thickness_follows_the_lid_s_substance() {
         transition: crate::units::Kelvin::new(273.15),
         mechanics: hyperion_surface::field::MechanicsFamily::WaterIce,
         liquid: None,
+        feo_mass_fraction: None,
     };
     let shell = |t: f64, f: f64| {
         provinces::ice_thickness(

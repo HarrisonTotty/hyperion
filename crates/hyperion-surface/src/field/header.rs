@@ -204,6 +204,20 @@ pub struct FieldHeaderParts {
     /// [+0, 1] (decision-r11-palette-liquids §2, item 4). Reserved for P14.T51.d's figure, as
     /// [`maturity`](Self::maturity) is, and `None` until P14.T54.b fills it.
     pub organic_cover: Option<f64>,
+    /// The weathering rate k: the body's orbit-mean, surface-reaching space-weathering dose rate
+    /// relative to the Moon's present one, computed by the same rules, so that the Moon's is
+    /// exactly 1 (decision-p14-t51d-weathering §2.2):
+    /// `k = s_w Φ_w ÷ Φ_w,Moon + s_d Φ_d ÷ Φ_d,Moon`, the stellar wind's and the micrometeoroids'
+    /// shares of the Moon's weathering times their fluxes at the surface relative to the Moon's,
+    /// P14.T51.d's `SurfaceModifiers::weathering_rate`. Dimensionless, finite and at least +0 (a −0
+    /// is refused), with no upper bound: a close-in world of an active M dwarf may reach 10³.
+    ///
+    /// R10.T1.c fades a crater's ejecta to the background as `min(m_body, maturity_after(t_c, k))`
+    /// ([`maturity_after`](crate::material::maturity_after)), `t_c` the crater's age and `m_body`
+    /// the [`maturity`](Self::maturity), which saturates on old ground, so that k cannot be
+    /// recovered from it (§2.1, §2.3). Present exactly when the maturity is, and `None` until
+    /// P14.T54.b fills both.
+    pub weathering_rate: Option<f64>,
 }
 
 /// A coarse field's header: [`FieldHeaderParts`], validated, with the level and the boundary
@@ -245,7 +259,8 @@ pub enum BuildFieldHeaderError {
         /// The part's name.
         part: &'static str,
     },
-    /// A part that cannot be negative is.
+    /// A part that cannot be negative is: for the weathering rate, a −0 too, so that its value has
+    /// one wire form.
     Negative {
         /// The part's name.
         part: &'static str,
@@ -267,6 +282,12 @@ pub enum BuildFieldHeaderError {
         crust: Crust,
         /// The entry it names.
         entry: u8,
+    },
+    /// The maturity and the weathering rate are not both present or both absent
+    /// (decision-p14-t51d-weathering §2.3): R10.T1.c reads them together.
+    WeatheringParts {
+        /// The part that is absent while the other is present.
+        missing: &'static str,
     },
     /// The main liquid's entry is past the palette or not a liquid's.
     MainLiquid(u8),
@@ -303,6 +324,11 @@ impl std::fmt::Display for BuildFieldHeaderError {
             Self::Negative { part } => write!(f, "{part} is negative"),
             Self::NotPositive { part } => write!(f, "{part} is not positive"),
             Self::NotAFraction { part } => write!(f, "{part} is not within 0 to 1"),
+            Self::WeatheringParts { missing } => write!(
+                f,
+                "{missing} is absent while the other of the maturity and the weathering rate is \
+                 present"
+            ),
             Self::CrustPalette { crust, entry } => write!(
                 f,
                 "the {crust:?} crust's palette entry {entry} is past the palette or not a \
@@ -364,6 +390,26 @@ fn check_fraction(part: &'static str, fraction: Option<f64>) -> Result<(), Build
     }
 }
 
+/// Checks the weathering rate, absent or finite and at least +0, and that it is present exactly
+/// when the maturity is.
+fn check_weathering(maturity: Option<f64>, rate: Option<f64>) -> Result<(), BuildFieldHeaderError> {
+    let part = "weathering rate";
+    match rate {
+        Some(k) if !k.is_finite() => return Err(BuildFieldHeaderError::NotFinite { part }),
+        Some(k) if k < 0.0 || k.is_sign_negative() => {
+            return Err(BuildFieldHeaderError::Negative { part });
+        }
+        Some(_) | None => {}
+    }
+    match (maturity, rate) {
+        (Some(_), None) => Err(BuildFieldHeaderError::WeatheringParts { missing: part }),
+        (None, Some(_)) => Err(BuildFieldHeaderError::WeatheringParts {
+            missing: "maturity",
+        }),
+        (Some(_), Some(_)) | (None, None) => Ok(()),
+    }
+}
+
 /// `value` ÷ `step`, rounded, if it lies within `min` to `max`.
 fn quantise(value: f64, step: f64, min: f64, max: f64) -> Result<f64, QuantiseValueError> {
     if !value.is_finite() {
@@ -386,9 +432,12 @@ impl FieldHeader {
     /// radius's spheroid, the months are neither 1 nor 12, the season eccentricity is outside
     /// [0, 1) or not 0 in a one-month year, a step's exponent is above 15, a part is not finite
     /// or out of its range (each part's documentation states it; a reserved fraction outside +0 to
-    /// 1 is [`BuildFieldHeaderError::NotAFraction`]), a crust's palette entry is past the palette
-    /// or of a role no [`Crust`] variant may take, the main liquid's is past it or not a liquid's,
-    /// or the surface is older than the crater contract's system.
+    /// 1 is [`BuildFieldHeaderError::NotAFraction`], and a weathering rate below +0
+    /// [`BuildFieldHeaderError::Negative`]), the maturity and the weathering rate are not both
+    /// present or both absent ([`BuildFieldHeaderError::WeatheringParts`], checked after each one's
+    /// range), a crust's palette entry is past the palette or of a role no [`Crust`] variant may
+    /// take, the main liquid's is past it or not a liquid's, or the surface is older than the
+    /// crater contract's system.
     pub fn new(parts: FieldHeaderParts) -> Result<Self, BuildFieldHeaderError> {
         let r = parts.radius.value();
         if !(r.is_finite() && r > 0.0) {
@@ -460,6 +509,7 @@ impl FieldHeader {
         ] {
             check_fraction(part, fraction)?;
         }
+        check_weathering(parts.maturity, parts.weathering_rate)?;
         for (&crust, &entry) in Crust::ALL.iter().zip(&parts.crust_palette) {
             if let Some(entry) = entry
                 && !parts.palette.get(entry).is_some_and(|e| e.role.is_crust())
@@ -702,6 +752,13 @@ impl FieldHeader {
         self.parts.organic_cover
     }
 
+    /// The weathering rate relative to the Moon's, finite and at least 0, present exactly when the
+    /// maturity is, and `None` until plan 14 fills it ([`FieldHeaderParts::weathering_rate`]).
+    #[must_use]
+    pub fn weathering_rate(&self) -> Option<f64> {
+        self.parts.weathering_rate
+    }
+
     /// The annual mean surface temperature of `cell`, reduced to sea level, kelvin: its code times
     /// the temperature step, about the reference temperature.
     #[must_use]
@@ -791,6 +848,8 @@ impl FieldHeader {
 
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::assert_same_bits;
+
     use super::*;
     use crate::field::{FieldView, LogPrecipitation, Wind};
     use crate::testing::{SyntheticWorld, synthetic_field};
@@ -930,6 +989,7 @@ mod tests {
         assert_eq!((header.maturity(), header.organic_cover()), (None, None));
         let mut filled = parts();
         filled.maturity = Some(1.0);
+        filled.weathering_rate = Some(1.0);
         filled.organic_cover = Some(0.0);
         let header = FieldHeader::new(filled).unwrap();
         assert_eq!(header.maturity(), Some(1.0));
@@ -953,6 +1013,65 @@ mod tests {
             BuildFieldHeaderError::NotFinite {
                 part: "organic cover"
             }
+        );
+    }
+
+    /// The weathering rate is absent until plan 14 fills it, keeps any finite value from +0 up, a
+    /// close-in world's 10³ among them, refuses a −0, a negative value, a NaN or an infinity, and
+    /// is present exactly when the maturity is, each part's range checked before the pairing
+    /// (decision-p14-t51d-weathering §2.3).
+    #[test]
+    fn a_field_header_holds_its_weathering_rate_beside_its_maturity() {
+        let header = FieldHeader::new(parts()).unwrap();
+        assert_eq!(header.weathering_rate(), None);
+        let with = |maturity: Option<f64>, rate: Option<f64>| {
+            let mut p = parts();
+            (p.maturity, p.weathering_rate) = (maturity, rate);
+            FieldHeader::new(p)
+        };
+        for rate in [0.0, 1.0, 1e3, f64::MAX] {
+            let header = with(Some(0.5), Some(rate)).unwrap();
+            assert_same_bits(header.weathering_rate().unwrap(), rate);
+            assert_same_bits(header.maturity().unwrap(), 0.5);
+        }
+        let part = "weathering rate";
+        for rate in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(
+                with(Some(0.5), Some(rate)),
+                Err(BuildFieldHeaderError::NotFinite { part }),
+                "{rate}"
+            );
+        }
+        for rate in [-0.0, -1e-300, -1.0] {
+            assert_eq!(
+                with(Some(0.5), Some(rate)),
+                Err(BuildFieldHeaderError::Negative { part }),
+                "{rate:e}"
+            );
+        }
+        assert_eq!(
+            with(Some(0.5), None),
+            Err(BuildFieldHeaderError::WeatheringParts { missing: part })
+        );
+        assert_eq!(
+            with(None, Some(1.0)),
+            Err(BuildFieldHeaderError::WeatheringParts {
+                missing: "maturity"
+            })
+        );
+        // Each part's own range comes first.
+        assert_eq!(
+            with(None, Some(-1.0)),
+            Err(BuildFieldHeaderError::Negative { part })
+        );
+        assert_eq!(
+            with(Some(2.0), None),
+            Err(BuildFieldHeaderError::NotAFraction { part: "maturity" })
+        );
+        assert_eq!(
+            BuildFieldHeaderError::WeatheringParts { missing: part }.to_string(),
+            "weathering rate is absent while the other of the maturity and the weathering rate is \
+             present"
         );
     }
 

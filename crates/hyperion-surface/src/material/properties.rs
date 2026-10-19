@@ -1281,6 +1281,7 @@ mod tests {
             transition: Kelvin::new(273.15),
             mechanics,
             liquid: None,
+            feo_mass_fraction: None,
         }
     }
 

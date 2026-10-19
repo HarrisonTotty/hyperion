@@ -1223,11 +1223,43 @@ that own them measure them.
   R09.T9's pattern), `cargo test -p hyperion-sim --features testing --test surface_material_worlds`,
   and `just test-wasm-fast` runs the goldens on both wasm targets (the orchestrator's `just ci`
   runs all three).
+- **R10.T1.d The space-weathering law** (decision-p14-t51d-weathering §1, 2026-10-16; lane
+  r10-weathering, after R09.T2.f; built early for P14.T54.b, as R09.T7.d was for P14.T51.f).
+  - **The law.** Hapke 2001's npFe⁰ absorption, α = (36π z ÷ λ) φ ρ_h ÷ ρ_Fe, added to the
+    equivalent slab's internal transmission:
+    - Θ = Θ₀ exp(−τ), τ = m f (M_Fe ÷ M_FeO)(ρ_h ÷ ρ_Fe)(36π z(λ) ÷ λ) Λ;
+    - applied to the entry's fresh w, which the reference form's `A_N`(w) inverts;
+    - given as ratios of the form's `A_N`, `A_S` and `A_h`;
+    - the identity at τ = 0 or for an opaque grain.
+  - **The fit.** `hyperion-fit`'s `space_weathering` fits Λ to the Moon's mature highland and
+    mare normal albedos in B, V and R from the fresh `feldspathic` and `basalt_fe` rows at m = 1,
+    and reports the implied npFe⁰ yield against Morris 1980 and Taylor et al. 2001. It emits
+    `tables/space_weathering.rs` (`since-generator-version: 24`).
+  - **The scale.** `field_albedo_scale` solves c on the albedos weathered at the header's
+    maturity, and R10 draws clamp(c × W(…)).
+  - _Files:_ `material/weathering.rs`, `tables/space_weathering.rs`, `tables/mod.rs`,
+    `crates/hyperion-fit/src/tasks/space_weathering.rs` with its manifest, and
+    `crates/hyperion-server/src/surface/service.rs`.
+  - _Tests:_
+    - the identity at m = 0, f = 0 and for `Lambert`;
+    - monotone non-increasing in m and f;
+    - B darkens relatively more than R;
+    - never above the fresh value, and `A_h` at most 1;
+    - the Moon's anchors within their spread with one Λ, and the fresh/mature contrast of each
+      terrain stated against its measurement;
+    - the golden on native and both wasm targets.
+  - _Accept:_ `cargo test -p hyperion-surface material::weathering`;
+    `cargo test -p hyperion-fit space_weathering`; `cargo run -p hyperion-fit -- check`;
+    `just test-wasm-fast`.
 - **R10.T1.c Maturity and cover.** New at the re-validation (decision-composition §1.8 and
-  §7.5). Regolith's A_N and colour are modulated by exposure (crater and surface ages, from R09's
-  header and cells) and by plan 14's P14.T51.d cover. Files: `material/maturity.rs`. Tests: a
+  §7.5). Each regolith entry's `A_N` and colour come from R10.T1.d's law at
+  m_local = min(m_body, `maturity_after`(t_c, k)): the header's `maturity` and `weathering_rate`,
+  and each crater's age t_c (decision-p14-t51d-weathering §2.1). The organic cover blends the
+  `Cover` entry by `organic_cover`. Main-thread readers take weathered values from the shared
+  law, never a TypeScript copy. Files: `material/maturity.rs`. Tests: a
   fresh crater's ejecta is
-  brighter than mature regolith by the Moon's measured contrast; zero cover gives the substance's
+  brighter than mature regolith by the Moon's measured contrast, the fresh/mature ratio at
+  m_local = 0 against m_body = 1; zero cover gives the substance's
   own albedo. The cover term waits on P14.T51.d (the 23 → 24 batch); until then the exposure term
   lands alone. The contrast is checked against its primary before it is a constant. Acceptance:
   `cargo test -p hyperion-surface material::maturity`.

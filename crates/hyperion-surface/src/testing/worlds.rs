@@ -160,13 +160,17 @@ const CERES_ORBIT_E: f64 = 0.079_692_295;
 /// R11's ocean replaces. Every phase row is 0 until R10 assigns its rows. Every density is a grain
 /// density, the porosity being how a material lies, which R10's forms carry
 /// (science-r09-drainage.md §3), and an ice's is its crystal density where it lies on the body
-/// ([`Substance::ice_entry_at`]; science-composition-crusts.md §3).
+/// ([`Substance::ice_entry_at`]; science-composition-crusts.md §3). Each `FeO_T`
+/// ([`PaletteEntry::feo_mass_fraction`]; decision-p14-t51d-weathering §1.2 and §1.3) is the
+/// figure its constant's documentation cites, 0 for an ice and an iron-free salt, and absent,
+/// not modelled, for a rock whose documentation cites none and for a liquid.
 struct Substance {
     key: SubstanceKey,
     normal_albedo_bvr: [f64; 3],
     grain_density_kg_m3: f64,
     transition_k: f64,
     mechanics: MechanicsFamily,
+    feo_mass_fraction: Option<f64>,
 }
 
 impl Substance {
@@ -182,15 +186,17 @@ impl Substance {
             transition: Kelvin::new(self.transition_k),
             mechanics: self.mechanics,
             liquid: None,
+            feo_mass_fraction: self.feo_mass_fraction,
         }
     }
 
     /// The substance's [`PaletteRole::Liquid`] entry with its record `liquid`, whose density is
-    /// the substance's grain density.
+    /// the substance's grain density, and with no `FeO_T`, which a liquid never carries.
     #[must_use]
     fn liquid_entry(&self, liquid: LiquidProperties) -> PaletteEntry {
         PaletteEntry {
             liquid: Some(liquid),
+            feo_mass_fraction: None,
             ..self.entry(PaletteRole::Liquid)
         }
     }
@@ -245,13 +251,15 @@ const CHONDRITIC_SOLIDUS_K: f64 = 1_423.15;
 /// Basalt: Design note 8's basaltic rock, `A_N` 0.05–0.15; a grain density of 3,010 kg m⁻³, the
 /// mean of eight Alae lava lake tholeiites, 2,920–3,040 (Peck 1978, USGS Professional Paper
 /// 935-B, p. B20; science-r09-drainage.md §3): a terrestrial tholeiite's; an iron-rich basalt is
-/// [`BASALT_FE`].
+/// [`BASALT_FE`]. Its `FeO_T`, 0.110, is the Alae tholeiite's 11.0 wt% as total `FeO`, 9.80 `FeO`
+/// with 1.30 `Fe₂O₃` (Peck 1978, p. B3, as [`BASALT_FE`] cites it).
 const BASALT: Substance = Substance {
     key: SubstanceKey::new_const("basalt"),
     normal_albedo_bvr: [0.10; 3],
     grain_density_kg_m3: 3_010.0,
     transition_k: BASALT_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
+    feo_mass_fraction: Some(0.110),
 };
 
 /// An iron-rich basalt, `FeO` about 18–22 wt% against a terrestrial tholeiite's 10–12, as the lunar
@@ -266,13 +274,14 @@ const BASALT: Substance = Substance {
 /// lunar basalts' 3,270 (high-alumina, NWA 4898) to 3,460 kg m⁻³ (high-titanium, 70215), which
 /// rises with `TiO₂` (Kiefer et al. 2012, GRL 39, L07201, abstract and Table 1; a high-titanium
 /// row waits for a second province lithology, science-composition-crusts.md §2); and
-/// [`BASALT_FE_SOLIDUS_K`].
+/// [`BASALT_FE_SOLIDUS_K`]. Its `FeO_T`, 0.20, is the mid-point of the 18–22 wt% above.
 const BASALT_FE: Substance = Substance {
     key: SubstanceKey::new_const("basalt_fe"),
     normal_albedo_bvr: [0.10; 3],
     grain_density_kg_m3: 3_310.0,
     transition_k: BASALT_FE_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
+    feo_mass_fraction: Some(0.20),
 };
 
 /// Granite: Design note 8's felsic rock, `A_N` 0.2–0.35; a grain density of 2,650 kg m⁻³ (2,654
@@ -280,13 +289,15 @@ const BASALT_FE: Substance = Substance {
 /// 1951, USGS Bulletin 980, Table 26, with the Handbook of Mineralogy's mineral densities,
 /// 2,635–2,671 across their ranges; science-composition-crusts.md §4) and a dry solidus at 1 atm
 /// of about 960 °C (from memory; the dry haplogranite solidus's primary source is Huang and
-/// Wyllie 1975, J. Geol. 83, 737, not read; low confidence).
+/// Wyllie 1975, J. Geol. 83, 737, not read; low confidence). Its `FeO_T` is not modelled (`None`):
+/// no measurement of a granite's iron is cited here.
 const GRANITE: Substance = Substance {
     key: SubstanceKey::new_const("granite"),
     normal_albedo_bvr: [0.275; 3],
     grain_density_kg_m3: 2_650.0,
     transition_k: 1_233.15,
     mechanics: MechanicsFamily::Silicate,
+    feo_mass_fraction: None,
 };
 
 /// A feldspathic crust, as the lunar highlands': a primary flotation crust as basin-scale impacts
@@ -305,13 +316,15 @@ const GRANITE: Substance = Substance {
 /// four feldspathic highland rocks' 2,840–2,910 by helium pycnometry (Kiefer et al. 2012, GRL 39,
 /// L07201, Table 1), and what 75–78 per cent An₉₅ plagioclase gives with low-calcium pyroxene and
 /// olivine of Mg# 66–72, 2,880–2,910 (science-composition-crusts.md §10.1), against a pure
-/// anorthosite's about 2,790 (P14.T49.b's row); and [`PLAGIOCLASE_ROCK_SOLIDUS_K`].
+/// anorthosite's about 2,790 (P14.T49.b's row); and [`PLAGIOCLASE_ROCK_SOLIDUS_K`]. Its `FeO_T`,
+/// 0.05, is the highlands' about 5 wt% from orbit, inside the Apollo 16 soils' 4.7–5.4, both above.
 const FELDSPATHIC: Substance = Substance {
     key: SubstanceKey::new_const("feldspathic"),
     normal_albedo_bvr: [0.20; 3],
     grain_density_kg_m3: 2_900.0,
     transition_k: PLAGIOCLASE_ROCK_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
+    feo_mass_fraction: Some(0.05),
 };
 
 /// A phyllosilicate-rich rock, as Ceres's crust, a primary one, its frozen ocean's shell
@@ -321,13 +334,15 @@ const FELDSPATHIC: Substance = Substance {
 /// lizardite's 2,550 (Anthony et al., Handbook of Mineralogy), not Ceres's bulk crust, 1,200–1,400
 /// kg m⁻³ with its ice and salts (Ermakov et al. 2017, JGR Planets 122, 2267), which is the body's
 /// mixture, not a substance's; and, for its dehydrated residue's solidus,
-/// [`CHONDRITIC_SOLIDUS_K`].
+/// [`CHONDRITIC_SOLIDUS_K`]. Its `FeO_T` is not modelled (`None`): no measurement of its iron is
+/// cited here.
 const PHYLLOSILICATE: Substance = Substance {
     key: SubstanceKey::new_const("phyllosilicate"),
     normal_albedo_bvr: [0.094; 3],
     grain_density_kg_m3: 2_500.0,
     transition_k: CHONDRITIC_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
+    feo_mass_fraction: None,
 };
 
 /// Sodium carbonate, the salt of Ceres's faculae: Design note 8's evaporite, `A_N` 0.5–0.8; its
@@ -335,13 +350,15 @@ const PHYLLOSILICATE: Substance = Substance {
 /// 2003's cell (Acta Cryst. B59, 337), and natrite's, 2,547 (Zubkova et al. 2002; the Handbook of
 /// Mineralogy's D(meas.) 2.54), 2,575 at 110 K by Dusek et al.'s colder cell; and its melting
 /// point, 850 °C, where NIST-JANAF's solid ends and its liquid begins (Chase 1998, via the NIST
-/// WebBook; safety cards give 851 °C; science-composition-crusts.md §4).
+/// WebBook; safety cards give 851 °C; science-composition-crusts.md §4). Its `FeO_T` is 0: an
+/// iron-free salt (decision-p14-t51d-weathering §1.3).
 const SODIUM_CARBONATE: Substance = Substance {
     key: SubstanceKey::new_const("Na2CO3"),
     normal_albedo_bvr: [0.65; 3],
     grain_density_kg_m3: 2_540.0,
     transition_k: 1_123.15,
     mechanics: MechanicsFamily::Salt,
+    feo_mass_fraction: Some(0.0),
 };
 
 /// Mars's bright dust: Design note 8's 0.18–0.25 in V; a grain density of 2,600 kg m⁻³, which
@@ -349,13 +366,15 @@ const SODIUM_CARBONATE: Substance = Substance {
 /// Professional Paper 1389, p. 121 and Table 36; an assumption there, labelled so); the drift's
 /// bulk, 1,200 kg m⁻³, is a form's (science-r09-drainage.md §3); iron-rich and basaltic, so
 /// [`BASALT_FE_SOLIDUS_K`] (an assumption: no measurement of the dust was found; its chlorides
-/// melt first and are minor; science-composition-crusts.md §4).
+/// melt first and are minor; science-composition-crusts.md §4). Its `FeO_T` is not modelled
+/// (`None`): iron-rich, but no measurement of the dust's iron is cited here.
 const MARS_DUST: Substance = Substance {
     key: SubstanceKey::new_const("mars_dust"),
     normal_albedo_bvr: [0.215; 3],
     grain_density_kg_m3: 2_600.0,
     transition_k: BASALT_FE_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
+    feo_mass_fraction: None,
 };
 
 /// The melting point of water ice at 1 atm, kelvin: 273.152 519 K (IAPWS R10-06), to 0.01 K.
@@ -390,13 +409,15 @@ const POLE_LAT_RAD: f64 = core::f64::consts::FRAC_PI_2;
 /// (Wiscombe and Warren 1980; Grenfell et al. 1994); ice Ih's density, a function of temperature
 /// ([`ice_ih_density_kg_m3`]; 916.72 kg m⁻³ at its melting point, the row's figure, IAPWS
 /// R10-06(2009), Table 6: 916.721 463 kg m⁻³), each world's entry taking it where its ice lies
-/// ([`Substance::ice_entry_at`]; science-composition-crusts.md §3).
+/// ([`Substance::ice_entry_at`]; science-composition-crusts.md §3). Its `FeO_T` is 0: a pure ice
+/// (decision-p14-t51d-weathering §1.3).
 const WATER_ICE: Substance = Substance {
     key: SubstanceKey::new_const("H2O"),
     normal_albedo_bvr: [0.965; 3],
     grain_density_kg_m3: 916.72,
     transition_k: WATER_MELTING_K,
     mechanics: MechanicsFamily::WaterIce,
+    feo_mass_fraction: Some(0.0),
 };
 
 /// Liquid water at 25 °C, its record's temperature ([`liquid_water`]): the Fresnel reflectance at
@@ -404,13 +425,15 @@ const WATER_ICE: Substance = Substance {
 /// 0.64 µm, 0.021 092, 0.020 500 and 0.020 210, to four places (IAPWS R9-97 through R08's
 /// `water.json` since R08.T5.h, decision-r08-t5g.md §1; decision-r11-palette-liquids §2, item 7);
 /// its record's density, 997.047 kg m⁻³ at 25 °C (IAPWS-95, Wagner and Pruß 2002, J. Phys. Chem.
-/// Ref. Data 31, 387). The four places follow the record when the file moves its index.
+/// Ref. Data 31, 387). The four places follow the record when the file moves its index. It has no
+/// `FeO_T` (`None`): a liquid entry never carries one.
 const WATER: Substance = Substance {
     key: SubstanceKey::new_const("H2O"),
     normal_albedo_bvr: [0.021_1, 0.020_5, 0.020_2],
     grain_density_kg_m3: LIQUID_WATER_DENSITY_KG_M3,
     transition_k: WATER_MELTING_K,
     mechanics: MechanicsFamily::WaterIce,
+    feo_mass_fraction: None,
 };
 
 /// The density of the liquid water the Earth-like world's runoff is a depth of, kg m⁻³: fresh
@@ -421,13 +444,15 @@ const RUNOFF_WATER_DENSITY_KG_M3: f64 = 999.84;
 /// CO₂ ice: Design note 8's carbon dioxide frost, 0.4–0.8; its density at 150 K, a Mars-like
 /// frost's temperature, 1,621 kg m⁻³ (Mangan et al. 2017, Icarus 294, 201, whose fit over 80–195
 /// K is ρ = 1.723 91 − 2.53 × 10⁻⁴ T − 2.87 × 10⁻⁶ T² g cm⁻³); and its triple point, 216.592 K,
-/// where it can first melt (Span and Wagner 1996, J. Phys. Chem. Ref. Data 25, 1509).
+/// where it can first melt (Span and Wagner 1996, J. Phys. Chem. Ref. Data 25, 1509). Its `FeO_T`
+/// is 0: a pure ice (decision-p14-t51d-weathering §1.3).
 const CARBON_DIOXIDE_ICE: Substance = Substance {
     key: SubstanceKey::new_const("CO2"),
     normal_albedo_bvr: [0.6; 3],
     grain_density_kg_m3: 1_621.0,
     transition_k: 216.592,
     mechanics: MechanicsFamily::VolatileIce,
+    feo_mass_fraction: Some(0.0),
 };
 
 /// The palette of `entries`, which are in (role, key) order.

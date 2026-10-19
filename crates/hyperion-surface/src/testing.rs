@@ -194,6 +194,7 @@ pub struct FieldBuilder {
     main_liquid: Option<u8>,
     maturity: Option<f64>,
     organic_cover: Option<f64>,
+    weathering_rate: Option<f64>,
     ice_entry: Option<IceEntryFn>,
     plates: Vec<PlateSpec>,
     crust: DirFn<Crust>,
@@ -259,6 +260,7 @@ impl FieldBuilder {
             main_liquid: None,
             maturity: None,
             organic_cover: None,
+            weathering_rate: None,
             ice_entry: None,
             plates: Vec::new(),
             crust: Box::new(|_| Crust::Lid),
@@ -385,7 +387,8 @@ impl FieldBuilder {
     }
 
     /// The ground's space-weathering maturity, a reserved part of the header from +0 to 1
-    /// (absent by default; [`build`](Self::build) panics on one outside it).
+    /// (absent by default; [`build`](Self::build) panics on one outside it, or on one without a
+    /// [`weathering_rate`](Self::weathering_rate)).
     #[must_use]
     pub fn maturity(mut self, maturity: f64) -> Self {
         self.maturity = Some(maturity);
@@ -397,6 +400,15 @@ impl FieldBuilder {
     #[must_use]
     pub fn organic_cover(mut self, cover: f64) -> Self {
         self.organic_cover = Some(cover);
+        self
+    }
+
+    /// The weathering rate relative to the Moon's, a reserved part of the header, finite and at
+    /// least +0 (absent by default; [`build`](Self::build) panics on one outside it, or on one
+    /// without a [`maturity`](Self::maturity)).
+    #[must_use]
+    pub fn weathering_rate(mut self, rate: f64) -> Self {
+        self.weathering_rate = Some(rate);
         self
     }
 
@@ -503,7 +515,9 @@ impl FieldBuilder {
     ///   can hold;
     /// - an oceanic cell's sea floor whose hill relief is not finite and positive, or whose ponded
     ///   sediment is not finite and non-negative;
-    /// - a maturity or an organic cover that is not finite or not within +0 to 1;
+    /// - a maturity or an organic cover that is not finite or not within +0 to 1, a weathering rate
+    ///   that is not finite or below +0, or a maturity without a weathering rate or a weathering
+    ///   rate without a maturity;
     /// - a crust's palette entry or a main liquid the header refuses, a cell with ice and no ice
     ///   entry to name (none in the palette, or [`ice_entry`](Self::ice_entry)'s not an `Ice`
     ///   entry), or a cell under water and no main liquid;
@@ -593,6 +607,7 @@ impl FieldBuilder {
             main_liquid: self.main_liquid,
             maturity: self.maturity,
             organic_cover: self.organic_cover,
+            weathering_rate: self.weathering_rate,
         })
         .expect("the builder's header parts are valid");
         let climate: Vec<ClimateCell> = samples
@@ -1494,6 +1509,48 @@ mod tests {
             named(&ceres, Some(0)),
             Some(("phyllosilicate", PaletteRole::PrimaryCrust))
         );
+    }
+
+    /// The synthetic palettes carry each `FeO_T` their substances' documentation cites
+    /// (decision-p14-t51d-weathering §1.2 and §1.3): the highlands' 0.05, the iron-rich basalt's
+    /// 0.20 and the tholeiite's 0.110; 0 on every ice and on the salt; and none, not modelled, on
+    /// the granite, the phyllosilicate, the dust and the sea.
+    #[test]
+    fn the_synthetic_fields_palettes_carry_their_feo_mass_fractions() {
+        use PaletteRole::{Deposit, Ice, Liquid, PrimaryCrust, Province, SecondaryCrust};
+        let earth = synthetic_field(SyntheticWorld::EarthLike);
+        let mars = synthetic_field(SyntheticWorld::MarsLike);
+        let moon = synthetic_field(SyntheticWorld::MoonLike);
+        let ceres = synthetic_field(SyntheticWorld::CeresLike);
+        let expected: [(&CoarseField, &str, PaletteRole, Option<f64>); 14] = [
+            (&earth, "basalt", SecondaryCrust, Some(0.110)),
+            (&earth, "granite", PaletteRole::TertiaryCrust, None),
+            (&earth, "H2O", Ice, Some(0.0)),
+            (&earth, "H2O", Liquid, None),
+            (&mars, "basalt_fe", SecondaryCrust, Some(0.20)),
+            (&mars, "CO2", Ice, Some(0.0)),
+            (&mars, "H2O", Ice, Some(0.0)),
+            (&mars, "mars_dust", Deposit, None),
+            (&moon, "feldspathic", PrimaryCrust, Some(0.05)),
+            (&moon, "basalt_fe", Province, Some(0.20)),
+            (&moon, "H2O", Ice, Some(0.0)),
+            (&ceres, "phyllosilicate", PrimaryCrust, None),
+            (&ceres, "H2O", Ice, Some(0.0)),
+            (&ceres, "Na2CO3", Deposit, Some(0.0)),
+        ];
+        for (field, key, role, feo) in expected {
+            let held = entry(field, key, role).feo_mass_fraction;
+            match (held, feo) {
+                (Some(held), Some(feo)) => assert_same_bits(held, feo),
+                (held, feo) => assert_eq!(held, feo, "{key} as {role:?}"),
+            }
+        }
+        // Every entry of the four palettes is listed above.
+        let entries: usize = [&earth, &mars, &moon, &ceres]
+            .iter()
+            .map(|f| f.header().palette().len())
+            .sum();
+        assert_eq!(entries, expected.len());
     }
 
     /// The synthetic palettes take the crust ruling's rows (science-composition-crusts.md §2–§4

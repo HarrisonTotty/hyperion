@@ -52,6 +52,7 @@ pub(super) fn cold_trapped(share: f64) -> CoarseField {
         transition: Kelvin::new(transition_k),
         mechanics,
         liquid: None,
+        feo_mass_fraction: None,
     };
     let latitude = |dir: [f64; 3]| math::asin(dir[2].clamp(-1.0, 1.0));
     FieldBuilder::new(Metres::new(radius))

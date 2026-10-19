@@ -1244,6 +1244,9 @@ pub fn resolve_palette_entry(
         transition: condensed.transition().temperature(),
         mechanics: condensed.mechanics(),
         liquid: None,
+        // Not modelled until P14.T54.b fills it from the registry's composition
+        // (decision-p14-t51d-weathering §1.6).
+        feo_mass_fraction: None,
     })
 }
 

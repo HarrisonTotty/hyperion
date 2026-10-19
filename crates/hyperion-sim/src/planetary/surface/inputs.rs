@@ -811,6 +811,7 @@ impl CoarseInputs {
     ///     mechanics: MechanicsFamily::Silicate,
     ///     // Neither the rock nor an ice is a liquid, so neither carries a liquid record.
     ///     liquid: None,
+    ///     feo_mass_fraction: None,
     /// };
     /// let mut entries = vec![entry(basalt, PaletteRole::SecondaryCrust)];
     /// let ices = surface.figures().surface_ices().iter();
@@ -2312,6 +2313,7 @@ mod tests {
             transition: Kelvin::new(300.0),
             mechanics: MechanicsFamily::Silicate,
             liquid,
+            feo_mass_fraction: None,
         }
     }
 

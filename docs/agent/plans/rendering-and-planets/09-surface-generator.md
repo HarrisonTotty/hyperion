@@ -1585,6 +1585,18 @@ R09.T2.a–c are not used (main's ruling for R09.T2.e, 2026-10-15).
     `cargo test -p hyperion-sim planetary::surface`; `cargo test -p hyperion-protocol surface`;
     `cargo test -p hyperion-server surface`; `just gen-protocol-check`; `just smart-ci`.
 
+- **R09.T2.f Follow-up F, the palette's FeO_T and the weathering rate**
+  (decision-p14-t51d-weathering §1.6 and §2.3, 2026-10-16; lane r10-weathering). It is layout
+  of the gate's set, before the first send, so a re-bless at the version in force.
+  - `PaletteEntry.feo_mass_fraction: Option<f64>`, in [+0, 1], after `liquid`, with new
+    `BuildPaletteError::{FeoMassFraction, FeoOnLiquid}`.
+  - `FieldHeaderParts.weathering_rate: Option<f64>`, finite and ≥ +0, after `organic_cover`,
+    present exactly when `maturity` is (`BuildFieldHeaderError::WeatheringParts`).
+  - The codec's minimum entry becomes 61 bytes.
+  - The DTO mirrors: `PaletteEntryDto.feo_mass_fraction` and `SurfaceHeaderDto.weathering_rate`,
+    both `Modelled<f64>`.
+  - _Accept:_ as T2.e's, plus `just gen-protocol-check`.
+
 ### R09.T3 The payload codec
 
 `wire.rs`: little-endian blocks, each with a header (magic, `SURFACE_PAYLOAD_FORMAT`, generator
@@ -2720,7 +2732,10 @@ T2, as built"), the spectrum's break fields, the sea-floor byte's two scales
 liquid record (its eight members in order, each optional member's presence byte, and the
 record's own), `LIQUID_BINS`' fifteen bake bins, `LiquidBasis`'s codes 0–2, and the header's
 `maturity` and `organic_cover`, dimensionless in [0, 1] and absent until P14.T54.b
-(decision-r11-palette-liquids §1 and §2). R10.T10.a fills
+(decision-r11-palette-liquids §1 and §2); and T2's follow-up F's palette `feo_mass_fraction`, in
+[+0, 1], and the header's `weathering_rate`, finite and ≥ +0 and present exactly when `maturity`
+is (decision-p14-t51d-weathering §1.6 and §2.3). The gate does not open before R09.T2.f lands.
+R10.T10.a fills
 `FieldHeader.albedo_scale` and bumps `GENERATOR_VERSION`,
 re-blessing this plan's payload and coarse goldens in that commit. _As built (main's ruling for
 R10.T10.a, 2026-10-14): no bump. The first send above has not happened, since no generated body is
@@ -3720,6 +3735,39 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
   - _The liquid member is named by a string._ `BuildPaletteError::LiquidMember`'s `member` is a
     `&'static str`, as the header's `NotFinite { part }` is; a small enum was the Rust review's
     suggestion, not taken.
+- **Deviations in T2.f, as built** (2026-10-19; follow-up F, decision-p14-t51d-weathering §1.6 and
+  §2.3; lane r10-weathering, on 8c08d508). Layout of the gate's set, re-blessed at 22 with neither
+  `GENERATOR_VERSION` nor `SURFACE_PAYLOAD_FORMAT` bumped.
+  - _The palette._ `PaletteEntry.feo_mass_fraction` follows `liquid`; `MaterialPalette::new` checks
+    it last in each entry, its place before its value: `FeoOnLiquid` on a `Liquid` entry, then
+    `FeoMassFraction` for a value not finite or outside [+0, 1] (−0 refused). A crust entry whose
+    rock the body melts may carry both its liquid record and its solid's FeO_T.
+  - _The header._ `FieldHeaderParts.weathering_rate` follows `organic_cover`, with
+    `FieldHeader::weathering_rate` and `FieldBuilder::weathering_rate`. A rate not finite is
+    `NotFinite { part: "weathering rate" }` and one below +0, −0 among them, `Negative`, as the
+    reserved parts' refusals are named; the pairing is checked after each part's range, as
+    `BuildFieldHeaderError::WeatheringParts { missing }`, which names the absent part (a member
+    the ruling does not name, small and reversible).
+  - _The codec._ The entry's table ends with the presence byte and, when present, the `f64`;
+    `PALETTE_ENTRY_MIN_BYTES` is 61, an entry 61 bytes bare, 69 with FeO_T alone, and 202 to 466
+    with a liquid record (466 a melting crust's full record with FeO_T, tested). The header's
+    table gains the part after `organic_cover`, as `maturity` is encoded.
+  - _The worlds._ `testing`'s substances carry FeO_T, each cited in its doc comment: `feldspathic`
+    0.05 (the Apollo 16 soils' 4.7–5.4 wt% and the highlands' about 5 from orbit), `basalt_fe` 0.20
+    (the mid-point of its 18–22 wt%), `basalt` 0.110 (the Alae tholeiite's 11.0 wt% total FeO,
+    Peck 1978); `H2O` and `CO2` ices and `Na2CO3` 0, iron-free; `granite`, `phyllosilicate`,
+    `mars_dust` and liquid water `None`. No world sets `maturity`, so none sets the rate. Every
+    sim, server and test entry outside `testing` carries `None` until P14.T54.b fills the registry's
+    FeO_T.
+  - _The protocol._ `PaletteEntryDto.feo_mass_fraction` and `SurfaceHeaderDto.weathering_rate`,
+    both `Modelled<f64>` and absent from the JSON for `None`; `convert/surface.rs` fills them, and
+    the client's coarse-field store range-checks both in the Rust order, the rate's pairing with
+    the maturity included.
+  - _Goldens_, at 22: `wire/payloads.golden` 20 lines moved (the ten payloads' lengths and
+    digests); `worker/moon_like.golden` 8 lines moved, not only its two block-0 lines: the Moon's
+    header grows 28 bytes, more than one 25-byte cell record, so each payload's first block ends
+    one cell earlier: its two block-0 lines, the two block-1 lines and four `held` lines move.
+    `wire/codes.golden` and every other golden are unchanged.
 - **Deviations in T3, as built** (2026-10-09; the layout is generated output from T9's and T16's
   goldens on, revisable until then).
   - _Files._ `wire.rs` (the API, the block layout in its module documentation, the encoder and the

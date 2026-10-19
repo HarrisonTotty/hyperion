@@ -203,6 +203,7 @@ pub fn quantise(
         // Reserved for P14.T51.d's figures, which P14.T54.b fills.
         maturity: None,
         organic_cover: None,
+        weathering_rate: None,
     })
     .map_err(QuantiseFieldError::Header)?;
     let level = header.level();

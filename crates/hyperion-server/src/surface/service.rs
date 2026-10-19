@@ -1673,6 +1673,7 @@ mod tests {
             transition: Kelvin::new(1_250.0),
             mechanics: MechanicsFamily::Silicate,
             liquid: None,
+            feo_mass_fraction: None,
         };
         builder
             .palette(MaterialPalette::new(vec![crust]).unwrap())

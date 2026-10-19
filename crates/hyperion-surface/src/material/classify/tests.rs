@@ -50,6 +50,7 @@ fn entry(
         transition: Kelvin::new(transition_k),
         mechanics,
         liquid: None,
+        feo_mass_fraction: None,
     }
 }
 

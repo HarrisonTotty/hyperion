@@ -104,17 +104,21 @@ function paletteEntry(
   return { substance, role, normal_albedo_bvr: [0.1, 0.12, 0.14], phase_row: 1, liquid };
 }
 
-/** {@link HEADER} with a lava-crust, an ice and a sea, the sea its main liquid. */
+/**
+ * {@link HEADER} with a lava-crust carrying its rock's FeO mass fraction beside its melt's record,
+ * an ice at 0 and a sea, the sea its main liquid, and the three reserved parts.
+ */
 const SEA_HEADER: SurfaceHeaderDto = {
   ...HEADER,
   palette: [
-    paletteEntry("basalt", "primary_crust", MELT),
-    paletteEntry("H2O", "ice", null),
+    { ...paletteEntry("basalt", "primary_crust", MELT), feo_mass_fraction: 0.11 },
+    { ...paletteEntry("H2O", "ice", null), feo_mass_fraction: 0 },
     { ...paletteEntry("H2O", "liquid", WATER), normal_albedo_bvr: [0.0208, 0.0204, 0.0202] },
   ],
   main_liquid: 2,
   maturity: 0.75,
   organic_cover: 0,
+  weathering_rate: 2.5,
 };
 
 /** {@link SEA_HEADER} with its sea's record `liquid`. */
@@ -444,6 +448,65 @@ describe("the field header's checks", () => {
     expect(headerFailure({ ...SEA_HEADER, maturity: 1.5 })).toMatch(/maturity, 1.5, is not/u);
     expect(headerFailure({ ...SEA_HEADER, organic_cover: -0 })).toMatch(/organic cover, 0, is/u);
     expect(headerFailure({ ...SEA_HEADER, organic_cover: Number.NaN })).toMatch(/organic cover/u);
+  });
+
+  it("takes a weathering rate from 0 up, a close-in world's 10³ among them, beside its maturity", () => {
+    for (const rate of [0, 1, 1e3]) {
+      expect(headerFailure({ ...SEA_HEADER, weathering_rate: rate })).toBeNull();
+    }
+    expect(headerFailure({ ...SEA_HEADER, maturity: null, weathering_rate: null })).toBeNull();
+    expect(headerFailure(HEADER)).toBeNull();
+  });
+
+  it("refuses a weathering rate that is not finite and at least 0", () => {
+    for (const rate of [-0, -1e-300, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(headerFailure({ ...SEA_HEADER, weathering_rate: rate })).toMatch(
+        /weathering rate, .*, is not finite and at least 0/u,
+      );
+    }
+  });
+
+  it("refuses a weathering rate without its maturity, and a maturity without its rate", () => {
+    expect(headerFailure({ ...SEA_HEADER, maturity: null })).toMatch(
+      /weathering rate is present without its maturity/u,
+    );
+    expect(headerFailure({ ...SEA_HEADER, weathering_rate: null })).toMatch(
+      /maturity is present without its weathering rate/u,
+    );
+    // Each part's own range comes first.
+    expect(headerFailure({ ...SEA_HEADER, maturity: null, weathering_rate: -1 })).toMatch(
+      /weathering rate, -1, is not/u,
+    );
+  });
+
+  it("takes an FeO mass fraction from 0 to 1 on a solid, and none where not modelled", () => {
+    const [crust, ice, sea] = SEA_HEADER.palette;
+    if (crust === undefined || ice === undefined || sea === undefined) {
+      throw new Error("the sea header holds three entries");
+    }
+    for (const feo of [0, 0.2, 1]) {
+      expect(
+        headerFailure({ ...SEA_HEADER, palette: [{ ...crust, feo_mass_fraction: feo }, ice, sea] }),
+      ).toBeNull();
+    }
+    expect(
+      headerFailure({ ...SEA_HEADER, palette: [{ ...crust, feo_mass_fraction: null }, ice, sea] }),
+    ).toBeNull();
+  });
+
+  it("refuses an FeO mass fraction outside 0 to 1, and one on a liquid", () => {
+    const [crust, ice, sea] = SEA_HEADER.palette;
+    if (crust === undefined || ice === undefined || sea === undefined) {
+      throw new Error("the sea header holds three entries");
+    }
+    for (const feo of [-0, -1e-300, 1.0000000000000002, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(
+        headerFailure({ ...SEA_HEADER, palette: [crust, { ...ice, feo_mass_fraction: feo }, sea] }),
+      ).toMatch(/entry 1, H2O as ice, has an FeO mass fraction, .*, that is not from 0 to 1/u);
+    }
+    expect(
+      headerFailure({ ...SEA_HEADER, palette: [crust, ice, { ...sea, feo_mass_fraction: 0 }] }),
+    ).toMatch(/entry 2, H2O as liquid, has an FeO mass fraction, which no liquid carries/u);
   });
 
   it("refuses a liquid entry without a liquid record", () => {

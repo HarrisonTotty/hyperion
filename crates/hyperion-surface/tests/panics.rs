@@ -274,6 +274,7 @@ fn level_five_field_of(body: BodyRef, flow: FlowDirection) -> CoarseField {
         main_liquid: None,
         maturity: None,
         organic_cover: None,
+        weathering_rate: None,
     })
     .unwrap();
     let cell = SynthesisCell {

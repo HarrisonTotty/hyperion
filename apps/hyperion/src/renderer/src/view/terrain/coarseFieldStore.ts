@@ -331,14 +331,13 @@ function liquidFailure(record: LiquidDto): string | null {
   return null;
 }
 
-/** Why a palette entry cannot be taken, or `null`. */
-function entryFailure(entry: PaletteEntryDto): string | null {
-  if (!holds(entry.normal_albedo_bvr, 3, atLeastZero)) {
-    return "has a normal albedo that is not three finite values of at least 0";
-  }
-  if (!Number.isInteger(entry.phase_row) || entry.phase_row < 0 || entry.phase_row > 255) {
-    return `has a phase row, ${entry.phase_row}, that is not a byte`;
-  }
+/** Whether a member that may be absent is present. */
+function present(value: number | null | undefined): value is number {
+  return value !== undefined && value !== null;
+}
+
+/** Why a palette entry's liquid record, or its absence, does not suit its role, or `null`. */
+function recordFailure(entry: PaletteEntryDto): string | null {
   const rule = LIQUID_RULES[entry.role];
   if (entry.liquid === null) {
     return rule === "required" ? "has no liquid record" : null;
@@ -351,16 +350,48 @@ function entryFailure(entry: PaletteEntryDto): string | null {
 }
 
 /**
+ * Why a palette entry's FeO mass fraction cannot be taken, or `null`: one on a liquid, which only
+ * a solid carries, or one that is not finite from +0 to 1 (decision-p14-t51d-weathering §1.6).
+ */
+function feoFailure(entry: PaletteEntryDto): string | null {
+  const feo = entry.feo_mass_fraction;
+  if (!present(feo)) {
+    return null;
+  }
+  if (entry.role === "liquid") {
+    return "has an FeO mass fraction, which no liquid carries";
+  }
+  return isFraction(feo) ? null : `has an FeO mass fraction, ${feo}, that is not from 0 to 1`;
+}
+
+/**
+ * Why a palette entry cannot be taken, or `null`: its albedo, its phase row, its liquid record and
+ * then its FeO mass fraction, in R09's codec's order.
+ */
+function entryFailure(entry: PaletteEntryDto): string | null {
+  if (!holds(entry.normal_albedo_bvr, 3, atLeastZero)) {
+    return "has a normal albedo that is not three finite values of at least 0";
+  }
+  if (!Number.isInteger(entry.phase_row) || entry.phase_row < 0 || entry.phase_row > 255) {
+    return `has a phase row, ${entry.phase_row}, that is not a byte`;
+  }
+  return recordFailure(entry) ?? feoFailure(entry);
+}
+
+/**
  * Why a field's header cannot be taken, by the first of its members out of range, or `null`.
  *
  * @remarks
  * It holds what R09's codec holds of the same members (decision-r11-palette-liquids §1.6 and §2):
  * each palette entry's normal albedo finite and at least 0 and its phase row a byte; a liquid
  * record on every liquid entry and on no ice, cover or deposit, each of its members in range and
- * each by-bin member {@link LIQUID_BINS} long, a member not modelled absent; the main liquid,
- * where there is one, a liquid entry of the palette; and the two fractions plan 14 fills, the
- * maturity and the organic cover, from 0 to 1 where present. The server sends only headers its own
- * checks pass, so a header refused here is a damaged answer or a server of another build.
+ * each by-bin member {@link LIQUID_BINS} long, a member not modelled absent; each entry's FeO mass
+ * fraction, where present, on no liquid and from 0 to 1; the main liquid, where there is one, a
+ * liquid entry of the palette; the two fractions plan 14 fills, the maturity and the organic
+ * cover, from 0 to 1 where present; and the weathering rate, finite and at least 0 where present,
+ * and present exactly when the maturity is, each part's range checked before the pairing
+ * (decision-p14-t51d-weathering §1.6 and §2.3). The server sends only headers its own checks pass,
+ * so a header refused here is a damaged answer or a server of another build.
  */
 export function headerFailure(header: SurfaceHeaderDto): string | null {
   for (const [index, entry] of header.palette.entries()) {
@@ -378,9 +409,18 @@ export function headerFailure(header: SurfaceHeaderDto): string | null {
     ["organic cover", header.organic_cover],
   ] as const;
   for (const [name, value] of fractions) {
-    if (value !== undefined && value !== null && !isFraction(value)) {
+    if (present(value) && !isFraction(value)) {
       return `the field's ${name}, ${value}, is not from 0 to 1`;
     }
+  }
+  const rate = header.weathering_rate;
+  if (present(rate) && !atLeastZero(rate)) {
+    return `the field's weathering rate, ${rate}, is not finite and at least 0`;
+  }
+  if (present(rate) !== present(header.maturity)) {
+    return present(rate)
+      ? "the field's weathering rate is present without its maturity"
+      : "the field's maturity is present without its weathering rate";
   }
   return null;
 }

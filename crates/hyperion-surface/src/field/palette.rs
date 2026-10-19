@@ -14,6 +14,10 @@
 //! ([`LiquidProperties`]): what the liquid is to light and to waves at the body's temperature, by
 //! R08's fifteen bake bins ([`LIQUID_BINS`]) for the optical members (R11.T8;
 //! decision-r11-palette-liquids §1).
+//!
+//! A solid entry may carry its substance's total non-metallic iron as `FeO`
+//! ([`PaletteEntry::feo_mass_fraction`]), which scales the darkening of R10.T1.d's
+//! space-weathering law (decision-p14-t51d-weathering §1.2).
 
 use hyperion_base::units::Kelvin;
 
@@ -320,6 +324,23 @@ pub struct PaletteEntry {
     ///   [`Deposit`](PaletteRole::Deposit) entry, which [`MaterialPalette::new`] refuses: an ice's
     ///   liquid is its own `Liquid` entry where the body has it.
     pub liquid: Option<LiquidProperties>,
+    /// `FeO_T`: the substance's total non-metallic iron (silicate, oxide and sulphide) expressed as
+    /// `FeO`, as a mass fraction of the substance, dimensionless in [+0, 1] (a −0 is refused, so
+    /// that an iron-free substance has one wire form). Metallic iron is excluded: it is already
+    /// metal, and its weathering is not the law's.
+    ///
+    /// The npFe⁰ yield of R10.T1.d's space-weathering law scales with it, as Morris's `I_s`/`FeO`
+    /// normalises the ferromagnetic resonance by it (decision-p14-t51d-weathering §1.2), so that
+    /// the yield stays the law's constant and a refit of the law never moves a palette value.
+    ///
+    /// - `None` means not modelled: the registry has no composition for the substance, or its
+    ///   [`normal_albedo_bvr`](Self::normal_albedo_bvr) is an observed, space-weathered body's
+    ///   value. The law is then the identity, so that nothing darkens twice (§1.5).
+    /// - An ice and an iron-free solid (a salt, an organic) carry `Some(0.0)`, where the law is the
+    ///   identity too (§1.3).
+    /// - Never on a [`PaletteRole::Liquid`] entry, which [`MaterialPalette::new`] refuses. A crust
+    ///   entry whose rock the body melts may carry both a liquid record and its solid's `FeO_T`.
+    pub feo_mass_fraction: Option<f64>,
 }
 
 impl PaletteEntry {
@@ -393,6 +414,17 @@ pub enum BuildPaletteError {
         /// The member's name.
         member: &'static str,
     },
+    /// An entry's `FeO_T` is not finite and within +0 to 1 (a −0 is refused).
+    FeoMassFraction {
+        /// The entry's index.
+        entry: u8,
+    },
+    /// A [`PaletteRole::Liquid`] entry carries an `FeO_T`, which only a solid has
+    /// (decision-p14-t51d-weathering §1.6).
+    FeoOnLiquid {
+        /// The entry's index.
+        entry: u8,
+    },
 }
 
 impl std::fmt::Display for BuildPaletteError {
@@ -435,6 +467,15 @@ impl std::fmt::Display for BuildPaletteError {
             Self::LiquidMember { entry, member } => write!(
                 f,
                 "palette entry {entry}'s liquid {member} is out of its range"
+            ),
+            Self::FeoMassFraction { entry } => write!(
+                f,
+                "palette entry {entry}'s FeO mass fraction is not finite and within 0 to 1"
+            ),
+            Self::FeoOnLiquid { entry } => write!(
+                f,
+                "palette entry {entry} is a liquid with an FeO mass fraction, which only a solid \
+                 carries"
             ),
         }
     }
@@ -486,6 +527,17 @@ fn check_liquid(entry: u8, e: &PaletteEntry) -> Result<(), BuildPaletteError> {
     Ok(())
 }
 
+/// Checks entry `entry`'s `FeO_T` (decision-p14-t51d-weathering §1.6): its place first, absent on a
+/// liquid, then its value, finite and within +0 to 1.
+fn check_feo(entry: u8, e: &PaletteEntry) -> Result<(), BuildPaletteError> {
+    match e.feo_mass_fraction {
+        None => Ok(()),
+        Some(_) if e.role == PaletteRole::Liquid => Err(BuildPaletteError::FeoOnLiquid { entry }),
+        Some(f) if f.is_finite() && (0.0..=1.0).contains(&f) && f.is_sign_positive() => Ok(()),
+        Some(_) => Err(BuildPaletteError::FeoMassFraction { entry }),
+    }
+}
+
 impl MaterialPalette {
     /// The most entries a palette holds: 15, the most a nibble addresses beside [`NO_ENTRY`].
     pub const MAX_ENTRIES: usize = 15;
@@ -500,8 +552,15 @@ impl MaterialPalette {
     /// range, [`BuildPaletteError::LiquidMissing`] for a liquid without its record,
     /// [`BuildPaletteError::LiquidMisplaced`] for a record on an ice, a cover or a deposit,
     /// [`BuildPaletteError::LiquidDensity`] for a liquid whose grain density is not its record's,
-    /// and [`BuildPaletteError::LiquidMember`] for a record's member out of its range, the first
-    /// entry that breaks a rule named.
+    /// [`BuildPaletteError::LiquidMember`] for a record's member out of its range,
+    /// [`BuildPaletteError::FeoOnLiquid`] for an `FeO_T` on a liquid, and
+    /// [`BuildPaletteError::FeoMassFraction`] for an `FeO_T` that is not finite and within +0 to 1.
+    ///
+    /// The first entry that breaks a rule is named, and within an entry the first rule it breaks in
+    /// this order: its place in the order, its albedo, its density, its transition, its liquid
+    /// record (the record's place, then its members, then a liquid's density against its
+    /// record's), and last its `FeO_T` (its place, then its value), as the liquid record's place is
+    /// checked before its members.
     pub fn new(entries: Vec<PaletteEntry>) -> Result<Self, BuildPaletteError> {
         if entries.len() > Self::MAX_ENTRIES {
             return Err(BuildPaletteError::TooManyEntries(entries.len()));
@@ -524,6 +583,7 @@ impl MaterialPalette {
                 return Err(BuildPaletteError::Transition { entry });
             }
             check_liquid(entry, e)?;
+            check_feo(entry, e)?;
         }
         Ok(Self { entries })
     }
@@ -601,6 +661,7 @@ mod tests {
             transition: Kelvin::new(1_300.0),
             mechanics: MechanicsFamily::Silicate,
             liquid,
+            feo_mass_fraction: None,
         }
     }
 
@@ -790,6 +851,92 @@ mod tests {
         record.absorption_per_m = Some([0.0; LIQUID_BINS]);
         record.surface_tension_n_per_m = None;
         assert!(MaterialPalette::new(vec![clear]).is_ok());
+    }
+
+    /// An entry's `FeO_T` is absent, which every role may be, or finite within +0 to 1: a NaN, ±∞,
+    /// −0, the next `f64` above 1 and a negative value however small are refused, and +0 and 1
+    /// kept, each to the bit (decision-p14-t51d-weathering §1.6).
+    #[test]
+    fn a_field_palette_holds_each_feo_mass_fraction_within_zero_to_one() {
+        let with = |feo: f64| {
+            let mut e = entry("basalt", PaletteRole::SecondaryCrust);
+            e.feo_mass_fraction = Some(feo);
+            MaterialPalette::new(vec![e])
+        };
+        for feo in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            -0.0,
+            1.000_000_000_000_000_2,
+            -1e-300,
+        ] {
+            assert_eq!(
+                with(feo),
+                Err(BuildPaletteError::FeoMassFraction { entry: 0 }),
+                "{feo:e}"
+            );
+        }
+        assert_same_bits(1.000_000_000_000_000_2, 1.0_f64.next_up());
+        for feo in [0.0, 0.05, 1.0] {
+            let palette = with(feo).unwrap();
+            assert_same_bits(palette.entries()[0].feo_mass_fraction.unwrap(), feo);
+        }
+        for role in PaletteRole::ALL.iter().copied() {
+            assert_eq!(entry("basalt", role).feo_mass_fraction, None);
+            assert!(
+                MaterialPalette::new(vec![entry("basalt", role)]).is_ok(),
+                "{role:?}"
+            );
+        }
+        // The first entry that breaks the rule is named.
+        let mut ice = entry("H2O", PaletteRole::Ice);
+        ice.feo_mass_fraction = Some(0.0);
+        let mut salt = entry("NaCl", PaletteRole::Ice);
+        salt.feo_mass_fraction = Some(-0.0);
+        assert_eq!(
+            MaterialPalette::new(vec![ice, salt]),
+            Err(BuildPaletteError::FeoMassFraction { entry: 1 })
+        );
+    }
+
+    /// An `FeO_T` is a solid's: refused on a liquid entry, its place before its value, and kept on
+    /// a crust entry beside its melt's record, the solid's iron, and on an ice at 0; a crust
+    /// entry's record is checked before its `FeO_T` (decision-p14-t51d-weathering §1.6).
+    #[test]
+    fn a_field_palette_holds_an_feo_mass_fraction_on_solids_alone() {
+        let mut sea = entry("H2O", PaletteRole::Liquid);
+        for feo in [0.0, f64::NAN] {
+            sea.feo_mass_fraction = Some(feo);
+            assert_eq!(
+                MaterialPalette::new(vec![sea.clone()]),
+                Err(BuildPaletteError::FeoOnLiquid { entry: 0 }),
+                "{feo:e}"
+            );
+        }
+        sea.feo_mass_fraction = None;
+        let mut lava = entry("basalt", PaletteRole::SecondaryCrust);
+        lava.liquid = Some(crate::testing::basaltic_melt());
+        lava.feo_mass_fraction = Some(0.110);
+        let mut ice = entry("H2O", PaletteRole::Ice);
+        ice.feo_mass_fraction = Some(0.0);
+        let palette = MaterialPalette::new(vec![lava.clone(), ice, sea]).unwrap();
+        let held: Vec<Option<f64>> = palette
+            .entries()
+            .iter()
+            .map(|e| e.feo_mass_fraction)
+            .collect();
+        assert_eq!(held, [Some(0.110), Some(0.0), None]);
+        assert!(palette.entries()[0].liquid.is_some());
+        lava.liquid.as_mut().unwrap().temperature = Kelvin::new(0.0);
+        lava.feo_mass_fraction = Some(2.0);
+        assert_eq!(
+            MaterialPalette::new(vec![lava]),
+            Err(BuildPaletteError::LiquidMember {
+                entry: 0,
+                member: "temperature"
+            })
+        );
     }
 
     /// A liquid's normal albedo is its Fresnel reflectance at normal incidence from its record's n,

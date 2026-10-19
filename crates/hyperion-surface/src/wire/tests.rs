@@ -142,10 +142,11 @@ fn first_difference(a: &[u8], b: &[u8]) -> Option<usize> {
 
 /// A Ceres-sized flat field whose palette holds every present form of the liquid record
 /// (decision-r11-palette-liquids §1.5): a basalt lid melting to [`basaltic_melt`]'s record, its
-/// optional members absent but the absorption; a water ice with none; and a sea of
-/// [`liquid_water`] with a scattering of 0.0025 m⁻¹ in every bin, a test value, so that every
-/// member is present; the sea its main liquid, and the header's two fractions present, 0.25 and
-/// 0.75.
+/// optional members absent but the absorption; a water ice with none; and a sea of [`liquid_water`]
+/// with a scattering of 0.0025 m⁻¹ in every bin, a test value, so that every member is present; the
+/// sea its main liquid; the basalt's `FeO_T`, 0.110, beside its melt's record and the ice's 0, the
+/// sea's absent; and the header's three reserved parts present, 0.25, 0.75 and a weathering rate of
+/// 2.5.
 fn liquid_field() -> CoarseField {
     let entry = |key, role, density, transition_k, mechanics, liquid| PaletteEntry {
         substance: SubstanceKey::new(key).unwrap(),
@@ -156,28 +157,35 @@ fn liquid_field() -> CoarseField {
         transition: Kelvin::new(transition_k),
         mechanics,
         liquid,
+        feo_mass_fraction: None,
     };
     let sea = LiquidProperties {
         scattering_per_m: Some([0.002_5; LIQUID_BINS]),
         ..liquid_water()
     };
     let palette = MaterialPalette::new(vec![
-        entry(
-            "basalt",
-            PaletteRole::PrimaryCrust,
-            3_010.0,
-            1_253.15,
-            MechanicsFamily::Silicate,
-            Some(basaltic_melt()),
-        ),
-        entry(
-            "H2O",
-            PaletteRole::Ice,
-            916.72,
-            273.15,
-            MechanicsFamily::WaterIce,
-            None,
-        ),
+        PaletteEntry {
+            feo_mass_fraction: Some(0.110),
+            ..entry(
+                "basalt",
+                PaletteRole::PrimaryCrust,
+                3_010.0,
+                1_253.15,
+                MechanicsFamily::Silicate,
+                Some(basaltic_melt()),
+            )
+        },
+        PaletteEntry {
+            feo_mass_fraction: Some(0.0),
+            ..entry(
+                "H2O",
+                PaletteRole::Ice,
+                916.72,
+                273.15,
+                MechanicsFamily::WaterIce,
+                None,
+            )
+        },
         PaletteEntry {
             normal_albedo_bvr: sea.fresnel_normal_albedo_bvr(),
             phase_row: UNASSIGNED_PHASE_ROW,
@@ -198,12 +206,13 @@ fn liquid_field() -> CoarseField {
         .main_liquid(2)
         .maturity(0.25)
         .organic_cover(0.75)
+        .weathering_rate(2.5)
         .build()
 }
 
-/// A payload carries each liquid record and the header's two fractions to the bit: the field
-/// rebuilt from its blocks is the field, the records, the main liquid and the fractions among it,
-/// and encodes to the same bytes again.
+/// A payload carries each liquid record, each `FeO_T` and the header's three reserved parts to the
+/// bit: the field rebuilt from its blocks is the field, the records, the `FeO_T`, the main liquid,
+/// the fractions and the weathering rate among it, and encodes to the same bytes again.
 #[test]
 fn a_wire_payload_carries_its_liquid_records_and_fractions() {
     let field = liquid_field();
@@ -215,6 +224,7 @@ fn a_wire_payload_carries_its_liquid_records_and_fractions() {
     assert_eq!(held.main_liquid(), Some(2));
     assert_same_bits(held.maturity().unwrap(), 0.25);
     assert_same_bits(held.organic_cover().unwrap(), 0.75);
+    assert_same_bits(held.weathering_rate().unwrap(), 2.5);
     for (got, put) in held
         .palette()
         .entries()
@@ -222,7 +232,20 @@ fn a_wire_payload_carries_its_liquid_records_and_fractions() {
         .zip(sent.palette().entries())
     {
         assert_eq!(got.liquid, put.liquid, "{}", put.substance.as_str());
+        assert_eq!(
+            got.feo_mass_fraction,
+            put.feo_mass_fraction,
+            "{}",
+            put.substance.as_str()
+        );
     }
+    let feo: Vec<Option<f64>> = held
+        .palette()
+        .entries()
+        .iter()
+        .map(|e| e.feo_mass_fraction)
+        .collect();
+    assert_eq!(feo, [Some(0.110), Some(0.0), None]);
     assert_eq!(
         first_difference(&encode_payload(&rebuilt, &cover, None), &bytes),
         None
@@ -750,9 +773,10 @@ fn crater_spans(block: &[u8]) -> Vec<(usize, usize)> {
 }
 
 /// Block 0's header section's last parts out of their ranges are each refused with their own
-/// error: the palette's order and keys, a crust's entry, and a reserved fraction outside 0 to 1
-/// (decision-r11-palette-liquids §2, item 4); and the Ceres-like palette's entries carry no
-/// liquid record.
+/// error: the palette's order and keys, a crust's entry, a reserved fraction outside 0 to 1
+/// (decision-r11-palette-liquids §2, item 4), and a weathering rate below 0 or without its
+/// maturity (decision-p14-t51d-weathering §2.3); and the Ceres-like palette's entries carry no
+/// liquid record, and their `FeO_T` where their substances have one.
 #[test]
 fn malformed_wire_palettes_and_header_fractions_are_refused_with_their_errors() {
     let (_, bytes, _) = ceres_blocks();
@@ -763,15 +787,17 @@ fn malformed_wire_palettes_and_header_fractions_are_refused_with_their_errors() 
         decode_payload(&b).unwrap_err()
     };
     let declared = u16::from_le_bytes([bytes[33], bytes[34]]);
-    // The header section's last parts: the Ceres-like palette (a count and three entries of 60
-    // bytes, none with a liquid record), each crust's entry (four options, the lid's and the
-    // provinces' present: six bytes), the main liquid's (absent: one byte) and the two reserved
-    // fractions (absent: a byte each).
+    // The header section's last parts: the Ceres-like palette (a count and three entries, none
+    // with a liquid record: the phyllosilicate's 61 bytes with no `FeO_T`, and the ice's and the
+    // salt's 69 with theirs), each crust's entry (four options, the lid's and the provinces'
+    // present: six bytes), the main liquid's (absent: one byte) and the three reserved parts
+    // (absent: a byte each).
     let end = 35 + usize::from(declared);
-    let palette = end - 9 - (1 + 3 * 60);
+    let starts = [0, 61, 61 + 69];
+    let palette = end - 10 - (1 + 61 + 69 + 69);
     assert_eq!(bytes[palette], 3);
     let unsorted = DecodeBlockError::Palette(BuildPaletteError::Unsorted { entry: 1 });
-    let second_role = palette + 1 + 60 + 16;
+    let second_role = palette + 1 + starts[1] + 16;
     assert_eq!(
         bytes[second_role],
         u8::from(PaletteRole::Ice),
@@ -788,27 +814,56 @@ fn malformed_wire_palettes_and_header_fractions_are_refused_with_their_errors() 
         entry: 1,
     });
     assert_eq!(
-        bytes[end - 7..end],
-        [PRESENT, 0, PRESENT, 0, ABSENT, ABSENT, ABSENT]
+        bytes[end - 8..end],
+        [PRESENT, 0, PRESENT, 0, ABSENT, ABSENT, ABSENT, ABSENT]
     );
-    assert_eq!(damaged(end - 6, &[1]), block(0, crust));
-    // Each entry's liquid record is absent, after its 59 fixed bytes.
-    for k in 0..3 {
-        assert_eq!(bytes[palette + 1 + 60 * k + 59], ABSENT, "entry {k}");
+    assert_eq!(damaged(end - 7, &[1]), block(0, crust));
+    // Each entry's liquid record is absent, after its 59 fixed bytes, and its `FeO_T` follows: none
+    // for the phyllosilicate, and the ice's and the salt's 0.
+    for (k, (start, feo)) in starts
+        .into_iter()
+        .zip([ABSENT, PRESENT, PRESENT])
+        .enumerate()
+    {
+        let entry = palette + 1 + start;
+        assert_eq!(bytes[entry + 59], ABSENT, "entry {k}'s record");
+        assert_eq!(bytes[entry + 60], feo, "entry {k}'s FeO_T");
     }
+    assert_eq!(bytes[palette + 1 + starts[1] + 61..][..8], f64_bytes(0.0));
+    // The bytes with the reserved part at `from_end` from the header's end present at `value`, the
+    // header's and the block's lengths grown by its eight bytes.
+    let with_part = |from_end: usize, value: f64| {
+        let mut b = bytes.clone();
+        let at = end - from_end;
+        b.splice(at..=at, [PRESENT].into_iter().chain(f64_bytes(value)));
+        let length = u16::try_from(usize::from(declared) + 8).unwrap();
+        patch(&mut b, 33, &length.to_le_bytes());
+        let block_length = u32_at(&b, 6) + 8;
+        patch(&mut b, 6, &block_length.to_le_bytes());
+        decode_payload(&b).unwrap_err()
+    };
+    let header = |error| block(0, DecodeBlockError::Header(error));
     // A reserved fraction outside 0 to 1, here the maturity at 2.
-    let mut fraction = bytes.clone();
-    fraction.splice(
-        end - 2..end - 1,
-        [PRESENT].into_iter().chain(f64_bytes(2.0)),
+    assert_eq!(
+        with_part(3, 2.0),
+        header(BuildFieldHeaderError::NotAFraction { part: "maturity" })
     );
-    let length = u16::try_from(usize::from(declared) + 8).unwrap();
-    patch(&mut fraction, 33, &length.to_le_bytes());
-    let block_length = u32_at(&fraction, 6) + 8;
-    patch(&mut fraction, 6, &block_length.to_le_bytes());
-    let outside =
-        DecodeBlockError::Header(BuildFieldHeaderError::NotAFraction { part: "maturity" });
-    assert_eq!(decode_payload(&fraction).unwrap_err(), block(0, outside));
+    // A weathering rate below 0, and one without its maturity; and a maturity without its rate.
+    let part = "weathering rate";
+    assert_eq!(
+        with_part(1, -1.0),
+        header(BuildFieldHeaderError::Negative { part })
+    );
+    assert_eq!(
+        with_part(1, 1.0),
+        header(BuildFieldHeaderError::WeatheringParts {
+            missing: "maturity"
+        })
+    );
+    assert_eq!(
+        with_part(3, 0.5),
+        header(BuildFieldHeaderError::WeatheringParts { missing: part })
+    );
 }
 
 /// Block 0's header parts out of their ranges, an unknown screening tag, a header length its

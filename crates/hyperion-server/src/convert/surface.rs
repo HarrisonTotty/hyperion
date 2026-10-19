@@ -223,8 +223,10 @@ const _: () = assert!(SURFACE_LIQUID_BINS == LIQUID_BINS);
 
 /// A field's header as the main thread reads it: the scalars of `header`, its classes, its
 /// palette's substances and roles with each entry's normal albedo, phase row and liquid record
-/// (ruled by "main", 2026-10-13, R09.T19.a's record; decision-r11-palette-liquids §1.5 and §2),
-/// its main liquid, and the two fractions plan 14 fills later, absent until it does.
+/// (ruled by "main", 2026-10-13, R09.T19.a's record; decision-r11-palette-liquids §1.5 and §2)
+/// and `FeO_T` (decision-p14-t51d-weathering §1.6), its main liquid, and the three reserved parts
+/// plan 14 fills later, the maturity, the organic cover and the weathering rate (§2.3), each absent
+/// until it does.
 ///
 /// The body is the header's own, which on the reference worlds is theirs, not the body asked for
 /// (R09.T17's deferred finding).
@@ -260,12 +262,13 @@ pub(crate) fn surface_header(header: &FieldHeader) -> SurfaceHeaderDto {
         main_liquid: header.main_liquid(),
         maturity: modelled(header.maturity()),
         organic_cover: modelled(header.organic_cover()),
+        weathering_rate: modelled(header.weathering_rate()),
     }
 }
 
 /// A palette entry as the main thread reads it: its key, its role, its normal albedo before the
-/// albedo scale, its phase row, and its liquid record, `None` where the entry is not liquid on the
-/// body.
+/// albedo scale, its phase row, its liquid record, `None` where the entry is not liquid on the
+/// body, and its `FeO_T`, absent where not modelled.
 #[must_use]
 fn palette_entry(entry: &PaletteEntry) -> PaletteEntryDto {
     PaletteEntryDto {
@@ -274,6 +277,7 @@ fn palette_entry(entry: &PaletteEntry) -> PaletteEntryDto {
         normal_albedo_bvr: entry.normal_albedo_bvr,
         phase_row: entry.phase_row,
         liquid: entry.liquid.as_ref().map(liquid),
+        feo_mass_fraction: modelled(entry.feo_mass_fraction),
     }
 }
 
@@ -819,18 +823,23 @@ mod tests {
             );
             assert_eq!(entry.phase_row, held.phase_row);
             assert_eq!(entry.liquid, None, "{}", entry.substance);
+            // The sim's reference rows model no `FeO_T` until P14.T54.b fills it from the registry.
+            assert_eq!(held.feo_mass_fraction, None, "{}", entry.substance);
+            assert!(entry.feo_mass_fraction.is_not_modelled(), "{entry:?}");
         }
         assert_eq!(wire.main_liquid, None);
         assert!(wire.maturity.is_not_modelled(), "{wire:?}");
         assert!(wire.organic_cover.is_not_modelled(), "{wire:?}");
+        assert!(wire.weathering_rate.is_not_modelled(), "{wire:?}");
     }
 
     /// Decision-r11-palette-liquids §1.5 and §2: a sea's and a melt's records reach the wire with
     /// every member to the bit (the sea's scattering, the registry's since P14.T49.h filled it,
     /// decision-r10-t10b-r09-t2e §7), a member the field does not model absent (the melt's
-    /// scattering), an entry that is not liquid with none; the header names its main liquid and
-    /// carries the two fractions plan 14 fills, once they are filled; and every basis has its wire
-    /// name.
+    /// scattering), an entry that is not liquid with none; each `FeO_T` reaches the wire where the
+    /// field models it, a melting crust's beside its record (decision-p14-t51d-weathering §1.6),
+    /// and is absent where it does not; the header names its main liquid and carries the three
+    /// reserved parts plan 14 fills, once they are filled; and every basis has its wire name.
     #[test]
     fn a_field_header_carries_its_liquid_records() {
         let entry = |key, role, density, liquid| PaletteEntry {
@@ -842,6 +851,7 @@ mod tests {
             transition: Kelvin::new(1_400.0),
             mechanics: MechanicsFamily::Silicate,
             liquid,
+            feo_mass_fraction: None,
         };
         let water = liquid_water();
         let sea = PaletteEntry {
@@ -852,12 +862,15 @@ mod tests {
             ..entry("H2O", PaletteRole::Liquid, water.density_kg_m3, Some(water))
         };
         let palette = MaterialPalette::new(vec![
-            entry(
-                "basalt",
-                PaletteRole::PrimaryCrust,
-                2_900.0,
-                Some(basaltic_melt()),
-            ),
+            PaletteEntry {
+                feo_mass_fraction: Some(0.110),
+                ..entry(
+                    "basalt",
+                    PaletteRole::PrimaryCrust,
+                    2_900.0,
+                    Some(basaltic_melt()),
+                )
+            },
             entry("anorthosite", PaletteRole::SecondaryCrust, 2_730.0, None),
             sea,
         ])
@@ -868,15 +881,20 @@ mod tests {
             .main_liquid(2)
             .maturity(0.75)
             .organic_cover(0.0)
+            .weathering_rate(2.5)
             .build();
         let wire = surface_header(field.header());
         assert_eq!(wire.main_liquid, Some(2));
         assert_eq!(wire.maturity, Modelled::Value(0.75));
         assert_eq!(wire.organic_cover, Modelled::Value(0.0));
+        assert_eq!(wire.weathering_rate, Modelled::Value(2.5));
         let [melt, rock, sea] = wire.palette.as_slice() else {
             panic!("{:?}", wire.palette);
         };
         assert_eq!(rock.liquid, None);
+        assert_eq!(melt.feo_mass_fraction, Modelled::Value(0.110));
+        assert!(rock.feo_mass_fraction.is_not_modelled(), "{rock:?}");
+        assert!(sea.feo_mass_fraction.is_not_modelled(), "{sea:?}");
         let record = liquid_water();
         let sent = sea.liquid.as_ref().unwrap();
         assert_eq!(sent.basis, LiquidBasisDto::Measured);

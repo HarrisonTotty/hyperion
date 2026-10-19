@@ -38,6 +38,7 @@ fn entry(key: &str, family: MechanicsFamily, bvr: [f64; 3], code: u8) -> Palette
         transition: Kelvin::new(1_000.0),
         mechanics: family,
         liquid: None,
+        feo_mass_fraction: None,
     }
 }
 

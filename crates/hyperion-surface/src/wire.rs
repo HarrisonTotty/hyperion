@@ -39,15 +39,17 @@
 //!    cutoff followed by its diameter), the gravity, the target factor, the impact velocity, the
 //!    projectile density, the target (its class's code, a byte, then its density) and the
 //!    system's age, each `Option` (the impact velocity, the albedo scale, each crust's palette
-//!    entry, the main liquid's, and the two reserved fractions, the maturity and the organic
-//!    cover, which end the header) as a presence byte, 0 or 1, followed by its value when 1, and
-//!    the palette as its entry count, a byte, then each entry: its key NUL-padded to 16 bytes, its
-//!    role (a byte), its normal albedo in B, V and R (three `f64`), its phase row (a byte), its
-//!    grain density and transition temperature (`f64`), its mechanics family (a byte) and its
-//!    liquid record, an `Option`: when present, its temperature and density (`f64`), its basis (a
-//!    byte), its refractive index in the fifteen liquid bins (15 `f64`), its absorption and its
+//!    entry, the main liquid's, and the three reserved parts, the maturity, the organic cover and
+//!    the weathering rate, which end the header) as a presence byte, 0 or 1, followed by its value
+//!    when 1, and the palette as its entry count, a byte, then each entry: its key NUL-padded to 16
+//!    bytes, its role (a byte), its normal albedo in B, V and R (three `f64`), its phase row (a
+//!    byte), its grain density and transition temperature (`f64`), its mechanics family (a byte),
+//!    its liquid record, an `Option`: when present, its temperature and density (`f64`), its basis
+//!    (a byte), its refractive index in the fifteen liquid bins (15 `f64`), its absorption and its
 //!    scattering, each an `Option` of 15 `f64`, and its surface tension and viscosity, each an
-//!    `Option` of an `f64`. An entry is 60 bytes without a record and 201 to 457 with one.
+//!    `Option` of an `f64`; and its `FeO_T`, an `Option` of an `f64`. An entry is 61 to 466 bytes:
+//!    61 with neither a record nor an `FeO_T`, 69 with an `FeO_T` alone, and 202 to 466 with a
+//!    record.
 //! 2. The block's cover: its range count, `u32`, then each range as its first cell index and the
 //!    index past its last, two `u32`, and its [`ResolutionCode`], a byte: the block's surveyed
 //!    cells with their codes and its margin cells at [`ResolutionCode::NONE`], sorted, disjoint and
@@ -76,7 +78,7 @@
 //! and its liquid record) is one table in the private `form` module, from which its writer and its
 //! reader, and for a fixed record its length, are all generated, so that a field added to a
 //! record, or a part to the header, is one line there; the strides above are the tables' sums. A
-//! decoder checks a palette's entry count against the shortest entry, 60 bytes, before it
+//! decoder checks a palette's entry count against the shortest entry, 61 bytes, before it
 //! allocates. A crater, whose reach has no fixed length, is written and
 //! read by hand here (`put_crater`, `read_crater`, `CRATER_FIXED_BYTES`), and a field added to
 //! [`CoarseCrater`] touches all three; the encoder's check of each block's length against its plan
@@ -138,11 +140,12 @@ mod form;
 /// Beside the layout above, format 1 holds a palette entry's liquid record with its members and
 /// their units, R08's fifteen bake bins for its optical members
 /// ([`LIQUID_BINS`](crate::field::LIQUID_BINS),
-/// [`LIQUID_BIN_CENTRES_NM`](crate::field::LIQUID_BIN_CENTRES_NM)), [`LiquidBasis`]'s codes, and
-/// the header's two reserved fractions, the maturity and the organic cover
-/// (decision-r11-palette-liquids §2). A new liquid member or a new bin set is a new format;
-/// filling an absent member (a liquid's absorption, a melt's measured optics) moves values, not
-/// the layout.
+/// [`LIQUID_BIN_CENTRES_NM`](crate::field::LIQUID_BIN_CENTRES_NM)), [`LiquidBasis`]'s codes, a
+/// palette entry's `FeO_T`, the header's two reserved fractions, the maturity and the organic cover
+/// (decision-r11-palette-liquids §2), and its weathering rate, present exactly when the maturity is
+/// (decision-p14-t51d-weathering §1.6 and §2.3). A new liquid member or a new bin set is a new
+/// format; filling an absent member (a liquid's absorption, a melt's measured optics, an entry's
+/// `FeO_T`) moves values, not the layout.
 ///
 /// [`Crust`]: crate::field::Crust
 /// [`BoundaryKind`]: crate::field::BoundaryKind

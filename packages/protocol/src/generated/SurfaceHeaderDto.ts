@@ -130,4 +130,16 @@ maturity?: number | null,
  * The organic cover, dimensionless from 0 to 1: the covered fraction of the ground that can
  * take one; absent until galaxy plan 14 computes it (P14.T51.d).
  */
-organic_cover?: number | null, };
+organic_cover?: number | null, 
+/**
+ * The weathering rate k, dimensionless, finite and at least 0 with no upper bound: the body's
+ * orbit-mean, surface-reaching space-weathering dose rate relative to the Moon's present one,
+ * computed by the same rules, so that the Moon's is exactly 1 (decision-p14-t51d-weathering
+ * §2.2: the stellar wind's and the micrometeoroids' shares of the Moon's weathering times
+ * their fluxes at the surface relative to the Moon's); a close-in world of an active M dwarf
+ * may reach 10³. Rendering plan R10 fades a crater's ejecta to the background as
+ * `min(maturity, 1 − exp(−k t ÷ τ_L))`, `t` the crater's age and `τ_L` the lunar maturation
+ * time, through the shared Rust law. Present exactly when [`maturity`](Self::maturity) is, and
+ * absent until galaxy plan 14 computes it (P14.T51.d).
+ */
+weathering_rate?: number | null, };

@@ -107,7 +107,8 @@ struct Substance {
 }
 
 impl Substance {
-    /// The entry of the substance in `role`, with no liquid record.
+    /// The entry of the substance in `role`, with no liquid record and no `FeO_T`, which P14.T54.b
+    /// fills from the registry (decision-p14-t51d-weathering §1.6).
     #[must_use]
     const fn entry(&self, role: PaletteRole) -> PaletteEntry {
         PaletteEntry {
@@ -119,6 +120,7 @@ impl Substance {
             transition: Kelvin::new(self.transition_k),
             mechanics: self.mechanics,
             liquid: None,
+            feo_mass_fraction: None,
         }
     }
 

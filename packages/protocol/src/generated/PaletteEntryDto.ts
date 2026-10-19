@@ -4,8 +4,9 @@ import type { PaletteRoleDto } from "./PaletteRoleDto";
 
 /**
  * One substance of a body's palette, with the values the main thread's photometry and ocean read:
- * its normal albedo, its phase row and its liquid record (decision-r11-palette-liquids §1.5 and
- * §2, item 8). Its grain density, transition and mechanics family travel in the payload alone.
+ * its normal albedo, its phase row, its liquid record (decision-r11-palette-liquids §1.5 and §2,
+ * item 8) and its `FeO_T` (decision-p14-t51d-weathering §1.6). Its grain density, transition and
+ * mechanics family travel in the payload alone.
  */
 export type PaletteEntryDto = { 
 /**
@@ -37,4 +38,15 @@ phase_row: number,
  * the body melts (a lava lake or a magma ocean); `null` where the entry is not liquid on the
  * body.
  */
-liquid: LiquidDto | null, };
+liquid: LiquidDto | null, 
+/**
+ * `FeO_T`: the substance's total non-metallic iron (silicate, oxide and sulphide) expressed as
+ * `FeO`, as a mass fraction of the substance, dimensionless from 0 to 1; metallic iron is
+ * excluded. The npFe⁰ yield of rendering plan R10's space-weathering law scales with it
+ * (decision-p14-t51d-weathering §1.2), and a main-thread reader takes weathered values from
+ * the shared Rust law, never a TypeScript copy of it. 0 on an ice or an iron-free solid; never
+ * on a [`PaletteRoleDto::Liquid`] entry; absent where not modelled: the registry has no
+ * composition for the substance, or its normal albedo is an observed, space-weathered value,
+ * so that nothing darkens twice.
+ */
+feo_mass_fraction?: number | null, };

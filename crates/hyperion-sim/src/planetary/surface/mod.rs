@@ -147,6 +147,7 @@ use steps::{Pass, Working};
 ///     mechanics: MechanicsFamily::Silicate,
 ///     // Ceres's rock does not melt, so the entry carries no liquid record.
 ///     liquid: None,
+///     feo_mass_fraction: None,
 /// }])?;
 ///
 /// let gravity = MetresPerSecondSquared::new(0.284);
