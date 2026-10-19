@@ -69,7 +69,8 @@ import type {
 } from "../view/terrain/workers/messages";
 import { WIREFRAME_MATERIALS } from "../view/wireframe/submit";
 import { type Checks, halfTexels } from "./harness";
-import { MOON_LIKE, parseFixture } from "./litTerrain";
+import { moonLikeFixture, type WorkerFixture } from "../test/moonLikeFixture";
+import { MOON_LIKE } from "./litTerrain";
 
 /** The frames' size, pixels. */
 const VIEWPORT: Viewport = { widthPx: 64, heightPx: 48 };
@@ -108,7 +109,7 @@ const DEPRESSION_DEG = 60;
 async function bakeAcrossTheEdge(
   wanted: ReadonlyArray<PatchKey>,
   settings: BakeSettings,
-  field: ReturnType<typeof parseFixture>,
+  field: WorkerFixture,
 ): Promise<{ readonly bakes: BakedPatch[]; readonly blocks: FieldBlockAnswer[] }> {
   const worker = new Worker(new URL("../view/terrain/workers/height.worker.ts", import.meta.url), {
     type: "module",
@@ -376,7 +377,7 @@ function referenceDraws(
     figure,
     photometry: PROVISIONAL_PHOTOMETRY,
     rotation: IDENTITY_ROTATION,
-    surveyCoverage: texture,
+    surveyCoverage: { mask: texture, rotation: IDENTITY_ROTATION },
     handoverReliefM:
       4 * handoverTauPx("photorealistic", "low") * limbM * pixelAngleRad(pose.camera, VIEWPORT),
     lighting: undefined,
@@ -398,7 +399,7 @@ function referenceDraws(
     options,
     new Map([[body.id, "disc"]]),
   );
-  if (plan.meshes.length !== 1 || plan.meshes[0]?.handedOver !== true) {
+  if (plan.meshes.length !== 1 || plan.meshes[0]?.role.kind !== "handed-over") {
     throw new Error("the body was not handed over to its terrain and drawn as a mesh");
   }
   return renderer.meshDraws(plan);
@@ -442,7 +443,7 @@ function bodyAt(texels: Float32Array, p: number): boolean {
 
 /** R10.T10.c's survey edge: the terrain and the reference surface share the ground, once each. */
 export async function checkSurveyEdge(engine: RenderEngine, checks: Checks): Promise<void> {
-  const field = parseFixture();
+  const field = moonLikeFixture("first");
   const settings = { ...TERRAIN_SETTINGS.low, cacheBytes: CACHE_BYTES };
   const keys = blockKeys();
   const { bakes, blocks } = await bakeAcrossTheEdge(

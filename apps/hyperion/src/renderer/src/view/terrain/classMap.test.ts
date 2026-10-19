@@ -190,17 +190,27 @@ describe("a class map from a worker's answer", () => {
     ]);
   });
 
-  it("is none for a map of no class, and refuses an answer it cannot pack", () => {
+  it("is none for a map of no class", () => {
     const none: ClassMapAnswer = {
       ...answerOf([]),
       classes: new Uint8Array(0),
       photometry: new Float32Array(0),
     };
     expect(classMapTexelsOf(none)).toBeNull();
-    expect(() => classMapTexelsOf({ ...answerOf(TEXELS), level: 5 })).toThrow(/level 6, not 5/u);
-    expect(() => classMapTexelsOf({ ...answerOf(TEXELS), fractions: new Float32Array(3) })).toThrow(
-      /4 texels have 3 shares/u,
-    );
+  });
+
+  it.each([
+    { name: "of another level", change: { level: 5 }, message: /level 6, not 5/u },
+    {
+      name: "whose shares are not its texels'",
+      change: { fractions: new Float32Array(3) },
+      message: /4 texels have 3 shares/u,
+    },
+  ])("refuses an answer $name", ({ change, message }) => {
+    expect(() => classMapTexelsOf({ ...answerOf(TEXELS), ...change })).toThrow(message);
+  });
+
+  it("refuses an answer of more classes than a texel packs", () => {
     expect(() => classMapTexelsOf({ ...answerOf([]), classes: new Uint8Array(2 * 17) })).toThrow(
       /at most 16 classes/u,
     );
@@ -229,6 +239,11 @@ describe("a class map from a worker's answer", () => {
     );
   });
 });
+
+/** The allocations' kinds but uploads. */
+function kindsOf(events: ReadonlyArray<AllocationEvent>): string[] {
+  return events.filter((e) => e.kind !== "uploaded").map((e) => e.kind);
+}
 
 describe("the class-map store", () => {
   it("asks for a body's map, and files its texture, 66 × 66 texels a layer, under coarse-field-gpu", async () => {
@@ -260,6 +275,8 @@ describe("the class-map store", () => {
     const surface = store.classMapOf(MOON, ELSEWHERE);
     expect(surface?.kind).toBe("class-map");
     expect(surface?.elsewhere).toBe(ELSEWHERE);
+    // Its texels travel with it, the texture's CPU copy, which the point regime integrates (R10.T10.f).
+    expect(surface?.texels).toEqual(classMapTexelsOf(answerOf(TEXELS)));
     // The unnamed substance's class shades with `elsewhere`, the others with their own laws.
     expect(surface?.laws[2]).toBe(ELSEWHERE);
     expect(surface?.laws.slice(0, 2)).toEqual(classMapLawsOf(answerOf(TEXELS)).slice(0, 2));
@@ -267,6 +284,7 @@ describe("the class-map store", () => {
     expect(store.classMapOf(MOON, ELSEWHERE)).toBe(surface);
     const other = lawFor([0.3, 0.3, 0.3], [1, 1, 1], "moon");
     expect(store.classMapOf(MOON, other)?.elsewhere).toBe(other);
+    expect(store.classMapOf(MOON, other)?.texels).toBe(surface?.texels);
     expect(store.classMapOf("0200080020000000.0301", ELSEWHERE)).toBeNull();
     store.dispose();
   });
@@ -352,7 +370,13 @@ describe("the class-map store", () => {
     store.dispose();
   });
 
-  it("remakes the texture after a device loss, and releases it with the body and at its disposal", async () => {
+  /** A store holding the Moon's map, its engine's allocations and its pool. */
+  async function holding(): Promise<{
+    readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+    readonly events: AllocationEvent[];
+    readonly pool: ScriptedPool;
+    readonly store: ClassMapStore;
+  }> {
     const engine = await countingRenderEngine();
     const events: AllocationEvent[] = [];
     engine.onAllocation((event) => events.push(event));
@@ -361,22 +385,50 @@ describe("the class-map store", () => {
     store.want(MOON, SEED);
     pool.asked[0]?.resolve(answerOf(TEXELS));
     await settle();
+    return { engine, events, pool, store };
+  }
+
+  it("remakes the texture after a device loss, with the texels it held", async () => {
+    const { engine, store } = await holding();
     const before = store.classMapOf(MOON, ELSEWHERE);
     engine.restore();
     const after = store.classMapOf(MOON, ELSEWHERE);
-    expect(after?.weights).not.toBe(before?.weights);
-    expect(engine.textureWritten.at(-1)?.data).toEqual(engine.textureWritten.at(-2)?.data);
+    expect([after?.weights !== before?.weights, engine.textureWritten.at(-1)?.data]).toEqual([
+      true,
+      engine.textureWritten.at(-2)?.data,
+    ]);
+    store.dispose();
+  });
+
+  it("releases the texture with the body", async () => {
+    const { events, store } = await holding();
     store.release(MOON);
-    expect(store.classMapOf(MOON, ELSEWHERE)).toBeNull();
-    const kinds = events.filter((e) => e.kind !== "uploaded").map((e) => e.kind);
-    expect(kinds).toEqual(["created", "destroyed", "created", "destroyed"]);
+    expect([store.classMapOf(MOON, ELSEWHERE), kindsOf(events)]).toEqual([
+      null,
+      ["created", "destroyed"],
+    ]);
+    store.dispose();
+  });
+
+  it("keeps one listener on the pool as a body is released and asked for again", async () => {
+    const { pool, store } = await holding();
+    store.release(MOON);
     store.want(MOON, SEED);
     pool.asked[1]?.resolve(answerOf(TEXELS));
     await settle();
     expect(pool.listening).toBe(1);
     store.dispose();
-    expect(events.filter((e) => e.kind === "destroyed")).toHaveLength(3);
-    expect(pool.listening).toBe(0);
+  });
+
+  it("releases its textures and stops listening to the pool at its disposal", async () => {
+    const { events, pool, store } = await holding();
+    store.dispose();
+    expect([kindsOf(events), pool.listening]).toEqual([["created", "destroyed"], 0]);
+  });
+
+  it("refuses a body once disposed", async () => {
+    const { store } = await holding();
+    store.dispose();
     expect(() => {
       store.want(MOON, SEED);
     }).toThrow(/disposed/u);

@@ -97,7 +97,7 @@ export interface FrameTerrain {
   surveyCoverage(body: BodyIdHex): TextureHandle | null;
   /**
    * The draws of the terrain of each body `plan` hands over (`LitRegime` `terrain`, a
-   * `MeshBodyPlan` with `handedOver`, its record its lights), opaque with depth, drawn in the
+   * `MeshBodyPlan` whose `role` is `handed-over`, its record its lights), opaque with depth, drawn in the
    * `bodies` pass after the mesh bodies' figures; none for a body with nothing resident.
    */
   draws(plan: BodyFramePlan): ReadonlyArray<DrawItem>;

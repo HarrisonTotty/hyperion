@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { countingRenderEngine } from "../../test/countingRenderEngine";
+import { packClassMap } from "../../view/bodies/discSurface";
 import { type LitBodyInput, planLitBodies } from "../../view/bodies/draw";
 import { DISC_ANNULI_HIGH } from "../../view/lighting/annuli";
 import { PLANETSHINE_SOURCES_HIGH } from "../../view/lighting/planetshine";
@@ -28,7 +29,7 @@ import type { TextureHandle } from "../../view/engine/types";
 import type { ClassMapSource } from "../../view/terrain/classMap";
 import { sceneHostDiscs } from "../../view/lighting/hostLights";
 import type { ViewScene } from "../../view/scene/model";
-import { litBodiesOf, litLabelsOf, photorealFrame } from "./photorealFrame";
+import { litBodiesOf, litLabelsOf, photorealFrame, type PhotorealInputs } from "./photorealFrame";
 import { runPose, startRun, startServerRun } from "./viewRun";
 
 const VIEWPORT = { widthPx: 1920, heightPx: 1080 };
@@ -49,7 +50,7 @@ function drawnOnly(body: LitBodyInput): LitBodyInput {
 }
 
 async function frameOfPhaseScene(
-  terrainFootprints?: ReadonlyArray<ScreenCircle>,
+  sources: Pick<PhotorealInputs, "terrainFootprints" | "classMaps" | "reliefs" | "terrain"> = {},
 ): Promise<ReturnType<typeof photorealFrame>> {
   const engine = await countingRenderEngine();
   const run = startRun(phaseScene());
@@ -77,7 +78,7 @@ async function frameOfPhaseScene(
     previousRegimes: new Map(),
     overlay: null,
     meter: "average",
-    ...(terrainFootprints === undefined ? {} : { terrainFootprints }),
+    ...sources,
   });
 }
 
@@ -116,7 +117,47 @@ describe("a photorealistic frame of the phase scene", () => {
   it("takes the terrain's footprints as the geometry that writes depth (R10.T10.b)", async () => {
     expect((await frameOfPhaseScene()).depthWriters).toEqual([]);
     const footprint: ScreenCircle = { xPx: 960, yPx: 540, radiusPx: 300 };
-    expect((await frameOfPhaseScene([footprint])).depthWriters).toEqual([footprint]);
+    expect((await frameOfPhaseScene({ terrainFootprints: [footprint] })).depthWriters).toEqual([
+      footprint,
+    ]);
+  });
+
+  it("shades each lit body with the view's class maps (R10.T10.d)", async () => {
+    const asked: string[] = [];
+    const classMaps: ClassMapSource = {
+      classMapOf: (body) => {
+        asked.push(body);
+        return null;
+      },
+    };
+    await frameOfPhaseScene({ classMaps });
+    expect(asked).toEqual([...PHASE_PLANETS, PHASE_GIANT]);
+  });
+
+  it("gives each lit body its relief from the view's reliefs (R10.T10.e)", async () => {
+    const frame = await frameOfPhaseScene({ reliefs: { reliefM: () => 4_000 } });
+    expect(frame.bodies.map((body) => body.handoverReliefM)).toEqual(
+      [...PHASE_PLANETS, PHASE_GIANT].map(() => 4_000),
+    );
+  });
+
+  it("asks the view's terrain for each lit body's survey coverage (R10.T10.e)", async () => {
+    const asked: string[] = [];
+    await frameOfPhaseScene({
+      terrain: {
+        surveyCoverage: (body) => {
+          asked.push(body);
+          return null;
+        },
+        draws: () => [],
+      },
+    });
+    expect(asked).toEqual([...PHASE_PLANETS, PHASE_GIANT]);
+  });
+
+  it("carries the view's terrain, which draws the bodies handed over (R10.T10.e)", async () => {
+    const terrain = { surveyCoverage: () => null, draws: () => [] };
+    expect((await frameOfPhaseScene({ terrain })).terrain).toBe(terrain);
   });
 
   it("draws no sky without one, and takes the camera's role and field", async () => {
@@ -169,12 +210,13 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
   it("shade each body's disc with its class map, oriented where its rotation is known and elsewhere's alone where it is null (R10.T10.d)", () => {
     const { scene, pose } = sliceScene();
     const weights: TextureHandle = { kind: "texture", name: "slice class map" };
+    const texels = packClassMap(1, 1, () => [1]);
     const dark = lawFor([0.05, 0.05, 0.05], [0.6, 0.6, 0.6], "moon");
     const asked: Array<readonly [string, PhotometricLaw]> = [];
     const classMaps: ClassMapSource = {
       classMapOf: (body, elsewhere) => {
         asked.push([body, elsewhere]);
-        return { kind: "class-map", weights, laws: [dark], elsewhere };
+        return { kind: "class-map", weights, texels, laws: [dark], elsewhere };
       },
     };
     const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null), classMaps);
@@ -226,7 +268,11 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
     });
     const earth = lit.find((body) => body.id === FIXTURE_EARTH);
     const jupiter = lit.find((body) => body.id === FIXTURE_JUPITER);
-    expect([earth?.handoverReliefM, earth?.surveyCoverage]).toEqual([18_000, mask]);
+    // The mask comes with the axes it is read in, Earth's rotation.
+    expect([earth?.handoverReliefM, earth?.surveyCoverage]).toEqual([
+      18_000,
+      { mask, rotation: viewBodyOf(scene, FIXTURE_EARTH).rotation },
+    ]);
     expect(jupiter).not.toHaveProperty("handoverReliefM");
     expect(jupiter).not.toHaveProperty("surveyCoverage");
     const bare = litBodiesOf(scene, pose, sceneHostDiscs(scene, null));
@@ -235,6 +281,15 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
         (body) => body.handoverReliefM !== undefined || body.surveyCoverage !== undefined,
       ),
     ).toEqual([]);
+  });
+
+  it("give no coverage mask to a body without a rotation to read it in (R10.T10.e)", () => {
+    const { scene, pose } = sliceScene();
+    const mask: TextureHandle = { kind: "texture", name: "slice coverage mask" };
+    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null), undefined, {
+      terrain: { surveyCoverage: () => mask },
+    });
+    expect(lit.find((body) => body.id === FIXTURE_JUPITER)).not.toHaveProperty("surveyCoverage");
   });
 
   it("state the provisional photometry's label while one lit body takes it", () => {

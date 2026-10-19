@@ -2,7 +2,7 @@ import type { BodyIdHex } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
-import { type PhaseTemplateId, type PhotometricLaw } from "../appearance/law";
+import type { PhaseTemplateId, PhotometricLaw } from "../appearance/law";
 import { lawFor, lawPhaseIntegral, withTemplateCurve } from "../appearance/phase";
 import { packPhaseFactorRows } from "../appearance/litBodyProbe";
 import { discReflectance } from "../bodies/discShading";
@@ -38,8 +38,8 @@ import { PHOTOMETRY_STRIDE } from "./workers/messages";
 
 const RAD = Math.PI / 180;
 
-/** Design note 13's pixel: 1080p across 60° by width ÷ field, rad. */
-const NOTE_RAD_PER_PX = 5.45e-4;
+/** Design note 13's pixel: 1080p across 60° by width ÷ field, 5.454 × 10⁻⁴ rad. */
+const NOTE_RAD_PER_PX = (60 * RAD) / 1920;
 
 /** Design note 13's relief: an Earth's 10 km, m. */
 const EARTH_RELIEF_M = 1e4;
@@ -75,8 +75,8 @@ describe("the hand-over range (R10.T10.e, Design note 13)", () => {
   it("is about 1.8 × 10⁷ m for 10 km of relief at 1080p and 1 px, and 4.6 × 10⁶ m at the wireframe's 4 px", () => {
     const atOnePx = handoverRangeM(EARTH_RELIEF_M, 1, NOTE_RAD_PER_PX);
     const atFourPx = handoverRangeM(EARTH_RELIEF_M, WIREFRAME_TERRAIN_TAU_PX, NOTE_RAD_PER_PX);
-    expect(near(atOnePx, 1.83e7, 3e-3)).toBe(true);
-    expect(near(atFourPx, 4.59e6, 3e-3)).toBe(true);
+    expect(near(atOnePx, 1.833e7, 1e-3)).toBe(true);
+    expect(near(atFourPx, 4.584e6, 1e-3)).toBe(true);
     expect(atOnePx / atFourPx).toBe(4);
   });
 
@@ -192,7 +192,7 @@ describe("the hand-over's decision", () => {
       );
     expect(at(1e3)).toBe(true);
     expect(at(2e6)).toBe(false);
-    // Its limb is at the range (less the hysteresis) some 2,000 km up.
+    // Its limb is at the range (less the hysteresis) about 1,740 km up.
     const altitudeM = Math.sqrt((wire / (1 + REGIME_HYSTERESIS)) ** 2 + venusM ** 2) - venusM;
     expect(at(altitudeM * 0.999)).toBe(true);
     expect(at(altitudeM * 1.001)).toBe(false);

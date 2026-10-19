@@ -33,6 +33,7 @@ import {
   MAX_CELL_JOBS,
   packDiscRecords,
 } from "./discShading";
+import { packClassMap } from "./discSurface";
 import {
   BODY_DISC_CELLS_KERNEL,
   type BodyFramePlan,
@@ -273,6 +274,7 @@ describe("the cell pass's jobs (R07.T8.d)", () => {
       surface: {
         kind: "class-map",
         weights: { kind: "texture", name: "test class map" },
+        texels: packClassMap(1, 1, () => [1]),
         laws: [law],
         elsewhere: law,
         rotation: IDENTITY_ROTATION,

@@ -352,7 +352,8 @@ export function classMapTextureSpec(
 
 /**
  * A disc's class-map surface (R10.T10.d's construction): the map uploaded as its texture, with a law
- * per class and the uniform law for unsurveyed texels.
+ * per class and the uniform law for unsurveyed texels; the surface carries the map as `texels` too,
+ * the texture's CPU copy, which the point regime integrates (R10.T10.f).
  *
  * @remarks
  * The texture is the caller's: it is made again, and this called again, after a device loss
@@ -382,5 +383,5 @@ export function classMapSurface(
     { width: side, height: side, depthOrArrayLayers: classMapLayers(map.classes) },
     map.data,
   );
-  return { kind: "class-map", weights, laws, elsewhere };
+  return { kind: "class-map", weights, texels: map, laws, elsewhere };
 }

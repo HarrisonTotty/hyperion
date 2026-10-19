@@ -562,6 +562,7 @@ struct TexelReading {
 /// A class map's classes from its texels' readings ([`ClassMap`]): every material they name, in
 /// [`GroundMaterial`]'s order, or past [`CLASS_MAP_CLASSES`] the heaviest, by weight summed over
 /// the texels times each one's surveyed share, ties to the earlier material.
+#[must_use]
 fn kept_classes(readings: &[TexelReading]) -> Vec<GroundMaterial> {
     let mut totals = BTreeMap::<GroundMaterial, f64>::new();
     for reading in readings {
@@ -578,33 +579,38 @@ fn kept_classes(readings: &[TexelReading]) -> Vec<GroundMaterial> {
     kept
 }
 
-/// The field's cells of `level` under, or holding, the class-map texel `texel`.
-fn field_cells_of(texel: PatchKey, level: u8) -> Vec<PatchKey> {
+/// The field's cells of `level` under, or holding, the class-map texel `texel`, into `cells`, which
+/// it clears first: 4^(`level` − 6) of them in rising (j, i), or the one holding the texel where
+/// `level` is 6 or shallower.
+fn field_cells_of(texel: PatchKey, level: u8, cells: &mut Vec<PatchKey>) {
+    cells.clear();
     if level <= CLASS_MAP_LEVEL {
         let shift = CLASS_MAP_LEVEL - level;
-        vec![
+        cells.push(
             PatchKey::new(texel.face(), level, texel.i() >> shift, texel.j() >> shift)
                 .expect("a texel's ancestor is a cell of its level"),
-        ]
+        );
     } else {
         let shift = level - CLASS_MAP_LEVEL;
         let side = 1_u32 << shift;
-        (0..side)
-            .flat_map(|dj| (0..side).map(move |di| (di, dj)))
-            .map(|(di, dj)| {
-                PatchKey::new(
-                    texel.face(),
-                    level,
-                    (texel.i() << shift) + di,
-                    (texel.j() << shift) + dj,
-                )
-                .expect("a texel's descendants are cells of their level")
-            })
-            .collect()
+        cells.extend(
+            (0..side)
+                .flat_map(|dj| (0..side).map(move |di| (di, dj)))
+                .map(|(di, dj)| {
+                    PatchKey::new(
+                        texel.face(),
+                        level,
+                        (texel.i() << shift) + di,
+                        (texel.j() << shift) + dj,
+                    )
+                    .expect("a texel's descendants are cells of their level")
+                }),
+        );
     }
 }
 
 /// The centre of `cell` in face coordinates.
+#[must_use]
 fn centre_of(cell: PatchKey) -> FaceUv {
     let side = f64::from(1_u32 << cell.level());
     FaceUv {
@@ -614,30 +620,46 @@ fn centre_of(cell: PatchKey) -> FaceUv {
     }
 }
 
-/// `values` as bytes keeping their rounded sum, at most 255: each rounded down, and the bytes that
-/// leaves short given to the largest remainders, ties to the earlier.
-fn bytes_by_largest_remainder(values: &[f64]) -> Vec<u8> {
+/// `values`, at most [`CLASS_MAP_CLASSES`], as bytes in their order keeping their rounded sum, at
+/// most 255, the bytes past them 0: each rounded down, and the bytes that leaves short given to the
+/// largest remainders, ties to the earlier.
+///
+/// # Panics
+///
+/// If `values` holds more than [`CLASS_MAP_CLASSES`], which a map's classes never do (a bug).
+#[must_use]
+fn bytes_by_largest_remainder(values: &[f64]) -> [u8; CLASS_MAP_CLASSES] {
+    let n = values.len();
+    assert!(
+        n <= CLASS_MAP_CLASSES,
+        "{n} values for at most {CLASS_MAP_CLASSES} classes"
+    );
     let total: f64 = values.iter().sum();
-    let floors: Vec<f64> = values.iter().map(|v| v.floor()).collect();
+    let mut bytes = [0_u8; CLASS_MAP_CLASSES];
+    let mut remainders = [0.0_f64; CLASS_MAP_CLASSES];
+    for ((byte, remainder), &value) in bytes.iter_mut().zip(&mut remainders).zip(values) {
+        let floor = value.floor();
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "each value lies in [0, 255], so its floor is a whole number a u8 holds"
+        )]
+        let whole = floor as u8;
+        *byte = whole;
+        *remainder = value - floor;
+    }
     #[expect(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
-        reason = "each value and their sum lie in [0, 255], so the rounded sum and the floors are \
-                  whole numbers a u8 holds"
+        reason = "the values' sum lies in [0, 255], so its rounding is a whole number a u32 holds"
     )]
-    let (target, mut bytes) = (
-        num::min(total.round(), f64::from(WEIGHT_TOTAL)) as u32,
-        floors.iter().map(|&f| f as u8).collect::<Vec<u8>>(),
-    );
-    let mut order: Vec<usize> = (0..values.len()).collect();
-    order.sort_by(|&a, &b| {
-        (values[b] - floors[b])
-            .total_cmp(&(values[a] - floors[a]))
-            .then(a.cmp(&b))
-    });
+    let target = num::min(total.round(), f64::from(WEIGHT_TOTAL)) as u32;
+    let mut order: [usize; CLASS_MAP_CLASSES] = std::array::from_fn(|k| k);
+    // The index breaks every tie, so no two compare equal and the unstable sort is the stable one.
+    order[..n].sort_unstable_by(|&a, &b| remainders[b].total_cmp(&remainders[a]).then(a.cmp(&b)));
     let held: u32 = bytes.iter().map(|&b| u32::from(b)).sum();
     let mut short = target.saturating_sub(held);
-    for &k in &order {
+    for &k in &order[..n] {
         if short == 0 {
             break;
         }
@@ -1002,26 +1024,35 @@ impl WorkerFields {
         let texel_count = 6_u32 << (2 * u32::from(CLASS_MAP_LEVEL));
         let mut readings = Vec::new();
         let mut complete = true;
+        // A texel's field cells, those surveyed and the points read, at most 16 each (a field of
+        // level 8), kept from texel to texel.
+        let mut cells = Vec::with_capacity(16);
+        let mut surveyed = Vec::with_capacity(16);
+        let mut points = Vec::with_capacity(16);
+        let count = |n: usize| u32::try_from(n).expect("a texel holds at most 16 field cells");
         for index in 0..texel_count {
             let texel =
                 cell_at_index(CLASS_MAP_LEVEL, index).expect("an index below 6 · 4⁶ is a texel");
-            let cells = field_cells_of(texel, level);
-            let surveyed: Vec<PatchKey> = cells
-                .iter()
-                .copied()
-                .filter(|&cell| field.is_surveyed(cell))
-                .collect();
+            field_cells_of(texel, level, &mut cells);
+            surveyed.clear();
+            surveyed.extend(
+                cells
+                    .iter()
+                    .copied()
+                    .filter(|&cell| field.is_surveyed(cell)),
+            );
             if surveyed.is_empty() {
                 continue;
             }
             let centre = centre_of(texel);
             let centre_cell = PatchKey::containing(level, unit_dir(face_uv_to_xyz(centre)))
                 .expect("a coarse level is a quadtree level");
-            let points: Vec<FaceUv> = if field.is_surveyed(centre_cell) {
-                vec![centre]
+            points.clear();
+            if field.is_surveyed(centre_cell) {
+                points.push(centre);
             } else {
-                surveyed.iter().map(|&cell| centre_of(cell)).collect()
-            };
+                points.extend(surveyed.iter().map(|&cell| centre_of(cell)));
+            }
             let mut weights = BTreeMap::<GroundMaterial, f64>::new();
             let mut answered = true;
             for &at in &points {
@@ -1042,7 +1073,6 @@ impl WorkerFields {
                 complete = false;
                 continue;
             }
-            let count = |n: usize| u32::try_from(n).expect("a texel holds at most 16 field cells");
             for value in weights.values_mut() {
                 *value /= f64::from(count(points.len()));
             }
@@ -1057,19 +1087,15 @@ impl WorkerFields {
         let texels = readings
             .iter()
             .map(|reading| {
-                let values: Vec<f64> = kept
-                    .iter()
-                    .map(|m| reading.weights.get(m).copied().unwrap_or(0.0))
-                    .collect();
-                let mut weights = [0_u8; CLASS_MAP_CLASSES];
-                for (slot, byte) in weights.iter_mut().zip(bytes_by_largest_remainder(&values)) {
-                    *slot = byte;
+                let mut values = [0.0_f64; CLASS_MAP_CLASSES];
+                for (value, material) in values.iter_mut().zip(&kept) {
+                    *value = reading.weights.get(material).copied().unwrap_or(0.0);
                 }
                 ClassMapTexel {
                     cell: reading.cell,
                     surveyed: reading.surveyed,
                     cells: reading.cells,
-                    weights,
+                    weights: bytes_by_largest_remainder(&values[..kept.len()]),
                 }
             })
             .collect();

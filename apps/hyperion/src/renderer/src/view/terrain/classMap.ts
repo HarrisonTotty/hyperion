@@ -248,6 +248,7 @@ export class ClassMapStore implements ClassMapSource {
       map.surface = {
         kind: "class-map",
         weights: map.texture,
+        texels: map.texels,
         laws: map.laws.map((law) => law ?? elsewhere),
         elsewhere,
       };

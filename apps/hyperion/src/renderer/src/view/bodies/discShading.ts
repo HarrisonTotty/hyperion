@@ -686,6 +686,48 @@ export function discReflectance(
 }
 
 /**
+ * One of a disc's laws at a phase, per channel, split by the two terms of its disc factor: a law's
+ * I/F at a point lit by one point source wholly above its horizon is
+ * `lommelSeeliger` · 2μ₀ ÷ (μ₀ + μ) + `lambert` · μ₀.
+ */
+export interface DiscLawTerms {
+  /** A′ f(α) L(α), A′ the law's A scaled for the figure. */
+  readonly lommelSeeliger: Rgb;
+  /** A′ f(α) (1 − L(α)). */
+  readonly lambert: Rgb;
+}
+
+/**
+ * Each of a disc's laws at phase α split by its two terms, by the disc's own arithmetic
+ * ({@link discReflectance}'s: each A scaled for the figure, f and L(α) read from the law's row as
+ * `surface_reflectance` reads them), so that Σ_m share_m [`lommelSeeliger`_m · 2μ₀ ÷ (μ₀ + μ) +
+ * `lambert`_m · μ₀] is {@link discReflectance} at any point: the point regime's integral under a
+ * class map (plan R10, R10.T10.f) sums each law's geometry over the surface and multiplies by these
+ * once.
+ *
+ * @param laws - The surface's laws in their order (`discSurfaceLaws`).
+ * @param polarOverEquatorial - The figure's c ÷ a, 1 for a sphere.
+ * @param alphaRad - The phase angle, rad.
+ */
+export function discLawTerms(
+  laws: ReadonlyArray<PhotometricLaw>,
+  polarOverEquatorial: number,
+  alphaRad: number,
+): DiscLawTerms[] {
+  return laws.map((law, m) => {
+    const scaled = scaledLawOf(law, polarOverEquatorial, m);
+    const share = limbShareFromTable(scaled.table, alphaRad);
+    const f = phaseFactorFromTable(scaled.table, alphaRad);
+    const term = (weight: number): Rgb => [
+      scaled.a[0] * f[0] * weight,
+      scaled.a[1] * f[1] * weight,
+      scaled.a[2] * f[2] * weight,
+    ];
+    return { lommelSeeliger: term(share), lambert: term(1 - share) };
+  });
+}
+
+/**
  * A lit point's frame for R08's lookups (plan R08, R08.T9.b; `litBody.wgsl`'s `local_frame`): its
  * geodetic latitude from its spheroid normal against the pole, and its north and east, in the
  * view's axes; at a pole any horizontal east.

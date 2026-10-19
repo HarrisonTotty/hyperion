@@ -12,7 +12,6 @@
 
 import { beforeAll, describe, expect, it } from "vitest";
 
-import fixture from "../../../../../../../crates/hyperion-surface/tests/golden/worker/moon_like.golden?raw";
 import {
   bakePatch,
   initSync,
@@ -20,6 +19,7 @@ import {
   testPlanetVersion,
 } from "../../generated/surface/hyperion_surface";
 import wasmDataUrl from "../../generated/surface/hyperion_surface_bg.wasm?inline";
+import { moonLikeFixture } from "../../test/moonLikeFixture";
 import { fieldCellIndex } from "./coverage";
 import { packSurveyMask, SURVEY_FIN_LINES, surveyCellCode, surveyedAt } from "./gpu/resources";
 import type { PatchKey } from "./patchKey";
@@ -38,34 +38,8 @@ const module: HeightModule = {
   createFields: () => new SurfaceFields(),
 };
 
-/** The bytes of a hexadecimal string, in a buffer of their own. */
-function bytesOf(hex: string): ArrayBuffer {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let n = 0; n < bytes.length; n += 1) {
-    bytes[n] = Number.parseInt(hex.slice(2 * n, 2 * n + 2), 16);
-  }
-  return bytes.buffer;
-}
-
 /** The fixture's body, seed and first payload's blocks, the first survey's. */
-function firstSurvey(): { body: string; seed: string; blocks: ArrayBuffer[] } {
-  let body = "";
-  let seed = "";
-  const blocks: ArrayBuffer[] = [];
-  for (const line of fixture.split("\n")) {
-    const [head, first, , third] = line.split(" ");
-    if (head === "body") {
-      body = first ?? "";
-    } else if (head === "seed") {
-      seed = first ?? "";
-    } else if (head === "block" && first === "1") {
-      blocks.push(bytesOf(third ?? ""));
-    }
-  }
-  return { body, seed, blocks };
-}
-
-const SURVEY = firstSurvey();
+const SURVEY = moonLikeFixture("first");
 
 /** The field's level, 6: the survey's four cells are (22, 22) to (23, 23) of face +y there. */
 const FIELD_LEVEL = 6;

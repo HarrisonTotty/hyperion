@@ -20,7 +20,6 @@
 
 import { beforeAll, describe, expect, it } from "vitest";
 
-import fixture from "../../../../../../../crates/hyperion-surface/tests/golden/worker/moon_like.golden?raw";
 import {
   bakePatch,
   initSync,
@@ -28,6 +27,7 @@ import {
   testPlanetVersion,
 } from "../../generated/surface/hyperion_surface";
 import wasmDataUrl from "../../generated/surface/hyperion_surface_bg.wasm?inline";
+import { moonLikeFixture } from "../../test/moonLikeFixture";
 import { add, cross, dot, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
 import type { PhotometricLaw } from "../appearance/law";
 import { lawFor } from "../appearance/phase";
@@ -75,34 +75,8 @@ const module: HeightModule = {
   createFields: () => new SurfaceFields(),
 };
 
-/** The bytes of a hexadecimal string, in a buffer of their own. */
-function bytesOf(hex: string): ArrayBuffer {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let n = 0; n < bytes.length; n += 1) {
-    bytes[n] = Number.parseInt(hex.slice(2 * n, 2 * n + 2), 16);
-  }
-  return bytes.buffer;
-}
-
 /** The fixture's body, seed and every block, in its order. */
-function fixtureBlocks(): { body: string; seed: string; blocks: ArrayBuffer[] } {
-  let body = "";
-  let seed = "";
-  const blocks: ArrayBuffer[] = [];
-  for (const line of fixture.split("\n")) {
-    const [head, first, , third] = line.split(" ");
-    if (head === "body") {
-      body = first ?? "";
-    } else if (head === "seed") {
-      seed = first ?? "";
-    } else if (head === "block") {
-      blocks.push(bytesOf(third ?? ""));
-    }
-  }
-  return { body, seed, blocks };
-}
-
-const FIXTURE = fixtureBlocks();
+const FIXTURE = moonLikeFixture("all");
 
 /**
  * The Moon-like world's c ÷ a (`hyperion_surface`'s `testing/worlds.rs`: a flattening of 0.0012),

@@ -334,6 +334,9 @@ export function painterOrder(
 ): PainterEntry[]; // back to front by tangent power, meshes excluded, Design note 2
 ```
 
+_R10.T10.e adds `terrain`, the mesh regime handed to R05's quadtree, and `drawnAsMesh` (R10's
+Risks, "Deviations in T10.e, as built")._
+
 `shaders/bodyDisc.wgsl` (the analytic disc, spheroid by axis scaling), point bodies as sprite
 records through R06's `SKY_SPRITE_HDR_MATERIAL` (`POINT SPRITES HDR`), R02's `starSprite.wgsl` with
 the identity tone step, the sprite row's `z` carrying depth (decision-r07-t8a, item 2),
@@ -7062,7 +7065,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `packClassMap`, `classWeightsAt`, `surfaceShares`, `discSurfaceLaws`, `classMapTextureSpec`
     and `classMapSurface`, the construction R10.T10.d calls), with `ClassMapDiscSurface` beside
     `UniformDiscSurface` in `appearance/bodyAppearance.ts`, Provides' shape unchanged (`weights`,
-    `laws`, `elsewhere`).
+    `laws`, `elsewhere`). _R10.T10.f adds `texels`, the texture's CPU copy, which `classMapSurface`
+    and R10's store set and the point integrates (R10's Risks, "Deviations in T10.f, as built")._
   - **The map's layout**, which the plan left open: a 2D array of `rgba8unorm`, N × N texels a face
     of R05's cube sphere. Texel (i, j) of face f is the cell s ∈ [i ÷ N, (i + 1) ÷ N),
     t ∈ [j ÷ N, (j + 1) ÷ N) of `xyzToFaceUv`'s (u, v) under `uvToSt`, so with N = 2^L it is the
@@ -7145,7 +7149,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       R10.T10.d or a follow-up.
     - _Ruled 2026-10-04 (decision-r07-t8b):_ The point integrates the class map in a new R10.T10.f,
       to T8.a's 1%. The Iapetus figures are about 1.4× and 0.28× against the area mean (calibrated
-      to Iapetus's V range of 10.2–11.9, from a secondary source: to verify).
+      to Iapetus's V range of 10.2–11.9, from a secondary source: to verify). _Built by R10.T10.f
+      (`bodies/classMapPoint.ts`; R10's Risks, "Deviations in T10.f, as built")._
   - **Tests** (`bodies/discSurface.test.ts`, on a synthetic two-class map with half its cells
     surveyed, i + j even, the pole tilted 55° and turned 30°):
     - At 40° of phase, each pixel of a 64 px, 10% oblate disc within 70% of its polar radius (one
@@ -7809,7 +7814,13 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       optional `BodyFrameOptions.depthWriters`; the new required `BodyFrameOptions.setting` goes
       to selection. `BodyFramePlan` gains `meshes` (`MeshBodyPlan`: the record's index, the figure,
       the limb's depths); its `order` is the order the steps follow, a mesh body in it as a disc
-      for its limb, while `painterOrder` still leaves meshes out.
+      for its limb, while `painterOrder` still leaves meshes out. _R10.T10.c gives
+      `SMOOTH_MESH_MATERIAL` the coverage mask (binding 13) and `coverageAxes`, with
+      `LitBodyInput.surveyCoverage` (the mask with the axes it is read in, `MeshBodyCoverage`) and
+      the mesh plan's coverage; R10.T10.e reads the mask only for a body handed over (the mesh
+      plan's `role`, `MeshBodyRole`: `promoted`, or `handed-over` with its coverage) and adds
+      `LitBodyInput.handoverReliefM` and `PhotorealFrame.terrain`, drawn in the `bodies` pass after
+      the figures (R10's Risks, T10.c and T10.e as built)._
     - `PhotorealFrame` gains `depthWriters`. The view passes none: nothing in a view writes depth
       yet (R10's terrain, lit craft), so the live client never promotes and draws as before. This
       replaces T8.a part 2's "Promotion … is not called".
@@ -8589,7 +8600,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       (`build-variants.sh`, logs, `cycles-sd1.txt`), with `cost-t19/`'s instrumentation.
 - **Deviations in T8.c, as built** (2026-10-06; the shading lane, after T19.e). Built as
   decision-r07-small-disc-cost rules it: the constants, `discSamples` and `discRecordOf`'s counts,
-  with no hysteresis and no shader change.
+  with no hysteresis and no shader change. _R10.T10.f: under a class map the 8 × 8 cells at 3 px
+  miss a pattern's edge in the near-limb band; the disc is 1.7–2.6% under the point facing an
+  Iapetus's leading side (R10's "Deferred findings (R10.T10.f)")._
   - **`discSamples(diameterPx)`** returns `DiscSamples` (`{ interior, limb }`): 8 × 8 below
     `FINE_DISC_PX`, 4 × 4 below `SMALL_DISC_PX`, one inside and `LIMB_SAMPLES` on the limb above.
     NaN, and +∞ (which `angularDiameterPx` gives for a camera inside the body), take the large

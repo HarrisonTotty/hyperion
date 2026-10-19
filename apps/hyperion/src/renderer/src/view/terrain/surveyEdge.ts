@@ -13,15 +13,23 @@
  * the spheroid in pieces of at most {@link SURVEY_EDGE_PIECE_PX} on the view, at the rim of the
  * step the skirts join (`terrainLit.wgsl`): the higher of the drawn ground's height there and the
  * datum's, so that the line stands on the edge of the higher surface and the step falls away from
- * it on one side. A point is drawn while it lies in front of the camera and above the spheroid's
- * horizon; the line and the ticks are view-space segments, so that the draw's depth test hides them
- * behind nearer ground (R02's lines). The first view to draw a body's terrain (R10.T10.e's
- * hand-over, T11's wireframe) gives the view its coverage and heights; T12 lists the note and draws
- * the line-of-sight mark the ticks keep clear of.
+ * it on one side. A piece is clipped, not dropped: at the spheroid's horizon, bisected along its
+ * side to the crossing, and at the near plane, where the piece is a straight segment in view space
+ * cut at its view depth, so that the line runs on to the view's edge beneath a ship low over it.
+ * The line and the ticks are view-space segments, so that the draw's depth test hides them behind
+ * nearer ground (R02's lines). The first view to draw a body's terrain (R10.T10.e's hand-over,
+ * T11's wireframe) gives the view its coverage and heights; T12 lists the note and draws the
+ * line-of-sight mark the ticks keep clear of.
  */
 import { type BodyDistanceUnit, formatBodyDistance } from "../../lib/format";
-import { add, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
-import { type ProjectionCamera, project, toViewAxes, type Viewport } from "../camera/projection";
+import { add, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import {
+  NEAR_PLANE_M,
+  type ProjectionCamera,
+  project,
+  toViewAxes,
+  type Viewport,
+} from "../camera/projection";
 import { rotationRows } from "../camera/quaternion";
 import { narrow } from "../coords/narrow";
 import { type Rotation3, rotateToBody, rotateToBodyFixed } from "../coords/rotation";
@@ -49,8 +57,20 @@ export const SURVEY_EDGE_TICK_CLEARANCE_REM = 0.5;
  */
 export const SURVEY_EDGE_PIECE_PX = 8;
 
-/** The most pieces one side is drawn in: the cap where a side's ends lie off the view or behind. */
+/**
+ * The pieces a side is first cut into where an end lies off the view, behind the camera or below
+ * the horizon; each is then halved where it is longer than {@link SURVEY_EDGE_PIECE_PX} on the view.
+ */
 export const SURVEY_EDGE_MAX_PIECES = 64;
+
+/**
+ * The most times a piece is halved: 2⁻²⁰ of a 64th of a level-5 cell's side on an Earth-sized body
+ * is some 5 mm, finer than a pixel wherever the camera stands above the near plane's 0.1 m.
+ */
+const MAX_SPLITS = 20;
+
+/** The bisection's steps to a side's horizon crossing: 2⁻⁴⁰ of a piece, far below a pixel. */
+const HORIZON_STEPS = 40;
 
 /** A body's survey as a view draws its edge. */
 export interface SurveyEdgeView {
@@ -91,7 +111,10 @@ export interface SurveyEdgeMark {
   readonly line: Float32Array;
   /** The ticks' segments, laid out as {@link SurveyEdgeMark.line}'s. */
   readonly ticks: Float32Array;
-  /** The range to the drawn edge's nearest point inside the view, m, or `null` where none is. */
+  /**
+   * The range to the drawn line's nearest point inside the view, m, over each segment as clipped
+   * to the view's edges, or `null` where none is.
+   */
   readonly nearestRangeM: number | null;
 }
 
@@ -116,6 +139,16 @@ interface DirectedSide {
 function directionAt(face: Face, a: number, b: number, cells: number): Vec3 {
   const [x, y, z] = unitDir(faceUvToXyz(face, stToUv(a / cells), stToUv(b / cells)));
   return vec3(x, y, z);
+}
+
+/** The unit direction of the point `t` of the way along `side`, uniform in the cell coordinates. */
+function sideDirection(side: DirectedSide, t: number, cells: number): Vec3 {
+  return directionAt(
+    side.face,
+    side.from[0] + t * (side.to[0] - side.from[0]),
+    side.from[1] + t * (side.to[1] - side.from[1]),
+    cells,
+  );
 }
 
 /** `edge` directed with its surveyed cell on the left (each face's e₁ × e₂ is its outward axis). */
@@ -188,18 +221,21 @@ function runsOf(sides: ReadonlyArray<DirectedSide>): DirectedSide[][] {
   return runs;
 }
 
-/** A point of the drawn edge. */
+/** A point of a side on the ground. */
 interface EdgePoint {
+  /** Its place along the side, 0 at its start to 1 at its end. */
+  readonly t: number;
   /** From the camera, m along the frame's axes. */
   readonly fromCameraM: Vec3;
-  readonly screen: ScreenPx;
-  /** Whether it is drawn: in front of the camera and above the spheroid's horizon. */
-  readonly drawn: boolean;
-  /**
-   * The unsurveyed side of the side it was placed on, a point a little into it, as
-   * {@link fromCameraM}: for every point but a run's first, the side of the piece it ends.
-   */
-  readonly outwardM: Vec3;
+  /** Its distance along the camera's view axis, m: in front of the near plane from 0.1. */
+  readonly wM: number;
+  /** Whether it lies above the spheroid's horizon seen from the camera. */
+  readonly above: boolean;
+}
+
+/** Whether a point is drawn as it stands: above the horizon and in front of the near plane. */
+function seen(p: EdgePoint): boolean {
+  return p.above && p.wM >= NEAR_PLANE_M;
 }
 
 /** Whether the body-fixed point `p` lies above the spheroid's horizon seen from `camera`. */
@@ -237,16 +273,83 @@ function pushSegment(out: number[], a: Vec3, b: Vec3): void {
 }
 
 /**
+ * The part of the segment from `a` to `b`, as fractions of it, that lies inside the view's four
+ * side planes (Cyrus–Beck), or `null` where none does; `a` and `b` in the view's axes, in front.
+ */
+function insideView(a: Vec3, b: Vec3, s: number, aspect: number): readonly [number, number] | null {
+  let t0 = 0;
+  let t1 = 1;
+  // Inside each plane where −z ± s x ≥ 0 and −z ± s a y ≥ 0.
+  for (const [kx, ky] of [
+    [s, 0],
+    [-s, 0],
+    [0, s * aspect],
+    [0, -s * aspect],
+  ] as const) {
+    const fa = -a.z - kx * a.x - ky * a.y;
+    const fb = -b.z - kx * b.x - ky * b.y;
+    if (fa < 0 && fb < 0) {
+      return null;
+    }
+    if (fa < 0) {
+      t0 = Math.max(t0, fa / (fa - fb));
+    } else if (fb < 0) {
+      t1 = Math.min(t1, fa / (fa - fb));
+    }
+  }
+  return t0 <= t1 ? [t0, t1] : null;
+}
+
+/**
+ * The part of the screen segment from `p` to `q`, as fractions of it, that lies within `marginPx`
+ * of the viewport (Liang–Barsky), or `null` where none does.
+ */
+function onViewport(
+  p: ScreenPx,
+  q: ScreenPx,
+  viewport: Viewport,
+  marginPx: number,
+): readonly [number, number] | null {
+  let u0 = 0;
+  let u1 = 1;
+  const dx = q.xPx - p.xPx;
+  const dy = q.yPx - p.yPx;
+  for (const [d, low, high, at] of [
+    [dx, -marginPx, viewport.widthPx + marginPx, p.xPx],
+    [dy, -marginPx, viewport.heightPx + marginPx, p.yPx],
+  ] as const) {
+    if (d === 0) {
+      if (at < low || at > high) {
+        return null;
+      }
+      continue;
+    }
+    const ua = (low - at) / d;
+    const ub = (high - at) / d;
+    u0 = Math.max(u0, Math.min(ua, ub));
+    u1 = Math.min(u1, Math.max(ua, ub));
+  }
+  return u0 <= u1 ? [u0, u1] : null;
+}
+
+/**
  * The survey edge's mark of `view` on a camera's view: its line and ticks as view-space segments,
  * and the range to its nearest point inside the view.
  *
  * @remarks
- * A tick stands at every {@link SURVEY_EDGE_TICK_SPACING_REM} of a drawn run's length on the view,
- * the first half a spacing from the run's start, at right angles to the line on the view and
- * {@link SURVEY_EDGE_TICK_REM} long, towards the side the unsurveyed cell lies on there; its far
- * end is placed at its foot's depth, so that its length on the view is the guide's. A tick that
- * would come within {@link SURVEY_EDGE_TICK_CLEARANCE_REM} of the line-of-sight mark's ticks is
- * left out. The line is never dashed.
+ * Each piece of a side is drawn where it lies above the spheroid's horizon and in front of the near
+ * plane, clipped exactly at each: at the horizon by bisection along the side to the crossing, at
+ * the near plane by the piece's view depth, along which it is straight. A piece that is in the view
+ * and longer than {@link SURVEY_EDGE_PIECE_PX} there is halved, so that the line follows the
+ * ground beneath a camera close above it. The range is the least over the drawn segments, each as
+ * clipped to the view's edges, so that a line running out of the view is measured where it crosses
+ * the edge. A tick stands at every {@link SURVEY_EDGE_TICK_SPACING_REM} of a drawn run's length on
+ * the view, the first half a spacing from the run's start, at right angles to the line on the view
+ * and {@link SURVEY_EDGE_TICK_REM} long, towards the side the unsurveyed cell lies on there; its
+ * far end is placed at its foot's depth, so that its length on the view is the guide's. Only the
+ * ticks within a tick's length of the view are placed. A tick that would come within
+ * {@link SURVEY_EDGE_TICK_CLEARANCE_REM} of the line-of-sight mark's ticks is left out. The line is
+ * never dashed.
  */
 export function surveyEdgeMark(
   view: SurveyEdgeView,
@@ -268,6 +371,26 @@ export function surveyEdgeMark(
       : datum;
   };
   const fromCamera = (p: Vec3): Vec3 => add(centreM, rotateToBody(rotation, p));
+  const depthOf = (fromCameraM: Vec3): number => -toViewAxes(fromCameraM, camera.orientation).z;
+  const pointAt = (side: DirectedSide, t: number): EdgePoint => {
+    const ground = groundAt(sideDirection(side, t, cells));
+    const fromCameraM = fromCamera(ground);
+    return {
+      t,
+      fromCameraM,
+      wM: depthOf(fromCameraM),
+      above: aboveHorizon(ground, cameraBodyFixedM, figure),
+    };
+  };
+  // A hundredth of a cell into the unsurveyed side of `side` at `t`, from the camera.
+  const outwardAt = (side: DirectedSide, t: number): Vec3 => {
+    const d = sideDirection(side, t, cells);
+    return fromCamera(groundAt(normalise(add(d, scale(sub(side.outward, d), 0.01)))));
+  };
+  const screenOf = (fromCameraM: Vec3): ScreenPx => {
+    const { xPx, yPx } = project(fromCameraM, camera, viewport);
+    return { xPx, yPx };
+  };
   const sides = FACES.flatMap((face) =>
     surveyEdges(coverage, face).map((edge) => directed(edge, cells)),
   );
@@ -279,62 +402,70 @@ export function surveyEdgeMark(
   const clearance2 = (SURVEY_EDGE_TICK_CLEARANCE_REM * remPx) ** 2;
   const [right, up] = cameraAxes(camera);
   const s = 1 / Math.tan(camera.fovXRad / 2);
+  const aspect = viewport.widthPx / viewport.heightPx;
   const rangeFrom = options.rangeFromM ?? vec3(0, 0, 0);
   let nearestRangeM: number | null = null;
-  for (const run of runsOf(sides)) {
-    const points = runPoints(
-      run,
-      cells,
-      groundAt,
-      fromCamera,
-      (p) => aboveHorizon(p, cameraBodyFixedM, figure),
-      camera,
-      viewport,
+  // The length along the drawn run, px, and that at which the next tick stands.
+  let along = 0;
+  let nextTickPx = spacingPx / 2;
+  const gap = (): void => {
+    along = 0;
+    nextTickPx = spacingPx / 2;
+  };
+
+  // The least range over the part of the segment from `pM` to `qM` inside the view.
+  const measure = (pM: Vec3, qM: Vec3): void => {
+    const inside = insideView(
+      toViewAxes(pM, camera.orientation),
+      toViewAxes(qM, camera.orientation),
+      s,
+      aspect,
     );
-    // The length along the drawn run, px, at which the next tick stands.
-    let along = 0;
-    let nextTickPx = spacingPx / 2;
-    for (let k = 1; k < points.length; k += 1) {
-      const p = points[k - 1];
-      const q = points[k];
-      if (p === undefined || q === undefined) {
-        continue;
-      }
-      if (!(p.drawn && q.drawn)) {
-        along = 0;
-        nextTickPx = spacingPx / 2;
-        continue;
-      }
-      pushSegment(line, p.fromCameraM, q.fromCameraM);
-      for (const point of [p, q]) {
-        const { xPx, yPx } = point.screen;
-        if (xPx >= 0 && xPx <= viewport.widthPx && yPx >= 0 && yPx <= viewport.heightPx) {
-          const rangeM = norm(sub(point.fromCameraM, rangeFrom));
-          nearestRangeM = nearestRangeM === null ? rangeM : Math.min(nearestRangeM, rangeM);
-        }
-      }
-      const dx = q.screen.xPx - p.screen.xPx;
-      const dy = q.screen.yPx - p.screen.yPx;
-      const lengthPx = Math.hypot(dx, dy);
-      if (!(lengthPx > 0)) {
-        continue;
-      }
-      // The line's normal on the view, towards the unsurveyed side of the piece's side, which its
-      // far end's is: its near end may be the corner it shares with the side before.
-      const outward = project(q.outwardM, camera, viewport);
+    if (inside === null) {
+      return;
+    }
+    const d = sub(qM, pM);
+    const length2 = dot(d, d);
+    const t = length2 > 0 ? dot(sub(rangeFrom, pM), d) / length2 : 0;
+    const at = Math.min(inside[1], Math.max(inside[0], t));
+    const rangeM = norm(sub(add(pM, scale(d, at)), rangeFrom));
+    nearestRangeM = nearestRangeM === null ? rangeM : Math.min(nearestRangeM, rangeM);
+  };
+
+  // A drawn segment, both ends in front: its line, its range and its ticks, the tick's side from
+  // `reference`, the piece's end farther in front, on `side`.
+  const draw = (pM: Vec3, qM: Vec3, side: DirectedSide, reference: EdgePoint): void => {
+    pushSegment(line, pM, qM);
+    measure(pM, qM);
+    const p = screenOf(pM);
+    const q = screenOf(qM);
+    const dx = q.xPx - p.xPx;
+    const dy = q.yPx - p.yPx;
+    const lengthPx = Math.hypot(dx, dy);
+    if (!(lengthPx > 0)) {
+      return;
+    }
+    const placed = onViewport(p, q, viewport, tickPx);
+    if (placed !== null) {
+      // The line's normal on the view, towards the unsurveyed side of the piece's side.
+      const outward = project(outwardAt(side, reference.t), camera, viewport);
+      const at = screenOf(reference.fromCameraM);
       let nx = -dy / lengthPx;
       let ny = dx / lengthPx;
-      if (
-        outward.inFront &&
-        (outward.xPx - q.screen.xPx) * nx + (outward.yPx - q.screen.yPx) * ny < 0
-      ) {
+      if (outward.inFront && (outward.xPx - at.xPx) * nx + (outward.yPx - at.yPx) * ny < 0) {
         nx = -nx;
         ny = -ny;
       }
-      while (nextTickPx <= along + lengthPx) {
-        const t = (nextTickPx - along) / lengthPx;
+      const firstPx = along + placed[0] * lengthPx;
+      if (nextTickPx < firstPx) {
+        nextTickPx += Math.ceil((firstPx - nextTickPx) / spacingPx) * spacingPx;
+      }
+      const wp = depthOf(pM);
+      const wq = depthOf(qM);
+      while (nextTickPx <= along + placed[1] * lengthPx) {
+        const u = (nextTickPx - along) / lengthPx;
         nextTickPx += spacingPx;
-        const foot: ScreenPx = { xPx: p.screen.xPx + t * dx, yPx: p.screen.yPx + t * dy };
+        const foot: ScreenPx = { xPx: p.xPx + u * dx, yPx: p.yPx + u * dy };
         const end: ScreenPx = { xPx: foot.xPx + tickPx * nx, yPx: foot.yPx + tickPx * ny };
         if (
           options.keepClear.some(
@@ -345,18 +476,112 @@ export function surveyEdgeMark(
         ) {
           continue;
         }
-        const footM = add(p.fromCameraM, scale(sub(q.fromCameraM, p.fromCameraM), t));
+        // The segment's point that lands u of the way along it on the view: 1 ÷ w is linear there.
+        const t = (u * wp) / (u * wp + (1 - u) * wq);
+        const footM = add(pM, scale(sub(qM, pM), t));
         // A view offset of (Δx, Δy) px at a point w along the view's axis is (Δx, −Δy) × 2w ÷ (s W)
         // along the camera's right and up axes (`project`'s inverse at that depth).
-        const w = -toViewAxes(footM, camera.orientation).z;
-        const metresPerPx = (2 * w) / (s * viewport.widthPx);
+        const metresPerPx = (2 * depthOf(footM)) / (s * viewport.widthPx);
         const endM = add(
           footM,
           add(scale(right, tickPx * nx * metresPerPx), scale(up, -tickPx * ny * metresPerPx)),
         );
         pushSegment(ticks, footM, endM);
       }
-      along += lengthPx;
+    }
+    along += lengthPx;
+  };
+
+  // The point of `side` between `p` (above the horizon) and `q` (below) where it crosses, as the
+  // last point above.
+  const horizonCrossing = (side: DirectedSide, p: EdgePoint, q: EdgePoint): EdgePoint => {
+    let above = p;
+    let below = q;
+    for (let step = 0; step < HORIZON_STEPS; step += 1) {
+      const mid = pointAt(side, (above.t + below.t) / 2);
+      if (mid.above) {
+        above = mid;
+      } else {
+        below = mid;
+      }
+    }
+    return above;
+  };
+
+  // The piece of `side` from `p` to `q`, drawn as far as it is seen, halved where it is long.
+  const piece = (side: DirectedSide, p: EdgePoint, q: EdgePoint, splits: number): void => {
+    if (!(p.above || q.above)) {
+      gap();
+      return;
+    }
+    if (p.above !== q.above) {
+      if (p.above) {
+        piece(side, p, horizonCrossing(side, p, q), splits);
+        gap();
+      } else {
+        gap();
+        piece(side, horizonCrossing(side, q, p), q, splits);
+      }
+      return;
+    }
+    if (p.wM < NEAR_PLANE_M && q.wM < NEAR_PLANE_M) {
+      gap();
+      return;
+    }
+    // Straight in view space, the piece meets the near plane where its depth is the plane's.
+    const cut = (): Vec3 =>
+      add(
+        p.fromCameraM,
+        scale(sub(q.fromCameraM, p.fromCameraM), (NEAR_PLANE_M - p.wM) / (q.wM - p.wM)),
+      );
+    const pM = p.wM < NEAR_PLANE_M ? cut() : p.fromCameraM;
+    const qM = q.wM < NEAR_PLANE_M ? cut() : q.fromCameraM;
+    const ps = screenOf(pM);
+    const qs = screenOf(qM);
+    if (
+      splits < MAX_SPLITS &&
+      Math.hypot(qs.xPx - ps.xPx, qs.yPx - ps.yPx) > SURVEY_EDGE_PIECE_PX &&
+      insideView(
+        toViewAxes(pM, camera.orientation),
+        toViewAxes(qM, camera.orientation),
+        s,
+        aspect,
+      ) !== null
+    ) {
+      const mid = pointAt(side, (p.t + q.t) / 2);
+      piece(side, p, mid, splits + 1);
+      piece(side, mid, q, splits + 1);
+      return;
+    }
+    if (p.wM < NEAR_PLANE_M) {
+      gap();
+    }
+    draw(pM, qM, side, p.wM >= q.wM ? p : q);
+    if (q.wM < NEAR_PLANE_M) {
+      gap();
+    }
+  };
+
+  for (const run of runsOf(sides)) {
+    gap();
+    for (const side of run) {
+      const first = pointAt(side, 0);
+      const last = pointAt(side, 1);
+      const span = (): number => {
+        const p = screenOf(first.fromCameraM);
+        const q = screenOf(last.fromCameraM);
+        return Math.hypot(q.xPx - p.xPx, q.yPx - p.yPx);
+      };
+      const pieces =
+        seen(first) && seen(last)
+          ? Math.min(SURVEY_EDGE_MAX_PIECES, Math.max(1, Math.ceil(span() / SURVEY_EDGE_PIECE_PX)))
+          : SURVEY_EDGE_MAX_PIECES;
+      let p = first;
+      for (let k = 1; k <= pieces; k += 1) {
+        const q = k === pieces ? last : pointAt(side, k / pieces);
+        piece(side, p, q, 0);
+        p = q;
+      }
     }
   }
   return {
@@ -370,63 +595,6 @@ export function surveyEdgeMark(
 function cameraAxes(camera: ProjectionCamera): readonly [Vec3, Vec3] {
   const [r0, r1, r2] = rotationRows(camera.orientation);
   return [vec3(r0.x, r1.x, r2.x), vec3(r0.y, r1.y, r2.y)];
-}
-
-/**
- * A run's points: each side in pieces of at most {@link SURVEY_EDGE_PIECE_PX} on the view, its
- * last point the next side's first, uniform in the cell coordinates along it.
- */
-function runPoints(
-  run: ReadonlyArray<DirectedSide>,
-  cells: number,
-  groundAt: (d: Vec3) => Vec3,
-  fromCamera: (p: Vec3) => Vec3,
-  visible: (p: Vec3) => boolean,
-  camera: ProjectionCamera,
-  viewport: Viewport,
-): EdgePoint[] {
-  const points: EdgePoint[] = [];
-  const pointAt = (side: DirectedSide, t: number): EdgePoint => {
-    const ca = side.from[0] + t * (side.to[0] - side.from[0]);
-    const cb = side.from[1] + t * (side.to[1] - side.from[1]);
-    const d = directionAt(side.face, ca, cb, cells);
-    const ground = groundAt(d);
-    const fromCameraM = fromCamera(ground);
-    const projected = project(fromCameraM, camera, viewport);
-    // A hundredth of a cell into the unsurveyed side, on the datum.
-    const into = normalise(add(d, scale(sub(side.outward, d), 0.01)));
-    return {
-      fromCameraM,
-      screen: { xPx: projected.xPx, yPx: projected.yPx },
-      drawn: projected.inFront && visible(ground),
-      outwardM: fromCamera(groundAt(into)),
-    };
-  };
-  run.forEach((side, n) => {
-    const first = pointAt(side, 0);
-    const last = pointAt(side, 1);
-    const pieces =
-      first.drawn && last.drawn
-        ? Math.min(
-            SURVEY_EDGE_MAX_PIECES,
-            Math.max(
-              1,
-              Math.ceil(
-                Math.hypot(last.screen.xPx - first.screen.xPx, last.screen.yPx - first.screen.yPx) /
-                  SURVEY_EDGE_PIECE_PX,
-              ),
-            ),
-          )
-        : SURVEY_EDGE_MAX_PIECES;
-    if (n === 0) {
-      points.push(first);
-    }
-    for (let k = 1; k < pieces; k += 1) {
-      points.push(pointAt(side, k / pieces));
-    }
-    points.push(last);
-  });
-  return points;
 }
 
 /**

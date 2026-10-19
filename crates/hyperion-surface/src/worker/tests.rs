@@ -1024,13 +1024,14 @@ fn worker_lines_of_sight_meet_the_survey_leave_it_and_miss() {
 }
 
 /// One of the worker's queries, for the order checks: a probe's bake, a reading at a point and
-/// baseline, a line of sight, or a material at a point.
+/// baseline, a line of sight, a material at a point, or the class map.
 #[derive(Debug, Clone, Copy)]
 enum Query {
     Bake(usize),
     Reading(usize, f64),
     Sight(usize),
     Material(usize),
+    ClassMap,
 }
 
 /// A [`Query`]'s answer.
@@ -1040,6 +1041,7 @@ enum Answer {
     Reading(Result<Option<SurveyedReading>, QueryBodyError>),
     Sight(Result<LineOfSight, QueryBodyError>),
     Material(Result<Option<SurveyedMaterial>, QueryBodyError>),
+    ClassMap(Result<ClassMap, QueryBodyError>),
 }
 
 /// The points the order checks read: in either survey, in a margin and not held.
@@ -1052,7 +1054,7 @@ fn query_points() -> [FaceUv; 4] {
     ]
 }
 
-/// Every kind of query, interleaved.
+/// Every kind of query, interleaved, the class map after every second round of the others.
 fn queries() -> Vec<Query> {
     let mut queries = Vec::new();
     for n in 0..probes().len() {
@@ -1060,6 +1062,9 @@ fn queries() -> Vec<Query> {
         queries.push(Query::Reading(n % 4, if n % 2 == 0 { 2.0 } else { 100.0 }));
         queries.push(Query::Sight(n % 3));
         queries.push(Query::Material(n % 4));
+        if n % 2 == 0 {
+            queries.push(Query::ClassMap);
+        }
     }
     queries
 }
@@ -1084,6 +1089,7 @@ fn ask(
             Answer::Sight(fields.slant_range(body, SEED, &origin, &direction, Metres::new(1e7)))
         }
         Query::Material(n) => Answer::Material(fields.material(body, SEED, query_points()[n])),
+        Query::ClassMap => Answer::ClassMap(fields.class_map(body, SEED)),
     }
 }
 
@@ -1216,7 +1222,12 @@ fn worker_class_map_holds_each_surveyed_cell_with_the_weights_at_its_centre() {
         indices(&surveyed)
     );
     let classes: Vec<GroundMaterial> = map.classes().iter().map(ClassMapClass::material).collect();
-    assert!(!classes.is_empty() && classes.len() <= CLASS_MAP_CLASSES);
+    assert_ne!(classes, []);
+    assert!(
+        classes.len() <= CLASS_MAP_CLASSES,
+        "{} classes",
+        classes.len()
+    );
     assert!(
         classes.windows(2).all(|w| w[0] < w[1]),
         "the classes once each, in GroundMaterial's order: {classes:?}"
@@ -1261,6 +1272,52 @@ fn worker_class_map_needs_the_body_s_field() {
         fields.class_map(other, SEED),
         Err(QueryBodyError::NotStarted(other))
     );
+}
+
+#[test]
+fn worker_class_map_of_a_survey_without_its_margin_waits_for_the_margin() {
+    let f = fixture();
+    let mut fresh = WorkerFields::new();
+    fresh.init(f.body, &f.first_blocks[0]).unwrap();
+    for block in &f.first_blocks[1..] {
+        fresh.chunk(f.body, block).unwrap();
+    }
+    let full = fresh.class_map(f.body, SEED).unwrap();
+    assert!(full.is_complete());
+    let full_texels: BTreeSet<PatchKey> = full.texels().iter().map(ClassMapTexel::cell).collect();
+    // Each later block of the first payload with block 0 alone, so that a texel's cell can be held
+    // surveyed while the margin its weights read, in other blocks, is not.
+    let mut waited = false;
+    for (k, block) in f.first_blocks.iter().enumerate().skip(1) {
+        let mut fields = WorkerFields::new();
+        fields.init(f.body, &f.first_blocks[0]).unwrap();
+        fields.chunk(f.body, block).unwrap();
+        let partial = fields.class_map(f.body, SEED).unwrap();
+        if partial.is_complete() {
+            continue;
+        }
+        let held: BTreeSet<PatchKey> = partial.texels().iter().map(ClassMapTexel::cell).collect();
+        let field = fields.field(f.body).unwrap();
+        let waiting = *full_texels
+            .iter()
+            .find(|&&t| field.is_surveyed(t) && !held.contains(&t))
+            .unwrap_or_else(|| panic!("block {k}: an incomplete map leaves out a surveyed texel"));
+        // The rest of the payload: the map is whole, holds the texel and is a fresh worker's.
+        for (n, rest) in f.first_blocks.iter().enumerate().skip(1) {
+            if n != k {
+                fields.chunk(f.body, rest).unwrap();
+            }
+        }
+        let whole = fields.class_map(f.body, SEED).unwrap();
+        assert!(whole.is_complete(), "block {k}");
+        assert!(
+            whole.texels().iter().any(|t| t.cell() == waiting),
+            "block {k}: {waiting:?}"
+        );
+        assert_eq!(whole, full, "block {k}");
+        waited = true;
+    }
+    assert!(waited, "some texel's weights read a margin still to come");
 }
 
 #[test]
@@ -1337,24 +1394,32 @@ fn worker_class_map_weighs_a_partly_surveyed_texel_by_its_surveyed_cells() {
     );
 }
 
+/// [`bytes_by_largest_remainder`]'s bytes for `values`, those past them checked 0.
+fn bytes_of(values: &[f64]) -> Vec<u8> {
+    let bytes = bytes_by_largest_remainder(values);
+    let (held, rest) = bytes.split_at(values.len());
+    assert!(rest.iter().all(|&b| b == 0), "{values:?}: {bytes:?}");
+    held.to_vec()
+}
+
 #[test]
 fn worker_class_map_bytes_keep_their_sum_by_the_largest_remainder() {
-    assert_eq!(
-        bytes_by_largest_remainder(&[85.0, 85.0, 85.0]),
-        [85, 85, 85]
-    );
+    assert_eq!(bytes_of(&[85.0, 85.0, 85.0]), [85, 85, 85]);
     // Ties to the earlier.
-    assert_eq!(bytes_by_largest_remainder(&[127.5, 127.5]), [128, 127]);
-    assert_eq!(
-        bytes_by_largest_remainder(&[255.0 / 3.0, 510.0 / 3.0]),
-        [85, 170]
-    );
-    assert_eq!(
-        bytes_by_largest_remainder(&[100.4, 100.4, 54.2]),
-        [101, 100, 54]
-    );
+    assert_eq!(bytes_of(&[127.5, 127.5]), [128, 127]);
+    assert_eq!(bytes_of(&[255.0 / 3.0, 510.0 / 3.0]), [85, 170]);
+    assert_eq!(bytes_of(&[100.4, 100.4, 54.2]), [101, 100, 54]);
     // A sum short of 255, a class left out: the rounded sum.
-    assert_eq!(bytes_by_largest_remainder(&[60.6, 60.6]), [61, 60]);
+    assert_eq!(bytes_of(&[60.6, 60.6]), [61, 60]);
+    // As many values as the map has classes, and none.
+    let sixteen = [255.0 / 16.0; CLASS_MAP_CLASSES];
+    assert_eq!(
+        bytes_by_largest_remainder(&sixteen),
+        [
+            16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 15
+        ]
+    );
+    assert_eq!(bytes_of(&[]), [] as [u8; 0]);
 }
 
 #[test]

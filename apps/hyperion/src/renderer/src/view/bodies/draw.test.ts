@@ -38,6 +38,7 @@ import {
 import { hostAnnuli, type PlacedLight } from "../lighting/hostLights";
 import {
   type BodyFrameOptions,
+  type BodyFramePlan,
   LitBodyRenderer,
   type LitBodyInput,
   planLitBodies,
@@ -1550,64 +1551,87 @@ describe("mesh bodies (T9)", () => {
     renderer.dispose();
   });
 
-  it("draws a surveyed body's figure as the reference surface beneath its terrain, with the inverse coverage mask (R10.T10.c)", async () => {
-    const engine = await countingRenderEngine();
-    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+  const SURVEY_MASK: TextureHandle = { kind: "texture", name: "coverage mask" };
+  const SURVEY_ROTATION = rotation3FromRows([vec3(0, 1, 0), vec3(-1, 0, 0), vec3(0, 0, 1)]);
+
+  /**
+   * The three bodies with the planet handed over to its terrain (R10.T10.e: a relief of 2 px from
+   * here) and the moon a mesh by its overlap alone, each with its survey's mask and rotation.
+   */
+  function surveyedPlan(): BodyFramePlan {
     const { bodies, hosts } = sceneOfThree();
-    const mask: TextureHandle = { kind: "texture", name: "coverage mask" };
-    const rotation = rotation3FromRows([vec3(0, 1, 0), vec3(-1, 0, 0), vec3(0, 0, 1)]);
-    // The planet is handed over to its terrain (R10.T10.e: a relief of 2 px from here) and carries
-    // its survey and its rotation; the moon, a mesh by its overlap alone, a survey but no rotation
-    // to read it in.
     const surveyed: LitBodyInput[] = bodies.map((body) =>
-      body.id === PLANET
+      body.id === PLANET || body.id === MOON
         ? {
             ...body,
-            rotation,
-            surveyCoverage: mask,
-            handoverReliefM: (2 * norm(body.centreM)) / PX_PER_RAD,
+            rotation: SURVEY_ROTATION,
+            surveyCoverage: { mask: SURVEY_MASK, rotation: SURVEY_ROTATION },
+            ...(body.id === PLANET
+              ? { handoverReliefM: (2 * norm(body.centreM)) / PX_PER_RAD }
+              : {}),
           }
-        : body.id === MOON
-          ? { ...body, surveyCoverage: mask }
-          : body,
+        : body,
     );
-    const plan = planLitBodies(
+    return planLitBodies(
       surveyed,
       hosts,
       OPTIONS,
       new Map(bodies.map((b) => [b.id, "disc" as const])),
     );
+  }
+
+  /** The figures' draws of {@link surveyedPlan}, by body, and the engine that took them. */
+  async function surveyedDraws(): Promise<{
+    readonly byBody: ReadonlyMap<string | undefined, DrawItem>;
+    readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+  }> {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const plan = surveyedPlan();
+    const draws = renderer.meshDraws(plan);
+    renderer.dispose();
+    return {
+      byBody: new Map(
+        draws.map((draw) => [plan.discs[draw.uniforms["disc"]?.[0] ?? -1]?.body, draw]),
+      ),
+      engine,
+    };
+  }
+
+  it("hands the surveyed planet over to its terrain and draws the overlapped moon as a mesh (R10.T10.c)", () => {
+    const plan = surveyedPlan();
     expect(
       [PLANET, MOON, CLEAR].map((id) => (id === undefined ? id : plan.regimes.get(id))),
     ).toEqual(["terrain", "mesh", "disc"]);
-    expect(
-      plan.meshes.map((m) => [
-        plan.discs[m.index]?.body,
-        m.handedOver,
-        m.coverage?.mask.name ?? null,
-      ]),
-    ).toEqual(
+  });
+
+  it("gives the coverage mask to a mesh body handed over, and none to one promoted (R10.T10.c)", () => {
+    const plan = surveyedPlan();
+    expect(plan.meshes.map((m) => [plan.discs[m.index]?.body, m.role])).toEqual(
       expect.arrayContaining([
-        [PLANET, true, "coverage mask"],
-        [MOON, false, null],
+        [
+          PLANET,
+          { kind: "handed-over", coverage: { mask: SURVEY_MASK, rotation: SURVEY_ROTATION } },
+        ],
+        [MOON, { kind: "promoted" }],
       ]),
     );
-    const draws = renderer.meshDraws(plan);
-    const byBody = new Map(
-      draws.map((draw) => [plan.discs[draw.uniforms["disc"]?.[0] ?? -1]?.body, draw]),
-    );
-    const planetDraw = byBody.get(PLANET);
-    const moonDraw = byBody.get(MOON);
-    expect(planetDraw?.textures["coverageMask"]?.name).toBe("coverage mask");
-    expect(Array.from(planetDraw?.uniforms["coverageAxes"] ?? [])).toEqual(
-      Array.from(rotationColumns(rotation)),
-    );
-    // A body without a survey binds the mask of no surveyed cell, and draws its figure whole.
-    expect(moonDraw?.textures["coverageMask"]?.name).toBe("bodies:no coverage");
-    expect(engine.textureWritten.find((w) => w.texture === "bodies:no coverage")?.data).toEqual(
-      new Uint8Array(6),
-    );
-    renderer.dispose();
+  });
+
+  it("draws a surveyed body's figure as the reference surface beneath its terrain, with the coverage mask in its axes (R10.T10.c)", async () => {
+    const planetDraw = (await surveyedDraws()).byBody.get(PLANET);
+    expect([
+      planetDraw?.textures["coverageMask"]?.name,
+      Array.from(planetDraw?.uniforms["coverageAxes"] ?? []),
+    ]).toEqual(["coverage mask", Array.from(rotationColumns(SURVEY_ROTATION))]);
+  });
+
+  it("binds the mask of no surveyed cell for a body not handed over, which draws its figure whole (R10.T10.c)", async () => {
+    const { byBody, engine } = await surveyedDraws();
+    expect([
+      byBody.get(MOON)?.textures["coverageMask"]?.name,
+      engine.textureWritten.find((w) => w.texture === "bodies:no coverage")?.data,
+    ]).toEqual(["bodies:no coverage", new Uint8Array(6)]);
   });
 
   it("reads the coverage mask in the mesh material's fragment stage alone", () => {
@@ -1683,7 +1707,7 @@ describe("the hand-over to terrain (R10.T10.e)", () => {
     const { body, hosts } = bodyWithRelief(4);
     const plan = planLitBodies([body], hosts, OPTIONS, new Map([[body.id, "disc"]]));
     expect(plan.meshes).toHaveLength(1);
-    expect(plan.meshes[0]?.handedOver).toBe(true);
+    expect(plan.meshes[0]?.role.kind).toBe("handed-over");
     expect(plan.steps.filter((step) => step.kind === "limb")).toEqual([{ kind: "limb", mesh: 0 }]);
     expect(plan.steps.filter((step) => step.kind === "disc")).toEqual([]);
     expect(plan.discs.map((record) => record.body)).toEqual([body.id]);
@@ -1694,7 +1718,10 @@ describe("the hand-over to terrain (R10.T10.e)", () => {
     const surveyed: LitBodyInput = {
       ...body,
       rotation: rotation3FromRows([vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)]),
-      surveyCoverage: { kind: "texture", name: "coverage mask" },
+      surveyCoverage: {
+        mask: { kind: "texture", name: "coverage mask" },
+        rotation: rotation3FromRows([vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)]),
+      },
     };
     const writer = sphereFootprint(body.centreM, 6.371e6, CAMERA, VIEWPORT);
     const plan = planLitBodies(
@@ -1704,6 +1731,6 @@ describe("the hand-over to terrain (R10.T10.e)", () => {
       new Map([[body.id, "disc"]]),
     );
     expect(plan.regimes.get(body.id)).toBe("mesh");
-    expect(plan.meshes.map((m) => [m.handedOver, m.coverage])).toEqual([[false, null]]);
+    expect(plan.meshes.map((m) => m.role)).toEqual([{ kind: "promoted" }]);
   });
 });

@@ -203,6 +203,9 @@ describe("promoteOverlapping", () => {
     ]);
     const promoted = promoteOverlapping(regimes, footprints, []);
     expect([...promoted.values()]).toEqual(["terrain", "mesh", "disc"]);
+  });
+
+  it("draws as meshes the bodies promoted and those handed over to terrain alone (R10.T10.e)", () => {
     expect((["point", "disc", "mesh", "terrain"] as const).map(drawnAsMesh)).toEqual([
       false,
       false,

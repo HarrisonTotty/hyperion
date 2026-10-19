@@ -184,7 +184,10 @@ export interface OccluderSphere {
   readonly id: string;
   /** Its centre from the camera, `f32` m. */
   readonly centreF32: Float32Array;
-  /** Its radius, m: `occluderRadius`, a little inside the body. */
+  /**
+   * Its radius, m: `occluderRadius`, a little inside the body; of its polar radius where the list
+   * draws its survey edge, so that the edge on its spheroid stands outside it (R10.T10.c).
+   */
   readonly radiusM: number;
   /**
    * Its centre's distance from the camera less its radius, m, differenced in `f64`: the shader's
@@ -530,6 +533,9 @@ export function buildWireframeDrawList(
   const lines: LineBatch[] = [];
   const anchors: DrawAnchor[] = [];
   const limbs: { id: string; centreM: Vec3; radiusM: number }[] = [];
+  const surveyedPolarRadiusM = new Map(
+    (options.surveyEdges ?? []).map((edge) => [edge.body, edge.figure.polarRadiusM]),
+  );
   // Whether a mark is in sight: not behind the limb of a body drawn as a sphere, its own excepted.
   const shown = (pointM: Vec3, own: string | null): boolean =>
     !limbs.some((body) => body.id !== own && behindLimb(pointM, body.centreM, body.radiusM));
@@ -554,7 +560,13 @@ export function buildWireframeDrawList(
     if (wireframe.regime !== "symbol") {
       limbs.push({ id: body.id, centreM, radiusM: body.radiusM });
       const distanceM = norm(centreM);
-      const radiusM = occluderRadius(body.radiusM, distanceM);
+      // A body whose survey edge is drawn is occluded from inside its spheroid, at its polar
+      // radius: the edge stands on the spheroid, up to a − c inside the equatorial sphere
+      // (21 km on Earth), and the edge's own horizon cull hides what of it lies behind the body.
+      const radiusM = occluderRadius(
+        Math.min(body.radiusM, surveyedPolarRadiusM.get(body.id) ?? body.radiusM),
+        distanceM,
+      );
       occluderSpheres.push({
         id: body.id,
         centreF32: narrow(centreM),

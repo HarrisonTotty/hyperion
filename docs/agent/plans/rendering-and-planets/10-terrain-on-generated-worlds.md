@@ -303,7 +303,15 @@ index, and each query is given the body's detail seed, which the field does not 
   `coverage(body): CoverageView`, `onRevision`; it drives R09's `surface_field` and posts to R05's
   `HeightWorkerPool`.
 - `coverage.ts`: `CoverageView` (`resolutionAt(cell)`, `surveyedFraction()`, `bestResolution()`),
-  `surveyEdges(face, level)` for the edge mark, and the GPU coverage mask per face.
+  `surveyEdges(face, level)` for the edge mark, and the GPU coverage mask per face. _As built
+  (Risks, "Deviations in T10.c, as built"): `surveyEdges(coverage, face)`, the level the
+  coverage's own; the mask is `CoverageMask` (`update`, `survey`, `restore`, `release`), and the
+  mark `surveyEdge.ts`' `surveyEdgeMark` and `surveyEdgeNote`._
+- `handover.ts` (as built, R10.T10.e; Risks, "Deviations in T10.e, as built"): `handoverRangeM`,
+  the decision (`handsOver`, and `handOverRegimes` over a frame's discs), `handoverRangeRatio`,
+  `handoverReliefM`, `limbDistanceM`, `pixelAngleRad`, `handoverTauPx`, and `storeReliefSource`
+  over a `CoarseFieldStore` as a `HandoverReliefSource`; with R07's `photoreal/renderer.ts`
+  `FrameTerrain`, the frame's terrain input. R10.T16 ("The live terrain path") consumes them.
 - `levelBounds.ts`: `LevelBounds { hard: Float64Array; sigma: Float64Array }` per body, and
   `selectionBound(bounds, level, rule)`. As built, R05's selection reads its bound from the body's
   level table (`PlanetGeometry.levels`, four values a level: bound, lowest and highest height,
@@ -1646,7 +1654,8 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   hand, recorded: the skirt heights seen at the edge on a flattened generated world, which stay
   within the terrain's local relief. Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain src/renderer/src/view/engine`
-  (the `view/engine/` files it changes) and the smoke run.
+  (the `view/engine/` files it changes) and the smoke run. _As built (Risks, "Deviations in T10.c,
+  as built")._
 - **R10.T10.d The class map on the disc.**
   - **The map.** `classMap.ts` builds the per-body coarse class-weights map over surveyed cells
     that R07's disc samples (Design note 8), under `coarse-field-gpu` with the coverage mask. It
@@ -1701,6 +1710,7 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
       equal to `rasteriseDisc` within R07.T8.a's tolerance.
   - **Acceptance.** `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain
 src/renderer/src/view/bodies src/renderer/src/displays/view` and `just test-render`.
+  - _As built (Risks, "Deviations in T10.d, as built")._
 - **R10.T10.e The disc hands over.** R07's `disc` regime gives way to the quadtree at the range of
   Design note 13, per view and style. Tests: the handover range as a pure function (about
   1.8 × 10⁷ m for 10 km of relief at 1080p and 1 px, and 4.6 × 10⁶ m at the wireframe's 4 px), and a
@@ -1739,6 +1749,7 @@ src/renderer/src/view/bodies src/renderer/src/displays/view` and `just test-rend
     - A cached value is within 0.3% of a fresh one.
   - **Acceptance.** `pnpm --filter hyperion exec vitest run src/renderer/src/view/bodies` and
     `just test-render`.
+  - _As built (Risks, "Deviations in T10.f, as built")._
 
 ### R10.T11 The wireframe's terrain
 
@@ -5787,8 +5798,54 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
     spheroid's datum. The edge's look by eye, on the development machine and the owner's UHD 620,
     stays pending by hand until a view draws a generated world's terrain (T10.e, T15).
   - _Generator version._ Untouched (22): presentation alone, no golden moved.
+  - _Drafted for the owner_ (the batch review's UX findings, 2026-10-19, for the sign-off queue;
+    nothing new built to them, the note's text as built). Each for T12, which lists the note:
+    (a) with no own ship the note reads `SURVEY EDGE 4.21 km FROM CAMERA`, where the guide shows
+    only the own ship's form (`SURVEY EDGE 4.21 km`); (b) short ranges read `SURVEY EDGE 0.412 km`,
+    and below 10 m `SURVEY EDGE 5.00E-3 km` (the list's range form, `lib/format.ts`'
+    `formatBodyDistance`), while the readout's `SLANT RANGE` turns to m below 1 km; (c) the note is
+    one a body, so two bodies' edges in view give two identical `SURVEY EDGE …` notes: name the
+    body, or keep the nearest alone?; (d) the note's accessible name, which the guide gives for
+    the line-of-sight note and not for `SURVEY EDGE`.
+  - _The batch review (2026-10-19)._ The mark clips its pieces rather than dropping them
+    (`surveyEdgeMark`): at the spheroid's horizon by bisection along the side to the crossing, at
+    the near plane on the piece's straight view-space segment by its view depth, a piece in the
+    view and longer than 8 px halved (at most 20 times), so that the line runs on to the view's
+    edge beneath a ship low over its survey; the nearest range is the least over the drawn
+    segments as clipped to the view's four side planes, where a segment leaves the view included,
+    not over the vertices inside it; and the ticks are placed perspective-correctly along a
+    segment, only within a tick's length of the view (tested: a camera 100 m over an edge looking
+    along it 15° down, the line crossing the view's bottom edge and ending on the horizon, its range
+    a centimetre-sampled minimum's to 5 × 10⁻⁴). The draw list builds the occluder sphere of a
+    body whose survey edge it draws from its polar radius less the margin
+    (`occluderRadius(min(a, c), d)`), so that the edge on its spheroid, up to a − c inside the
+    equatorial sphere (21 km on Earth), passes the depth test: the one depth buffer every batch
+    tests against, filled by one instanced draw of the spheres before any line, cannot leave one
+    sphere out of one batch's test without a pass a surveyed body (and an order that fails with
+    two in view), and the edge's own horizon cull already hides what of it lies behind its body
+    (tested: Earth's figure, a survey at 47°, every point of the edge's batch in front of every
+    occluder; the cost is deferred below). `CoverageMask.restore()` makes the texture again from the
+    cells held, for the device loss its documentation names (`release()` now forgets them alone),
+    and `survey` writes nothing for a block that surveys nothing once a texture of its level stands.
+    `LitBodyInput.surveyCoverage` is a `MeshBodyCoverage`, the mask with the axes it is read in, and
+    `MeshBodyPlan.coverage` is in its `role` (T10.e's entry). The moon_like.golden parser is one
+    module, `src/test/moonLikeFixture.ts` (`moonLikeFixture`, `bytesOf`), shared by the two smoke
+    checks and the two wasm tests, which keep their own module loading; `smoke/litTerrain.ts`'
+    `MOON_LIKE` carries its TSDoc and is read-only. `smoothMesh.wgsl`'s comment names
+    `class_map_texel` as the coverage mask's lookup, with no gutter. Tests split to one behaviour
+    an `it` (`coverage.test.ts`, `drawList.test.ts`, `draw.test.ts`' mask test), and
+    `terrainMaterial.test.ts` holds the WGSL's `SURVEY_MASK_WORDS`, `SURVEY_CELL_CODE_BYTE` and
+    each `LIT_*` code to `slotLayout.ts` and `gpu/resources.ts`' `LIT_VERTEX_CODE`.
 - **Questions for "main" (R10.T10.c)** (none touches the server's contracts; each built to its
   lean).
+  - _The edge over the image, and the note's points, for R10.T16 and T12_ (the batch review,
+    2026-10-19; nothing passes survey edges to a view yet). The photorealistic overlay's depth
+    holds only the occluder spheres and the hulls' faces, so before survey edges reach it the
+    overlay needs the terrain's depth, or nearer ground will not hide the edge over the image (nor,
+    since the review, lines behind a surveyed body's equatorial limb; deferred below); and the note,
+    and whether it stands, must count only the edge points the operator can see: a CPU march
+    against `heightAtM`, or the depth-tested result. Lean: R10.T16's, as it wires the edges to the
+    views.
   - _The discard's rule._ Design note 12's "interpolated mask below one half" draws both surfaces,
     or neither, along a half-quad strip at each coarse cell's edge; as built, the fragment's cell at
     its centre vertex (above), the half only where a cell spans one quad or less. Lean: as built,
@@ -5821,6 +5878,23 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
   - _The cache's slots._ The `survey-mask` field takes 4,228 B a lit slot: 158,936 B, 422 slots in
     64 MiB on the low setting, against Design note 15's rule of 430; 311,024 B, 1,286 slots in
     400 MB on the high one. T14.
+  - _The mark sits at the ground's own depth_ (the batch review, 2026-10-19). Once the terrain's
+    depth is in the symbology's pass, a tick towards the camera sinks into the nearer ground, and
+    the line on the step's rim z-fights with the higher surface. The lever: the ticks' ends on the
+    ground, or the occluders' slope push for the terrain. For T11's GPU smoke.
+  - _Datum-deep skirts._ Every surveyed patch's foot strips hang from its ground to the datum on
+    all four edges, under its neighbours' surfaces, in a shader that discards, so hidden fragments
+    may be shaded before the depth test rejects them; the overdraw grows with the ground's height
+    above the datum, unmeasured. The lever: R05's skirt depth where no survey edge meets the patch
+    edge. T14.
+  - _A surveyed body's occluder at its polar radius_ (the batch review's choice, above). Between
+    its sphere of c less the margin and its equatorial limb, a band up to a − c deep at the
+    equator (21 km on Earth, some 15 px at the limb seen from 400 km up at 1080p across 60°),
+    lines behind the body
+    (another body's graticule, an orbit, a hull) are not hidden by the sphere. In the wireframe the
+    body's terrain, which T11 draws to depth wherever the list draws its edge, covers the band;
+    over the image the overlay holds no terrain depth yet (the question above). The lever: the
+    terrain's depth in the overlay, or an occluder of the spheroid's own shape.
 - **Deviations in T10.d, as built** (2026-10-16; lane r10-shader, on `rendering-and-planets` at
   `a4dcf814`).
   - _Files._ The task's: a new `view/terrain/classMap.ts` (`CLASS_MAP_LEVEL`,
@@ -5946,20 +6020,29 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     and `just test-render --part=1` (the class-map, disc and mesh groups, whose shader this task
     changes) and `--part=6` (the lit terrain and the survey edge, which compose `bodyDisc.wgsl`
     through the mesh regime); and the Rust the task's commands do not reach,
-    `cargo test -p hyperion-surface --features testing --lib worker` (31 tests, the five class-map
-    ones among them), with the surface crate's Clippy on the native and browser targets.
+    `cargo test -p hyperion-surface --features testing --lib worker` (32 tests since the batch
+    review, six of them the class map's: it added the incomplete-map test), with the surface
+    crate's Clippy on the native and browser targets.
   - _By hand._ None can run here: no view feeds a class map yet. The disc's look under a live
     survey, on the development machine and the owner's UHD 620, stays pending until the store is
     wired (T10.e's hand-over and T15).
   - _Generator version._ Untouched (22): presentation alone; no golden moved, the worker golden
     included (the map is tested natively and on the module without one).
+  - _The batch review (2026-10-19)._ The class map joins the worker's order-independence test, and
+    the incomplete map is tested (a texel whose margin is in a block not yet taken is left out,
+    then held, the map a fresh worker's); band level 0 is pinned in the weights goldens (new lines
+    at 22, no existing line moved; main's ruling on R10.T2's Q2); and the texel loop's allocations
+    are hoisted. On the client, the tests that failed for more than one reason are split, one
+    behaviour an `it` (`classMap.test.ts`' refusals and the store's restore, release, listener and
+    disposal; `heightBake.test.ts`' and `pool.test.ts`' class-map queries).
 - **Questions for "main" (R10.T10.d)** (none touches a contract of the server's; each built to its
   lean).
   - _Who wires the live store and pool._ No live view creates a `CoarseFieldStore` or a
     `HeightWorkerPool`, and no plan-10 task names wiring them. Lean: the task that first draws a
     body's terrain live (T10.e's hand-over, or T11's wireframe if it lands first) makes the store
     over the view's engine and the pool in `ViewStage`, beside T10.c's `CoverageMask`, and passes it
-    as `classMaps`.
+    as `classMaps`. _Answered 2026-10-16: R10.T16 "The live terrain path"
+    (decision-r10-live-path.md)._
   - _The map's level in the text._ Lean: Design note 8's "T2's weights at level 4 or shallower"
     and T2's "the class map's level (level 4)" read "a texel a cell of quadtree level 6, its
     weights at band level 0" (main's provisional ruling, confirmed here).
@@ -5984,6 +6067,11 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
   - _At a cube's corner_ three texels meet and the gutter's corner is empty, so within half a texel
     of a corner the reconstruction renormalises over three: continuous across each edge, not
     exactly at the corner.
+  - _The centre's cell at field levels 7 and 8_ (the batch review's consider item, 2026-10-19).
+    There a texel's centre is the corner where four of its 4 or 16 field cells meet, so which cell
+    is "the centre's" is settled by `PatchKey::containing`'s rounding of the st → uv → xyz → st
+    round trip: deterministic on every target, but an integer choice of the child,
+    `(i << shift) + (side >> 1)`, would be exact.
 - **Deviations in T10.e, as built** (2026-10-16; lane r10-shader, on `rendering-and-planets` at
   `05da4caf`).
   - _Files._ A new `view/terrain/handover.ts` (`pixelAngleRad`, `handoverRangeM`,
@@ -6005,8 +6093,8 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     `draw.test.ts`, `regime.test.ts`, `renderer.test.ts` and `photorealFrame.test.ts`.
   - _The range, pure_ (the lane lead's decision). `handoverRangeM(reliefM, tauPx, radPerPx)` is
     relief ÷ (τ · rad a pixel), refusing a relief negative or not finite and a τ or pixel not
-    positive: at Design note 13's 5.45 × 10⁻⁴ rad a pixel, 1.835 × 10⁷ m for 10 km at 1 px and
-    4.587 × 10⁶ m at 4 px (the task's 1.8 × 10⁷ and 4.6 × 10⁶ m). The view passes R07's own pixel,
+    positive: at Design note 13's 5.454 × 10⁻⁴ rad a pixel, 1.833 × 10⁷ m for 10 km at 1 px and
+    4.584 × 10⁶ m at 4 px (the task's 1.8 × 10⁷ and 4.6 × 10⁶ m). The view passes R07's own pixel,
     `pixelAngleRad` = 2 tan(fov ÷ 2) ÷ width, the inverse of `angularDiameterPx`'s centre-pixel
     scale that `litRegimes` measures its 3 px switch by, so that both switches count pixels alike:
     6.014 × 10⁻⁴ rad at 1080p across 60°, where 10 km hands over at 1.663 × 10⁷ m (4.157 × 10⁶ m at
@@ -6073,8 +6161,9 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     `terrainTexelLaws`, the latter the twin of `packTerrainLighting`'s law 0 and `packClassLaws`'
     slots), retiring T10.b's deferred "The class laws carry no figure scale". The factor is 1 under
     Lommel–Seeliger's L(0) = 1, whose disc reaches p on any figure, 1.0062 for the Ice row at
-    L(0) 0.628 and 1.0224 under Lambert's at c ÷ a 0.9, and 1 + 2.8 × 10⁻⁴ under Lambert's on the
-    Moon-like world (c ÷ a 0.9988). It is right as the disc's is: T10.a's c is solved on the
+    L(0) 0.628 and 1.0224 under Lambert's at c ÷ a 0.9, and 1 + 2.4 × 10⁻⁴ under Lambert's on the
+    Moon-like world (c ÷ a 0.9988; the code's 1 + 2.85 × 10⁻⁴ carries R07's quadrature bias,
+    deferred below). It is right as the disc's is: T10.a's c is solved on the
     sphere's p, and the factor takes the disc to that p equator-on, so the terrain under it draws
     the disc's light a class. T10.b's tests are unchanged but for the new argument (1, a sphere).
     `discShading.ts` exports `discReflectance(laws, c ÷ a, shares, μ₀, μ, α)`, the disc's own
@@ -6142,7 +6231,27 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     below). The Mars-like world, whose glaciers take Lambert's row (q 3/2) on 1.5% of its area at
     their clamped albedos, waits on T10.f's point integral or those albedos; the Earth-like is not
     served a scale.
+  - _Acceptance, as built:_ `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`
+    with `src/renderer/src/view/bodies`, `src/renderer/src/view/photoreal` and
+    `src/renderer/src/displays/view`, whose tests it adds; `just test-render --part=6`
+    (2026-10-16, both variants, 74 checks), and the whole harness in the batch's gate
+    (`/home/quantum/gh/hyperion/.git/rm45-scratch/r10-shader/smart-ci-final.log`), over the final
+    tree.
   - _Generator version._ Untouched (22): presentation alone, no golden moved.
+  - _The batch review (2026-10-19)._ `MeshBodyPlan.handedOver` and its `coverage` are one
+    discriminated `role` (`MeshBodyRole`: `{ kind: "promoted" }` or
+    `{ kind: "handed-over"; coverage: MeshBodyCoverage | null }`), read by an exhaustive switch, so
+    that a promoted body cannot carry a mask; `LitBodyInput.surveyCoverage` is the mask with the
+    axes it is read in (`MeshBodyCoverage`), which `litBodiesOf` gives only with the body's
+    rotation, so that it cannot arrive without them; `photoreal/renderer.ts`, its test and the
+    smoke's reference body take both. New tests: `photorealFrame` passes the view's class maps,
+    reliefs and terrain to the lit bodies and carries the terrain on the frame, a body without a
+    rotation takes no mask, and `ViewFrameDrawer` passes all three on. Tests split to one
+    behaviour an `it` (`regime.test.ts`, `draw.test.ts`' mask test); `handover.wasm.test.ts`
+    reads the shared `moonLikeFixture`; `handover.test.ts` imports its types as types, takes
+    Design note 13's pixel as 60° ÷ 1,920 (5.454 × 10⁻⁴ rad), pins 1.833 × 10⁷ and 4.584 × 10⁶ m to
+    10⁻³ (the old 1.83 × 10⁷ and 4.59 × 10⁶ m at 3 × 10⁻³ held too), and puts the Venus's hand-over
+    about 1,740 km up; `handover.ts`' a · 4 px is 14.6 km (the science check).
 - **Questions for "main" (R10.T10.e)** (none touches a contract of the server's; each built to its
   lean).
   - _Who builds the live terrain pipeline._ No plan-10 task names it: the store over
@@ -6151,11 +6260,18 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     `TerrainLighting` from its disc record, drawn into the `AtmosphereScene`), T10.c's
     `CoverageMask` and the draw list's `surveyEdges`, and T10.d's `ClassMapStore`, fed through
     `ViewStage` (the lane lead has told main; the scoping agent's `decision-r10-live-path.md`).
-    Lean: a task main assigns.
+    Lean: a task main assigns. _Answered 2026-10-16: R10.T16 "The live terrain path"
+    (decision-r10-live-path.md)._
   - _The limb's distance._ Design note 13 says when the relief "subtends τ pixels" without the
     distance it is measured over; as built, the camera's to the limb, so that a body of little
     relief beside its radius hands over near it (above). Lean: as built, Design note 13 amended to
     "subtends τ pixels at the body's limb", and Design note 16's want range with it.
+  - _The pixel it is measured in_ (the batch review's science check, 2026-10-19), asked with the
+    limb's distance and Design note 16's want range. The live view measures its pixel at the
+    centre pixel, 2 tan(fov ÷ 2) ÷ width (6.014 × 10⁻⁴ rad at 1080p across 60°, where 10 km hands
+    over at 1.663 × 10⁷ m), as R07's 3 px switch does, where Design note 13 takes width ÷ field
+    (5.454 × 10⁻⁴ rad, 1.833 × 10⁷ m). Lean: as built, Design note 13's figures restated at the
+    centre pixel with its limb's distance.
   - _`terrain`, a fourth regime._ Lean: as built, R07's regime text ("a `mesh` … or R10 hands it to
     terrain") reading "`terrain`, the mesh regime handed to R05's quadtree".
   - _T10.c's mask on a body handed over alone._ Lean: as built (a promoted body's terrain is not
@@ -6192,3 +6308,200 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     range spans π a τ ÷ (128 · relief) px, about 16 px on an Earth of 10 km and 3 px on a Moon-like
     of 15 km. The lever: the terrain's discard reading the GPU coverage mask at the fragment, as the
     reference surface does, where the patch is coarser than its code can carry.
+  - _The figure's factor after the clamp_ (the batch review's science check, 2026-10-19). The
+    per-class oblate factor applies after T10.a's clamp, so it shifts the Lambert to
+    Lommel–Seeliger contrast by k_Lambert ÷ k_LS (2.2% at c ÷ a 0.9, 6.7 × 10⁻⁴ at Earth's
+    0.99665), and can push a Lambert class past its ceiling A_N ≤ 1 (0.98 × 1.0224 = 1.002 at
+    c ÷ a 0.9; the factor is 1.087 at c ÷ a 0.7 and 1.204 at 0.5), for fast rotators such as a
+    Haumea. The lever: T10.a's c solved on the spheroid (m(0) for ⅔), or each scaled A clamped to
+    its law's `normal_albedo_ceiling` (the server's).
+  - _R07's quadrature bias in the figure's factor_ (the batch review's science check). The code's
+    Lambert factor on the Moon-like world, 1 + 2.85 × 10⁻⁴ against the closed form's
+    1 + 2.4 × 10⁻⁴, carries R07's 96 × 192 quadrature: m = 0.666637 against ⅔ as c ÷ a → 1, a
+    bias of 4.5 × 10⁻⁵, which the disc and the terrain share, so that they agree. R07's lever: the
+    quadrature's grid, or m's closed form.
+- **Deviations in T10.f, as built** (2026-10-16; lane r10-shader, on `rendering-and-planets` at
+  `05da4caf`; finished 2026-10-19 after a reboot).
+  - _Files._ The task's: R07's `bodies/draw.ts` (`pointFlux` takes each light's reflection from
+    `pointReflectionOf`: the class map integrated where `surface` is a class map and `rotation` is
+    known, `bodyReflection` of the photometry's law otherwise) and `bodies/discSurface.ts`
+    (`classMapSurface` returns its map as `texels`). Beyond them: a new `bodies/classMapPoint.ts`
+    (`CLASS_MAP_POINT_FACE_ELEMENTS`, `classMapPointSubdivision`, `CLASS_MAP_POINT_CACHE_RAD`,
+    `classMapPointCacheAngleRad`, `classMapReflectionRatio`, `classMapPointReflection`) with
+    `classMapPoint.test.ts`, its own file since `discSurface.ts` cannot import `discShading.ts`,
+    which imports it; `bodies/discShading.ts` (`DiscLawTerms`, `discLawTerms`: `discReflectance`'s
+    arithmetic split by its two terms, per law); `appearance/bodyAppearance.ts`
+    (`ClassMapDiscSurface.texels`); `terrain/classMap.ts` (the store's surface carries its held
+    texels). Tests beside them in `discShading.test.ts`, `discSurface.test.ts` and
+    `classMap.test.ts`; the surfaces `discCells.test.ts` and `photorealFrame.test.ts` build take
+    texels. No shader, `view/engine/` or smoke file changes, and no smoke scene draws a point under
+    a class map (the harness's 3 px switch is a uniform sphere's).
+  - _The CPU copy_ (the lane lead's decision). `ClassMapDiscSurface` gains
+    `texels: ClassMapTexels`, set by `classMapSurface` and by `ClassMapStore.classMapOf` (its held
+    map's), so that the texture and its CPU copy travel as one value and `pointFlux` reads the map
+    from `body.surface`. An additive change to R07's Provides shape, now `kind`, `weights`,
+    `texels`, `laws` and `elsewhere` (asked below; a pointer in R07's "Deviations in T8.b, as
+    built"). `rasteriseDisc` still takes the texels as its argument, as T10.d built it.
+  - _The integral_ (the lane lead's decision). `classMapReflectionRatio(figure, surface, light,
+observer)`, in the body-fixed axes (`classMapPointReflection` takes the galactic directions in
+    by `rotateToBodyFixed`): over the lit (μ₀ > 0) and visible (μ > 0) elements of the spheroid
+    about the body-fixed z axis, the pole the class-map disc draws about, each element's shares by
+    T10.d's reconstruction (`classMapSharesAt`) times each law's I/F by the disc's arithmetic
+    (`discLawTerms`: A × `oblateAlbedoScale` of L(0), f and L(α) from the law's row; equal to
+    `discReflectance` to 10⁻¹⁵, tested) times μ and the element's area, in `f64`. Regrouped: each
+    law's two sums over the elements, Σ share · 2μ₀μ ÷ (μ₀ + μ) dS and Σ share · μ₀μ dS, then each
+    law's terms once. Normalised so that a uniform map gives the photometry's point exactly: the
+    sum over the same sum under `elsewhere` alone, per channel, times `bodyReflection` of
+    `elsewhere` on the figure about the rotation's pole, in the galactic axes, which is a uniform
+    body's own call where its figure's pole is the rotation's. The elements' error at the limb and
+    the terminator cancels in the ratio, a weighted mean of the classes' reflectances over
+    `elsewhere`'s and bounded by them; it is 1 in a channel where `elsewhere` alone reflects nothing
+    by the elements (none lit and visible, at the extreme of phase). Each star and each
+    planetshine secondary goes through its own integral, from its own direction.
+  - _The elements' rule._ A texel's face cell cut into n × n in (s, t), n = ⌈128 ÷ N⌉, 2 at R10's
+    N = 64: 98,304 elements on the sphere, each at its centre in (s, t) (a texel's quarter points,
+    inside whose quarters the reconstruction is bilinear between the four nearest texel centres),
+    with its exact solid angle (the face rectangle's, F(u, v) = atan(u v ÷ √(1 + u² + v²)), through
+    the quadratic warp) times the spheroid's factor c ÷ a · |(x, y, z a ÷ c)|. Against 2 × 10⁶
+    Fibonacci directions on the Iapetus's three views at 0° to 150°: at most 3.8 × 10⁻⁴ at n = 2,
+    1.33 × 10⁻³ at n = 1 (a texel's centre alone, its own shares); on a half-surveyed checkerboard
+    of texels 2.0 × 10⁻⁴ (2.6 × 10⁻⁴ at n = 1), on a half-surveyed Iapetus 1.1 × 10⁻⁴
+    (3.8 × 10⁻⁴). n = 2 keeps a factor of eight under the 0.3% for contrasts past the Iapetus's 14
+    to 1. Cost (2026-10-16, load about 3, provisional): the elements' shares, found once a map and
+    held with its texels, 300 ms (95 ms at n = 1); an evaluation, one pass over the elements, two
+    dot products each and a multiply-add per share of the lit and visible ones, 1.65 ms a light
+    (0.43 ms); the elements' directions and solid angles 3.1 MB once, each map's shares 1–2 MB
+    (deferred below).
+  - _The eclipse_ (the lane lead's decision, literal to the plan and R07.T10.b). Each star keeps
+    its `discEclipseVisible` term, with the photometry's limb share (`elsewhere`'s), on its own
+    integral: tested, the share an eclipse leaves under the map equals the uniform body's to 10⁻¹²
+    (deferred below).
+  - _The cache_ (the lane lead's decision; what it holds is asked below). Per surface, in a module
+    `WeakMap` keyed by the `ClassMapDiscSurface`, at most eight entries a surface (two stars and two
+    planetshine sources from two views), the latest kept; released with the surface by the
+    collector once its owner drops it (the store makes a new one for a new map or a new
+    `elsewhere`, and holds none once the body is released); the elements' shares likewise with the
+    texels. The held value is each light's ratio, uneclipsed, not its integral: the uniform point
+    (closed form on a sphere, R07's memoised spheroid integral otherwise) is fresh each call and
+    carries the phase's steep dependence exactly, so δ bounds only the pattern's drift. An entry is
+    taken again while the light's and the camera's body-fixed directions both lie within
+    δ(α) = 10⁻³ rad × (π − α) ÷ π of its own, by chord, at its own c ÷ a. The derivation: the
+    ratio's sensitivity S, |Δ ln R| per radian with both directions moved, measured on the
+    Iapetus's three views at 0° to 165°, keeps S (π − α) at or below about 5.2 (worst at 60° to
+    90°, 1.8 at 150° and 165°), a pattern's share of the light moving with the angle over the lit
+    and visible lune's width π − α; so a cached ratio is within 5.2 δ₀ ÷ π, 1.7 × 10⁻³, of a fresh
+    one, about half the 0.3%, the rest left for contrasts past the Iapetus's.
+  - _Without a rotation, or with a uniform surface,_ today's path: `bodyReflection` of the
+    photometry's law, tested equal bit for bit.
+  - _The switch's test rasterises at 64 × 64 samples a pixel_ (the brief's allowance, "enough
+    sub-pixel samples"), one centred placement: R07.T8.c's 8 × 8 at 3 px misses the Iapetus's
+    bright rim, the disc's error and not the point's (asked and deferred below).
+  - _Tests_ (`classMapPoint.test.ts`). The synthetic Iapetus: 64 texels a face through
+    `packClassMap`, dark (the Regolith row at L(0) 1, A 0.04) where a texel's centre lies within 70°
+    of the leading apex, bright (the Ice row at L(0) 1, A 0.55) elsewhere, `elsewhere` the Regolith
+    row at A 0.38; the camera on galactic +z and a rotation turning each view onto it, the Sun at 1
+    au. Measured (the brute force over 2 × 10⁵ directions; the half map surveyed where
+    x + 0.3 z > 0.1, its edge across the cap and the bright side):
+
+    | Facing   | Phase | Disc ÷ point − 1, 64² | At R07's 8² | Point ÷ brute force − 1, unsigned: whole, sphere and c ÷ a 0.9; half, the same |
+    | -------- | ----- | --------------------- | ----------- | ------------------------------------------------------------------------------ |
+    | leading  | 0°    | −0.28%                | −1.73%      | 5.7 × 10⁻⁵, 1.0 × 10⁻⁴; 6.1 × 10⁻⁶, 5.1 × 10⁻⁵                                 |
+    | leading  | 60°   | −0.36%                | −1.99%      | 7.2 × 10⁻⁵, 1.9 × 10⁻⁴; 1.0 × 10⁻⁵, 1.2 × 10⁻⁴                                 |
+    | leading  | 120°  | −0.56%                | −2.58%      | 3.1 × 10⁻⁵, 4.8 × 10⁻⁴; 3.7 × 10⁻⁵, 4.9 × 10⁻⁴                                 |
+    | trailing | 0°    | −0.011%               | +0.050%     | 4 × 10⁻⁹, 4.5 × 10⁻⁵; 1.6 × 10⁻⁶, 4.6 × 10⁻⁵                                   |
+    | trailing | 60°   | +0.010%               | +0.073%     | 2 × 10⁻⁸, 1.1 × 10⁻⁴; 5.6 × 10⁻⁶, 1.1 × 10⁻⁴                                   |
+    | trailing | 120°  | −0.18%                | −0.38%      | 8 × 10⁻⁹, 4.5 × 10⁻⁴; 5.3 × 10⁻⁶, 4.6 × 10⁻⁴                                   |
+    | a pole   | 0°    | +0.004%               | +0.031%     | 1.1 × 10⁻⁵, 1.7 × 10⁻⁴; 1.5 × 10⁻⁵, 1.9 × 10⁻⁴                                 |
+    | a pole   | 60°   | +0.090%               | +0.083%     | 1.6 × 10⁻⁵, 1.7 × 10⁻⁴; 1.5 × 10⁻⁵, 2.1 × 10⁻⁴                                 |
+    | a pole   | 120°  | −0.33%                | −1.73%      | 2.0 × 10⁻⁴, 5.7 × 10⁻⁴; 7.3 × 10⁻⁵, 2.9 × 10⁻⁴                                 |
+
+    The tests hold the disc at 64² to the task's 1% (worst 0.56%) and the brute force to 0.3%
+    (worst 5.7 × 10⁻⁴; about 4 s for its 36 cases); a one-class map equal to the uniform law,
+    surveyed whole and in half, on a spheroid of c ÷ a 0.9 at 0° to 150°, by starlight and a
+    planetshine source, gives the uniform point to 10⁻⁶ (exact to rounding by the normalisation);
+    without a rotation, and under a uniform surface, the photometry's point exactly; an eclipse's
+    share as the uniform body's; a cached value within 0.3% of a fresh one at 0.98 δ over the
+    Iapetus's views at 0° to 150° (8 pairs of directions each; over 64 pairs the worst is
+    1.60 × 10⁻³, facing the leading side at 60°), taken exactly from the cache within δ and afresh
+    past it; and the refusal of laws not one per class. `discShading.test.ts`: `discLawTerms` by
+    shares give `discReflectance` to 10⁻¹⁵ for three laws at four phases on a sphere and a
+    spheroid; `discSurface.test.ts` and `classMap.test.ts`: the construction's and the store's
+    surfaces carry their map's texels.
+
+  - _The Iapetus's faces_, for R07's "The point keeps the photometry's law": against a uniform law
+    of the area-mean p (0.382), the point at zero phase is 0.260× facing the leading side and
+    1.439× facing the trailing, 1.86 mag apart, where decision-r07-t8b estimated 0.28× and 1.4×.
+  - _Acceptance, as built._ `pnpm --filter hyperion exec vitest run src/renderer/src/view/bodies`
+    (9 files, 391 tests), with `view/terrain`, `displays/view`, `view/appearance` and
+    `view/lighting` (95 files, 2,037 tests), and the client suite (427 files, 12,315 tests, 2
+    skipped), `pnpm typecheck` from a clean cache, and oxlint and Prettier on the files. No smoke
+    scene draws a point under a class map; part 1's `T8.a at the 3 px switch` check calls
+    `pointFlux` on a uniform body, whose path is tested equal bit for bit, and the batch's gate
+    runs the whole harness (`/home/quantum/gh/hyperion/.git/rm45-scratch/r10-shader/smart-ci-final.log`).
+  - _By hand._ None can run: no live view feeds a class map yet (T10.d's and T10.e's questions,
+    now R10.T16's live path). Pending until then, on the development machine and the owner's
+    UHD 620: on a surveyed patterned body in `VIEW`, its brightness across the 3 px switch both
+    ways, facing its most contrasting face at 0°, 60° and 120° of phase, the meter on `average`.
+  - _Generator version._ Untouched (22): presentation alone, no golden.
+  - _The batch review (2026-10-19)._ `classMapPoint.test.ts`' tests that failed for more than one
+    reason are split, one behaviour an `it`: the photometry's point without a rotation, under a
+    uniform surface, and the oriented map dimming it; and the cache reused within δ, within 0.3% of
+    a fresh value, and found afresh past δ. `classMapSurface`'s documentation names the map's CPU
+    copy as the surface's `texels`.
+- **Questions for "main" (R10.T10.f)** (one touches R07's Provides, as the lane lead decided; none
+  the server's; each built to its lean).
+  - _`texels` on `ClassMapDiscSurface`_ (R07's Provides, additive; the lane lead's decision 1).
+    Lean: as built, R07's Provides entry reading `{ kind, weights, texels, laws, elsewhere }`.
+  - _The cached value is the ratio._ Decision 4 names the uneclipsed per-light integral; built as
+    the per-light ratio to the uniform law with the uniform point fresh, which lets δ bound the
+    pattern's drift alone. Lean: as built.
+  - _A file of its own._ Lean: as built, the task's Files reading "R07's `bodies/draw.ts` and
+    `bodies/discSurface.ts`, and a new `bodies/classMapPoint.ts`".
+  - _The switch's test at 64 × 64 samples._ The task's "equals the CPU rasteriser's summed disc
+    flux at the switch to 1%" holds with the disc rasterised at the switch's geometry at 64 × 64
+    samples a pixel, not at R07.T8.c's 8 × 8, under which the disc errs by up to 2.6% (deferred
+    below). Lean: as built, the test's text so amended, and the disc's sampling R07's to revisit.
+- **Deferred findings (2026-10-13 rule) (R10.T10.f)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _The eclipse's limb weighting is the uniform law's._ Under a patterned map each star's
+    `discEclipseVisible` weights the disc by `elsewhere`'s L, not by the classes' A and L where the
+    shadow falls. The error is first order in partial phases (the batch review's science check,
+    2026-10-19): the product of the pattern's contrast and the eclipse's variation across the disc;
+    a sharp shadow over exactly the bright half of a 14:1 body gives the point 7.5 times its light,
+    over the dark half 0.54 times. The lever stays a per-element eclipse in the integral, which
+    would be exact (the cache then holding the uncut ratio and the eclipse its own factor).
+  - _R07's disc at 3 px misses a pattern's edge near the limb._ R07.T8.c's 8 × 8 cells integrate
+    the two cells nearest the limb across their profile in √δ, as a uniform law's light needs; the
+    Iapetus's bright rim, 0.06 a inside the limb facing the leading side, lies in that band, and its
+    albedo step is not followed: the disc is 1.73%, 1.99% and 2.58% under the point facing the
+    leading side at 0°, 60° and 120°, and 1.73% facing a pole at 120° (the point within 2 × 10⁻⁴
+    of the brute force there; 4.1% at 150°, measured with one element a texel). At 32 × 32 it is
+    still 1.1% to 1.7% off, the band about the rim's width; at 64 × 64 the band lies inside it. So
+    the 3 px switch steps by up to 0.03 mag for such a body. The lever: R07.T8.c's limb cells
+    under a class map (more of them, or each Gauss depth of the profile taking its own shares).
+  - _Planetshine from a class-mapped neighbour_ keeps the neighbour's photometry law
+    (`litNeighbours` through `bodyReflection`), so a patterned moon lights its planet by its mean,
+    not by the face it turns to it. The lever: the neighbour's light through
+    `classMapPointReflection` towards the lit body.
+  - _A map's first point costs a frame._ The elements' shares, 98,304 `classMapSharesAt` calls,
+    take about 300 ms on the render thread the first time a point is drawn under each map the store
+    takes, and each light's evaluation 1.65 ms; under time acceleration a fast rotator misses the
+    cache every frame (δ at α = 0 is 10⁻³ rad, which an Earth-like day turns through in 14 s of
+    game time). The levers: the shares built off the frame (with the map in the worker, or as the
+    store takes it), a reconstruction loop cheaper than `classMapSharesAt`'s allocations, and
+    uniform texels' elements merged.
+  - _Memory._ The elements' geometry, 3.1 MB once, and each map's shares 1–2 MB, against its
+    texture's 104–418 KB. The lever: directions found per face from tabulated (u, v), or `f32`
+    stores.
+  - _T10.e's q for the Mars-like world is not closed by the point integral_ (T10.e's deferred "The
+    classes' q is the Regolith row's, not plan 14's"). The integral is linear in the map, so
+    averaged over orientations it gives T10.e's closed form Σ aᵢ pᵢ qᵢ ÷ Σ aᵢ pᵢ exactly and adds
+    nothing to it, and no client fixture holds the Mars-like world's class map (its field is the
+    surface crate's synthetic world; the worker golden is the Moon-like's). By the closed form, from
+    T10.a's `albedo/worlds.golden` (dust 98.29%, two glaciers 0.770% each, sediment 0.166%,
+    p_V 0.17) with the glaciers clamped low (T10.a's table) to their spans' low ends under Lambert's
+    law, the H₂O glacier's `GLACIER_ICE_V` 0.69 and, taking CO₂ as a volatile ice,
+    `VOLATILE_GLACIER_V`'s 0.80 (p 0.460 and 0.533), and the dust and sediment on the Regolith row
+    (q 0.62600 in V) taking the rest of p: q_V ≈ 0.665, the glaciers 4.5% of p, against plan 14's
+    1.08465 on Mars's template (−38.7%). Not checked against the worker's photometry export; T10.e's
+    finding stands, for plan 14 and R10.T1.a's rows.

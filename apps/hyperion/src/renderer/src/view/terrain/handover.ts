@@ -5,7 +5,7 @@
  *
  * @remarks
  * - **The range** is the relief over τ pixels' angle, `handoverRangeM` = relief ÷ (τ · rad a
- *   pixel): about 1.8 × 10⁷ m for 10 km of relief at 1 px of 5.45 × 10⁻⁴ rad (Design note 13's
+ *   pixel): about 1.8 × 10⁷ m for 10 km of relief at 1 px of 5.454 × 10⁻⁴ rad (Design note 13's
  *   1080p across 60° by width ÷ field), and 4.6 × 10⁶ m at the wireframe's 4 px. A view measures
  *   its pixel as R07's 3 px switch does, at the centre pixel ({@link pixelAngleRad}, the inverse
  *   of `angularDiameterPx`'s scale), so that both switches count the same pixels: 6.01 × 10⁻⁴ rad
@@ -23,7 +23,7 @@
  *   sky across the line of sight: the centre's distance far off (7% less at an Earth's
  *   1.66 × 10⁷ m), and 0 at the ground, so that a body whose relief is small beside its radius
  *   still hands over as the camera nears it, which the centre's distance would not let a Venus of
- *   13 km do in the wireframe (a · 4 px is 14.5 km at 1080p).
+ *   13 km do in the wireframe (a · 4 px is 14.6 km at 1080p).
  */
 import type { BodyIdHex, SurfaceHeaderDto } from "@hyperion/protocol";
 

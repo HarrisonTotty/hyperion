@@ -4,6 +4,7 @@
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
+import type { ClassMapTexels } from "../bodies/discSurface";
 import type { LitRegime } from "../bodies/regime";
 import type { TextureHandle } from "../engine/types";
 import type { AppearanceLabel, BodyFigure, BodyPhotometry, WireAppearance } from "./fromWire";
@@ -38,12 +39,15 @@ export interface UniformDiscSurface {
  * @remarks
  * The texture's layout is `bodies/discSurface.ts`' (`classMapSurface` makes it): R05's cube-sphere
  * faces, a texel per cell, each class's weight in one channel. Its owner makes it again after a
- * device loss.
+ * device loss. The texels it was made from travel with it (R10.T10.f), which the point regime
+ * integrates on the CPU, so that a point and the disc it becomes read one map.
  */
 export interface ClassMapDiscSurface {
   readonly kind: "class-map";
   /** R10's coarse class weights, surveyed cells only (`CLASS_MAP_FORMAT`, a 2D array). */
   readonly weights: TextureHandle;
+  /** The texture's texels, its CPU copy: the map the point regime integrates (R10.T10.f). */
+  readonly texels: ClassMapTexels;
   /** One law per class, in the map's channel order. */
   readonly laws: ReadonlyArray<PhotometricLaw>;
   /** The law of unsurveyed texels: the uniform `lawFor(p, q, template)`. */

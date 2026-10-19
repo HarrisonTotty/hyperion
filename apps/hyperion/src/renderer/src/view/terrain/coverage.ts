@@ -441,8 +441,9 @@ export function coverageMaskTextureSpec(name: string, level: number): TextureSpe
  * on R10.T6.b's question, 2026-10-14; R10.T10.c).
  *
  * The texture is made at the first update and again, empty, when the field's level changes. After
- * a device loss, {@link CoverageMask.release} and update again: `ResilientEngine` drops the release
- * of a handle a lost engine made.
+ * a device loss, {@link CoverageMask.restore} makes it again from the cells held, so that a cell
+ * only a block surveyed is not lost until the store's next answer; {@link CoverageMask.release}
+ * forgets them, for a body the view no longer draws.
  */
 export class CoverageMask {
   readonly #engine: Pick<RenderEngine, "createTexture" | "writeTexture" | "releaseTexture">;
@@ -498,6 +499,10 @@ export class CoverageMask {
         );
       }
     }
+    // A block that surveys nothing changes nothing a texture of its level holds.
+    if (runs.length < 2 && this.#texture !== null && this.#level === level) {
+      return;
+    }
     const texels = this.#texelsOf(level);
     const n = 2 ** level;
     for (let r = 0; r + 1 < runs.length; r += 2) {
@@ -505,6 +510,26 @@ export class CoverageMask {
         const cell = fieldCellAt(level, index);
         texels[(cell.face * n + cell.j) * n + cell.i] = COVERAGE_MASK_SURVEYED;
       }
+    }
+    this.#write(level, texels);
+  }
+
+  /**
+   * Makes the texture again from the cells held, after a device loss; nothing where it holds none.
+   *
+   * @remarks
+   * The lost engine's handle is released first, which `ResilientEngine` drops for a handle a lost
+   * engine made.
+   */
+  restore(): void {
+    const level = this.#level;
+    const texels = this.#texels;
+    if (level === null || texels === null) {
+      return;
+    }
+    if (this.#texture !== null) {
+      this.#engine.releaseTexture(this.#texture);
+      this.#texture = null;
     }
     this.#write(level, texels);
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { norm, normalise, vec3 } from "../../geometry/vec3";
+import { dot, norm, normalise, type Vec3, vec3 } from "../../geometry/vec3";
 import type { ColourTokens } from "../../spatial/paint";
 import {
   aMarkedViewScene,
@@ -108,6 +108,60 @@ function scene(): ViewScene {
 
 function build(options: Partial<DrawOptions> = {}, input: ViewScene = scene()): WireframeDrawList {
   return buildWireframeDrawList(input, CAMERA, VIEWPORT, TOKENS, { ...OPTIONS, ...options });
+}
+
+/**
+ * The fixture's list with the planet's survey edge marked: `cells` surveyed at level 5 (by default
+ * the four about face +z's centre, which faces the camera) on a body of `figure`.
+ */
+function withSurveyEdge(
+  input: ViewScene = scene(),
+  figure = { equatorialRadiusM: 6.371e6, polarRadiusM: 6.371e6 },
+  cells: ReadonlyArray<{ face: 0 | 1 | 2 | 3 | 4 | 5; i: number; j: number }> = [
+    { face: 2, i: 14, j: 14 },
+    { face: 2, i: 15, j: 14 },
+    { face: 2, i: 16, j: 14 },
+    { face: 2, i: 17, j: 14 },
+  ],
+): WireframeDrawList {
+  const centreM = relativeToCamera(centre(FIXTURE_PLANET), CAMERA.pose, sceneOrigins(input));
+  const merged = CoverageView.empty(5).merged(
+    {
+      ranges: cells.map((cell) => {
+        const start = fieldCellIndex({ ...cell, level: 5 });
+        return { start, end: start + 1, resolution: 12 };
+      }),
+    },
+    1,
+  );
+  if (!merged.ok) {
+    throw new Error(merged.message);
+  }
+  return build(
+    {
+      surveyEdges: [
+        {
+          body: FIXTURE_PLANET,
+          coverage: merged.coverage,
+          figure,
+          rotation: IDENTITY_ROTATION,
+          centreM,
+          heightAtM: () => null,
+        },
+      ],
+    },
+    input,
+  );
+}
+
+/** Whether the sight line from the camera to `p`, m from it, meets the sphere before reaching it. */
+function behindSphere(p: Vec3, centreM: Vec3, radiusM: number): boolean {
+  // |t p − c|² = r² along the sight line t p, t from 0 at the camera to 1 at the point.
+  const a = dot(p, p);
+  const b = -2 * dot(p, centreM);
+  const c = dot(centreM, centreM) - radiusM * radiusM;
+  const discriminant = b * b - 4 * a * c;
+  return discriminant >= 0 && (-b - Math.sqrt(discriminant)) / (2 * a) < 1;
 }
 
 describe("buildWireframeDrawList", () => {
@@ -273,34 +327,10 @@ describe("buildWireframeDrawList", () => {
     expect(onThePlate(segments, 2)).toBe(4);
   });
 
-  it("marks a body's survey edge as a cased --text line 1 px wide in view space, with its nearest range (R10.T10.c)", () => {
-    const input = scene();
-    const centreM = relativeToCamera(centre(FIXTURE_PLANET), CAMERA.pose, sceneOrigins(input));
-    // The camera looks at the planet from along +z: four cells about face +z's centre surveyed.
-    const start = fieldCellIndex({ face: 2, level: 5, i: 14, j: 14 });
-    const merged = CoverageView.empty(5).merged(
-      { ranges: [{ start, end: start + 4, resolution: 12 }] },
-      1,
+  it("marks a body's survey edge as a cased --text line 1 px wide in view space (R10.T10.c)", () => {
+    const batch = withSurveyEdge().lines.find(
+      (line) => line.id === `survey-edge:${FIXTURE_PLANET}`,
     );
-    if (!merged.ok) {
-      throw new Error(merged.message);
-    }
-    const list = build(
-      {
-        surveyEdges: [
-          {
-            body: FIXTURE_PLANET,
-            coverage: merged.coverage,
-            figure: { equatorialRadiusM: 6.371e6, polarRadiusM: 6.371e6 },
-            rotation: IDENTITY_ROTATION,
-            centreM,
-            heightAtM: () => null,
-          },
-        ],
-      },
-      input,
-    );
-    const batch = list.lines.find((line) => line.id === `survey-edge:${FIXTURE_PLANET}`);
     expect([
       batch?.space,
       batch?.token,
@@ -309,12 +339,55 @@ describe("buildWireframeDrawList", () => {
       batch?.dash,
       batch?.casingWidthPx,
       batch?.casingColour,
-    ]).toEqual(["view", "text", "colour-text", 1, null, CASING_PX, "colour-surface-0"]);
-    expect(batch?.segments.length ?? 0).toBeGreaterThan(0);
-    expect(list.surveyEdges).toHaveLength(1);
+      (batch?.segments.length ?? 0) > 0,
+    ]).toEqual(["view", "text", "colour-text", 1, null, CASING_PX, "colour-surface-0", true]);
+  });
+
+  it("gives a drawn survey edge its nearest range from the own ship (R10.T10.c)", () => {
     // From the own ship, some 3 × 10⁷ m from the planet's near side.
-    expect(list.surveyEdges[0]?.nearestRangeM).toBeGreaterThan(1e7);
+    const edges = withSurveyEdge().surveyEdges;
+    expect([edges.length, (edges[0]?.nearestRangeM ?? 0) > 1e7]).toEqual([1, true]);
+  });
+
+  it("marks no survey edge where it is given none (R10.T10.c)", () => {
     expect(build().surveyEdges).toEqual([]);
+  });
+
+  it("draws every point of a mid-latitude survey edge on an oblate body in front of every occluder (R10.T10.c)", () => {
+    // Earth's figure, 6,378.1 × 6,356.8 km: at 47° the spheroid lies some 11 km inside the
+    // equatorial sphere, which an occluder of the equatorial radius would hide it behind.
+    const figure = { equatorialRadiusM: 6.3781e6, polarRadiusM: 6.3568e6 };
+    const input = scene();
+    const planet = input.bodies.find((body) => body.id === FIXTURE_PLANET);
+    if (planet === undefined) {
+      throw new Error("the fixture scene has its planet");
+    }
+    const oblate: ViewScene = {
+      ...input,
+      bodies: [
+        { ...planet, radiusM: figure.equatorialRadiusM },
+        ...input.bodies.filter((body) => body !== planet),
+      ],
+    };
+    const list = withSurveyEdge(oblate, figure, [{ face: 2, i: 1, j: 16 }]);
+    const batch = list.lines.find((line) => line.id === `survey-edge:${FIXTURE_PLANET}`);
+    const points = Array.from({ length: (batch?.segments.length ?? 0) / 3 }, (_, n) =>
+      vec3(
+        batch?.segments[n * 3] ?? 0,
+        batch?.segments[n * 3 + 1] ?? 0,
+        batch?.segments[n * 3 + 2] ?? 0,
+      ),
+    );
+    const hidden = points.filter((p) =>
+      list.occluderSpheres.some((sphere) =>
+        behindSphere(
+          p,
+          vec3(sphere.centreF32[0] ?? 0, sphere.centreF32[1] ?? 0, sphere.centreF32[2] ?? 0),
+          sphere.radiusM,
+        ),
+      ),
+    );
+    expect([points.length > 0, hidden.length]).toEqual([true, 0]);
   });
 
   it("draws occluders, then lines, then sprites, and carries its strokes and slope term", () => {

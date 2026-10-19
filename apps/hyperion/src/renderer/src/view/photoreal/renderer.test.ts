@@ -161,7 +161,7 @@ describe("the photorealistic renderer", () => {
       surveyCoverage: () => null,
       draws: (plan: BodyFramePlan) => {
         asked.push(plan);
-        return plan.meshes.some((mesh) => mesh.handedOver) ? [terrainDraw] : [];
+        return plan.meshes.some((mesh) => mesh.role.kind === "handed-over") ? [terrainDraw] : [];
       },
     };
     const bodiesPass = (from: number): ReadonlyArray<string> | undefined =>

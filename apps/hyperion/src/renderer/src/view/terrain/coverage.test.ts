@@ -322,31 +322,103 @@ describe("the GPU coverage mask", () => {
     });
   });
 
-  it("follows the workers' blocks as well as the store's coverage, keeping every cell surveyed (R10.T10.c)", async () => {
+  /** A mask that has taken a level-5 block surveying cell (7, 9) of face 2, and its engine. */
+  async function afterBlock(): Promise<{
+    readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+    readonly mask: CoverageMask;
+  }> {
     const engine = await countingRenderEngine();
     const mask = new CoverageMask(engine, "coverage mask");
-    // A block's cells, before the store's answer names them.
     mask.survey({
       fieldLevel: 5,
       newlySurveyed: Uint32Array.from([cell(2, 7, 9), cell(2, 7, 9) + 1]),
     });
-    const afterBlock = engine.textureWritten.at(-1)?.data;
-    expect(writtenTexel(afterBlock, 2, 7, 9)).toBe(COVERAGE_MASK_SURVEYED);
-    expect(writtenTexel(afterBlock, 2, 8, 9)).toBe(0);
-    // The store's coverage, behind the workers, unsurveys nothing the block surveyed.
-    mask.update(merged(CoverageView.empty(5), cover([cell(4, 1, 1), cell(4, 1, 1) + 1, 3]), 1));
-    const afterAnswer = engine.textureWritten.at(-1)?.data;
-    expect(writtenTexel(afterAnswer, 2, 7, 9)).toBe(COVERAGE_MASK_SURVEYED);
-    expect(writtenTexel(afterAnswer, 4, 1, 1)).toBe(COVERAGE_MASK_SURVEYED);
+    return { engine, mask };
+  }
+
+  /** The store's level-5 coverage of cell (1, 1) of face 4 alone. */
+  function storeCoverage(): CoverageView {
+    return merged(CoverageView.empty(5), cover([cell(4, 1, 1), cell(4, 1, 1) + 1, 3]), 1);
+  }
+
+  it("marks a block's cells surveyed before the store's answer names them (R10.T10.c)", async () => {
+    const { engine } = await afterBlock();
+    const written = engine.textureWritten.at(-1)?.data;
+    expect([writtenTexel(written, 2, 7, 9), writtenTexel(written, 2, 8, 9)]).toEqual([
+      COVERAGE_MASK_SURVEYED,
+      0,
+    ]);
+  });
+
+  it("keeps a block's cells surveyed under the store's coverage, which lags the workers (R10.T10.c)", async () => {
+    const { engine, mask } = await afterBlock();
+    mask.update(storeCoverage());
+    const written = engine.textureWritten.at(-1)?.data;
+    expect([writtenTexel(written, 2, 7, 9), writtenTexel(written, 4, 1, 1)]).toEqual([
+      COVERAGE_MASK_SURVEYED,
+      COVERAGE_MASK_SURVEYED,
+    ]);
+  });
+
+  it("writes the blocks and the store's coverage into one texture (R10.T10.c)", async () => {
+    const { engine, mask } = await afterBlock();
+    mask.update(storeCoverage());
     expect(engine.textureSpecs.filter((spec) => spec.name === "coverage mask")).toHaveLength(1);
-    // A release forgets them; a field of another level starts a mask afresh.
+  });
+
+  it("forgets the cells at a release, a field of another level starting a mask afresh (R10.T10.c)", async () => {
+    const { engine, mask } = await afterBlock();
     mask.release();
     mask.survey({ fieldLevel: 6, newlySurveyed: Uint32Array.from([0, 1]) });
     const afresh = engine.textureWritten.at(-1)?.data;
-    expect(afresh).toHaveLength(6 * 64 * 64);
-    expect(
+    expect([
+      afresh?.byteLength,
       afresh instanceof Uint8Array ? afresh.reduce((n, t) => n + (t === 0 ? 0 : 1), 0) : 0,
-    ).toBe(1);
+    ]).toEqual([6 * 64 * 64, 1]);
+  });
+
+  it("makes its texture again from the cells held at a restore, those only a block surveyed kept", async () => {
+    const { engine, mask } = await afterBlock();
+    mask.update(storeCoverage());
+    const before = mask.texture;
+    const held = engine.textureWritten.at(-1)?.data;
+    mask.restore();
+    expect([
+      mask.texture !== null && mask.texture !== before,
+      engine.textureWritten.at(-1)?.data,
+    ]).toEqual([true, held]);
+  });
+
+  it("releases the lost texture at a restore, making one in its place", async () => {
+    const { engine, mask } = await afterBlock();
+    const events: AllocationEvent[] = [];
+    engine.onAllocation((event) => events.push(event));
+    mask.restore();
+    expect(events.filter((e) => e.kind !== "uploaded").map((e) => e.kind)).toEqual([
+      "destroyed",
+      "created",
+    ]);
+  });
+
+  it("makes nothing at a restore where it holds no cells", async () => {
+    const engine = await countingRenderEngine();
+    const mask = new CoverageMask(engine, "coverage mask");
+    mask.restore();
+    expect([mask.texture, engine.textureSpecs.length]).toEqual([null, 0]);
+  });
+
+  it("writes nothing for a block that surveys nothing", async () => {
+    const { engine, mask } = await afterBlock();
+    const writes = engine.textureWritten.length;
+    mask.survey({ fieldLevel: 5, newlySurveyed: new Uint32Array(0) });
+    expect(engine.textureWritten).toHaveLength(writes);
+  });
+
+  it("makes its texture at a first block that surveys nothing", async () => {
+    const engine = await countingRenderEngine();
+    const mask = new CoverageMask(engine, "coverage mask");
+    mask.survey({ fieldLevel: 5, newlySurveyed: new Uint32Array(0) });
+    expect([mask.texture !== null, engine.textureWritten.length]).toEqual([true, 1]);
   });
 
   it("refuses a block's runs that are not cells of a level R09 serves", async () => {

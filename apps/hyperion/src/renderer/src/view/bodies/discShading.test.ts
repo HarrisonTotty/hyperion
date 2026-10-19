@@ -15,7 +15,9 @@ import { AU_M } from "../scenes/kept";
 import type { BodyFigure } from "../terrain/planet";
 import {
   compositeDiscPixels,
+  discLawTerms,
   type DiscRecord,
+  discReflectance,
   type DiscSamples,
   discSamples,
   FINE_DISC_PX,
@@ -372,5 +374,42 @@ describe("a star's sky light through an atmosphere (R08.T9.b)", () => {
         expect(hidden.radiance[c]).toBe(0);
       }
     }
+  });
+});
+
+describe("a disc's laws split by their two terms (R10.T10.f)", () => {
+  it("gives the disc's own reflectance by their shares to 10⁻¹⁵ at every point, on a sphere and a spheroid", () => {
+    // A lunar law under McEwen's L(α), a terrestrial one, and Lambert's.
+    const laws = [
+      lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+      lawFor([0.3, 0.25, 0.2], [1.3, 1.3, 1.3], "earth"),
+      lawFor([0.2, 0.2, 0.2], [1.5, 1.5, 1.5], "lambert"),
+    ];
+    const shares = [0.5, 0.2, 0.3];
+    let worst = 0;
+    for (const cOverA of [1, 0.9]) {
+      for (const alphaDeg of [0, 30, 90, 150]) {
+        const alpha = (alphaDeg * Math.PI) / 180;
+        const terms = discLawTerms(laws, cOverA, alpha);
+        for (const [mu0, mu] of [
+          [1, 1],
+          [0.5, 0.1],
+          [0.05, 0.9],
+        ] as const) {
+          const disc = discReflectance(laws, cOverA, shares, mu0, mu, alpha);
+          for (const c of [0, 1, 2] as const) {
+            const split = terms.reduce(
+              (sum, term, m) =>
+                sum +
+                (shares[m] ?? 0) *
+                  (term.lommelSeeliger[c] * ((2 * mu0) / (mu0 + mu)) + term.lambert[c] * mu0),
+              0,
+            );
+            worst = Math.max(worst, Math.abs(split / disc[c] - 1));
+          }
+        }
+      }
+    }
+    expect(worst).toBeLessThan(1e-15);
   });
 });

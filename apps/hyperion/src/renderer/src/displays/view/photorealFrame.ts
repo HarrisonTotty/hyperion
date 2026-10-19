@@ -150,7 +150,10 @@ function litBodyOf(
     ...(body.rotation === null ? {} : { rotation: body.rotation }),
     ...(surface === null ? {} : { surface }),
     ...(reliefM === null ? {} : { handoverReliefM: reliefM }),
-    ...(coverage === null ? {} : { surveyCoverage: coverage }),
+    // The mask is read in the body's axes, so it is given only with its rotation.
+    ...(coverage === null || body.rotation === null
+      ? {}
+      : { surveyCoverage: { mask: coverage, rotation: body.rotation } }),
     lighting: frame,
   };
 }

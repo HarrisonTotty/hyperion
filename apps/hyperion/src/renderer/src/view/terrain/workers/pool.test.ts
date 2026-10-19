@@ -690,12 +690,17 @@ describe("the height-worker pool's class maps (R10.T10.d)", () => {
     expect(workerAt(created, 0).received).toEqual([]);
   });
 
-  it("answers null where the worker holds no field of the body, and rejects with the module's refusal", async () => {
+  it("answers null where the worker holds no field of the body", async () => {
     const { pool, created } = poolOf(1);
     pool.fieldInit(MOON, blockOf(4, 0));
     const none = pool.classMap(MOON, SEED);
     answerClassMap(workerAt(created, 0), null);
     await expect(none).resolves.toBeNull();
+  });
+
+  it("rejects with the module's refusal", async () => {
+    const { pool, created } = poolOf(1);
+    pool.fieldInit(MOON, blockOf(4, 0));
     const refused = pool.classMap(MOON, SEED);
     const query = workerAt(created, 0).pendingClassMaps[0];
     if (query === undefined) {
@@ -727,30 +732,46 @@ describe("the height-worker pool's class maps (R10.T10.d)", () => {
     await expect(asked).resolves.toBe(map);
   });
 
-  it("asks another worker where a failed one's place is given up, and answers null with none left", async () => {
-    const { pool, created } = poolOf(2);
+  /**
+   * A pool of `workers` asked for the Moon's map, its first worker and each of that one's
+   * replacements failing until its place is given up; the queries each failing worker held.
+   */
+  function failingFirst(workers: number): {
+    readonly pool: ReturnType<typeof poolOf>["pool"];
+    readonly created: ReturnType<typeof poolOf>["created"];
+    readonly asked: ReturnType<ReturnType<typeof poolOf>["pool"]["classMap"]>;
+    readonly held: ReadonlyArray<number>;
+  } {
+    const { pool, created } = poolOf(workers);
     pool.fieldInit(MOON, blockOf(4, 0));
     const asked = pool.classMap(MOON, SEED);
-    // The first worker, and each of its replacements, fails.
+    const held: number[] = [];
     let failing = workerAt(created, 0);
     for (let n = 0; n < MAX_CONSECUTIVE_WORKER_FAILURES; n += 1) {
-      expect(failing.pendingClassMaps).toHaveLength(1);
+      held.push(failing.pendingClassMaps.length);
       failing.fail();
       failing = workerAt(created, created.length - 1);
     }
-    expect(pool.lostWorkers).toBe(1);
-    const survivor = workerAt(created, 1);
+    return { pool, created, asked, held };
+  }
+
+  it("asks each of a failing worker's replacements again until its place is given up", () => {
+    const { pool, held } = failingFirst(2);
+    expect([held, pool.lostWorkers]).toEqual([
+      Array.from({ length: MAX_CONSECUTIVE_WORKER_FAILURES }, () => 1),
+      1,
+    ]);
+  });
+
+  it("asks another worker where a failed one's place is given up", async () => {
+    const { created, asked } = failingFirst(2);
     const map = emptyMap();
-    answerClassMap(survivor, map);
+    answerClassMap(workerAt(created, 1), map);
     await expect(asked).resolves.toBe(map);
-    const alone = poolOf(1);
-    alone.pool.fieldInit(MOON, blockOf(4, 0));
-    const unanswered = alone.pool.classMap(MOON, SEED);
-    for (let n = 0; n < MAX_CONSECUTIVE_WORKER_FAILURES; n += 1) {
-      workerAt(alone.created, alone.created.length - 1).fail();
-    }
-    expect(alone.pool.lostWorkers).toBe(1);
-    await expect(unanswered).resolves.toBeNull();
+  });
+
+  it("answers null once its only worker's place is given up", async () => {
+    await expect(failingFirst(1).asked).resolves.toBeNull();
   });
 
   it("answers null to a query out when terminated", async () => {

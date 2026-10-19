@@ -1,7 +1,7 @@
 import type { CoverDto } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
-import { norm, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
+import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import { lookAlong } from "../camera/quaternion";
 import { IDENTITY_ROTATION } from "../coords/rotation";
@@ -78,6 +78,17 @@ function segmentsOf(packed: Float32Array): Array<readonly [Vec3, Vec3]> {
     ]);
   }
   return out;
+}
+
+/** The least distance, m, from `from` to the segments, every segment in the view. */
+function nearestOn(segments: ReadonlyArray<readonly [Vec3, Vec3]>, from: Vec3): number {
+  return Math.min(
+    ...segments.map(([a, b]) => {
+      const d = sub(b, a);
+      const t = Math.min(1, Math.max(0, dot(sub(from, a), d) / dot(d, d)));
+      return norm(sub(add(a, scale(d, t)), from));
+    }),
+  );
 }
 
 describe("the survey edge's mark (R10.T10.c)", () => {
@@ -167,21 +178,19 @@ describe("the survey edge's mark (R10.T10.c)", () => {
     expect([mark.line.length, mark.ticks.length, mark.nearestRangeM]).toEqual([0, 0, null]);
   });
 
-  it("gives the range to the edge's nearest point in the view, from the own ship where there is one", () => {
+  it("gives the range to the edge's nearest point in the view", () => {
     const { view, camera } = viewOf(surveyed([0, 16, 16]), 200_000);
     const mark = surveyEdgeMark(view, camera, VIEWPORT, OPTIONS);
     // The camera stands 200 km above the cell's centre, so its border lies further off.
-    expect(mark.nearestRangeM).toBeGreaterThan(200_000);
-    const points = segmentsOf(mark.line).flat();
-    const nearest = Math.min(...points.map((p) => norm(p)));
-    expect(mark.nearestRangeM).toBeCloseTo(nearest, -1);
+    expect(mark.nearestRangeM).toBeCloseTo(nearestOn(segmentsOf(mark.line), vec3(0, 0, 0)), -1);
+  });
+
+  it("measures the range from the own ship where there is one", () => {
+    const { view, camera } = viewOf(surveyed([0, 16, 16]), 200_000);
     // From an own ship 100 km beyond the camera along its look, the range is the ship's.
     const ship = scale(normalise(view.centreM), 100_000);
     const fromShip = surveyEdgeMark(view, camera, VIEWPORT, { ...OPTIONS, rangeFromM: ship });
-    const nearestFromShip = Math.min(
-      ...points.map((p) => norm(vec3(p.x - ship.x, p.y - ship.y, p.z - ship.z))),
-    );
-    expect(fromShip.nearestRangeM).toBeCloseTo(nearestFromShip, -1);
+    expect(fromShip.nearestRangeM).toBeCloseTo(nearestOn(segmentsOf(fromShip.line), ship), -1);
   });
 
   it("leaves out the ticks within 0.5 rem of the line-of-sight mark's", () => {
@@ -207,6 +216,96 @@ describe("the survey edge's mark (R10.T10.c)", () => {
     const { view, camera } = viewOf(CoverageView.empty(5), 200_000);
     const mark = surveyEdgeMark(view, camera, VIEWPORT, OPTIONS);
     expect([mark.line.length, mark.ticks.length, mark.nearestRangeM]).toEqual([0, 0, null]);
+  });
+});
+
+/** The unit direction of the point (a, b) in cells of `face` at level 5. */
+function cellPoint(face: Face, a: number, b: number): Vec3 {
+  return faceUvToDir(face, stToUv(a / 32), stToUv(b / 32));
+}
+
+/**
+ * The camera 100 m over the edge of cell (16, 16) of face 0 that it shares with cell (16, 15), 0.6
+ * of the way through the 33rd of the 64 pieces the side is first cut into, looking along it 15°
+ * down and 10° to its side: the piece beneath it reaches behind the camera, and the side runs on
+ * past the horizon some 14 km ahead.
+ */
+function lowOver(): {
+  view: SurveyEdgeView;
+  camera: ProjectionCamera;
+  sideAt: (t: number) => Vec3;
+} {
+  const along = (t: number): Vec3 => cellPoint(0, 16 + t, 16);
+  const footT = 32.6 / 64;
+  const up = along(footT);
+  const ahead = normalise(sub(along(footT + 1e-6), along(footT - 1e-6)));
+  const aside = cross(up, ahead);
+  const yaw = (10 * Math.PI) / 180;
+  const pitch = (15 * Math.PI) / 180;
+  const forward = add(
+    scale(add(scale(ahead, Math.cos(yaw)), scale(aside, Math.sin(yaw))), Math.cos(pitch)),
+    scale(up, -Math.sin(pitch)),
+  );
+  const cameraM = scale(up, RADIUS_M + 100);
+  return {
+    view: {
+      body: "test",
+      coverage: surveyed([0, 16, 16]),
+      figure: { equatorialRadiusM: RADIUS_M, polarRadiusM: RADIUS_M },
+      rotation: IDENTITY_ROTATION,
+      centreM: scale(cameraM, -1),
+      heightAtM: () => null,
+    },
+    camera: { orientation: lookAlong(forward, up), fovXRad: Math.PI / 3 },
+    sideAt: (t) => sub(scale(along(t), RADIUS_M), cameraM),
+  };
+}
+
+describe("the survey edge's mark beneath a camera low over it (R10.T10.c)", () => {
+  it("runs the line on to the view's bottom edge", () => {
+    const { view, camera } = lowOver();
+    const line = segmentsOf(surveyEdgeMark(view, camera, VIEWPORT, OPTIONS).line);
+    // A drawn segment crosses the bottom edge between the view's sides.
+    const crossings = line.filter(([a, b]) => {
+      const p = project(a, camera, VIEWPORT);
+      const q = project(b, camera, VIEWPORT);
+      const h = VIEWPORT.heightPx;
+      if ((p.yPx - h) * (q.yPx - h) > 0 || p.yPx === q.yPx) {
+        return false;
+      }
+      const x = p.xPx + ((h - p.yPx) / (q.yPx - p.yPx)) * (q.xPx - p.xPx);
+      return x >= 0 && x <= VIEWPORT.widthPx;
+    });
+    expect(crossings.length).toBeGreaterThan(0);
+  });
+
+  it("ends the line at the horizon", () => {
+    const { view, camera } = lowOver();
+    const line = segmentsOf(surveyEdgeMark(view, camera, VIEWPORT, OPTIONS).line);
+    const farthestM = Math.max(...line.flat().map((p) => norm(p)));
+    // On a sphere the horizon lies √((R + h)² − R²) from the camera.
+    expect(farthestM / Math.sqrt((RADIUS_M + 100) ** 2 - RADIUS_M ** 2)).toBeCloseTo(1, 6);
+  });
+
+  it("gives the range to the line where it leaves the view, to three figures", () => {
+    const { view, camera, sideAt } = lowOver();
+    const mark = surveyEdgeMark(view, camera, VIEWPORT, OPTIONS);
+    // The side sampled every centimetre within 500 m of the camera's foot.
+    let sampledM = Number.POSITIVE_INFINITY;
+    for (let k = -50_000; k <= 50_000; k += 1) {
+      const p = sideAt(32.6 / 64 + k / 5_000_000);
+      const at = project(p, camera, VIEWPORT);
+      const inView =
+        at.inFront &&
+        at.xPx >= 0 &&
+        at.xPx <= VIEWPORT.widthPx &&
+        at.yPx >= 0 &&
+        at.yPx <= VIEWPORT.heightPx;
+      if (inView) {
+        sampledM = Math.min(sampledM, norm(p));
+      }
+    }
+    expect(Math.abs((mark.nearestRangeM ?? 0) / sampledM - 1)).toBeLessThan(5e-4);
   });
 });
 

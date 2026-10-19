@@ -1319,11 +1319,12 @@ impl ClassMapAnswer {
     #[must_use]
     pub fn weights(&self) -> Vec<u8> {
         let classes = self.map.classes().len();
-        self.map
-            .texels()
-            .iter()
-            .flat_map(|t| t.weights().into_iter().take(classes))
-            .collect()
+        let texels = self.map.texels();
+        let mut out = Vec::with_capacity(texels.len() * classes);
+        for t in texels {
+            out.extend_from_slice(&t.weights()[..classes]);
+        }
+        out
     }
 
     /// Whether every texel the survey touches was answered ([`ClassMap::is_complete`]).

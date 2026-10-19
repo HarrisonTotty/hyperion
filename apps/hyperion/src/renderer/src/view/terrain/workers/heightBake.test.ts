@@ -288,35 +288,53 @@ describe("a height worker's fields", () => {
     ]);
   });
 
-  it("answers no class map of a body with no field or a stand-in's, refuses the module's refusal and rethrows a trap", () => {
+  /** A class-map query of `body` by `detailSeed`, the worker holding `held`'s fields. */
+  function askClassMap(
+    held: ReadonlyArray<readonly [string, "stand-in" | "payload"]>,
+    body: string,
+    detailSeed: string,
+  ): ReturnType<typeof answerRequest> {
     const { module } = fakeModule();
     const fields = new WorkerFields(module);
-    const ask = (body: string, detailSeed: string): ReturnType<typeof answerRequest> =>
-      answerRequest(module, { kind: "class-map", id: 3, body, detailSeed }, fields);
-    expect(ask(MOON, "00000000000000a5").reply).toEqual({
+    held.forEach(([each, form], n) => {
+      answerRequest(
+        module,
+        { kind: "field-init", id: n + 1, body: each, block: new ArrayBuffer(8), form },
+        fields,
+      );
+    });
+    return answerRequest(module, { kind: "class-map", id: 3, body, detailSeed }, fields);
+  }
+
+  it("answers no class map of a body with no field", () => {
+    expect(askClassMap([], MOON, "00000000000000a5").reply).toEqual({
       kind: "class-map",
       id: 3,
       body: MOON,
       map: null,
     });
-    answerRequest(
-      module,
-      { kind: "field-init", id: 1, body: PLANET, block: new ArrayBuffer(8), form: "stand-in" },
-      fields,
-    );
-    expect(ask(PLANET, "00000000000000a5").reply).toMatchObject({ kind: "class-map", map: null });
-    answerRequest(
-      module,
-      { kind: "field-init", id: 2, body: MOON, block: new ArrayBuffer(8), form: "payload" },
-      fields,
-    );
-    expect(ask(MOON, "000000000000dead").reply).toEqual({
+  });
+
+  it("answers no class map of a body whose field is a stand-in's", () => {
+    expect(askClassMap([[PLANET, "stand-in"]], PLANET, "00000000000000a5").reply).toMatchObject({
+      kind: "class-map",
+      map: null,
+    });
+  });
+
+  it("answers the module's refusal of a class map as class-map-failed", () => {
+    expect(askClassMap([[MOON, "payload"]], MOON, "000000000000dead").reply).toEqual({
       kind: "class-map-failed",
       id: 3,
       body: MOON,
       message: "a body index above 65,535",
     });
-    expect(() => ask(MOON, "000000000000ffff")).toThrow(WebAssembly.RuntimeError);
+  });
+
+  it("rethrows a trap in the module's class map", () => {
+    expect(() => askClassMap([[MOON, "payload"]], MOON, "000000000000ffff")).toThrow(
+      WebAssembly.RuntimeError,
+    );
   });
 
   it("answers a body's bake the field cannot make yet as bake-unsurveyed", () => {

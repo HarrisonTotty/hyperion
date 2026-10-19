@@ -25,7 +25,9 @@
 //! are up to 30 each in cells on mountain belts on dry land, in cells of partial ice, in the
 //! shallowest cells under water and under the coarse craters' rims, one point a cell, where a world
 //! has them, then random points over the sphere to 250; the levels are the finest, n − 1, n − 3 and
-//! n − 6 from it, n − 10, and the class map's, level 4.
+//! n − 6 from it, n − 10, band level 4 (Design note 8's deepest for the class map), and the class
+//! map's, band level 0 (R10.T10.d: a texel a cell of quadtree level 6), whose lines follow each
+//! point's others (added at 22 by R10's batch review of 2026-10-19, no other line moved).
 
 use std::fmt::Write as _;
 
@@ -52,8 +54,13 @@ const POINTS: usize = 250;
 /// The points of each kind of cell a golden pins, at most.
 const EACH: usize = 30;
 
-/// The class map's band level (Design note 8).
-const CLASS_MAP_LEVEL: u8 = 4;
+/// Band level 4: Design note 8's deepest for the class map ("level 4 or shallower"), pinned before
+/// R10.T10.d settled the map's band level ([`CLASS_MAP_BAND`]).
+const DESIGN_NOTE_8_BAND: u8 = 4;
+
+/// The class map's band level, 0 (R10.T10.d): a texel is a cell of quadtree level 6
+/// ([`crate::worker::CLASS_MAP_LEVEL`]), whose weights are at band level 6 − 6.
+const CLASS_MAP_BAND: u8 = crate::worker::CLASS_MAP_BAND;
 
 /// The points the golden of `field` pins (the module documentation).
 fn pinned_points(field: &CoarseField) -> Vec<FaceUv> {
@@ -126,7 +133,8 @@ fn cold_trap_text() -> String {
 }
 
 /// The golden lines of `points` on `synth`'s field: each at the finest level, n − 1, n − 3, n − 6
-/// and n − 10 from it, and the class map's level (the module documentation's format).
+/// and n − 10 from it, band level 4 and the class map's band level (the module documentation's
+/// format).
 fn weights_lines(synth: &Synthesiser<'_, CoarseField>, points: &[FaceUv]) -> String {
     let mut cache = SynthCache::new();
     let finest = finest_band(synth.field().header()).get();
@@ -136,7 +144,8 @@ fn weights_lines(synth: &Synthesiser<'_, CoarseField>, points: &[FaceUv]) -> Str
         finest - 3,
         finest - 6,
         finest - 10,
-        CLASS_MAP_LEVEL,
+        DESIGN_NOTE_8_BAND,
+        CLASS_MAP_BAND,
     ];
     let mut out = GoldenWriter::new();
     out.header(crate::generator_version());

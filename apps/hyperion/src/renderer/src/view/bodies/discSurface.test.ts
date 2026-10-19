@@ -88,11 +88,25 @@ const ROTATION = tilted(55 * RAD, 30 * RAD);
 /** A handle the twin never reads: the class map's texels go to `rasteriseDisc` directly. */
 const WEIGHTS: TextureHandle = { kind: "texture", name: "test class map" };
 
+/**
+ * A surface's texels where no test reads them: the disc's twin takes its map as `rasteriseDisc`'s
+ * argument, and no point is drawn.
+ */
+function unreadTexels(classes: number): ClassMapTexels {
+  return { faceTexels: 1, classes, data: new Uint8Array(0) };
+}
+
 function classMap(
   laws: ReadonlyArray<PhotometricLaw>,
   elsewhere: PhotometricLaw = UNIFORM,
 ): ClassMapDiscSurface {
-  return { kind: "class-map", weights: WEIGHTS, laws, elsewhere };
+  return {
+    kind: "class-map",
+    weights: WEIGHTS,
+    texels: unreadTexels(laws.length),
+    laws,
+    elsewhere,
+  };
 }
 
 /**
@@ -301,6 +315,8 @@ describe("the class map's layout", () => {
     const map = twoClassMap(4);
     const surface = classMapSurface(engine, "moon class map", map, [DARK, BRIGHT], UNIFORM);
     expect(surface).toMatchObject({ kind: "class-map", laws: [DARK, BRIGHT], elsewhere: UNIFORM });
+    // The texels travel with the texture, the CPU copy the point regime integrates (R10.T10.f).
+    expect(surface.texels).toBe(map);
     expect(engine.textureSpecs.at(-1)).toMatchObject({
       name: "moon class map",
       size: { width: 6, height: 6, depthOrArrayLayers: 6 },

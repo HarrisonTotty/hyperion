@@ -125,8 +125,8 @@ fn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32
 // Whether the pixel whose centre is `position` sees the spheroid in a surveyed cell, where the
 // terrain draws the ground: the ray through its centre against the analytic spheroid, the hit's
 // direction on R05's cube sphere (the spheroid's point of unit direction d is M d, so d is the hit
-// stretched along the pole) in the body-fixed axes, and its cell's texel, as the disc reads a class
-// map (`class_map_texel`).
+// stretched along the pole) in the body-fixed axes, and its cell's texel of the coverage mask,
+// which has no gutter (`class_map_texel`, the mask's lookup since R10.T10.d).
 fn surveyed_beneath(position : vec2f) -> bool {
   let body = body_of();
   let hit = hit_spheroid(body, view_ray(floor(position) + 0.5));

@@ -16,7 +16,6 @@
  * harness's main process counts against the run.
  */
 
-import fixture from "../../../../../../crates/hyperion-surface/tests/golden/worker/moon_like.golden?raw";
 import { withTemplateCurve } from "../view/appearance/phase";
 import {
   createAirlessTables,
@@ -43,6 +42,7 @@ import {
   patchTerms,
 } from "../view/terrain/gpu/uniforms";
 import { parentKey, type PatchKey } from "../view/terrain/patchKey";
+import type { BodyFigure } from "../view/terrain/planet";
 import { type TerrainLighting, terrainLitMaterialSpec } from "../view/terrain/terrainMaterial";
 import type {
   BakedPatch,
@@ -50,14 +50,17 @@ import type {
   HeightWorkerReply,
   HeightWorkerRequest,
 } from "../view/terrain/workers/messages";
+import { moonLikeFixture, type WorkerFixture } from "../test/moonLikeFixture";
 import { type Checks, halfTexels, projection } from "./harness";
+
+/** The Moon-like world's equatorial radius, m: R ÷ ∛(1 − f) ({@link MOON_LIKE}). */
+const MOON_LIKE_A_M = 1.7374e6 / Math.cbrt(1 - 0.0012);
 
 /**
  * The Moon-like world's figure (`hyperion_surface`'s `testing/worlds.rs`: the Moon's volumetric
  * radius, 1,737.4 km, at a flattening of 0.0012, `Spheroid::from_volumetric`'s a = R ÷ ∛(1 − f)).
  */
-const MOON_LIKE_A_M = 1.7374e6 / Math.cbrt(1 - 0.0012);
-export const MOON_LIKE = {
+export const MOON_LIKE: Readonly<Pick<BodyFigure, "equatorialRadiusM" | "polarRadiusM">> = {
   equatorialRadiusM: MOON_LIKE_A_M,
   polarRadiusM: MOON_LIKE_A_M * (1 - 0.0012),
 };
@@ -77,30 +80,6 @@ const CENTRE: PatchKey = { face: 1, level: 7, i: 45, j: 45 };
 /** The camera's height above the centre patch's origin, metres, and its depression, degrees. */
 const HEIGHT_M = 30_000;
 const DEPRESSION_DEG = 60;
-
-/** The fixture's body, seed and first payload's blocks, which R10.T10.c's check shares. */
-export function parseFixture(): { body: string; seed: string; blocks: ArrayBuffer[] } {
-  let body = "";
-  let seed = "";
-  const blocks: ArrayBuffer[] = [];
-  for (const line of fixture.split("\n")) {
-    // `block <payload> <index> <hex>`: the first payload's blocks are the first survey's.
-    const [head, first, , third] = line.split(" ");
-    if (head === "body") {
-      body = first ?? "";
-    } else if (head === "seed") {
-      seed = first ?? "";
-    } else if (head === "block" && first === "1") {
-      const hex = third ?? "";
-      const bytes = new Uint8Array(hex.length / 2);
-      for (let n = 0; n < bytes.length; n += 1) {
-        bytes[n] = Number.parseInt(hex.slice(2 * n, 2 * n + 2), 16);
-      }
-      blocks.push(bytes.buffer);
-    }
-  }
-  return { body, seed, blocks };
-}
 
 /** The 3 × 3 block of keys about {@link CENTRE}, the centre first. */
 function keys(): PatchKey[] {
@@ -138,7 +117,7 @@ const MORPH_M = [0, 120_000] as const;
 async function bakeOverField(
   wanted: ReadonlyArray<PatchKey>,
   settings: BakeSettings,
-  field: ReturnType<typeof parseFixture>,
+  field: WorkerFixture,
 ): Promise<BakedPatch[]> {
   const worker = new Worker(new URL("../view/terrain/workers/height.worker.ts", import.meta.url), {
     type: "module",
@@ -237,7 +216,7 @@ interface LitFrame {
 async function drawLit(
   engine: RenderEngine,
   setting: "high" | "low",
-  field: ReturnType<typeof parseFixture>,
+  field: WorkerFixture,
 ): Promise<LitFrame> {
   const settings = { ...TERRAIN_SETTINGS[setting], cacheBytes: CACHE_BYTES };
   const resources = new TerrainResources(engine, settings, MOON_LIKE, "lit");
@@ -254,7 +233,7 @@ async function drawLit(
 async function drawInto(
   engine: RenderEngine,
   setting: "high" | "low",
-  field: ReturnType<typeof parseFixture>,
+  field: WorkerFixture,
   resources: TerrainResources,
   air: SurfaceLightingTables,
 ): Promise<LitFrame> {
@@ -482,7 +461,7 @@ async function renderInto(
 
 /** R10.T10.b's lit terrain: a generated world's patch set by both vertex paths. */
 export async function checkLitTerrain(engine: RenderEngine, checks: Checks): Promise<void> {
-  const field = parseFixture();
+  const field = moonLikeFixture("first");
   for (const setting of ["high", "low"] as const) {
     // The frames run in order: each bakes, draws and reads back before the next allocates.
     // oxlint-disable-next-line no-await-in-loop

@@ -23,7 +23,8 @@
  * dispatch of the `disc cells` pass, which shades every cell of the discs under 32 px at once for
  * their draws to read (R07.T8.d, {@link BODY_DISC_CELLS_KERNEL}). A disc shades from its
  * `DiscSurface` (T8.b): its photometry's uniform law, or R10's class map with a law per class; a
- * point keeps the photometry's law.
+ * point keeps the photometry's law, or integrates the class map where the rotation is known
+ * (R10.T10.f).
  *
  * A disc whose footprint overlaps geometry that writes depth (a mesh body, R10's terrain, a craft,
  * given as {@link BodyFrameOptions.depthWriters}) is promoted to the mesh regime for the frame
@@ -113,6 +114,7 @@ import {
   MAX_DISC_OCCLUDERS,
   packDiscRecords,
 } from "./discShading";
+import { classMapPointReflection } from "./classMapPoint";
 import { CLASS_MAP_FORMAT, discSurfaceLaws } from "./discSurface";
 import { bodyReflection, figurePole } from "./oblate";
 import { type HostSphere, type PainterEntry, painterOrder } from "./painter";
@@ -166,13 +168,13 @@ export interface LitBodyInput {
   readonly atmosphere?: SurfaceLightingTables;
   /**
    * The GPU's coverage mask of its survey (plan R10, R10.T10.c; `terrain/coverage.ts`'
-   * `CoverageMask.texture`), given by a view that draws its terrain, with which its figure, once it
-   * is handed over (`terrain`), is the reference surface beneath that terrain: discarded wherever
-   * the mask holds a cell surveyed, so that the terrain alone draws that ground (R10's Design note
-   * 12). Read in the axes of its `rotation`, so ignored without one, and by no other regime;
-   * absent, the figure is drawn whole.
+   * `CoverageMask.texture`) with the axes it is read in, given by a view that draws its terrain,
+   * with which its figure, once it is handed over (`terrain`), is the reference surface beneath
+   * that terrain: discarded wherever the mask holds a cell surveyed, so that the terrain alone
+   * draws that ground (R10's Design note 12). Read by no other regime; absent, the figure is drawn
+   * whole.
    */
-  readonly surveyCoverage?: TextureHandle;
+  readonly surveyCoverage?: MeshBodyCoverage;
   /**
    * Its relief for the hand-over to terrain (plan R10, R10.T10.e; `terrain/handover.ts`'
    * `handoverReliefM`: R09's realised relief, m, where its field's header is held and its survey
@@ -218,17 +220,32 @@ export interface MeshBodyPlan {
   readonly mesh: SmoothMesh;
   /** Its limb draw's corner depths, on the limb's plane. */
   readonly limbDepths: LimbDepths;
-  /**
-   * Whether it is handed over to terrain (`terrain`, R10.T10.e), whose ground R05's quadtree draws
-   * over its figure, rather than promoted by its overlaps alone.
-   */
-  readonly handedOver: boolean;
-  /**
-   * Its survey's coverage mask, which discards its figure where the terrain draws the ground
-   * (R10.T10.c), or `null` for a body not handed over, without a mask, or without a rotation to
-   * read it in.
-   */
-  readonly coverage: MeshBodyCoverage | null;
+  /** How it came to be drawn as a mesh, and with it what its figure leaves to its terrain. */
+  readonly role: MeshBodyRole;
+}
+
+/**
+ * Why a body is drawn as a mesh (T9; plan R10, R10.T10.e): `promoted` by its overlaps alone
+ * (`mesh`), its figure drawn whole, or `handed-over` to terrain (`terrain`), whose ground R05's
+ * quadtree draws over its figure, with its survey's coverage mask, which discards its figure where
+ * the terrain draws the ground (R10.T10.c), or `null` where the view gives it none.
+ */
+export type MeshBodyRole =
+  | { readonly kind: "promoted" }
+  | { readonly kind: "handed-over"; readonly coverage: MeshBodyCoverage | null };
+
+/** The coverage mask that discards a mesh body's figure: a handed-over body's, a promoted one none. */
+function coverageOf(role: MeshBodyRole): MeshBodyCoverage | null {
+  let coverage: MeshBodyCoverage | null;
+  switch (role.kind) {
+    case "promoted":
+      coverage = null;
+      break;
+    case "handed-over":
+      coverage = role.coverage;
+      break;
+  }
+  return coverage;
 }
 
 /** A point body's sprite: R02's sprite record, its depth its own (decision-r07-t8a, item 2). */
@@ -299,11 +316,15 @@ function occludersOf(
 /**
  * A point body's flux at the camera per display channel, lx: E p (a ÷ Δ)² Φ(α) for a sphere; for a
  * spheroid the law integrated over its figure, (E ÷ π)(a ÷ Δ)² A′ f(α) K (`bodyReflection`, A′ the
- * disc's scaled A), so that the point and the disc draw one flux. Each star's light is cut by its
- * eclipse over the disc the camera sees (`discEclipseVisible`, T10.b), the share of the light the
- * disc regime's pixels sum, so that the flux stays continuous at the 3 px switch through an
- * eclipse. Each planetshine source adds its own term, as a point source at its centre's direction
- * and never eclipsed (Design note 7).
+ * disc's scaled A), so that the point and the disc draw one flux. Under a class map, where the
+ * body's rotation is known, each light's term is the map integrated over the figure by the disc's
+ * own arithmetic (`classMapPointReflection`, plan R10, R10.T10.f), so that the point meets the
+ * patterned disc it switches with; otherwise it is the photometry's law, which equals the map's
+ * `elsewhere`. Each star's light is cut by its eclipse over the disc the camera sees
+ * (`discEclipseVisible`, T10.b), the share of the light the disc regime's pixels sum, so that the
+ * flux stays continuous at the 3 px switch through an eclipse; it takes the photometry's limb
+ * share under a class map too. Each planetshine source adds its own term, as a point source at its
+ * centre's direction and never eclipsed (Design note 7).
  *
  * @param hosts - The lights where they are drawn, for a body without its own lighting frame.
  * @param occluders - The bodies that may eclipse its stars (`occludersFor`).
@@ -322,9 +343,10 @@ export function pointFlux(
   const toCamera = scale(body.centreM, -1 / distanceM);
   const solid = (body.figure.equatorialRadiusM / distanceM) ** 2;
   const blockers = occluders.map(({ centreM, radiusM }) => ({ centreM, radiusM }));
+  const reflection = pointReflectionOf(body, toCamera);
   const flux: [number, number, number] = [0, 0, 0];
   for (const light of lightsOf(body, hosts)) {
-    const reflected = bodyReflection(body.figure, law, normalise(light.toStarM), toCamera);
+    const reflected = reflection(normalise(light.toStarM));
     const visible = discEclipseVisible(
       light.host,
       body,
@@ -338,12 +360,26 @@ export function pointFlux(
     }
   }
   for (const source of secondaries) {
-    const reflected = bodyReflection(body.figure, law, source.direction, toCamera);
+    const reflected = reflection(source.direction);
     for (const ch of [0, 1, 2] as const) {
       flux[ch] += source.illuminance[ch] * solid * reflected[ch];
     }
   }
   return flux;
+}
+
+/**
+ * What a point body reflects of a light from its direction towards the camera, uneclipsed: its
+ * class map integrated (`classMapPointReflection`, R10.T10.f) where its surface is one and its
+ * rotation is known, and otherwise its photometry's law over its figure (`bodyReflection`).
+ */
+function pointReflectionOf(body: LitBodyInput, toCamera: Vec3): (towardsLight: Vec3) => Rgb {
+  const { surface, rotation } = body;
+  if (surface?.kind === "class-map" && rotation !== undefined) {
+    return (towardsLight) =>
+      classMapPointReflection(body.figure, surface, rotation, towardsLight, toCamera);
+  }
+  return (towardsLight) => bodyReflection(body.figure, body.photometry.law, towardsLight, toCamera);
 }
 
 /**
@@ -590,7 +626,11 @@ export function planLitBodies(
     closeRun();
     const regime = regimes.get(body.id);
     if (drawnAsMesh(regime)) {
-      const handedOver = regime === "terrain";
+      // Only a body handed over has terrain over its figure to give the surveyed ground to.
+      const role: MeshBodyRole =
+        regime === "terrain"
+          ? { kind: "handed-over", coverage: body.surveyCoverage ?? null }
+          : { kind: "promoted" };
       steps.push({ kind: "limb", mesh: meshes.length });
       meshes.push({
         index: discs.length,
@@ -611,12 +651,7 @@ export function planLitBodies(
           camera,
           viewport,
         ),
-        handedOver,
-        // Only a body handed over has terrain over its figure to give the surveyed ground to.
-        coverage:
-          !handedOver || body.surveyCoverage === undefined || body.rotation === undefined
-            ? null
-            : { mask: body.surveyCoverage, rotation: body.rotation },
+        role,
       });
     } else {
       steps.push({ kind: "disc", index: discs.length });
@@ -1147,6 +1182,7 @@ export class LitBodyRenderer {
       if (body.mesh.patches.length === 0) {
         return [];
       }
+      const coverage = coverageOf(body.role);
       return [
         {
           mesh: resources.patch,
@@ -1156,11 +1192,11 @@ export class LitBodyRenderer {
             disc: new Float32Array([body.index]),
             firstInstance: new Float32Array([first]),
             bodyRotation: rotationColumns(body.mesh.axes),
-            coverageAxes: rotationColumns(body.coverage?.rotation ?? IDENTITY_ROTATION),
+            coverageAxes: rotationColumns(coverage?.rotation ?? IDENTITY_ROTATION),
           },
           textures: {
             ...this.#recordTextures(record),
-            coverageMask: body.coverage?.mask ?? resources.noCoverage,
+            coverageMask: coverage?.mask ?? resources.noCoverage,
           },
           storageBuffers: {
             discs: resources.discs,

@@ -17,7 +17,14 @@ import type { WgslMaterialSpec } from "../engine/types";
 import { annulusEdges } from "../lighting/annuli";
 import terrainLitWgsl from "./shaders/terrainLit.wgsl?raw";
 import horizonWgsl from "./shadows/horizon.wgsl?raw";
-import { CLASS_LAWS_BYTES, CLASS_LAYERS_BYTES, CLASS_WEIGHTS_BYTES } from "./slotLayout";
+import { LIT_VERTEX_CODE } from "./gpu/resources";
+import {
+  CLASS_LAWS_BYTES,
+  CLASS_LAYERS_BYTES,
+  CLASS_WEIGHTS_BYTES,
+  SURVEY_CELL_CODE_BYTE,
+  SURVEY_MASK_BYTES,
+} from "./slotLayout";
 import {
   AIRLESS_ICE_EXPONENT,
   CLASS_LAW_ROWS,
@@ -142,6 +149,23 @@ describe("the lit terrain's material (R10.T10.b)", () => {
     expect(terrainLitWgsl).toContain("const FIRST_TERRAIN_SECONDARY_ROW : u32 = 21u;");
     expect(TERRAIN_LIGHT_ROWS).toBe(21 + 2 * 2);
   });
+
+  it("carries the survey mask's layout: its words a slot, and the byte of its cell's code (R10.T10.c)", () => {
+    expect([
+      terrainLitWgsl.includes(`const SURVEY_MASK_WORDS : u32 = ${String(SURVEY_MASK_BYTES / 4)}u;`),
+      terrainLitWgsl.includes(
+        `const SURVEY_CELL_CODE_BYTE : u32 = ${String(SURVEY_CELL_CODE_BYTE)}u;`,
+      ),
+    ]).toEqual([true, true]);
+  });
+
+  it.each(Object.entries(LIT_VERTEX_CODE))(
+    "carries the lit mesh's vertex code %s as resources.ts gives it (R10.T10.c)",
+    (name, code) => {
+      const constant = `LIT_${name.replace(/[A-Z]/gu, (letter) => `_${letter}`).toUpperCase()}`;
+      expect(terrainLitWgsl).toContain(`const ${constant} : u32 = ${String(code)}u;`);
+    },
+  );
 });
 
 describe("the class laws (decision-r10-limb; decision-r07-t8b)", () => {
