@@ -216,7 +216,8 @@ halo's prefix in plans 02 and 08).
 - Scope `Body` (opened with `ObjectKey::from(BodyId)`): `planet.orbit`, `planet.radius`,
   `planet.volatiles`, `planet.spin`, `planet.origin`, `planet.scatter` (ruling 80), `moon.count`,
   `moon.mass`, `moon.orbit`, `moon.impact`, `moon.capture`, `ring.system`, `belt.member`,
-  `body.surface`, `body.resources`, `body.formation` (T51.c: a body's formation time, word 0).
+  `body.surface`, `body.resources`, `body.formation` (T51.c: a body's formation time, word 0),
+  `body.cold_traps` (T51.f: an airless body's exposed fraction of its cold traps, word 0).
 - Scope `Event`, each also an entry of plan 01's `event_tags!` in the block 0x0400–0x04FF that plan
   06 sets aside for this plan: `0x0400 BODY_IMPACT` (`body.impact`), `0x0401 BODY_ERUPTION`
   (`body.eruption`), `0x0402 BODY_STORM` (`body.storm`), `0x0403 BODY_DUSTSTORM` (`body.duststorm`),
@@ -7061,8 +7062,9 @@ it:
     T50.b, T52, T24.c with T24.g, and T24.d with T52.d) with T51.d–g, T53, T48.g and T31's event
     goldens, its riders boarding as Tasks, "Order and parallelism", says. It takes one bump in
     P14.T54.b. The fitted tables `thermo` and `condensate_extinction` are stamped since 24.
-  - Draws: words 3–5 of `planet.volatiles` (no existing value moves), and one new tag,
-    `system.abundances` (System scope). No other domain tag.
+  - Draws: words 3–5 of `planet.volatiles` (no existing value moves), and three new tags,
+    `system.abundances` (System scope), `body.formation` (Body scope, T51.c) and `body.cold_traps`
+    (Body scope, T51.f). No other domain tag.
   - The registry is append-only. A row's index and key are never changed. A changed value is a
     generator-version change. A changed index file in R08's `materials/` moves the sim's τ(550)
     through `condensate_extinction` and so bumps, from 24; before 24 the table is refitted with no

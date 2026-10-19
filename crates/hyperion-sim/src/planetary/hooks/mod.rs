@@ -26,6 +26,9 @@
 //!   and maturity, organic cover, resurfacing rate and an Io's volcanic deposits. It is pure until
 //!   P14.T54.b, the 23 → 24 bump, puts it in the record's surface section in the place of the
 //!   record's placeholder of the same name.
+//! - [`cold_traps`]: an airless body's cold traps (P14.T51.f), so far the exposed fraction of
+//!   their ice, `f_x`, drawn once a body on `body.cold_traps`, which nothing on the record reads
+//!   yet.
 //!
 //! The conditions and figures are a body's record's surface section
 //! ([`record::Surface`](crate::planetary::record::Surface), P14.T48.e), from the 21 → 22 batch's
@@ -42,6 +45,7 @@
 //! record's hooks section ([`record::Hooks`](crate::planetary::record::Hooks)) carries the body's
 //! [`DetailSeed`] in the surface seed's place (R09.T1.b), and nothing server-only.
 
+pub mod cold_traps;
 pub mod crust;
 pub mod figures;
 pub mod modifiers;

@@ -372,7 +372,7 @@ domain_tags! {
     // `planet.volatiles`, `planet.spin`, `planet.origin`, `planet.scatter` (ruling 80),
     // `moon.count`, `moon.mass`, `moon.orbit`, `moon.impact`, `moon.capture`, `ring.system`,
     // `belt.member`, `body.surface`, `body.resources`, `body.continents` (P14.T48.a),
-    // `body.formation` (P14.T51.c).
+    // `body.formation` (P14.T51.c), `body.cold_traps` (P14.T51.f).
     //
     // Scope `Event`, each behind an event tag of plan 06's block 0x0400–0x04FF: `body.impact`
     // (0x0400), `body.eruption` (0x0401), `body.storm` (0x0402), `body.duststorm` (0x0403),
@@ -841,6 +841,15 @@ domain_tags! {
     /// one open uniform, its place in its window; words 1–7 are reserved
     /// (`planetary::hooks::crust::formation_time`).
     BODY_FORMATION: Body = "body.formation";
+
+    // Plan 14, phase L (P14.T51.f): an airless body's exposed fraction of its cold traps, under the
+    // name and scope the "Plan 14" heading above lists. Appended here, after P14.T51.c's
+    // `body.formation`, because the macro's order fixes `ALL`.
+
+    /// The share of a body's cold traps whose ice is exposed, `f_x` (P14.T51.f), keyed by the body:
+    /// word 0, one open uniform, its log-uniform rank in [0.016, 0.45]; words 1–7 are reserved
+    /// (`planetary::hooks::cold_traps::exposed_fraction`).
+    BODY_COLD_TRAPS: Body = "body.cold_traps";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1072,13 +1081,23 @@ mod tests {
         assert!(at(SYSTEM_ABUNDANCES) > at(BODY_CONTINENTS));
     }
 
+    /// P14.T51.c's one new tag, appended after plan 06's `star.ns.glitch_class`.
     #[test]
     fn plan_14_registers_the_formation_tag_with_body_scope() {
         assert_eq!(BODY_FORMATION.name(), "body.formation");
         assert_eq!(BODY_FORMATION.scope(), crate::rng::TagScope::Body);
         let at = |tag| ALL.iter().position(|t| *t == tag);
-        assert_eq!(at(BODY_FORMATION), Some(ALL.len() - 1));
         assert!(at(BODY_FORMATION) > at(STAR_NS_GLITCH_CLASS));
+    }
+
+    /// P14.T51.f's one new tag, keyed by the body, last in `ALL` when it was appended.
+    #[test]
+    fn plan_14_registers_the_cold_traps_tag_with_body_scope() {
+        assert_eq!(BODY_COLD_TRAPS.name(), "body.cold_traps");
+        assert_eq!(BODY_COLD_TRAPS.scope(), crate::rng::TagScope::Body);
+        let at = |tag| ALL.iter().position(|t| *t == tag);
+        assert_eq!(at(BODY_COLD_TRAPS), Some(ALL.len() - 1));
+        assert!(at(BODY_COLD_TRAPS) > at(BODY_FORMATION));
     }
 
     #[test]

@@ -104,6 +104,7 @@
 //! | 01 | a planet's volatile inventory (P14.T13.a) | [`rng::tags::PLANET_VOLATILES`](crate::rng::tags::PLANET_VOLATILES) (`Body`), opened with `ObjectKey::from(BodyId)`, words 0–5, 3–5 read by number from [`derive::atmosphere::SULPHUR_WORD`] (P14.T50.a; [`derive::atmosphere::VolatileDraws`]) |
 //! | 01 | a host's C/O and Mg/Si (P14.T50.a) | [`rng::tags::SYSTEM_ABUNDANCES`](crate::rng::tags::SYSTEM_ABUNDANCES) (`System`), opened with `ObjectKey::from(SystemId)`, words 0–1 ([`chem::AbundanceDraws`]) |
 //! | 01 | a small body's formation time (P14.T51.c) | [`rng::tags::BODY_FORMATION`](crate::rng::tags::BODY_FORMATION) (`Body`), opened with `ObjectKey::from(BodyId)`, word 0 ([`hooks::crust::formation_time`]) |
+//! | 01 | an airless body's exposed fraction of its cold traps (P14.T51.f) | [`rng::tags::BODY_COLD_TRAPS`](crate::rng::tags::BODY_COLD_TRAPS) (`Body`), opened with `ObjectKey::from(BodyId)`, word 0 ([`hooks::cold_traps::exposed_fraction`]) |
 //! | 14 | a young magma ocean (design note 12) | [`hosts::young::Formation::molten_until`], which [`derive::PlacedBody::with_magma_ocean_until`] carries to the atmosphere |
 
 pub mod architecture;
