@@ -734,7 +734,7 @@ mod tests {
         .unwrap();
         assert_eq!(manifest.task(), "toy");
         assert_eq!(manifest.datasets(), ["census"]);
-        assert!(manifest.materials().is_empty());
+        assert_eq!(manifest.materials(), [] as [String; 0]);
         assert_eq!(manifest.u64("draws").unwrap(), 200);
         assert!(manifest.f64("scale").unwrap().total_cmp(&0.5).is_eq());
         assert!(manifest.f64("draws").unwrap().total_cmp(&200.0).is_eq());

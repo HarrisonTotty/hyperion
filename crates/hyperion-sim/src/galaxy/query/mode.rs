@@ -268,7 +268,7 @@ mod tests {
                 range_query_observed(&galaxy, &mut NoCache::new(), &mut NoStarsCache, &[], &now)
                     .unwrap();
             assert_eq!(as_now, present, "now mode is plan 03's answer");
-            assert!(as_now.observed().is_empty());
+            assert_eq!(as_now.observed(), []);
 
             let plain = range_query(&galaxy, &mut NoCache::new(), &[], &observed);
             let seen =

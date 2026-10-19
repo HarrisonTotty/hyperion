@@ -472,7 +472,7 @@ mod tests {
         let inward = at_ly([half - 300.5, 0.5, 0.5]);
         let cells: Vec<CellKey> =
             cells_along_segment(Layer::E, &edge, &inward, LightYears::new(200.0)).collect();
-        assert!(!cells.is_empty());
+        assert_ne!(cells, []);
         assert!(cells.iter().all(|c| c.origin_ly()[0] < ROOT_HALF_WIDTH_LY));
         // A bad radius is the segment itself.
         let nan: Vec<CellKey> =

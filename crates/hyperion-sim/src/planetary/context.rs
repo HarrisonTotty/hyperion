@@ -1612,7 +1612,7 @@ mod tests {
             if drawn.star_count() == 1 {
                 assert_eq!(context.zones().len(), 1);
             } else {
-                assert!(!context.zones().is_empty());
+                assert_ne!(context.zones(), []);
             }
         }
     }

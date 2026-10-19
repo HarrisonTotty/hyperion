@@ -382,7 +382,7 @@ fn assert_summary_is_the_sims(wire: &SystemSummaryDto, stars: &SystemStars) {
         assert_star_is_the_sims(star, stars, summary);
     }
     let Some(hierarchy) = sim.hierarchy() else {
-        assert!(wire.hierarchy.nodes.is_empty());
+        assert_eq!(wire.hierarchy.nodes, []);
         return;
     };
     assert_eq!(wire.hierarchy.nodes.len(), hierarchy.nodes().len());

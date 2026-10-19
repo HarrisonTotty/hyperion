@@ -1911,7 +1911,7 @@ mod tests {
             plan.complete(),
         );
         let (_, last) = cold.last().expect("a step");
-        assert!(!one_pass.listed().is_empty());
+        assert_ne!(one_pass.listed(), []);
         assert!(last.completeness().is_some_and(Completeness::is_final));
         assert_eq!(
             (last.listed(), last.overflow(), last.tallies()),

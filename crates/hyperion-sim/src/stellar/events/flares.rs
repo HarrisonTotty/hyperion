@@ -1517,7 +1517,7 @@ mod tests {
             );
         }
         assert_eq!(running(&dwarf, &s, t), cold);
-        assert!(!cold.is_empty());
+        assert_ne!(cold, []);
     }
 
     /// Pinned: the template's profile and area; three stars at the median draws, their floors and

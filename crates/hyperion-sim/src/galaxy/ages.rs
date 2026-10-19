@@ -307,7 +307,7 @@ pub struct AgeDistribution {
 impl AgeDistribution {
     /// A distribution from pieces on ordered, disjoint intervals whose weights sum to 1.
     fn from_pieces(pieces: Vec<Piece>) -> Self {
-        debug_assert!(!pieces.is_empty());
+        debug_assert_ne!(pieces, []);
         debug_assert!(pieces.windows(2).all(|w| w[0].hi <= w[1].lo));
         let mut cumulative = Vec::with_capacity(pieces.len() + 1);
         let mut sum = 0.0;

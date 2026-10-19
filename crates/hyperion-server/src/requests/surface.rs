@@ -1100,7 +1100,7 @@ mod tests {
         );
         let blocks = decode_payload(&none.bytes).unwrap();
         assert_eq!(blocks.len(), 1);
-        assert!(blocks[0].cells().is_empty());
+        assert_eq!(blocks[0].cells(), []);
         assert_eq!(
             served(ask(&harness, field_request(&universe, solid, Some(0))).await),
             none

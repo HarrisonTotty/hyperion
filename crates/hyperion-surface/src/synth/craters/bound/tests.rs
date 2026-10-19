@@ -110,7 +110,7 @@ fn the_coarse_rims_marks_bound_their_sharpenings_changes() {
         let (d_b, radius_m) = (header.boundary_diameter().value(), header.radius().value());
         let marks = coarse_marks(header.craters(), coarse_band, d_b, radius_m, &bands);
         // Octaves of D_b × 2^k up to π R.
-        assert!(!marks.is_empty());
+        assert_ne!(marks, []);
         let mut lower = d_b;
         for mark in &marks {
             assert!(lower < core::f64::consts::PI * radius_m);

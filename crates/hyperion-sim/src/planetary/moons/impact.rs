@@ -493,7 +493,7 @@ mod tests {
     #[test]
     fn the_orbit_is_monotone_and_continuous_in_time() {
         let moons = moons_of(400, |i| earth(planet_id(i, 3)));
-        assert!(!moons.is_empty());
+        assert_ne!(moons, []);
         for (parent, moon) in &moons {
             let mut last = moon.formed().semi_major_axis();
             assert_eq!(moon.semi_major_axis_at(Years::new(0.0)), last);
@@ -522,7 +522,7 @@ mod tests {
         use crate::planetary::drift::{DRIFT_TOLERANCE, drift_cell};
         use crate::time::ClockWindow;
         let moons = moons_of(400, |i| earth(planet_id(i, 3)));
-        assert!(!moons.is_empty());
+        assert_ne!(moons, []);
         let age = 4.57e9;
         for (parent, moon) in moons.iter().take(20) {
             let anchored = moon.orbit_at(parent, Years::new(age));
@@ -580,7 +580,7 @@ mod tests {
                     0.0,
                 )
             });
-            assert!(!moons.is_empty());
+            assert_ne!(moons, []);
             for (_, moon) in moons {
                 let lost = moon.lost_at().value();
                 assert!(lost < 1e9, "{mass} M⊕: lost at {lost} yr");
@@ -649,7 +649,7 @@ mod tests {
                 0.25,
             )
         });
-        assert!(!dwarfs.is_empty());
+        assert_ne!(dwarfs, []);
         assert!(
             dwarfs
                 .iter()

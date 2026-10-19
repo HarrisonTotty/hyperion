@@ -407,7 +407,7 @@ mod tests {
         let whole = merge_census(parts.to_vec(), unbounded());
         let census = merge_census(parts.to_vec(), n_max);
         let all = whole.listed();
-        assert!(whole.overflow().is_empty());
+        assert_eq!(whole.overflow(), []);
         assert!(all.windows(2).all(|w| sky_order(&w[0], &w[1]).is_lt()));
         let keep = all.len().min(usize::try_from(n_max.get()).expect("fits"));
         assert_eq!(census.listed(), &all[..keep], "the brightest are listed");
@@ -602,7 +602,7 @@ mod tests {
         let stars = tied_stars();
         let whole = merge_census(dealt(&stars, 5), unbounded());
         assert_eq!(whole.listed().len(), stars.len());
-        assert!(whole.overflow().is_empty());
+        assert_eq!(whole.overflow(), []);
         for n_max in 1..=u32::try_from(stars.len()).expect("few") + 2 {
             let census = merge_census(dealt(&stars, 5), n(n_max));
             let mut both = census.listed().to_vec();

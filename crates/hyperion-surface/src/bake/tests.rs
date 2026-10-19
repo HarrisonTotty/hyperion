@@ -392,7 +392,7 @@ fn bake_a_block_of_new_cells_changes_nothing_at_a_vertex_surveyed_before_it() {
             .collect();
         (before, answered)
     };
-    assert!(!answered.is_empty());
+    assert_ne!(answered, [] as [usize; 0]);
     // The 2 × 2 cells beside the survey, with their margin, as a later block brings them.
     let beside: BTreeSet<PatchKey> = [(24, 22), (25, 22), (24, 23), (25, 23)]
         .map(|(i, j)| PatchKey::new(Face::PosY, coarse, i, j).unwrap())
@@ -654,7 +654,7 @@ fn bake_without_weights_leaves_the_palette_empty_and_the_rest_as_baked() {
     let with = bake_terrain(&synth, &mut SynthCache::new(), edge, &MESH, &[]).unwrap();
     let without = bake_terrain(&synth, &mut SynthCache::new(), edge, &skipped, &[]).unwrap();
     assert_eq!(without.layers().palette(), [None; MAX_CLASSES]);
-    assert!(without.layers().weights().is_empty());
+    assert_eq!(without.layers().weights(), [] as [[u8; MAX_CLASSES]; 0]);
     assert_eq!(without.patch(), with.patch());
     assert_eq!(without.layers().survey_mask(), with.layers().survey_mask());
     assert_eq!(
@@ -704,7 +704,7 @@ fn bake_hands_each_hook_the_patch_and_its_heights_in_turn() {
     for hook in [&first, &second] {
         assert_eq!(*hook.calls.borrow(), vec![(key, heights.clone(), 0)]);
     }
-    assert!(bake.layers().extra().is_empty());
+    assert_eq!(bake.layers().extra(), []);
     assert!(
         !bake.layers().horizon().is_empty(),
         "the horizon map is baked beside the hooks"

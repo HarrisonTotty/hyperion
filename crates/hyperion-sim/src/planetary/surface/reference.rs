@@ -1209,8 +1209,8 @@ mod tests {
         // The Moon's cold-trapped water ice and Ceres's are entries no share names yet
         // (science-r09-drainage.md §4).
         for world in [moon_like(), ceres_like()] {
-            assert!(world.ices().is_empty());
-            assert!(world.condensates().is_empty());
+            assert_eq!(world.ices(), []);
+            assert_eq!(world.condensates(), []);
         }
         // Each world's sea, where it has one, is its main liquid.
         let earth = earth_like();

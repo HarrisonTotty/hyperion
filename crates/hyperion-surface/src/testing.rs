@@ -1758,7 +1758,7 @@ mod tests {
 
         let flat = synthetic_field(SyntheticWorld::Flat);
         assert!(flat.synthesis().iter().all(|c| c.elevation_mm == 0));
-        assert!(flat.craters().is_empty());
+        assert_eq!(flat.craters(), []);
         assert_eq!(flat.header().months(), 1);
 
         let one = synthetic_field(SyntheticWorld::OneCrater);

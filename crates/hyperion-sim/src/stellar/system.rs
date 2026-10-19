@@ -3189,7 +3189,7 @@ mod tests {
         let record = young_disc_record(&galaxy, 4, 1.0e9);
         let single = SystemStars::generate_in(&galaxy, &record, MultiplicityContext::ForcedSingle);
         assert_eq!(single.recoil(), None);
-        assert!(single.pairs().is_empty());
+        assert_eq!(single.pairs(), []);
     }
 
     /// `age_at` is `SystemRecord::age_at`'s arithmetic.

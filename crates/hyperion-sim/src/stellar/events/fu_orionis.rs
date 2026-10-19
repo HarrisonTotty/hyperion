@@ -1883,8 +1883,8 @@ mod tests {
                 FuOrionisRates::new(SolarMasses::new(mass), UnitUniform::HALF),
                 None
             );
-            assert!(list(&s, &series(0), horizon()).is_empty());
-            assert!(running(&s, &series(0), UniverseTime::EPOCH).is_empty());
+            assert_eq!(list(&s, &series(0), horizon()), []);
+            assert_eq!(running(&s, &series(0), UniverseTime::EPOCH), []);
             let id = series(0).event_id(EventBin::new(0).unwrap(), 0);
             assert_eq!(outburst(&s, &series(0), id), None);
         }
@@ -1900,7 +1900,7 @@ mod tests {
         let end = T_P + STEP_WIDTH.value() / 2.0;
         assert!(outbursts.iter().all(|o| s.age_at(o.onset()).value() < end));
         let past = TimeWindow::new(model.last_instant(), ClockWindow::END).unwrap();
-        assert!(list_many(&s, 10, past).is_empty());
+        assert_eq!(list_many(&s, 10, past), []);
         assert_same_bits(model.rate(model.last_instant()).value(), 0.0);
         assert_same_bits(model.bound(bins_window(0, 1)).value(), 0.0);
     }
@@ -1976,7 +1976,7 @@ mod tests {
             .filter(|&t| horizon().contains(t))
             .collect();
             cuts.sort_unstable();
-            assert!(!cuts.is_empty());
+            assert_ne!(cuts, []);
             assert_partition_independent(horizon(), &cuts, listing);
             assert_order_independent(&partition(horizon(), &cuts), |w| listing(*w));
         }
@@ -2065,8 +2065,14 @@ mod tests {
         }
         assert!(seen > 100, "{seen} running outbursts seen");
         // Nothing runs before the onset of collapse or long after the last instant.
-        assert!(running(&star(1.0, 1e9), &series(0), UniverseTime::EPOCH).is_empty());
-        assert!(running(&star(1.0, -2e3), &series(0), UniverseTime::EPOCH).is_empty());
+        assert_eq!(
+            running(&star(1.0, 1e9), &series(0), UniverseTime::EPOCH),
+            []
+        );
+        assert_eq!(
+            running(&star(1.0, -2e3), &series(0), UniverseTime::EPOCH),
+            []
+        );
     }
 
     /// The parent's no-history test for this kind: the outbursts running at +900 years, asked
@@ -2094,7 +2100,7 @@ mod tests {
             );
         }
         assert_eq!(running(&s, &sr, t), cold);
-        assert!(!cold.is_empty());
+        assert_ne!(cold, []);
     }
 
     /// Writes `model`'s disc, its clock times, its bound and clock rate about each of them, and
@@ -2308,7 +2314,7 @@ mod tests {
                 StarModel::new(inputs.initial_mass, inputs.composition, inputs.draws, age).unwrap();
             let Some(model) = FuOrionisModel::of(&s) else {
                 substellar += 1;
-                assert!(list(&s, &series(i), window).is_empty());
+                assert_eq!(list(&s, &series(i), window), []);
                 continue;
             };
             forming += u32::from(window.contains(model.formation()));

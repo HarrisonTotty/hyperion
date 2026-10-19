@@ -614,7 +614,7 @@ async fn a_query_before_the_epoch_drops_only_the_systems_not_yet_born(server: &T
     let earlier = ask(&mut client, &universe.id, &earlier_query)
         .await
         .unwrap();
-    assert!(!earlier.systems.is_empty());
+    assert_ne!(earlier.systems, []);
     assert_eq!(
         earlier.census.complete_above_msun, epoch.census.complete_above_msun,
         "the census does not depend on the time asked about"
@@ -760,7 +760,7 @@ async fn a_mass_floor_leaves_the_lighter_layers_out_and_says_so(server: &TestSer
     }
     // 0.75 M☉ is the lower edge of layer C's band (plan 02's mass bands).
     assert_eq!(answer.census.complete_above_msun, Some(0.75));
-    assert!(!answer.systems.is_empty());
+    assert_ne!(answer.systems, []);
     for record in &answer.systems {
         assert!(
             matches!(record.layer, MassLayer::C | MassLayer::D | MassLayer::E),
@@ -863,7 +863,7 @@ async fn a_query_over_the_limit_returns_whole_layers_or_none(server: &TestServer
 
     assert_eq!(answer.census.limit, 5_000);
     assert_eq!(answer.census.complete_above_msun, None);
-    assert!(answer.systems.is_empty());
+    assert_eq!(answer.systems, []);
     for line in &answer.census.layers {
         assert_eq!(line.status, LayerStatus::OverLimit, "{line:?}");
         assert_eq!(line.returned, 0, "no layer is partial: {line:?}");
@@ -895,7 +895,7 @@ async fn a_query_over_the_cell_budget_still_answers(server: &TestServer) {
 
     assert_eq!(answer.centre, query.centre);
     assert_eq!(answer.census.complete_above_msun, None);
-    assert!(answer.systems.is_empty());
+    assert_eq!(answer.systems, []);
     for line in &answer.census.layers {
         assert_eq!(line.status, LayerStatus::OverCellBudget, "{line:?}");
         assert_eq!(line.returned, 0, "{line:?}");
@@ -1048,12 +1048,12 @@ async fn a_request_wrong_in_several_ways_is_refused_for_the_first_in_design_note
         remaining.remove(0);
     }
     // With every fault mended the request is served.
-    assert!(
-        !ask(&mut client, &universe.id, &Query::sunlike())
+    assert_ne!(
+        ask(&mut client, &universe.id, &Query::sunlike())
             .await
             .unwrap()
-            .systems
-            .is_empty()
+            .systems,
+        []
     );
 
     client.close().await;
@@ -1179,7 +1179,7 @@ async fn a_radius_that_is_not_a_number_never_reaches_the_query(server: &TestServ
     let answer = ask(&mut client, &universe.id, &Query::sunlike())
         .await
         .unwrap();
-    assert!(!answer.systems.is_empty());
+    assert_ne!(answer.systems, []);
 
     client.close().await;
 }

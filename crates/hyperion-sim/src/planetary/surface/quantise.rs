@@ -447,7 +447,7 @@ mod tests {
                     && c.month_anomaly == [0; 12]
                     && c.wind.iter().all(|&w| w == Wind::CALM))
         );
-        assert!(field.craters().is_empty());
+        assert_eq!(field.craters(), []);
         assert_eq!(
             field.header().reference_temperature(),
             inputs.mean_surface_temperature()

@@ -429,7 +429,7 @@ fn the_hazard_density_applies_holes_and_clouds_by_the_point_rule() {
     );
     let mut none = Vec::new();
     NoModifiers.modifiers_near_segment(&inside, &outside, &mut none);
-    assert!(none.is_empty());
+    assert_eq!(none, []);
     for p in [inside, outside, centre] {
         assert_same_bits(
             gas.density_with(&p, &none, &mut cache).value(),

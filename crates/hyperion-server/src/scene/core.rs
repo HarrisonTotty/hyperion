@@ -1411,7 +1411,7 @@ mod tests {
         else {
             panic!("the system arrives again: {:?}", delta.arrival);
         };
-        assert!(delta.bodies.is_empty());
+        assert_eq!(delta.bodies, []);
         assert_eq!(system.system.hosts.system.to_u64(), fixture.id().raw());
         assert_eq!(
             tidal_radius_m.to_bits(),

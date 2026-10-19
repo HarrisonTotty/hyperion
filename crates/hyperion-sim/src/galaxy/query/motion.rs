@@ -327,7 +327,7 @@ mod tests {
             CellKey::new(Layer::C, [0, 812, 0]).unwrap(),
             &mut cell,
         );
-        assert!(!cell.is_empty());
+        assert_ne!(cell, []);
         for system in &cell {
             assert_eq!(epoch_velocity(&galaxy, system), GalacticVelocity::default());
             for t in [UniverseTime::EPOCH, ClockWindow::START, ClockWindow::END] {

@@ -219,7 +219,7 @@ fn galaxy_map_rows_are_the_same_in_any_band() {
         }
         // An empty range renders nothing.
         render_rows(&fields, &spec, 7..7, &mut again);
-        assert!(again.is_empty());
+        assert_eq!(again, [] as [f64; 0]);
     }
 }
 

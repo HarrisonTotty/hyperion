@@ -1881,7 +1881,7 @@ mod tests {
         // One still poorer forms none: its budget is under even the innermost member.
         let none = group_masses_from(chain(), &poor(-3.0), &draws);
         assert_eq!(none.cap(), GroupCap::Truncated);
-        assert!(none.masses().is_empty());
+        assert_eq!(none.masses(), []);
         assert!(drift_budget(&poor(-3.0)) < whole.masses()[0]);
         // An ice giant group, drawn from its law, is scaled down whole.
         let ice = &template(ArchitectureClass::SolarLike).groups()[2];
@@ -2062,7 +2062,7 @@ mod tests {
         }];
         let low = group_masses_from(chain(), &disc, &near).masses()[0].value();
         assert!(low > 1.0 && low < 1.001, "{low}");
-        assert!(group_masses_from(chain(), &disc, &[]).masses().is_empty());
+        assert_eq!(group_masses_from(chain(), &disc, &[]).masses(), []);
         assert_eq!(
             group_masses_from(chain(), &disc, &[]).characteristic(),
             None

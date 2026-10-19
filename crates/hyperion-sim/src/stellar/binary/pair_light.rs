@@ -1161,7 +1161,7 @@ pub fn merge_tolerance_mag(v: f64) -> f64 {
 /// Never: a class is at most 32.
 #[must_use]
 pub fn count_class(count: u32) -> i16 {
-    i16::try_from(u32::BITS - count.leading_zeros()).expect("at most 32")
+    i16::try_from(count.bit_width()).expect("at most 32")
 }
 
 /// The stored value of magnitude `v`: +∞ is [`DARK_CMAG`], [`UNSEEN_MAG`] [`UNSEEN_CMAG`], and a

@@ -252,7 +252,7 @@ async fn a_universe_is_created_charted_and_reopened_over_one_socket() {
     );
     let (later, _) = ask(&mut client, query(&universe.id, centre, century)).await;
     assert_eq!(later.time, century);
-    assert!(!later.systems.is_empty());
+    assert_ne!(later.systems, []);
 
     // Nothing but the identity is saved, so another server on the same directory answers the same
     // query with the same bytes.

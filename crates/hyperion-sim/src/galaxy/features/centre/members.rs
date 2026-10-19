@@ -1193,6 +1193,6 @@ mod tests {
         let a = placement.members_in_cell(galaxy, MassBand::B, cell);
         let b = CentrePlacement::new(milky_way_centre()).members_in_cell(galaxy, MassBand::B, cell);
         assert_eq!(a, b);
-        assert!(!a.is_empty());
+        assert_ne!(a, []);
     }
 }

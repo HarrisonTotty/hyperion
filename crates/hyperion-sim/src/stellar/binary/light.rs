@@ -1207,7 +1207,7 @@ mod tests {
         assert!(!can_interact(&input, until));
         let timeline = evolve(&input, until);
         assert_eq!(timeline.segments().len(), 1);
-        assert!(timeline.supernovae().is_empty());
+        assert_eq!(timeline.supernovae(), []);
         assert_eq!(timeline.state_at(until).orbit(), Some(input.orbit()));
         // The bound does not lean on it: the primary may have collapsed, so the pair is not
         // `Detached`, and its verdict is the tables', which sample the kicks.

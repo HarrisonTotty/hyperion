@@ -1717,7 +1717,10 @@ mod tests {
             .unwrap();
             assert_eq!(found, expected, "{system}");
         }
-        assert!(!host_discs(&galaxy, &SystemStars::generate(&galaxy, &host), t).is_empty());
+        assert_ne!(
+            host_discs(&galaxy, &SystemStars::generate(&galaxy, &host), t),
+            []
+        );
         harness.stop().await;
     }
 

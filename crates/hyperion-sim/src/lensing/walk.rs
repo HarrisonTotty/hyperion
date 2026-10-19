@@ -2005,7 +2005,7 @@ mod tests {
             "the wide reach finds grid lenses"
         );
         let replaced = lenses_along(galaxy, &mut NoCache::new(), &[&Everything], &query).unwrap();
-        assert!(replaced.events().is_empty());
+        assert_eq!(replaced.events(), []);
         assert_eq!(replaced.walked().cells(), open.walked().cells());
     }
 

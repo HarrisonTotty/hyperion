@@ -552,7 +552,7 @@ async fn a_sky_near_the_sun_lists_feature_members_in_not_modelled() {
         )
     );
     assert_eq!(response.band.face_texels, COARSE_BAND.face_texels());
-    assert!(response.hosts.is_empty());
+    assert_eq!(response.hosts, []);
     assert_eq!(response.observer, sky(&universe).observer);
     // No listed star lies within a light-year, so the sky holds a Julian year.
     assert_eq!(
@@ -1225,7 +1225,7 @@ fn assert_final_to(response: &SkyResponse, cap_ly: f64) {
 fn assert_band_sent(band: &[BandTexel], sent: &[u8], what: &str) {
     assert_eq!(band.len(), BAND_TEXELS);
     let (texels, rest) = sent.as_chunks::<SKY_TEXEL_BYTES>();
-    assert!(rest.is_empty());
+    assert_eq!(rest, [] as [u8; 0]);
     assert_eq!(texels.len(), BAND_TEXELS);
     for (index, (texel, bytes)) in band.iter().zip(texels).enumerate() {
         assert_eq!(
@@ -1364,7 +1364,7 @@ async fn a_sky_near_the_sun_returns_the_stars_texels_and_host_discs_the_sim_retu
     // The host's discs at the request's time.
     let stars = SystemStars::generate(galaxy(), &host);
     let discs = host_discs(galaxy(), &stars, observer.time());
-    assert!(!discs.is_empty());
+    assert_ne!(discs, []);
     assert_eq!(
         response.hosts,
         discs.iter().map(sim_host).collect::<Vec<_>>()
@@ -1605,7 +1605,7 @@ fn stated_radii(
                 (edge.map_or(cap_ly, LightYears::value), edge.is_none()),
                 "reply {k}, {layer:?}"
             );
-            assert!(dto.complete_to_rays_ly.is_empty());
+            assert_eq!(dto.complete_to_rays_ly, [] as [f64; 0]);
             (layer, LightYears::new(dto.complete_to_ly), dto.is_final)
         })
         .collect()
@@ -1644,7 +1644,7 @@ fn census_to(radii: &[(Layer, LightYears, bool)], n_max: std::num::NonZeroU32) -
 fn stars_sent(response: &SkyResponse, payload: &[u8]) -> Vec<Vec<u8>> {
     let stars_bytes = usize::try_from(response.stars_bytes).unwrap();
     let (stars, rest) = payload[..stars_bytes].as_chunks::<SKY_STAR_BYTES>();
-    assert!(rest.is_empty());
+    assert_eq!(rest, [] as [u8; 0]);
     stars.iter().map(|star| star.to_vec()).collect()
 }
 

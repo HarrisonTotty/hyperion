@@ -667,7 +667,6 @@ impl ColumnInventory {
     }
 
     /// The species and their column weights, in registry order.
-    #[must_use]
     pub fn species(&self) -> impl ExactSizeIterator<Item = (SubstanceId, Pascals)> + '_ {
         self.species.iter().map(|s| (s.substance, s.weight))
     }

@@ -902,8 +902,8 @@ mod tests {
             PlanetClass::SubNeptune,
         ] {
             let body = planet(3, class, 5.97e24, 6_371.0, 255.0, 1.0);
-            assert!(rings(&body, &[], &draws_with(true), &FLAT).is_empty());
-            assert!(generate_rings(SEED, system(1), &body, &[], &FLAT).is_empty());
+            assert_eq!(rings(&body, &[], &draws_with(true), &FLAT), []);
+            assert_eq!(generate_rings(SEED, system(1), &body, &[], &FLAT), []);
         }
     }
 
@@ -920,7 +920,7 @@ mod tests {
                 assert!(dusty.optical_depth() < 1e-3 && dusty.optical_depth() > 0.0);
                 assert_eq!(dusty.index().sub(), BodySub::Ring(0));
                 assert_eq!(dusty.index().parent(), Some(parent.index()));
-                assert!(dusty.gaps().is_empty());
+                assert_eq!(dusty.gaps(), []);
             }
         }
     }
@@ -1148,7 +1148,7 @@ mod tests {
     #[test]
     fn a_ring_in_the_band_is_not_made_and_one_close_in_lies_on_the_equator() {
         let banded = RingPlane::Laplace(saturn_on_its_side(1.5));
-        assert!(rings(&saturn(), &[], &draws_with(true), &banded).is_empty());
+        assert_eq!(rings(&saturn(), &[], &draws_with(true), &banded), []);
         let far = saturn_on_its_side(40.0);
         let laid = rings(&saturn(), &[], &draws_with(true), &RingPlane::Laplace(far));
         let flat = rings(&saturn(), &[], &draws_with(true), &FLAT);

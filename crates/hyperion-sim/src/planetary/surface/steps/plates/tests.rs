@@ -735,7 +735,7 @@ fn untouched(inputs: CoarseInputs) {
     let mut working = initial.clone();
     run(&pass, &mut working);
     assert_eq!(working, initial);
-    assert!(working.plates.is_empty());
+    assert_eq!(working.plates, []);
     assert!(
         working
             .cells

@@ -567,7 +567,7 @@ fn worker_bake_is_bake_terrain_over_the_field_with_its_unsurveyed_cells() {
         assert_eq!(bake.unsurveyed_cells(), unsurveyed.as_slice(), "{name}");
     }
     let inside = fields.bake(f.body, SEED, probes()[0].1, &DOUBLE).unwrap();
-    assert!(inside.unsurveyed_cells().is_empty());
+    assert_eq!(inside.unsurveyed_cells(), [] as [u32; 0]);
     assert!(inside.terrain().layers().is_complete());
 }
 

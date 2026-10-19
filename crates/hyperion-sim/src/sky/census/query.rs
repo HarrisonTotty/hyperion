@@ -2296,7 +2296,7 @@ mod tests {
                 );
             }
             let streamed: Vec<CellKey> = plan.cells().collect();
-            assert!(!streamed.is_empty());
+            assert_ne!(streamed, []);
             assert_eq!(
                 streamed, expected,
                 "{radius} ly, cone {cone:?}, edges {edges:?}"
@@ -3027,7 +3027,7 @@ mod tests {
         }
         let census = merge_shells(fixture.parts_of(&done), unbounded, reached.clone());
         assert_eq!(census.completeness(), Some(&reached));
-        assert!(census.overflow().is_empty());
+        assert_eq!(census.overflow(), []);
         // The census with C's, D's and E's caps forced to the edge, less its stars beyond it.
         let forced = fixture
             .query
@@ -3878,7 +3878,7 @@ mod tests {
             plan.complete(),
         );
         assert_eq!(star_bits(shelled.listed()), star_bits(census.listed()));
-        assert!(census.overflow().is_empty());
+        assert_eq!(census.overflow(), []);
         let first: Vec<Shell> = shells.iter().copied().filter(|s| s.index() == 0).collect();
         let reached = plan.completeness(first.iter().copied());
         assert!(!reached.is_final(), "C, D and E have a second shell");

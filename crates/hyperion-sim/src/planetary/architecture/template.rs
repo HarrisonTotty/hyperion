@@ -1323,11 +1323,7 @@ mod tests {
                 template.class()
             );
         }
-        assert!(
-            super::template(ArchitectureClass::Barren)
-                .groups()
-                .is_empty()
-        );
+        assert_eq!(super::template(ArchitectureClass::Barren).groups(), []);
     }
 
     /// The chain's count law has the means of its sources: 3.5 at 1 M☉ (plan 14), 6.1 at and below

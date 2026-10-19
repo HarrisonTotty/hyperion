@@ -1367,7 +1367,7 @@ async fn a_malformed_index_or_an_unknown_system_is_refused_naming_the_field() {
         bodies_request(&universe, pinned, at_years(0), DetailLevelDto::Full),
     )
     .await;
-    assert!(!answer.bodies.is_empty());
+    assert_ne!(answer.bodies, []);
     let counters = server.stats().bodies();
     assert_eq!(
         (counters.generated(), counters.cache().entries()),
@@ -1418,7 +1418,7 @@ async fn mass_and_orbit_gives_no_bulk_section(server: &TestServer) {
         other => panic!("expected a system's bodies, got {other:?}"),
     };
     assert_eq!(answer.granted, DetailLevelDto::MassAndOrbit);
-    assert!(!answer.bodies.is_empty());
+    assert_ne!(answer.bodies, []);
     for body in &answer.bodies {
         assert_eq!(body.bulk, SectionDto::NotResolved, "{}", body.id);
         assert!(

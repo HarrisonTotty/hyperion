@@ -193,7 +193,7 @@ fn generate_satellites_is_each_member_s_children_in_generate() {
         for member in system.bodies().iter().filter(|b| b.member_of().is_some()) {
             let alone = generate_satellites(SEED, ctx, member, None);
             assert_eq!(alone, system.satellites_of(member.index()));
-            assert!(alone.rings().is_empty());
+            assert_eq!(alone.rings(), []);
             assert!(alone.moons().len() <= 1);
             let children: Vec<BodyIndex> =
                 system.children(member.index()).map(Body::index).collect();

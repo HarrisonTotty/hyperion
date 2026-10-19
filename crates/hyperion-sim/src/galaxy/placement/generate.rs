@@ -265,7 +265,7 @@ mod tests {
             },
             &mut kept,
         );
-        assert!(kept.is_empty());
+        assert_eq!(kept, []);
         let seen = seen.into_inner();
         let count = candidate_count(&galaxy, key);
         assert_eq!(seen.len(), usize::try_from(count).unwrap());
@@ -275,7 +275,7 @@ mod tests {
                 CandidateOutcome::Thinned | CandidateOutcome::ClaimedByCatalogue => None,
             })
             .collect();
-        assert!(!accepted.is_empty());
+        assert_ne!(accepted, []);
         for (index, mass) in accepted {
             assert_same_bits(seen[usize::try_from(index).unwrap()].value(), mass.value());
         }
@@ -289,7 +289,7 @@ mod tests {
         let mut cell = Vec::new();
         generate_cell(&galaxy, dense, &mut cell);
         let expected = cell.clone();
-        assert!(!expected.is_empty());
+        assert_ne!(expected, []);
         generate_cell(&galaxy, sparse, &mut cell);
         generate_cell(&galaxy, dense, &mut cell);
         assert_eq!(cell, expected);
@@ -304,7 +304,7 @@ mod tests {
             CellKey::containing(Layer::D, &sunlike()).unwrap(),
             &mut cell,
         );
-        assert!(!cell.is_empty());
+        assert_ne!(cell, []);
         assert_eq!(
             cell_heap_bytes(&cell),
             cell.len() * size_of::<SystemRecord>()

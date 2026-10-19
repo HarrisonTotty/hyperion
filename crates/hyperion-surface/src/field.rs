@@ -1466,7 +1466,7 @@ mod tests {
     #[test]
     fn a_field_builder_without_craters_lists_none() {
         let field = FieldBuilder::new(Metres::new(CERES_M)).build();
-        assert!(field.craters().is_empty());
+        assert_eq!(field.craters(), []);
         assert_eq!(field.header().level(), CoarseLevel::MIN);
         let level = field.header().level().get();
         let any = cell_at_index(level, 17).unwrap();

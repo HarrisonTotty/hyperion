@@ -292,10 +292,9 @@ fn equal_fractions_are_ordered_by_substance() {
     assert!(water.substance() < methane.substance());
     assert_eq!(gases[0].0, water.substance());
     // A weight of nothing is no gas, and no weight at all is an empty list.
-    assert!(
-        mole_fractions([(water.substance(), Pascals::ZERO)])
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        mole_fractions([(water.substance(), Pascals::ZERO)]).unwrap(),
+        []
     );
 }
 
@@ -2661,11 +2660,6 @@ fn the_conditions_gases_are_the_mole_fractions() {
                 (a, b) => assert_eq!(a.is_none(), b.is_none()),
             }
         }
-        assert!(
-            GasFractions::of(partials, true)
-                .unwrap()
-                .as_slice()
-                .is_empty()
-        );
+        assert_eq!(GasFractions::of(partials, true).unwrap().as_slice(), []);
     }
 }

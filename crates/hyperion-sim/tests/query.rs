@@ -139,7 +139,7 @@ fn with_no_source_the_query_is_the_grid_alone() {
     }
 
     // Every hit is a grid system of an admitted layer, inside the radius, in distance order.
-    assert!(!result.systems().is_empty());
+    assert_ne!(result.systems(), []);
     let mut nearer = 0.0;
     for hit in result.systems() {
         assert!(result.census().layers().contains(hit.record().layer()));
@@ -739,7 +739,7 @@ fn the_census_follows_the_density_from_the_sun_to_the_galactic_centre() {
     assert_eq!(result.census().complete_above(), None);
     assert_eq!(result.census().stopped_by(), CensusStop::Limit);
     assert_eq!(result.census().layers(), LayerSet::EMPTY);
-    assert!(result.systems().is_empty());
+    assert_eq!(result.systems(), []);
     assert_eq!(result.stats().cells_visited(), 0, "a cell was generated");
     assert!(result.census().expected().get(Layer::E) > 4_096.0);
 }
@@ -757,7 +757,7 @@ fn every_system_returned_resolves_and_passes_the_querys_own_tests() {
                 .build()
                 .expect("a small sphere inside the clock window");
             let result = run(&galaxy, &[], &query);
-            assert!(!result.systems().is_empty());
+            assert_ne!(result.systems(), []);
             for hit in result.systems() {
                 // An ID is all a save keeps, and it must give the record back.
                 assert_eq!(resolve(&galaxy, hit.id()), Ok(*hit.record()));

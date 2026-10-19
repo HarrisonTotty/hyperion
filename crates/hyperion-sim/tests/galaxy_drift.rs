@@ -242,7 +242,7 @@ fn the_query_is_the_brute_force_answer(
             got.len(),
             still.systems().len()
         );
-        assert!(!got.is_empty());
+        assert_ne!(got, []);
         assert_eq!(got, want, "the query at +1,000 yr against the brute force");
         // Warm and cold caches agree: a cache warmed by the epoch's query answers the moving one.
         let mut warm = WarmCache::default();

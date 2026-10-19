@@ -2133,7 +2133,7 @@ mod tests {
             5,
         );
         assert_eq!(none.class(), ArchitectureClass::Barren);
-        assert!(none.planets().is_empty());
+        assert_eq!(none.planets(), []);
         assert_eq!(none.next_slot(), 5);
     }
 

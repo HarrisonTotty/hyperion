@@ -1699,7 +1699,7 @@ mod tests {
             }
         ));
         assert!(!pusher.push(push(1, Vec::new())), "the push is dropped");
-        assert!(client.ping(1).await.is_empty());
+        assert_eq!(client.ping(1).await, []);
         client.close().await;
         harness.stop().await;
     }

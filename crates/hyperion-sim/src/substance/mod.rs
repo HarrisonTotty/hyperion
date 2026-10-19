@@ -392,7 +392,6 @@ pub fn by_key(key: &str) -> Option<SubstanceId> {
 /// # Panics
 ///
 /// Never: the registry holds far fewer than 65,536 rows, so each index fits a `u16`.
-#[must_use]
 pub fn ids() -> impl ExactSizeIterator<Item = SubstanceId> {
     (0..ROWS.len())
         .map(|i| SubstanceId(u16::try_from(i).expect("the registry holds fewer than 65,536 rows")))
@@ -843,7 +842,7 @@ mod tests {
     #[test]
     fn substance_values_name_their_sources() {
         let named = |sources: &[Source]| {
-            assert!(!sources.is_empty());
+            assert_ne!(sources, []);
             for s in sources {
                 assert!(!s.covers().is_empty() && !s.citation().is_empty(), "{s:?}");
             }

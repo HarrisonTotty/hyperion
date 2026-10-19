@@ -516,7 +516,7 @@ fn no_wire_block_exceeds_a_mebibyte_and_an_earth_encodes_to_10_to_15_mb() {
         encode_payload(mars(), &region(), None),
         encode_payload(mars(), &whole(mars()), None),
     ] {
-        assert!(!blocks_of(&bytes).is_empty());
+        assert_ne!(blocks_of(&bytes), []);
         assert!(bytes.len() <= MAX_BLOCK_BYTES * blocks_of(&bytes).len());
     }
 }

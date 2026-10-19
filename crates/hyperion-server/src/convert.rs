@@ -2460,7 +2460,7 @@ mod tests {
         let request = range_request([0, 0, 0], 50.0, 5_000, MassLayer::A);
         let answer = answer(&request);
         assert_eq!(answer.census.complete_above_msun, None);
-        assert!(answer.systems.is_empty());
+        assert_eq!(answer.systems, []);
         for line in &answer.census.layers {
             assert_eq!(line.status, LayerStatus::OverLimit, "{line:?}");
             assert_eq!(line.returned, 0);
@@ -2478,7 +2478,7 @@ mod tests {
         assert_eq!(answer.centre, request.centre);
         assert_same_bits(answer.radius_ly, request.radius_ly);
         assert_eq!(answer.time, request.time);
-        assert!(!answer.systems.is_empty());
+        assert_ne!(answer.systems, []);
         let query = RangeRequest::try_from(&request).unwrap().into_query();
         let galaxy = milky_way();
         for record in &answer.systems {

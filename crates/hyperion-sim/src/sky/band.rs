@@ -3470,7 +3470,7 @@ mod tests {
         let spec = spec(8);
         let query = query_at(SUN, CENSUS_CUT);
         let census = census_to(CENSUS_CUT, 50.0, n(20), Eye::NotAsked);
-        assert!(!census.overflow().is_empty());
+        assert_ne!(census.overflow(), []);
         let replies = replies_near_the_sun();
         let nodes = Edges::of_replies(replies.clone()).nodes;
         let dust = solar_colour().reddening();
@@ -3837,7 +3837,7 @@ mod tests {
             })
         };
         let census = merge_census([(stars, CensusTallies::default())], n(MAX_N_MAX));
-        assert!(census.overflow().is_empty());
+        assert_eq!(census.overflow(), []);
         census.listed().to_vec()
     }
 
@@ -4019,7 +4019,7 @@ mod tests {
             .copied()
             .collect();
         let census = merge_census([(within, CensusTallies::default())], n(MAX_N_MAX));
-        assert!(census.overflow().is_empty());
+        assert_eq!(census.overflow(), []);
         census
     }
 

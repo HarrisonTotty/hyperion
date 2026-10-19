@@ -2241,7 +2241,7 @@ mod tests {
         );
         for i in 0..500 {
             let system = regular_moons(Seed::new(9), &renamed(&hot, i, 1));
-            assert!(system.moons().is_empty());
+            assert_eq!(system.moons(), []);
             assert_eq!(system.moonlets(), 0);
             for p in [&rocky, &small, &light] {
                 assert_eq!(

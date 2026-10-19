@@ -443,7 +443,7 @@ mod solar {
         let host = BeltHost::new(OrbitHost::Star(0), &disc, &planets, plane());
         let belts = host_belts(SEED, system(), &host, FIRST_BELT_SLOT);
         let belt = &belts.belts()[0];
-        assert!(!belt.members().is_empty());
+        assert_ne!(belt.members(), []);
         let primordial = belt.main().solids() * belt.depletion();
         assert!((belt.initial_mass().value() / primordial.value() - 1.0).abs() < 1e-12);
         let cascade = belt.main().initial_mass();
@@ -527,7 +527,7 @@ mod solar {
         let disc = disc();
         let planets = planets();
         let once = belts_about(&planets, &disc, FIRST_BELT_SLOT);
-        assert!(!once.belts().is_empty());
+        assert_ne!(once.belts(), []);
         assert_eq!(once, belts_about(&planets, &disc, FIRST_BELT_SLOT));
         let mut reversed = planets.clone();
         reversed.reverse();

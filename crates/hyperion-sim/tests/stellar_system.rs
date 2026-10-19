@@ -335,7 +335,7 @@ fn every_companion_is_its_slots_star_with_the_systems_composition_and_age() {
                 }
                 SystemExistence::NotYetBorn => {
                     assert_eq!(summary.hierarchy(), None);
-                    assert!(summary.stars().is_empty());
+                    assert_eq!(summary.stars(), []);
                 }
             }
         }
@@ -534,7 +534,7 @@ fn a_system_not_yet_born_has_no_stars() {
     let stars = SystemStars::generate(&galaxy, &unborn);
     let before = stars.summary_at(UniverseTime::EPOCH);
     assert_eq!(before.existence(), SystemExistence::NotYetBorn);
-    assert!(before.stars().is_empty());
+    assert_eq!(before.stars(), []);
     assert_eq!(stars.brief_at(UniverseTime::EPOCH), None);
     let after = stars.summary_at(years(400));
     assert_eq!(after.existence(), SystemExistence::Exists);

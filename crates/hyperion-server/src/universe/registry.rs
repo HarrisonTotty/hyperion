@@ -740,7 +740,7 @@ mod tests {
         fs::create_dir_all(&save_dir).unwrap();
         fs::write(save_dir.join("universe.json"), r#"{"format":2}"#).unwrap();
         let registry = load(dir.path(), SequenceEntropy::new([0xab, 0xcd])).await;
-        assert!(registry.list().is_empty());
+        assert_eq!(registry.list(), []);
         assert_eq!(
             registry.open(UniverseId::new(0xab)),
             Err(OpenUniverseError::UnsupportedSaveFormat {
@@ -807,7 +807,7 @@ mod tests {
             create(&registry, "Kepler", Some(1)).await,
             Err(CreateUniverseError::Storage(WriteSaveError::Io { .. }))
         ));
-        assert!(registry.list().is_empty());
+        assert_eq!(registry.list(), []);
         fs::remove_file(&universes).unwrap();
         let kepler = create(&registry, "Kepler", Some(1)).await.unwrap();
         assert_eq!(kepler.id(), UniverseId::new(0xcd));

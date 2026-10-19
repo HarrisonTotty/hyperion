@@ -1245,7 +1245,7 @@ mod tests {
             .iter()
             .map(|r| HeldRecord::new(*r, RecordLight::Unbounded))
             .collect();
-        assert!(!poison.is_empty());
+        assert_ne!(poison, []);
         let at = BlockParams::new(position(SUN), Magnitudes::new(6.0));
         let planted = |params: &BlockParams| {
             SkyBlock::with_cell(None, key, params, &poison).expect("a new block")

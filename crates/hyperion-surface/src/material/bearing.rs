@@ -600,7 +600,7 @@ mod tests {
         .unwrap();
         let bedrock =
             properties(Material::new(MaterialClass::Bedrock, 0).unwrap(), &palette).unwrap();
-        assert!(bedrock.shear().is_empty());
+        assert_eq!(bedrock.shear(), []);
         assert!(none(&bedrock, 1.62, 1.0));
         // A footing of zero width carries the cohesion term alone.
         let q = bearing_capacity(&soil, MOON_G, Metres::ZERO).unwrap();

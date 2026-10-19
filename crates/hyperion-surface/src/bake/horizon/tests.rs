@@ -844,8 +844,8 @@ fn horizon_names_the_cells_its_far_field_was_refused_for() {
         inside,
     );
     assert!(complete.is_complete());
-    assert!(complete.refused_cells().is_empty());
-    assert!(HorizonMap::default().refused_cells().is_empty());
+    assert_eq!(complete.refused_cells(), [] as [u32; 0]);
+    assert_eq!(HorizonMap::default().refused_cells(), [] as [u32; 0]);
 }
 
 #[test]

@@ -680,7 +680,7 @@ mod tests {
         assert!(events.len() > 100, "{} events", events.len());
         assert!(events.iter().all(|e| w.contains(e.time())));
         assert!(events.windows(2).all(|p| p[0].time() <= p[1].time()));
-        assert!(list(daily(), &flares(), days(0, 0), &per_day(20.0)).is_empty());
+        assert_eq!(list(daily(), &flares(), days(0, 0), &per_day(20.0)), []);
     }
 
     /// The window, rate and cut sets of the partition tests.
@@ -810,7 +810,7 @@ mod tests {
             &rate,
         );
         assert_eq!(active, expected);
-        assert!(!active.is_empty());
+        assert_ne!(active, []);
         // An event exactly at t is active at t.
         let onset = active.last().unwrap().time();
         let mut at_onset = Vec::new();
@@ -975,7 +975,7 @@ mod tests {
             assert_eq!(short.event(&series, e.id(), &rate).as_ref(), Some(e));
         }
         let past = TimeWindow::new(at(edge, 0), at(edge + 1_000, 0)).unwrap();
-        assert!(listing(past).is_empty());
+        assert_eq!(listing(past), []);
     }
 
     /// Pinned keys: a star's flares and a system's self-test events, with each event's time and

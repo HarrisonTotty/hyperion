@@ -568,7 +568,7 @@ mod tests {
         }
         let scan = store.scan().unwrap();
         assert_eq!(scan.saves(), [saves[1].clone(), saves[0].clone()]);
-        assert!(scan.unsupported().is_empty());
+        assert_eq!(scan.unsupported(), []);
     }
 
     #[test]
@@ -643,7 +643,7 @@ mod tests {
         fs::write(&path, &text[..text.len() / 2]).unwrap();
         let scan = store.scan().unwrap();
         assert_eq!(scan.saves(), [save(0x12, "Beta", 1)]);
-        assert!(scan.unsupported().is_empty());
+        assert_eq!(scan.unsupported(), []);
     }
 
     #[test]
@@ -674,7 +674,7 @@ mod tests {
         plant(&store, "0000000000000017", r#"{"format":0}"#);
         let scan = store.scan().unwrap();
         assert_eq!(scan.saves(), [save(0x12, "Beta", 1)]);
-        assert!(scan.unsupported().is_empty());
+        assert_eq!(scan.unsupported(), []);
     }
 
     #[test]

@@ -912,7 +912,7 @@ fn the_climate_and_the_inventory_are_validated() {
     // A gravity that is not positive leaves every reservoir zero.
     let mars = mars();
     let flat = partition(&mars.climate, &gravity(0.0), &mars.inventory);
-    assert!(!flat.condensates().is_empty());
+    assert_ne!(flat.condensates(), []);
     for c in flat.condensates() {
         assert_same_bits(c.reservoir().value(), 0.0);
     }

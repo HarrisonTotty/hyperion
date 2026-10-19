@@ -336,7 +336,7 @@ async fn system_bodies(
 
 /// Checks that every craft list `heard` holds is the source's at the time it states.
 fn assert_craft_are_the_source_s(heard: &Heard, system: &SystemIdHex) {
-    assert!(!heard.craft.is_empty());
+    assert_ne!(heard.craft, [] as [Vec<SceneCraftDto>; 0]);
     for list in &heard.craft {
         let t = list[0].state.time;
         let at = hyperion_sim::time::UniverseTime::new(t.seconds, t.nanos).unwrap();

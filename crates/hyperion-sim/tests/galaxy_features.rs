@@ -515,7 +515,7 @@ fn a_segment_s_modifiers_do_not_depend_on_its_direction() {
     source.modifiers_near_segment(&a, &b, &mut ab);
     source.modifiers_near_segment(&b, &a, &mut ba);
     assert_eq!(ab, ba);
-    assert!(!ab.is_empty());
+    assert_ne!(ab, []);
 }
 
 // --- P09.T3.b: the index's headroom ---

@@ -883,7 +883,7 @@ mod tests {
             );
         }
         assert_eq!(running(&model, t), cold);
-        assert!(!cold.is_empty());
+        assert_ne!(cold, []);
     }
 
     /// The same seed gives the same flares, another seed others.

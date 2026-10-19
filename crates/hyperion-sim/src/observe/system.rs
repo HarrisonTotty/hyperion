@@ -382,7 +382,7 @@ mod tests {
         assert!(seen.brief_then().is_some());
         let (summary, _) = summary_observed(galaxy, &young, &stars, &far).unwrap();
         assert_eq!(summary.existence(), SystemExistence::NotYetBorn);
-        assert!(summary.stars().is_empty());
+        assert_eq!(summary.stars(), []);
     }
 
     /// P12.T2: an extrapolated jump lands on the star. Observe from `x_o`, extrapolate, place a

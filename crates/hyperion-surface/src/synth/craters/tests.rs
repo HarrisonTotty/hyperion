@@ -154,7 +154,7 @@ fn the_octaves_halve_from_the_boundary_diameter_to_the_band_limit() {
         assert_same_bits(octave.density().value(), 0.0);
         assert_same_bits(octave.variance().value(), 0.0);
         let cell = PatchKey::containing(octave.level(), [0.6, 0.0, 0.8]).unwrap();
-        assert!(none.craters_in(octave.index(), cell, &mut cache).is_empty());
+        assert_eq!(none.craters_in(octave.index(), cell, &mut cache), []);
     }
     let h = none.at(
         [0.6, 0.0, 0.8],
@@ -978,7 +978,7 @@ fn the_same_seed_draws_the_same_craters_and_another_seed_others() {
     let mine = a
         .craters_in(octave.index(), cell, &mut CraterCache::new())
         .to_vec();
-    assert!(!mine.is_empty());
+    assert_ne!(mine, []);
     assert_eq!(
         mine,
         b.craters_in(octave.index(), cell, &mut CraterCache::new())

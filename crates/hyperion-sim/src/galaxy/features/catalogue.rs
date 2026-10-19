@@ -1708,6 +1708,6 @@ mod tests {
         a.sort();
         b.sort();
         assert_eq!(a, b);
-        assert!(!a.is_empty());
+        assert_ne!(a, []);
     }
 }

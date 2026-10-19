@@ -3770,7 +3770,7 @@ mod tests {
         };
         let all = NonZeroU32::new(MAX_N_MAX).expect("not zero");
         let census = merge_census([(stars, CensusTallies::default())], all);
-        assert!(census.overflow().is_empty());
+        assert_eq!(census.overflow(), []);
         census
             .listed()
             .iter()

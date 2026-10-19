@@ -2661,7 +2661,7 @@ mod tests {
                 &mut out,
             );
         }
-        assert!(out.is_empty());
+        assert_eq!(out, []);
         let total: u64 = Layer::ALL
             .iter()
             .map(|&l| tally.layer(l).centre_members())
@@ -2679,13 +2679,13 @@ mod tests {
         });
         let query = query_beside(&record, 11.0);
         let (every, _) = measured(&record, &query);
-        assert!(!every.is_empty());
+        assert_ne!(every, []);
         let own = SkyQuery::builder(*query.observer(), Magnitudes::new(11.0))
             .exclude(record.id())
             .build()
             .expect("a valid query");
         let (_, listed) = measured(&record, &own);
-        assert!(listed.is_empty());
+        assert_eq!(listed, []);
     }
 
     #[test]

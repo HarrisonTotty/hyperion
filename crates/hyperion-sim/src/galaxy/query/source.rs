@@ -228,14 +228,14 @@ mod tests {
         };
         let mut out = Vec::new();
         crowd.systems_in_sphere(&galaxy, &sphere, LayerSet::EMPTY, &mut out);
-        assert!(out.is_empty());
+        assert_eq!(out, []);
         let mut cell = Vec::new();
         crate::galaxy::placement::generate_cell(
             &galaxy,
             crate::galaxy::placement::CellKey::containing(Layer::C, sphere.centre()).unwrap(),
             &mut cell,
         );
-        assert!(!cell.is_empty());
+        assert_ne!(cell, []);
         assert!(!crowd.suppresses(&galaxy, &cell[0], sphere.time()));
     }
 }

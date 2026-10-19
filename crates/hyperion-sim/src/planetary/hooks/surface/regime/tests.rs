@@ -430,7 +430,7 @@ fn the_reservoirs_are_the_gases_held_at_their_caps() {
     assert!(found("Earth").contains(&Gas::Water.substance()));
     assert!(found("Titan").contains(&Gas::Methane.substance()));
     assert!(!found("Titan").contains(&Gas::Nitrogen.substance()));
-    assert!(found("Venus").is_empty());
+    assert_eq!(found("Venus"), []);
 }
 
 /// An air of mole fractions `gases` at `pressure` Pa over a night at `night` K, its surface holding

@@ -833,7 +833,7 @@ fn the_generators_belts_carry_over() {
     let system = SystemId::from_raw(0x0200_0800_2000_0000).unwrap();
     let belts = host_belts(Seed::new(0x48f), system, &host, FIRST_BELT_SLOT);
     let generated: Vec<SourceBelt> = belts.belts().iter().map(SourceBelt::from).collect();
-    assert!(!generated.is_empty());
+    assert_ne!(generated, []);
     for (belt, source) in belts.belts().iter().zip(&generated) {
         assert_eq!(source.kind, belt.kind());
         assert_eq!(source.composition, belt.composition());
