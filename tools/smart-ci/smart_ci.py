@@ -22,7 +22,11 @@ package.json's `engines.node`.
 
 `--plan` prints the plan, each step with the paths that caused it, and runs nothing; a run prints
 the plan first. The tests run are those that reach the changed code through the code's graph
-(`rust_graph.py`), in the changed crates and in those that depend on them; `--all-tests` runs every
+(`rust_graph.py`), in the changed crates and in those that depend on them; and for any changed `.rs`
+file of a crate, natively, every test in any crate whose code lists the Rust sources (a source
+walker, which reads the text of the `.rs` files it finds), which the native step names as "the
+tests that read the Rust sources". A test that reads Rust sources by listing a directory names the
+`rs` extension in the function that lists it, so that smart-ci finds it. `--all-tests` runs every
 test of the changed crates instead. `--dependents` adds the Clippy of every crate that depends on a
 changed crate, and with `--all-tests` their every test (`just smart-ci --help`). `--full` runs the
 full `just ci` whatever the diff, its build phases inside the build slot `SMART_CI_SLOT` names and
@@ -127,6 +131,9 @@ GENERATOR_VERSION_FILE = "crates/hyperion-base/src/version.rs"
 # and those that name the file's path (`rust_graph`).
 GOLDEN_DIR = "tests/golden/"
 GOLDEN_READERS = [(GOLDEN_DIR, "crates/hyperion-testkit/src/golden.rs")]
+# The cause the native nextest step and the test build name for the tests that read the Rust sources
+# (`rust_graph.Selection.sources`): every changed `.rs` file of a crate runs them, natively alone.
+SOURCE_READERS = "the tests that read the Rust sources"
 # The longest filter expression a step passes: the recipe's command line holds it, and Windows limits
 # a command line to 32,767 characters. A longer one is made coarser (`Chosen.nextest_filter`).
 MAX_FILTER = 20000
@@ -979,6 +986,9 @@ class Needs:
         # Changes whose tests the code's graph chooses (Rust code, goldens): every test of the crate
         # with --all-tests, as `tests` holds them.
         self.graph: Dict[str, Set[str]] = {}
+        # The changed `.rs` files of the crates, which run the tests that read the Rust sources (the
+        # graph's `Selection.sources`), natively, whatever else their crate runs.
+        self.rust_sources: Set[str] = set()
         self.manifests: Dict[str, Set[str]] = {}  # crates whose manifest changed: their dependents run
         self.prettier: Set[str] = set()
         self.prettier_all: Set[str] = set()
@@ -1107,6 +1117,8 @@ def classify(path: str, deleted: bool, ws: Workspace, needs: Needs) -> None:
             # their code expands to changes, and the graph sees no derive's name).
             needs.crate_code(crate.name, path, graph=ext == ".rs" and crate.name not in ws.build_scripts
                              and crate.name not in ws.proc_macros)
+            if ext == ".rs":
+                needs.rust_sources.add(path)
             if crate.name in ws.proc_macros:
                 needs.add(needs.manifests, crate.name, path)
             needs.say(path, f"{crate.name}'s code")
@@ -1457,7 +1469,11 @@ def causes_of(table: Dict[str, Set[str]], keys: Optional[Iterable[str]] = None) 
 
 @dataclass
 class Chosen:
-    """The tests the code's graph found reach the changed Rust code and goldens (`rust_graph`)."""
+    """The tests the code's graph found reach the changed Rust code and goldens (`rust_graph`).
+
+    The tests that read the Rust sources (`Selection.sources`) join the native nextest step alone:
+    what a source walker reads is the source text, the same on every target, and the browser suites
+    run a crate's whole suite for one chosen test. The methods that take `native` add them."""
 
     graph: "rust_graph.Graph"
     selection: "rust_graph.Selection"
@@ -1470,15 +1486,33 @@ class Chosen:
             self._readers = self.graph.readers(RUN_SHARED)
         return self._readers
 
-    def _units(self) -> Dict[str, Set[str]]:
+    def _units(self, native: bool = False) -> Dict[str, Set[str]]:
         out: Dict[str, Set[str]] = {}
-        for unit_id in set(self.selection.tests) | set(self.selection.generated):
+        units = set(self.selection.tests) | set(self.selection.generated) | (
+            set(self.selection.sources) if native else set())
+        for unit_id in units:
             out.setdefault(self.graph.units[unit_id].crate, set()).add(unit_id)
+        return out
+
+    def picked(self, unit_id: str, native: bool = False) -> Dict[str, Set[str]]:
+        """A unit's chosen tests, each with its causes; `native` adds the tests that read the Rust
+        sources."""
+        tests = self.selection.tests.get(unit_id, {})
+        readers = self.selection.sources.get(unit_id, {}) if native else {}
+        if not readers:
+            return tests
+        out = {name: set(causes) for name, causes in readers.items()}
+        for name, causes in tests.items():
+            out.setdefault(name, set()).update(causes)
         return out
 
     def crates(self, whole: Set[str]) -> Set[str]:
         """The crates some of whose tests the graph chose, less those every test of which runs."""
         return set(self._units()) - whole
+
+    def source_crates(self, whole: Set[str]) -> Set[str]:
+        """The crates with a test that reads the Rust sources, less those every test of which runs."""
+        return {self.graph.units[unit_id].crate for unit_id in self.selection.sources} - whole
 
     def doc_crates(self, whole: Set[str]) -> Set[str]:
         return set(self.selection.doctests) - whole
@@ -1487,12 +1521,14 @@ class Chosen:
         """Whether a crate's browser suite (`--lib --tests`) holds a chosen test: then all of it runs."""
         return any(self.graph.units[u].kind in ("lib", "test") for u in self._units().get(crate, ()))
 
-    def causes(self, crates: Set[str], doctests: bool = False) -> Set[str]:
+    def causes(self, crates: Set[str], doctests: bool = False, native: bool = False) -> Set[str]:
         out: Set[str] = set()
-        for unit_id, tests in list(self.selection.tests.items()) + list(self.selection.generated.items()):
-            if self.graph.units[unit_id].crate in crates:
-                for causes in tests.values():
-                    out |= causes
+        tables = [self.selection.tests, self.selection.generated] + ([self.selection.sources] if native else [])
+        for table in tables:
+            for unit_id, tests in table.items():
+                if self.graph.units[unit_id].crate in crates:
+                    for causes in tests.values():
+                        out |= causes
         if doctests:
             for crate, files in self.selection.doctests.items():
                 if crate in crates:
@@ -1500,31 +1536,33 @@ class Chosen:
                         out |= causes
         return out
 
-    def counts(self, crate: str) -> Tuple[int, int]:
-        """How many of the crate's test functions (not ignored) the graph chose, and how many it has."""
+    def counts(self, crate: str, native: bool = False) -> Tuple[int, int]:
+        """How many of the crate's test functions (not ignored) the graph chose, and how many it has;
+        `native`, with the tests that read the Rust sources."""
         chosen = total = 0
         for unit in self.graph.runnable(crate):
-            picked = self.selection.tests.get(unit.id, {})
+            picked = self.picked(unit.id, native)
             for test in self.graph.tests.get(unit.id, ()):
                 if not test.ignored:
                     total += 1
                     chosen += test.name in picked
         return chosen, total
 
-    def count(self, crate: str) -> str:
-        chosen, total = self.counts(crate)
+    def count(self, crate: str, native: bool = False) -> str:
+        chosen, total = self.counts(crate, native)
         return f"{crate} ({chosen} of {total} tests)"
 
-    def nextest_filter(self, crates: Iterable[str], whole: Set[str]) -> str:
+    def nextest_filter(self, crates: Iterable[str], whole: Set[str], native: bool = False) -> str:
         """nextest's `-E` for the chosen tests of `crates`, every test of those in `whole`; empty for
         every test of them all. Coarser where the expression would be too long for a command line:
-        modules by their paths, then whole binaries, then whole crates."""
-        return self.filter_of(crates, whole)[0]
+        modules by their paths, then whole binaries, then whole crates. `native` adds the tests that
+        read the Rust sources, which the native run alone runs."""
+        return self.filter_of(crates, whole, native)[0]
 
-    def filter_of(self, crates: Iterable[str], whole: Set[str]) -> Tuple[str, bool]:
+    def filter_of(self, crates: Iterable[str], whole: Set[str], native: bool = False) -> Tuple[str, bool]:
         """`nextest_filter`'s expression, and whether it was made coarser than the chosen tests."""
         crates = sorted(set(crates))
-        units = self._units()
+        units = self._units(native)
         if all(c in whole or c not in units for c in crates):
             return "", False
         expression = ""
@@ -1536,7 +1574,7 @@ class Chosen:
                     terms.append(f"package({crate})")
                     continue
                 for unit in sorted(self.graph.runnable(crate), key=lambda u: u.id):
-                    tests = self.selection.tests.get(unit.id, {})
+                    tests = self.picked(unit.id, native)
                     generated = self.selection.generated.get(unit.id, {})
                     if not tests and not generated:
                         continue
@@ -1551,9 +1589,10 @@ class Chosen:
     def suite(self, kind: str, crates: Iterable[str], whole: Set[str], step_filter: str, coarse: bool,
               changed: Set[str], less: Optional[Filter] = None) -> Suite:
         """The tests a nextest step over `crates` runs on `kind`'s target, as the graph lists them: the
-        chosen tests, not ignored, and the terms of those it generates; every test of the crates in
-        `whole`, and every term. `less` names those the step leaves out (wasip1's `wasm_sky`), and
-        `changed` the changed paths, for the terms whose generator changed."""
+        chosen tests, not ignored (natively, the tests that read the Rust sources too), and the terms
+        of those it generates; every test of the crates in `whole`, and every term. `less` names those
+        the step leaves out (wasip1's `wasm_sky`), and `changed` the changed paths, for the terms whose
+        generator changed."""
         out = Suite(kind, crates=set(crates), filter=step_filter, coarse=coarse)
         readers = self.fixture_readers()
         makers = {unit: {term: node for node, term in made.items()} for unit, made in self.graph.generators.items()}
@@ -1562,7 +1601,7 @@ class Chosen:
             if every:
                 out.whole.add(crate)
             for unit in self.graph.runnable(crate):
-                picked = self.selection.tests.get(unit.id, {})
+                picked = self.picked(unit.id, native=kind == "native")
                 names = {t.name for t in self.graph.tests.get(unit.id, ())
                          if not t.ignored and (every or t.name in picked)}
                 if less is not None:
@@ -1595,33 +1634,41 @@ class Chosen:
         return "" if any(not SAFE_PATH.match(w) for w in words) else " ".join(words)
 
     def describe(self, crates: Set[str], whole: Set[str], explain: bool) -> List[str]:
-        """The tests chosen, crate by crate and module by module, each with the changes it reaches."""
+        """The tests chosen, crate by crate and module by module, each with the changes it reaches;
+        and, unit by unit after those, the tests that read the Rust sources and reach no change
+        through code, natively, each with the walker it reaches. The crates' counts are the native
+        step's, both kinds."""
         lines = [f"The tests that reach the changed Rust code and goldens ({self.info}):"]
         for crate in sorted(crates):
-            chosen, total = self.counts(crate)
+            chosen, total = self.counts(crate, native=True)
             lines.append(f"  {crate}: {chosen} of {total} tests")
             for unit in sorted(self.graph.runnable(crate), key=lambda u: u.id):
                 tests = self.selection.tests.get(unit.id, {})
                 generated = self.selection.generated.get(unit.id, {})
-                if not tests and not generated:
-                    continue
-                modules: Dict[str, List[str]] = {}
-                for test in self.graph.tests.get(unit.id, ()):
-                    if test.name in tests:
-                        modules.setdefault(test.module, []).append(test.name)
-                shown = sorted(modules) if explain else sorted(modules, key=lambda m: -len(modules[m]))[:6]
-                summary = ", ".join(f"{m or '(root)'} {len(modules[m])}" for m in shown)
-                more = len(modules) - len(shown)
-                lines.append(f"    {unit.id}: {len(tests)} test(s){': ' + summary if summary else ''}"
-                             + (f", and {more} more module(s)" if more > 0 else ""))
-                causes = set().union(*tests.values(), *generated.values()) if tests or generated else set()
-                lines.append(f"      because of {', '.join(short(causes))}")
-                for term in sorted(generated):
-                    lines.append(f"      and the tests generated there: {term}")
-                if explain:
-                    for name in sorted(tests):
-                        chain = self.selection.via.get(f"{unit.id} {name}", [])
-                        lines.append(f"      {name}: " + " -> ".join(rust_graph.describe_node(n) for n in chain))
+                readers = {name: causes for name, causes in self.selection.sources.get(unit.id, {}).items()
+                           if name not in tests}
+                if tests or generated:
+                    lines.append(f"    {unit.id}: {len(tests)} test(s){self._modules(unit.id, tests, explain)}")
+                    causes = set().union(*tests.values(), *generated.values())
+                    lines.append(f"      because of {', '.join(short(causes))}")
+                    for term in sorted(generated):
+                        lines.append(f"      and the tests generated there: {term}")
+                    if explain:
+                        for name in sorted(tests):
+                            chain = self.selection.via.get(f"{unit.id} {name}", [])
+                            lines.append(f"      {name}: " + " -> ".join(rust_graph.describe_node(n) for n in chain))
+                if readers:
+                    lines.append(f"    {unit.id}: {len(readers)} test(s) that read the Rust sources, natively"
+                                 f"{self._modules(unit.id, readers, explain)}")
+                    lines.append(f"      because of {', '.join(short(set().union(*readers.values())))}: every "
+                                 "changed `.rs` file of a crate runs the tests whose code reaches a source walker")
+                    if explain:
+                        for name in sorted(readers):
+                            chain = self.selection.via.get(f"{unit.id} {name}", [])
+                            walker = bool(chain) and chain[-1] in self.graph.source_walkers()
+                            lines.append(f"      {name}: " + " -> ".join(rust_graph.describe_node(n) for n in chain)
+                                         + (", a source walker: it lists a directory and keeps its `.rs` files"
+                                            if walker else " -> ..., which reaches a source walker"))
         for crate, files in sorted(self.selection.doctests.items()):
             if crate not in whole:
                 lines.append(f"  {crate}'s doctests in {len(files)} file(s): {', '.join(short(files, 3))}")
@@ -1629,10 +1676,24 @@ class Chosen:
             lines.append("  none")
         return lines
 
+    def _modules(self, unit_id: str, names: Mapping[str, object], explain: bool) -> str:
+        """`describe`'s summary of a unit's chosen tests by module: every module with `explain`, else
+        the six with the most."""
+        modules: Dict[str, List[str]] = {}
+        for test in self.graph.tests.get(unit_id, ()):
+            if test.name in names:
+                modules.setdefault(test.module, []).append(test.name)
+        shown = sorted(modules) if explain else sorted(modules, key=lambda m: -len(modules[m]))[:6]
+        summary = ", ".join(f"{m or '(root)'} {len(modules[m])}" for m in shown)
+        more = len(modules) - len(shown)
+        return (f": {summary}" if summary else "") + (f", and {more} more module(s)" if more > 0 else "")
 
-def choose_tests(changes: Sequence[Tuple[str, bool]], ws: Workspace) -> Chosen:
+
+def choose_tests(changes: Sequence[Tuple[str, bool]], ws: Workspace,
+                 sources: Optional[Iterable[str]] = None) -> Chosen:
     """Build the code's graph (from the cache where the files are unchanged) and choose the tests that
-    reach the changed paths."""
+    reach the changed paths; and the tests that read the Rust sources, for the changed `.rs` files
+    `sources` names (by default those of `changes`)."""
     started = time.monotonic()
     facts = rust_graph.Facts(ws.cache, ws.read_bytes or (lambda p: ws.read(p).encode("utf-8")), ws.ids)
     base: Dict[str, Optional[rust_graph.FileFacts]] = {}
@@ -1642,7 +1703,7 @@ def choose_tests(changes: Sequence[Tuple[str, bool]], ws: Workspace) -> Chosen:
             base[path] = facts.get(path, data) if data is not None else None
     files = ws.rust_files if ws.rust_files is not None else ws.files
     graph = rust_graph.Graph(ws.rust, files, facts, base, GOLDEN_READERS)
-    selection = graph.select(changes)
+    selection = graph.select(changes, sources)
     facts.save()
     edges = sum(len(targets) for targets in graph.edges.values())
     info = (f"the Rust graph of {len(graph.rs)} files, {len(graph.edges):,} nodes and {edges:,} edges, built in "
@@ -1669,19 +1730,25 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
         return Plan(needs.full, [], needs.render, needs.why, needs.notes)
 
     # The tests of the changed code: those the code's graph finds reach it, in any crate, or with
-    # --all-tests (or no graph) every test of the changed crates, as before the graph.
+    # --all-tests (or no graph) every test of the changed crates, as before the graph. With the graph,
+    # every changed `.rs` file of a crate, a crate's whose every test runs included, also runs the
+    # tests that read the Rust sources, natively.
     chosen: Optional[Chosen] = None
     if needs.graph and (all_tests or not ws.rust):
         for crate, causes in needs.graph.items():
             for cause in causes:
                 for reader in ([crate] if crate else sorted(fixture_readers(cause, ws))):
                     needs.add(needs.tests, reader, cause)
-    elif needs.graph:
+    elif (needs.graph or needs.rust_sources) and ws.rust and not all_tests:
         graph_paths = causes_of(needs.graph)
-        chosen = choose_tests([(p, d) for p, d in changes if p in graph_paths], ws)
+        chosen = choose_tests([(p, d) for p, d in changes if p in graph_paths], ws, sorted(needs.rust_sources))
         for crate, causes in chosen.selection.whole.items():
             for cause in causes:
                 needs.add(needs.tests, crate, cause)
+    # Whether the graph chose the changed code's tests: not for a change it was built for only to find
+    # the tests that read the Rust sources (a crate with a build script or a proc-macro), whose crates
+    # and dependents run as without the graph.
+    graph_mode = chosen is not None and bool(needs.graph)
 
     # Reverse dependents: always for a changed manifest, their Clippy and every test; for any code
     # change with --dependents, their Clippy, and every test only with --all-tests (the graph chooses
@@ -1694,11 +1761,14 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
         for dependent in sorted(ws.reverse_dependents([root])):
             cause = f"{dependent} depends on {root}"
             needs.add(needs.clippy, dependent, cause)
-            if root in needs.manifests or chosen is None:
+            if root in needs.manifests or not graph_mode:
                 needs.add(needs.tests, dependent, cause)
     graph_crates = chosen.crates(set(needs.tests)) if chosen else set()
+    # The crates with a test that reads the Rust sources, for the native step alone, less those whose
+    # every native test runs.
+    source_crates = chosen.source_crates(set(needs.tests) | set(needs.native)) if chosen else set()
     # The dependents whose Clippy does not run (with the graph, their tests are its to choose).
-    unchecked = ws.reverse_dependents(needs.code) - set(needs.clippy) - (set() if chosen else set(needs.tests) | set(needs.native))
+    unchecked = ws.reverse_dependents(needs.code) - set(needs.clippy) - (set() if graph_mode else set(needs.tests) | set(needs.native))
 
     # The TypeScript side's reads of the changed files, and of the surface module; with --all-tests,
     # every vitest file for a change to a package's sources, as before the graph.
@@ -1729,14 +1799,15 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
 
     steps: List[Step] = []
 
-    def step(phase: str, title: str, recipe: List[str], causes: Iterable[str]) -> None:
-        every = sorted(set(causes))
-        steps.append(Step(phase, title, recipe, short(every), every))
+    def step(phase: str, title: str, recipe: List[str], causes: Iterable[str], first: Sequence[str] = ()) -> None:
+        # `first`: reasons named ahead of the paths, which `short` might otherwise leave out.
+        every = sorted(set(causes) | set(first))
+        steps.append(Step(phase, title, recipe, list(first) + short(set(every) - set(first)), every))
 
     vitest_any = bool(needs.vitest_all or needs.vitest_package or needs.vitest_files)
     clippy = sorted(needs.clippy)
     whole = set(needs.tests)  # every test of these crates
-    native = sorted(whole | set(needs.native) | graph_crates)
+    native = sorted(whole | set(needs.native) | graph_crates | source_crates)
     doc_crates = sorted(whole | (chosen.doc_crates(whole) if chosen else set()))
     wasip1_tests = [c for c in ws.wasip1 if c in whole or c in graph_crates]
     browser_tests = [c for c in ws.browser if c in whole or (chosen is not None and chosen.browser(c))]
@@ -1747,8 +1818,10 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
     fit_check = sorted((whole | set(needs.native) | set(needs.graph)) & set(FIT_CHECK_CRATES))
     native_causes = causes_of(needs.tests) | causes_of(needs.native) | causes_of(needs.graph, graph_crates & set(needs.graph))
     if chosen is not None:
-        native_causes |= chosen.causes(graph_crates)
-    native_filter, native_coarse = chosen.filter_of(native, whole | set(needs.native)) if chosen else ("", False)
+        native_causes |= chosen.causes(graph_crates) | chosen.causes(source_crates, native=True)
+    native_first = [SOURCE_READERS] if source_crates else []
+    native_filter, native_coarse = (chosen.filter_of(native, whole | set(needs.native), native=True) if chosen
+                                    else ("", False))
     wasip1_chosen, wasip1_coarse = chosen.filter_of(wasip1_tests, whole) if chosen else ("", False)
     wasip1_filter = less_wasm_sky(wasip1_chosen, ws.wasm_sky)
     doc_filters = chosen.doctest_filters(doc_crates, whole) if chosen else ""
@@ -1868,15 +1941,17 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
         # Over the test build's selection, as `ci` runs it over the workspace's: the same build.
         step("main", "the protocol bindings are fresh",
              ["_gen-protocol-check-for", ws.cargo_packages(set(native) | {PROTOCOL_CRATE})], needs.gen_protocol)
-    def scope(crates: Sequence[str]) -> str:
-        """The crates of a suite, each with how many of its tests run."""
-        return ", ".join(chosen.count(c) if chosen and c in graph_crates and c not in whole else c for c in crates)
+    def scope(crates: Sequence[str], natively: bool = False) -> str:
+        """The crates of a suite, each with how many of its tests run; `natively`, with the tests that
+        read the Rust sources."""
+        partial = graph_crates | (source_crates if natively else set())
+        return ", ".join(chosen.count(c, natively) if chosen and c in partial and c not in whole else c for c in crates)
 
     wasm_causes = causes_of(needs.tests, wasip1_tests) | (chosen.causes(set(wasip1_tests)) if chosen else set())
     browser_causes = causes_of(needs.tests, browser_tests) | (chosen.causes(set(browser_tests)) if chosen else set())
     if native:
         step("main", "build the tests: " + ", ".join(native), ["_test-build-for", ws.cargo_packages(native)],
-             native_causes)
+             native_causes, native_first)
     if fit_check:
         # As `ci` runs it, with the binary of the test build just before it, where that build makes one.
         built = FIT_CRATE in native
@@ -1894,8 +1969,8 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
 
     # Every suite, in one hold of the heavy-test lock.
     if native:
-        step("locked", "nextest: " + scope(native), ["_nextest-run", ws.cargo_packages(native), native_filter],
-             native_causes)
+        step("locked", "nextest: " + scope(native, natively=True),
+             ["_nextest-run", ws.cargo_packages(native), native_filter], native_causes, native_first)
     if doc_crates:
         step("locked", "doctests: " + ", ".join(doc_crates), ["_doctest-run", ws.cargo_packages(doc_crates), doc_filters],
              causes_of(needs.tests, doc_crates) | (chosen.causes(set(doc_crates), doctests=True) if chosen else set()))
@@ -1916,11 +1991,13 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
     if chosen is not None:
         notes += chosen.selection.notes
         if not graph_crates and not whole and not needs.native:
-            notes.append("No test reaches the changed Rust code: no suite runs for it (its Clippy and rustfmt do).")
+            notes.append("No test reaches the changed Rust code through its code: only the tests that read the Rust "
+                         "sources run for it (and its Clippy and rustfmt)." if source_crates else
+                         "No test reaches the changed Rust code: no suite runs for it (its Clippy and rustfmt do).")
     if unchecked:
         notes.append(
             "Not checked: " + ", ".join(sorted(unchecked)) + "'s Clippy, which depend on the changed crates. "
-            + ("`--dependents` adds it; the graph chooses their tests. " if chosen is not None else
+            + ("`--dependents` adds it; the graph chooses their tests. " if graph_mode else
                "`--dependents` adds their Clippy and tests. ")
             + "Integration's `just ci` runs them anyway."
         )
@@ -1932,8 +2009,8 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
             "the crates that depend on the change): `--hook-checks` runs the workspace's in their place, inside the "
             "gate's build slot, and the hooks then skip them (`tools/smart-ci/stamp.py`).")
     plan = Plan({}, steps, needs.render, needs.why, notes, suites=weighed)
-    if chosen is not None:
-        plan.details = chosen.describe(graph_crates, whole, explain)
+    if chosen is not None and (graph_mode or source_crates):
+        plan.details = chosen.describe(graph_crates | source_crates, whole, explain)
     return plan
 
 
@@ -2871,7 +2948,8 @@ concerned (`--plan` shows each step and the paths that caused it):
                                 and any crate the guard finds such code in) of that crate, with the
                                 features `just ci` gives it, and the tests, in any crate, that reach
                                 the changed code through the code's graph (nextest and wasip1 test
-                                by test, doctests by file, the browser suites by crate)
+                                by test, doctests by file, the browser suites by crate); a `.rs`
+                                file, the tests in any crate that read the Rust sources, natively
   a crate's Cargo.toml          that crate's checks and every test, and its dependents' Clippy and tests
   a crate's goldens             the tests of its crate that read goldens, and those that name the file
   a crate's other data          that crate's tests, those of any crate that name the file, and the
@@ -2895,8 +2973,15 @@ The tests: the code's graph (`tools/smart-ci/rust_graph.py`) links each item of 
 code to the items it names, resolved as rustc resolves them, and each impl to its type; a test runs
 when it reaches a changed item, in its own crate or any other. The plan shows how many of each
 crate's tests that is, and why; `--explain` lists every test with the chain that reaches the change.
-Where the reading cannot be sure it widens: to a crate's every test, as before the graph.
-`--all-tests` runs every test of the changed crates instead, as smart-ci did before the graph.
+Where the reading cannot be sure it widens: to a crate's every test, as before the graph. A test
+that reads the Rust sources as text, by listing a directory, reaches a source walker (an item whose
+code lists a directory and holds the string `rs` or one ending in `.rs`), and any changed `.rs` file
+of a crate runs it, in any crate and whatever the crates' dependencies, in the native nextest step
+alone, which names "the tests that read the Rust sources" among its causes. A test that reads Rust
+sources by listing a directory names the `rs` extension in the function that lists it, so that
+smart-ci finds it. `--all-tests` runs every test of the changed crates instead, as smart-ci did
+before the graph: another crate's tests that read the Rust sources (the surface crate's tag check,
+for a change to the sim) run only without it.
 
 Dependents: by default only the changed crates' Clippy runs (the owner's rule: a task runs the
 checks of the crates it touched); their tests are the graph's to choose. Integration's full `just ci`
@@ -2948,7 +3033,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                              "their tests too)")
     parser.add_argument("--all-tests", action="store_true",
                         help="run every test of the changed crates, not those the code's graph finds reach the "
-                             "change: smart-ci's selection before the graph")
+                             "change: smart-ci's selection before the graph. Another crate's tests that read the "
+                             "Rust sources (the surface crate's tag check, for a change to the sim) run only "
+                             "without it")
     parser.add_argument("--explain", action="store_true",
                         help="list every test the graph chose, with the chain of items that reaches the change")
     parser.add_argument("--hook-checks", action="store_true",

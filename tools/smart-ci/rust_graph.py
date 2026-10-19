@@ -48,7 +48,15 @@ item A:
   `serialize` and `deserialize`), a path from the extern prelude (`::a::f`).
 - Literals: a string naming a workspace file (`include_str!`, `#[path]`, a read of a path built from
   `CARGO_MANIFEST_DIR`) depends on that file's text, or on that data file; a crate's data, read from
-  another crate by a string that names the crate's directory and more, too.
+  another crate by a string that names the crate's directory and more, too. An item whose own code
+  lists a directory (`read_dir`, `WalkDir`) and holds the string `rs`, or one ending in `.rs`
+  (`extension() == "rs"`, `ends_with(".rs")`), is a source walker: it reads the text of every Rust
+  source it finds, which no string names. So every changed `.rs` file of a workspace crate, added and
+  deleted ones too, selects every test, in any crate, whose code reaches a source walker, whatever
+  the crates' dependencies. They are kept apart from the tests the change reaches through code, in
+  `Selection.sources`, since smart-ci runs them natively alone. A test that reads Rust sources by
+  listing a directory names the `rs` extension in the function that lists it, so that smart-ci finds
+  it.
 - Code compiled for some configurations only (`cfg`, features, `target_arch = "wasm32"`) counts as
   if every configuration were built, and generic code is its definer's, whatever instantiates it.
 
@@ -139,6 +147,8 @@ _WITH_MODULE = frozenset(("with",))
 _WORD = re.compile(r"^[A-Za-z0-9_.-]{2,40}$")
 # Calls that read a directory's entries: every file under it is read.
 _DIRECTORY_READS = frozenset(("read_dir", "WalkDir", "walkdir"))
+# A string by which a directory's listing keeps the Rust sources: the extension, or a name's end.
+_RUST_EXTENSION = "rs"
 # No cycle of lookups reached a position on the stack (`Graph.lookup`).
 _NO_CYCLE = 1 << 30
 # Items of the value namespace alone, which have no associated items: no path goes on past one.
@@ -1440,6 +1450,11 @@ class Selection:
     whole: Dict[str, Set[str]] = field(default_factory=dict)  # crates every test of which runs: why
     notes: List[str] = field(default_factory=list)
     via: Dict[str, List[str]] = field(default_factory=dict)  # "unit test" -> a chain to its first cause
+    # unit -> {test name: causes}: the tests that read the Rust sources (their code reaches a source
+    # walker), which every changed Rust source of a crate selects, for the native run alone; a test
+    # that the change reaches through code is in `tests` as well. The `via` chain of one that is in
+    # `sources` alone ends at a walker.
+    sources: Dict[str, Dict[str, Set[str]]] = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------------------------------
@@ -2272,8 +2287,11 @@ class Graph:
             out |= {item_node(path, item[0]) for item in facts.items}
         return out
 
-    def select(self, changed: Sequence[Tuple[str, bool]]) -> Selection:
-        """The tests and doctests that reach the changed paths, unit by unit."""
+    def select(self, changed: Sequence[Tuple[str, bool]], sources: Optional[Iterable[str]] = None) -> Selection:
+        """The tests and doctests that reach the changed paths, unit by unit; and the tests that read
+        the Rust sources, for the changed Rust sources of the crates: `sources`, by default the `.rs`
+        paths of `changed` that are in a crate. smart-ci passes every changed `.rs` file of a crate,
+        those of a crate with a build script or a proc-macro too, which are not in `changed`."""
         sel = Selection()
         starts: Dict[str, Set[str]] = {}  # node -> the changed paths it stands for
         conditional: List[Tuple[str, str, str]] = []  # changed members called by name: (impl, name, path)
@@ -2374,7 +2392,67 @@ class Graph:
                     if node.endswith("#doctests") and self.crate_of(file_of(node)) == crate}
             if docs:
                 sel.doctests[crate] = docs
+        # The tests that read the Rust sources: a source walker lists the `.rs` files, so any changed
+        # Rust source of a crate may change what they read, whichever branch above took it and
+        # whatever their crate depends on.
+        if sources is None:
+            sources = [path for path, _ in changed if path.endswith(".rs") and self.crate_of(path)]
+        rust_sources = set(sources)
+        if rust_sources:
+            found, chains = self.source_readers(reverse)
+            for unit_id, names in found.items():
+                for name in names:
+                    sel.sources.setdefault(unit_id, {})[name] = set(rust_sources)
+                    sel.via.setdefault(f"{unit_id} {name}", chains[f"{unit_id} {name}"])
         return sel
+
+    @staticmethod
+    def _lists_directory(facts: FileFacts, index: int) -> bool:
+        """Whether an item's own code calls a read of a directory's entries (`_DIRECTORY_READS`)."""
+        return any(set(p[1:]) & _DIRECTORY_READS for p in facts.item_paths[index])
+
+    def source_walkers(self) -> Set[str]:
+        """The source walkers: the items whose own code lists a directory and holds the string `rs`,
+        or one ending in `.rs`, so that what they read is the text of the Rust sources they find."""
+        if not hasattr(self, "_source_walkers"):
+            self._source_walkers: Set[str] = {
+                item_node(file, item[0])
+                for file, facts in self.rs.items() for index, item in enumerate(facts.items)
+                if self._lists_directory(facts, index)
+                and any(literal == _RUST_EXTENSION or literal.endswith("." + _RUST_EXTENSION)
+                        for literal in facts.item_literals[index])}
+        return self._source_walkers
+
+    def source_readers(self, reverse: Optional[Dict[str, Set[str]]] = None
+                       ) -> Tuple[Dict[str, Dict[str, Set[str]]], Dict[str, List[str]]]:
+        """The tests, unit by unit, whose code reaches a source walker (`tests_reaching`)."""
+        return self.tests_reaching(self.source_walkers(), reverse)
+
+    def tests_reaching(self, nodes: Iterable[str], reverse: Optional[Dict[str, Set[str]]] = None
+                       ) -> Tuple[Dict[str, Dict[str, Set[str]]], Dict[str, List[str]]]:
+        """The tests, unit by unit, whose code reaches one of `nodes`, each with those it reaches; and
+        for each ("unit test"), a chain from it to one. `reverse` is the reversed edges, built here if
+        not given."""
+        if reverse is None:
+            reverse = {}
+            for source, targets in self.edges.items():
+                for target in targets:
+                    reverse.setdefault(target, set()).add(source)
+        wanted = set(nodes)
+        found: Dict[str, Dict[str, Set[str]]] = {}
+        chains: Dict[str, List[str]] = {}
+        for crate in sorted(self.crates):
+            allowed = self.allowed_test[crate] | {""}
+            mine = {node: {node} for node in wanted if (self.crate_of(file_of(node)) or "") in allowed}
+            if not mine:
+                continue
+            causes, parent = self._reach(mine, reverse, allowed)
+            for unit in self.runnable(crate):
+                for test in self.tests.get(unit.id, ()):
+                    if test.node in causes:
+                        found.setdefault(unit.id, {})[test.name] = causes[test.node]
+                        chains[f"{unit.id} {test.name}"] = self._chain(test.node, parent)
+        return found, chains
 
     def readers(self, paths: Iterable[str]) -> Dict[str, Dict[str, Set[str]]]:
         """The tests, unit by unit, whose code reaches an item of one of `paths` (Rust files), each with
@@ -2558,7 +2636,7 @@ class Graph:
                     for literal in facts.item_literals[index]:
                         if "/" not in literal:
                             self._words.setdefault((owner, literal), set()).add(node)
-                    if any(set(p[1:]) & _DIRECTORY_READS for p in facts.item_paths[index]):
+                    if self._lists_directory(facts, index):
                         self._dir_reads.setdefault(owner, set()).add(node)
         rel = path[len(self.crates[crate].dir) + 1 :] if crate in self.crates else path
         directories = [part for part in rel.split("/")[:-1] if part not in ("src", "tests")]

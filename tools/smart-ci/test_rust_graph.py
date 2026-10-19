@@ -380,6 +380,100 @@ class Data(unittest.TestCase):
         self.assertIn("a", sel.whole)  # data that is no golden: every test of its crate, too
 
 
+def readers(sel: rg.Selection) -> Set[str]:
+    """The tests that read the Rust sources, which the selection picked apart from `tests`."""
+    return {f"{unit} {name}" for unit, tests in sel.sources.items() for name in tests}
+
+
+class SourceWalkers(unittest.TestCase):
+    """Tests that read the Rust sources by listing a directory: every changed `.rs` file of a crate
+    selects them, whatever its code reaches, in any crate."""
+
+    WALKER = ("pub(crate) fn rust_files(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {\n"
+              "    for entry in std::fs::read_dir(dir).unwrap() {\n"
+              "        let path = entry.unwrap().path();\n"
+              "        if path.is_dir() { rust_files(&path, found); }\n"
+              "        else if path.extension().is_some_and(|e| e == \"rs\") { found.push(path); }\n"
+              "    }\n}\n")
+
+    def setUp(self) -> None:
+        self.ws = Fixture([crate("a"), crate("b")], {
+            "crates/a/src/lib.rs": "pub mod code;\npub mod thermal;\npub mod optics;\npub mod goldens;\n",
+            "crates/a/src/code.rs": "pub fn f() -> u32 { 1 }\n" + TESTS
+                                    + "    #[test]\n    fn calls_f() { assert_eq!(f(), 1); }\n}\n",
+            "crates/a/src/thermal.rs": "pub fn g() -> u32 { 2 }\n#[cfg(test)]\nmod tests;\n",
+            "crates/a/src/thermal/tests.rs": self.WALKER + (
+                "#[test]\nfn nothing_reads_g_yet() {\n    let mut found = Vec::new();\n"
+                "    rust_files(&std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"src\"), &mut found);\n}\n"
+                "#[test]\nfn plain() { assert_eq!(super::g(), 2); }\n"),
+            # A walker called through an import from another module.
+            "crates/a/src/optics.rs": "#[cfg(test)]\nmod tests {\n    use super::super::thermal::tests::rust_files;\n"
+                                      "    #[test]\n    fn nothing_reads_the_columns_yet() {\n"
+                                      "        let mut found = Vec::new();\n"
+                                      "        rust_files(std::path::Path::new(\"src\"), &mut found);\n    }\n}\n",
+            # A listing of goldens, which names no `.rs`: no walker.
+            "crates/a/src/goldens.rs": "#[cfg(test)]\nmod tests {\n"
+                                       "    fn goldens(dir: &std::path::Path) -> usize {\n"
+                                       "        std::fs::read_dir(dir).unwrap().filter(|e| e.as_ref().unwrap().path()"
+                                       ".extension().is_some_and(|x| x == \"golden\")).count()\n    }\n"
+                                       "    #[test]\n    fn every_golden_parses() { goldens(std::path::Path::new(\"x\")); }\n}\n",
+            "crates/a/data/table.bin": "",
+            # Crate b, which does not depend on a, reads every crate's sources by a name's end.
+            "crates/b/src/lib.rs": "#[cfg(test)]\nmod tests {\n"
+                                   "    fn sources(dir: &std::path::Path, out: &mut Vec<String>) {\n"
+                                   "        for entry in std::fs::read_dir(dir).unwrap() {\n"
+                                   "            let name = entry.unwrap().file_name().into_string().unwrap();\n"
+                                   "            if name.ends_with(\".rs\") { out.push(name); }\n        }\n    }\n"
+                                   "    #[test]\n    fn every_crate_keeps_the_rule() {\n        let mut out = Vec::new();\n"
+                                   "        sources(std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).parent().unwrap(), "
+                                   "&mut out);\n    }\n"
+                                   "    #[test]\n    fn unrelated() { assert_eq!(1, 1); }\n}\n",
+        })
+
+    ALL = {"a thermal::tests::nothing_reads_g_yet", "a optics::tests::nothing_reads_the_columns_yet",
+           "b tests::every_crate_keeps_the_rule"}
+
+    def test_a_rust_change_its_code_does_not_reach_selects_every_walker_s_test(self) -> None:
+        sel = self.ws.change("crates/a/src/code.rs", "{ 1 }", "{ 3 }")
+        self.assertEqual(picked(sel), {"a code::tests::calls_f"})
+        # Crate a's walkers' tests, and crate b's, which does not depend on a; apart from the code's.
+        self.assertEqual(readers(sel), self.ALL)
+        self.assertEqual(sel.sources["b"]["tests::every_crate_keeps_the_rule"], {"crates/a/src/code.rs"})
+        # A file added (in no module tree, so widened to its crate) and one deleted, too.
+        self.ws.files["crates/a/src/added.rs"] = "pub fn h() {}\n"
+        added = self.ws.graph().select([("crates/a/src/added.rs", False)])
+        del self.ws.files["crates/a/src/added.rs"]
+        self.assertIn("a", added.whole)
+        self.assertEqual(readers(added), self.ALL)
+        deleted = self.ws.graph({"crates/a/src/gone.rs": "pub fn h() {}\n"}).select([("crates/a/src/gone.rs", True)])
+        self.assertEqual(readers(deleted), self.ALL)
+        # Data is no Rust source.
+        self.assertEqual(readers(self.ws.touch("crates/a/data/table.bin")), set())
+
+    def test_the_walkers_and_the_chain_to_each(self) -> None:
+        graph = self.ws.graph()
+        self.assertEqual(graph.source_walkers(), {
+            "crates/a/src/thermal/tests.rs#fn::rust_files", "crates/b/src/lib.rs#fn:tests:sources"})
+        sel = self.ws.change("crates/a/src/code.rs", "{ 1 }", "{ 3 }")
+        # Reached through the import, the chain ends at the walker.
+        chain = sel.via["a optics::tests::nothing_reads_the_columns_yet"]
+        self.assertEqual(chain[0], "crates/a/src/optics.rs#fn:tests:nothing_reads_the_columns_yet")
+        self.assertEqual(chain[-1], "crates/a/src/thermal/tests.rs#fn::rust_files")
+        # A listing of goldens, and a test that holds a walker's module but not its call, read no source.
+        self.assertNotIn("a goldens::tests::every_golden_parses", readers(sel))
+        self.assertNotIn("a thermal::tests::plain", readers(sel))
+        self.assertNotIn("b tests::unrelated", readers(sel))
+
+    def test_a_comment_runs_them_and_a_test_the_code_reaches_is_in_both(self) -> None:
+        # A comment changes no item, but it is in the text the walkers read.
+        sel = self.ws.change("crates/a/src/code.rs", "pub fn f()", "/// One.\npub fn f()")
+        self.assertEqual(sel.tests, {})
+        self.assertEqual(readers(sel), self.ALL)
+        sel = self.ws.change("crates/a/src/thermal/tests.rs", "found.push(path)", "found.insert(0, path)")
+        self.assertIn("a thermal::tests::nothing_reads_g_yet", picked(sel))
+        self.assertIn("a thermal::tests::nothing_reads_g_yet", readers(sel))
+
+
 class Filters(unittest.TestCase):
     """nextest's filters: modules by their paths, tests by name, generated ones by their pattern."""
 

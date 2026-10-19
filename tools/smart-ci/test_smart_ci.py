@@ -770,6 +770,99 @@ class GraphMode(unittest.TestCase):
         self.assertEqual(args(p, "_doctest-run"), ["-p hyperion-base", ""])
         self.assertEqual(p.details, [])
 
+    # A source walker: lists a directory and keeps its `.rs` files.
+    WALKER = ("        fn rust_files(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {\n"
+              "            for entry in std::fs::read_dir(dir).unwrap() {\n"
+              "                let path = entry.unwrap().path();\n"
+              "                if path.extension().is_some_and(|e| e == \"rs\") { found.push(path); }\n"
+              "            }\n        }\n")
+
+    def walkers_workspace(self, changed: str, old: str, new: str) -> Workspace:
+        """GraphMode's workspace with a walker's test in the sim and one in the surface crate's library,
+        compiled out of the browser build as `tags.rs`'s is, and `changed` changed."""
+        now = dict(self.SOURCES)
+        now["crates/hyperion-sim/src/lib.rs"] = now["crates/hyperion-sim/src/lib.rs"].replace(
+            "pub mod sky;", "pub mod sky;\npub mod substance;")
+        now["crates/hyperion-sim/src/substance.rs"] = (
+            "#[cfg(test)]\nmod tests {\n" + self.WALKER.replace("\n        ", "\n    ")[4:]
+            + "    #[test]\n    fn nothing_reads_it_yet() {\n        let mut found = Vec::new();\n"
+            "        rust_files(std::path::Path::new(\"src\"), &mut found);\n    }\n}\n")
+        now["crates/hyperion-surface/src/lib.rs"] = "pub mod tags;\n"
+        now["crates/hyperion-surface/src/tags.rs"] = (
+            "pub fn tag() -> u32 { 5 }\n#[cfg(test)]\nmod tests {\n"
+            "    #[test]\n    fn tag_is_five() { assert_eq!(super::tag(), 5); }\n"
+            "    #[cfg(not(all(target_arch = \"wasm32\", target_os = \"unknown\")))]\n    mod native_only {\n"
+            + self.WALKER + "        #[test]\n        fn call_sites_keep_the_rule() {\n"
+            "            let mut found = Vec::new();\n"
+            "            rust_files(std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).parent().unwrap(), &mut found);\n"
+            "        }\n    }\n}\n")
+        now[changed] = now[changed].replace(old, new)
+        ws = self.workspace(now)
+        ws.rust[SURFACE] = rust_graph.CrateInfo(SURFACE, "crates/" + SURFACE, [BASE], [TESTKIT], [
+            rust_graph.Target("lib", "hyperion_surface", "crates/hyperion-surface/src/lib.rs", True, True)])
+        return ws
+
+    def test_a_rust_change_runs_the_tests_that_read_the_rust_sources_natively(self) -> None:
+        sim = "crates/hyperion-sim/src/sky/mod.rs"
+        ws = self.walkers_workspace(sim, "* 3", "* 4")
+        p = make_plan([(sim, False)], ws, False, explain=True)
+        # Natively: the change's own test, the sim's walker's, and the surface crate's, which reads the
+        # sim's sources though the surface crate does not depend on it; the testkit's, as RUST_READERS has it.
+        self.assertEqual(packages(p, "_nextest-run"), [SIM, SURFACE, TESTKIT])
+        self.assertEqual(packages(p, "_test-build-for"), [SIM, SURFACE, TESTKIT])
+        self.assertEqual(args(p, "_nextest-run")[1],
+                         "(binary_id(=hyperion-sim) & (test(/^sky::tests::/) | test(/^substance::tests::/))) | "
+                         "(binary_id(=hyperion-surface) & (test(/^tags::tests::native_only::/))) | "
+                         "package(hyperion-testkit)")
+        # Not on wasip1, nor in the browser: the surface crate's walker's test is its only pick.
+        for recipe in ("_wasip1-build", "_wasm-run"):
+            self.assertEqual(args(p, recipe)[1], "(binary_id(=hyperion-sim) & (test(/^sky::tests::/)))", recipe)
+        self.assertEqual(args(p, "_wasm-run")[2], "")
+        self.assertNotIn("_browser", calls(p))
+        self.assertEqual(packages(p, "_wasip1-build"), [SIM])
+        # The native step and the test build name the reason first; the counts include the readers.
+        native = next(s for s in p.steps if s.recipe[0] == "_nextest-run")
+        self.assertEqual(native.causes[0], smart_ci.SOURCE_READERS)
+        self.assertIn(smart_ci.SOURCE_READERS, next(s for s in p.steps if s.recipe[0] == "_test-build-for").causes)
+        self.assertEqual(native.title, "nextest: hyperion-sim (2 of 3 tests), hyperion-surface (1 of 2 tests), "
+                                       "hyperion-testkit")
+        wasm = next(s for s in p.steps if s.recipe[0] == "_wasip1-build")
+        self.assertIn("hyperion-sim (1 of 3 tests)", wasm.title)
+        self.assertNotIn(smart_ci.SOURCE_READERS, wasm.causes)
+        # --explain: the chain from the test to the walker, and the rule.
+        details = "\n".join(p.details)
+        self.assertIn("hyperion-surface: 1 test(s) that read the Rust sources, natively", details)
+        self.assertIn("tags::tests::native_only::call_sites_keep_the_rule: crates/hyperion-surface/src/tags.rs "
+                      "(fn tests:::native_only:call_sites_keep_the_rule) -> crates/hyperion-surface/src/tags.rs "
+                      "(fn tests:::native_only:rust_files), a source walker", details)
+
+    def test_a_rust_change_that_the_graph_does_not_read_still_runs_them(self) -> None:
+        # A build script's crate runs its every test without the graph; the walkers' tests run all the same.
+        base = "crates/hyperion-base/src/lib.rs"
+        ws = self.walkers_workspace(base, "{ 1 }", "{ 4 }")
+        ws.build_scripts = {BASE}
+        p = make_plan([(base, False)], ws, False)
+        self.assertEqual(args(p, "_nextest-run")[1],
+                         "package(hyperion-base) | (binary_id(=hyperion-sim) & (test(/^substance::tests::/))) | "
+                         "(binary_id(=hyperion-surface) & (test(/^tags::tests::native_only::/))) | "
+                         "package(hyperion-testkit)")
+        # With --all-tests, no graph: the changed crate's tests alone, as before.
+        q = make_plan([(base, False)], ws, False, all_tests=True)
+        self.assertEqual(packages(q, "_nextest-run"), [BASE, TESTKIT])
+        self.assertEqual(q.details, [])
+        # With --dependents, its dependents' every test, as without the graph, which chose none of them.
+        d = make_plan([(base, False)], ws, True)
+        self.assertEqual(packages(d, "_nextest-run"), [BASE, FIT, SERVER, SIM, SURFACE, TESTKIT])
+        self.assertEqual(args(d, "_nextest-run")[1], "")
+
+    def test_a_reader_that_the_change_reaches_through_code_keeps_its_wasip1_run(self) -> None:
+        substance = "crates/hyperion-sim/src/substance.rs"
+        p = make_plan([(substance, False)], self.walkers_workspace(substance, "found.push(path)",
+                                                                  "found.insert(0, path)"), False)
+        self.assertEqual(args(p, "_wasip1-build")[1], "(binary_id(=hyperion-sim) & (test(/^substance::tests::/)))")
+        self.assertIn("binary_id(=hyperion-sim) & (test(/^substance::tests::/))", args(p, "_nextest-run")[1])
+        self.assertIn("binary_id(=hyperion-surface) & (test(/^tags::tests::native_only::/))", args(p, "_nextest-run")[1])
+
 
 class TheGuard(unittest.TestCase):
     """What the cross-Clippy guard counts as code that differs between Linux, macOS and Windows: a cfg
@@ -2085,6 +2178,38 @@ class RealWorkspace(unittest.TestCase):
         self.assertGreater(sum(len(t) for t in graph.tests.values()), 1000)
         self.assertEqual(graph.missing_mods, [], "a `mod` declaration names no file the graph knows")
         self.assertEqual([f for f in graph.orphans if "/src/" in f], [], "sources in no module tree: they widen")
+
+    def test_a_test_that_lists_a_crates_sources_reaches_a_source_walker(self) -> None:
+        # The source walkers' guard: a test function that holds the string `src` (or one ending in
+        # `/src`) and reaches a listing of a directory most likely reads the Rust sources, and smart-ci
+        # runs it for every Rust change only if its code reaches a source walker.
+        graph = real_graph()
+        listings = {rust_graph.item_node(file, item[0]) for file, facts in graph.rs.items()
+                    for index, item in enumerate(facts.items) if graph._lists_directory(facts, index)}
+        literals = {rust_graph.item_node(file, item[0]): facts.item_literals[index]
+                    for file, facts in graph.rs.items() for index, item in enumerate(facts.items)}
+        listers, _ = graph.tests_reaching(listings)
+        walkers, _ = graph.source_readers()
+        nodes = {(unit, t.name): t.node for unit, tests in graph.tests.items() for t in tests}
+        unseen = sorted(f"{unit} {name}" for unit, names in listers.items() for name in names
+                        if name not in walkers.get(unit, {})
+                        and any(s == "src" or s.endswith("/src") for s in literals.get(nodes[(unit, name)], ())))
+        self.assertEqual(unseen, [], "these tests hold `src` and list a directory, but reach no source walker, so "
+                                     "smart-ci runs them only for a change their code reaches: if one reads the Rust "
+                                     "sources, name the `rs` extension in the function that lists the directory "
+                                     "(`extension() == \"rs\"` or `ends_with(\".rs\")`); if it reads none, narrow this "
+                                     "guard's test of what reads them, rather than list the test here")
+
+    def test_the_real_graph_finds_source_walkers_and_a_sim_source_runs_their_tests_natively(self) -> None:
+        graph = real_graph()
+        self.assertTrue(graph.source_walkers())
+        readers, _ = graph.source_readers()
+        self.assertTrue(readers)
+        p = make_plan([("crates/hyperion-sim/src/lib.rs", False)], self.ws, False)
+        native = smart_ci.Filter(args(p, "_nextest-run")[1] or "all()")
+        self.assertTrue(any(native.matches(graph.units[unit].crate, unit, name)
+                            for unit, names in readers.items() for name in names))
+        self.assertEqual(next(s for s in p.steps if s.recipe[0] == "_nextest-run").causes[0], smart_ci.SOURCE_READERS)
 
 
 # --------------------------------------------------------------------------------------------------
