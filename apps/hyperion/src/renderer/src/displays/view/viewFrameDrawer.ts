@@ -31,11 +31,7 @@ import {
   spritesAtScale,
 } from "../../view/photoreal/internalScale";
 import { overlaySubmission } from "../../view/photoreal/overlay";
-import {
-  type FrameTerrain,
-  PhotorealRenderer,
-  type PhotorealStatus,
-} from "../../view/photoreal/renderer";
+import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
 import type { ViewBudget } from "../../view/budget/viewBudget";
 import type { Histogram } from "../../view/post/histogram";
 import type { MeterMode } from "../../view/post/meter";
@@ -48,7 +44,13 @@ import { cameraFromObserverM } from "../../view/sky/camera";
 import { SkyCubeLayer } from "../../view/sky/cubeLayer";
 import { HostDiscLayer } from "../../view/sky/disc";
 import { skySpriteStars } from "../../view/sky/sprites";
+import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
 import type { ClassMapSource } from "../../view/terrain/classMap";
+import {
+  LiveFrameTerrain,
+  surveyEdgeViewsOf,
+  type ViewTerrainInput,
+} from "../../view/terrain/frameTerrain";
 import type { HandoverReliefSource } from "../../view/terrain/handover";
 import type { TerrainViewReport } from "../../view/terrain/session";
 import {
@@ -110,10 +112,13 @@ export interface ViewFrameInputs {
    */
   readonly reliefs?: HandoverReliefSource | undefined;
   /**
-   * The terrain of the bodies handed over, made on the drawer's engine (plan R10, R10.T10.e);
-   * absent, a body handed over is drawn as a mesh body is. No view feeds one yet.
+   * The view's terrain this frame (plan R10, R10.T16.c): the terrain session, the view's ID in it
+   * and the frame's time, from which the drawer makes its photorealistic frame's `FrameTerrain`
+   * (`LiveFrameTerrain`: the terrain of the bodies it hands over, on the drawer's engine) and its
+   * draw list's survey edges, in either style (`surveyEdgeViewsOf`); absent, a body handed over is
+   * drawn as a mesh body is and no survey edge is marked.
    */
-  readonly terrain?: FrameTerrain | undefined;
+  readonly terrain?: ViewTerrainInput | undefined;
 }
 
 /** What a frame drew. */
@@ -122,6 +127,12 @@ export interface ViewFrameDrawn {
   readonly anchors: ReadonlyArray<DrawAnchor>;
   /** The style it was drawn in: the wireframe while the photorealistic pipelines compile. */
   readonly drawnStyle: RenderStyle;
+  /**
+   * The terrain's annunciation of the bodies the frame hands over, for the view's label block
+   * (`labelStatements(run, terrain)`, plan R10, R10.T16.c); `null` with none, and for a frame drawn
+   * in the wireframe, which hands nothing over until R10.T11.
+   */
+  readonly terrain: TerrainAnnunciation | null;
 }
 
 /**
@@ -297,17 +308,32 @@ export class ViewFrameDrawer {
         // The guide's CSS-pixel widths at the display's ratio, never under 2 device pixels.
         ...viewStrokesAt(ratio),
         skyStars: inputs.sky === null ? null : skySprites(inputs.sky, camera.pose, run.scene),
+        // The surveys' edges, in both styles (R10.T16.c).
+        surveyEdges:
+          inputs.terrain === undefined
+            ? []
+            : surveyEdgeViewsOf(
+                inputs.terrain.source,
+                inputs.terrain.view,
+                run.scene,
+                camera,
+                viewport,
+                inputs.style,
+              ),
       },
     );
     const cube = this.#cubeFor(inputs.sky, inputs.setting);
     const exposed = exposureScale(ev100);
     let drawn = false;
+    let terrain: TerrainAnnunciation | null = null;
     if (
       inputs.style === "photorealistic" &&
       inputs.availability.photorealistic &&
       this.#photoreal.status !== "failed"
     ) {
-      drawn = this.#drawPhotoreal(inputs, tokens, viewport, camera, list, cube, exposed);
+      const photoreal = this.#drawPhotoreal(inputs, tokens, viewport, camera, list, cube, exposed);
+      drawn = photoreal.drawn;
+      terrain = photoreal.terrain;
     }
     if (!drawn) {
       this.#wireframe.render(
@@ -318,7 +344,7 @@ export class ViewFrameDrawer {
         cube === null ? [] : [this.#cubes.draw(cube, "display", exposed)],
       );
     }
-    return { anchors: list.anchors, drawnStyle: drawn ? "photorealistic" : "wireframe" };
+    return { anchors: list.anchors, drawnStyle: drawn ? "photorealistic" : "wireframe", terrain };
   }
 
   #drawPhotoreal(
@@ -329,8 +355,20 @@ export class ViewFrameDrawer {
     list: ReturnType<typeof buildWireframeDrawList>,
     cube: BakedCube | null,
     exposed: number,
-  ): boolean {
+  ): { readonly drawn: boolean; readonly terrain: TerrainAnnunciation | null } {
     const { sky, run } = inputs;
+    // The view's own terrain of the session's passes, for this frame alone (R10.T16.c).
+    const terrain =
+      inputs.terrain === undefined
+        ? undefined
+        : new LiveFrameTerrain(inputs.terrain.source, {
+            view: inputs.terrain.view,
+            camera: { orientation: camera.pose.orientation, fovXRad: camera.fovXRad },
+            presentedPx: viewport,
+            exposureScale: exposed,
+            occluderSlopePx: list.occluderSlopePx,
+            nowMs: inputs.terrain.nowMs,
+          });
     try {
       if (sky !== null && sky !== this.#bandFor) {
         this.#band.update(
@@ -361,18 +399,18 @@ export class ViewFrameDrawer {
           meter: inputs.meter,
           classMaps: inputs.classMaps,
           reliefs: inputs.reliefs,
-          terrain: inputs.terrain,
+          terrain,
           // The marks cased over the tone-mapped image at the canvas's resolution (R07.T16.a), and
           // the craft on their silhouettes (R07.T16.e).
           overlay: overlaySubmission(this.#wireframe, list, tokens, camera, viewport),
         }),
       );
       if (plan === null) {
-        return false;
+        return { drawn: false, terrain: null };
       }
       this.#regimes = plan.regimes;
       this.#frameFailed = false;
-      return true;
+      return { drawn: true, terrain: terrain?.annunciation ?? null };
     } catch (error: unknown) {
       // A creation refused between a device loss and its restore: this frame draws the
       // wireframe, and the next tries again; said once until a frame draws or a restore.
@@ -380,7 +418,7 @@ export class ViewFrameDrawer {
         console.error(`the photorealistic frame of ${this.#name} could not be drawn:`, error);
         this.#frameFailed = true;
       }
-      return false;
+      return { drawn: false, terrain: null };
     }
   }
 

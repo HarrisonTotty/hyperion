@@ -322,7 +322,8 @@ export interface WireframeDrawList {
   readonly occluderSlopePx: number;
   /**
    * The bodies' survey edges drawn (plan R10, R10.T10.c), each with the range to its nearest point
-   * in the picture, for the view's list note `SURVEY EDGE` (T12's).
+   * in the picture that the operator can see (R10.T16.c), for the view's list note `SURVEY EDGE`
+   * (T12's).
    */
   readonly surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
 }
@@ -331,8 +332,8 @@ export interface WireframeDrawList {
 export interface DrawnSurveyEdge {
   readonly body: string;
   /**
-   * The range to its nearest point inside the view, m, from the own ship where there is one, else
-   * from the camera; `null` where none of it is drawn there.
+   * The range to its nearest point inside the view that no drawn ground hides (R10.T16.c), m, from
+   * the own ship where there is one, else from the camera; `null` where none of it is seen there.
    */
   readonly nearestRangeM: number | null;
 }
@@ -392,7 +393,8 @@ export interface DrawOptions extends ViewStrokes {
   readonly skyStars?: ReadonlyArray<SpriteStar> | null;
   /**
    * The bodies' surveys whose edges the list marks (plan R10, R10.T10.c; the guide's
-   * `SURVEY EDGE`), in both styles; none until a view draws a body's terrain (R10.T10.e, T11).
+   * `SURVEY EDGE`), in both styles: each wanted body's coverage in view, from the terrain session
+   * (R10.T16.c, `surveyEdgeViewsOf`); none without one.
    */
   readonly surveyEdges?: ReadonlyArray<SurveyEdgeView>;
 }

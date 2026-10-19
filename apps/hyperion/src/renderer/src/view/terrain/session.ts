@@ -48,10 +48,12 @@
  *   that hands a body over shows `TERRAIN_NOT_AVAILABLE` on its label block's fault line
  *   ({@link TerrainSession.terrainFaults}, which {@link TerrainSession.subscribeFaults} follows), until
  *   `VIEW` is shown again and the session made anew.
- * - **Seams for R10.T16.c.** Its per-view `FrameTerrain` calls {@link TerrainSession.drawTerrain}
- *   with the view's `TerrainView` and lighting from its plan, and gives
- *   {@link TerrainSession.coverageMask}'s texture as its `surveyCoverage` only while the view's
- *   frame says `maskReady`.
+ * - **Each view's frame (R10.T16.c).** Its `LiveFrameTerrain` (`frameTerrain.ts`) calls
+ *   {@link TerrainSession.drawTerrain} with the view's `TerrainView` and lighting from its plan, and
+ *   gives {@link TerrainSession.coverageMask}'s texture as its `surveyCoverage` only while the
+ *   view's draw set of the body leaves nothing missing (`TerrainPass.maskReadyFor`); its draw
+ *   list's survey edges read {@link TerrainSession.survey} and each pass's resident heights
+ *   (`surveyEdgeViewsOf`).
  */
 
 import type {

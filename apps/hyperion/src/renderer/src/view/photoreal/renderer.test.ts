@@ -163,6 +163,7 @@ describe("the photorealistic renderer", () => {
         asked.push(plan);
         return plan.meshes.some((mesh) => mesh.role.kind === "handed-over") ? [terrainDraw] : [];
       },
+      symbologyDepth: () => [],
     };
     const bodiesPass = (from: number): ReadonlyArray<string> | undefined =>
       engine.targetFrames
@@ -272,6 +273,17 @@ describe("the photorealistic renderer", () => {
   });
 });
 
+/** A draw of `material`, by its name alone. */
+function drawOf(material: string): DrawItem {
+  return {
+    mesh: { kind: "mesh", name: "mesh" },
+    material: { kind: "material", name: material },
+    offsetFromCameraM: new Float32Array(3),
+    uniforms: {},
+    textures: {},
+  };
+}
+
 describe("the photorealistic renderer's overlay", () => {
   it("loads the tone-mapped image for the symbology", async () => {
     const engine = await countingRenderEngine();
@@ -293,6 +305,35 @@ describe("the photorealistic renderer's overlay", () => {
       ["tonemap", undefined],
       ["symbology", "load"],
     ]);
+    renderer.dispose();
+  });
+
+  it("draws the terrain's depth into the symbology's pass before its marks (R10.T16.c)", async () => {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", {
+      orientation: IDENTITY_QUATERNION,
+      fovXRad: Math.PI / 3,
+    });
+    const overlay = {
+      label: PHOTOREAL_PASS_LABELS.symbology,
+      viewRotation: new Float32Array(16),
+      projection: new Float32Array(16),
+      draws: [drawOf("occluderSphere"), drawOf("lines")],
+      postProcesses: [],
+    };
+    const terrain = {
+      surveyCoverage: () => null,
+      draws: () => [],
+      symbologyDepth: () => [drawOf("terrain-depth-baked-offsets")],
+    };
+    renderer.render(view, { ...frameWith([]), overlay, terrain });
+    expect(
+      view.frames
+        .find((f) => f.label === PHOTOREAL_PASS_LABELS.symbology)
+        ?.draws.map((draw) => draw.material.name),
+    ).toEqual(["terrain-depth-baked-offsets", "occluderSphere", "lines"]);
     renderer.dispose();
   });
 });

@@ -130,6 +130,7 @@ import {
   ViewMarkLabels,
 } from "./ViewMarkLabels";
 import { styleName } from "../../view/photoreal/style";
+import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
 import type { TerrainSession } from "../../view/terrain/session";
 import type { WorkerLike } from "../../view/terrain/workers/pool";
 import { useServerLink } from "../../lib/serverLink";
@@ -408,6 +409,11 @@ interface Published {
   readonly drawnStyle: RenderStyle;
   /** The photorealistic view's standing (`PhotorealRenderer.status`). */
   readonly photoreal: PhotorealStatus;
+  /**
+   * The terrain's annunciation of the bodies its last frame handed over (plan R10, R10.T16.c), for
+   * its label block's `labelStatements`; `null` with none.
+   */
+  readonly terrain: TerrainAnnunciation | null;
 }
 
 /** What the meter holds before the loop's first readout: no image is drawn yet. */
@@ -592,6 +598,7 @@ function ViewStage({
     anchors: [],
     drawnStyle: initial.camera.style,
     photoreal: "idle",
+    terrain: null,
   });
   const shown = useThrottledValue(published, READOUT_INTERVAL_MS);
   // The meter as the loop last read it out (R07.T16.b): given in the same frame as the exposure the
@@ -826,6 +833,8 @@ function ViewStage({
     const labelStates = new WeakMap<HTMLElement, MarkLabelState>();
     // The terrain session the view last told what it drew, which forgets it when it goes.
     let reportedTo: TerrainSession | null = null;
+    // The terrain's annunciation of the last frame drawn (R10.T16.c), for the label block.
+    let terrainAnnunciation: TerrainAnnunciation | null = null;
     let frame = 0;
     const tick = (nowMs: number): void => {
       animationFrame += 1;
@@ -899,6 +908,7 @@ function ViewStage({
         reportedTo = session;
       }
       session?.step();
+      terrainAnnunciation = null;
       if (drawer !== null) {
         if (run.camera.style === "photorealistic" && drawer.photorealStatus === "failed") {
           // Its pipelines could not be made: the view returns to the wireframe, and the control
@@ -923,10 +933,13 @@ function ViewStage({
           // Every view's lit bodies shade and hand over by the session's (R10.T16.a).
           classMaps: session?.classMaps,
           reliefs: session?.reliefs,
+          // The view's own terrain of the session's passes, and its survey edges (R10.T16.c).
+          terrain: session === null ? undefined : { source: session, view: VIEW_ID, nowMs },
         };
         const drawn = drawer.draw(frameInputs);
         if (drawn !== null && inputs.size !== null) {
           anchors = drawn.anchors;
+          terrainAnnunciation = drawn.terrain;
           // The wireframe, and the photorealistic view's stand-in while its pipelines compile.
           drawnStyle = drawn.drawnStyle;
           placeMarkLabels(
@@ -981,6 +994,7 @@ function ViewStage({
           anchors,
           drawnStyle,
           photoreal: drawer?.photorealStatus ?? "idle",
+          terrain: terrainAnnunciation,
         });
       }
       frame = requestAnimationFrame(tick);
@@ -1183,7 +1197,8 @@ function ViewStage({
   const meterShown = meteringFor(metering, meter);
   const primaryPhotoreal = photorealStatements(shown.run, lighting, shown.drawnStyle, litLabels);
   const primaryStatements = [
-    ...labelStatements(shown.run),
+    // The primary's own terrain annunciation (G10; R10.T16.c).
+    ...labelStatements(shown.run, shown.terrain),
     ...(easedMoves && !reducedMotion ? [EASED_MOVES_STATEMENT] : []),
     ...primaryPhotoreal,
   ];
@@ -1854,7 +1869,10 @@ function ViewPanels({
  * terrain session (plan R10, R10.T16.a; `useTerrainSession`), made above the stage on the view's
  * engine with the height workers `heightWorkers` starts: every view tells it what it drew each
  * frame it draws, the primary's frame steps it, which wants the bodies' coarse fields the cameras
- * can resolve, and every view's lit bodies take its class maps and reliefs. It goes with the
- * engine when the display is hidden.
+ * can resolve, and every view's lit bodies take its class maps and reliefs. Each view's
+ * photorealistic frame draws the terrain of the bodies it hands over through the session, from its
+ * own camera at its own τ and weight, and its label block states that terrain's annunciation; every
+ * view, in either style, marks the surveys' edges (R10.T16.c). It goes with the engine when the
+ * display is hidden.
  */
 export const ViewDisplay = memo(ViewPanels);

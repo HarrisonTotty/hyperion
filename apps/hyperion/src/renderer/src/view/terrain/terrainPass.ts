@@ -44,8 +44,14 @@
  * and a body baked without weights, keep R05's material and its one sun.
  *
  * {@link TerrainPass.dispose} releases every handle the pass made on the current device: its
- * resources, every view's, its mesh, its material and its tables of no air
+ * resources, every view's, its mesh, its materials and its tables of no air
  * (decision-r10-t16-contracts §1).
+ *
+ * For a view's frame (plan R10, R10.T16.c) a lit pass also gives the terrain as depth alone, for
+ * the symbology's pass over the image ({@link TerrainPass.symbologyDepthMaterial}, drawn with a
+ * view's draw's resources), whether a view's frame may give the body's coverage mask before its
+ * draw ({@link TerrainPass.maskReadyFor}), and the heights of its resident bakes that the survey
+ * edge's rim and its note's line of sight read ({@link TerrainPass.heights}).
  */
 
 import type { Quaternion } from "../camera/pose";
@@ -102,7 +108,12 @@ import {
 } from "./select";
 import { RESELECT_MOVE_FRACTION, selectionTolerancePx } from "./selectionTolerance";
 import type { TerrainShading } from "./slotLayout";
-import { type TerrainLighting, terrainLitMaterialSpec } from "./terrainMaterial";
+import { ResidentHeights, type ResidentHeightsView } from "./residentHeights";
+import {
+  terrainDepthMaterialSpec,
+  type TerrainLighting,
+  terrainLitMaterialSpec,
+} from "./terrainMaterial";
 import type {
   BakedPatch,
   BakeSettings,
@@ -372,6 +383,11 @@ interface Device {
   /** A lit terrain's tables of no air, for a body without an atmosphere; `null` for the spike's. */
   readonly airless: SurfaceLightingTables | null;
   material: MaterialHandle | null;
+  /**
+   * A lit terrain's depth material for the symbology's pass (R10.T16.c), compiled for the canvas;
+   * `null` before, and for the spike's.
+   */
+  depthMaterial: MaterialHandle | null;
   /** Each resident patch's layers' summary and request, by key string. */
   readonly residents: Map<string, Resident>;
   /** The resident patches asked for again by the rebake rule, at their last requests. */
@@ -543,6 +559,8 @@ export class TerrainPass {
   readonly #shading: TerrainShading;
   /** Each view's own frame state, by its name. */
   readonly #views = new Map<string, ViewState>();
+  /** What the render thread keeps of the resident bakes' heights (R10.T16.c), on the current device. */
+  readonly #heights = new ResidentHeights();
   /** The planet as selection reads it: its figure and the field's level table, which grows. */
   #planet: PlanetGeometry;
   #rangesVersion = 0;
@@ -626,10 +644,35 @@ export class TerrainPass {
     return this.#device.cache.get(keyString);
   }
 
-  /** Compiles the material ahead of the first frame; frames draw nothing until it resolves. */
+  /**
+   * The resident bakes' heights as the survey edge's rim and its note's line of sight read them
+   * (R10.T16.c; `residentHeights.ts`): a body's bakes, on the current device, forgotten as they
+   * leave the cache and at a restore.
+   */
+  get heights(): ResidentHeightsView {
+    return this.#heights;
+  }
+
+  /**
+   * A lit pass's terrain as depth alone, compiled for the canvas (`terrainDepthMaterialSpec`,
+   * R10.T16.c): a view's draw with this material and its `occluderSlopePx` writes the drawn ground's
+   * depth into the symbology's pass before its lines; `null` before it is compiled, and for R05's
+   * spike shading, which no overlay draws over.
+   */
+  get symbologyDepthMaterial(): MaterialHandle | null {
+    return this.#device.depthMaterial;
+  }
+
+  /**
+   * Compiles the material ahead of the first frame, and beside it a lit pass's depth material for
+   * the symbology's pass; frames draw nothing until the first resolves, and give no depth until
+   * the second does. A depth material that cannot be made is reported, and the pass draws on
+   * without it.
+   */
   async ready(): Promise<void> {
     const device = this.#device;
     const path = device.resources.layout.vertexPath;
+    const depth = this.#shading === "lit" ? this.#readyDepth(device, path) : Promise.resolve();
     const material = await this.#engine.createMaterialAsync(
       this.#shading === "lit" ? terrainLitMaterialSpec(path) : terrainMaterialSpec(path),
       ["rgba16float"],
@@ -641,6 +684,26 @@ export class TerrainPass {
       // Made for a device a restore replaced, a pass let go meanwhile, or a second call: no frame
       // ever drew it.
       this.#engine.releaseMaterial(material);
+    }
+    await depth;
+  }
+
+  /** Compiles `device`'s depth material for the canvas (R10.T16.c); never rejects. */
+  async #readyDepth(device: Device, path: TerrainLayout["vertexPath"]): Promise<void> {
+    try {
+      const depth = await this.#engine.createMaterialAsync(
+        terrainDepthMaterialSpec(path),
+        ["canvas"],
+        [device.resources.mesh],
+      );
+      if (device === this.#device && !this.#disposed && device.depthMaterial === null) {
+        device.depthMaterial = depth;
+      } else {
+        this.#engine.releaseMaterial(depth);
+      }
+    } catch (error: unknown) {
+      // The symbology then has no terrain depth over the image; the terrain itself still draws.
+      console.error("the terrain's depth material for the symbology failed:", error);
     }
   }
 
@@ -788,6 +851,41 @@ export class TerrainPass {
   }
 
   /**
+   * Whether view `id`'s frame may give the body's coverage mask (decision D7), as the last step
+   * leaves it, before the view's draw: no fault, the view taken by that step, nothing it sees
+   * missing, and its draw ready to be made wherever it sees a patch (the material compiled, and a
+   * lit pass's phase table and tables of no air made). {@link TerrainPass.drawFor}'s `maskReady`
+   * is this, but for a draw refused at its making (a device lost meanwhile); a view's frame reads
+   * this one before its plan, which takes the mask (R10.T16.c).
+   */
+  maskReadyFor(id: string): boolean {
+    const selected = this.#selected;
+    if (this.#faulted || this.#disposed || selected === null || !this.#views.has(id)) {
+      return false;
+    }
+    const bit = selected.views.findIndex((view) => view.id === id);
+    if (bit < 0) {
+      return false;
+    }
+    const mask = 1 << bit;
+    const { drawSet } = selected;
+    if ((drawSet.missingViews & mask) !== 0) {
+      return false;
+    }
+    let sees = false;
+    for (let n = 0; n < drawSet.count && !sees; n += 1) {
+      sees = ((drawSet.views[n] ?? 0) & mask) !== 0;
+    }
+    const device = this.#device;
+    return (
+      !sees ||
+      (device.material !== null &&
+        (this.#shading !== "lit" ||
+          (device.resources.phaseTable !== null && device.airless !== null)))
+    );
+  }
+
+  /**
    * Runs one frame of the descent spike's single view, {@link DEFAULT_TERRAIN_VIEW}: a step at the
    * terrain's τ and weight 1, then its draw, as R05 built it.
    *
@@ -829,15 +927,20 @@ export class TerrainPass {
     device.offFailed();
     device.pool.terminate();
     this.#views.clear();
+    this.#heights.clear();
     device.resources.dispose();
     this.#releaseDevice(device);
   }
 
-  /** The material and the tables of no air of `device`. */
+  /** The materials and the tables of no air of `device`. */
   #releaseDevice(device: Device): void {
     if (device.material !== null) {
       this.#engine.releaseMaterial(device.material);
       device.material = null;
+    }
+    if (device.depthMaterial !== null) {
+      this.#engine.releaseMaterial(device.depthMaterial);
+      device.depthMaterial = null;
     }
     if (device.airless !== null) {
       this.#engine.releaseTexture(device.airless.body);
@@ -870,6 +973,7 @@ export class TerrainPass {
       airless:
         this.#shading === "lit" ? createAirlessTables(this.#engine, "terrain: no air") : null,
       material: null,
+      depthMaterial: null,
       residents: new Map(),
       rebakes: new Map(),
       gates: [],
@@ -888,6 +992,7 @@ export class TerrainPass {
     this.#settleAll(old);
     // The lost device's handles went with it: `ResilientEngine` drops their release.
     this.#releaseDevice(old);
+    this.#heights.clear();
     this.#device = this.#makeDevice(old.resources);
     // Each view's records sized to the new layout's slots, its debounce kept.
     for (const [id, state] of this.#views) {
@@ -939,6 +1044,7 @@ export class TerrainPass {
       return;
     }
     // A rebake replaces its old bake in its slot (`PatchCache.insert` of a resident key).
+    this.#heights.take(bake);
     const layers = bake.layers;
     device.residents.set(keyString, {
       layers:
@@ -965,6 +1071,7 @@ export class TerrainPass {
   /** A patch no longer resident: evicted, or refused by its slot. */
   #forget(device: Device, keyString: string): void {
     device.residents.delete(keyString);
+    this.#heights.forget(keyString);
     if (device.rebakes.delete(keyString)) {
       this.#demandDirty = true;
     }

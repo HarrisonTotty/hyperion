@@ -11,8 +11,11 @@
 //
 // Composed after frame.wgsl, patchVertex.wgsl, R08's surface lighting (`SURFACE_LIGHTING_WGSL`:
 // preciseTrig.wgsl, common.wgsl, oblate.wgsl, surfaceLighting.wgsl), R07's litBody.wgsl,
-// terrainPatch.wgsl and the horizon map's lookup (`shadows/horizon.wgsl`, R10.T8.b), with one of
-// the two vertex paths (`terrainMaterial.ts`).
+// terrainPatch.wgsl and the horizon map's lookup (`shadows/horizon.wgsl`, R10.T8.b), then a
+// `Draw` and a fragment stage: the lit material's own (`terrainLitShade.wgsl`), or the terrain's
+// depth alone for the symbology's pass over the image (`terrainDepth.wgsl`, R10.T16.c), each over
+// this module's vertices and survey discard; and one of the two vertex paths
+// (`terrainMaterial.ts`).
 //
 // Each star's horizon term takes its local horizon from the patch's horizon map (R10.T8.b; Design
 // note 10): `terrain_horizon` looks the horizon up towards the star's grid azimuth, blends it to the
@@ -45,19 +48,6 @@
 // (`gpu/resources.ts`' `litPatchMeshData`) join them, each drawn by the side whose surface stands
 // higher above it, in the reference surface's appearance: the body's uniform law (law 0) under the
 // datum's normal, without the horizon map's shadows, as R07's disc draws the reference surface.
-
-struct Draw {
-  // Zero: each instance carries its own origin.
-  offsetFromCameraM : vec3f,
-  // The body-fixed axes into the frame the instance origins are in (the body's rotation).
-  bodyRotation : mat4x4f,
-  // The camera less the body's centre, body-fixed, metres; w, 1 ÷ a, a the equatorial radius.
-  cameraBodyFixedM : vec4f,
-  // The normals atlas: tiles across a layer, tiles a layer, a tile's stored texels, samples a side.
-  atlas : vec4f,
-}
-
-@group(1) @binding(0) var<uniform> draw : Draw;
 
 // Each slot's class layers, CLASS_LAYER_WORDS words (`slotLayout.ts`' `class-layers` field): first
 // each vertex's eight class-weight bytes over its patch's palette, two words a vertex (the bake's
@@ -607,20 +597,4 @@ fn shade_terrain(in : LitVertexOut, terrain_normal : vec3f, reference : bool) ->
     out.radiance = out.radiance + source.xyz * misc.y * reflectance * transmitted;
   }
   return out;
-}
-
-@fragment
-fn fragmentMain(in : LitVertexOut) -> @location(0) vec4f {
-  if (!survey_kept(in)) {
-    discard;
-  }
-  // One call of the shading: a compiler that inlines every call (SwiftShader's) takes one copy.
-  let reference = in.kind != LIT_GRID;
-  let normal = select(patchNormalAt(in.slot, in.patchUv), normalize(in.datumNormal), reference);
-  let shaded = shade_terrain(in, normal, reference);
-  var meter = METER_OTHER;
-  if (u32(terrain_row(0u).x) > 0u) {
-    meter = select(METER_UNLIT_BODY, METER_LIT_BODY, shaded.lit);
-  }
-  return vec4f(min(shaded.radiance, vec3f(HALF_FLOAT_MAX)), meter);
 }

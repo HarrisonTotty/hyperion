@@ -9,6 +9,7 @@ import { CoverageView, fieldCellIndex } from "./coverage";
 import { faceUvToDir, stToUv } from "./cube";
 import type { Face } from "./patchKey";
 import {
+  groundHidesPoint,
   SURVEY_EDGE_NOTE,
   SURVEY_EDGE_TICK_REM,
   SURVEY_EDGE_TICK_SPACING_REM,
@@ -317,3 +318,98 @@ describe("the survey edge's note", () => {
     expect(surveyEdgeNote(3.84e8, false, null)).toEqual({ text: "SURVEY EDGE 384 Mm", unit: "Mm" });
   });
 });
+
+describe("the drawn ground between the camera and an edge's point (R10.T16.c)", () => {
+  const FIGURE = { equatorialRadiusM: RADIUS_M, polarRadiusM: RADIUS_M };
+  // The camera 1 km over the pole, a point on the datum 20 km away along the surface.
+  const cameraM = vec3(0, 0, RADIUS_M + 1_000);
+  const pointM = scale(normalise(vec3(20_000 / RADIUS_M, 0, 1)), RADIUS_M);
+  // A ridge 2 km high across the line of sight, between 8 and 12 km from the pole.
+  const ridgeAt =
+    (fromKm: number, toKm: number): ((d: Vec3) => number) =>
+    (d) => {
+      const alongKm = (Math.atan2(Math.hypot(d.x, d.y), d.z) * RADIUS_M) / 1000;
+      return alongKm >= fromKm && alongKm <= toKm ? 2_000 : 0;
+    };
+
+  it("hides a point behind a ridge across the line of sight", () => {
+    expect(
+      groundHidesPoint(cameraM, pointM, FIGURE, { heightAtM: ridgeAt(8, 12), ceilingM: 2_000 }),
+    ).toBe(true);
+  });
+
+  it("hides no point where the ground stands clear of the line of sight, before or behind it", () => {
+    expect([
+      groundHidesPoint(cameraM, pointM, FIGURE, { heightAtM: () => 0, ceilingM: 2_000 }),
+      groundHidesPoint(cameraM, pointM, FIGURE, { heightAtM: ridgeAt(25, 30), ceilingM: 2_000 }),
+      groundHidesPoint(cameraM, pointM, FIGURE, { heightAtM: () => null, ceilingM: 0 }),
+    ]).toEqual([false, false, false]);
+  });
+});
+
+describe("the survey edge's note counts only the points the operator can see (R10.T16.c)", () => {
+  it("gives the same range where the drawn ground hides nothing", () => {
+    const { view, camera } = viewOf(surveyed([0, 16, 16]), 200_000);
+    const bare = surveyEdgeMark(view, camera, VIEWPORT, OPTIONS);
+    const clear = surveyEdgeMark(
+      { ...view, ground: { heightAtM: () => 0, ceilingM: 1_000 } },
+      camera,
+      VIEWPORT,
+      OPTIONS,
+    );
+    expect(clear.nearestRangeM).toBe(bare.nearestRangeM);
+  });
+
+  it("gives no range where the drawn ground hides every point, though the line is drawn", () => {
+    const { view, camera } = viewOf(surveyed([0, 16, 16]), 200_000);
+    const hidden = surveyEdgeMark(
+      { ...view, ground: { heightAtM: () => 150_000, ceilingM: 150_000 } },
+      camera,
+      VIEWPORT,
+      OPTIONS,
+    );
+    expect([hidden.line.length > 0, hidden.nearestRangeM]).toEqual([true, null]);
+  });
+
+  it("gives the range of the nearest point seen past ground that hides a nearer one", () => {
+    // The camera 200 km over a point of the cell nearer its west side (s = 16 ÷ 32), whose
+    // middle is then the line's one nearest point.
+    const up = faceUvToDir(0, stToUv(16.2 / 32), stToUv(16.5 / 32));
+    const cameraM = scale(up, RADIUS_M + 200_000);
+    const view: SurveyEdgeView = {
+      body: "test",
+      coverage: surveyed([0, 16, 16]),
+      figure: { equatorialRadiusM: RADIUS_M, polarRadiusM: RADIUS_M },
+      rotation: IDENTITY_ROTATION,
+      centreM: scale(cameraM, -1),
+      heightAtM: () => null,
+    };
+    const camera = { orientation: lookAlong(scale(up, -1), vec3(0, 0, 1)), fovXRad: Math.PI / 3 };
+    const bare = surveyEdgeMark(view, camera, VIEWPORT, OPTIONS);
+    // A tower halfway between the camera's foot and that point, which hides it and its
+    // neighbours alone.
+    const tower = normalise(add(up, nearestPointDir(view, camera)));
+    const ground = {
+      heightAtM: (d: Vec3): number =>
+        Math.acos(Math.min(1, dot(normalise(d), tower))) * RADIUS_M < 3_000 ? 180_000 : 0,
+      ceilingM: 180_000,
+    };
+    const seen = surveyEdgeMark({ ...view, ground }, camera, VIEWPORT, OPTIONS);
+    expect(seen.nearestRangeM).not.toBeNull();
+    expect(seen.nearestRangeM ?? 0).toBeGreaterThan((bare.nearestRangeM ?? 0) + 10);
+  });
+});
+
+/** The body-fixed direction of the drawn line's point nearest the camera. */
+function nearestPointDir(view: SurveyEdgeView, camera: ProjectionCamera): Vec3 {
+  const { line } = surveyEdgeMark(view, camera, VIEWPORT, OPTIONS);
+  let best = vec3(0, 0, 1);
+  let least = Number.POSITIVE_INFINITY;
+  for (const [a] of segmentsOf(line)) {
+    if (norm(a) < least) {
+      least = norm(a);
+      best = normalise(sub(a, view.centreM));
+    }
+  }
+  return best;
+}

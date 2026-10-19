@@ -131,7 +131,8 @@ function instrumentLines(
  * (decision-r06-t11f-stars-line); and its faults, the graphics' (decision-r07-t19, item 2b) and then
  * the terrain's (R10.T16.b), each on a fault line of its own. Its
  * statements run the slot's width under its label block and canvas, while they hold:
- * `POSITIONS AS SEEN FROM SHIP`,
+ * `POSITIONS AS SEEN FROM SHIP`, its own terrain's `TERRAIN: STREAMING` or
+ * `TERRAIN: DETAIL LIMITED` (R10.T16.c),
  * `PHOTOREALISTIC: PREPARING`, and each photorealistic statement that holds for its picture
  * (`LIGHTING: …`, `BODY PHOTOMETRY: NOT YET MODELLED`, `CRAFT PHOTOMETRY: NOT YET MODELLED` or the
  * two composed, R07.T16.e) unless the primary's block shows the same line
@@ -170,7 +171,10 @@ export function InstrumentView({
     run === null
       ? []
       : [
-          ...labelStatements(run).filter((statement) => statement === POSITIONS_FROM_SHIP),
+          // Its own terrain annunciation, of the bodies its frame hands over (R10.T16.c).
+          ...labelStatements(run, shown?.terrain ?? null).filter(
+            (statement) => statement === POSITIONS_FROM_SHIP || statement === shown?.terrain,
+          ),
           // Its own preparing, and the photorealistic style's statements about its picture that
           // the primary's block does not show already.
           ...photorealStatements(

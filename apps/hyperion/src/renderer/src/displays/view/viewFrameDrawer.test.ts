@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { EngineUnavailable } from "../../view/engine/resilientEngine";
 import type { FrameSubmission, RenderView } from "../../view/engine/types";
+import { viewId } from "../../view/camera/state";
+import { IDENTITY_ROTATION } from "../../view/coords/rotation";
 import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
 import { PHASE_GIANT, PHASE_PLANETS, phaseScene } from "../../view/scenes/phaseScene";
 import {
@@ -97,14 +99,31 @@ const TOKENS = {
   surface0: "#000000",
 } as const;
 
+/** The phase scene's run, its planets turning (their rotations the identity) where `rotated`. */
+function phaseRun(rotated: boolean): ReturnType<typeof startRun> {
+  const run = startRun(phaseScene());
+  return rotated
+    ? {
+        ...run,
+        scene: {
+          ...run.scene,
+          bodies: run.scene.bodies.map((body) =>
+            body.kind === "star" ? body : { ...body, rotation: IDENTITY_ROTATION },
+          ),
+        },
+      }
+    : run;
+}
+
 /** The phase scene's frame drawn photorealistically, at 320 × 180, with the view's `sources`. */
 async function drawPhotoreal(
   sources: Pick<ViewFrameInputs, "classMaps" | "reliefs" | "terrain">,
+  rotated = false,
 ): Promise<void> {
   const engine = await countingRenderEngine();
   const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
   drawer.draw({
-    run: startRun(phaseScene()),
+    run: phaseRun(rotated),
     size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
     tokens: TOKENS,
     exposure: DEFAULT_EXPOSURE,
@@ -137,28 +156,38 @@ describe("a view's photorealistic frame (R10.T10.d, T10.e)", () => {
     expect(asked).toEqual(LIT);
   });
 
-  it("hands its lit bodies over by the view's reliefs", async () => {
+  it("hands its lit bodies with a rotation over by the view's reliefs", async () => {
     const asked: string[] = [];
-    await drawPhotoreal({
-      reliefs: {
-        reliefM: (body) => {
-          asked.push(body);
-          return null;
+    await drawPhotoreal(
+      {
+        reliefs: {
+          reliefM: (body) => {
+            asked.push(body);
+            return null;
+          },
         },
       },
-    });
+      true,
+    );
     expect(asked).toEqual(LIT);
   });
 
-  it("draws its lit bodies over the view's terrain", async () => {
+  it("draws its lit bodies over the view's own terrain of the session (R10.T16.c)", async () => {
     const asked: string[] = [];
     await drawPhotoreal({
       terrain: {
-        surveyCoverage: (body) => {
-          asked.push(body);
-          return null;
+        source: {
+          wanted: new Set(),
+          survey: () => null,
+          drawTerrain: () => null,
+          coverageMask: () => null,
+          pass: (body) => {
+            asked.push(body);
+            return null;
+          },
         },
-        draws: () => [],
+        view: viewId("primary"),
+        nowMs: 0,
       },
     });
     expect(asked).toEqual(LIT);

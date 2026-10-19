@@ -25,7 +25,7 @@ import {
   PROVISIONAL_PHOTOMETRY,
 } from "../../view/appearance/fromWire";
 import type { LitBodyInput } from "../../view/bodies/draw";
-import type { LitRegime, ScreenCircle } from "../../view/bodies/regime";
+import type { LitRegime } from "../../view/bodies/regime";
 import { type ProjectionCamera, project, type Viewport } from "../../view/camera/projection";
 import type { CameraPose } from "../../view/camera/pose";
 import type { DrawItem, FrameSubmission } from "../../view/engine/types";
@@ -72,27 +72,20 @@ export interface PhotorealInputs {
   /** The operator's meter where the view is the exposure's source, or `null` (no histogram). */
   readonly meter: MeterMode | null;
   /**
-   * The footprints of the terrain the frame draws, which writes depth (plan R10, R10.T10.b): a
-   * disc they overlap is drawn in the mesh regime (`promoteOverlapping`, R07 Design note 2). None
-   * until a view draws a body's terrain (R10.T10.c, T11).
-   */
-  readonly terrainFootprints?: ReadonlyArray<ScreenCircle>;
-  /**
-   * The class maps the lit bodies' discs shade with (plan R10, R10.T10.d; `ClassMapStore`), or
-   * absent, every disc then its photometry's uniform law. None until a view draws a body's terrain
-   * live.
+   * The class maps the lit bodies' discs shade with (plan R10, R10.T10.d; `ClassMapStore`), the
+   * terrain session's (R10.T16.a), or absent, every disc then its photometry's uniform law.
    */
   readonly classMaps?: ClassMapSource | undefined;
   /**
    * The lit bodies' reliefs, by which a body hands over to terrain (plan R10, R10.T10.e;
-   * `storeReliefSource` over the view's `CoarseFieldStore`), or absent, when none hands over.
-   * None until a view holds bodies' fields live.
+   * `storeReliefSource` over the terrain session's `CoarseFieldStore`, R10.T16.a), or absent, when
+   * none hands over.
    */
   readonly reliefs?: HandoverReliefSource | undefined;
   /**
    * The terrain of the bodies handed over (plan R10, R10.T10.e), with their surveys' coverage
-   * masks, or absent, when a body handed over is drawn as a mesh body is, its figure whole. None
-   * until a view draws a body's terrain live.
+   * masks: the view's own from the terrain session (R10.T16.c, `LiveFrameTerrain`), or absent,
+   * when a body handed over is drawn as a mesh body is, its figure whole.
    */
   readonly terrain?: FrameTerrain | undefined;
 }
@@ -125,7 +118,8 @@ export function litLabelsOf(scene: ViewScene): ReadonlyArray<AppearanceLabel> {
 /**
  * A lit body of the scene as the frame lights it, with its rotation where it has one, its class
  * map where `classMaps` holds one, and its relief and survey's coverage mask where `terrain` holds
- * them.
+ * them and its rotation is known: a body whose rotation is not known is never handed over, its
+ * figure and disc standing (R10.T16.c; decision-r10-live-path, D5).
  */
 function litBodyOf(
   { body, centreM, frame }: LitBodyLighting,
@@ -140,7 +134,8 @@ function litBodyOf(
   };
   const photometry = body.appearance?.photometry ?? PROVISIONAL_PHOTOMETRY;
   const surface = classMaps?.classMapOf(id, photometry.law) ?? null;
-  const reliefM = terrain.reliefs?.reliefM(id) ?? null;
+  // Its terrain, mask and class map are drawn in its body-fixed axes, so it hands over only with them.
+  const reliefM = body.rotation === null ? null : (terrain.reliefs?.reliefM(id) ?? null);
   const coverage = terrain.terrain?.surveyCoverage(id) ?? null;
   return {
     id,
@@ -172,7 +167,8 @@ function litBodyOf(
  * its class map with `elsewhere` alone.
  *
  * Each body takes its relief from `terrain.reliefs`, by which it hands over to terrain, and the
- * coverage mask of its survey from the terrain the view draws (plan R10, R10.T10.e).
+ * coverage mask of its survey from the terrain the view draws (plan R10, R10.T10.e), both only
+ * with its rotation (R10.T16.c).
  *
  * @param discs - The scene's host discs (`sceneHostDiscs`).
  * @param classMaps - The bodies' class maps; absent, every disc is uniform.
@@ -247,8 +243,9 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
       reliefs: inputs.reliefs,
       terrain: inputs.terrain,
     }),
-    // R10's terrain, where the view draws it; lit craft will add theirs.
-    depthWriters: inputs.terrainFootprints ?? [],
+    // A body handed over to terrain writes depth as a mesh does (`drawnAsMesh`), its footprint
+    // counted by its regime (R10.T16.c); lit craft will add theirs.
+    depthWriters: [],
     previousRegimes: inputs.previousRegimes,
     terrain: inputs.terrain,
     overlay: inputs.overlay,

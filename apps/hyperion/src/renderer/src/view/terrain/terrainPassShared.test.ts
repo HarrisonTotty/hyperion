@@ -17,6 +17,7 @@ import type { MemoryCategory } from "../engine/memory";
 import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
 import { TERRAIN_SETTINGS } from "../quality/qualitySetting";
 import { TERRAIN_NOT_AVAILABLE } from "./annunciation";
+import { vertexDir } from "./cube";
 import { allocationTally } from "./gpu/allocationTally";
 import { INSTANCE_RECORD_BYTES } from "./gpu/uniforms";
 import { craftContact, datumGroundUnder, finestPatchSizeM } from "./grounded";
@@ -25,7 +26,7 @@ import { type PlanetGeometry, planetGeometry } from "./planet";
 import { PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
 import { type PatchRequest, type SelectionInput, selectPatches } from "./select";
 import { RESELECT_MOVE_FRACTION } from "./selectionTolerance";
-import type { TerrainLighting } from "./terrainMaterial";
+import { terrainDepthMaterialSpec, type TerrainLighting } from "./terrainMaterial";
 import {
   morphRangeM,
   TerrainPass,
@@ -799,4 +800,56 @@ describe("the shared pass's releases (R10.T16.b; decision-r10-t16-contracts §1)
       expect(CATEGORIES.map((c) => tally.liveBytes(c))).toEqual(bytes);
     },
   );
+});
+
+describe("the shared pass for a view's frame (R10.T16.c)", () => {
+  it("compiles a lit pass's depth material for the symbology, and none for the spike's shading", async () => {
+    const lit = await sharedPass("low", { source: BODY });
+    const spike = await sharedPass("low");
+    expect([lit.pass.symbologyDepthMaterial?.name, spike.pass.symbologyDepthMaterial]).toEqual([
+      terrainDepthMaterialSpec(lit.pass.layout.vertexPath).name,
+      null,
+    ]);
+  });
+
+  it("says a view's mask is ready only as its draw does: nothing it sees missing, its draw made", async () => {
+    const made = await sharedPass("low", { source: BODY });
+    made.lane().layers = layers();
+    const view = northPole(2_000_000);
+    made.pass.step({ views: [passView(PRIMARY, view)], grounded: [] });
+    // Before any bake lands every patch the view sees is missing.
+    const missing = [
+      made.pass.maskReadyFor(PRIMARY),
+      made.pass.drawFor(PRIMARY, frameOf(view, 0, LIGHTING)).maskReady,
+    ];
+    stream(made, [passView(PRIMARY, view)], 6);
+    const ready = [
+      made.pass.maskReadyFor(PRIMARY),
+      made.pass.drawFor(PRIMARY, frameOf(view, 16, LIGHTING)).maskReady,
+    ];
+    expect([missing, ready, made.pass.maskReadyFor(INSTRUMENT)]).toEqual([
+      [false, false],
+      [true, true],
+      false,
+    ]);
+  });
+
+  it("keeps the heights of its resident bakes that hold the edge, and forgets them at a restore", async () => {
+    const made = await sharedPass("low", { source: BODY });
+    const edge = layers();
+    // One vertex outside the survey: the bake's mask holds the edge.
+    edge.surveyMask[0] = 0;
+    made.lane().layers = edge;
+    const view = northPole(2_000_000);
+    stream(made, [passView(PRIMARY, view)], 2);
+    const drawn = made.pass.lastStep?.drawSet.patches[0]?.patch.key;
+    if (drawn === undefined) {
+      throw new Error("the pass drew no patch");
+    }
+    const [x, y, z] = vertexDir(drawn, 32, 32);
+    const at = vec3(x, y, z);
+    const before = made.pass.heights.rimHeightAtM(at);
+    made.engine.restore();
+    expect([before, made.pass.heights.rimHeightAtM(at)]).toEqual([0, null]);
+  });
 });

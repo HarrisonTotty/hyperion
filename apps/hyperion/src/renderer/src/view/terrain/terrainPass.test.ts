@@ -36,6 +36,7 @@ import { createAirlessTables } from "../atmosphere/surfaceLighting";
 import {
   packTerrainLighting,
   type TerrainLighting,
+  terrainDepthMaterialSpec,
   terrainLitMaterialSpec,
 } from "./terrainMaterial";
 import {
@@ -1225,6 +1226,7 @@ describe("the terrain materials' storage bindings by stage (decision-r10-t10b-r0
   const materials = (["baked-offsets", "face-differences"] as const).flatMap((path) => [
     terrainMaterialSpec(path),
     terrainLitMaterialSpec(path),
+    terrainDepthMaterialSpec(path),
   ]);
 
   it("count at most WebGPU's default eight storage buffers in each stage, by their declared stages", () => {

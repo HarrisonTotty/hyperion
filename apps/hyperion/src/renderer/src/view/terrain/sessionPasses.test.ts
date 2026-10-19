@@ -9,7 +9,7 @@ import type { BodyIdHex, DetailSeedHex, UniverseIdHex } from "@hyperion/protocol
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { vec3 } from "../../geometry/vec3";
+import { add, normalise, scale, vec3 } from "../../geometry/vec3";
 import { type ServerLink, useServerLink } from "../../lib/serverLink";
 import {
   answerBlock,
@@ -27,21 +27,31 @@ import { FakeWebSocket } from "../../test/FakeWebSocket";
 import { ScriptedHeightWorker } from "../../test/scriptedHeightWorker";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import {
+  SESSION_FOV_X_RAD,
   SESSION_MOON,
   SESSION_MOON_RADIUS_M,
+  SESSION_PRESENTED,
   SESSION_SCENE,
   viewAt,
 } from "../../test/terrainSessionFixtures";
 import { aViewCraft, NO_TURN } from "../../test/viewFixtures";
+import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
 import { lawFor } from "../appearance/phase";
-import { viewId } from "../camera/state";
+import { type BodyFramePlan, type LitBodyInput, planLitBodies } from "../bodies/draw";
+import { type ViewId, viewId } from "../camera/state";
 import { IDENTITY_ROTATION } from "../coords/rotation";
 import type { MemoryCategory } from "../engine/memory";
+import { DISC_ANNULI_HIGH } from "../lighting/annuli";
+import { sunLikeHostDisc } from "../lighting/hostDisc";
+import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
+import { AU_M } from "../scenes/kept";
 import type { ViewBody, ViewScene } from "../scene/model";
 import { TERRAIN_NOT_AVAILABLE } from "./annunciation";
 import { fieldCellIndex } from "./coverage";
+import { LiveFrameTerrain } from "./frameTerrain";
 import { allocationTally } from "./gpu/allocationTally";
 import { datumGroundUnder } from "./grounded";
+import { limbDistanceM, pixelAngleRad } from "./handover";
 import { childKeys, type PatchKey, patchKeyString } from "./patchKey";
 import { useTerrainFaults } from "../../displays/view/useTerrainSession";
 import { type TerrainViewReport, sceneContacts, TerrainSession } from "./session";
@@ -633,5 +643,111 @@ describe("the scene's craft as a pass's contacts (R10.T16.b; R05 Design note 9)"
       (p) => p.forced,
     );
     expect(forced.length).toBeGreaterThan(0);
+  });
+});
+
+/** A 1080p camera across 60°, looking along −z, as `viewAt`'s views do. */
+const FRAME_CAMERA = { orientation: NO_TURN, fovXRad: SESSION_FOV_X_RAD };
+
+/** The moon 5,000 km ahead of a view, handed over in its plan, and the plan, under a Sun. */
+function moonPlan(): { readonly plan: BodyFramePlan; readonly body: LitBodyInput } {
+  const a = SESSION_MOON_RADIUS_M;
+  const distanceM = 5e6;
+  const body: LitBodyInput = {
+    id: MOON,
+    centreM: vec3(0, 0, -distanceM),
+    figure: { equatorialRadiusM: a, polarRadiusM: a, pole: vec3(0, 0, 1) },
+    photometry: PROVISIONAL_PHOTOMETRY,
+    rotation: IDENTITY_ROTATION,
+    handoverReliefM:
+      4 * limbDistanceM(distanceM, a) * pixelAngleRad(FRAME_CAMERA, SESSION_PRESENTED),
+    lighting: undefined,
+  };
+  const plan = planLitBodies(
+    [body],
+    [
+      {
+        disc: sunLikeHostDisc(),
+        centreM: add(body.centreM, scale(normalise(vec3(0.3, 0.2, 1)), AU_M)),
+      },
+    ],
+    {
+      camera: FRAME_CAMERA,
+      viewport: SESSION_PRESENTED,
+      exposureScale: 1e-5,
+      annuli: DISC_ANNULI_HIGH,
+      planetshine: PLANETSHINE_SOURCES_HIGH,
+      setting: "high",
+    },
+    new Map(),
+  );
+  if (plan.meshes[0]?.role.kind !== "handed-over") {
+    throw new Error("the moon was not handed over");
+  }
+  return { plan, body };
+}
+
+/** View `view`'s frame terrain of the session's passes. */
+function frameTerrainOf(h: Harness, view: ViewId, nowMs = 0): LiveFrameTerrain {
+  return new LiveFrameTerrain(h.session, {
+    view,
+    camera: FRAME_CAMERA,
+    presentedPx: SESSION_PRESENTED,
+    exposureScale: 1e-5,
+    occluderSlopePx: 3,
+    nowMs,
+  });
+}
+
+/** Steps the session and answers the bakes asked, `rounds` times. */
+async function streamBakes(h: Harness, rounds: number): Promise<void> {
+  for (let n = 0; n < rounds; n += 1) {
+    h.session.step();
+    answerBakes(h, new Set([0, 1]), new Map());
+    // oxlint-disable-next-line no-await-in-loop
+    await settle();
+  }
+  h.session.step();
+}
+
+describe("each view's frame terrain through the session (R10.T16.c)", () => {
+  it("draws a body's terrain in the view that hands it over, and in another only once it hands it over too", async () => {
+    const h = await harness();
+    await handedOver(h);
+    h.session.noteView(INSTRUMENT, notHanding(5e6));
+    await streamBakes(h, 4);
+    const { plan, body } = moonPlan();
+    const primary = frameTerrainOf(h, PRIMARY).draws(plan, [body]);
+    const instrumentBefore = frameTerrainOf(h, INSTRUMENT).draws(plan, [body]);
+    h.session.noteView(INSTRUMENT, handing(5e6, { streamPriority: "secondary" }));
+    await streamBakes(h, 2);
+    const instrumentAfter = frameTerrainOf(h, INSTRUMENT, 16).draws(plan, [body]);
+    expect([primary.length, instrumentBefore.length, instrumentAfter.length]).toEqual([1, 0, 1]);
+    // One pass draws both, each view through its own buffers.
+    expect(instrumentAfter[0]?.storageBuffers?.["instances"]?.name).toBe(
+      `terrain instances (${INSTRUMENT})`,
+    );
+  });
+
+  it("gives the body's mask to a view only once its draw set of the body has nothing missing", async () => {
+    const h = await harness();
+    await handedOver(h);
+    const beforeBakes = frameTerrainOf(h, PRIMARY).surveyCoverage(MOON);
+    await streamBakes(h, 4);
+    const afterBakes = frameTerrainOf(h, PRIMARY).surveyCoverage(MOON);
+    expect(h.session.coverageMask(MOON)).not.toBeNull();
+    expect([beforeBakes, afterBakes]).toEqual([null, h.session.coverageMask(MOON)]);
+  });
+
+  it("gives the terrain's depth for the symbology of each body it draws", async () => {
+    const h = await harness();
+    await handedOver(h);
+    await streamBakes(h, 4);
+    const { plan, body } = moonPlan();
+    const terrain = frameTerrainOf(h, PRIMARY);
+    terrain.draws(plan, [body]);
+    expect(terrain.symbologyDepth().map((draw) => draw.material.name)).toEqual([
+      h.session.pass(MOON)?.symbologyDepthMaterial?.name,
+    ]);
   });
 });

@@ -32,7 +32,7 @@ import { DISC_MATERIAL } from "../sky/disc";
 import { SKY_SPRITE_HDR_MATERIAL } from "../sky/spriteHdr";
 import { LIT_AGX_MATERIAL } from "../spike/litView";
 import { TERRAIN_MATERIALS } from "../terrain/gpu/material";
-import { TERRAIN_LIT_MATERIALS } from "../terrain/terrainMaterial";
+import { TERRAIN_DEPTH_MATERIALS, TERRAIN_LIT_MATERIALS } from "../terrain/terrainMaterial";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import { SUBGROUP_TWINS } from "./twins";
 import type { PointSplatSpec, WgslMaterialSpec, WgslPostProcessSpec } from "./types";
@@ -98,13 +98,15 @@ const ATMOSPHERE_VIEW_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 ];
 
 /**
- * R05.T11.b's terrain pass, one material per vertex path, T11.c's lit view's display pass, and
- * R10.T10.b's lit terrain, one material per vertex path.
+ * R05.T11.b's terrain pass, one material per vertex path, T11.c's lit view's display pass,
+ * R10.T10.b's lit terrain, one material per vertex path, and R10.T16.c's lit terrain as depth
+ * alone for the symbology's pass, one per vertex path.
  */
 const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   ...TERRAIN_MATERIALS,
   LIT_AGX_MATERIAL,
   ...TERRAIN_LIT_MATERIALS,
+  ...TERRAIN_DEPTH_MATERIALS,
 ].map((spec) => ({ kind: "material", spec }));
 
 /**

@@ -72,8 +72,8 @@ import { type Checks, halfTexels } from "./harness";
 import { moonLikeFixture, type WorkerFixture } from "../test/moonLikeFixture";
 import { MOON_LIKE } from "./litTerrain";
 
-/** The frames' size, pixels. */
-const VIEWPORT: Viewport = { widthPx: 64, heightPx: 48 };
+/** The frames' size, pixels (R10.T16.c's frame check takes it too). */
+export const VIEWPORT: Viewport = { widthPx: 64, heightPx: 48 };
 
 /** The frames' cache budget, 32 MiB: a few hundred lit slots. */
 const CACHE_BYTES = 2 ** 25;
@@ -82,7 +82,7 @@ const CACHE_BYTES = 2 ** 25;
 const WORKER_TIMEOUT_MS = 120_000;
 
 /** The pre-exposure the frames are drawn at. */
-const EXPOSURE = 1e-4;
+export const EXPOSURE = 1e-4;
 
 /**
  * The block: level 7 of face +y, i 46 to 49 and j 44 to 47. Columns 46 and 47 lie in the survey's
@@ -99,7 +99,7 @@ function blockKeys(): PatchKey[] {
 }
 
 /** The patch the camera stands over: the surveyed column next to the edge. */
-const OVER: PatchKey = { face: 1, level: 7, i: 47, j: 46 };
+export const OVER: PatchKey = { face: 1, level: 7, i: 47, j: 46 };
 
 /** The camera's height above that patch's origin, metres, and its depression, degrees. */
 const HEIGHT_M = 30_000;
@@ -182,12 +182,12 @@ async function bakeAcrossTheEdge(
 }
 
 /** A bake with every height on the datum: its own and morph heights and its origin's, 0. */
-function onTheDatum(bake: BakedPatch): BakedPatch {
+export function onTheDatum(bake: BakedPatch): BakedPatch {
   return { ...bake, heights: new Float32Array(bake.heights.length), originHeightM: 0 };
 }
 
 /** The camera, body-fixed, which the frame's axes are: its place, orientation and projection. */
-interface Pose {
+export interface Pose {
   /** From the body's centre, m. */
   readonly cameraM: Vec3;
   readonly camera: ProjectionCamera;
@@ -196,7 +196,11 @@ interface Pose {
 }
 
 /** The datum's point over vertex (x, y) of `key`, body-fixed m, and its normal there. */
-function datumAt(key: PatchKey, x: number, y: number): { readonly p: Vec3; readonly nu: Vec3 } {
+export function datumAt(
+  key: PatchKey,
+  x: number,
+  y: number,
+): { readonly p: Vec3; readonly nu: Vec3 } {
   const d = vertexDir(key, x, y);
   const [px, py, pz] = surfacePoint({ ...MOON_LIKE, pole: null }, d, 0);
   const [nx, ny, nz] = spheroidNormal({ ...MOON_LIKE, pole: null }, d);
@@ -216,7 +220,7 @@ function datumAt(key: PatchKey, x: number, y: number): { readonly p: Vec3; reado
  * of that row's edge across the view, and every pixel's centre a kilometre-scale distance from it.
  * The survey's edges along i, at j 44 and 48, lie outside the view on the ground nearer than i 48.
  */
-function poseOver(): Pose {
+export function poseOver(): Pose {
   const { p, nu } = datumAt(OVER, 32, 0);
   const cameraM = add(p, scale(nu, HEIGHT_M));
   // Face +y's u axis, along which i rises, is −x (`faceUvToXyz`): east here, made level.
@@ -406,7 +410,7 @@ function referenceDraws(
 }
 
 /** Draws `passes` in order into a fresh scene target from `pose` and reads it back. */
-async function drawn(
+export async function drawn(
   engine: RenderEngine,
   pose: Pose,
   passes: ReadonlyArray<{ readonly label: string; readonly draws: ReadonlyArray<DrawItem> }>,
@@ -436,7 +440,7 @@ async function drawn(
 }
 
 /** Whether pixel `p` of a read-back was drawn by a body: its meter class lit or unlit. */
-function bodyAt(texels: Float32Array, p: number): boolean {
+export function bodyAt(texels: Float32Array, p: number): boolean {
   const meter = texels[4 * p + 3];
   return meter === METER_CLASS.litBody || meter === METER_CLASS.unlitBody;
 }

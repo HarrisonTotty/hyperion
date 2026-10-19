@@ -11,8 +11,10 @@
  * exposure, which its label block says (`SOURCE PRIMARY`, Design note 11), and culls the sky for
  * its own camera. Its camera is reported to the server's scene while it is open, as the primary's
  * is, and what it drew to the stage's terrain session each frame it draws, its lit bodies taking
- * the session's class maps and reliefs (plan R10, R10.T16.a). Its readouts change at most four
- * times a second.
+ * the session's class maps and reliefs (plan R10, R10.T16.a), and its photorealistic frame the
+ * terrain of the bodies it hands over, drawn from its own camera at its own τ and weight through
+ * the same session, with the surveys' edges in either style and the terrain's annunciation on its
+ * label block (R10.T16.c). Its readouts change at most four times a second.
  */
 import {
   type RefObject,
@@ -49,6 +51,7 @@ import type { PhotorealStatus } from "../../view/photoreal/renderer";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
 import { cameraKinematics } from "../../view/scene/fromServer";
 import type { ViewStar } from "../../view/scene/model";
+import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
 import type { ClassMapSource } from "../../view/terrain/classMap";
 import type { HandoverReliefSource } from "../../view/terrain/handover";
 import type { TerrainSession } from "../../view/terrain/session";
@@ -94,6 +97,11 @@ export interface InstrumentShown {
   readonly drawnStyle: RenderStyle;
   /** Its photorealistic renderer's standing. */
   readonly photoreal: PhotorealStatus;
+  /**
+   * The terrain's annunciation of the bodies its last frame handed over (plan R10, R10.T16.c), its
+   * own, for its label block; `null` with none.
+   */
+  readonly terrain: TerrainAnnunciation | null;
 }
 
 /** One slot's standing, as the display renders it. */
@@ -276,6 +284,8 @@ interface SlotLoop {
   lastMs: number | null;
   anchors: ReadonlyArray<DrawAnchor>;
   drawnStyle: RenderStyle;
+  /** The terrain's annunciation of its last frame drawn (R10.T16.c). */
+  terrain: TerrainAnnunciation | null;
   /** The terrain session it last told what it drew, which forgets it when it goes; or `null`. */
   reportedTo: TerrainSession | null;
 }
@@ -323,6 +333,7 @@ function useSlotDrawer(
         lastMs: null,
         anchors: [],
         drawnStyle: "wireframe",
+        terrain: null,
         reportedTo: null,
       });
     });
@@ -477,7 +488,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           open: true,
           style: run.camera.style,
           selection: null,
-          shown: { run, anchors: [], drawnStyle: "wireframe", photoreal: "idle" },
+          shown: { run, anchors: [], drawnStyle: "wireframe", photoreal: "idle", terrain: null },
           refused: false,
         })),
       );
@@ -613,6 +624,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
       if (next.source.kind === "server") {
         each.reportCamera?.(instrumentViewId(slot), cameraKinematics(runPose(next), next.scene));
       }
+      const session = terrainRef.current;
       const frameInputs: ViewFrameInputs = {
         run: next,
         size: inputs.size,
@@ -630,13 +642,19 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         // The terrain session's, as the primary's frame read them (R10.T16.a).
         classMaps: each.classMaps ?? undefined,
         reliefs: each.reliefs ?? undefined,
+        // Its own terrain of the session's passes, from its own camera, and its survey edges
+        // (R10.T16.c).
+        terrain:
+          session === null
+            ? undefined
+            : { source: session, view: instrumentViewId(slot), nowMs: each.nowMs },
       };
       const drawn = loop.drawer.draw(frameInputs);
+      loop.terrain = drawn?.terrain ?? null;
       if (drawn !== null) {
         loop.anchors = drawn.anchors;
         loop.drawnStyle = drawn.drawnStyle;
         // What it drew, for the terrain session's next step (R10.T16.a).
-        const session = terrainRef.current;
         if (loop.reportedTo !== session) {
           forgetSlot(loop, slot);
           loop.reportedTo = session;
@@ -655,6 +673,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           anchors: loop.anchors,
           drawnStyle: loop.drawnStyle,
           photoreal: loop.drawer.photorealStatus,
+          terrain: loop.terrain,
         };
         setSlots((previous) =>
           withSlot(previous, slot, (state) =>
