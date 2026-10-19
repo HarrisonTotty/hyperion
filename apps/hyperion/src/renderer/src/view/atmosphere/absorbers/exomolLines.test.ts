@@ -1,24 +1,23 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
-import bakeSpectra from "../../../../../../../../packages/protocol/fixtures/bake_spectra.json" with { type: "json" };
 import { earthLikeColumn, planckBakeSpectrum } from "../../../test/atmosphereFixtures";
 import { inlinePart } from "../../../test/kDistributionFixtures";
+import {
+  cellMeansAt,
+  cellWeights,
+  largestChange,
+  RANGE_SUNS,
+  rangeCrossingK,
+  saturatedColumnPerM2,
+} from "../../../test/lineRanges";
 import {
   ABSORBER_TRANSMITTANCE_FLOOR,
   absorberCurve,
   absorberSpecs,
   type ColumnAbsorberSpec,
 } from "../absorbers";
-import { BAKE_RANGE_NM } from "../medium";
-import {
-  type BakeSpectrum,
-  bakeSpectrumAt,
-  bakeSpectrumOf,
-  matchingFunctionsAt,
-} from "../spectralColour";
 import merge from "./exomol/n2oMerge.json" with { type: "json" };
 import {
-  cellMeanSigma,
   committedLineSpecies,
   type KDistributionTable,
   kDistributionAt,
@@ -28,22 +27,6 @@ import {
 /** The committed sidecars' paths, R08.T4.d's directory and ExoMol's, as the loader globs them. */
 const HITRAN_SIDECARS = import.meta.glob("./kDistributions/*.json");
 const EXOMOL_SIDECARS = import.meta.glob("./exomol/kDistributions/*.json");
-
-/** The Sun: R06's `solar_colour()`, the 5,772 K main-sequence row of `bake_spectra.json`. */
-const THE_SUN: BakeSpectrum = (() => {
-  const row = bakeSpectra.suns.find((s) => s.teff_k === 5_772 && s.grid === "MainSequence");
-  if (row === undefined) {
-    throw new Error("bake_spectra.json holds no 5,772 K main-sequence sun");
-  }
-  return bakeSpectrumOf(row.bake_spectrum);
-})();
-
-/** T4.b's test suns: the Sun and the 2,500 K and 30,000 K Planck suns. */
-const SUNS: ReadonlyArray<readonly [string, BakeSpectrum]> = [
-  ["the Sun", THE_SUN],
-  ["a 2,500 K Planck sun", planckBakeSpectrum(2_500)],
-  ["a 30,000 K Planck sun", planckBakeSpectrum(30_000)],
-];
 
 /**
  * NH₃'s saturation pressure, Pa, below its triple point: N. Fray and B. Schmitt, Planet. Space
@@ -55,67 +38,12 @@ function ammoniaSaturationPa(temperatureK: number): number {
   return 1e5 * Math.exp(a.reduce((sum, ai, i) => sum + ai / temperatureK ** i, 0));
 }
 
-/** NH₃'s molecular mass, kg: 17.026 549 Da (its `def.json`, HITRAN's) × CODATA 2018's m_u. */
-const AMMONIA_MASS_KG = 17.026_549 * 1.660_539_066_6e-27;
+/** NH₃'s molecular mass, Da: 17.026 549 (its `def.json`, HITRAN's). */
+const AMMONIA_MASS_DA = 17.026_549;
 
-/**
- * The saturated column of a pure vapour over a grazing path, m⁻²: 40 p_sat ÷ (m g) at
- * g = 0.5 m s⁻² (`decision-r08-t4d-kdist.md` §3.1).
- */
-function saturatedColumnPerM2(temperatureK: number): number {
-  return (40 * ammoniaSaturationPa(temperatureK)) / (AMMONIA_MASS_KG * 0.5);
-}
-
-/** Each 1 nm cell's channel weights c̄_c S over 380–760 nm for a sun, by T4.b's weighting rule. */
-function cellWeights(sun: BakeSpectrum): ReadonlyArray<Float64Array> {
-  const [low, high] = BAKE_RANGE_NM;
-  const cells = high - low + 1;
-  const weights = [new Float64Array(cells), new Float64Array(cells), new Float64Array(cells)];
-  for (let c = 0; c < cells; c += 1) {
-    for (let j = 0; j < 20; j += 1) {
-      const nm = low + c - 0.5 + (j + 0.5) / 20;
-      const s = bakeSpectrumAt(sun, Math.min(Math.max(nm, low), high)) / 20;
-      const m = matchingFunctionsAt(Math.min(Math.max(nm, low), high));
-      for (const [k, row] of weights.entries()) {
-        row[c] = (row[c] ?? 0) + (m[k] ?? 0) * s;
-      }
-    }
-  }
-  return weights;
-}
-
-/**
- * R08.T10.a's Δ_c, the most a pending species' cells could move a channel's light, at k = 100
- * (follow-up 4, ruling 3): Σ |c̄_c| S min(1, k ⟨σ⟩ u) ÷ Σ c̄_c S, the largest over the channels.
- */
-function largestChange(
-  weights: ReadonlyArray<Float64Array>,
-  cellMeansM2: Float64Array,
-  columnPerM2: number,
-): number {
-  return Math.max(
-    ...weights.map((row) => {
-      let changed = 0;
-      let total = 0;
-      for (let c = 0; c < row.length; c += 1) {
-        const w = row[c] ?? 0;
-        changed += Math.abs(w) * Math.min(1, 100 * (cellMeansM2[c] ?? 0) * columnPerM2);
-        total += w;
-      }
-      return changed / total;
-    }),
-  );
-}
-
-/** A table's cell means at a temperature, m², on 380–760 nm, from its 10 Pa row. */
-function cellMeansAt(table: KDistributionTable, temperatureK: number): Float64Array {
-  const kd = kDistributionAt(table, temperatureK);
-  const out = new Float64Array(BAKE_RANGE_NM[1] - BAKE_RANGE_NM[0] + 1);
-  for (const cell of kd.cells) {
-    const g = cell.weights.length;
-    out[cell.cellNm - BAKE_RANGE_NM[0]] = cellMeanSigma(cell.weights, cell.sigmas.slice(0, g));
-  }
-  return out;
+/** NH₃'s saturated column over a grazing path, m⁻² ({@link saturatedColumnPerM2}). */
+function ammoniaColumnPerM2(temperatureK: number): number {
+  return saturatedColumnPerM2(ammoniaSaturationPa(temperatureK), AMMONIA_MASS_DA);
 }
 
 let ammonia: KDistributionTable | undefined;
@@ -137,9 +65,9 @@ describe("NH₃'s table from C2018 (R08.T4.g)", () => {
   it("starts where a pure vapour's saturated column is negligible, Δ_c under 10⁻³ at k = 100", () => {
     const table = loaded(ammonia);
     const first = table.temperaturesK[0] ?? Number.NaN;
-    for (const [, sun] of SUNS) {
+    for (const [, sun] of RANGE_SUNS) {
       expect(
-        largestChange(cellWeights(sun), cellMeansAt(table, first), saturatedColumnPerM2(first)),
+        largestChange(cellWeights(sun), cellMeansAt(table, first), ammoniaColumnPerM2(first)),
       ).toBeLessThan(1e-3);
     }
   });
@@ -149,22 +77,11 @@ describe("NH₃'s table from C2018 (R08.T4.g)", () => {
     // within the first 50 K: the plan records it (103.9 K, the least over the three suns).
     const table = loaded(ammonia);
     const first = table.temperaturesK[0] ?? Number.NaN;
-    const crossings = SUNS.map(([, sun]) => {
-      const weights = cellWeights(sun);
-      let lo = first;
-      let hi = table.temperaturesK.at(-1) ?? Number.NaN;
-      // 20 halvings of the 200 K bracket: 2 × 10⁻⁴ K.
-      for (let k = 0; k < 20; k += 1) {
-        const mid = 0.5 * (lo + hi);
-        if (largestChange(weights, cellMeansAt(table, mid), saturatedColumnPerM2(mid)) < 1e-3) {
-          lo = mid;
-        } else {
-          hi = mid;
-        }
-      }
-      return lo;
-    });
-    const least = Math.min(...crossings);
+    const least = Math.min(
+      ...RANGE_SUNS.map(([, sun]) =>
+        rangeCrossingK(table, sun, ammoniaSaturationPa, AMMONIA_MASS_DA),
+      ),
+    );
     expect([least > first, least < first + 50]).toEqual([true, true]);
   }, 60_000);
 

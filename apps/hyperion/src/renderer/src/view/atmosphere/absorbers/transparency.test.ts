@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ABSORBER_CROSS_SECTIONS } from "../absorbers";
+import atomicBounds from "./atomicBounds.json" with { type: "json" };
 import exomolBounds from "./exomol/bounds.json" with { type: "json" };
 import { committedLineSpecies } from "./kDistribution";
 import {
@@ -25,12 +26,27 @@ function pendingBound(key: string): AbsorberBound | undefined {
 }
 
 describe("the stated transparency", () => {
-  it("names He below 5,000 K, N₂ below 1,800 K and e⁻ at every temperature, and nothing else", () => {
+  it("names He below 5,000 K, N₂ below 1,800 K, e⁻ at every temperature and seven ions by their lines' share, and nothing else", () => {
     expect(NO_VISIBLE_ABSORPTION.map((n) => [n.species, n.reason, n.belowK])).toEqual([
       ["He", "bandsOutsideRange", 5_000],
       ["N2", "bandsOutsideRange", 1_800],
       ["e-", "noBoundStates", undefined],
+      ["Na+", "underEquivalentWidthBound", 5_000],
+      ["Mg+", "underEquivalentWidthBound", 4_600],
+      ["Al+", "underEquivalentWidthBound", 5_000],
+      ["Si+", "underEquivalentWidthBound", 4_600],
+      ["K+", "underEquivalentWidthBound", 5_000],
+      ["Ni+", "underEquivalentWidthBound", 4_600],
+      ["Zn+", "underEquivalentWidthBound", 5_000],
     ]);
+  });
+
+  it("pends each ion stated none by its lines' share from its own limit, in atomicBounds.json", () => {
+    const atomic = readAbsorberBounds(atomicBounds, "atomicBounds.json");
+    const byShare = NO_VISIBLE_ABSORPTION.filter((n) => n.reason === "underEquivalentWidthBound");
+    expect(
+      byShare.map((n) => [n.species, atomic.find((b) => b.key === n.species)?.temperaturesK[0]]),
+    ).toEqual(byShare.map((n) => [n.species, n.belowK]));
   });
 
   it("holds below a species' limit and not above it", () => {
@@ -163,6 +179,31 @@ describe("the pending absorbers", () => {
     for (const bound of readAbsorberBounds(exomolBounds, "exomol/bounds.json")) {
       expect(bound.source).toMatch(/^ExoMol line list/u);
     }
+  });
+});
+
+/**
+ * Every JSON file under `absorbers/`, as text (`?raw`): the bounds files, the k-distribution
+ * sidecars and the reference tables.
+ */
+const ABSORBER_JSON = import.meta.glob<string>("./**/*.json", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+});
+
+describe("the absorbers' JSON files (R08.T4.h)", () => {
+  // The 500 kB hook checks only the files a commit adds, so a file that grows passes it unseen.
+  it("are found, the three bounds files among them", () => {
+    expect(
+      ["./bounds.json", "./atomicBounds.json", "./exomol/bounds.json"].filter(
+        (file) => ABSORBER_JSON[file] === undefined,
+      ),
+    ).toEqual([]);
+  });
+
+  it.each(Object.entries(ABSORBER_JSON))("keep %s under 500,000 bytes", (_, text) => {
+    expect(new TextEncoder().encode(text).length).toBeLessThan(500_000);
   });
 });
 

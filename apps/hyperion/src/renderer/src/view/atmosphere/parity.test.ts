@@ -96,18 +96,60 @@ describe("the registry's Rayleigh rows (decision-composition §1.9)", () => {
   });
 });
 
+/** The keys among those given with none of condition 2's answers. */
+function unanswered(keys: ReadonlyArray<string>): ReadonlyArray<string> {
+  const tables = committedLineSpecies();
+  return keys.filter(
+    (key) =>
+      !hasCrossSections(key) &&
+      !tables.includes(key) &&
+      !isPendingWithCellMeans(key) &&
+      !isStatedNone(key),
+  );
+}
+
 describe("the registry's absorbers", () => {
   it("each have cross-sections, a line table, a pending entry with its cell means, or a stated none", () => {
     const keys = flagged("absorber");
-    const tables = committedLineSpecies();
-    const unaccounted = keys.filter(
-      (key) =>
-        !hasCrossSections(key) &&
-        !tables.includes(key) &&
-        !isPendingWithCellMeans(key) &&
-        !isStatedNone(key),
-    );
-    expect([keys.length > 0, unaccounted]).toEqual([true, []]);
+    expect([keys.length > 0, unanswered(keys)]).toEqual([true, []]);
+  });
+});
+
+/**
+ * The fifteen rows P14.T49.b appended with `absorber: false` (R08.T19's known gaps), whose flags
+ * P14.T54.a's bump turns on once each is answered.
+ *
+ * @remarks
+ * R08.T4.h answered each: interim pending entries with their cell means for Al, V, Mn, Ni, Zn, V⁺,
+ * Cr⁺ and Mn⁺; stated nones by their lines' share for Na⁺, Al⁺, Si⁺, K⁺, Ni⁺ and Zn⁺; HCl's
+ * HITRAN2024 answer. This test may go once the fixture flags them, when the check above holds
+ * them. The fixture is the sim's, written by its test: this test never edits it.
+ */
+const AWAITING_THEIR_FLAG = [
+  "Al",
+  "V",
+  "Mn",
+  "Ni",
+  "Zn",
+  "HCl",
+  "Na+",
+  "Al+",
+  "Si+",
+  "K+",
+  "V+",
+  "Cr+",
+  "Mn+",
+  "Ni+",
+  "Zn+",
+] as const;
+
+describe("the fifteen rows awaiting their absorber flag (R08.T4.h)", () => {
+  it("are rows of the fixture", () => {
+    expect(AWAITING_THEIR_FLAG.filter((key) => !ROWS.some((row) => row.key === key))).toEqual([]);
+  });
+
+  it("each have condition 2's answer already, so that P14.T54.a's flags pass", () => {
+    expect(unanswered(AWAITING_THEIR_FLAG)).toEqual([]);
   });
 });
 

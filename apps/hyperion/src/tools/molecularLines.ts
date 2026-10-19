@@ -102,7 +102,7 @@ export interface Isotopologue {
  * The isotopologues whose lines R08.T4.d reduces, with HITRAN's molar masses
  * (https://hitran.org/docs/iso-meta/, fetched 2026-10-12, SHA-256 `6a687905…965d4`): every
  * isotopologue with a line over 13,100–26,400 cm⁻¹ in HITRAN2024 for H₂O, CO₂, O₂, CO, N₂O, HCN
- * and H₂.
+ * and H₂, and HCl's four (R08.T4.h; the page fetched again 2026-10-19, unchanged).
  */
 export const ISOTOPOLOGUES: ReadonlyArray<Isotopologue> = [
   { id: 1, molecule: 1, local: 1, formula: "H2(16O)", molarMassGPerMol: 18.010_565 },
@@ -117,6 +117,10 @@ export const ISOTOPOLOGUES: ReadonlyArray<Isotopologue> = [
   { id: 36, molecule: 7, local: 1, formula: "(16O)2", molarMassGPerMol: 31.98983 },
   { id: 37, molecule: 7, local: 2, formula: "(16O)(18O)", molarMassGPerMol: 33.994_076 },
   { id: 38, molecule: 7, local: 3, formula: "(16O)(17O)", molarMassGPerMol: 32.994_045 },
+  { id: 52, molecule: 15, local: 1, formula: "H(35Cl)", molarMassGPerMol: 35.976_678 },
+  { id: 53, molecule: 15, local: 2, formula: "H(37Cl)", molarMassGPerMol: 37.973_729 },
+  { id: 107, molecule: 15, local: 3, formula: "D(35Cl)", molarMassGPerMol: 36.982_853 },
+  { id: 108, molecule: 15, local: 4, formula: "D(37Cl)", molarMassGPerMol: 38.979_904 },
   { id: 70, molecule: 23, local: 1, formula: "H(12C)(14N)", molarMassGPerMol: 27.010_899 },
   { id: 103, molecule: 45, local: 1, formula: "H2", molarMassGPerMol: 2.01565 },
   { id: 115, molecule: 45, local: 2, formula: "HD", molarMassGPerMol: 3.021_825 },
@@ -278,6 +282,44 @@ export function parseHitranLines(text: string): LineList {
     }
   }
   return list;
+}
+
+/**
+ * The lines of a list whose wavenumber is below a limit, or at or above it, in the list's order:
+ * a species' table takes one side and its overtones part the other (HCl, R08.T4.h).
+ */
+export function linesBeyond(list: LineList, limitPerCm: number, side: "below" | "above"): LineList {
+  const keep = Array.from(list.wavenumbersPerCm, (nu, i) =>
+    (side === "below" ? nu < limitPerCm : nu >= limitPerCm) ? i : -1,
+  ).filter((i) => i >= 0);
+  const pick = <A extends Float64Array | Uint16Array>(from: A, make: (n: number) => A): A => {
+    const out = make(keep.length);
+    for (const [j, i] of keep.entries()) {
+      out[j] = from[i] ?? Number.NaN;
+    }
+    return out;
+  };
+  const f64 = (from: Float64Array): Float64Array => pick(from, (n) => new Float64Array(n));
+  const foreign = (
+    of: Readonly<Record<(typeof FOREIGN_BROADENERS)[number], Float64Array>>,
+  ): Record<(typeof FOREIGN_BROADENERS)[number], Float64Array> => ({
+    H2: f64(of.H2),
+    He: f64(of.He),
+    CO2: f64(of.CO2),
+    H2O: f64(of.H2O),
+  });
+  return {
+    isotopologues: pick(list.isotopologues, (n) => new Uint16Array(n)),
+    wavenumbersPerCm: f64(list.wavenumbersPerCm),
+    intensitiesCm: f64(list.intensitiesCm),
+    lowerEnergiesPerCm: f64(list.lowerEnergiesPerCm),
+    airHalfWidthsPerCmAtm: f64(list.airHalfWidthsPerCmAtm),
+    airExponents: f64(list.airExponents),
+    selfHalfWidthsPerCmAtm: f64(list.selfHalfWidthsPerCmAtm),
+    foreignHalfWidthsPerCmAtm: foreign(list.foreignHalfWidthsPerCmAtm),
+    selfExponents: f64(list.selfExponents),
+    foreignExponents: foreign(list.foreignExponents),
+  };
 }
 
 /** One band of an overtone-ladder estimate: its anchor's lines and where they are moved. */

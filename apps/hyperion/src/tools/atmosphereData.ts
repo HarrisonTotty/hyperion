@@ -50,6 +50,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
+import { runAtomicBounds, runAtomicShares } from "./atomicLinesCli";
 import {
   runExomolBands,
   runExomolBins,
@@ -57,6 +58,7 @@ import {
   runExomolKDistributions,
   runExomolKDistributionsMerge,
 } from "./exomolCli";
+import { runHclOvertones } from "./hclOvertones";
 import { broadeningRatios } from "./kDistributions";
 import { LINE_SOURCES, runKDistributions, runKDistributionsMerge } from "./kDistributionsCli";
 import { runBackgroundError, runCellReferences, runEarthReference } from "./lineReferences";
@@ -1727,7 +1729,11 @@ const USAGE =
   "       atmosphereData exomol-k-distributions-merge --species NH3|N2O --cache <dir> " +
   "--out-dir <dir> [--hitran-par <file> --record <json>] <partial.json>...\n" +
   "       atmosphereData exomol-cell-references --species NH3|N2O --cache <dir> " +
-  "[--hitran-lines <csv> --tips <dir>] --table <sidecar.json> --cells <nm,...> --out <json>";
+  "[--hitran-lines <csv> --tips <dir>] --table <sidecar.json> --cells <nm,...> --out <json>\n" +
+  "       atmosphereData atomic-shares --kurucz <dir> --barklem <dir> [--asd-zn2 <csv>] " +
+  "[--stages <key,...>] [--out <json>]\n" +
+  "       atmosphereData atomic-bounds --kurucz <dir> --barklem <dir> --asd-zn2 <csv> [--out <json>]\n" +
+  "       atmosphereData hcl-overtones --lines <hcl-13100-26400-broad.csv> --tips <dir> [--bounds <json>]";
 
 /** `matching`: writes `colourMatching.json`. */
 function runMatching(rest: readonly string[]): void {
@@ -1949,6 +1955,12 @@ export function main(args: readonly string[]): number | Promise<number> {
       runCellReferences(rest);
     } else if (command === "background-error") {
       runBackgroundError(rest);
+    } else if (command === "atomic-shares") {
+      runAtomicShares(rest);
+    } else if (command === "atomic-bounds") {
+      runAtomicBounds(rest);
+    } else if (command === "hcl-overtones") {
+      runHclOvertones(rest);
     } else {
       throw new Error(USAGE);
     }

@@ -329,11 +329,22 @@ ruled 2026-10-09 and 2026-10-10).
   apps/hyperion/src/renderer/src/view/atmosphere/absorbers/heliumMinus.ts (plan R08, R08.T4.c).
 
 - Atomic line data: R. L. Kurucz, atomic line lists, http://kurucz.harvard.edu/linelists/gfall/
-  (the files named in each value's source, fetched 2026-10-11; R. L. Kurucz, "Including all the
-  lines", Can. J. Phys. 89 (2011) 417). The bounds of the atoms and ions in
-  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/bounds.json are computed from them (plan
-  R08, R08.T4.c), with P. S. Barklem and R. Collet's partition functions, Astron. Astrophys. 588
-  (2016) A96, via CDS VizieR (DOI: 10.26093/cds/vizier), catalogue J/A+A/588/A96. The forbidden
+  (the files named in each value's source, fetched 2026-10-11, and 2026-10-16 and 2026-10-19; R. L.
+  Kurucz, "Including all the lines", Can. J. Phys. 89 (2011) 417, DOI: 10.1139/p10-104). The bounds
+  of the atoms and ions in apps/hyperion/src/renderer/src/view/atmosphere/absorbers/bounds.json
+  (plan R08, R08.T4.c) and atomicBounds.json (plan R08, R08.T4.h) are computed from them, with
+  P. S. Barklem and R. Collet's partition functions, Astron. Astrophys. 588 (2016) A96, via CDS
+  VizieR (DOI: 10.26093/cds/vizier), catalogue J/A+A/588/A96, whose ionisation energies and H2
+  equilibrium constant and dissociation energy, with M. Asplund, N. Grevesse, A. J. Sauval and P. Scott's solar
+  abundances, Annu. Rev. Astron. Astrophys. 47 (2009) 481 (Table 1, in
+  apps/hyperion/src/tools/atomicLines.ts), also give the reference columns of R08.T4.h's stated
+  nones. Zn II's lines, which Kurucz's list lacks in the range, are the transitions NIST's Atomic
+  Spectra Database v5.12 lists (as below), at W. C. Martin and V. Kaufman's levels, J. Res. Natl.
+  Bur. Stand. 74A (1970) 11, with D. K. Nandy and B. K. Sahoo's computed transition probabilities,
+  Mon. Not. R. Astron. Soc. 447 (2015) 3812, and R. Kisielius et al.'s computed line strength,
+  Astrophys. J. 804 (2015) 76; seven lines' transition probabilities are ASD's values (a stated
+  exception, their primary paper, R. Mayo, M. Ortiz and J. Campos, Eur. Phys. J. D 37 (2006) 181,
+  being closed). The forbidden
   [Fe II] lines Kurucz lacks are N. C. Deb and A. Hibbert's, "Radiative transition rates for the
   forbidden lines in Fe II", Astron. Astrophys. 536 (2011) A74, DOI: 10.1051/0004-6361/201118059,
   via CDS VizieR, catalogue J/A+A/536/A74 (fetched 2026-10-11); the forbidden
@@ -360,7 +371,8 @@ ruled 2026-10-09 and 2026-10-10).
   R08.T4.d); the tables themselves are not committed.
 
 - Molecular lines' k-distributions, reduced from the HITRAN2024 line lists (I. E. Gordon et al.,
-  as above; https://hitran.org/lbl/, fetched 2026-10-12) of O2, H2O, CO2, CO, HCN and H2, and
+  as above; https://hitran.org/lbl/, fetched 2026-10-12) of O2, H2O, CO2, CO, HCN and H2, and of
+  HCl (fetched 2026-10-19; R08.T4.h), and
   from the anchor bands of the stated overtone-ladder estimates of C2H2, C2H4, C2H6, CH3OH and PH3,
   with HITRAN's partition sums (TIPS; R. R. Gamache et al., J. Quant. Spectrosc. Radiat. Transfer
   271 (2021) 107713, DOI: 10.1016/j.jqsrt.2021.107713), to 16-bit k-distributions per 1 nm cell in
@@ -383,7 +395,8 @@ ruled 2026-10-09 and 2026-10-10).
 
 - Cross-sections of the pending molecules (1 nm cell means), derived from the HITRAN2024 line
   lists (I. E. Gordon et al., as above; https://hitran.org), with the stated overtone-ladder and
-  band-model estimates, in apps/hyperion/src/renderer/src/view/atmosphere/absorbers/bounds.json.
+  band-model estimates, in apps/hyperion/src/renderer/src/view/atmosphere/absorbers/bounds.json,
+  HCl's 8-0 band and its overtone-ladder estimate among them (R08.T4.h).
 
 - Cross-sections of the pending absorbers, and NH3's and N2O's k-distributions, derived from the
   ExoMol database (J. Tennyson et al., the ExoMol database and the line lists each file names,

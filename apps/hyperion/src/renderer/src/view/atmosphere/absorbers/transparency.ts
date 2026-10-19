@@ -19,11 +19,14 @@
  *   Δ_c ≤ 10⁻³ in every channel. T4.c records the cell means; T10.a applies them.
  *
  * The values are reduced, with their citations: HITRAN's, Kurucz's and the overtone-ladder
- * estimates in `bounds.json`, and ExoMol's, adapted material under CC BY-SA 4.0, in
- * `exomol/bounds.json` with its licence note (decision-composition §5).
+ * estimates in `bounds.json`; the atoms and ions R08.T4.h adds, from Kurucz's lists and, for Zn⁺,
+ * NIST ASD's Zn II lines, in `atomicBounds.json` (written by `src/tools/atomicLinesCli.ts`'s
+ * `atomic-bounds`), so that neither file nears the 500 kB hook; and ExoMol's, adapted material
+ * under CC BY-SA 4.0, in `exomol/bounds.json` with its licence note (decision-composition §5).
  */
 
 import { BAKE_RANGE_NM } from "../medium";
+import atomicBounds from "./atomicBounds.json" with { type: "json" };
 import bounds from "./bounds.json" with { type: "json" };
 import exomolBounds from "./exomol/bounds.json" with { type: "json" };
 
@@ -38,8 +41,15 @@ import exomolBounds from "./exomol/bounds.json" with { type: "json" };
  *   10³ km-amagat. No species holds it as built (follow-up 3); it stays for later rows.
  * - `noBoundStates`: a free particle, with no lines; its optics are other terms' (e⁻'s Thomson
  *   scattering and its free–free pairs).
+ * - `underEquivalentWidthBound`: an atom or ion whose catalogued lines in the range take under
+ *   10⁻³ of every bake bin's light, a summed equivalent width under 0.0253 nm in each 25.33 nm bin,
+ *   at its reference column (R08.T4.h, the third reason; science-r08-unowned-absorbers §2.2): the
+ *   stage's vertical column above 0.1 bar at g = 10 m s⁻², doubled for the mean slant path, at
+ *   solar abundances with every atom of the element free, its stages in Saha equilibrium, taken at
+ *   2,000–5,000 K (`src/tools/atomicLines.ts`'s `referenceColumnPerM2` and `stageBinShares`).
  */
-export type TransparencyReason = "bandsOutsideRange" | "underOvertoneBound" | "noBoundStates";
+export type TransparencyReason =
+  "bandsOutsideRange" | "underOvertoneBound" | "noBoundStates" | "underEquivalentWidthBound";
 
 /** A species stated to have nothing to draw over the bake range, with its evidence. */
 export interface TransparentSpecies {
@@ -211,12 +221,29 @@ export function readAbsorberBounds(
 
 /**
  * Every pending absorber's cell means: `bounds.json`'s (HITRAN2024, Kurucz's line lists and the
- * stated estimates) and `exomol/bounds.json`'s (ExoMol, CC BY-SA 4.0).
+ * stated estimates), `atomicBounds.json`'s (R08.T4.h's atoms and ions: Kurucz's line lists and,
+ * for Zn⁺, NIST ASD's Zn II lines) and `exomol/bounds.json`'s (ExoMol, CC BY-SA 4.0).
  */
 export const ABSORBER_BOUNDS: ReadonlyArray<AbsorberBound> = [
   ...readAbsorberBounds(bounds, "bounds.json"),
+  ...readAbsorberBounds(atomicBounds, "atomicBounds.json"),
   ...readAbsorberBounds(exomolBounds, "exomol/bounds.json"),
 ];
+
+/**
+ * How the third reason's shares are taken (R08.T4.h; science-r08-unowned-absorbers §2.2, ruled
+ * 2026-10-19), which each such statement's evidence cites.
+ */
+const EQUIVALENT_WIDTH_METHOD =
+  "the third reason's sums (src/tools/atomicLinesCli.ts's atomic-shares: each bake bin's share " +
+  "of the light the lines' Voigt equivalent widths take, Humlicek 1982, with Doppler broadening " +
+  "and 1 km/s of microturbulence, classical damping and twice Unsold's van der Waals width, over " +
+  "every line in 360-780 nm, vacuum, from a level below the ionisation limit, summed by bin over " +
+  "380-760 nm, at the stage's reference column: its vertical column above 0.1 bar at g = 10 m/s2, " +
+  "doubled for the mean slant path, at Asplund et al. 2009's solar abundances with every atom of " +
+  "the element free and its stages split by a Saha balance at 0.1 bar with Barklem and Collet " +
+  "2016's partition functions, ionisation energies and H2 dissociation; at 2000, 2500, 3000, " +
+  "3500, 4000, 4600 and 5000 K)";
 
 /**
  * The species with no visible absorption to draw (`decision-r08-t4b-t12c.md`, follow-up 3,
@@ -225,6 +252,12 @@ export const ABSORBER_BOUNDS: ReadonlyArray<AbsorberBound> = [
  * bound, or no catalogued data and an overtone ladder above it, and have R08.T4.d's line tables or
  * are {@link PENDING_ABSORBERS}. So does CO₂, whose HITRAN2024 lines reach 565–737 nm (follow-up
  * 4's check).
+ *
+ * @remarks
+ * R08.T4.h states seven ions none by the third reason (`underEquivalentWidthBound`), each under
+ * 10⁻³ of every bin's light through 4,600 K, and below 5,000 K where it stays under at 5,000 K
+ * too; above its limit each is pending in R08.T4.e (`atomicBounds.json`), as He is. Mg⁺ is among
+ * them: on Kurucz's full list its 448.1 nm lines take 7.2 × 10⁻⁴ at 4,600 K.
  */
 export const NO_VISIBLE_ABSORPTION: ReadonlyArray<TransparentSpecies> = [
   {
@@ -272,6 +305,101 @@ export const NO_VISIBLE_ABSORPTION: ReadonlyArray<TransparentSpecies> = [
       "by Kramers' hydrogenic estimate, matters only in ultra-hot atmospheres and is not " +
       "modelled: the registry pairs no ion with e-.",
   },
+  {
+    species: "Na+",
+    reason: "underEquivalentWidthBound",
+    belowK: 5_000,
+    evidence:
+      "Every Na II line in the range arises 32.9 eV up or more. On R. L. Kurucz's gf1101.all (8 lines " +
+      "in 360-780 nm; Kurucz 2011, Can. J. Phys. 89, 417), " +
+      EQUIVALENT_WIDTH_METHOD +
+      " give a largest share of 9.4e-35 at 4600 K and 7.8e-32 at 5000 K, in the 405-431 nm bin " +
+      "(Na II 408.87 nm, from 33.32 eV), against the science ruling's 0 from NIST ASD's lines. " +
+      "Above 5000 K it is pending (R08.T4.e).",
+  },
+  {
+    species: "Mg+",
+    reason: "underEquivalentWidthBound",
+    belowK: 4_600,
+    evidence:
+      "Mg II's lines in the range arise 8.65 eV up or more. On R. L. Kurucz's gf1201.all (103 lines " +
+      "in 360-780 nm; Kurucz 2011, Can. J. Phys. 89, 417), " +
+      EQUIVALENT_WIDTH_METHOD +
+      " give a largest share of 7.2e-4 at 4600 K, in the 431-456 nm bin (Mg II 448.24 and 448.26 nm, " +
+      "3d 2D - 4f 2F, from 8.86 eV), against the science ruling's 7.1e-4 from NIST ASD's lines; " +
+      "1.7e-3 at 5000 K, so the statement holds below 4600 K and Mg+ is pending above it (R08.T4.e).",
+  },
+  {
+    species: "Al+",
+    reason: "underEquivalentWidthBound",
+    belowK: 5_000,
+    evidence:
+      "Al II's lines in the range arise 7.42 eV up or more. On R. L. Kurucz's gf1301.all (684 lines in " +
+      "360-780 nm; Kurucz 2011, Can. J. Phys. 89, 417), " +
+      EQUIVALENT_WIDTH_METHOD +
+      " give a largest share of 4.4e-5 at 4600 K and 1.6e-4 at 5000 K, in the 380-405 nm bin (Al II " +
+      "390.18 nm, from 7.42 eV), against the science ruling's 4.8e-6 from NIST ASD's lines. Above " +
+      "5000 K it is pending (R08.T4.e).",
+  },
+  {
+    species: "Si+",
+    reason: "underEquivalentWidthBound",
+    belowK: 4_600,
+    evidence:
+      "Si II's lines in the range arise 6.86 eV up or more. On R. L. Kurucz's gf1401.all (225 lines in " +
+      "360-780 nm, 50 of them from autoionising levels above the 16.35 eV limit, left out; Kurucz " +
+      "2011, Can. J. Phys. 89, 417), " +
+      EQUIVALENT_WIDTH_METHOD +
+      " give a largest share to 4600 K of 3.3e-4 at 4600 K, in the 380-405 nm bin (Si II 385.71 and " +
+      "386.37 nm, from 6.86 eV), against the science ruling's 4.8e-4 from NIST ASD's lines; 1.3e-3 " +
+      "at 5000 K (634.89 and 637.31 nm, from 8.12 eV), so the statement holds below 4600 K and Si+ " +
+      "is pending above it (R08.T4.e).",
+  },
+  {
+    species: "K+",
+    reason: "underEquivalentWidthBound",
+    belowK: 5_000,
+    evidence:
+      "Every K II line in the range arises 20.1 eV up or more. On R. L. Kurucz's gf1901.all (54 lines " +
+      "in 360-780 nm; Kurucz 2011, Can. J. Phys. 89, 417), " +
+      EQUIVALENT_WIDTH_METHOD +
+      " give a largest share of 2.3e-18 at 4600 K and 1.4e-16 at 5000 K, in the 405-431 nm bin (K II " +
+      "418.73 nm, from 20.15 eV), against the science ruling's 0 from NIST ASD's lines. Above " +
+      "5000 K it is pending (R08.T4.e).",
+  },
+  {
+    species: "Ni+",
+    reason: "underEquivalentWidthBound",
+    belowK: 4_600,
+    evidence:
+      "Ni II's lines in the range arise 3.10 eV up or more. On R. L. Kurucz's gf2801.all (6560 lines in " +
+      "360-780 nm, where NIST ASD's 370-800 nm held forbidden lines only; Kurucz 2011, Can. J. Phys. " +
+      "89, 417), " +
+      EQUIVALENT_WIDTH_METHOD +
+      " give a largest share to 4600 K of 6.7e-4 at 4600 K, in the 405-431 nm bin, 58% of it Ni II " +
+      "406.82 nm ((1G)4s 2G - (3F)4p 2F, log gf -1.29, from 4.03 eV, saturated), against the " +
+      "science ruling's 1.5e-4; 1.5e-3 at 5000 K, so the statement holds below 4600 K and Ni+ is " +
+      "pending above it (R08.T4.e).",
+  },
+  {
+    species: "Zn+",
+    reason: "underEquivalentWidthBound",
+    belowK: 5_000,
+    evidence:
+      "Kurucz's gf3001.all holds no Zn II line in the range. Its lines are the 17 NIST ASD v5.12 " +
+      "lists over 350-800 nm (air), at Martin and Kaufman 1970's levels, with ASD's A for 7 (their " +
+      "primary paper, Mayo et al. 2006, closed: a stated exception), Nandy and Sahoo 2015's computed " +
+      "A for 5, Kisielius et al. 2015's computed line strength for 589.60 nm, and A = 3e8 s-1, above " +
+      "every A ASD lists in the range, for the 4 that take no value from an open paper (the 6.12 eV " +
+      "621.64 and 748.09 nm lines, whose upper level's lifetime has not been measured and whose " +
+      "computed strengths, Kisielius et al.'s in a CC BY-NC catalogue and Kurucz's gf3001.pos, lie " +
+      "3.4-4.0 dex below the bound; and 380.74 and 384.14 nm). On these, " +
+      EQUIVALENT_WIDTH_METHOD +
+      " give the bound's largest share, 1.5e-4 at 4600 K and 6.1e-4 at 5000 K, in the 735-760 nm " +
+      "bin (Zn II 748.09 nm), against the science ruling's 0 from ASD's lines with a transition " +
+      "probability; at Kurucz's computed gf it would be near 1e-6 at 5000 K. Above 5000 K it is " +
+      "pending (R08.T4.e, estimated).",
+  },
 ];
 
 /** A pending absorber before its cell means are attached. */
@@ -288,10 +416,11 @@ interface PendingListing {
 
 /**
  * The species and pairs whose absorption over the bake range R08.T4.d–g draw
- * (`decision-r08-t4b-t12c.md`, follow-ups 2 to 5). The ions are listed for when P14.T49.b adds
- * their rows. A resonance line's far wing, which grows with its perturbers' density, is a pair of
- * the atom and each perturber (`K+H2`, `K+He`; follow-up 5, ruling 2), beside the atom's own
- * entry per atom.
+ * (`decision-r08-t4b-t12c.md`, follow-ups 2 to 5). A resonance line's far wing, which grows with
+ * its perturbers' density, is a pair of the atom and each perturber (`K+H2`, `K+He`; follow-up 5,
+ * ruling 2), beside the atom's own entry per atom. R08.T4.h adds the interim entries of the atoms
+ * and ions R08.T4.e draws and the entries of its stated nones above their limits
+ * (`atomicBounds.json`).
  */
 const PENDING: ReadonlyArray<PendingListing> = [
   { key: "Na", task: "R08.T4.e", what: "Na D (589.0 and 589.6 nm), pressure-broadened" },
@@ -318,10 +447,67 @@ const PENDING: ReadonlyArray<PendingListing> = [
   { key: "Ca+", task: "R08.T4.e", what: "Ca II's H and K lines (393.4 and 396.8 nm)" },
   { key: "Fe+", task: "R08.T4.e", what: "Fe II's lines in the range" },
   { key: "Ti+", task: "R08.T4.e", what: "Ti II's lines in the range" },
+  // R08.T4.h's interim entries, which R08.T4.e's tables replace.
+  { key: "Al", task: "R08.T4.e", what: "Al I 394.4 and 396.2 nm" },
+  {
+    key: "V",
+    task: "R08.T4.e",
+    what: "V I's lines in the range, strongest at 437.9, 438.5, 439.0, 411.2 and 384.1 nm",
+  },
+  {
+    key: "Mn",
+    task: "R08.T4.e",
+    what: "Mn I 403.1, 403.3 and 403.4 nm and its 2.1-2.3 eV lines",
+  },
+  {
+    key: "Ni",
+    task: "R08.T4.e",
+    what: "Ni I's lines in the range, strongest at 385.8, 380.7 and 547.7 nm",
+  },
+  { key: "Zn", task: "R08.T4.e", what: "Zn I 468.0, 472.2 and 481.1 nm (4.0 eV) and 636.2 nm" },
+  { key: "V+", task: "R08.T4.e", what: "V II's lines (387-404 nm, from 1.4-1.8 eV)" },
+  {
+    key: "Cr+",
+    task: "R08.T4.e",
+    what: "Cr II's lines (455.9 and 458.8 nm and others, from 3.9-4.1 eV)",
+  },
+  { key: "Mn+", task: "R08.T4.e", what: "Mn II's lines (412.8 and 420.5 nm, and 432-440 nm)" },
+  // R08.T4.h's stated nones above their limits, as He is: R08.T4.e draws them from the limit as a
+  // visibility floor, and its range, to 5,000 K, does not draw them above 5,000 K.
+  {
+    key: "Na+",
+    task: "R08.T4.e",
+    what: "Na II's lines in the range above 5000 K, which R08.T4.e's range (to 5000 K) does not draw",
+  },
   {
     key: "Mg+",
     task: "R08.T4.e",
-    what: "Mg II 448.1 nm, from 8.86 eV, which reaches tau 1e-3 at 1e3 km-amagat near 2570 K",
+    what: "Mg II 448.2 nm and its other lines above 4600 K; R08.T4.e's range (to 5000 K) does not draw them above 5000 K",
+  },
+  {
+    key: "Al+",
+    task: "R08.T4.e",
+    what: "Al II's lines in the range above 5000 K, which R08.T4.e's range (to 5000 K) does not draw",
+  },
+  {
+    key: "Si+",
+    task: "R08.T4.e",
+    what: "Si II's lines in the range above 4600 K; R08.T4.e's range (to 5000 K) does not draw them above 5000 K",
+  },
+  {
+    key: "K+",
+    task: "R08.T4.e",
+    what: "K II's lines in the range above 5000 K, which R08.T4.e's range (to 5000 K) does not draw",
+  },
+  {
+    key: "Ni+",
+    task: "R08.T4.e",
+    what: "Ni II's lines in the range above 4600 K; R08.T4.e's range (to 5000 K) does not draw them above 5000 K",
+  },
+  {
+    key: "Zn+",
+    task: "R08.T4.e",
+    what: "Zn II's lines in the range above 5000 K, which R08.T4.e's range (to 5000 K) does not draw",
   },
   {
     key: "H2+e-",
@@ -356,6 +542,12 @@ const PENDING: ReadonlyArray<PendingListing> = [
     what: "hot CO2 above HITRAN's 500 K, to which R08.T4.d's table is held (ExoMol's UCL-4000 considered)",
   },
   { key: "HCN", task: "R08.T4.f", what: "hot HCN (Harris)" },
+  {
+    key: "HCl",
+    task: "R08.T4.f",
+    part: "overtones",
+    what: "the 8-0 band (HITRAN2024's, an extrapolation) and the 9-0 to 11-0 bands, which HITRAN2024 lacks, by the overtone ladder below 8-0 (estimated)",
+  },
   { key: "H2O", task: "R08.T4.f", what: "hot H2O (POKAZATEL)" },
   {
     key: "N2",

@@ -62,6 +62,7 @@ import {
   ladderLines,
   LINE_CUTOFF_PER_CM,
   type LineList,
+  linesBeyond,
   type LineSpecies,
   parseHitranLines,
   parsePartitionSums,
@@ -99,6 +100,11 @@ export interface LineSource {
    * HITRAN `.par` file, whose band is moved and scaled ({@link ladderLines}).
    */
   readonly ladder?: LadderBand;
+  /**
+   * The wavenumber, cm⁻¹, from which the file's lines are left out of the table, its `overtones`
+   * pending part holding them (HCl's 8–0 band, R08.T4.h), or none.
+   */
+  readonly tableBelowPerCm?: number;
 }
 
 /** HITRAN2024's citation (Gordon et al. 2026). */
@@ -121,7 +127,10 @@ function hitranUrl(isotopologues: ReadonlyArray<number>): string {
   );
 }
 
-/** TIPS files by isotopologue, as fetched 2026-10-12 (each matching T4.c's of 2026-10-10/11). */
+/**
+ * TIPS files by isotopologue, as fetched 2026-10-12 (each matching T4.c's of 2026-10-10/11), and
+ * HCl's four (52, 53, 107 and 108) on 2026-10-19 (R08.T4.h).
+ */
 const TIPS: Readonly<Record<number, string>> = {
   1: "3d6812b28d411597564006e8c51dd3e3b0bf4f5a47c8c055d1ed25cbff9375a2",
   2: "08efeff76e4b1d8adab23f1c6a38331aeb3462d6cac806383dbd42979a7383d5",
@@ -135,6 +144,10 @@ const TIPS: Readonly<Record<number, string>> = {
   36: "cfee961a1ed969799d451c609993d8266f3362ee45210a1c2627cfc1c6018166",
   37: "06e902498613e3e01d3c42f4603d03a43b837b4333dd13e00fca036d5d25455c",
   38: "e4b62e3b8dec5095f226562721c302a18ee297fd180c3b81bfa65c7be15b4476",
+  52: "2d7ffdfccde2faef45b349705be4c436f5846db3d5a8e0f4fad433f9d311ff25",
+  53: "0df3c853d91dfec0184a14b04d99fc067736f03b8e26960b2fc5a73b4d0016be",
+  107: "9eba794983b51845d7f599d7313eae407e9d778cfacc740cb146ee41b2a979af",
+  108: "0075d0574627c492ca6ea78b5e4d8ad758731930064fd6f04b6291761392f661",
   70: "57537cda4e86f0fdfe2ad3b03490c18303a314963f9c78c821a109eed4e4139b",
   103: "d475e2099cdde6c2ae93c491e14c4be01a16f0989169e17d7bf48e3a66a1a9a7",
   115: "e5b0e11b1cc53796e2b29a7a55cb9d8f8a65843c1a9ce2bdd1e2f43a3ee07980",
@@ -310,6 +323,47 @@ const CO2_SATURATION: SaturationCurve = {
 };
 
 /**
+ * HCl's saturation (R08.T4.h; a derivation from the triple point, as O₂'s): the triple point
+ * 159.07 K (M. Thol et al., J. Chem. Eng. Data 63 (2018) 2533, DOI 10.1021/acs.jced.7b01031, its
+ * equation of state as CoolProp's `HydrogenChloride.json` gives it) and 13.800 ± 0.006 kPa (P.
+ * Henderson et al., J. Chem. Thermodyn. 18 (1986) 1077, as NIST's WebBook gives it); ΔH_sub
+ * 19.7 kJ mol⁻¹ at 127 K, from vapour pressures over 121–133 K (Ser and Larher, J. Chem.
+ * Thermodyn. 22 (1990) 407, as the WebBook gives it, 19.6 at 142 K); ΔH_vap 17.227 kJ mol⁻¹ at the
+ * triple point, Thol et al.'s vapour less liquid enthalpy there (Giauque and Wiebe 1928's
+ * calorimetric 16.2 kJ mol⁻¹ at 188 K, the WebBook's, is the lower value at the boiling point); the
+ * critical point 324.68 K (Henderson et al. 1986). p_sat is 2.1 Pa at 100 K, 108 Pa at 120 K and
+ * 103.4 kPa at 188.16 K, the boiling point (2% over 1 atm). The simplifications widen the cap
+ * below about 103 K and above about 175 K and narrow it by at most 4% between (R08.T4.h's science
+ * check), which the cap's factor of 10 over 40 p_sat ÷ (m g) absorbs: a constant ΔH_vap overstates
+ * p_sat towards the critical point (6.3 MPa at 300 K, against 4.9 by Thol et al.'s vapour-pressure
+ * ancillary); a constant ΔH_sub overstates it below the solid's transition near 98 K (from memory,
+ * not modelled), whose enthalpy would add to the sublimation's, and understates it over about
+ * 105–159 K, where ΔH_sub falls towards the triple point (19.6 kJ mol⁻¹ at 142 K, Ser and Larher).
+ */
+const HCL_SATURATION: SaturationCurve = {
+  kind: "clausiusClapeyron",
+  tripleK: 159.07,
+  triplePa: 13_800,
+  sublimationJPerMol: 19_700,
+  vaporisationJPerMol: 17_227,
+  criticalK: 324.68,
+  source:
+    "triple point 159.07 K (Thol et al. 2018, J. Chem. Eng. Data 63, 2533, via CoolProp) and 13.800 kPa (Henderson et al. 1986, J. Chem. Thermodyn. 18, 1077, via NIST); " +
+    "dH_sub 19.7 kJ/mol at 127 K (Ser and Larher 1990, J. Chem. Thermodyn. 22, 407, via NIST); dH_vap 17.227 kJ/mol at the triple point (Thol et al. 2018); Tc 324.68 K (Henderson et al. 1986)",
+};
+
+/**
+ * Where HCl's table ends, cm⁻¹: the 525/526 nm cells' edge, 10⁷ ÷ 525.5 (R08.T4.h's science
+ * check). Below it lie the 5–0 to 7–0 bands, which HITRAN2024 anchors to measured intensities
+ * (Gelfand et al. 1981 times its 1.3, after Vasilchenko et al. 2023's 5–0; Gordon et al. 2026,
+ * §2.15); above it the 8–0 band, from 19,058 cm⁻¹, never measured: Li et al. 2013's dipole
+ * function carried a quantum past its data, without the 1.3, held in HCl's `overtones` part,
+ * estimated. The cut falls in the 34 cm⁻¹ between the last line below it (19,024.33 cm⁻¹) and the
+ * first above (19,058.48 cm⁻¹); the lines over 18,900–19,029.5 cm⁻¹ sum to 8.5 × 10⁻³⁵ cm.
+ */
+export const HCL_TABLE_BELOW_PER_CM = 1e7 / 525.5;
+
+/**
  * The line species reduced from HITRAN2024 (R08.T4.d): each species' lines over 13,100–26,400 cm⁻¹,
  * fetched 2026-10-12 with every broadener HITRAN gives, and its grid. Temperatures run from where
  * the species' saturated column is negligible (`decision-r08-t4d-kdist.md` §3.1: H₂O from 150 K;
@@ -447,6 +501,26 @@ export const LINE_SOURCES: Readonly<Record<string, LineSource>> = {
     policy: CUTOFF_25,
     molecularMassDa: 2.01565,
     reduction: HITRAN_REDUCTION,
+  },
+  HCl: {
+    species: "HCl",
+    citation: `${HITRAN2024}; HCl lines 13100-26400 cm-1 (3387 lines of the 5-0 to 8-0 bands and their hot bands, to 20231.25 cm-1: H35Cl, H37Cl, D35Cl, D37Cl), the table taking the 3255 below 19029.5 cm-1 (525.5 nm), the 5-0 to 7-0 bands, measurement-anchored (Gordon et al. 2026, section 2.15), and its overtones part the 132 above, the 8-0 band and its 9-1 hot band, an extrapolation`,
+    url: hitranUrl([52, 53, 107, 108]),
+    lines: {
+      name: "hcl-13100-26400-broad.csv",
+      sha256: "13ef4cadc7a5d16581f621eaf0ca7023edd9bd0c0d4e90dd40b7bdda5a6f85ed",
+    },
+    tips: tipsOf(52, 53, 107, 108),
+    fetched: "2026-10-19",
+    terms: HITRAN_TERMS,
+    basis: "measured",
+    measuredRangeK: [50, 296],
+    rangeK: [50, 500],
+    policy: CUTOFF_25,
+    molecularMassDa: 35.976_678,
+    saturation: HCL_SATURATION,
+    reduction: HITRAN_REDUCTION,
+    tableBelowPerCm: HCL_TABLE_BELOW_PER_CM,
   },
 };
 
@@ -639,10 +713,17 @@ export function readLineSpecies(
   };
 }
 
-/** A species' lines from its checked file: HITRAN's records, or its ladder's moved band. */
+/**
+ * A species' lines from its checked file: HITRAN's records, or its ladder's moved band; those from
+ * its {@link LineSource.tableBelowPerCm} up left out.
+ */
 export function readLineList(source: LineSource, linesPath: string): LineList {
   const text = readCheckedText(linesPath, source.lines.sha256);
-  return source.ladder === undefined ? parseHitranLines(text) : ladderLines(text, source.ladder);
+  const lines =
+    source.ladder === undefined ? parseHitranLines(text) : ladderLines(text, source.ladder);
+  return source.tableBelowPerCm === undefined
+    ? lines
+    : linesBeyond(lines, source.tableBelowPerCm, "below");
 }
 
 /** The species' grid: its temperature nodes (50 K apart unless given) and the stored pressures. */

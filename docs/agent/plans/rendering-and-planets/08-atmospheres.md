@@ -2895,6 +2895,14 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
     their bounds with them, once the tables are committed.
   - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers`.
 
+- **R08.T4.h The fifteen rows' answers** (split from R08.T4.e and T4.f, 2026-10-16; decision-r08-t4ef-storage and its addendum of 2026-10-19). After R08.T19; before P14.T54.a's bless.
+  - The third reason (T4.e's "Stated transparency, the third reason") and T4.e's reference column, built in `src/tools/` for T4.e to reuse.
+  - Stated nones for `Na+`, `Al+`, `Si+`, `K+`, `Ni+` and `Zn+` on Kurucz's full lists (Zn⁺'s on the lines NIST ASD lists, Kurucz holding none in the range), and Mg⁺'s check. An ion reaching 10⁻³ by 4,600 K is pending instead. Each stated none is pending from its `belowK` (4,600 or 5,000 K), as He's is.
+  - Interim pending entries with T4.c's cell means for `Al`, `V`, `Mn`, `Ni`, `Zn`, `V+`, `Cr+` and `Mn+`, which T4.e's tables replace. The atomic and ionic entries it adds go in `absorbers/atomicBounds.json`.
+  - HCl from HITRAN2024 on T4.d's machinery, to 500 K, with a science check of its 5–0 to 8–0 bands, failing which (or past its 2 MB budget) a pending entry with its cell means (science-r08-unowned-absorbers, erratum 2026-10-16).
+  - A parity test holding the fifteen keys to condition 2.
+  - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers view/atmosphere/parity`.
+
 Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers view/atmosphere/channels`.
 
 ### R08.T5 Aerosols
@@ -8354,7 +8362,11 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     15 forbidden [Ti II] lines in the range, which Kurucz lacks and whose primary papers (Deb et
     al. 2009; Hartman et al. 2005) are closed, at ASD's values with citation, Ti⁺'s entry marked
     `estimated`. They lead its largest cell only at 300 K; from 1,000 K Kurucz's permitted lines
-    lead.
+    lead. Listed (R08.T4.h, §4.1 of its brief, ruled 2026-10-19): Zn⁺'s transition probabilities
+    for 7 of the 17 Zn II lines ASD lists over 350–800 nm (5p–7s, 5p–5d, 4d ²D₃/₂–4f and
+    4d ²D₅/₂–4f ²F₇/₂), at ASD's values with citation, since Kurucz's `gf3001.all` holds no Zn II
+    line in the range and their primary paper (Mayo, Ortiz and Campos 2006) is closed. Zn⁺'s
+    entry is `estimated` on the bound its four lines without a found A take.
 - **H₂–H₂ collision-induced absorption: decided 2026-10-11** (`decision-r08-cmf-licence.md` §8).
   - Borysow 2002's tables (A&A 390, 779), 60–1,000 K to about 16,500 cm⁻¹, are used as reduced
     values with citation: 1 nm cell means in `crossSections.json`. The raw files are not
@@ -13425,6 +13437,222 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     `transparency.test.ts` holds every flagged absorber row, and its Rayleigh bullet that no client
     test reads the fixture's `rayleigh`; both checks are `parity.test.ts`'s since R08.T19. A plan-14
     docs pass updates them, for P14.T54.a, which turns the fifteen flags on.
+- **Deviations in T4.h, as built** (2026-10-19; decision-r08-t4ef-storage and its addendum of
+  2026-10-19, science-r08-unowned-absorbers §2.2 with its erratum of 2026-10-16). New
+  `src/tools/atomicLines.ts`, `atomicLinesCli.ts` and `hclOvertones.ts`, each with its test, and
+  `atmosphereData.ts`'s `atomic-shares`, `atomic-bounds` and `hcl-overtones`; HCl in
+  `molecularLines.ts` (`ISOTOPOLOGUES`, `linesBeyond`) and `kDistributionsCli.ts` (`LINE_SOURCES`,
+  `TIPS`, `HCL_SATURATION`, `HCL_TABLE_BELOW_PER_CM`, `LineSource.tableBelowPerCm`); new
+  `absorbers/atomicBounds.json` and `absorbers/kDistributions/HCl.json` with its parts; `bounds.json`
+  (Mg⁺'s entry out, HCl's `overtones` part in); `transparency.ts`; tests `transparency.test.ts`,
+  `parity.test.ts`, `hclLines.test.ts` (new) and `exomolLines.test.ts`, whose range helpers moved to
+  the new `test/lineRanges.ts`; `.prettierignore`; `NOTICE`. No Rust, wire or generator change.
+  - _The plan's entry._ At the base R08.T4.h had none; the entry above is the decision's addendum's
+    text, verbatim. T4.e's, T4.f's and T19's text are main's docs pass, so the lines there that this
+    record supersedes stand: T4.e's "Mg II … stays pending … unless Kurucz's full list confirms" and
+    its expected shares, T19's known gaps (the fifteen rows' answers and "HCl, the overtone
+    ladder's stated none"), and T4.c's Mg⁺ lines (its bullet "Mg⁺, from 2,570 K … are R08.T4.e's"
+    and its as-built "Mg⁺ is not 'stated none'"), now a stated none below 4,600 K.
+  - _The third reason_ is `TransparencyReason`'s `underEquivalentWidthBound`, named for its rule (a
+    summed equivalent width under 0.0253 nm a 25.33 nm bin). Its sums are the tool's
+    (`stageBinShares`, `largestShares`, `belowKOf`), not the client's: the client holds the
+    statements, each evidence naming its figures, as T4.c's did.
+  - _The fifteen answers._ Interim pending entries (R08.T4.e, T4.c's nodes 300–5,000 K, `measured`,
+    in `atomicBounds.json`): `Al`, `V`, `Mn`, `Ni`, `Zn`, `V+`, `Cr+`, `Mn+`. Stated nones by the
+    third reason, each pending from its `belowK` at its limit and He's nodes above it, R08.T4.e, in
+    `atomicBounds.json`: `Na+`, `Al+`, `K+` and `Zn+` below 5,000 K (5,000–10,000 K), `Si+` and
+    `Ni+` below 4,600 K (4,600–10,000 K); Zn⁺'s entry is `estimated` (below), the others
+    `measured`. `HCl`: HITRAN2024's table for its 5–0 to 7–0 bands and an `overtones` part, R08.T4.f,
+    `estimated`, for 8–0 and the 9–0 to 11–0 ladder (below). No ion reached 10⁻³ by 4,600 K, so
+    none of the six is pending instead. Each stated none's pending entry's `what` says that T4.e's
+    range (to 5,000 K) does not draw it above 5,000 K.
+  - _Mg⁺_ is a stated none below 4,600 K on Kurucz's full list (`gf1201.all`, 103 lines in
+    360–780 nm, unchanged since T4.c's fetch): its largest share is 7.2 × 10⁻⁴ at 4,600 K (431–456
+    nm, Mg II 448.24 and 448.26 nm from 8.86 eV) and 1.7 × 10⁻³ at 5,000 K. Its T4.c entry (300–5,000
+    K) and its `bounds.json` row went; its entry from 4,600 K is in `atomicBounds.json`.
+  - _The reference column by stage_, cm⁻², at 2,000 / 3,000 / 4,000 / 4,600 / 5,000 K: Na⁺ 3.9 ×
+    10¹⁷ / 1.0 × 10²⁰ / 1.5 × 10²⁰ / 1.5 × 10²⁰ / 1.5 × 10²⁰; Mg⁺ 1.7 × 10¹³ / 1.9 × 10¹⁸ / 6.0 ×
+    10²⁰ / 2.2 × 10²¹ / 3.0 × 10²¹; Al⁺ 1.6 × 10¹⁵ / 6.8 × 10¹⁸ / 1.7 × 10²⁰ / 2.3 × 10²⁰ / 2.4 ×
+    10²⁰; Si⁺ 2.4 × 10¹¹ / 6.8 × 10¹⁶ / 4.2 × 10¹⁹ / 3.7 × 10²⁰ / 1.1 × 10²¹; K⁺ 1.9 × 10¹⁸ / 9.2 ×
+    10¹⁸ / 9.4 × 10¹⁸ / 9.4 × 10¹⁸ / 9.4 × 10¹⁸; Ni⁺ 1.2 × 10¹¹ / 1.3 × 10¹⁶ / 4.9 × 10¹⁸ / 3.4 ×
+    10¹⁹ / 7.7 × 10¹⁹; Zn⁺ 6.1 × 10⁵ / 2.0 × 10¹² / 4.2 × 10¹⁵ / 6.6 × 10¹⁶ / 3.1 × 10¹⁷; V⁺ 3.1 ×
+    10¹¹ / 5.9 × 10¹⁵ / 4.2 × 10¹⁷ / 6.6 × 10¹⁷ / 7.2 × 10¹⁷; Cr⁺ 1.3 × 10¹³ / 2.4 × 10¹⁷ / 1.9 ×
+    10¹⁹ / 3.3 × 10¹⁹ / 3.6 × 10¹⁹; Mn⁺ 2.3 × 10¹¹ / 1.7 × 10¹⁶ / 4.4 × 10¹⁸ / 1.5 × 10¹⁹ / 2.0 ×
+    10¹⁹; and the atoms Al 2.5 × 10²⁰ / 2.4 × 10²⁰ / 7.8 × 10¹⁹ / 2.3 × 10¹⁹ / 9.4 × 10¹⁸, V 7.5 ×
+    10¹⁷ / 7.4 × 10¹⁷ / 3.3 × 10¹⁷ / 8.7 × 10¹⁶ / 3.1 × 10¹⁶, Mn 2.4 × 10¹⁹ / 2.4 × 10¹⁹ / 1.9 ×
+    10¹⁹ / 8.5 × 10¹⁸ / 3.3 × 10¹⁸, Ni 1.5 × 10²⁰ / 1.5 × 10²⁰ / 1.4 × 10²⁰ / 1.1 × 10²⁰ / 6.9 ×
+    10¹⁹, Zn 3.2 × 10¹⁸ / 3.2 × 10¹⁸ / 3.2 × 10¹⁸ / 3.1 × 10¹⁸ / 2.9 × 10¹⁸ (2,500 and 3,500 K in the
+    tool's record). The element's column above 0.1 bar is its abundance times P ÷ (g m_H), m_H the
+    mass per H nucleus of Asplund et al.'s gas, 1.37 m_u, and the Saha balance (`sahaBalance`) holds every element to Zn in its
+    stages I–III, H as H, H⁺ and H₂ (Barklem and Collet's table 7 K_p, their Eq. 7, splined in
+    log K_p + 5,040 D₀ ÷ T over log T from 100 K as their §3 advises, D₀ 4.478 007 eV from their
+    Table 1), H⁻ left out (3 × 10⁻⁴ of the electrons at 4,600 K); Q splined in log Q over log T as
+    they advise. The elements beyond Zn are left out: the science check's balance with Ga, Ge, Rb,
+    Sr, Y, Zr, Nb, Mo, Ba, La, Ce and Nd moved n_e by 2.8 × 10⁻³ at 2,000 K and 5 × 10⁻⁵ at 4,600 K,
+    and its own sums matched every stage's column to four figures and the shares. The science
+    ruling's "every atom of the element in that stage" is read as free atoms split among the stages
+    by the balance, as decision-r08-t4ef-storage's addendum of 2026-10-19 rules (the brief's
+    "ruled, 2026-10-19"). The reading decides outcomes: the whole element in one stage would raise
+    Si⁺'s 4,600 K column 7.8 times (and Ni⁺'s 4.4, Mg⁺'s 1.6), likely taking Si⁺ past 10⁻³ (the
+    plan-conformance review's estimate).
+  - _The stated nones' shares beside the science ruling's_ (largest bin share at the reference
+    column, to 4,600 K and at 5,000 K; the ruling's NIST ASD 370–800 nm sums in brackets): Na⁺ 9.4 ×
+    10⁻³⁵ and 7.8 × 10⁻³² (0); Mg⁺ 7.2 × 10⁻⁴ and 1.7 × 10⁻³ (7.1 × 10⁻⁴); Al⁺ 4.4 × 10⁻⁵ and
+    1.6 × 10⁻⁴ (4.8 × 10⁻⁶); Si⁺ 3.3 × 10⁻⁴ and 1.3 × 10⁻³ (4.8 × 10⁻⁴); K⁺ 2.3 × 10⁻¹⁸ and 1.4 ×
+    10⁻¹⁶ (0); Ni⁺ 6.7 × 10⁻⁴ and 1.5 × 10⁻³ (1.5 × 10⁻⁴, forbidden lines only), 58% of it Ni II
+    406.82 nm, saturated; Zn⁺ 1.5 × 10⁻⁴ and 6.1 × 10⁻⁴ (0), 748.09 nm at the bound. Each is largest
+    at 4,600 K of the six temperatures. Al⁺ is ten times the ruling's: Kurucz's Al II 390.18 nm
+    (log gf −1.27, NBS) leads, ten times the A NIST ASD gives it (4.8 × 10⁵ s⁻¹, grade E; a finding
+    aid, the science check's). The drawn stages, for the record: Al 0.81 (2,000 K), V 0.34
+    (3,500 K), Mn 0.50 (4,000 K), Ni 0.25 (4,600 K), Zn 4.1 × 10⁻³, V⁺ 1.8 × 10⁻², Cr⁺ 1.3 × 10⁻²
+    and Mn⁺ 2.8 × 10⁻³ (each at 4,600 K), against the ruling's 3.1 × 10⁻³, 1.3 × 10⁻², 3.3 × 10⁻³
+    and 1.1 × 10⁻³: Kurucz's fuller lists raise the ions'.
+  - _The cell means are now committed code_ (`atomic-bounds`, `lineCellMeansM2`), where T4.c's
+    were scratch sums: the tool reproduces T4.c's Mg⁺ row at 5,000 K, the one node both entries
+    hold, in all 381 cells, digit for digit.
+  - _The sums, as built._ Every line of the stage's list over 360–780 nm (vacuum) from a level below
+    its ionisation limit, as T4.c's cell means take them: Si II's 225 in the window include 50 from
+    autoionising levels above 16.35 eV, left out (their Boltzmann factor is e^(−38) at 5,000 K).
+    Each line's W by bin is the trapezoid of 1 − e^(−τ) on offsets 120 a decade from a fiftieth of
+    its Voigt half-width out to the far bin edge, the bins' edges among the points
+    (`lineBinWidthsNm`, held to an `f64` quadrature within 10⁻³ in its test). Unsöld's ⟨r²⟩ is
+    2.5 n*⁴ a₀² ÷ Z², a level within 0.1 eV of its limit taken at 0.1 eV; H's polarisability 4.5 a₀³
+    (exact), H₂'s 5.429 and He's 1.387 from the client's dispersions at λ → ∞ by Lorentz–Lorenz
+    (Peck and Huang 1977, Mansfield and Peck 1969, as `rayleigh.ts` takes them), 0.3% above the
+    computed values, 0.1% in Γ₆; Γ₆ = 8.08 v̄^(3/5) C₆^(2/5) n per perturber, C₆ in angular units
+    (Gray's 17 for cyclic, as the science check confirmed; Unsöld and Gray not re-read).
+  - _Zn⁺'s line source_ (ruled 2026-10-19). Kurucz's `gfall/gf3001.all` holds 6 lines, all at
+    202.5–255.8 nm. The 17 transitions NIST ASD v5.12 lists over 350–800 nm (air; main's file,
+    SHA-256 `6303dcd2…7e75`, byte for byte) are the line set, read as a finding aid; their levels
+    are Martin and Kaufman 1970's Table 2 (J. Res. NBS 74A, 11, read in NIST's open copy), the
+    vacuum wavelengths their differences. Transition probabilities: ASD's for 7 (5p–7s, 5p–5d,
+    4d ²D₃/₂–4f and 4d ²D₅/₂–4f ²F₇/₂), whose primary paper ASD cites (Mayo, Ortiz and Campos 2006,
+    Eur. Phys. J. D 37, 181) is closed with no open copy found: the stated exception, now in the
+    Risks entry; Nandy and Sahoo 2015's computed A (MNRAS 447, 3812, Table 10, ASD's source) for
+    5s–5p and 5p–6s, and for 4d ²D₅/₂–4f ²F₅/₂, which ASD gives none (1.46 × 10⁷ s⁻¹); Kisielius
+    et al. 2015's computed E1 line strength (ApJ 804, 76, Table 2 as printed in arXiv:1504.01667v1,
+    S = 1.196 × 10⁻² a.u.) for 589.60 nm (4p ²P₁/₂–3d⁹4s² ²D₃/₂); and the bound A = 3 × 10⁸ s⁻¹ for
+    the 4 that take no value from an open paper: 621.64 and 748.09 nm (4p ²P₃/₂–3d⁹4s² ²D), no
+    lifetime of 3d⁹4s² ²D having been measured and Kisielius et al.'s strengths for them being only
+    in their CDS catalogue (J/ApJ/804/76, AAS-origin, CC BY-NC by CDS, not an input; Kurucz's
+    computed `atoms/3001/gf3001.pos` puts them 4.0 and 3.4 dex below the bound), and 380.74 and
+    384.14 nm (5p–6d), none found. So Zn⁺'s entry is `estimated`, and its shares and largest cells
+    are the bound's: at Kurucz's computed gf its share at 5,000 K would be near 10⁻⁶ (the science
+    check's estimate). The stated none holds on the bound itself.
+  - _HCl from HITRAN2024_ (decision-r08-t4ef-storage §4; T4.f's bullet "any molecule P14.T52.a
+    lists with a visible band system", its source HITRAN, since ExoMol holds only HCl's `.broad`
+    files). Fetched through `hitranUrl([52, 53, 107, 108])`: 3,387 lines, the brief's band sums to
+    their digits (5–0 5.36 × 10⁻²⁵, 6–0 3.96 × 10⁻²⁵, 7–0 1.08 × 10⁻²⁵, 8–0 2.19 × 10⁻²⁶ cm, none
+    above 20,231.25 cm⁻¹).
+    - _The science check's verdict._ HITRAN2024's 5–0, 6–0 and 7–0 band strengths reproduce Gelfand
+      et al.'s measured overtone intensities (J. Quant. Spectrosc. Radiat. Transfer 26 (1981) 303)
+      corrected for isotopic abundance by HITRAN2024's factor 1.3 (Gordon et al. 2026, §2.15), which
+      rests on Vasilchenko et al.'s 5–0 cavity ring-down measurements (J. Quant. Spectrosc. Radiat.
+      Transfer 296 (2023) 108460); Reddy (J. Mol. Spectrosc. 82 (1980) 127) confirms the flat 5–0/6–0
+      step (1.37–1.38 against HITRAN's 1.36), so the shape is measured, not the extrapolation
+      artefact of Li2015's CO, and the three bands are kept, `measured`. The 8–0 band, never
+      measured, is Li et al.'s dipole moment function (J. Quant. Spectrosc. Radiat. Transfer 121
+      (2013) 78) carried a quantum past its data and left without the 1.3 (HITRAN's code "estimate");
+      it is smooth (7–0/8–0 3.8 within one dipole function), so it is kept, `estimated`, probably
+      25% low. HITRAN holds no 9–0 to 11–0 since HITRAN2016 (§2.15 there), though they lie in the
+      range. No band was dropped.
+    - _A cut, as built._ A table has one basis, so the 8–0 band (132 lines from 19,058.48 cm⁻¹, with
+      its 9–1 hot band) leaves the table for an `overtones` part, `estimated`, R08.T4.f, in
+      `bounds.json`, as CO's is (follow-up 3, ruling 2): HITRAN's 8–0 lines unchanged, and the
+      overtone ladder below them (follow-up 3, ruling 3, CO's construction) for 9–0, 10–0 and 11–0,
+      each line moved by E(v) − E(8) of H³⁵Cl's levels (20,196.056, 22,251.585, 24,197.664 and
+      26,030.666 cm⁻¹, E′ = ν + E″ of the hot bands' P(1) lines in HITRAN's `.par` records; Huber
+      and Herzberg's three constants put them 66–240 cm⁻¹ higher there) and divided by 10 for each
+      quantum, at the table's 50 K grid with 296 K for 300 K (`hcl-overtones`). Its largest cells at
+      296 K: 1.50 × 10⁻³² m² (8–0, 494–525 nm), 2.16 × 10⁻³³ (9–0, 449–474 nm), 1.85 × 10⁻³⁴ (10–0,
+      413–434 nm), 1.75 × 10⁻³⁵ (11–0, 384–402 nm); 12–0 lies above 380 nm's 26,316 cm⁻¹. The
+      table takes the 3,255 lines below 19,029.5 cm⁻¹ (the 525/526 nm cells' edge,
+      `HCL_TABLE_BELOW_PER_CM`, a new optional `LineSource.tableBelowPerCm` that `readLineList`
+      applies): the cut falls in the 34 cm⁻¹ gap after the last line below it, 19,024.33 cm⁻¹.
+    - _Its range._ T_min by §3.1's criterion through the client's chain from the table: 93.62 K for
+      the Sun, 93.57 K for a 2,500 K and 93.39 K for a 30,000 K Planck sun (`hclLines.test.ts`), so
+      the nodes run down from 500 K in 50 K steps to 50 K. p_sat is `HCL_SATURATION`, from the triple
+      point: 159.07 K (Thol et al. 2018's equation of state, as CoolProp gives it) and 13.800 kPa
+      (Henderson et al. 1986, as NIST's WebBook gives it), ΔH_sub 19.7 kJ mol⁻¹ (Ser and Larher 1990,
+      the WebBook's) and ΔH_vap 17.227 kJ mol⁻¹ at the triple point (Thol et al.); 2.1 Pa at 100 K and
+      103.4 kPa at the boiling point. The curve widens the cap below about 103 K and above about
+      175 K and narrows it by at most 4% between, where ΔH_sub falls towards the triple point (the
+      science check's), inside the cap's factor of 10. HCl condenses below its critical point,
+      324.68 K, so it takes the condensing cap, as N₂O does. It is not in `GASES`, so its
+      between-node test stops at helium's Rayleigh column, not its own as T4.g's ruling has the
+      ExoMol species': helium's is about 165 times the deeper ((n − 1)² ratio), so the test covers
+      more columns, not fewer. `measured` to 296 K and held and `estimated` above 500 K.
+    - _Its grid._ A sample of every tenth cell on the 50 K grid failed the chain test at 125 and
+      175 K (in 5 of 26 cells, 7.0 × 10⁻³ at worst), so the full reduction ran on the grid refined
+      there, 12 nodes, with no failure left; the merge exited 0.
+    - _Figures_ (T4.d's table; "beyond cap" recorded, not gated):
+
+      | Species | Cells | Worst node (16-bit)       | Worst chain | 1 Pa        | Bytes, parts | G = 1 | Temperatures                     | Beyond cap (16-bit) | Estimated |
+      | ------- | ----- | ------------------------- | ----------- | ----------- | ------------ | ----- | -------------------------------- | ------------------- | --------- |
+      | HCl     | 236   | 8.15 × 10⁻⁴ (9.55 × 10⁻⁵) | 1.85 × 10⁻³ | 2.40 × 10⁻⁴ | 1,537,952, 4 | 86    | 12: 50–500 K, with 125 and 175 K | 1.0 (6.06 × 10⁻⁴)   | none      |
+
+      With its 10,729-byte sidecar the table takes 1,548,681 bytes of its 2 MB budget; the
+      projection from half its cells, on the refined grid, was 1.55 MB. Its cells run 525–760 nm.
+      Beyond the caps the errors reach 1.0 at columns of 10³⁵–10¹¹⁰ cm⁻² (573 nm at 75 K; the
+      G = 1 cells' means at 50 K), where a cell's weakest lines would darken: recorded, not gated,
+      as T4.d's.
+      The committed tables come to 20,313,536 bytes (19,977,860 of parts, 335,676 of sidecars),
+      against the 150 MB cap.
+
+    - _Its size on generated bodies_, so that no one mistakes the table for a visible effect: solar
+      Cl/H is 3.2 × 10⁻⁷ (Asplund et al. 2009, log ε 5.50, read), so x_HCl ≲ 5 × 10⁻⁷ times the
+      metallicity. A 100-times-solar sub-Neptune's column above 10 bar at g = 10 m s⁻² is about 500
+      km-amagat (μ about 4.8, the science check's estimate; 975 at solar μ 2.3), holding about 0.03
+      km-amagat of HCl: τ ≈ 6 × 10⁻⁴ vertically in the 744 nm cell (8.29 × 10⁻³¹ m²), and the
+      744–746 nm cells together take about 4 × 10⁻⁵ of their 735–760 nm bin's light. The brief's
+      "about 10 km-amagat" (and its τ ≈ 10⁻⁵) matches the column above 0.1 bar, not 10 bar (the
+      science check's correction). Venus's 0.4 ppm (from memory) over its
+      528 km-amagat gives τ ≈ 5 × 10⁻⁶. So the correction changes the form of HCl's answer and is
+      not visible vertically; on a grazing path (40 times) its cells reach τ of a few × 10⁻², which
+      R08.T10.a's per-channel test weighs on each body, not this record.
+  - _Costs_, on the laptop (8 threads, 16 GB), the other lane's gate running for the first sums and
+    idle after, the load 1–4: the atomic sums, `atomic-shares` over the 15 stages or `atomic-bounds`,
+    28 s of CPU each (Ni II's 6,560 lines the most, about 10 s); HCl's samples, 26 cells on the 50 K
+    grid 260 s of CPU and 342 MB, then two workers of 68 cells on the refined grid 1,084 and
+    1,039 s (17.9 and 17.2 min) at 360 and 367 MB; the full reduction, two workers (`--stride 2:0`
+    and `2:1`, each under `systemd-run --scope` at 4 GB without swap), 1,663 and 1,769 s of CPU
+    (27.5 and 29.3 min wall) at 376 MB each; the merge and `hcl-overtones` seconds.
+  - _The new bounds file and the size test_ (§4.6). `atomicBounds.json` (236,147 bytes) holds the
+    15 entries this task adds, with a `description` in `bounds.json`'s form; `ABSORBER_BOUNDS` reads
+    it between `bounds.json` and `exomol/bounds.json`; it is in `.prettierignore`. No existing entry
+    moved but Mg⁺'s, which went: `bounds.json` is 340,701 bytes (329,199 at the base, less Mg⁺'s
+    entry, with HCl's `overtones` part). `transparency.test.ts` holds every JSON file under `absorbers/`
+    (the bounds files, the sidecars and the reference tables, read with `?raw`) under 500,000 bytes,
+    since the 500 kB hook checks only files a commit adds; the hook is unchanged.
+  - _Sources and their terms._ Kurucz's 15 lists and Barklem and Collet's tables 4 and 8 matched
+    the brief's SHA-256 at the fetch of 2026-10-19; Kurucz states no terms and CDS's are as T4.c
+    read them. New SHA-256: Barklem and Collet's `table7.dat` `5282b947…9d5c` (H₂'s K_p) and
+    `table1.dat` `85f17e00…b5fc` (its D₀, read); Kurucz's `0linelists.readme` `9a65f8be…5127d` (the
+    format); Asplund et al. 2009 in arXiv:0909.0948v1 `e89e9711…5c6f`; HITRAN's HCl lines with
+    T4.d's fields `13ef4cad…85ed` (3,387 lines, the band sums of the brief's table to its digits;
+    main's narrower request reproduced its `4cb223b9…3bb3`); HCl's TIPS `q52.txt` `2d7ffdfc…ff25`,
+    `q53.txt` `0df3c853…16be`, `q107.txt` `9eba7949…79af`, `q108.txt` `0075d057…f661`; H³⁵Cl's
+    `.par` records for its levels `ac9e3bea…15c3d`; HITRAN's isotopologue page as T4.d's
+    (`6a687905…965d4`), IDs 52, 53, 107 and 108 checked there. HITRAN's terms are T4.d's.
+  - _Deferred findings (2026-10-13 rule)_ (R08.T4.h). Each leaves the algorithm and every contract
+    as they are.
+    - _Kurucz does hold Zn II's lines_, in `atoms/3001/gf3001.pos` (2012), not `gfall/`: 255 over
+      350–800 nm, the 17 ASD lists among them, the three 6.0 eV lines at log gf −2.40, −3.12 and
+      −2.24. R08.T4.e may take Zn⁺'s lines from it in place of the bound; Kisielius et al.'s
+      calculation is 6.5–7.3 times lower for the same three.
+    - _HCl's 8–0 band is probably 25% low_, HITRAN2024's 1.3 having reached only 4–0 to 7–0; the
+      `overtones` part keeps HITRAN's value, `estimated`, whose hundredfold margin covers it.
+    - _Above 500 K_ HCl's table is held at its 500 K node, `estimated`, as T4.d's are; no hot HCl list
+      reaches the range (HITEMP holds none; ExoMol only `.broad` files), so it has no hot entry.
+    - _The ladder's shifts_ take H³⁵Cl's levels for every isotopologue's 8–0 lines.
+    - _The ladder's factor._ HITRAN's own HCl bands step 3.7–4.9 times a quantum from 6–0 to 8–0
+      (3.8 within one dipole function), so the ruled factor of 10 may put 9–0 to 11–0 2–10 times
+      low; their cells stay under 3 × 10⁻³³ m², inside the `estimated` hundredfold margin.
+    - _HCl's size on bodies, corrected._ The brief's sub-Neptune column (about 10 km-amagat, τ ≈
+      10⁻⁵) matches the column above 0.1 bar; at 10 bar it is about 500 km-amagat and τ(744 nm) ≈ 6 ×
+      10⁻⁴ (the HCl record above). Not visible vertically; R08.T10.a's test decides grazing paths.
+    - _Unsöld's widths near the limit._ The 0.1 eV floor on a level's binding only widens a line; a
+      dedicated (ABO) width is R08.T4.e's.
 - **Composition (decision-composition, 2026-10-09).** Every species and material is a plan-14
   registry key. The client's tables are keyed by those strings, with measured, estimated, derived
   or stand-in provenance, and the labelled fallback never drops a species. R08.T19 holds the client
