@@ -14,10 +14,12 @@ export interface ViewLabelBlockProps {
   /** The interim stars' count line (`STARS 1,204 DRAWN · …`), or `null` before an answer. */
   readonly countLine: string | null;
   /**
-   * A graphics fault standing while the view draws (`GRAPHICS DEVICE LOST: re-creating`, or this
-   * view's `GRAPHICS VIEW REFUSED: …`), or `null`.
+   * The faults standing while the view draws, each set as its own fault line, in order: a graphics
+   * fault first (`GRAPHICS DEVICE LOST: re-creating`, or this view's `GRAPHICS VIEW REFUSED: …`),
+   * then the terrain's (`TERRAIN NOT AVAILABLE: …`, plan R10, R10.T16.b; decision-r10-t16-contracts
+   * §7), so that a device loss never hides the standing one; none while nothing is wrong.
    */
-  readonly fault: string | null;
+  readonly faults: ReadonlyArray<string>;
   /** The block's ID, by which its view's canvas is described (R07.T19), or none. */
   readonly id?: string | undefined;
 }
@@ -256,14 +258,14 @@ export function readingParts(
  * reading of a stale server scene is muted with its trailing `S` (the guide's "Data states"); a
  * line's fields, the sky's limit and edge, are each set in a fixed width and go stale alone, and
  * the sky's `STARS` reading sets each middle dot at the head of the part after it (R06.T11.f,
- * R06.T13.j). A graphics fault is set as `StatusLine`'s fault, in `--status-caution`,
- * apart from the steady statements (the guide's "Alerts": a console's report on its own graphics
- * is never an alert). The statements are set through `StatusText`, so one that gives a sentence
+ * R06.T13.j). Each fault, the graphics' and then the terrain's, is set as a `StatusLine` fault line
+ * of its own, in `--status-caution`, apart from the steady statements (the guide's "Alerts": a
+ * console's report on its own graphics is never an alert). The statements are set through `StatusText`, so one that gives a sentence
  * after its state (the descent spike's `TEST PLANET: provisional, …`) tracks the state alone; the
  * rest are upper case whole and tracked whole, as before (P05.T13). The stars' count line is a
  * reading of numbers, so an `output` in B612 Mono (the guide's "Typography"), not a statement.
  */
-export function ViewLabelBlock({ lines, statements, countLine, fault, id }: ViewLabelBlockProps) {
+export function ViewLabelBlock({ lines, statements, countLine, faults, id }: ViewLabelBlockProps) {
   return (
     <div className="view-label" id={id}>
       <p className="view-label__class">VIEW</p>
@@ -290,7 +292,9 @@ export function ViewLabelBlock({ lines, statements, countLine, fault, id }: View
           <output aria-live="off">{countLine}</output>
         </p>
       )}
-      {fault === null ? null : <StatusLine text={fault} standing="fault" />}
+      {faults.map((fault) => (
+        <StatusLine key={fault} text={fault} standing="fault" />
+      ))}
     </div>
   );
 }

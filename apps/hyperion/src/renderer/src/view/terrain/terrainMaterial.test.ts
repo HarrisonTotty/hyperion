@@ -244,7 +244,17 @@ describe("the class laws (decision-r10-limb; decision-r07-t8b)", () => {
     const before = rows.version;
     expect(rows.setElsewhere(elsewhere)).toBe(false);
     expect(rows.version).toBe(before);
-    expect(rows.setElsewhere({ ...elsewhere })).toBe(true);
+    expect(rows.setElsewhere({ ...elsewhere, phaseExponent: [1.1, 1, 1] })).toBe(true);
+    expect(rows.version).toBe(before + 1);
+  });
+
+  it("counts no change for a law equal to row 0's by value, as each view's frame gives its own (R10.T16.b)", () => {
+    const elsewhere = classRowLaw(PHASE_LAW.regolith, 1);
+    const rows = new TerrainPhaseRows(elsewhere);
+    const before = rows.version;
+    expect(rows.setElsewhere({ ...elsewhere, a: [...elsewhere.a] })).toBe(false);
+    expect(rows.version).toBe(before);
+    expect(rows.setElsewhere({ ...elsewhere, lommelSeeligerShare: 0.5 })).toBe(true);
     expect(rows.version).toBe(before + 1);
   });
 

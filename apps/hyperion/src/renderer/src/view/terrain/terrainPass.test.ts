@@ -68,8 +68,27 @@ class FakePool implements TerrainPool {
   demand: ReadonlyArray<PatchRequest> = [];
   /** R10's layers each bake carries: `null`, as the test planet's, unless a test sets them. */
   layers: TerrainLayers | null = null;
+  /** Each key's own layers where a test gives them (R10.T16.b's rebake rule), else {@link layers}. */
+  readonly layersOf = new Map<string, TerrainLayers>();
+  /** Whether every worker is lost (R10.T16.b's fault). */
+  unavailable = false;
   readonly #listeners = new Set<(bake: BakedPatch) => void>();
+  readonly #failures = new Set<(failure: { readonly keyString: string }) => void>();
   terminated = false;
+
+  onFailed(cb: (failure: { readonly keyString: string }) => void): () => void {
+    this.#failures.add(cb);
+    return () => {
+      this.#failures.delete(cb);
+    };
+  }
+
+  /** Gives up the request of `key`, as the pool does a bake that failed. */
+  fail(key: PatchRequest["key"]): void {
+    for (const listener of this.#failures) {
+      listener({ keyString: patchKeyString(key) });
+    }
+  }
 
   /** Listeners still subscribed. */
   get listeners(): number {
@@ -115,7 +134,7 @@ class FakePool implements TerrainPool {
       boundingRadiusM: 1,
       originHeightM: 0,
       skirtDepthM: 1,
-      layers: this.layers,
+      layers: this.layersOf.get(patchKeyString(key)) ?? this.layers,
     };
     for (const listener of this.#listeners) {
       listener(bake);

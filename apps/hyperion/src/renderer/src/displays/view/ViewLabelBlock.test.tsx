@@ -1,7 +1,9 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import STYLES from "../../styles.css?raw";
 import { statusLine } from "../../test/statusLine";
+import { TERRAIN_NOT_AVAILABLE } from "../../view/terrain/annunciation";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 
 /** The classes of the parts the status line reading `text` is set in. */
@@ -16,7 +18,7 @@ describe("the view's label block", () => {
         lines={[{ label: "STYLE", value: "PHOTOREALISTIC" }]}
         statements={["TERRAIN: DETAIL LIMITED"]}
         countLine={null}
-        fault={null}
+        faults={[]}
       />,
     );
     const line = screen.getByText(statusLine("TERRAIN: DETAIL LIMITED"));
@@ -32,13 +34,54 @@ describe("the view's label block", () => {
         lines={[{ label: "STYLE", value: "WIREFRAME" }]}
         statements={["TERRAIN: STREAMING", "TEST PLANET: provisional, dry and hand-parameterised"]}
         countLine={null}
-        fault={null}
+        faults={[]}
       />,
     );
     expect([
       partsOf("TERRAIN: STREAMING"),
       partsOf("TEST PLANET: provisional, dry and hand-parameterised"),
     ]).toEqual([["status-text__state"], ["status-text__state", "status-text__sentence"]]);
+  });
+
+  it("sets each fault on a fault line of its own in --status-caution, the graphics fault first (R10.T16.b)", () => {
+    render(
+      <ViewLabelBlock
+        lines={[{ label: "STYLE", value: "PHOTOREALISTIC" }]}
+        statements={[]}
+        countLine={null}
+        faults={["GRAPHICS DEVICE LOST: re-creating", TERRAIN_NOT_AVAILABLE]}
+      />,
+    );
+    const faults = screen
+      .getAllByRole("status")
+      .filter((output) => output.classList.contains("request-status__text--fault"));
+    expect(faults.map((output) => output.textContent)).toEqual([
+      "GRAPHICS DEVICE LOST: re-creating",
+      "TERRAIN NOT AVAILABLE: height computation failed, reopen VIEW to retry",
+    ]);
+    // The fault line's class is set in the caution colour, the guide's for a failed system.
+    expect(STYLES).toMatch(
+      /\.request-status__text--fault,[^{]*\{\s*color: var\(--status-caution\);\s*\}/u,
+    );
+    // The terrain's state is tracked and its sentence after the colon is not (Typography).
+    expect(partsOf(TERRAIN_NOT_AVAILABLE)).toEqual(["status-text__state", "status-text__sentence"]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("sets no fault line with no fault", () => {
+    render(
+      <ViewLabelBlock
+        lines={[{ label: "STYLE", value: "PHOTOREALISTIC" }]}
+        statements={["TERRAIN: STREAMING"]}
+        countLine={null}
+        faults={[]}
+      />,
+    );
+    expect(
+      screen
+        .getAllByRole("status")
+        .filter((output) => output.classList.contains("request-status__text--fault")),
+    ).toEqual([]);
   });
 });
 
@@ -53,7 +96,7 @@ describe("the view's label block's line breaks (R07.T19.b)", () => {
 
   function block(): HTMLElement {
     const { container } = render(
-      <ViewLabelBlock lines={LINES} statements={[]} countLine={null} fault={null} />,
+      <ViewLabelBlock lines={LINES} statements={[]} countLine={null} faults={[]} />,
     );
     return container;
   }
@@ -92,7 +135,7 @@ describe("the view's label block's line breaks (R07.T19.b)", () => {
         lines={[{ label: "SCENE CLOCK", value: "86,400 s/s" }]}
         statements={[]}
         countLine={null}
-        fault={null}
+        faults={[]}
       />,
     );
     const runs = [...container.querySelectorAll(".view-label__run")].map((run) => run.textContent);
@@ -112,7 +155,7 @@ describe("the view's label block's field (R06.T11.f)", () => {
         ]}
         statements={[]}
         countLine={null}
-        fault={null}
+        faults={[]}
       />,
     );
     const field = container.querySelector<HTMLElement>(".view-label__field");
@@ -182,7 +225,7 @@ describe("the view's label block's limit field (R06.T13.j)", () => {
         ]}
         statements={[]}
         countLine={null}
-        fault={null}
+        faults={[]}
       />,
     );
     return container;
@@ -249,7 +292,7 @@ describe("the sky's STARS reading's leading dots (R06.T13.j)", () => {
         ]}
         statements={[]}
         countLine={null}
-        fault={null}
+        faults={[]}
       />,
     );
     return container;
@@ -308,7 +351,7 @@ describe("the sky's STARS reading's leading dots (R06.T13.j)", () => {
         ]}
         statements={[]}
         countLine={null}
-        fault={null}
+        faults={[]}
       />,
     );
     expect(

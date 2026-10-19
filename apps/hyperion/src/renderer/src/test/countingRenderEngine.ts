@@ -99,6 +99,14 @@ export interface RecordedTextureWrite {
   readonly data: Uint8Array;
 }
 
+/** How many of each kind of handle are live: made and neither released nor lost (R10.T16.b). */
+export interface LiveHandles {
+  readonly buffers: number;
+  readonly textures: number;
+  readonly meshes: number;
+  readonly materials: number;
+}
+
 /** A creation the device's limits would refuse with a validation error. */
 export class LimitExceeded extends Error {
   constructor(message: string) {
@@ -156,6 +164,11 @@ export class CountingRenderEngine implements RenderEngine {
     BufferHandle | TextureHandle,
     { bytes: number; category: MemoryCategory }
   >();
+  /** The meshes and materials made and not released or lost (R10.T16.b). */
+  readonly #meshes = new Set<MeshHandle>();
+  readonly #materials = new Set<MaterialHandle>();
+  /** The handles a modelled loss took ({@link CountingRenderEngine.loseHandles}), whose release is dropped. */
+  readonly #lost = new WeakSet<BufferHandle | TextureHandle | MeshHandle | MaterialHandle>();
   #capabilities: GpuCapabilities;
 
   constructor(device: GPUDevice) {
@@ -166,6 +179,46 @@ export class CountingRenderEngine implements RenderEngine {
   /** The device's capabilities: the first device's, or the one the last restore rebuilt onto. */
   get capabilities(): GpuCapabilities {
     return this.#capabilities;
+  }
+
+  /**
+   * The handles live now, by kind: made, and neither released nor taken by a modelled loss, so that
+   * a test holds an owner's teardown to "nothing left" (R10.T16.b; render targets' textures, which
+   * their targets own, count while the engine lives).
+   */
+  get live(): LiveHandles {
+    let buffers = 0;
+    let textures = 0;
+    for (const handle of this.#made.keys()) {
+      if (handle.kind === "buffer") {
+        buffers += 1;
+      } else {
+        textures += 1;
+      }
+    }
+    return { buffers, textures, meshes: this.#meshes.size, materials: this.#materials.size };
+  }
+
+  /**
+   * Models a device loss's end of every handle made so far, as `ResilientEngine`'s lost engine
+   * disposes of them (R10.T16.b): each buffer and texture raises its `destroyed` event, every
+   * handle leaves the live tallies, and a later release of one is dropped, as the resilient engine
+   * drops it. A test follows it with {@link CountingRenderEngine.restore}.
+   */
+  loseHandles(): void {
+    for (const [handle, made] of this.#made) {
+      this.#lost.add(handle);
+      this.#emit({ kind: "destroyed", name: handle.name, ...made });
+    }
+    this.#made.clear();
+    for (const mesh of this.#meshes) {
+      this.#lost.add(mesh);
+    }
+    this.#meshes.clear();
+    for (const material of this.#materials) {
+      this.#lost.add(material);
+    }
+    this.#materials.clear();
   }
 
   /** Zeroes {@link CountingRenderEngine.counts}; the recorded lists are kept. */
@@ -248,12 +301,16 @@ export class CountingRenderEngine implements RenderEngine {
 
   createMesh(spec: MeshSpec): MeshHandle {
     this.counts.meshes += 1;
-    return { kind: "mesh", name: spec.name };
+    const mesh: MeshHandle = { kind: "mesh", name: spec.name };
+    this.#meshes.add(mesh);
+    return mesh;
   }
 
   createMaterial(spec: WgslMaterialSpec): MaterialHandle {
     this.counts.materials += 1;
-    return { kind: "material", name: spec.name };
+    const material: MaterialHandle = { kind: "material", name: spec.name };
+    this.#materials.add(material);
+    return material;
   }
 
   createMaterialAsync(spec: WgslMaterialSpec): Promise<MaterialHandle> {
@@ -341,7 +398,30 @@ export class CountingRenderEngine implements RenderEngine {
     this.#release(texture);
   }
 
+  /** Forgets a mesh, as the engine destroys its buffers (R10.T16.b); a lost one is dropped. */
+  releaseMesh(mesh: MeshHandle): void {
+    if (this.#lost.has(mesh)) {
+      return;
+    }
+    if (!this.#meshes.delete(mesh)) {
+      throw new Error(`mesh ${mesh.name} was not made by this engine, or was released`);
+    }
+  }
+
+  /** Forgets a material, as the engine forgets its record (R10.T16.b); a lost one is dropped. */
+  releaseMaterial(material: MaterialHandle): void {
+    if (this.#lost.has(material)) {
+      return;
+    }
+    if (!this.#materials.delete(material)) {
+      throw new Error(`material ${material.name} was not made by this engine, or was released`);
+    }
+  }
+
   #release(handle: BufferHandle | TextureHandle): void {
+    if (this.#lost.has(handle)) {
+      return;
+    }
     const made = this.#made.get(handle);
     if (made === undefined) {
       throw new Error(`${handle.name} was not made by this engine, or was released`);

@@ -244,7 +244,7 @@ function Instrument({ title, canvasRef, stageRef, run, listId, cameraLabel }: In
             // The scene's statements are the main view's, which states them for every view.
             statements={[]}
             countLine={null}
-            fault={null}
+            faults={[]}
           />
         </div>
       </div>
@@ -558,7 +558,7 @@ export function DescentSpike({
                     : labelStatements(runs.main, terrain?.annunciation ?? null)),
                 ]}
                 countLine={null}
-                fault={drawFault}
+                faults={drawFault === null ? [] : [drawFault]}
               />
             </div>
           </div>

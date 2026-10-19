@@ -225,6 +225,25 @@ export function classPhotometryOf(photometry: Float32Array, slot: number): Class
 }
 
 /**
+ * Whether two laws give the same phase table row: the same A, L(0), template and exponents, and the
+ * same L(α) profile object (the templates' own, shared), or each none.
+ */
+function sameLaw(a: PhotometricLaw, b: PhotometricLaw): boolean {
+  return (
+    a === b ||
+    (a.a[0] === b.a[0] &&
+      a.a[1] === b.a[1] &&
+      a.a[2] === b.a[2] &&
+      a.lommelSeeligerShare === b.lommelSeeligerShare &&
+      a.lommelSeeligerCurve === b.lommelSeeligerCurve &&
+      a.template === b.template &&
+      a.phaseExponent[0] === b.phaseExponent[0] &&
+      a.phaseExponent[1] === b.phaseExponent[1] &&
+      a.phaseExponent[2] === b.phaseExponent[2])
+  );
+}
+
+/**
  * The rows of a terrain's phase table (`phase_factor_table`): row 0 the body's uniform law, then
  * one row per (law, L(0)) as the patches' class laws ask for them, kept in the order asked.
  *
@@ -252,9 +271,14 @@ export class TerrainPhaseRows {
     return this.#version;
   }
 
-  /** Puts `law` in row 0; whether it changed. */
+  /**
+   * Puts `law` in row 0; whether it changed. A law equal to row 0's by value changes nothing, so
+   * that the views of one body, each lit by its own frame's law object, upload the table once
+   * (plan R10, R10.T16.b).
+   */
   setElsewhere(law: PhotometricLaw): boolean {
-    if (this.#laws[0] === law) {
+    const held = this.#laws[0];
+    if (held !== undefined && sameLaw(held, law)) {
       return false;
     }
     this.#laws[0] = law;

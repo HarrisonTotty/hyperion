@@ -7,8 +7,11 @@ import type { AllocationEvent, TextureSpec } from "../memory";
 import { GraphicsStatusStore, initialGraphicsStatus } from "../status";
 import {
   Float32BlendUnavailable,
+  type MaterialHandle,
+  type MeshHandle,
   type PassTimes,
   PresentationOnlyReadback,
+  type RenderTarget,
   type TextureHandle,
 } from "../types";
 import { WebGpuRenderEngine } from "./engine";
@@ -505,5 +508,162 @@ describe("a texture bound where a 2d-array is declared", () => {
     await expect(
       drawWith(engine, engine.createTexture(sampled("layers", 2)), "2d"),
     ).rejects.toThrow(/declares tiles as 2d, but layers is 2d-array/u);
+  });
+});
+
+/** A material with one sampled texture, `tiles`, whose pipelines for `meshes` are made. */
+function tiledMaterial(
+  engine: WebGpuRenderEngine,
+  name: string,
+  meshes: ReadonlyArray<MeshHandle>,
+): Promise<MaterialHandle> {
+  return engine.createMaterialAsync(
+    {
+      name,
+      displayName: name.toUpperCase(),
+      vertexWgsl: "",
+      fragmentWgsl: "",
+      uniforms: [],
+      samplers: [],
+      textures: [{ name: "tiles", binding: 0 }],
+      cullMode: "none",
+      depthWrite: false,
+      colourWrites: true,
+      blend: "none",
+    },
+    ["rgba16float"],
+    meshes,
+  );
+}
+
+/** One frame drawing `mesh` with each of `materials`, its texture `tiles`, into `target`. */
+function drawEach(
+  target: RenderTarget,
+  mesh: MeshHandle,
+  materials: ReadonlyArray<MaterialHandle>,
+  tiles: TextureHandle,
+): void {
+  target.render({
+    label: "releases",
+    viewRotation: new Float32Array(16),
+    projection: new Float32Array(16),
+    draws: materials.map((material) => ({
+      mesh,
+      material,
+      offsetFromCameraM: new Float32Array(3),
+      uniforms: {},
+      textures: { tiles },
+    })),
+    postProcesses: [],
+  });
+}
+
+/** A triangle with indices: a position buffer and an index buffer. */
+function indexedTriangle(engine: WebGpuRenderEngine): MeshHandle {
+  return engine.createMesh({
+    name: "triangle",
+    positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+    indices: new Uint32Array([0, 1, 2]),
+    topology: "triangle-list",
+    attributes: {},
+  });
+}
+
+/** A small target to draw into. */
+function outTarget(engine: WebGpuRenderEngine): RenderTarget {
+  return engine.createRenderTarget({
+    name: "out",
+    size: { widthPx: 4, heightPx: 4 },
+    format: "rgba16float",
+    mips: 1,
+    depth: false,
+    category: "render-targets",
+  });
+}
+
+describe("mesh and material releases (R10.T16.b)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  it("destroy a mesh's buffers at once, one destroyed event each with the bytes it was made with", async () => {
+    const { engine, gpu } = await engineOn();
+    const events: AllocationEvent[] = [];
+    engine.onAllocation((event) => events.push(event));
+    const mesh = indexedTriangle(engine);
+    const created = events.flatMap((event) =>
+      event.kind === "created" ? [[event.name, event.bytes, event.category]] : [],
+    );
+    engine.releaseMesh(mesh);
+    const destroyed = events.flatMap((event) =>
+      event.kind === "destroyed" ? [[event.name, event.bytes, event.category]] : [],
+    );
+    expect(created.map(([name]) => name)).toEqual(["triangle:position", "triangle:indices"]);
+    expect(destroyed).toEqual(created);
+    expect(
+      gpu.buffers.filter((b) => b.label.startsWith("triangle:")).map((b) => b.destroyed),
+    ).toEqual([true, true]);
+  });
+
+  it("refuse a released mesh in a draw, in createMaterialAsync's meshes and in a second release", async () => {
+    const { engine } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const tiles = engine.createTexture(sampled("tiles", 1));
+    const material = await tiledMaterial(engine, "flat", [mesh]);
+    engine.releaseMesh(mesh);
+    expect(() => {
+      drawEach(outTarget(engine), mesh, [material], tiles);
+    }).toThrow(/mesh triangle was released/u);
+    await expect(tiledMaterial(engine, "later", [mesh])).rejects.toThrow(
+      /mesh triangle was released/u,
+    );
+    expect(() => {
+      engine.releaseMesh(mesh);
+    }).toThrow(/mesh triangle was released/u);
+  });
+
+  it("refuse a released material in a draw and in a second release", async () => {
+    const { engine } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const tiles = engine.createTexture(sampled("tiles", 1));
+    const material = await tiledMaterial(engine, "flat", [mesh]);
+    engine.releaseMaterial(material);
+    expect(() => {
+      drawEach(outTarget(engine), mesh, [material], tiles);
+    }).toThrow(/material flat was released/u);
+    expect(() => {
+      engine.releaseMaterial(material);
+    }).toThrow(/material flat was released/u);
+  });
+
+  it("refuse the release of a mesh or material another engine made", async () => {
+    const { engine } = await engineOn();
+    const other = (await engineOn()).engine;
+    const mesh = indexedTriangle(other);
+    expect(() => {
+      engine.releaseMesh(mesh);
+    }).toThrow(/mesh triangle was not made by this engine/u);
+    const material = await tiledMaterial(other, "flat", []);
+    expect(() => {
+      engine.releaseMaterial(material);
+    }).toThrow(/material flat was not made by this engine/u);
+  });
+
+  it("leave no cached bind group of a released material: the draw path's cache is cleared", async () => {
+    const { engine, gpu } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const tiles = engine.createTexture(sampled("tiles", 1));
+    const released = await tiledMaterial(engine, "released", [mesh]);
+    const kept = await tiledMaterial(engine, "kept", [mesh]);
+    const target = outTarget(engine);
+    drawEach(target, mesh, [released, kept], tiles);
+    const made = gpu.bindGroups.length;
+    // Cached: the same frame again makes no bind group.
+    drawEach(target, mesh, [kept], tiles);
+    expect(gpu.bindGroups).toHaveLength(made);
+    engine.releaseMaterial(released);
+    // Every cached group is gone, the released material's among them: the kept one's is made again.
+    drawEach(target, mesh, [kept], tiles);
+    expect(gpu.bindGroups.length).toBeGreaterThan(made);
   });
 });

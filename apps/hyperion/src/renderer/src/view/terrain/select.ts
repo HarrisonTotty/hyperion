@@ -11,6 +11,14 @@
  * selected patches form a restricted quadtree: no two neighbours, across face edges and at cube
  * corners included, differ by more than one level. Patches no view can see, outside every frustum
  * or below every horizon, are not selected.
+ *
+ * Given a survey lookup (plan R10, R10.T16.b; decision-r10-live-path, D6, and
+ * decision-r10-t16-contracts §2–3), a patch with no surveyed coarse cell under it is bare: the
+ * reference surface is the ground there (R10 Design note 12), so it is never refined, forced,
+ * demanded or drawn, whatever the view, the setting or a contact. It stays in the quadtree, seen as
+ * before, so that the balance is the same, but counts against no budget and is left out of the
+ * result. Without a lookup, and with one that calls every patch surveyed, the selection is R05's,
+ * bit for bit.
  */
 
 import type { Quaternion } from "../camera/pose";
@@ -41,7 +49,12 @@ import {
 import { finestPatchSizeM, type GroundContact, inForcedRegionPacked } from "./grounded";
 import { compareRequests } from "./priority";
 import { type BodyFixedVec3, levelBoundM, levelHeightRangeM, type PlanetGeometry } from "./planet";
-import { type ViewGeometry, viewExcessPacked, viewGeometry } from "./viewGeometry";
+import {
+  distanceToPackedBoxFromM,
+  type ViewGeometry,
+  viewExcessPacked,
+  viewGeometry,
+} from "./viewGeometry";
 
 /*
  * The imports selection reads for every node, split or comparison, bound once. Under a module
@@ -65,6 +78,12 @@ export interface SelectedPatch {
    * `maxPatches`.
    */
   readonly seen: boolean;
+  /**
+   * The views that see it, bit k for `SelectionInput.views[k]` (plan R10, R10.T16.b): a
+   * non-negative 32-bit integer, since at most {@link MAX_SELECTION_VIEWS} views are selected for;
+   * 0 for a forced patch no view sees.
+   */
+  readonly views: number;
 }
 
 /** A request to bake a patch, with its streaming priority (Design note 24). */
@@ -119,6 +138,20 @@ export interface Selection {
    * approach's coarse patches thrashed this way (decision-r05-high-bound.md, reason 3c).
    */
   readonly hiddenBaked: ReadonlyArray<PatchKey>;
+  /**
+   * The distance from the nearest view's camera to the nearest surveyed ground, metres, at least
+   * one finest patch: the box distance of the nearest patch of level {@link NEAREST_SURVEY_LEVEL}
+   * (or the finest) with a surveyed cell under it; `+∞` with no survey lookup or no surveyed cell
+   * (plan R10, R10.T16.b; decision-r10-t16-contracts §3).
+   *
+   * @remarks
+   * The terrain pass's move rule takes it only where no selected patch above the finest level gives
+   * a distance, as over bare ground with the survey out of view: closing on a survey, the pass
+   * selects again on the way, and the survey's patches enter within a reselection step of the first
+   * pose at which a fresh selection holds them. With no lookup it is `+∞`, so R05's reselection is
+   * unchanged.
+   */
+  readonly nearestSurveyM: number;
 }
 
 /**
@@ -128,6 +161,19 @@ export interface Selection {
 export interface HeightRangeLookup {
   /** The lowest and highest baked height of `key`, metres, or `undefined` if it is not baked. */
   heightRangeM(key: PatchKey): readonly [number, number] | undefined;
+}
+
+/**
+ * Which patches have surveyed ground under them (plan R10, R10.T16.b; decision-r10-live-path, D6):
+ * the body's coverage as selection reads it, from the coarse-field store's coverage and the blocks
+ * the workers took (`surveyLookup.ts`' `SurveyedCells`).
+ */
+export interface SurveyLookup {
+  /**
+   * Whether any coarse cell that a vertex of patch `key` reads for its survey mask is surveyed: a
+   * conservative answer, so that no patch it calls bare bakes a vertex inside the survey.
+   */
+  surveyedUnder(key: PatchKey): boolean;
 }
 
 /** One view's part in selection (Design notes 7, 23 and 24). */
@@ -171,6 +217,12 @@ export interface SelectionInput {
    * down to the skirts' bottoms. Absent, 0.
    */
   readonly skirtMarginM?: number;
+  /**
+   * The body's survey (R10.T16.b): a patch it calls bare is never refined, forced, demanded or
+   * drawn. Absent, every patch is surveyed, as on the test planet and R07's reference spheroid.
+   * Selection stays a pure function of its inputs: the lookup is one of them.
+   */
+  readonly survey?: SurveyLookup;
 }
 
 /**
@@ -268,6 +320,11 @@ interface TraversalNode {
   readonly baked: BakedRange | null;
   /** Whether it is baked itself. */
   readonly resident: boolean;
+  /**
+   * Whether no surveyed cell lies under it ({@link SurveyLookup}): never refined, forced, demanded
+   * or drawn, and counted against no budget; `false` with no lookup.
+   */
+  readonly bare: boolean;
   /** The node it was split from, `null` for a root. */
   readonly parent: TraversalNode | null;
   /**
@@ -472,7 +529,11 @@ function cellOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Memo
     }
     return root;
   }
-  const up = parent.cell;
+  return memoChild(t, parent.cell, key);
+}
+
+/** The memo cell of `key`, a child of the patch whose cell is `up`, made where there is none. */
+function memoChild(t: Traversal, up: MemoCell, key: PatchKey): MemoCell {
   const n = (key.i & 1) | ((key.j & 1) << 1);
   const known = n === 0 ? up.child0 : n === 1 ? up.child1 : n === 2 ? up.child2 : up.child3;
   if (known !== null) {
@@ -572,6 +633,8 @@ interface Traversal extends PlanetTables {
   readonly range: Float64Array;
   readonly grounded: ReadonlyArray<GroundContact>;
   readonly heightRanges: HeightRangeLookup | null;
+  /** The body's survey, or `null`, every patch then surveyed. */
+  readonly survey: SurveyLookup | null;
   /** The bake's skirt margin, metres. */
   readonly skirtMarginM: number;
   /** The finest level's patch edge, metres: the forced region's unit. */
@@ -644,6 +707,8 @@ function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Trav
   buildBounds(t, cell, key, baked);
   const packed = cell.packed;
   const errorM = t.errorM[key.level] ?? 0;
+  // Bare ground is the reference surface's: seen, for the balance, but wanting nothing.
+  const bare = t.survey !== null && !t.survey.surveyedUnder(key);
   let seenBy = 0;
   let wantedBy = 0;
   let excess = 0;
@@ -659,13 +724,17 @@ function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Trav
       continue;
     }
     seenBy |= 1 << n;
+    if (bare) {
+      continue;
+    }
     if (e > 1) {
       wantedBy |= 1 << n;
     }
     excess = Math.max(excess, e);
     weighted = Math.max(weighted, v.input.weight * e);
   }
-  const forced = t.grounded.length > 0 && forcedAt(packed, t.grounded, t.patchSizeM);
+  // Unsurveyed ground wins over the forced region (decision-r10-t16-contracts §2).
+  const forced = !bare && t.grounded.length > 0 && forcedAt(packed, t.grounded, t.patchSizeM);
   if (seenBy === 0 && !forced) {
     if (own !== undefined && parent !== null) {
       parent.hiddenBaked |= 1 << ((key.i & 1) | ((key.j & 1) << 1));
@@ -682,6 +751,7 @@ function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Trav
     forced,
     baked,
     resident: own !== undefined,
+    bare,
     parent,
     split: false,
     hiddenBaked: 0,
@@ -919,12 +989,14 @@ export function selectPatches(input: SelectionInput): Selection {
     range: new Float64Array(2),
     grounded: input.grounded,
     heightRanges: input.heightRanges ?? null,
+    survey: input.survey ?? null,
     skirtMarginM: input.skirtMarginM ?? 0,
     patchSizeM: finestPatchSizeM(planet),
   };
   const maxPatches = input.maxPatches ?? Infinity;
-  // A forced patch no view sees is selected, to be kept resident, but neither drawn nor counted.
-  const tree = new PatchLeafSet<TraversalNode>((node) => node.seenBy !== 0);
+  // A forced patch no view sees is selected, to be kept resident, but neither drawn nor counted;
+  // nor is a bare one, which the reference surface draws.
+  const tree = new PatchLeafSet<TraversalNode>((node) => node.seenBy !== 0 && !node.bare);
   const heap = new CandidateHeap();
   const offer = (node: TraversalNode): void => {
     if (wantsRefining(t, node)) {
@@ -962,7 +1034,8 @@ export function selectPatches(input: SelectionInput): Selection {
       offer(leaf);
     }
   }
-  const leaves = tree.leafValues();
+  // A bare leaf is the reference surface's: neither drawn nor asked for.
+  const leaves = t.survey === null ? tree.leafValues() : tree.leafValues().filter((n) => !n.bare);
   const patches = new Map<string, SelectedPatch>();
   for (const node of leaves) {
     const cell = node.cell;
@@ -970,14 +1043,16 @@ export function selectPatches(input: SelectionInput): Selection {
     const bounds = boundsOfCell(cell);
     const forced = node.forced && node.key.level === planet.finestLevel;
     const seen = node.seenBy !== 0;
+    const views = node.seenBy;
     let selected = cell.selected;
     if (
       selected === null ||
       selected.bounds !== bounds ||
       selected.forced !== forced ||
-      selected.seen !== seen
+      selected.seen !== seen ||
+      selected.views !== views
     ) {
-      selected = { key: node.key, bounds, forced, seen };
+      selected = { key: node.key, bounds, forced, seen, views };
       cell.selected = selected;
     }
     patches.set(cell.keyString, selected);
@@ -988,7 +1063,80 @@ export function selectPatches(input: SelectionInput): Selection {
     limited,
     limitExcess,
     hiddenBaked: hiddenBakedOf(t, tree),
+    nearestSurveyM: nearestSurveyOf(t),
   };
+}
+
+/**
+ * The level whose patches {@link Selection.nearestSurveyM} measures to: R09's deepest coarse field
+ * (no survey lookup holds finer cells), whose cells are no wider than about 40 km.
+ */
+export const NEAREST_SURVEY_LEVEL = 8;
+
+/** A patch with surveyed ground under it, on the way down to the nearest surveyed ground. */
+interface SurveyStep {
+  readonly key: PatchKey;
+  readonly cell: MemoCell;
+  readonly baked: BakedRange | null;
+  /** Its box's distance from the camera, metres. */
+  readonly distanceM: number;
+}
+
+/**
+ * {@link Selection.nearestSurveyM}: the least over the views of each camera's box distance to the
+ * nearest patch of {@link NEAREST_SURVEY_LEVEL} (or the finest level) with surveyed ground under it,
+ * found best first from the six roots through the patches with surveyed ground under them, and at
+ * least one finest patch; `+∞` with no lookup or no surveyed ground.
+ */
+function nearestSurveyOf(t: Traversal): number {
+  const survey = t.survey;
+  if (survey === null) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const deepest = Math.min(NEAREST_SURVEY_LEVEL, t.planet.finestLevel);
+  let nearest = Number.POSITIVE_INFINITY;
+  for (const view of t.views) {
+    const camera = view.input.camera.positionM;
+    const step = (key: PatchKey, cell: MemoCell, above: BakedRange | null): SurveyStep => {
+      cell.usedAt = t.memo.call;
+      const own = t.heightRanges?.heightRangeM(key);
+      const baked: BakedRange | null =
+        own === undefined ? above : { level: key.level, lowM: own[0], highM: own[1] };
+      buildBounds(t, cell, key, baked);
+      return { key, cell, baked, distanceM: distanceToPackedBoxFromM(cell.packed, camera) };
+    };
+    const frontier: SurveyStep[] = [];
+    for (const face of FACES) {
+      const key = rootKey(face);
+      const root = t.memo.roots[face];
+      if (root !== undefined && survey.surveyedUnder(key)) {
+        frontier.push(step(key, root, null));
+      }
+    }
+    for (;;) {
+      // The frontier holds a few patches a level: a scan finds its nearest.
+      let at = -1;
+      for (let n = 0; n < frontier.length; n += 1) {
+        if (at < 0 || (frontier[n]?.distanceM ?? 0) < (frontier[at]?.distanceM ?? 0)) {
+          at = n;
+        }
+      }
+      const next = at < 0 ? undefined : frontier.splice(at, 1)[0];
+      if (next === undefined || next.distanceM >= nearest) {
+        break;
+      }
+      if (next.key.level >= deepest) {
+        nearest = next.distanceM;
+        break;
+      }
+      for (const child of childKeys(next.key)) {
+        if (survey.surveyedUnder(child)) {
+          frontier.push(step(child, memoChild(t, next.cell, child), next.baked));
+        }
+      }
+    }
+  }
+  return Number.isFinite(nearest) ? Math.max(nearest, t.patchSizeM) : nearest;
 }
 
 /** The baked patches among the tree's bare keys ({@link Selection.hiddenBaked}). */
@@ -1014,6 +1162,7 @@ function hiddenBakedOf(t: Traversal, tree: PatchLeafSet<TraversalNode>): PatchKe
 function demandOf(t: Traversal, leaves: ReadonlyArray<TraversalNode>): PatchRequest[] {
   const requests = new Map<TraversalNode, PatchRequest>();
   for (const leaf of leaves) {
+    // The caller leaves the bare leaves out; a surveyed leaf's ancestors are surveyed too.
     if (leaf.resident) {
       continue;
     }

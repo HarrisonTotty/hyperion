@@ -19,6 +19,14 @@
  * restore, so that a row's index never changes, and uploaded again whenever one is added. It also
  * holds each slot's survey mask and draws the lit material's own mesh, whose skirts and fins join
  * the terrain to the reference surface at the survey's edge (R10.T10.c, Design note 12).
+ *
+ * Each view that draws the terrain has its own frame buffers (plan R10, R10.T16.b): its instance,
+ * contact and indirect buffers and, on a lit layout, its lights, made at its first frame and
+ * released when it leaves ({@link TerrainResources.releaseView}); {@link DEFAULT_TERRAIN_VIEW}'s are
+ * made with the rest, under R05's names. {@link TerrainResources.dispose} releases every handle the
+ * resources made, so that a pass disposed while the engine lives leaves nothing behind
+ * (decision-r10-t16-contracts §1); after a device loss the old handles are released first, which
+ * `ResilientEngine` drops, as they went with the lost device.
  */
 
 import { PHASE_TABLE_SAMPLES } from "../../appearance/law";
@@ -120,6 +128,12 @@ export const LIT_PATCH_INDICES =
  * 0, which most bodies' materials share; it doubles as rows are added.
  */
 const LIT_TABLE_ROWS = 4;
+
+/**
+ * The view whose frame buffers are made with the resources, under R05's names (`terrain instances`
+ * and the rest): the descent spike's one view, `TerrainPass.frame`'s (R10.T16.b).
+ */
+export const DEFAULT_TERRAIN_VIEW = "primary";
 
 /** The texture format of the normals atlas: an octahedral pair as two half floats. */
 export const NORMALS_FORMAT = "rg16float";
@@ -572,10 +586,8 @@ export type SlotUploadResult =
 
 const UPLOADED: SlotUploadResult = { kind: "uploaded" };
 
-/** A lit layout's frame resources (R10.T10.b). */
+/** A lit layout's phase table (R10.T10.b), which every view's draw binds. */
 interface LitMade {
-  /** The frame's lights, `TERRAIN_LIGHT_ROWS` `vec4f`. */
-  readonly lights: BufferHandle;
   /** The phase table, `rgba32float`, `tableRows` rows of `PHASE_TABLE_SAMPLES`. */
   table: TextureHandle;
   tableRows: number;
@@ -583,19 +595,30 @@ interface LitMade {
   tableVersion: number;
 }
 
+/** One view's frame buffers (R10.T16.b). */
+export interface TerrainViewBuffers {
+  /** Its instance records ({@link INSTANCE_RECORD_BYTES} each), one per slot at most. */
+  readonly instances: BufferHandle;
+  /** Its contacts' header and records. */
+  readonly contacts: BufferHandle;
+  /** Its `drawIndexedIndirect` arguments, for `DrawItem.indirect` at offset 0. */
+  readonly indirect: BufferHandle;
+  /** A lit layout's lights for it, `TERRAIN_LIGHT_ROWS` `vec4f`; `null` for R05's spike shading. */
+  readonly lights: BufferHandle | null;
+}
+
 /** The buffers and textures of one layout, made together. */
 interface Made {
   readonly layout: TerrainLayout;
-  /** The lit layout's frame resources; `null` for R05's spike shading. */
+  /** The lit layout's phase table; `null` for R05's spike shading. */
   readonly lit: LitMade | null;
   /** Each storage-buffer field of the layout with bytes, by its name. */
   readonly fields: ReadonlyMap<SlotFieldName, BufferHandle>;
   readonly slotRecords: BufferHandle;
   readonly normals: TextureHandle;
   readonly mesh: MeshHandle;
-  readonly instances: BufferHandle;
-  readonly contacts: BufferHandle;
-  readonly indirect: BufferHandle;
+  /** Each view's frame buffers, {@link DEFAULT_TERRAIN_VIEW}'s made with the rest. */
+  readonly views: Map<string, TerrainViewBuffers>;
 }
 
 /**
@@ -627,6 +650,8 @@ export class TerrainResources {
   #horizonHeld: Uint8Array;
   /** A slot's horizon map of {@link NO_HORIZON_WORD}s, made once a slot is written without one. */
   #noHorizon: Uint32Array | null = null;
+  /** Every handle released ({@link TerrainResources.dispose}): nothing more is made. */
+  #disposed = false;
 
   constructor(
     engine: RenderEngine,
@@ -642,6 +667,8 @@ export class TerrainResources {
     this.#normalsScratch = this.#scratchFor(this.#made.layout);
     this.#horizonHeld = new Uint8Array(this.#made.layout.slots.slotCount);
     this.#offRestored = engine.onRestored(() => {
+      // The lost device's handles went with it: `ResilientEngine` drops their release.
+      this.#release(this.#made);
       this.#made = this.#make();
       this.#normalsScratch = this.#scratchFor(this.#made.layout);
       this.#horizonHeld = new Uint8Array(this.#made.layout.slots.slotCount);
@@ -675,19 +702,53 @@ export class TerrainResources {
     return this.#made.slotRecords;
   }
 
-  /** The instance records ({@link INSTANCE_RECORD_BYTES} each), one per slot at most. */
+  /** {@link DEFAULT_TERRAIN_VIEW}'s instance records ({@link INSTANCE_RECORD_BYTES} each). */
   get instances(): BufferHandle {
-    return this.#made.instances;
+    return this.viewBuffers(DEFAULT_TERRAIN_VIEW).instances;
   }
 
-  /** The contacts' header and records. */
+  /** {@link DEFAULT_TERRAIN_VIEW}'s contacts' header and records. */
   get contacts(): BufferHandle {
-    return this.#made.contacts;
+    return this.viewBuffers(DEFAULT_TERRAIN_VIEW).contacts;
   }
 
-  /** `drawIndexedIndirect`'s arguments, for `DrawItem.indirect` at offset 0. */
+  /** {@link DEFAULT_TERRAIN_VIEW}'s `drawIndexedIndirect` arguments, at offset 0. */
   get indirect(): BufferHandle {
-    return this.#made.indirect;
+    return this.viewBuffers(DEFAULT_TERRAIN_VIEW).indirect;
+  }
+
+  /**
+   * `view`'s frame buffers (R10.T16.b), made at its first call on the current device: named after
+   * the view, as `terrain instances (view)`, all but {@link DEFAULT_TERRAIN_VIEW}'s, which are made
+   * with the resources under R05's names.
+   */
+  viewBuffers(view: string): TerrainViewBuffers {
+    if (this.#disposed) {
+      throw new Error("the terrain's resources were disposed: they make nothing more");
+    }
+    const made = this.#made;
+    let buffers = made.views.get(view);
+    if (buffers === undefined) {
+      buffers = this.#makeView(made.layout, view);
+      made.views.set(view, buffers);
+    }
+    return buffers;
+  }
+
+  /**
+   * Releases `view`'s frame buffers, once it no longer draws the terrain (R10.T16.b); nothing for
+   * a view with none made, or for {@link DEFAULT_TERRAIN_VIEW}, whose go with the resources. A
+   * caller never releases a view a frame not yet submitted draws.
+   */
+  releaseView(view: string): void {
+    if (view === DEFAULT_TERRAIN_VIEW) {
+      return;
+    }
+    const buffers = this.#made.views.get(view);
+    if (buffers !== undefined) {
+      this.#made.views.delete(view);
+      this.#releaseView(buffers);
+    }
   }
 
   /**
@@ -707,10 +768,19 @@ export class TerrainResources {
     return this.#horizonHeld[slot] === 1;
   }
 
-  /** A lit layout's lights buffer and phase table, or `null` for R05's spike shading. */
+  /**
+   * A lit layout's lights buffer, {@link DEFAULT_TERRAIN_VIEW}'s, and its phase table, or `null`
+   * for R05's spike shading.
+   */
   get lit(): { readonly lights: BufferHandle; readonly phaseTable: TextureHandle } | null {
     const lit = this.#made.lit;
-    return lit === null ? null : { lights: lit.lights, phaseTable: lit.table };
+    const lights = this.viewBuffers(DEFAULT_TERRAIN_VIEW).lights;
+    return lit === null || lights === null ? null : { lights, phaseTable: lit.table };
+  }
+
+  /** A lit layout's phase table, which every view's draw binds, or `null` for R05's spike shading. */
+  get phaseTable(): TextureHandle | null {
+    return this.#made.lit?.table ?? null;
   }
 
   /** The lit layout's phase rows, row 0 the body's uniform law. */
@@ -719,18 +789,19 @@ export class TerrainResources {
   }
 
   /**
-   * Writes a frame's lights into a lit layout's buffer, and the body's uniform law into row 0 of
-   * its phase table where it changed; nothing on R05's spike shading.
+   * Writes a frame's lights into `view`'s lights buffer of a lit layout, and the body's uniform law
+   * into row 0 of its phase table where it changed; nothing on R05's spike shading.
    */
-  setLighting(lighting: TerrainLighting): void {
+  setLighting(lighting: TerrainLighting, view: string = DEFAULT_TERRAIN_VIEW): void {
     const lit = this.#made.lit;
-    if (lit === null) {
+    const lights = this.viewBuffers(view).lights;
+    if (lit === null || lights === null) {
       return;
     }
     this.#rows.setElsewhere(lighting.elsewhere);
     this.#writeTable(lit);
     const { equatorialRadiusM: a, polarRadiusM: c } = this.#figure;
-    this.#engine.writeBuffer(lit.lights, 0, packTerrainLighting(lighting, c / a));
+    this.#engine.writeBuffer(lights, 0, packTerrainLighting(lighting, c / a));
   }
 
   /**
@@ -846,31 +917,72 @@ export class TerrainResources {
   }
 
   /**
-   * Writes a frame's instances and contacts and sets the indirect draw's instance count.
+   * Writes a frame's instances and contacts into `view`'s buffers and sets its indirect draw's
+   * instance count.
    *
    * @throws RangeError if `instances` holds more records than the buffer, whose capacity is the
    * slot count.
    */
-  writeFrame(instances: InstanceRecords, contacts: ContactRecords): void {
+  writeFrame(
+    instances: InstanceRecords,
+    contacts: ContactRecords,
+    view: string = DEFAULT_TERRAIN_VIEW,
+  ): void {
     const made = this.#made;
     if (instances.count > made.layout.slots.slotCount) {
       throw new RangeError(
         `${instances.count} instances exceed the ${made.layout.slots.slotCount} slots`,
       );
     }
+    const buffers = this.viewBuffers(view);
     if (instances.count > 0) {
-      this.#engine.writeBuffer(made.instances, 0, instances.bytes());
+      this.#engine.writeBuffer(buffers.instances, 0, instances.bytes());
     }
-    this.#engine.writeBuffer(made.contacts, 0, contacts.bytes());
+    this.#engine.writeBuffer(buffers.contacts, 0, contacts.bytes());
     this.#instanceCount[0] = instances.count;
     // `instanceCount` is the second of drawIndexedIndirect's five words.
-    this.#engine.writeBuffer(made.indirect, 4, this.#instanceCount);
+    this.#engine.writeBuffer(buffers.indirect, 4, this.#instanceCount);
   }
 
-  /** Stops following restores. The engine frees the handles with itself. */
+  /**
+   * Releases every handle the resources made on the current device, every view's buffers with
+   * them, and stops following restores (decision-r10-t16-contracts §1). A caller never disposes of
+   * resources a frame not yet submitted draws.
+   */
   dispose(): void {
+    if (this.#disposed) {
+      return;
+    }
+    this.#disposed = true;
     this.#offRestored();
     this.#rebuilt.clear();
+    this.#release(this.#made);
+  }
+
+  /** Releases every handle of `made`: the slot buffers, records and atlas, the mesh, the table and the views'. */
+  #release(made: Made): void {
+    for (const buffer of made.fields.values()) {
+      this.#engine.releaseBuffer(buffer);
+    }
+    this.#engine.releaseBuffer(made.slotRecords);
+    this.#engine.releaseTexture(made.normals);
+    this.#engine.releaseMesh(made.mesh);
+    if (made.lit !== null) {
+      this.#engine.releaseTexture(made.lit.table);
+    }
+    for (const buffers of made.views.values()) {
+      this.#releaseView(buffers);
+    }
+    made.views.clear();
+  }
+
+  #releaseView(buffers: TerrainViewBuffers): void {
+    this.#engine.releaseBuffer(buffers.instances);
+    this.#engine.releaseBuffer(buffers.contacts);
+    this.#engine.releaseBuffer(buffers.indirect);
+    if (buffers.lights !== null) {
+      this.#engine.releaseBuffer(buffers.lights);
+    }
   }
 
   /** The bytes a slot of `name` holds. */
@@ -976,20 +1088,59 @@ export class TerrainResources {
     });
   }
 
-  /** A lit layout's frame resources, the table holding the rows kept. */
+  /** A lit layout's phase table, holding the rows kept. */
   #makeLit(): LitMade {
-    const lights = this.#engine.createBuffer({
-      name: "terrain lights",
-      bytes: TERRAIN_LIGHT_ROWS * 16,
+    const tableRows = Math.max(LIT_TABLE_ROWS, this.#rows.laws.length);
+    const lit: LitMade = { table: this.#table(tableRows), tableRows, tableVersion: -1 };
+    this.#writeTable(lit);
+    return lit;
+  }
+
+  /**
+   * `view`'s frame buffers on `layout`: its instances, contacts and indirect arguments, and on a lit
+   * layout its lights, with no star until its first frame's.
+   */
+  #makeView(layout: TerrainLayout, view: string): TerrainViewBuffers {
+    const engine = this.#engine;
+    const named = (name: string): string =>
+      view === DEFAULT_TERRAIN_VIEW ? `terrain ${name}` : `terrain ${name} (${view})`;
+    const instances = engine.createBuffer({
+      name: named("instances"),
+      bytes: layout.slots.slotCount * INSTANCE_RECORD_BYTES,
       usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
       category: "other",
     });
-    // No star until the first frame's lights: nothing is lit.
-    this.#engine.writeBuffer(lights, 0, new Float32Array(TERRAIN_LIGHT_ROWS * 4));
-    const tableRows = Math.max(LIT_TABLE_ROWS, this.#rows.laws.length);
-    const lit: LitMade = { lights, table: this.#table(tableRows), tableRows, tableVersion: -1 };
-    this.#writeTable(lit);
-    return lit;
+    const contacts = engine.createBuffer({
+      name: named("contacts"),
+      bytes: CONTACTS_HEADER_BYTES + MAX_CONTACTS * CONTACT_RECORD_BYTES,
+      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+      category: "other",
+    });
+    const indirect = engine.createBuffer({
+      name: named("indirect"),
+      bytes: INDIRECT_ARGS_BYTES,
+      usage: BUFFER_USAGE.INDIRECT | BUFFER_USAGE.COPY_DST,
+      category: "other",
+    });
+    const lit = layout.shading === "lit";
+    // indexCount, instanceCount, firstIndex, baseVertex, firstInstance: only the count changes.
+    engine.writeBuffer(
+      indirect,
+      0,
+      new Uint32Array([lit ? LIT_PATCH_INDICES : PATCH_INDICES, 0, 0, 0, 0]),
+    );
+    let lights: BufferHandle | null = null;
+    if (lit) {
+      lights = engine.createBuffer({
+        name: named("lights"),
+        bytes: TERRAIN_LIGHT_ROWS * 16,
+        usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+        category: "other",
+      });
+      // No star until the view's first frame's lights: nothing is lit.
+      engine.writeBuffer(lights, 0, new Float32Array(TERRAIN_LIGHT_ROWS * 4));
+    }
+    return { instances, contacts, indirect, lights };
   }
 
   #scratchFor(layout: TerrainLayout): Uint16Array {
@@ -1042,30 +1193,8 @@ export class TerrainResources {
       topology: "triangle-list",
       attributes: {},
     });
-    const instances = engine.createBuffer({
-      name: "terrain instances",
-      bytes: slotCount * INSTANCE_RECORD_BYTES,
-      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
-      category: "other",
-    });
-    const contacts = engine.createBuffer({
-      name: "terrain contacts",
-      bytes: CONTACTS_HEADER_BYTES + MAX_CONTACTS * CONTACT_RECORD_BYTES,
-      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
-      category: "other",
-    });
-    const indirect = engine.createBuffer({
-      name: "terrain indirect",
-      bytes: INDIRECT_ARGS_BYTES,
-      usage: BUFFER_USAGE.INDIRECT | BUFFER_USAGE.COPY_DST,
-      category: "other",
-    });
-    // indexCount, instanceCount, firstIndex, baseVertex, firstInstance: only the count changes.
-    engine.writeBuffer(
-      indirect,
-      0,
-      new Uint32Array([lit ? LIT_PATCH_INDICES : PATCH_INDICES, 0, 0, 0, 0]),
-    );
+    // The default view's buffers, made after the mesh and before the table, as R05's were.
+    const views = new Map([[DEFAULT_TERRAIN_VIEW, this.#makeView(layout, DEFAULT_TERRAIN_VIEW)]]);
     return {
       layout,
       lit: lit ? this.#makeLit() : null,
@@ -1073,9 +1202,7 @@ export class TerrainResources {
       slotRecords,
       normals,
       mesh,
-      instances,
-      contacts,
-      indirect,
+      views,
     };
   }
 }

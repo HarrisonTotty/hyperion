@@ -56,7 +56,6 @@ import {
   type GpuTimer,
   type GraphicsAnnunciation,
   graphicsAnnunciation,
-  type GraphicsStatus,
   useGraphicsStatus,
 } from "../../view/engine/status";
 import type { RenderView } from "../../view/engine/types";
@@ -134,7 +133,13 @@ import { styleName } from "../../view/photoreal/style";
 import type { TerrainSession } from "../../view/terrain/session";
 import type { WorkerLike } from "../../view/terrain/workers/pool";
 import { useServerLink } from "../../lib/serverLink";
-import { browserHeightWorker, terrainSessionSource, useTerrainSession } from "./useTerrainSession";
+import { faultsFor } from "./viewFaults";
+import {
+  browserHeightWorker,
+  terrainSessionSource,
+  useTerrainFaults,
+  useTerrainSession,
+} from "./useTerrainSession";
 import { ViewMarkList } from "./ViewMarkList";
 import { ViewSceneContext } from "./ViewSceneProvider";
 import {
@@ -222,19 +227,6 @@ function roomForSlot(stage: ElementSize | null, open: ReadonlyArray<ElementSize 
     inset + usedPx + slotPx + inset <= stage.heightPx &&
     INSTRUMENT_SLOT_REM.widthRem + 3 * INSTRUMENT_INSET_REM + PRIMARY_LABEL_MIN_REM <= widthRem
   );
-}
-
-/**
- * A graphics fault to show on a view's plate: the standing fault, unless it is another view's
- * refusal, which only that view's plate shows (decided 2026-10-02).
- */
-function faultFor(
-  graphics: GraphicsStatus,
-  annunciation: GraphicsAnnunciation | null,
-  viewName: string,
-): string | null {
-  const otherView = graphics.fault?.kind === "view-refused" && graphics.fault.viewName !== viewName;
-  return annunciation?.standing === "fault" && !otherView ? annunciation.text : null;
 }
 
 /** No stars, one array for every frame without an answer. */
@@ -359,8 +351,8 @@ interface InstrumentViewState {
   readonly availability: StyleAvailability;
   /** The style its budget draws. */
   readonly budgetStyle: RenderStyle;
-  /** A graphics fault for its plate, or `null`. */
-  readonly fault: string | null;
+  /** The faults for its plate, the graphics' then the terrain's ({@link faultsFor}). */
+  readonly faults: ReadonlyArray<string>;
 }
 
 /** What the view keys' listener reads of the stage, kept current by an effect. */
@@ -610,6 +602,8 @@ function ViewStage({
   const reducedMotion = usePrefersReducedMotion();
   const graphics = useGraphicsStatus();
   const annunciation = graphicsAnnunciation(graphics);
+  // The views that show the terrain's fault, every height worker lost (R10.T16.b).
+  const terrainFaults = useTerrainFaults(terrain);
   const { ref: stageRef, size } = useElementSize();
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
   // Whether the engine refused the stage's view at its first creation (a canvas with no context).
@@ -688,7 +682,7 @@ function ViewStage({
       refusals: slotRefusals,
       availability: availabilityOf(slotRefusals),
       budgetStyle: budgets.get(slot.id)?.style ?? "wireframe",
-      fault: faultFor(graphics, annunciation, slot.id),
+      faults: faultsFor(graphics, annunciation, slot.id, slot.id, terrainFaults),
     };
   });
   // The CONTROLS view: the side column's list and controls, and the single keys pressed off a
@@ -700,7 +694,7 @@ function ViewStage({
     : null;
   const controlsView = operatedView === null ? VIEW_ID : operatedView.slot.id;
   const controlledShown = operatedView?.slot.shown ?? null;
-  const fault = faultFor(graphics, annunciation, VIEW_NAME);
+  const faults = faultsFor(graphics, annunciation, VIEW_NAME, VIEW_ID, terrainFaults);
 
   // The list's ranges switch unit with hysteresis, from the units they were last shown in;
   // adjusted during render as each published run arrives.
@@ -1401,10 +1395,10 @@ function ViewStage({
                 )}
                 statements={primaryStatements}
                 countLine={viewSky.drawn === null ? countLine : null}
-                fault={fault}
+                faults={faults}
               />
               <div className="view-instruments">
-                {instrumentViews.map(({ slot, budgetStyle, fault: slotFault }) =>
+                {instrumentViews.map(({ slot, budgetStyle, faults: slotFaults }) =>
                   slot.open ? (
                     <InstrumentView
                       key={slot.id}
@@ -1416,7 +1410,7 @@ function ViewStage({
                       litLabels={litLabels}
                       primaryPhotorealStatements={primaryPhotoreal}
                       skyAwaiting={viewSky.awaiting}
-                      fault={slotFault}
+                      faults={slotFaults}
                       legendId={legendId}
                       onKeyDown={(event) => {
                         // A view key on its canvas makes it the CONTROLS view before it acts.

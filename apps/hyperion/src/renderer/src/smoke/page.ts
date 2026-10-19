@@ -13,8 +13,9 @@
  * with no part given the page runs them all, in its order. Each part checks its path (T9.c)
  * itself. R08.T6.f's slices and bands run in two groups in part 5: the Saturn-class figure's, and
  * Earth's, which took R08.T6.g's Earth; R08.T9.b's surface lighting in two in part 6, Earth's and
- * the Saturn-class figure's, and beside them R10.T10.b's lit terrain and R10.T10.c's survey edge,
- * part 6 being the shortest.
+ * the Saturn-class figure's, and beside them R10.T10.b's lit terrain, R10.T10.c's survey edge and
+ * R10.T16.b's shared pass (on an engine of its own, whose device it destroys), part 6 being the
+ * shortest.
  */
 
 import { WGSL_CATALOGUE } from "../view/engine/catalogue";
@@ -66,6 +67,7 @@ import { checkTwins } from "./twins";
 import { checkSpatialStrokeContrast } from "./spatial";
 import { checkStrokeContrast } from "./strokeContrast";
 import { checkWireframe } from "./wireframe";
+import { checkSharedPass } from "./sharedPass";
 import { checkForcedLoss, checkOneLayerArrays, checkTargetsAsyncIndirectTiming } from "./work";
 
 /** What the page reports, as `src/smoke/result.ts` reads it. */
@@ -296,6 +298,22 @@ async function run(
   );
   await group(6, "R10.T10.b the lit terrain", () => checkLitTerrain(engine, checks));
   await group(6, "R10.T10.c the survey edge", () => checkSurveyEdge(engine, checks));
+  // On an engine of its own, whose device it destroys mid-stream (R10.T16.b).
+  await group(6, "R10.T16 the shared pass", async () => {
+    const second = await requestAdapterOutcome(navigator.gpu);
+    if (second.kind !== "adapter") {
+      throw new Error(`no second adapter: ${second.kind}`);
+    }
+    const shared = await loadRenderEngine(
+      second,
+      new GraphicsStatusStore(initialGraphicsStatus("vulkan", false)),
+    );
+    try {
+      await checkSharedPass(shared, devices.at(-1), checks);
+    } finally {
+      shared.dispose();
+    }
+  });
   await group(4, "R08.T7 several suns, and the sky through the air", () =>
     checkSeveralSuns(engine, checks, twins),
   );

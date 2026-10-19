@@ -245,6 +245,14 @@ export class ProbedEngine implements RenderEngine {
     this.#inner.releaseTexture(texture);
   }
 
+  releaseMesh(mesh: MeshHandle): void {
+    this.#inner.releaseMesh(mesh);
+  }
+
+  releaseMaterial(material: MaterialHandle): void {
+    this.#inner.releaseMaterial(material);
+  }
+
   dispatch(
     kernel: ComputeHandle,
     bindings: ComputeBindings,

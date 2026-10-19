@@ -17,6 +17,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 
 import type { ServerLink } from "../../lib/serverLink";
 import type { SceneSurfaceEvent, SceneView } from "../../lib/scene/useScene";
+import type { ViewId } from "../../view/camera/state";
 import { TerrainSession, type TerrainRequests } from "../../view/terrain/session";
 import type { WorkerLike } from "../../view/terrain/workers/pool";
 import type { ViewEngineState } from "./useViewEngine";
@@ -241,4 +242,24 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
   }, [session, onSurface]);
 
   return session;
+}
+
+/** No view shows the terrain's fault: the snapshot with no session. */
+const NO_TERRAIN_FAULTS: ReadonlySet<ViewId> = new Set();
+
+/** The subscription with no session, which nothing changes. */
+function noFaults(): () => void {
+  return () => undefined;
+}
+
+/**
+ * The views whose label blocks show the terrain's fault (plan R10, R10.T16.b;
+ * `TerrainSession.terrainFaults`): every view that hands a body over while every height worker is
+ * lost; none with no session.
+ */
+export function useTerrainFaults(session: TerrainSession | null): ReadonlySet<ViewId> {
+  return useSyncExternalStore(
+    session?.subscribeFaults ?? noFaults,
+    () => session?.terrainFaults ?? NO_TERRAIN_FAULTS,
+  );
 }

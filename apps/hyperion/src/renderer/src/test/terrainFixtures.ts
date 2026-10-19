@@ -45,8 +45,8 @@ export function goldenLevelTable(ridges: "off" | "on"): Float64Array {
 }
 
 /**
- * A selection of `keys`, those in `forced` marked forced, with no demand, and `hiddenBaked` as the
- * baked patches it found hidden.
+ * A selection of `keys`, those in `forced` marked forced, each seen by view 0 alone, with no demand,
+ * and `hiddenBaked` as the baked patches it found hidden.
  */
 export function selectionOf(
   keys: readonly PatchKey[],
@@ -62,7 +62,15 @@ export function selectionOf(
       bounds: UNIT_BOUNDS,
       forced: forcedStrings.has(keyString),
       seen: true,
+      views: 1,
     });
   }
-  return { patches, demand: [], limited: false, limitExcess: 0, hiddenBaked };
+  return {
+    patches,
+    demand: [],
+    limited: false,
+    limitExcess: 0,
+    hiddenBaked,
+    nearestSurveyM: Number.POSITIVE_INFINITY,
+  };
 }

@@ -3026,7 +3026,12 @@ src/renderer/src/view` passes; `just test-render` (SwiftShader, headless) passes
   the draw path's bind-group cache; each refuses a handle the engine did not make or has released,
   and a released handle is refused by every later call. `ResilientEngine` forwards them and drops a
   lost engine's handles; the fake, counting and probed engines follow. As `releaseBuffer`'s, a
-  caller never releases a handle a frame not yet submitted holds. Recorded in R10's Risks.
+  caller never releases a handle a frame not yet submitted holds. Recorded in R10's Risks. _As
+  built:_ `MeshRecord` keeps its buffers' handles (`buffers`); a released mesh or material is
+  refused as "was released"; `FakeRenderEngine` makes mesh and material handles and records their
+  releases; `CountingRenderEngine` gains `live` (the handles of each kind made and not released)
+  and `loseHandles()` (a loss's end of every handle, whose later release is dropped, as
+  `ResilientEngine` drops it), its meshes still raising no allocation events.
 - **A `2d-array` binding takes a single-layer 2D texture** (R05.T11.a, approved by the orchestrator 2026-10-03): `drawing.ts`'s `viewDimensionBinds` lets a material declaring `viewDimension: "2d-array"` bind a 2D texture of one layer, viewed as a one-layer array, so that R05's layered normals atlas binds whatever its layer count; every other mismatch is refused as before (`engine.test.ts`). `platform.ts` gains `MAX_TEXTURE_ARRAY_LAYERS` (256, WebGPU's default, never raised). Additive.
 - **A compute binding takes the view dimension its kernel declares** (R08.T0;
   `decision-r08-design.md` item 1, 2026-10-09). `kernelBindings` reads each texture binding's

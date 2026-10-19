@@ -389,6 +389,11 @@ export interface DrawnPatch {
  * @remarks
  * A {@link DrawSetResolver} returns the same object every call, its arrays rewritten in place, so
  * that resolving each frame allocates nothing after warm-up: read it before the next call.
+ *
+ * The views' masks (plan R10, R10.T16.b; decision-r10-t16-contracts §3) are bit k for the
+ * selection's view k (`SelectedPatch.views`): each drawn patch's {@link DrawSet.views}, and the
+ * views with a stand-in and with a missing patch, from which each view's `TERRAIN: STREAMING` and
+ * its own draw are made.
  */
 export interface DrawSet {
   /** How many patches are drawn: the length of {@link DrawSet.patches}, and of `slots`' prefix. */
@@ -407,6 +412,16 @@ export interface DrawSet {
   readonly standingIn: number;
   /** How many selected patches have no resident ancestor at all, and are not drawn. */
   readonly missing: number;
+  /**
+   * Each drawn patch's views in its first {@link DrawSet.count} entries, in {@link DrawSet.patches}'
+   * order: the union of the views that see the selected patches it draws or stands in for. Its
+   * length is the cache's slot count, fixed.
+   */
+  readonly views: Uint32Array;
+  /** The views that see a selected patch drawn by a coarser resident ancestor. */
+  readonly standingInViews: number;
+  /** The views that see a selected patch with no resident ancestor at all. */
+  readonly missingViews: number;
 }
 
 /** A drawn patch's record, reused from call to call. */
@@ -414,6 +429,10 @@ interface DrawnRecord {
   keyString: string;
   patch: CachedPatch;
   standIn: boolean;
+  /** The views of the selected patches it draws or stands in for. */
+  views: number;
+  /** The chosen ancestor that draws it in its place this call, or `null`. */
+  drawnBy: DrawnRecord | null;
 }
 
 /** The draw set the resolver rewrites in place. */
@@ -423,6 +442,9 @@ interface ResolvedSet {
   readonly slots: Uint32Array;
   standingIn: number;
   missing: number;
+  readonly views: Uint32Array;
+  standingInViews: number;
+  missingViews: number;
 }
 
 /**
@@ -453,6 +475,9 @@ export class DrawSetResolver {
       slots: new Uint32Array(cache.slotCount),
       standingIn: 0,
       missing: 0,
+      views: new Uint32Array(cache.slotCount),
+      standingInViews: 0,
+      missingViews: 0,
     };
   }
 
@@ -463,6 +488,8 @@ export class DrawSetResolver {
     this.used = 0;
     let missing = 0;
     let unseen = 0;
+    let missingViews = 0;
+    let standingInViews = 0;
     for (const selected of selection.patches.values()) {
       if (!selected.seen) {
         // A forced patch no view sees is kept resident by the pins, not drawn.
@@ -470,6 +497,7 @@ export class DrawSetResolver {
         continue;
       }
       const key = selected.key;
+      const views = selected.views;
       let found: CachedPatch | undefined;
       let standIn = false;
       for (let level = key.level; level >= 0; level -= 1) {
@@ -481,23 +509,39 @@ export class DrawSetResolver {
       }
       if (found === undefined) {
         missing += 1;
+        missingViews |= views;
         continue;
+      }
+      if (standIn) {
+        standingInViews |= views;
       }
       const known = chosen.get(found);
       if (known === undefined) {
-        chosen.set(found, this.record(found, standIn));
-      } else if (standIn) {
-        known.standIn = true;
+        chosen.set(found, this.record(found, standIn, views));
+      } else {
+        known.standIn ||= standIn;
+        known.views |= views;
+      }
+    }
+    // A chosen patch under another is drawn by its coarsest chosen ancestor, which no other covers:
+    // its views go to that ancestor's, and stand in there.
+    for (const record of chosen.values()) {
+      const drawnBy = this.coarsestChosenAncestor(record.patch.key);
+      record.drawnBy = drawnBy;
+      if (drawnBy !== null) {
+        drawnBy.views |= record.views;
+        standingInViews |= record.views;
       }
     }
     let count = 0;
     let drawnAsThemselves = 0;
     for (const record of chosen.values()) {
-      if (this.hasChosenAncestor(record.patch.key)) {
+      if (record.drawnBy !== null) {
         continue;
       }
       set.patches[count] = record;
       set.slots[count] = record.patch.slot;
+      set.views[count] = record.views;
       count += 1;
       if (selection.patches.has(record.keyString)) {
         drawnAsThemselves += 1;
@@ -507,31 +551,37 @@ export class DrawSetResolver {
     set.count = count;
     set.missing = missing;
     set.standingIn = selection.patches.size - unseen - missing - drawnAsThemselves;
+    set.missingViews = missingViews;
+    set.standingInViews = standingInViews;
     return set;
   }
 
-  private record(patch: CachedPatch, standIn: boolean): DrawnRecord {
+  private record(patch: CachedPatch, standIn: boolean, views: number): DrawnRecord {
     let record = this.pool[this.used];
     if (record === undefined) {
-      record = { keyString: patch.keyString, patch, standIn };
+      record = { keyString: patch.keyString, patch, standIn, views, drawnBy: null };
       this.pool.push(record);
     } else {
       record.keyString = patch.keyString;
       record.patch = patch;
       record.standIn = standIn;
+      record.views = views;
+      record.drawnBy = null;
     }
     this.used += 1;
     return record;
   }
 
-  private hasChosenAncestor(key: PatchKey): boolean {
-    for (let level = key.level - 1; level >= 0; level -= 1) {
+  /** The record of `key`'s coarsest ancestor chosen this call, or `null` where none is. */
+  private coarsestChosenAncestor(key: PatchKey): DrawnRecord | null {
+    for (let level = 0; level < key.level; level += 1) {
       const patch = this.cache.residentOver(key, level);
-      if (patch !== undefined && this.chosen.has(patch)) {
-        return true;
+      const record = patch === undefined ? undefined : this.chosen.get(patch);
+      if (record !== undefined) {
+        return record;
       }
     }
-    return false;
+    return null;
   }
 }
 

@@ -16,22 +16,27 @@
  * and the transient copies are one block, at most 1 MiB, a worker, where R05's one field went to
  * one worker at a time.
  *
- * The pool's bakes are of one height source, its settings' (R10.T6.b). The test planet reads no
- * field, so no field ever makes its bakes stale. A body's bakes are held back until its field is
- * started, and its field alone makes them stale (per-body epochs): a bake in flight when the field
- * starts again or is released is baked again, and one in flight while blocks arrive is baked again
- * by R10's rebake rule, conservatively, since the blocks' changes may not be known yet: unless it
- * is complete, its horizon map complete, with its survey mask whole (`rebake.ts`' `staleInFlight`).
- * A bake the field cannot make yet, a survey whose margin
- * is still to come, waits for the body's next block. Each block's change of the survey is reported
- * once ({@link HeightWorkerPool.onFieldChange}), for the bakes already delivered (`rebake.ts`).
+ * Bakes go through lanes (plan R10, R10.T16.b; decision-r10-live-path, D2): each of a body's
+ * terrain passes takes its own ({@link HeightWorkerPool.lane}), with its own bake settings (its
+ * height source, vertex path and normals), demand, generation and listeners, over the pool's one
+ * queue, workers and fields. The queue takes forced requests first, then the larger weighted excess
+ * w × ρ ÷ τ whatever the lane (Design note 24's priority, comparable across lanes), then the older
+ * lane's, then by key. A pool made with bake settings (the descent spike's) is a pool of one lane,
+ * whose calls are the pool's own; one made without them (the terrain session's) holds the fields
+ * and answers the class maps, and bakes through its lanes alone.
+ *
+ * A lane's bakes are of one height source, its settings'. The test planet reads no field, so no
+ * field ever makes its bakes stale. A body's bakes are held back until its field is started, and
+ * its field alone makes them stale (per-body epochs): a bake in flight when the field starts again
+ * or is released is baked again, and one in flight while blocks arrive is baked again by R10's
+ * rebake rule, conservatively, since the blocks' changes may not be known yet: unless it is
+ * complete, its horizon map complete, with its survey mask whole (`rebake.ts`' `staleInFlight`). A
+ * bake the field cannot make yet, a survey whose margin is still to come, waits for the body's next
+ * block. Each block's change of the survey is reported once ({@link HeightWorkerPool.onFieldChange}),
+ * for the bakes already delivered (`rebake.ts`).
  *
  * A body's coarse class map for R07's disc (plan R10, T10.d) is asked of one worker
  * ({@link HeightWorkerPool.classMap}), after the blocks posted before it, which it reads.
- *
- * A pool made without bake settings (plan R10, R10.T16.a: the terrain session's, whose passes
- * bake through lanes of their own from R10.T16.b) holds the fields and answers the class maps
- * alone, and refuses every bake request.
  */
 
 import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
@@ -104,13 +109,14 @@ export interface HeightWorkerPoolOptions {
    */
   readonly createWorker: () => WorkerLike;
   /**
-   * The setting's vertex path and normal resolution and the height source, sent with every bake.
-   * A body's source holds its bakes back until its field is started, and makes them stale as its
-   * field grows.
+   * The settings of the pool's own lane, the setting's vertex path and normal resolution and the
+   * height source, sent with every bake of it: a pool of one lane, whose calls are the pool's own
+   * (the descent spike's). A body's source holds its bakes back until its field is started, and
+   * makes them stale as its field grows.
    *
    * @remarks
-   * Absent for a pool that holds fields and answers class maps but bakes nothing (the terrain
-   * session's, R10.T16.a, until R10.T16.b's lanes): its {@link HeightWorkerPool.request},
+   * Absent for a pool that holds fields and answers class maps and bakes through its lanes alone
+   * (the terrain session's, R10.T16.a and T16.b): its {@link HeightWorkerPool.request},
    * {@link HeightWorkerPool.reprioritise} and {@link HeightWorkerPool.cancelStale} throw.
    */
   readonly bake?: BakeSettings;
@@ -170,8 +176,29 @@ interface Queued {
   readonly keyString: string;
 }
 
+/** One lane's bakes: its settings, demand and listeners (R10.T16.b). */
+interface Lane {
+  /** Its place among the lanes made, the first 0: the queue's order between equal requests. */
+  readonly index: number;
+  /** The settings sent with every bake of it. */
+  readonly settings: BakeSettings;
+  /** The body whose field its bakes read, `null` for the test planet, which reads none. */
+  readonly sourceBody: BodyIdHex | null;
+  readonly queue: Map<string, Queued>;
+  readonly wanted: Set<string>;
+  readonly failedKeys: Set<string>;
+  /** The requests the source body's field could not make yet, until its next block. */
+  readonly waiting: Map<string, PatchRequest>;
+  readonly bakedListeners: Set<(bake: BakedPatch) => void>;
+  readonly failureListeners: Set<(failure: BakeFailure) => void>;
+  generation: number;
+  terminated: boolean;
+}
+
 interface InFlight {
   readonly id: number;
+  /** The lane it was asked through; its answer reaches that lane alone. */
+  readonly lane: Lane;
   readonly request: PatchRequest;
   readonly keyString: string;
   readonly generation: number;
@@ -211,45 +238,140 @@ function loadOf(slot: Slot): number {
   return slot.inFlight.size + slot.queries.size;
 }
 
-/** Orders requests: forced first, then higher priority, then by key string. */
-function before(a: Queued, b: Queued): boolean {
-  if (a.request.forced !== b.request.forced) {
-    return a.request.forced;
+/** A queued request with its lane, as the queue orders them. */
+interface Candidate {
+  readonly lane: Lane;
+  readonly queued: Queued;
+}
+
+/**
+ * Orders requests: forced first, then higher priority whatever the lane, then the older lane's,
+ * then by key string. With one lane it is R05's order.
+ */
+function before(a: Candidate, b: Candidate): boolean {
+  const ra = a.queued.request;
+  const rb = b.queued.request;
+  if (ra.forced !== rb.forced) {
+    return ra.forced;
   }
-  if (a.request.priority !== b.request.priority) {
-    return a.request.priority > b.request.priority;
+  if (ra.priority !== rb.priority) {
+    return ra.priority > rb.priority;
   }
-  return a.keyString < b.keyString;
+  if (a.lane.index !== b.lane.index) {
+    return a.lane.index < b.lane.index;
+  }
+  return a.queued.keyString < b.queued.keyString;
+}
+
+function newLane(index: number, settings: BakeSettings): Lane {
+  return {
+    index,
+    settings,
+    sourceBody: settings.source.kind === "body" ? settings.source.body : null,
+    queue: new Map(),
+    wanted: new Set(),
+    failedKeys: new Set(),
+    waiting: new Map(),
+    bakedListeners: new Set(),
+    failureListeners: new Set(),
+    generation: 0,
+    terminated: false,
+  };
+}
+
+/**
+ * One lane of a {@link HeightWorkerPool} (plan R10, R10.T16.b): a terrain pass's bakes, of its own
+ * settings, over the pool's queue, workers and fields.
+ *
+ * @remarks
+ * Its demand replaces its own alone; its bakes and failures reach its own listeners alone; and
+ * terminating it drops its queued, waiting and in-flight requests (an answer still to come is
+ * dropped as it arrives) and leaves the fields, the class-map queries and the other lanes. A pass
+ * rebuilt after a device loss terminates its lane and takes a new one, so that no field is posted
+ * again (decision-r10-live-path, D2).
+ */
+export interface HeightWorkerLane {
+  /** The settings every bake of the lane is sent with. */
+  readonly settings: BakeSettings;
+  /** The lane's current generation, which each new request is tagged with. */
+  readonly currentGeneration: number;
+  /** The lane's requests queued, not yet sent to a worker. */
+  readonly queuedCount: number;
+  /**
+   * How many of the lane's requests wait for a block of its body's field, which their surveys'
+   * margins are still to come in: patches waiting on a surveyed region's block, which Design note
+   * 16 counts toward `TERRAIN: STREAMING`.
+   */
+  readonly waitingCount: number;
+  /**
+   * Whether the pool can bake nothing more: every worker given up (`lostWorkers` equal to the
+   * pool's size), R10.T16.b's fault.
+   */
+  readonly unavailable: boolean;
+  /** Whether the lane, or its pool, was terminated. */
+  readonly terminated: boolean;
+  /**
+   * Queues one request, or re-scores it if queued already or waiting for a block; one in flight is
+   * left alone.
+   *
+   * @throws Error once the lane or its pool is terminated.
+   */
+  request(r: PatchRequest): void;
+  /**
+   * Replaces the lane's demand, once a frame: queues new requests, re-scores queued ones and drops
+   * those no longer in it; the other lanes' are untouched. Requests in flight are untouched, and
+   * their results are kept if their keys are still in the demand when they arrive.
+   *
+   * @throws Error once the lane or its pool is terminated.
+   */
+  reprioritise(demand: ReadonlyArray<PatchRequest>): void;
+  /**
+   * Drops every queued or waiting request of the lane, and every result yet to arrive, whose key is
+   * not in `keep`.
+   *
+   * @throws Error once the lane or its pool is terminated.
+   */
+  cancelStale(keep: ReadonlySet<string>): void;
+  /** Listens for the lane's bakes; returns the function that stops listening. */
+  onBaked(cb: (bake: BakedPatch) => void): () => void;
+  /** Listens for the lane's requests given up because their bake failed; returns the unsubscribe. */
+  onFailed(cb: (failure: BakeFailure) => void): () => void;
+  /**
+   * Ends the lane: drops its queued, waiting and in-flight requests and its listeners, and leaves
+   * the pool's fields, class-map queries and other lanes; a second call does nothing.
+   */
+  terminate(): void;
+}
+
+/** A listener set's adder, which returns the unsubscribe. */
+function listen<T>(listeners: Set<T>, listener: T): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 /**
  * The pool of height workers that bake patches for the cache.
  *
  * @remarks
- * Each frame the terrain pass calls {@link HeightWorkerPool.reprioritise} with the selection's
- * demand (the patches not yet resident); the pool hands bakes to {@link HeightWorkerPool.onBaked}'s
- * listeners, which insert them into the cache. A key whose bake failed is reported through
- * {@link HeightWorkerPool.onFailed} and not requested again. {@link HeightWorkerPool.terminate}
- * stops every worker and drops every listener.
+ * Each frame a terrain pass calls its lane's `reprioritise` (or, in a pool of one lane, the pool's
+ * {@link HeightWorkerPool.reprioritise}) with the selection's demand (the patches not yet
+ * resident); the pool hands bakes to the lane's `onBaked` listeners, which insert them into the
+ * cache. A key whose bake failed is reported through `onFailed` and not requested again by that
+ * lane. {@link HeightWorkerPool.terminate} stops every worker and drops every listener.
  */
 export class HeightWorkerPool {
   private readonly createWorker: () => WorkerLike;
-  /** The bakes' settings, or `null` for a pool that bakes nothing (R10.T16.a). */
-  private readonly settings: BakeSettings | null;
   private readonly slots: Slot[] = [];
-  private readonly queue = new Map<string, Queued>();
-  private readonly wanted = new Set<string>();
-  private readonly failedKeys = new Set<string>();
-  private readonly bakedListeners = new Set<(bake: BakedPatch) => void>();
-  private readonly failureListeners = new Set<(failure: BakeFailure) => void>();
+  /** The live lanes, oldest first. */
+  private readonly lanes: Lane[] = [];
+  /** The pool's own lane, of the settings it was made with; `null` for a pool of lanes alone. */
+  private readonly own: Lane | null;
   private readonly refusalListeners = new Set<(refusal: FieldRefusal) => void>();
   private readonly changeListeners = new Set<(change: FieldChange) => void>();
   private readonly fields = new Map<BodyIdHex, KeptField>();
-  /** The requests the source body's field could not make yet, until its next block. */
-  private readonly waiting = new Map<string, PatchRequest>();
-  /** The body whose field the bakes read, `null` for the test planet, which reads none. */
-  private readonly sourceBody: BodyIdHex | null;
-  private generation = 0;
+  private nextLane = 0;
   private nextId = 1;
   private terminated = false;
 
@@ -258,8 +380,7 @@ export class HeightWorkerPool {
       throw new Error(`a height-worker pool needs at least one worker, not ${opts.workers}`);
     }
     this.createWorker = opts.createWorker;
-    this.settings = opts.bake ?? null;
-    this.sourceBody = opts.bake?.source.kind === "body" ? opts.bake.source.body : null;
+    this.own = opts.bake === undefined ? null : this.addLane(opts.bake);
     for (let n = 0; n < opts.workers; n += 1) {
       const slot: Slot = {
         worker: this.createWorker(),
@@ -281,14 +402,18 @@ export class HeightWorkerPool {
     }
   }
 
-  /** The current generation, which every new request is tagged with. */
+  /** The current generation of the pool's own lane, which every new request is tagged with. */
   get currentGeneration(): number {
-    return this.generation;
+    return this.own?.generation ?? 0;
   }
 
-  /** How many requests are queued, not yet sent to a worker. */
+  /** How many requests are queued, not yet sent to a worker, over every lane. */
   get queuedCount(): number {
-    return this.queue.size;
+    let n = 0;
+    for (const lane of this.lanes) {
+      n += lane.queue.size;
+    }
+    return n;
   }
 
   /** How many requests are in flight, over every worker. */
@@ -298,6 +423,11 @@ export class HeightWorkerPool {
       n += slot.inFlight.size;
     }
     return n;
+  }
+
+  /** How many workers the pool runs, given up or not: its size. */
+  get workerCount(): number {
+    return this.slots.length;
   }
 
   /**
@@ -341,13 +471,16 @@ export class HeightWorkerPool {
   }
 
   /**
-   * How many requests wait for a block of the source body's field, which their surveys' margins
-   * are still to come in: patches waiting on a surveyed region's chunk, which R10's Design note 16
-   * counts toward R05's `TERRAIN: STREAMING` (they are among the patches it finds missing; the
-   * pass's first consumer reads this to tell them).
+   * How many requests wait for a block of their source body's field, which their surveys' margins
+   * are still to come in, over every lane: patches waiting on a surveyed region's chunk, which R10's
+   * Design note 16 counts toward R05's `TERRAIN: STREAMING`.
    */
   get waitingCount(): number {
-    return this.waiting.size;
+    let n = 0;
+    for (const lane of this.lanes) {
+      n += lane.waiting.size;
+    }
+    return n;
   }
 
   /**
@@ -371,106 +504,108 @@ export class HeightWorkerPool {
   }
 
   /**
-   * Queues one request, or re-scores it if queued already or waiting for a block; one in flight is
-   * left alone.
+   * How many of this start of `body`'s field's blocks are posted, and how many of them have had
+   * their changes reported ({@link HeightWorkerPool.onFieldChange}), in order from the first;
+   * `null` with no field kept (R10.T16.b: the session holds a coverage back until the workers have
+   * taken the blocks posted before it).
+   */
+  fieldBlocks(body: BodyIdHex): { readonly posted: number; readonly reported: number } | null {
+    const kept = this.fields.get(body);
+    return kept === undefined ? null : { posted: kept.blocks.length, reported: kept.reported };
+  }
+
+  /**
+   * A lane of bakes of `bake`'s settings over the pool's queue, workers and fields (R10.T16.b): a
+   * terrain pass's, which it terminates when it is rebuilt or disposed.
+   *
+   * @throws Error once the pool is terminated.
+   */
+  lane(bake: BakeSettings): HeightWorkerLane {
+    this.assertLive();
+    const lane = this.addLane(bake);
+    // The object's getters bind `this` to the object, so the pool's state is read through arrows.
+    const unavailable = (): boolean => this.lostWorkers === this.workerCount;
+    return {
+      settings: bake,
+      get currentGeneration(): number {
+        return lane.generation;
+      },
+      get queuedCount(): number {
+        return lane.queue.size;
+      },
+      get waitingCount(): number {
+        return lane.waiting.size;
+      },
+      get unavailable(): boolean {
+        return unavailable();
+      },
+      get terminated(): boolean {
+        return lane.terminated;
+      },
+      request: (r) => {
+        this.laneRequest(lane, r);
+      },
+      reprioritise: (demand) => {
+        this.laneReprioritise(lane, demand);
+      },
+      cancelStale: (keep) => {
+        this.laneCancelStale(lane, keep);
+      },
+      onBaked: (cb) => listen(lane.bakedListeners, cb),
+      onFailed: (cb) => listen(lane.failureListeners, cb),
+      terminate: () => {
+        this.dropLane(lane);
+      },
+    };
+  }
+
+  /**
+   * Queues one request of the pool's own lane, or re-scores it if queued already or waiting for a
+   * block; one in flight is left alone.
    *
    * @throws Error once the pool is terminated, or for a pool made without bake settings.
    */
   request(r: PatchRequest): void {
-    this.assertLive();
-    this.assertBakes();
-    const keyString = patchKeyString(r.key);
-    if (this.failedKeys.has(keyString)) {
-      return;
-    }
-    this.wanted.add(keyString);
-    if (this.waiting.has(keyString)) {
-      this.waiting.set(keyString, r);
-    } else if (!this.isInFlight(keyString)) {
-      this.queue.set(keyString, { request: r, keyString });
-    }
-    this.pump();
+    this.laneRequest(this.ownLane(), r);
   }
 
   /**
-   * Replaces the demand, once a frame: queues new requests, re-scores queued ones and drops those
-   * no longer in the demand. Requests in flight are untouched, and their results are kept if their
-   * keys are still in the demand when they arrive.
+   * Replaces the pool's own lane's demand, once a frame: queues new requests, re-scores queued ones
+   * and drops those no longer in the demand. Requests in flight are untouched, and their results are
+   * kept if their keys are still in the demand when they arrive.
    *
    * @throws Error once the pool is terminated, or for a pool made without bake settings.
    */
   reprioritise(demand: ReadonlyArray<PatchRequest>): void {
-    this.assertLive();
-    this.assertBakes();
-    this.generation += 1;
-    this.wanted.clear();
-    this.queue.clear();
-    const waited = new Map(this.waiting);
-    this.waiting.clear();
-    for (const request of demand) {
-      const keyString = patchKeyString(request.key);
-      if (this.failedKeys.has(keyString)) {
-        continue;
-      }
-      this.wanted.add(keyString);
-      if (waited.has(keyString)) {
-        // Still waiting for the field's next block: asking again before it would be refused again.
-        this.waiting.set(keyString, request);
-      } else if (!this.isInFlight(keyString)) {
-        this.queue.set(keyString, { request, keyString });
-      }
-    }
-    this.pump();
+    this.laneReprioritise(this.ownLane(), demand);
   }
 
   /**
-   * Drops every queued or waiting request, and every result yet to arrive, whose key is not in
-   * `keep`.
+   * Drops every queued or waiting request of the pool's own lane, and every result yet to arrive,
+   * whose key is not in `keep`.
    *
    * @throws Error once the pool is terminated, or for a pool made without bake settings.
    */
   cancelStale(keep: ReadonlySet<string>): void {
-    this.assertLive();
-    this.assertBakes();
-    for (const keyString of this.queue.keys()) {
-      if (!keep.has(keyString)) {
-        this.queue.delete(keyString);
-      }
-    }
-    for (const keyString of this.waiting.keys()) {
-      if (!keep.has(keyString)) {
-        this.waiting.delete(keyString);
-      }
-    }
-    for (const keyString of this.wanted) {
-      if (!keep.has(keyString)) {
-        this.wanted.delete(keyString);
-      }
-    }
+    this.laneCancelStale(this.ownLane(), keep);
   }
 
-  /** Listens for bakes; returns the function that stops listening. */
+  /**
+   * Listens for the bakes of the pool's own lane; returns the function that stops listening. A pool
+   * made without bake settings has none to tell of.
+   */
   onBaked(cb: (bake: BakedPatch) => void): () => void {
-    this.bakedListeners.add(cb);
-    return () => {
-      this.bakedListeners.delete(cb);
-    };
+    return this.own === null ? () => undefined : listen(this.own.bakedListeners, cb);
   }
 
-  /** Listens for requests given up because their bake failed; returns the unsubscribe. */
+  /** Listens for the own lane's requests given up because their bake failed; returns the unsubscribe. */
   onFailed(cb: (failure: BakeFailure) => void): () => void {
-    this.failureListeners.add(cb);
-    return () => {
-      this.failureListeners.delete(cb);
-    };
+    return this.own === null ? () => undefined : listen(this.own.failureListeners, cb);
   }
 
   /** Listens for a body's field refused by a worker; returns the unsubscribe. */
   onFieldRefused(cb: (refusal: FieldRefusal) => void): () => void {
-    this.refusalListeners.add(cb);
-    return () => {
-      this.refusalListeners.delete(cb);
-    };
+    return listen(this.refusalListeners, cb);
   }
 
   /**
@@ -479,10 +614,7 @@ export class HeightWorkerPool {
    * makes stale (`rebake.ts`'s `needsRebake`) are the listener's to ask again.
    */
   onFieldChange(cb: (change: FieldChange) => void): () => void {
-    this.changeListeners.add(cb);
-    return () => {
-      this.changeListeners.delete(cb);
-    };
+    return listen(this.changeListeners, cb);
   }
 
   /**
@@ -543,9 +675,11 @@ export class HeightWorkerPool {
     if (!this.fields.delete(body)) {
       return;
     }
-    if (body === this.sourceBody) {
-      // Nothing waits for a field that is gone: the next demand asks again, held until it starts.
-      this.waiting.clear();
+    for (const lane of this.lanes) {
+      if (lane.sourceBody === body) {
+        // Nothing waits for a field that is gone: the next demand asks again, held until it starts.
+        lane.waiting.clear();
+      }
     }
     for (const slot of this.slots) {
       if (!slot.lost) {
@@ -578,7 +712,7 @@ export class HeightWorkerPool {
     });
   }
 
-  /** Stops every worker and drops every listener; the pool cannot be used afterwards. */
+  /** Stops every worker and drops every lane and listener; the pool cannot be used afterwards. */
   terminate(): void {
     if (this.terminated) {
       return;
@@ -594,14 +728,102 @@ export class HeightWorkerPool {
       }
       slot.queries.clear();
     }
-    this.queue.clear();
-    this.waiting.clear();
-    this.wanted.clear();
-    this.bakedListeners.clear();
-    this.failureListeners.clear();
+    for (const lane of this.lanes) {
+      this.clearLane(lane);
+    }
+    this.lanes.length = 0;
     this.refusalListeners.clear();
     this.changeListeners.clear();
     this.fields.clear();
+  }
+
+  /** {@link HeightWorkerLane.request} of `lane`. */
+  private laneRequest(lane: Lane, r: PatchRequest): void {
+    this.assertLane(lane);
+    const keyString = patchKeyString(r.key);
+    if (lane.failedKeys.has(keyString)) {
+      return;
+    }
+    lane.wanted.add(keyString);
+    if (lane.waiting.has(keyString)) {
+      lane.waiting.set(keyString, r);
+    } else if (!this.isInFlight(lane, keyString)) {
+      lane.queue.set(keyString, { request: r, keyString });
+    }
+    this.pump();
+  }
+
+  /** {@link HeightWorkerLane.reprioritise} of `lane`. */
+  private laneReprioritise(lane: Lane, demand: ReadonlyArray<PatchRequest>): void {
+    this.assertLane(lane);
+    lane.generation += 1;
+    lane.wanted.clear();
+    lane.queue.clear();
+    const waited = new Map(lane.waiting);
+    lane.waiting.clear();
+    for (const request of demand) {
+      const keyString = patchKeyString(request.key);
+      if (lane.failedKeys.has(keyString)) {
+        continue;
+      }
+      lane.wanted.add(keyString);
+      if (waited.has(keyString)) {
+        // Still waiting for the field's next block: asking again before it would be refused again.
+        lane.waiting.set(keyString, request);
+      } else if (!this.isInFlight(lane, keyString)) {
+        lane.queue.set(keyString, { request, keyString });
+      }
+    }
+    this.pump();
+  }
+
+  /** {@link HeightWorkerLane.cancelStale} of `lane`. */
+  private laneCancelStale(lane: Lane, keep: ReadonlySet<string>): void {
+    this.assertLane(lane);
+    for (const keyString of lane.queue.keys()) {
+      if (!keep.has(keyString)) {
+        lane.queue.delete(keyString);
+      }
+    }
+    for (const keyString of lane.waiting.keys()) {
+      if (!keep.has(keyString)) {
+        lane.waiting.delete(keyString);
+      }
+    }
+    for (const keyString of lane.wanted) {
+      if (!keep.has(keyString)) {
+        lane.wanted.delete(keyString);
+      }
+    }
+  }
+
+  private addLane(bake: BakeSettings): Lane {
+    const lane = newLane(this.nextLane, bake);
+    this.nextLane += 1;
+    this.lanes.push(lane);
+    return lane;
+  }
+
+  /** Ends `lane`: its requests and listeners dropped; its answers still to come are dropped too. */
+  private dropLane(lane: Lane): void {
+    if (lane.terminated) {
+      return;
+    }
+    this.clearLane(lane);
+    const at = this.lanes.indexOf(lane);
+    if (at >= 0) {
+      this.lanes.splice(at, 1);
+    }
+    this.pump();
+  }
+
+  private clearLane(lane: Lane): void {
+    lane.terminated = true;
+    lane.queue.clear();
+    lane.waiting.clear();
+    lane.wanted.clear();
+    lane.bakedListeners.clear();
+    lane.failureListeners.clear();
   }
 
   private assertLive(): void {
@@ -610,20 +832,28 @@ export class HeightWorkerPool {
     }
   }
 
-  /** The bakes' settings, of a pool made with them. */
-  private assertBakes(): BakeSettings {
-    if (this.settings === null) {
-      throw new Error(
-        "the height-worker pool was made without bake settings: it holds fields and answers class maps alone",
-      );
+  private assertLane(lane: Lane): void {
+    this.assertLive();
+    if (lane.terminated) {
+      throw new Error("the height-worker lane was terminated");
     }
-    return this.settings;
   }
 
-  private isInFlight(keyString: string): boolean {
+  /** The pool's own lane, of a pool made with bake settings. */
+  private ownLane(): Lane {
+    this.assertLive();
+    if (this.own === null) {
+      throw new Error(
+        "the height-worker pool was made without bake settings: it holds fields and answers class maps, and bakes through its lanes alone",
+      );
+    }
+    return this.own;
+  }
+
+  private isInFlight(lane: Lane, keyString: string): boolean {
     for (const slot of this.slots) {
       for (const inFlight of slot.inFlight.values()) {
-        if (inFlight.keyString === keyString) {
+        if (inFlight.lane === lane && inFlight.keyString === keyString) {
           return true;
         }
       }
@@ -649,10 +879,6 @@ export class HeightWorkerPool {
     if (this.terminated) {
       return;
     }
-    // A body's patches are baked over its field, so none is sent before the field is started.
-    if (this.sourceBody !== null && !this.fields.has(this.sourceBody)) {
-      return;
-    }
     for (let load = 0; load < MAX_IN_FLIGHT_PER_WORKER; load += 1) {
       for (const slot of this.slots) {
         if (slot.inFlight.size !== load || slot.lost) {
@@ -667,14 +893,16 @@ export class HeightWorkerPool {
     }
   }
 
-  private send(slot: Slot, next: Queued): void {
-    this.queue.delete(next.keyString);
-    const field = this.sourceField();
+  private send(slot: Slot, next: Candidate): void {
+    const { lane, queued } = next;
+    lane.queue.delete(queued.keyString);
+    const field = this.sourceField(lane);
     const inFlight: InFlight = {
       id: this.takeId(),
-      request: next.request,
-      keyString: next.keyString,
-      generation: this.generation,
+      lane,
+      request: queued.request,
+      keyString: queued.keyString,
+      generation: lane.generation,
       field,
       blocksAtSend: field?.blocks.length ?? 0,
     };
@@ -683,29 +911,41 @@ export class HeightWorkerPool {
       {
         kind: "bake",
         id: inFlight.id,
-        key: next.request.key,
+        key: queued.request.key,
         generation: inFlight.generation,
-        // A pool without settings queues nothing, since its every request is refused.
-        settings: this.assertBakes(),
+        settings: lane.settings,
       },
       [],
     );
   }
 
-  private best(): Queued | null {
-    let best: Queued | null = null;
-    for (const queued of this.queue.values()) {
-      if (best === null || before(queued, best)) {
-        best = queued;
+  /** The best queued request over every lane whose bakes can be made now. */
+  private best(): Candidate | null {
+    let best: Candidate | null = null;
+    for (const lane of this.lanes) {
+      // A body's patches are baked over its field, so none is sent before the field is started.
+      if (lane.sourceBody !== null && !this.fields.has(lane.sourceBody)) {
+        continue;
+      }
+      for (const queued of lane.queue.values()) {
+        const candidate = { lane, queued };
+        if (best === null || before(candidate, best)) {
+          best = candidate;
+        }
       }
     }
     return best;
   }
 
-  /** Puts a request back in the queue if its key is still wanted and not queued already. */
+  /** Puts a request back in its lane's queue if its key is still wanted and not queued already. */
   private requeue(inFlight: InFlight): void {
-    if (this.wanted.has(inFlight.keyString) && !this.queue.has(inFlight.keyString)) {
-      this.queue.set(inFlight.keyString, {
+    const { lane } = inFlight;
+    if (
+      !lane.terminated &&
+      lane.wanted.has(inFlight.keyString) &&
+      !lane.queue.has(inFlight.keyString)
+    ) {
+      lane.queue.set(inFlight.keyString, {
         request: inFlight.request,
         keyString: inFlight.keyString,
       });
@@ -718,14 +958,15 @@ export class HeightWorkerPool {
       case "baked": {
         const inFlight = slot.inFlight.get(reply.id);
         slot.inFlight.delete(reply.id);
-        if (inFlight === undefined) {
+        if (inFlight === undefined || inFlight.lane.terminated) {
           break;
         }
+        const { lane } = inFlight;
         if (this.madeStale(inFlight, reply.bake.layers)) {
           this.requeue(inFlight);
-        } else if (this.wanted.has(inFlight.keyString)) {
-          this.wanted.delete(inFlight.keyString);
-          for (const listener of this.bakedListeners) {
+        } else if (lane.wanted.has(inFlight.keyString)) {
+          lane.wanted.delete(inFlight.keyString);
+          for (const listener of lane.bakedListeners) {
             listener(reply.bake);
           }
         }
@@ -734,10 +975,10 @@ export class HeightWorkerPool {
       case "bake-unsurveyed": {
         const inFlight = slot.inFlight.get(reply.id);
         slot.inFlight.delete(reply.id);
-        if (inFlight === undefined) {
+        if (inFlight === undefined || inFlight.lane.terminated) {
           break;
         }
-        const field = this.sourceField();
+        const field = this.sourceField(inFlight.lane);
         if (
           field !== inFlight.field ||
           field === null ||
@@ -745,19 +986,20 @@ export class HeightWorkerPool {
         ) {
           // A block came since, which may hold what it lacked, or the field started anew.
           this.requeue(inFlight);
-        } else if (this.wanted.has(inFlight.keyString)) {
-          this.waiting.set(inFlight.keyString, inFlight.request);
+        } else if (inFlight.lane.wanted.has(inFlight.keyString)) {
+          inFlight.lane.waiting.set(inFlight.keyString, inFlight.request);
         }
         break;
       }
       case "bake-failed": {
         const inFlight = slot.inFlight.get(reply.id);
         slot.inFlight.delete(reply.id);
-        if (inFlight !== undefined) {
-          this.wanted.delete(inFlight.keyString);
-          this.failedKeys.add(inFlight.keyString);
+        if (inFlight !== undefined && !inFlight.lane.terminated) {
+          const { lane } = inFlight;
+          lane.wanted.delete(inFlight.keyString);
+          lane.failedKeys.add(inFlight.keyString);
           const failure = { keyString: inFlight.keyString, message: reply.message };
-          for (const listener of this.failureListeners) {
+          for (const listener of lane.failureListeners) {
             listener(failure);
           }
         }
@@ -802,8 +1044,9 @@ export class HeightWorkerPool {
   }
 
   /**
-   * Replaces a failed worker, re-queueing its requests still wanted and re-posting every body's
-   * field, or gives its place up after {@link MAX_CONSECUTIVE_WORKER_FAILURES} failures in a row.
+   * Replaces a failed worker, re-queueing its requests still wanted in their lanes and re-posting
+   * every body's field, or gives its place up after {@link MAX_CONSECUTIVE_WORKER_FAILURES}
+   * failures in a row.
    */
   private replace(slot: Slot): void {
     if (this.terminated || slot.lost) {
@@ -876,9 +1119,9 @@ export class HeightWorkerPool {
     );
   }
 
-  /** The source body's field as kept now: `null` for the test planet, or none started. */
-  private sourceField(): KeptField | null {
-    return this.sourceBody === null ? null : (this.fields.get(this.sourceBody) ?? null);
+  /** `lane`'s source body's field as kept now: `null` for the test planet, or none started. */
+  private sourceField(lane: Lane): KeptField | null {
+    return lane.sourceBody === null ? null : (this.fields.get(lane.sourceBody) ?? null);
   }
 
   /**
@@ -889,10 +1132,10 @@ export class HeightWorkerPool {
    * answered yet, so the rule is taken conservatively here.
    */
   private madeStale(inFlight: InFlight, layers: TerrainLayers | null): boolean {
-    if (this.sourceBody === null) {
+    if (inFlight.lane.sourceBody === null) {
       return false;
     }
-    const field = this.sourceField();
+    const field = this.sourceField(inFlight.lane);
     if (field !== inFlight.field) {
       return true;
     }
@@ -902,15 +1145,18 @@ export class HeightWorkerPool {
     return staleInFlight(layers);
   }
 
-  /** After a block of `body`'s field: the requests waiting for it are asked again. */
+  /** After a block of `body`'s field: the requests of its lanes waiting for it are asked again. */
   private afterBlock(body: BodyIdHex): void {
-    if (body === this.sourceBody) {
-      for (const [keyString, request] of this.waiting) {
-        if (!this.queue.has(keyString) && !this.isInFlight(keyString)) {
-          this.queue.set(keyString, { request, keyString });
+    for (const lane of this.lanes) {
+      if (lane.sourceBody !== body) {
+        continue;
+      }
+      for (const [keyString, request] of lane.waiting) {
+        if (!lane.queue.has(keyString) && !this.isInFlight(lane, keyString)) {
+          lane.queue.set(keyString, { request, keyString });
         }
       }
-      this.waiting.clear();
+      lane.waiting.clear();
     }
     this.pump();
   }

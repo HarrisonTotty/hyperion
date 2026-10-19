@@ -4,7 +4,13 @@ import { keptBody } from "../../scenes/kept";
 import { bakeOf, ScriptedHeightWorker } from "../../../test/scriptedHeightWorker";
 import { type PatchKey, patchKeyString } from "../patchKey";
 import type { PatchRequest } from "../select";
-import type { BakedPatch, ClassMapAnswer, HeightSourceSetting, TerrainLayers } from "./messages";
+import type {
+  BakedPatch,
+  BakeSettings,
+  ClassMapAnswer,
+  HeightSourceSetting,
+  TerrainLayers,
+} from "./messages";
 import {
   defaultHeightWorkers,
   type FieldChange,
@@ -845,5 +851,195 @@ describe("the height-worker pool of the terrain session (R10.T16.a)", () => {
 
   it("runs one worker where the browser reports no thread count", () => {
     expect(defaultHeightWorkers(Number.NaN)).toBe(1);
+  });
+});
+
+/** The moon's bakes with the wireframe's shading: a second lane's settings (R10.T16.b). */
+const MOON_WIREFRAME: HeightSourceSetting = { ...MOON_SOURCE, weights: "skipped" };
+
+/** The bake settings of a lane over `source`. */
+function laneSettings(source: HeightSourceSetting = MOON_SOURCE): BakeSettings {
+  return { vertexPath: "face-differences", normals: "mesh", source };
+}
+
+/** A bake's key and its settings' class weights, as {@link bakesOf} lists them. */
+function bakeLine(key: PatchKey, weights: "baked" | "skipped"): string {
+  return `${patchKeyString(key)} ${weights}`;
+}
+
+/** Each bake a worker received, as its key and its settings' class weights. */
+function bakesOf(w: ScriptedHeightWorker): string[] {
+  return w.received.flatMap((m) =>
+    m.kind === "bake" && m.settings.source.kind === "body"
+      ? [bakeLine(m.key, m.settings.source.weights)]
+      : [],
+  );
+}
+
+/** Answers the pending bake of `key` with `weights` from a worker. */
+function bakeKey(w: ScriptedHeightWorker, key: PatchKey, weights: "baked" | "skipped"): void {
+  const pending = w.pendingBakes.find(
+    (m) =>
+      patchKeyString(m.key) === patchKeyString(key) &&
+      m.settings.source.kind === "body" &&
+      m.settings.source.weights === weights,
+  );
+  if (pending === undefined) {
+    throw new Error(`no bake of ${patchKeyString(key)} is pending`);
+  }
+  w.reply({ kind: "baked", id: pending.id, bake: bakeOf(pending.key, pending.generation) });
+}
+
+describe("the height-worker pool's lanes (R10.T16.b)", () => {
+  it("replaces a lane's demand alone", () => {
+    const { pool, created } = fieldsOnly(1);
+    const lit = pool.lane(laneSettings());
+    const wire = pool.lane(laneSettings(MOON_WIREFRAME));
+    lit.reprioritise([req(1, 1), req(2, 1)]);
+    wire.reprioritise([req(3, 1)]);
+    lit.reprioritise([req(4, 1)]);
+    expect([lit.queuedCount, wire.queuedCount]).toEqual([1, 1]);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    expect(bakesOf(workerAt(created, 0)).toSorted()).toEqual(
+      [bakeLine(keyAt(3), "skipped"), bakeLine(keyAt(4), "baked")].toSorted(),
+    );
+  });
+
+  it("takes forced requests first, then the larger priority whatever the lane, then the older lane's, then the key's", () => {
+    const { pool, created } = fieldsOnly(1);
+    const older = pool.lane(laneSettings());
+    const newer = pool.lane(laneSettings(MOON_WIREFRAME));
+    older.reprioritise([req(1, 2), req(5, 1), req(6, 3)]);
+    newer.reprioritise([req(2, 2), req(3, 0, true), req(4, 5)]);
+    // Nothing is sent before the moon's field starts; then the queue's two best, and one a bake.
+    pool.fieldInit(MOON, blockOf(8, 0));
+    const worker = workerAt(created, 0);
+    for (let n = 0; n < 4; n += 1) {
+      worker.bakeOldest();
+    }
+    expect(bakesOf(worker)).toEqual([
+      bakeLine(keyAt(3), "skipped"),
+      bakeLine(keyAt(4), "skipped"),
+      bakeLine(keyAt(6), "baked"),
+      bakeLine(keyAt(1), "baked"),
+      bakeLine(keyAt(2), "skipped"),
+      bakeLine(keyAt(5), "baked"),
+    ]);
+  });
+
+  it("hands a lane's bakes to its own listeners alone, each lane baking the key with its settings", () => {
+    const { pool, created } = fieldsOnly(1);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    const lit = pool.lane(laneSettings());
+    const wire = pool.lane(laneSettings(MOON_WIREFRAME));
+    const litBakes: string[] = [];
+    const wireBakes: string[] = [];
+    lit.onBaked((bake) => litBakes.push(patchKeyString(bake.key)));
+    wire.onBaked((bake) => wireBakes.push(patchKeyString(bake.key)));
+    lit.reprioritise([req(1, 1)]);
+    wire.reprioritise([req(1, 1)]);
+    const worker = workerAt(created, 0);
+    expect(worker.pendingBakes).toHaveLength(2);
+    bakeKey(worker, keyAt(1), "skipped");
+    expect([litBakes, wireBakes]).toEqual([[], [patchKeyString(keyAt(1))]]);
+    bakeKey(worker, keyAt(1), "baked");
+    expect(litBakes).toEqual([patchKeyString(keyAt(1))]);
+  });
+
+  it("drops a terminated lane's queued, waiting and in-flight requests, and leaves the fields, the class maps and the other lanes", async () => {
+    const { pool, created } = fieldsOnly(1);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    const ended = pool.lane(laneSettings());
+    const kept = pool.lane(laneSettings(MOON_WIREFRAME));
+    const endedBakes: string[] = [];
+    ended.onBaked((bake) => endedBakes.push(patchKeyString(bake.key)));
+    const keptBakes: string[] = [];
+    kept.onBaked((bake) => keptBakes.push(patchKeyString(bake.key)));
+    const worker = workerAt(created, 0);
+    // Two of the ended lane's in flight, one answered as waiting for a block, which sends the third.
+    ended.reprioritise([req(1, 9), req(2, 8), req(3, 7), req(5, 6)]);
+    replyUnsurveyed(worker);
+    expect([ended.waitingCount, ended.queuedCount]).toEqual([1, 1]);
+    kept.reprioritise([req(4, 1)]);
+    const map = pool.classMap(MOON, "0123456789abcdef");
+    ended.terminate();
+    expect([ended.terminated, ended.waitingCount, ended.queuedCount]).toEqual([true, 0, 0]);
+    // Its bakes still out are dropped as they arrive; the kept lane's is sent and delivered.
+    bakeKey(worker, keyAt(2), "baked");
+    bakeKey(worker, keyAt(3), "baked");
+    expect(endedBakes).toEqual([]);
+    bakeKey(worker, keyAt(4), "skipped");
+    expect(keptBakes).toEqual([patchKeyString(keyAt(4))]);
+    expect(pool.fieldBodies).toEqual([MOON]);
+    const query = worker.pendingClassMaps[0];
+    if (query === undefined) {
+      throw new Error("no class map was asked");
+    }
+    worker.reply({ kind: "class-map", id: query.id, body: MOON, map: null });
+    await expect(map).resolves.toBeNull();
+    expect(() => {
+      ended.reprioritise([]);
+    }).toThrow(/lane was terminated/u);
+    // A second termination does nothing.
+    ended.terminate();
+  });
+
+  it("clears the waiting of the lanes of a released field's body alone", () => {
+    const { pool, created } = fieldsOnly(1);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    pool.fieldInit(PLANET, blockOf(8, 1));
+    const moon = pool.lane(laneSettings());
+    const planet = pool.lane(
+      laneSettings({
+        kind: "body",
+        body: PLANET,
+        detailSeed: "fedcba9876543210",
+        weights: "baked",
+      }),
+    );
+    const worker = workerAt(created, 0);
+    moon.reprioritise([req(1, 2)]);
+    planet.reprioritise([req(2, 1)]);
+    replyUnsurveyed(worker);
+    replyUnsurveyed(worker);
+    pool.fieldRelease(MOON);
+    expect([moon.waitingCount, planet.waitingCount]).toEqual([0, 1]);
+  });
+
+  it("asks a lane's waiting request again after the next block of its own body alone", () => {
+    const { pool, created } = fieldsOnly(1);
+    pool.fieldInit(MOON, blockOf(8, 0));
+    pool.fieldInit(PLANET, blockOf(8, 1));
+    const moon = pool.lane(laneSettings());
+    const worker = workerAt(created, 0);
+    moon.reprioritise([req(1, 1)]);
+    replyUnsurveyed(worker);
+    pool.fieldChunk(PLANET, blockOf(8, 2));
+    expect(moon.waitingCount).toBe(1);
+    pool.fieldChunk(MOON, blockOf(8, 3));
+    expect([moon.waitingCount, worker.pendingBakes.length]).toEqual([0, 1]);
+  });
+
+  it("says it can bake nothing once every worker is given up", () => {
+    const { pool, created } = fieldsOnly(2);
+    const lane = pool.lane(laneSettings());
+    expect(lane.unavailable).toBe(false);
+    for (let failure = 0; failure < MAX_CONSECUTIVE_WORKER_FAILURES; failure += 1) {
+      for (const worker of created.slice(-2)) {
+        worker.fail();
+      }
+    }
+    expect([pool.lostWorkers, pool.workerCount, lane.unavailable]).toEqual([2, 2, true]);
+  });
+
+  it("refuses every lane's call, and a new lane, once the pool is terminated", () => {
+    const { pool } = fieldsOnly(1);
+    const lane = pool.lane(laneSettings());
+    pool.terminate();
+    expect(lane.terminated).toBe(true);
+    expect(() => {
+      lane.reprioritise([]);
+    }).toThrow(/pool was terminated/u);
+    expect(() => pool.lane(laneSettings())).toThrow(/pool was terminated/u);
   });
 });

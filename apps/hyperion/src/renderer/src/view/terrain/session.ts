@@ -30,11 +30,28 @@
  * - **Memory.** The masks and maps are under `coarse-field-gpu` (R12 Design note 6); the
  *   session's report ({@link TerrainSession.memory}) gives the workers' copies of the fields, the
  *   pool's kept blocks and the session's own GPU bytes by category.
- * - **Seams for R10.T16.b and T16.c.** The pool bakes nothing yet (no bake settings): T16.b's
- *   passes take lanes of it, are made at a body's first hand-over in the views' reports'
- *   regimes, are disposed where the workers drop the field (`#fieldReleased`) and are torn down
- *   first, and gate the masks' feed (`#blockTaken`). T16.c's per-view `FrameTerrain` gives
- *   {@link TerrainSession.coverageMask}'s texture as its `surveyCoverage`.
+ * - **The passes (R10.T16.b; decision-r10-live-path, D3 and D4).** One {@link TerrainPass} a body,
+ *   lit, shared by every view that hands the body over (T10.e's `terrain` regime in a
+ *   photorealistic view's last plan), made at the body's first hand-over in any view, on its field
+ *   header's figure and the workers' level table, baking through a lane of the session's one pool
+ *   (`HeightWorkerPool.lane`), and disposed where the workers drop the body's field
+ *   (`#fieldReleased`), not at a hand-back, and first at the teardown. Each step steps every pass
+ *   once over the views that hand its body over, each at its own style's τ, presented size and
+ *   weight (`ViewBudget.streamPriority`), with the scene's craft over it as its contacts
+ *   ({@link sceneContacts}); each view draws its own through {@link TerrainSession.drawTerrain}.
+ * - **The survey and the mask (D6 and D7).** Each wanted body's {@link SurveyedCells}, which its
+ *   pass's selection reads, take every block's cells and the store's coverage at once. Its GPU
+ *   mask takes a block's cells once the rebakes the block named have landed where a pass draws
+ *   the body (`TerrainPass.fieldChanged`), and the store's coverage once the workers have taken
+ *   the blocks posted before it and no rebake is due; at once where no pass draws it.
+ * - **The fault.** Once every height worker is lost, the passes draw nothing more, and every view
+ *   that hands a body over shows `TERRAIN_NOT_AVAILABLE` on its label block's fault line
+ *   ({@link TerrainSession.terrainFaults}, which {@link TerrainSession.subscribeFaults} follows), until
+ *   `VIEW` is shown again and the session made anew.
+ * - **Seams for R10.T16.c.** Its per-view `FrameTerrain` calls {@link TerrainSession.drawTerrain}
+ *   with the view's `TerrainView` and lighting from its plan, and gives
+ *   {@link TerrainSession.coverageMask}'s texture as its `surveyCoverage` only while the view's
+ *   frame says `maskReady`.
  */
 
 import type {
@@ -47,19 +64,23 @@ import type {
   UniverseTime,
 } from "@hyperion/protocol";
 
-import { norm, vec3 } from "../../geometry/vec3";
+import { norm, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import { bodyDetailSeed, toBodyDetailRequest } from "../../lib/system/bodiesWire";
 import type { LitRegime } from "../bodies/regime";
 import type { ViewBudget } from "../budget/viewBudget";
 import type { CameraPose } from "../camera/pose";
 import type { Viewport } from "../camera/projection";
 import { type RenderStyle, sceneFrameFor, type ViewId } from "../camera/state";
+import { differenceM } from "../coords/position";
 import { relativeToCamera } from "../coords/relative";
+import { rotateToBodyFixed } from "../coords/rotation";
 import { type MemoryCategory, textureBytes, type TextureSpec } from "../engine/memory";
+import { EngineUnavailable } from "../engine/resilientEngine";
 import type { RenderEngine, TextureHandle } from "../engine/types";
 import { isLitBody } from "../lighting/retarded";
 import type { QualitySetting } from "../quality/qualitySetting";
-import { cameraSceneOf, type ViewBody, type ViewScene } from "../scene/model";
+import type { HullOutline } from "../scene/hull";
+import { cameraSceneOf, type ViewBody, type ViewCraft, type ViewScene } from "../scene/model";
 import { type ClassMapSource, ClassMapStore } from "./classMap";
 import {
   CoarseFieldStore,
@@ -68,6 +89,14 @@ import {
   type FieldStatus,
 } from "./coarseFieldStore";
 import { CoverageMask, type CoverageView } from "./coverage";
+import { MAX_CONTACTS } from "./gpu/uniforms";
+import {
+  craftContact,
+  datumGroundUnder,
+  finestPatchSizeM,
+  type GroundContact,
+  type GroundUnderFunction,
+} from "./grounded";
 import {
   handoverRangeRatio,
   type HandoverReliefSource,
@@ -76,6 +105,16 @@ import {
   pixelAngleRad,
   storeReliefSource,
 } from "./handover";
+import { type BodyFigure, planetGeometry } from "./planet";
+import { PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
+import { MAX_SELECTION_VIEWS } from "./select";
+import { SurveyedCells } from "./surveyLookup";
+import {
+  TerrainPass,
+  type TerrainPassView,
+  type TerrainViewFrame,
+  type TerrainViewFrameInput,
+} from "./terrainPass";
 import {
   defaultHeightWorkers,
   type FieldChange,
@@ -218,6 +257,123 @@ export function viewFieldCandidates(
   });
 }
 
+/**
+ * One view's part in a body's pass (R10.T16.b): its camera from the body's centre as it last drew,
+ * in the body's non-rotating axes (the galactic axes, the body frame's), at its style's τ
+ * (`handoverTauPx`), its presented size and its weight (`PRIMARY_VIEW_WEIGHT` or
+ * `SECONDARY_VIEW_WEIGHT`, from its budget's `streamPriority`); `null` for a body whose rotation is
+ * not known, which is never handed over.
+ */
+export function terrainPassViewOf(
+  id: ViewId,
+  report: TerrainViewReport,
+  body: ViewBody,
+): TerrainPassView | null {
+  const rotation = body.rotation;
+  if (rotation === null) {
+    return null;
+  }
+  const centreM = relativeToCamera(
+    { kind: "body", body: body.id, m: vec3(0, 0, 0) },
+    report.pose,
+    cameraSceneOf(report.scene).origins,
+  );
+  return {
+    id,
+    view: {
+      rotation,
+      cameraM: scale(centreM, -1),
+      orientation: report.pose.orientation,
+      fovXRad: report.fovXRad,
+      viewport: report.presentedPx,
+    },
+    tauPx: handoverTauPx(report.style, report.setting),
+    weight: report.streamPriority === "primary" ? PRIMARY_VIEW_WEIGHT : SECONDARY_VIEW_WEIGHT,
+  };
+}
+
+/** A hull's bounding radius, m: its farthest vertex from its reference point (`TEST HULL`'s 11.06 m). */
+export function hullBoundingRadiusM(hull: HullOutline): number {
+  return Math.max(0, ...hull.vertices.map((v) => norm(v)));
+}
+
+/**
+ * A craft's velocity against `body`, m/s along the galactic axes: its own where its frame is the
+ * body's, less the body's (its retarded centre's) where its frame is the system's; `null` where
+ * neither holds, or none is known.
+ */
+function velocityAgainst(craft: ViewCraft, body: ViewBody): Vec3 | null {
+  const v = craft.velocityMPerS;
+  if (v === null) {
+    return null;
+  }
+  const position = craft.pose.position;
+  let against: Vec3 | null;
+  switch (position.kind) {
+    case "body":
+    case "body_fixed":
+      against = position.body === body.id ? v : null;
+      break;
+    case "system":
+      against = body.retarded === null ? null : sub(v, body.retarded.velocityMPerS);
+      break;
+    case "galactic":
+      against = null;
+      break;
+  }
+  return against;
+}
+
+/**
+ * The scene's craft over `body` as its pass's contacts (plan R10, R10.T16.b; R05 Design note 9):
+ * each grounded or descending (`isDescending`) over the ground `ground` gives, at its hull's
+ * bounding radius (`TEST HULL`'s until hulls are defined), passed at the ground beneath it
+ * (`craftContact`), at most `MAX_CONTACTS` of them; none for a body whose rotation is not known. A
+ * craft the scene cannot place against the body is passed over.
+ *
+ * @param ground - The ground under a body-fixed point: the datum's (`datumGroundUnder`) until
+ *   R10.T14.c gives it the workers' ground (decision-r10-t16-contracts §2).
+ * @param patchSizeM - The finest patch's edge on the body, metres (`finestPatchSizeM`).
+ */
+export function sceneContacts(
+  scene: ViewScene,
+  body: ViewBody,
+  ground: GroundUnderFunction,
+  patchSizeM: number,
+): GroundContact[] {
+  const rotation = body.rotation;
+  if (rotation === null) {
+    return [];
+  }
+  const origins = cameraSceneOf(scene).origins;
+  const contacts: GroundContact[] = [];
+  for (const craft of scene.craft) {
+    let fromCentreM: Vec3;
+    try {
+      fromCentreM = differenceM(
+        craft.pose.position,
+        { kind: "body", body: body.id, m: vec3(0, 0, 0) },
+        origins,
+      );
+    } catch {
+      // A frame the scene does not know: nothing to place the craft by.
+      continue;
+    }
+    const v = velocityAgainst(craft, body);
+    const contact = craftContact(
+      rotateToBodyFixed(rotation, fromCentreM),
+      v === null ? null : rotateToBodyFixed(rotation, v),
+      hullBoundingRadiusM(craft.hull),
+      ground,
+      patchSizeM,
+    );
+    if (contact !== null && contacts.length < MAX_CONTACTS) {
+      contacts.push(contact);
+    }
+  }
+  return contacts;
+}
+
 /** What the session's masks and maps make on its engine. */
 type TextureEngine = Pick<
   RenderEngine,
@@ -288,8 +444,27 @@ type SeedState =
 interface SessionBody {
   /** Its survey's GPU coverage mask. */
   readonly mask: CoverageMask;
+  /** Its survey as its pass's selection reads it, at once (R10.T16.b). */
+  readonly survey: SurveyedCells;
   seed: SeedState;
+  /**
+   * The store's latest coverage held back from the mask while its pass's rebakes are due, with the
+   * blocks posted when it came, which the workers must take first.
+   */
+  pendingCoverage: { readonly coverage: CoverageView; readonly posted: number } | null;
+  /** Rises when its field is dropped, so that a block's rebakes landing after reach no mask. */
+  epoch: number;
 }
+
+/** A view that hands a body over, with the report and the body as it drew them. */
+interface HandingView {
+  readonly id: ViewId;
+  readonly report: TerrainViewReport;
+  readonly body: ViewBody;
+}
+
+/** No view shows the terrain's fault. */
+const NO_FAULTS: ReadonlySet<ViewId> = new Set();
 
 /** Whether a request ended because the client cancelled it (the protocol's own codes). */
 function cancelled(code: string): boolean {
@@ -313,10 +488,15 @@ export class TerrainSession {
   readonly #store: CoarseFieldStore;
   readonly #classMaps: ClassMapStore;
   readonly #reliefs: HandoverReliefSource;
+  readonly #engine: RenderEngine;
   readonly #bodies = new Map<BodyIdHex, SessionBody>();
   readonly #reports = new Map<ViewId, TerrainViewReport>();
+  /** Each handed-over body's pass (R10.T16.b), from its first hand-over to its field's release. */
+  readonly #passes = new Map<BodyIdHex, TerrainPass>();
+  readonly #faultListeners = new Set<() => void>();
   readonly #unsubscribe: ReadonlyArray<() => void>;
   readonly #workerCount: number;
+  #faults: ReadonlySet<ViewId> = NO_FAULTS;
   #linkUp: boolean;
   #disposed = false;
 
@@ -325,6 +505,7 @@ export class TerrainSession {
     this.#universe = options.universe;
     this.#requests = options.requests;
     this.#linkUp = options.linkUp;
+    this.#engine = options.engine;
     this.#textures = new SessionTextures(options.engine);
     this.#workerCount =
       options.workers ?? defaultHeightWorkers(globalThis.navigator.hardwareConcurrency);
@@ -360,7 +541,7 @@ export class TerrainSession {
         this.#blockTaken(change);
       }),
       this.#store.onRevision((body, coverage) => {
-        this.#bodies.get(body)?.mask.update(coverage);
+        this.#coverageTaken(body, coverage);
       }),
       this.#textures.onRestored(() => {
         this.#restored();
@@ -394,6 +575,55 @@ export class TerrainSession {
     return this.#workerCount;
   }
 
+  /** The bodies with a terrain pass: each handed over since its field was last taken (R10.T16.b). */
+  get passBodies(): ReadonlySet<BodyIdHex> {
+    return new Set(this.#passes.keys());
+  }
+
+  /**
+   * The views whose label blocks show the terrain's fault, `TERRAIN_NOT_AVAILABLE`, after any
+   * graphics fault (decision-r10-t16-contracts §7): every view that hands a body over while every
+   * height worker is lost; the same object until it changes, for `useSyncExternalStore`.
+   */
+  get terrainFaults(): ReadonlySet<ViewId> {
+    return this.#faults;
+  }
+
+  /**
+   * Listens for a change of {@link TerrainSession.terrainFaults}; returns the unsubscribe. Stable in
+   * identity, for `useSyncExternalStore`.
+   */
+  readonly subscribeFaults = (listener: () => void): (() => void) => {
+    this.#faultListeners.add(listener);
+    return () => {
+      this.#faultListeners.delete(listener);
+    };
+  };
+
+  /** `body`'s terrain pass, from its first hand-over to its field's release, or `null`. */
+  pass(body: BodyIdHex): TerrainPass | null {
+    return this.#passes.get(body) ?? null;
+  }
+
+  /**
+   * View `view`'s draw of `body`'s terrain this frame (R10.T16.b; R10.T16.c's `FrameTerrain`
+   * calls it): its pass's `drawFor` with the view's `TerrainView` and lighting from its plan, or
+   * `null` where no pass draws the body, or once the session is disposed. Call it after the
+   * frame's {@link TerrainSession.step}, once a view frame.
+   *
+   * @throws RangeError if more contacts are given than the contact buffer holds.
+   */
+  drawTerrain(
+    view: ViewId,
+    body: BodyIdHex,
+    input: TerrainViewFrameInput,
+  ): TerrainViewFrame | null {
+    if (this.#disposed) {
+      return null;
+    }
+    return this.#passes.get(body)?.drawFor(view, input) ?? null;
+  }
+
   /**
    * Takes what view `id` drew this frame; it judges the fields from the next
    * {@link TerrainSession.step} on, until the view draws again or is forgotten.
@@ -412,11 +642,14 @@ export class TerrainSession {
 
   /**
    * One step, once a primary frame before it draws: wants and releases the bodies' fields as every
-   * view's last report judges them (T7's `follow` over {@link viewFieldCandidates}), and makes or
-   * releases each body's mask, detail seed and class map with its want.
+   * view's last report judges them (T7's `follow` over {@link viewFieldCandidates}), makes or
+   * releases each body's mask, detail seed and class map with its want, and steps each body's
+   * pass (R10.T16.b) once over the views that hand its body over, making the pass at its first
+   * hand-over.
    *
    * @remarks
-   * R10.T16.b's passes step here too, and take `nowMs` with them then.
+   * The views' debounces take their time from their own draws (`TerrainViewFrameInput.nowMs`), so
+   * the step takes none.
    */
   step(): void {
     if (this.#disposed) {
@@ -429,6 +662,7 @@ export class TerrainSession {
     );
     this.#store.follow(candidates);
     this.#followWants();
+    this.#stepPasses();
   }
 
   /**
@@ -514,17 +748,21 @@ export class TerrainSession {
   }
 
   /**
-   * Tears the session down, in order: its passes (none before R10.T16.b), the class-map store, the
-   * masks (with the detail seeds' requests and the session's listeners), the store (its requests
-   * cancelled and its fields released) and the pool (its workers terminated). Nothing is left: no
-   * worker, request, timer, listener or GPU handle.
+   * Tears the session down, in order: its passes (their resources, meshes and materials released,
+   * their lanes ended), the class-map store, the masks (with the detail seeds' requests and the
+   * session's listeners), the store (its requests cancelled and its fields released) and the pool
+   * (its workers terminated). Nothing is left: no worker, request, timer, listener or GPU handle.
    */
   dispose(): void {
     if (this.#disposed) {
       return;
     }
     this.#disposed = true;
-    // The passes: R10.T16.b's, disposed first.
+    for (const pass of this.#passes.values()) {
+      pass.dispose();
+    }
+    this.#passes.clear();
+    this.#faultListeners.clear();
     this.#classMaps.dispose();
     for (const unsubscribe of this.#unsubscribe) {
       unsubscribe();
@@ -542,20 +780,208 @@ export class TerrainSession {
   }
 
   /**
-   * A block the workers took: its newly surveyed cells reach the body's GPU mask at once (T10.c as
-   * built). This is the masks' one feed from the workers, which R10.T16.b holds back until the
-   * rebakes the block names have landed where a pass draws the body (decision D7).
+   * A block the workers took: its newly surveyed cells reach the body's survey at once, which its
+   * pass's selection reads, and its GPU mask, the masks' one feed from the workers, at once where no
+   * pass draws the body, and otherwise once the rebakes the block names have landed (decision D7;
+   * `TerrainPass.fieldChanged`), with the block's level table to the pass.
    */
   #blockTaken(change: FieldChange): void {
-    this.#bodies.get(change.body)?.mask.survey(change);
+    const held = this.#bodies.get(change.body);
+    if (held === undefined) {
+      return;
+    }
+    held.survey.add(change);
+    const pass = this.#passes.get(change.body);
+    if (pass === undefined) {
+      held.mask.survey(change);
+      return;
+    }
+    pass.setLevels(change.levels);
+    const epoch = held.epoch;
+    pass.fieldChanged(change, () => {
+      if (!this.#disposed && this.#bodies.get(change.body) === held && held.epoch === epoch) {
+        held.mask.survey(change);
+        this.#flushCoverage(change.body, held, pass);
+      }
+    });
+    this.#flushCoverage(change.body, held, pass);
+  }
+
+  /**
+   * The store's new coverage of a body: its cells reach the body's survey at once, and its GPU mask
+   * at once where no pass draws the body, and otherwise once the workers have taken every block
+   * posted before it and no rebake is due (decision D7), so that the mask never runs ahead of the
+   * bakes drawn.
+   */
+  #coverageTaken(body: BodyIdHex, coverage: CoverageView): void {
+    const held = this.#bodies.get(body);
+    if (held === undefined) {
+      return;
+    }
+    held.survey.merge(coverage);
+    const pass = this.#passes.get(body);
+    if (pass === undefined) {
+      held.mask.update(coverage);
+      return;
+    }
+    held.pendingCoverage = { coverage, posted: this.#pool.fieldBlocks(body)?.posted ?? 0 };
+    this.#flushCoverage(body, held, pass);
+  }
+
+  /** Gives a body's mask the coverage held back, once its pass is settled and the blocks taken. */
+  #flushCoverage(body: BodyIdHex, held: SessionBody, pass: TerrainPass): void {
+    const pending = held.pendingCoverage;
+    if (pending === null || !pass.settled) {
+      return;
+    }
+    const blocks = this.#pool.fieldBlocks(body);
+    if (blocks !== null && blocks.reported < pending.posted) {
+      return;
+    }
+    held.pendingCoverage = null;
+    held.mask.update(pending.coverage);
   }
 
   /**
    * The workers drop a body's field (released, refused, or held no longer for another history):
-   * its mask forgets the cells, which no field holds now. R10.T16.b disposes the body's passes here.
+   * its pass is disposed (decision D4), and its survey and mask forget the cells, which no field
+   * holds now.
    */
   #fieldReleased(body: BodyIdHex): void {
-    this.#bodies.get(body)?.mask.release();
+    const held = this.#bodies.get(body);
+    if (held !== undefined) {
+      held.epoch += 1;
+      held.pendingCoverage = null;
+      held.survey.clear();
+    }
+    const pass = this.#passes.get(body);
+    if (pass !== undefined) {
+      this.#passes.delete(body);
+      pass.dispose();
+    }
+    held?.mask.release();
+  }
+
+  /**
+   * Steps each body's pass over the views that hand it over, making a pass at a body's first
+   * hand-over, and follows the fault: every view that hands a body over shows it while every height
+   * worker is lost.
+   */
+  #stepPasses(): void {
+    const handing = this.#handingViews();
+    for (const [body, views] of handing) {
+      const first = views[0];
+      if (!this.#passes.has(body) && first !== undefined) {
+        this.#makePass(body, first);
+      }
+    }
+    for (const [body, pass] of this.#passes) {
+      const views = handing.get(body) ?? [];
+      const passViews = views
+        .flatMap(({ id, report, body: seen }) => terrainPassViewOf(id, report, seen) ?? [])
+        .slice(0, MAX_SELECTION_VIEWS);
+      const seen = this.#sceneWith(body);
+      const grounded =
+        seen === null
+          ? []
+          : sceneContacts(
+              seen.scene,
+              seen.body,
+              datumGroundUnder(pass.planet.figure),
+              finestPatchSizeM(pass.planet),
+            );
+      pass.step({ views: passViews, grounded });
+    }
+    const faulted = this.#pool.lostWorkers === this.#pool.workerCount;
+    const faults = faulted
+      ? new Set([...handing.values()].flatMap((views) => views.map(({ id }) => id)))
+      : NO_FAULTS;
+    if (faults.size !== this.#faults.size || [...faults].some((id) => !this.#faults.has(id))) {
+      this.#faults = faults.size === 0 ? NO_FAULTS : faults;
+      for (const listener of this.#faultListeners) {
+        listener();
+      }
+    }
+  }
+
+  /** A scene of the views' last reports holding `body`, with the body as it holds it; `null` where none does. */
+  #sceneWith(body: BodyIdHex): { readonly scene: ViewScene; readonly body: ViewBody } | null {
+    for (const { scene } of this.#reports.values()) {
+      const found = scene.bodies.find((each) => each.id === body);
+      if (found !== undefined) {
+        return { scene, body: found };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The views that hand each wanted body over, in the order they first reported: T10.e's `terrain`
+   * regime in a photorealistic view's last plan, for a body whose rotation is known (R10.T16.b;
+   * the wireframe's hand-over is R10.T11's).
+   */
+  #handingViews(): Map<BodyIdHex, HandingView[]> {
+    const handing = new Map<BodyIdHex, HandingView[]>();
+    for (const [id, report] of this.#reports) {
+      if (report.style !== "photorealistic") {
+        continue;
+      }
+      for (const [body, regime] of report.regimes) {
+        if (regime !== "terrain" || !this.#bodies.has(body)) {
+          continue;
+        }
+        const seen = report.scene.bodies.find((each) => each.id === body);
+        if (seen === undefined || seen.rotation === null) {
+          continue;
+        }
+        const views = handing.get(body) ?? [];
+        views.push({ id, report, body: seen });
+        handing.set(body, views);
+      }
+    }
+    return handing;
+  }
+
+  /**
+   * Makes `body`'s pass at its first hand-over, on its field header's figure and the workers' level
+   * table, through a lane of the pool, once its detail seed and header are held; nothing while the
+   * device is lost (the next step tries again).
+   */
+  #makePass(body: BodyIdHex, first: HandingView): void {
+    const held = this.#bodies.get(body);
+    const header = this.#store.header(body);
+    const detailSeed = this.detailSeed(body);
+    if (held === undefined || header === null || detailSeed === null) {
+      return;
+    }
+    const figure: BodyFigure = {
+      equatorialRadiusM: header.equatorial_radius_m,
+      polarRadiusM: header.polar_radius_m,
+      pole: null,
+    };
+    if (!(figure.polarRadiusM > 0 && figure.polarRadiusM <= figure.equatorialRadiusM)) {
+      return;
+    }
+    let pass: TerrainPass;
+    try {
+      pass = new TerrainPass({
+        engine: this.#engine,
+        setting: first.report.setting,
+        planet: planetGeometry(figure, this.#pool.fieldLevels(body)),
+        source: { kind: "body", body, detailSeed, weights: "baked" },
+        createPool: (bake) => this.#pool.lane(bake),
+        survey: held.survey,
+      });
+    } catch (error: unknown) {
+      if (error instanceof EngineUnavailable) {
+        return;
+      }
+      throw error;
+    }
+    this.#passes.set(body, pass);
+    void pass.ready().catch((error: unknown) => {
+      console.error(`the terrain material of ${body} failed:`, error);
+    });
   }
 
   /** After a device loss: every mask made again from the cells it holds; nothing fetched or posted. */
@@ -584,7 +1010,10 @@ export class TerrainSession {
   #take(body: BodyIdHex): void {
     const held: SessionBody = {
       mask: new CoverageMask(this.#textures, `coverage mask ${body}`),
+      survey: new SurveyedCells(),
       seed: { kind: "none" },
+      pendingCoverage: null,
+      epoch: 0,
     };
     this.#bodies.set(body, held);
     const seen = this.#sceneBody(body);
@@ -599,8 +1028,13 @@ export class TerrainSession {
     }
   }
 
-  /** Releases a body no longer wanted: its detail seed's request, its class map and its mask. */
+  /**
+   * Releases a body no longer wanted: its pass (released with its field already, as a rule), its
+   * detail seed's request, its class map and its mask.
+   */
   #drop(body: BodyIdHex, held: SessionBody): void {
+    this.#passes.get(body)?.dispose();
+    this.#passes.delete(body);
     this.#bodies.delete(body);
     if (held.seed.kind === "asking") {
       held.seed.cancel();

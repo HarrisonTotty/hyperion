@@ -527,6 +527,30 @@ export interface RenderEngine {
    */
   releaseTexture(texture: TextureHandle): void;
   /**
+   * Destroys a mesh this engine made, at once: its vertex and index buffers, each raising its
+   * `destroyed` allocation event with the bytes it was made with (plan R10, R10.T16.b;
+   * decision-r10-t16-contracts §1).
+   *
+   * @remarks
+   * The handle is refused by every later call: a draw of it, `createMaterialAsync`'s `meshes`, and a
+   * second release. As {@link RenderEngine.releaseBuffer}'s, a caller never releases a mesh a frame
+   * not yet submitted holds. `ResilientEngine` drops the release of a mesh a lost engine made.
+   * @throws Error for a handle this engine did not make or has released.
+   */
+  releaseMesh(mesh: MeshHandle): void;
+  /**
+   * Forgets a material this engine made (R10.T16.b): its record, with its shader modules, layouts
+   * and pipelines, which WebGPU cannot destroy and which go with their last reference, and every
+   * bind group the draw path keeps, so that none of the material's is held.
+   *
+   * @remarks
+   * The handle is refused by every later call: a draw of it and a second release. A caller never
+   * releases a material a frame not yet submitted draws. `ResilientEngine` drops the release of a
+   * material a lost engine made.
+   * @throws Error for a handle this engine did not make or has released.
+   */
+  releaseMaterial(material: MaterialHandle): void;
+  /**
    * Dispatches a kernel.
    *
    * @param workgroups - Workgroup counts, or GPU-written ones (an indirect dispatch).
