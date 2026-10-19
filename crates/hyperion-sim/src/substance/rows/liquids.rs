@@ -479,18 +479,22 @@ const WATER: LiquidColumns = LiquidColumns {
 /// The file's 90 K lies 0.694 K below methane's triple point, where the row's ancillary density
 /// is not evaluated: its density there is the line at the ancillary's triple-point slope
 /// (decision-p14-t49b-condensed §2.5), so the index is `Derived`. Its absorption is `Derived`
-/// (decision-p14-t49h-liquids §2, as Martonchik and Orton's paper reads):
+/// (decision-p14-t49h-liquids §2; the file re-reduced by R08.T5.j, §2.4, and `derived`):
 ///
-/// - their Table 2's visible k are local maxima only, every one marked "+", none a minimum, and
-///   the file interpolates linearly between them;
+/// - over 555.6–780 nm it is Martonchik and Orton's Fig. 3 best estimate, read from the paper's
+///   scan, not their Table 2, whose visible k are local maxima only (every one marked "+", none a
+///   minimum). The figure's level over Patel, Nelson and Kerl's range, from 13,300 cm⁻¹, is put on
+///   Table 2's (divided by 1.780), and its spike at 616–623 nm, ten times their own points, is
+///   taken as an exponent slip (divided by 10), as main ruled on 2026-10-19;
 /// - nothing was measured shortward of 18,100 cm⁻¹ (552.5 nm): "We could find no absorption
-///   measurements of liquid methane in this spectral region" (p. 8309), and the table's 400 nm
-///   zero is an unmarked anchor, from which the file interpolates to the 583.1 nm maximum;
-/// - the 90 K values are their 111 K spectrum scaled by the density ratio (p. 8310), uncertain by
-///   25% (p. 8309).
+///   measurements of liquid methane in this spectral region" (p. 8309). Over 380–555.6 nm it is
+///   Karkoschka 1998's gas coefficients times the liquid's number density, 630.8 amagat, the
+///   method Martonchik and Orton used for their unmeasured far ultraviolet (p. 8309); the
+///   coefficients are inferred from planetary spectra, their continuum uncertain by 0.0003 (km
+///   amagat)⁻¹ at 400 nm, doubling every 100 nm, so 100% or more for the smallest;
+/// - the 90 K values are their 111 K spectrum density-scaled (p. 8310), uncertain by 25% (p. 8309).
 ///
-/// R08's re-reduction of the file's visible k (decision-p14-t49h-liquids §2.4) refits the table
-/// before P14.T54.a.
+/// The table was refitted for it at 22 by decision-p14-t49h-liquids §5.
 const METHANE: LiquidColumns = LiquidColumns {
     optics: Some(LiquidOptics {
         index: &bins::METHANE_LIQUID_N,
@@ -538,12 +542,17 @@ const METHANE: LiquidColumns = LiquidColumns {
     sources: &[
         Source {
             covers: "n, a",
-            citation: "R08's `methane-liquid.json`: Martonchik and Orton 1994 (Appl. Opt. 33, \
-                       8306), the liquid at 90 K, through refractiveindex.info (CC0): its visible \
-                       k Table 2's local maxima only, nothing measured shortward of 552.5 nm, the \
-                       400 nm zero an anchor, and the 90 K values the 111 K values scaled by \
-                       density, 25% (decision-p14-t49h-liquids §2.1); reduced to the bake bins by \
-                       `tables::liquid_optics`",
+            citation: "R08's `methane-liquid.json` (`derived`; R08.T5.j): n Martonchik and Orton \
+                       1994 (Appl. Opt. 33, 8306), the liquid at 90 K, through \
+                       refractiveindex.info (CC0); a over 555.6–780 nm their Fig. 3 best estimate, \
+                       read from the scan (NASA NTRS 19960016949), not Table 2's local maxima, its \
+                       level over Patel, Nelson and Kerl's range (from 13,300 cm⁻¹) put on Table \
+                       2's and its 616–623 nm spike taken as an exponent slip; \
+                       nothing measured shortward of 552.5 nm, so a over 380–555.6 nm Karkoschka \
+                       1998's gas coefficients (Icarus 133, 134; PDS GBAT_0001, CC0) at the \
+                       liquid's number density; the 90 K values the 111 K values scaled by \
+                       density, 25% (decision-p14-t49h-liquids §2.1 and §2.4); reduced to the bake \
+                       bins by `tables::liquid_optics`",
             basis: Basis::Reduced,
         },
         Source {

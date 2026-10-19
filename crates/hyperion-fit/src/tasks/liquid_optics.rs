@@ -662,7 +662,8 @@ impl FitTask for LiquidOpticsTask {
             source: "rendering plan R08's committed liquid material files \
                      (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`), each citing its \
                      own primaries: IAPWS R9-97, Mason, Cone and Fry 2016, Pope and Fry 1997 and \
-                     Kou, Labrie and Chýlek 1993 (water); Martonchik and Orton 1994 (methane); \
+                     Kou, Labrie and Chýlek 1993 (water); Martonchik and Orton 1994 (n; k from \
+                     their Fig. 3) with Karkoschka 1998's gas coefficients (methane, R08.T5.j); \
                      Pollack, Toon and Khare 1973 (basaltic glass, a solid held for the silicate \
                      melts); Augustin 1915 (nitrogen); Hagermann et al. 2005 with Loria 1909 \
                      (ethane); Wong and Anderson 1972 with Cuthbertson 1914 (ammonia); Palmer and \
@@ -767,8 +768,13 @@ mod tests {
     }
 
     /// The files' provenances are the ones `substance::liquid`'s bases were set against
-    /// (decision-r08-t5g §3: water, methane and the acids measured; nitrogen, ethane and ammonia
-    /// derived; the basaltic glass a measured solid's, which the melts hold as a stand-in;
+    /// (decision-r08-t5g §3: water and the acids measured; nitrogen, ethane and ammonia derived;
+    /// methane derived since R08.T5.j, its blue k the gas's at the liquid's density, its n measured
+    /// and its red k Fig. 3's best estimate (its axis floor held over 753–776 nm), the row's
+    /// `index_basis` `Measured` (the record's index `Derived` by the 90 K state's extended density)
+    /// and its absorption's `Derived`, as before (decision-p14-t49h-liquids §2.4, main's ruling of
+    /// 2026-10-19); the basaltic glass a
+    /// measured solid's, which the melts hold as a stand-in;
     /// decision-p14-t49h-gas-index §2.3 and A.4: argon, krypton and xenon measured, oxygen, carbon
     /// dioxide, nitrous oxide and sulphur dioxide derived, and carbon monoxide and hydrogen
     /// sulphide stand-ins, whose index the record calls `Derived`). A file whose provenance
@@ -777,7 +783,7 @@ mod tests {
     fn liquid_optics_the_files_provenances_are_the_bases_assumed() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(MATERIALS_FROM_CRATE);
         let expected = [
-            "derived", "measured", "derived", "measured", "derived", "measured", "measured",
+            "derived", "measured", "derived", "derived", "derived", "measured", "measured",
             "measured", "measured", "derived", "standIn", "standIn", "measured", "derived",
             "derived", "derived", "measured",
         ];

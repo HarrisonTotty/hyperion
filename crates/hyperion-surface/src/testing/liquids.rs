@@ -126,9 +126,10 @@ pub const LIQUID_WATER_DENSITY_KG_M3: f64 = 997.047;
 ///   (decision-p14-t49h-gas-index §4.3), `Derived`, copied as shortest round-trip decimals
 ///   (decision-r10-t10b-r09-t2e §7): 0.003 87 m⁻¹ in the bin about 393 nm and 0.000 269 in the bin
 ///   about 747 nm. A sim test holds it to the registry's to the bit.
-/// - **Not modelled here:** the absorption (the file holds k = 0 at 380–400 nm, below its source's
-///   sensitivity with no bound stated, and its visible k is indicative between band extrema), the
-///   surface tension and the viscosity, which the registry resolves for a generated body.
+/// - **Not modelled here:** the absorption (the file's k is `derived` since R08.T5.j: Martonchik
+///   and Orton's Fig. 3 over 555.6–780 nm, and the gas's coefficients at the liquid's density over
+///   380–555.6 nm, since nothing was measured shortward of 552.5 nm and Fig. 3 ends at 555.6 nm),
+///   the surface tension and the viscosity, which the registry resolves for a generated body.
 #[must_use]
 pub fn liquid_methane_titan() -> LiquidProperties {
     LiquidProperties {

@@ -18001,7 +18001,8 @@ tables::gauss_legendre`.
     1. **Step 2b, the nine rows**, as step 2's record gives it: R08.T5.k has landed on the
        integration branch (c085cfff and 5622cb95) (built: step 2b's record, below).
     2. R08's re-reduction of methane's visible k (decision-p14-t49h-liquids §2.4), refitted by
-       §5, with the fill redone before T54.a and the serve gate (§9.7).
+       §5, with the fill redone before T54.a and the serve gate (§9.7) (built: the methane refit's
+       record, below).
   - _Accept_ as step 3's, and:
     - `cargo test -p hyperion-sim --features testing substance::liquid::melt`;
     - `cargo test -p hyperion-fit liquid_optics`; `cargo run -p hyperion-fit -- check`.
@@ -18194,8 +18195,9 @@ tables::gauss_legendre`.
     doc).
   - _The steps left:_ none of T49.h's but two: molten S8, which waits for T49.b's last piece, its
     liquid density; and R08's re-reduction of methane's visible k (decision-p14-t49h-liquids
-    §2.4), refitted by §5, with the fill redone before T54.a and the serve gate (§9.7). P14.T54.a
-    then reads the table and strikes the at-22 re-bless rule.
+    §2.4), refitted by §5, with the fill redone before T54.a and the serve gate (§9.7) (built:
+    R08.T5.j and the methane refit's record, below). P14.T54.a then reads the table and strikes
+    the at-22 re-bless rule.
   - _Accept_ as step 4's, and:
     - `cargo test -p hyperion-fit liquid_optics_the_atoms_index_windows`;
     - `cargo test -p hyperion-sim --features testing --lib the_gas_derived_rows`.
@@ -18234,3 +18236,63 @@ tables::gauss_legendre`.
     the B and A bands; and its 203 K cross-sections are not carried to 90 K.
   - _The item count_: decision-p14-t49h-gas-index §1.2's "48 items" predates step 2's four
     supercooled items and step 4's two glass items; the table holds 54.
+- **Deviations in P14.T49.h, as built: the methane refit, after R08.T5.j (`r08-methane`,
+  2026-10-19).** R08.T5.j re-reduced `methane-liquid.json`'s visible k (decision-p14-t49h-liquids
+  §2.4, with main's rulings of 2026-10-19, status log 15:21 and 15:22; rendering plan R08's
+  "Deviations in T5.j, as built").
+  The file is now `derived`. Its k over 555.6–780 nm is M&O's Fig. 3, put on Table 2's level over
+  PNK's range with its 616–623 nm spike divided by 10. Over 380–555.6 nm it is Karkoschka 1998's
+  gas coefficients at the liquid's density. Its n is unchanged.
+  - _The refit_ (decision-p14-t49h-liquids §5):
+    - the `hyperion-fit` binary was built from the final tree, with the row's doc and citation and
+      the fit task's test and source text edited;
+    - `tables/liquid_optics.rs` was deleted, then `hyperion-fit run liquid_optics --since 22` ran;
+    - `hyperion-fit check` passes (32 fresh, 6 warnings, all provisional tables of other tasks, 0
+      failures);
+    - in `tables.lock` only `liquid_optics`'s `inputs_sha256` and `body_sha256` move. Its revision
+      stays 2, and its fingerprint (the bins' edges and the supercooled viscosities) is unchanged;
+    - the binary was rebuilt on the re-emitted table and `check` run again;
+    - after the batch review (the task's source string, the row's doc and citation, and the science
+      check's axis-vertex fix, which moved bins 6 and 7 by 0.3% and 1.2%), the same steps ran a
+      second time on the final tree, and `check` passes again.
+  - _The table._ Only `METHANE_LIQUID_A`'s fifteen bins move, with the header's `inputs-sha256`, its
+    data hash for `methane-liquid.json` and the task's source text, which now names Fig. 3 and
+    Karkoschka 1998. `METHANE_LIQUID_N` is bit-identical: the file's n did not change.
+    - The bins move from 1.18 × 10⁻⁴, 3.63 × 10⁻³ … 1.83 (bin 9), 0.682 (bin 10) … 1.50 and 1.26
+      m⁻¹ to 2.08 × 10⁻⁵, 7.28 × 10⁻⁵ … 0.147, 0.0250 … 0.629 and 0.141. Every bin and the
+      alternatives are in R08's record.
+  - _The golden._ `liquids.golden` is re-blessed at 22 (decision-bump-plan-after-22 §1.2; §5,
+    condition 4). golden_diff against HEAD finds 75 changed lines:
+    - all of them methane's `absorption_per_m`, fifteen bins at each of its five temperatures
+      (90.694, 115.662, 140.629, 165.597 and 190.464 K);
+    - no basis line, no other row and none of Titan's seas or the other solutions moves;
+    - no other golden moves.
+    - Its verdict, "changed without a bump", is the ruled re-bless. `GENERATOR_VERSION` stays 22.
+  - _The fill_ (§9.7) needs no redo. It fills b alone, which reads the index and κ_T, not k.
+    Methane's records (`testing::liquid_methane_titan` and the sim's `methane_sea`) hold their
+    absorption absent, and their bit tests pass on the refit. `liquid_methane_titan`'s
+    documentation no longer says the file holds k = 0 at 380–400 nm and an indicative k between
+    band extrema.
+  - _The bases._ The row's `index_basis` stays `Measured` (M&O's n). The record's index is
+    `Derived` at every temperature, by the 90 K state's extended density, as before, and its
+    absorption `Derived`, as decision-p14-t49h-liquids §2.2 ruled.
+    - `liquid_optics_the_files_provenances_are_the_bases_assumed` now expects methane `derived`,
+      the case it exists to catch, revisited here.
+    - `METHANE`'s doc comment and its "n, a" citation state the new reduction, with §2.1's three
+      facts (maxima only, nothing measured shortward of 552.5 nm, 90 K density-scaled from 111 K,
+      25%).
+  - _Not on the record._ `planetary::derive::photometry::area_mix` reads `liquid_properties` only
+    under the `p14-snapshot` hold, until P14.T54.a, and no golden of it moved. P14.T49.j's thermal
+    tripwire and the other source-scanning tripwires pass.
+  - _Files:_ `substance/rows/liquids.rs`, `tables/liquid_optics.rs`,
+    `tests/golden/substance/liquids.golden`; `hyperion-fit`'s `tables.lock` and
+    `tasks/liquid_optics.rs`; the surface crate's `testing/liquids.rs` (a doc).
+  - _The other table that reads the file._ P14.T49.e's `condensate_extinction_5`, on
+    `p14-optics-t49c` (8409c95e, not landed), reads `methane-liquid.json`'s n and k at 550 nm.
+    Whichever of the two lands second refits it at 22 through §5.
+  - _The steps left:_ only molten S8 remains of T49.h, waiting for T49.b's last piece.
+  - _Accept:_
+    - `cargo test -p hyperion-fit liquid_optics`;
+    - `cargo run -p hyperion-fit -- check`;
+    - `cargo test -p hyperion-sim --features testing substance::liquid`;
+    - `cargo test -p hyperion-sim --test liquids_golden`.
