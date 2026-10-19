@@ -83,6 +83,7 @@ pub mod habitable_zone;
 pub mod irradiation;
 pub mod limits;
 pub mod m_dwarfs;
+pub(crate) mod passes;
 pub mod photometry;
 pub mod radius;
 pub mod rocky;
@@ -123,6 +124,7 @@ use crate::planetary::derive::envelope::radius_with_envelope;
 use crate::planetary::derive::habitable_zone::HabitableLimit;
 use crate::planetary::derive::irradiation::luminosity_flux;
 use crate::planetary::derive::limits::TidalPlanet;
+use crate::planetary::derive::passes::Convergence;
 use crate::planetary::derive::photometry::area_mix::{HostShade, HostShadeSum};
 use crate::planetary::derive::rotation::tides;
 use crate::planetary::disc::DiscProfile;
@@ -677,6 +679,7 @@ pub struct DerivedBody {
     inventory: VolatileInventory,
     atmosphere: Atmosphere,
     atmosphere_passes: u32,
+    convergence: Convergence,
     internal_luminosity: Watts,
     radius: EarthRadii,
     density: KilogramsPerCubicMetre,
@@ -785,16 +788,18 @@ impl DerivedBody {
 
     /// The Bond albedo the equilibrium temperature was taken at: the one the body's surface state
     /// gives, after the fixed three passes of P14.T12 and T13 ([`ATMOSPHERE_PASSES`]). From the
-    /// 22 → 23 bump (the `p14-snapshot` lane's hold), the area mix's that the last of the passes
-    /// read, which converge to 10⁻⁹ in the equilibrium temperature (P14.T51.b).
+    /// 22 → 23 bump (the `p14-snapshot` lane's hold), the area mix's that the published pass read:
+    /// the last of the passes, which converge to 10⁻⁹ in the equilibrium temperature (P14.T51.b),
+    /// or for a body they do not settle, the end of its bracket with the smaller residual
+    /// (P14.T51.h).
     #[must_use]
     pub const fn albedo(&self) -> BondAlbedo {
         self.albedo
     }
 
     /// How many passes of P14.T12 and T13 the derivation took: [`ATMOSPHERE_PASSES`] under version
-    /// 22's rules, and under the batch's as many as converge, at most [`ATMOSPHERE_PASS_CAP`]
-    /// (P14.T51.b).
+    /// 22's rules, and under the batch's as many as converge, at most `PLAIN_PASSES` (P14.T51.b),
+    /// and for a body they do not settle its bisection's too, at most 57 in all (P14.T51.h).
     #[cfg_attr(
         not(test),
         expect(
@@ -805,6 +810,20 @@ impl DerivedBody {
     #[must_use]
     pub(crate) const fn atmosphere_passes(&self) -> u32 {
         self.atmosphere_passes
+    }
+
+    /// How the derivation's passes ended (P14.T51.h): fixed under version 22's rules, and under the
+    /// batch's converged or bracketed, with the published pass's residual.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the batch's convergence tests read it until P14.T54.a's re-check"
+        )
+    )]
+    #[must_use]
+    pub(crate) const fn convergence(&self) -> Convergence {
+        self.convergence
     }
 
     /// The body's atmosphere and surface at the time (P14.T13).
@@ -1166,14 +1185,43 @@ impl BodyHolds {
 /// Under [`SnapshotRules::Held`] the passes are P14.T13.c's fixed three ([`ATMOSPHERE_PASSES`]).
 /// Under [`SnapshotRules::Batch`] they take the area-mix albedo (P14.T51.b) and run from
 /// [`BondAlbedo::BEFORE_ATMOSPHERES`] until the equilibrium temperature changes by at most
-/// [`ATMOSPHERE_CONVERGENCE`] of itself between passes, at most [`ATMOSPHERE_PASS_CAP`] of them,
-/// under the light of its hosts built once before them.
+/// [`ATMOSPHERE_CONVERGENCE`] of itself between passes, at most
+/// [`PLAIN_PASSES`](passes::PLAIN_PASSES) of them, under the light of its hosts built once before
+/// them; a body they do not settle takes its bracketed fixed point (P14.T51.h, [`passes`]).
 ///
 /// # Errors
 ///
 /// As [`derive_body`].
 pub(crate) fn derive_body_under(
     holds: BodyHolds,
+    placed: &PlacedBody,
+    hosts: &BodyHosts<'_>,
+    disc: &DiscProfile,
+    age: Years,
+    t: UniverseTime,
+) -> Result<DerivedBody, DeriveBodyError> {
+    derive_body_driven(holds, PassDriver::Solve, placed, hosts, disc, age, t)
+}
+
+/// What drives the batch's passes (P14.T51.h): the bracketed fixed point, and for the tests the loop
+/// P14.T51.b built, to which a body that settles within the plain passes is held bit for bit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PassDriver {
+    /// [`passes::solve`], the generator's.
+    Solve,
+    /// P14.T51.b's loop as it was built: at most 64 passes until one settles, the last published.
+    #[cfg(test)]
+    T51b,
+}
+
+/// [`derive_body_under`], its batch's passes driven by `driver` (P14.T51.h).
+///
+/// # Errors
+///
+/// As [`derive_body`].
+pub(crate) fn derive_body_driven(
+    holds: BodyHolds,
+    driver: PassDriver,
     placed: &PlacedBody,
     hosts: &BodyHosts<'_>,
     disc: &DiscProfile,
@@ -1231,7 +1279,7 @@ pub(crate) fn derive_body_under(
         radius: Metres::new(r),
         age: age_now,
     }
-    .passes(holds.snapshot);
+    .passes(holds.snapshot, driver);
 
     let volume = 4.0 / 3.0 * core::f64::consts::PI * (r * r * r);
     let density = KilogramsPerCubicMetre::new(mass_kg.value() / volume);
@@ -1264,6 +1312,7 @@ pub(crate) fn derive_body_under(
         inventory: bulk.inventory,
         atmosphere: passes.air,
         atmosphere_passes: passes.count,
+        convergence: passes.convergence,
         internal_luminosity,
         radius,
         density,
@@ -1307,15 +1356,6 @@ fn tidal_planet(
 /// (P14.T13.c), from the 0.3 of [`BondAlbedo::BEFORE_ATMOSPHERES`].
 pub const ATMOSPHERE_PASSES: u32 = 3;
 
-/// The most passes [`derive_body`] takes under the batch's rules (P14.T51.b, the `p14-snapshot`
-/// lane's hold): 64, the lane's cap, far above the passes a body takes to converge (P14.T51.b's
-/// sample measures them), so that a body whose state flips between passes ends.
-///
-/// A body that reaches the cap publishes the albedo its last pass read, so its value depends on
-/// the cap: retuning the cap moves it once [`SnapshotRules::Batch`] is in force. P14.T54.a's
-/// re-check over the sample should show that no body reaches it (20 of 954 did at 23's stand-ins).
-pub(crate) const ATMOSPHERE_PASS_CAP: u32 = 64;
-
 /// The change in the equilibrium temperature between passes, as a share of it, at which the
 /// batch's passes have converged: 10⁻⁹ (plan 14, P14.T51.b, "the passes converge to 10⁻⁹ in
 /// `T_eq`").
@@ -1334,8 +1374,9 @@ struct PassBody<'a> {
     age: Years,
 }
 
-/// What the passes leave (P14.T13.c, P14.T51.b): the albedo the last pass read, its equilibrium and
-/// heated temperatures and its atmosphere, and how many passes were taken.
+/// What the passes leave (P14.T13.c, P14.T51.b, P14.T51.h): the albedo the published pass read,
+/// its equilibrium and heated temperatures and its atmosphere, how many passes were taken and how
+/// they ended.
 #[derive(Debug, Clone, Copy)]
 struct Passes {
     albedo: BondAlbedo,
@@ -1343,6 +1384,7 @@ struct Passes {
     heated: Kelvin,
     air: Atmosphere,
     count: u32,
+    convergence: Convergence,
 }
 
 impl PassBody<'_> {
@@ -1389,43 +1431,85 @@ impl PassBody<'_> {
     /// [`BondAlbedo::BEFORE_ATMOSPHERES`], each taking the albedo the last one's atmosphere gave:
     /// a fixed [`ATMOSPHERE_PASSES`] under [`SnapshotRules::Held`], and under
     /// [`SnapshotRules::Batch`] until the equilibrium temperature changes by at most
-    /// [`ATMOSPHERE_CONVERGENCE`] of itself, at most [`ATMOSPHERE_PASS_CAP`] of them (a body at the
-    /// cap keeps the albedo its last pass read).
+    /// [`ATMOSPHERE_CONVERGENCE`] of itself, at most [`PLAIN_PASSES`](passes::PLAIN_PASSES) of
+    /// them, a body they do not settle then taking its bracketed fixed point ([`passes::solve`],
+    /// P14.T51.h), as `driver` drives them.
     ///
     /// Every pass reads one surface, built once before the first: the passes' stand-in surface
     /// ([`PassSurface::stand_in`]) under the body's hosts' light, which [`Sky::of`] builds under
-    /// the batch's rules alone (the held rules read no light).
+    /// the batch's rules alone (the held rules read no light). So a pass is a function of the
+    /// albedo it reads alone, which the bisection needs.
     #[must_use]
-    fn passes(&self, rules: SnapshotRules) -> Passes {
+    fn passes(&self, rules: SnapshotRules, driver: PassDriver) -> Passes {
         let light = self
             .sky
             .shade
             .as_ref()
             .map_or(PassLight::HottestHost, PassLight::Shade);
         let surface = PassSurface::stand_in(light);
-        let mut albedo = BondAlbedo::BEFORE_ATMOSPHERES;
-        let (mut irradiated, mut heated, mut air) = self.pass(rules, &surface, albedo);
-        let mut count = 1;
         match rules {
             SnapshotRules::Held => {
+                let mut albedo = BondAlbedo::BEFORE_ATMOSPHERES;
+                let (mut irradiated, mut heated, mut air) = self.pass(rules, &surface, albedo);
                 for _ in 1..ATMOSPHERE_PASSES {
                     albedo = air.albedo();
                     (irradiated, heated, air) = self.pass(rules, &surface, albedo);
-                    count += 1;
+                }
+                Passes {
+                    albedo,
+                    irradiated,
+                    heated,
+                    air,
+                    count: ATMOSPHERE_PASSES,
+                    convergence: Convergence::Fixed,
                 }
             }
-            SnapshotRules::Batch => {
-                while count < ATMOSPHERE_PASS_CAP {
-                    let next = air.albedo();
-                    let (now, warmed, held) = self.pass(rules, &surface, next);
-                    count += 1;
-                    let change = (now.value() - irradiated.value()).abs();
-                    let settled = change <= ATMOSPHERE_CONVERGENCE * now.value();
-                    (albedo, irradiated, heated, air) = (next, now, warmed, held);
-                    if settled {
-                        break;
+            SnapshotRules::Batch => match driver {
+                PassDriver::Solve => {
+                    let solved = passes::solve(
+                        BondAlbedo::BEFORE_ATMOSPHERES,
+                        |albedo| self.pass(rules, &surface, albedo),
+                        |&(_, _, air): &(Kelvin, Kelvin, Atmosphere)| air.albedo(),
+                        |&(last, ..), &(now, ..)| {
+                            (now.value() - last.value()).abs()
+                                <= ATMOSPHERE_CONVERGENCE * now.value()
+                        },
+                    );
+                    let (irradiated, heated, air) = solved.pass;
+                    Passes {
+                        albedo: solved.albedo,
+                        irradiated,
+                        heated,
+                        air,
+                        count: solved.count,
+                        convergence: solved.convergence,
                     }
                 }
+                #[cfg(test)]
+                PassDriver::T51b => self.t51b_passes(&surface),
+            },
+        }
+    }
+
+    /// The batch's passes over `surface` by P14.T51.b's loop as it was built, for the tests that
+    /// hold a body settling within the plain passes to its bits: from 0.3, until one settles to
+    /// [`ATMOSPHERE_CONVERGENCE`], at most 64, the last published and called converged.
+    #[cfg(test)]
+    #[must_use]
+    fn t51b_passes(&self, surface: &PassSurface<'_>) -> Passes {
+        let rules = SnapshotRules::Batch;
+        let mut albedo = BondAlbedo::BEFORE_ATMOSPHERES;
+        let (mut irradiated, mut heated, mut air) = self.pass(rules, surface, albedo);
+        let mut count = 1;
+        while count < 64 {
+            let next = air.albedo();
+            let (now, warmed, held) = self.pass(rules, surface, next);
+            count += 1;
+            let change = (now.value() - irradiated.value()).abs();
+            let settled = change <= ATMOSPHERE_CONVERGENCE * now.value();
+            (albedo, irradiated, heated, air) = (next, now, warmed, held);
+            if settled {
+                break;
             }
         }
         Passes {
@@ -1434,6 +1518,7 @@ impl PassBody<'_> {
             heated,
             air,
             count,
+            convergence: Convergence::Converged,
         }
     }
 }

@@ -51,7 +51,7 @@
 
 mod surface_mix;
 
-pub(crate) use surface_mix::{PassLight, PassSurface};
+pub(crate) use surface_mix::{LARGEST_BOND_ALBEDO, PassLight, PassSurface};
 
 use crate::id::BodyId;
 use crate::math;

@@ -202,7 +202,7 @@ fn pass_condensates(
 
 /// The largest Bond albedo the type holds, the largest `f64` below 1: a lossless frost's
 /// visible-only Bond albedo of 1 (nitrogen's, until P14.T49.i's infrared) is held just below it.
-const LARGEST_BOND_ALBEDO: f64 = 1.0 - f64::EPSILON / 2.0;
+pub(crate) const LARGEST_BOND_ALBEDO: f64 = 1.0 - f64::EPSILON / 2.0;
 
 /// The area mix's albedo `value` as a [`BondAlbedo`], held into 0 ≤ A < 1
 /// ([`LARGEST_BOND_ALBEDO`]); the state's table albedo for a value that is not a number, which no

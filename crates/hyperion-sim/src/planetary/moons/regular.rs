@@ -1212,6 +1212,20 @@ impl DerivedMoon {
         self.body.atmosphere_passes()
     }
 
+    /// Its derivation as a body (P14.T51.h's sample test).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn body(&self) -> &DerivedBody {
+        &self.body
+    }
+
+    /// How its derivation's passes ended (P14.T51.h; [`DerivedBody::convergence`]).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn convergence(&self) -> crate::planetary::derive::passes::Convergence {
+        self.body.convergence()
+    }
+
     /// The moon's own Hill radius about its planet, from P14.T16's
     /// [`derive_body`](crate::planetary::derive::derive_body).
     #[must_use]
@@ -3798,7 +3812,7 @@ mod tests {
     /// The table's Triton at its own inventory under the `p14-snapshot` lane's batch, about the
     /// table's Neptune: airless with no N₂ until P14.T53.c, recorded, not asserted
     /// (decision-triton-and-e101 §1.6). Its cheap invariants are: the airless state, a finite
-    /// albedo in [0, 1), and passes below the cap.
+    /// albedo in [0, 1), and passes that converge within the plain passes (`Converged`, P14.T51.h).
     #[test]
     fn the_table_s_triton_at_its_own_inventory_is_recorded() {
         let batch = MoonHolds {
@@ -3828,8 +3842,9 @@ mod tests {
             albedo.is_finite() && (0.0..1.0).contains(&albedo),
             "{albedo}"
         );
-        assert!(
-            triton.atmosphere_passes() < crate::planetary::derive::ATMOSPHERE_PASS_CAP,
+        assert_eq!(
+            triton.convergence(),
+            crate::planetary::derive::passes::Convergence::Converged,
             "{} passes",
             triton.atmosphere_passes()
         );
