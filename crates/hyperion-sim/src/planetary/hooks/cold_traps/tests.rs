@@ -17,6 +17,7 @@ use crate::planetary::hooks::figures::table_figures_under;
 use crate::planetary::hooks::surface::tests::{inputs_of, spin_of};
 use crate::planetary::hooks::surface::{SurfaceConditions, SurfaceInputs, ZONAL_AREA_POINTS};
 use crate::units::KilogramsPerCubicMetre;
+use crate::units::consts::METRES_PER_AU;
 
 /// Over 10⁴ bodies the exposed fractions are log-uniform on [0.016, 0.45] (Kolmogorov–Smirnov on
 /// ln(f ÷ 0.016) ÷ ln(0.45 ÷ 0.016)), each the open uniform of word 0 of its own
@@ -796,4 +797,371 @@ fn time_the_cold_traps() {
             each[1] - each[0]
         );
     }
+}
+
+/// The table's Moon and its figures under the batch, whose crater contract the record path's
+/// terrain reads ([`terrain_of`]).
+fn table_moon() -> (
+    crate::planetary::derive::DerivedBody,
+    crate::planetary::hooks::figures::GlobalFigures,
+) {
+    let (_, moon) = historic_table()
+        .into_iter()
+        .find(|(name, _)| *name == "Moon")
+        .unwrap();
+    let figures = table_figures_under(SnapshotRules::Batch, &moon).unwrap();
+    (moon, figures)
+}
+
+/// The parts of a ground under [`lunar_sky`]'s sky, over the crater contract `craters`: the Moon's
+/// 1.54°, the flux at Earth's perihelion as the orbit-mean flux of an orbit of eccentricity 0, so
+/// that `S_p` is the sky's to the bit, the Sun's 0.2711° there, and [`real_moon`]'s albedo 0.12 and
+/// heat flow 0.018 W m⁻².
+fn lunar_parts(craters: &CraterParams) -> ColdTrapGroundParts<'_> {
+    ColdTrapGroundParts {
+        obliquity: Radians::from(Degrees::new(1.54)),
+        orbit_mean_flux: WattsPerSquareMetre::new(1361.0 / (0.98329 * 0.98329)),
+        eccentricity: 0.0,
+        star_radius: Radians::from(Degrees::new(0.2711)),
+        bond_albedo: 0.12,
+        heat_flow: WattsPerSquareMetre::new(0.018),
+        craters,
+    }
+}
+
+/// The cold-trap fraction of `threshold` over the surface, by the latitude integral of
+/// `ground`'s [`ColdTrapGround::fractions_at`] at that threshold alone.
+fn integral_of(ground: &ColdTrapGround, threshold: Kelvin) -> f64 {
+    over_latitude(|latitude| {
+        let mut fraction = [f64::NAN];
+        ground.fractions_at(latitude, &[threshold], &mut fraction);
+        fraction[0]
+    })
+}
+
+/// Latitudes every half degree from pole to pole, rad, with the exact poles and both zeros.
+fn pole_to_pole() -> Vec<Radians> {
+    (0..=360)
+        .map(|i| Radians::from(Degrees::new(-90.0 + 0.5 * f64::from(i))))
+        .filter(|latitude| latitude.value().abs() < FRAC_PI_2)
+        .chain([-FRAC_PI_2, -0.0, 0.0, FRAC_PI_2].map(Radians::new))
+        .collect()
+}
+
+/// The record path's cold traps are the latitude integral of the ground's fractions: the table's
+/// Moon publishes `f_x` times that integral of a ground built from its obliquity, flux and
+/// eccentricity, to the bit, and so does a sky taken to periapsis on an eccentric orbit (Mercury's)
+/// and on a retrograde one, whose zonal maxima are the ground's too.
+#[test]
+fn the_trap_fraction_is_the_latitude_integral_of_fractions_at() {
+    let (moon, figures) = table_moon();
+    let inputs = SurfaceInputs {
+        heat_flow: figures.heat_flow(),
+        ocean_weight: figures.ocean_weight(),
+        ..inputs_of(&moon, spin_of("Moon"))
+    };
+    let conditions = SurfaceConditions::derive_under(SnapshotRules::Batch, &inputs).unwrap();
+    let (air, g) = (moon.atmosphere(), moon.surface_gravity());
+    let sky = lunar_sky();
+    let (_, batch) = figures
+        .condensates_under(
+            SnapshotRules::Batch,
+            air,
+            &conditions,
+            g,
+            ColdTrapRules::Batch,
+            &sky,
+        )
+        .unwrap();
+    let ground = ColdTrapGround::new(&ColdTrapGroundParts {
+        bond_albedo: air.albedo().value(),
+        heat_flow: figures.heat_flow(),
+        ..lunar_parts(figures.craters())
+    })
+    .unwrap();
+    for gas in DELIVERED {
+        let trapped = integral_of(&ground, threshold(gas));
+        assert!(trapped > 0.0, "{gas:?}: {trapped}");
+        let ice = batch
+            .entry(gas.substance(), CondensatePhase::Solid)
+            .unwrap();
+        assert_same_bits(ice.area_fraction(), trapped * sky.exposed_fraction);
+    }
+    let au = METRES_PER_AU;
+    for (degrees, (a_au, e)) in [
+        (0.034, (0.387_098, 0.205_630_f64)),
+        (178.46, (1.0, 0.016_7)),
+    ] {
+        let obliquity = Radians::from(Degrees::new(degrees));
+        let flux = WattsPerSquareMetre::new(1361.0 / (a_au * a_au * (1.0 - e * e).sqrt()));
+        let star = Some(SolarRadii::new(1.0));
+        let sky =
+            ColdTrapSky::at_periapsis(obliquity, flux, (Metres::new(a_au * au), e), star, 0.1);
+        let (albedo, heat_flow) = (0.12, WattsPerSquareMetre::new(0.018));
+        let sunlit = Sunlit::new(sky, albedo, heat_flow);
+        let shadows = sunlit.shadows().unwrap();
+        let terrain = terrain_of(figures.craters());
+        let ground = ColdTrapGround::new(&ColdTrapGroundParts {
+            obliquity,
+            orbit_mean_flux: flux,
+            eccentricity: e,
+            star_radius: sky.star_radius,
+            bond_albedo: albedo,
+            heat_flow,
+            craters: figures.craters(),
+        })
+        .unwrap();
+        for gas in DELIVERED {
+            let t = threshold(gas);
+            let trapped = sunlit.trap_fraction(&shadows, &terrain, t);
+            assert!(trapped > 0.0, "{degrees}°, {gas:?}: {trapped}");
+            assert_same_bits(trapped, integral_of(&ground, t));
+        }
+        for (x, t) in sunlit.maxima(&area_points()) {
+            let latitude = Radians::new(math::asin(x));
+            assert_same_bits(t, ground.annual_maximum(latitude).value());
+        }
+    }
+}
+
+/// Several thresholds in one call are one call per threshold, to the bit, in their order: the
+/// closed form where the zonal annual maximum reaches the threshold and 0 where it does not, which
+/// shuts some ground the closed form alone would trap. Up to the zonal maximum a fraction does not
+/// fall as its threshold rises.
+#[test]
+fn fractions_at_over_several_thresholds_is_one_call_per_threshold() {
+    let (_, figures) = table_moon();
+    let ground = ColdTrapGround::new(&lunar_parts(figures.craters())).unwrap();
+    let thresholds = [
+        threshold(Gas::Water),
+        Kelvin::new(30.0),
+        threshold(Gas::CarbonDioxide),
+        Kelvin::new(200.0),
+        threshold_at(Gas::CarbonDioxide, 10.0),
+        Kelvin::new(158.0),
+        Kelvin::new(400.0),
+    ];
+    let mut all = [f64::NAN; 7];
+    let (mut open, mut shut) = (0, 0);
+    for latitude in pole_to_pole() {
+        ground.fractions_at(latitude, &thresholds, &mut all);
+        let maximum = ground.annual_maximum(latitude);
+        for (&t, &f) in thresholds.iter().zip(&all) {
+            let mut one = [f64::NAN];
+            ground.fractions_at(latitude, &[t], &mut one);
+            assert_same_bits(f, one[0]);
+            let closed = cold_trap::fraction(latitude, &ground.shadows, &ground.terrain, t);
+            if maximum >= t {
+                assert_same_bits(f, closed);
+                open += usize::from(f > 0.0);
+            } else {
+                assert_same_bits(f, 0.0);
+                shut += usize::from(closed > 0.0);
+            }
+            assert!((0.0..=1.0).contains(&f), "{latitude:?}, {t:?}: {f}");
+        }
+        for (&low, &f_low) in thresholds.iter().zip(&all) {
+            for (&high, &f_high) in thresholds.iter().zip(&all) {
+                if low < high && high <= maximum {
+                    assert!(
+                        f_low <= f_high,
+                        "{latitude:?}: {low:?} {f_low} > {high:?} {f_high}"
+                    );
+                }
+            }
+        }
+    }
+    assert!(open > 0 && shut > 0, "open {open}, shut by the gate {shut}");
+    ground.fractions_at(Radians::ZERO, &[], &mut []);
+}
+
+/// A southern latitude reads its northern mirror: the fractions and the zonal annual maximum at −φ
+/// are φ's, to the bit, from pole to pole.
+#[test]
+fn the_cold_traps_are_symmetric_about_the_equator() {
+    let (_, figures) = table_moon();
+    let ground = ColdTrapGround::new(&lunar_parts(figures.craters())).unwrap();
+    let thresholds = [threshold(Gas::Water), threshold(Gas::CarbonDioxide)];
+    let (mut north, mut south) = ([f64::NAN; 2], [f64::NAN; 2]);
+    let mut trapped = 0;
+    for latitude in pole_to_pole() {
+        let mirror = Radians::new(-latitude.value());
+        ground.fractions_at(latitude, &thresholds, &mut north);
+        ground.fractions_at(mirror, &thresholds, &mut south);
+        for (n, s) in north.iter().zip(&south) {
+            assert_same_bits(*n, *s);
+            trapped += usize::from(*n > 0.0);
+        }
+        assert_same_bits(
+            ground.annual_maximum(latitude).value(),
+            ground.annual_maximum(mirror).value(),
+        );
+    }
+    assert!(trapped > 0, "{trapped}");
+}
+
+/// On a rocky body at 40 au the zonal annual maximum lies below water's threshold at every
+/// latitude, so its water takes no cold traps anywhere, though the closed form alone would trap
+/// its polar shadows: the zonal ice covers that ground.
+#[test]
+fn a_rocky_body_at_40_au_has_no_water_traps_at_any_latitude() {
+    let (_, figures) = table_moon();
+    let ground = ColdTrapGround::new(&ColdTrapGroundParts {
+        orbit_mean_flux: WattsPerSquareMetre::new(1361.0 / (40.0 * 40.0)),
+        star_radius: Radians::new(math::asin(SOLAR_RADIUS_M / (40.0 * METRES_PER_AU))),
+        bond_albedo: 0.11,
+        heat_flow: WattsPerSquareMetre::new(0.0119),
+        ..lunar_parts(figures.craters())
+    })
+    .unwrap();
+    let water = threshold(Gas::Water);
+    let equator = ground.annual_maximum(Radians::ZERO);
+    assert!(equator < water, "{equator:?}");
+    for latitude in pole_to_pole() {
+        assert!(ground.annual_maximum(latitude) <= equator, "{latitude:?}");
+        let mut fraction = [f64::NAN];
+        ground.fractions_at(latitude, &[water], &mut fraction);
+        assert_same_bits(fraction[0], 0.0);
+    }
+    assert_same_bits(integral_of(&ground, water), 0.0);
+    let pole = Radians::new(FRAC_PI_2);
+    assert!(cold_trap::fraction(pole, &ground.shadows, &ground.terrain, water) > 0.0);
+    eprintln!("40 au: the equator's zonal annual maximum {equator:?}");
+}
+
+/// The ground's zonal annual maximum gives P14.T51.f's figures to 0.01 K, by the record's own
+/// arithmetic to the bit: the Moon's pole 158.13 K and 85° 226.87 K at the sim's albedo 0.11 and
+/// heat flow 0.0119 W m⁻², and Mercury's pole 172.07 K with the Sun's 0.87° disk and 110.27 K as a
+/// point.
+#[test]
+fn the_ground_s_annual_maximum_gives_t51f_s_figures() {
+    let (_, figures) = table_moon();
+    let craters = figures.craters();
+    let (albedo, heat_flow) = (0.11, WattsPerSquareMetre::new(0.0119));
+    let moon = ColdTrapGround::new(&ColdTrapGroundParts {
+        bond_albedo: albedo,
+        heat_flow,
+        ..lunar_parts(craters)
+    })
+    .unwrap();
+    let record = Sunlit::new(lunar_sky(), albedo, heat_flow);
+    let eighty_five = Radians::from(Degrees::new(85.0));
+    for (latitude, expected) in [(Radians::new(FRAC_PI_2), 158.13), (eighty_five, 226.87)] {
+        let t = moon.annual_maximum(latitude).value();
+        assert!((t - expected).abs() < 0.01, "{latitude:?}: {t} K");
+        let colatitude = Radians::new(FRAC_PI_2 - latitude.value());
+        assert_same_bits(t, record.annual_maximum(colatitude).value());
+    }
+    for (radius, expected) in [(0.87, 172.07), (0.0, 110.27)] {
+        let mercury = ColdTrapGround::new(&ColdTrapGroundParts {
+            obliquity: Radians::from(Degrees::new(0.034)),
+            orbit_mean_flux: WattsPerSquareMetre::new(1361.0 / (0.3075 * 0.3075)),
+            eccentricity: 0.0,
+            star_radius: Radians::from(Degrees::new(radius)),
+            bond_albedo: 0.07,
+            heat_flow: WattsPerSquareMetre::new(0.02),
+            craters,
+        })
+        .unwrap();
+        let pole = mercury.annual_maximum(Radians::new(FRAC_PI_2)).value();
+        assert!((pole - expected).abs() < 0.01, "α {radius}°: {pole} K");
+    }
+}
+
+/// The cold-trap threshold is the exosphere's at the airless loss, to the bit, for water and carbon
+/// dioxide, within 1 K of 110 K and at the registry's 58.18 K; helium, with no phase diagram, has
+/// none.
+#[test]
+fn the_trap_threshold_is_the_exosphere_threshold_at_the_airless_loss() {
+    for gas in DELIVERED {
+        let t = trap_threshold(gas.substance()).unwrap();
+        let exosphere =
+            exosphere_threshold(gas.substance(), AIRLESS_ICE_LOSS_KG_PER_M2_GYR).unwrap();
+        assert_same_bits(t.value(), exosphere.value());
+    }
+    let water = trap_threshold(Gas::Water.substance()).unwrap().value();
+    assert!((water - 110.0).abs() < 1.0, "{water}");
+    let co2 = trap_threshold(Gas::CarbonDioxide.substance())
+        .unwrap()
+        .value();
+    assert!((co2 - 58.18).abs() < 0.01, "{co2}");
+    assert_eq!(trap_threshold(Gas::Helium.substance()), None);
+}
+
+/// The Moon's ground under [`lunar_parts`], for the panics.
+fn lunar_ground() -> ColdTrapGround {
+    let (_, figures) = table_moon();
+    ColdTrapGround::new(&lunar_parts(figures.craters())).unwrap()
+}
+
+/// `fractions_at` refuses a buffer of another length than its thresholds.
+#[test]
+#[should_panic(expected = "the thresholds and their fractions must be as many")]
+fn fractions_at_refuses_lengths_that_differ() {
+    let thresholds = [threshold(Gas::Water), threshold(Gas::CarbonDioxide)];
+    lunar_ground().fractions_at(Radians::ZERO, &thresholds, &mut [0.0]);
+}
+
+/// `fractions_at` refuses a latitude past the north pole.
+#[test]
+#[should_panic(expected = "a latitude must be in [-π/2, π/2]")]
+fn fractions_at_refuses_a_latitude_past_the_pole() {
+    let past = Radians::new(FRAC_PI_2.next_up());
+    lunar_ground().fractions_at(past, &[threshold(Gas::Water)], &mut [0.0]);
+}
+
+/// `annual_maximum` refuses a latitude past the south pole.
+#[test]
+#[should_panic(expected = "a latitude must be in [-π/2, π/2]")]
+fn annual_maximum_refuses_a_latitude_past_the_south_pole() {
+    let _ = lunar_ground().annual_maximum(Radians::new((-FRAC_PI_2).next_down()));
+}
+
+/// `fractions_at` refuses a threshold that is not finite, even where the zonal maximum's gate
+/// would shut it.
+#[test]
+#[should_panic(expected = "a threshold must be finite and positive")]
+fn fractions_at_refuses_a_threshold_that_is_not_finite() {
+    let thresholds = [threshold(Gas::Water), Kelvin::new(f64::NAN)];
+    lunar_ground().fractions_at(Radians::ZERO, &thresholds, &mut [0.0; 2]);
+}
+
+/// A ground the closed form refuses has no cold traps: a bare ground of albedo 1 absorbs nothing,
+/// and a star of no flux gives no light, so `new` answers `None` for both.
+#[test]
+fn a_ground_the_closed_form_refuses_has_no_cold_traps() {
+    let (_, figures) = table_moon();
+    let craters = figures.craters();
+    let white = ColdTrapGroundParts {
+        bond_albedo: 1.0,
+        ..lunar_parts(craters)
+    };
+    assert!(ColdTrapGround::new(&white).is_none());
+    let dark = ColdTrapGroundParts {
+        orbit_mean_flux: WattsPerSquareMetre::new(0.0),
+        ..lunar_parts(craters)
+    };
+    assert!(ColdTrapGround::new(&dark).is_none());
+}
+
+/// `new` refuses an eccentricity of 1: a caller's fault, not a body without cold traps.
+#[test]
+#[should_panic(expected = "an eccentricity must be in [0, 1)")]
+fn a_ground_refuses_an_eccentricity_of_one() {
+    let (_, figures) = table_moon();
+    let _ = ColdTrapGround::new(&ColdTrapGroundParts {
+        eccentricity: 1.0,
+        ..lunar_parts(figures.craters())
+    });
+}
+
+/// `new` refuses a heat flow that is not a number.
+#[test]
+#[should_panic(expected = "a heat flow must be finite and non-negative")]
+fn a_ground_refuses_a_heat_flow_that_is_not_a_number() {
+    let (_, figures) = table_moon();
+    let _ = ColdTrapGround::new(&ColdTrapGroundParts {
+        heat_flow: WattsPerSquareMetre::new(f64::NAN),
+        ..lunar_parts(figures.craters())
+    });
 }

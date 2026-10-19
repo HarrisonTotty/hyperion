@@ -36,7 +36,8 @@
 //! dioxide the registry's 58.18 K at 144 kg m⁻² Gyr⁻¹ (the research estimated about 57 K); at
 //! Schorghofer et al. 2021's
 //! stricter 10 kg m⁻² Gyr⁻¹ (GRL 48, e2021GL095533) carbon dioxide's is 55.53 K (their 55.6 K on
-//! Bryson et al. 1974's curve), which the tests read.
+//! Bryson et al. 1974's curve), which the tests read. [`trap_threshold`] gives it, and the cold
+//! traps, R09.T13.f's placement and R09.T13.d's airless frost points all read it there.
 //!
 //! # The zonal annual maximum
 //!
@@ -52,7 +53,8 @@
 //! It is taken at the annual-mean profile's area points, and its cold area read by the same rule,
 //! linear between them. It falls toward the pole, so its cold area is a polar cap, nothing or the
 //! whole surface. On the Moon it is 158 K at the pole and 227 K at 85°, and on Mercury 172 K at
-//! the pole (110 K with the Sun as a point).
+//! the pole (110 K with the Sun as a point). It is symmetric about the equator: a southern
+//! latitude takes its northern mirror's ([`ColdTrapGround::annual_maximum`]).
 //!
 //! # The airless branch, from 24
 //!
@@ -90,6 +92,13 @@
 //!   (`LUNAR_SHARE_UNDER_CUTOFF`, 0.05).
 //!
 //! The published area is `f_ct` × `f_x`, the exposed ice ([`exposed_fraction`]).
+//!
+//! A body's flat ground, its shadows and its terrain are one [`ColdTrapGround`]: at any latitude it
+//! gives the zonal annual maximum and each threshold's gated fraction
+//! ([`ColdTrapGround::fractions_at`]), a southern latitude its northern mirror's. `f_ct` is the
+//! latitude integral of its fractions, and R09.T13.f's field reads its cells' fractions from the
+//! same calls, so that the record's area and the field's cells are one model
+//! (decision-r09-t13f-cold-traps §3).
 //!
 //! # The reservoir
 //!
@@ -331,11 +340,14 @@ impl ColdTrapSky {
     /// eccentricity `orbit`, under an orbit-mean flux `orbit_mean_flux` from a star of radius
     /// `star_radius` (`None` for none, a point), with the exposed fraction `exposed_fraction`.
     ///
-    /// - δ = min(ε, π − ε), so that a retrograde rotator such as Venus (177.4°) has 2.6°.
-    /// - `S_p` = F √(1 − e²) ÷ (1 − e)², the orbit mean L ÷ (4π a² √(1 − e²)) taken to
-    ///   L ÷ (4π a² (1 − e)²) (P14.T12's mean flux).
+    /// - δ = min(ε, π − ε) ([`greatest_declination`]), so that a retrograde rotator such as Venus
+    ///   (177.4°) has 2.6°.
+    /// - `S_p` = F √(1 − e²) ÷ (1 − e)² ([`periapsis_flux`]).
     /// - α = asin(R ÷ a (1 − e)), and π/2 where the star would fill the sky, which the cold traps'
     ///   inputs then refuse.
+    ///
+    /// δ and `S_p` are [`ColdTrapGround::new`]'s arithmetic, so that a ground built from the same
+    /// obliquity, flux and eccentricity sees this sky to the bit.
     #[must_use]
     pub(crate) fn at_periapsis(
         obliquity: Radians,
@@ -344,12 +356,7 @@ impl ColdTrapSky {
         star_radius: Option<SolarRadii>,
         exposed_fraction: f64,
     ) -> Self {
-        let tilt = obliquity.value();
-        let reversed = PI - tilt;
-        let declination = if reversed < tilt { reversed } else { tilt };
-        let e = eccentricity;
-        let near = 1.0 - e;
-        let flux = orbit_mean_flux.value() * (1.0 - e * e).sqrt() / (near * near);
+        let near = 1.0 - eccentricity;
         let ratio = star_radius.map_or(0.0, |r| {
             r.value() * SOLAR_RADIUS_M / (semi_major_axis.value() * near)
         });
@@ -359,12 +366,32 @@ impl ColdTrapSky {
             FRAC_PI_2
         };
         Self {
-            greatest_declination: Radians::new(declination),
-            periapsis_flux: WattsPerSquareMetre::new(flux),
+            greatest_declination: greatest_declination(obliquity),
+            periapsis_flux: periapsis_flux(orbit_mean_flux, eccentricity),
             star_radius: Radians::new(angular),
             exposed_fraction,
         }
     }
+}
+
+/// The star's greatest declination δ in the sky of a body of obliquity `obliquity` to its seasonal
+/// orbit, rad in [0, π/2] for an obliquity in [0, π]: min(ε, π − ε), the present obliquity's,
+/// labelled (the obliquity's history is not modelled).
+#[must_use]
+fn greatest_declination(obliquity: Radians) -> Radians {
+    let tilt = obliquity.value();
+    let reversed = PI - tilt;
+    Radians::new(if reversed < tilt { reversed } else { tilt })
+}
+
+/// The flux at periapsis `S_p`, W m⁻², of the orbit-mean flux `orbit_mean_flux` on a seasonal orbit
+/// of eccentricity `eccentricity`, in [0, 1): F √(1 − e²) ÷ (1 − e)², the orbit mean
+/// L ÷ (4π a² √(1 − e²)) taken to L ÷ (4π a² (1 − e)²) (P14.T12's mean flux).
+#[must_use]
+fn periapsis_flux(orbit_mean_flux: WattsPerSquareMetre, eccentricity: f64) -> WattsPerSquareMetre {
+    let e = eccentricity;
+    let near = 1.0 - e;
+    WattsPerSquareMetre::new(orbit_mean_flux.value() * (1.0 - e * e).sqrt() / (near * near))
 }
 
 /// The Moon's sky as the plan's tests take it (science-r09-drainage.md §8; R09.T7.d's real Moon):
@@ -486,10 +513,12 @@ pub(crate) fn collisional(
 }
 
 /// A body's flat ground and its shadows under its star: what both its zonal annual maximum and its
-/// cold traps read.
+/// cold traps read. [`ColdTrapGround`] adds its terrain.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Sunlit {
-    sky: ColdTrapSky,
+    greatest_declination: Radians,
+    periapsis_flux: WattsPerSquareMetre,
+    star_radius: Radians,
     albedo: f64,
     heat_flow: WattsPerSquareMetre,
 }
@@ -501,11 +530,14 @@ impl Sunlit {
         Self::new(*body.sky, body.atmosphere.albedo().value(), body.heat_flow)
     }
 
-    /// The ground under the sky `sky`, of Bond albedo `albedo` and heat flow `heat_flow`.
+    /// The ground under the sky `sky`, of Bond albedo `albedo` and heat flow `heat_flow`: the sky's
+    /// greatest declination, flux at periapsis and angular radius.
     #[must_use]
     pub(crate) const fn new(sky: ColdTrapSky, albedo: f64, heat_flow: WattsPerSquareMetre) -> Self {
         Self {
-            sky,
+            greatest_declination: sky.greatest_declination,
+            periapsis_flux: sky.periapsis_flux,
+            star_radius: sky.star_radius,
             albedo,
             heat_flow,
         }
@@ -517,27 +549,44 @@ impl Sunlit {
     /// maximum").
     #[must_use]
     pub(crate) fn annual_maximum(&self, colatitude: Radians) -> Kelvin {
-        let rising = colatitude.value() + self.sky.greatest_declination.value();
+        let rising = colatitude.value() + self.greatest_declination.value();
         let highest = if rising < FRAC_PI_2 {
             rising
         } else {
             FRAC_PI_2
         };
-        let e = flux_weighted_elevation(Radians::new(highest), self.sky.star_radius).value();
-        let absorbed = (1.0 - self.albedo) * self.sky.periapsis_flux.value() * math::sin(e);
+        let e = flux_weighted_elevation(Radians::new(highest), self.star_radius).value();
+        let absorbed = (1.0 - self.albedo) * self.periapsis_flux.value() * math::sin(e);
         let power = (absorbed + self.heat_flow.value()) / (REGOLITH_EMISSIVITY * STEFAN_BOLTZMANN);
         Kelvin::new(power.sqrt().sqrt())
     }
 
+    /// The zonal annual maximum at the latitude `latitude`, rad in [−π/2, π/2], symmetric about the
+    /// equator: [`annual_maximum`](Self::annual_maximum) at the colatitude of its northern mirror.
+    ///
+    /// # Panics
+    ///
+    /// If the latitude is outside [−π/2, π/2].
+    #[must_use]
+    fn annual_maximum_at(&self, latitude: Radians) -> Kelvin {
+        let north = northern_mirror(latitude);
+        self.annual_maximum(Radians::new(FRAC_PI_2 - north.value()))
+    }
+
     /// The zonal annual maximum at the area points of `points`, `(x, T)` with x the sine of the
-    /// latitude, as `(x, T_max)`, in their order.
+    /// latitude from 0 to 1, as `(x, T_max)`, in their order: each at its latitude by
+    /// [`ColdTrapGround::annual_maximum`]'s rule.
+    ///
+    /// # Panics
+    ///
+    /// If an x is outside [−1, 1].
     #[must_use]
     pub(crate) fn maxima(&self, points: &[(f64, f64)]) -> Vec<(f64, f64)> {
         points
             .iter()
             .map(|&(x, _)| {
-                let colatitude = Radians::new(FRAC_PI_2 - math::asin(x));
-                (x, self.annual_maximum(colatitude).value())
+                let latitude = Radians::new(math::asin(x));
+                (x, self.annual_maximum_at(latitude).value())
             })
             .collect()
     }
@@ -549,9 +598,9 @@ impl Sunlit {
         // A body the closed form refuses has no cold traps; its zonal annual maximum still lays
         // its zonal ices, so nothing is lost by dropping the error.
         cold_trap::Body::new(BodyParts {
-            flux: self.sky.periapsis_flux,
-            greatest_declination: self.sky.greatest_declination,
-            star_radius: self.sky.star_radius,
+            flux: self.periapsis_flux,
+            greatest_declination: self.greatest_declination,
+            star_radius: self.star_radius,
             bond_albedo: self.albedo,
             emissivity: REGOLITH_EMISSIVITY,
             heat_flow: self.heat_flow,
@@ -560,10 +609,18 @@ impl Sunlit {
     }
 
     /// The cold-trap fraction `f_ct` of a species of threshold `threshold` over the terrain
-    /// `terrain` under the shadows `shadows`: `hyperion_surface::cold_trap::fraction` integrated by
-    /// area over latitude ([`over_latitude`]), at the latitudes whose zonal annual maximum is at
-    /// least the threshold, so that it never lies under the zonal cap. A share of the whole surface,
-    /// 0 to 1.
+    /// `terrain` under the shadows `shadows`: the latitude integral ([`over_latitude`]) of the
+    /// ground's gated fraction ([`ColdTrapGround::fractions_at`]), the closed form at the latitudes
+    /// whose zonal annual maximum is at least the threshold, so that it never lies under the zonal
+    /// cap. A share of the whole surface, 0 to 1.
+    ///
+    /// The record path takes it through [`ColdTrapGround`] over [`terrain_of`]'s terrain. The tests
+    /// take it here over terrains of their own, Hayne et al.'s distribution A among them.
+    ///
+    /// # Panics
+    ///
+    /// If the threshold is not finite and positive.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn trap_fraction(
         &self,
@@ -571,12 +628,221 @@ impl Sunlit {
         terrain: &Terrain,
         threshold: Kelvin,
     ) -> f64 {
-        over_latitude(|latitude| {
-            if self.annual_maximum(Radians::new(FRAC_PI_2 - latitude.value())) >= threshold {
-                cold_trap::fraction(latitude, shadows, terrain, threshold)
+        ColdTrapGround {
+            sunlit: *self,
+            shadows: *shadows,
+            terrain: *terrain,
+        }
+        .trap_fraction(threshold)
+    }
+}
+
+/// The northern mirror |φ| of the latitude `latitude`, rad in [0, π/2]: the cold traps are
+/// symmetric about the equator, and a southern latitude's own φ would put the star's highest
+/// elevation, e₀ + δ from the colatitude π/2 − φ, past the zenith.
+///
+/// # Panics
+///
+/// If the latitude is outside [−π/2, π/2].
+#[must_use]
+fn northern_mirror(latitude: Radians) -> Radians {
+    let phi = latitude.value();
+    assert!(
+        (-FRAC_PI_2..=FRAC_PI_2).contains(&phi),
+        "a latitude must be in [-π/2, π/2], got {phi} rad"
+    );
+    latitude.abs()
+}
+
+/// What a body's cold traps read of its sky and its ground (P14.T51.f; R09.T13.f), each in the
+/// unit its type states.
+///
+/// Plain data with crate-visible fields: [`ColdTrapGround::new`] reads them.
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "R09.T13.f's placement is the first caller")
+)]
+pub(crate) struct ColdTrapGroundParts<'a> {
+    /// The obliquity ε of the spin axis to the seasonal orbit, rad in [0, π]. The star's greatest
+    /// declination is min(ε, π − ε), the present one (labelled).
+    pub(crate) obliquity: Radians,
+    /// The orbit-mean flux of every host at the body, W m⁻² (P14.T12's sum), taken to periapsis as
+    /// F √(1 − e²) ÷ (1 − e)².
+    pub(crate) orbit_mean_flux: WattsPerSquareMetre,
+    /// The seasonal orbit's eccentricity e, in [0, 1).
+    pub(crate) eccentricity: f64,
+    /// The star's angular radius α at periapsis, rad in [0, π/2): 0 for a point.
+    pub(crate) star_radius: Radians,
+    /// The bare ground's Bond albedo A, in [0, 1).
+    pub(crate) bond_albedo: f64,
+    /// The internal heat flow q (P14.T24.b), W m⁻².
+    pub(crate) heat_flow: WattsPerSquareMetre,
+    /// The crater contract (P14.T48.c), from which [`terrain_of`] takes the terrain's stand-ins.
+    pub(crate) craters: &'a CraterParams,
+}
+
+/// A body's cold traps as functions of latitude (P14.T51.f): its zonal annual maximum, and each
+/// threshold's closed-form cold-trap fraction behind it. P14.T51.f's latitude integral and
+/// R09.T13.f's per-cell placement both read it, so the record's area and the field's cells are
+/// one model.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ColdTrapGround {
+    /// The flat ground under the star, for the zonal annual maximum.
+    sunlit: Sunlit,
+    /// The closed form's body-wide inputs, the same ground's.
+    shadows: cold_trap::Body,
+    /// The terrain whose shadows trap.
+    terrain: Terrain,
+}
+
+impl ColdTrapGround {
+    /// The ground of `parts`, with δ and `S_p` by the module's arithmetic
+    /// ([`ColdTrapSky::at_periapsis`]'s), ε [`REGOLITH_EMISSIVITY`] and the terrain
+    /// [`terrain_of`]'s. `None` where `hyperion_surface::cold_trap::Body` refuses them (a star that
+    /// gives no light or fills the sky, or an albedo of 1): such a body has no cold traps.
+    ///
+    /// # Panics
+    ///
+    /// If a part lies outside its documented range: an obliquity outside [0, π], an eccentricity
+    /// outside [0, 1), a flux, star radius or heat flow that is negative or not finite, or an albedo
+    /// outside [0, 1]. Those are a caller's fault, not a body without cold traps.
+    #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "R09.T13.f's placement is the first caller")
+    )]
+    pub(crate) fn new(parts: &ColdTrapGroundParts<'_>) -> Option<Self> {
+        let obliquity = parts.obliquity.value();
+        assert!(
+            (0.0..=PI).contains(&obliquity),
+            "an obliquity must be in [0, π], got {obliquity} rad"
+        );
+        let e = parts.eccentricity;
+        assert!(
+            (0.0..1.0).contains(&e),
+            "an eccentricity must be in [0, 1), got {e}"
+        );
+        for (part, value) in [
+            ("flux", parts.orbit_mean_flux.value()),
+            ("star radius", parts.star_radius.value()),
+            ("heat flow", parts.heat_flow.value()),
+        ] {
+            assert!(
+                value.is_finite() && value >= 0.0,
+                "a {part} must be finite and non-negative, got {value}"
+            );
+        }
+        let albedo = parts.bond_albedo;
+        assert!(
+            (0.0..=1.0).contains(&albedo),
+            "a Bond albedo must be in [0, 1], got {albedo}"
+        );
+        let sunlit = Sunlit {
+            greatest_declination: greatest_declination(parts.obliquity),
+            periapsis_flux: periapsis_flux(parts.orbit_mean_flux, parts.eccentricity),
+            star_radius: parts.star_radius,
+            albedo: parts.bond_albedo,
+            heat_flow: parts.heat_flow,
+        };
+        Self::under(sunlit, terrain_of(parts.craters))
+    }
+
+    /// The ground of the body `body` on the record path: its sky as [`ColdTrapSky::at_periapsis`]
+    /// took it, its atmosphere's Bond albedo, its heat flow and [`terrain_of`] its crater contract,
+    /// or `None` where `hyperion_surface::cold_trap::Body` refuses them.
+    #[must_use]
+    fn of(body: &ColdTrapBody<'_>) -> Option<Self> {
+        Self::under(Sunlit::of(body), terrain_of(body.craters))
+    }
+
+    /// The flat ground `sunlit` over the terrain `terrain`, or `None` where its shadows are
+    /// refused ([`Sunlit::shadows`]).
+    #[must_use]
+    fn under(sunlit: Sunlit, terrain: Terrain) -> Option<Self> {
+        let shadows = sunlit.shadows()?;
+        Some(Self {
+            sunlit,
+            shadows,
+            terrain,
+        })
+    }
+
+    /// The zonal annual maximum at `latitude`, rad in [−π/2, π/2], K: flat ground in equilibrium
+    /// with the star at its highest, σT⁴ = ((1 − A) `S_p` sin e + q) ÷ ε (the module's "The zonal
+    /// annual maximum"). It is symmetric about the equator.
+    ///
+    /// # Panics
+    ///
+    /// If the latitude is outside [−π/2, π/2].
+    #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "R09.T13.f's placement is the first caller")
+    )]
+    pub(crate) fn annual_maximum(&self, latitude: Radians) -> Kelvin {
+        self.sunlit.annual_maximum_at(latitude)
+    }
+
+    /// The cold-trap fraction at `latitude`, rad in [−π/2, π/2], of each threshold of
+    /// `thresholds`, written to `fractions` in their order. Each is a share, 0 to 1, of the ground
+    /// at that latitude:
+    /// - `hyperion_surface::cold_trap::fraction` where the zonal annual maximum there is at least
+    ///   the threshold;
+    /// - 0 where it is below, so the traps never lie under the zonal cap.
+    ///
+    /// It is symmetric about the equator: a southern latitude reads its northern mirror. It does
+    /// not fall as a threshold rises up to the zonal annual maximum there, and is 0 above it, under
+    /// the zonal cap.
+    ///
+    /// # Panics
+    ///
+    /// If `fractions` and `thresholds` differ in length, the latitude is outside [−π/2, π/2], or a
+    /// threshold is not finite and positive.
+    pub(crate) fn fractions_at(
+        &self,
+        latitude: Radians,
+        thresholds: &[Kelvin],
+        fractions: &mut [f64],
+    ) {
+        assert_eq!(
+            thresholds.len(),
+            fractions.len(),
+            "the thresholds and their fractions must be as many"
+        );
+        let north = northern_mirror(latitude);
+        for threshold in thresholds {
+            let t = threshold.value();
+            assert!(
+                t.is_finite() && t > 0.0,
+                "a threshold must be finite and positive, got {t} K"
+            );
+        }
+        let maximum = self
+            .sunlit
+            .annual_maximum(Radians::new(FRAC_PI_2 - north.value()));
+        for (fraction, &threshold) in fractions.iter_mut().zip(thresholds) {
+            *fraction = if maximum >= threshold {
+                cold_trap::fraction(north, &self.shadows, &self.terrain, threshold)
             } else {
                 0.0
-            }
+            };
+        }
+    }
+
+    /// The cold-trap fraction `f_ct` of a species of threshold `threshold`: the latitude integral
+    /// ([`over_latitude`]) of its [`fractions_at`](Self::fractions_at), a share of the whole
+    /// surface, 0 to 1.
+    ///
+    /// # Panics
+    ///
+    /// If the threshold is not finite and positive.
+    #[must_use]
+    fn trap_fraction(&self, threshold: Kelvin) -> f64 {
+        over_latitude(|latitude| {
+            let mut fraction = [0.0];
+            self.fractions_at(latitude, &[threshold], &mut fraction);
+            fraction[0]
         })
     }
 }
@@ -647,30 +913,39 @@ pub(crate) fn condensables(partition: &Partition) -> Vec<SubstanceId> {
     species
 }
 
+/// The cold-trap threshold of `substance` (the module's "The threshold"), K: its sublimation edge
+/// into vacuum at [`AIRLESS_ICE_LOSS_KG_PER_M2_GYR`] ([`exosphere_threshold`]), within 1 K of
+/// 110 K for water and 58.18 K for carbon dioxide. `None` for a row with no phase diagram or molar
+/// mass, which takes no cold traps. P14.T51.f's traps, R09.T13.f's placement and R09.T13.d's
+/// airless frost points all read it, so the three are one rule.
+#[must_use]
+pub(crate) fn trap_threshold(substance: SubstanceId) -> Option<Kelvin> {
+    exosphere_threshold(substance, AIRLESS_ICE_LOSS_KG_PER_M2_GYR)
+}
+
 /// The cold-trapped ices of a qualifying body `body` of partition `partition`, whose zonal entries
-/// are `zonal`: one for each condensable ([`condensables`]) with a cold-trap fraction, its area
-/// `f_ct` × `f_x` and its reservoir [`trap_reservoir`]'s. Water takes none on an ice-rich crust.
+/// are `zonal`: one for each condensable ([`condensables`]) with a cold-trap fraction at its
+/// [`trap_threshold`], its area `f_ct` × `f_x` and its reservoir [`trap_reservoir`]'s. Water takes
+/// none on an ice-rich crust.
 #[must_use]
 fn trapped_ices(
     partition: &Partition,
     zonal: &Condensates,
     body: &ColdTrapBody<'_>,
 ) -> Vec<TrappedIce> {
-    let ground = Sunlit::of(body);
-    let Some(shadows) = ground.shadows() else {
+    let Some(ground) = ColdTrapGround::of(body) else {
         return Vec::new();
     };
-    let terrain = terrain_of(body.craters);
     let water = Gas::Water.substance();
     let mut traps = Vec::new();
     for substance in condensables(partition) {
         if substance == water && body.crust == Crust::IceRich {
             continue;
         }
-        let Some(threshold) = exosphere_threshold(substance, AIRLESS_ICE_LOSS_KG_PER_M2_GYR) else {
+        let Some(threshold) = trap_threshold(substance) else {
             continue;
         };
-        let trapped = ground.trap_fraction(&shadows, &terrain, threshold);
+        let trapped = ground.trap_fraction(threshold);
         if trapped.is_nan() || trapped <= 0.0 {
             continue;
         }
