@@ -176,7 +176,7 @@ fn the_list_is_sorted_and_each_reach_complete() {
     let (state, _) = cratered(&world);
     let field: CoarseField = quantise(&world.inputs, state).unwrap();
     let craters = field.craters();
-    assert!(!craters.is_empty());
+    assert_ne!(craters, []);
     let level = field.header().level().get();
     let key = |c: &CoarseCrater| {
         (
@@ -268,7 +268,10 @@ fn the_elevation_holds_each_crater_s_coarse_profile() {
     let world = World::new(reference::ceres_like());
     let pass = world.pass(reference::SEED);
     let (state, _) = cratered(&world);
-    assert!(!state.craters.is_empty());
+    assert_ne!(
+        state.craters,
+        [] as [hyperion_surface::field::CoarseCrater; 0]
+    );
     let figure = world.inputs.figure();
     let rims = CoarseRims::for_body(*world.inputs.craters(), figure, pass.level());
     let mut expected = vec![0.0; state.cells.len()];
@@ -419,7 +422,7 @@ mod cost {
         if through >= 3 {
             run(&pass, &mut working);
         }
-        assert!(!working.cells.is_empty());
+        assert_ne!(working.cells, []);
     }
 
     #[test]
@@ -443,7 +446,7 @@ mod cost {
     /// The whole pass on `inputs`.
     fn pass_on(inputs: &CoarseInputs) {
         let field = crate::planetary::surface::coarse_pass(reference::SEED, inputs);
-        assert!(!field.synthesis().is_empty());
+        assert_ne!(field.synthesis(), []);
     }
 
     #[test]

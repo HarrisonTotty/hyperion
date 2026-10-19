@@ -19,10 +19,13 @@
 //! R09.T12's science check read them), each a centre uniform on the sphere, and the edifices dealt
 //! to them in turn, each set off from its province's centre by a two-dimensional normal of angular
 //! s.d. `r_e` √(n ÷ P) ÷ R, so that a province holds its edifices about twice over. Overlapping
-//! loads sum, held at `h_max`. The flexure then sinks the load and raises its bulge, and the
-//! realised share falls short of `σ_volc` where the lithosphere bends; one correction then widens
-//! the coverage by the ratio of the variances (at most to ¾) and lays the field again. A
-//! labelled illustration of low confidence: one edifice size, Mars's style on every lid.
+//! loads sum, held at `h_max`. The flexure then fills each load's moat and raises its bulge, and
+//! where the realised share falls short of `σ_volc` one correction widens the coverage by the
+//! ratio of the variances (at most to ¾) and lays the field again. A labelled illustration of low
+//! confidence: one edifice size, Mars's style on every lid, and no regional rise (Mars's
+//! constructional relief is mostly Tharsis's rise, which an edifice-only law can only stand for
+//! with some thirty giant shields: the addendum 2's figures, not read; recorded for T12.c's
+//! re-validation).
 //!
 //! The lid's mechanics family sets the rest (`decision-r09-t12-coarse.md` item 3): a `Silicate`
 //! lid sits on a mantle of [`MANTLE_DENSITY`] and takes the silicate `T_e`; a `WaterIce` lid sits
@@ -38,7 +41,8 @@
 //! not re-read; the solution checked symbolically by R09.T12's science check): a line load of
 //! weight `V₀` per unit length deflects it by w = `w₀` e^(−x/α) (cos x/α + sin x/α), `w₀` = `V₀` ÷
 //! (2 `k_eff` α), with α = [4D ÷ `k_eff`]^¼, D = E `T_e`³ ÷ 12(1 − ν²) and `k_eff` = (`ρ_m` −
-//! `ρ_fill`) g + E `T_e` ÷ R² ([`flexural_parameter`]). The last term is a spherical shell's
+//! `ρ_fill`) g + E `T_e` ÷ R² ([`flexural_parameter`]), `ρ_fill` being `ρ_p` (the addendum 2,
+//! below). The last term is a spherical shell's
 //! membrane support, the shallow shell's foundation stiffness (Brotchie and Silvester 1969, JGR 74,
 //! 5240, not read; "membrane stresses (which depend on ETe/R0² and are thus large for small
 //! bodies)", Nimmo, Bills and Thomas 2011, JGR 116, E11001, ¶49), valid for α ≪ R; low-degree
@@ -49,20 +53,32 @@
 //! own cross-section (the axisymmetric load's exact solution, in Kelvin functions, is not used).
 //! The cross-section is cut into [`PROFILE_STRIPS`] strips of uniform load, each convolved exactly
 //! through the line load's step response ([`step_response`]), so the result holds for any α,
-//! the local Airy balance at α = 0 included. A load broad against α sinks by `ρ_l` g h ÷ `k_eff`
-//! (`ρ_l` h ÷ (`ρ_m` − `ρ_fill`) where the shell term is negligible), its whole compensation, and a
-//! narrow one is held up. R09.T12's science check found the ruled model counting the fill twice
-//! under a load (the uniform foundation assumes fill beneath it, and Δz takes w off it again);
-//! built as ruled, it is recorded in the plan's deferred findings for main's ruling.
+//! the local Airy balance at α = 0 included. A load broad against α sinks by `ρ_p` g h ÷ `k_eff`
+//! (`ρ_p` h ÷ (`ρ_m` − `ρ_p`) where the shell term is negligible), its whole compensation, and a
+//! narrow one is held up. The ridge reading overstates an edifice's flexure against the
+//! axisymmetric solution: on the reference Mars's cap-height edifice its root is 2.1 times and its
+//! bulge 5.3 times the axisymmetric cone's, and its profile, turned about the centre, carries 1.6
+//! times the load's weight (R09.T12's science check, by a planar FFT solve; recorded).
 //!
-//! **The moat is filled to the surrounding level** (ruled): w is the deflection, positive
-//! downward, under the total load, h the load's thickness above the pre-load surface, and the
-//! elevation changes by Δz = max(h − w, 0). The moat is a level plain of province material, the
-//! load stands h − w above it, and the bulge rises by −w. The fill is the `Province` entry's
-//! grain density × (1 − [`FILL_POROSITY`]); the load is its grain density, near Belleguic,
-//! Lognonné and Wieczorek 2005's 3,200 ± 100 kg m⁻³ for Mars's large volcanoes (JGR 110,
-//! E11005, the abstract). A cell takes the `Province` crust where the load or its moat's fill is
-//! at least [`PROVINCE_SURFACE_MIN`] thick.
+//! **The moat is filled to the surrounding level, and the load stands on the fill** (ruled:
+//! `decision-r09-t12-coarse.md`'s addendum 2, 2026-10-16, which replaces the first rule's
+//! Δz = max(h − w, 0)). The load and the moat's fill share one density, `ρ_p`, the `Province`
+//! entry's grain density × (1 − [`FILL_POROSITY`]) (2,648 kg m⁻³ on the reference Mars), so that
+//! the uniform foundation (`ρ_m` − `ρ_p`) g + E `T_e` ÷ R² is the model's balance wherever the
+//! deflection is filled (w ≥ 0), with province material of `ρ_p` beneath the load as in its moat,
+//! and α stays closed-form. On a bulge left standing (w < 0) nothing fills the rise, so there the
+//! balance is `ρ_m` g + E `T_e` ÷ R², and the uniform foundation raises a bulge some 2.4 times too
+//! high (R09.T12's science check; built as ruled, recorded). The load is q = `ρ_p` g h, h its
+//! height above the filled level, which is how the
+//! edifice cap's calibration on Olympus Mons's present, already-flexed 21.9 km reads it. With w the
+//! summed deflection, positive downward, the elevation changes by Δz = h + max(−w, 0)
+//! ([`surface_lift_m`]): under a load it stands at h, in the filled moat at the surrounding level,
+//! on the bulge it rises by −w, and on another load's bulge it stands at h − w. A load at `ρ_p`
+//! is some 17% lighter than Belleguic, Lognonné and Wieczorek 2005's 3,200 ± 100 kg m⁻³ for Mars's
+//! large volcanoes (JGR 110, E11005, the abstract), so at the ruled foundation it deflects some
+//! 17% less (recorded); the piecewise foundation the addendum declined makes the solve nonlinear.
+//! A cell takes the `Province` crust where its load or the fill of its deflection is at least
+//! [`PROVINCE_SURFACE_MIN`] thick.
 //!
 //! # The draws
 //!
@@ -104,7 +120,9 @@ pub(crate) const YOUNGS_MODULUS_PA: f64 = 100e9;
 /// The lithosphere's Poisson's ratio ν, 0.25 (Belleguic et al. 2005; Design note 7).
 pub(crate) const POISSON_RATIO: f64 = 0.25;
 
-/// The porosity of a province's fill, 0.2 (ruled, `decision-r09-t12-coarse.md` item 3): Mars's
+/// The porosity of a province's material, 0.2, which sets `ρ_p`, the one density of its loads
+/// and of their moats' fill (ruled, `decision-r09-t12-coarse.md` item 3 for the fill, and its
+/// addendum 2 for the load): Mars's
 /// crust has a bulk density of 2,582 ± 209 kg m⁻³ (Goossens et al. 2017, GRL 44, 7686, the abstract)
 /// against the shergottites' grain density of 3,310 kg m⁻³ (Macke et al. 2011, MAPS 46, 311, the
 /// abstract), a porosity of 0.22 ± 0.06; GRAIL's lunar crust's 12% lies below (Wieczorek et al.
@@ -143,8 +161,9 @@ const TABLE_NODES: usize = 512;
 /// load's deflection is under e^(−2π) ≈ 0.2% of its peak.
 const REACH_LENGTHS: f64 = core::f64::consts::TAU;
 
-/// The thickness of a province's load or moat fill from which a cell's crust is the province's,
-/// 10 m: thinner, the flexure's far lobes would make a province of any lid (an illustration).
+/// The thickness of a province's load, or of the fill of its deflection, from which a cell's crust
+/// is the province's, 10 m: thinner, the flexure's far lobes would make a province of any lid (an
+/// illustration).
 pub(crate) const PROVINCE_SURFACE_MIN: Metres = Metres::new(10.0);
 
 /// The largest coverage of the cone field, ¾: plan 14's saturation (P14.T48.a).
@@ -289,7 +308,8 @@ pub(crate) fn foundation_n_per_m3(
 ///
 /// # Panics
 ///
-/// If `mantle` is not denser than `fill`, which [`run`] never passes it.
+/// If `mantle` is not denser than `fill` (`ρ_m` − `ρ_p` > 0, asserted as the addendum 2 rules),
+/// which [`run`] never passes it.
 #[must_use]
 pub(crate) fn flexural_parameter(
     elastic: Metres,
@@ -354,15 +374,47 @@ pub(super) struct Cone {
     pub(super) radius: Metres,
 }
 
-/// The lid an edifice bends: its flexural parameter, its foundation and its gravity.
+/// The lid an edifice bends: its flexural parameter, its foundation, its gravity, and the one
+/// density `ρ_p` of its loads and their fill, which its foundation balances wherever the
+/// deflection is filled (the addendum 2; see the module documentation).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct Lid {
+struct Lid {
     /// Its flexural parameter α.
-    pub(super) alpha: Metres,
+    alpha: Metres,
     /// Its foundation `k_eff`, N m⁻³ ([`foundation_n_per_m3`]).
-    pub(super) foundation_n_per_m3: f64,
+    foundation_n_per_m3: f64,
     /// The body's surface gravity.
-    pub(super) gravity: MetresPerSecondSquared,
+    gravity: MetresPerSecondSquared,
+    /// The density of its loads and their fill, `ρ_p`.
+    density: KilogramsPerCubicMetre,
+}
+
+impl Lid {
+    /// The lid an elastic lithosphere `elastic` thick bends over a mantle of density `mantle`
+    /// under `gravity` on a body of radius `radius`, its loads and their fill of density `density`
+    /// ([`flexural_parameter`], [`foundation_n_per_m3`]).
+    ///
+    /// `None` where the province material is no lighter than the mantle (`ρ_m` − `ρ_p` ≤ 0: a
+    /// rocky province on an ice lid, which plan 14's crusts never pair), which has no flexural
+    /// rule, so that the pass never reaches [`flexural_parameter`]'s assert (labelled).
+    #[must_use]
+    fn new(
+        elastic: Metres,
+        mantle: KilogramsPerCubicMetre,
+        density: KilogramsPerCubicMetre,
+        gravity: MetresPerSecondSquared,
+        radius: Metres,
+    ) -> Option<Self> {
+        if mantle.value() - density.value() <= 0.0 {
+            return None;
+        }
+        Some(Self {
+            alpha: flexural_parameter(elastic, mantle, density, gravity, radius),
+            foundation_n_per_m3: foundation_n_per_m3(elastic, mantle, density, gravity, radius),
+            gravity,
+            density,
+        })
+    }
 }
 
 /// An edifice: a cone with its deflection of its lid tabulated out to its reach (see the module
@@ -380,14 +432,15 @@ pub(super) struct Edifice {
 }
 
 impl Edifice {
-    /// The edifice of `cone`, whose load of density `load` bends `lid`, its reach held to `limit`.
+    /// The edifice of `cone`, whose load of the lid's density `ρ_p` bends `lid`, its reach held to
+    /// `limit`.
     #[must_use]
-    fn new(cone: Cone, load: KilogramsPerCubicMetre, lid: Lid, limit: Metres) -> Self {
+    fn new(cone: Cone, lid: Lid, limit: Metres) -> Self {
         let (height, radius) = (cone.height.value(), cone.radius.value());
         let alpha = lid.alpha;
         let reach = num::min(radius + REACH_LENGTHS * alpha.value(), limit.value());
         let strip = 2.0 * radius / count_f64(PROFILE_STRIPS);
-        let pressure_over_k = load.value() * lid.gravity.value() / lid.foundation_n_per_m3;
+        let pressure_over_k = lid.density.value() * lid.gravity.value() / lid.foundation_n_per_m3;
         let strips: Vec<(f64, f64, f64)> = (0..PROFILE_STRIPS)
             .map(|j| {
                 let a = -radius + strip * count_f64(j);
@@ -471,8 +524,16 @@ pub(super) struct Provinces {
     pub(super) realised: Metres,
     /// The realised relief's s.d. before the correction.
     pub(super) first: Metres,
-    /// Each cell's lift, metres.
+    /// The province material's density `ρ_p`, the load's and the fill's.
+    pub(super) density: KilogramsPerCubicMetre,
+    /// The one edifice every load is.
+    pub(super) edifice: Edifice,
+    /// Each cell's lift, metres ([`surface_lift_m`]).
     pub(super) lift: Vec<f64>,
+    /// Each cell's summed load h, metres.
+    pub(super) load: Vec<f64>,
+    /// Each cell's summed deflection w, metres, positive down.
+    pub(super) deflection: Vec<f64>,
 }
 
 /// Runs the provinces on `working`'s stagnant lid (see the module documentation), returning their
@@ -486,12 +547,8 @@ pub(super) fn run(pass: &Pass<'_>, working: &mut Working) -> Option<Provinces> {
     let province = inputs.palette().get(province_entry)?;
     let lid_entry = inputs.palette().get(inputs.lid_entry())?;
     let mantle = mantle_density(lid_entry)?;
-    let fill = KilogramsPerCubicMetre::new(province.grain_density_kg_m3 * (1.0 - FILL_POROSITY));
-    // A fill no lighter than the mantle beneath (a rocky province on an ice lid, which plan 14's
-    // crusts never pair) has no flexural rule: no provinces (labelled).
-    if mantle.value() - fill.value() <= 0.0 {
-        return None;
-    }
+    // The load's and the fill's one density (the addendum 2).
+    let density = KilogramsPerCubicMetre::new(province.grain_density_kg_m3 * (1.0 - FILL_POROSITY));
     let elastic = elastic_thickness(inputs)?;
     if elastic.value() <= 0.0 {
         return None;
@@ -506,12 +563,9 @@ pub(super) fn run(pass: &Pass<'_>, working: &mut Working) -> Option<Provinces> {
     let strength = CONSTRUCTIONAL_REFERENCE_GRAVITY.value() / gravity.value() * support;
     let target = CONSTRUCTIONAL_RELIEF.value() * strength * inputs.volcanism();
     let cap = TALLEST_EDIFICE_RELIEF.value() * strength;
-    let alpha = flexural_parameter(elastic, mantle, fill, gravity, inputs.radius());
-    let bending = Lid {
-        alpha,
-        foundation_n_per_m3: foundation_n_per_m3(elastic, mantle, fill, gravity, inputs.radius()),
-        gravity,
-    };
+    // Province material no lighter than the mantle beneath has no flexural rule: no provinces.
+    let bending = Lid::new(elastic, mantle, density, gravity, inputs.radius())?;
+    let alpha = bending.alpha;
     let radius_m = inputs.radius().value();
     let base = num::max(
         cap / EDIFICE_ASPECT,
@@ -521,13 +575,7 @@ pub(super) fn run(pass: &Pass<'_>, working: &mut Working) -> Option<Provinces> {
         height: Metres::new(cap),
         radius: Metres::new(base),
     };
-    let load = KilogramsPerCubicMetre::new(province.grain_density_kg_m3);
-    let edifice = Edifice::new(
-        cone,
-        load,
-        bending,
-        Metres::new(core::f64::consts::PI * radius_m),
-    );
+    let edifice = Edifice::new(cone, bending, Metres::new(core::f64::consts::PI * radius_m));
     let mut count_stream = pass.seed().stream(
         SURFACE_COARSE_RELIEF,
         ObjectKey::surface_cell(0, 0, 0, 0, PROVINCE_INSTANCE).expect("a level-0 cell is a key"),
@@ -558,7 +606,7 @@ pub(super) fn run(pass: &Pass<'_>, working: &mut Working) -> Option<Provinces> {
         cell.elevation = z;
         cell.water_surface = z;
         let (h, w) = (laid.load[n], laid.deflection[n]);
-        if h >= PROVINCE_SURFACE_MIN.value() || w - h >= PROVINCE_SURFACE_MIN.value() {
+        if h >= PROVINCE_SURFACE_MIN.value() || w >= PROVINCE_SURFACE_MIN.value() {
             cell.crust = Crust::Province;
         }
     }
@@ -572,8 +620,24 @@ pub(super) fn run(pass: &Pass<'_>, working: &mut Working) -> Option<Provinces> {
         edifices: laid.edifices,
         realised: Metres::new(laid.realised),
         first: Metres::new(first),
+        density,
+        edifice,
         lift: laid.lift,
+        load: laid.load,
+        deflection: laid.deflection,
     })
+}
+
+/// The surface's rise over the pre-load level, metres: h + max(−w, 0) (ruled,
+/// `decision-r09-t12-coarse.md`'s addendum 2).
+///
+/// h is the cell's summed load `load_m`, held at the edifice cap `cap_m`, and w its summed
+/// deflection `deflection_m`, positive down, both in metres. Under a load the surface stands at
+/// h, in the filled moat at the surrounding level, on a bulge it rises by −w, and on another
+/// load's bulge it stands at h − w.
+#[must_use]
+pub(super) fn surface_lift_m(load_m: f64, deflection_m: f64, cap_m: f64) -> f64 {
+    num::min(load_m, cap_m) + num::max(-deflection_m, 0.0)
 }
 
 /// Plan 14's own lithosphere for the lid entry `lid` of the body of `inputs`, by which its
@@ -595,7 +659,7 @@ fn published_thickness(lid: &PaletteEntry, inputs: &CoarseInputs) -> Metres {
 
 /// A cone field laid on a pass's cells ([`lay`]).
 struct Laid {
-    /// Each cell's lift, metres: max(min(h, `h_max`) − w, 0).
+    /// Each cell's lift, metres: min(h, `h_max`) + max(−w, 0) ([`surface_lift_m`]).
     lift: Vec<f64>,
     /// Each cell's summed load h, metres.
     load: Vec<f64>,
@@ -695,7 +759,7 @@ fn lay(pass: &Pass<'_>, edifice: &Edifice, centres: &[[f64; 3]], coverage: f64) 
     let lift: Vec<f64> = load
         .iter()
         .zip(&deflection)
-        .map(|(&h, &w)| num::max(num::min(h, edifice.height_m) - w, 0.0))
+        .map(|(&h, &w)| surface_lift_m(h, w, edifice.height_m))
         .collect();
     let (_, realised) = noise::mean_and_spread(&lift, grid.solid_angles_sr());
     Laid {

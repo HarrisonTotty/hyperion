@@ -91,7 +91,7 @@ fn relieve(inputs: CoarseInputs) -> Relieved {
 }
 
 /// The staged step of the tests' `relieve` is the step's [`run`], bit for bit, on a small mobile
-/// lid and on a stagnant one.
+/// lid and on stagnant ones, one of them through the provinces' coverage correction.
 #[test]
 fn the_staged_step_is_the_step() {
     for inputs in [
@@ -101,6 +101,7 @@ fn the_staged_step_is_the_step() {
             .unwrap(),
         reference::ceres_like(),
         reference::mars_like(),
+        saturated_mars(),
     ] {
         let staged = relieve(inputs.clone());
         let world = World::new(inputs);
@@ -116,6 +117,12 @@ fn the_staged_step_is_the_step() {
 fn earth() -> &'static Relieved {
     static EARTH: OnceLock<Relieved> = OnceLock::new();
     EARTH.get_or_init(|| relieve(reference::earth_like()))
+}
+
+/// The reference Mars, computed once for the tests that read it.
+fn mars() -> &'static Relieved {
+    static MARS: OnceLock<Relieved> = OnceLock::new();
+    MARS.get_or_init(|| relieve(reference::mars_like()))
 }
 
 /// Myr as seconds.
@@ -265,7 +272,7 @@ fn earth_ocean() -> Vec<(f64, Option<f64>, f64)> {
 fn the_steady_state_ages_rank_the_kinematic_ones_onto_the_triangular_law() {
     let earth = earth();
     let ocean = earth_ocean();
-    assert!(!ocean.is_empty());
+    assert_ne!(ocean, []);
     // Every oceanic cell has an age and no other cell has one.
     for c in &earth.relief.cells {
         assert_eq!(c.seafloor_age.is_some(), c.crust == Crust::Oceanic);
@@ -1582,6 +1589,190 @@ fn a_line_load_s_bulge_crest_lies_at_pi_alpha() {
     );
 }
 
+/// ∫ f dx over the panels between consecutive `edges`, each by 64-point Gauss–Legendre.
+fn integrate(edges: &[f64], f: impl Fn(f64) -> f64) -> f64 {
+    use crate::tables::gauss_legendre::{GL64_NODES, GL64_WEIGHTS};
+    let mut sum = 0.0;
+    for pair in edges.windows(2) {
+        let (half, mid) = (0.5 * (pair[1] - pair[0]), f64::midpoint(pair[0], pair[1]));
+        let mut panel = 0.0;
+        for (node, weight) in GL64_NODES.iter().zip(&GL64_WEIGHTS) {
+            panel += weight * f(mid + half * node);
+        }
+        sum += half * panel;
+    }
+    sum
+}
+
+/// `count` panels' edges evenly from `from` to `to`.
+fn panels(from: f64, to: f64, count: u32) -> Vec<f64> {
+    (0..=count)
+        .map(|i| from + (to - from) * f64::from(i) / f64::from(count))
+        .collect()
+}
+
+/// On one line load, the foundation carries the load's whole weight, ∫ `k_eff` w dx = ∫ `ρ_p` g h
+/// dx to 10⁻⁶ (`decision-r09-t12-coarse.md`'s addendum 2): for a line load of the reference Mars's
+/// edifice's cross-section, and for that cross-section cut into strips and convolved through the
+/// step response, as an edifice's deflection is.
+#[test]
+fn a_line_load_s_deflection_carries_its_weight() {
+    let mars = mars();
+    let inputs = &mars.world.inputs;
+    let laid = mars
+        .provinces
+        .as_ref()
+        .expect("the reference Mars has provinces");
+    let mantle = provinces::mantle_density(inputs.palette().get(inputs.lid_entry()).unwrap())
+        .expect("a silicate lid has a mantle");
+    let k = provinces::foundation_n_per_m3(
+        laid.elastic,
+        mantle,
+        laid.density,
+        inputs.gravity(),
+        inputs.radius(),
+    );
+    let alpha = laid.alpha;
+    let a = alpha.value();
+    let (height, radius) = (laid.edifice.height_m, laid.edifice.radius_m);
+    let pressure = laid.density.value() * inputs.gravity().value();
+    // The line load: its weight is the cross-section's, ∫ h dx = h r.
+    let weight = pressure * height * radius;
+    let line = integrate(&panels(-40.0 * a, 40.0 * a, 640), |x| {
+        provinces::line_load_deflection(x, alpha, k, weight)
+    });
+    assert!(
+        (k * line / weight - 1.0).abs() < 1e-6,
+        "∫ k w dx {} N m⁻¹ against ∫ ρ_p g h dx {weight} N m⁻¹",
+        k * line
+    );
+    // The cross-section in 64 strips through the step response, the panels' edges on the strips'.
+    let strips: Vec<(f64, f64, f64)> = (0..64)
+        .map(|j| {
+            let from = -radius + 2.0 * radius * f64::from(j) / 64.0;
+            let to = -radius + 2.0 * radius * f64::from(j + 1) / 64.0;
+            let mid = f64::midpoint(from, to);
+            (from, to, height * (1.0 - mid.abs() / radius))
+        })
+        .collect();
+    let load: f64 = strips
+        .iter()
+        .map(|&(from, to, h)| pressure * h * (to - from))
+        .sum();
+    let mut edges = panels(-radius - 40.0 * a, -radius, 320);
+    edges.extend(panels(-radius, radius, 64).into_iter().skip(1));
+    edges.extend(panels(radius, radius + 40.0 * a, 320).into_iter().skip(1));
+    let ridge = integrate(&edges, |x| {
+        strips
+            .iter()
+            .map(|&(from, to, h)| {
+                pressure / k
+                    * h
+                    * (provinces::step_response(x - from, alpha)
+                        - provinces::step_response(x - to, alpha))
+            })
+            .sum::<f64>()
+    });
+    assert!(
+        (k * ridge / load - 1.0).abs() < 1e-6,
+        "∫ k w dx {} N m⁻¹ against ∫ ρ_p g h dx {load} N m⁻¹",
+        k * ridge
+    );
+    // The edifice's own table is that convolution at `ρ_p` on `k_eff(ρ_p)`, which a load at the
+    // grain density (a root of some 38 km) would miss: at its centre, its root, and out to its
+    // reach.
+    let convolved = |x: f64| {
+        strips
+            .iter()
+            .map(|&(from, to, h)| {
+                h * (provinces::step_response(x - from, alpha)
+                    - provinces::step_response(x - to, alpha))
+            })
+            .sum::<f64>()
+            * (pressure / k)
+    };
+    let root = laid.edifice.deflection_m(0.0);
+    assert!(
+        (root / convolved(0.0) - 1.0).abs() < 1e-12,
+        "the table's root {root} m against the convolution's {} m",
+        convolved(0.0)
+    );
+    let reach = laid.edifice.reach_m;
+    for i in [1_u32, 64, 128, 200, 256, 384, 500] {
+        let x = reach * f64::from(i) / 511.0;
+        let table = laid.edifice.deflection_m(x);
+        assert!(
+            (table - convolved(x)).abs() < 1e-9 * root,
+            "at {x} m: the table's {table} m against the convolution's {} m",
+            convolved(x)
+        );
+    }
+}
+
+/// The surface over a province is h + max(−w, 0) (`decision-r09-t12-coarse.md`'s addendum 2):
+/// at h under a load, at the surrounding level in its filled moat, raised by −w on a bulge and at
+/// h − w on another load's bulge, the load held at the cap; and so is every cell's lift on the
+/// reference Mars.
+#[test]
+fn the_surface_stands_at_its_load_over_the_filled_moat() {
+    let cap = 21_795.0;
+    assert_same_bits(provinces::surface_lift_m(1_000.0, 300.0, cap), 1_000.0);
+    assert_same_bits(provinces::surface_lift_m(0.0, 300.0, cap), 0.0);
+    assert_same_bits(provinces::surface_lift_m(0.0, -50.0, cap), 50.0);
+    assert_same_bits(provinces::surface_lift_m(1_000.0, -50.0, cap), 1_050.0);
+    assert_same_bits(provinces::surface_lift_m(30_000.0, 38_000.0, cap), cap);
+    assert_same_bits(provinces::surface_lift_m(0.0, 0.0, cap), 0.0);
+    let laid = mars().provinces.as_ref().unwrap();
+    for ((&lift, &h), &w) in laid.lift.iter().zip(&laid.load).zip(&laid.deflection) {
+        assert_same_bits(lift, provinces::surface_lift_m(h, w, laid.cap.value()));
+    }
+    // Each cell's ground and water surface rise by its lift, bit for bit.
+    let world = World::new(reference::mars_like());
+    let pass = world.pass(reference::SEED);
+    let mut working = Working::initial(&pass);
+    crate::planetary::surface::steps::plates::run(&pass, &mut working);
+    lid_population(&pass, &mut working);
+    let before: Vec<f64> = working.cells.iter().map(|c| c.elevation.value()).collect();
+    let laid = provinces::run(&pass, &mut working).unwrap();
+    for (n, c) in working.cells.iter().enumerate() {
+        assert_same_bits(c.elevation.value(), before[n] + laid.lift[n]);
+        assert_same_bits(c.water_surface.value(), c.elevation.value());
+    }
+}
+
+/// The province material is lighter than the mantle beneath, `ρ_m` − `ρ_p` > 0
+/// (`decision-r09-t12-coarse.md`'s addendum 2): on the reference Mars `ρ_p` is the `Province`
+/// entry's 3,310 kg m⁻³ × 0.8, 2,648 kg m⁻³, 652 kg m⁻³ below `ρ_m`.
+#[test]
+fn the_province_material_is_lighter_than_the_mantle() {
+    let mars = mars();
+    let inputs = &mars.world.inputs;
+    let laid = mars.provinces.as_ref().unwrap();
+    let mantle = provinces::mantle_density(inputs.palette().get(inputs.lid_entry()).unwrap())
+        .unwrap()
+        .value();
+    let density = laid.density.value();
+    assert!((density - 2_648.0).abs() < 1e-9, "ρ_p {density} kg m⁻³");
+    assert!(
+        (mantle - density - 652.0).abs() < 1e-9,
+        "ρ_m {mantle} kg m⁻³, ρ_p {density} kg m⁻³"
+    );
+}
+
+/// The flexure refuses province material as dense as its mantle (the asserted `ρ_m` − `ρ_p` > 0).
+#[test]
+#[should_panic(expected = "must be denser than its fill")]
+fn the_flexure_refuses_material_as_dense_as_its_mantle() {
+    let density = crate::units::KilogramsPerCubicMetre::new(3_300.0);
+    let _ = provinces::flexural_parameter(
+        Metres::new(70e3),
+        density,
+        density,
+        crate::units::MetresPerSecondSquared::new(3.71),
+        Metres::new(3_389.5e3),
+    );
+}
+
 /// α at `T_e` = 70 km under Mars's gravity (3.71 m s⁻²) and radius (3,389.5 km), with `ρ_m`
 /// 3,300 kg m⁻³ and an open moat (`ρ_fill` = 0), is 180 km ± 10 (`decision-r09-t12-coarse.md` item
 /// 3: its value is 175.5 km, 177.7 km planar; Design note 7's "as observed" was the formula's own
@@ -1711,19 +1902,35 @@ fn the_elastic_thickness_follows_the_lid_s_substance() {
     assert_same_bits(rigid.value(), ceres.radius().value());
 }
 
-/// The reference Mars's provinces: edifices at the cap about Mars's provinces, never lowering the
-/// ground, the `Province` crust where their load or fill is at least 10 m; none on the Moon (V = 0)
-/// or on a mobile lid.
+/// The reference Mars's provinces (`decision-r09-t12-coarse.md`'s addendum 2): edifices at the cap
+/// about Mars's provinces, each standing at its height over its filled moat, so that a cap-height
+/// load stands at 21.8 km; never lowering the ground; their loads' footprint at most a quarter of
+/// the surface; the `Province` crust where their load or the fill of their deflection is at least
+/// 10 m; none on the Moon (V = 0) or on a mobile lid.
 #[test]
 fn the_reference_mars_has_volcanic_provinces() {
-    let mars = relieve(reference::mars_like());
+    let mars = mars();
     let laid = mars
         .provinces
         .as_ref()
         .expect("the reference Mars has provinces");
+    let omega = mars.world.grid.solid_angles_sr();
+    let sphere: f64 = omega.iter().sum();
+    let footprint = laid
+        .load
+        .iter()
+        .zip(omega)
+        .filter(|(h, _)| **h > 0.0)
+        .map(|(_, w)| w)
+        .sum::<f64>()
+        / sphere;
+    let edifice = &laid.edifice;
+    let root = edifice.deflection_m(0.0);
+    let top = provinces::surface_lift_m(edifice.load_m(0.0), root, laid.cap.value());
     eprintln!(
-        "Mars: T_e {:.1} km, α {:.1} km, h_max {:.0} m, {} provinces, {} edifices over {:.3} of \
-         the surface; realised s.d. {:.0} m ({:.0} m before the correction) against σ_volc {:.0} m",
+        "Mars: T_e {:.1} km, α {:.1} km, h_max {:.0} m standing at {top:.0} m over its root w₀ \
+         {root:.0} m; {} provinces, {} edifices, coverage {:.3}, footprint {footprint:.3}; \
+         realised s.d. {:.0} m ({:.0} m before any correction) against σ_volc {:.0} m",
         laid.elastic.value() / 1e3,
         laid.alpha.value() / 1e3,
         laid.cap.value(),
@@ -1735,26 +1942,30 @@ fn the_reference_mars_has_volcanic_provinces() {
         laid.target.value()
     );
     assert!(laid.count >= 1 && laid.edifices >= 1);
+    assert_same_bits(top, laid.cap.value());
+    assert!((top - 21.8e3).abs() < 50.0, "{top} m");
+    // The root as built at `ρ_p` (30,474 m; some 38 km at the grain density's load).
+    assert!((root - 30_474.0).abs() < 50.0, "{root} m");
+    assert!(footprint <= 0.25, "{footprint}");
     assert!(laid.lift.iter().all(|&l| l >= 0.0));
-    // The lean: the realised share approaches σ_volc (0.76 of it as built).
+    // The realised share reaches σ_volc's neighbourhood (1.06 of it as built, uncorrected).
     assert!(
         laid.realised.value() >= 0.7 * laid.target.value(),
         "{} m",
         laid.realised.value()
     );
-    let provinces = mars
-        .relief
-        .cells
-        .iter()
-        .filter(|c| c.crust == Crust::Province)
-        .count();
-    assert!(provinces > 0);
-    assert!(
-        mars.relief
-            .cells
-            .iter()
-            .all(|c| matches!(c.crust, Crust::Lid | Crust::Province))
-    );
+    let floor = provinces::PROVINCE_SURFACE_MIN.value();
+    for (n, c) in mars.relief.cells.iter().enumerate() {
+        let (h, w) = (laid.load[n], laid.deflection[n]);
+        let province = h >= floor || w >= floor;
+        assert_eq!(
+            c.crust == Crust::Province,
+            province,
+            "cell {n}: h {h} m, w {w} m"
+        );
+        assert!(matches!(c.crust, Crust::Lid | Crust::Province));
+    }
+    assert!(mars.relief.cells.iter().any(|c| c.crust == Crust::Province));
     assert!(relieve(reference::moon_like()).provinces.is_none());
     assert!(earth().provinces.is_none());
     assert!(
@@ -1766,11 +1977,11 @@ fn the_reference_mars_has_volcanic_provinces() {
     );
 }
 
-/// Measurements for the record, run by hand: `T_e` on each reference world, α beside a mantle of
-/// 3,500 kg m⁻³, and the reference Mars's provinces in detail.
+/// Measurements for the record, run by hand: `T_e` on each reference world, and α beside a mantle
+/// of 3,500 kg m⁻³.
 #[test]
-#[ignore = "measurement: the lithospheres and the reference Mars's provinces, printed"]
-fn measure_the_lithospheres_and_the_provinces() {
+#[ignore = "measurement: the lithospheres, printed"]
+fn measure_the_lithospheres() {
     for (name, inputs) in [
         ("Earth", reference::earth_like()),
         ("Mars", reference::mars_like()),
@@ -1810,7 +2021,16 @@ fn measure_the_lithospheres_and_the_provinces() {
             core::f64::consts::PI * at(own)
         );
     }
-    let world = relieve(mars);
+}
+
+/// Measurements for the record, run by hand: the reference Mars's provinces in detail, under
+/// `decision-r09-t12-coarse.md`'s addendum 2 (the count, the coverage and footprint, a lone
+/// edifice's root and bulge, the moats' and bulges' shares, the `Province` crust, the volumes and
+/// the realised s.d. beside `σ_volc`).
+#[test]
+#[ignore = "measurement: the reference Mars's provinces, printed"]
+fn measure_the_reference_mars_s_provinces() {
+    let world = relieve(reference::mars_like());
     let laid = world.provinces.as_ref().unwrap();
     let omega = world.world.grid.solid_angles_sr();
     let sphere: f64 = omega.iter().sum();
@@ -1823,26 +2043,68 @@ fn measure_the_lithospheres_and_the_provinces() {
         .map(|(_, w)| w)
         .sum();
     let highest = laid.lift.iter().copied().fold(0.0, f64::max);
-    let raised: f64 = laid
-        .lift
-        .iter()
-        .zip(omega)
-        .filter(|(l, _)| **l > 0.0)
-        .map(|(_, w)| w)
-        .sum();
+    let share = |keep: &dyn Fn(usize) -> bool| {
+        100.0
+            * omega
+                .iter()
+                .enumerate()
+                .filter(|&(n, _)| keep(n))
+                .map(|(_, w)| w)
+                .sum::<f64>()
+            / sphere
+    };
+    let raised = share(&|n| laid.lift[n] > 0.0);
+    let footprint = share(&|n| laid.load[n] > 0.0);
+    let moat = share(&|n| laid.load[n] <= 0.0 && laid.deflection[n] > 0.0);
+    let bulge = share(&|n| laid.deflection[n] < 0.0);
+    // Volumes over the cells' areas on a sphere of the body's mean radius (an estimate).
+    let r = world.world.inputs.radius().value();
+    let volume_km3 = |f: &dyn Fn(usize) -> f64| {
+        omega
+            .iter()
+            .enumerate()
+            .map(|(n, w)| f(n) * w * r * r)
+            .sum::<f64>()
+            / 1e9
+    };
+    let cap = laid.cap.value();
+    let summed = volume_km3(&|n| laid.load[n]);
+    let standing = volume_km3(&|n| laid.load[n].min(cap));
+    let clipped = volume_km3(&|n| (laid.load[n] - cap).max(0.0));
+    let over = share(&|n| laid.load[n] > cap);
+    let filled = volume_km3(&|n| laid.load[n].min(cap) + laid.deflection[n].max(0.0));
+    let edifice = &laid.edifice;
+    eprintln!(
+        "Mars's provinces' loads: summed {summed:.3e} km³, standing (held at the cap) \
+         {standing:.3e} km³, clipped at the cap {clipped:.3e} km³ over {over:.2}% of the surface; \
+         standing with the fill of the deflections {filled:.3e} km³"
+    );
     eprintln!(
         "Mars's provinces: {} of them, {} edifices of {:.0} km base and {:.0} m height, coverage \
-         {:.3}; raised {:.1}% of the surface, the Province crust over {:.1}%, the highest lift \
-         {highest:.0} m; realised s.d. {:.0} m against σ_volc {:.0} m",
+         {:.3}; a lone edifice's root w₀ {:.0} m, its bulge {:.0} m at {:.0} km; the loads' \
+         footprint {footprint:.1}% of the surface, filled moats beyond it {moat:.1}%, bulges \
+         {bulge:.1}%, raised {raised:.1}%, the Province crust over {:.1}%; the highest lift \
+         {highest:.0} m; realised s.d. {:.0} m ({:.0} m before any correction) against σ_volc \
+         {:.0} m ({:.2} of it)",
         laid.count,
         laid.edifices,
-        laid.cap.value() / provinces::EDIFICE_ASPECT / 1e3,
+        edifice.radius_m / 1e3,
         laid.cap.value(),
         laid.coverage,
-        100.0 * raised / sphere,
+        edifice.deflection_m(0.0),
+        (0..=4_000)
+            .map(|i| edifice.deflection_m(edifice.reach_m * f64::from(i) / 4_000.0))
+            .fold(0.0, f64::min),
+        (0..=4_000)
+            .map(|i| edifice.reach_m * f64::from(i) / 4_000.0)
+            .min_by(|&x, &y| edifice.deflection_m(x).total_cmp(&edifice.deflection_m(y)))
+            .unwrap_or(0.0)
+            / 1e3,
         100.0 * province_area / sphere,
         laid.realised.value(),
-        laid.target.value()
+        laid.first.value(),
+        laid.target.value(),
+        laid.realised.value() / laid.target.value()
     );
     let z: Vec<f64> = world
         .relief
@@ -1935,4 +2197,29 @@ fn another_seed_gives_other_arcs_and_provinces() {
     };
     let (a, b) = (lift(reference::SEED), lift(SurfaceSeed::new(0x0dd5)));
     assert!(a.iter().zip(&b).any(|(x, y)| x.total_cmp(y).is_ne()));
+}
+
+/// The reference Mars at a volcanism level of 2.5, past plan 14's bound, whose first cone field
+/// falls short of `σ_volc` at the saturated coverage: the one case in which the coverage
+/// correction runs under the addendum 2's moat (the determinism audit's consider).
+fn saturated_mars() -> CoarseInputs {
+    builder_of(&reference::mars_like())
+        .volcanism(2.5)
+        .build()
+        .unwrap()
+}
+
+/// Under the addendum 2's moat the coverage correction runs only where the cone field saturates:
+/// the reference Mars's field reaches `σ_volc` uncorrected, and at a volcanism level of 2.5 the
+/// first field falls short at ¾ already, so the correction lays the same field again, bit for bit.
+#[test]
+fn the_coverage_correction_runs_only_at_saturation() {
+    let laid = mars().provinces.as_ref().unwrap();
+    assert!(laid.first.value() >= laid.target.value());
+    assert_same_bits(laid.realised.value(), laid.first.value());
+    let saturated = relieve(saturated_mars());
+    let laid = saturated.provinces.as_ref().unwrap();
+    assert!(laid.first.value() < laid.target.value(), "{:?}", laid.first);
+    assert_same_bits(laid.coverage, 0.75);
+    assert_same_bits(laid.realised.value(), laid.first.value());
 }

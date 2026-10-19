@@ -35,9 +35,10 @@
 //!
 //! R09.T12.c adds a stagnant lid's volcanic provinces ([`provinces`]): fields of edifices at plan
 //! 14's edifice cap, gathered into provinces, covering the share of the surface whose cone field
-//! has plan 14's constructional share, each sinking under its load with a moat filled to the
-//! surrounding level and a bulge about it, by the lid's elastic thickness from its heat flow and
-//! its crust's substance (`decision-r09-t12-coarse.md` items 3 and 4).
+//! has plan 14's constructional share, each standing at its height on the fill of its deflection,
+//! with its moat filled to the surrounding level and a bulge about it, by the lid's elastic
+//! thickness from its heat flow and its crust's substance (`decision-r09-t12-coarse.md` items 3
+//! and 4, and its addendum 2).
 //!
 //! Each population's spread is the coarse landform noise ([`noise`]), which holds no power finer
 //! than the coarse cell's Nyquist wavelength, the synthesis's structural share owning what is

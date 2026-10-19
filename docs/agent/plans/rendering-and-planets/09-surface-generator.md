@@ -7500,9 +7500,9 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
   `decision-r09-t12-coarse.md` items 3 and 4; the province law is the lane's own, not put to main;
   no bump).
   - _Files and items._ `relief/provinces.rs`, a `pub(crate)` module: `elastic_thickness`,
-    `conductivity_integral`, `mantle_density`, `foundation`, `flexural_parameter`,
-    `step_response`, the cone field and its constants; `relief::run` calls it after a stagnant
-    lid's population. Tests in `relief::tests`.
+    `conductivity_integral`, `mantle_density`, `foundation_n_per_m3`, `flexural_parameter`,
+    `step_response`, `surface_lift_m`, the cone field and its constants; `relief::run` calls it
+    after a stagnant lid's population. Tests in `relief::tests`.
   - _The province law (the lane's; sources in the module)._ Plan 14's own constructional model,
     below its saturation: edifices at the edifice cap `h_max` = 21.9 km × (3.71 ÷ g) × min(1,
     `T_e` ÷ 70 km) (plan 14's `TALLEST_EDIFICE_RELIEF`, Plescia 2004), cones of basal radius
@@ -7517,22 +7517,69 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     correction widens f by the variances' ratio (at most ¾) and lays the field again. Mobile lids
     get no provinces; nor do worlds of no volcanism (the reference Moon's maria and Ceres are not
     modelled, V = 0), nor lids of no rule (below), nor palettes with no `Province` entry.
-  - _The flexure (ruled, item 3)._ α = [4D ÷ ((`ρ_m` − `ρ_fill`) g + E `T_e` ÷ R²)]^¼, D = E `T_e`³
-    ÷ 12(1 − ν²), E 100 GPa and ν 0.25 (Belleguic et al. 2005's Table 2, read by the science
+  - _The flexure (ruled, item 3)._ α = [4D ÷ ((`ρ_m` − `ρ_fill`) g + E `T_e` ÷ R²)]^¼, `ρ_fill`
+    being `ρ_p` since the addendum 2 (below), D = E `T_e`³ ÷ 12(1 − ν²), E 100 GPa and ν 0.25 (Belleguic et al. 2005's Table 2, read by the science
     check). DN7's line load is applied to an edifice along its diameter, as if it were an infinite
     ridge of its own cross-section (labelled; the axisymmetric Kelvin-function solution is not
     used): 64 strips of uniform load, each convolved exactly through the line load's step response
     (1 − ½ e^(−t) cos t under the load, ½ e^(−t) cos t beyond, a step at α = 0, the local Airy
-    balance), tabulated at 512 distances out to the base plus 2πα (held to πR). The moat is filled
-    to the surrounding level: Δz = max(h − w, 0), h the summed load (at most `h_max`) and w the
-    summed deflection. `ρ_m` by the lid entry's family: `Silicate` the named `MANTLE_DENSITY`
-    (3,300 kg m⁻³, the sediment's too); `WaterIce` the lid entry's own grain density; `Metal`,
+    balance), tabulated at 512 distances out to the base plus 2πα (held to πR). `ρ_m` by the lid
+    entry's family: `Silicate` the named `MANTLE_DENSITY` (3,300 kg m⁻³, the sediment's too);
+    `WaterIce` the lid entry's own grain density; `Metal`,
     `VolatileIce`, `Salt` and `Organic` no rule and no provinces (a closed set for the composition
-    audit). The fill is the `Province` entry's grain density × 0.8 (the reference Mars's
-    2,648 kg m⁻³), asserted below `ρ_m`; the load its grain density (3,310 kg m⁻³ on Mars, near
-    Belleguic et al.'s 3,200 ± 100). A cell takes the `Province` crust where its load or its moat's
-    fill is at least 10 m (an illustration); a moat below a sea is not modelled, since no sea is
-    placed before T12.e.
+    audit). A cell takes the `Province` crust where its load or the fill of its deflection is at
+    least 10 m (an illustration); a moat below a sea is not modelled, since no sea is placed before
+    T12.e.
+  - _The filled moat (ruled: `decision-r09-t12-coarse.md`'s addendum 2, 2026-10-16; built in the
+    lane's second fix commit, after the push)._ The first rule, Δz = max(h − w, 0) with the load at
+    its grain density, counted the fill twice under a load (the science check's must-fix, commented
+    on the issue): the uniform foundation already puts fill-density rock beneath the load, and a
+    load of 3,310 kg m⁻³ is denser than the 3,300 kg m⁻³ mantle, so a cap-height edifice stood
+    nowhere. Now the load and the fill share one density `ρ_p`, the `Province` entry's grain
+    density × 0.8 (2,648 kg m⁻³ on the reference Mars), asserted below `ρ_m` (in
+    `flexural_parameter`, with `Lid::new`'s guard before it); the load is q = `ρ_p` g h, h its height
+    above the filled level, as the cap's calibration on Olympus Mons's present 21.9 km reads it
+    (21.8 km is `h_max`'s 21,795 m on the reference Mars);
+    and the surface rises by Δz = h + max(−w, 0) (`surface_lift_m`, h the summed load held at
+    `h_max`, w the summed deflection, positive down): at h under a load, at the surrounding level
+    in its filled moat, by −w on a bulge and to h − w on another load's bulge. α is unchanged. A
+    cell's `Province` test reads the fill of its deflection, w, where the first rule read w − h.
+    The lid an edifice bends (`Lid`, now private) carries `ρ_p` with its foundation, so the load
+    and the foundation cannot part, and `Edifice::new` takes no density of its own (the review).
+    `Provinces` carries `density`, `edifice`, `load` and `deflection` for the tests and the record.
+    Tests: Δz in its four cases and on every cell of the reference Mars, bit for bit; ∫ `k_eff` w
+    dx = ∫ `ρ_p` g h dx to 10⁻⁶, for a line load of the reference Mars's cross-section and for that
+    cross-section in 64 strips through the step response, which the edifice's own table matches at
+    its centre to 10⁻¹² and out to its reach; `ρ_m` − `ρ_p` = 652 kg m⁻³ on the reference Mars,
+    and `flexural_parameter` panics at equal densities; on the reference Mars a cap-height load
+    stands at 21,795 m over its root `w₀`, pinned at 30,474 m ± 50 (about 38 km at the grain
+    density's load), each cell's ground rises by its lift bit for bit, and the loads' footprint is
+    at most a quarter of the surface. The bulge crest at πα, 0.043 `w₀` high, was tested already.
+  - _Overlapping loads past the cap bend the lid by their whole sum_ (as T12.c built them; the
+    addendum 2's q = `ρ_p` g h holds for each load): each edifice's table bends the lid under its
+    whole cone, while the surface stops at `h_max`, so the rock clipped there weighs on the lid
+    without standing. On the reference Mars it is 8.75 × 10⁵ km³ over 0.15% of the surface, 0.8% of
+    the loads' 1.082 × 10⁸ km³; bending the lid under the capped field alone would take a
+    convolution of the field. Recorded below.
+  - _The coverage correction now runs only at saturation._ Under the addendum 2's moat a field
+    stands at its cones' height and its bulges add, so its realised s.d. falls short of σ_volc only
+    where overlaps clip it near the saturated ¾: on the reference Mars only at a volcanism level of
+    2.5, past plan 14's bound (about 2), where the coverage is ¾ already and the correction lays the
+    same field again. The count law is kept as built (the addendum 2); a test runs that world
+    through the staged step and holds the second field to the first bit for bit.
+  - _This fix's review_, by the same four reviewers by hand over its diff:
+    - _Rust._ Should-fix, done: the balance test now holds the edifice's own table to the
+      convolution and pins its root; `Lid` carries `ρ_p` and the guard, its fields private; a doc
+      summary split. Considers, done: `FILL_POROSITY`'s doc names the load; the asserts print.
+    - _Determinism._ No must-fix or should-fix; its consider, done: the saturated case runs the
+      correction through the staged step.
+    - _Plan conformance._ Should-fix, done: the clipped overlaps measured and recorded, the volume
+      held at the cap. Considers, done: each cell's ground against its lift, the table against the
+      convolution, the record's wording.
+    - _Science._ Must-fix, the uniform foundation on a standing bulge: ruled otherwise, so built as
+      ruled, documented, recorded below and commented on the issue with the lane's lean. Must-fix,
+      done: α's 5–7% was about 5%. Should-fix, done: the ridge reading's effect in full, and main's
+      unread figures labelled. Considers, done: 17% at the ruled foundation, `ρ_fill` read as `ρ_p`.
   - _`T_e` (ruled, item 4)._ `Silicate`: plan 14's `lithosphere_thickness` (3.1 W m⁻¹ K⁻¹ ×
     (870 K − `T_s`) ÷ F, zero at 870 K and above). `WaterIce`: ∫ k dT ÷ F from `T_s` to plan 14's
     `ICE_LITHOSPHERE_ISOTHERM` (170 K, kept), k the lid substance's conductivity row
@@ -7545,21 +7592,32 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     70 km (the ruling's 251.9) and 337.4 km at the reference Mars's own 107.0 km, the bulge crest
     near 1,060 km; beside `ρ_m` 3,500 kg m⁻³, 238.2 and 321.0 km. `T_e`: the reference Earth 19.7 km,
     Mars 107.0 km, the Moon 103.3 km, Ceres 469.7 km (its radius; the law's 2,192.9 km). The ice
-    rule's test value: 2.516 km at 200 mW m⁻² and 70 K, 1.86 km at 270. The reference Mars: 6
-    provinces; the first coverage 0.10 gave a realised s.d. of 1,268 m against σ_volc's 2,747 m,
-    so the correction laid 163 edifices of a 368 km base and 21,795 m over 0.480 of the surface,
-    realising 2,094 m (0.76 of σ_volc); the lift reaches 28.5% of the surface, at most 19,371 m,
-    and the `Province` crust covers 71.4% (the moats' fill). After T12.a–c the reference Mars's
-    s.d. is 2,325 m and its relief 22,829 m.
+    rule's test value: 2.516 km at 200 mW m⁻² and 70 K, 1.86 km at 270. The reference Mars, under
+    the addendum 2's moat: 6 provinces; 35 edifices of a 368 km basal radius and 21,795 m at a
+    coverage of 0.102, the first, which realises 2,899 m against σ_volc's 2,747 m (1.06 of it), so
+    no correction runs; a lone cap-height edifice stands at 21,795 m over a root `w₀` of 30,474 m,
+    its bulge 1,242 m high (0.041 `w₀`) at 1,125 km from its centre; the loads' footprint is 9.4%
+    of the surface (main's estimate about 32 loads over about 9%), the filled moats beyond it 35.5%
+    and the bulges 36.0%; the lift reaches 45.4% of the surface, at most 21,795 m; the `Province`
+    crust covers 44.5%, mostly filled moats (a reported figure, not a bound); the volume standing
+    above the filled level is 1.07 × 10⁸ km³ (held at the cap; the loads' sum 1.08 × 10⁸), and
+    7.0 × 10⁸ km³ with the fill of the deflections (over the cells on a sphere of the mean radius;
+    main's estimate about 4 × 10⁸, the gap the ridge reading's, below: 35 isolated axisymmetric cones
+    would hold 4.6 × 10⁸, the science check's solve). After T12.a–c the
+    reference Mars's s.d. is 2,986 m and its relief 25,711 m. Under the first rule the correction
+    had laid 163 edifices over 0.480 of the surface (from 1,268 m at 0.10), realising 2,094 m
+    (0.76), with 71.4% `Province` crust and an s.d. after T12.a–c of 2,325 m.
   - _Plan 14's figures stay plan 14's_ (the review; Design note 3, never left to drift): σ_volc and
     `h_max` are gated by plan 14's own lithosphere (`published_thickness`: its
     `lithosphere_thickness` of the lid's class, 651 ÷ T for ice), while the flexure reads the ruled
     `T_e` (the `H2O` row's 567 ÷ T); on an ice lid the two differ by 13%. Nothing moves on the
     reference worlds, whose one province lid is silicate.
-  - _A fill no lighter than the mantle beneath_ (a rocky province on an ice lid, which plan 14's
-    crusts never pair but the builder accepts) gives no provinces (labelled), so the pass cannot
-    panic there; `flexural_parameter` keeps its assert for its direct callers.
-  - _The province test_ holds the realised share at 0.7 σ_volc or more (0.76 as built).
+  - _Province material no lighter than the mantle beneath_ (a rocky province on an ice lid, which
+    plan 14's crusts never pair but the builder accepts) gives no provinces (labelled; `Lid::new`
+    returns `None`), so the pass cannot panic there; `flexural_parameter` keeps the addendum 2's
+    assert of `ρ_m` − `ρ_p` > 0 for its direct callers.
+  - _The province test_ holds the realised share at 0.7 σ_volc or more (1.06 as built,
+    uncorrected; 0.76 under the first rule).
 - **Deviations in T12.d, as built** (2026-10-16; the same lane, on `a4dcf814`; main's rulings on
   R09.T7.c and R09.T8 for T12.d's contract, and `decision-r09-t12-coarse.md` item 5b; no bump).
   - _Files and items._ `steps/craters.rs`: `run` and `run_after_erosion` (public, as the step
@@ -7636,8 +7694,9 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
       guard are recorded above, and the `tags.rs` docs below. The continental width's bound is
       based on 1.08 km. Done from its considers: the belts' and the noise kernel's docs, and the
       251.7 km comment; the province test is tightened.
-    - _Science._ Must-fix, pending main's ruling: the filled moat counts its fill twice under a
-      load. It is commented on the issue with the lane's lean and deferred below, built as ruled.
+    - _Science._ Must-fix: the filled moat counted its fill twice under a load. Commented on the
+      issue with the lane's lean, it was ruled by the addendum 2 and built after the push (T12.c's
+      "The filled moat" above).
       Should-fix, done: 14.3% (not 14.2%) older than 120 Myr under the triangular law; the core's
       skewness, 0.32, beside Earth2014's 1.20 (not its shape's 0.10); α 251.7 km at 70 km under the
       reference Mars's gravity; `T_e` held at R labelled an extrapolation of the thin-shell model;
@@ -7686,14 +7745,33 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     core with long tails (an interquartile range of 723 m and a skewness of 1.20, against the
     first population's 1,427 m and 0.54, the addendum's figures), and the ice sheets' surfaces,
     2–4 km over Antarctica and Greenland, are a tail no population or landform holds.
-  - _The ruled flexure compensates broad provinces:_ a load much wider than α sinks by
-    `ρ_l` ÷ (`ρ_m` − `ρ_fill`) of its height, 5.1 times on Mars, so only edifices about α across
-    stand. To approach σ_volc the cone field covers half of the reference Mars with 163
-    Olympus-sized edifices and still realises 0.76 of it, and their moats make 71% of it province
-    crust. Tharsis-scale rises, held up by thickened crust of low density, are not modelled; nor is
-    a size distribution of edifices (one size, Mars's style, on every lid).
-  - _`ρ_m` per body from plan 14's mantle composition_ (Mars nearer 3,500 kg m⁻³, from memory,
-    which lowers its filled α by 5–7%) is an ask for P14.T54.a: a density at the lithosphere's base
+  - _Mars's constructional relief is mostly Tharsis's regional rise_ (the addendum 2), so an
+    edifice-only law needs some thirty giant shields to reach σ_volc: 35 on the reference Mars,
+    where Mars has about ten shields wider than 300 km (main's figures, not read; Plescia 2004's
+    Table 1 would source the sizes). A rise component, held up
+    by thickened crust, is for T12.c's re-validation; nor is a size distribution of edifices
+    modelled (one size, Mars's style, on every lid).
+  - _Loads at `ρ_p` are about 17% lighter_ than Belleguic et al.'s 3,200 ± 100 kg m⁻³ for Mars's
+    large volcanoes (17.25%, the science check, which read the abstract), so at the ruled
+    foundation they deflect about 17% less (the addendum 2). The piecewise foundation the addendum
+    declined makes the solve nonlinear.
+  - _The uniform foundation is exact only where the deflection is filled_ (R09.T12's science
+    check; commented on the issue with the lane's lean): on a bulge left standing (w < 0) nothing
+    fills the rise, so the restoring term there is `ρ_m` g + E `T_e` ÷ R² (13,234 N m⁻³ on the
+    reference Mars) against the uniform 3,362, and the ruled model raises the bulges some 2.4
+    times too high (a cap-height ridge's bulge 1,242 against 508 m, an axisymmetric cone's 234
+    against 96 m, the check's solves; `w₀` moves by 0.2%). Bulges cover 36.0% of the reference
+    Mars and feed its realised s.d. Built as ruled; the docs say so.
+  - _Moats fill whatever the volcanic flux_ (the addendum 2): every moat is filled to the
+    surrounding level, however little the province has erupted.
+  - _Overlapping loads past the cap bend the lid by their whole sum_ (the conformance review): the
+    rock the cap clips, 8.75 × 10⁵ km³ over 0.15% of the reference Mars, weighs on the lid without
+    standing. Dropping it from the load would take a convolution of the capped field; the
+    addendum 2 does not address overlaps.
+  - _`ρ_m` per body from plan 14's mantle composition_ (the addendum 2: the ask stands; Mars
+    nearer 3,500 kg m⁻³, from memory, which lowers its filled α by about 5%: 321.0 against
+    337.4 km at the reference Mars's own `T_e`, and 238.2 against 251.7 km at 70 km) is an ask for
+    P14.T54.a: a density at the lithosphere's base
     from `hooks::crust::mantle_iron_oxide_mass_fraction` and `MantleNorm`.
   - _An ocean beneath an ice shell, and sea-filled moats,_ are not modelled.
   - _The shell term is the shallow shell's,_ valid for α ≪ R; low-degree membrane support is not
@@ -7719,17 +7797,15 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
   - _No crater is drawn from an octave whose lower diameter reaches the body's radius_ (labelled).
   - _Positions are uniform over directions,_ not over the spheroid's area: on Ceres (f 0.075) the
     density per area is 1 ÷ (1 − f)², 17%, higher at the poles than at the equator; labelled.
-  - _The ruled filled moat counts its fill twice under a load_ (R09.T12's science check; commented
-    on the issue). α's uniform foundation, (`ρ_m` − `ρ_fill`) g + E `T_e` ÷ R², assumes fill
-    beneath the load as well as in the moat, which puts the load's top at h above the surrounding
-    level, and Δz = max(h − w, 0) then sinks it by w again. On the reference Mars a cap-height
-    edifice (21.8 km, base radius 368 km, filled α 337 km) deflects some 38 km under its centre and
-    stands nowhere; a consistent piecewise balance (`ρ_m` g under the load) gives 13.4 km and a
-    summit standing 8.4 km. Lean: keep the ruled α and read h as the load's height above the filled
-    level (Δz = h under the load, 0 in the moat, −w on the bulge), the uniform-infill model it
-    implies, which fits `h_max`'s calibration on Olympus Mons's present 21.9 km. The ridge's
-    approximation also doubles the deflection at the cap's size against the axisymmetric cone's
-    (38.1 against 18.2 km, the science check).
+  - _The ridge's approximation overstates an edifice's flexure_ at the cap's size against the
+    axisymmetric cone's (R09.T12's science check, by a planar FFT solve on a 16,000 km periodic
+    domain with the shell term as a foundation term, which reproduces its earlier 18.2 km at
+    3,310 kg m⁻³; medium-high confidence): at `ρ_p` the root is 30.5 against 14.6 km (2.1 times),
+    the bulge 1,242 against 234 m (5.3 times; 0.041 against 0.016 `w₀`) and the fill per edifice
+    2.0 against 1.0 × 10⁷ km³, and the profile turned about the centre carries 1.62 times the
+    load's weight. With the uniform foundation's bulge (above), a lone edifice's bulge is some 13
+    times the consistent axisymmetric one (1,242 against 96 m). The axisymmetric Kelvin-function
+    solution is not used (labelled).
   - _`tags.rs`'s registry docs read the old keys_ (for a docs batch, which may edit it):
     `surface.coarse.crater` is keyed by `surface_item(k)` for octave k, not crater slot k, and
     `surface.coarse.relief` by `surface_cell` of lattice cells at levels 1–5 and the field's, and
