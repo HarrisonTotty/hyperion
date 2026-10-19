@@ -13,6 +13,7 @@ import type {
   ResponseFor,
   SectionDto,
   SubsurfaceOceanDto,
+  SurfaceModifiersDto,
   UniverseTime,
   VerticalStructureDto,
 } from "@hyperion/protocol";
@@ -644,7 +645,13 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
           subsurface_ocean: EUROPA_OCEAN,
           vertical_structure: EARTH_STRUCTURE,
           aerosols: { modes: [DROPLETS, HAZE], decks: [], absorbers: [OZONE] },
-          modifiers: { maturity: 0.8, organic_cover: 0.1, resurfacing_m_per_yr: 0.01 },
+          modifiers: {
+            maturity: 0.8,
+            weathering_rate: 1,
+            organic_cover: 0.1,
+            resurfacing_m_per_yr: 0.01,
+            volcanic_deposits: [{ substance: "SO2", area_fraction: 0.27 }],
+          },
         }),
       ).surface,
     );
@@ -679,7 +686,13 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
     expect(aerosols?.absorbers[0]?.columnPerM2).toBe(8.06e22);
     expect(valued.modifiers).toEqual({
       kind: "value",
-      value: { maturity: 0.8, organicCover: 0.1, resurfacingMPerYr: 0.01 },
+      value: {
+        maturity: 0.8,
+        weatheringRate: 1,
+        organicCover: 0.1,
+        resurfacingMPerYr: 0.01,
+        volcanicDeposits: [{ substance: "SO2", areaFraction: 0.27 }],
+      },
     });
   });
 
@@ -954,10 +967,28 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
     ).toBe("condensate unusable");
   });
 
-  it("refuses surface modifiers whose maturity is not a fraction", () => {
-    expect(
-      surfaceFault({ modifiers: { maturity: 1.5, organic_cover: 0, resurfacing_m_per_yr: 0 } }),
-    ).toBe("surface modifiers unusable");
+  it.each<[string, Partial<SurfaceModifiersDto>]>([
+    ["whose maturity is not a fraction", { maturity: 1.5 }],
+    ["whose weathering rate is negative", { weathering_rate: -1 }],
+    [
+      "whose deposits cover more than the surface",
+      {
+        volcanic_deposits: [
+          { substance: "SO2", area_fraction: 0.6 },
+          { substance: "S8", area_fraction: 0.6 },
+        ],
+      },
+    ],
+  ])("refuses surface modifiers %s", (_, change) => {
+    const modifiers: SurfaceModifiersDto = {
+      maturity: 0.8,
+      weathering_rate: 1,
+      organic_cover: 0,
+      resurfacing_m_per_yr: 0,
+      volcanic_deposits: [],
+      ...change,
+    };
+    expect(surfaceFault({ modifiers })).toBe("surface modifiers unusable");
   });
 
   it("refuses a biosphere flux that is not finite", () => {

@@ -566,18 +566,28 @@ pub struct CrustCompositionDto {
     pub melt_area_fraction: f64,
 }
 
-/// A surface's modifiers (plan 14, P14.T51.d). Absent from the wire until P14.T51.d, which may
-/// reshape it.
+/// A surface's modifiers (plan 14, P14.T51.d; decision-p14-t51d-weathering §2). Absent from the
+/// wire until P14.T54.b fills it. P14.T51.d gave it this shape, which may change until a build
+/// sends a value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SurfaceModifiersDto {
-    /// The space-weathering maturity, dimensionless, from 0 for a fresh surface to 1 for a mature
-    /// one.
+    /// The space-weathering maturity, dimensionless in `[0, 1]`: the background regolith's
+    /// nanophase-iron content as a fraction of the Moon's mature background's, per unit of its
+    /// non-metallic iron as `FeO`, 0 for fresh ground and 1 for the Moon's mature background.
     pub maturity: f64,
-    /// The share of the surface under an irradiated-organics cover, in `[0, 1]`.
+    /// The space-weathering rate, dimensionless, finite and not negative, with no upper bound: the
+    /// body's surface-reaching weathering dose rate relative to the Moon's present one, so that the
+    /// Moon's is 1.
+    pub weathering_rate: f64,
+    /// The organic cover: the covered fraction of the ground that can take one, in `[0, 1]`.
     pub organic_cover: f64,
     /// The resurfacing rate from volcanism or tidal heat, m per Julian year, not negative.
     pub resurfacing_m_per_yr: f64,
+    /// The volcanic deposits an Io is resurfaced with, SO₂ frost and sulphur, each a key of the
+    /// substance registry with its share of the surface in `[0, 1]`, together at most 1; empty for
+    /// every other body.
+    pub volcanic_deposits: Vec<SubstanceAreaDto>,
 }
 
 /// One net surface flux of a biosphere.
@@ -1479,13 +1489,33 @@ pub(crate) mod tests {
     fn modifiers() -> SurfaceModifiersDto {
         SurfaceModifiersDto {
             maturity: 0.8,
+            weathering_rate: 1.0,
             organic_cover: 0.0,
-            resurfacing_m_per_yr: 0.0,
+            resurfacing_m_per_yr: 0.04,
+            volcanic_deposits: vec![
+                SubstanceAreaDto {
+                    substance: "SO2".to_owned(),
+                    area_fraction: 0.27,
+                },
+                SubstanceAreaDto {
+                    substance: "S8".to_owned(),
+                    area_fraction: 0.716,
+                },
+            ],
         }
     }
 
     fn modifiers_json() -> Value {
-        json!({ "maturity": 0.8, "organic_cover": 0.0, "resurfacing_m_per_yr": 0.0 })
+        json!({
+            "maturity": 0.8,
+            "weathering_rate": 1.0,
+            "organic_cover": 0.0,
+            "resurfacing_m_per_yr": 0.04,
+            "volcanic_deposits": [
+                { "substance": "SO2", "area_fraction": 0.27 },
+                { "substance": "S8", "area_fraction": 0.716 },
+            ],
+        })
     }
 
     fn biosphere() -> BiosphereDto {
@@ -1985,11 +2015,12 @@ pub(crate) mod tests {
             "haze_tau_550",
             "flux_earth",
         ];
-        const MORE: [&str; 4] = [
+        const MORE: [&str; 5] = [
             "mantle_redox_iw",
             "melt_area_fraction",
             "maturity",
             "organic_cover",
+            "weathering_rate",
         ];
         const UNITS: [&str; 14] = [
             "_k",

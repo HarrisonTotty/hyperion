@@ -5987,8 +5987,6 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::crust`.
 - **P14.T51.d Surface modifiers** (23 → 24).
   - `hooks/modifiers.rs`:
-    - a space-weathering maturity, from the host wind's flux at the body times the surface age,
-      reduced under a magnetic field or an atmosphere;
     - an irradiated-organics cover, for surfaces holding CH₄, N₂, CO or CH₃OH ices, from the UV and
       particle dose, giving a tholin cover;
     - a resurfacing rate from volcanism or tidal heat, which gives Io its SO₂ frost and sulphur
@@ -6000,15 +5998,38 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
     `organic_cover`. This task fixes their exact definitions inside that contract; a shape it cannot
     fit goes to "main" before T54.b. The resurfacing rate stays off the header, since the surface
     age carries it for R10 and R11.
+  - a space-weathering maturity m and rate k (decision-p14-t51d-weathering §2, 2026-10-16):
+    - m is the background regolith's npFe⁰ content as a fraction of the Moon's mature
+      background's, per unit of FeO_T, which the shared law reads linearly;
+    - m_body = 1 − exp(−k t_s ÷ τ_L), from
+      `hyperion_surface::material::{body_maturity, LUNAR_MATURATION_TIME}`, which this task builds
+      in `material/maturity.rs`, with τ_L fitted to Grier et al. 2001's Tycho and Copernicus;
+    - k is the orbit-mean surface-reaching dose rate relative to the Moon's,
+      k = 0.5 Φ_w ÷ Φ_w,Moon + 0.5 Φ_d ÷ Φ_d,Moon (the split labelled):
+      - the wind's flux Ṁ ÷ (4π a² √(1 − e²)), times its unshielded share: 0 under air above
+        T53.c's tenuous floor or inside a planet's magnetopause, and 1 − √(1 − R ÷ r_mp) under a
+        dipole;
+      - the micrometeoroids' n(r) v(r)³ ∝ r^(−1.3) (G M_* ÷ r)^(3/2) at a labelled dust level of
+        1, times exp(−Σ ÷ 0.3 kg m⁻²) of the air's column;
+    - k goes on `modifiers` as `weathering_rate`.
   - _Tests:_
-    - the Moon's regolith mature;
-    - a magnetised twin less weathered;
+    - the Moon's k = 1 to 10⁻¹² and m ≥ 0.99;
+    - a magnetised twin has a lower k, and on a 100 Myr surface a lower m;
+    - Mercury's k is above 1, its two terms printed, within Braden and Robinson 2013's ratio;
+    - air above the tenuous floor gives no wind term, and Mars's k is below 0.01;
+    - `maturity_after` at k = 1 is below 30 ÷ X at 109 Myr and above 60 ÷ X at 810 Myr, X being the
+      lunar mature background's I_s/FeO;
     - a CH₄-ice body under a high dose carries a cover, and one without CH₄ none;
-    - an `Extreme`-volcanism moon resurfaced with SO₂ frost and sulphur.
+    - an `Extreme`-volcanism moon is resurfaced with SO₂ frost and sulphur.
+  - The albedo anchors moved here by decision-p14-t49c-split §1.5 move on:
+    - the Moon's highlands and maria to rendering plan R10.T1.d's calibration;
+    - Mercury's two checks and Europa's in-range check to P14.T54.b.
   - _Sources:_ Hapke 2001; Pieters and Noble 2016; Vernazza et al. 2009; Cruikshank, Imanaka and
-    Dalle Ore 2005; Brown, Schaller and Fraser 2011.
-  - _Files:_ `planetary/hooks/modifiers.rs`.
-  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::modifiers`.
+    Dalle Ore 2005; Brown, Schaller and Fraser 2011; Morris 1978; Grier et al. 2001; Cintala 1992;
+    Leinert et al. 1981; Blewett et al. 2011; Braden and Robinson 2013.
+  - _Files:_ `planetary/hooks/modifiers.rs`; `crates/hyperion-surface/src/material/maturity.rs`.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::modifiers`;
+    `cargo test -p hyperion-surface material::maturity`.
 - **P14.T51.e Small bodies' surface types** (23 → 24; amends T21's members and T17–T19's small
   moons).
   - `hooks/small_bodies.rs`: a taxonomic class for the record and the census, a label and not a
@@ -17166,3 +17187,134 @@ tables::gauss_legendre`.
       profile;
     - 5 rocky temperate worlds alternating between about 0.15–0.27 and 0.278.
   - _The passes' convergence_: 25 of the sample's 954 bodies oscillate to the cap (above).
+- _Space weathering_ (decision-p14-t51d-weathering, 2026-10-16). Recorded and deferred, each a
+  value change in the shared law, none a contract change:
+  - microphase iron, a split by surface temperature (Lucey and Riner 2011; Noble and Pieters
+    2003);
+  - exogenous carbon (Syal et al. 2015);
+  - the C-complex's bluing and reddening;
+  - salts' colour centres and sulphur implantation;
+  - a moon's magnetospheric plasma;
+  - a steady-state factor on m_body;
+  - per-system dust levels.
+
+  NASA's Mercury fact sheet's "Bond albedo 0.068" is the V-band p_V q_V; the bolometric value is
+  0.088.
+
+- **Deviations in P14.T51.d, as built (`p14-snapshot`, 2026-10-16).** The surface modifiers, pure:
+  nothing on the record calls `planetary/hooks/modifiers.rs` or `hyperion-surface`'s
+  `material/maturity.rs` until P14.T54.b, they draw nothing, and no value on the record moves at
+  version 22 (decision-bump-plan-after-22 §1.3). The ruling is decision-p14-t51d-weathering §2.
+  - _The time law_ (`material/maturity.rs`): `LUNAR_MATURATION_TIME` = 0.3277 Gyr,
+    `maturity_after(exposure: Gigayears, weathering_rate: f64) -> f64` and `body_maturity`, the
+    latter the former at the surface age. τ_L is the geometric centre of the bounds Grier et al.
+    2001's Tycho (109 Myr, immature) and Copernicus (810 Myr, mature) set at X = 75, a
+    stand-in inside Morris 1978's mature range (immature 0–29.0, mature from 60.0, values above
+    100; pp. 2289–2290, read), (0.2134, 0.5033) Gyr, so m(109 Myr) = 0.283 < 0.4 and m(810 Myr) = 0.916 > 0.8; it
+    holds both for X from about 66 to 106. It is −expm1(−x), +0 at zero exposure or rate of
+    either sign, and panics on a NaN, an infinite or a negative input, as the crate's chronology
+    does (the sim validates first).
+  - _`SurfaceModifiers`_ (`hooks::modifiers`):
+    `derive(&ModifierInputs) -> Result<Self, DeriveModifiersError>` (one variant,
+    `OutOfRange(ModifierInput)`), with `maturity`, `weathering_rate` and its two terms
+    (`weathering() -> WeatheringRate { wind, dust }`), `organic_ground`, `organic_cover`,
+    `resurfacing_m_per_yr` and `volcanic_deposits() -> &[VolcanicDeposit]`. The inputs take T24.b's resurfacing time τ itself, so that T54.b passes it
+    under the record's tide rule, and the host as its radius, X-ray and ultraviolet luminosity and
+    G M★ (`ModifierHost`, with `ModifierHost::sun()` the reference). The record's uninhabited
+    `record::SurfaceModifiers` keeps its name: the module's documentation says which is which, as
+    the crust's does.
+  - _The rate as built:_ the Moon 1 to 10⁻¹² (as the Sun's orbiter or as Earth's moon, outside
+    Earth's magnetopause); Mercury k = 8.89 = 0.5 × wind 3.52 + 0.5 × dust 14.26 (its weak
+    dipole's open share 0.515); a Moon twin at 100 Myr k 1.000, m 0.263 bare, k 0.667, m 0.184
+    under the weak class, k 0.527, m 0.149 under the strong; Mars k 2.2 × 10⁻²⁴⁸ (its wind 0,
+    its dust exp(−Σ ÷ 0.3) at 170 kg m⁻²); an Io-like moon 0.0049 (its wind 0 inside Jupiter's
+    magnetopause), a Callisto-like one 0.0234.
+  - _The organic cover_ is the exact solution of the first-order balance,
+    c = c_ss (1 − exp(−(k_irr + k_res) t_s)), where the brief wrote c_ss (1 − exp(−t_s ÷ τ_c)):
+    the two agree where k_irr ≫ k_res, and the brief's form grows as the dose squared where the
+    renewal is the faster. The dose is the host's X-ray and ultraviolet flux and the wind's ions'
+    kinetic energy (½ Ṁ v² at 400 km/s, its unshielded share), a quarter of the disk's over the
+    globe, both 0 under air above the floor; the saturation dose 100 eV per 16 amu (Cooper et al.
+    2003; Brunetto et al. 2006, both abstracts read) over 0.1 µm at unit density, 6.03 × 10⁴ J
+    m⁻². A Kuiper-belt body at 40 au saturates in about 9 kyr, so its methane ice over 4 Gyr
+    carries a cover of about 1. The eligible ground is a getter (`organic_ground`), off the DTO.
+  - _The resurfacing rate_ is 200 m ÷ τ: the 1 km crater N☾(>1 km) counts, at the bowl's 0.20 D
+    (`craters/shape.rs`'s Pike 1980b), buried once per resurfacing time. Io at 2.5 W m⁻²: τ =
+    4,415 yr, 4.53 cm per year.
+  - _An Io's deposits_ are entries of a registry row and an area, `SO2` 0.27 and `S8` 0.716
+    (Geissler et al. 1999, abstract read; the rest its 0.014 of dark silicate, the lid's), where
+    `Volcanism::of` the heat flow is `Extreme`, the mantle's sulphur (T50.a's) is above 0 and the
+    mean surface temperature is below SO₂'s frost point at 1 nbar on the registry's curve, 112.05
+    K.
+  - _The protocol._ `SurfaceModifiersDto` gains `weathering_rate: f64` and
+    `volcanic_deposits: Vec<SubstanceAreaDto>` (the existing type, key and area). It has never been sent, so its shape
+    is not frozen and `PROTOCOL_VERSION` stays 2 (`hyperion_protocol::PROTOCOL_VERSION`'s rule).
+    The client's reader takes both (the rate not negative, each deposit a fraction, together at
+    most 1), with its tests.
+  - _The tripwire_ (`modifiers_nothing_on_the_record_reads_the_modifiers_yet`) scans the sim's
+    `src/` and the surface crate's, and names what T54.b wires.
+  - _Not applied here_ (main's docs batch): the ruling's plan text for P14.T54.b, R10.T1.d, R10.T1.c
+    and R09.T2.f, and T51.b's Mercury line.
+- **Deferred findings (2026-10-13 rule)**, from P14.T51.d:
+  - _Mercury's k against Braden and Robinson 2013_ (JGR Planets 118, 1903, abstract read: "up to
+    4 times faster"): the ruling's shares and laws give 8.89, its dust term alone 7.1. The test
+    pins k ÷ 4 in [1, 3). It is a difference of models, not a misreading (verified by the science
+    check): k is a dose ratio, whose dust term reproduces Cintala 1992's "almost 14 times more
+    impact melt" (abstract read), while Braden and Robinson's figure is a rate of optical change,
+    which also carries Mercury's low FeO, its npFe⁰'s coarsening and its faster gardening. Either
+    the anchor is restated as a dose ratio, or the dust law is softened (a smaller dust share, a
+    law softer than n v³, or the gardening a steady-state factor would add): value changes, for
+    main.
+  - _No wind model for cool stars:_ Wood et al. 2002's Ṁ ∝ R² F_X^1.15 with the X-ray and
+    ultraviolet luminosity standing in for the X-ray, uncapped. Wood et al. 2005 (ApJ 628, L143,
+    §3, read) refit the index as 1.34 ± 0.18 and find the relation holds only below
+    F_X = 8 × 10⁵ erg cm⁻² s⁻¹; Wood 2018 (arXiv:1809.01109, §3, read) gives 1.29 ± 0.16 below
+    log F_X = 6.0. 1.15 is kept, inside the newer error bar. At the bump: take 1.29 and cap F_X at
+    10⁶ erg cm⁻² s⁻¹, against the Sun's surface X-ray flux; uncapped, an active host's wind is
+    overstated, an M dwarf's the more. One wind speed, 400 km/s (the speed Wood et al. 2005
+    assume), for every host; Ṁ☉ 2 × 10⁻¹⁴ M☉ yr⁻¹ (Wood et al. 2002's text) and the Sun's
+    zero-age 0.7 L☉ (Feulner 2012's "~30% fainter"; Gough 1981's 0.714), all read.
+  - _The field-class stand-ins:_ weak 195 nT (Mercury's dipole, 195 ± 10 nT R_M³, Anderson et
+    al. 2011, read), strong 30 µT (Earth's dipole, 29.7 µT in IGRF-14, 2025, read). Jupiter's
+    some 420 µT would put its magnetopause about 2.4 times farther than the class's 17 R_J, so a
+    Callisto is exposed to the wind here (k 0.023).
+  - _Mercury's magnetopause_, the ruling's check: the model's subsolar standoff at 14.3 nPa is
+    1.27 R_M against Winslow et al. 2013's measured 1.45 R_M (JGR 118, 2213, abstract read), about
+    12% low. At 1.45 R_M the open share falls from 0.52 to 0.44 and k from 8.89 to 8.64. Winslow
+    et al. 2014 (GRL 41, 4463) find most of Mercury's southern hemisphere bombarded, more than the
+    dipole's polar caps. No code change.
+  - _The floor stand-in:_ 10⁻⁴ kg m⁻² (a 1 keV proton's CSDA range in dry air, 9.857 × 10⁻⁶ g
+    cm⁻², NIST PSTAR, read) until P14.T53.c's tenuous floor; the X-ray and ultraviolet light take
+    the same floor. The airs' columns quoted against it (Pluto, Triton, Io) are derived here as
+    p ÷ g from pressures and gravities _from memory_.
+  - _The 0.5 split_ and _the dust level_ `D_sys` = 1 (the ruling's labels; Pieters and Noble 2016,
+    §3.1, read: the split is debated, and the rims' npFe⁰ forms "largely through impact
+    processes"). The dust term is taken at the semi-major axis: the orbit mean of r^(−2.8) is about
+    (1 + 1.26 e²) times it, 5% at Mercury's e. A giant planet's gravitational focusing of the dust
+    onto its moons is not modelled.
+  - _Leinert et al. 1981's r^(−1.3)_ (A&A 103, 177, Summary, read) is measured over 0.3–1.0 au;
+    beyond it, where the source says nothing, the law is an extrapolation: Mercury's 0.387 au lies
+    inside, every belt and Kuiper-belt body outside.
+  - _For P14.T51.e:_ Vernazza et al. 2009's asteroid timescale, under 10⁶ yr (Nature 458, 993,
+    _from memory_), against the lunar calibration's τ_L ÷ k, about 2.8 Gyr at 2.5 au (k about
+    0.12): a gap of three orders of magnitude, for T51.e, whose Q/S threshold reads this m. Morris
+    1978 (p. 2290, read) finds I_s/FeO does not saturate, the regolith's thickness setting its
+    maximum, which supports the deferred steady-state factor on m_body.
+  - _The far ultraviolet_ (Lyman α among it), which photolyses methane, is not in the organic
+    dose; the X-ray and extreme ultraviolet are taken as absorbed within the layer.
+  - _Magnetospheric plasma:_ a moon inside its planet's magnetopause takes no wind term, and its
+    planet's plasma (Io's, Europa's and Ganymede's weathering and radiolysis) is not modelled.
+  - _On bodies with air_ the cover is 0; their tholin is haze fallout, P14.T53.c's. A Sputnik
+    Planitia renewed every 500 kyr (McKinnon et al. 2016, abstract read) would still saturate
+    airless (cover 0.98 at 40 au): the check holds only by its air. Volatile ices' own renewal by
+    sublimation and condensation is not modelled.
+  - _Io's shares_ are Io's, labelled, until P14.T24.g's outgassing; the frost point is taken at a
+    1 nbar stand-in (_from memory_), 112.05 K, just above an Io's 110 K; `Volcanism::of`'s moon
+    levels classify every body's heat flow.
+  - _The resurfacing rate:_ Io's 4.53 cm per year against Johnson et al. 1979's about 1 (_from
+    memory_; the abstract gives no figure).
+  - _The cover's build-up_ starts at the surface age while k_res renews it: where the surface age
+    is the resurfacing time itself the turnover counts twice, lowering the cover by at most a
+    factor e ÷ (e − 1), only where k_irr τ ≪ 1 and the cover is small. The eligible ground sums
+    its entries' areas, which may overlap, held to 1.
+  - _The Moon's reference_ ignores its months in Earth's magnetotail, which cancel in k_Moon.

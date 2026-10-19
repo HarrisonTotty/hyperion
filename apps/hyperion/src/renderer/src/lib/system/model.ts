@@ -732,9 +732,19 @@ export interface CrustComposition {
 export interface SurfaceModifiers {
   /** Dimensionless, 0 fresh to 1 mature. */
   readonly maturity: number;
-  /** In `[0, 1]`. */
+  /**
+   * Dimensionless, not negative: the space-weathering dose rate relative to the Moon's, which is
+   * 1.
+   */
+  readonly weatheringRate: number;
+  /** In `[0, 1]`: the covered fraction of the ground that can take an organic cover. */
   readonly organicCover: number;
   readonly resurfacingMPerYr: number;
+  /**
+   * An Io's SO₂ frost and sulphur, by registry key, each with its share of the surface; empty for
+   * every other body.
+   */
+  readonly volcanicDeposits: ReadonlyArray<SubstanceArea>;
 }
 
 /** One net surface flux of a biosphere. */

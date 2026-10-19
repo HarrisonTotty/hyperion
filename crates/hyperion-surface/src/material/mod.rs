@@ -26,7 +26,10 @@
 //! share of each finest-level class over a texel's footprint (Design note 3). The class photometry
 //! ([`albedo_scale`], R10.T10.a) is the one scale on a body's class albedos that makes its scaled
 //! classes, over their area fractions ([`class_fractions`]), give its geometric albedo (Design
-//! note 8).
+//! note 8). The space-weathering maturity's time law ([`maturity_after`], [`body_maturity`],
+//! [`LUNAR_MATURATION_TIME`]; plan 14's P14.T51.d, decision-p14-t51d-weathering §2.1) is the one
+//! the sim's surface modifiers and R10.T1.c's crater fading share; nothing on the record calls it
+//! until P14.T54.b.
 //!
 //! Nothing here draws from a stream, so the module opens no domain tag.
 
@@ -36,6 +39,7 @@ mod class;
 mod classify;
 #[cfg(test)]
 mod golden;
+mod maturity;
 mod properties;
 mod weights;
 
@@ -50,6 +54,7 @@ pub use bearing::{
 pub use class::{Material, MaterialClass, PhotometricForm};
 pub(crate) use classify::IceCuts;
 pub use classify::{GroundMaterial, MASSIVE_ICE_SHARE, THIN_ATMOSPHERE_PRESSURE, material_at};
+pub use maturity::{LUNAR_MATURATION_TIME, body_maturity, maturity_after};
 pub use properties::{
     AlbedoSpan, BRIGHT_FROST_LIMB_PARAMETER, BRIGHT_FROST_NORMAL_ALBEDO, Citation, Figure, FormRow,
     FrictionModel, LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO, LUNAR_LIMB_ONSET_NORMAL_ALBEDO,

@@ -22,6 +22,10 @@
 //!   over P14.T49.b's `c_p`(T) to an isothermal skin, with [`temperature_at`](structure::temperature_at),
 //!   which the flight model's drag and rendering plan R08 read. It is pure until P14.T54.b, the
 //!   23 → 24 bump, puts it in the record's surface section.
+//! - [`modifiers`]: a solid surface's [`SurfaceModifiers`] (P14.T51.d), its space-weathering rate
+//!   and maturity, organic cover, resurfacing rate and an Io's volcanic deposits. It is pure until
+//!   P14.T54.b, the 23 → 24 bump, puts it in the record's surface section in the place of the
+//!   record's placeholder of the same name.
 //!
 //! The conditions and figures are a body's record's surface section
 //! ([`record::Surface`](crate::planetary::record::Surface), P14.T48.e), from the 21 → 22 batch's
@@ -40,6 +44,7 @@
 
 pub mod crust;
 pub mod figures;
+pub mod modifiers;
 pub mod seed;
 pub mod structure;
 pub mod surface;
@@ -49,6 +54,7 @@ pub use figures::{
     GlobalFigures, Impactors, MagneticField, OceanFloor, Subsurface, SubsurfaceOcean,
     TectonicRegime, impactors,
 };
+pub use modifiers::{DeriveModifiersError, ModifierInputs, SurfaceModifiers};
 pub use seed::{DetailSeed, SurfaceSeed, detail_seed, surface_seed};
 pub use structure::{ProfileNode, RadiativeConvective, VerticalStructure};
 pub use surface::{ClimateRegime, RadiationClass, SurfaceConditions};
