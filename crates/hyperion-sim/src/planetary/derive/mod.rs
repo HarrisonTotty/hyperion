@@ -680,6 +680,7 @@ pub struct DerivedBody {
     atmosphere: Atmosphere,
     atmosphere_passes: u32,
     convergence: Convergence,
+    regolith_albedo: Option<f64>,
     internal_luminosity: Watts,
     radius: EarthRadii,
     density: KilogramsPerCubicMetre,
@@ -824,6 +825,16 @@ impl DerivedBody {
     #[must_use]
     pub(crate) const fn convergence(&self) -> Convergence {
         self.convergence
+    }
+
+    /// The Bond albedo of the body's bare regolith about its hosts' bands, airless (P14.T51.i): the
+    /// passes' regolith row (T51.b's `Regolith`, its lid not known until P14.T54.a, weathered by the
+    /// stand-in until P14.T54.b) on an airless body, which its cold traps' flat ground and shadows
+    /// read, so that their field does not move with the area mix (decision-p14-t51-batch §6).
+    /// Dimensionless, 0 to 1; `None` under version 22's rules, whose passes read no light.
+    #[must_use]
+    pub(crate) const fn regolith_albedo(&self) -> Option<f64> {
+        self.regolith_albedo
     }
 
     /// The body's atmosphere and surface at the time (P14.T13).
@@ -1313,6 +1324,7 @@ pub(crate) fn derive_body_driven(
         atmosphere: passes.air,
         atmosphere_passes: passes.count,
         convergence: passes.convergence,
+        regolith_albedo: passes.regolith_albedo,
         internal_luminosity,
         radius,
         density,
@@ -1376,7 +1388,7 @@ struct PassBody<'a> {
 
 /// What the passes leave (P14.T13.c, P14.T51.b, P14.T51.h): the albedo the published pass read,
 /// its equilibrium and heated temperatures and its atmosphere, how many passes were taken and how
-/// they ended.
+/// they ended, and the bare regolith's albedo under the batch (P14.T51.i).
 #[derive(Debug, Clone, Copy)]
 struct Passes {
     albedo: BondAlbedo,
@@ -1385,6 +1397,7 @@ struct Passes {
     air: Atmosphere,
     count: u32,
     convergence: Convergence,
+    regolith_albedo: Option<f64>,
 }
 
 impl PassBody<'_> {
@@ -1447,7 +1460,14 @@ impl PassBody<'_> {
             .as_ref()
             .map_or(PassLight::HottestHost, PassLight::Shade);
         let surface = PassSurface::stand_in(light);
-        match rules {
+        // The bare regolith the cold traps read (P14.T51.i): the passes' row on an airless body,
+        // under the hosts' light, which the held rules do not build.
+        let regolith_albedo = self.sky.shade.as_ref().map(|shade| {
+            (surface.regolith)(SurfaceMaterial::of(&self.bulk.fractions))
+                .bond(SurfaceState::Airless, shade.bands())
+                .bond
+        });
+        let ended = match rules {
             SnapshotRules::Held => {
                 let mut albedo = BondAlbedo::BEFORE_ATMOSPHERES;
                 let (mut irradiated, mut heated, mut air) = self.pass(rules, &surface, albedo);
@@ -1462,6 +1482,7 @@ impl PassBody<'_> {
                     air,
                     count: ATMOSPHERE_PASSES,
                     convergence: Convergence::Fixed,
+                    regolith_albedo: None,
                 }
             }
             SnapshotRules::Batch => match driver {
@@ -1483,11 +1504,16 @@ impl PassBody<'_> {
                         air,
                         count: solved.count,
                         convergence: solved.convergence,
+                        regolith_albedo: None,
                     }
                 }
                 #[cfg(test)]
                 PassDriver::T51b => self.t51b_passes(&surface),
             },
+        };
+        Passes {
+            regolith_albedo,
+            ..ended
         }
     }
 
@@ -1519,6 +1545,7 @@ impl PassBody<'_> {
             air,
             count,
             convergence: Convergence::Converged,
+            regolith_albedo: None,
         }
     }
 }

@@ -2522,7 +2522,7 @@ fn the_batch_s_zonal_solver_moves_the_table_only_at_its_last_bits() {
 #[test]
 fn the_batch_publishes_the_table_s_condensates() {
     use crate::planetary::chem::partition::CondensatePhase;
-    use crate::planetary::hooks::cold_traps::{ColdTrapRules, lunar_sky};
+    use crate::planetary::hooks::cold_traps::{ColdTrapRules, RecordColdTraps, lunar_sky};
     use crate::planetary::hooks::figures::{VolatileHistory, cover, table_figures_under};
 
     let water = Gas::Water.substance();
@@ -2555,8 +2555,8 @@ fn the_batch_publishes_the_table_s_condensates() {
         let atmosphere = body.atmosphere();
         // P14.T51.a's published condensates, with the cold traps held (P14.T51.f).
         let under = |rules| {
-            let traps = ColdTrapRules::Held;
-            batch.condensates_under(rules, atmosphere, &conditions, gravity, traps, &sky)
+            let traps = RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, atmosphere);
+            batch.condensates_under(rules, atmosphere, &conditions, gravity, &traps)
         };
         assert!(under(SnapshotRules::Held).is_none());
         let (partition, published) =

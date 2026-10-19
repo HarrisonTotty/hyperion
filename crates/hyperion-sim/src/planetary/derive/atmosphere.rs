@@ -1383,6 +1383,13 @@ impl Atmosphere {
         }))
         .expect("an atmosphere's column holds finite weights of gas rows, each once")
     }
+
+    /// The same atmosphere with the Bond albedo `albedo`, for the tests of what reads it.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn with_albedo(self, albedo: BondAlbedo) -> Self {
+        Self { albedo, ..self }
+    }
 }
 
 /// The species a body's carbon is airborne as (P14.T24.f, [`Atmosphere::carbon_carrier`]).

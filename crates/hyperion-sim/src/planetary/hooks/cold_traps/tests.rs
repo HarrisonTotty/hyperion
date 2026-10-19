@@ -179,7 +179,13 @@ fn the_cold_traps_are_held_only_until_the_24_bump() {
         let (air, g) = (body.atmosphere(), body.surface_gravity());
         let under = |traps| {
             figures
-                .condensates_under(SnapshotRules::Batch, air, &conditions, g, traps, &sky)
+                .condensates_under(
+                    SnapshotRules::Batch,
+                    air,
+                    &conditions,
+                    g,
+                    &RecordColdTraps::at_the_albedo_of(traps, &sky, air),
+                )
                 .unwrap()
         };
         let (solved, held) = under(ColdTrapRules::Held);
@@ -596,8 +602,14 @@ fn a_body_colder_than_its_threshold_everywhere_lays_a_whole_cover() {
 
 /// The merge adds a trap's area, reservoir and layer to its substance's solid entry, keeping that
 /// entry's seasonal flag, inserts a new one as perennial, skips an empty trap, and keeps P14.T51.a's
-/// order, held to its eight entries.
+/// order, held to its eight entries; its trapped part is none in a zonal-only entry, the trap's area
+/// in a merged one and the whole area in an inserted one, and held to 1 the trap takes what the
+/// zonal part leaves (P14.T51.i).
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of the merge's cases: summed, inserted, skipped, held, ordered and capped"
+)]
 fn the_merge_keeps_t51a_s_order() {
     let co2 = Gas::CarbonDioxide.substance();
     let climate =
@@ -640,6 +652,9 @@ fn the_merge_keeps_t51a_s_order() {
     ]);
     let both = merged.entry(co2, CondensatePhase::Solid).unwrap();
     assert_same_bits(both.area_fraction(), caps.area_fraction() + 1e-4);
+    // The trapped part (P14.T51.i): none in a zonal-only entry, the trap's area in a merged one.
+    assert_same_bits(caps.trapped_area_fraction(), 0.0);
+    assert_same_bits(both.trapped_area_fraction(), 1e-4);
     assert_same_bits(both.reservoir().value(), caps.reservoir().value() + 2.0);
     let rho = co2
         .substance()
@@ -659,6 +674,15 @@ fn the_merge_keeps_t51a_s_order() {
         .unwrap();
     assert!(!ice.is_seasonal());
     assert_same_bits(ice.area_fraction(), 3e-5);
+    // An inserted trap's trapped part is its whole area.
+    assert_same_bits(ice.trapped_area_fraction(), ice.area_fraction());
+    // Held to 1, the zonal part is kept whole and the trap takes what is left.
+    let flooded = published
+        .clone()
+        .with_cold_traps(&[trap(Gas::CarbonDioxide, 2.0, 1.0)]);
+    let full_cap = flooded.entry(co2, CondensatePhase::Solid).unwrap();
+    assert_same_bits(full_cap.area_fraction(), 1.0);
+    assert_same_bits(full_cap.trapped_area_fraction(), 1.0 - caps.area_fraction());
     assert_eq!(
         merged.entry(Gas::Methane.substance(), CondensatePhase::Solid),
         None
@@ -717,7 +741,13 @@ fn the_record_path_publishes_the_moon_s_cold_traps_under_the_batch() {
     let sky = lunar_sky();
     let under = |traps| {
         figures
-            .condensates_under(SnapshotRules::Batch, air, &conditions, g, traps, &sky)
+            .condensates_under(
+                SnapshotRules::Batch,
+                air,
+                &conditions,
+                g,
+                &RecordColdTraps::at_the_albedo_of(traps, &sky, air),
+            )
             .unwrap()
             .1
     };
@@ -739,6 +769,7 @@ fn the_record_path_publishes_the_moon_s_cold_traps_under_the_batch() {
         let trapped = ground.trap_fraction(&shadows, &terrain, threshold(gas));
         let ice = batch.entry(substance, CondensatePhase::Solid).unwrap();
         assert_same_bits(ice.area_fraction(), trapped * sky.exposed_fraction);
+        assert_same_bits(ice.trapped_area_fraction(), ice.area_fraction());
         assert_same_bits(
             ice.reservoir().value(),
             delivered_column(substance).value() * trapped,
@@ -755,7 +786,9 @@ fn the_record_path_publishes_the_moon_s_cold_traps_under_the_batch() {
 }
 
 /// The cost of the cold traps per body of the table, in release: the batch's published
-/// condensates against the held ones (plan 14's Risks record it).
+/// condensates against the held ones, the best of five interleaved rounds each (plan 14's Risks
+/// record it; P14.T51.i's budget, at most 0.6 ms for each qualifying table body, all its species,
+/// decision-p14-t51-batch §1.5). A timing alone, asserting nothing.
 #[test]
 #[ignore = "a timing, run by name in release"]
 fn time_the_cold_traps() {
@@ -774,24 +807,36 @@ fn time_the_cold_traps() {
             continue;
         };
         let (air, g) = (body.atmosphere(), body.surface_gravity());
-        let n = 50_u32;
-        let mut each = [0.0; 2];
+        let n = 200_u32;
+        let mut each = [f64::INFINITY; 2];
         let mut entries = 0;
-        for (k, traps) in [ColdTrapRules::Held, ColdTrapRules::Batch]
-            .into_iter()
-            .enumerate()
-        {
-            let start = std::time::Instant::now();
-            for _ in 0..n {
-                let (_, published) = figures
-                    .condensates_under(SnapshotRules::Batch, air, &conditions, g, traps, &sky)
-                    .unwrap();
-                entries += published.entries().len();
+        // The best of five rounds of each, interleaved, so that the machine's load moves both.
+        for _ in 0..5 {
+            for (k, traps) in [ColdTrapRules::Held, ColdTrapRules::Batch]
+                .into_iter()
+                .enumerate()
+            {
+                let start = std::time::Instant::now();
+                for _ in 0..n {
+                    let (_, published) = figures
+                        .condensates_under(
+                            SnapshotRules::Batch,
+                            air,
+                            &conditions,
+                            g,
+                            &RecordColdTraps::at_the_albedo_of(traps, &sky, air),
+                        )
+                        .unwrap();
+                    entries += published.entries().len();
+                }
+                let ms = start.elapsed().as_secs_f64() / f64::from(n) * 1e3;
+                if ms < each[k] {
+                    each[k] = ms;
+                }
             }
-            each[k] = start.elapsed().as_secs_f64() / f64::from(n) * 1e3;
         }
         eprintln!(
-            "{name}: held {:.3} ms, batch {:.3} ms, cold traps {:.3} ms ({entries})",
+            "{name}: held {:.4} ms, batch {:.4} ms, cold traps {:.4} ms ({entries})",
             each[0],
             each[1],
             each[1] - each[0]
@@ -869,8 +914,7 @@ fn the_trap_fraction_is_the_latitude_integral_of_fractions_at() {
             air,
             &conditions,
             g,
-            ColdTrapRules::Batch,
-            &sky,
+            &RecordColdTraps::at_the_albedo_of(ColdTrapRules::Batch, &sky, air),
         )
         .unwrap();
     let ground = ColdTrapGround::new(&ColdTrapGroundParts {
@@ -1164,4 +1208,247 @@ fn a_ground_refuses_a_heat_flow_that_is_not_a_number() {
         heat_flow: WattsPerSquareMetre::new(f64::NAN),
         ..lunar_parts(figures.craters())
     });
+}
+
+/// P14.T51.i: a field's `f_ct` is the latitude integral of the ground's `fractions_at` at each
+/// threshold alone, to the bit (decision-r09-t13f-cold-traps §7.4), for every condensable a body is
+/// tested for, one without a threshold left out; its maxima are the ground's at the area points.
+#[test]
+fn the_field_s_f_ct_is_the_latitude_integral_of_fractions_at() {
+    let (_, figures) = table_moon();
+    let sunlit = Sunlit::new(lunar_sky(), 0.12, WattsPerSquareMetre::new(0.018));
+    let terrain = terrain_of(figures.craters());
+    let shadows = sunlit.shadows().unwrap();
+    let species: Vec<SubstanceId> = [
+        Gas::Helium,
+        Gas::Methane,
+        Gas::Ammonia,
+        Gas::Nitrogen,
+        Gas::CarbonDioxide,
+        Gas::Water,
+    ]
+    .iter()
+    .map(|gas| gas.substance())
+    .collect();
+    let field = ColdTrapField::new(&sunlit, terrain, &area_points(), &species);
+    let mut trapping = 0;
+    for &substance in &species {
+        let Some(t) = trap_threshold(substance) else {
+            assert!(field.trap(substance).is_none(), "{substance:?}");
+            continue;
+        };
+        let (threshold, f_ct) = field.trap(substance).unwrap();
+        assert_same_bits(threshold.value(), t.value());
+        assert_same_bits(f_ct, sunlit.trap_fraction(&shadows, &terrain, t));
+        trapping += usize::from(f_ct > 0.0);
+        eprintln!("the field's {substance:?}: {t:?}, f_ct {f_ct:e}");
+    }
+    assert!(trapping >= 2, "{trapping}");
+    let maxima = sunlit.maxima(&area_points());
+    assert_eq!(field.maxima().len(), maxima.len());
+    for (&(x, t), &(y, u)) in field.maxima().iter().zip(&maxima) {
+        assert_same_bits(x, y);
+        assert_same_bits(t, u);
+    }
+}
+
+/// P14.T51.i: `fractions_at` through the shared form is one closed-form fraction per threshold with
+/// the gate, to the bit (decision-r09-t13f-cold-traps §7.4), over the table's Moon, a Mercury and
+/// a Ceres, every degree from pole to pole, and thresholds of 20–200 K with water's and carbon
+/// dioxide's.
+#[test]
+fn fractions_at_through_the_shared_form_is_one_fraction_per_threshold_with_the_gate() {
+    let (_, figures) = table_moon();
+    let craters = figures.craters();
+    let au = METRES_PER_AU;
+    let periapsis = |a_au: f64, e: f64| {
+        let (a, near) = (a_au * au, 1.0 - e);
+        Radians::new(math::asin(6.957e8 / (a * near)))
+    };
+    let grounds = [
+        lunar_parts(craters),
+        ColdTrapGroundParts {
+            obliquity: Radians::from(Degrees::new(0.034)),
+            orbit_mean_flux: WattsPerSquareMetre::new(
+                1361.0 / (0.387_098 * 0.387_098 * (1.0 - 0.205_63 * 0.205_63_f64).sqrt()),
+            ),
+            eccentricity: 0.205_63,
+            star_radius: periapsis(0.387_098, 0.205_63),
+            bond_albedo: 0.11,
+            heat_flow: WattsPerSquareMetre::new(0.02),
+            craters,
+        },
+        ColdTrapGroundParts {
+            obliquity: Radians::from(Degrees::new(4.0)),
+            orbit_mean_flux: WattsPerSquareMetre::new(
+                1361.0 / (2.767 * 2.767 * (1.0 - 0.0785 * 0.0785_f64).sqrt()),
+            ),
+            eccentricity: 0.0785,
+            star_radius: periapsis(2.767, 0.0785),
+            bond_albedo: 0.09,
+            heat_flow: WattsPerSquareMetre::new(0.001),
+            craters,
+        },
+    ]
+    .map(|parts| ColdTrapGround::new(&parts).unwrap());
+    let mut thresholds: Vec<Kelvin> = (2..=20).map(|k| Kelvin::new(10.0 * f64::from(k))).collect();
+    thresholds.extend([threshold(Gas::Water), threshold(Gas::CarbonDioxide)]);
+    let mut got = vec![f64::NAN; thresholds.len()];
+    let mut open = 0;
+    for ground in &grounds {
+        for i in -90..=90 {
+            let latitude = Radians::from(Degrees::new(f64::from(i)));
+            ground.fractions_at(latitude, &thresholds, &mut got);
+            let north = latitude.abs();
+            let maximum = ground
+                .sunlit
+                .annual_maximum(Radians::new(FRAC_PI_2 - north.value()));
+            for (&share, &t) in got.iter().zip(&thresholds) {
+                let alone = if maximum >= t {
+                    cold_trap::fraction(north, &ground.shadows, &ground.terrain, t)
+                } else {
+                    0.0
+                };
+                assert_same_bits(share, alone);
+                open += usize::from(alone > 0.0);
+            }
+        }
+    }
+    assert!(open > 100, "{open} open fractions");
+}
+
+/// The table's Moon on the record path under the batch: its conditions, its figures, its
+/// atmosphere and gravity, and its partition and cover as `condensates_under` builds them.
+struct RecordMoon {
+    figures: crate::planetary::hooks::figures::GlobalFigures,
+    conditions: SurfaceConditions,
+    air: Atmosphere,
+    gravity: MetresPerSecondSquared,
+}
+
+impl RecordMoon {
+    fn new() -> Self {
+        let (moon, figures) = table_moon();
+        let inputs = SurfaceInputs {
+            heat_flow: figures.heat_flow(),
+            ocean_weight: figures.ocean_weight(),
+            ..inputs_of(&moon, spin_of("Moon"))
+        };
+        let conditions = SurfaceConditions::derive_under(SnapshotRules::Batch, &inputs).unwrap();
+        Self {
+            figures,
+            conditions,
+            air: *moon.atmosphere(),
+            gravity: moon.surface_gravity(),
+        }
+    }
+
+    /// Its published condensates under the batch's cold traps, its atmosphere `air` and its
+    /// regolith's albedo `regolith`.
+    fn published(&self, air: &Atmosphere, regolith: Option<f64>, sky: &ColdTrapSky) -> Condensates {
+        let traps = RecordColdTraps {
+            rules: ColdTrapRules::Batch,
+            sky,
+            regolith_albedo: regolith,
+        };
+        self.figures
+            .condensates_under(
+                SnapshotRules::Batch,
+                air,
+                &self.conditions,
+                self.gravity,
+                &traps,
+            )
+            .unwrap()
+            .1
+    }
+}
+
+/// P14.T51.i: the cold traps read the bare regolith's albedo, not the area mix's
+/// (decision-p14-t51-batch §6). The table's Moon whose area-mix albedo has risen to 0.6 under a
+/// frost keeps, to the bit, the condensates its regolith's 0.11 gives; a brighter regolith moves
+/// them; and a derivation that gives no regolith albedo keeps P14.T51.a's.
+#[test]
+fn a_body_whose_area_mix_albedo_rises_keeps_the_traps_its_regolith_gives() {
+    let moon = RecordMoon::new();
+    let sky = lunar_sky();
+    let regolith = moon.air.albedo().value();
+    let frosted = moon
+        .air
+        .with_albedo(crate::planetary::derive::BondAlbedo::new(0.6).unwrap());
+    let bare = moon.published(&moon.air, Some(regolith), &sky);
+    let frost = moon.published(&frosted, Some(regolith), &sky);
+    assert_eq!(format!("{frost:?}"), format!("{bare:?}"));
+    let water = Gas::Water.substance();
+    let ice = bare.entry(water, CondensatePhase::Solid).unwrap();
+    assert!(ice.trapped_area_fraction() > 0.0, "{ice:?}");
+    let brighter = moon.published(&moon.air, Some(0.6), &sky);
+    assert_ne!(format!("{brighter:?}"), format!("{bare:?}"));
+    let held = moon
+        .figures
+        .condensates_under(
+            SnapshotRules::Batch,
+            &moon.air,
+            &moon.conditions,
+            moon.gravity,
+            &RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, &moon.air),
+        )
+        .unwrap()
+        .1;
+    let none = moon.published(&moon.air, None, &sky);
+    assert_eq!(format!("{none:?}"), format!("{held:?}"));
+}
+
+/// P14.T51.i: one field, built once a body, serves every publish (decision-p14-t51-batch §6):
+/// publishing over it is the record's publish to the bit, under the Moon's atmosphere and under
+/// one whose area mix has risen, and a body whose air does not qualify keeps P14.T51.a's publish
+/// over it.
+#[test]
+fn one_field_built_once_serves_every_publish() {
+    let moon = RecordMoon::new();
+    let sky = lunar_sky();
+    let (solved, _) = moon
+        .figures
+        .condensates_under(
+            SnapshotRules::Batch,
+            &moon.air,
+            &moon.conditions,
+            moon.gravity,
+            &RecordColdTraps::at_the_albedo_of(ColdTrapRules::Held, &sky, &moon.air),
+        )
+        .unwrap();
+    let profile = moon.conditions.cold_profile();
+    let cold_area = |t: Kelvin| profile.area_below(t);
+    let cover = Cover {
+        cold_area: &cold_area,
+        state: moon.air.state(),
+        water: moon.figures.water_cover(&moon.conditions, &profile),
+    };
+    let body = |atmosphere| ColdTrapBody {
+        atmosphere,
+        profile: &profile,
+        gravity: moon.gravity,
+        heat_flow: moon.figures.heat_flow(),
+        crust: moon.figures.impactors().crust(),
+        craters: moon.figures.craters(),
+        sky: &sky,
+        regolith_albedo: Some(moon.air.albedo().value()),
+    };
+    let field = ColdTrapField::of(&body(&moon.air), &solved).unwrap();
+    let frosted = moon
+        .air
+        .with_albedo(crate::planetary::derive::BondAlbedo::new(0.6).unwrap());
+    for air in [&moon.air, &frosted] {
+        let over = publish_over(&solved, &cover, &body(air), &field);
+        let alone = publish(&solved, &cover, &body(air));
+        assert_eq!(format!("{over:?}"), format!("{alone:?}"));
+        assert!(
+            over.entry(Gas::Water.substance(), CondensatePhase::Solid)
+                .is_some()
+        );
+    }
+    let bodies = historic_table();
+    let (_, earth) = bodies.iter().find(|(name, _)| *name == "Earth").unwrap();
+    let over = publish_over(&solved, &cover, &body(earth.atmosphere()), &field);
+    assert_eq!(format!("{over:?}"), format!("{:?}", solved.publish(&cover)));
 }

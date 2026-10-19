@@ -133,7 +133,7 @@ use crate::planetary::chem::partition::{
 };
 use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SnapshotRules, SurfaceState};
 use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
-use crate::planetary::hooks::cold_traps::{self, ColdTrapBody, ColdTrapRules, ColdTrapSky};
+use crate::planetary::hooks::cold_traps::{self, ColdTrapBody, ColdTrapRules, RecordColdTraps};
 use crate::planetary::hooks::surface::{ColdProfile, OceanWeight, SurfaceConditions};
 use crate::planetary::moons::CaptureKind;
 use crate::planetary::moons::regular::MoonTideRule;
@@ -2337,8 +2337,8 @@ impl GlobalFigures {
     /// What P14.T51.a's partition gives the record of the body whose atmosphere is `atmosphere`,
     /// whose conditions are `conditions` and whose surface gravity is `gravity`, under the lane's
     /// rules `rules` (P14.T51.a's second part, held by
-    /// [`SNAPSHOT_VERSION`](crate::planetary::derive::atmosphere)) and the cold traps' rules
-    /// `traps` under the sky `sky` (P14.T51.f, held by
+    /// [`SNAPSHOT_VERSION`](crate::planetary::derive::atmosphere)) and the cold traps' rules, sky
+    /// and regolith `traps` (P14.T51.f and P14.T51.i, held by
     /// [`COLD_TRAPS_VERSION`](crate::planetary::hooks::cold_traps)): nothing under
     /// [`SnapshotRules::Held`], and under [`SnapshotRules::Batch`] its partition and its published
     /// condensates.
@@ -2359,8 +2359,7 @@ impl GlobalFigures {
         atmosphere: &Atmosphere,
         conditions: &SurfaceConditions,
         gravity: MetresPerSecondSquared,
-        traps: ColdTrapRules,
-        sky: &ColdTrapSky,
+        traps: &RecordColdTraps<'_>,
     ) -> Option<(Partition, Condensates)> {
         match rules {
             SnapshotRules::Held => return None,
@@ -2382,7 +2381,7 @@ impl GlobalFigures {
             state: atmosphere.state(),
             water: self.water_cover(conditions, &profile),
         };
-        let published = match traps {
+        let published = match traps.rules {
             ColdTrapRules::Held => solved.publish(&cover),
             ColdTrapRules::Batch => cold_traps::publish(
                 &solved,
@@ -2394,7 +2393,8 @@ impl GlobalFigures {
                     heat_flow: self.heat_flow,
                     crust: self.impactors.crust(),
                     craters: &self.craters,
-                    sky,
+                    sky: traps.sky,
+                    regolith_albedo: traps.regolith_albedo,
                 },
             ),
         };

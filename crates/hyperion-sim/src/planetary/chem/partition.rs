@@ -1718,9 +1718,20 @@ pub struct CondensateEntry {
     reservoir_gel: Option<Metres>,
     area_fraction: f64,
     seasonal: bool,
+    trapped_area_fraction: f64,
 }
 
 impl CondensateEntry {
+    /// The part of [`area_fraction`](Self::area_fraction) in cold traps (P14.T51.f, P14.T51.i;
+    /// decision-r09-t13f-cold-traps §1.4), 0 to `area_fraction`: the trap's exposed area as
+    /// [`Condensates::with_cold_traps`] merged it, held with the entry to 1 (the zonal part kept
+    /// whole, the trap given what is left), and 0 for an entry with no cold-trapped part. R09's
+    /// field places the rest, its zonal part, by its own rule. Dimensionless.
+    #[must_use]
+    pub const fn trapped_area_fraction(&self) -> f64 {
+        self.trapped_area_fraction
+    }
+
     /// The substance: the condensable's row, or for a liquid the solution it lies as
     /// ([`Condensate::liquid`]).
     #[must_use]
@@ -1846,24 +1857,32 @@ impl Condensates {
                 .entries
                 .iter_mut()
                 .find(|e| e.substance == trap.substance && e.phase == CondensatePhase::Solid);
-            match found {
-                Some(entry) => {
-                    let total = entry.area_fraction + area;
-                    entry.area_fraction = if total > 1.0 { 1.0 } else { total };
-                    entry.reservoir = KilogramsPerSquareMetre::new(entry.reservoir.value() + mass);
-                    entry.reservoir_gel = match (entry.reservoir_gel, layer) {
-                        (Some(zonal), Some(trapped)) => Some(Metres::new(zonal.value() + trapped)),
-                        (None, _) | (_, None) => None,
-                    };
-                }
-                None => self.entries.push(CondensateEntry {
+            if let Some(entry) = found {
+                let total = entry.area_fraction + area;
+                // Held to 1, the zonal part whole and the trap the rest.
+                let trapped = if total > 1.0 {
+                    1.0 - entry.area_fraction
+                } else {
+                    area
+                };
+                entry.area_fraction = if total > 1.0 { 1.0 } else { total };
+                entry.trapped_area_fraction += trapped;
+                entry.reservoir = KilogramsPerSquareMetre::new(entry.reservoir.value() + mass);
+                entry.reservoir_gel = match (entry.reservoir_gel, layer) {
+                    (Some(zonal), Some(trapped)) => Some(Metres::new(zonal.value() + trapped)),
+                    (None, _) | (_, None) => None,
+                };
+            } else {
+                let held = if area > 1.0 { 1.0 } else { area };
+                self.entries.push(CondensateEntry {
                     substance: trap.substance,
                     phase: CondensatePhase::Solid,
                     reservoir: trap.reservoir,
                     reservoir_gel: layer.map(Metres::new),
-                    area_fraction: if area > 1.0 { 1.0 } else { area },
+                    area_fraction: held,
                     seasonal: false,
-                }),
+                    trapped_area_fraction: held,
+                });
             }
         }
         self.entries.sort_by(entry_order);
@@ -1923,6 +1942,7 @@ impl Part {
                 .map(|rho| Metres::new(self.mass_kg_per_m2 / rho)),
             area_fraction: area,
             seasonal: self.seasonal,
+            trapped_area_fraction: 0.0,
         }
     }
 }
@@ -2017,6 +2037,7 @@ impl Partition {
                     reservoir_gel: Some(Metres::ZERO),
                     area_fraction: 0.0,
                     seasonal: false,
+                    trapped_area_fraction: 0.0,
                 });
                 continue;
             }

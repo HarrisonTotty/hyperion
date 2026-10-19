@@ -6285,6 +6285,65 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
   - _Files:_ `planetary/derive/mod.rs` and its tests.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive`, and T51.b's widened filter.
 
+- **P14.T51.i The cold traps' fast path and their pass-invariant field** (23 → 24; lane
+  `p14-snapshot`, behind `COLD_TRAPS_VERSION`; amends T51.f and, additively, rendering plan R09's
+  T7.d (recorded there as R09.T7.k); before T54.b's wiring; decision-p14-t51-batch §1 and §6).
+  - **One depth integral for every species** (bit for bit):
+    - `hyperion_surface::cold_trap` gains a form that evaluates one latitude's shadows for several
+      thresholds;
+    - each population's trapezoid integrand is evaluated once on its fixed nodes, up to the
+      largest cold limit;
+    - each threshold's value is read from the running sums at its own limit, in
+      `Population::cumulative`'s order, so it equals `fraction`'s to the bit;
+    - `fraction` stays, as its one-threshold case;
+    - T51.f's traps call the new form once a latitude node, for all of a body's condensables.
+  - **Cheaper rules** (a value change in the surface crate; no golden reads it):
+    - `instantaneous`'s Gauss–Legendre rule falls from 16 points to at most 8. GL-8 is within
+      4 × 10⁻¹⁶ of 16 points, GL-6 within 7 × 10⁻¹² and GL-4 within 3 × 10⁻⁷, over colatitudes
+      0.1–30°, D 0–20° and d/D 0.005–0.5. The lane states its choice and its measured difference.
+    - `INTERVALS` falls from 512 to 128. The Moon's water traps move by under 3 × 10⁻⁴ of
+      themselves, its CO₂ by 1.1 × 10⁻³, Mercury's by 2.6 × 10⁻⁴, and Ceres's shadow by under
+      5 × 10⁻⁵. Its doc states the measured differences.
+    - R09.T7.d's tests keep their tolerances, and `bowl_permanent_shadow`'s fit acceptance is
+      unchanged.
+  - **The albedo the cold traps read** is the regolith's Bond albedo about the body's hosts
+    (T51.b's `Regolith` row: the lid's from T54.a, weathered from T54.b), not the body's area-mix
+    Bond albedo.
+    - The shadows lie in the regolith's craters, whose walls are the regolith (Ingersoll et al.
+      1992; Hayne et al. 2021's 0.12).
+    - The zonal maximum asks whether bare ground stays below the threshold.
+    - The table's Moon, Mercury and Ceres move by nothing.
+  - **The field.** The zonal annual maxima and each condensable's f_ct then read only the sky,
+    the regolith's albedo, T24.b's heat flow and the terrain, none of which the passes change.
+    So `ColdTrapField` (crate-private) is built once a body and read by every pass and by the
+    record's `publish`. Its zonal entries and reservoirs stay per partition.
+  - **R09.T13.f's interface stays** (decision-r09-t13f-cold-traps §3 and §8): it keeps
+    `ColdTrapGround::{new, annual_maximum, fractions_at}` and `trap_threshold`, with the shared
+    form inside `fractions_at`; `ColdTrapField` is built from a `ColdTrapGround`; the regolith's
+    albedo is passed as `ColdTrapGroundParts::bond_albedo`. It adds
+    `CondensateEntry::trapped_area_fraction` (§1.4).
+  - **Budget** (release, `time_the_cold_traps`):
+    - at most 0.6 ms for each qualifying table body, all its species;
+    - over the 60-system sample, measured with a probe and recorded, a mean of at most 7 ms a
+      system and at most 50 ms in any;
+    - if missed, R09.T7.g's plains table, then main.
+  - _Tests:_
+    - the shared form equals `fraction` to the bit for each threshold, over the table's bodies
+      and thresholds of 20–200 K;
+    - T51.f's Moon, CO₂, Ceres and 30° tests hold;
+    - the field is built once a body;
+    - a body whose area-mix albedo rises under a zonal frost keeps the traps its regolith gives;
+    - `time_the_cold_traps` prints the figures (ignored);
+    - `fractions_at` through the shared form equals one `cold_trap::fraction` per threshold with
+      the gate, bit for bit; `ColdTrapField`'s f_ct is the latitude integral of `fractions_at`, bit
+      for bit; a merged entry's `trapped_area_fraction` is its trap's area, a zonal-only entry's 0
+      and an inserted trap's its `area_fraction`; R09.T13.f's tests pass unchanged
+      (decision-r09-t13f-cold-traps §7.4).
+  - _Files:_ `crates/hyperion-surface/src/cold_trap.rs`; `planetary/hooks/cold_traps.rs` and its
+    tests; `planetary/hooks/figures.rs`.
+  - _Accept:_ `cargo test -p hyperion-surface cold_trap`;
+    `cargo test -p hyperion-sim planetary::hooks::cold_traps`; `just test-wasm-fast`.
+
 #### P14.T52 Atmospheric chemistry
 
 Surface path, `planetary/chem/`. Built only with a `surface` or `envelope` section, and never
@@ -17566,7 +17625,9 @@ tables::gauss_legendre`.
     3.21 ms, the Moon 3.05 ms, Ceres 3.06 ms), against P14.T51.a's 0.17 ms, so about 1.5 ms a
     species where the research estimated 0.5–0.8 ms; the bodies that do not qualify move by under
     0.01 ms.
-  - _The passes_ (`surface_mix::pass_condensates`) keep P14.T51.a's airless branch. From 24 the
+  - _The passes_ (**owned by P14.T54.b, over P14.T51.i's field**, which makes one evaluation a body
+    serve every pass, decision-p14-t51-batch §6) (`surface_mix::pass_condensates`) keep P14.T51.a's
+    airless branch. From 24 the
     record takes the cold traps' branch, so P14.T54.b must give T13.c's passes the same sky and
     rules, or the Bond albedo reads other areas than the record publishes. The cold traps'
     tripwire names it among what T54.b settles.
@@ -17578,7 +17639,9 @@ tables::gauss_legendre`.
     Gyr⁻¹; the regolith's 1,500 kg m⁻³ is labelled _from memory_; and σ_c's doc records N₂'s
     kinetic diameter.
 - **Deferred findings (2026-10-13 rule)**, from P14.T51.f:
-  - _The cost per system_ (for main, before P14.T54.b): about 3.1 ms for each airless body that is
+  - _The cost per system_ (**ruled: P14.T51.i's fast path and field**, decision-p14-t51-batch §1;
+    measured after it at 0.50 ms a qualifying table body and a mean of 0.83 ms a system, P14.T51.i's
+    record) (for main, before P14.T54.b): about 3.1 ms for each airless body that is
     not locked to its star and whose air is not collisional, for its two delivered species (about
     1.5 ms more for each further condensable), against P14.T33.a's 3.47 ms a field system and
     decision-p14-t51a-partition §6's refusal of 2.1 ms a body. Over the 60-system sample under the
@@ -17587,7 +17650,9 @@ tables::gauss_legendre`.
     taking none; a mean of 11.5 a system (median 8, at most 73), so about 36 ms a system (median
     25 ms, at most 0.23 s), some ten times a field system's whole cost. At 23's stand-ins a
     Pluto's or a Triton's N₂ is deleted, so they count until P14.T53.c.
-  - _Grazing-angle albedo_ (for main): Hayne et al. 2017 (JGR Planets 122, 2371, eq. A8 and Table
+  - _Grazing-angle albedo_ (**ruled deferred**, not made before 24, decision-p14-t51-batch §2: for
+    P14.T55.c's rough-ground zonal annual maximum) (for main): Hayne et al. 2017 (JGR Planets 122,
+    2371, eq. A8 and Table
     A1) give A(θ) = A₀ + 0.06 (θ ÷ 45°)³ + 0.25 (θ ÷ 90°)⁸ at the solar incidence angle θ. With it
     the Moon's polar T_max falls from 158 to 111 K, its 85° from 227 to 182 K, and Mercury's pole
     from 172 to 118 K. The current results survive, but the lunar pole's margin to water's 110 K
@@ -17715,6 +17780,82 @@ tables::gauss_legendre`.
     with Venus's full deck at T_s 45.8 K, its insolation once inside the runaway limit at its
     host's largest past luminosity (T13.c's classification), which no cold body's air holds. For
     T13.c's re-validation (P14.T54.a's bless note).
+- **Deviations in P14.T51.i, as built (`p14-t51hij`, 2026-10-19).** The cold traps' fast path and
+  their pass-invariant field, behind the cold traps' hold (`COLD_TRAPS_VERSION` 24) inside the
+  `p14-snapshot` lane's at 23: nothing on the record moves at 22 or 23 (golden_diff: nothing to
+  reconcile). The surface crate's half is its own commit, recorded in plan 09 as R09.T7.k, with
+  its measured figures.
+  - _The choice of rule:_ 8 points (GL-8), 4.4 × 10⁻¹⁶ from 16 points on the ruling's 10,800
+    points (its port: 4 × 10⁻¹⁶), as the budget allowed without GL-6; and 128 intervals.
+  - _The measured differences_ (the lane's, against 16 points and 512 intervals; plan 09's
+    R09.T7.k): the Moon's water −9.3 × 10⁻⁵ (B), +2.8 × 10⁻⁴ (A); its CO₂ at 58.18 K +1.1 × 10⁻³
+    (B), +8.5 × 10⁻⁴ (A), and at 10 kg m⁻² Gyr⁻¹'s 55.53 K +2.1 × 10⁻³ and +1.9 × 10⁻³; Mercury's
+    water +2.6 × 10⁻⁴; Ceres's shadow at 4° −4.2 × 10⁻⁵ (B), −3.7 × 10⁻⁶ (A). T51.f's tests hold
+    unchanged. R09.T7.d's trapezoid test's unit-integrand bound is restated for 128 intervals,
+    8 × 10⁻⁴ (16 times, the rule's h²; 3.2 × 10⁻⁴ measured), its other tolerances unchanged.
+  - _The regolith's albedo_ is computed in the passes under the batch (`DerivedBody::regolith_albedo`,
+    crate-private, with `DerivedMoon`'s): the passes' regolith provider (`PassSurface::regolith`,
+    `Regolith::of_material` until P14.T54.a's lid) at the airless state under the hosts' light, so
+    that T54.a's lid and T54.b's weathering reach it with no change. `None` under the held rules,
+    whose passes read no light; a record whose derivation gives none keeps P14.T51.a's publish.
+    The record path carries it in the surface section's sky (`SurfaceSky::regolith_albedo`) to
+    `condensates_under`, whose cold-trap arguments are bundled as `RecordColdTraps { rules, sky,
+regolith_albedo }` (a deviation in that crate-private signature; `ColdTrapSky`, on R09's
+    interface, is untouched). The table's airless rocky bodies take the Moon's 0.11 either way.
+  - _The field_ (`ColdTrapField`, crate-private): the zonal maxima at the profile's area points and
+    each condensable's threshold and f_ct, built by `ColdTrapField::new` from a `Sunlit` and a
+    terrain (its f_ct through a `ColdTrapGround`'s `fractions_at`, one call a latitude node for
+    every species, each species' sum in `over_latitude`'s order by `over_latitude_each`), or on the
+    record path by `ColdTrapField::of`. `publish` tests the body's qualification first
+    (`qualifies`: a zonal profile, airless, not collisional) and only then builds the field, once;
+    `publish_over(partition, cover, body, field)` is the function T54.b's passes call over one
+    field, testing qualification at every call. Where the closed form refuses the ground, the
+    field keeps its maxima and every f_ct is 0, as T51.f's traps were. The field's species are the
+    record's condensables, water left out on an ice-rich crust; T54.b builds its passes' field over
+    a set that does not change between passes (the body's inventory's condensables and the
+    delivered species), since the field must hold every condensable a pass's partition names
+    (debug-asserted).
+  - _The trapped part_ (`CondensateEntry::trapped_area_fraction`, public, additive): an inserted
+    trap's whole area, a merged one's the trap's area, and where the merge is held to 1 the trap
+    takes 1 − the zonal part (the zonal part kept whole). 0 at 22 and 23.
+  - _Tests' sites:_ `RecordColdTraps::at_the_albedo_of` (tests) passes the atmosphere's albedo as
+    the regolith's for the table's bodies derived under version 22's rules, so T51.f's figures
+    hold; `Atmosphere::with_albedo` (tests) raises an area mix. `PlanetarySystem::with_record_rules`
+    (tests; `RecordRules`, deleted by T54.b with the holds) puts the record's partition and cold
+    traps under the batches for the sample's probe.
+  - _The budget, measured_ (release, under the heavy lock, one thread at a 100% quota, the
+    1-minute load about 4.5; the best of five interleaved rounds of 200, and of three for the
+    sample):
+    - the table's qualifying bodies under `time_the_cold_traps`'s lunar sky: Mercury 0.501 ms,
+      the Moon 0.500 ms, Ceres 0.501 ms, all species included, against 3.05–3.21 ms at T51.f and
+      the budget's 0.6 ms;
+    - over the sample (`time_the_cold_traps_over_the_sample`, every record of the first 60
+      systems, 611 airless, uncollisional planets and members, moons' records included): a mean
+      of 0.83 ms a system (0.80 on a second run), median 0.31 ms, at most 4.8 ms, against the
+      budget's 7 and 50 ms. The record path's ices differ under the cold traps' batch (954 listed
+      against 980 held), so the path runs. The table's per-body cost exceeds the sample's mean
+      per body because most airless bodies lie where the zonal gate shuts every latitude or the
+      warmest threshold has few cold bowls.
+    - R09.T7.g's plains table, the next lever, is not needed.
+  - _Not done (optional, the ruling's):_ evaluating the cap only where a bound says it can bind,
+    and the two bisections' closed root.
+  - _Tests:_ the surface crate's `the_shared_form_is_fraction_at_each_threshold_to_the_bit` (four
+    bodies, two terrains, 60–90°, nine thresholds of 20–200 K, any order, repeated) and
+    `the_8_point_rule_keeps_the_16_point_shadow`; `fractions`' panics in `tests/panics.rs`; the
+    sim's `the_field_s_f_ct_is_the_latitude_integral_of_fractions_at`,
+    `fractions_at_through_the_shared_form_is_one_fraction_per_threshold_with_the_gate` (the Moon,
+    a Mercury, a Ceres, every degree pole to pole, 20–200 K),
+    `a_body_whose_area_mix_albedo_rises_keeps_the_traps_its_regolith_gives`,
+    `one_field_built_once_serves_every_publish`, the merge test's trapped parts, and the two
+    timings (ignored). R09.T13.f's tests are not on integration yet; R09's
+    `planetary::surface::steps::climate` passes unchanged.
+- **Deferred findings (2026-10-13 rule)**, from P14.T51.i:
+  - _The timing's sky:_ `time_the_cold_traps` takes the lunar sky for every table body (T51.f's
+    design), so its Mercury and Ceres are lunar skies over their own craters and heat flow; the
+    sample's probe reads each body's own sky.
+  - _Locked bodies' blended edge_ (decision-p14-t51-batch §7.2's optional one-liner) is not taken:
+    it is not one line here, since a locked body has no zonal profile for the field's maxima.
+
 - **Deviations in P14.T49.h, as built: step 3, the solutions (`p14-liquids`, 2026-10-16).**
   `GENERATOR_VERSION` stays 22. Nothing on the record reads `liquid_properties` before P14.T54.a
   (decision-bump-plan-after-22 §1.2), so `liquids.golden` is re-blessed at 22. Nothing is
