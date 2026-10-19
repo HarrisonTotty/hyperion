@@ -38,7 +38,7 @@ use hyperion_sim::galaxy::query::{epoch_velocity, position_at};
 use hyperion_sim::id::{BodyId, SystemId};
 use hyperion_sim::observe::{BodyTrack, SystemObserver, retarded_in_system};
 use hyperion_sim::planetary::BodyIndex;
-use hyperion_sim::planetary::record::{BodyRecord, DetailLevel};
+use hyperion_sim::planetary::record::DetailLevel;
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::Metres;
 
@@ -204,7 +204,10 @@ impl Sent {
 struct InSystem {
     record: SystemRecord,
     generated: Arc<GeneratedSystem>,
-    /// Every body of the system, resolved or not, in index order.
+    /// Every body of the system, resolved or not, in index order: [`PlanetarySystem::indices`],
+    /// the snapshot's own list (P14.T36.c).
+    ///
+    /// [`PlanetarySystem::indices`]: hyperion_sim::planetary::PlanetarySystem::indices
     all: Vec<BodyIndex>,
     /// The bodies sent, by index.
     sent: BTreeMap<BodyIndex, Sent>,
@@ -459,12 +462,7 @@ impl SceneCore {
         self.system = Some(InSystem {
             record,
             generated: Arc::clone(generated),
-            all: planets
-                .snapshot_at(ctx, t)
-                .bodies()
-                .iter()
-                .map(BodyRecord::index)
-                .collect(),
+            all: planets.indices(),
             sent: listed
                 .into_iter()
                 .map(|listed| {
@@ -835,6 +833,7 @@ mod tests {
     use hyperion_sim::coords::GalacticDisplacement;
     use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
     use hyperion_sim::id::Layer;
+    use hyperion_sim::planetary::record::BodyRecord;
     use hyperion_sim::planetary::{SystemContext, generate};
     use hyperion_sim::time::Span;
     use tokio::time::Instant;
@@ -1132,6 +1131,100 @@ mod tests {
         );
         assert_eq!(arrivals[1].0.to_bits(), 1.05_f64.to_bits());
         assert_eq!(arrivals[1].1, SceneArrivalDto::NoSystem);
+    }
+
+    /// Every index of the snapshot of `generated` at `t`, in the snapshot's order.
+    fn snapshot_indices(generated: &GeneratedSystem, t: UniverseTime) -> Vec<BodyIndex> {
+        let (ctx, planets) = generated;
+        planets
+            .snapshot_at(ctx, t)
+            .bodies()
+            .iter()
+            .map(BodyRecord::index)
+            .collect()
+    }
+
+    #[test]
+    fn an_arrival_keeps_every_index_of_the_snapshot_in_its_order() {
+        let fixture = Fixture::new();
+        let world = fixture.world();
+        let ship = system_ship(&fixture);
+        let mut populations = false;
+        for t in [UniverseTime::EPOCH, at(1_000), at(86_400)] {
+            for (id, generated) in &fixture.systems {
+                let (_, planets) = generated.as_ref();
+                let indices = planets.indices();
+                assert_eq!(
+                    indices,
+                    snapshot_indices(generated, t),
+                    "{id:?} at {t:?}: the same bodies in the same order"
+                );
+                populations |= indices.len() > planets.bodies().len();
+            }
+            let (core, _) = SceneCore::build(
+                DetailLevel::Full,
+                inputs(t, &ship, &GrantAsked),
+                Vec::new(),
+                &world,
+            )
+            .unwrap();
+            let all = &core.system.as_ref().expect("the ship is in the system").all;
+            assert_eq!(
+                *all,
+                snapshot_indices(fixture.generated(), t),
+                "the arrival at {t:?} keeps the snapshot's every index"
+            );
+        }
+        assert!(
+            populations,
+            "some system of the fixture holds a belt or a halo beside its bodies"
+        );
+    }
+
+    /// The cost of an arrival in release against one `snapshot_at` and one `indices()` of the
+    /// scene's system (P14.T36.c; plan 14's Risks record it).
+    #[test]
+    #[ignore = "a timing, run by name in release"]
+    fn time_an_arrival() {
+        let fixture = Fixture::new();
+        let world = fixture.world();
+        let ship = system_ship(&fixture);
+        let t = UniverseTime::EPOCH;
+        let (ctx, planets) = fixture.generated();
+        let n = 50_u32;
+        let mean_s = |start: std::time::Instant| start.elapsed().as_secs_f64() / f64::from(n);
+        let arrive = || {
+            SceneCore::build(
+                DetailLevel::Full,
+                inputs(t, &ship, &GrantAsked),
+                Vec::new(),
+                &world,
+            )
+            .unwrap()
+        };
+        std::hint::black_box(arrive());
+        let start = std::time::Instant::now();
+        for _ in 0..n {
+            std::hint::black_box(arrive());
+        }
+        let arrival_s = mean_s(start);
+        let start = std::time::Instant::now();
+        for _ in 0..n {
+            std::hint::black_box(planets.snapshot_at(ctx, t));
+        }
+        let snapshot_s = mean_s(start);
+        let start = std::time::Instant::now();
+        for _ in 0..n {
+            std::hint::black_box(planets.indices());
+        }
+        let indices_s = mean_s(start);
+        eprintln!(
+            "{} bodies: arrival {:.3} ms, snapshot_at {:.3} ms, indices() {:.3} µs (n = {n})",
+            planets.indices().len(),
+            arrival_s * 1e3,
+            snapshot_s * 1e3,
+            indices_s * 1e6
+        );
     }
 
     #[test]
