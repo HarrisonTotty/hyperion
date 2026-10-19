@@ -58,7 +58,9 @@
 //! column of regolith per point with the day resolved and averaged over local time, and the
 //! isothermal surface of a Venus. R09.T13.d normalised the climate to plan 14's mean and signed
 //! contrasts and placed the ices, and the liquids on the relief step's flood, by substance, with
-//! the lapse rate. Erosion and the classes are still no-ops: run on any inputs, the pass yields
+//! the lapse rate. R09.T13.g gave the energy-balance model the relief, each grid point's
+//! hypsometry setting its albedo, outgoing radiation and sea-ice heat capacity at the ground's
+//! temperature, τ solved for the surface mean. Erosion and the classes are still no-ops: run on any inputs, the pass yields
 //! that relief and sea, with their ices and liquids, under the climate its regime names, with the
 //! inputs' palette. R09.T13.e–T15 fill the rest and R09.T16 pins the reference worlds' fields.
 //!

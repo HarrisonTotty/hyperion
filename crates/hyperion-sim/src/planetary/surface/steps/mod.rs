@@ -44,7 +44,9 @@
 //! and the isothermal surface. R09.T13.d normalised its field to plan 14's mean and signed
 //! contrasts and writes the lapse rate, each flooded cell's liquid and each cell's ice by
 //! substance; the water surfaces are the relief step's flood (decision-r09-t12-coarse R8).
-//! Erosion and the classes are still no-ops.
+//! R09.T13.g gave the energy-balance models the relief: each grid point's hypsometry of the cells'
+//! heights above the sea level, its albedo, outgoing radiation and sea-ice heat capacity at the
+//! ground's temperature, and τ solved for the surface mean. Erosion and the classes are still no-ops.
 
 pub mod classes;
 pub mod climate;

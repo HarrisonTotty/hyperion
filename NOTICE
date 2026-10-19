@@ -842,3 +842,13 @@ Geophys. Res. 109, D06303) join this list when their values are quoted; neither 
   "Scattering by pure seawater: effect of salinity", Opt. Express 17 (2009) 5698-5710, DOI:
   10.1364/OE.17.005698, re-implemented from its equations as its published code
   (betasw_ZHH2009.m) states them, at zero salinity; no code of it is copied.
+
+- Earth's land hypsometry by 2.5° band (72 bands × 8 equal-area quantiles of the surface height,
+  ice sheets included), computed from Earth2014's SUR2014 5-arcmin grid (C. Hirt and M. Rexer,
+  Int. J. Appl. Earth Obs. Geoinf. 39 (2015) 103-112, DOI: 10.1016/j.jag.2015.03.001), in the
+  climate step's tests (plan R09, R09.T13.g). Earth2014 is composed of SRTM V4.1 (A. Jarvis, H. I.
+  Reuter, A. Nelson and E. Guevara, Hole-filled SRTM for the globe Version 4, CGIAR-CSI, 2008;
+  CIAT acknowledged as its source), SRTM30_PLUS v9 (J. J. Becker et al., Marine Geodesy 32 (2009)
+  355-371), Bedmap2 (P. Fretwell et al., The Cryosphere 7 (2013) 375-393) and GBT v3 (J. L.
+  Bamber et al., The Cryosphere 7 (2013) 499-510). Only these derived statistics are committed;
+  no grid is.

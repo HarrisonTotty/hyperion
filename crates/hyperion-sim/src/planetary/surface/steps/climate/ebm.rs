@@ -1,11 +1,12 @@
-//! Design note 8's seasonal moist energy-balance model (R09.T13.a–b): North and Coakley's
+//! Design note 8's seasonal moist energy-balance model (R09.T13.a–b, g): North and Coakley's
 //! diffusive equation in Spiegel, Menou and Scharf's form, diffusing near-surface moist static
 //! energy as Siler, Roe and Armour do, in latitude and longitude, stepped implicitly over the
-//! seasonal orbit.
+//! seasonal orbit, over each grid point's relief.
 //!
 //! # The equation
 //!
-//! At each grid point, of sea share s, at the surface temperature T (at sea level):
+//! At each grid point, of sea share s, at the surface temperature T at sea level, written here
+//! for a point at the sea level (the relief's terms follow):
 //!
 //! C(T) ∂T/∂t = S (1 − α(T)) + `F_int` − σT⁴ ÷ (1 + ¾τ) + Λ ∇²h,
 //!
@@ -23,7 +24,7 @@
 //!   and the sea's, 40 times land's above `T_f`, 9.2 times from 10 K below it, and 2 times
 //!   colder, an ice's (40 times at every temperature where no ice forms);
 //! - σT⁴ ÷ (1 + ¾τ) the grey outgoing radiation in Spiegel et al.'s Eddington form, with one τ
-//!   for the body, solved once so that the global mean of the annual-mean steady state is plan
+//!   for the body, solved once so that the surface mean of the annual-mean steady state is plan
 //!   14's mean ([`CoarseInputs::mean_surface_temperature`]);
 //! - h the near-surface moist static energy `c_p` T + L q, with q the climate condensable's
 //!   specific humidity at 80% relative humidity ([`RELATIVE_HUMIDITY`]), from its saturation
@@ -31,6 +32,28 @@
 //!   vaporisation per kilogram, and `c_p` the air's mixed heat capacity: on a dry world, one whose
 //!   condensable is not among its surface liquids or that has none, h is `c_p` T alone;
 //! - Λ the transport's coefficient ([`transport`](super::transport)), no-flux at the poles.
+//!
+//! # The relief (R09.T13.g)
+//!
+//! Each point holds its surface heights above the sea level, the water's surface over water, as
+//! eight equal-area quantiles `z_q` of the field cells it holds, and `z̄_w`, its flooded cells' mean
+//! water-surface height ([`hypsometry`](super::hypsometry)). The prognostic T stays the sea-level
+//! temperature, and h and the transport stay at it (decision-r09-t13a-relief §1.1); at each
+//! quantile the ground is at `T_g` = T − Γ `z_q`, Γ plan 14's ground gradient α g ÷ `c_p`
+//! ([`lapse`](super::lapse)), held at least the night floor ([`Relief`]):
+//!
+//! - α and its slope are the means over the quantiles of the albedo law at `T_g`;
+//! - the outgoing radiation is the mean over the quantiles of
+//!   max(σT⁴ ÷ (1 + ¾τ) − e^(−(3/2)`τ_z`) σ(T⁴ − `T_g`⁴), e^(−(3/2)`τ_z`) σ`T_g`⁴), with
+//!   `τ_z` = τ e^(−z ÷ 2H), plan 14's τ ∝ √p over the air's scale height H, and its diffusivity
+//!   3/2 ([`quantile_emission`]);
+//! - the sea's heat capacity reads its water's surface, T − Γ `z̄_w` (decision-r09-t13ge §1.4, g2);
+//! - τ is solved so that the steady state's surface mean, of each point's quantiles' `T_g`, is
+//!   plan 14's (decision-r09-t13a-relief §1.3), with a guard where the bisection closes on a fold
+//!   ([`OpticalDepth::Folded`]).
+//!
+//! A point whose heights are all zero takes the arithmetic above, so a world at the sea level is
+//! T13.a's to the bit; a point whose heights are all equal is evaluated once.
 //!
 //! # The scheme
 //!
@@ -53,9 +76,12 @@
 //! tenth ([`STEP_LIMIT`]): a guard that only the steady state's iteration from far off reaches.
 //!
 //! The run: the optical depth by bisection on the annual-mean steady state of the zonal model,
-//! each from an isothermal start at the mean, under each band's mean insolation over its columns.
-//! On the geographic grid that is the steady state itself, since only the heat capacity sees the
-//! sea and the columns, and a steady state stores no heat; on the locked grid it is the steady
+//! each from an isothermal start at the mean, under each band's mean insolation over its columns
+//! and over each band's quantiles pooled over all of its cells (decision-r09-t13ge §1.4, g5).
+//! On the geographic grid at the sea level that is the steady state itself, since only the heat
+//! capacity sees the sea and the columns, and a steady state stores no heat; over relief, whose
+//! quantiles vary in longitude, it is not quite (R09.T13.d's constant takes up the difference,
+//! decision-r09-t13ge §3, G3); on the locked grid it is the steady
 //! state of the tidally locked longitudes' mean sunlight, the steady state itself in a one-month
 //! year, whose beam stands over the pole. Then, in a twelve-month year, whole orbits of steps
 //! on the whole grid from that steady state, each column of it the zonal one ([`Sunlight`]),
@@ -69,11 +95,14 @@ use super::frost;
 use super::grid::{
     CyclicWork, GridClimate, LATITUDE_BANDS, ModelGrid, solve_cyclic_tridiagonal, solve_tridiagonal,
 };
+use super::hypsometry::{Hypsometry, PointHeights, QUANTILES, Shape};
+use super::lapse;
 use super::sun::Sunlight;
 use super::transport::{Diffusing, REFERENCE_PRESSURE_PA, rotation_ratio, transport_kg_m2_s};
 use crate::math;
 use crate::planetary::hooks::surface::{
     EARTH_AIR_MOLAR_MASS_G_PER_MOL, EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K,
+    FLUX_OPTICAL_DEPTH_PER_GREY, night_floor,
 };
 use crate::planetary::surface::inputs::CoarseInputs;
 use crate::substance::{
@@ -140,6 +169,12 @@ pub(super) const RELATIVE_HUMIDITY: f64 = 0.8;
 /// The step of the centred difference that gives h's slope in T, K: 0.01, small against any
 /// curvature of the saturation curve, whose form the registry owns.
 const ENERGY_SLOPE_STEP_K: f64 = 0.01;
+
+/// The coefficient of the optical depth in the emission factor 1 + ¾τ: ¾, Spiegel, Menou and
+/// Scharf's Eddington form σT⁴ ÷ (1 + ¾τ) (2008, Table 1, models 1–2, read, as [`emission`]
+/// cites it), by which the relief's transmission recovers τ = (x − 1) ÷ ¾ from the fitted factor
+/// x (decision-r09-t13a-relief §1.3).
+pub(super) const EDDINGTON_COEFFICIENT: f64 = 0.75;
 
 /// The largest emission factor 1 + ¾τ the optical depth's bisection reaches: 10⁶, which holds a
 /// surface 31.6 times its equilibrium temperature.
@@ -261,16 +296,50 @@ pub(super) struct Steady {
     pub(super) converged: bool,
 }
 
-/// The optical depth's solve ([`EnergyBalance::emission_factor`]): the emission factor, the
-/// annual-mean steady state there and how τ was found.
+/// The optical depth's solve ([`EnergyBalance::fit`]): the emission factor, the annual-mean
+/// steady state there, its surface mean and how τ was found.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Fitted {
     /// The emission factor 1 + ¾τ.
     pub(super) emission_factor: f64,
     /// The annual-mean steady state at it.
     pub(super) steady: Steady,
+    /// The steady state's surface mean, K: the solid-angle mean of each point's ground
+    /// temperature over its hypsometry ([`Relief::surface_mean_k`]), its mean at sea level where
+    /// the model reads no relief.
+    pub(super) surface_mean_k: f64,
     /// How τ was found.
     pub(super) optical_depth: OpticalDepth,
+}
+
+/// A probe of τ's bisection, and its steady state, which the fold guard keeps where it converged
+/// ([`EnergyBalance::fit`]; decision-r09-t13ge §1.4, g4).
+#[derive(Debug, Clone, PartialEq)]
+struct Probe {
+    /// The probe's emission factor.
+    emission_factor: f64,
+    /// Its steady state's surface mean, K.
+    surface_mean_k: f64,
+    /// Its steady state.
+    steady: Steady,
+}
+
+/// The fold guard's choice between the last converged probe on the cold side of the bracket,
+/// `cold`, and on the warm side, `warm`: the one whose surface mean lies nearer `target_k`, K, ties
+/// to the warm side (decision-r09-t13ge §1.4, g4); `None` where neither side kept one.
+#[must_use]
+fn nearer(cold: Option<Probe>, warm: Option<Probe>, target_k: f64) -> Option<Probe> {
+    match (cold, warm) {
+        (Some(cold), Some(warm)) => {
+            if (warm.surface_mean_k - target_k).abs() <= (cold.surface_mean_k - target_k).abs() {
+                Some(warm)
+            } else {
+                Some(cold)
+            }
+        }
+        (Some(only), None) | (None, Some(only)) => Some(only),
+        (None, None) => None,
+    }
 }
 
 /// The air whose heat the model diffuses: its mean molar mass and specific heat.
@@ -380,8 +449,15 @@ impl Moisture {
 /// How the optical depth was found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum OpticalDepth {
-    /// By bisection, so that the steady state's mean is the inputs'.
+    /// By bisection, so that the steady state's surface mean is the inputs'.
     Solved,
+    /// By bisection, but the final probe's steady state did not converge within
+    /// [`STEADY_ITERATIONS`]: the bisection closed on a fold, a jump of the steady states' mean
+    /// between two branches (the relief Earth's small Arctic cap), where the iteration crawls. The
+    /// fold guard took the last converged probe on either side of the bracket whose surface mean
+    /// lies nearer the inputs', ties to the warm side (decision-r09-t13ge §1.4, g4); R09.T13.d's
+    /// constant takes up the rest.
+    Folded,
     /// Clamped at zero: the steady state is warmer than the mean even with no greenhouse, a mean
     /// colder than the albedo allows, which R09.T13.d's constant makes up.
     Transparent,
@@ -400,6 +476,229 @@ pub(super) struct Solution {
     pub(super) emission_factor: f64,
     /// How τ was found.
     pub(super) optical_depth: OpticalDepth,
+    /// Whether the steady state τ was solved on met [`STEADY_TOLERANCE_K`]: true for a body
+    /// with neither light nor heat, which has none.
+    pub(super) steady_converged: bool,
+    /// That steady state's surface mean, K ([`Fitted::surface_mean_k`]): the inputs' mean for a
+    /// body with neither light nor heat.
+    pub(super) steady_surface_mean_k: f64,
+}
+
+/// The ground a run of the model reads (R09.T13.g).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum Ground<'a> {
+    /// Every point at the sea level, as the model was before R09.T13.g: no hypsometry is read.
+    /// The step always reads the field's relief, at the sea level wherever its heights are zero;
+    /// the tests compare it with this.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the model before R09.T13.g, which the tests hold the step's zero relief to"
+        )
+    )]
+    SeaLevel,
+    /// The relief of the run's grid, and of the zonal grid in its coordinates, whose bands pool
+    /// all of their cells (decision-r09-t13ge §1.4, g5), on which τ is solved.
+    Relief {
+        /// The run's grid's relief.
+        grid: &'a Relief,
+        /// The zonal grid's relief.
+        zonal: &'a Relief,
+    },
+}
+
+/// The relief the energy-balance model reads on one grid (R09.T13.g; decision-r09-t13a-relief
+/// §1, decision-r09-t13ge §1.4): its points' hypsometry, the body's lapse rate Γ and its air's
+/// scale height H, and the ground's floor.
+///
+/// The prognostic temperature T stays the sea-level one, and h and the transport stay at it; at
+/// each quantile height z the ground is at `T_g` = T − Γz, held at least the floor. The albedo and
+/// its slope are the means over the quantiles of the albedo law at `T_g`; the outgoing radiation
+/// is the sea-level column's less the change at the raised ground transmitted through the column
+/// above it, never below the ground's emission transmitted ([`quantile_emission`]); the sea's
+/// heat capacity reads the water's own surface, T − Γ `z̄_w`.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct Relief {
+    /// Γ, K m⁻¹.
+    lapse_rate_k_per_m: f64,
+    /// The floor of the ground's temperature, K.
+    floor_k: f64,
+    /// The points' heights.
+    hypsometry: Hypsometry,
+    /// Each point-quantile's share of the column's optical depth above it, e^(−z ÷ 2H).
+    thinning: Vec<[f64; QUANTILES]>,
+}
+
+impl Relief {
+    /// The relief of `hypsometry` under the lapse rate `lapse_rate_k_per_m`, K m⁻¹, and the scale
+    /// height `scale_height_m`, m, the ground held at least `floor_k`, K. A scale height that is
+    /// not positive or not finite thins nothing.
+    #[must_use]
+    pub(super) fn new(
+        lapse_rate_k_per_m: f64,
+        scale_height_m: f64,
+        floor_k: f64,
+        hypsometry: Hypsometry,
+    ) -> Self {
+        let thinning = hypsometry
+            .all()
+            .iter()
+            .map(|point| {
+                point.quantiles_m.map(|z| {
+                    if positive(scale_height_m) {
+                        math::exp(-z / (2.0 * scale_height_m))
+                    } else {
+                        1.0
+                    }
+                })
+            })
+            .collect();
+        Self {
+            lapse_rate_k_per_m,
+            floor_k,
+            hypsometry,
+            thinning,
+        }
+    }
+
+    /// The relief of `hypsometry` on the body of `inputs`: plan 14's ground gradient
+    /// ([`lapse::lapse_rate_k_per_m`], the one Γ T13.d writes to the header), the air's scale height
+    /// at the mean surface temperature ([`scale_height_m`]) and the night floor (`night_floor`,
+    /// decision-r09-t13a-relief §1.2's guard).
+    #[must_use]
+    pub(super) fn of(inputs: &CoarseInputs, hypsometry: Hypsometry) -> Self {
+        Self::new(
+            lapse::lapse_rate_k_per_m(inputs),
+            scale_height_m(inputs),
+            night_floor(inputs.heat_flow()).value(),
+            hypsometry,
+        )
+    }
+
+    /// The points' heights.
+    #[cfg(test)]
+    #[must_use]
+    pub(super) fn hypsometry(&self) -> &Hypsometry {
+        &self.hypsometry
+    }
+
+    /// The ground's temperature `z_m` above the sea level under the sea-level temperature `t_k`,
+    /// K, and its slope in T: T − Γz and 1, or the floor and 0 where T − Γz lies below it.
+    #[must_use]
+    fn ground_k(&self, t_k: f64, z_m: f64) -> (f64, f64) {
+        let ground = t_k - self.lapse_rate_k_per_m * z_m;
+        if ground < self.floor_k {
+            (self.floor_k, 0.0)
+        } else {
+            (ground, 1.0)
+        }
+    }
+
+    /// The temperature of the water's surface of a point of heights `heights` under the sea-level
+    /// temperature `t_k`, K, which the sea's ice heat capacity reads: T − Γ `z̄_w`, T itself over
+    /// R09.T12.e's ocean (decision-r09-t13ge §1.4, g2).
+    #[must_use]
+    fn water_k(&self, t_k: f64, heights: &PointHeights) -> f64 {
+        t_k - self.lapse_rate_k_per_m * heights.water_m
+    }
+
+    /// Point `point`'s surface temperature at the sea-level temperature `t_k`, K: the mean over its
+    /// quantiles of the ground's temperature, held at least the floor; `t_k` itself at the sea
+    /// level, so that a world at the sea level keeps its mean to the bit.
+    #[must_use]
+    pub(super) fn surface_k(&self, point: usize, t_k: f64) -> f64 {
+        let heights = self.hypsometry.point(point);
+        match heights.shape {
+            Shape::SeaLevel => t_k,
+            Shape::Level => self.ground_k(t_k, heights.quantiles_m[0]).0,
+            Shape::Varied => {
+                heights
+                    .quantiles_m
+                    .iter()
+                    .fold(0.0, |sum, &z| sum + self.ground_k(t_k, z).0)
+                    * QUANTILE_WEIGHT
+            }
+        }
+    }
+
+    /// The surface mean of the sea-level temperatures `t_k`, K, one per point of `grid`: the
+    /// solid-angle mean over the grid of each point's surface temperature
+    /// ([`surface_k`](Self::surface_k)), [`ModelGrid::mean`]'s, which it is to the bit at the sea
+    /// level (decision-r09-t13a-relief §1.3).
+    #[must_use]
+    pub(super) fn surface_mean_k(&self, grid: &ModelGrid, t_k: &[f64]) -> f64 {
+        let surface: Vec<f64> = t_k
+            .iter()
+            .enumerate()
+            .map(|(point, &t)| self.surface_k(point, t))
+            .collect();
+        grid.mean(&surface)
+    }
+
+    /// Each point-quantile's transmission through the column above it at the emission factor
+    /// `emission_factor`, e^(−(3/2) `τ_z`) with `τ_z` = τ e^(−z ÷ 2H) and τ = (x − 1) ÷ ¾ the model's
+    /// own (plan 14's τ ∝ √p, `optical_depth`, and its diffusivity
+    /// [`FLUX_OPTICAL_DEPTH_PER_GREY`]), each through [`math::exp`].
+    #[must_use]
+    fn transmissions(&self, emission_factor: f64) -> Vec<[f64; QUANTILES]> {
+        let tau = (emission_factor - 1.0) / EDDINGTON_COEFFICIENT;
+        self.thinning
+            .iter()
+            .map(|point| point.map(|share| math::exp(-FLUX_OPTICAL_DEPTH_PER_GREY * tau * share)))
+            .collect()
+    }
+
+    /// How far a seasonal run's table must reach below and above its starting temperatures for
+    /// every quantile's ground, K: Γ times the highest quantile above the sea level, and times the
+    /// deepest below it, each at least zero.
+    #[must_use]
+    fn table_reach_k(&self) -> (f64, f64) {
+        let (deepest, highest) = self.hypsometry.extremes_m();
+        let reach = |z: f64| {
+            if z > 0.0 {
+                self.lapse_rate_k_per_m * z
+            } else {
+                0.0
+            }
+        };
+        (reach(highest), reach(-deepest))
+    }
+}
+
+/// The weight of each quantile in a point's mean over its hypsometry: 1 ÷ [`QUANTILES`], exact.
+const QUANTILE_WEIGHT: f64 = 1.0 / 8.0;
+
+// The weight is the quantiles' count's reciprocal.
+const _: () = assert!(QUANTILES == 8, "QUANTILE_WEIGHT is 1 ÷ QUANTILES");
+
+/// The scale height of the air of `inputs`, m: H = R `T_s` ÷ (μ g), at plan 14's mean surface
+/// temperature `T_s` and the air's mean molar mass μ ([`Air::of`]), on which plan 14's grey τ,
+/// whose every term goes as the square root of its partial pressure, thins as e^(−z ÷ 2H) above
+/// raised ground (decision-r09-t13a-relief §1.3: 8.42 km on an Earth; the reference Earth's moist
+/// air, 8.47 km).
+#[must_use]
+pub(super) fn scale_height_m(inputs: &CoarseInputs) -> f64 {
+    MOLAR_GAS_CONSTANT * inputs.mean_surface_temperature().value()
+        / (Air::of(inputs).molar_mass_g_per_mol * 1e-3 * inputs.gravity().value())
+}
+
+/// A grid's relief at one emission factor, what a step reads: the relief, and each
+/// point-quantile's transmission at that factor ([`Relief::transmissions`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ReliefAt<'a> {
+    relief: &'a Relief,
+    transmission: &'a [[f64; QUANTILES]],
+}
+
+impl<'a> ReliefAt<'a> {
+    /// Point `point`'s heights and transmissions, or `None` at the sea level, where the model
+    /// takes T13.a's arithmetic.
+    #[must_use]
+    fn raised(self, point: usize) -> Option<(&'a PointHeights, &'a [f64; QUANTILES])> {
+        let heights = self.relief.hypsometry.point(point);
+        (heights.shape != Shape::SeaLevel).then(|| (heights, &self.transmission[point]))
+    }
 }
 
 /// The model's parameters for one body.
@@ -752,9 +1051,87 @@ impl EnergyBalance {
         ]
     }
 
+    /// h at `t_k`, K, and its slope, from `table` where it holds `t_k` and directly otherwise:
+    /// [`functions`](Self::functions)' first two, to the bit.
+    #[must_use]
+    fn energies(&self, t_k: f64, table: Option<&Tabulated>) -> [f64; 2] {
+        if let Some((table, (i, f))) = table.and_then(|table| Some((table, table.locate(t_k)?))) {
+            let t = (table.first_node + super::grid::index(i) + f) * TABLE_SPACING_K;
+            let sensible = self.specific_heat_j_per_kg_k * t;
+            return match &table.latent {
+                Some(latent) => {
+                    let (value, slope) = hermite(latent, i, f);
+                    [sensible + value, self.specific_heat_j_per_kg_k + slope]
+                }
+                None => [sensible, self.specific_heat_j_per_kg_k],
+            };
+        }
+        [self.energy(t_k), self.energy_slope(t_k)]
+    }
+
+    /// The albedo at the ground's temperature `ground_k`, K, and its slope, from `table` where it
+    /// holds `ground_k` and directly otherwise (the nodes lie on one lattice, so the value does
+    /// not depend on the table's span).
+    #[must_use]
+    fn ground_albedo(&self, ground_k: f64, table: Option<&Tabulated>) -> AlbedoAt {
+        match table.and_then(|table| Some((table, table.locate(ground_k)?))) {
+            Some((table, (i, f))) => {
+                let (albedo, slope_per_k) = hermite(&table.albedo, i, f);
+                AlbedoAt {
+                    albedo,
+                    slope_per_k,
+                }
+            }
+            None => self.albedo_and_slope(ground_k),
+        }
+    }
+
+    /// The albedo of a raised point of heights `heights` under `relief` at the sea-level
+    /// temperature `t_k`, K, and its slope in T: the mean over its quantiles of the albedo law at
+    /// each ground's temperature, and of its slope times the ground's in T (zero where the floor
+    /// holds it), once at a level point (decision-r09-t13a-relief §1.2).
+    #[must_use]
+    fn point_albedo(
+        &self,
+        t_k: f64,
+        heights: &PointHeights,
+        relief: &Relief,
+        table: Option<&Tabulated>,
+    ) -> AlbedoAt {
+        let at = |z: f64| {
+            let (ground, rate) = relief.ground_k(t_k, z);
+            let albedo = self.ground_albedo(ground, table);
+            (albedo.albedo, albedo.slope_per_k * rate)
+        };
+        match heights.shape {
+            Shape::SeaLevel | Shape::Level => {
+                let (albedo, slope_per_k) = at(heights.quantiles_m[0]);
+                AlbedoAt {
+                    albedo,
+                    slope_per_k,
+                }
+            }
+            Shape::Varied => {
+                let (albedo, slope) =
+                    heights
+                        .quantiles_m
+                        .iter()
+                        .fold((0.0, 0.0), |(albedo, slope), &z| {
+                            let (a, s) = at(z);
+                            (albedo + a, slope + s)
+                        });
+                AlbedoAt {
+                    albedo: albedo * QUANTILE_WEIGHT,
+                    slope_per_k: slope * QUANTILE_WEIGHT,
+                }
+            }
+        }
+    }
+
     /// The heat capacity, J m⁻² K⁻¹, of a grid point of sea share `sea_share` at `t_k`, K:
     /// (1 − s) `C_l` + s `C_sea`(T), the sea's open water's at every temperature where no ice
-    /// forms.
+    /// forms. Over relief the sea's T is its water surface's, T − Γ `z̄_w` (decision-r09-t13ge
+    /// §1.4, g2), which the caller gives; land's capacity reads no temperature.
     #[must_use]
     pub(super) fn heat_capacity(&self, t_k: f64, sea_share: f64) -> f64 {
         let sea_ratio = match self.freezing {
@@ -800,12 +1177,13 @@ impl EnergyBalance {
 
     /// One linearised backward-Euler step of the points' temperatures `t_k`, K, under insolation
     /// `insolation_w_m2` (one value per point) and emission factor `emission_factor`, storing heat
-    /// in `storage`, split into the latitude solve and then the longitude one (the
+    /// in `storage`, over the ground `relief` at that factor (every point at the sea level where
+    /// `None`), split into the latitude solve and then the longitude one (the
     /// [module documentation](self)); the largest change, K.
     #[expect(
         clippy::too_many_arguments,
-        reason = "a step reads the grid, the forcing, the storage, the table and the state, and \
-                  writes the work arrays; bundling them would only rename them"
+        reason = "a step reads the grid, the forcing, the storage, the table, the relief and the \
+                  state, and writes the work arrays; bundling them would only rename them"
     )]
     fn advance(
         &self,
@@ -814,13 +1192,23 @@ impl EnergyBalance {
         insolation_w_m2: &[f64],
         storage: Storage<'_>,
         table: Option<&Tabulated>,
+        relief: Option<ReliefAt<'_>>,
         t_k: &mut [f64],
         work: &mut Work,
     ) -> f64 {
         let lambda = self.transport_kg_m2_s;
         let columns = grid.columns();
+        let raised = |p: usize| relief.and_then(|at| Some((at.relief, at.raised(p)?)));
         for (p, &v) in t_k.iter().enumerate() {
-            let [energy, slope, albedo, albedo_slope] = self.functions(v, table);
+            let [energy, slope, albedo, albedo_slope] = match raised(p) {
+                // At the sea level, T13.a's arithmetic to the bit.
+                None => self.functions(v, table),
+                Some((relief, (heights, _))) => {
+                    let [energy, slope] = self.energies(v, table);
+                    let ground = self.point_albedo(v, heights, relief, table);
+                    [energy, slope, ground.albedo, ground.slope_per_k]
+                }
+            };
             work.energy[p] = energy;
             work.slope[p] = slope;
             work.albedo[p] = albedo;
@@ -839,14 +1227,24 @@ impl EnergyBalance {
             for column in 0..columns {
                 let p = grid.point(k, column);
                 let tk = t_k[p];
-                let Emission {
-                    flux_w_m2: emitted,
-                    slope_w_m2_k: emission_slope,
-                } = emission(tk, emission_factor);
+                // The sea's temperature for its capacity is its water surface's.
+                let (
+                    Emission {
+                        flux_w_m2: emitted,
+                        slope_w_m2_k: emission_slope,
+                    },
+                    sea_k,
+                ) = match raised(p) {
+                    None => (emission(tk, emission_factor), tk),
+                    Some((relief, (heights, transmission))) => (
+                        point_emission(tk, emission_factor, heights, transmission, relief),
+                        relief.water_k(tk, heights),
+                    ),
+                };
                 let stored = match storage {
                     Storage::Relaxation => RELAXATION * emission_slope,
                     Storage::Seasonal { step_s, sea_share } => {
-                        self.heat_capacity(tk, sea_share[p]) / step_s
+                        self.heat_capacity(sea_k, sea_share[p]) / step_s
                     }
                 };
                 let (albedo, albedo_slope) = (work.albedo[p], work.albedo_slope[p]);
@@ -908,6 +1306,7 @@ impl EnergyBalance {
     /// The steady state under constant insolation `insolation_w_m2` at emission factor
     /// `emission_factor`, iterated from the temperatures `start_k`, K, and whether its iteration
     /// met [`STEADY_TOLERANCE_K`] within [`STEADY_ITERATIONS`].
+    #[cfg(test)]
     #[must_use]
     pub(super) fn steady_state(
         &self,
@@ -922,12 +1321,41 @@ impl EnergyBalance {
             insolation_w_m2,
             start_k,
             None,
+            None,
+            STEADY_ITERATIONS,
+        )
+    }
+
+    /// [`steady_state`](Self::steady_state) over the ground `relief` (R09.T13.g).
+    #[cfg(test)]
+    #[must_use]
+    pub(super) fn steady_state_over(
+        &self,
+        grid: &ModelGrid,
+        emission_factor: f64,
+        insolation_w_m2: &[f64],
+        start_k: Vec<f64>,
+        relief: &Relief,
+    ) -> Steady {
+        self.relax(
+            grid,
+            emission_factor,
+            insolation_w_m2,
+            start_k,
+            None,
+            Some(relief),
             STEADY_ITERATIONS,
         )
     }
 
     /// [`steady_state`](Self::steady_state) for at most `iterations`, its functions read from
-    /// `table` where it holds them.
+    /// `table` where it holds them, over the ground `relief` (every point at the sea level where
+    /// `None`), its transmissions taken once at the emission factor.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the steady state's grid, forcing and start, and the step's table, relief and \
+                  count; bundling them would only rename them"
+    )]
     #[must_use]
     fn relax(
         &self,
@@ -936,8 +1364,16 @@ impl EnergyBalance {
         insolation_w_m2: &[f64],
         start_k: Vec<f64>,
         table: Option<&Tabulated>,
+        relief: Option<&Relief>,
         iterations: u32,
     ) -> Steady {
+        let transmission = relief.map(|relief| relief.transmissions(emission_factor));
+        let at = relief
+            .zip(transmission.as_deref())
+            .map(|(relief, transmission)| ReliefAt {
+                relief,
+                transmission,
+            });
         let mut t_k = start_k;
         let mut work = Work::new(grid);
         for _ in 0..iterations {
@@ -947,6 +1383,7 @@ impl EnergyBalance {
                 insolation_w_m2,
                 Storage::Relaxation,
                 table,
+                at,
                 &mut t_k,
                 &mut work,
             );
@@ -965,7 +1402,8 @@ impl EnergyBalance {
 
     /// The emission factor 1 + ¾τ at which the annual-mean steady state under `insolation_w_m2`,
     /// each solve from an isothermal start at `mean_k`, has the global mean `mean_k`, K; the
-    /// steady state there, and how τ was found.
+    /// steady state there, and how τ was found ([`fit`](Self::fit), at the sea level).
+    #[cfg(test)]
     #[must_use]
     pub(super) fn emission_factor(
         &self,
@@ -973,41 +1411,93 @@ impl EnergyBalance {
         insolation_w_m2: &[f64],
         mean_k: f64,
     ) -> Fitted {
+        self.fit(grid, insolation_w_m2, mean_k, None)
+    }
+
+    /// The emission factor 1 + ¾τ at which the annual-mean steady state under `insolation_w_m2`
+    /// over the ground `relief` (every point at the sea level where `None`), each solve from an
+    /// isothermal start at `mean_k`, has the surface mean `mean_k`, K ([`Relief::surface_mean_k`],
+    /// decision-r09-t13a-relief §1.3): 48 bisections of ln(1 + ¾τ); the steady state there, and
+    /// how τ was found.
+    ///
+    /// The fold guard (decision-r09-t13ge §1.4, g4): the bisection keeps, on each side of its
+    /// bracket, the last probe whose steady state converged, the bracket's two ends among them. If
+    /// the final midpoint's steady state has not converged within [`STEADY_ITERATIONS`], it
+    /// answers whichever kept probe's surface mean lies nearer `mean_k`, ties to the warm side
+    /// ([`OpticalDepth::Folded`]), or the final midpoint where it kept none; otherwise the
+    /// midpoint, as before, to the bit. On a world of one month the steady state is the climate,
+    /// and a steady state that had not converged would be a transient between two branches.
+    #[must_use]
+    fn fit(
+        &self,
+        grid: &ModelGrid,
+        insolation_w_m2: &[f64],
+        mean_k: f64,
+        relief: Option<&Relief>,
+    ) -> Fitted {
         let solve = |factor: f64| {
-            let steady =
-                self.steady_state(grid, factor, insolation_w_m2, vec![mean_k; grid.points()]);
-            (grid.mean(&steady.t_k), steady)
+            let steady = self.relax(
+                grid,
+                factor,
+                insolation_w_m2,
+                vec![mean_k; grid.points()],
+                None,
+                relief,
+                STEADY_ITERATIONS,
+            );
+            let surface = match relief {
+                Some(relief) => relief.surface_mean_k(grid, &steady.t_k),
+                None => grid.mean(&steady.t_k),
+            };
+            Probe {
+                emission_factor: factor,
+                surface_mean_k: surface,
+                steady,
+            }
         };
-        let fitted = |emission_factor: f64, steady: Steady, optical_depth: OpticalDepth| Fitted {
-            emission_factor,
-            steady,
+        let fitted = |probe: Probe, optical_depth: OpticalDepth| Fitted {
+            emission_factor: probe.emission_factor,
+            steady: probe.steady,
+            surface_mean_k: probe.surface_mean_k,
             optical_depth,
         };
-        let (clear_mean, clear) = solve(1.0);
-        if clear_mean >= mean_k {
-            return fitted(1.0, clear, OpticalDepth::Transparent);
+        let clear = solve(1.0);
+        if clear.surface_mean_k >= mean_k {
+            return fitted(clear, OpticalDepth::Transparent);
         }
-        let (opaque_mean, opaque) = solve(EMISSION_FACTOR_MAX);
-        if opaque_mean < mean_k {
-            return fitted(EMISSION_FACTOR_MAX, opaque, OpticalDepth::Opaque);
+        let opaque = solve(EMISSION_FACTOR_MAX);
+        if opaque.surface_mean_k < mean_k {
+            return fitted(opaque, OpticalDepth::Opaque);
         }
+        let kept = |probe: Probe| probe.steady.converged.then_some(probe);
+        let (mut cold, mut warm) = (kept(clear), kept(opaque));
         let (mut low, mut high) = (0.0, math::ln(EMISSION_FACTOR_MAX));
         for _ in 0..OPTICAL_DEPTH_ITERATIONS {
             let middle = f64::midpoint(low, high);
-            if solve(math::exp(middle)).0 < mean_k {
+            let probe = solve(math::exp(middle));
+            if probe.surface_mean_k < mean_k {
                 low = middle;
+                cold = kept(probe).or(cold);
             } else {
                 high = middle;
+                warm = kept(probe).or(warm);
             }
         }
-        let factor = math::exp(f64::midpoint(low, high));
-        let (_, steady) = solve(factor);
-        fitted(factor, steady, OpticalDepth::Solved)
+        let last = solve(math::exp(f64::midpoint(low, high)));
+        if last.steady.converged {
+            return fitted(last, OpticalDepth::Solved);
+        }
+        match nearer(cold, warm, mean_k) {
+            Some(probe) => fitted(probe, OpticalDepth::Folded),
+            None => fitted(last, OpticalDepth::Solved),
+        }
     }
 
     /// Whole seasonal orbits of `sunlight` at emission factor `emission_factor` from `start_k`, K,
-    /// over points of sea share `sea_share`, until the annual means move under [`CONVERGENCE_K`]
-    /// between orbits, at most [`MAX_ORBITS`]: the last orbit's annual and monthly means.
+    /// over points of sea share `sea_share` and the ground `relief` (every point at the sea level
+    /// where `None`), until the annual means move under [`CONVERGENCE_K`] between orbits, at most
+    /// [`MAX_ORBITS`]: the last orbit's annual and monthly means. The table reaches as far below
+    /// and above the start as the highest and deepest quantiles' grounds need.
     ///
     /// Where the sunlight varies in the grid's longitude, as a locked world's beam does on an
     /// eccentric or tilted orbit, `start`, the zonal model's steady state under each band's mean
@@ -1030,6 +1520,7 @@ impl EnergyBalance {
         emission_factor: f64,
         start_k: Vec<f64>,
         sea_share: &[f64],
+        relief: Option<&Relief>,
     ) -> GridClimate {
         let steps = sunlight.steps();
         assert!(steps > 0, "a seasonal run needs a seasonal orbit");
@@ -1046,7 +1537,8 @@ impl EnergyBalance {
                     if v > high { v } else { high },
                 )
             });
-        let table = Tabulated::new(self, low, high);
+        let (below, above) = relief.map_or((0.0, 0.0), Relief::table_reach_k);
+        let table = Tabulated::new(self, low - below, high + above);
         let start_k = if sunlight.varies_in_longitude() {
             self.relax(
                 grid,
@@ -1054,12 +1546,20 @@ impl EnergyBalance {
                 sunlight.annual(),
                 start_k,
                 Some(&table),
+                relief,
                 SPIN_UP_ITERATIONS,
             )
             .t_k
         } else {
             start_k
         };
+        let transmission = relief.map(|relief| relief.transmissions(emission_factor));
+        let at = relief
+            .zip(transmission.as_deref())
+            .map(|(relief, transmission)| ReliefAt {
+                relief,
+                transmission,
+            });
         let mut t = start_k;
         let mut work = Work::new(grid);
         let mut insolation = vec![0.0; points];
@@ -1082,6 +1582,7 @@ impl EnergyBalance {
                     &insolation,
                     storage,
                     Some(&table),
+                    at,
                     &mut t,
                     &mut work,
                 );
@@ -1125,7 +1626,10 @@ impl EnergyBalance {
     }
 
     /// The model's run over `sunlight` for a body of mean surface temperature `mean_k`, over the
-    /// points of `grid` of sea share `sea_share` (the [module documentation](self)).
+    /// points of `grid` of sea share `sea_share` and the ground `ground` (the
+    /// [module documentation](self)): τ solved on the zonal grid in the grid's coordinates, over
+    /// the zonal relief, so that the steady state's surface mean is `mean_k`, then the orbits over
+    /// the grid's own relief.
     ///
     /// # Panics
     ///
@@ -1137,7 +1641,12 @@ impl EnergyBalance {
         sunlight: &Sunlight,
         mean_k: f64,
         sea_share: &[f64],
+        ground: Ground<'_>,
     ) -> Solution {
+        let (on_grid, on_zonal) = match ground {
+            Ground::SeaLevel => (None, None),
+            Ground::Relief { grid, zonal } => (Some(grid), Some(zonal)),
+        };
         let months = usize::from(sunlight.months());
         let zonal = ModelGrid::zonal();
         let annual = grid.band_means(sunlight.annual());
@@ -1146,8 +1655,9 @@ impl EnergyBalance {
             let Fitted {
                 emission_factor: factor,
                 steady,
+                surface_mean_k,
                 optical_depth: depth,
-            } = self.emission_factor(&zonal, &annual, mean_k);
+            } = self.fit(&zonal, &annual, mean_k, on_zonal);
             let converged = steady.converged;
             let steady = grid.broadcast(&steady.t_k);
             let climate = if sunlight.steps() == 0 {
@@ -1158,12 +1668,14 @@ impl EnergyBalance {
                     converged,
                 }
             } else {
-                self.orbits(grid, sunlight, factor, steady, sea_share)
+                self.orbits(grid, sunlight, factor, steady, sea_share, on_grid)
             };
             Solution {
                 climate,
                 emission_factor: factor,
                 optical_depth: depth,
+                steady_converged: converged,
+                steady_surface_mean_k: surface_mean_k,
             }
         } else {
             let isothermal = vec![mean_k; grid.points()];
@@ -1176,6 +1688,8 @@ impl EnergyBalance {
                 },
                 emission_factor: 1.0,
                 optical_depth: OpticalDepth::Unforced,
+                steady_converged: true,
+                steady_surface_mean_k: mean_k,
             }
         };
         let climate = &solution.climate;
@@ -1230,6 +1744,101 @@ fn emission(t_k: f64, emission_factor: f64) -> Emission {
     }
 }
 
+/// The sea-level column of a point at one temperature, what each of its quantiles' outgoing
+/// radiation reads: σT⁴ ÷ (1 + ¾τ) and its slope ([`emission`]), T³ and T⁴.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Column {
+    emission: Emission,
+    cube: f64,
+    fourth: f64,
+}
+
+impl Column {
+    /// The column at the sea-level temperature `t_k`, K, under emission factor `emission_factor`.
+    #[must_use]
+    fn at(t_k: f64, emission_factor: f64) -> Self {
+        let cube = t_k * t_k * t_k;
+        Self {
+            emission: emission(t_k, emission_factor),
+            cube,
+            fourth: cube * t_k,
+        }
+    }
+}
+
+/// The outgoing radiation of one quantile of a raised point and its slope in T, W m⁻² and
+/// W m⁻² K⁻¹, over the sea-level column `column` (the point's temperature T and emission factor,
+/// computed once for its quantiles), its ground at `ground_k`, K, of slope `ground_rate` in T (1,
+/// or 0 where the floor holds it), seen through the column above it of transmission
+/// `transmission`, e^(−(3/2)`τ_z`) (decision-r09-t13a-relief §1.3, decision-r09-t13ge §1.4, g5):
+///
+/// OLR = max(σT⁴ ÷ (1 + ¾τ) − e^(−(3/2)`τ_z`) σ(T⁴ − `T_g`⁴), e^(−(3/2)`τ_z`) σ`T_g`⁴),
+///
+/// the sea-level column's less the change at the raised ground transmitted through the column
+/// above it, to first order in the removed layer's own optical depth, and never below the ground's
+/// emission transmitted, since the air's own emission is not negative; its slope from whichever
+/// term binds. At z = 0 it is σT⁴ ÷ (1 + ¾τ); as τ → 0 it is σ`T_g`⁴, the ground's own; the floor
+/// binds only where the transmission exceeds 1 ÷ (1 + ¾τ), above 16.2 km on an Earth and 3.89
+/// scale heights up under τ = 10.
+#[must_use]
+fn quantile_emission(
+    column: &Column,
+    ground_k: f64,
+    ground_rate: f64,
+    transmission: f64,
+) -> Emission {
+    let (cube, fourth) = (column.cube, column.fourth);
+    let column = column.emission;
+    let ground_cube = ground_k * ground_k * ground_k;
+    let ground_fourth = ground_cube * ground_k;
+    let through = column.flux_w_m2 - transmission * STEFAN_BOLTZMANN * (fourth - ground_fourth);
+    let ground = transmission * STEFAN_BOLTZMANN * ground_fourth;
+    if through >= ground {
+        Emission {
+            flux_w_m2: through,
+            slope_w_m2_k: column.slope_w_m2_k
+                - transmission * 4.0 * STEFAN_BOLTZMANN * (cube - ground_cube * ground_rate),
+        }
+    } else {
+        Emission {
+            flux_w_m2: ground,
+            slope_w_m2_k: transmission * 4.0 * STEFAN_BOLTZMANN * ground_cube * ground_rate,
+        }
+    }
+}
+
+/// The outgoing radiation of a raised point of heights `heights` under `relief` and its slope in
+/// T at the sea-level temperature `t_k`, K, under emission factor `emission_factor`, each
+/// quantile seen through its transmission `transmission` ([`quantile_emission`]): the mean over
+/// its quantiles, once at a level point.
+#[must_use]
+fn point_emission(
+    t_k: f64,
+    emission_factor: f64,
+    heights: &PointHeights,
+    transmission: &[f64; QUANTILES],
+    relief: &Relief,
+) -> Emission {
+    let column = Column::at(t_k, emission_factor);
+    let at = |q: usize| {
+        let (ground, rate) = relief.ground_k(t_k, heights.quantiles_m[q]);
+        quantile_emission(&column, ground, rate, transmission[q])
+    };
+    match heights.shape {
+        Shape::SeaLevel | Shape::Level => at(0),
+        Shape::Varied => {
+            let (flux, slope) = (0..QUANTILES).fold((0.0, 0.0), |(flux, slope), q| {
+                let quantile = at(q);
+                (flux + quantile.flux_w_m2, slope + quantile.slope_w_m2_k)
+            });
+            Emission {
+                flux_w_m2: flux * QUANTILE_WEIGHT,
+                slope_w_m2_k: slope * QUANTILE_WEIGHT,
+            }
+        }
+    }
+}
+
 /// The diffusion's convergence at the point of band `band` and column `column` of the field
 /// `energy`, J kg⁻¹ per unit of Λ: the point's average of ∇²h in flux form ([`ModelGrid`]), the
 /// latitude term no-flux at the poles, and on a grid of more than one column the longitude term,
@@ -1270,15 +1879,16 @@ pub(super) fn contrast(t: &[f64]) -> f64 {
 }
 
 /// The model's answer for the body of `inputs`, which turns under its sun, over the points of
-/// `grid` (the zonal or the geographic grid) of sea share `sea_share`, under the diurnal-mean
-/// sunlight, at a nominal step of `step` ([`NOMINAL_STEP`](super::sun::NOMINAL_STEP) in the
-/// pass).
+/// `grid` (the zonal or the geographic grid) of sea share `sea_share` and the ground `ground`,
+/// under the diurnal-mean sunlight, at a nominal step of `step`
+/// ([`NOMINAL_STEP`](super::sun::NOMINAL_STEP) in the pass).
 #[must_use]
 pub(super) fn solve(
     inputs: &CoarseInputs,
     grid: &ModelGrid,
     sea_share: &[f64],
     step: Seconds,
+    ground: Ground<'_>,
 ) -> Solution {
     let model = EnergyBalance::for_inputs(inputs);
     let sunlight = Sunlight::of(inputs, grid, step);
@@ -1287,18 +1897,21 @@ pub(super) fn solve(
         &sunlight,
         inputs.mean_surface_temperature().value(),
         sea_share,
+        ground,
     )
 }
 
 /// The model's answer for the body of `inputs`, locked 1:1 to its seasonal host, over the points
-/// of `grid` (the locked grid) in tidally locked coordinates, of sea share `sea_share`, under the
-/// host's beam ([`Sunlight::locked`]), at a nominal step of `step`.
+/// of `grid` (the locked grid) in tidally locked coordinates, of sea share `sea_share` and the
+/// ground `ground` (its zonal relief the tidally locked bands'), under the host's beam
+/// ([`Sunlight::locked`]), at a nominal step of `step`.
 #[must_use]
 pub(super) fn solve_locked(
     inputs: &CoarseInputs,
     grid: &ModelGrid,
     sea_share: &[f64],
     step: Seconds,
+    ground: Ground<'_>,
 ) -> Solution {
     let model = EnergyBalance::for_inputs(inputs);
     let sunlight = Sunlight::locked(inputs, grid, Coordinates::TidallyLocked, step);
@@ -1307,6 +1920,7 @@ pub(super) fn solve_locked(
         &sunlight,
         inputs.mean_surface_temperature().value(),
         sea_share,
+        ground,
     )
 }
 
@@ -1320,6 +1934,7 @@ fn positive(x: f64) -> bool {
 mod tests {
     use super::*;
     use crate::planetary::surface::reference;
+    use hyperion_testkit::float::assert_same_bits;
 
     fn earth() -> (EnergyBalance, Sunlight, ModelGrid) {
         let inputs = reference::earth_like();
@@ -1366,9 +1981,11 @@ mod tests {
                 t_k: steady,
                 converged,
             },
+            surface_mean_k,
             optical_depth: depth,
         } = model.emission_factor(&grid, sun.annual(), 288.0);
         assert!(converged);
+        assert_same_bits(surface_mean_k, grid.mean(&steady));
         assert_eq!(depth, OpticalDepth::Solved);
         assert!(
             (grid.mean(&steady) - 288.0).abs() < 1e-6,
@@ -1419,7 +2036,7 @@ mod tests {
         let (mut model, _, grid) = earth();
         let dark = Sunlight::constant(vec![0.0; LATITUDE_BANDS]);
         model.heat_flow_w_m2 = 0.0;
-        let none = model.run(&grid, &dark, 40.0, &[0.0; LATITUDE_BANDS]);
+        let none = model.run(&grid, &dark, 40.0, &[0.0; LATITUDE_BANDS], Ground::SeaLevel);
         assert_eq!(none.optical_depth, OpticalDepth::Unforced);
         assert!(
             none.climate
@@ -1428,7 +2045,7 @@ mod tests {
                 .all(|t| (t - 40.0).abs() < 1e-12)
         );
         model.heat_flow_w_m2 = 0.0916;
-        let warm = model.run(&grid, &dark, 60.0, &[0.0; LATITUDE_BANDS]);
+        let warm = model.run(&grid, &dark, 60.0, &[0.0; LATITUDE_BANDS], Ground::SeaLevel);
         assert_eq!(warm.optical_depth, OpticalDepth::Solved);
         assert!(
             warm.climate
@@ -1475,6 +2092,7 @@ mod tests {
                 step_s: sun.step_s(),
                 sea_share: &sea,
             },
+            None,
             None,
             &mut state,
             &mut work,
@@ -1563,7 +2181,7 @@ mod tests {
             .into_iter()
             .zip(model.functions(30.0, None))
         {
-            hyperion_testkit::float::assert_same_bits(a, b);
+            assert_same_bits(a, b);
         }
     }
 
@@ -1584,5 +2202,256 @@ mod tests {
         // A world whose condensable is not among its liquids is dry, as is one with no pressure.
         let mars = reference::mars_like();
         assert!(EnergyBalance::for_inputs(&mars).moisture.is_none());
+    }
+
+    /// A point half at the sea level and half 3 km up, and one wholly at their mean height.
+    fn split_and_mean(inputs: &CoarseInputs) -> Relief {
+        let split = [0.0, 0.0, 0.0, 0.0, 3_000.0, 3_000.0, 3_000.0, 3_000.0];
+        Relief::of(
+            inputs,
+            Hypsometry::new(vec![
+                PointHeights::new(split, 0.0),
+                PointHeights::level(1_500.0, 0.0),
+            ]),
+        )
+    }
+
+    /// R09.T13.g (decision-r09-t13ge §1.6): a band half at sea level and half 3 km up is brighter
+    /// than one wholly at their mean height where that height's ground lies above the albedo's
+    /// midpoint, and darker below it, the tanh law being convex above its midpoint and concave
+    /// below; read through the table, the same. At 275, 280 and 285 K at sea level the two read
+    /// decision-r09-t13a-relief §1.2's 0.537 against 0.615, 0.504 against 0.391 and 0.420
+    /// against 0.299 (its Γ 5.85 K km⁻¹; the reference Earth's 5.818), to 0.01.
+    #[test]
+    fn a_band_half_3_km_up_is_brighter_than_its_mean_height_above_the_albedo_s_midpoint() {
+        let inputs = reference::earth_like();
+        let model = EnergyBalance::for_inputs(&inputs);
+        let relief = split_and_mean(&inputs);
+        let (split, mean) = (relief.hypsometry().point(0), relief.hypsometry().point(1));
+        let gamma = lapse::lapse_rate_k_per_m(&inputs);
+        let point = model.freezing.point_k().expect("water freezes");
+        let midpoint = point - ALBEDO_MIDPOINT_BELOW_FREEZING_K;
+        let table = Tabulated::new(&model, 200.0, 320.0);
+        for offset in [-15.0, -8.0, -4.0, -1.0, -0.25, 0.25, 1.0, 4.0, 8.0, 15.0] {
+            // The sea level at which the mean height's ground lies `offset` from the midpoint.
+            let t = midpoint + offset + gamma * 1_500.0;
+            let (a, b) = (
+                model.point_albedo(t, split, &relief, None),
+                model.point_albedo(t, mean, &relief, None),
+            );
+            eprintln!(
+                "ground at 1.5 km {:+6.2} K from the midpoint: split {:.4}, mean height {:.4}",
+                offset, a.albedo, b.albedo
+            );
+            if offset > 0.0 {
+                assert!(a.albedo > b.albedo, "{offset}: {a:?} against {b:?}");
+            } else {
+                assert!(a.albedo < b.albedo, "{offset}: {a:?} against {b:?}");
+            }
+            let read = model.point_albedo(t, split, &relief, Some(&table));
+            assert!((read.albedo - a.albedo).abs() < 1e-9);
+            assert!((read.slope_per_k - a.slope_per_k).abs() < 1e-8);
+        }
+        for (t, ruled_split, ruled_mean) in [
+            (275.0, 0.537, 0.615),
+            (280.0, 0.504, 0.391),
+            (285.0, 0.420, 0.299),
+        ] {
+            let (a, b) = (
+                model.point_albedo(t, split, &relief, None).albedo,
+                model.point_albedo(t, mean, &relief, None).albedo,
+            );
+            eprintln!("{t} K: split {a:.3} ({ruled_split}), mean height {b:.3} ({ruled_mean})");
+            assert!((a - ruled_split).abs() < 0.01 && (b - ruled_mean).abs() < 0.01);
+        }
+    }
+
+    /// R09.T13.g (decision-r09-t13ge §1.6, g2): the heat capacity of a point half sea and half a
+    /// 3 km plateau, just above the freezing point at sea level, carries the open sea's capacity
+    /// on its sea share, its water's surface at the sea level, where the plateau's quantiles would
+    /// read ice; a lake whose surface is 3 km up reads that surface's ice.
+    #[test]
+    fn a_sea_beside_a_plateau_keeps_the_open_sea_s_heat_capacity() {
+        let inputs = reference::earth_like();
+        let model = EnergyBalance::for_inputs(&inputs);
+        let relief = split_and_mean(&inputs);
+        let split = relief.hypsometry().point(0);
+        let point = model.freezing.point_k().expect("water freezes");
+        let t = point + 0.5;
+        let capacity = model.heat_capacity(relief.water_k(t, split), 0.5);
+        let open = LAND_HEAT_CAPACITY_J_PER_M2_K * (0.5 + 0.5 * SEA_HEAT_CAPACITY_RATIO);
+        assert_same_bits(capacity, open);
+        // The plateau's ground, 17 K colder, would read the frozen sea's 2.0.
+        let gamma = lapse::lapse_rate_k_per_m(&inputs);
+        let frozen = LAND_HEAT_CAPACITY_J_PER_M2_K * (0.5 + 0.5 * ICE_HEAT_CAPACITY_RATIO);
+        assert_same_bits(model.heat_capacity(t - gamma * 3_000.0, 0.5), frozen);
+        let lake = PointHeights::new(split.quantiles_m, 3_000.0);
+        assert_same_bits(model.heat_capacity(relief.water_k(t, &lake), 0.5), frozen);
+    }
+
+    /// R09.T13.g (decision-r09-t13ge §1.6): with no transport and τ = 0, a column's ground
+    /// temperature at a given sunlight is the same at every height: its outgoing radiation is the
+    /// ground's own, σ`T_g`⁴, and its albedo reads `T_g`, so the steady state of each band, every
+    /// one under the same sunlight and each at its own height from 0 to 7.1 km, holds the same
+    /// ground. Under the reference Earth's τ, with an albedo that cannot flip, the higher ground is
+    /// colder, by less than Γz.
+    #[test]
+    fn with_no_transport_and_no_greenhouse_the_ground_s_temperature_is_independent_of_height() {
+        let inputs = reference::earth_like();
+        let mut model = EnergyBalance::for_inputs(&inputs);
+        model.transport_kg_m2_s = 0.0;
+        let grid = ModelGrid::zonal();
+        let height = |k: usize| 100.0 * super::super::grid::index(k);
+        let relief = Relief::of(
+            &inputs,
+            Hypsometry::new(
+                (0..LATITUDE_BANDS)
+                    .map(|k| PointHeights::level(height(k), 0.0))
+                    .collect(),
+            ),
+        );
+        let gamma = lapse::lapse_rate_k_per_m(&inputs);
+        let sunlight = vec![300.0; LATITUDE_BANDS];
+        for (factor, ground_k) in [(1.0, 250.0), (1.0, 290.0), (1.65, 270.0)] {
+            let start = (0..LATITUDE_BANDS)
+                .map(|k| ground_k + gamma * height(k))
+                .collect();
+            // Under a greenhouse, an albedo that cannot flip, so that the contrast is the column's.
+            let model = if factor > 1.0 {
+                EnergyBalance {
+                    freezing: Freezing::Never {
+                        albedo: ICE_FREE_ALBEDO,
+                    },
+                    ..model
+                }
+            } else {
+                model
+            };
+            let steady = model.steady_state_over(&grid, factor, &sunlight, start, &relief);
+            assert!(steady.converged, "{factor}");
+            let grounds: Vec<f64> = (0..LATITUDE_BANDS)
+                .map(|k| steady.t_k[k] - gamma * height(k))
+                .collect();
+            let (low, high) = grounds
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), &g| {
+                    (l.min(g), h.max(g))
+                });
+            eprintln!(
+                "x {factor}: ground {:.6} K at sea level, {:.6} K at 7.1 km; spread {:e} K",
+                grounds[0],
+                grounds[LATITUDE_BANDS - 1],
+                high - low
+            );
+            if factor > 1.0 {
+                let fall = grounds[0] - grounds[LATITUDE_BANDS - 1];
+                assert!(
+                    fall > 1.0 && fall < gamma * height(LATITUDE_BANDS - 1),
+                    "{fall}"
+                );
+            } else {
+                assert!(high - low < 1e-6, "{grounds:?}");
+            }
+        }
+    }
+
+    /// R09.T13.g (decision-r09-t13ge §1.6, g5): the outgoing radiation of every quantile is
+    /// positive and rises with T, over τ from 0 to 20, ground from sea level to four scale heights
+    /// up and grounds of 50–300 K, and is never below the ground's emission transmitted through the
+    /// column above it; its slope is the derivative of the branch that binds. A τ = 10 column four
+    /// scale heights up takes that floor; at the sea level the floor never binds, and the form is
+    /// σT⁴ ÷ (1 + ¾τ) to the bit.
+    #[test]
+    fn the_outgoing_radiation_rises_with_t_and_never_falls_below_the_transmitted_ground() {
+        let inputs = reference::earth_like();
+        let (gamma, h) = (lapse::lapse_rate_k_per_m(&inputs), scale_height_m(&inputs));
+        eprintln!("Γ {:.4} K km⁻¹, H {:.1} m", gamma * 1e3, h);
+        assert!((h - 8_470.0).abs() < 20.0, "{h}");
+        let transmission = |tau: f64, z: f64| {
+            math::exp(-FLUX_OPTICAL_DEPTH_PER_GREY * tau * math::exp(-z / (2.0 * h)))
+        };
+        let mut floors = 0;
+        for tau in [0.0, 0.3, 0.876, 2.0, 5.0, 10.0, 20.0] {
+            let factor = 1.0 + EDDINGTON_COEFFICIENT * tau;
+            for scale_heights in [0.0, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0] {
+                let z = scale_heights * h;
+                let tr = transmission(tau, z);
+                for ground in [50.0, 100.0, 150.0, 200.0, 250.0, 300.0] {
+                    let t = ground + gamma * z;
+                    let at = |dt: f64| {
+                        quantile_emission(&Column::at(t + dt, factor), ground + dt, 1.0, tr)
+                    };
+                    let e = at(0.0);
+                    let through = STEFAN_BOLTZMANN * math::powi(t, 4) / factor
+                        - tr * STEFAN_BOLTZMANN * (math::powi(t, 4) - math::powi(ground, 4));
+                    let floor = tr * STEFAN_BOLTZMANN * math::powi(ground, 4);
+                    assert!(e.flux_w_m2 > 0.0, "τ {tau}, z {z}, {ground} K: {e:?}");
+                    assert!(e.slope_w_m2_k > 0.0, "τ {tau}, z {z}, {ground} K: {e:?}");
+                    assert!(at(0.5).flux_w_m2 > e.flux_w_m2);
+                    assert!(e.flux_w_m2 >= floor * (1.0 - 1e-12));
+                    assert!((e.flux_w_m2 - through.max(floor)).abs() < 1e-9 * e.flux_w_m2);
+                    if (through - floor).abs() > 1e-3 * floor {
+                        let numeric = (at(1e-3).flux_w_m2 - at(-1e-3).flux_w_m2) / 2e-3;
+                        assert!(
+                            (numeric - e.slope_w_m2_k).abs() < 1e-6 * e.slope_w_m2_k,
+                            "τ {tau}, z {z}, {ground} K: {numeric} against {e:?}"
+                        );
+                    }
+                    if through < floor {
+                        floors += 1;
+                    }
+                    if scale_heights == 0.0 {
+                        let sea = emission(t, factor);
+                        assert_same_bits(e.flux_w_m2, sea.flux_w_m2);
+                        assert_same_bits(e.slope_w_m2_k, sea.slope_w_m2_k);
+                    }
+                }
+            }
+        }
+        eprintln!("the floor bound {floors} cases");
+        // Four scale heights under τ = 10: e^(−15 e^(−2)) = 0.131 > 1 ÷ 8.5.
+        let (tau, z, ground) = (10.0, 4.0 * h, 220.0);
+        let tr = transmission(tau, z);
+        assert!(tr > 1.0 / (1.0 + EDDINGTON_COEFFICIENT * tau));
+        let factor = 1.0 + EDDINGTON_COEFFICIENT * tau;
+        let e = quantile_emission(&Column::at(ground + gamma * z, factor), ground, 1.0, tr);
+        assert_same_bits(e.flux_w_m2, tr * STEFAN_BOLTZMANN * math::powi(ground, 4));
+        // A floored ground's emission holds still.
+        let held = quantile_emission(&Column::at(400.0, factor), 30.0, 0.0, tr);
+        assert!(held.flux_w_m2 > 0.0);
+        assert_same_bits(held.slope_w_m2_k, 0.0);
+    }
+
+    /// The fold guard's choice (decision-r09-t13ge §1.4, g4): the kept probe whose surface mean
+    /// lies nearer the target, ties to the warm side, either side alone, or none; on the relief
+    /// Earth's fold, 287.34 K on the cold branch and 288.46 K on the warm one, the warm.
+    #[test]
+    fn the_fold_guard_takes_the_nearer_converged_probe_ties_to_the_warm_side() {
+        let probe = |factor: f64, mean: f64| Probe {
+            emission_factor: factor,
+            surface_mean_k: mean,
+            steady: Steady {
+                t_k: vec![mean],
+                converged: true,
+            },
+        };
+        let chosen = |cold: Option<Probe>, warm: Option<Probe>| {
+            nearer(cold, warm, 288.0).map(|probe| probe.emission_factor)
+        };
+        assert_eq!(
+            chosen(Some(probe(1.656_70, 287.34)), Some(probe(1.656_80, 288.46))),
+            Some(1.656_80)
+        );
+        assert_eq!(
+            chosen(Some(probe(1.0, 287.9)), Some(probe(2.0, 288.5))),
+            Some(1.0)
+        );
+        assert_eq!(
+            chosen(Some(probe(1.0, 287.5)), Some(probe(2.0, 288.5))),
+            Some(2.0)
+        );
+        assert_eq!(chosen(Some(probe(1.0, 280.0)), None), Some(1.0));
+        assert_eq!(chosen(None, Some(probe(2.0, 300.0))), Some(2.0));
+        assert_eq!(chosen(None, None), None);
     }
 }

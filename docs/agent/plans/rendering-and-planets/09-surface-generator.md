@@ -2456,6 +2456,44 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     - a water ice on a body whose zonal maximum is below its threshold is placed by T13.d's own
       rule.
   - _Acceptance:_ `cargo test -p hyperion-sim planetary::surface::steps::climate`.
+- **R09.T13.g Relief in the energy balance** (after T13.a, before T13.d, which takes its lapse rate;
+  decision-r09-t13a-relief). `steps/climate/ebm.rs` and one lapse-rate function. Each model grid
+  point holds its surface heights above the sea level (the water's surface over water) as eight
+  equal-area quantiles of the field cells whose centres it holds, a point holding none taking the
+  nearest point's, equatorward first. The prognostic temperature stays the sea-level one, T, and
+  the transport is unchanged. The albedo and the ice heat capacity read each quantile's ground
+  temperature T − Γz, and the outgoing radiation is σT⁴ ÷ (1 + ¾τ) − e^(−(3/2)τ_z) σ(T⁴ − (T − Γz)⁴)
+  with τ_z = τ e^(−z ÷ 2H), plan 14's τ ∝ √p and H the air's scale height at plan 14's mean, each
+  averaged over the quantiles. The sea's ice heat capacity reads the water's own surface,
+  T − Γ z̄_w, z̄_w the point's flooded cells' mean water-surface height above the sea level. The
+  outgoing radiation is never below the ground's emission transmitted through the column above it,
+  e^(−(3/2)τ_z) σ(T − Γz)⁴. A point holding no cell takes the cell holding its centre (T13.b's
+  rule), and the zonal model's band the nearest band's, equatorward first (T13.a's). τ's zonal
+  solve takes each band's quantiles over all its cells; where its final probe's steady state has
+  not converged, it takes the nearer, by surface mean, of the last converged probes on each side
+  (decision-r09-t13ge). Γ is plan 14's ground gradient, α g ÷ c_p(T_s) (`structure::lapse_factor`),
+  the one lapse rate T13.d writes to the header; the reference Earth's air carries its water
+  vapour. τ is solved so that the surface mean, of T − Γz, is plan 14's. Tests:
+  - with every height zero, T13.a's output bit for bit;
+  - the reference Earth with its land's hypsometry by hand:
+    - the set-up: Earth2014's SUR2014 at 5′, eight equal-area quantiles a band; each band's land
+      cells at those heights in turn, its sea flooded to the sea level; `EARTH_LAND_SHARE`'s mask;
+    - it lies within 5 K of Siler et al.'s Fig. 2b from 58.75° S northward, within 8 K from
+      73.75° S to 61.25° S and within 11 K at 76.25° S, every band printed;
+    - its 76.25° S and 73.75° S bands are each at least 1 K colder than the same Earth with every
+      land cell at the sea level;
+    - its τ solve's steady state has converged, with τ, the steady and seasonal surface means and
+      the mean constant printed;
+  - a band half at sea level and half 3 km up is brighter than one wholly at their mean height
+    where that height's ground lies above the albedo's midpoint, and darker below it;
+  - the heat capacity of a point half sea and half a 3 km plateau, just above the freezing point at
+    sea level, carries the open sea's capacity on its sea share;
+  - with no transport and τ = 0, a column's ground temperature at a given sunlight is the same at
+    every height;
+  - the outgoing radiation is positive and rises with T at every quantile, and is never below the
+    ground's emission transmitted through the column above it; a τ = 10 column four scale heights
+    up takes that floor.
+  - _Acceptance:_ `cargo test -p hyperion-sim planetary::surface::steps::climate`.
 
 Offline check (recorded, not in CI): the reference Earth's monthly fields against an ExoPlaSim run
 of the same inputs, with the differences written into this plan. Acceptance:
@@ -3038,7 +3076,7 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
     T7.c after T7.b; T6.b after T6.a; T8 after
     T4–T7; T9 after T8; T11 after T10; T12.a–b after T11; T12.c after T11 and T0.b's isotherm item;
     T12.d after T10 and T7.e; T12.e after T12.a, T4 and T5; T13.a after T10 and T0.b's transport-cap
-    items, T13.b–e after it; T14.a after T12; T14.b after T14.a, T4 and T0.b's erodibility item;
+    items, T13.b–e and T13.g after it, T13.d after T13.g; T14.a after T12; T14.b after T14.a, T4 and T0.b's erodibility item;
     T14.c after T14.b and T6.b; T14.d after T14.c and T13; T15 after T13 and T14; T16 after T15;
     T17 after T3 and T10; T18 after T2; T19.a after T17 and T18; T19.b after T19.a and T8; T19.c
     after T19.b; T20 last. No task waits on an owner's sign-off or on an unbuilt galaxy-plan task;
@@ -8480,7 +8518,10 @@ column`, with one column; the latitude solve and the stencil run per band, so R0
     shares: an ice sheet at sea level melts its albedo in summer, the reference Earth's
     Antarctica by up to 11 K. Lean: R09.T13.d gives the model each grid point's area-mean surface
     height, its albedo and emission reading T − Γ z̄ at T13.d's lapse rate, the output staying at
-    sea level (the diagnostic above).
+    sea level (the diagnostic above). _Ruled 2026-10-16 (decision-r09-t13a-relief):_ R09.T13.g,
+    built now: the albedo and ice heat capacity over each grid point's hypsometry, the outgoing
+    radiation through the column above the ground, Γ plan 14's ground gradient with the reference
+    Earth's vapour.
   - _Kaspi and Showman's gravity and radius sweeps_ (their §3.4, Fig. 18a: the contrast roughly
     triples from an ice planet's density, 1,000 kg m⁻³, to an iron planet's, 7,874, at Earth's
     radius and column mass; §3.6, Fig. 20b: larger planets at Earth's density have smaller
@@ -9144,3 +9185,163 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     tests' stand-in palette entries; Leighton and Murray 1966 and Hamilton et al. 2016 as the
     ruling read them; that Titan's north-polar seas are the richer in methane (ethane identified in
     Ontario Lacus, Brown et al. 2008, Nature 454, 607, title read).
+- **Deviations in T13.g, as built** (2026-10-19; lane r09-climate-2, on `f01c6927`; built to
+  decision-r09-t13a-relief §1–§3 and decision-r09-t13ge §1, whose forms, tests and bounds bind).
+  - _Files._ A private submodule the plan does not name, `steps/climate/hypsometry.rs` (each model
+    grid point's eight equal-area quantiles of its cells' heights above the sea level, its flooded
+    cells' mean water-surface height z̄_w, and its shape); `ebm.rs`'s relief (`Relief`, `Ground`,
+    `scale_height_m`, the per-quantile albedo and outgoing radiation, the sea's capacity at its
+    water's surface, the surface-mean τ and its fold guard); `mod.rs`'s `reliefs`, which the
+    energy-balance and locked energy-balance arms build from the working state on their grid and
+    on the zonal grid in the same coordinates; the tests in `ebm.rs`, `hypsometry.rs` and
+    `tests.rs`; `NOTICE`'s "Test data (not shipped)" entry for Earth2014, decision-r09-t13ge §1.5's
+    text verbatim; and the "What is built" lines of `steps/climate/mod.rs`, `steps/mod.rs` and
+    `planetary/surface/mod.rs`. Γ is T13.d's `lapse::lapse_rate_k_per_m`, and the reference Earth's
+    vapour was T13.d's. No contract moved: `CoarseInputs`, the working state's types, the field's
+    types, the header, the wire and every golden are as they were, and `GENERATOR_VERSION` stays 22.
+  - _The plan's text._ R09.T13.g's subtask above is decision-r09-t13a-relief's plan text (c) as
+    decision-r09-t13ge's plan text (a) amends it, its Tests that ruling's §1.6; the order line
+    takes (d), and T13.a's deferred finding "The model never sees the relief" (e). Plan text (a),
+    Design note 8's relief sentence, and (b), T13.a's test wording, are left for the docs batch.
+  - _The ground a run reads._ `ebm::solve`, `solve_locked` and `EnergyBalance::run` take a
+    `Ground`: `Relief { grid, zonal }`, the run's grid's relief and the zonal one τ is solved on,
+    or `SeaLevel`, the model as T13.a–d built it, which reads no hypsometry. The step always passes
+    the field's relief, at the sea level wherever its heights are zero; `SeaLevel` is what the
+    tests hold that zero to (kept with `expect(dead_code)` outside the tests).
+  - _A point's shape._ A point whose eight quantiles and z̄_w are all zero, of either sign, is at
+    the sea level and takes T13.a's arithmetic (`functions`, `emission`, `heat_capacity` at T), so
+    a world whose every height is zero is T13.a's to the bit; one whose quantiles are exactly equal
+    but not all zero is evaluated once at that height; the rest at each quantile, the sums in
+    quantile order times ⅛, exact.
+  - _The quantiles._ Each point's cells, binned by their centres as the sea shares are and sorted
+    by (height, cell index) after every height is asserted finite, give quantile q at the first
+    cell whose cumulative solid angle, summed in height order, reaches (q + ½) ÷ 8 of the point's;
+    z̄_w is summed in cell-index order. A point that holds no cell takes the cell at its centre on
+    the 72 × 72 and locked grids (its height for all eight; z̄_w that height if it is flooded, else
+    0), and on the zonal grid the nearest band that holds one, equatorward first; a field of no
+    cells is at the sea level. A height may be negative, where a dry depression lies below the
+    sea level (after R09.T12.e): its ground is warmer and the column above it thicker.
+  - _The ground's floor_ (decision-r09-t13a-relief §1.2's guard) holds `T_g` at the night floor in
+    the albedo, the outgoing radiation and the surface mean, its slope then zero. The sea's
+    capacity reads T − Γ z̄_w unfloored: its thresholds lie at the freezing point, far above any
+    floor.
+  - _The table._ A seasonal run reads each quantile's albedo through `Tabulated` where the table
+    holds its ground, and directly elsewhere; the table's span reaches Γ times the highest
+    quantile further down (and Γ times the deepest further up), nothing at the sea level, so its
+    nodes are T13.a's there. h and its slope stay at T, read as before. The τ solve's steady states
+    evaluate directly, as built.
+  - _The radiation._ τ = (x − 1) ÷ ¾ (`EDDINGTON_COEFFICIENT`, Spiegel et al.'s 1 + ¾τ), each
+    point-quantile's e^(−z ÷ 2H) is taken once per relief and its transmission
+    e^(−(3/2)τ e^(−z ÷ 2H)) once per emission factor, each steady state's or orbit run's, through
+    `math::exp`; each point's sea-level column, σT⁴ ÷ (1 + ¾τ), T³ and T⁴, once per step for its
+    quantiles. H = R `T_s` ÷ (μ g) with `Air::of`'s μ, 8,471.9 m on the reference Earth; a scale
+    height that is not positive and finite thins nothing (none is reached).
+  - _The fold guard_ (g4) keeps the bracket's ends among the probes, where their steady states
+    converged; where no probe converged it answers the final midpoint as built. Its answer is
+    labelled `OpticalDepth::Folded`. `Fitted` carries its steady state's surface mean, and the
+    model's `Solution` whether that steady state converged and its surface mean, which the tests
+    and the step's diagnostics read. The step's diagnostics (`Diagnostics::surface_means`, for the
+    tests) keep the zonal τ solve's and the seasonal run's surface means (G3).
+  - _The test set-up._ `tests::synthetic_sea` puts its land at the sea level, dry (it was 100 m
+    up, decision-r09-t13ge §1.6), its sea 100 m below, flooded; given `EARTH_HYPSOMETRY_M` (Earth2014
+    SUR2014 at 5′, the lane's table, a `const` of 72 × 8 integers in metres cited to Hirt and Rexer
+    2015 with Earth2014's inputs and CIAT acknowledged), each band's land cells, in their order
+    from −180°, take its eight heights in turn, the q-th eighth of the band's land by each cell's
+    midpoint at quantile q. T13.a's Earth test now builds its ground as the step does, from the
+    cells, and gives the same bits (its land at the sea level). The mean constant c, which needs
+    the step's 72 × 72 run (6.5 s on one thread), is printed by its own slow test
+    (`the_step_s_mean_constant_reconciles_the_relief_earth_s_surface_means`, ignored as slow);
+    the Earth test prints τ and the steady and seasonal surface means.
+  - _Zero relief, measured._ A digest of the reference Earth's model output at level 7 on its
+    synthetic sea with every height zero (the zonal ERA field, the 72 × 72 model's annual and
+    monthly fields with τ, and the whole step's climate cells, ices, liquids, corrections and Γ),
+    taken at `f01c6927` before any edit and again through the relief path after the build, is
+    the same to the bit (not kept as a test); `with_every_height_zero_the_model_is_t13a_s_to_the_bit`
+    holds the zonal, geographic (level 5, all land) and one-month locked models to `SeaLevel`.
+  - _The Earth with its hypsometry_ (zonal, level 7; model less ERA-Interim at sea level, K; the
+    same Earth with its land at the sea level in brackets): 76.25° S +9.32 (+11.40), 73.75° S +6.89
+    (+8.75), 71.25° S +6.64 (+8.24), 68.75° S +6.43 (+7.76), 66.25° S +6.31 (+7.37), 63.75° S +5.52
+    (+6.35), 61.25° S +4.72 (+5.35); from 58.75° S northward at most 4.47 at 51.25° S (4.83 at
+    58.75° S); within 23.75° of the equator 0.8–3.4 K cold (1.3–3.9), and north of 73.75° N +0.9
+    to +3.0 (+1.0 to +3.2).
+    76.25° S and 73.75° S are 2.08 and 1.86 K colder than at the sea level. τ 0.8754, by the fold
+    guard (at the sea level 0.8630, solved), its steady state converged with a surface mean of
+    288.422 K, the warm branch's probe; 8 orbits, the seasonal surface mean 287.467 K and the
+    sea-level mean 288.611 K (at the sea level 9 orbits and 288.378 K). The ruling's reproduction
+    (§1.1, cap B) read +9.29, +6.85, … +4.64, 4.45 at 51.25° S and τ 0.8756: within 0.08 K.
+  - _The other ruled tests, measured._ Over a band half at the sea level and half 3 km up against
+    one wholly at 1.5 km, at 275, 280 and 285 K at sea level, 0.536 against 0.613, 0.504 against
+    0.389 and 0.418 against 0.298 (the ruling's 0.537, 0.615, 0.504, 0.391, 0.420, 0.299 at Γ 5.85
+    K km⁻¹). With no transport and τ = 0 the steady grounds from 0 to 7.1 km agree to 3 × 10⁻¹⁴ K
+    (186.833 K under 300 W m⁻²); under τ 0.876 and an albedo that cannot flip the ground 7.1 km up is
+    14.29 K colder, against Γz's 41.3 K. The outgoing radiation's floor binds in 78 of the 294
+    quantile cases from τ 0 to 20, ground 0 to 4 H and 50 to 300 K.
+  - _The step on the relief Earth_ (level 7; G3): the zonal τ solve's surface mean 288.422 K, the
+    geographic seasonal run's 286.851 K, and the mean constant c +1.145 K (a −4.670 K), against
+    c −0.293 K on the same Earth at the sea level; at level 8, 288.453 K, 286.862 K and +1.138 K.
+  - _Figures that moved._ Every test that builds its world from `Working::initial` or sets its land
+    at the sea level reads no relief and moved nowhere, T13.d's corrections table among them (each
+    world through the step alone from its initial state). The Titan-like basins' land, 100 m up,
+    now reads 100 m of relief: its basins' means stay 92.502 and 94.167 K, its methane's share
+    0.749 888 033 823 2119 of the sea (was …2122). The radiative and isothermal worlds read none
+    (Γ = 0 or no albedo). The reference Earth through `coarse_pass`, whose relief is R09.T12.a–d's
+    and whose sea level is the interim lowest cell, moved most (below, and the deferred findings):
+    at level 8 its c went from +54.43 to −42.37 K and its a from +2.496 to −23.849 K.
+  - _Tests and acceptance._ `cargo test -p hyperion-sim --lib planetary::surface::steps::climate`
+    runs 91 tests, 87 passing and four ignored as slow (T13.b's three and the G3 test), 12 of them
+    T13.g's (`hypsometry` 4, `ebm` 5, `tests` 3), in 12.0 s at 4 threads; the Earth test takes 1.8 s
+    and the zero-relief test 4.1 s alone, one thread. `cargo test -p hyperion-sim --lib
+planetary::surface::` passes, 204 with 22 ignored (112.9 s at 4 threads, against 53.9 s at
+    `f01c6927`), and so do `surface_material_worlds`, `surface_ground_worlds` and
+    `surface_albedo_worlds` (`--features testing`; 14.1, 14.0 and 13.6 s, against 6.8, 6.9 and
+    13.6 s).
+  - _Cost_ (provisional: the climate step alone at level 8, one thread, the sim at opt-level 2, a
+    shared machine at load 3–6): the reference Earth through plates, relief and craters 2.07 s at
+    `f01c6927` and 9.44 s with the relief, every one of its 5,184 points raised (eight of them
+    level; 3 orbits either way); its zonal model alone, τ and orbits, 2.07 s, at a fold. The reference Earth on its synthetic
+    sea, every height zero, 5.43 s and 5.69 s; with Earth2014's hypsometry 6.76 s, of which the
+    zonal model, τ and orbits, takes 1.5 s, at its fold (T13.a's whole zonal model took 0.16 s).
+- **Deferred findings (2026-10-13 rule)** (R09.T13.g; recorded, not ruled; each for "main"'s list).
+  - _From decision-r09-t13ge_ (its §3, for R09.T13.i, the energy-balance model's revision, with R1–R3
+    and O1):
+    - G1. The Antarctic warm bias: +9.32 K at 76.25° S, +6.3 to +6.9 K over 73.75–66.25° S, +5.52 K
+      at 63.75° S as built (the ruling's +9.29, +6.3 to +6.9 and +5.48). Its parts: (a) the
+      Southern Ocean's own bias, +4.4 to +4.5 K at 48.75–58.75° S with no relief (T13.a's finding); (b) the
+      temperature-only albedo has no perennial ice, so the summer coast at z = 0 darkens to
+      0.30–0.37, where a real ice shelf or fast ice stays bright; (c) the column-to-surface
+      relation, an energy-about-right column 9 K warm at sea level (R1, R3), and ERA's unread
+      reduction over the plateau. Candidate remedies: an ice albedo that remembers T13.d's
+      perennial ice, or a mass-balance key (with D1); a two-part emission (R1); an inversion (R3);
+      the ocean term and cloud (O1). The bounds are then to be tightened.
+    - G2. The fold: the relief Earth's annual-mean steady states have no state with a surface mean
+      of 288 K, and the guard fired as built, taking the warm branch's probe at 288.422 K (the
+      ruling's 288.46 K); c takes up the rest. A τ solved on the seasonal mean, where the jump is
+      smoothed (T13.d's deferred lean), is for the revision if c grows.
+    - G3. The zonal τ solve pools each band's quantiles while the geographic run varies in
+      longitude: on the relief Earth the zonal steady state's surface mean is 288.422 K and the
+      geographic seasonal run's 286.851 K, and c is +1.145 K (level 7).
+    - G4. The Earth test's ice shelves are sea (Natural Earth 1:110m); as land at their surface
+      they move 76.25° S by +0.04 K (the lane's `shelves` run).
+  - _The prototype's miss_ (decision-r09-t13ge §1.3). decision-r09-t13a-relief §4's "within 5 K
+    from 73.75° S northward and within 8 K south of it" came from T13.a's mean-height diagnostic,
+    which that ruling then refused; the ruled forms miss it (+6.89 K at 73.75° S, +9.32 K at
+    76.25° S), as the lane's prototype did, and the re-ruled bounds (5 K from 58.75° S, 8 K to
+    73.75° S, 11 K at 76.25° S, and 1 K colder than at the sea level) hold. No tuning.
+  - _The reference Earth's interim relief folds_ (for "main", with R09.T12.e). Dry, its sea level
+    the lowest cell (−10,498 m at level 8), its cells stand 7,972 m above it on average and up to
+    19,376 m, so every grid point is raised. Its zonal steady states' surface mean jumps from 237.5 K
+    at x = 4.48 to 376.2 K at x = 7.39 (a snowball against an ice-free hot branch), so no τ holds
+    288 K: the guard takes the cold side's probe (x 4.67, τ 4.90, surface mean 242.37 K), from
+    which the seasonal run leaves for the hot branch (surface mean 330.3 K, sea-level mean
+    376.7 K, 3 orbits), and c is −42.37 K (a −23.85 K). Its tests pass. Lean: record; R09.T12.e's
+    flood puts the sea level at the ocean's and brings the Earth's mean height to about 230 m, and
+    the guard then reads the relief Earth's fold above. The guard's nearer probe can lie on a
+    branch the seasonal run leaves, which G2's seasonal-mean τ would not; for the revision.
+  - _The cost_ (with T13.b's deferred finding on the pass tests). The relief's per-quantile albedo
+    and radiation take about four times a sea-level point's step, and near a fold τ's zonal
+    steady states run towards their 2,000 iterations, each evaluating eight albedos directly: the
+    reference Earth's climate step went from 2.07 to 9.44 s at level 8, and the surface module's
+    tests from 53.9 to 112.9 s at 4 threads. Lean: read the τ solve's quantile albedos from a table
+    as the seasonal run does (bit for bit at the sea level, which keeps T13.a's direct arithmetic);
+    R09.T12.e's sea makes most points level; and T13.b's lean, R09.T16's once-per-binary run of
+    the reference worlds.

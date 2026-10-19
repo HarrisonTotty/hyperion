@@ -15,7 +15,14 @@
 //!    cell's centre takes the state of the cell that holds its own. Until R09.T12.e floods the
 //!    ocean every cell's water surface is its ground, so every world is all land.
 //! 2. The model that [`ClimateRegime::model`](crate::planetary::surface::ClimateRegime) names, on
-//!    its own grid: the annual mean and each month's mean at every grid point.
+//!    its own grid: the annual mean and each month's mean at every grid point. The energy-balance
+//!    models read the relief (`hypsometry`, R09.T13.g): each grid point's eight equal-area
+//!    quantiles of its cells' heights above the sea level, the water's surface over water, binned
+//!    as the sea shares are, with its flooded cells' mean water-surface height; and on the zonal
+//!    grid in the model's coordinates each band's quantiles over all of its cells, for τ's solve.
+//!    Their albedo, outgoing radiation and sea-ice heat capacity read the ground's temperature,
+//!    the sea-level temperature less Γ z at each quantile, and τ is solved for the surface mean
+//!    (decision-r09-t13a-relief §1, decision-r09-t13ge §1).
 //! 3. The normalisation on the model grid (`normalise`; decision-r09-t13d-normalisation §2):
 //!    plan 14's contrasts as corrections a P₂(sin φ) + b P₁(cos γ) on the annual sea-level field,
 //!    by an exact linear solve on the energy-balance and isothermal models; on the radiative model
@@ -61,15 +68,20 @@
 //! classifier reads it per cell from these temperatures against the cell's crust entry's
 //! transition. R09.T13.d added the normalisation, the guard, the lapse rate, the mean, the ices and
 //! the liquids (the pipeline's steps 3–8), and the energy-balance albedo's shift to the climate
-//! condensable's freezing point by `SubstanceId` (`frost`). R09.T13.e–f's precipitation, winds and
-//! cold traps are still to come. A world places liquids only on the cells the relief step floods
-//! (R09.T12.e's ocean, decision-r09-t12-coarse R8); until R09.T12.e every world is dry.
+//! condensable's freezing point by `SubstanceId` (`frost`). R09.T13.g gave the energy-balance
+//! models the relief (`hypsometry`, and `ebm`'s relief terms, its surface-mean τ and the fold
+//! guard): a world whose every height above the sea level is zero is T13.a's to the bit.
+//! R09.T13.e–f's precipitation, winds and cold traps are still to come. A world places liquids
+//! only on the cells the relief step floods (R09.T12.e's ocean, decision-r09-t12-coarse R8); until
+//! R09.T12.e every world is dry, its sea level its lowest elevation, so the energy-balance models
+//! read every cell's height above that.
 
 mod airless;
 mod coordinates;
 mod ebm;
 mod frost;
 mod grid;
+mod hypsometry;
 pub(crate) mod ice;
 mod isothermal;
 mod lapse;
@@ -88,9 +100,11 @@ use crate::planetary::hooks::surface::night_floor;
 use crate::planetary::surface::grid::parent_index;
 use crate::units::Kelvin;
 use coordinates::Coordinates;
+use ebm::{Ground, Relief};
 #[cfg(test)]
 use grid::LATITUDE_BANDS;
 use grid::{GridClimate, ModelGrid};
+use hypsometry::Hypsometry;
 use ice::{IceKey, PlacedIce};
 use normalise::Correction;
 use seas::PlacedLiquid;
@@ -130,6 +144,20 @@ struct Diagnostics {
     ices: Vec<PlacedIce>,
     /// The liquids placed, in order.
     liquids: Vec<PlacedLiquid>,
+    /// The energy-balance models' surface means ([`SurfaceMeans`]); none on the other models.
+    surface_means: Option<SurfaceMeans>,
+}
+
+/// An energy-balance model's surface means over its relief, K, which R09.T13.d's constant c
+/// reconciles (decision-r09-t13ge §3, G3): its τ solve's, of the zonal grid's steady state over
+/// each band's pooled quantiles, and its seasonal run's, of the annual field on its own grid over
+/// each point's.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SurfaceMeans {
+    /// The τ solve's steady state's, K.
+    steady_k: f64,
+    /// The seasonal run's annual field's, K.
+    seasonal_k: f64,
 }
 
 /// The kind of mean a model's records are normalised in (decision-r09-t13d-normalisation §2.2),
@@ -158,6 +186,7 @@ struct Normalised {
     correction: Correction,
     residuals_k: [f64; 3],
     kind: MeanKind,
+    surface_means: Option<SurfaceMeans>,
 }
 
 /// `t_k`, a climate temperature in kelvin, asserted finite: one that is not is a fault of the
@@ -179,7 +208,10 @@ fn finite_k(t_k: f64) -> f64 {
 fn normalised(pass: &Pass<'_>, working: &Working) -> Normalised {
     let inputs = pass.inputs();
     let floor = night_floor(inputs.heat_flow()).value();
-    let arithmetic = |grid: ModelGrid, coordinates: Coordinates, climate: GridClimate| {
+    let arithmetic = |grid: ModelGrid,
+                      coordinates: Coordinates,
+                      climate: GridClimate,
+                      surface_means: Option<SurfaceMeans>| {
         let correction = normalise::arithmetic(inputs, &grid, coordinates, &climate.annual_k);
         let mut climate = climate;
         normalise::apply(&mut climate, &grid, coordinates, &correction);
@@ -191,25 +223,42 @@ fn normalised(pass: &Pass<'_>, working: &Working) -> Normalised {
             correction,
             residuals_k: [0.0; 3],
             kind: MeanKind::Arithmetic,
+            surface_means,
         }
+    };
+    let means = |solution: &ebm::Solution, grid: &ModelGrid, relief: &Relief| SurfaceMeans {
+        steady_k: solution.steady_surface_mean_k,
+        seasonal_k: relief.surface_mean_k(grid, &solution.climate.annual_k),
     };
     match inputs.climate().model {
         ClimateModelKind::EnergyBalance => {
             let (grid, coordinates) = (ModelGrid::geographic(), Coordinates::Geographic);
             let sea_share = point_sea_shares(pass, working, &grid, coordinates);
-            let solution = ebm::solve(inputs, &grid, &sea_share, NOMINAL_STEP);
-            arithmetic(grid, coordinates, solution.climate)
+            let (on_grid, zonal) = reliefs(pass, working, &grid, coordinates);
+            let ground = Ground::Relief {
+                grid: &on_grid,
+                zonal: &zonal,
+            };
+            let solution = ebm::solve(inputs, &grid, &sea_share, NOMINAL_STEP, ground);
+            let surface_means = Some(means(&solution, &grid, &on_grid));
+            arithmetic(grid, coordinates, solution.climate, surface_means)
         }
         ClimateModelKind::LockedEnergyBalance => {
             let (grid, coordinates) = (ModelGrid::locked(), Coordinates::TidallyLocked);
             let sea_share = point_sea_shares(pass, working, &grid, coordinates);
-            let solution = ebm::solve_locked(inputs, &grid, &sea_share, NOMINAL_STEP);
-            arithmetic(grid, coordinates, solution.climate)
+            let (on_grid, zonal) = reliefs(pass, working, &grid, coordinates);
+            let ground = Ground::Relief {
+                grid: &on_grid,
+                zonal: &zonal,
+            };
+            let solution = ebm::solve_locked(inputs, &grid, &sea_share, NOMINAL_STEP, ground);
+            let surface_means = Some(means(&solution, &grid, &on_grid));
+            arithmetic(grid, coordinates, solution.climate, surface_means)
         }
         ClimateModelKind::Isothermal => {
             let (grid, coordinates) = airless::frame(inputs);
             let climate = isothermal::solve(inputs, &grid);
-            arithmetic(grid, coordinates, climate)
+            arithmetic(grid, coordinates, climate, None)
         }
         ClimateModelKind::RadiativeEquilibrium => {
             let solution = airless::solve(inputs);
@@ -227,9 +276,30 @@ fn normalised(pass: &Pass<'_>, working: &Working) -> Normalised {
                 correction,
                 residuals_k,
                 kind: MeanKind::Radiative { keys_k },
+                surface_means: None,
             }
         }
     }
+}
+
+/// The energy-balance model's relief from `working`'s field (R09.T13.g;
+/// [`hypsometry`](self::hypsometry)), on `grid` in `coordinates` and on the zonal grid in the same
+/// coordinates, whose bands pool all of their cells for τ's solve (decision-r09-t13ge §1.4, g5).
+#[must_use]
+fn reliefs(
+    pass: &Pass<'_>,
+    working: &Working,
+    grid: &ModelGrid,
+    coordinates: Coordinates,
+) -> (Relief, Relief) {
+    let inputs = pass.inputs();
+    let of = |grid: &ModelGrid| {
+        Relief::of(
+            inputs,
+            Hypsometry::of_field(pass, working, grid, coordinates),
+        )
+    };
+    (of(grid), of(&ModelGrid::zonal()))
 }
 
 /// [`run`], with what it did that is no output.
@@ -285,6 +355,7 @@ fn finish(pass: &Pass<'_>, working: &mut Working, mut model: Normalised) -> Diag
         lower_bound_k: model.lower_bound_k,
         ices,
         liquids,
+        surface_means: model.surface_means,
     }
 }
 
