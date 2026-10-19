@@ -32,17 +32,19 @@
 //! sphere at the datum ([`Working::initial`]). R09.T11 filled [`plates`]: on a mobile lid it writes
 //! each cell's plate, crust and nearest boundary, and each oceanic cell's
 //! [`SeafloorOrigin`]. R09.T12.a began [`relief`]'s coarse elevation, the crust's populations and
-//! the sea floor, R09.T12.b its convergent landforms and R09.T12.c a stagnant lid's provinces, before
-//! T12.e's `σ_h` and sea level; R09.T12.d filled [`craters`]. R09.T13.a filled [`climate`] for a
-//! world whose regime names the seasonal energy-balance model: its zonal model writes each climate
-//! cell's sea-level temperature and monthly anomalies, the lapse rate left 0. R09.T13.b put that
-//! model on 72 × 72 points in latitude and longitude, and a locked world's on 72 × 144 in tidally
-//! locked coordinates. R09.T13.c filled it for the other regimes: radiative equilibrium with
-//! thermal inertia, the day resolved, under a thin air's slab and frost point, and the isothermal
-//! surface. R09.T13.d normalised its field to plan 14's mean and signed contrasts and writes the
-//! lapse rate, each flooded cell's liquid and each cell's ice by substance; the water surfaces
-//! are the relief step's flood (decision-r09-t12-coarse R8). Erosion and the classes are still
-//! no-ops.
+//! the sea floor, R09.T12.b its convergent landforms and R09.T12.c a stagnant lid's provinces;
+//! R09.T12.d filled [`craters`]; and R09.T12.e added the relief step's second entry,
+//! [`relief::run_after_craters`], which the pass calls after the craters: it scales the elevation
+//! to plan 14's `σ_h`, places the sea and writes the realised figures. R09.T13.a filled
+//! [`climate`] for a world whose regime names the seasonal energy-balance model: its zonal model
+//! writes each climate cell's sea-level temperature and monthly anomalies, the lapse rate left 0.
+//! R09.T13.b put that model on 72 × 72 points in latitude and longitude, and a locked world's on
+//! 72 × 144 in tidally locked coordinates. R09.T13.c filled it for the other regimes: radiative
+//! equilibrium with thermal inertia, the day resolved, under a thin air's slab and frost point,
+//! and the isothermal surface. R09.T13.d normalised its field to plan 14's mean and signed
+//! contrasts and writes the lapse rate, each flooded cell's liquid and each cell's ice by
+//! substance; the water surfaces are the relief step's flood (decision-r09-t12-coarse R8).
+//! Erosion and the classes are still no-ops.
 
 pub mod classes;
 pub mod climate;
@@ -312,9 +314,11 @@ pub struct Working {
     pub spectrum: BandSpectrum,
     /// The months of the year, 1 or 12.
     pub months: u8,
-    /// The reconstructed field's realised `σ_h` (R09.T12.e, and again R09.T14.d).
+    /// The whole surface's realised `σ_h`, the reconstructed field's variance with what the
+    /// synthesis adds over it at its band limit (R09.T12.e, and again R09.T14.d).
     pub realised_sigma_h: Metres,
-    /// The reconstructed field's realised greatest relief (R09.T12.e, and again R09.T14.d).
+    /// The realised greatest relief, the cells' greatest less least elevation, which bounds the
+    /// reconstructed field (R09.T12.e, and again R09.T14.d).
     pub realised_relief: Metres,
     /// The plates, in plate-index order (R09.T11): none on a world without them.
     pub plates: Vec<plates::Plate>,

@@ -2,8 +2,13 @@
 //!
 //! The crust's populations about sea level with GDH1's age–depth law at the ridges, the
 //! convergent landforms, a stagnant lid's volcanic provinces with their flexure, and the affine
-//! scaling that makes the reconstructed field's `σ_h` plan 14's, with sea level at the
-//! area-weighted quantile that leaves plan 14's ocean fraction below it.
+//! scaling that makes the whole surface's `σ_h`, the reconstructed field's with what the
+//! synthesis adds over it, plan 14's, with the sea the connected ocean that covers plan 14's ocean
+//! fraction.
+//!
+//! The step has two entries: [`run`] (R09.T12.a–c) builds the elevation, and [`run_after_craters`]
+//! (R09.T12.e), which the pass calls after the coarse craters, whose share its budget counts,
+//! scales it and places the sea (main's ruling R3 on R09.T12.e, 2026-10-19).
 //!
 //! # As built
 //!
@@ -44,9 +49,30 @@
 //! than the coarse cell's Nyquist wavelength, the synthesis's structural share owning what is
 //! finer (`decision-r09-t5.md` item 3).
 //!
-//! Until R09.T12.e, no sea is placed: every cell is dry, the sea level is the lowest elevation, and
-//! the realised `σ_h` and relief are the cells' own (area-weighted s.d., and greatest less least),
-//! interim figures that R09.T12.e replaces with the reconstructed field's.
+//! [`run`] ends with interim figures, which R09.T12.d's crater step keeps true as it smooths its
+//! craters in: no sea, the sea level the lowest elevation, and the realised `σ_h` and relief the
+//! cells' own (area-weighted s.d., and greatest less least).
+//!
+//! R09.T12.e's [`run_after_craters`] then replaces them (main's rulings R1–R10 of 2026-10-19):
+//!
+//! - **The spectrum** ([`structural_spectrum`]): [`BandSpectrum::anchored`] of the crust class's
+//!   shape at its anchor ([`structural_anchor`]), which fixes the synthesis's structural amplitudes.
+//! - **The budget and the scale** ([`budget`]): plan 14's `σ_h`² is the reconstructed field's
+//!   variance, from a quadrature of R09.T4's interpolant ([`quadrature`]), plus the whole share the
+//!   synthesis adds over it: the realised structural share, the small craters', the coarse
+//!   craters' increase and the channels'. One affine scale of the whole field meets it where it is
+//!   at most 1, the coarse craters' part of it carried by their degradation bytes, so that each
+//!   crater's coarse profile and sharpening stay one profile; above 1 the non-crater field alone is
+//!   scaled.
+//! - **The sea** ([`sea`]): the connected ocean, the largest region below the ocean fraction's
+//!   quantile flooded by a priority flood to the level at which it covers the fraction, filled
+//!   with the main liquid; the enclosed depressions stay dry, for R09.T14's lakes.
+//! - **The figures** ([`budget::figures`]): the whole surface's realised `σ_h`, plan 14's, and the
+//!   cells' range as the realised relief. [`craters::run_after_erosion`](super::craters::run_after_erosion)
+//!   refloods the ocean against the same sea level and recomputes them once the craters younger
+//!   than a wet epoch's end are in (ruling R4).
+//!
+//! R09.T12.e draws nothing.
 //!
 //! # The draws
 //!
@@ -61,9 +87,12 @@
 //! - instances 2 and 3 ([`provinces::PROVINCE_INSTANCE`], [`provinces::EDIFICE_INSTANCE`]), level 0's
 //!   first cell alone: the provinces' count and centres, and the edifices' offsets.
 
+pub(crate) mod budget;
 pub(crate) mod convergent;
 mod noise;
 pub(crate) mod provinces;
+pub(crate) mod quadrature;
+pub(crate) mod sea;
 mod seafloor;
 
 #[cfg(test)]
@@ -94,8 +123,12 @@ const _: () = {
 
 use hyperion_surface::field::Crust;
 use hyperion_surface::num;
-use hyperion_surface::synth::SpectrumShape;
+use hyperion_surface::synth::{
+    BandSpectrum, STRUCTURAL_RMS_ICE_RICH, STRUCTURAL_RMS_MOBILE_LID, STRUCTURAL_RMS_STAGNANT_LID,
+    SpectrumShape,
+};
 
+use super::craters::Phase;
 use super::plates::{cell_of, reach, slot};
 use super::{Pass, Working};
 use crate::math;
@@ -165,15 +198,55 @@ pub fn run(pass: &Pass<'_>, working: &mut Working) {
     interim_figures(pass, working);
 }
 
-/// The structural spectrum's shape of the body of `inputs`' crust class, as R09.T12.e's anchored
-/// spectrum will choose it from the surface material and the regime (`decision-r09-t5.md` item 2):
-/// an ice shell or an ice surface takes [`SpectrumShape::ICE_RICH`], every rock surface in any
-/// other regime [`SpectrumShape::SILICATE`].
+/// Runs the step's second entry on `working`, after the coarse craters (R09.T12.e; main's rulings
+/// of 2026-10-19, R1–R10): anchors the header's structural spectrum, scales the coarse elevation
+/// so that the whole surface's `σ_h` is plan 14's, setting each coarse crater's degradation byte
+/// where the whole field scales down, places the sea, and writes the realised figures (see the
+/// module documentation).
+///
+/// The pass calls it right after [`craters::run`](super::craters::run), whose craters its budget
+/// must count, and before the climate, which is reduced to its sea level (main's ruling R3).
+///
+/// # Panics
+///
+/// Never on valid inputs: every value it writes is finite and within its code.
+pub fn run_after_craters(pass: &Pass<'_>, working: &mut Working) {
+    working.spectrum = structural_spectrum(pass.inputs());
+    let matched = budget::match_sigma_h(pass, working);
+    // The sea's and the figures' reports are the tests' and the plan's record, not the pass's.
+    let _ = sea::place(pass, working);
+    let _ = budget::figures(pass, working, Phase::BeforeErosion, &matched.booked);
+}
+
+/// What follows the craters that waited for the erosion step (R09.T12.d's
+/// [`craters::run_after_erosion`](super::craters::run_after_erosion)), in place of the interim
+/// figures: the ocean refloods against the sea level as placed, to which the climate is reduced,
+/// and the realised figures are the whole surface's with every crater in, its cells booked afresh
+/// (main's rulings R4 and R8, 2026-10-19).
+pub(super) fn after_late_craters(pass: &Pass<'_>, working: &mut Working) {
+    // As in `run_after_craters`, the reports are the tests'.
+    let _ = sea::reflood(pass, working);
+    let booked = budget::book(pass, working, &budget::Body::of(pass, &working.spectrum));
+    let _ = budget::figures(pass, working, Phase::AfterErosion, &booked);
+}
+
+/// A crust's class, which picks its structural spectrum's shape and its anchor
+/// (`decision-r09-t5.md` items 2 and 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CrustClass {
+    /// An ice surface, or an ice shell's.
+    IceRich,
+    /// Every rock surface in any regime but an ice shell.
+    Silicate,
+}
+
+/// The crust class of the body of `inputs`, from its surface material and regime: an ice surface
+/// or an ice shell is ice-rich, every other rock surface silicate.
 #[must_use]
-pub(crate) const fn crust_shape(inputs: &CoarseInputs) -> SpectrumShape {
+pub(crate) const fn crust_class(inputs: &CoarseInputs) -> CrustClass {
     match (inputs.surface_material(), inputs.tectonics()) {
         (SurfaceMaterial::Ice, _) | (SurfaceMaterial::Rock, TectonicRegime::IceShell) => {
-            SpectrumShape::ICE_RICH
+            CrustClass::IceRich
         }
         (
             SurfaceMaterial::Rock,
@@ -181,8 +254,63 @@ pub(crate) const fn crust_shape(inputs: &CoarseInputs) -> SpectrumShape {
             | TectonicRegime::StagnantLid
             | TectonicRegime::HeatPipe
             | TectonicRegime::Episodic,
-        ) => SpectrumShape::SILICATE,
+        ) => CrustClass::Silicate,
     }
+}
+
+/// The structural spectrum's shape of the body of `inputs`' crust class ([`crust_class`]), as
+/// R09.T12.e's anchored spectrum chooses it (`decision-r09-t5.md` item 2): an ice-rich crust takes
+/// [`SpectrumShape::ICE_RICH`], a silicate one [`SpectrumShape::SILICATE`].
+#[must_use]
+pub(crate) const fn crust_shape(inputs: &CoarseInputs) -> SpectrumShape {
+    match crust_class(inputs) {
+        CrustClass::IceRich => SpectrumShape::ICE_RICH,
+        CrustClass::Silicate => SpectrumShape::SILICATE,
+    }
+}
+
+/// The structural RMS in wavelengths shorter than the anchor's 72 km
+/// ([`ANCHOR_WAVELENGTH`](hyperion_surface::synth::ANCHOR_WAVELENGTH)) of the body of `inputs`'
+/// crust class and regime (`decision-r09-t5.md` item 3, in the order main amended it on
+/// 2026-10-19, ruling R9):
+///
+/// - an ice-rich crust ([`crust_class`]), in every regime, [`STRUCTURAL_RMS_ICE_RICH`], 50 m with
+///   no gravity term (Europa, Nimmo and Schenk 2008). On a mobile lid this is labelled: plates of
+///   ice take ice's roughness, not rock plates' strength-limited 200 m × (g⊕ ÷ g), which at
+///   Europa's gravity would give 1.5 km below 72 km against Europa's 35–50 m at 1 km (R9);
+/// - a silicate mobile lid, [`STRUCTURAL_RMS_MOBILE_LID`], 200 m, times R09.T12.b's height factor
+///   g⊕ ÷ g ([`convergent::height_factor`]; exactly 1 on the reference Earth), so that a belt's
+///   coarse and fine relief scale together;
+/// - every other silicate lid (stagnant, heat-pipe or episodic), [`STRUCTURAL_RMS_STAGNANT_LID`],
+///   60 m with no gravity term.
+#[must_use]
+pub(crate) fn structural_anchor(inputs: &CoarseInputs) -> Metres {
+    match (crust_class(inputs), inputs.tectonics()) {
+        (CrustClass::IceRich, _) => STRUCTURAL_RMS_ICE_RICH,
+        (CrustClass::Silicate, TectonicRegime::MobileLid) => Metres::new(
+            STRUCTURAL_RMS_MOBILE_LID.value() * convergent::height_factor(inputs.gravity()),
+        ),
+        // An ice shell is ice-rich, so its arm is never reached here.
+        (
+            CrustClass::Silicate,
+            TectonicRegime::StagnantLid
+            | TectonicRegime::HeatPipe
+            | TectonicRegime::Episodic
+            | TectonicRegime::IceShell,
+        ) => STRUCTURAL_RMS_STAGNANT_LID,
+    }
+}
+
+/// The header's structural spectrum for the body of `inputs` (`decision-r09-t5.md` items 2 and 3,
+/// ruling R9): [`BandSpectrum::anchored`] of its crust class's shape ([`crust_shape`]) on its mean
+/// radius at its class's anchor ([`structural_anchor`]).
+#[must_use]
+pub(crate) fn structural_spectrum(inputs: &CoarseInputs) -> BandSpectrum {
+    BandSpectrum::anchored(
+        crust_shape(inputs),
+        inputs.radius(),
+        structural_anchor(inputs),
+    )
 }
 
 /// A stagnant lid's one population: each cell's elevation [`STAGNANT_LID_RELIEF`] times the red

@@ -190,7 +190,11 @@ pub fn run(pass: &Pass<'_>, working: &mut Working) {
 }
 
 /// Smooths into the elevation the coarse craters that waited for the erosion step (Design note 5),
-/// in draw order: none on a world with no wet epoch that ended before its surface age ran out.
+/// in draw order, at the degradation bytes R09.T12.e set: none on a world with no wet epoch that
+/// ended before its surface age ran out. Where it smooths any in, it refloods the ocean against
+/// the sea level as placed, to which the climate is reduced, and recomputes the realised figures
+/// with every crater in (R09.T12.e; main's rulings R4 and R8, 2026-10-19), with no rescale: that
+/// is R09.T14.d's.
 ///
 /// # Panics
 ///
@@ -201,12 +205,46 @@ pub fn run_after_erosion(pass: &Pass<'_>, working: &mut Working) {
 
 /// When a crater is smoothed in (Design note 5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Phase {
+pub(crate) enum Phase {
     /// Before the erosion step: the craters that do not wait.
     BeforeErosion,
     /// After it: the craters younger than a wet epoch's end that ended before the surface age ran
     /// out.
     AfterErosion,
+}
+
+/// Whether a crater `age` old is in the elevation of the body of `pass` once `phase`'s craters are
+/// smoothed in: before the erosion, every crater that does not wait for it; after it, every one.
+#[must_use]
+pub(crate) fn smoothed_in_by(pass: &Pass<'_>, age: Gigayears, phase: Phase) -> bool {
+    match phase {
+        Phase::BeforeErosion => !waits(pass, age),
+        Phase::AfterErosion => true,
+    }
+}
+
+/// Each cell of `grid` that `crater` reaches, in its reach's ascending order, handed to `emit` with
+/// the crater's lift there: its [`kept_relief`] times `rims`' coarse profile of its diameter, at
+/// the chord in rim radii from the crater centre's spheroid point on `figure` to the cell
+/// centre's, sampled at the cell's centre (R09.T12.d's ruling B, the one profile). The one
+/// expression for a coarse crater's lift, which the step's smoothing and R09.T12.e's budget share.
+pub(crate) fn each_lift(
+    grid: &crate::planetary::surface::grid::CellGraph,
+    figure: &hyperion_surface::spheroid::Spheroid,
+    rims: &CoarseRims,
+    crater: &CoarseCrater,
+    mut emit: impl FnMut(u32, f64),
+) {
+    let profile = rims.coarse_profile(crater.diameter);
+    let kept = kept_relief(crater);
+    let centre = figure.point(crater.centre);
+    let rim = 0.5 * crater.diameter.value();
+    for cell in crater.reach.cells() {
+        let p = figure.point(grid.centre(cell));
+        let gap = [p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]];
+        let chord = (gap[0] * gap[0] + gap[1] * gap[1] + gap[2] * gap[2]).sqrt();
+        emit(cell, kept * profile.at(chord / rim).height_m);
+    }
 }
 
 /// Smooths into `working`'s elevation its craters of `phase`, in list order.
@@ -216,7 +254,8 @@ fn apply(pass: &Pass<'_>, working: &mut Working, phase: Phase) {
     let rims = CoarseRims::for_body(*inputs.craters(), figure, pass.level());
     let grid = pass.grid();
     let mut touched = false;
-    for crater in &working.craters {
+    let Working { cells, craters, .. } = working;
+    for crater in craters.iter() {
         let waiting = waits(pass, crater.age);
         let now = match phase {
             Phase::BeforeErosion => !waiting,
@@ -226,23 +265,20 @@ fn apply(pass: &Pass<'_>, working: &mut Working, phase: Phase) {
             continue;
         }
         touched = true;
-        let profile = rims.coarse_profile(crater.diameter);
-        let kept = kept_relief(crater);
-        let centre = figure.point(crater.centre);
-        let rim = 0.5 * crater.diameter.value();
-        for cell in crater.reach.cells() {
-            let p = figure.point(grid.centre(cell));
-            let gap = [p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]];
-            let chord = (gap[0] * gap[0] + gap[1] * gap[1] + gap[2] * gap[2]).sqrt();
-            let lift = kept * profile.at(chord / rim).height_m;
-            let state = &mut working.cells[slot(cell)];
+        each_lift(grid, &figure, &rims, crater, |cell, lift| {
+            let state = &mut cells[slot(cell)];
             let z = Metres::new(num::assert_finite(state.elevation.value() + lift));
             state.elevation = z;
             state.water_surface = z;
-        }
+        });
     }
-    if touched {
-        super::relief::interim_figures(pass, working);
+    if !touched {
+        return;
+    }
+    match phase {
+        // R09.T12.d's staged figures, which R09.T12.e's second entry of the relief step replaces.
+        Phase::BeforeErosion => super::relief::interim_figures(pass, working),
+        Phase::AfterErosion => super::relief::after_late_craters(pass, working),
     }
 }
 

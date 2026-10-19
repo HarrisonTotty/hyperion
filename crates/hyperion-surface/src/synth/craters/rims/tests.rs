@@ -669,3 +669,137 @@ fn on_an_oblate_figure_the_ground_integral_is_off_by_a_small_residual() {
         }
     }
 }
+
+/// ∫ f(x) 2x dx over the reach of two profiles of one shape, in rim radii: five-point
+/// Gauss–Legendre on four equal panels of each piece between both profiles' breakpoints, exact to
+/// rounding for f a product of two of their heights (degree 8 at most, and 9 with x), and
+/// independent of the closed forms' eight-point rule.
+fn by_pieces(first: &CraterProfile, second: &CraterProfile, f: impl Fn(f64) -> f64) -> f64 {
+    let mut points: Vec<f64> = first
+        .breakpoints()
+        .into_iter()
+        .chain(second.breakpoints())
+        .collect();
+    points.sort_by(f64::total_cmp);
+    let mut total = 0.0;
+    for pair in points.windows(2) {
+        if pair[1] <= pair[0] {
+            continue;
+        }
+        let width = (pair[1] - pair[0]) / 4.0;
+        for k in 0..4_u8 {
+            let mid = pair[0] + width * (f64::from(k) + 0.5);
+            for (node, weight) in super::super::tests::GAUSS_LEGENDRE_5 {
+                let x = mid + 0.5 * width * node;
+                total += 0.5 * width * weight * f(x) * 2.0 * x;
+            }
+        }
+    }
+    total
+}
+
+/// The per-crater forms over the whole ground (main's ruling R2 on R09.T12.e, 2026-10-19): a
+/// crater's sharpening finer than a wavelength, over the area of its reach's disc, is the share
+/// [`unresolved_rims`] sums for it, to 10⁻¹²; it is zero at the band limit and below and for a
+/// crater whose relief is gone; and both forms scale as g².
+#[test]
+fn a_crater_s_sharpening_over_its_reach_is_its_share() {
+    let mut checked = 0;
+    for field in fields() {
+        let rims = CoarseRims::new(field.header());
+        for crater in field.craters() {
+            let shape = crater_shape(field.header().craters(), crater.diameter);
+            let rim_m = 0.5 * crater.diameter.value();
+            let reach = 1.0 + shape.exterior_width();
+            let disc_m2 = core::f64::consts::PI * (reach * rim_m) * (reach * rim_m);
+            for lambda_m in [3.0, 400.0, 2.0e4, 1.0e5, 1.0e7] {
+                let finer_than = Metres::new(lambda_m);
+                let form = rims.sharpening_moment_m4(crater, finer_than);
+                let crater_share = match rims.unresolved_bands(finer_than) {
+                    Some((finest, band)) => rims.share(crater, finest, band).variance,
+                    None => 0.0,
+                };
+                let over_disc = form / disc_m2;
+                assert!(
+                    (over_disc - crater_share).abs() <= 1e-12 * crater_share.abs(),
+                    "{:?} at {lambda_m} m: {over_disc} against {crater_share}",
+                    crater.diameter
+                );
+                checked += usize::from(crater_share > 0.0);
+            }
+            assert_same_bits(rims.sharpening_moment_m4(crater, Metres::new(2.0)), 0.0);
+            let worn = CoarseCrater {
+                degradation: 255,
+                ..crater.clone()
+            };
+            assert_same_bits(rims.sharpening_moment_m4(&worn, Metres::new(1e5)), 0.0);
+            assert_same_bits(rims.increase_m4(&worn), 0.0);
+            let fresh = CoarseCrater {
+                degradation: 0,
+                ..crater.clone()
+            };
+            let part = CoarseCrater {
+                degradation: 51,
+                ..crater.clone()
+            };
+            let g = kept_relief(&part);
+            for (whole, scaled) in [
+                (
+                    rims.sharpening_moment_m4(&fresh, Metres::new(1e5)),
+                    rims.sharpening_moment_m4(&part, Metres::new(1e5)),
+                ),
+                (rims.increase_m4(&fresh), rims.increase_m4(&part)),
+            ] {
+                assert!(
+                    (scaled - g * g * whole).abs() <= 1e-12 * whole.abs(),
+                    "{scaled} against {}",
+                    g * g * whole
+                );
+            }
+        }
+    }
+    assert!(checked > 20, "{checked} shares checked");
+}
+
+/// A crater's increase is g² ∫ (F(w₂)² − F(`w_c`)²) dA to 10⁻¹⁰ of an independent sum, and is the
+/// sharpening's own ∫ (F(w₂) − F(`w_c`))² dA, its whole moment at a wavelength of twice the coarse
+/// band or more, plus twice the sharpening's product with the coarse profile.
+#[test]
+fn a_crater_s_increase_is_its_fine_square_less_its_coarse_one() {
+    for field in fields() {
+        let rims = CoarseRims::new(field.header());
+        for crater in field.craters() {
+            let shape = crater_shape(field.header().craters(), crater.diameter);
+            let rim_m = 0.5 * crater.diameter.value();
+            let disc = core::f64::consts::PI * rim_m * rim_m;
+            let fine = CraterProfile::filleted(shape, Metres::new(0.5 * BAND_LIMIT_M));
+            let coarse = CraterProfile::filleted(shape, rims.coarse_band());
+            let g = kept_relief(crater);
+            let heights = |x: f64| (fine.at(x).height_m, coarse.at(x).height_m);
+            let squares = by_pieces(&fine, &coarse, |x| {
+                let (f, c) = heights(x);
+                f * f - c * c
+            });
+            let expected = g * g * squares * disc;
+            let increase = rims.increase_m4(crater);
+            let scale = g * g * disc * by_pieces(&fine, &coarse, |x| heights(x).0 * heights(x).0);
+            assert!(
+                (increase - expected).abs() <= 1e-10 * scale,
+                "{:?}: {increase} m⁴ against {expected}",
+                crater.diameter
+            );
+            let whole = Metres::new(2.0 * rims.coarse_band().value());
+            let sharpening = rims.sharpening_moment_m4(crater, whole);
+            let product = by_pieces(&fine, &coarse, |x| {
+                let (f, c) = heights(x);
+                (f - c) * c
+            });
+            let cross = 2.0 * g * g * product * disc;
+            assert!(
+                (sharpening + cross - increase).abs() <= 1e-10 * scale,
+                "{:?}: {sharpening} + {cross} against {increase}",
+                crater.diameter
+            );
+        }
+    }
+}

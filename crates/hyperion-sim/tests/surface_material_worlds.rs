@@ -6,14 +6,15 @@
 //!
 //! The worlds are R09's reference Earth, Mars, Moon and Ceres
 //! (`planetary::surface::reference`), each run through the coarse pass once per binary, under the
-//! sim's `testing` feature. Until R09.T12.e–T16 fill the rest of the pass's steps they come out as
+//! sim's `testing` feature. Until R09.T13.e–T16 fill the rest of the pass's steps they come out as
 //! the steps built so far leave them, the plates, the coarse elevation and the coarse craters of
-//! R09.T11–T12.d under R09.T13.a–d's climate, dry, with the Earth's and Mars's ices placed by the
-//! climate step, on which the synthesis draws its own relief and small craters, which exercises
-//! the classifier's reads of every record but not its seas. The plan's
-//! two cases on R09.T16's `sample_worlds()` (`tests/common/surface_worlds.rs`, with its icy moon
-//! and locked world), that a warm pole has no ice cap and that a locked world's ice lies where
-//! R09's field puts it, follow R09.T16 under the same task ID, and that list takes this one's
+//! R09.T11–T12.d, scaled to their `σ_h` with the reference Earth's sea placed by R09.T12.e, under
+//! R09.T13.a–d's climate, with the Earth's and Mars's ices placed by the climate step, on which
+//! the synthesis draws its own relief and small craters, which exercises the classifier's reads of
+//! every record, the reference Earth's sea and the ices among them. The plan's two cases on
+//! R09.T16's `sample_worlds()` (`tests/common/surface_worlds.rs`, with its icy moon and locked
+//! world), that a warm pole has no ice cap and that a locked world's ice lies where R09's field
+//! puts it, follow R09.T16 under the same task ID, and that list takes this one's
 //! place. Until then the classifier's rules are held on the surface crate's synthetic worlds and
 //! built fields (`material::classify`'s tests).
 #![cfg(feature = "testing")]

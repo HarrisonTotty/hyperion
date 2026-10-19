@@ -7,7 +7,7 @@
 //! gate itself).
 //!
 //! The worlds are R09's reference Earth, Mars, Moon and Ceres (`planetary::surface::reference`),
-//! each run through the coarse pass once, under the sim's `testing` feature; until R09.T12.e–T16
+//! each run through the coarse pass once, under the sim's `testing` feature; until R09.T13.e–T16
 //! fill the rest of the pass's steps they come out as the steps built so far leave them
 //! (`surface_material_worlds`'s documentation). Each world's p is its state's template's, as the sim's photometry chooses it
 //! (P14.T47.b): Mercury's for the airless rock of the Moon and Ceres, Mars's for the thin-aired

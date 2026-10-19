@@ -14,9 +14,10 @@
 //! 1. The grid: the body's level from its radius ([`coarse_level`], Design note 4), the field's
 //!    cells and its climate layer's one level above as [`CellGraph`]s.
 //! 2. The steps, in the brainstorm's order ([`steps`]): plates, coarse elevation, coarse craters,
-//!    climate, erosion, the coarse craters younger than a wet epoch's end (Design note 5), then the
-//!    classes and crater state, each updating the `f64` [`Working`](steps::Working) state in place,
-//!    every loop and sum in cell-index order.
+//!    the coarse elevation's scale to plan 14's `σ_h` and its sea (the relief step's second entry,
+//!    which counts the craters), climate, erosion, the coarse craters younger than a wet epoch's
+//!    end (Design note 5), then the classes and crater state, each updating the `f64`
+//!    [`Working`](steps::Working) state in place, every loop and sum in cell-index order.
 //! 3. The quantiser ([`quantise()`]): the working state turned into the field's codes once, so
 //!    that the server's own synthesis and collision read exactly what a client receives (Design
 //!    note 17).
@@ -45,19 +46,21 @@
 //! P14.T54.a connects (decision-backlog-2 §3). R09.T11 filled the plates, and R09.T12.a began the
 //! coarse elevation: a mobile lid's continental and oceanic populations with its sea floor, and
 //! R09.T12.b its belts, trenches and arcs; a stagnant lid's one population, and R09.T12.c its
-//! volcanic provinces; and R09.T12.d the coarse craters, listed and smoothed in; all dry about the
-//! datum until R09.T12.e places the sea. R09.T13.a built the climate step's zonal moist
-//! energy-balance model, which writes the climate cells' sea-level temperatures and monthly
-//! anomalies on a world whose regime names it ([`steps::climate`]); R09.T13.b extended it in
-//! longitude, 72 × 72 points, and to a locked world in tidally locked coordinates, 72 × 144 points
-//! lit by its host's beam. R09.T13.c built the other regimes: radiative equilibrium with thermal
-//! inertia for airless and thin-air worlds, a column of regolith per point with the day resolved
-//! and averaged over local time, and the isothermal surface of a Venus. R09.T13.d normalised the
-//! climate to plan 14's mean and signed contrasts and placed the ices, and the liquids on the
-//! relief step's flood, by substance, with the lapse rate. Erosion and the classes are still
-//! no-ops: run on any inputs, the pass yields that relief, dry, under the climate its regime
-//! names, with the inputs' palette. R09.T12.e–T15 fill the rest and R09.T16 pins the reference
-//! worlds' fields.
+//! volcanic provinces; and R09.T12.d the coarse craters, listed and smoothed in. R09.T12.e anchors
+//! the header's structural spectrum by crust class, scales the elevation so that the whole
+//! surface's `σ_h` is plan 14's, the coarse craters' share through their degradation bytes, and
+//! places the sea: the connected ocean that covers plan 14's ocean fraction, filled with the main
+//! liquid. R09.T13.a built the climate step's zonal moist energy-balance model, which writes the
+//! climate cells' sea-level temperatures and monthly anomalies on a world whose regime names it
+//! ([`steps::climate`]); R09.T13.b extended it in longitude, 72 × 72 points, and to a locked world
+//! in tidally locked coordinates, 72 × 144 points lit by its host's beam. R09.T13.c built the
+//! other regimes: radiative equilibrium with thermal inertia for airless and thin-air worlds, a
+//! column of regolith per point with the day resolved and averaged over local time, and the
+//! isothermal surface of a Venus. R09.T13.d normalised the climate to plan 14's mean and signed
+//! contrasts and placed the ices, and the liquids on the relief step's flood, by substance, with
+//! the lapse rate. Erosion and the classes are still no-ops: run on any inputs, the pass yields
+//! that relief and sea, with their ices and liquids, under the climate its regime names, with the
+//! inputs' palette. R09.T13.e–T15 fill the rest and R09.T16 pins the reference worlds' fields.
 //!
 //! # Consumed items, by their paths in the code
 //!
@@ -219,6 +222,7 @@ pub fn coarse_pass(seed: SurfaceSeed, inputs: &CoarseInputs) -> CoarseField {
     steps::plates::run(&pass, &mut working);
     steps::relief::run(&pass, &mut working);
     steps::craters::run(&pass, &mut working);
+    steps::relief::run_after_craters(&pass, &mut working);
     steps::climate::run(&pass, &mut working);
     steps::erosion::run(&pass, &mut working);
     // The coarse craters younger than a wet epoch's end, placed on the eroded surface (Design
