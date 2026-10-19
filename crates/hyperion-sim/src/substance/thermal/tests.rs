@@ -488,8 +488,15 @@ fn substance_thermal_columns_name_their_sources() {
     }
 }
 
-/// The files whose calls of this module sit behind a named hold, each with its hold: none yet.
-const HELD: &[(&str, &str)] = &[];
+/// The files whose calls of this module sit behind a named hold, each with its hold. R09.T12.c's
+/// ice lid takes its elastic thickness from the `H2O` row's conductivity column, ∫ k dT ÷ F with
+/// k = 567 ÷ T, as `decision-r09-t12-coarse.md` item 4 rules ("Read the row; do not restate it").
+/// That read moves only R09's coarse field, which reaches no record before the serve gate.
+const HELD: &[(&str, &str)] = &[(
+    "planetary/surface/steps/relief/provinces.rs",
+    "R09.T12.c's ice-lid T_e reads the H2O conductivity row (decision-r09-t12-coarse item 4); \
+     the coarse field is on no record before the serve gate",
+)];
 
 /// The constants of this module that another module shares, each with the file that reads it and
 /// the path by which it does: P14.T49.c's condensed optics take their regolith's grains from
@@ -603,7 +610,7 @@ pub(in crate::substance) fn rust_files(
 /// `src/` is read, in sorted order, but this module's own, the declaring lines of
 /// `substance/mod.rs` ([`DECLARATIONS`]), comment lines, each inline test module (from its
 /// `#[cfg(test)]`), every file an out-of-line test module declares, the files held behind a named
-/// hold ([`HELD`], empty) and, in its one file, a shared constant's path ([`SHARED`]).
+/// hold ([`HELD`]) and, in its one file, a shared constant's path ([`SHARED`]).
 /// `hyperion-fit` and `hyperion-server`, which depend on the sim, are left to review: a fitted
 /// table would hold this module's numbers, not its calls.
 #[test]
