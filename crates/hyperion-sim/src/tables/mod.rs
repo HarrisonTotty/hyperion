@@ -115,6 +115,7 @@ pub mod stellar_fates_mid;
 pub mod streams;
 pub mod stripping;
 pub mod substance_albedo;
+pub mod thermo;
 pub mod type_ia_delay;
 pub mod wd_cooling;
 
@@ -375,6 +376,12 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "substance_albedos",
         revision: 1,
+        since_generator_version: 22,
+        provisional: false,
+    },
+    TableInfo {
+        name: "thermo_equilibrium",
+        revision: 0,
         since_generator_version: 22,
         provisional: false,
     },

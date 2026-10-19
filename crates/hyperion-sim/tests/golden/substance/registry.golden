@@ -1716,7 +1716,7 @@ condensed 73 graphite: solid grain_density_kg_per_m3 = 0x40a1aa0000000000  # 226
 condensed 73 graphite: solid grain_density_at_k = 0x4072500000000000  # 293.0
 condensed 73 graphite: liquid grain_density_kg_per_m3 none
 condensed 73 graphite: transition sublimation
-condensed 73 graphite: transition_k = 0x40afe00000000000  # 4080.0
+condensed 73 graphite: transition_k = 0x40af0a0000000000  # 3973.0
 condensed 73 graphite: mechanics Silicate
 condensed 74 tholin: grain density fixed
 condensed 74 tholin: solid grain_density_kg_per_m3 = 0x4095180000000000  # 1350.0
@@ -1730,7 +1730,7 @@ condensed 75 soot: solid grain_density_kg_per_m3 = 0x409c200000000000  # 1800.0
 condensed 75 soot: solid grain_density_at_k = 0x4072700000000000  # 295.0
 condensed 75 soot: liquid grain_density_kg_per_m3 none
 condensed 75 soot: transition sublimation
-condensed 75 soot: transition_k = 0x40afe00000000000  # 4080.0
+condensed 75 soot: transition_k = 0x40af0a0000000000  # 3973.0
 condensed 75 soot: mechanics Organic
 condensed 76 chromophore: grain density fixed
 condensed 76 chromophore: solid grain_density_kg_per_m3 = 0x4095180000000000  # 1350.0
@@ -1912,7 +1912,7 @@ condensed 100 MgSO4: solid grain_density_kg_per_m3 = 0x40a7980000000000  # 3020.
 condensed 100 MgSO4: solid grain_density_at_k = 0x4072c00000000000  # 300.0
 condensed 100 MgSO4: liquid grain_density_kg_per_m3 none
 condensed 100 MgSO4: transition decomposition
-condensed 100 MgSO4: transition_k = 0x4093e00000000000  # 1272.0
+condensed 100 MgSO4: transition_k = 0x40957c0000000000  # 1375.0
 condensed 100 MgSO4: mechanics Salt
 condensed 101 Na2CO3: grain density fixed
 condensed 101 Na2CO3: solid grain_density_kg_per_m3 = 0x40a3d80000000000  # 2540.0

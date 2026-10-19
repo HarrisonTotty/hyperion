@@ -18097,6 +18097,153 @@ tables::gauss_legendre`.
     top.
   - _Mars dust's ω at 550 nm_ is 0.911 for spheres on its file (gamma 1.5 µm, 0.3), where R08's
     note has 0.968 at 650 nm and the measurement 0.975 ± 0.015; recorded, not compared.
+- **Deviations in P14.T49.d, as built: gas thermochemistry from NASA's CEA records (`p14-optics`,
+  2026-10-19).** `GENERATOR_VERSION` stays 22; the registry golden's `[condensed]` moves three
+  values (below), and no other golden moves.
+  - _Held at 22_ (decision-bump-plan-after-22 §1.3 and §5). Nothing on the record calls
+    `substance::formation`; P14.T52.a is its first reader. The table `thermo` (task
+    `thermo_equilibrium`, revision 0, fast) is a first emission stamped since 22; **P14.T54.b**
+    restamps it `--since 24`. Before 24 a refit re-emits through the first-emission path (delete
+    and re-emit, decision-p14-t49h-liquids §5). `hyperion-fit check`: `thermo_equilibrium` fresh,
+    40 fresh, 6 warnings (the provisional tables, as before), 0 failures.
+  - _Added public items._
+    - In `hyperion_sim::substance::formation` (the three functions re-exported from `substance`):
+      `log10_formation_constant(id, temperature) -> Option<f64>`, log₁₀ K_f at 1 bar from the
+      elements in their reference states, `None` for a row with no record and outside its range;
+      `formation_range(id) -> Option<(Kelvin, Kelvin)>`, its record's range and its elements'
+      references' (and the electron gas's, for an ion) together;
+      `log10_equilibrium_constant(&[(SubstanceId, i32)], temperature) -> Option<f64>`, −Σ ν G ÷
+      (RT ln 10) from the species' own records, over their own ranges, `None` for a species with no
+      record or an unbalanced reaction (elements and charge); `NOT_MODELLED`, the gas rows with no
+      record and why (`FeH`).
+    - In `hyperion-fit`: `tasks::thermo_equilibrium` (`VERSION` 0, `DATASET`, `LIBRARY`,
+      `UPPER_TEMPERATURE_K` 6,000; `ROWS`, the 57 rows' CEA names; `NOT_MODELLED`;
+      `REFERENCE_GASES`; `Reference` and `reference(element)`; `CONDENSED`; `CROSS_CHECKS`;
+      `JANAF_GAS_FROM_K`; `ITEMS`, 99; `item_name`; `Interval`, `Record`, `parse` and
+      `ParseThermoError`, a reader of Appendix A's layout; `FitThermoError`; `Item`, `Fit`, `fit`,
+      `switch`, `gibbs_over_rt`, `magnesium_sulphate_decomposition_k`, `graphite_sublimation_k`,
+      `render`; `ThermoEquilibriumTask`).
+  - _The data_ (decision-composition §5's "committed verbatim" case). The dataset
+    `crates/hyperion-fit/data/nasa_cea_thermo/`, class committed: `thermo.inp`, the 111 records the
+    task reads, extracted byte for byte (header, CRLF line ends, the `END` lines) by the committed
+    `reduce.py` from `data/thermo.inp` of `nasa/cea` at 2f79a647e85737742fb08a127da00d1ea1d069da
+    (1,234,323 bytes, SHA-256 fa7746572952…28884363, the T49.b oracle's file; downloaded
+    2026-10-16), 77,658 bytes, SHA-256 1fa29fc93db2…4226b2fd, recorded hash `a334adf45a15…`; the
+    repository's Apache 2.0 `LICENSE.txt` (9,170 bytes, unmodified, not hashed); `PROVENANCE.toml`.
+    The records: the 57 gas rows (CEA's `AL`, `AL+`, `HCL`, `C2H2,acetylene` and `HCN`), the
+    reference states (`CL2`, `S2`, `P2`, `C(gr)` and the 15 other elements' 41 condensed Ref-Elm
+    records, `Cr(cr)`, `Fe(a)` and `Ni(cr)` two each) and the cross-checks' (`MgSO4(II)`,
+    `MgSO4(I)`, `MgO(cr)`, `SO3`, `C`, `C2`–`C5`). NOTICE carries NASA's notice and the Apache 2.0
+    statement. The subset parses to the same evaluation as the whole file, byte for byte.
+  - _The table_, `tables/thermo.rs`, 57,455 bytes: 84 record items of 194 intervals, each row
+    `[T_lo, T_hi, a₁, …, a₇, b₁, b₂]`, the file's decimals to the nearest `f64`, and the 15
+    `<EL>_BOILING_K` switches. Intervals from 6,000 K up are not emitted, and two empty ones are
+    dropped: `Si(cr)`'s and `Ca(a)`'s first intervals run 300 → 298.15 K since CEA's 2021 range
+    update. Inputs hash `97371be39c99…`, sim fingerprint `a0549cb71547…` (each gas row's index,
+    charge and stoichiometry, so that a gas row added or changed asks for a rerun).
+  - _The reference states_ (NIST-JANAF's convention, Chase 1998's introduction; the elements'
+    reference tables read at janaf.nist.gov 2026-10-19 for which gas, one transition per element):
+    H₂, N₂, O₂, Cl₂ and the noble gases at every temperature; graphite throughout; every other
+    element its condensed phases to where their G per atom meets its gas form's at 1 bar, found by
+    bisection on the records, then that gas: the monatomic metal, S₂ (JANAF S-001's liquid ↔ gas
+    at fugacity 1 bar, 882.117 K) and P₂ (P-001, 1,180.008 K, whose heat capacity above it is the
+    diatomic's); the electron gas for charge. The switches against JANAF's: Na 1,170.43 K (−0.10),
+    Mg 1,364.15 (−1.96), Al 2,797.65 (+6.83), Si 3,509.40 (+4.79), P 1,180.96 (+0.96), S 882.42
+    (+0.31), K 1,039.41 (−0.13), Ca 1,778.06 (+4.40), Ti 3,634.62 (+3.66), V 3,704.91 (+14.83), Cr
+    2,951.82 (−0.26), Mn 2,325.03 (−9.49), Fe 3,138.45 (+5.11), Ni 3,159.60 (+3.01), Zn 1,178.83
+    (−1.35). So K_f is continuous and holds to 6,000 K: from 200 K for H₂, H₂O, NH₃, N₂, O₂, Ar, H
+    and O, 298.15 K for e⁻, H⁻ and the ions of Mg, Si and Ca, and 300 K for the rest.
+  - _The model._ G ÷ RT = H ÷ RT − S ÷ R from McBride, Zehe and Gordon's eqs. 4.7–4.8, with
+    `hyperion_sim::math::ln`, the first interval holding T taken (the lower at a shared bound);
+    log₁₀ K_f = −(G − Σ n G_ref + q G_e) ÷ (RT ln 10) for a species of charge q. Nothing is
+    extrapolated.
+  - _Tests, with their values._
+    - **CEA's own evaluation** (`substance_formation_reproduces_cea_s_own_evaluation`): each of the
+      57 rows at 500, 2,500 and 5,000 K to 10⁻⁴ in log K, from an independent Python reading of the
+      raw file (the lane's `scripts/t49d/`, `python3 -I asserted.py kf.py cea.py thermo.inp`, the
+      command and the file's hash in the test's doc). Measured, all 171 values equal the Python's
+      to the bit.
+    - **Completeness**: every gas row that T52.a or T52.b names has an entry but `FeH`; `P`, `Cl`,
+      `P+`, `Cl+` and `OH` are not rows; the records are the registry's gas rows in its order.
+    - **No extrapolation**: each row has a value at both ends of its range and none 10⁻⁶ K beyond,
+      nor at 0, −300 K, NaN or ∞.
+    - **The references**: log₁₀ K_f = 0 exactly for H₂, N₂, O₂, the noble gases and e⁻, and for each
+      metal's atom from its switch; each condensed reference meets its gas there to 10⁻⁹ in G ÷ RT;
+      the fit's switches within 15 K of JANAF's (`thermo_equilibrium_the_switches_meet_janaf_s`).
+    - **NIST-JANAF**, within 3 × 10⁻³: H₂O 40.0453 at 298.15 K (H-064's 40.047, −0.0017) and 10.0592
+      at 1,000 K (10.060, −0.0008); CO 10.4619 at 1,000 K (C-093's 10.461, +0.0009); CH₄ −1.0178 at
+      1,000 K (C-067's −1.018, +0.0002).
+    - **MgSO₄ and graphite** (decision-p14-t49b-condensed §3.1(5)), by the rows' own arithmetic,
+      the roots by bisection: MgSO₄'s open-system decomposition at 1 bar 1,375.441 K (SO₂ 0.648, O₂
+      0.324, SO₃ 0.027 bar; interpolated in 1 ÷ T between 1,300 and 1,400 K, 1,375.51), against
+      the row's JANAF-reduced 1,272 K (103.4 K off); graphite's C₁–C₅ at 1 bar 3,973.324 K (C₃ 0.72
+      bar), against 4,080 K (106.7 K off). Both beyond 10 K, so CEA's replaces each: `MgSO4`
+      1,375 K, `GRAPHITE_SUBLIMATION_K` (graphite and soot) 3,973 K, each `Reduced` with its source
+      rewritten. The sim's test and the fit's both hold them within 10 K.
+    - **An equilibrium constant** equals Σ ν log K_f to 10⁻⁹ for four reactions (CO + 3H₂ = CH₄ +
+      H₂O, N₂ + 3H₂ = 2NH₃, Na = Na⁺ + e⁻, H₂S + 2H₂O = SO₂ + 3H₂) at 500–5,000 K; CH₄'s combustion
+      holds at 250 K (167.42), where CH₄'s K_f, needing graphite, does not; unbalanced reactions and
+      `FeH` give `None`.
+    - **The second thermochemistry** (T49.b's sums against CEA's c_p on the table's records), within
+      T49.b's oracle tolerances: N₂ −0.03, −0.13, −0.25% at 300, 700 and 1,000 K; CO₂ +0.03, −0.05,
+      −0.29%; H₂O −0.32, −0.34, −0.65%; CH₄ −0.15, −1.28, −2.56%; NH₃ −0.43, −1.53, −1.06%; H₂
+      (equilibrium) +0.01, +0.05, +0.13%. No disagreement beyond them.
+    - The fit's reader: a record by its columns, its refusals (no header, not ASCII, other than 7
+      coefficients, other exponents, a short record), a missing or wrong-formula record refused;
+      `tests/thermo_equilibrium.rs` reruns the table and compares it byte for byte. The provenance
+      test parses the new dataset.
+  - _The replaced rows._ `golden_diff --base HEAD`: one golden changed, the registry's, three
+    values, all in `[condensed]`: graphite's and soot's `transition_k` (rows 73 and 75) 4080.0 →
+    3973.0, and MgSO4's (row 100) 1272.0 → 1375.0; its only problem the expected "not bumped" (a `[condensed]` re-bless at the version in force,
+    decision-p14-t49b-condensed §3.1(5)); nothing else moved. Re-blessed at 22 by
+    `HYPERION_BLESS=1 cargo test -p hyperion-sim --features testing --test substance_golden`.
+  - _Files beyond the task's:_ `substance/formation.rs` (for `substance/thermo.rs`, below);
+    `substance/mod.rs` (the module line, re-exports, a sentence); `substance/rows/condensed.rs`
+    (the two transitions, their sources, the module note); the registry golden;
+    `tables/mod.rs` (the module line and MANIFEST row); `tables.lock`; `task.rs` and
+    `tasks/mod.rs` (registration); `manifests/thermo_equilibrium.toml`;
+    `tests/thermo_equilibrium.rs`; the dataset's four files; `NOTICE`; `.pre-commit-config.yaml`
+    (the subset excluded from `mixed-line-ending`, it and `LICENSE.txt` from `end-of-file-fixer`);
+    `.prettierignore`; `crates/hyperion-fit/clippy.toml` (`McBride` a valid identifier, as the
+    sim's).
+  - _Deviations, with their reasons._
+    - **The module is `substance/formation.rs`**, not the plan's `substance/thermo.rs`, which is
+      T49.b's statistical sums; its acceptance is `cargo test -p hyperion-sim substance::formation`.
+    - **The NASA-9 polynomials are re-emitted**, the plan's alternative to Chebyshev coefficients:
+      they reproduce the source exactly, and their intervals and the elements' phase changes would
+      make a Chebyshev fit piecewise anyway.
+    - **The records are committed** (a verbatim subset, class committed, Apache 2.0's notice in
+      NOTICE) rather than fetched by URL and checksum, so that the fit reruns in CI; the full file's
+      URL and hash are its provenance.
+    - **Two rows replaced**: MgSO₄'s decomposition and graphite's sublimation (with soot's) are now
+      CEA's, by §3.1(5).
+    - **The domain stops at 6,000 K** (the plan's 100–6,000 K "where the data reach"): CEA's atoms
+      and ions run to 20,000 K, not emitted. Below, nothing reaches 100 K: the records start at 200,
+      298.15 or 300 K.
+    - **The table carries the cross-checks' records** (`SO3`, `C`–`C5`, `MgO`, `MgSO4`), which no
+      public function reads, so that the sim's own test recomputes the two transitions.
+    - **`log10_equilibrium_constant` refuses an unbalanced reaction** (`None`), which the design
+      did not state; a sum over an unbalanced set has no meaning.
+    - **`FeH` is not modelled** (no CEA record, nor a JANAF table): `NOT_MODELLED`, a closed set,
+      for the composition audit (P14.T52.d's).
+- **Deferred findings (2026-10-13 rule)**, from P14.T49.d:
+  - _MgSO₄_: CEA's (Gurvich 1996) 1,375.4 K against JANAF's 1,272 K, 103 K apart; no measured
+    decomposition was read (§3.1(5) asks one recorded where read; one in air would lie higher).
+  - _Graphite_: CEA's 3,973.3 K against JANAF's reduced 4,079 K (107 K) and TRC's boiling point
+    4,100 ± 100 K (127 K, beyond its stated uncertainty); C₃, 0.72 bar of it, sets it.
+  - _The switches_: CEA's against JANAF's within 15 K, vanadium's +14.8, manganese's −9.5 and
+    aluminium's +6.8 K the largest; the compilations' metal data differ (not chased).
+  - _JANAF's log K_f_ differs from CEA's by up to 1.7 × 10⁻³ (water at 298.15 K).
+  - _Below 300 K_ only H₂, H₂O, NH₃, N₂, O₂, Ar, H and O have a K_f (to 200 K), and e⁻, H⁻, Mg⁺,
+    Si⁺ and Ca⁺ to 298.15 K: CEA's 2021 update reset most ranges to 300 K. T52.a takes its major
+    carriers as all-in below 500 K (its plan), so it should not need them there.
+  - _Above 6,000 K_ nothing is emitted, though CEA's atoms and ions reach 20,000 K.
+  - _Not registry rows_: OH, the P and Cl atoms and P⁺ and Cl⁺, which T52.a's closed form names
+    (its trace elements "each … as its neutral atom and its first ion"); CEA holds each, and a row
+    added later takes its record by a refit (for T52.a).
+  - _`FeH`_: no thermochemistry anywhere in the sim (P14.T52.d's).
+  - _CEA's empty intervals_: `Si(cr)`'s and `Ca(a)`'s first intervals (300 → 298.15 K) are a defect
+    of the 2021 range update, dropped here.
 - **Deviations in P14.T51.b, as built (`p14-snapshot`, 2026-10-16).** The area-mix Bond albedo,
   wholly behind the lane's hold (`SnapshotRules::Batch`, `SNAPSHOT_VERSION` = 23): under `Held`, in
   force at 22, every output is version 22's to the bit and no golden moves. The rulings are

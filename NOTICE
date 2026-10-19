@@ -239,6 +239,40 @@ crates/hyperion-sim/src/substance/rows/equations.rs, and their surface_tension a
 coefficients (Mulero, Cachadiña and Parra 2012) into crates/hyperion-sim/src/substance/rows/
 liquids.rs (galaxy plan 14, P14.T49.h's second step), each cited there.
 
+--------------------------------------------------------------------------------
+CEA – Chemical Equilibrium with Applications (NASA's thermodynamic data, data/thermo.inp)
+https://github.com/nasa/cea
+
+CEA – Chemical Equilibrium with Applications
+
+Copyright (c) 2025, United States Government as represented by the Administrator of the National
+Aeronautics and Space Administration
+Licensed under the Apache License, Version 2.0.
+
+Data: NASA CEA thermodynamic and transport databases (data/thermo.inp, data/trans.inp,
+data/thermo.lib, data/trans.lib); source and references: NASA TP-2002-211556,
+https://ntrs.nasa.gov/api/citations/20020085330/downloads/20020085330.pdf (the repository's
+NOTICE.txt, as of commit 2f79a647e85737742fb08a127da00d1ea1d069da).
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use these files except
+in compliance with the License. You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License
+is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+implied. See the License for the specific language governing permissions and limitations under the
+License.
+
+The 111 species records of data/thermo.inp that galaxy plan 14's P14.T49.d reads (B. J. McBride,
+M. J. Zehe and S. Gordon 2002, NASA Glenn Coefficients for Calculating Thermodynamic Properties of
+Individual Species, NASA/TP-2002-211556) are kept verbatim, with the file's header and CRLF line
+ends, in crates/hyperion-fit/data/nasa_cea_thermo/thermo.inp (a tool input, not shipped), beside
+the repository's LICENSE.txt; crates/hyperion-fit/data/nasa_cea_thermo/reduce.py extracts them.
+Changes: only the selection of records. Their coefficients are re-emitted interval by interval,
+unmodified, into crates/hyperion-sim/src/tables/thermo.rs, and the reference states' switches to
+their gases are computed from them there.
+
 ================================================================================
 Data
 

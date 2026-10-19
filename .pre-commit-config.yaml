@@ -27,13 +27,14 @@ repos:
         exclude: ^pnpm-lock\.yaml$
       - id: end-of-file-fixer
         # refractiveindex.info's Martonchik-solid-90K.yml is committed unmodified, without a final
-        # newline, hashed by its PROVENANCE.toml.
-        exclude: ^(packages/protocol/src/generated/|crates/hyperion-fit/data/martonchik_orton_1994_ch4/Martonchik-solid-90K\.yml$)
+        # newline, hashed by its PROVENANCE.toml; NASA CEA's subset and its LICENSE.txt (which has
+        # none) are committed as extracted.
+        exclude: ^(packages/protocol/src/generated/|crates/hyperion-fit/data/martonchik_orton_1994_ch4/Martonchik-solid-90K\.yml$|crates/hyperion-fit/data/nasa_cea_thermo/(thermo\.inp|LICENSE\.txt)$)
       - id: mixed-line-ending
         args: [--fix=lf]
-        # The CIE's tables and splib07a's spectra are committed unmodified (CRLF), hashed by their
-        # PROVENANCE.toml.
-        exclude: ^crates/hyperion-fit/data/(cie_cmf|usgs_splib07a)/
+        # The CIE's tables, splib07a's spectra and NASA CEA's thermo.inp records are committed
+        # unmodified (CRLF), hashed by their PROVENANCE.toml.
+        exclude: ^crates/hyperion-fit/data/(cie_cmf|usgs_splib07a|nasa_cea_thermo)/
       - id: trailing-whitespace
         exclude: ^packages/protocol/src/generated/
 

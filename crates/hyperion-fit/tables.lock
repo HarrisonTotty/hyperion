@@ -515,6 +515,18 @@ provisional = false
 acceptance = "55 rows (11 frosts, 44 regoliths); the highest `A_N` 1.1501 (`KCl`), the highest `A_h` 1.0000 (`CH4`, B at μ₀ = 1), both within the bounds of 1.35 and 1; the 12 bins' spherical albedos within [0, 1], the lowest 0.0108 (`H2O`, 2800-3500 nm); `A_N` in V: `H2O` 0.949, `CH4` 0.959, `NH3` 0.959, `N2` 0.959, `O2` 0.959, `CO2` 0.955, `Ar` 0.959, `CO` 0.959, `SO2` 0.805, `H2S` 0.959, `Fe` 0.209, `NH4SH` 0.959, `S8` 0.962, `KCl` 1.132, `NaCl` 1.132, `ZnS` 0.769, `Na2S` 0.058, `MnS` 0.127, `Cr` 0.258, `FeS` 0.061, `MgSiO3` 0.623, `Mg2SiO4` 0.264, `SiO2` 0.914, `Al2O3` 0.857, `CaTiO3` 0.092, `TiO2` 0.366, `graphite` 0.139, `tholin` 0.051, `soot` 0.037, `mars_dust` 0.351, `anorthosite` 0.853, `feldspathic` 0.667, `basalt` 0.093, `basalt_fe` 0.410, `komatiite` 0.430, `basalt_reduced` 0.651, `granite` 0.818, `ultramafic` 0.507, `ferric` 0.369, `phyllosilicate` 0.770, `lava_glass` 0.168, `ca_al_residue` 0.857, `iron_nickel` 0.209, `MgSO4` 0.980, `Na2CO3` 1.092, `CaCO3` 1.023, `carbonaceous` 0.037, `chondrite_ci` 0.072, `chondrite_cm` 0.070, `chondrite_cv` 0.157, `chondrite_h` 0.445, `chondrite_l` 0.433, `chondrite_ll` 0.417, `chondrite_e` 0.385, `cometary` 0.041"
 
 [[table]]
+name = "thermo_equilibrium"
+path = "thermo.rs"
+task = "thermo_equilibrium"
+revision = 0
+inputs_sha256 = "97371be39c99e02942a2d52ac9344045a5ed745bc0ff3e43ea7ee08a2cd77b96"
+body_sha256 = "f6f9d36064510fdd8305b11ab1a7458ad3a1470181c81405274fe1b04bac8260"
+fingerprint = [0.0, 0.0, 2.0, 1.0, 0.0, 1.0, 2.0, 0.0, 2.0, 1.0, 3.0, 0.0, 1.0, 4.0, 4.0, 0.0, 1.0, 3.0, 5.0, 0.0, 2.0, 6.0, 0.0, 2.0, 7.0, 0.0, 1.0, 2.0, 8.0, 0.0, 1.0, 9.0, 0.0, 1.0, 10.0, 0.0, 1.0, 11.0, 0.0, 1.0, 12.0, 0.0, 2.0, 1.0, 13.0, 0.0, 1.0, 1.0, 14.0, 0.0, 1.0, 2.0, 15.0, 0.0, 2.0, 1.0, 16.0, 0.0, 3.0, 17.0, 0.0, 1.0, 1.0, 1.0, 18.0, 0.0, 2.0, 2.0, 19.0, 0.0, 2.0, 4.0, 20.0, 0.0, 2.0, 6.0, 21.0, 0.0, 1.0, 3.0, 22.0, 0.0, 1.0, 4.0, 1.0, 23.0, 0.0, 1.0, 24.0, 0.0, 1.0, 25.0, -1.0, 26.0, -1.0, 1.0, 27.0, 0.0, 1.0, 28.0, 0.0, 1.0, 29.0, 0.0, 1.0, 30.0, 0.0, 1.0, 31.0, 0.0, 1.0, 32.0, 0.0, 1.0, 33.0, 0.0, 1.0, 34.0, 0.0, 1.0, 1.0, 35.0, 0.0, 1.0, 1.0, 36.0, 0.0, 1.0, 1.0, 37.0, 0.0, 1.0, 1.0, 38.0, 0.0, 1.0, 39.0, 0.0, 1.0, 40.0, 0.0, 1.0, 41.0, 0.0, 1.0, 42.0, 0.0, 1.0, 43.0, 1.0, 1.0, 44.0, 1.0, 1.0, 45.0, 1.0, 1.0, 46.0, 1.0, 1.0, 47.0, 1.0, 1.0, 48.0, 1.0, 1.0, 49.0, 1.0, 1.0, 50.0, 1.0, 1.0, 51.0, 1.0, 1.0, 52.0, 1.0, 1.0, 53.0, 1.0, 1.0, 54.0, 1.0, 1.0, 55.0, 1.0, 1.0, 56.0, 0.0, 1.0, 1.0, 65.0, 0.0, 1.0]
+since_generator_version = 22
+provisional = false
+acceptance = "57 of the registry's 58 gas rows (`FeH` not modelled), 84 items of 194 intervals re-emitted from the records to the bit; dropped as empty: `Si(cr)` 300–298.15 K, `Ca(a)` 300–298.15 K; the reference states' switches to their gas against NIST-JANAF's: Na 1170.43 K (-0.10), Mg 1364.15 K (-1.96), Al 2797.65 K (+6.83), Si 3509.40 K (+4.79), P 1180.96 K (+0.96), S 882.42 K (+0.31), K 1039.41 K (-0.13), Ca 1778.06 K (+4.40), Ti 3634.62 K (+3.66), V 3704.91 K (+14.83), Cr 2951.82 K (-0.26), Mn 2325.03 K (-9.49), Fe 3138.45 K (+5.11), Ni 3159.60 K (+3.01), Zn 1178.83 K (-1.35), within 14.8 K; `MgSO4`'s decomposition at 1 bar 1375.44 K, which replaces the row's 1,272 K reduced from JANAF, and graphite's sublimation at 1 bar 3973.32 K, which replaces its 4,080 K"
+
+[[table]]
 name = "type_ia_delay"
 path = "type_ia_delay.rs"
 task = "type_ia_delay"

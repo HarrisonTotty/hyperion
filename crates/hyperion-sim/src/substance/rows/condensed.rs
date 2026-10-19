@@ -17,8 +17,10 @@
 //! source of its own beside its value, DOE PAC's [`Basis::Fact`]. No
 //! table of it is fitted from, committed or copied, and a modern primary that differs beyond
 //! JANAF's uncertainty is the value, JANAF's recorded, as for `Fe` and `Cr` (decision-composition
-//! §5, as decision-p14-t49b-condensed §3 reads it). P14.T49.d cross-checks the two reduced values
-//! against the sim's own thermochemistry from NASA's CEA data.
+//! §5, as decision-p14-t49b-condensed §3 reads it). P14.T49.d recomputed the two values reduced
+//! from JANAF, `MgSO4`'s decomposition and `graphite`'s sublimation, from the sim's own
+//! thermochemistry, NASA's CEA records ([`formation`](super::super::formation)); both missed by
+//! more than 10 K, so each is now CEA's, reduced by the same arithmetic.
 
 use hyperion_surface::field::MechanicsFamily;
 
@@ -773,8 +775,9 @@ pub(in crate::substance) const RUTILE: CondensedColumns = CondensedColumns {
     ],
 };
 
-/// The one-bar sublimation of graphite, kelvin, which `soot` shares.
-const GRAPHITE_SUBLIMATION_K: f64 = 4_080.0;
+/// The one-bar sublimation of graphite, kelvin, which `soot` shares: where the summed C₁–C₅ vapour
+/// of NASA's CEA records reaches one bar (P14.T49.d, by decision-p14-t49b-condensed §3.1(5)).
+const GRAPHITE_SUBLIMATION_K: f64 = 3_973.0;
 
 /// Graphite, which sublimes at one bar.
 pub(in crate::substance) const GRAPHITE: CondensedColumns = CondensedColumns {
@@ -791,12 +794,16 @@ pub(in crate::substance) const GRAPHITE: CondensedColumns = CondensedColumns {
         ),
         source(
             "transition",
-            "4,080 K, where the summed vapour of C1–C5 over graphite reaches one bar, reduced \
-             from NIST-JANAF's log K_f (tables C-003, C-113, C-138, C-143 and C-148; Chase 1998): \
-             with graphite, the reference state, at unit activity each p(Cn) in bar is K_f(Cn); \
-             their sum's log₁₀, linear in 1 ÷ T between the tables' 4,000 and 4,100 K rows, \
-             crosses zero at 4,079 K. TRC's boiling point in the NIST WebBook, 4,100 ± 100 K \
-             (Honig and Kramer 1969), agrees. Graphite does not melt at one bar",
+            "3,973 K, where the summed vapour of C1–C5 over graphite reaches one bar, reduced \
+             from NASA's CEA records (McBride, Zehe and Gordon 2002, NASA/TP-2002-211556; \
+             `data/thermo.inp`'s C(gr), C, C2, C3, C4 and C5, from TRC and Gurvich) through \
+             `substance::formation`'s log K_f (P14.T49.d): with graphite, the reference state, at \
+             unit activity each p(Cn) in bar is K_f(Cn), and their sum reaches one bar at 3,973.3 \
+             K, C3 0.72 bar of it. It replaces 4,080 K, reduced the same way from NIST-JANAF's \
+             tables (C-003, C-113, C-138, C-143 and C-148; Chase 1998), 107 K higher, so that the \
+             sim has one thermochemistry (decision-p14-t49b-condensed §3.1(5)). TRC's boiling \
+             point in the NIST WebBook is 4,100 ± 100 K (Honig and Kramer 1969). Graphite does \
+             not melt at one bar",
             Basis::Reduced,
         ),
         source(
@@ -1607,7 +1614,7 @@ pub(in crate::substance) const SILICON_CARBIDE: CondensedColumns = CondensedColu
 /// Anhydrous magnesium sulphate.
 pub(in crate::substance) const MAGNESIUM_SULPHATE: CondensedColumns = CondensedColumns {
     grain_density: solid(3_020.0, 300.0),
-    transition: at(TransitionKind::Decomposition, 1_272.0),
+    transition: at(TransitionKind::Decomposition, 1_375.0),
     mechanics: MechanicsFamily::Salt,
     sources: &[
         source(
@@ -1621,14 +1628,20 @@ pub(in crate::substance) const MAGNESIUM_SULPHATE: CondensedColumns = CondensedC
         ),
         source(
             "transition",
-            "1,272 K, where MgSO4's decomposition to MgO with SO3, SO2 and O2 reaches one bar in \
-             all, reduced from NIST-JANAF's log K_f (tables Mg-018, Mg-008, O-058 and O-034; \
-             Chase 1998), in an open system whose gas is the decomposition's own: with both \
-             solids at unit activity, log₁₀ p(SO3) = log K_f(MgO) + log K_f(SO3) − log \
-             K_f(MgSO4), and MgSO4 → MgO + SO2 + ½O2 with p(O2) = p(SO2) ÷ 2 gives p(SO2)^1.5 ÷ \
-             √2 = K_f(MgO) K_f(SO2) ÷ K_f(MgSO4); the total's log₁₀, linear in 1 ÷ T between the \
-             tables' 1,200 and 1,300 K rows, crosses zero at 1,272 K. JANAF's MgSO4 melts at \
-             1,400 K (table Mg-020), which a dense SO2-bearing air approaches",
+            "1,375 K, where MgSO4's decomposition to MgO with SO3, SO2 and O2 reaches one bar in \
+             all, reduced from NASA's CEA records (McBride, Zehe and Gordon 2002, \
+             NASA/TP-2002-211556; `data/thermo.inp`'s MgSO4(II) and MgSO4(I), from Gurvich 1996, \
+             MgO(cr), SO3 and SO2) through `substance::formation`'s log K_f (P14.T49.d), in an \
+             open system whose gas is the decomposition's own: with both solids at unit activity, \
+             log₁₀ p(SO3) = log K_f(MgO) + log K_f(SO3) − log K_f(MgSO4), and MgSO4 → MgO + SO2 + \
+             ½O2 with p(O2) = p(SO2) ÷ 2 gives p(SO2)^1.5 ÷ √2 = K_f(MgO) K_f(SO2) ÷ K_f(MgSO4); \
+             the total reaches one bar at 1,375.4 K (SO2 0.648, O2 0.324 and SO3 0.027 bar). It \
+             replaces 1,272 K, reduced the same way from NIST-JANAF's tables (Mg-018, Mg-008, \
+             O-058 and O-034; Chase 1998), 103 K lower, so that the sim has one thermochemistry \
+             (decision-p14-t49b-condensed §3.1(5)). CEA's MgSO4 melts at 1,410 K and JANAF's at \
+             1,400 K (table Mg-020), which a dense SO2-bearing air approaches; a decomposition \
+             observed in air lies higher, its O2 suppressing SO3's dissociation (no measurement \
+             read)",
             Basis::Reduced,
         ),
         SALT_FAMILY,

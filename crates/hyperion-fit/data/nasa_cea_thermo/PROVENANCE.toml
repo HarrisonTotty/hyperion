@@ -1,0 +1,18 @@
+# NASA Glenn's thermodynamic records, as NASA's CEA (Chemical Equilibrium with Applications) ships
+# them in data/thermo.inp: the 111 records plan 14's P14.T49.d reads (every substance-registry gas
+# row's but FeH's, which the file lacks; the elements' reference states; and the MgSO4 and graphite
+# cross-checks' species), extracted verbatim by `reduce.py`, with the file's header, CRLF line ends
+# and END lines, so that the subset is a CEA library itself. Under Apache 2.0, whose text is kept
+# beside it (LICENSE.txt) and whose notice is in the repository's NOTICE. Read by
+# `run thermo_equilibrium`, which re-emits the polynomials to `tables/thermo.rs`.
+dataset = "nasa_cea_thermo"
+class = "committed"
+citation = "B. J. McBride, M. J. Zehe and S. Gordon (2002), NASA Glenn Coefficients for Calculating Thermodynamic Properties of Individual Species, NASA/TP-2002-211556 (NASA Glenn Research Center); the records of data/thermo.inp of NASA's CEA, with the species' own sources as each record's comment names them, and C. Snyder's (NASA GRC) 2019-2021 updates"
+url = "https://raw.githubusercontent.com/nasa/cea/2f79a647e85737742fb08a127da00d1ea1d069da/data/thermo.inp"
+retrieved = "2026-10-16"
+release = "nasa/cea at commit 2f79a647e85737742fb08a127da00d1ea1d069da, data/thermo.inp (1,234,323 bytes, sha256 fa7746572952d74e249e818a82a35c113829742fb421a308e167185528884363; its temperature line dated 9/8/2021), reduced by reduce.py to 111 records, 77,658 bytes"
+licence = "Apache License 2.0 (the repository's LICENSE.txt, kept here unmodified as LICENSE.txt); the repository's NOTICE.txt: \"CEA – Chemical Equilibrium with Applications. Copyright (c) 2025, United States Government as represented by the Administrator of the National Aeronautics and Space Administration. Licensed under the Apache License, Version 2.0\", naming data/thermo.inp and NASA TP-2002-211556 as its source. NTRS marks the TP GOV_PUBLIC_USE_PERMITTED (decision-composition §5)"
+
+[[files]]
+name = "thermo.inp"
+sha256 = "1fa29fc93db2129f56057034e68edcb0be3e7b2fdcbb70ff8afb31e74226b2fd"

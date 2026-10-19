@@ -30,11 +30,12 @@
 //! phase diagrams ([`PhaseDiagram`], whose functions are [`diagram`]'s), the condensed columns
 //! ([`CondensedColumns`]: a solid's or a liquid's grain density, its transition and its mechanics
 //! family) and the liquid columns ([`LiquidColumns`]: a surface liquid's optics and transport,
-//! which [`liquid_properties`] resolves into a palette's liquid record). Every value names its
-//! sources and their licence basis ([`Source`], [`Basis`]; decision-composition §5). P14.T49.b
-//! adds the later rows, the gases' molecular constants, the phase diagrams and the condensed
-//! columns; P14.T49.c–e the condensed optics, the thermochemistry and the aerosols' extinction;
-//! P14.T49.h the liquid columns.
+//! which [`liquid_properties`] resolves into a palette's liquid record). [`formation`] gives each
+//! gas row's equilibrium constant of formation by temperature, from NASA's CEA records (P14.T49.d).
+//! Every value names its sources and their licence basis ([`Source`], [`Basis`];
+//! decision-composition §5). P14.T49.b adds the later rows, the gases' molecular constants, the
+//! phase diagrams and the condensed columns; P14.T49.c–e the condensed optics, the thermochemistry
+//! and the aerosols' extinction; P14.T49.h the liquid columns.
 //!
 //! # Rows
 //!
@@ -54,6 +55,7 @@ pub mod aerosol;
 pub mod condensed;
 pub mod diagram;
 pub mod element;
+pub mod formation;
 pub mod helmholtz;
 pub mod liquid;
 pub mod mix;
@@ -75,6 +77,7 @@ pub use diagram::{
     SolidDensity, SolidPhase, SublimationEquation, SublimationPiece, WagnerEquation,
 };
 pub use element::Element;
+pub use formation::{formation_range, log10_equilibrium_constant, log10_formation_constant};
 pub use helmholtz::HelmholtzResidual;
 pub use hyperion_surface::substance_key::{SubstanceKey, SubstanceKeyForm};
 pub use liquid::{
