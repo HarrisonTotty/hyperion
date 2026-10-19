@@ -1997,6 +1997,37 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
   `cargo test -p hyperion-surface --lib height_golden`, `just test-wasm-fast`, and
   `just test-slow -E 'binary(surface_reading_worlds)'`.
 
+- **R09.T7.k The cold-trap fraction's shared integral and cheaper rules** (a T7.d follow-up,
+  built by plan 14's P14.T51.i in lane `p14-t51hij`; decision-p14-t51-batch §1).
+  - The multi-threshold form, bit for bit with `fraction`.
+  - `instantaneous` at at most 8 points.
+  - `INTERVALS` 128.
+  - T7.d's tests unchanged.
+  - T13.f reads them through plan 14's `ColdTrapGround::fractions_at`, whose signature T51.i keeps
+    (decision-r09-t13f-cold-traps §8).
+  - _As built (2026-10-19)._ All in `cold_trap.rs`, additive in its API and a value change in its
+    rules; no golden reads it, and no stream or tag moves.
+    - `fractions(latitude, body, terrain, thresholds, fractions)` writes each threshold's fraction
+      in their order. The star's path is found once. Each population's shadow is one trapezoid
+      integral over its fixed nodes (`Population::cumulative_each`, `Band::shadowed_each`,
+      `Terrain::shadowed_each`), its integrand evaluated once up to the largest cold limit, and
+      each threshold's share read from the running sum where its own would stop, by the same
+      operations, so each is `fraction`'s to the bit. `fraction` is `fractions` at one threshold.
+      Its panics (lengths, a threshold not finite) are in `tests/panics.rs`.
+    - The instantaneous shadow takes the 8-point Gauss–Legendre rule (`GAUSS_LEGENDRE_8`, the sim's
+      `tables::gauss_legendre` literals), within 4.4 × 10⁻¹⁶ of the 16-point rule over colatitudes
+      0.1–30°, D 0–20° and d/D 0.005–0.5 on 10,800 points (the ruling's port: 4 × 10⁻¹⁶).
+    - `INTERVALS` is 128. The cold traps move, relative to 512 intervals and 16 points (the lane's
+      figures, the real Sun and Hayne et al.'s lunar terrain): the Moon's water −9.3 × 10⁻⁵ (B) and
+      +2.8 × 10⁻⁴ (A); its CO₂ at 58.18 K +1.1 × 10⁻³ (B) and +8.5 × 10⁻⁴ (A), and at 55.53 K
+      +2.1 × 10⁻³ and +1.9 × 10⁻³; Mercury's water +2.6 × 10⁻⁴; Ceres's permanent shadow at 4°
+      −4.2 × 10⁻⁵ (B) and −3.7 × 10⁻⁶ (A), and at 20° −2.1 × 10⁻⁴ (A).
+    - T7.d's tests keep their tolerances but one: the trapezoid's unit-integrand test, whose
+      5 × 10⁻⁵ was the 512 intervals' bound. At 128 it is 8 × 10⁻⁴, 16 times, the rule's h², and the
+      worst measured is 3.2 × 10⁻⁴. The rule's degree test is now 15, the 8-point rule's.
+    - `bowl_permanent_shadow`'s fit (`hyperion-fit`) reads the cap through it, and its 0.003
+      acceptance cannot tell 4.4 × 10⁻¹⁶.
+
 Acceptance: `cargo test -p hyperion-surface craters` (T7.a–c and T7.e) and
 `cargo test -p hyperion-surface cold_trap` (T7.d).
 

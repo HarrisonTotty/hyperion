@@ -753,7 +753,7 @@ mod cold_trap {
     use hyperion_base::units::{Kelvin, Radians, WattsPerSquareMetre};
     use hyperion_surface::cold_trap::{
         Body, BodyParts, DepthRatios, Terrain, TerrainParts, bowl_permanent_shadow, fraction,
-        permanent_shadow, shadow_temperature,
+        fractions, permanent_shadow, shadow_temperature,
     };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
@@ -784,6 +784,32 @@ mod cold_trap {
     #[should_panic(expected = "a latitude must be in [-π/2, π/2]")]
     fn a_fraction_beyond_the_pole_is_refused() {
         let _ = fraction(Radians::new(1.6), &body(), &terrain(), Kelvin::new(110.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "the thresholds and their fractions must be as many")]
+    fn fractions_of_another_length_than_their_thresholds_are_refused() {
+        let mut shares = [0.0; 2];
+        fractions(
+            Radians::new(1.5),
+            &body(),
+            &terrain(),
+            &[Kelvin::new(110.0)],
+            &mut shares,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "a threshold must be finite and positive")]
+    fn fractions_with_a_threshold_that_is_not_finite_are_refused() {
+        let mut shares = [0.0; 2];
+        fractions(
+            Radians::new(1.5),
+            &body(),
+            &terrain(),
+            &[Kelvin::new(110.0), Kelvin::new(f64::NAN)],
+            &mut shares,
+        );
     }
 
     #[test]

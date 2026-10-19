@@ -87,7 +87,7 @@
 //!   - The temperature rises with γ, so the cold bowls are those below one depth ratio, and the
 //!     shallowest bowl with a permanent shadow bounds the population from below.
 //! - **Integration over d/D.** Each population's share is a quadrature of the bowl's shadow over
-//!   its density, the trapezoid rule on 512 intervals of the population's own ±8σ: in
+//!   its density, the trapezoid rule on 128 intervals of the population's own ±8σ: in
 //!   ln γ for the craters' log-normal and in γ for the plains' half-normal. Bowls no deeper than
 //!   tan(max(e₀ + D, 2D) ÷ 2) ÷ 2 keep no shadow. Ratios above 0.5, deeper than a hemisphere,
 //!   count as 0.5, the limit of both the table and Ingersoll's sphere.
@@ -200,41 +200,46 @@ const PLAINS_DEPTH_SCALE: f64 = 0.6;
 /// emissivity.
 const PLAINS_SURROUNDINGS: f64 = 0.0035;
 
-/// The 16-point Gauss–Legendre rule on [−1, 1]: its positive nodes and their weights.
+/// The 8-point Gauss–Legendre rule on [−1, 1]: its positive nodes and their weights.
 ///
-/// The rule is symmetric about 0 (Abramowitz and Stegun 1964, Table 25.4; recomputed to 40 digits
-/// by Newton's method on P₁₆, and rounded to the nearest `f64`).
-const GAUSS_LEGENDRE_16: [(f64, f64); 8] = [
-    (0.095_012_509_837_637_44, 0.189_450_610_455_068_5),
-    (0.281_603_550_779_258_9, 0.182_603_415_044_923_58),
-    (0.458_016_777_657_227_37, 0.169_156_519_395_002_54),
-    (0.617_876_244_402_643_8, 0.149_595_988_816_576_74),
-    (0.755_404_408_355_003, 0.124_628_971_255_533_88),
-    (0.865_631_202_387_831_8, 0.095_158_511_682_492_79),
-    (0.944_575_023_073_232_6, 0.062_253_523_938_647_894),
-    (0.989_400_934_991_649_9, 0.027_152_459_411_754_096),
+/// The rule is symmetric about 0 (Abramowitz and Stegun 1964, Table 25.4; DLMF §3.5(v)), each value
+/// the correctly rounded `f64`, as the sim's `tables::gauss_legendre` holds them. It replaces the
+/// 16-point rule in the instantaneous shadow's integral (P14.T51.i; R09.T7.k): over colatitudes
+/// 0.1–30°, D = δ + α from 0 to 20° and d/D 0.005–0.5 the two differ by at most 4.4 × 10⁻¹⁶,
+/// measured on 10,800 points (the ruling's port gave 4 × 10⁻¹⁶, decision-p14-t51-batch §1.2), at
+/// half the integrand's evaluations.
+const GAUSS_LEGENDRE_8: [(f64, f64); 4] = [
+    (0.183_434_642_495_649_8, 0.362_683_783_378_362),
+    (0.525_532_409_916_329, 0.313_706_645_877_887_27),
+    (0.796_666_477_413_626_7, 0.222_381_034_453_374_48),
+    (0.960_289_856_497_536_3, 0.101_228_536_290_376_26),
 ];
 
-/// Intervals of the trapezoid rule over a population's window.
+/// Intervals of the trapezoid rule over a population's window: 128 (P14.T51.i; R09.T7.k), from
+/// 512.
 ///
 /// The nodes are the population's alone, fixed whatever the latitude, the star or the cold
 /// limit, so that each function is monotone in its inputs to the last bit: every node's term is,
 /// and the cold limit only decides how far the sum runs. The bowl's shadow is piecewise smooth in
 /// the depth ratio, with a kink at each of the table's cells it crosses, which the rule resolves
-/// as the square of its step.
-const INTERVALS: u32 = 512;
+/// as the square of its step. Against 512 intervals, the cold traps move by relative amounts the
+/// ruling measured on its port of the model (decision-p14-t51-batch §1.2): the Moon's water by
+/// −9 × 10⁻⁵ with craters of distribution B and +2.8 × 10⁻⁴ with A, its CO₂ by +1.1 × 10⁻³,
+/// Mercury's water by +2.6 × 10⁻⁴, and Ceres's permanent shadow at 4° by −4 × 10⁻⁵ (B) and
+/// −4 × 10⁻⁶ (A); the lane's own figures are in plan 14's P14.T51.i record.
+const INTERVALS: u32 = 128;
 
 /// Standard deviations either side of a population's centre over which its bowls are integrated:
 /// a normal distribution's mass beyond 8σ is 1.2 × 10⁻¹⁵.
 const SPREAD_WIDTHS: f64 = 8.0;
 
-/// ∫ₐᵇ f by [`GAUSS_LEGENDRE_16`], summing the nodes in their fixed order.
+/// ∫ₐᵇ f by [`GAUSS_LEGENDRE_8`], summing the nodes in their fixed order.
 #[must_use]
 fn gauss_legendre(a: f64, b: f64, f: impl Fn(f64) -> f64) -> f64 {
     // `f64::midpoint` of operands this size is (a + b) ÷ 2, two of the four operators.
     let (mid, half) = (f64::midpoint(a, b), 0.5 * (b - a));
     let mut sum = 0.0;
-    for (x, w) in GAUSS_LEGENDRE_16 {
+    for (x, w) in GAUSS_LEGENDRE_8 {
         sum += w * (f(mid - half * x) + f(mid + half * x));
     }
     half * sum
@@ -647,6 +652,48 @@ impl Terrain {
     }
 }
 
+impl Terrain {
+    /// [`shadowed`](Self::shadowed) at each pair of cold limits, `crater_limits` and
+    /// `plains_limits` in step, written to `shares` in their order, each population's shadow one
+    /// integral shared by every pair (P14.T51.i; R09.T7.k): each equals
+    /// [`shadowed`](Self::shadowed)'s to the bit.
+    fn shadowed_each(
+        &self,
+        sky: &Sky,
+        (crater_limits, plains_limits): (&[f64], &[f64]),
+        shares: &mut [f64],
+    ) {
+        let n = shares.len();
+        debug_assert!(crater_limits.len() == n && plains_limits.len() == n);
+        let craters = self.parts.crater_fraction;
+        let plains = 1.0 - craters;
+        let mut crater_shares = vec![0.0; n];
+        if craters > 0.0 {
+            let population = Population::LogNormal(self.parts.crater_depths.log_normal());
+            sky.band
+                .shadowed_each(population, crater_limits, &mut crater_shares);
+        }
+        let mut plains_shares = vec![0.0; n];
+        let plains_population = Population::of_plains(self.parts.plains_slope);
+        if plains > 0.0
+            && let Some(population) = plains_population
+        {
+            sky.band
+                .shadowed_each(population, plains_limits, &mut plains_shares);
+        }
+        for (k, share) in shares.iter_mut().enumerate() {
+            let mut sum = 0.0;
+            if craters > 0.0 {
+                sum += craters * crater_shares[k];
+            }
+            if plains > 0.0 && plains_population.is_some() {
+                sum += plains * plains_shares[k];
+            }
+            *share = sum;
+        }
+    }
+}
+
 /// The star's path at one latitude, as the bowls' shadows and temperatures need it.
 #[derive(Debug, Clone, Copy)]
 struct Sky {
@@ -782,6 +829,35 @@ impl Band {
         share
     }
 
+    /// [`shadowed`](Self::shadowed) at each cold limit of `limits`, written to `shares` in their
+    /// order, one integral of the bowls' shadow shared by every limit (P14.T51.i; R09.T7.k): each
+    /// equals [`shadowed`](Self::shadowed)'s to the bit.
+    fn shadowed_each(&self, dist: Population, limits: &[f64], shares: &mut [f64]) {
+        debug_assert_eq!(limits.len(), shares.len());
+        let shallowest = self.shallowest();
+        let tops: Vec<f64> = limits
+            .iter()
+            .map(|&limit| {
+                if shallowest >= HEMISPHERE || limit <= shallowest {
+                    0.0
+                } else {
+                    num::min(limit, HEMISPHERE)
+                }
+            })
+            .collect();
+        dist.cumulative_each(&tops, |gamma| self.bowl(gamma), shares);
+        // Bowls deeper than a hemisphere count as hemispheres, if they are cold.
+        let mut deepest = None;
+        for ((&limit, &top), share) in limits.iter().zip(&tops).zip(shares.iter_mut()) {
+            if top > 0.0 && limit >= HEMISPHERE {
+                let term = *deepest.get_or_insert_with(|| {
+                    self.bowl(HEMISPHERE) * dist.mass(HEMISPHERE, f64::INFINITY)
+                });
+                *share += term;
+            }
+        }
+    }
+
     /// The instantaneous shadow of a spherical bowl of depth ratio `gamma` in (0, 0.5], under the
     /// star's upper limb at its highest elevation, as a share of the bowl's opening.
     ///
@@ -793,9 +869,9 @@ impl Band {
     /// `γ_y` = ½ √((ρ − h) ÷ (ρ + h)), which falls to 0 at the rim. The shadow is
     /// (4 ÷ π) ∫ √(1 − y²) (cos² e − `β_y` sin e cos e ÷ 2) dy over the offsets whose section is
     /// shadowed, from 0 to the y* where `γ_y` falls to the depth ratio whose β is 2 cot e. It is
-    /// taken in y = sin θ, so that the integrand stays smooth to the rim, by the 16-point
-    /// Gauss–Legendre rule. It matches an 801 × 801 ray grid to 10⁻⁴; the tests hold 0.005 on a
-    /// coarser one.
+    /// taken in y = sin θ, so that the integrand stays smooth to the rim, by the 8-point
+    /// Gauss–Legendre rule ([`GAUSS_LEGENDRE_8`]), within 4.4 × 10⁻¹⁶ of the 16-point rule it
+    /// replaced. It matches an 801 × 801 ray grid to 10⁻⁴; the tests hold 0.005 on a coarser one.
     #[must_use]
     fn instantaneous(&self, gamma: f64) -> f64 {
         if gamma >= HEMISPHERE || self.half_sin_cos <= 0.0 {
@@ -964,6 +1040,65 @@ impl Population {
             left = right;
         }
         sum
+    }
+}
+
+impl Population {
+    /// [`cumulative`](Self::cumulative) at each top of `tops`, each ≤ 0.5, written to `shares` in
+    /// their order (P14.T51.i; R09.T7.k): the integrand g is evaluated once at each node, up to
+    /// the largest top, and each top's share is read from the running sum where its own sum would
+    /// stop, by the same operations, so that each equals [`cumulative`](Self::cumulative)'s to the
+    /// bit.
+    fn cumulative_each(self, tops: &[f64], g: impl Fn(f64) -> f64, shares: &mut [f64]) {
+        debug_assert_eq!(tops.len(), shares.len());
+        let (lo, hi) = self.window();
+        // Each top's end in the window's variable, and the tops still to stop, latest first, so
+        // that the next to stop is the last.
+        let mut pending: Vec<(usize, f64)> = Vec::with_capacity(tops.len());
+        for (k, (&top, share)) in tops.iter().zip(shares.iter_mut()).enumerate() {
+            *share = 0.0;
+            if top <= 0.0 || hi <= lo {
+                continue;
+            }
+            let end = self.variable(top);
+            if end > lo {
+                pending.push((k, end));
+            }
+        }
+        if pending.is_empty() {
+            return;
+        }
+        pending.sort_by(|a, b| b.1.total_cmp(&a.1).then(b.0.cmp(&a.0)));
+        let step = (hi - lo) / f64::from(INTERVALS);
+        let value = |x: f64| g(self.ratio(x)) * self.density(x);
+        let mut left = value(lo);
+        let mut sum = 0.0;
+        for i in 0..INTERVALS {
+            let x0 = lo + step * f64::from(i);
+            let x1 = if i + 1 == INTERVALS {
+                hi
+            } else {
+                lo + step * f64::from(i + 1)
+            };
+            let right = value(x1);
+            while let Some(&(k, end)) = pending.last() {
+                if end >= x1 {
+                    break;
+                }
+                // The chord's area from x0 to the end: never more than the whole interval's.
+                let u = (end - x0) / (x1 - x0);
+                shares[k] = sum + 0.5 * (end - x0) * (left + (left + (right - left) * u));
+                pending.pop();
+            }
+            if pending.is_empty() {
+                return;
+            }
+            sum += 0.5 * (x1 - x0) * (left + right);
+            left = right;
+        }
+        for &(k, _) in &pending {
+            shares[k] = sum;
+        }
     }
 }
 
@@ -1181,28 +1316,115 @@ pub fn permanent_shadow(latitude: Radians, body: &Body, terrain: &Terrain) -> f6
 /// It is the part of [`permanent_shadow`] whose temperature at the star's highest elevation lies
 /// below the threshold, times one less the share under lateral conduction's cut-off. It does not
 /// rise with the greatest declination, the star's angular radius, the flux, the heat flow or the
-/// conduction share, and does not fall as the threshold rises.
+/// conduction share, and does not fall as the threshold rises. It is [`fractions`] at the one
+/// threshold.
 ///
 /// # Panics
 ///
 /// If the latitude is not in [−π/2, π/2] or the threshold is not finite and positive.
 #[must_use]
 pub fn fraction(latitude: Radians, body: &Body, terrain: &Terrain, threshold: Kelvin) -> f64 {
-    let t = threshold.value();
-    assert!(
-        t.is_finite() && t > 0.0,
-        "a threshold must be finite and positive, got {t} K"
+    let mut share = [0.0];
+    fractions(latitude, body, terrain, &[threshold], &mut share);
+    share[0]
+}
+
+/// The cold-trap fraction at `latitude` of each threshold of `thresholds`, written to `fractions`
+/// in their order: each [`fraction`]'s, to the bit (P14.T51.i; R09.T7.k).
+///
+/// The star's path is found once, and each population's shadow is one integral over its depth
+/// ratios shared by every threshold: its integrand is evaluated once at each node up to the largest
+/// cold limit, and each threshold's share is read from the running sum where its own would stop,
+/// in the same order. So a body tested for several condensables pays about one's cost: the
+/// warmest's, whose cold bowls reach deepest.
+///
+/// # Panics
+///
+/// If `fractions` and `thresholds` differ in length, the latitude is not in [−π/2, π/2], or a
+/// threshold is not finite and positive.
+///
+/// # Examples
+///
+/// Water's and carbon dioxide's cold traps at 88° on a Moon-like body, in one call, are the two
+/// calls' to the bit, and carbon dioxide's, the colder threshold, are no larger:
+///
+/// ```
+/// use hyperion_base::units::{Kelvin, Radians, WattsPerSquareMetre};
+/// use hyperion_surface::cold_trap::{
+///     Body, BodyParts, DepthRatios, LUNAR_SHARE_UNDER_CUTOFF, Terrain, TerrainParts, fraction,
+///     fractions,
+/// };
+///
+/// let body = Body::new(BodyParts {
+///     flux: WattsPerSquareMetre::new(1407.6),
+///     greatest_declination: Radians::new(0.026_878),
+///     star_radius: Radians::new(0.004_732),
+///     bond_albedo: 0.12,
+///     emissivity: 0.95,
+///     heat_flow: WattsPerSquareMetre::new(0.018),
+/// })?;
+/// let terrain = Terrain::new(TerrainParts {
+///     crater_fraction: 0.2,
+///     crater_depths: DepthRatios::HAYNE_B,
+///     plains_slope: Radians::new(0.099_669),
+///     share_under_cutoff: LUNAR_SHARE_UNDER_CUTOFF,
+/// })?;
+/// let latitude = Radians::new(1.535_89);
+/// let thresholds = [Kelvin::new(110.0), Kelvin::new(58.18)];
+/// let mut shares = [0.0; 2];
+/// fractions(latitude, &body, &terrain, &thresholds, &mut shares);
+/// for (share, threshold) in shares.into_iter().zip(thresholds) {
+///     let alone = fraction(latitude, &body, &terrain, threshold);
+///     assert_eq!(share.to_bits(), alone.to_bits());
+/// }
+/// assert!(shares[1] <= shares[0] && shares[0] > 0.0);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn fractions(
+    latitude: Radians,
+    body: &Body,
+    terrain: &Terrain,
+    thresholds: &[Kelvin],
+    fractions: &mut [f64],
+) {
+    assert_eq!(
+        thresholds.len(),
+        fractions.len(),
+        "the thresholds and their fractions must be as many"
     );
-    let sky = Sky::at(latitude, body);
-    let crater_limit = body.coldest_limit(sky.sin_highest, threshold, 0.0);
-    if crater_limit <= 0.0 {
-        return 0.0;
+    for threshold in thresholds {
+        let t = threshold.value();
+        assert!(
+            t.is_finite() && t > 0.0,
+            "a threshold must be finite and positive, got {t} K"
+        );
     }
-    // The plains' shadows also see sunlit terrain beyond their hollows, so are never colder.
-    let plains_limit = body.coldest_limit(sky.sin_highest, threshold, PLAINS_SURROUNDINGS);
-    let share = terrain.shadowed(&sky, crater_limit, plains_limit)
-        * (1.0 - terrain.parts.share_under_cutoff);
-    num::max(0.0, num::min(1.0, share))
+    let sky = Sky::at(latitude, body);
+    // A threshold whose bowls are all too warm takes no integral; the rest share one.
+    let mut cold = Vec::with_capacity(thresholds.len());
+    let mut crater_limits = Vec::with_capacity(thresholds.len());
+    let mut plains_limits = Vec::with_capacity(thresholds.len());
+    for (k, (&threshold, fraction)) in thresholds.iter().zip(fractions.iter_mut()).enumerate() {
+        *fraction = 0.0;
+        let crater_limit = body.coldest_limit(sky.sin_highest, threshold, 0.0);
+        if crater_limit <= 0.0 {
+            continue;
+        }
+        // The plains' shadows also see sunlit terrain beyond their hollows, so are never colder.
+        let plains_limit = body.coldest_limit(sky.sin_highest, threshold, PLAINS_SURROUNDINGS);
+        cold.push(k);
+        crater_limits.push(crater_limit);
+        plains_limits.push(plains_limit);
+    }
+    if cold.is_empty() {
+        return;
+    }
+    let mut shadowed = vec![0.0; cold.len()];
+    terrain.shadowed_each(&sky, (&crater_limits, &plains_limits), &mut shadowed);
+    let kept = 1.0 - terrain.parts.share_under_cutoff;
+    for (&k, &shadow) in cold.iter().zip(&shadowed) {
+        fractions[k] = num::max(0.0, num::min(1.0, shadow * kept));
+    }
 }
 
 #[cfg(test)]
@@ -1701,8 +1923,12 @@ mod tests {
 
     #[test]
     fn the_trapezoid_rule_follows_each_populations_mass() {
-        // The rule with a unit integrand is the population's mass up to `top`, to 5 × 10⁻⁵, and never
-        // falls as `top` rises, whether `top` falls on a node or inside an interval.
+        // The rule with a unit integrand is the population's mass up to `top`, within the rule's
+        // h² f′ ÷ 12 where it stops, and never falls as `top` rises, whether `top` falls on a node or
+        // inside an interval. At 128 intervals (P14.T51.i; R09.T7.k) the bound is 16 times the 512
+        // intervals' 5 × 10⁻⁵, the rule's h² at a quarter of the intervals; the worst, printed, is
+        // 3.2 × 10⁻⁴ at 128.
+        let mut worst: f64 = 0.0;
         let populations = [
             Population::LogNormal(DepthRatios::HAYNE_A.log_normal()),
             Population::LogNormal(DepthRatios::HAYNE_B.log_normal()),
@@ -1717,23 +1943,150 @@ mod tests {
                 assert!(sum >= last, "{dist:?} at {top}: {sum} after {last}");
                 last = sum;
                 let mass = dist.mass(0.0, top);
-                // Within the rule's h² f′ ÷ 12 where it stops.
+                worst = num::max(worst, (sum - mass).abs());
                 assert!(
-                    (sum - mass).abs() <= 5e-5,
+                    (sum - mass).abs() <= 8e-4,
                     "{dist:?} at {top}: {sum} against {mass}"
                 );
             }
         }
+        eprintln!("the trapezoid rule against each population's mass: at most {worst:e}");
     }
 
     #[test]
-    fn the_gauss_legendre_rule_integrates_degree_31_exactly() {
+    fn the_gauss_legendre_rule_integrates_degree_15_exactly() {
         let ones = gauss_legendre(0.0, 1.0, |_| 1.0);
         assert!((ones - 1.0).abs() < 1e-15, "{ones}");
         let (a, b) = (0.2, 1.7);
-        let got = gauss_legendre(a, b, |x| math::powi(x, 31));
-        let exact = (math::powi(b, 32) - math::powi(a, 32)) / 32.0;
-        assert!((got / exact - 1.0).abs() < 1e-13, "{got} against {exact}");
+        let got = gauss_legendre(a, b, |x| math::powi(x, 15));
+        let exact = (math::powi(b, 16) - math::powi(a, 16)) / 16.0;
+        assert!((got / exact - 1.0).abs() < 1e-14, "{got} against {exact}");
+    }
+
+    /// The 16-point rule the instantaneous shadow took until P14.T51.i (Abramowitz and Stegun 1964,
+    /// Table 25.4), kept here for the measured difference.
+    const GAUSS_LEGENDRE_16: [(f64, f64); 8] = [
+        (0.095_012_509_837_637_44, 0.189_450_610_455_068_5),
+        (0.281_603_550_779_258_9, 0.182_603_415_044_923_58),
+        (0.458_016_777_657_227_37, 0.169_156_519_395_002_54),
+        (0.617_876_244_402_643_8, 0.149_595_988_816_576_74),
+        (0.755_404_408_355_003, 0.124_628_971_255_533_88),
+        (0.865_631_202_387_831_8, 0.095_158_511_682_492_79),
+        (0.944_575_023_073_232_6, 0.062_253_523_938_647_894),
+        (0.989_400_934_991_649_9, 0.027_152_459_411_754_096),
+    ];
+
+    /// The instantaneous shadow by the 8-point rule is within 10⁻¹⁵ of the 16-point rule's (4.4 ×
+    /// 10⁻¹⁶ measured; the ruling's port, 4 × 10⁻¹⁶, decision-p14-t51-batch §1.2) over colatitudes
+    /// 0.1–30°, D from 0 to 20° and d/D 0.005–0.5: the 16-point integral recomputed here from the
+    /// same integrand, on 10,800 points.
+    #[test]
+    fn the_8_point_rule_keeps_the_16_point_shadow() {
+        let sixteen = |band: &Band, gamma: f64| {
+            if gamma >= HEMISPHERE || band.half_sin_cos <= 0.0 {
+                return band.cos2;
+            }
+            let threshold = depth_ratio_of_beta(band.cos2 / band.half_sin_cos);
+            if gamma <= threshold {
+                return 0.0;
+            }
+            let depth = 2.0 * gamma;
+            let sphere = (1.0 + depth * depth) / (2.0 * depth);
+            let centre = sphere - depth;
+            let edge = 4.0 * threshold * threshold;
+            let gap = 4.0 * (gamma - threshold) * (gamma + threshold) / (depth * (1.0 - edge));
+            let reach = (gap * (2.0 * sphere - gap)).sqrt();
+            let theta_max = math::asin(num::min(1.0, reach));
+            let (mid, half) = (f64::midpoint(0.0, theta_max), 0.5 * theta_max);
+            let f = |theta: f64| {
+                let (offset, cos_theta) = math::sin_cos(theta);
+                let rho = (sphere * sphere - offset * offset).sqrt();
+                let section_depth = depth - offset * offset / (sphere + rho);
+                let gamma_y = 0.5 * (section_depth / (rho + centre)).sqrt();
+                cos_theta * cos_theta * (band.cos2 - beta_of(gamma_y) * band.half_sin_cos)
+            };
+            let mut sum = 0.0;
+            for (x, w) in GAUSS_LEGENDRE_16 {
+                sum += w * (f(mid - half * x) + f(mid + half * x));
+            }
+            4.0 / PI * half * sum
+        };
+        let mut worst: f64 = 0.0;
+        for i in 0..30 {
+            let colatitude = degrees(0.1 + 29.9 * f64::from(i) / 29.0).value();
+            for j in 0..18 {
+                let limb = degrees(20.0 * f64::from(j) / 17.0).value();
+                let band = Band::new(colatitude, limb);
+                for k in 0..20 {
+                    let gamma = 0.005 * math::powf(100.0, f64::from(k) / 19.0);
+                    let d = (band.instantaneous(gamma) - sixteen(&band, gamma)).abs();
+                    worst = num::max(worst, d);
+                }
+            }
+        }
+        eprintln!("the 8-point rule against the 16-point: at most {worst:e}");
+        assert!(worst <= 1e-15, "{worst:e}");
+    }
+
+    /// The shared form is [`fraction`] at each threshold to the bit (P14.T51.i; R09.T7.k), over the
+    /// Moon, a Mercury, a Ceres and a cold body at 30 au, each latitude from 60° to the pole, and
+    /// thresholds of 20–200 K given in any order, repeated and with ones too warm for any bowl.
+    #[test]
+    fn the_shared_form_is_fraction_at_each_threshold_to_the_bit() {
+        let bodies = [
+            moon(),
+            Body::new(BodyParts {
+                flux: WattsPerSquareMetre::new(14_490.0),
+                greatest_declination: degrees(0.034),
+                star_radius: degrees(0.87),
+                bond_albedo: 0.11,
+                emissivity: 0.95,
+                heat_flow: WattsPerSquareMetre::new(0.02),
+            })
+            .unwrap(),
+            Body::new(BodyParts {
+                flux: WattsPerSquareMetre::new(1361.0 / (2.55 * 2.55)),
+                greatest_declination: degrees(4.0),
+                star_radius: degrees(0.1),
+                bond_albedo: 0.09,
+                emissivity: 0.95,
+                heat_flow: WattsPerSquareMetre::new(0.001),
+            })
+            .unwrap(),
+            Body::new(BodyParts {
+                flux: WattsPerSquareMetre::new(1361.0 / 900.0),
+                greatest_declination: degrees(10.0),
+                star_radius: degrees(0.009),
+                bond_albedo: 0.3,
+                emissivity: 0.95,
+                heat_flow: WattsPerSquareMetre::new(0.003),
+            })
+            .unwrap(),
+        ];
+        let terrains = [
+            best_fit(DepthRatios::HAYNE_B),
+            best_fit(DepthRatios::HAYNE_A),
+        ];
+        let thresholds: Vec<Kelvin> = [200.0, 20.0, 110.0, 58.18, 35.0, 110.0, 80.0, 150.0, 25.0]
+            .into_iter()
+            .map(Kelvin::new)
+            .collect();
+        let mut compared = 0;
+        for body in &bodies {
+            for terrain in &terrains {
+                for i in 0..=30 {
+                    let latitude = degrees(60.0 + f64::from(i));
+                    let mut shares = vec![f64::NAN; thresholds.len()];
+                    fractions(latitude, body, terrain, &thresholds, &mut shares);
+                    for (&share, &threshold) in shares.iter().zip(&thresholds) {
+                        let alone = fraction(latitude, body, terrain, threshold);
+                        assert_same_bits(share, alone);
+                        compared += usize::from(alone > 0.0);
+                    }
+                }
+            }
+        }
+        assert!(compared > 200, "{compared} nonzero fractions compared");
     }
 
     #[test]
