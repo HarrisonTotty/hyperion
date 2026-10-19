@@ -519,39 +519,51 @@ impl WilliamsLongViscosity {
     }
 }
 
-/// The acid's index in one bin at the record's density `density` (kg m⁻³) and mass-fraction
-/// weight `s` = (w − `w₁`) ÷ (`w₂` − `w₁`), from the two files' indices `low` and `high` there at
-/// their own states' densities `low_density` and `high_density`: the specific refractions
+/// The acid's index in one bin at the record's density `density` and mass-fraction weight `s` =
+/// (w − `w₁`) ÷ (`w₂` − `w₁`), from the two files' indices `low` and `high` there at their own
+/// states' densities `low_density` and `high_density`: the specific refractions
 /// r = (n² − 1) ÷ [(n² + 2) ρ] mixed as (1 − s) `r₁` + s `r₂`, then n at r ρ ([`AqueousAcid`]).
 #[must_use]
 fn acid_index(
-    (low, low_density): (f64, f64),
-    (high, high_density): (f64, f64),
+    (low, low_density): (f64, KilogramsPerCubicMetre),
+    (high, high_density): (f64, KilogramsPerCubicMetre),
     s: f64,
-    density: f64,
+    density: KilogramsPerCubicMetre,
 ) -> f64 {
-    let refraction =
-        (1.0 - s) * lorentz_lorenz(low) / low_density + s * lorentz_lorenz(high) / high_density;
-    from_lorentz_lorenz(refraction * density)
+    let refraction = (1.0 - s) * lorentz_lorenz(low) / low_density.value()
+        + s * lorentz_lorenz(high) / high_density.value();
+    from_lorentz_lorenz(refraction * density.value())
 }
 
-/// The acid's absorption coefficient in one bin, m⁻¹, at the record's density `density` (kg m⁻³),
-/// from the two files' coefficients `low` and `high` (m⁻¹) at their own states' densities
-/// `low_density` and `high_density`: by mass, (1 − s) `α₁` ÷ `ρ₁` + s `α₂` ÷ `ρ₂` at the
-/// mass-fraction weight `between` = `Some(s)`, s in [0, 1], between the files; and the larger of
-/// the two at `None`, outside them; times ρ ([`AqueousAcid`]).
+/// Where a composition's acid mass fraction lies against the acid's two files, for
+/// [`acid_absorption`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum AcidSpan {
+    /// Between the files' mass fractions, within [`MOLE_FRACTION_SLACK`]: the mass-fraction weight
+    /// s = (w − `w₁`) ÷ (`w₂` − `w₁`), held to [0, 1].
+    Between(f64),
+    /// Outside them by more than the slack.
+    Outside,
+}
+
+/// The acid's absorption coefficient in one bin, m⁻¹, at the record's density `density`, from
+/// the two files' coefficients `low` and `high` (m⁻¹) at their own states' densities
+/// `low_density` and `high_density`: by mass, (1 − s) `α₁` ÷ `ρ₁` + s `α₂` ÷ `ρ₂` at
+/// [`AcidSpan::Between`]`(s)`, between the files; and the larger of the two at
+/// [`AcidSpan::Outside`]; times ρ ([`AqueousAcid`]).
 #[must_use]
 fn acid_absorption(
-    (low, low_density): (f64, f64),
-    (high, high_density): (f64, f64),
-    between: Option<f64>,
-    density: f64,
+    (low, low_density): (f64, KilogramsPerCubicMetre),
+    (high, high_density): (f64, KilogramsPerCubicMetre),
+    span: AcidSpan,
+    density: KilogramsPerCubicMetre,
 ) -> f64 {
-    let (per_kg_low, per_kg_high) = (low / low_density, high / high_density);
-    let per_kg = between.map_or(per_kg_low.max(per_kg_high), |s| {
-        (1.0 - s) * per_kg_low + s * per_kg_high
-    });
-    per_kg * density
+    let (per_kg_low, per_kg_high) = (low / low_density.value(), high / high_density.value());
+    let per_kg = match span {
+        AcidSpan::Between(s) => (1.0 - s) * per_kg_low + s * per_kg_high,
+        AcidSpan::Outside => per_kg_low.max(per_kg_high),
+    };
+    per_kg * density.value()
 }
 
 /// A brine's solute that has no registry row yet (decision-p14-t49h-step3-composition §1.3): its
@@ -861,11 +873,11 @@ fn parts(
     Ok(parts)
 }
 
-/// The mixture's Lorentz–Lorenz function in each bin, L = Σ xᵢ Lᵢ Vᵢ ÷ `molar_volume`
+/// The mixture's Lorentz–Lorenz function in each bin, L = Σ xᵢ Lᵢ Vᵢ ÷ `molar_volume_m3_per_mol`
 /// (Lorentz–Lorenz from the components' molar refractions Rᵢ = Lᵢ Vᵢ at the mixture's molar volume
-/// `V_m`, m³ mol⁻¹), summed in the parts' order.
+/// `V_m`), summed in the parts' order.
 #[must_use]
-fn mixed_lorentz_lorenz(parts: &[Part], molar_volume: f64) -> [f64; LIQUID_BINS] {
+fn mixed_lorentz_lorenz(parts: &[Part], molar_volume_m3_per_mol: f64) -> [f64; LIQUID_BINS] {
     let mut lorentz = [0.0; LIQUID_BINS];
     for (k, l) in lorentz.iter_mut().enumerate() {
         let mut refraction = 0.0;
@@ -874,7 +886,7 @@ fn mixed_lorentz_lorenz(parts: &[Part], molar_volume: f64) -> [f64; LIQUID_BINS]
                 * lorentz_lorenz(part.state.refractive_index[k])
                 * part.molar_volume_m3_per_mol;
         }
-        *l = refraction / molar_volume;
+        *l = refraction / molar_volume_m3_per_mol;
     }
     lorentz
 }
@@ -884,10 +896,10 @@ fn mixed_lorentz_lorenz(parts: &[Part], molar_volume: f64) -> [f64; LIQUID_BINS]
 /// component's parachor Pᵢ = σᵢ^(1/4) Vᵢ from its own tension and molar volume at the temperature
 /// (Macleod 1923, Trans. Faraday Soc. 19, 38, doi:10.1039/tf9231900038; Sugden 1924, J. Chem. Soc.,
 /// Trans. 125, 1177, doi:10.1039/ct9242501177; Weinaug and Katz 1943, Ind. Eng. Chem. 35, 239,
-/// doi:10.1021/ie50398a028), `molar_volume` the mixture's `V_m`, m³ mol⁻¹; `None` where a part has
-/// no tension.
+/// doi:10.1021/ie50398a028), `molar_volume_m3_per_mol` the mixture's `V_m`; `None` where a part
+/// has no tension.
 #[must_use]
-fn mixed_surface_tension(parts: &[Part], molar_volume: f64) -> Option<f64> {
+fn mixed_surface_tension(parts: &[Part], molar_volume_m3_per_mol: f64) -> Option<f64> {
     let mut parachors = Some(0.0);
     for part in parts {
         parachors = parachors
@@ -896,7 +908,7 @@ fn mixed_surface_tension(parts: &[Part], molar_volume: f64) -> Option<f64> {
                 sum + part.fraction * sigma.sqrt().sqrt() * part.molar_volume_m3_per_mol
             });
     }
-    parachors.map(|sum| math::powi(sum / molar_volume, 4))
+    parachors.map(|sum| math::powi(sum / molar_volume_m3_per_mol, 4))
 }
 
 /// [`MixingModel::IdealLiquids`]' record of `parts` at `temperature`, each sum in the parts'
@@ -978,7 +990,7 @@ struct MixtureScattering {
 
 /// The scattering of an ideal mixture of `parts` (decision-r11-palette-liquids §1.8's Titan row:
 /// "ES–Cabannes with ideal-mixing `κ_T`, plus an ideal-solution concentration term"), from the
-/// mixture's `molar_mass` (kg mol⁻¹), `molar_volume` `V_m` (m³ mol⁻¹), Lorentz–Lorenz function
+/// mixture's `molar_mass_kg_per_mol`, `molar_volume_m3_per_mol` `V_m`, Lorentz–Lorenz function
 /// `lorentz` and index `index` by bin at `temperature`; `None` where a part has no `κ_T`.
 ///
 /// For natural light the isotropic part of the volume scattering function at 90° is (π² ÷ 2) λ⁻⁴
@@ -1022,8 +1034,8 @@ struct MixtureScattering {
 #[must_use]
 fn mixture_scattering(
     parts: &[Part],
-    molar_mass: f64,
-    molar_volume: f64,
+    molar_mass_kg_per_mol: f64,
+    molar_volume_m3_per_mol: f64,
     lorentz: &[f64; LIQUID_BINS],
     index: &[f64; LIQUID_BINS],
     temperature: Kelvin,
@@ -1033,17 +1045,17 @@ fn mixture_scattering(
     let mut gas_constant = 0.0;
     for part in parts {
         let own = part.state.fluctuations?;
-        compressibility += part.fraction * part.molar_volume_m3_per_mol / molar_volume
+        compressibility += part.fraction * part.molar_volume_m3_per_mol / molar_volume_m3_per_mol
             * own.compressibility_per_pa;
-        gas_constant +=
-            part.fraction * part.molar_mass_kg_per_mol / molar_mass * own.gas_constant_j_per_kg_k;
+        gas_constant += part.fraction * part.molar_mass_kg_per_mol / molar_mass_kg_per_mol
+            * own.gas_constant_j_per_kg_k;
         inputs.push(own);
     }
     let t = temperature.value();
-    let density = molar_mass / molar_volume;
+    let density = molar_mass_kg_per_mol / molar_volume_m3_per_mol;
     let structure_factor = density * gas_constant * t * compressibility;
     let fluctuation = BOLTZMANN_CONSTANT * t * compressibility;
-    let per_molecule = molar_volume / AVOGADRO_PER_MOL;
+    let per_molecule = molar_volume_m3_per_mol / AVOGADRO_PER_MOL;
     let pi2_half = std::f64::consts::PI * std::f64::consts::PI / 2.0;
     let mut scattering = MixtureScattering {
         total: [0.0; LIQUID_BINS],
@@ -1060,7 +1072,8 @@ fn mixture_scattering(
         let (mut mean, mut square, mut anisotropy, mut refraction) = (0.0, 0.0, 0.0, 0.0);
         for (part, own) in parts.iter().zip(&inputs) {
             let own_lorentz = lorentz_lorenz(part.state.refractive_index[k]);
-            let slope = field * part.molar_volume_m3_per_mol / molar_volume * (own_lorentz - mixed);
+            let slope = field * part.molar_volume_m3_per_mol / molar_volume_m3_per_mol
+                * (own_lorentz - mixed);
             mean += part.fraction * slope;
             square += part.fraction * slope * slope;
             let molar_refraction = part.molar_volume_m3_per_mol * own_lorentz;
@@ -1178,16 +1191,22 @@ fn acid_record(
     let water_mass = fraction(model.solvent) * molar_mass_kg_per_mol(model.solvent)?;
     let acid_mass = fraction(model.solute) * molar_mass_kg_per_mol(model.solute)?;
     let w = acid_mass / (water_mass + acid_mass);
-    let density = model.density.density_kg_m3(w, temperature);
+    let density = KilogramsPerCubicMetre::new(model.density.density_kg_m3(w, temperature));
     let [low, high] = &model.files;
     let s = (w - low.mass_fraction) / (high.mass_fraction - low.mass_fraction);
     // A composition at a file's own fraction, given by mole fraction, lands within an ulp or two
     // of it: within the composition's slack it is between the files, so that both are reproduced.
-    let between = (w >= low.mass_fraction - MOLE_FRACTION_SLACK
-        && w <= high.mass_fraction + MOLE_FRACTION_SLACK)
-        .then(|| s.clamp(0.0, 1.0));
-    let low_density = model.density.density_kg_m3(low.mass_fraction, low.state);
-    let high_density = model.density.density_kg_m3(high.mass_fraction, high.state);
+    let span = if w >= low.mass_fraction - MOLE_FRACTION_SLACK
+        && w <= high.mass_fraction + MOLE_FRACTION_SLACK
+    {
+        AcidSpan::Between(s.clamp(0.0, 1.0))
+    } else {
+        AcidSpan::Outside
+    };
+    let low_density =
+        KilogramsPerCubicMetre::new(model.density.density_kg_m3(low.mass_fraction, low.state));
+    let high_density =
+        KilogramsPerCubicMetre::new(model.density.density_kg_m3(high.mass_fraction, high.state));
     let mut refractive_index = [0.0; LIQUID_BINS];
     let mut absorption_per_m = [0.0; LIQUID_BINS];
     for (k, (n, a)) in refractive_index
@@ -1204,7 +1223,7 @@ fn acid_record(
         *a = acid_absorption(
             (low.absorption[k], low_density),
             (high.absorption[k], high_density),
-            between,
+            span,
             density,
         );
     }
@@ -1213,7 +1232,7 @@ fn acid_record(
         .surface_tension_n_per_m(w, temperature);
     Ok(LiquidProperties {
         temperature,
-        density_kg_m3: density,
+        density_kg_m3: density.value(),
         basis: LiquidBasis::Derived,
         refractive_index,
         absorption_per_m: Some(absorption_per_m),
@@ -1223,11 +1242,11 @@ fn acid_record(
     })
 }
 
-/// The uniform mean over [`low`, `high`], nm, of the function linear between `points` (nm,
+/// The uniform mean over [`low_nm`, `high_nm`] of the function linear between `points` (nm,
 /// value), which run in increasing wavelength and span the interval: the trapezoids between its
 /// ends and every point inside it, exact for that function.
 #[must_use]
-fn piecewise_linear_mean(points: &[(f64, f64)], low: f64, high: f64) -> f64 {
+fn piecewise_linear_mean(points: &[(f64, f64)], low_nm: f64, high_nm: f64) -> f64 {
     let at = |wavelength: f64| {
         let mut value = points.last().map_or(1.0, |&(_, v)| v);
         for pair in points.windows(2) {
@@ -1239,16 +1258,16 @@ fn piecewise_linear_mean(points: &[(f64, f64)], low: f64, high: f64) -> f64 {
         }
         value
     };
-    let (mut from, mut value, mut area) = (low, at(low), 0.0);
+    let (mut from, mut value, mut area) = (low_nm, at(low_nm), 0.0);
     for &(wavelength, v) in points {
-        if wavelength > low && wavelength < high {
+        if wavelength > low_nm && wavelength < high_nm {
             area += f64::midpoint(value, v) * (wavelength - from);
             from = wavelength;
             value = v;
         }
     }
-    area += f64::midpoint(value, at(high)) * (high - from);
-    area / (high - low)
+    area += f64::midpoint(value, at(high_nm)) * (high_nm - from);
+    area / (high_nm - low_nm)
 }
 
 /// [`MixingModel::ReferenceOnly`]'s record of `parts` at `temperature`, the solution `row`'s

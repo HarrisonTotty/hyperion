@@ -157,20 +157,20 @@ pub(crate) struct SilicateMelt {
 
 /// A Vogel–Fulcher–Tammann viscosity, log₁₀ μ = A + B ÷ (T − C), μ in Pa s and T in K.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Vft {
-    /// A, the high-temperature limit's log₁₀ μ, Pa s.
-    pub(crate) a: f64,
+struct Vft {
+    /// A, the high-temperature limit's log₁₀ μ, μ in Pa s.
+    log10_limit_pa_s: f64,
     /// B, K.
-    pub(crate) b_kelvin: f64,
+    b_kelvin: f64,
     /// C, K.
-    pub(crate) c_kelvin: f64,
+    c_kelvin: f64,
 }
 
 impl Vft {
     /// log₁₀ μ at `temperature`, μ in Pa s; finite for `temperature` above C.
     #[must_use]
-    pub(crate) fn log10_viscosity_pa_s(&self, temperature: Kelvin) -> f64 {
-        self.a + self.b_kelvin / (temperature.value() - self.c_kelvin)
+    fn log10_viscosity_pa_s(&self, temperature: Kelvin) -> f64 {
+        self.log10_limit_pa_s + self.b_kelvin / (temperature.value() - self.c_kelvin)
     }
 }
 
@@ -215,7 +215,7 @@ const GRD_C: [f64; 7] = [2.75, 15.72, 8.32, 10.2, -12.29, -99.54, 0.3];
 /// [`giordano_russell_2007`] instead (decision-p14-t49h-step4-melts §1: its `Al₂O₃` term is
 /// negative, and the alkali-balanced term that offsets it is zero there).
 #[must_use]
-pub(crate) fn giordano_2008(oxides: &[(Oxide, f64)]) -> Vft {
+fn giordano_2008(oxides: &[(Oxide, f64)]) -> Vft {
     let wt = |oxide| weight_pct(oxides, oxide);
     let total_iron = wt(Oxide::Ferrous)
         + FERROUS_PER_FERRIC * Oxide::Ferrous.molar_mass_g_per_mol() * wt(Oxide::Ferric)
@@ -283,7 +283,7 @@ pub(crate) fn giordano_2008(oxides: &[(Oxide, f64)]) -> Vft {
         c_kelvin += coefficient * term;
     }
     Vft {
-        a: GRD_A,
+        log10_limit_pa_s: GRD_A,
         b_kelvin,
         c_kelvin,
     }
@@ -323,7 +323,7 @@ const GR07_C: [f64; 4] = [6.042, 10.190, 7.213, 9.626];
 /// 5333, Table 1). On Scarfe, Cronin, Wenzel and Kauffman 1983's diopside–anorthite melts (Am.
 /// Mineral. 68, 1083, Table 1) its 75 points lie at 0.18 rms (the ruling's §2.2).
 #[must_use]
-pub(crate) fn giordano_russell_2007(oxides: &[(Oxide, f64)]) -> Vft {
+fn giordano_russell_2007(oxides: &[(Oxide, f64)]) -> Vft {
     let at = |oxide| moles(oxides, oxide);
     let silica = at(Oxide::Silica);
     let alumina = at(Oxide::Alumina);
@@ -346,7 +346,7 @@ pub(crate) fn giordano_russell_2007(oxides: &[(Oxide, f64)]) -> Vft {
         c_kelvin += coefficient * term;
     }
     Vft {
-        a: GR07_A,
+        log10_limit_pa_s: GR07_A,
         b_kelvin,
         c_kelvin,
     }
@@ -355,19 +355,19 @@ pub(crate) fn giordano_russell_2007(oxides: &[(Oxide, f64)]) -> Vft {
 /// The least `Al₂O₃` of a melt that takes [`giordano_russell_2007`], wt%: where Giordano, Russell
 /// and Dingwell 2008's miss on Scarfe et al. 1983's alkali-free join passes 0.4 log units
 /// (decision-p14-t49h-step4-melts §1 and §2.3).
-pub(crate) const GR07_LEAST_ALUMINA_WT_PCT: f64 = 15.0;
+const GR07_LEAST_ALUMINA_WT_PCT: f64 = 15.0;
 
 /// The most `Na₂O` + K₂O of a melt that takes [`giordano_russell_2007`], wt% (§2.3).
-pub(crate) const GR07_MOST_ALKALIS_WT_PCT: f64 = 1.0;
+const GR07_MOST_ALKALIS_WT_PCT: f64 = 1.0;
 
 /// The most a melt that takes [`giordano_russell_2007`] may hold of the oxides its mapping drops,
 /// wt% (§2.3): all but `SiO₂`, `Al₂O₃`, `MgO`, `CaO`, `FeO`, `Fe₂O₃` (which counts as FeO(T)) and
 /// `MnO`.
-pub(crate) const GR07_MOST_DROPPED_WT_PCT: f64 = 3.0;
+const GR07_MOST_DROPPED_WT_PCT: f64 = 3.0;
 
 /// Which viscosity model a melt takes, by decision-p14-t49h-step4-melts §2.3's rule on its oxides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MeltViscosityModel {
+enum MeltViscosityModel {
     /// [`giordano_2008`]: any melt the rule does not send elsewhere.
     Giordano2008,
     /// [`giordano_russell_2007`]: `Al₂O₃` at least [`GR07_LEAST_ALUMINA_WT_PCT`], `Na₂O` + K₂O at
@@ -384,7 +384,7 @@ impl MeltViscosityModel {
     /// The model `oxides` take: an alkali-poor, aluminium-rich melt Giordano and Russell 2007's,
     /// any other Giordano, Russell and Dingwell 2008's.
     #[must_use]
-    pub(crate) fn of(oxides: &[(Oxide, f64)]) -> Self {
+    fn of(oxides: &[(Oxide, f64)]) -> Self {
         let w = |oxide| weight_pct(oxides, oxide);
         let alkalis = w(Oxide::Soda) + w(Oxide::Potash);
         let mut dropped = 0.0;
@@ -416,7 +416,7 @@ impl MeltViscosityModel {
 
     /// The model's A, B and C for `oxides`, or `None` where it is [`Self::Unruled`].
     #[must_use]
-    pub(crate) fn vft(self, oxides: &[(Oxide, f64)]) -> Option<Vft> {
+    fn vft(self, oxides: &[(Oxide, f64)]) -> Option<Vft> {
         match self {
             Self::Giordano2008 => Some(giordano_2008(oxides)),
             Self::GiordanoRussell2007 => Some(giordano_russell_2007(oxides)),
@@ -465,7 +465,7 @@ const LANGE_CARMICHAEL: [(Oxide, f64, f64); 9] = [
 /// B37: 2,740 kg m⁻³ for the melt fraction, from the lake's level surveys and its core's density,
 /// ±30 on the bulk) it meets within 1%, as a test holds.
 #[must_use]
-pub(crate) fn lange_carmichael_density(
+fn lange_carmichael_density(
     oxides: &[(Oxide, f64)],
     temperature: Kelvin,
 ) -> KilogramsPerCubicMetre {

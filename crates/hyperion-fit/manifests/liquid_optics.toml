@@ -1,8 +1,10 @@
 # The liquids' optical constants by bin (plan 14, P14.T49.h; decision-r11-palette-liquids §1.2 and
-# §1.8): rendering plan R08's committed liquid files, and its basaltic glass, a solid's file that the
-# silicate melts hold as it stands, reduced to the fifteen bake bins. The inputs hash covers each
-# file's data fields (`hyperion_fit::materials`); the task takes no parameters and no dataset, and
-# reads the sim's bins' edges and supercooled viscosities, which its fingerprint probes.
+# §1.8): rendering plan R08's committed liquid files, its basaltic glass, a solid's file that the
+# silicate melts hold as it stands, and R08.T5.k's nine liquids from their gases and their
+# measurements (decision-p14-t49h-gas-index §1.2), after the first eight, reduced to the fifteen
+# bake bins. The inputs hash covers each file's data fields (`hyperion_fit::materials`); the task
+# takes no parameters and no dataset, and reads the sim's bins' edges and supercooled viscosities,
+# which its fingerprint probes.
 task = "liquid_optics"
 materials = [
     "ammonia-liquid.json",
@@ -13,4 +15,13 @@ materials = [
     "sulphuric-acid-75.json",
     "sulphuric-acid-84.json",
     "water.json",
+    "argon-liquid.json",
+    "carbon-dioxide-liquid.json",
+    "carbon-monoxide-liquid.json",
+    "hydrogen-sulphide-liquid.json",
+    "krypton-liquid.json",
+    "nitrous-oxide-liquid.json",
+    "oxygen-liquid.json",
+    "sulphur-dioxide-liquid.json",
+    "xenon-liquid.json",
 ]

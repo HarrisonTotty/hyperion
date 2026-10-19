@@ -1,17 +1,20 @@
 //! The rows' liquid columns (P14.T49.h): each pure liquid with an R08 file, its index and
 //! absorption from that file; water's scattering, surface tension and viscosity from its IAPWS
-//! releases (the first step); and methane's, nitrogen's, ethane's and ammonia's from their
-//! reference equations of state (`rows/equations.rs`), Mulero, Cachadiña and Parra 2012's
-//! surface tensions and each one's reference viscosity correlation (the second step), with carbon
-//! dioxide's columns but its index, which waits on R08.T5.k's liquid file
-//! (decision-p14-t49h-gas-index §1.3), so that row answers `NotALiquid` until then; and the
+//! releases (the first step); methane's, nitrogen's, ethane's, ammonia's and carbon dioxide's from
+//! their reference equations of state (`rows/equations.rs`), Mulero, Cachadiña and Parra 2012's
+//! surface tensions and each one's reference viscosity correlation (the second step); the
 //! solutions (the third step): Titan's seas, an ideal mixture of three of them at Ligeia Mare's
 //! composition (decision-p14-t49b-condensed §1), with its scattering; the chloride and sulphate
 //! brines, aqueous electrolytes of water and a salt row; the perchlorate brines, whose solutes have
 //! no rows yet; ammonia–water at its eutectic; and aqueous sulphuric acid, the `H2SO4` row's
 //! liquid, from 25 to 85 wt% between Palmer and Williams's two measured compositions
-//! (decision-p14-t49h-step3-composition). The lithologies' silicate melts (the fourth step) are
-//! `rows/melts.rs`'s, listed here in registry order.
+//! (decision-p14-t49h-step3-composition); and the nine rows R08.T5.k gives liquid files (step 2b,
+//! decision-p14-t49h-gas-index §1.2): carbon dioxide's index joins its columns, and oxygen, argon,
+//! krypton, xenon, nitrous oxide, carbon monoxide, sulphur dioxide and hydrogen sulphide take their
+//! files' index (oxygen its absorption too), their reference equations' scattering, but sulphur
+//! dioxide's, and Mulero et al.'s surface tensions, with no viscosity, none being ruled for them.
+//! The lithologies' silicate melts (the fourth step) are `rows/melts.rs`'s, listed here in registry
+//! order.
 //!
 //! Every water coefficient is its release's, as printed: IAPWS R6-95(2018)'s Table 2 for the
 //! residual Helmholtz energy, R1-76(2014) for the surface tension and R12-08's Tables 1 and 2 for
@@ -44,16 +47,23 @@ use super::{equations, melts};
 use crate::tables::liquid_optics as bins;
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
 
-/// Every row with liquid columns, in registry order, by key: the pure liquids, the solutions and
-/// the lithologies' silicate melts (`rows/melts.rs`). Carbon dioxide's columns ([`CARBON_DIOXIDE`])
-/// join when its index does, with the eight other rows R08.T5.k gives a liquid file
-/// (decision-p14-t49h-gas-index §1.2–§1.3: P14.T49.h's step 2b); until then those nine answer
-/// `NotALiquid`.
-pub(in crate::substance) const LIQUIDS: [(SubstanceKey, LiquidColumns); 23] = [
+/// Every row with liquid columns, in registry order, by key: the pure liquids, among them the nine
+/// rows R08.T5.k gives a liquid file (decision-p14-t49h-gas-index §1.2: P14.T49.h's step 2b), the
+/// solutions and the lithologies' silicate melts (`rows/melts.rs`).
+pub(in crate::substance) const LIQUIDS: [(SubstanceKey, LiquidColumns); 32] = [
     (SubstanceKey::new_const("H2O"), WATER),
     (SubstanceKey::new_const("CH4"), METHANE),
     (SubstanceKey::new_const("NH3"), AMMONIA),
     (SubstanceKey::new_const("N2"), NITROGEN),
+    (SubstanceKey::new_const("O2"), OXYGEN),
+    (SubstanceKey::new_const("CO2"), CARBON_DIOXIDE),
+    (SubstanceKey::new_const("Ar"), ARGON),
+    (SubstanceKey::new_const("Kr"), KRYPTON),
+    (SubstanceKey::new_const("Xe"), XENON),
+    (SubstanceKey::new_const("N2O"), NITROUS_OXIDE),
+    (SubstanceKey::new_const("CO"), CARBON_MONOXIDE),
+    (SubstanceKey::new_const("SO2"), SULPHUR_DIOXIDE),
+    (SubstanceKey::new_const("H2S"), HYDROGEN_SULPHIDE),
     (SubstanceKey::new_const("C2H6"), ETHANE),
     (SubstanceKey::new_const("H2SO4"), SULPHURIC_ACID),
     (SubstanceKey::new_const("mars_dust"), melts::MARS_DUST),
@@ -87,8 +97,24 @@ const METHANE_ID: SubstanceId = SubstanceId(3);
 const AMMONIA_ID: SubstanceId = SubstanceId(4);
 /// [`WATER_ID`]'s nitrogen.
 const NITROGEN_ID: SubstanceId = SubstanceId(5);
+/// [`WATER_ID`]'s oxygen.
+const OXYGEN_ID: SubstanceId = SubstanceId(6);
 /// [`WATER_ID`]'s carbon dioxide.
 const CARBON_DIOXIDE_ID: SubstanceId = SubstanceId(7);
+/// [`WATER_ID`]'s argon.
+const ARGON_ID: SubstanceId = SubstanceId(8);
+/// [`WATER_ID`]'s krypton.
+const KRYPTON_ID: SubstanceId = SubstanceId(10);
+/// [`WATER_ID`]'s xenon.
+const XENON_ID: SubstanceId = SubstanceId(11);
+/// [`WATER_ID`]'s nitrous oxide.
+const NITROUS_OXIDE_ID: SubstanceId = SubstanceId(12);
+/// [`WATER_ID`]'s carbon monoxide.
+const CARBON_MONOXIDE_ID: SubstanceId = SubstanceId(13);
+/// [`WATER_ID`]'s sulphur dioxide.
+const SULPHUR_DIOXIDE_ID: SubstanceId = SubstanceId(14);
+/// [`WATER_ID`]'s hydrogen sulphide.
+const HYDROGEN_SULPHIDE_ID: SubstanceId = SubstanceId(15);
 /// [`WATER_ID`]'s ethane.
 const ETHANE_ID: SubstanceId = SubstanceId(20);
 /// [`WATER_ID`]'s sulphuric acid, the molecule, whose liquid is its aqueous acid.
@@ -830,22 +856,23 @@ pub(in crate::substance) const HUBER_2024: Huber2024Viscosity = Huber2024Viscosi
     },
 };
 
-/// Liquid carbon dioxide, for any world above its triple point's 518 kPa: its scattering by
-/// ES–Cabannes from Span and Wagner 1996's `κ_T`, its surface tension Mulero et al.'s and its
-/// viscosity Laesecke and Muzny 2017's. Its index waits on R08.T5.k's `carbon-dioxide-liquid.json`
-/// (decision-p14-t49h-gas-index §1.2), so these columns are not yet in [`LIQUIDS`] and the row
-/// answers `NotALiquid` until P14.T49.h's step 2b gives it its optics; its absorption is not
-/// modelled.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "carbon dioxide's columns join LIQUIDS with its index, P14.T49.h's step 2b \
-                  (decision-p14-t49h-gas-index §1.3); its tests read them now"
-    )
-)]
-pub(in crate::substance) const CARBON_DIOXIDE: LiquidColumns = LiquidColumns {
-    optics: None,
+/// Liquid carbon dioxide, for any world above its triple point's 518 kPa: its index R08.T5.k's
+/// `carbon-dioxide-liquid.json`, the gas's dispersion scaled by Phillips 1920's measured density
+/// law of the Lorentz–Lorenz function, at 216.6 K (decision-p14-t49h-gas-index §2.3), `Derived`,
+/// its provenance, and carried by Lorentz–Lorenz at constant specific refraction from there (a
+/// carry that misses Phillips's own law by about 0.0025 at warm states, recorded there, §2.2); its
+/// absorption not modelled (the file's k = 0, the liquid colourless in the visible); its
+/// scattering by ES–Cabannes from Span and Wagner 1996's `κ_T`, its surface tension Mulero et al.'s
+/// and its viscosity Laesecke and Muzny 2017's (P14.T49.h's second step).
+const CARBON_DIOXIDE: LiquidColumns = LiquidColumns {
+    optics: Some(LiquidOptics {
+        index: &bins::CARBON_DIOXIDE_LIQUID_N,
+        absorption: None,
+        state: Kelvin::new(216.6),
+        index_basis: LiquidBasis::Derived,
+        index_checked: None,
+        absorption_checked: None,
+    }),
     scattering: Some(LiquidScattering {
         equation: &equations::CARBON_DIOXIDE,
         anisotropy_ratio: CARBON_DIOXIDE_ANISOTROPY,
@@ -876,6 +903,17 @@ pub(in crate::substance) const CARBON_DIOXIDE: LiquidColumns = LiquidColumns {
         reference: &[(CARBON_DIOXIDE_ID, 1.0)],
     },
     sources: &[
+        Source {
+            covers: "n",
+            citation: "R08's `carbon-dioxide-liquid.json` (R08.T5.k; decision-p14-t49h-gas-index \
+                       §2.3): rayleigh.ts's gas dispersion (Bideau-Mehu et al. 1973 as Sneep and \
+                       Ubachs 2005 correct it) at the NIST WebBook's 26.776 63 mol/l at 216.6 K \
+                       (the triple point rounded up to 0.01 K, the state the index is carried \
+                       from), its molar refraction scaled by Phillips 1920's measured density law \
+                       (Proc. R. Soc. A 97, 225), c = 1 ÷ (1 + 0.0172 ρ²), 0.976 672 there, \
+                       extrapolated beyond his 0.737 g cm⁻³; derived, band ±0.007 in n",
+            basis: Basis::Reduced,
+        },
         Source {
             covers: "b",
             citation: "Einstein–Smoluchowski–Cabannes as for water, κ_T from Span and Wagner 1996 \
@@ -944,6 +982,724 @@ pub(in crate::substance) const LAESECKE_MUZNY_2017: LaeseckeMuzny2017Viscosity =
             )),
         },
     };
+
+/// A gas's depolarisation ratio for vertically polarised light from its King factor: `ρ_v` = 3
+/// (`F_K` − 1) ÷ (6 + 4 `F_K`), the inverse of `F_K` = (3 + 6 `ρ_v`) ÷ (3 − 4 `ρ_v`), so that
+/// [`molecular_anisotropy`] of it is 4.5 (`F_K` − 1).
+#[must_use]
+const fn vertical_depolarisation(king_factor: f64) -> f64 {
+    3.0 * (king_factor - 1.0) / (6.0 + 4.0 * king_factor)
+}
+
+/// Oxygen's anisotropy ratio, about 0.466 (decision-p14-t49h-gas-index §4.3): its molecular part
+/// from the gas's King factor at 550 nm, Bates 1984's `F_K` = 1.096 + 1.385 × 10⁻³ λ⁻² + 1.448 ×
+/// 10⁻⁴ λ⁻⁴ (λ in µm; Bodhaine et al. 1999, Eq. 6, as `rayleigh.ts`'s King-factor row cites it),
+/// 1.102 16, so `ρ_v` = 0.029 45, plus [`INTERACTION_ANISOTROPY`], giving δ about 0.706 at the
+/// triple point and 0.499 at 90.19 K, where `S_0` is 0.0155 and 0.0521 (the lane's research,
+/// `.git/rm45-scratch/p14-liquids/step2b/step2b.json`). An upper estimate within −40% / +0%, as
+/// [`NITROGEN_ANISOTROPY`]'s; here the anisotropic part dominates b.
+const OXYGEN_ANISOTROPY: f64 = molecular_anisotropy(vertical_depolarisation(
+    1.096 + 1.385e-3 / (0.55 * 0.55) + 1.448e-4 / (0.55 * 0.55 * 0.55 * 0.55),
+)) + INTERACTION_ANISOTROPY;
+
+/// Nitrous oxide's anisotropy ratio, about 1.013: its molecular part from the gas's `ρ_v` at 550
+/// nm, 0.0577 + 11.8 × 10⁻¹² ν² (ν in cm⁻¹; Sneep and Ubachs 2005, Eq. 19, after Alms, Burnham and
+/// Flygare 1975, as `rayleigh.ts` cites it), 0.061 60, plus [`INTERACTION_ANISOTROPY`], giving δ
+/// about 0.665 at the triple point (`S_0` 0.0454) and 0.652 at 184.67 K (the lane's research). An
+/// upper estimate within −40% / +0%, as [`OXYGEN_ANISOTROPY`]'s.
+const NITROUS_OXIDE_ANISOTROPY: f64 =
+    molecular_anisotropy(0.057_7 + 11.8e-12 * (1.0e7 / 550.0) * (1.0e7 / 550.0))
+        + INTERACTION_ANISOTROPY;
+
+/// Carbon monoxide's anisotropy ratio, 0.0825: its molecular part from the gas's King factor, 1.017
+/// over the visible (`rayleigh.ts`'s row, between Bogaard, Buckingham, Pierens and White 1978's
+/// 1.0161–1.0175 and Couling and Graham 1994's 1.0176), plus [`INTERACTION_ANISOTROPY`], giving δ
+/// about 0.230 at the triple point (`S_0` 0.0351; the lane's research); Couling and Graham's
+/// measured `ρ_v` = 0.005 251 at 514.5 nm would give 0.0853, and δ 0.235. An upper estimate within
+/// −40% / +0%, as [`NITROGEN_ANISOTROPY`]'s.
+const CARBON_MONOXIDE_ANISOTROPY: f64 =
+    molecular_anisotropy(vertical_depolarisation(1.017)) + INTERACTION_ANISOTROPY;
+
+/// Hydrogen sulphide's anisotropy ratio, about 0.0067: its molecular part from the gas's King
+/// factor, 1 + (2 ÷ 9)(Δα ÷ ᾱ)² with Δα = 0.6735 au, the vibrational Raman lines excluded, over ᾱ
+/// = 25.5 au at 632.8 nm (Bogaard, Buckingham and Ritchie 1982 and Monan, Bribes and Gaufrès 1982,
+/// as `rayleigh.ts`'s row cites them), 1.000 155, plus [`INTERACTION_ANISOTROPY`], which dominates
+/// it, giving δ about 0.025 at the triple point (`S_0` 0.0344; the lane's research). An upper
+/// estimate within −40% / +0%, as [`NITROGEN_ANISOTROPY`]'s.
+const HYDROGEN_SULPHIDE_ANISOTROPY: f64 = molecular_anisotropy(vertical_depolarisation(
+    1.0 + 2.0 / 9.0 * (0.673_5 / 25.5) * (0.673_5 / 25.5),
+)) + INTERACTION_ANISOTROPY;
+
+/// Methane's Lorentz–Lorenz function (n² − 1) ÷ (n² + 2) at its triple point at 550 nm, 0.182 858:
+/// Martonchik and Orton's 90 K file's 1.293 45 there, carried to 90.694 K by the row's density
+/// (the lane's research), the calibration [`atomic_anisotropy`] scales from.
+const METHANE_TRIPLE_LORENTZ_LORENZ: f64 = 0.182_858_302;
+
+/// An atomic liquid's anisotropy ratio, its interaction part alone, since an atom has none of its
+/// own (decision-p14-t49h-gas-index §4.3): methane's calibrated [`INTERACTION_ANISOTROPY`] scaled
+/// by the square of the ratio of the liquid's Lorentz–Lorenz function `lorentz_lorenz` at its
+/// triple point at 550 nm to methane's, as the dipole-induced-dipole pair estimate, (27 ÷ 2π) L² ÷
+/// ρ*, scales at corresponding reduced densities ρ*, with one cancellation factor for all (the
+/// lane's research's proposal). A stand-in, with methane's band, × (0.4–2): at the triple points it
+/// gives `ρ_u` inside the ruling's estimates, 0.009–0.012 for argon and 0.021–0.027 for xenon (at
+/// its top).
+#[must_use]
+const fn atomic_anisotropy(lorentz_lorenz: f64) -> f64 {
+    let ratio = lorentz_lorenz / METHANE_TRIPLE_LORENTZ_LORENZ;
+    INTERACTION_ANISOTROPY * ratio * ratio
+}
+
+/// Argon's anisotropy ratio, about 0.003 93, [`atomic_anisotropy`] at its Lorentz–Lorenz function
+/// at the triple point at 550 nm, 0.148 021 (its file's 83.81 K index there carried to 83.806 K):
+/// δ about 0.0109 at the triple point (`S_0` 0.0476; the lane's research).
+const ARGON_ANISOTROPY: f64 = atomic_anisotropy(0.148_020_740);
+
+/// Krypton's anisotropy ratio, about 0.006 39, [`atomic_anisotropy`] at 0.188 766 (its file's index
+/// at 550 nm at the triple point, 1.3031): δ about 0.0171 at the triple point (`S_0` 0.0489).
+const KRYPTON_ANISOTROPY: f64 = atomic_anisotropy(0.188_765_946);
+
+/// Xenon's anisotropy ratio, about 0.010 16, [`atomic_anisotropy`] at 0.237 901 (its file's index
+/// at 550 nm at the triple point, 1.391 58): δ about 0.0270 at the triple point (`S_0` 0.0486).
+const XENON_ANISOTROPY: f64 = atomic_anisotropy(0.237_900_701);
+
+/// The temperatures over which argon's carried index was checked against Sinnock and Smith 1969's
+/// tables of the liquid (Phys. Rev. 181, 1297, as refractiveindex.info's CC0 copies give them) and
+/// keeps its basis, 83.81–90 K: from the file's state to the warmest of their tables, every row
+/// inside the file's grid of every table met within 5 × 10⁻⁴ by the file's own index at its
+/// wavelength carried by the row's density, 1.5 × 10⁻⁴ at 83.81 K (the file's fit to that table),
+/// 3.7 × 10⁻⁴ at 86 K, 3.4 × 10⁻⁴ at 88 K and 4.2 × 10⁻⁴ at 90 K (decision-p14-t49h-gas-index
+/// §1.2; `hyperion-fit`'s `liquid_optics_the_atoms_index_windows_are_sinnock_and_smith_s`).
+const ARGON_INDEX_CHECKED: (Kelvin, Kelvin) = (Kelvin::new(83.81), Kelvin::new(90.0));
+
+/// Krypton's window, as [`ARGON_INDEX_CHECKED`]'s, 115.77–115.95 K: from the file's state, the
+/// row's triple point, to Sinnock and Smith's melting-point table, met within 4.7 × 10⁻⁵. Their
+/// 118, 122 and 126 K tables miss by 1.25 × 10⁻³, 1.72 × 10⁻³ and 1.70 × 10⁻³, past 5 × 10⁻⁴, for
+/// two causes: the row's ancillary density (CoolProp's fit, −0.22% to +0.06% against Lemmon and
+/// Span's equation), and their krypton itself, which falls faster than constant specific
+/// refraction (1.5 × 10⁻³ at 126 K even at the equation's densities; Sinnock 1980 finds krypton's
+/// two methods disagree). So the ruled 115.95–126 K is narrowed to where the check holds, as
+/// water's window is.
+const KRYPTON_INDEX_CHECKED: (Kelvin, Kelvin) = (Kelvin::new(115.77), Kelvin::new(115.95));
+
+/// Xenon's window, as [`ARGON_INDEX_CHECKED`]'s: the file's state alone, 161.4 K, the row's triple
+/// point. Sinnock and Smith's warmer tables, 166–178 K, miss by 6.3 × 10⁻⁴ to 8.1 × 10⁻⁴ (2.1 ×
+/// 10⁻⁴ to 5.2 × 10⁻⁴ at the equation's densities: the row's ancillary density, CoolProp's fit,
+/// lies −0.09% to +0.07% from Lemmon and Span's equation), and their melting-point table, at
+/// 161.35 K, lies below the row's triple point, so the ruled 161.35–178 K is narrowed to the state,
+/// away from which the index is `Derived`.
+const XENON_INDEX_CHECKED: (Kelvin, Kelvin) = (Kelvin::new(161.4), Kelvin::new(161.4));
+
+/// The viscosity the eight rows beside carbon dioxide that R08.T5.k gives a liquid file lack.
+const NO_RULED_VISCOSITY: Source = Source {
+    covers: "μ",
+    citation: "absent: no viscosity correlation is ruled for the row (decision-p14-t49h-gas-index \
+               §1.2: its other members only where a ruled source exists); CoolProp's files hold \
+               Lemmon and Jacobsen 2004 for oxygen and argon, Polychroniadou et al. 2022 for \
+               krypton, Velliadou et al. 2021 for xenon and Quiñones-Cisneros et al. 2012 for \
+               hydrogen sulphide, and none for carbon monoxide, nitrous oxide or sulphur dioxide",
+    basis: Basis::Adopted,
+};
+
+/// Liquid oxygen (decision-p14-t49h-gas-index §1.2): its index R08.T5.k's `oxygen-liquid.json`, the
+/// gas's dispersion scaled to Johns and Wilhelm 1937's 1.2242 at 546.1 nm and 90.19 K, `Derived`
+/// (its provenance; band ±0.0015). Its absorption is the file's, `Derived` (§2.4): Thalman and
+/// Volkamer 2013's O₂–O₂ collision-induced bands near 477, 577 and 630 nm times the liquid's number
+/// density squared, which make the liquid blue, unmeasured in the liquid; 0 in the bins from 658.7
+/// nm, where the source's set ends (654 nm) and neither the B nor the A band is drawn. Its
+/// scattering is ES–Cabannes from Schmidt and Wagner 1985's `κ_T`, its surface tension Mulero et
+/// al.'s; no viscosity is ruled.
+const OXYGEN: LiquidColumns = LiquidColumns {
+    optics: Some(LiquidOptics {
+        index: &bins::OXYGEN_LIQUID_N,
+        absorption: Some((&bins::OXYGEN_LIQUID_A, LiquidBasis::Derived)),
+        state: Kelvin::new(90.19),
+        index_basis: LiquidBasis::Derived,
+        index_checked: None,
+        absorption_checked: None,
+    }),
+    scattering: Some(LiquidScattering {
+        equation: &equations::OXYGEN,
+        anisotropy_ratio: OXYGEN_ANISOTROPY,
+        basis: LiquidBasis::Derived,
+        fluctuations: CorrelationLength {
+            amplitude_m: 0.24e-9,
+            susceptibility_amplitude: 0.055,
+            nu: 0.63,
+            gamma: 1.241_5,
+            reference_temperature: Kelvin::new(309.162),
+            critical_pressure: Pascals::new(5.043e6),
+            critical_density: KilogramsPerCubicMetre::new(13_630.0 * 0.031_998_8),
+        },
+    }),
+    surface_tension: Some(SurfaceTensionEquation {
+        critical_temperature: Kelvin::new(154.581),
+        terms: &[(0.038_43, 1.225)],
+        valid_from: Kelvin::new(54.361),
+        valid_to: Kelvin::new(154.581),
+        basis: LiquidBasis::Measured,
+    }),
+    viscosity: None,
+    supercooled_viscosity: None,
+    constitution: LiquidConstitution::Pure {
+        components: &[OXYGEN_ID],
+        reference: &[(OXYGEN_ID, 1.0)],
+    },
+    sources: &[
+        Source {
+            covers: "n, a",
+            citation: "R08's `oxygen-liquid.json` (R08.T5.k; decision-p14-t49h-gas-index §2.3 and \
+                       §2.4): n rayleigh.ts's gas dispersion (Křen 2011's refit of Zhang, Lu and \
+                       Wang 2008) at the NIST WebBook's 35.662 63 mol/l at 90.19 K, the normal \
+                       boiling point and the state the index is carried from, its molar \
+                       refraction scaled by c = 0.986 155 to meet Johns and Wilhelm 1937's 1.2242 \
+                       at 546.1 nm (Can. J. Res. 15a, 101, their abstract), derived, band \
+                       ±0.0015; k Thalman and Volkamer 2013's O₂–O₂ collision-induced \
+                       cross-sections at 203 K (Phys. Chem. Chem. Phys. 15, 15371, HITRAN2024's \
+                       set) times the liquid's number density squared, derived and unmeasured in \
+                       the liquid, 0 from 655 nm, where the set ends and the B and A bands are not \
+                       drawn; reduced to the bake bins by `tables::liquid_optics`",
+            basis: Basis::Reduced,
+        },
+        Source {
+            covers: "b",
+            citation: "Einstein–Smoluchowski–Cabannes as for water, κ_T from Schmidt and Wagner \
+                       1985 (`rows/equations.rs`), δ from x = 45ρ_v ÷ (3 − 4ρ_v) + 0.006 with the \
+                       gas's ρ_v = 0.029 45 from Bates 1984's King factor at 550 nm, about 0.71 at \
+                       the triple point and 0.50 at 90.19 K; `Derived`; `Derived` too where q_max \
+                       ξ passes 0.1, ξ_0 = 0.24 nm, Γ_0 = 0.055, γ = 1.2415 and T_R = 309.162 K \
+                       from Lemmon and Jacobsen 2004's oxygen correlations (Int. J. Thermophys. \
+                       25, 21) as CoolProp's `Oxygen.json` quotes them, not read, with ν = 0.63; \
+                       p_c = 5.043 MPa, the equation's critical point as CoolProp's `Oxygen.json` \
+                       holds it",
+            basis: Basis::Raw { licence: "MIT" },
+        },
+        Source {
+            covers: "σ",
+            citation: MULERO,
+            basis: Basis::Raw { licence: "MIT" },
+        },
+        NO_RULED_VISCOSITY,
+    ],
+};
+
+/// Liquid argon (decision-p14-t49h-gas-index §1.2): its index R08.T5.k's `argon-liquid.json`,
+/// Sinnock and Smith 1969's table of the liquid at 83.81 K, `Measured` over its checked window,
+/// 83.81–90 K ([`ARGON_INDEX_CHECKED`]), and `Derived` beyond it; its absorption not modelled (the
+/// file's k = 0, the liquid colourless); its scattering ES–Cabannes from Tegeler, Span and Wagner
+/// 1999's `κ_T` with its interaction anisotropy alone, a stand-in; its surface tension Mulero et
+/// al.'s; no viscosity is ruled.
+const ARGON: LiquidColumns = LiquidColumns {
+    optics: Some(LiquidOptics {
+        index: &bins::ARGON_LIQUID_N,
+        absorption: None,
+        state: Kelvin::new(83.81),
+        index_basis: LiquidBasis::Measured,
+        index_checked: Some(ARGON_INDEX_CHECKED),
+        absorption_checked: None,
+    }),
+    scattering: Some(LiquidScattering {
+        equation: &equations::ARGON,
+        anisotropy_ratio: ARGON_ANISOTROPY,
+        basis: LiquidBasis::Derived,
+        fluctuations: CorrelationLength {
+            amplitude_m: 0.13e-9,
+            susceptibility_amplitude: 0.055,
+            nu: 0.63,
+            gamma: 1.241_5,
+            reference_temperature: Kelvin::new(301.374),
+            critical_pressure: Pascals::new(4.863e6),
+            critical_density: KilogramsPerCubicMetre::new(535.6),
+        },
+    }),
+    surface_tension: Some(SurfaceTensionEquation {
+        critical_temperature: Kelvin::new(150.687),
+        terms: &[(0.037, 1.25)],
+        valid_from: Kelvin::new(83.805_8),
+        valid_to: Kelvin::new(150.687),
+        basis: LiquidBasis::Measured,
+    }),
+    viscosity: None,
+    supercooled_viscosity: None,
+    constitution: LiquidConstitution::Pure {
+        components: &[ARGON_ID],
+        reference: &[(ARGON_ID, 1.0)],
+    },
+    sources: &[
+        Source {
+            covers: "n",
+            citation: "R08's `argon-liquid.json` (R08.T5.k; decision-p14-t49h-gas-index §2.3): \
+                       Sinnock and Smith 1969's table of the liquid at its melting point, 83.81 K \
+                       (Phys. Rev. 181, 1297, through refractiveindex.info, CC0), nine rows over \
+                       361.2–643.9 nm, met within 1.5 × 10⁻⁴ by the gas's dispersion (Peck and \
+                       Fisher 1964) scaled by c = 0.990 053 at the WebBook's density, which fills \
+                       the grid; measured, band ±0.0003 (+0.0002 beyond 643.9 nm); 83.81 K, \
+                       0.0042 K above the row's triple point, is the state the index is carried \
+                       from, `Measured` to 90 K, where the carry meets the source's warmer tables \
+                       within 5 × 10⁻⁴",
+            basis: Basis::Reduced,
+        },
+        Source {
+            covers: "b",
+            citation: "Einstein–Smoluchowski–Cabannes as for water, κ_T from Tegeler, Span and \
+                       Wagner 1999 (`rows/equations.rs`), δ from argon's interaction anisotropy \
+                       alone, x = 0.006 (L ÷ L_CH4)² = 0.003 93 with L the Lorentz–Lorenz function \
+                       at the triple point at 550 nm, a stand-in scaled from methane's \
+                       calibration on liquid CCl₄ (decision-p14-t49h-gas-index §4.3), about 0.011 \
+                       at the triple point; `Derived`; `Derived` too where q_max ξ passes 0.1, ξ_0 \
+                       = 0.13 nm, Γ_0 = 0.055, γ = 1.2415 and T_R = 301.374 K from Lemmon and \
+                       Jacobsen 2004 (Int. J. Thermophys. 25, 21) as CoolProp's `Argon.json` \
+                       quotes them, not read, with ν = 0.63; p_c = 4.863 MPa, the equation's \
+                       critical point as CoolProp's `Argon.json` holds it",
+            basis: Basis::Raw { licence: "MIT" },
+        },
+        Source {
+            covers: "σ",
+            citation: MULERO,
+            basis: Basis::Raw { licence: "MIT" },
+        },
+        NO_RULED_VISCOSITY,
+    ],
+};
+
+/// Liquid krypton (decision-p14-t49h-gas-index §1.2): its index R08.T5.k's `krypton-liquid.json`,
+/// Sinnock and Smith 1969's table of the liquid at its 115.95 K melting point, labelled with the
+/// row's 115.77 K triple point, `Measured` over its checked window, 115.77–115.95 K
+/// ([`KRYPTON_INDEX_CHECKED`]), narrowed from the ruled 115.95–126 K, and `Derived` beyond it; its
+/// absorption not modelled; its scattering ES–Cabannes from Lemmon and Span 2006's `κ_T` with its
+/// interaction anisotropy alone, a stand-in; its surface tension Mulero et al.'s; no viscosity is
+/// ruled.
+const KRYPTON: LiquidColumns = LiquidColumns {
+    optics: Some(LiquidOptics {
+        index: &bins::KRYPTON_LIQUID_N,
+        absorption: None,
+        state: Kelvin::new(115.77),
+        index_basis: LiquidBasis::Measured,
+        index_checked: Some(KRYPTON_INDEX_CHECKED),
+        absorption_checked: None,
+    }),
+    scattering: Some(LiquidScattering {
+        equation: &equations::KRYPTON,
+        anisotropy_ratio: KRYPTON_ANISOTROPY,
+        basis: LiquidBasis::Derived,
+        fluctuations: CorrelationLength {
+            amplitude_m: R12_08_XI_0_M,
+            susceptibility_amplitude: R12_08_GAMMA_0,
+            nu: 0.630,
+            gamma: 1.239,
+            reference_temperature: Kelvin::new(1.5 * 209.48),
+            critical_pressure: Pascals::new(5.525e6),
+            critical_density: KilogramsPerCubicMetre::new(10_850.0 * 0.083_798),
+        },
+    }),
+    surface_tension: Some(SurfaceTensionEquation {
+        critical_temperature: Kelvin::new(209.48),
+        terms: &[(0.044_7, 1.245)],
+        valid_from: Kelvin::new(115.77),
+        valid_to: Kelvin::new(209.48),
+        basis: LiquidBasis::Measured,
+    }),
+    viscosity: None,
+    supercooled_viscosity: None,
+    constitution: LiquidConstitution::Pure {
+        components: &[KRYPTON_ID],
+        reference: &[(KRYPTON_ID, 1.0)],
+    },
+    sources: &[
+        Source {
+            covers: "n",
+            citation: "R08's `krypton-liquid.json` (R08.T5.k; decision-p14-t49h-gas-index §2.3 and \
+                       A.3): Sinnock and Smith 1969's table of the liquid at its melting point, \
+                       115.95 K (Phys. Rev. 181, 1297, through refractiveindex.info, CC0), eight \
+                       rows over 363.1–643.9 nm, linear between them, and beyond 643.9 nm a \
+                       two-term Cauchy fit to the six rows from 435.8 nm, within 1.1 × 10⁻⁴; \
+                       measured, band ±0.0005; labelled with the row's triple point, 115.77 K, \
+                       0.18 K below the source's, the state the index is carried from, \
+                       `Measured` to 115.95 K only, where the carry meets the source within 5 × \
+                       10⁻⁴ (its 118–126 K tables miss by 1.25–1.72 × 10⁻³)",
+            basis: Basis::Reduced,
+        },
+        Source {
+            covers: "b",
+            citation: "Einstein–Smoluchowski–Cabannes as for water, κ_T from Lemmon and Span 2006 \
+                       (`rows/equations.rs`), δ from krypton's interaction anisotropy alone, x = \
+                       0.006 (L ÷ L_CH4)² = 0.006 39, as argon's, about 0.017 at the triple point, \
+                       a stand-in; `Derived`; `Derived` too where q_max ξ passes 0.1, ξ by IAPWS \
+                       R12-08's Eqs. (20)–(21a) with its own amplitudes (ξ_0 = 0.13 nm, Γ_0 = \
+                       0.06, T_R = 1.5 T_c), in want of krypton's; p_c = 5.525 MPa, the \
+                       equation's critical point as CoolProp's `Krypton.json` holds it",
+            basis: Basis::Fact,
+        },
+        Source {
+            covers: "σ",
+            citation: MULERO,
+            basis: Basis::Raw { licence: "MIT" },
+        },
+        NO_RULED_VISCOSITY,
+    ],
+};
+
+/// Liquid xenon (decision-p14-t49h-gas-index §1.2): its index R08.T5.k's `xenon-liquid.json`,
+/// Sinnock and Smith 1969's table of the liquid at its 161.35 K melting point, labelled with the
+/// row's 161.4 K triple point, `Measured` at that state alone ([`XENON_INDEX_CHECKED`]), narrowed
+/// from the ruled 161.35–178 K, and `Derived` above it; its absorption not modelled; its scattering
+/// ES–Cabannes from Lemmon and Span 2006's `κ_T` with its interaction anisotropy alone, a stand-in;
+/// its surface tension Mulero et al.'s, whose two terms' sum turns negative 0.12 K below the
+/// critical point, where it is absent; no viscosity is ruled.
+const XENON: LiquidColumns = LiquidColumns {
+    optics: Some(LiquidOptics {
+        index: &bins::XENON_LIQUID_N,
+        absorption: None,
+        state: Kelvin::new(161.4),
+        index_basis: LiquidBasis::Measured,
+        index_checked: Some(XENON_INDEX_CHECKED),
+        absorption_checked: None,
+    }),
+    scattering: Some(LiquidScattering {
+        equation: &equations::XENON,
+        anisotropy_ratio: XENON_ANISOTROPY,
+        basis: LiquidBasis::Derived,
+        fluctuations: CorrelationLength {
+            amplitude_m: 0.182e-9,
+            susceptibility_amplitude: 0.058,
+            nu: 0.63,
+            gamma: 1.239,
+            reference_temperature: Kelvin::new(434.6),
+            critical_pressure: Pascals::new(5.842e6),
+            critical_density: KilogramsPerCubicMetre::new(8_400.0 * 0.131_293),
+        },
+    }),
+    surface_tension: Some(SurfaceTensionEquation {
+        critical_temperature: Kelvin::new(289.733),
+        terms: &[(-0.115_38, 1.051_2), (0.165_98, 1.098)],
+        valid_from: Kelvin::new(161.4),
+        valid_to: Kelvin::new(289.733),
+        basis: LiquidBasis::Measured,
+    }),
+    viscosity: None,
+    supercooled_viscosity: None,
+    constitution: LiquidConstitution::Pure {
+        components: &[XENON_ID],
+        reference: &[(XENON_ID, 1.0)],
+    },
+    sources: &[
+        Source {
+            covers: "n",
+            citation: "R08's `xenon-liquid.json` (R08.T5.k; decision-p14-t49h-gas-index §2.3 and \
+                       A.3): Sinnock and Smith 1969's table of the liquid at its melting point, \
+                       161.35 K (Phys. Rev. 181, 1297, through refractiveindex.info, CC0), ten \
+                       rows over 361.2–643.9 nm, linear between them, and beyond 643.9 nm a \
+                       two-term Cauchy fit to the seven rows from 435.8 nm, within 1.8 × 10⁻⁴; \
+                       measured, band ±0.0005; labelled with the row's triple point, 161.4 K, \
+                       0.05 K above the source's, the state the index is carried from and its \
+                       only `Measured` one, the carry missing the source's 166–178 K tables by \
+                       6.3–8.1 × 10⁻⁴",
+            basis: Basis::Reduced,
+        },
+        Source {
+            covers: "b",
+            citation: "Einstein–Smoluchowski–Cabannes as for water, κ_T from Lemmon and Span 2006 \
+                       (`rows/equations.rs`), δ from xenon's interaction anisotropy alone, x = \
+                       0.006 (L ÷ L_CH4)² = 0.010 16, as argon's, about 0.027 at the triple point, \
+                       a stand-in; `Derived`; `Derived` too where q_max ξ passes 0.1, ξ_0 = 0.182 \
+                       nm, Γ_0 = 0.058 and T_R = 434.6 K from Velliadou, Tasidou, Antoniadis, \
+                       Assael, Perkins and Huber 2021's xenon thermal-conductivity correlation \
+                       (Int. J. Thermophys., Sec. 2.3) as CoolProp's `Xenon.json` quotes it, not \
+                       read, with ν = 0.63; p_c = 5.842 MPa, the equation's critical point as \
+                       CoolProp's `Xenon.json` holds it",
+            basis: Basis::Raw { licence: "MIT" },
+        },
+        Source {
+            covers: "σ",
+            citation: MULERO,
+            basis: Basis::Raw { licence: "MIT" },
+        },
+        NO_RULED_VISCOSITY,
+    ],
+};
+
+/// Liquid nitrous oxide (decision-p14-t49h-gas-index §1.2): its index R08.T5.k's
+/// `nitrous-oxide-liquid.json`, the gas's dispersion scaled to Liveing and Dewar 1892's five lines
+/// at the 184.67 K boiling point, `Derived` (band ±0.003); its absorption not modelled; its
+/// scattering ES–Cabannes from Lemmon and Span 2006's `κ_T`; its surface tension Mulero et al.'s;
+/// no viscosity is ruled.
+const NITROUS_OXIDE: LiquidColumns = LiquidColumns {
+    optics: Some(LiquidOptics {
+        index: &bins::NITROUS_OXIDE_LIQUID_N,
+        absorption: None,
+        state: Kelvin::new(184.67),
+        index_basis: LiquidBasis::Derived,
+        index_checked: None,
+        absorption_checked: None,
+    }),
+    scattering: Some(LiquidScattering {
+        equation: &equations::NITROUS_OXIDE,
+        anisotropy_ratio: NITROUS_OXIDE_ANISOTROPY,
+        basis: LiquidBasis::Derived,
+        fluctuations: CorrelationLength {
+            amplitude_m: R12_08_XI_0_M,
+            susceptibility_amplitude: R12_08_GAMMA_0,
+            nu: 0.630,
+            gamma: 1.239,
+            reference_temperature: Kelvin::new(1.5 * 309.52),
+            critical_pressure: Pascals::new(7.245e6),
+            critical_density: KilogramsPerCubicMetre::new(10_270.0 * 0.044_012_8),
+        },
+    }),
+    surface_tension: Some(SurfaceTensionEquation {
+        critical_temperature: Kelvin::new(309.52),
+        terms: &[(0.070_87, 1.204)],
+        valid_from: Kelvin::new(182.33),
+        valid_to: Kelvin::new(309.52),
+        basis: LiquidBasis::Measured,
+    }),
+    viscosity: None,
+    supercooled_viscosity: None,
+    constitution: LiquidConstitution::Pure {
+        components: &[NITROUS_OXIDE_ID],
+        reference: &[(NITROUS_OXIDE_ID, 1.0)],
+    },
+    sources: &[
+        Source {
+            covers: "n",
+            citation: "R08's `nitrous-oxide-liquid.json` (R08.T5.k; decision-p14-t49h-gas-index \
+                       §2.3): rayleigh.ts's gas dispersion (He, Fang, Shoshanim, Brown and Rudich \
+                       2021) at the NIST WebBook's 27.957 49 mol/l at 184.67 K, the normal boiling \
+                       point and the state the index is carried from, its molar refraction scaled \
+                       by c = 0.969 096, fitted by least squares to Liveing and Dewar 1892's C, D, \
+                       F, G and In lines (Phil. Mag. (5) 34, 205); derived, band ±0.003",
+            basis: Basis::Reduced,
+        },
+        Source {
+            covers: "b",
+            citation: "Einstein–Smoluchowski–Cabannes as for water, κ_T from Lemmon and Span 2006 \
+                       (`rows/equations.rs`), δ from x = 45ρ_v ÷ (3 − 4ρ_v) + 0.006 with the gas's \
+                       ρ_v = 0.0616 at 550 nm (Sneep and Ubachs 2005, Eq. 19), about 0.67 at the \
+                       triple point; `Derived`; `Derived` too where q_max ξ passes 0.1, ξ by IAPWS \
+                       R12-08's Eqs. (20)–(21a) with its own amplitudes (ξ_0 = 0.13 nm, Γ_0 = \
+                       0.06, T_R = 1.5 T_c), in want of nitrous oxide's; p_c = 7.245 MPa, the \
+                       equation's critical point as CoolProp's `NitrousOxide.json` holds it",
+            basis: Basis::Fact,
+        },
+        Source {
+            covers: "σ",
+            citation: MULERO,
+            basis: Basis::Raw { licence: "MIT" },
+        },
+        NO_RULED_VISCOSITY,
+    ],
+};
+
+/// Liquid carbon monoxide (decision-p14-t49h-gas-index §1.2 and A.4): its index R08.T5.k's
+/// `carbon-monoxide-liquid.json`, an unscaled Lorentz–Lorenz estimate from the gas at the
+/// liquid's density, which the file calls a stand-in (`standIn`) and the record `Derived`, an
+/// estimation method by decision-r11-palette-liquids §1.1's vocabulary, which keeps `StandIn` for a
+/// named analogue or a stated constant: the two vocabularies differ on purpose. Its band is +0 /
+/// −0.015, likely high. Its absorption is not modelled; its scattering ES–Cabannes from Lemmon and
+/// Span 2006's `κ_T`; its surface tension Mulero et al.'s; no viscosity is ruled.
+const CARBON_MONOXIDE: LiquidColumns = LiquidColumns {
+    optics: Some(LiquidOptics {
+        index: &bins::CARBON_MONOXIDE_LIQUID_N,
+        absorption: None,
+        state: Kelvin::new(68.16),
+        index_basis: LiquidBasis::Derived,
+        index_checked: None,
+        absorption_checked: None,
+    }),
+    scattering: Some(LiquidScattering {
+        equation: &equations::CARBON_MONOXIDE,
+        anisotropy_ratio: CARBON_MONOXIDE_ANISOTROPY,
+        basis: LiquidBasis::Derived,
+        fluctuations: CorrelationLength {
+            amplitude_m: R12_08_XI_0_M,
+            susceptibility_amplitude: R12_08_GAMMA_0,
+            nu: 0.630,
+            gamma: 1.239,
+            reference_temperature: Kelvin::new(1.5 * 132.86),
+            critical_pressure: Pascals::new(3.494e6),
+            critical_density: KilogramsPerCubicMetre::new(10_850.0 * 0.028_010_1),
+        },
+    }),
+    surface_tension: Some(SurfaceTensionEquation {
+        critical_temperature: Kelvin::new(132.86),
+        terms: &[(0.028_43, 1.148)],
+        valid_from: Kelvin::new(68.16),
+        valid_to: Kelvin::new(132.86),
+        basis: LiquidBasis::Measured,
+    }),
+    viscosity: None,
+    supercooled_viscosity: None,
+    constitution: LiquidConstitution::Pure {
+        components: &[CARBON_MONOXIDE_ID],
+        reference: &[(CARBON_MONOXIDE_ID, 1.0)],
+    },
+    sources: &[
+        Source {
+            covers: "n",
+            citation: "R08's `carbon-monoxide-liquid.json` (R08.T5.k; decision-p14-t49h-gas-index \
+                       §2.3 and A.4): an unscaled Lorentz–Lorenz estimate, rayleigh.ts's gas \
+                       dispersion (C. and M. Cuthbertson 1920) at the NIST WebBook's 30.329 71 \
+                       mol/l at 68.16 K, the triple point and the state the index is carried \
+                       from; the file a stand-in, since Gagnon, Gammon, Kiefte and Clouter 1979's \
+                       1.2213 at 514.5 nm and 1.2122 at 632.8 nm (Appl. Opt. 18, 1237, their \
+                       abstract) contradict each other beyond their errors; band +0 / −0.015, \
+                       likely high; `Derived` here, the record's word for an estimation method",
+            basis: Basis::Reduced,
+        },
+        Source {
+            covers: "b",
+            citation: "Einstein–Smoluchowski–Cabannes as for water, κ_T from Lemmon and Span 2006 \
+                       (`rows/equations.rs`), δ from x = 45ρ_v ÷ (3 − 4ρ_v) + 0.006 with the gas's \
+                       ρ_v from its King factor, 1.017 (Bogaard et al. 1978; Couling and Graham \
+                       1994's measured 1.0176 would give x 0.0853 against 0.0825), about 0.23 at \
+                       the triple point; `Derived`; `Derived` too where q_max ξ passes 0.1, ξ by \
+                       IAPWS R12-08's Eqs. (20)–(21a) with its own amplitudes (ξ_0 = 0.13 nm, Γ_0 \
+                       = 0.06, T_R = 1.5 T_c), in want of carbon monoxide's; p_c = 3.494 MPa, \
+                       the equation's critical point as CoolProp's `CarbonMonoxide.json` holds it",
+            basis: Basis::Fact,
+        },
+        Source {
+            covers: "σ",
+            citation: MULERO,
+            basis: Basis::Raw { licence: "MIT" },
+        },
+        NO_RULED_VISCOSITY,
+    ],
+};
+
+/// Liquid sulphur dioxide (decision-p14-t49h-gas-index §1.2): its index R08.T5.k's
+/// `sulphur-dioxide-liquid.json`, the gas's dispersion scaled to three room-temperature
+/// measurements, `Derived` (band ±0.003); its absorption not modelled (the file draws no violet
+/// edge of the gas's ã–X̃ band); its surface tension Mulero et al.'s at the row's critical point,
+/// whose three terms' sum turns negative 13.1 K below it, at 417.55 K, where it is absent. Its
+/// scattering is absent: no depolarisation of the gas or the liquid was read, so its anisotropy
+/// ratio has no source (§4.3), and Gao, Wu, Zhang and Lemmon 2016's equation of state, which
+/// CoolProp's files hold, is not wired, as nothing would read it. No viscosity is ruled.
+const SULPHUR_DIOXIDE: LiquidColumns = LiquidColumns {
+    optics: Some(LiquidOptics {
+        index: &bins::SULPHUR_DIOXIDE_LIQUID_N,
+        absorption: None,
+        state: Kelvin::new(197.7),
+        index_basis: LiquidBasis::Derived,
+        index_checked: None,
+        absorption_checked: None,
+    }),
+    scattering: None,
+    surface_tension: Some(SurfaceTensionEquation {
+        critical_temperature: Kelvin::new(430.64),
+        terms: &[(0.080_3, 0.928), (0.013_9, 1.57), (-0.011_4, 0.364)],
+        valid_from: Kelvin::new(197.7),
+        valid_to: Kelvin::new(430.64),
+        basis: LiquidBasis::Measured,
+    }),
+    viscosity: None,
+    supercooled_viscosity: None,
+    constitution: LiquidConstitution::Pure {
+        components: &[SULPHUR_DIOXIDE_ID],
+        reference: &[(SULPHUR_DIOXIDE_ID, 1.0)],
+    },
+    sources: &[
+        Source {
+            covers: "n",
+            citation: "R08's `sulphur-dioxide-liquid.json` (R08.T5.k; decision-p14-t49h-gas-index \
+                       §2.3): rayleigh.ts's estimated gas dispersion (C. and M. Cuthbertson 1910) \
+                       at the NIST WebBook's 25.411 32 mol/l at 197.7 K, the triple point and the \
+                       state the index is carried from, 0.44% past Gao et al. 2016's stated 25.3 \
+                       mol/l, its molar refraction scaled by c = 0.994 335, the mean ratio of \
+                       Ketteler 1865's, Bichat 1880's and Bleekrode 1884's liquid at 589.3 nm \
+                       (Proc. R. Soc. Lond. 37, 339); derived, band ±0.003",
+            basis: Basis::Reduced,
+        },
+        Source {
+            covers: "b",
+            citation: "absent: no depolarisation of the gas or the liquid was read (rayleigh.ts \
+                       holds none: 'F_K lies near 1.02–1.07'), so the anisotropy ratio has no \
+                       source (decision-p14-t49h-gas-index §4.3)",
+            basis: Basis::Adopted,
+        },
+        Source {
+            covers: "σ",
+            citation: MULERO,
+            basis: Basis::Raw { licence: "MIT" },
+        },
+        NO_RULED_VISCOSITY,
+    ],
+};
+
+/// Liquid hydrogen sulphide (decision-p14-t49h-gas-index §1.2 and A.4): its index R08.T5.k's
+/// `hydrogen-sulphide-liquid.json`, an unscaled Lorentz–Lorenz estimate, the file's stand-in and
+/// the record's `Derived`, as [`CARBON_MONOXIDE`]'s; its band −0.005 / +0.021, likely low. Its
+/// absorption is not modelled; its scattering ES–Cabannes from Lemmon and Span 2006's `κ_T`; its
+/// surface tension Mulero et al.'s; no viscosity is ruled.
+const HYDROGEN_SULPHIDE: LiquidColumns = LiquidColumns {
+    optics: Some(LiquidOptics {
+        index: &bins::HYDROGEN_SULPHIDE_LIQUID_N,
+        absorption: None,
+        state: Kelvin::new(187.7),
+        index_basis: LiquidBasis::Derived,
+        index_checked: None,
+        absorption_checked: None,
+    }),
+    scattering: Some(LiquidScattering {
+        equation: &equations::HYDROGEN_SULPHIDE,
+        anisotropy_ratio: HYDROGEN_SULPHIDE_ANISOTROPY,
+        basis: LiquidBasis::Derived,
+        fluctuations: CorrelationLength {
+            amplitude_m: R12_08_XI_0_M,
+            susceptibility_amplitude: R12_08_GAMMA_0,
+            nu: 0.630,
+            gamma: 1.239,
+            reference_temperature: Kelvin::new(1.5 * 373.1),
+            critical_pressure: Pascals::new(9.0e6),
+            critical_density: KilogramsPerCubicMetre::new(10_190.0 * 0.034_080_88),
+        },
+    }),
+    surface_tension: Some(SurfaceTensionEquation {
+        critical_temperature: Kelvin::new(373.1),
+        terms: &[(0.078_557, 1.207_4)],
+        valid_from: Kelvin::new(187.7),
+        valid_to: Kelvin::new(373.1),
+        basis: LiquidBasis::Measured,
+    }),
+    viscosity: None,
+    supercooled_viscosity: None,
+    constitution: LiquidConstitution::Pure {
+        components: &[HYDROGEN_SULPHIDE_ID],
+        reference: &[(HYDROGEN_SULPHIDE_ID, 1.0)],
+    },
+    sources: &[
+        Source {
+            covers: "n",
+            citation: "R08's `hydrogen-sulphide-liquid.json` (R08.T5.k; \
+                       decision-p14-t49h-gas-index §2.3 and A.4): an unscaled Lorentz–Lorenz \
+                       estimate, rayleigh.ts's gas dispersion (C. and M. Cuthbertson 1910) at the \
+                       NIST WebBook's 29.116 33 mol/l at 187.7 K, the triple point and the state \
+                       the index is carried from; the file a stand-in, since Bleekrode 1884's \
+                       1.380 at 12.5 °C and 1.384 at 18.5 °C run the wrong way with temperature, \
+                       0.010 and 0.021 above it; band −0.005 / +0.021, likely low; `Derived` here, \
+                       the record's word for an estimation method",
+            basis: Basis::Reduced,
+        },
+        Source {
+            covers: "b",
+            citation: "Einstein–Smoluchowski–Cabannes as for water, κ_T from Lemmon and Span 2006 \
+                       (`rows/equations.rs`), δ from x = 45ρ_v ÷ (3 − 4ρ_v) + 0.006 with the gas's \
+                       ρ_v from its King factor, 1.000 155 (Bogaard et al. 1982 and Monan et al. \
+                       1982, without the vibrational Raman lines), about 0.025 at the triple \
+                       point, its interaction part dominating; `Derived`; `Derived` too where \
+                       q_max ξ passes 0.1, ξ by IAPWS R12-08's Eqs. (20)–(21a) with its own \
+                       amplitudes (ξ_0 = 0.13 nm, Γ_0 = 0.06, T_R = 1.5 T_c), in want of hydrogen \
+                       sulphide's; p_c = 9.000 MPa, the equation's critical point as CoolProp's \
+                       `HydrogenSulfide.json` holds it",
+            basis: Basis::Fact,
+        },
+        Source {
+            covers: "σ",
+            citation: MULERO,
+            basis: Basis::Raw { licence: "MIT" },
+        },
+        NO_RULED_VISCOSITY,
+    ],
+};
 
 /// Liquid ethane: the index levelled to Hagermann et al. 2005's measured 1.3887 at 670 nm, 94 K and
 /// 1.5 bar, its slope a Lorentz–Lorenz estimate, so `Derived` (decision-r08-t5g §3). Its
@@ -1673,11 +2429,14 @@ const BRINE_NACL: LiquidColumns = LiquidColumns {
                        International Critical Tables vol. VII (1930), p. 73, Table 1, entry 156, \
                        authority (10), at 5–14 wt% and 25 °C (archive.org \
                        international-critical-tables_1930_7, page image n91, SHA-256 58121e91…), \
-                       their air-relative indices taken to vacuum; its dispersion a stand-in \
-                       shaped on Quan and Fry 1995's seawater (Appl. Opt. 34, 3477), +4.4% at 380 \
-                       nm and −1.9% at 780 nm of its 589.3 nm value: a 3.5 wt% brine's increment \
-                       at 25 °C is +0.006 06 in the bin across 545 nm against seawater's +0.006 39 \
-                       at S = 35, sea salt being about 78% NaCl by mass",
+                       their air-relative indices taken to vacuum with Ciddor 1996's standard \
+                       air at 15 °C, though ICT's 25 °C indices are relative to room air, which \
+                       moves r_s by about 0.08% at 5 wt% and 0.03% at 14 wt%, inside its ±0.3%; \
+                       its dispersion a stand-in shaped on Quan and Fry 1995's seawater (Appl. \
+                       Opt. 34, 3477), +4.4% at 380 nm and −1.9% at 780 nm of its 589.3 nm value: \
+                       a 3.5 wt% brine's increment at 25 °C is +0.006 06 in the bin across 545 nm \
+                       against seawater's +0.006 39 at S = 35, sea salt being about 78% NaCl by \
+                       mass",
             basis: Basis::Adopted,
         },
         Source {

@@ -3,6 +3,8 @@
 //! and against measured melts, §2.3's rule, Lange and Carmichael's density against a measured melt,
 //! the rows' oxides, and the record's range and refusals.
 
+use hyperion_testkit::float::assert_same_bits;
+
 use super::super::super::rows::liquids::LIQUIDS;
 use super::super::{Composition, LiquidComposition, LiquidConstitution, liquid_properties};
 use super::*;
@@ -235,7 +237,7 @@ const SCARFE_TABLE_3: [(f64, Vft); 3] = [
     (
         0.0,
         Vft {
-            a: -2.343,
+            log10_limit_pa_s: -2.343,
             b_kelvin: 2123.0,
             c_kelvin: 1106.15,
         },
@@ -243,7 +245,7 @@ const SCARFE_TABLE_3: [(f64, Vft); 3] = [
     (
         20.0,
         Vft {
-            a: -2.615,
+            log10_limit_pa_s: -2.615,
             b_kelvin: 2540.0,
             c_kelvin: 988.65,
         },
@@ -251,7 +253,7 @@ const SCARFE_TABLE_3: [(f64, Vft); 3] = [
     (
         30.0,
         Vft {
-            a: -2.472,
+            log10_limit_pa_s: -2.472,
             b_kelvin: 2319.0,
             c_kelvin: 1000.65,
         },
@@ -356,7 +358,7 @@ fn gr07_reproduces_its_table_a2_for_anorthite_and_diopside() {
         let vft = giordano_russell_2007(&oxides);
         assert!((vft.b_kelvin.round() - b).abs() <= 1.0, "{name}: {vft:?}");
         assert!((vft.c_kelvin.round() - c).abs() <= 1.0, "{name}: {vft:?}");
-        assert!((vft.a - GR07_A).abs() < 1e-12, "{name}");
+        assert!((vft.log10_limit_pa_s - GR07_A).abs() < 1e-12, "{name}");
     }
     let an = giordano_russell_2007(&anorthite());
     assert!((an.b_kelvin - 5467.4).abs() < 1e-9 && (an.c_kelvin - 797.5).abs() < 1e-9);
@@ -485,7 +487,8 @@ fn the_rule_sends_exactly_the_al_rich_rows_to_gr07() {
         MeltViscosityModel::of(&titanian),
         MeltViscosityModel::Unruled
     );
-    assert_eq!(MeltViscosityModel::Unruled.vft(&titanian), None);
+    let unruled = MeltViscosityModel::Unruled.vft(&titanian);
+    assert!(unruled.is_none(), "{unruled:?}");
     let mut sodic = edge;
     sodic[4] = (Oxide::Soda, 1.5);
     assert_eq!(
@@ -604,7 +607,8 @@ fn a_melt_s_given_composition_is_not_modelled() {
         let id = row(key);
         let columns = id.substance().liquid().unwrap();
         assert_eq!(columns.components(), [] as [SubstanceId; 0], "{key}");
-        assert_eq!(columns.reference_composition(), None, "{key}");
+        let reference = columns.reference_composition();
+        assert!(reference.is_none(), "{key}: {reference:?}");
         for t in [1_000.0, 2_000.0] {
             assert_eq!(
                 liquid_properties(id, Kelvin::new(t), given),
@@ -642,10 +646,9 @@ fn a_melt_below_its_solidus_is_out_of_range() {
             );
         }
         for t in [solidus.value(), 10_000.0] {
-            assert!(
-                liquid_properties(id, Kelvin::new(t), Composition::Reference).is_ok(),
-                "{key} at {t} K"
-            );
+            if let Err(refusal) = liquid_properties(id, Kelvin::new(t), Composition::Reference) {
+                panic!("{key} at {t} K: {refusal:?}");
+            }
         }
     }
 }
@@ -699,18 +702,24 @@ fn each_melt_s_record_is_its_models() {
         assert_eq!(key, oracle_key);
         let record = liquid_properties(row(key), t, Composition::Reference).unwrap();
         assert_eq!(record.basis, LiquidBasis::StandIn, "{key}");
-        assert_eq!(record.refractive_index, bins::BASALTIC_GLASS_N, "{key}");
-        assert_eq!(
-            record.absorption_per_m,
-            Some(bins::BASALTIC_GLASS_A),
-            "{key}"
+        for (n, glass) in record.refractive_index.iter().zip(&bins::BASALTIC_GLASS_N) {
+            assert_same_bits(*n, *glass);
+        }
+        let absorption = record
+            .absorption_per_m
+            .unwrap_or_else(|| panic!("{key} has the glass's absorption"));
+        for (a, glass) in absorption.iter().zip(&bins::BASALTIC_GLASS_A) {
+            assert_same_bits(*a, *glass);
+        }
+        assert!(
+            record.scattering_per_m.is_none(),
+            "{key}: {:?}",
+            record.scattering_per_m
         );
-        assert_eq!(record.scattering_per_m, None, "{key}");
-        assert_eq!(
-            record.surface_tension_n_per_m,
-            Some(melt.surface_tension_n_per_m),
-            "{key}"
-        );
+        let sigma = record
+            .surface_tension_n_per_m
+            .unwrap_or_else(|| panic!("{key} has its stated surface tension"));
+        assert_same_bits(sigma, melt.surface_tension_n_per_m);
         let density = lange_carmichael_density(melt.oxides, t).value();
         assert!((record.density_kg_m3 - density).abs() < 1e-12, "{key}");
         let vft = MeltViscosityModel::of(melt.oxides)

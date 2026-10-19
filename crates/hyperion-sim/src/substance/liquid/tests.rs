@@ -439,7 +439,11 @@ fn nitrogen_at_its_boiling_point_is_within_half_a_percent_of_1_20() {
     let n = record.refractive_index[6];
     assert!((n / 1.20 - 1.0).abs() < 5e-3, "{n}");
     assert_eq!(record.basis, LiquidBasis::Derived);
-    assert_eq!(record.absorption_per_m, None);
+    assert!(
+        record.absorption_per_m.is_none(),
+        "{:?}",
+        record.absorption_per_m
+    );
 }
 
 /// Below a diagram row's triple point its density is the line at the ancillary's slope there,
@@ -472,12 +476,14 @@ fn the_extended_density_is_continuous_at_the_triple_point() {
 }
 
 /// Every row with liquid columns gives a record across its range that a palette's liquid entry
-/// accepts, with no absent member written as 0: every present by-bin value is above zero, a row
-/// whose file's k is not modelled leaves its absorption absent, and a solution with a component
-/// whose absorption is not modelled leaves its own absent (Titan's seas: ethane's and nitrogen's;
-/// ammonia–water: ammonia's; the sulphate brine: its salt's), so that of the solutions only the
-/// chloride brine, its salt's transparency cited, and the acid, its files' bounds, have one. The
-/// perchlorate brines, whose record is refused for its index, are the solutions' tests'.
+/// accepts, with no absent member written as 0: every present by-bin value is above zero but a bin
+/// a pure liquid's file holds transparent, at +0, which is a value (oxygen's from 658.7 nm, where
+/// its collision-induced bands end); a row whose file's k is not modelled leaves its absorption
+/// absent, and a solution with a component whose absorption is not modelled leaves its own absent
+/// (Titan's seas: ethane's and nitrogen's; ammonia–water: ammonia's; the sulphate brine: its
+/// salt's), so that of the solutions only the chloride brine, its salt's transparency cited, and
+/// the acid, its files' bounds, have one. Every liquid-range row has n and ρ, step 2b's nine among
+/// them. The perchlorate brines, whose record is refused for its index, are the solutions' tests'.
 #[test]
 fn every_record_is_a_palette_s_and_no_absent_member_is_zero() {
     for (key, columns) in &super::super::rows::liquids::LIQUIDS {
@@ -491,15 +497,23 @@ fn every_record_is_a_palette_s_and_no_absent_member_is_zero() {
         for fraction in [0.0, 0.1, 0.5, 0.9, 1.0] {
             let t = Kelvin::new(lowest + fraction * (highest - lowest));
             let record = liquid_properties(id, t, Composition::Reference).unwrap();
-            for bins in [record.absorption_per_m, record.scattering_per_m]
-                .into_iter()
-                .flatten()
-            {
+            if let Some(bins) = record.scattering_per_m {
                 assert!(
                     bins.iter().all(|v| *v > 0.0),
                     "{key} at {} K: {bins:?}",
                     t.value()
                 );
+            }
+            let stated = columns.optics.and_then(|optics| optics.absorption);
+            if let Some(bins) = record.absorption_per_m {
+                for (k, v) in bins.iter().enumerate() {
+                    let transparent = stated.is_some_and(|(file, _)| file[k] <= 0.0);
+                    assert!(
+                        *v > 0.0 || (transparent && v.is_sign_positive()),
+                        "{key} at {} K: {bins:?}",
+                        t.value()
+                    );
+                }
             }
             let modelled = match columns.optics {
                 Some(optics) => optics.absorption.is_some(),
@@ -519,11 +533,9 @@ fn every_record_is_a_palette_s_and_no_absent_member_is_zero() {
                 mechanics: MechanicsFamily::WaterIce,
                 liquid: Some(record),
             };
-            assert!(
-                MaterialPalette::new(vec![entry]).is_ok(),
-                "{key} at {} K",
-                t.value()
-            );
+            if let Err(refusal) = MaterialPalette::new(vec![entry]) {
+                panic!("{key} at {} K: {refusal:?}", t.value());
+            }
         }
     }
 }
@@ -542,7 +554,8 @@ fn the_liquid_rows_are_rows_in_registry_order() {
 
 /// A temperature outside the liquid range, a composition naming another row, a composition outside
 /// the model's range (the pure acid), a composition of a liquid whose mixing is not yet modelled (a
-/// perchlorate brine's), and a row with no liquid columns are refused, each by its own error.
+/// perchlorate brine's), and a row with no liquid columns (neon, which has no R08 file) are
+/// refused, each by its own error.
 #[test]
 fn what_is_not_modelled_is_refused() {
     let water = row("H2O");
@@ -579,7 +592,7 @@ fn what_is_not_modelled_is_refused() {
         Err(ResolveLiquidError::CompositionNotModelled { .. })
     ));
     assert!(matches!(
-        liquid_properties(row("CO2"), Kelvin::new(250.0), Composition::Reference),
+        liquid_properties(row("Ne"), Kelvin::new(26.0), Composition::Reference),
         Err(ResolveLiquidError::NotALiquid { .. })
     ));
     assert!(matches!(
@@ -683,9 +696,13 @@ fn water_s_density_is_iapws_95_s_saturated_liquid() {
 fn water_outside_its_checked_windows_is_derived() {
     let water = row("H2O");
     let optics = water.substance().liquid().unwrap().optics().unwrap();
-    let window = |w: Option<(Kelvin, Kelvin)>| w.map(|(a, b)| (a.value(), b.value()));
-    assert_eq!(window(optics.index_checked()), Some((273.16, 373.15)));
-    assert_eq!(window(optics.absorption_checked()), Some((273.16, 303.15)));
+    let assert_window = |window: Option<(Kelvin, Kelvin)>, (low, high): (f64, f64)| {
+        let (from, to) = window.unwrap_or_else(|| panic!("water's window from {low} K is absent"));
+        assert_same_bits(from.value(), low);
+        assert_same_bits(to.value(), high);
+    };
+    assert_window(optics.index_checked(), (273.16, 373.15));
+    assert_window(optics.absorption_checked(), (273.16, 303.15));
     let at = |t: f64| {
         liquid_properties(water, Kelvin::new(t), Composition::Reference)
             .unwrap()
@@ -696,24 +713,27 @@ fn water_outside_its_checked_windows_is_derived() {
     assert_eq!(at(400.0), LiquidBasis::Derived);
     for (key, columns) in &super::super::rows::liquids::LIQUIDS {
         if let (Some(optics), false) = (columns.optics, key.as_str() == "H2O") {
-            assert_eq!(optics.absorption_checked(), None, "{key}");
+            let checked = optics.absorption_checked();
+            assert!(checked.is_none(), "{key}: {checked:?}");
         }
     }
 }
 
 /// Each row's optics state is its file's: within half a kelvin of the temperature the table
-/// carries from the file's label, so a file whose temperature changes fails here (the acid's two
-/// files are the solutions' tests').
+/// carries from the file's label, for the first five, whose label rounds their reduction's state to
+/// the kelvin, and to the bit for step 2b's nine, whose files state it to 0.01 K
+/// (decision-p14-t49h-gas-index §2.3), never below the row's triple point; so a file whose
+/// temperature changes fails here (the acid's two files are the solutions' tests').
 #[test]
 fn each_optics_state_is_its_file_s() {
-    let files = [
+    let labelled = [
         ("H2O", bins::WATER_TEMPERATURE_K),
         ("CH4", bins::METHANE_LIQUID_TEMPERATURE_K),
         ("NH3", bins::AMMONIA_LIQUID_TEMPERATURE_K),
         ("N2", bins::NITROGEN_LIQUID_TEMPERATURE_K),
         ("C2H6", bins::ETHANE_LIQUID_TEMPERATURE_K),
     ];
-    for (key, label) in files {
+    for (key, label) in labelled {
         let optics = row(key).substance().liquid().unwrap().optics().unwrap();
         let state = optics.state().value();
         assert!(
@@ -721,7 +741,33 @@ fn each_optics_state_is_its_file_s() {
             "{key}: state {state} K against {label} K"
         );
     }
+    for (key, label) in GAS_DERIVED_FILES {
+        let substance = row(key).substance();
+        let state = substance
+            .liquid()
+            .unwrap()
+            .optics()
+            .unwrap()
+            .state()
+            .value();
+        assert_same_bits(state, label);
+        let triple = substance.phase_diagram().unwrap().triple_temperature();
+        assert!(state >= triple.value(), "{key}: {state} K");
+    }
 }
+
+/// Step 2b's nine rows, each with its file's stated temperature (`tables::liquid_optics`).
+const GAS_DERIVED_FILES: [(&str, f64); 9] = [
+    ("O2", bins::OXYGEN_LIQUID_TEMPERATURE_K),
+    ("CO2", bins::CARBON_DIOXIDE_LIQUID_TEMPERATURE_K),
+    ("Ar", bins::ARGON_LIQUID_TEMPERATURE_K),
+    ("Kr", bins::KRYPTON_LIQUID_TEMPERATURE_K),
+    ("Xe", bins::XENON_LIQUID_TEMPERATURE_K),
+    ("N2O", bins::NITROUS_OXIDE_LIQUID_TEMPERATURE_K),
+    ("CO", bins::CARBON_MONOXIDE_LIQUID_TEMPERATURE_K),
+    ("SO2", bins::SULPHUR_DIOXIDE_LIQUID_TEMPERATURE_K),
+    ("H2S", bins::HYDROGEN_SULPHIDE_LIQUID_TEMPERATURE_K),
+];
 
 /// A table's isothermal compressibility, Pa⁻¹, from its `c_v`, `c_p` (any one unit) and sound speed
 /// w (m s⁻¹) at `density` (kg m⁻³): `κ_T` = `c_p` ÷ (`c_v` ρ w²).
@@ -1120,16 +1166,9 @@ fn the_viscosities_are_derived_outside_their_ranges() {
     assert_eq!(basis("CH4", 190.0, 162.66), LiquidBasis::Derived);
     assert_eq!(basis("NH3", 300.0, 600.2), LiquidBasis::Measured);
     assert_eq!(basis("NH3", 405.0, 233.3), LiquidBasis::Derived);
-    let co2 = super::super::rows::liquids::CARBON_DIOXIDE
-        .viscosity
-        .unwrap();
-    let co2_basis = |t: f64, rho: f64| {
-        co2.viscosity_pa_s(Kelvin::new(t), KilogramsPerCubicMetre::new(rho))
-            .1
-    };
-    assert_eq!(co2_basis(302.0, 450.0), LiquidBasis::Derived);
-    assert_eq!(co2_basis(302.0, 650.0), LiquidBasis::Measured);
-    assert_eq!(co2_basis(250.0, 1_046.0), LiquidBasis::Measured);
+    assert_eq!(basis("CO2", 302.0, 450.0), LiquidBasis::Derived);
+    assert_eq!(basis("CO2", 302.0, 650.0), LiquidBasis::Measured);
+    assert_eq!(basis("CO2", 250.0, 1_046.0), LiquidBasis::Measured);
 }
 
 /// The correlation length reproduces Huber, Perkins and Lemmon 2024's Table 8 for nitrogen near
@@ -1198,17 +1237,26 @@ fn the_scattering_is_derived_near_a_critical_point() {
 }
 
 /// A surface tension the correlation gives as negative is absent, not written: methane's Mulero
-/// sum falls below 0 within about 0.18 K of its critical point, and is present 1 K below it.
+/// sum falls below 0 within about 0.18 K of its critical point, sulphur dioxide's three terms' at
+/// 417.55 K, 13.1 K below its 430.64 K, and xenon's two at 289.611 K, 0.12 K below its 289.733 K;
+/// each is present a little cooler.
 #[test]
 fn a_negative_surface_tension_is_absent() {
-    let tension = |t: f64| {
-        liquid_properties(row("CH4"), Kelvin::new(t), Composition::Reference)
-            .unwrap()
-            .surface_tension_n_per_m
-    };
-    assert_eq!(tension(190.5), None);
-    let below = tension(189.564).unwrap();
-    assert!(below > 0.0, "{below} N/m");
+    for (key, present, absent) in [
+        ("CH4", 189.564, 190.5),
+        ("SO2", 417.5, 417.6),
+        ("Xe", 289.6, 289.62),
+    ] {
+        let tension = |t: f64| {
+            liquid_properties(row(key), Kelvin::new(t), Composition::Reference)
+                .unwrap()
+                .surface_tension_n_per_m
+        };
+        let none = tension(absent);
+        assert!(none.is_none(), "{key} at {absent} K: {none:?}");
+        let below = tension(present).unwrap();
+        assert!(below > 0.0, "{key}: {below} N/m at {present} K");
+    }
 }
 
 /// Water's anisotropy ratio is the closed form its doc states, x = 45 `ρ_v` `S_0` ÷ (3 − 4`ρ_v`)
@@ -1254,7 +1302,6 @@ fn the_depolarisation_follows_the_state() {
     assert!(at_triple < 0.039, "δ {at_triple} at the triple point");
     let at_100 = delta("H2O", water, 373.15);
     assert!(at_100 < 0.031, "δ {at_100} at 373.15 K");
-    let co2 = &super::super::rows::liquids::CARBON_DIOXIDE;
     for (key, ruled) in [
         ("CH4", 0.025),
         ("N2", 0.38),
@@ -1262,11 +1309,7 @@ fn the_depolarisation_follows_the_state() {
         ("C2H6", 0.29),
         ("NH3", 0.07),
     ] {
-        let columns = if key == "CO2" {
-            co2
-        } else {
-            row(key).substance().liquid().unwrap()
-        };
+        let columns = row(key).substance().liquid().unwrap();
         let triple = row(key)
             .substance()
             .phase_diagram()
@@ -1317,90 +1360,193 @@ fn water_s_scattering_is_within_six_percent_of_morel_s_pure_water() {
     }
 }
 
+/// Three saturated-liquid states, each its temperature, K, and the WebBook's surface tension there,
+/// N m⁻¹.
+type TensionRows = [(f64, f64); 3];
+
+/// The WebBook's saturated-liquid surface tensions by row, with the tolerance
+/// [`mulero_s_surface_tensions_reproduce_the_webbook`] holds each to.
+const MULERO_WEBBOOK: [(&str, f64, TensionRows); 13] = [
+    (
+        "CH4",
+        2e-6,
+        [
+            (90.694_057, 0.017_062_798),
+            (143.794_26, 0.006_878_156_0),
+            (169.726_3, 0.002_559_923_6),
+        ],
+    ),
+    (
+        "N2",
+        2e-6,
+        [
+            (63.151_008, 0.012_205_148),
+            (95.845_1, 0.004_908_255_9),
+            (112.654_57, 0.001_795_175_3),
+        ],
+    ),
+    (
+        "C2H6",
+        2e-6,
+        [
+            (90.367_641, 0.031_663_374),
+            (234.486_41, 0.008_534_154_2),
+            (273.999_22, 0.003_122_508_5),
+        ],
+    ),
+    (
+        "NH3",
+        2e-6,
+        [
+            (195.492_05, 0.043_947_790),
+            (320.545_21, 0.015_481_965),
+            (368.330_58, 0.005_701_248_7),
+        ],
+    ),
+    (
+        "CO2",
+        2e-6,
+        [
+            (216.591_36, 0.016_494_627),
+            (247.749_6, 0.009_500_193_8),
+            (277.934_57, 0.003_632_893_5),
+        ],
+    ),
+    (
+        "O2",
+        1e-10,
+        [
+            (54.37, 0.022_598_286_314_3),
+            (102.93, 0.010_034_034_642_0),
+            (127.21, 0.004_609_302_498_89),
+        ],
+    ),
+    (
+        "Ar",
+        1e-10,
+        [
+            (83.81, 0.013_403_029_379_7),
+            (115.74, 0.005_954_829_973_37),
+            (131.705, 0.002_776_735_112_36),
+        ],
+    ),
+    (
+        "Kr",
+        1e-10,
+        [
+            (115.78, 0.016_417_265_440_4),
+            (160.535, 0.007_314_285_425_45),
+            (182.912_5, 0.003_418_232_802_84),
+        ],
+    ),
+    (
+        "Xe",
+        1e-10,
+        [
+            (161.41, 0.018_858_632_201_1),
+            (222.675, 0.008_506_493_471_75),
+            (253.307_5, 0.003_985_122_152_57),
+        ],
+    ),
+    (
+        "N2O",
+        1e-10,
+        [
+            (182.34, 0.024_288_096_397_5),
+            (242.835, 0.011_163_570_440_8),
+            (273.082_5, 0.005_392_345_350_81),
+        ],
+    ),
+    (
+        "CO",
+        1e-10,
+        [
+            (68.16, 0.012_446_245_900_0),
+            (99.18, 0.005_882_249_127_06),
+            (114.69, 0.002_896_407_873_72),
+        ],
+    ),
+    (
+        "SO2",
+        1e-10,
+        [
+            (197.7, 0.041_582_250_355_2),
+            (309.865, 0.019_391_208_080_3),
+            (365.947_5, 0.008_817_895_456_54),
+        ],
+    ),
+    (
+        "H2S",
+        1e-10,
+        [
+            (187.7, 0.033_765_934_367_6),
+            (276.67, 0.015_335_602_898_4),
+            (321.155, 0.007_266_254_562_94),
+        ],
+    ),
+];
+
 /// Mulero et al. 2012's surface tensions, with each reference equation's critical temperature,
-/// reproduce the WebBook's saturated-liquid column within 2 × 10⁻⁶ at three states each.
+/// reproduce the WebBook's saturated-liquid column at three states each: step 2's within 2 × 10⁻⁶,
+/// and step 2b's eight, from their triple points to about 0.85 `T_c`, within 10⁻¹⁰ (the research
+/// found 4.5 × 10⁻¹², the WebBook's twelve printed figures), sulphur dioxide's at its row's
+/// critical point, which is Gao et al.'s.
 #[test]
 fn mulero_s_surface_tensions_reproduce_the_webbook() {
-    let co2 = &super::super::rows::liquids::CARBON_DIOXIDE;
-    for (key, rows) in [
-        (
-            "CH4",
-            [
-                (90.694_057, 0.017_062_798),
-                (143.794_26, 0.006_878_156_0),
-                (169.726_3, 0.002_559_923_6),
-            ],
-        ),
-        (
-            "N2",
-            [
-                (63.151_008, 0.012_205_148),
-                (95.845_1, 0.004_908_255_9),
-                (112.654_57, 0.001_795_175_3),
-            ],
-        ),
-        (
-            "C2H6",
-            [
-                (90.367_641, 0.031_663_374),
-                (234.486_41, 0.008_534_154_2),
-                (273.999_22, 0.003_122_508_5),
-            ],
-        ),
-        (
-            "NH3",
-            [
-                (195.492_05, 0.043_947_790),
-                (320.545_21, 0.015_481_965),
-                (368.330_58, 0.005_701_248_7),
-            ],
-        ),
-        (
-            "CO2",
-            [
-                (216.591_36, 0.016_494_627),
-                (247.749_6, 0.009_500_193_8),
-                (277.934_57, 0.003_632_893_5),
-            ],
-        ),
-    ] {
-        let columns = if key == "CO2" {
-            co2
-        } else {
-            row(key).substance().liquid().unwrap()
-        };
-        let tension = columns.surface_tension().unwrap();
+    for (key, tolerance, rows) in MULERO_WEBBOOK {
+        let tension = row(key)
+            .substance()
+            .liquid()
+            .and_then(LiquidColumns::surface_tension)
+            .unwrap();
         for (t, webbook) in rows {
             let ours = tension.surface_tension_n_per_m(Kelvin::new(t));
             assert!(
-                (ours / webbook - 1.0).abs() < 2e-6,
+                (ours / webbook - 1.0).abs() < tolerance,
                 "{key} at {t} K: {ours} N/m against {webbook}"
             );
         }
     }
 }
 
-/// Carbon dioxide's columns are built but wait on its index (decision-p14-t49h-gas-index §1.3): the
-/// row answers `NotALiquid`, and its columns give b, σ and μ at its triple point.
+/// Carbon dioxide's record resolves now that its index has landed (decision-p14-t49h-gas-index
+/// §1.2): at its triple point its index is its file's carried 0.008 K down, the record is
+/// `Derived` (the index's basis, its file's provenance), and b, σ and μ are present, μ about 0.253
+/// mPa s (the WebBook's 253.37 μPa s at its own density) and `Measured`.
 #[test]
-fn carbon_dioxide_waits_on_its_index() {
-    assert!(matches!(
-        liquid_properties(row("CO2"), Kelvin::new(250.0), Composition::Reference),
-        Err(ResolveLiquidError::NotALiquid { .. })
-    ));
-    let co2 = &super::super::rows::liquids::CARBON_DIOXIDE;
-    assert!(co2.optics().is_none());
-    assert_eq!(co2.components(), [row("CO2")]);
+fn carbon_dioxide_resolves_with_its_index() {
+    let co2 = row("CO2");
+    let columns = co2.substance().liquid().unwrap();
+    assert_eq!(columns.components(), [co2]);
+    let optics = columns.optics().unwrap();
+    assert_eq!(optics.index_basis(), LiquidBasis::Derived);
+    assert!(
+        optics.absorption_per_m().is_none(),
+        "{:?}",
+        optics.absorption_per_m()
+    );
     let t = Kelvin::new(216.592);
-    let rho = row("CO2")
-        .substance()
-        .grain_density(CondensedPhase::Liquid, t)
-        .unwrap();
-    let (mu, basis) = co2.viscosity().unwrap().viscosity_pa_s(t, rho);
-    // About 0.253 mPa s at the triple point (the WebBook's 253.37 μPa s at its own density).
+    let record = liquid_properties(co2, t, Composition::Reference).unwrap();
+    assert_eq!(record.basis, LiquidBasis::Derived);
+    assert!(
+        record.absorption_per_m.is_none(),
+        "{:?}",
+        record.absorption_per_m
+    );
+    for (n, file) in record
+        .refractive_index
+        .iter()
+        .zip(&bins::CARBON_DIOXIDE_LIQUID_N)
+    {
+        assert!(n > file && n - file < 1e-5, "{n} against the file's {file}");
+    }
+    assert!(record.scattering_per_m.is_some());
+    let rho = KilogramsPerCubicMetre::new(record.density_kg_m3);
+    let (mu, basis) = columns.viscosity().unwrap().viscosity_pa_s(t, rho);
+    assert_same_bits(record.viscosity_pa_s.unwrap(), mu);
     assert!((mu * 1e6 - 253.4).abs() < 2.0, "{mu}");
     assert_eq!(basis, LiquidBasis::Measured);
-    let sigma = co2.surface_tension().unwrap().surface_tension_n_per_m(t);
+    let sigma = record.surface_tension_n_per_m.unwrap();
     assert!(sigma > 0.016, "{sigma} N/m");
 }
 
@@ -1461,5 +1607,436 @@ fn the_testing_worlds_carry_the_registry_s_scattering() {
         for (h, r) in held.iter().zip(&resolved.scattering_per_m.unwrap()) {
             assert_same_bits(*h, *r);
         }
+    }
+}
+
+/// A saturation table's states: T, K; ρ′, kg m⁻³; `c_v` and `c_p`, J g⁻¹ K⁻¹; and w, m s⁻¹.
+type SaturationRows = [(f64, f64, f64, f64, f64); 4];
+
+/// Step 2b's equations with the WebBook's saturated-liquid states for each (NIST SRD 69, fetched
+/// 2026-10-19), and whether the equation is Lemmon and Span 2006's, which the WebBook evaluates
+/// with CODATA 2014's R.
+const GAS_DERIVED_WEBBOOK: [(&str, &HelmholtzResidual, bool, SaturationRows); 7] = [
+    (
+        "O2",
+        &super::super::rows::equations::OXYGEN,
+        false,
+        [
+            (
+                54.37,
+                1_306.040_101_27,
+                1.195_126_187_67,
+                1.673_186_515,
+                1_123.431_731_36,
+            ),
+            (
+                78.65,
+                1_196.829_212_5,
+                0.975_586_615_194,
+                1.680_515_211_79,
+                998.306_150_931,
+            ),
+            (
+                102.93,
+                1_075.158_208_79,
+                0.885_768_414_758,
+                1.754_062_559_92,
+                797.045_159_464,
+            ),
+            (
+                127.21,
+                923.696_351_177,
+                0.831_954_464_448,
+                2.073_272_517_9,
+                569.085_279_123,
+            ),
+        ],
+    ),
+    (
+        "Ar",
+        &super::super::rows::equations::ARGON,
+        false,
+        [
+            (
+                83.81,
+                1_416.741_313_67,
+                0.549_587_539_271,
+                1.115_690_370_39,
+                862.398_158_74,
+            ),
+            (
+                99.775,
+                1_315.216_188_93,
+                0.498_183_953_14,
+                1.152_703_109_71,
+                748.588_640_142,
+            ),
+            (
+                115.74,
+                1_198.251_073_03,
+                0.464_086_275_26,
+                1.274_772_760_46,
+                621.489_771_381,
+            ),
+            (
+                131.705,
+                1_049.734_646_33,
+                0.449_157_697_443,
+                1.627_747_118_68,
+                469.818_910_639,
+            ),
+        ],
+    ),
+    (
+        "Kr",
+        &super::super::rows::equations::KRYPTON,
+        true,
+        [
+            (
+                115.78,
+                2_446.601_975_35,
+                0.253_283_459_567,
+                0.517_129_910_363,
+                698.925_135_62,
+            ),
+            (
+                138.157_5,
+                2_269.432_253_21,
+                0.234_670_868_639,
+                0.542_510_399_411,
+                604.150_646_134,
+            ),
+            (
+                160.535,
+                2_065.332_701_81,
+                0.221_645_888_679,
+                0.604_607_834_497,
+                501.116_715_438,
+            ),
+            (
+                182.912_5,
+                1_806.830_780_92,
+                0.216_700_104_589,
+                0.775_433_945_568,
+                379.253_677_591,
+            ),
+        ],
+    ),
+    (
+        "Xe",
+        &super::super::rows::equations::XENON,
+        true,
+        [
+            (
+                161.41,
+                2_966.150_426_69,
+                0.168_042_680_643,
+                0.338_526_172_041,
+                653.349_831_976,
+            ),
+            (
+                192.042_5,
+                2_753.370_638_63,
+                0.154_214_135_043,
+                0.352_444_740_603,
+                565.013_173_635,
+            ),
+            (
+                222.675,
+                2_507.905_773_81,
+                0.144_748_626_797,
+                0.390_789_226_688,
+                468.558_333_288,
+            ),
+            (
+                253.307_5,
+                2_196.402_146_9,
+                0.140_857_034_091,
+                0.498_770_900_504,
+                354.626_968_096,
+            ),
+        ],
+    ),
+    (
+        "CO",
+        &super::super::rows::equations::CARBON_MONOXIDE,
+        true,
+        [
+            (
+                68.16,
+                849.538_097_042,
+                1.262_082_095_84,
+                2.157_441_259_37,
+                998.196_602_86,
+            ),
+            (
+                83.67,
+                784.267_282_701,
+                1.127_649_069_33,
+                2.152_353_371_86,
+                847.223_503_193,
+            ),
+            (
+                99.18,
+                709.749_112_933,
+                1.040_486_122_15,
+                2.292_605_345_92,
+                687.547_911_725,
+            ),
+            (
+                114.69,
+                615.854_956_374,
+                0.993_488_141_969,
+                2.774_902_129_93,
+                506.095_727_718,
+            ),
+        ],
+    ),
+    (
+        "N2O",
+        &super::super::rows::equations::NITROUS_OXIDE,
+        true,
+        [
+            (
+                182.34,
+                1_237.321_619_04,
+                0.960_965_601_087,
+                1.717_753_299_63,
+                1_149.532_582_98,
+            ),
+            (
+                212.587_5,
+                1_144.655_023_33,
+                0.928_737_450_79,
+                1.765_159_560_72,
+                956.262_382_338,
+            ),
+            (
+                242.835,
+                1_038.952_148_28,
+                0.912_481_116_73,
+                1.901_485_957_31,
+                762.992_517_528,
+            ),
+            (
+                273.082_5,
+                907.409_615_835,
+                0.911_144_708_916,
+                2.271_262_471_68,
+                559.004_946_222,
+            ),
+        ],
+    ),
+    (
+        "H2S",
+        &super::super::rows::equations::HYDROGEN_SULPHIDE,
+        true,
+        [
+            (
+                187.7,
+                992.310_041_096,
+                1.302_479_201_15,
+                2.019_750_265_76,
+                1_437.845_137_88,
+            ),
+            (
+                232.185,
+                914.426_617_583,
+                1.180_439_742,
+                2.000_316_227_14,
+                1_203.987_765_68,
+            ),
+            (
+                276.67,
+                825.410_242_74,
+                1.103_745_226_04,
+                2.110_944_332_23,
+                961.008_972_268,
+            ),
+            (
+                321.155,
+                712.230_368_033,
+                1.063_863_128_52,
+                2.528_856_735_9,
+                692.699_216_883,
+            ),
+        ],
+    ),
+];
+
+/// Step 2b's equations of state reproduce the WebBook's evaluation of the same equations (NIST SRD
+/// 69's saturation tables at twelve figures, fetched 2026-10-19, their SHA-256 in plan 14's
+/// P14.T49.h step 2b record): `κ_T` against `c_p` ÷ (`c_v` ρ′ w²) at four saturated-liquid states
+/// each, from the triple point to about 0.85 `T_c`. Oxygen's and argon's within 10⁻⁶, the WebBook
+/// taking their own gas constants. Lemmon and Span 2006's five within 2 × 10⁻⁶: the WebBook
+/// evaluates them with CODATA 2014's R = 8.314 459 8 J mol⁻¹ K⁻¹, not the 8.314 472 J mol⁻¹ K⁻¹
+/// their coefficients were fitted with, which this crate keeps, so its `κ_T` lies a constant
+/// 1.47 × 10⁻⁶ above theirs; scaled by the ratio of the two R, they meet it within 10⁻⁹.
+#[test]
+fn the_gas_derived_rows_equations_reproduce_the_webbook() {
+    let codata_2014_ratio = 8.314_472 / 8.314_459_8;
+    for (name, equation, lemmon_and_span, rows) in GAS_DERIVED_WEBBOOK {
+        if lemmon_and_span {
+            assert_compressibility(name, equation, &rows, 2e-6);
+            for (t, rho, cv, cp, w) in rows {
+                let ours = equation.isothermal_compressibility_per_pa(
+                    KilogramsPerCubicMetre::new(rho),
+                    Kelvin::new(t),
+                ) * codata_2014_ratio;
+                let table = table_compressibility(rho, cv, cp, w);
+                assert!(
+                    (ours / table - 1.0).abs() < 1e-9,
+                    "{name} at {t} K with the WebBook's R: κ_T {ours} against {table}"
+                );
+            }
+        } else {
+            assert_compressibility(name, equation, &rows, 1e-6);
+        }
+    }
+}
+
+/// At its file's own state each of step 2b's nine rows is its file's bins, within 4 × 10⁻¹⁶, as
+/// water's is: the carry's ratio of densities is exactly 1 there.
+#[test]
+fn the_gas_derived_rows_files_are_reproduced_at_their_states() {
+    for (key, state) in GAS_DERIVED_FILES {
+        let id = row(key);
+        let optics = id.substance().liquid().unwrap().optics().unwrap();
+        let record = liquid_properties(id, Kelvin::new(state), Composition::Reference).unwrap();
+        for (n, file) in record.refractive_index.iter().zip(optics.index()) {
+            assert!((n - file).abs() < 4e-16, "{key}: {n} against {file}");
+        }
+    }
+}
+
+/// The atoms' indices, Sinnock and Smith's measured tables, keep their basis only over their
+/// checked windows, each from its file's state (`hyperion-fit`'s
+/// `liquid_optics_the_atoms_index_windows_are_sinnock_and_smith_s` derives them from the files
+/// and the tables): argon's 83.81–90 K, krypton's 115.77–115.95 K and xenon's 161.4 K alone. The
+/// other six of step 2b's rows have no window, their index `Derived` throughout (carbon monoxide's
+/// and hydrogen sulphide's files `standIn`, the record's `Derived`, decision-p14-t49h-gas-index
+/// A.4).
+#[test]
+fn the_atoms_alone_have_index_windows() {
+    let optics = |key: &str| row(key).substance().liquid().unwrap().optics().unwrap();
+    let window = |key: &str| {
+        optics(key)
+            .index_checked()
+            .map(|(low, high)| (low.value(), high.value()))
+    };
+    for (key, checked) in [
+        ("Ar", (83.81, 90.0)),
+        ("Kr", (115.77, 115.95)),
+        ("Xe", (161.4, 161.4)),
+    ] {
+        let (low, high) = window(key).unwrap_or_else(|| panic!("{key} has an index window"));
+        assert_same_bits(low, checked.0);
+        assert_same_bits(high, checked.1);
+        assert_eq!(optics(key).index_basis(), LiquidBasis::Measured, "{key}");
+        assert_same_bits(checked.0, optics(key).state().value());
+    }
+    for key in ["O2", "CO2", "N2O", "CO", "SO2", "H2S"] {
+        let none = window(key);
+        assert!(none.is_none(), "{key}: {none:?}");
+        assert_eq!(optics(key).index_basis(), LiquidBasis::Derived, "{key}");
+    }
+}
+
+/// Step 2b's anisotropy ratios are the lane's research's (decision-p14-t49h-gas-index §4.3;
+/// `.git/rm45-scratch/p14-liquids/step2b/step2b.json`) within 10⁻⁸ relative, and δ at each triple
+/// point at the record's density within 10⁻⁷ (carbon dioxide's 1.1 × 10⁻⁸, the research's
+/// equation evaluated apart): oxygen's x 0.466 and δ 0.706, nitrous oxide's 1.013 and
+/// 0.665, carbon monoxide's 0.0825 and 0.230 and hydrogen sulphide's 0.006 70 and 0.0252, each its
+/// gas's King factor's molecular part plus 0.006; argon's 0.003 93 and 0.0109, krypton's 0.006 39
+/// and 0.0171 and xenon's 0.010 16 and 0.0270, their interaction part alone, a stand-in; and
+/// carbon dioxide's step 2 value, 0.657 and 0.465.
+#[test]
+fn the_gas_derived_rows_anisotropy_is_the_research_s() {
+    for (key, x, delta) in [
+        ("O2", 0.465_724_130_865, 0.706_178_953_819),
+        ("CO2", 0.656_564_174_894, 0.465_146_714_766),
+        ("Ar", 0.003_931_579_195_82, 0.010_866_598_497_8),
+        ("Kr", 0.006_393_949_283_6, 0.017_078_665_293),
+        ("Xe", 0.010_155_781_107_9, 0.026_960_559_563_8),
+        ("N2O", 1.012_696_876_09, 0.665_497_134_243),
+        ("CO", 0.082_5, 0.229_624_764_876),
+        ("H2S", 0.006_697_581_314_88, 0.025_174_699_444_6),
+    ] {
+        let substance = row(key).substance();
+        let scattering = substance.liquid().unwrap().scattering().unwrap();
+        let ours = scattering.anisotropy_ratio();
+        assert!((ours / x - 1.0).abs() < 1e-8, "{key}: x {ours} against {x}");
+        let triple = substance.phase_diagram().unwrap().triple_temperature();
+        let density = substance
+            .grain_density(CondensedPhase::Liquid, triple)
+            .unwrap();
+        let ours = scattering.depolarisation_ratio(density, triple);
+        assert!(
+            (ours / delta - 1.0).abs() < 1e-7,
+            "{key}: δ {ours} against {delta} at its triple point"
+        );
+    }
+}
+
+/// Step 2b's eight rows beside carbon dioxide have no viscosity, none being ruled for them
+/// (decision-p14-t49h-gas-index §1.2), and sulphur dioxide no scattering, its depolarisation unread
+/// (§4.3); each record resolves mid-range all the same, `Derived`.
+#[test]
+fn the_gas_derived_rows_unsourced_members_are_absent() {
+    for key in ["O2", "Ar", "Kr", "Xe", "N2O", "CO", "SO2", "H2S"] {
+        let id = row(key);
+        let columns = id.substance().liquid().unwrap();
+        assert!(columns.viscosity().is_none(), "{key}");
+        assert_eq!(columns.scattering().is_some(), key != "SO2", "{key}");
+        let (lowest, top) = reference_range(id);
+        let t = Kelvin::new(f64::midpoint(lowest, top));
+        let record = liquid_properties(id, t, Composition::Reference).unwrap();
+        assert!(
+            record.viscosity_pa_s.is_none(),
+            "{key}: {:?}",
+            record.viscosity_pa_s
+        );
+        assert_eq!(record.scattering_per_m.is_some(), key != "SO2", "{key}");
+        assert!(record.surface_tension_n_per_m.is_some(), "{key}");
+        assert_eq!(record.basis, LiquidBasis::Derived, "{key}");
+    }
+}
+
+/// The critical-point rule acts on step 2b's rows where the lane's research found it: `q_max` ξ,
+/// `q_max` = 4π n ÷ 380 nm with the record's index in the shortest bin and ξ from each row's
+/// amplitudes (oxygen's and argon's Lemmon and Jacobsen 2004's, xenon's Velliadou et al. 2021's,
+/// the others' R12-08's water amplitudes), passes [`CRITICAL_SCATTERING_LIMIT`] on the saturated
+/// liquid 1.17 K below `T_c` for oxygen, 0.41 K for argon, 0.73 K for krypton, 1.66 K for xenon,
+/// 0.71 K for nitrous oxide, 0.33 K for carbon monoxide and 1.06 K for hydrogen sulphide: below it
+/// 0.01 K cooler, above it 0.01 K warmer.
+#[test]
+fn the_gas_derived_rows_critical_rule_acts_where_the_research_found() {
+    for (key, crossing) in [
+        ("O2", 153.407_483_177),
+        ("Ar", 150.272_555_562),
+        ("Kr", 208.750_049_783),
+        ("Xe", 288.077_143_334),
+        ("N2O", 308.813_103_829),
+        ("CO", 132.533_774_696),
+        ("H2S", 372.038_140_693),
+    ] {
+        let id = row(key);
+        let scattering = id.substance().liquid().unwrap().scattering().unwrap();
+        let q_xi = |t: f64| {
+            let record = liquid_properties(id, Kelvin::new(t), Composition::Reference).unwrap();
+            let xi = scattering.fluctuations().correlation_length_m(
+                scattering.equation(),
+                KilogramsPerCubicMetre::new(record.density_kg_m3),
+                Kelvin::new(t),
+            );
+            4.0 * std::f64::consts::PI * record.refractive_index[0]
+                / (LIQUID_BIN_EDGES_NM[0] * 1e-9)
+                * xi
+        };
+        let (cooler, warmer) = (q_xi(crossing - 0.01), q_xi(crossing + 0.01));
+        assert!(
+            cooler < CRITICAL_SCATTERING_LIMIT && warmer > CRITICAL_SCATTERING_LIMIT,
+            "{key}: q ξ {cooler} and {warmer} about {crossing} K"
+        );
     }
 }

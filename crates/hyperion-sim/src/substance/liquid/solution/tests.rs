@@ -52,6 +52,14 @@ fn assert_close(a: f64, b: f64, relative: f64, what: &str) {
     );
 }
 
+/// `value` absent, labelled `what`, printing it where it is present.
+#[track_caller]
+fn assert_absent<T: std::fmt::Debug>(value: Option<T>, what: &str) {
+    if let Some(present) = value {
+        panic!("{what}: present, {present:?}");
+    }
+}
+
 /// Every member of `a` and `b` the same, bit for bit.
 fn assert_same_record(a: &LiquidProperties, b: &LiquidProperties) {
     assert_same_bits(a.temperature.value(), b.temperature.value());
@@ -166,8 +174,9 @@ fn titan_s_density_at_its_reference_state_is_518_9() {
 /// there with the row's own record, member by member, for every pure liquid with a phase diagram:
 /// the density's line, the index carried to it, the surface tension's form and the continued
 /// viscosity within round-off of the slope a microkelvin below; `κ_T` held at the triple point's
-/// value, to the bit, a microkelvin and 5 K below; the absorption the file's, held. Every member
-/// below is `Derived`, and a row with no continued viscosity has none below.
+/// value, to the bit, a microkelvin and 5 K below, where the row scatters (sulphur dioxide does
+/// not); the absorption the file's, held. Every member below is `Derived`, and a row with no
+/// continued viscosity has none below.
 #[test]
 fn the_continuation_below_the_triple_point_is_continuous() {
     let mut continued = 0;
@@ -195,11 +204,29 @@ fn the_continuation_below_the_triple_point_is_continuous() {
         for (n, m) in below.refractive_index.iter().zip(&at.refractive_index) {
             assert_close(*n, *m, 1e-8, key.as_str());
         }
-        assert_eq!(below.absorption_per_m, at.absorption_per_m, "{key}");
-        let kappa = at.fluctuations.unwrap().compressibility_per_pa;
-        assert_same_bits(below.fluctuations.unwrap().compressibility_per_pa, kappa);
+        assert_eq!(
+            below.absorption_per_m.is_some(),
+            at.absorption_per_m.is_some(),
+            "{key}"
+        );
+        for (a, b) in below
+            .absorption_per_m
+            .iter()
+            .flatten()
+            .zip(at.absorption_per_m.iter().flatten())
+        {
+            assert_same_bits(*a, *b);
+        }
         let colder = component_state(id, Kelvin::new(triple.value() - 5.0)).unwrap();
-        assert_same_bits(colder.fluctuations.unwrap().compressibility_per_pa, kappa);
+        match (at.fluctuations, below.fluctuations, colder.fluctuations) {
+            (Some(at), Some(below), Some(colder)) => {
+                let kappa = at.compressibility_per_pa;
+                assert_same_bits(below.compressibility_per_pa, kappa);
+                assert_same_bits(colder.compressibility_per_pa, kappa);
+            }
+            (None, None, None) => assert!(columns.scattering.is_none(), "{key}"),
+            other => panic!("{key}: the fluctuations {other:?}"),
+        }
         assert_close(
             below.surface_tension_n_per_m.unwrap(),
             at.surface_tension_n_per_m.unwrap(),
@@ -296,7 +323,7 @@ fn a_composition_s_components_are_neutral_species() {
     }
     let water = row("H2O");
     let fractions = [(water, 0.5), (row("NaCl"), 0.5)];
-    assert!(LiquidComposition::new(&fractions).is_ok());
+    LiquidComposition::new(&fractions).unwrap();
 }
 
 /// Every neutral formula-key row has a molar mass, so the resolver never meets a component
@@ -408,8 +435,8 @@ fn the_reference_is_its_composition_given() {
         }
     }
     assert_eq!(
-        stated, 10,
-        "five pure liquids, the two modelled brines, ammonia–water, the acid and Titan's seas"
+        stated, 19,
+        "fourteen pure liquids, the two modelled brines, ammonia–water, the acid and Titan's seas"
     );
 }
 
@@ -429,7 +456,19 @@ fn each_liquid_s_components_are_its_rows() {
             continue;
         };
         let checked = LiquidComposition::new(reference.mole_fractions()).unwrap();
-        assert_eq!(checked, reference, "{key}");
+        assert_eq!(
+            checked.mole_fractions().len(),
+            reference.mole_fractions().len(),
+            "{key}"
+        );
+        for (&(a, x), &(b, y)) in checked
+            .mole_fractions()
+            .iter()
+            .zip(reference.mole_fractions())
+        {
+            assert_eq!(a, b, "{key}");
+            assert_same_bits(x, y);
+        }
         let named: Vec<SubstanceId> = reference.mole_fractions().iter().map(|&(c, _)| c).collect();
         assert_eq!(named, components, "{key}");
         match &columns.constitution {
@@ -508,7 +547,7 @@ fn titan_below_its_components_triple_points_resolves() {
             "{t} K: {:?}",
             sea.refractive_index
         );
-        assert_eq!(sea.absorption_per_m, None, "{t} K");
+        assert_absent(sea.absorption_per_m, &format!("{t} K"));
         let b = sea.scattering_per_m.unwrap();
         assert!(b.iter().all(|v| v.is_finite() && *v > 0.0), "{t} K: {b:?}");
         let sigma = sea.surface_tension_n_per_m.unwrap();
@@ -572,9 +611,9 @@ fn the_ideal_mixture_lies_between_its_components() {
 #[test]
 fn titan_s_range_runs_to_its_lowest_component_s_critical_point() {
     let check = |composition: Composition<'_>, critical: f64| {
-        assert!(liquid_properties(titan(), Kelvin::new(71.15), composition).is_ok());
+        liquid_properties(titan(), Kelvin::new(71.15), composition).unwrap();
         let top = Kelvin::new(critical - 1e-6);
-        assert!(liquid_properties(titan(), top, composition).is_ok());
+        liquid_properties(titan(), top, composition).unwrap();
         for t in [71.149, critical, critical + 10.0, f64::NAN] {
             match liquid_properties(titan(), Kelvin::new(t), composition) {
                 Err(ResolveLiquidError::OutOfRange {
@@ -595,7 +634,7 @@ fn titan_s_range_runs_to_its_lowest_component_s_critical_point() {
     let fractions = [(row("C2H6"), 0.4), (row("CH4"), 0.6)];
     let binary = Composition::Given(LiquidComposition::new(&fractions).unwrap());
     check(binary, 190.564);
-    assert!(liquid_properties(titan(), Kelvin::new(150.0), binary).is_ok());
+    liquid_properties(titan(), Kelvin::new(150.0), binary).unwrap();
 }
 
 /// A given composition's order moves nothing (decision-p14-t49h-step3-composition §5, item 3): the
@@ -749,8 +788,8 @@ fn a_brine_of_water_alone_is_water_s_record() {
                 1e-12,
                 &what,
             );
-            assert_eq!(brine.surface_tension_n_per_m, None, "{what}");
-            assert_eq!(brine.scattering_per_m, None, "{what}");
+            assert_absent(brine.surface_tension_n_per_m, &what);
+            assert_absent(brine.scattering_per_m, &what);
             assert_eq!(brine.basis, LiquidBasis::Derived, "{what}");
         }
     }
@@ -888,7 +927,9 @@ fn a_brine_past_its_highest_fraction_is_refused() {
             )
         };
         let at = binary("H2O", salt, highest);
-        assert!(given(&at).is_ok(), "{key}");
+        if let Err(refusal) = given(&at) {
+            panic!("{key}: {refusal:?}");
+        }
         let x_max = at[1].1;
         let past = binary("H2O", salt, highest + 0.01);
         match given(&[past[1], past[0]]) {
@@ -1002,9 +1043,9 @@ fn a_brine_s_viscosity_is_continuous_at_water_s_triple_point() {
             mu(273.15)
         );
     }
-    assert_eq!(
+    assert_absent(
         supercooled_water_viscosity_pa_s(water, Kelvin::new(triple)),
-        None
+        "water at its triple point",
     );
     let continued = supercooled_water_viscosity_pa_s(water, Kelvin::new(triple - 1e-9)).unwrap();
     let own = record(water, triple, Composition::Reference)
@@ -1059,7 +1100,7 @@ fn the_perchlorate_brines_wait_for_their_solutes() {
         let id = row(key);
         let columns = id.substance().liquid().unwrap();
         assert!(columns.components().is_empty(), "{key}");
-        assert_eq!(columns.reference_composition(), None, "{key}");
+        assert_absent(columns.reference_composition(), key);
         let LiquidConstitution::AwaitingSolute(solute) = columns.constitution else {
             panic!("{key} awaits its solute");
         };
@@ -1148,9 +1189,9 @@ fn ammonia_water_is_its_components_mixed_at_its_stated_density() {
         1e-9,
         "surface tension",
     );
-    assert_eq!(eutectic.viscosity_pa_s, None);
-    assert_eq!(eutectic.absorption_per_m, None);
-    assert_eq!(eutectic.scattering_per_m, None);
+    assert_absent(eutectic.viscosity_pa_s, "viscosity");
+    assert_absent(eutectic.absorption_per_m, "absorption");
+    assert_absent(eutectic.scattering_per_m, "scattering");
     assert_eq!(eutectic.basis, LiquidBasis::Derived);
     let warm = record(id, 300.0, Composition::Reference);
     assert_same_bits(warm.density_kg_m3, 946.0);
@@ -1225,7 +1266,40 @@ fn ammonia_water_refuses_any_other_composition() {
             other => panic!("{t} K: {other:?}"),
         }
     }
-    assert!(liquid_properties(id, Kelvin::new(405.56 - 1e-6), Composition::Reference).is_ok());
+    liquid_properties(id, Kelvin::new(405.56 - 1e-6), Composition::Reference).unwrap();
+}
+
+/// Ammonia–water's reference composition given in either order, `[(H2O, x), (NH3, y)]` and
+/// reversed, is the same record to the bit, and the reference's, at its 176.15 K eutectic and at
+/// 300 K (decision-p14-t49h-step3-composition §5, item 3): the one-composition model sums over its
+/// components in registry order too.
+#[test]
+fn ammonia_water_s_order_does_not_move_the_record() {
+    let id = row("nh3_h2o");
+    let reference = id
+        .substance()
+        .liquid()
+        .unwrap()
+        .reference_composition()
+        .unwrap();
+    let &[(water, x_w), (ammonia, x_a)] = reference.mole_fractions() else {
+        panic!("ammonia–water has two components");
+    };
+    assert_eq!((water, ammonia), (row("H2O"), row("NH3")));
+    let forward = [(water, x_w), (ammonia, x_a)];
+    let reversed = [(ammonia, x_a), (water, x_w)];
+    for t in [176.15, 300.0] {
+        let given = |fractions: &[(SubstanceId, f64)]| {
+            record(
+                id,
+                t,
+                Composition::Given(LiquidComposition::new(fractions).unwrap()),
+            )
+        };
+        let first = given(&forward);
+        assert_same_record(&first, &given(&reversed));
+        assert_same_record(&first, &record(id, t, Composition::Reference));
+    }
 }
 
 /// The aqueous acid's model, `H2SO4`'s liquid columns'.
@@ -1320,7 +1394,7 @@ fn the_acid_reproduces_its_two_files_at_300_k() {
             assert_close(*ours, *file, 1e-12, &format!("absorption bin {k}"));
         }
         assert_eq!(acid.basis, LiquidBasis::Derived);
-        assert_eq!(acid.scattering_per_m, None);
+        assert_absent(acid.scattering_per_m, "scattering");
         assert!(acid.surface_tension_n_per_m.is_some() && acid.viscosity_pa_s.is_some());
     }
 }
@@ -1407,10 +1481,18 @@ fn the_acid_s_density_is_myhre_s_without_its_t4_column() {
 fn the_acid_s_index_is_specific_refraction_linear_in_mass_fraction() {
     let model = acid();
     let density = |w: f64, t: f64| model.density.density_kg_m3(w, Kelvin::new(t));
-    let (low, high) = (density(0.75, 300.0), density(0.845, 300.0));
+    let (low, high) = (
+        KilogramsPerCubicMetre::new(density(0.75, 300.0)),
+        KilogramsPerCubicMetre::new(density(0.845, 300.0)),
+    );
     let at = |n75: f64, n845: f64, w: f64| {
         let s = (w - 0.75) / (0.845 - 0.75);
-        acid_index((n75, low), (n845, high), s, density(w, 300.0))
+        acid_index(
+            (n75, low),
+            (n845, high),
+            s,
+            KilogramsPerCubicMetre::new(density(w, 300.0)),
+        )
     };
     let n80 = at(1.431_05, 1.438_21, 0.80);
     assert!((n80 - 1.435_99).abs() < 1e-5, "{n80}");
@@ -1596,7 +1678,9 @@ fn the_acid_refuses_what_its_model_does_not_evaluate() {
     let [_, (_, x_low)] = binary("H2O", "H2SO4", 0.25);
     let [_, (_, x_high)] = binary("H2O", "H2SO4", 0.85);
     for w in [0.25, 0.85] {
-        assert!(given(&binary("H2O", "H2SO4", w), 300.0).is_ok(), "{w}");
+        if let Err(refusal) = given(&binary("H2O", "H2SO4", w), 300.0) {
+            panic!("{w}: {refusal:?}");
+        }
     }
     for (w, t) in [(0.86, 300.0), (0.24, 300.0), (0.90, 700.0), (0.20, 200.0)] {
         let [water, acid] = binary("H2O", "H2SO4", w);
@@ -1633,8 +1717,8 @@ fn the_acid_refuses_what_its_model_does_not_evaluate() {
     let eighty = binary("H2O", "H2SO4", 0.80);
     let eighty = Composition::Given(LiquidComposition::new(&eighty).unwrap());
     for composition in [Composition::Reference, eighty] {
-        assert!(liquid_properties(id, Kelvin::new(233.67), composition).is_ok());
-        assert!(liquid_properties(id, Kelvin::new(647.096 - 1e-6), composition).is_ok());
+        liquid_properties(id, Kelvin::new(233.67), composition).unwrap();
+        liquid_properties(id, Kelvin::new(647.096 - 1e-6), composition).unwrap();
         for t in [233.66, 647.096, 700.0, f64::NAN] {
             match liquid_properties(id, Kelvin::new(t), composition) {
                 Err(ResolveLiquidError::OutOfRange {

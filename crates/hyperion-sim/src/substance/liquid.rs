@@ -78,9 +78,15 @@
 //! [`ResolveLiquidError::NotALiquid`], each for its reason in `rows/melts.rs`. Molten sulphur
 //! (`S8`, Io's flows) is left out: its liquid density waits for P14.T49.b's last piece.
 //!
-//! Its later step adds the nine rows R08.T5.k gives liquid files (carbon dioxide's columns, built,
-//! join them; decision-p14-t49h-gas-index §1; P14.T49.h's record in galaxy plan 14). Until then
-//! [`liquid_properties`] answers [`ResolveLiquidError::NotALiquid`] for those rows.
+//! Its step 2b, the nine rows R08.T5.k gives liquid files (decision-p14-t49h-gas-index §1.2):
+//! carbon dioxide's index joins the columns its second step built, and oxygen, argon, krypton,
+//! xenon, nitrous oxide, carbon monoxide, sulphur dioxide and hydrogen sulphide take their files'
+//! index, carried; oxygen its file's collision-induced absorption; all but sulphur dioxide, whose
+//! depolarisation is unread, their reference equations of state's scattering, the atoms with their
+//! interaction anisotropy alone; and Mulero et al.'s surface tensions. Their viscosity is absent,
+//! none being ruled. Argon's, krypton's and xenon's measured indices keep their basis only over the
+//! temperatures where Sinnock and Smith's warmer tables check the carry. Molten sulphur still waits
+//! for P14.T49.b's last piece.
 //!
 //! Generator version 22 publishes none of it: nothing on the record reads these columns until
 //! P14.T54.a resolves the palette (decision-bump-plan-after-22 §1.2).
@@ -155,7 +161,8 @@ impl LiquidOptics {
     }
 
     /// The temperature the file's constants were measured or derived at: its reduction's, which
-    /// its `temperatureK` label rounds to the kelvin.
+    /// its `temperatureK` label rounds to the kelvin for R08.T5.g's and T5.h's liquids and states
+    /// to 0.01 K for T5.k's nine (decision-p14-t49h-gas-index §2.3).
     #[must_use]
     pub const fn state(&self) -> Kelvin {
         self.state
@@ -1057,8 +1064,9 @@ impl LiquidColumns {
 
     /// The reference composition by mole fraction, in registry order: a pure liquid's is itself
     /// at 1, a solution's its stated reference (decision-p14-t49b-condensed §1.4 and §2.6);
-    /// `None` where [`components`](Self::components) is empty. [`Composition::Reference`]
-    /// resolves as this composition given, to the bit.
+    /// `None` where [`components`](Self::components) is empty.
+    ///
+    /// [`Composition::Reference`] resolves as this composition given, to the bit.
     #[must_use]
     pub const fn reference_composition(&self) -> Option<LiquidComposition<'static>> {
         match &self.constitution {
@@ -1133,8 +1141,9 @@ pub struct LiquidComposition<'a> {
 
 impl<'a> LiquidComposition<'a> {
     /// The composition of `mole_fractions`: one or more components, each a neutral species with
-    /// a formula key, each once, each fraction in (0, 1], summing to 1 within 10⁻⁹. Each
-    /// component is checked in the given order, its species first, then its fraction, then
+    /// a formula key, each once, each fraction in (0, 1], summing to 1 within 10⁻⁹.
+    ///
+    /// Each component is checked in the given order, its species first, then its fraction, then
     /// whether it was named before.
     ///
     /// # Errors

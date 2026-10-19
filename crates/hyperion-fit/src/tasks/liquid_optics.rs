@@ -9,7 +9,15 @@
 //!   points (the integral of that interpolant, exact);
 //! - **a = 4πk ÷ λ,** m⁻¹, Napierian: the same mean of the absorption coefficient, the file's k
 //!   turned into a at each grid point and then interpolated linearly in a;
-//! - **the temperature** the file states, K, its label to the kelvin.
+//! - **the temperature** the file states, K, as it writes it: a label to the kelvin for the first
+//!   seven liquids, whose reductions state the measured temperature, and the state the index was
+//!   computed at, to 0.01 K, for R08.T5.k's nine (decision-p14-t49h-gas-index §2.3).
+//!
+//! **The files.** The first eight are step 1's seven liquids and step 4's glass, in their names'
+//! order; then R08.T5.k's nine liquids from their gases and their measurements (oxygen, argon,
+//! krypton, xenon, carbon monoxide and dioxide, nitrous oxide, sulphur dioxide and hydrogen
+//! sulphide; decision-p14-t49h-gas-index §1.2), in theirs, so that the earlier items keep their
+//! order in the table.
 //!
 //! **A solid held for a melt** ([`HELD_SOLIDS`]). One file is a solid's: R08's basaltic glass
 //! (`basaltic-glass.json`, Pollack, Toon and Khare 1973), whose room-temperature index and
@@ -54,9 +62,9 @@ use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput, check_manifest};
 /// silicate melts ([`HELD_SOLIDS`]).
 pub const VERSION: u32 = 2;
 
-/// The files the manifest names, in its order (by name), each one of R08's liquid files or a solid
-/// of [`HELD_SOLIDS`].
-pub const FILES: [&str; 8] = [
+/// The files the manifest names, in its order, each one of R08's liquid files or a solid of
+/// [`HELD_SOLIDS`]: the first eight by name, then R08.T5.k's nine by name.
+pub const FILES: [&str; 17] = [
     "ammonia-liquid.json",
     "basaltic-glass.json",
     "ethane-liquid.json",
@@ -65,11 +73,22 @@ pub const FILES: [&str; 8] = [
     "sulphuric-acid-75.json",
     "sulphuric-acid-84.json",
     "water.json",
+    "argon-liquid.json",
+    "carbon-dioxide-liquid.json",
+    "carbon-monoxide-liquid.json",
+    "hydrogen-sulphide-liquid.json",
+    "krypton-liquid.json",
+    "nitrous-oxide-liquid.json",
+    "oxygen-liquid.json",
+    "sulphur-dioxide-liquid.json",
+    "xenon-liquid.json",
 ];
 
 /// The files of [`FILES`] that are a solid's, whose index and absorption a liquid holds as they
-/// stand at no stated temperature: R08's basaltic glass, for the silicate melts. Their reduction
-/// has no temperature unless the file states one.
+/// stand at no stated temperature.
+///
+/// The one held is R08's basaltic glass, for the silicate melts. Their reduction has no
+/// temperature unless the file states one.
 pub const HELD_SOLIDS: [&str; 1] = ["basaltic-glass.json"];
 
 /// The rows whose viscosity the task continues below the triple point, by registry key, with
@@ -86,7 +105,7 @@ pub const VFT_SCAN: u32 = 400;
 /// The table's items: for each file in [`FILES`]'s order, its bins of n, its bins of a and its
 /// temperature (none for a solid of [`HELD_SOLIDS`] that states none); then for each row of
 /// [`SUPERCOOLED`], its B and its `T_0`.
-pub const ITEMS: [&str; 27] = [
+pub const ITEMS: [&str; 54] = [
     "AMMONIA_LIQUID_N",
     "AMMONIA_LIQUID_A",
     "AMMONIA_LIQUID_TEMPERATURE_K",
@@ -110,6 +129,33 @@ pub const ITEMS: [&str; 27] = [
     "WATER_N",
     "WATER_A",
     "WATER_TEMPERATURE_K",
+    "ARGON_LIQUID_N",
+    "ARGON_LIQUID_A",
+    "ARGON_LIQUID_TEMPERATURE_K",
+    "CARBON_DIOXIDE_LIQUID_N",
+    "CARBON_DIOXIDE_LIQUID_A",
+    "CARBON_DIOXIDE_LIQUID_TEMPERATURE_K",
+    "CARBON_MONOXIDE_LIQUID_N",
+    "CARBON_MONOXIDE_LIQUID_A",
+    "CARBON_MONOXIDE_LIQUID_TEMPERATURE_K",
+    "HYDROGEN_SULPHIDE_LIQUID_N",
+    "HYDROGEN_SULPHIDE_LIQUID_A",
+    "HYDROGEN_SULPHIDE_LIQUID_TEMPERATURE_K",
+    "KRYPTON_LIQUID_N",
+    "KRYPTON_LIQUID_A",
+    "KRYPTON_LIQUID_TEMPERATURE_K",
+    "NITROUS_OXIDE_LIQUID_N",
+    "NITROUS_OXIDE_LIQUID_A",
+    "NITROUS_OXIDE_LIQUID_TEMPERATURE_K",
+    "OXYGEN_LIQUID_N",
+    "OXYGEN_LIQUID_A",
+    "OXYGEN_LIQUID_TEMPERATURE_K",
+    "SULPHUR_DIOXIDE_LIQUID_N",
+    "SULPHUR_DIOXIDE_LIQUID_A",
+    "SULPHUR_DIOXIDE_LIQUID_TEMPERATURE_K",
+    "XENON_LIQUID_N",
+    "XENON_LIQUID_A",
+    "XENON_LIQUID_TEMPERATURE_K",
     "METHANE_SUPERCOOLED_VISCOSITY_B_K",
     "METHANE_SUPERCOOLED_VISCOSITY_T0_K",
     "ETHANE_SUPERCOOLED_VISCOSITY_B_K",
@@ -448,7 +494,7 @@ pub fn render(reduced: &[Reduced], supercooled: &[SupercooledFit]) -> RustTable 
             items.push(TableItem::Scalar {
                 name: format!("{prefix}_TEMPERATURE_K"),
                 doc: vec![format!(
-                    "The temperature `{}` states, K, its label to the kelvin.",
+                    "The temperature `{}` states, K, as it writes it.",
                     file.file
                 )],
                 value: temperature_k,
@@ -495,7 +541,9 @@ pub fn render(reduced: &[Reduced], supercooled: &[SupercooledFit]) -> RustTable 
                 .to_owned(),
             "basis, is `substance::liquid`'s. The basaltic glass, a solid's file held for the silicate"
                 .to_owned(),
-            "melts, is reduced alike; it states no temperature, so it has none here. Then each"
+            "melts, is reduced alike; it states no temperature, so it has none here. R08.T5.k's"
+                .to_owned(),
+            "nine liquids from their gases and their measurements follow the first eight. Then each"
                 .to_owned(),
             "supercooled row's Vogel–Fulcher–Tammann B and `T_0`, fitted to its viscosity along the"
                 .to_owned(),
@@ -618,9 +666,15 @@ impl FitTask for LiquidOpticsTask {
                      Pollack, Toon and Khare 1973 (basaltic glass, a solid held for the silicate \
                      melts); Augustin 1915 (nitrogen); Hagermann et al. 2005 with Loria 1909 \
                      (ethane); Wong and Anderson 1972 with Cuthbertson 1914 (ammonia); Palmer and \
-                     Williams 1975 (sulphuric acid); and the sim's own liquid viscosities, \
-                     Sotiriadou et al. 2026 (methane) and Friend, Ingham and Ely 1991 (ethane), for \
-                     the transport fit"
+                     Williams 1975 (sulphuric acid); R08.T5.k's nine, each its gas's dispersion in \
+                     `rayleigh.ts` at the NIST Chemistry WebBook's saturated-liquid density: \
+                     Sinnock and Smith 1969 (argon, krypton and xenon), Johns and Wilhelm 1937 \
+                     with Thalman and Volkamer 2013's O2–O2 absorption (oxygen), Liveing and \
+                     Dewar 1892 (nitrous oxide), Bleekrode 1884 with Ketteler 1865 and Bichat 1880 \
+                     (sulphur dioxide) and Phillips 1920 (carbon dioxide), and unscaled \
+                     Lorentz–Lorenz estimates (carbon monoxide and hydrogen sulphide); and the \
+                     sim's own liquid viscosities, Sotiriadou et al. 2026 (methane) and Friend, \
+                     Ingham and Ely 1991 (ethane), for the transport fit"
                 .to_owned(),
             acceptance,
             provisional: None,
@@ -631,6 +685,8 @@ impl FitTask for LiquidOpticsTask {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+
+    use hyperion_sim::substance::{CondensedPhase, LiquidColumns};
 
     use super::*;
     use crate::materials::MATERIALS_FROM_CRATE;
@@ -712,14 +768,18 @@ mod tests {
 
     /// The files' provenances are the ones `substance::liquid`'s bases were set against
     /// (decision-r08-t5g §3: water, methane and the acids measured; nitrogen, ethane and ammonia
-    /// derived; the basaltic glass a measured solid's, which the melts hold as a stand-in). A file
-    /// whose provenance changes fails here, so that its liquid's basis is revisited.
+    /// derived; the basaltic glass a measured solid's, which the melts hold as a stand-in;
+    /// decision-p14-t49h-gas-index §2.3 and A.4: argon, krypton and xenon measured, oxygen, carbon
+    /// dioxide, nitrous oxide and sulphur dioxide derived, and carbon monoxide and hydrogen
+    /// sulphide stand-ins, whose index the record calls `Derived`). A file whose provenance
+    /// changes fails here, so that its liquid's basis is revisited.
     #[test]
     fn liquid_optics_the_files_provenances_are_the_bases_assumed() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(MATERIALS_FROM_CRATE);
         let expected = [
             "derived", "measured", "derived", "measured", "derived", "measured", "measured",
-            "measured",
+            "measured", "measured", "derived", "standIn", "standIn", "measured", "derived",
+            "derived", "derived", "measured",
         ];
         for (name, provenance) in FILES.iter().zip(expected) {
             let file = MaterialFile::read(&dir, name).unwrap();
@@ -735,9 +795,17 @@ mod tests {
         for name in HELD_SOLIDS {
             let file = MaterialFile::read(&dir, name).unwrap();
             assert_eq!(file.phase(), "solid", "{name}");
-            assert_eq!(file.temperature_k(), None, "{name}");
+            assert!(
+                file.temperature_k().is_none(),
+                "{name}: {:?}",
+                file.temperature_k()
+            );
             let reduced = reduce(name, &file).unwrap();
-            assert_eq!(reduced.temperature_k, None, "{name}");
+            assert!(
+                reduced.temperature_k.is_none(),
+                "{name}: {:?}",
+                reduced.temperature_k
+            );
         }
         let glass = MaterialFile::read(&dir, "basaltic-glass.json").unwrap();
         let reduced = reduce("basaltic-glass.json", &glass).unwrap();
@@ -749,7 +817,175 @@ mod tests {
         );
     }
 
-    /// A file that is not a liquid's, that states no temperature or whose grid does not cover
+    /// One of Sinnock and Smith's tables: its temperature, K, and n at each of its atom's
+    /// wavelengths.
+    type SinnockTable = (f64, &'static [f64]);
+
+    /// Sinnock and Smith 1969's tables of the liquid noble gases (Phys. Rev. 181, 1297), as
+    /// refractiveindex.info's CC0 copies give them at commit c5c2f188
+    /// (`main/<atom>/nk/Sinnock-liquid-<T>K.yml`, each file's SHA-256 in plan 14's P14.T49.h step
+    /// 2b record): each atom's registry key, its R08 file, its rows' wavelengths, nm, and its
+    /// tables. The rows at 361.2, 363.1 and 365.0 nm lie below the files' 380–780 nm grid and are
+    /// left out; xenon's 161.35 K table lies below its file's state, the row's triple point, and is
+    /// read by none of the windows.
+    const SINNOCK_AND_SMITH: [(&str, &str, &[f64], &[SinnockTable]); 3] = [
+        (
+            "Ar",
+            "argon-liquid.json",
+            &[406.3, 435.8, 475.3, 508.6, 546.1, 578.0, 643.9],
+            &[
+                (
+                    83.81,
+                    &[1.2372, 1.2361, 1.2349, 1.2341, 1.2334, 1.2328, 1.2321],
+                ),
+                (
+                    86.0,
+                    &[1.2347, 1.2336, 1.2324, 1.2316, 1.2308, 1.2303, 1.2295],
+                ),
+                (
+                    88.0,
+                    &[1.2326, 1.2315, 1.2303, 1.2295, 1.2287, 1.2282, 1.2274],
+                ),
+                (
+                    90.0,
+                    &[1.2308, 1.2297, 1.2285, 1.2277, 1.2269, 1.2264, 1.2256],
+                ),
+            ],
+        ),
+        (
+            "Kr",
+            "krypton-liquid.json",
+            &[406.3, 435.8, 475.3, 508.6, 546.1, 578.0, 643.9],
+            &[
+                (
+                    115.95,
+                    &[1.3090, 1.3074, 1.3056, 1.3042, 1.3032, 1.3024, 1.3011],
+                ),
+                (
+                    118.0,
+                    &[1.3065, 1.3049, 1.3031, 1.3017, 1.3008, 1.2999, 1.2986],
+                ),
+                (
+                    122.0,
+                    &[1.3018, 1.3002, 1.2984, 1.2970, 1.2960, 1.2952, 1.2939],
+                ),
+                (
+                    126.0,
+                    &[1.2973, 1.2957, 1.2938, 1.2924, 1.2915, 1.2906, 1.2893],
+                ),
+            ],
+        ),
+        (
+            "Xe",
+            "xenon-liquid.json",
+            &[406.3, 435.8, 470.0, 480.6, 508.6, 546.1, 578.0, 643.9],
+            &[
+                (
+                    161.35,
+                    &[
+                        1.4041, 1.4001, 1.3967, 1.3957, 1.3937, 1.3918, 1.3900, 1.3876,
+                    ],
+                ),
+                (
+                    166.0,
+                    &[
+                        1.3995, 1.3955, 1.3921, 1.3911, 1.3891, 1.3871, 1.3853, 1.3830,
+                    ],
+                ),
+                (
+                    170.0,
+                    &[
+                        1.3956, 1.3916, 1.3882, 1.3872, 1.3851, 1.3832, 1.3814, 1.3790,
+                    ],
+                ),
+                (
+                    174.0,
+                    &[
+                        1.3914, 1.3874, 1.3840, 1.3830, 1.3809, 1.3790, 1.3772, 1.3748,
+                    ],
+                ),
+                (
+                    178.0,
+                    &[
+                        1.3874, 1.3834, 1.3800, 1.3790, 1.3770, 1.3750, 1.3732, 1.3708,
+                    ],
+                ),
+            ],
+        ),
+    ];
+
+    /// The atoms' `index_checked` windows are Sinnock and Smith's tables'
+    /// (decision-p14-t49h-gas-index §1.2's test, as the lane narrowed it): the file's own n at each
+    /// table row's wavelength, linear on its 5 nm grid, carried at constant specific refraction by
+    /// the row's own liquid density from the file's state to the table's temperature, against the
+    /// row. Each window runs from the file's state to the warmest table at which every row, and
+    /// every row of each cooler table above the state, lies within 5 × 10⁻⁴; the state alone where
+    /// no warmer table does. The warmest table's worst miss and the next warmer table's are pinned
+    /// to 10⁻⁷, so that a change to a file, a density or the carry is noticed: argon's window ends
+    /// at its warmest table, 90 K (worst 4.17 × 10⁻⁴); krypton's at 115.95 K (4.7 × 10⁻⁵), 118 K
+    /// missing by 1.25 × 10⁻³; and xenon's is its state alone, 166 K missing by 8.04 × 10⁻⁴.
+    #[test]
+    fn liquid_optics_the_atoms_index_windows_are_sinnock_and_smith_s() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(MATERIALS_FROM_CRATE);
+        let lorentz_lorenz = |n: f64| (n * n - 1.0) / (n * n + 2.0);
+        let index_of = |l: f64| ((1.0 + 2.0 * l) / (1.0 - l)).sqrt();
+        // Each atom's warmest checked table's worst miss, and the next warmer table's.
+        let pinned = [
+            (Some(0.000_416_9), None),
+            (Some(0.000_046_5), Some(0.001_250_3)),
+            (None, Some(0.000_803_8)),
+        ];
+        for ((key, name, wavelengths, tables), (warmest, next)) in
+            SINNOCK_AND_SMITH.iter().zip(pinned)
+        {
+            let file = MaterialFile::read(&dir, name).unwrap();
+            let row = by_key(key).unwrap().substance();
+            let optics = row.liquid().and_then(LiquidColumns::optics).unwrap();
+            let state = optics.state().value();
+            let density = |t: f64| {
+                row.grain_density(CondensedPhase::Liquid, Kelvin::new(t))
+                    .unwrap()
+                    .value()
+            };
+            let misses: Vec<(f64, f64)> = tables
+                .iter()
+                .filter(|(t, _)| *t >= state)
+                .map(|&(t, rows)| {
+                    let ratio = density(t) / density(state);
+                    let worst = wavelengths
+                        .iter()
+                        .zip(rows)
+                        .fold(0.0_f64, |worst, (&nm, &n)| {
+                            let file_n = interpolate(file.wavelengths_nm(), file.n(), nm);
+                            worst.max((index_of(lorentz_lorenz(file_n) * ratio) - n).abs())
+                        });
+                    (t, worst)
+                })
+                .collect();
+            let checked = misses.iter().take_while(|(_, worst)| *worst < 5e-4).count();
+            let top = checked.checked_sub(1).map_or(state, |k| misses[k].0);
+            let (low, high) = optics.index_checked().unwrap();
+            assert!(
+                (low.value() - state).abs() < 1e-12 && (high.value() - top).abs() < 1e-12,
+                "{key}: the window {} to {} K against {state} to {top} K ({misses:?})",
+                low.value(),
+                high.value()
+            );
+            let worst_at = |k: Option<usize>| k.and_then(|k| misses.get(k)).map(|m| m.1);
+            for (ours, pin) in [
+                (worst_at(checked.checked_sub(1)), warmest),
+                (worst_at(Some(checked)), next),
+            ] {
+                assert_eq!(ours.is_some(), pin.is_some(), "{key}: {misses:?}");
+                if let (Some(ours), Some(pin)) = (ours, pin) {
+                    assert!((ours - pin).abs() < 1e-7, "{key}: {ours} against {pin}");
+                }
+            }
+        }
+    }
+
+    /// A file that is neither a liquid's nor a solid of [`HELD_SOLIDS`] (a solid's file under any
+    /// other name), a liquid's that states no temperature, or one whose grid does not cover
     /// 380–760 nm is refused, and so is a manifest naming other files.
     #[test]
     fn liquid_optics_refuses_what_it_cannot_reduce() {
