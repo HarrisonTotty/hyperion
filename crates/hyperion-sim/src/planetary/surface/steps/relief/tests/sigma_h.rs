@@ -666,10 +666,11 @@ fn the_figures_read_the_match_s_book_as_a_fresh_one() {
 /// Every check on the reference Earth, with the tests only it can hold: test 2's band, 0.3–1%
 /// (Design note 7's 0.6%), asserted; test 4, ⟨a²⟩ 0.6–1.2 (`decision-r09-t5.md` item 1: Earth's
 /// areas give 0.8–1.1); test 5's belts' lift; test 7's ocean of 0.7095; its one ocean through
-/// quantisation; its hypsometry after the scale; and the uniform cells' shortcut on its sparse
-/// fields.
+/// quantisation; its hypsometry after the scale; the uniform cells' shortcut on its sparse fields;
+/// and R09.T13.d's climate step on its sea.
 #[test]
-#[ignore = "slow: R09.T12.e's tests on the reference Earth, whose pass with T12.e takes about 9 s"]
+#[ignore = "slow: R09.T12.e's tests on the reference Earth, whose pass with T12.e takes about 9 s, \
+            then its climate step"]
 fn the_reference_earth_holds_r09_t12e_s_tests() {
     let world = Reference::Earth;
     assert_whole_sigma_h(world);
@@ -696,6 +697,49 @@ fn the_reference_earth_holds_r09_t12e_s_tests() {
     for values in [lift, b] {
         assert!(uniform_reads(f.grid(), &values, 97) > 0);
     }
+    assert_the_climate_keeps_the_sea(world);
+}
+
+/// R09.T13.d's climate step on R09.T12.e's sea (decision-r09-t12-coarse R8): run on `world` after
+/// the entry, it moves no ground, water surface or sea level, gives every flooded cell a liquid and
+/// no dry cell one, and on a world of one liquid leaves each flooded cell the main liquid's entry.
+/// What it placed is printed.
+fn assert_the_climate_keeps_the_sea(world: Reference) {
+    let f = finished(world);
+    let pass = f.pass();
+    let mut climate = f.working.clone();
+    crate::planetary::surface::steps::climate::run(&pass, &mut climate);
+    assert_same_bits(climate.sea_level.value(), f.working.sea_level.value());
+    let one_liquid = f.inputs().liquids().len() == 1;
+    let omega = f.grid().solid_angles_sr();
+    let total: f64 = omega.iter().sum();
+    let (mut sea, mut iced, mut sea_iced) = (0.0, 0.0, 0.0);
+    for (n, ((was, now), &w)) in f
+        .working
+        .cells
+        .iter()
+        .zip(&climate.cells)
+        .zip(omega)
+        .enumerate()
+    {
+        assert_same_bits(now.elevation.value(), was.elevation.value());
+        assert_same_bits(now.water_surface.value(), was.water_surface.value());
+        let under = now.water_surface.value() > now.elevation.value();
+        assert_eq!(now.liquid_entry.is_some(), under, "{world:?}, cell {n}");
+        if one_liquid {
+            assert_eq!(now.liquid_entry, was.liquid_entry, "{world:?}, cell {n}");
+        }
+        let ice = w * now.ice_fraction;
+        sea += if under { w } else { 0.0 };
+        iced += ice;
+        sea_iced += if under { ice } else { 0.0 };
+    }
+    eprintln!(
+        "{world:?} under the climate: sea {:.6} of the sphere, ice {:.6}, of it on the sea {:.6}",
+        sea / total,
+        iced / total,
+        sea_iced / total
+    );
 }
 
 /// The hypsometry after the scale: on the reference Earth, relative to its sea level, T12.a's three
@@ -1056,6 +1100,69 @@ fn the_late_craters_reflood_the_ocean_and_keep_the_whole_sigma_h() {
     assert_eq!(probe, after);
     let field = quantise(&inputs, after.clone()).unwrap();
     assert_the_sea_holds(&world.grid, &inputs, &after, &field, &sea);
+}
+
+/// The reflood keeps the liquids the climate step shared the ocean among (R09.T13.d's `seas`): on
+/// the small wet Mars, every other flooded cell given a second liquid's entry as the climate step
+/// would give it, after `craters::run_after_erosion` a cell flooded before and after keeps its
+/// entry, a cell the late craters newly flood takes the main liquid's, and a cell they raise out
+/// of the sea is dry, its water surface its ground, with no liquid entry.
+#[test]
+fn the_reflood_keeps_the_liquid_each_flooded_cell_held() {
+    let inputs = small_wet_mars();
+    let world = World::new(inputs.clone());
+    let pass = world.pass(reference::SEED);
+    let mut working = Working::initial(&pass);
+    crate::planetary::surface::steps::plates::run(&pass, &mut working);
+    run(&pass, &mut working);
+    craters::run(&pass, &mut working);
+    run_after_craters(&pass, &mut working);
+    let main = inputs.main_liquid().expect("the world has a liquid");
+    // A stand-in for a second liquid's entry, which the reflood carries and never reads.
+    let second = main
+        .checked_add(1)
+        .expect("a palette has fewer than 255 entries");
+    for (n, cell) in working
+        .cells
+        .iter_mut()
+        .filter(|c| c.liquid_entry.is_some())
+        .enumerate()
+    {
+        if n % 2 == 1 {
+            cell.liquid_entry = Some(second);
+        }
+    }
+    let before = working.clone();
+    craters::run_after_erosion(&pass, &mut working);
+    let (mut kept, mut flooded, mut drained) = (0_u32, 0_u32, 0_u32);
+    for (n, (was, now)) in before.cells.iter().zip(&working.cells).enumerate() {
+        match (was.liquid_entry, now.liquid_entry) {
+            (Some(held), Some(entry)) => {
+                assert_eq!(entry, held, "cell {n}");
+                kept += 1;
+            }
+            (None, Some(entry)) => {
+                assert_eq!(entry, main, "cell {n}");
+                flooded += 1;
+            }
+            (held, None) => {
+                assert_same_bits(now.water_surface.value(), now.elevation.value());
+                drained += u32::from(held.is_some());
+            }
+        }
+        if now.liquid_entry.is_some() {
+            assert!(
+                now.water_surface.value() > now.elevation.value(),
+                "cell {n}"
+            );
+        }
+    }
+    eprintln!("kept {kept}, newly flooded {flooded}, drained {drained}");
+    assert!(kept > 0 && flooded > 0 && drained > 0, "a path untested");
+    assert!(
+        working.cells.iter().any(|c| c.liquid_entry == Some(second)),
+        "the second liquid was lost"
+    );
 }
 
 /// Where the coarse craters' bytes differ, C′ is not C times one factor, so the match reads it in a
