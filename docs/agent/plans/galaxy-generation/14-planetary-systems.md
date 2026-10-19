@@ -17908,6 +17908,195 @@ tables::gauss_legendre`.
     threshold; its ice belt reads water's.
   - _Overlapping ices_ (several solids in one cold zone) are scaled down to the whole surface in
     proportion, a stand-in for their layering.
+- **Deviations in P14.T49.e, as built: aerosol extinction at 550 nm (`p14-optics`, 2026-10-19).**
+  `GENERATOR_VERSION` stays 22, and no generated value moves.
+  - _Held at 22_ (decision-bump-plan-after-22 §1.3 and §5). Nothing on the record calls
+    `substance::aerosol`; P14.T52.c and T24.c are its first readers. The seven tables (below, task
+    `condensate_extinction` and its six parts, revision 0, fast) are a first emission stamped since
+    22; **P14.T54.b** restamps them `--since 24`, and from then a changed index file in R08's
+    `materials/` moves τ(550) and rides a bump. Before 24 a refit re-emits through the first-
+    emission path (decision-p14-t49h-liquids §5), no table being read by a golden.
+    `golden_diff --base HEAD`: no golden changed, verdict "nothing to reconcile"; no golden lists
+    the tables. `hyperion-fit check`: the seven `fresh`, 0 failures.
+  - _Added public items._
+    - In `hyperion_sim::substance::aerosol` (re-exported from `substance`): `SizeDistribution`
+      (`gamma(r_eff, v_eff)`, `log_normal(r_eff, v_eff)`, `kind()`, `effective_radius()`,
+      `effective_variance()`), `SizeDistributionKind` (`Gamma`, `LogNormal`, `name()`),
+      `BuildSizeDistributionError`, `AerosolOptics` (`mass_extinction_m2_per_kg()`,
+      `extinction_efficiency()`, `single_scattering_albedo()`, `is_stand_in()`),
+      `aerosol_optics(id, phase, variant, &distribution, temperature)`, which returns
+      `Result<AerosolOptics, ResolveAerosolError>`, with the variants `NotModelled`, `NoFile`,
+      `NoDensity`, `OffGrid` and `NonFiniteTemperature`, `FileVariant` (`Substance`, `Named(&str)`,
+      from a file's `variant`), `ExtinctionEntry` (the table's row type: `file()`, `key()`,
+      `phase()`, `variant()`, `is_stand_in()`), `extinction_entries()`, `density_variant(key)`,
+      `cubic_weights(nodes, at, coordinate)`, `interpolate_grid` (rows, radii, variances, the
+      variances' offset, a radius, a variance and a `GridSpace`, `Logarithmic` or `Linear`), the
+      table's interpolation, which the fit's half-step check calls on its own grids,
+      `EXTINCTION_WAVELENGTH_NM` (550), `GAMMA_VARIANCE_NODES` (12) and `LOG_NORMAL_VARIANCE_NODES`
+      (14).
+    - In `hyperion-fit`: `tasks::condensate_extinction` (`VERSION` 0; the grid and fine-grid
+      constants; `Part` and `PARTS`; `FitExtinctionError` and `FitFileError`, the causes a refused
+      fit carries; `TASK_1` … `TASK_7`; the spectrum, kernels, cells, check and rendering are the
+      crate's own) and its `mie` submodule (`ComplexIndex`, whose n and k are at most
+      `MAX_INDEX_PART` 100, `efficiencies`, `amplitudes`, `term_count`, `Efficiencies`,
+      `Amplitudes`, `ComputeMieError`, `MIN_SIZE_PARAMETER` 10⁻⁶ and `MAX_SIZE_PARAMETER` 20,000,
+      the client's).
+  - _The model._
+    - **A Rust Mie** on Wiscombe 1980's structure, the client's `mie.ts` line for line: `N_stop` =
+      ⌊x + 4.05 x^(1/3) + 2⌋, Dₙ down from Lentz's continued fraction (modified Lentz, tolerance
+      10⁻¹⁵), ψ and χ up, ψ₁ by its series below x = 0.1, the coefficients by Wiscombe's (16), m =
+      n + ik used as n − ik. Every transcendental through `hyperion_sim::math`.
+    - **Every shape class is a Mie sphere** at the file's index, a `nonSphericalMineral` or
+      `crystal` file the sphere of equal volume to projected area (science-r08-mmf §2).
+    - **The size distributions** are Hansen and Travis 1974's gamma (2.56) and log-normal (2.60),
+      by `r_eff` and `v_eff` of r = 3V ÷ 4A. The area weight in u = ln(r ÷ `r_eff`) is (u − eᵘ + 1)
+      ÷ `v_eff` (the area-weighted radius Gamma-distributed, shape 1 ÷ `v_eff`) and −(u + σ²/2)² ÷
+      2σ² (σ² = ln(1 + `v_eff`)), so one kernel per variance serves every radius.
+    - **The table is density-free**: per index file (key, phase, variant), at 550 nm found by
+      wavelength on the file's own grid, `Q̄_ext` = ⟨`C_ext`⟩ ÷ ⟨πr²⟩ and ln ω on an (`r_eff`,
+      `v_eff`) grid for each family. The sim applies κ_ext = 3 `Q̄_ext` ÷ (4 ρ `r_eff`) with ρ the
+      row's grain density at the mode's temperature, `Substance::grain_density`.
+    - **A variant's density.** The registry holds a row's reference composition's density, so
+      `aerosol_optics` gives a density only to the variant `density_variant` names: `75wt%` for
+      `H2SO4` (its source's reference), the substance itself for every other row. The 84.5 wt%
+      acid's and seawater's entries exist but return `NoDensity`, as do solid `Ar`, solid `H2S`,
+      β-`CO`, β-`O2` and liquid `S8`, whose densities were not read.
+  - _The grid and the fine grid._
+    - **The fine grid**: even in ln r with step 0.002, from x = 10⁻⁶ to 20,000 at 550 nm (11,860
+      nodes), the medium taken as index 1 as the client's. Each node is the mean of its cell's
+      sub-samples: at most 0.000 5 apart in x to x = 60, where the lossless high-index files' sharp
+      low-order resonances lie (Chýlek, Kiehl and Ko 1978), 0.1 apart to x = 1,200, 4.5 to 9 a
+      period of the ripple (Δx ≈ 0.45–0.9 at the files' indices; Chýlek 1976 and 1990), one sphere
+      beyond, where the distributions (at least √0.04 wide in ln r) average the ripple. About 2 ×
+      10⁷ terms of the series per file; the seven tables fit in 13 s on eight threads, the
+      end-to-end test about 8 s a table on one.
+    - **The kernels** are cut where the area weight falls under 10⁻⁶ of its peak (the client's
+      `SIZE_WEIGHT_FLOOR`) and, upwards, where the Rayleigh scattering weight r⁶ n(r) does too; a
+      cell refuses (`ClippedCell`) if more than 10⁻⁶ of its area or extinction lies off the fine
+      grid.
+    - **The table's grid**: 107 radii from 1 nm (x = 0.011, Rayleigh's) by 0.152 in ln r to
+      21 nm, 0.08 to 4.1 µm and 0.16 to 101 µm (x = 1,150, `Q̄_ext` within 1% of 2; 1.3% at
+      `v_eff` 0.45); the log-normal's first 100, to 33 µm, its tail being heavier. Variances: 12
+      for the gamma distribution, 0.04 to 0.45, and 14 for the log-normal, 0.04 to 0.65 (a
+      geometric standard deviation e^σ = 2.03, past the σ_g = 2 of Ackerman and Marley 2001, ApJ
+      556, 872), even in ln(`v_eff` + 0.05), the best of the offsets 0.03–0.3 measured; every end
+      exactly its stated value. Values to five significant digits.
+    - **Interpolation**: Lagrange's cubic on the four nearest nodes in ln `r_eff` and ln(`v_eff` +
+      0.05), of ln `Q̄_ext` and of ln ω.
+    - **The half-step check** runs in every fit, and the task refuses a table that fails it
+      (`MissedHalfStep`): at every half step in radius, variance and both, the table's
+      interpolation (the sim's own `interpolate_grid`, from the rounded values) against the direct
+      cell. Worst, over the 49 files:
+      `Q̄_ext` 8.10 × 10⁻⁴ (`manganese-sulphide.json`), ω 7.16 × 10⁻⁴ (`tholin.json`), against
+      10⁻³; 1 − ω, reported and not bounded, 3.0 × 10⁻³.
+    - **Split into seven tables**: 2.76 MB at five digits, so seven files of seven index files in
+      name order (`condensate_extinction`, which also holds the axes `EFFECTIVE_RADII_M`,
+      `GAMMA_EFFECTIVE_VARIANCES`, `LOG_NORMAL_EFFECTIVE_VARIANCES` and
+      `EFFECTIVE_VARIANCE_OFFSET`, then `condensate_extinction_2` … `_7`), 351–455 kB each (2.76 MB
+      in all), under
+      the 500 kB hook. Each lists its files' `ENTRIES` (key, phase, variant, stand-in flag and four
+      grids: `<FILE>_GAMMA_EXTINCTION`, `_GAMMA_LN_ALBEDO`, `_LOG_NORMAL_EXTINCTION`,
+      `_LOG_NORMAL_LN_ALBEDO`). Inputs hashes: `6656fedc52c6…`, `fc8c1fe7460f…`, `248e9a178d80…`,
+      `d68883d8825d…`, `241c92b8e3db…`, `a113702fbef6…`, `2e7180c2de1c…`; sim fingerprint
+      `4043103f5879…` (the two variance-node counts).
+    - **The materials** are the 49 index files whose key is one of the registry's 37 aerosol
+      materials, read in place through `materials.rs`, each data hash (key, phase, variant, shape,
+      temperature, provenance, wavelengths, n and k) in the inputs hash. 16 are stand-ins.
+  - _Tests, with their values._
+    - The Mie: MIEV0's cases 5–19, the values `mie.test.ts` holds (`MVTstNew.f`'s `CHEKMI`),
+      `Q_ext`, `Q_sca`, g and S₁, S₂ at 0°–180° to 10⁻⁶ (5 × 10⁻⁶ where the client marks Wiscombe's
+      answer limited); Bohren and Huffman's m = 1.55 sample to its printed digits; the Rayleigh
+      limit to x²; the geometric limit (a 40-size mean within 3 x^(−2/3) of 2 at x = 100–10⁴, each
+      sphere within 0.02 at 10⁴); `Q_ext` = `Q_sca` to 10⁻¹² for k = 0; `N_stop`; the refusals.
+    - **Five shared cases** with the client's `mieSphere` (the fit's `mie_cases.json`, beside
+      `mie.rs`, written by the new vitest `test/mieSharedCases.test.ts` under a bless and compared
+      byte for byte otherwise; a Rayleigh sphere at 1.44, the 75 wt% acid's index at x =
+      4.5, the dust's at 8, the soot's at 3, titanium dioxide's at 5,000): every efficiency,
+      asymmetry and amplitude within 2.2 × 10⁻¹⁶ of the client's.
+    - **Venus's four deck modes at n = 1.44** (the sulphur note's modes and columns), combined by
+      mass at 1,662.6 kg m⁻³: **418.6 m² kg⁻¹** against the note's 417 (+0.4%, within 2%), τ(550)
+      34.52 against 34.5. Through the table and the 75 wt% acid's file (n 1.431): 418.5 m² kg⁻¹,
+      the modes 2,899, 921, 665 and 228 (within 1%).
+    - `acid_uv_absorber`'s κ_ext and ω equal `H2SO4`'s at `75wt%` to the bit for five modes; a
+      stand-in's flag (`ice_giant_haze`) carries through and a measured file's does not.
+    - 550 nm by wavelength in the 75 wt% acid's file (from 360 nm, node 38) and water's (from 380
+      nm, node 34).
+    - Every aerosol-material row has an entry, every entry is one's, none twice (49); the parts are
+      exactly the aerosol files, in order, with their items and manifests. The grid's ends (1 nm,
+      `v_eff` 0.04, 0.45 and 0.65, the last radius of each family) resolve.
+    - The kernels hold `r_eff` to 10⁻⁶ and `v_eff` to 10⁻⁵ at every node and half step.
+    - Rayleigh at 1 nm: a lossless sphere's `Q̄_ext` against (8/3)|K|²x⁴ times the moment ratio
+      ((1 + b)(1 + 2b)(1 + 3b), e^(6σ²)) within 5 × 10⁻⁵, an absorbing one's absorption against 4x
+      Im K within 1.6 × 10⁻⁴. Geometric at 101 µm: `Q̄_ext` above 2 by under 2%, and a
+      transparent narrow mode's excess 0.0185 against the edge term 2x^(−2/3) = 0.0182.
+    - The spectrum's convergence: halving the sub-samples' spacings and doubling their reaches
+      moves the hardest files' cells below 30 µm by under 2.5 × 10⁻⁴, and titanium dioxide's at
+      101 µm by 3.5 × 10⁻⁴ (bound 4 × 10⁻⁴).
+    - The four hardest files (titanium dioxide, zinc sulphide, manganese sulphide, tholin) meet the
+      half-step bound; a lossless file's ω is 1 exactly; the sim reproduces the table at its nodes
+      to rounding. The refusals, each by its cause: `aerosol_optics`'s five, the distributions'
+      ranges, the Mie's index and size bounds, and the fit's other materials, phase, missing 550 nm,
+      clipped cell and a grid 1% off that misses its half steps.
+    - `tests/condensate_extinction.rs` reruns each of the seven tables and compares it byte for
+      byte.
+  - _Files beyond the task's:_ the six other tables `tables/condensate_extinction_{2..7}.rs`, their
+    manifests and lock entries; `tasks/condensate_extinction/mie.rs` and `mie_cases.json`;
+    `apps/hyperion/src/renderer/src/test/mieSharedCases.test.ts`; `.prettierignore` (the fixture,
+    as the sphere matrices); `task.rs` and `tasks/mod.rs` (registration); `substance/mod.rs` (the
+    module line and re-exports); `tables/mod.rs` (seven module lines, each with the tables' usual
+    `approx_constant` allowance).
+  - _Deviations, with their reasons._
+    - **The table is density-free** (`Q̄_ext` and ω, not κ_ext): κ_ext needs ρ at the mode's
+      temperature, which several rows give by phase diagram, and some rows have none. The sim
+      applies the row's grain density, so the aerosol's density and the surface's are one figure
+      (science-r09-drainage §3).
+    - **Mie for every shape class**, as the plan says, not R08's TAMUdust2020 tables for
+      `nonSphericalMineral` and `crystal` (science-r08-nonspherical §5); the gap is measured below.
+    - **Aggregates are out of scope**: no index file is an aggregate's and no `SizeDistribution`
+      describes one. A closed set, for the composition audit.
+    - **ln ω, not ω, is tabled**, so that both ω (small absorbing particles, ω ≪ 1) and 1 − ω
+      (weakly absorbing ones) keep five digits; a co-albedo representation lost ω, by 0.21 for
+      `tholin.json`'s smallest modes.
+    - **Seven tables, not one**, for the 500 kB hook; both families are tabled, not the gamma
+      alone, since the log-normal's v_eff reaches past the gamma's 0.5 (Ackerman and Marley's
+      σ_g = 2 is 0.62). Mapped onto the gamma at equal (`r_eff`, `v_eff`), Venus's modes would move
+      by −4.2% (mode 1, `v_eff` 0.214) and under 0.11% (the others).
+    - **The grid's domain**: `r_eff` 1 nm to 101 µm (gamma) or 33 µm (log-normal), `v_eff` 0.04 to
+      0.45 or 0.65; outside it `OffGrid`.
+    - **The error type** is `ResolveAerosolError`, after its neighbours `ResolveLiquidError` and
+      `ResolvePaletteEntryError` and the verb–object rule, not the brief's `AerosolError`. The
+      variant is a `FileVariant`, not a bare `Option<&str>` (the rule on parameters): `Substance`
+      for a file whose `variant` is null, `Named("75wt%")` for the 75 wt% acid, which `H2SO4`'s
+      callers pass.
+- **Deferred findings (2026-10-13 rule)**, from P14.T49.e:
+  - _The hexahedra's gap._ For `mars_dust` at 550 nm over a gamma distribution of `v_eff` 0.3 at
+    R08's Mars mode, `r_eff` 0.8974 µm in r = 3V ÷ 4A (science-r08-mmf §3), TAMUdust2020's
+    hexahedra (sphericity 0.71, R08's committed `phase/mars-dust.json`) give 703 m² kg⁻¹ at 2,600
+    kg m⁻³ and ω 0.931, against the table's spheres' 832 and 0.943: the sphere record overstates
+    the dust's mass extinction by 18% (ratio 0.845) where R08's sky reads the hexahedra. At 1.5
+    µm (Wolff's projected-area size, read as r = 3V ÷ 4A) the ratio is 0.89 (408 against 460).
+  - _The equal-V/A sphere's range._ Over the same distributions the hexahedra's κ ÷ the spheres'
+    is 1.94, 1.32, 0.81, 0.85 and 0.89 at `r_eff` 0.05, 0.1, 0.3, 0.8974 and 1.5 µm: the spheres'
+    κ is 0.5–1.2 times the hexahedra's. Per particle below x ≈ 1 the hexahedra's C ÷ V reaches
+    1.7–2.7 times the sphere's, as expected: the equal-V/A sphere holds Ψ³ = 0.36 of the grain's
+    volume, and Rayleigh scattering goes as V², so per unit mass it scatters up to Ψ⁻³ = 2.8 times
+    less. "A few per cent" (science-r08-mmf) holds only at large x. Whether `nonSphericalMineral`
+    and `crystal` should read the hexahedra's `C_ext` (science-r08-nonspherical §5, item 5) instead
+    of the plan's Mie is main's question.
+  - _Variants' densities._ The 84.5 wt% acid's and seawater's entries have no density until the
+    registry holds a variant's (P14.T49.h's step 3 mass fraction); `NoDensity` meanwhile.
+  - _Densities not read_: solid `Ar`, solid `H2S`, β-`CO`, β-`O2` and liquid `S8` (`NoDensity`).
+  - _The medium's index_ is taken as 1 (vacuum wavelength), as the client's: n − 1 is about 10⁻³
+    at 10 bar of H₂ and some 0.015 at Venus's surface (735 K, about 65 kg m⁻³ of CO₂; from
+    memory), small for decks aloft.
+  - _The 75 wt% acid's density_ is its 300 K value at every temperature (T49.b's row): near 250
+    K it is about 1.71 g cm⁻³ (from memory), which would put Venus's κ some 3% lower.
+  - _1 − ω is not bounded by the check_: its interpolation is within 3.0 × 10⁻³ of itself.
+  - _Outside the grid_: modes narrower than `v_eff` 0.04, larger than 101 µm (gamma) or 33 µm
+    (log-normal), or wider than 0.45 and 0.65, are refused; T52.c's f_sed sizes may want a larger
+    top.
+  - _Mars dust's ω at 550 nm_ is 0.911 for spheres on its file (gamma 1.5 µm, 0.3), where R08's
+    note has 0.968 at 650 nm and the measurement 0.975 ± 0.015; recorded, not compared.
 - **Deviations in P14.T51.b, as built (`p14-snapshot`, 2026-10-16).** The area-mix Bond albedo,
   wholly behind the lane's hold (`SnapshotRules::Batch`, `SNAPSHOT_VERSION` = 23): under `Held`, in
   force at 22, every output is version 22's to the bit and no golden moves. The rulings are

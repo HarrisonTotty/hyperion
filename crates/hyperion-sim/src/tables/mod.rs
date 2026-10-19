@@ -36,6 +36,43 @@ pub mod binary_reach;
 pub mod chabrier;
 pub mod cluster_dynamics;
 pub mod cluster_retention;
+// The seven `condensate_extinction` tables are written whole by `hyperion-fit`, so their one lint
+// allowance is on their modules.
+#[allow(
+    clippy::approx_constant,
+    reason = "fitted values that may land near a constant are data"
+)]
+pub mod condensate_extinction;
+#[allow(
+    clippy::approx_constant,
+    reason = "fitted values that may land near a constant are data"
+)]
+pub mod condensate_extinction_2;
+#[allow(
+    clippy::approx_constant,
+    reason = "fitted values that may land near a constant are data"
+)]
+pub mod condensate_extinction_3;
+#[allow(
+    clippy::approx_constant,
+    reason = "fitted values that may land near a constant are data"
+)]
+pub mod condensate_extinction_4;
+#[allow(
+    clippy::approx_constant,
+    reason = "fitted values that may land near a constant are data"
+)]
+pub mod condensate_extinction_5;
+#[allow(
+    clippy::approx_constant,
+    reason = "fitted values that may land near a constant are data"
+)]
+pub mod condensate_extinction_6;
+#[allow(
+    clippy::approx_constant,
+    reason = "fitted values that may land near a constant are data"
+)]
+pub mod condensate_extinction_7;
 pub mod displaced_forms;
 pub mod gauss_legendre;
 pub mod giant_cooling;
@@ -135,6 +172,48 @@ pub const MANIFEST: &[TableInfo] = &[
         name: "cluster_retention",
         revision: 0,
         since_generator_version: 16,
+        provisional: false,
+    },
+    TableInfo {
+        name: "condensate_extinction",
+        revision: 0,
+        since_generator_version: 22,
+        provisional: false,
+    },
+    TableInfo {
+        name: "condensate_extinction_2",
+        revision: 0,
+        since_generator_version: 22,
+        provisional: false,
+    },
+    TableInfo {
+        name: "condensate_extinction_3",
+        revision: 0,
+        since_generator_version: 22,
+        provisional: false,
+    },
+    TableInfo {
+        name: "condensate_extinction_4",
+        revision: 0,
+        since_generator_version: 22,
+        provisional: false,
+    },
+    TableInfo {
+        name: "condensate_extinction_5",
+        revision: 0,
+        since_generator_version: 22,
+        provisional: false,
+    },
+    TableInfo {
+        name: "condensate_extinction_6",
+        revision: 0,
+        since_generator_version: 22,
+        provisional: false,
+    },
+    TableInfo {
+        name: "condensate_extinction_7",
+        revision: 0,
+        since_generator_version: 22,
         provisional: false,
     },
     TableInfo {

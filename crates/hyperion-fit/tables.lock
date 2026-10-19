@@ -109,6 +109,90 @@ provisional = false
 acceptance = "at 64 off-node points ([Fe/H] [-1.95, -1.1, -0.43, 0.05], v [3.3, 17.0, 45.0, 120.0] km/s, Chabrier and Kroupa), the tabulated neutron-star and black-hole retention within 0.00002 absolute of the exact quadrature where it is 0.05 or less and 0.0195 relative where it exceeds 0.05 (ruling 139.5: 0.005 and 3%; met); largest absolute 0.01299"
 
 [[table]]
+name = "condensate_extinction"
+path = "condensate_extinction.rs"
+task = "condensate_extinction"
+revision = 0
+inputs_sha256 = "6656fedc52c6e007fc90265e28f2a242ffd5e6f7563d9aa68e72fbd48478fd35"
+body_sha256 = "5867c7d66ba897a5318de4b6eaccfee0f375439e6725d37714f3c860efd44521"
+fingerprint = [12.0, 14.0]
+since_generator_version = 22
+provisional = false
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid; the half-step check: `Q̄_ext` within 4.12e-4 (aluminium-oxide.json) and ω within 1.97e-4 (basalt.json) of the direct values, against 1e-3; 1 − ω within 5.77e-4"
+
+[[table]]
+name = "condensate_extinction_2"
+path = "condensate_extinction_2.rs"
+task = "condensate_extinction_2"
+revision = 0
+inputs_sha256 = "fc8c1fe7460f724a70c627d49bf707d7dbe7706c53e27e3d241bd4918dc15f24"
+body_sha256 = "4baaf55bf193d08dc378ec336c6dc26fdd669378bbccab8dd48bdff229ed19a6"
+fingerprint = [12.0, 14.0]
+since_generator_version = 22
+provisional = false
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid; the half-step check: `Q̄_ext` within 5.09e-4 (calcium-titanate.json) and ω within 5.83e-4 (chromium.json) of the direct values, against 1e-3; 1 − ω within 1.66e-3"
+
+[[table]]
+name = "condensate_extinction_3"
+path = "condensate_extinction_3.rs"
+task = "condensate_extinction_3"
+revision = 0
+inputs_sha256 = "248e9a178d80f9df253b5487601638dcd7c261abd36423fe42025615d17beb7c"
+body_sha256 = "86765fcaad8f24e9eed61a250382091d0a8ce6a352ede35e0830acb46723b367"
+fingerprint = [12.0, 14.0]
+since_generator_version = 22
+provisional = false
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid; the half-step check: `Q̄_ext` within 4.09e-4 (enstatite-glass.json) and ω within 6.83e-4 (graphite.json) of the direct values, against 1e-3; 1 − ω within 1.23e-3"
+
+[[table]]
+name = "condensate_extinction_4"
+path = "condensate_extinction_4.rs"
+task = "condensate_extinction_4"
+revision = 0
+inputs_sha256 = "d68883d8825dc60e8cf7a2e189ca6d2b5d4b23655b3277838c0d05fba06dc714"
+body_sha256 = "95b87eb09f644630dfb747550fa29908eaca671baeb0221e022d67d1389dce64"
+fingerprint = [12.0, 14.0]
+since_generator_version = 22
+provisional = false
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid; the half-step check: `Q̄_ext` within 8.10e-4 (manganese-sulphide.json) and ω within 7.15e-4 (iron.json) of the direct values, against 1e-3; 1 − ω within 2.47e-3"
+
+[[table]]
+name = "condensate_extinction_5"
+path = "condensate_extinction_5.rs"
+task = "condensate_extinction_5"
+revision = 0
+inputs_sha256 = "241c92b8e3dbb2696e12440d3fd0ace580750107c2bbd125e0874c40f5ffb3a0"
+body_sha256 = "1237f87d383e7b68da22b98f20df226298f4a17837402846411b3f636b5346ed"
+fingerprint = [12.0, 14.0]
+since_generator_version = 22
+provisional = false
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid; the half-step check: `Q̄_ext` within 3.82e-4 (potassium-chloride.json) and ω within 7.02e-5 (oxygen-liquid.json) of the direct values, against 1e-3; 1 − ω within 1.45e-3"
+
+[[table]]
+name = "condensate_extinction_6"
+path = "condensate_extinction_6.rs"
+task = "condensate_extinction_6"
+revision = 0
+inputs_sha256 = "a113702fbef64fb19a472e63aad219e30de10af0f6bcf02a7dc574d0799e8ea3"
+body_sha256 = "a409d0461d5a55786384555b7a1873224eda8fc586ed50689a0d6f743d19c65f"
+fingerprint = [12.0, 14.0]
+since_generator_version = 22
+provisional = false
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid; the half-step check: `Q̄_ext` within 4.71e-4 (sulphur.json) and ω within 6.22e-4 (soot.json) of the direct values, against 1e-3; 1 − ω within 1.30e-3"
+
+[[table]]
+name = "condensate_extinction_7"
+path = "condensate_extinction_7.rs"
+task = "condensate_extinction_7"
+revision = 0
+inputs_sha256 = "2e7180c2de1ce9a7e6612ba7276929d0aae3dc0a548d9338d2f25c5687f97bd5"
+body_sha256 = "a101dbb7db0fc2529631b223eab358c6681535027998cf9e2eb7154eb6e05a6e"
+fingerprint = [12.0, 14.0]
+since_generator_version = 22
+provisional = false
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid; the half-step check: `Q̄_ext` within 5.42e-4 (titanium-dioxide.json) and ω within 7.16e-4 (tholin.json) of the direct values, against 1e-3; 1 − ω within 3.02e-3"
+
+[[table]]
 name = "displaced_forms"
 path = "displaced_forms.rs"
 task = "displaced_forms"

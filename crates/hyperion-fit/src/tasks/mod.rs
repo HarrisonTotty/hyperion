@@ -9,6 +9,7 @@ pub mod bowl_permanent_shadow;
 pub mod chabrier;
 pub mod cluster_bh;
 pub mod cluster_retention;
+pub mod condensate_extinction;
 pub mod displaced_forms;
 pub mod equipartition;
 pub mod giant_cooling;

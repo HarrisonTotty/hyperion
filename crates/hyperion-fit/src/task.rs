@@ -138,7 +138,7 @@ pub trait FitTask: Sync + std::fmt::Debug {
 }
 
 /// Every task, in name order. A new task is one more entry (see the module's documentation).
-pub static REGISTRY: [&dyn FitTask; 38] = [
+pub static REGISTRY: [&dyn FitTask; 45] = [
     &tasks::binary_cooling_floor::BinaryCoolingFloorTask,
     &tasks::binary_pair_light::C_TASK,
     &tasks::binary_pair_light::D_TASK,
@@ -148,6 +148,13 @@ pub static REGISTRY: [&dyn FitTask; 38] = [
     &tasks::chabrier::ChabrierTask,
     &tasks::cluster_bh::ClusterBhTask,
     &tasks::cluster_retention::ClusterRetentionTask,
+    &tasks::condensate_extinction::TASK_1,
+    &tasks::condensate_extinction::TASK_2,
+    &tasks::condensate_extinction::TASK_3,
+    &tasks::condensate_extinction::TASK_4,
+    &tasks::condensate_extinction::TASK_5,
+    &tasks::condensate_extinction::TASK_6,
+    &tasks::condensate_extinction::TASK_7,
     &tasks::displaced_forms::DisplacedFormsTask,
     &tasks::equipartition::EquipartitionTask,
     &tasks::giant_cooling::GiantCoolingTask,
@@ -268,6 +275,13 @@ mod tests {
                 "chabrier",
                 "cluster_bh",
                 "cluster_retention",
+                "condensate_extinction",
+                "condensate_extinction_2",
+                "condensate_extinction_3",
+                "condensate_extinction_4",
+                "condensate_extinction_5",
+                "condensate_extinction_6",
+                "condensate_extinction_7",
                 "displaced_forms",
                 "equipartition",
                 "giant_cooling",

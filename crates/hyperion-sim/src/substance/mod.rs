@@ -50,6 +50,7 @@
 //! the solutions, lithologies, salts, organics and undifferentiated bodies' materials. A row no
 //! rule yet produces is reachable data, labelled so where a reader meets it.
 
+pub mod aerosol;
 pub mod condensed;
 pub mod diagram;
 pub mod element;
@@ -62,6 +63,10 @@ mod rows;
 pub mod thermal;
 pub mod thermo;
 
+pub use aerosol::{
+    AerosolOptics, BuildSizeDistributionError, FileVariant, ResolveAerosolError, SizeDistribution,
+    SizeDistributionKind, aerosol_optics,
+};
 pub use condensed::{
     CondensedColumns, CondensedPhase, DensityAt, GrainDensity, Transition, TransitionKind,
 };

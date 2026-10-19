@@ -26,6 +26,7 @@ apps/hyperion/src/renderer/src/test/blessProbe.json
 apps/hyperion/src/renderer/src/view/atmosphere/channels.json
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/curves.json
 crates/hyperion-fit/src/atmosphere/sphere_matrices/
+crates/hyperion-fit/src/tasks/condensate_extinction/mie_cases.json
 
 # Reduced data a tool writes one row a line (`apps/hyperion/scripts/atmosphereData.mjs cross-sections`)
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json
