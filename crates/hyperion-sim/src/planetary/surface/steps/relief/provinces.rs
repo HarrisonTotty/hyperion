@@ -19,8 +19,9 @@
 //! R09.T12's science check read them), each a centre uniform on the sphere, and the edifices dealt
 //! to them in turn, each set off from its province's centre by a two-dimensional normal of angular
 //! s.d. `r_e` √(n ÷ P) ÷ R, so that a province holds its edifices about twice over. Overlapping
-//! loads sum, held at `h_max`. The flexure then fills each load's moat and raises its bulge, and
-//! where the realised share falls short of `σ_volc` one correction widens the coverage by the
+//! loads sum, held at `h_max`. The flexure then fills each load's moat to the surrounding level
+//! and planes its bulge to it, so the surface stands at the loads alone, and where overlaps held
+//! at the cap leave the realised share short of `σ_volc` one correction widens the coverage by the
 //! ratio of the variances (at most to ¾) and lays the field again. A labelled illustration of low
 //! confidence: one edifice size, Mars's style on every lid, and no regional rise (Mars's
 //! constructional relief is mostly Tharsis's rise, which an edifice-only law can only stand for
@@ -42,11 +43,10 @@
 //! weight `V₀` per unit length deflects it by w = `w₀` e^(−x/α) (cos x/α + sin x/α), `w₀` = `V₀` ÷
 //! (2 `k_eff` α), with α = [4D ÷ `k_eff`]^¼, D = E `T_e`³ ÷ 12(1 − ν²) and `k_eff` = (`ρ_m` −
 //! `ρ_fill`) g + E `T_e` ÷ R² ([`flexural_parameter`]), `ρ_fill` being `ρ_p` (the addendum 2,
-//! below). The last term is a spherical shell's
-//! membrane support, the shallow shell's foundation stiffness (Brotchie and Silvester 1969, JGR 74,
-//! 5240, not read; "membrane stresses (which depend on ETe/R0² and are thus large for small
-//! bodies)", Nimmo, Bills and Thomas 2011, JGR 116, E11001, ¶49), valid for α ≪ R; low-degree
-//! membrane support is not modelled.
+//! below). The last term is a spherical shell's membrane support, the shallow shell's foundation
+//! stiffness (Brotchie and Silvester 1969, JGR 74, 5240, not read; "membrane stresses (which
+//! depend on ETe/R0² and are thus large for small bodies)", Nimmo, Bills and Thomas 2011, JGR 116,
+//! E11001, ¶49), valid for α ≪ R; low-degree membrane support is not modelled.
 //!
 //! **Applied to an edifice** (labelled): its deflection at a distance r from its centre is the line
 //! load's convolved with its load along a diameter, as if the edifice were an infinite ridge of its
@@ -56,29 +56,34 @@
 //! the local Airy balance at α = 0 included. A load broad against α sinks by `ρ_p` g h ÷ `k_eff`
 //! (`ρ_p` h ÷ (`ρ_m` − `ρ_p`) where the shell term is negligible), its whole compensation, and a
 //! narrow one is held up. The ridge reading overstates an edifice's flexure against the
-//! axisymmetric solution: on the reference Mars's cap-height edifice its root is 2.1 times and its
-//! bulge 5.3 times the axisymmetric cone's, and its profile, turned about the centre, carries 1.6
-//! times the load's weight (R09.T12's science check, by a planar FFT solve; recorded).
+//! axisymmetric solution: on the reference Mars's cap-height edifice its root is 2.09 times and its
+//! bulge 5.32 times the axisymmetric cone's, and its profile, turned about the centre, carries 1.63
+//! times the load's weight (R09.T12's science check by a planar FFT solve, and the addendum 3 by a
+//! finite-difference one checked against the Kelvin-function closed form; recorded). Under the
+//! planed surface (below) it moves only the `Province` crust's share and the volume, not the
+//! elevation.
 //!
-//! **The moat is filled to the surrounding level, and the load stands on the fill** (ruled:
-//! `decision-r09-t12-coarse.md`'s addendum 2, 2026-10-16, which replaces the first rule's
-//! Δz = max(h − w, 0)). The load and the moat's fill share one density, `ρ_p`, the `Province`
-//! entry's grain density × (1 − [`FILL_POROSITY`]) (2,648 kg m⁻³ on the reference Mars), so that
-//! the uniform foundation (`ρ_m` − `ρ_p`) g + E `T_e` ÷ R² is the model's balance wherever the
-//! deflection is filled (w ≥ 0), with province material of `ρ_p` beneath the load as in its moat,
-//! and α stays closed-form. On a bulge left standing (w < 0) nothing fills the rise, so there the
-//! balance is `ρ_m` g + E `T_e` ÷ R², and the uniform foundation raises a bulge some 2.4 times too
-//! high (R09.T12's science check; built as ruled, recorded). The load is q = `ρ_p` g h, h its
-//! height above the filled level, which is how the
-//! edifice cap's calibration on Olympus Mons's present, already-flexed 21.9 km reads it. With w the
-//! summed deflection, positive downward, the elevation changes by Δz = h + max(−w, 0)
-//! ([`surface_lift_m`]): under a load it stands at h, in the filled moat at the surrounding level,
-//! on the bulge it rises by −w, and on another load's bulge it stands at h − w. A load at `ρ_p`
-//! is some 17% lighter than Belleguic, Lognonné and Wieczorek 2005's 3,200 ± 100 kg m⁻³ for Mars's
-//! large volcanoes (JGR 110, E11005, the abstract), so at the ruled foundation it deflects some
-//! 17% less (recorded); the piecewise foundation the addendum declined makes the solve nonlinear.
-//! A cell takes the `Province` crust where its load or the fill of its deflection is at least
-//! [`PROVINCE_SURFACE_MIN`] thick.
+//! **The moat is filled to the surrounding level, the bulge planed to it, and the load stands on
+//! the fill** (ruled: `decision-r09-t12-coarse.md`'s addendum 2, 2026-10-16, which replaced the
+//! first rule's Δz = max(h − w, 0), and its addendum 3, 2026-10-19, which planes the bulge). The
+//! load and the moat's fill share one density, `ρ_p`, the `Province` entry's grain density × (1 −
+//! [`FILL_POROSITY`]) (2,648 kg m⁻³ on the reference Mars). The load is q = `ρ_p` g h, h its
+//! height above the filled level, which is how the edifice cap's calibration on Olympus Mons's
+//! present, already-flexed 21.9 km reads it. With w the summed deflection, positive downward, the
+//! elevation changes by Δz = h ([`surface_lift_m`], h the summed load held at `h_max`): under a
+//! load the surface stands at h, and off the loads at the filled level, in the moat and on the
+//! bulge alike. With the bulge planed, the load is `ρ_p` g (h + w) everywhere, so the uniform
+//! foundation (`ρ_m` − `ρ_p`) g + E `T_e` ÷ R² is the model's exact balance and α stays
+//! closed-form: the bulge planed to the filled level, the uniform foundation's exact surface
+//! (addendum 3); a standing bulge's own foundation is `ρ_m` g + E `T_e` ÷ R², on which the
+//! reference Mars's cap-height cone would raise a bulge of about 96 m (axisymmetric); not
+//! modelled. w no longer reaches the elevation: it sets the fill, and so the `Province` crust,
+//! which a cell takes where its load or the fill of its deflection is at least
+//! [`PROVINCE_SURFACE_MIN`] thick (a planed bulge's cells keep their crust), and the volumes the
+//! record reports. A load at `ρ_p` is some 17% lighter than Belleguic, Lognonné and Wieczorek
+//! 2005's 3,200 ± 100 kg m⁻³ for Mars's large volcanoes (JGR 110, E11005, the abstract), so at the
+//! ruled foundation it deflects some 17% less (recorded); the piecewise foundation the addendum 2
+//! declined makes the solve nonlinear.
 //!
 //! # The draws
 //!
@@ -375,8 +380,8 @@ pub(super) struct Cone {
 }
 
 /// The lid an edifice bends: its flexural parameter, its foundation, its gravity, and the one
-/// density `ρ_p` of its loads and their fill, which its foundation balances wherever the
-/// deflection is filled (the addendum 2; see the module documentation).
+/// density `ρ_p` of its loads and their fill, which its foundation balances exactly with the
+/// bulge planed (the addenda 2 and 3; see the module documentation).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Lid {
     /// Its flexural parameter α.
@@ -628,16 +633,15 @@ pub(super) fn run(pass: &Pass<'_>, working: &mut Working) -> Option<Provinces> {
     })
 }
 
-/// The surface's rise over the pre-load level, metres: h + max(−w, 0) (ruled,
-/// `decision-r09-t12-coarse.md`'s addendum 2).
+/// The surface's rise over the pre-load level, metres: Δz = h (ruled,
+/// `decision-r09-t12-coarse.md`'s addendum 3).
 ///
-/// h is the cell's summed load `load_m`, held at the edifice cap `cap_m`, and w its summed
-/// deflection `deflection_m`, positive down, both in metres. Under a load the surface stands at
-/// h, in the filled moat at the surrounding level, on a bulge it rises by −w, and on another
-/// load's bulge it stands at h − w.
+/// h is the cell's summed load `load_m`, metres, held at the edifice cap `cap_m`. Under a load
+/// the surface stands at h above the filled level, and off the loads at the filled level, in the
+/// moat and on the bulge alike: the bulge is planed, so the deflection never reaches it.
 #[must_use]
-pub(super) fn surface_lift_m(load_m: f64, deflection_m: f64, cap_m: f64) -> f64 {
-    num::min(load_m, cap_m) + num::max(-deflection_m, 0.0)
+pub(super) fn surface_lift_m(load_m: f64, cap_m: f64) -> f64 {
+    num::min(load_m, cap_m)
 }
 
 /// Plan 14's own lithosphere for the lid entry `lid` of the body of `inputs`, by which its
@@ -659,7 +663,7 @@ fn published_thickness(lid: &PaletteEntry, inputs: &CoarseInputs) -> Metres {
 
 /// A cone field laid on a pass's cells ([`lay`]).
 struct Laid {
-    /// Each cell's lift, metres: min(h, `h_max`) + max(−w, 0) ([`surface_lift_m`]).
+    /// Each cell's lift, metres: min(h, `h_max`) ([`surface_lift_m`]).
     lift: Vec<f64>,
     /// Each cell's summed load h, metres.
     load: Vec<f64>,
@@ -758,8 +762,7 @@ fn lay(pass: &Pass<'_>, edifice: &Edifice, centres: &[[f64; 3]], coverage: f64) 
     }
     let lift: Vec<f64> = load
         .iter()
-        .zip(&deflection)
-        .map(|(&h, &w)| surface_lift_m(h, w, edifice.height_m))
+        .map(|&h| surface_lift_m(h, edifice.height_m))
         .collect();
     let (_, realised) = noise::mean_and_spread(&lift, grid.solid_angles_sr());
     Laid {

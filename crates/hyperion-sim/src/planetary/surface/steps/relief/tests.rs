@@ -1709,22 +1709,44 @@ fn a_line_load_s_deflection_carries_its_weight() {
     }
 }
 
-/// The surface over a province is h + max(−w, 0) (`decision-r09-t12-coarse.md`'s addendum 2):
-/// at h under a load, at the surrounding level in its filled moat, raised by −w on a bulge and at
-/// h − w on another load's bulge, the load held at the cap; and so is every cell's lift on the
-/// reference Mars.
+/// Under a load the surface stands at the load's height above the filled level, and off the loads
+/// at the filled level, in the moat and on the bulge alike: Δz = h (`decision-r09-t12-coarse.md`'s
+/// addendum 3). On the reference Mars each cell's lift is its summed load held at `h_max`, bit for
+/// bit; about one hand-placed edifice, cells on its bulge (w < 0) exist and their lift is exactly
+/// zero; and each cell's ground rises by its lift.
 #[test]
-fn the_surface_stands_at_its_load_over_the_filled_moat() {
-    let cap = 21_795.0;
-    assert_same_bits(provinces::surface_lift_m(1_000.0, 300.0, cap), 1_000.0);
-    assert_same_bits(provinces::surface_lift_m(0.0, 300.0, cap), 0.0);
-    assert_same_bits(provinces::surface_lift_m(0.0, -50.0, cap), 50.0);
-    assert_same_bits(provinces::surface_lift_m(1_000.0, -50.0, cap), 1_050.0);
-    assert_same_bits(provinces::surface_lift_m(30_000.0, 38_000.0, cap), cap);
-    assert_same_bits(provinces::surface_lift_m(0.0, 0.0, cap), 0.0);
-    let laid = mars().provinces.as_ref().unwrap();
-    for ((&lift, &h), &w) in laid.lift.iter().zip(&laid.load).zip(&laid.deflection) {
-        assert_same_bits(lift, provinces::surface_lift_m(h, w, laid.cap.value()));
+fn under_a_load_the_surface_stands_at_its_height_and_off_the_loads_at_the_filled_level() {
+    let mars = mars();
+    let laid = mars.provinces.as_ref().unwrap();
+    let cap = laid.cap.value();
+    assert_same_bits(provinces::surface_lift_m(1_000.0, cap), 1_000.0);
+    assert_same_bits(provinces::surface_lift_m(0.0, cap), 0.0);
+    assert_same_bits(provinces::surface_lift_m(30_000.0, cap), cap);
+    for (&lift, &h) in laid.lift.iter().zip(&laid.load) {
+        assert_same_bits(lift, h.min(cap));
+    }
+    // One edifice, hand-placed on the +x axis, over the reference Mars's cells.
+    let grid = &mars.world.grid;
+    let radius = mars.world.inputs.radius().value();
+    let edifice = &laid.edifice;
+    let mut bulge = 0_u32;
+    for n in 0..grid.len() {
+        let x = grid.centre(n);
+        let chord = ((x[0] - 1.0) * (x[0] - 1.0) + x[1] * x[1] + x[2] * x[2]).sqrt();
+        let r = 2.0 * math::asin((0.5 * chord).min(1.0)) * radius;
+        if edifice.deflection_m(r) < 0.0 {
+            bulge += 1;
+            assert_same_bits(provinces::surface_lift_m(edifice.load_m(r), cap), 0.0);
+        }
+    }
+    assert!(bulge > 0, "no cell lies on the edifice's bulge");
+    // And on the laid field: cells on a bulge and under no load lift by exactly 0.
+    let planed: Vec<usize> = (0..laid.lift.len())
+        .filter(|&n| laid.deflection[n] < 0.0 && laid.load[n] <= 0.0)
+        .collect();
+    assert_ne!(planed, []);
+    for n in planed {
+        assert_same_bits(laid.lift[n], 0.0);
     }
     // Each cell's ground and water surface rise by its lift, bit for bit.
     let world = World::new(reference::mars_like());
@@ -1902,11 +1924,11 @@ fn the_elastic_thickness_follows_the_lid_s_substance() {
     assert_same_bits(rigid.value(), ceres.radius().value());
 }
 
-/// The reference Mars's provinces (`decision-r09-t12-coarse.md`'s addendum 2): edifices at the cap
-/// about Mars's provinces, each standing at its height over its filled moat, so that a cap-height
-/// load stands at 21.8 km; never lowering the ground; their loads' footprint at most a quarter of
-/// the surface; the `Province` crust where their load or the fill of their deflection is at least
-/// 10 m; none on the Moon (V = 0) or on a mobile lid.
+/// The reference Mars's provinces (`decision-r09-t12-coarse.md`'s addenda 2 and 3): edifices at
+/// the cap about Mars's provinces, each standing at its height over its filled moat, so that a
+/// cap-height load stands at 21.8 km over its root; never lowering the ground; their loads'
+/// footprint at most a quarter of the surface; the `Province` crust where their load or the fill
+/// of their deflection is at least 10 m; none on the Moon (V = 0) or on a mobile lid.
 #[test]
 fn the_reference_mars_has_volcanic_provinces() {
     let mars = mars();
@@ -1926,7 +1948,7 @@ fn the_reference_mars_has_volcanic_provinces() {
         / sphere;
     let edifice = &laid.edifice;
     let root = edifice.deflection_m(0.0);
-    let top = provinces::surface_lift_m(edifice.load_m(0.0), root, laid.cap.value());
+    let top = provinces::surface_lift_m(edifice.load_m(0.0), laid.cap.value());
     eprintln!(
         "Mars: T_e {:.1} km, α {:.1} km, h_max {:.0} m standing at {top:.0} m over its root w₀ \
          {root:.0} m; {} provinces, {} edifices, coverage {:.3}, footprint {footprint:.3}; \
@@ -1948,7 +1970,7 @@ fn the_reference_mars_has_volcanic_provinces() {
     assert!((root - 30_474.0).abs() < 50.0, "{root} m");
     assert!(footprint <= 0.25, "{footprint}");
     assert!(laid.lift.iter().all(|&l| l >= 0.0));
-    // The realised share reaches σ_volc's neighbourhood (1.06 of it as built, uncorrected).
+    // The realised share reaches σ_volc's neighbourhood (1.04 of it as built, uncorrected).
     assert!(
         laid.realised.value() >= 0.7 * laid.target.value(),
         "{} m",
@@ -2024,9 +2046,9 @@ fn measure_the_lithospheres() {
 }
 
 /// Measurements for the record, run by hand: the reference Mars's provinces in detail, under
-/// `decision-r09-t12-coarse.md`'s addendum 2 (the count, the coverage and footprint, a lone
-/// edifice's root and bulge, the moats' and bulges' shares, the `Province` crust, the volumes and
-/// the realised s.d. beside `σ_volc`).
+/// `decision-r09-t12-coarse.md`'s addenda 2 and 3 (the count, the coverage and footprint, a lone
+/// edifice's root and bulge, the moats' and planed bulges' shares, the `Province` crust, the
+/// volumes standing, clipped, filled and planed, and the realised s.d. beside `σ_volc`).
 #[test]
 #[ignore = "measurement: the reference Mars's provinces, printed"]
 fn measure_the_reference_mars_s_provinces() {
@@ -2073,11 +2095,14 @@ fn measure_the_reference_mars_s_provinces() {
     let clipped = volume_km3(&|n| (laid.load[n] - cap).max(0.0));
     let over = share(&|n| laid.load[n] > cap);
     let filled = volume_km3(&|n| laid.load[n].min(cap) + laid.deflection[n].max(0.0));
+    let summed_filled = volume_km3(&|n| laid.load[n] + laid.deflection[n].max(0.0));
+    let planed = volume_km3(&|n| (-laid.deflection[n]).max(0.0));
     let edifice = &laid.edifice;
     eprintln!(
         "Mars's provinces' loads: summed {summed:.3e} km³, standing (held at the cap) \
          {standing:.3e} km³, clipped at the cap {clipped:.3e} km³ over {over:.2}% of the surface; \
-         standing with the fill of the deflections {filled:.3e} km³"
+         ∫ (h + max(w, 0)) dA {summed_filled:.3e} km³ ({filled:.3e} km³ with h held at the cap); \
+         the planed bulges ∫ max(−w, 0) dA {planed:.3e} km³ over {bulge:.1}% of the surface"
     );
     eprintln!(
         "Mars's provinces: {} of them, {} edifices of {:.0} km base and {:.0} m height, coverage \
@@ -2199,18 +2224,18 @@ fn another_seed_gives_other_arcs_and_provinces() {
     assert!(a.iter().zip(&b).any(|(x, y)| x.total_cmp(y).is_ne()));
 }
 
-/// The reference Mars at a volcanism level of 2.5, past plan 14's bound, whose first cone field
-/// falls short of `σ_volc` at the saturated coverage: the one case in which the coverage
-/// correction runs under the addendum 2's moat (the determinism audit's consider).
+/// The reference Mars at a volcanism level of 3, past plan 14's bound (about 2), whose first cone
+/// field falls short of `σ_volc` at the saturated coverage: the one case in which the coverage
+/// correction runs under the addenda 2 and 3 (the determinism audit's consider).
 fn saturated_mars() -> CoarseInputs {
     builder_of(&reference::mars_like())
-        .volcanism(2.5)
+        .volcanism(3.0)
         .build()
         .unwrap()
 }
 
-/// Under the addendum 2's moat the coverage correction runs only where the cone field saturates:
-/// the reference Mars's field reaches `σ_volc` uncorrected, and at a volcanism level of 2.5 the
+/// Under the addenda 2 and 3 the coverage correction runs only where the cone field saturates:
+/// the reference Mars's field reaches `σ_volc` uncorrected, and at a volcanism level of 3 the
 /// first field falls short at ¾ already, so the correction lays the same field again, bit for bit.
 #[test]
 fn the_coverage_correction_runs_only_at_saturation() {
@@ -2219,7 +2244,17 @@ fn the_coverage_correction_runs_only_at_saturation() {
     assert_same_bits(laid.realised.value(), laid.first.value());
     let saturated = relieve(saturated_mars());
     let laid = saturated.provinces.as_ref().unwrap();
-    assert!(laid.first.value() < laid.target.value(), "{:?}", laid.first);
+    eprintln!(
+        "V 3: the first field's s.d. {:.0} m against σ_volc {:.0} m",
+        laid.first.value(),
+        laid.target.value()
+    );
+    assert!(
+        laid.first.value() < laid.target.value(),
+        "{:?} against {:?}",
+        laid.first,
+        laid.target
+    );
     assert_same_bits(laid.coverage, 0.75);
     assert_same_bits(laid.realised.value(), laid.first.value());
 }
