@@ -3499,6 +3499,21 @@ hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/s
 - _As built (`wireD`, round 9)._ The handlers answer phase D's bodies; `heap_bytes` counts
   satellites, belts, their members and gaps and rings' gaps. `a_pinned_system_with_moons_returns_them`
   checks a pinned system's moons, rings, belts and halo against the sim.
+- **P14.T36.c The scene's arrival lists its bodies by `indices()`** (decision-p14-t51-batch §1.3,
+  2026-10-19, "any time"; a server change only, with no wire, output or protocol change; the
+  scene's core is rendering plan R03's T7).
+  - `scene/core.rs`'s `SceneCore::arrive` takes the system's every index (`InSystem::all`) from
+    `PlanetarySystem::indices()`, not from a second `snapshot_at` used only for its index list.
+    `indices()` lists every index the system holds a record for, in index order, which is the
+    snapshot's own list, so an arrival evaluates the system once, not twice: half its sim cost, the
+    cold traps' included from 24.
+  - _Tests:_ for the fixture's systems at three times, `indices()` equals the snapshot's index list,
+    the same bodies in the same order, and an arrival keeps that list; the arrival, re-send,
+    knowledge and heartbeat tests pass unchanged. `time_an_arrival`, ignored, run by name in
+    release, times an arrival before and after.
+  - _Accept:_ `cargo test -p hyperion-server --lib scene::core`; the timing's figures in the
+    as-built record.
+  - _Commit:_ `perf(server): P14.T36.c The scene's arrival lists its bodies by indices()`.
 
 #### P14.T37 Client protocol helpers
 
@@ -18343,3 +18358,59 @@ tables::gauss_legendre`.
     - `cargo run -p hyperion-fit -- check`;
     - `cargo test -p hyperion-sim --features testing substance::liquid`;
     - `cargo test -p hyperion-sim --test liquids_golden`.
+- **Deviations in P14.T36.c, as built (`lane/45-server-arrival-indices`, 2026-10-19).** As the
+  task says, with one addition to its test; nothing else deviated. The record holds the
+  measurement.
+  - _The change._ `SceneCore::arrive` fills `InSystem::all` with `planets.indices()`. `BodyRecord`
+    leaves the core's `use` for its test module's, and `all`'s doc names its source. No wire,
+    output or protocol moves: `GENERATOR_VERSION` stays 22 and `PROTOCOL_VERSION` 2, and
+    golden_diff against the base finds no golden changed and none added.
+  - _The test_, `an_arrival_keeps_every_index_of_the_snapshot_in_its_order`, passed on the base's
+    code before the change and passes after it.
+    - The fixture generates one system, the scene's, the cell's first with at least four bodies:
+      31 indices, 29 bodies and 2 populations. So the loop over `fixture.systems` checks that system
+      alone. The sim's `a_snapshot_is_body_at_body_by_body` holds the same list over 80 systems.
+    - The test adds one assertion to the task's: some system of the fixture holds a belt or a halo
+      beside its bodies. So the list it compares includes the populations' indices, not only the
+      bodies'.
+  - _The timing_, `time_an_arrival`, ignored, run by name in release under the heavy-test lock,
+    alone (no other build, gate or test running):
+
+    ```text
+    cargo test --release -p hyperion-server --lib scene::core::tests::time_an_arrival -- --ignored --exact --nocapture
+    ```
+
+    - Machine: the laptop's i7-8665U (4 cores, 8 threads), Linux.
+    - Build: the workspace's release profile (opt-level 3, thin LTO), rustc 1.99.1,
+      `CARGO_BUILD_JOBS=4`, no target-CPU flags.
+    - n = 50 calls of each after one untimed warm-up arrival: `SceneCore::build` at `Full` with
+      `system_ship` and `GrantAsked` at the epoch, then `snapshot_at` alone, then `indices()`
+      alone. Each result went through `std::hint::black_box`.
+    - Three runs each, back to back, before and after the change, both on the tree at 3d7bf246.
+      The 1-minute load was read before each run. It was the decay of the release build that had
+      just ended, as nothing else ran. The means of the three, with the loads before them; the
+      Bodies column is `indices().len()`, 29 bodies and 2 populations:
+
+      | Run                    | Bodies | Arrival (ms) | `snapshot_at` (ms) | `indices()` (µs) | Load             |
+      | ---------------------- | ------ | ------------ | ------------------ | ---------------- | ---------------- |
+      | before (two snapshots) | 31     | 8.963        | 4.398              | 0.161            | 2.70, 2.70, 2.70 |
+      | after (`indices()`)    | 31     | 4.874        | 4.731              | 0.163            | 2.77, 2.77, 2.77 |
+
+      The runs, as arrival, `snapshot_at` and `indices()`: before, 8.975, 8.942 and 8.972 ms;
+      4.404, 4.386 and 4.405 ms; 0.158, 0.162 and 0.164 µs. After, 4.894, 4.862 and 4.867 ms;
+      4.738, 4.727 and 4.727 ms; 0.156, 0.156 and 0.177 µs. After again, on the tree merged with
+      1dca3af8, at 1-minute loads of 4.07, 4.07 and 3.83 just after its rebuild: 4.872, 4.946 and
+      5.034 ms; 4.712, 4.780 and 5.021 ms; 0.146, 0.151 and 0.177 µs.
+
+    - The arrival falls by 4.09 ms, about one `snapshot_at` (4.40 ms in the first build, 4.73 ms in
+      the second), to 54% of what it was. What is left beside the one snapshot is about 0.15 ms in
+      both builds: degrading and converting the records, the observer, the hosts and the place.
+    - `snapshot_at` alone reads 8% (7.6%) higher in the second build, with the same code. This is
+      build-to-build variation, not this change's.
+    - At 22 a snapshot pays no cold traps (`COLD_TRAPS_VERSION` is 24). The ruling's 72 → 36 ms
+      is the extrapolation at 24, which P14.T51.i's lane measures.
+
+  - _Accept:_
+    - `cargo test -p hyperion-server --lib scene::core`: 17 passed, `time_an_arrival` ignored;
+    - `cargo test -p hyperion-server --test scene --test scene_agree --test scene_knowledge`: 2, 1
+      and 1 passed, as before.
