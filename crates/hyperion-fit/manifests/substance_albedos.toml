@@ -1,11 +1,32 @@
-# The condensed optics of the substance registry's solids (plan 14, P14.T49.c): each row's normal
-# albedo in B, V and R at its reference grain class by Hapke's model, and its energy albedos by the
-# similarity relation. The reference forms' photometry and grain sizes are the sim's
-# (`hyperion_sim::substance::optics`), which the task's fingerprint probes; the indices are
+# The condensed optics of the substance registry's solids (plan 14, P14.T49.c and P14.T49.i): each
+# row's normal albedo in B, V and R at its reference grain class by Hapke's model, its energy
+# albedos by the similarity relation, and its spherical albedo in 12 bins over 0.3-5 µm. The
+# reference forms' photometry and grain sizes, the bins' edges and every row's input (its index
+# file and infrared set, or its laboratory end-members, mixture parts and levels) are the sim's
+# (`hyperion_sim::substance::optics`), which the task's fingerprint probes; the visible indices are
 # rendering plan R08's committed material files, listed here in the optics rows' registry order,
-# whose data hashes the inputs hash covers (`hyperion_fit::materials`). The task takes no
-# parameters and no dataset.
+# whose data hashes the inputs hash covers (`hyperion_fit::materials`); the infrared sets beyond
+# 780 nm and the laboratory spectra (`usgs_splib07a`) are the datasets, in the order the rows first
+# name them (`substance_albedos::row_datasets`). The task takes no parameters.
 task = "substance_albedos"
+datasets = [
+    "warren_brandt_2008_h2o",
+    "grundy_schmitt_1998_h2o",
+    "grundy_2002_ch4",
+    "martonchik_orton_1994_ch4",
+    "martonchik_1984_nh3",
+    "grundy_1993_n2",
+    "warren_1986_co2",
+    "gerakines_2023_co",
+    "usgs_splib07a",
+    "palik_1985_zns",
+    "dorschner_1995_mgsio3",
+    "jager_2003_mg2sio4",
+    "khare_1984_tholin",
+    "wolff_2009_mars_dust",
+    "pollack_1973_basalt",
+    "pollack_1973_basaltic_glass",
+]
 materials = [
     "water-ice.json",
     "methane-ice.json",
@@ -20,11 +41,13 @@ materials = [
     "zinc-sulphide.json",
     "sodium-sulphide.json",
     "manganese-sulphide.json",
+    "chromium.json",
     "enstatite-glass.json",
     "forsterite-amorphous.json",
     "calcium-titanate.json",
+    "graphite.json",
     "tholin.json",
+    "mars-dust.json",
     "basalt.json",
-    "mars-regolith-simulant.json",
     "basaltic-glass.json",
 ]

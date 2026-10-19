@@ -1,0 +1,18 @@
+# Phase I methane ice's absorption at 40 K of Grundy, Schmitt and Quirico (2002): the frost `CH4`'s
+# imaginary index beyond 780 nm (plan 14, P14.T49.i). Reduced by `reduce.py` from the authors'
+# reduced-resolution table (git-ignored, `data/cache/grundy_2002_ch4/alpha_CH4.ascii`) to its 40 K
+# column from 0.77998 µm, and committed as measured values with the citation. Reproduced from the raw
+# by hand on 2026-10-16: `python3 -I crates/hyperion-fit/data/grundy_2002_ch4/reduce.py <raw>
+# crates/hyperion-fit/data/grundy_2002_ch4/alpha_40k.csv`, from outside the raw's directory. Read
+# by `run substance_albedos`.
+dataset = "grundy_2002_ch4"
+class = "committed"
+citation = "W. M. Grundy, B. Schmitt and E. Quirico (2002), Icarus 155, 486-496, DOI 10.1006/icar.2001.6726: the temperature-dependent spectrum of methane ice I between 0.7 and 5 µm and opportunities for near-infrared remote thermometry; the Lambert absorption coefficient α (cm⁻¹) at 40 K over 0.77998-4.91266 µm"
+url = "http://74.208.185.217/grundy/abstracts/ice/alpha_CH4.ascii"
+retrieved = "2026-10-16"
+release = "alpha_CH4.ascii as served on the retrieval date from the author's pages (Lowell Observatory's www2.lowell.edu/users/grundy/abstracts/2002.CH4.html, now at a bare IP address; sha256 52b42fcbe1271743724f500d37a9c4a9059a2bb10502efc429152f14d276b91b; α at 20-93 K in columns 2-10), reduced by reduce.py"
+licence = "none stated beyond the table's request: \"Please cite this reference if you make use of the data\"; only the measured coefficients at one temperature, facts, are committed, with the citation"
+
+[[files]]
+name = "alpha_40k.csv"
+sha256 = "4d62bf56fdd9ce9f17aac8aede184e8e4fe338a250e628e5f28a2513858e2680"

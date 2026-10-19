@@ -477,7 +477,11 @@ ruled 2026-10-09 and 2026-10-10).
   Spectrometer", J. Geophys. Res. 114 (2009) E00D04, DOI: 10.1029/2009JE003350, as
   distributed by NASA Ames's Mars Climate Modeling Group (Dust_Refractive_Indicies.txt) and
   kept in S. Ranjan's ranjanwordsworthsasselov2017b repository (commit 1e67a481). Reduced to the
-  visible in apps/hyperion/src/renderer/src/view/atmosphere/materials/mars-dust.json.
+  visible in apps/hyperion/src/renderer/src/view/atmosphere/materials/mars-dust.json; and, for the
+  infrared (galaxy plan 14, P14.T49.i), to 148 of the table's rows, 0.7-5.5 um (its 146 infrared
+  rows over 0.8-4.9946 um and the rows at 0.7 and 5.5 um), as the table prints them, in
+  crates/hyperion-fit/data/wolff_2009_mars_dust/nk.csv, a tool input (not shipped) from which
+  crates/hyperion-sim/src/tables/substance_albedo.rs is computed.
 
 - Refractive indices of Titan tholin: B. N. Khare et al., "Optical constants of organic tholins
   produced in a simulated Titanian atmosphere: From soft x-ray to microwave frequencies",
@@ -669,6 +673,49 @@ ruled 2026-10-09 and 2026-10-10).
   5348402, licensed under CC BY 4.0. The 8-column aggregate, severely roughened, resampled in size
   and angle in apps/hyperion/src/renderer/src/view/atmosphere/materials/phase/; offered under
   CC BY 4.0.
+
+- The infrared optical constants of the condensed optics' frosts and regoliths (galaxy plan 14,
+  P14.T49.i), tool inputs in crates/hyperion-fit/data/ (not shipped), each with its
+  PROVENANCE.toml, a reduced one with its reduce.py; the values of
+  crates/hyperion-sim/src/tables/substance_albedo.rs are computed from them:
+  - committed unmodified from the refractiveindex.info database (M. N. Polyanskiy, Sci. Data 11,
+    94 (2024); commit c5c2f188), which is dedicated to the public domain (CC0 1.0): S. G. Warren
+    and R. E. Brandt, J. Geophys. Res. 113 (2008) D14220, DOI: 10.1029/2007JD009744 (ice Ih);
+    J. V. Martonchik and G. S. Orton, Appl. Opt. 33 (1994) 8306-8317, DOI: 10.1364/AO.33.008306
+    (methane ice's real index);
+  - reduced, with their citations: W. M. Grundy and B. Schmitt, J. Geophys. Res. 103 (1998)
+    25809-25822, DOI: 10.1029/98JE00738 (H2O ice at 100 K); W. M. Grundy, B. Schmitt and
+    E. Quirico, Icarus 155 (2002) 486-496, DOI: 10.1006/icar.2001.6726 (CH4 ice at 40 K), and
+    Icarus 105 (1993) 254-258, DOI: 10.1006/icar.1993.1122 (beta-N2 ice at 41 K), from the first
+    author's pages; S. G. Warren, Appl. Opt. 25 (1986) 2650-2674, DOI: 10.1364/AO.25.002650 (CO2
+    ice), J. V. Martonchik, G. S. Orton and J. F. Appleby, Appl. Opt. 23 (1984) 541-547, DOI:
+    10.1364/AO.23.000541 (NH3 ice), and J. Dorschner et al., Astron. Astrophys. 300 (1995)
+    503-520 (MgSiO3 glass), as distributed in optool's lnk_data (commit 0b1fa6df);
+    P. A. Gerakines, C. K. Materese and R. L. Hudson, Mon. Not. R. Astron. Soc. 522 (2023)
+    3145-3162, DOI: 10.1093/mnras/stad1164 (alpha-CO ice at 25 K), optical constants data
+    retrieved from the Optical Constants database (OCdb, NASA), distributed under NASA's Open
+    Access Data Policy; B. N. Khare et al., Icarus 60 (1984) 127-137 (Titan tholin), and C. Jaeger
+    et al., Astron. Astrophys. 408 (2003) 193-204 (amorphous Mg2SiO4), as distributed in the
+    HITRAN2024 aerosol compilation (I. E. Gordon et al., J. Quant. Spectrosc. Radiat. Transfer 353
+    (2026) 109807); J. B. Pollack, O. B. Toon and B. N. Khare, Icarus 19 (1973) 372-389, DOI:
+    10.1016/0019-1035(73)90115-2 (basalt and basaltic glass), through the Aerosol Refractive
+    Index Archive; and E. D. Palik and A. Addamiano, in E. D. Palik (ed.), Handbook of Optical
+    Constants of Solids (1985) (cubic ZnS), as compiled by D. Kitzmann and K. Heng, Mon. Not. R.
+    Astron. Soc. 475 (2018) 94-107, DOI: 10.1093/mnras/stx3141, a reduced subset of one material,
+    no file of the compilation included.
+  - reduced, with its citation: M. J. Wolff et al., J. Geophys. Res. 114 (2009) E00D04, DOI:
+    10.1029/2009JE003350 (Mars's dust), as distributed by NASA Ames's Mars Climate Modeling Group
+    (Dust_Refractive_Indicies.txt), its rows over 0.7-5.5 um.
+
+- The laboratory spectra of the condensed optics' rows without an index file (galaxy plan 14,
+  P14.T49.i), tool inputs in crates/hyperion-fit/data/usgs_splib07a/ (not shipped), committed
+  unmodified with its PROVENANCE.toml: forty spectra and two wavelength files of the USGS Spectral
+  Library Version 7 (R. F. Kokaly et al., U.S. Geological Survey Data Series 1035 (2017), DOI:
+  10.3133/ds1035; data release DOI: 10.5066/F7RR1WDJ), in the public domain in the United States.
+  Each spectrum is inverted for a single-scattering albedo by Hapke's model at its own geometry,
+  taken to a regolith's grains or held, and mixed at cited modes; the values of
+  crates/hyperion-sim/src/tables/substance_albedo.rs are computed from them. Courtesy of the U.S.
+  Geological Survey, which has not reviewed or endorsed the derived values.
 
 ================================================================================
 Test data (not shipped)

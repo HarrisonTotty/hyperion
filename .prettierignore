@@ -18,6 +18,8 @@ apps/hyperion/src/main/fixtures/*.trace.json
 
 # Third-party data committed unmodified, hashed by its PROVENANCE.toml
 crates/hyperion-fit/data/green2008_si/
+crates/hyperion-fit/data/martonchik_orton_1994_ch4/
+crates/hyperion-fit/data/warren_brandt_2008_h2o/
 
 # Tables a bless-style vitest writes and compares byte for byte (`src/renderer/src/test/bless.ts`)
 apps/hyperion/src/renderer/src/test/blessProbe.json

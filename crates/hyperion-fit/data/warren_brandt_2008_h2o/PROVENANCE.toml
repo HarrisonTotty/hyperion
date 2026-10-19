@@ -1,0 +1,16 @@
+# The optical constants of ice Ih at 266 K of Warren and Brandt (2008), as the refractiveindex.info
+# database tabulates them (lines of λ in µm, n and k; 0.0443 µm to 2 m): the frost `H2O`'s infrared
+# index beyond 780 nm (plan 14, P14.T49.i), the source of rendering plan R08's water-ice.json, whose
+# 380-780 nm rows are this file's to the row. The database is in the public domain (CC0 1.0), so the
+# file is committed unmodified. Read by `run substance_albedos`.
+dataset = "warren_brandt_2008_h2o"
+class = "committed"
+citation = "S. G. Warren and R. E. Brandt (2008), J. Geophys. Res. 113, D14220, DOI 10.1029/2007JD009744: optical constants of ice from the ultraviolet to the microwave, a revised compilation; ice Ih at 266 K (-7 °C); via the refractiveindex.info database (M. N. Polyanskiy 2024, Sci. Data 11, 94)"
+url = "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/c5c2f188e848453def5970e347399d653df2ffc2/database/data/main/H2O/nk/Warren-2008.yml"
+retrieved = "2026-10-16"
+release = "database/data/main/H2O/nk/Warren-2008.yml at the database's commit c5c2f188, the file R08's water-ice.json was reduced from (the same SHA-256)"
+licence = "CC0 1.0 Universal (the file's header: \"refractiveindex.info database is in the public domain; copyright and related rights waived via CC0 1.0\")"
+
+[[files]]
+name = "Warren-2008.yml"
+sha256 = "a8577eaa1fabb9245957397344ce23efb20dd4c57cd7f442710d2d2373e0bbd6"

@@ -1,0 +1,189 @@
+# Forty spectra and two wavelength files of the USGS Spectral Library Version 7, splib07a (Kokaly et
+# al. 2017), committed unmodified (CRLF line ends, as the release writes them) from the release's
+# ASCII data: the laboratory end-members of the condensed optics' rows without an index file (plan
+# 14, P14.T49.i; decision-p14-t49i-rock-mixtures). Read by `run substance_albedos`.
+#
+# How they are used, as USGS asks that modifications be described: no file is modified. Each
+# spectrum's reflectance is inverted channel by channel for a single-scattering albedo by Hapke's
+# model at the spectrum's own geometry (a Beckman spectrum as a directional-hemispherical albedo, an
+# ASD spectrum as a reflectance factor at incidence 20 degrees and emission 30 degrees), its deleted
+# channels (-1.23e34) dropped; the albedo is then taken to a regolith's 70 µm grains through Hapke's
+# equivalent slab at the mineral's stated real index, or held as measured for an opaque or unsized
+# sample; a rock's albedo is a cross-section-weighted mixture of its minerals' at a cited mode; and
+# the results are averaged into spectral bins over 0.3-5 µm, beyond each spectrum's reach held at
+# its nearest covered bin. USGS has not reviewed or endorsed these derived values.
+dataset = "usgs_splib07a"
+class = "committed"
+citation = "R. F. Kokaly, R. N. Clark, G. A. Swayze, K. E. Livo, T. M. Hoefen, N. C. Pearson, R. A. Wise, W. M. Benzel, H. A. Lowers, R. L. Driscoll and A. J. Klein (2017), USGS Spectral Library Version 7, U.S. Geological Survey Data Series 1035, 61 p., DOI 10.3133/ds1035; and the same authors (2017), USGS Spectral Library Version 7 Data, U.S. Geological Survey data release, DOI 10.5066/F7RR1WDJ"
+url = "https://www.sciencebase.gov/catalog/item/586e8c88e4b0f5ce109fccae"
+retrieved = "2026-10-16"
+release = "ASCIIdata_splib07a.zip of the data release's ASCII data item (ScienceBase 586e8c88e4b0f5ce109fccae, of the release 5807a2a2e4b0841e59e3a18d), sha256 d232645740869a82aafcad5839448c50b1dc72965ce042d1374f29b7a798a91c, its members of these names (thirty-six spectra under ChapterM_Minerals, four under ChapterA_ArtificialMaterials, and the two wavelength files at the archive's top level) extracted unmodified"
+licence = "U.S. public domain: DS 1035, p. ii: \"Although this information product, for the most part, is in the public domain, it also may contain copyrighted materials as noted in the text\" (no spectrum used here is so noted); the data release's metadata (ASCIIdata.xml): Access_Constraints \"none\", and Use_Constraints \"Any user who modifies the data is obligated to describe the types of modifications they perform ... Acknowledgment of the U.S. Geological Survey would be appreciated in products derived from these data. User specifically agrees not to misrepresent the data, nor to imply that changes made were approved or endorsed by the U.S. Geological Survey\" (the uses are described above and in each row's sources)"
+
+[[files]]
+name = "splib07a_Anorthite_HS201.3B_Plagio_BECKa_AREF.txt"
+sha256 = "cae580dce6cbba5fca9ec93e6df41f2f5b4ec753d597b1e7dc55199417fb67a8"
+
+[[files]]
+name = "splib07a_Augite_NMNH120049_BECKb_AREF.txt"
+sha256 = "f53e6e9923016442fd4c58397e3ddbb2b571679b8cbc533c78e5a3dee3ee3722"
+
+[[files]]
+name = "splib07a_Biotite_HS28.3B_BECKa_AREF.txt"
+sha256 = "6d89bf620ba515f91bbc6b5f25ed7557761c5a45002c8de2408c48f2e356be55"
+
+[[files]]
+name = "splib07a_Calcite_GDS304_75-150um_ASDFRb_AREF.txt"
+sha256 = "b20a32f29f7ebf52254abcd4ecad7d2c45b250d136ae13e2da65766408999b5e"
+
+[[files]]
+name = "splib07a_Carbon_Black_GDS68_sm.ap._BECKa_AREF.txt"
+sha256 = "27f11281502df0a1f25417192a701e46f993ef8f5241553d4261a55d09de2371"
+
+[[files]]
+name = "splib07a_Chromite_HS281.3B_ASDFRc_AREF.txt"
+sha256 = "b58b2c40ab491a1214213ba6ee41468e12028c5103445a20b53cf0d4a966152f"
+
+[[files]]
+name = "splib07a_Corundum_HS283.3B_BECKc_AREF.txt"
+sha256 = "328f957f72ffdeec233f9f47376de5a73a0f5e00f098c76fa4e873cdb52b2f4b"
+
+[[files]]
+name = "splib07a_Cronstedtite_M3542_BECKb_AREF.txt"
+sha256 = "e04cd240b754cd65a0f25e345e8d06a50660ae423b2a42033d7182b46b62fd51"
+
+[[files]]
+name = "splib07a_Diopside_HS15.3B_Pyroxene_BECKc_AREF.txt"
+sha256 = "da1ab8091796ddda542419ca70bdbd6fca75233f286ba3af475faa588be27673"
+
+[[files]]
+name = "splib07a_Enstatite_NMNH128288_BECKc_AREF.txt"
+sha256 = "77c4bf12b8465393093b9ca64f64cbb6fca32573593a17e5357b97e2e460cfa9"
+
+[[files]]
+name = "splib07a_Ferrihydrite_GDS75_Syn_F6_BECKb_AREF.txt"
+sha256 = "5a7f537fd276f0d44a426079203fa47122767fe3f8ed6c4debd5387dcd6b5072"
+
+[[files]]
+name = "splib07a_Halite_HS433.3B_BECKa_AREF.txt"
+sha256 = "bcd66deaf8fe216b993656926fc13629dd5d59b36e1d0a9b886dab49b3dcb1ae"
+
+[[files]]
+name = "splib07a_Hematite_GDS27_BECKa_AREF.txt"
+sha256 = "39d4822eb489410f4080552ef086f8f04a9983c9dc157bf448a4cc110796d8f6"
+
+[[files]]
+name = "splib07a_Hypersthene_NMNHC2368_BECKb_AREF.txt"
+sha256 = "748028979dc0afd835726f6a5f2340deadf038b9a083e9a7f2f409e395d9e3ea"
+
+[[files]]
+name = "splib07a_Hypersthene_PYX02.f_60um_BECKc_AREF.txt"
+sha256 = "5925fe6e7767527ccba49a2660c67fc2df70cabd8840ffcd4180064aebfe07fb"
+
+[[files]]
+name = "splib07a_Ilmenite_HS231.3B_BECKb_AREF.txt"
+sha256 = "513b9f6b5b95e9ce09473a542f375a6610574e51a22d5785750638c684025832"
+
+[[files]]
+name = "splib07a_IronPowder_SA-209309_325mesh_ASDFRa_AREF.txt"
+sha256 = "149206fdffc1f3d05afa7a1aa7ec63011bc57b0fc95dc0d1b247c91a262fdcad"
+
+[[files]]
+name = "splib07a_Iron_Powder_SA-267953_lt10_um_ASDHRa_AREF.txt"
+sha256 = "85f9ea2c81bb5c772287e5b5aaadbaf9830e24c55ee66c513d458dd9caa8f332"
+
+[[files]]
+name = "splib07a_Iron_Sulfide_Cerac-I-1047_ASDHRa_AREF.txt"
+sha256 = "292b0a0da3c7cc10bb60a53ba3ad255918be8ca977865a53ae1b02f638e72501"
+
+[[files]]
+name = "splib07a_Kerogen_BK-Cornell_BECKa_AREF.txt"
+sha256 = "1cf90f2c3e0fc06305d0fd5ee627d65e81aac5106f8ed67c0942cad84bc92e45"
+
+[[files]]
+name = "splib07a_Kieserite_KIEDE1.b_fine_gr_ASDFRc_AREF.txt"
+sha256 = "674077f4c10aa7766e2b0a4b58ffb66cea7d4107d7f8d52a48c9dda9a73e8456"
+
+[[files]]
+name = "splib07a_Lizardite_NMNHR4687.c_70um_BECKa_AREF.txt"
+sha256 = "f94ee5b619cf93eee1fa8c20c29e949220258e4af1f279c774ef6914a42a661b"
+
+[[files]]
+name = "splib07a_Magnetite_HS195.1B_ASDFRb_AREF.txt"
+sha256 = "bbaf043ccc9a2ddce0415fbd21b77b466f6376cd92f18c37c2635331a1900a3d"
+
+[[files]]
+name = "splib07a_Magnetite_HS195.3B_BECKb_AREF.txt"
+sha256 = "f918cf83e0d319d7ec7947337f1fff9df0faf3b3ed7a2e28eec31834c4cd0516"
+
+[[files]]
+name = "splib07a_Magnetite_HS78.1B_ASDFRb_AREF.txt"
+sha256 = "b58eae31bd901f2a6433b933db4909ab2a3069348cb4775a253245b75d1a47e7"
+
+[[files]]
+name = "splib07a_Microcline_HS151.3B_Feldspar_BECKc_AREF.txt"
+sha256 = "fc3a775e55878630b2748c3965d5754f64df939e0b4d2028d11a4626f017a528"
+
+[[files]]
+name = "splib07a_Oligoclase_HS110.3B_BECKc_AREF.txt"
+sha256 = "fa9ca5c13a488d93f785f99ab788107a3c0fc33e94fa54cc039b4ccc5f95b566"
+
+[[files]]
+name = "splib07a_Olivine_GDS70.c_Fo89_70um_BECKb_AREF.txt"
+sha256 = "980bc6c1f0e3005d3e394121557df9ad7809a6fb49b96f9abfccda56218eb029"
+
+[[files]]
+name = "splib07a_Olivine_GDS71.a_Fo91_65um_BECKb_AREF.txt"
+sha256 = "4dbc8bacfb7dbf4f724f761c17eef9a6da4213428ebefe5371246f2623c87835"
+
+[[files]]
+name = "splib07a_Olivine_HS285.2B_Fo80_ASDFRb_AREF.txt"
+sha256 = "4d57df426824b017bdaa8736d14831146c4de4ac829aa30ff233f65d377a9e2a"
+
+[[files]]
+name = "splib07a_Olivine_KI3054_Fo66_lt60um_BECKb_AREF.txt"
+sha256 = "29857612986e3afd2a8fb902a5941c212de959a34c206929c36ac9046641cdc0"
+
+[[files]]
+name = "splib07a_Olivine_KI3188_Fo51_lt60um_BECKb_AREF.txt"
+sha256 = "d9f15114858dff590185164f38e7b2cf07686893e18e20b0d5fb6bc50769ef94"
+
+[[files]]
+name = "splib07a_Olivine_KI3189_Fo60_lt60um_BECKb_AREF.txt"
+sha256 = "e9ae07fea8c949b890002bd068aa39fd321684daa2ae389ea3f2059b666642fa"
+
+[[files]]
+name = "splib07a_Olivine_KI3291_Fo29_lt60um_BECKb_AREF.txt"
+sha256 = "955f07d1ac3f126c43750372074b01aeb77fa3bc2ef9b7fdf81afd2d91044b27"
+
+[[files]]
+name = "splib07a_Pigeonite_HS199.3B_BECKc_AREF.txt"
+sha256 = "c121c814b2e27463bc06d057ea4c44579e74fe99fefa736c729a1892f80db2f1"
+
+[[files]]
+name = "splib07a_Quartz_GDS31_0-74um_fr_BECKa_AREF.txt"
+sha256 = "f34b2654fe3d7a6e0f8db5fd66066ad46cab5c71560f98e2cc37067fca8906d4"
+
+[[files]]
+name = "splib07a_Rutile_HS126.3B_BECKc_AREF.txt"
+sha256 = "b783f7dfe0d167962cb3417b5a67cb5d339259f94d721dc74ac2d5b4b4e77797"
+
+[[files]]
+name = "splib07a_Saponite_SapCa-1_BECKb_AREF.txt"
+sha256 = "aaa8d0e9cd3fa0d3ea95523560b1fa1c1f56b9b56d9c10ad1d0e4d73bd6ab65c"
+
+[[files]]
+name = "splib07a_Sulfur_GDS94_Reagent_BECKa_AREF.txt"
+sha256 = "59cd2294b1f4867747995bdc879028329221c65a6cfd1a383cabbbbc6184ea7b"
+
+[[files]]
+name = "splib07a_Trona_GDS148_BECKa_AREF.txt"
+sha256 = "0b152b84b1b6ae5dddc159c55ab01a15e705a0fb917d7ed0478d7b0524d24eea"
+
+[[files]]
+name = "splib07a_Wavelengths_ASD_0.35-2.5_microns_2151_ch.txt"
+sha256 = "a1069d2e9278924bd4ba90fa85ced99a10640a31d8de5ba95216c632021b323a"
+
+[[files]]
+name = "splib07a_Wavelengths_BECK_Beckman_0.2-3.0_microns.txt"
+sha256 = "b4c83d7b62a5148b9305a17f958a8cdcea4eaeaa26f2dc9e1ec05bdca25a437e"

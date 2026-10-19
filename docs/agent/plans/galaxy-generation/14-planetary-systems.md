@@ -5406,6 +5406,100 @@ rows' values.
     - every row names its source and basis.
   - _Files:_ `substance/optics.rs`, `tables/substance_albedo.rs`, `tasks/substance_albedos.rs`.
   - _Accept:_ `cargo test -p hyperion-sim substance::optics`; `cargo test -p hyperion-fit substance_albedos`.
+- **P14.T49.i Condensed optics from laboratory spectra, and the infrared** (22 → 23; lane
+  `p14-optics`, after T49.c; T49.c's part 2, decision-p14-t49c-split §1.1, §1.3, §5.2 and §5.4,
+  2026-10-16; on 23's critical path: P14.T57.a and P14.T54.a wait for it).
+  - _The bins._ Each row gains its spherical albedo in contiguous energy bins over 0.3–5 µm, so that
+    P14.T51.b's Bond albedo weights the host's flux over a whole spectrum (§5.2: an M dwarf puts
+    most of its light in the near infrared, where ice absorbs).
+    - B, V and R are the visible's bins, with stated edges that hold their effective wavelengths
+      (440, 550 and 640 nm); a bin ends at 780 nm, where R08's files end.
+    - A bin's value is the mean over the bin, uniform in wavelength, of the row's spectral spherical
+      albedo, by T49.c's similarity relation. A bin the row's data cover in part averages over that
+      part; a bin beyond the data holds the nearest covered bin's value; each row states its data's
+      reach.
+    - The palette's B, V and R values (w, `A_N`, `A_h` and the spherical albedo at the effective
+      wavelengths) stay T49.c's.
+  - _The frosts' infrared_, from each primary, read as `hyperion-fit` datasets with URL and
+    checksum: raw where a licence allows it, else reduced by a committed `reduce.py` with the raw
+    file's checksum recorded (decision-composition §5). R08's files stay the visible's one source,
+    and each set joins its file at 780 nm.
+    - `H2O`: Warren and Brandt 2008, the R08 file's own source, with Grundy and Schmitt 1998's cold
+      ice over its range.
+    - `CO2`: Warren 1986. Hansen 2005's data, R08's visible continuum, could not be fetched.
+    - `CH4`: Grundy, Schmitt and Quirico 2002 (phase I), with Martonchik and Orton 1994's n.
+    - `N2`: Grundy, Schmitt and Quirico 1993's 2.15 µm band of β-N₂; transparent elsewhere.
+    - `CO`: Gerakines, Materese and Hudson 2023's fundamental band; its overtones are not drawn.
+    - `NH3`: Martonchik, Orton and Appleby 1984's measured infrared, from 1.462 µm (their 6,840
+      cm⁻¹ row, `AMMONIA_MEASURED_FROM_NM`).
+    - `O2`, `Ar`, `H2S` and `NH4SH` have no usable infrared primary. They stay lossless, labelled
+      upper bounds.
+    - One reference temperature per set, stated. One grain class, the reference form's; grain
+      classes stay deferred with their size (§3).
+  - _The rows from laboratory spectra_: the USGS Spectral Library 7 (`splib07a`; Kokaly et al.
+    2017; U.S. public domain by USGS policy, each use described), its spectra committed as used.
+    - Each spectrum is inverted for w by T49.c's model at its own geometry: a Beckman spectrum (an
+      integrating sphere) as a directional-hemispherical albedo, an ASD spectrum as Hapke's
+      reflectance factor at its incidence and emission. Its grains are then rescaled to the
+      reference form's by the equivalent slab's internal transmission at a stated n, and put in
+      the form.
+    - A rock with no whole-rock spectrum is an intimate mixture of its minerals' w at its cited
+      pristine mode, weighted by cross-section (Hapke 2012 §10: volume fraction over diameter):
+      - its silicates at the form's 70 µm;
+      - the phases its class's petrography puts below it at 1 µm (`Adopted`: the smallest grain at
+        which the equivalent slab is used; never fitted). These are the organics, magnetite,
+        sulphides and fine metal of the CI, CM and CV matrices at the class's matrix fraction, and
+        none for equilibrated ordinary and enstatite chondrites or crystalline rocks without a
+        cited fine fraction;
+      - each fine phase from its finest measured fraction.
+
+      `basalt` and `lava_glass` keep R08's whole-rock indices. The mixture is run on `basalt` as
+      the method's check, and `basalt_fe` is a stand-in upper bound. `splib07a` holds no
+      whole-rock powder, meteorite or soil. RELAB's terms are non-commercial and its PDS copy
+      carries no licence of the rights holder's, and ECOSTRESS reserves all rights
+      (decision-p14-t49i-rock-mixtures, 2026-10-16).
+
+    - The rows: every lithology P14.T51.c names; `anorthosite`, `ferric`, `ca_al_residue` and
+      `carbonaceous`; the salts and transparent minerals where a spectrum exists; and `S8`
+      (Sulfur GDS94). `basalt_fe` comes first: a mixture replaces its MGS-1 stand-in index
+      (§5.10).
+  - _The opaque solids_ (k above 0.1: `Fe`, `Cr`, `graphite`, `FeS`, `soot`): a spectrum where
+    `splib07a` has one, else Hapke's slab with the complex Fresnel surface term from R08's file.
+  - _The rest, each labelled_, with its reason:
+    - `mars_dust`: the slab at its grains' effective size, from R08's file, a stand-in below
+      geometric optics;
+    - `SO2` frost: Nash, Fanale and Nelson 1980's measured levels;
+    - `NH3`, `Na2S` and `CaTiO3` keep their stand-in indices, since no open spectrum exists.
+      Pipes, Browell and Anderson 1974 measured ammonia frost in the ultraviolet only;
+    - every row still not modelled (closed set, for the composition audit).
+  - _Tests:_
+    - the bins contiguous over 0.3–5 µm, with B, V and R holding their wavelengths; every bin's
+      value in [0, 1], and a lossless row's 1;
+    - each infrared set at 780 nm: n within 1% of its R08 file's, and k continuous, or its step
+      stated;
+    - each inversion reproducing its spectrum at its own geometry and grain size;
+    - each mixture class against its band in the like quantity, `A_N` against zero-phase values
+      and the 30° reflectance factor against 30° values, within an allowance of 1.25:
+      - CI 0.020–0.035 at 30° (Amano et al. 2023);
+      - CM 0.047–0.085 in `A_N` (Beck et al. 2021);
+      - CV 0.05–0.13 at 30° (Cloutis et al. 2012);
+      - H, L, LL 0.25–0.39 at 700 nm (Bowen et al. 2023);
+      - `basalt_fe` between 0.09 and 0.5 in `A_N`.
+
+      A miss makes the row a stand-in with its reason, never a refit;
+
+    - CI and CM < CV < H, L, LL in `A_N`;
+    - the anchors space weathering does not set: Mars's bright dust; Io, through the `S8` and `SO2`
+      rows; Titan's dunes in its infrared windows;
+    - from this commit, P14.T51.b's anchors that need the infrared, checked at the rows here and
+      asserted at the body by T51.b: an Enceladus near 0.8 (Howett et al. 2010; Li et al. 2023's
+      0.76 ± 0.03), and T51.a's by-hand Pluto (0.6–0.8) and Triton (0.72–0.92);
+    - the energy tests and the sources, as T49.c's.
+  - _Files:_ T49.c's, with the task's datasets under `crates/hyperion-fit/data/`.
+  - _Accept:_ T49.c's: `cargo test -p hyperion-sim substance::optics`;
+    `cargo test -p hyperion-fit substance_albedos`;
+    `cargo test -p hyperion-sim --features testing --test substance_golden`;
+    `cargo run -p hyperion-fit -- check`.
 - **P14.T49.j The condensed thermal columns and the regolith's inertia** (22 → 23; lane
   `p14-thermal`, after T49.b; decision-p14-t49c-split, 2026-10-16).
   - For every row that can form a surface: the solid's specific heat c(T) and thermal
@@ -16749,6 +16843,648 @@ tables::gauss_legendre`.
     refit.
   - _Space weathering_ (§5.11) is not in any row, by design: a fresh basalt regolith's `A_N`, 0.093,
     sits at the top of the mature maria's 0.06–0.09. P14.T51.d's.
+- **Deviations in P14.T49.i, as built: the bins, the infrared, the laboratory spectra and the
+  anchors space weathering does not set (`p14-optics`, 2026-10-16; finished 2026-10-19).**
+  `GENERATOR_VERSION` stays 22. The task was built in two stages: stage A the bins, the frosts' and
+  the regoliths' infrared and `OpticsInput`; stage B the laboratory rows, the mixtures, the opaque
+  slabs, the levels and the anchors. The palette's B, V and R values of T49.c's rows other than
+  `basalt_fe` are T49.c's, to the bit.
+  - _Held at 22_ (decision-bump-plan-after-22 §1.2, as T49.c's record).
+    - Nothing on the record calls `substance::optics`. P14.T51.b is the bins' first reader, and
+      adds `planetary/derive/photometry.rs` to the optics tripwire's held list.
+    - The table `substance_albedo` (task `substance_albedos`, fast) goes from revision 0 to 1 and
+      stays stamped since 22. It is refitted at 22 by delete-and-re-emit (decision-p14-t49h-liquids
+      §5): the binary built from the tree, the table removed,
+      `hyperion-fit run substance_albedos --since 22`, `hyperion-fit check` passing (32 fresh, 6
+      warnings, 0 failures), and only this table's `tables.lock` entry changed. The final refit's
+      header:
+      - inputs-sha256 `9001cce9285b57855c65942a05e0c9c4db1b1361f395bbecc74703851482ecc0`;
+      - sim-fingerprint `0d07ed91f3a0b5bdadc6f8a6519bfab008564f7122360272fc4767ea67707132`.
+
+      **P14.T54.a** restamps the table `--since 23`, as T49.c's record says.
+
+    - _A note for the procedure._ A row grew from 21 values to 35, so the sim would not compile
+      against the old table, and `hyperion-fit` links the sim. To build the fit binary the old
+      table was padded to 35 values a row for the moment. It was then deleted and re-emitted,
+      because the emit guard refuses to rewrite a table under the same `since-generator-version`
+      header. Any later change to the row length needs the same steps.
+    - The registry golden's `[albedo]` is re-blessed at 22, its header 22. Against `HEAD`
+      (P14.T49.c) 2,007 labels are new and 22 gone:
+      - each row gains its infrared set, its 12 bins and its data's reach;
+      - each laboratory row prints its input: its spectra, and a mixture's parts with their volume
+        fractions and grain classes, and its fine size (decision-p14-t49i-rock-mixtures §4);
+      - `basalt_fe`'s input line and its 21 values go, relabelled under the mixture that replaces
+        its MGS-1 index (decision-p14-t49c-split §5.10).
+
+      `golden_diff --base HEAD` moves that one file, every change inside `[albedo]`. Its verdict
+      asks for a bump, which main's ruling of 2026-10-13 waives for a change before 22 → 23. Until
+      T54.a a changed value re-blesses it at the version in force.
+  - _Added public items._
+    - In `hyperion_sim::substance::optics`:
+      - `SPECTRAL_BIN_EDGES_NM`, 13 edges: 300, 390, 495, 595, 700, 780, 1,000, 1,300, 1,700,
+        2,200, 2,800, 3,500 and 5,000 nm. Each edge's reason is in its doc:
+        - 300 and 5,000 are the ruling's ends;
+        - 390, 495, 595 and 700 put 440, 550 and 640 nm inside the B, V and R bins: 495 and 595
+          are the midpoints between those wavelengths, and 390 and 700 close B and R 50 and 60 nm
+          from theirs;
+        - 780 is where R08's files end;
+        - 1,000 to 3,500 are cut so that water ice's bands fall inside bins, not on their edges;
+      - `SPECTRAL_BINS` (12), `BVR_BINS` (`[1, 2, 3]`), `BVR_ROW_LEN` (21, T49.c's row),
+        `SPECTRAL_BINS_OFFSET` (21) and `DATA_REACH_OFFSET` (33). `ALBEDO_ROW_LEN` is now 35:
+        21 values in B, V and R, 12 bins and 2 for the reach;
+      - `OpticsInput`: `Index { file, infrared: Option<InfraredIndex> }`, `SizedIndex`,
+        `OpaqueSlab`, `Spectrum`, `Mixture` and `Levels`. It is now
+        `Debug, Clone, Copy, PartialEq` only: its fractions and indices are real numbers;
+      - `InfraredIndex`: 13 variants, each with `datasets()`. It is a closed set, for the
+        composition audit; a row gains a set where an open primary of its solid's infrared is
+        found;
+      - `FINE_GRAIN_DIAMETER`, `Spectrometer`, `BECKMAN_INCIDENCE_DEG`, `Geometry`,
+        `ASD_GEOMETRY`, `LabSpectrum`, `GrainScaling`, `EndMember`, `GrainClass`, `MixturePart`
+        and `ReflectanceLevels`;
+      - on `CondensedOptics`, six new methods: `input()`, `infrared_source()`,
+        `spherical_albedo_bins()`, `data_reach_nm()`, `grain_diameter()` and `lab_spectra()`. The
+        bins method has a doctest: water frost is above 0.95 in the B, V and R bins and below 0.1
+        in 2.8–3.5 µm. `index_file()` now returns `Option<&'static str>`, `None` for a row of
+        another input. The `_bvr` accessors, `is_stand_in`, `sources` and `reference_form` are
+        unchanged. The provenance enum is renamed `InputProvenance` (private);
+      - **the first and last bins stand for the light outside 0.3–5 µm** (the module
+        documentation). A Bond albedo weights the first bin by all the flux below 390 nm and the
+        last by all the flux above 3.5 µm, as the fit's tests do for a blackbody. P14.T51.b
+        applies this weighting.
+    - In `hyperion-fit`'s `tasks::substance_albedos`:
+      - `VERSION` is 1;
+      - `row_optics` returns `BvrValues` (`[f64; BVR_ROW_LEN]`), and `fit` fills the bins and the
+        reach after it;
+      - new: `row_optics_at`, `row_optics_of_w`, `reflectance_factor`, `RowGrain`, `FitInputs`,
+        `describe_input`, `row_datasets`, `fit_on_grid(manifest, step_nm)` and `INFRARED_SETS`
+        (every set in a fixed order, which the fingerprint numbers them by; an exhaustive match,
+        so a new set does not compile until it is listed);
+      - new errors: `FitAlbedoError::NoIndexFile`, `FitAlbedoError::Infrared { dataset, why }` and
+        `FitAlbedoError::Spectrum`;
+      - the module `spectral`: `SPECTRAL_STEP_NM` (0.1), `SphericalAlbedoCache`,
+        `spectral_single_scattering_albedo`, `Interpolation` (five rules), `Curve`, `Piece` (with
+        `knots_nm`), `SpectralIndex`, `spectral_bins`, and the trait `SpectralGrain`. The trait
+        gives a row's reach, its knots and its w at a wavelength; every input's grain implements
+        it;
+      - the module `infrared`: `JOIN_NM` (780), `REACH_END_NM` (5,000), `METHANE_N_HELD_FROM_NM`
+        (2,381), `AMMONIA_MEASURED_FROM_NM` (1,462), `CO_NOISE_FLOOR` and
+        `CO_NOISE_WINDOW_PER_CM`, `InfraredData` (`load`, `from_texts`, `files`),
+        `refractiveindex_rows`, `table_rows`, `k_of_alpha`, `visible_piece`, `infrared_pieces`
+        and `spectral_index`;
+      - the module `lab`: the splib07a reader `LabLibrary`; the inversions `Measurement`,
+        `InversionTable`, `invert` and `HAtMu`; the slab's `rescale`; the complex Fresnel
+        `hemispherical_fresnel_reflectance`; the grains `EndMemberGrain`, `MixtureGrain`,
+        `LevelsGrain` and `OpaqueGrain`; and `Clamped`;
+      - the manifest gains `datasets`, 16 entries, in the order the rows first name them. The task
+        refuses a manifest whose list is not `row_datasets()`, before it reads any dataset;
+      - the fingerprint also probes the 13 bin edges, each row's infrared set by its place in
+        `INFRARED_SETS` (0 for none), the fine size, the Beckman's and the ASD's geometry, the
+        regolith's highest w, and a hash of every row's described input;
+      - the acceptance line adds the bins' range: all 12 within [0, 1], the lowest 0.0108
+        (`H2O`, 2,800–3,500 nm). The run refuses a bin outside [0, 1].
+  - _The bins._
+    - **What a bin's value is.** The mean over the bin, uniform in wavelength, of the reference
+      form's spectral spherical albedo. At each wavelength:
+      - w comes from the row's input at the form's grain (100 µm frost, 70 µm regolith): the
+        equivalent slab of an index, a spectrum's w taken to the form's grains, a mixture's
+        weighting, an opaque slab's surface term or the levels' inversion;
+      - the spherical albedo is that of T49.c's similarity relation's isotropic medium, at the
+        form's asymmetry.
+    - **The grid.** Its nodes are every knot of the row's data, every join, every bin edge and
+      both ends of the reach. Each interval between nodes is cut into equal steps of at most
+      0.1 nm, and the mean is taken by the midpoint rule, so a step in the integrand (a join)
+      always falls on a node.
+    - **The cache.** The spherical albedo is read from `SphericalAlbedoCache`:
+      - 257 nodes, uniform in s = √(1 − w*), van de Hulst's similarity parameter (1974, eq. 13),
+        in which the albedo is smooth where it is not in w*;
+      - a cubic through the four nearest nodes;
+      - within 10⁻⁷ of the direct computation.
+
+      The whole fit ran in about 2 s at stage A (its measure).
+
+    - **How each source is read between its knots.** Over 380–780 nm, R08's file as T49.c reads
+      it: n linear, and ln k linear, in λ. Beyond 780 nm, each set by its source's own rule
+      (below). A spectrum's w is linear between its channels.
+    - **Coverage.** Every index row's data begin at R08's 380 nm, so **its first bin, 300–390 nm,
+      is the mean over 380–390 nm**, as `SPECTRAL_BIN_EDGES_NM`'s doc says. That bin stands for
+      all the light below 390 nm: 11% of a 5,772 K blackbody's and 0.2% of a 3,000 K one's
+      (computed here from the Planck series). A laboratory row's data begin at its spectra's first
+      channel (301.1 nm for a Beckman spectrum, 350 nm for an ASD one).
+      - A bin the data cover in part is averaged over the covered part. `CH4`'s last bin, for
+        example, is the mean over 3,500–4,912.7 nm.
+      - A bin beyond the data takes the nearest covered bin's value. A row with no infrared set
+        carries its 700–780 nm bin out to 5 µm, and says so in its own sources: the four lossless
+        frosts (`O2`, `Ar`, `H2S`, `NH4SH`), `Na2S`, `MnS`, `CaTiO3`, `Cr` and `graphite`.
+      - Each row stores its data's reach: from 300–380 nm to between 780 and 5,000 nm.
+    - **Where n falls below 1.** This happens inside the ices' strong fundamentals. There the
+      slab's internal terms (`S_i`, and the mean path ⟨D⟩) are not real.
+      - They take their limit at n = 1, and the surface reflection R(0) takes the true complex
+        index. This extension is the lane's own; no source gives it.
+      - It is continuous with the slab at n = 1 (a test).
+      - A negative k, noise about zero, is taken as 0.
+      - n drops below 1 only in `H2O`'s and `NH3`'s 3 µm bands, `CO2`'s 4.27 µm band and `CO`'s
+        4.67 µm band, all beyond 2.8 µm (a test).
+    - **B, V and R** stay the palette's point values at 440, 550 and 640 nm (T49.c's), not the
+      bins' means.
+  - _The frosts' infrared._ Each set comes from its primary and joins its R08 file at 780 nm. Each
+    has one reference temperature, stated in the row's sources, and all use the reference grain,
+    100 µm.
+    - **`H2O` (`WaterIce`).** Warren and Brandt 2008, ice Ih at 266 K, committed raw
+      (refractiveindex.info's `Warren-2008.yml`, CC0).
+      - n and ln k are linear in ln λ, their table's recommendation.
+      - Over 962.3–2,742 nm, Grundy and Schmitt 1998's absorption of hexagonal ice at 100 K takes
+        the place of their k (k = αλ ÷ 4π, linear in λ); n stays Warren and Brandt's.
+      - At 780 nm the join is continuous by construction (k step 1): R08's `water-ice.json` is
+        Warren and Brandt's table, row for row.
+      - Inside the set, k steps ×2.64 at 962.3 nm and ×0.561 at 2,742 nm, where the 100 K ice
+        meets the 266 K ice: a temperature step, not an error.
+      - Bins: .9990 .9979 .9914 .9801 .9634 .9061 .7863 .3641 .2634 .2077 .0108 .0108.
+    - **`CH4` (`MethaneIce`).** Grundy, Schmitt and Quirico 2002, phase I at 40 K.
+      - k comes from their α over 0.780–4.913 µm (k = αλ ÷ 4π, linear in λ); the data end at
+        4,912.66 nm.
+      - n is Martonchik and Orton 1994's at 90 K, committed raw (`Martonchik-solid-90K.yml`, CC0;
+        n only), linear in λ. Beyond its 2,381 nm row n is held at 1.316, because the table's next
+        rows are the 3.3 µm band's extrema and then 7.675 µm.
+      - At 780 nm, n is within 1%, and k goes from the file's 0 (a gap) to 3.54 × 10⁻⁸, inside
+        Grundy's 0.79 µm band.
+      - Bins: 1 ×5, then .9482 .8879 .7525 .7481 .5445 .3516 .7110.
+    - **`NH3` (`AmmoniaIce`).** Martonchik, Orton and Appleby 1984, from optool's
+      `nh3-m-Martonchik1983.lnk`, the file R08's was reduced from; no temperature stated.
+      - n is linear in λ from 0.668 µm.
+      - k is their measured infrared from 1,462 nm on (their 6,840 cm⁻¹ row,
+        `AMMONIA_MEASURED_FROM_NM`), with ln k linear in λ. Over 780–1,462 nm k = 0, continuing
+        the file's statement (R08.T5.i). The entry's "beyond 1.43 µm" is corrected to 1.462 µm.
+      - Bins: 1 ×7, then .5643 .2087 .0934 .0613 .1521.
+    - **`N2` (`NitrogenIce`).** Grundy, Schmitt and Quirico 1993's 2.15 µm band of β-N₂ at 41 K,
+      over 1,999.9–2,300.2 nm (k = αλ ÷ 4π, linear).
+      - Elsewhere to 5 µm k = 0: a statement of transparency, not a measurement.
+      - n is held at the file's 780 nm value.
+      - Bins: 1 ×8, then .9956 .9992 1 1.
+    - **`CO2` (`CarbonDioxideIce`).** Warren 1986, CO₂ deposited near 80 K, over 0.742–5 µm
+      (optool's `co2-w-Warren1986.lnk`); n linear, and ln k linear, in λ.
+      - The ruling paired it with Hansen 2005, but Hansen 1997's and 2005's near infrared could not
+        be fetched.
+      - At 780 nm, n is within 1% and k steps ×2,371. Warren's continuum between the bands is
+        Egan and Spagnolo's impure dry ice, while the file's k is Hansen 2005's visible estimate.
+      - Bins: .9957 ×5, then .8081 .7961 .7832 .7583 .5500 .5757 .3855.
+    - **`CO` (`CarbonMonoxideIce`).** Gerakines, Materese and Hudson 2023's α-CO at 25 K, from
+      NASA's Optical Constants Database (OCdb).
+      - It covers 3,333.5–5,000 nm (1,990–3,000 cm⁻¹), as means of 8-row blocks (0.48 cm⁻¹, the
+        measurement's 0.5 cm⁻¹ resolution), linear in wavenumber.
+      - **Its noise floor** (stage A's finding, fixed in stage B): k is taken as 0 below 1.02 ×
+        10⁻³ (`CO_NOISE_FLOOR`), three times its rms over 2,400–3,000 cm⁻¹ (1,245 rows,
+        `CO_NOISE_WINDOW_PER_CM`), its baseline, in place of stage A's clipping of the negative
+        noise at 0. Stage A's 2.8–3.5 µm bin, 0.958, was that baseline noise; it is now 1.
+      - Over 780–3,333.5 nm k = 0, with the file's 780 nm n. The overtones at 1.58 and 2.35 µm are
+        not drawn.
+      - n steps by −0.46% at 3,333.5 nm, where the table begins.
+      - Bins: 1 ×11, then .7211 (stage A's: 1 ×10, then .9580 .6158).
+    - **`O2`, `Ar`, `H2S` and `NH4SH`.** No usable infrared primary was found, as each row's own
+      sources say:
+      - solid O₂'s measurements found are closed;
+      - argon is an atomic solid, with no vibrational band;
+      - H₂S's: Fathe et al. 2006 is closed, and Zhang et al. 2026 gives absorbance only;
+      - NH₄SH's (Howett et al. 2007) is closed.
+
+      They stay lossless, with n held at 780 nm: their data end at 780 nm and all twelve bins are
+      1. That is an upper bound, labelled by their stand-in flags.
+
+    - **Bond albedos** under a 5,772 K and a 3,000 K blackbody. Each bin is weighted by the Planck
+      flux between its edges, the first by all the flux below 390 nm and the last by all the flux
+      above 3.5 µm. These were recomputed from the committed table for this record:
+
+      | Row                    | 5,772 K | 3,000 K |
+      | ---------------------- | ------- | ------- |
+      | `H2O`                  | 0.832   | 0.528   |
+      | `CH4`                  | 0.928   | 0.795   |
+      | `NH3`                  | 0.891   | 0.618   |
+      | `N2`                   | 1.000   | 0.999   |
+      | `CO2`                  | 0.894   | 0.751   |
+      | `CO`                   | 0.996   | 0.979   |
+      | the four lossless rows | 1       | 1       |
+
+      At 3,000 K, 84% of the light falls in 0.78–5 µm, where ice absorbs; at 5,772 K, 43%
+      (computed here).
+  - _The regoliths' infrared._ Each set has the same primary as the row's R08 file, in the same
+    open copy, so n and k at 780 nm equal the file's (k step 1, a test). n is linear and ln k
+    linear in λ, R08's reduction. Bond albedos at 5,772 K / 3,000 K:
+    - `tholin`: Khare et al. 1984 at room temperature, through HITRAN2024; 0.068 / 0.121;
+    - `basalt`: Pollack, Toon and Khare 1973, through ARIA, n from the rows that give n and k from
+      the rows that give k; 0.055 / 0.064;
+    - `lava_glass`: the same paper's basaltic glass, read the same way; 0.129 / 0.211;
+    - `MgSiO3`: Dorschner et al. 1995, through optool; 0.556 / 0.587;
+    - `Mg2SiO4`: Jäger et al. 2003, through HITRAN2024, k printed to 10⁻⁴; 0.266 / 0.292;
+    - `ZnS`: Palik and Addamiano 1985, as Kitzmann and Heng 2018 compile it; 0.619 / 0.797. Its
+      380–390 nm bin, 0.061, and its B bin, 0.313, rest on the file's suspect k near the band gap
+      (T49.c's "`ZnS` in B");
+    - `mars_dust` (`MarsDust`, stage B): Wolff et al. 2009, as NASA Ames's Mars Climate Modeling
+      Group distributed it (the dataset `wolff_2009_mars_dust`, below), read the same way over its
+      0.7–5.5 µm rows, at its grains' 2.8 µm (below); 0.365 / 0.449.
+    - **Held at 780 nm**: these rows carry their 700–780 nm bin beyond 780 nm, each saying why in
+      its own sources (Bond albedos computed here from the table):
+      - `Na2S`: a computed index with a flat k, no measured infrared to join; 0.032 / 0.031;
+      - `MnS`: in Kitzmann and Heng's copy its infrared k is a placeholder floor from 1.9 µm, not
+        a measurement; 0.139 / 0.179;
+      - `CaTiO3`: Posch et al. 2003's infrared is in Jena's `Per_nk.dat`, reached only through the
+        Wayback Machine (sha256 `d8eeaa69…`). Its terms were not read, so it is not taken. The
+        row's visible is a stand-in; 0.067 / 0.076;
+      - `Cr` and `graphite`, the opaque slabs (below): no infrared set is joined; 0.182 / 0.184
+        and 0.086 / 0.087.
+  - _The datasets._ 16 are new, under `crates/hyperion-fit/data/`, all of class `committed`. Each
+    reduced one's `reduce.py` reproduces its committed file byte for byte from the raw, by the
+    command in its `PROVENANCE.toml`. Hashes are SHA-256, raw → committed:
+    - committed raw (CC0, refractiveindex.info at c5c2f188), so that the hooks leave their bytes
+      alone: `.prettierignore` skips both directories, as it does `green2008_si`, and
+      `end-of-file-fixer` skips `Martonchik-solid-90K.yml`, which has no final newline (added at
+      the finish: Prettier would have rewritten both files, and the fixer the second):
+      - `warren_brandt_2008_h2o` (`a8577eaa…`);
+      - `martonchik_orton_1994_ch4` (`6fb85914…`);
+    - reduced, from the first author's pages, now at a bare IP address (74.208.185.217):
+      - `grundy_schmitt_1998_h2o` (`56e45ef8…` → `98711622…`; no terms stated);
+      - `grundy_2002_ch4` (`52b42fcb…` → `4d62bf56…`; "please cite");
+      - `grundy_1993_n2` (`c5f71256…` → `1cbc57ee…`; no terms stated);
+    - reduced, from optool's `lnk_data` at 0b1fa6df (no licence for the data; MIT covers the
+      software):
+      - `warren_1986_co2` (`357f8951…` → `1da210a4…`);
+      - `martonchik_1984_nh3` (`14a5b66b…` → `c3064549…`);
+      - `dorschner_1995_mgsio3` (`9f07f23c…` → `f14ccc80…`);
+    - reduced, from OCdb, under NASA's Open Access Data Policy, with a citation and an
+      acknowledgment requested:
+      - `gerakines_2023_co` (`3a87d56c…` → `8f058ec2…`);
+    - reduced, from HITRAN2024's `hitran_ri.tar`, its members fetched by HTTP range requests
+      ("free", with a citation policy):
+      - `khare_1984_tholin` (`8cef815b…` → `4e36c453…`);
+      - `jager_2003_mg2sio4` (`2582d4ab…` → `fcae2486…`);
+    - reduced, from ARIA ("acknowledge the source publications"):
+      - `pollack_1973_basalt` (`ad8730a5…` → `90a1cadd…`);
+      - `pollack_1973_basaltic_glass` (`e05d88b2…` → `dab409dc…`);
+    - reduced, from LX-MIE at 38cc6d97, cited to both the primary and the compiler (the
+      Kitzmann–Heng compilation rule):
+      - `palik_1985_zns` (`ZnS.dat`, `32607bcb…` → `f666eaba…`);
+    - reduced, from NASA Ames's Mars Climate Modeling Group's table (no terms stated; the AGU paper
+      is closed):
+      - `wolff_2009_mars_dust`: `Dust_Refractive_Indicies.txt` from
+        <https://web.archive.org/web/20111019190939id_/http://spacescience.arc.nasa.gov/mars-climate-modeling-group/documents/Dust_Refractive_Indicies.txt>,
+        sha256 `bf6069ad22fbfbbef7bf957d386a8177647c87fd98ed6574b5c5f8d6c8016769`, the bytes of
+        the copy R08's `mars-dust.json` was reduced from (S. Ranjan's repository at 1e67a481),
+        reduced to 148 of its 229 rows, 0.7–5.5 µm, as the table prints them: its 146 infrared
+        rows over 0.8–4.9946 µm and the rows at 0.7 and 5.5 µm that bracket 0.78–5 µm (→
+        `b187d9bb…`). No other row and no raw file is committed; the `PROVENANCE.toml`'s header
+        and `reduce.py` name the rows kept. Re-fetched, re-hashed and re-reduced byte for byte on
+        2026-10-19;
+    - committed unmodified, U.S. public domain (USGS policy):
+      - `usgs_splib07a`: 40 spectra and 2 wavelength files of the release `ASCIIdata_splib07a.zip`
+        (sha256 `d2326457…a91c`; Kokaly et al. 2017, USGS Data Series 1035; data release DOI
+        10.5066/F7RR1WDJ), with their CRLF line ends: `.pre-commit-config.yaml`'s
+        `mixed-line-ending` now excludes the directory, as it does the CIE's. Each use is
+        described in its `PROVENANCE.toml`, in `NOTICE` and in every laboratory row's sources, as
+        the release's Use_Constraints ask.
+
+    For nine sets the raw is the very file R08's index was reduced from, with the same SHA-256:
+    `H2O`'s, `CH4`'s real index, `NH3`'s and the six regoliths' of stage A; `mars_dust`'s is a
+    tenth. `CO2`'s `PROVENANCE.toml` makes no such claim. `NOTICE` gains two entries under "Data"
+    and names the dust's infrared rows in Wolff et al.'s:
+    - the infrared optical constants, described as tool inputs, not shipped, from which
+      `tables/substance_albedo.rs` is computed: the two CC0 files committed unmodified, then the
+      reduced ones by copy, each with its citation. Gerakines et al. carry OCdb's acknowledgment,
+      and `ZnS` is "a reduced subset of one material, no file of the compilation included";
+    - the laboratory spectra: splib07a's citation and DOIs, the public-domain statement, how the
+      values are derived, and USGS's courtesy line ("which has not reviewed or endorsed the derived
+      values");
+    - Wolff et al. 2009's existing entry (R08's) now names its infrared rows, 0.7–5.5 µm, in
+      `wolff_2009_mars_dust/nk.csv`, beside the visible ones in `mars-dust.json`.
+
+  - _The two licence confirmations._ The lane's lean in both was facts with their citation:
+    - **the Mars dust table's infrared rows**, committed reduced as R08's visible rows are
+      (decision-r08-licences, row 3 and the notes to items 2–4): confirmed by main (2026-10-19),
+      with its conditions met. The reduced file holds only the source's own points over 0.7–5.5
+      µm, never the whole table, and no raw file is committed; its header names the infrared rows;
+      `NOTICE`'s "Data" entry for Wolff et al. 2009 names them beside the visible ones; and the
+      provenance is above (the URL, the SHA-256 and the rows kept);
+    - **Brossier et al. 2018's values** (CC BY-NC-ND), Titan's dunes' single-scattering albedo at
+      1.27, 1.59 and 2.01 µm read by eye from Fig. 7a, asserted in a test as facts with their
+      citation (decision-composition §5): confirmed by main (2026-10-19), with its conditions met.
+      Nothing generated reads them; the test's comment says they were read by eye, to about ±0.01,
+      which the test's tolerances exceed; and no figure, digitised curve or data file of the paper
+      is committed.
+  - _The rows from laboratory spectra_ (`splib07a`; decision-p14-t49i-rock-mixtures).
+    - **The inversion.** A Beckman spectrum is the similarity relation's directional-hemispherical
+      albedo at the regolith's asymmetry and μ₀ = cos 10° (`BECKMAN_INCIDENCE_DEG`); an ASD
+      spectrum is the IMSA's reflectance factor at i 20°, e 30°, azimuth 90° (g 35.5°; Kokaly et
+      al. 2017, DS 1035, p. 7). Each channel is bracketed on a 513-node table of the model in
+      √(1 − w) and refined by the Illinois method to a residual below 10⁻¹⁵; every spectrum's round
+      trip is tested below 10⁻¹², and no channel is clipped. A deleted channel is dropped and
+      interpolated across.
+    - **The rescale.** Through the slab's internal transmission at the end-member's stated n (the
+      Handbook of Mineralogy's mean principal index, linear in composition for a solid solution),
+      Θ^(D ÷ `D_lab`). An opaque end-member, an unsized one and any w below `S_e` are held as
+      measured. Holding the opaques was the lane's decision, not a ruling: the slab would brighten
+      them as they get finer, against the opaque behaviour Hunt, Salisbury and Lenhoff 1971
+      describe ("decreasing in reflectivity with decreasing particle size", quoted in splib07a's
+      descriptions). A regolith row's w is held at most 0.9995: halite's passes it at 195 of its
+      channels (`NaCl`, `KCl`), stated.
+    - **The reach.** A Beckman spectrum's data run from 301.1 nm to near 3 µm, an ASD spectrum's
+      over 350–2,500 nm, and a mixture's over the span all its parts share; its bins beyond hold
+      the last covered bin's value, stated in every laboratory row's sources. splib07a's Nicolet
+      spectra are not spliced on (deferred, below).
+    - **The rows**: every lithology P14.T51.c names (the mixtures, below); the salts and the
+      transparent minerals where a spectrum exists (`NaCl` as halite HS433.3B, `KCl` as halite,
+      `Na2CO3` as trona, `MgSO4` as kieserite, `CaCO3` as calcite GDS304, `SiO2` as quartz GDS31,
+      `Al2O3` and `ca_al_residue` as corundum, `TiO2` as rutile HS126.3B); `S8` (Sulfur GDS94);
+      `carbonaceous` as kerogen; `Fe`, `iron_nickel`, `FeS` and `soot` from spectra (below).
+  - _The mixtures_, per decision-p14-t49i-rock-mixtures, with the recipe check's corrections
+    against the sources (each stated in the row's mode):
+    - the fine size 1 µm, `Adopted`, stated per row with its phases and shares in a `fine grains`
+      source, which also states §2.3's infrared caveat (beyond about 1.5 µm a 1 µm grain is below
+      geometric optics, and the weights stay geometric); the matrix fractions read in Weisberg,
+      McCoy and Krot 2006 (MESS II, Table 1, p. 26): CI above 99, CM 70, CV 40 vol%, as the ruling
+      recalled; the matrix opaques' size read beside it (Orgueil's framboid crystals 0.1–1 µm, Hua
+      and Buseck 1998; Ryugu's magnetite 0.10–1.5 µm, Kimura et al. 2023; sub-µm sulphides and
+      organics, Nakamura et al. 2022; a pristine CM's sulphides under 100 nm, Nittler et al.
+      2021): 1 µm sits at the top of the range;
+    - the fine phases by class (§2.2): CI's and CM's organics (kerogen, IOM's named analogue),
+      magnetite and sulphides, CV's matrix-hosted sulphide, magnetite and metal, `cometary`'s
+      organics and sulphides; none for H, L, LL, E and the crystalline rocks, whose opaques sit at
+      the form's grain. Each fine phase takes its finest measured fraction (magnetite the mean of
+      HS195.1B's and HS78.1B's w, iron < 10 µm); FeS's coarse Cerac powder used fine says "an
+      upper bound on its w";
+    - CM's and CV's opaques split at the matrix share, the fine part at 1 µm from the finest
+      fraction and the rest at the form's grains from the coarse one (HS195.3B magnetite, 325-mesh
+      iron), the lane's reading of §2.2;
+    - Fa and Fs matched to each class: the ordinary chondrites' olivine to Weisberg et al.'s
+      equilibrated means (Fa 19.3, 25.2, 31.3) and their low-Ca pyroxene to Dunn et al. 2010's
+      ranges' midpoints (Fs 16.25, 20.5, 24), each split linearly between two samples (HS285.2B
+      Fo80 and KI3054 Fo65.5; PYX02.f Fs13.8 and NMNHC2368 Fs26.2); Bland et al.'s Fo80 phases as
+      HS285.2B and their Fo100 as GDS71.a (Fo91.9); PYX02.f is Fs13.8 by its analysis, not Fs30–40,
+      so `feldspathic` and `anorthosite` take NMNHC2368;
+    - `chondrite_ci` without ferrihydrite and gypsum (Amano et al. 2023), its phyllosilicate split
+      1:1; `ferric` at `basalt_fe` 90.4 wt% (the prototype's 92.4 summed to 102); the measured
+      grain sizes of diopside HS15 (295 µm) and halite HS433 (230 µm) and GDS71.a's named 65 µm;
+      the Ordinary chondrites' densities the Handbook's D(calc.); `basalt`'s check at the
+      Handbook's augite 3.31;
+    - **`basalt_reduced`'s mode is re-chosen, a deviation from the draft's**: the draft's
+      50/20/15/15 lies inside none of Charlier and Namur 2017's provinces, so the row takes the
+      Intermediate Plains' bounds (enstatite above 25, plagioclase above 45 wt%): 50/30/10/10 wt%,
+      to vol%;
+    - `basalt_fe` from the Lunar Sourcebook's Table 6.1 (Heiken, Vaniman and French 1991, p. 188),
+      the mean of five low-Ti mare basalts' modes, its pyroxene split 1:1 between augite and
+      pigeonite and its opaques as ilmenite at the form's grains; `basalt` and `lava_glass` keep
+      R08's whole-rock indices;
+    - TiO2 as natural rutile HS126.3B, not the pigment GDS798, whose polymorph and size are not
+      recorded; FeS as Cerac's, Pyrrhotite HS269 being mostly sulphates by its XRD.
+  - _The bands_ (decision-p14-t49i-rock-mixtures §3), in the like quantity, each passed within the
+    allowance of 1.25: CI's reflectance factor at i 30°, e 0° and 550 nm **0.042** against
+    0.020–0.035 (up to 0.044: at the top, as the ruling expected); CM's `A_N` 0.070 against
+    0.047–0.085 and its 30° reflectance at 560 nm 0.041 against 0.028–0.140; CV's 0.096 at 560 nm
+    against 0.05–0.13; H, L and LL 0.382, 0.377 and 0.368 at 700 nm against 0.25–0.39 (Bowen et
+    al. 2023's geometry read from their lab's later papers: i 0°, e 30°, the same by reciprocity);
+    `basalt_fe`'s `A_N` 0.410, inside 0.09–0.5. The order holds: CI 0.072 and CM 0.070 below CV
+    0.157, below H 0.445, L 0.433 and LL 0.417. So CI, CM, CV, H, L and LL are not stand-ins.
+    The lane's earlier "2–3× too bright" is withdrawn, replaced by these numbers (the ruling's
+    item 1).
+  - _The opaque solids_ (k above 0.1). `Fe` and `iron_nickel` (iron powder SA-209309), `FeS`
+    (Cerac I-1047) and `soot` (carbon black GDS68) are spectra, held as measured. `Cr` and
+    `graphite` are slabs: w = `S_e` by the complex Fresnel equations (Byrnes 2016, arXiv
+    1603.02720, eq. 6, App. D.2), held to Martinez-Anton 2026's dielectric values (0.0918 at n 1.5)
+    and within 4% of Hapke's fit at k ≪ 1; stand-ins, a smooth-grain upper bound: splib07a's iron
+    powder lies 15% below `iron.json`'s slab at 550 nm.
+  - _The rest, labelled._
+    - `mars_dust`: the slab from R08's file and Wolff et al.'s infrared at its grains' effective
+      size, 2.8 µm, a stand-in below geometric optics (a size parameter of 20 at 440 nm and 2 at
+      4.4 µm).
+    - `SO2`: Nash, Fanale and Nelson 1980's levels at i 20°, e 60°, the phase taken as 80°, read
+      from the abstract at the ranges' midpoints over 0.24–0.85 µm; at 40° its Bond albedo would be
+      0.84 (0.80 at 80°), recorded in its sources; its infrared bands are not drawn, its bins beyond
+      850 nm holding the 780–1,000 nm bin's value.
+    - `NH3`, `Na2S` and `CaTiO3` keep their stand-in indices, since no open spectrum exists; `NH3`
+      now carries its measured infrared beyond 1.462 µm.
+  - _The anchors._
+    - **Enceladus** (T51.b's anchor, checked at the row). `H2O`'s Bond albedo under a 5,772 K
+      blackbody is 0.832:
+      - inside Howett et al. 2010's 0.81 ± 0.04 (the test's window, 0.77–0.85);
+      - above Li et al. 2023's 0.76 ± 0.03, read through a secondary (the test asserts no less
+        than 0.73).
+
+      Pure fresh frost of 100 µm grains is an upper bound on the body, whose grains, impurities
+      and weathering darken it; T51.b asserts the body's value. Under a 3,000 K blackbody the same
+      frost gives 0.528, more than 0.2 below (a test), because most of the light then lies beyond
+      1 µm. Its B, V and R bins stay above 0.98.
+
+    - **Pluto and Triton** (T51.a's by-hand ranges, checked at the rows; added at the finish):
+      `N2` (1.000 / 0.999), `CH4` (0.928 / 0.795) and `CO` (0.996 / 0.979), the ices T51.a's
+      fixtures give, each lie at or above the top of Pluto's 0.6–0.8 and Triton's 0.72–0.92 under
+      a 5,772 K blackbody, so the infrared leaves both reachable. They are pure-frost upper bounds:
+      a mix of the three alone lies above Pluto's range, and T51.b asserts the bodies.
+    - **Io**: `S8`'s Bond albedo under a 5,772 K blackbody 0.69 and `SO2`'s 0.80, both above Io's
+      0.50 ± 0.10 (Simonelli and Veverka 1984).
+    - **Titan's dunes**: `tholin`'s w at 1.28 µm 0.564, inside 0.56–0.57 with the allowance; at
+      1.59 and 2.01 µm 0.644 and 0.572, brighter than the dunes' 0.46 and 0.42, the miss recorded
+      (the dunes mix tholin with ice; `tholin` is not a stand-in for it).
+    - **Mars's bright dust**: `mars_dust`'s Bond albedo 0.36 against the bright regions' 0.27
+      (Pleskot and Miner 1981), above the allowance's 0.338: a miss, brighter, stated in its
+      stand-in's reason.
+    - **`basalt`'s check**: the separates at Peck 1978's Alae mode give `A_N` 0.493, 5.3 times the
+      whole rock's 0.093, stated in `basalt`'s and `basalt_fe`'s sources.
+  - _Stand-ins_ (decision-p14-t49i-rock-mixtures §4): every mixture with no band (`anorthosite`,
+    `feldspathic`, `komatiite`, `basalt_reduced`, `granite`, `ultramafic`, `ferric`,
+    `phyllosilicate`, `chondrite_e`, `cometary`), `basalt_fe` (an upper bound), the analogues
+    (`KCl`, `Na2CO3`, `MgSO4`, `Al2O3`, `TiO2`, `ca_al_residue`, `iron_nickel`, `carbonaceous`),
+    `Cr` and `graphite`, `mars_dust` and `SO2`, beside T49.c's (`CH4`, `NH3`, `N2`, `O2`, `Ar`,
+    `CO`, `H2S`, `NH4SH`, `Na2S`, `CaTiO3`); each states its reason. `cometary` takes no band:
+    67P's geometric albedo (6.5 ± 0.2% at 649 nm, Fornasier et al. 2015) is a body's, context per
+    the ruling's §3 notes, and is stated beside the row's values.
+  - _Not modelled_ (closed set, for the composition audit): `Kr`, `Xe`, `N2O`, `C2H6` and `CH3OH`
+    (no index file or spectrum read), the liquids and solutions (`H2SO4`, `acid_uv_absorber`, the
+    brines, `nh3_h2o`, `ch4_c2h6_n2`), the giant planets' hazes and `SiC`.
+  - _Recorded per the ruling's item 9_: Hapke's embedded-absorber model (d) is not built, its
+    reason corrected (below its skin depth an absorber's absorption per volume is independent of
+    size, so (d)'s parameter is the absorber's index), to be built when an open IOM index or a
+    measured whole-rock spectrum exists and tried on `basalt` first; shock darkening is not
+    modelled (T51.d owns regolith processes); no band is read for `chondrite_e`, `cometary`, the
+    crystalline lithologies or any mixture's infrared bins; `basalt_fe`, an upper bound, lifts a
+    Mars-like lid's spherical albedo from about 0.12 to about 0.35, which P14.T51.b's bless note
+    checks against Mars's Bond albedo, and P14.T51.d must not darken it twice; RELAB is not an
+    input now, a permissive licence from its rights holder (a `License_Information` in its bundle
+    or its page's terms for the PDS copy) or a PDS provider agreement being what would settle it.
+  - _Tests._
+    - In the sim (`substance::optics`):
+      - the bins are contiguous over 0.3–5 µm and rising; B, V and R's bins hold 440, 550 and
+        640 nm; an edge falls at 780 nm; and the row layout is 12, 21 and 35;
+      - every bin is within [0, 1] (the energy test);
+      - each index row's reach runs from 380 nm to between 780 and 5,000 nm. A row with no set
+        ends at 780 nm and carries its 700–780 nm bin beyond, and every row's bins beyond its data
+        hold their nearest covered bin's value;
+      - the four lossless rows' bins are 1 to 10⁻⁶;
+      - each row names its sources and their basis: its file once and its infrared set once
+        (`Reduced`), each end-member's description, a mixture's mode (`Reduced`) and its fine
+        grains (`Adopted`) where it has any, levels' measurement, and a stand-in's reason;
+      - the laboratory inputs are well formed (spectra named for their spectrometer, physical
+        indices and grains, a mixture's parts positive and summing to 1, only held end-members
+        fine, every laboratory row a regolith, levels within [0, 1]);
+      - the rows not modelled have none (18 keys);
+      - the tripwire `substance_optics_nothing_on_the_record_reads_the_held_columns_yet` adds
+        `OpticsInput`, `InfraredIndex`, `EndMember`, `MixturePart`, `LabSpectrum`,
+        `GrainScaling`, `GrainClass` and `ReflectanceLevels` to both its lists (23 and 18
+        patterns), and `rows/optics/lab.rs` to its own files;
+      - the doctest.
+    - In the fit (`substance_albedos`):
+      - the committed table is the fit, bit for bit, with every value read through the sim's
+        accessors, the bins and the reach included;
+      - the acceptance refuses a bin above 1;
+      - the datasets are the rows', and a list without `grundy_1993_n2` is refused;
+      - the cache is within 10⁻⁷ at any w, for both forms' asymmetries, and exact at w = 1;
+      - the grid has converged: halving 0.1 nm moves no bin by more than 10⁻⁴ (at stage A, 0.5 nm
+        moved `CO`'s last bin by 4.6 × 10⁻⁴);
+      - over 380–780 nm the bins read the file's own index, to the bit, at and between its nodes;
+      - **the joins at 780 nm**: n is within 1% for every set; k equals the file's (step 1) where
+        the set is the file's own source; `CO2`'s k steps ×2,371; `CH4`'s k goes from 0 to 3.544
+        × 10⁻⁸; `N2`'s, `CO`'s and `NH3`'s k stay 0;
+      - `H2O`'s steps inside its set, ×2.64 at 962.3 nm and ×0.561 at 2,742 nm, and `CO`'s n step
+        of −0.46% at 3,333.5 nm;
+      - n below 1 only in `H2O`'s, `NH3`'s, `CO2`'s and `CO`'s fundamentals, and only beyond
+        2.8 µm;
+      - the slab's extension: continuous at n = 1; an opaque grain of n below 1 scatters its
+        surface's reflection alone; a negative k gives a lossless grain;
+      - the five interpolation rules;
+      - the blackbody shares against `star_colour::spectrum::planck`, to 10⁻³ (the trapezoid rule
+        in 1 nm steps);
+      - `CO`'s noise floor is three times its baseline's rms;
+      - the inversions: the fast H is the task's to 10⁻¹³; each forward model rises strictly with
+        w; each inversion reproduces its value below 10⁻¹³; every one of the 40 spectra round-trips
+        at its own geometry below 10⁻¹² with no channel clipped, and at its own laboratory grain
+        the rescale is the identity;
+      - the rescale's limits (a transparent grain brightens as it gets finer; a held end-member or
+        a w below `S_e` is held at any size), the clamp where it is stated (halite's 195
+        channels), the complex Fresnel term (Martinez-Anton's values, within 4% of Hapke's fit,
+        R(0) at normal incidence, rising with k) and its quadrature, a splib07a file's reader, and
+        a mixture's cross-section weighting;
+      - the mixtures' bands and their order, and `basalt`'s check (above);
+      - the anchors: Enceladus, Pluto and Triton, Io (with `SO2`'s other phase recorded), Titan's
+        dunes, Mars's dust, and the iron powder below its slab;
+      - the fingerprint's new probes, with each set listed once.
+    - Also run: `tests/substance_albedos.rs`, the end-to-end `rerender`, unchanged;
+      `cargo run -p hyperion-fit -- check` (32 fresh, 6 warnings, 0 failures; `substance_albedos`
+      revision 1 fresh); `data.rs`'s `every_recorded_provenance_parses`; the registry golden; and
+      Clippy on both crates (`--all-targets --all-features -D warnings`) and `cargo fmt --check`.
+  - _Files beyond the task's._ The entry names T49.c's three files and the datasets. Beyond them:
+    - in the sim, `substance/rows/optics.rs` and the new `substance/rows/optics/lab.rs` (the
+      end-members, the mixtures and their sources), `tables/mod.rs` (revision 1), and
+      `tests/substance_golden.rs` with its golden;
+    - in `hyperion-fit`, the new `src/tasks/substance_albedos/spectral.rs`, `infrared.rs`,
+      `lab.rs`, `lab/tests.rs` and `anchors.rs`, `src/tasks/substance_albedos/tests.rs`,
+      `manifests/substance_albedos.toml` and `tables.lock`;
+    - `NOTICE`, `.pre-commit-config.yaml` (`mixed-line-ending` and `end-of-file-fixer`) and
+      `.prettierignore`.
+- **Deferred findings (2026-10-13 rule)**, from P14.T49.i, and as handed to it from P14.T49.c:
+  - _`CO2`'s near infrared is a lower bound._ Between the bands, Warren 1986's k is Egan and
+    Spagnolo's impure dry ice, 2,371 times the file's Hansen 2005 k at 780 nm. It lowers `CO2`'s
+    0.78–2.2 µm bins to 0.76–0.81, so its Bond albedo (0.894 / 0.751) is a lower bound on pure
+    frost's. Hansen 1997's and 2005's near infrared, which could not be fetched, would replace
+    it.
+  - _The slab outside its derivation._ The equivalent slab assumes k ≪ 1, and T49.c's threshold
+    is 0.1. The bins also read it:
+    - above k 0.1;
+    - below n = 1, in `H2O`'s, `NH3`'s, `CO2`'s and `CO`'s fundamentals, by the lane's extension:
+      n = 1 in the internal terms and the true index in the surface reflection.
+
+    No source gives that extension. Its n-below-1 branch touches only the bins beyond 2.8 µm.
+
+  - _The forward phase function in the infrared._ Fresh snow's lobe (asymmetry 0.503, a visible
+    measurement) is applied at every wavelength, including where the grains are opaque inside a
+    band and scatter by surface reflection alone.
+  - _Methane's real index._ Martonchik and Orton 1994 tabulate n only at band extrema, so `CH4`'s
+    n is held at 1.316 from 2.381 µm. Inside the 3.3 µm band the grains are opaque whatever n is.
+  - _Bands not drawn._ N₂'s weak 4.3 µm fundamental, CO's overtones at 1.58 and 2.35 µm
+    (Quirico and Schmitt 1997, in SSHADE only), and SO₂ frost's infrared bands. The bins there are
+    upper bounds on brightness.
+  - _Methane's visible gap._ Grundy et al. 2002's `CH4` rows over 648–780 nm could fill R08's
+    visible gap, where methane's k is 0. R08's.
+  - _Grundy and Schmitt 1998's wavelengths_ are printed to four figures: 193 rows share a printed
+    value, and are merged by `reduce.py`.
+  - _HITRAN's `Mg2SiO4` k_ is printed to 10⁻⁴, so it is coarse below 1.5 µm, where k is near that.
+  - _`ZnS`'s near-infrared k_ in Kitzmann and Heng's compilation looks like the compiler's fill
+    (stage A's reading), not a measurement.
+  - _`MnS`'s citation._ `manganese-sulphide.json` cites "Montaner 1979 for the infrared", but
+    Montaner et al. 1979 is a Na₂S paper (`sodium-sulphide.json` cites it for Na₂S), and Kitzmann
+    and Heng say MnS's infrared is extrapolated. R08's to correct.
+  - _HITRAN's archive not re-hashed._ The 207 MB `hitran_ri.tar` was not fetched; the two
+    members' hashes match R08's records.
+  - _Grundy's `CH4` saturates over 3.2–3.45 µm._ 100 µm grains are opaque there at any k, so the
+    bin barely depends on the true value.
+  - _`H2O`'s steps inside its set._ The ×2.64 step at 962.3 nm and the ×0.561 step at 2,742 nm
+    are temperature steps (100 K against 266 K), not errors. A frost's temperature is not a
+    dimension of the row: each set has one reference temperature.
+  - _The Nicolet spectra not spliced._ `splib07a`'s Nicolet spectra (1.12–216 µm) are not joined
+    beyond the ASD's 2.5 µm and the Beckman's 3 µm, so every laboratory row holds its last covered
+    bin out to 5 µm (the 2.2–2.8 µm bin's value for an ASD spectrum and a mixture ending below
+    2.8 µm, the 2.8–3.5 µm one's for a Beckman spectrum). Splicing them would move a row's
+    Bond albedo under a 3,000 K blackbody by −0.03 to +0.04 (the lane's prototype), stated in the
+    rows' sources.
+  - _Grain classes, still deferred with their size_ (decision-p14-t49c-split §3). The infrared is
+    computed at the reference grain, 100 µm, where `N2` barely shows its 2.15 µm band (0.9956 in
+    1.7–2.2 µm). Pluto's N₂ ice is modelled with path lengths of centimetres (from memory, not
+    read here). §3 puts a coarse or old ice's overstatement at up to about 0.1 in Bond albedo; for
+    centimetre N₂ it is larger.
+  - _For P14.T51.b: Pluto at the body._ A Pluto of `N2`, `CH4` and `CO` alone would sit at 0.93–1.0
+    under the Sun, above its 0.6–0.8: T51.b's Pluto test reaches its range only through what
+    darkens the body (its tholins, grains or both), which T51.a's fixture and T51.b supply.
+  - _For R08: measured visible indices._ OCdb holds measured visible n:
+    - Kruger and Ambs 1959, at 546.1 nm and 4.2 K, for solid N₂, O₂, CO₂, Ar and H₂O;
+    - Marcoux 1969, at 589 nm, for Ar (84 K), CH₄ (91 K) and NH₃ (195 K).
+
+    R08's Lorentz–Lorenz estimates could take them.
+
+  - _For R08: ammonia's visible._ Pipes, Browell and Anderson 1974 measured ammonia frost only at
+    140–300 nm, so R08.T5.i's lean for ammonia's visible (decision-p14-t49c-split §5.3, Pipes et
+    al.'s frost reflectance) is wrong. Hapke et al. 1981 and Lebofsky and Fegley 1976 hold the
+    visible, in figures only.
+  - _The Beckman's beam angle_, 10°, is the prototype's: DS 1035 gives none and calls the Beckman
+    measurements biconical reflectance factors (p. 4); Clark et al. 1990b not read. It moves a
+    spherical albedo by at most 0.003.
+  - _Beck et al. 2021's 0.066_ is a solar-spectrum mean over 0.4–2.5 µm, 0.85–1.25 times the 550
+    nm value (their §5.3); CM's band test takes `A_N` at 550 nm, as the ruling's table does.
+  - _The organics' volume fractions_ (CI 9.3, CM 6.3 vol%) rest on second-hand carbon contents and
+    an unread organic-matter-to-carbon ratio and density; Jarosewich 1990 gives Orgueil's C 2.80 +
+    CO₂ 1.50 wt%, Amano et al. 2023 5.5 wt%.
+  - _The fine size_, 1 µm, is at the top of CI's matrix-opaque range and above CM's sub-100 nm
+    sulphides: the fine phases' cross-section is a lower bound.
+  - _Biotite HS28.3B's channels_ over 397–451 nm, inside B, are deleted and interpolated across
+    (3.2% of `granite`).
+  - _The end-members' purity._ HS199.3B "pigeonite" is an augite of Wo34 with albite (31% of
+    `basalt_fe`); chromite HS281.3B is 50% chromite; NMNH128288 carries 15% mica.
+  - _The Ordinary chondrites' "other" phases' density_, 4,000 kg m⁻³, is assumed.
+  - _An ethane frost._ splib07a holds an ethane ice spectrum at about 76 K
+    (`Ethane_MTG_T~76K_ASDFRa`) that could model `C2H6`'s frost; not read.
+  - _The model's primaries not reached_ (from T49.c, §5.7): still not reached.
+    decision-p14-t49c-split §5.7 asked T49.i's science check to read Hapke's book where it adds a
+    formula; no record of this task shows it read. Its formulas rest on their reproductions: the
+    opaque slab's surface term on Byrnes 2016's complex Fresnel equations (checked against
+    Martinez-Anton 2026's dielectric values, and within 4% of Hapke 2012's fit at k ≪ 1), the
+    cross-section weighting on Hapke 2012 §10 as the ruling states it, and the slab's extension
+    below n = 1 on no source (above).
+  - _No infrared_ (from T49.c, §5.2): closed by this task.
+  - _The lossless frosts' upper bounds_ (from T49.c, §5.6): `CH4`, `NH3`, `N2` and `CO` now carry
+    their infrared, where a primary exists. Their visible stays lossless, because R08's files have
+    k = 0. `O2`, `Ar`, `H2S` and `NH4SH` stay lossless in every bin: upper bounds, labelled by
+    their stand-in flags.
+  - _The bright-grain photometry_ (from T49.c, §5.4): still the lunar set, as ruled. The lane's
+    prototype compared Hapke 2012's hockey-stick two-term Henyey–Greenstein at b 0.3: the `A_N` of
+    `CaCO3`, `NaCl` and `SiO2` would fall by about 0.05, and their spherical albedo by
+    0.007–0.017. Not a test; recorded for T51.d and R10.
+  - _The similar plane albedo's grazing misses_ (from T49.c): still deferred. T51.b reads the
+    spherical albedo, in B, V and R and now in the bins, which the relation keeps (within 0.004);
+    no reader at 23 needs `A_h` at one incidence; the ruled similarity relation stays.
+  - _`ZnS` in B_ (from T49.c): still R08's. No pure-ZnS spectrum exists to replace it, since
+    natural sphalerite is Fe-bearing. The 300–390 and 390–495 nm bins (0.061 and 0.313) inherit
+    it.
+  - _R09's reference rows_ (from T49.c, §5.8, for P14.T54.a's bless note): the registry's `A_N` in
+    V against R09's hand values (`planetary/surface/reference.rs`): `granite` 0.818 against 0.275,
+    `feldspathic` 0.667 against 0.20, `phyllosilicate` 0.770 against Ceres's 0.094, `Na2CO3` 1.092
+    against 0.65, `mars_dust` 0.351 against 0.215, and `basalt_fe` 0.410 against 0.10. Each
+    registry row but `mars_dust` is a mixture of clean separates or an analogue, a stand-in that
+    bounds the fresh rock from above; R09's are a weathered or measured body's. T54.a's switch to
+    the registry's resolution brightens each, which its bless note states, and P14.T51.d's space
+    weathering and darkening (not twice for `basalt_fe`) take up.
 - **Deviations in P14.T49.h, as built: step 2, the pure fluids' transport and scattering, and the
   fill (`p14-liquids`, 2026-10-16).** `GENERATOR_VERSION` stays 22. Nothing on the record reads
   `liquid_properties` or `tables::liquid_optics` before P14.T54.a (decision-bump-plan-after-22

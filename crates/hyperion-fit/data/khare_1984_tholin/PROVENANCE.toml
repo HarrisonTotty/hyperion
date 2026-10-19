@@ -1,0 +1,19 @@
+# Titan tholin's optical constants of Khare et al. (1984), as HITRAN2024's aerosol compilation
+# distributes them: the regolith `tholin`'s infrared index beyond 780 nm (plan 14, P14.T49.i), the
+# file rendering plan R08's tholin.json was reduced from. Reduced by `reduce.py` from the
+# compilation's ASCII file (git-ignored, `data/cache/khare_1984_tholin/khare_tholins.dat`) to its
+# rows over 0.6888-5.166 µm, and committed as measured values with the citations. Reproduced from
+# the raw by hand on 2026-10-16: `python3 -I crates/hyperion-fit/data/khare_1984_tholin/reduce.py
+# <raw> crates/hyperion-fit/data/khare_1984_tholin/nk.csv`, from outside the raw's directory. Read
+# by `run substance_albedos`.
+dataset = "khare_1984_tholin"
+class = "committed"
+citation = "B. N. Khare, C. Sagan, E. T. Arakawa, F. Suits, T. A. Callcott and M. W. Williams (1984), Icarus 60, 127-137, DOI 10.1016/0019-1035(84)90142-8: optical constants of organic tholins produced in a simulated Titanian atmosphere, from soft x-ray to microwave frequencies; n and k at room temperature over 0.6888-5.166 µm; via HITRAN2024's aerosol compilation (I. E. Gordon et al. 2026, J. Quant. Spectrosc. Radiat. Transfer 353, 109807)"
+url = "https://hitran.org/data/Aerosols/Aerosols-2024/hitran_ri.tar"
+retrieved = "2026-10-16"
+release = "hitran_ri.tar's member hitran_ri/ascii/exoplanets/khare_tholins.dat (sha256 8cef815bfcf19123b27dc061bc3a92377a5ad2440d9ba3a0823d19427e0198b6, the member R08's tholin.json was reduced from), fetched by HTTP range requests over the tar's headers, the 207 MB archive itself not fetched (its sha256 as R08 recorded it, c22643a856ec98b3371c70e64351b19a9f3ea51b38ce369087e17e7e4ecc231e, not re-checked); reduced by reduce.py"
+licence = "HITRAN's FAQ (https://hitran.org/faq/, read 2026-10-16): \"The HITRAN database and its associated compilations are free\"; its citation policy (https://hitran.org/citepolicy/) asks that the edition's article be cited and encourages citing the original sources. No licence is stated; reduced values committed with both citations (decision-composition §5)"
+
+[[files]]
+name = "nk.csv"
+sha256 = "4e36c4533a1fad3242cf96c550fafab67f32e7631006c4e4a28fe2600fe1f0d6"

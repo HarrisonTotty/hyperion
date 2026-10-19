@@ -1,0 +1,20 @@
+# A terrestrial basaltic glass's optical constants of Pollack, Toon and Khare (1973), as the Aerosol
+# Refractive Index Archive distributes them: the regolith's infrared index beyond 780 nm (plan 14,
+# P14.T49.i), the file rendering plan R08's basaltic-glass.json was reduced from. The paper gives n at a few
+# wavelengths and k at many, so n is read from the rows that give n and k from the rows that give k.
+# Reduced by `reduce.py` from the archive's file (git-ignored, `data/cache/pollack_1973_basaltic_glass/basaltic_glass_R_Pollack_1973.ri`) to its rows
+# over 0.5-5 µm, and committed as measured values with the citation. Reproduced from the raw by hand
+# on 2026-10-16: `python3 -I crates/hyperion-fit/data/pollack_1973_basaltic_glass/reduce.py <raw>
+# crates/hyperion-fit/data/pollack_1973_basaltic_glass/nk.csv`, from outside the raw's directory. Read by
+# `run substance_albedos`.
+dataset = "pollack_1973_basaltic_glass"
+class = "committed"
+citation = "J. B. Pollack, O. B. Toon and B. N. Khare (1973), Icarus 19, 372-389, DOI 10.1016/0019-1035(73)90115-2: optical properties of some terrestrial rocks and glasses; the basaltic glass's n and k over 0.5-5 µm, no temperature stated; via the Aerosol Refractive Index Archive (ARIA, University of Oxford)"
+url = "https://eodg.atm.ox.ac.uk/ARIA/data_files/Rocks_and_Conglomerates/Basalt/Basaltic_glass_(Pollack_et_al_1973)/original/basaltic_glass_R_Pollack_1973.ri"
+retrieved = "2026-10-16"
+release = "basaltic_glass_R_Pollack_1973.ri as served on the retrieval date (sha256 e05d88b2250f8540e7504a7e92673d6e34bfa6d8d0ca2eb2d360023cf53376cf, the file R08's basaltic-glass.json was reduced from), reduced by reduce.py"
+licence = "none stated (ARIA's front page, https://eodg.atm.ox.ac.uk/ARIA/, read 2026-10-16: \"If you use these data, please acknowledge the source publications\"); only the measured constants over the range read, facts, are committed, with the citation (decision-r08-licences.md)"
+
+[[files]]
+name = "nk.csv"
+sha256 = "dab409dc44708da3b132f96d285d9c43c443e441122c79cac55895476155c712"

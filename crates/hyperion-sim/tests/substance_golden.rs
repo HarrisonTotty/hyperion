@@ -28,6 +28,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use hyperion_sim::GENERATOR_VERSION;
+use hyperion_sim::substance::optics::{EndMember, GrainScaling, LabSpectrum, OpticsInput};
 use hyperion_sim::substance::{
     self, CondensedPhase, EQUILIBRIUM_HYDROGEN, Element, GasColumns, GrainDensity, LevelSet,
     MolecularConstants, PhaseDiagram, Substance, TransitionKind,
@@ -358,9 +359,64 @@ fn condensed_section(w: &mut GoldenWriter) {
     }
 }
 
-/// The golden's albedo section: each row with condensed optics, its reference form, its index file
-/// (a stand-in or not), its phase law, and its fitted values in B, V and R: w, the normal albedo,
-/// the spherical albedo and the directional-hemispherical albedo at each incidence (P14.T49.c).
+/// The lines of a laboratory row's input under `label`: each end-member's spectra and scaling, each
+/// mixture part's fraction and grain class, and each level (P14.T49.i).
+fn input_lines(w: &mut GoldenWriter, label: &str, input: OpticsInput) {
+    let end_member = |w: &mut GoldenWriter, label: &str, e: &EndMember| {
+        let files: Vec<&str> = e.spectra().iter().map(LabSpectrum::file).collect();
+        w.line(&format!("{label}: {} spectra {files:?}", e.name()));
+        match e.scaling() {
+            GrainScaling::Held => w.line(&format!("{label}: {} held", e.name())),
+            GrainScaling::Slab {
+                real_index,
+                lab_grain_diameter,
+            } => {
+                w.f64(&format!("{label}: {} slab n", e.name()), real_index);
+                w.f64(
+                    &format!("{label}: {} slab lab grain m", e.name()),
+                    lab_grain_diameter.value(),
+                );
+            }
+        }
+    };
+    match input {
+        OpticsInput::Spectrum { end_member: e } => end_member(w, label, e),
+        OpticsInput::Mixture { parts } => {
+            for (i, part) in parts.iter().enumerate() {
+                let e = part.end_member();
+                let part_label = format!("{label}: part {i}");
+                w.f64(
+                    &format!(
+                        "{part_label} {} {:?} volume_fraction",
+                        e.name(),
+                        part.grain()
+                    ),
+                    part.volume_fraction(),
+                );
+                end_member(w, &part_label, e);
+            }
+        }
+        OpticsInput::Levels { levels } => {
+            let g = levels.geometry();
+            w.line(&format!(
+                "{label}: levels at i {} e {} azimuth {} deg",
+                g.incidence_deg, g.emission_deg, g.azimuth_deg
+            ));
+            for (nm, value) in levels.knots() {
+                w.f64(&format!("{label}: level at {nm} nm"), *value);
+            }
+        }
+        OpticsInput::Index { .. }
+        | OpticsInput::SizedIndex { .. }
+        | OpticsInput::OpaqueSlab { .. } => {}
+    }
+}
+
+/// The golden's albedo section: each row with condensed optics, its reference form, its input (a
+/// stand-in or not; an index file and infrared set, or a laboratory input with its end-members,
+/// parts and fine grain size) and its phase law, its fitted values in B, V and R: w, the normal
+/// albedo, the spherical albedo and the directional-hemispherical albedo at each incidence
+/// (P14.T49.c), and its spherical albedo in each spectral bin and its data's reach (P14.T49.i).
 fn albedo_section(w: &mut GoldenWriter) {
     w.line("[albedo]");
     for (id, optics) in substance::optics::rows() {
@@ -370,16 +426,35 @@ fn albedo_section(w: &mut GoldenWriter) {
             .condensed()
             .expect("a row with optics has condensed columns")
             .phase_law();
+        let input = match optics.input() {
+            OpticsInput::Index { file, .. } => format!("from {file}"),
+            OpticsInput::SizedIndex {
+                file,
+                grain_diameter,
+                ..
+            } => format!(
+                "from {file} at {} um grains",
+                grain_diameter.value() * 1.0e6
+            ),
+            OpticsInput::OpaqueSlab { file } => format!("by the opaque slab of {file}"),
+            OpticsInput::Spectrum { end_member } => format!("from {}", end_member.name()),
+            OpticsInput::Mixture { parts } => format!(
+                "from a mixture of {} parts, fine grains {} um",
+                parts.len(),
+                substance::optics::FINE_GRAIN_DIAMETER.value() * 1.0e6
+            ),
+            OpticsInput::Levels { .. } => "from measured levels".to_owned(),
+        };
         w.line(&format!(
-            "{label}: {:?} from {}{}, phase law {law:?}",
+            "{label}: {:?} {input}{}, phase law {law:?}",
             optics.reference_form(),
-            optics.index_file(),
             if optics.is_stand_in() {
                 " (stand-in)"
             } else {
                 ""
             }
         ));
+        input_lines(w, &label, optics.input());
         for (name, values) in [
             ("w", optics.single_scattering_albedo_bvr()),
             ("normal_albedo", optics.normal_albedo_bvr()),
@@ -403,6 +478,21 @@ fn albedo_section(w: &mut GoldenWriter) {
                 );
             }
         }
+        w.line(&format!("{label}: infrared {:?}", optics.infrared_source()));
+        let edges = substance::optics::SPECTRAL_BIN_EDGES_NM;
+        for (bin, value) in optics.spherical_albedo_bins().into_iter().enumerate() {
+            w.f64(
+                &format!(
+                    "{label}: spherical_albedo {}-{} nm",
+                    edges[bin],
+                    edges[bin + 1]
+                ),
+                value,
+            );
+        }
+        let [lo, hi] = optics.data_reach_nm();
+        w.f64(&format!("{label}: data from nm"), lo);
+        w.f64(&format!("{label}: data to nm"), hi);
     }
 }
 

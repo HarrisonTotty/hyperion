@@ -1,5 +1,5 @@
 use hyperion_sim::substance::optics::{
-    FRESH_SNOW, LUNAR_REGOLITH, REGOLITH_MAX_SINGLE_SCATTERING_ALBEDO,
+    BVR_BINS, FRESH_SNOW, LUNAR_REGOLITH, REGOLITH_MAX_SINGLE_SCATTERING_ALBEDO,
 };
 use hyperion_sim::substance::{self, by_key};
 use hyperion_surface::material::{BRIGHT_FROST_NORMAL_ALBEDO, PARTICULATE_NORMAL_ALBEDO_CEILING};
@@ -167,13 +167,29 @@ fn substance_albedos_the_photometries_conserve_energy_inside_their_limits() {
 }
 
 /// The task's own manifest's path.
-fn manifest_path() -> std::path::PathBuf {
+pub(super) fn manifest_path() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("manifests/substance_albedos.toml")
 }
 
 /// The task's own manifest, whose material directory is R08's.
-fn manifest() -> Manifest {
+pub(super) fn manifest() -> Manifest {
     Manifest::load(&manifest_path()).unwrap()
+}
+
+/// The task's fit of its own manifest, computed once for the tests that read it.
+pub(super) fn fitted() -> &'static [(SubstanceId, AlbedoRow)] {
+    static FITTED: std::sync::OnceLock<Vec<(SubstanceId, AlbedoRow)>> = std::sync::OnceLock::new();
+    FITTED.get_or_init(|| fit(&manifest()).unwrap())
+}
+
+/// The fitted row of `key`.
+pub(super) fn fitted_row(key: &str) -> AlbedoRow {
+    let id = by_key(key).unwrap();
+    fitted()
+        .iter()
+        .find(|(r, _)| *r == id)
+        .unwrap_or_else(|| panic!("{key} is fitted"))
+        .1
 }
 
 /// `water-ice.json` with `edit` applied, read back as a material file from a temporary directory.
@@ -268,13 +284,15 @@ fn substance_albedos_an_index_off_its_grid_or_below_unity_is_refused() {
 fn substance_albedos_the_items_are_the_registry_s_optics_rows() {
     let manifest = manifest();
     assert_eq!(manifest.materials(), row_files().as_slice());
-    let fitted = fit(&manifest).unwrap();
-    let names: Vec<String> = fitted.iter().map(|(id, _)| item_name(*id)).collect();
+    let names: Vec<String> = fitted().iter().map(|(id, _)| item_name(*id)).collect();
     assert_eq!(names, ITEMS);
-    let table = render(fitted);
+    let table = render(fitted().to_vec());
     assert_eq!(table.item_names(), ITEMS);
     for (id, optics) in substance::optics::rows() {
-        let file = manifest.load_material(optics.index_file()).unwrap();
+        let Some(name) = optics.index_file() else {
+            continue;
+        };
+        let file = manifest.load_material(name).unwrap();
         assert!(row_index(id, &file).is_ok());
         if file.provenance() == "standIn" {
             assert!(optics.is_stand_in(), "{}", file.key());
@@ -300,10 +318,10 @@ fn substance_albedos_the_items_are_the_registry_s_optics_rows() {
 /// `A_N` passes 1.35 or whose `A_h` passes 1 is refused, as is no row at all.
 #[test]
 fn substance_albedos_the_acceptance_refuses_a_fit_past_its_bounds() {
-    let rows = fit(&manifest()).unwrap();
+    let rows = fitted().to_vec();
     let line = acceptance(&rows).unwrap();
     assert!(
-        line.starts_with("20 rows (10 frosts, 10 regoliths)"),
+        line.starts_with("55 rows (11 frosts, 44 regoliths)"),
         "{line}"
     );
     let mut bright = rows.clone();
@@ -312,26 +330,37 @@ fn substance_albedos_the_acceptance_refuses_a_fit_past_its_bounds() {
         acceptance(&bright),
         Err(RunTaskError::Input { .. })
     ));
-    let mut over = rows;
+    let mut over = rows.clone();
     over[0].1[9] = 1.01;
     assert!(matches!(acceptance(&over), Err(RunTaskError::Input { .. })));
+    let mut binned = rows;
+    binned[0].1[SPECTRAL_BINS_OFFSET + 7] = 1.01;
+    assert!(matches!(
+        acceptance(&binned),
+        Err(RunTaskError::Input { .. })
+    ));
     assert!(matches!(acceptance(&[]), Err(RunTaskError::Input { .. })));
 }
 
-/// The committed table is this fit, bit for bit, row by row.
+/// The committed table is this fit, bit for bit, row by row, every value of each row through the
+/// sim's accessors.
 #[test]
 fn substance_albedos_the_committed_table_is_the_fit() {
-    for (id, values) in fit(&manifest()).unwrap() {
+    for &(id, values) in fitted() {
         let optics = id.substance().condensed_optics().unwrap();
-        let committed = [
+        let committed: Vec<f64> = [
             optics.single_scattering_albedo_bvr(),
             optics.normal_albedo_bvr(),
             optics.spherical_albedo_bvr(),
         ]
         .into_iter()
         .flatten()
-        .chain((0..4).flat_map(|i| optics.directional_hemispherical_albedo_bvr(i).unwrap()));
-        for (a, b) in committed.zip(values) {
+        .chain((0..4).flat_map(|i| optics.directional_hemispherical_albedo_bvr(i).unwrap()))
+        .chain(optics.spherical_albedo_bins())
+        .chain(optics.data_reach_nm())
+        .collect();
+        assert_eq!(committed.len(), values.len());
+        for (a, b) in committed.into_iter().zip(values) {
             assert!(
                 a.total_cmp(&b).is_eq(),
                 "{}: {a} against {b}",
@@ -348,7 +377,7 @@ fn substance_albedos_the_committed_table_is_the_fit() {
 /// each w is in [0, 1], and a regolith's at most the lunar photometry's limit.
 #[test]
 fn substance_albedos_every_row_conserves_energy() {
-    for (id, values) in fit(&manifest()).unwrap() {
+    for &(id, values) in fitted() {
         let key = id.substance().key();
         let form = id.substance().condensed_optics().unwrap().reference_form();
         for band in 0..3 {
@@ -388,18 +417,23 @@ fn substance_albedos_every_row_conserves_energy() {
 /// impurities), and an isotropic grain's similar medium is itself.
 #[test]
 fn substance_albedos_the_energy_albedos_match_lossless_and_measured_snow() {
-    let rows = fit(&manifest()).unwrap();
-    let row = |key: &str| {
-        let id = by_key(key).unwrap();
-        rows.iter().find(|(r, _)| *r == id).unwrap().1
-    };
+    let row = fitted_row;
     for key in ["CH4", "NH3", "N2", "O2", "Ar", "CO", "H2S", "NH4SH"] {
         let values = row(key);
-        for (offset, &value) in values.iter().enumerate().skip(6) {
+        for (offset, &value) in values.iter().enumerate().take(BVR_ROW_LEN).skip(6) {
             assert!(
                 (value - 1.0).abs() < 1e-6,
                 "{key}: value {offset} is {value}"
             );
+        }
+    }
+    for key in ["O2", "Ar", "H2S", "NH4SH"] {
+        let values = row(key);
+        for (offset, &value) in values[SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET]
+            .iter()
+            .enumerate()
+        {
+            assert!((value - 1.0).abs() < 1e-6, "{key}: bin {offset} is {value}");
         }
     }
     let water = row("H2O");
@@ -494,13 +528,16 @@ fn substance_albedos_the_similarity_relation_meets_van_de_hulst_s_tables() {
 }
 
 /// The fingerprint probes the bands, the incidences, every reference form's constants, evaluated
-/// photometry and asymmetry, and every row's form, all finite, so that a changed constant or formula of the
-/// sim's finds the table stale.
+/// photometry and asymmetry, and every row's form, all finite, so that a changed constant or
+/// formula of the sim's finds the table stale.
 #[test]
 fn substance_albedos_the_fingerprint_reads_the_sim_s_constants() {
     let fingerprint = SubstanceAlbedosTask.fingerprint();
     let rows = substance::optics::rows().count();
-    assert_eq!(fingerprint.probes().len(), 3 + 4 + 8 + 11 + rows);
+    assert_eq!(
+        fingerprint.probes().len(),
+        3 + 4 + 8 + 11 + rows + SPECTRAL_BIN_EDGES_NM.len() + rows + 6 + 4
+    );
     assert!(fingerprint.values().iter().all(|v| v.is_finite()));
     let probe = |name: &str| {
         fingerprint
@@ -512,4 +549,331 @@ fn substance_albedos_the_fingerprint_reads_the_sim_s_constants() {
     assert!(probe("H2O reference form").total_cmp(&0.0).is_eq());
     assert!(probe("basalt reference form").total_cmp(&1.0).is_eq());
     assert!((probe("Regolith asymmetry") + 0.11).abs() < 1e-12);
+    assert!(probe("bin edge 5 nm").total_cmp(&780.0).is_eq());
+    assert!(probe("H2O infrared set").total_cmp(&1.0).is_eq());
+    assert!(probe("O2 infrared set").total_cmp(&0.0).is_eq());
+    assert!(probe("mars_dust infrared set").total_cmp(&13.0).is_eq());
+    assert!((probe("fine grain diameter m") - 1.0e-6).abs() < 1e-18);
+    for word in 0..4 {
+        let value = probe(&format!("row inputs hash word {word}"));
+        assert!((1.0..=65_536.0).contains(&value), "{value}");
+    }
+    let mut descriptions: Vec<String> = substance::optics::rows()
+        .map(|(_, optics)| describe_input(optics.input()))
+        .collect();
+    assert!(
+        descriptions.iter().all(|d| !d.contains("Kokaly")),
+        "no prose"
+    );
+    let rows_described = descriptions.len();
+    descriptions.dedup();
+    assert!(descriptions.len() > rows_described / 2);
+    for (place, set) in INFRARED_SETS.into_iter().enumerate() {
+        assert!(
+            !INFRARED_SETS[..place].contains(&set),
+            "{set:?} is listed once"
+        );
+    }
+}
+
+/// The manifest's datasets are the rows' infrared sets', in the order the rows first name them;
+/// another list is refused before any is read.
+#[test]
+fn substance_albedos_the_datasets_are_the_rows_infrared_sets() {
+    assert_eq!(manifest().datasets(), row_datasets().as_slice());
+    let text = std::fs::read_to_string(manifest_path()).unwrap();
+    let without = text.replace("    \"grundy_1993_n2\",\n", "");
+    assert_ne!(without, text);
+    let manifest = Manifest::from_bytes(&manifest_path(), without.into_bytes()).unwrap();
+    assert!(matches!(fit(&manifest), Err(RunTaskError::Input { .. })));
+}
+
+/// The cache of the isotropic spherical albedo is within 10⁻⁷ of `energy_albedos`'s at any w, for
+/// both reference forms' asymmetries, between its nodes as at them, and exact at w = 1.
+#[test]
+fn substance_albedos_the_spherical_albedo_cache_is_exact_to_its_bound() {
+    let cache = spectral::SphericalAlbedoCache::new();
+    let mut worst: f64 = 0.0;
+    for form in [ReferenceForm::Frost, ReferenceForm::Regolith] {
+        let xi = form.photometry().phase_function().asymmetry();
+        for j in 0..=400_u32 {
+            // Uniform in s = √(1 − w), where the cache's grid is, and so between its nodes.
+            let s = (f64::from(j) + 0.37) / 400.37;
+            let w = 1.0 - s * s;
+            let exact = energy_albedos(w, xi).1;
+            worst = worst.max((cache.spherical_albedo(w, xi) - exact).abs());
+        }
+        assert!(cache.spherical_albedo(1.0, xi).total_cmp(&1.0).is_eq());
+    }
+    assert!(worst < 1e-7, "the cache's largest error {worst}");
+}
+
+/// The bins converge on the grid: halving its step moves no bin of any row by more than 10⁻⁴.
+#[test]
+fn substance_albedos_the_bins_converge_on_the_grid() {
+    let manifest = manifest();
+    let coarse = fit_on_grid(&manifest, spectral::SPECTRAL_STEP_NM).unwrap();
+    let fine = fit_on_grid(&manifest, spectral::SPECTRAL_STEP_NM / 2.0).unwrap();
+    let mut worst = (0.0, String::new(), 0);
+    for ((id, a), (_, b)) in coarse.iter().zip(&fine) {
+        for bin in 0..SPECTRAL_BINS {
+            let moved = (a[SPECTRAL_BINS_OFFSET + bin] - b[SPECTRAL_BINS_OFFSET + bin]).abs();
+            if moved > worst.0 {
+                worst = (moved, id.substance().key().as_str().to_owned(), bin);
+            }
+        }
+    }
+    assert!(worst.0 < 1e-4, "halving the step moves {worst:?}");
+}
+
+/// Each row's index, as the bins read it, is its R08 file's own over 380–780 nm: the file's piece
+/// gives `index_at`'s n and k at and between the file's nodes, to the bit.
+#[test]
+fn substance_albedos_the_visible_piece_is_the_file_s_index() {
+    let manifest = manifest();
+    for (_, optics) in substance::optics::rows() {
+        let Some(name) = optics.index_file() else {
+            continue;
+        };
+        let file = manifest.load_material(name).unwrap();
+        let piece = infrared::visible_piece(name, &file).unwrap();
+        for nm in [380.0, 437.5, 550.0, 641.25, 777.0, 780.0] {
+            let (n, k) = index_at(&file, nm).unwrap();
+            let (pn, pk) = piece.at(nm);
+            assert!(
+                pn.total_cmp(&n).is_eq() && pk.total_cmp(&k).is_eq(),
+                "{name} at {nm} nm"
+            );
+        }
+    }
+}
+
+/// The step in k where each infrared set joins its file at 780 nm, the set's k over the file's,
+/// where the file's k is not 0: 1 where the set is the file's own source, and Warren 1986's
+/// impure dry ice over Hansen 2005's continuum for `CO2` (the row's source). Where the file's k is
+/// 0, the set's k at 780 nm is stated instead (`CH4`'s, 3.54 × 10⁻⁸, in Grundy et al. 2002's 0.79
+/// µm band).
+const STEPS_AT_780_NM: [(&str, f64); 9] = [
+    ("H2O", 1.0),
+    ("CO2", 2_371.0),
+    ("ZnS", 1.0),
+    ("MgSiO3", 1.0),
+    ("Mg2SiO4", 1.0),
+    ("tholin", 1.0),
+    ("basalt", 1.0),
+    ("lava_glass", 1.0),
+    ("mars_dust", 1.0),
+];
+
+/// Each infrared set at 780 nm: its n within 1% of its R08 file's, and its k continuous with the
+/// file's, or its step at the stated size ([`STEPS_AT_780_NM`]); where the file's k is 0, the set's
+/// is 0 too (`N2`, `CO`, `NH3`) or `CH4`'s stated 3.54 × 10⁻⁸. `H2O`'s joins inside its set, where
+/// Grundy and Schmitt 1998's 100 K ice meets Warren and Brandt 2008's 266 K ice, are at their
+/// stated sizes: k 2.64 times Warren and Brandt's at 962.3 nm, and 0.561 times at 2,742 nm. `CO`'s
+/// n steps by −0.46% at 3,333.5 nm, where Gerakines et al.'s table begins.
+#[test]
+fn substance_albedos_each_infrared_set_joins_its_file_at_780_nm() {
+    let manifest = manifest();
+    let data = infrared::InfraredData::load(&manifest).unwrap();
+    let ratio = |a: f64, b: f64| a / b;
+    for (id, optics) in substance::optics::rows() {
+        let key = id.substance().key();
+        let Some(name) = optics.index_file() else {
+            continue;
+        };
+        let file = manifest.load_material(name).unwrap();
+        let spectral = infrared::spectral_index(optics, name, &file, &data).unwrap();
+        let (n_file, k_file) = index_at(&file, 780.0).unwrap();
+        let Some(_) = optics.infrared_source() else {
+            assert_eq!(spectral.pieces().len(), 1, "{key}");
+            continue;
+        };
+        let (n_set, k_set) = spectral.at(780.0);
+        assert!(
+            (n_set / n_file - 1.0).abs() < 0.01,
+            "{key}: n {n_set} against {n_file}"
+        );
+        if k_file > 0.0 {
+            let step = STEPS_AT_780_NM
+                .iter()
+                .find(|(k, _)| *k == key.as_str())
+                .map_or_else(|| panic!("{key}'s step is stated"), |s| s.1);
+            let found = ratio(k_set, k_file);
+            assert!(
+                (found / step - 1.0).abs() < 1e-3,
+                "{key}: k steps by {found}, not {step}"
+            );
+        } else if key.as_str() == "CH4" {
+            assert!((k_set / 3.544e-8 - 1.0).abs() < 1e-3, "{key}: k {k_set}");
+        } else {
+            assert!(k_set.total_cmp(&0.0).is_eq(), "{key}: k {k_set}");
+        }
+    }
+    let water = by_key("H2O")
+        .unwrap()
+        .substance()
+        .condensed_optics()
+        .unwrap();
+    let file = manifest.load_material("water-ice.json").unwrap();
+    let spectral = infrared::spectral_index(water, "water-ice.json", &file, &data).unwrap();
+    let pieces = spectral.pieces();
+    // The file's piece, then Warren and Brandt's, Grundy and Schmitt's, and Warren and Brandt's.
+    for (join, expected) in [(pieces[2].lo_nm(), 2.64), (pieces[3].lo_nm(), 0.561)] {
+        let found = ratio(pieces[2].at(join).1, pieces[1].at(join).1);
+        assert!(
+            (found / expected - 1.0).abs() < 2e-3,
+            "H2O at {join} nm: {found}"
+        );
+    }
+    let co = by_key("CO")
+        .unwrap()
+        .substance()
+        .condensed_optics()
+        .unwrap();
+    let file = manifest.load_material("carbon-monoxide-ice.json").unwrap();
+    let spectral = infrared::spectral_index(co, "carbon-monoxide-ice.json", &file, &data).unwrap();
+    // The file's piece, then k = 0, then Gerakines et al.'s.
+    let join = spectral.pieces()[2].lo_nm();
+    let step = spectral.at(join).0 / spectral.pieces()[1].at(join).0 - 1.0;
+    assert!(
+        (step + 0.0046).abs() < 1e-4,
+        "CO's n steps by {step} at {join} nm"
+    );
+}
+
+/// The rows whose data put n below 1, inside a strong band, where the slab's extension
+/// ([`spectral::spectral_single_scattering_albedo`]) reads them: the ices' strong fundamentals
+/// alone, `H2O`'s and `NH3`'s 3 µm bands, `CO2`'s 4.27 µm band and `CO`'s 4.67 µm band, and only
+/// beyond 2.8 µm.
+#[test]
+fn substance_albedos_an_index_below_unity_lies_in_the_ices_fundamentals() {
+    let manifest = manifest();
+    let data = infrared::InfraredData::load(&manifest).unwrap();
+    let mut keys = Vec::new();
+    for (id, optics) in substance::optics::rows() {
+        let Some(name) = optics.index_file() else {
+            continue;
+        };
+        let file = manifest.load_material(name).unwrap();
+        let spectral = infrared::spectral_index(optics, name, &file, &data).unwrap();
+        for nm in spectral::SpectralGrain::knots_nm(&spectral) {
+            if spectral.at(nm).0 < 1.0 {
+                assert!(nm > 2_800.0, "{} at {nm} nm", id.substance().key());
+                keys.push(id.substance().key().as_str().to_owned());
+            }
+        }
+    }
+    keys.dedup();
+    assert_eq!(keys, ["H2O", "NH3", "CO2", "CO"]);
+}
+
+/// The share of a blackbody's emission at temperature `teff` K below `nm`: (15 ÷ π⁴) Σₙ e^{−nx}
+/// (x³ ÷ n + 3x² ÷ n² + 6x ÷ n³ + 6 ÷ n⁴), x = hc ÷ (λ k T), the series of the Planck integral (its
+/// terms summed to n = 600, past e⁻²⁹⁰ at 5 µm and 5,772 K), with hc ÷ k from CODATA 2018's exact
+/// h, c and `k_B`, as `star_colour::spectrum::planck` takes it.
+pub(super) fn blackbody_share_below(nm: f64, teff: f64) -> f64 {
+    const HC_OVER_K_NM_K: f64 = 6.626_070_15e-34 * 299_792_458.0 / 1.380_649e-23 * 1.0e9;
+    let x = HC_OVER_K_NM_K / (nm * teff);
+    let mut sum = 0.0;
+    for n in 1..=600_u32 {
+        let n = f64::from(n);
+        sum += math::exp(-n * x)
+            * (x * x * x / n
+                + 3.0 * x * x / (n * n)
+                + 6.0 * x / (n * n * n)
+                + 6.0 / (n * n * n * n));
+    }
+    15.0 / math::powi(core::f64::consts::PI, 4) * sum
+}
+
+/// The Bond albedo of `bins` under a blackbody at `teff` K: each bin weighted by the flux between
+/// its edges, the first bin by all the flux below 390 nm and the last by all above 3,500 nm (the
+/// first and last bins standing for the light outside 0.3–5 µm).
+pub(super) fn bond_albedo(bins: &[f64], teff: f64) -> f64 {
+    let edges = SPECTRAL_BIN_EDGES_NM;
+    (0..SPECTRAL_BINS)
+        .map(|bin| {
+            let lo = if bin == 0 {
+                0.0
+            } else {
+                blackbody_share_below(edges[bin], teff)
+            };
+            let hi = if bin == SPECTRAL_BINS - 1 {
+                1.0
+            } else {
+                blackbody_share_below(edges[bin + 1], teff)
+            };
+            bins[bin] * (hi - lo)
+        })
+        .sum()
+}
+
+/// The blackbody's shares are the Planck function's: none below 10 nm, and a band's share is
+/// `star_colour::spectrum::planck` integrated over it against the whole (the trapezoid rule, 1 nm
+/// steps, to 10⁻³).
+#[test]
+fn substance_albedos_the_blackbody_shares_are_planck_s() {
+    use crate::tasks::star_colour::spectrum::planck;
+    assert!(blackbody_share_below(10.0, 5_772.0) < 1e-12);
+    let (lo, hi) = (390.0, 5_000.0);
+    let band: f64 = (0..4_610_u32)
+        .map(|i| {
+            let a = lo + f64::from(i);
+            f64::midpoint(planck(a, 5_772.0), planck(a + 1.0, 5_772.0))
+        })
+        .sum();
+    let total: f64 = (1..2_000_000_u32)
+        .map(|i| planck(f64::from(i) * 0.05 + 50.0, 5_772.0) * 0.05)
+        .sum();
+    let share = blackbody_share_below(hi, 5_772.0) - blackbody_share_below(lo, 5_772.0);
+    assert!(
+        (band / total - share).abs() < 1e-3,
+        "{} against {share}",
+        band / total
+    );
+}
+
+/// The anchor the infrared already sets at the row (plan 14, P14.T49.i; decision-p14-t49c-split
+/// §1.3): `H2O`'s Bond albedo under a 5,772 K blackbody, the Sun's effective temperature (0.832),
+/// against Enceladus's measured bolometric Bond albedo, 0.81 ± 0.04 (Howett et al. 2010) and 0.76 ±
+/// 0.03 (Li et al. 2023, read through a secondary): within Howett et al.'s range, and not below Li
+/// et al.'s, pure fresh frost of 100 µm grains being an upper bound on an icy satellite's, whose
+/// grains, impurities and weathering darken it (P14.T51.b asserts the body's). Under a 3,000 K
+/// blackbody, an M dwarf's, the same frost's is 0.528: most of the light is then beyond 1 µm,
+/// where ice absorbs (decision-p14-t49c-split §5.2). The row's B, V and R bins stay above 0.98.
+#[test]
+fn substance_albedos_water_frost_s_bond_albedo_meets_enceladus_s() {
+    let water = fitted_row("H2O");
+    let bins = &water[SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET];
+    let sun = bond_albedo(bins, 5_772.0);
+    assert!((0.77..=0.85).contains(&sun), "H2O's Bond albedo {sun}");
+    assert!(sun >= 0.76 - 0.03, "H2O's Bond albedo {sun}");
+    let m_dwarf = bond_albedo(bins, 3_000.0);
+    assert!(
+        m_dwarf < sun - 0.2,
+        "H2O's Bond albedo at 3,000 K {m_dwarf}"
+    );
+    assert!(BVR_BINS.iter().all(|&bin| bins[bin] > 0.98), "{bins:?}");
+}
+
+/// T51.a's by-hand Pluto and Triton, checked at the rows (plan 14, P14.T49.i;
+/// decision-p14-t49c-split §1.3): each of the ices their fixtures give by hand, `N2`, `CH4` and
+/// `CO`, has a Bond albedo under a 5,772 K blackbody at or above the top of both bodies' ranges,
+/// Pluto's 0.6–0.8 (Buratti et al. 2017's 0.72 ± 0.07) and Triton's 0.72–0.92 (Hillier et al.
+/// 1990's 0.82 ± 0.05; both read in decision-triton-and-e101 §1.6), so that the frosts' infrared
+/// leaves both reachable. Pure fresh frost of 100 µm grains is an upper bound on a body's: a mix of
+/// these three alone lies above Pluto's range, and P14.T51.b asserts the bodies, with what darkens
+/// them.
+#[test]
+fn substance_albedos_the_outer_frosts_bound_pluto_and_triton_from_above() {
+    for key in ["N2", "CH4", "CO"] {
+        let row = fitted_row(key);
+        let sun = bond_albedo(&row[SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET], 5_772.0);
+        for (body, top) in [("Pluto", 0.8), ("Triton", 0.92)] {
+            assert!(
+                sun >= top,
+                "{key}'s Bond albedo {sun} against {body}'s range's top {top}"
+            );
+        }
+    }
 }

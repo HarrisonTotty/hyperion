@@ -2014,6 +2014,21 @@ albedo 2 H2O: hemispherical_albedo at mu0 0.2 R = 0x3fef9da9ee6c4918  # 0.987996
 albedo 2 H2O: hemispherical_albedo at mu0 0.05 B = 0x3feff944e78b615b  # 0.9991783640244124
 albedo 2 H2O: hemispherical_albedo at mu0 0.05 V = 0x3fefdbcf07a8aef6  # 0.9955821179950977
 albedo 2 H2O: hemispherical_albedo at mu0 0.05 R = 0x3fefb2c596b14772  # 0.9905727332318135
+albedo 2 H2O: infrared Some(WaterIce)
+albedo 2 H2O: spherical_albedo 300-390 nm = 0x3feff7b5b8942d73  # 0.9989880185179757
+albedo 2 H2O: spherical_albedo 390-495 nm = 0x3fefef15fbadc42e  # 0.9979352870560712
+albedo 2 H2O: spherical_albedo 495-595 nm = 0x3fefb9d9d20aee88  # 0.9914368727108505
+albedo 2 H2O: spherical_albedo 595-700 nm = 0x3fef5cad60907137  # 0.9800631414432591
+albedo 2 H2O: spherical_albedo 700-780 nm = 0x3feed4154654ea5e  # 0.9633890508333243
+albedo 2 H2O: spherical_albedo 780-1000 nm = 0x3fecfedf30188ed4  # 0.9061122836469289
+albedo 2 H2O: spherical_albedo 1000-1300 nm = 0x3fe9291e8035c48f  # 0.7862694267370375
+albedo 2 H2O: spherical_albedo 1300-1700 nm = 0x3fd74e168a8e410a  # 0.3641411164362728
+albedo 2 H2O: spherical_albedo 1700-2200 nm = 0x3fd0db8b6c2ae065  # 0.2633999401400671
+albedo 2 H2O: spherical_albedo 2200-2800 nm = 0x3fca954201e59714  # 0.2076799878370187
+albedo 2 H2O: spherical_albedo 2800-3500 nm = 0x3f86239f111049ff  # 0.010810129841080316
+albedo 2 H2O: spherical_albedo 3500-5000 nm = 0x3f86241fc3a67ac9  # 0.010811088712953236
+albedo 2 H2O: data from nm = 0x4077c00000000000  # 380.0
+albedo 2 H2O: data to nm = 0x40b3880000000000  # 5000.0
 albedo 3 CH4: Frost from methane-ice.json (stand-in), phase law Ice
 albedo 3 CH4: w B = 0x3ff0000000000000  # 1.0
 albedo 3 CH4: w V = 0x3ff0000000000000  # 1.0
@@ -2036,6 +2051,21 @@ albedo 3 CH4: hemispherical_albedo at mu0 0.2 R = 0x3ff0000000000000  # 1.0
 albedo 3 CH4: hemispherical_albedo at mu0 0.05 B = 0x3ff0000000000000  # 1.0
 albedo 3 CH4: hemispherical_albedo at mu0 0.05 V = 0x3ff0000000000000  # 1.0
 albedo 3 CH4: hemispherical_albedo at mu0 0.05 R = 0x3ff0000000000000  # 1.0
+albedo 3 CH4: infrared Some(MethaneIce)
+albedo 3 CH4: spherical_albedo 300-390 nm = 0x3ff0000000000000  # 1.0
+albedo 3 CH4: spherical_albedo 390-495 nm = 0x3ff0000000000000  # 1.0
+albedo 3 CH4: spherical_albedo 495-595 nm = 0x3ff0000000000000  # 1.0
+albedo 3 CH4: spherical_albedo 595-700 nm = 0x3ff0000000000000  # 1.0
+albedo 3 CH4: spherical_albedo 700-780 nm = 0x3ff0000000000000  # 1.0
+albedo 3 CH4: spherical_albedo 780-1000 nm = 0x3fee57a9dfa91721  # 0.9482011192673988
+albedo 3 CH4: spherical_albedo 1000-1300 nm = 0x3fec69a61d57dc8a  # 0.8878965924367475
+albedo 3 CH4: spherical_albedo 1300-1700 nm = 0x3fe8141c8892590e  # 0.7524550120749909
+albedo 3 CH4: spherical_albedo 1700-2200 nm = 0x3fe7f0752f39b9af  # 0.7481027529118388
+albedo 3 CH4: spherical_albedo 2200-2800 nm = 0x3fe16c6f84430288  # 0.5444867690312813
+albedo 3 CH4: spherical_albedo 2800-3500 nm = 0x3fd6807637493abb  # 0.35159068488148265
+albedo 3 CH4: spherical_albedo 3500-5000 nm = 0x3fe6c0e1528f6ab8  # 0.711044942140993
+albedo 3 CH4: data from nm = 0x4077c00000000000  # 380.0
+albedo 3 CH4: data to nm = 0x40b330a8f5c28f5c  # 4912.66
 albedo 4 NH3: Frost from ammonia-ice.json (stand-in), phase law Ice
 albedo 4 NH3: w B = 0x3fefffffffffffff  # 0.9999999999999999
 albedo 4 NH3: w V = 0x3ff0000000000000  # 1.0
@@ -2058,6 +2088,21 @@ albedo 4 NH3: hemispherical_albedo at mu0 0.2 R = 0x3ff0000000000000  # 1.0
 albedo 4 NH3: hemispherical_albedo at mu0 0.05 B = 0x3feffffff4dd27a7  # 0.9999999792573718
 albedo 4 NH3: hemispherical_albedo at mu0 0.05 V = 0x3ff0000000000000  # 1.0
 albedo 4 NH3: hemispherical_albedo at mu0 0.05 R = 0x3ff0000000000000  # 1.0
+albedo 4 NH3: infrared Some(AmmoniaIce)
+albedo 4 NH3: spherical_albedo 300-390 nm = 0x3feffffffd3fecca  # 0.9999999948771798
+albedo 4 NH3: spherical_albedo 390-495 nm = 0x3feffffffe857204  # 0.9999999972456526
+albedo 4 NH3: spherical_albedo 495-595 nm = 0x3feffffffee7441c  # 0.9999999979573917
+albedo 4 NH3: spherical_albedo 595-700 nm = 0x3feffffffee999cf  # 0.9999999979743793
+albedo 4 NH3: spherical_albedo 700-780 nm = 0x3fefffffff0292b3  # 0.9999999981560762
+albedo 4 NH3: spherical_albedo 780-1000 nm = 0x3fefffffff1438d1  # 0.9999999982844888
+albedo 4 NH3: spherical_albedo 1000-1300 nm = 0x3fefffffff11bebd  # 0.9999999982664672
+albedo 4 NH3: spherical_albedo 1300-1700 nm = 0x3fe20ef125f57bd2  # 0.5643239728341263
+albedo 4 NH3: spherical_albedo 1700-2200 nm = 0x3fcab6c1ae95ffb4  # 0.2087022879095436
+albedo 4 NH3: spherical_albedo 2200-2800 nm = 0x3fb7e871b8a7dce6  # 0.09339056738086846
+albedo 4 NH3: spherical_albedo 2800-3500 nm = 0x3faf5df872e2376f  # 0.06126381304157646
+albedo 4 NH3: spherical_albedo 3500-5000 nm = 0x3fc3766de3f421da  # 0.1520516741804972
+albedo 4 NH3: data from nm = 0x4077c00000000000  # 380.0
+albedo 4 NH3: data to nm = 0x40b3880000000000  # 5000.0
 albedo 5 N2: Frost from nitrogen-ice.json (stand-in), phase law Ice
 albedo 5 N2: w B = 0x3ff0000000000000  # 1.0
 albedo 5 N2: w V = 0x3ff0000000000000  # 1.0
@@ -2080,6 +2125,21 @@ albedo 5 N2: hemispherical_albedo at mu0 0.2 R = 0x3ff0000000000000  # 1.0
 albedo 5 N2: hemispherical_albedo at mu0 0.05 B = 0x3ff0000000000000  # 1.0
 albedo 5 N2: hemispherical_albedo at mu0 0.05 V = 0x3ff0000000000000  # 1.0
 albedo 5 N2: hemispherical_albedo at mu0 0.05 R = 0x3ff0000000000000  # 1.0
+albedo 5 N2: infrared Some(NitrogenIce)
+albedo 5 N2: spherical_albedo 300-390 nm = 0x3feffffffac2bcbd  # 0.9999999902410291
+albedo 5 N2: spherical_albedo 390-495 nm = 0x3feffffffb7b1f5f  # 0.9999999915826087
+albedo 5 N2: spherical_albedo 495-595 nm = 0x3feffffffbcd3293  # 0.999999992179783
+albedo 5 N2: spherical_albedo 595-700 nm = 0x3feffffffbac50f0  # 0.9999999919405393
+albedo 5 N2: spherical_albedo 700-780 nm = 0x3feffffffb82e0a8  # 0.9999999916390339
+albedo 5 N2: spherical_albedo 780-1000 nm = 0x3ff0000000000000  # 1.0
+albedo 5 N2: spherical_albedo 1000-1300 nm = 0x3ff0000000000000  # 1.0
+albedo 5 N2: spherical_albedo 1300-1700 nm = 0x3ff0000000000000  # 1.0
+albedo 5 N2: spherical_albedo 1700-2200 nm = 0x3fefdbfc80f49304  # 0.9956038015994584
+albedo 5 N2: spherical_albedo 2200-2800 nm = 0x3feff909b0a30bbf  # 0.999150128358785
+albedo 5 N2: spherical_albedo 2800-3500 nm = 0x3ff0000000000000  # 1.0
+albedo 5 N2: spherical_albedo 3500-5000 nm = 0x3ff0000000000000  # 1.0
+albedo 5 N2: data from nm = 0x4077c00000000000  # 380.0
+albedo 5 N2: data to nm = 0x40b3880000000000  # 5000.0
 albedo 6 O2: Frost from oxygen-ice.json (stand-in), phase law Ice
 albedo 6 O2: w B = 0x3fefffffffffffff  # 0.9999999999999999
 albedo 6 O2: w V = 0x3ff0000000000000  # 1.0
@@ -2102,6 +2162,21 @@ albedo 6 O2: hemispherical_albedo at mu0 0.2 R = 0x3ff0000000000000  # 1.0
 albedo 6 O2: hemispherical_albedo at mu0 0.05 B = 0x3feffffff4dd27a7  # 0.9999999792573718
 albedo 6 O2: hemispherical_albedo at mu0 0.05 V = 0x3ff0000000000000  # 1.0
 albedo 6 O2: hemispherical_albedo at mu0 0.05 R = 0x3ff0000000000000  # 1.0
+albedo 6 O2: infrared None
+albedo 6 O2: spherical_albedo 300-390 nm = 0x3feffffffbe45e36  # 0.9999999923483702
+albedo 6 O2: spherical_albedo 390-495 nm = 0x3feffffffb67288f  # 0.9999999914373506
+albedo 6 O2: spherical_albedo 495-595 nm = 0x3feffffffbbbd1d8  # 0.9999999920533424
+albedo 6 O2: spherical_albedo 595-700 nm = 0x3feffffffb7d39bb  # 0.9999999915979098
+albedo 6 O2: spherical_albedo 700-780 nm = 0x3feffffffb6a6526  # 0.9999999914609006
+albedo 6 O2: spherical_albedo 780-1000 nm = 0x3feffffffb6a6526  # 0.9999999914609006
+albedo 6 O2: spherical_albedo 1000-1300 nm = 0x3feffffffb6a6526  # 0.9999999914609006
+albedo 6 O2: spherical_albedo 1300-1700 nm = 0x3feffffffb6a6526  # 0.9999999914609006
+albedo 6 O2: spherical_albedo 1700-2200 nm = 0x3feffffffb6a6526  # 0.9999999914609006
+albedo 6 O2: spherical_albedo 2200-2800 nm = 0x3feffffffb6a6526  # 0.9999999914609006
+albedo 6 O2: spherical_albedo 2800-3500 nm = 0x3feffffffb6a6526  # 0.9999999914609006
+albedo 6 O2: spherical_albedo 3500-5000 nm = 0x3feffffffb6a6526  # 0.9999999914609006
+albedo 6 O2: data from nm = 0x4077c00000000000  # 380.0
+albedo 6 O2: data to nm = 0x4088600000000000  # 780.0
 albedo 7 CO2: Frost from carbon-dioxide-ice.json, phase law Ice
 albedo 7 CO2: w B = 0x3feffffc56f8d600  # 0.9999982546493698
 albedo 7 CO2: w V = 0x3feffffc6361e96c  # 0.9999982777656391
@@ -2124,6 +2199,21 @@ albedo 7 CO2: hemispherical_albedo at mu0 0.2 R = 0x3fefe9f733a462e0  # 0.997310
 albedo 7 CO2: hemispherical_albedo at mu0 0.05 B = 0x3fefee8dfc46dcd7  # 0.9978704383164779
 albedo 7 CO2: hemispherical_albedo at mu0 0.05 V = 0x3fefeeaba77ad0b1  # 0.9978845854843909
 albedo 7 CO2: hemispherical_albedo at mu0 0.05 R = 0x3fefeeb96dda442c  # 0.9978911538656852
+albedo 7 CO2: infrared Some(CarbonDioxideIce)
+albedo 7 CO2: spherical_albedo 300-390 nm = 0x3fefdc6dfa75ac06  # 0.9956579105177077
+albedo 7 CO2: spherical_albedo 390-495 nm = 0x3fefdca07c84b722  # 0.9956819946289424
+albedo 7 CO2: spherical_albedo 495-595 nm = 0x3fefdcda0fbecb40  # 0.9957094485783742
+albedo 7 CO2: spherical_albedo 595-700 nm = 0x3fefdcfa2e0e84ca  # 0.9957247638268651
+albedo 7 CO2: spherical_albedo 700-780 nm = 0x3fefdd0c97b4301b  # 0.9957335436788556
+albedo 7 CO2: spherical_albedo 780-1000 nm = 0x3fe9dc17af9e8e16  # 0.8081167631211794
+albedo 7 CO2: spherical_albedo 1000-1300 nm = 0x3fe979e22b2055b5  # 0.7961283533392619
+albedo 7 CO2: spherical_albedo 1300-1700 nm = 0x3fe90fca3a52f078  # 0.7831774844303387
+albedo 7 CO2: spherical_albedo 1700-2200 nm = 0x3fe843d7fd783b0d  # 0.7582817030505297
+albedo 7 CO2: spherical_albedo 2200-2800 nm = 0x3fe199586014f4a5  # 0.5499688984488286
+albedo 7 CO2: spherical_albedo 2800-3500 nm = 0x3fe26bf405e01f76  # 0.575677882648036
+albedo 7 CO2: spherical_albedo 3500-5000 nm = 0x3fd8ac80d092a933  # 0.3855287587017699
+albedo 7 CO2: data from nm = 0x4077c00000000000  # 380.0
+albedo 7 CO2: data to nm = 0x40b3880000000000  # 5000.0
 albedo 8 Ar: Frost from argon-ice.json (stand-in), phase law Ice
 albedo 8 Ar: w B = 0x3ff0000000000000  # 1.0
 albedo 8 Ar: w V = 0x3ff0000000000000  # 1.0
@@ -2146,6 +2236,21 @@ albedo 8 Ar: hemispherical_albedo at mu0 0.2 R = 0x3ff0000000000000  # 1.0
 albedo 8 Ar: hemispherical_albedo at mu0 0.05 B = 0x3ff0000000000000  # 1.0
 albedo 8 Ar: hemispherical_albedo at mu0 0.05 V = 0x3ff0000000000000  # 1.0
 albedo 8 Ar: hemispherical_albedo at mu0 0.05 R = 0x3ff0000000000000  # 1.0
+albedo 8 Ar: infrared None
+albedo 8 Ar: spherical_albedo 300-390 nm = 0x3feffffffbb36730  # 0.9999999919921034
+albedo 8 Ar: spherical_albedo 390-495 nm = 0x3feffffffba6673d  # 0.9999999918975174
+albedo 8 Ar: spherical_albedo 495-595 nm = 0x3feffffffb4ea7fa  # 0.9999999912590731
+albedo 8 Ar: spherical_albedo 595-700 nm = 0x3feffffffdb79e27  # 0.9999999957480598
+albedo 8 Ar: spherical_albedo 700-780 nm = 0x3ff0000000000000  # 1.0
+albedo 8 Ar: spherical_albedo 780-1000 nm = 0x3ff0000000000000  # 1.0
+albedo 8 Ar: spherical_albedo 1000-1300 nm = 0x3ff0000000000000  # 1.0
+albedo 8 Ar: spherical_albedo 1300-1700 nm = 0x3ff0000000000000  # 1.0
+albedo 8 Ar: spherical_albedo 1700-2200 nm = 0x3ff0000000000000  # 1.0
+albedo 8 Ar: spherical_albedo 2200-2800 nm = 0x3ff0000000000000  # 1.0
+albedo 8 Ar: spherical_albedo 2800-3500 nm = 0x3ff0000000000000  # 1.0
+albedo 8 Ar: spherical_albedo 3500-5000 nm = 0x3ff0000000000000  # 1.0
+albedo 8 Ar: data from nm = 0x4077c00000000000  # 380.0
+albedo 8 Ar: data to nm = 0x4088600000000000  # 780.0
 albedo 13 CO: Frost from carbon-monoxide-ice.json (stand-in), phase law Ice
 albedo 13 CO: w B = 0x3fefffffffffffff  # 0.9999999999999999
 albedo 13 CO: w V = 0x3ff0000000000000  # 1.0
@@ -2168,6 +2273,63 @@ albedo 13 CO: hemispherical_albedo at mu0 0.2 R = 0x3ff0000000000000  # 1.0
 albedo 13 CO: hemispherical_albedo at mu0 0.05 B = 0x3feffffff4dd27a7  # 0.9999999792573718
 albedo 13 CO: hemispherical_albedo at mu0 0.05 V = 0x3ff0000000000000  # 1.0
 albedo 13 CO: hemispherical_albedo at mu0 0.05 R = 0x3ff0000000000000  # 1.0
+albedo 13 CO: infrared Some(CarbonMonoxideIce)
+albedo 13 CO: spherical_albedo 300-390 nm = 0x3feffffffe1eab1a  # 0.9999999964978514
+albedo 13 CO: spherical_albedo 390-495 nm = 0x3feffffffb402517  # 0.9999999911534897
+albedo 13 CO: spherical_albedo 495-595 nm = 0x3feffffffad96d6f  # 0.9999999904061222
+albedo 13 CO: spherical_albedo 595-700 nm = 0x3feffffffafd1712  # 0.9999999906656021
+albedo 13 CO: spherical_albedo 700-780 nm = 0x3feffffffb8fb815  # 0.9999999917324681
+albedo 13 CO: spherical_albedo 780-1000 nm = 0x3fefffffe95f616d  # 0.9999999578531465
+albedo 13 CO: spherical_albedo 1000-1300 nm = 0x3fefffffe95f610c  # 0.9999999578531358
+albedo 13 CO: spherical_albedo 1300-1700 nm = 0x3fefffffe95f60c9  # 0.9999999578531283
+albedo 13 CO: spherical_albedo 1700-2200 nm = 0x3fefffffe95f60a1  # 0.9999999578531239
+albedo 13 CO: spherical_albedo 2200-2800 nm = 0x3fefffffe95f6087  # 0.999999957853121
+albedo 13 CO: spherical_albedo 2800-3500 nm = 0x3fefffffed95f138  # 0.9999999657007157
+albedo 13 CO: spherical_albedo 3500-5000 nm = 0x3fe7130e502d4e98  # 0.7210761609989786
+albedo 13 CO: data from nm = 0x4077c00000000000  # 380.0
+albedo 13 CO: data to nm = 0x40b3880000000000  # 5000.0
+albedo 14 SO2: Frost from measured levels (stand-in), phase law Ice
+albedo 14 SO2: levels at i 20 e 60 azimuth 180 deg
+albedo 14 SO2: level at 300 nm = 0x3fa1eb851eb851ec  # 0.035
+albedo 14 SO2: level at 320 nm = 0x3fa1eb851eb851ec  # 0.035
+albedo 14 SO2: level at 400 nm = 0x3fe8cccccccccccd  # 0.775
+albedo 14 SO2: level at 850 nm = 0x3fe8cccccccccccd  # 0.775
+albedo 14 SO2: w B = 0x3fefee653754ffe3  # 0.9978509979919149
+albedo 14 SO2: w V = 0x3fefee653754ffe3  # 0.9978509979919149
+albedo 14 SO2: w R = 0x3fefee653754ffe3  # 0.9978509979919149
+albedo 14 SO2: normal_albedo B = 0x3fe9c5da1901c62e  # 0.8054018486420256
+albedo 14 SO2: normal_albedo V = 0x3fe9c5da1901c62e  # 0.8054018486420256
+albedo 14 SO2: normal_albedo R = 0x3fe9c5da1901c62e  # 0.8054018486420256
+albedo 14 SO2: spherical_albedo B = 0x3feb82c3998cad39  # 0.8597124098791148
+albedo 14 SO2: spherical_albedo V = 0x3feb82c3998cad39  # 0.8597124098791148
+albedo 14 SO2: spherical_albedo R = 0x3feb82c3998cad39  # 0.8597124098791148
+albedo 14 SO2: hemispherical_albedo at mu0 1 B = 0x3fea84a98eefaa79  # 0.8286941329691465
+albedo 14 SO2: hemispherical_albedo at mu0 1 V = 0x3fea84a98eefaa79  # 0.8286941329691465
+albedo 14 SO2: hemispherical_albedo at mu0 1 R = 0x3fea84a98eefaa79  # 0.8286941329691465
+albedo 14 SO2: hemispherical_albedo at mu0 0.5 B = 0x3fec002be35a1315  # 0.8750209274736301
+albedo 14 SO2: hemispherical_albedo at mu0 0.5 V = 0x3fec002be35a1315  # 0.8750209274736301
+albedo 14 SO2: hemispherical_albedo at mu0 0.5 R = 0x3fec002be35a1315  # 0.8750209274736301
+albedo 14 SO2: hemispherical_albedo at mu0 0.2 B = 0x3fed056d461598ba  # 0.9069124573550404
+albedo 14 SO2: hemispherical_albedo at mu0 0.2 V = 0x3fed056d461598ba  # 0.9069124573550404
+albedo 14 SO2: hemispherical_albedo at mu0 0.2 R = 0x3fed056d461598ba  # 0.9069124573550404
+albedo 14 SO2: hemispherical_albedo at mu0 0.05 B = 0x3feda00d2e43f164  # 0.9257875350590834
+albedo 14 SO2: hemispherical_albedo at mu0 0.05 V = 0x3feda00d2e43f164  # 0.9257875350590834
+albedo 14 SO2: hemispherical_albedo at mu0 0.05 R = 0x3feda00d2e43f164  # 0.9257875350590834
+albedo 14 SO2: infrared None
+albedo 14 SO2: spherical_albedo 300-390 nm = 0x3fd32fa62358fd04  # 0.2997832627479087
+albedo 14 SO2: spherical_albedo 390-495 nm = 0x3feb547e8412bf21  # 0.8540642337374927
+albedo 14 SO2: spherical_albedo 495-595 nm = 0x3feb82c399727fc3  # 0.8597124096886478
+albedo 14 SO2: spherical_albedo 595-700 nm = 0x3feb82c399727fc5  # 0.859712409688648
+albedo 14 SO2: spherical_albedo 700-780 nm = 0x3feb82c399727fb3  # 0.859712409688646
+albedo 14 SO2: spherical_albedo 780-1000 nm = 0x3feb82c399727fa8  # 0.8597124096886448
+albedo 14 SO2: spherical_albedo 1000-1300 nm = 0x3feb82c399727fa8  # 0.8597124096886448
+albedo 14 SO2: spherical_albedo 1300-1700 nm = 0x3feb82c399727fa8  # 0.8597124096886448
+albedo 14 SO2: spherical_albedo 1700-2200 nm = 0x3feb82c399727fa8  # 0.8597124096886448
+albedo 14 SO2: spherical_albedo 2200-2800 nm = 0x3feb82c399727fa8  # 0.8597124096886448
+albedo 14 SO2: spherical_albedo 2800-3500 nm = 0x3feb82c399727fa8  # 0.8597124096886448
+albedo 14 SO2: spherical_albedo 3500-5000 nm = 0x3feb82c399727fa8  # 0.8597124096886448
+albedo 14 SO2: data from nm = 0x4072c00000000000  # 300.0
+albedo 14 SO2: data to nm = 0x408a900000000000  # 850.0
 albedo 15 H2S: Frost from hydrogen-sulphide-ice.json (stand-in), phase law Ice
 albedo 15 H2S: w B = 0x3ff0000000000000  # 1.0
 albedo 15 H2S: w V = 0x3fefffffffffffff  # 0.9999999999999999
@@ -2190,6 +2352,60 @@ albedo 15 H2S: hemispherical_albedo at mu0 0.2 R = 0x3ff0000000000000  # 1.0
 albedo 15 H2S: hemispherical_albedo at mu0 0.05 B = 0x3ff0000000000000  # 1.0
 albedo 15 H2S: hemispherical_albedo at mu0 0.05 V = 0x3feffffff4dd27a7  # 0.9999999792573718
 albedo 15 H2S: hemispherical_albedo at mu0 0.05 R = 0x3ff0000000000000  # 1.0
+albedo 15 H2S: infrared None
+albedo 15 H2S: spherical_albedo 300-390 nm = 0x3feffffffc612e7a  # 0.9999999932565082
+albedo 15 H2S: spherical_albedo 390-495 nm = 0x3feffffffd2908f7  # 0.9999999947106336
+albedo 15 H2S: spherical_albedo 495-595 nm = 0x3feffffffd268bdf  # 0.9999999946925263
+albedo 15 H2S: spherical_albedo 595-700 nm = 0x3feffffffd15eca2  # 0.9999999945715852
+albedo 15 H2S: spherical_albedo 700-780 nm = 0x3feffffffd627d20  # 0.9999999951286647
+albedo 15 H2S: spherical_albedo 780-1000 nm = 0x3feffffffd627d20  # 0.9999999951286647
+albedo 15 H2S: spherical_albedo 1000-1300 nm = 0x3feffffffd627d20  # 0.9999999951286647
+albedo 15 H2S: spherical_albedo 1300-1700 nm = 0x3feffffffd627d20  # 0.9999999951286647
+albedo 15 H2S: spherical_albedo 1700-2200 nm = 0x3feffffffd627d20  # 0.9999999951286647
+albedo 15 H2S: spherical_albedo 2200-2800 nm = 0x3feffffffd627d20  # 0.9999999951286647
+albedo 15 H2S: spherical_albedo 2800-3500 nm = 0x3feffffffd627d20  # 0.9999999951286647
+albedo 15 H2S: spherical_albedo 3500-5000 nm = 0x3feffffffd627d20  # 0.9999999951286647
+albedo 15 H2S: data from nm = 0x4077c00000000000  # 380.0
+albedo 15 H2S: data to nm = 0x4088600000000000  # 780.0
+albedo 29 Fe: Regolith from iron powder SA-209309, phase law Regolith
+albedo 29 Fe: iron powder SA-209309 spectra ["splib07a_IronPowder_SA-209309_325mesh_ASDFRa_AREF.txt"]
+albedo 29 Fe: iron powder SA-209309 held
+albedo 29 Fe: w B = 0x3fdac406f90180f8  # 0.4182145530412664
+albedo 29 Fe: w V = 0x3fdbc8423bc032f3  # 0.43409782252346857
+albedo 29 Fe: w R = 0x3fdc62ae5928199c  # 0.4435230131788559
+albedo 29 Fe: normal_albedo B = 0x3fc99c90b1a586ff  # 0.20009049104833562
+albedo 29 Fe: normal_albedo V = 0x3fcac1647a54e880  # 0.20902687047220425
+albedo 29 Fe: normal_albedo R = 0x3fcb7182295599a2  # 0.2144015027835851
+albedo 29 Fe: spherical_albedo B = 0x3fbfa4a39484f748  # 0.12360594154321547
+albedo 29 Fe: spherical_albedo V = 0x3fc0a12ed550600b  # 0.1299189130375001
+albedo 29 Fe: spherical_albedo R = 0x3fc11ea1e2732b96  # 0.13374732548831209
+albedo 29 Fe: hemispherical_albedo at mu0 1 B = 0x3fb8b393de3be630  # 0.09649013686785035
+albedo 29 Fe: hemispherical_albedo at mu0 1 V = 0x3fba03cf65a20f80  # 0.10162063819194422
+albedo 29 Fe: hemispherical_albedo at mu0 1 R = 0x3fbad057044314c8  # 0.10474151472142801
+albedo 29 Fe: hemispherical_albedo at mu0 0.5 B = 0x3fc150b736656e58  # 0.13527574688019928
+albedo 29 Fe: hemispherical_albedo at mu0 0.5 V = 0x3fc23142c7636408  # 0.14212832198862224
+albedo 29 Fe: hemispherical_albedo at mu0 0.5 R = 0x3fc2b9552d2d3948  # 0.14628090577975628
+albedo 29 Fe: hemispherical_albedo at mu0 0.2 B = 0x3fc73bc465178e3c  # 0.18151144920476436
+albedo 29 Fe: hemispherical_albedo at mu0 0.2 V = 0x3fc857239e4c4fd0  # 0.19015927533530297
+albedo 29 Fe: hemispherical_albedo at mu0 0.2 R = 0x3fc90214a015644c  # 0.19537599388675841
+albedo 29 Fe: hemispherical_albedo at mu0 0.05 B = 0x3fccdd8587d1f330  # 0.22551030284730578
+albedo 29 Fe: hemispherical_albedo at mu0 0.05 V = 0x3fce280fa0c41c94  # 0.2355975661268742
+albedo 29 Fe: hemispherical_albedo at mu0 0.05 R = 0x3fceee96596137e0  # 0.24165610660787618
+albedo 29 Fe: infrared None
+albedo 29 Fe: spherical_albedo 300-390 nm = 0x3fbce48b878aa442  # 0.1128623205101045
+albedo 29 Fe: spherical_albedo 390-495 nm = 0x3fbf91998d92f9a9  # 0.12331542688750709
+albedo 29 Fe: spherical_albedo 495-595 nm = 0x3fc09f862ee74238  # 0.12986829080775109
+albedo 29 Fe: spherical_albedo 595-700 nm = 0x3fc12f3ea1bfd13b  # 0.13425429246820805
+albedo 29 Fe: spherical_albedo 700-780 nm = 0x3fc1e7981cc9c3c4  # 0.13988019376441063
+albedo 29 Fe: spherical_albedo 780-1000 nm = 0x3fc38e6c08402428  # 0.152783874538984
+albedo 29 Fe: spherical_albedo 1000-1300 nm = 0x3fc688dc9ee30e3e  # 0.17605169065619636
+albedo 29 Fe: spherical_albedo 1300-1700 nm = 0x3fca0bc1e1d5f988  # 0.20348380591526571
+albedo 29 Fe: spherical_albedo 1700-2200 nm = 0x3fce73e100e87a5c  # 0.23791134399739888
+albedo 29 Fe: spherical_albedo 2200-2800 nm = 0x3fd0e94c3d28ec30  # 0.26423936817781435
+albedo 29 Fe: spherical_albedo 2800-3500 nm = 0x3fd0e94c3d28ec30  # 0.26423936817781435
+albedo 29 Fe: spherical_albedo 3500-5000 nm = 0x3fd0e94c3d28ec30  # 0.26423936817781435
+albedo 29 Fe: data from nm = 0x4075dffff583a53b  # 349.99998999999997
+albedo 29 Fe: data to nm = 0x40a3880000000000  # 2500.0
 albedo 57 NH4SH: Frost from ammonium-hydrosulphide.json (stand-in), phase law Ice
 albedo 57 NH4SH: w B = 0x3ff0000000000000  # 1.0
 albedo 57 NH4SH: w V = 0x3ff0000000000000  # 1.0
@@ -2212,6 +2428,140 @@ albedo 57 NH4SH: hemispherical_albedo at mu0 0.2 R = 0x3ff0000000000000  # 1.0
 albedo 57 NH4SH: hemispherical_albedo at mu0 0.05 B = 0x3ff0000000000000  # 1.0
 albedo 57 NH4SH: hemispherical_albedo at mu0 0.05 V = 0x3ff0000000000000  # 1.0
 albedo 57 NH4SH: hemispherical_albedo at mu0 0.05 R = 0x3ff0000000000000  # 1.0
+albedo 57 NH4SH: infrared None
+albedo 57 NH4SH: spherical_albedo 300-390 nm = 0x3feffffffcd508aa  # 0.9999999940994446
+albedo 57 NH4SH: spherical_albedo 390-495 nm = 0x3feffffffbd94dc8  # 0.9999999922678677
+albedo 57 NH4SH: spherical_albedo 495-595 nm = 0x3feffffffc5ee8b8  # 0.9999999932399737
+albedo 57 NH4SH: spherical_albedo 595-700 nm = 0x3feffffffce7afea  # 0.9999999942351654
+albedo 57 NH4SH: spherical_albedo 700-780 nm = 0x3feffffffcb89735  # 0.9999999938924932
+albedo 57 NH4SH: spherical_albedo 780-1000 nm = 0x3feffffffcb89735  # 0.9999999938924932
+albedo 57 NH4SH: spherical_albedo 1000-1300 nm = 0x3feffffffcb89735  # 0.9999999938924932
+albedo 57 NH4SH: spherical_albedo 1300-1700 nm = 0x3feffffffcb89735  # 0.9999999938924932
+albedo 57 NH4SH: spherical_albedo 1700-2200 nm = 0x3feffffffcb89735  # 0.9999999938924932
+albedo 57 NH4SH: spherical_albedo 2200-2800 nm = 0x3feffffffcb89735  # 0.9999999938924932
+albedo 57 NH4SH: spherical_albedo 2800-3500 nm = 0x3feffffffcb89735  # 0.9999999938924932
+albedo 57 NH4SH: spherical_albedo 3500-5000 nm = 0x3feffffffcb89735  # 0.9999999938924932
+albedo 57 NH4SH: data from nm = 0x4077c00000000000  # 380.0
+albedo 57 NH4SH: data to nm = 0x4088600000000000  # 780.0
+albedo 59 S8: Regolith from sulfur GDS94, phase law Regolith
+albedo 59 S8: sulfur GDS94 spectra ["splib07a_Sulfur_GDS94_Reagent_BECKa_AREF.txt"]
+albedo 59 S8: sulfur GDS94 held
+albedo 59 S8: w B = 0x3fe5361a396071cb  # 0.6628543015136129
+albedo 59 S8: w V = 0x3fefbb6d4253f5d1  # 0.991629247233215
+albedo 59 S8: w R = 0x3fefd67952e1844b  # 0.9949308985488953
+albedo 59 S8: normal_albedo B = 0x3fd459b90fadb2a9  # 0.31797625094513166
+albedo 59 S8: normal_albedo V = 0x3feec9e320d681d7  # 0.9621444360128021
+albedo 59 S8: normal_albedo R = 0x3ff040dbe3a2a57f  # 1.0158347026830084
+albedo 59 S8: spherical_albedo B = 0x3fcf91e9736922f8  # 0.24664037833488073
+albedo 59 S8: spherical_albedo V = 0x3fea344499bac16a  # 0.8188803675202909
+albedo 59 S8: spherical_albedo R = 0x3feb63f370c5dedf  # 0.8559510424228981
+albedo 59 S8: hemispherical_albedo at mu0 1 B = 0x3fc999fe08d320a4  # 0.2000119727219999
+albedo 59 S8: hemispherical_albedo at mu0 1 V = 0x3fe8fc6fe98c78a4  # 0.7808150826929432
+albedo 59 S8: hemispherical_albedo at mu0 1 R = 0x3fea603a61db620e  # 0.8242465888279769
+albedo 59 S8: hemispherical_albedo at mu0 0.5 B = 0x3fd1203499302b48  # 0.26759066543370524
+albedo 59 S8: hemispherical_albedo at mu0 0.5 V = 0x3feacdd66e779970  # 0.8376266629755218
+albedo 59 S8: hemispherical_albedo at mu0 0.5 R = 0x3febe41c0a144c38  # 0.8715954014645666
+albedo 59 S8: hemispherical_albedo at mu0 0.2 B = 0x3fd5c841474f4428  # 0.3403475948699133
+albedo 59 S8: hemispherical_albedo at mu0 0.2 V = 0x3fec170f7939bb1e  # 0.8778149955449839
+albedo 59 S8: hemispherical_albedo at mu0 0.2 R = 0x3fecefcb9a429052  # 0.9042718899622832
+albedo 59 S8: hemispherical_albedo at mu0 0.05 B = 0x3fd9c35b9642fdb2  # 0.40254869150154626
+albedo 59 S8: hemispherical_albedo at mu0 0.05 V = 0x3fecdd8e122892f1  # 0.9020452837617922
+albedo 59 S8: hemispherical_albedo at mu0 0.05 R = 0x3fed8e7dff25fcb2  # 0.9236440642706809
+albedo 59 S8: infrared None
+albedo 59 S8: spherical_albedo 300-390 nm = 0x3faa81499153cc2d  # 0.051767634382393936
+albedo 59 S8: spherical_albedo 390-495 nm = 0x3fd50a27ae6d3b45  # 0.3287448123345949
+albedo 59 S8: spherical_albedo 495-595 nm = 0x3fe9def8e837d1a1  # 0.8084682975300447
+albedo 59 S8: spherical_albedo 595-700 nm = 0x3feb5d4bdd853357  # 0.8551387144631047
+albedo 59 S8: spherical_albedo 700-780 nm = 0x3feb9e1571eb9d7a  # 0.8630473351485499
+albedo 59 S8: spherical_albedo 780-1000 nm = 0x3feb53c52c098032  # 0.8539758548831797
+albedo 59 S8: spherical_albedo 1000-1300 nm = 0x3feac44323de1295  # 0.8364577961479706
+albedo 59 S8: spherical_albedo 1300-1700 nm = 0x3fea72e83a699c7f  # 0.8265267506475452
+albedo 59 S8: spherical_albedo 1700-2200 nm = 0x3fea771d8b4e3b49  # 0.8270404549419733
+albedo 59 S8: spherical_albedo 2200-2800 nm = 0x3fea9d8a2d04a76b  # 0.8317309264432259
+albedo 59 S8: spherical_albedo 2800-3500 nm = 0x3fea9868942d3ae0  # 0.8311045545650266
+albedo 59 S8: spherical_albedo 3500-5000 nm = 0x3fea9868942d3ae0  # 0.8311045545650266
+albedo 59 S8: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 59 S8: data to nm = 0x40a740000d1b7175  # 2976.0000999999997
+albedo 60 KCl: Regolith from halite HS433.3B (stand-in), phase law Regolith
+albedo 60 KCl: halite HS433.3B spectra ["splib07a_Halite_HS433.3B_BECKa_AREF.txt"]
+albedo 60 KCl: halite HS433.3B slab n = 0x3ff8b573eab367a1  # 1.5443
+albedo 60 KCl: halite HS433.3B slab lab grain m = 0x3f2e2584f4c6e6d9  # 0.00022999999999999998
+albedo 60 KCl: w B = 0x3feff14aacaa4546  # 0.9982045528760544
+albedo 60 KCl: w V = 0x3feff7a245086b2a  # 0.9989787433908976
+albedo 60 KCl: w R = 0x3feffa40a358de93  # 0.9992983999608945
+albedo 60 KCl: normal_albedo B = 0x3ff198393edcd701  # 1.0996639686176766
+albedo 60 KCl: normal_albedo V = 0x3ff21e3c71b22304  # 1.1323818627590194
+albedo 60 KCl: normal_albedo R = 0x3ff266e57b0eee52  # 1.1501211935964375
+albedo 60 KCl: spherical_albedo B = 0x3fed2b11406b465b  # 0.9115072496590061
+albedo 60 KCl: spherical_albedo V = 0x3fedd6d495da69ea  # 0.9324744154758353
+albedo 60 KCl: spherical_albedo R = 0x3fee32a7dad6a5a3  # 0.9436835550488251
+albedo 60 KCl: hemispherical_albedo at mu0 1 B = 0x3fec80aa13602396  # 0.8907060984066557
+albedo 60 KCl: hemispherical_albedo at mu0 1 V = 0x3fed51a99e90067e  # 0.9162185761380923
+albedo 60 KCl: hemispherical_albedo at mu0 1 R = 0x3fedc230d9bcd32d  # 0.9299549343764731
+albedo 60 KCl: hemispherical_albedo at mu0 0.5 B = 0x3fed7f587e4ca753  # 0.9217951266084391
+albedo 60 KCl: hemispherical_albedo at mu0 0.5 V = 0x3fee18bce0f2f9f0  # 0.940519751886141
+albedo 60 KCl: hemispherical_albedo at mu0 0.5 R = 0x3fee6a55b743b485  # 0.9504803256401294
+albedo 60 KCl: hemispherical_albedo at mu0 0.2 B = 0x3fee28cb64409f8f  # 0.9424797971778264
+albedo 60 KCl: hemispherical_albedo at mu0 0.2 V = 0x3fee9b6491e22c1b  # 0.9564688538824869
+albedo 60 KCl: hemispherical_albedo at mu0 0.2 R = 0x3feed7e3d16aa7f5  # 0.9638537492912734
+albedo 60 KCl: hemispherical_albedo at mu0 0.05 B = 0x3fee8ad76979eb0b  # 0.9544484195788255
+albedo 60 KCl: hemispherical_albedo at mu0 0.05 V = 0x3feee6530f38c58a  # 0.9656157777118761
+albedo 60 KCl: hemispherical_albedo at mu0 0.05 R = 0x3fef166d449790ad  # 0.9714876498878958
+albedo 60 KCl: infrared None
+albedo 60 KCl: spherical_albedo 300-390 nm = 0x3febf431a9785d32  # 0.8735588369335459
+albedo 60 KCl: spherical_albedo 390-495 nm = 0x3fed20f22d08ad33  # 0.9102717284744472
+albedo 60 KCl: spherical_albedo 495-595 nm = 0x3fedccffb89ded09  # 0.9312742811011115
+albedo 60 KCl: spherical_albedo 595-700 nm = 0x3fee2c5609294ef4  # 0.9429121188099701
+albedo 60 KCl: spherical_albedo 700-780 nm = 0x3fee57f7c55ea2ce  # 0.9482382635952378
+albedo 60 KCl: spherical_albedo 780-1000 nm = 0x3fee745cc43e2696  # 0.95170439079921
+albedo 60 KCl: spherical_albedo 1000-1300 nm = 0x3fee78b44d3f0138  # 0.952234412070573
+albedo 60 KCl: spherical_albedo 1300-1700 nm = 0x3fee7839d112c06a  # 0.9521760066472897
+albedo 60 KCl: spherical_albedo 1700-2200 nm = 0x3fee63a134847c5d  # 0.9496618295414795
+albedo 60 KCl: spherical_albedo 2200-2800 nm = 0x3fed95789bdd93b5  # 0.9244959873436672
+albedo 60 KCl: spherical_albedo 2800-3500 nm = 0x3fe5c3b20d00123d  # 0.6801386121665655
+albedo 60 KCl: spherical_albedo 3500-5000 nm = 0x3fe5c3b20d00123d  # 0.6801386121665655
+albedo 60 KCl: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 60 KCl: data to nm = 0x40a740000d1b7175  # 2976.0000999999997
+albedo 61 NaCl: Regolith from halite HS433.3B, phase law Regolith
+albedo 61 NaCl: halite HS433.3B spectra ["splib07a_Halite_HS433.3B_BECKa_AREF.txt"]
+albedo 61 NaCl: halite HS433.3B slab n = 0x3ff8b573eab367a1  # 1.5443
+albedo 61 NaCl: halite HS433.3B slab lab grain m = 0x3f2e2584f4c6e6d9  # 0.00022999999999999998
+albedo 61 NaCl: w B = 0x3feff14aacaa4546  # 0.9982045528760544
+albedo 61 NaCl: w V = 0x3feff7a245086b2a  # 0.9989787433908976
+albedo 61 NaCl: w R = 0x3feffa40a358de93  # 0.9992983999608945
+albedo 61 NaCl: normal_albedo B = 0x3ff198393edcd701  # 1.0996639686176766
+albedo 61 NaCl: normal_albedo V = 0x3ff21e3c71b22304  # 1.1323818627590194
+albedo 61 NaCl: normal_albedo R = 0x3ff266e57b0eee52  # 1.1501211935964375
+albedo 61 NaCl: spherical_albedo B = 0x3fed2b11406b465b  # 0.9115072496590061
+albedo 61 NaCl: spherical_albedo V = 0x3fedd6d495da69ea  # 0.9324744154758353
+albedo 61 NaCl: spherical_albedo R = 0x3fee32a7dad6a5a3  # 0.9436835550488251
+albedo 61 NaCl: hemispherical_albedo at mu0 1 B = 0x3fec80aa13602396  # 0.8907060984066557
+albedo 61 NaCl: hemispherical_albedo at mu0 1 V = 0x3fed51a99e90067e  # 0.9162185761380923
+albedo 61 NaCl: hemispherical_albedo at mu0 1 R = 0x3fedc230d9bcd32d  # 0.9299549343764731
+albedo 61 NaCl: hemispherical_albedo at mu0 0.5 B = 0x3fed7f587e4ca753  # 0.9217951266084391
+albedo 61 NaCl: hemispherical_albedo at mu0 0.5 V = 0x3fee18bce0f2f9f0  # 0.940519751886141
+albedo 61 NaCl: hemispherical_albedo at mu0 0.5 R = 0x3fee6a55b743b485  # 0.9504803256401294
+albedo 61 NaCl: hemispherical_albedo at mu0 0.2 B = 0x3fee28cb64409f8f  # 0.9424797971778264
+albedo 61 NaCl: hemispherical_albedo at mu0 0.2 V = 0x3fee9b6491e22c1b  # 0.9564688538824869
+albedo 61 NaCl: hemispherical_albedo at mu0 0.2 R = 0x3feed7e3d16aa7f5  # 0.9638537492912734
+albedo 61 NaCl: hemispherical_albedo at mu0 0.05 B = 0x3fee8ad76979eb0b  # 0.9544484195788255
+albedo 61 NaCl: hemispherical_albedo at mu0 0.05 V = 0x3feee6530f38c58a  # 0.9656157777118761
+albedo 61 NaCl: hemispherical_albedo at mu0 0.05 R = 0x3fef166d449790ad  # 0.9714876498878958
+albedo 61 NaCl: infrared None
+albedo 61 NaCl: spherical_albedo 300-390 nm = 0x3febf431a9785d32  # 0.8735588369335459
+albedo 61 NaCl: spherical_albedo 390-495 nm = 0x3fed20f22d08ad33  # 0.9102717284744472
+albedo 61 NaCl: spherical_albedo 495-595 nm = 0x3fedccffb89ded09  # 0.9312742811011115
+albedo 61 NaCl: spherical_albedo 595-700 nm = 0x3fee2c5609294ef4  # 0.9429121188099701
+albedo 61 NaCl: spherical_albedo 700-780 nm = 0x3fee57f7c55ea2ce  # 0.9482382635952378
+albedo 61 NaCl: spherical_albedo 780-1000 nm = 0x3fee745cc43e2696  # 0.95170439079921
+albedo 61 NaCl: spherical_albedo 1000-1300 nm = 0x3fee78b44d3f0138  # 0.952234412070573
+albedo 61 NaCl: spherical_albedo 1300-1700 nm = 0x3fee7839d112c06a  # 0.9521760066472897
+albedo 61 NaCl: spherical_albedo 1700-2200 nm = 0x3fee63a134847c5d  # 0.9496618295414795
+albedo 61 NaCl: spherical_albedo 2200-2800 nm = 0x3fed95789bdd93b5  # 0.9244959873436672
+albedo 61 NaCl: spherical_albedo 2800-3500 nm = 0x3fe5c3b20d00123d  # 0.6801386121665655
+albedo 61 NaCl: spherical_albedo 3500-5000 nm = 0x3fe5c3b20d00123d  # 0.6801386121665655
+albedo 61 NaCl: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 61 NaCl: data to nm = 0x40a740000d1b7175  # 2976.0000999999997
 albedo 62 ZnS: Regolith from zinc-sulphide.json, phase law Regolith
 albedo 62 ZnS: w B = 0x3fe106435c3720bc  # 0.5320145417290614
 albedo 62 ZnS: w V = 0x3feef76ae9495fec  # 0.9677023464564605
@@ -2234,6 +2584,21 @@ albedo 62 ZnS: hemispherical_albedo at mu0 0.2 R = 0x3fe958b45f2188ed  # 0.79207
 albedo 62 ZnS: hemispherical_albedo at mu0 0.05 B = 0x3fd34b8fc16a726c  # 0.3014869107080702
 albedo 62 ZnS: hemispherical_albedo at mu0 0.05 V = 0x3fe9e358f6cf7908  # 0.8090023823276917
 albedo 62 ZnS: hemispherical_albedo at mu0 0.05 R = 0x3fea930c561b03bc  # 0.8304502183674383
+albedo 62 ZnS: infrared Some(ZincSulphide)
+albedo 62 ZnS: spherical_albedo 300-390 nm = 0x3faf35290368b99d  # 0.06095245520224355
+albedo 62 ZnS: spherical_albedo 390-495 nm = 0x3fd4068e5fd1a423  # 0.3129001556140471
+albedo 62 ZnS: spherical_albedo 495-595 nm = 0x3fe55c021b0c9260  # 0.6674814728072072
+albedo 62 ZnS: spherical_albedo 595-700 nm = 0x3fe69ee90550113c  # 0.7068982223286535
+albedo 62 ZnS: spherical_albedo 700-780 nm = 0x3fe72f0d3a05b1fa  # 0.7244936116454135
+albedo 62 ZnS: spherical_albedo 780-1000 nm = 0x3fe83e82bfcab247  # 0.7576307054456003
+albedo 62 ZnS: spherical_albedo 1000-1300 nm = 0x3fe953be3109dd8b  # 0.7914725263389512
+albedo 62 ZnS: spherical_albedo 1300-1700 nm = 0x3fea17ec1e774b01  # 0.8154202075041611
+albedo 62 ZnS: spherical_albedo 1700-2200 nm = 0x3feac2ef52d925e8  # 0.836295759022673
+albedo 62 ZnS: spherical_albedo 2200-2800 nm = 0x3feb51cdcc3fc7b1  # 0.853735827373603
+albedo 62 ZnS: spherical_albedo 2800-3500 nm = 0x3febc6452dd327aa  # 0.8679529089943021
+albedo 62 ZnS: spherical_albedo 3500-5000 nm = 0x3fec40c2f4f61b51  # 0.8829054626847698
+albedo 62 ZnS: data from nm = 0x4077c00000000000  # 380.0
+albedo 62 ZnS: data to nm = 0x40b3880000000000  # 5000.0
 albedo 63 Na2S: Regolith from sodium-sulphide.json (stand-in), phase law Regolith
 albedo 63 Na2S: w B = 0x3fc21810e200969d  # 0.14135943446415392
 albedo 63 Na2S: w V = 0x3fc0f65b4369cf8f  # 0.13251820365587405
@@ -2256,6 +2621,21 @@ albedo 63 Na2S: hemispherical_albedo at mu0 0.2 R = 0x3fa8c911c5384950  # 0.0484
 albedo 63 Na2S: hemispherical_albedo at mu0 0.05 B = 0x3fb1b951b6aa9ea8  # 0.06923399648314421
 albedo 63 Na2S: hemispherical_albedo at mu0 0.05 V = 0x3fb0924266f7d718  # 0.06473174108381519
 albedo 63 Na2S: hemispherical_albedo at mu0 0.05 R = 0x3fb018fc9ba1d420  # 0.06288126754391543
+albedo 63 Na2S: infrared None
+albedo 63 Na2S: spherical_albedo 300-390 nm = 0x3fa3636f0f13f4c5  # 0.03786799487168361
+albedo 63 Na2S: spherical_albedo 390-495 nm = 0x3fa1d68a1c905780  # 0.03483993147544506
+albedo 63 Na2S: spherical_albedo 495-595 nm = 0x3fa099be901718b6  # 0.03242297657884434
+albedo 63 Na2S: spherical_albedo 595-700 nm = 0x3fa00f02b25c6a6b  # 0.0313645212865666
+albedo 63 Na2S: spherical_albedo 700-780 nm = 0x3f9f986cd00ecb9d  # 0.030854892920341482
+albedo 63 Na2S: spherical_albedo 780-1000 nm = 0x3f9f986cd00ecb9d  # 0.030854892920341482
+albedo 63 Na2S: spherical_albedo 1000-1300 nm = 0x3f9f986cd00ecb9d  # 0.030854892920341482
+albedo 63 Na2S: spherical_albedo 1300-1700 nm = 0x3f9f986cd00ecb9d  # 0.030854892920341482
+albedo 63 Na2S: spherical_albedo 1700-2200 nm = 0x3f9f986cd00ecb9d  # 0.030854892920341482
+albedo 63 Na2S: spherical_albedo 2200-2800 nm = 0x3f9f986cd00ecb9d  # 0.030854892920341482
+albedo 63 Na2S: spherical_albedo 2800-3500 nm = 0x3f9f986cd00ecb9d  # 0.030854892920341482
+albedo 63 Na2S: spherical_albedo 3500-5000 nm = 0x3f9f986cd00ecb9d  # 0.030854892920341482
+albedo 63 Na2S: data from nm = 0x4077c00000000000  # 380.0
+albedo 63 Na2S: data to nm = 0x4088600000000000  # 780.0
 albedo 64 MnS: Regolith from manganese-sulphide.json, phase law Regolith
 albedo 64 MnS: w B = 0x3fd2c96872367250  # 0.2935429683073254
 albedo 64 MnS: w V = 0x3fd1dc5889da932a  # 0.27907384359632437
@@ -2278,6 +2658,97 @@ albedo 64 MnS: hemispherical_albedo at mu0 0.2 R = 0x3fc40954ff5157cc  # 0.15653
 albedo 64 MnS: hemispherical_albedo at mu0 0.05 B = 0x3fc3556b8d65a23c  # 0.15104431537771912
 albedo 64 MnS: hemispherical_albedo at mu0 0.05 V = 0x3fc249e11f347668  # 0.1428796198242026
 albedo 64 MnS: hemispherical_albedo at mu0 0.05 R = 0x3fc9189ab5c2f954  # 0.19606336474493935
+albedo 64 MnS: infrared None
+albedo 64 MnS: spherical_albedo 300-390 nm = 0x3fb75b799d671f68  # 0.09123954861490591
+albedo 64 MnS: spherical_albedo 390-495 nm = 0x3fb461695e7212d8  # 0.07961138301659376
+albedo 64 MnS: spherical_albedo 495-595 nm = 0x3fb36a81e54f5124  # 0.07584392403015677
+albedo 64 MnS: spherical_albedo 595-700 nm = 0x3fbceb646fdfa6b8  # 0.11296680194177611
+albedo 64 MnS: spherical_albedo 700-780 nm = 0x3fc7db2b4c3b18e3  # 0.18637601110658072
+albedo 64 MnS: spherical_albedo 780-1000 nm = 0x3fc7db2b4c3b18e3  # 0.18637601110658072
+albedo 64 MnS: spherical_albedo 1000-1300 nm = 0x3fc7db2b4c3b18e3  # 0.18637601110658072
+albedo 64 MnS: spherical_albedo 1300-1700 nm = 0x3fc7db2b4c3b18e3  # 0.18637601110658072
+albedo 64 MnS: spherical_albedo 1700-2200 nm = 0x3fc7db2b4c3b18e3  # 0.18637601110658072
+albedo 64 MnS: spherical_albedo 2200-2800 nm = 0x3fc7db2b4c3b18e3  # 0.18637601110658072
+albedo 64 MnS: spherical_albedo 2800-3500 nm = 0x3fc7db2b4c3b18e3  # 0.18637601110658072
+albedo 64 MnS: spherical_albedo 3500-5000 nm = 0x3fc7db2b4c3b18e3  # 0.18637601110658072
+albedo 64 MnS: data from nm = 0x4077c00000000000  # 380.0
+albedo 64 MnS: data to nm = 0x4088600000000000  # 780.0
+albedo 65 Cr: Regolith by the opaque slab of chromium.json (stand-in), phase law Regolith
+albedo 65 Cr: w B = 0x3fe19cacea699bae  # 0.5503754213685761
+albedo 65 Cr: w V = 0x3fe177810aca970d  # 0.5458378992813963
+albedo 65 Cr: w R = 0x3fe178e9526727f0  # 0.5460096940453223
+albedo 65 Cr: normal_albedo B = 0x3fd0a9a3df03124a  # 0.26035401133075153
+albedo 65 Cr: normal_albedo V = 0x3fd088bae82f983a  # 0.2583453433456985
+albedo 65 Cr: normal_albedo R = 0x3fd089f85a8eb3fc  # 0.2584210285520496
+albedo 65 Cr: spherical_albedo B = 0x3fc750f4b4505cce  # 0.18215807728186068
+albedo 65 Cr: spherical_albedo V = 0x3fc706925e354d23  # 0.17988805389413995
+albedo 65 Cr: spherical_albedo R = 0x3fc70960084a0a88  # 0.17997360615489222
+albedo 65 Cr: hemispherical_albedo at mu0 1 B = 0x3fc289b582868378  # 0.14482754586517976
+albedo 65 Cr: hemispherical_albedo at mu0 1 V = 0x3fc24b459904d8b0  # 0.14292211505534658
+albedo 65 Cr: hemispherical_albedo at mu0 1 R = 0x3fc24d9f9c774d38  # 0.1429938806528328
+albedo 65 Cr: hemispherical_albedo at mu0 0.5 B = 0x3fc96b1e2df15ae0  # 0.1985814785318416
+albedo 65 Cr: hemispherical_albedo at mu0 0.5 V = 0x3fc91b0d51a71a48  # 0.1961380623526614
+albedo 65 Cr: hemispherical_albedo at mu0 0.5 R = 0x3fc91e11f0bf74c4  # 0.19623016600863796
+albedo 65 Cr: hemispherical_albedo at mu0 0.2 B = 0x3fd09d225eab7e7a  # 0.2595907139311532
+albedo 65 Cr: hemispherical_albedo at mu0 0.2 V = 0x3fd06cf6274a8b96  # 0.25665048443823346
+albedo 65 Cr: hemispherical_albedo at mu0 0.2 R = 0x3fd06ec772663876  # 0.2567614190273909
+albedo 65 Cr: hemispherical_albedo at mu0 0.05 B = 0x3fd4234188c0316a  # 0.3146518550354559
+albedo 65 Cr: hemispherical_albedo at mu0 0.05 V = 0x3fd3ed839a0190e0  # 0.31137170829448557
+albedo 65 Cr: hemispherical_albedo at mu0 0.05 R = 0x3fd3ef8b2133ac34  # 0.31149557344787415
+albedo 65 Cr: infrared None
+albedo 65 Cr: spherical_albedo 300-390 nm = 0x3fc5f7776bf2d008  # 0.17161457796976287
+albedo 65 Cr: spherical_albedo 390-495 nm = 0x3fc7293ed207a6ca  # 0.18094620948186552
+albedo 65 Cr: spherical_albedo 495-595 nm = 0x3fc71a8d3ef39045  # 0.180497794855116
+albedo 65 Cr: spherical_albedo 595-700 nm = 0x3fc71d4a8aa0b155  # 0.18058139580660773
+albedo 65 Cr: spherical_albedo 700-780 nm = 0x3fc7a70e0bcdf8fa  # 0.18478560997386478
+albedo 65 Cr: spherical_albedo 780-1000 nm = 0x3fc7a70e0bcdf8fa  # 0.18478560997386478
+albedo 65 Cr: spherical_albedo 1000-1300 nm = 0x3fc7a70e0bcdf8fa  # 0.18478560997386478
+albedo 65 Cr: spherical_albedo 1300-1700 nm = 0x3fc7a70e0bcdf8fa  # 0.18478560997386478
+albedo 65 Cr: spherical_albedo 1700-2200 nm = 0x3fc7a70e0bcdf8fa  # 0.18478560997386478
+albedo 65 Cr: spherical_albedo 2200-2800 nm = 0x3fc7a70e0bcdf8fa  # 0.18478560997386478
+albedo 65 Cr: spherical_albedo 2800-3500 nm = 0x3fc7a70e0bcdf8fa  # 0.18478560997386478
+albedo 65 Cr: spherical_albedo 3500-5000 nm = 0x3fc7a70e0bcdf8fa  # 0.18478560997386478
+albedo 65 Cr: data from nm = 0x4077c00000000000  # 380.0
+albedo 65 Cr: data to nm = 0x4088600000000000  # 780.0
+albedo 66 FeS: Regolith from iron sulphide Cerac I-1047, phase law Regolith
+albedo 66 FeS: iron sulphide Cerac I-1047 spectra ["splib07a_Iron_Sulfide_Cerac-I-1047_ASDHRa_AREF.txt"]
+albedo 66 FeS: iron sulphide Cerac I-1047 held
+albedo 66 FeS: w B = 0x3fbc92368ae69ba0  # 0.11160603419430837
+albedo 66 FeS: w V = 0x3fc1d94dc6c6827d  # 0.13944408613044237
+albedo 66 FeS: w R = 0x3fc2a2191bd2c93a  # 0.1455718408447611
+albedo 66 FeS: normal_albedo B = 0x3fa8e3962646c6c1  # 0.048611347362919506
+albedo 66 FeS: normal_albedo V = 0x3faf4ebaa009b14f  # 0.06114752963626079
+albedo 66 FeS: normal_albedo R = 0x3fb05dd5d671839a  # 0.06393181310114784
+albedo 66 FeS: spherical_albedo B = 0x3f9b91f26fad955a  # 0.026923931185043194
+albedo 66 FeS: spherical_albedo V = 0x3fa1805b7d1712e7  # 0.034182414073745275
+albedo 66 FeS: spherical_albedo R = 0x3fa256009395c0a6  # 0.035812395110839376
+albedo 66 FeS: hemispherical_albedo at mu0 1 B = 0x3f94dcb892056de0  # 0.02037323371165012
+albedo 66 FeS: hemispherical_albedo at mu0 1 V = 0x3f9a8cb0343b5160  # 0.025927308261843307
+albedo 66 FeS: hemispherical_albedo at mu0 1 R = 0x3f9bd495cd95e580  # 0.027178135559983385
+albedo 66 FeS: hemispherical_albedo at mu0 0.5 B = 0x3f9e557aea6e2c80  # 0.029622955854887056
+albedo 66 FeS: hemispherical_albedo at mu0 0.5 V = 0x3fa33fc9fdb1dcb0  # 0.0375960466562274
+albedo 66 FeS: hemispherical_albedo at mu0 0.5 R = 0x3fa42a5c89990d40  # 0.03938569240247114
+albedo 66 FeS: hemispherical_albedo at mu0 0.2 B = 0x3fa54e29d3629980  # 0.04161196427712621
+albedo 66 FeS: hemispherical_albedo at mu0 0.2 V = 0x3faaf185e9248d20  # 0.05262392493230039
+albedo 66 FeS: hemispherical_albedo at mu0 0.2 R = 0x3fac34185fe7f160  # 0.055084954936293284
+albedo 66 FeS: hemispherical_albedo at mu0 0.05 B = 0x3fabbd78b7f4bfc0  # 0.05417992826039564
+albedo 66 FeS: hemispherical_albedo at mu0 0.05 V = 0x3fb1794275e74620  # 0.0682565248346454
+albedo 66 FeS: hemispherical_albedo at mu0 0.05 R = 0x3fb24679e59d9640  # 0.07138788085793468
+albedo 66 FeS: infrared None
+albedo 66 FeS: spherical_albedo 300-390 nm = 0x3f96278f28aa9cb5  # 0.02163528142650924
+albedo 66 FeS: spherical_albedo 390-495 nm = 0x3f9b8c2800c88634  # 0.026901841209229185
+albedo 66 FeS: spherical_albedo 495-595 nm = 0x3fa128128cf328ce  # 0.033508853631774124
+albedo 66 FeS: spherical_albedo 595-700 nm = 0x3fa2429038c89c60  # 0.0356640881839716
+albedo 66 FeS: spherical_albedo 700-780 nm = 0x3fa1a4dbc55f84e5  # 0.03446089538898337
+albedo 66 FeS: spherical_albedo 780-1000 nm = 0x3f9e830ec85a0a6a  # 0.029796820620058652
+albedo 66 FeS: spherical_albedo 1000-1300 nm = 0x3f989d6cfb3c06ce  # 0.024038031419883414
+albedo 66 FeS: spherical_albedo 1300-1700 nm = 0x3f9b2df59c41769c  # 0.026542508756725355
+albedo 66 FeS: spherical_albedo 1700-2200 nm = 0x3fa3d4be29c28aa9  # 0.03873247394337415
+albedo 66 FeS: spherical_albedo 2200-2800 nm = 0x3faaebb94e591e50  # 0.052579680265406936
+albedo 66 FeS: spherical_albedo 2800-3500 nm = 0x3faaebb94e591e50  # 0.052579680265406936
+albedo 66 FeS: spherical_albedo 3500-5000 nm = 0x3faaebb94e591e50  # 0.052579680265406936
+albedo 66 FeS: data from nm = 0x4075dffff583a53b  # 349.99998999999997
+albedo 66 FeS: data to nm = 0x40a3880000000000  # 2500.0
 albedo 67 MgSiO3: Regolith from enstatite-glass.json, phase law Regolith
 albedo 67 MgSiO3: w B = 0x3fed59deef638a91  # 0.9172205615580699
 albedo 67 MgSiO3: w V = 0x3fedac28a4cfb665  # 0.9272654742214398
@@ -2300,6 +2771,21 @@ albedo 67 MgSiO3: hemispherical_albedo at mu0 0.2 R = 0x3fe52ee89d99579e  # 0.66
 albedo 67 MgSiO3: hemispherical_albedo at mu0 0.05 B = 0x3fe64d7c731ad3a1  # 0.6969587562694991
 albedo 67 MgSiO3: hemispherical_albedo at mu0 0.05 V = 0x3fe6e580b5861a5c  # 0.7155154748332495
 albedo 67 MgSiO3: hemispherical_albedo at mu0 0.05 R = 0x3fe6eef25ed3d51f  # 0.7166683055972135
+albedo 67 MgSiO3: infrared Some(EnstatiteGlass)
+albedo 67 MgSiO3: spherical_albedo 300-390 nm = 0x3fdf48126db717a3  # 0.4887739249646705
+albedo 67 MgSiO3: spherical_albedo 390-495 nm = 0x3fe0e34d7ae18b0c  # 0.5277469062824323
+albedo 67 MgSiO3: spherical_albedo 495-595 nm = 0x3fe19427a48a3864  # 0.5493353093786593
+albedo 67 MgSiO3: spherical_albedo 595-700 nm = 0x3fe1bd80048aa13c  # 0.5543823326779953
+albedo 67 MgSiO3: spherical_albedo 700-780 nm = 0x3fe1e4fea246695b  # 0.5592034501490092
+albedo 67 MgSiO3: spherical_albedo 780-1000 nm = 0x3fe2061e4a8c9fcc  # 0.5632468658486629
+albedo 67 MgSiO3: spherical_albedo 1000-1300 nm = 0x3fe280e33c841c1e  # 0.5782333547548466
+albedo 67 MgSiO3: spherical_albedo 1300-1700 nm = 0x3fe3275e70a418ce  # 0.5985557746905898
+albedo 67 MgSiO3: spherical_albedo 1700-2200 nm = 0x3fe3c15323e2161e  # 0.6173492146342061
+albedo 67 MgSiO3: spherical_albedo 2200-2800 nm = 0x3fe45fd9d5013d00  # 0.6367005501032565
+albedo 67 MgSiO3: spherical_albedo 2800-3500 nm = 0x3fe4c291372caa1f  # 0.6487508847833999
+albedo 67 MgSiO3: spherical_albedo 3500-5000 nm = 0x3fe0f28cbf159258  # 0.5296081287493264
+albedo 67 MgSiO3: data from nm = 0x4077c00000000000  # 380.0
+albedo 67 MgSiO3: data to nm = 0x40b3880000000000  # 5000.0
 albedo 68 Mg2SiO4: Regolith from forsterite-amorphous.json, phase law Regolith
 albedo 68 Mg2SiO4: w B = 0x3fe002c5791a46d5  # 0.5003383031164171
 albedo 68 Mg2SiO4: w V = 0x3fe1e50e97d71b1c  # 0.5592110601072338
@@ -2322,6 +2808,101 @@ albedo 68 Mg2SiO4: hemispherical_albedo at mu0 0.2 R = 0x3fdad485f93c20d4  # 0.4
 albedo 68 Mg2SiO4: hemispherical_albedo at mu0 0.05 B = 0x3fd1e1f7458b87de  # 0.2794168643141556
 albedo 68 Mg2SiO4: hemispherical_albedo at mu0 0.05 V = 0x3fd48cc1009df530  # 0.3210909372354136
 albedo 68 Mg2SiO4: hemispherical_albedo at mu0 0.05 R = 0x3fdf031839cf4590  # 0.48456388135408535
+albedo 68 Mg2SiO4: infrared Some(AmorphousForsterite)
+albedo 68 Mg2SiO4: spherical_albedo 300-390 nm = 0x3fba33c2c4f1b296  # 0.10235230739790277
+albedo 68 Mg2SiO4: spherical_albedo 390-495 nm = 0x3fc3f21b52bd6ecd  # 0.15582601108586971
+albedo 68 Mg2SiO4: spherical_albedo 495-595 nm = 0x3fca0ac591802c29  # 0.20345372776532258
+albedo 68 Mg2SiO4: spherical_albedo 595-700 nm = 0x3fd433f478f64834  # 0.3156710797567286
+albedo 68 Mg2SiO4: spherical_albedo 700-780 nm = 0x3fd5a54cc148ad6a  # 0.33821410060291746
+albedo 68 Mg2SiO4: spherical_albedo 780-1000 nm = 0x3fd7a3cee872bc30  # 0.3693730611802861
+albedo 68 Mg2SiO4: spherical_albedo 1000-1300 nm = 0x3fd8940ee00d631d  # 0.38403674965006634
+albedo 68 Mg2SiO4: spherical_albedo 1300-1700 nm = 0x3fd4ddc6dd495254  # 0.3260361824989435
+albedo 68 Mg2SiO4: spherical_albedo 1700-2200 nm = 0x3fd1993b2ade3cff  # 0.27497748552646323
+albedo 68 Mg2SiO4: spherical_albedo 2200-2800 nm = 0x3fca0e3e0cf19b94  # 0.2035596430971195
+albedo 68 Mg2SiO4: spherical_albedo 2800-3500 nm = 0x3fc258252789b8db  # 0.1433149760300186
+albedo 68 Mg2SiO4: spherical_albedo 3500-5000 nm = 0x3fb4b66d85383c94  # 0.08090862753327804
+albedo 68 Mg2SiO4: data from nm = 0x4077c00000000000  # 380.0
+albedo 68 Mg2SiO4: data to nm = 0x40b3880000000000  # 5000.0
+albedo 69 SiO2: Regolith from quartz GDS31, phase law Regolith
+albedo 69 SiO2: quartz GDS31 spectra ["splib07a_Quartz_GDS31_0-74um_fr_BECKa_AREF.txt"]
+albedo 69 SiO2: quartz GDS31 slab n = 0x3ff8c083126e978d  # 1.547
+albedo 69 SiO2: quartz GDS31 slab lab grain m = 0x3f03660e51d25aab  # 3.7e-5
+albedo 69 SiO2: w B = 0x3fef75b61b5c87ed  # 0.9831190618899633
+albedo 69 SiO2: w V = 0x3fef9b429ab55b36  # 0.9877026578568351
+albedo 69 SiO2: w R = 0x3fefa9ba1369c3aa  # 0.9894686106837203
+albedo 69 SiO2: normal_albedo B = 0x3febddf9f202d96f  # 0.8708467222957504
+albedo 69 SiO2: normal_albedo V = 0x3fed435903b69e9f  # 0.9144711563612481
+albedo 69 SiO2: normal_albedo R = 0x3fede6714d58b193  # 0.9343801985428847
+albedo 69 SiO2: spherical_albedo B = 0x3fe817c0c6b443b0  # 0.7528995400372107
+albedo 69 SiO2: spherical_albedo V = 0x3fe91dfbd5d1dee3  # 0.7849101234596357
+albedo 69 SiO2: spherical_albedo R = 0x3fe99338de2413d4  # 0.7992214525880805
+albedo 69 SiO2: hemispherical_albedo at mu0 1 B = 0x3fe691df2742921a  # 0.7053066031263058
+albedo 69 SiO2: hemispherical_albedo at mu0 1 V = 0x3fe7bba0dc455de1  # 0.7416538526694546
+albedo 69 SiO2: hemispherical_albedo at mu0 1 R = 0x3fe8422cc11be40e  # 0.7580779811534073
+albedo 69 SiO2: hemispherical_albedo at mu0 0.5 B = 0x3fe8d6eb8e981a13  # 0.7762353692094756
+albedo 69 SiO2: hemispherical_albedo at mu0 0.5 V = 0x3fe9cc20bca00a98  # 0.8061679538808049
+albedo 69 SiO2: hemispherical_albedo at mu0 0.5 R = 0x3fea3903957f449b  # 0.8194597167840983
+albedo 69 SiO2: hemispherical_albedo at mu0 0.2 B = 0x3fea84b8e589c732  # 0.8287014468353162
+albedo 69 SiO2: hemispherical_albedo at mu0 0.2 V = 0x3feb4aa4100f6ed2  # 0.8528614343335568
+albedo 69 SiO2: hemispherical_albedo at mu0 0.2 R = 0x3feba17400dd3270  # 0.8634586350322717
+albedo 69 SiO2: hemispherical_albedo at mu0 0.05 B = 0x3feb901b277a540c  # 0.8613410731364879
+albedo 69 SiO2: hemispherical_albedo at mu0 0.05 V = 0x3fec34f6a40ca5ae  # 0.8814652637567428
+albedo 69 SiO2: hemispherical_albedo at mu0 0.05 R = 0x3fec7cc425ba235e  # 0.8902302491052116
+albedo 69 SiO2: infrared None
+albedo 69 SiO2: spherical_albedo 300-390 nm = 0x3fe541166430b6e4  # 0.6641952473489394
+albedo 69 SiO2: spherical_albedo 390-495 nm = 0x3fe80e617a8179c2  # 0.751755465764113
+albedo 69 SiO2: spherical_albedo 495-595 nm = 0x3fe9179cf105643b  # 0.7841324527208892
+albedo 69 SiO2: spherical_albedo 595-700 nm = 0x3fe99e8aa9d95b27  # 0.8006032292713358
+albedo 69 SiO2: spherical_albedo 700-780 nm = 0x3fe9eae424ce82ad  # 0.809923240554857
+albedo 69 SiO2: spherical_albedo 780-1000 nm = 0x3fea3f7536b00b00  # 0.820246321498729
+albedo 69 SiO2: spherical_albedo 1000-1300 nm = 0x3fea9f4830be8e2c  # 0.8319436027563305
+albedo 69 SiO2: spherical_albedo 1300-1700 nm = 0x3feafa634032fb9c  # 0.8430649045839007
+albedo 69 SiO2: spherical_albedo 1700-2200 nm = 0x3feb546bcf80d22a  # 0.8540553143307694
+albedo 69 SiO2: spherical_albedo 2200-2800 nm = 0x3feacc410db8e626  # 0.8374333637249876
+albedo 69 SiO2: spherical_albedo 2800-3500 nm = 0x3fe5f8582a851905  # 0.6865654783694316
+albedo 69 SiO2: spherical_albedo 3500-5000 nm = 0x3fe5f8582a851905  # 0.6865654783694316
+albedo 69 SiO2: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 69 SiO2: data to nm = 0x40a740000d1b7175  # 2976.0000999999997
+albedo 70 Al2O3: Regolith from corundum HS283.3B (stand-in), phase law Regolith
+albedo 70 Al2O3: corundum HS283.3B spectra ["splib07a_Corundum_HS283.3B_BECKc_AREF.txt"]
+albedo 70 Al2O3: corundum HS283.3B slab n = 0x3ffc45a1cac08312  # 1.767
+albedo 70 Al2O3: corundum HS283.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 70 Al2O3: w B = 0x3fef653f4e40cce5  # 0.9811092880612732
+albedo 70 Al2O3: w V = 0x3fef68224e7bd91c  # 0.981461671150814
+albedo 70 Al2O3: w R = 0x3fef83231e106a2f  # 0.9847579562368248
+albedo 70 Al2O3: normal_albedo B = 0x3feb5758e0e7f403  # 0.8544124977776167
+albedo 70 Al2O3: normal_albedo V = 0x3feb6e29ff63a5ed  # 0.8571977603980351
+albedo 70 Al2O3: normal_albedo R = 0x3fec54b5791cc51d  # 0.8853404393650269
+albedo 70 Al2O3: spherical_albedo B = 0x3fe7b2fed15eaba2  # 0.7406000222448379
+albedo 70 Al2O3: spherical_albedo V = 0x3fe7c42648da6503  # 0.7426940367614921
+albedo 70 Al2O3: spherical_albedo R = 0x3fe86fb511245a1e  # 0.7636361441425981
+albedo 70 Al2O3: hemispherical_albedo at mu0 1 B = 0x3fe620a1a35a7238  # 0.6914833250517125
+albedo 70 Al2O3: hemispherical_albedo at mu0 1 V = 0x3fe633dd7618e29c  # 0.6938311869226541
+albedo 70 Al2O3: hemispherical_albedo at mu0 1 R = 0x3fe6f5406c54cc6a  # 0.7174379459232914
+albedo 70 Al2O3: hemispherical_albedo at mu0 0.5 B = 0x3fe878185cf9c329  # 0.7646600547724108
+albedo 70 Al2O3: hemispherical_albedo at mu0 0.5 V = 0x3fe88843596b9766  # 0.7666336771478484
+albedo 70 Al2O3: hemispherical_albedo at mu0 0.5 R = 0x3fe9296b7f2dc86b  # 0.786306141277476
+albedo 70 Al2O3: hemispherical_albedo at mu0 0.2 B = 0x3fea37449d703a1a  # 0.8192465853661048
+albedo 70 Al2O3: hemispherical_albedo at mu0 0.2 V = 0x3fea4482c6c81e89  # 0.8208631403403653
+albedo 70 Al2O3: hemispherical_albedo at mu0 0.2 R = 0x3feac7b0b6f449fb  # 0.8368762563061972
+albedo 70 Al2O3: hemispherical_albedo at mu0 0.05 B = 0x3feb4f24ecbd6f56  # 0.8534111617877709
+albedo 70 Al2O3: hemispherical_albedo at mu0 0.05 V = 0x3feb5a44e75d84a6  # 0.8547691840032214
+albedo 70 Al2O3: hemispherical_albedo at mu0 0.05 R = 0x3febc811cdf5a1c8  # 0.8681725523611528
+albedo 70 Al2O3: infrared None
+albedo 70 Al2O3: spherical_albedo 300-390 nm = 0x3fe080946f8d6e13  # 0.5156957796820641
+albedo 70 Al2O3: spherical_albedo 390-495 nm = 0x3fe7d453b8fa4af0  # 0.7446688282819576
+albedo 70 Al2O3: spherical_albedo 495-595 nm = 0x3fe8224942e62976  # 0.7541853243467773
+albedo 70 Al2O3: spherical_albedo 595-700 nm = 0x3fe86efa170c9d07  # 0.7635469865971637
+albedo 70 Al2O3: spherical_albedo 700-780 nm = 0x3fe94a57d5e5cc73  # 0.7903250863731855
+albedo 70 Al2O3: spherical_albedo 780-1000 nm = 0x3feb38608eff71a9  # 0.8506319802213983
+albedo 70 Al2O3: spherical_albedo 1000-1300 nm = 0x3fec71e5550913f7  # 0.8889032994126173
+albedo 70 Al2O3: spherical_albedo 1300-1700 nm = 0x3fec4b9392ada72a  # 0.8842256417094394
+albedo 70 Al2O3: spherical_albedo 1700-2200 nm = 0x3fe62d58dc8c387a  # 0.6930355365345939
+albedo 70 Al2O3: spherical_albedo 2200-2800 nm = 0x3fe2f8917fa89a4a  # 0.5928428166706194
+albedo 70 Al2O3: spherical_albedo 2800-3500 nm = 0x3fd2f10e1c2e8107  # 0.2959628367625701
+albedo 70 Al2O3: spherical_albedo 3500-5000 nm = 0x3fd2f10e1c2e8107  # 0.2959628367625701
+albedo 70 Al2O3: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 70 Al2O3: data to nm = 0x40a740000d1b7175  # 2976.0000999999997
 albedo 71 CaTiO3: Regolith from calcium-titanate.json (stand-in), phase law Regolith
 albedo 71 CaTiO3: w B = 0x3fcad9f6b16230ca  # 0.20977672253900997
 albedo 71 CaTiO3: w V = 0x3fca4ba0599b3ac8  # 0.20543293357191872
@@ -2344,6 +2925,98 @@ albedo 71 CaTiO3: hemispherical_albedo at mu0 0.2 R = 0x3fb7a228f3645c98  # 0.09
 albedo 71 CaTiO3: hemispherical_albedo at mu0 0.05 B = 0x3fbade3ddbbf0f98  # 0.10495363821888615
 albedo 71 CaTiO3: hemispherical_albedo at mu0 0.05 V = 0x3fba4670b8d770a8  # 0.10263733399136987
 albedo 71 CaTiO3: hemispherical_albedo at mu0 0.05 R = 0x3fbe3d9437524758  # 0.11812712050075669
+albedo 71 CaTiO3: infrared None
+albedo 71 CaTiO3: spherical_albedo 300-390 nm = 0x3fadfd299b63c5a0  # 0.05857210180137007
+albedo 71 CaTiO3: spherical_albedo 390-495 nm = 0x3fab93ff7c244114  # 0.053863510040289025
+albedo 71 CaTiO3: spherical_albedo 495-595 nm = 0x3faaf2a0a7d51589  # 0.052632351386402716
+albedo 71 CaTiO3: spherical_albedo 595-700 nm = 0x3fafd986731a7f12  # 0.062206460524292365
+albedo 71 CaTiO3: spherical_albedo 700-780 nm = 0x3fb3ddcd5cb5f206  # 0.07760318292088905
+albedo 71 CaTiO3: spherical_albedo 780-1000 nm = 0x3fb3ddcd5cb5f206  # 0.07760318292088905
+albedo 71 CaTiO3: spherical_albedo 1000-1300 nm = 0x3fb3ddcd5cb5f206  # 0.07760318292088905
+albedo 71 CaTiO3: spherical_albedo 1300-1700 nm = 0x3fb3ddcd5cb5f206  # 0.07760318292088905
+albedo 71 CaTiO3: spherical_albedo 1700-2200 nm = 0x3fb3ddcd5cb5f206  # 0.07760318292088905
+albedo 71 CaTiO3: spherical_albedo 2200-2800 nm = 0x3fb3ddcd5cb5f206  # 0.07760318292088905
+albedo 71 CaTiO3: spherical_albedo 2800-3500 nm = 0x3fb3ddcd5cb5f206  # 0.07760318292088905
+albedo 71 CaTiO3: spherical_albedo 3500-5000 nm = 0x3fb3ddcd5cb5f206  # 0.07760318292088905
+albedo 71 CaTiO3: data from nm = 0x4077c00000000000  # 380.0
+albedo 71 CaTiO3: data to nm = 0x4088600000000000  # 780.0
+albedo 72 TiO2: Regolith from rutile HS126.3B (stand-in), phase law Regolith
+albedo 72 TiO2: rutile HS126.3B spectra ["splib07a_Rutile_HS126.3B_BECKc_AREF.txt"]
+albedo 72 TiO2: rutile HS126.3B slab n = 0x4005a5e353f7ced9  # 2.706
+albedo 72 TiO2: rutile HS126.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 72 TiO2: w B = 0x3fe4ba1910c67ab5  # 0.6477170303004046
+albedo 72 TiO2: w V = 0x3fe7849d2888c840  # 0.7349382201848655
+albedo 72 TiO2: w R = 0x3fecc10a8471ba4e  # 0.89856458538072
+albedo 72 TiO2: normal_albedo B = 0x3fd3c98d64d977a8  # 0.3091767773493026
+albedo 72 TiO2: normal_albedo V = 0x3fd770cb8204ded4  # 0.3662594575612108
+albedo 72 TiO2: normal_albedo R = 0x3fe1df6699a375b2  # 0.5585206032516707
+albedo 72 TiO2: spherical_albedo B = 0x3fce526d50ad198b  # 0.23689047278658068
+albedo 72 TiO2: spherical_albedo V = 0x3fd3284d04ba4601  # 0.29933476888354
+albedo 72 TiO2: spherical_albedo R = 0x3fdf885e92c25b0d  # 0.49269832927659324
+albedo 72 TiO2: hemispherical_albedo at mu0 1 B = 0x3fc88445b4f48840  # 0.19153663001731225
+albedo 72 TiO2: hemispherical_albedo at mu0 1 V = 0x3fcf9185ea4a2aa4  # 0.24662851276328468
+albedo 72 TiO2: hemispherical_albedo at mu0 1 R = 0x3fdb7c8f1c6fc8f0  # 0.42947747971551475
+albedo 72 TiO2: hemispherical_albedo at mu0 0.5 B = 0x3fd07615c8e0afd2  # 0.25720734230958187
+albedo 72 TiO2: hemispherical_albedo at mu0 0.5 V = 0x3fd4b22a3e91b508  # 0.3233743296649014
+albedo 72 TiO2: hemispherical_albedo at mu0 0.5 R = 0x3fe0ba6b21bdcdc0  # 0.5227561625492214
+albedo 72 TiO2: hemispherical_albedo at mu0 0.2 B = 0x3fd505a98e759e84  # 0.3284706011968199
+albedo 72 TiO2: hemispherical_albedo at mu0 0.2 V = 0x3fd9c400ccdf213a  # 0.4025880814265467
+albedo 72 TiO2: hemispherical_albedo at mu0 0.2 R = 0x3fe3628a0da28b02  # 0.6057787195498749
+albedo 72 TiO2: hemispherical_albedo at mu0 0.05 B = 0x3fd8f3ca321fc53c  # 0.38987975020343746
+albedo 72 TiO2: hemispherical_albedo at mu0 0.05 V = 0x3fddec97a5349ad6  # 0.4675654519400444
+albedo 72 TiO2: hemispherical_albedo at mu0 0.05 R = 0x3fe54ae91f5b7a3e  # 0.6653943645904474
+albedo 72 TiO2: infrared None
+albedo 72 TiO2: spherical_albedo 300-390 nm = 0x3fc7752fdf623348  # 0.1832637634983263
+albedo 72 TiO2: spherical_albedo 390-495 nm = 0x3fce00cca3c86be6  # 0.23439939496242274
+albedo 72 TiO2: spherical_albedo 495-595 nm = 0x3fd352416090617e  # 0.30189546995236316
+albedo 72 TiO2: spherical_albedo 595-700 nm = 0x3fe004f8a2bfc201  # 0.5006068400089704
+albedo 72 TiO2: spherical_albedo 700-780 nm = 0x3fe3fce116add16a  # 0.6246190493534816
+albedo 72 TiO2: spherical_albedo 780-1000 nm = 0x3fe7523f756e705c  # 0.728790025098998
+albedo 72 TiO2: spherical_albedo 1000-1300 nm = 0x3fe7c0e511dfbb9f  # 0.7422967290020671
+albedo 72 TiO2: spherical_albedo 1300-1700 nm = 0x3fe7b29ad1d93789  # 0.7405523394206607
+albedo 72 TiO2: spherical_albedo 1700-2200 nm = 0x3fe8899de0b0b49d  # 0.7667989147645532
+albedo 72 TiO2: spherical_albedo 2200-2800 nm = 0x3fe79c490d22f774  # 0.7378278023313514
+albedo 72 TiO2: spherical_albedo 2800-3500 nm = 0x3fdbe0ba8ee4f58a  # 0.435591353936467
+albedo 72 TiO2: spherical_albedo 3500-5000 nm = 0x3fdbe0ba8ee4f58a  # 0.435591353936467
+albedo 72 TiO2: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 72 TiO2: data to nm = 0x40a740000d1b7175  # 2976.0000999999997
+albedo 73 graphite: Regolith by the opaque slab of graphite.json (stand-in), phase law Regolith
+albedo 73 graphite: w B = 0x3fd38c2cc7757d9d  # 0.3054305980531014
+albedo 73 graphite: w V = 0x3fd356bf61f5ef4c  # 0.30216965261910356
+albedo 73 graphite: w R = 0x3fd3bcfe66e77c3f  # 0.30841026353113316
+albedo 73 graphite: normal_albedo B = 0x3fc1f70e2a64d669  # 0.1403520304681252
+albedo 73 graphite: normal_albedo V = 0x3fc1c13056bfdd94  # 0.13870815501989553
+albedo 73 graphite: normal_albedo R = 0x3fc22864e23d1881  # 0.14185772940453847
+albedo 73 graphite: spherical_albedo B = 0x3fb5480b424832a3  # 0.08313055389607853
+albedo 73 graphite: spherical_albedo V = 0x3fb501e02627a6cd  # 0.08205986911311954
+albedo 73 graphite: spherical_albedo R = 0x3fb58872ba626d46  # 0.08411328363802281
+albedo 73 graphite: hemispherical_albedo at mu0 1 B = 0x3fb06667dca92a60  # 0.06406258713938362
+albedo 73 graphite: hemispherical_albedo at mu0 1 V = 0x3fb02ee864abc6f8  # 0.06321575601375773
+albedo 73 graphite: hemispherical_albedo at mu0 1 R = 0x3fb09960902c6178  # 0.06484035034043767
+albedo 73 graphite: hemispherical_albedo at mu0 0.5 B = 0x3fb758c21c971cc0  # 0.09119809339528029
+albedo 73 graphite: hemispherical_albedo at mu0 0.5 V = 0x3fb70c22bd3e4120  # 0.09002892608828406
+albedo 73 graphite: hemispherical_albedo at mu0 0.5 R = 0x3fb79f13c8e3ec38  # 0.09227107672261148
+albedo 73 graphite: hemispherical_albedo at mu0 0.2 B = 0x3fbfeb64e32765d8  # 0.12468557878255326
+albedo 73 graphite: hemispherical_albedo at mu0 0.2 V = 0x3fbf86b4d2c64f20  # 0.1231492056452308
+albedo 73 graphite: hemispherical_albedo at mu0 0.2 R = 0x3fc023dae1ef9088  # 0.12609420806905214
+albedo 73 graphite: hemispherical_albedo at mu0 0.05 B = 0x3fc43374b462ec30  # 0.15782030876093378
+albedo 73 graphite: hemispherical_albedo at mu0 0.05 V = 0x3fc3f65848bbe0f8  # 0.15595534850559267
+albedo 73 graphite: hemispherical_albedo at mu0 0.05 R = 0x3fc46b6e7e5284c0  # 0.15952855270464816
+albedo 73 graphite: infrared None
+albedo 73 graphite: spherical_albedo 300-390 nm = 0x3fb5dcd04033eb73  # 0.08540059630824519
+albedo 73 graphite: spherical_albedo 390-495 nm = 0x3fb55096867f7cd2  # 0.08326092513697184
+albedo 73 graphite: spherical_albedo 495-595 nm = 0x3fb510c843271aa3  # 0.08228732718917313
+albedo 73 graphite: spherical_albedo 595-700 nm = 0x3fb59aa106efa5e6  # 0.08439070147837632
+albedo 73 graphite: spherical_albedo 700-780 nm = 0x3fb666ff3478f6ba  # 0.08750910788600211
+albedo 73 graphite: spherical_albedo 780-1000 nm = 0x3fb666ff3478f6ba  # 0.08750910788600211
+albedo 73 graphite: spherical_albedo 1000-1300 nm = 0x3fb666ff3478f6ba  # 0.08750910788600211
+albedo 73 graphite: spherical_albedo 1300-1700 nm = 0x3fb666ff3478f6ba  # 0.08750910788600211
+albedo 73 graphite: spherical_albedo 1700-2200 nm = 0x3fb666ff3478f6ba  # 0.08750910788600211
+albedo 73 graphite: spherical_albedo 2200-2800 nm = 0x3fb666ff3478f6ba  # 0.08750910788600211
+albedo 73 graphite: spherical_albedo 2800-3500 nm = 0x3fb666ff3478f6ba  # 0.08750910788600211
+albedo 73 graphite: spherical_albedo 3500-5000 nm = 0x3fb666ff3478f6ba  # 0.08750910788600211
+albedo 73 graphite: data from nm = 0x4077c00000000000  # 380.0
+albedo 73 graphite: data to nm = 0x4088600000000000  # 780.0
 albedo 74 tholin: Regolith from tholin.json, phase law Regolith
 albedo 74 tholin: w B = 0x3fbe79b9f2d53caf  # 0.11904489687479967
 albedo 74 tholin: w V = 0x3fbdeac76d2a57bb  # 0.11686369338198592
@@ -2366,6 +3039,189 @@ albedo 74 tholin: hemispherical_albedo at mu0 0.2 R = 0x3fa5fde8b898b890  # 0.04
 albedo 74 tholin: hemispherical_albedo at mu0 0.05 B = 0x3fada76b7315d2c0  # 0.057917936132900305
 albedo 74 tholin: hemispherical_albedo at mu0 0.05 V = 0x3fad17874b8c5a50  # 0.05682013318271528
 albedo 74 tholin: hemispherical_albedo at mu0 0.05 R = 0x3fac9ee0fd185490  # 0.055899649520292916
+albedo 74 tholin: infrared Some(Tholin)
+albedo 74 tholin: spherical_albedo 300-390 nm = 0x3f9bc47654672066  # 0.027116631413975155
+albedo 74 tholin: spherical_albedo 390-495 nm = 0x3f9d1cb118b7060c  # 0.028429762967567426
+albedo 74 tholin: spherical_albedo 495-595 nm = 0x3f9cfcc18d0c7a05  # 0.02830793784516496
+albedo 74 tholin: spherical_albedo 595-700 nm = 0x3f9c6f68e3586cf5  # 0.02776874435049322
+albedo 74 tholin: spherical_albedo 700-780 nm = 0x3f9c36fc88c37e12  # 0.027553506705656323
+albedo 74 tholin: spherical_albedo 780-1000 nm = 0x3fa60a76aebf17ad  # 0.04304858096251905
+albedo 74 tholin: spherical_albedo 1000-1300 nm = 0x3fc1c53ec6b149a6  # 0.13883194638999646
+albedo 74 tholin: spherical_albedo 1300-1700 nm = 0x3fcccb67ed724424  # 0.22495745748577278
+albedo 74 tholin: spherical_albedo 1700-2200 nm = 0x3fcb2ff964d2e3a6  # 0.2124015562347072
+albedo 74 tholin: spherical_albedo 2200-2800 nm = 0x3fbdfa85b630e4fe  # 0.11710391710302656
+albedo 74 tholin: spherical_albedo 2800-3500 nm = 0x3f9a95d65b182a35  # 0.025962209043465207
+albedo 74 tholin: spherical_albedo 3500-5000 nm = 0x3fa1284bec3eaceb  # 0.03351056345794653
+albedo 74 tholin: data from nm = 0x4077c00000000000  # 380.0
+albedo 74 tholin: data to nm = 0x40b3880000000000  # 5000.0
+albedo 75 soot: Regolith from carbon black GDS68, phase law Regolith
+albedo 75 soot: carbon black GDS68 spectra ["splib07a_Carbon_Black_GDS68_sm.ap._BECKa_AREF.txt"]
+albedo 75 soot: carbon black GDS68 held
+albedo 75 soot: w B = 0x3fb64048e434c3fd  # 0.0869184071678006
+albedo 75 soot: w V = 0x3fb612de8a942233  # 0.08622542269962068
+albedo 75 soot: w R = 0x3fb59b357b3d5deb  # 0.0843995500448426
+albedo 75 soot: normal_albedo B = 0x3fa345ac1a0fe49d  # 0.03764093225613261
+albedo 75 soot: normal_albedo V = 0x3fa31d8f53be6f7c  # 0.037334898922579435
+albedo 75 soot: normal_albedo R = 0x3fa2b3ef90bb13cb  # 0.036529051225023666
+albedo 75 soot: spherical_albedo B = 0x3f952cf59f1d395f  # 0.02067931922584287
+albedo 75 soot: spherical_albedo V = 0x3f94ffaadd720f30  # 0.02050654388996448
+albedo 75 soot: spherical_albedo R = 0x3f94888046e09c6b  # 0.020051960302364707
+albedo 75 soot: hemispherical_albedo at mu0 1 B = 0x3f8ffb37578eed40  # 0.01561587558705091
+albedo 75 soot: hemispherical_albedo at mu0 1 V = 0x3f8fb659b8981b00  # 0.015484524675242195
+albedo 75 soot: hemispherical_albedo at mu0 1 R = 0x3f8f0132803bc3c0  # 0.015139002359747411
+albedo 75 soot: hemispherical_albedo at mu0 0.5 B = 0x3f974e1ffdad4d00  # 0.022758960588658006
+albedo 75 soot: hemispherical_albedo at mu0 0.5 V = 0x3f971c533ab755c0  # 0.022568989237546466
+albedo 75 soot: hemispherical_albedo at mu0 0.5 R = 0x3f96994b5ecb0ac0  # 0.022069146786416693
+albedo 75 soot: hemispherical_albedo at mu0 0.2 B = 0x3fa06b50a47c6a50  # 0.032068748549325066
+albedo 75 soot: hemispherical_albedo at mu0 0.2 V = 0x3fa04896132a55f0  # 0.03180378898575131
+albedo 75 soot: hemispherical_albedo at mu0 0.2 R = 0x3f9fda5cde8ad1e0  # 0.03110642536440078
+albedo 75 soot: hemispherical_albedo at mu0 0.05 B = 0x3fa57316531de100  # 0.041893670698245344
+albedo 75 soot: hemispherical_albedo at mu0 0.05 V = 0x3fa5463932966290  # 0.041551387238716875
+albedo 75 soot: hemispherical_albedo at mu0 0.05 R = 0x3fa4d01aa06b6620  # 0.04065020759817295
+albedo 75 soot: infrared None
+albedo 75 soot: spherical_albedo 300-390 nm = 0x3f96a978630b56d5  # 0.02213085274237055
+albedo 75 soot: spherical_albedo 390-495 nm = 0x3f9544d7b5eba29a  # 0.020770426252883036
+albedo 75 soot: spherical_albedo 495-595 nm = 0x3f94e7f11ceade9d  # 0.020416037931424758
+albedo 75 soot: spherical_albedo 595-700 nm = 0x3f94a4c16bb13120  # 0.020159742544181403
+albedo 75 soot: spherical_albedo 700-780 nm = 0x3f94df567d94464a  # 0.020383216299768393
+albedo 75 soot: spherical_albedo 780-1000 nm = 0x3f9528d0935bc59d  # 0.020663508409545995
+albedo 75 soot: spherical_albedo 1000-1300 nm = 0x3f942f66035532f7  # 0.01971206088392116
+albedo 75 soot: spherical_albedo 1300-1700 nm = 0x3f9276e5be39f0e3  # 0.018031682715886965
+albedo 75 soot: spherical_albedo 1700-2200 nm = 0x3f906a7b834c9ce4  # 0.01603119839560642
+albedo 75 soot: spherical_albedo 2200-2800 nm = 0x3f8e92a9ce9bb4ed  # 0.014928175561602386
+albedo 75 soot: spherical_albedo 2800-3500 nm = 0x3f88ef91c3cd4fde  # 0.01217569235601695
+albedo 75 soot: spherical_albedo 3500-5000 nm = 0x3f88ef91c3cd4fde  # 0.01217569235601695
+albedo 75 soot: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 75 soot: data to nm = 0x40a6c0001a36e2eb  # 2912.0002
+albedo 78 mars_dust: Regolith from mars-dust.json at 2.8 um grains (stand-in), phase law Regolith
+albedo 78 mars_dust: w B = 0x3fdae75de271f8e6  # 0.420371504915137
+albedo 78 mars_dust: w V = 0x3fe6d538b2d40578  # 0.7135280125368544
+albedo 78 mars_dust: w R = 0x3fec4107cb988bb4  # 0.8829382873994889
+albedo 78 mars_dust: normal_albedo B = 0x3fc9c40c39ef2b74  # 0.2012954028017152
+albedo 78 mars_dust: normal_albedo V = 0x3fd67114f87b30a5  # 0.3506519724439932
+albedo 78 mars_dust: normal_albedo R = 0x3fe0f77cec461a48  # 0.5302109350894364
+albedo 78 mars_dust: spherical_albedo B = 0x3fbfdc2bae4bc1e3  # 0.12445328717490826
+albedo 78 mars_dust: spherical_albedo V = 0x3fd213d4286f3814  # 0.2824602503650351
+albedo 78 mars_dust: spherical_albedo R = 0x3fddd23f72d5836a  # 0.4659575101305139
+albedo 78 mars_dust: hemispherical_albedo at mu0 1 B = 0x3fb8e0a20d583440  # 0.09717762780947314
+albedo 78 mars_dust: hemispherical_albedo at mu0 1 V = 0x3fcda3792dbc1760  # 0.23155131085530467
+albedo 78 mars_dust: hemispherical_albedo at mu0 1 R = 0x3fd9cc0f057678c2  # 0.40307975324129697
+albedo 78 mars_dust: hemispherical_albedo at mu0 0.5 B = 0x3fc16edddde50618  # 0.1361958821744771
+albedo 78 mars_dust: hemispherical_albedo at mu0 0.5 V = 0x3fd38e82c6eff26a  # 0.3055731718775748
+albedo 78 mars_dust: hemispherical_albedo at mu0 0.5 R = 0x3fdfb9c6f1f2dc62  # 0.4957139361171753
+albedo 78 mars_dust: hemispherical_albedo at mu0 0.2 B = 0x3fc761e921e60868  # 0.1826754966278401
+albedo 78 mars_dust: hemispherical_albedo at mu0 0.2 V = 0x3fd883318af3946c  # 0.3830074173877793
+albedo 78 mars_dust: hemispherical_albedo at mu0 0.2 R = 0x3fe28de308617552  # 0.5798201717076756
+albedo 78 mars_dust: hemispherical_albedo at mu0 0.05 B = 0x3fcd0a1e8a405834  # 0.22687131643823621
+albedo 78 mars_dust: hemispherical_albedo at mu0 0.05 V = 0x3fdca175e03b88fc  # 0.447354763962849
+albedo 78 mars_dust: hemispherical_albedo at mu0 0.05 R = 0x3fe4850b62f52c24  # 0.641240781094329
+albedo 78 mars_dust: infrared Some(MarsDust)
+albedo 78 mars_dust: spherical_albedo 300-390 nm = 0x3fb6f7a1eb36c8e8  # 0.08971607201127407
+albedo 78 mars_dust: spherical_albedo 390-495 nm = 0x3fc0669869c14d9d  # 0.12813096202681332
+albedo 78 mars_dust: spherical_albedo 495-595 nm = 0x3fd185ffdfb79b3c  # 0.2738036808718112
+albedo 78 mars_dust: spherical_albedo 595-700 nm = 0x3fdde81136e855cc  # 0.4672892605024941
+albedo 78 mars_dust: spherical_albedo 700-780 nm = 0x3fe0c627b7bfc863  # 0.5241888607836355
+albedo 78 mars_dust: spherical_albedo 780-1000 nm = 0x3fe0440028450f30  # 0.5083008562582787
+albedo 78 mars_dust: spherical_albedo 1000-1300 nm = 0x3fdeecf9d35ed39b  # 0.48321385995523664
+albedo 78 mars_dust: spherical_albedo 1300-1700 nm = 0x3fde4ba1f64435ac  # 0.473366251463484
+albedo 78 mars_dust: spherical_albedo 1700-2200 nm = 0x3fdd85e8758ba710  # 0.46129809836439595
+albedo 78 mars_dust: spherical_albedo 2200-2800 nm = 0x3fdadd691e7e2932  # 0.41976383188070365
+albedo 78 mars_dust: spherical_albedo 2800-3500 nm = 0x3fcb962b7083f6a7  # 0.21552031511230504
+albedo 78 mars_dust: spherical_albedo 3500-5000 nm = 0x3fda8da55b840e6d  # 0.41489538132757425
+albedo 78 mars_dust: data from nm = 0x4077c00000000000  # 380.0
+albedo 78 mars_dust: data to nm = 0x40b3880000000000  # 5000.0
+albedo 86 anorthosite: Regolith from a mixture of 2 parts, fine grains 1 um (stand-in), phase law Regolith
+albedo 86 anorthosite: part 0 anorthite HS201.3B Form volume_fraction = 0x3fee666666666666  # 0.95
+albedo 86 anorthosite: part 0: anorthite HS201.3B spectra ["splib07a_Anorthite_HS201.3B_Plagio_BECKa_AREF.txt"]
+albedo 86 anorthosite: part 0: anorthite HS201.3B slab n = 0x3ff94fdf3b645a1d  # 1.582
+albedo 86 anorthosite: part 0: anorthite HS201.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 86 anorthosite: part 1 hypersthene NMNHC2368 Form volume_fraction = 0x3fa999999999999a  # 0.05
+albedo 86 anorthosite: part 1: hypersthene NMNHC2368 spectra ["splib07a_Hypersthene_NMNHC2368_BECKb_AREF.txt"]
+albedo 86 anorthosite: part 1: hypersthene NMNHC2368 held
+albedo 86 anorthosite: w B = 0x3fef3549ea1e392c  # 0.9752549717539174
+albedo 86 anorthosite: w V = 0x3fef644988b638ab  # 0.980992095008124
+albedo 86 anorthosite: w R = 0x3fef7f262421711e  # 0.9842711167980587
+albedo 86 anorthosite: normal_albedo B = 0x3fea040ca0cf9c41  # 0.8129943028296865
+albedo 86 anorthosite: normal_albedo V = 0x3feb4fd423016eda  # 0.8534947093680458
+albedo 86 anorthosite: normal_albedo R = 0x3fec30831b22dd19  # 0.8809218912128102
+albedo 86 anorthosite: spherical_albedo B = 0x3fe6b00efd9714a6  # 0.7089915230686941
+albedo 86 anorthosite: spherical_albedo V = 0x3fe7ad55f6fae67a  # 0.7399091552571939
+albedo 86 anorthosite: spherical_albedo R = 0x3fe854fb8777e895  # 0.7603738447062535
+albedo 86 anorthosite: hemispherical_albedo at mu0 1 B = 0x3fe500937cf5c5b6  # 0.6563203278184833
+albedo 86 anorthosite: hemispherical_albedo at mu0 1 V = 0x3fe61a4a330cc9fe  # 0.6907092091626621
+albedo 86 anorthosite: hemispherical_albedo at mu0 1 R = 0x3fe6d700c366a8aa  # 0.7137454811502455
+albedo 86 anorthosite: hemispherical_albedo at mu0 0.5 B = 0x3fe782dcbc7b8f0d  # 0.7347243958761013
+albedo 86 anorthosite: hemispherical_albedo at mu0 0.5 V = 0x3fe872c242f9ad6a  # 0.7640086467849134
+albedo 86 anorthosite: hemispherical_albedo at mu0 0.5 R = 0x3fe9106133ea6493  # 0.7832494749046809
+albedo 86 anorthosite: hemispherical_albedo at mu0 0.2 B = 0x3fe96c86ccfa9014  # 0.794497871731894
+albedo 86 anorthosite: hemispherical_albedo at mu0 0.2 V = 0x3fea32e4d14ed2bc  # 0.8187126243634206
+albedo 86 anorthosite: hemispherical_albedo at mu0 0.2 R = 0x3feab367b8ccfaaf  # 0.8344000443829226
+albedo 86 anorthosite: hemispherical_albedo at mu0 0.05 B = 0x3feaa3e339aae349  # 0.8325058103865582
+albedo 86 anorthosite: hemispherical_albedo at mu0 0.05 V = 0x3feb4b77cb9e6a14  # 0.8529623963289077
+albedo 86 anorthosite: hemispherical_albedo at mu0 0.05 R = 0x3febb723391fe7be  # 0.8661056628909518
+albedo 86 anorthosite: infrared None
+albedo 86 anorthosite: spherical_albedo 300-390 nm = 0x3fe347db96a01ef9  # 0.6025217000869524
+albedo 86 anorthosite: spherical_albedo 390-495 nm = 0x3fe69d08c1fce68f  # 0.7066692150903736
+albedo 86 anorthosite: spherical_albedo 495-595 nm = 0x3fe7a809d69dcf94  # 0.7392625037887108
+albedo 86 anorthosite: spherical_albedo 595-700 nm = 0x3fe8680931943900  # 0.7626996963824979
+albedo 86 anorthosite: spherical_albedo 700-780 nm = 0x3fe90413945e11bd  # 0.7817476175119321
+albedo 86 anorthosite: spherical_albedo 780-1000 nm = 0x3fe7e3e9535b23a2  # 0.7465712192580336
+albedo 86 anorthosite: spherical_albedo 1000-1300 nm = 0x3fe92044a3b9e4cf  # 0.7851889798904724
+albedo 86 anorthosite: spherical_albedo 1300-1700 nm = 0x3fe8e5a611f337e4  # 0.7780332899653755
+albedo 86 anorthosite: spherical_albedo 1700-2200 nm = 0x3fe8ae9b507832a5  # 0.7713142940206877
+albedo 86 anorthosite: spherical_albedo 2200-2800 nm = 0x3fe977430de360df  # 0.7958083411458822
+albedo 86 anorthosite: spherical_albedo 2800-3500 nm = 0x3fe5acdd75c5ca47  # 0.6773516941305581
+albedo 86 anorthosite: spherical_albedo 3500-5000 nm = 0x3fe5acdd75c5ca47  # 0.6773516941305581
+albedo 86 anorthosite: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 86 anorthosite: data to nm = 0x40a740000d1b7175  # 2976.0000999999997
+albedo 87 feldspathic: Regolith from a mixture of 3 parts, fine grains 1 um (stand-in), phase law Regolith
+albedo 87 feldspathic: part 0 anorthite HS201.3B Form volume_fraction = 0x3fe9eab367a0f909  # 0.8099
+albedo 87 feldspathic: part 0: anorthite HS201.3B spectra ["splib07a_Anorthite_HS201.3B_Plagio_BECKa_AREF.txt"]
+albedo 87 feldspathic: part 0: anorthite HS201.3B slab n = 0x3ff94fdf3b645a1d  # 1.582
+albedo 87 feldspathic: part 0: anorthite HS201.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 87 feldspathic: part 1 hypersthene NMNHC2368 Form volume_fraction = 0x3fc271de69ad42c4  # 0.1441
+albedo 87 feldspathic: part 1: hypersthene NMNHC2368 spectra ["splib07a_Hypersthene_NMNHC2368_BECKb_AREF.txt"]
+albedo 87 feldspathic: part 1: hypersthene NMNHC2368 held
+albedo 87 feldspathic: part 2 olivine KI3054 Fo66 Form volume_fraction = 0x3fa79a6b50b0f27c  # 0.0461
+albedo 87 feldspathic: part 2: olivine KI3054 Fo66 spectra ["splib07a_Olivine_KI3054_Fo66_lt60um_BECKb_AREF.txt"]
+albedo 87 feldspathic: part 2: olivine KI3054 Fo66 slab n = 0x3ffb916872b020c5  # 1.723
+albedo 87 feldspathic: part 2: olivine KI3054 Fo66 slab lab grain m = 0x3eff75104d551d68  # 2.9999999999999997e-5
+albedo 87 feldspathic: w B = 0x3fed8c2df85af239  # 0.9233617640198367
+albedo 87 feldspathic: w V = 0x3fee26f0d106d91d  # 0.9422535021356314
+albedo 87 feldspathic: w R = 0x3fee70f176ef5ade  # 0.951287014288791
+albedo 87 feldspathic: normal_albedo B = 0x3fe39dfe5a561e67  # 0.6130363239653435
+albedo 87 feldspathic: normal_albedo V = 0x3fe55405881b982c  # 0.6665065439563072
+albedo 87 feldspathic: normal_albedo R = 0x3fe65383e4543955  # 0.6976947269011285
+albedo 87 feldspathic: spherical_albedo B = 0x3fe15cbd66e8c99b  # 0.5425707826564578
+albedo 87 feldspathic: spherical_albedo V = 0x3fe2dd38401e73c3  # 0.5895043613742178
+albedo 87 feldspathic: spherical_albedo R = 0x3fe3b67046e322f7  # 0.6160203346745153
+albedo 87 feldspathic: hemispherical_albedo at mu0 1 B = 0x3fdeb2ef5a8acbc6  # 0.47967132417687386
+albedo 87 feldspathic: hemispherical_albedo at mu0 1 V = 0x3fe0e5d6bb57617c  # 0.5280564936647774
+albedo 87 feldspathic: hemispherical_albedo at mu0 1 R = 0x3fe1c9d581f595c4  # 0.5558879411952877
+albedo 87 feldspathic: hemispherical_albedo at mu0 0.5 B = 0x3fe253a5c7dc3007  # 0.5727108863370639
+albedo 87 feldspathic: hemispherical_albedo at mu0 0.5 V = 0x3fe3cffe3b048122  # 0.6191397812545214
+albedo 87 feldspathic: hemispherical_albedo at mu0 0.5 R = 0x3fe4a4cc0c21c158  # 0.645116828627617
+albedo 87 feldspathic: hemispherical_albedo at mu0 0.2 B = 0x3fe4e19caa0f61cf  # 0.6525405236707743
+albedo 87 feldspathic: hemispherical_albedo at mu0 0.2 V = 0x3fe63ad56f96fffc  # 0.694681852291978
+albedo 87 feldspathic: hemispherical_albedo at mu0 0.2 R = 0x3fe6f7a6e007ef44  # 0.7177309394460072
+albedo 87 feldspathic: hemispherical_albedo at mu0 0.05 B = 0x3fe6a93210407990  # 0.7081537549418488
+albedo 87 feldspathic: hemispherical_albedo at mu0 0.05 V = 0x3fe7de61e6e383ff  # 0.745896292643124
+albedo 87 feldspathic: hemispherical_albedo at mu0 0.05 R = 0x3fe884ffb64e928d  # 0.7662352142984489
+albedo 87 feldspathic: infrared None
+albedo 87 feldspathic: spherical_albedo 300-390 nm = 0x3fdb89df8f78cb7c  # 0.43029011736796696
+albedo 87 feldspathic: spherical_albedo 390-495 nm = 0x3fe13fe5ad2736ed  # 0.5390499479196628
+albedo 87 feldspathic: spherical_albedo 495-595 nm = 0x3fe2cab44c24a8df  # 0.587244175641242
+albedo 87 feldspathic: spherical_albedo 595-700 nm = 0x3fe3d2fa455da23f  # 0.6195041041183414
+albedo 87 feldspathic: spherical_albedo 700-780 nm = 0x3fe45bf0c4ed7508  # 0.6362232061616462
+albedo 87 feldspathic: spherical_albedo 780-1000 nm = 0x3fe20ffaf2fe7d42  # 0.5644507165888302
+albedo 87 feldspathic: spherical_albedo 1000-1300 nm = 0x3fe333753fc2d28d  # 0.6000314946491742
+albedo 87 feldspathic: spherical_albedo 1300-1700 nm = 0x3fe42e4731039589  # 0.6306491811089227
+albedo 87 feldspathic: spherical_albedo 1700-2200 nm = 0x3fe491f7434f07d5  # 0.6428180994628244
+albedo 87 feldspathic: spherical_albedo 2200-2800 nm = 0x3fe65d6b0e99aedc  # 0.6989035878336511
+albedo 87 feldspathic: spherical_albedo 2800-3500 nm = 0x3fe65d6b0e99aedc  # 0.6989035878336511
+albedo 87 feldspathic: spherical_albedo 3500-5000 nm = 0x3fe65d6b0e99aedc  # 0.6989035878336511
+albedo 87 feldspathic: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 87 feldspathic: data to nm = 0x40a4ffffd8adaba0  # 2687.9997000000003
 albedo 88 basalt: Regolith from basalt.json, phase law Regolith
 albedo 88 basalt: w B = 0x3fc736bb9b49070a  # 0.18135781366623177
 albedo 88 basalt: w V = 0x3fca8e2496c73293  # 0.20746285783970517
@@ -2388,28 +3244,382 @@ albedo 88 basalt: hemispherical_albedo at mu0 0.2 R = 0x3fb5d643ac2d3920  # 0.08
 albedo 88 basalt: hemispherical_albedo at mu0 0.05 B = 0x3fb7051a5c80ed18  # 0.08992161520375352
 albedo 88 basalt: hemispherical_albedo at mu0 0.05 V = 0x3fba8d52daa69e78  # 0.10371892774730351
 albedo 88 basalt: hemispherical_albedo at mu0 0.05 R = 0x3fbc022759d9aab8  # 0.10940786307916539
-albedo 89 basalt_fe: Regolith from mars-regolith-simulant.json (stand-in), phase law Regolith
-albedo 89 basalt_fe: w B = 0x3fd5b78e86a73b77  # 0.3393284144375949
-albedo 89 basalt_fe: w V = 0x3fd97d99d2817a9e  # 0.39829106862263497
-albedo 89 basalt_fe: w R = 0x3fdb9214a80d66b6  # 0.4307910576950279
-albedo 89 basalt_fe: normal_albedo B = 0x3fc42f4e9fd873c4  # 0.15769369893032892
-albedo 89 basalt_fe: normal_albedo V = 0x3fc833e6aa8c4a73  # 0.18908389403857803
-albedo 89 basalt_fe: normal_albedo R = 0x3fca840660eade88  # 0.2071540806989456
-albedo 89 basalt_fe: spherical_albedo B = 0x3fb8358bf71f3f44  # 0.09456705840352436
-albedo 89 basalt_fe: spherical_albedo V = 0x3fbdad08c7359b52  # 0.11592154372702382
-albedo 89 basalt_fe: spherical_albedo R = 0x3fc075a6f5f9a9a2  # 0.1285904599238395
-albedo 89 basalt_fe: hemispherical_albedo at mu0 1 B = 0x3fb2b984b4e24390  # 0.07314328590497454
-albedo 89 basalt_fe: hemispherical_albedo at mu0 1 V = 0x3fb71c099d7bd8d0  # 0.09027156920260215
-albedo 89 basalt_fe: hemispherical_albedo at mu0 1 R = 0x3fb9bcf2fab980c8  # 0.1005393850441606
-albedo 89 basalt_fe: hemispherical_albedo at mu0 0.5 B = 0x3fba8a8c78860050  # 0.1036765856024442
-albedo 89 basalt_fe: hemispherical_albedo at mu0 0.5 V = 0x3fc03f1dde204388  # 0.12692616792676525
-albedo 89 basalt_fe: hemispherical_albedo at mu0 0.5 R = 0x3fc20206be3fb478  # 0.14068683900351053
-albedo 89 basalt_fe: hemispherical_albedo at mu0 0.2 B = 0x3fc20be69a43e678  # 0.1409881833313198
-albedo 89 basalt_fe: hemispherical_albedo at mu0 0.2 V = 0x3fc5e04e4da8aa1c  # 0.170907771987303
-albedo 89 basalt_fe: hemispherical_albedo at mu0 0.2 R = 0x3fc81ba9cfd8eeb8  # 0.18834421776579346
-albedo 89 basalt_fe: hemispherical_albedo at mu0 0.05 B = 0x3fc6b824219fe244  # 0.17749454156707334
-albedo 89 basalt_fe: hemispherical_albedo at mu0 0.05 V = 0x3fcb45bf8b5848c4  # 0.21306604675243623
-albedo 89 basalt_fe: hemispherical_albedo at mu0 0.05 R = 0x3fcde2d5b6593f14  # 0.23348494914761686
+albedo 88 basalt: infrared Some(Basalt)
+albedo 88 basalt: spherical_albedo 300-390 nm = 0x3fa4e854dd1f99f6  # 0.04083504866848735
+albedo 88 basalt: spherical_albedo 390-495 nm = 0x3fa77c38f4cb299e  # 0.045869617349654876
+albedo 88 basalt: spherical_albedo 495-595 nm = 0x3faaef5825273285  # 0.05260730222253066
+albedo 88 basalt: spherical_albedo 595-700 nm = 0x3facc9494c4c89d5  # 0.05622319275268565
+albedo 88 basalt: spherical_albedo 700-780 nm = 0x3fad252667bbafa3  # 0.05692405716203488
+albedo 88 basalt: spherical_albedo 780-1000 nm = 0x3fad46560477e083  # 0.05717724613708788
+albedo 88 basalt: spherical_albedo 1000-1300 nm = 0x3fae79889e2bf1a0  # 0.059520978267730174
+albedo 88 basalt: spherical_albedo 1300-1700 nm = 0x3fb0121dcceae779  # 0.06277643444891891
+albedo 88 basalt: spherical_albedo 1700-2200 nm = 0x3fb117381a964bf8  # 0.06676054619883576
+albedo 88 basalt: spherical_albedo 2200-2800 nm = 0x3fb2a9ca2ee713ec  # 0.07290328641018079
+albedo 88 basalt: spherical_albedo 2800-3500 nm = 0x3fb20899f3f9dffc  # 0.07044374662825698
+albedo 88 basalt: spherical_albedo 3500-5000 nm = 0x3fb71708f16cc302  # 0.09019523519669906
+albedo 88 basalt: data from nm = 0x4077c00000000000  # 380.0
+albedo 88 basalt: data to nm = 0x40b3880000000000  # 5000.0
+albedo 89 basalt_fe: Regolith from a mixture of 5 parts, fine grains 1 um (stand-in), phase law Regolith
+albedo 89 basalt_fe: part 0 augite NMNH120049 Form volume_fraction = 0x3fd3c504816f0069  # 0.3089
+albedo 89 basalt_fe: part 0: augite NMNH120049 spectra ["splib07a_Augite_NMNH120049_BECKb_AREF.txt"]
+albedo 89 basalt_fe: part 0: augite NMNH120049 held
+albedo 89 basalt_fe: part 1 pigeonite HS199.3B Form volume_fraction = 0x3fd3c504816f0069  # 0.3089
+albedo 89 basalt_fe: part 1: pigeonite HS199.3B spectra ["splib07a_Pigeonite_HS199.3B_BECKc_AREF.txt"]
+albedo 89 basalt_fe: part 1: pigeonite HS199.3B slab n = 0x3ffb70a3d70a3d71  # 1.715
+albedo 89 basalt_fe: part 1: pigeonite HS199.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 89 basalt_fe: part 2 olivine KI3054 Fo66 Form volume_fraction = 0x3fb07c84b5dcc63f  # 0.0644
+albedo 89 basalt_fe: part 2: olivine KI3054 Fo66 spectra ["splib07a_Olivine_KI3054_Fo66_lt60um_BECKb_AREF.txt"]
+albedo 89 basalt_fe: part 2: olivine KI3054 Fo66 slab n = 0x3ffb916872b020c5  # 1.723
+albedo 89 basalt_fe: part 2: olivine KI3054 Fo66 slab lab grain m = 0x3eff75104d551d68  # 2.9999999999999997e-5
+albedo 89 basalt_fe: part 3 anorthite HS201.3B Form volume_fraction = 0x3fcfc84b5dcc63f1  # 0.2483
+albedo 89 basalt_fe: part 3: anorthite HS201.3B spectra ["splib07a_Anorthite_HS201.3B_Plagio_BECKa_AREF.txt"]
+albedo 89 basalt_fe: part 3: anorthite HS201.3B slab n = 0x3ff94fdf3b645a1d  # 1.582
+albedo 89 basalt_fe: part 3: anorthite HS201.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 89 basalt_fe: part 4 ilmenite HS231.3B Form volume_fraction = 0x3fb1c432ca57a787  # 0.0694
+albedo 89 basalt_fe: part 4: ilmenite HS231.3B spectra ["splib07a_Ilmenite_HS231.3B_BECKb_AREF.txt"]
+albedo 89 basalt_fe: part 4: ilmenite HS231.3B held
+albedo 89 basalt_fe: w B = 0x3fe7906d3bbb1db4  # 0.7363802115077562
+albedo 89 basalt_fe: w V = 0x3fe92fc6c2a9407f  # 0.7870820810294531
+albedo 89 basalt_fe: w R = 0x3fe9ac9ed9df8c22  # 0.8023218398415148
+albedo 89 basalt_fe: normal_albedo B = 0x3fd782c2eb48300c  # 0.367356042640268
+albedo 89 basalt_fe: normal_albedo V = 0x3fda42e0f79f652a  # 0.41033195669077094
+albedo 89 basalt_fe: normal_albedo R = 0x3fdb37cd22784d9e  # 0.4252808415050938
+albedo 89 basalt_fe: spherical_albedo B = 0x3fd33ba05dd35e8b  # 0.30051430857336275
+albedo 89 basalt_fe: spherical_albedo V = 0x3fd62631feff2128  # 0.3460812559319657
+albedo 89 basalt_fe: spherical_albedo R = 0x3fd724c327ec6f28  # 0.36161879442964784
+albedo 89 basalt_fe: hemispherical_albedo at mu0 1 B = 0x3fcfb43acd61f34c  # 0.24768767384002854
+albedo 89 basalt_fe: hemispherical_albedo at mu0 1 V = 0x3fd2811d9799f6da  # 0.28913059048487144
+albedo 89 basalt_fe: hemispherical_albedo at mu0 1 R = 0x3fd36c7e0532c926  # 0.3034968424573371
+albedo 89 basalt_fe: hemispherical_albedo at mu0 0.5 B = 0x3fd4c683cc38fe7a  # 0.32461638396851067
+albedo 89 basalt_fe: hemispherical_albedo at mu0 0.5 V = 0x3fd7d4dbfa368348  # 0.37236689982278337
+albedo 89 basalt_fe: hemispherical_albedo at mu0 0.5 R = 0x3fd8dde5c021c76c  # 0.38854354632268584
+albedo 89 basalt_fe: hemispherical_albedo at mu0 0.2 B = 0x3fd9da3af54194a6  # 0.4039447207526997
+albedo 89 basalt_fe: hemispherical_albedo at mu0 0.2 V = 0x3fdd21adf1c7877e  # 0.4551806317450583
+albedo 89 basalt_fe: hemispherical_albedo at mu0 0.2 R = 0x3fde3796ae56e532  # 0.47214285874686646
+albedo 89 basalt_fe: hemispherical_albedo at mu0 0.05 B = 0x3fde03670c171e86  # 0.46895767384237563
+albedo 89 basalt_fe: hemispherical_albedo at mu0 0.05 V = 0x3fe0aa570d64ec48  # 0.5207934629064619
+albedo 89 basalt_fe: hemispherical_albedo at mu0 0.05 R = 0x3fe1346029e002aa  # 0.5376435106155288
+albedo 89 basalt_fe: infrared None
+albedo 89 basalt_fe: spherical_albedo 300-390 nm = 0x3fca529c4633fd22  # 0.2056460707462771
+albedo 89 basalt_fe: spherical_albedo 390-495 nm = 0x3fd324e90cbbd2ec  # 0.299127829013101
+albedo 89 basalt_fe: spherical_albedo 495-595 nm = 0x3fd5fa3888e05709  # 0.34339726797894393
+albedo 89 basalt_fe: spherical_albedo 595-700 nm = 0x3fd736393cff9dab  # 0.36268454510578846
+albedo 89 basalt_fe: spherical_albedo 700-780 nm = 0x3fd7aa54c56c9fe2  # 0.3697711875888655
+albedo 89 basalt_fe: spherical_albedo 780-1000 nm = 0x3fd5d85cecf43440  # 0.3413307489398143
+albedo 89 basalt_fe: spherical_albedo 1000-1300 nm = 0x3fd5d2864207d5ed  # 0.34097439239789545
+albedo 89 basalt_fe: spherical_albedo 1300-1700 nm = 0x3fdacb88fb49ce8d  # 0.41867279567598176
+albedo 89 basalt_fe: spherical_albedo 1700-2200 nm = 0x3fda9bd26d948f79  # 0.4157606191749817
+albedo 89 basalt_fe: spherical_albedo 2200-2800 nm = 0x3fdaceeacc746825  # 0.4188792225483005
+albedo 89 basalt_fe: spherical_albedo 2800-3500 nm = 0x3fdaceeacc746825  # 0.4188792225483005
+albedo 89 basalt_fe: spherical_albedo 3500-5000 nm = 0x3fdaceeacc746825  # 0.4188792225483005
+albedo 89 basalt_fe: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 89 basalt_fe: data to nm = 0x40a4ffffd8adaba0  # 2687.9997000000003
+albedo 90 komatiite: Regolith from a mixture of 2 parts, fine grains 1 um (stand-in), phase law Regolith
+albedo 90 komatiite: part 0 olivine GDS70.c Fo89 Form volume_fraction = 0x3fd999999999999a  # 0.4
+albedo 90 komatiite: part 0: olivine GDS70.c Fo89 spectra ["splib07a_Olivine_GDS70.c_Fo89_70um_BECKb_AREF.txt"]
+albedo 90 komatiite: part 0: olivine GDS70.c Fo89 slab n = 0x3ffac083126e978d  # 1.672
+albedo 90 komatiite: part 0: olivine GDS70.c Fo89 slab lab grain m = 0x3f12599ed7c6fbd2  # 7e-5
+albedo 90 komatiite: part 1 augite NMNH120049 Form volume_fraction = 0x3fe3333333333333  # 0.6
+albedo 90 komatiite: part 1: augite NMNH120049 spectra ["splib07a_Augite_NMNH120049_BECKb_AREF.txt"]
+albedo 90 komatiite: part 1: augite NMNH120049 held
+albedo 90 komatiite: w B = 0x3fe6949d767cf4dc  # 0.7056414903851436
+albedo 90 komatiite: w V = 0x3fe9d4679a58c627  # 0.807178307970564
+albedo 90 komatiite: w R = 0x3fea37726df29026  # 0.8192684314167351
+albedo 90 komatiite: normal_albedo B = 0x3fd617bcafed660a  # 0.3451987951317227
+albedo 90 komatiite: normal_albedo V = 0x3fdb89d2377766da  # 0.430286935964984
+albedo 90 komatiite: normal_albedo R = 0x3fdc5f445b63584f  # 0.44331463741889804
+albedo 90 komatiite: spherical_albedo B = 0x3fd1b29f65bceeac  # 0.27652726111748893
+albedo 90 komatiite: spherical_albedo V = 0x3fd77967ad58b573  # 0.36678497246142355
+albedo 90 komatiite: spherical_albedo R = 0x3fd8543c954d8bdc  # 0.3801413972889216
+albedo 90 komatiite: hemispherical_albedo at mu0 1 B = 0x3fccf6dca07bf18c  # 0.22628362499370913
+albedo 90 komatiite: hemispherical_albedo at mu0 1 V = 0x3fd3bb3046b564d4  # 0.3083000841630341
+albedo 90 komatiite: hemispherical_albedo at mu0 1 R = 0x3fd487a708676a6e  # 0.32077956982326483
+albedo 90 komatiite: hemispherical_albedo at mu0 0.5 B = 0x3fd327bbea43efcc  # 0.29930017354467675
+albedo 90 komatiite: hemispherical_albedo at mu0 0.5 V = 0x3fd935d2a46923ea  # 0.3939100843022617
+albedo 90 komatiite: hemispherical_albedo at mu0 0.5 R = 0x3fda18ad31da6734  # 0.4077561365935367
+albedo 90 komatiite: hemispherical_albedo at mu0 0.2 B = 0x3fd81121141ed2e8  # 0.37604548420794837
+albedo 90 komatiite: hemispherical_albedo at mu0 0.2 V = 0x3fde9314dcfe3c60  # 0.47772714215620304
+albedo 90 komatiite: hemispherical_albedo at mu0 0.2 R = 0x3fdf7d8c47ff132c  # 0.49203784018418406
+albedo 90 komatiite: hemispherical_albedo at mu0 0.05 B = 0x3fdc2adb3fe3754a  # 0.4401157497321334
+albedo 90 komatiite: hemispherical_albedo at mu0 0.05 V = 0x3fe1618ce59050a3  # 0.5431580051104173
+albedo 90 komatiite: hemispherical_albedo at mu0 0.05 R = 0x3fe1d4b7f14b3506  # 0.557216616894636
+albedo 90 komatiite: infrared None
+albedo 90 komatiite: spherical_albedo 300-390 nm = 0x3fc134f9c9f7f1fa  # 0.13442919122452662
+albedo 90 komatiite: spherical_albedo 390-495 nm = 0x3fd19deca55699a7  # 0.2752639402991925
+albedo 90 komatiite: spherical_albedo 495-595 nm = 0x3fd703d808b67d8d  # 0.35960961199631286
+albedo 90 komatiite: spherical_albedo 595-700 nm = 0x3fd881c865605e52  # 0.3829213132862367
+albedo 90 komatiite: spherical_albedo 700-780 nm = 0x3fd8a9fd640b94ce  # 0.38537535448115257
+albedo 90 komatiite: spherical_albedo 780-1000 nm = 0x3fd493b8559db2d7  # 0.32151611672342767
+albedo 90 komatiite: spherical_albedo 1000-1300 nm = 0x3fd31acfaaac9aa6  # 0.29851142566114175
+albedo 90 komatiite: spherical_albedo 1300-1700 nm = 0x3fe04aafa28183f8  # 0.509116952318549
+albedo 90 komatiite: spherical_albedo 1700-2200 nm = 0x3fe1704a34d8d985  # 0.5449572593850439
+albedo 90 komatiite: spherical_albedo 2200-2800 nm = 0x3fe0b19b578eb62a  # 0.5216805181605129
+albedo 90 komatiite: spherical_albedo 2800-3500 nm = 0x3fe0b19b578eb62a  # 0.5216805181605129
+albedo 90 komatiite: spherical_albedo 3500-5000 nm = 0x3fe0b19b578eb62a  # 0.5216805181605129
+albedo 90 komatiite: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 90 komatiite: data to nm = 0x40a4ffffd8adaba0  # 2687.9997000000003
+albedo 91 basalt_reduced: Regolith from a mixture of 4 parts, fine grains 1 um (stand-in), phase law Regolith
+albedo 91 basalt_reduced: part 0 anorthite HS201.3B Form volume_fraction = 0x3fe147ae147ae148  # 0.54
+albedo 91 basalt_reduced: part 0: anorthite HS201.3B spectra ["splib07a_Anorthite_HS201.3B_Plagio_BECKa_AREF.txt"]
+albedo 91 basalt_reduced: part 0: anorthite HS201.3B slab n = 0x3ff94fdf3b645a1d  # 1.582
+albedo 91 basalt_reduced: part 0: anorthite HS201.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 91 basalt_reduced: part 1 enstatite NMNH128288 Form volume_fraction = 0x3fd1f212d77318fc  # 0.2804
+albedo 91 basalt_reduced: part 1: enstatite NMNH128288 spectra ["splib07a_Enstatite_NMNH128288_BECKc_AREF.txt"]
+albedo 91 basalt_reduced: part 1: enstatite NMNH128288 slab n = 0x3ffa9374bc6a7efa  # 1.661
+albedo 91 basalt_reduced: part 1: enstatite NMNH128288 slab lab grain m = 0x3efa36e2eb1c432c  # 2.4999999999999998e-5
+albedo 91 basalt_reduced: part 2 diopside HS15.3B Form volume_fraction = 0x3fb74538ef34d6a1  # 0.0909
+albedo 91 basalt_reduced: part 2: diopside HS15.3B spectra ["splib07a_Diopside_HS15.3B_Pyroxene_BECKc_AREF.txt"]
+albedo 91 basalt_reduced: part 2: diopside HS15.3B slab n = 0x3ffad4fdf3b645a2  # 1.677
+albedo 91 basalt_reduced: part 2: diopside HS15.3B slab lab grain m = 0x3f3355475a31a4bd  # 0.00029499999999999996
+albedo 91 basalt_reduced: part 3 olivine GDS71.a Fo91 Form volume_fraction = 0x3fb6ae7d566cf41f  # 0.0886
+albedo 91 basalt_reduced: part 3: olivine GDS71.a Fo91 spectra ["splib07a_Olivine_GDS71.a_Fo91_65um_BECKb_AREF.txt"]
+albedo 91 basalt_reduced: part 3: olivine GDS71.a Fo91 slab n = 0x3ffab4395810624e  # 1.669
+albedo 91 basalt_reduced: part 3: olivine GDS71.a Fo91 slab lab grain m = 0x3f110a137f38c543  # 6.5e-5
+albedo 91 basalt_reduced: w B = 0x3fec9d1701f4e87e  # 0.8941760099617253
+albedo 91 basalt_reduced: w V = 0x3fedfc95ff7976b1  # 0.9370832433448496
+albedo 91 basalt_reduced: w R = 0x3fee00d6c71af429  # 0.9376024140143545
+albedo 91 basalt_reduced: normal_albedo B = 0x3fe19b0fa16a56d2  # 0.5501783516544612
+albedo 91 basalt_reduced: normal_albedo V = 0x3fe4d0e85a8ed2c3  # 0.6505014198979427
+albedo 91 basalt_reduced: normal_albedo R = 0x3fe4dda421440bcc  # 0.6520558023188356
+albedo 91 basalt_reduced: spherical_albedo B = 0x3fdf0843414d9a9b  # 0.4848793161130886
+albedo 91 basalt_reduced: spherical_albedo V = 0x3fe26bc3829b0e60  # 0.575654749955401
+albedo 91 basalt_reduced: spherical_albedo R = 0x3fe276d7a8702f00  # 0.5770071306046418
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 1 B = 0x3fdafd7cd0f7892a  # 0.4217216530506841
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 1 V = 0x3fe06febbb90de80  # 0.5136622107883824
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 1 R = 0x3fe07b666820964c  # 0.5150634797798346
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.5 B = 0x3fe079cb3663f4a7  # 0.5148674070657265
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.5 V = 0x3fe3603e65d0eaaa  # 0.6054985035510374
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.5 R = 0x3fe36b2c7fabea10  # 0.6068327420792361
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.2 B = 0x3fe324e581a5d21a  # 0.5982539684469572
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.2 V = 0x3fe5d6734e4ede68  # 0.6824280290083609
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.2 R = 0x3fe5e04e844fa13c  # 0.6836311897468828
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.05 B = 0x3fe511cf6ac31f47  # 0.6584240994643346
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.05 V = 0x3fe78517d09855a5  # 0.7349967073557094
+albedo 91 basalt_reduced: hemispherical_albedo at mu0 0.05 R = 0x3fe78de1d385e8b1  # 0.736069596415538
+albedo 91 basalt_reduced: infrared None
+albedo 91 basalt_reduced: spherical_albedo 300-390 nm = 0x3fd701fd0781c183  # 0.35949636204806995
+albedo 91 basalt_reduced: spherical_albedo 390-495 nm = 0x3fdf2cab658bedfe  # 0.48710141102466753
+albedo 91 basalt_reduced: spherical_albedo 495-595 nm = 0x3fe223ac7bb8e954  # 0.5668547073794721
+albedo 91 basalt_reduced: spherical_albedo 595-700 nm = 0x3fe284e4115de363  # 0.5787220324701646
+albedo 91 basalt_reduced: spherical_albedo 700-780 nm = 0x3fe29e26da2c455b  # 0.5818056355657676
+albedo 91 basalt_reduced: spherical_albedo 780-1000 nm = 0x3fdf461244a33080  # 0.4886518163955387
+albedo 91 basalt_reduced: spherical_albedo 1000-1300 nm = 0x3fe140c1000bfb3c  # 0.5391545296587092
+albedo 91 basalt_reduced: spherical_albedo 1300-1700 nm = 0x3fe2f80354f478b4  # 0.5927750262524314
+albedo 91 basalt_reduced: spherical_albedo 1700-2200 nm = 0x3fe30ce44f2ac0f1  # 0.595323710082111
+albedo 91 basalt_reduced: spherical_albedo 2200-2800 nm = 0x3fe4761bd37b9b0d  # 0.6394175653957476
+albedo 91 basalt_reduced: spherical_albedo 2800-3500 nm = 0x3fe4761bd37b9b0d  # 0.6394175653957476
+albedo 91 basalt_reduced: spherical_albedo 3500-5000 nm = 0x3fe4761bd37b9b0d  # 0.6394175653957476
+albedo 91 basalt_reduced: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 91 basalt_reduced: data to nm = 0x40a4bffff2e48e8a  # 2655.9999
+albedo 92 granite: Regolith from a mixture of 5 parts, fine grains 1 um (stand-in), phase law Regolith
+albedo 92 granite: part 0 quartz GDS31 Form volume_fraction = 0x3fd1ab9f559b3d08  # 0.2761
+albedo 92 granite: part 0: quartz GDS31 spectra ["splib07a_Quartz_GDS31_0-74um_fr_BECKa_AREF.txt"]
+albedo 92 granite: part 0: quartz GDS31 slab n = 0x3ff8c083126e978d  # 1.547
+albedo 92 granite: part 0: quartz GDS31 slab lab grain m = 0x3f03660e51d25aab  # 3.7e-5
+albedo 92 granite: part 1 microcline HS151.3B Form volume_fraction = 0x3fd795810624dd2f  # 0.3685
+albedo 92 granite: part 1: microcline HS151.3B spectra ["splib07a_Microcline_HS151.3B_Feldspar_BECKc_AREF.txt"]
+albedo 92 granite: part 1: microcline HS151.3B slab n = 0x3ff86a7ef9db22d1  # 1.526
+albedo 92 granite: part 1: microcline HS151.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 92 granite: part 2 oligoclase HS110.3B Form volume_fraction = 0x3fd42de00d1b7176  # 0.3153
+albedo 92 granite: part 2: oligoclase HS110.3B spectra ["splib07a_Oligoclase_HS110.3B_BECKc_AREF.txt"]
+albedo 92 granite: part 2: oligoclase HS110.3B slab n = 0x3ff8ac083126e979  # 1.542
+albedo 92 granite: part 2: oligoclase HS110.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 92 granite: part 3 biotite HS28.3B Form volume_fraction = 0x3fa06f694467381d  # 0.0321
+albedo 92 granite: part 3: biotite HS28.3B spectra ["splib07a_Biotite_HS28.3B_BECKa_AREF.txt"]
+albedo 92 granite: part 3: biotite HS28.3B slab n = 0x3ffa000000000000  # 1.625
+albedo 92 granite: part 3: biotite HS28.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 92 granite: part 4 magnetite HS195.3B Form volume_fraction = 0x3f80624dd2f1a9fc  # 0.008
+albedo 92 granite: part 4: magnetite HS195.3B spectra ["splib07a_Magnetite_HS195.3B_BECKb_AREF.txt"]
+albedo 92 granite: part 4: magnetite HS195.3B held
+albedo 92 granite: w B = 0x3fef079e755d4b1b  # 0.9696800510667772
+albedo 92 granite: w V = 0x3fef3c37ba1b73ac  # 0.9761007914454374
+albedo 92 granite: w R = 0x3fef56ea2acbb1ee  # 0.9793597064831923
+albedo 92 granite: normal_albedo B = 0x3fe8f6159418a72d  # 0.7800395863061788
+albedo 92 granite: normal_albedo V = 0x3fea310628cbe024  # 0.818484382324645
+albedo 92 granite: normal_albedo R = 0x3feaea84b513a5b0  # 0.8411277329116071
+albedo 92 granite: spherical_albedo B = 0x3fe5dcb40e4427d3  # 0.6831913260114056
+albedo 92 granite: spherical_albedo V = 0x3fe6d2cd86b6de66  # 0.7132327681674269
+albedo 92 granite: spherical_albedo R = 0x3fe760bba1b431b3  # 0.7305582197455379
+albedo 92 granite: hemispherical_albedo at mu0 1 B = 0x3fe41899c9c68cae  # 0.628003019421518
+albedo 92 granite: hemispherical_albedo at mu0 1 V = 0x3fe526fb00210ca3  # 0.6610083582421747
+albedo 92 granite: hemispherical_albedo at mu0 1 R = 0x3fe5c4a824452272  # 0.6802559574508236
+albedo 92 granite: hemispherical_albedo at mu0 0.5 B = 0x3fe6b90dbc933858  # 0.7100895579440119
+albedo 92 granite: hemispherical_albedo at mu0 0.5 V = 0x3fe7a3e57ca1f84c  # 0.7387568887932132
+albedo 92 granite: hemispherical_albedo at mu0 0.5 R = 0x3fe82a6d3f12dd8c  # 0.7551790458591525
+albedo 92 granite: hemispherical_albedo at mu0 0.2 B = 0x3fe8c2fd7ef73870  # 0.7738025169180798
+albedo 92 granite: hemispherical_albedo at mu0 0.2 V = 0x3fe9880b4d22f054  # 0.7978569513866298
+albedo 92 granite: hemispherical_albedo at mu0 0.2 R = 0x3fe9f7708c93dc42  # 0.8114550347953655
+albedo 92 granite: hemispherical_albedo at mu0 0.05 B = 0x3fea134d04429941  # 0.8148560603338312
+albedo 92 granite: hemispherical_albedo at mu0 0.05 V = 0x3feabb3c75b929bf  # 0.8353559779437133
+albedo 92 granite: hemispherical_albedo at mu0 0.05 R = 0x3feb196b42cacfc1  # 0.8468529037986557
+albedo 92 granite: infrared None
+albedo 92 granite: spherical_albedo 300-390 nm = 0x3fe46b161cf7f175  # 0.6380720678130688
+albedo 92 granite: spherical_albedo 390-495 nm = 0x3fe5e35cf4930197  # 0.684004285511082
+albedo 92 granite: spherical_albedo 495-595 nm = 0x3fe6cf36b4493c00  # 0.71279463970302
+albedo 92 granite: spherical_albedo 595-700 nm = 0x3fe760acc698dd9d  # 0.7305511359071947
+albedo 92 granite: spherical_albedo 700-780 nm = 0x3fe777c7e8befe05  # 0.7333716913053087
+albedo 92 granite: spherical_albedo 780-1000 nm = 0x3fe7ad90d8a94cb8  # 0.7399372321764508
+albedo 92 granite: spherical_albedo 1000-1300 nm = 0x3fe7c2e54aa6fde5  # 0.7425409753849946
+albedo 92 granite: spherical_albedo 1300-1700 nm = 0x3fe89a19adfc5d8e  # 0.7688110731277662
+albedo 92 granite: spherical_albedo 1700-2200 nm = 0x3fe999ed74a157fd  # 0.8000399854597614
+albedo 92 granite: spherical_albedo 2200-2800 nm = 0x3fe868f5da8ff988  # 0.7628125447079563
+albedo 92 granite: spherical_albedo 2800-3500 nm = 0x3fdb9b3414bcc433  # 0.43134786629804295
+albedo 92 granite: spherical_albedo 3500-5000 nm = 0x3fdb9b3414bcc433  # 0.43134786629804295
+albedo 92 granite: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 92 granite: data to nm = 0x40a740000d1b7175  # 2976.0000999999997
+albedo 93 ultramafic: Regolith from a mixture of 2 parts, fine grains 1 um (stand-in), phase law Regolith
+albedo 93 ultramafic: part 0 olivine GDS70.c Fo89 Form volume_fraction = 0x3fe3333333333333  # 0.6
+albedo 93 ultramafic: part 0: olivine GDS70.c Fo89 spectra ["splib07a_Olivine_GDS70.c_Fo89_70um_BECKb_AREF.txt"]
+albedo 93 ultramafic: part 0: olivine GDS70.c Fo89 slab n = 0x3ffac083126e978d  # 1.672
+albedo 93 ultramafic: part 0: olivine GDS70.c Fo89 slab lab grain m = 0x3f12599ed7c6fbd2  # 7e-5
+albedo 93 ultramafic: part 1 enstatite NMNH128288 Form volume_fraction = 0x3fd999999999999a  # 0.4
+albedo 93 ultramafic: part 1: enstatite NMNH128288 spectra ["splib07a_Enstatite_NMNH128288_BECKc_AREF.txt"]
+albedo 93 ultramafic: part 1: enstatite NMNH128288 slab n = 0x3ffa9374bc6a7efa  # 1.661
+albedo 93 ultramafic: part 1: enstatite NMNH128288 slab lab grain m = 0x3efa36e2eb1c432c  # 2.4999999999999998e-5
+albedo 93 ultramafic: w B = 0x3fe7f3246caeb8e9  # 0.7484304545121435
+albedo 93 ultramafic: w V = 0x3febcaa1e08b849f  # 0.8684853921551116
+albedo 93 ultramafic: w R = 0x3feb8571aa262082  # 0.8600395510884626
+albedo 93 ultramafic: normal_albedo B = 0x3fd81ce6e5e45e85  # 0.3767640347518653
+albedo 93 ultramafic: normal_albedo V = 0x3fe039b752d4b3d2  # 0.5070454232969672
+albedo 93 ultramafic: normal_albedo R = 0x3fdfa7bb24a1a5d2  # 0.4946124894837257
+albedo 93 ultramafic: spherical_albedo B = 0x3fd3e0e0986a568c  # 0.31060042270960575
+albedo 93 ultramafic: spherical_albedo V = 0x3fdc6484bfa445c3  # 0.44363516535767306
+albedo 93 ultramafic: spherical_albedo R = 0x3fdb9d84bc8a5609  # 0.43148916637559914
+albedo 93 ultramafic: hemispherical_albedo at mu0 1 B = 0x3fd06ef5eaa6309c  # 0.2567724982734576
+albedo 93 ultramafic: hemispherical_albedo at mu0 1 V = 0x3fd86784aeda2b1a  # 0.3813182551900113
+albedo 93 ultramafic: hemispherical_albedo at mu0 1 R = 0x3fd7a73ba4264f98  # 0.3695820906661935
+albedo 93 ultramafic: hemispherical_albedo at mu0 0.5 B = 0x3fd5745303a055fe  # 0.3352248702443318
+albedo 93 ultramafic: hemispherical_albedo at mu0 0.5 V = 0x3fde45b69e8be0b6  # 0.47300496562048566
+albedo 93 ultramafic: hemispherical_albedo at mu0 0.5 R = 0x3fdd7a6e85ab1f1c  # 0.46059763959464006
+albedo 93 ultramafic: hemispherical_albedo at mu0 0.2 B = 0x3fda974056540a1a  # 0.4154816477822877
+albedo 93 ultramafic: hemispherical_albedo at mu0 0.2 V = 0x3fe1d853c849b006  # 0.5576571380493085
+albedo 93 ultramafic: hemispherical_albedo at mu0 0.2 R = 0x3fe173f3479b84a4  # 0.5454040907462923
+albedo 93 ultramafic: hemispherical_albedo at mu0 0.05 B = 0x3fdec4b2a5e235b4  # 0.48075548362325127
+albedo 93 ultramafic: hemispherical_albedo at mu0 0.05 V = 0x3fe3da1bc9f63c84  # 0.620374578911552
+albedo 93 ultramafic: hemispherical_albedo at mu0 0.05 R = 0x3fe37acb9db12ed9  # 0.6087396697925797
+albedo 93 ultramafic: infrared None
+albedo 93 ultramafic: spherical_albedo 300-390 nm = 0x3fc594820b7f830b  # 0.16859460412435853
+albedo 93 ultramafic: spherical_albedo 390-495 nm = 0x3fd3fd0115496ea9  # 0.3123171527747482
+albedo 93 ultramafic: spherical_albedo 495-595 nm = 0x3fdb62f396703de8  # 0.42791452113394124
+albedo 93 ultramafic: spherical_albedo 595-700 nm = 0x3fdbe6ac0c5f3337  # 0.43595410545531216
+albedo 93 ultramafic: spherical_albedo 700-780 nm = 0x3fdb64c35f6357de  # 0.42802509608497796
+albedo 93 ultramafic: spherical_albedo 780-1000 nm = 0x3fd3600a5f9a5373  # 0.3027368482228702
+albedo 93 ultramafic: spherical_albedo 1000-1300 nm = 0x3fd2d66d91e87414  # 0.29433764695005604
+albedo 93 ultramafic: spherical_albedo 1300-1700 nm = 0x3fdcf9c5a5653b4f  # 0.4527448764028365
+albedo 93 ultramafic: spherical_albedo 1700-2200 nm = 0x3fe087a7522993a9  # 0.5165592770323332
+albedo 93 ultramafic: spherical_albedo 2200-2800 nm = 0x3fe1d6abe724316e  # 0.5574550165634216
+albedo 93 ultramafic: spherical_albedo 2800-3500 nm = 0x3fe1d6abe724316e  # 0.5574550165634216
+albedo 93 ultramafic: spherical_albedo 3500-5000 nm = 0x3fe1d6abe724316e  # 0.5574550165634216
+albedo 93 ultramafic: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 93 ultramafic: data to nm = 0x40a4ffffd8adaba0  # 2687.9997000000003
+albedo 94 ferric: Regolith from a mixture of 8 parts, fine grains 1 um (stand-in), phase law Regolith
+albedo 94 ferric: part 0 augite NMNH120049 Form volume_fraction = 0x3fd2305532617c1c  # 0.2842
+albedo 94 ferric: part 0: augite NMNH120049 spectra ["splib07a_Augite_NMNH120049_BECKb_AREF.txt"]
+albedo 94 ferric: part 0: augite NMNH120049 held
+albedo 94 ferric: part 1 pigeonite HS199.3B Form volume_fraction = 0x3fd2305532617c1c  # 0.2842
+albedo 94 ferric: part 1: pigeonite HS199.3B spectra ["splib07a_Pigeonite_HS199.3B_BECKc_AREF.txt"]
+albedo 94 ferric: part 1: pigeonite HS199.3B slab n = 0x3ffb70a3d70a3d71  # 1.715
+albedo 94 ferric: part 1: pigeonite HS199.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 94 ferric: part 2 olivine KI3054 Fo66 Form volume_fraction = 0x3fae5c91d14e3bcd  # 0.0593
+albedo 94 ferric: part 2: olivine KI3054 Fo66 spectra ["splib07a_Olivine_KI3054_Fo66_lt60um_BECKb_AREF.txt"]
+albedo 94 ferric: part 2: olivine KI3054 Fo66 slab n = 0x3ffb916872b020c5  # 1.723
+albedo 94 ferric: part 2: olivine KI3054 Fo66 slab lab grain m = 0x3eff75104d551d68  # 2.9999999999999997e-5
+albedo 94 ferric: part 3 anorthite HS201.3B Form volume_fraction = 0x3fcd3c36113404ea  # 0.2284
+albedo 94 ferric: part 3: anorthite HS201.3B spectra ["splib07a_Anorthite_HS201.3B_Plagio_BECKa_AREF.txt"]
+albedo 94 ferric: part 3: anorthite HS201.3B slab n = 0x3ff94fdf3b645a1d  # 1.582
+albedo 94 ferric: part 3: anorthite HS201.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 94 ferric: part 4 ilmenite HS231.3B Form volume_fraction = 0x3fb05bc01a36e2eb  # 0.0639
+albedo 94 ferric: part 4: ilmenite HS231.3B spectra ["splib07a_Ilmenite_HS231.3B_BECKb_AREF.txt"]
+albedo 94 ferric: part 4: ilmenite HS231.3B held
+albedo 94 ferric: part 5 ferrihydrite GDS75 Form volume_fraction = 0x3fafb15b573eab36  # 0.0619
+albedo 94 ferric: part 5: ferrihydrite GDS75 spectra ["splib07a_Ferrihydrite_GDS75_Syn_F6_BECKb_AREF.txt"]
+albedo 94 ferric: part 5: ferrihydrite GDS75 held
+albedo 94 ferric: part 6 hematite GDS27 Form volume_fraction = 0x3f7a36e2eb1c432d  # 0.0064
+albedo 94 ferric: part 6: hematite GDS27 spectra ["splib07a_Hematite_GDS27_BECKa_AREF.txt"]
+albedo 94 ferric: part 6: hematite GDS27 held
+albedo 94 ferric: part 7 magnetite HS195.3B Form volume_fraction = 0x3f87f62b6ae7d567  # 0.0117
+albedo 94 ferric: part 7: magnetite HS195.3B spectra ["splib07a_Magnetite_HS195.3B_BECKb_AREF.txt"]
+albedo 94 ferric: part 7: magnetite HS195.3B held
+albedo 94 ferric: w B = 0x3fe5fad82be97ed8  # 0.6868706567438165
+albedo 94 ferric: w V = 0x3fe79fb14aec4310  # 0.738243719419275
+albedo 94 ferric: w R = 0x3fe89d6366836423  # 0.7692124368869638
+albedo 94 ferric: normal_albedo B = 0x3fd54c7b99ae7fdf  # 0.3327931404874089
+albedo 94 ferric: normal_albedo V = 0x3fd79a209e014da6  # 0.36878219061073947
+albedo 94 ferric: normal_albedo R = 0x3fd9391cf6c41918  # 0.39411090944521865
+albedo 94 ferric: spherical_albedo B = 0x3fd0d45c68739971  # 0.2629614849123732
+albedo 94 ferric: spherical_albedo V = 0x3fd354bd7a99235b  # 0.3020471284149175
+albedo 94 ferric: spherical_albedo R = 0x3fd50eeeacea834f  # 0.32903639684996205
+albedo 94 ferric: hemispherical_albedo at mu0 1 B = 0x3fcb6e527fe38f50  # 0.21430426830840554
+albedo 94 ferric: hemispherical_albedo at mu0 1 V = 0x3fcfe15d6203efc4  # 0.24906508718401998
+albedo 94 ferric: hemispherical_albedo at mu0 1 R = 0x3fd18128680baad6  # 0.2735081687994073
+albedo 94 ferric: hemispherical_albedo at mu0 0.5 B = 0x3fd23c4973fc5552  # 0.28492962195135363
+albedo 94 ferric: hemispherical_albedo at mu0 0.5 V = 0x3fd4e0f3c8bd4130  # 0.32622999766774097
+albedo 94 ferric: hemispherical_albedo at mu0 0.5 R = 0x3fd6b116c07828aa  # 0.3545586471160599
+albedo 94 ferric: hemispherical_albedo at mu0 0.2 B = 0x3fd709cc73c5ac3e  # 0.35997306161761233
+albedo 94 ferric: hemispherical_albedo at mu0 0.2 V = 0x3fd9f71391190b76  # 0.4057053486796386
+albedo 94 ferric: hemispherical_albedo at mu0 0.2 R = 0x3fdbec000f2ad74a  # 0.43627931100069317
+albedo 94 ferric: hemispherical_albedo at mu0 0.05 B = 0x3fdb17460166085c  # 0.4232954991968023
+albedo 94 ferric: hemispherical_albedo at mu0 0.05 V = 0x3fde20fadcde9e80  # 0.4707629353456255
+albedo 94 ferric: hemispherical_albedo at mu0 0.05 R = 0x3fe00f0d33f9e0ea  # 0.5018373503835651
+albedo 94 ferric: infrared None
+albedo 94 ferric: spherical_albedo 300-390 nm = 0x3fc7a189a20c0552  # 0.18461723720978768
+albedo 94 ferric: spherical_albedo 390-495 nm = 0x3fd0c3276a3fef34  # 0.2619112527461198
+albedo 94 ferric: spherical_albedo 495-595 nm = 0x3fd339d275c693fa  # 0.30040418149502524
+albedo 94 ferric: spherical_albedo 595-700 nm = 0x3fd52e1619909759  # 0.3309378862053243
+albedo 94 ferric: spherical_albedo 700-780 nm = 0x3fd65d2f2261e738  # 0.34943750722560507
+albedo 94 ferric: spherical_albedo 780-1000 nm = 0x3fd4e2549a2ae8ed  # 0.3263141160529262
+albedo 94 ferric: spherical_albedo 1000-1300 nm = 0x3fd56b7daec404e8  # 0.33468572680437925
+albedo 94 ferric: spherical_albedo 1300-1700 nm = 0x3fdad40c226640ef  # 0.41919234618491336
+albedo 94 ferric: spherical_albedo 1700-2200 nm = 0x3fda9688886dc456  # 0.41543782542345775
+albedo 94 ferric: spherical_albedo 2200-2800 nm = 0x3fda3fad11046d64  # 0.4101364771065248
+albedo 94 ferric: spherical_albedo 2800-3500 nm = 0x3fda3fad11046d64  # 0.4101364771065248
+albedo 94 ferric: spherical_albedo 3500-5000 nm = 0x3fda3fad11046d64  # 0.4101364771065248
+albedo 94 ferric: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 94 ferric: data to nm = 0x40a4ffffd8adaba0  # 2687.9997000000003
+albedo 95 phyllosilicate: Regolith from a mixture of 2 parts, fine grains 1 um (stand-in), phase law Regolith
+albedo 95 phyllosilicate: part 0 lizardite NMNHR4687.c Form volume_fraction = 0x3fea3d70a3d70a3d  # 0.82
+albedo 95 phyllosilicate: part 0: lizardite NMNHR4687.c spectra ["splib07a_Lizardite_NMNHR4687.c_70um_BECKa_AREF.txt"]
+albedo 95 phyllosilicate: part 0: lizardite NMNHR4687.c slab n = 0x3ff8d0e560418937  # 1.551
+albedo 95 phyllosilicate: part 0: lizardite NMNHR4687.c slab lab grain m = 0x3f12599ed7c6fbd2  # 7e-5
+albedo 95 phyllosilicate: part 1 saponite SapCa-1 Form volume_fraction = 0x3fc70a3d70a3d70a  # 0.18
+albedo 95 phyllosilicate: part 1: saponite SapCa-1 spectra ["splib07a_Saponite_SapCa-1_BECKb_AREF.txt"]
+albedo 95 phyllosilicate: part 1: saponite SapCa-1 held
+albedo 95 phyllosilicate: w B = 0x3feb8a3a5ad051b8  # 0.860623528833961
+albedo 95 phyllosilicate: w V = 0x3feef8623bb773a6  # 0.9678202787723549
+albedo 95 phyllosilicate: w R = 0x3fef53c7cfe0ed10  # 0.9789771137360805
+albedo 95 phyllosilicate: normal_albedo B = 0x3fdfb56df5b4194d  # 0.4954485797355986
+albedo 95 phyllosilicate: normal_albedo V = 0x3fe8a4b5dad51951  # 0.7701062463827758
+albedo 95 phyllosilicate: normal_albedo R = 0x3fead3a4e3928f8a  # 0.8383354611182636
+albedo 95 phyllosilicate: spherical_albedo B = 0x3fdbaaf5ea4ac529  # 0.4323096073158746
+albedo 95 phyllosilicate: spherical_albedo V = 0x3fe59c08af8ca8d5  # 0.6752971104335993
+albedo 95 phyllosilicate: spherical_albedo R = 0x3fe74f593ea93d81  # 0.7284361099099642
+albedo 95 phyllosilicate: hemispherical_albedo at mu0 1 B = 0x3fd7b42ef983c1c4  # 0.37037252775828855
+albedo 95 phyllosilicate: hemispherical_albedo at mu0 1 V = 0x3fe3d22f704f936e  # 0.6194073861666831
+albedo 95 phyllosilicate: hemispherical_albedo at mu0 1 R = 0x3fe5b1466c622754  # 0.677890025793412
+albedo 95 phyllosilicate: hemispherical_albedo at mu0 0.5 B = 0x3fdd882e72a779f4  # 0.4614368552846877
+albedo 95 phyllosilicate: hemispherical_albedo at mu0 0.5 V = 0x3fe67b03226381f4  # 0.702516143002923
+albedo 95 phyllosilicate: hemispherical_albedo at mu0 0.5 R = 0x3fe819fc0d54b863  # 0.7531719456071752
+albedo 95 phyllosilicate: hemispherical_albedo at mu0 0.2 B = 0x3fe17ac42ea6b090  # 0.5462361251025118
+albedo 95 phyllosilicate: hemispherical_albedo at mu0 0.2 V = 0x3fe88e5eb4b891f8  # 0.7673791436869228
+albedo 95 phyllosilicate: hemispherical_albedo at mu0 0.2 R = 0x3fe9e9e1d82f6481  # 0.8098000738492744
+albedo 95 phyllosilicate: hemispherical_albedo at mu0 0.05 B = 0x3fe38149391de43a  # 0.6095319858133117
+albedo 95 phyllosilicate: hemispherical_albedo at mu0 0.05 V = 0x3fe9e629f41e6ff9  # 0.8093461769053639
+albedo 95 phyllosilicate: hemispherical_albedo at mu0 0.05 R = 0x3feb0dfc2c0b3d29  # 0.8454571590645276
+albedo 95 phyllosilicate: infrared None
+albedo 95 phyllosilicate: spherical_albedo 300-390 nm = 0x3fd2368adf993543  # 0.2845790084437178
+albedo 95 phyllosilicate: spherical_albedo 390-495 nm = 0x3fdd4ae55cdc7252  # 0.45769628590077105
+albedo 95 phyllosilicate: spherical_albedo 495-595 nm = 0x3fe4f918ef4558ed  # 0.655407397581056
+albedo 95 phyllosilicate: spherical_albedo 595-700 nm = 0x3fe7706a2de9bfd2  # 0.7324725052585512
+albedo 95 phyllosilicate: spherical_albedo 700-780 nm = 0x3fe84552c42e3817  # 0.7584623176242101
+albedo 95 phyllosilicate: spherical_albedo 780-1000 nm = 0x3fe88dffd9cc59c5  # 0.7673339132186859
+albedo 95 phyllosilicate: spherical_albedo 1000-1300 nm = 0x3fe8586c6a123a10  # 0.7607938834860892
+albedo 95 phyllosilicate: spherical_albedo 1300-1700 nm = 0x3fe82c13773fb37d  # 0.7553803757742653
+albedo 95 phyllosilicate: spherical_albedo 1700-2200 nm = 0x3fe56c98a014f0b7  # 0.6695063711736314
+albedo 95 phyllosilicate: spherical_albedo 2200-2800 nm = 0x3fd56f9a68b4eca5  # 0.3349367163206785
+albedo 95 phyllosilicate: spherical_albedo 2800-3500 nm = 0x3f9d31fe9540d472  # 0.028511026248640943
+albedo 95 phyllosilicate: spherical_albedo 3500-5000 nm = 0x3f9d31fe9540d472  # 0.028511026248640943
+albedo 95 phyllosilicate: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 95 phyllosilicate: data to nm = 0x40a740000d1b7175  # 2976.0000999999997
 albedo 96 lava_glass: Regolith from basaltic-glass.json, phase law Regolith
 albedo 96 lava_glass: w B = 0x3fd10fb1ad67c2b0  # 0.2665828889285349
 albedo 96 lava_glass: w V = 0x3fd6ee96d2d2499e  # 0.3583123263171276
@@ -2432,3 +3642,778 @@ albedo 96 lava_glass: hemispherical_albedo at mu0 0.2 R = 0x3fc6358d7a72c25c  # 
 albedo 96 lava_glass: hemispherical_albedo at mu0 0.05 B = 0x3fc1653e6e1b1168  # 0.13590221763855515
 albedo 96 lava_glass: hemispherical_albedo at mu0 0.05 V = 0x3fc829091a96b5c4  # 0.18875230596806436
 albedo 96 lava_glass: hemispherical_albedo at mu0 0.05 R = 0x3fcbaa0be4d045bc  # 0.21612690613305385
+albedo 96 lava_glass: infrared Some(BasalticGlass)
+albedo 96 lava_glass: spherical_albedo 300-390 nm = 0x3fa3d0ea367fef5e  # 0.038703269150544214
+albedo 96 lava_glass: spherical_albedo 390-495 nm = 0x3fb149fc075662ef  # 0.06753516368042843
+albedo 96 lava_glass: spherical_albedo 495-595 nm = 0x3fb99d32c08213a3  # 0.10005490493683893
+albedo 96 lava_glass: spherical_albedo 595-700 nm = 0x3fbe42e7ae6a0d53  # 0.11820838936005389
+albedo 96 lava_glass: spherical_albedo 700-780 nm = 0x3fbf6119ff6ef3a3  # 0.122575402127906
+albedo 96 lava_glass: spherical_albedo 780-1000 nm = 0x3fc0aa66ed0a27be  # 0.13020025800898155
+albedo 96 lava_glass: spherical_albedo 1000-1300 nm = 0x3fc320e0ce9c2acf  # 0.14944086159115108
+albedo 96 lava_glass: spherical_albedo 1300-1700 nm = 0x3fc72a4b5e517f06  # 0.180978222898368
+albedo 96 lava_glass: spherical_albedo 1700-2200 nm = 0x3fcf8da6805c1a20  # 0.24651032702986786
+albedo 96 lava_glass: spherical_albedo 2200-2800 nm = 0x3fd8022cb062dbe0  # 0.37513272500240014
+albedo 96 lava_glass: spherical_albedo 2800-3500 nm = 0x3fd723a0d4a68424  # 0.3615495754875744
+albedo 96 lava_glass: spherical_albedo 3500-5000 nm = 0x3fd94437f9c57586  # 0.3947887362645236
+albedo 96 lava_glass: data from nm = 0x4077c00000000000  # 380.0
+albedo 96 lava_glass: data to nm = 0x40b3880000000000  # 5000.0
+albedo 97 ca_al_residue: Regolith from corundum HS283.3B (stand-in), phase law Regolith
+albedo 97 ca_al_residue: corundum HS283.3B spectra ["splib07a_Corundum_HS283.3B_BECKc_AREF.txt"]
+albedo 97 ca_al_residue: corundum HS283.3B slab n = 0x3ffc45a1cac08312  # 1.767
+albedo 97 ca_al_residue: corundum HS283.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 97 ca_al_residue: w B = 0x3fef653f4e40cce5  # 0.9811092880612732
+albedo 97 ca_al_residue: w V = 0x3fef68224e7bd91c  # 0.981461671150814
+albedo 97 ca_al_residue: w R = 0x3fef83231e106a2f  # 0.9847579562368248
+albedo 97 ca_al_residue: normal_albedo B = 0x3feb5758e0e7f403  # 0.8544124977776167
+albedo 97 ca_al_residue: normal_albedo V = 0x3feb6e29ff63a5ed  # 0.8571977603980351
+albedo 97 ca_al_residue: normal_albedo R = 0x3fec54b5791cc51d  # 0.8853404393650269
+albedo 97 ca_al_residue: spherical_albedo B = 0x3fe7b2fed15eaba2  # 0.7406000222448379
+albedo 97 ca_al_residue: spherical_albedo V = 0x3fe7c42648da6503  # 0.7426940367614921
+albedo 97 ca_al_residue: spherical_albedo R = 0x3fe86fb511245a1e  # 0.7636361441425981
+albedo 97 ca_al_residue: hemispherical_albedo at mu0 1 B = 0x3fe620a1a35a7238  # 0.6914833250517125
+albedo 97 ca_al_residue: hemispherical_albedo at mu0 1 V = 0x3fe633dd7618e29c  # 0.6938311869226541
+albedo 97 ca_al_residue: hemispherical_albedo at mu0 1 R = 0x3fe6f5406c54cc6a  # 0.7174379459232914
+albedo 97 ca_al_residue: hemispherical_albedo at mu0 0.5 B = 0x3fe878185cf9c329  # 0.7646600547724108
+albedo 97 ca_al_residue: hemispherical_albedo at mu0 0.5 V = 0x3fe88843596b9766  # 0.7666336771478484
+albedo 97 ca_al_residue: hemispherical_albedo at mu0 0.5 R = 0x3fe9296b7f2dc86b  # 0.786306141277476
+albedo 97 ca_al_residue: hemispherical_albedo at mu0 0.2 B = 0x3fea37449d703a1a  # 0.8192465853661048
+albedo 97 ca_al_residue: hemispherical_albedo at mu0 0.2 V = 0x3fea4482c6c81e89  # 0.8208631403403653
+albedo 97 ca_al_residue: hemispherical_albedo at mu0 0.2 R = 0x3feac7b0b6f449fb  # 0.8368762563061972
+albedo 97 ca_al_residue: hemispherical_albedo at mu0 0.05 B = 0x3feb4f24ecbd6f56  # 0.8534111617877709
+albedo 97 ca_al_residue: hemispherical_albedo at mu0 0.05 V = 0x3feb5a44e75d84a6  # 0.8547691840032214
+albedo 97 ca_al_residue: hemispherical_albedo at mu0 0.05 R = 0x3febc811cdf5a1c8  # 0.8681725523611528
+albedo 97 ca_al_residue: infrared None
+albedo 97 ca_al_residue: spherical_albedo 300-390 nm = 0x3fe080946f8d6e13  # 0.5156957796820641
+albedo 97 ca_al_residue: spherical_albedo 390-495 nm = 0x3fe7d453b8fa4af0  # 0.7446688282819576
+albedo 97 ca_al_residue: spherical_albedo 495-595 nm = 0x3fe8224942e62976  # 0.7541853243467773
+albedo 97 ca_al_residue: spherical_albedo 595-700 nm = 0x3fe86efa170c9d07  # 0.7635469865971637
+albedo 97 ca_al_residue: spherical_albedo 700-780 nm = 0x3fe94a57d5e5cc73  # 0.7903250863731855
+albedo 97 ca_al_residue: spherical_albedo 780-1000 nm = 0x3feb38608eff71a9  # 0.8506319802213983
+albedo 97 ca_al_residue: spherical_albedo 1000-1300 nm = 0x3fec71e5550913f7  # 0.8889032994126173
+albedo 97 ca_al_residue: spherical_albedo 1300-1700 nm = 0x3fec4b9392ada72a  # 0.8842256417094394
+albedo 97 ca_al_residue: spherical_albedo 1700-2200 nm = 0x3fe62d58dc8c387a  # 0.6930355365345939
+albedo 97 ca_al_residue: spherical_albedo 2200-2800 nm = 0x3fe2f8917fa89a4a  # 0.5928428166706194
+albedo 97 ca_al_residue: spherical_albedo 2800-3500 nm = 0x3fd2f10e1c2e8107  # 0.2959628367625701
+albedo 97 ca_al_residue: spherical_albedo 3500-5000 nm = 0x3fd2f10e1c2e8107  # 0.2959628367625701
+albedo 97 ca_al_residue: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 97 ca_al_residue: data to nm = 0x40a740000d1b7175  # 2976.0000999999997
+albedo 98 iron_nickel: Regolith from iron powder SA-209309 (stand-in), phase law Regolith
+albedo 98 iron_nickel: iron powder SA-209309 spectra ["splib07a_IronPowder_SA-209309_325mesh_ASDFRa_AREF.txt"]
+albedo 98 iron_nickel: iron powder SA-209309 held
+albedo 98 iron_nickel: w B = 0x3fdac406f90180f8  # 0.4182145530412664
+albedo 98 iron_nickel: w V = 0x3fdbc8423bc032f3  # 0.43409782252346857
+albedo 98 iron_nickel: w R = 0x3fdc62ae5928199c  # 0.4435230131788559
+albedo 98 iron_nickel: normal_albedo B = 0x3fc99c90b1a586ff  # 0.20009049104833562
+albedo 98 iron_nickel: normal_albedo V = 0x3fcac1647a54e880  # 0.20902687047220425
+albedo 98 iron_nickel: normal_albedo R = 0x3fcb7182295599a2  # 0.2144015027835851
+albedo 98 iron_nickel: spherical_albedo B = 0x3fbfa4a39484f748  # 0.12360594154321547
+albedo 98 iron_nickel: spherical_albedo V = 0x3fc0a12ed550600b  # 0.1299189130375001
+albedo 98 iron_nickel: spherical_albedo R = 0x3fc11ea1e2732b96  # 0.13374732548831209
+albedo 98 iron_nickel: hemispherical_albedo at mu0 1 B = 0x3fb8b393de3be630  # 0.09649013686785035
+albedo 98 iron_nickel: hemispherical_albedo at mu0 1 V = 0x3fba03cf65a20f80  # 0.10162063819194422
+albedo 98 iron_nickel: hemispherical_albedo at mu0 1 R = 0x3fbad057044314c8  # 0.10474151472142801
+albedo 98 iron_nickel: hemispherical_albedo at mu0 0.5 B = 0x3fc150b736656e58  # 0.13527574688019928
+albedo 98 iron_nickel: hemispherical_albedo at mu0 0.5 V = 0x3fc23142c7636408  # 0.14212832198862224
+albedo 98 iron_nickel: hemispherical_albedo at mu0 0.5 R = 0x3fc2b9552d2d3948  # 0.14628090577975628
+albedo 98 iron_nickel: hemispherical_albedo at mu0 0.2 B = 0x3fc73bc465178e3c  # 0.18151144920476436
+albedo 98 iron_nickel: hemispherical_albedo at mu0 0.2 V = 0x3fc857239e4c4fd0  # 0.19015927533530297
+albedo 98 iron_nickel: hemispherical_albedo at mu0 0.2 R = 0x3fc90214a015644c  # 0.19537599388675841
+albedo 98 iron_nickel: hemispherical_albedo at mu0 0.05 B = 0x3fccdd8587d1f330  # 0.22551030284730578
+albedo 98 iron_nickel: hemispherical_albedo at mu0 0.05 V = 0x3fce280fa0c41c94  # 0.2355975661268742
+albedo 98 iron_nickel: hemispherical_albedo at mu0 0.05 R = 0x3fceee96596137e0  # 0.24165610660787618
+albedo 98 iron_nickel: infrared None
+albedo 98 iron_nickel: spherical_albedo 300-390 nm = 0x3fbce48b878aa442  # 0.1128623205101045
+albedo 98 iron_nickel: spherical_albedo 390-495 nm = 0x3fbf91998d92f9a9  # 0.12331542688750709
+albedo 98 iron_nickel: spherical_albedo 495-595 nm = 0x3fc09f862ee74238  # 0.12986829080775109
+albedo 98 iron_nickel: spherical_albedo 595-700 nm = 0x3fc12f3ea1bfd13b  # 0.13425429246820805
+albedo 98 iron_nickel: spherical_albedo 700-780 nm = 0x3fc1e7981cc9c3c4  # 0.13988019376441063
+albedo 98 iron_nickel: spherical_albedo 780-1000 nm = 0x3fc38e6c08402428  # 0.152783874538984
+albedo 98 iron_nickel: spherical_albedo 1000-1300 nm = 0x3fc688dc9ee30e3e  # 0.17605169065619636
+albedo 98 iron_nickel: spherical_albedo 1300-1700 nm = 0x3fca0bc1e1d5f988  # 0.20348380591526571
+albedo 98 iron_nickel: spherical_albedo 1700-2200 nm = 0x3fce73e100e87a5c  # 0.23791134399739888
+albedo 98 iron_nickel: spherical_albedo 2200-2800 nm = 0x3fd0e94c3d28ec30  # 0.26423936817781435
+albedo 98 iron_nickel: spherical_albedo 2800-3500 nm = 0x3fd0e94c3d28ec30  # 0.26423936817781435
+albedo 98 iron_nickel: spherical_albedo 3500-5000 nm = 0x3fd0e94c3d28ec30  # 0.26423936817781435
+albedo 98 iron_nickel: data from nm = 0x4075dffff583a53b  # 349.99998999999997
+albedo 98 iron_nickel: data to nm = 0x40a3880000000000  # 2500.0
+albedo 100 MgSO4: Regolith from kieserite KIEDE1.b (stand-in), phase law Regolith
+albedo 100 MgSO4: kieserite KIEDE1.b spectra ["splib07a_Kieserite_KIEDE1.b_fine_gr_ASDFRc_AREF.txt"]
+albedo 100 MgSO4: kieserite KIEDE1.b held
+albedo 100 MgSO4: w B = 0x3fefa8364e4f6566  # 0.9892837075705472
+albedo 100 MgSO4: w V = 0x3fefc57a5e961111  # 0.9928562018763235
+albedo 100 MgSO4: w R = 0x3fefd706155b9cd5  # 0.9949980179925669
+albedo 100 MgSO4: normal_albedo B = 0x3fedd4842bc4a6f1  # 0.9321919302794567
+albedo 100 MgSO4: normal_albedo V = 0x3fef5d304ba8a186  # 0.9801255681714316
+albedo 100 MgSO4: normal_albedo R = 0x3ff046303141e1be  # 1.0171358036151186
+albedo 100 MgSO4: spherical_albedo B = 0x3fe98668a6161e00  # 0.7976573222994716
+albedo 100 MgSO4: spherical_albedo V = 0x3fea9b167aa3407c  # 0.8314316172855025
+albedo 100 MgSO4: spherical_albedo R = 0x3feb6b301ca33ac8  # 0.8568344649628097
+albedo 100 MgSO4: hemispherical_albedo at mu0 1 B = 0x3fe8336d4592e6a1  # 0.7562776907791041
+albedo 100 MgSO4: hemispherical_albedo at mu0 1 V = 0x3fe9743b36a3fad8  # 0.7954383914182825
+albedo 100 MgSO4: hemispherical_albedo at mu0 1 R = 0x3fea68c79ce34650  # 0.8252904953207665
+albedo 100 MgSO4: hemispherical_albedo at mu0 0.5 B = 0x3fea2d22c643d788  # 0.8180097458232334
+albedo 100 MgSO4: hemispherical_albedo at mu0 0.5 V = 0x3feb2c666bd0ed7c  # 0.8491699319633166
+albedo 100 MgSO4: hemispherical_albedo at mu0 0.5 R = 0x3febeab4063d935e  # 0.8724002954373693
+albedo 100 MgSO4: hemispherical_albedo at mu0 0.2 B = 0x3feb9803bdd4ad4d  # 0.8623064715988363
+albedo 100 MgSO4: hemispherical_albedo at mu0 0.2 V = 0x3fec612b7160b4da  # 0.8868615354928366
+albedo 100 MgSO4: hemispherical_albedo at mu0 0.2 R = 0x3fecf4e1b8e7f94f  # 0.9048927890251351
+albedo 100 MgSO4: hemispherical_albedo at mu0 0.05 B = 0x3fec74f970a06482  # 0.8892790984856591
+albedo 100 MgSO4: hemispherical_albedo at mu0 0.05 V = 0x3fed1a434fbcae92  # 0.909455924736408
+albedo 100 MgSO4: hemispherical_albedo at mu0 0.05 R = 0x3fed929f66c9d747  # 0.9241482741915455
+albedo 100 MgSO4: infrared None
+albedo 100 MgSO4: spherical_albedo 300-390 nm = 0x3fe7975fe6844843  # 0.7372283460883938
+albedo 100 MgSO4: spherical_albedo 390-495 nm = 0x3fe977c27e2cada5  # 0.7958691086145576
+albedo 100 MgSO4: spherical_albedo 495-595 nm = 0x3fea9ab719bb8e3d  # 0.8313861372557266
+albedo 100 MgSO4: spherical_albedo 595-700 nm = 0x3feb7211ea3b9d68  # 0.8576745581494096
+albedo 100 MgSO4: spherical_albedo 700-780 nm = 0x3febc931cf2a4820  # 0.868309883708438
+albedo 100 MgSO4: spherical_albedo 780-1000 nm = 0x3febf96ae685eac3  # 0.8741964819340285
+albedo 100 MgSO4: spherical_albedo 1000-1300 nm = 0x3febb9a948b27494  # 0.8664137287011209
+albedo 100 MgSO4: spherical_albedo 1300-1700 nm = 0x3fe6835556d0cea4  # 0.7035319038027024
+albedo 100 MgSO4: spherical_albedo 1700-2200 nm = 0x3fdfb252ae84ccc3  # 0.49525897066923735
+albedo 100 MgSO4: spherical_albedo 2200-2800 nm = 0x3fdbb36f1bf48e3c  # 0.4328267834664279
+albedo 100 MgSO4: spherical_albedo 2800-3500 nm = 0x3fdbb36f1bf48e3c  # 0.4328267834664279
+albedo 100 MgSO4: spherical_albedo 3500-5000 nm = 0x3fdbb36f1bf48e3c  # 0.4328267834664279
+albedo 100 MgSO4: data from nm = 0x4075dffff583a53b  # 349.99998999999997
+albedo 100 MgSO4: data to nm = 0x40a3880000000000  # 2500.0
+albedo 101 Na2CO3: Regolith from trona GDS148 (stand-in), phase law Regolith
+albedo 101 Na2CO3: trona GDS148 spectra ["splib07a_Trona_GDS148_BECKa_AREF.txt"]
+albedo 101 Na2CO3: trona GDS148 held
+albedo 101 Na2CO3: w B = 0x3fefdac461786edb  # 0.9954549697608529
+albedo 101 Na2CO3: w V = 0x3fefef901033b09f  # 0.9979934994166973
+albedo 101 Na2CO3: w R = 0x3feff4e383444280  # 0.9986436427880818
+albedo 101 Na2CO3: normal_albedo B = 0x3ff06bbc1af23e3c  # 1.0263024380291332
+albedo 101 Na2CO3: normal_albedo V = 0x3ff179dcc3c5a078  # 1.0922515532820665
+albedo 101 Na2CO3: normal_albedo R = 0x3ff1dedb5dfd9c0e  # 1.116908423567796
+albedo 101 Na2CO3: spherical_albedo B = 0x3feb9e03df1d93fe  # 0.8630389554715518
+albedo 101 Na2CO3: spherical_albedo V = 0x3fed03b5d66841f9  # 0.9067029178277713
+albedo 101 Na2CO3: spherical_albedo R = 0x3fed85fdc5c911bd  # 0.9226063597675914
+albedo 101 Na2CO3: hemispherical_albedo at mu0 1 B = 0x3feaa4efa8311c30  # 0.8326338086125187
+albedo 101 Na2CO3: hemispherical_albedo at mu0 1 V = 0x3fec510c5b67b3fd  # 0.8848935876136462
+albedo 101 Na2CO3: hemispherical_albedo at mu0 1 R = 0x3fecef0eab3fee18  # 0.9041817993851877
+albedo 101 Na2CO3: hemispherical_albedo at mu0 0.5 B = 0x3fec18f677e3fbe7  # 0.8780472127544926
+albedo 101 Na2CO3: hemispherical_albedo at mu0 0.5 V = 0x3fed5c0eeb68866f  # 0.9174875829523453
+albedo 101 Na2CO3: hemispherical_albedo at mu0 0.5 R = 0x3fedd0ab1fd57768  # 0.9317222234492251
+albedo 101 Na2CO3: hemispherical_albedo at mu0 0.2 B = 0x3fed1880e34bdb36  # 0.909241146028626
+albedo 101 Na2CO3: hemispherical_albedo at mu0 0.2 V = 0x3fee0e44ca36fed4  # 0.9392417859562223
+albedo 101 Na2CO3: hemispherical_albedo at mu0 0.2 R = 0x3fee65b15fa65d4a  # 0.9499136799012515
+albedo 101 Na2CO3: hemispherical_albedo at mu0 0.05 B = 0x3fedaf859f6417ee  # 0.9276760209183956
+albedo 101 Na2CO3: hemispherical_albedo at mu0 0.05 V = 0x3fee7598fc51e050  # 0.9518551757928524
+albedo 101 Na2CO3: hemispherical_albedo at mu0 0.05 R = 0x3feebb8408c48fa1  # 0.9603901072737139
+albedo 101 Na2CO3: infrared None
+albedo 101 Na2CO3: spherical_albedo 300-390 nm = 0x3fe9a3fd448d9af4  # 0.8012682284287096
+albedo 101 Na2CO3: spherical_albedo 390-495 nm = 0x3feba49a844d10e2  # 0.8638432106022516
+albedo 101 Na2CO3: spherical_albedo 495-595 nm = 0x3fecf030e0bef1bb  # 0.9043201818054095
+albedo 101 Na2CO3: spherical_albedo 595-700 nm = 0x3fed8793f8e09722  # 0.9228000508198628
+albedo 101 Na2CO3: spherical_albedo 700-780 nm = 0x3fedcc458cdbb430  # 0.9311855078827929
+albedo 101 Na2CO3: spherical_albedo 780-1000 nm = 0x3fedb1afde54a410  # 0.927940305938252
+albedo 101 Na2CO3: spherical_albedo 1000-1300 nm = 0x3fec5a4bd2d0c116  # 0.8860224835862336
+albedo 101 Na2CO3: spherical_albedo 1300-1700 nm = 0x3fe5d7b07d295093  # 0.6825792736585917
+albedo 101 Na2CO3: spherical_albedo 1700-2200 nm = 0x3fd8c34a1c7e27bc  # 0.3869195249795856
+albedo 101 Na2CO3: spherical_albedo 2200-2800 nm = 0x3fccbb57d296121a  # 0.22446725637941328
+albedo 101 Na2CO3: spherical_albedo 2800-3500 nm = 0x3f93e0923778f00c  # 0.019411358485953698
+albedo 101 Na2CO3: spherical_albedo 3500-5000 nm = 0x3f93e0923778f00c  # 0.019411358485953698
+albedo 101 Na2CO3: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 101 Na2CO3: data to nm = 0x40a740000d1b7175  # 2976.0000999999997
+albedo 102 CaCO3: Regolith from calcite GDS304, phase law Regolith
+albedo 102 CaCO3: calcite GDS304 spectra ["splib07a_Calcite_GDS304_75-150um_ASDFRb_AREF.txt"]
+albedo 102 CaCO3: calcite GDS304 slab n = 0x3ff99db22d0e5604  # 1.601
+albedo 102 CaCO3: calcite GDS304 slab lab grain m = 0x3f1d7dbf487fcb92  # 0.0001125
+albedo 102 CaCO3: w B = 0x3fefd550bdad5b5e  # 0.9947894768364269
+albedo 102 CaCO3: w V = 0x3fefd9a4bb137f69  # 0.9953178075629526
+albedo 102 CaCO3: w R = 0x3fefda5b03e1125c  # 0.9954047275319442
+albedo 102 CaCO3: normal_albedo B = 0x3ff035c677794b9d  # 1.0131287257142738
+albedo 102 CaCO3: normal_albedo V = 0x3ff0603927b2fd06  # 1.0234920073269804
+albedo 102 CaCO3: normal_albedo R = 0x3ff0677e37ed84a5  # 1.0252668556861775
+albedo 102 CaCO3: spherical_albedo B = 0x3feb54e1b01dc817  # 0.8541115226528316
+albedo 102 CaCO3: spherical_albedo V = 0x3feb8e76216b0143  # 0.8611403134055212
+albedo 102 CaCO3: spherical_albedo R = 0x3feb984976d4dd7a  # 0.8623397179534742
+albedo 102 CaCO3: hemispherical_albedo at mu0 1 B = 0x3fea4e6e9e5a9f6c  # 0.8220742314197031
+albedo 102 CaCO3: hemispherical_albedo at mu0 1 V = 0x3fea9282828efecc  # 0.8303844976398636
+albedo 102 CaCO3: hemispherical_albedo at mu0 1 R = 0x3fea9e25f1966642  # 0.8318052023416345
+albedo 102 CaCO3: hemispherical_albedo at mu0 0.5 B = 0x3febd65fc352db46  # 0.869918710223694
+albedo 102 CaCO3: hemispherical_albedo at mu0 0.5 V = 0x3fec0ad0e8a9a720  # 0.8763203186219677
+albedo 102 CaCO3: hemispherical_albedo at mu0 0.5 R = 0x3fec13c0f39cc45b  # 0.8774113424352764
+albedo 102 CaCO3: hemispherical_albedo at mu0 0.2 B = 0x3fece53147bedb26  # 0.9029776002197181
+albedo 102 CaCO3: hemispherical_albedo at mu0 0.2 V = 0x3fed0d9f22ad26e0  # 0.9079127957604349
+albedo 102 CaCO3: hemispherical_albedo at mu0 0.2 R = 0x3fed147f6f7425e2  # 0.9087521721677911
+albedo 102 CaCO3: hemispherical_albedo at mu0 0.05 B = 0x3fed85e0f914dec0  # 0.9225926270364297
+albedo 102 CaCO3: hemispherical_albedo at mu0 0.05 V = 0x3feda6b2e9441639  # 0.9265989833808767
+albedo 102 CaCO3: hemispherical_albedo at mu0 0.05 R = 0x3fedac464fe5be71  # 0.927279621171648
+albedo 102 CaCO3: infrared None
+albedo 102 CaCO3: spherical_albedo 300-390 nm = 0x3fea365ebb217b10  # 0.8191369681261182
+albedo 102 CaCO3: spherical_albedo 390-495 nm = 0x3feb39441daa2417  # 0.8507404879939057
+albedo 102 CaCO3: spherical_albedo 495-595 nm = 0x3feb8cd79537da36  # 0.8609426416795205
+albedo 102 CaCO3: spherical_albedo 595-700 nm = 0x3feb99c0bfdd9ee4  # 0.8625186679246011
+albedo 102 CaCO3: spherical_albedo 700-780 nm = 0x3feba96db7a69d8d  # 0.8644322001390933
+albedo 102 CaCO3: spherical_albedo 780-1000 nm = 0x3feba502e2d7197e  # 0.8638929777596756
+albedo 102 CaCO3: spherical_albedo 1000-1300 nm = 0x3feb8f8994c09e0e  # 0.861271658451132
+albedo 102 CaCO3: spherical_albedo 1300-1700 nm = 0x3feb57f68ed0fbe6  # 0.8544876851445877
+albedo 102 CaCO3: spherical_albedo 1700-2200 nm = 0x3fea814742dad13b  # 0.8282810502774177
+albedo 102 CaCO3: spherical_albedo 2200-2800 nm = 0x3fe5ddba35500645  # 0.6833163300763735
+albedo 102 CaCO3: spherical_albedo 2800-3500 nm = 0x3fe5ddba35500645  # 0.6833163300763735
+albedo 102 CaCO3: spherical_albedo 3500-5000 nm = 0x3fe5ddba35500645  # 0.6833163300763735
+albedo 102 CaCO3: data from nm = 0x4075dffff583a53b  # 349.99998999999997
+albedo 102 CaCO3: data to nm = 0x40a3880000000000  # 2500.0
+albedo 103 carbonaceous: Regolith from kerogen BK-Cornell (stand-in), phase law Regolith
+albedo 103 carbonaceous: kerogen BK-Cornell spectra ["splib07a_Kerogen_BK-Cornell_BECKa_AREF.txt"]
+albedo 103 carbonaceous: kerogen BK-Cornell held
+albedo 103 carbonaceous: w B = 0x3fb249d310fb16a2  # 0.07143897213526398
+albedo 103 carbonaceous: w V = 0x3fb5cc86454df9a3  # 0.0851520461273823
+albedo 103 carbonaceous: w R = 0x3fbc12208f1e497e  # 0.10965159887408579
+albedo 103 carbonaceous: normal_albedo B = 0x3f9f91a1907a3205  # 0.03082897610015502
+albedo 103 carbonaceous: normal_albedo V = 0x3fa2df74949fcb87  # 0.03686107935199972
+albedo 103 carbonaceous: normal_albedo R = 0x3fa8711b9a4b51c3  # 0.04773794420694657
+albedo 103 carbonaceous: spherical_albedo B = 0x3f914195806efeaf  # 0.016851745571101414
+albedo 103 carbonaceous: spherical_albedo V = 0x3f94b9955c5f09b6  # 0.020239194643872437
+albedo 103 carbonaceous: spherical_albedo R = 0x3f9b0ea93b11ca0b  # 0.026423114996257307
+albedo 103 carbonaceous: hemispherical_albedo at mu0 1 B = 0x3f8a076c49fa1fc0  # 0.012709470756149588
+albedo 103 carbonaceous: hemispherical_albedo at mu0 1 V = 0x3f8f4bcde793cec0  # 0.015281304006271923
+albedo 103 carbonaceous: hemispherical_albedo at mu0 1 R = 0x3f94788406b74be0  # 0.019990981016075327
+albedo 103 carbonaceous: hemispherical_albedo at mu0 0.5 B = 0x3f92feb19bbae400  # 0.01854970467568151
+albedo 103 carbonaceous: hemispherical_albedo at mu0 0.5 V = 0x3f96cf439ff27180  # 0.022275025021927686
+albedo 103 carbonaceous: hemispherical_albedo at mu0 0.5 R = 0x3f9dc5367e99ad40  # 0.029072619893139917
+albedo 103 carbonaceous: hemispherical_albedo at mu0 0.2 B = 0x3f9ad0d9b2f851a0  # 0.026187326000653877
+albedo 103 carbonaceous: hemispherical_albedo at mu0 0.2 V = 0x3fa012d5b2d1fdd0  # 0.03139369781365142
+albedo 103 carbonaceous: hemispherical_albedo at mu0 0.2 R = 0x3fa4ea283fd4e660  # 0.04084897784418895
+albedo 103 carbonaceous: hemispherical_albedo at mu0 0.05 B = 0x3fa18d455939e8c0  # 0.03428093637644869
+albedo 103 carbonaceous: hemispherical_albedo at mu0 0.05 V = 0x3fa500c4e803a870  # 0.0410214932652061
+albedo 103 carbonaceous: hemispherical_albedo at mu0 0.05 R = 0x3fab3d1ccb807e50  # 0.05320062622217547
+albedo 103 carbonaceous: infrared None
+albedo 103 carbonaceous: spherical_albedo 300-390 nm = 0x3f937c66b4a9e487  # 0.01902924039538736
+albedo 103 carbonaceous: spherical_albedo 390-495 nm = 0x3f9162dd5ab09d9d  # 0.016978701267502328
+albedo 103 carbonaceous: spherical_albedo 495-595 nm = 0x3f94ad2e626b5876  # 0.020191883809126364
+albedo 103 carbonaceous: spherical_albedo 595-700 nm = 0x3f9c1b6bb07f43e9  # 0.02744835152390471
+albedo 103 carbonaceous: spherical_albedo 700-780 nm = 0x3fa32ead88104410  # 0.0374654987900912
+albedo 103 carbonaceous: spherical_albedo 780-1000 nm = 0x3fa84ca28154c9f4  # 0.04745967701673584
+albedo 103 carbonaceous: spherical_albedo 1000-1300 nm = 0x3fa99b286471942f  # 0.05001188493842112
+albedo 103 carbonaceous: spherical_albedo 1300-1700 nm = 0x3fa9e8934059d261  # 0.05060253296406781
+albedo 103 carbonaceous: spherical_albedo 1700-2200 nm = 0x3faae7d359cba7e8  # 0.05254993888031817
+albedo 103 carbonaceous: spherical_albedo 2200-2800 nm = 0x3fad188aa5de04d7  # 0.05682786249873011
+albedo 103 carbonaceous: spherical_albedo 2800-3500 nm = 0x3faedafad8dbee2c  # 0.060264433834131687
+albedo 103 carbonaceous: spherical_albedo 3500-5000 nm = 0x3faedafad8dbee2c  # 0.060264433834131687
+albedo 103 carbonaceous: data from nm = 0x4072d1998f1d3ed5  # 301.09999
+albedo 103 carbonaceous: data to nm = 0x40a740000d1b7175  # 2976.0000999999997
+albedo 104 chondrite_ci: Regolith from a mixture of 6 parts, fine grains 1 um, phase law Regolith
+albedo 104 chondrite_ci: part 0 saponite SapCa-1 Form volume_fraction = 0x3fd8fdf3b645a1cb  # 0.3905
+albedo 104 chondrite_ci: part 0: saponite SapCa-1 spectra ["splib07a_Saponite_SapCa-1_BECKb_AREF.txt"]
+albedo 104 chondrite_ci: part 0: saponite SapCa-1 held
+albedo 104 chondrite_ci: part 1 lizardite NMNHR4687.c Form volume_fraction = 0x3fd8fdf3b645a1cb  # 0.3905
+albedo 104 chondrite_ci: part 1: lizardite NMNHR4687.c spectra ["splib07a_Lizardite_NMNHR4687.c_70um_BECKa_AREF.txt"]
+albedo 104 chondrite_ci: part 1: lizardite NMNHR4687.c slab n = 0x3ff8d0e560418937  # 1.551
+albedo 104 chondrite_ci: part 1: lizardite NMNHR4687.c slab lab grain m = 0x3f12599ed7c6fbd2  # 7e-5
+albedo 104 chondrite_ci: part 2 iron sulphide Cerac I-1047 Fine volume_fraction = 0x3fab71758e219653  # 0.0536
+albedo 104 chondrite_ci: part 2: iron sulphide Cerac I-1047 spectra ["splib07a_Iron_Sulfide_Cerac-I-1047_ASDHRa_AREF.txt"]
+albedo 104 chondrite_ci: part 2: iron sulphide Cerac I-1047 held
+albedo 104 chondrite_ci: part 3 magnetite HS195.1B and HS78.1B Fine volume_fraction = 0x3fb020c49ba5e354  # 0.063
+albedo 104 chondrite_ci: part 3: magnetite HS195.1B and HS78.1B spectra ["splib07a_Magnetite_HS195.1B_ASDFRb_AREF.txt", "splib07a_Magnetite_HS78.1B_ASDFRb_AREF.txt"]
+albedo 104 chondrite_ci: part 3: magnetite HS195.1B and HS78.1B held
+albedo 104 chondrite_ci: part 4 olivine HS285.2B Fo80 Form volume_fraction = 0x3f83404ea4a8c155  # 0.0094
+albedo 104 chondrite_ci: part 4: olivine HS285.2B Fo80 spectra ["splib07a_Olivine_HS285.2B_Fo80_ASDFRb_AREF.txt"]
+albedo 104 chondrite_ci: part 4: olivine HS285.2B Fo80 slab n = 0x3ffb16872b020c4a  # 1.693
+albedo 104 chondrite_ci: part 4: olivine HS285.2B Fo80 slab lab grain m = 0x3f03660e51d25aab  # 3.7e-5
+albedo 104 chondrite_ci: part 5 kerogen BK-Cornell Fine volume_fraction = 0x3fb7ced916872b02  # 0.093
+albedo 104 chondrite_ci: part 5: kerogen BK-Cornell spectra ["splib07a_Kerogen_BK-Cornell_BECKa_AREF.txt"]
+albedo 104 chondrite_ci: part 5: kerogen BK-Cornell held
+albedo 104 chondrite_ci: w B = 0x3fc304fb6a8426d5  # 0.14858954144465622
+albedo 104 chondrite_ci: w V = 0x3fc4e1feb0e11ece  # 0.16314681660354896
+albedo 104 chondrite_ci: w R = 0x3fc67f931402366e  # 0.17576826550468944
+albedo 104 chondrite_ci: normal_albedo B = 0x3fb0b7eb08d4cb4d  # 0.06530636754614001
+albedo 104 chondrite_ci: normal_albedo V = 0x3fb26c9453fd0f97  # 0.07196929026127773
+albedo 104 chondrite_ci: normal_albedo R = 0x3fb3ea128aa8d668  # 0.07779041180841662
+albedo 104 chondrite_ci: spherical_albedo B = 0x3fa2bfca5a4d0ec7  # 0.036619494937011825
+albedo 104 chondrite_ci: spherical_albedo V = 0x3fa4c38ab63482ad  # 0.040554365865550814
+albedo 104 chondrite_ci: spherical_albedo R = 0x3fa68a29a4442be6  # 0.044022847463643974
+albedo 104 chondrite_ci: hemispherical_albedo at mu0 1 B = 0x3f9c7712f52f84c0  # 0.027797981467192256
+albedo 104 chondrite_ci: hemispherical_albedo at mu0 1 V = 0x3f9f9078b4b44780  # 0.030824552563962992
+albedo 104 chondrite_ci: hemispherical_albedo at mu0 1 R = 0x3fa126bfa11fdbf0  # 0.03349875299311822
+albedo 104 chondrite_ci: hemispherical_albedo at mu0 0.5 B = 0x3fa49e7f5cf45510  # 0.0402717400521998
+albedo 104 chondrite_ci: hemispherical_albedo at mu0 0.5 V = 0x3fa6d48ecebbf6d0  # 0.04459043763743653
+albedo 104 chondrite_ci: hemispherical_albedo at mu0 0.5 R = 0x3fa8c7544a12a580  # 0.04839576153001257
+albedo 104 chondrite_ci: hemispherical_albedo at mu0 0.2 B = 0x3facd39c288d8950  # 0.056301956129362396
+albedo 104 chondrite_ci: hemispherical_albedo at mu0 0.2 V = 0x3fafdb4ffb0b5540  # 0.06222009601121181
+albedo 104 chondrite_ci: hemispherical_albedo at mu0 0.2 R = 0x3fb1422d5790c2c8  # 0.06741603267506513
+albedo 104 chondrite_ci: hemispherical_albedo at mu0 0.05 B = 0x3fb2abd454f36b88  # 0.07293440889354319
+albedo 104 chondrite_ci: hemispherical_albedo at mu0 0.05 V = 0x3fb4977ec8582370  # 0.08043663397996936
+albedo 104 chondrite_ci: hemispherical_albedo at mu0 0.05 R = 0x3fb6458664e7f710  # 0.08699836696174779
+albedo 104 chondrite_ci: infrared None
+albedo 104 chondrite_ci: spherical_albedo 300-390 nm = 0x3fa1cc82d0d2fb0a  # 0.03476342009661522
+albedo 104 chondrite_ci: spherical_albedo 390-495 nm = 0x3fa2cedcd082e7e5  # 0.036734486058278816
+albedo 104 chondrite_ci: spherical_albedo 495-595 nm = 0x3fa4a6bd8a709a6e  # 0.04033462824763921
+albedo 104 chondrite_ci: spherical_albedo 595-700 nm = 0x3fa6c09ce075b148  # 0.044438269042844925
+albedo 104 chondrite_ci: spherical_albedo 700-780 nm = 0x3fa8d33868eeac7b  # 0.04848648339187719
+albedo 104 chondrite_ci: spherical_albedo 780-1000 nm = 0x3fa9eb85b84b3a7f  # 0.05062501787835049
+albedo 104 chondrite_ci: spherical_albedo 1000-1300 nm = 0x3fa956c00ae7bb63  # 0.04948997624511866
+albedo 104 chondrite_ci: spherical_albedo 1300-1700 nm = 0x3faa6d5779161501  # 0.05161546090224967
+albedo 104 chondrite_ci: spherical_albedo 1700-2200 nm = 0x3fad34d632e796da  # 0.05704373713869666
+albedo 104 chondrite_ci: spherical_albedo 2200-2800 nm = 0x3faf57babfc9bfac  # 0.061216197883254025
+albedo 104 chondrite_ci: spherical_albedo 2800-3500 nm = 0x3faf57babfc9bfac  # 0.061216197883254025
+albedo 104 chondrite_ci: spherical_albedo 3500-5000 nm = 0x3faf57babfc9bfac  # 0.061216197883254025
+albedo 104 chondrite_ci: data from nm = 0x4075dffff583a53b  # 349.99998999999997
+albedo 104 chondrite_ci: data to nm = 0x40a3880000000000  # 2500.0
+albedo 105 chondrite_cm: Regolith from a mixture of 12 parts, fine grains 1 um, phase law Regolith
+albedo 105 chondrite_cm: part 0 olivine GDS71.a Fo91 Form volume_fraction = 0x3fb04ea4a8c154ca  # 0.0637
+albedo 105 chondrite_cm: part 0: olivine GDS71.a Fo91 spectra ["splib07a_Olivine_GDS71.a_Fo91_65um_BECKb_AREF.txt"]
+albedo 105 chondrite_cm: part 0: olivine GDS71.a Fo91 slab n = 0x3ffab4395810624e  # 1.669
+albedo 105 chondrite_cm: part 0: olivine GDS71.a Fo91 slab lab grain m = 0x3f110a137f38c543  # 6.5e-5
+albedo 105 chondrite_cm: part 1 olivine HS285.2B Fo80 Form volume_fraction = 0x3f923a29c779a6b5  # 0.0178
+albedo 105 chondrite_cm: part 1: olivine HS285.2B Fo80 spectra ["splib07a_Olivine_HS285.2B_Fo80_ASDFRb_AREF.txt"]
+albedo 105 chondrite_cm: part 1: olivine HS285.2B Fo80 slab n = 0x3ffb16872b020c4a  # 1.693
+albedo 105 chondrite_cm: part 1: olivine HS285.2B Fo80 slab lab grain m = 0x3f03660e51d25aab  # 3.7e-5
+albedo 105 chondrite_cm: part 2 olivine KI3188 Fo51 Form volume_fraction = 0x3f8eb851eb851eb8  # 0.015
+albedo 105 chondrite_cm: part 2: olivine KI3188 Fo51 spectra ["splib07a_Olivine_KI3188_Fo51_lt60um_BECKb_AREF.txt"]
+albedo 105 chondrite_cm: part 2: olivine KI3188 Fo51 slab n = 0x3ffc10624dd2f1aa  # 1.754
+albedo 105 chondrite_cm: part 2: olivine KI3188 Fo51 slab lab grain m = 0x3eff75104d551d68  # 2.9999999999999997e-5
+albedo 105 chondrite_cm: part 3 enstatite NMNH128288 Form volume_fraction = 0x3f923a29c779a6b5  # 0.0178
+albedo 105 chondrite_cm: part 3: enstatite NMNH128288 spectra ["splib07a_Enstatite_NMNH128288_BECKc_AREF.txt"]
+albedo 105 chondrite_cm: part 3: enstatite NMNH128288 slab n = 0x3ffa9374bc6a7efa  # 1.661
+albedo 105 chondrite_cm: part 3: enstatite NMNH128288 slab lab grain m = 0x3efa36e2eb1c432c  # 2.4999999999999998e-5
+albedo 105 chondrite_cm: part 4 lizardite NMNHR4687.c Form volume_fraction = 0x3fcf6c8b43958106  # 0.2455
+albedo 105 chondrite_cm: part 4: lizardite NMNHR4687.c spectra ["splib07a_Lizardite_NMNHR4687.c_70um_BECKa_AREF.txt"]
+albedo 105 chondrite_cm: part 4: lizardite NMNHR4687.c slab n = 0x3ff8d0e560418937  # 1.551
+albedo 105 chondrite_cm: part 4: lizardite NMNHR4687.c slab lab grain m = 0x3f12599ed7c6fbd2  # 7e-5
+albedo 105 chondrite_cm: part 5 cronstedtite M3542 Form volume_fraction = 0x3fe16bb98c7e2824  # 0.5444
+albedo 105 chondrite_cm: part 5: cronstedtite M3542 spectra ["splib07a_Cronstedtite_M3542_BECKb_AREF.txt"]
+albedo 105 chondrite_cm: part 5: cronstedtite M3542 held
+albedo 105 chondrite_cm: part 6 calcite GDS304 Form volume_fraction = 0x3f86f0068db8bac7  # 0.0112
+albedo 105 chondrite_cm: part 6: calcite GDS304 spectra ["splib07a_Calcite_GDS304_75-150um_ASDFRb_AREF.txt"]
+albedo 105 chondrite_cm: part 6: calcite GDS304 slab n = 0x3ff99db22d0e5604  # 1.601
+albedo 105 chondrite_cm: part 6: calcite GDS304 slab lab grain m = 0x3f1d7dbf487fcb92  # 0.0001125
+albedo 105 chondrite_cm: part 7 kerogen BK-Cornell Fine volume_fraction = 0x3fb020c49ba5e354  # 0.063
+albedo 105 chondrite_cm: part 7: kerogen BK-Cornell spectra ["splib07a_Kerogen_BK-Cornell_BECKa_AREF.txt"]
+albedo 105 chondrite_cm: part 7: kerogen BK-Cornell held
+albedo 105 chondrite_cm: part 8 iron sulphide Cerac I-1047 Fine volume_fraction = 0x3f8c432ca57a786c  # 0.0138
+albedo 105 chondrite_cm: part 8: iron sulphide Cerac I-1047 spectra ["splib07a_Iron_Sulfide_Cerac-I-1047_ASDHRa_AREF.txt"]
+albedo 105 chondrite_cm: part 8: iron sulphide Cerac I-1047 held
+albedo 105 chondrite_cm: part 9 iron sulphide Cerac I-1047 Form volume_fraction = 0x3f782a9930be0ded  # 0.0059
+albedo 105 chondrite_cm: part 9: iron sulphide Cerac I-1047 spectra ["splib07a_Iron_Sulfide_Cerac-I-1047_ASDHRa_AREF.txt"]
+albedo 105 chondrite_cm: part 9: iron sulphide Cerac I-1047 held
+albedo 105 chondrite_cm: part 10 magnetite HS195.1B and HS78.1B Fine volume_fraction = 0x3f554c985f06f694  # 0.0013
+albedo 105 chondrite_cm: part 10: magnetite HS195.1B and HS78.1B spectra ["splib07a_Magnetite_HS195.1B_ASDFRb_AREF.txt", "splib07a_Magnetite_HS78.1B_ASDFRb_AREF.txt"]
+albedo 105 chondrite_cm: part 10: magnetite HS195.1B and HS78.1B held
+albedo 105 chondrite_cm: part 11 magnetite HS195.3B Form volume_fraction = 0x3f43a92a30553261  # 0.0006
+albedo 105 chondrite_cm: part 11: magnetite HS195.3B spectra ["splib07a_Magnetite_HS195.3B_BECKb_AREF.txt"]
+albedo 105 chondrite_cm: part 11: magnetite HS195.3B held
+albedo 105 chondrite_cm: w B = 0x3fc0eab483532bee  # 0.13216263210628604
+albedo 105 chondrite_cm: w V = 0x3fc462f2f2ba1383  # 0.15926968433282349
+albedo 105 chondrite_cm: w R = 0x3fc6dd6bff35162c  # 0.17863225899979918
+albedo 105 chondrite_cm: normal_albedo B = 0x3fad9ea146184518  # 0.05785087566995112
+albedo 105 chondrite_cm: normal_albedo V = 0x3fb1f7ef8e3857a1  # 0.07018944952173324
+albedo 105 chondrite_cm: normal_albedo R = 0x3fb441061473400b  # 0.07911718367836344
+albedo 105 chondrite_cm: spherical_albedo B = 0x3fa0848029d5417c  # 0.03226089964539633
+albedo 105 chondrite_cm: spherical_albedo V = 0x3fa4394a3bec6d9e  # 0.03949958783615702
+albedo 105 chondrite_cm: spherical_albedo R = 0x3fa6f24f183d34c7  # 0.04481742068183219
+albedo 105 chondrite_cm: hemispherical_albedo at mu0 1 B = 0x3f990a969666d420  # 0.024454453401364984
+albedo 105 chondrite_cm: hemispherical_albedo at mu0 1 V = 0x3f9ebb98c7d5e960  # 0.030012499997135733
+albedo 105 chondrite_cm: hemispherical_albedo at mu0 1 R = 0x3fa17727c3365eb0  # 0.03411220796550418
+albedo 105 chondrite_cm: hemispherical_albedo at mu0 0.5 B = 0x3fa22b3616546430  # 0.03548592588976651
+albedo 105 chondrite_cm: hemispherical_albedo at mu0 0.5 V = 0x3fa63cd7d95d7f70  # 0.04343294647583107
+albedo 105 chondrite_cm: hemispherical_albedo at mu0 0.5 R = 0x3fa939904b838580  # 0.04926730081366326
+albedo 105 chondrite_cm: hemispherical_albedo at mu0 0.2 B = 0x3fa974870f408290  # 0.04971715985471292
+albedo 105 chondrite_cm: hemispherical_albedo at mu0 0.2 V = 0x3faf0bb35e127340  # 0.06063614390698158
+albedo 105 chondrite_cm: hemispherical_albedo at mu0 0.2 R = 0x3fb19001a03a1af0  # 0.06860361253539415
+albedo 105 chondrite_cm: hemispherical_albedo at mu0 0.05 B = 0x3fb0866d42568f38  # 0.06455119008620336
+albedo 105 chondrite_cm: hemispherical_albedo at mu0 0.05 V = 0x3fb4141968a6b148  # 0.07843169026336227
+albedo 105 chondrite_cm: hemispherical_albedo at mu0 0.05 R = 0x3fb6a7993b544ca8  # 0.088494851097766
+albedo 105 chondrite_cm: infrared None
+albedo 105 chondrite_cm: spherical_albedo 300-390 nm = 0x3f9ea9e208234f05  # 0.029944926974009984
+albedo 105 chondrite_cm: spherical_albedo 390-495 nm = 0x3fa0a91131558e46  # 0.032539880058518864
+albedo 105 chondrite_cm: spherical_albedo 495-595 nm = 0x3fa40810d41d7bc7  # 0.039124036686863976
+albedo 105 chondrite_cm: spherical_albedo 595-700 nm = 0x3fa74ee096aed1ad  # 0.045523661035449116
+albedo 105 chondrite_cm: spherical_albedo 700-780 nm = 0x3faaf8520e512a3e  # 0.05267578530090987
+albedo 105 chondrite_cm: spherical_albedo 780-1000 nm = 0x3fae56a42b94104e  # 0.05925477058374949
+albedo 105 chondrite_cm: spherical_albedo 1000-1300 nm = 0x3faf20bfd7bb86d4  # 0.0607967329831475
+albedo 105 chondrite_cm: spherical_albedo 1300-1700 nm = 0x3fb13ea91563d9cd  # 0.06736237308709932
+albedo 105 chondrite_cm: spherical_albedo 1700-2200 nm = 0x3fb37a9291618584  # 0.07608905839290087
+albedo 105 chondrite_cm: spherical_albedo 2200-2800 nm = 0x3fb49606ce6799db  # 0.0804142240445808
+albedo 105 chondrite_cm: spherical_albedo 2800-3500 nm = 0x3fb49606ce6799db  # 0.0804142240445808
+albedo 105 chondrite_cm: spherical_albedo 3500-5000 nm = 0x3fb49606ce6799db  # 0.0804142240445808
+albedo 105 chondrite_cm: data from nm = 0x4075dffff583a53b  # 349.99998999999997
+albedo 105 chondrite_cm: data to nm = 0x40a3880000000000  # 2500.0
+albedo 106 chondrite_cv: Regolith from a mixture of 13 parts, fine grains 1 um, phase law Regolith
+albedo 106 chondrite_cv: part 0 olivine GDS71.a Fo91 Form volume_fraction = 0x3fcdf3b645a1cac1  # 0.234
+albedo 106 chondrite_cv: part 0: olivine GDS71.a Fo91 spectra ["splib07a_Olivine_GDS71.a_Fo91_65um_BECKb_AREF.txt"]
+albedo 106 chondrite_cv: part 0: olivine GDS71.a Fo91 slab n = 0x3ffab4395810624e  # 1.669
+albedo 106 chondrite_cv: part 0: olivine GDS71.a Fo91 slab lab grain m = 0x3f110a137f38c543  # 6.5e-5
+albedo 106 chondrite_cv: part 1 olivine HS285.2B Fo80 Form volume_fraction = 0x3fc3b645a1cac083  # 0.154
+albedo 106 chondrite_cv: part 1: olivine HS285.2B Fo80 spectra ["splib07a_Olivine_HS285.2B_Fo80_ASDFRb_AREF.txt"]
+albedo 106 chondrite_cv: part 1: olivine HS285.2B Fo80 slab n = 0x3ffb16872b020c4a  # 1.693
+albedo 106 chondrite_cv: part 1: olivine HS285.2B Fo80 slab lab grain m = 0x3f03660e51d25aab  # 3.7e-5
+albedo 106 chondrite_cv: part 2 olivine KI3189 Fo60 Form volume_fraction = 0x3fca5e353f7ced91  # 0.206
+albedo 106 chondrite_cv: part 2: olivine KI3189 Fo60 spectra ["splib07a_Olivine_KI3189_Fo60_lt60um_BECKb_AREF.txt"]
+albedo 106 chondrite_cv: part 2: olivine KI3189 Fo60 slab n = 0x3ffbbe76c8b43958  # 1.734
+albedo 106 chondrite_cv: part 2: olivine KI3189 Fo60 slab lab grain m = 0x3eff75104d551d68  # 2.9999999999999997e-5
+albedo 106 chondrite_cv: part 3 olivine KI3188 Fo51 Form volume_fraction = 0x3fca5e353f7ced91  # 0.206
+albedo 106 chondrite_cv: part 3: olivine KI3188 Fo51 spectra ["splib07a_Olivine_KI3188_Fo51_lt60um_BECKb_AREF.txt"]
+albedo 106 chondrite_cv: part 3: olivine KI3188 Fo51 slab n = 0x3ffc10624dd2f1aa  # 1.754
+albedo 106 chondrite_cv: part 3: olivine KI3188 Fo51 slab lab grain m = 0x3eff75104d551d68  # 2.9999999999999997e-5
+albedo 106 chondrite_cv: part 4 olivine KI3291 Fo29 Form volume_fraction = 0x3fa3f7ced916872b  # 0.039
+albedo 106 chondrite_cv: part 4: olivine KI3291 Fo29 spectra ["splib07a_Olivine_KI3291_Fo29_lt60um_BECKb_AREF.txt"]
+albedo 106 chondrite_cv: part 4: olivine KI3291 Fo29 slab n = 0x3ffcc083126e978d  # 1.797
+albedo 106 chondrite_cv: part 4: olivine KI3291 Fo29 slab lab grain m = 0x3eff75104d551d68  # 2.9999999999999997e-5
+albedo 106 chondrite_cv: part 5 enstatite NMNH128288 Form volume_fraction = 0x3fb0e5604189374c  # 0.066
+albedo 106 chondrite_cv: part 5: enstatite NMNH128288 spectra ["splib07a_Enstatite_NMNH128288_BECKc_AREF.txt"]
+albedo 106 chondrite_cv: part 5: enstatite NMNH128288 slab n = 0x3ffa9374bc6a7efa  # 1.661
+albedo 106 chondrite_cv: part 5: enstatite NMNH128288 slab lab grain m = 0x3efa36e2eb1c432c  # 2.4999999999999998e-5
+albedo 106 chondrite_cv: part 6 anorthite HS201.3B Form volume_fraction = 0x3f889374bc6a7efa  # 0.012
+albedo 106 chondrite_cv: part 6: anorthite HS201.3B spectra ["splib07a_Anorthite_HS201.3B_Plagio_BECKa_AREF.txt"]
+albedo 106 chondrite_cv: part 6: anorthite HS201.3B slab n = 0x3ff94fdf3b645a1d  # 1.582
+albedo 106 chondrite_cv: part 6: anorthite HS201.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 106 chondrite_cv: part 7 iron sulphide Cerac I-1047 Fine volume_fraction = 0x3fa0624dd2f1a9fc  # 0.032
+albedo 106 chondrite_cv: part 7: iron sulphide Cerac I-1047 spectra ["splib07a_Iron_Sulfide_Cerac-I-1047_ASDHRa_AREF.txt"]
+albedo 106 chondrite_cv: part 7: iron sulphide Cerac I-1047 held
+albedo 106 chondrite_cv: part 8 iron sulphide Cerac I-1047 Form volume_fraction = 0x3fa89374bc6a7efa  # 0.048
+albedo 106 chondrite_cv: part 8: iron sulphide Cerac I-1047 spectra ["splib07a_Iron_Sulfide_Cerac-I-1047_ASDHRa_AREF.txt"]
+albedo 106 chondrite_cv: part 8: iron sulphide Cerac I-1047 held
+albedo 106 chondrite_cv: part 9 magnetite HS195.1B and HS78.1B Fine volume_fraction = 0x3f4a36e2eb1c432d  # 0.0008
+albedo 106 chondrite_cv: part 9: magnetite HS195.1B and HS78.1B spectra ["splib07a_Magnetite_HS195.1B_ASDFRb_AREF.txt", "splib07a_Magnetite_HS78.1B_ASDFRb_AREF.txt"]
+albedo 106 chondrite_cv: part 9: magnetite HS195.1B and HS78.1B held
+albedo 106 chondrite_cv: part 10 magnetite HS195.3B Form volume_fraction = 0x3f53a92a30553261  # 0.0012
+albedo 106 chondrite_cv: part 10: magnetite HS195.3B spectra ["splib07a_Magnetite_HS195.3B_BECKb_AREF.txt"]
+albedo 106 chondrite_cv: part 10: magnetite HS195.3B held
+albedo 106 chondrite_cv: part 11 iron powder SA-267953 Fine volume_fraction = 0x3f3a36e2eb1c432d  # 0.0004
+albedo 106 chondrite_cv: part 11: iron powder SA-267953 spectra ["splib07a_Iron_Powder_SA-267953_lt10_um_ASDHRa_AREF.txt"]
+albedo 106 chondrite_cv: part 11: iron powder SA-267953 held
+albedo 106 chondrite_cv: part 12 iron powder SA-209309 Form volume_fraction = 0x3f43a92a30553261  # 0.0006
+albedo 106 chondrite_cv: part 12: iron powder SA-209309 spectra ["splib07a_IronPowder_SA-209309_325mesh_ASDFRa_AREF.txt"]
+albedo 106 chondrite_cv: part 12: iron powder SA-209309 held
+albedo 106 chondrite_cv: w B = 0x3fd27218d932504a  # 0.28821393213843705
+albedo 106 chondrite_cv: w V = 0x3fd5ac81e16c6971  # 0.3386540128136835
+albedo 106 chondrite_cv: w R = 0x3fd633a698145ac8  # 0.34690251208796186
+albedo 106 chondrite_cv: normal_albedo B = 0x3fc0dc28d359e90e  # 0.13171873397715966
+albedo 106 chondrite_cv: normal_albedo V = 0x3fc423d91bd84ba3  # 0.15734399661650142
+albedo 106 chondrite_cv: normal_albedo R = 0x3fc4b073217be4e6  # 0.16163481841048294
+albedo 106 chondrite_cv: spherical_albedo B = 0x3fb3d93cc437dfd3  # 0.07753352919087257
+albedo 106 chondrite_cv: spherical_albedo V = 0x3fb82643fa8d99ed  # 0.09433388583202147
+albedo 106 chondrite_cv: spherical_albedo R = 0x3fb8e23d37b5eded  # 0.09720213518260552
+albedo 106 chondrite_cv: hemispherical_albedo at mu0 1 B = 0x3fae8965e1c49bb0  # 0.059642013368196856
+albedo 106 chondrite_cv: hemispherical_albedo at mu0 1 V = 0x3fb2ad57bdf629c0  # 0.07295750034078363
+albedo 106 chondrite_cv: hemispherical_albedo at mu0 1 R = 0x3fb3433cb2a673a8  # 0.07524470674111561
+albedo 106 chondrite_cv: hemispherical_albedo at mu0 0.5 B = 0x3fb5c81961617b80  # 0.08508452060185157
+albedo 106 chondrite_cv: hemispherical_albedo at mu0 0.5 V = 0x3fba79e326bedb18  # 0.10342235275207334
+albedo 106 chondrite_cv: hemispherical_albedo at mu0 0.5 R = 0x3fbb46cda609c670  # 0.10654912284533125
+albedo 106 chondrite_cv: hemispherical_albedo at mu0 0.2 B = 0x3fbddbc812942728  # 0.11663485005933849
+albedo 106 chondrite_cv: hemispherical_albedo at mu0 0.2 V = 0x3fc20112d3ff0324  # 0.14065776206373315
+albedo 106 chondrite_cv: hemispherical_albedo at mu0 0.2 R = 0x3fc2861303069ee0  # 0.14471662185427814
+albedo 106 chondrite_cv: hemispherical_albedo at mu0 0.05 B = 0x3fc2f28ab383ad08  # 0.1480267883810955
+albedo 106 chondrite_cv: hemispherical_albedo at mu0 0.05 V = 0x3fc6ab247dd44788  # 0.17709785598759376
+albedo 106 chondrite_cv: hemispherical_albedo at mu0 0.05 R = 0x3fc74a9f75bc98e8  # 0.18196480988371566
+albedo 106 chondrite_cv: infrared None
+albedo 106 chondrite_cv: spherical_albedo 300-390 nm = 0x3fae6738c302ddbd  # 0.0593812692690636
+albedo 106 chondrite_cv: spherical_albedo 390-495 nm = 0x3fb3b80f501ea8c4  # 0.07702727991150754
+albedo 106 chondrite_cv: spherical_albedo 495-595 nm = 0x3fb7b868daf21fd1  # 0.09265761704784771
+albedo 106 chondrite_cv: spherical_albedo 595-700 nm = 0x3fb8e81773ca24cd  # 0.09729143692870253
+albedo 106 chondrite_cv: spherical_albedo 700-780 nm = 0x3fb80e8e8fe324ad  # 0.09397212040780074
+albedo 106 chondrite_cv: spherical_albedo 780-1000 nm = 0x3fb3903ab97fed14  # 0.07641951588441415
+albedo 106 chondrite_cv: spherical_albedo 1000-1300 nm = 0x3fb07b5848d10ad8  # 0.064382093217357
+albedo 106 chondrite_cv: spherical_albedo 1300-1700 nm = 0x3fb5a85a61a5cd7c  # 0.08460011371589887
+albedo 106 chondrite_cv: spherical_albedo 1700-2200 nm = 0x3fbb68854a9dc7d5  # 0.10706360885322337
+albedo 106 chondrite_cv: spherical_albedo 2200-2800 nm = 0x3fbf053d46cbcde1  # 0.12117369631214771
+albedo 106 chondrite_cv: spherical_albedo 2800-3500 nm = 0x3fbf053d46cbcde1  # 0.12117369631214771
+albedo 106 chondrite_cv: spherical_albedo 3500-5000 nm = 0x3fbf053d46cbcde1  # 0.12117369631214771
+albedo 106 chondrite_cv: data from nm = 0x4075dffff583a53b  # 349.99998999999997
+albedo 106 chondrite_cv: data to nm = 0x40a3880000000000  # 2500.0
+albedo 107 chondrite_h: Regolith from a mixture of 8 parts, fine grains 1 um, phase law Regolith
+albedo 107 chondrite_h: part 0 olivine HS285.2B Fo80 Form volume_fraction = 0x3fd6c56d5cfaacda  # 0.3558
+albedo 107 chondrite_h: part 0: olivine HS285.2B Fo80 spectra ["splib07a_Olivine_HS285.2B_Fo80_ASDFRb_AREF.txt"]
+albedo 107 chondrite_h: part 0: olivine HS285.2B Fo80 slab n = 0x3ffb16872b020c4a  # 1.693
+albedo 107 chondrite_h: part 0: olivine HS285.2B Fo80 slab lab grain m = 0x3f03660e51d25aab  # 3.7e-5
+albedo 107 chondrite_h: part 1 hypersthene PYX02.f Form volume_fraction = 0x3fcdf3b645a1cac1  # 0.234
+albedo 107 chondrite_h: part 1: hypersthene PYX02.f spectra ["splib07a_Hypersthene_PYX02.f_60um_BECKc_AREF.txt"]
+albedo 107 chondrite_h: part 1: hypersthene PYX02.f slab n = 0x3ffab4395810624e  # 1.669
+albedo 107 chondrite_h: part 1: hypersthene PYX02.f slab lab grain m = 0x3f0f75104d551d68  # 5.9999999999999995e-5
+albedo 107 chondrite_h: part 2 hypersthene NMNHC2368 Form volume_fraction = 0x3fad7dbf487fcb92  # 0.0576
+albedo 107 chondrite_h: part 2: hypersthene NMNHC2368 spectra ["splib07a_Hypersthene_NMNHC2368_BECKb_AREF.txt"]
+albedo 107 chondrite_h: part 2: hypersthene NMNHC2368 held
+albedo 107 chondrite_h: part 3 diopside HS15.3B Form volume_fraction = 0x3fb3afb7e90ff972  # 0.0769
+albedo 107 chondrite_h: part 3: diopside HS15.3B spectra ["splib07a_Diopside_HS15.3B_Pyroxene_BECKc_AREF.txt"]
+albedo 107 chondrite_h: part 3: diopside HS15.3B slab n = 0x3ffad4fdf3b645a2  # 1.677
+albedo 107 chondrite_h: part 3: diopside HS15.3B slab lab grain m = 0x3f3355475a31a4bd  # 0.00029499999999999996
+albedo 107 chondrite_h: part 4 oligoclase HS110.3B Form volume_fraction = 0x3fc068db8bac710d  # 0.1282
+albedo 107 chondrite_h: part 4: oligoclase HS110.3B spectra ["splib07a_Oligoclase_HS110.3B_BECKc_AREF.txt"]
+albedo 107 chondrite_h: part 4: oligoclase HS110.3B slab n = 0x3ff8ac083126e979  # 1.542
+albedo 107 chondrite_h: part 4: oligoclase HS110.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 107 chondrite_h: part 5 iron sulphide Cerac I-1047 Form volume_fraction = 0x3fa70a3d70a3d70a  # 0.045
+albedo 107 chondrite_h: part 5: iron sulphide Cerac I-1047 spectra ["splib07a_Iron_Sulfide_Cerac-I-1047_ASDHRa_AREF.txt"]
+albedo 107 chondrite_h: part 5: iron sulphide Cerac I-1047 held
+albedo 107 chondrite_h: part 6 iron powder SA-209309 Form volume_fraction = 0x3fb631f8a0902de0  # 0.0867
+albedo 107 chondrite_h: part 6: iron powder SA-209309 spectra ["splib07a_IronPowder_SA-209309_325mesh_ASDFRa_AREF.txt"]
+albedo 107 chondrite_h: part 6: iron powder SA-209309 held
+albedo 107 chondrite_h: part 7 chromite HS281.3B Form volume_fraction = 0x3f9013a92a305532  # 0.0157
+albedo 107 chondrite_h: part 7: chromite HS281.3B spectra ["splib07a_Chromite_HS281.3B_ASDFRc_AREF.txt"]
+albedo 107 chondrite_h: part 7: chromite HS281.3B held
+albedo 107 chondrite_h: w B = 0x3fe8a9a0d8bcc631  # 0.7707065804626777
+albedo 107 chondrite_h: w V = 0x3fea43da8e655119  # 0.8207829266707761
+albedo 107 chondrite_h: w R = 0x3feaba35e4c2f243  # 0.8352307765959001
+albedo 107 chondrite_h: normal_albedo B = 0x3fd94e8787c0ffca  # 0.3954180551263532
+albedo 107 chondrite_h: normal_albedo V = 0x3fdc7afefb6d0d07  # 0.44500708154028285
+albedo 107 chondrite_h: normal_albedo R = 0x3fdd8fc7e846fad2  # 0.4619006889660514
+albedo 107 chondrite_h: spherical_albedo B = 0x3fd5258d37980d6a  # 0.33041696957680833
+albedo 107 chondrite_h: spherical_albedo V = 0x3fd870831763f379  # 0.3818671921179014
+albedo 107 chondrite_h: spherical_albedo R = 0x3fd988cfb27f6461  # 0.3989753001347421
+albedo 107 chondrite_h: hemispherical_albedo at mu0 1 B = 0x3fd195cd44f68462  # 0.27476817831672495
+albedo 107 chondrite_h: hemispherical_albedo at mu0 1 V = 0x3fd4a22d63162d96  # 0.3223985164301778
+albedo 107 chondrite_h: hemispherical_albedo at mu0 1 R = 0x3fd5aa6f325f07f8  # 0.33852748793663023
+albedo 107 chondrite_h: hemispherical_albedo at mu0 0.5 B = 0x3fd6c8c2b4433904  # 0.35600345233696395
+albedo 107 chondrite_h: hemispherical_albedo at mu0 0.5 V = 0x3fda35f075cdcadc  # 0.40954219345364407
+albedo 107 chondrite_h: hemispherical_albedo at mu0 0.5 R = 0x3fdb576956f91ae0  # 0.4272101735445357
+albedo 107 chondrite_h: hemispherical_albedo at mu0 0.2 B = 0x3fdc0545e639e9a2  # 0.4378218410780851
+albedo 107 chondrite_h: hemispherical_albedo at mu0 0.2 V = 0x3fdf9ba08d3947f4  # 0.4938737277162766
+albedo 107 chondrite_h: hemispherical_albedo at mu0 0.2 R = 0x3fe06195385016d7  # 0.5119119739399264
+albedo 107 chondrite_h: hemispherical_albedo at mu0 0.05 B = 0x3fe01bc89890c743  # 0.5033915500446046
+albedo 107 chondrite_h: hemispherical_albedo at mu0 0.05 V = 0x3fe1e36e66481ec3  # 0.5590126035394508
+albedo 107 chondrite_h: hemispherical_albedo at mu0 0.05 R = 0x3fe2733feefa156a  # 0.5765685718076103
+albedo 107 chondrite_h: infrared None
+albedo 107 chondrite_h: spherical_albedo 300-390 nm = 0x3fd0bbb909b2b02b  # 0.2614576906878507
+albedo 107 chondrite_h: spherical_albedo 390-495 nm = 0x3fd4fccb66391998  # 0.32792935354918873
+albedo 107 chondrite_h: spherical_albedo 495-595 nm = 0x3fd85666a5d75785  # 0.38027349658420234
+albedo 107 chondrite_h: spherical_albedo 595-700 nm = 0x3fd99a3f1585e6f4  # 0.4000394544778907
+albedo 107 chondrite_h: spherical_albedo 700-780 nm = 0x3fd8bb98837745f5  # 0.38644993627994434
+albedo 107 chondrite_h: spherical_albedo 780-1000 nm = 0x3fd194a53b54109a  # 0.2746975974444098
+albedo 107 chondrite_h: spherical_albedo 1000-1300 nm = 0x3fd63b299c4e3920  # 0.34736099495138895
+albedo 107 chondrite_h: spherical_albedo 1300-1700 nm = 0x3fd8bfe04aca6881  # 0.3867111902596961
+albedo 107 chondrite_h: spherical_albedo 1700-2200 nm = 0x3fd73483297e9811  # 0.3625800996036342
+albedo 107 chondrite_h: spherical_albedo 2200-2800 nm = 0x3fdd0f9e7d7589d2  # 0.45407831432217194
+albedo 107 chondrite_h: spherical_albedo 2800-3500 nm = 0x3fdd0f9e7d7589d2  # 0.45407831432217194
+albedo 107 chondrite_h: spherical_albedo 3500-5000 nm = 0x3fdd0f9e7d7589d2  # 0.45407831432217194
+albedo 107 chondrite_h: data from nm = 0x4075dffff583a53b  # 349.99998999999997
+albedo 107 chondrite_h: data to nm = 0x40a3880000000000  # 2500.0
+albedo 108 chondrite_l: Regolith from a mixture of 9 parts, fine grains 1 um, phase law Regolith
+albedo 108 chondrite_l: part 0 olivine HS285.2B Fo80 Form volume_fraction = 0x3fd17dbf487fcb92  # 0.2733
+albedo 108 chondrite_l: part 0: olivine HS285.2B Fo80 spectra ["splib07a_Olivine_HS285.2B_Fo80_ASDFRb_AREF.txt"]
+albedo 108 chondrite_l: part 0: olivine HS285.2B Fo80 slab n = 0x3ffb16872b020c4a  # 1.693
+albedo 108 chondrite_l: part 0: olivine HS285.2B Fo80 slab lab grain m = 0x3f03660e51d25aab  # 3.7e-5
+albedo 108 chondrite_l: part 1 olivine KI3054 Fo66 Form volume_fraction = 0x3fc38ef34d6a161e  # 0.1528
+albedo 108 chondrite_l: part 1: olivine KI3054 Fo66 spectra ["splib07a_Olivine_KI3054_Fo66_lt60um_BECKb_AREF.txt"]
+albedo 108 chondrite_l: part 1: olivine KI3054 Fo66 slab n = 0x3ffb916872b020c5  # 1.723
+albedo 108 chondrite_l: part 1: olivine KI3054 Fo66 slab lab grain m = 0x3eff75104d551d68  # 2.9999999999999997e-5
+albedo 108 chondrite_l: part 2 hypersthene PYX02.f Form volume_fraction = 0x3fbd77318fc50481  # 0.1151
+albedo 108 chondrite_l: part 2: hypersthene PYX02.f spectra ["splib07a_Hypersthene_PYX02.f_60um_BECKc_AREF.txt"]
+albedo 108 chondrite_l: part 2: hypersthene PYX02.f slab n = 0x3ffab4395810624e  # 1.669
+albedo 108 chondrite_l: part 2: hypersthene PYX02.f slab lab grain m = 0x3f0f75104d551d68  # 5.9999999999999995e-5
+albedo 108 chondrite_l: part 3 hypersthene NMNHC2368 Form volume_fraction = 0x3fc154c985f06f69  # 0.1354
+albedo 108 chondrite_l: part 3: hypersthene NMNHC2368 spectra ["splib07a_Hypersthene_NMNHC2368_BECKb_AREF.txt"]
+albedo 108 chondrite_l: part 3: hypersthene NMNHC2368 held
+albedo 108 chondrite_l: part 4 diopside HS15.3B Form volume_fraction = 0x3fb6c8b439581062  # 0.089
+albedo 108 chondrite_l: part 4: diopside HS15.3B spectra ["splib07a_Diopside_HS15.3B_Pyroxene_BECKc_AREF.txt"]
+albedo 108 chondrite_l: part 4: diopside HS15.3B slab n = 0x3ffad4fdf3b645a2  # 1.677
+albedo 108 chondrite_l: part 4: diopside HS15.3B slab lab grain m = 0x3f3355475a31a4bd  # 0.00029499999999999996
+albedo 108 chondrite_l: part 5 oligoclase HS110.3B Form volume_fraction = 0x3fc075f6fd21ff2e  # 0.1286
+albedo 108 chondrite_l: part 5: oligoclase HS110.3B spectra ["splib07a_Oligoclase_HS110.3B_BECKc_AREF.txt"]
+albedo 108 chondrite_l: part 5: oligoclase HS110.3B slab n = 0x3ff8ac083126e979  # 1.542
+albedo 108 chondrite_l: part 5: oligoclase HS110.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 108 chondrite_l: part 6 iron sulphide Cerac I-1047 Form volume_fraction = 0x3fab645a1cac0831  # 0.0535
+albedo 108 chondrite_l: part 6: iron sulphide Cerac I-1047 spectra ["splib07a_Iron_Sulfide_Cerac-I-1047_ASDHRa_AREF.txt"]
+albedo 108 chondrite_l: part 6: iron sulphide Cerac I-1047 held
+albedo 108 chondrite_l: part 7 iron powder SA-209309 Form volume_fraction = 0x3fa38ef34d6a161e  # 0.0382
+albedo 108 chondrite_l: part 7: iron powder SA-209309 spectra ["splib07a_IronPowder_SA-209309_325mesh_ASDFRa_AREF.txt"]
+albedo 108 chondrite_l: part 7: iron powder SA-209309 held
+albedo 108 chondrite_l: part 8 chromite HS281.3B Form volume_fraction = 0x3f8cac083126e979  # 0.014
+albedo 108 chondrite_l: part 8: chromite HS281.3B spectra ["splib07a_Chromite_HS281.3B_ASDFRc_AREF.txt"]
+albedo 108 chondrite_l: part 8: chromite HS281.3B held
+albedo 108 chondrite_l: w B = 0x3fe7cf51e92c5278  # 0.7440576128161203
+albedo 108 chondrite_l: w V = 0x3fe9ebba81c80334  # 0.8100254568854326
+albedo 108 chondrite_l: w R = 0x3fea7db39ca80a8b  # 0.8278444347091222
+albedo 108 chondrite_l: normal_albedo B = 0x3fd7e41f0f8611e7  # 0.37329842105853434
+albedo 108 chondrite_l: normal_albedo V = 0x3fdbbaddca297c20  # 0.43328041784656257
+albedo 108 chondrite_l: normal_albedo R = 0x3fdcff6ade8671af  # 0.45308944445585103
+albedo 108 chondrite_l: spherical_albedo B = 0x3fd3a41e8d336c73  # 0.30689204968593414
+albedo 108 chondrite_l: spherical_albedo V = 0x3fd7abdf4381ca3d  # 0.3698652419326754
+albedo 108 chondrite_l: spherical_albedo R = 0x3fd8f70e27e21c13  # 0.39007905859802
+albedo 108 chondrite_l: hemispherical_albedo at mu0 1 B = 0x3fd038237d673d64  # 0.2534264301911746
+albedo 108 chondrite_l: hemispherical_albedo at mu0 1 V = 0x3fd3ea36a837bbd6  # 0.31117025783072216
+albedo 108 chondrite_l: hemispherical_albedo at mu0 1 R = 0x3fd520b907842968  # 0.33012223943719343
+albedo 108 chondrite_l: hemispherical_albedo at mu0 0.5 B = 0x3fd53476133a0a02  # 0.3313269794236079
+albedo 108 chondrite_l: hemispherical_albedo at mu0 0.5 V = 0x3fd96a331b5ffd52  # 0.3971069114049516
+albedo 108 chondrite_l: hemispherical_albedo at mu0 0.5 R = 0x3fdac1067790a610  # 0.4180313270213398
+albedo 108 chondrite_l: hemispherical_albedo at mu0 0.2 B = 0x3fda51f83fcdabe2  # 0.41125303488541765
+albedo 108 chondrite_l: hemispherical_albedo at mu0 0.2 V = 0x3fdec96b3f415ae4  # 0.4810436361052963
+albedo 108 chondrite_l: hemispherical_albedo at mu0 0.2 R = 0x3fe0150a7115de97  # 0.5025684555721054
+albedo 108 chondrite_l: hemispherical_albedo at mu0 0.05 B = 0x3fde7dfdb876ddea  # 0.4764398862275515
+albedo 108 chondrite_l: hemispherical_albedo at mu0 0.05 V = 0x3fe17c512c7a9c30  # 0.546425425408307
+albedo 108 chondrite_l: hemispherical_albedo at mu0 0.05 R = 0x3fe228ebc242be4a  # 0.5674952310709582
+albedo 108 chondrite_l: infrared None
+albedo 108 chondrite_l: spherical_albedo 300-390 nm = 0x3fcd833b78e730a6  # 0.2305673923823452
+albedo 108 chondrite_l: spherical_albedo 390-495 nm = 0x3fd372fc9a143657  # 0.3038932327916419
+albedo 108 chondrite_l: spherical_albedo 495-595 nm = 0x3fd76ac6cbb2baa5  # 0.36589212314985736
+albedo 108 chondrite_l: spherical_albedo 595-700 nm = 0x3fd9164eb6980f48  # 0.39198654014056844
+albedo 108 chondrite_l: spherical_albedo 700-780 nm = 0x3fd8687da3bc7f6f  # 0.3813776110637183
+albedo 108 chondrite_l: spherical_albedo 780-1000 nm = 0x3fd1c57404233cc1  # 0.2776765861899087
+albedo 108 chondrite_l: spherical_albedo 1000-1300 nm = 0x3fd35fe851ea2285  # 0.3027287292430077
+albedo 108 chondrite_l: spherical_albedo 1300-1700 nm = 0x3fd7f547e84e5e6c  # 0.3743457573523077
+albedo 108 chondrite_l: spherical_albedo 1700-2200 nm = 0x3fd93ba9de7e0751  # 0.39426657417071903
+albedo 108 chondrite_l: spherical_albedo 2200-2800 nm = 0x3fdd81da501ae0a2  # 0.4610505850100798
+albedo 108 chondrite_l: spherical_albedo 2800-3500 nm = 0x3fdd81da501ae0a2  # 0.4610505850100798
+albedo 108 chondrite_l: spherical_albedo 3500-5000 nm = 0x3fdd81da501ae0a2  # 0.4610505850100798
+albedo 108 chondrite_l: data from nm = 0x4075dffff583a53b  # 349.99998999999997
+albedo 108 chondrite_l: data to nm = 0x40a3880000000000  # 2500.0
+albedo 109 chondrite_ll: Regolith from a mixture of 9 parts, fine grains 1 um, phase law Regolith
+albedo 109 chondrite_ll: part 0 olivine HS285.2B Fo80 Form volume_fraction = 0x3fbc1bda5119ce07  # 0.1098
+albedo 109 chondrite_ll: part 0: olivine HS285.2B Fo80 spectra ["splib07a_Olivine_HS285.2B_Fo80_ASDFRb_AREF.txt"]
+albedo 109 chondrite_ll: part 0: olivine HS285.2B Fo80 slab n = 0x3ffb16872b020c4a  # 1.693
+albedo 109 chondrite_ll: part 0: olivine HS285.2B Fo80 slab lab grain m = 0x3f03660e51d25aab  # 3.7e-5
+albedo 109 chondrite_ll: part 1 olivine KI3054 Fo66 Form volume_fraction = 0x3fd8d013a92a3055  # 0.3877
+albedo 109 chondrite_ll: part 1: olivine KI3054 Fo66 spectra ["splib07a_Olivine_KI3054_Fo66_lt60um_BECKb_AREF.txt"]
+albedo 109 chondrite_ll: part 1: olivine KI3054 Fo66 slab n = 0x3ffb916872b020c5  # 1.723
+albedo 109 chondrite_ll: part 1: olivine KI3054 Fo66 slab lab grain m = 0x3eff75104d551d68  # 2.9999999999999997e-5
+albedo 109 chondrite_ll: part 2 hypersthene PYX02.f Form volume_fraction = 0x3fa42c3c9eecbfb1  # 0.0394
+albedo 109 chondrite_ll: part 2: hypersthene PYX02.f spectra ["splib07a_Hypersthene_PYX02.f_60um_BECKc_AREF.txt"]
+albedo 109 chondrite_ll: part 2: hypersthene PYX02.f slab n = 0x3ffab4395810624e  # 1.669
+albedo 109 chondrite_ll: part 2: hypersthene PYX02.f slab lab grain m = 0x3f0f75104d551d68  # 5.9999999999999995e-5
+albedo 109 chondrite_ll: part 3 hypersthene NMNHC2368 Form volume_fraction = 0x3fc765fd8adab9f5  # 0.1828
+albedo 109 chondrite_ll: part 3: hypersthene NMNHC2368 spectra ["splib07a_Hypersthene_NMNHC2368_BECKb_AREF.txt"]
+albedo 109 chondrite_ll: part 3: hypersthene NMNHC2368 held
+albedo 109 chondrite_ll: part 4 diopside HS15.3B Form volume_fraction = 0x3fb4538ef34d6a16  # 0.0794
+albedo 109 chondrite_ll: part 4: diopside HS15.3B spectra ["splib07a_Diopside_HS15.3B_Pyroxene_BECKc_AREF.txt"]
+albedo 109 chondrite_ll: part 4: diopside HS15.3B slab n = 0x3ffad4fdf3b645a2  # 1.677
+albedo 109 chondrite_ll: part 4: diopside HS15.3B slab lab grain m = 0x3f3355475a31a4bd  # 0.00029499999999999996
+albedo 109 chondrite_ll: part 5 oligoclase HS110.3B Form volume_fraction = 0x3fc0adab9f559b3d  # 0.1303
+albedo 109 chondrite_ll: part 5: oligoclase HS110.3B spectra ["splib07a_Oligoclase_HS110.3B_BECKc_AREF.txt"]
+albedo 109 chondrite_ll: part 5: oligoclase HS110.3B slab n = 0x3ff8ac083126e979  # 1.542
+albedo 109 chondrite_ll: part 5: oligoclase HS110.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 109 chondrite_ll: part 6 iron sulphide Cerac I-1047 Form volume_fraction = 0x3fa5182a9930be0e  # 0.0412
+albedo 109 chondrite_ll: part 6: iron sulphide Cerac I-1047 spectra ["splib07a_Iron_Sulfide_Cerac-I-1047_ASDHRa_AREF.txt"]
+albedo 109 chondrite_ll: part 6: iron sulphide Cerac I-1047 held
+albedo 109 chondrite_ll: part 7 iron powder SA-209309 Form volume_fraction = 0x3f8fbe76c8b43958  # 0.0155
+albedo 109 chondrite_ll: part 7: iron powder SA-209309 spectra ["splib07a_IronPowder_SA-209309_325mesh_ASDFRa_AREF.txt"]
+albedo 109 chondrite_ll: part 7: iron powder SA-209309 held
+albedo 109 chondrite_ll: part 8 chromite HS281.3B Form volume_fraction = 0x3f8c779a6b50b0f2  # 0.0139
+albedo 109 chondrite_ll: part 8: chromite HS281.3B spectra ["splib07a_Chromite_HS281.3B_ASDFRc_AREF.txt"]
+albedo 109 chondrite_ll: part 8: chromite HS281.3B held
+albedo 109 chondrite_ll: w B = 0x3fe68b2729b519b4  # 0.7044864477727999
+albedo 109 chondrite_ll: w V = 0x3fe96966c112b3c7  # 0.7941163798292273
+albedo 109 chondrite_ll: w R = 0x3fea25e71cc6830d  # 0.8171268045444734
+albedo 109 chondrite_ll: normal_albedo B = 0x3fd60adb10f19225  # 0.34441258101131417
+albedo 109 chondrite_ll: normal_albedo V = 0x3fdab1ad6a2631d9  # 0.41709456792957905
+albedo 109 chondrite_ll: normal_albedo R = 0x3fdc38720ef32b44  # 0.4409451623911773
+albedo 109 chondrite_ll: spherical_albedo B = 0x3fd1a495274c4431  # 0.275670326592322
+albedo 109 chondrite_ll: spherical_albedo V = 0x3fd699b12070cb24  # 0.3531306092074138
+albedo 109 chondrite_ll: spherical_albedo R = 0x3fd82c97426de114  # 0.3777216099474725
+albedo 109 chondrite_ll: hemispherical_albedo at mu0 1 B = 0x3fccddfa4373df90  # 0.22552421849809123
+albedo 109 chondrite_ll: hemispherical_albedo at mu0 1 V = 0x3fd2eba9a397fa02  # 0.29563370681708545
+albedo 109 chondrite_ll: hemispherical_albedo at mu0 1 R = 0x3fd46280870c55de  # 0.31851208866404856
+albedo 109 chondrite_ll: hemispherical_albedo at mu0 0.5 B = 0x3fd318e1278f3048  # 0.29839352477279535
+albedo 109 chondrite_ll: hemispherical_albedo at mu0 0.5 V = 0x3fd84d37aa26460a  # 0.3797129785171768
+albedo 109 chondrite_ll: hemispherical_albedo at mu0 0.5 R = 0x3fd9efa09a528112  # 0.4052506930402312
+albedo 109 chondrite_ll: hemispherical_albedo at mu0 0.2 B = 0x3fd800995ecc63c8  # 0.3750365663304902
+albedo 109 chondrite_ll: hemispherical_albedo at mu0 0.2 V = 0x3fdda0476e50faf2  # 0.46290765545920387
+albedo 109 chondrite_ll: hemispherical_albedo at mu0 0.2 R = 0x3fdf534a41b2f924  # 0.4894586221306716
+albedo 109 chondrite_ll: hemispherical_albedo at mu0 0.05 B = 0x3fdc19a153b370a4  # 0.43906434225005797
+albedo 109 chondrite_ll: hemispherical_albedo at mu0 0.05 V = 0x3fe0e95fe832fe0a  # 0.528488114847222
+albedo 109 chondrite_ll: hemispherical_albedo at mu0 0.05 R = 0x3fe1c0066cd1a4f8  # 0.5546905637139892
+albedo 109 chondrite_ll: infrared None
+albedo 109 chondrite_ll: spherical_albedo 300-390 nm = 0x3fc8108c40fc6ecb  # 0.18800500081203206
+albedo 109 chondrite_ll: spherical_albedo 390-495 nm = 0x3fd1667e115ac84a  # 0.27188064284121494
+albedo 109 chondrite_ll: spherical_albedo 495-595 nm = 0x3fd62f79f7dd2e56  # 0.346647731833149
+albedo 109 chondrite_ll: spherical_albedo 595-700 nm = 0x3fd8596932b0f7c9  # 0.3804572100669899
+albedo 109 chondrite_ll: spherical_albedo 700-780 nm = 0x3fd79f5ea62617cc  # 0.3691021559283143
+albedo 109 chondrite_ll: spherical_albedo 780-1000 nm = 0x3fd094042b2be811  # 0.25903419700591807
+albedo 109 chondrite_ll: spherical_albedo 1000-1300 nm = 0x3fd00c8d2b21fa44  # 0.2507660790651338
+albedo 109 chondrite_ll: spherical_albedo 1300-1700 nm = 0x3fd6a16ce6ac61bb  # 0.3536026241941063
+albedo 109 chondrite_ll: spherical_albedo 1700-2200 nm = 0x3fdad7130c68d2b0  # 0.41937710010396767
+albedo 109 chondrite_ll: spherical_albedo 2200-2800 nm = 0x3fde208c029f4e03  # 0.4707365060432666
+albedo 109 chondrite_ll: spherical_albedo 2800-3500 nm = 0x3fde208c029f4e03  # 0.4707365060432666
+albedo 109 chondrite_ll: spherical_albedo 3500-5000 nm = 0x3fde208c029f4e03  # 0.4707365060432666
+albedo 109 chondrite_ll: data from nm = 0x4075dffff583a53b  # 349.99998999999997
+albedo 109 chondrite_ll: data to nm = 0x40a3880000000000  # 2500.0
+albedo 110 chondrite_e: Regolith from a mixture of 4 parts, fine grains 1 um (stand-in), phase law Regolith
+albedo 110 chondrite_e: part 0 enstatite NMNH128288 Form volume_fraction = 0x3fe723a29c779a6b  # 0.7231
+albedo 110 chondrite_e: part 0: enstatite NMNH128288 spectra ["splib07a_Enstatite_NMNH128288_BECKc_AREF.txt"]
+albedo 110 chondrite_e: part 0: enstatite NMNH128288 slab n = 0x3ffa9374bc6a7efa  # 1.661
+albedo 110 chondrite_e: part 0: enstatite NMNH128288 slab lab grain m = 0x3efa36e2eb1c432c  # 2.4999999999999998e-5
+albedo 110 chondrite_e: part 1 oligoclase HS110.3B Form volume_fraction = 0x3fc027525460aa65  # 0.1262
+albedo 110 chondrite_e: part 1: oligoclase HS110.3B spectra ["splib07a_Oligoclase_HS110.3B_BECKc_AREF.txt"]
+albedo 110 chondrite_e: part 1: oligoclase HS110.3B slab n = 0x3ff8ac083126e979  # 1.542
+albedo 110 chondrite_e: part 1: oligoclase HS110.3B slab lab grain m = 0x3f253bd1676640a6  # 0.00016199999999999998
+albedo 110 chondrite_e: part 2 iron powder SA-209309 Form volume_fraction = 0x3fb86594af4f0d84  # 0.0953
+albedo 110 chondrite_e: part 2: iron powder SA-209309 spectra ["splib07a_IronPowder_SA-209309_325mesh_ASDFRa_AREF.txt"]
+albedo 110 chondrite_e: part 2: iron powder SA-209309 held
+albedo 110 chondrite_e: part 3 iron sulphide Cerac I-1047 Form volume_fraction = 0x3fac6a7ef9db22d1  # 0.0555
+albedo 110 chondrite_e: part 3: iron sulphide Cerac I-1047 spectra ["splib07a_Iron_Sulfide_Cerac-I-1047_ASDHRa_AREF.txt"]
+albedo 110 chondrite_e: part 3: iron sulphide Cerac I-1047 held
+albedo 110 chondrite_e: w B = 0x3fe534e56b7b924c  # 0.6627070521613603
+albedo 110 chondrite_e: w V = 0x3fe846a9ef2f5f83  # 0.7586259528716116
+albedo 110 chondrite_e: w R = 0x3fe86a759a7bc7ce  # 0.7629955308204843
+albedo 110 chondrite_e: normal_albedo B = 0x3fd4584a05514ec4  # 0.317888741677262
+albedo 110 chondrite_e: normal_albedo V = 0x3fd8a5409680eb5e  # 0.38508619973770475
+albedo 110 chondrite_e: normal_albedo R = 0x3fd8e179ad778c78  # 0.38876192035804236
+albedo 110 chondrite_e: spherical_albedo B = 0x3fcf8ebdc8c15cee  # 0.24654362013345782
+albedo 110 chondrite_e: spherical_albedo V = 0x3fd47238ac3f4813  # 0.3194715196706294
+albedo 110 chondrite_e: spherical_albedo R = 0x3fd4b229cd01badb  # 0.3233742239016643
+albedo 110 chondrite_e: hemispherical_albedo at mu0 1 B = 0x3fc9973a8b694988  # 0.19992763335410424
+albedo 110 chondrite_e: hemispherical_albedo at mu0 1 V = 0x3fd0f28e6cad5a78  # 0.26480446446422645
+albedo 110 chondrite_e: hemispherical_albedo at mu0 1 R = 0x3fd12ca6d84c4634  # 0.268350325802291
+albedo 110 chondrite_e: hemispherical_albedo at mu0 0.5 B = 0x3fd11e84c9944d30  # 0.26748771367529667
+albedo 110 chondrite_e: hemispherical_albedo at mu0 0.5 V = 0x3fd60ce5eda961a0  # 0.3445372410692702
+albedo 110 chondrite_e: hemispherical_albedo at mu0 0.5 R = 0x3fd64fee8493366a  # 0.3486286444357122
+albedo 110 chondrite_e: hemispherical_albedo at mu0 0.2 B = 0x3fd5c65548cb795e  # 0.34023029431218343
+albedo 110 chondrite_e: hemispherical_albedo at mu0 0.2 V = 0x3fdb3bf997427ee6  # 0.425535581316565
+albedo 110 chondrite_e: hemispherical_albedo at mu0 0.2 R = 0x3fdb83fe9bcb99c0  # 0.4299313088835355
+albedo 110 chondrite_e: hemispherical_albedo at mu0 0.05 B = 0x3fd9c1508dae6e6e  # 0.40242399059363876
+albedo 110 chondrite_e: hemispherical_albedo at mu0 0.05 V = 0x3fdf6c2874cf374c  # 0.49097644240543015
+albedo 110 chondrite_e: hemispherical_albedo at mu0 0.05 R = 0x3fdfb5167d5f3438  # 0.4954277252516621
+albedo 110 chondrite_e: infrared None
+albedo 110 chondrite_e: spherical_albedo 300-390 nm = 0x3fc90f8e91285358  # 0.19578725898522964
+albedo 110 chondrite_e: spherical_albedo 390-495 nm = 0x3fcfd7cd6e41a909  # 0.2487732685434099
+albedo 110 chondrite_e: spherical_albedo 495-595 nm = 0x3fd401928e3fc6ed  # 0.312595976748624
+albedo 110 chondrite_e: spherical_albedo 595-700 nm = 0x3fd4cc8ef93aa70d  # 0.3249852594259302
+albedo 110 chondrite_e: spherical_albedo 700-780 nm = 0x3fd5a37b9c04a489  # 0.33810320125719123
+albedo 110 chondrite_e: spherical_albedo 780-1000 nm = 0x3fd1914ea449265b  # 0.2744938473084397
+albedo 110 chondrite_e: spherical_albedo 1000-1300 nm = 0x3fd712bdb85ca9b8  # 0.3605188656244098
+albedo 110 chondrite_e: spherical_albedo 1300-1700 nm = 0x3fd72bf2ff1240bc  # 0.36205744656855265
+albedo 110 chondrite_e: spherical_albedo 1700-2200 nm = 0x3fd664d018560a4b  # 0.34990312935420737
+albedo 110 chondrite_e: spherical_albedo 2200-2800 nm = 0x3fd9892ea5dd9465  # 0.3989979381352156
+albedo 110 chondrite_e: spherical_albedo 2800-3500 nm = 0x3fd9892ea5dd9465  # 0.3989979381352156
+albedo 110 chondrite_e: spherical_albedo 3500-5000 nm = 0x3fd9892ea5dd9465  # 0.3989979381352156
+albedo 110 chondrite_e: data from nm = 0x4075dffff583a53b  # 349.99998999999997
+albedo 110 chondrite_e: data to nm = 0x40a3880000000000  # 2500.0
+albedo 111 cometary: Regolith from a mixture of 4 parts, fine grains 1 um (stand-in), phase law Regolith
+albedo 111 cometary: part 0 kerogen BK-Cornell Fine volume_fraction = 0x3fe5645a1cac0831  # 0.6685
+albedo 111 cometary: part 0: kerogen BK-Cornell spectra ["splib07a_Kerogen_BK-Cornell_BECKa_AREF.txt"]
+albedo 111 cometary: part 0: kerogen BK-Cornell held
+albedo 111 cometary: part 1 olivine GDS70.c Fo89 Form volume_fraction = 0x3fc15b573eab367a  # 0.1356
+albedo 111 cometary: part 1: olivine GDS70.c Fo89 spectra ["splib07a_Olivine_GDS70.c_Fo89_70um_BECKb_AREF.txt"]
+albedo 111 cometary: part 1: olivine GDS70.c Fo89 slab n = 0x3ffac083126e978d  # 1.672
+albedo 111 cometary: part 1: olivine GDS70.c Fo89 slab lab grain m = 0x3f12599ed7c6fbd2  # 7e-5
+albedo 111 cometary: part 2 enstatite NMNH128288 Form volume_fraction = 0x3fc15b573eab367a  # 0.1356
+albedo 111 cometary: part 2: enstatite NMNH128288 spectra ["splib07a_Enstatite_NMNH128288_BECKc_AREF.txt"]
+albedo 111 cometary: part 2: enstatite NMNH128288 slab n = 0x3ffa9374bc6a7efa  # 1.661
+albedo 111 cometary: part 2: enstatite NMNH128288 slab lab grain m = 0x3efa36e2eb1c432c  # 2.4999999999999998e-5
+albedo 111 cometary: part 3 iron sulphide Cerac I-1047 Fine volume_fraction = 0x3faedfa43fe5c91d  # 0.0603
+albedo 111 cometary: part 3: iron sulphide Cerac I-1047 spectra ["splib07a_Iron_Sulfide_Cerac-I-1047_ASDHRa_AREF.txt"]
+albedo 111 cometary: part 3: iron sulphide Cerac I-1047 held
+albedo 111 cometary: w B = 0x3fb4090e7979d7c7  # 0.07826319184991269
+albedo 111 cometary: w V = 0x3fb7fd44f4018e26  # 0.09370833356074879
+albedo 111 cometary: w R = 0x3fbdd518c8b76ca1  # 0.1165328493147393
+albedo 111 cometary: normal_albedo B = 0x3fa151a1780f345d  # 0.033825918107688514
+albedo 111 cometary: normal_albedo V = 0x3fa4cf68ad5de675  # 0.040644904292048624
+albedo 111 cometary: normal_albedo R = 0x3faa04ac21255f00  # 0.05081689743627571
+albedo 111 cometary: spherical_albedo B = 0x3f92f9cac7c7cd45  # 0.01853100628245598
+albedo 111 cometary: spherical_albedo V = 0x3f96ea9cd89de104  # 0.02237935135005477
+albedo 111 cometary: spherical_albedo R = 0x3f9cde3740e9f051  # 0.02819143613531622
+albedo 111 cometary: hemispherical_albedo at mu0 1 B = 0x3f8ca37b97c96dc0  # 0.013983693666140051
+albedo 111 cometary: hemispherical_albedo at mu0 1 V = 0x3f91509e840c56c0  # 0.016909100350935402
+albedo 111 cometary: hemispherical_albedo at mu0 1 R = 0x3f95da795c11dc40  # 0.021341224903576483
+albedo 111 cometary: hemispherical_albedo at mu0 0.5 B = 0x3f94e2d929d47ba0  # 0.020396607568837433
+albedo 111 cometary: hemispherical_albedo at mu0 0.5 V = 0x3f993816d5fe2980  # 0.024628025828442812
+albedo 111 cometary: hemispherical_albedo at mu0 0.5 R = 0x3f9fc29233079440  # 0.031015667309379547
+albedo 111 cometary: hemispherical_albedo at mu0 0.2 B = 0x3f9d760f2c196440  # 0.02877067286167212
+albedo 111 cometary: hemispherical_albedo at mu0 0.2 V = 0x3fa1c0af235e31b0  # 0.034673188273788624
+albedo 111 cometary: hemispherical_albedo at mu0 0.2 R = 0x3fa64b066330df20  # 0.04354114495111916
+albedo 111 cometary: hemispherical_albedo at mu0 0.05 B = 0x3fa3440e256aa3a0  # 0.03762859541649921
+albedo 111 cometary: hemispherical_albedo at mu0 0.05 V = 0x3fa72ba36993cd00  # 0.04525480903421375
+albedo 111 cometary: hemispherical_albedo at mu0 0.05 R = 0x3fad01b847c595b0  # 0.05665374637718956
+albedo 111 cometary: infrared None
+albedo 111 cometary: spherical_albedo 300-390 nm = 0x3f9315bc091becd6  # 0.01863759809110096
+albedo 111 cometary: spherical_albedo 390-495 nm = 0x3f93182fb357b791  # 0.018646951028066964
+albedo 111 cometary: spherical_albedo 495-595 nm = 0x3f96cd4db78e0765  # 0.022267546013160628
+albedo 111 cometary: spherical_albedo 595-700 nm = 0x3f9dd2e635b938a2  # 0.029124829319976293
+albedo 111 cometary: spherical_albedo 700-780 nm = 0x3fa390b4b164f7f6  # 0.03821339288195695
+albedo 111 cometary: spherical_albedo 780-1000 nm = 0x3fa7f022bcd8001e  # 0.04675396495076732
+albedo 111 cometary: spherical_albedo 1000-1300 nm = 0x3fa8df295442165a  # 0.04857758668462671
+albedo 111 cometary: spherical_albedo 1300-1700 nm = 0x3fa95ae7b9e5881f  # 0.04952167648549754
+albedo 111 cometary: spherical_albedo 1700-2200 nm = 0x3faad715b1b03541  # 0.05242221635863099
+albedo 111 cometary: spherical_albedo 2200-2800 nm = 0x3fac7c7aea0deba7  # 0.055637208052721925
+albedo 111 cometary: spherical_albedo 2800-3500 nm = 0x3fac7c7aea0deba7  # 0.055637208052721925
+albedo 111 cometary: spherical_albedo 3500-5000 nm = 0x3fac7c7aea0deba7  # 0.055637208052721925
+albedo 111 cometary: data from nm = 0x4075dffff583a53b  # 349.99998999999997
+albedo 111 cometary: data to nm = 0x40a3880000000000  # 2500.0

@@ -1,0 +1,20 @@
+# Amorphous Mg2SiO4's optical constants of Jäger et al. (2003), as HITRAN2024's aerosol compilation
+# distributes them: the regolith `Mg2SiO4`'s infrared index beyond 780 nm (plan 14, P14.T49.i), the
+# file rendering plan R08's forsterite-amorphous.json was reduced from. The file prints k to four
+# decimals, so below 1.5 µm, where k is 1-2 × 10⁻⁴, it is coarse. Reduced by `reduce.py` from the
+# compilation's ASCII file (git-ignored, `data/cache/jager_2003_mg2sio4/jager_mg2sio4.dat`) to its
+# rows over 0.7794-5.019 µm, and committed as measured values with the citations. Reproduced from
+# the raw by hand on 2026-10-16: `python3 -I crates/hyperion-fit/data/jager_2003_mg2sio4/reduce.py
+# <raw> crates/hyperion-fit/data/jager_2003_mg2sio4/nk.csv`, from outside the raw's directory. Read
+# by `run substance_albedos`.
+dataset = "jager_2003_mg2sio4"
+class = "committed"
+citation = "C. Jäger, J. Dorschner, H. Mutschke, Th. Posch and Th. Henning (2003), Astron. Astrophys. 408, 193-204, DOI 10.1051/0004-6361:20030916: steps toward interstellar silicate mineralogy VII, magnesium silicates produced by the sol-gel method; amorphous Mg2SiO4's n and k at room temperature over 0.7794-5.019 µm; via HITRAN2024's aerosol compilation (I. E. Gordon et al. 2026, J. Quant. Spectrosc. Radiat. Transfer 353, 109807)"
+url = "https://hitran.org/data/Aerosols/Aerosols-2024/hitran_ri.tar"
+retrieved = "2026-10-16"
+release = "hitran_ri.tar's member hitran_ri/ascii/exoplanets/jager_mg2sio4.dat (sha256 2582d4ab3cd9f7c9f8e53ae9988bd71a13c7080ba68f858bdf60133536c2fa32, the member R08's forsterite-amorphous.json was reduced from), fetched by HTTP range requests over the tar's headers, the 207 MB archive itself not fetched; reduced by reduce.py"
+licence = "HITRAN's FAQ (https://hitran.org/faq/, read 2026-10-16): \"The HITRAN database and its associated compilations are free\"; its citation policy (https://hitran.org/citepolicy/) asks that the edition's article be cited and encourages citing the original sources. No licence is stated; reduced values committed with both citations (decision-composition §5)"
+
+[[files]]
+name = "nk.csv"
+sha256 = "fcae2486506cf90f529e86388fe1ba3c4db929961fca44edbe7af0bbb09cb619"

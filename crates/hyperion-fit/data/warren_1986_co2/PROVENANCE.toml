@@ -1,0 +1,21 @@
+# CO2 ice's optical constants of Warren (1986), as optool's lnk_data copies his compilation: the frost
+# `CO2`'s infrared index beyond 780 nm (plan 14, P14.T49.i). Between its bands Warren's k is Egan and
+# Spagnolo's impure dry ice, about 2,370 times rendering plan R08's visible k (Hansen 2005's
+# estimated continuum) at 780 nm: an upper bound on the absorption between bands. Hansen 1997 and
+# 2005's near-infrared data could not be fetched. Reduced by `reduce.py` from optool's file
+# (git-ignored, `data/cache/warren_1986_co2/co2-w-Warren1986.lnk`) to its rows over 0.742-5 µm,
+# and committed as measured values with the citation. Reproduced from the raw by hand on
+# 2026-10-16: `python3 -I crates/hyperion-fit/data/warren_1986_co2/reduce.py <raw>
+# crates/hyperion-fit/data/warren_1986_co2/nk.csv`, from outside the raw's directory. Read by
+# `run substance_albedos`.
+dataset = "warren_1986_co2"
+class = "committed"
+citation = "S. G. Warren (1986), Appl. Opt. 25, 2650-2674, DOI 10.1364/AO.25.002650: optical constants of carbon dioxide ice; n and k of CO2 ice deposited near 80 K over 0.742-5 µm; via optool's lnk_data (C. Dominik, M. Min and R. Tazaki, ascl:2104.010)"
+url = "https://raw.githubusercontent.com/cdominik/optool/0b1fa6df95e3a694dc64abdbf8e36dad127165ab/lnk_data/co2-w-Warren1986.lnk"
+retrieved = "2026-10-16"
+release = "lnk_data/co2-w-Warren1986.lnk at optool's commit 0b1fa6df (sha256 357f89517ab218da779c9016fd32a64351c1d3e40a6974bddff3d66664bea0ee), reduced by reduce.py"
+licence = "none stated for the data (optool's MIT licence covers its software; Optica holds Warren's article); only the measured constants over the range read, facts, are committed, with the citation (decision-r08-licences.md)"
+
+[[files]]
+name = "nk.csv"
+sha256 = "1da210a48c4d411be4310173f53f671dedd393d5d48345c29333a184eff42b17"

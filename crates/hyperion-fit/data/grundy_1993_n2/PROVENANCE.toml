@@ -1,0 +1,19 @@
+# β nitrogen ice's 2.15 µm band at 41 K of Grundy, Schmitt and Quirico (1993): the frost `N2`'s
+# imaginary index over 2.0-2.3 µm (plan 14, P14.T49.i); k is 0 elsewhere beyond 780 nm, a statement
+# of transparency. Reduced by `reduce.py` from the authors' table (git-ignored,
+# `data/cache/grundy_1993_n2/alpha_N2.ascii`) to its 41 K column, the column nearest 40 K above
+# the α-β transition at 35.6 K, and committed as measured values with the citation. Reproduced from
+# the raw by hand on 2026-10-16: `python3 -I crates/hyperion-fit/data/grundy_1993_n2/reduce.py <raw>
+# crates/hyperion-fit/data/grundy_1993_n2/alpha_41k.csv`, from outside the raw's directory. Read by
+# `run substance_albedos`.
+dataset = "grundy_1993_n2"
+class = "committed"
+citation = "W. M. Grundy, B. Schmitt and E. Quirico (1993), Icarus 105, 254-258, DOI 10.1006/icar.1993.1122: the temperature-dependent spectra of α and β nitrogen ice with application to Triton; the absorption coefficient α (cm⁻¹) of β-N2 at 41 K over 1.99993-2.30024 µm"
+url = "http://74.208.185.217/grundy/abstracts/ice/alpha_N2.ascii"
+retrieved = "2026-10-16"
+release = "alpha_N2.ascii as served on the retrieval date from the author's pages (Lowell Observatory's www2.lowell.edu/users/grundy/abstracts/1993.N2ice.html, now at a bare IP address; sha256 c5f712568bbea468ed281655560023cf80dab4536679943fd9aae51b105713b1; α at 20, 34, 37, 38, 41, 48 and 60 K), reduced by reduce.py"
+licence = "none stated (the table's header gives the citation alone); only the measured coefficients at one temperature, facts, are committed, with the citation"
+
+[[files]]
+name = "alpha_41k.csv"
+sha256 = "1cbc57ee2807835cce913bce3c32f9cd93d7092d505d38be063a470683af8bd3"

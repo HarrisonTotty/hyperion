@@ -1,6 +1,7 @@
 //! The condensed optics: a solid's normal albedo in B, V and R at its reference grain class, with
-//! the photometric law the terrain draws it by (plan 14, P14.T49.c; decision-composition §1.1,
-//! §1.7 and §1.8; decision-r10-limb §2–§4).
+//! the photometric law the terrain draws it by, and its spherical albedo in contiguous bins over
+//! 0.3–5 µm (plan 14, P14.T49.c and P14.T49.i; decision-composition §1.1, §1.7 and §1.8;
+//! decision-r10-limb §2–§4; decision-p14-t49c-split §1.3 and §5.2).
 //!
 //! # What the albedo is
 //!
@@ -16,12 +17,27 @@
 //! The albedos are offline fits (`hyperion-fit`'s `substance_albedos`, in
 //! `tables::substance_albedo`), each the row's own Hapke solution:
 //!
-//! - **The single-scattering albedo** w of a grain of diameter D in each band is Hapke's
-//!   equivalent slab, from the row's complex index n + ik at the band's wavelength. The index is
-//!   rendering plan R08's committed file for the row's solid
-//!   (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`), the one source of truth for a
-//!   condensate's optical constants (decision-composition §1.1), read by wavelength on the file's
-//!   own grid.
+//! - **The single-scattering albedo** w of a grain of diameter D in each band comes from the row's
+//!   input ([`OpticsInput`]):
+//!   - **an index**: Hapke's equivalent slab, from the row's complex index n + ik at the band's
+//!     wavelength, rendering plan R08's committed file for the row's solid
+//!     (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`), the one source of truth for
+//!     a condensate's optical constants (decision-composition §1.1), read by wavelength on the
+//!     file's own grid; at the form's grains, or at a stated finer grain for a dust;
+//!   - **an opaque slab** (k above 0.1): the same file's surface reflection alone, the
+//!     hemispherically averaged complex Fresnel reflectance, since its grains transmit nothing;
+//!   - **a laboratory spectrum** (P14.T49.i): a spectrum of the USGS Spectral Library 7
+//!     (splib07a; Kokaly et al. 2017, U.S. public domain) inverted for w by this model at its own
+//!     geometry, a Beckman spectrum as the directional-hemispherical albedo and an ASD spectrum as
+//!     the reflectance factor, then taken to the form's grains through the slab's internal
+//!     transmission at a stated real index, or held where the end-member is opaque or its grain
+//!     size is not stated ([`EndMember`], [`GrainScaling`]); w held at most
+//!     [`REGOLITH_MAX_SINGLE_SCATTERING_ALBEDO`];
+//!   - **a mixture** of such end-members at a cited pristine mode, weighted by cross-section
+//!     (Hapke 2012, §10: volume fraction over diameter), its silicates at the form's grains and the
+//!     phases its class's petrography puts below them at [`FINE_GRAIN_DIAMETER`]
+//!     ([`MixturePart`]; decision-p14-t49i-rock-mixtures);
+//!   - **measured levels** at a stated geometry, inverted as a spectrum ([`ReflectanceLevels`]).
 //! - **The normal albedo** `A_N` is Hapke's reflectance factor at i = e = g = 0 with isotropic
 //!   multiple scattering (the IMSA, the model the reference forms' photometry was fitted with),
 //!   Chandrasekhar's exact H-function, the reference form's single-particle phase function and its
@@ -43,12 +59,47 @@
 //!   frost's light and makes more than it receives on a bright regolith, so it gives `A_N` alone.
 //! - **What it gives**: w, `A_N`, the directional-hemispherical albedo at four incidences
 //!   ([`HEMISPHERICAL_INCIDENCE_COSINES`]) and the spherical albedo, each in B, V and R
-//!   ([`CondensedOptics`]). Energy is bounded on the whole solution: the IMSA's own
+//!   ([`CondensedOptics`]), and the spherical albedo in each of the spectral bins (below).
+//!   Energy is bounded on the whole solution: the IMSA's own
 //!   directional-hemispherical albedo, from the same w, phase function and opposition as `A_N`, is
 //!   at most 1 at those incidences in every band, and `A_N` at most 1.35, R10's particulate
 //!   ceiling (`hyperion_surface::material::PARTICULATE_NORMAL_ALBEDO_CEILING`; decision-r10-limb
 //!   §4), both held by the fit's tests; the tabled albedos, the similarity relation's, are at most
 //!   1 by construction.
+//!
+//! # The spectral bins
+//!
+//! A row's spherical albedo is also held in [`SPECTRAL_BINS`] contiguous bins over 0.3–5 µm
+//! ([`SPECTRAL_BIN_EDGES_NM`]), so that P14.T51.b's Bond albedo weights its host's flux over a
+//! whole spectrum: an M dwarf puts most of its light in the near infrared, where ice absorbs
+//! (decision-p14-t49c-split §5.2). A bin's value is the mean over the bin, uniform in wavelength,
+//! of the spectral spherical albedo by the same similarity relation at the row's reference form and
+//! grain size, from the row's data interpolated as each source asks
+//! ([`CondensedOptics::spherical_albedo_bins`]):
+//!
+//! - an index row's: over 380–780 nm, R08's index file, the visible's one source; beyond 780 nm,
+//!   its infrared set ([`InfraredIndex`]), read by `hyperion-fit` as datasets with their URLs and
+//!   checksums and joined to the file at 780 nm, or none;
+//! - a laboratory row's: its spectra's channels inside 0.3–5 µm (a Beckman spectrum's to about 3
+//!   µm, an ASD spectrum's over 0.35–2.5 µm, a mixture's where all its parts' are), each inverted
+//!   for w; the Nicolet's infrared spectra are not spliced on (splicing them over 2.8–5 µm would
+//!   move a row's Bond albedo under a 3,000 K blackbody by −0.03 to +0.04, the lane's prototype
+//!   found); measured levels' over their knots;
+//! - a bin the row's data cover in part is the mean over the covered part, and a bin they do not
+//!   cover takes the nearest covered bin's value. Each row states its data's reach
+//!   ([`CondensedOptics::data_reach_nm`]): an index row's from 380 nm, so its first bin is its
+//!   380–390 nm part, to 5,000 nm or its infrared set's end, or to 780 nm for a row with none,
+//!   whose bins beyond hold the 700–780 nm bin's value.
+//!
+//! **The first and last bins stand for the light outside 0.3–5 µm**: a Bond albedo over a whole
+//! spectrum is to weight the first bin by the flux below 390 nm and the last by the flux above
+//! 3.5 µm, as the fit's tests do for a blackbody (P14.T51.b's to apply). The B, V and R bins, 1,
+//! 2 and 3 ([`BVR_BINS`]), hold the bands' effective wavelengths; the palette's B, V and R values
+//! remain the point values at those wavelengths, not the bins' means.
+//!
+//! One grain class, the reference form's, serves the infrared too (decision-p14-t49c-split §3): a
+//! coarse or old ice's infrared albedo is overstated by it, up to about 0.1 in its Bond albedo,
+//! which the first task that carries a grain size or age adds.
 //!
 //! # The phase row
 //!
@@ -61,17 +112,17 @@
 //!
 //! # What is not modelled yet
 //!
-//! A row has condensed optics where its solid has an index file R08 committed whose absorption the
-//! equivalent slab can take (k ≪ 1), and where its reference form's photometry is valid for its
-//! grains ([`Substance::condensed_optics`]; the closed list in `rows/optics.rs`, each exclusion
-//! with its reason, for the composition audit). The lithologies, salts and chondrites without an
-//! index file, the transparent minerals, the metals and opaque solids, and Mars's dust take
-//! laboratory spectra in P14.T49.i, which adds the infrared bands; the thermal columns are
-//! P14.T49.j's (`substance::thermal`), and the geomorphic columns are out of 23
-//! (decision-p14-t49c-split §1.3). One grain class per form serves the visible, which grain size
-//! barely moves; grain classes are deferred to the infrared, with their size (§3). A palette entry
-//! whose row has none cannot be resolved ([`ResolvePaletteEntryError::OpticsNotModelled`]), and is
-//! labelled so.
+//! A row has condensed optics where one of its inputs exists ([`Substance::condensed_optics`]): an
+//! index file R08 committed whose absorption the equivalent slab can take (k ≪ 1) and whose grains
+//! lie inside the form's photometry, an opaque solid's file, an open laboratory spectrum of the
+//! solid or of the minerals of its cited mode, or measured levels. The rows without one are a
+//! closed list in `rows/optics.rs`, each with its reason, for the composition audit: the ices
+//! without an index file or a spectrum, the liquids, the giant planets' hazes and `SiC`. The
+//! thermal columns are P14.T49.j's (`substance::thermal`), and the geomorphic columns are out of
+//! 23 (decision-p14-t49c-split §1.3). One grain class per form serves the visible, which grain
+//! size barely moves, and the infrared at the reference grain; grain classes are deferred, with
+//! their size (§3). A palette entry whose row has none cannot be resolved
+//! ([`ResolvePaletteEntryError::OpticsNotModelled`]), and is labelled so.
 //!
 //! # Generator version
 //!
@@ -94,13 +145,398 @@ use super::rows::optics::OPTICS;
 /// 0.2 and 0.05 (decision-r10-limb §4's test).
 pub const HEMISPHERICAL_INCIDENCE_COSINES: [f64; 4] = [1.0, 0.5, 0.2, 0.05];
 
-/// The number of values a row of `tables::substance_albedo` holds: three bands each of w, `A_N` and
-/// the spherical albedo, and of the directional-hemispherical albedo at each of
+/// The number of a row's values in B, V and R, which lead it: three bands each of w, `A_N` and the
+/// spherical albedo, and of the directional-hemispherical albedo at each of
 /// [`HEMISPHERICAL_INCIDENCE_COSINES`].
-pub const ALBEDO_ROW_LEN: usize = 9 + 3 * HEMISPHERICAL_INCIDENCE_COSINES.len();
+pub const BVR_ROW_LEN: usize = 9 + 3 * HEMISPHERICAL_INCIDENCE_COSINES.len();
+
+/// The edges of the spectral bins, nm: [`SPECTRAL_BINS`] contiguous bins over 0.3–5 µm, the
+/// infrared's reach that decision-p14-t49c-split §1.3 rules. Each edge's reason:
+///
+/// - 300 and 5,000: the ruling's ends. The first bin's value stands for all the light below 390
+///   nm, and the last's for all the light above 3.5 µm (the [module documentation](self)); where a
+///   row's data begin at 380 nm, as every index row's do, the first bin's value is its mean over
+///   380–390 nm alone, which then stands for all the light below 390 nm;
+/// - 390, 495, 595 and 700: the B, V and R bins hold their effective wavelengths, 440, 550 and 640
+///   nm ([`BVR_EFFECTIVE_WAVELENGTHS_NM`]): 495 and 595 are the midpoints between them, and 390 and
+///   700 close B and R 50 and 60 nm from theirs;
+/// - 780: the end of rendering plan R08's index files, where each infrared set joins its file;
+/// - 1,000, 1,300, 1,700, 2,200, 2,800 and 3,500: the near infrared, cut so that water ice's bands
+///   fall inside bins, not on their edges: 1.03 and 1.25 µm in the sixth, 1.5 and 1.65 µm in the
+///   seventh, 2.0 µm in the eighth, the 2.5 µm continuum and the 2.7 µm wing in the ninth, the 3.0
+///   µm fundamental in the tenth, and the 4.5 µm combination band in the last.
+pub const SPECTRAL_BIN_EDGES_NM: [f64; 13] = [
+    300.0, 390.0, 495.0, 595.0, 700.0, 780.0, 1_000.0, 1_300.0, 1_700.0, 2_200.0, 2_800.0, 3_500.0,
+    5_000.0,
+];
+
+/// The number of spectral bins, 12.
+pub const SPECTRAL_BINS: usize = SPECTRAL_BIN_EDGES_NM.len() - 1;
+
+/// The bins of B, V and R, which hold 440, 550 and 640 nm: the second, third and fourth.
+pub const BVR_BINS: [usize; 3] = [1, 2, 3];
+
+/// The offset in a row of its spectral bins' spherical albedos, after its values in B, V and R.
+pub const SPECTRAL_BINS_OFFSET: usize = BVR_ROW_LEN;
+
+/// The offset in a row of its data's reach, nm: its first and last wavelength, after its bins.
+pub const DATA_REACH_OFFSET: usize = SPECTRAL_BINS_OFFSET + SPECTRAL_BINS;
+
+/// The number of values a row of `tables::substance_albedo` holds: its [`BVR_ROW_LEN`] values in
+/// B, V and R, its [`SPECTRAL_BINS`] bins and its data's reach, 35.
+pub const ALBEDO_ROW_LEN: usize = DATA_REACH_OFFSET + 2;
 
 /// The bands' wavelengths, nm: the palette's, 440, 550 and 640 ([`BVR_EFFECTIVE_WAVELENGTHS_NM`]).
 pub const BAND_WAVELENGTHS_NM: [f64; 3] = BVR_EFFECTIVE_WAVELENGTHS_NM;
+
+/// What a row's grains' optics are computed from (P14.T49.c and P14.T49.i).
+///
+/// Not `Eq`, `Hash` or `Ord`: a mixture's volume fractions, an end-member's real index and a
+/// level's reflectance are real numbers.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OpticsInput {
+    /// Optical constants n + ik: rendering plan R08's committed index file over 380–780 nm, the
+    /// visible's one source, joined at 780 nm to an infrared set where one is read.
+    Index {
+        /// The file's name, in `apps/hyperion/src/renderer/src/view/atmosphere/materials/`.
+        file: &'static str,
+        /// The infrared set beyond 780 nm, or `None`: the row's data then end at 780 nm.
+        infrared: Option<InfraredIndex>,
+    },
+    /// Optical constants n + ik, as [`Index`](Self::Index), of grains of a stated diameter in place
+    /// of the reference form's: a dust finer than the form's grains, under the form's photometry
+    /// (Mars's dust; P14.T49.i).
+    SizedIndex {
+        /// The file's name, in `apps/hyperion/src/renderer/src/view/atmosphere/materials/`.
+        file: &'static str,
+        /// The infrared set beyond 780 nm, or `None`.
+        infrared: Option<InfraredIndex>,
+        /// The grains' diameter, Hapke's D, which replaces the form's.
+        grain_diameter: Metres,
+    },
+    /// An opaque solid's optical constants (k above 0.1 in the visible): R08's index file, whose
+    /// grains scatter only what their first surface reflects, the hemispherically averaged complex
+    /// Fresnel reflectance `S_e` (P14.T49.i). Its data end at 780 nm.
+    OpaqueSlab {
+        /// The file's name, in `apps/hyperion/src/renderer/src/view/atmosphere/materials/`.
+        file: &'static str,
+    },
+    /// One laboratory end-member: a measured spectrum inverted for w at its own geometry and taken
+    /// to the reference form's grains ([`EndMember`]; P14.T49.i).
+    Spectrum {
+        /// The end-member.
+        end_member: &'static EndMember,
+    },
+    /// An intimate mixture of laboratory end-members at a cited mode, weighted by cross-section,
+    /// volume fraction over diameter (Hapke 2012, §10; decision-p14-t49i-rock-mixtures §2.1): w̄ =
+    /// Σ (fⱼ ÷ Dⱼ) wⱼ ÷ Σ (fⱼ ÷ Dⱼ), each part at the form's grain or at
+    /// [`FINE_GRAIN_DIAMETER`] ([`MixturePart`]; P14.T49.i).
+    Mixture {
+        /// The parts, each once per grain class.
+        parts: &'static [MixturePart],
+    },
+    /// Measured reflectance levels at a stated geometry, a piecewise-linear spectrum inverted for
+    /// w under the reference form's photometry, with no grain size to rescale (SO₂ frost;
+    /// [`ReflectanceLevels`]; P14.T49.i).
+    Levels {
+        /// The levels.
+        levels: &'static ReflectanceLevels,
+    },
+}
+
+/// The diameter of a mixture's fine phases, 1 µm: the smallest grain at which the reference form's
+/// equivalent slab and Hapke's extinction efficiency `Q_E` ≈ 1 are still used, a size parameter
+/// πD ÷ λ of 7.1, 5.7 and 4.9 in B, V and R (decision-p14-t49i-rock-mixtures §2.3, `Adopted`,
+/// never fitted). The petrography it stands beside puts the matrix opaques and organics of the CI,
+/// CM and CV chondrites at sub-µm to a few µm (each mixture row's sources). Beyond about 1.5 µm a
+/// 1 µm grain is below geometric optics (πD ÷ λ < 2), and the weights stay geometric there: an
+/// approximation in the infrared bins of the matrix-rich rows.
+pub const FINE_GRAIN_DIAMETER: Metres = Metres::new(1.0e-6);
+
+/// A spectrometer of the USGS Spectroscopy Laboratory, which fixes a spectrum's measured quantity
+/// and geometry (Kokaly et al. 2017, USGS Data Series 1035).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Spectrometer {
+    /// The Beckman 5270 with its integrating sphere: a directional-hemispherical reflectance,
+    /// 0.2–3 µm, at the incidence of [`BECKMAN_INCIDENCE_DEG`].
+    Beckman,
+    /// The ASD (Analytical Spectral Devices) spectrometers: a reflectance factor at the geometry of
+    /// [`ASD_GEOMETRY`], 0.35–2.5 µm.
+    Asd,
+}
+
+/// The Beckman's beam's incidence on the sample, degrees: 10, the near-normal incidence of its
+/// integrating sphere, at which a spectrum is inverted as the similarity relation's
+/// directional-hemispherical albedo (P14.T49.i; its effect on the spherical albedo is at most
+/// 0.003 against normal incidence).
+pub const BECKMAN_INCIDENCE_DEG: f64 = 10.0;
+
+/// A measurement's geometry: the incidence and emission angles from the surface's normal and the
+/// azimuth between the planes of incidence and emission, degrees.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Geometry {
+    /// The incidence angle i, degrees, in [0, 90).
+    pub incidence_deg: f64,
+    /// The emission angle e, degrees, in [0, 90).
+    pub emission_deg: f64,
+    /// The azimuth between the planes of incidence and emission, degrees, in [0, 180]: 180 with the
+    /// source and the detector on opposite sides of the normal, where the phase angle is i + e.
+    pub azimuth_deg: f64,
+}
+
+/// The ASD's geometry in the USGS laboratory: incidence 20°, emission 30°, in planes 90° apart, a
+/// phase angle of 35.5° (Kokaly et al. 2017, USGS Data Series 1035, p. 7).
+pub const ASD_GEOMETRY: Geometry = Geometry {
+    incidence_deg: 20.0,
+    emission_deg: 30.0,
+    azimuth_deg: 90.0,
+};
+
+/// A spectrum of the USGS Spectral Library version 7, splib07a (Kokaly et al. 2017, USGS Data
+/// Series 1035; U.S. public domain), by its file in the release's ASCII data, which
+/// `hyperion-fit`'s `usgs_splib07a` dataset commits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct LabSpectrum {
+    file: &'static str,
+    spectrometer: Spectrometer,
+}
+
+impl LabSpectrum {
+    /// The spectrum in `file` (`splib07a_<record>.txt`), measured by `spectrometer`.
+    #[must_use]
+    pub const fn new(file: &'static str, spectrometer: Spectrometer) -> Self {
+        Self { file, spectrometer }
+    }
+
+    /// Its file's name in the release, `splib07a_<record>.txt`.
+    #[must_use]
+    pub const fn file(&self) -> &'static str {
+        self.file
+    }
+
+    /// The spectrometer that measured it.
+    #[must_use]
+    pub const fn spectrometer(&self) -> Spectrometer {
+        self.spectrometer
+    }
+}
+
+/// How an end-member's measured w is taken from its laboratory grains to a row's.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GrainScaling {
+    /// Through the equivalent slab's internal transmission at a stated real index n and the
+    /// laboratory grains' diameter: the measured w gives Θ by the slab's own relation, and the
+    /// row's grains take Θ^(D ÷ `D_lab`). A w below the slab's surface term `S_e` at k = 0, which
+    /// no Θ gives, is held as measured.
+    Slab {
+        /// The real index n, dimensionless, at least 1.
+        real_index: f64,
+        /// The laboratory grains' diameter, `D_lab`.
+        lab_grain_diameter: Metres,
+    },
+    /// Held as measured at every grain size: an opaque phase, which the slab would brighten at a
+    /// finer grain against Hunt, Salisbury and Lenhoff 1971's observation that opaque powders
+    /// darken as they get finer (as splib07a's magnetite description quotes them), or a phase whose
+    /// laboratory grain size is not stated (the end-member's source says which).
+    Held,
+}
+
+/// A laboratory end-member: one or more splib07a spectra of one material, each inverted for w at
+/// its own geometry, their mean where there are several, and how w is taken to a row's grains.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EndMember {
+    name: &'static str,
+    spectra: &'static [LabSpectrum],
+    scaling: GrainScaling,
+    source: Source,
+}
+
+impl EndMember {
+    /// The end-member `name`, of `spectra` (their w averaged), scaled by `scaling`, described by
+    /// `source`.
+    #[must_use]
+    pub const fn new(
+        name: &'static str,
+        spectra: &'static [LabSpectrum],
+        scaling: GrainScaling,
+        source: Source,
+    ) -> Self {
+        Self {
+            name,
+            spectra,
+            scaling,
+            source,
+        }
+    }
+
+    /// Its name: the material and its sample, as splib07a names them.
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// Its spectra, whose w are averaged: one, or several fractions of one size class.
+    #[must_use]
+    pub const fn spectra(&self) -> &'static [LabSpectrum] {
+        self.spectra
+    }
+
+    /// How its w is taken to a row's grains.
+    #[must_use]
+    pub const fn scaling(&self) -> GrainScaling {
+        self.scaling
+    }
+
+    /// Its source: the sample's description, its real index and its grain size, with their
+    /// basis.
+    #[must_use]
+    pub const fn source(&self) -> Source {
+        self.source
+    }
+}
+
+/// The grain class of a mixture's part.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum GrainClass {
+    /// The reference form's grains (70 µm for a regolith).
+    Form,
+    /// The fine phases' grains, [`FINE_GRAIN_DIAMETER`], at their measured w
+    /// (decision-p14-t49i-rock-mixtures §2.2–§2.4).
+    Fine,
+}
+
+/// A part of an intimate mixture: an end-member, its volume fraction in the mode and its grain
+/// class.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MixturePart {
+    end_member: &'static EndMember,
+    volume_fraction: f64,
+    grain: GrainClass,
+}
+
+impl MixturePart {
+    /// `volume_fraction` of `end_member` at grain class `grain`.
+    #[must_use]
+    pub const fn new(
+        end_member: &'static EndMember,
+        volume_fraction: f64,
+        grain: GrainClass,
+    ) -> Self {
+        Self {
+            end_member,
+            volume_fraction,
+            grain,
+        }
+    }
+
+    /// The end-member.
+    #[must_use]
+    pub const fn end_member(&self) -> &'static EndMember {
+        self.end_member
+    }
+
+    /// Its volume fraction in the mode, dimensionless, positive; a row's parts sum to 1 to the
+    /// rounding of the stated fractions (the mixing rule normalises them).
+    #[must_use]
+    pub const fn volume_fraction(&self) -> f64 {
+        self.volume_fraction
+    }
+
+    /// Its grain class.
+    #[must_use]
+    pub const fn grain(&self) -> GrainClass {
+        self.grain
+    }
+}
+
+/// Measured reflectance levels: a piecewise-linear spectrum through its knots, the reflectance
+/// factor at a stated geometry, held at its end knots' values beyond them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReflectanceLevels {
+    knots: &'static [(f64, f64)],
+    geometry: Geometry,
+}
+
+impl ReflectanceLevels {
+    /// The levels of `knots`, (wavelength nm, reflectance factor) of rising wavelength, measured
+    /// at `geometry`.
+    #[must_use]
+    pub const fn new(knots: &'static [(f64, f64)], geometry: Geometry) -> Self {
+        Self { knots, geometry }
+    }
+
+    /// Its knots: (wavelength nm, reflectance factor), the wavelength rising.
+    #[must_use]
+    pub const fn knots(&self) -> &'static [(f64, f64)] {
+        self.knots
+    }
+
+    /// The geometry of the measurement.
+    #[must_use]
+    pub const fn geometry(&self) -> Geometry {
+        self.geometry
+    }
+}
+
+/// An infrared set: a row's optical constants beyond 780 nm, from its primaries, as
+/// `hyperion-fit`'s datasets hold them (P14.T49.i; decision-composition §5), each at one reference
+/// temperature, which the row's sources state. Closed, for the composition audit: a row gains one
+/// where an open primary of its solid's infrared is found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum InfraredIndex {
+    /// Ice Ih: Warren and Brandt 2008 at 266 K, with Grundy and Schmitt 1998's absorption at 100 K
+    /// over 0.9623–2.742 µm.
+    WaterIce,
+    /// CO₂ ice: Warren 1986, near 80 K.
+    CarbonDioxideIce,
+    /// Methane ice I: Grundy, Schmitt and Quirico 2002's absorption at 40 K, with Martonchik and
+    /// Orton 1994's real index.
+    MethaneIce,
+    /// β nitrogen ice: Grundy, Schmitt and Quirico 1993's 2.15 µm band at 41 K, transparent
+    /// elsewhere.
+    NitrogenIce,
+    /// α-CO ice: Gerakines, Materese and Hudson 2023's fundamental band at 25 K, transparent below
+    /// it.
+    CarbonMonoxideIce,
+    /// Ammonia ice: Martonchik, Orton and Appleby 1984's measured infrared from 1.462 µm.
+    AmmoniaIce,
+    /// Titan tholin: Khare et al. 1984, at room temperature.
+    Tholin,
+    /// Amorphous `MgSiO₃`: Dorschner et al. 1995, at room temperature.
+    EnstatiteGlass,
+    /// Amorphous `Mg₂SiO₄`: Jäger et al. 2003, at room temperature.
+    AmorphousForsterite,
+    /// A terrestrial basalt: Pollack, Toon and Khare 1973.
+    Basalt,
+    /// A terrestrial basaltic glass: Pollack, Toon and Khare 1973.
+    BasalticGlass,
+    /// Cubic `ZnS`: Palik and Addamiano 1985, as Kitzmann and Heng 2018 compile it.
+    ZincSulphide,
+    /// Mars's dust: the index table Wolff et al. distribute, R08's `mars-dust.json`'s own source.
+    MarsDust,
+}
+
+impl InfraredIndex {
+    /// The `hyperion-fit` datasets it is read from, under `crates/hyperion-fit/data/`.
+    #[must_use]
+    pub const fn datasets(self) -> &'static [&'static str] {
+        match self {
+            Self::WaterIce => &["warren_brandt_2008_h2o", "grundy_schmitt_1998_h2o"],
+            Self::CarbonDioxideIce => &["warren_1986_co2"],
+            Self::MethaneIce => &["grundy_2002_ch4", "martonchik_orton_1994_ch4"],
+            Self::NitrogenIce => &["grundy_1993_n2"],
+            Self::CarbonMonoxideIce => &["gerakines_2023_co"],
+            Self::AmmoniaIce => &["martonchik_1984_nh3"],
+            Self::Tholin => &["khare_1984_tholin"],
+            Self::EnstatiteGlass => &["dorschner_1995_mgsio3"],
+            Self::AmorphousForsterite => &["jager_2003_mg2sio4"],
+            Self::Basalt => &["pollack_1973_basalt"],
+            Self::BasalticGlass => &["pollack_1973_basaltic_glass"],
+            Self::ZincSulphide => &["palik_1985_zns"],
+            Self::MarsDust => &["wolff_2009_mars_dust"],
+        }
+    }
+}
 
 /// What a row's albedo is the albedo of: the form of the substance R10 takes its entry's albedo
 /// for (R10.T1.a, "the per-form factor"; decision-r10-limb §4).
@@ -340,23 +776,24 @@ pub const LUNAR_REGOLITH: Photometry = Photometry {
 /// bound and not a calibration limit, which no measured figure gives.
 pub const REGOLITH_MAX_SINGLE_SCATTERING_ALBEDO: f64 = 0.9995;
 
-/// How directly an index file's constants were obtained, as its `provenance` gives it.
+/// How directly a row's input was obtained: an index file's `provenance`, or the lane's finding
+/// for an input of another kind (decision-p14-t49i-rock-mixtures §4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) enum IndexProvenance {
+pub(super) enum InputProvenance {
     /// Measured or derived from measurements of the substance.
     Measured,
-    /// A stand-in: an estimate or a named analogue's index (the file's `standIn`).
+    /// A stand-in: an estimate, a named analogue, an upper bound or an unvalidated mixture.
     StandIn,
 }
 
-/// A row's condensed optics: its reference form, the index file its grains' optics are computed
-/// from, and the fitted values of `tables::substance_albedo` (the [module documentation](self)).
+/// A row's condensed optics: its reference form, what its grains' optics are computed from, and
+/// the fitted values of `tables::substance_albedo` (the [module documentation](self)).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CondensedOptics {
     pub(super) key: SubstanceKey,
     pub(super) form: ReferenceForm,
-    pub(super) index_file: &'static str,
-    pub(super) provenance: IndexProvenance,
+    pub(super) input: OpticsInput,
+    pub(super) provenance: InputProvenance,
     pub(super) values: &'static [f64; ALBEDO_ROW_LEN],
     pub(super) sources: &'static [Source],
 }
@@ -377,18 +814,87 @@ impl CondensedOptics {
         self.form
     }
 
-    /// The name of R08's index file its grains' optics are computed from, in
-    /// `apps/hyperion/src/renderer/src/view/atmosphere/materials/`.
+    /// What its grains' optics are computed from.
     #[must_use]
-    pub const fn index_file(&self) -> &'static str {
-        self.index_file
+    pub const fn input(&self) -> OpticsInput {
+        self.input
     }
 
-    /// Whether that file is a stand-in (its `standIn`): an estimated or named analogue's index,
-    /// which a reader labels approximate.
+    /// The name of R08's index file its grains' visible optics are computed from, in
+    /// `apps/hyperion/src/renderer/src/view/atmosphere/materials/`, or `None` for a row of another
+    /// input ([`OpticsInput`]).
+    #[must_use]
+    pub const fn index_file(&self) -> Option<&'static str> {
+        match self.input {
+            OpticsInput::Index { file, .. }
+            | OpticsInput::SizedIndex { file, .. }
+            | OpticsInput::OpaqueSlab { file } => Some(file),
+            OpticsInput::Spectrum { .. }
+            | OpticsInput::Mixture { .. }
+            | OpticsInput::Levels { .. } => None,
+        }
+    }
+
+    /// The infrared set its optics beyond 780 nm are computed from, or `None` where its data end
+    /// at 780 nm or come from no index file ([`data_reach_nm`](Self::data_reach_nm)).
+    #[must_use]
+    pub const fn infrared_source(&self) -> Option<InfraredIndex> {
+        match self.input {
+            OpticsInput::Index { infrared, .. } | OpticsInput::SizedIndex { infrared, .. } => {
+                infrared
+            }
+            OpticsInput::OpaqueSlab { .. }
+            | OpticsInput::Spectrum { .. }
+            | OpticsInput::Mixture { .. }
+            | OpticsInput::Levels { .. } => None,
+        }
+    }
+
+    /// The diameter of its grains, Hapke's D: its input's for a [`OpticsInput::SizedIndex`], else
+    /// its reference form's ([`ReferenceForm::grain_diameter`]); a mixture's fine parts take
+    /// [`FINE_GRAIN_DIAMETER`].
+    #[must_use]
+    pub const fn grain_diameter(&self) -> Metres {
+        match self.input {
+            OpticsInput::SizedIndex { grain_diameter, .. } => grain_diameter,
+            OpticsInput::Index { .. }
+            | OpticsInput::OpaqueSlab { .. }
+            | OpticsInput::Spectrum { .. }
+            | OpticsInput::Mixture { .. }
+            | OpticsInput::Levels { .. } => self.form.grain_diameter(),
+        }
+    }
+
+    /// The laboratory spectra its optics are computed from, each once, in the order its input
+    /// names them: an end-member's, every part's of a mixture, and none for another input.
+    #[must_use]
+    pub fn lab_spectra(&self) -> Vec<LabSpectrum> {
+        let mut spectra: Vec<LabSpectrum> = Vec::new();
+        let mut add = |end_member: &EndMember| {
+            for spectrum in end_member.spectra() {
+                if !spectra.contains(spectrum) {
+                    spectra.push(*spectrum);
+                }
+            }
+        };
+        match self.input {
+            OpticsInput::Spectrum { end_member } => add(end_member),
+            OpticsInput::Mixture { parts } => parts.iter().for_each(|p| add(p.end_member())),
+            OpticsInput::Index { .. }
+            | OpticsInput::SizedIndex { .. }
+            | OpticsInput::OpaqueSlab { .. }
+            | OpticsInput::Levels { .. } => {}
+        }
+        spectra
+    }
+
+    /// Whether its input is a stand-in, which a reader labels approximate (its sources give the
+    /// reason): an index file's `standIn`, or the lane's finding; a named analogue's spectrum; a
+    /// mixture that misses a band its class is tested against, or has none; an upper bound; or
+    /// levels from an abstract (decision-p14-t49i-rock-mixtures §4).
     #[must_use]
     pub const fn is_stand_in(&self) -> bool {
-        matches!(self.provenance, IndexProvenance::StandIn)
+        matches!(self.provenance, InputProvenance::StandIn)
     }
 
     /// The triple of values at `offset` in the row.
@@ -434,8 +940,50 @@ impl CondensedOptics {
             .then(|| self.triple(3 * BANDS + BANDS * incidence))
     }
 
-    /// Where its values come from: the index file's paper, the reference form's photometry and
-    /// grain size, and the fit.
+    /// Its spherical albedo in each spectral bin ([`SPECTRAL_BIN_EDGES_NM`]): the mean over the
+    /// bin, uniform in wavelength, of the spectral spherical albedo of the reference form by the
+    /// similarity relation, over the part of the bin its data cover, or the nearest covered bin's
+    /// value where they cover none of it (the [module documentation](self)); each in [0, 1], and
+    /// 1 for a lossless grain. The first and last bins stand for the light below 0.3 µm and above
+    /// 5 µm.
+    ///
+    /// # Examples
+    ///
+    /// Water frost is bright in the visible and dark in its 3 µm band, where every grain absorbs:
+    ///
+    /// ```
+    /// use hyperion_sim::substance::by_key;
+    /// use hyperion_sim::substance::optics::{BVR_BINS, SPECTRAL_BIN_EDGES_NM};
+    ///
+    /// # fn main() {
+    /// #     assert!(example().is_some(), "every value the example reads is there");
+    /// # }
+    /// # fn example() -> Option<()> {
+    /// let frost = by_key("H2O")?.substance().condensed_optics()?;
+    /// let bins = frost.spherical_albedo_bins();
+    /// assert!(BVR_BINS.iter().all(|&bin| bins[bin] > 0.95));
+    /// let band = SPECTRAL_BIN_EDGES_NM.iter().position(|&edge| edge >= 2_800.0)?;
+    /// assert!(bins[band] < 0.1, "2.8–3.5 µm: {}", bins[band]);
+    /// # Some(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn spherical_albedo_bins(&self) -> [f64; SPECTRAL_BINS] {
+        core::array::from_fn(|bin| self.values[SPECTRAL_BINS_OFFSET + bin])
+    }
+
+    /// The reach of its data, nm: the first and last wavelength over which its n and k are given,
+    /// measured or stated (the [module documentation](self)), at least 300 and at most 5,000.
+    #[must_use]
+    pub fn data_reach_nm(&self) -> [f64; 2] {
+        [
+            self.values[DATA_REACH_OFFSET],
+            self.values[DATA_REACH_OFFSET + 1],
+        ]
+    }
+
+    /// Where its values come from: the index file's paper, its infrared set's where it has one,
+    /// the reference form's photometry and grain size, and the fit.
     #[must_use]
     pub const fn sources(&self) -> &'static [Source] {
         self.sources
@@ -473,8 +1021,8 @@ impl Substance {
     /// let (snow, rock) = (snow.normal_albedo_bvr(), rock.normal_albedo_bvr());
     /// assert!((0..3).all(|band| snow[band] > rock[band]));
     /// assert!(snow.iter().chain(&rock).all(|a| *a <= 1.35));
-    /// // Mars's dust is finer than geometric optics reaches: not modelled yet.
-    /// assert!(by_key("mars_dust")?.substance().condensed_optics().is_none());
+    /// // Silicon carbide has neither an index file nor an open spectrum: not modelled yet.
+    /// assert!(by_key("SiC")?.substance().condensed_optics().is_none());
     /// # Some(())
     /// # }
     /// ```
@@ -611,11 +1159,13 @@ mod tests {
     }
 
     /// The modelled rows are rows of the registry with condensed columns, in registry order and
-    /// each once, each in its family's reference form, and each names its own index file once.
+    /// each once, each in its family's reference form; each names its own index file once and its
+    /// own infrared set, if any, once, or its laboratory spectra, or its levels.
     #[test]
     fn substance_optics_rows_are_condensed_registry_rows_in_order() {
         let mut last = None;
         let mut files = Vec::new();
+        let mut sets = Vec::new();
         for optics in &OPTICS {
             let id = by_key(optics.key.as_str()).expect("an optics row is a registry row");
             assert!(last < Some(id), "{} is out of order", optics.key);
@@ -630,11 +1180,114 @@ mod tests {
                 "{}",
                 optics.key
             );
-            assert!(!files.contains(&optics.index_file), "{}", optics.index_file);
-            files.push(optics.index_file);
+            match (optics.index_file(), optics.input()) {
+                (Some(file), _) => {
+                    assert!(!files.contains(&file), "{file}");
+                    files.push(file);
+                }
+                (None, OpticsInput::Spectrum { .. } | OpticsInput::Mixture { .. }) => {
+                    assert!(!optics.lab_spectra().is_empty(), "{}", optics.key);
+                }
+                (None, OpticsInput::Levels { levels }) => {
+                    assert!(levels.knots().len() >= 2, "{}", optics.key);
+                }
+                (None, input) => panic!("{}: {input:?} names no file", optics.key),
+            }
+            if let Some(infrared) = optics.infrared_source() {
+                assert!(!sets.contains(&infrared), "{infrared:?}");
+                sets.push(infrared);
+                assert!(!infrared.datasets().is_empty(), "{infrared:?}");
+            }
         }
         assert_eq!(rows().count(), OPTICS.len());
         assert!(rows().all(|(id, optics)| id.substance().key() == optics.key()));
+    }
+
+    /// The laboratory inputs are well formed: each spectrum's file is a splib07a file named for its
+    /// spectrometer; a scaled end-member's index and grain are physical; a mixture's parts are
+    /// positive, sum to 1 within the rounding of their stated fractions, name each end-member once
+    /// per grain class, and put only held end-members at the fine grain; every laboratory row is a
+    /// regolith; and levels rise in wavelength within [0, 1].
+    #[test]
+    fn substance_optics_the_laboratory_inputs_are_well_formed() {
+        let check_end_member = |e: &EndMember| {
+            assert!(!e.spectra().is_empty(), "{}", e.name());
+            for spectrum in e.spectra() {
+                let file = spectrum.file();
+                let txt = std::path::Path::new(file)
+                    .extension()
+                    .is_some_and(|extension| extension == "txt");
+                assert!(file.starts_with("splib07a_") && txt, "{file}");
+                let marker = match spectrum.spectrometer() {
+                    Spectrometer::Beckman => "_BECK",
+                    Spectrometer::Asd => "_ASD",
+                };
+                assert!(file.contains(marker), "{file} is not a {marker} spectrum");
+            }
+            if let GrainScaling::Slab {
+                real_index,
+                lab_grain_diameter,
+            } = e.scaling()
+            {
+                assert!((1.3..=3.0).contains(&real_index), "{}", e.name());
+                let um = lab_grain_diameter.value() * 1.0e6;
+                assert!((5.0..=500.0).contains(&um), "{}: {um} µm", e.name());
+            }
+            assert!(!e.source().citation().is_empty(), "{}", e.name());
+            assert_eq!(e.source().basis(), Basis::Reduced, "{}", e.name());
+        };
+        for (_, optics) in rows() {
+            let key = optics.key();
+            match optics.input() {
+                OpticsInput::Spectrum { end_member } => {
+                    assert_eq!(optics.reference_form(), ReferenceForm::Regolith, "{key}");
+                    check_end_member(end_member);
+                }
+                OpticsInput::Mixture { parts } => {
+                    assert_eq!(optics.reference_form(), ReferenceForm::Regolith, "{key}");
+                    assert!(parts.len() >= 2, "{key}");
+                    let sum: f64 = parts.iter().map(MixturePart::volume_fraction).sum();
+                    assert!(
+                        (sum - 1.0).abs() < 2e-3,
+                        "{key}: the fractions sum to {sum}"
+                    );
+                    for (i, part) in parts.iter().enumerate() {
+                        assert!(part.volume_fraction() > 0.0, "{key}");
+                        check_end_member(part.end_member());
+                        assert!(
+                            !parts[..i].iter().any(|p| {
+                                p.end_member().name() == part.end_member().name()
+                                    && p.grain() == part.grain()
+                            }),
+                            "{key}: {} twice",
+                            part.end_member().name()
+                        );
+                        if part.grain() == GrainClass::Fine {
+                            assert_eq!(
+                                part.end_member().scaling(),
+                                GrainScaling::Held,
+                                "{key}: {} is fine but not held",
+                                part.end_member().name()
+                            );
+                        }
+                    }
+                }
+                OpticsInput::Levels { levels } => {
+                    let knots = levels.knots();
+                    assert!(knots.windows(2).all(|p| p[0].0 < p[1].0), "{key}");
+                    assert!(knots.iter().all(|k| (0.0..=1.0).contains(&k.1)), "{key}");
+                }
+                OpticsInput::SizedIndex { grain_diameter, .. } => {
+                    assert!(grain_diameter < optics.reference_form().grain_diameter());
+                    assert!(grain_diameter.value() > 0.0);
+                }
+                OpticsInput::Index { .. } | OpticsInput::OpaqueSlab { .. } => {}
+            }
+        }
+        assert!(
+            (FINE_GRAIN_DIAMETER.value() - 1.0e-6).abs() < 1e-18,
+            "the ruling's 1 µm"
+        );
     }
 
     /// The phase row is R10's `for_family` law of the row's family for every condensed row, never
@@ -656,7 +1309,7 @@ mod tests {
 
     /// Every row's values are inside energy's bounds: each directional-hemispherical albedo at
     /// most 1 in every band, each normal albedo at most R10's particulate ceiling of 1.35
-    /// (decision-r10-limb §4), and w in [0, 1].
+    /// (decision-r10-limb §4), w in [0, 1], and every spectral bin's spherical albedo in [0, 1].
     #[test]
     fn substance_optics_every_row_is_inside_the_energy_bound() {
         for (_, optics) in rows() {
@@ -679,63 +1332,195 @@ mod tests {
                 }
             }
             assert!(optics.directional_hemispherical_albedo_bvr(4).is_none());
+            for (bin, sphere) in optics.spherical_albedo_bins().into_iter().enumerate() {
+                assert!((0.0..=1.0).contains(&sphere), "{key}: bin {bin}: {sphere}");
+            }
+        }
+    }
+
+    /// The bins are contiguous over 0.3–5 µm, rising, each of positive width, with B, V and R's
+    /// bins holding 440, 550 and 640 nm and a bin ending at 780 nm, where R08's files end; and the
+    /// row's layout is its values in B, V and R, its bins, then its reach.
+    #[test]
+    fn substance_optics_the_bins_are_contiguous_over_0_3_to_5_um() {
+        let edges = SPECTRAL_BIN_EDGES_NM;
+        assert!((edges[0] - 300.0).abs() < 1e-12);
+        assert!((edges[SPECTRAL_BINS] - 5_000.0).abs() < 1e-12);
+        assert!(edges.windows(2).all(|pair| pair[0] < pair[1]));
+        for (bin, wavelength) in BVR_BINS.into_iter().zip(BAND_WAVELENGTHS_NM) {
+            assert!(
+                edges[bin] < wavelength && wavelength < edges[bin + 1],
+                "bin {bin}: {} to {} nm, not holding {wavelength}",
+                edges[bin],
+                edges[bin + 1]
+            );
+        }
+        assert!(edges.iter().any(|edge| (edge - 780.0).abs() < 1e-12));
+        assert_eq!(SPECTRAL_BINS, 12);
+        assert_eq!(BVR_ROW_LEN, 21);
+        assert_eq!(SPECTRAL_BINS_OFFSET, BVR_ROW_LEN);
+        assert_eq!(DATA_REACH_OFFSET, SPECTRAL_BINS_OFFSET + SPECTRAL_BINS);
+        assert_eq!(ALBEDO_ROW_LEN, 35);
+    }
+
+    /// Each row's data reach lie within the bins' 0.3–5 µm and cover the visible's 440–640 nm: an
+    /// index row's from R08's 380 nm to 780 nm at least; a row without an infrared set ends at 780
+    /// nm and holds its 700–780 nm bin beyond; every bin past the data holds its nearest covered
+    /// bin's value; and a lossless grain's bins are 1 to 10⁻⁶ (the rows with k = 0 in the visible
+    /// and no infrared set).
+    #[test]
+    fn substance_optics_the_bins_follow_the_data_s_reach() {
+        for (_, optics) in rows() {
+            let key = optics.key();
+            let [lo, hi] = optics.data_reach_nm();
+            assert!(
+                (300.0..=440.0).contains(&lo) && (640.0..=5_000.0).contains(&hi),
+                "{key}"
+            );
+            let bins = optics.spherical_albedo_bins();
+            if optics.index_file().is_some() {
+                assert!((lo - 380.0).abs() < 1e-9, "{key}: from {lo} nm");
+                assert!(hi >= 780.0, "{key}: to {hi} nm");
+                if optics.infrared_source().is_none() {
+                    assert!((hi - 780.0).abs() < 1e-9, "{key}: to {hi} nm");
+                    for bin in 5..SPECTRAL_BINS {
+                        assert!(bins[bin].total_cmp(&bins[4]).is_eq(), "{key}: bin {bin}");
+                    }
+                }
+            }
+            for (bin, pair) in SPECTRAL_BIN_EDGES_NM.windows(2).enumerate() {
+                let held = if pair[0] >= hi {
+                    SPECTRAL_BIN_EDGES_NM.windows(2).rposition(|p| p[0] < hi)
+                } else if pair[1] <= lo {
+                    SPECTRAL_BIN_EDGES_NM.windows(2).position(|p| p[1] > lo)
+                } else {
+                    None
+                };
+                if let Some(held) = held {
+                    assert!(
+                        bins[held].total_cmp(&bins[bin]).is_eq(),
+                        "{key}: bin {bin} holds its nearest covered bin's value"
+                    );
+                }
+            }
+        }
+        for key in ["O2", "Ar", "H2S", "NH4SH"] {
+            let optics = of(key);
+            assert_eq!(optics.infrared_source(), None, "{key}");
+            for (bin, sphere) in optics.spherical_albedo_bins().into_iter().enumerate() {
+                assert!((sphere - 1.0).abs() < 1e-6, "{key}: bin {bin}: {sphere}");
+            }
         }
     }
 
     /// Every row names its sources and their basis: the fit, its reference form's photometry and
-    /// grain size, and its index file, by name.
+    /// grain size, and its input's: an index file, by name, and its infrared set where it has one,
+    /// once; each end-member's description (`Reduced`), a mixture's mode (`Reduced`) and its fine
+    /// grains (`Adopted`) where it has any; levels' measurement; and a stand-in's reason, where it
+    /// comes from no index file whose own source gives it.
     #[test]
     fn substance_optics_every_row_names_its_source_and_basis() {
         for (_, optics) in rows() {
+            let key = optics.key();
             let sources = optics.sources();
             let covering =
                 |what: &'static str| sources.iter().filter(move |s| s.covers().contains(what));
             assert!(covering("normal albedo").all(|s| s.basis() == Basis::Fitted));
-            for what in ["normal albedo", "phase function", "grain size", "index"] {
-                assert_eq!(covering(what).count(), 1, "{}: {what}", optics.key());
+            for what in ["normal albedo", "phase function", "grain size"] {
+                assert_eq!(covering(what).count(), 1, "{key}: {what}");
             }
             assert_eq!(
                 covering("phase function").next().map(Source::citation),
                 Some(optics.reference_form().photometry().source().citation())
             );
-            assert!(
-                covering("index").all(|s| s.citation().starts_with(optics.index_file())),
-                "{}",
-                optics.key()
+            assert_eq!(
+                covering("infrared").count(),
+                usize::from(optics.infrared_source().is_some()),
+                "{key}"
             );
+            assert!(covering("infrared").all(|s| s.basis() == Basis::Reduced));
+            match optics.input() {
+                OpticsInput::Index { file, .. }
+                | OpticsInput::SizedIndex { file, .. }
+                | OpticsInput::OpaqueSlab { file } => {
+                    assert_eq!(covering("index").count(), 1, "{key}");
+                    assert!(
+                        covering("index").all(|s| s.citation().starts_with(file)),
+                        "{key}"
+                    );
+                }
+                OpticsInput::Spectrum { end_member } => {
+                    assert!(sources.contains(&end_member.source()), "{key}");
+                }
+                OpticsInput::Mixture { parts } => {
+                    for part in parts {
+                        assert!(sources.contains(&part.end_member().source()), "{key}");
+                    }
+                    assert_eq!(covering("mode").count(), 1, "{key}");
+                    assert!(
+                        covering("mode").all(|s| s.basis() == Basis::Reduced),
+                        "{key}"
+                    );
+                    let fine = parts.iter().any(|p| p.grain() == GrainClass::Fine);
+                    assert_eq!(covering("fine grains").count(), usize::from(fine), "{key}");
+                    assert!(covering("fine grains").all(|s| s.basis() == Basis::Adopted));
+                }
+                OpticsInput::Levels { .. } => {
+                    assert_eq!(covering("levels").count(), 1, "{key}");
+                }
+            }
+            if optics.index_file().is_none() {
+                assert_eq!(
+                    covering("stand-in").count(),
+                    usize::from(optics.is_stand_in()),
+                    "{key}: a stand-in states its reason"
+                );
+            }
             assert!(sources.iter().all(|s| !s.citation().is_empty()));
         }
     }
 
     /// The rows outside the model are labelled by having none (the closed set of
-    /// `rows/optics.rs`): the transparent minerals, the opaque solids, Mars's dust, the giant
-    /// planets' hazes and every row without an index file.
+    /// `rows/optics.rs`): the ices with no index file or spectrum, the liquids and solutions, the
+    /// giant planets' hazes, `SiC` and every row without condensed columns.
     #[test]
     fn substance_optics_the_rows_not_modelled_have_none() {
-        for key in [
-            "Al2O3",
-            "KCl",
-            "NaCl",
-            "SiO2",
-            "S8",
-            "TiO2",
-            "Fe",
-            "Cr",
-            "graphite",
-            "FeS",
-            "soot",
-            "mars_dust",
+        const NOT_MODELLED: [&str; 18] = [
+            "Kr",
+            "Xe",
+            "N2O",
+            "C2H6",
+            "CH3OH",
+            "H2SO4",
             "chromophore",
             "ice_giant_haze",
-            "feldspathic",
-            "granite",
-            "chondrite_ci",
-            "SO2",
+            "acid_uv_absorber",
+            "brine_nacl",
+            "brine_mgso4",
+            "brine_naclo4",
+            "brine_mgclo4",
+            "nh3_h2o",
+            "ch4_c2h6_n2",
+            "SiC",
             "He",
-        ] {
+            "H2",
+        ];
+        for key in NOT_MODELLED {
             let id = by_key(key).unwrap_or_else(|| panic!("{key} is a row"));
             assert!(id.substance().condensed_optics().is_none(), "{key}");
         }
+        let condensed = ids()
+            .filter(|id| id.substance().condensed().is_some())
+            .count();
+        let unmodelled_condensed = NOT_MODELLED
+            .iter()
+            .filter(|key| by_key(key).is_some_and(|id| id.substance().condensed().is_some()))
+            .count();
+        assert_eq!(
+            rows().count() + unmodelled_condensed,
+            condensed,
+            "every condensed row is modelled or named here"
+        );
     }
 
     /// The Solar System's icy anchors (plan 14's T49.c tests), against each row's normal albedo in
@@ -800,10 +1585,12 @@ mod tests {
         ),
     ];
 
-    /// The files that define what the patterns name: this module, its rows and its table.
-    const OWN: [&str; 3] = [
+    /// The files that define what the patterns name: this module, its rows, its laboratory
+    /// end-members and its table.
+    const OWN: [&str; 4] = [
         "substance/optics.rs",
         "substance/rows/optics.rs",
+        "substance/rows/optics/lab.rs",
         "tables/substance_albedo.rs",
     ];
 
@@ -812,7 +1599,7 @@ mod tests {
     /// (decision-p14-t49c-split §8.2, which narrowed them: a partition result's own `.condensed()`
     /// is not the registry's; `.grain_density(` is a method of the registry's alone, and a
     /// `grain_density_kg_m3` field does not match it) and this module's and its table's paths.
-    const PATTERNS: [&str; 15] = [
+    const PATTERNS: [&str; 23] = [
         "condensed_optics(",
         "resolve_palette_entry(",
         "Substance::condensed",
@@ -828,11 +1615,19 @@ mod tests {
         "ReferenceForm",
         "ResolvePaletteEntryError",
         "substance_albedo::",
+        "OpticsInput",
+        "InfraredIndex",
+        "EndMember",
+        "MixturePart",
+        "LabSpectrum",
+        "GrainScaling",
+        "GrainClass",
+        "ReflectanceLevels",
     ];
 
     /// The patterns that are this module's own API, which the rest of the substance module, whose
     /// own code reads the condensed columns, must not name either.
-    const OPTICS_PATTERNS: [&str; 10] = [
+    const OPTICS_PATTERNS: [&str; 18] = [
         "condensed_optics(",
         "resolve_palette_entry(",
         ".phase_law()",
@@ -843,6 +1638,14 @@ mod tests {
         "ReferenceForm",
         "ResolvePaletteEntryError",
         "substance_albedo::",
+        "OpticsInput",
+        "InfraredIndex",
+        "EndMember",
+        "MixturePart",
+        "LabSpectrum",
+        "GrainScaling",
+        "GrainClass",
+        "ReflectanceLevels",
     ];
 
     /// The lines of `substance/mod.rs` that declare this module and re-export it.
@@ -991,7 +1794,7 @@ mod tests {
             ResolvePaletteEntryError::LiquidNotModelled
         );
         assert_eq!(
-            error("mars_dust", PaletteRole::Deposit, 210.0),
+            error("SiC", PaletteRole::Deposit, 210.0),
             ResolvePaletteEntryError::OpticsNotModelled
         );
         assert_eq!(
