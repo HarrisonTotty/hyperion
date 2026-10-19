@@ -71,8 +71,8 @@ pub struct AreaShare {
     /// The substance.
     pub substance: SubstanceKey,
     /// The share of the body's surface it covers all year, 0 (not −0) to 1: the area R09.T13.d
-    /// places it over, coldest cells first by their warmest month for an ice, so cover that comes
-    /// and goes with the seasons is the climate's, not this share.
+    /// places it over, coldest cells first by their annual radiative mean for an ice, so cover
+    /// that comes and goes with the seasons is the climate's, not this share.
     pub area_fraction: f64,
 }
 
@@ -978,23 +978,27 @@ impl CoarseInputs {
     /// On an airless body plan 14 states its equilibrium temperature (P14.T13.c), a radiative
     /// mean: the Moon's is about 270 K, where its time-and-area mean temperature is far lower
     /// (Diviner's equator swings between about 95 and 395 K, Williams et al. 2017, Icarus 283,
-    /// 300). R09.T13.c–d impose it as that radiative mean, ⟨T⁴⟩^¼ over the surface and the year,
-    /// not as an arithmetic mean (the ruling in R09's Risks, which T13's science check confirms).
+    /// 300). On the radiative model R09.T13.d imposes it as that radiative mean, the brightness
+    /// temperature of the emitted flux less the night floor's, averaged as flux over the surface
+    /// and the year; on the other models as the area-weighted arithmetic mean
+    /// (decision-r09-t13d-normalisation).
     #[must_use]
     pub const fn mean_surface_temperature(&self) -> Kelvin {
         self.mean_surface_temperature
     }
 
     /// The equator–pole contrast T(0°) − T(90°), kelvin, signed: a warm pole is negative
-    /// (P14.T48.e). With the annual field T₀ + T₂ P₂(sin φ), the contrast is −(3/2) T₂, so the
-    /// climate step sets the P₂ coefficient to −⅔ of it (Design note 8).
+    /// (P14.T48.e). The climate step imposes it on the annual field's ends by a correction shaped
+    /// like P₂(sin φ). On a field T₀ + T₂ P₂(sin φ) the contrast is −(3/2) T₂, so the coefficient
+    /// is then −⅔ of it (Design note 8).
     #[must_use]
     pub const fn equator_pole_contrast_k(&self) -> f64 {
         self.equator_pole_contrast_k
     }
 
     /// The day–night contrast, kelvin, signed, about P14.T14's substellar axis on a locked world
-    /// (P14.T48.e), which the climate step imposes there by P₁(cos γ) (Design note 8).
+    /// (P14.T48.e), which the climate step imposes there on the μ-weighted day and night means by
+    /// a P₁(cos γ) correction, so that a P₁ field's coefficient is ¾ of it (Design note 8).
     #[must_use]
     pub const fn day_night_contrast_k(&self) -> f64 {
         self.day_night_contrast_k

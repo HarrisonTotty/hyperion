@@ -46,9 +46,18 @@
 //! coarse elevation: a mobile lid's continental and oceanic populations with its sea floor, and
 //! R09.T12.b its belts, trenches and arcs; a stagnant lid's one population, and R09.T12.c its
 //! volcanic provinces; and R09.T12.d the coarse craters, listed and smoothed in; all dry about the
-//! datum until R09.T12.e places the sea. The later steps are still no-ops: run on any inputs, the
-//! pass yields that relief, dry, under a still climate at the body's mean surface temperature, with
-//! the inputs' palette. R09.T12.e–T15 fill the rest and R09.T16 pins the reference worlds' fields.
+//! datum until R09.T12.e places the sea. R09.T13.a built the climate step's zonal moist
+//! energy-balance model, which writes the climate cells' sea-level temperatures and monthly
+//! anomalies on a world whose regime names it ([`steps::climate`]); R09.T13.b extended it in
+//! longitude, 72 × 72 points, and to a locked world in tidally locked coordinates, 72 × 144 points
+//! lit by its host's beam. R09.T13.c built the other regimes: radiative equilibrium with thermal
+//! inertia for airless and thin-air worlds, a column of regolith per point with the day resolved
+//! and averaged over local time, and the isothermal surface of a Venus. R09.T13.d normalised the
+//! climate to plan 14's mean and signed contrasts and placed the ices, and the liquids on the
+//! relief step's flood, by substance, with the lapse rate. Erosion and the classes are still
+//! no-ops: run on any inputs, the pass yields that relief, dry, under the climate its regime
+//! names, with the inputs' palette. R09.T12.e–T15 fill the rest and R09.T16 pins the reference
+//! worlds' fields.
 //!
 //! # Consumed items, by their paths in the code
 //!

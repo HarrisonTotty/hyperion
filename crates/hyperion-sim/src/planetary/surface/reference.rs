@@ -432,8 +432,8 @@ const CARBON_DIOXIDE_ICE: Substance = Substance {
 };
 
 /// The reference Earth's dry air by mole, as [`earth_like`]'s table sources it: a `const`, so that
-/// a malformed key fails to compile.
-const EARTH_AIR: [GasShare; 7] = [
+/// a malformed key fails to compile. Its air ([`earth_air`]) adds the water vapour.
+const EARTH_DRY_AIR: [GasShare; 7] = [
     gas("N2", 0.780_84),
     gas("O2", 0.209_476),
     gas("Ar", 0.009_34),
@@ -442,6 +442,41 @@ const EARTH_AIR: [GasShare; 7] = [
     gas("He", 0.000_005_24),
     gas("CH4", 0.000_002),
 ];
+
+/// The reference Earth's air by mole at the mean surface temperature `mean` under the surface
+/// pressure `pressure`: [`EARTH_DRY_AIR`] with water vapour at mole fraction x = `p_sat`(`T_s`) ÷
+/// `p_s`, the dry fractions scaled by 1 − x (decision-r09-t13a-relief §2.1).
+///
+/// The vapour's partial pressure is plan 14's own rule for a generated Earth (P14.T13.c,
+/// `derive::atmosphere`'s `greenhouse`: each condensable held at the registry's saturation vapour
+/// pressure at the surface temperature, [`substance::saturation_pressure`]): 1.64 kPa at 288 K
+/// (the held curve's; IAPWS gives 1.689 kPa at 288 K, Wagner and Pruss 2002, which P14.T54.a's
+/// phase diagram takes), x = 0.0167 of the 98.55 kPa. It enters the air's `c_p`, mean molar mass
+/// and lapse rate (plan 14's
+/// lapse factor reads it, `hooks::structure::lapse_factor`); the energy-balance model's moist
+/// static energy keeps its own 80% relative humidity.
+///
+/// # Panics
+///
+/// Never: the registry holds water's phase columns.
+#[must_use]
+fn earth_air(mean: Kelvin, pressure: Pascals) -> [GasShare; 8] {
+    let water = substance::by_key(H2O.as_str())
+        .and_then(|id| substance::saturation_pressure(id, mean))
+        .expect("the registry holds water's phase columns");
+    let x = water.value() / pressure.value();
+    let mut air = [GasShare {
+        substance: H2O,
+        mole_fraction: x,
+    }; 8];
+    for (share, dry) in air.iter_mut().zip(EARTH_DRY_AIR) {
+        *share = GasShare {
+            mole_fraction: dry.mole_fraction * (1.0 - x),
+            ..dry
+        };
+    }
+    air
+}
 
 /// The reference Mars's air by mole, as [`mars_like`]'s table sources it.
 const MARS_AIR: [GasShare; 5] = [
@@ -604,7 +639,7 @@ fn figure(radius_m: f64, f: f64) -> Spheroid {
 /// | day–night contrast | 3 K | a placeholder for P14.T24.a's: about 10 K over land and under 1 K over the ocean, area-weighted (low confidence) |
 /// | spin | obliquity 23.44°, sidereal day 23.9345 h; the March equinox at a true anomaly of 77.053°, 180° less the perihelion's longitude 102.947° | NASA's fact sheet and its J2000 elements |
 /// | orbit | 1.000 au, e 0.0167, 365.256 d | NASA's fact sheet |
-/// | air | 98.55 kPa; dry, by mole: N₂ 0.780 84, O₂ 0.209 476, Ar 0.009 34, CO₂ 0.000 314, Ne 1.818 × 10⁻⁵, He 5.24 × 10⁻⁶, CH₄ 2 × 10⁻⁶ | the mean total surface pressure over the topography (Trenberth and Smith 2005, J. Climate 18, 864; sea level's is 101.3 kPa); the U.S. Standard Atmosphere 1976's sea-level composition (Table 3), whose CO₂ is about 420 × 10⁻⁶ today; water vapour, about 1% and variable, is the climate's |
+/// | air | 98.55 kPa; dry, by mole: N₂ 0.780 84, O₂ 0.209 476, Ar 0.009 34, CO₂ 0.000 314, Ne 1.818 × 10⁻⁵, He 5.24 × 10⁻⁶, CH₄ 2 × 10⁻⁶; water vapour at its saturation pressure at the mean temperature, 1.64 kPa (x = 0.0167), the dry fractions scaled by 1 − x | the mean total surface pressure over the topography (Trenberth and Smith 2005, J. Climate 18, 864; sea level's is 101.3 kPa); the U.S. Standard Atmosphere 1976's sea-level composition (Table 3), whose CO₂ is about 420 × 10⁻⁶ today; the vapour by plan 14's rule for a generated Earth, P14.T13.c's (decision-r09-t13a-relief §2.1; the real near-surface mean is about 1% and variable, from memory) |
 /// | regime | mobile lid, `f_c` 0.405 | Design note 3 |
 /// | volcanism V | 1 | a placeholder: plan 14 has not set V's scale, which Mars calibrates at 1 (P14.T48.a) |
 /// | heat flow | 0.0916 W m⁻² | Davies and Davies 2010, Solid Earth 1, 5, Table 7 (46.7 TW) |
@@ -659,7 +694,7 @@ pub fn earth_like() -> CoarseInputs {
             period: year,
         })
         .surface_pressure(pressure)
-        .gases(EARTH_AIR)
+        .gases(earth_air(mean, pressure))
         .surface(SurfaceState::Temperate, SurfaceMaterial::Rock)
         .tectonics(TectonicRegime::MobileLid, 0.405)
         .volcanism(1.0)
