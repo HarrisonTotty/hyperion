@@ -2397,36 +2397,35 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   where there is none"). Tests: an airless world's day–night contrast exceeds 300 K; the
   isothermal model's own field, before T13.d imposes plan 14's contrasts, varies by under 1 K; a
   locked lava world's melt is the dayside region above the solidus, and its nightside is solid.
-- **R09.T13.d Normalisation and ice.** Plan 14's mean and signed contrasts imposed on the field
-  as plan 14 defines them (decision-r09-t13d-normalisation): the equator–pole contrast on the
-  annual field's T(0°) less its poles' mean, a locked world's day–night contrast on its μ-weighted
-  day and night means about the substellar axis, and the mean, each read in the model's kind
-  (arithmetic on the energy-balance and isothermal models; on the radiative model, which has no
-  lapse term, the brightness of the emitted flux, less the night floor's for the mean and the
-  equator–pole contrast). The corrections are c + a P₂(sin φ) + b P₁(cos γ), b on a world locked
-  1:1 only, the same at every sample and month of a model grid point. On the energy-balance and
-  isothermal models a and b come from an exact linear solve on the sea-level grid, and c is a
-  constant after the lapse term. On the radiative model all three are solved together on the
-  converged orbit's moments. No record lies below the model's lower bound (the night floor, or
-  the frost point the model holds the surface at). Each ice placed per condensate, most volatile
-  first, on the cells coldest against its own frost point by their annual radiative mean, ⟨T⁴⟩^¼
-  over the year (ties by the warmest month, then the cell's index), until its area matches plan
-  14's area for that substance (`surface_ices`), but a cold-trapped one, which T13.f places in
-  each cell's cold-trap fraction, and each liquid's surface to its share of the ocean fraction
-  (`surface_liquids`); the energy-balance albedo function shifted to the climate condensable's
-  freezing point, by `SubstanceId` (decision-composition). Tests: the area-weighted surface mean
-  equals the input to 0.1 K on the energy-balance and isothermal models, and the radiative
-  model's brightness mean of its moments equals it to 10⁻⁶ K; the annual field's ends give the
-  input contrast exactly, and on a field shaped like P₂ the P₂ coefficient is −⅔ of it; a locked
-  world's μ-weighted day and night give its day–night contrast exactly, and on a P₁ field the P₁
-  coefficient is ¾ of it; a Moon-like airless input's correction is under 0.5 K at every grid
-  point; no record lies below the model's lower bound on any reference world or on a locked lava
-  world; ice area equals the input fraction to one cell; a warm pole gets no cap; a
-  90°-obliquity world, all land at an Earth-like mean temperature, is labelled by FILLET's
-  ice-edge states (an ice belt, not caps, when plan 14's history says it started cold), and its
-  warm-start twin places the same cells; the reference Mars places CO₂ ice, placed first, inside
-  its water-ice cap's latitude, given by hand, with every iced cell poleward of 75°; a Titan-like
-  world's methane liquid fills its basins to its share.
+- **R09.T13.d Normalisation and ice.** Plan 14's mean and signed contrasts imposed on the field as
+  plan 14 defines them (decision-r09-t13d-normalisation): the equator–pole contrast on the annual
+  field's T(0°) less its poles' mean, a locked world's day–night contrast on its μ-weighted day and
+  night means about the substellar axis, and the mean, each read in the model's kind (arithmetic on
+  the energy-balance and isothermal models; on the radiative model, which has no lapse term, the
+  brightness of the emitted flux, less the night floor's for the mean and the equator–pole
+  contrast). The corrections are c + a P₂(sin φ) + b P₁(cos γ), b on a world locked 1:1 only, the
+  same at every sample and month of a model grid point. On the energy-balance and isothermal models
+  a and b come from an exact linear solve on the sea-level grid, and c is a constant after the lapse
+  term. On the radiative model all three are solved together on the converged orbit's moments. No
+  record lies below the model's lower bound (the night floor, or the frost point the model holds the
+  surface at). Each ice placed per condensate, most volatile first, on the cells coldest against its
+  own frost point by their annual radiative mean, ⟨T⁴⟩^¼ over the year (ties by the warmest month,
+  then the cell's index), until its area matches plan 14's area for that substance (`surface_ices`),
+  less its cold-trapped part (`cold_traps`), which T13.f places (`place_ices` places both parts),
+  and each liquid's surface to its share of the ocean fraction (`surface_liquids`); the
+  energy-balance albedo function shifted to the climate condensable's freezing point, by
+  `SubstanceId` (decision-composition). Tests: the area-weighted surface mean equals the input to
+  0.1 K on the energy-balance and isothermal models, and the radiative model's brightness mean of
+  its moments equals it to 10⁻⁶ K; the annual field's ends give the input contrast exactly, and on a
+  field shaped like P₂ the P₂ coefficient is −⅔ of it; a locked world's μ-weighted day and night
+  give its day–night contrast exactly, and on a P₁ field the P₁ coefficient is ¾ of it; a Moon-like
+  airless input's correction is under 0.5 K at every grid point; no record lies below the model's
+  lower bound on any reference world or on a locked lava world; ice area equals the input fraction
+  to one cell; a warm pole gets no cap; a 90°-obliquity world, all land at an Earth-like mean
+  temperature, is labelled by FILLET's ice-edge states (an ice belt, not caps, when plan 14's
+  history says it started cold), and its warm-start twin places the same cells; the reference Mars
+  places CO₂ ice, placed first, inside its water-ice cap's latitude, given by hand, with every iced
+  cell poleward of 75°; a Titan-like world's methane liquid fills its basins to its share.
 - **R09.T13.e Precipitation and wind.** Design note 8's heuristic, labelled in the header, and
   each month's 10 m wind. Tests (decision-r09-t13ge §2.13):
   - global precipitation equals global evaporation, the open liquid's Priestley–Taylor evaporation
@@ -2466,29 +2465,51 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     form; on the reference Earth through the coarse pass (slow) every month converges before the
     cap, its budget closes, and every land climate cell's monthly and annual rate lies within 1% of
     a deep solve's (decision-r09-t13e-lfpm-convergence).
-- **R09.T13.f Cold traps.** After T13.c, T13.d and T7.d (science-r09-drainage.md §4).
-  - **The shared closed form** is T7.d's `hyperion_surface::cold_trap::fraction`, built early in
-    the surface crate. This task calls it, as P14.T51.f does, and does not change it.
-    Its sky comes from the inputs' spin and seasonal orbit: the greatest declination, the host's
-    angular radius and flux at periapsis. Its heat flow is `heat_flow`, and its conduction share the
-    lunar reference.
-  - **In the airless model:** each cell's fraction for each cold-trapped condensate, at the cell's
-    latitude, with its crater fraction from the body's crater state and its plains' slope from the
-    synthesis's slope variance at the cold traps' scales. The plains' slope is clamped to 45°
-    before a `Terrain` is built, since T7.d's `Terrain::new` refuses a plains' RMS slope above 45°
-    (Risks, "Deviations in T7.d, as built"; its stand-in is checked against Smith 1967 only to
-    26.6°).
-  - **The placement:** T13.d places a cold-trapped ice in proportion to each cell's fraction,
-    capped at it and scaled so that its area matches plan 14's. Its quantised shares are rounded
-    coldest first, so the total matches to one cell. It is never placed coldest-first by whole
-    cells.
+- **R09.T13.f Cold traps.** After T13.c, T13.d and T7.d (science-r09-drainage.md §4;
+  decision-r09-t13f-cold-traps, whose interface text and tests bind).
+  - **The shared closed form** is T7.d's `hyperion_surface::cold_trap::fraction`, read through
+    plan 14's `planetary::hooks::cold_traps::ColdTrapGround`, as P14.T51.f reads it. This task
+    changes neither. Its one edit in plan 14's file is that interface, additive and bit for bit, in
+    its own commit landed before P14.T51.i (decision-r09-t13f-cold-traps §3).
+    - Its sky and ground: the inputs' spin, host flux and seasonal orbit, and
+      `cold_trap_inputs()`'s star angular radius and bare-ground Bond albedo.
+    - Its heat flow is `heat_flow`, its terrain plan 14's `terrain_of` from `craters()`, and each
+      species' threshold `trap_threshold`.
+  - **The inputs:** `CoarseInputs::cold_traps()`, the trapped part of each `ices()` share, and
+    `cold_trap_inputs()`. Both are empty or `None` from the record until P14.T54.b.
+  - **In the airless model:** each field cell's fraction for every trapped condensate, from one
+    `fractions_at` call at the cell's latitude, symmetric about the equator.
+  - **The placement:** after T13.d's zonal parts, each trapped ice in proportion to each cell's
+    fraction, scaled over every cell to plan 14's area and capped at the fraction. A cell names
+    one ice: the trapped ice of largest share. Other trapped ices there, and trapped ice on
+    another ice's zonal cell, are counted as undrawn, never moved. Its quantised shares are
+    rounded coldest first, so each drawn total matches to one cell. It is never placed
+    coldest-first by whole cells.
   - _Tests_ (the closed form's own, Ingersoll et al.'s 97 K and Hayne et al.'s Table 1 bands, are
-    T7.d's):
-    - a Moon-like input given 1.7 × 10⁻⁵ of water ice by hand places it only poleward of 70°, more
-      than 90% of it poleward of 80°, and no cell's share exceeds its fraction;
-    - at 25° obliquity no cell has a fraction;
-    - a water ice on a body whose zonal maximum is below its threshold is placed by T13.d's own
-      rule.
+    T7.d's; decision-r09-t13f-cold-traps §7.2–§7.3):
+    - the inputs: each refusal of the cold traps and their inputs, by its variant; a valid input
+      round-trips through its getters; and the tripwire
+      `the_record_gives_no_cold_traps_until_the_24_bump`, which fails at 24 so that P14.T54.b
+      wires the record's traps;
+    - a Moon-like input (T51.f's lunar case: α 0.2711°, A 0.12, q 0.018 W m⁻², δ 1.54°) given
+      1.7 × 10⁻⁵ of water ice, all of it cold-trapped, places it only poleward of 70°, more than
+      90% of it poleward of 80°, no cell's share exceeds its fraction, and none of it is short;
+    - at 25° obliquity no cell has a fraction, and a trapped share given by hand is short in full
+      and placed nowhere;
+    - a water ice with no cold-trapped part on a body whose zonal maximum is below its threshold
+      is placed by T13.d's own rule;
+    - on the Moon-like input the field's Σ Ω f ÷ Σ Ω lies within 5% of plan 14's `f_ct` for the
+      same parts, for water and for CO₂;
+    - the split: 0.02 of water ice, 10⁻⁵ of it cold-trapped, lays its zonal part on T13.d's
+      coldest cells and its traps in proportion to the fraction outside them, the total 0.02 to
+      one cell;
+    - nesting: with water's and CO₂'s traps, each cell names one ice, water's drawn area matches
+      its target to one cell, and CO₂'s drawn plus undrawn matches its own;
+    - covered: a cold body's CO₂ shares on its zonal water sheet are undrawn, and none lies on a
+      free cell its fraction does not give;
+    - a second `place_ices` (R09.T14.d's) leaves every cell's ice to the bit;
+    - a cell and its mirror across the equator take equal fractions;
+    - the airless frost points of H₂O and CO₂ are `trap_threshold`'s to the bit.
   - _Acceptance:_ `cargo test -p hyperion-sim planetary::surface::steps::climate`.
 - **R09.T13.g Relief in the energy balance** (after T13.a, before T13.d, which takes its lapse rate;
   decision-r09-t13a-relief). `steps/climate/ebm.rs` and one lapse-rate function. Each model grid
@@ -10096,3 +10117,172 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
         linear interpolation), not 35.9°, which would put the node at 35.9° rather than 35.4°.
       - Low impact, since the orographic model reads only the wind's direction. For the revision,
         with E-P3.
+- **Deviations in T13.f, as built** (2026-10-20; lane r09-climate-2, on `5fa4b0e2`; built to
+  decision-r09-t13f-cold-traps, all of it: §1's contract, §2's group, §4.2's frost points, §5's
+  placement and §7.2–§7.3's tests, its interface text exact).
+  - _Files._ `planetary/surface/inputs.rs`: `ColdTrapInputs { star_angular_radius, bond_albedo }`
+    (re-exported from `planetary::surface`), `CoarseInputs::cold_traps() -> &[AreaShare]` and
+    `cold_trap_inputs() -> Option<&ColdTrapInputs>`, the builder's `cold_traps(…)` and
+    `cold_trap_inputs(…)`, `BuildCoarseInputsError::{ColdTrapExceedsIce, ColdTrapWithoutThreshold}`
+    with the ruled Display texts, and §1.2's doc amendments to `ices()` and
+    `AreaShare::area_fraction`; `from_record` gives none and `None`, stated on it, with no code of
+    its own (the builder's defaults). `reference::builder_of` carries both. `steps/climate/ice.rs`
+    rewritten: `place_ices(inputs, solid_angles_sr, centres, keys, cells) -> PlacedIces { zonal,
+traps }`, `PlacedTrap`, `trap_fractions` and `ICE_CODES`. `frost.rs`'s airless branch,
+    `mod.rs`'s pipeline and diagnostics, the tests in `inputs.rs`, `frost.rs`, `ice.rs` and
+    `tests/cold_traps.rs`, and the "What is built" lines of `steps/climate/mod.rs`. In plan 14's
+    file only the `dead_code` expectations on `ColdTrapGroundParts` and `ColdTrapGround::new` went;
+    `annual_maximum`'s stays, since nothing outside the tests calls it (the tests read it). No other
+    contract moved: the field's types, the header, the wire and every golden are as they were, and
+    `GENERATOR_VERSION` stays 22.
+  - _The interface commit_ (`08f4b812`, `refactor(planetary): R09.T13.f The cold traps by latitude,
+for the field`, bit for bit on 3,939 values): `ColdTrapSky` keeps its declination and periapsis
+    flux (five plan-14 tests build or read them), the arithmetic shared through two private
+    functions rather than moved into `ColdTrapGround::new`; the record path built its ground with a
+    private `ColdTrapGround::of` (P14.T51.i has since moved it to `ColdTrapField::of` over a private
+    `ColdTrapGround::under`); `Sunlit::trap_fraction` is test-only; `ColdTrapGround::new` asserts
+    its parts' documented ranges, so that `None` means only the closed form's own refusals; and
+    `fractions_at`'s doc says it does not fall as the threshold rises up to the zonal annual maximum
+    there, and is 0 above it, under the zonal cap.
+  - _The builder's order._ The cold traps are checked right after the ices: each share's range
+    (`OutOfRange { part: "cold traps" }`, a −0 among them), a substance named twice, then share by
+    share, largest first, `ColdTrapExceedsIce` and `ColdTrapWithoutThreshold` (a key the registry
+    lacks has no threshold either); then the group's ranges where it is given, with traps or
+    without; then `Missing("cold-trap inputs")` where a share is above zero. Their sum takes no test
+    of its own (each is at most its ice's). A zero share of a substance with no ice share is refused
+    too, the table's "no ice share at all", its text reading "exceeds its ice share 0". The star's
+    angular radius takes `cold_trap::Body`'s rule as it stands, so a −0 passes.
+  - _One function, both parts_ (§1.5). `place_ices` drops `cold_trapped`, takes the field cells'
+    centres, and returns each ice's zonal part (`PlacedIce`, its `target` now the zonal part,
+    `area − trapped`) and each trapped part (`PlacedTrap`). It clears every cell naming an ice it
+    places, whichever part put it there. T13.d's own test keeps its carbon dioxide cell by naming
+    an entry the placement does not place, in place of the dropped list.
+  - _The fractions._ `trap_fractions` builds the one `ColdTrapGround` a body from §3.2's parts and
+    calls `fractions_at` once a field cell, in index order, at its centre's latitude asin z (the
+    cell graph's unit sphere, as the climate's grids bin cells; the spheroid's flattening is not
+    applied). No call is shared between cells of identical |φ| (the ruling allows it; the cost
+    below did not need it). A body with no cold-trap inputs, or whose sky the closed form refuses,
+    has none anywhere, and its traps are short in full.
+  - _The scale._ k_s = A_s Σ Ω ÷ Σ Ω f_s where Σ Ω f_s > A_s Σ Ω, else 1 with `short` =
+    A_s − Σ Ω f_s ÷ Σ Ω (all of A_s where no cell has a fraction).
+  - _Eligibility._ A cell naming any ice entry holds it, as T13.d's free-cell test reads, even at a
+    zero fraction. On the ice's own zonal cells its share is added to at most 1, the part over 1
+    counted as `undrawn` (the ruling says "to at most 1" and names no bucket for the rest; with it
+    placed + undrawn + short = A_s holds), and the cell is written as it is, for the quantiser to
+    round with its zonal part. A free cell's tie goes to the first in the ices' order, the most
+    volatile.
+  - _The quantisation_ (the brief's check of the ice byte's 1 ÷ 255). Each ice's free cells, in
+    the zonal key's order (K_i − T_f, T̂_i, index), take the code nearest w plus the rounding
+    carried so far (an error diffusion along the order), held to 0 and to ⌊255 f⌋, so that no
+    written share exceeds its fraction; the written value is c ÷ 255, which the quantiser maps back
+    to c. Without it much of the trapped ice would vanish: on the reference Moon at Li et al.'s
+    exposed fraction 0.035 (k 0.035), 608 of the 768 cells with a water share hold under half a
+    code, 29.5% of its area, which the quantiser alone would round to 0, and all 104 of carbon
+    dioxide's do (on the Moon-like test input, at k 0.0184, more). A cell whose fraction is under
+    one code cannot draw, and a share carried past the last cell that can is lost to rounding
+    (under one cell; F2).
+  - _The diagnostics._ `placed` is Σ Ω of what was written (the codes on free cells, the addition
+    on the ice's own zonal cells) ÷ Σ Ω, `undrawn` and `short` are the real shares, so the sum
+    holds to the quantisation's rounding. The step's `Diagnostics` gain `cold_traps` and `keys`,
+    each field cell's ice key, moved in after the placement (no copy), so that a test can run
+    R09.T14.d's second placement with the step's own keys.
+  - _The frost points_ (§4.2). `frost_point_k`'s airless branch is `trap_threshold`, equal to the
+    bit (110.00630751158238 K for water, 58.17948014553512 K for carbon dioxide); T13.d's
+    `sublimation_edge` at the triple point gave the same bits for both (measured, a difference of
+    0 K): no frost point moved.
+  - _The tests' inputs._ T51.f's lunar case is the reference Moon at 1.54° obliquity, 1,361 W m⁻²
+    ÷ 0.98329² on a circular orbit (so that `S_p` is plan 14's `lunar_parts`' to the bit), its mean
+    temperature plan 14's airless rule at that flux, its heat flow (0.018 W m⁻²) and crater
+    contract the reference's, α 0.2711° and A 0.12, with the reference Mars's carbon dioxide ice
+    entry added. Plan 14's side of the agreement test is the latitude integral of `fractions_at`
+    by `over_latitude` (`ColdTrapGround::trap_fraction`'s own sum, which is private). The nesting
+    test gives CO₂ its plan-14 `f_ct` times water's scale, one exposed fraction; the covered test is
+    that Moon at 5.2 au with 0.01 of zonal water by hand and CO₂ traps at 0.05 of its `f_ct`; the
+    25° test 10⁻⁴ by hand. Tolerances are one cell (5.12 × 10⁻⁵ of the sphere at level 6) or the
+    agreement test's 5%, never bits but where the rule is a bit identity (the re-application, the
+    mirror, the frost points). The reference worlds carry no cold-trapped share: the reference
+    Moon's water-ice entry still names none (the ruling's §3.4).
+  - _Measured_ (level 6, the Moon-like input):
+    - water's drawn ice: 1.0000 of it poleward of 70°, 0.9692 poleward of 80°; k_s 0.018421, placed
+      1.6841 × 10⁻⁵ of 1.7 × 10⁻⁵ on 109 cells, undrawn 0, short 0;
+    - agreement with plan 14: water Σ Ω f ÷ Σ Ω 9.2284 × 10⁻⁴ against `f_ct` 9.2193 × 10⁻⁴ (ratio
+      1.00098), carbon dioxide 1.8775 × 10⁻⁵ against 1.9237 × 10⁻⁵ (0.97599);
+    - the split: the zonal part 0.01999 on 480 cells, placed 0.01999; the trapped 10⁻⁵ at k
+      0.010836, placed 1.57 × 10⁻⁹ (one cell), undrawn 9.914 × 10⁻⁶, nearly all of it under the
+      sheet, which lies poleward of the traps' outer edge; the drawn total 0.019990;
+    - nesting: carbon dioxide's 3.547 × 10⁻⁷ at k 0.018893 against water's 0.018421 is undrawn in
+      full (placed 0), water drawing every cell; water as above;
+    - covered (5.2 au): carbon dioxide's 5.490 × 10⁻⁵ at k 0.049976, placed 1.2497 × 10⁻⁵ on 73
+      free cells, undrawn 4.1214 × 10⁻⁵ on the 0.01 sheet's 251 cells;
+    - at 25°: no fraction anywhere, k 1, short 10⁻⁴; the mirror: 24,576 cells against their mirrors,
+      identical to the bit.
+  - _The cost_ (D7; the release profile with its thin LTO, one thread, timed under the heavy-test
+    lock at a CPU quota of 1200%, the median of seven runs, the 1-minute load 5.3):
+    - the reference Moon at level 6 (24,576 cells; water's and carbon dioxide's traps at 0.035 of
+      the field's own fractions, α 0.2711°, A 0.12): the fractions 0.0902 s, 3.67 µs a
+      `fractions_at` call for both thresholds (the gate is open at every latitude, the zonal
+      maximum being at least 158 K); `place_ices` 0.0935 s against 0.0028 s for the zonal parts
+      alone, so the cold traps' placement is 0.091 s, under the ruling's 0.25 s. The whole climate
+      step took 0.108 s, so the cold traps are about 85% of it on an airless body;
+    - the Mercury-like input (the tests' 3:2 Mercury, with the reference Moon's figure and level 6;
+      α 0.8665°, the Sun from 0.3075 au; A 0.11; the traps at 0.45 of the fractions): 0.0576 s,
+      2.34 µs a call, and `place_ices` 0.0609 s against 0.0029 s; the climate step 0.132 s.
+  - _The plan's text._ R09.T13.f's first two bullets and its placement are §8's text, its tests
+    §7.2–§7.3's; R09.T13.d's sentence is §8's. R09.T7.k's line already read §8's ("T13.f reads them
+    through plan 14's `ColdTrapGround::fractions_at`, whose signature T51.i keeps"), so it is not
+    edited. Plan 14's P14.T51.i and P14.T54.b texts (§8) are left for the docs batch.
+- **Deferred findings (2026-10-13 rule)** (R09.T13.f; recorded, not ruled; each for "main"'s list).
+  - _From decision-r09-t13f-cold-traps §9:_
+    - D1. The plains' slope (§4.1). The synthesis's slope variance at the cold traps' scales, with
+      R09.T7.g's fit, goes to plan 14's `terrain_of` and R09 together. Owner: whoever gives plan
+      14's terrain its own slope. The 45° clamp is moot until then.
+    - D2. Collisional thin airs' frost points (§4.2). R09 reads an `Airless` body as vacuum until
+      P14.T53.c's `Tenuous` pressure reaches the inputs; then a test: a Tenuous Pluto's N₂ frost
+      point at its saturation at about 1 Pa, about 37 K. For plan 14's list (P14.T53.c or
+      P14.T55.e): its dominant-ice edge, 0.963 T_fm (60.8 K for N₂), is not the ice's own
+      saturation temperature (about 37 K at 1 Pa); it sets its zonal N₂ area on collisional thin
+      airs from T53.c.
+    - D3. The ice order can flip between vacuum edges and under-air saturation: CH₄ at 10⁻⁶ under
+      1 Pa of N₂ is about 32 K against N₂'s 37 K, while in vacuum it is 23.5 K against 17 K
+      (_estimates_). It cannot be reached at 24; it moves cells on a `Tenuous` body after T53.c,
+      which is correct under air.
+    - D4. R09's airless climate lights its poles with a point sun: on Mercury the disk raises the
+      polar peak from 110 to 172 K (T51.f's figures), so R09's polar radiative key is too cold
+      there. α is now an input, but only for the cold traps; a T13.c revision may read it.
+    - D5. R09's airless climate albedo is P14.T13.c's state albedo, neither the area mix the passes
+      use from 23 nor the regolith albedo the cold traps use from T51.i. For the T54.a and T54.b
+      re-validation, beside T13.c's own deferred albedo finding.
+    - D6. One ice per cell: nested trapped ices, and traps on another ice's zonal cell, are not
+      drawn as their own entry (§5). For R10 and the codec, if a mixed or second ice per cell is
+      ever wanted. No area is lost on the record. As built, CO₂'s traps at water's exposed fraction
+      are undrawn in full on the Moon, and a polar water sheet covers almost all of water's own
+      traps (the split's 99.1% undrawn).
+    - D7. T13.f's cost (§5.4): measured in release (above), 0.091 s on the reference Moon at level
+      6 and 0.058 s on the Mercury-like input, under the 0.25 s limit, but about 85% of the
+      release climate step on an airless body. The levers, if R09.T16's pass budget needs them:
+      the calls shared between cells of identical |φ| (the field's cells and their mirrors across
+      the equator match to the bit, so at least half the calls), then T51.i's shared form's own
+      costs and `fractions_at`'s allocations (F3).
+    - Confirmed limits carried from P14.T51.f, unchanged in R09: the model is symmetric about the
+      equator (the Moon's south holds about 60% of its traps); the present obliquity stands for its
+      history; the peak-temperature form understates CO₂; T_max is taken at equilibrium.
+  - _Found in building:_
+    - F1. A contract edge (for "main", with a lean). §1.3's table asks for the cold-trap inputs
+      only where a share is above zero, and the builder's setter says the same, while §1.2's
+      getters say the inputs are `Some` wherever `cold_traps()` is not empty. A list whose every
+      share is 0 is built without the inputs, so the getters' sentence fails in that one case.
+      Lean: keep the table (a zero share places nothing), and either P14.T54.b passes only the
+      entries whose trapped area is above zero (as `on_the_ground` does for the ices), or the
+      getters' sentence reads "wherever a share of it is above zero".
+    - F2. A cell whose fraction is under one code (1 ÷ 255) never draws its ice, its share carried
+      to the next cell in the order; past the last cell that can take it, the carry is lost to
+      rounding: the reference Moon's water placed 3.1988 × 10⁻⁵ of 3.2379 × 10⁻⁵ (−1.2%, 0.0076 of a
+      cell), the Moon-like test input's 1.6841 × 10⁻⁵ of 1.7 × 10⁻⁵ (−0.9%), and the Mercury-like
+      input's 1.0607 × 10⁻⁴ of 1.0669 × 10⁻⁴ at k 0.45 (−0.6%). Where k_s is near 1 (Mercury's
+      exposed fraction reaches 0.45) the cap ⌊255 f⌋ binds more often; a carry that may exceed ⌊255
+      f⌋ by one code, or the shares written in a finer code, would keep more. For R10 and the codec,
+      with D6.
+    - F3. `fractions_at`'s allocations (P14.T51.i's deferred finding): about 13 small ones a call,
+      three in `fractions_at` itself. At 3.67 µs a call on the Moon they are not separable without
+      a profile, which was not run; at 20–50 ns an allocation (_estimate_) they would be 0.3–0.7 µs
+      of it. Not optimised in this lane, as the brief says.

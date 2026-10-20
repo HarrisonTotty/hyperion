@@ -1129,6 +1129,10 @@ pub(crate) fn builder_of(inputs: &CoarseInputs) -> CoarseInputsBuilder {
     if let Some(epoch) = inputs.wet_epoch() {
         builder = builder.wet_epoch(*epoch);
     }
+    builder = builder.cold_traps(inputs.cold_traps().iter().copied());
+    if let Some(group) = inputs.cold_trap_inputs() {
+        builder = builder.cold_trap_inputs(*group);
+    }
     builder
 }
 

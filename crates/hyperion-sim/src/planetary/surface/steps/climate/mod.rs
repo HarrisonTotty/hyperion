@@ -39,9 +39,14 @@
 //!    cells' area-weighted surface temperature, each its climate cell's sea-level temperature
 //!    less Γ times its surface's height above the sea level, the input's, added last to every
 //!    sea-level temperature (Design note 8). Every record then lies at or above the lower bound.
-//! 7. The ices (`ice`): each placed per substance, most volatile first, on the field cells coldest
-//!    against its own frost point by their annual radiative mean surface temperature, read by the
-//!    cells' own interpolant at their centres (decision-r09-t13d-normalisation §1).
+//! 7. The ices (`ice`): each placed per substance, most volatile first, its zonal part on the field
+//!    cells coldest against its own frost point by their annual radiative mean surface
+//!    temperature, read by the cells' own interpolant at their centres
+//!    (decision-r09-t13d-normalisation §1), then its cold-trapped part
+//!    ([`CoarseInputs::cold_traps`](crate::planetary::surface::CoarseInputs::cold_traps)) in
+//!    proportion to each cell's cold-trap fraction at its centre's latitude, plan 14's closed form
+//!    through its `ColdTrapGround`, scaled to plan 14's area and capped at the fraction, a cell
+//!    naming one ice (decision-r09-t13f-cold-traps §5).
 //! 8. The liquids (`seas`): the flooded cells shared among them, each to its share of the ocean
 //!    fraction, basin by basin.
 //! 9. The precipitation heuristic and the winds (`hydrology`, R09.T13.e; decision-r09-t13ge §2),
@@ -91,7 +96,13 @@
 //! (`wind`); and their pipeline (`hydrology`), which writes each climate cell's monthly
 //! precipitation and 10 m wind, and `annual_runoff_kg_m2_s`, the runoff R09.T14 reads. Each
 //! month's record holds the wind its orographic step carried vapour along, as the record decodes
-//! it. R09.T13.f's cold traps are still to come. A world places liquids only on the cells the
+//! it. R09.T13.f added the cold traps (`ice`, the pipeline's step 7): each ice's cold-trapped part,
+//! the inputs' `cold_traps`, placed after the zonal parts in one function in each field cell's
+//! cold-trap fraction, from one call of plan 14's `ColdTrapGround::fractions_at` a cell for every
+//! trapped substance, scaled over every cell to plan 14's area and held to the fraction, the
+//! trapped ice of largest share drawn where several lie and the rest counted as undrawn, its
+//! shares written in whole codes coldest first; and the airless frost points the ices are ranked
+//! by read plan 14's cold-trap threshold (`frost`). A world places liquids only on the cells the
 //! relief step floods (R09.T12.e's ocean, decision-r09-t12-coarse R8).
 
 mod airless;
@@ -128,7 +139,7 @@ use ebm::{Ground, Relief};
 use grid::LATITUDE_BANDS;
 use grid::{GridClimate, ModelGrid};
 use hypsometry::Hypsometry;
-use ice::{IceKey, PlacedIce};
+use ice::{IceKey, PlacedIce, PlacedTrap};
 use normalise::Correction;
 use seas::PlacedLiquid;
 use sun::NOMINAL_STEP;
@@ -146,7 +157,8 @@ pub fn run(pass: &Pass<'_>, working: &mut Working) {
 }
 
 /// What a run did that is no output, for its tests: the guard's counts, the corrections and the
-/// ices and liquids placed (decision-r09-t13d-normalisation §1.2, §2.4).
+/// ices, their cold-trapped parts and the liquids placed (decision-r09-t13d-normalisation §1.2,
+/// §2.4; decision-r09-t13f-cold-traps §5.3).
 #[derive(Debug, Clone, PartialEq, Default)]
 struct Diagnostics {
     /// The correction the model's field took, K: c, a and b.
@@ -163,8 +175,13 @@ struct Diagnostics {
     floored_records: u32,
     /// The model's lower bound, K.
     lower_bound_k: f64,
-    /// The ices placed, in order.
+    /// The ices' zonal parts placed, in order.
     ices: Vec<PlacedIce>,
+    /// The ices' cold-trapped parts placed, in order (R09.T13.f).
+    cold_traps: Vec<PlacedTrap>,
+    /// Each field cell's ice key, in cell-index order, which a second placement reads
+    /// (R09.T14.d's re-application).
+    keys: Vec<IceKey>,
     /// The liquids placed, in order.
     liquids: Vec<PlacedLiquid>,
     /// The energy-balance models' surface means ([`SurfaceMeans`]); none on the other models.
@@ -409,8 +426,8 @@ fn finish(pass: &Pass<'_>, working: &mut Working, mut model: Normalised) -> Diag
     let ices = ice::place_ices(
         inputs,
         pass.grid().solid_angles_sr(),
+        pass.grid().centres(),
         &keys,
-        &[],
         &mut working.cells,
     );
     let liquids = seas::place_liquids(inputs, pass.grid(), &annual_k, &mut working.cells);
@@ -422,7 +439,9 @@ fn finish(pass: &Pass<'_>, working: &mut Working, mut model: Normalised) -> Diag
         clamped_values,
         floored_records,
         lower_bound_k: model.lower_bound_k,
-        ices,
+        ices: ices.zonal,
+        cold_traps: ices.traps,
+        keys,
         liquids,
         surface_means: model.surface_means,
         water,

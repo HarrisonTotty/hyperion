@@ -1,4 +1,4 @@
-//! The climate step's tests (R09.T13.a–e): the plan's, with the pipeline's own.
+//! The climate step's tests (R09.T13.a–g): the plan's, with the pipeline's own.
 
 use hyperion_surface::field::{ClimateModelKind, CoarseLevel};
 
@@ -1214,6 +1214,7 @@ fn a_locked_world_with_obliquity_has_twelve_months_that_differ() {
     a_locked_world_has_twelve_months_that_differ(0.0, 20.0);
 }
 
+mod cold_traps;
 mod earth_land;
 mod hydrology;
 mod normalisation;
