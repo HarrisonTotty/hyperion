@@ -164,6 +164,9 @@ async function bakeOverField(
           // No class map is asked here (R10.T10.d).
           case "class-map":
           case "class-map-failed":
+          // No readout is asked here (R10.T12).
+          case "ground-readout":
+          case "ground-readout-failed":
             fail(`the worker answered ${JSON.stringify(reply)}`);
             return;
         }

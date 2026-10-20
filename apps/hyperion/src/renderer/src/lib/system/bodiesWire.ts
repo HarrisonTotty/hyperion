@@ -63,7 +63,7 @@ import {
 
 import { cross, dot, vec3, type Vec3 } from "../../geometry/vec3";
 import { ROTATION_ORTHONORMAL_TOLERANCE } from "../../view/coords/rotation";
-import { NEAR_PARABOLIC_ECCENTRICITY, type OrbitDrift } from "../orbit";
+import { type KeplerOrbit, NEAR_PARABOLIC_ECCENTRICITY, type OrbitDrift } from "../orbit";
 import { GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 } from "./constants";
 import type {
   Absorber,
@@ -170,6 +170,49 @@ export function bodyDetailSeed(record: Pick<BodyRecordDto, "hooks">): DetailSeed
   }
   const seed = hooks.value.detail_seed.value;
   return DETAIL_SEED_FORM.test(seed) ? seed : null;
+}
+
+/**
+ * A body record's own orbit about its parent, as the client propagates it (with its drift), without
+ * reading the rest of the record: `null` where the section is not `ok` (a free-floating body's is
+ * `not_applicable`) or the orbit is not one the client can propagate.
+ */
+export function bodyRecordOrbit(record: Pick<BodyRecordDto, "orbit">): KeplerOrbit | null {
+  const { orbit } = record;
+  if (orbit.state !== "ok") {
+    return null;
+  }
+  const converted = faultOf(() => toOrbit(orbit.value));
+  return "ok" in converted ? converted.ok.orbit : null;
+}
+
+/**
+ * Whose orbit sets a body's seasons, by its record (R09's Design note 8; decision-r10-t12-leans §6
+ * (b)): a moon's, one whose kind is `moon` about a body, its planet's, whose record holds it; every
+ * other body's its own, a circumbinary planet's and a belt member's included.
+ */
+export type RecordSeasons =
+  /** The body's own orbit sets them. */
+  | { readonly kind: "own"; readonly orbit: KeplerOrbit }
+  /** A moon: its planet's orbit sets them, from the planet's own record. */
+  | { readonly kind: "planet"; readonly planet: BodyIdHex }
+  /** No orbit the client can propagate is on the record. */
+  | { readonly kind: "none" };
+
+/**
+ * Whose orbit sets the seasons of the body of `record` (plan R10, T12): the sim's
+ * `CoarseInputs::planet_of`'s rule, a moon by its kind about a body, read off the record's kind and
+ * parent, and otherwise the record's own orbit ({@link bodyRecordOrbit}).
+ */
+export function bodyRecordSeasons(
+  record: Pick<BodyRecordDto, "kind" | "parent" | "orbit">,
+): RecordSeasons {
+  const { kind, parent } = record;
+  if (kind.type === "moon" && parent?.type === "body") {
+    return { kind: "planet", planet: parent.id };
+  }
+  const orbit = bodyRecordOrbit(record);
+  return orbit === null ? { kind: "none" } : { kind: "own", orbit };
 }
 
 /**

@@ -301,6 +301,34 @@ describe("the terrain run's results", () => {
     expect(findings.bothSurfaces).toMatch(/part-6/);
   });
 
+  it.each([
+    [
+      "its height workers lost",
+      "TERRAIN NOT AVAILABLE: height computation failed, reopen VIEW to retry",
+    ],
+    [
+      "a computation failing on",
+      "TERRAIN NOT AVAILABLE: terrain computation failed, reopen VIEW to retry",
+    ],
+  ])(
+    "fail a run whose terrain session showed the terrain's fault, for %s (R10.T16.e)",
+    (_cause, text) => {
+      const results = buildTerrainCheckResults(
+        changed({ terrainFaults: [{ atMs: 41_000, text, views: ["view"] }] }),
+      );
+      expect([
+        results.findings.terrainFaults.verdict,
+        results.overall,
+        terrainFailures(results),
+      ]).toEqual(["fail", "fail", `the terrain's fault at 41000 ms on view: ${text}`]);
+    },
+  );
+
+  it("pass a run whose terrain session never showed the terrain's fault", () => {
+    const { findings } = buildTerrainCheckResults(input());
+    expect(findings.terrainFaults).toEqual({ verdict: "pass", reasons: [], record: [] });
+  });
+
   it("list the console's first errors", () => {
     const errors = Array.from({ length: 7 }, (_, i) => `error ${String(i)}`);
     const { findings } = buildTerrainCheckResults(input({ consoleErrors: errors }));
@@ -401,6 +429,9 @@ describe("the terrain run's summary and its files", () => {
     expect(text).toContain("# Terrain run: effect, high, 2026-10-19");
     expect(text).toContain("- **Overall:** pass");
     expect(text).toMatch(/\| One forced loss, then one restore, and no other fault \| pass \|/);
+    expect(text).toContain(
+      "| No terrain fault (the session's terrainFaults never held a view) | pass | none |",
+    );
     expect(text).toContain("## Phases (provisional)");
     expect(text).toContain("| terrain-loss |");
   });
@@ -432,7 +463,9 @@ describe("the terrain run's summary and its files", () => {
     expect(smoke.markdown).toBe("/out/2026-10-19-effect-high-terrain-smoke.md");
     expect(JSON.parse(written.get(first.json) ?? "null")).toMatchObject({
       schema: "hyperion.views-check.terrain-results",
+      version: 2,
       overall: "pass",
+      findings: { terrainFaults: { verdict: "pass", reasons: [], record: [] } },
     });
   });
 });

@@ -130,7 +130,8 @@ import {
   ViewMarkLabels,
 } from "./ViewMarkLabels";
 import { styleName } from "../../view/photoreal/style";
-import { TERRAIN_NOT_AVAILABLE, type TerrainAnnunciation } from "../../view/terrain/annunciation";
+import { isTerrainFault, type TerrainAnnunciation } from "../../view/terrain/annunciation";
+import { TerrainFailureGuard } from "../../view/terrain/failureGuard";
 import type { TerrainSession } from "../../view/terrain/session";
 import type { WorkerLike } from "../../view/terrain/workers/pool";
 import { useServerLink } from "../../lib/serverLink";
@@ -507,6 +508,9 @@ function chromeBoxesPx(overlay: Element): ScreenBoxPx[] {
  * afresh.
  *
  * @param labels - The marks' labels by their target's key.
+ * @param lineOfSightPx - The line-of-sight mark's box as the last drawn frame drew it, device px
+ *   (`DrawnLineOfSight.boxPx`, plan R10, R10.T12), held clear as the chrome is; `null` where it was
+ *   not drawn.
  * @param stage - The stage's size, CSS px, its device-pixel ratio and its rem.
  * @param states - Each label's state after the frame before, written for the next.
  * @param nowMs - The animation frame's time, by which each label's changes are counted.
@@ -514,6 +518,7 @@ function chromeBoxesPx(overlay: Element): ScreenBoxPx[] {
 function placeMarkLabels(
   labels: ReadonlyMap<string, HTMLElement>,
   anchors: ReadonlyArray<DrawAnchor>,
+  lineOfSightPx: ScreenBoxPx | null,
   stage: ElementSize,
   selection: CameraTarget | null,
   states: WeakMap<HTMLElement, MarkLabelState>,
@@ -538,6 +543,7 @@ function placeMarkLabels(
   }
   const places = markLabelPlaces(anchors, plates, stage, {
     chrome: overlay === null ? [] : chromeBoxesPx(overlay),
+    lineOfSightPx,
     selection: selection === null ? null : targetKey(selection),
     previous,
     nowMs,
@@ -651,7 +657,8 @@ function ViewStage({
   const reducedMotion = usePrefersReducedMotion();
   const graphics = useGraphicsStatus();
   const annunciation = graphicsAnnunciation(graphics);
-  // The views that show the terrain's fault, every height worker lost (R10.T16.b).
+  // The views that show the terrain's fault, every height worker lost (R10.T16.b) or a guarded
+  // computation failing on (R10.T16.e), each with its text.
   const terrainFaults = useTerrainFaults(terrain);
   const { ref: stageRef, size } = useElementSize();
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
@@ -744,9 +751,9 @@ function ViewStage({
   const controlsView = operatedView === null ? VIEW_ID : operatedView.slot.id;
   const controlledShown = operatedView?.slot.shown ?? null;
   const faults = faultsFor(graphics, annunciation, VIEW_NAME, VIEW_ID, terrainFaults);
-  // The primary's own terrain annunciation (G10; R10.T16.c), none while its fault stands
-  // (`terrainStatementOf`'s rule, C2).
-  const primaryTerrain = faults.includes(TERRAIN_NOT_AVAILABLE) ? null : shown.terrain;
+  // The primary's own terrain annunciation (G10; R10.T16.c), none while its fault stands, of either
+  // cause (`terrainStatementOf`'s rule, C2).
+  const primaryTerrain = faults.some((fault) => isTerrainFault(fault)) ? null : shown.terrain;
 
   // The list's ranges switch unit with hysteresis, from the units they were last shown in;
   // adjusted during render as each published run arrives.
@@ -879,6 +886,9 @@ function ViewStage({
     let lastMs: number | null = null;
     let publishedMs = Number.NEGATIVE_INFINITY;
     let anchors: ReadonlyArray<DrawAnchor> = [];
+    // The line-of-sight mark's box as the last frame drew it, which the labels stand clear of
+    // (R10.T12).
+    let lineOfSightPx: ScreenBoxPx | null = null;
     // Where each mark's label stood after the last frame, kept with its element (R07.T16.i).
     const labelStates = new WeakMap<HTMLElement, MarkLabelState>();
     // The terrain session the view last told what it drew, which forgets it when it goes.
@@ -887,10 +897,12 @@ function ViewStage({
     let terrainAnnunciation: TerrainAnnunciation | null = null;
     // The survey edges the last frame drawn marked, for the list's notes (R10.T16.c).
     let surveyEdges = NO_SURVEY_EDGES;
+    // The guard of the terrain session's step (the batch review's S5; R10.T16.e): a failure said
+    // once until a step succeeds, and the session's terrain faulted once its steps fail on for
+    // 250 ms. One a session, so that a run of failures is its own.
+    let stepGuard = new TerrainFailureGuard();
     // The contour interval of the last frame drawn (R10.T11), for the label block.
     let contourIntervalM: number | null = null;
-    // The terrain session's step failed, said once until a step succeeds (the batch review's S5).
-    let stepFailed = false;
     let frame = 0;
     const tick = (nowMs: number): void => {
       animationFrame += 1;
@@ -906,6 +918,7 @@ function ViewStage({
           placeMarkLabels(
             labelsRef.current,
             anchors,
+            lineOfSightPx,
             between.size,
             between.selection,
             labelStates,
@@ -969,6 +982,7 @@ function ViewStage({
       if (reportedTo !== session) {
         reportedTo?.forgetView(VIEW_ID);
         reportedTo = session;
+        stepGuard = new TerrainFailureGuard();
       }
       terrainAnnunciation = null;
       let frameInputs: ViewFrameInputs | null = null;
@@ -1013,12 +1027,14 @@ function ViewStage({
           session.noteView(VIEW_ID, report);
         }
       }
-      // Guarded: no throw of the step stops this loop or the instruments' (S5).
-      stepFailed = stepTerrainSession(session, stepFailed);
+      // Guarded: no throw of the step stops this loop or the instruments' (S5), and one that lasts
+      // faults the terrain (R10.T16.e).
+      stepTerrainSession(session, stepGuard, nowMs);
       if (drawer !== null && frameInputs !== null) {
         const drawn = drawer.draw(frameInputs);
         if (drawn !== null && inputs.size !== null) {
           anchors = drawn.anchors;
+          lineOfSightPx = drawn.lineOfSight?.boxPx ?? null;
           terrainAnnunciation = drawn.terrain;
           surveyEdges = drawn.surveyEdges;
           contourIntervalM = drawn.contourIntervalM;
@@ -1027,6 +1043,7 @@ function ViewStage({
           placeMarkLabels(
             labelsRef.current,
             anchors,
+            lineOfSightPx,
             inputs.size,
             inputs.selection,
             labelStates,

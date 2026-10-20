@@ -349,6 +349,25 @@ describe("the views check's session on a terrain launch (R10.T16.d)", () => {
     expect(lines.at(-1)).toMatch(/1 height workers left/);
   });
 
+  it("ends with 1 when its terrain session showed the terrain's fault (R10.T16.e)", async () => {
+    const failing: TerrainCheckRecord = {
+      ...TERRAIN_RECORD,
+      terrainFaults: [
+        {
+          atMs: 40_000,
+          text: "TERRAIN NOT AVAILABLE: terrain computation failed, reopen VIEW to retry",
+          views: ["view"],
+        },
+      ],
+    };
+    const lines: string[] = [];
+    const { session: run, deps } = terrainSession({ log: (line) => lines.push(line) });
+    await run.writeTerrainResults(failing);
+    run.end(0, null);
+    expect(deps.exit).toHaveBeenCalledWith(1);
+    expect(lines.at(-1)).toMatch(/the terrain's fault at 40000 ms on view: TERRAIN NOT AVAILABLE/);
+  });
+
   it("ends with 1 when it ends with no results written", () => {
     const { session: run, deps } = terrainSession();
     run.end(0, null);

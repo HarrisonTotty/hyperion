@@ -14,7 +14,11 @@ import {
 import { vec3 } from "../../geometry/vec3";
 import { earthDetail, FIXTURE_EARTH } from "../../test/planetaryFixture";
 import { SCENE_TIDAL_RADIUS_M, sceneClock, sliceSceneSystem } from "../../test/sceneFixture";
-import { ANNUNCIATION_ONSET_MS, TERRAIN_NOT_AVAILABLE } from "../../view/terrain/annunciation";
+import {
+  ANNUNCIATION_ONSET_MS,
+  TERRAIN_COMPUTATION_FAILED,
+  TERRAIN_NOT_AVAILABLE,
+} from "../../view/terrain/annunciation";
 import { PALETTE_NONE } from "../../view/terrain/workers/messages";
 import { MAX_CONSECUTIVE_WORKER_FAILURES } from "../../view/terrain/workers/pool";
 
@@ -499,6 +503,55 @@ describe("the terrain's fault on a live VIEW (R10.T16.b's line, a body handed ov
     // The fault stands only for a view that hands a body over: the primary's live frame does.
     expect([before, faultLines()]).toEqual([[], [TERRAIN_NOT_AVAILABLE]]);
     expect(within(primaryLabelBlock()).queryByText("TERRAIN: STREAMING")).toBeNull();
+  });
+
+  /** The Earth handed over, with the session `VIEW` made. */
+  async function earthAndSession(): Promise<{
+    readonly view: ViewDisplayHarness;
+    readonly session: TerrainSession;
+  }> {
+    const sessions: TerrainSession[] = [];
+    const view = await earthHandedOver({
+      watchTerrain: (session) => {
+        sessions.push(session);
+        return () => undefined;
+      },
+    });
+    const session = sessions.at(-1);
+    if (session === undefined) {
+      throw new Error("VIEW made no terrain session");
+    }
+    return { view, session };
+  }
+
+  it("states the computation's fault, and draws no terrain, once the session's step has thrown for 250 ms (R10.T16.e)", async () => {
+    const { view, session } = await earthAndSession();
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const before = faultLines();
+    vi.spyOn(session, "step").mockImplementation(() => {
+      throw new Error("a bug of the session's step");
+    });
+    view.advance(ANNUNCIATION_ONSET_MS + 250);
+    await settle();
+    expect([
+      before,
+      faultLines(),
+      session.pass(FIXTURE_EARTH)?.faulted,
+      within(primaryLabelBlock()).queryByText("TERRAIN: STREAMING"),
+      // Said once, however many steps threw.
+      error.mock.calls.filter(([what]) => what === "the terrain session's step failed:").length,
+    ]).toEqual([[], [TERRAIN_COMPUTATION_FAILED], true, null, 1]);
+  });
+
+  it("states nothing for a single step that throws", async () => {
+    const { view, session } = await earthAndSession();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(session, "step").mockImplementationOnce(() => {
+      throw new Error("a bug of the session's step");
+    });
+    view.advance(ANNUNCIATION_ONSET_MS + 250);
+    await settle();
+    expect([faultLines(), session.pass(FIXTURE_EARTH)?.faulted]).toEqual([[], false]);
   });
 });
 

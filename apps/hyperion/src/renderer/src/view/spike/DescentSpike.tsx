@@ -25,6 +25,7 @@ import type { ViewSize } from "../engine/types";
 import type { QualitySetting, TerrainVariant } from "../quality/qualitySetting";
 import { cameraSceneOf } from "../scene/model";
 import type { PatchKey } from "../terrain/patchKey";
+import { formatElevationReading } from "../terrain/readouts";
 import type { Selection, SelectionInput } from "../terrain/select";
 import type { TestPlanetRidges } from "../terrain/workers/messages";
 import { viewStrokesAt } from "../wireframe/drawList";
@@ -136,6 +137,17 @@ export function heightReading(heightM: number, unit: HeightUnit): string {
     return `${formatNumber(heightM / 1000, 1)} km`;
   }
   return Math.abs(heightM) < 10 ? `${formatNumber(heightM, 1)} m` : `${formatNumber(heightM, 0)} m`;
+}
+
+/**
+ * The landing site's `SITE ELEVATION` above the body's spheroid, in `ELEVATION`'s resolved form
+ * (signoff-9 (k) part 2; plan R10, R10.T12): to 0.1 m, `-` below the datum and no `+` above it,
+ * digits grouped from five (`formatElevationReading`), `412.3 m`, `-410.0 m`.
+ *
+ * @param elevationM - Above the spheroid, m.
+ */
+export function siteElevationReading(elevationM: number): string {
+  return formatElevationReading(elevationM, null).value;
 }
 
 /** The ground speed: whole metres a second from 100 m/s, two decimals below. */
@@ -604,9 +616,9 @@ export function DescentSpike({
               <Reading value={pose === null ? null : verticalSpeedReading(pose.verticalSpeedMps)} />
               <dt>Camera ELV</dt>
               <Reading value={pose === null ? null : formatSignedDeg(cameraElevationDeg(pose))} />
-              <dt>Site Height</dt>
+              <dt>Site Elevation</dt>
               <Reading
-                value={prepared === null ? null : `${formatSigned(prepared.siteHeightM, 0)} m`}
+                value={prepared === null ? null : siteElevationReading(prepared.siteHeightM)}
               />
               <dt>Finest Terrain Held</dt>
               <Reading value={published === null ? null : published.contact ? "YES" : "NO"} />

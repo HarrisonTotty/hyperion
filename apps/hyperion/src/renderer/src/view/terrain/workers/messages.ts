@@ -14,13 +14,16 @@
  * or a body, whose patches the worker bakes over the field it holds of it with the body's detail
  * seed. A worker answers each block of a payload with what it changed of the survey and the body's
  * level table after it, and a body's bake with R10's layers. A `class-map` query asks one worker for
- * a body's coarse class map over the field it holds (R10.T10.d), the disc's surface.
+ * a body's coarse class map over the field it holds (R10.T10.d), the disc's surface, and a
+ * `ground-readout` query a view's whole terrain readout where its line of sight meets the ground
+ * (R10.T12), whose answer's types live here with the readings', the worker's wrappers of the
+ * module answering in them (`heightBake.ts`).
  */
 
 import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
 
 import type { TerrainNormals, TerrainVertexPath } from "../../quality/terrainKinds";
-import type { PatchKey } from "../patchKey";
+import type { Face, PatchKey } from "../patchKey";
 import type { BodyFixedVec3 } from "../planet";
 
 /** A baked patch as the worker hands it to the render thread (Design note 5). */
@@ -217,6 +220,156 @@ export interface ClassMapAnswer {
   readonly complete: boolean;
 }
 
+/** A point of a face, in the cube's face coordinates (`hyperion_surface::cube::FaceUv`). */
+export interface FacePoint {
+  readonly face: Face;
+  /** In [−1, 1]. */
+  readonly u: number;
+  /** In [−1, 1]. */
+  readonly v: number;
+}
+
+/** What a readout may quote of the ground at a point (R10.T5's `SurveyedReading`). */
+export interface SurfaceReading {
+  readonly elevationM: number;
+  /** The elevation's standard uncertainty, metres; 0 where resolved. */
+  readonly elevationSigmaM: number;
+  readonly slopeRmsRad: number;
+  readonly slopeSigmaRad: number;
+  readonly slopeBaselineM: number;
+  /** The cell code's resolution the reading was taken at, metres. */
+  readonly resolutionM: number;
+  /** Whether the survey reaches the band limit, so that the uncertainties are zero. */
+  readonly resolved: boolean;
+}
+
+/** The distance along a line of sight to the ground it meets, and where (R10.T5's `SlantRange`). */
+export interface SurfaceSlantRange {
+  readonly rangeM: number;
+  /** The range's standard uncertainty, metres; `null` where the line of sight grazes. */
+  readonly sigmaM: number | null;
+  readonly resolved: boolean;
+  /** The hit, body-fixed metres. */
+  readonly hitM: readonly [number, number, number];
+  /** The hit's foot on the datum. */
+  readonly at: FacePoint;
+}
+
+/** Where a line of sight meets the ground, as far as the survey can say (R10.T5's `LineOfSight`). */
+export type SurfaceLineOfSight =
+  | ({ readonly kind: "ground" } & SurfaceSlantRange)
+  | { readonly kind: "no-ground" }
+  | { readonly kind: "not-surveyed" };
+
+/** The properties of a material whose substance the palette names (R10.T1.a's). */
+export interface SurfaceMaterialProperties {
+  /** The normal albedo in the Johnson B, V and R bands. */
+  readonly normalAlbedoBvr: readonly [number, number, number];
+  /** The photometric law's code (`PhaseLaw`). */
+  readonly phaseLaw: number;
+  /** The law's L(0) at the material's albedo in V. */
+  readonly limbParameter: number;
+  readonly grainDensityKgM3: number;
+  /** The temperature above which the substance is melt or liquid, kelvin. */
+  readonly transitionK: number;
+  /** The substance's mechanics family's code (`MechanicsFamily`). */
+  readonly mechanics: number;
+}
+
+/** The ground's material at a point, by its form and its substance (R10.T1.b's `GroundMaterial`). */
+export interface SurfaceGroundMaterial {
+  /** The form's class code (`MaterialClass`). */
+  readonly classCode: number;
+  /** The palette entry, `null` where the palette names no substance. */
+  readonly entry: number | null;
+}
+
+/** The ground's material at a surveyed point, with its properties where its substance is named. */
+export interface SurfaceMaterial extends SurfaceGroundMaterial {
+  /** `null` where the palette names no substance. */
+  readonly properties: SurfaceMaterialProperties | null;
+}
+
+/**
+ * A baseline a terrain readout's `SLOPE` may be read over, metres: the guide's `BASELINE` choices,
+ * the crate's `SLOPE_BASELINES` (R10.T12), and nothing else, which the module refuses.
+ */
+export type SlopeBaselineM = 2 | 5 | 100;
+
+/**
+ * What a view's terrain readout asks where its line of sight meets the ground (R10.T12; the crate's
+ * `GroundReadoutQuery`): the line of sight, body-fixed, and the readout's settings.
+ */
+export interface GroundReadoutQuery {
+  /** The line of sight's origin, body-fixed metres. */
+  readonly originM: BodyFixedVec3;
+  /** Its direction, body-fixed, of any length but zero. */
+  readonly direction: BodyFixedVec3;
+  /** How far along it the ground is looked for, metres; past the body's far side for `NO GROUND`. */
+  readonly maxM: number;
+  /**
+   * The baseline `SLOPE` is read over, metres (the guide's `BASELINE`), 2 until its selector is
+   * built (R10.T12.a); the capacity takes 2 m whatever this is.
+   */
+  readonly slopeBaselineM: SlopeBaselineM;
+  /** The width of the pad the bearing capacity is taken under, metres: the reference pad's 1.0. */
+  readonly padWidthM: number;
+  /**
+   * The seasonal orbit's mean anomaly at the instant the view lights the body at, radians from
+   * periapsis, finite (`meanAnomalyAt`); `undefined` where no orbit is known (a kept scene's body).
+   */
+  readonly seasonMeanAnomalyRad: number | undefined;
+}
+
+/**
+ * The ground's two properties a terrain readout states after `MATERIAL` (R10.T12; the crate's
+ * `GroundProperties`), each `null` where it is not computed: the guide's em dash, never 0.
+ */
+export interface SurfaceGroundProperties {
+  /**
+   * The ultimate bearing capacity under the query's pad at the body's surface gravity, Pa (the
+   * guide's `ULTIMATE BEARING CAPACITY`).
+   */
+  readonly bearingCapacityPa: number | null;
+  /** The RMS slope over the fixed 2 m baseline the capacity was taken on, rad. */
+  readonly capacitySlopeRad: number;
+  /** The pad's interface friction coefficient, dimensionless (the guide's `PAD FRICTION`). */
+  readonly padFriction: number | null;
+  /** Whether the friction depends on the temperature, so that the line states its `· AT`. */
+  readonly frictionOnTemperature: boolean;
+  /**
+   * The month's mean surface temperature at the point, kelvin (the guide's `AT`): `null` in a year of
+   * twelve months with no season known.
+   */
+  readonly temperatureK: number | null;
+}
+
+/** A view's terrain readout where its line of sight meets the ground (R10.T12's `GroundReadout`). */
+export type SurfaceGroundReadout =
+  | {
+      readonly kind: "ground";
+      readonly sight: SurfaceSlantRange;
+      /** The reading at the sight's foot, its slope over the query's baseline. */
+      readonly reading: SurfaceReading;
+      readonly material: SurfaceGroundMaterial;
+      readonly properties: SurfaceGroundProperties;
+    }
+  /** The line of sight meets no ground within its reach: `NO GROUND`. */
+  | { readonly kind: "no-ground" }
+  /** It meets ground the ship has not surveyed, or no field is held: `NOT SURVEYED`. */
+  | { readonly kind: "not-surveyed" };
+
+/**
+ * Answer a view's terrain readout of `body` along the query's line of sight over the field the
+ * worker holds of it, with its detail seed (R10.T12).
+ */
+export interface GroundReadoutRequest extends GroundReadoutQuery {
+  readonly kind: "ground-readout";
+  readonly id: number;
+  readonly body: BodyIdHex;
+  readonly detailSeed: DetailSeedHex;
+}
+
 /** A message from the pool to a height worker. */
 export type HeightWorkerRequest =
   /** Bake a patch; the answer carries the same `id`. */
@@ -256,7 +409,8 @@ export type HeightWorkerRequest =
       readonly id: number;
       readonly body: BodyIdHex;
       readonly detailSeed: DetailSeedHex;
-    };
+    }
+  | GroundReadoutRequest;
 
 /** A message from a height worker to the pool. */
 export type HeightWorkerReply =
@@ -306,6 +460,20 @@ export type HeightWorkerReply =
   /** Class-map query `id` was refused by the module, which names why. */
   | {
       readonly kind: "class-map-failed";
+      readonly id: number;
+      readonly body: BodyIdHex;
+      readonly message: string;
+    }
+  /** Ground-readout query `id`'s answer, `body`'s readout. */
+  | {
+      readonly kind: "ground-readout";
+      readonly id: number;
+      readonly body: BodyIdHex;
+      readonly readout: SurfaceGroundReadout;
+    }
+  /** Ground-readout query `id` was refused by the module, which names why. */
+  | {
+      readonly kind: "ground-readout-failed";
       readonly id: number;
       readonly body: BodyIdHex;
       readonly message: string;

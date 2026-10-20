@@ -12,6 +12,7 @@ import type {
   TerrainCheckPhaseName,
   TerrainCheckPhaseRecord,
   TerrainCheckRecord,
+  TerrainCheckSessionFault,
   TerrainCheckTeardownRecord,
   TerrainCheckViewRecord,
   ViewsCheckCanvas,
@@ -422,6 +423,17 @@ function fault(value: unknown): TerrainCheckFault | null {
     : null;
 }
 
+function sessionFault(value: unknown): TerrainCheckSessionFault | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { atMs, text } = value;
+  const views = strings(value["views"]);
+  return isFiniteNumber(atMs) && typeof text === "string" && views !== null
+    ? { atMs, text, views }
+    : null;
+}
+
 function loss(value: unknown): TerrainCheckLossRecord | null {
   if (!isRecord(value) || !isRecord(value["after"]) || !isRecord(value["masks"])) {
     return null;
@@ -498,6 +510,7 @@ export function readTerrainCheckRecord(value: unknown): TerrainCheckRecord | nul
   const { timer, devicePixelRatio } = value;
   const phases = listOf(value["phases"], terrainPhase);
   const faults = listOf(value["faults"], fault);
+  const terrainFaults = listOf(value["terrainFaults"], sessionFault);
   const restoresAtMs = numbers(value["restoresAtMs"]);
   const lost = loss(value["loss"]);
   const torn = teardown(value["teardown"]);
@@ -517,6 +530,7 @@ export function readTerrainCheckRecord(value: unknown): TerrainCheckRecord | nul
     devicePixelRatio <= 0 ||
     phases === null ||
     faults === null ||
+    terrainFaults === null ||
     restoresAtMs === null ||
     lost === null ||
     torn === null ||
@@ -529,6 +543,7 @@ export function readTerrainCheckRecord(value: unknown): TerrainCheckRecord | nul
     devicePixelRatio,
     phases,
     faults,
+    terrainFaults,
     restoresAtMs,
     loss: lost,
     teardown: torn,

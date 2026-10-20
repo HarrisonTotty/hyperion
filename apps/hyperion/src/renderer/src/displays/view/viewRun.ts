@@ -63,6 +63,7 @@ import {
   cameraSceneOf,
   isLitKind,
   sceneOrigins,
+  type ViewBody,
   type ViewBodyKind,
   type ViewScene,
 } from "../../view/scene/model";
@@ -446,6 +447,56 @@ export function frameName(frame: CameraFrame, scene: ViewScene): string {
     }
   }
   return name;
+}
+
+/** The body a position is held to: a body frame's, or a body-fixed point's; else `null`. */
+function positionBody(position: ViewPosition): BodyIdHex | null {
+  let body: BodyIdHex | null;
+  switch (position.kind) {
+    case "body":
+    case "body_fixed":
+      body = position.body;
+      break;
+    case "system":
+    case "galactic":
+      body = null;
+      break;
+  }
+  return body;
+}
+
+/**
+ * The body whose `FRAME` the view names ({@link frameName}), whose survey line and terrain readout
+ * its label block states (plan R10, R10.T12): a body frame's body, and for a camera held to a
+ * craft, the body of the frame the craft's position is in, as {@link frameName} names it; `null`
+ * for a system or galactic frame, or a body the scene does not hold.
+ */
+export function frameBody(frame: CameraFrame, scene: ViewScene): ViewBody | null {
+  let id: BodyIdHex | null;
+  switch (frame.kind) {
+    case "galactic":
+    case "system":
+      id = null;
+      break;
+    case "body":
+      id = frame.body;
+      break;
+    case "craft": {
+      const position = scene.craft.find((c) => c.id === frame.craft)?.pose.position;
+      id = position === undefined ? null : positionBody(position);
+      break;
+    }
+  }
+  return id === null ? null : (scene.bodies.find((b) => b.id === id) ?? null);
+}
+
+/**
+ * Whether a view's `SLANT RANGE` reads `SLANT RANGE FROM CAMERA` (the guide's `FROM CAMERA` row):
+ * the range is always the camera's, and is so labelled whenever the camera is off the hull, in
+ * `CHASE` or `FREE`, or there is no own ship whose hull it could be on ({@link rangesFromCamera}).
+ */
+export function slantRangeFromCamera(camera: CameraState, scene: ViewScene): boolean {
+  return camera.preset !== "seat" || rangesFromCamera(scene);
 }
 
 /** The star source's reading until R06's sky (Design note 16). */

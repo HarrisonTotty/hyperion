@@ -35,6 +35,11 @@ function modeBanner(): HTMLElement | null {
   return screen.queryByRole("status", { name: "Mode" });
 }
 
+/** The words of the header strip's mode banner, which must stand. */
+function standingModeBanner(): string | null {
+  return screen.getByRole("status", { name: "Mode" }).textContent;
+}
+
 /** A views-check launch's functions, each a mock. */
 function viewsCheckApi(): ViewsCheckApi & { readonly end: Mock<ViewsCheckApi["end"]> } {
   return {
@@ -99,6 +104,31 @@ describe("App", () => {
       "page",
     );
   });
+
+  it.each([
+    ["T20's", false],
+    ["the terrain run's", true],
+  ])(
+    "shows MEASUREMENT on every display of %s views-check launch (R10.T16.e)",
+    async (_run, terrain) => {
+      const api = { ...viewsCheckApi(), launch: { ...viewsCheckApi().launch, terrain } };
+      stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
+      const user = userEvent.setup();
+      render(<App />);
+      const opened = standingModeBanner();
+      await user.keyboard("{F1}");
+      const link = standingModeBanner();
+      await user.keyboard("{F2}");
+      const galaxy = standingModeBanner();
+      await user.keyboard("{F3}");
+      const system = standingModeBanner();
+      await user.keyboard("{F4}");
+      const view = standingModeBanner();
+      expect([opened, link, galaxy, system, view]).toEqual(
+        Array.from({ length: 5 }, () => "MEASUREMENT"),
+      );
+    },
+  );
 
   it("fails a views-check run whose VIEW cannot be drawn", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });

@@ -26,24 +26,33 @@
  * field and asks for it whole. A server too busy to answer is asked again later, waiting longer
  * each time ({@link FIELD_RETRY_DELAY_MS}). Any other refusal is held, and not asked again until the
  * body is wanted afresh; a first payload that fails leaves nothing in the workers.
+ *
+ * A failure is held typed ({@link FieldFailure}; decision-r10-t16-leans §12(b)), for the survey
+ * line's two states: the server's refusal or failure, its code apart from its message, and a check
+ * of the console's own that the answer failed, one of {@link FieldCheck}'s closed list, whose full
+ * message goes to the console's log once. A failure after any block posted since the last answer
+ * taken reached the workers drops the field whole, so that the workers, the mask and the picture
+ * never hold cells the coverage does not count; one before keeps the field held (§12(c)).
  */
 
-import type {
-  BodyIdHex,
-  BulkChunk,
-  LiquidBasisDto,
-  LiquidDto,
-  PaletteEntryDto,
-  PaletteRoleDto,
-  RecordSectionDto,
-  RequestClient,
-  RequestFailure,
-  ResponseFor,
-  SurfaceHeaderDto,
-  SurfaceRevisionDto,
-  UniverseIdHex,
+import {
+  type BodyIdHex,
+  type BulkChunk,
+  isBulkAssemblyFailure,
+  type LiquidBasisDto,
+  type LiquidDto,
+  type PaletteEntryDto,
+  type PaletteRoleDto,
+  type RecordSectionDto,
+  type RequestClient,
+  type RequestFailure,
+  type ResponseFor,
+  type SurfaceHeaderDto,
+  type SurfaceRevisionDto,
+  type UniverseIdHex,
 } from "@hyperion/protocol";
 
+import { isRefusal } from "../../lib/refusal";
 import { CoverageView, isFieldLevel } from "./coverage";
 import type { HeightWorkerPool } from "./workers/pool";
 
@@ -397,6 +406,8 @@ export function headerFailure(header: SurfaceHeaderDto): string | null {
   for (const [index, entry] of header.palette.entries()) {
     const failure = entryFailure(entry);
     if (failure !== null) {
+      // The log's message, never shown: the survey line names the check alone, `header unusable`
+      // (decision-r10-t16-leans §12(b)), so the entry's registry key here is for a developer.
       return `the palette's entry ${index}, ${entry.substance} as ${entry.role}, ${failure}`;
     }
   }
@@ -443,21 +454,71 @@ export interface CoarseFieldStoreOptions {
   readonly linkUp: boolean;
 }
 
+/**
+ * A check of the console's own that a field's answer failed, as the survey line's
+ * `SURVEY DATA INVALID` names it: the closed list of decision-r10-t16-leans §12(b), in the `DATA
+ * INVALID` family's form (`density range unusable`).
+ *
+ * - `payload cut short`: the payload ended inside a block, or its chunks did not come whole: one
+ *   missing or out of order, or what came unlike the answer's manifest (the request client's own
+ *   finding, `isBulkAssemblyFailure`).
+ * - `field level unusable`: the field's level is not 5 to 8, or moved from the level held.
+ * - `header unusable`: the field's header fails {@link headerFailure}'s checks.
+ * - `coverage unusable`: the answer's coverage is not a run of the field's cells.
+ * - `block unreadable`: a block's frame cannot be cut ({@link BlockSplitter}), or a height worker
+ *   refused a block.
+ * - `answer unreadable`: the answer could not be taken: the server answered with a response of
+ *   another kind, or taking the answer or one of its chunks failed, a bug in the console.
+ */
+export type FieldCheck =
+  | "payload cut short"
+  | "field level unusable"
+  | "header unusable"
+  | "coverage unusable"
+  | "block unreadable"
+  | "answer unreadable";
+
+/**
+ * Why a body's field is not being asked for, typed for the survey line (decision-r10-t16-leans
+ * §12(b)): its words on screen are the server's message or the check's phrase, never a code.
+ */
+export type FieldFailure =
+  /**
+   * The server refused the request or reported its own failure: its code apart from its message,
+   * and whether it refused the request for what it asked (`isRefusal`, as `SCENE REJECTED` takes
+   * it), in `--text`, rather than failing, in `--status-caution`.
+   */
+  | {
+      readonly kind: "rejected";
+      readonly code: RequestFailure["code"];
+      readonly message: string;
+      readonly refusal: boolean;
+    }
+  /** The answer failed a check of the console's own; its full message went to the log. */
+  | { readonly kind: "invalid"; readonly check: FieldCheck };
+
 /** Where a wanted body's field stands, besides its coverage and header. */
 export interface FieldStatus {
   readonly reason: FieldWantReason;
   /**
    * Whether a request for the field is in flight, waits for the link to return, or waits to be
-   * asked again after the server was too busy to answer.
+   * asked again after the server was too busy to answer, which is never a failure.
    */
   readonly pending: boolean;
   /** For a body whose field R09 cannot compute yet, the plan 14 section it needs; else `null`. */
   readonly notModelled: RecordSectionDto | null;
   /**
-   * Why the body's field is not being asked for: the server's refusal, a payload that could not
-   * be read, or a block a worker refused. It is held until the body is wanted afresh; else `null`.
+   * Why the body's field is not being asked for: the server's refusal, an answer that failed the
+   * console's checks, or a block a worker refused. It is held until the body is wanted afresh;
+   * else `null`.
    */
-  readonly failure: string | null;
+  readonly failure: FieldFailure | null;
+}
+
+/** An answer's failure of the console's checks: the check, and the full message for the log. */
+interface CheckFailure {
+  readonly check: FieldCheck;
+  readonly detail: unknown;
 }
 
 /** How long the store waits before asking again after the server was too busy, ms, at first. */
@@ -471,7 +532,7 @@ interface Fetch {
   /** Cancels the request; set once it is sent. */
   cancel: () => void;
   /** Why the store gave the request up itself, if it did. */
-  failure: string | null;
+  failure: CheckFailure | null;
 }
 
 /** One wanted body. */
@@ -480,10 +541,15 @@ interface Entry {
   header: SurfaceHeaderDto | null;
   coverage: CoverageView | null;
   notModelled: RecordSectionDto | null;
-  failure: string | null;
+  failure: FieldFailure | null;
   fetch: Fetch | null;
   /** Whether the body's first block has been posted, as `field_init`. */
   started: boolean;
+  /**
+   * Whether a block has been posted since the last answer taken, so that the workers may hold
+   * cells the coverage does not count: a failure then drops the field whole (§12(c)).
+   */
+  ahead: boolean;
   /** The newest revision the scene has announced since the field was last dropped, or `null`. */
   announced: number | null;
   /** Whether the body is to be asked once the link returns. */
@@ -589,6 +655,7 @@ export class CoarseFieldStore {
       failure: null,
       fetch: null,
       started: false,
+      ahead: false,
       announced: null,
       waiting: false,
       retry: null,
@@ -788,19 +855,27 @@ export class CoarseFieldStore {
       if (entry.fetch !== started || started.failure !== null) {
         return;
       }
-      const split = splitter.push(chunk.payload);
-      if (!split.ok) {
-        started.failure = split.message;
-        started.cancel();
-        return;
-      }
-      for (const block of split.blocks) {
-        if (entry.started) {
-          this.#pool.fieldChunk(body, block);
-        } else {
-          this.#pool.fieldInit(body, block);
-          entry.started = true;
+      try {
+        const split = splitter.push(chunk.payload);
+        if (!split.ok) {
+          started.failure = { check: "block unreadable", detail: split.message };
+          started.cancel();
+          return;
         }
+        for (const block of split.blocks) {
+          entry.ahead = true;
+          if (entry.started) {
+            this.#pool.fieldChunk(body, block);
+          } else {
+            this.#pool.fieldInit(body, block);
+            entry.started = true;
+          }
+        }
+      } catch (error: unknown) {
+        // A bug in taking the chunk, held here as the console's own: thrown to the request client,
+        // it would come back as a payload the client could not assemble.
+        started.failure = { check: "answer unreadable", detail: error };
+        started.cancel();
       }
     };
     const pending = this.#requests.requestBulk<"surface_field">(
@@ -824,7 +899,8 @@ export class CoarseFieldStore {
       }
       entry.fetch = null;
       if (started.failure !== null) {
-        this.#fail(body, entry, started.failure);
+        const { check, detail } = started.failure;
+        this.#fail(body, entry, { kind: "invalid", check }, detail);
       } else if (outcome.ok) {
         this.#answered(body, entry, outcome.response, splitter);
       } else if (isLinkFailure(outcome.error)) {
@@ -836,14 +912,30 @@ export class CoarseFieldStore {
         this.#ask(body, entry);
       } else if (isBusy(outcome.error)) {
         this.#askLater(body, entry);
+      } else if (outcome.error.code === "protocol_violation") {
+        // The client's own finding, an answer of another kind: a check, not the server's word.
+        this.#fail(body, entry, { kind: "invalid", check: "answer unreadable" }, outcome.error);
+      } else if (isBulkAssemblyFailure(outcome.error)) {
+        // The client's own finding too, in the server's `internal` shape: chunks that did not come
+        // whole, never the server's reason.
+        const { message } = outcome.error;
+        this.#fail(body, entry, { kind: "invalid", check: "payload cut short" }, message);
       } else if (!isCancelled(outcome.error)) {
-        this.#fail(body, entry, `${outcome.error.code}: ${outcome.error.message}`);
+        const { code, message } = outcome.error;
+        this.#fail(body, entry, { kind: "rejected", code, message, refusal: isRefusal(code) });
       }
     };
     void finish().catch((error: unknown) => {
-      // A bug in taking the answer: the body is held failed, with the reason, and reported.
-      console.error(`the coarse field of ${body} could not be taken:`, error);
-      entry.failure = error instanceof Error ? error.message : String(error);
+      // A bug in taking the answer: the body is held failed, with the error in the log.
+      if (this.#entries.get(body) !== entry) {
+        console.error(`the coarse field of ${body} could not be taken:`, error);
+        return;
+      }
+      try {
+        this.#fail(body, entry, { kind: "invalid", check: "answer unreadable" }, error);
+      } catch (dropError: unknown) {
+        console.error(`the coarse field of ${body} could not be dropped:`, dropError);
+      }
     });
   }
 
@@ -876,13 +968,13 @@ export class CoarseFieldStore {
     }
     const failure = this.#readyFailure(entry, response.header, splitter);
     if (failure !== null) {
-      this.#fail(body, entry, failure);
+      this.#fail(body, entry, { kind: "invalid", check: failure.check }, failure.detail);
       return;
     }
     const base = entry.coverage ?? CoverageView.empty(response.header.level);
     const merged = base.merged(response.coverage, response.revision);
     if (!merged.ok) {
-      this.#fail(body, entry, merged.message);
+      this.#fail(body, entry, { kind: "invalid", check: "coverage unusable" }, merged.message);
       return;
     }
     const coverage = merged.coverage.withStale(!this.#linkUp);
@@ -890,6 +982,7 @@ export class CoarseFieldStore {
     entry.header = response.header;
     entry.notModelled = null;
     entry.failure = null;
+    entry.ahead = false;
     // A listener removed by another during the call is not told; one added is.
     for (const listener of this.#revisionListeners) {
       try {
@@ -903,29 +996,53 @@ export class CoarseFieldStore {
     }
   }
 
-  /** Why a `ready` answer cannot be taken, or `null`. */
-  #readyFailure(entry: Entry, header: SurfaceHeaderDto, splitter: BlockSplitter): string | null {
+  /** Why a `ready` answer cannot be taken, by the check it fails and its message, or `null`. */
+  #readyFailure(
+    entry: Entry,
+    header: SurfaceHeaderDto,
+    splitter: BlockSplitter,
+  ): CheckFailure | null {
     if (!splitter.atBoundary) {
-      return "the payload ended inside a block";
+      return { check: "payload cut short", detail: "the payload ended inside a block" };
     }
     if (!isFieldLevel(header.level)) {
-      return `the field's level ${header.level} is not 5 to 8`;
+      return {
+        check: "field level unusable",
+        detail: `the field's level ${header.level} is not 5 to 8`,
+      };
     }
     if (entry.coverage !== null && entry.coverage.level !== header.level) {
-      return `the field's level moved from ${entry.coverage.level} to ${header.level}`;
+      return {
+        check: "field level unusable",
+        detail: `the field's level moved from ${entry.coverage.level} to ${header.level}`,
+      };
     }
-    return headerFailure(header);
+    const failure = headerFailure(header);
+    return failure === null ? null : { check: "header unusable", detail: failure };
   }
 
   /**
-   * Holds `message` as the body's failure. A field with no answer held yet is dropped from the
-   * workers too, so that no part of a payload never taken stays there; one held keeps what it has.
+   * Holds `failure` as the body's (decision-r10-t16-leans §12(c)). Where a block has been posted
+   * since the last answer taken ({@link Entry.ahead}), or no answer is held, the field is dropped
+   * whole, here and in every worker, so that no part of an answer never taken stays there: a
+   * half-taken delta would leave the workers, the mask and the picture ahead of the coverage.
+   * Otherwise the field held is kept, and goes stale with the failure. A check's failure goes to
+   * the log, with its full message, once: the failure is held, and nothing asks again.
+   *
+   * @param detail - The full message of a check's failure, for the log.
    */
-  #fail(body: BodyIdHex, entry: Entry, message: string): void {
-    if (entry.coverage === null) {
+  #fail(body: BodyIdHex, entry: Entry, failure: FieldFailure, detail: unknown = null): void {
+    if (failure.kind === "invalid") {
+      console.error(
+        `the coarse field of ${body} failed the console's checks (${failure.check}):`,
+        detail,
+      );
+    }
+    // Held before the drop, so that a drop that throws still leaves the failure standing.
+    entry.failure = failure;
+    if (entry.ahead || entry.coverage === null) {
       this.#drop(body, entry);
     }
-    entry.failure = message;
   }
 
   /** A worker refused one of `body`'s blocks: the field is dropped and the refusal held. */
@@ -936,8 +1053,13 @@ export class CoarseFieldStore {
     }
     entry.fetch?.cancel();
     entry.fetch = null;
-    this.#drop(body, entry);
-    entry.failure = `a height worker refused a block of the field: ${message}`;
+    entry.ahead = true;
+    this.#fail(
+      body,
+      entry,
+      { kind: "invalid", check: "block unreadable" },
+      `a height worker refused a block of the field: ${message}`,
+    );
   }
 
   /**
@@ -949,6 +1071,7 @@ export class CoarseFieldStore {
       this.#pool.fieldRelease(body);
       entry.started = false;
     }
+    entry.ahead = false;
     entry.coverage = null;
     entry.header = null;
     entry.announced = null;

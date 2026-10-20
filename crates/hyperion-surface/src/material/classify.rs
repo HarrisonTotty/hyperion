@@ -650,7 +650,7 @@ impl<'a> Site<'a> {
         let header = self.header;
         let palette = header.palette();
         let cell = self.cell;
-        let lapse_k = header.lapse_rate_k_per_m() * (h_m - header.sea_level().value());
+        let lapse_k = lapse_drop_k(header, h_m);
         let annual_k = self.annual_sea_k - lapse_k;
         let warmest_k = self.warmest_sea_k - lapse_k;
         let molten = self
@@ -1150,6 +1150,19 @@ fn snow_entry(header: &FieldHeader, cell: &SynthesisCell) -> Option<u8> {
         let liquid = header.palette().get(header.main_liquid()?)?;
         header.palette().find(PaletteRole::Ice, liquid.substance)
     })
+}
+
+/// How much colder, kelvin, ground `h_m` metres above the datum is than the climate record's
+/// sea-level temperatures there: the header's lapse rate Γ times the height above its sea level,
+/// Γ (h − `sea_level`), negative below the sea level. The classifier carries every temperature it
+/// reads from sea level to a point's height by it, and the worker's ground readout the month's
+/// (R10.T12), so that the two carry their temperatures by one expression. Their heights agree only
+/// where the survey is resolved: the classifier takes the height at the finest band
+/// ([`finest_band`]), and the readout its reading's elevation, which at an unresolved point is the
+/// survey level's ([`SurveyedReading::elevation`](crate::reading::SurveyedReading::elevation)).
+#[must_use]
+pub(crate) fn lapse_drop_k(header: &FieldHeader, h_m: f64) -> f64 {
+    header.lapse_rate_k_per_m() * (h_m - header.sea_level().value())
 }
 
 /// The warmest month's mean temperature of `climate`, reduced to sea level, kelvin: the annual mean

@@ -1,0 +1,445 @@
+# generator_version = 22
+table lunar regolith, Regolith of silicate
+gravity_m_s2 = 0x3ff9eb851eb851ec  # 1.62
+grain_density_kg_m3 = 0x40a8380000000000  # 3100.0
+layer 0x0000000000000000 0x3fc3333333333333
+c_pa = 0x4080400000000000  # 520.0
+phi_rad = 0x3fe7750cb50c6e5b  # 0.7330382858376184
+rho_kg_m3 = 0x4097700000000000  # 1500.0
+pad 1 m at 0°, Pa = 0x4109357fb508cbee  # 206511.96339568443
+pad 1 m at 2°, Pa = 0x410742207a5d8dd0  # 190532.0597487525
+pad 1 m at 5°, Pa = 0x41047cd3533f5d80  # 167834.41564820334
+pad 1 m at 10°, Pa = 0x4100452673965f02  # 133284.8064391539
+pad 1 m at 15°, Pa = 0x40f912d9ae3c7206  # 102701.60503811398
+pad 1 m at 20°, Pa = 0x40f28d4a50d633a6  # 75988.64473552871
+pad 1 m at 25°, Pa = 0x40e9eea29a2599d2  # 53109.08131675761
+pad 1 m at 30°, Pa = 0x40e0a6c4de517f7a  # 34102.15213847063
+pad 1 m at 40°, Pa = 0x40c13d8bcbbc4bfc  # 8827.092155015089
+pad 1 m at 45°, Pa none
+pad 1 m at 50°, Pa none
+pad 1 m at 0.25 φ, Pa = 0x40ffc020e061455a  # 130050.05478026476
+pad 1 m at 0.5 φ, Pa = 0x40f15c220cf374dc  # 71106.1281618657
+pad 1 m at 0.75 φ, Pa = 0x40dc7e4da39b24aa  # 29177.213110719495
+pad 1 m at 0.9 φ, Pa = 0x40c8e9192f5dfdce  # 12754.196758030823
+pad 1 m at 0.99 φ, Pa = 0x40b9d74e2157ff4c  # 6615.305196285084
+pad 1 m at φ − 1e-9 rad, Pa = 0x40b77745454febf0  # 6007.270588870146
+pad 1 m at φ, Pa none
+pad 1 m at next above φ, Pa none
+pad 1 m at 89°, Pa none
+pad 0.1 m at 0°, Pa = 0x40f980ca5dcaba11  # 104460.64789841349
+pad 0.1 m at 2°, Pa = 0x40f80b8ffe8957be  # 98488.999642699
+pad 0.1 m at 5°, Pa = 0x40f5ebcaa88b471a  # 89788.6661484506
+pad 0.1 m at 10°, Pa = 0x40f287c79592463c  # 75900.47401645122
+pad 0.1 m at 15°, Pa = 0x40ee9b985ec6e98e  # 62684.76156945816
+pad 0.1 m at 20°, Pa = 0x40e87355d67a9c26  # 50074.68243151186
+pad 0.1 m at 25°, Pa = 0x40e29649ba47e944  # 38066.303989368054
+pad 0.1 m at 30°, Pa = 0x40da24964907b498  # 26770.348207403527
+pad 0.1 m at 40°, Pa = 0x40c057bc6af7a892  # 8367.472014386472
+pad 0.1 m at 45°, Pa none
+pad 0.1 m at 50°, Pa none
+pad 0.1 m at 0.25 φ, Pa = 0x40f23361f6a6e226  # 74550.12271774616
+pad 0.1 m at 0.5 φ, Pa = 0x40e740ef90e9758c  # 47623.486439447006
+pad 0.1 m at 0.75 φ, Pa = 0x40d702f473369ef2  # 23563.8195320656
+pad 0.1 m at 0.9 φ, Pa = 0x40c6b1f37097dc02  # 11619.901873571802
+pad 0.1 m at 0.99 φ, Pa = 0x40b93b1f2aacd114  # 6459.121744919819
+pad 0.1 m at φ − 1e-9 rad, Pa = 0x40b776bb7b27c8a8  # 6006.732347952355
+pad 0.1 m at φ, Pa none
+pad 0.1 m at next above φ, Pa none
+pad 0.1 m at 89°, Pa none
+layer 0x0000000000000000 0x3fd3333333333333
+c_pa = 0x408c200000000000  # 900.0
+phi_rad = 0x3fe9b0f58956c202  # 0.8028514559173916
+rho_kg_m3 = 0x4098b00000000000  # 1580.0
+pad 1 m at 0°, Pa = 0x4120459e487ec6d2  # 533199.141592229
+pad 1 m at 2°, Pa = 0x411e29831400872a  # 494176.7695332641
+pad 1 m at 5°, Pa = 0x411ac35a43b9f01c  # 438486.5661389844
+pad 1 m at 10°, Pa = 0x41158af5cdfe0446  # 352957.4511643093
+pad 1 m at 15°, Pa = 0x4110db6200ed975c  # 276184.5009063387
+pad 1 m at 20°, Pa = 0x4109612bcb1e5fae  # 207909.47417902708
+pad 1 m at 25°, Pa = 0x410212365ba9717e  # 148038.79475678125
+pad 1 m at 30°, Pa = 0x40f79bf53be0c540  # 96703.32711865474
+pad 1 m at 40°, Pa = 0x40d6dfb18817c138  # 23422.773931444826
+pad 1 m at 45°, Pa = 0x40bdc6058aa669cc  # 7622.021646881894
+pad 1 m at 50°, Pa none
+pad 1 m at 0.25 φ, Pa = 0x411414f3f52a209a  # 329020.9894185156
+pad 1 m at 0.5 φ, Pa = 0x4104df053726bd12  # 170976.65192935668
+pad 1 m at 0.75 φ, Pa = 0x40ec746ed509ed24  # 58275.463505709806
+pad 1 m at 0.9 φ, Pa = 0x40d0ea79a6bb366c  # 17321.900801470896
+pad 1 m at 0.99 φ, Pa = 0x40ba86fd1c39c8ac  # 6790.988711940281
+pad 1 m at φ − 1e-9 rad, Pa = 0x40b80a421684ff48  # 6154.25815612061
+pad 1 m at φ, Pa none
+pad 1 m at next above φ, Pa none
+pad 1 m at 89°, Pa none
+pad 0.1 m at 0°, Pa = 0x41129c258c967a92  # 304905.38729278103
+pad 0.1 m at 2°, Pa = 0x41119274eea3b1c2  # 287901.23304631945
+pad 0.1 m at 5°, Pa = 0x41100e54b81f6d56  # 263061.17980738485
+pad 0.1 m at 10°, Pa = 0x410b3f90a58c724c  # 223218.08083428664
+pad 0.1 m at 15°, Pa = 0x41069664eeff6e46  # 185036.616698133
+pad 0.1 m at 20°, Pa = 0x41021a4f03849860  # 148297.87671774905
+pad 0.1 m at 25°, Pa = 0x40fb9358fd6ea0be  # 112949.56187308111
+pad 0.1 m at 30°, Pa = 0x40f35848574b9db6  # 79236.52131234747
+pad 0.1 m at 40°, Pa = 0x40d5a6c8dc01dcda  # 22171.138428178478
+pad 0.1 m at 45°, Pa = 0x40bd8740e3cc8324  # 7559.253475934998
+pad 0.1 m at 50°, Pa none
+pad 0.1 m at 0.25 φ, Pa = 0x4109d48d5d14809e  # 211601.6704492615
+pad 0.1 m at 0.5 φ, Pa = 0x40fefc38c55a1188  # 126915.54818159912
+pad 0.1 m at 0.75 φ, Pa = 0x40e8e90deed49c42  # 51016.435404114905
+pad 0.1 m at 0.9 φ, Pa = 0x40d049bd1d66c88c  # 16678.954919525
+pad 0.1 m at 0.99 φ, Pa = 0x40ba62a60e3763de  # 6754.6486544245545
+pad 0.1 m at φ − 1e-9 rad, Pa = 0x40b80a257ab9197a  # 6154.146403855057
+pad 0.1 m at φ, Pa none
+pad 0.1 m at next above φ, Pa none
+pad 0.1 m at 89°, Pa none
+layer 0x3fd3333333333333 0x3fe3333333333333
+c_pa = 0x40a7700000000000  # 3000.0
+phi_rad = 0x3fee28c731eb6950  # 0.9424777960769379
+rho_kg_m3 = 0x409b300000000000  # 1740.0
+pad 1 m at 0°, Pa = 0x41547ab8b296e57c  # 5368546.790459987
+pad 1 m at 2°, Pa = 0x415326425fb5934a  # 5019913.49545748
+pad 1 m at 5°, Pa = 0x41513b500917c430  # 4517184.142075583
+pad 1 m at 10°, Pa = 0x414c7538517b58ac  # 3730032.6365767326
+pad 1 m at 15°, Pa = 0x4146e7e637023792  # 3002316.4297551597
+pad 1 m at 20°, Pa = 0x4141c8cdb8085120  # 2331035.4377538115
+pad 1 m at 25°, Pa = 0x413a2bf2bb656d12  # 1715186.7320163888
+pad 1 m at 30°, Pa = 0x4131a690b34c1056  # 1156752.7003793917
+pad 1 m at 40°, Pa = 0x410fc884258a78f8  # 260368.51833052165
+pad 1 m at 45°, Pa = 0x40e34ee9e6c2db04  # 39543.30941908623
+pad 1 m at 50°, Pa = 0x40c31de531555ff8  # 9787.790568038807
+pad 1 m at 0.25 φ, Pa = 0x41488685d8fcde72  # 3214603.6952169472
+pad 1 m at 0.5 φ, Pa = 0x4136a779e2037730  # 1484665.8828653805
+pad 1 m at 0.75 φ, Pa = 0x410bbf6f943bdca2  # 227309.9473798024
+pad 1 m at 0.9 φ, Pa = 0x40c95bfde81549e0  # 12983.98364511592
+pad 1 m at 0.99 φ, Pa = 0x40b68952f132dddc  # 5769.323992900052
+pad 1 m at φ − 1e-9 rad, Pa = 0x40b50abe9d7d0eee  # 5386.7445905839395
+pad 1 m at φ, Pa none
+pad 1 m at next above φ, Pa none
+pad 1 m at 89°, Pa none
+pad 0.1 m at 0°, Pa = 0x414d8353b5a75e18  # 3868327.4191701524
+pad 0.1 m at 2°, Pa = 0x414bed21aedef4a2  # 3660355.366179065
+pad 0.1 m at 5°, Pa = 0x4149997c3c93edce  # 3355384.4732644325
+pad 0.1 m at 10°, Pa = 0x4145d7841545866c  # 2862856.166184237
+pad 0.1 m at 15°, Pa = 0x41423492e052016a  # 2386213.75250261
+pad 0.1 m at 20°, Pa = 0x413d553984be805c  # 1922361.5185318207
+pad 0.1 m at 25°, Pa = 0x41366ebc59b55e66  # 1470140.3504237174
+pad 0.1 m at 30°, Pa = 0x412f7c31bbf1ebe2  # 1031704.8670800889
+pad 0.1 m at 40°, Pa = 0x410eafe38356d7c0  # 251388.4391304832
+pad 0.1 m at 45°, Pa = 0x40e33ab85f66fe16  # 39381.76164579035
+pad 0.1 m at 50°, Pa = 0x40c31c788d7c5952  # 9784.94181780206
+pad 0.1 m at 0.25 φ, Pa = 0x41434904ad22fd16  # 2527753.352630268
+pad 0.1 m at 0.5 φ, Pa = 0x4133ba1545a66ed6  # 1292821.2720708153
+pad 0.1 m at 0.75 φ, Pa = 0x410ae47f2e625460  # 220303.8976484863
+pad 0.1 m at 0.9 φ, Pa = 0x40c95898a45e903a  # 12977.192516155646
+pad 0.1 m at 0.99 φ, Pa = 0x40b688f719b308cc  # 5768.965235891006
+pad 0.1 m at φ − 1e-9 rad, Pa = 0x40b50abe55933c72  # 5386.743493273027
+pad 0.1 m at φ, Pa none
+pad 0.1 m at next above φ, Pa none
+pad 0.1 m at 89°, Pa none
+layer 0x0000000000000000 0x3fe3333333333333
+c_pa = 0x4099000000000000  # 1600.0
+phi_rad = 0x3feb5de4288e80bf  # 0.8552113334772214
+rho_kg_m3 = 0x4099efffffffffff  # 1659.9999999999998
+pad 1 m at 0°, Pa = 0x4133a4a3088f0bd8  # 1287331.0334327128
+pad 1 m at 2°, Pa = 0x41324b4b728739c8  # 1198923.4473758806
+pad 1 m at 5°, Pa = 0x41305bd11f4e8882  # 1072081.122292072
+pad 1 m at 10°, Pa = 0x412ab669a25c8bb4  # 875316.8171123178
+pad 1 m at 15°, Pa = 0x41253d030c355d72  # 695937.5238446428
+pad 1 m at 20°, Pa = 0x4120461cc60745ae  # 533262.3867742324
+pad 1 m at 25°, Pa = 0x41179fc4b0552a64  # 387057.17219988094
+pad 1 m at 30°, Pa = 0x410f76556a33b44e  # 257738.67685643065
+pad 1 m at 40°, Pa = 0x40edb8721aef663e  # 60867.56578798265
+pad 1 m at 45°, Pa = 0x40cebc9ec80e0cb6  # 15737.240480190474
+pad 1 m at 50°, Pa none
+pad 1 m at 0.25 φ, Pa = 0x41282f5de844f1b8  # 792494.9536510026
+pad 1 m at 0.5 φ, Pa = 0x4118788e78acef48  # 400931.6178471935
+pad 1 m at 0.75 φ, Pa = 0x40fbba2c48c765fc  # 113570.76776828611
+pad 1 m at 0.9 φ, Pa = 0x40d3b975f91acf48  # 20197.843329145835
+pad 1 m at 0.99 φ, Pa = 0x40bbc8514cfdb22c  # 7112.317581039428
+pad 1 m at φ − 1e-9 rad, Pa = 0x40b969d447d5f258  # 6505.829221126238
+pad 1 m at φ, Pa none
+pad 1 m at next above φ, Pa none
+pad 1 m at 89°, Pa none
+pad 0.1 m at 0°, Pa = 0x4129b3378d8364ca  # 842139.7763930794
+pad 0.1 m at 2°, Pa = 0x41284c3632aa61fa  # 796187.098956167
+pad 0.1 m at 5°, Pa = 0x41263e96d35192c8  # 728907.4127317304
+pad 0.1 m at 10°, Pa = 0x4122f0159a9d6b08  # 620554.8019822547
+pad 0.1 m at 15°, Pa = 0x411f8051caee7f0c  # 516116.4481754161
+pad 0.1 m at 20°, Pa = 0x41195395ce85c65a  # 414949.4516821854
+pad 0.1 m at 25°, Pa = 0x411356d417e03bce  # 316853.02331632085
+pad 0.1 m at 30°, Pa = 0x410b260e72ad3c06  # 222401.80599448102
+pad 0.1 m at 40°, Pa = 0x40ec7a6eb967d22a  # 58323.4601325135
+pad 0.1 m at 45°, Pa = 0x40ce8574f7dc24c0  # 15626.913814084954
+pad 0.1 m at 50°, Pa none
+pad 0.1 m at 0.25 φ, Pa = 0x41217d7f9d38642e  # 573119.8070708567
+pad 0.1 m at 0.5 φ, Pa = 0x4113edd3466ca382  # 326516.81877379876
+pad 0.1 m at 0.75 φ, Pa = 0x40f9b4e1abbaafa8  # 105294.10442608467
+pad 0.1 m at 0.9 φ, Pa = 0x40d3839e41925c60  # 19982.4727521803
+pad 0.1 m at 0.99 φ, Pa = 0x40bbc16c2fa1da60  # 7105.422601810278
+pad 0.1 m at φ − 1e-9 rad, Pa = 0x40b969cf000ca9a2  # 6505.808594504751
+pad 0.1 m at φ, Pa none
+pad 0.1 m at next above φ, Pa none
+pad 0.1 m at 89°, Pa none
+the table under 1 m, its layer at 0x3fd3333333333333 0x3fe3333333333333
+pad 1 m at 0°, Pa = 0x41547ab8b296e57c  # 5368546.790459987
+pad 1 m at 2°, Pa = 0x415326425fb5934a  # 5019913.49545748
+pad 1 m at 5°, Pa = 0x41513b500917c430  # 4517184.142075583
+pad 1 m at 10°, Pa = 0x414c7538517b58ac  # 3730032.6365767326
+pad 1 m at 15°, Pa = 0x4146e7e637023792  # 3002316.4297551597
+pad 1 m at 20°, Pa = 0x4141c8cdb8085120  # 2331035.4377538115
+pad 1 m at 25°, Pa = 0x413a2bf2bb656d12  # 1715186.7320163888
+pad 1 m at 30°, Pa = 0x4131a690b34c1056  # 1156752.7003793917
+pad 1 m at 40°, Pa = 0x410fc884258a78f8  # 260368.51833052165
+pad 1 m at 45°, Pa = 0x40e34ee9e6c2db04  # 39543.30941908623
+pad 1 m at 50°, Pa = 0x40c31de531555ff8  # 9787.790568038807
+pad 1 m at 0.25 φ, Pa = 0x41488685d8fcde72  # 3214603.6952169472
+pad 1 m at 0.5 φ, Pa = 0x4136a779e2037730  # 1484665.8828653805
+pad 1 m at 0.75 φ, Pa = 0x410bbf6f943bdca2  # 227309.9473798024
+pad 1 m at 0.9 φ, Pa = 0x40c95bfde81549e0  # 12983.98364511592
+pad 1 m at 0.99 φ, Pa = 0x40b68952f132dddc  # 5769.323992900052
+pad 1 m at φ − 1e-9 rad, Pa = 0x40b50abe9d7d0eee  # 5386.7445905839395
+pad 1 m at φ, Pa none
+pad 1 m at next above φ, Pa none
+pad 1 m at 89°, Pa none
+the table under 0.1 m, its layer at 0x0000000000000000 0x3fc3333333333333
+pad 0.1 m at 0°, Pa = 0x40f980ca5dcaba11  # 104460.64789841349
+pad 0.1 m at 2°, Pa = 0x40f80b8ffe8957be  # 98488.999642699
+pad 0.1 m at 5°, Pa = 0x40f5ebcaa88b471a  # 89788.6661484506
+pad 0.1 m at 10°, Pa = 0x40f287c79592463c  # 75900.47401645122
+pad 0.1 m at 15°, Pa = 0x40ee9b985ec6e98e  # 62684.76156945816
+pad 0.1 m at 20°, Pa = 0x40e87355d67a9c26  # 50074.68243151186
+pad 0.1 m at 25°, Pa = 0x40e29649ba47e944  # 38066.303989368054
+pad 0.1 m at 30°, Pa = 0x40da24964907b498  # 26770.348207403527
+pad 0.1 m at 40°, Pa = 0x40c057bc6af7a892  # 8367.472014386472
+pad 0.1 m at 45°, Pa none
+pad 0.1 m at 50°, Pa none
+pad 0.1 m at 0.25 φ, Pa = 0x40f23361f6a6e226  # 74550.12271774616
+pad 0.1 m at 0.5 φ, Pa = 0x40e740ef90e9758c  # 47623.486439447006
+pad 0.1 m at 0.75 φ, Pa = 0x40d702f473369ef2  # 23563.8195320656
+pad 0.1 m at 0.9 φ, Pa = 0x40c6b1f37097dc02  # 11619.901873571802
+pad 0.1 m at 0.99 φ, Pa = 0x40b93b1f2aacd114  # 6459.121744919819
+pad 0.1 m at φ − 1e-9 rad, Pa = 0x40b776bb7b27c8a8  # 6006.732347952355
+pad 0.1 m at φ, Pa none
+pad 0.1 m at next above φ, Pa none
+pad 0.1 m at 89°, Pa none
+table Mars's drift, Dust of silicate
+gravity_m_s2 = 0x400dae147ae147ae  # 3.71
+grain_density_kg_m3 = 0x40a4500000000000  # 2600.0
+layer 0x0000000000000000 0x3fcc28f5c28f5c29
+c_pa = 0x409ce80000000000  # 1850.0
+phi_rad = 0x3fd41b2f769cf0e0  # 0.3141592653589793
+rho_kg_m3 = 0x4092c00000000000  # 1200.0
+pad 1 m at 0°, Pa = 0x40e33cf22d8d08f8  # 39399.56806041481
+pad 1 m at 2°, Pa = 0x40e205b94c34eaf0  # 36909.79055257689
+pad 1 m at 5°, Pa = 0x40e04876f85347ae  # 33347.7178131485
+pad 1 m at 10°, Pa = 0x40db306726e6817c  # 27841.611749292802
+pad 1 m at 15°, Pa = 0x40d641a26d528232  # 22790.53792250361
+pad 1 m at 20°, Pa none
+pad 1 m at 25°, Pa none
+pad 1 m at 30°, Pa none
+pad 1 m at 40°, Pa none
+pad 1 m at 45°, Pa none
+pad 1 m at 50°, Pa none
+pad 1 m at 0.25 φ, Pa = 0x40e090ed9595bda8  # 33927.42450987856
+pad 1 m at 0.5 φ, Pa = 0x40dc398390a4f03a  # 28902.055703386875
+pad 1 m at 0.75 φ, Pa = 0x40d7b3bea9718076  # 24270.979092002344
+pad 1 m at 0.9 φ, Pa = 0x40d5191fad2735ce  # 21604.494943430465
+pad 1 m at 0.99 φ, Pa = 0x40d356154af2c69a  # 19800.33269948382
+pad 1 m at φ − 1e-9 rad, Pa = 0x40d2c7e72b61f9f6  # 19231.612022871115
+pad 1 m at φ, Pa none
+pad 1 m at next above φ, Pa none
+pad 1 m at 89°, Pa none
+pad 0.1 m at 0°, Pa = 0x40e0d9f0abe11d5c  # 34511.520981366484
+pad 0.1 m at 2°, Pa = 0x40dfd4e635f41cca  # 32595.597043064226
+pad 0.1 m at 5°, Pa = 0x40dd221b86d89784  # 29832.43010535046
+pad 0.1 m at 10°, Pa = 0x40d8e94b11a36b02  # 25509.172951559543
+pad 0.1 m at 15°, Pa = 0x40d5059545968542  # 21526.332372312674
+pad 0.1 m at 20°, Pa none
+pad 0.1 m at 25°, Pa none
+pad 0.1 m at 30°, Pa none
+pad 0.1 m at 40°, Pa none
+pad 0.1 m at 45°, Pa none
+pad 0.1 m at 50°, Pa none
+pad 0.1 m at 0.25 φ, Pa = 0x40dd92fd61e0ffd4  # 30283.959099054176
+pad 0.1 m at 0.5 φ, Pa = 0x40d9ba8ebae1127c  # 26346.230156200458
+pad 0.1 m at 0.75 φ, Pa = 0x40d627961e032f82  # 22686.34558181419
+pad 0.1 m at 0.9 φ, Pa = 0x40d4227b34cdf15e  # 20617.925097928724
+pad 0.1 m at 0.99 φ, Pa = 0x40d2f1eb3ae4574a  # 19399.675469479793
+pad 0.1 m at φ − 1e-9 rad, Pa = 0x40d2c75ff4fb2a54  # 19229.49932746061
+pad 0.1 m at φ, Pa none
+pad 0.1 m at next above φ, Pa none
+pad 0.1 m at 89°, Pa none
+the table under 1 m, its layer at 0x0000000000000000 0x3fcc28f5c28f5c29
+pad 1 m at 0°, Pa = 0x40e33cf22d8d08f8  # 39399.56806041481
+pad 1 m at 2°, Pa = 0x40e205b94c34eaf0  # 36909.79055257689
+pad 1 m at 5°, Pa = 0x40e04876f85347ae  # 33347.7178131485
+pad 1 m at 10°, Pa = 0x40db306726e6817c  # 27841.611749292802
+pad 1 m at 15°, Pa = 0x40d641a26d528232  # 22790.53792250361
+pad 1 m at 20°, Pa none
+pad 1 m at 25°, Pa none
+pad 1 m at 30°, Pa none
+pad 1 m at 40°, Pa none
+pad 1 m at 45°, Pa none
+pad 1 m at 50°, Pa none
+pad 1 m at 0.25 φ, Pa = 0x40e090ed9595bda8  # 33927.42450987856
+pad 1 m at 0.5 φ, Pa = 0x40dc398390a4f03a  # 28902.055703386875
+pad 1 m at 0.75 φ, Pa = 0x40d7b3bea9718076  # 24270.979092002344
+pad 1 m at 0.9 φ, Pa = 0x40d5191fad2735ce  # 21604.494943430465
+pad 1 m at 0.99 φ, Pa = 0x40d356154af2c69a  # 19800.33269948382
+pad 1 m at φ − 1e-9 rad, Pa = 0x40d2c7e72b61f9f6  # 19231.612022871115
+pad 1 m at φ, Pa none
+pad 1 m at next above φ, Pa none
+pad 1 m at 89°, Pa none
+the table under 0.1 m, its layer at 0x0000000000000000 0x3fcc28f5c28f5c29
+pad 0.1 m at 0°, Pa = 0x40e0d9f0abe11d5c  # 34511.520981366484
+pad 0.1 m at 2°, Pa = 0x40dfd4e635f41cca  # 32595.597043064226
+pad 0.1 m at 5°, Pa = 0x40dd221b86d89784  # 29832.43010535046
+pad 0.1 m at 10°, Pa = 0x40d8e94b11a36b02  # 25509.172951559543
+pad 0.1 m at 15°, Pa = 0x40d5059545968542  # 21526.332372312674
+pad 0.1 m at 20°, Pa none
+pad 0.1 m at 25°, Pa none
+pad 0.1 m at 30°, Pa none
+pad 0.1 m at 40°, Pa none
+pad 0.1 m at 45°, Pa none
+pad 0.1 m at 50°, Pa none
+pad 0.1 m at 0.25 φ, Pa = 0x40dd92fd61e0ffd4  # 30283.959099054176
+pad 0.1 m at 0.5 φ, Pa = 0x40d9ba8ebae1127c  # 26346.230156200458
+pad 0.1 m at 0.75 φ, Pa = 0x40d627961e032f82  # 22686.34558181419
+pad 0.1 m at 0.9 φ, Pa = 0x40d4227b34cdf15e  # 20617.925097928724
+pad 0.1 m at 0.99 φ, Pa = 0x40d2f1eb3ae4574a  # 19399.675469479793
+pad 0.1 m at φ − 1e-9 rad, Pa = 0x40d2c75ff4fb2a54  # 19229.49932746061
+pad 0.1 m at φ, Pa none
+pad 0.1 m at next above φ, Pa none
+pad 0.1 m at 89°, Pa none
+table Viking Lander 2's soil, Soil of silicate
+gravity_m_s2 = 0x400dae147ae147ae  # 3.71
+grain_density_kg_m3 = 0x40a4500000000000  # 2600.0
+layer 0x0000000000000000 0x3fcc28f5c28f5c29
+c_pa = 0x40a6440000000000  # 2850.0
+phi_rad = 0x3fe38c35418a5bf6  # 0.6108652381980153
+rho_kg_m3 = 0x4095e00000000000  # 1400.0
+pad 1 m at 0°, Pa = 0x41126202254f4740  # 301184.5364352353
+pad 1 m at 2°, Pa = 0x411131aa7bc597b8  # 281706.62087094365
+pad 1 m at 5°, Pa = 0x410ef74ceb2f9f82  # 253673.61483692756
+pad 1 m at 10°, Pa = 0x41099fdf86da0070  # 209915.94084549276
+pad 1 m at 15°, Pa = 0x4104b522826552f2  # 169636.3136698227
+pad 1 m at 20°, Pa = 0x410032f9f07497ec  # 132703.24240988435
+pad 1 m at 25°, Pa = 0x40f836a916fab8b6  # 99178.56811020043
+pad 1 m at 30°, Pa = 0x40f0f397c25ca338  # 69433.48495162732
+pad 1 m at 40°, Pa none
+pad 1 m at 45°, Pa none
+pad 1 m at 50°, Pa none
+pad 1 m at 0.25 φ, Pa = 0x410aeb469d4c5c7a  # 220520.82680580375
+pad 1 m at 0.5 φ, Pa = 0x41026708d3e6ff22  # 150753.10346793482
+pad 1 m at 0.75 φ, Pa = 0x40f64e4531389f34  # 91364.32451688946
+pad 1 m at 0.9 φ, Pa = 0x40edf5421ec9cfce  # 61354.06625834071
+pad 1 m at 0.99 φ, Pa = 0x40e6480179ab8710  # 45632.04610229854
+pad 1 m at φ − 1e-9 rad, Pa = 0x40e52d86fface15e  # 43372.21871036546
+pad 1 m at φ, Pa none
+pad 1 m at next above φ, Pa none
+pad 1 m at 89°, Pa none
+pad 0.1 m at 0°, Pa = 0x410c8b2fabf14c3a  # 233829.9589563327
+pad 0.1 m at 2°, Pa = 0x410affdfc9fd3a56  # 221179.9736275251
+pad 0.1 m at 5°, Pa = 0x4108bd4537d15f22  # 202664.6522548134
+pad 0.1 m at 10°, Pa = 0x41051a48f7455020  # 172873.12073767278
+pad 0.1 m at 15°, Pa = 0x41019b2efb4fa44a  # 144229.87271049834
+pad 0.1 m at 20°, Pa = 0x40fc7a26c0a8e70c  # 116642.422036078
+pad 0.1 m at 25°, Pa = 0x40f606f10f1b14fe  # 90223.06618793678
+pad 0.1 m at 30°, Pa = 0x40eff5524eef4c6c  # 65450.5721355908
+pad 0.1 m at 40°, Pa none
+pad 0.1 m at 45°, Pa none
+pad 0.1 m at 50°, Pa none
+pad 0.1 m at 0.25 φ, Pa = 0x4105ff740f3a2462  # 180206.50743511604
+pad 0.1 m at 0.5 φ, Pa = 0x40ffcff444900ac4  # 130303.2667389317
+pad 0.1 m at 0.75 φ, Pa = 0x40f47851e9bacd88  # 83845.11956291471
+pad 0.1 m at 0.9 φ, Pa = 0x40ec8ece9002c71c  # 58486.455079449544
+pad 0.1 m at 0.99 φ, Pa = 0x40e5e5f996a422e6  # 44847.79963881317
+pad 0.1 m at φ − 1e-9 rad, Pa = 0x40e52d231485c6b6  # 43369.09625519572
+pad 0.1 m at φ, Pa none
+pad 0.1 m at next above φ, Pa none
+pad 0.1 m at 89°, Pa none
+the table under 1 m, its layer at 0x0000000000000000 0x3fcc28f5c28f5c29
+pad 1 m at 0°, Pa = 0x41126202254f4740  # 301184.5364352353
+pad 1 m at 2°, Pa = 0x411131aa7bc597b8  # 281706.62087094365
+pad 1 m at 5°, Pa = 0x410ef74ceb2f9f82  # 253673.61483692756
+pad 1 m at 10°, Pa = 0x41099fdf86da0070  # 209915.94084549276
+pad 1 m at 15°, Pa = 0x4104b522826552f2  # 169636.3136698227
+pad 1 m at 20°, Pa = 0x410032f9f07497ec  # 132703.24240988435
+pad 1 m at 25°, Pa = 0x40f836a916fab8b6  # 99178.56811020043
+pad 1 m at 30°, Pa = 0x40f0f397c25ca338  # 69433.48495162732
+pad 1 m at 40°, Pa none
+pad 1 m at 45°, Pa none
+pad 1 m at 50°, Pa none
+pad 1 m at 0.25 φ, Pa = 0x410aeb469d4c5c7a  # 220520.82680580375
+pad 1 m at 0.5 φ, Pa = 0x41026708d3e6ff22  # 150753.10346793482
+pad 1 m at 0.75 φ, Pa = 0x40f64e4531389f34  # 91364.32451688946
+pad 1 m at 0.9 φ, Pa = 0x40edf5421ec9cfce  # 61354.06625834071
+pad 1 m at 0.99 φ, Pa = 0x40e6480179ab8710  # 45632.04610229854
+pad 1 m at φ − 1e-9 rad, Pa = 0x40e52d86fface15e  # 43372.21871036546
+pad 1 m at φ, Pa none
+pad 1 m at next above φ, Pa none
+pad 1 m at 89°, Pa none
+the table under 0.1 m, its layer at 0x0000000000000000 0x3fcc28f5c28f5c29
+pad 0.1 m at 0°, Pa = 0x410c8b2fabf14c3a  # 233829.9589563327
+pad 0.1 m at 2°, Pa = 0x410affdfc9fd3a56  # 221179.9736275251
+pad 0.1 m at 5°, Pa = 0x4108bd4537d15f22  # 202664.6522548134
+pad 0.1 m at 10°, Pa = 0x41051a48f7455020  # 172873.12073767278
+pad 0.1 m at 15°, Pa = 0x41019b2efb4fa44a  # 144229.87271049834
+pad 0.1 m at 20°, Pa = 0x40fc7a26c0a8e70c  # 116642.422036078
+pad 0.1 m at 25°, Pa = 0x40f606f10f1b14fe  # 90223.06618793678
+pad 0.1 m at 30°, Pa = 0x40eff5524eef4c6c  # 65450.5721355908
+pad 0.1 m at 40°, Pa none
+pad 0.1 m at 45°, Pa none
+pad 0.1 m at 50°, Pa none
+pad 0.1 m at 0.25 φ, Pa = 0x4105ff740f3a2462  # 180206.50743511604
+pad 0.1 m at 0.5 φ, Pa = 0x40ffcff444900ac4  # 130303.2667389317
+pad 0.1 m at 0.75 φ, Pa = 0x40f47851e9bacd88  # 83845.11956291471
+pad 0.1 m at 0.9 φ, Pa = 0x40ec8ece9002c71c  # 58486.455079449544
+pad 0.1 m at 0.99 φ, Pa = 0x40e5e5f996a422e6  # 44847.79963881317
+pad 0.1 m at φ − 1e-9 rad, Pa = 0x40e52d231485c6b6  # 43369.09625519572
+pad 0.1 m at φ, Pa none
+pad 0.1 m at next above φ, Pa none
+pad 0.1 m at 89°, Pa none
+a cohesionless soil of φ 30°, 1,600 kg m⁻³
+gravity_m_s2 = 0x40239eb851eb851f  # 9.81
+c_pa = 0x0000000000000000  # 0.0
+phi_rad = 0x3fe0c152382d7365  # 0.5235987755982988
+rho_kg_m3 = 0x4099000000000000  # 1600.0
+pad 1 m at 0°, Pa = 0x40f9c10d3cd6e511  # 105488.82735337714
+pad 1 m at 2°, Pa = 0x40f70a8e1953b95c  # 94376.88118336111
+pad 1 m at 5°, Pa = 0x40f3444953bbb79c  # 78916.58294269297
+pad 1 m at 10°, Pa = 0x40eb7e2f18a4ce16  # 56305.47175827266
+pad 1 m at 15°, Pa = 0x40e25687d454dfef  # 37556.24466937768
+pad 1 m at 20°, Pa = 0x40d60b34d6b0a008  # 22572.825603634148
+pad 1 m at 25°, Pa = 0x40c5d1f3bf5d1e4e  # 11171.904277457998
+pad 1 m at 30°, Pa none
+pad 1 m at 40°, Pa none
+pad 1 m at 45°, Pa none
+pad 1 m at 50°, Pa none
+pad 1 m at 0.25 φ, Pa = 0x40f0632aefb9c3ca  # 67122.6835267685
+pad 1 m at 0.5 φ, Pa = 0x40e25687d454dfef  # 37556.24466937768
+pad 1 m at 0.75 φ, Pa = 0x40d00f7ddc57e547  # 16445.966573690323
+pad 1 m at 0.9 φ, Pa = 0x40bd3b9a95cc0148  # 7483.603848219216
+pad 1 m at 0.99 φ, Pa = 0x40a2728890053906  # 2361.2667237884625
+pad 1 m at φ − 1e-9 rad, Pa = 0x402422763e22d84f  # 10.067308370355162
+pad 1 m at φ, Pa none
+pad 1 m at next above φ, Pa none
+pad 1 m at 89°, Pa none
+pad 0.1 m at 0°, Pa = 0x40c49a70fd78b741  # 10548.882735337715
+pad 0.1 m at 2°, Pa = 0x40c26ed81442fab0  # 9437.688118336111
+pad 0.1 m at 5°, Pa = 0x40bed3a885f925c6  # 7891.658294269297
+pad 0.1 m at 10°, Pa = 0x40b5fe8c13b70b45  # 5630.547175827266
+pad 0.1 m at 15°, Pa = 0x40ad573fba21664b  # 3755.624466937768
+pad 0.1 m at 20°, Pa = 0x40a1a290abc08007  # 2257.282560363415
+pad 0.1 m at 25°, Pa = 0x409174c2ff7db1d8  # 1117.1904277457998
+pad 0.1 m at 30°, Pa none
+pad 0.1 m at 40°, Pa none
+pad 0.1 m at 45°, Pa none
+pad 0.1 m at 50°, Pa none
+pad 0.1 m at 0.25 φ, Pa = 0x40ba3844b2c2d2de  # 6712.268352676851
+pad 0.1 m at 0.5 φ, Pa = 0x40ad573fba21664b  # 3755.624466937768
+pad 0.1 m at 0.75 φ, Pa = 0x4099b262fa263ba6  # 1644.5966573690325
+pad 0.1 m at 0.9 φ, Pa = 0x408762e211700106  # 748.3603848219216
+pad 0.1 m at 0.99 φ, Pa = 0x406d840db33b8e71  # 236.12667237884628
+pad 0.1 m at φ − 1e-9 rad, Pa = 0x3ff01b91cb4f1372  # 1.0067308370355161
+pad 0.1 m at φ, Pa none
+pad 0.1 m at next above φ, Pa none
+pad 0.1 m at 89°, Pa none

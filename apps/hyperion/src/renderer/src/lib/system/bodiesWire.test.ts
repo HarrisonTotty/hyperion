@@ -37,6 +37,8 @@ import { GOLDEN_SYSTEMS, GOLDEN_TIMES, goldenSystemBodies } from "../../test/inS
 import { vec3 } from "../../geometry/vec3";
 import {
   bodyDetailSeed,
+  bodyRecordOrbit,
+  bodyRecordSeasons,
   EARTH_MASS_KG,
   toBodiesRequest,
   toBodyDetail,
@@ -440,6 +442,59 @@ describe("toBodyDetail", () => {
       bodyDetailSeed({ hooks: { state: "not_applicable" } }),
       bodyDetailSeed(earthDetail().record),
     ]).toEqual([null, null, null, null]);
+  });
+
+  it("gives a record's own orbit alone, for the terrain readout's season (R10.T12)", () => {
+    const { orbit } = earthDetail().record;
+    if (orbit.state !== "ok") {
+      throw new Error("the fixture's Earth has an orbit");
+    }
+    const { orbit: elements } = orbit.value;
+    expect(bodyRecordOrbit(earthDetail().record)).toEqual({
+      semiMajorAxisM: elements.semi_major_axis_m,
+      eccentricity: elements.eccentricity,
+      inclinationRad: elements.inclination_rad,
+      ascendingNodeRad: elements.ascending_node_rad,
+      argumentOfPeriapsisRad: elements.argument_of_periapsis_rad,
+      meanAnomalyAtEpochRad: elements.mean_anomaly_at_epoch_rad,
+      periodS: elements.period_s,
+    });
+  });
+
+  it("gives no orbit where the section is not ok or the orbit cannot be propagated", () => {
+    const { orbit } = earthDetail().record;
+    if (orbit.state !== "ok") {
+      throw new Error("the fixture's Earth has an orbit");
+    }
+    const open = {
+      state: "ok",
+      value: { ...orbit.value, orbit: { ...orbit.value.orbit, eccentricity: 0.99995 } },
+    } as const;
+    expect([
+      bodyRecordOrbit({ orbit: { state: "not_applicable" } }),
+      bodyRecordOrbit({ orbit: open }),
+    ]).toEqual([null, null]);
+  });
+
+  it("takes a moon's seasons from its planet, and every other body's from its own orbit", () => {
+    const { record } = earthDetail();
+    const planet = `${FIXTURE_SYSTEM}.0100`;
+    const moonOf = (parent: (typeof record)["parent"]) => ({
+      ...record,
+      kind: { type: "moon", origin: "captured" } as const,
+      parent,
+    });
+    expect([
+      bodyRecordSeasons(moonOf({ type: "body", id: planet })),
+      bodyRecordSeasons({ ...record, parent: { type: "body", id: planet } }),
+      bodyRecordSeasons(moonOf({ type: "star", body_index: 0 })),
+      bodyRecordSeasons({ ...record, orbit: { state: "not_applicable" } }),
+    ]).toEqual([
+      { kind: "planet", planet },
+      { kind: "own", orbit: bodyRecordOrbit(record) },
+      { kind: "own", orbit: bodyRecordOrbit(record) },
+      { kind: "none" },
+    ]);
   });
 
   it("refuses a record of another system", () => {

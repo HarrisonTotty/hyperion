@@ -28,6 +28,7 @@ import {
   heightReading,
   heightUnitFor,
   patchesReading,
+  siteElevationReading,
   TEST_PLANET_STATEMENT,
   VIEWS_NOT_MADE,
 } from "./DescentSpike";
@@ -262,13 +263,14 @@ describe("DescentSpike", () => {
     expect(screen.getByRole("status", { name: "Mode" }).textContent).toBe("MEASUREMENT");
   });
 
-  it("says it is measuring the terrain, then shows the site's height", async () => {
+  it("says it is measuring the terrain, then shows the site's elevation", async () => {
     renderSpike();
     expect(
       screen.getByText(statusLine("MEASURING TERRAIN: landing site and ground track")),
     ).toBeDefined();
-    const reading = await screen.findByText(/^[+-][\d,]+ m$/, undefined, { timeout: 20_000 });
-    expect(reading.closest("dd")?.previousElementSibling?.textContent).toBe("Site Height");
+    // ELEVATION's form: 0.1 m, `-` below the datum and no `+`.
+    const reading = await screen.findByText(/^-?[\d,]+\.\d m$/, undefined, { timeout: 20_000 });
+    expect(reading.closest("dd")?.previousElementSibling?.textContent).toBe("Site Elevation");
   }, 30_000);
 
   it("says it is acquiring its adapter while none has answered", async () => {
@@ -421,7 +423,7 @@ describe("DescentSpike", () => {
       "Ground Speed",
       "Vertical Speed",
       "Camera ELV",
-      "Site Height",
+      "Site Elevation",
       "Finest Terrain Held",
       "Patches",
     ]) {
@@ -444,6 +446,15 @@ describe("the descent panel's readings", () => {
     expect(heightReading(9_850.4, "m")).toBe("9850 m");
     expect(heightReading(-12_000, "m")).toBe("-12,000 m");
     expect(heightReading(400_000, "km")).toBe("400.0 km");
+  });
+
+  it("writes the site's elevation in ELEVATION's form: 0.1 m, no plus, grouped from five", () => {
+    expect([
+      siteElevationReading(412.34),
+      siteElevationReading(-410),
+      siteElevationReading(12_480),
+      siteElevationReading(-0.04),
+    ]).toEqual(["412.3 m", "-410.0 m", "12,480.0 m", "0.0 m"]);
   });
 
   it("writes ground speed whole from 100 m/s", () => {

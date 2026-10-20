@@ -46,10 +46,12 @@ import { HostDiscLayer } from "../../view/sky/disc";
 import { skySpriteStars } from "../../view/sky/sprites";
 import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
 import type { ClassMapSource } from "../../view/terrain/classMap";
+import { TerrainFailureGuard } from "../../view/terrain/failureGuard";
 import {
   LiveFrameTerrain,
   surveyEdgeViewsOf,
   type ViewTerrainInput,
+  type ViewTerrainSession,
   type WireframeTerrainFrame,
   type WireframeTerrainInput,
   wireframeTerrainOf,
@@ -59,6 +61,7 @@ import type { TerrainViewReport } from "../../view/terrain/session";
 import {
   buildWireframeDrawList,
   type DrawAnchor,
+  type DrawnLineOfSight,
   type DrawnSurveyEdge,
   type SpriteStar,
   viewStrokesAt,
@@ -124,6 +127,15 @@ export interface ViewFrameInputs {
    * wireframe draws no terrain and no survey edge is marked.
    */
   readonly terrain?: ViewTerrainInput | undefined;
+  /**
+   * Whether the view's terrain readout reads a point on its line of sight this frame, which its
+   * tripod marks at the picture's centre (plan R10, R10.T12): `true` while the readout stands with a
+   * point, over surveyed ground or not; `false` where it has none, at `NO GROUND`. Absent for a view
+   * that states no readout, which draws no tripod: an instrument (decision-r10-t12-leans §3), or a
+   * view under `TERRAIN NOT AVAILABLE` (§5). The drawer keeps the tripod's give-way from frame to
+   * frame while it is given, `false` or `true`.
+   */
+  readonly lineOfSightPoint?: boolean | undefined;
 }
 
 /** What a frame drew. */
@@ -149,6 +161,12 @@ export interface ViewFrameDrawn {
    * decision-r10-t16-review §1); none without a terrain session.
    */
   readonly surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
+  /**
+   * The line-of-sight mark the frame drew (`WireframeDrawList.lineOfSight`, plan R10, R10.T12): its
+   * box where it is drawn, which the view's mark labels stand clear of; `null` where the frame was
+   * given no line of sight.
+   */
+  readonly lineOfSight: DrawnLineOfSight | null;
 }
 
 /**
@@ -254,13 +272,24 @@ export class ViewFrameDrawer {
   /** A sky whose bake failed is not baked again until another sky or a restore. */
   #failedFor: DrawnSky | null = null;
   #frameFailed = false;
-  /** The survey edges could not be made: said once until they are made again (S5). */
-  #edgesFailed = false;
-  /** The wireframe's terrain could not be drawn: said once until it is drawn again (R10.T11). */
-  #wireTerrainFailed = false;
+  /**
+   * The guards of the survey edges (S5) and of the wireframe's terrain (R10.T11), R10.T16.e's: a
+   * failure said once until the call succeeds again, and the session's terrain faulted once it has
+   * failed on for 250 ms; made anew for each session (`#guardsFor`).
+   */
+  #edgesGuard = new TerrainFailureGuard();
+  #wireGuard = new TerrainFailureGuard();
+  /** The session the guards guard. */
+  #guarded: ViewTerrainSession | null = null;
   /** The contour interval the view's wireframe terrain last held, its hysteresis's (R10.T11). */
   #contourIntervalM: number | null = null;
   #regimes: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
+  /**
+   * Whether the view's tripod gave way in its last frame drawn (plan R10, R10.T12), the give-way's
+   * hysteresis, which its next frame's draw list starts from (`LineOfSightOptions.yielded`); `false`
+   * before its first, and once a frame is drawn with no line of sight.
+   */
+  #lineOfSightYielded = false;
   #sized: ViewSize | null = null;
   readonly #unsubscribe: () => void;
 
@@ -369,8 +398,15 @@ export class ViewFrameDrawer {
                 viewport,
                 frameStyleOf(inputs, this.#photoreal.status),
               ),
+        // The tripod at the picture's centre where the readout has a point, and its give-way's
+        // state from the frame before (R10.T12).
+        lineOfSight:
+          inputs.lineOfSightPoint === undefined
+            ? null
+            : { hasPoint: inputs.lineOfSightPoint, yielded: this.#lineOfSightYielded },
       },
     );
+    this.#lineOfSightYielded = list.lineOfSight?.yielded ?? false;
     const cube = this.#cubeFor(inputs.sky, inputs.setting);
     const exposed = exposureScale(ev100);
     let drawn = false;
@@ -418,29 +454,45 @@ export class ViewFrameDrawer {
       terrain,
       contourIntervalM,
       surveyEdges: list.surveyEdges,
+      lineOfSight: list.lineOfSight,
     };
   }
 
   /**
    * The wireframe's terrain this frame (`wireframeTerrainOf`, plan R10, R10.T11), or none where it
    * cannot be drawn: a loss (`EngineUnavailable`) passes in silence, and anything else, a bug, is
-   * reported once until it is drawn again, so that the view draws on, as the survey edges do.
+   * reported once until it is drawn again, so that the view draws on, as the survey edges do; once
+   * it has failed for `ANNUNCIATION_ONSET_MS`, the session's terrain is faulted (R10.T16.e).
    */
   #wireTerrain(
     terrain: ViewTerrainInput,
     input: WireframeTerrainInput,
   ): WireframeTerrainFrame | null {
-    try {
-      const wire = wireframeTerrainOf(terrain.source, input);
-      this.#wireTerrainFailed = false;
-      return wire;
-    } catch (error: unknown) {
-      if (!(error instanceof EngineUnavailable) && !this.#wireTerrainFailed) {
-        console.error(`the wireframe terrain of ${this.#name} could not be drawn:`, error);
-        this.#wireTerrainFailed = true;
-      }
-      return null;
+    const session = terrain.source;
+    return this.#guardsFor(session).wire.run(
+      () => wireframeTerrainOf(session, input),
+      null,
+      terrain.nowMs,
+      {
+        describe: `the wireframe terrain of ${this.#name} could not be drawn:`,
+        onFault: () => {
+          session.failComputation();
+        },
+      },
+    );
+  }
+
+  /** The guards of `session`'s calls, made anew when the session changes (R10.T16.e). */
+  #guardsFor(session: ViewTerrainSession): {
+    readonly edges: TerrainFailureGuard;
+    readonly wire: TerrainFailureGuard;
+  } {
+    if (session !== this.#guarded) {
+      this.#guarded = session;
+      this.#edgesGuard = new TerrainFailureGuard();
+      this.#wireGuard = new TerrainFailureGuard();
     }
+    return { edges: this.#edgesGuard, wire: this.#wireGuard };
   }
 
   #drawPhotoreal(
@@ -521,7 +573,9 @@ export class ViewFrameDrawer {
   /**
    * The survey edges the frame marks (`surveyEdgeViewsOf`), or none where they cannot be made: a
    * loss (`EngineUnavailable`) passes in silence, and anything else, a bug, is reported once until
-   * they are made again, so that the view draws on (the batch review's S5).
+   * they are made again, so that the view draws on (the batch review's S5); once they have failed
+   * for `ANNUNCIATION_ONSET_MS`, the session's terrain is faulted (`TerrainFailureGuard`;
+   * R10.T16.e), since the guide requires the edge wherever surveyed terrain meets unsurveyed ground.
    */
   #surveyEdges(
     terrain: ViewTerrainInput,
@@ -530,17 +584,18 @@ export class ViewFrameDrawer {
     viewport: ViewSize,
     style: RenderStyle,
   ): ReturnType<typeof surveyEdgeViewsOf> {
-    try {
-      const edges = surveyEdgeViewsOf(terrain.source, terrain.view, scene, camera, viewport, style);
-      this.#edgesFailed = false;
-      return edges;
-    } catch (error: unknown) {
-      if (!(error instanceof EngineUnavailable) && !this.#edgesFailed) {
-        console.error(`the survey edges of ${this.#name} could not be marked:`, error);
-        this.#edgesFailed = true;
-      }
-      return [];
-    }
+    const session = terrain.source;
+    return this.#guardsFor(session).edges.run(
+      () => surveyEdgeViewsOf(session, terrain.view, scene, camera, viewport, style),
+      [],
+      terrain.nowMs,
+      {
+        describe: `the survey edges of ${this.#name} could not be marked:`,
+        onFault: () => {
+          session.failComputation();
+        },
+      },
+    );
   }
 
   #cubeFor(sky: DrawnSky | null, setting: QualitySetting): BakedCube | null {

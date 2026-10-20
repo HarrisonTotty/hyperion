@@ -30,6 +30,12 @@ import { viewId } from "../../view/camera/state";
 import { IDENTITY_ROTATION } from "../../view/coords/rotation";
 import { EngineUnavailable } from "../../view/engine/resilientEngine";
 import type { RenderEngine } from "../../view/engine/types";
+import {
+  ANNUNCIATION_ONSET_MS,
+  TERRAIN_COMPUTATION_FAILED,
+  TERRAIN_NOT_AVAILABLE,
+} from "../../view/terrain/annunciation";
+import { TerrainFailureGuard } from "../../view/terrain/failureGuard";
 import type { TerrainSession } from "../../view/terrain/session";
 import { MAX_CONSECUTIVE_WORKER_FAILURES, type WorkerLike } from "../../view/terrain/workers/pool";
 import { precisionScene } from "../../view/scenes/precision";
@@ -500,34 +506,85 @@ describe("useTerrainSession (R10.T16.a)", () => {
   });
 });
 
-/** A session whose every step throws `error`. */
-function throwing(error: Error): Pick<TerrainSession, "step"> {
+/** A session stand-in whose steps throw `error` while `throws` holds, its faults counted. */
+function throwing(
+  error: Error,
+  throws: () => boolean = () => true,
+): Pick<TerrainSession, "step" | "failComputation"> & { readonly faulted: () => number } {
+  let faulted = 0;
   return {
     step: () => {
-      throw error;
+      if (throws()) {
+        throw error;
+      }
     },
+    failComputation: () => {
+      faulted += 1;
+    },
+    faulted: () => faulted,
   };
 }
 
-describe("the loop's guarded step of its session (the batch review's S5)", () => {
+/** Steps `session` through `guard` once at each of `timesMs`. */
+function stepAt(
+  session: Pick<TerrainSession, "step" | "failComputation"> | null,
+  guard: TerrainFailureGuard,
+  timesMs: ReadonlyArray<number>,
+): void {
+  for (const atMs of timesMs) {
+    stepTerrainSession(session, guard, atMs);
+  }
+}
+
+describe("the loop's guarded step of its session (the batch review's S5; R10.T16.e)", () => {
   it("reports a step's bug once, however many steps fail after it, and keeps the loop going", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const session = throwing(new Error("a bug of the session's"));
-    const failing = [false, true, true].map((before) => stepTerrainSession(session, before));
-    expect([failing, error.mock.calls.length]).toEqual([[true, true, true], 1]);
+    const guard = new TerrainFailureGuard();
+    stepAt(throwing(new Error("a bug of the session's")), guard, [0, 16, 33]);
+    expect([guard.failing, error.mock.calls.length]).toEqual([true, 1]);
   });
 
-  it("lets a loss pass in silence", () => {
+  it("faults the session's terrain once its steps have failed for 250 ms, and not before", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const session = throwing(new Error("a bug of the session's"));
+    const guard = new TerrainFailureGuard();
+    stepAt(session, guard, [1_000, 1_100, 1_000 + ANNUNCIATION_ONSET_MS - 1]);
+    const before = session.faulted();
+    stepAt(session, guard, [1_000 + ANNUNCIATION_ONSET_MS, 1_300, 1_400]);
+    expect([before, session.faulted()]).toEqual([0, 1]);
+  });
+
+  it("raises nothing for a single failed step", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    let atMs = 0;
+    const session = throwing(new Error("a bug of the session's"), () => atMs === 0);
+    const guard = new TerrainFailureGuard();
+    for (atMs = 0; atMs <= 1_000; atMs += 16) {
+      stepTerrainSession(session, guard, atMs);
+    }
+    expect([session.faulted(), guard.failing]).toEqual([0, false]);
+  });
+
+  it("lets a loss pass in silence, however long it lasts", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const failing = stepTerrainSession(throwing(new EngineUnavailable("createBuffer")), false);
-    expect([failing, error.mock.calls.length]).toEqual([false, 0]);
+    const session = throwing(new EngineUnavailable("createBuffer"));
+    const guard = new TerrainFailureGuard();
+    stepAt(session, guard, [0, 300, 600]);
+    expect([guard.failing, session.faulted(), error.mock.calls.length]).toEqual([false, 0, 0]);
   });
 
   it("clears once a step succeeds, and steps no session where there is none", () => {
-    expect([
-      stepTerrainSession({ step: () => undefined }, true),
-      stepTerrainSession(null, true),
-    ]).toEqual([false, false]);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const failed = new TerrainFailureGuard();
+    stepAt(throwing(new Error("a bug of the session's")), failed, [0]);
+    stepAt(
+      throwing(new Error("never"), () => false),
+      failed,
+      [16],
+    );
+    const none = new TerrainFailureGuard();
+    stepAt(null, none, [0, 300]);
+    expect([failed.failing, none.failing]).toEqual([false, false]);
   });
 });
 
@@ -547,7 +604,12 @@ describe("the terrain's faults for the label blocks (useTerrainFaults; decision-
     expect(result.current.size).toBe(0);
   });
 
-  it("gives every view that hands a body over once every height worker is lost", async () => {
+  /** A session holding the moon, which the primary hands over, and the hook's faults of it. */
+  async function handingSession(): Promise<{
+    readonly session: TerrainSession;
+    readonly workers: ScriptedHeightWorker[];
+    readonly faults: () => ReadonlyMap<string, string>;
+  }> {
     const engine = await countingRenderEngine();
     const feed = new SurfaceFeed();
     const { result, workers } = renderSession({
@@ -561,7 +623,12 @@ describe("the terrain's faults for the label blocks (useTerrainFaults; decision-
       regimes: new Map([[SESSION_MOON, "terrain"]]),
     });
     session.step();
-    const faults = renderHook(() => useTerrainFaults(session));
+    const hook = renderHook(() => useTerrainFaults(session));
+    return { session, workers, faults: () => hook.result.current };
+  }
+
+  it("gives every view that hands a body over once every height worker is lost", async () => {
+    const { session, workers, faults } = await handingSession();
     act(() => {
       for (let round = 0; round < MAX_CONSECUTIVE_WORKER_FAILURES; round += 1) {
         for (const worker of workers.slice(-2)) {
@@ -570,6 +637,14 @@ describe("the terrain's faults for the label blocks (useTerrainFaults; decision-
       }
       session.step();
     });
-    expect([...faults.result.current]).toEqual([PRIMARY]);
+    expect([...faults()]).toEqual([[PRIMARY, TERRAIN_NOT_AVAILABLE]]);
+  });
+
+  it("gives the computation's fault at once when the session's terrain computation is faulted (R10.T16.e)", async () => {
+    const { session, faults } = await handingSession();
+    act(() => {
+      session.failComputation();
+    });
+    expect([...faults()]).toEqual([[PRIMARY, TERRAIN_COMPUTATION_FAILED]]);
   });
 });

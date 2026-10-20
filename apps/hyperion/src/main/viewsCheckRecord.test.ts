@@ -112,6 +112,20 @@ describe("the terrain run's record (R10.T16.d)", () => {
     expect(readTerrainCheckRecord(structuredClone(TERRAIN_RECORD))).toEqual(TERRAIN_RECORD);
   });
 
+  it("is read back with the terrain session's faults (R10.T16.e)", () => {
+    const record = {
+      ...TERRAIN_RECORD,
+      terrainFaults: [
+        {
+          atMs: 40_000,
+          text: "TERRAIN NOT AVAILABLE: terrain computation failed, reopen VIEW to retry",
+          views: ["view", "instrument-1"],
+        },
+      ],
+    };
+    expect(readTerrainCheckRecord(structuredClone(record))).toEqual(record);
+  });
+
   it("is read back with no hand-over range and an undestroyed device", () => {
     const record = {
       ...TERRAIN_RECORD,
@@ -133,6 +147,10 @@ describe("the terrain run's record (R10.T16.d)", () => {
     [["faults", 0, "kind"], "device-gone"],
     [["faults", 0, "reason"], 3],
     [["restoresAtMs"], ["soon"]],
+    [["terrainFaults"], null],
+    [["terrainFaults"], [{ atMs: "soon", text: "a fault", views: [] }]],
+    [["terrainFaults"], [{ atMs: 1, text: 2, views: [] }]],
+    [["terrainFaults"], [{ atMs: 1, text: "a fault", views: [3] }]],
     [["loss", "after", "fieldChunks"], 1.5],
     [["loss", "masks", "beforeKept"], "yes"],
     [["teardown", "workersLive"], -1],

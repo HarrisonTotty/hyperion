@@ -363,6 +363,30 @@ function secondsBetween(from: UniverseTime, to: UniverseTime): number {
 }
 
 /**
+ * An orbit's mean anomaly at `time`, rad, unreduced: the phase {@link stateAt} places the body at,
+ * the server's `KeplerElements::drifting_state_at`'s in the same order of operations.
+ *
+ * @remarks
+ * M₀ plus 2π times the centred fraction of a period elapsed since the epoch
+ * ({@link fractionOfPeriod}), and for an evolving orbit ½ ṅ Δt² more, Δt the seconds from its
+ * drift's reference time (P14.T45.c). The terrain readout reads a body's month from it (plan R10,
+ * T12; decision-r10-t12-leans §6), so that the month is the one of the very phase the body is drawn
+ * at. It is not reduced: `stateAt` reduces it into `[−π, π]` for Kepler's equation, and the surface
+ * module's `month_at` takes any finite angle.
+ *
+ * @throws RangeError for a malformed time, as {@link fractionOfPeriod}.
+ */
+export function meanAnomalyAt(orbit: KeplerOrbit, time: UniverseTime): number {
+  const { drift } = orbit;
+  let meanAnomaly = orbit.meanAnomalyAtEpochRad + TAU * fractionOfPeriod(time, orbit.periodS);
+  if (drift !== undefined) {
+    const sinceReferenceS = secondsBetween(drift.reference, time);
+    meanAnomaly += 0.5 * drift.meanMotionRateRadPerS2 * sinceReferenceS * sinceReferenceS;
+  }
+  return meanAnomaly;
+}
+
+/**
  * A body's position and velocity relative to its parent at `time`, in the axes of the parent's
  * frame: the server's `KeplerElements::relative_state_at`, or for an evolving orbit its
  * `drifting_state_at`.
@@ -385,13 +409,12 @@ export function stateAt(orbit: KeplerOrbit, time: UniverseTime): OrbitState {
   const { periodS, drift } = orbit;
   let a = orbit.semiMajorAxisM;
   let e = orbit.eccentricity;
-  let meanAnomaly = orbit.meanAnomalyAtEpochRad + TAU * fractionOfPeriod(time, periodS);
+  const meanAnomaly = meanAnomalyAt(orbit, time);
   let meanMotionRadPerS = TAU / periodS;
   if (drift !== undefined) {
     const sinceReferenceS = secondsBetween(drift.reference, time);
     a += drift.semiMajorAxisRateMPerS * sinceReferenceS;
     e += drift.eccentricityRatePerS * sinceReferenceS;
-    meanAnomaly += 0.5 * drift.meanMotionRateRadPerS2 * sinceReferenceS * sinceReferenceS;
     meanMotionRadPerS += drift.meanMotionRateRadPerS2 * sinceReferenceS;
   }
   const anomaly = eccentricAnomaly(reduceToHalfTurn(meanAnomaly), e);

@@ -1,17 +1,22 @@
 import { describe, expect, it } from "vitest";
 
-import { dot, norm, normalise, type Vec3, vec3 } from "../../geometry/vec3";
+import { add, dot, norm, normalise, type Vec3, vec3 } from "../../geometry/vec3";
 import type { ColourTokens } from "../../spatial/paint";
 import {
+  aBody,
   aMarkedViewScene,
   aViewStar,
   FIXTURE_MOON,
   FIXTURE_PLANET,
+  FIXTURE_PLANET_CENTRE_M,
+  FIXTURE_SHIP,
   FIXTURE_SYSTEM,
   OFF_PLANET_CAMERA,
 } from "../../test/viewFixtures";
 import { quaternionFromAxisAngle } from "../camera/quaternion";
-import type { Viewport } from "../camera/projection";
+import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
+import { overlayDrawList } from "../photoreal/overlay";
+import { surveyEdgeMark, type SurveyEdgeView } from "../terrain/surveyEdge";
 import type { CameraTarget } from "../camera/state";
 import type { ViewPosition } from "../coords/position";
 import { relativeToCamera } from "../coords/relative";
@@ -42,6 +47,7 @@ import {
   viewStrokesAt,
   type WireframeDrawList,
 } from "./drawList";
+import { lineOfSightTripod, markBoxPx, type ScreenSegment, segmentDistancePx } from "./symbology";
 
 /** Stand-in colours, one distinct string per token, as `readTokens` would read them. */
 const TOKENS: ColourTokens = {
@@ -110,20 +116,27 @@ function build(options: Partial<DrawOptions> = {}, input: ViewScene = scene()): 
   return buildWireframeDrawList(input, CAMERA, VIEWPORT, TOKENS, { ...OPTIONS, ...options });
 }
 
-/**
- * The fixture's list with the planet's survey edge marked: `cells` surveyed at level 5 (by default
- * the four about face +z's centre, which faces the camera) on a body of `figure`.
- */
-function withSurveyEdge(
-  input: ViewScene = scene(),
-  figure = { equatorialRadiusM: 6.371e6, polarRadiusM: 6.371e6 },
-  cells: ReadonlyArray<{ face: 0 | 1 | 2 | 3 | 4 | 5; i: number; j: number }> = [
-    { face: 2, i: 14, j: 14 },
-    { face: 2, i: 15, j: 14 },
-    { face: 2, i: 16, j: 14 },
-    { face: 2, i: 17, j: 14 },
-  ],
-): WireframeDrawList {
+/** A cell of the planet's survey at level 5. */
+interface SurveyCell {
+  readonly face: 0 | 1 | 2 | 3 | 4 | 5;
+  readonly i: number;
+  readonly j: number;
+}
+
+/** The four cells about face +z's centre, which faces the camera, below it. */
+const BELOW_FACE_CENTRE: ReadonlyArray<SurveyCell> = [
+  { face: 2, i: 14, j: 14 },
+  { face: 2, i: 15, j: 14 },
+  { face: 2, i: 16, j: 14 },
+  { face: 2, i: 17, j: 14 },
+];
+
+/** The planet's survey as the list's options give it: `cells` surveyed on a body of `figure`. */
+function planetSurvey(
+  input: ViewScene,
+  figure: { equatorialRadiusM: number; polarRadiusM: number },
+  cells: ReadonlyArray<SurveyCell>,
+): SurveyEdgeView {
   const centreM = relativeToCamera(centre(FIXTURE_PLANET), CAMERA.pose, sceneOrigins(input));
   const merged = CoverageView.empty(5).merged(
     {
@@ -137,21 +150,27 @@ function withSurveyEdge(
   if (!merged.ok) {
     throw new Error(merged.message);
   }
-  return build(
-    {
-      surveyEdges: [
-        {
-          body: FIXTURE_PLANET,
-          coverage: merged.coverage,
-          figure,
-          rotation: IDENTITY_ROTATION,
-          centreM,
-          heightAtM: () => null,
-        },
-      ],
-    },
-    input,
-  );
+  return {
+    body: FIXTURE_PLANET,
+    coverage: merged.coverage,
+    figure,
+    rotation: IDENTITY_ROTATION,
+    centreM,
+    heightAtM: () => null,
+  };
+}
+
+/**
+ * The fixture's list with the planet's survey edge marked: `cells` surveyed at level 5 (by default
+ * the four about face +z's centre, which faces the camera) on a body of `figure`, with `options`.
+ */
+function withSurveyEdge(
+  input: ViewScene = scene(),
+  figure = { equatorialRadiusM: 6.371e6, polarRadiusM: 6.371e6 },
+  cells: ReadonlyArray<SurveyCell> = BELOW_FACE_CENTRE,
+  options: Partial<DrawOptions> = {},
+): WireframeDrawList {
+  return build({ surveyEdges: [planetSurvey(input, figure, cells)], ...options }, input);
 }
 
 /** Whether the sight line from the camera to `p`, m from it, meets the sphere before reaching it. */
@@ -401,6 +420,7 @@ describe("buildWireframeDrawList", () => {
       "markStrokePx",
       "occluderSlopePx",
       "surveyEdges",
+      "lineOfSight",
     ]);
   });
 
@@ -1244,4 +1264,347 @@ describe("the destination's chevrons (R07.T16.h; decision-r07-quality-and-destin
       expect(alone).toEqual(chevrons);
     },
   );
+});
+
+/** The readout's point, the tripod not given way before (R10.T12). */
+const AT_POINT = { hasPoint: true, yielded: false } as const;
+
+/** The view's centre, where the projection puts the line of sight. */
+const VIEW_CENTRE = { xPx: VIEWPORT.widthPx / 2, yPx: VIEWPORT.heightPx / 2 };
+
+/** The tripod's ticks in {@link OPTIONS}, from 3 to 7 px about the view's centre: 1.5 px, cased 1 px. */
+const TRIPOD_TICKS = lineOfSightTripod(VIEW_CENTRE, 16, {
+  markStrokePx: SYMBOL_STROKE_PX,
+  markShiftPx: 0,
+  casingPx: CASING_PX,
+}).segments;
+
+/** {@link CAMERA} as the list projects through it. */
+const PROJECTION: ProjectionCamera = {
+  orientation: CAMERA.pose.orientation,
+  fovXRad: CAMERA.fovXRad,
+};
+
+/** The planet's survey edge across the view's centre: the strip of cells just below it. */
+const THROUGH_CENTRE: ReadonlyArray<SurveyCell> = [14, 15, 16, 17].map((i) => ({
+  face: 2,
+  i,
+  j: 15,
+}));
+
+/** The planet's figure, a sphere. */
+const SPHERE = { equatorialRadiusM: 6.371e6, polarRadiusM: 6.371e6 };
+
+/** A list's tripod's batch, if it is drawn. */
+function tripodOf(list: WireframeDrawList): LineBatch | undefined {
+  return list.lines.find((line) => line.id === "mark:line_of_sight");
+}
+
+/** A list's survey edge's batch on the planet, if it is drawn. */
+function edgeOf(list: WireframeDrawList): LineBatch | undefined {
+  return list.lines.find((line) => line.id === `survey-edge:${FIXTURE_PLANET}`);
+}
+
+/** A screen batch's segments as {@link ScreenSegment}s, px. */
+function screenSegmentsPx(batch: LineBatch | undefined): ScreenSegment[] {
+  const s = batch?.segments ?? new Float32Array(0);
+  return Array.from({ length: s.length / 6 }, (_, i): ScreenSegment => [
+    { xPx: s[i * 6] ?? Number.NaN, yPx: s[i * 6 + 1] ?? Number.NaN },
+    { xPx: s[i * 6 + 3] ?? Number.NaN, yPx: s[i * 6 + 4] ?? Number.NaN },
+  ]);
+}
+
+/** Segments' ends' coordinates as the list packs them, in `f32`. */
+function f32Ends(segments: ReadonlyArray<ScreenSegment>): number[] {
+  return segments.flatMap(([a, b]) => [a.xPx, a.yPx, b.xPx, b.yPx].map((v) => Math.fround(v)));
+}
+
+/**
+ * The fixture scene with the own ship moving away below the view's centre, its flight path
+ * marker's fin's tip `clearRem` below the end of the tripod's lower tick: the tick ends 7 px down,
+ * and the fin's tip stands 6 + 5 px above the marker's centre.
+ */
+function withMarkerBelow(clearRem: number): ViewScene {
+  const yPx = 7 + 11 + clearRem * 16;
+  // Below the centre by y px along (0, −y ÷ (s W ÷ 2), −1), s = 1 ÷ tan 30°.
+  const t = yPx / (Math.sqrt(3) * (VIEWPORT.widthPx / 2));
+  const base = scene();
+  return {
+    ...base,
+    craft: base.craft.map((craft) =>
+      craft.id === FIXTURE_SHIP
+        ? Object.assign({}, craft, { velocityMPerS: vec3(0, -t, -1) })
+        : craft,
+    ),
+  };
+}
+
+/** The fixture scene with the other craft on the line of sight, 10⁷ m off the planet's centre. */
+function withCraftOnTheLine(): ViewScene {
+  const base = scene();
+  return {
+    ...base,
+    craft: base.craft.map((craft) =>
+      craft.id === "other"
+        ? Object.assign({}, craft, {
+            pose: {
+              position: {
+                kind: "system",
+                system: FIXTURE_SYSTEM,
+                m: add(FIXTURE_PLANET_CENTRE_M, vec3(0, 0, 1e7)),
+              },
+              attitude: craft.pose.attitude,
+            },
+            predictedPath: null,
+          })
+        : craft,
+    ),
+  };
+}
+
+/** The fixture scene with the moon shrunk to a metre on the line of sight, drawn as its symbol. */
+function withMoonOnTheLine(): ViewScene {
+  const base = scene();
+  return {
+    ...base,
+    bodies: base.bodies.map((body) =>
+      body.id === FIXTURE_MOON
+        ? aBody({
+            id: FIXTURE_MOON,
+            parent: FIXTURE_PLANET,
+            kind: "moon",
+            designation: "TEST MOON",
+            radiusM: 1,
+            centreM: add(FIXTURE_PLANET_CENTRE_M, vec3(0, 0, 1e7)),
+          })
+        : body,
+    ),
+  };
+}
+
+/** The survey edge's ticks across the view's centre in a list, px: its batch's past its line's. */
+function edgeTicksPx(list: WireframeDrawList): ScreenSegment[] {
+  const lineSegments =
+    surveyEdgeMark(planetSurvey(scene(), SPHERE, THROUGH_CENTRE), PROJECTION, VIEWPORT, {
+      remPx: 16,
+      keepClear: [],
+      rangeFromM: null,
+    }).line.length / 6;
+  const s = edgeOf(list)?.segments ?? new Float32Array(0);
+  const at = (i: number): { xPx: number; yPx: number } => {
+    const p = project(
+      vec3(s[i] ?? Number.NaN, s[i + 1] ?? Number.NaN, s[i + 2] ?? Number.NaN),
+      PROJECTION,
+      VIEWPORT,
+    );
+    return { xPx: p.xPx, yPx: p.yPx };
+  };
+  return Array.from({ length: s.length / 6 - lineSegments }, (_, k): ScreenSegment => {
+    const i = (lineSegments + k) * 6;
+    return [at(i), at(i + 3)];
+  });
+}
+
+/** A point `t` of the way along a segment. */
+function alongPx(s: ScreenSegment, t: number): { xPx: number; yPx: number } {
+  return {
+    xPx: s[0].xPx + t * (s[1].xPx - s[0].xPx),
+    yPx: s[0].yPx + t * (s[1].yPx - s[0].yPx),
+  };
+}
+
+/** The least distance between two segments, px, by sampling each at 129 points: the test's own. */
+function sampledDistancePx(a: ScreenSegment, b: ScreenSegment): number {
+  let least = Number.POSITIVE_INFINITY;
+  for (let i = 0; i <= 128; i += 1) {
+    const p = alongPx(a, i / 128);
+    for (let j = 0; j <= 128; j += 1) {
+      const q = alongPx(b, j / 128);
+      least = Math.min(least, Math.hypot(p.xPx - q.xPx, p.yPx - q.yPx));
+    }
+  }
+  return least;
+}
+
+/** How near a segment comes to the tripod's ticks, px, by `measure`. */
+function nearestTripodPx(tick: ScreenSegment, measure = segmentDistancePx): number {
+  return Math.min(...TRIPOD_TICKS.map((each) => measure(tick, each)));
+}
+
+describe("the line-of-sight mark, the tripod (R10.T12)", () => {
+  it("is drawn by no list given no line of sight, which is as it was", () => {
+    const list = build();
+    expect({
+      none: build({ lineOfSight: null }),
+      lineOfSight: list.lineOfSight,
+      tripod: tripodOf(list),
+    }).toEqual({ none: list, lineOfSight: null, tripod: undefined });
+  });
+
+  it("is not drawn where the readout has no point, its give-way kept all the same", () => {
+    const list = build({ lineOfSight: { hasPoint: false, yielded: false } });
+    expect({ lines: list.lines, lineOfSight: list.lineOfSight }).toEqual({
+      lines: build().lines,
+      lineOfSight: { yielded: false, boxPx: null },
+    });
+  });
+
+  it("is drawn first of the marks where the readout has a point, and changes nothing else", () => {
+    const before = build().lines;
+    const lines = build({ lineOfSight: AT_POINT }).lines;
+    const at = lines.findIndex((line) => line.id === "mark:line_of_sight");
+    expect({ at, others: lines.filter((_, i) => i !== at) }).toEqual({
+      at: before.findIndex((line) => line.id.startsWith("mark:")),
+      others: before,
+    });
+  });
+
+  it("is drawn over the survey edge, after every view-space batch and before every other mark", () => {
+    const ids = withSurveyEdge(scene(), undefined, BELOW_FACE_CENTRE, {
+      lineOfSight: AT_POINT,
+    }).lines.map((line) => `${line.space} ${line.id}`);
+    const at = ids.indexOf("screen mark:line_of_sight");
+    expect({
+      edgeBefore: ids.indexOf(`view survey-edge:${FIXTURE_PLANET}`) < at,
+      viewAfter: ids.slice(at).filter((id) => id.startsWith("view ")),
+      marksBefore: ids.slice(0, at).filter((id) => id.startsWith("screen ")),
+    }).toEqual({ edgeBefore: true, viewAfter: [], marksBefore: [] });
+  });
+
+  it("strokes three ticks about the view's centre in --text at the marks' width, cased in --surface-0", () => {
+    const batch = tripodOf(build({ lineOfSight: AT_POINT }));
+    expect([
+      batch?.space,
+      batch?.token,
+      batch?.colour,
+      batch?.widthPx,
+      batch?.casingWidthPx,
+      batch?.casingColour,
+      batch?.dash,
+      f32Ends(screenSegmentsPx(batch)),
+    ]).toEqual([
+      "screen",
+      "text",
+      "colour-text",
+      SYMBOL_STROKE_PX,
+      CASING_PX,
+      "colour-surface-0",
+      null,
+      f32Ends(TRIPOD_TICKS),
+    ]);
+  });
+
+  it("is cased over the photorealistic image as in the wireframe, at each ratio", () => {
+    const casings = [1, 2].map((ratio) => {
+      const list = build({ lineOfSight: AT_POINT, ...viewStrokesAt(ratio) });
+      return [tripodOf(list), tripodOf(overlayDrawList(list, TOKENS))].map((batch) => [
+        batch?.widthPx,
+        batch?.casingWidthPx,
+        batch?.casingColour,
+      ]);
+    });
+    expect(casings).toEqual([
+      [
+        [2, 2, "colour-surface-0"],
+        [2, 2, "colour-surface-0"],
+      ],
+      [
+        [3, 2, "colour-surface-0"],
+        [3, 2, "colour-surface-0"],
+      ],
+    ]);
+  });
+
+  it("gives the box of every pixel it lights, for the labels to stand clear of", () => {
+    const list = build({ lineOfSight: AT_POINT });
+    const box = list.lineOfSight?.boxPx ?? null;
+    expect({
+      yielded: list.lineOfSight?.yielded,
+      box,
+      holdsCentre:
+        box !== null &&
+        box.leftPx < VIEW_CENTRE.xPx &&
+        box.leftPx + box.widthPx > VIEW_CENTRE.xPx &&
+        box.topPx < VIEW_CENTRE.yPx &&
+        box.topPx + box.heightPx > VIEW_CENTRE.yPx,
+    }).toEqual({
+      yielded: false,
+      box: markBoxPx({ segments: TRIPOD_TICKS }, SYMBOL_STROKE_PX / 2 + CASING_PX + 0.5),
+      holdsCentre: true,
+    });
+  });
+
+  it("gives way to the flight path marker within 0.5 rem, and says so for the next frame", () => {
+    const list = build({ lineOfSight: AT_POINT }, withMarkerBelow(0.4));
+    expect([tripodOf(list), list.lineOfSight]).toEqual([undefined, { yielded: true, boxPx: null }]);
+  });
+
+  it("stays out while the flight path marker is within 0.75 rem, and returns beyond it", () => {
+    const drawn = (clearRem: number, yielded: boolean): boolean =>
+      tripodOf(build({ lineOfSight: { hasPoint: true, yielded } }, withMarkerBelow(clearRem))) !==
+      undefined;
+    expect([drawn(0.6, false), drawn(0.6, true), drawn(0.8, true)]).toEqual([true, false, true]);
+  });
+
+  it("keeps its give-way through a frame with no point", () => {
+    expect(
+      build({ lineOfSight: { hasPoint: false, yielded: false } }, withMarkerBelow(0.4)).lineOfSight,
+    ).toEqual({ yielded: true, boxPx: null });
+  });
+
+  it.each([
+    ["a craft's ticks", "target", withCraftOnTheLine],
+    ["a body's symbol", "body_symbol", withMoonOnTheLine],
+  ])("gives way to %s on the line of sight", (_, kind, input) => {
+    const list = build({ lineOfSight: AT_POINT }, input());
+    expect({
+      drawn: list.lines.some((line) => line.id.startsWith(`mark:${kind}:`)),
+      tripod: tripodOf(list),
+      yielded: list.lineOfSight?.yielded,
+    }).toEqual({ drawn: true, tripod: undefined, yielded: true });
+  });
+
+  it("stands beneath the selection's bracket and the destination's chevrons about the body it marks, which do not make it give way", () => {
+    // The camera looks at the planet's centre, drawn as a sphere: its reticles stand round the
+    // tripod, within 0.5 rem of its ticks.
+    const planet = { kind: "body", body: FIXTURE_PLANET } as const;
+    const list = build({ lineOfSight: AT_POINT, selection: planet, destination: planet });
+    const ids = list.lines.map((line) => line.id);
+    const at = ids.indexOf("mark:line_of_sight");
+    const reticles = ["mark:selection:", "mark:destination:"].map((prefix) =>
+      screenSegmentsPx(list.lines.find((line) => line.id.startsWith(prefix))),
+    );
+    expect({
+      yielded: list.lineOfSight?.yielded,
+      within: reticles.map((segments) => segments.some((segment) => nearestTripodPx(segment) < 8)),
+      beneath: [
+        at >= 0,
+        at < ids.findIndex((id) => id.startsWith("mark:selection:")),
+        at < ids.findIndex((id) => id.startsWith("mark:destination:")),
+      ],
+    }).toEqual({ yielded: false, within: [true, true], beneath: [true, true, true] });
+  });
+
+  it("leaves out the survey edge's ticks within 0.5 rem of its ticks, and keeps every other", () => {
+    const all = edgeTicksPx(withSurveyEdge(scene(), SPHERE, THROUGH_CENTRE));
+    const kept = edgeTicksPx(
+      withSurveyEdge(scene(), SPHERE, THROUGH_CENTRE, { lineOfSight: AT_POINT }),
+    );
+    expect({
+      someWithin: all.some((tick) => nearestTripodPx(tick) < 8),
+      keptWithin: kept.filter((tick) => nearestTripodPx(tick, sampledDistancePx) < 8 - 0.05),
+      kept: kept.length,
+    }).toEqual({
+      someWithin: true,
+      keptWithin: [],
+      kept: all.filter((tick) => nearestTripodPx(tick) >= 8).length,
+    });
+  });
+
+  it("leaves the survey edge's ticks as they are where it gives way", () => {
+    const input = withMarkerBelow(0.2);
+    expect(
+      edgeOf(withSurveyEdge(input, SPHERE, THROUGH_CENTRE, { lineOfSight: AT_POINT })),
+    ).toEqual(edgeOf(withSurveyEdge(input, SPHERE, THROUGH_CENTRE)));
+  });
 });

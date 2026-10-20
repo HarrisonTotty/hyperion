@@ -2,8 +2,11 @@
 //! [`PartialField`] a body, built from R09's payload blocks as the render thread posts them, and
 //! over it R10's bake ([`bake_terrain`]), readings ([`surveyed_reading`], [`slant_range`]),
 //! material ([`material_at`] with its [`exposed_properties`] at the point's maturity,
-//! [`maturity_at`]) and the photometry the lit terrain draws a bake's palette with
-//! ([`WorkerFields::photometry`], R10.T10.b, at the header's maturity; R10.T1.c).
+//! [`maturity_at`]), the photometry the lit terrain draws a bake's palette with
+//! ([`WorkerFields::photometry`], R10.T10.b, at the header's maturity; R10.T1.c), and the whole of a
+//! view's terrain readout where its line of sight meets the ground ([`WorkerFields::ground_readout`],
+//! R10.T12: the slant range, the reading, the material and the ground's two properties, the bearing
+//! capacity and the pad friction, with the month's temperature the friction is taken at).
 //!
 //! The client's WebAssembly module wraps [`WorkerFields`] in its `SurfaceFields` export
 //! (`src/wasm.rs`) thinly: the decoding, the merge, the survey's change, the level table and each
@@ -52,7 +55,8 @@
 //! # The synthesis
 //!
 //! Each query builds the body's [`Synthesiser`] over its field afresh (1 to 10 ms, R09's figure),
-//! since a synthesiser borrows the field, which the next block changes. The [`SynthCache`] is the
+//! since a synthesiser borrows the field, which the next block changes; a ground readout builds one
+//! for all of its parts, the line of sight, the readings and the material. The [`SynthCache`] is the
 //! body's, from its field's start to its release: [`SynthCache`]'s rule lets one cache serve views
 //! whose held cells only grow, as a body's field does. The body's detail seed is each query's
 //! argument, the client's from the body's record (R09.T1.b); the field carries none. No answer
@@ -67,24 +71,40 @@
 //! survey: a texel a cell of [`CLASS_MAP_LEVEL`] (64 × 64 a face), each texel touched by the
 //! survey with its weights over the body's classes, at most [`CLASS_MAP_CLASSES`], and the share of
 //! it surveyed. The render thread packs it into R07's map (`view/terrain/classMap.ts`).
+//!
+//! # The terrain readout (plan R10, T12)
+//!
+//! [`WorkerFields::ground_readout`] answers a view's `GROUND AT LINE OF SIGHT` at its 4 Hz in one
+//! query: where the line of sight meets the ground ([`slant_range`]), the reading at its foot
+//! ([`surveyed_reading`] over the operator's `BASELINE`), the material there, and the ground's two
+//! properties ([`GroundProperties`]): the ultimate bearing capacity ([`bearing_capacity_on_slope`]
+//! at the body's surface gravity under the query's pad, on the RMS slope over the fixed
+//! [`CAPACITY_SLOPE_BASELINE`]) and the pad friction ([`interface_friction`]), at the ground's mean
+//! temperature for the month the season's mean anomaly falls in where the friction depends on it.
+//! Each part is the separate query's to the bit, and `NOT SURVEYED` stands for all of them wherever
+//! one would not read surveyed ground.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use hyperion_base::rng::DetailSeed;
-use hyperion_base::units::Metres;
+use hyperion_base::units::{Kelvin, Metres, Pascals, Radians};
 
 use crate::bake::{TerrainBake, TerrainBakeOptions, UNSURVEYED, bake_terrain};
 use crate::cube::{FaceUv, MAX_LEVEL, PATCH_QUADS, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir};
 use crate::field::{
-    BodyRef, FieldView, InsertBlockError, PartialField, ResolutionCode, cell_at_index, cell_index,
+    BodyRef, FieldHeader, FieldView, InsertBlockError, PartialField, ResolutionCode, cell_at_index,
+    cell_index, month_at,
 };
 use crate::geometry::vertex_spacing;
 use crate::material::{
-    GroundExposure, GroundMaterial, Material, MaterialProperties, PhaseLaw, ResolvePropertiesError,
-    WEIGHT_TOTAL, exposed_properties, material_at, maturity_at, scaled_normal_albedo, weights_at,
+    FrictionModel, GroundExposure, GroundMaterial, Material, MaterialProperties, PhaseLaw,
+    ResolvePropertiesError, WEIGHT_TOTAL, bearing_capacity_on_slope, exposed_properties,
+    interface_friction, lapse_drop_k, material_at, maturity_at, scaled_normal_albedo, weights_at,
 };
 use crate::num;
-use crate::reading::{LineOfSight, SurveyedReading, slant_range, surveyed_reading};
+use crate::reading::{
+    LineOfSight, SLOPE_BASELINES, SlantRange, SurveyedReading, slant_range, surveyed_reading,
+};
 use crate::synth::{BandLevel, LevelBounds, QueryHeightError, SynthCache, Synthesiser};
 use crate::wire::{DecodeBlockError, DecodedBlock, decode_block};
 
@@ -708,6 +728,288 @@ impl SurveyedMaterial {
     }
 }
 
+/// One of the baselines a readout's slope may be read over, a member of [`SLOPE_BASELINES`]
+/// (Design note 7; the guide's `BASELINE`), so that no free length reaches [`surveyed_reading`],
+/// which panics on one that is not finite and positive (decision-r10-t12-leans §1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum SlopeBaseline {
+    /// 2 m, the default: the band limit, and the finest of `InSight`'s lander-stability baselines.
+    #[default]
+    TwoMetres,
+    /// 5 m, the other lander-stability baseline.
+    FiveMetres,
+    /// 100 m, near the landing radar's 84 m scale.
+    HundredMetres,
+}
+
+impl SlopeBaseline {
+    /// Every baseline, in [`SLOPE_BASELINES`]' order.
+    pub const ALL: [Self; 3] = [Self::TwoMetres, Self::FiveMetres, Self::HundredMetres];
+
+    /// The baseline's length, metres: its member of [`SLOPE_BASELINES`].
+    #[must_use]
+    pub const fn metres(self) -> Metres {
+        SLOPE_BASELINES[match self {
+            Self::TwoMetres => 0,
+            Self::FiveMetres => 1,
+            Self::HundredMetres => 2,
+        }]
+    }
+}
+
+impl TryFrom<Metres> for SlopeBaseline {
+    type Error = SelectSlopeBaselineError;
+
+    /// The baseline whose length is `length` to the bit.
+    ///
+    /// # Errors
+    ///
+    /// [`SelectSlopeBaselineError`] for a length that is none of [`SLOPE_BASELINES`].
+    fn try_from(length: Metres) -> Result<Self, Self::Error> {
+        Self::ALL
+            .into_iter()
+            .find(|b| b.metres().value().total_cmp(&length.value()).is_eq())
+            .ok_or(SelectSlopeBaselineError {
+                length_m: length.value(),
+            })
+    }
+}
+
+/// A slope baseline asked for that is none of [`SLOPE_BASELINES`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SelectSlopeBaselineError {
+    length_m: f64,
+}
+
+impl std::fmt::Display for SelectSlopeBaselineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "a slope baseline of {} m is none of the readout's ",
+            self.length_m
+        )?;
+        let last = SLOPE_BASELINES.len() - 1;
+        for (n, baseline) in SLOPE_BASELINES.iter().enumerate() {
+            let before = match n {
+                0 => "",
+                n if n == last => " and ",
+                _ => ", ",
+            };
+            write!(f, "{before}{} m", baseline.value())?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for SelectSlopeBaselineError {}
+
+/// A seasonal orbit's mean anomaly, radians from periapsis: any finite angle, which [`month_at`]
+/// reduces (decision-r10-t12-leans §6 (f): never a NaN, on which it panics).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SeasonAnomaly(Radians);
+
+impl SeasonAnomaly {
+    /// The anomaly, radians, finite.
+    #[must_use]
+    pub const fn radians(self) -> Radians {
+        self.0
+    }
+}
+
+impl TryFrom<Radians> for SeasonAnomaly {
+    type Error = MakeSeasonAnomalyError;
+
+    /// `anomaly`, if finite.
+    ///
+    /// # Errors
+    ///
+    /// [`MakeSeasonAnomalyError`] for an anomaly that is not finite.
+    fn try_from(anomaly: Radians) -> Result<Self, Self::Error> {
+        if anomaly.value().is_finite() {
+            Ok(Self(anomaly))
+        } else {
+            Err(MakeSeasonAnomalyError {
+                anomaly_rad: anomaly.value(),
+            })
+        }
+    }
+}
+
+/// A season's mean anomaly that is not finite.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MakeSeasonAnomalyError {
+    anomaly_rad: f64,
+}
+
+impl std::fmt::Display for MakeSeasonAnomalyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "a season's mean anomaly of {} rad is not finite",
+            self.anomaly_rad
+        )
+    }
+}
+
+impl std::error::Error for MakeSeasonAnomalyError {}
+
+/// The fixed baseline the bearing capacity's slope is read over: 2 m, the first of
+/// [`SLOPE_BASELINES`], whatever baseline the readout's `BASELINE` shows
+/// ([`bearing_capacity_on_slope`]'s "The slope's basis"; signoff-10 (h);
+/// decision-r10-slope-capacity §5).
+pub const CAPACITY_SLOPE_BASELINE: SlopeBaseline = SlopeBaseline::TwoMetres;
+
+/// What a view's terrain readout asks where its line of sight meets the ground
+/// ([`WorkerFields::ground_readout`], plan R10, T12): the line of sight and the readout's settings.
+///
+/// Plain data with public fields, as [`TerrainBakeOptions`] is.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroundReadoutQuery {
+    /// The line of sight's origin, body-fixed, metres: finite.
+    pub origin_m: [f64; 3],
+    /// Its direction, body-fixed: finite and not zero, of any length.
+    pub direction: [f64; 3],
+    /// How far along it the ground is looked for, metres: finite and at least 0 ([`slant_range`]'s
+    /// reach; past the body's far side for a `NO GROUND` that means the line passes the body).
+    pub max: Metres,
+    /// The baseline the readout's `SLOPE` is read over: the operator's `BASELINE`, 2 m until its
+    /// selector is built (R10.T12.a). The capacity's slope is read over
+    /// [`CAPACITY_SLOPE_BASELINE`] whatever this is.
+    pub slope_baseline: SlopeBaseline,
+    /// The width of the pad the bearing capacity is taken under, metres, a square pad's side or a
+    /// round pad's diameter: the reference pad's 1.0 m until the own ship's hull defines its pads
+    /// (the guide's `PAD WIDTH`, signoff-10). One that is not finite and positive has no capacity.
+    pub pad_width: Metres,
+    /// The seasonal orbit's mean anomaly at the instant the view lights the body at: the body's own
+    /// orbit about its star or stars, or its planet's for a moon (R09's Design note 8;
+    /// decision-r10-t12-leans §6), or `None` where no orbit is known. A one-month year reads its
+    /// one month whatever is given.
+    pub season: Option<SeasonAnomaly>,
+}
+
+/// The ground's two properties a terrain readout states after `MATERIAL` (plan R10, T12; the
+/// guide's `ULTIMATE BEARING CAPACITY` and `PAD FRICTION`, signoff-10): what the ground at the point
+/// bears under a pad before it fails in shear, and how a metal pad grips it, with the slope and the
+/// temperature they were taken at.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroundProperties {
+    bearing_capacity: Option<Pascals>,
+    capacity_slope: Radians,
+    pad_width: Metres,
+    friction: Option<f64>,
+    friction_on_temperature: bool,
+    temperature: Option<Kelvin>,
+}
+
+impl GroundProperties {
+    /// The ultimate bearing capacity, Pa: [`bearing_capacity_on_slope`] of the material's
+    /// properties at the body's surface gravity (the header's crater contract's,
+    /// [`CraterParams::gravity`](crate::craters::CraterParams::gravity)), under a pad of
+    /// [`pad_width`](Self::pad_width), on the ground's RMS slope over [`CAPACITY_SLOPE_BASELINE`]
+    /// ([`capacity_slope`](Self::capacity_slope)). `None` where it is not computed (the readout's
+    /// em dash, never 0): the palette names no substance, the pad's width is not finite and
+    /// positive, or [`bearing_capacity_on_slope`] gives `None` (its cases).
+    #[must_use]
+    pub const fn bearing_capacity(&self) -> Option<Pascals> {
+        self.bearing_capacity
+    }
+
+    /// The slope the capacity was taken on, radians from the local horizontal: the RMS adirectional
+    /// slope over [`CAPACITY_SLOPE_BASELINE`] at the point ([`SurveyedReading::slope_rms`] at 2 m;
+    /// an upper estimate where the point is unresolved, which errs low on the capacity).
+    #[must_use]
+    pub const fn capacity_slope(&self) -> Radians {
+        self.capacity_slope
+    }
+
+    /// The pad width the capacity was taken under, metres ([`GroundReadoutQuery::pad_width`]).
+    #[must_use]
+    pub const fn pad_width(&self) -> Metres {
+        self.pad_width
+    }
+
+    /// The pad's interface friction coefficient tan δ, dimensionless ([`interface_friction`],
+    /// Design note 2): the form's constant, NAVFAC DM-7.02's on a soil, whatever the temperature;
+    /// on an ice the interpolation at [`temperature`](Self::temperature) between Liefferink et
+    /// al.'s points. `None` where the form has no model, where the friction depends on a
+    /// temperature not known, or where the temperature lies outside the model's points.
+    #[must_use]
+    pub const fn friction(&self) -> Option<f64> {
+        self.friction
+    }
+
+    /// Whether the friction depends on the temperature ([`FrictionModel::ByTemperature`]), so that
+    /// the readout states the temperature it was taken at after `· AT`, the friction's em dash
+    /// included where the temperature lies outside the source's; `false` for a constant and for a
+    /// form with no model.
+    #[must_use]
+    pub const fn friction_on_temperature(&self) -> bool {
+        self.friction_on_temperature
+    }
+
+    /// The ground's mean temperature at the point for the month the readout's time falls in, kelvin
+    /// (the guide's `AT`): the climate record's month mean at sea level
+    /// ([`FieldHeader::month_temperature`]) carried to the reading's elevation by the header's lapse
+    /// rate as the classifier carries it, the month [`month_at`] the season's mean anomaly, or the
+    /// one month of a one-month year. `None` in a year of twelve months with no season given. The
+    /// day's cycle is not modelled.
+    #[must_use]
+    pub const fn temperature(&self) -> Option<Kelvin> {
+        self.temperature
+    }
+}
+
+/// A terrain readout's answer where the line of sight meets surveyed ground: the slant range, the
+/// reading at its foot, the material there and the ground's properties.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroundAtSight {
+    sight: SlantRange,
+    reading: SurveyedReading,
+    material: SurveyedMaterial,
+    properties: GroundProperties,
+}
+
+impl GroundAtSight {
+    /// The slant range and its foot, as [`slant_range`] gives it.
+    #[must_use]
+    pub const fn sight(&self) -> &SlantRange {
+        &self.sight
+    }
+
+    /// The reading at the foot, its slope over the query's baseline, as [`surveyed_reading`] gives
+    /// it ([`WorkerFields::reading`]).
+    #[must_use]
+    pub const fn reading(&self) -> &SurveyedReading {
+        &self.reading
+    }
+
+    /// The material at the foot, as [`WorkerFields::material`] gives it.
+    #[must_use]
+    pub const fn material(&self) -> &SurveyedMaterial {
+        &self.material
+    }
+
+    /// The ground's bearing capacity and pad friction there.
+    #[must_use]
+    pub const fn properties(&self) -> &GroundProperties {
+        &self.properties
+    }
+}
+
+/// What a view's terrain readout reads where its line of sight meets the ground
+/// ([`WorkerFields::ground_readout`], plan R10, T12).
+#[derive(Debug, Clone, PartialEq)]
+pub enum GroundReadout {
+    /// The line of sight meets surveyed ground: every reading there.
+    Ground(Box<GroundAtSight>),
+    /// It meets no ground within its reach ([`LineOfSight::NoGround`]): the readout's `NO GROUND`.
+    NoGround,
+    /// It meets ground the ship has not surveyed first ([`LineOfSight::NotSurveyed`]), or its foot
+    /// lies in a cell the field does not hold as surveyed (a survey's margin): the readout's
+    /// `NOT SURVEYED`, in place of every reading.
+    NotSurveyed,
+}
+
 impl WorkerFields {
     /// No field held.
     #[must_use]
@@ -968,27 +1270,65 @@ impl WorkerFields {
         at: FaceUv,
     ) -> Result<Option<SurveyedMaterial>, QueryBodyError> {
         let BodyField { field, cache, .. } = self.held(body)?;
-        let dir = unit_dir(face_uv_to_xyz(at));
-        let header = field.header();
-        let level = header.level().get();
-        let cell = PatchKey::containing(level, dir).expect("a coarse level is a quadtree level");
-        if !field.is_surveyed(cell) {
+        if !field.is_surveyed(field_cell(field, at)) {
             return Ok(None);
         }
         let synth = Synthesiser::new(&*field, seed);
-        let ground = material_at(&synth, cache, at)?;
-        let maturity = maturity_at(&synth, cache, at)?;
-        let header_exposure = GroundExposure::of_header(header);
-        let exposure = maturity.map_or(header_exposure, |m| header_exposure.with_maturity(m));
-        let properties = ground.material().map(|m| {
-            exposed_properties(m, header.palette(), exposure)
-                .expect("the classifier names only entries of the body's palette")
-        });
-        Ok(Some(SurveyedMaterial {
-            ground,
-            maturity,
-            properties,
-        }))
+        Ok(Some(surveyed_material(&synth, cache, at)?))
+    }
+
+    /// The whole of a view's terrain readout where the line of sight `query` gives meets `body`'s
+    /// ground (plan R10, T12), with the body's detail seed `seed`.
+    ///
+    /// - The slant range is [`slant_range`]'s, and its `NoGround` and `NotSurveyed` are the
+    ///   answer's.
+    /// - Where it meets ground whose foot lies in a cell the field does not hold as surveyed, as
+    ///   [`material`](Self::material) judges it (a margin is not surveyed), the answer is
+    ///   [`GroundReadout::NotSurveyed`], so that the readout never reads ground the survey does not
+    ///   hold. The march itself meets only surveyed ground, so this is a guard for the foot alone.
+    /// - Otherwise it is the reading at the foot over the query's baseline, as
+    ///   [`reading`](Self::reading) gives it; the material there, as `material` gives it; and the
+    ///   ground's [properties](GroundProperties): the bearing capacity on the RMS slope over
+    ///   [`CAPACITY_SLOPE_BASELINE`] (the reading's own where the query's baseline is it), and the
+    ///   pad friction, at the month's temperature where it depends on it.
+    ///
+    /// Every part is the separate query's to the bit. One [`Synthesiser`] serves them all, built
+    /// once (1 to 10 ms, R09's figure): one where `slant_range`, `reading` and `material` asked
+    /// apart build three.
+    ///
+    /// # Errors
+    ///
+    /// As [`bake`](Self::bake): no field of `body`, or a read past the cells held (a survey whose
+    /// margin is still to come in a later block).
+    ///
+    /// # Panics
+    ///
+    /// As [`slant_range`]: if the origin is not finite, the direction is zero or not finite, or the
+    /// reach is not finite and non-negative. The baseline and the season are of types that hold
+    /// only what [`surveyed_reading`] and [`month_at`] take.
+    pub fn ground_readout(
+        &mut self,
+        body: BodyRef,
+        seed: DetailSeed,
+        query: &GroundReadoutQuery,
+    ) -> Result<GroundReadout, QueryBodyError> {
+        let BodyField { field, cache, .. } = self.held(body)?;
+        let synth = Synthesiser::new(&*field, seed);
+        let sight = match slant_range(&synth, cache, &query.origin_m, &query.direction, query.max)?
+        {
+            LineOfSight::Ground(sight) => sight,
+            LineOfSight::NoGround => return Ok(GroundReadout::NoGround),
+            LineOfSight::NotSurveyed => return Ok(GroundReadout::NotSurveyed),
+        };
+        Ok(match ground_at(&synth, cache, sight.at(), query)? {
+            Some(ground) => GroundReadout::Ground(Box::new(GroundAtSight {
+                sight,
+                reading: ground.reading,
+                material: ground.material,
+                properties: ground.properties,
+            })),
+            None => GroundReadout::NotSurveyed,
+        })
     }
 
     /// The photometry `material` is drawn with on `body` ([`DrawnPhotometry`]).
@@ -1160,6 +1500,149 @@ impl WorkerFields {
         self.bodies
             .get_mut(&body)
             .ok_or(QueryBodyError::NotStarted(body))
+    }
+}
+
+/// The cell of `field`'s level that holds the point `at`.
+#[must_use]
+fn field_cell(field: &PartialField, at: FaceUv) -> PatchKey {
+    PatchKey::containing(field.header().level().get(), unit_dir(face_uv_to_xyz(at)))
+        .expect("a coarse level is a quadtree level")
+}
+
+/// [`WorkerFields::material`]'s answer at `at`, whose field cell the caller has found surveyed.
+///
+/// # Errors
+///
+/// [`QueryHeightError::NotSurveyed`] for a read past the cells held.
+///
+/// # Panics
+///
+/// As [`material_at`]: if `at` names no direction. Also if the classifier names an entry past the
+/// body's palette, which its tests rule out (a bug).
+fn surveyed_material(
+    synth: &Synthesiser<'_, PartialField>,
+    cache: &mut SynthCache,
+    at: FaceUv,
+) -> Result<SurveyedMaterial, QueryHeightError> {
+    let header = synth.field().header();
+    let ground = material_at(synth, cache, at)?;
+    let maturity = maturity_at(synth, cache, at)?;
+    let header_exposure = GroundExposure::of_header(header);
+    let exposure = maturity.map_or(header_exposure, |m| header_exposure.with_maturity(m));
+    let properties = ground.material().map(|m| {
+        exposed_properties(m, header.palette(), exposure)
+            .expect("the classifier names only entries of the body's palette")
+    });
+    Ok(SurveyedMaterial {
+        ground,
+        maturity,
+        properties,
+    })
+}
+
+/// A ground readout's parts at a line of sight's foot, the slant range apart.
+struct FootGround {
+    reading: SurveyedReading,
+    material: SurveyedMaterial,
+    properties: GroundProperties,
+}
+
+/// The reading, material and properties of the ground at the foot `at` for `query`
+/// ([`WorkerFields::ground_readout`]), or `None` where the field's cell there is not surveyed.
+///
+/// # Errors
+///
+/// [`QueryBodyError::NotSurveyed`] for a read past the cells held.
+fn ground_at(
+    synth: &Synthesiser<'_, PartialField>,
+    cache: &mut SynthCache,
+    at: FaceUv,
+    query: &GroundReadoutQuery,
+) -> Result<Option<FootGround>, QueryBodyError> {
+    let field = synth.field();
+    let cell = field_cell(field, at);
+    if !field.is_surveyed(cell) {
+        return Ok(None);
+    }
+    let Some(reading) = surveyed_reading(synth, cache, at, query.slope_baseline.metres())? else {
+        return Ok(None);
+    };
+    // The capacity's slope is read over the fixed 2 m whatever `BASELINE` shows: the readout's own
+    // reading where it shows 2 m, the same bits, and one more otherwise.
+    let capacity_slope = if query.slope_baseline == CAPACITY_SLOPE_BASELINE {
+        reading.slope_rms()
+    } else {
+        match surveyed_reading(synth, cache, at, CAPACITY_SLOPE_BASELINE.metres())? {
+            Some(two_metres) => two_metres.slope_rms(),
+            None => return Ok(None),
+        }
+    };
+    let material = surveyed_material(synth, cache, at)?;
+    let header = field.header();
+    let temperature = month_of(header, query.season).and_then(|month| {
+        let sea_level = header.month_temperature(field.climate(cell)?, month)?;
+        Some(Kelvin::new(
+            sea_level.value() - lapse_drop_k(header, reading.elevation().value()),
+        ))
+    });
+    let properties = properties_of(
+        material.properties(),
+        header,
+        query.pad_width,
+        capacity_slope,
+        temperature,
+    );
+    Ok(Some(FootGround {
+        reading,
+        material,
+        properties,
+    }))
+}
+
+/// The month (from 0) of `header`'s year the readout's time falls in: [`month_at`] the season's
+/// mean anomaly in a year of twelve months, `None` there without one, and the one month of a
+/// one-month year whatever is given.
+#[must_use]
+fn month_of(header: &FieldHeader, season: Option<SeasonAnomaly>) -> Option<u8> {
+    if header.months() == 1 {
+        Some(0)
+    } else {
+        season.map(|anomaly| month_at(header, anomaly.radians()))
+    }
+}
+
+/// The ground's [properties](GroundProperties) of a material whose properties are `material`, on a
+/// body of `header`, under a pad of `pad_width` on ground of slope `capacity_slope` at
+/// `temperature`; no capacity under a pad whose width is not finite and positive.
+#[must_use]
+fn properties_of(
+    material: Option<&MaterialProperties>,
+    header: &FieldHeader,
+    pad_width: Metres,
+    capacity_slope: Radians,
+    temperature: Option<Kelvin>,
+) -> GroundProperties {
+    let gravity = header.craters().gravity();
+    // `bearing_capacity_on_slope` takes a width of 0, where a cohesive soil's cohesion term alone
+    // bears; a pad is never that narrow (`GroundReadoutQuery::pad_width`).
+    let pad = pad_width.value();
+    let bears = pad.is_finite() && pad > 0.0;
+    let model = material.and_then(MaterialProperties::interface_friction_model);
+    let friction = material.and_then(|p| match p.interface_friction_model()? {
+        // `interface_friction`'s at every temperature, so asked of none.
+        FrictionModel::Constant(mu) => Some(mu),
+        FrictionModel::ByTemperature(_) => interface_friction(p, temperature?),
+    });
+    GroundProperties {
+        bearing_capacity: material
+            .filter(|_| bears)
+            .and_then(|p| bearing_capacity_on_slope(p, gravity, pad_width, capacity_slope)),
+        capacity_slope,
+        pad_width,
+        friction,
+        friction_on_temperature: matches!(model, Some(FrictionModel::ByTemperature(_))),
+        temperature,
     }
 }
 

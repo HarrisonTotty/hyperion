@@ -41,7 +41,7 @@ import {
 import { rotationRows } from "../camera/quaternion";
 import { narrow } from "../coords/narrow";
 import { type Rotation3, rotateToBody, rotateToBodyFixed } from "../coords/rotation";
-import type { ScreenPx, ScreenSegment } from "../wireframe/symbology";
+import { type ScreenPx, type ScreenSegment, segmentDistancePx } from "../wireframe/symbology";
 import { type CoverageView, type SurveyEdge, surveyEdges } from "./coverage";
 import { faceUvToXyz, stToUv, unitDir } from "./cube";
 import { edgeNeighbour, type Face, FACES, facePoint, type PatchKey } from "./patchKey";
@@ -143,7 +143,8 @@ export interface SurveyEdgeOptions {
   readonly remPx: number;
   /**
    * The line-of-sight mark's ticks (R10.T12's tripod), device px, which no tick comes within
-   * {@link SURVEY_EDGE_TICK_CLEARANCE_REM} of; none until it is drawn.
+   * {@link SURVEY_EDGE_TICK_CLEARANCE_REM} of, measured between the two segments on the view; none
+   * where it is not drawn.
    */
   readonly keepClear: ReadonlyArray<ScreenSegment>;
   /**
@@ -301,21 +302,6 @@ function aboveHorizon(
   return (e.x - q.x) * q.x + (e.y - q.y) * q.y + (e.z - q.z) * q.z > 0;
 }
 
-/** The squared distance, px², from `p` to the segment `s`. */
-function squaredDistanceToSegment(p: ScreenPx, s: ScreenSegment): number {
-  const [a, b] = s;
-  const dx = b.xPx - a.xPx;
-  const dy = b.yPx - a.yPx;
-  const length2 = dx * dx + dy * dy;
-  const t =
-    length2 > 0
-      ? Math.min(1, Math.max(0, ((p.xPx - a.xPx) * dx + (p.yPx - a.yPx) * dy) / length2))
-      : 0;
-  const x = a.xPx + t * dx - p.xPx;
-  const y = a.yPx + t * dy - p.yPx;
-  return x * x + y * y;
-}
-
 /** A segment's six `f32`, narrowed once from `f64` (R02's packing). */
 function pushSegment(out: number[], a: Vec3, b: Vec3): void {
   out.push(...narrow(a), ...narrow(b));
@@ -396,9 +382,9 @@ function onViewport(
  * the view, the first half a spacing from the run's start, at right angles to the line on the view
  * and {@link SURVEY_EDGE_TICK_REM} long, towards the side the unsurveyed cell lies on there; its
  * far end is placed at its foot's depth, so that its length on the view is the guide's. Only the
- * ticks within a tick's length of the view are placed. A tick that would come within
- * {@link SURVEY_EDGE_TICK_CLEARANCE_REM} of the line-of-sight mark's ticks is left out. The line is
- * never dashed.
+ * ticks within a tick's length of the view are placed. A tick any of which would come within
+ * {@link SURVEY_EDGE_TICK_CLEARANCE_REM} of the line-of-sight mark's ticks, segment to segment on
+ * the view, is left out. The line is never dashed.
  */
 export function surveyEdgeMark(
   view: SurveyEdgeView,
@@ -448,7 +434,7 @@ export function surveyEdgeMark(
   const remPx = options.remPx;
   const spacingPx = SURVEY_EDGE_TICK_SPACING_REM * remPx;
   const tickPx = SURVEY_EDGE_TICK_REM * remPx;
-  const clearance2 = (SURVEY_EDGE_TICK_CLEARANCE_REM * remPx) ** 2;
+  const clearancePx = SURVEY_EDGE_TICK_CLEARANCE_REM * remPx;
   const [right, up] = cameraAxes(camera);
   const s = 1 / Math.tan(camera.fovXRad / 2);
   const aspect = viewport.widthPx / viewport.heightPx;
@@ -517,12 +503,9 @@ export function surveyEdgeMark(
         nextTickPx += spacingPx;
         const foot: ScreenPx = { xPx: p.xPx + u * dx, yPx: p.yPx + u * dy };
         const end: ScreenPx = { xPx: foot.xPx + tickPx * nx, yPx: foot.yPx + tickPx * ny };
+        // Left out where any of it comes within the clearance of the line-of-sight mark's ticks.
         if (
-          options.keepClear.some(
-            (segment) =>
-              squaredDistanceToSegment(foot, segment) < clearance2 ||
-              squaredDistanceToSegment(end, segment) < clearance2,
-          )
+          options.keepClear.some((segment) => segmentDistancePx([foot, end], segment) < clearancePx)
         ) {
           continue;
         }

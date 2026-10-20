@@ -8,7 +8,9 @@ import type {
   BakedPatch,
   BakeSettings,
   ClassMapAnswer,
+  GroundReadoutQuery,
   HeightSourceSetting,
+  SurfaceGroundReadout,
   TerrainLayers,
 } from "./messages";
 import {
@@ -1057,5 +1059,131 @@ describe("the height-worker pool's lanes (R10.T16.b)", () => {
       lane.reprioritise([]);
     }).toThrow(/pool was terminated/u);
     expect(() => pool.lane(laneSettings())).toThrow(/pool was terminated/u);
+  });
+});
+
+/** The query of a readout straight down from 2,000 km on +y, over 2 m, under 1 m, at a season. */
+const READOUT_QUERY: GroundReadoutQuery = {
+  originM: { x: 0, y: 2e6, z: 0 },
+  direction: { x: 0, y: -1, z: 0 },
+  maxM: 1e7,
+  slopeBaselineM: 2,
+  padWidthM: 1,
+  seasonMeanAnomalyRad: 0.75,
+};
+
+/** A readout off the ground, as a worker answers one that meets no surveyed ground. */
+const NOT_SURVEYED: SurfaceGroundReadout = { kind: "not-surveyed" };
+
+/** Answers `worker`'s oldest ground-readout query with `readout`. */
+function answerReadout(worker: ScriptedHeightWorker, readout: SurfaceGroundReadout): void {
+  const query = worker.pendingGroundReadouts[0];
+  if (query === undefined) {
+    throw new Error("no ground readout is asked");
+  }
+  worker.reply({ kind: "ground-readout", id: query.id, body: query.body, readout });
+}
+
+describe("the height-worker pool's ground readouts (R10.T12)", () => {
+  const SEED = "0123456789abcdef";
+
+  it("asks one worker, the least loaded, after the body's blocks, and answers with its readout", async () => {
+    const { pool, created } = fieldsOnly(2);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    const map = pool.classMap(MOON, SEED);
+    const asked = pool.groundReadout(MOON, SEED, READOUT_QUERY);
+    // The class map went to the first worker; the readout to the second, after the block.
+    const second = workerAt(created, 1);
+    expect(second.received.map((m) => m.kind)).toEqual(["field-init", "ground-readout"]);
+    expect(second.pendingGroundReadouts[0]).toEqual({
+      ...READOUT_QUERY,
+      kind: "ground-readout",
+      id: second.pendingGroundReadouts[0]?.id,
+      body: MOON,
+      detailSeed: SEED,
+    });
+    expect(workerAt(created, 0).pendingGroundReadouts).toEqual([]);
+    answerReadout(second, NOT_SURVEYED);
+    await expect(asked).resolves.toBe(NOT_SURVEYED);
+    answerClassMap(workerAt(created, 0), null);
+    await expect(map).resolves.toBeNull();
+  });
+
+  it("answers null at once for a body whose field it does not keep, posting nothing", async () => {
+    const { pool, created } = fieldsOnly(1);
+    await expect(pool.groundReadout(MOON, SEED, READOUT_QUERY)).resolves.toBeNull();
+    expect(workerAt(created, 0).received).toEqual([]);
+  });
+
+  it("rejects with the module's refusal", async () => {
+    const { pool, created } = fieldsOnly(1);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    const refused = pool.groundReadout(MOON, SEED, READOUT_QUERY);
+    const query = workerAt(created, 0).pendingGroundReadouts[0];
+    if (query === undefined) {
+      throw new Error("no ground readout is asked");
+    }
+    workerAt(created, 0).reply({
+      kind: "ground-readout-failed",
+      id: query.id,
+      body: MOON,
+      message: "a pad width of 0 m is not finite and positive",
+    });
+    await expect(refused).rejects.toThrow(/ground readout of .* was refused: a pad width/u);
+  });
+
+  it("asks a failed worker's replacement again, with the class map, once the fields are posted to it", async () => {
+    const { pool, created } = fieldsOnly(1);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.fieldChunk(MOON, blockOf(4, 1));
+    const map = pool.classMap(MOON, SEED);
+    const asked = pool.groundReadout(MOON, SEED, READOUT_QUERY);
+    workerAt(created, 0).fail();
+    const replacement = workerAt(created, 1);
+    expect(replacement.received.map((m) => m.kind)).toEqual([
+      "field-init",
+      "field-chunk",
+      "class-map",
+      "ground-readout",
+    ]);
+    expect(replacement.pendingGroundReadouts[0]).toMatchObject(READOUT_QUERY);
+    answerReadout(replacement, NOT_SURVEYED);
+    answerClassMap(replacement, null);
+    await expect(asked).resolves.toBe(NOT_SURVEYED);
+    await expect(map).resolves.toBeNull();
+  });
+
+  it("answers null to a readout out when terminated, as to a class map", async () => {
+    const { pool } = fieldsOnly(1);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    const asked = pool.groundReadout(MOON, SEED, READOUT_QUERY);
+    const map = pool.classMap(MOON, SEED);
+    pool.terminate();
+    await expect(asked).resolves.toBeNull();
+    await expect(map).resolves.toBeNull();
+    expect(() => pool.groundReadout(MOON, SEED, READOUT_QUERY)).toThrow(/pool was terminated/u);
+  });
+
+  it("answers null once its only worker's place is given up", async () => {
+    const { pool, created } = fieldsOnly(1);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    const asked = pool.groundReadout(MOON, SEED, READOUT_QUERY);
+    for (let n = 0; n < MAX_CONSECUTIVE_WORKER_FAILURES; n += 1) {
+      workerAt(created, created.length - 1).fail();
+    }
+    expect(pool.lostWorkers).toBe(1);
+    await expect(asked).resolves.toBeNull();
+  });
+
+  it("rejects a query answered with another query's kind, rather than leaving it to wait", async () => {
+    const { pool, created } = fieldsOnly(1);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    const asked = pool.groundReadout(MOON, SEED, READOUT_QUERY);
+    const query = workerAt(created, 0).pendingGroundReadouts[0];
+    if (query === undefined) {
+      throw new Error("no ground readout is asked");
+    }
+    workerAt(created, 0).reply({ kind: "class-map", id: query.id, body: MOON, map: null });
+    await expect(asked).rejects.toThrow(/a ground-readout query of .* was answered class-map/u);
   });
 });

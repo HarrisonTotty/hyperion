@@ -20,6 +20,9 @@
  * - **The faults**: exactly one `device-lost` with reason `destroyed` inside the loss phase's
  *   window, then exactly one restore, and no other fault and no exit of the GPU process
  *   ({@link terrainFaultsVerdict}).
+ * - **No terrain fault**: the terrain session's `terrainFaults` never held a view, of either cause,
+ *   its height workers lost or a guarded computation failing on (plan R10, R10.T16.e;
+ *   decision-r10-t16-leans §8).
  * - **The loss**: the device destroyed with blocks still to come and bakes in flight; after it the
  *   terrain drawn again, no `surface_field` asked, no `field-init` posted, no `field-chunk` but the
  *   answer in flight's blocks, once to each worker; and the mask holding the same cells.
@@ -42,6 +45,7 @@ import type {
   TerrainCheckPhaseName,
   TerrainCheckPhaseRecord,
   TerrainCheckRecord,
+  TerrainCheckSessionFault,
   ViewsCheckStyle,
   ViewsCheckViewName,
 } from "../preload/api";
@@ -63,8 +67,8 @@ import { join } from "node:path";
 /** The file's schema name. */
 export const TERRAIN_CHECK_SCHEMA = "hyperion.views-check.terrain-results";
 
-/** The schema's version; bumped with any change to the file's shape. */
-export const TERRAIN_CHECK_VERSION = 1;
+/** The schema's version; bumped with any change to the file's shape (2: R10.T16.e's `terrainFaults`). */
+export const TERRAIN_CHECK_VERSION = 2;
 
 /**
  * The longest from a view's hand-over to its first terrain draw, ms: the lit material compiles and
@@ -245,6 +249,10 @@ export interface TerrainCheckResults {
     readonly framesFinite: TerrainFinding & { readonly readBacks: number };
     readonly terrainDrawn: TerrainFinding;
     readonly faults: TerrainFaultsFinding;
+    /** The terrain session's faults, each a failure (R10.T16.e). */
+    readonly terrainFaults: TerrainFinding & {
+      readonly record: ReadonlyArray<TerrainCheckSessionFault>;
+    };
     readonly loss: TerrainFinding & { readonly record: TerrainCheckRecord["loss"] };
     readonly teardown: TerrainFinding & { readonly record: TerrainCheckRecord["teardown"] };
     readonly bothSurfaces: string;
@@ -530,6 +538,19 @@ function lossFinding(record: TerrainCheckRecord["loss"]): TerrainFinding {
   return finding(reasons);
 }
 
+/**
+ * No terrain fault (plan R10, R10.T16.e; decision-r10-t16-leans §8): each time the session's
+ * `terrainFaults` held a view, of either cause, is a failure.
+ */
+function sessionFaultsFinding(record: ReadonlyArray<TerrainCheckSessionFault>): TerrainFinding {
+  return finding(
+    record.map(
+      (fault) =>
+        `the terrain's fault at ${fault.atMs.toFixed(0)} ms on ${fault.views.join(", ")}: ${fault.text}`,
+    ),
+  );
+}
+
 function teardownFinding(record: TerrainCheckRecord["teardown"]): TerrainFinding {
   const reasons: string[] = [];
   if (!record.disposed) {
@@ -566,6 +587,7 @@ export function buildTerrainCheckResults(input: TerrainCheckInput): TerrainCheck
     framesFinite: framesFiniteFinding(phases),
     terrainDrawn: terrainDrawnFinding(phases),
     faults,
+    terrainFaults: { ...sessionFaultsFinding(record.terrainFaults), record: record.terrainFaults },
     loss: { ...lossFinding(record.loss), record: record.loss },
     teardown: { ...teardownFinding(record.teardown), record: record.teardown },
     bothSurfaces: BOTH_SURFACES_HELD_BY,
@@ -584,6 +606,7 @@ export function buildTerrainCheckResults(input: TerrainCheckInput): TerrainCheck
     findings.framesFinite,
     findings.terrainDrawn,
     findings.faults,
+    findings.terrainFaults,
     findings.loss,
     findings.teardown,
   ].map((each) => each.verdict);
@@ -631,6 +654,7 @@ export function terrainFailures(results: TerrainCheckResults): string {
     findings.framesFinite,
     findings.terrainDrawn,
     findings.faults,
+    findings.terrainFaults,
     findings.loss,
     findings.teardown,
   ]
@@ -690,6 +714,7 @@ export function terrainCheckMarkdown(results: TerrainCheckResults): string {
     `| Every frame finite (the photorealistic scene targets read back) | ${findings.framesFinite.verdict} | ${String(findings.framesFinite.readBacks)} read-backs${reasonsText(findings.framesFinite)} |`,
     `| The terrain drawn once handed over | ${findings.terrainDrawn.verdict} | ${phases.map((phase) => `${phase.name} ${phase.views.map((view) => `${view.slot} ${String(view.terrainDraws)} of ${String(view.handedOverDraws)} handed-over draws with a patch in view (${String(view.offSurveyDraws)} with none)${view.terrainDelayMs === null ? "" : `, first ${view.terrainDelayMs.toFixed(0)} ms after the hand-over`}`).join(", ")}`).join("; ")}${reasonsText(findings.terrainDrawn)} |`,
     `| One forced loss, then one restore, and no other fault | ${findings.faults.verdict} | ${findings.faults.expected === null ? "no forced loss excluded" : `excluded: ${findings.faults.expected.line}`}; ${String(findings.faults.restores)} restores; ${String(findings.faults.others.length)} other faults; ${String(findings.faults.gpuProcessExits)} GPU-process exits${reasonsText(findings.faults)} |`,
+    `| No terrain fault (the session's terrainFaults never held a view) | ${findings.terrainFaults.verdict} | ${findings.terrainFaults.record.length === 0 ? "none" : `${String(findings.terrainFaults.record.length)} raised or changed`}${reasonsText(findings.terrainFaults)} |`,
     `| The loss mid-stream, and after it no field asked again | ${findings.loss.verdict} | ${loss.destroyedAtScriptS === null ? "not destroyed" : `destroyed at ${loss.destroyedAtScriptS.toFixed(1)} s of the script, ${String(loss.blocksToCome)} blocks to come, ${String(loss.bakesInFlight)} bakes in flight`}; after: ${String(loss.after.fieldAsks)} asks, ${String(loss.after.fieldInits)} inits, ${String(loss.after.fieldChunks)} chunks for ${String(loss.after.blocksSent)} blocks to ${String(loss.workers)} workers; the mask ${String(loss.masks.before ?? "—")} cells before, ${String(loss.masks.afterRestore ?? "—")} after the restore, ${String(loss.masks.end ?? "—")} at the end of ${String(loss.masks.expected)}${reasonsText(findings.loss)} |`,
     `| The session torn down | ${findings.teardown.verdict} | ${teardown.disposed ? "disposed" : "NOT disposed"}; ${String(teardown.workersLive)} of ${String(teardown.workersMade)} workers left; the session's textures ${String(teardown.sessionGpuBytes)} B; the terrain's GPU bytes left: ${bytesText(teardown.liveBytes)}${reasonsText(findings.teardown)} |`,
     `| No pixel drawn by both surfaces on the datum | — | ${findings.bothSurfaces} |`,

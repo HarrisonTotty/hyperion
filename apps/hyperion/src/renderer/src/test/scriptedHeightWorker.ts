@@ -107,6 +107,14 @@ export class ScriptedHeightWorker implements WorkerLike {
     return this.received.flatMap((m) => (m.kind === "class-map" && !answered.has(m.id) ? [m] : []));
   }
 
+  /** The ground-readout queries still awaiting an answer, oldest first (R10.T12). */
+  get pendingGroundReadouts(): Extract<HeightWorkerRequest, { kind: "ground-readout" }>[] {
+    const answered = new Set(this.answered);
+    return this.received.flatMap((m) =>
+      m.kind === "ground-readout" && !answered.has(m.id) ? [m] : [],
+    );
+  }
+
   reply(message: HeightWorkerReply): void {
     this.answered.push(message.id);
     this.events.dispatchEvent(new MessageEvent("message", { data: message }));

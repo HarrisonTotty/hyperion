@@ -7,9 +7,11 @@ import {
   StandInFields,
   type WasmClassMap,
   type WasmFieldBlock,
+  type WasmGroundReadout,
   type WasmSurfaceFields,
   WorkerFields,
 } from "./heightBake";
+import type { GroundReadoutRequest } from "./messages";
 
 const MOON = keptBody(1);
 const PLANET = keptBody(2);
@@ -36,6 +38,42 @@ function oneTexelMap(): WasmClassMap {
     fractions: () => Float32Array.from([1]),
     weights: () => Uint8Array.from([255]),
     complete: true,
+    free: () => {},
+  };
+}
+
+/**
+ * The fake module's readout: on the ground, its sight's, reading's and material's getters, a
+ * capacity and a friction that depends on the temperature, at `temperatureK`; or, off the ground
+ * (`kind` 1 or 2), every getter `undefined` or `false`, as the module answers.
+ */
+function readoutOf(kind: number, temperatureK: number | undefined): WasmGroundReadout {
+  const on = kind === 0;
+  const value = (x: number): number | undefined => (on ? x : undefined);
+  return {
+    kind,
+    rangeM: value(41_200),
+    rangeSigmaM: value(300),
+    grazing: false,
+    rangeResolved: false,
+    hitM: () => (on ? Float64Array.of(1, 2, 3) : undefined),
+    atFace: value(2),
+    atU: value(0.25),
+    atV: value(-0.5),
+    elevationM: value(2_140),
+    elevationSigmaM: value(180),
+    slopeRmsRad: value(0.2),
+    slopeSigmaRad: value(0.07),
+    slopeBaselineM: value(2),
+    resolutionM: value(410),
+    readingResolved: false,
+    classCode: value(7),
+    entry: value(2),
+    bearingCapacityPa: undefined,
+    capacitySlopeRad: value(0.2),
+    padFriction: value(0.08),
+    frictionOnTemperature: on,
+    temperatureK: on ? temperatureK : undefined,
     free: () => {},
   };
 }
@@ -95,6 +133,17 @@ function fakeModule(): { module: HeightModule; held: Map<string, number> } {
         throw new WebAssembly.RuntimeError("unreachable");
       }
       return held.has(key(system, body)) ? oneTexelMap() : undefined;
+    },
+    // A held body's readout on the ground at the season's anomaly as its temperature, kelvin, and
+    // `not-surveyed` with none held; seed 0xdead the module's refusal, 0xffff a trap.
+    groundReadout: (system, body, seed, ...rest) => {
+      if (seed === 0xdeadn) {
+        throw new Error("a slope baseline of 3 m is none of the readout's 2 m, 5 m and 100 m");
+      }
+      if (seed === 0xffffn) {
+        throw new WebAssembly.RuntimeError("unreachable");
+      }
+      return held.has(key(system, body)) ? readoutOf(0, rest[9]) : readoutOf(2, undefined);
     },
     free: () => {},
   };
@@ -333,6 +382,106 @@ describe("a height worker's fields", () => {
 
   it("rethrows a trap in the module's class map", () => {
     expect(() => askClassMap([[MOON, "payload"]], MOON, "000000000000ffff")).toThrow(
+      WebAssembly.RuntimeError,
+    );
+  });
+
+  /** A ground-readout query of `body` by `detailSeed`, the worker holding `held`'s fields. */
+  function askReadout(
+    held: ReadonlyArray<readonly [string, "stand-in" | "payload"]>,
+    body: string,
+    detailSeed: string,
+    seasonMeanAnomalyRad: number | undefined,
+  ): ReturnType<typeof answerRequest> {
+    const { module } = fakeModule();
+    const fields = new WorkerFields(module);
+    held.forEach(([each, form], n) => {
+      answerRequest(
+        module,
+        { kind: "field-init", id: n + 1, body: each, block: new ArrayBuffer(8), form },
+        fields,
+      );
+    });
+    const request: GroundReadoutRequest = {
+      kind: "ground-readout",
+      id: 4,
+      body,
+      detailSeed,
+      originM: { x: 0, y: 2e6, z: 0 },
+      direction: { x: 0, y: -1, z: 0 },
+      maxM: 1e7,
+      slopeBaselineM: 2,
+      padWidthM: 1,
+      seasonMeanAnomalyRad,
+    };
+    return answerRequest(module, request, fields);
+  }
+
+  it("answers a ground-readout query with the module's readout, copied out (R10.T12)", () => {
+    const answer = askReadout([[MOON, "payload"]], MOON, "00000000000000a5", 243);
+    expect(answer.reply).toEqual({
+      kind: "ground-readout",
+      id: 4,
+      body: MOON,
+      readout: {
+        kind: "ground",
+        sight: {
+          rangeM: 41_200,
+          sigmaM: 300,
+          resolved: false,
+          hitM: [1, 2, 3],
+          at: { face: 2, u: 0.25, v: -0.5 },
+        },
+        reading: {
+          elevationM: 2_140,
+          elevationSigmaM: 180,
+          slopeRmsRad: 0.2,
+          slopeSigmaRad: 0.07,
+          slopeBaselineM: 2,
+          resolutionM: 410,
+          resolved: false,
+        },
+        material: { classCode: 7, entry: 2 },
+        properties: {
+          bearingCapacityPa: null,
+          capacitySlopeRad: 0.2,
+          padFriction: 0.08,
+          frictionOnTemperature: true,
+          temperatureK: 243,
+        },
+      },
+    });
+    expect(answer.transfer).toEqual([]);
+  });
+
+  it("hands the module no season where none is known, and reads no temperature back", () => {
+    const answer = askReadout([[MOON, "payload"]], MOON, "00000000000000a5", undefined);
+    expect(answer.reply).toMatchObject({
+      kind: "ground-readout",
+      readout: { properties: { temperatureK: null, frictionOnTemperature: true } },
+    });
+  });
+
+  it("answers not-surveyed where the module holds no field of the body", () => {
+    expect(askReadout([[PLANET, "stand-in"]], PLANET, "00000000000000a5", 1).reply).toEqual({
+      kind: "ground-readout",
+      id: 4,
+      body: PLANET,
+      readout: { kind: "not-surveyed" },
+    });
+  });
+
+  it("answers the module's refusal of a readout as ground-readout-failed", () => {
+    expect(askReadout([[MOON, "payload"]], MOON, "000000000000dead", 1).reply).toEqual({
+      kind: "ground-readout-failed",
+      id: 4,
+      body: MOON,
+      message: "a slope baseline of 3 m is none of the readout's 2 m, 5 m and 100 m",
+    });
+  });
+
+  it("rethrows a trap in the module's readout", () => {
+    expect(() => askReadout([[MOON, "payload"]], MOON, "000000000000ffff", 1)).toThrow(
       WebAssembly.RuntimeError,
     );
   });

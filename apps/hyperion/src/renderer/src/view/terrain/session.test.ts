@@ -1,8 +1,17 @@
-import type { BodyIdHex, DetailSeedHex, ResponseFor, UniverseIdHex } from "@hyperion/protocol";
+import type {
+  BodyIdHex,
+  DetailSeedHex,
+  ResponseFor,
+  UniverseIdHex,
+  UniverseTime,
+} from "@hyperion/protocol";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { instrumentViewId, PRIMARY_VIEW_ID } from "../../displays/view/viewNames";
+import { vec3 } from "../../geometry/vec3";
+import { type KeplerOrbit, meanAnomalyAt } from "../../lib/orbit";
+import { toKeplerOrbit } from "../../lib/system/wire";
 import { type ServerLink, useServerLink } from "../../lib/serverLink";
 import {
   answerBlock,
@@ -38,7 +47,7 @@ import { allocationTally } from "./gpu/allocationTally";
 import { limbDistanceM } from "./handover";
 import { TerrainSession, viewFieldCandidates } from "./session";
 import { PHASE_LAW } from "./terrainMaterial";
-import type { ClassMapAnswer } from "./workers/messages";
+import type { ClassMapAnswer, GroundReadoutRequest } from "./workers/messages";
 
 const UNIVERSE: UniverseIdHex = "000000000000002a";
 const MOON: BodyIdHex = SESSION_MOON;
@@ -350,6 +359,24 @@ describe("the terrain session's fields (R10.T16.a)", () => {
     const live = h.session.survey(MOON)?.stale;
     h.session.setLinkUp(false);
     expect([live, h.session.survey(MOON)?.stale]).toEqual([false, true]);
+  });
+
+  it("keeps a held survey stale, with its typed failure, once a later ask is refused", async () => {
+    const h = await harness();
+    await holdMoon(h);
+    h.session.noteSurfaceRevisions([{ body: MOON, revision: 2 }]);
+    h.socket().serverRejects(latestFieldAsk(h.socket()).id, {
+      code: "unknown_body",
+      message: "no such body",
+      field: "body",
+    });
+    await settle();
+    const survey = h.session.survey(MOON);
+    expect([survey?.stale, survey?.header, survey?.status.failure]).toEqual([
+      true,
+      moonLikeHeader(MOON),
+      { kind: "rejected", code: "unknown_body", message: "no such body", refusal: true },
+    ]);
   });
 
   it("gives a wanted body's survey: its status, coverage and header", async () => {
@@ -668,5 +695,219 @@ describe("the terrain session's pool, memory and teardown (R10.T16.a)", () => {
     h.session.setLinkUp(true);
     h.session.resync();
     expect(h.socket().requestsOfKind("surface_field")).toEqual([]);
+  });
+});
+
+/** A line of sight down onto the moon from 2,000 km, body-fixed. */
+const SIGHT = {
+  originM: vec3(0, 2e6, 0),
+  direction: vec3(0, -1, 0),
+  maxM: 1e7,
+} as const;
+const OPTIONS = { slopeBaselineM: 2, padWidthM: 1 } as const;
+/** The instant the view lights the moon at: a year and a day after the epoch. */
+const LIT: UniverseTime = { seconds: 31_644_000, nanos: 250_000_000 };
+
+/** The record of a moon of the fixture's planet: the Earth's, of kind moon about the planet. */
+function moonDetail(): ResponseFor<"body_detail"> {
+  const detail = detailWithSeed(SEED);
+  return {
+    ...detail,
+    record: {
+      ...detail.record,
+      kind: { type: "moon", origin: "regular" },
+      parent: { type: "body", id: PLANET },
+    },
+  };
+}
+
+/** The planet's record: the Earth's, its orbit's eccentricity and phase set apart from the moon's. */
+function planetDetail(): ResponseFor<"body_detail"> {
+  const detail = earthDetail();
+  const { orbit } = detail.record;
+  if (orbit.state !== "ok") {
+    throw new Error("the fixture's Earth has an orbit");
+  }
+  return {
+    ...detail,
+    record: {
+      ...detail.record,
+      orbit: {
+        state: "ok",
+        value: {
+          ...orbit.value,
+          orbit: { ...orbit.value.orbit, eccentricity: 0.3, mean_anomaly_at_epoch_rad: 4 },
+        },
+      },
+    },
+  };
+}
+
+/** The record's own orbit as the client propagates it. */
+function orbitOf(detail: ResponseFor<"body_detail">): KeplerOrbit {
+  const { orbit } = detail.record;
+  if (orbit.state !== "ok") {
+    throw new Error("the record has an orbit");
+  }
+  return toKeplerOrbit(orbit.value.orbit);
+}
+
+/** The moon held, its record answered by `detail`. */
+async function holdWith(h: Harness, detail: ResponseFor<"body_detail">): Promise<void> {
+  await holdMoon(h);
+  h.socket().serverAnswers("body_detail", () => detail);
+  await settle();
+}
+
+/** The ground-readout queries the workers were posted, each with its worker, in posting order. */
+function readoutsAsked(
+  h: Harness,
+): { readonly w: ScriptedHeightWorker; readonly q: GroundReadoutRequest }[] {
+  return h.workers
+    .flatMap((w) => w.pendingGroundReadouts.map((q) => ({ w, q })))
+    .toSorted((a, b) => a.q.id - b.q.id);
+}
+
+describe("the terrain session's ground readouts (R10.T12)", () => {
+  it("asks one worker for the readout with the body's seed and the season of its own orbit", async () => {
+    const h = await harness();
+    const detail = detailWithSeed(SEED);
+    await holdWith(h, detail);
+    const asked = h.session.groundReadout(PRIMARY, MOON, SIGHT, LIT, OPTIONS);
+    const posted = readoutsAsked(h);
+    expect(posted.map(({ q }) => q)).toEqual([
+      {
+        kind: "ground-readout",
+        id: posted[0]?.q.id,
+        body: MOON,
+        detailSeed: SEED,
+        originM: SIGHT.originM,
+        direction: SIGHT.direction,
+        maxM: SIGHT.maxM,
+        slopeBaselineM: 2,
+        padWidthM: 1,
+        seasonMeanAnomalyRad: meanAnomalyAt(orbitOf(detail), LIT),
+      },
+    ]);
+    const readout = { kind: "no-ground" } as const;
+    const first = posted[0];
+    first?.w.reply({ kind: "ground-readout", id: first.q.id, body: MOON, readout });
+    await expect(asked).resolves.toEqual(readout);
+  });
+
+  it("takes a moon's season from its planet's orbit, asking the planet's record once", async () => {
+    const h = await harness();
+    await holdMoon(h);
+    h.socket().serverAnswers("body_detail", () => moonDetail());
+    await settle();
+    const planetAsks = h
+      .socket()
+      .requestsOfKind("body_detail")
+      .map(({ body }) => body)
+      .filter((body) => body.body === PLANET);
+    expect(planetAsks).toEqual([
+      { kind: "body_detail", universe: UNIVERSE, body: PLANET, time: SCENE.time, detail: "full" },
+    ]);
+    // Until the planet's record answers, no season is known.
+    const before = h.session.groundReadout(PRIMARY, MOON, SIGHT, LIT, OPTIONS);
+    h.socket().serverAnswers("body_detail", () => planetDetail());
+    await settle();
+    const after = h.session.groundReadout(PRIMARY, MOON, SIGHT, LIT, OPTIONS);
+    const posted = readoutsAsked(h);
+    expect(posted.map(({ q }) => q.seasonMeanAnomalyRad)).toEqual([
+      undefined,
+      meanAnomalyAt(orbitOf(planetDetail()), LIT),
+    ]);
+    expect(meanAnomalyAt(orbitOf(planetDetail()), LIT)).not.toBe(
+      meanAnomalyAt(orbitOf(moonDetail()), LIT),
+    );
+    const readout = { kind: "no-ground" } as const;
+    for (const { w, q } of posted) {
+      w.reply({ kind: "ground-readout", id: q.id, body: MOON, readout });
+    }
+    await expect(Promise.all([before, after])).resolves.toEqual([readout, readout]);
+  });
+
+  it("gives no season to a kept scene's body, whose record it does not ask", async () => {
+    const h = await harness();
+    const [planet, moon] = SCENE.bodies;
+    if (planet === undefined || moon === undefined) {
+      throw new Error("the scene holds the planet and its moon");
+    }
+    const scene: ViewScene = { ...SCENE, bodies: [planet, { ...moon, detailSeed: SEED }] };
+    h.session.noteView(PRIMARY, viewAt(5e6, "photorealistic", { scene }));
+    h.session.step();
+    await answerField(h);
+    const asked = h.session.groundReadout(PRIMARY, MOON, SIGHT, LIT, OPTIONS);
+    const posted = readoutsAsked(h);
+    expect([
+      h.socket().requestsOfKind("body_detail"),
+      posted.map(({ q }) => [q.detailSeed, q.seasonMeanAnomalyRad]),
+    ]).toEqual([[], [[SEED, undefined]]]);
+    const readout = { kind: "no-ground" } as const;
+    for (const { w, q } of posted) {
+      w.reply({ kind: "ground-readout", id: q.id, body: MOON, readout });
+    }
+    await expect(asked).resolves.toEqual(readout);
+  });
+
+  it("rejects a malformed time, rather than throwing, and asks no worker", async () => {
+    const h = await harness();
+    await holdWith(h, detailWithSeed(SEED));
+    const malformed: UniverseTime = { seconds: 1.5, nanos: 0 };
+    const asked = h.session.groundReadout(PRIMARY, MOON, SIGHT, malformed, OPTIONS);
+    await expect(asked).rejects.toThrow(RangeError);
+    expect(readoutsAsked(h)).toEqual([]);
+  });
+
+  it("asks a moon's planet's record the link cut off again once it returns", async () => {
+    const h = await harness();
+    await holdMoon(h);
+    h.session.setLinkUp(false);
+    h.socket().serverAnswers("body_detail", () => moonDetail());
+    await settle();
+    const asked = (): number =>
+      h
+        .socket()
+        .requestsOfKind("body_detail")
+        .filter(({ body }) => body.body === PLANET).length;
+    const whileDown = asked();
+    h.session.setLinkUp(true);
+    expect([whileDown, asked()]).toEqual([0, 1]);
+  });
+
+  it("answers null once disposed, for a view it holds no report of, a body not wanted, before the seed and before the field", async () => {
+    const h = await harness();
+    const ask = (view = PRIMARY, body = MOON): Promise<unknown> =>
+      h.session.groundReadout(view, body, SIGHT, LIT, OPTIONS);
+    h.session.noteView(PRIMARY, viewAt(5e6));
+    h.session.step();
+    // Wanted, its seed asked and its field not yet answered.
+    const beforeSeed = ask();
+    h.socket().serverAnswers("body_detail", () => detailWithSeed(SEED));
+    await settle();
+    const beforeField = ask();
+    await answerField(h);
+    const notWanted = ask(PRIMARY, PLANET);
+    const unknownView = ask(INSTRUMENT);
+    h.session.dispose();
+    const disposed = ask();
+    await expect(
+      Promise.all([beforeSeed, beforeField, notWanted, unknownView, disposed]),
+    ).resolves.toEqual([null, null, null, null, null]);
+    expect(readoutsAsked(h)).toEqual([]);
+  });
+
+  it("cancels a moon's planet's record still asked when disposed", async () => {
+    const h = await harness();
+    await holdMoon(h);
+    h.socket().serverAnswers("body_detail", () => moonDetail());
+    await settle();
+    const planetAsk = h
+      .socket()
+      .requestsOfKind("body_detail")
+      .find(({ body }) => body.body === PLANET);
+    h.session.dispose();
+    expect(h.socket().cancelledIds()).toContain(planetAsk?.id);
   });
 });

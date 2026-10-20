@@ -2338,6 +2338,17 @@ src/renderer/src/view/spike` and `just test-render --part=6`.
 src/tools`; `just views-check --hidden --smoke --terrain` (exit 0); the console-ux checks; and the
     figures recorded.
 
+- **R10.T16.e The live path's small fixes** (new, decision-r10-t16-leans §8 and §11). A guarded
+  failure of the session's step or of a view's survey edges lasting `ANNUNCIATION_ONSET_MS` faults
+  the session's terrain as lost workers do, with
+  `TERRAIN NOT AVAILABLE: terrain computation failed, reopen VIEW to retry` on each handing view's
+  fault line (the `console.error` stays, once). Every `--views-check` launch shows `MEASUREMENT` in
+  place of `TRAINING`. The terrain run fails if the session's `terrainFaults` is ever non-empty. The
+  guide's `TERRAIN NOT AVAILABLE`, `TRAINING` and `MEASUREMENT` rows as the ruling gives them.
+  Tests: a step throwing for 250 ms raises the fault on each handing view and stops the terrain, a
+  single throw does not; a views-check launch's header reads `MEASUREMENT` on every display; a
+  terrain fault fails the run's verdict; the console-ux checks.
+
 ### R10.T11 The wireframe's terrain
 
 Depth-only terrain in the wireframe style at τ = 4 px from the same bounds and bakes (heights and
@@ -2456,8 +2467,8 @@ _From R10.T16 (`decision-r10-live-path.md`, D10): the readings (T6.b's `reading`
 `material`) are asked of the session's pool, whose workers hold the body's field, through a query of
 the pool's beside `classMap`, at 4 Hz for each view's line of sight; `SurveyLine` reads the session's
 survey of the view's `FRAME` body (the store's status, coverage and header, stale while the link is
-down), with the refused field's state as T16.d's draft is signed off. Its by-hand checks may take
-T16.d's `TERRAIN TEST`._
+down), with the refused field's state as signed off (decision-r10-t16-leans §12). Its by-hand checks
+may take T16.d's `TERRAIN TEST`._
 
 #### The drafts, for the owner
 
@@ -2477,13 +2488,15 @@ ELEVATION                 ~2140 m ± 180 m
 SLOPE                     ~12° ± 4° · BASELINE 2 m
 SLANT RANGE               ~41.2 km ± 0.3 km
 MATERIAL                  REGOLITH · UNLISTED MATERIAL
-ULTIMATE BEARING CAPACITY ~5.4 MPa · PAD WIDTH 1.0 m
+ULTIMATE BEARING CAPACITY ~3.4 MPa · PAD WIDTH 1.0 m
 PAD FRICTION              ~0.20
 RESOLUTION                410 m
 ```
 
 The substance is `feldspathic`'s, which `substanceName` does not name yet (R10.T13's Draft 5); the
-capacity is lunar regolith's at the Moon's 1.62 m/s², and the friction NAVFAC's for silt (Draft 1).
+capacity is lunar regolith's at the Moon's 1.62 m/s², on the point's 12° slope over 2 m (3,432 kPa;
+_corrected by R10.T12 from the draft's level `~5.4 MPa`, T1.a's slope follow-up, finding 10_), and the
+friction NAVFAC's for silt (Draft 1).
 
 - **Draft 1. The material's properties: `BEARING CAPACITY` and `PAD FRICTION`.**
   - _The quantities, as built_ (R10.T1.a; `crates/hyperion-surface/src/material/`, `bearing.rs` and
@@ -2494,7 +2507,10 @@ capacity is lunar regolith's at the Moon's 1.62 m/s², and the friction NAVFAC's
       of one footing width, at the body's gravity (Design note 2). Its test pins it on lunar
       regolith at 1.62 m/s² under a 1 m footing: 5,368.6 kPa from the 30–60 cm layer. The top
       15 cm's pair gives 206.5 kPa under the same footing, so a narrow pad, whose failure zone stays
-      near the surface, bears far less: about 100 kPa under 0.1 m.
+      near the surface, bears far less: about 100 kPa under 0.1 m. _On a slope (T1.a's slope
+      follow-up, decision-r10-slope-capacity):_ `bearing_capacity_on_slope` takes the slope too,
+      for a pad resting flush on it, and gives `bearing_capacity`'s figure at 0; the readout takes
+      it at the point's slope over 2 m (signoff-10 (h)).
     - `interface_friction(properties, temperature)` is the friction coefficient tan δ of a metal
       pad on the ground, with no unit. On a soil it is a constant, NAVFAC DM-7.02 (1986) Table 1's
       factor for steel: 0.20 on regolith, soil and dust, 0.25 on sediment and 0.30 on sand. On
@@ -2514,7 +2530,9 @@ capacity is lunar regolith's at the Moon's 1.62 m/s², and the friction NAVFAC's
     its material and the body: what it will bear before it fails in shear, and how a landing pad
     grips it.
     - `BEARING CAPACITY` is the pressure under which the ground fails beneath a pad: its ultimate
-      bearing capacity, with no factor of safety, at the body's surface gravity, on level ground.
+      bearing capacity, with no factor of safety, at the body's surface gravity, on level ground
+      (_amended: on the ground's slope at the point over 2 m, for a pad that holds there,
+      signoff-10 (h) and decision-r10-t12-leans G1; the guide holds the adopted text_).
       It is not a safe load: a pad sinks into the ground at far lower pressures, which are not
       modelled.
       It is on the console's pressure ladder, `Pa`, `kPa` and `MPa`, switching at 1000 with
@@ -5711,6 +5729,8 @@ Option<Pascals>` sit beside the level `bearing_capacity` and `ultimate_bearing_c
       `bearing_capacity(properties, gravity, footing_width)` on level ground, and its wording
       bullet says "on level ground". Its example readout's `~5.4 MPa` sits under `SLOPE ~12°`,
       where the capacity is 3.4 MPa. The amendment leaves T12's text to T12's own commit.
+      _Fixed by R10.T12's back-end commit: the example reads `~3.4 MPa`, and both bullets name the
+      slope._
   11. _The spread across the slope's uncertainty._ Across the example's 12° ± 4° the 1 m pad's
       capacity runs from 4.0 MPa to 2.9 MPa, while Draft 1 gives the figure a `~` with no `±`.
   12. _Design note 7's InSight wording._ It says "lander-stability slopes at 2–5 m … against a
@@ -5721,6 +5741,7 @@ Option<Pascals>` sit beside the level `bearing_capacity` and `ultimate_bearing_c
       and the two level lunar capacities. It could take the slope capacities too, but that file is
       outside this lane, so a unit test pins seven of their bits instead. A golden file of them,
       through `GoldenWriter`, is owed once T12 first shows the figure or a payload carries it.
+      _Settled by R10.T12 (decision-r10-t12-leans §8): `material/bearing_on_slope.golden`._
   14. _signoff-10's two findings for this follow-up's list are still open._ They are "Regolith on
       small bodies" and "Loose soils' failure mode", from R10.T12's drafts' findings above. Both
       change the level formula beyond the slope this brief asked for, so they stay on main's list.
@@ -9574,6 +9595,59 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
   - _The harness's console in the views check's log_: this part's first scratch run, without
     `ELECTRON_ENABLE_LOGGING=1`, logged none of the renderer's console, and its next, with it,
     logged all of it. For whoever next runs a scratch harness on the views check.
+- **Deviations in T16.e, as built** (2026-10-20; lane r10-readouts, on `rendering-and-planets` at
+  `1870973b`; decision-r10-t16-leans §8 and §11).
+  - _The fault._ `annunciation.ts` gains `TERRAIN_COMPUTATION_FAILED` beside
+    `TERRAIN_NOT_AVAILABLE`, the type `TerrainFault` of the two and `isTerrainFault`. A new
+    `view/terrain/failureGuard.ts`, `TerrainFailureGuard.run` (the call, its fallback, the frame's
+    time and the report's `describe` and `onFault`), guards each call: a success clears it; a loss
+    (`EngineUnavailable`) passes in silence, neither starting nor clearing a run of failures; any
+    other throw is reported by `console.error` once a run, and `onFault` is called once the run has
+    lasted `ANNUNCIATION_ONSET_MS`, so one failed frame raises nothing. `stepTerrainSession` (the
+    session, its guard and the frame's time) guards the session's step in `VIEW`'s loop, and the
+    drawer's `#surveyEdges` its own guard with `ViewTerrainInput.nowMs`; each takes a new guard
+    when the session changes, so that one session's run of failures never counts against the next.
+  - _The session._ `TerrainSession.failComputation()`, sticky: every pass halted
+    (`TerrainPass.halt(cause)`, the private fault R10.T16.b built, now with its cause, which
+    `drawFor` reports) and none made again; the faults raised at once, not at the next step, which
+    may be what throws (where the views that hand a body over cannot be told either, every view that
+    has reported is faulted). `terrainFaults` is a `ReadonlyMap<ViewId, TerrainFault>`, the text the
+    session's first cause raised, which stands for the session: lost workers'
+    `TERRAIN_NOT_AVAILABLE`, or the computation's. After the fault each step follows the fields and
+    the fault and steps no pass. Lost workers alone behave as built. The masks are withheld for a
+    halted pass and for a body never given one, and the annunciations are `null`, as with lost
+    workers. `viewFaults.ts`' `faultsFor` appends the view's text; `terrainStatementOf` and the
+    primary's statement drop the terrain annunciation under either text (`isTerrainFault`; inline in
+    `ViewDisplay`, where a call to `terrainStatementOf` drew oxlint's React-compiler errors).
+  - _The survey edge on a faulted pass (found in the build, fixed here)._ `surveyEdgeViewsOf` stood
+    the rim on a faulted pass's resident heights while the view drew the body's figure, since the
+    pass keeps its last step's views: true of lost workers since T16.b. `FrameTerrainPass` gains
+    `faulted`, and a faulted pass draws no ground, so the rim stands on the datum, as for a view
+    that hands the body to no pass.
+  - _The run._ The probe follows the session's `subscribeFaults` in `watchTerrain` and records each
+    change to a held fault (`TerrainCheckSessionFault`: its time, text and views) in the record's
+    `terrainFaults`. Main's results gain the finding "No terrain fault (the session's terrainFaults
+    never held a view)", a failure for each record, in the overall verdict, its table row and its
+    JSON member; `TERRAIN_CHECK_VERSION` 2, as its own comment asks for any change of shape.
+  - _The banner._ `App.tsx`'s `modeBanner` is `MEASUREMENT` whenever `window.hyperion.viewsCheck`
+    is present, on every display, for the whole launch; `TRAINING` otherwise as built.
+  - _The guide._ The `TERRAIN NOT AVAILABLE` row's second cause (§8), and the `TRAINING` and
+    `MEASUREMENT` rows (§11), as the ruling gives them; nothing else. The `SCENE` row's "under the
+    training banner" stands, which the `TRAINING` row's exception now covers (§15 C).
+  - _Tests._ The guard (a single throw, a run under and over 250 ms, a loss, the report once); the
+    session (a step throwing for 250 ms faults each handing view and stops the terrain, no demand,
+    no draw, the mask withheld, no annunciation; a single throw does not; the first cause stands);
+    the label block's fault line through `VIEW`; the survey edges' guard in the drawer; the rim on a
+    faulted pass; `MEASUREMENT` on F1 to F4 on a views-check launch, T20's and the terrain run's;
+    a terrain fault fails main's verdict and the launch exits 1. The console-ux checks: `ux_lint.py`
+    on the changed renderer files, 0 errors; `glyphs.py` on the new string, all ASCII;
+    `contrast.py status-caution surface-0` 12.01:1.
+  - _With R10.T11 (merged before T16.e landed)._ The fault covers the wireframe's passes as the
+    lit ones: `failComputation` halts both kinds and makes neither again, and its views are those
+    that hand a body over in either style. The wireframe terrain's draw in the drawer
+    (`wireframeTerrainOf`, R10.T11's guarded call) takes a `TerrainFailureGuard` of its own beside
+    the survey edges', so that its failure lasting `ANNUNCIATION_ONSET_MS` faults the terrain too,
+    by §8's reasons (a view drawing on with a stopped terrain and nothing on its plate).
 - **Deviations in T11, as built** (2026-10-20; lane r10-wireframe, on `rendering-and-planets` at
   `8a7378d6`, on T16's session).
   - _Files._ New: `view/terrain/terrainWire.ts` (`contourStepM`, `contourInterval`,
@@ -9886,3 +9960,154 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
   - _The views check's patch counts._ The probe's phase table counts the lit pass's patches alone
     (its `view:hdr` frames), so a wireframe-only run records none; for the views check's next
     revision.
+- **Deviations in T12's back end, as built** (2026-10-20; lane r10-readouts, branch
+  `r10-readouts-land`, after R10.T16.e's commit, on `rendering-and-planets` at `6fa6a405`;
+  decision-r10-t12-leans, decision-r10-t16-leans §12, decision-r10-view-block-room §2–§4).
+  - _The split (decision-r10-view-block-room §4; accepted by main)._ This commit is T12's back end
+    and the pure pieces its lines need, dormant: nothing in `VIEW` asks the readout, draws its
+    lines or sets the tripod's point (`TerrainSession.groundReadout`, `terrainLabelModel` and
+    `ViewFrameInputs.lineOfSightPoint` have no caller), and the draw list is bit for bit unchanged
+    without a line-of-sight input (tested). The label-block work is T12's later commit, on
+    R10.T12.b's lower plate ("Left for T12's label-block commit", below).
+  - _The query._ `WorkerFields::ground_readout(body, seed, &GroundReadoutQuery)` answers the whole
+    readout at a line of sight from one `Synthesiser`, each part the separate query's (`slant_range`,
+    `reading`, `material`) to the bit: the reading at a `SlopeBaseline`, a member of
+    `SLOPE_BASELINES` checked at the boundary since `surveyed_reading` panics on another
+    (decision-r10-t12-leans §1); the material; the capacity, `bearing_capacity_on_slope` at the
+    header's gravity under the pad on the RMS slope over the fixed 2 m (`CAPACITY_SLOPE_BASELINE`)
+    whatever the baseline, and none under a pad not finite and positive; the month's temperature and
+    the friction (§6). A foot outside the survey reads `NotSurveyed`. The wasm `groundReadout` takes
+    flat arguments, the season as `number | undefined` and refuses a non-finite one with a `JsError`,
+    so no NaN reaches `month_at`; `GroundReadoutAnswer` holds the answer itself. On the client: the
+    `ground-readout` request and its two replies (the reading types moved from `heightBake.ts` to
+    `messages.ts`, against an import cycle); `HeightWorkerPool.groundReadout` beside `classMap`,
+    over a discriminated pending query whose `receive` is exhaustive; and
+    `TerrainSession.groundReadout(view, body, sight, time, options)`, async, with the baseline
+    typed `SlopeBaselineM`, `null` once disposed, for a body not wanted, with no seed or field held,
+    or for a view it holds no report of. The view enters at the session, not at the pool's query,
+    which takes a line of sight alone (§3).
+  - _The month (§6)._ `lib/orbit.ts`'s `meanAnomalyAt(orbit, time)`, factored out of `stateAt` in
+    the order of operations of the server's `drifting_state_at`, the orbit goldens unchanged; the
+    orbit the `body_detail` record's own, or, for a moon whose parent is a body, its planet's, asked
+    once beside the seed (`CoarseInputs::planet_of`'s rule); none for a kept scene's body or an
+    open-form orbit. In Rust: `month_at`, `month_temperature`, then the lapse to the reading's
+    elevation by `lapse_drop_k`, now shared with the classifier's `facts` (their goldens
+    byte-identical); month 0 on a one-month header with or without an anomaly; no temperature with
+    twelve months and no anomaly. The caller gives the instant the view lights the body at
+    (§6 (c)), the label-block commit's.
+  - _The goldens (scope)._ Two new files, each headed `crate::generator_version()` (22), compared
+    natively and on both wasm targets, with no other golden moved: `material/bearing_on_slope.golden`
+    (§8: every shear table's layers at their bodies' gravities under the 1.0 m and 0.1 m pads,
+    slopes from 0 to just under φ, none at φ, just above it and at 89°, the cohesionless φ 30° soil,
+    and the ruled 3,730.03, 2,331.04, 133.28, 209.92 and 27.84 kPa), its version test now pinning
+    the material goldens' names rather than a count (a scope deviation the slope ruling §9
+    allowed); and `worker/earth_like.golden` (10,874 B; accepted by main), an Earth-like survey of
+    (+x, level 8, 0, 0) at 50 m whose finest patch (+x, 19, 900, 668) holds soil, sand and sediment
+    of granite, for the `dominantSlot` test, its name joining the worker goldens' set. It was
+    re-blessed at 22 after R09.T7.i–j moved the craters (one payload line; its classes unchanged).
+  - _The `dominantSlot` test._ All 4,225 vertices of the patch are checked against the native
+    worker's material answers, which the golden pins (taken with one synthesiser), with the
+    module's own `material` at 28 of them and its bake held equal to the native bake: a `material`
+    query builds a synthesiser of its own (about 17 ms natively), so one at every vertex would take
+    over 70 s.
+  - _The store's failure (decision-r10-t16-leans §12 (b)–(d))._ `FieldFailure`: `rejected`, the
+    server's code and message with `refusal` from `isRefusal` (moved to `lib/refusal.ts`, out of
+    the `RequestStatus` component), or `invalid`, one of §12's six checks, its message logged once.
+    `protocol_violation` maps to `answer unreadable`; the protocol package's own bulk-assembly
+    failures, which it builds in the server's `internal` shape, now carry `bulkUnassembled: true`
+    (`BulkAssemblyFailure`, `isBulkAssemblyFailure`: additive, no wire change) and map to
+    `payload cut short`; a throw of the store's own while taking a chunk is `answer unreadable`. A
+    failure drops the field whole wherever a block has been posted since the last answer taken, a
+    link-cut answer's blocks included (§12 (c)'s reason applied to them too); `TerrainSurvey.stale`
+    also holds while a failure stands.
+  - _The model (`view/terrain/readouts.ts`)._ Typed lines of its own: readings made of segments of
+    fixed-width fields with a kept place for the `S`, the console's own text and statuses; status
+    lines with their colour token; the heading. `LabelLine`'s `FieldRun` admits none of
+    `~ ± % K °`. Every state and stale form of decision-r10-t12-leans §4 and §7. The `S` of a `±`
+    reading stands in its uncertainty's field, after the uncertainty. `DATUM REFERENCE SPHERE`
+    where the two radii are equal. The Estimated rounding, as the guide's sentence is read (main,
+    2026-10-20): the uncertainty's three highest digits taken by flooring, as the PDG's own words
+    have it (RPP 2024, Introduction §5.3), and where the rule's result is finer than the quantity's
+    step, that result rounded up to the step (0.04 m → `± 0.1 m`, 0.12 m → `± 0.2 m`, a slope's
+    1.02° → `± 1°`; JCGM 100:2008 §7.2.6), no guide change. The uncertainty fields sized for
+    ` ± 100,000 m` and ` ± 10,000 km`; an Estimated range under 1 cm in E notation, as the resolved
+    form is. `lineOfSightOf` reaches past the far side, held to the binding's 10¹² m, whose limits a
+    test holds equal to `wasm.rs`'s. `frameBody` and `slantRangeFromCamera` in `viewRun.ts`;
+    `formatBearingCapacity` and `formatTwoFigures` in `lib/format.ts`, its `Intl` cache now keyed by
+    the options too (the review found two formatters sharing a key).
+  - _The tripod._ `lineOfSightTripod` and `lineOfSightGivesWay` in `symbology.ts`, drawn first of
+    the screen-space marks when `DrawOptions.lineOfSight` has a point, beneath the reticles and over
+    the survey edge; it gives way at 0.5 rem and returns at 0.75 rem, centreline to centreline, to
+    symbol-sized body symbols, a craft's ticks and the flight path marker, and the drawer keeps the
+    give-way per view. The open centre counts the casing, so at a device-pixel ratio of 1 the ticks
+    start 4.21 px out from 80% to 125% (reaching 0.58, 0.51 and 0.46 rem), in place of the plan's
+    by-hand fallback of 0.25 rem; the guide's prose ("they start further out, keeping their
+    length") covers it, and its figures stand. The edge's ticks keep 0.5 rem clear only where the
+    tripod is drawn, and mark labels keep off its box.
+  - _The descent spike._ `SITE ELEVATION` in `ELEVATION`'s form, with its row (signoff-9 (k)
+    part 2).
+  - _The guide._ §12's survey-line texts with G6 in place of their second sub-bullet, and G1–G5
+    with signoff-10's (h), applied as adopted text ahead of the display (main, as for
+    `SURVEY EDGE` before T16.c). **Adopted, not yet drawn**, until T12's label-block commit:
+    - in "Views": the survey line's bullet and its sub-bullets (`SURVEY COVERAGE REJECTED`,
+      `SURVEY DATA INVALID`, the survey held, `NONE S`), the readout's bullet (G4's stale forms,
+      G5's terrain fault), the capacity's sub-bullet (G1), the Missing sub-bullet (G2) and the
+      instruments' bullet's clause (G3);
+    - the rows `ULTIMATE BEARING CAPACITY`, `DATUM`'s stale form, `SURVEY COVERAGE REJECTED`, the
+      `DATA INVALID` row's `SURVEY DATA INVALID` and `TERRAIN NOT AVAILABLE`'s "or states a
+      terrain readout".
+
+    Drawn now: the `SITE ELEVATION` row.
+
+  - _Tests and acceptance, as run._ `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain
+src/renderer/src/displays/view src/renderer/src/view/wireframe src/renderer/src/lib
+src/renderer/src/view/spike src/renderer/src/components src/renderer/src/smoke
+src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protocol package's (197);
+    `cargo test -p hyperion-surface --features testing --lib -- worker:: material::` (185), the
+    golden compares on wasip1 by name; the console-ux checks (`ux_lint.py` 0 errors, one justified
+    check on a logged-only `${entry.substance}`; `glyphs.py` on `· — ~ ± ° ×` and U+00A0, all in
+    both faces; `contrast.py`: `--text` 13.57:1, `--text-muted` 7.22:1, `--status-caution` 12.01:1
+    on `--surface-0`); the batch's gate, `just smart-ci origin/rendering-and-planets --hook-checks`.
+  - _By hand, hidden._ `just views-check --hidden --smoke --terrain` on the RTX 3080, both
+    settings, exit 0, with R10.T16.e's "No terrain fault" passing. The §12 looks
+    (decision-r10-view-block-room) are the label-block commit's.
+- **Left for T12's label-block commit (on R10.T12.b; decision-r10-view-block-room §3–§4, §12)**:
+  - the lower plate's groups through R10.T12.b's interface (`LowerPlatePart`: `survey`, `state`,
+    `datum`, `readout`, each with its tallest form; the plate's own yield lines), the tripod and the
+    `GROUND AT LINE OF SIGHT` note only while the readout stands there;
+  - the primary alone (decision-r10-t12-leans §3), asked at 4 Hz: `frameBody` → `survey` →
+    `lineOfSightOf` → `groundReadout`, at the scene's time less `retarded.lightTimeS`, with the
+    2 m baseline and the 1.0 m pad, one query in flight, the `FRAME` body wanted (a body nobody
+    wants reads `PENDING` for ever);
+  - the queries' failures under R10.T16.e's guard (§5; `TerrainFailureGuard.run` is synchronous,
+    so the answers' rejections need a way in);
+  - `lineOfSightPoint` from the published readout; `SurveyLine.tsx`, `TerrainReadout.tsx` in
+    `output` elements; the note first in `ViewMarkList`, unselectable, with its accessible name;
+    keyboard reach of the readout's target;
+  - the §12 looks, the tripod's look at a ratio of 1, and the longest note at 1280 × 720.
+- **Deferred findings (2026-10-13 rule) (T12's back end)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  1. _A readout's own figures across targets._ The temperature, friction and capacity of one
+     readout are compared on one target only; each is plain IEEE arithmetic over inputs that
+     goldens pin (`months.golden`, `table.golden`, `bearing_on_slope.golden`). A small worker
+     golden of a glacier point's readout either side of a month's edge would pin them across
+     targets (the determinism audit's lever).
+  2. _The season's orbit past its record's `valid_until`._ The session never asks the record again,
+     so a long session's month comes from elements past their range: negligible for the month.
+  3. _The line of sight's raw fields._ The query types the baseline and the season but carries the
+     origin, direction and reach as raw values that `sight_of` checks and `slant_range` asserts
+     again; a checked sight type would end its `# Panics`.
+  4. _The rounding's remaining overstatement._ "Never down" still rounds a figure up a whole step
+     (a range's σ of 0.31 km reads `± 0.4 km`).
+  5. _Vesić's inclination factors_ were not read in a primary here (the science check could not
+     reach Vesić 1975 or EM 1110-1-1905); the slope ruling read them.
+- **Leans for commit 3's rulings** (main rules them with its §12 look):
+  1. In `CHASE` the tripod stands over the own ship's hull at the centre: the give-way list names
+     no hull outline. Lean: a hull outline within 0.5 rem also makes it give way.
+  2. The `GROUND AT LINE OF SIGHT` row's "Stated while …" is broader than "Views" (main has queued
+     "while its terrain readout stands (see "Views")" for the docs batch).
+  3. The casing counting for the open centre (above). Lean: it counts; the look at a ratio of 1
+     confirms it.
+  4. At a ratio of 1 and 80%, the upper ticks' ends come about 1.8 px from the selection bracket's
+     arms about a size-class-1 body at the centre, the bracket's casing cutting their tips. Lean:
+     acceptable under the draw order; for the look.

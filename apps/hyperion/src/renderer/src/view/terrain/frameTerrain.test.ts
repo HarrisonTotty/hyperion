@@ -367,6 +367,7 @@ function fakeSource(
     symbologyDepthMaterial: options.depth === undefined ? DEPTH : options.depth,
     heights: new ResidentHeights(),
     viewIds: new Set([VIEW]),
+    faulted: false,
   };
   const frame: TerrainViewFrame = {
     draw: DRAW,
@@ -594,6 +595,7 @@ function edgeSource(
             symbologyDepthMaterial: null,
             heights,
             viewIds: new Set([VIEW]),
+            faulted: false,
           }
         : null,
     ...overrides,
@@ -735,6 +737,18 @@ describe("the survey edges a view marks (R10.T16.c)", () => {
     },
   );
 
+  it("stands the rim on the datum where the body's pass is faulted, which draws the figure (R10.T16.e)", () => {
+    const lit = litAt500();
+    const { onA, onB } = rimHeights("photorealistic", VIEW, {
+      ...lit,
+      pass: (body) => {
+        const pass = lit.pass(body);
+        return pass === null ? null : { ...pass, faulted: true };
+      },
+    });
+    expect([onA.length > 8, allNear([...onA, ...onB], 0)]).toEqual([true, true]);
+  });
+
   /**
    * A source whose lit pass's bakes stand the edge on cell A at 900 m, taking `VIEW`, and whose
    * wireframe pass's at 500 m, taking `wireViews` (R10.T11).
@@ -752,6 +766,7 @@ describe("the survey edges a view marks (R10.T16.c)", () => {
               symbologyDepthMaterial: null,
               heights: wire,
               viewIds: wireViews,
+              faulted: false,
             }
           : null,
     });
@@ -848,6 +863,7 @@ function wireSource(bodies: ReadonlyMap<BodyIdHex, WireBody>): {
               symbologyDepthMaterial: null,
               heights: each.heights ?? new ResidentHeights(),
               viewIds: each.viewIds ?? new Set([VIEW]),
+              faulted: false,
             };
       },
       drawWireTerrain: (view, body, input) => {

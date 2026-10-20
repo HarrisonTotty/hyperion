@@ -35,7 +35,8 @@
  * (decision D7). Given the body's survey ({@link TerrainPassOptions.survey}), selection leaves the
  * bare ground to the reference surface (D6). Once every height worker is lost, the pass asks for
  * nothing more and draws nothing, and each view's frame carries the fault
- * ({@link TERRAIN_NOT_AVAILABLE}).
+ * ({@link TERRAIN_NOT_AVAILABLE}); likewise once its session halts it ({@link TerrainPass.halt}),
+ * with the cause the session gives (plan R10, R10.T16.e).
  *
  * Positions follow R02's differencing: patch origins and contacts are body-fixed `f64`, rotated
  * into the body's non-rotating axes, less the camera in those axes, and narrowed once into the
@@ -89,6 +90,7 @@ import {
   type TerrainAnnunciation,
   TerrainAnnunciationDebounce,
   type TerrainConditions,
+  type TerrainFault,
 } from "./annunciation";
 import { distanceToBoxM, relativeBounds } from "./bounds";
 import { type DrawSet, DrawSetResolver, PatchCache } from "./cache";
@@ -380,10 +382,11 @@ export interface TerrainViewFrame {
   /** Its debounced label line (Design note 23), for `labelStatements`; `null` under the fault. */
   readonly annunciation: TerrainAnnunciation | null;
   /**
-   * The terrain's fault, every height worker lost, for the view's label block's fault line after
-   * any graphics fault (decision-r10-t16-contracts §7), or `null`.
+   * The terrain's fault by the cause the pass was faulted for, every height worker lost
+   * ({@link TERRAIN_NOT_AVAILABLE}) or the session's halt (R10.T16.e), for the view's label block's
+   * fault line after any graphics fault (decision-r10-t16-contracts §7), or `null`.
    */
-  readonly fault: typeof TERRAIN_NOT_AVAILABLE | null;
+  readonly fault: TerrainFault | null;
   /** Whether a selected patch it sees has no resident ancestor, and is not drawn. */
   readonly missing: boolean;
   /** Whether a selected patch it sees is drawn by a coarser resident ancestor. */
@@ -748,8 +751,13 @@ export class TerrainPass {
   #device: Device;
   #selected: Selected | null = null;
   #demandDirty = true;
-  /** Every height worker is lost: the pass asks for and draws nothing more. */
+  /**
+   * Every height worker is lost, or the session halted the pass ({@link TerrainPass.halt}): it asks
+   * for and draws nothing more.
+   */
   #faulted = false;
+  /** The cause its frames carry once faulted: the first one, which stands. */
+  #cause: TerrainFault = TERRAIN_NOT_AVAILABLE;
   #disposed = false;
 
   constructor(options: TerrainPassOptions) {
@@ -796,7 +804,10 @@ export class TerrainPass {
     return this.#device.gates.length === 0;
   }
 
-  /** Whether every height worker is lost (R10.T16.b's fault): nothing is asked or drawn now. */
+  /**
+   * Whether every height worker is lost (R10.T16.b's fault), or the session halted the pass
+   * (R10.T16.e's): nothing is asked or drawn now.
+   */
   get faulted(): boolean {
     return this.#faulted;
   }
@@ -975,6 +986,20 @@ export class TerrainPass {
   }
 
   /**
+   * Halts the pass for good (plan R10, R10.T16.e; decision-r10-t16-leans §8): its session's terrain
+   * computation kept failing, so, as when every height worker is lost, it asks for nothing more, its
+   * demand withdrawn and every block's cells told, and draws nothing, each view's frame carrying
+   * `cause`, its mask withheld ({@link TerrainPass.maskReadyFor}). Nothing for a pass already
+   * faulted, whose first cause stands, or disposed.
+   */
+  halt(cause: TerrainFault): void {
+    if (this.#disposed || this.#faulted) {
+      return;
+    }
+    this.#fault(cause);
+  }
+
+  /**
    * One step, once a frame, over the views that hand the body over: selection when due (once for
    * them all), the demand and the rebakes to the pool, the draw set and the cache's pins. A view
    * that left since the last step releases its own draw resources, and the others keep theirs.
@@ -1002,7 +1027,7 @@ export class TerrainPass {
     this.#leaveViews(stepViews);
     const device = this.#device;
     if (!this.#faulted && device.pool.unavailable === true) {
-      this.#fault();
+      this.#fault(TERRAIN_NOT_AVAILABLE);
     }
     if (this.#faulted) {
       return this.#faultedStep();
@@ -1052,7 +1077,7 @@ export class TerrainPass {
         draw: null,
         conditions: CLEAR,
         annunciation: null,
-        fault: this.#faulted ? TERRAIN_NOT_AVAILABLE : null,
+        fault: this.#faulted ? this.#cause : null,
         missing: false,
         standingIn: false,
         maskReady: false,
@@ -1312,9 +1337,13 @@ export class TerrainPass {
     });
   }
 
-  /** Every height worker is lost: no demand, no draw, and every block's cells told. */
-  #fault(): void {
+  /**
+   * Every height worker is lost, or the session halted the pass: no demand, no draw, and every
+   * block's cells told; its frames carry `cause`.
+   */
+  #fault(cause: TerrainFault): void {
     this.#faulted = true;
+    this.#cause = cause;
     const device = this.#device;
     device.pool.reprioritise([]);
     device.rebakes.clear();
