@@ -6,6 +6,7 @@ import {
   TERRAIN_SETTINGS,
   type TerrainSettings,
   terrainSettingsFor,
+  WIREFRAME_TERRAIN_SLOTS,
 } from "./qualitySetting";
 
 // One entry per field, so that a field added to `TerrainSettings` and missed here fails the typecheck.
@@ -48,6 +49,14 @@ describe("the quality settings", () => {
       vertexPath: "baked-offsets",
     });
     expect(SETTINGS.high.terrain.cacheBytes).toBeGreaterThan(SETTINGS.low.terrain.cacheBytes);
+  });
+
+  it("gives the high setting's cache 400,000,000 B, provisional until R10.T14.b", () => {
+    expect(SETTINGS.high.terrain.cacheBytes).toBe(400_000_000);
+  });
+
+  it("gives the wireframe's cache 520 slots on either setting, provisional until R10.T14.b", () => {
+    expect(WIREFRAME_TERRAIN_SLOTS).toBe(520);
   });
 
   it("holds the photorealistic view's internal scale in [0.5, 1.0] on both settings", () => {

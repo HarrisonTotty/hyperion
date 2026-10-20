@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 import { normalise, type Vec3, vec3 } from "../../geometry/vec3";
 import { goldenLevelTable, selectionOf, WGS84_FIGURE } from "../../test/terrainFixtures";
 import { lookAlong } from "../camera/quaternion";
+import { TERRAIN_SETTINGS, WIREFRAME_TERRAIN_TAU_PX } from "../quality/qualitySetting";
+import { recordProfile, SETTING_VIEWS } from "../spike/demandRecord";
+import { craftContacts } from "../spike/fixedStep";
+import { TEST_PLANET_FIGURE } from "../spike/testPlanetFigure";
 import {
   type CacheInsert,
   DrawSetResolver,
@@ -11,10 +15,18 @@ import {
   resolveDrawSet,
 } from "./cache";
 import { vertexDir } from "./cube";
+import { finestPatchSizeM } from "./grounded";
 import { childKeys, FACES, type PatchKey, patchKeyString, rootKey } from "./patchKey";
-import { planetGeometry, surfacePoint } from "./planet";
+import { levelHeightRangeM, planetGeometry, surfacePoint } from "./planet";
 import { type Selection, selectPatches } from "./select";
-import { PATCH_VERTICES_PER_SIDE, slotLayout } from "./slotLayout";
+import { selectionTolerancePx } from "./selectionTolerance";
+import {
+  PATCH_VERTICES_PER_SIDE,
+  type SlotLayout,
+  slotLayout,
+  terrainSlotLayout,
+} from "./slotLayout";
+import { wireframeTerrainSettings } from "./terrainWire";
 import type { BakedPatch } from "./workers/messages";
 
 /** A cache of `slots` slots of 100 B each. */
@@ -741,4 +753,165 @@ describe("selection and the cache over a low pass (the high-bound ruling's F3)",
     expect(second.evictions).toEqual(first.evictions);
     expect(second.bakes).toBe(first.bakes);
   });
+});
+
+/** R05's test planet with ridges off, under the descent's figure (`recordProfile`'s). */
+const DESCENT_PLANET = planetGeometry(TEST_PLANET_FIGURE, goldenLevelTable("off"));
+
+/** The descent's sampling rate for the replay, Hz. */
+const REPLAY_RATE_HZ = 4;
+
+/** What a replay of the descent found, frame by frame over the frames with a contact. */
+interface DescentReplay {
+  readonly frames: number;
+  /** The most forced patches one frame's selection held. */
+  readonly peakForced: number;
+  /** The most pins (`pressure()`'s forced and drawn) after one frame's bakes. */
+  readonly peakPins: number;
+  /** Frames whose pins exceeded the slots (`pressure().exceeded`). */
+  readonly exceededFrames: number;
+  /** Inserts of a forced patch the cache refused. */
+  readonly refusedForced: number;
+  /** Forced patches selected and not resident after their frame's bakes, over every frame. */
+  readonly forcedNotResident: number;
+}
+
+/**
+ * Replays R05's descent (`recordProfile()`) over the test planet through selection and a cache of
+ * `layout`, at {@link REPLAY_RATE_HZ}, on every frame where the craft has a contact
+ * (`craftContacts`): selected at τ_sel with half the slots as the budget, as the terrain pass
+ * selects, though without its motion margin, as `runFixedStep` selects; then the draw set, the
+ * retain and the bakes, as `runFixedStep` runs them, an ideal pool baking every request the frame
+ * it is made, each at its level's height range, the loosest bounds.
+ */
+function replayDescent(
+  layout: SlotLayout,
+  view: {
+    readonly fovXRad: number;
+    readonly widthPx: number;
+    readonly heightPx: number;
+    readonly tauPx: number;
+  },
+): DescentReplay {
+  const profile = recordProfile();
+  const patchSizeM = finestPatchSizeM(DESCENT_PLANET);
+  const cache = new PatchCache(layout);
+  const resolver = new DrawSetResolver(cache);
+  const endS = profile.segmentSpans().at(-1)?.endS ?? 0;
+  let frames = 0;
+  let peakForced = 0;
+  let peakPins = 0;
+  let exceededFrames = 0;
+  let refusedForced = 0;
+  let forcedNotResident = 0;
+  for (let step = 0; step <= endS * REPLAY_RATE_HZ; step += 1) {
+    const pose = profile.poseAt(step / REPLAY_RATE_HZ);
+    const grounded = craftContacts(pose, patchSizeM);
+    if (grounded.length === 0) {
+      continue;
+    }
+    const selection = selectPatches({
+      planet: DESCENT_PLANET,
+      views: [
+        {
+          camera: { positionM: pose.positionM, orientation: pose.orientation },
+          fovXRad: view.fovXRad,
+          viewport: { widthPx: view.widthPx, heightPx: view.heightPx },
+          weight: 1,
+          tauPx: selectionTolerancePx(view.tauPx),
+        },
+      ],
+      setting: "high",
+      grounded,
+      heightRanges: cache,
+      maxPatches: Math.floor(layout.slotCount / 2),
+    });
+    cache.retain(selection, resolver.resolve(selection));
+    for (const request of selection.demand) {
+      if (cache.has(patchKeyString(request.key))) {
+        continue;
+      }
+      const stored = cache.insert({
+        ...resident(request.key),
+        heightRangeM: levelHeightRangeM(DESCENT_PLANET, request.key.level),
+      });
+      refusedForced += stored.kind === "refused" && request.forced ? 1 : 0;
+    }
+    let forced = 0;
+    for (const [keyString, patch] of selection.patches) {
+      if (patch.forced) {
+        forced += 1;
+        forcedNotResident += cache.has(keyString) ? 0 : 1;
+      }
+    }
+    const pressure = cache.pressure();
+    frames += 1;
+    peakForced = Math.max(peakForced, forced);
+    peakPins = Math.max(peakPins, pressure.forced + pressure.drawn);
+    exceededFrames += pressure.exceeded ? 1 : 0;
+  }
+  return { frames, peakForced, peakPins, exceededFrames, refusedForced, forcedNotResident };
+}
+
+describe("the cache at its sizes over R05's descent (plan R10, R10.T14.a)", () => {
+  const [high, low] = SETTING_VIEWS;
+  if (high === undefined || low === undefined) {
+    throw new Error("SETTING_VIEWS holds the high and the low setting");
+  }
+  /** A case replayed once, as the suite is collected (about 1–2.3 s), for both tests below. */
+  function replayed(
+    name: string,
+    layout: SlotLayout,
+    view: Parameters<typeof replayDescent>[1],
+    record: Pick<DescentReplay, "frames" | "peakForced" | "peakPins" | "exceededFrames">,
+  ): {
+    readonly name: string;
+    readonly layout: SlotLayout;
+    readonly record: typeof record;
+    readonly replay: DescentReplay;
+  } {
+    return { name, layout, record, replay: replayDescent(layout, view) };
+  }
+
+  // `record` is T14.a's record in plan 10, the sizing rule's forced term and the pins; R10.T14.e,
+  // which tightens the boxes, moves it.
+  const REPLAYS = [
+    replayed("the low setting's lit", terrainSlotLayout(TERRAIN_SETTINGS.low, "lit"), low.view, {
+      frames: 723,
+      peakForced: 71,
+      peakPins: 422,
+      exceededFrames: 136,
+    }),
+    replayed("the high setting's lit", terrainSlotLayout(TERRAIN_SETTINGS.high, "lit"), high.view, {
+      frames: 723,
+      peakForced: 71,
+      peakPins: 884,
+      exceededFrames: 0,
+    }),
+    replayed(
+      "the wireframe's",
+      terrainSlotLayout(wireframeTerrainSettings("high"), "wire"),
+      { ...high.view, tauPx: WIREFRAME_TERRAIN_TAU_PX },
+      { frames: 723, peakForced: 71, peakPins: 520, exceededFrames: 4 },
+    ),
+  ];
+
+  it.each(REPLAYS)(
+    "keeps every forced patch under the craft resident in $name $layout.slotCount slots",
+    ({ replay }) => {
+      expect({
+        forced: replay.peakForced > 0,
+        refusedForced: replay.refusedForced,
+        forcedNotResident: replay.forcedNotResident,
+      }).toEqual({ forced: true, refusedForced: 0, forcedNotResident: 0 });
+    },
+  );
+
+  it.each(REPLAYS)(
+    "peaks at the record's forced patches and pins in $name $layout.slotCount slots",
+    ({ replay, record }) => {
+      const { frames, peakForced, peakPins, exceededFrames } = replay;
+      expect({ frames, peakForced, peakPins, exceededFrames }).toEqual(record);
+    },
+  );
 });
