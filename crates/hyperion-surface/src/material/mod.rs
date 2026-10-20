@@ -43,7 +43,10 @@
 //! there ([`crater_maturity`]), at its fresh share of the crater's wear, its excavated share
 //! ([`excavated_share`], [`reworked_depth`], [`EXCAVATION_DEPTH_RATIO`],
 //! [`REWORKING_DEPTH_AT_ONE_MYR`], [`REWORKING_EXPONENT`]) and its halo ([`halo_share`],
-//! [`HALO_LENGTH_RIM_RADII`], [`HALO_EXTENT_RIM_RADII`]).
+//! [`HALO_LENGTH_RIM_RADII`], [`HALO_EXTENT_RIM_RADII`]). So that a body drawn at each point's
+//! maturity keeps its p, the server solves its scale ([`haloed_albedo_scale`]) over the body's
+//! maturity mix ([`maturity_mix`], [`MaturityMix`], [`MaturityNode`]), the distribution of its
+//! young craters' deficits in closed form, through the inverse halo ([`halo_reach`]).
 //!
 //! Nothing here draws from a stream, so the module opens no domain tag.
 
@@ -60,8 +63,8 @@ mod weights;
 
 pub use albedo::{
     ALBEDO_SCALE_FLOOR, AlbedoScale, BuildClassFractionsError, ClassFractions,
-    SolveAlbedoScaleError, albedo_scale, class_fractions, exposed_albedo_scale, scale_range,
-    scaled_normal_albedo,
+    SolveAlbedoScaleError, albedo_scale, class_fractions, exposed_albedo_scale,
+    haloed_albedo_scale, scale_range, scaled_normal_albedo,
 };
 pub use bearing::{
     BearingFactors, bearing_capacity, bearing_capacity_on_slope, ultimate_bearing_capacity,
@@ -74,7 +77,7 @@ pub use classify::{GroundMaterial, MASSIVE_ICE_SHARE, THIN_ATMOSPHERE_PRESSURE, 
 // (`modifiers_nothing_on_the_record_reads_the_modifiers_yet`) allows the time law's names outside
 // `material/maturity.rs` on this module's one re-export line of that module alone.
 #[rustfmt::skip]
-pub use maturity::{EXCAVATION_DEPTH_RATIO, GroundExposure, HALO_EXTENT_RIM_RADII, HALO_LENGTH_RIM_RADII, LUNAR_MATURATION_TIME, REWORKING_DEPTH_AT_ONE_MYR, REWORKING_EXPONENT, body_maturity, crater_maturity, excavated_share, exposed_properties, halo_share, maturity_after, maturity_at, reworked_depth, takes_organic_cover};
+pub use maturity::{EXCAVATION_DEPTH_RATIO, GroundExposure, HALO_EXTENT_RIM_RADII, HALO_LENGTH_RIM_RADII, LUNAR_MATURATION_TIME, MaturityMix, MaturityNode, REWORKING_DEPTH_AT_ONE_MYR, REWORKING_EXPONENT, body_maturity, crater_maturity, excavated_share, exposed_properties, halo_reach, halo_share, maturity_after, maturity_at, maturity_mix, reworked_depth, takes_organic_cover};
 pub use properties::{
     AlbedoSpan, BRIGHT_FROST_LIMB_PARAMETER, BRIGHT_FROST_NORMAL_ALBEDO, Citation, Figure, FormRow,
     FrictionModel, LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO, LUNAR_LIMB_ONSET_NORMAL_ALBEDO,

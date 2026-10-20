@@ -233,6 +233,16 @@ fn level_five_field_flowing(flow: FlowDirection) -> CoarseField {
 
 /// [`level_five_field_flowing`] of the body `body`.
 fn level_five_field_of(body: BodyRef, flow: FlowDirection) -> CoarseField {
+    level_five_field_weathered(body, flow, None)
+}
+
+/// [`level_five_field_of`] with its ground's space-weathering maturity `maturity` at the Moon's
+/// rate, or neither.
+fn level_five_field_weathered(
+    body: BodyRef,
+    flow: FlowDirection,
+    maturity: Option<f64>,
+) -> CoarseField {
     let radius = 4.697e5;
     let craters = CraterParams::new(CraterParamsParts {
         n_1km: PerSquareKilometre::ZERO,
@@ -272,9 +282,9 @@ fn level_five_field_of(body: BodyRef, flow: FlowDirection) -> CoarseField {
         palette: MaterialPalette::default(),
         crust_palette: [None; 4],
         main_liquid: None,
-        maturity: None,
+        maturity,
         organic_cover: None,
-        weathering_rate: None,
+        weathering_rate: maturity.map(|_| 1.0),
     })
     .unwrap();
     let cell = SynthesisCell {
@@ -1274,11 +1284,14 @@ mod material {
 /// P14.T51.d's space-weathering maturity law and R10.T1.c's exposure, one-crater formula,
 /// excavated share and halo: their inputs out of range are refused.
 mod maturity {
+    use hyperion_base::rng::DetailSeed;
     use hyperion_base::units::{Gigayears, Metres};
+    use hyperion_surface::field::{CoarseField, FieldView};
     use hyperion_surface::material::{
-        GroundExposure, crater_maturity, excavated_share, halo_share, maturity_after,
-        reworked_depth,
+        GroundExposure, class_fractions, crater_maturity, excavated_share, halo_reach, halo_share,
+        haloed_albedo_scale, maturity_after, maturity_mix, reworked_depth,
     };
+    use hyperion_surface::synth::{SynthCache, Synthesiser};
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
 
@@ -1412,6 +1425,93 @@ mod maturity {
     #[should_panic(expected = "a weathering rate must be finite and non-negative")]
     fn the_maturity_refuses_an_infinite_rate() {
         let _ = maturity_after(Gigayears::new(1.0), f64::INFINITY);
+    }
+
+    #[test]
+    #[should_panic(expected = "a halo's share must be in (0, 1]")]
+    fn the_inverse_halo_refuses_a_share_of_zero() {
+        let _ = halo_reach(0.0, 10.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a halo's share must be in (0, 1]")]
+    fn the_inverse_halo_refuses_a_share_above_one() {
+        let _ = halo_reach(1.0 + 1e-12, 10.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a halo's share must be in (0, 1]")]
+    fn the_inverse_halo_refuses_a_nan_share() {
+        let _ = halo_reach(f64::NAN, 10.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a halo must end finite and at or beyond the rim")]
+    fn the_inverse_halo_refuses_an_end_inside_the_rim() {
+        let _ = halo_reach(0.5, 0.9);
+    }
+
+    #[test]
+    #[should_panic(expected = "a halo must end finite and at or beyond the rim")]
+    fn the_inverse_halo_refuses_an_infinite_end() {
+        let _ = halo_reach(0.5, f64::INFINITY);
+    }
+
+    /// The level-5 field weathered at maturity 0.5, with no crater: its mix is one node.
+    fn weathered_field() -> CoarseField {
+        super::level_five_field_weathered(
+            super::BodyRef::new(1, 2),
+            super::FlowDirection::Terminal,
+            Some(0.5),
+        )
+    }
+
+    #[test]
+    #[should_panic(expected = "a maturity mix of m_body 0.5 is solved at its own maturity")]
+    fn the_haloed_solve_refuses_a_mix_of_another_maturity() {
+        let field = weathered_field();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let mix = maturity_mix(&synth).expect("the field carries a maturity");
+        let fractions = class_fractions(&synth, &mut SynthCache::new()).unwrap();
+        let _ = haloed_albedo_scale(
+            &fractions,
+            field.header().palette(),
+            GroundExposure::NONE.with_maturity(0.4),
+            &mix,
+            [0.1, 0.12, 0.14],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "a maturity mix of m_body 0.5 is solved at its own maturity")]
+    fn the_haloed_solve_refuses_an_exposure_of_no_maturity() {
+        let field = weathered_field();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let mix = maturity_mix(&synth).expect("the field carries a maturity");
+        let fractions = class_fractions(&synth, &mut SynthCache::new()).unwrap();
+        let _ = haloed_albedo_scale(
+            &fractions,
+            field.header().palette(),
+            GroundExposure::NONE,
+            &mix,
+            [0.1, 0.12, 0.14],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "a deficit must be non-negative")]
+    fn the_mix_refuses_a_negative_deficit() {
+        let field = weathered_field();
+        let mix = maturity_mix(&Synthesiser::new(&field, DetailSeed::new(1))).unwrap();
+        let _ = mix.share_above(-1e-9);
+    }
+
+    #[test]
+    #[should_panic(expected = "a deficit must be non-negative")]
+    fn the_mix_refuses_a_nan_deficit() {
+        let field = weathered_field();
+        let mix = maturity_mix(&Synthesiser::new(&field, DetailSeed::new(1))).unwrap();
+        let _ = mix.share_above(f64::NAN);
     }
 }
 

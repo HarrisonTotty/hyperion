@@ -216,6 +216,20 @@ pub fn reworked_depth(exposure: Gigayears) -> Metres;
 pub fn halo_share(distance: f64, outer: f64) -> f64;
 // HALO_LENGTH_RIM_RADII 3, HALO_EXTENT_RIM_RADII 10, EXCAVATION_DEPTH_RATIO 0.084,
 // REWORKING_DEPTH_AT_ONE_MYR 0.022 m, REWORKING_EXPONENT 0.45
+/// The inverse halo (the halo follow-up): x* where the fresh share falls to s, by `ln_1p`.
+pub fn halo_reach(share: f64, outer: f64) -> f64;
+/// A body's maturity mix: nodes in falling maturity from m_body, their weights summing to 1.
+pub struct MaturityMix { /* nodes: Vec<MaturityNode>, the deficit law F */ }
+// body, nodes, share_above
+pub struct MaturityNode { /* maturity: f64, weight: f64 */ }             // maturity, weight
+/// The mix in closed form, F_c exp(−Λ_s) cut at 52 nodes; `None` without a maturity and a rate.
+pub fn maturity_mix(synth: &Synthesiser<'_, CoarseField>) -> Option<MaturityMix>;
+/// The solve over the mix, each material one term a node; the halo-free solve where none moves.
+pub fn haloed_albedo_scale(fractions: &ClassFractions, palette: &MaterialPalette,
+    exposure: GroundExposure, mix: &MaturityMix, geometric_albedo_bvr: [f64; 3])
+    -> Result<AlbedoScale, SolveAlbedoScaleError>;
+// AlbedoScale::halo_excess_v(): the mean V excess the haloes add at the solved scale (0 without
+// a mix)
 ```
 
 ### `ground` and `reading`
@@ -1340,9 +1354,12 @@ that own them measure them.
   - _The split:_
     - this Rust half now, landing before P14.T54.b (if it does not, T54.b leaves the maturity and
       the rate absent);
-    - a second Rust follow-up, in which the solve takes each material's albedo averaged over the
-      body's young-crater haloes, so that the drawn mean stays p (generator-versioned: at 24 if
-      ready, else the next bump);
+    - a second Rust follow-up (decision-r10-t1c-halo), in which the solve takes each material's
+      albedo averaged over the body's young-crater haloes, so that the drawn mean stays p: the
+      body's maturity mix, P(D ≤ d) = F_c(d) exp(−Λ_s(d)) over its small craters' octaves (a
+      Poisson field under the largest-deficit rule) and its coarse craters' list, cut at 52
+      maturity nodes with each bin's mean deficit kept, each material one term a node in the
+      exact piecewise-linear solve (generator-versioned: at 24 if ready, else the next bump);
     - a client half after R10.T16 and with or after that follow-up, which bakes a per-texel
       maturity with the same function and blends between Rust-computed albedos
       (`bake/layers.rs`, `worker.rs`, `wasm.rs`, `heightBake.ts`, `terrainMaterial.ts`,
@@ -1369,6 +1386,15 @@ that own them measure them.
   - _Accept:_ `cargo test -p hyperion-surface material::maturity`;
     `cargo test -p hyperion-surface --lib material::golden`;
     `cargo test -p hyperion-surface --test panics maturity`;
+    `cargo test -p hyperion-server albedo_scale`; `just test-wasm-fast`.
+  - _The halo follow-up:_ files `material/{maturity,albedo,mod,golden}.rs`,
+    `material/albedo/tests.rs`, `tests/golden/material/halo.golden`, `tests/panics.rs` and
+    `crates/hyperion-server/src/surface/service.rs`. Tests: the inverse halo; the mix's shape;
+    the identity to the bit; one coarse crater's closed form; convergence; the haloed scale below
+    the halo-free one; the brute force over 10⁴ points (the stated excess within max(10%, 0.2%) of
+    the drawn one, the drawn mean within 1% of p, the shares); the server's solve; the golden on
+    native and both wasm targets. Accept: `cargo test -p hyperion-surface material::maturity`,
+    `--lib material::albedo`, `--lib material::golden`, `--test panics maturity`;
     `cargo test -p hyperion-server albedo_scale`; `just test-wasm-fast`.
 
 ### R10.T2 Class weights for coarser levels
@@ -4579,12 +4605,14 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   11. The OMAT excess stands in for the fresh share.
   12. Kepler's age is a weak, morphological upper bound, and Proclus has none.
   13. The haloes in the solve: ruled for a second Rust follow-up before or with the client half;
-      the mean V excess measured here (above) sizes it.
+      the mean V excess measured here (above) sizes it (resolved: the halo follow-up;
+      decision-r10-t1c-halo).
   14. λ = 3.0 R is the ruling's value, but the science check's fits of the model to North Ray's
       four quoted points give 2.34 R (linear), 2.45 R (shifted to 0 at 10 R, the code's form) and
       2.72 R (log space), and to North Ray's and South Ray's whole profiles 2.3–2.8 R; only a
       log-space fit with a free rim amplitude, which puts the rim at 0.75–0.80, gives about 3.1.
-      Kept; a change moves only `maturity.golden`, the point maturity being presentation.
+      Kept; a change moves only `maturity.golden`, the point maturity being presentation
+      (resolved: the halo follow-up; decision-r10-t1c-halo).
   15. The ruling's Fig. 3 ranges are North Ray's alone; South Ray's are 0.68, 0.24, 0.13 and 0.08
       at 2, 4, 6 and 8 R.
   16. Tycho's 1.34 is region D3's, a 65″ (about 121 km) average wider than the crater; B42's
@@ -4598,6 +4626,121 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
       cache, about 0.9 s a 65 × 65 patch, so a per-texel bake through `maturity_at` alone is far
       over the brainstorm's 40 ms a patch; the client half wants a per-patch gather of the craters
       whose haloes reach the patch, evaluated per texel, or a coarser maturity grid.
+- **Deviations in T1.c's halo follow-up, as built** (2026-10-20; issue lane 51, on
+  `origin/rendering-and-planets` at `8f307d16`, before R09.T7.j landed, so a small crater's wear g
+  stays `relief_factor(R, diffusion_length(t))`; decision-r10-t1c-halo). Pure at 22: no header
+  outside the `testing` builder carries a maturity, so the server's `maturity_mix` is `None` for
+  every generated body and every scale is as it was; the golden-diff script shows only
+  `tests/golden/material/halo.golden` new, and `GENERATOR_VERSION` stays 22.
+  - _Files beyond the list:_ none beyond the plan.
+  - _Public items_ (`hyperion_surface::material`): `halo_reach` (the inverse halo, by `ln_1p`),
+    `MaturityMix` (`body`, `nodes`, `share_above`, the share above a deficit, 1 − F(d)),
+    `MaturityNode` (`maturity`, `weight`), `maturity_mix(synth: &Synthesiser<'_, CoarseField>)`,
+    `haloed_albedo_scale` and `AlbedoScale::halo_excess_v`, 0 from `exposed_albedo_scale` and
+    `albedo_scale`. Private: R3's one wear helper, `small_crater_wear(rim_radius, age)`, which
+    `maturity_at` and the mix both call (`maturity.golden` unchanged to the bit), and the test
+    schemes (`MixScheme`: the diameter rule, the age panels' and the bins' splits).
+  - _Deviations:_
+    - A bin's share towards its upper edge is computed as (P + 4 (F(b) − F(m))) ÷ 6P, which is
+      R1's d̄ = (b F(b) − a F(a) − ∫ F) ÷ P with Simpson's rule substituted, exactly; the literal
+      form cancels digits where F is near 1 and P small. For an F that never falls the share lies
+      in [1/6, 5/6], so the clamp guards only rounding.
+    - A, the body's area, is its cells' `cell_area` summed in index order, as `class_fractions`
+      weights the materials, and is computed only where a coarse crater leaves a deficit: about
+      30 ms on a level-6 field, half the mix's cost on the Moon-like worlds; the spheroid's closed
+      form would be cheaper.
+    - The window density is `lunar_chronology(window, A)`, as the brief has it: the octave's own
+      to the bit where it is not capped, and to `chronology_age`'s bisection where it is; kept is
+      `density()` ÷ `drawn_density()`, the octave's private share to rounding.
+    - The bit identities (the mix's `m_body` against the exposure's, a material's albedo at the
+      least node against `m_body`'s) compare by `total_cmp`, since the crate's `clippy.toml` bans
+      `f64::to_bits` outside the testkit. `haloed_albedo_scale` refuses an exposure of no maturity
+      as it refuses one of another, and `share_above` a negative or NaN deficit (`tests/panics.rs`).
+    - `MaturityMix` keeps its law, each octave's (δ₀, weight) nodes (19.9–24.3 thousand on the
+      Moon-like worlds) and the coarse list's, so that `share_above` answers at any deficit; it is
+      dropped after the solve.
+    - The golden pins `halo_reach` on a grid of shares and ends too. The solve's test and the
+      golden share one computation per world, so the browser's lib binary pays the five worlds'
+      class fractions once (about 3 s natively).
+    - The convergence test's reference is 4,080 bins, each of the 51 split into 80, since 51 does
+      not divide 4,096; its excess is compared at the haloed scale, Σ a Σ w G ÷ Σ a G(m_body) − 1,
+      rather than through a solve of its own, whose 4,081 nodes a material make the solve's knot
+      sweep quadratic in the terms.
+    - Test 4's "each material" is every form of the one basalt entry at c = 1;
+      `material/albedo/tests.rs` adds the haloed solve against its mix's terms summed by hand, the
+      model in V to 10⁻¹² and the stated excess to 10⁻⁹; `maturity_mix_scheme_has_the_ruled_nodes`
+      pins the 192 age nodes and the 52 edges, and their splits; and
+      `maturity_mix_is_the_same_twice_and_under_any_seed` holds the mix to the bit twice and under
+      another detail seed, on all three targets (the review's). The server's cratered test field
+      is a 300 km body at the lunar contract's N(>1 km) of 8.4 × 10⁻⁴ per km² on a 1 Gyr surface.
+    - `MaturityNode` has no `Default`: a mix holds no node of zero weight.
+
+  - _Acceptance, as built:_ the plan's commands, each `cargo test -p hyperion-surface` with
+    `material::maturity`, `--lib material::albedo`, `--lib material::golden` or
+    `--test panics maturity`, and `cargo test -p hyperion-server albedo_scale`; the slow
+    `cargo test -p hyperion-surface --lib material::maturity -- --ignored maturity_immature`, whose
+    two filters run every ignored test of the module (the brute force, the convergence and the two
+    timings, 187 s); the sim's `cargo test -p hyperion-sim --lib modifiers_nothing_on_the_record`,
+    whose one allowed `pub use maturity::{…};` line this change extends; and `just test-wasm-fast`.
+
+  - _The closed form against the drawn ground_ (the slow test, 10⁴ points uniform in area, maturity
+    1 and k = 1, p = 0.10, 0.12 and 0.14; each world's mix of 50 nodes): the share above 0.05, 0.2
+    and 0.5, the mix's against the sampled; the stated excess against the drawn one; the drawn mean
+    Σ G(m_local) ÷ N over p at the haloed and the halo-free scales; the halo-free and haloed scales:
+    - 4.4 Gyr: 3.79/0.722/0.088% against 3.97/0.71/0.13%; 0.405% against 0.442%; 0.9987 and
+      1.0027; 1.300850 and 1.295607;
+    - 3.5 Gyr: 52.98/13.27/1.72% against 53.87/12.53/1.64%; 5.297% against 5.238%; 0.9977 and
+      1.0503; 1.300850 and 1.235411;
+    - 1 Gyr: 56.37/14.83/2.03% against 56.09/14.39/2.15%; 5.766% against 5.749%; 0.9981 and
+      1.0552; 1.300850 and 1.229932;
+    - 0.1 Gyr (N(>1 km) 8.4 × 10⁻⁵): 43.35/12.93/2.23% against 43.28/11.76/2.00%; 4.933% against
+      4.652%; 0.9956 and 1.0442; 1.300850 and 1.239695;
+    - the young single crater on basalt (39 nodes, not sampled): 0.915/0.621/0.255%; 0.0899%;
+      2.256637 and 2.254611. Its closed form holds 1 − F to π (R x*)² ÷ A within 10⁻¹², and each
+      form's excess over the mix at c = 1, 8.987 × 10⁻⁴, against the direct radial integral's
+      8.992 × 10⁻⁴ (−0.06%).
+
+    Main's replica gave 3.79/0.72/0.09%, 53.0/13.3/1.72% and 56.4/14.8/2.03%, and mean excesses of
+    0.44%, 5.24% and 5.71% (its 94.5 : 5.5 mixture) and 5.14% (0.1 Gyr, highland). Every bound of
+    the slow test held. At 0.1 Gyr the stated excess is 0.28 points (6%) above the drawn one, the
+    share above 0.2 10% (3.6 standard errors) above the sampled, and the haloed drawn mean 0.44%
+    under p: inside the bounds, but beyond main's shot-noise estimate, which is the 1–3.5 Gyr
+    rows'; it stays with deferred finding 2.
+
+  - _Convergence_ (the slow test; the largest change of the stated excess and the three shares on
+    the four Moon-like worlds): 16 diameter nodes 0.62% (4.4 Gyr, above 0.5; 0.20% or less
+    elsewhere); the age panels split 0.44% (4.4 Gyr, above 0.5); the bins split 0.05–0.09% of the
+    excess, the shares unmoved; R1's nodes against the 4,080-bin reference +0.07% to +0.11% of the
+    excess.
+  - _The cost_ (the measurement test, native at the dev profile's opt-level 2 on the 8-thread
+    laptop, its 1-minute load 3.4–4.5 from another lane's data reductions, so provisional, each the
+    best of three): `maturity_mix` 62, 69, 73 and 79 ms on the 4.4, 3.5, 1 and 0.1 Gyr worlds
+    (14–16 octaves) and 30 ms on the single crater's (its area sum), `haloed_albedo_scale` 0.26 ms,
+    beside `class_fractions`' 690, 685, 643, 627 and 320 ms.
+  - _λ's basis_ (R2, docs only): λ = 3.0 R keeps the halo's area moment ∫₁¹⁰ e 2x dx, 15.98 in the
+    model, within 7% of North Ray's and South Ray's measured 15.5–17.1 over both backgrounds (the
+    ruling's "within 6%" is 6.5% at 17.1, this lane's science check), the moment's own fits giving
+    2.90–3.25 R; least squares on e (2.42–2.63 R) and on ln e (3.35–3.86 R) are labelled
+    alternatives. `HALO_LENGTH_RIM_RADII`'s doc and the module's halo bullet say so, with main's
+    re-reading of Fig. 3; no value moves.
+  - _Deferred findings (2026-10-13 rule)_, each leaving the algorithm and the contracts as built:
+    1. The mix leaves out the material–crater correlation (crater interiors' `Bedrock`, a young
+       coarse crater's own terrain).
+    2. The realised small craters' shot noise about the expectation, main's estimate at most
+       0.15–0.26% of p, is left out.
+    3. The coarse haloes are combined as non-overlapping.
+    4. The area within a chord is taken as π c² on the spheroid.
+    5. The single exponential's shape misses the measured share by up to 0.10 at 2–8 R, and the
+       10 R extent drops the 10–15 R tail (the science check reads Fig. 3 to 16 R).
+    6. Grier et al. 2001 (large rayed craters) is unread, so a size-dependent halo waits.
+    7. p from the sim's area mix leaves out a real body's haloes (plan 14's question).
+    8. For the client half: a texel's albedo must be the mean of W(m_local) over its points, never
+       W of a mean maturity, since W is convex in m and a disc drawn from mean maturities would be
+       darker than p.
+    9. Grier et al. 2000's abstract does not name Clementine, which the module's halo bullet does
+       (the Rust half's text); Lucey et al.'s OMAT papers are the source to cite for it.
+    10. The browser target's lib binary runs about 555 s of its 600 s on the laptop; the halo
+        golden's five worlds add some seconds to it.
 - **Deviations in T5, as built** (2026-10-13; lane r10-readings, begun on R09.T8 and R10.T3 at
   `627e9b35` and finished on R09.T9 and R10.T1.a at `4474e781`; the findings and the interface
   ruled in `decision-r10-t5-closed-forms.md`).
