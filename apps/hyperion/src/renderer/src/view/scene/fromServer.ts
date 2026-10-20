@@ -182,6 +182,32 @@ function viewKind(body: SystemBody): ViewBodyKind | null {
   return kind;
 }
 
+/**
+ * Whether a served body has no solid surface for a view's survey line to speak of (plan R10,
+ * R10.T12): its bulk section's class an envelope's, a sub-Neptune, an ice giant or a gas giant
+ * (plan 14's `PlanetClass`), which is the gas-envelope state, whose record's `surface` section is
+ * `not_applicable` and whose field the server refuses (P14.T35.e); a body whose bulk is not sent is
+ * taken to have one, as its survey's state then says.
+ */
+function surfaceless(body: SystemBody): boolean {
+  if (body.bulk.state !== "ok") {
+    return false;
+  }
+  let none: boolean;
+  switch (body.bulk.value.planetClass) {
+    case "sub_neptune":
+    case "ice_giant":
+    case "gas_giant":
+      none = true;
+      break;
+    case "rocky":
+    case "icy":
+      none = false;
+      break;
+  }
+  return none;
+}
+
 /** A body's own symbol from the ship-wide set: a giant's larger triangle, a dwarf's smaller one. */
 function symbolOf(body: SystemBody, kind: ViewBodyKind): BodyMarkSymbol {
   return bodySymbol(body) ?? bodyKindSymbol(kind);
@@ -430,6 +456,8 @@ export function viewSceneFromServer(
       appearance,
       orbitNormal: record.orbit.state === "ok" ? orbitNormal(record.orbit.value.orbit) : null,
       symbol: symbolOf(record, kind),
+      // A giant's or a sub-Neptune's FRAME states no survey line (R10.T12).
+      ...(surfaceless(record) ? { surfaceless: true as const } : {}),
     });
   }
   const drawn = new Set<string>(bodies.map((body) => body.id));

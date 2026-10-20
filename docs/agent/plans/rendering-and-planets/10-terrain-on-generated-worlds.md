@@ -10574,11 +10574,10 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     the screen-space marks when `DrawOptions.lineOfSight` has a point, beneath the reticles and over
     the survey edge; it gives way at 0.5 rem and returns at 0.75 rem, centreline to centreline, to
     symbol-sized body symbols, a craft's ticks and the flight path marker, and the drawer keeps the
-    give-way per view. The open centre counts the casing, so at a device-pixel ratio of 1 the ticks
-    start 4.21 px out from 80% to 125% (reaching 0.58, 0.51 and 0.46 rem), in place of the plan's
-    by-hand fallback of 0.25 rem; the guide's prose ("they start further out, keeping their
-    length") covers it, and its figures stand. The edge's ticks keep 0.5 rem clear only where the
-    tripod is drawn, and mark labels keep off its box.
+    give-way per view. The open centre is the coloured stroke's, as Layout's hole is; the casings
+    may meet over the point (decision-r10-t12-commit3 §3), so the ticks start 0.1875 rem plus δ at
+    every ratio in use, the guard never binding (0.08 px to spare at 0.78125 and 80%). The edge's
+    ticks keep 0.5 rem clear only where the tripod is drawn, and mark labels keep off its box.
   - _The descent spike._ `SITE ELEVATION` in `ELEVATION`'s form, with its row (signoff-9 (k)
     part 2).
   - _The guide._ §12's survey-line texts with G6 in place of their second sub-bullet, and G1–G5
@@ -10606,7 +10605,8 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
   - _By hand, hidden._ `just views-check --hidden --smoke --terrain` on the RTX 3080, both
     settings, exit 0, with R10.T16.e's "No terrain fault" passing. The §12 looks
     (decision-r10-view-block-room) are the label-block commit's.
-- **Left for T12's label-block commit (on R10.T12.b; decision-r10-view-block-room §3–§4, §12)**:
+- **Left for T12's label-block commit (on R10.T12.b; decision-r10-view-block-room §3–§4, §12)**
+  (_built by commit 3, below_):
   - the lower plate's groups through R10.T12.b's interface (`LowerPlatePart`: `survey`, `state`,
     `datum`, `readout`, each with its tallest form; the plate's own yield lines), the tripod and the
     `GROUND AT LINE OF SIGHT` note only while the readout stands there;
@@ -10638,14 +10638,20 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
      reach Vesić 1975 or EM 1110-1-1905); the slope ruling read them.
 - **Leans for commit 3's rulings** (main rules them with its §12 look):
   1. In `CHASE` the tripod stands over the own ship's hull at the centre: the give-way list names
-     no hull outline. Lean: a hull outline within 0.5 rem also makes it give way.
+     no hull outline. Lean: a hull outline within 0.5 rem also makes it give way. _Ruled
+     (decision-r10-t12-commit3 §1), amended: a craft's hull nearer than the point gives way by its
+     outline, clipped at the near plane, or by its opaque faces over the point, so `CHASE` draws no
+     tripod; the note stands._
   2. The `GROUND AT LINE OF SIGHT` row's "Stated while …" is broader than "Views" (main has queued
-     "while its terrain readout stands (see "Views")" for the docs batch).
+     "while its terrain readout stands (see "Views")" for the docs batch). _Ruled
+     (decision-r10-t12-commit3 §2): C3, applied in commit 3._
   3. The casing counting for the open centre (above). Lean: it counts; the look at a ratio of 1
-     confirms it.
+     confirms it. _Ruled (decision-r10-t12-commit3 §3), differs: the casing does not count; the
+     ticks start 0.1875 rem plus δ._
   4. At a ratio of 1 and 80%, the upper ticks' ends come about 1.8 px from the selection bracket's
      arms about a size-class-1 body at the centre, the bracket's casing cutting their tips. Lean:
-     acceptable under the draw order; for the look.
+     acceptable under the draw order; for the look. _Ruled (decision-r10-t12-commit3 §4): settled
+     by 3, the ends 3.13 px from the arms; the look checks it._
 - **`VIEW`'s room, ruled (decision-r10-view-block-room).** The floor is 80 × 45 rem (1280 × 720 at
   100%, 1920 × 1080 at 150%); a 1280 × 720 window at 125% or 150% is below it. Stated limits: at
   the floor beside an open instrument the primary holds back its terrain lines and, in `CHASE`,
@@ -10826,3 +10832,221 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
     (decision-r10-view-block-room, "Seen" item 1).
   - _The compact column at 1280 × 720 at 125%_ clips 3 to 33 px at its foot (below the floor, as
     G-B allows); a selector that holds one row, or a tighter fold, is R07's (Seen items 4 and 5).
+- **Deviations in T12's label-block commit (commit 3), as built** (2026-10-20; lane r10-readouts-3,
+  branch `r10-readouts-3`, on `rendering-and-planets` at `bd185668`, R10.T12.b's `27f8af0b`
+  beneath; decision-r10-t12-commit3, decision-r10-view-block-room §3, §4 and §12,
+  decision-r10-t12-leans §3 to §7, decision-r10-t16-leans §12).
+  - _Files._ Beyond the entry's list, all under `apps/hyperion/src/renderer/src/`:
+    `displays/view/groundReadout.ts` (`GroundReadouts`, the primary's readout asked at each
+    publish; `groundBodyOf`, `surfaceUnsetOf`, `readoutBodyOf`, `litTimeOf`, `lineOfSightPointOf`,
+    `GROUND_READOUT_OPTIONS`), `displays/view/useTerrainLines.ts` (the lines and their units'
+    hysteresis; `standingReadout`), `displays/view/terrainPlate.tsx` (`terrainLowerParts`, the
+    lower plate's parts), `view/terrain/TerrainReading.tsx` and `TerrainStatus.tsx` beside the
+    entry's `SurveyLine.tsx` and `TerrainReadout.tsx`; `view/terrain/failureGuard.ts`
+    (`succeeded`, `failed`); `view/terrain/session.ts` (`TerrainViewReport.readoutBody`,
+    `TerrainSession.terrainFault`, the fault's views; `hullBoundingRadiusM` moved to
+    `view/wireframe/hulls.ts`, with `hullOnView`); `view/wireframe/symbology.ts` (`HullOnView`,
+    the stroke-only open centre); `view/wireframe/drawList.ts` (`LineOfSightPoint` with the point's
+    range); `displays/view/viewFrameDrawer.ts`; `view/scene/model.ts` (`ViewBody.surfaceless`) with
+    `view/scenes/eclipseScene.ts`'s and `phaseScene.ts`'s giants and `view/scene/fromServer.ts`'s
+    gas-envelope bodies; `lib/scene/lightTime.ts` (`spanFromSeconds` exported); `styles.css`; and
+    `displays/view/ViewDisplay.tsx` (`ViewStage`'s `lowerParts` from `terrainLowerParts`, the loop's
+    `GroundReadouts` at each publish, the primary's report's `readoutBody`,
+    `LoopInputs.lineOfSightPoint` from the committed render, the list's `groundNote`). The entry's
+    `displays/view/viewRun.ts` and `ViewLabelBlock.tsx` are untouched: T12's lines stand on
+    R10.T12.b's lower plate (decision-r10-view-block-room §3 and §4), and `frameBody` came with the
+    back end.
+  - _The ask (decision-r10-t12-leans §3, §6 (c), §7)._ The primary alone, at the loop's publish
+    (4 Hz, on a frame the 30 Hz instruments draw in too): the `FRAME` body (`frameBody` of the
+    camera's frame, as the back end defined it) where it has a surface (`isLitBody`, not
+    `surfaceless`); its survey; `lineOfSightOf` along `runPose`; `TerrainSession.groundReadout` at
+    the scene's time less the body's `retarded.lightTimeS` (the scene's time where that is 0 or not
+    known), `SLOPE` over 2 m and the 1.0 m pad. One query in flight; a publish while one is out
+    asks nothing, the next asks afresh. The answer is taken at the next publish, and dropped for a
+    session let go or a body no longer framed; a `null` answer (no seed or field yet, no worker
+    left) leaves no readout. Nothing is asked, and what is held is let go, while no header is held,
+    the body is not modelled, or the session's terrain fault stands, so that the readout returns
+    with a first answer of its own, as a cut. The lane's choice: the readout is asked while the
+    plate's readout gives way for room too, so that it stands at once when the room returns.
+  - _No line of sight (the lane's choice; accepted by main)._ Where `lineOfSightOf` gives none (the body's
+    rotation not known, or the camera past the binding's 10¹² m), nothing is asked, and no `DATUM`,
+    readout, tripod or note stands; the survey line stands, and the upper plate's
+    `ROTATION: NOT YET MODELLED` states the rotation's gap.
+  - _No session._ With no terrain session (the engine not yet ready, or a server scene with no
+    universe), a served body states no terrain lines, as before T12; a kept scene's body with no
+    terrain reads `TERRAIN: NOT YET MODELLED` with or without one (below).
+  - _The guard (§5)._ The answers' outcomes go through `TerrainFailureGuard`'s new `succeeded` and
+    `failed`, taken at the publish with its frame's time, so that a run's onset is counted in the
+    loop's time, as the step's and the edges' are; the ask's own work has a guard of its own. A
+    refusal changes nothing; refusals for 250 ms fault the terrain (`failComputation`), said once
+    (`the terrain readout's query failed:`).
+  - _The lines._ `terrainLabelModel` in `useTerrainLines`, its units kept from publish to publish
+    and started afresh when the `FRAME` body changes; the readout stands only while no terrain
+    fault stands, the view's own or the session's (`TerrainSession.terrainFault`, beside the
+    view's fault lines: decision-r10-t12-commit3 §6). The parts (R10.T12.b's interface): the survey
+    line or a state in its place (`state`), a state after a survey held, `DATUM` and the readout,
+    each that gives way with its tallest form.
+  - _The tallest forms (`tallestTerrainLines`)._ Every field at its longest reading and stale with
+    its `S`; `DATUM` the header's spheroid, both radii, with its `SEA LEVEL`;
+    `SLANT RANGE FROM CAMERA` with both the widest Estimated range and uncertainty and the
+    `· GRAZING` part, so that
+    it is as tall as either of its forms at any width (beyond the ruling's "Estimated, stale and
+    `GRAZING`", which names the two forms one at a time); `MATERIAL` the longest form's name and
+    the longest substance the header's palette names, or `UNLISTED MATERIAL`; `SLOPE` with the
+    longest `BASELINE`, 100 m, for R10.T12.a's selector.
+  - _The components._ Each value in an `output` (`aria-live` off), an inline block as wide as its
+    field in ch, right-aligned, an uncertainty left-aligned (`.terrain-field--start`), each `S`'s
+    place a 2 ch `.terrain-mark`, `MATERIAL`'s names' too (the UX review: their place was not kept
+    before); a value with its uncertainty and its `S`'s place one `.view-label__run`, so that a `±`
+    reading or its `S` never starts a line alone (the UX review); a blank uncertainty's place an
+    `aria-hidden` span; segments and pieces set as chains, not lists, so that no key is a position
+    (the TypeScript review). Statements (`PENDING`, `TERRAIN: NOT YET MODELLED`, `NOT SURVEYED`,
+    `NO GROUND`) are the block's statements through `StatusText`; the survey line's failures,
+    `SURVEY COVERAGE REJECTED` and `SURVEY DATA INVALID`, are set through `StatusLine` as every
+    request's status is (the model's status line gains `failure`, `refused` or `fault`; the UX
+    review). The heading `GROUND AT LINE OF SIGHT` is an `h3` of a new `.view-label__heading`, set
+    as `.system-readout__heading` is (muted, 0.2 em tracking) at the plate's type size. The model's
+    status lines keep their `colour`, which states the line's colour token; the renderer sets it by
+    `failure`.
+  - _The tripod._ Its point comes from the committed render: the lines' answer while the plate's
+    readout stands (`standingReadout`), so that the mark and the plate never disagree; with the
+    point's slant range (`LineOfSightPoint.rangeM`; none at `NOT SURVEYED`, whose answer carries
+    none). The give-way to a craft's hull (decision-r10-t12-commit3 §1): `hullOnView` projects every
+    edge, its windows' and those hidden behind its own faces included, clipped at the near plane,
+    and casts the camera's forward ray in `f64` against its opaque faces (Möller and Trumbore 1997;
+    a window is no face); a hull counts where the list draws it, not behind a body's limb, and its
+    bounding sphere's near side is nearer than the point, every drawn hull where the range is not
+    known or there is no point. So `CHASE` draws no tripod, at any size, and `SEAT` does. The open
+    centre is the coloured stroke's (decision-r10-t12-commit3 §3): `lineOfSightInnerPx` drops the
+    casing term; its tests follow.
+  - _The note._ `ViewMarkList`'s `groundNote`: `GROUND AT LINE OF SIGHT` first of the notes,
+    `role="note"`, named "Ground at line of sight, at the view's centre", outside the listbox, not
+    focusable, never stale; while the plate's readout has a point, drawn or given way.
+  - _Kept scenes (decision-r10-t12-commit3 §5)._ A kept planet, dwarf planet or moon with no detail
+    seed reads `TERRAIN: NOT YET MODELLED` in the survey line's place, with or without a session,
+    with nothing asked; a star states nothing, and the kept giants are marked
+    `ViewBody.surfaceless`: `ECLIPSE TEST`'s and `PHASE TEST`'s.
+  - _Served giants (beyond the ruling; the UX review's must-fix; accepted by main)._ A served body in the
+    gas-envelope state, a sub-Neptune, an ice giant or a gas giant by its bulk section's class, is
+    marked `surfaceless` too (`fromServer.ts`), so that a view framed in a giant states no
+    `SURVEY COVERAGE REJECTED: … has no solid surface …`, the server's refusal of its field: the
+    scene's records hold no `surface` section, and the record's `not_applicable` one is the same
+    state (P14.T35.e). A body whose bulk is not sent is taken to have a surface, as its survey then
+    says.
+  - _The fault's views (decision-r10-t12-commit3 §6)._ `TerrainViewReport.readoutBody` (the
+    primary's `readoutBodyOf`) keeps the `FRAME` body wanted as the view's local body, and gives the
+    view the terrain's fault line once the session is faulted, beside the views that hand a body
+    over, unless the body reads not modelled.
+  - _The `FRAME` from the ship in a served system._ Built to `frameBody` as the back end defined it;
+    the own ship then reads the system frame there (R02.T17's view scene), so commit 4 holds it in
+    its local body's frame (decision-r10-ship-frame; commit 4's record, "Beyond T12's files").
+  - _Keyboard reach._ The entry's "keyboard reach of the readout's target through the DOM list" is
+    tested as `NEXT TARGET` (`]`), which points the camera at the next body or craft in the view's
+    list (the guide's row), so that the readout's line of sight moves with no pointer; the list's
+    own options select and do not aim.
+  - _The guide._ decision-r10-t12-commit3's C1 to C6, signed off there: the tripod's _Beside other
+    marks._ (the hull), _In the list._, _Size and stroke._ (the casings), the survey line's
+    not-modelled clause and the `TERRAIN: NOT YET MODELLED` row (kept scenes), the
+    `GROUND AT LINE OF SIGHT` row ("and its terrain readout stands") and the
+    `TERRAIN NOT AVAILABLE` row's place. Drawn now, which the back end applied ahead of the display:
+    the survey line's bullet and sub-bullets, the readout's bullet, the capacity's and the Missing
+    sub-bullets, the instruments' clause (G3), and the rows `ULTIMATE BEARING CAPACITY`, `DATUM`,
+    `SURVEY COVERAGE REJECTED`, `SURVEY DATA INVALID` and `TERRAIN NOT AVAILABLE`.
+  - _Tests._ New: `groundReadout.test.ts` (44), `useTerrainLines.test.tsx` (9; jsdom, so `.tsx`),
+    `terrainPlate.test.tsx` (11), `TerrainReadout.test.tsx` (32), `SurveyLine.test.tsx` (17); and
+    in the changed files `readouts.test.ts` (the tallest forms, 39), `failureGuard.test.ts` (9),
+    `session.test.ts` (9, the pending survey among them), `ViewMarkList.test.tsx` (9), `hulls.test.ts` (9), `symbology.test.ts`
+    (6, and the open-centre cases at 0.1875 rem plus δ), `drawList.test.ts` (11: 0.4, 0.6 and
+    0.8 rem, an edge from behind the camera clipped and counted, a face, a window, beyond the point, `rangeM` unknown, behind a limb, `CHASE` over
+    TEST HULL at 1920 × 1080 and 1280 × 720 from 80% to 150%, `SEAT`), `viewFrameDrawer.test.ts`,
+    `fromServer.test.ts` (the gas-envelope body) and `ViewDisplayTerrain.test.tsx` (14: the plate
+    before and from the first answer, the 4 Hz ask of the primary alone, the frames' point and
+    range, no readout on an instrument, the note, `CHASE`'s tripod given way with its note first,
+    `NO GROUND`, stale on loss of the link, the fault, the refusals' fault, the keyboard's
+    `NEXT TARGET` moving the line of sight, and the kept scenes).
+  - _Generator version._ Untouched (22): presentation alone; no golden, wire or payload moved
+    (decision-r10-t12-commit3, Flags).
+  - _Acceptance, as run._ `pnpm --filter hyperion exec vitest run` over
+    `src/renderer/src/view/terrain`, `src/renderer/src/displays/view`,
+    `src/renderer/src/view/wireframe`, `src/renderer/src/view/scene`,
+    `src/renderer/src/view/scenes` and `src/renderer/src/lib/scene` (125 files, 4,024 tests), the
+    entry's `view/terrain` among them; the typecheck and `oxlint --type-aware --deny-warnings` clean; the
+    console-ux checks by the UX review (`ux_lint.py` 0 errors, its 12 checks on lines older than
+    this change; `glyphs.py` on `° ± × · —` and U+00A0, all in both faces; no new colour, so no
+    contrast owed beyond `--text-muted` 7.22:1 and `--status-caution` 12.01:1 on `--surface-0`);
+    the gate, `just smart-ci origin/rendering-and-planets --hook-checks`, once over commits 3 and 4.
+  - _By hand, hidden, 2026-10-20_ (the desktop, RTX 3080; the views check's `--hidden --terrain`
+    run, offscreen at a device-pixel ratio of 1, windows 1926 × 1086 on high and 1286 × 724 on low;
+    R10.T12.b's harness in the lane's scratch `looks/`, its scratch plate replaced by T12's real
+    parts; built from this commit's tree, run after the UX review's fixes, its logs
+    `looks-b-high.log` and `looks-b-low.log`, the first run's `looks-a-*` the same outcomes before
+    them). `TERRAIN TEST` at 105–140 s and 188–220 s of its script, the primary wireframe and then
+    photorealistic, each in `CHASE` with `EASED CAMERA MOVES` and in `SEAT`, with zero, one and two
+    wireframe instruments, at 100%, 125% and 150% by the root's font size, the lower plate in its
+    tallest state (every part's tallest form, `DATUM` with `SEA LEVEL`, and a state line,
+    `SURVEY DATA INVALID: field level unusable, reopen VIEW to retry`, after the survey line); then
+    the live plate and the tripod in both styles in `SEAT` at 80%, 100% and 125% and in `CHASE` at
+    100%, and beside the class-1 bracket, `FREE` from the chase pose aimed at `TEST MOON` with it
+    selected, at 80% and 100%. Each case measured every plate and slot against the stage's 0.5 rem
+    inset, the plates' gap, the slots against the stage and the plates, every plate's and slot's
+    scroll against its client size outside the ruled scrollers, every part, run and field of the
+    lower plate within it, no terrain readout on an instrument, the tripod (drawn, given way or
+    absent, its box, what covers it, and the gap between the slots) against the readout, and the
+    list's notes, `GROUND AT LINE OF SIGHT` first while the readout has a point. 184 cases, none
+    cut:
+
+    | Size (room)                     | Slots | Lower plate (tallest)                      | Upper plate                                 | Slots standing                                     | Tripod, `SEAT`               | Tripod, `CHASE` |
+    | ------------------------------- | ----- | ------------------------------------------ | ------------------------------------------- | -------------------------------------------------- | ---------------------------- | --------------- |
+    | 1920 × 1080, 100%               | 0–2   | whole                                      | whole                                       | as opened                                          | drawn, clear                 | given way       |
+    | 1920 × 1080, 125%               | 0–2   | whole                                      | whole                                       | as opened                                          | drawn, clear                 | given way       |
+    | 1920 × 1080, 150% (the floor's) | 0     | whole in `SEAT`; readout yields in `CHASE` | whole                                       | —                                                  | drawn, under the upper plate | absent          |
+    | 1920 × 1080, 150%               | 1–2   | to its one line                            | `1-5` to `1-9 of 10`                        | `INSTRUMENT 1`; with both, `INSTRUMENT 2` its stub | absent                       | absent          |
+    | 1280 × 720, 100% (the floor)    | 0     | readout yields; once to its one line       | whole; once `1-6 of 10`                     | —                                                  | absent                       | absent          |
+    | 1280 × 720, 100%                | 1–2   | readout yields, or to its one line         | whole, or `1-5` to `1-8 of 10`              | `INSTRUMENT 1`; the second `OPEN` held back        | absent                       | absent          |
+    | 1280 × 720, 125% (below)        | 0–2   | to its one line                            | whole, or `1-5` to `1-7 of 10`              | held whole, the panel's line                       | absent                       | absent          |
+    | 1280 × 720, 150% (below)        | 0–2   | to its one line                            | whole plate, `11-14 of 14` to `15-17 of 17` | held whole, the panel's line                       | absent                       | absent          |
+    - _The tripod._ Drawn wherever the readout stands and nothing makes it give way: in `SEAT`
+      (and `FREE`) at every size where the readout stands, never in `CHASE`, where the own hull's
+      faces stand over the point, the note `GROUND AT LINE OF SIGHT` standing first all the same
+      (decision-r10-t12-commit3 §1). At 1920 × 1080 at 100% and 125% with both slots open, in
+      `SEAT`, it stands in the gap between them, under their span, covered by neither (at 100%,
+      slot 1's foot at 421 px, slot 2's top at 695 px, the tripod 551–569 px). Under the upper plate
+      at 1920 × 1080 at 150% and, live, at 1280 × 720 at 100%, as the guide's chrome clause has it
+      (decision-r10-view-block-room, "Seen" item 1).
+    - _The open centre at a ratio of 1_ (`looks/crops`, 400% and 1600% kept): at 80% and 100%, over
+      the lit ground in the photorealistic style and over the wireframe, the three `--text` ends
+      apart and the centre dark, never a solid "Y"; at 80% open and small, as signoff-10 had it.
+    - _Beside the class-1 bracket_ at 80% and 100% (photorealistic, `TEST MOON` selected and aimed):
+      the upper ticks whole but for their tips, the bracket's casing between them and its arms, not
+      touching (decision-r10-t12-commit3 §4).
+    - _The longest note at 1280 × 720_: `GROUND AT LINE OF SIGHT` with
+      `SURVEY EDGE TEST MOON 178 km` beneath it, whole. At 1280 × 720 at 150% the compact column
+      clips at its foot (141–236 px, as R10.T12.b measured) and its notes with it, below the floor,
+      as G-B allows.
+    - _Outcomes beside the ruling's expectations_ (decision-r10-view-block-room §4), each with
+      nothing cut: at the floor alone the readout gives way in the tallest state in every style and
+      preset, and once (photorealistic `SEAT`, five statements) the survey line and `DATUM` too, with
+      the upper plate's lines scrolling `1-6 of 10`; live, at the floor alone the readout stands in
+      `SEAT` and gives way in `CHASE`; at 1920 × 1080 at 150% alone it gives way in `CHASE`, in both
+      styles.
+- **Deferred findings (2026-10-13 rule) (T12's commit 3)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _A nearer body on the line of sight_ (decision-r10-t12-commit3, "Seen" item 1): a moon crossing
+    the picture's centre in front of the `FRAME` body's point is the ground the line of sight first
+    meets, yet the readout reads the `FRAME` body behind it and the tripod stands over the moon's
+    disc. For R10.T12.a or a later pass.
+  - _The open centre at a ratio of 0.78125 and 80%_ ("Seen" item 3): 0.08 px to spare, its ends
+    about 1 px apart; this machine renders no such ratio.
+  - _Hidden hull parts count_ ("Seen" item 2), erring to leave the tripod out; the note stands.
+  - _`NOT SURVEYED` carries no range_, so every drawn hull counts there, nearer than the ground or
+    not.
+  - _A query that never settles_ (a worker that hangs without failing) holds the last readout
+    unstale; nothing times a query out, as nothing times a bake out.
+  - _The readout asked while it gives way for room_ costs a worker query at 4 Hz that nothing
+    shows.
+  - _A stated line where no line of sight can be formed_ (the body's rotation not known, or the
+    camera beyond the binding's 10¹² m): the plate states the survey line alone there (above); a
+    line of its own is R10.T12.a's, for a later UX pass (main, 2026-10-20).
+  - _The labels wrap in a narrow plate_ (`SLANT RANGE FROM` | `CAMERA`, `ULTIMATE BEARING` |
+    `CAPACITY`), as the label block's line markup sets a long label beside its value; a layout
+    that keeps them whole is R10.T12.a's to weigh with its measurements.

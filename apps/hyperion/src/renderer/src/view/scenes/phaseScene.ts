@@ -157,6 +157,8 @@ function phaseSceneAt(tS: number): ViewScene {
         appearance: null,
         symbol: bodyKindSymbol("planet"),
         orbitNormal: null,
+        // A giant has no surface for a survey line (R10.T12).
+        surfaceless: true,
       },
     ],
     rings: [],

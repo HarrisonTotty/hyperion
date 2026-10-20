@@ -19,7 +19,8 @@ import {
   TERRAIN_COMPUTATION_FAILED,
   TERRAIN_NOT_AVAILABLE,
 } from "../../view/terrain/annunciation";
-import { PALETTE_NONE } from "../../view/terrain/workers/messages";
+import { PALETTE_NONE, type SurfaceGroundReadout } from "../../view/terrain/workers/messages";
+import { NO_BREAK_SPACE } from "../../view/terrain/readouts";
 import { MAX_CONSECUTIVE_WORKER_FAILURES } from "../../view/terrain/workers/pool";
 
 import {
@@ -42,7 +43,8 @@ import {
 import type { TerrainSession } from "../../view/terrain/session";
 import type { TerrainFixture } from "./useTerrainSession";
 import { instrumentViewId, PRIMARY_VIEW_ID } from "./viewNames";
-import { ViewFrameDrawer, type ViewFrameInputs } from "./viewFrameDrawer";
+import { GROUND_NOTE_NAME } from "./ViewMarkList";
+import { type ViewFrameDrawn, ViewFrameDrawer, type ViewFrameInputs } from "./viewFrameDrawer";
 import { runPose, SCENE_OPTIONS } from "./viewRun";
 
 afterEach(() => {
@@ -793,5 +795,342 @@ describe("a closed instrument forgotten by the terrain session (the batch review
     );
     await playFor(view, 2);
     expect(sessions.at(-1)?.pass(FIXTURE_EARTH)?.viewIds).toEqual(new Set([PRIMARY_VIEW_ID]));
+  });
+});
+
+/** A readout over surveyed ground under a 410 m survey, Estimated: the guide's Moon-like example's. */
+const GROUND_READOUT: SurfaceGroundReadout = {
+  kind: "ground",
+  sight: {
+    rangeM: 41_200,
+    sigmaM: 300,
+    resolved: false,
+    hitM: [0, 0, EARTH_RADIUS_M],
+    at: { face: 2, u: 0, v: 0 },
+  },
+  reading: {
+    elevationM: 2140,
+    elevationSigmaM: 180,
+    slopeRmsRad: 0.21,
+    slopeSigmaRad: 0.07,
+    slopeBaselineM: 2,
+    resolutionM: 410,
+    resolved: false,
+  },
+  material: { classCode: 1, entry: null },
+  properties: {
+    bearingCapacityPa: 3.4e6,
+    capacitySlopeRad: 0.21,
+    padFriction: 0.2,
+    frictionOnTemperature: false,
+    temperatureK: null,
+  },
+};
+
+/** Answers every terrain-readout query the height workers hold with `readout`; returns how many. */
+function answerReadouts(view: ViewDisplayHarness, readout: SurfaceGroundReadout): number {
+  let answered = 0;
+  for (const worker of view.heightWorkers) {
+    for (const query of worker.pendingGroundReadouts) {
+      worker.reply({ kind: "ground-readout", id: query.id, body: query.body, readout });
+      answered += 1;
+    }
+  }
+  return answered;
+}
+
+/** Plays `steps` × 250 ms, answering after each step every readout query asked; returns how many. */
+async function readFor(
+  view: ViewDisplayHarness,
+  steps: number,
+  readout: SurfaceGroundReadout = GROUND_READOUT,
+): Promise<number> {
+  let answered = 0;
+  for (let step = 0; step < steps; step += 1) {
+    view.advance(250);
+    answered += answerReadouts(view, readout);
+    // Each step answers what the one before asked.
+    // oxlint-disable-next-line no-await-in-loop
+    await settle();
+  }
+  return answered;
+}
+
+/**
+ * `VIEW` on `TERRAIN TEST` over a nominal adapter, its first payload arrived, the session it made
+ * given to `sessions`: its primary's camera on `TEST HULL`, held in `TEST MOON`'s frame, so that its
+ * `FRAME` is the moon's.
+ */
+async function terrainTestReading(sessions: TerrainSession[] = []): Promise<ViewDisplayHarness> {
+  const fake = timedEngineSource();
+  const view = renderViewDisplay({
+    store: await nominalStore(),
+    source: fake.source,
+    engines: fake.engines,
+    watchTerrain: (session) => {
+      sessions.push(session);
+      return () => undefined;
+    },
+  });
+  await settle();
+  view.advance(100);
+  await view.user.click(screen.getByRole("button", { name: TERRAIN_SCENE_NAME }));
+  await playFor(view, 6);
+  return view;
+}
+
+/** The primary's lower plate, by its canvas's description, or `null` while it states no terrain. */
+function lowerPlate(): HTMLElement | null {
+  const canvas = screen.getByRole("application", { name: /, PRIMARY, /u });
+  const id = (canvas.getAttribute("aria-describedby") ?? "")
+    .split(" ")
+    .find((each) => each.endsWith("-lower"));
+  return id === undefined ? null : document.getElementById(id);
+}
+
+/** The primary's lower plate, which a test expects to stand. */
+function plate(): HTMLElement {
+  const found = lowerPlate();
+  if (found === null) {
+    throw new Error("the primary has no lower plate");
+  }
+  return found;
+}
+
+/** A plate's reading of `label`, its value's text as it reads, or `null` where it has none. */
+function readingIn(block: HTMLElement, label: string): string | null {
+  const term = within(block).queryByText(label, { selector: "dt" });
+  return term?.nextElementSibling?.textContent ?? null;
+}
+
+/** The primary's frames' line-of-sight inputs, and an instrument's, over the next `ms`. */
+function sightsOver(
+  view: ViewDisplayHarness,
+  ms: number,
+): { readonly primary: ReadonlyArray<unknown>; readonly instruments: ReadonlyArray<unknown> } {
+  const frames = framesOver(view, ms);
+  return {
+    primary: frames
+      .filter(({ inputs }) => inputs.terrain?.view === PRIMARY_VIEW_ID)
+      .map(({ inputs }) => inputs.lineOfSightPoint),
+    instruments: frames
+      .filter(({ inputs }) => inputs.terrain?.view === instrumentViewId(1))
+      .map(({ inputs }) => inputs.lineOfSightPoint),
+  };
+}
+
+describe("the primary's terrain lines on its lower plate (R10.T12; decision-r10-view-block-room §3)", () => {
+  it("states the survey line and no DATUM or readout before the readout's first answer", async () => {
+    const view = await terrainTestReading();
+    view.advance(300);
+    await settle();
+    expect([
+      readingIn(plate(), "SURVEY COVERAGE") !== null,
+      within(plate()).queryByText("GROUND AT LINE OF SIGHT"),
+      readingIn(plate(), "DATUM"),
+    ]).toEqual([true, null, null]);
+  });
+
+  it("states DATUM and the readout from its first answer, Estimated", async () => {
+    const view = await terrainTestReading();
+    await readFor(view, 4);
+    expect({
+      heading: within(plate()).getByText("GROUND AT LINE OF SIGHT").textContent,
+      datum: readingIn(plate(), "DATUM"),
+      elevation: readingIn(plate(), "ELEVATION")?.trim(),
+    }).toEqual({
+      heading: "GROUND AT LINE OF SIGHT",
+      datum: expect.stringMatching(/^REFERENCE SPHER(?:E|OID) [\d.,]+ km/u),
+      elevation: `~2140 m${NO_BREAK_SPACE}±${NO_BREAK_SPACE}180 m`,
+    });
+  });
+
+  it("asks the primary's readout about four times a second, and an instrument's none", async () => {
+    const view = await terrainTestReading();
+    await openInstrument(view, "INSTRUMENT 1");
+    await readFor(view, 2);
+    const answered = await readFor(view, 8);
+    expect(answered >= 6 && answered <= 9).toBe(true);
+  });
+
+  it("gives the primary's frames its point and range while the readout stands, and an instrument's none", async () => {
+    const view = await terrainTestReading();
+    await openInstrument(view, "INSTRUMENT 1");
+    await readFor(view, 4);
+    const sights = sightsOver(view, 200);
+    expect({
+      primary: [...new Set(sights.primary.map((each) => JSON.stringify(each)))],
+      instruments: [...new Set(sights.instruments)],
+    }).toEqual({
+      primary: [JSON.stringify({ hasPoint: true, rangeM: 41_200 })],
+      instruments: [undefined],
+    });
+  });
+
+  it("states no survey line or readout on an instrument in its slot (decision-r10-t12-leans §3)", async () => {
+    const view = await terrainTestReading();
+    await openInstrument(view, "INSTRUMENT 1");
+    await readFor(view, 4);
+    const slot = screen.getByRole("region", { name: "INSTRUMENT 1" });
+    expect([
+      within(slot).queryByText("GROUND AT LINE OF SIGHT"),
+      within(slot).queryByText("SURVEY COVERAGE"),
+    ]).toEqual([null, null]);
+  });
+
+  it("notes GROUND AT LINE OF SIGHT first in the primary's list while the readout has a point", async () => {
+    const view = await terrainTestReading();
+    await readFor(view, 4);
+    const targets = screen.getByRole("region", { name: "Targets PRIMARY" });
+    expect([
+      within(targets).getAllByRole("note")[0]?.getAttribute("aria-label"),
+      within(targets).queryByRole("option", { name: /line of sight/iu }),
+    ]).toEqual([GROUND_NOTE_NAME, null]);
+  });
+
+  it("leaves the tripod out in CHASE, the own hull over the point, its note still first (decision-r10-t12-commit3 §1)", async () => {
+    const view = await terrainTestReading();
+    await view.user.keyboard("2");
+    await readFor(view, 4);
+    const draw = vi.spyOn(ViewFrameDrawer.prototype, "draw");
+    view.advance(200);
+    const primary = draw.mock.calls.flatMap(([inputs], at): Array<ViewFrameDrawn | null> => {
+      const result = draw.mock.results[at];
+      return inputs.terrain?.view === PRIMARY_VIEW_ID && result?.type === "return"
+        ? [result.value]
+        : [];
+    });
+    draw.mockRestore();
+    const targets = screen.getByRole("region", { name: "Targets PRIMARY" });
+    expect({
+      drawn: primary.length > 0,
+      givenWay: primary.every(
+        (drawn) => drawn?.lineOfSight?.boxPx === null && drawn.lineOfSight.yielded,
+      ),
+      note: within(targets).getAllByRole("note")[0]?.getAttribute("aria-label"),
+    }).toEqual({ drawn: true, givenWay: true, note: GROUND_NOTE_NAME });
+  });
+
+  it("reads NO GROUND with no tripod's point and no note where the line of sight misses the ground", async () => {
+    const view = await terrainTestReading();
+    await readFor(view, 4, { kind: "no-ground" });
+    const sights = sightsOver(view, 200);
+    expect({
+      status: within(plate()).getByText("NO GROUND").textContent,
+      point: [...new Set(sights.primary.map((each) => JSON.stringify(each)))],
+      note: screen.queryByRole("note", { name: GROUND_NOTE_NAME }),
+    }).toEqual({
+      status: "NO GROUND",
+      point: [JSON.stringify({ hasPoint: false, rangeM: null })],
+      note: null,
+    });
+  });
+
+  it("marks the readout's values stale with their S on loss of the link, its constants not", async () => {
+    // The server's scene, its FREE camera in the Earth's frame, whose FRAME is then the Earth's.
+    const view = await earthInWireframe([]);
+    await view.user.keyboard("3");
+    await readFor(view, 4);
+    if (readingIn(plate(), "ELEVATION") === null) {
+      throw new Error("the readout does not stand before the link is lost");
+    }
+    act(() => {
+      view.socket.close();
+    });
+    await readFor(view, 4);
+    expect({
+      elevation: readingIn(plate(), "ELEVATION")?.trim(),
+      slope: readingIn(plate(), "SLOPE")?.trim(),
+    }).toEqual({
+      elevation: `~2140 m${NO_BREAK_SPACE}±${NO_BREAK_SPACE}180 m Sstale`,
+      slope: `~12°${NO_BREAK_SPACE}±${NO_BREAK_SPACE}4° Sstale · BASELINE 2 m`,
+    });
+  });
+
+  it("states no readout, DATUM or tripod under the terrain's fault, the survey line and its fault line standing (decision-r10-t12-leans §5)", async () => {
+    const sessions: TerrainSession[] = [];
+    const view = await terrainTestReading(sessions);
+    await readFor(view, 4);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    sessions.at(-1)?.failComputation();
+    await readFor(view, 2);
+    const sights = sightsOver(view, 200);
+    expect({
+      survey: readingIn(plate(), "SURVEY COVERAGE") !== null,
+      heading: within(plate()).queryByText("GROUND AT LINE OF SIGHT"),
+      datum: readingIn(plate(), "DATUM"),
+      point: [...new Set(sights.primary)],
+      faults: faultLines(),
+    }).toEqual({
+      survey: true,
+      heading: null,
+      datum: null,
+      point: [undefined],
+      faults: [TERRAIN_COMPUTATION_FAILED],
+    });
+  });
+
+  it("faults the terrain once the readout's queries have been refused for 250 ms, saying so once", async () => {
+    const view = await terrainTestReading();
+    await readFor(view, 4);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    for (let step = 0; step < 4; step += 1) {
+      view.advance(250);
+      for (const worker of view.heightWorkers) {
+        for (const query of worker.pendingGroundReadouts) {
+          worker.reply({
+            kind: "ground-readout-failed",
+            id: query.id,
+            body: query.body,
+            message: "a bug of the module's readout",
+          });
+        }
+      }
+      // Each step refuses what the one before asked.
+      // oxlint-disable-next-line no-await-in-loop
+      await settle();
+    }
+    view.advance(500);
+    await settle();
+    expect([
+      faultLines(),
+      error.mock.calls.filter(([what]) => what === "the terrain readout's query failed:").length,
+    ]).toEqual([[TERRAIN_COMPUTATION_FAILED], 1]);
+  });
+
+  it("moves the readout's line of sight by the keyboard's NEXT TARGET, no pointer needed", async () => {
+    const view = await terrainTestReading();
+    await readFor(view, 4);
+    view.advance(250);
+    const before = view.heightWorkers.flatMap((worker) => worker.pendingGroundReadouts).at(-1);
+    answerReadouts(view, GROUND_READOUT);
+    await settle();
+    await view.user.keyboard("]");
+    await readFor(view, 4);
+    view.advance(250);
+    const after = view.heightWorkers.flatMap((worker) => worker.pendingGroundReadouts).at(-1);
+    expect([
+      before === undefined || after === undefined,
+      JSON.stringify(after?.direction) === JSON.stringify(before?.direction),
+    ]).toEqual([false, false]);
+  });
+});
+
+describe("a kept scene's terrain lines (decision-r10-t12-commit3 §5)", () => {
+  it("reads TERRAIN: NOT YET MODELLED where its FRAME is a body it gives no terrain", async () => {
+    const view = await setup();
+    await view.user.click(screen.getByRole("button", { name: "ECLIPSE TEST" }));
+    await playFor(view, 2);
+    expect([
+      within(plate()).getByText("TERRAIN: NOT YET MODELLED").textContent,
+      readingIn(plate(), "SURVEY COVERAGE"),
+      within(plate()).queryByText("GROUND AT LINE OF SIGHT"),
+      screen.queryByRole("note", { name: GROUND_NOTE_NAME }),
+    ]).toEqual(["TERRAIN: NOT YET MODELLED", null, null, null]);
+  });
+
+  it("states no terrain lines where its FRAME is the system's", async () => {
+    await setup();
+    expect(lowerPlate()).toBeNull();
   });
 });

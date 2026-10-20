@@ -589,6 +589,17 @@ describe("a server body's rotation and shading from plan 14's sections (R07.T2.b
     ]).toEqual([6_378_137, jupiter.bulk.state === "ok" ? jupiter.bulk.value.radiusM : Number.NaN]);
   });
 
+  it("marks a body in the gas-envelope state as having no surface for a survey line, and a rocky one not (R10.T12)", () => {
+    const model = sceneModelOf(stateNearEarth());
+    const scene = viewSceneOf(model, shipFrameOf(model));
+    const jupiter = recordOf(model, FIXTURE_JUPITER);
+    expect([
+      jupiter.bulk.state === "ok" ? jupiter.bulk.value.planetClass : null,
+      viewBodyOf(scene, FIXTURE_JUPITER).surfaceless,
+      viewBodyOf(scene, FIXTURE_EARTH).surfaceless,
+    ]).toEqual(["gas_giant", true, undefined]);
+  });
+
   it("shades a body without a photometric section with the provisional photometry, labelled", () => {
     const model = sceneModelOf(stateNearEarth());
     const appearance = viewBodyOf(

@@ -639,8 +639,6 @@ export interface LineOfSightStrokes {
   readonly markStrokePx: number;
   /** The marks' outline shift δ (`ViewStrokes.markShiftPx`). */
   readonly markShiftPx: number;
-  /** The casing's width on each side: `CASING_PX` times `ViewStrokes.strokeScale`. */
-  readonly casingPx: number;
 }
 
 /**
@@ -650,20 +648,21 @@ export interface LineOfSightStrokes {
  * "Layout": an open mark keeps its hole at every ratio).
  *
  * @remarks
- * The criterion: the point is open where neither a tick's stroke nor its casing lights the device
- * pixel that holds the point, wherever the point falls on the grid. A tick's inner end, with its
- * round cap, lights the pixels whose centres lie within half its stroke, its casing and
+ * The criterion (decision-r10-t12-commit3 §3): the point is open where no tick's coloured stroke
+ * lights the device pixel that holds it, wherever the point falls on the grid, as Layout's hole is
+ * the stroke's, which δ keeps at its inner edge; the ticks' `--surface-0` casings, the mark's own
+ * dark surface, may meet over it, as a symbol's casing lies in its hole. A tick's inner end, with
+ * its round cap, lights the pixels whose centres lie within half its stroke and
  * {@link STROKE_FRINGE_PX} of it, and the pixel that holds the point has its centre within half a
- * pixel's diagonal, √2 ÷ 2, of it; so each inner end stands at least m ÷ 2 + c + 0.5 + √2 ÷ 2 px
- * from the point, m being the marks' stroke and c the casing. At a ratio of 1 (m 2, c 2) that is
- * 4.21 px, beyond 0.1875 rem and δ's 2.65 px at the 80% interface scale and 3.25 px at 100%, so the
- * ticks there start 4.21 px out and reach 7.41 and 8.21 px. At 2 (m 3, c 2) it is 4.71 px, inside
- * 0.1875 rem's 4.8 px at 80% and 6 px at 100%, which stand.
+ * pixel's diagonal, √2 ÷ 2, of it; so each inner end stands at least m ÷ 2 + 0.5 + √2 ÷ 2 px from
+ * the point, m being the marks' stroke: 2.21 px at a ratio of 1 (m 2) and 2.71 px at 2 (m 3). That
+ * guard never binds at a ratio in use from the 80% interface scale up: 0.1875 rem and δ are 2.65 px
+ * at a ratio of 1 and 80%, 3.25 px at 100%, and 2.29 px at 0.78125 and 80%, 0.08 px to spare.
  *
  * @param remPx - The interface's rem, device px.
  */
 export function lineOfSightInnerPx(remPx: number, strokes: LineOfSightStrokes): number {
-  const openPx = strokes.markStrokePx / 2 + strokes.casingPx + STROKE_FRINGE_PX + Math.SQRT1_2;
+  const openPx = strokes.markStrokePx / 2 + STROKE_FRINGE_PX + Math.SQRT1_2;
   return Math.max(LINE_OF_SIGHT_TICK_REM.inner * remPx + strokes.markShiftPx, openPx);
 }
 
@@ -774,26 +773,45 @@ function crowdsLineOfSight(kind: ScreenMark["kind"]): boolean {
 }
 
 /**
- * How clear of the line-of-sight mark's ticks the marks that make it give way stand, device px: the
- * least distance between any of their drawn segments and any of its ticks, centreline to centreline
- * ({@link segmentDistancePx}); infinite where there is none.
+ * A craft's hull as the line-of-sight mark gives way to it (plan R10, R10.T12;
+ * decision-r10-t12-commit3 §1): a hull the view draws, in sight and nearer than the point.
+ */
+export interface HullOnView {
+  /** Its edges, projected and clipped at the near plane, device px; hidden ones among them. */
+  readonly edges: ReadonlyArray<ScreenSegment>;
+  /**
+   * Whether one of its opaque faces stands over the point: the line of sight meets it in front of
+   * the near plane. A window is no face.
+   */
+  readonly coversPoint: boolean;
+}
+
+/**
+ * How clear of the line-of-sight mark's ticks the marks and hulls that make it give way stand,
+ * device px: the least distance between any of their drawn segments, or a hull's edges, and any of
+ * its ticks, centreline to centreline ({@link segmentDistancePx}); 0 where a hull's opaque face
+ * stands over the point; infinite where there is none.
  *
  * @param ticks - The tripod's ticks where it stands ({@link lineOfSightTripod}).
  * @param marks - The frame's other marks ({@link symbologyMarks}).
+ * @param hulls - The craft's hulls that count ({@link HullOnView}); none by default.
  */
 export function lineOfSightClearancePx(
   ticks: ReadonlyArray<ScreenSegment>,
   marks: ReadonlyArray<ScreenMark>,
+  hulls: ReadonlyArray<HullOnView> = [],
 ): number {
+  if (hulls.some((hull) => hull.coversPoint)) {
+    return 0;
+  }
   let clearancePx = Number.POSITIVE_INFINITY;
-  for (const mark of marks) {
-    if (!crowdsLineOfSight(mark.kind)) {
-      continue;
-    }
-    for (const segment of mark.segments) {
-      for (const tick of ticks) {
-        clearancePx = Math.min(clearancePx, segmentDistancePx(segment, tick));
-      }
+  const crowding = [
+    ...marks.flatMap((mark) => (crowdsLineOfSight(mark.kind) ? mark.segments : [])),
+    ...hulls.flatMap((hull) => hull.edges),
+  ];
+  for (const segment of crowding) {
+    for (const tick of ticks) {
+      clearancePx = Math.min(clearancePx, segmentDistancePx(segment, tick));
     }
   }
   return clearancePx;
@@ -801,28 +819,34 @@ export function lineOfSightClearancePx(
 
 /**
  * Whether the line-of-sight mark gives way in this frame, with the guide's hysteresis ("Beside other
- * marks"): it is left out where a body's symbol, a craft's ticks or the own ship's flight path
- * marker comes within 0.5 rem of its ticks, and drawn again only once all are 0.75 rem clear.
+ * marks"): it is left out where a body's symbol, a craft's ticks, the own ship's flight path
+ * marker or a craft's hull nearer than the point, by its outline or its opaque faces, comes within
+ * 0.5 rem of its ticks, and drawn again only once all are 0.75 rem clear.
  *
  * @remarks
  * "Within" is measured as {@link lineOfSightClearancePx} measures it: the least distance between
  * the other mark's drawn segments and the tripod's ticks, centreline to centreline. A mark under
  * 0.5 rem makes it leave, and once left it returns only at 0.75 rem or more; between the two it
- * keeps the state it had. The reticles never make it give way.
+ * keeps the state it had. The reticles never make it give way. A hull does, as a craft's ticks do
+ * (plan R10, R10.T12; decision-r10-t12-commit3 §1): an edge of it beside the ticks would read with
+ * them as one new symbol, and a face of it over the point hides the ground the tripod marks, so in
+ * `CHASE`, whose line of sight passes through the own ship, the tripod is never drawn.
  *
  * @param ticks - The tripod's ticks where it stands ({@link lineOfSightTripod}), drawn or not.
  * @param marks - The frame's other marks ({@link symbologyMarks}).
  * @param remPx - The interface's rem, device px.
  * @param yielded - Whether it gave way in the view's frame before.
+ * @param hulls - The craft's hulls that count ({@link lineOfSightClearancePx}).
  */
 export function lineOfSightGivesWay(
   ticks: ReadonlyArray<ScreenSegment>,
   marks: ReadonlyArray<ScreenMark>,
   remPx: number,
   yielded: boolean,
+  hulls: ReadonlyArray<HullOnView> = [],
 ): boolean {
   const thresholdRem = yielded ? LINE_OF_SIGHT_RETURN_REM : LINE_OF_SIGHT_LEAVE_REM;
-  return lineOfSightClearancePx(ticks, marks) < thresholdRem * remPx;
+  return lineOfSightClearancePx(ticks, marks, hulls) < thresholdRem * remPx;
 }
 
 /**

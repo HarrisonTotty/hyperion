@@ -4040,6 +4040,38 @@ body {
 }
 
 /*
+ * A terrain reading's value in its fixed field (plan R10, R10.T12): as wide as its longest reading
+ * in ch of B612 Mono, right-aligned, or left-aligned for an uncertainty after its `±`, never
+ * broken, so that its unit and the part after it keep their places from Estimated to resolved and
+ * stale (the guide's "Numbers").
+ */
+.terrain-field {
+  display: inline-block;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.terrain-field--start {
+  text-align: left;
+}
+
+/* The place kept after a terrain value for its S: a space and the mark, blank while it is live. */
+.terrain-mark {
+  display: inline-block;
+  width: 2ch;
+  white-space: pre;
+}
+
+/* The terrain readout's heading, GROUND AT LINE OF SIGHT, set as a readout's heading is. */
+.view-label__heading {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: inherit;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+}
+
+/*
  * The instrument views' fixed slots over the primary view's right edge (R07 Design note 15,
  * decision-r07-t19 item 2a): INSTRUMENT 1 at the stage's top right and INSTRUMENT 2 at its foot,
  * each inset 0.5rem, so that neither moves when the other opens or closes

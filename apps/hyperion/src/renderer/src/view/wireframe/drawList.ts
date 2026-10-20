@@ -30,7 +30,7 @@ import { cameraSceneOf, sceneOrigins, type ViewBody, type ViewScene } from "../s
 import { angularDiameterPx, graticule, isSymbolSized, ringEllipse } from "./bodies";
 import { behindLimb, sphereInFrustum } from "./cull";
 import type { Polyline } from "./curve";
-import { hullEdges, hullFaces } from "./hulls";
+import { hullBoundingRadiusM, hullEdges, hullFaces, hullOnView } from "./hulls";
 import { orbitPath } from "./orbits";
 import { surveyEdgeMark, type SurveyEdgeView } from "../terrain/surveyEdge";
 import {
@@ -41,6 +41,7 @@ import {
   markBoxPx,
   markLabelOffsetPx,
   markLabelRisePx,
+  type HullOnView,
   type ScreenMark,
   type ScreenPx,
   STROKE_FRINGE_PX,
@@ -346,18 +347,28 @@ export interface WireframeDrawList {
   readonly lineOfSight: DrawnLineOfSight | null;
 }
 
-/**
- * The view's line of sight as its draw list marks it (plan R10, R10.T12; the guide's tripod): what
- * its terrain readout reads, and the give-way's state, which the view keeps from frame to frame, so
- * that the list stays a function of its arguments.
- */
-export interface LineOfSightOptions {
+/** What a view's terrain readout reads of its line of sight, as its tripod marks it (R10.T12). */
+export interface LineOfSightPoint {
   /**
    * Whether the view's terrain readout reads a point on its line of sight, which the tripod marks:
    * over surveyed ground or `NOT SURVEYED` ground alike, and unchanged under `GRAZING`; not at
    * `NO GROUND`, where there is no point. Its changes come with the readout's own updates.
    */
   readonly hasPoint: boolean;
+  /**
+   * The point's slant range from the camera, m (`SLANT RANGE`), by which only a craft's hull nearer
+   * than it makes the tripod give way (decision-r10-t12-commit3 §1); `null` where it is not known,
+   * `NOT SURVEYED`, or there is no point, when every hull drawn counts.
+   */
+  readonly rangeM: number | null;
+}
+
+/**
+ * The view's line of sight as its draw list marks it (plan R10, R10.T12; the guide's tripod): what
+ * its terrain readout reads, and the give-way's state, which the view keeps from frame to frame, so
+ * that the list stays a function of its arguments.
+ */
+export interface LineOfSightOptions extends LineOfSightPoint {
   /**
    * Whether the tripod gave way to another mark in the view's frame before
    * ({@link DrawnLineOfSight.yielded}); `false` in the view's first frame.
@@ -368,8 +379,9 @@ export interface LineOfSightOptions {
 /** The line-of-sight mark of one frame (plan R10, R10.T12). */
 export interface DrawnLineOfSight {
   /**
-   * Whether the tripod gives way this frame, a body's symbol, a craft's ticks or the flight path
-   * marker standing within 0.5 rem of its ticks, or not yet 0.75 rem clear of them since it gave
+   * Whether the tripod gives way this frame, a body's symbol, a craft's ticks, the flight path
+   * marker or a craft's hull nearer than the point standing within 0.5 rem of its ticks, or a hull's
+   * opaque face over its point, or not yet 0.75 rem clear of them since it gave
    * way (`lineOfSightGivesWay`): the view's next {@link LineOfSightOptions.yielded}. It is kept
    * whether or not the readout has a point, so that the hysteresis runs on through `NO GROUND`.
    */
@@ -556,7 +568,9 @@ function packScreen(segments: ReadonlyArray<readonly [ScreenPx, ScreenPx]>): Flo
  * Where the options give the view's line of sight with a point (plan R10, R10.T12), its tripod is
  * drawn at the picture's centre, the first of the screen-space marks, after the survey edges and
  * before every other mark, and the survey edges' ticks keep 0.5 rem clear of its ticks. It gives
- * way, with hysteresis, to a body's symbol, a craft's ticks or the flight path marker near it; the
+ * way, with hysteresis, to a body's symbol, a craft's ticks or the flight path marker near it, and
+ * to a craft's hull nearer than the point by its outline or its opaque faces, so that `CHASE`
+ * draws none; the
  * give-way's state comes in the options and goes out in the list
  * ({@link WireframeDrawList.lineOfSight}). Without a line of sight the list is as it was before.
  */
@@ -712,6 +726,10 @@ export function buildWireframeDrawList(
   }
 
   const occluderMeshes: OccluderMesh[] = [];
+  // The hulls the tripod gives way to (R10.T12; decision-r10-t12-commit3 §1): each drawn, not behind
+  // a body's limb, and nearer than the point; taken only where a line of sight is given.
+  const sightHulls: HullOnView[] = [];
+  const sight = options.lineOfSight ?? null;
   for (const craft of scene.craft) {
     const originM = fromCamera(craft.pose.position);
     if (!sphereInFrustum(originM, craft.hull.lengthM, projection, viewport)) {
@@ -723,6 +741,13 @@ export function buildWireframeDrawList(
       origins,
     );
     const edges = hullEdges(craft.hull, craft.pose.attitude);
+    if (
+      sight !== null &&
+      shown(originM, null) &&
+      (sight.rangeM === null || norm(originM) - hullBoundingRadiusM(craft.hull) < sight.rangeM)
+    ) {
+      sightHulls.push(hullOnView(craft.hull, craft.pose.attitude, originM, projection, viewport));
+    }
     lines.push(
       batch(
         `hull:${craft.id}`,
@@ -886,7 +911,7 @@ export function buildWireframeDrawList(
     projection,
     viewport,
   );
-  const lineOfSight = lineOfSightMark(options, marks, viewport);
+  const lineOfSight = lineOfSightMark(options, marks, sightHulls, viewport);
 
   // The survey edges (R10.T10.c): a `--text` line, its ticks into the unsurveyed side, cased as
   // every line, in view space, so that nearer ground hides it; ranges from the own ship. Their
@@ -954,15 +979,18 @@ export function buildWireframeDrawList(
 /**
  * The frame's line-of-sight mark (plan R10, R10.T12; the guide's tripod): at the picture's centre,
  * where the projection puts the line of sight, its ticks as {@link lineOfSightTripod} places them;
- * drawn where the view's readout has a point and it does not give way to the frame's `marks`
- * ({@link lineOfSightGivesWay}, from the view's last state), else not.
+ * drawn where the view's readout has a point and it does not give way to the frame's `marks` or
+ * `hulls` ({@link lineOfSightGivesWay}, from the view's last state), else not.
  *
+ * @param hulls - The craft's hulls that count, drawn, in sight and nearer than the point
+ *   (`hullOnView`).
  * @returns The tripod to draw, or `null`; and the frame's {@link DrawnLineOfSight}, `null` with no
  *   line of sight in the options.
  */
 function lineOfSightMark(
   options: DrawOptions,
   marks: ReadonlyArray<ScreenMark>,
+  hulls: ReadonlyArray<HullOnView>,
   viewport: Viewport,
 ): { readonly tripod: ScreenMark | null; readonly drawn: DrawnLineOfSight | null } {
   const input = options.lineOfSight ?? null;
@@ -973,9 +1001,9 @@ function lineOfSightMark(
   const tripod = lineOfSightTripod(
     { xPx: viewport.widthPx / 2, yPx: viewport.heightPx / 2 },
     options.remPx,
-    { markStrokePx: options.markStrokePx, markShiftPx: options.markShiftPx, casingPx },
+    { markStrokePx: options.markStrokePx, markShiftPx: options.markShiftPx },
   );
-  const yielded = lineOfSightGivesWay(tripod.segments, marks, options.remPx, input.yielded);
+  const yielded = lineOfSightGivesWay(tripod.segments, marks, options.remPx, input.yielded, hulls);
   if (!input.hasPoint || yielded) {
     return { tripod: null, drawn: { yielded, boxPx: null } };
   }

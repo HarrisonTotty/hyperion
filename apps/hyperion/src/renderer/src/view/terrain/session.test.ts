@@ -41,6 +41,7 @@ import { aBody, FIXTURE_PLANET_CENTRE_M, FIXTURE_SYSTEM } from "../../test/viewF
 import { lawFor } from "../appearance/phase";
 import type { AllocationEvent } from "../engine/memory";
 import type { ViewBody, ViewScene } from "../scene/model";
+import { TERRAIN_COMPUTATION_FAILED, TERRAIN_NOT_AVAILABLE } from "./annunciation";
 import { CLASS_MAP_LEVEL } from "./classMap";
 import { fieldCellAt } from "./coverage";
 import { allocationTally } from "./gpu/allocationTally";
@@ -48,6 +49,7 @@ import { limbDistanceM } from "./handover";
 import { TerrainSession, viewFieldCandidates } from "./session";
 import { PHASE_LAW } from "./terrainMaterial";
 import type { ClassMapAnswer, GroundReadoutRequest } from "./workers/messages";
+import { MAX_CONSECUTIVE_WORKER_FAILURES } from "./workers/pool";
 
 const UNIVERSE: UniverseIdHex = "000000000000002a";
 const MOON: BodyIdHex = SESSION_MOON;
@@ -217,6 +219,15 @@ describe("a view's field candidates (R10.T16.a)", () => {
     expect(moon?.rangeRatio).toBe(Number.POSITIVE_INFINITY);
   });
 
+  it("marks the body whose terrain readout the view states as a local body too (R10.T12)", () => {
+    const report = { ...viewAt(5e6), readoutBody: PLANET };
+    const local = viewFieldCandidates(report, () => null).map((c) => [c.body, c.local]);
+    expect(local).toEqual([
+      [PLANET, true],
+      [MOON, true],
+    ]);
+  });
+
   it("gives no candidate for a body that is not lit", () => {
     const star: ViewBody = aBody({ id: `${FIXTURE_SYSTEM}.0000`, kind: "star", parent: null });
     const scene = { ...SCENE, bodies: [...SCENE.bodies, star] };
@@ -244,6 +255,20 @@ describe("the terrain session's fields (R10.T16.a)", () => {
     h.session.noteView(PRIMARY, viewAt(2e7));
     h.session.step();
     expect(h.socket().requestsOfKind("surface_field")).toEqual([]);
+  });
+
+  it("asks for a view's readout body as for its local body, the camera far beyond its frame (R10.T12)", async () => {
+    const h = await harness();
+    // Beyond the moon's frame, and beyond its range with no header held to give it.
+    h.session.noteView(PRIMARY, { ...viewAt(7e7), readoutBody: MOON });
+    h.session.step();
+    expect([
+      [...h.session.wanted],
+      h
+        .socket()
+        .requestsOfKind("surface_field")
+        .map(({ body }) => body.body),
+    ]).toEqual([[MOON], [MOON]]);
   });
 
   it("keeps a held body wanted while a view is within its hand-over range", async () => {
@@ -909,5 +934,88 @@ describe("the terrain session's ground readouts (R10.T12)", () => {
       .find(({ body }) => body.body === PLANET);
     h.session.dispose();
     expect(h.socket().cancelledIds()).toContain(planetAsk?.id);
+  });
+});
+
+/** Fails every height worker of the pool's two places, and each replacement, until both are lost. */
+function loseEveryWorker(h: Harness): void {
+  for (let round = 0; round < MAX_CONSECUTIVE_WORKER_FAILURES; round += 1) {
+    for (const worker of h.workers.slice(-2)) {
+      worker.fail();
+    }
+  }
+}
+
+describe("the terrain session's fault for the terrain readout (R10.T12; decision-r10-t12-leans §5)", () => {
+  it("raises none while its workers live and no computation has kept failing", async () => {
+    const h = await harness();
+    await holdMoon(h);
+    expect(h.session.terrainFault).toBeNull();
+  });
+
+  it("gives the computation's fault once a guarded computation has kept failing", async () => {
+    const h = await harness();
+    await holdMoon(h);
+    h.session.failComputation();
+    expect(h.session.terrainFault).toBe(TERRAIN_COMPUTATION_FAILED);
+  });
+
+  it("gives TERRAIN NOT AVAILABLE once every height worker is lost", async () => {
+    const h = await harness();
+    await holdMoon(h);
+    loseEveryWorker(h);
+    expect(h.session.terrainFault).toBe(TERRAIN_NOT_AVAILABLE);
+  });
+
+  it("shows the fault on a view whose report names a readout body, though it hands nothing over", async () => {
+    const h = await harness();
+    h.session.noteView(PRIMARY, { ...viewAt(5e6), readoutBody: MOON });
+    h.session.step();
+    await answerField(h);
+    h.session.failComputation();
+    expect(new Map(h.session.terrainFaults)).toEqual(
+      new Map([[PRIMARY, TERRAIN_COMPUTATION_FAILED]]),
+    );
+  });
+
+  it("shows the fault on a view whose readout body's survey is still pending (decision-r10-t12-commit3 §6)", async () => {
+    const h = await harness();
+    h.session.noteView(PRIMARY, { ...viewAt(5e6), readoutBody: MOON });
+    h.session.step();
+    h.session.failComputation();
+    expect({
+      pending: h.session.survey(MOON)?.status.pending,
+      views: new Map(h.session.terrainFaults),
+    }).toEqual({ pending: true, views: new Map([[PRIMARY, TERRAIN_COMPUTATION_FAILED]]) });
+  });
+
+  it("shows no fault on a view whose readout body's terrain is not modelled (decision-r10-t12-commit3 §6)", async () => {
+    const h = await harness();
+    h.session.noteView(PRIMARY, { ...viewAt(5e6), readoutBody: MOON });
+    h.session.step();
+    h.socket().serverResponds(latestFieldAsk(h.socket()).id, {
+      kind: "surface_field",
+      state: "not_modelled",
+      section: "surface",
+    });
+    await settle();
+    h.session.failComputation();
+    expect({
+      notModelled: h.session.survey(MOON)?.status.notModelled,
+      fault: h.session.terrainFault,
+      views: [...h.session.terrainFaults.keys()],
+    }).toEqual({ notModelled: "surface", fault: TERRAIN_COMPUTATION_FAILED, views: [] });
+  });
+
+  it("shows no fault on a view that names no readout body and hands nothing over", async () => {
+    const h = await harness();
+    h.session.noteView(PRIMARY, { ...viewAt(5e6), readoutBody: null });
+    h.session.step();
+    await answerField(h);
+    h.session.failComputation();
+    expect({
+      fault: h.session.terrainFault,
+      views: [...h.session.terrainFaults.keys()],
+    }).toEqual({ fault: TERRAIN_COMPUTATION_FAILED, views: [] });
   });
 });

@@ -5,19 +5,27 @@ import type { ColourTokens } from "../../spatial/paint";
 import {
   aBody,
   aMarkedViewScene,
+  aViewCraft,
+  aViewScene,
   aViewStar,
   FIXTURE_MOON,
   FIXTURE_PLANET,
   FIXTURE_PLANET_CENTRE_M,
   FIXTURE_SHIP,
   FIXTURE_SYSTEM,
+  NO_TURN,
   OFF_PLANET_CAMERA,
 } from "../../test/viewFixtures";
 import { quaternionFromAxisAngle } from "../camera/quaternion";
-import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
+import {
+  DEFAULT_FOV_DEG,
+  type ProjectionCamera,
+  project,
+  type Viewport,
+} from "../camera/projection";
 import { overlayDrawList } from "../photoreal/overlay";
 import { surveyEdgeMark, type SurveyEdgeView } from "../terrain/surveyEdge";
-import type { CameraTarget } from "../camera/state";
+import { type CameraTarget, presetPose } from "../camera/state";
 import type { ViewPosition } from "../coords/position";
 import { relativeToCamera } from "../coords/relative";
 import { IDENTITY_ROTATION } from "../coords/rotation";
@@ -33,20 +41,22 @@ import {
 } from "../../spatial/symbols";
 import { occluderRadius } from "../depth/depth";
 import { narrow } from "../coords/narrow";
-import { TEST_HULL } from "../scene/hull";
-import { type BodyMarkSymbol, sceneOrigins, type ViewScene } from "../scene/model";
+import { type HullOutline, hullOutline, TEST_HULL } from "../scene/hull";
+import { type BodyMarkSymbol, cameraSceneOf, sceneOrigins, type ViewScene } from "../scene/model";
 import {
   buildWireframeDrawList,
   CASING_PX,
   type DrawCamera,
   type DrawOptions,
   type LineBatch,
+  type LineOfSightOptions,
   LOW_SETTING_MAX_SPRITES,
   occluderSlopePxAt,
   type ViewStrokes,
   viewStrokesAt,
   type WireframeDrawList,
 } from "./drawList";
+import { hullBoundingRadiusM } from "./hulls";
 import { lineOfSightTripod, markBoxPx, type ScreenSegment, segmentDistancePx } from "./symbology";
 
 /** Stand-in colours, one distinct string per token, as `readTokens` would read them. */
@@ -1267,7 +1277,7 @@ describe("the destination's chevrons (R07.T16.h; decision-r07-quality-and-destin
 });
 
 /** The readout's point, the tripod not given way before (R10.T12). */
-const AT_POINT = { hasPoint: true, yielded: false } as const;
+const AT_POINT = { hasPoint: true, rangeM: null, yielded: false } as const;
 
 /** The view's centre, where the projection puts the line of sight. */
 const VIEW_CENTRE = { xPx: VIEWPORT.widthPx / 2, yPx: VIEWPORT.heightPx / 2 };
@@ -1276,7 +1286,6 @@ const VIEW_CENTRE = { xPx: VIEWPORT.widthPx / 2, yPx: VIEWPORT.heightPx / 2 };
 const TRIPOD_TICKS = lineOfSightTripod(VIEW_CENTRE, 16, {
   markStrokePx: SYMBOL_STROKE_PX,
   markShiftPx: 0,
-  casingPx: CASING_PX,
 }).segments;
 
 /** {@link CAMERA} as the list projects through it. */
@@ -1442,7 +1451,7 @@ describe("the line-of-sight mark, the tripod (R10.T12)", () => {
   });
 
   it("is not drawn where the readout has no point, its give-way kept all the same", () => {
-    const list = build({ lineOfSight: { hasPoint: false, yielded: false } });
+    const list = build({ lineOfSight: { hasPoint: false, rangeM: null, yielded: false } });
     expect({ lines: list.lines, lineOfSight: list.lineOfSight }).toEqual({
       lines: build().lines,
       lineOfSight: { yielded: false, boxPx: null },
@@ -1541,14 +1550,21 @@ describe("the line-of-sight mark, the tripod (R10.T12)", () => {
 
   it("stays out while the flight path marker is within 0.75 rem, and returns beyond it", () => {
     const drawn = (clearRem: number, yielded: boolean): boolean =>
-      tripodOf(build({ lineOfSight: { hasPoint: true, yielded } }, withMarkerBelow(clearRem))) !==
-      undefined;
+      tripodOf(
+        build(
+          { lineOfSight: { hasPoint: true, rangeM: null, yielded } },
+          withMarkerBelow(clearRem),
+        ),
+      ) !== undefined;
     expect([drawn(0.6, false), drawn(0.6, true), drawn(0.8, true)]).toEqual([true, false, true]);
   });
 
   it("keeps its give-way through a frame with no point", () => {
     expect(
-      build({ lineOfSight: { hasPoint: false, yielded: false } }, withMarkerBelow(0.4)).lineOfSight,
+      build(
+        { lineOfSight: { hasPoint: false, rangeM: null, yielded: false } },
+        withMarkerBelow(0.4),
+      ).lineOfSight,
     ).toEqual({ yielded: true, boxPx: null });
   });
 
@@ -1607,4 +1623,213 @@ describe("the line-of-sight mark, the tripod (R10.T12)", () => {
       edgeOf(withSurveyEdge(input, SPHERE, THROUGH_CENTRE, { lineOfSight: AT_POINT })),
     ).toEqual(edgeOf(withSurveyEdge(input, SPHERE, THROUGH_CENTRE)));
   });
+});
+
+/**
+ * The fixture scene with the own ship alone, unturned and not moving, its hull `hull` at `offsetM`
+ * from {@link CAMERA} along the system's axes: the own ship's, so that no craft's ticks stand at it.
+ */
+function withOwnHullAt(hull: HullOutline, offsetM: Vec3): ViewScene {
+  return aViewScene({
+    craft: [
+      aViewCraft({
+        hull,
+        pose: {
+          position: {
+            kind: "system",
+            system: FIXTURE_SYSTEM,
+            m: add(CAMERA.pose.positionM, offsetM),
+          },
+          attitude: NO_TURN,
+        },
+      }),
+    ],
+  });
+}
+
+/** How far ahead of {@link CAMERA} the test outlines stand, m. */
+const OUTLINE_AHEAD_M = 100;
+
+/** A point `px` from the view's centre, as m across at {@link OUTLINE_AHEAD_M}: px ÷ (s W ÷ 2) × d. */
+function acrossM(px: number): number {
+  return (px / (Math.sqrt(3) * (VIEWPORT.widthPx / 2))) * OUTLINE_AHEAD_M;
+}
+
+/**
+ * A bare outline, one edge across the view below its centre at {@link OUTLINE_AHEAD_M}, `clearRem`
+ * from the end of the tripod's lower tick (7 px down), with no face.
+ */
+function barBelow(clearRem: number): HullOutline {
+  const dropM = acrossM(7 + clearRem * 16);
+  return hullOutline({
+    name: "BAR",
+    vertices: [vec3(-5, -dropM, 0), vec3(5, -dropM, 0)],
+    edges: [[0, 1]],
+    faces: [],
+    windows: [],
+    eyePointM: vec3(0, 0, 0),
+    lengthM: 10,
+  });
+}
+
+/**
+ * A square plate square to the line of sight at {@link OUTLINE_AHEAD_M}, about the view's centre,
+ * its edges `clearRem` beyond the tripod's ticks' reach (7 px), opaque or glazed.
+ */
+function plateAbout(clearRem: number, glazed: boolean): HullOutline {
+  const halfM = acrossM(7 + clearRem * 16);
+  return hullOutline({
+    name: "PLATE",
+    vertices: [
+      vec3(-halfM, -halfM, 0),
+      vec3(halfM, -halfM, 0),
+      vec3(halfM, halfM, 0),
+      vec3(-halfM, halfM, 0),
+    ],
+    edges: [
+      [0, 1],
+      [1, 2],
+      [2, 3],
+      [3, 0],
+    ],
+    faces: [
+      [0, 1, 2],
+      [0, 2, 3],
+    ],
+    windows: glazed ? [0, 1] : [],
+    eyePointM: vec3(0, 0, 0),
+    lengthM: 2 * halfM,
+  });
+}
+
+/** Whether a list of `input` from {@link CAMERA} draws the tripod, given `lineOfSight`. */
+function tripodDrawn(input: ViewScene, lineOfSight: LineOfSightOptions): boolean {
+  return tripodOf(build({ lineOfSight }, input)) !== undefined;
+}
+
+/** A point at `rangeM` from the camera, the tripod not given way before. */
+function pointAt(rangeM: number | null): LineOfSightOptions {
+  return { hasPoint: true, rangeM, yielded: false };
+}
+
+/**
+ * Whether the tripod is drawn over the own ship in `preset` on `TEST_HULL`, at a ratio of 1, in a
+ * view of `viewport` at an interface rem of `remPx`, its point 100 km beyond.
+ */
+function tripodDrawnFrom(preset: "seat" | "chase", viewport: Viewport, remPx: number): boolean {
+  const input = aViewScene();
+  const pose = presetPose(preset, "forward", null, cameraSceneOf(input), input.defaultPose);
+  if (pose === null) {
+    throw new Error("the fixture scene has no own ship");
+  }
+  const camera: DrawCamera = { pose, fovXRad: (DEFAULT_FOV_DEG * Math.PI) / 180 };
+  const list = buildWireframeDrawList(input, camera, viewport, TOKENS, {
+    ...OPTIONS,
+    ...viewStrokesAt(1),
+    remPx,
+    lineOfSight: pointAt(1e5),
+  });
+  return tripodOf(list) !== undefined;
+}
+
+/** The windows the tripod's look was ruled at (decision-r10-t12-commit3 §1). */
+const RULED_WINDOWS: ReadonlyArray<Viewport> = [
+  { widthPx: 1920, heightPx: 1080 },
+  { widthPx: 1280, heightPx: 720 },
+];
+
+/** The interface's rem at a ratio of 1 from 80% to 150%, device px. */
+const RULED_REMS_PX = [12.8, 16, 20, 24] as const;
+
+describe("the tripod over a craft's hull (R10.T12; decision-r10-t12-commit3 §1)", () => {
+  /** {@link OUTLINE_AHEAD_M} ahead of {@link CAMERA}, along its line of sight. */
+  const AHEAD = vec3(0, 0, -OUTLINE_AHEAD_M);
+
+  it("leaves out for a hull's edge within 0.5 rem of its ticks, keeps its state up to 0.75 rem, and returns beyond", () => {
+    const drawn = (clearRem: number, yielded: boolean): boolean =>
+      tripodDrawn(withOwnHullAt(barBelow(clearRem), AHEAD), { ...pointAt(null), yielded });
+    expect({
+      within: drawn(0.4, false),
+      between: [drawn(0.6, false), drawn(0.6, true)],
+      beyond: drawn(0.8, true),
+    }).toEqual({ within: false, between: [true, false], beyond: true });
+  });
+
+  it("counts an edge that runs from behind the camera, clipped at the near plane, not dropped", () => {
+    /** One edge from 10 m behind the camera to {@link OUTLINE_AHEAD_M} ahead, `clearRem` below. */
+    const fromBehind = (clearRem: number): HullOutline => {
+      const dropM = acrossM(7 + clearRem * 16);
+      return hullOutline({
+        name: "BOOM",
+        vertices: [vec3(0, -dropM, OUTLINE_AHEAD_M + 10), vec3(0, -dropM, 0)],
+        edges: [[0, 1]],
+        faces: [],
+        windows: [],
+        eyePointM: vec3(0, 0, 0),
+        lengthM: OUTLINE_AHEAD_M + 10,
+      });
+    };
+    expect({
+      near: tripodDrawn(withOwnHullAt(fromBehind(0.4), AHEAD), pointAt(null)),
+      clear: tripodDrawn(withOwnHullAt(fromBehind(0.8), AHEAD), pointAt(null)),
+    }).toEqual({ near: false, clear: true });
+  });
+
+  it("says it gave way to a hull for the next frame", () => {
+    const list = build({ lineOfSight: pointAt(null) }, withOwnHullAt(barBelow(0.4), AHEAD));
+    expect(list.lineOfSight).toEqual({ yielded: true, boxPx: null });
+  });
+
+  it("leaves out for an opaque face over the point with every edge 2 rem away, and not for a window", () => {
+    const drawn = (glazed: boolean): boolean =>
+      tripodDrawn(withOwnHullAt(plateAbout(2, glazed), AHEAD), pointAt(null));
+    expect({ opaque: drawn(false), glazed: drawn(true) }).toEqual({ opaque: false, glazed: true });
+  });
+
+  it("counts no hull wholly beyond the point: its distance less its bounding radius not nearer than the point", () => {
+    // TEST_HULL 1 km ahead on the line of sight, its faces over the point.
+    const input = withOwnHullAt(TEST_HULL, vec3(0, 0, -1_000));
+    const nearSideM = 1_000 - hullBoundingRadiusM(TEST_HULL);
+    expect({
+      pointBeforeIt: tripodDrawn(input, pointAt(nearSideM - 1)),
+      pointPastItsNearSide: tripodDrawn(input, pointAt(nearSideM + 1)),
+    }).toEqual({ pointBeforeIt: true, pointPastItsNearSide: false });
+  });
+
+  it("counts every drawn hull where the point's range is not known", () => {
+    const input = withOwnHullAt(TEST_HULL, vec3(0, 0, -1_000));
+    expect({
+      unknown: tripodDrawn(input, pointAt(null)),
+      before: tripodDrawn(input, pointAt(10)),
+    }).toEqual({
+      unknown: false,
+      before: true,
+    });
+  });
+
+  it("counts no hull behind a body's limb", () => {
+    // TEST_HULL on the line of sight 10⁷ m beyond the planet's centre, and 10⁷ m before it.
+    expect({
+      behind: tripodDrawn(withOwnHullAt(TEST_HULL, vec3(0, 0, -4e7)), pointAt(null)),
+      before: tripodDrawn(withOwnHullAt(TEST_HULL, vec3(0, 0, -2e7)), pointAt(null)),
+    }).toEqual({ behind: true, before: false });
+  });
+
+  it.each(RULED_WINDOWS)(
+    "leaves it out in CHASE over TEST_HULL at $widthPx × $heightPx, a ratio of 1, from 80% to 150%",
+    (viewport) => {
+      expect(RULED_REMS_PX.map((remPx) => tripodDrawnFrom("chase", viewport, remPx))).toEqual(
+        RULED_REMS_PX.map(() => false),
+      );
+    },
+  );
+
+  it.each(RULED_WINDOWS)(
+    "draws it in SEAT looking forward over TEST_HULL at $widthPx × $heightPx, a ratio of 1, from 80% to 150%",
+    (viewport) => {
+      expect(RULED_REMS_PX.map((remPx) => tripodDrawnFrom("seat", viewport, remPx))).toEqual(
+        RULED_REMS_PX.map(() => true),
+      );
+    },
+  );
 });

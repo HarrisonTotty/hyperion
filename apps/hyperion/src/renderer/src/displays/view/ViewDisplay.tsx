@@ -3,7 +3,6 @@ import {
   type FocusEvent,
   type KeyboardEvent,
   memo,
-  type ReactNode,
   useCallback,
   useEffect,
   useId,
@@ -75,7 +74,7 @@ import {
   serverSceneAtPush,
 } from "../../view/scene/fromServer";
 import { cameraSceneOf, type ViewStar } from "../../view/scene/model";
-import type { DrawAnchor, DrawnSurveyEdge } from "../../view/wireframe/drawList";
+import type { DrawAnchor, DrawnSurveyEdge, LineOfSightPoint } from "../../view/wireframe/drawList";
 import type { StyleAvailability } from "../../view/engine/platform";
 import { hostLights, lightingState, sceneHostDiscs } from "../../view/lighting/hostLights";
 import type { PhotorealStatus } from "../../view/photoreal/renderer";
@@ -136,7 +135,6 @@ import { measureRoom, NOT_MEASURED, type RoomMeasures, sameRoomMeasures } from "
 import { BESIDE_CLASS, ViewRoomSizers } from "./ViewRoomSizers";
 import {
   INSTRUMENT_SLOT_REM,
-  type LowerPlatePart,
   type RoomInput,
   roomToOpen,
   sameRoom,
@@ -170,6 +168,14 @@ import {
   useTerrainSession,
 } from "./useTerrainSession";
 import { ViewMarkList } from "./ViewMarkList";
+import {
+  GroundReadouts,
+  type GroundSnapshot,
+  lineOfSightPointOf,
+  readoutBodyOf,
+} from "./groundReadout";
+import { terrainLowerParts } from "./terrainPlate";
+import { standingReadout, useTerrainLines } from "./useTerrainLines";
 import { ViewSceneContext } from "./ViewSceneProvider";
 import {
   DEFAULT_FOLD,
@@ -228,12 +234,6 @@ const STARS_LABEL = "STARS";
  * "always shown" lines `FRAME` to `CAMERA`, with `QUALITY` among them.
  */
 const PINNED_THROUGH = "CAMERA";
-
-/**
- * The lower plate's parts (decision-r10-view-block-room §3): none until R10.T12 fills them with the
- * survey line, `DATUM` and `GROUND AT LINE OF SIGHT`, while the view states a body's terrain.
- */
-const NO_LOWER_PARTS: ReadonlyArray<LowerPlatePart<ReactNode>> = [];
 
 /** How many of `lines` before `STARS` stay in view at the scroll's first position: to `CAMERA`. */
 function pinnedLinesOf(lines: ReadonlyArray<LabelLine>): number {
@@ -458,6 +458,14 @@ interface LoopInputs {
    * R10.T16.d), told the script's time each primary frame; `null` for any other stage.
    */
   readonly notePlayed: ((scriptS: number) => void) | null;
+  /**
+   * What the primary's terrain readout, as last rendered, reads of its line of sight, which its
+   * tripod marks (`ViewFrameInputs.lineOfSightPoint`, plan R10, R10.T12): a point over ground,
+   * surveyed or not, with its slant range where known, none at `NO GROUND`, and absent while the
+   * plate states no readout, given way or not standing, so that the mark and the readout never
+   * disagree.
+   */
+  readonly lineOfSightPoint: LineOfSightPoint | undefined;
 }
 
 /** What the loop publishes for the DOM, at most every {@link READOUT_INTERVAL_MS}. */
@@ -484,6 +492,11 @@ interface Published {
    * `CONTOUR INTERVAL` (plan R10, R10.T11); `null` while it draws none.
    */
   readonly contourIntervalM: number | null;
+  /**
+   * What its label block's terrain lines are made from, its `FRAME` body's survey and the terrain
+   * readout's latest answer (plan R10, R10.T12; `GroundReadouts`); `null` where it states none.
+   */
+  readonly ground: GroundSnapshot | null;
 }
 
 /** The survey edges before the loop's first frame: none. */
@@ -688,6 +701,7 @@ function ViewStage({
     terrain: null,
     surveyEdges: NO_SURVEY_EDGES,
     contourIntervalM: null,
+    ground: null,
   });
   const shown = useThrottledValue(published, READOUT_INTERVAL_MS);
   // The meter as the loop last read it out (R07.T16.b): given in the same frame as the exposure the
@@ -723,6 +737,7 @@ function ViewStage({
     onExposureChange,
     terrain,
     notePlayed,
+    lineOfSightPoint: undefined,
   });
 
   // The sky replaces the interim field once it arrives, asked on the published run (R06.T13.c).
@@ -828,6 +843,15 @@ function ViewStage({
   const controlsView = operatedView === null ? VIEW_ID : operatedView.slot.id;
   const controlledShown = operatedView?.slot.shown ?? null;
   const faults = faultsFor(graphics, annunciation, VIEW_NAME, VIEW_ID, terrainFaults);
+  // The primary's terrain lines (R10.T12): its survey line, DATUM and readout, from the loop's
+  // latest publish, on the lower plate; the tripod and the list's note only while the plate states
+  // the readout (decision-r10-view-block-room §3).
+  const terrainLines = useTerrainLines(shown.ground, faults);
+  const lowerParts = terrainLowerParts(terrainLines);
+  const readoutAnswer = standingReadout(terrainLines, room.readout);
+  const sightPoint = readoutAnswer === null ? undefined : lineOfSightPointOf(readoutAnswer);
+  const hasPoint = sightPoint?.hasPoint;
+  const pointRangeM = sightPoint?.rangeM ?? null;
   // The primary's own terrain annunciation (G10; R10.T16.c), none while its fault stands, of either
   // cause (`terrainStatementOf`'s rule, C2).
   const primaryTerrain = faults.some((fault) => isTerrainFault(fault)) ? null : shown.terrain;
@@ -865,6 +889,7 @@ function ViewStage({
       onExposureChange,
       terrain,
       notePlayed,
+      lineOfSightPoint: hasPoint === undefined ? undefined : { hasPoint, rangeM: pointRangeM },
     };
   }, [
     exposure,
@@ -879,6 +904,8 @@ function ViewStage({
     onExposureChange,
     terrain,
     notePlayed,
+    hasPoint,
+    pointRangeM,
   ]);
 
   // The drawing loop reads the server's scene, as the latest render holds it, through a ref.
@@ -994,6 +1021,8 @@ function ViewStage({
     // once until a step succeeds, and the session's terrain faulted once its steps fail on for
     // 250 ms. One a session, so that a run of failures is its own.
     let stepGuard = new TerrainFailureGuard();
+    // The primary's terrain readout, asked at each publish (R10.T12; decision-r10-t12-leans §3).
+    const grounds = new GroundReadouts(VIEW_ID);
     // The contour interval of the last frame drawn (R10.T11), for the label block.
     let contourIntervalM: number | null = null;
     // One interval for a pose (R10.T12.b; decision-r10-view-block-room §10): the stage's views
@@ -1113,6 +1142,8 @@ function ViewStage({
             session === null
               ? undefined
               : { source: session, view: VIEW_ID, nowMs, intervals: poseIntervals },
+          // The tripod, while the plate states the readout with its point (R10.T12).
+          lineOfSightPoint: inputs.lineOfSightPoint,
         };
         // What it draws now, in the style it last drew in (S8), for the step below.
         const report =
@@ -1125,7 +1156,9 @@ function ViewStage({
                 drawnStyle,
               );
         if (session !== null && report !== null) {
-          session.noteView(VIEW_ID, report);
+          // Its FRAME body, whose terrain readout it states, is wanted wherever the camera is
+          // (R10.T12).
+          session.noteView(VIEW_ID, { ...report, readoutBody: readoutBodyOf(run) });
         }
       }
       // Guarded: no throw of the step stops this loop or the instruments' (S5), and one that lasts
@@ -1195,6 +1228,7 @@ function ViewStage({
           terrain: terrainAnnunciation,
           surveyEdges,
           contourIntervalM,
+          ground: grounds.publish(session, run, nowMs),
         });
       }
       frame = requestAnimationFrame(tick);
@@ -1417,8 +1451,6 @@ function ViewStage({
     placeLines(place, stale),
   );
   const primaryCount = viewSky.drawn === null ? countLine : null;
-  // The lower plate's parts: R10.T12's survey line, DATUM and readout, none until it fills them.
-  const lowerParts = NO_LOWER_PARTS;
 
   // The plates as laid out after each render, for the room's next decision (R10.T12.b): read from
   // the DOM, an external system, and kept only where they changed.
@@ -1796,6 +1828,7 @@ function ViewStage({
                 <ViewMarkList
                   rows={rows}
                   notes={notes}
+                  groundNote={hasPoint === true}
                   fromCamera={rangesFromCamera(shown.run.scene)}
                   stale={stale}
                   selectedKey={selection === null ? null : targetKey(selection)}

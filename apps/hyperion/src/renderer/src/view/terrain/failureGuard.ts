@@ -1,7 +1,9 @@
 /**
  * The guard of a terrain computation a view's loop runs every frame (plan R10, R10.T16.e;
  * decision-r10-t16-leans §8; the batch review's S5): the terrain session's step in
- * `stepTerrainSession`, and a view's survey edges in its drawer.
+ * `stepTerrainSession`, a view's survey edges in its drawer, and the terrain readout's queries,
+ * whose answers come later (R10.T12; decision-r10-t12-leans §5), through
+ * {@link TerrainFailureGuard.succeeded} and {@link TerrainFailureGuard.failed}.
  *
  * @remarks
  * No throw of a guarded call stops the loop. A device loss (`EngineUnavailable`) passes in silence:
@@ -52,21 +54,41 @@ export class TerrainFailureGuard {
     try {
       value = call();
     } catch (error: unknown) {
-      if (error instanceof EngineUnavailable) {
-        return fallback;
-      }
-      if (this.#failingSinceMs === null) {
-        this.#failingSinceMs = nowMs;
-        console.error(guarded.describe, error);
-      }
-      if (!this.#faulted && nowMs - this.#failingSinceMs >= ANNUNCIATION_ONSET_MS) {
-        this.#faulted = true;
-        guarded.onFault();
-      }
+      this.failed(error, nowMs, guarded);
       return fallback;
     }
+    this.succeeded();
+    return value;
+  }
+
+  /**
+   * Takes a success of a call whose outcome comes later than its making (an answer that arrived):
+   * it ends the run of failures, as a call `run` makes that returns does.
+   */
+  succeeded(): void {
     this.#failingSinceMs = null;
     this.#faulted = false;
-    return value;
+  }
+
+  /**
+   * Takes a failure of a call whose outcome comes later than its making (an answer refused), as a
+   * call `run` makes that throws: a loss (`EngineUnavailable`) in silence; anything else said once
+   * for a run of failures, and the terrain faulted once the run has lasted
+   * {@link ANNUNCIATION_ONSET_MS}.
+   *
+   * @param nowMs - The time the failure is taken at, the frame's monotonic time, ms.
+   */
+  failed(error: unknown, nowMs: number, guarded: GuardedCall): void {
+    if (error instanceof EngineUnavailable) {
+      return;
+    }
+    if (this.#failingSinceMs === null) {
+      this.#failingSinceMs = nowMs;
+      console.error(guarded.describe, error);
+    }
+    if (!this.#faulted && nowMs - this.#failingSinceMs >= ANNUNCIATION_ONSET_MS) {
+      this.#faulted = true;
+      guarded.onFault();
+    }
   }
 }

@@ -60,6 +60,7 @@ import type { FieldFailure } from "./coarseFieldStore";
 import type { CoverageView } from "./coverage";
 import type { GroundSight, TerrainSurvey } from "./session";
 import type {
+  SlopeBaselineM,
   SurfaceGroundMaterial,
   SurfaceGroundProperties,
   SurfaceGroundReadout,
@@ -246,6 +247,13 @@ export type ReadoutLine =
       readonly key: string;
       readonly text: string;
       readonly colour: StatusColour;
+      /**
+       * What it reports, where it is a request's outcome rather than a statement: the server's
+       * refusal of what was asked (`refused`, in `--text`) or a failure (`fault`, in
+       * `--status-caution`), the survey line's `SURVEY COVERAGE REJECTED` and `SURVEY DATA
+       * INVALID`, which a renderer sets as every request's status is; `null` for a statement.
+       */
+      readonly failure: "refused" | "fault" | null;
     }
   /** The readout's heading, {@link GROUND_HEADING}. */
   | { readonly kind: "heading"; readonly key: string; readonly text: string };
@@ -297,9 +305,14 @@ function reading(label: string, segments: ReadonlyArray<ReadoutSegment>): Readou
   return { kind: "reading", key: label, label, segments };
 }
 
-/** A status line. */
-function status(key: string, words: string, colour: StatusColour): ReadoutLine {
-  return { kind: "status", key, text: words, colour };
+/** A status line: a statement, unless it reports a request's refusal or failure. */
+function status(
+  key: string,
+  words: string,
+  colour: StatusColour,
+  failure: "refused" | "fault" | null = null,
+): ReadoutLine {
+  return { kind: "status", key, text: words, colour, failure };
 }
 
 /**
@@ -754,6 +767,7 @@ function failureLine(failure: FieldFailure): ReadoutLine {
         "survey-state",
         `SURVEY COVERAGE REJECTED: ${words}`,
         failure.refusal ? "text" : "status-caution",
+        failure.refusal ? "refused" : "fault",
       );
       break;
     }
@@ -762,6 +776,7 @@ function failureLine(failure: FieldFailure): ReadoutLine {
         "survey-state",
         `SURVEY DATA INVALID: ${failure.check}, ${RETRY}`,
         "status-caution",
+        "fault",
       );
       break;
   }
@@ -911,12 +926,17 @@ function valueSegment(value: string | null, widthCh: number, stale: boolean): Re
     : [field(value, widthCh, toneOf(stale)), mark(stale)];
 }
 
-/** A name's segment: the name at its own width, its `S` after it while stale; else the em dash. */
+/**
+ * A name's segment: the name at its own width, then its `S`'s place, the mark in it while stale;
+ * else the em dash, its place kept blank.
+ */
 function nameSegment(name: string | null, stale: boolean): ReadoutSegment {
+  // The S's place is kept after a name, as after every value, so that the substance after the
+  // form keeps its place as the readings go stale; the em dash takes none, its place kept blank.
   if (name === null) {
-    return [field(MISSING, 0, "missing")];
+    return [field(MISSING, 0, "missing"), mark(false)];
   }
-  return stale ? [field(name, 0, "stale"), mark(true)] : [field(name, 0, "value")];
+  return [field(name, 0, toneOf(stale)), mark(stale)];
 }
 
 /** What the readout's lines take besides the answer. */
@@ -1108,6 +1128,12 @@ export interface TerrainLabelInput {
   readonly slantFromCamera: boolean;
   /** The width of the pad the capacity was asked under, m. */
   readonly padWidthM: number;
+  /**
+   * Whether a kept scene leaves the body's surface unset (decision-r10-t12-commit3 §5): the survey
+   * line's place reads `TERRAIN: NOT YET MODELLED`, and no `DATUM` or readout stands; not by
+   * default.
+   */
+  readonly surfaceUnset?: boolean | undefined;
 }
 
 /** A view's terrain lines, in the label block's order, and the units they kept. */
@@ -1123,7 +1149,8 @@ export interface TerrainLabelModel {
 
 /**
  * A view's terrain lines (the guide's survey line, `DATUM` and terrain readout): the survey line
- * always ({@link surveyLines}); while the readout may stand ({@link terrainReadoutStands}), the
+ * always ({@link surveyLines}), or `TERRAIN: NOT YET MODELLED` in its place where a kept scene
+ * leaves the body's surface unset; while the readout may stand ({@link terrainReadoutStands}), the
  * `DATUM` line ({@link datumLine}) and the readout ({@link groundReadoutLines}), stale as the
  * survey is.
  *
@@ -1133,6 +1160,14 @@ export function terrainLabelModel(
   input: TerrainLabelInput,
   units: ReadoutUnits,
 ): TerrainLabelModel {
+  if (input.surfaceUnset === true) {
+    return {
+      survey: [status("survey", TERRAIN_NOT_MODELLED, "text")],
+      datum: null,
+      readout: [],
+      units,
+    };
+  }
   const survey = surveyLines(input.survey, units);
   const header = input.survey?.header ?? null;
   const { readout } = input;
@@ -1156,6 +1191,116 @@ export function terrainLabelModel(
     readout: ground.lines,
     units: ground.units,
   };
+}
+
+// --- The tallest forms --------------------------------------------------------------------------
+
+/**
+ * The longest `BASELINE` the guide offers, m (the crate's `SLOPE_BASELINES`): the tallest `SLOPE`
+ * line is reckoned at it, so that its room holds whichever R10.T12.a's selector sets.
+ */
+const LONGEST_BASELINE_M: SlopeBaselineM = 100;
+
+/** The longest of a list of names, the first where two are as long; `null` for none. */
+function longestOf(names: ReadonlyArray<string>): string | null {
+  return names.reduce<string | null>(
+    (longest, name) => (longest === null || name.length > longest.length ? name : longest),
+    null,
+  );
+}
+
+/** A view's terrain lines in their tallest forms, by which its lower plate's room is reckoned. */
+export interface TallestTerrainLines {
+  /** The survey line with both its values, stale. */
+  readonly survey: ReadoutLine;
+  /** `DATUM` as a spheroid with its `SEA LEVEL`, stale. */
+  readonly datum: ReadoutLine;
+  /** The readout's heading and every reading, Estimated, stale and grazing. */
+  readonly readout: ReadonlyArray<ReadoutLine>;
+}
+
+/**
+ * A view's terrain lines in their tallest forms (decision-r10-view-block-room §3): the survey line,
+ * `DATUM` and the readout, each at least as wide as any form the model gives them for the body, so
+ * that the lower plate's room, reckoned on them, never comes and goes with the readings.
+ *
+ * @remarks
+ * - Every value fills its fixed field with its longest reading and takes its `S`: the survey line's
+ *   `ABOVE 99.9 %` and `FINEST 36,000 km`; the readout's Estimated `ELEVATION`, `SLOPE` and
+ *   `SLANT RANGE` with their widest uncertainties, the capacity's `~0.95 MPa`, the friction's
+ *   `~0.71` with its `· AT 272 K`, and `RESOLUTION 36,000 km`.
+ * - `DATUM` is the header's spheroid with both radii and its `SEA LEVEL`, whether or not the body
+ *   has a sea or is a sphere.
+ * - `SLANT RANGE` takes the longer label, `SLANT RANGE FROM CAMERA`, and both of its forms at once:
+ *   its widest Estimated value and uncertainty, and the `· GRAZING` part that stands in the
+ *   uncertainty's place where it grazes, so that it is as tall as either at any width.
+ * - `MATERIAL` takes the longest form's name and the longest substance the header's palette names
+ *   (or `UNLISTED MATERIAL` where that is longer), each stale.
+ * - `SLOPE` takes the longest `BASELINE`, 100 m.
+ *
+ * @param padWidthM - The width of the pad the capacity is asked under, m (`ReadoutContext`).
+ */
+export function tallestTerrainLines(
+  header: SurfaceHeaderDto,
+  padWidthM: number,
+): TallestTerrainLines {
+  const stale = true;
+  const tone = toneOf(stale);
+  const survey = reading("SURVEY COVERAGE", [
+    [field("ABOVE 99.9 %", COVERAGE_FIELD_CH, tone), mark(stale)],
+    [consoleText("FINEST "), field("36,000 km", RESOLUTION_FIELD_CH, tone), mark(stale)],
+  ]);
+  const radii = `${radiusKm(header.equatorial_radius_m)} km × ${radiusKm(header.polar_radius_m)} km`;
+  const datum = reading("DATUM", [
+    [consoleText("REFERENCE SPHEROID "), field(radii, 0, tone), mark(stale)],
+    [
+      consoleText("SEA LEVEL "),
+      field(`${formatNumber(header.sea_level_m, 1)} m`, 0, tone),
+      mark(stale),
+    ],
+  ]);
+  const substances = header.palette.map((named) => substanceName(named.substance, "upper"));
+  const form = longestOf(MATERIAL_FORMS) ?? MISSING;
+  const substance = longestOf([...substances, "UNLISTED MATERIAL"]) ?? MISSING;
+  const estimated = (value: string, uncertainty: string): FieldReading => ({
+    value: `${ESTIMATED}${value}`,
+    uncertainty: `±${NO_BREAK_SPACE}${uncertainty}`,
+  });
+  const readout: ReadonlyArray<ReadoutLine> = [
+    { kind: "heading", key: "ground-heading", text: GROUND_HEADING },
+    reading("ELEVATION", [
+      uncertainSegment(
+        estimated("-99,999.9 m", "100,000 m"),
+        ELEVATION_FIELD_CH,
+        ELEVATION_UNCERTAINTY_CH,
+        stale,
+      ),
+    ]),
+    reading("SLOPE", [
+      uncertainSegment(estimated("90°", "90°"), SLOPE_FIELD_CH, SLOPE_UNCERTAINTY_CH, stale),
+      [consoleText(`BASELINE ${formatNumber(LONGEST_BASELINE_M, 0)} m`)],
+    ]),
+    reading(slantLabel(true), [
+      uncertainSegment(
+        estimated("5.00E-3 m", "10,000 km"),
+        SLANT_RANGE_FIELD_CH,
+        SLANT_RANGE_UNCERTAINTY_CH,
+        stale,
+      ),
+      [{ kind: "status", text: GRAZING }],
+    ]),
+    reading("MATERIAL", [nameSegment(form, stale), nameSegment(substance, stale)]),
+    reading("ULTIMATE BEARING CAPACITY", [
+      valueSegment(`${ESTIMATED}0.95 MPa`, CAPACITY_FIELD_CH, stale),
+      [consoleText(`PAD WIDTH ${formatTwoFigures(padWidthM)} m`)],
+    ]),
+    reading("PAD FRICTION", [
+      valueSegment(`${ESTIMATED}0.71`, FRICTION_FIELD_CH, stale),
+      [consoleText("AT "), ...valueSegment("272 K", TEMPERATURE_FIELD_CH, stale)],
+    ]),
+    reading("RESOLUTION", [valueSegment("36,000 km", RESOLUTION_FIELD_CH, stale)]),
+  ];
+  return { survey, datum, readout };
 }
 
 // --- The line of sight --------------------------------------------------------------------------

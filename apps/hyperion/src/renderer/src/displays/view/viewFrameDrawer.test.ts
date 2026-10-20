@@ -874,11 +874,12 @@ describe("a view's line-of-sight mark across its frames (R10.T12)", () => {
 
   /**
    * The craft below the centre with its upper tick `clearRem` below the end of the tripod's lower
-   * tick, at a ratio of 1 and 16 px a rem: the tripod's ticks from 4.21 to 8.21 px out (its open
-   * centre), the craft's upper tick ending 6.25 + 4 px above its anchor.
+   * tick, at a ratio of 1 and 16 px a rem: the tripod's ticks from 3.25 to 7.25 px out (0.1875 rem
+   * and δ's 0.25 px; decision-r10-t12-commit3 §3), the craft's upper tick ending 6.25 + 4 px above
+   * its anchor.
    */
   function craftClear(clearRem: number): ViewRun {
-    return runWithCraftBelow(1 + 2 + 0.5 + Math.SQRT1_2 + 4 + 10.25 + clearRem * 16);
+    return runWithCraftBelow(0.1875 * 16 + 0.25 + 4 + 10.25 + clearRem * 16);
   }
 
   /** A wireframe frame's inputs over `run`, at 320 × 180, its readout's point as given. */
@@ -896,7 +897,9 @@ describe("a view's line-of-sight mark across its frames (R10.T12)", () => {
       renderScale: 1,
       availability: { wireframe: true, photorealistic: true },
       meter: null,
-      ...(lineOfSightPoint === undefined ? {} : { lineOfSightPoint }),
+      ...(lineOfSightPoint === undefined
+        ? {}
+        : { lineOfSightPoint: { hasPoint: lineOfSightPoint, rangeM: null } }),
     };
   }
 

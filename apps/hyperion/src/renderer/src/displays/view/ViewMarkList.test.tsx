@@ -6,7 +6,7 @@ import { aViewScene, FIXTURE_MOON, FIXTURE_PLANET } from "../../test/viewFixture
 import type { ViewScene } from "../../view/scene/model";
 import type { DrawnSurveyEdge } from "../../view/wireframe/drawList";
 import { markRows, rangesFromCamera, startServerRun, surveyEdgeNotes } from "./viewRun";
-import { ViewMarkList } from "./ViewMarkList";
+import { GROUND_NOTE, GROUND_NOTE_NAME, ViewMarkList } from "./ViewMarkList";
 
 /** Both bodies' edges in view, the moon's nearer. */
 const BOTH: ReadonlyArray<DrawnSurveyEdge> = [
@@ -102,6 +102,88 @@ describe("the view list's survey-edge notes (R10.T16.c; decision-r10-t16-review 
 
   it("lists no note where no edge is in view", () => {
     renderList(aViewScene(), [{ body: FIXTURE_MOON, nearestRangeM: null }]);
+    expect(screen.queryByRole("note")).toBeNull();
+  });
+});
+
+/**
+ * The list of the fixture scene's targets with the notes of `edges` and, where `groundNote` holds,
+ * the line-of-sight mark's; each selection made pushed to `selected`.
+ */
+function renderWithGround(
+  edges: ReadonlyArray<DrawnSurveyEdge>,
+  groundNote: boolean | undefined,
+  options: { readonly stale?: boolean; readonly selected?: string[] } = {},
+): void {
+  const scene = aViewScene();
+  render(
+    <ViewMarkList
+      rows={markRows(startServerRun(scene))}
+      notes={surveyEdgeNotes(scene, edges)}
+      groundNote={groundNote}
+      fromCamera={rangesFromCamera(scene)}
+      stale={options.stale ?? false}
+      selectedKey={null}
+      onSelect={(row) => {
+        options.selected?.push(row.key);
+      }}
+    />,
+  );
+}
+
+describe("the view list's line-of-sight note (R10.T12; the guide's tripod, In the list)", () => {
+  it("stands GROUND AT LINE OF SIGHT first of the notes, before the survey edges'", () => {
+    renderWithGround(BOTH, true);
+    expect(screen.getAllByRole("note").map((note) => note.textContent)).toEqual([
+      GROUND_NOTE,
+      "SURVEY EDGE TEST MOON 4.21 km",
+      "SURVEY EDGE TEST PLANET 9.00 km",
+    ]);
+  });
+
+  it("names the note by the mark's place", () => {
+    renderWithGround(BOTH, true);
+    expect(
+      screen.getByRole("note", { name: "Ground at line of sight, at the view's centre" }),
+    ).toHaveTextContent("GROUND AT LINE OF SIGHT");
+  });
+
+  it("names the note the same while the list's ranges are stale, since it marks the centre", () => {
+    renderWithGround(BOTH, true, { stale: true });
+    expect(screen.getByRole("note", { name: GROUND_NOTE_NAME })).toHaveTextContent(GROUND_NOTE);
+  });
+
+  it("stands the note with no survey edge in view", () => {
+    renderWithGround([], true);
+    expect(screen.getAllByRole("note").map((note) => note.textContent)).toEqual([GROUND_NOTE]);
+  });
+
+  it("sets the note outside the listbox, and not as an option", () => {
+    renderWithGround(BOTH, true);
+    const list = screen.getByRole("listbox", { name: "Marks in view" });
+    const note = screen.getByRole("note", { name: GROUND_NOTE_NAME });
+    expect([list.contains(note), within(list).queryByText(GROUND_NOTE)]).toEqual([false, null]);
+  });
+
+  it("makes the note not focusable", () => {
+    renderWithGround(BOTH, true);
+    const note = screen.getByRole("note", { name: GROUND_NOTE_NAME });
+    expect([note.hasAttribute("tabindex"), note.tabIndex]).toEqual([false, -1]);
+  });
+
+  it("leaves the note out of the list's keys", async () => {
+    const user = userEvent.setup();
+    const selected: string[] = [];
+    renderWithGround([], true, { selected });
+    const rows = markRows(startServerRun(aViewScene()));
+    screen.getByRole("listbox", { name: "Marks in view" }).focus();
+    // The selection stays where the test holds it, none: each key moves from before the first row.
+    await user.keyboard("{End}{ArrowDown}");
+    expect(selected).toEqual([rows.at(-1)?.key, rows[0]?.key]);
+  });
+
+  it.each([false, undefined])("sets no line-of-sight note with groundNote %s", (groundNote) => {
+    renderWithGround([], groundNote);
     expect(screen.queryByRole("note")).toBeNull();
   });
 });

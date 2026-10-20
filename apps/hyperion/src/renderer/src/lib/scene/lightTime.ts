@@ -68,9 +68,10 @@ function floorNanos(fraction: number): number {
 
 /**
  * The span of `seconds`, not negative, floored to the nanosecond: the simulation's
- * `Span::from_seconds_f64` for a value at or above zero.
+ * `Span::from_seconds_f64` for a value at or above zero; a view's light time held as a float of
+ * seconds (`RetardedCentre.lightTimeS`) as a span again, to the nanosecond below 2⁵³ ns.
  */
-function spanFromSeconds(seconds: number): Span {
+export function spanFromSeconds(seconds: number): Span {
   const whole = Math.floor(seconds);
   return { seconds: whole, nanos: floorNanos(seconds - whole) };
 }
