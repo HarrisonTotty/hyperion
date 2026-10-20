@@ -3,27 +3,18 @@
 //! line, and how a server ended.
 //!
 //! Each server listens on port 0 in a data directory of its own, and is killed when its test ends,
-//! so a server that does not stop fails the test instead of outliving it.
+//! so a server that does not stop fails the test instead of outliving it. Like every wait of the
+//! harness, a server's start and its exit are bounded by [`patience`](super::patience).
 
 use std::fmt;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::{ExitStatus, Stdio};
-use std::time::Duration;
 
 use clap::CommandFactory;
 use hyperion_server::ServerArgs;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdout, Command};
-use tokio::time::timeout;
-
-/// Upper bound on a start, to the `listening` line. Nothing is loaded, since the data directory is
-/// empty, so this is margin for a loaded machine.
-pub const START_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Upper bound on a run of the binary that exits before serving, and on the exit after a stop
-/// request or a kill: neither has connections to close or jobs to finish.
-pub const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The server binary, with none of the variables it reads inherited from the test's environment:
 /// every option's, read from the parser itself, so that a new one is cleared too.
@@ -80,6 +71,15 @@ impl Running {
     /// Starts the server on port 0 in `data_dir` with one worker, logging at `info` without
     /// colours, with a null stdin, and with none of the variables it reads inherited from the
     /// test's environment. `configure` then adds to those settings or overrides them.
+    ///
+    /// It waits for the `listening` line under the harness's [`patience`](super::patience). Nothing
+    /// is loaded, since the data directory is empty, so that wait is margin for a loaded machine.
+    ///
+    /// # Panics
+    ///
+    /// If the server cannot be spawned or its output read, or if it ends before its `listening`
+    /// line or does not write that line within the patience. Also if
+    /// [`PATIENCE_ENV`](super::PATIENCE_ENV) is set and is not a whole number of seconds above 0.
     pub async fn start(data_dir: &Path, configure: impl FnOnce(&mut Command)) -> Self {
         let mut command = server_binary();
         command
@@ -99,7 +99,7 @@ impl Running {
             stdout: BufReader::new(stdout).lines(),
             lines: Vec::new(),
         };
-        let listening = timeout(START_TIMEOUT, async {
+        let listening = super::patiently("waiting for the server's `listening` line", async {
             while let Some(line) = running.next_line().await {
                 if line.contains("listening") {
                     return true;
@@ -107,8 +107,7 @@ impl Running {
             }
             false
         })
-        .await
-        .expect("the server starts listening within START_TIMEOUT");
+        .await;
         if listening {
             return running;
         }
@@ -146,8 +145,18 @@ impl Running {
     }
 
     /// Reads the rest of the server's output and waits for it to exit.
+    ///
+    /// It waits under the harness's [`patience`](super::patience). An exit after a stop request or
+    /// a kill has no connections to close or jobs to finish, so that wait is margin for a loaded
+    /// machine too.
+    ///
+    /// # Panics
+    ///
+    /// If the server's output cannot be read or the server cannot be waited for, or if it does not
+    /// exit within the patience. Also if [`PATIENCE_ENV`](super::PATIENCE_ENV) is set and is not a
+    /// whole number of seconds above 0.
     pub async fn finish(mut self) -> Stopped {
-        timeout(EXIT_TIMEOUT, async {
+        super::patiently("waiting for the server to exit", async {
             while self.next_line().await.is_some() {}
             let mut stderr = String::new();
             if let Some(mut pipe) = self.child.stderr.take() {
@@ -163,6 +172,5 @@ impl Running {
             }
         })
         .await
-        .expect("the server exits within EXIT_TIMEOUT")
     }
 }
