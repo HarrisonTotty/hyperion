@@ -51,26 +51,30 @@ const SOURCE = {
  * with the orbit coast flown level, which moved high's coast alone. 2026-10-05: selected at
  * τ ÷ 1.1 (decision-r05-record-tau.md); every window moved but high's vertical descent and hover,
  * whose selections are the same at either tolerance. Before re-pinning, the 14 windows run at the
- * setting's τ reproduced the hashes pinned before, and the fixture, byte for byte.
+ * setting's τ reproduced the hashes pinned before, and the fixture, byte for byte. 2026-10-20:
+ * R10.T14.e's normal margin (the boxes' normal half-extent takes the boundary's sagitta in place of
+ * the ring's chord, so fewer coarse patches below the horizon pass), and all 14 moved, none kept:
+ * every window's selected bounds changed, and its mean patches a frame by −15.7 to +1 (plan 10,
+ * T14.e's record). No window asked a key the fixture lacks, so the fixture is as it was.
  */
 const PINNED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   high: {
-    "orbit coast": "df104b5501ce5e0b",
-    "descent arc": "a4180564c215ffe6",
-    "approach and flare": "f77246a34f435036",
-    "low fast pass": "fcc42d115d7da663",
-    slowdown: "64e24061df5b2400",
-    "vertical descent": "7f86f5753748ba08",
-    "hover and touchdown": "3815401074eed29e",
+    "orbit coast": "fd7ae3382c240021",
+    "descent arc": "439ea3210155af6a",
+    "approach and flare": "d9f6c5ae43da617b",
+    "low fast pass": "4b2c37f5cc7985e4",
+    slowdown: "ecd8036c19cc835e",
+    "vertical descent": "dfa26af3b11f1944",
+    "hover and touchdown": "91cd09b8651bf057",
   },
   low: {
-    "orbit coast": "3674ed69e62032f9",
-    "descent arc": "2c266fb1ea0c57d8",
-    "approach and flare": "7e583e2ae02512d0",
-    "low fast pass": "1f9f60c3def409b7",
-    slowdown: "03e68d9fca900571",
-    "vertical descent": "e2a6afd03bee7c06",
-    "hover and touchdown": "927a1d8e235bfa8e",
+    "orbit coast": "c9a36f3ba4350b99",
+    "descent arc": "7a8c9c94761b778e",
+    "approach and flare": "a0cd1a2fc860e35f",
+    "low fast pass": "bf701119d8e01aad",
+    slowdown: "132bd06205d34c0e",
+    "vertical descent": "2688e84fbcec3b10",
+    "hover and touchdown": "ba06af3a7ea9e6d5",
   },
 };
 
@@ -78,11 +82,15 @@ const PINNED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
  * The windows where the measured demand lies within a factor of two of the per-level D. The
  * others miss, recorded as findings in the plan's Risks (T13.a, as built), never by a looser test.
  * At τ ÷ 1.1 (2026-10-05) high's descent arc missed (0.49) and high's slowdown came within (0.61).
+ * After R10.T14.e's normal margin (2026-10-20) both descent arcs came within, high's at 0.93 and
+ * low's at 1.64 (from no demand at all).
  */
 const WITHIN_TWO: ReadonlyArray<string> = [
+  "high/descent arc",
   "high/approach and flare",
   "high/low fast pass",
   "high/slowdown",
+  "low/descent arc",
   "low/approach and flare",
   "low/low fast pass",
   "low/slowdown",

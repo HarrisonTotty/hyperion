@@ -873,19 +873,21 @@ describe("the cache at its sizes over R05's descent (plan R10, R10.T14.a)", () =
     return { name, layout, record, replay: replayDescent(layout, view) };
   }
 
-  // `record` is T14.a's record in plan 10, the sizing rule's forced term and the pins; R10.T14.e,
-  // which tightens the boxes, moves it.
+  // `record` is T14.a's record in plan 10, the sizing rule's forced term and the pins, as R10.T14.e's
+  // normal margin, which tightens the boxes, moved it (2026-10-20): low past its slots in 107 frames,
+  // from 136, and high's pins peaking at 887, from 884, its freed budget refining elsewhere; the
+  // forced peak and the wireframe's case are as they were.
   const REPLAYS = [
     replayed("the low setting's lit", terrainSlotLayout(TERRAIN_SETTINGS.low, "lit"), low.view, {
       frames: 723,
       peakForced: 71,
       peakPins: 422,
-      exceededFrames: 136,
+      exceededFrames: 107,
     }),
     replayed("the high setting's lit", terrainSlotLayout(TERRAIN_SETTINGS.high, "lit"), high.view, {
       frames: 723,
       peakForced: 71,
-      peakPins: 884,
+      peakPins: 887,
       exceededFrames: 0,
     }),
     replayed(

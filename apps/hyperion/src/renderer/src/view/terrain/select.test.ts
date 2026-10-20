@@ -870,7 +870,10 @@ describe("the budget's limit excess", () => {
   const secondary = view(LOW, lookingDown(LOW, 0.4), { weight: 0.25, tauPx: 4 });
   // The digests were recorded from selection before `limitExcess` was added (2026-10-04), and
   // guard the work on selection's cost (decision-r05-high-bound.md, item 4): re-record them only
-  // when selection's output is meant to change.
+  // when selection's output is meant to change. Re-recorded 2026-10-20 for R10.T14.e's normal
+  // margin, which culls coarse patches below the horizon that R05's chord let pass (patches with no
+  // budget, then under it: 12,731 to 12,721 and 300 to 299; 287 to 251 and 198 to 198; 13,220 to
+  // 13,210 and 1,998 to 2,000).
   const cases: readonly BudgetCase[] = [
     budgetCase({
       name: "one view and no baked ranges",
@@ -878,8 +881,8 @@ describe("the budget's limit excess", () => {
       budget: 300,
       bakedDepth: null,
       digests: {
-        free: "12731 98452de7 1 84bfd6f6 false",
-        budgeted: "300 e43ad952 3 3a5eda2e true",
+        free: "12721 80a1e935 1 84bfd6f6 false",
+        budgeted: "299 3f3f0074 3 3a5eda2e true",
       },
     }),
     budgetCase({
@@ -888,8 +891,8 @@ describe("the budget's limit excess", () => {
       budget: 200,
       bakedDepth: 7,
       digests: {
-        free: "287 5d6b78f0 159 ea8fbb82 false",
-        budgeted: "198 187cb71c 84 7a9121f2 true",
+        free: "251 c07cb76 126 2ab89143 false",
+        budgeted: "198 a0d6d2df 87 8744afdf true",
       },
     }),
     // The refused split is one only the secondary view wants, its weighted excess under 1.
@@ -902,8 +905,8 @@ describe("the budget's limit excess", () => {
       budget: 2000,
       bakedDepth: null,
       digests: {
-        free: "13220 d29cc345 1 84bfd6f6 false",
-        budgeted: "1998 1bfeb10d 1 84bfd6f6 true",
+        free: "13210 679b4a70 1 84bfd6f6 false",
+        budgeted: "2000 a7ee9cb7 3 3a5eda2e true",
       },
     }),
   ];
@@ -1273,12 +1276,14 @@ function approachDigest(): string {
 describe("selection's output, bit for bit", () => {
   // Recorded from selection before R05.T7 perf (c) (2026-10-04, with F3's `hiddenBaked`), with
   // every number it returns: the work on selection's cost changes none of them. Re-record only when
-  // the output is meant to change.
+  // the output is meant to change. Re-recorded 2026-10-20 for R10.T14.e's normal margin (patches
+  // 981 to 980, 1,952 to 1,952 and 12,731 to 12,721; along the approach 38,823 to 38,746 over its
+  // 48 frames).
   const pose = view(LOW, lookingDown(LOW, 1.2));
   it.each([
-    { label: "a budget of 981", budget: 981, digest: "981 3 d2f846a9" },
-    { label: "a budget of 1,952", budget: 1952, digest: "1952 3 cd0bdca9" },
-    { label: "no budget", budget: undefined, digest: "12731 1 36f86306" },
+    { label: "a budget of 981", budget: 981, digest: "980 3 5d0bb89f" },
+    { label: "a budget of 1,952", budget: 1952, digest: "1952 3 5eea445a" },
+    { label: "no budget", budget: undefined, digest: "12721 1 bed6f397" },
   ])("is as recorded at the 1.5 km pose with $label", ({ budget, digest }) => {
     const sel = selectPatches({
       planet: PLANET,
@@ -1291,7 +1296,7 @@ describe("selection's output, bit for bit", () => {
   });
 
   it("is as recorded frame by frame along an approach, its bakes following its demand", () => {
-    expect(approachDigest()).toBe("48 8a892427");
+    expect(approachDigest()).toBe("48 1ac40f03");
   });
 });
 
