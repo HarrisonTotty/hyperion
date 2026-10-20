@@ -3,11 +3,13 @@
  * setting's budget (plan R05, Design note 10).
  *
  * @remarks
- * R10 owns the layout's sizes and formats per setting (R10 Design note 15 and T14); R05 builds its
- * shape from the start so that nothing is rebuilt when R10 lands. Heights and morph targets (and,
- * from R10, the horizon map, class weights and survey mask) are unfiltered data in storage buffers
- * indexed by slot and vertex; normals, which want filtering, live in a 2D atlas (T11.a). The slot
- * count is fixed when the cache is made.
+ * R10 owns the layout's sizes and formats per setting (R10 Design note 15); R05 built its shape
+ * from the start so that nothing was rebuilt when R10 landed. Heights and morph targets (and, from
+ * R10, the horizon map, the class layers and the survey mask) are unfiltered data in storage
+ * buffers indexed by slot and vertex; normals, which want filtering, live in a 2D atlas (T11.a).
+ * The slot count is fixed when the cache is made. R10's tasks sized their fields (T8.b, T10.b,
+ * T10.c, T11); `cacheBudget.ts` (R10.T14.a) sums a slot's bytes and sets them beside Design note
+ * 15's count model, and R10.T14.b settles the budgets from measurement.
  */
 
 import type { TerrainSettings } from "../quality/qualitySetting";
@@ -105,7 +107,8 @@ export const SURVEY_CELL_CODE_BYTE = VERTICES;
  *
  * @remarks
  * R10 adds its own fields to this union (the class layers, R10.T10.b; the survey mask, R10.T10.c)
- * and sizes `horizon-map` (R10.T8.b; T14 settles the budgets).
+ * and sizes `horizon-map` (R10.T8.b); `cacheBudget.ts`' `bytesPerPatch` sums them (R10.T14.a),
+ * and R10.T14.b settles the budgets.
  */
 export type SlotFieldName =
   "heights" | "offsets" | "normals" | "horizon-map" | "class-layers" | "survey-mask";

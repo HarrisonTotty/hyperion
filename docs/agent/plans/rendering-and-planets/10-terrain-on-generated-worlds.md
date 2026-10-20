@@ -1149,6 +1149,12 @@ targets at header 21 (below).
     under the rule's 430; and R05.T18 kept `BakedOffsets` on the high setting, so a high slot is
     about 310 kB and 400,000,000 B holds about 1,290 slots, against the rule's 1,900. T14 decides,
     as Risks' "The low setting's cache is at its edge" already has it for the low setting._
+    _As built by T14.a (`cacheBudget.ts`): the model counts by the selection's own metric, and on
+    it, on the exact horizon this note's premise names (`exactHorizon`), the note's high column is
+    about 1.6 times low (model ÷ note ×1.53–1.91) and its low and wireframe columns near
+    (×0.98–1.25 and ×0.89–1.33); on the boxes' horizon, as `selectPatches` culls until R10.T14.e,
+    ×1.75–2.21, ×1.29–1.75 and ×1.36–1.90. The sizing rule's figures from it are T14.a's record's,
+    the constants provisional for T14.b (decision-r10-t14a and its #56 follow-up)._
 
 16. **The client fetches what the camera can resolve, and nothing more.** A body's field is wanted
     once it is the camera's local body or within the hand-over range of Design note 13 of any view's
@@ -1227,8 +1233,9 @@ plan, then R09's server and coarse pass):
 - **T10.a** follows T1.b; its server test of `surface_field`'s answer waits on R09.T19.b. **T10.b**
   draws the atmosphere through R07's stubs until R08.T9.b lands, and the ground's thermal emission
   waits on R08.T18.
-- **T16** after T10.c–f land, then T11 and T12 on its session; T14.c, then T14.b, after it; T15
-  after the serve gate opens (decision-bump-plan-after-22 §1.4).
+- **T16** after T10.c–f land, then T11 and T12 on its session; T14.c, then T14.b, after it, T14.a
+  free, T14.e after T14.a, and T14.d and T14.e before T14.b's measurements; T15 after the serve
+  gate opens (decision-bump-plan-after-22 §1.4).
 
 Rust files are under `crates/hyperion-surface/src/` and client files under
 `apps/hyperion/src/renderer/src/view/terrain/` unless a path says otherwise. Every test in
@@ -3400,6 +3407,16 @@ RESOLUTION       410 m
   10%; the cache never evicts a patch under a grounded body at the chosen size during a replay of
   the descent's selections. Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`.
+  _Ruled (decision-r10-t14a, 2026-10-20, and its #56 follow-up):_ the model is built on the
+  selection's own metric (R05's box distance at the premise's bound, without the balance, the
+  forced region or the budget), and takes the margin a side, the bound's ratio and a relief
+  half-height as inputs; its test holds Design note 15's table to [0.5, 2] a cell on the exact
+  horizon, the box-horizon ratios recorded beside it, since no one faithful reading meets all three
+  columns within 10% (on the exact horizon the model's high column is ×1.53–1.91 the note's at
+  k = 5, and ×1.04–1.15 all-round and ×1.12–1.37 in the frustum at k = 4), and its validation is a
+  cross-check against `selectPatches` on the premise planet; R05's margin along the normal passes
+  coarse patches below the horizon; R10.T14.e fixes it; the constants stay provisional and
+  unchanged; every GPU item is T14.b's but the compile lever, T14.d's.
 - **R10.T14.c The descent over a generated world** (new at the scoping of 2026-10-16,
   `decision-r10-live-path.md`; before T14.b). R05's descent spike flies a body source:
   `--world terrain-test` takes `TERRAIN TEST`'s fixture body and field through T16's session (its
@@ -3425,12 +3442,52 @@ RESOLUTION       410 m
   400 MB hold, or the finding; and record the resident
   total (the cache, the coverage mask, the class map, the cascades, each worker's field copy)
   against the ceilings of 1 GB low and 2–3 GB discrete, from driver-reported GPU memory as well as
-  computed bytes. By hand, recorded, on a quiet machine: the peaks and totals on the development
+  computed bytes.
+  It also takes (decision-r10-t14a §1): a measurement at a 1 s/s scene clock beside 60 s/s, each
+  frame's motion margin, bound ratio and box heights logged, so that the wireframe's "more than
+  twenty times" (T11's deferred findings) is split into its factors and the wireframe's budget sized
+  from it; the wireframe's share against the model's and Design note 15's ratios; the horizon's GPU
+  time by an A/B with the layer off; eviction in place of rebakes, weighed against the undrawn
+  rebakes' worker time and built if adopted; "The live path's costs" and the T16 records' measured
+  costs; the owner's UHD 620 figures before the low setting is sized; and the binding ceiling
+  (1,323 lit slots, 411,484,752 B, on `baked-offsets` under a default 128 MiB binding) for each
+  machine. If R10.T9.b has not landed, the cascades are counted at 67,108,864 B from T9.a's spec,
+  labelled computed.
+  By hand, recorded, on a quiet machine: the peaks and totals on the development
   machine's RTX 3080 and, by the owner, on the UHD 620. Acceptance: the figures recorded and the
   constants updated, with `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`
   passing.
-- **From R10.T16's rulings** (decision-r10-t16-leans §2, §13 and §16, 2026-10-20). T14 also
-  takes:
+- **R10.T14.d The hand-over's compile stall** (new, decision-r10-t14a §1, from
+  decision-r10-t16-leans §2). The lit material, its depth material and the wireframe's are compiled
+  when the terrain session is made, before any hand-over, so that a hand-over never stalls the page
+  (1,317 ms with no animation frame on low, a defect under the guide's Motion rule that a view never
+  stops); then the terrain run gains a limit on the longest gap outside the restore, set from
+  quiet-machine runs (the worst gaps today 117 ms on high alone and 300 ms as the instruments open).
+  Desktop: the engine's pipeline compilation and the session, so `just test-render` and the hidden
+  `just views-check --terrain` on both settings. Free now T16 has landed; before T14.b's quiet runs.
+  Tests: the session compiles its materials at creation, and a hand-over then compiles none; the
+  terrain run fails on a gap over the limit outside the restore. Acceptance: the lane's
+  `just smart-ci`, `just test-render` and the hidden terrain run, with the gaps recorded.
+- **R10.T14.e The patch boxes' margin along the normal** (new, decision-r10-t14a's #56 follow-up).
+  R05's `packPatchBounds` (`bounds.ts`) adds its margin, the largest chord between neighbouring
+  ring samples (a sixteenth of the patch's edge), to all three half-extents. Along the centre's
+  normal it is not needed: the patch's highest point along that normal is its centre vertex at the
+  top of its range (the support point of a convex figure in its own normal's direction), sampled
+  exactly, and its lowest lies on its boundary, which departs from the chord between two samples by
+  at most the chord's sagitta under a stated bound on the boundary's curvature. So the normal's
+  half-extent takes that sagitta, rounded up, in place of the chord; the tangents and the sphere
+  keep the chord. On the count model's premise at 100 m the chord passes 22% of the high setting's
+  all-round leaves, wholly below the horizon (T14.a's record). Tests: every vertex of the 65 × 65
+  grid and a 257 × 257 sampling of the surface, at both ends of the height range, lies inside the
+  box, for patches of levels 0–19 over faces, edges and corners, on WGS 84, a sphere and a figure of
+  flattening 0.1; `bounds.test.ts`'s oracle takes the same margins; the count model's box and
+  exact-horizon counts, and R05.T13.a's fourteen descent windows' patch counts, before and after;
+  the windows' pinned hashes (`demandRecord.test.ts`) and T14.a's box-metric table re-pinned, each
+  move stated. No golden file and no generator version. Client-only, Vitest; the orchestrator runs
+  `just test-render` at landing, since the smoke harness's terrain parts select through the boxes.
+  After T14.a; before T14.b's measurements.
+- **From R10.T16's rulings** (decision-r10-t16-leans §2, §13 and §16, 2026-10-20). T14 also takes
+  (routed by decision-r10-t14a §1: the compile lever to T14.d, the rest to T14.b):
   - _The compile lever_ (§2): the lit and depth materials compiled when the terrain session is
     made, for the whole-page stall at the hand-over (1,317 ms with no animation frame on low, a
     defect under the guide's Motion rule that a view never stops). Once it lands, the terrain run
@@ -3530,7 +3587,10 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   about 156 kB, and the sizing rule's 430 slots fill 64 MiB exactly before relief and balancing. T14
   decides between a larger low cache (inside the 1 GB ceiling), a half-resolution near-field horizon
   (33 × 33, 17 kB) and the frustum rule, and records which. R05 choosing `BakedOffsets` would break
-  the 64 MiB outright.
+  the 64 MiB outright. _As built: 422 lit slots in 64 MiB (158,936 B a slot); the model's rule gives
+  about 935 at τ_sel on the boxes' horizon, what the cache holds today, and about 676 on the exact
+  one, the estimate after R10.T14.e, each with the descent's 71 forced patches (T14.a's record).
+  T14.b decides after the UHD 620 run._
 - **Coarse weights assume Gaussian slopes.** The slope-exceedance probability of Design note 3
   treats the unresolved slope as Gaussian; ridged and cratered terrain is not. The ten-point test is
   the guard; if it fails on a class of world, the fallback is counting a sparse sample of finest
@@ -10009,6 +10069,208 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
   - _The views check's patch counts._ The probe's phase table counts the lit pass's patches alone
     (its `view:hdr` frames), so a wireframe-only run records none; for the views check's next
     revision.
+- **Deviations in T14.a, as built** (2026-10-20; lane `lane/56-r10-t14a-count-model`, on
+  `rendering-and-planets` at `bd185668`; decision-r10-t14a and its #56 follow-up).
+  - _Files._ New: `view/terrain/cacheBudget.ts` with `cacheBudget.test.ts`. Changed:
+    `cache.test.ts` (the replay); the doc comments alone of `cache.ts`, `slotLayout.ts` and
+    `view/quality/qualitySetting.ts`; `qualitySetting.test.ts` (400,000,000 B and 520 slots
+    pinned beside 64 MiB). No value, behaviour, wire, protocol, DTO, golden or generator version
+    changes. The layout handed to `PatchCache` is already `terrainLayout`'s slots (`terrainPass.ts`'
+    device), verified, not rewired. The acceptance as run adds `src/renderer/src/view/quality` to
+    the entry's command, the brief's, since the two pins live there.
+  - _The names._ `bytesPerPatch({ terrain, shading })`, the sum of `terrainSlotFields`, needing no
+    budget. `patchCountModel(camera, tauPx, viewport, premise?)`: the camera
+    `{ heightM, fovXRad, frustumMarginRad? }` over `COUNT_MODEL_SITE` (face 0, level 19,
+    (300,001, 200,003), its centre vertex), the premise `{ radiusM?, edgesAtOnePx?, reliefM? }`, by
+    default WGS 84's a as a sphere, k₀ = 5 and no relief; it returns
+    `{ positionM, allRound, frustum: [least, greatest], peaks, exactHorizon }`, a peak
+    `{ headingRad, pitchRad, count, orientation }` for each of `COUNT_MODEL_HEADINGS_RAD` (0°,
+    22.5°, 45° from the face's +u), and `exactHorizon` the same counts on the exact horizon (below).
+    The rule: `sizingRuleSlots(views, forcedPatches)` and `frustumRuleSlots(views, forcedPatches)`,
+    a view `{ allRound, frustum }`, unrounded, with `ALL_ROUND_FACTOR` 1.3 and `FRUSTUM_FACTOR` 3;
+    `slotBudgetBytes(slots, bytesPerSlot)`, in whole slots. The allocations:
+    `cacheAllocationBytes(layout)` and `allocationSumBytes(layouts)`. The ceiling:
+    `bindingCeilingSlots(fields, bindingBytes?)`, `WEBGPU_DEFAULT_STORAGE_BINDING_BYTES`
+    (134,217,728 B) by default.
+  - _The slot's bytes_ (test 1), each `terrainSlotLayout(…).bytesPerSlot` too:
+
+    | Field          | Design note 15           | As built               | Departure | Why (task)                                                     |
+    | -------------- | ------------------------ | ---------------------- | --------- | -------------------------------------------------------------- |
+    | Heights        | 33,800                   | 33,800                 | none      |                                                                |
+    | Offsets        | about 101 kB             | 101,400                | none      |                                                                |
+    | Mesh normals   | 16,900                   | 17,956                 | +1,056    | the atlas's gutter (R05)                                       |
+    | Double normals | 66,564                   | 68,644                 | +2,080    | the atlas's gutter (R05)                                       |
+    | Class weights  | 33,800, two `rgba8unorm` | 34,056, `class-layers` | +256      | one storage buffer with the laws, interpolated by hand (T10.b) |
+    | Horizon map    | 67,600                   | 68,896                 | +1,296    | the 9 × 9 far field (T8.a, T8.b)                               |
+    | Survey mask    | 4,225                    | 4,228                  | +3        | word alignment and the cell-code byte (T10.c)                  |
+
+    A slot: 158,936 B low lit (the note's 156,325, +1.7%); 311,024 B high lit (307,389, +1.2%);
+    209,624 B on high's `face-differences` fallback (205,989); the wireframe's 38,028 B on
+    `face-differences` and 139,428 B on `baked-offsets`; R05's spike's 51,756, 203,844 and
+    102,444 B. Low lit on `baked-offsets` is 260,336 B, 257 slots in 64 MiB: the note's "not with
+    `BakedOffsets`". The slot counts as built: 422 low lit, 1,286 high lit, 520 for the wireframe.
+
+  - _The premise's deviations._ The vertical field of view follows from the aspect, as the engine's
+    projection takes it: 2 atan(tan 30° × 9 ÷ 16) = 36.0°, not the note's 34°, which scales the
+    angle (60° × 9 ÷ 16 = 33.75°) rather than its tangent. The distance is
+    R05's box distance (`patchBounds`, `relativeBounds`, `distanceToBoxM`), not the patch's centre.
+    The bound is ε_n = k₀ eₙ ÷ P₀ alone, P₀ = 1,662.8 px rad⁻¹: the chord sagitta, the 2:1
+    balance, the forced region, the survey and the budget are left out. The frustum is searched over
+    three headings and 91 pitches from level to the nadir, 1° apart; each heading's peak is taken,
+    and the range is the least and greatest of the three.
+  - _Two horizons._ _Ruled (decision-r10-t14a, the #56 follow-up, §1–§2): the model returns both
+    counts, its own on the selection's box test, which the sizing rule and the cross-check read,
+    and `exactHorizon`, the same leaves and poses with each leaf's horizon tested exactly on its
+    own surface._ R05's bounds add their margin, the largest chord between ring samples, about a
+    sixteenth of the patch's edge, to every half-extent, the normal's included, so the top of a
+    coarse patch's box stands hundreds of metres above the patch and `aboveHorizon` passes patches
+    wholly below the true horizon: at 100 m, 654 of the high setting's 3,014 all-round leaves
+    (22%), 178 of low's 581 and 125 of the wireframe's 409 (31% each). `exactHorizon` calls a
+    leaf seen where the camera's nadir lies in it or the least angle from the nadir to its four
+    great-circle edges (to the perpendicular's foot inside the arc, else the nearer end) is at most
+    acos(R ÷ (R + h)) + acos(R ÷ (R + H)), H the relief. The boxes' all-round counts are 1.15–1.44
+    times the exact ones across the table, their frustum peaks 1.14–1.56 times. The first build
+    tested the centre vertex and every fourth boundary vertex instead; leaf for leaf it agreed
+    with the exact test everywhere at zero relief (42 cases, up to 18,151 leaves each, the largest
+    difference 0), and under relief once given the same occluder. As ruled, the exact test keeps
+    the sphere of R as its occluder under relief, where the boxes' test sinks it to R − H
+    (`horizonCone`): at ±24.5 km and 1 km it sees 3,652 of the high setting's 4,004 leaves, against
+    3,949 with the occluder sunk (711 against 761 on low, 494 against 534 for the wireframe).
+  - _R7's test change._ _Ruled (decision-r10-t14a, and its #56 follow-up): the model's own table
+    is pinned to 1%, Design note 15's cells are held to a sanity band of [0.5, 2] each on the exact
+    horizon, the box-horizon ratios recorded beside them, not asserted, and the cross-check against
+    `selectPatches` on the premise planet is its validation, in place of "within 10%" of the
+    note._ On the boxes six of the high column's cells pass 2, until R10.T14.e.
+  - _The model's table_ (tests 2 and 3; k₀ = 5 at τ, no margin or relief; all-round / the
+    frustum's least–greatest peak, then model ÷ the note's). On the exact horizon:
+
+    | Height | High, 1 px 1080p                    | Low, 2 px 720p                  | Wireframe, 4 px 1080p           |
+    | ------ | ----------------------------------- | ------------------------------- | ------------------------------- |
+    | 100 m  | 2,360 / 423–432 (×1.61; ×1.72–1.61) | 403 / 85–88 (×1.21; ×1.06–1.00) | 284 / 72–74 (×1.00; ×0.95–0.97) |
+    | 1 km   | 1,955 / 324–340 (×1.61; ×1.62–1.62) | 323 / 77–80 (×1.24; ×1.20–1.18) | 221 / 55–58 (×1.04; ×1.06–1.04) |
+    | 10 km  | 1,430 / 251–261 (×1.53; ×1.74–1.59) | 259 / 58–61 (×1.25; ×1.16–1.13) | 169 / 34–38 (×1.14; ×0.89–0.90) |
+    | 100 km | 950 / 176–188 (×1.57; ×1.91–1.62)   | 169 / 41–41 (×1.11; ×1.08–0.98) | 109 / 28–34 (×1.05; ×1.08–1.13) |
+    | 400 km | 648 / 137–143 (×1.53; ×1.76–1.55)   | 126 / 33–33 (×1.09; ×1.10–1.03) | 81 / 24–26 (×1.19; ×1.33–1.30)  |
+
+    On the boxes' horizon, selection's:
+
+    | Height | High, 1 px 1080p                    | Low, 2 px 720p                    | Wireframe, 4 px 1080p             |
+    | ------ | ----------------------------------- | --------------------------------- | --------------------------------- |
+    | 100 m  | 3,014 / 537–554 (×2.05; ×2.18–2.07) | 581 / 127–130 (×1.75; ×1.59–1.48) | 409 / 104–104 (×1.44; ×1.37–1.37) |
+    | 1 km   | 2,323 / 394–410 (×1.91; ×1.97–1.95) | 439 / 102–105 (×1.69; ×1.59–1.54) | 303 / 75–76 (×1.43; ×1.44–1.36)   |
+    | 10 km  | 1,640 / 291–298 (×1.75; ×2.02–1.82) | 331 / 76–77 (×1.59; ×1.52–1.43)   | 234 / 53–57 (×1.58; ×1.39–1.36)   |
+    | 100 km | 1,120 / 203–222 (×1.85; ×2.21–1.91) | 214 / 51–54 (×1.41; ×1.34–1.29)   | 145 / 37–46 (×1.39; ×1.42–1.53)   |
+    | 400 km | 772 / 162–167 (×1.82; ×2.08–1.82)   | 164 / 42–44 (×1.41; ×1.40–1.38)   | 115 / 34–38 (×1.69; ×1.89–1.90)   |
+
+    Exact: high ×1.53–1.91, low ×0.98–1.25, wireframe ×0.89–1.33. Boxes: high ×1.75–2.21, low
+    ×1.29–1.75, wireframe ×1.36–1.90. At k₀ = 4 the exact high column is ×1.04–1.15 of the note's
+    all round and ×1.12–1.37 in the frustum (1,619, 1,295, 978, 692, 477 / 295–299, 228–240,
+    180–190, 126–137, 102–107), so the note's all-round column matches k ≈ 4, as the ruling's
+    scratch found. The frustum's peak pitch below the horizontal at 0°, 22.5° and 45°
+    (boxes), by height from 100 m: high 18°, 17–19°, 20–21°, 26–28°, 38°; low 8–10°, 13–19°,
+    18–19°, 25–29°, 30–35°; wireframe 9–15°, 11–20°, 18–19°, 18–28°, 31–42°. The low setting at
+    k₀ = 15 counts exactly what the high one does at 5, the same bound in pixels (tested).
+
+  - _The cross-check_ (test 4). `selectPatches` on the premise planet (the model's sphere, with
+    `terrainWireSelection.test.ts`' `countModelTable()` copied), one view at τ, with no budget,
+    contacts or height ranges, at each heading's peak pose, at 1, 10 and 100 km in the three
+    columns: its seen patches over the model's frustum count are 1.000 in 26 of the 27 cases and
+    1.007 in one (high at 1 km and 45°, 413 against 410). On the premise the balance and the
+    sagitta add almost nothing.
+  - _The inputs_ (test 5; boxes, all-round / the frustum's least–greatest peak). The frustum never
+    falls as the margin opens to `MAX_FRUSTUM_MARGIN_RAD` or the relief grows to ±24.5 km (tested
+    at 1 km in five steps, on both horizons).
+
+    | Case            | Column    | 100 m                | 1 km                 | 10 km                |
+    | --------------- | --------- | -------------------- | -------------------- | -------------------- |
+    | Margin 0.1 rad  | High      | 3,014 / 651–654      | 2,323 / 480–494      | 1,640 / 349–352      |
+    | Margin 0.1 rad  | Low       | 581 / 148–153        | 439 / 119–122        | 331 / 88–92          |
+    | Margin 0.1 rad  | Wireframe | 409 / 115–124        | 303 / 82–93          | 234 / 65–67          |
+    | k₀ = 15         | High      | 18,151 / 3,154–3,182 | 15,973 / 2,574–2,593 | 11,751 / 1,808–1,847 |
+    | k₀ = 15         | Low       | 3,014 / 537–554      | 2,323 / 394–410      | 1,640 / 291–298      |
+    | k₀ = 15         | Wireframe | 1,906 / 355–372      | 1,458 / 281–284      | 1,056 / 198–204      |
+    | Relief ±24.5 km | High      | 3,998 / 2,626–2,639  | 4,004 / 2,627–2,640  | 4,022 / 2,606–2,617  |
+    | Relief ±24.5 km | Low       | 778 / 529–531        | 779 / 529–531        | 783 / 529–532        |
+    | Relief ±24.5 km | Wireframe | 553 / 387–393        | 554 / 387–393        | 557 / 385–393        |
+
+    Against the frustum's greatest peak at k₀ = 5 with neither: the margin's cap ×1.16–1.22 (the
+    ruling's scratch 1.14–1.34); k₀ = 15 ×3.6–6.3 (high 5.7–6.3, low 3.9–4.3, wireframe 3.6–3.7;
+    the scratch 6.5–7.6); the relief ×3.8–8.8, rising with height (high 4.8, 6.4, 8.8; the scratch
+    about 9), its frustum peak two thirds of its all-round count, since a box ±24.5 km tall a few
+    kilometres off enters a frustum looking down by its bottom.
+
+  - _The wireframe's share_ (R4; r = wireframe ÷ high, all-round, then at the frustum's greatest
+    peak, at 100 m, 1 km and 10 km). k₀ = 5: boxes 0.136, 0.130, 0.143 and 0.188, 0.185, 0.191;
+    exact 0.120, 0.113, 0.118 and 0.171, 0.171, 0.146. k₀ = 15: boxes 0.105, 0.091, 0.090 and
+    0.117, 0.110, 0.110; exact 0.095, 0.082, 0.082 and 0.105, 0.099, 0.101. Every one is above
+    τ⁻² = 0.0625 (tested at 1 km); the note's own r is 0.16–0.19 all-round and 0.26–0.30 at the
+    frustum ranges' middles. The brainstorm's "about a fifth" waits on T14.b.
+  - _The replay_ (test 6, `cache.test.ts`). R05's descent (`recordProfile()`) over the test planet
+    (`goldenLevelTable("off")`), at 4 Hz on the 723 frames with a contact (`craftContacts`), from
+    1,024 s to 1,230 s, selected at τ_sel with half the slots as the budget and without the pass's
+    motion margin, as `runFixedStep` selects; an ideal pool bakes each request the frame it is
+    made, at its level's height range, the loosest bounds. In every case no forced insert is
+    refused and every forced patch is resident after its frame's bakes. The forced peak is 71
+    patches in each. The pins (`pressure()`'s forced and drawn) peak at 422 of 422 slots on low,
+    past the slots in 136 frames; at 884 of 1,286 on high, never past; at 520 of 520 for the
+    wireframe at 4 px 1080p, past in 4. These figures are pinned (R10.T14.e moves them with the
+    boxes). About 1.0–2.3 s a case.
+  - _The sizing rule_ (test 7). Design note 15's own figures: low max(1.3 × 332, 3 × 88) = 431.6,
+    high 1,908.4, wireframe 369.2; its high frustum rule 804 slots, 165,615,156 B at 205,989 B.
+    From the model at τ_sel at 100 m, each column's peak over the five heights (pinned to 1%), with
+    the replay's 71 forced patches, against the provisional constants (recorded, not asserted):
+
+    | Column             | Peaks, boxes | Rule, boxes                                    | Peaks, exact | Rule, exact                           | As built                   |
+    | ------------------ | ------------ | ---------------------------------------------- | ------------ | ------------------------------------- | -------------------------- |
+    | High               | 3,498 / 646  | 4,619 slots, 1,436,619,856 B                   | 2,750 / 503  | 3,646 slots, 1,133,993,504 B          | 1,286 slots, 400,000,000 B |
+    | High, frustum rule | 3,498 / 646  | 2,009 slots, 624,847,216 B                     | 2,750 / 503  | 1,580 slots, 491,417,920 B            | 1,286 slots, 400,000,000 B |
+    | Low                | 664 / 145    | 935 slots, 148,605,160 B                       | 465 / 100    | 676 slots, 107,440,736 B              | 422 slots, 64 MiB          |
+    | Wireframe          | 461 / 116    | 671 slots, 25,516,788 B low, 93,556,188 B high | 328 / 83     | 498 slots, 18,937,944 B, 69,435,144 B | 520 slots                  |
+
+    The all-round term governs everywhere. On the boxes the high rule is 3.6 times the provisional
+    bytes, and both it and the frustum rule pass the 1,323 slots a default binding holds on
+    `baked-offsets` (R2's caution); the low rule is 2.2 times 64 MiB.
+
+  - _The allocations and the ceiling_ (test 8). One lit pass 67,070,992 B low and 399,976,864 B
+    high; two lit passes (a moon over its planet) 134,141,984 and 799,953,728; one body in both
+    styles 86,845,552 and 472,479,424; two bodies in both styles 173,691,104 and 944,958,848: all
+    under the ceilings of 1 GB low and 2–3 GB discrete. The wireframe's own: 19,774,560 B on
+    `face-differences`, 72,502,560 B on `baked-offsets`. WebGPU's default 128 MiB binding holds at
+    most 1,323 high lit slots on `baked-offsets` (411,484,752 B; the offsets bind first,
+    134,152,200 B), 37 more than the 1,286, and 1,948 on `face-differences` (the horizon map
+    first). `terrainLayout` at the default limits lays both lit settings and both wireframe layouts
+    out with `fallback: "none"`. The engine asks for the adapter's own limit up to 1 GiB
+    (`requiredLimits`), so the ceiling binds only at the defaults, T14.b's for each machine.
+- **Deferred findings (2026-10-13 rule) (R10.T14.a)** (recorded, not ruled unless marked; each
+  leaves the algorithm and the contracts as built).
+  - _R05's box margin along the normal._ _Ruled (decision-r10-t14a, the #56 follow-up): fixed by
+    R10.T14.e._ The bounds' ring-chord margin on the normal's half-extent (`packPatchBounds`) lets
+    `aboveHorizon` pass coarse patches wholly below the true horizon, which selection then selects,
+    demands, bakes and draws: at 100 m on the count model's premise, 654 of the high setting's
+    3,014 all-round leaves, 178 of low's 581 and 125 of the wireframe's 409, the boxes' all-round
+    counts 1.15–1.44 times the exact across the table. `bounds.ts` is untouched here; T14.e takes
+    the chord's sagitta along the normal and re-pins what moves, this task's box-metric table and
+    the replay's pinned peaks among them.
+  - _The relief's tall boxes._ At ±24.5 km the frustum peak is 3.8–8.8 times the smooth sphere's,
+    two thirds of the all-round count: an unbaked patch's box spans its level's whole height range,
+    and a view sees boxes by their bottoms. Real bakes' ranges shrink it; T14.b measures it on a
+    generated world, with the bound ratio and box heights it logs.
+  - _The high setting's rule past the ceiling._ On the model's boxes even the frustum rule (2,009
+    slots) passes the 1,323 a default binding holds on `baked-offsets`, so a budget set from it
+    puts the high setting on `face-differences` on adapters at the defaults. For T14.b.
+  - _The low cache's pins._ At 422 lit slots, half of them the budget, the descent's pins fill the
+    low cache in 136 of its 723 contact frames under the levels' height ranges (the backstop's
+    report). T14.b measures on real bakes.
+  - _`terrainWireSelection.test.ts`' stale remark._ Its module doc says `patchCountModel` is not
+    built; the file stays as it is (R4), for T14.b, which may hold its bracket to the model's
+    ratios.
+- **Questions for main (R10.T14.a)**
+  1. _The band's horizon_ (asked on the issue, not blocking; answered). The model as ruled
+     reproduces `selectPatches` (1.000–1.007), but on its boxes' horizon six of the high column's
+     cells pass test 3's [0.5, 2] (×2.02–2.21). The lean, that the model reports both horizons and
+     test 3 holds the note's cells on the exact one: _Ruled (decision-r10-t14a, the #56 follow-up):
+     accepted, with the exact horizon made exact rather than sampled (Amendment A) and R05's margin
+     fixed by R10.T14.e, not here (Amendment B)._ Both are built and recorded above.
 - **Deviations in T12's back end, as built** (2026-10-20; lane r10-readouts, branch
   `r10-readouts-land`, after R10.T16.e's commit, on `rendering-and-planets` at `6fa6a405`;
   decision-r10-t12-leans, decision-r10-t16-leans §12, decision-r10-view-block-room §2–§4).

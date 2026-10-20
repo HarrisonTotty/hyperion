@@ -178,8 +178,8 @@ export class PatchCache implements HeightRangeLookup {
    * @remarks
    * Only the {@link ResidentPatch} fields are kept: the terrain pass hands over the worker's whole
    * bake, whose heights, offsets and normals its slot already holds, and keeping them here would
-   * hold about 51 KB a patch in the renderer, about 66 MB with the low setting's 1,296 slots full
-   * (R05.T14.c's memory probe).
+   * hold about 51 KB a patch in the renderer, about 66 MB with R05's spike layout's 1,296 low slots
+   * full (R05.T14.c's memory probe); the low setting's lit layout holds 422 (R10.T14.a).
    *
    * @throws RangeError for a key deeper than {@link MAX_LEVEL}, before anything is changed.
    */
