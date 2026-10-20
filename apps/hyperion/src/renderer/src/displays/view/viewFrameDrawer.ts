@@ -46,10 +46,12 @@ import { HostDiscLayer } from "../../view/sky/disc";
 import { skySpriteStars } from "../../view/sky/sprites";
 import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
 import type { ClassMapSource } from "../../view/terrain/classMap";
+import { TerrainFailureGuard } from "../../view/terrain/failureGuard";
 import {
   LiveFrameTerrain,
   surveyEdgeViewsOf,
   type ViewTerrainInput,
+  type ViewTerrainSession,
   type WireframeTerrainFrame,
   type WireframeTerrainInput,
   wireframeTerrainOf,
@@ -254,10 +256,15 @@ export class ViewFrameDrawer {
   /** A sky whose bake failed is not baked again until another sky or a restore. */
   #failedFor: DrawnSky | null = null;
   #frameFailed = false;
-  /** The survey edges could not be made: said once until they are made again (S5). */
-  #edgesFailed = false;
-  /** The wireframe's terrain could not be drawn: said once until it is drawn again (R10.T11). */
-  #wireTerrainFailed = false;
+  /**
+   * The guards of the survey edges (S5) and of the wireframe's terrain (R10.T11), R10.T16.e's: a
+   * failure said once until the call succeeds again, and the session's terrain faulted once it has
+   * failed on for 250 ms; made anew for each session (`#guardsFor`).
+   */
+  #edgesGuard = new TerrainFailureGuard();
+  #wireGuard = new TerrainFailureGuard();
+  /** The session the guards guard. */
+  #guarded: ViewTerrainSession | null = null;
   /** The contour interval the view's wireframe terrain last held, its hysteresis's (R10.T11). */
   #contourIntervalM: number | null = null;
   #regimes: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
@@ -424,23 +431,38 @@ export class ViewFrameDrawer {
   /**
    * The wireframe's terrain this frame (`wireframeTerrainOf`, plan R10, R10.T11), or none where it
    * cannot be drawn: a loss (`EngineUnavailable`) passes in silence, and anything else, a bug, is
-   * reported once until it is drawn again, so that the view draws on, as the survey edges do.
+   * reported once until it is drawn again, so that the view draws on, as the survey edges do; once
+   * it has failed for `ANNUNCIATION_ONSET_MS`, the session's terrain is faulted (R10.T16.e).
    */
   #wireTerrain(
     terrain: ViewTerrainInput,
     input: WireframeTerrainInput,
   ): WireframeTerrainFrame | null {
-    try {
-      const wire = wireframeTerrainOf(terrain.source, input);
-      this.#wireTerrainFailed = false;
-      return wire;
-    } catch (error: unknown) {
-      if (!(error instanceof EngineUnavailable) && !this.#wireTerrainFailed) {
-        console.error(`the wireframe terrain of ${this.#name} could not be drawn:`, error);
-        this.#wireTerrainFailed = true;
-      }
-      return null;
+    const session = terrain.source;
+    return this.#guardsFor(session).wire.run(
+      () => wireframeTerrainOf(session, input),
+      null,
+      terrain.nowMs,
+      {
+        describe: `the wireframe terrain of ${this.#name} could not be drawn:`,
+        onFault: () => {
+          session.failComputation();
+        },
+      },
+    );
+  }
+
+  /** The guards of `session`'s calls, made anew when the session changes (R10.T16.e). */
+  #guardsFor(session: ViewTerrainSession): {
+    readonly edges: TerrainFailureGuard;
+    readonly wire: TerrainFailureGuard;
+  } {
+    if (session !== this.#guarded) {
+      this.#guarded = session;
+      this.#edgesGuard = new TerrainFailureGuard();
+      this.#wireGuard = new TerrainFailureGuard();
     }
+    return { edges: this.#edgesGuard, wire: this.#wireGuard };
   }
 
   #drawPhotoreal(
@@ -521,7 +543,9 @@ export class ViewFrameDrawer {
   /**
    * The survey edges the frame marks (`surveyEdgeViewsOf`), or none where they cannot be made: a
    * loss (`EngineUnavailable`) passes in silence, and anything else, a bug, is reported once until
-   * they are made again, so that the view draws on (the batch review's S5).
+   * they are made again, so that the view draws on (the batch review's S5); once they have failed
+   * for `ANNUNCIATION_ONSET_MS`, the session's terrain is faulted (`TerrainFailureGuard`;
+   * R10.T16.e), since the guide requires the edge wherever surveyed terrain meets unsurveyed ground.
    */
   #surveyEdges(
     terrain: ViewTerrainInput,
@@ -530,17 +554,18 @@ export class ViewFrameDrawer {
     viewport: ViewSize,
     style: RenderStyle,
   ): ReturnType<typeof surveyEdgeViewsOf> {
-    try {
-      const edges = surveyEdgeViewsOf(terrain.source, terrain.view, scene, camera, viewport, style);
-      this.#edgesFailed = false;
-      return edges;
-    } catch (error: unknown) {
-      if (!(error instanceof EngineUnavailable) && !this.#edgesFailed) {
-        console.error(`the survey edges of ${this.#name} could not be marked:`, error);
-        this.#edgesFailed = true;
-      }
-      return [];
-    }
+    const session = terrain.source;
+    return this.#guardsFor(session).edges.run(
+      () => surveyEdgeViewsOf(session, terrain.view, scene, camera, viewport, style),
+      [],
+      terrain.nowMs,
+      {
+        describe: `the survey edges of ${this.#name} could not be marked:`,
+        onFault: () => {
+          session.failComputation();
+        },
+      },
+    );
   }
 
   #cubeFor(sky: DrawnSky | null, setting: QualitySetting): BakedCube | null {

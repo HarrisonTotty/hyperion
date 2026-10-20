@@ -47,7 +47,10 @@
  * - **The fault.** Once every height worker is lost, the passes draw nothing more, and every view
  *   that hands a body over shows `TERRAIN_NOT_AVAILABLE` on its label block's fault line
  *   ({@link TerrainSession.terrainFaults}, which {@link TerrainSession.subscribeFaults} follows), until
- *   `VIEW` is shown again and the session made anew.
+ *   `VIEW` is shown again and the session made anew. Likewise once a guarded computation, the
+ *   session's step or a view's survey edges, has kept failing for `ANNUNCIATION_ONSET_MS`
+ *   ({@link TerrainSession.failComputation}; R10.T16.e): every pass halted and none made again, and
+ *   `TERRAIN_COMPUTATION_FAILED` on the same line. The first cause raised stands for the session.
  * - **Each view's frame (R10.T16.c).** Its `LiveFrameTerrain` (`frameTerrain.ts`) calls
  *   {@link TerrainSession.drawTerrain} with the view's `TerrainView` and lighting from its plan, and
  *   gives {@link TerrainSession.coverageMask}'s texture as its `surveyCoverage` only while the
@@ -92,6 +95,11 @@ import { isLitBody } from "../lighting/retarded";
 import type { QualitySetting, TerrainSettings } from "../quality/qualitySetting";
 import type { HullOutline } from "../scene/hull";
 import { cameraSceneOf, type ViewBody, type ViewCraft, type ViewScene } from "../scene/model";
+import {
+  TERRAIN_COMPUTATION_FAILED,
+  TERRAIN_NOT_AVAILABLE,
+  type TerrainFault,
+} from "./annunciation";
 import { type ClassMapSource, ClassMapStore } from "./classMap";
 import {
   CoarseFieldStore,
@@ -560,7 +568,18 @@ interface HandingView {
 type PassShading = "lit" | "wire";
 
 /** No view shows the terrain's fault. */
-const NO_FAULTS: ReadonlySet<ViewId> = new Set();
+const NO_FAULTS: ReadonlyMap<ViewId, TerrainFault> = new Map();
+
+/** The views of `handing`, each once. */
+function handingIds(
+  ...handing: ReadonlyArray<ReadonlyMap<BodyIdHex, ReadonlyArray<HandingView>>>
+): ViewId[] {
+  return [
+    ...new Set(
+      handing.flatMap((each) => [...each.values()].flatMap((views) => views.map(({ id }) => id))),
+    ),
+  ];
+}
 
 /** No body handed over. */
 const NO_BODIES: ReadonlySet<BodyIdHex> = new Set();
@@ -602,7 +621,11 @@ export class TerrainSession {
   readonly #faultListeners = new Set<() => void>();
   readonly #unsubscribe: ReadonlyArray<() => void>;
   readonly #workerCount: number;
-  #faults: ReadonlySet<ViewId> = NO_FAULTS;
+  #faults: ReadonlyMap<ViewId, TerrainFault> = NO_FAULTS;
+  /** The terrain's fault by its first cause raised, which stands for the session; `null` before. */
+  #cause: TerrainFault | null = null;
+  /** A guarded computation kept failing (R10.T16.e): no pass is stepped or made again. */
+  #computationFailed = false;
   #linkUp: boolean;
   #disposed = false;
 
@@ -695,11 +718,14 @@ export class TerrainSession {
   }
 
   /**
-   * The views whose label blocks show the terrain's fault, `TERRAIN_NOT_AVAILABLE`, after any
-   * graphics fault (decision-r10-t16-contracts §7): every view that hands a body over while every
-   * height worker is lost; the same object until it changes, for `useSyncExternalStore`.
+   * The views whose label blocks show the terrain's fault after any graphics fault
+   * (decision-r10-t16-contracts §7; decision-r10-t16-leans §8), each with its text, the session's
+   * first cause: every view that hands a body over, in either style, once every height worker is
+   * lost (`TERRAIN_NOT_AVAILABLE`) or a guarded computation has kept failing
+   * (`TERRAIN_COMPUTATION_FAILED`, {@link TerrainSession.failComputation}); the same object until
+   * it changes, for `useSyncExternalStore`.
    */
-  get terrainFaults(): ReadonlySet<ViewId> {
+  get terrainFaults(): ReadonlyMap<ViewId, TerrainFault> {
     return this.#faults;
   }
 
@@ -806,7 +832,48 @@ export class TerrainSession {
       this.#store.follow(candidates);
       this.#followWants();
     }
+    if (this.#computationFailed) {
+      // Halted for good (R10.T16.e): no pass is stepped or made, and the fault follows the views.
+      this.#followFaults(handingIds(this.#handingViews(), this.#wireHandingViews()));
+      return;
+    }
     this.#stepPasses();
+  }
+
+  /**
+   * Faults the session's terrain for a computation that keeps failing (plan R10, R10.T16.e;
+   * decision-r10-t16-leans §8): the guard of the session's step, or of a view's survey edges, calls
+   * it once their failures have lasted `ANNUNCIATION_ONSET_MS` (`TerrainFailureGuard`).
+   *
+   * @remarks
+   * As lost workers do, and sticky until the session is made anew (`VIEW` shown again): every pass
+   * is halted (`TerrainPass.halt`) and none is made again, so that the passes ask for and draw
+   * nothing, each body is drawn by its figure and every mask is withheld; and every view that hands
+   * a body over shows the fault at once, by the session's first cause
+   * (`TERRAIN_COMPUTATION_FAILED`, or `TERRAIN_NOT_AVAILABLE` where every height worker was lost
+   * first). Its steps follow the fields and the fault as before, and step no pass.
+   */
+  failComputation(): void {
+    if (this.#disposed || this.#computationFailed) {
+      return;
+    }
+    this.#computationFailed = true;
+    this.#noteLostWorkers();
+    this.#cause ??= TERRAIN_COMPUTATION_FAILED;
+    const cause = this.#cause;
+    for (const pass of [...this.#passes.values(), ...this.#wirePasses.values()]) {
+      pass.halt(cause);
+    }
+    // Raised now, not at the next step, which may be what throws; where the views that hand a
+    // body over cannot be told either, every view that has reported shows it.
+    let views: ReadonlyArray<ViewId>;
+    try {
+      views = handingIds(this.#handingViews(), this.#wireHandingViews());
+    } catch (error: unknown) {
+      console.error("the views that hand a body over could not be told:", error);
+      views = [...this.#reports.keys()];
+    }
+    this.#followFaults(views);
   }
 
   /**
@@ -1041,7 +1108,7 @@ export class TerrainSession {
 
   /**
    * Steps each body's pass over the views that hand it over, making a pass at a body's first
-   * hand-over, and follows the fault: every view that hands a body over shows it while every height
+   * hand-over, and follows the fault: every view that hands a body over shows it once every height
    * worker is lost.
    */
   #stepPasses(): void {
@@ -1061,16 +1128,32 @@ export class TerrainSession {
         this.#stepPass(body, pass, views.get(body) ?? []);
       }
     }
-    const faulted = this.#pool.lostWorkers === this.#pool.workerCount;
-    const faults = faulted
-      ? new Set(
-          [...handing.values(), ...wireHanding.values()].flatMap((views) =>
-            views.map(({ id }) => id),
-          ),
-        )
-      : NO_FAULTS;
-    if (faults.size !== this.#faults.size || [...faults].some((id) => !this.#faults.has(id))) {
-      this.#faults = faults.size === 0 ? NO_FAULTS : faults;
+    this.#followFaults(handingIds(handing, wireHanding));
+  }
+
+  /** Raises the lost workers' cause once every height worker is lost, unless a cause stands. */
+  #noteLostWorkers(): void {
+    if (this.#cause === null && this.#pool.lostWorkers === this.#pool.workerCount) {
+      this.#cause = TERRAIN_NOT_AVAILABLE;
+    }
+  }
+
+  /**
+   * Follows the fault over `views`, the views that hand a body over: each shows the session's
+   * cause once one is raised, and none before; the listeners are told of a change.
+   */
+  #followFaults(views: ReadonlyArray<ViewId>): void {
+    this.#noteLostWorkers();
+    const cause = this.#cause;
+    const faults: ReadonlyMap<ViewId, TerrainFault> =
+      cause === null || views.length === 0
+        ? NO_FAULTS
+        : new Map(views.map((id) => [id, cause] as const));
+    if (
+      faults.size !== this.#faults.size ||
+      [...faults].some(([id, text]) => this.#faults.get(id) !== text)
+    ) {
+      this.#faults = faults;
       for (const listener of this.#faultListeners) {
         listener();
       }

@@ -15,6 +15,12 @@ import type {
   TextureHandle,
 } from "../../../view/engine/types";
 import { TERRAIN_SCENE_NAME, terrainTestGolden } from "../../../view/scenes/terrainScene";
+import { type ViewId, viewId } from "../../../view/camera/state";
+import {
+  TERRAIN_COMPUTATION_FAILED,
+  TERRAIN_NOT_AVAILABLE,
+  type TerrainFault,
+} from "../../../view/terrain/annunciation";
 import { toHalfBits } from "../../../view/sky/half";
 import type { ViewEngineSource } from "../useViewEngine";
 import { SCENE_OPTIONS } from "../viewRun";
@@ -109,7 +115,46 @@ function watchedSession(
       gpuBytes: new Map([["coarse-field-gpu", 24_576]]),
     }),
     workerCount: 3,
+    terrainFaults: new Map(),
+    subscribeFaults: () => () => undefined,
   };
+}
+
+/** A session stand-in whose terrain's fault the test sets, its listeners told of each change. */
+class FaultingSession {
+  readonly #listeners = new Set<() => void>();
+  terrainFaults: ReadonlyMap<ViewId, TerrainFault> = new Map();
+
+  /** The session as the probe watches it. */
+  get watched(): WatchedSession {
+    const read = (): ReadonlyMap<ViewId, TerrainFault> => this.terrainFaults;
+    const listeners = this.#listeners;
+    return {
+      ...watchedSession(new Set(), { count: 0 }),
+      get terrainFaults() {
+        return read();
+      },
+      subscribeFaults: (listener) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    };
+  }
+
+  /** How many listen now. */
+  get listening(): number {
+    return this.#listeners.size;
+  }
+
+  /** Sets the fault and tells the listeners. */
+  set(faults: ReadonlyMap<ViewId, TerrainFault>): void {
+    this.terrainFaults = faults;
+    for (const listener of this.#listeners) {
+      listener();
+    }
+  }
 }
 
 describe("the terrain probe's counted height workers (R10.T16.d)", () => {
@@ -596,5 +641,55 @@ describe("the terrain probe's read-backs (R10.T16.d; the batch review's D-C)", (
     const reading = await probe.readMask();
     stop();
     expect([...(reading?.cells ?? [])]).toEqual([3, 7]);
+  });
+});
+
+describe("the terrain probe's watch of the session's terrain fault (R10.T16.e; decision-r10-t16-leans §8)", () => {
+  const PRIMARY = viewId("view");
+  const INSTRUMENT = viewId("instrument-1");
+
+  it("records each time the fault holds a view or changes, with its time, its text and its views", () => {
+    let nowMs = 1_000;
+    const probe = new TerrainProbe(new ViewsProbe(), {
+      paceMs: 0,
+      readBackMs: 100,
+      nowMs: () => nowMs,
+    });
+    const session = new FaultingSession();
+    probe.watchTerrain(session.watched);
+    const none = probe.terrainFaults();
+    nowMs = 2_000;
+    session.set(new Map([[PRIMARY, TERRAIN_COMPUTATION_FAILED]]));
+    nowMs = 2_500;
+    session.set(
+      new Map([
+        [PRIMARY, TERRAIN_COMPUTATION_FAILED],
+        [INSTRUMENT, TERRAIN_COMPUTATION_FAILED],
+      ]),
+    );
+    expect([none, probe.terrainFaults()]).toEqual([
+      [],
+      [
+        { atMs: 2_000, text: TERRAIN_COMPUTATION_FAILED, views: ["view"] },
+        { atMs: 2_500, text: TERRAIN_COMPUTATION_FAILED, views: ["view", "instrument-1"] },
+      ],
+    ]);
+  });
+
+  it("records a fault standing when the watch begins, and stops listening at its release", () => {
+    const probe = new TerrainProbe(new ViewsProbe(), {
+      paceMs: 0,
+      readBackMs: 100,
+      nowMs: () => 0,
+    });
+    const session = new FaultingSession();
+    session.set(new Map([[PRIMARY, TERRAIN_NOT_AVAILABLE]]));
+    const release = probe.watchTerrain(session.watched);
+    release();
+    session.set(new Map());
+    expect([probe.terrainFaults(), session.listening]).toEqual([
+      [{ atMs: 0, text: TERRAIN_NOT_AVAILABLE, views: ["view"] }],
+      0,
+    ]);
   });
 });

@@ -7,6 +7,7 @@ import {
   terrainShipBodyFixedM,
   terrainTestGolden,
 } from "../../../view/scenes/terrainScene";
+import { TERRAIN_COMPUTATION_FAILED } from "../../../view/terrain/annunciation";
 import { handoverTauPx, limbDistanceM } from "../../../view/terrain/handover";
 import {
   recordTerrainCheck,
@@ -20,6 +21,7 @@ const RECORD: TerrainCheckRecord = {
   devicePixelRatio: 1,
   phases: [],
   faults: [],
+  terrainFaults: [],
   restoresAtMs: [],
   loss: {
     destroyedAtMs: null,
@@ -122,6 +124,16 @@ describe("the terrain run's ending", () => {
       ["write", RECORD],
       ["end", { status: "pass" }],
     ]);
+  });
+
+  it("writes a record holding the terrain's fault as it stands, for the main process to fail (R10.T16.e)", async () => {
+    const api = ending();
+    const faulted: TerrainCheckRecord = {
+      ...RECORD,
+      terrainFaults: [{ atMs: 40_000, text: TERRAIN_COMPUTATION_FAILED, views: ["view"] }],
+    };
+    await recordTerrainCheck(api, () => Promise.resolve(faulted), new AbortController().signal);
+    expect(api.calls[0]).toEqual(["write", faulted]);
   });
 
   it("fails the run with the reason the script threw", async () => {

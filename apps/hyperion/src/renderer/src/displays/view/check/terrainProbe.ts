@@ -21,7 +21,9 @@
  *   blocks are still arriving when the device is destroyed, its traffic counted, and the script's
  *   time it is told read back.
  * - **The session** ({@link TerrainProbe.watchTerrain}): held while `VIEW` holds it, for its pass,
- *   its masks, its survey and its memory report.
+ *   its masks, its survey and its memory report, and followed for its terrain's fault: each time its
+ *   `terrainFaults` holds a view or changes while it does, recorded with the time
+ *   ({@link TerrainProbe.terrainFaults}; R10.T16.e), which fails the run.
  * - **The submissions** (through the views probe's watch): each view's draws while it hands
  *   `TEST MOON` over (its pass drew for the view), and whether they held a draw of the terrain's
  *   lit material; and each photorealistic view's scene target read back every
@@ -35,9 +37,11 @@ import type {
   TerrainCheckMemory,
   TerrainCheckPhaseName,
   TerrainCheckPhaseRecord,
+  TerrainCheckSessionFault,
   TerrainCheckTeardownRecord,
   TerrainCheckViewRecord,
 } from "../../../../../preload/api";
+import type { ViewId } from "../../../view/camera/state";
 import type { AllocationEvent, MemoryCategory } from "../../../view/engine/memory";
 import type {
   FrameSubmission,
@@ -56,6 +60,7 @@ import {
   terrainSceneFixture,
 } from "../../../view/scenes/terrainScene";
 import { EngineUnavailable } from "../../../view/engine/resilientEngine";
+import type { TerrainFault } from "../../../view/terrain/annunciation";
 import type { TerrainSessionMemory } from "../../../view/terrain/session";
 import type {
   HeightWorkerReply,
@@ -100,8 +105,8 @@ export interface WatchedPass {
 
 /**
  * What the probe reads of a terrain session (`TerrainSession`'s members of these names): its body's
- * passes, the lit one and the wireframe's (R10.T11), its mask and survey, its memory report and its
- * worker count.
+ * passes, the lit one and the wireframe's (R10.T11), its mask and survey, its memory report, its
+ * worker count, and its terrain's fault and the fault's changes.
  */
 export interface WatchedSession {
   pass(body: BodyIdHex): WatchedPass | null;
@@ -110,6 +115,10 @@ export interface WatchedSession {
   survey(body: BodyIdHex): { readonly coverage: { maskTexels(): Uint8Array } | null } | null;
   memory(): TerrainSessionMemory;
   readonly workerCount: number;
+  /** The views that show the terrain's fault, each with its text (`TerrainSession.terrainFaults`). */
+  readonly terrainFaults: ReadonlyMap<ViewId, TerrainFault>;
+  /** Listens for a change of `terrainFaults`; returns the unsubscribe. */
+  subscribeFaults(listener: () => void): () => void;
 }
 
 /** The height workers' traffic, over every worker the probe made. */
@@ -365,6 +374,8 @@ export class TerrainProbe {
     { readonly spec: RenderTargetSpec; readonly target: RenderTarget }
   >();
   readonly #readBacks: ReadBack[] = [];
+  /** Each time a session's `terrainFaults` held a view or changed while it did (R10.T16.e). */
+  readonly #terrainFaults: TerrainCheckSessionFault[] = [];
   readonly #readBackAt = new Map<string, number>();
   readonly #reading = new Set<string>();
   #engine: RenderEngine | null = null;
@@ -448,20 +459,33 @@ export class TerrainProbe {
   }
 
   /**
-   * Holds `session` while `VIEW` holds it (`ViewDisplay`'s terrain watch); returns the release,
-   * called when `VIEW` lets it go.
+   * Holds `session` while `VIEW` holds it (`ViewDisplay`'s terrain watch), and follows its terrain's
+   * fault; returns the release, called when `VIEW` lets it go.
    */
   readonly watchTerrain = (session: WatchedSession): (() => void) => {
     this.#session = session;
     this.#lastSession = session;
     this.#sessionsMade += 1;
+    const unsubscribe = session.subscribeFaults(() => {
+      this.#takeFaults(session);
+    });
+    this.#takeFaults(session);
     return () => {
+      unsubscribe();
       if (this.#session === session) {
         this.#session = null;
       }
       this.#sessionsEnded += 1;
     };
   };
+
+  /**
+   * Each time a session's `terrainFaults` held a view or changed while it did, timed (R10.T16.e;
+   * decision-r10-t16-leans §8): the run fails on any.
+   */
+  terrainFaults(): TerrainCheckSessionFault[] {
+    return this.#terrainFaults.map((fault) => ({ ...fault, views: [...fault.views] }));
+  }
 
   /** The session `VIEW` holds, or `null`. */
   get session(): WatchedSession | null {
@@ -749,6 +773,20 @@ export class TerrainProbe {
     if (SCENE_TARGET.test(owner)) {
       this.#readBackIfDue(owner, view);
     }
+  }
+
+  /** Records `session`'s terrain's fault as it stands, where it holds a view. */
+  #takeFaults(session: WatchedSession): void {
+    const faults = session.terrainFaults;
+    if (faults.size === 0) {
+      return;
+    }
+    this.#terrainFaults.push({
+      atMs: this.#nowMs(),
+      // The session's one cause, which every view shows alike.
+      text: [...new Set(faults.values())].join("; "),
+      views: [...faults.keys()],
+    });
   }
 
   #frameAt(frameMs: number): TerrainFrame {

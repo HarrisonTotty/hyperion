@@ -18,7 +18,7 @@ import { IDENTITY_ROTATION } from "../coords/rotation";
 import type { MemoryCategory } from "../engine/memory";
 import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
 import { TERRAIN_SETTINGS } from "../quality/qualitySetting";
-import { TERRAIN_NOT_AVAILABLE } from "./annunciation";
+import { TERRAIN_COMPUTATION_FAILED, TERRAIN_NOT_AVAILABLE } from "./annunciation";
 import { uvToSt, vertexDir, xyzToFaceUv } from "./cube";
 import { allocationTally } from "./gpu/allocationTally";
 import { normalsAtlasOf } from "./gpu/resources";
@@ -833,6 +833,34 @@ describe("the shared pass's fault (R10.T16.b; decision-r10-t16-contracts §7)", 
       },
     );
     expect(settled).toBe(2);
+  });
+
+  it("asks for nothing and draws nothing once halted, each view's frame carrying the halt's cause (R10.T16.e)", async () => {
+    const made = await sharedPass("high");
+    const view = northPole(2_000_000);
+    stream(made, [passView(PRIMARY, view)], 2);
+    made.pass.halt(TERRAIN_COMPUTATION_FAILED);
+    const step = made.pass.step({ views: [passView(PRIMARY, view)], grounded: [] });
+    const frame = made.pass.drawFor(PRIMARY, frameOf(view, 5_000));
+    expect([
+      made.lane().demand,
+      step.drawSet.count,
+      made.pass.faulted,
+      made.pass.maskReadyFor(PRIMARY),
+      frame.draw,
+      frame.annunciation,
+      frame.fault,
+    ]).toEqual([[], 0, true, false, null, null, TERRAIN_COMPUTATION_FAILED]);
+  });
+
+  it("keeps the first cause: a halt after every worker is lost changes nothing", async () => {
+    const made = await sharedPass("high");
+    const view = northPole(2_000_000);
+    stream(made, [passView(PRIMARY, view)], 2);
+    made.lane().unavailable = true;
+    made.pass.step({ views: [passView(PRIMARY, view)], grounded: [] });
+    made.pass.halt(TERRAIN_COMPUTATION_FAILED);
+    expect(made.pass.drawFor(PRIMARY, frameOf(view, 5_000)).fault).toBe(TERRAIN_NOT_AVAILABLE);
   });
 });
 

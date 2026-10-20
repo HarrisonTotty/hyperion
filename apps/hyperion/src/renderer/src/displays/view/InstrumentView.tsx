@@ -53,8 +53,8 @@ export interface InstrumentViewProps {
   readonly skyAwaiting: boolean;
   /**
    * The faults standing for this view, graphics first (its own `GRAPHICS VIEW REFUSED`), then the
-   * terrain's while it hands a body over with every height worker lost (plan R10, R10.T16.b); each
-   * its own fault line.
+   * terrain's while it hands a body over once every height worker is lost or a guarded computation
+   * has kept failing (plan R10, R10.T16.b and R10.T16.e); each its own fault line.
    */
   readonly faults: ReadonlyArray<string>;
   /** The ID of the text describing the canvases' keys. */

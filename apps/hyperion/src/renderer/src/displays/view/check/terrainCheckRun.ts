@@ -223,6 +223,7 @@ export interface TerrainCheckDeps {
     | "readMask"
     | "coverageCells"
     | "faults"
+    | "terrainFaults"
     | "teardown"
     | "phase"
   >;
@@ -575,6 +576,7 @@ export async function runTerrainCheck(deps: TerrainCheckDeps): Promise<TerrainCh
     devicePixelRatio: deps.devicePixelRatio,
     phases,
     faults: terrain.faults(),
+    terrainFaults: terrain.terrainFaults(),
     restoresAtMs: deps.views.restoresAtMs(),
     loss,
     teardown: terrain.teardown(),

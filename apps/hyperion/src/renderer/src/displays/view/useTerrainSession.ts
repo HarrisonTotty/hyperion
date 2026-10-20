@@ -18,7 +18,8 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import type { ServerLink } from "../../lib/serverLink";
 import type { SceneSurfaceEvent, SceneView } from "../../lib/scene/useScene";
 import type { ViewId } from "../../view/camera/state";
-import { EngineUnavailable } from "../../view/engine/resilientEngine";
+import type { TerrainFault } from "../../view/terrain/annunciation";
+import type { TerrainFailureGuard } from "../../view/terrain/failureGuard";
 import { TerrainSession, type TerrainRequests } from "../../view/terrain/session";
 import type { WorkerLike } from "../../view/terrain/workers/pool";
 import type { ViewEngineState } from "./useViewEngine";
@@ -253,7 +254,7 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
 }
 
 /** No view shows the terrain's fault: the snapshot with no session. */
-const NO_TERRAIN_FAULTS: ReadonlySet<ViewId> = new Set();
+const NO_TERRAIN_FAULTS: ReadonlyMap<ViewId, TerrainFault> = new Map();
 
 /** The subscription with no session, which nothing changes. */
 function noFaults(): () => void {
@@ -261,11 +262,13 @@ function noFaults(): () => void {
 }
 
 /**
- * The views whose label blocks show the terrain's fault (plan R10, R10.T16.b;
- * `TerrainSession.terrainFaults`): every view that hands a body over while every height worker is
- * lost; none with no session.
+ * The views whose label blocks show the terrain's fault, each with its text (plan R10, R10.T16.b and
+ * R10.T16.e; `TerrainSession.terrainFaults`): every view that hands a body over once every height
+ * worker is lost or a guarded computation has kept failing; none with no session.
  */
-export function useTerrainFaults(session: TerrainSession | null): ReadonlySet<ViewId> {
+export function useTerrainFaults(
+  session: TerrainSession | null,
+): ReadonlyMap<ViewId, TerrainFault> {
   return useSyncExternalStore(
     session?.subscribeFaults ?? noFaults,
     () => session?.terrainFaults ?? NO_TERRAIN_FAULTS,
@@ -273,28 +276,31 @@ export function useTerrainFaults(session: TerrainSession | null): ReadonlySet<Vi
 }
 
 /**
- * Steps a view's terrain session once (`TerrainSession.step`), guarded (plan R10, R10.T16; the batch
- * review's S5): a device loss (`EngineUnavailable`) passes in silence, and anything else, a bug, is
- * reported once until a step succeeds again, so that no throw stops the view's loop and every view
- * draws on with what the last step left.
+ * Steps a view's terrain session once (`TerrainSession.step`), through `guard` (plan R10, R10.T16
+ * and R10.T16.e; the batch review's S5; decision-r10-t16-leans §8): a device loss
+ * (`EngineUnavailable`) passes in silence, and anything else, a bug, is reported once until a step
+ * succeeds again, so that no throw stops the view's loop; once its steps have failed for
+ * `ANNUNCIATION_ONSET_MS`, the session's terrain is faulted (`TerrainSession.failComputation`).
  *
- * @param failing - Whether the last step failed with a bug.
- * @returns Whether this step leaves it failing.
+ * @param guard - The loop's guard of its session's step, one a session.
+ * @param nowMs - The frame's monotonic time, ms.
  */
 export function stepTerrainSession(
-  session: Pick<TerrainSession, "step"> | null,
-  failing: boolean,
-): boolean {
-  try {
-    session?.step();
-    return false;
-  } catch (error: unknown) {
-    if (error instanceof EngineUnavailable) {
-      return failing;
-    }
-    if (!failing) {
-      console.error("the terrain session's step failed:", error);
-    }
-    return true;
-  }
+  session: Pick<TerrainSession, "step" | "failComputation"> | null,
+  guard: TerrainFailureGuard,
+  nowMs: number,
+): void {
+  guard.run(
+    () => {
+      session?.step();
+    },
+    undefined,
+    nowMs,
+    {
+      describe: "the terrain session's step failed:",
+      onFault: () => {
+        session?.failComputation();
+      },
+    },
+  );
 }

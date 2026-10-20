@@ -20,9 +20,10 @@ import type { Selection } from "./select";
 export type TerrainAnnunciation = "TERRAIN: STREAMING" | "TERRAIN: DETAIL LIMITED";
 
 /**
- * The terrain's fault (plan R10, R10.T16.b; decision-r10-t16-contracts §7, the string and its guide
- * row ruled under the owner's delegation): every height worker is lost, so no view draws terrain
- * and each body is drawn by its figure, until `VIEW` is shown again and its terrain made anew.
+ * The terrain's fault for its first cause (plan R10, R10.T16.b; decision-r10-t16-contracts §7, the
+ * string and its guide row ruled under the owner's delegation): every height worker is lost, so no
+ * view draws terrain and each body is drawn by its figure, until `VIEW` is shown again and its
+ * terrain made anew. Its second cause is {@link TERRAIN_COMPUTATION_FAILED}'s (R10.T16.e).
  *
  * @remarks
  * It is a fault, not a status: set on the label block's fault line in `--status-caution`, after any
@@ -32,6 +33,35 @@ export type TerrainAnnunciation = "TERRAIN: STREAMING" | "TERRAIN: DETAIL LIMITE
  */
 export const TERRAIN_NOT_AVAILABLE =
   "TERRAIN NOT AVAILABLE: height computation failed, reopen VIEW to retry";
+
+/**
+ * The terrain's fault for a computation that keeps failing (plan R10, R10.T16.e;
+ * decision-r10-t16-leans §8, the string and its guide row ruled under the owner's delegation): the
+ * terrain session's step, or a view's survey edges, failed for {@link ANNUNCIATION_ONSET_MS} on end,
+ * so no view draws terrain and each body is drawn by its figure, until `VIEW` is shown again and
+ * its terrain made anew.
+ *
+ * @remarks
+ * The same fault as {@link TERRAIN_NOT_AVAILABLE}, for its second cause: in the same place and
+ * colour, as sticky, and never debounced. A single failed frame raises nothing.
+ */
+export const TERRAIN_COMPUTATION_FAILED =
+  "TERRAIN NOT AVAILABLE: terrain computation failed, reopen VIEW to retry";
+
+/**
+ * The terrain's fault, by its cause (plan R10, R10.T16.e; decision-r10-t16-leans §8): the height
+ * workers lost ({@link TERRAIN_NOT_AVAILABLE}) or a computation that keeps failing
+ * ({@link TERRAIN_COMPUTATION_FAILED}).
+ */
+export type TerrainFault = typeof TERRAIN_NOT_AVAILABLE | typeof TERRAIN_COMPUTATION_FAILED;
+
+/**
+ * Whether a fault line's `text` is the terrain's fault, of either cause (plan R10, R10.T16.e;
+ * decision-r10-t16-leans §8).
+ */
+export function isTerrainFault(text: string): text is TerrainFault {
+  return text === TERRAIN_NOT_AVAILABLE || text === TERRAIN_COMPUTATION_FAILED;
+}
 
 /** How long a condition must hold before its line shows, in milliseconds. */
 export const ANNUNCIATION_ONSET_MS = 250;

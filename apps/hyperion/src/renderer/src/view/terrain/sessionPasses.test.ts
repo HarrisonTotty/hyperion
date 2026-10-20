@@ -50,7 +50,14 @@ import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
 import { WIREFRAME_TERRAIN_SLOTS, WIREFRAME_TERRAIN_TAU_PX } from "../quality/qualitySetting";
 import { AU_M } from "../scenes/kept";
 import type { ViewBody, ViewScene } from "../scene/model";
-import { TERRAIN_NOT_AVAILABLE } from "./annunciation";
+import { stepTerrainSession } from "../../displays/view/useTerrainSession";
+import type { LitRegime } from "../bodies/regime";
+import {
+  ANNUNCIATION_ONSET_MS,
+  TERRAIN_COMPUTATION_FAILED,
+  TERRAIN_NOT_AVAILABLE,
+} from "./annunciation";
+import { TerrainFailureGuard } from "./failureGuard";
 import { fieldCellIndex } from "./coverage";
 import { LiveFrameTerrain } from "./frameTerrain";
 import { allocationTally } from "./gpu/allocationTally";
@@ -645,7 +652,12 @@ describe("the terrain session's fault (R10.T16.b; decision-r10-t16-contracts §7
 
   it("shows the fault on every view that hands a body over once every worker is lost", async () => {
     const { h } = await faulted();
-    expect([...h.session.terrainFaults].toSorted()).toEqual([INSTRUMENT, PRIMARY].toSorted());
+    expect(new Map(h.session.terrainFaults)).toEqual(
+      new Map([
+        [PRIMARY, TERRAIN_NOT_AVAILABLE],
+        [INSTRUMENT, TERRAIN_NOT_AVAILABLE],
+      ]),
+    );
   });
 
   it("tells its listeners of the fault once", async () => {
@@ -663,7 +675,7 @@ describe("the terrain session's fault (R10.T16.b; decision-r10-t16-contracts §7
     ]);
   });
 
-  it("keeps the same set while nothing changes, for useSyncExternalStore", async () => {
+  it("keeps the same map while nothing changes, for useSyncExternalStore", async () => {
     const { h } = await faulted();
     const faults = h.session.terrainFaults;
     h.session.step();
@@ -939,6 +951,187 @@ describe("each view's frame terrain through the session (R10.T16.c)", () => {
     expect(terrain.symbologyDepth().map((draw) => draw.material.name)).toEqual([
       h.session.pass(MOON)?.symbologyDepthMaterial?.name,
     ]);
+  });
+});
+
+/** The session as the view's loop steps it, each step throwing a bug while `failing.on` holds. */
+function steppedAs(
+  h: Harness,
+  failing: { on: boolean },
+): Pick<TerrainSession, "step" | "failComputation"> {
+  return {
+    step: () => {
+      if (failing.on) {
+        throw new Error("a bug of the session's step");
+      }
+      h.session.step();
+    },
+    failComputation: () => {
+      h.session.failComputation();
+    },
+  };
+}
+
+/** Steps `stepped` through `guard` at each animation frame, 16 ms apart, from `fromMs` to `toMs`. */
+function loop(
+  stepped: Pick<TerrainSession, "step" | "failComputation">,
+  guard: TerrainFailureGuard,
+  fromMs: number,
+  toMs: number,
+): void {
+  for (let atMs = fromMs; atMs <= toMs; atMs += 16) {
+    stepTerrainSession(stepped, guard, atMs);
+  }
+}
+
+/** Every bake the workers have been asked for. */
+function bakesAsked(h: Harness): number {
+  return h.workers.reduce((n, w) => n + w.received.filter((m) => m.kind === "bake").length, 0);
+}
+
+describe("the terrain session's computation fault (R10.T16.e; decision-r10-t16-leans §8)", () => {
+  /**
+   * The moon handed over by the primary and an instrument, its bakes streamed so that the primary
+   * draws it and is given its mask, and a third view handing nothing over.
+   */
+  async function streaming(): Promise<Harness> {
+    const h = await harness();
+    await handedOver(h);
+    h.session.noteView(INSTRUMENT, handing(6e6, { streamPriority: "secondary" }));
+    h.session.noteView(THIRD, notHanding(6e6));
+    await streamBakes(h, 4);
+    return h;
+  }
+
+  it("raises the fault on each view that hands a body over once the step has thrown for 250 ms", async () => {
+    const h = await streaming();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const stepped = steppedAs(h, { on: true });
+    const guard = new TerrainFailureGuard();
+    loop(stepped, guard, 0, ANNUNCIATION_ONSET_MS - 1);
+    const before = h.session.terrainFaults.size;
+    loop(stepped, guard, ANNUNCIATION_ONSET_MS, ANNUNCIATION_ONSET_MS);
+    expect([before, new Map(h.session.terrainFaults)]).toEqual([
+      0,
+      new Map([
+        [PRIMARY, TERRAIN_COMPUTATION_FAILED],
+        [INSTRUMENT, TERRAIN_COMPUTATION_FAILED],
+      ]),
+    ]);
+  });
+
+  it("raises nothing for a single failed step", async () => {
+    const h = await streaming();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const failing = { on: true };
+    const stepped = steppedAs(h, failing);
+    const guard = new TerrainFailureGuard();
+    loop(stepped, guard, 0, 0);
+    failing.on = false;
+    loop(stepped, guard, 16, 1_000);
+    expect([h.session.terrainFaults.size, h.session.pass(MOON)?.faulted]).toEqual([0, false]);
+  });
+
+  it("stops the terrain's demand: no bake is asked as the view closes in", async () => {
+    const h = await harness();
+    // Four cells about the north pole of face +z, under the primary 3,000 km out.
+    const cells = [
+      { i: 15, j: 15 },
+      { i: 16, j: 15 },
+      { i: 15, j: 16 },
+      { i: 16, j: 16 },
+    ].map(({ i, j }) => fieldCellIndex({ face: 2, level: FIELD_LEVEL, i, j }));
+    h.session.noteView(PRIMARY, handing(3e6));
+    h.session.step();
+    await answerField(h, 1, cells);
+    h.session.step();
+    await settle();
+    for (const worker of h.workers) {
+      answerBlock(worker, 0, blockChange(FIELD_LEVEL, runsOf(cells)));
+    }
+    await streamBakes(h, 2);
+    h.session.failComputation();
+    const asked = bakesAsked(h);
+    // At 2,200 km a pass still stepping asks for finer patches over the survey (8 more bakes).
+    h.session.noteView(PRIMARY, handing(2.2e6));
+    await streamBakes(h, 3);
+    expect(bakesAsked(h) - asked).toBe(0);
+  });
+
+  it("stops the terrain's draw: none in any view, with no annunciation, and the mask withheld", async () => {
+    const h = await streaming();
+    const maskBefore = frameTerrainOf(h, PRIMARY).surveyCoverage(MOON);
+    h.session.failComputation();
+    h.session.step();
+    const { plan, body } = moonPlan();
+    const terrain = frameTerrainOf(h, PRIMARY, 16);
+    const draws = terrain.draws(plan, [body]);
+    const instrument = h.session.drawTerrain(INSTRUMENT, MOON, frameAt(5_000));
+    expect(maskBefore).not.toBeNull();
+    expect([
+      draws.length,
+      terrain.annunciation,
+      terrain.surveyCoverage(MOON),
+      instrument?.draw,
+      instrument?.fault,
+      instrument?.annunciation,
+      instrument?.maskReady,
+    ]).toEqual([0, null, null, null, TERRAIN_COMPUTATION_FAILED, null, false]);
+  });
+
+  it("makes no pass once faulted: a body handed over after it keeps its figure, its mask withheld", async () => {
+    const h = await harness();
+    h.session.noteView(PRIMARY, handing(5e6));
+    h.session.step();
+    // The field held, the moon's pass would be made at the next step.
+    await answerField(h);
+    h.session.failComputation();
+    h.session.step();
+    await settle();
+    expect([
+      h.session.pass(MOON),
+      h.session.coverageMask(MOON) === null,
+      frameTerrainOf(h, PRIMARY).surveyCoverage(MOON),
+      new Map(h.session.terrainFaults),
+    ]).toEqual([null, false, null, new Map([[PRIMARY, TERRAIN_COMPUTATION_FAILED]])]);
+  });
+
+  it("is sticky: the fault stands, and the passes stay halted, however the steps go after it", async () => {
+    const h = await streaming();
+    h.session.failComputation();
+    const faults = h.session.terrainFaults;
+    await streamBakes(h, 2);
+    expect([h.session.terrainFaults, h.session.pass(MOON)?.faulted]).toEqual([faults, true]);
+  });
+
+  it("keeps the first cause raised: every height worker lost before the computation's fault", async () => {
+    const h = await streaming();
+    loseEveryWorker(h);
+    h.session.step();
+    h.session.failComputation();
+    h.session.step();
+    expect(new Set(h.session.terrainFaults.values())).toEqual(new Set([TERRAIN_NOT_AVAILABLE]));
+  });
+
+  it("shows the fault on every view reported where the views handing a body over cannot be told", async () => {
+    const h = await streaming();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    /** A view's regimes that cannot be read: a bug the step meets as it finds the views handing over. */
+    class UnreadableRegimes extends Map<BodyIdHex, LitRegime> {
+      override [Symbol.iterator](): never {
+        throw new Error("a bug of the view's regimes");
+      }
+    }
+    h.session.noteView(THIRD, { ...notHanding(6e6), regimes: new UnreadableRegimes() });
+    const stepped = steppedAs(h, { on: false });
+    loop(stepped, new TerrainFailureGuard(), 0, ANNUNCIATION_ONSET_MS + 16);
+    expect(new Map(h.session.terrainFaults)).toEqual(
+      new Map([
+        [PRIMARY, TERRAIN_COMPUTATION_FAILED],
+        [INSTRUMENT, TERRAIN_COMPUTATION_FAILED],
+        [THIRD, TERRAIN_COMPUTATION_FAILED],
+      ]),
+    );
   });
 });
 
@@ -1234,7 +1427,7 @@ describe("the terrain session's fault in the wireframe (R10.T11; decision-r10-t1
     ]);
     loseEveryWorker(h);
     h.session.step();
-    expect([...h.session.terrainFaults]).toEqual([PRIMARY]);
+    expect([...h.session.terrainFaults]).toEqual([[PRIMARY, TERRAIN_NOT_AVAILABLE]]);
   });
 
   it("shows the fault on the views of both styles that hand a body over", async () => {
@@ -1245,7 +1438,9 @@ describe("the terrain session's fault in the wireframe (R10.T11; decision-r10-t1
     ]);
     loseEveryWorker(h);
     h.session.step();
-    expect([...h.session.terrainFaults].toSorted()).toEqual([INSTRUMENT, PRIMARY].toSorted());
+    expect([...h.session.terrainFaults.keys()].toSorted()).toEqual(
+      [INSTRUMENT, PRIMARY].toSorted(),
+    );
   });
 });
 

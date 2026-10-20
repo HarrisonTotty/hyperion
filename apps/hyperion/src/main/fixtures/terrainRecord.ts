@@ -133,6 +133,7 @@ export const TERRAIN_RECORD: TerrainCheckRecord = {
       line: "device-lost (destroyed): Device was destroyed.",
     },
   ],
+  terrainFaults: [],
   restoresAtMs: [DESTROYED_AT_MS + 400],
   loss: {
     destroyedAtMs: DESTROYED_AT_MS,

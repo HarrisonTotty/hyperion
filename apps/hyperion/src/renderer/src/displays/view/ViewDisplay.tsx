@@ -130,7 +130,8 @@ import {
   ViewMarkLabels,
 } from "./ViewMarkLabels";
 import { styleName } from "../../view/photoreal/style";
-import { TERRAIN_NOT_AVAILABLE, type TerrainAnnunciation } from "../../view/terrain/annunciation";
+import { isTerrainFault, type TerrainAnnunciation } from "../../view/terrain/annunciation";
+import { TerrainFailureGuard } from "../../view/terrain/failureGuard";
 import type { TerrainSession } from "../../view/terrain/session";
 import type { WorkerLike } from "../../view/terrain/workers/pool";
 import { useServerLink } from "../../lib/serverLink";
@@ -651,7 +652,8 @@ function ViewStage({
   const reducedMotion = usePrefersReducedMotion();
   const graphics = useGraphicsStatus();
   const annunciation = graphicsAnnunciation(graphics);
-  // The views that show the terrain's fault, every height worker lost (R10.T16.b).
+  // The views that show the terrain's fault, every height worker lost (R10.T16.b) or a guarded
+  // computation failing on (R10.T16.e), each with its text.
   const terrainFaults = useTerrainFaults(terrain);
   const { ref: stageRef, size } = useElementSize();
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
@@ -744,9 +746,9 @@ function ViewStage({
   const controlsView = operatedView === null ? VIEW_ID : operatedView.slot.id;
   const controlledShown = operatedView?.slot.shown ?? null;
   const faults = faultsFor(graphics, annunciation, VIEW_NAME, VIEW_ID, terrainFaults);
-  // The primary's own terrain annunciation (G10; R10.T16.c), none while its fault stands
-  // (`terrainStatementOf`'s rule, C2).
-  const primaryTerrain = faults.includes(TERRAIN_NOT_AVAILABLE) ? null : shown.terrain;
+  // The primary's own terrain annunciation (G10; R10.T16.c), none while its fault stands, of either
+  // cause (`terrainStatementOf`'s rule, C2).
+  const primaryTerrain = faults.some((fault) => isTerrainFault(fault)) ? null : shown.terrain;
 
   // The list's ranges switch unit with hysteresis, from the units they were last shown in;
   // adjusted during render as each published run arrives.
@@ -887,10 +889,12 @@ function ViewStage({
     let terrainAnnunciation: TerrainAnnunciation | null = null;
     // The survey edges the last frame drawn marked, for the list's notes (R10.T16.c).
     let surveyEdges = NO_SURVEY_EDGES;
+    // The guard of the terrain session's step (the batch review's S5; R10.T16.e): a failure said
+    // once until a step succeeds, and the session's terrain faulted once its steps fail on for
+    // 250 ms. One a session, so that a run of failures is its own.
+    let stepGuard = new TerrainFailureGuard();
     // The contour interval of the last frame drawn (R10.T11), for the label block.
     let contourIntervalM: number | null = null;
-    // The terrain session's step failed, said once until a step succeeds (the batch review's S5).
-    let stepFailed = false;
     let frame = 0;
     const tick = (nowMs: number): void => {
       animationFrame += 1;
@@ -969,6 +973,7 @@ function ViewStage({
       if (reportedTo !== session) {
         reportedTo?.forgetView(VIEW_ID);
         reportedTo = session;
+        stepGuard = new TerrainFailureGuard();
       }
       terrainAnnunciation = null;
       let frameInputs: ViewFrameInputs | null = null;
@@ -1013,8 +1018,9 @@ function ViewStage({
           session.noteView(VIEW_ID, report);
         }
       }
-      // Guarded: no throw of the step stops this loop or the instruments' (S5).
-      stepFailed = stepTerrainSession(session, stepFailed);
+      // Guarded: no throw of the step stops this loop or the instruments' (S5), and one that lasts
+      // faults the terrain (R10.T16.e).
+      stepTerrainSession(session, stepGuard, nowMs);
       if (drawer !== null && frameInputs !== null) {
         const drawn = drawer.draw(frameInputs);
         if (drawn !== null && inputs.size !== null) {

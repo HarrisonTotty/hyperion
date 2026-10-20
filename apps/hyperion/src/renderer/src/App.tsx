@@ -151,7 +151,10 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
  * not over the server's scene (R02.T17; the guide's training banner): `ViewSceneProvider` holds the
  * display's scene and its `SCENE` choice above the frame, so the banner is computed during render
  * from what `VIEW` draws. The system last opened on `SYSTEM` is handed to it with its designation
- * and position, which the server's scene does not carry.
+ * and position, which the server's scene does not carry. A `--views-check` launch, T20's or the
+ * terrain run's, is a measurement run, flown by script and wanting no input: its banner reads
+ * `MEASUREMENT` in place of `TRAINING` on every display for the whole launch (plan R10, R10.T16.e;
+ * decision-r10-t16-leans §11).
  */
 export function App() {
   const serverUrl = window.hyperion.serverUrl;
@@ -221,9 +224,14 @@ export function App() {
                 activeDisplay={activeDisplay}
                 onSelectDisplay={setActiveDisplay}
                 linkStatus={connection.status}
-                // Training is a kept test scene on VIEW; the server's scene is live operation.
+                // A views check measures for the whole launch, on every display; training is a
+                // kept test scene on VIEW; the server's scene is live operation.
                 modeBanner={
-                  activeDisplay === "view" && sceneProvenance === "kept" ? "TRAINING" : null
+                  viewsCheck !== undefined
+                    ? "MEASUREMENT"
+                    : activeDisplay === "view" && sceneProvenance === "kept"
+                      ? "TRAINING"
+                      : null
                 }
               >
                 {DISPLAYS.map(({ id }) => (

@@ -5,12 +5,14 @@ import type {
   TerrainCheckFault,
   TerrainCheckPhaseName,
   TerrainCheckPhaseRecord,
+  TerrainCheckSessionFault,
   ViewsCheckStyle,
 } from "../../../../../preload/api";
 import type { TextureHandle } from "../../../view/engine/types";
 import { STYLE_TOGGLE_KEY } from "../../../view/photoreal/style";
 import { PHASE_SCENE_NAME } from "../../../view/scenes/phaseScene";
 import { TERRAIN_SCENE_NAME } from "../../../view/scenes/terrainScene";
+import { TERRAIN_COMPUTATION_FAILED } from "../../../view/terrain/annunciation";
 import { runTerrainCheck, type TerrainCheckDeps, type TerrainCheckTiming } from "./terrainCheckRun";
 import type { MaskReading, QuietSpan, TerrainMark, WatchedSession } from "./terrainProbe";
 import type { ShownView } from "./viewsProbe";
@@ -154,6 +156,11 @@ class FakeView {
   }
 }
 
+/** The terrain session's faults the fake probe saw. */
+const SESSION_FAULTS: ReadonlyArray<TerrainCheckSessionFault> = [
+  { atMs: 50_000, text: TERRAIN_COMPUTATION_FAILED, views: ["view"] },
+];
+
 /** What the fake probe saw the run do. */
 interface Seen {
   readonly phases: Array<{
@@ -178,6 +185,8 @@ function fakeProbe(view: FakeView, clock: () => number, seen: Seen): TerrainChec
     survey: () => null,
     memory: () => ({ workerFieldBytes: 0, keptFieldBytes: 0, gpuBytes: new Map() }),
     workerCount: 3,
+    terrainFaults: new Map(),
+    subscribeFaults: () => () => undefined,
   };
   const terrain = (): boolean => view.scene === TERRAIN_SCENE_NAME;
   const scriptS = (): number | null => (terrain() ? (clock() - view.chosenAtMs) / 1000 : null);
@@ -259,6 +268,7 @@ function fakeProbe(view: FakeView, clock: () => number, seen: Seen): TerrainChec
           : null,
       ),
     coverageCells: () => new Set(Array.from({ length: 48 }, (_, i) => i)),
+    terrainFaults: (): TerrainCheckSessionFault[] => [...SESSION_FAULTS],
     faults: (): TerrainCheckFault[] =>
       seen.destroyedAtMs === null
         ? []
@@ -428,5 +438,10 @@ describe("the terrain run's script (R10.T16.d)", () => {
     expect(record.faults).toHaveLength(1);
     expect(record.teardown).toMatchObject({ disposed: true, workersLive: 0 });
     expect(record.handover?.scriptS).toBeGreaterThan(0);
+  });
+
+  it("records the terrain session's faults as the probe saw them (R10.T16.e)", async () => {
+    const { record } = await run();
+    expect(record.terrainFaults).toEqual(SESSION_FAULTS);
   });
 });

@@ -183,6 +183,11 @@ export interface FrameTerrainPass {
   readonly heights: ResidentHeightsView;
   /** The views its last step took (`TerrainPass.viewIds`). */
   readonly viewIds: ReadonlySet<string>;
+  /**
+   * Whether the pass is faulted (`TerrainPass.faulted`): it draws nothing more, whatever its last
+   * step's views (R10.T16.b's lost workers, R10.T16.e's computation fault).
+   */
+  readonly faulted: boolean;
 }
 
 /** What a view's frame terrain reads of its source: `TerrainSession`'s, structurally. */
@@ -217,13 +222,28 @@ export interface ViewTerrainSource extends FrameTerrainSource, WireTerrainSource
   readonly wanted: ReadonlySet<BodyIdHex>;
 }
 
+/**
+ * What a view's drawer reads of its terrain session: its survey edges' source, and the fault that a
+ * lasting failure of them raises (plan R10, R10.T16.e).
+ */
+export interface ViewTerrainSession extends ViewTerrainSource {
+  /**
+   * Faults the session's terrain for a computation that keeps failing
+   * (`TerrainSession.failComputation`; decision-r10-t16-leans §8).
+   */
+  failComputation(): void;
+}
+
 /** A view's terrain for one frame, as its loop gives its drawer (`ViewFrameInputs.terrain`). */
 export interface ViewTerrainInput {
   /** The stage's terrain session. */
-  readonly source: ViewTerrainSource;
+  readonly source: ViewTerrainSession;
   /** The view, as the session knows it: `PRIMARY`'s or an instrument's ID. */
   readonly view: ViewId;
-  /** The frame's monotonic time, ms, for the annunciation's debounce. */
+  /**
+   * The frame's monotonic time, ms, for the annunciation's debounce and for how long its survey
+   * edges have failed (R10.T16.e).
+   */
   readonly nowMs: number;
 }
 
@@ -362,9 +382,10 @@ const NO_HEIGHT = (): number | null => null;
  * (`ResidentHeightsView.rimHeightAtM`, the datum where none does), and the drawn ground hides a
  * point from the note's range (`SurveyEdgeView.ground`); in the wireframe the edge then takes the
  * terrain's own depth, which the wireframe's terrain writes. Elsewhere the view draws no terrain of
- * the body (a frame that hands it over to no pass), so the rim is the datum, the figure it draws,
- * and the edge is drawn against the occluder spheres alone (decision-r10-t16-review §3; the batch
- * review's S1).
+ * the body (a frame that hands it over to no pass, or a faulted pass, which keeps its last step's
+ * views but draws nothing, R10.T16.e), so the rim is the datum, the figure it draws, and the edge
+ * is drawn against the occluder spheres alone (decision-r10-t16-review §3; the batch review's
+ * S1).
  *
  * @param style - The style the frame is drawn in (`ViewFrameDrawn.drawnStyle`, as the drawer
  *   foresees it before the draw).
@@ -406,7 +427,8 @@ export function surveyEdgeViewsOf(
     // The pass whose terrain this view draws in its style: the lit one, or the wireframe's.
     const pass = style === "photorealistic" ? source.pass(body.id) : source.wirePass(body.id);
     const heights = pass?.heights ?? null;
-    const drawsGround = pass !== null && pass.viewIds.has(view);
+    // A faulted pass keeps its last step's views but draws nothing: the view draws the figure.
+    const drawsGround = pass !== null && !pass.faulted && pass.viewIds.has(view);
     views.push({
       body: body.id,
       coverage,

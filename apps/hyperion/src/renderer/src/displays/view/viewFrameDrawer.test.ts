@@ -13,7 +13,8 @@ import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
 import { sceneOrigins } from "../../view/scene/model";
 import { PHASE_GIANT, PHASE_PLANETS, phaseScene } from "../../view/scenes/phaseScene";
 import { CoverageView, fieldCellIndex } from "../../view/terrain/coverage";
-import type { ViewTerrainSource } from "../../view/terrain/frameTerrain";
+import { ANNUNCIATION_ONSET_MS } from "../../view/terrain/annunciation";
+import type { ViewTerrainSession, ViewTerrainSource } from "../../view/terrain/frameTerrain";
 import type { ResidentHeightsView } from "../../view/terrain/residentHeights";
 import type { TerrainViewFrameInput } from "../../view/terrain/terrainPass";
 import { heightAboveGroundM } from "../../view/terrain/terrainWire";
@@ -199,6 +200,7 @@ describe("a view's photorealistic frame (R10.T10.d, T10.e)", () => {
             asked.push(body);
             return null;
           },
+          failComputation: () => undefined,
         },
         view: viewId("primary"),
         nowMs: 0,
@@ -330,12 +332,39 @@ describe("the style a view's frame is drawn in, foreseen (the batch review's S8)
   );
 });
 
-describe("a view's survey edges that cannot be marked (the batch review's S5)", () => {
-  it("draws on without them, saying so once", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const engine = await countingRenderEngine();
-    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
-    const inputs: ViewFrameInputs = {
+/**
+ * A session stand-in whose survey throws `error` while `throws` holds, the faults its drawer's
+ * guard raised counted.
+ */
+function failingSource(
+  error: Error,
+  throws: () => boolean = () => true,
+): ViewTerrainSession & { readonly faulted: () => number } {
+  let faulted = 0;
+  return {
+    wanted: new Set(PHASE_PLANETS),
+    survey: () => {
+      if (throws()) {
+        throw error;
+      }
+      return null;
+    },
+    drawTerrain: () => null,
+    coverageMask: () => null,
+    pass: () => null,
+    wirePass: () => null,
+    drawWireTerrain: () => null,
+    failComputation: () => {
+      faulted += 1;
+    },
+    faulted: () => faulted,
+  };
+}
+
+describe("a view's survey edges that cannot be marked (the batch review's S5; R10.T16.e)", () => {
+  /** The phase scene's wireframe frame over `source` at `nowMs`. */
+  function inputsAt(source: ViewTerrainSession, nowMs: number): ViewFrameInputs {
+    return {
       run: phaseRun(true),
       size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
       tokens: TOKENS,
@@ -348,25 +377,73 @@ describe("a view's survey edges that cannot be marked (the batch review's S5)", 
       renderScale: 1,
       availability: { wireframe: true, photorealistic: true },
       meter: null,
-      terrain: {
-        source: {
-          wanted: new Set(PHASE_PLANETS),
-          survey: () => {
-            throw new Error("a bug of the source's");
-          },
-          drawTerrain: () => null,
-          coverageMask: () => null,
-          wirePass: () => null,
-          drawWireTerrain: () => null,
-          pass: () => null,
-        },
-        view: viewId("view"),
-        nowMs: 0,
-      },
+      terrain: { source, view: viewId("view"), nowMs },
     };
-    const drawn = [drawer.draw(inputs) !== null, drawer.draw(inputs) !== null];
+  }
+
+  /** `drawer`'s frames over `source` at each of `timesMs`: whether each drew. */
+  function drawAt(
+    drawer: ViewFrameDrawer,
+    source: ViewTerrainSession,
+    timesMs: ReadonlyArray<number>,
+  ): boolean[] {
+    return timesMs.map((nowMs) => drawer.draw(inputsAt(source, nowMs)) !== null);
+  }
+
+  it("draws on without them, saying so once", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const drawn = drawAt(drawer, failingSource(new Error("a bug of the source's")), [0, 16]);
     drawer.dispose();
     expect([drawn, error.mock.calls.length]).toEqual([[true, true], 1]);
+  });
+
+  it("faults the session's terrain once they have failed for 250 ms, and not before", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const source = failingSource(new Error("a bug of the source's"));
+    drawAt(drawer, source, [1_000, 1_100, 1_000 + ANNUNCIATION_ONSET_MS - 1]);
+    const before = source.faulted();
+    drawAt(drawer, source, [1_000 + ANNUNCIATION_ONSET_MS, 1_300]);
+    drawer.dispose();
+    expect([before, source.faulted()]).toEqual([0, 1]);
+  });
+
+  it("raises nothing for a single failed frame", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    let nowMs = 0;
+    const source = failingSource(new Error("a bug of the source's"), () => nowMs === 0);
+    for (nowMs = 0; nowMs <= 1_000; nowMs += 100) {
+      drawer.draw(inputsAt(source, nowMs));
+    }
+    drawer.dispose();
+    expect(source.faulted()).toBe(0);
+  });
+
+  it("lets a loss pass in silence, however long it lasts", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const source = failingSource(new EngineUnavailable("createBuffer"));
+    drawAt(drawer, source, [0, 300, 600]);
+    drawer.dispose();
+    expect([source.faulted(), error.mock.calls.length]).toEqual([0, 0]);
+  });
+
+  it("counts a new session's failures afresh", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const first = failingSource(new Error("a bug of the source's"));
+    const second = failingSource(new Error("a bug of the source's"));
+    drawAt(drawer, first, [0, 200]);
+    drawAt(drawer, second, [240, 300]);
+    drawer.dispose();
+    expect([first.faulted(), second.faulted()]).toEqual([0, 0]);
   });
 });
 
@@ -391,7 +468,7 @@ describe("what a view's frame gives its label block and list (the batch review's
    * A terrain session stand-in: the 90° planet's field wanted and surveyed in part, and each
    * draw of its terrain annunciating `TERRAIN: STREAMING`.
    */
-  function streamingSource(): ViewTerrainSource {
+  function streamingSource(): ViewTerrainSession {
     return {
       wanted: new Set([SURVEYED]),
       survey: (body) =>
@@ -409,6 +486,7 @@ describe("what a view's frame gives its label block and list (the batch review's
       wirePass: () => null,
       drawWireTerrain: () => null,
       pass: () => null,
+      failComputation: () => undefined,
     };
   }
 
@@ -507,7 +585,7 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
   function wireSource(
     heights: ResidentHeightsView = DATUM,
     overrides: Partial<ViewTerrainSource> = {},
-  ): { readonly source: ViewTerrainSource; readonly asked: TerrainViewFrameInput[] } {
+  ): { readonly source: ViewTerrainSession; readonly asked: TerrainViewFrameInput[] } {
     const asked: TerrainViewFrameInput[] = [];
     return {
       asked,
@@ -525,6 +603,7 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
                 symbologyDepthMaterial: null,
                 heights,
                 viewIds: new Set([VIEW]),
+                faulted: false,
               }
             : null,
         drawWireTerrain: (_view, body, input) => {
@@ -542,6 +621,8 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
             maskReady: true,
           };
         },
+        // Never faulted here: the drawer's guards are R10.T16.e's own tests'.
+        failComputation: () => undefined,
         ...overrides,
       },
     };
@@ -549,7 +630,7 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
 
   /** The phase scene's frame inputs over `source` in `style`, its planets turning. */
   function inputsOver(
-    source: ViewTerrainSource,
+    source: ViewTerrainSession,
     style: "photorealistic" | "wireframe" = "wireframe",
   ): ViewFrameInputs {
     return {
@@ -570,7 +651,7 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
   }
 
   /** A drawer's wireframe frame over `source`, with what its view was given. */
-  async function wireframeOf(source: ViewTerrainSource): Promise<{
+  async function wireframeOf(source: ViewTerrainSession): Promise<{
     readonly drawn: ViewFrameDrawn | null;
     readonly frame: FrameSubmission | undefined;
   }> {

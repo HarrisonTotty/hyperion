@@ -100,6 +100,31 @@ describe("App", () => {
     );
   });
 
+  it.each([
+    ["T20's", false],
+    ["the terrain run's", true],
+  ])(
+    "shows MEASUREMENT on every display of %s views-check launch (R10.T16.e)",
+    async (_run, terrain) => {
+      const api = { ...viewsCheckApi(), launch: { ...viewsCheckApi().launch, terrain } };
+      stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
+      const user = userEvent.setup();
+      render(<App />);
+      const opened = modeBanner()?.textContent;
+      await user.keyboard("{F1}");
+      const link = modeBanner()?.textContent;
+      await user.keyboard("{F2}");
+      const galaxy = modeBanner()?.textContent;
+      await user.keyboard("{F3}");
+      const system = modeBanner()?.textContent;
+      await user.keyboard("{F4}");
+      const view = modeBanner()?.textContent;
+      expect([opened, link, galaxy, system, view]).toEqual(
+        Array.from({ length: 5 }, () => "MEASUREMENT"),
+      );
+    },
+  );
+
   it("fails a views-check run whose VIEW cannot be drawn", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     vi.spyOn(console, "error").mockImplementation(() => undefined);

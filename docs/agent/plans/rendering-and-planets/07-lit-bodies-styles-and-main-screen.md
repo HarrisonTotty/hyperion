@@ -2926,6 +2926,10 @@ Recorded in this plan. Acceptance: the record.
   it. Before T8.d it could not: lowering the scale does not shorten a chain, and can push a disc
   into the 8 × 8 band. A miss whose `discs` pass holds a disc of 32 px or more is the residual
   (a large disc's 4 × 4 limb, 0.47–0.54 M cycles) and is recorded as a finding.
+- **Extended by R10.T16.e: `MEASUREMENT` on a views-check launch** (decision-r10-t16-leans §11).
+  Every `--views-check` launch, this task's and R10.T16.d's terrain run, shows `MEASUREMENT` in
+  place of `TRAINING` on every display for the whole launch: it is flown by script, records, and
+  wants no input while it measures, and its closing question is asked after its phases.
 
 #### R07.T21 A child window on a second monitor
 

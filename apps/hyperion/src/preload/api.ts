@@ -573,6 +573,22 @@ export interface TerrainCheckFault {
   readonly line: string;
 }
 
+/**
+ * The terrain session's fault as the terrain run saw it raised or changed (plan R10, R10.T16.e;
+ * decision-r10-t16-leans §8): the views whose label blocks showed it, and its text.
+ */
+export interface TerrainCheckSessionFault {
+  /** `performance.now()` ms. */
+  readonly atMs: number;
+  /**
+   * Its fault line by the session's first cause, which every view shows alike: the renderer's
+   * `TERRAIN_NOT_AVAILABLE` or `TERRAIN_COMPUTATION_FAILED` (`view/terrain/annunciation.ts`).
+   */
+  readonly text: string;
+  /** The views that showed it, by their engine names (`view`, `instrument-1`, `instrument-2`). */
+  readonly views: ReadonlyArray<string>;
+}
+
 /** The forced loss (decision-r10-t16-contracts §6): what stood when the harness destroyed the device, and after. */
 export interface TerrainCheckLossRecord {
   /** When the harness destroyed the device, ms, and the script's time then, s; `null` if it did not. */
@@ -633,6 +649,11 @@ export interface TerrainCheckRecord {
   readonly phases: ReadonlyArray<TerrainCheckPhaseRecord>;
   /** Every engine fault over the run, timed. */
   readonly faults: ReadonlyArray<TerrainCheckFault>;
+  /**
+   * Each time the terrain session's `terrainFaults` held a view or changed while it did, timed
+   * (R10.T16.e): the run fails on any, of either cause.
+   */
+  readonly terrainFaults: ReadonlyArray<TerrainCheckSessionFault>;
   /** Every restore of the engine after a loss, `performance.now()` ms. */
   readonly restoresAtMs: ReadonlyArray<number>;
   readonly loss: TerrainCheckLossRecord;
