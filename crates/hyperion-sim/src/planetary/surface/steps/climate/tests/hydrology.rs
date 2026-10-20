@@ -12,7 +12,7 @@ use super::super::ebm::EnergyBalance;
 use super::super::grid::{LATITUDE_BANDS, ModelGrid};
 use super::super::hydrology::{self, Evaporation, MonthCycle};
 use super::super::lfpm::{
-    self, DEEP_MEASURE, MAX_RESTARTS, Parameters, RATE_FLOOR_SHARE, TOLERANCE,
+    self, EARTH_DEEP_TOLERANCE, MAX_RESTARTS, Parameters, RATE_FLOOR_SHARE, TOLERANCE,
 };
 use super::super::wind;
 use super::super::{
@@ -520,8 +520,9 @@ fn report_months(run: &Run) {
             let c = &d.components;
             format!(
                 "; land {} cells, {} restarts, {} sweeps, measure {:.1e}{} (residual {:.1e}); \
-                 components of 1: {}, 2: {}, 3–16: {}, > 16: {} ({} cells, the largest {}); {} \
-                 below zero; the budget's closure {:.1e}",
+                 components of 1: {}, 2: {}, 3–16: {}, > 16: {} ({} cells, the largest {}), the \
+                 flow order's backward share {:.4} (the largest's {:.4}); {} below zero; the \
+                 budget's closure {:.1e}",
                 d.land_cells,
                 d.restarts,
                 d.sweeps,
@@ -534,6 +535,8 @@ fn report_months(run: &Run) {
                 c.large,
                 c.large_cells,
                 c.largest,
+                d.backward_share,
+                d.largest_backward_share,
                 d.negative_cells,
                 closure(d)
             )
@@ -575,10 +578,10 @@ fn compare(values: &[f64], reference: &[f64], floor: f64, land: &[bool]) -> (f64
 
 /// Asserts the ruled convergence on the coarse pass's Earth (decision-r09-t13e-lfpm-convergence
 /// §3.5): every month's orographic solve converges before the cap and closes the land's budget
-/// within 10⁻³ of its inflow, the deep solve meets the stop test at [`DEEP_MEASURE`], and every
-/// land climate cell's (any of its four field cells land) monthly and annual rate lies within 1%
-/// of the deep solve's, |P − P*| ≤ 0.01 max(P*, 10⁻³ k* `P̄_sea`), `deep` the same water cycle at
-/// the deep tolerance on a clone of the finished state ([`Parameters::deep`]) with its records
+/// within 10⁻³ of its inflow, the deep solve meets the stop test at [`EARTH_DEEP_TOLERANCE`] (the
+/// ruling's E-L8 §5), and every land climate cell's (any of its four field cells land) monthly and
+/// annual rate lies within 1% of the deep solve's, |P − P*| ≤ 0.01 max(P*, 10⁻³ k* `P̄_sea`),
+/// `deep` the same water cycle at that tolerance on a clone of the finished state with its records
 /// `deep_climate`. Prints each month's comparison.
 fn assert_the_solve_converges(
     run: &Run,
@@ -644,7 +647,7 @@ fn assert_the_solve_converges(
         );
         assert!(closure(d).abs() <= 1e-3, "month {m}: {d:?}");
         assert!(
-            dd.measure <= DEEP_MEASURE,
+            dd.converged && dd.measure <= EARTH_DEEP_TOLERANCE,
             "month {m}: the deep solve's {dd:?}"
         );
         assert!(
@@ -1156,12 +1159,13 @@ fn a_locked_aquaplanet_s_winds_converge_on_its_substellar_point() {
 /// hemisphere ([`assert_the_budget_s_pattern`]), but never its precipitation windows, since its
 /// generated midlatitudes are mostly sea and its southern margin a few per cent. It is also the
 /// ruled slow test of the orographic solve (decision-r09-t13e-lfpm-convergence §3.5): the water
-/// cycle run again at the deep tolerance on a clone of the finished state, every month converges
-/// before the cap and closes its budget, and every land climate cell's monthly and annual rate
-/// lies within 1% of the deep solve's ([`assert_the_solve_converges`]).
+/// cycle run again on a clone of the finished state at the deep tolerance its E-L8 §5 rules,
+/// [`EARTH_DEEP_TOLERANCE`], every month converges before the cap and closes its budget, and every
+/// land climate cell's monthly and annual rate lies within 1% of the deep solve's
+/// ([`assert_the_solve_converges`]).
 #[test]
 #[ignore = "slow: the reference Earth's coarse pass to the climate at level 8, and its water cycle \
-            again at the deep tolerance, about a minute"]
+            again at the deep tolerance, about 40 s"]
 fn the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp() {
     let inputs = reference::earth_like();
     let level = hyperion_surface::field::coarse_level(inputs.radius());
@@ -1186,14 +1190,20 @@ fn the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp() {
         assert_eq!(again.as_ref(), diagnostics.water.as_ref());
         let mut deep_working = working.clone();
         let start = std::time::Instant::now();
-        let deep = hydrology::run_with(&pass, &mut deep_working, &kept, &Parameters::deep())
-            .expect("the Earth's model keeps its own records");
+        let deep = hydrology::run_with(
+            &pass,
+            &mut deep_working,
+            &kept,
+            &Parameters::deep().with_tolerance(EARTH_DEEP_TOLERANCE),
+        )
+        .expect("the Earth's model keeps its own records");
         let deep_s = start.elapsed().as_secs_f64();
         let land = working.cells.iter().filter(|c| !seas::under_sea(c)).count();
         eprintln!(
             "level {}: the model {modelled:.2} s, the rest {finished:.2} s, of which the water \
              cycle {cycle:.2} s; the step without it {:.2} s and with it {:.2} s; {land} of {} \
-             cells land; τ {TOLERANCE:e}; the deep water cycle {deep_s:.2} s",
+             cells land; τ {TOLERANCE:e}; the deep water cycle at τ {EARTH_DEEP_TOLERANCE:e} \
+             {deep_s:.2} s",
             level.get(),
             modelled + finished - cycle,
             modelled + finished,

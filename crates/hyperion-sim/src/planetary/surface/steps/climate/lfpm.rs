@@ -109,13 +109,31 @@
 //!   cycle is a closed loop of a zonal wind, two cells blowing into each other across a
 //!   convergence line, or two east–west neighbours whose side edges lean together as the meridians
 //!   converge (plan 09's E-L2).
+//! - **The flow order** ([`order_along_flow`]; decision-r09-t13e-lfpm-convergence's E-L8). The side
+//!   edges' cycles merge whole regions into components of thousands of cells, whose index runs
+//!   against their flow over part of their extent. Each component of more than
+//!   [`EXACT_BLOCK_CELLS`] cells is reordered along its flow by Eades, Lin and Smyth's greedy
+//!   heuristic for the feedback arc set (Eades, P., Lin, X., and Smyth, W. F. 1993, "A fast and
+//!   effective heuristic for the feedback arc set problem", Inf. Process. Lett. 47, 319–323; its
+//!   bibliographic data the ruling's, checked against Crossref, and the rule as the ruling states
+//!   it, from its memory of the paper), weighted, over the component's internal edges, each
+//!   weighted by the wind's share of its source's outflow, (ŵ · n̂)⁺ ℓ ÷ W. Until no member is
+//!   left: a member with no successor left (a sink) goes to the front of the tail; else a member
+//!   with no predecessor left (a source) to the end of the head; else the member of greatest δ,
+//!   its remaining weight out less its weight in, to the end of the head; each the lowest index of
+//!   its kind. The order is the head, then the tail. It minimises, greedily, the weight of the
+//!   edges that point backward, the inflows a sweep reads one sweep late: on a ring it cuts once
+//!   and walks the ring downstream. It is downwind numbering for a convection-dominated problem
+//!   (Bey, J., and Wittum, G. 1997, "Downwind numbering: robust multigrid for
+//!   convection-diffusion problems", Appl. Numer. Math. 23, 177–192, as the ruling cites it). It
+//!   changes the sweep, not the solution.
 //! - **A sweep** ([`sweep`]) solves the components in turn, every other cell at its latest value.
 //!   A single cell's balance is solved for its own outflow. A component of 2 to
 //!   [`EXACT_BLOCK_CELLS`] cells has its whole balance, `M_i` `Q_i` − Σ `pull_ij` `Q_j` over its
 //!   members, solved at once by Gaussian elimination in member order without pivoting, factorised
 //!   once a month. That needs no pivoting because the block is a column diagonally dominant
 //!   M-matrix: each column's pulls to other cells sum to at most 1 + `δ_j`. A larger component's
-//!   cells take one Gauss–Seidel pass in index order. So a sweep is a fixed affine map,
+//!   cells take one Gauss–Seidel pass in its flow order. So a sweep is a fixed affine map,
 //!   F(x) = G x + c, of x, the vapour and cloud-water outflows of the land cells whose air moves
 //!   on.
 //! - **The start** is one sweep without the dispersion from no air. With exact blocks it is the
@@ -139,10 +157,17 @@
 //! edges' in [`Edge::ALL`]'s, and the unknowns' in cell-index order, vapour then cloud water), in
 //! `f64`, every sum and product in that order with no fused multiply–add, every exponential
 //! through [`crate::math`], with no `HashMap` and no threads. The work that decides the order is
-//! integer work. The iteration count varies between worlds but is a function of the inputs alone,
-//! and no month starts from another's.
+//! integer work, but for the flow order's δ: each is summed afresh over the member's remaining
+//! edges in [`Edge::ALL`]'s order whenever a neighbour leaves, never updated by differences, so
+//! that its bits do not depend on the order of the removals, and its heap orders by `total_cmp`,
+//! then the lowest index, an entry whose δ is no longer its member's, compared bit for bit,
+//! skipped. The iteration count varies between worlds but is a function of the inputs alone, and
+//! no month starts from another's.
 //!
 //! [`Edge::ALL`]: hyperion_surface::cube::Edge::ALL
+
+use std::cmp::{Ordering, Reverse};
+use std::collections::BinaryHeap;
 
 use hyperion_surface::cube::PATCH_QUADS;
 use hyperion_surface::num::assert_finite;
@@ -219,16 +244,19 @@ pub(super) const RESTART: usize = 10;
 /// and is flagged as not converged ([`Diagnostics::converged`]); it never panics, so that an odd
 /// world still generates. In the ruling's replica the stop came after 47–113 sweep-equivalents. On
 /// the reference Earth through the coarse pass (level 8, its generated continents and R09.T12.e's
-/// sea) every month stops after 20–27 restarts (223–300 sweep-equivalents), and on R09.T13.g's
-/// synthetic Earth at level 7 after 8–13: 19–25% of the coarse pass's land lies in components
-/// larger than [`EXACT_BLOCK_CELLS`], the largest 11,333 cells, which the Gauss–Seidel pass leaves
-/// to the Krylov iteration (plan 09's deferred finding E-L8).
+/// sea) every month stops after 9–12 restarts (102–135 sweep-equivalents) with its large
+/// components in their flow order, against 20–27 in index order, and on R09.T13.g's synthetic
+/// Earth at level 7 after 3–5 (8–13): 19–25% of the coarse pass's land lies in components larger
+/// than [`EXACT_BLOCK_CELLS`], the largest 11,635 cells. Over the ruling's generated sample (its
+/// E-L8 §4: four more surface seeds, a land-heavy Earth, 60° obliquity and a locked world) no
+/// month took more than 18, inside its acceptance of 20, two-thirds of the cap.
 pub(super) const MAX_RESTARTS: u32 = 30;
 
 /// The largest strongly connected component of a month's upwind graph that a sweep solves
 /// exactly, cells: 16, at most 32 unknowns (decision-r09-t13e-lfpm-convergence §3.2 item 2). A
-/// larger one takes one Gauss–Seidel pass over its members in index order, which keeps the sweep
-/// a fixed linear map; the Krylov iteration absorbs the rest.
+/// larger one takes one Gauss–Seidel pass over its members in its flow order (the ruling's E-L8
+/// §3, [`order_along_flow`]), which keeps the sweep a fixed linear map; the Krylov iteration
+/// absorbs the rest.
 pub(super) const EXACT_BLOCK_CELLS: usize = 16;
 
 /// The share τ of the tests' deep solves' stop test (decision-r09-t13e-lfpm-convergence §3.5: "a
@@ -242,9 +270,17 @@ pub(super) const DEEP_TOLERANCE: f64 = 1e-12;
 #[cfg(test)]
 pub(super) const DEEP_MEASURE: f64 = 1e-10;
 
-/// The restarts a deep solve may take: 400, against the 41–53 the reference Earth's months take.
+/// The restarts a deep solve may take: 400, against the 20–27 the reference Earth's months take at
+/// [`DEEP_TOLERANCE`] in their flow order (41–53 in index order).
 #[cfg(test)]
 pub(super) const DEEP_RESTARTS: u32 = 400;
+
+/// The share τ of the slow reference-Earth test's deep reference, which its stop test must meet:
+/// 10⁻⁷ (decision-r09-t13e-lfpm-convergence, E-L8 §5). With the error at most about 20 times the
+/// measure, that reference lies within about 2 × 10⁻⁶ of the converged rates, 5,000 times inside
+/// the 1% comparison. The unit tests' deep solves keep [`DEEP_TOLERANCE`], their worlds small.
+#[cfg(test)]
+pub(super) const EARTH_DEEP_TOLERANCE: f64 = 1e-7;
 
 /// The least ŵ · n̂ at which an edge is downwind: a wind within 10⁻⁹ rad of an edge's direction
 /// passes nothing across it. Far above the rounding of a unit normal (about 10⁻¹⁶), so that a
@@ -599,6 +635,16 @@ pub(super) struct Diagnostics {
     pub(super) relative_residual: f64,
     /// The month's components by size.
     pub(super) components: ComponentSizes,
+    /// The share of the internal advective weight of the month's components larger than
+    /// [`EXACT_BLOCK_CELLS`] that their flow order leaves pointing backward, the inflows a sweep
+    /// reads one sweep late (decision-r09-t13e-lfpm-convergence, E-L8 §3): over those components,
+    /// the weight of each internal edge whose source comes after its target, each edge weighted by
+    /// the wind's share of its source's outflow, (ŵ · n̂)⁺ ℓ ÷ W, over the weight of all their
+    /// internal edges; zero with none.
+    pub(super) backward_share: f64,
+    /// The same share of the largest component alone, the first of equals; zero where it is not
+    /// larger than [`EXACT_BLOCK_CELLS`].
+    pub(super) largest_backward_share: f64,
     /// `P̄_sea`, the area mean of the sea's large-scale rate over the month's sea cells,
     /// kg m⁻² s⁻¹; zero on a world of no sea.
     pub(super) sea_mean_kg_m2_s: f64,
@@ -1023,9 +1069,11 @@ fn factorise(rows: &[Row], factors: &mut Vec<f64>) {
 /// The strongly connected components of a graph, in topological order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Components {
-    /// The nodes, each component's members contiguous and in index order, the components in a
-    /// topological order of the condensation: every edge between two components points from the
-    /// earlier to the later.
+    /// The nodes, each component's members contiguous, the components in a topological order of
+    /// the condensation: every edge between two components points from the earlier to the later.
+    /// Each component's members are in index order as [`strongly_connected`] finds them, and in
+    /// their flow order once [`order_along_flow`] has ordered those of a component larger than
+    /// [`EXACT_BLOCK_CELLS`].
     cells: Vec<u32>,
     /// Each component's first entry in `cells`, then one past the last one's end: one more than
     /// the components.
@@ -1215,6 +1263,292 @@ fn upwind_components(mesh: &Mesh, locals: &[Local]) -> Components {
     )
 }
 
+/// A member's internal advective edges in its component (decision-r09-t13e-lfpm-convergence, E-L8
+/// §3), in [`Edge::ALL`]'s order: each the other member's place among the component's members in
+/// index order, and the edge's weight, the wind's share of its source's outflow across it,
+/// (ŵ · n̂)⁺ ℓ ÷ W of the source. The edges are [`upwind_components`]' between two members; the
+/// dispersion is no edge.
+///
+/// [`Edge::ALL`]: hyperion_surface::cube::Edge::ALL
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Links {
+    /// The edges to the members it passes air to.
+    successors: [Option<(u32, f64)>; 4],
+    /// The edges from the members that pass it air, each weighed on its source's side.
+    predecessors: [Option<(u32, f64)>; 4],
+}
+
+impl Links {
+    /// Cell `cell`'s internal edges in the component `members`, in index order, each cell's
+    /// place among them in `place` (an entry that is no member's place names no member).
+    #[must_use]
+    fn of(mesh: &Mesh, locals: &[Local], members: &[u32], place: &[u32], cell: u32) -> Self {
+        let i = slot(cell);
+        let (local, faces) = (&locals[i], &mesh.faces[i]);
+        let member = |j: u32| {
+            let p = place[slot(j)];
+            (members.get(slot(p)) == Some(&j)).then_some(p)
+        };
+        Self {
+            successors: core::array::from_fn(|k| {
+                let face = &faces[k];
+                let given = downwind(local.dots[k]) * face.length_m;
+                member(face.neighbour)
+                    .filter(|_| given > 0.0)
+                    .map(|p| (p, given / local.width_m))
+            }),
+            predecessors: core::array::from_fn(|k| {
+                let face = &faces[k];
+                let (j, back) = (slot(face.neighbour), usize::from(face.back));
+                let other = &locals[j];
+                let given = downwind(other.dots[back]) * mesh.faces[j][back].length_m;
+                member(face.neighbour)
+                    .filter(|_| given > 0.0)
+                    .map(|p| (p, given / other.width_m))
+            }),
+        }
+    }
+}
+
+/// What a month's flow order leaves pointing backward (decision-r09-t13e-lfpm-convergence, E-L8
+/// §3), over its components larger than [`EXACT_BLOCK_CELLS`]: the weights of [`Links`].
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct FlowOrder {
+    /// The weight of their internal edges whose source comes after its target.
+    backward: f64,
+    /// The weight of all their internal edges.
+    internal: f64,
+    /// The largest one's cells, the first of equals, and its own backward and internal weights.
+    largest: (usize, f64, f64),
+}
+
+impl FlowOrder {
+    /// The backward weight's share of the internal weight; zero with no large component.
+    #[must_use]
+    fn share(&self) -> f64 {
+        if self.internal > 0.0 {
+            self.backward / self.internal
+        } else {
+            0.0
+        }
+    }
+
+    /// The largest large component's own share; zero with none.
+    #[must_use]
+    fn largest_share(&self) -> f64 {
+        let (_, backward, internal) = self.largest;
+        if internal > 0.0 {
+            backward / internal
+        } else {
+            0.0
+        }
+    }
+}
+
+/// Orders the members of each component of `components` larger than [`EXACT_BLOCK_CELLS`] along
+/// the month's flow (decision-r09-t13e-lfpm-convergence, E-L8 §3; the [module
+/// documentation](self)): by Eades, Lin and Smyth's greedy order ([`greedy_order`]) over its
+/// internal advective edges ([`Links`]), the components left in their order and the smaller
+/// ones' members in index order. Returns what the orders leave pointing backward, summed over the
+/// components in their order and each one's edges by member in index order, in [`Edge::ALL`]'s.
+///
+/// [`Edge::ALL`]: hyperion_surface::cube::Edge::ALL
+fn order_along_flow(mesh: &Mesh, locals: &[Local], components: &mut Components) -> FlowOrder {
+    let mut place = vec![u32::MAX; locals.len()];
+    let mut flow = FlowOrder::default();
+    for c in 0..components.len() {
+        let range = components.range(c);
+        if range.len() <= EXACT_BLOCK_CELLS {
+            continue;
+        }
+        let members = &mut components.cells[range];
+        for (p, &cell) in (0_u32..).zip(members.iter()) {
+            place[slot(cell)] = p;
+        }
+        let links: Vec<Links> = members
+            .iter()
+            .map(|&cell| Links::of(mesh, locals, members, &place, cell))
+            .collect();
+        let order = greedy_order(&links);
+        let mut position = vec![0_u32; links.len()];
+        for (t, &p) in (0_u32..).zip(&order) {
+            position[slot(p)] = t;
+        }
+        let (mut backward, mut internal) = (0.0, 0.0);
+        for (p, member) in links.iter().enumerate() {
+            for &(q, weight) in member.successors.iter().flatten() {
+                internal += weight;
+                if position[slot(q)] < position[p] {
+                    backward += weight;
+                }
+            }
+        }
+        let ordered: Vec<u32> = order.iter().map(|&p| members[slot(p)]).collect();
+        members.copy_from_slice(&ordered);
+        flow.backward += backward;
+        flow.internal += internal;
+        if members.len() > flow.largest.0 {
+            flow.largest = (members.len(), backward, internal);
+        }
+    }
+    flow
+}
+
+/// Eades, Lin and Smyth's greedy order (1993; the [module documentation](self)'s citation),
+/// weighted, of the members whose internal edges `links` holds by place, the members' places in
+/// it. Until no member is left: the least place of a member with no successor left goes to the
+/// front of the tail; else the least place of a member with no predecessor left to the end of the
+/// head; else the member of greatest δ, its remaining successors' weight less its remaining
+/// predecessors' ([`balance`]), the least place of equals, to the end of the head. Returns the
+/// head, then the tail.
+///
+/// The sinks and sources are found by integer counts of each member's remaining edges, and each
+/// δ is summed afresh whenever a neighbour leaves. The heap of δ holds an entry for each sum,
+/// ordered by `total_cmp`, then the least place, and skips an entry whose member has left or whose
+/// δ is no longer its member's, compared bit for bit by `total_cmp`.
+///
+/// # Panics
+///
+/// If a δ is not finite: a fault of the weights.
+#[must_use]
+fn greedy_order(links: &[Links]) -> Vec<u32> {
+    let count = links.len();
+    let mut alive = vec![true; count];
+    let edges = |sides: &[Option<(u32, f64)>; 4]| sides.iter().flatten().count();
+    let mut successors: Vec<usize> = links.iter().map(|l| edges(&l.successors)).collect();
+    let mut predecessors: Vec<usize> = links.iter().map(|l| edges(&l.predecessors)).collect();
+    let (mut sinks, mut sources) = (BinaryHeap::new(), BinaryHeap::new());
+    let mut picks = BinaryHeap::with_capacity(count);
+    let mut deltas = Vec::with_capacity(count);
+    for (p, member) in (0_u32..).zip(links) {
+        let i = slot(p);
+        if successors[i] == 0 {
+            sinks.push(Reverse(p));
+        } else if predecessors[i] == 0 {
+            sources.push(Reverse(p));
+        }
+        let delta = balance(member, &alive);
+        deltas.push(delta);
+        picks.push(Pick { delta, place: p });
+    }
+    let (mut head, mut tail) = (Vec::with_capacity(count), Vec::new());
+    for _ in 0..count {
+        let next = if let Some(p) = least_left(&mut sinks, &alive) {
+            tail.push(p);
+            p
+        } else if let Some(p) = least_left(&mut sources, &alive) {
+            head.push(p);
+            p
+        } else {
+            let p = loop {
+                let pick = picks
+                    .pop()
+                    .expect("a member is left, and its δ is on the heap");
+                let i = slot(pick.place);
+                if alive[i] && pick.delta.total_cmp(&deltas[i]).is_eq() {
+                    break pick.place;
+                }
+            };
+            head.push(p);
+            p
+        };
+        let v = slot(next);
+        alive[v] = false;
+        for &(q, _) in links[v].successors.iter().flatten() {
+            let i = slot(q);
+            if alive[i] {
+                predecessors[i] -= 1;
+                if predecessors[i] == 0 {
+                    sources.push(Reverse(q));
+                }
+                deltas[i] = balance(&links[i], &alive);
+                picks.push(Pick {
+                    delta: deltas[i],
+                    place: q,
+                });
+            }
+        }
+        for &(q, _) in links[v].predecessors.iter().flatten() {
+            let i = slot(q);
+            if alive[i] {
+                successors[i] -= 1;
+                if successors[i] == 0 {
+                    sinks.push(Reverse(q));
+                }
+                deltas[i] = balance(&links[i], &alive);
+                picks.push(Pick {
+                    delta: deltas[i],
+                    place: q,
+                });
+            }
+        }
+    }
+    head.extend(tail.iter().rev());
+    head
+}
+
+/// The least place in `heap` whose member is `alive`, popped, those that have left popped and
+/// dropped; `None` where none is left.
+fn least_left(heap: &mut BinaryHeap<Reverse<u32>>, alive: &[bool]) -> Option<u32> {
+    while let Some(Reverse(p)) = heap.pop() {
+        if alive[slot(p)] {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// δ of a member whose internal edges are `links` (decision-r09-t13e-lfpm-convergence, E-L8 §3):
+/// the weight of its edges to the members `alive` less that of its edges from them, each summed
+/// from zero in [`Edge::ALL`]'s order.
+///
+/// [`Edge::ALL`]: hyperion_surface::cube::Edge::ALL
+///
+/// # Panics
+///
+/// If δ is not finite: a fault of the weights.
+#[must_use]
+fn balance(links: &Links, alive: &[bool]) -> f64 {
+    let weight = |sides: &[Option<(u32, f64)>; 4]| {
+        sides
+            .iter()
+            .flatten()
+            .filter(|&&(q, _)| alive[slot(q)])
+            .fold(0.0, |sum, &(_, w)| sum + w)
+    };
+    assert_finite(weight(&links.successors) - weight(&links.predecessors))
+}
+
+/// An entry of [`greedy_order`]'s heap of δ: a member's place and its δ when it was summed,
+/// ordered so that the heap pops the greatest δ by `total_cmp`, then the least place.
+#[derive(Debug, Clone, Copy)]
+struct Pick {
+    delta: f64,
+    place: u32,
+}
+
+impl Ord for Pick {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.delta
+            .total_cmp(&other.delta)
+            .then_with(|| other.place.cmp(&self.place))
+    }
+}
+
+impl PartialOrd for Pick {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Pick {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl Eq for Pick {}
+
 /// What `row`'s cell takes in from the sea (none under [`Source::Nothing`]) and from its
 /// neighbours' latest outflows in `outflow_kg_s` but those `skip` names, kg s⁻¹, vapour then
 /// cloud water, its edges in order.
@@ -1244,9 +1578,10 @@ enum Skip {
 }
 
 /// One sweep (the [module documentation](self)), in `components`' order: a single cell, and each
-/// member of a component larger than [`EXACT_BLOCK_CELLS`] in turn, solved for its own outflow
-/// from its neighbours' latest; a component of 2 to [`EXACT_BLOCK_CELLS`] cells solved whole. Each
-/// land cell's outflow is updated in `outflow_kg_s`; a sink keeps none.
+/// member of a component larger than [`EXACT_BLOCK_CELLS`] in turn, in the component's order (its
+/// flow order, [`order_along_flow`], in a solve), solved for its own outflow from its neighbours'
+/// latest; a component of 2 to [`EXACT_BLOCK_CELLS`] cells solved whole. Each land cell's outflow
+/// is updated in `outflow_kg_s`; a sink keeps none.
 fn sweep(
     balances: &Balances,
     components: &Components,
@@ -1604,10 +1939,11 @@ fn check(mesh: &Mesh, month: &Month<'_>) {
 }
 
 /// The month's orographic precipitation over `mesh` (the [module documentation](self)): each land
-/// cell's rate and recycled share, solved in the order of the month's upwind components from a
-/// sweep without the dispersion, by GMRES([`RESTART`]) until one further sweep moves no land
-/// cell's rate by more than the parameters' tolerance of max(its rate, [`RATE_FLOOR_SHARE`] of
-/// the sea's mean rate), or the cap.
+/// cell's rate and recycled share, solved in the order of the month's upwind components, the
+/// members of each larger than [`EXACT_BLOCK_CELLS`] in its flow order, from a sweep without the
+/// dispersion, by GMRES([`RESTART`]) until one further sweep moves no land cell's rate by more
+/// than the parameters' tolerance of max(its rate, [`RATE_FLOOR_SHARE`] of the sea's mean rate),
+/// or the cap.
 ///
 /// # Panics
 ///
@@ -1621,7 +1957,8 @@ pub(super) fn solve(mesh: &Mesh, month: &Month<'_>, parameters: &Parameters) -> 
     let locals: Vec<Local> = (0..cells)
         .map(|i| Local::of(mesh, i, month.cover[i], month.winds[i]))
         .collect();
-    let components = upwind_components(mesh, &locals);
+    let mut components = upwind_components(mesh, &locals);
+    let flow = order_along_flow(mesh, &locals, &mut components);
     let through: Vec<u32> = (0..cells)
         .filter(|&i| locals[i].kind == Kind::Through)
         .map(index)
@@ -1696,6 +2033,8 @@ pub(super) fn solve(mesh: &Mesh, month: &Month<'_>, parameters: &Parameters) -> 
     diagnostics.converged = iteration.converged;
     diagnostics.relative_residual = iteration.relative_residual;
     diagnostics.components = components.sizes();
+    diagnostics.backward_share = flow.share();
+    diagnostics.largest_backward_share = flow.largest_share();
     diagnostics.sea_mean_kg_m2_s = sea_mean_kg_m2_s;
     diagnostics.negative_cells = negative_cells;
     diagnostics.land_cells = index(components.cells.len());
@@ -1744,6 +2083,8 @@ fn budget(
         converged: true,
         relative_residual: 0.0,
         components: ComponentSizes::default(),
+        backward_share: 0.0,
+        largest_backward_share: 0.0,
         sea_mean_kg_m2_s: 0.0,
         negative_cells: 0,
         global_mean_kg_m2_s: 0.0,

@@ -258,7 +258,8 @@ fn describe(d: &Diagnostics) -> String {
     let c = &d.components;
     format!(
         "{} restarts, {} sweeps, measure {:.1e}{}, relative residual {:.1e}; {} land cells in \
-         components of 1: {}, 2: {}, 3–16: {}, > 16: {} ({} cells, the largest {}); {} below zero",
+         components of 1: {}, 2: {}, 3–16: {}, > 16: {} ({} cells, the largest {}), the flow \
+         order's backward share {:.4} (the largest's {:.4}); {} below zero",
         d.restarts,
         d.sweeps,
         d.measure,
@@ -271,8 +272,50 @@ fn describe(d: &Diagnostics) -> String {
         c.large,
         c.large_cells,
         c.largest,
+        d.backward_share,
+        d.largest_backward_share,
         d.negative_cells
     )
+}
+
+/// Each cell's wind against its edges in `month` on `mesh`, as [`solve`] reads it.
+fn locals_of(mesh: &Mesh, month: &Month<'_>) -> Vec<Local> {
+    (0..mesh.areas_m2.len())
+        .map(|i| Local::of(mesh, i, month.cover[i], month.winds[i]))
+        .collect()
+}
+
+/// The share of the internal advective weight of `components`' components larger than
+/// [`EXACT_BLOCK_CELLS`] that their members' order as it stands leaves pointing backward: the
+/// measure of [`Diagnostics::backward_share`], of any order.
+fn backward_share_of(mesh: &Mesh, locals: &[Local], components: &Components) -> f64 {
+    let mut place = vec![u32::MAX; locals.len()];
+    let (mut backward, mut internal) = (0.0, 0.0);
+    for c in 0..components.len() {
+        let range = components.range(c);
+        if range.len() <= EXACT_BLOCK_CELLS {
+            continue;
+        }
+        let mut members = components.cells[range.clone()].to_vec();
+        members.sort_unstable();
+        for (p, &cell) in (0_u32..).zip(&members) {
+            place[slot(cell)] = p;
+        }
+        let mut position = vec![0; members.len()];
+        for (t, &cell) in components.cells[range].iter().enumerate() {
+            position[slot(place[slot(cell)])] = t;
+        }
+        for (p, &cell) in members.iter().enumerate() {
+            let links = Links::of(mesh, locals, &members, &place, cell);
+            for &(q, weight) in links.successors.iter().flatten() {
+                internal += weight;
+                if position[slot(q)] < position[p] {
+                    backward += weight;
+                }
+            }
+        }
+    }
+    backward / internal
 }
 
 /// The land's budget's closure, (inflow − runoff − outflow) ÷ inflow.
@@ -670,6 +713,108 @@ fn due_south() -> Sphere {
     )
 }
 
+/// The ruled pole world (decision-r09-t13e-lfpm-convergence, E-L8 §1 and §3, like its replica's
+/// "pole"): the due-south world's land ([`due_south`]) under a due-south wind, but for its two
+/// westernmost columns of land cells, under a wind towards the north-east, and its two
+/// easternmost, towards the north-west (0.6 of the way east or west and 0.8 north, the
+/// replica's). The side edges merge each row into a cycle (plan 09's E-L2), and the end columns
+/// carry the air back north and inward, which joins the rows into one component; the cell index,
+/// which rises northward on the face, runs against the interior's flow. On face +x a column of
+/// cells is a meridian.
+fn pole() -> Sphere {
+    let mut sphere = due_south();
+    let graph = CellGraph::new(7).unwrap();
+    let land = |n: u32| sphere.world.cover[slot(n)] == Cover::Land;
+    let columns = (0..graph.len())
+        .filter(|&n| land(n))
+        .map(|n| graph.cell(n).i());
+    let (west, east) = columns.fold((u32::MAX, 0), |(w, e), i| (w.min(i), e.max(i)));
+    for n in 0..graph.len() {
+        if !land(n) {
+            continue;
+        }
+        let (i, c) = (graph.cell(n).i(), graph.centre(n));
+        if i <= west + 1 {
+            sphere.world.winds[slot(n)] = towards(c, 0.6, 0.8);
+        } else if i + 1 >= east {
+            sphere.world.winds[slot(n)] = towards(c, -0.6, 0.8);
+        }
+    }
+    sphere
+}
+
+/// The ruled pole test (decision-r09-t13e-lfpm-convergence, E-L8 §3): on the pole world, whose
+/// rows join into one component with its index against the flow, the solve converges within eight
+/// restarts, every land cell within 1% of a deep solve ([`assert_converges`]); and the flow order
+/// leaves under half the backward weight that the index order does.
+#[test]
+fn a_poleward_world_joined_into_one_component_against_its_index_converges_within_eight_restarts() {
+    let pole = pole();
+    let month = pole.world.month();
+    let solved = assert_converges("level 7 pole", &pole.mesh, &month);
+    let d = &solved.diagnostics;
+    let locals = locals_of(&pole.mesh, &month);
+    let index_share =
+        backward_share_of(&pole.mesh, &locals, &upwind_components(&pole.mesh, &locals));
+    eprintln!(
+        "  the backward share in index order {index_share:.4}, in the flow order {:.4}",
+        d.backward_share
+    );
+    assert!(
+        d.components.largest * 5 >= d.land_cells * 4,
+        "the rows join into one component: {}",
+        describe(d)
+    );
+    assert!(d.restarts <= 8, "{}", describe(d));
+    assert!(
+        d.backward_share < 0.5 * index_share,
+        "{} against {index_share}",
+        d.backward_share
+    );
+}
+
+/// The ruled determinism of the order (decision-r09-t13e-lfpm-convergence, E-L8 §3): the pole
+/// world's flow order is the same twice, its components and its backward weights to the bit, and
+/// so is its solve; and the order is not the index order.
+#[test]
+fn the_flow_order_and_its_solve_are_the_same_bits_twice() {
+    let pole = pole();
+    let month = pole.world.month();
+    let order = || {
+        let locals = locals_of(&pole.mesh, &month);
+        let mut components = upwind_components(&pole.mesh, &locals);
+        let flow = order_along_flow(&pole.mesh, &locals, &mut components);
+        (components, flow)
+    };
+    let ((first, a), (second, b)) = (order(), order());
+    assert_eq!(first, second);
+    assert_ne!(
+        first,
+        upwind_components(&pole.mesh, &locals_of(&pole.mesh, &month)),
+        "the order moved the large components' members"
+    );
+    for (x, y) in [
+        (a.backward, b.backward),
+        (a.internal, b.internal),
+        (a.largest.1, b.largest.1),
+        (a.largest.2, b.largest.2),
+    ] {
+        assert_same_bits(x, y);
+    }
+    assert_eq!(a.largest.0, b.largest.0);
+    assert!(a.backward > 0.0 && a.internal > a.backward, "{a:?}");
+    let (p, q) = (
+        solve(&pole.mesh, &month, &Parameters::HERGARTEN_ROBL),
+        solve(&pole.mesh, &month, &Parameters::HERGARTEN_ROBL),
+    );
+    for (&x, &y) in p.precipitation_kg_m2_s.iter().zip(&q.precipitation_kg_m2_s) {
+        assert_same_bits(x, y);
+    }
+    assert_same_bits(p.diagnostics.backward_share, a.share());
+    assert_same_bits(p.diagnostics.largest_backward_share, a.largest_share());
+    assert_eq!(p.diagnostics.restarts, q.diagnostics.restarts);
+}
+
 #[test]
 fn a_ridge_casts_a_rain_shadow_on_the_cell_graph() {
     let set = Parameters::HERGARTEN_ROBL;
@@ -932,6 +1077,69 @@ fn a_zonal_ring_is_one_component_a_row_and_converges_wherever_its_labels_start()
             assert!(first[i] > 0.0);
             assert!((first[i] - second[i]).abs() <= 1e-9 * largest);
         }
+    }
+}
+
+/// The ruled ring test (decision-r09-t13e-lfpm-convergence, E-L8 §3): three land rows round a
+/// periodic grid under a wind along it, labelled out of order along each row (17 x + 5 mod 40) or
+/// against the flow, are each one component, whose flow order starts at its least index, runs
+/// downstream and has exactly one backward edge, from its last cell into its first; the solve
+/// reports that order's backward share, a fortieth.
+#[test]
+fn a_zonal_ring_s_flow_order_has_one_backward_edge_and_runs_downstream() {
+    let (nx, ny) = (40, 5);
+    let labels: [&dyn Fn(u32, u32) -> u32; 2] = [&|x, y| y * nx + (17 * x + 5) % nx, &|x, y| {
+        y * nx + (nx - 1 - x)
+    }];
+    for (name, label) in ["17 x + 5", "backwards"].into_iter().zip(labels) {
+        let mesh = Mesh::planar(nx, ny, 33_000.0, 33_000.0, true, label);
+        let mut row = vec![0; slot(nx * ny)];
+        for y in 0..ny {
+            for x in 0..nx {
+                row[slot(label(x, y))] = y;
+            }
+        }
+        let world = World::of(nx * ny, |i| {
+            let y = row[slot(i)];
+            let cover = if y == 0 || y + 1 == ny {
+                Cover::Sea
+            } else {
+                Cover::Land
+            };
+            (cover, 0.0, ALONG_X)
+        });
+        let month = world.month();
+        let locals = locals_of(&mesh, &month);
+        let mut components = upwind_components(&mesh, &locals);
+        let index_share = backward_share_of(&mesh, &locals, &components);
+        let flow = order_along_flow(&mesh, &locals, &mut components);
+        // Each cell's +x face is its second; the wind crosses no other.
+        let east = |cell: u32| mesh.faces[slot(cell)][1].neighbour;
+        let mut rings = 0;
+        for c in 0..components.len() {
+            let members = &components.cells[components.range(c)];
+            if members.len() <= EXACT_BLOCK_CELLS {
+                continue;
+            }
+            rings += 1;
+            assert_eq!(members.len(), slot(nx));
+            assert_eq!(Some(&members[0]), members.iter().min(), "{name}");
+            for pair in members.windows(2) {
+                assert_eq!(east(pair[0]), pair[1], "{name}: downstream");
+            }
+            assert_eq!(east(members[slot(nx) - 1]), members[0], "{name}");
+        }
+        assert_eq!(rings, ny - 2, "{name}");
+        eprintln!(
+            "ring labelled {name}: the backward share in index order {index_share:.4}, in the flow \
+             order {:.4}",
+            flow.share()
+        );
+        assert!((flow.share() - 1.0 / 40.0).abs() < 1e-15, "{flow:?}");
+        assert!(index_share > flow.share(), "{name}: {index_share}");
+        let d = solve(&mesh, &month, &Parameters::HERGARTEN_ROBL).diagnostics;
+        assert_same_bits(d.backward_share, flow.share());
+        assert!(d.converged, "{name}: {}", describe(&d));
     }
 }
 
