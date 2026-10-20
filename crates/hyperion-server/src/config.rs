@@ -1129,12 +1129,37 @@ mod tests {
         assert_eq!(error.kind(), ErrorKind::InvalidUtf8);
     }
 
+    /// "fo" and an unpaired high surrogate: UTF-16 that no `str` can hold.
+    #[cfg(windows)]
+    #[test]
+    fn a_number_that_is_not_unicode_is_refused() {
+        use std::os::windows::ffi::OsStringExt;
+
+        let error = parse_os([
+            OsString::from("--num-workers"),
+            OsString::from_wide(&[0x66, 0x6F, 0xD800]),
+        ])
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidUtf8);
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_data_directory_need_not_be_unicode() {
         use std::os::unix::ffi::OsStringExt;
 
         let dir = OsString::from_vec(vec![0x66, 0x6f, 0x80]);
+        let args = parse_os([OsString::from("--data-dir"), dir.clone()]).unwrap();
+        assert_eq!(ServerConfig::from(args).data_dir(), Path::new(&dir));
+    }
+
+    /// "fo" and an unpaired high surrogate, which a path keeps.
+    #[cfg(windows)]
+    #[test]
+    fn a_data_directory_need_not_be_unicode() {
+        use std::os::windows::ffi::OsStringExt;
+
+        let dir = OsString::from_wide(&[0x66, 0x6F, 0xD800]);
         let args = parse_os([OsString::from("--data-dir"), dir.clone()]).unwrap();
         assert_eq!(ServerConfig::from(args).data_dir(), Path::new(&dir));
     }
