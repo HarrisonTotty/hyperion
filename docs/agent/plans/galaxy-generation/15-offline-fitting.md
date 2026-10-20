@@ -281,7 +281,9 @@ reading their Provides as built.
     current constant, and refuses if the new body differs from the old while `--since` equals the
     old table's value; `check` refuses a table whose `since` is ahead of the constant; and the
     golden tests fail when a star moves. A fit whose output is byte-identical to the committed table
-    changes nothing and needs no bump.
+    changes nothing and needs no bump. A table that no record function reads may re-emit a changed
+    body at the version in force through the first-emission path, until its first reader's commit
+    (decision-p14-t49h-liquids §5).
 11. **Manifests** are TOML files in `crates/hyperion-fit/manifests/`: seeds, sample sizes, grids,
     parameter ranges, dataset names. Each slow task also has `<name>.smoke.toml`, a reduced run of a
     few seconds that the crate's tests execute end to end into a temporary directory, checking the

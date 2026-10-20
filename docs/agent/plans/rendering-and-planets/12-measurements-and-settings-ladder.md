@@ -304,8 +304,10 @@ built, T0 changes only the call sites here.
   note 21 and its pacing; open question 2's rule (Design note 22); `HeightWorkerPool` and its
   per-body calls (`fieldInit`, `fieldChunk`, `fieldRelease`, `fieldResidentBytes`; R10.T7, which
   replaced R05's `postField`), and R10.T16's `TerrainSession` with its memory report (the workers'
-  copies, the pool's kept blocks and its GPU bytes by category), for Design note 6's line;
-  `PatchCache` and its budget; `terrainAnnunciation`.
+  copies, the pool's kept blocks and its GPU bytes by category), for Design note 6's line, read
+  beside the engine's tally by category (in `VIEW`, `height-cache` is the terrain passes' alone,
+  R10.T16.b's question; `TerrainPass.gpuBytes` is the lever if another owner ever allocates under
+  it; decision-r10-t16-leans §13); `PatchCache` and its budget; `terrainAnnunciation`.
 - **R06:** the sky request and its census as arrival work on the server's bulk priority; the star
   cubemap bake and the sprite budget, with their settings.
 - **R07:** `photorealisticPasses(setting)` and its `PassList`, whose labels are the
@@ -818,7 +820,7 @@ battery. Acceptance: `pnpm test`, `just ci`.
   `rg11b10ufloat`, `rgba16float`, `depth32float`, cube layers, mip chains); `MEMORY_ITEMS`
   (`@hyperion/perf`) filled for every `MemoryCategory` by its owner's name, including the five its
   owners took from this plan (`height-cache`, `atmosphere-tables` and `atmosphere-view` by
-  R05.T11.a, T12.b and T12.c; `coarse-field-gpu` and `shadows` by R10.T7 and T9.a); where one of
+  R05.T11.a, T12.b and T12.c; `coarse-field-gpu` and `shadows` by R10.T7 and T9.b); where one of
   those tasks has not landed, T3.a adds the member to R01's union in `view/engine/memory.ts` under
   the same name. Tests, which also re-check the brainstorm's memory table as arithmetic from
   formats: a 1,024² `rgb9e5ufloat` cubemap with mips is 6 × 4 B × 1,024² × 4⁄3 ≈ 33.6 MB ("34 MB
@@ -1119,7 +1121,7 @@ generator version it ran at. The plan reserves nothing in the generator.
 - **Memory categories named by their owners.** The five names this plan asked for are now in the
   owning plans' tasks: `height-cache` (R05.T11.a), `atmosphere-tables` (R05.T12.b) and
   `atmosphere-view` (R05.T12.c), which R08 keeps for its widened, per-sun and thick tables (R08
-  Consumes R05); and `coarse-field-gpu` (R10.T7, T10.d) and `shadows` (R10.T9.a). The coarse
+  Consumes R05); and `coarse-field-gpu` (R10.T7, T10.d) and `shadows` (R10.T9.b). The coarse
   field's GPU copy is R10's coverage mask and class map, and R09 allocates nothing on the GPU, so
   R09 names none. T3.a only checks that `MEMORY_ITEMS` maps them.
 - **R05's memory run and R12's differ on purpose.** R05's criterion row keeps the brainstorm's 15 MB
