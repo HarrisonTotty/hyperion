@@ -368,20 +368,28 @@ defines what the body defines; `cfg` counts every configuration, and a changed `
 changes the import; files read as data count by their path's string, by a directory's name (from
 any crate), or by a listing of their directory, and a Markdown file that a crate root includes as
 its documentation is that crate's data. A test that reads the Rust sources as text by listing a
-directory reaches a source walker, an item whose code lists a directory and holds the string `rs`
-or one ending in `.rs`: every changed `.rs` file of a crate, added or deleted ones too, runs every
-such test, in any crate and whatever the crates' dependencies (the surface crate's tag check reads
-the sim), in the native step alone, whose causes name "the tests that read the Rust sources".
-A test that reads Rust sources by listing a directory names the `rs` extension in the function
-that lists it, so that smart-ci finds it. A changed file's removed items still count, so that a test
-naming one runs. Where the reading cannot be sure, it widens: a file it cannot follow, a file in no
-module tree, a changed crate attribute, global allocator or panic handler, and a module outside the
-crate's directory run their crate's every test, and an unresolved path falls back to every item of
-its name. The graph's facts are cached in `target/smart-ci/`, keyed by each file's git object id and the
-reader's own source, so a stale entry is never used; a build takes about 3 s with the cache, 10 to
-40 s without. On the TypeScript side, the vitest files are chosen from the import graph (imports,
-`export ... from`, dynamic imports, workers' `new URL(...)`, `vi.mock`, `import.meta.glob`, `?raw`
-and other assets) and from the paths that tests read at run time.
+directory reaches a source walker, an item whose code lists a directory (`read_dir`, as a function
+or as the method `dir.read_dir()`, or `WalkDir`) and holds the string `rs` or one ending in `.rs`:
+a changed `.rs` file of a crate, added or deleted ones too, runs every such test whose scope holds
+that crate, in any crate and whatever the crates' dependencies, in the native step alone, whose
+causes name "the tests that read the Rust sources". The scope is read from the strings of the code
+the test reaches: `src` names its own crate, `../<crate dir>` or a crate's directory name that
+crate, and a directory computed rather than named (`parent()`, `..` in another form, `crates`, an
+environment variable other than `CARGO_MANIFEST_DIR`), or named by nothing, is every crate's, as
+the surface crate's tag check's is; `--explain` shows each test's scope. A test that the change
+reaches through its code runs whatever its scope. A test that reads Rust sources by listing a
+directory names the `rs` extension in the function that lists it, so that smart-ci finds it. After
+the tests chosen, the plan lists the slow tests (`#[ignore]`d ones) that the graph reaches, which
+no step runs, so that a lane whose change reaches a slow test runs it by name. A changed file's
+removed items still count, so that a test naming one runs. Where the reading cannot be sure, it
+widens: a file it cannot follow, a file in no module tree, a changed crate attribute, global
+allocator or panic handler, and a module outside the crate's directory run their crate's every
+test, and an unresolved path falls back to every item of its name. The graph's facts are cached in
+`target/smart-ci/`, keyed by each file's git object id and the reader's own source, so a stale
+entry is never used; a build takes about 3 s with the cache, 10 to 40 s without. On the TypeScript
+side, the vitest files are chosen from the import graph (imports, `export ... from`, dynamic
+imports, workers' `new URL(...)`, `vi.mock`, `import.meta.glob`, `?raw` and other assets) and from
+the paths that tests read at run time.
 `just smart-ci --all-tests` runs every test of the changed crates and every vitest file instead, as
 smart-ci did before the graph: another crate's tests that read the Rust sources (the surface crate's
 tag check, for a change to the sim) run only without it.

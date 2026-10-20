@@ -19,6 +19,7 @@ import functools
 import io
 import json
 import os
+import posixpath
 import re
 import shlex
 import shutil
@@ -876,8 +877,10 @@ class GraphMode(unittest.TestCase):
             "            let mut found = Vec::new();\n"
             "            rust_files(std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).parent().unwrap(), &mut found);\n"
             "        }\n    }\n}\n")
-        now[changed] = now[changed].replace(old, new)
+        then = {**FILES, **now}
+        now[changed] = then.get(changed, "").replace(old, new)
         ws = self.workspace(now)
+        ws.read_base = lambda path: then[path].encode() if path in then else None
         ws.rust[SURFACE] = rust_graph.CrateInfo(SURFACE, "crates/" + SURFACE, [BASE], [TESTKIT], [
             rust_graph.Target("lib", "hyperion_surface", "crates/hyperion-surface/src/lib.rs", True, True)])
         return ws
@@ -917,13 +920,15 @@ class GraphMode(unittest.TestCase):
                       "(fn tests:::native_only:rust_files), a source walker", details)
 
     def test_a_rust_change_that_the_graph_does_not_read_still_runs_them(self) -> None:
-        # A build script's crate runs its every test without the graph; the walkers' tests run all the same.
+        # A build script's crate runs its every test without the graph; the walkers' tests that may
+        # list it run all the same: the surface crate's, whose directory is computed, and not the
+        # sim's, which lists the sim's `src` alone.
         base = "crates/hyperion-base/src/lib.rs"
         ws = self.walkers_workspace(base, "{ 1 }", "{ 4 }")
         ws.build_scripts = {BASE}
         p = make_plan([(base, False)], ws, False)
         self.assertEqual(args(p, "_nextest-run")[1],
-                         "package(hyperion-base) | (binary_id(=hyperion-sim) & (test(/^substance::tests::/))) | "
+                         "package(hyperion-base) | "
                          "(binary_id(=hyperion-surface) & (test(/^tags::tests::native_only::/))) | "
                          "package(hyperion-testkit)")
         # With --all-tests, no graph: the changed crate's tests alone, as before.
@@ -942,6 +947,75 @@ class GraphMode(unittest.TestCase):
         self.assertEqual(args(p, "_wasip1-build")[1], "(binary_id(=hyperion-sim) & (test(/^substance::tests::/)))")
         self.assertIn("binary_id(=hyperion-sim) & (test(/^substance::tests::/))", args(p, "_nextest-run")[1])
         self.assertIn("binary_id(=hyperion-surface) & (test(/^tags::tests::native_only::/))", args(p, "_nextest-run")[1])
+
+    def test_a_rust_change_runs_the_readers_whose_walker_may_list_its_crate(self) -> None:
+        # The sim's reader lists the sim's `src`; the surface crate's lists every crate, from a
+        # directory it computes. A change to the surface crate runs the latter alone, and builds no
+        # sim test.
+        surface = "crates/hyperion-surface/src/tags.rs"
+        p = make_plan([(surface, False)], self.walkers_workspace(surface, "{ 5 }", "{ 6 }"), False, explain=True)
+        self.assertEqual(packages(p, "_nextest-run"), [SURFACE, TESTKIT])
+        self.assertEqual(packages(p, "_test-build-for"), [SURFACE, TESTKIT])
+        details = "\n".join(p.details)
+        self.assertIn("(fn tests:::native_only:rust_files), a source walker: it lists a directory and keeps its `.rs` "
+                      "files; reads every crate, since its directory is computed: `parent()` in "
+                      "crates/hyperion-surface/src/tags.rs", details)
+        # A comment in a crate no reader's code names: the computed one alone, and no sim test.
+        protocol = "crates/hyperion-protocol/src/lib.rs"
+        ws = self.walkers_workspace(protocol, "", "// A comment.\n")
+        p = make_plan([(protocol, False)], ws, False)
+        self.assertNotIn(SIM, packages(p, "_nextest-run"))
+        self.assertNotIn(SIM, packages(p, "_test-build-for"))
+        self.assertIn("binary_id(=hyperion-surface) & (test(/^tags::tests::native_only::/))", args(p, "_nextest-run")[1])
+        # A change to the sim runs both, the sim's for the crate it lists.
+        sim = "crates/hyperion-sim/src/sky/mod.rs"
+        p = make_plan([(sim, False)], self.walkers_workspace(sim, "* 3", "* 4"), False, explain=True)
+        self.assertIn("(fn tests::rust_files), a source walker: it lists a directory and keeps its `.rs` files; reads "
+                      "hyperion-sim\n", "\n".join(p.details) + "\n")
+
+    # Two slow tests of base's, `#[ignore]`d for two reasons.
+    SLOW = ("    #[test]\n    #[ignore = \"slow: the long pass\"]\n    fn unit_slowly() { assert_eq!(super::unit(), 1); }\n"
+            "    #[test]\n    #[ignore = \"cost: a large table\"]\n    fn other_slowly() { assert_eq!(super::other(), 2); }\n")
+
+    def slow_plan(self, path: str, old: str, new: str, all_tests: bool = False, explain: bool = False) -> Plan:
+        """A plan for `path` changed, with base's slow tests beside its fast ones, at the base too."""
+        then = dict(self.SOURCES)
+        base = "crates/hyperion-base/src/lib.rs"
+        then[base] = then[base].replace("    #[test]\n    fn other_is_two()", self.SLOW + "    #[test]\n    fn other_is_two()")
+        now = dict(then)
+        if path in now:
+            now[path] = now[path].replace(old, new)
+        else:
+            now[path] = new
+        ws = self.workspace(now)
+        ws.read_base = lambda p: then[p].encode() if p in then else None
+        return make_plan([(path, False)], ws, False, all_tests, explain)
+
+    def test_the_slow_tests_a_change_reaches_are_listed_and_left_out_of_the_run(self) -> None:
+        base = "crates/hyperion-base/src/lib.rs"
+        p = self.slow_plan(base, "{ 1 }", "{ 4 }")
+        details = "\n".join(p.details)
+        # The counts are the run's: base's fast tests, not its ignored ones, in the crate's line and
+        # the unit's alike.
+        self.assertIn("  hyperion-base: 1 of 2 tests\n    hyperion-base: 1 test(s): tests 1\n", details)
+        self.assertIn("\n  slow tests reached (run by name): hyperion-base: 1: tests 1", details)
+        self.assertNotIn("other_slowly", details)  # not reached
+        native = next(s for s in p.suites if s.kind == "native")
+        self.assertEqual(native.tests[BASE], {"tests::unit_is_one"})
+        # Advisory: no step runs an ignored test.
+        self.assertFalse(any("--run-ignored" in " ".join(step.recipe) for step in p.steps))
+        # With --explain, each with its chain.
+        explained = "\n".join(self.slow_plan(base, "{ 1 }", "{ 4 }", explain=True).details)
+        self.assertIn("      hyperion-base tests::unit_slowly: crates/hyperion-base/src/lib.rs (fn tests::unit_slowly) -> "
+                      "crates/hyperion-base/src/lib.rs (fn unit)", explained)
+        # None reached: no line; and none with --all-tests, which has no graph.
+        quiet = self.slow_plan("crates/hyperion-sim/src/sky/mod.rs", "* 3", "* 4")
+        self.assertIn("hyperion-sim: 1 of 2 tests", "\n".join(quiet.details))
+        self.assertNotIn("slow tests reached", "\n".join(quiet.details))
+        self.assertEqual(self.slow_plan(base, "{ 1 }", "{ 4 }", all_tests=True).details, [])
+        # A crate every test of which runs: every slow test of it.
+        data = self.slow_plan("crates/hyperion-base/data/table.bin", "", "")
+        self.assertIn("  slow tests reached (run by name): every slow test of hyperion-base (2)", data.details)
 
 
 class TheGuard(unittest.TestCase):
@@ -2167,6 +2241,127 @@ class AgreesWithCi(unittest.TestCase):
         self.assertTrue(assignments["browser_crates"]["value"])
 
 
+# A string that names a file by its extension (`Cargo.toml`, `.golden`), for the source walkers' guard.
+NAMES_A_FILE = re.compile(r"\.(\w{1,8})$")
+
+
+def unlisted_source_readers(graph: rust_graph.Graph) -> List[str]:
+    """The source walkers' guard: the tests ("unit test") that most likely read the Rust sources but
+    reach no source walker, so that smart-ci runs them only for a change their code reaches. Such a
+    test reaches a listing of a directory (`Graph._lists_directory`), and the code on its way there,
+    the test's own function, the listing and every item between, names a crate's sources: `src`, a
+    string ending `/src`, `crates`, another workspace crate's directory name, or `../<crate dir>`.
+    Two narrowings, by rule: a listing that keeps files by another name (`Cargo.toml`) and holds no
+    `rs` lists something else, and does not count; and the test's own crate's directory name is how
+    the crate names itself (the server's program name, `hyperion-server`, in its tests' arguments),
+    while a test that lists its own crate's sources names `src`."""
+    crate_dirs = {posixpath.basename(info.dir) for info in graph.crates.values()}
+
+    def names_sources(literal: str, own: str) -> bool:
+        return literal in ("src", "crates") or literal.endswith("/src") or literal in crate_dirs - {own} or any(
+            literal == f"../{d}" or literal.startswith(f"../{d}/") for d in crate_dirs)
+
+    def keeps_other_files(literals: Sequence[str]) -> bool:
+        found = [NAMES_A_FILE.search(literal) for literal in literals]
+        return not any(literal == "rs" or literal.endswith(".rs") for literal in literals) and any(
+            m is not None and m.group(1) != "rs" for m in found)
+
+    literals = {rust_graph.item_node(file, item[0]): facts.item_literals[index]
+                for file, facts in graph.rs.items() for index, item in enumerate(facts.items)}
+    listings = {rust_graph.item_node(file, item[0]) for file, facts in graph.rs.items()
+                for index, item in enumerate(facts.items)
+                if graph._lists_directory(facts, index) and not keeps_other_files(facts.item_literals[index])}
+    reverse: Dict[str, Set[str]] = {}
+    for source, targets in graph.edges.items():
+        for target in targets:
+            reverse.setdefault(target, set()).add(source)
+    toward = set(listings)  # every node whose code reaches a listing
+    frontier = list(toward)
+    while frontier:
+        for source in reverse.get(frontier.pop(), ()):
+            if source not in toward:
+                toward.add(source)
+                frontier.append(source)
+    listers, _ = graph.tests_reaching(listings, reverse)
+    walkers, _ = graph.source_readers(reverse)
+    nodes = {(unit, t.name): t.node for unit, tests in graph.tests.items() for t in tests}
+    unseen: List[str] = []
+    for unit, names in listers.items():
+        for name in names:
+            if name in walkers.get(unit, {}):
+                continue
+            own = posixpath.basename(graph.crates[graph.units[unit].crate].dir)
+            way = {nodes[(unit, name)]}
+            frontier = list(way)
+            while frontier:
+                for target in graph.edges.get(frontier.pop(), ()):
+                    if target in toward and target not in way:
+                        way.add(target)
+                        frontier.append(target)
+            if any(names_sources(s, own) for node in way for s in literals.get(node, ())):
+                unseen.append(f"{unit} {name}")
+    return sorted(unseen)
+
+
+# The guard's message: the two ways out.
+UNLISTED_SOURCE_READERS = (
+    "these tests list a directory, and the code on their way to the listing names a crate's sources, but they "
+    "reach no source walker, so smart-ci runs them only for a change their code reaches: if one reads the Rust "
+    "sources, name the `rs` extension in the function that lists the directory (`extension() == \"rs\"` or "
+    "`ends_with(\".rs\")`); if it reads none, narrow this guard's test of what reads them "
+    "(`unlisted_source_readers`), rather than list the test here")
+
+
+class TheSourceWalkersGuard(unittest.TestCase):
+    """The guard (`unlisted_source_readers`) along the chain, on a test modelled on the testkit's
+    `no_target_feature_attributes`: its strings name the crates it lists, not `src`, and those that
+    name `src` are elsewhere or nowhere."""
+
+    def fixture(self, keep: str) -> test_rust_graph.Fixture:
+        """A testkit whose `clippy_bans` lists the sources of base and the sim, its walker keeping the
+        `.rs` files by `keep`; and a listing of the crates' manifests."""
+        return test_rust_graph.Fixture([test_rust_graph.crate("base"), test_rust_graph.crate("sim"),
+                                        test_rust_graph.crate("testkit", tests=["clippy_bans"])], {
+            "crates/base/src/lib.rs": "",
+            # A listing of data, and a test that runs the sim by its own crate's name, as the server's
+            # tests run it by its program's.
+            "crates/sim/src/lib.rs": "pub fn scan(dir: &std::path::Path) -> usize { std::fs::read_dir(dir).unwrap().count() }\n"
+                                     "#[cfg(test)]\nmod tests {\n    #[test]\n    fn runs_by_its_name() {\n"
+                                     "        let _args = [\"sim\", \"--data\"];\n"
+                                     "        super::scan(std::path::Path::new(\"universes\"));\n    }\n}\n",
+            "crates/testkit/src/lib.rs": "",
+            "crates/testkit/tests/clippy_bans.rs": (
+                "use std::path::{Path, PathBuf};\nconst EXT: &str = \"rs\";\n"
+                "const CRATES: [&str; 2] = [\"base\", \"sim\"];\n"
+                "fn workspace_root() -> PathBuf {\n"
+                "    Path::new(env!(\"CARGO_MANIFEST_DIR\")).parent().and_then(Path::parent).unwrap().to_path_buf()\n}\n"
+                "fn rust_files(dir: &Path, files: &mut Vec<PathBuf>) {\n"
+                "    for entry in std::fs::read_dir(dir).unwrap() {\n"
+                "        let path = entry.unwrap().path();\n"
+                "        if path.is_dir() { rust_files(&path, files); }\n"
+                f"        else if path.extension().is_some_and(|e| e == {keep}) {{ files.push(path); }}\n    }}\n}}\n"
+                "#[test]\nfn no_target_feature_attributes() {\n    let mut files = Vec::new();\n"
+                "    for name in CRATES { rust_files(&workspace_root().join(\"crates\").join(name), &mut files); }\n}\n"
+                "fn workspace_crates() -> Vec<String> {\n"
+                "    std::fs::read_dir(workspace_root().join(\"crates\")).unwrap()\n"
+                "        .map(|e| e.unwrap().path()).filter(|p| p.join(\"Cargo.toml\").is_file())\n"
+                "        .map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect()\n}\n"
+                "#[test]\nfn every_crate_has_a_manifest() { assert!(!workspace_crates().is_empty()); }\n"),
+        })
+
+    def test_a_walker_that_keeps_rs_by_a_constant_is_no_walker_and_its_test_is_flagged(self) -> None:
+        graph = self.fixture("EXT").graph()
+        self.assertEqual(graph.source_walkers(), set())
+        # Its `crates`, on the test's own way to the listing, names the sources; the manifests'
+        # listing keeps `Cargo.toml` and holds no `rs`, so its test is not flagged.
+        self.assertEqual(unlisted_source_readers(graph), ["testkit::clippy_bans no_target_feature_attributes"])
+
+    def test_a_walker_that_names_rs_is_one_and_nothing_is_flagged(self) -> None:
+        graph = self.fixture("\"rs\"").graph()
+        self.assertEqual(graph.source_walkers(), {"crates/testkit/tests/clippy_bans.rs#fn::rust_files"})
+        self.assertEqual(unlisted_source_readers(graph), [])
+
+
 @functools.lru_cache(maxsize=None)
 def real_workspace() -> Workspace:
     """The real workspace, loaded once for the classes that read it."""
@@ -2260,25 +2455,10 @@ class RealWorkspace(unittest.TestCase):
         self.assertEqual([f for f in graph.orphans if "/src/" in f], [], "sources in no module tree: they widen")
 
     def test_a_test_that_lists_a_crates_sources_reaches_a_source_walker(self) -> None:
-        # The source walkers' guard: a test function that holds the string `src` (or one ending in
-        # `/src`) and reaches a listing of a directory most likely reads the Rust sources, and smart-ci
-        # runs it for every Rust change only if its code reaches a source walker.
-        graph = real_graph()
-        listings = {rust_graph.item_node(file, item[0]) for file, facts in graph.rs.items()
-                    for index, item in enumerate(facts.items) if graph._lists_directory(facts, index)}
-        literals = {rust_graph.item_node(file, item[0]): facts.item_literals[index]
-                    for file, facts in graph.rs.items() for index, item in enumerate(facts.items)}
-        listers, _ = graph.tests_reaching(listings)
-        walkers, _ = graph.source_readers()
-        nodes = {(unit, t.name): t.node for unit, tests in graph.tests.items() for t in tests}
-        unseen = sorted(f"{unit} {name}" for unit, names in listers.items() for name in names
-                        if name not in walkers.get(unit, {})
-                        and any(s == "src" or s.endswith("/src") for s in literals.get(nodes[(unit, name)], ())))
-        self.assertEqual(unseen, [], "these tests hold `src` and list a directory, but reach no source walker, so "
-                                     "smart-ci runs them only for a change their code reaches: if one reads the Rust "
-                                     "sources, name the `rs` extension in the function that lists the directory "
-                                     "(`extension() == \"rs\"` or `ends_with(\".rs\")`); if it reads none, narrow this "
-                                     "guard's test of what reads them, rather than list the test here")
+        # The source walkers' guard: a test whose code on its way to a listing of a directory names a
+        # crate's sources most likely reads them, and smart-ci runs it for a Rust change only if its
+        # code reaches a source walker (`unlisted_source_readers`).
+        self.assertEqual(unlisted_source_readers(real_graph()), [], UNLISTED_SOURCE_READERS)
 
     def test_the_real_graph_finds_source_walkers_and_a_sim_source_runs_their_tests_natively(self) -> None:
         graph = real_graph()
