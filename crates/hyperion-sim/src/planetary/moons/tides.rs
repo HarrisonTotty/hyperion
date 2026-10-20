@@ -7,7 +7,7 @@
 //! Love number k₂ that despins and figures read, and whose loss −Im k₂ = |k₂| sin ε = k₂ ÷ Q, with
 //! Q⁻¹ = sin ε, is what dissipates: "Im k₂" here is that positive loss. The eccentricity tide's
 //! heat is (21 ÷ 2)(k₂ ÷ Q) G `M_p`² R⁵ n e² ÷ a⁶
-//! ([`tidal_heating`](crate::planetary::moons::regular::tidal_heating)), so the tidal heat flux is
+//! ([`tidal_heating`]), so the tidal heat flux is
 //! Φ × Im k₂, with the forcing Φ = (21 ÷ 2) G `M_p`² R⁵ n e² ÷ (a⁶ 4πR²) ([`tidal_forcing`]), and
 //! the despinning time reads Q ÷ k₂, its inverse.
 //!
@@ -18,7 +18,7 @@
 //! holds decides ([`MoonTides::of`]):
 //!
 //! 1. **The ocean branch** ([`TidalBranch::Ocean`]), for a moon with water, if
-//!    [`has_subsurface_ocean`](crate::planetary::moons::regular::has_subsurface_ocean) holds at
+//!    [`has_subsurface_ocean`] holds at
 //!    `F_ocean`. Its ice shell is a thin membrane over the ocean on a rigid mantle, Beuthe's own
 //!    form (2015, Icarus 248, 109, eqs. 28 and 43–44): k₂ = `k_oc` ÷ (1 + h°Λ)
 //!    ([`membrane_love_number`]), with the ocean's limit `k_oc` = 3`ρ_w` ÷ (5ρ̄ − 3`ρ_w`)
@@ -33,7 +33,7 @@
 //!    planet's disc keeps ([`ocean_heat_flow`]).
 //! 2. **The heated branch** ([`TidalBranch::Heated`]), for a rocky moon if `F_nt` and its tidal
 //!    flux at Io's Im k₂ = 0.015
-//!    ([`MOON_TIDAL_RESPONSE`](crate::planetary::moons::regular::MOON_TIDAL_RESPONSE)) reach
+//!    ([`MOON_TIDAL_RESPONSE`]) reach
 //!    P14.T24.b's `F_c` ([`SURFACE_MELT_HEAT_FLOW`]): a partially molten interior dissipating in
 //!    thermal-orbital equilibrium, as Io does. Its k₂ is the elastic body's at
 //!    [`HEATED_ROCK_RIGIDITY`], and its Im k₂ Io's.

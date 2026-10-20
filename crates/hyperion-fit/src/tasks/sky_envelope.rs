@@ -273,7 +273,7 @@ impl FitTask for SkyEnvelopeTask {
     }
 
     /// The mass nodes' count and ends, and, at [`FINGERPRINT_MASSES`] and each of
-    /// [`FINGERPRINT_FE_H`] with [`FINGERPRINT_SAMPLES`] parts a phase, each raw node's brightest
+    /// [`FINGERPRINT_FE_H`] with `FINGERPRINT_SAMPLES` parts a phase, each raw node's brightest
     /// bin, the sum of its shining bins and their number: some sixty tracks, which `just ci`'s
     /// fit-check can afford.
     fn fingerprint(&self) -> SimFingerprint {

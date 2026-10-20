@@ -75,7 +75,7 @@
 //!
 //! Everything here is a pure function of the registry and its arguments: no draws, no state, no
 //! caches, loops in registry order and sums in a fixed order, with the crate's deterministic
-//! [`math`](crate::math).
+//! [`math`].
 
 use core::f64::consts::PI;
 use std::error::Error;

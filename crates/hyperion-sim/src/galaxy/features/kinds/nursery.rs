@@ -22,7 +22,7 @@
 //!   when the region emerges.
 //! - **The size** is `max(D₀, v × age)`, held to 10–300 ly, where `D₀` is the diameter of the
 //!   birth clump of mass `M_* ÷ ε` by the clouds' mass–radius relation
-//!   ([`cloud_radius`](super::cloud::cloud_radius)). The 10 ly floor and the
+//!   ([`cloud_radius`]). The 10 ly floor and the
 //!   300 ly cap are the brainstorm's range for star-forming regions and associations ("Large
 //!   features"); the floor is provisional, since a small clump is smaller. A bound cluster stops
 //!   expanding when it emerges: its size is then four half-mass radii, 10–100 ly, and its

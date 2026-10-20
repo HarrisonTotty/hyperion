@@ -226,8 +226,8 @@ const SEARCH_MARGIN: f64 = 1.25;
 /// ship's position, so a layer of small stars costs a handful of cells rather than
 /// the reach of layer E's giants; there is no census and no limit, because the answer is one ID and
 /// the spheres are a few light-years across. Systems are placed at `t` by
-/// [`position_at`](super::query::position_at), tested there by
-/// [`hit_at`](super::query::hit_at) — a system not yet born holds nothing — and each one's tidal
+/// [`position_at`], tested there by
+/// [`hit_at`] — a system not yet born holds nothing — and each one's tidal
 /// radius is read at its own position from its primary's initial mass
 /// ([`PotentialTables::tidal_radius`](super::potential::PotentialTables::tidal_radius)), which is
 /// the brainstorm's sphere of influence until plans 06 and 11 give a present-day system mass.
@@ -245,13 +245,13 @@ const SEARCH_MARGIN: f64 = 1.25;
 /// # Errors
 ///
 /// [`FindFrameError::TimeOutsideClockWindow`] if `t` lies outside the
-/// [`ClockWindow`], as [`RangeQuery::build`](super::query::RangeQuery::build) refuses such a time
+/// [`ClockWindow`], as [`super::query::RangeQueryBuilder::build`] refuses such a time
 /// for a range query: the pad for motion grows with |t|, so the walk would grow without bound.
 ///
 /// # Panics
 ///
 /// If a system's drift would take it out of the addressable cube, which
-/// [`position_at`](super::query::position_at) rules out: velocities are cut below the padding
+/// [`position_at`] rules out: velocities are cut below the padding
 /// speeds, which move a system by at most 10 ly over the clock window (plan 08).
 ///
 /// # Examples

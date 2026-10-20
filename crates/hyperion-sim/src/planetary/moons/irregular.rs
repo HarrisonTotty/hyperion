@@ -535,7 +535,7 @@ const SHARE_POINTS: u32 = 64;
 /// (ruling 112.4).
 ///
 /// The axis's share is exact at each eccentricity, and the mean over eccentricities a midpoint
-/// rule of [`SHARE_POINTS`] points.
+/// rule of `SHARE_POINTS` points.
 ///
 /// # Examples
 ///

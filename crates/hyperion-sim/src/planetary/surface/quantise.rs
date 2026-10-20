@@ -111,7 +111,7 @@ impl Error for QuantiseFieldError {
 /// entries. The header's parts that travel as raw `f64` bits (the sea level, the lapse rate
 /// and the realised figures) have a −0 made +0, so that a zero has one form on the wire whichever
 /// way a step reached it. The header's surface pressure is exactly 0 for an airless surface state,
-/// as R10's classifier takes it, and the inputs' own pressure otherwise ([`header_pressure`];
+/// as R10's classifier takes it, and the inputs' own pressure otherwise (`header_pressure`;
 /// decision-r11-palette-liquids §2, item 5).
 ///
 /// Public, beside [`coarse_pass`](super::coarse_pass), so that a bench or test can quantise the

@@ -433,7 +433,7 @@ pub const RECORD_TIME: UniverseTime = UniverseTime::EPOCH;
 /// planet's record where it is a moon's planet's (`decision-r09-t2.md` item 1).
 ///
 /// The record-bearing form of plan 14's
-/// [`SeasonsFrom`](crate::planetary::hooks::surface::SeasonsFrom).
+/// [`SeasonsFrom`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SeasonsFromRecord<'a> {
     /// The body's own orbit: a planet's, a dwarf planet's or a belt member's about its host.

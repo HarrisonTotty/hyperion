@@ -3,7 +3,7 @@
 //! irregulars, the occasional giant-impact moon)").
 //!
 //! Every draw here is on the parent's own streams, keyed by the parent's
-//! [`BodyId`](crate::id::BodyId) (design note 4): a planet's moons can be generated alone, and
+//! [`BodyId`] (design note 4): a planet's moons can be generated alone, and
 //! adding a property to moons can never move a planet. The three kinds are independent, each on
 //! its own domain tags, so that the order in which P14.T22's `generate_satellites` runs them
 //! (regular moons, the giant-impact moon, captures and their removals) moves no draw of another:

@@ -16,11 +16,11 @@
 //! R09.T12.e places it:
 //!
 //! - **On a mobile lid** (R09.T11 laid out plates), the continental population is a core of
-//!   width [`CONTINENTAL_CORE_WIDTH`] about [`CONTINENTAL_CORE_MEAN`], skewed as a log-normal of
-//!   shape [`CONTINENTAL_SKEW`] so that its mode is Earth2014's +125 m, which with R09.T12.b's
+//!   width `CONTINENTAL_CORE_WIDTH` about `CONTINENTAL_CORE_MEAN`, skewed as a log-normal of
+//!   shape `CONTINENTAL_SKEW` so that its mode is Earth2014's +125 m, which with R09.T12.b's
 //!   convergent landforms on it gives the continental crust Earth2014's mean [`CONTINENTAL_MEAN`]
 //!   and width above −2 km; and the
-//!   oceanic crust is the sea floor of [`seafloor`]: GDH1's basement at the floor's steady-state
+//!   oceanic crust is the sea floor of `seafloor`: GDH1's basement at the floor's steady-state
 //!   age, lifted by its sediment's isostatic load, with the oceanic noise, whose RMS makes the
 //!   oceanic s.d. plan 14's [`OCEANIC_WIDTH`] with GDH1's own spread. Each oceanic cell also gets
 //!   its steady-state age and its sea floor's roughness inputs, the draped hill relief and the
@@ -30,22 +30,23 @@
 //!   one lid is one population about the datum, of plan 14's width [`STAGNANT_LID_RELIEF`] (Design
 //!   note 3's structural share on such a lid, Venus's), Gaussian, which no other step realises: a
 //!   red field, its degree variance ∝ l^−β₁ from degree 2 with no degree-1 term, β₁ its crust
-//!   class's ([`crust_shape`]), its area mean zero and its area RMS the constant (ruled:
+//!   class's (`crust_shape`), its area mean zero and its area RMS the constant (ruled:
 //!   `decision-r09-t12-coarse.md`'s addendum of 2026-10-16).
 //!
-//! R09.T12.b adds a mobile lid's convergent landforms ([`convergent`]): collisional belts on
+//! R09.T12.b adds a mobile lid's convergent landforms (`convergent`): collisional belts on
 //! continental crust, trenches on a subduction's subducting side, and arcs with their volcanic
 //! fronts behind it, by the overriding crust, their heights scaled by the height factor
-//! h = g⊕ ÷ g ([`convergent::height_factor`]; `decision-r09-t12-coarse.md` item 2), their distances Earth's.
+//! h = g⊕ ÷ g (`convergent::height_factor`; `decision-r09-t12-coarse.md` item 2), their distances
+//! Earth's.
 //!
-//! R09.T12.c adds a stagnant lid's volcanic provinces ([`provinces`]): fields of edifices at plan
+//! R09.T12.c adds a stagnant lid's volcanic provinces (`provinces`): fields of edifices at plan
 //! 14's edifice cap, gathered into provinces, covering the share of the surface whose cone field
 //! has plan 14's constructional share, each standing at its height on the fill of its deflection,
 //! with its moat filled to the surrounding level and its bulge planed to it, by the lid's elastic
 //! thickness from its heat flow and its crust's substance (`decision-r09-t12-coarse.md` items 3
 //! and 4, and its addenda 2 and 3).
 //!
-//! Each population's spread is the coarse landform noise ([`noise`]), which holds no power finer
+//! Each population's spread is the coarse landform noise (`noise`), which holds no power finer
 //! than the coarse cell's Nyquist wavelength, the synthesis's structural share owning what is
 //! finer (`decision-r09-t5.md` item 3).
 //!
@@ -55,19 +56,19 @@
 //!
 //! R09.T12.e's [`run_after_craters`] then replaces them (main's rulings R1–R10 of 2026-10-19):
 //!
-//! - **The spectrum** ([`structural_spectrum`]): [`BandSpectrum::anchored`] of the crust class's
-//!   shape at its anchor ([`structural_anchor`]), which fixes the synthesis's structural amplitudes.
-//! - **The budget and the scale** ([`budget`]): plan 14's `σ_h`² is the reconstructed field's
-//!   variance, from a quadrature of R09.T4's interpolant ([`quadrature`]), plus the whole share the
+//! - **The spectrum** (`structural_spectrum`): [`BandSpectrum::anchored`] of the crust class's
+//!   shape at its anchor (`structural_anchor`), which fixes the synthesis's structural amplitudes.
+//! - **The budget and the scale** (`budget`): plan 14's `σ_h`² is the reconstructed field's
+//!   variance, from a quadrature of R09.T4's interpolant (`quadrature`), plus the whole share the
 //!   synthesis adds over it: the realised structural share, the small craters', the coarse
 //!   craters' increase and the channels'. One affine scale of the whole field meets it where it is
 //!   at most 1, the coarse craters' part of it carried by their degradation bytes, so that each
 //!   crater's coarse profile and sharpening stay one profile; above 1 the non-crater field alone is
 //!   scaled.
-//! - **The sea** ([`sea`]): the connected ocean, the largest region below the ocean fraction's
+//! - **The sea** (`sea`): the connected ocean, the largest region below the ocean fraction's
 //!   quantile flooded by a priority flood to the level at which it covers the fraction, filled
 //!   with the main liquid; the enclosed depressions stay dry, for R09.T14's lakes.
-//! - **The figures** ([`budget::figures`]): the whole surface's realised `σ_h`, plan 14's, and the
+//! - **The figures** (`budget::figures`): the whole surface's realised `σ_h`, plan 14's, and the
 //!   cells' range as the realised relief. [`craters::run_after_erosion`](super::craters::run_after_erosion)
 //!   refloods the ocean against the same sea level and recomputes them once the craters younger
 //!   than a wet epoch's end are in (ruling R4).
@@ -79,12 +80,12 @@
 //! All on `surface.coarse.relief`, keyed `surface_cell(face, ℓ, i, j, instance)` of a lattice
 //! cell, one standard normal (two words) each:
 //!
-//! - instance 0 ([`noise::LANDFORM_INSTANCE`]): the coarse landform noise, at levels 2 to the
+//! - instance 0 (`noise::LANDFORM_INSTANCE`): the coarse landform noise, at levels 2 to the
 //!   field's on a mobile lid and 1 to the field's on a stagnant one (whose red field adds the
 //!   level-1 octave and weights the others by its β₁).
-//! - instance 1 ([`convergent::STRIKE_INSTANCE`]), level 5 alone: the convergent landforms'
+//! - instance 1 (`convergent::STRIKE_INSTANCE`), level 5 alone: the convergent landforms'
 //!   along-strike draw.
-//! - instances 2 and 3 ([`provinces::PROVINCE_INSTANCE`], [`provinces::EDIFICE_INSTANCE`]), level 0's
+//! - instances 2 and 3 (`provinces::PROVINCE_INSTANCE`, `provinces::EDIFICE_INSTANCE`), level 0's
 //!   first cell alone: the provinces' count and centres, and the edifices' offsets.
 
 pub(crate) mod budget;

@@ -11,7 +11,7 @@
 //! | From T             | A supernova of that age: its shell and its remnant at kick × age         |
 //! | From T + `W_eff`   | The bare remnant: the shell has merged with the gas                      |
 //!
-//! The explosion itself is an event, [`SUPERNOVA`](crate::id::event_tags::SUPERNOVA), bin 0,
+//! The explosion itself is an event, [`SUPERNOVA`], bin 0,
 //! number 0, on the entry's member 0 ([`SupernovaEntry::explosion_event`]), so that plan 12's
 //! alerts can name it.
 //!

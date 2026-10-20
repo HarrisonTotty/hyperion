@@ -1,5 +1,5 @@
 //! The coarse pass's grid: R05's cube-sphere cells at one level as a graph, in the field's
-//! [`cell_index`](hyperion_surface::field::cell_index) order, with each cell's centre, solid angle
+//! [`cell_index`] order, with each cell's centre, solid angle
 //! and neighbours (plan R09, Design notes 4–6).
 //!
 //! The coarse field lives on the cube-sphere quadtree at the body's one level, so that no second
@@ -24,7 +24,7 @@ use crate::units::Radians;
 /// neighbours.
 ///
 /// Built once per pass and read by every step; immutable, so it is the same whichever step reads
-/// it first. Cells are named by their [`cell_index`](hyperion_surface::field::cell_index), a `u32`.
+/// it first. Cells are named by their [`cell_index`], a `u32`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CellGraph {
     level: u8,

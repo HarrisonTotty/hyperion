@@ -11,7 +11,7 @@
 //!   2010, ApJ 722, 605, equation 1). The fraction is held through the main sequence and
 //!   the speed follows the state's mass and radius. The distribution is bimodal for late B and A
 //!   stars (Zorec and Royer 2012, A&A 537, A120): a small slow mode below 0.3 and a broad fast mode
-//!   whose centre follows their equation 5 and Huang et al.'s B stars ([`fast_fraction_mean`]).
+//!   whose centre follows their equation 5 and Huang et al.'s B stars (`fast_fraction_mean`).
 //! - **Below 1.3 M☉** (the Kraft break) the rank maps onto the spread of birth periods, which
 //!   magnetic braking erases: P(t)² = P₀² + P(g)(t)², the solution of Skumanich's torque
 //!   dΩ ÷ dt ∝ −Ω³, with the gyrochronology law P(g) of Mamajek and Hillenbrand (2008, ApJ 687, 1264,

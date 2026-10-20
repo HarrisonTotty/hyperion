@@ -43,20 +43,20 @@
 //!   octave's term is the same at every level that evaluates it;
 //! - **the channels**: a level's raw incision is what its grooves cut below every coarser level's,
 //!   so the levels from k on together cut between 0 and `G_k`, level k's groove cap
-//!   ([`groove_cap_m`]), the deepest a level k or finer may cut; each level's correction is
+//!   (`groove_cap_m`), the deepest a level k or finer may cut; each level's correction is
 //!   bilinear in its corner means, within [−`G_j`, 0], plus a bubble scaled by the cell's mean
-//!   less the bilinear part's over the bubble's mean, within ±`G_j` ÷ [`BUBBLE_MEAN_FLOOR`]. The
+//!   less the bilinear part's over the bubble's mean, within ±`G_j` ÷ `BUBBLE_MEAN_FLOOR`. The
 //!   raw part and the bilinear part take opposite signs, and `G_k` is one of the `G_j`, so the
 //!   omitted levels from k to the deepest a body's channels can reach
-//!   ([`deepest_possible_level`]) change a height by at most (1 + 1 ÷ B) Σ `G_j`;
+//!   (`deepest_possible_level`) change a height by at most (1 + 1 ÷ B) Σ `G_j`;
 //! - **the craters**: per octave, one crater's largest share, its fresh height and its fillet's
 //!   change where the octave is new to the finer level, its fillet's change between the two bands
 //!   where both evaluate it, with the octave's expected count of craters reaching a point, summed
-//!   by Chernoff's bound to the tail ([`poisson_tail_bound`]). Where the two levels' bands are the
+//!   by Chernoff's bound to the tail (`poisson_tail_bound`). Where the two levels' bands are the
 //!   same, an octave both evaluate adds nothing. The coarse craters' rims (R09.T7.c) join the same
 //!   sum: every level sharpens them, so each octave of diameters from `D_b` up adds its fillet's
 //!   change between the two bands, held to the coarse band, at the count Trask's saturation
-//!   allows, which bounds the coarse pass's draw whatever the production ([`coarse_marks`]).
+//!   allows, which bounds the coarse pass's draw whatever the production (`coarse_marks`).
 //!
 //! The same terms bound the heights a level can reach about the base elevation, for culling
 //! ([`LevelBounds::contribution_range_m`]).
@@ -64,11 +64,6 @@
 //! [`octave_spacing`]: super::relief::octave_spacing
 //! [`band_half_width`]: super::craters::band_half_width
 //! [`octave_bound`]: super::relief::octave_bound
-//! [`groove_cap_m`]: super::channels::incision::groove_cap_m
-//! [`BUBBLE_MEAN_FLOOR`]: super::channels::incision::BUBBLE_MEAN_FLOOR
-//! [`deepest_possible_level`]: super::channels::incision::deepest_possible_level
-//! [`poisson_tail_bound`]: super::craters::bound::poisson_tail_bound
-//! [`coarse_marks`]: super::craters::bound::coarse_marks
 
 use hyperion_base::math;
 use hyperion_base::units::Metres;

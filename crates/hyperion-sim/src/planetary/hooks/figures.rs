@@ -12,7 +12,7 @@
 //!   its [`relief`], and its surface water, oceans, ices and cloud, from its [`cover`] (Part 4).
 //! - [`impactors`] (P14.T48.f): what strikes a body and what it strikes, and how often over the
 //!   Moon ([`Impactors::rate`]), which P14.T48.c's crater contract carries beside the crater
-//!   density ([`CraterParams`](hyperion_surface::craters::CraterParams)).
+//!   density ([`CraterParams`]).
 //!
 //! # The global figures (P14.T24.b)
 //!
@@ -1218,7 +1218,7 @@ impl Impactors {
     /// - Ψ follows the source rule ([`ImpactorSource`]): in a belt, [`IN_BELT_DENSITY`] (rocky) or
     ///   [`ICY_IN_BELT_DENSITY`] (icy) × the component's density over the Solar main belt's; the
     ///   giants' comets, [`COMET_DENSITY`] × `μ_ic` ([`ImpactorSources::icy_belt_ratio`]) × s³
-    ///   (s · min(a, `a_K`) ÷ 5.2 au)^1.15 ([`comet_abundance`], §2.7), with a the body's or its
+    ///   (s · min(a, `a_K`) ÷ 5.2 au)^1.15 (`comet_abundance`, §2.7), with a the body's or its
     ///   parent's semi-major axis; toward the nearest asteroid belt, its mass over
     ///   [`SOLAR_MAIN_BELT_MASS`] × (2.065 au ÷ `a_i`)³ × ((1 − 1 au ÷ 2.065 au) ÷ (1 − a ÷
     ///   `a_i`))^1.5 inside its inner edge, or (1 − `a_o` ÷ a) beyond its outer edge; with no

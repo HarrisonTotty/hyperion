@@ -438,7 +438,7 @@ impl CoarseRims {
     /// sharpening is, and g its [`kept_relief`]; zero at the band limit and below, and for a
     /// crater whose relief is gone.
     ///
-    /// The moments are those [`unresolved_rims`] takes for the crater's share, from the same
+    /// The moments are those `unresolved_rims` takes for the crater's share, from the same
     /// profiles in the same order, so that this over the area of the crater's reach, π ((1 + a)
     /// R)², is that share's variance (to rounding): the area is the chord's, π c², which on a
     /// sphere is the ground within the chord c exactly (R09.T7.c). The coarse pass books it per

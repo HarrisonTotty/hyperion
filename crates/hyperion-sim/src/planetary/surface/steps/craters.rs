@@ -10,7 +10,7 @@
 //!   Trask's saturation over the same octave, 0.079 (D⁻² − (2D)⁻²) km⁻² ([`saturation`]; Design note
 //!   10), so that the rims' term of the level bound holds (a cap on N(>D), or on another grid,
 //!   could exceed it by up to 1.24 in the octave that straddles the crossover). The body's area is
-//!   its spheroid's, in closed form ([`spheroid_area_m2`]). The octaves run
+//!   its spheroid's, in closed form (`spheroid_area_m2`). The octaves run
 //!   while their lower diameter is below the body's radius (labelled: no wider crater is drawn).
 //! - **Each crater.** Its centre uniform on the unit sphere of directions (z, then the longitude),
 //!   its diameter within the octave by the body's size–frequency distribution

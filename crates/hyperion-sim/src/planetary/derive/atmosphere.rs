@@ -30,7 +30,7 @@
 //!   ([`partition`](crate::planetary::chem::partition)) over the body's climate, on the
 //!   registry's phase diagrams, and the Bond albedo and cloud fraction are P14.T51.b's area mix
 //!   over the condensates the pass publishes, its regolith and its cloud
-//!   ([`area_mix`](crate::planetary::derive::photometry::area_mix)), in place of the state's
+//!   (`area_mix`), in place of the state's
 //!   table.
 //! - **Carbon speciation and oxygen** (P14.T24.f). A body formed beyond the snow line that lies
 //!   beyond the maximum-greenhouse limit carries its carbon as methane, held where a reservoir lies
@@ -408,7 +408,7 @@ pub const ICY_VOLATILE_BOOST: f64 = 100.0;
 /// condenses at 131 K by the reaction of ammonia gas and water ice, and 50% of all nitrogen is in
 /// this hydrate by 123 K." The boost treats a body's nitrogen as condensed, which is the 50%
 /// figure; 131 K, column 2, is where the hydrate appears and holds about none of it. Lodders,
-/// Palme and Gail (2009, arXiv:0901.1149, Table 1, read) give the same 123 K, "taken from [03L]".
+/// Palme and Gail (2009, arXiv:0901.1149, Table 1, read) give the same 123 K, "taken from \[03L\]".
 pub const AMMONIA_HYDRATE_CONDENSATION: Kelvin = Element::N.condensation_temperature();
 
 /// The temperature of the disc a body formed in, at its formation distance `formation_distance`,
@@ -1789,7 +1789,7 @@ fn partitioned_greenhouse(
 /// 4. The partial pressures are each airborne mass's weight over the surface, M g ÷ 4πR², held at
 ///    each gas's saturation vapour pressure at the surface temperature (water, carbon dioxide,
 ///    nitrogen and argon condense, by their rows of the substance registry,
-///    [`saturation_pressure`](crate::substance::saturation_pressure)), which is iterated
+///    [`saturation_pressure`]), which is iterated
 ///    [`GREENHOUSE_STEPS`] times upward from the equilibrium temperature through the grey
 ///    greenhouse they give ([`optical_depth`], [`grey_surface_temperature`]). On a body formed
 ///    beyond the snow line that lies beyond the maximum-greenhouse limit the carbon is methane,

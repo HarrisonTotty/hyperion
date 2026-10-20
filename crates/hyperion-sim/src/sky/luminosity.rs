@@ -9,7 +9,7 @@
 //! with the present mass replaced by the V light:
 //!
 //! - **Masses.** Gauss–Legendre panels in ln m no wider than
-//!   [`MAX_PANEL_LN_MASS`](crate::galaxy::fates::MAX_PANEL_LN_MASS), a set for each \[Fe/H\] node,
+//!   [`MAX_PANEL_LN_MASS`], a set for each \[Fe/H\] node,
 //!   a [`TablesPlan`]'s [`Stage`] (R06.T5.e, decided 2026-10-05, `decision-r06-t5e-gate-2.md`).
 //!   Their edges are the mass function's and the fates' breaks, each layer's band edges and their
 //!   multiples by the companion laws' mass-ratio kinks, and the masses at which the node's tracks

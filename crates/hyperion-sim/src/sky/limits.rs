@@ -596,7 +596,7 @@ pub struct Glare {
 }
 
 impl Glare {
-    /// The glare of the stars `listed` (a [`SkyCensus`](super::census::SkyCensus)'s listed stars,
+    /// The glare of the stars `listed` (a [`SkyCensus`]'s listed stars,
     /// not its overflow, whose light the band holds) as `observer` sees them, over the texels of a
     /// band of `spec`, the band whose limits it sets, for an eye of cut `eye_cut`
     /// ([`SkyQuery::eye_cut`](super::census::SkyQuery::eye_cut)).
@@ -616,7 +616,7 @@ impl Glare {
     /// first ones. At the eye's own cut every listed star glares.
     ///
     /// Each leaf of the pyramid sums its stars in the census's order, so `listed` is the census's
-    /// own, by [`sky_order`](super::census::sky_order), as
+    /// own, by [`sky_order`], as
     /// [`SkyCensus::listed`](super::census::SkyCensus::listed) gives it.
     ///
     /// # Panics

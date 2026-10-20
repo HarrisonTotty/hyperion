@@ -4,7 +4,7 @@
 //! The brainstorm reads the black hole's mass from the M–σ relation at the bulge's projected
 //! dispersion ("Galaxy parameters"), which its own model takes from plan 08's axisymmetric Jeans
 //! solution. [`bulge_dispersion`] is that: plan 08's
-//! [`bulge_projected_sigma`](crate::galaxy::kinematics::spheroid::bulge_projected_sigma), the
+//! [`bulge_projected_sigma`], the
 //! relation's own `σ_e` (the line-of-sight `V² + σ²` along the major axis inside the effective radius,
 //! averaged over inclination; ruling 105.1), solved straight from the mass model without the black hole and the nuclear cluster, since the
 //! black hole's mass is what it sets (the two-phase build of P02.T6.e). It replaced plan 02's

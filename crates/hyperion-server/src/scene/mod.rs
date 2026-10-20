@@ -5,7 +5,7 @@
 //! and set by `scene_ship` (Design note 2). They are shared, because two clients of one scene can
 //! agree only on one clock and one observer; the last setting the server accepts stands, and every
 //! subscription of the universe sees it through the universe's [`watch`] channel. None of it is
-//! saved. The scene's core reads them only through the [`Clock`] and [`Ship`] traits, which a
+//! saved. The scene's core reads them only through the `Clock` and `Ship` traits, which a
 //! session will implement in their place.
 
 mod clock;

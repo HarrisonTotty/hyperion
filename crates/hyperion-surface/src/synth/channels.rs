@@ -130,7 +130,7 @@
 //! [`ReadCellError`] names the first that is missing. Its relief, the valleys the channels cut,
 //! level by level with each level's mean over its parent cell removed, is [`Channels::incision_at`]
 //! (R09.T6.b), whose model, cut, search and closed forms [`incision`] describes. [`ChannelNetwork`]
-//! memoises what it computes, in its own memo or in the caller's [`SynthCache`](super::SynthCache),
+//! memoises what it computes, in its own memo or in the caller's [`SynthCache`],
 //! and no result depends on what it has computed before.
 
 use std::collections::BTreeMap;
@@ -1184,7 +1184,7 @@ impl Channels {
 
     /// The network over `field`, memoising in the caller's `cache`, which keeps what it holds for
     /// these channels' body and seed and starts afresh for another's (see
-    /// [`SynthCache`](super::SynthCache)).
+    /// [`SynthCache`]).
     ///
     /// # Panics
     ///
@@ -1388,7 +1388,7 @@ impl Memo<'_> {
 ///
 /// Every answer is a pure function of the field, the seed and the cell, the same whatever was asked
 /// before; the memo, its own ([`Channels::network`]) or the caller's
-/// [`SynthCache`](super::SynthCache) ([`Channels::network_in`]), only saves work.
+/// [`SynthCache`] ([`Channels::network_in`]), only saves work.
 pub struct ChannelNetwork<'a, F> {
     channels: &'a Channels,
     field: &'a F,

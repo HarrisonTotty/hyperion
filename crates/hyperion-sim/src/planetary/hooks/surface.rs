@@ -969,7 +969,7 @@ impl SurfaceConditions {
     /// Whether water can be liquid at the surface pressure somewhere in the climate's range of
     /// temperature ([`climate_range`](Self::climate_range), [`liquid_water`]): a condition of the
     /// surface, whether or not the body holds water. From 22 → 23 P14.T51.a derives it from the
-    /// partition ([`with_condensates`](Self::with_condensates)).
+    /// partition (`with_condensates`).
     #[must_use]
     pub const fn liquid_water(&self) -> bool {
         self.liquid_water
@@ -2349,7 +2349,7 @@ const ZONAL_INSOLATION_STEPS: u32 = 1_024;
 
 /// The annual-mean insolation at x = sin φ of a world at obliquity `obliquity`, relative to the
 /// mean S ÷ 4: (2 ÷ π²) ∫₀^{2π} √(1 − (√(1 − x²) sin β cos γ − x cos β)²) dγ, by
-/// [`ZONAL_INSOLATION_STEPS`] steps of the trapezoid rule on [0, π], the integrand being even in
+/// `ZONAL_INSOLATION_STEPS` steps of the trapezoid rule on [0, π], the integrand being even in
 /// γ (McGehee and Lehman 2012, SIAM J. Appl. Dyn. Syst. 11, 684, after Ward 1974; from memory, and
 /// checked against [`annual_insolation`]'s closed forms at the equator and the poles).
 ///

@@ -164,7 +164,7 @@ impl CollapseChannel {
 ///
 /// Speeds are in km/s, masses in M☉ of carbon–oxygen core or of the initial mass the track's
 /// `m_c_bagb` reads. The four defaults of the brainstorm's "Open questions" are read from
-/// [`tables::kick_rank`], which plan 15 owns after P06.T19.e.
+/// [`crate::tables::kick_rank`], which plan 15 owns after P06.T19.e.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KickLawParams {
     /// The log-normal's μ, ln(km/s): 5.60 (Disberg and Mandel 2025).

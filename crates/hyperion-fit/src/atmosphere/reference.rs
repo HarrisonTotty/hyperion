@@ -36,9 +36,9 @@
 //! for the diagnostics and the scalar gates; the standard error of their difference is given too,
 //! since the two are strongly correlated. Q, U and V are in the frame (e₁, e₂) of the light's
 //! direction k, the reverse of the view direction: e₁ lies in the view's vertical plane, towards
-//! the larger zenith angle of the view, and e₂ = k × e₁ ([`super::transport`]). Q is positive for
+//! the larger zenith angle of the view, and e₂ = k × e₁ (`super::transport`). Q is positive for
 //! light polarised along e₁, in that plane, and U for light polarised along e₁ + e₂; V's sign is
-//! that of the case's b₂ ([`super::optics`]); azimuths run from north towards east. These are
+//! that of the case's b₂ (`super::optics`); azimuths run from north towards east. These are
 //! Hovenier's conventions as Natraj and Hovenier 2012 (ApJ 748, 28) tabulate them, at the same
 //! relative azimuth; Natraj, Li and Yung 2009 (ApJ 691, 1909), with Q = Iᵣ − Iₗ (their eq. 1b),
 //! tabulate −Q and −U of these. A standard error is the sample standard deviation over √n; it

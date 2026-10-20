@@ -58,7 +58,7 @@ use hyperion_base::units::Gigayears;
 pub const LUNAR_MATURATION_TIME: Gigayears = Gigayears::new(0.3277);
 
 /// The maturity, dimensionless in [+0, 1], of ground exposed for `exposure` at the weathering rate
-/// `weathering_rate` (k, dimensionless, the Moon's 1): 1 − exp(−k t ÷ `τ_L`) (the [module](self)
+/// `weathering_rate` (k, dimensionless, the Moon's 1): 1 − exp(−k t ÷ `τ_L`) (the `maturity` module
 /// documentation), with `τ_L` [`LUNAR_MATURATION_TIME`].
 ///
 /// It is +0 at zero exposure or zero rate (never −0, whatever the sign of a zero exposure), never

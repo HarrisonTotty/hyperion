@@ -21,7 +21,7 @@
 //! - **Craters** carry the body's own d/D distribution ([`DepthRatios`]).
 //! - **Plains** are a labelled stand-in for Hayne et al.'s, which they ray-traced and give no
 //!   closed form for (`science-r09-drainage.md` §8.1, §8.10, §8.11 and §8.13). They are bowls whose
-//!   d/D is a half-normal of scale [`PLAINS_DEPTH_SCALE`] × tan `σ_s` ÷ 2: 0.6 of half the
+//!   d/D is a half-normal of scale `PLAINS_DEPTH_SCALE` × tan `σ_s` ÷ 2: 0.6 of half the
 //!   magnitude of the surface's directional slope, a normal variable of RMS tan `σ_s`.
 //!   - A bowl is a closed hollow, whose shadow stays put as the star circles the sky, while a
 //!     Gaussian surface's shadows are cast by ridges and lit from other azimuths. So bowls of the
@@ -30,7 +30,7 @@
 //!   - Their instantaneous shadow is then 0.38–0.92 of Smith's for a Gaussian surface (1967,
 //!     JGR 72, 4059): no population of bowls matches both shadows, and cold traps need the
 //!     permanent one.
-//!   - Their shadows also absorb [`PLAINS_SURROUNDINGS`] of S sin e from sunlit terrain beyond
+//!   - Their shadows also absorb `PLAINS_SURROUNDINGS` of S sin e from sunlit terrain beyond
 //!     their hollows, which a bowl's sphere omits. At `σ_s` 5.7° this matches the ray traces'
 //!     water and CO₂ cold traps; on rougher plains the form still overstates both (R09's Risks
 //!     give the figures).

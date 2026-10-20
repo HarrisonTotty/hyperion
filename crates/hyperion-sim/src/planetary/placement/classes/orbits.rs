@@ -541,7 +541,7 @@ fn beta_fraction(a: f64, b: f64, x: f64) -> f64 {
 }
 
 /// The x at which Iₓ(a, b) = `p`: Press et al.'s (2007, Numerical Recipes, 3rd ed., §6.14.11)
-/// `invbetai`, an approximate start refined by [`BETA_INVERSE_STEPS`] Halley steps, each kept
+/// `invbetai`, an approximate start refined by `BETA_INVERSE_STEPS` Halley steps, each kept
 /// inside `(0, 1)`.
 ///
 /// # Panics

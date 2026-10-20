@@ -286,7 +286,7 @@ impl SkyCaps {
     }
 
     /// The same caps with layer C's shells whose inner edge is at or beyond `edge_ly` censused a
-    /// step late ([`delivery_steps`]), in place of [`C_DEFERRED_BEYOND_LY`]: for a test whose
+    /// step late (`delivery_steps`), in place of `C_DEFERRED_BEYOND_LY`: for a test whose
     /// nearer shell edges ([`with_shell_edges`](Self::with_shell_edges)) never reach 2,000 ly, so
     /// that its sky still has a step in which C's edge stays where it was (R06.T11.g). No sky a
     /// client asks is delivered so. The edge is above nought, so that every layer's first shell
@@ -300,7 +300,7 @@ impl SkyCaps {
     }
 
     /// The same caps with E's shells from `edge_ly` censused a step ahead of C's and D's of the
-    /// same edge, in place of [`FAR_FIRST_FROM_LY`] ([`delivery_steps`]; R06.T11.h).
+    /// same edge, in place of `FAR_FIRST_FROM_LY` (`delivery_steps`; R06.T11.h).
     ///
     /// For a test whose nearer shell edges ([`with_shell_edges`](Self::with_shell_edges)) never
     /// reach 1,000 ly, so that its sky still has a step in which E's shell runs ahead of C's and

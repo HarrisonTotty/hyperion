@@ -899,7 +899,7 @@ impl AirborneWeights {
 
 /// The phase a condensate lies in (P14.T51.a): never the vapour.
 ///
-/// It is distinct from the registry's [`CondensedPhase`](crate::substance::condensed::CondensedPhase),
+/// It is distinct from the registry's [`CondensedPhase`],
 /// what a grain density is the density of, by its supercritical fluid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum CondensatePhase {
@@ -1523,7 +1523,7 @@ impl fmt::Debug for Cover<'_> {
 /// Plain data with public fields.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WaterCover {
-    /// The surface water `σ_s` ([`cover::surface_water_under`]): the share of the partition's
+    /// The surface water `σ_s` (`cover::surface_water_under`): the share of the partition's
     /// condensed water that lies at the surface.
     pub surface_water: KilogramsPerSquareMetre,
     /// The potential ocean `f_pot` it fills ([`cover::potential_ocean`]), the liquid entry's area.

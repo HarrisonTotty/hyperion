@@ -22,7 +22,7 @@
 //!   each age bin (age in `L` plus the bin's edges in `R_d ÷ v_c`), exactly, through the age
 //!   distribution's CDF;
 //! - for the dead of layer E, plan 06's kick law in each speed bin by remnant kind and mode,
-//!   through [`kick_bins::speed_bin_shares`], and the share leaving nothing, which is gone;
+//!   through [`super::kick_bins::speed_bin_shares`], and the share leaving nothing, which is gone;
 //! - for the living of the thin disc and the nuclear disc, the runaway and walkaway shares by
 //!   speed bin and time since ejection ([`RunawayModel`]), which leave the field.
 //!

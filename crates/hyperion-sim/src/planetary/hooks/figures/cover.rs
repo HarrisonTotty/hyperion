@@ -6,7 +6,7 @@
 //! - **The surface water** `σ_s` ([`surface_water`]): P14.T13.a's water over 4πR², less the
 //!   vapour P14.T13.c holds in the air, while the present outgassing O is at least P14.T48.b's
 //!   edge
-//!   ([`VOLCANIC_GREENHOUSE_OUTGASSING`](super::wet_epoch::VOLCANIC_GREENHOUSE_OUTGASSING)), the
+//!   ([`VOLCANIC_GREENHOUSE_OUTGASSING`]), the
 //!   volcanic greenhouse still running, and [`DRY_SURFACE_WATER_SHARE`] of it after: a world whose
 //!   volcanic supply has failed has put most of its water into its crust and ground ice, or lost
 //!   it, as Mars has.

@@ -36,7 +36,7 @@
 //! dioxide the registry's 58.18 K at 144 kg m⁻² Gyr⁻¹ (the research estimated about 57 K); at
 //! Schorghofer et al. 2021's
 //! stricter 10 kg m⁻² Gyr⁻¹ (GRL 48, e2021GL095533) carbon dioxide's is 55.53 K (their 55.6 K on
-//! Bryson et al. 1974's curve), which the tests read. [`trap_threshold`] gives it, and the cold
+//! Bryson et al. 1974's curve), which the tests read. `trap_threshold` gives it, and the cold
 //! traps, R09.T13.f's placement and R09.T13.d's airless frost points all read it there.
 //!
 //! # The zonal annual maximum
@@ -54,7 +54,7 @@
 //! linear between them. It falls toward the pole, so its cold area is a polar cap, nothing or the
 //! whole surface. On the Moon it is 158 K at the pole and 227 K at 85°, and on Mercury 172 K at
 //! the pole (110 K with the Sun as a point). It is symmetric about the equator: a southern
-//! latitude takes its northern mirror's ([`ColdTrapGround::annual_maximum`]).
+//! latitude takes its northern mirror's (`ColdTrapGround::annual_maximum`).
 //!
 //! # The airless branch, from 24
 //!
@@ -93,9 +93,9 @@
 //!
 //! The published area is `f_ct` × `f_x`, the exposed ice ([`exposed_fraction`]).
 //!
-//! A body's flat ground, its shadows and its terrain are one [`ColdTrapGround`]: at any latitude it
+//! A body's flat ground, its shadows and its terrain are one `ColdTrapGround`: at any latitude it
 //! gives the zonal annual maximum and each threshold's gated fraction
-//! ([`ColdTrapGround::fractions_at`]), a southern latitude its northern mirror's. `f_ct` is the
+//! (`ColdTrapGround::fractions_at`), a southern latitude its northern mirror's. `f_ct` is the
 //! latitude integral of its fractions, and R09.T13.f's field reads its cells' fractions from the
 //! same calls, so that the record's area and the field's cells are one model
 //! (decision-r09-t13f-cold-traps §3).

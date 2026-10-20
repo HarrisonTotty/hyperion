@@ -261,7 +261,7 @@ pub struct ReachNode {
 /// log₁₀(Z<sub>fit</sub> ÷ 0.02)): for each age bin the largest radius over the [`ETA_DRAWS`],
 /// each a full track at the median draws but η and the companion-stripped mark (never set, and
 /// inside [`STRIPPED_WINDOW`] also always set), read at the engine's age
-/// ([`engine_track_age_years`]) of the bin's upper age times [`AGE_SPREAD`]; the earliest end of a
+/// (`engine_track_age_years`) of the bin's upper age times [`AGE_SPREAD`]; the earliest end of a
 /// main sequence and the earliest sudden death among them.
 ///
 /// A star below [`MIN_INITIAL_MASS`] is P06.T13's cooling fits at age 0, the largest radius the

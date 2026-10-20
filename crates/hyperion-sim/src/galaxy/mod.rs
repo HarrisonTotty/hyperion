@@ -333,7 +333,7 @@ impl Galaxy {
     /// The velocity laws of every population (plan 08), which
     /// [`with_full_potential`](Self::with_full_potential) builds; `None` for a galaxy built
     /// without them, whose systems keep their epoch positions at every time
-    /// ([`query::epoch_velocity`](query::epoch_velocity)).
+    /// ([`query::epoch_velocity`]).
     #[must_use]
     pub fn kinematics(&self) -> Option<&KinematicTables> {
         self.kinematics.as_deref()

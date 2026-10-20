@@ -622,8 +622,8 @@ impl Track {
     /// [`PhasePredicate::Lbv`] gives the window in which the star is a luminous blue variable,
     /// which plan 09's catalogue class tests against the source horizon. The interval runs from
     /// the first age at which the predicate holds to the last: each living segment is sampled at
-    /// [`WINDOW_SAMPLES`] even ages, both ends included, and each change of the predicate between
-    /// neighbours is bisected to [`WINDOW_BISECTIONS`] steps. Where a track leaves and re-enters
+    /// `WINDOW_SAMPLES` even ages, both ends included, and each change of the predicate between
+    /// neighbours is bisected to `WINDOW_BISECTIONS` steps. Where a track leaves and re-enters
     /// the region, the interval spans the gap; the LBV window of the generator's tracks has none
     /// in the plan's test.
     ///

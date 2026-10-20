@@ -255,7 +255,7 @@ pub(crate) fn fe_h_coordinate(composition: &Composition) -> Dex {
 
 /// One cell of the table: its mass, \[Fe/H\] and η intervals.
 ///
-/// A cell is made only by the frame ([`PhaseFrame::cell_of`]'s crate-wide reader), by
+/// A cell is made only by the frame (`PhaseFrame::cell_of`'s crate-wide reader), by
 /// [`rows_of_interval`] and by [`Cell::from_index`], so its intervals lie within the table's axes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Cell {

@@ -33,7 +33,7 @@
 //!
 //! # The maturity
 //!
-//! m = [`body_maturity`](hyperion_surface::material::body_maturity)(`t_s`, k) = 1 − exp(−k `t_s` ÷
+//! m = [`body_maturity`]\(`t_s`, k) = 1 − exp(−k `t_s` ÷
 //! `τ_L`), with `t_s` P14.T24.b's surface age and `τ_L` the shared law's lunar maturation time
 //! ([`LUNAR_MATURATION_TIME`](hyperion_surface::material::LUNAR_MATURATION_TIME)): the background
 //! regolith's npFe⁰ content as a fraction of the Moon's mature background's, per unit of `FeO_T`

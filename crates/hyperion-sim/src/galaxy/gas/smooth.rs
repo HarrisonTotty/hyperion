@@ -14,7 +14,7 @@
 //! substitutes `u = ln R` itself, where [`gl_panels`](quad::gl_panels) integrates in `R` — over
 //! eight log-spaced panels of 32 nodes each from 1 ly to 20 `R_g`. The molecular disc's integral is
 //! the elementary `4π R_c² h_c`. The panel scheme and the node count are part of the generator
-//! version, as everything in [`quad`](crate::galaxy::quad) is.
+//! version, as everything in [`quad`] is.
 //!
 //! Lanes are not here: they are a factor on the neutral layer alone, and because that factor
 //! averages exactly 1 around a circle (Design note 6) every density this module returns is the

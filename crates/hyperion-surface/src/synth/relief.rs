@@ -952,7 +952,7 @@ fn seafloor_amplitude(seafloor: u8) -> f64 {
 /// [`PLAIN_AMPLITUDE`] where ponded sediment buries them ([`H_REF`]); a stagnant lid's is 1 and its
 /// provinces' [`PROVINCE_AMPLITUDE`]. The belt weight is 1 within a collision belt on either side,
 /// and in a subduction margin's arc on the overriding plate (the positive side) in a band behind
-/// the trench set by the overriding crust ([`ARC_OCEANIC_KM`], [`ARC_CONTINENTAL_KM`]), the
+/// the trench set by the overriding crust (`ARC_OCEANIC_KM`, `ARC_CONTINENTAL_KM`), the
 /// forearc before it keeping its crust's own style; the shear weight is the boundary's obliquity
 /// within its shear zone. These are the plan's procedural reading of the brainstorm's three
 /// rules, with the amplitudes Earth's, the Moon's and Mars's measured relief gives (each

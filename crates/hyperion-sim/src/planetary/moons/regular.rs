@@ -1511,9 +1511,9 @@ pub(crate) struct OceanLayers {
 /// The time a planet of mass `planet_mass` takes to lock the spin of a moon of mass `mass`,
 /// radius `radius`, class `class` and mass fractions `fractions` at semi-major axis `a`, from a
 /// period of [`MOON_PRIMORDIAL_PERIOD_HOURS`]: P14.T14.b's
-/// [`tidal_locking_time`](crate::planetary::derive::rotation::tidal_locking_time), with the
+/// [`tidal_locking_time`], with the
 /// moon's one moment of inertia,
-/// [`moment_of_inertia_factor`](crate::planetary::derive::rotation::moment_of_inertia_factor)
+/// [`moment_of_inertia_factor`]
 /// (P14.T46.a, which retired the moons' own 0.35), and the tides `tides` say: its class's, a rocky
 /// body's k₂ = 0.3 and Q = 100 (P14.T14.b's pair; the despinning time is Gladman et al. 1996's,
 /// Icarus 122, 166), below [`MOONS_VERSION`], or its own (k₂, Q) by composition and state from it

@@ -8,7 +8,7 @@
 //! (`src/wasm.rs`) thinly: the decoding, the merge, the survey's change, the level table and each
 //! query's synthesis are here, so that the native and wasip1 tests check them as the browser
 //! target runs them, and the client's worker test holds the module's answers to this module's on a
-//! fixture field (`tests/golden/worker/moon_like.golden`, [`golden`]).
+//! fixture field (`tests/golden/worker/moon_like.golden`, `golden`).
 //!
 //! # A body's field
 //!

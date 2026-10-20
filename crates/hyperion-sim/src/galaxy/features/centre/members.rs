@@ -55,6 +55,8 @@
 //! ([`CentreMemberId::CENTRAL_BLACK_HOLE`]), at the galactic origin and at rest, with the mass of
 //! [`GalaxyParams`](crate::galaxy::params::GalaxyParams)' black hole. It counts in layer E. The
 //! centre's list registers no class yet (the tidal-disruption victims are P09.T30.b's).
+//!
+//! [`CentreClasses`]: super::CentreClasses
 
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;

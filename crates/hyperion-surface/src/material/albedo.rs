@@ -405,7 +405,7 @@ impl From<ResolvePropertiesError> for SolveAlbedoScaleError {
 /// The scale on the class albedos of a body of palette `palette` whose ground's area fractions are
 /// `fractions` that makes the scaled materials' geometric albedo in V the body's,
 /// `geometric_albedo_bvr[1]` (plan 14's visual geometric albedo, in B, V and R), with the residual
-/// in each band (the [module](self) documentation).
+/// in each band (the `albedo` module documentation).
 ///
 /// Each material's albedo is its entry's times its form's factor, its law the form's or the
 /// entry's ([`properties`]). The ground whose palette names no substance is left out, and the named

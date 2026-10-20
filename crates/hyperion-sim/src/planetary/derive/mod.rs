@@ -242,7 +242,7 @@ impl PlacedBody {
 
     /// The same body with a young magma ocean until its system is `until` old (design note 12;
     /// P14.T28.a's `molten_until`): before then its surface is
-    /// [`SurfaceState::MagmaOcean`](atmosphere::SurfaceState::MagmaOcean). A body built without
+    /// [`SurfaceState::MagmaOcean`]. A body built without
     /// one has a solid crust from its birth.
     #[must_use]
     pub const fn with_magma_ocean_until(self, until: Years) -> Self {
