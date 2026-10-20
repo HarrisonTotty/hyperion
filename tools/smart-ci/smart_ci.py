@@ -22,13 +22,16 @@ package.json's `engines.node`.
 
 `--plan` prints the plan, each step with the paths that caused it, and runs nothing; a run prints
 the plan first. The tests run are those that reach the changed code through the code's graph
-(`rust_graph.py`), in the changed crates and in those that depend on them; and for any changed `.rs`
-file of a crate, natively, every test in any crate whose code lists the Rust sources (a source
-walker, which reads the text of the `.rs` files it finds), which the native step names as "the
-tests that read the Rust sources". A test that reads Rust sources by listing a directory names the
-`rs` extension in the function that lists it, so that smart-ci finds it. `--all-tests` runs every
-test of the changed crates instead. `--dependents` adds the Clippy and rustdoc of every crate that
-depends on a changed crate, and with `--all-tests` their every test (`just smart-ci --help`).
+(`rust_graph.py`), in the changed crates and in those that depend on them; and for a changed `.rs`
+file of a crate, natively, every test in any crate whose code lists that crate's Rust sources (a
+source walker, which reads the text of the `.rs` files it finds, in the crates its test's strings
+name: every crate where the directory is computed), which the native step names as "the tests that
+read the Rust sources". A test that reads Rust sources by listing a directory names the `rs`
+extension in the function that lists it, so that smart-ci finds it. The plan also lists the slow
+(ignored) tests the graph reaches, which no step runs, so that a lane whose change reaches one runs
+it by name. `--all-tests` runs every test of the changed crates instead. `--dependents` adds the
+Clippy and rustdoc of every crate that depends on a changed crate, and with `--all-tests` their
+every test (`just smart-ci --help`).
 `--full` runs the full `just ci` whatever the diff, its build phases inside the build slot
 `SMART_CI_SLOT` names and its suites outside it: integration's run.
 
@@ -138,7 +141,8 @@ GENERATOR_VERSION_FILE = "crates/hyperion-base/src/version.rs"
 GOLDEN_DIR = "tests/golden/"
 GOLDEN_READERS = [(GOLDEN_DIR, "crates/hyperion-testkit/src/golden.rs")]
 # The cause the native nextest step and the test build name for the tests that read the Rust sources
-# (`rust_graph.Selection.sources`): every changed `.rs` file of a crate runs them, natively alone.
+# (`rust_graph.Selection.sources`): a changed `.rs` file of a crate runs those whose walker may list
+# that crate (their scope), natively alone.
 SOURCE_READERS = "the tests that read the Rust sources"
 # The longest filter expression a step passes: the recipe's command line holds it, and Windows limits
 # a command line to 32,767 characters. A longer one is made coarser (`Chosen.nextest_filter`).
@@ -1000,8 +1004,8 @@ class Needs:
         # Changes whose tests the code's graph chooses (Rust code, goldens): every test of the crate
         # with --all-tests, as `tests` holds them.
         self.graph: Dict[str, Set[str]] = {}
-        # The changed `.rs` files of the crates, which run the tests that read the Rust sources (the
-        # graph's `Selection.sources`), natively, whatever else their crate runs.
+        # The changed `.rs` files of the crates, which run the tests that read their crates' Rust
+        # sources (the graph's `Selection.sources`), natively, whatever else their crate runs.
         self.rust_sources: Set[str] = set()
         self.manifests: Dict[str, Set[str]] = {}  # crates whose manifest changed: their dependents run
         self.prettier: Set[str] = set()
@@ -1652,17 +1656,20 @@ class Chosen:
     def describe(self, crates: Set[str], whole: Set[str], explain: bool) -> List[str]:
         """The tests chosen, crate by crate and module by module, each with the changes it reaches;
         and, unit by unit after those, the tests that read the Rust sources and reach no change
-        through code, natively, each with the walker it reaches. The crates' counts are the native
-        step's, both kinds."""
+        through code, natively, each with the walker it reaches and the crates it reads. The counts
+        are of the tests the native step runs, both kinds, not the ignored ones; those follow, crate
+        by crate (`slow`)."""
         lines = [f"The tests that reach the changed Rust code and goldens ({self.info}):"]
         for crate in sorted(crates):
             chosen, total = self.counts(crate, native=True)
             lines.append(f"  {crate}: {chosen} of {total} tests")
             for unit in sorted(self.graph.runnable(crate), key=lambda u: u.id):
-                tests = self.selection.tests.get(unit.id, {})
+                run = {t.name for t in self.graph.tests.get(unit.id, ()) if not t.ignored}
+                reached = self.selection.tests.get(unit.id, {})
+                tests = {name: causes for name, causes in reached.items() if name in run}
                 generated = self.selection.generated.get(unit.id, {})
                 readers = {name: causes for name, causes in self.selection.sources.get(unit.id, {}).items()
-                           if name not in tests}
+                           if name not in reached and name in run}
                 if tests or generated:
                     lines.append(f"    {unit.id}: {len(tests)} test(s){self._modules(unit.id, tests, explain)}")
                     causes = set().union(*tests.values(), *generated.values())
@@ -1676,29 +1683,73 @@ class Chosen:
                 if readers:
                     lines.append(f"    {unit.id}: {len(readers)} test(s) that read the Rust sources, natively"
                                  f"{self._modules(unit.id, readers, explain)}")
-                    lines.append(f"      because of {', '.join(short(set().union(*readers.values())))}: every "
-                                 "changed `.rs` file of a crate runs the tests whose code reaches a source walker")
+                    lines.append(f"      because of {', '.join(short(set().union(*readers.values())))}: a changed "
+                                 "`.rs` file runs the tests whose code reaches a source walker that may list its crate")
                     if explain:
                         for name in sorted(readers):
                             chain = self.selection.via.get(f"{unit.id} {name}", [])
                             walker = bool(chain) and chain[-1] in self.graph.source_walkers()
                             lines.append(f"      {name}: " + " -> ".join(rust_graph.describe_node(n) for n in chain)
                                          + (", a source walker: it lists a directory and keeps its `.rs` files"
-                                            if walker else " -> ..., which reaches a source walker"))
+                                            if walker else " -> ..., which reaches a source walker")
+                                         + self._scope(unit.id, name))
         for crate, files in sorted(self.selection.doctests.items()):
             if crate not in whole:
                 lines.append(f"  {crate}'s doctests in {len(files)} file(s): {', '.join(short(files, 3))}")
         if not crates and not self.selection.doctests:
             lines.append("  none")
+        return lines + self.slow(crates, whole, explain)
+
+    def _scope(self, unit_id: str, name: str) -> str:
+        """`describe`'s note of the crates a test that reads the Rust sources reads (`Selection.scopes`)."""
+        found = self.selection.scopes.get(f"{unit_id} {name}")
+        if found is None:
+            return ""
+        crates, why = found
+        return f"; reads {', '.join(crates)}" if crates is not None else f"; reads every crate, since {why}"
+
+    def slow(self, crates: Set[str], whole: Set[str], explain: bool) -> List[str]:
+        """The slow tests (ignored, whatever the reason: `slow:`, `cost:`, `measurement:`) that the graph
+        reached, which no step runs: one advisory line per crate that has any, so that a lane whose
+        change reaches one runs it by name (`just test-slow` runs them all). Summarised by module, or
+        with `explain` each with its chain; for a crate in `whole`, every slow test of it."""
+        lines: List[str] = []
+        for crate in sorted(set(crates) | set(whole)):
+            units = sorted(self.graph.runnable(crate), key=lambda u: u.id)
+            if crate in whole:
+                count = sum(1 for unit in units for t in self.graph.tests.get(unit.id, ()) if t.ignored)
+                if count:
+                    lines.append(f"  slow tests reached (run by name): every slow test of {crate} ({count})")
+                continue
+            modules: Dict[str, List[str]] = {}
+            named: List[str] = []
+            for unit in units:
+                picked = self.picked(unit.id, native=True)
+                binary = "" if unit.is_lib else unit.id[len(crate) + 2 :]
+                for test in self.graph.tests.get(unit.id, ()):
+                    if test.ignored and test.name in picked:
+                        modules.setdefault("::".join(p for p in (binary, test.module) if p), []).append(test.name)
+                        named.append(f"{unit.id} {test.name}")
+            if not named:
+                continue
+            lines.append(f"  slow tests reached (run by name): {crate}: {len(named)}{self._summary(modules, explain)}")
+            if explain:
+                for key in sorted(named):
+                    chain = self.selection.via.get(key, [])
+                    lines.append(f"      {key}: " + " -> ".join(rust_graph.describe_node(n) for n in chain))
         return lines
 
     def _modules(self, unit_id: str, names: Mapping[str, object], explain: bool) -> str:
-        """`describe`'s summary of a unit's chosen tests by module: every module with `explain`, else
-        the six with the most."""
+        """`describe`'s summary of a unit's chosen tests by module."""
         modules: Dict[str, List[str]] = {}
         for test in self.graph.tests.get(unit_id, ()):
             if test.name in names:
                 modules.setdefault(test.module, []).append(test.name)
+        return self._summary(modules, explain)
+
+    @staticmethod
+    def _summary(modules: Mapping[str, List[str]], explain: bool) -> str:
+        """Tests by module: every module with `explain`, else the six with the most."""
         shown = sorted(modules) if explain else sorted(modules, key=lambda m: -len(modules[m]))[:6]
         summary = ", ".join(f"{m or '(root)'} {len(modules[m])}" for m in shown)
         more = len(modules) - len(shown)
@@ -1748,7 +1799,7 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
     # The tests of the changed code: those the code's graph finds reach it, in any crate, or with
     # --all-tests (or no graph) every test of the changed crates, as before the graph. With the graph,
     # every changed `.rs` file of a crate, a crate's whose every test runs included, also runs the
-    # tests that read the Rust sources, natively.
+    # tests that read that crate's Rust sources, natively.
     chosen: Optional[Chosen] = None
     if needs.graph and (all_tests or not ws.rust):
         for crate, causes in needs.graph.items():
@@ -2974,8 +3025,8 @@ concerned (`--plan` shows each step and the paths that caused it):
                                 features `cargo doc --workspace` gives it), and the tests, in any
                                 crate, that reach the changed code through the code's graph (nextest
                                 and wasip1 test by test, doctests by file, the browser suites by
-                                crate); a `.rs` file, the tests in any crate that read the Rust
-                                sources, natively
+                                crate); a `.rs` file, the tests in any crate that read its
+                                crate's Rust sources, natively
   a crate's Cargo.toml          that crate's checks and every test, and its dependents' Clippy,
                                 rustdoc and tests
   a crate's goldens             the tests of its crate that read goldens, and those that name the file
@@ -3002,13 +3053,19 @@ when it reaches a changed item, in its own crate or any other. The plan shows ho
 crate's tests that is, and why; `--explain` lists every test with the chain that reaches the change.
 Where the reading cannot be sure it widens: to a crate's every test, as before the graph. A test
 that reads the Rust sources as text, by listing a directory, reaches a source walker (an item whose
-code lists a directory and holds the string `rs` or one ending in `.rs`), and any changed `.rs` file
-of a crate runs it, in any crate and whatever the crates' dependencies, in the native nextest step
-alone, which names "the tests that read the Rust sources" among its causes. A test that reads Rust
-sources by listing a directory names the `rs` extension in the function that lists it, so that
-smart-ci finds it. `--all-tests` runs every test of the changed crates instead, as smart-ci did
-before the graph: another crate's tests that read the Rust sources (the surface crate's tag check,
-for a change to the sim) run only without it.
+code lists a directory, by `read_dir`, as a function or a method, or `WalkDir`, and holds the string
+`rs` or one ending in `.rs`), and a changed `.rs` file of a crate in its scope runs it, in any crate
+and whatever the crates' dependencies, in the native nextest step alone, which names "the tests
+that read the Rust sources" among its causes. Its scope is read from the strings its code holds:
+`src` its own crate, `../<crate dir>` or a crate's directory name that crate, and every crate where
+the directory is computed (`parent()`, `..` otherwise, `crates`, an environment variable other than
+`CARGO_MANIFEST_DIR`) or named by nothing; `--explain` shows it. A test the change reaches through
+its code runs whatever its scope. A test that reads Rust sources by listing a directory names the
+`rs` extension in the function that lists it, so that smart-ci finds it. After the tests chosen,
+the plan lists the slow tests (ignored ones) that the graph reaches, which no step runs: a lane
+whose change reaches a slow test runs it by name. `--all-tests` runs every test of the changed
+crates instead, as smart-ci did before the graph: another crate's tests that read the Rust sources
+(the surface crate's tag check, for a change to the sim) run only without it.
 
 Dependents: by default only the changed crates' Clippy and rustdoc run (the owner's rule: a task
 runs the checks of the crates it touched); their tests are the graph's to choose. Integration's full

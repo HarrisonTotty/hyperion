@@ -49,14 +49,18 @@ item A:
 - Literals: a string naming a workspace file (`include_str!`, `#[path]`, a read of a path built from
   `CARGO_MANIFEST_DIR`) depends on that file's text, or on that data file; a crate's data, read from
   another crate by a string that names the crate's directory and more, too. An item whose own code
-  lists a directory (`read_dir`, `WalkDir`) and holds the string `rs`, or one ending in `.rs`
-  (`extension() == "rs"`, `ends_with(".rs")`), is a source walker: it reads the text of every Rust
-  source it finds, which no string names. So every changed `.rs` file of a workspace crate, added and
-  deleted ones too, selects every test, in any crate, whose code reaches a source walker, whatever
-  the crates' dependencies. They are kept apart from the tests the change reaches through code, in
-  `Selection.sources`, since smart-ci runs them natively alone. A test that reads Rust sources by
-  listing a directory names the `rs` extension in the function that lists it, so that smart-ci finds
-  it.
+  lists a directory (`fs::read_dir(dir)`, the method `dir.read_dir()`, `WalkDir`) and holds the
+  string `rs`, or one ending in `.rs` (`extension() == "rs"`, `ends_with(".rs")`), is a source
+  walker: it reads the text of every Rust source it finds, which no string names. A test whose code
+  reaches one reads the sources of the crates in its scope (`Graph.source_scope`), read from the
+  strings of the code it reaches: `src` its own crate's, `../<crate dir>` or a crate's directory
+  name that crate's, and every crate's where the directory is computed (`parent()`, `..` otherwise,
+  `crates`, another environment variable than `CARGO_MANIFEST_DIR`) or named by nothing. So every
+  changed `.rs` file of a crate in its scope, added and deleted ones too, selects it, whatever the
+  crates' dependencies. They are kept apart from the tests the change reaches through code, in
+  `Selection.sources`, since smart-ci runs them natively alone; one the change reaches through code
+  is selected as any other, whatever its scope. A test that reads Rust sources by listing a directory
+  names the `rs` extension in the function that lists it, so that smart-ci finds it.
 - Code compiled for some configurations only (`cfg`, features, `target_arch = "wasm32"`) counts as
   if every configuration were built, and generic code is its definer's, whatever instantiates it.
 
@@ -145,10 +149,25 @@ _CAPTURE = re.compile(r"\{([A-Za-z_]\w*)(?=[:}])")
 _WITH_MODULE = frozenset(("with",))
 # A one-word string, which a path built a piece at a time (`dir.join("golden")`) may use.
 _WORD = re.compile(r"^[A-Za-z0-9_.-]{2,40}$")
-# Calls that read a directory's entries: every file under it is read.
+# Calls that read a directory's entries: every file under it is read. `read_dir` is a method too
+# (`Path::read_dir`, `dir.read_dir()`); `WalkDir` and `walkdir` have no method form.
 _DIRECTORY_READS = frozenset(("read_dir", "WalkDir", "walkdir"))
+_DIRECTORY_METHOD = "read_dir"
 # A string by which a directory's listing keeps the Rust sources: the extension, or a name's end.
 _RUST_EXTENSION = "rs"
+# What a source walker's test lists (`Graph.source_scope`). The environment variable that names a
+# crate's own directory, which cargo and nextest also make the working directory of its tests.
+_MANIFEST_DIR = "CARGO_MANIFEST_DIR"
+# The macros and the `std::env` functions that read an environment variable, whose names the
+# lexer keeps (`FileFacts.item_env`).
+_ENV_MACROS = frozenset(("env", "option_env"))
+_ENV_CALLS = frozenset(("var", "var_os", "vars", "vars_os"))
+# Methods that climb from a directory to the one above it (`Path::parent`, `Path::ancestors`,
+# `PathBuf::pop`): what they list is computed, not named.
+_CLIMBS = frozenset(("parent", "ancestors", "pop"))
+# The names by which an item works with paths, where a climb is a directory's: elsewhere `parent()`
+# may be another type's (`BodyIndex::parent`).
+_PATH_NAMES = frozenset(("Path", "PathBuf", "path", "fs", "env", "OsStr", "OsString", "DirEntry", "ReadDir"))
 # No cycle of lookups reached a position on the stack (`Graph.lookup`).
 _NO_CYCLE = 1 << 30
 # Items of the value namespace alone, which have no associated items: no path goes on past one.
@@ -267,6 +286,9 @@ class FileFacts:
     item_calls: List[List[str]] = field(default_factory=list)  # per item: the macros it calls
     item_literals: List[List[str]] = field(default_factory=list)  # per item: strings naming paths, maybe
     item_methods: List[List[str]] = field(default_factory=list)  # per item: names after `.`, and `Self::`
+    # per item: the environment variables its code reads (`env!`, `option_env!`, `std::env::var`),
+    # by the string that names each; "?" for one that no string names (`env::vars()`, `var(NAME)`)
+    item_env: List[List[str]] = field(default_factory=list)
     # Names the items define: [name, kind, visibility, scope, item]; kind "mod" is an inline module,
     # "maybe" an identifier inside an item-position macro call, "local" an item inside a body.
     defs: List[list] = field(default_factory=list)
@@ -945,6 +967,7 @@ class _Scanner:
         calls: List[Set[str]] = [set() for _ in range(count)]
         literals: List[Set[str]] = [set() for _ in range(count)]
         methods: List[Set[str]] = [set() for _ in range(count)]  # `.name` and `Self::name`
+        envs: List[Set[str]] = [set() for _ in range(count)]  # the environment variables read
         digests = [hashlib.sha1() for _ in range(count)]
         k, v = self.k, self.v
         # Attributes anywhere, a field's and a variant's too (`#[serde(serialize_with = "path")]`).
@@ -965,6 +988,13 @@ class _Scanner:
             # A macro call's words may be what its body calls methods by (`$o.$m()`): mentions.
             if self.val(group) in ("(", "[", "{"):
                 methods[owner].update(v[x] for x in range(group + 1, self.close[group]) if k[x] == "i")
+
+        def variable(group: int, owner: int) -> None:
+            # The environment variable that `env!(...)` or `env::var(...)` reads: its first argument's
+            # string, or "?" where no string names it.
+            named = self.val(group) in ("(", "[", "{") and group + 1 < self.n and k[group + 1] == "s" \
+                and self.val(group + 2) in (")", "]", "}", ",")
+            envs[owner].add(v[group + 1] if named else "?")
 
         i = 0
         while i < self.n:
@@ -1007,14 +1037,21 @@ class _Scanner:
             if self.val(i + 1) == "!" and self.val(i + 2) != "=":
                 calls[owner].add(v[i])
                 arguments(i + 2, owner)
+                if v[i] in _ENV_MACROS:
+                    variable(i + 2, owner)
                 i += 2
                 continue
             segments, j = self.path_at(i, self.n)
             if self.val(j) == "!" and self.val(j + 1) != "=":
                 calls[owner].add(segments[-1])
                 arguments(j + 1, owner)
+                if segments[-1] in _ENV_MACROS:
+                    variable(j + 1, owner)
             elif segments[0] != "Self":
                 paths[owner].add((test, *segments))
+                if segments[-1] in _ENV_CALLS and (len(segments) == 1 or segments[-2] == "env") \
+                        and self.val(j) == "(":
+                    variable(j, owner)  # `std::env::var("NAME")`; `vars()` names none
             else:
                 methods[owner].update(segments[1:])  # `Self::name`: an associated item of the impl's type
             # On from the path's second token, not its end: its generic arguments (a turbofish,
@@ -1033,6 +1070,7 @@ class _Scanner:
             facts.item_calls.append(sorted(calls[index]))
             facts.item_literals.append(sorted(literals[index]))
             facts.item_methods.append(sorted(methods[index]))
+            facts.item_env.append(sorted(envs[index]))
         for name, kind, vis, scope, at in self.local_defs:
             facts.defs.append([name, kind, vis, scope, item_of[at]])
         for at, scope, test, head, header, trait in self.local_impls:
@@ -1451,10 +1489,13 @@ class Selection:
     notes: List[str] = field(default_factory=list)
     via: Dict[str, List[str]] = field(default_factory=dict)  # "unit test" -> a chain to its first cause
     # unit -> {test name: causes}: the tests that read the Rust sources (their code reaches a source
-    # walker), which every changed Rust source of a crate selects, for the native run alone; a test
-    # that the change reaches through code is in `tests` as well. The `via` chain of one that is in
-    # `sources` alone ends at a walker.
+    # walker), which a changed Rust source of a crate in the test's scope selects, for the native run
+    # alone; a test that the change reaches through code is in `tests` as well, whatever its scope.
+    # The `via` chain of one that is in `sources` alone ends at a walker.
     sources: Dict[str, Dict[str, Set[str]]] = field(default_factory=dict)
+    # "unit test" -> the scope of each test in `sources` (`Graph.source_scope`): the crates whose
+    # files its walker may list, None for every crate, and why.
+    scopes: Dict[str, Tuple[Optional[List[str]], str]] = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------------------------------
@@ -2289,9 +2330,10 @@ class Graph:
 
     def select(self, changed: Sequence[Tuple[str, bool]], sources: Optional[Iterable[str]] = None) -> Selection:
         """The tests and doctests that reach the changed paths, unit by unit; and the tests that read
-        the Rust sources, for the changed Rust sources of the crates: `sources`, by default the `.rs`
-        paths of `changed` that are in a crate. smart-ci passes every changed `.rs` file of a crate,
-        those of a crate with a build script or a proc-macro too, which are not in `changed`."""
+        the Rust sources, each for the changed Rust sources of the crates in its scope: `sources`, by
+        default the `.rs` paths of `changed` that are in a crate. smart-ci passes every changed `.rs`
+        file of a crate, those of a crate with a build script or a proc-macro too, which are not in
+        `changed`."""
         sel = Selection()
         starts: Dict[str, Set[str]] = {}  # node -> the changed paths it stands for
         conditional: List[Tuple[str, str, str]] = []  # changed members called by name: (impl, name, path)
@@ -2392,9 +2434,10 @@ class Graph:
                     if node.endswith("#doctests") and self.crate_of(file_of(node)) == crate}
             if docs:
                 sel.doctests[crate] = docs
-        # The tests that read the Rust sources: a source walker lists the `.rs` files, so any changed
-        # Rust source of a crate may change what they read, whichever branch above took it and
-        # whatever their crate depends on.
+        # The tests that read the Rust sources: a source walker lists the `.rs` files, so a changed
+        # Rust source of a crate it may list may change what they read, whichever branch above took
+        # it and whatever their crate depends on. A test that the change reaches through code is in
+        # `tests` above, whatever its scope.
         if sources is None:
             sources = [path for path, _ in changed if path.endswith(".rs") and self.crate_of(path)]
         rust_sources = set(sources)
@@ -2402,14 +2445,22 @@ class Graph:
             found, chains = self.source_readers(reverse)
             for unit_id, names in found.items():
                 for name in names:
-                    sel.sources.setdefault(unit_id, {})[name] = set(rust_sources)
-                    sel.via.setdefault(f"{unit_id} {name}", chains[f"{unit_id} {name}"])
+                    key = f"{unit_id} {name}"
+                    scope = self.source_scope(unit_id, name, chains[key][0], reverse)
+                    causes = {path for path in rust_sources if scope[0] is None or self.crate_of(path) in scope[0]}
+                    if causes:
+                        sel.sources.setdefault(unit_id, {})[name] = causes
+                        sel.via.setdefault(key, chains[key])
+                        sel.scopes[key] = scope
         return sel
 
     @staticmethod
     def _lists_directory(facts: FileFacts, index: int) -> bool:
-        """Whether an item's own code calls a read of a directory's entries (`_DIRECTORY_READS`)."""
-        return any(set(p[1:]) & _DIRECTORY_READS for p in facts.item_paths[index])
+        """Whether an item's own code calls a read of a directory's entries (`_DIRECTORY_READS`): a
+        path's call (`fs::read_dir(dir)`, `WalkDir::new`) or the method (`dir.read_dir()`). A method of
+        another type, or a function, named `read_dir` counts too: the reading cannot tell them apart."""
+        return any(set(p[1:]) & _DIRECTORY_READS for p in facts.item_paths[index]) or (
+            index < len(facts.item_methods) and _DIRECTORY_METHOD in facts.item_methods[index])
 
     def source_walkers(self) -> Set[str]:
         """The source walkers: the items whose own code lists a directory and holds the string `rs`,
@@ -2427,6 +2478,147 @@ class Graph:
                        ) -> Tuple[Dict[str, Dict[str, Set[str]]], Dict[str, List[str]]]:
         """The tests, unit by unit, whose code reaches a source walker (`tests_reaching`)."""
         return self.tests_reaching(self.source_walkers(), reverse)
+
+    def source_scope(self, unit_id: str, name: str, node: str, reverse: Optional[Dict[str, Set[str]]] = None
+                     ) -> Tuple[Optional[List[str]], str]:
+        """The scope of a test that reads the Rust sources (its node `node`): the crates whose files its
+        walker may list, its own crate always among them, sorted; None for every crate. And why.
+
+        It is read from the strings of every item the test's code reaches, in any crate, those on its
+        way to the walker included, since any of them may build the directory it lists: `src` or
+        `src/...` (joined to `CARGO_MANIFEST_DIR`, or relative, from the crate's directory, where cargo
+        and nextest run its tests) names the crate of the test and of the string's item, as
+        `CARGO_MANIFEST_DIR` itself names the item's; `../<crate dir>` or `../<crate dir>/...` names
+        that sibling crate, and a crate's directory name (`hyperion-surface`, `hyperion-sim/src`) that
+        crate. A directory computed rather than named is every crate's: a climb (`parent()`,
+        `ancestors()` or `pop()`, where the item works with paths, is test code or is on the way to a
+        walker: elsewhere it may be another type's; a walker that walks with a stack's `pop()` reads
+        every crate too), `..` in any other form, the string `crates`, or an environment variable
+        other than `CARGO_MANIFEST_DIR`. So is a test whose code names no
+        directory at all. Other strings (`substance/mod.rs`, a pattern, a message) name nothing
+        listed and do not count. A directory that the code reads from data, or builds from a path's
+        components, is beyond the reading, as is a string with `\\` separators (which only Windows
+        would read, so that the test would fail on Linux and macOS)."""
+        key = f"{unit_id} {name}"
+        cache: Dict[str, Tuple[Optional[List[str]], str]] = self.__dict__.setdefault("_scopes", {})
+        if key in cache:
+            return cache[key]
+        own = self.units[unit_id].crate
+        toward = self._toward_walkers(reverse)
+        if not hasattr(self, "_crate_by_dir"):
+            self._crate_by_dir = {info.dir: crate for crate, info in self.crates.items()}
+            self._crates_by_name: Dict[str, Set[str]] = {}
+            for crate, info in self.crates.items():
+                self._crates_by_name.setdefault(posixpath.basename(info.dir), set()).add(crate)
+        crates = {own}
+        named = False
+        computed = ""  # the first reason, in the items' order, that the directory is computed
+
+        def compute(reason: str, item: str) -> None:
+            nonlocal computed
+            computed = computed or f"{reason} in {describe_node(item)}"
+
+        for item in sorted(self._forward(node)):
+            found = self._item_facts(item)
+            if found is None:
+                continue
+            facts, index = found
+            holder = self.crate_of(item) or own
+            for variable in (facts.item_env[index] if index < len(facts.item_env) else ()):
+                if variable == _MANIFEST_DIR:
+                    crates.add(holder)
+                    named = True
+                else:
+                    compute(f"the environment variable `{variable}`" if variable != "?"
+                            else "an environment variable that no string names", item)
+            for literal in facts.item_literals[index]:
+                parts = [p for p in literal.split("/") if p not in ("", ".")]
+                if not parts:
+                    continue
+                beside = self._siblings({own, holder}, parts[1]) if (
+                    parts[0] == ".." and len(parts) > 1 and ".." not in parts[1:]) else set()
+                if beside:
+                    crates |= beside
+                    named = True
+                elif ".." in parts:
+                    compute(f"`..` that names no crate (\"{literal}\")", item)
+                elif "crates" in parts:
+                    compute(f"the string \"{literal}\"", item)
+                elif parts[0] == "src":
+                    crates |= {own, holder}
+                    named = True
+                elif parts[0] in self._crates_by_name:
+                    crates |= self._crates_by_name[parts[0]]
+                    named = True
+            climbs = _CLIMBS & set(facts.item_methods[index] if index < len(facts.item_methods) else ())
+            if climbs and (item in toward or facts.items[index][5] or self.is_test_file(file_of(item))
+                           or self._works_with_paths(facts, index)):
+                compute(f"`{sorted(climbs)[0]}()`", item)
+        if computed:
+            scope: Tuple[Optional[List[str]], str] = (None, f"its directory is computed: {computed}")
+        elif not named:
+            scope = (None, "no string of its code names the directory it lists")
+        else:
+            scope = (sorted(crates), "")
+        cache[key] = scope
+        return scope
+
+    def _siblings(self, crates: Iterable[str], directory: str) -> Set[str]:
+        """The crates whose directory is `directory` beside one of `crates`' (`../<directory>`)."""
+        out: Set[str] = set()
+        for crate in crates:
+            beside = posixpath.join(posixpath.dirname(self.crates[crate].dir), directory)
+            if beside in self._crate_by_dir:
+                out.add(self._crate_by_dir[beside])
+        return out
+
+    @staticmethod
+    def _works_with_paths(facts: FileFacts, index: int) -> bool:
+        """Whether an item names a path's type or module (`Path`, `std::fs`), or reads the environment."""
+        names = {s for p in facts.item_paths[index] for s in p[1:]}
+        names.update(facts.item_methods[index] if index < len(facts.item_methods) else ())
+        return bool(names & _PATH_NAMES) or bool(index < len(facts.item_env) and facts.item_env[index])
+
+    def _item_facts(self, node: str) -> Optional[Tuple[FileFacts, int]]:
+        """An item's node -> its file's facts and its index there; None for another kind of node."""
+        file = file_of(node)
+        facts = self.rs.get(file)
+        if facts is None:
+            return None
+        indices: Dict[str, Dict[str, int]] = self.__dict__.setdefault("_item_indices", {})
+        if file not in indices:
+            indices[file] = {item[0]: index for index, item in enumerate(facts.items)}
+        index = indices[file].get(node[len(file) + 1 :])
+        return None if index is None else (facts, index)
+
+    def _forward(self, node: str) -> Set[str]:
+        """Every node that `node`'s code reaches, itself included, in any crate."""
+        seen = {node}
+        frontier = [node]
+        while frontier:
+            for target in self.edges.get(frontier.pop(), ()):
+                if target not in seen:
+                    seen.add(target)
+                    frontier.append(target)
+        return seen
+
+    def _toward_walkers(self, reverse: Optional[Dict[str, Set[str]]] = None) -> Set[str]:
+        """Every node whose code reaches a source walker, the walkers included: the way to one."""
+        if not hasattr(self, "_toward"):
+            if reverse is None:
+                reverse = {}
+                for source, targets in self.edges.items():
+                    for target in targets:
+                        reverse.setdefault(target, set()).add(source)
+            seen = set(self.source_walkers())
+            frontier = list(seen)
+            while frontier:
+                for source in reverse.get(frontier.pop(), ()):
+                    if source not in seen:
+                        seen.add(source)
+                        frontier.append(source)
+            self._toward: Set[str] = seen
+        return self._toward
 
     def tests_reaching(self, nodes: Iterable[str], reverse: Optional[Dict[str, Set[str]]] = None
                        ) -> Tuple[Dict[str, Dict[str, Set[str]]], Dict[str, List[str]]]:

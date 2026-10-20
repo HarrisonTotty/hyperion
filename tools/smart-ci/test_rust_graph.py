@@ -379,6 +379,15 @@ class Data(unittest.TestCase):
         self.assertTrue({"a::whole reads", "a::listing lists"} <= picked(sel))
         self.assertIn("a", sel.whole)  # data that is no golden: every test of its crate, too
 
+    def test_a_listing_by_the_method_reads_its_crate_s_data(self) -> None:
+        # `dir.read_dir()`, by a directory that no string of the data's path names.
+        self.ws.files["crates/a/tests/listing.rs"] = (
+            "#[test]\nfn lists() { let _ = std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"elsewhere\")"
+            ".read_dir(); }\n")
+        self.assertIn("a::listing lists", picked(self.ws.touch("crates/a/tests/data/set/d.csv")))
+        self.ws.files["crates/a/tests/listing.rs"] = "#[test]\nfn lists() { let _ = \"elsewhere\"; }\n"
+        self.assertNotIn("a::listing lists", picked(self.ws.touch("crates/a/tests/data/set/d.csv")))
+
 
 def readers(sel: rg.Selection) -> Set[str]:
     """The tests that read the Rust sources, which the selection picked apart from `tests`."""
@@ -472,6 +481,141 @@ class SourceWalkers(unittest.TestCase):
         sel = self.ws.change("crates/a/src/thermal/tests.rs", "found.push(path)", "found.insert(0, path)")
         self.assertIn("a thermal::tests::nothing_reads_g_yet", picked(sel))
         self.assertIn("a thermal::tests::nothing_reads_g_yet", readers(sel))
+
+    def test_a_walker_that_lists_by_the_method_is_one(self) -> None:
+        # `dir.read_dir()`, std's `Path::read_dir`, lists as `fs::read_dir(dir)` does. The lexer keeps
+        # `read_dir` among the names after `.` or `::`: the method, or the path's last segment.
+        method = self.WALKER.replace("std::fs::read_dir(dir)", "dir.read_dir()")
+        for text in (self.WALKER, method):
+            facts = rg.parse(text)
+            index = next(i for i, item in enumerate(facts.items) if item[2] == "rust_files")
+            self.assertIn("read_dir", facts.item_methods[index])
+            self.assertTrue(rg.Graph._lists_directory(facts, index))
+        self.ws.files["crates/a/src/thermal/tests.rs"] = self.ws.files["crates/a/src/thermal/tests.rs"].replace(
+            self.WALKER, method)
+        self.assertIn("crates/a/src/thermal/tests.rs#fn::rust_files", self.ws.graph().source_walkers())
+        sel = self.ws.change("crates/b/src/lib.rs", "fn unrelated()", "fn unrelated_too()")
+        self.assertEqual(readers(sel), {"b tests::every_crate_keeps_the_rule"})  # a's read only a
+        sel = self.ws.change("crates/a/src/code.rs", "{ 1 }", "{ 3 }")
+        self.assertEqual(readers(sel), self.ALL)
+
+    def test_a_method_or_a_function_of_another_type_named_read_dir_is_a_listing_too(self) -> None:
+        # A known limit: the reading cannot tell std's `Path::read_dir` from another type's method of
+        # that name, nor from a function `read_dir` (the surface crate's `reading/tests.rs` has one),
+        # so both count as listing a directory. That only adds: a listing with no `rs` string is no
+        # source walker, and its crate's data files select its tests.
+        facts = rg.parse("pub struct Shelf;\nimpl Shelf {\n    pub fn read_dir(&self) -> u32 { 1 }\n}\n"
+                         "pub fn count() -> u32 { Shelf.read_dir() }\n"
+                         "fn read_dir(dir: [f64; 3]) -> [f64; 3] { dir }\npub fn turn() -> [f64; 3] { read_dir([0.0; 3]) }\n")
+        listing = {item[2] for i, item in enumerate(facts.items) if rg.Graph._lists_directory(facts, i)}
+        self.assertTrue({"count", "turn"} <= listing, listing)
+
+
+def scoped(sel: rg.Selection) -> Dict[str, Optional[List[str]]]:
+    """The scope of each test that read the Rust sources: its crates, None for every crate."""
+    return {key: crates for key, (crates, _) in sel.scopes.items()}
+
+
+class SourceScopes(unittest.TestCase):
+    """A test that reads the Rust sources runs for a changed `.rs` file of a crate its walker may list,
+    read from the strings its code holds, and for any change its code reaches."""
+
+    WALKER = SourceWalkers.WALKER.replace("\n", "\n    ").replace("pub(crate) fn", "    fn").rstrip(" ")
+
+    def setUp(self) -> None:
+        self.ws = Fixture([crate("a", normal=["c"]), crate("b"), crate("c")], {
+            "crates/a/src/lib.rs": "pub fn f() -> u32 { 1 }\n" + TESTS + self.WALKER + (
+                "    #[test]\n    fn own_sources() {\n        let mut found = Vec::new();\n"
+                "        rust_files(&std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"src\"), &mut found);\n"
+                "    }\n"
+                "    #[test]\n    fn own_and_b_sources() {\n"
+                "        let manifest = std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\"));\n"
+                "        let mut found = Vec::new();\n"
+                "        rust_files(&manifest.join(\"src\"), &mut found);\n"
+                "        rust_files(&manifest.join(\"../b/src\"), &mut found);\n    }\n"
+                # Computed, as the surface crate's tag check is: its `src` names its own file, skipped.
+                "    #[test]\n    fn every_crate() {\n        let own = std::path::Path::new(\"src\").join(\"lib.rs\");\n"
+                "        let mut found = Vec::new();\n"
+                "        rust_files(std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).parent().unwrap(), &mut found);\n"
+                "        found.retain(|p| !p.ends_with(&own));\n    }\n"
+                "    #[test]\n    fn own_sources_and_c() {\n        assert_eq!(c::g(), 2);\n"
+                "        let mut found = Vec::new();\n        rust_files(std::path::Path::new(\"src\"), &mut found);\n"
+                "    }\n}\n"),
+            "crates/b/src/lib.rs": "pub fn b() -> u32 { 2 }\n",
+            "crates/c/src/lib.rs": "pub fn g() -> u32 { 2 }\n",
+        })
+
+    def test_each_reader_runs_for_the_crates_it_lists(self) -> None:
+        sel = self.ws.change("crates/a/src/lib.rs", "{ 1 }", "{ 3 }")
+        self.assertEqual(scoped(sel), {"a tests::own_sources": ["a"], "a tests::own_and_b_sources": ["a", "b"],
+                                       "a tests::every_crate": None, "a tests::own_sources_and_c": ["a"]})
+        # (a) A crate the reader's code does not reach, and its strings do not name: not it.
+        sel = self.ws.change("crates/b/src/lib.rs", "{ 2 }", "{ 4 }")
+        self.assertEqual(readers(sel), {"a tests::own_and_b_sources", "a tests::every_crate"})  # (b), (c)
+        self.assertEqual(sel.sources["a"]["tests::own_and_b_sources"], {"crates/b/src/lib.rs"})
+        # A comment, which changes no item, the same.
+        sel = self.ws.change("crates/b/src/lib.rs", "pub fn b()", "/// Two.\npub fn b()")
+        self.assertEqual(readers(sel), {"a tests::own_and_b_sources", "a tests::every_crate"})
+
+    def test_a_reader_the_change_reaches_through_code_runs_whatever_its_scope(self) -> None:
+        # (d) c is in no reader's scope but the computed one's, and one reader's code calls c.
+        sel = self.ws.change("crates/c/src/lib.rs", "{ 2 }", "{ 5 }")
+        self.assertEqual(readers(sel), {"a tests::every_crate"})
+        self.assertIn("a tests::own_sources_and_c", picked(sel))
+        self.assertNotIn("a tests::own_sources", picked(sel))
+
+    def scope(self, body: str, **files: str) -> Tuple[Optional[List[str]], str]:
+        """The scope of a test `t` in crate a whose body is `body`, calling the walker."""
+        ws = Fixture([crate("a", normal=["c"]), crate("b"), crate("c")], {
+            "crates/a/src/lib.rs": TESTS + self.WALKER + "    #[test]\n    fn t() {\n        let mut found = Vec::new();\n"
+                                   f"        {body}\n    }}\n}}\n",
+            "crates/b/src/lib.rs": "", "crates/c/src/lib.rs": "", **{f"crates/{k}/src/lib.rs": v for k, v in files.items()}})
+        graph = ws.graph()
+        _, chains = graph.source_readers()
+        return graph.source_scope("a", "tests::t", chains["a tests::t"][0])
+
+    def test_what_names_a_crate_and_what_computes_the_directory(self) -> None:
+        manifest = "std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\"))"
+        named = {
+            # `concat!`'s form.
+            f"rust_files(std::path::Path::new(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/src\")), &mut found);": ["a"],
+            f"rust_files(std::path::Path::new(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../b\")), &mut found);":
+                ["a", "b"],
+            f"rust_files(&{manifest}.join(\"tests\"), &mut found);": ["a"],  # its directory alone
+            # A crate's directory's name, as one joined to a computed directory would be (`b/src`).
+            "rust_files(&std::path::Path::new(\"src\").join(\"c\"), &mut found); let _ = \"b/src/lib.rs\";": ["a", "b"],
+            # A file under `src/` and a pattern name no directory listed.
+            f"rust_files(&{manifest}.join(\"src\"), &mut found); let _ = (\"substance/mod.rs\", \"pub fn \");": ["a"],
+        }
+        for body, crates in named.items():
+            self.assertEqual(self.scope(body), (crates, ""), body)
+        computed = {
+            f"rust_files(&{manifest}.join(\"../..\"), &mut found);": "`..` that names no crate",
+            f"rust_files(&{manifest}.join(\"src/../../b\"), &mut found);": "`..` that names no crate",
+            f"rust_files(&{manifest}.join(\"crates\"), &mut found);": "the string \"crates\"",
+            "rust_files(std::path::Path::new(env!(\"OUT_DIR\")), &mut found);": "the environment variable `OUT_DIR`",
+            "rust_files(&std::path::PathBuf::from(std::env::var(\"HOME\").unwrap()), &mut found);":
+                "the environment variable `HOME`",
+            f"let root = {manifest}.ancestors().nth(2).unwrap(); rust_files(root, &mut found);": "`ancestors()`",
+            f"let mut root = {manifest}.to_path_buf(); root.pop(); rust_files(&root, &mut found);": "`pop()`",
+        }
+        for body, why in computed.items():
+            crates, reason = self.scope(body)
+            self.assertIsNone(crates, body)
+            self.assertIn(why, reason, body)
+        # A directory that another crate's code computes, and one that nothing names.
+        crates, reason = self.scope("rust_files(&c::root(), &mut found);",
+                                    c="pub fn root() -> std::path::PathBuf {\n"
+                                      "    std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).parent().unwrap().into()\n}\n")
+        self.assertIsNone(crates)
+        self.assertIn("`parent()` in crates/c/src/lib.rs (fn root)", reason)
+        self.assertEqual(self.scope("rust_files(&std::env::temp_dir(), &mut found);"),
+                         (None, "no string of its code names the directory it lists"))
+        # A `parent()` of another type, in code that works with no path, computes no directory.
+        self.assertEqual(self.scope(f"rust_files(&{manifest}.join(\"src\"), &mut found); let _ = c::up(3);",
+                                    c="pub struct Body(u32);\nimpl Body {\n    pub fn parent(&self) -> u32 { self.0 }\n}\n"
+                                      "pub fn up(x: u32) -> u32 { Body(x).parent() }\n"),
+                         (["a"], ""))
 
 
 class Filters(unittest.TestCase):
