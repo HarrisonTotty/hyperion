@@ -37,11 +37,36 @@
 //!   drainage on the current ground from the sea and the terminal bodies' pits, the bodies found
 //!   once on a level's construction.
 //!
-//! R09.T14.b–d build the rest: the erodibility K from the bed and its fluid, Tzathas et al.'s
-//! recursion with the fixed point and the multigrid with the jittered upsample (R09.T14.b); the
-//! wet-now, dry-now and never-wet branches (R09.T14.c); and the re-match of `σ_h` with the
-//! outputs, the flow directions, the geometric drainage area, the steepness index, the two
-//! runoffs and the water surfaces (R09.T14.d). Until R09.T14.c, [`run`] is a no-op.
+//! R09.T14.b builds the solver, which R09.T14.c's branches call:
+//!
+//! - `erodibility`: K = K⊕ (g ÷ g⊕)(`ρ_f` ÷ `ρ_ref`) B in m^0.1 a⁻¹ (Design note 9, R09.T0.b), K⊕
+//!   = 6.3 × 10⁻⁶, Tzathas et al.'s calibration converted to m = 0.45; the fluid the main
+//!   liquid's palette entry on a world wet now and the wet epoch's liquid's registry row on one
+//!   dry now (decision-r09-t14-choices Q6a); B a (substrate, fluid) table with its sources, rock
+//!   under water 1, a crater-saturated regolith under water 10 and water ice under methane,
+//!   ethane or Titan's sea 8, any other pair 1 (not modelled); and the per-world criterion of a
+//!   crater-saturated surface, the craters older than the epoch's end at or above the basins'
+//!   saturation density.
+//! - `solver`: Tzathas et al.'s recursion with n = 1 over a network's depth-first order with a
+//!   path array, at steady state (their eq. 9) or after a time (eq. 8, D found by a binary search
+//!   of the path's τ and interpolated inside its link), m = 0.45 on the equivalent area with the
+//!   slope correction; roots, bounds and cells of no equivalent area kept at their ground and
+//!   reset the path to their base; no deposition on a cell with no uplift; the elevation returned
+//!   as a base and a part linear in the uplift's scale.
+//! - `multigrid`: the fixed point of routing and solution with the moving average of weight ½,
+//!   coarse to fine from level 4 on the quadtree's parents (solid-angle-weighted means), six
+//!   iterations a level, the finest level's last iteration the pure solution; once a level, on its
+//!   construction, the water bodies, the bounds and, on a world wet now, each cell's basin and
+//!   base level, with the uplift u = `λ_b` max(0, z0 − `ℓ_b`) refitted every iteration so that
+//!   each basin keeps its construction's mean height above its base level
+//!   (decision-r09-t14-choices Q1); and the upsample through R09.T4's interpolant at child centres
+//!   jittered on `surface.coarse.erosion` (instance 1, the receivers' being 0), with each level's
+//!   last residual, `λ_b`'s distribution and the implied mean uplift recorded.
+//!
+//! R09.T14.c–d build the rest: the wet-now, dry-now and never-wet branches (R09.T14.c); and the
+//! re-match of `σ_h` with the outputs, the flow directions, the geometric drainage area, the
+//! steepness index, the two runoffs and the water surfaces (R09.T14.d). Until R09.T14.c, [`run`]
+//! is a no-op.
 //!
 //! Every part is implemented from the papers alone: no code is copied or paraphrased from Tzathas
 //! et al.'s repository (Inria research-only licence), Dendry (GPL-3.0) or Barnes's `RichDEM`.
@@ -52,7 +77,7 @@
     not(test),
     expect(
         dead_code,
-        reason = "R09.T14.b's solver and R09.T14.c's branches call it"
+        reason = "R09.T14.b's multigrid calls it, which R09.T14.c's branches call"
     )
 )]
 mod depressions;
@@ -60,21 +85,34 @@ mod depressions;
     not(test),
     expect(
         dead_code,
-        reason = "R09.T14.b's solver and R09.T14.c's branches call it"
+        reason = "R09.T14.b's multigrid calls it, which R09.T14.c's branches call"
     )
 )]
 mod drainage;
+#[cfg_attr(not(test), expect(dead_code, reason = "R09.T14.c's branches call it"))]
+mod erodibility;
 #[cfg_attr(
     not(test),
     expect(
         dead_code,
-        reason = "R09.T14.b's solver and R09.T14.c's branches call it"
+        reason = "R09.T14.b's multigrid calls it, which R09.T14.c's branches call"
     )
 )]
 mod mesh;
+#[cfg_attr(not(test), expect(dead_code, reason = "R09.T14.c's branches call it"))]
+mod multigrid;
+#[cfg_attr(not(test), expect(dead_code, reason = "R09.T14.c's branches call it"))]
+mod solver;
 
 #[cfg(test)]
 mod tests;
+
+// The draws' instances on `surface.coarse.erosion` are distinct, so that the receivers and the
+// upsample's jitter never share a stream (as the relief step's are).
+const _: () = assert!(
+    drainage::RECEIVER_INSTANCE != multigrid::JITTER_INSTANCE,
+    "the erosion step's receivers and jitter share an instance"
+);
 
 use super::{Pass, Working};
 

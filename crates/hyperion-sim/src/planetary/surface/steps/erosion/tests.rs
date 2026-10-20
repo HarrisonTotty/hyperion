@@ -1,9 +1,17 @@
-//! R09.T14.a's tests of the drainage (Design note 9): the plan's four (drainage area at every
-//! outlet, no cell draining uphill after filling, the same seed's receivers, a finite inventory
-//! filling the lowest basins first and spilling) and the lane's checks (flats without ε, the flood
-//! against a minimax oracle, Priority-Flood against the merge tree when every depression is full,
-//! and the receivers' draw in proportion to the drop per metre). Each runs on hand-built ground
-//! over a real cube-sphere level, 3 to 6, on a body of radius 1,000 km.
+//! The erosion step's tests (R09.T14, Design note 9).
+//!
+//! - R09.T14.a's of the drainage: the plan's four (drainage area at every outlet, no cell draining
+//!   uphill after filling, the same seed's receivers, a finite inventory filling the lowest basins
+//!   first and spilling) and the lane's checks (flats without ε, the flood against a minimax
+//!   oracle, Priority-Flood against the merge tree when every depression is full, and the
+//!   receivers' draw in proportion to the drop per metre). Each runs on hand-built ground over a
+//!   real cube-sphere level, 3 to 6, on a body of radius 1,000 km.
+//! - R09.T14.b's of the solver: the three calibrated erodibilities and the bed table
+//!   (`erodibility`); the ridge-to-sea steady state against its closed form, the lowering linear in
+//!   t and in runoff^0.45, the Mars calibration's K t, the bounds and the cells of no area, no
+//!   deposition and the linearity in the uplift's scale, on hand-built networks (`solver`); and
+//!   the residual falling over the multigrid's levels on a synthetic world, the jitter's draws and
+//!   the upsample of a constant field (`multigrid`).
 
 use hyperion_testkit::lcg::Lcg;
 
@@ -15,6 +23,9 @@ use crate::units::Metres;
 
 mod depressions;
 mod drainage;
+mod erodibility;
+mod multigrid;
+mod solver;
 
 /// The radius of the test bodies, 1,000 km.
 const RADIUS: Metres = Metres::new(1.0e6);
