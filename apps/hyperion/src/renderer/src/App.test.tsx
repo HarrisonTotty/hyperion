@@ -38,10 +38,12 @@ function modeBanner(): HTMLElement | null {
 /** A views-check launch's functions, each a mock. */
 function viewsCheckApi(): ViewsCheckApi & { readonly end: Mock<ViewsCheckApi["end"]> } {
   return {
-    launch: { setting: "high", smoke: true, out: null },
+    launch: { setting: "high", smoke: true, out: null, terrain: false },
     startPhase: () => Promise.resolve(),
     endPhase: () => Promise.resolve(),
     askRightWayUp: () => Promise.resolve(),
+    writeTerrainResults: () => Promise.resolve({ json: "a", markdown: "b" }),
+    capture: () => Promise.resolve(),
     writeResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     end: vi.fn<ViewsCheckApi["end"]>(() => Promise.resolve()),
   };
@@ -113,6 +115,24 @@ describe("App", () => {
       status: "fail",
       reason: expect.stringContaining("VIEW did not show its primary view"),
     });
+  });
+
+  it("runs a terrain launch's terrain run (R10.T16.d), which ends as T20's does when VIEW cannot be drawn", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const api = { ...viewsCheckApi(), launch: { ...viewsCheckApi().launch, terrain: true } };
+    const writeTerrainResults = vi.spyOn(api, "writeTerrainResults");
+    stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
+    render(<App />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(61_000);
+    });
+    expect(api.end).toHaveBeenCalledWith({
+      status: "fail",
+      reason: expect.stringContaining("VIEW did not show its primary view"),
+    });
+    expect(writeTerrainResults).not.toHaveBeenCalled();
   });
 
   it("shows a safe launch in the graphics panel and the header strip", () => {

@@ -343,6 +343,40 @@ const VIEWS_CHECK_HIDDEN_ENV = "HYPERION_VIEWS_CHECK_HIDDEN";
 const RIGHT_WAY_UP_TIMEOUT_MS = 180_000;
 
 /**
+ * Where a views check writes, from the repository's root: T20's under `target/views-check/` for a
+ * smoke and `docs/measurements/several-views/` otherwise, the terrain run's (R10.T16.d;
+ * decision-r10-t16-contracts §6) under `target/views-check/terrain/` and
+ * `docs/measurements/terrain-check/`; the captures under the smoke's directory either way.
+ */
+function viewsCheckDirs(launch: ViewsCheckLaunch): {
+  readonly out: string;
+  readonly captures: string;
+} {
+  const smokeDir = launch.terrain ? "target/views-check/terrain" : "target/views-check";
+  return {
+    out: launch.smoke
+      ? smokeDir
+      : launch.terrain
+        ? "docs/measurements/terrain-check"
+        : "docs/measurements/several-views",
+    captures: smokeDir,
+  };
+}
+
+/**
+ * How long a views check may take before the main process ends it with status 3: T20's smoke 4
+ * minutes and its full run 20; the terrain run's smoke, whose loss phase plays its script to the
+ * field's revision rise at 120 s, 8 minutes, and its full run, three phases of about five minutes
+ * each, 30.
+ */
+function viewsCheckWatchdogMs(launch: ViewsCheckLaunch): number {
+  if (launch.terrain) {
+    return launch.smoke ? 8 * 60_000 : 30 * 60_000;
+  }
+  return launch.smoke ? 240_000 : 20 * 60_000;
+}
+
+/**
  * Asks the person at a shown check whether every view is the right way up (R07.T20).
  *
  * @remarks
@@ -385,6 +419,7 @@ function startViewsCheckSession(
   const startedAt = new Date();
   const stamp = startedAt.toISOString().replaceAll(/[-:]/g, "").slice(0, 15);
   const repo = process.cwd();
+  const dirs = viewsCheckDirs(launch);
   const checkSession = new ViewsCheckSession({
     launch,
     describe: async () => ({
@@ -415,16 +450,16 @@ function startViewsCheckSession(
     tracePath: (phase) => join(app.getPath("userData"), `views-check-${phase}.json`),
     reduce: reduceWindowFile,
     removeFile: (path) => rm(path, { force: true }),
-    capturesDir: resolve(repo, "target/views-check", `captures-${stamp}`),
+    capturesDir: resolve(repo, dirs.captures, `captures-${stamp}`),
+    // From the repository's root with forward slashes, the same on every platform.
+    capturesRecordedAs: `${dirs.captures}/captures-${stamp}`,
     capture: async (path) => {
       await mkdir(dirname(path), { recursive: true });
       const image = await window.webContents.capturePage();
       await writeFile(path, image.toPNG());
     },
     ask: hidden ? null : askRightWayUp,
-    outDir:
-      launch.out ??
-      resolve(repo, launch.smoke ? "target/views-check" : "docs/measurements/several-views"),
+    outDir: launch.out ?? resolve(repo, dirs.out),
     exit: (code) => {
       app.exit(code);
     },
@@ -439,22 +474,23 @@ function startViewsCheckSession(
     },
     isSender: (event) => isOwnPage(event.senderFrame, page, window.webContents.mainFrame),
     session: checkSession,
+    terrain: launch.terrain,
   });
   window.webContents.on("console-message", (details) => {
     checkSession.consoleMessage(details.message);
+    if (details.level === "error") {
+      checkSession.consoleError(details.message);
+    }
   });
   app.on("child-process-gone", (_event, details) => {
     if (details.type === "GPU") {
       checkSession.gpuProcessGone();
     }
   });
-  const watchdog = setTimeout(
-    () => {
-      process.stdout.write("views check: WATCHDOG the run did not end\n");
-      app.exit(3);
-    },
-    launch.smoke ? 240_000 : 20 * 60_000,
-  );
+  const watchdog = setTimeout(() => {
+    process.stdout.write("views check: WATCHDOG the run did not end\n");
+    app.exit(3);
+  }, viewsCheckWatchdogMs(launch));
   app.once("will-quit", () => {
     clearTimeout(watchdog);
   });

@@ -921,7 +921,7 @@ fn titan_like() -> CoarseInputs {
 /// (a synthetic mask: three basins at 80° N and one at 40° S, each 5° in radius, 100 m under the
 /// sea level and flooded to it with the main liquid, methane, all else 100 m above and dry,
 /// [`set_ground`]), from the initial state.
-fn titan_with_basins(level: u8) -> (CellGraph, CellGraph, CoarseInputs, Working) {
+pub(super) fn titan_with_basins(level: u8) -> (CellGraph, CellGraph, CoarseInputs, Working) {
     let inputs = titan_like();
     let (field, climate_grid) = grids(level);
     let pass = Pass::new(reference::SEED, &inputs, &field, &climate_grid);

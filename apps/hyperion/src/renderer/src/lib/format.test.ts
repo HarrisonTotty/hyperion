@@ -4,10 +4,12 @@ import { SECONDS_PER_JULIAN_YEAR } from "@hyperion/protocol";
 
 import {
   type BodyDistanceUnit,
+  type SurfaceRangeUnit,
   formatAge,
   formatBearingDeg,
   formatBodyDistance,
   formatBodySpan,
+  formatSurfaceRange,
   formatGravity,
   formatLengthLy,
   formatListPosition,
@@ -316,6 +318,37 @@ describe("formatBodyDistance", () => {
 
   it("keeps the sign of a negative distance, as a signed offset has", () => {
     expect(formatBodyDistance(-384_400, null)).toEqual({ value: "-384", unit: "Mm" });
+  });
+});
+
+describe("formatSurfaceRange (decision-r10-t16-review §1)", () => {
+  it.each([
+    [412, "412", "m"],
+    // Rounds to 1,000 m, which must be read as 1.00 km.
+    [999.6, "1.00", "km"],
+    [4_210, "4.21", "km"],
+    [1_500_000, "1.50", "Mm"],
+  ])("formats %f m, first shown, as %s %s", (rangeM, value, unit) => {
+    expect(formatSurfaceRange(rangeM, null)).toEqual({ value, unit });
+  });
+
+  it.each<[number, SurfaceRangeUnit, string, SurfaceRangeUnit]>([
+    // Up across 1 km: kept in m within 5% of the edge, then left.
+    [1_020, "m", "1020", "m"],
+    [1_060, "m", "1.06", "km"],
+    // Down across 1 km: kept in km within 5% of the edge, then left.
+    [960, "km", "0.960", "km"],
+    [940, "km", "940", "m"],
+  ])("formats %f m last shown in %s as %s %s", (rangeM, previous, value, unit) => {
+    expect(formatSurfaceRange(rangeM, previous)).toEqual({ value, unit });
+  });
+
+  it("writes a range below 0.01 m in E notation", () => {
+    expect(formatSurfaceRange(0.005, null)).toEqual({ value: "5.00E-3", unit: "m" });
+  });
+
+  it("refuses a range that is not finite", () => {
+    expect(() => formatSurfaceRange(Number.POSITIVE_INFINITY, null)).toThrow(RangeError);
   });
 });
 

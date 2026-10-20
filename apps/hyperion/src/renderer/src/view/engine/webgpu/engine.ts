@@ -149,6 +149,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   readonly #status: GraphicsStatusStore;
   readonly #meshes = new WeakMap<MeshHandle, MeshRecord>();
   readonly #materials = new WeakMap<MaterialHandle, MaterialRecord>();
+  /** The meshes and materials released, so that a later use names the release (R10.T16.b). */
+  readonly #released = new WeakSet<MeshHandle | MaterialHandle>();
   readonly #postProcesses = new WeakMap<PostProcessHandle, PostProcessRecord>();
   readonly #kernels = new WeakMap<ComputeHandle, KernelRecord>();
   readonly #views = new Set<WebGpuView>();
@@ -285,7 +287,9 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   materialOf(handle: MaterialHandle): MaterialRecord {
     const record = this.#materials.get(handle);
     if (record === undefined) {
-      throw new Error(`material ${handle.name} was not made by this engine`);
+      throw new Error(
+        `material ${handle.name} ${this.#released.has(handle) ? "was released" : "was not made by this engine"}`,
+      );
     }
     return record;
   }
@@ -293,7 +297,9 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   meshOf(handle: MeshHandle): MeshRecord {
     const record = this.#meshes.get(handle);
     if (record === undefined) {
-      throw new Error(`mesh ${handle.name} was not made by this engine`);
+      throw new Error(
+        `mesh ${handle.name} ${this.#released.has(handle) ? "was released" : "was not made by this engine"}`,
+      );
     }
     return record;
   }
@@ -509,6 +515,25 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       }
     }
     this.destroyTexture(texture);
+  }
+
+  releaseMesh(mesh: MeshHandle): void {
+    this.#assertLive();
+    const record = this.meshOf(mesh);
+    for (const buffer of record.buffers) {
+      this.#resources.destroyBuffer(buffer);
+    }
+    this.#meshes.delete(mesh);
+    this.#released.add(mesh);
+  }
+
+  releaseMaterial(material: MaterialHandle): void {
+    this.#assertLive();
+    this.materialOf(material);
+    this.#materials.delete(material);
+    this.#released.add(material);
+    // The cache is keyed by layouts and resources, not by material: cleared whole, as a destroy does.
+    this.#drawing.forgetBindGroups();
   }
 
   writePackedCubeLevel(cube: TextureHandle, level: number, packed: Uint32Array): void {

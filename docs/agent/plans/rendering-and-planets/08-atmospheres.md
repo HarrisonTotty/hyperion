@@ -4422,7 +4422,12 @@ of Design note 12 join `photorealStatements` (`displays/view/viewRun.ts`) beside
 (`displays/view/photorealFrame.ts`). `PhotorealRenderer` hands each body's stars and planetshine
 sources, the arrays `planLitBodies` built, to that body's atmosphere (Design note 7's one list).
 For the camera's local body, which `planLitBodies` may not light while terrain draws it, the same
-two calls are made once a frame.
+two calls are made once a frame. The terrain of a body handed over (R10.T16.c's `FrameTerrain`)
+draws in the `bodies` pass before the discs, so the composite covers it on both scopes; each
+handed-over body's medium gives its `SurfaceLightingTables` to the terrain through
+`TerrainFrameLighting.atmosphere`. Whichever of this task and R10.T16.c lands second binds them and
+tests the composite over the terrain. The `body_detail` fetch is shared with R10.T16.a's for the
+detail seed.
 
 An airless body (`SurfaceState::Airless`) draws no atmosphere, and its one label is
 `EXOSPHERE: NOT YET MODELLED` (`exosphereNotYetModelled`) while the generator computes no exosphere

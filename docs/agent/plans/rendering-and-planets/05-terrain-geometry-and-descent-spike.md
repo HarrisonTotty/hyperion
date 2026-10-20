@@ -750,6 +750,10 @@ re-checked against the cited source in that task, as the galaxy README's Figures
    summary rounds it to 0.5 s) and not at all in the hover and touchdown, with 1.1 and 0 patches a
    second requested. 30 s remains the upper bound that R11 consumes.
 
+   _From R10.T16 (decision-r10-t16-contracts §2): a patch with no surveyed cell is never forced;
+   the rule binds every setting and style over surveyed ground, and off the survey the reference
+   surface stands and the forced region holds nothing._
+
 10. **The patch cache, and who owns its layout.** Patches are cached by patch, not by view, in one
     cache per body. R10 owns the cache's sizes, formats and slot layout per setting (its Design note
     15 and T14); this plan owns the cache's behaviour, the eviction rule, the pins and the draw-set

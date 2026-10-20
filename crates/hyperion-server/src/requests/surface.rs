@@ -1433,4 +1433,179 @@ mod tests {
         client.close().await;
         harness.stop().await;
     }
+
+    /// The terrain test golden: the client's kept scene `TERRAIN TEST` answers `surface_field`
+    /// from the surface crate's `tests/golden/worker/terrain_test.golden` in R09.T19.b's place
+    /// (rendering plan R10, R10.T16.d; decision-r10-t16-contracts §4), so its header lines and its
+    /// covers are held here to what this server answers for the same synthetic field. The file is
+    /// the surface crate's; its module documentation (`worker/golden.rs`) names this test.
+    mod terrain_test_golden {
+        use std::collections::BTreeMap;
+        use std::path::Path;
+
+        use hyperion_protocol::SurfaceHeaderDto;
+        use hyperion_surface::field::{Cover, CoverRange, FieldView, ResolutionCode};
+        use hyperion_surface::testing::{SyntheticWorld, synthetic_field};
+        use serde_json::{Map, Value, json};
+
+        use super::super::sent;
+        use crate::convert::surface_header;
+
+        /// The golden's text, read from the surface crate's tests.
+        fn golden() -> String {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("hyperion-surface")
+                .join("tests")
+                .join("golden")
+                .join("worker")
+                .join("terrain_test.golden");
+            std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{} is readable: {error}", path.display()))
+        }
+
+        /// A float of the golden's form, `0x` and its bits.
+        fn float(token: &str) -> f64 {
+            let digits = token
+                .strip_prefix("0x")
+                .unwrap_or_else(|| panic!("{token} is a float's bits"));
+            f64::from_bits(u64::from_str_radix(digits, 16).expect("16 hexadecimal digits"))
+        }
+
+        /// A `dto` line's value as JSON: a float's bits as a number, a whole number as one, `-`
+        /// as `null`, anything else as a string.
+        fn value(token: &str) -> Value {
+            if token == "-" {
+                Value::Null
+            } else if token.starts_with("0x") {
+                json!(float(token))
+            } else if let Ok(whole) = token.parse::<u64>() {
+                json!(whole)
+            } else {
+                json!(token)
+            }
+        }
+
+        /// The tokens of a line before its comment.
+        fn tokens(line: &str) -> Vec<&str> {
+            line.split_whitespace()
+                .take_while(|&token| token != "#")
+                .collect()
+        }
+
+        /// The header the golden's `dto` lines give, as the client builds it: each member's
+        /// value, a palette entry's from its line, and a member not modelled (`maturity`,
+        /// `organic_cover`, `weathering_rate` and an entry's `FeO_T`) left out where it reads `-`,
+        /// as the wire leaves it out (a `null` would read as `Modelled::Null`, not as absent).
+        ///
+        /// # Panics
+        ///
+        /// On a `dto` line of a form it does not read, so that a member the writer adds cannot
+        /// pass unread.
+        fn header_of(text: &str) -> SurfaceHeaderDto {
+            let mut header = Map::new();
+            let mut palette = Vec::new();
+            for line in text.lines() {
+                match tokens(line).as_slice() {
+                    ["dto", "palette", _, substance, role, b, v, r, row, "-", feo] => {
+                        let mut entry = json!({
+                            "substance": substance,
+                            "role": role,
+                            "normal_albedo_bvr": [float(b), float(v), float(r)],
+                            "phase_row": value(row),
+                            "liquid": null,
+                        });
+                        if *feo != "-" {
+                            entry["feo_mass_fraction"] = json!(float(feo));
+                        }
+                        palette.push(entry);
+                    }
+                    ["dto", "maturity" | "organic_cover" | "weathering_rate", "-"] => {}
+                    ["dto", "body", body] => {
+                        header.insert("body".to_owned(), json!(body));
+                    }
+                    ["dto", key, token] => {
+                        header.insert((*key).to_owned(), value(token));
+                    }
+                    ["dto", ..] => panic!("unread dto line: {line}"),
+                    _ => {}
+                }
+            }
+            header.insert("palette".to_owned(), Value::Array(palette));
+            serde_json::from_value(Value::Object(header))
+                .expect("the golden's dto lines are a SurfaceHeaderDto")
+        }
+
+        /// A cover of the golden's runs, each `<first>-<past last>:<code>`, `-` for none.
+        fn cover_of(runs: &[&str]) -> Cover {
+            if runs == ["-"] {
+                return Cover::new();
+            }
+            Cover::from_ranges(runs.iter().map(|run| {
+                let (cells, code) = run.split_once(':').expect("a run has its code");
+                let (start, end) = cells.split_once('-').expect("a run has its ends");
+                CoverRange::new(
+                    start.parse().expect("a cell index"),
+                    end.parse().expect("a cell index"),
+                    ResolutionCode::new(code.parse().expect("a code")),
+                )
+                .expect("a run holds a cell")
+            }))
+            .expect("the golden's runs are sorted and disjoint")
+        }
+
+        /// Compared as JSON text, not by `==`, which takes −0 for +0: the text holds each float's
+        /// sign and shortest round-trip digits, so that it differs wherever the bits do.
+        #[test]
+        fn the_terrain_test_golden_s_header_lines_are_the_server_s_header() {
+            let field = synthetic_field(SyntheticWorld::MoonLike);
+            let json = |header: &SurfaceHeaderDto| {
+                serde_json::to_string_pretty(header).expect("a header serialises")
+            };
+            assert_eq!(
+                json(&header_of(&golden())),
+                json(&surface_header(field.header()))
+            );
+        }
+
+        #[test]
+        fn the_terrain_test_golden_s_covers_are_the_cells_the_server_sends() {
+            let text = golden();
+            let level = synthetic_field(SyntheticWorld::MoonLike).header().level();
+            let mut surveys: BTreeMap<u32, Cover> = BTreeMap::new();
+            let mut payloads: BTreeMap<u32, (u32, Option<u32>)> = BTreeMap::new();
+            let mut covers: BTreeMap<u32, Cover> = BTreeMap::new();
+            for line in text.lines() {
+                match tokens(line).as_slice() {
+                    ["survey", revision, runs @ ..] => {
+                        surveys.insert(revision.parse().expect("a revision"), cover_of(runs));
+                    }
+                    ["payload", n, revision, have] => {
+                        let have = (*have != "-").then(|| have.parse().expect("a revision"));
+                        payloads.insert(
+                            n.parse().expect("a payload"),
+                            (revision.parse().expect("a revision"), have),
+                        );
+                    }
+                    ["cover", n, runs @ ..] => {
+                        covers.insert(n.parse().expect("a payload"), cover_of(runs));
+                    }
+                    _ => {}
+                }
+            }
+            assert_eq!(
+                payloads.values().copied().collect::<Vec<_>>(),
+                [(1, None), (2, Some(1)), (2, None), (2, Some(2))],
+                "the first payload, the delta, the whole at 2, and an ask at the revision held"
+            );
+            for (n, &(revision, have)) in &payloads {
+                let since = have.map(|held| &surveys[&held]);
+                assert_eq!(
+                    sent(level, &surveys[&revision], since),
+                    covers[n],
+                    "payload {n}"
+                );
+            }
+        }
+    }
 }

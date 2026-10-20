@@ -9,10 +9,10 @@
 //! ice of it is ranked against its palette entry's transition instead (the ice's own
 //! documentation, `ice`), and a climate condensable without one takes the flat albedo.
 
-use crate::planetary::chem::partition::{AIRLESS_ICE_LOSS_KG_PER_M2_GYR, sublimation_edge};
+use crate::planetary::hooks::cold_traps::trap_threshold;
 use crate::planetary::surface::inputs::{CoarseInputs, CondensatePhase};
 use crate::substance::by_key;
-use crate::units::Pascals;
+use crate::units::{Kelvin, Pascals};
 use hyperion_surface::substance_key::SubstanceKey;
 
 /// The frost point of `substance` on the body of `inputs`, K: the temperature below which its
@@ -24,30 +24,22 @@ use hyperion_surface::substance_key::SubstanceKey;
 ///   line, which the registry draws at the triple temperature (Mars's carbon dioxide at 605 Pa,
 ///   147.7 K);
 /// - under an air that does not hold it, `T_t`, the melting line (Mars's water ice, 273.16 K);
-/// - on an airless body, where its Hertz–Knudsen loss into a vacuum is 144 kg m⁻² Gyr⁻¹
-///   (Schorghofer and Williams 2020, PSJ 1, 54, eq. 8 and Table 1, as plan 14's
-///   `sublimation_edge` reads it): about 110 K for water.
+/// - on an airless body, its cold-trap threshold, plan 14's `trap_threshold` (P14.T51.f): the
+///   temperature at which its Hertz–Knudsen loss into a vacuum is 144 kg m⁻² Gyr⁻¹ (Schorghofer
+///   and Williams 2020, PSJ 1, 54, eq. 8 and Table 1, as plan 14's `exosphere_threshold` reads
+///   it), about 110 K for water and 58 K for carbon dioxide, so that the ices' ranking and the
+///   cold traps' placement read one rule (decision-r09-t13f-cold-traps §4.2).
 ///
 /// `None` for a key the registry lacks, a row with no phase diagram, or, airless, no molar mass.
 #[must_use]
 pub(super) fn frost_point_k(inputs: &CoarseInputs, substance: SubstanceKey) -> Option<f64> {
-    let row = by_key(substance.as_str())?.substance();
-    let diagram = row.phase_diagram()?;
+    let id = by_key(substance.as_str())?;
+    let diagram = id.substance().phase_diagram()?;
     let triple = diagram.triple_temperature();
     let pressure = inputs.surface_pressure().value();
     // A pressure that is not a number reads as airless.
     if pressure.is_nan() || pressure <= 0.0 {
-        let mass = row.molar_mass_g_per_mol()?;
-        return Some(
-            sublimation_edge(
-                diagram,
-                mass,
-                triple,
-                Pascals::ZERO,
-                AIRLESS_ICE_LOSS_KG_PER_M2_GYR,
-            )
-            .value(),
-        );
+        return trap_threshold(id).map(Kelvin::value);
     }
     let held = inputs.gases().iter().find(|gas| gas.substance == substance);
     Some(match held {
@@ -141,6 +133,21 @@ mod tests {
         assert!((airless_water - 110.0).abs() < 1.0, "{airless_water}");
         assert!((airless_co2 - 57.0).abs() < 2.0, "{airless_co2}");
         assert_eq!(frost_point_k(&moon, key("He")), None);
+    }
+
+    /// An airless frost point is plan 14's cold-trap threshold to the bit, water's and carbon
+    /// dioxide's, so that the ices' ranking and the cold traps read one rule
+    /// (decision-r09-t13f-cold-traps §4.2).
+    #[test]
+    fn an_airless_frost_point_is_the_cold_trap_threshold_to_the_bit() {
+        let moon = reference::moon_like();
+        assert_eq!(moon.surface_pressure(), Pascals::ZERO);
+        for k in ["H2O", "CO2"] {
+            let threshold = trap_threshold(by_key(k).unwrap()).unwrap();
+            let frost = frost_point_k(&moon, key(k)).unwrap();
+            eprintln!("{k}: frost point {frost} K, cold-trap threshold {threshold:?}");
+            hyperion_testkit::float::assert_same_bits(frost, threshold.value());
+        }
     }
 
     /// Water's freezing point under Earth's air is its triple temperature, so its shift is zero;

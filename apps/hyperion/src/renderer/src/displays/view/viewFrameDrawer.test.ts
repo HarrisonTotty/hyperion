@@ -1,17 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { moonLikeHeader } from "../../test/coarseFieldFixtures";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { EngineUnavailable } from "../../view/engine/resilientEngine";
 import type { FrameSubmission, RenderView } from "../../view/engine/types";
+import { viewId } from "../../view/camera/state";
+import { IDENTITY_ROTATION } from "../../view/coords/rotation";
 import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
 import { PHASE_GIANT, PHASE_PLANETS, phaseScene } from "../../view/scenes/phaseScene";
+import { CoverageView, fieldCellIndex } from "../../view/terrain/coverage";
+import type { ViewTerrainSource } from "../../view/terrain/frameTerrain";
 import {
+  frameStyleOf,
   makeViewFrameDrawer,
+  presentedViewport,
   skyFaceSizePx,
+  terrainReportOf,
   ViewFrameDrawer,
+  type ViewFrameDrawn,
   type ViewFrameInputs,
 } from "./viewFrameDrawer";
-import { startRun } from "./viewRun";
+import { runPose, startRun } from "./viewRun";
 
 /** A canvas view that records whether it was disposed. */
 class RecordingView implements RenderView {
@@ -95,14 +104,31 @@ const TOKENS = {
   surface0: "#000000",
 } as const;
 
+/** The phase scene's run, its planets turning (their rotations the identity) where `rotated`. */
+function phaseRun(rotated: boolean): ReturnType<typeof startRun> {
+  const run = startRun(phaseScene());
+  return rotated
+    ? {
+        ...run,
+        scene: {
+          ...run.scene,
+          bodies: run.scene.bodies.map((body) =>
+            body.kind === "star" ? body : { ...body, rotation: IDENTITY_ROTATION },
+          ),
+        },
+      }
+    : run;
+}
+
 /** The phase scene's frame drawn photorealistically, at 320 × 180, with the view's `sources`. */
 async function drawPhotoreal(
   sources: Pick<ViewFrameInputs, "classMaps" | "reliefs" | "terrain">,
+  rotated = false,
 ): Promise<void> {
   const engine = await countingRenderEngine();
   const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
   drawer.draw({
-    run: startRun(phaseScene()),
+    run: phaseRun(rotated),
     size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
     tokens: TOKENS,
     exposure: DEFAULT_EXPOSURE,
@@ -135,31 +161,132 @@ describe("a view's photorealistic frame (R10.T10.d, T10.e)", () => {
     expect(asked).toEqual(LIT);
   });
 
-  it("hands its lit bodies over by the view's reliefs", async () => {
+  it("hands its lit bodies with a rotation over by the view's reliefs", async () => {
+    const asked: string[] = [];
+    await drawPhotoreal(
+      {
+        reliefs: {
+          reliefM: (body) => {
+            asked.push(body);
+            return null;
+          },
+        },
+      },
+      true,
+    );
+    expect(asked).toEqual(LIT);
+  });
+
+  it("draws its lit bodies over the view's own terrain of the session (R10.T16.c)", async () => {
     const asked: string[] = [];
     await drawPhotoreal({
-      reliefs: {
-        reliefM: (body) => {
-          asked.push(body);
-          return null;
+      terrain: {
+        source: {
+          wanted: new Set(),
+          survey: () => null,
+          drawTerrain: () => null,
+          coverageMask: () => null,
+          pass: (body) => {
+            asked.push(body);
+            return null;
+          },
         },
+        view: viewId("primary"),
+        nowMs: 0,
       },
     });
     expect(asked).toEqual(LIT);
   });
+});
 
-  it("draws its lit bodies over the view's terrain", async () => {
-    const asked: string[] = [];
-    await drawPhotoreal({
-      terrain: {
-        surveyCoverage: (body) => {
-          asked.push(body);
-          return null;
-        },
-        draws: () => [],
-      },
+describe("what a view drew, for the terrain session (R10.T16.a)", () => {
+  const LIT = [...PHASE_PLANETS, PHASE_GIANT];
+
+  /** The phase scene's frame inputs at 320 × 180 CSS px and a ratio of `ratio`, in `style`. */
+  function inputsOf(style: "photorealistic" | "wireframe", ratio = 1): ViewFrameInputs {
+    return {
+      run: startRun(phaseScene()),
+      size: { widthPx: 320, heightPx: 180, devicePixelRatio: ratio, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      stars: [],
+      sky: null,
+      selection: null,
+      style,
+      setting: "low",
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+    };
+  }
+
+  /** A drawer that has drawn the phase scene's photorealistic frame, its pipelines made. */
+  async function plannedDrawer(): Promise<ViewFrameDrawer> {
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    // The first frame draws the wireframe while its pipelines compile, and plans no regimes.
+    drawer.draw(inputsOf("photorealistic"));
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
     });
-    expect(asked).toEqual(LIT);
+    drawer.draw(inputsOf("photorealistic"));
+    return drawer;
+  }
+
+  it("plans no regimes before a photorealistic frame", async () => {
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const regimes = drawer.regimes.size;
+    drawer.dispose();
+    expect(regimes).toBe(0);
+  });
+
+  it("keeps its last photorealistic plan's regimes", async () => {
+    const drawer = await plannedDrawer();
+    const regimes = [...drawer.regimes.keys()];
+    drawer.dispose();
+    expect(regimes).toEqual(LIT);
+  });
+
+  it("keeps them through a frame drawn in the wireframe", async () => {
+    const drawer = await plannedDrawer();
+    const planned = drawer.regimes;
+    drawer.draw(inputsOf("wireframe"));
+    const kept = drawer.regimes;
+    drawer.dispose();
+    expect([planned.size > 0, kept === planned]).toEqual([true, true]);
+  });
+
+  it("reports its scene, pose, field of view, presented size, styles, setting and priority", () => {
+    const inputs = inputsOf("wireframe", 1.5);
+    const regimes = new Map();
+    expect(terrainReportOf(inputs, regimes, "secondary", "photorealistic")).toEqual({
+      scene: inputs.run.scene,
+      pose: runPose(inputs.run),
+      fovXRad: (inputs.run.camera.fovDeg * Math.PI) / 180,
+      presentedPx: { widthPx: 480, heightPx: 270 },
+      style: "wireframe",
+      drawnStyle: "photorealistic",
+      setting: "low",
+      streamPriority: "secondary",
+      regimes,
+    });
+  });
+
+  it("reports nothing while its stage is not laid out", () => {
+    expect(
+      terrainReportOf({ ...inputsOf("wireframe"), size: null }, new Map(), "primary", "wireframe"),
+    ).toBe(null);
+  });
+
+  it("presents at its stage's size times its ratio, rounded, at least a pixel", () => {
+    expect([
+      presentedViewport({ widthPx: 320.4, heightPx: 180, devicePixelRatio: 1.25, remPx: 16 }),
+      presentedViewport({ widthPx: 0.2, heightPx: 0.1, devicePixelRatio: 1, remPx: 16 }),
+    ]).toEqual([
+      { widthPx: 401, heightPx: 225 },
+      { widthPx: 1, heightPx: 1 },
+    ]);
   });
 });
 
@@ -173,6 +300,152 @@ describe("the sky cube's face size (R07.T17)", () => {
     "is $faceSizePx² on the $setting setting where float32-blendable is $blendable",
     ({ setting, blendable, faceSizePx }) => {
       expect(skyFaceSizePx(setting, blendable)).toBe(faceSizePx);
+    },
+  );
+});
+
+describe("the style a view's frame is drawn in, foreseen (the batch review's S8)", () => {
+  it.each([
+    ["photorealistic", true, "ready", "photorealistic"],
+    ["photorealistic", true, "making", "wireframe"],
+    ["photorealistic", true, "failed", "wireframe"],
+    ["photorealistic", false, "ready", "wireframe"],
+    ["wireframe", true, "ready", "wireframe"],
+  ] as const)(
+    "is %s asked, available %s, pipelines %s: %s",
+    (style, photorealistic, status, drawn) => {
+      expect(
+        frameStyleOf({ style, availability: { wireframe: true, photorealistic } }, status),
+      ).toBe(drawn);
+    },
+  );
+});
+
+describe("a view's survey edges that cannot be marked (the batch review's S5)", () => {
+  it("draws on without them, saying so once", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const inputs: ViewFrameInputs = {
+      run: phaseRun(true),
+      size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      stars: [],
+      sky: null,
+      selection: null,
+      style: "wireframe",
+      setting: "low",
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+      terrain: {
+        source: {
+          wanted: new Set(PHASE_PLANETS),
+          survey: () => {
+            throw new Error("a bug of the source's");
+          },
+          drawTerrain: () => null,
+          coverageMask: () => null,
+          pass: () => null,
+        },
+        view: viewId("view"),
+        nowMs: 0,
+      },
+    };
+    const drawn = [drawer.draw(inputs) !== null, drawer.draw(inputs) !== null];
+    drawer.dispose();
+    expect([drawn, error.mock.calls.length]).toEqual([[true, true], 1]);
+  });
+});
+
+/** A level-5 coverage of one cell of face 0, so that a body has an edge to mark. */
+function oneCell(): CoverageView {
+  const start = fieldCellIndex({ face: 0, level: 5, i: 16, j: 16 });
+  const merged = CoverageView.empty(5).merged(
+    { ranges: [{ start, end: start + 1, resolution: 8 }] },
+    1,
+  );
+  if (!merged.ok) {
+    throw new Error(merged.message);
+  }
+  return merged.coverage;
+}
+
+describe("what a view's frame gives its label block and list (the batch review's S16)", () => {
+  // The planet at 90°, which the camera looks at.
+  const SURVEYED = PHASE_PLANETS[1];
+
+  /**
+   * A terrain session stand-in: the 90° planet's field wanted and surveyed in part, and each
+   * draw of its terrain annunciating `TERRAIN: STREAMING`.
+   */
+  function streamingSource(): ViewTerrainSource {
+    return {
+      wanted: new Set([SURVEYED]),
+      survey: (body) =>
+        body === SURVEYED ? { coverage: oneCell(), header: moonLikeHeader(SURVEYED) } : null,
+      drawTerrain: () => ({
+        draw: null,
+        conditions: { streaming: true, detailLimited: false },
+        annunciation: "TERRAIN: STREAMING",
+        fault: null,
+        missing: true,
+        standingIn: false,
+        maskReady: false,
+      }),
+      coverageMask: () => null,
+      pass: () => null,
+    };
+  }
+
+  /** The phase scene's frame inputs over {@link streamingSource}, its planets turning. */
+  function inputsIn(style: "photorealistic" | "wireframe"): ViewFrameInputs {
+    return {
+      run: phaseRun(true),
+      size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      stars: [],
+      sky: null,
+      selection: null,
+      style,
+      setting: "low",
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+      // Relief enough that every planet with a rotation is handed over.
+      reliefs: { reliefM: () => 1e9 },
+      terrain: { source: streamingSource(), view: viewId("view"), nowMs: 0 },
+    };
+  }
+
+  /** A frame drawn in `style` by a drawer whose photorealistic pipelines are made. */
+  async function drawnIn(style: "photorealistic" | "wireframe"): Promise<ViewFrameDrawn | null> {
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    // The first photorealistic frame draws the wireframe while its pipelines compile.
+    drawer.draw(inputsIn("photorealistic"));
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    const drawn = drawer.draw(inputsIn(style));
+    drawer.dispose();
+    return drawn;
+  }
+
+  it("gives the terrain's annunciation of a photorealistic frame", async () => {
+    expect((await drawnIn("photorealistic"))?.terrain).toBe("TERRAIN: STREAMING");
+  });
+
+  it("gives no terrain annunciation of a wireframe frame, which hands nothing over", async () => {
+    expect((await drawnIn("wireframe"))?.terrain).toBeNull();
+  });
+
+  it.each(["photorealistic", "wireframe"] as const)(
+    "gives the session's survey edges in the %s style",
+    async (style) => {
+      expect((await drawnIn(style))?.surveyEdges.map((edge) => edge.body)).toEqual([SURVEYED]);
     },
   );
 });

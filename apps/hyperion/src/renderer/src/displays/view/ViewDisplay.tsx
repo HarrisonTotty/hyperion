@@ -56,7 +56,6 @@ import {
   type GpuTimer,
   type GraphicsAnnunciation,
   graphicsAnnunciation,
-  type GraphicsStatus,
   useGraphicsStatus,
 } from "../../view/engine/status";
 import type { RenderView } from "../../view/engine/types";
@@ -74,7 +73,7 @@ import {
   serverSceneAtPush,
 } from "../../view/scene/fromServer";
 import { cameraSceneOf, type ViewStar } from "../../view/scene/model";
-import type { DrawAnchor } from "../../view/wireframe/drawList";
+import type { DrawAnchor, DrawnSurveyEdge } from "../../view/wireframe/drawList";
 import type { StyleAvailability } from "../../view/engine/platform";
 import { hostLights, lightingState, sceneHostDiscs } from "../../view/lighting/hostLights";
 import type { PhotorealStatus } from "../../view/photoreal/renderer";
@@ -116,7 +115,12 @@ import {
   type ViewEngineState,
 } from "./useViewEngine";
 import { ViewCanvas } from "./ViewCanvas";
-import { makeViewFrameDrawer, type ViewFrameDrawer } from "./viewFrameDrawer";
+import {
+  makeViewFrameDrawer,
+  terrainReportOf,
+  type ViewFrameDrawer,
+  type ViewFrameInputs,
+} from "./viewFrameDrawer";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import {
   type MarkLabelState,
@@ -126,7 +130,18 @@ import {
   ViewMarkLabels,
 } from "./ViewMarkLabels";
 import { styleName } from "../../view/photoreal/style";
-import type { ClassMapSource } from "../../view/terrain/classMap";
+import { TERRAIN_NOT_AVAILABLE, type TerrainAnnunciation } from "../../view/terrain/annunciation";
+import type { TerrainSession } from "../../view/terrain/session";
+import type { WorkerLike } from "../../view/terrain/workers/pool";
+import { useServerLink } from "../../lib/serverLink";
+import { faultsFor } from "./viewFaults";
+import {
+  browserHeightWorker,
+  stepTerrainSession,
+  terrainSessionSource,
+  useTerrainFaults,
+  useTerrainSession,
+} from "./useTerrainSession";
 import { ViewMarkList } from "./ViewMarkList";
 import { ViewSceneContext } from "./ViewSceneProvider";
 import {
@@ -156,6 +171,8 @@ import {
   startRun,
   startServerRun,
   stepRun,
+  type SurveyEdgeListNote,
+  surveyEdgeNotes,
   targetKey,
   type ViewRun,
 } from "./viewRun";
@@ -216,19 +233,6 @@ function roomForSlot(stage: ElementSize | null, open: ReadonlyArray<ElementSize 
   );
 }
 
-/**
- * A graphics fault to show on a view's plate: the standing fault, unless it is another view's
- * refusal, which only that view's plate shows (decided 2026-10-02).
- */
-function faultFor(
-  graphics: GraphicsStatus,
-  annunciation: GraphicsAnnunciation | null,
-  viewName: string,
-): string | null {
-  const otherView = graphics.fault?.kind === "view-refused" && graphics.fault.viewName !== viewName;
-  return annunciation?.standing === "fault" && !otherView ? annunciation.text : null;
-}
-
 /** No stars, one array for every frame without an answer. */
 const NO_STARS: ReadonlyArray<ViewStar> = [];
 
@@ -274,6 +278,22 @@ interface ViewDisplayProps {
    * legend names it; Linux's by default.
    */
   readonly platform?: string | undefined;
+  /**
+   * Starts one of the terrain session's height workers (plan R10, R10.T16.a), stable in identity:
+   * the renderer's module worker by default (`browserHeightWorker`), a fake in a test.
+   */
+  readonly heightWorkers?: (() => WorkerLike) | undefined;
+  /**
+   * The kept scenes the `SCENE` selector offers, stable in identity: {@link SCENE_OPTIONS} by
+   * default. The views check's terrain run gives its own (plan R10, R10.T16.d), `TERRAIN TEST`'s
+   * fixture paced and counted by its probe; no other launch gives any.
+   */
+  readonly sceneOptions?: ReadonlyArray<SceneOption> | undefined;
+  /**
+   * Watches the terrain session `VIEW` holds (the views check's terrain run, R10.T16.d): called
+   * with each session made, its returned function when `VIEW` lets the session go.
+   */
+  readonly watchTerrain?: ((session: TerrainSession) => () => void) | undefined;
 }
 
 /** What a view of the server's scene reads of `useScene`, kept current by its stage. */
@@ -316,11 +336,13 @@ interface ViewStageProps {
   /** The platform's primary modifier, whose chord with the arrows steps the rate (R07.T19.f). */
   readonly modifier: PrimaryModifier;
   /**
-   * The class maps every view's lit bodies' discs shade with (plan R10, R10.T10.d), a store made
-   * over `engineState`'s engine and the height workers' pool, or `null`: every disc then its
-   * photometry's uniform law.
+   * The terrain session of the stage's source (plan R10, R10.T16.a), made above the stage over
+   * `engineState`'s engine, or `null` with none: every view tells it what it drew each frame it
+   * draws, the primary's frame steps it, and every view's lit bodies take its class maps
+   * (R10.T10.d) and reliefs (R10.T10.e); without one every disc is its photometry's uniform law
+   * and none hands over.
    */
-  readonly classMaps: ClassMapSource | null;
+  readonly terrain: TerrainSession | null;
 }
 
 /** What the drawing loop reads of the several views' budgets, kept current by an effect. */
@@ -344,8 +366,8 @@ interface InstrumentViewState {
   readonly availability: StyleAvailability;
   /** The style its budget draws. */
   readonly budgetStyle: RenderStyle;
-  /** A graphics fault for its plate, or `null`. */
-  readonly fault: string | null;
+  /** The faults for its plate, the graphics' then the terrain's ({@link faultsFor}). */
+  readonly faults: ReadonlyArray<string>;
 }
 
 /** What the view keys' listener reads of the stage, kept current by an effect. */
@@ -388,8 +410,13 @@ interface LoopInputs {
   readonly meter: MeterMode;
   /** Takes the exposure the view's `AutoExposure` moved to, into the display's state. */
   readonly onExposureChange: (exposure: ExposureControl) => void;
-  /** The class maps the lit bodies' discs shade with (R10.T10.d), or `null`. */
-  readonly classMaps: ClassMapSource | null;
+  /** The stage's terrain session (R10.T16.a), or `null`. */
+  readonly terrain: TerrainSession | null;
+  /**
+   * A kept scene's terrain fixture's follower of its script (`TerrainFixture.notePlayed`,
+   * R10.T16.d), told the script's time each primary frame; `null` for any other stage.
+   */
+  readonly notePlayed: ((scriptS: number) => void) | null;
 }
 
 /** What the loop publishes for the DOM, at most every {@link READOUT_INTERVAL_MS}. */
@@ -401,7 +428,20 @@ interface Published {
   readonly drawnStyle: RenderStyle;
   /** The photorealistic view's standing (`PhotorealRenderer.status`). */
   readonly photoreal: PhotorealStatus;
+  /**
+   * The terrain's annunciation of the bodies its last frame handed over (plan R10, R10.T16.c), for
+   * its label block's `labelStatements`; `null` with none.
+   */
+  readonly terrain: TerrainAnnunciation | null;
+  /**
+   * The survey edges its last frame marked, for its list's notes (plan R10, R10.T16.c;
+   * decision-r10-t16-review §1).
+   */
+  readonly surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
 }
+
+/** The survey edges before the loop's first frame: none. */
+const NO_SURVEY_EDGES: ReadonlyArray<DrawnSurveyEdge> = [];
 
 /** What the meter holds before the loop's first readout: no image is drawn yet. */
 const NOT_YET_DRAWN: Metering = { kind: "no-image" };
@@ -531,10 +571,16 @@ function pickAnchor(anchor: DrawAnchor): Anchor {
   };
 }
 
-/** The rows of the list, with the units they were last shown in kept for their hysteresis. */
+/**
+ * The rows and notes of the list, with the units they were last shown in kept for their
+ * hysteresis.
+ */
 interface ShownRows {
   readonly run: ViewRun;
   readonly rows: ReadonlyArray<MarkRow>;
+  /** The survey edges its notes were made from, and the notes (R10.T16.c). */
+  readonly edges: ReadonlyArray<DrawnSurveyEdge>;
+  readonly notes: ReadonlyArray<SurveyEdgeListNote>;
 }
 
 function unitsOf(rows: ReadonlyArray<MarkRow>): ReadonlyMap<string, BodyDistanceUnit> {
@@ -573,10 +619,12 @@ function ViewStage({
   universe,
   setting,
   modifier,
-  classMaps,
+  terrain,
 }: ViewStageProps) {
   const legendId = useId();
   const server = source.kind === "server" ? source.server : null;
+  // A kept scene's terrain fixture follows the script the stage plays (R10.T16.d).
+  const notePlayed = source.kind === "kept" ? (source.option.terrain?.notePlayed ?? null) : null;
   const serverRef = useRef<ServerInput | null>(null);
   const [initial] = useState(() => initialRun(source));
   const runRef = useRef<ViewRun>(initial);
@@ -585,6 +633,8 @@ function ViewStage({
     anchors: [],
     drawnStyle: initial.camera.style,
     photoreal: "idle",
+    terrain: null,
+    surveyEdges: NO_SURVEY_EDGES,
   });
   const shown = useThrottledValue(published, READOUT_INTERVAL_MS);
   // The meter as the loop last read it out (R07.T16.b): given in the same frame as the exposure the
@@ -595,6 +645,8 @@ function ViewStage({
   const reducedMotion = usePrefersReducedMotion();
   const graphics = useGraphicsStatus();
   const annunciation = graphicsAnnunciation(graphics);
+  // The views that show the terrain's fault, every height worker lost (R10.T16.b).
+  const terrainFaults = useTerrainFaults(terrain);
   const { ref: stageRef, size } = useElementSize();
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
   // Whether the engine refused the stage's view at its first creation (a canvas with no context).
@@ -615,7 +667,8 @@ function ViewStage({
     availability: WIREFRAME_ONLY,
     meter: "average",
     onExposureChange,
-    classMaps,
+    terrain,
+    notePlayed,
   });
 
   // The sky replaces the interim field once it arrives, asked on the published run (R06.T13.c).
@@ -672,7 +725,7 @@ function ViewStage({
       refusals: slotRefusals,
       availability: availabilityOf(slotRefusals),
       budgetStyle: budgets.get(slot.id)?.style ?? "wireframe",
-      fault: faultFor(graphics, annunciation, slot.id),
+      faults: faultsFor(graphics, annunciation, slot.id, slot.id, terrainFaults),
     };
   });
   // The CONTROLS view: the side column's list and controls, and the single keys pressed off a
@@ -684,18 +737,24 @@ function ViewStage({
     : null;
   const controlsView = operatedView === null ? VIEW_ID : operatedView.slot.id;
   const controlledShown = operatedView?.slot.shown ?? null;
-  const fault = faultFor(graphics, annunciation, VIEW_NAME);
+  const faults = faultsFor(graphics, annunciation, VIEW_NAME, VIEW_ID, terrainFaults);
+  // The primary's own terrain annunciation (G10; R10.T16.c), none while its fault stands
+  // (`terrainStatementOf`'s rule, C2).
+  const primaryTerrain = faults.includes(TERRAIN_NOT_AVAILABLE) ? null : shown.terrain;
 
   // The list's ranges switch unit with hysteresis, from the units they were last shown in;
   // adjusted during render as each published run arrives.
   const [shownRows, setShownRows] = useState<ShownRows>(() => ({
     run: initial,
     rows: markRows(initial),
+    edges: NO_SURVEY_EDGES,
+    notes: [],
   }));
-  let rows = shownRows.rows;
-  if (shownRows.run !== shown.run) {
-    rows = markRows(shown.run, unitsOf(shownRows.rows));
-    setShownRows({ run: shown.run, rows });
+  let { rows, notes } = shownRows;
+  if (shownRows.run !== shown.run || shownRows.edges !== shown.surveyEdges) {
+    rows = shownRows.run === shown.run ? rows : markRows(shown.run, unitsOf(shownRows.rows));
+    notes = surveyEdgeNotes(shown.run.scene, shown.surveyEdges, shownRows.notes);
+    setShownRows({ run: shown.run, rows, edges: shown.surveyEdges, notes });
   }
 
   // The loop reads the display through a ref, current after every commit; the colour tokens are
@@ -714,7 +773,8 @@ function ViewStage({
       availability,
       meter,
       onExposureChange,
-      classMaps,
+      terrain,
+      notePlayed,
     };
   }, [
     exposure,
@@ -727,7 +787,8 @@ function ViewStage({
     availability,
     meter,
     onExposureChange,
-    classMaps,
+    terrain,
+    notePlayed,
   ]);
 
   // The drawing loop reads the server's scene, as the latest render holds it, through a ref.
@@ -814,6 +875,14 @@ function ViewStage({
     let anchors: ReadonlyArray<DrawAnchor> = [];
     // Where each mark's label stood after the last frame, kept with its element (R07.T16.i).
     const labelStates = new WeakMap<HTMLElement, MarkLabelState>();
+    // The terrain session the view last told what it drew, which forgets it when it goes.
+    let reportedTo: TerrainSession | null = null;
+    // The terrain's annunciation of the last frame drawn (R10.T16.c), for the label block.
+    let terrainAnnunciation: TerrainAnnunciation | null = null;
+    // The survey edges the last frame drawn marked, for the list's notes (R10.T16.c).
+    let surveyEdges = NO_SURVEY_EDGES;
+    // The terrain session's step failed, said once until a step succeeds (the batch review's S5).
+    let stepFailed = false;
     let frame = 0;
     const tick = (nowMs: number): void => {
       animationFrame += 1;
@@ -862,6 +931,11 @@ function ViewStage({
       });
       turnRef.current = NO_TURN;
       runRef.current = run;
+      // A kept scene's terrain fixture is told how far its script has played: its field's revision
+      // rises the first time the script passes the delta's time (R10.T16.d).
+      if (run.source.kind === "kept") {
+        inputs.notePlayed?.(run.tS);
+      }
       if (inputs.exposure !== seenExposure) {
         seenExposure = inputs.exposure;
         if (inputs.exposure !== givenExposure) {
@@ -879,13 +953,24 @@ function ViewStage({
         // Here in the loop, not in the render that made the first scene: it logs.
         reportBondRatioFindings(run.scene);
       }
+      // The terrain session steps once a primary frame, before any view draws, on what each
+      // instrument drew last and on what the primary draws now, noted first, so that its selection
+      // is this frame's (R10.T16.a; the batch review's S2 and S6); a session let go is forgotten
+      // by this view first.
+      const session = inputs.terrain;
+      if (reportedTo !== session) {
+        reportedTo?.forgetView(VIEW_ID);
+        reportedTo = session;
+      }
+      terrainAnnunciation = null;
+      let frameInputs: ViewFrameInputs | null = null;
       if (drawer !== null) {
         if (run.camera.style === "photorealistic" && drawer.photorealStatus === "failed") {
           // Its pipelines could not be made: the view returns to the wireframe, and the control
           // holds the style back with the reason.
           runRef.current = { ...run, camera: { ...run.camera, style: "wireframe" } };
         }
-        const drawn = drawer.draw({
+        frameInputs = {
           run,
           size: inputs.size,
           tokens: inputs.tokens,
@@ -900,10 +985,34 @@ function ViewStage({
           availability: inputs.availability,
           // The exposure's source: its frames take the histogram its meter reads (Design note 11).
           meter: auto.meter,
-          classMaps: inputs.classMaps ?? undefined,
-        });
+          // Every view's lit bodies shade and hand over by the session's (R10.T16.a).
+          classMaps: session?.classMaps,
+          reliefs: session?.reliefs,
+          // The view's own terrain of the session's passes, and its survey edges (R10.T16.c).
+          terrain: session === null ? undefined : { source: session, view: VIEW_ID, nowMs },
+        };
+        // What it draws now, in the style it last drew in (S8), for the step below.
+        const report =
+          session === null
+            ? null
+            : terrainReportOf(
+                frameInputs,
+                drawer.regimes,
+                primaryBudget.streamPriority,
+                drawnStyle,
+              );
+        if (session !== null && report !== null) {
+          session.noteView(VIEW_ID, report);
+        }
+      }
+      // Guarded: no throw of the step stops this loop or the instruments' (S5).
+      stepFailed = stepTerrainSession(session, stepFailed);
+      if (drawer !== null && frameInputs !== null) {
+        const drawn = drawer.draw(frameInputs);
         if (drawn !== null && inputs.size !== null) {
           anchors = drawn.anchors;
+          terrainAnnunciation = drawn.terrain;
+          surveyEdges = drawn.surveyEdges;
           // The wireframe, and the photorealistic view's stand-in while its pipelines compile.
           drawnStyle = drawn.drawnStyle;
           placeMarkLabels(
@@ -933,7 +1042,7 @@ function ViewStage({
         stars: inputs.stars,
         reportCamera:
           run.source.kind === "server" && current !== null ? current.reportCamera : null,
-        classMaps: inputs.classMaps,
+        terrain: session,
       });
       if (publish) {
         publishedMs = nowMs;
@@ -950,6 +1059,8 @@ function ViewStage({
           anchors,
           drawnStyle,
           photoreal: drawer?.photorealStatus ?? "idle",
+          terrain: terrainAnnunciation,
+          surveyEdges,
         });
       }
       frame = requestAnimationFrame(tick);
@@ -959,6 +1070,7 @@ function ViewStage({
       cancelAnimationFrame(frame);
       unsubscribeTimes();
       unsubscribeTimesRestored();
+      reportedTo?.forgetView(VIEW_ID);
       // The drawer disposes of the view with itself.
       releaseDrawer();
     };
@@ -1151,7 +1263,7 @@ function ViewStage({
   const meterShown = meteringFor(metering, meter);
   const primaryPhotoreal = photorealStatements(shown.run, lighting, shown.drawnStyle, litLabels);
   const primaryStatements = [
-    ...labelStatements(shown.run),
+    ...labelStatements(shown.run, primaryTerrain),
     ...(easedMoves && !reducedMotion ? [EASED_MOVES_STATEMENT] : []),
     ...primaryPhotoreal,
   ];
@@ -1363,10 +1475,10 @@ function ViewStage({
                 )}
                 statements={primaryStatements}
                 countLine={viewSky.drawn === null ? countLine : null}
-                fault={fault}
+                faults={faults}
               />
               <div className="view-instruments">
-                {instrumentViews.map(({ slot, budgetStyle, fault: slotFault }) =>
+                {instrumentViews.map(({ slot, budgetStyle, faults: slotFaults }) =>
                   slot.open ? (
                     <InstrumentView
                       key={slot.id}
@@ -1378,7 +1490,7 @@ function ViewStage({
                       litLabels={litLabels}
                       primaryPhotorealStatements={primaryPhotoreal}
                       skyAwaiting={viewSky.awaiting}
-                      fault={slotFault}
+                      faults={slotFaults}
                       legendId={legendId}
                       onKeyDown={(event) => {
                         // A view key on its canvas makes it the CONTROLS view before it acts.
@@ -1461,6 +1573,7 @@ function ViewStage({
                 </h2>
                 <ViewMarkList
                   rows={rows}
+                  notes={notes}
                   fromCamera={rangesFromCamera(shown.run.scene)}
                   stale={stale}
                   selectedKey={selection === null ? null : targetKey(selection)}
@@ -1644,6 +1757,9 @@ function ViewPanels({
   engineSource = DEFAULT_ENGINE_SOURCE,
   setting = "high",
   platform = "linux",
+  heightWorkers = browserHeightWorker,
+  sceneOptions = SCENE_OPTIONS,
+  watchTerrain,
 }: ViewDisplayProps) {
   const statusId = useId();
   const host = use(ViewSceneContext);
@@ -1672,7 +1788,7 @@ function ViewPanels({
           removeCamera: scene.removeCamera,
         }
       : null;
-  const option = SCENE_OPTIONS.find((each) => each.name === (serverChosen ? keptName : sceneName));
+  const option = sceneOptions.find((each) => each.name === (serverChosen ? keptName : sceneName));
   if (option === undefined) {
     throw new Error(`no kept scene named ${serverChosen ? keptName : sceneName}`);
   }
@@ -1691,6 +1807,24 @@ function ViewPanels({
         }
       : interimAt(universe, server.place, server.model.clock.time),
   );
+  // The terrain session of the stage's source, above the stage so that a new scene of the same
+  // source keeps its fields (R10.T16.a): the server's scene's over the link, a kept scene's over
+  // its terrain fixture, and none for any other kept scene.
+  const link = useServerLink();
+  const terrain = useTerrainSession({
+    engineState,
+    source: terrainSessionSource(
+      server === null
+        ? { kind: "kept", option }
+        : { kind: "server", universe, link, onSurface: scene.onSurface },
+    ),
+    createWorker: heightWorkers,
+  });
+  // The views check's terrain run watches the session (R10.T16.d); no other launch gives a watch.
+  useEffect(
+    () => (terrain === null || watchTerrain === undefined ? undefined : watchTerrain(terrain)),
+    [terrain, watchTerrain],
+  );
   const lines = [
     ...(serverChosen && standing.annunciation !== null ? [standing.annunciation] : []),
     ...(server !== null && scene.cameraFault !== null
@@ -1702,7 +1836,7 @@ function ViewPanels({
       <div className="view-display__bar">
         <fieldset className="preset-buttons" aria-label="Scene">
           <span className="field__label">SCENE</span>
-          {[SERVER_SCENE_NAME, ...SCENE_OPTIONS.map((each) => each.name)].map((name) => (
+          {[SERVER_SCENE_NAME, ...sceneOptions.map((each) => each.name)].map((name) => (
             <button
               key={name}
               type="button"
@@ -1747,10 +1881,7 @@ function ViewPanels({
         universe={universe}
         setting={setting}
         modifier={primaryModifierOf(platform)}
-        // No view feeds a body's class map yet: the task that first draws a body's terrain live
-        // makes the store over the engine and the height workers' pool (R10's Risks, "Questions for
-        // main (R10.T10.d)"), until when every disc is uniform.
-        classMaps={null}
+        terrain={terrain}
       />
     </div>
   );
@@ -1806,5 +1937,15 @@ function ViewPanels({
  * controller while instruments are open, from every view's GPU time in the primary's frame. The
  * setting is the launch's `--setting` (R07.T17): every view's sky, wireframe and photorealistic
  * frame take its forms, a photorealistic scene target at most its `terrain.renderHeightPx` rows.
+ *
+ * The server's scene of the open universe, and a kept scene that carries a terrain fixture, have a
+ * terrain session (plan R10, R10.T16.a; `useTerrainSession`), made above the stage on the view's
+ * engine with the height workers `heightWorkers` starts: every view tells it what it drew each
+ * frame it draws, the primary's frame steps it, which wants the bodies' coarse fields the cameras
+ * can resolve, and every view's lit bodies take its class maps and reliefs. Each view's
+ * photorealistic frame draws the terrain of the bodies it hands over through the session, from its
+ * own camera at its own τ and weight, and its label block states that terrain's annunciation; every
+ * view, in either style, marks the surveys' edges (R10.T16.c). It goes with the engine when the
+ * display is hidden.
  */
 export const ViewDisplay = memo(ViewPanels);

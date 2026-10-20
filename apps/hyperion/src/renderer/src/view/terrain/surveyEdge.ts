@@ -3,8 +3,8 @@
  * body's surveyed terrain meets ground the ship has not surveyed, a solid `--text` line `1px` wide
  * along the surveyed terrain's border, with a tick `0.25rem` long every `1rem` of the drawn line,
  * pointing into the unsurveyed side, cased as every mark is, and hidden by nearer ground as a limb
- * hides a graticule. The view's list notes it as `SURVEY EDGE` with the range to its nearest point
- * in the picture.
+ * hides a graticule. The view's list notes it as `SURVEY EDGE` with the body's designation and the
+ * range to its nearest point in the picture ({@link surveyEdgeNote}).
  *
  * @remarks
  * Pure: the edge is the coverage's ({@link surveyEdges}), each piece a side of a surveyed coarse
@@ -18,10 +18,18 @@
  * cut at its view depth, so that the line runs on to the view's edge beneath a ship low over it.
  * The line and the ticks are view-space segments, so that the draw's depth test hides them behind
  * nearer ground (R02's lines). The first view to draw a body's terrain (R10.T10.e's hand-over,
- * T11's wireframe) gives the view its coverage and heights; T12 lists the note and draws the
- * line-of-sight mark the ticks keep clear of.
+ * T11's wireframe) gives the view its coverage and heights; R10.T16.c lists the note
+ * (decision-r10-t16-review §1), and T12 draws the line-of-sight mark the ticks keep clear of.
+ *
+ * The note's range counts only the points the operator can see (plan R10, R10.T16.c; the
+ * r10-shader handoff's "For R10.T16", item b): where the view draws the body's terrain it gives the
+ * drawn ground ({@link SurveyEdgeView.ground}), and a drawn piece's nearest point counts only where
+ * no ground stands between it and the camera ({@link groundHidesPoint}, a march against the drawn
+ * heights on the CPU), as the depth test hides the line itself behind that ground over the image.
+ * Without it, as in the wireframe until R10.T11 draws its terrain, nothing but the spheroid's own
+ * horizon hides a point, as nothing but the occluder spheres hides the line there.
  */
-import { type BodyDistanceUnit, formatBodyDistance } from "../../lib/format";
+import { formatSurfaceRange, type SurfaceRangeUnit } from "../../lib/format";
 import { add, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import {
   NEAR_PLANE_M,
@@ -72,6 +80,41 @@ const MAX_SPLITS = 20;
 /** The bisection's steps to a side's horizon crossing: 2⁻⁴⁰ of a piece, far below a pixel. */
 const HORIZON_STEPS = 40;
 
+/**
+ * The samples a line of sight is marched in from where it enters the ground's highest shell to its
+ * point: a ridge across it is missed only where it is narrower than a 32nd of that stretch.
+ */
+export const SIGHT_SAMPLES = 32;
+
+/**
+ * How far a sample of a line of sight must stand below the drawn ground to be hidden, m: a
+ * metre, so that the bilinear heights' differences from the drawn triangles beside the point hide
+ * nothing.
+ */
+export const SIGHT_TOLERANCE_M = 1;
+
+/**
+ * The most drawn pieces' nearest points tested for sight, nearest first: a hand cap on the note's
+ * cost a frame (each test a march of {@link SIGHT_SAMPLES}). Where every point tested is hidden and
+ * more were drawn, the note keeps the nearest drawn point's range rather than none, conservatively,
+ * so that it never drops while the edge is drawn (the batch review's C1).
+ */
+export const MAX_SIGHT_TESTS = 256;
+
+/**
+ * The ground a view draws over a body, which hides the edge's points behind it (R10.T16.c): its
+ * terrain's resident heights (`ResidentHeightsView.groundHeightAtM` and `ceilingM`).
+ */
+export interface SurveyEdgeGround {
+  /**
+   * The drawn ground's height above the datum at a body-fixed unit direction, m; `null` where the
+   * view holds none, the datum there.
+   */
+  readonly heightAtM: (direction: Vec3) => number | null;
+  /** The highest the drawn ground stands above the datum, m. */
+  readonly ceilingM: number;
+}
+
 /** A body's survey as a view draws its edge. */
 export interface SurveyEdgeView {
   /** The body, which names its batch. */
@@ -87,6 +130,11 @@ export interface SurveyEdgeView {
    * holds it (its terrain's resident bakes); `null` where it holds none, the mark there on the datum.
    */
   readonly heightAtM: (direction: Vec3) => number | null;
+  /**
+   * The ground the view draws over the body (R10.T16.c), which hides a point of the edge behind it
+   * from the note's range; absent where the view draws none, as the wireframe until R10.T11.
+   */
+  readonly ground?: SurveyEdgeGround;
 }
 
 /** What the mark needs of the view beyond its camera. */
@@ -112,8 +160,9 @@ export interface SurveyEdgeMark {
   /** The ticks' segments, laid out as {@link SurveyEdgeMark.line}'s. */
   readonly ticks: Float32Array;
   /**
-   * The range to the drawn line's nearest point inside the view, m, over each segment as clipped
-   * to the view's edges, or `null` where none is.
+   * The range to the drawn line's nearest point inside the view that the operator can see, m, over
+   * each segment as clipped to the view's edges, its point hidden by no drawn ground
+   * ({@link SurveyEdgeView.ground}), or `null` where none is.
    */
   readonly nearestRangeM: number | null;
 }
@@ -404,7 +453,8 @@ export function surveyEdgeMark(
   const s = 1 / Math.tan(camera.fovXRad / 2);
   const aspect = viewport.widthPx / viewport.heightPx;
   const rangeFrom = options.rangeFromM ?? vec3(0, 0, 0);
-  let nearestRangeM: number | null = null;
+  // Each drawn segment's nearest point inside the view, from the camera, with its range.
+  const nearest: Array<{ readonly rangeM: number; readonly pointM: Vec3 }> = [];
   // The length along the drawn run, px, and that at which the next tick stands.
   let along = 0;
   let nextTickPx = spacingPx / 2;
@@ -428,8 +478,8 @@ export function surveyEdgeMark(
     const length2 = dot(d, d);
     const t = length2 > 0 ? dot(sub(rangeFrom, pM), d) / length2 : 0;
     const at = Math.min(inside[1], Math.max(inside[0], t));
-    const rangeM = norm(sub(add(pM, scale(d, at)), rangeFrom));
-    nearestRangeM = nearestRangeM === null ? rangeM : Math.min(nearestRangeM, rangeM);
+    const pointM = add(pM, scale(d, at));
+    nearest.push({ rangeM: norm(sub(pointM, rangeFrom)), pointM });
   };
 
   // A drawn segment, both ends in front: its line, its range and its ticks, the tick's side from
@@ -587,8 +637,101 @@ export function surveyEdgeMark(
   return {
     line: Float32Array.from(line),
     ticks: Float32Array.from(ticks),
-    nearestRangeM,
+    nearestRangeM: nearestSeenM(view, cameraBodyFixedM, nearest),
   };
+}
+
+/**
+ * The least range of `nearest`'s points that no drawn ground hides from the camera, m, tested
+ * nearest first, at most {@link MAX_SIGHT_TESTS} of them; the least of all where the view draws no
+ * ground, and where the cap is used up with none seen and more points were drawn; `null` where
+ * every point was tested and none is seen.
+ */
+function nearestSeenM(
+  view: SurveyEdgeView,
+  cameraBodyFixedM: Vec3,
+  nearest: ReadonlyArray<{ readonly rangeM: number; readonly pointM: Vec3 }>,
+): number | null {
+  const ground = view.ground;
+  if (ground === undefined) {
+    return nearest.reduce<number | null>(
+      (least, { rangeM }) => (least === null ? rangeM : Math.min(least, rangeM)),
+      null,
+    );
+  }
+  const ordered = nearest.toSorted((p, q) => p.rangeM - q.rangeM);
+  const visible = ordered
+    .slice(0, MAX_SIGHT_TESTS)
+    .find(
+      ({ pointM }) =>
+        !groundHidesPoint(
+          cameraBodyFixedM,
+          rotateToBodyFixed(view.rotation, sub(pointM, view.centreM)),
+          view.figure,
+          ground,
+        ),
+    );
+  if (visible !== undefined) {
+    return visible.rangeM;
+  }
+  // The cap used up with none seen: a point not tested may be, so the nearest drawn point's range.
+  return ordered.length > MAX_SIGHT_TESTS ? (ordered[0]?.rangeM ?? null) : null;
+}
+
+/**
+ * Whether the drawn ground hides the body-fixed point `pointM` from a camera at `cameraM` (plan
+ * R10, R10.T16.c): the line of sight marched in {@link SIGHT_SAMPLES} from where it enters the
+ * shell of the ground's highest ({@link SurveyEdgeGround.ceilingM} above the equatorial radius,
+ * which bounds every drawn point of an oblate figure) to just short of the point, a sample hidden
+ * where it stands more than {@link SIGHT_TOLERANCE_M} below the drawn ground over it; its height
+ * the offset from the datum's point of its parametric direction along that point's normal.
+ * Nothing hides a point where no ground stands above the datum: the spheroid's own horizon is
+ * the mark's to keep.
+ *
+ * @param cameraM - The camera from the body's centre, body-fixed, m.
+ * @param pointM - The point from the body's centre, body-fixed, m.
+ */
+export function groundHidesPoint(
+  cameraM: Vec3,
+  pointM: Vec3,
+  figure: Pick<BodyFigure, "equatorialRadiusM" | "polarRadiusM">,
+  ground: SurveyEdgeGround,
+): boolean {
+  const topM = ground.ceilingM;
+  if (!(topM > 0)) {
+    return false;
+  }
+  const a = figure.equatorialRadiusM;
+  const c = figure.polarRadiusM;
+  const shellM = a + topM;
+  const d = sub(pointM, cameraM);
+  let t0 = 0;
+  const outside = dot(cameraM, cameraM) - shellM * shellM;
+  if (outside > 0) {
+    // The nearer root of |C + t d|² = shell², where the line of sight enters the shell.
+    const qa = dot(d, d);
+    const qb = 2 * dot(cameraM, d);
+    const discriminant = qb * qb - 4 * qa * outside;
+    if (!(discriminant > 0)) {
+      return false;
+    }
+    t0 = (-qb - Math.sqrt(discriminant)) / (2 * qa);
+    if (!(t0 < 1)) {
+      return false;
+    }
+    t0 = Math.max(0, t0);
+  }
+  for (let k = 0; k < SIGHT_SAMPLES; k += 1) {
+    const q = add(cameraM, scale(d, t0 + ((1 - t0) * k) / SIGHT_SAMPLES));
+    const direction = normalise(vec3(q.x / a, q.y / a, q.z / c));
+    const datum = vec3(a * direction.x, a * direction.y, c * direction.z);
+    const normal = normalise(vec3(direction.x / a, direction.y / a, direction.z / c));
+    const heightM = dot(sub(q, datum), normal);
+    if (heightM < (ground.heightAtM(direction) ?? 0) - SIGHT_TOLERANCE_M) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** The camera's right and up axes in its frame's axes: its orientation's first two columns. */
@@ -597,20 +740,56 @@ function cameraAxes(camera: ProjectionCamera): readonly [Vec3, Vec3] {
   return [vec3(r0.x, r1.x, r2.x), vec3(r0.y, r1.y, r2.y)];
 }
 
+/** A survey edge's note in a view's list (plan R10, R10.T16.c; decision-r10-t16-review §1). */
+export interface SurveyEdgeNote {
+  /** The note as shown: `SURVEY EDGE TEST MOON 4.21 km`, `SURVEY EDGE TEST MOON 412 m FROM CAMERA`. */
+  readonly text: string;
+  /** Its range with its unit: `4.21 km`, `412 m`. */
+  readonly range: string;
+  /** Its range as read, after the designation: `4.21 km`, `412 m FROM CAMERA`. */
+  readonly reading: string;
+  /** The unit its range is in, which the next showing keeps within its hysteresis. */
+  readonly unit: SurfaceRangeUnit;
+}
+
 /**
- * The view list's note of a survey edge (the guide's `SURVEY EDGE 4.21 km`): its nearest range to
- * three figures, as the list's ranges are, `FROM CAMERA` where there is no own ship to measure
- * from, the unit kept within its hysteresis from `previous` (`formatBodyDistance`).
+ * The view list's note of a body's survey edge (the guide's Views and `SURVEY EDGE` row;
+ * decision-r10-t16-review §1): `SURVEY EDGE <designation> <range>`, the range to the edge's nearest
+ * point in the picture in `SLANT RANGE`'s units ({@link formatSurfaceRange}: `m` below 1 km, three
+ * figures, the unit kept within its hysteresis from `previous`), `FROM CAMERA` after the unit where
+ * the scene has no own ship to measure from.
+ *
+ * @param designation - The body's designation, as the list's option for it names it.
+ * @param rangeM - The range to the edge's nearest point seen, m (`DrawnSurveyEdge.nearestRangeM`).
+ * @param fromCamera - Whether the range is from the camera, the scene having no own ship.
+ * @param previous - The unit the note's range was last shown in, `null` for its first showing.
  */
 export function surveyEdgeNote(
+  designation: string,
   rangeM: number,
   fromCamera: boolean,
-  previous: BodyDistanceUnit | null,
-): { readonly text: string; readonly unit: BodyDistanceUnit } {
-  const distance = formatBodyDistance(rangeM / 1000, previous);
-  const range = `${distance.value} ${distance.unit}`;
+  previous: SurfaceRangeUnit | null,
+): SurveyEdgeNote {
+  const range = formatSurfaceRange(rangeM, previous);
+  const shown = `${range.value} ${range.unit}`;
+  const reading = fromCamera ? `${shown} FROM CAMERA` : shown;
   return {
-    text: fromCamera ? `${SURVEY_EDGE_NOTE} ${range} FROM CAMERA` : `${SURVEY_EDGE_NOTE} ${range}`,
-    unit: distance.unit,
+    text: `${SURVEY_EDGE_NOTE} ${designation} ${reading}`,
+    range: shown,
+    reading,
+    unit: range.unit,
   };
+}
+
+/**
+ * A survey edge's note's accessible name, in the options' form (the guide's Views;
+ * decision-r10-t16-review §1): `TEST MOON, survey edge, range 412 m FROM CAMERA`, with `, stale`
+ * while the list's ranges are stale, as the options' names take it.
+ */
+export function surveyEdgeNoteName(
+  designation: string,
+  note: Pick<SurveyEdgeNote, "reading">,
+  stale: boolean,
+): string {
+  return `${designation}, survey edge, range ${note.reading}${stale ? ", stale" : ""}`;
 }

@@ -3,8 +3,8 @@
  * adapter as a real one does, and whose device loss the test raises.
  *
  * @remarks
- * Only views, faults, allocation listeners, disposal, buffer handles and releases are faked;
- * every other member throws, naming itself.
+ * Only views, faults, allocation listeners, disposal, buffer, mesh and material handles and
+ * releases are faked; every other member throws, naming itself.
  */
 
 import type { AllocationEvent, BufferSpec } from "../view/engine/memory";
@@ -14,11 +14,15 @@ import type {
   BufferHandle,
   CreateWebGpuEngine,
   FrameSubmission,
+  MaterialHandle,
+  MeshHandle,
+  MeshSpec,
   PassTimes,
   RenderEngine,
   RenderView,
   TextureHandle,
   ViewSize,
+  WgslMaterialSpec,
 } from "../view/engine/types";
 
 /** The allocation every fake engine holds, and whose `destroyed` event its disposal raises. */
@@ -64,8 +68,8 @@ export class FakeRenderEngine implements RenderEngine {
   readonly capabilities: RenderEngine["capabilities"];
   readonly depthPolicy = "reversed-z-float" as const;
   readonly views: FakeView[] = [];
-  /** The buffers and textures released, in order. */
-  readonly released: Array<BufferHandle | TextureHandle> = [];
+  /** The buffers, textures, meshes and materials released, in order. */
+  readonly released: Array<BufferHandle | TextureHandle | MeshHandle | MaterialHandle> = [];
   disposed = false;
   readonly #faultListeners = new Set<(fault: GraphicsFault) => void>();
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
@@ -157,14 +161,17 @@ export class FakeRenderEngine implements RenderEngine {
   createRenderTarget(): never {
     throw notFaked("createRenderTarget");
   }
-  createMesh(): never {
-    throw notFaked("createMesh");
+  /** A handle with nothing behind it, for tests of what is done with handles (R10.T16.b). */
+  createMesh(spec: MeshSpec): MeshHandle {
+    return Object.freeze({ kind: "mesh", name: spec.name });
   }
-  createMaterial(): never {
-    throw notFaked("createMaterial");
+  /** A handle with nothing behind it, as {@link FakeRenderEngine.createMesh} gives. */
+  createMaterial(spec: WgslMaterialSpec): MaterialHandle {
+    return Object.freeze({ kind: "material", name: spec.name });
   }
-  createMaterialAsync(): Promise<never> {
-    return Promise.reject(notFaked("createMaterialAsync"));
+  /** {@link FakeRenderEngine.createMaterial}'s handle, at once. */
+  createMaterialAsync(spec: WgslMaterialSpec): Promise<MaterialHandle> {
+    return Promise.resolve(this.createMaterial(spec));
   }
   createPostProcess(): never {
     throw notFaked("createPostProcess");
@@ -204,6 +211,14 @@ export class FakeRenderEngine implements RenderEngine {
   /** Records a release, as {@link FakeRenderEngine.releaseBuffer} does. */
   releaseTexture(texture: TextureHandle): void {
     this.released.push(texture);
+  }
+  /** Records a release, as {@link FakeRenderEngine.releaseBuffer} does (R10.T16.b). */
+  releaseMesh(mesh: MeshHandle): void {
+    this.released.push(mesh);
+  }
+  /** Records a release, as {@link FakeRenderEngine.releaseBuffer} does (R10.T16.b). */
+  releaseMaterial(material: MaterialHandle): void {
+    this.released.push(material);
   }
   dispatch(): never {
     throw notFaked("dispatch");

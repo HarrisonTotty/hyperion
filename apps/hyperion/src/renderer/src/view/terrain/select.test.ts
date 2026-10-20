@@ -8,6 +8,7 @@ import { memoised } from "../../test/memo";
 import { seededRandom } from "../../test/seededRandom";
 import { goldenLevelTable, UNIT_BOUNDS, WGS84_FIGURE } from "../../test/terrainFixtures";
 import { distanceToBoxM, type PatchBounds, patchBounds, relativeBounds } from "./bounds";
+import { fieldCellIndex } from "./coverage";
 import { aboveHorizon, frustumOf, horizonCone, inFrustum } from "./cull";
 import { PATCH_QUADS, vertexDir, vertexSpacing, type Xyz } from "./cube";
 import {
@@ -40,8 +41,10 @@ import {
   selectionErrorM,
   selectPatches,
   screenSpaceErrorPx,
+  type SurveyLookup,
   type ViewSelectionInput,
 } from "./select";
+import { SurveyedCells } from "./surveyLookup";
 
 const PLANET = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
 const HD = { widthPx: 1920, heightPx: 1080 };
@@ -346,13 +349,15 @@ function levelGaps(keys: readonly PatchKey[]): number {
     patches: new Map(
       keys.map((k) => [
         patchKeyString(k),
-        { key: k, bounds: UNIT_BOUNDS, forced: false, seen: true },
+        { key: k, bounds: UNIT_BOUNDS, forced: false, seen: true, views: 1 },
       ]),
     ),
     demand: [],
     limited: false,
     limitExcess: 0,
     hiddenBaked: [],
+    nearestSurveyM: Number.POSITIVE_INFINITY,
+    nearestSurveyByViewM: [Number.POSITIVE_INFINITY],
   };
   let gaps = 0;
   for (const k of keys) {
@@ -1326,5 +1331,204 @@ describe("the bounds memo", () => {
       ([k, p]) => p.bounds !== first.patches.get(k)?.bounds,
     );
     expect(rebuilt.length).toBeGreaterThan(again.patches.size / 2);
+  });
+});
+
+/** The survey's cells at the field's level 8: a 2 × 2 block under {@link SITE}. */
+const SURVEY_LEVEL = 8;
+const SURVEY_CELLS: ReadonlyArray<PatchKey> = [
+  { face: 0, level: SURVEY_LEVEL, i: 146, j: 97 },
+  { face: 0, level: SURVEY_LEVEL, i: 147, j: 97 },
+  { face: 0, level: SURVEY_LEVEL, i: 146, j: 98 },
+  { face: 0, level: SURVEY_LEVEL, i: 147, j: 98 },
+];
+
+/** A survey of `cells`, as the session's lookup holds a block's (R10.T16.b). */
+function surveyOf(cells: ReadonlyArray<PatchKey>): SurveyedCells {
+  const survey = new SurveyedCells();
+  const indices = cells.map(fieldCellIndex).toSorted((a, b) => a - b);
+  survey.add({
+    fieldLevel: SURVEY_LEVEL,
+    newlySurveyed: Uint32Array.from(indices.flatMap((index) => [index, index + 1])),
+  });
+  return survey;
+}
+
+/** The keys of a selection's forced patches. */
+function forcedOf(sel: Selection): string[] {
+  return [...sel.patches.values()].filter((p) => p.forced).map((p) => patchKeyString(p.key));
+}
+
+/** A two-view mask with its views swapped. */
+function swap(mask: number): number {
+  return ((mask & 1) << 1) | ((mask & 2) >> 1);
+}
+
+/** A lookup that calls every patch surveyed. */
+const ALL_SURVEYED: SurveyLookup = { surveyedUnder: () => true };
+
+/** What a selection gives, its patches' every field and the rest, for comparing two. */
+function outcome(sel: Selection): unknown {
+  return {
+    patches: [...sel.patches.entries()].map(([k, p]) => [k, p.bounds, p.forced, p.seen, p.views]),
+    demand: sel.demand,
+    limited: sel.limited,
+    limitExcess: sel.limitExcess,
+    hiddenBaked: sel.hiddenBaked,
+  };
+}
+
+describe("selection over a survey (R10.T16.b; decision-r10-t16-contracts §2–3)", () => {
+  const survey = surveyOf(SURVEY_CELLS);
+  const low = (): ViewSelectionInput => view(LOW, lookingDown(LOW, 1.2));
+  const orbit = (): ViewSelectionInput => view(ORBIT, lookingDown(ORBIT, 0.3), { weight: 0.25 });
+
+  it.each([
+    ["two views", { views: [low(), orbit()] }],
+    ["a budget", { views: [low()], maxPatches: 300 }],
+    ["a contact", { views: [low()], grounded: [{ positionM: above(5), radiusM: 20 }] }],
+    ["baked ranges", { views: [low()], heightRanges: bakedToDepth(6) }],
+  ] as const)(
+    "gives R05's selection, bit for bit, with no lookup and with one that calls everything surveyed: %s",
+    (_name, given) => {
+      const input: SelectionInput = { planet: PLANET, setting: "high", grounded: [], ...given };
+      const plain = selectPatches(input);
+      const surveyed = selectPatches({ ...input, survey: ALL_SURVEYED });
+      expect(outcome(surveyed)).toEqual(outcome(plain));
+      expect(plain.nearestSurveyM).toBe(Number.POSITIVE_INFINITY);
+    },
+  );
+
+  it("never refines, asks for or draws a patch with no surveyed cell", () => {
+    const plain = select([low()]);
+    const sel = selectPatches({
+      planet: PLANET,
+      views: [low()],
+      setting: "high",
+      grounded: [],
+      survey,
+    });
+    const bare = (key: PatchKey): boolean => !survey.surveyedUnder(key);
+    expect([...sel.patches.values()].filter((p) => bare(p.key))).toEqual([]);
+    expect(sel.demand.filter((r) => bare(r.key))).toEqual([]);
+    // The camera sees bare ground too, which R05's selection refines.
+    expect([...plain.patches.values()].some((p) => bare(p.key))).toBe(true);
+    expect(sel.patches.size).toBeGreaterThan(0);
+    expect(sel.patches.size).toBeLessThan(plain.patches.size);
+  });
+
+  it("selects nothing over bare ground alone, and asks for nothing", () => {
+    const far = above(1_500, { face: 0, level: 19, i: 100_001, j: 400_003 });
+    const sel = selectPatches({
+      planet: PLANET,
+      views: [view(far, lookingDown(far))],
+      setting: "high",
+      grounded: [],
+      survey,
+    });
+    expect([sel.patches.size, sel.demand.length, sel.limited]).toEqual([0, 0, false]);
+  });
+
+  it("forces nothing for a contact over unsurveyed ground", () => {
+    const site = above(5, { face: 0, level: 19, i: 100_001, j: 400_003 });
+    const input: SelectionInput = {
+      planet: PLANET,
+      views: [low()],
+      setting: "high",
+      grounded: [{ positionM: site, radiusM: 20 }],
+    };
+    expect([...selectPatches(input).patches.values()].some((p) => p.forced)).toBe(true);
+    const sel = selectPatches({ ...input, survey });
+    expect([...sel.patches.values()].some((p) => p.forced)).toBe(false);
+    expect(sel.demand.some((r) => r.forced)).toBe(false);
+  });
+
+  it("forces exactly the surveyed patches of a contact astride the survey's edge, at the finest level", () => {
+    // On the low-i edge of the survey's first cell, half way along it.
+    const edge = vertexDir({ face: 0, level: SURVEY_LEVEL, i: 146, j: 97 }, 0, 32);
+    const [x, y, z] = surfacePoint(WGS84_FIGURE, edge, 5);
+    const input: SelectionInput = {
+      planet: PLANET,
+      views: [low()],
+      setting: "high",
+      grounded: [{ positionM: vec3(x, y, z), radiusM: 20 }],
+    };
+    const everywhere = forcedOf(selectPatches(input));
+    const sel = selectPatches({ ...input, survey });
+    const surveyedOnes = everywhere.filter((k) => {
+      const key = sel.patches.get(k)?.key ?? selectPatches(input).patches.get(k)?.key;
+      return key !== undefined && survey.surveyedUnder(key);
+    });
+    expect(forcedOf(sel).toSorted()).toEqual(surveyedOnes.toSorted());
+    // The edge splits the region: some of its patches lie over bare ground.
+    expect(surveyedOnes.length).toBeGreaterThan(0);
+    expect(surveyedOnes.length).toBeLessThan(everywhere.length);
+    expect(
+      [...sel.patches.values()]
+        .filter((p) => p.forced)
+        .every((p) => p.key.level === PLANET.finestLevel),
+    ).toBe(true);
+  });
+
+  it("marks each patch with the views that see it, a patch only the instrument sees bit 1 alone", () => {
+    const sel = selectPatches({
+      planet: PLANET,
+      views: [low(), orbit()],
+      setting: "high",
+      grounded: [],
+    });
+    const masks = new Set([...sel.patches.values()].map((p) => p.views));
+    expect([...masks].every((m) => m > 0 && (m & ~0b11) === 0)).toBe(true);
+    expect(masks.has(0b10)).toBe(true);
+    expect(masks.has(0b01) || masks.has(0b11)).toBe(true);
+  });
+
+  it("gives the same selection with two views and a survey, in any order, called twice", () => {
+    const a = low();
+    const b = orbit();
+    const run = (views: ViewSelectionInput[]): Selection =>
+      selectPatches({ planet: PLANET, views, setting: "high", grounded: [], survey });
+    const first = run([a, b]);
+    const swapped = run([b, a]);
+    select([view(ORBIT, lookingDown(ORBIT))]);
+    const after = run([a, b]);
+    expect([...swapped.patches.keys()]).toEqual([...first.patches.keys()]);
+    expect(outcome(after)).toEqual(outcome(first));
+    // The views' bits follow their order.
+    expect([...swapped.patches.values()].map((p) => p.views)).toEqual(
+      [...first.patches.values()].map((p) => swap(p.views)),
+    );
+  });
+
+  it("measures the nearest surveyed ground from the cameras: no nearer than its cells, never under a finest patch, +∞ with none", () => {
+    const far = above(1_500, { face: 0, level: 19, i: 100_001, j: 400_003 });
+    const input: SelectionInput = {
+      planet: PLANET,
+      views: [view(far, lookingDown(far))],
+      setting: "high",
+      grounded: [],
+    };
+    expect(selectPatches(input).nearestSurveyM).toBe(Number.POSITIVE_INFINITY);
+    expect(selectPatches({ ...input, survey: new SurveyedCells() }).nearestSurveyM).toBe(
+      Number.POSITIVE_INFINITY,
+    );
+    const nearest = selectPatches({ ...input, survey }).nearestSurveyM;
+    // The survey's nearest corner, on the datum, bounds it from above; its cells' boxes, from below.
+    const corners = SURVEY_CELLS.flatMap((cell) =>
+      [0, 64].flatMap((s) =>
+        [0, 64].map((t) => {
+          const [cx, cy, cz] = surfacePoint(WGS84_FIGURE, vertexDir(cell, s, t), 0);
+          return Math.hypot(cx - far.x, cy - far.y, cz - far.z);
+        }),
+      ),
+    );
+    expect(nearest).toBeLessThanOrEqual(Math.min(...corners));
+    expect(nearest).toBeGreaterThan(0.5 * Math.min(...corners));
+    // Over the survey it is clamped to one finest patch.
+    const over = selectPatches({ ...input, views: [low()], survey }).nearestSurveyM;
+    expect(over).toBeCloseTo(
+      PATCH_QUADS * vertexSpacing(PLANET.figure.equatorialRadiusM, PLANET.finestLevel).maxM,
+      6,
+    );
   });
 });

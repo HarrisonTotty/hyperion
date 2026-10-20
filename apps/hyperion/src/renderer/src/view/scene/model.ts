@@ -1,5 +1,6 @@
 import type {
   BodyIdHex,
+  DetailSeedHex,
   GalacticPosition,
   HostDiscDto,
   SystemIdHex,
@@ -113,6 +114,13 @@ export interface ViewBody {
   readonly orbitNormal: Vec3 | null;
   /** Its mark from the ship-wide symbol set, drawn below 3 px (`lib/system/bodySymbols.ts`). */
   readonly symbol: BodyMarkSymbol;
+  /**
+   * A kept scene's body's own detail seed (`BodyHooksDto.detail_seed`'s form), the seed of its
+   * terrain synthesis and class map, which the terrain session takes in place of asking
+   * `body_detail` (plan R10, R10.T16.a; `TERRAIN TEST`'s body carries one, R10.T16.d). Absent for a
+   * server body, whose seed the session asks of its record, and for a kept body with no terrain.
+   */
+  readonly detailSeed?: DetailSeedHex;
 }
 
 /** Whether a scene body is lit in the photorealistic style: a planet, dwarf planet or moon. */

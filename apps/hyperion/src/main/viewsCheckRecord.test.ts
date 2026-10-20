@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { ViewsCheckRecord } from "../preload/api";
-import { readViewsCheckRecord } from "./viewsCheckRecord";
+import { TERRAIN_RECORD } from "./fixtures/terrainRecord";
+import { readTerrainCheckRecord, readViewsCheckRecord } from "./viewsCheckRecord";
 
 const RECORD: ViewsCheckRecord = {
   timer: "full",
@@ -72,6 +73,11 @@ function withField(path: ReadonlyArray<string | number>, value: unknown): unknow
   return replaced(RECORD, path, value);
 }
 
+/** `TERRAIN_RECORD` with one property path replaced. */
+function withTerrainField(path: ReadonlyArray<string | number>, value: unknown): unknown {
+  return replaced(TERRAIN_RECORD, path, value);
+}
+
 describe("the views check's record", () => {
   it("is read back whole", () => {
     expect(readViewsCheckRecord(structuredClone(RECORD))).toEqual(RECORD);
@@ -98,5 +104,45 @@ describe("the views check's record", () => {
 
   it("refuses what is not an object", () => {
     expect(readViewsCheckRecord("record")).toBeNull();
+  });
+});
+
+describe("the terrain run's record (R10.T16.d)", () => {
+  it("is read back whole", () => {
+    expect(readTerrainCheckRecord(structuredClone(TERRAIN_RECORD))).toEqual(TERRAIN_RECORD);
+  });
+
+  it("is read back with no hand-over range and an undestroyed device", () => {
+    const record = {
+      ...TERRAIN_RECORD,
+      handover: null,
+      loss: { ...TERRAIN_RECORD.loss, destroyedAtMs: null, notDestroyed: "no device was held" },
+    };
+    expect(readTerrainCheckRecord(structuredClone(record))).toEqual(record);
+  });
+
+  it.each([
+    [["timer"], "fast"],
+    [["phases", 0, "name"], "photoreal-alone"],
+    [["phases", 0, "endMs"], 0],
+    [["phases", 0, "views", 0, "missedFrames"], -1],
+    [["phases", 0, "views", 0, "firstTerrainMs"], "soon"],
+    [["phases", 0, "patchesDrawn"], [1.5]],
+    [["phases", 0, "bakes", "baked"], null],
+    [["phases", 0, "memory", "liveBytes", 0, "bytes"], -2],
+    [["faults", 0, "kind"], "device-gone"],
+    [["faults", 0, "reason"], 3],
+    [["restoresAtMs"], ["soon"]],
+    [["loss", "after", "fieldChunks"], 1.5],
+    [["loss", "masks", "beforeKept"], "yes"],
+    [["teardown", "workersLive"], -1],
+    [["handover", "rangeM"], 0],
+  ])("refuses a record whose %j is %j", (path, value) => {
+    expect(readTerrainCheckRecord(withTerrainField(path, value))).toBeNull();
+  });
+
+  it("refuses T20's record, and T20's reader refuses it", () => {
+    expect(readTerrainCheckRecord(RECORD)).toBeNull();
+    expect(readViewsCheckRecord(TERRAIN_RECORD)).toBeNull();
   });
 });

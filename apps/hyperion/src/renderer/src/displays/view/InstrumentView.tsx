@@ -15,6 +15,7 @@ import type { Instrument } from "./useInstruments";
 import type { SkyLineReading } from "./useViewSky";
 import type { DragKind } from "./useViewDrag";
 import { ViewCanvas } from "./ViewCanvas";
+import { terrainStatementOf } from "./viewFaults";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import { PRIMARY_NAME } from "./viewNames";
 import {
@@ -50,8 +51,12 @@ export interface InstrumentViewProps {
    * reads `PENDING` until its first (R06.T11.f), as the primary's does.
    */
   readonly skyAwaiting: boolean;
-  /** A graphics fault standing for this view (its own `GRAPHICS VIEW REFUSED`), or `null`. */
-  readonly fault: string | null;
+  /**
+   * The faults standing for this view, graphics first (its own `GRAPHICS VIEW REFUSED`), then the
+   * terrain's while it hands a body over with every height worker lost (plan R10, R10.T16.b); each
+   * its own fault line.
+   */
+  readonly faults: ReadonlyArray<string>;
   /** The ID of the text describing the canvases' keys. */
   readonly legendId: string;
   readonly onKeyDown: (event: KeyboardEvent<HTMLCanvasElement>) => void;
@@ -124,9 +129,11 @@ function instrumentLines(
  * camera's limit, stale with the sky while the link is down (R06.T13.j), with what the sky leaves
  * out, or `PENDING` until the sky's first reply; never the stars-arriving note, which stands on
  * the primary's line alone, since the display's views draw one sky
- * (decision-r06-t11f-stars-line); and its graphics fault (decision-r07-t19, item 2b). Its
+ * (decision-r06-t11f-stars-line); and its faults, the graphics' (decision-r07-t19, item 2b) and then
+ * the terrain's (R10.T16.b), each on a fault line of its own. Its
  * statements run the slot's width under its label block and canvas, while they hold:
- * `POSITIONS AS SEEN FROM SHIP`,
+ * `POSITIONS AS SEEN FROM SHIP`, its own terrain's `TERRAIN: STREAMING` or
+ * `TERRAIN: DETAIL LIMITED` (R10.T16.c),
  * `PHOTOREALISTIC: PREPARING`, and each photorealistic statement that holds for its picture
  * (`LIGHTING: …`, `BODY PHOTOMETRY: NOT YET MODELLED`, `CRAFT PHOTOMETRY: NOT YET MODELLED` or the
  * two composed, R07.T16.e) unless the primary's block shows the same line
@@ -144,7 +151,7 @@ export function InstrumentView({
   litLabels,
   primaryPhotorealStatements,
   skyAwaiting,
-  fault,
+  faults,
   legendId,
   onKeyDown,
   onKeyUp,
@@ -165,7 +172,10 @@ export function InstrumentView({
     run === null
       ? []
       : [
-          ...labelStatements(run).filter((statement) => statement === POSITIONS_FROM_SHIP),
+          // Its own terrain annunciation, of the bodies its frame hands over (R10.T16.c).
+          ...labelStatements(run, terrainStatementOf(shown?.terrain ?? null, faults)).filter(
+            (statement) => statement === POSITIONS_FROM_SHIP || statement === shown?.terrain,
+          ),
           // Its own preparing, and the photorealistic style's statements about its picture that
           // the primary's block does not show already.
           ...photorealStatements(
@@ -225,7 +235,7 @@ export function InstrumentView({
               )}
               statements={[]}
               countLine={null}
-              fault={fault}
+              faults={faults}
             />
           )}
         </div>

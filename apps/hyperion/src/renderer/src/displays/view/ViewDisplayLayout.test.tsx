@@ -26,6 +26,7 @@ import {
 import { NO_VIEW_DRAWN, PHOTOREAL_NOT_CREATED } from "./styleRefusals";
 import type { ViewEngineSource } from "./useViewEngine";
 import { statusLine } from "../../test/statusLine";
+import STYLES from "../../styles.css?raw";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -667,5 +668,17 @@ describe("VIEW's list without an own ship (R07.T19.b)", () => {
     const targets = screen.getByRole("region", { name: "Targets PRIMARY" });
     expect(within(targets).getByText("RANGE")).toBeInTheDocument();
     expect(within(targets).queryByText("FROM CAMERA")).not.toBeInTheDocument();
+  });
+});
+
+describe("VIEW's SCENE selector at 150% interface scale (R10.T16's batch review, D-D)", () => {
+  it("wraps its row between its buttons", () => {
+    expect(STYLES).toMatch(/\.view-display__bar \.preset-buttons \{[^}]*flex-wrap: wrap;/u);
+  });
+
+  it("keeps each button's label on one line", () => {
+    expect(STYLES).toMatch(
+      /\.view-display__bar \.preset-buttons__button \{[^}]*white-space: nowrap;/u,
+    );
   });
 });

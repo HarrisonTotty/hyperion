@@ -19,6 +19,7 @@ import type { CoverDto } from "@hyperion/protocol";
 
 import { TEXTURE_USAGE } from "../engine/gpuFlags";
 import type { TextureSpec } from "../engine/memory";
+import { EngineUnavailable } from "../engine/resilientEngine";
 import type { RenderEngine, TextureHandle } from "../engine/types";
 import { stToUv } from "./cube";
 import { type Edge, EDGES, edgeNeighbour, type Face, type PatchKey } from "./patchKey";
@@ -413,6 +414,11 @@ export const COVERAGE_MASK_SURVEYED = 255;
  * The specification of a field's coverage mask (Design note 12): a 2D array of six 2ᴸ × 2ᴸ layers,
  * one a face, under `coarse-field-gpu` (R12 Design note 6), 6 · 4ᴸ bytes, at most 384 KiB at
  * level 8, the brainstorm's "coarse field, GPU copy".
+ *
+ * @remarks
+ * It may be copied from (`COPY_SRC`), so that the views check's terrain run reads it back around
+ * its forced device loss (plan R10, R10.T16.d; decision-r10-t16-contracts §6: "the masks hold the
+ * same cells"); nothing else reads it back.
  */
 export function coverageMaskTextureSpec(name: string, level: number): TextureSpec {
   const side = 2 ** level;
@@ -422,7 +428,7 @@ export function coverageMaskTextureSpec(name: string, level: number): TextureSpe
     dimension: "2d",
     format: COVERAGE_MASK_FORMAT,
     mips: 1,
-    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST | TEXTURE_USAGE.COPY_SRC,
     category: "coarse-field-gpu",
   };
 }
@@ -553,11 +559,23 @@ export class CoverageMask {
     return this.#texels;
   }
 
+  /**
+   * Writes `texels` into the texture, making it first where there is none. The cells are held
+   * before the texture is made, so that one refused during a device loss (`EngineUnavailable`)
+   * leaves them for {@link CoverageMask.restore} to make it with (the batch review's S4).
+   */
   #write(level: number, texels: Uint8Array): void {
     const side = 2 ** level;
+    this.#level = level;
     if (this.#texture === null) {
-      this.#texture = this.#engine.createTexture(coverageMaskTextureSpec(this.#name, level));
-      this.#level = level;
+      try {
+        this.#texture = this.#engine.createTexture(coverageMaskTextureSpec(this.#name, level));
+      } catch (error: unknown) {
+        if (error instanceof EngineUnavailable) {
+          return;
+        }
+        throw error;
+      }
     }
     this.#engine.writeTexture(
       this.#texture,

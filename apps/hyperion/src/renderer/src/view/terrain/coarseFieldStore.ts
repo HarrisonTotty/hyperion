@@ -492,6 +492,12 @@ interface Entry {
   retry: ReturnType<typeof setTimeout> | null;
   /** How many asks in a row the server was too busy for. */
   busyAnswers: number;
+  /**
+   * Whether the field is to be asked again once the request in flight settles with an answer: a
+   * resync came while it was out ({@link CoarseFieldStore.resync}), so its answer may be behind a
+   * rise the scene announced where the client could not hear it.
+   */
+  recheck: boolean;
 }
 
 /** The ending of a request that is the link's, not the server's: asked again when it returns. */
@@ -531,8 +537,10 @@ function isBusy(failure: RequestFailure): boolean {
  * @remarks
  * Each frame the views' wiring calls {@link CoarseFieldStore.follow} with the bodies their cameras
  * see, the scene's notifications pass their `surface_revisions` to
- * {@link CoarseFieldStore.noteSurfaceRevisions}, and the link's state reaches
- * {@link CoarseFieldStore.setLinkUp}. Consumers read {@link CoarseFieldStore.coverage} each frame,
+ * {@link CoarseFieldStore.noteSurfaceRevisions}, the scene topic opened again reaches
+ * {@link CoarseFieldStore.resync}, and the link's state reaches
+ * {@link CoarseFieldStore.setLinkUp} (R10.T16.a's `TerrainSession` wires all four). Consumers read
+ * {@link CoarseFieldStore.coverage} each frame,
  * or listen with {@link CoarseFieldStore.onRevision} for each new coverage. Call
  * {@link CoarseFieldStore.dispose} before the pool is terminated.
  */
@@ -585,6 +593,7 @@ export class CoarseFieldStore {
       waiting: false,
       retry: null,
       busyAnswers: 0,
+      recheck: false,
     };
     this.#entries.set(body, entry);
     this.#ask(body, entry);
@@ -709,6 +718,30 @@ export class CoarseFieldStore {
     }
   }
 
+  /**
+   * Asks every kept field again with the revision held, as the link's return does: for the scene
+   * topic opened again after a sequence fault, a push it could not use or the server's ending it,
+   * whose notifications meanwhile are not replayed (R03 Design note 4), so that a rise announced
+   * in them is not missed (plan R10, R10.T16.a).
+   *
+   * @remarks
+   * A body whose request is in flight is asked again once it is answered, since that answer may
+   * predate the rise; one waiting for the link, or for a busy server, is asked as it was to be. A
+   * field held failed, or not modelled, is not asked. Nothing once the store is disposed.
+   */
+  resync(): void {
+    if (this.#disposed) {
+      return;
+    }
+    for (const [body, entry] of this.#entries) {
+      if (entry.fetch !== null) {
+        entry.recheck = true;
+      } else if (entry.coverage !== null && entry.failure === null) {
+        this.#ask(body, entry);
+      }
+    }
+  }
+
   /** Cancels every request and releases every body from the workers; the store is then unusable. */
   dispose(): void {
     if (this.#disposed) {
@@ -747,6 +780,7 @@ export class CoarseFieldStore {
       return;
     }
     entry.waiting = false;
+    entry.recheck = false;
     const splitter = new BlockSplitter();
     const started: Fetch = { cancel: () => undefined, failure: null };
     const have = entry.coverage?.revision ?? null;
@@ -864,7 +898,7 @@ export class CoarseFieldStore {
         console.error(`a coarse-field listener failed on the revision of ${body}:`, error);
       }
     }
-    if (entry.announced !== null && entry.announced > response.revision) {
+    if (entry.recheck || (entry.announced !== null && entry.announced > response.revision)) {
       this.#ask(body, entry);
     }
   }

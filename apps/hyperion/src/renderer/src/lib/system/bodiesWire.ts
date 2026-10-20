@@ -33,6 +33,7 @@ import {
   type CraterContractDto,
   type CraterScreeningDto,
   type CrustCompositionDto,
+  type DetailSeedHex,
   type GasShareDto,
   type HabitableZoneDto,
   isBodyId,
@@ -147,6 +148,28 @@ export function toBodyDetailRequest(
   time: UniverseTime,
 ): RequestOf<"body_detail"> {
   return { kind: "body_detail", universe, body, time, detail: DETAIL_ASKED };
+}
+
+/** A detail seed's form on the wire: exactly 16 lowercase hexadecimal digits (`DetailSeedHex`). */
+const DETAIL_SEED_FORM = /^[0-9a-f]{16}$/u;
+
+/**
+ * A body record's detail seed (`BodyHooksDto.detail_seed`, R09.T1.b), the seed of the client's
+ * terrain synthesis, without reading the rest of the record: `null` where its hooks or the seed
+ * are not `ok` (not modelled, not applicable, or above the detail granted) or the seed is not of
+ * its wire form.
+ *
+ * @remarks
+ * The terrain session's want of a body (plan R10, R10.T16.a) reads it from one `body_detail` a
+ * want, as {@link toBodyDetail}'s record reads it whole for the `SYSTEM` display.
+ */
+export function bodyDetailSeed(record: Pick<BodyRecordDto, "hooks">): DetailSeedHex | null {
+  const { hooks } = record;
+  if (hooks.state !== "ok" || hooks.value.detail_seed.state !== "ok") {
+    return null;
+  }
+  const seed = hooks.value.detail_seed.value;
+  return DETAIL_SEED_FORM.test(seed) ? seed : null;
 }
 
 /**
@@ -1399,7 +1422,7 @@ function toRecord(record: BodyRecordDto, system: SystemIdHex, designation: strin
     envelope: toOptionalSection(record.envelope, toEnvelope),
     hooks: toSection(record.hooks, (hooks) => ({
       detailSeed: toSection(hooks.detail_seed, (seed) => {
-        check(/^[0-9a-f]{16}$/.test(seed), "detail seed malformed");
+        check(DETAIL_SEED_FORM.test(seed), "detail seed malformed");
         return seed;
       }),
     })),

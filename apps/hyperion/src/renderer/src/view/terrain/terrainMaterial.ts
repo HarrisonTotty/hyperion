@@ -52,7 +52,9 @@ import litBodyWgsl from "../shaders/litBody.wgsl?raw";
 import { PATH_SOURCES, TERRAIN_BINDINGS, terrainVertexStorage } from "./gpu/material";
 import horizonWgsl from "./shadows/horizon.wgsl?raw";
 import patchVertexWgsl from "./shaders/patchVertex.wgsl?raw";
+import terrainDepthWgsl from "./shaders/terrainDepth.wgsl?raw";
 import terrainLitWgsl from "./shaders/terrainLit.wgsl?raw";
+import terrainLitShadeWgsl from "./shaders/terrainLitShade.wgsl?raw";
 import terrainPatchWgsl from "./shaders/terrainPatch.wgsl?raw";
 import { PATCH_VERTICES_PER_SIDE } from "./slotLayout";
 import { PHOTOMETRY_STRIDE } from "./workers/messages";
@@ -85,9 +87,23 @@ const DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
 };
 
 /**
- * The lit terrain material of a vertex path: `frame.wgsl`, `patchVertex.wgsl`, R08's surface
- * lighting, R07's `litBody.wgsl`, `terrainPatch.wgsl`, the horizon map's lookup
- * (`shadows/horizon.wgsl`, R10.T8.b), `terrainLit.wgsl` and the path's source.
+ * What every lit terrain module composes before its `Draw` and fragment stage: `frame.wgsl`,
+ * `patchVertex.wgsl`, R08's surface lighting, R07's `litBody.wgsl`, `terrainPatch.wgsl`, the
+ * horizon map's lookup (`shadows/horizon.wgsl`, R10.T8.b) and `terrainLit.wgsl`, its vertices and
+ * survey discard.
+ */
+const LIT_TERRAIN_SOURCE =
+  frameWgsl +
+  patchVertexWgsl +
+  SURFACE_LIGHTING_WGSL +
+  litBodyWgsl +
+  terrainPatchWgsl +
+  horizonWgsl +
+  terrainLitWgsl;
+
+/**
+ * The lit terrain material of a vertex path: {@link LIT_TERRAIN_SOURCE}, its own `Draw` and
+ * fragment stage (`terrainLitShade.wgsl`) and the path's source.
  *
  * @remarks
  * Each storage buffer is visible only to the stages that read it (decision-r10-t10b-r09-t2e §5):
@@ -100,15 +116,7 @@ const DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
  * surface at the survey's edge.
  */
 export function terrainLitMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
-  const source =
-    frameWgsl +
-    patchVertexWgsl +
-    SURFACE_LIGHTING_WGSL +
-    litBodyWgsl +
-    terrainPatchWgsl +
-    horizonWgsl +
-    terrainLitWgsl +
-    PATH_SOURCES[path];
+  const source = LIT_TERRAIN_SOURCE + terrainLitShadeWgsl + PATH_SOURCES[path];
   const b = TERRAIN_LIT_BINDINGS;
   const fragment = ["fragment"] as const;
   const storageBuffers: StorageBufferSpec[] = [
@@ -142,10 +150,65 @@ export function terrainLitMaterialSpec(path: TerrainVertexPath): WgslMaterialSpe
   };
 }
 
+/** The console names of the two paths' depth materials. */
+const DEPTH_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "TERRAIN DEPTH OFFSETS",
+  "face-differences": "TERRAIN DEPTH",
+};
+
+/**
+ * The lit terrain of a vertex path as depth alone, for the symbology's pass over the
+ * photorealistic image (plan R10, R10.T16.c; `terrainDepth.wgsl`): {@link LIT_TERRAIN_SOURCE}, the
+ * depth's own `Draw` and fragment stage and the path's source, drawn with a lit view draw's
+ * resources (`TerrainPass.drawFor`'s) into the canvas's depth before the overlay's lines, so that
+ * nearer ground hides them, each fragment pushed away by `occluderSlopePx` as the occluders are.
+ *
+ * @remarks
+ * It binds what its entry points read alone: R05's vertex storage (four on `face-differences`)
+ * and the survey mask, in both stages as the lit material's, which places the fins by its code and
+ * discards by its mask, and no texture. Colour writes are off, and it writes depth from its
+ * fragment, as R02's occluders do.
+ */
+export function terrainDepthMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
+  const source = LIT_TERRAIN_SOURCE + terrainDepthWgsl + PATH_SOURCES[path];
+  return {
+    name: `terrain-depth-${path}`,
+    displayName: DEPTH_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [
+      { name: "bodyRotation", type: "mat4x4f" },
+      { name: "cameraBodyFixedM", type: "vec4f" },
+      { name: "atlas", type: "vec4f" },
+      { name: "occluderSlopePx", type: "f32" },
+    ],
+    samplers: [],
+    textures: [],
+    cullMode: "back",
+    depthWrite: true,
+    colourWrites: false,
+    blend: "none",
+    storageBuffers: [
+      ...terrainVertexStorage(path),
+      {
+        name: "surveyMask",
+        binding: TERRAIN_LIT_BINDINGS.surveyMask,
+        stages: ["vertex", "fragment"],
+      },
+    ],
+  };
+}
+
 /** Both paths' lit materials, for the catalogue. */
 export const TERRAIN_LIT_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   terrainLitMaterialSpec("baked-offsets"),
   terrainLitMaterialSpec("face-differences"),
+];
+
+/** Both paths' depth materials (R10.T16.c), for the catalogue. */
+export const TERRAIN_DEPTH_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainDepthMaterialSpec("baked-offsets"),
+  terrainDepthMaterialSpec("face-differences"),
 ];
 
 /**
@@ -225,6 +288,25 @@ export function classPhotometryOf(photometry: Float32Array, slot: number): Class
 }
 
 /**
+ * Whether two laws give the same phase table row: the same A, L(0), template and exponents, and the
+ * same L(α) profile object (the templates' own, shared), or each none.
+ */
+function sameLaw(a: PhotometricLaw, b: PhotometricLaw): boolean {
+  return (
+    a === b ||
+    (a.a[0] === b.a[0] &&
+      a.a[1] === b.a[1] &&
+      a.a[2] === b.a[2] &&
+      a.lommelSeeligerShare === b.lommelSeeligerShare &&
+      a.lommelSeeligerCurve === b.lommelSeeligerCurve &&
+      a.template === b.template &&
+      a.phaseExponent[0] === b.phaseExponent[0] &&
+      a.phaseExponent[1] === b.phaseExponent[1] &&
+      a.phaseExponent[2] === b.phaseExponent[2])
+  );
+}
+
+/**
  * The rows of a terrain's phase table (`phase_factor_table`): row 0 the body's uniform law, then
  * one row per (law, L(0)) as the patches' class laws ask for them, kept in the order asked.
  *
@@ -252,9 +334,14 @@ export class TerrainPhaseRows {
     return this.#version;
   }
 
-  /** Puts `law` in row 0; whether it changed. */
+  /**
+   * Puts `law` in row 0; whether it changed. A law equal to row 0's by value changes nothing, so
+   * that the views of one body, each lit by its own frame's law object, upload the table once
+   * (plan R10, R10.T16.b).
+   */
   setElsewhere(law: PhotometricLaw): boolean {
-    if (this.#laws[0] === law) {
+    const held = this.#laws[0];
+    if (held !== undefined && sameLaw(held, law)) {
       return false;
     }
     this.#laws[0] = law;

@@ -1022,3 +1022,58 @@ describe("the coarse-field store", () => {
     }).toThrow(/disposed/u);
   });
 });
+
+describe("the coarse-field store's resync (R10.T16.a)", () => {
+  beforeEach(() => {
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+  });
+
+  it("asks every kept field again with the revision held", async () => {
+    const h = harness(1);
+    h.store.want(MOON, "local-body");
+    await answer(h, [block(50, 1)], 3, cover([0, 2, 30]));
+
+    h.store.resync();
+
+    expect(h.socket().requestsOfKind("surface_field")).toHaveLength(2);
+    expect(latestAsk(h.socket()).have).toBe(3);
+  });
+
+  it("asks a field whose request is in flight again once it is answered", async () => {
+    const h = harness(1);
+    h.store.want(MOON, "local-body");
+    h.store.resync();
+    expect(h.socket().requestsOfKind("surface_field")).toHaveLength(1);
+
+    await answer(h, [block(50, 1)], 1, cover([0, 2, 30]));
+
+    expect(h.socket().requestsOfKind("surface_field")).toHaveLength(2);
+    expect(latestAsk(h.socket()).have).toBe(1);
+  });
+
+  it("asks no field held failed again", async () => {
+    const h = harness(1);
+    h.store.want(MOON, "local-body");
+    h.socket().serverRejects(latestAsk(h.socket()).id, {
+      code: "internal",
+      message: "the field could not be computed",
+      field: null,
+    });
+    await settle();
+
+    h.store.resync();
+
+    expect(h.socket().requestsOfKind("surface_field")).toHaveLength(1);
+  });
+
+  it("asks nothing once disposed", () => {
+    const h = harness(1);
+    h.store.want(MOON, "local-body");
+    h.store.dispose();
+
+    h.store.resync();
+
+    expect(h.socket().requestsOfKind("surface_field")).toHaveLength(1);
+  });
+});

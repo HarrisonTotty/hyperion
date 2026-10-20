@@ -31,11 +31,8 @@ import {
   spritesAtScale,
 } from "../../view/photoreal/internalScale";
 import { overlaySubmission } from "../../view/photoreal/overlay";
-import {
-  type FrameTerrain,
-  PhotorealRenderer,
-  type PhotorealStatus,
-} from "../../view/photoreal/renderer";
+import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
+import type { ViewBudget } from "../../view/budget/viewBudget";
 import type { Histogram } from "../../view/post/histogram";
 import type { MeterMode } from "../../view/post/meter";
 import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
@@ -47,11 +44,19 @@ import { cameraFromObserverM } from "../../view/sky/camera";
 import { SkyCubeLayer } from "../../view/sky/cubeLayer";
 import { HostDiscLayer } from "../../view/sky/disc";
 import { skySpriteStars } from "../../view/sky/sprites";
+import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
 import type { ClassMapSource } from "../../view/terrain/classMap";
+import {
+  LiveFrameTerrain,
+  surveyEdgeViewsOf,
+  type ViewTerrainInput,
+} from "../../view/terrain/frameTerrain";
 import type { HandoverReliefSource } from "../../view/terrain/handover";
+import type { TerrainViewReport } from "../../view/terrain/session";
 import {
   buildWireframeDrawList,
   type DrawAnchor,
+  type DrawnSurveyEdge,
   type SpriteStar,
   viewStrokesAt,
 } from "../../view/wireframe/drawList";
@@ -99,19 +104,22 @@ export interface ViewFrameInputs {
   readonly meter: MeterMode | null;
   /**
    * The class maps its lit bodies' discs shade with (plan R10, R10.T10.d), made on the drawer's
-   * engine; absent, every disc is uniform. No view feeds one until a body's terrain is drawn live.
+   * engine: the terrain session's (R10.T16.a), every view's alike; absent, every disc is uniform.
    */
   readonly classMaps?: ClassMapSource | undefined;
   /**
-   * Its lit bodies' reliefs, by which a body hands over to terrain (plan R10, R10.T10.e); absent,
-   * none hands over. No view feeds them until a body's field is held live.
+   * Its lit bodies' reliefs, by which a body hands over to terrain (plan R10, R10.T10.e): the
+   * terrain session's (R10.T16.a), every view's alike; absent, none hands over.
    */
   readonly reliefs?: HandoverReliefSource | undefined;
   /**
-   * The terrain of the bodies handed over, made on the drawer's engine (plan R10, R10.T10.e);
-   * absent, a body handed over is drawn as a mesh body is. No view feeds one yet.
+   * The view's terrain this frame (plan R10, R10.T16.c): the terrain session, the view's ID in it
+   * and the frame's time, from which the drawer makes its photorealistic frame's `FrameTerrain`
+   * (`LiveFrameTerrain`: the terrain of the bodies it hands over, on the drawer's engine) and its
+   * draw list's survey edges, in either style (`surveyEdgeViewsOf`); absent, a body handed over is
+   * drawn as a mesh body is and no survey edge is marked.
    */
-  readonly terrain?: FrameTerrain | undefined;
+  readonly terrain?: ViewTerrainInput | undefined;
 }
 
 /** What a frame drew. */
@@ -120,6 +128,83 @@ export interface ViewFrameDrawn {
   readonly anchors: ReadonlyArray<DrawAnchor>;
   /** The style it was drawn in: the wireframe while the photorealistic pipelines compile. */
   readonly drawnStyle: RenderStyle;
+  /**
+   * The terrain's annunciation of the bodies the frame hands over, for the view's label block
+   * (`labelStatements(run, terrain)`, plan R10, R10.T16.c); `null` with none, and for a frame drawn
+   * in the wireframe, which hands nothing over until R10.T11.
+   */
+  readonly terrain: TerrainAnnunciation | null;
+  /**
+   * The bodies' survey edges the frame marked, each with the range to its nearest point seen
+   * (`WireframeDrawList.surveyEdges`), for the view's list notes (plan R10, R10.T16.c;
+   * decision-r10-t16-review §1); none without a terrain session.
+   */
+  readonly surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
+}
+
+/**
+ * The size a view presents its frames at, device px: its stage's laid-out size times its
+ * device-pixel ratio, rounded, at least 1 on each axis; its canvas's, which its wireframe draws at
+ * and its photorealistic frame is presented at.
+ */
+export function presentedViewport(size: ElementSize): ViewSize {
+  const ratio = size.devicePixelRatio;
+  return {
+    widthPx: Math.max(1, Math.round(size.widthPx * ratio)),
+    heightPx: Math.max(1, Math.round(size.heightPx * ratio)),
+  };
+}
+
+/**
+ * What a view draws this frame, for the terrain session (plan R10, R10.T16.a): its run's scene and
+ * pose, its field of view, its presented size, its budget's style and streaming priority, the
+ * style it last drew in, the setting and its drawer's last plan's regimes; `null` while its stage
+ * is not laid out, when it draws nothing.
+ *
+ * @param regimes - Its drawer's last photorealistic plan's regimes ({@link ViewFrameDrawer.regimes}).
+ * @param streamPriority - Its budget's terrain streaming priority (`ViewBudget.streamPriority`).
+ * @param drawnStyle - The style its last frame was drawn in ({@link ViewFrameDrawn.drawnStyle}), by
+ *   which the session's passes take the views that hand a body over (the batch review's S8).
+ */
+export function terrainReportOf(
+  inputs: ViewFrameInputs,
+  regimes: ReadonlyMap<BodyIdHex, LitRegime>,
+  streamPriority: ViewBudget["streamPriority"],
+  drawnStyle: RenderStyle,
+): TerrainViewReport | null {
+  const { run, size } = inputs;
+  if (size === null) {
+    return null;
+  }
+  return {
+    scene: run.scene,
+    pose: runPose(run),
+    fovXRad: (run.camera.fovDeg * Math.PI) / 180,
+    presentedPx: presentedViewport(size),
+    style: inputs.style,
+    drawnStyle,
+    setting: inputs.setting,
+    streamPriority,
+    regimes,
+  };
+}
+
+/**
+ * The style a view's frame is drawn in, as near as it is known before the draw (plan R10, R10.T16;
+ * the batch review's S8): photorealistic where the view may draw so and its photorealistic
+ * pipelines are made, and the wireframe otherwise, its stand-in while they are made, after a device
+ * loss, or for good where they failed. A frame refused within its draw (a loss meanwhile) is drawn
+ * in the wireframe all the same, which its {@link ViewFrameDrawn.drawnStyle} says.
+ */
+export function frameStyleOf(
+  inputs: Pick<ViewFrameInputs, "style" | "availability">,
+  status: PhotorealStatus,
+): RenderStyle {
+  return inputs.style === "photorealistic" &&
+    inputs.availability.photorealistic &&
+    status === "ready"
+    ? "photorealistic"
+    : "wireframe";
 }
 
 /**
@@ -160,6 +245,8 @@ export class ViewFrameDrawer {
   /** A sky whose bake failed is not baked again until another sky or a restore. */
   #failedFor: DrawnSky | null = null;
   #frameFailed = false;
+  /** The survey edges could not be made: said once until they are made again (S5). */
+  #edgesFailed = false;
   #regimes: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
   #sized: ViewSize | null = null;
   readonly #unsubscribe: () => void;
@@ -206,6 +293,16 @@ export class ViewFrameDrawer {
   }
 
   /**
+   * Each lit body's regime in its last photorealistic plan (R07's, with T10.e's `terrain`), the
+   * hysteresis's previous frame, by which the terrain session takes the bodies it hands over
+   * (plan R10, R10.T16.a's report); none before such a frame. A frame drawn in the wireframe plans
+   * no regimes and leaves them as they were.
+   */
+  get regimes(): ReadonlyMap<BodyIdHex, LitRegime> {
+    return this.#regimes;
+  }
+
+  /**
    * The latest histogram read back since the last call (`PhotorealRenderer.takeHistogram`), or
    * `undefined` where none has arrived: always, for a view whose frames carry no meter.
    */
@@ -220,16 +317,19 @@ export class ViewFrameDrawer {
       return null;
     }
     const ratio = size.devicePixelRatio;
-    const viewport = {
-      widthPx: Math.max(1, Math.round(size.widthPx * ratio)),
-      heightPx: Math.max(1, Math.round(size.heightPx * ratio)),
-    };
+    const viewport = presentedViewport(size);
     if (this.#sized?.widthPx !== viewport.widthPx || this.#sized.heightPx !== viewport.heightPx) {
       this.#view.resize(viewport);
       this.#sized = viewport;
     }
     const camera = { pose: runPose(run), fovXRad: (run.camera.fovDeg * Math.PI) / 180 };
     const ev100 = controlEv100(inputs.exposure);
+    // The style this frame is drawn in, as near as it is known before the draw: photorealistic
+    // where it may draw so and its pipelines are made (the batch review's S8).
+    const triesPhotoreal =
+      inputs.style === "photorealistic" &&
+      inputs.availability.photorealistic &&
+      this.#photoreal.status !== "failed";
     const list = buildWireframeDrawList(
       { ...run.scene, stars: inputs.stars },
       camera,
@@ -245,17 +345,27 @@ export class ViewFrameDrawer {
         // The guide's CSS-pixel widths at the display's ratio, never under 2 device pixels.
         ...viewStrokesAt(ratio),
         skyStars: inputs.sky === null ? null : skySprites(inputs.sky, camera.pose, run.scene),
+        // The surveys' edges, in both styles (R10.T16.c), in the style the frame draws.
+        surveyEdges:
+          inputs.terrain === undefined
+            ? []
+            : this.#surveyEdges(
+                inputs.terrain,
+                run.scene,
+                camera,
+                viewport,
+                frameStyleOf(inputs, this.#photoreal.status),
+              ),
       },
     );
     const cube = this.#cubeFor(inputs.sky, inputs.setting);
     const exposed = exposureScale(ev100);
     let drawn = false;
-    if (
-      inputs.style === "photorealistic" &&
-      inputs.availability.photorealistic &&
-      this.#photoreal.status !== "failed"
-    ) {
-      drawn = this.#drawPhotoreal(inputs, tokens, viewport, camera, list, cube, exposed);
+    let terrain: TerrainAnnunciation | null = null;
+    if (triesPhotoreal) {
+      const photoreal = this.#drawPhotoreal(inputs, tokens, viewport, camera, list, cube, exposed);
+      drawn = photoreal.drawn;
+      terrain = photoreal.terrain;
     }
     if (!drawn) {
       this.#wireframe.render(
@@ -266,7 +376,12 @@ export class ViewFrameDrawer {
         cube === null ? [] : [this.#cubes.draw(cube, "display", exposed)],
       );
     }
-    return { anchors: list.anchors, drawnStyle: drawn ? "photorealistic" : "wireframe" };
+    return {
+      anchors: list.anchors,
+      drawnStyle: drawn ? "photorealistic" : "wireframe",
+      terrain,
+      surveyEdges: list.surveyEdges,
+    };
   }
 
   #drawPhotoreal(
@@ -277,8 +392,20 @@ export class ViewFrameDrawer {
     list: ReturnType<typeof buildWireframeDrawList>,
     cube: BakedCube | null,
     exposed: number,
-  ): boolean {
+  ): { readonly drawn: boolean; readonly terrain: TerrainAnnunciation | null } {
     const { sky, run } = inputs;
+    // The view's own terrain of the session's passes, for this frame alone (R10.T16.c).
+    const terrain =
+      inputs.terrain === undefined
+        ? undefined
+        : new LiveFrameTerrain(inputs.terrain.source, {
+            view: inputs.terrain.view,
+            camera: { orientation: camera.pose.orientation, fovXRad: camera.fovXRad },
+            presentedPx: viewport,
+            exposureScale: exposed,
+            occluderSlopePx: list.occluderSlopePx,
+            nowMs: inputs.terrain.nowMs,
+          });
     try {
       if (sky !== null && sky !== this.#bandFor) {
         this.#band.update(
@@ -309,18 +436,18 @@ export class ViewFrameDrawer {
           meter: inputs.meter,
           classMaps: inputs.classMaps,
           reliefs: inputs.reliefs,
-          terrain: inputs.terrain,
+          terrain,
           // The marks cased over the tone-mapped image at the canvas's resolution (R07.T16.a), and
           // the craft on their silhouettes (R07.T16.e).
           overlay: overlaySubmission(this.#wireframe, list, tokens, camera, viewport),
         }),
       );
       if (plan === null) {
-        return false;
+        return { drawn: false, terrain: null };
       }
       this.#regimes = plan.regimes;
       this.#frameFailed = false;
-      return true;
+      return { drawn: true, terrain: terrain?.annunciation ?? null };
     } catch (error: unknown) {
       // A creation refused between a device loss and its restore: this frame draws the
       // wireframe, and the next tries again; said once until a frame draws or a restore.
@@ -328,7 +455,32 @@ export class ViewFrameDrawer {
         console.error(`the photorealistic frame of ${this.#name} could not be drawn:`, error);
         this.#frameFailed = true;
       }
-      return false;
+      return { drawn: false, terrain: null };
+    }
+  }
+
+  /**
+   * The survey edges the frame marks (`surveyEdgeViewsOf`), or none where they cannot be made: a
+   * loss (`EngineUnavailable`) passes in silence, and anything else, a bug, is reported once until
+   * they are made again, so that the view draws on (the batch review's S5).
+   */
+  #surveyEdges(
+    terrain: ViewTerrainInput,
+    scene: ViewScene,
+    camera: { readonly pose: CameraPose; readonly fovXRad: number },
+    viewport: ViewSize,
+    style: RenderStyle,
+  ): ReturnType<typeof surveyEdgeViewsOf> {
+    try {
+      const edges = surveyEdgeViewsOf(terrain.source, terrain.view, scene, camera, viewport, style);
+      this.#edgesFailed = false;
+      return edges;
+    } catch (error: unknown) {
+      if (!(error instanceof EngineUnavailable) && !this.#edgesFailed) {
+        console.error(`the survey edges of ${this.#name} could not be marked:`, error);
+        this.#edgesFailed = true;
+      }
+      return [];
     }
   }
 

@@ -15,10 +15,12 @@ function checkApi(): ViewsCheckApi & {
   readonly writeResults: ReturnType<typeof vi.fn<ViewsCheckApi["writeResults"]>>;
 } {
   return {
-    launch: { setting: "high", smoke: true, out: null },
+    launch: { setting: "high", smoke: true, out: null, terrain: false },
     startPhase: () => Promise.resolve(),
     endPhase: () => Promise.resolve(),
     askRightWayUp: () => Promise.resolve(),
+    writeTerrainResults: () => Promise.resolve({ json: "a", markdown: "b" }),
+    capture: () => Promise.resolve(),
     writeResults: vi.fn<ViewsCheckApi["writeResults"]>(() =>
       Promise.resolve({ json: "a", markdown: "b" }),
     ),
@@ -29,7 +31,9 @@ function checkApi(): ViewsCheckApi & {
 describe("ViewsCheckRunner", () => {
   it("gives the page its own animation frames back on unmount", () => {
     const own = window.requestAnimationFrame;
-    const { unmount } = render(<ViewsCheckRunner api={checkApi()} probe={new ViewsProbe()} />);
+    const { unmount } = render(
+      <ViewsCheckRunner api={checkApi()} probe={new ViewsProbe()} terrain={null} />,
+    );
     expect(window.requestAnimationFrame).not.toBe(own);
 
     unmount();
@@ -40,7 +44,9 @@ describe("ViewsCheckRunner", () => {
   it("ends nothing once unmounted", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     const api = checkApi();
-    const { unmount } = render(<ViewsCheckRunner api={api} probe={new ViewsProbe()} />);
+    const { unmount } = render(
+      <ViewsCheckRunner api={api} probe={new ViewsProbe()} terrain={null} />,
+    );
 
     unmount();
     // Past the script's first wait, which a run still going would have failed.

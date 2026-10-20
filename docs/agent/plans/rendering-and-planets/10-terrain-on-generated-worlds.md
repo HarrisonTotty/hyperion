@@ -380,6 +380,22 @@ index, and each query is given the body's detail seed, which the field does not 
   pure count model of Design note 15. The budgets themselves are R05's `TerrainSettings.cacheBytes`
   in `view/quality/qualitySetting.ts`'s `SETTINGS` (400,000,000 B high, 64 MiB low, as built),
   the one list of R05's Design note 26, not a second `PATCH_CACHE_BYTES`.
+- `session.ts` (R10.T16): `TerrainSession`, one a source (the open universe's scene, or
+  `TERRAIN TEST`'s fixture) and engine: the `CoarseFieldStore`, one `HeightWorkerPool` in lanes,
+  each wanted body's `CoverageMask`, class map and detail seed, each handed-over body's
+  `TerrainPass`, the surveys the label block reads, and its memory report; made by
+  `displays/view/useTerrainSession.ts` in `ViewPanels`.
+- `frameTerrain.ts` (R10.T16): `terrainLightingOf(record, rotation, exposureScale)`, a disc
+  record's lights in the body-fixed axes, and the live `FrameTerrain` a view's frame takes.
+- `surveyLookup.ts` (R10.T16.b): `SurveyedCells`, the cells a body's blocks surveyed, and the
+  `SurveyLookup` selection reads beside its height ranges (a patch surveyed where any coarse cell
+  its vertices' masks read is).
+- `residentHeights.ts` (R10.T16.c): `ResidentHeights`, a pass's heights of its resident bakes that
+  hold the survey's edge and a coarse copy of the rest, for the edge's rim and the note's line of
+  sight; R10.T11's contours' nadir height reads it.
+- `lib/format.ts`' `formatSurfaceRange` (R10.T16.c; decision-r10-t16-review §1): a range to the
+  ground in `SLANT RANGE`'s units, which the `SURVEY EDGE` notes take and R10.T12's `SLANT RANGE`
+  will.
 
 ### Test helpers
 
@@ -1157,7 +1173,9 @@ targets at header 21 (below).
     and the cells its mask holds unsurveyed (Risks, "Deviations in T6.b, as built")._ _From T8.b
     (decision-r10-t8a §3): also on a block that brings a cell, surveyed or margin, that the patch's
     horizon map's far field was refused for. Each bake carries those cells, and each block's change
-    the cells it brought that the field did not hold._
+    the cells it brought that the field did not hold._ _From R10.T16: the session wants and releases
+    the fields from every view's camera (T16.a); selection never refines ground with no surveyed
+    cell (T16.b); and the GPU mask takes a block's cells once its rebakes land._
 
 ## Tasks
 
@@ -1169,8 +1187,11 @@ T10 (lit terrain) needs T2, T6 and T7, and its shadow term from T8 and T9; T10.f
 (the wireframe) needs T6 and T7. T12 (readouts) needs T5, T6.b and T7. T13 (guide drafts) is docs
 only, can be written at any time, and lands before T11 and T12, which are built to the drafts; it
 keeps its number because the roadmap cites `R10.T13`. T14 (cache sizes) follows T10 and T11. T15
-closes. There is no interface-reconciliation task: this plan is re-validated against R05 and R09 as
-built when its turn comes.
+closes. T16 (the live terrain path, new at the scoping of 2026-10-16, `decision-r10-live-path.md`)
+wires T7's store, T6.b's fields, T10.b's pass, T10.c's survey edge, T10.d's class map and T10.e's
+hand-over into `VIEW`; it follows T10.c–f and precedes T11 and T12, which are built on its session,
+and T14.b and T15, which measure on it. There is no interface-reconciliation task: this plan is
+re-validated against R05 and R09 as built when its turn comes.
 
 As re-validated at `c6d77cac` (Risks), with the critical path's order (R09's synthesis, then this
 plan, then R09's server and coarse pass):
@@ -1201,6 +1222,8 @@ plan, then R09's server and coarse pass):
 - **T10.a** follows T1.b; its server test of `surface_field`'s answer waits on R09.T19.b. **T10.b**
   draws the atmosphere through R07's stubs until R08.T9.b lands, and the ground's thermal emission
   waits on R08.T18.
+- **T16** after T10.c–f land, then T11 and T12 on its session; T14.c, then T14.b, after it; T15
+  after the serve gate opens (decision-bump-plan-after-22 §1.4).
 
 Rust files are under `crates/hyperion-surface/src/` and client files under
 `apps/hyperion/src/renderer/src/view/terrain/` unless a path says otherwise. Every test in
@@ -1893,6 +1916,366 @@ src/renderer/src/view/bodies src/renderer/src/displays/view` and `just test-rend
     `just test-render`.
   - _As built (Risks, "Deviations in T10.f, as built")._
 
+### R10.T16 The live terrain path
+
+New at the scoping of 2026-10-16 (`decision-r10-live-path.md`): no task made the app's half of
+Design notes 12, 13 and 16, so T7's store, T6.b's fields, T10.b's pass, T10.c's survey edge,
+T10.d's class map and T10.e's hand-over were built and tested, but nothing in `VIEW` made them
+(their records: "not wired yet", "the first consumer's"). This task wires them, in four subtasks
+of one batch, after T10.c–f and before T11 and T12, which are built on it. T10.e's names
+(`FrameTerrain`, `handover.ts`, the `terrain` regime) are its record's. Every GPU and Electron run
+here is hidden (offscreen), never on the owner's display; those on the development machine's RTX
+3080 are recorded with the machine, setting and date, and the owner's UHD 620 runs stay his, by
+hand. Generator version untouched (22): presentation alone, its one new golden re-blessed at the
+version in force.
+
+- **R10.T16.a The terrain session.**
+  - **What it holds.** `TerrainSession` (`view/terrain/session.ts`), for one universe, one engine
+    and one request client:
+    - the `CoarseFieldStore` (T7) over one `HeightWorkerPool`, of Design note 11's default worker
+      count (`clamp(⌊hardwareConcurrency ÷ 4⌋, 1, 3)`, as `defaultSpikeWorkers` gives it), one a
+      session whatever the views and bodies;
+    - for each wanted body: its `CoverageMask` (T10.c), fed by the pool's `onFieldChange` runs and
+      the store's coverage as T10.c built it; its class map (T10.d's
+      `ClassMapStore.want(body, detailSeed)`); and its detail seed;
+    - each wanted body's survey for T12's `SurveyLine`: the store's status, coverage and header,
+      stale while the link is down.
+  - **Where it is made.** `useTerrainSession` (`displays/view/useTerrainSession.ts`) in
+    `ViewPanels` makes it for the stage's source: the open universe's scene, over the link's request
+    client (`useServerLink`), or `TERRAIN TEST`'s, over its fixture (T16.d); no other kept scene has
+    one. It is disposed with the engine, the universe and a change of source, so that a stage
+    remounted on a new scene of the same source keeps its fields. `VIEW` hidden disposes the engine,
+    and the session with it; shown again, the fields are fetched again (T14 states the cost).
+  - **Its inputs.**
+    - The link: `setLinkUp` from `useServerLink().status`.
+    - The scene's `surface_revisions`: R03's scene model passes each notification's list on
+      (`lib/scene/sceneWire.ts`'s `applySceneNotification` keeps it on its update, and `useScene`
+      hands it to a listener, not to state, so that it renders nothing) to `noteSurfaceRevisions`.
+      A resubscription or a sequence fault asks every kept field again with its revision, as the
+      link's return does.
+    - The detail seed: each wanted body's `BodyHooksDto.detail_seed`, from one `body_detail`
+      (`toBodyDetailRequest`, `lib/system/bodiesWire.ts`) a want; a kept scene's body carries its
+      own. A body whose hooks are not modelled is wanted for its coverage alone, with no class map
+      and no terrain. R08.T10.a, which also reads `body_detail`, shares the fetch: whichever lands
+      second takes the other's.
+    - The views. Each view's loop, the primary's and each instrument's, tells the session, each
+      frame it draws, its camera (pose, field of view, presented size), its style, the setting, its
+      `ViewBudget.streamPriority` and its last plan's regimes. The primary's frame then steps the
+      session once: `follow` over every view's `FieldCandidate`s, `local` from the view's camera
+      frame (`sceneFrameFor`) and `rangeRatio` from T10.e's `handoverRangeRatio` at the view's
+      style's τ (`handoverTauPx`). As main ruled for T7, a body with no header is wanted only as a
+      view's local body.
+  - **What it gives the views.** T10.d's `classMaps` and T10.e's relief source
+    (`PhotorealInputs.reliefs`), through `ViewStage`, `viewFrameDrawer.ts` and `useInstruments` to
+    every view's frames, the instruments' included; `ViewPanels`' `classMaps={null}` goes.
+  - **Memory.** The masks and maps are filed under `coarse-field-gpu`. For T14 and R12's memory line
+    (R12 Design note 6) the session reports the workers' copies (`fieldResidentBytes`), the pool's
+    kept blocks (T7's "The pool's own copy") and its GPU bytes by category.
+  - **Teardown**, in order: the passes, the class-map store, the masks, the store (its requests
+    cancelled and its fields released), then the pool (its workers terminated).
+  - **Files.** `view/terrain/session.ts`, `displays/view/useTerrainSession.ts`, with their tests;
+    `displays/view/ViewDisplay.tsx`, `viewFrameDrawer.ts` and `useInstruments.ts`; R03's
+    `lib/scene/sceneWire.ts` and `useScene.ts`; `view/terrain/coarseFieldStore.ts` where a seam
+    needs it.
+  - **Tests** (Vitest, R03's `FakeWebSocket`, `test/scriptedHeightWorker.ts`,
+    `test/countingRenderEngine.ts`):
+    - it is made for the server's scene of the open universe and for `TERRAIN TEST`, and for no
+      other kept scene; after its disposal no worker, request, timer, listener or GPU handle is left
+      (the counting engine's tally back to zero);
+    - a new scene of the same source asks for no field again;
+    - a view's local body is asked for with no header held; another body only once some view is
+      within its hand-over range in that view's style, released once every view is beyond twice
+      it; a wireframe view (4 px) and a photorealistic one (1 px) are each judged by their own;
+    - a revision rise on the scene topic asks for the delta alone; a link lost and back, and a
+      resubscription, ask again with the revision held;
+    - the detail seed is asked once a want and reaches the class-map store; a body without hooks
+      gets no class map;
+    - a block's surveyed cells reach the body's mask before the store's answer; after a device
+      loss the masks hold the same cells and no request is asked again;
+    - every view's lit bodies take the class map and the relief, the instruments' included;
+    - one pool a session, of Design note 11's count.
+  - **Acceptance.** `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain
+src/renderer/src/displays/view src/renderer/src/lib/scene`.
+
+- **R10.T16.b A body's terrain pass, shared by the views.**
+  - **The pool's lanes.** `HeightWorkerPool.lane(bake: BakeSettings)` gives a pass its own lane
+    (`reprioritise`, `onBaked`, `onFailed`, `waitingCount` and `terminate`) over the pool's one
+    queue, workers and fields.
+    - A lane's demand replaces its own alone.
+    - The queue takes forced requests first, then the larger w × ρ ÷ τ whatever the lane (Design
+      note 24's priority is a weighted excess, comparable across lanes), then the lane's order and
+      the key's.
+    - A lane's bakes reach its own listeners alone.
+    - Terminating a lane drops its queued, waiting and in-flight requests and leaves the fields,
+      the class-map queries and the other lanes.
+    - The spike's pool, made with its one `bake`, is a pool of one lane and keeps its tests.
+    - `TerrainPoolFactory` gives the pass a lane, so `TerrainPass`'s rebuild after a device loss
+      takes a new lane of the same pool and the fields are untouched.
+  - **The views.** `TerrainPass` takes the views that hand its body over (T10.e's `terrain`
+    regime in each view's last plan).
+    - Selection runs once a step over them all (`selectPatches`' `views`, at most
+      `MAX_SELECTION_VIEWS`). Each view brings its own τ (`handoverTauPx`), presented size (R05
+      Design note 23) and weight (`PRIMARY_VIEW_WEIGHT` or `SECONDARY_VIEW_WEIGHT`, from
+      `ViewBudget.streamPriority`), over one cache and one lane.
+    - Each view draws its own `DrawItem`: its own instance records (the draw set's patches its
+      frustum meets, relative to its own camera, at its own morph bands, `morphRangeM` at its τ and
+      size), its own lights buffer and its own annunciation debounce.
+    - The spike's single view keeps its behaviour.
+  - **The level table.** Each block's level table (`FieldChange.levels`, the pool's `fieldLevels`)
+    reaches the pass through `TerrainPass.setLevels`, which reselects. Until T4.b, selection reads
+    the table as built, its bound column the hard bound.
+  - **The rebake rule** (Design note 16 as built by T6.b and T8.b).
+    - The pass keeps, for each resident patch, what `needsRebake` reads of its layers (`complete`,
+      `horizonComplete`, `unsurveyedCells` and `horizonRefusedCells`).
+    - At each `FieldChange` of its body, the pass asks again for each patch the rule names, at its
+      last priority, while the old bake stays drawn. The new bake replaces it in its slot
+      (`PatchCache.insert` of a resident key).
+    - The in-flight rule is the pool's as built (`staleInFlight`).
+    - The body's mask takes the block's newly surveyed cells once the rebakes that block named have
+      landed, or at once where no pass draws the body. Neither surface then leaves a hole along the
+      survey's advancing edge (T10.c's deferred "A hole while a rebake is due", settled).
+  - **Unsurveyed ground.** Selection takes a survey lookup beside its height ranges (an optional
+    `SelectionInput` member, from the body's coverage). A patch with no surveyed field cell under
+    it is exact, since the reference surface is the ground there (Design note 12). It is not
+    refined, demanded or drawn, and the body's figure draws it. No bake is made of ground that is
+    not coming, and it counts toward no `TERRAIN: STREAMING`; patches waiting for a block of a
+    surveyed region (the lane's `waitingCount`) do count (Design note 16). _From
+    decision-r10-t16-contracts §2–3:_ the lookup is conservative (a patch is surveyed if any coarse
+    cell its vertices' masks read is surveyed), every new selection member is optional, and a
+    caller with no lookup gets today's selection bit for bit; `Selection.nearestSurveyM` (metres,
+    never under one finest patch, `+∞` with no lookup or no surveyed cell) gives the move rule a
+    distance only where no selected patch above the finest level does. Unsurveyed ground wins over
+    the forced region: a patch with no surveyed cell is never forced, demanded, refined or drawn,
+    wherever a contact stands; a contact astride the edge forces exactly its surveyed patches, under
+    Design note 9's rule in full. Collision's ground there is `ground_at` over the server's whole
+    field, not the reference surface, which is the picture's ground alone. The mask's invariant: in
+    every view where the mask is given, each cell the GPU mask holds surveyed lies under a drawn
+    patch, selected or standing in, whose bake's mask holds that cell. A drawn patch of cell code 0
+    (six or more levels coarser than the field) whose bake holds a vertex outside the survey cannot
+    hold its cells at its vertices, so the view's mask is withheld while it sees one; that raises
+    no `TERRAIN: STREAMING` by itself (decision-r10-t16-review §2).
+  - **Contacts.** The scene's craft over a handed-over body are its `GroundContact`s where R05's
+    Design note 9 has them grounded or descending (`isDescending`: under 1 km over the datum and
+    closing, or under 30 s from contact), at their hulls' bounding radii (`TEST HULL`'s until hulls
+    are defined). The craft's height and ground point come from one function, the datum's until
+    T14.c gives it the workers' ground (decision-r10-t16-contracts §2).
+  - **Faults.**
+    - A worker that fails is replaced as built.
+    - Once every worker is lost (`lostWorkers` equal to the pool's size), every view that hands a
+      body over states `TERRAIN NOT AVAILABLE: height computation failed, reopen VIEW to retry`
+      (`TERRAIN_NOT_AVAILABLE`, `annunciation.ts`) on its label block's fault line, in
+      `--status-caution`, after any graphics fault; its terrain annunciation is then `null`
+      (decision-r10-t16-contracts §7, the string and its guide row ruled). The passes draw nothing
+      more and the bodies their figures. The session is made again when `VIEW` is next shown, which
+      is the retry.
+  - **The releases** (decision-r10-t16-contracts §1). R01's `RenderEngine` gains `releaseMesh` and
+    `releaseMaterial`, append-only, as R06.T13.h added `releaseBuffer` and `releaseTexture`;
+    `ResilientEngine` forwards them and drops a lost engine's handles. `TerrainPass.dispose`
+    releases every handle the pass made on the current device (through `TerrainResources.dispose`:
+    the slot buffers and records, the normals atlas, the instance, contact, indirect and lights
+    buffers and the phase table; then the patch mesh, the material and the tables of no air), and a
+    view that stops handing the body over releases its own draw resources.
+  - **Files.** `view/terrain/workers/pool.ts`, `terrainPass.ts`, `select.ts`, `cache.ts` (where
+    the replacement needs it), `grounded.ts`, `view/terrain/session.ts`; `view/spike/spikeRun.ts`
+    for the factory's type; the smoke harness's new group. R01's
+    `view/engine/{types,resilientEngine}.ts`, `view/engine/webgpu/{engine,meshes}.ts`,
+    `test/{fakeRenderEngine,countingRenderEngine}.ts` and `displays/view/check/probedEngine.ts`;
+    `displays/view/ViewLabelBlock.tsx` (its `faults` list) and `InstrumentView.tsx`.
+  - **Tests** (Vitest, pure, and over the scripted worker and the counting engine):
+    - the lanes, each sentence above; the spike's pool and pass tests pass unchanged;
+    - two views at one pose request each patch once; a patch only an instrument wants ranks at a
+      quarter of the primary's; each view draws only the patches its frustum meets, at its own
+      morph bands; R05's history-independence test holds with two views; a view that leaves
+      releases nothing the other draws;
+    - a widened level table reselects, and the bounds are its own;
+    - after a block, exactly the resident patches `needsRebake` names are asked again, each drawn
+      until its new bake replaces it, and none the rule passes over; on the module, over
+      `fieldsWasm.test.ts`'s golden blocks, a patch passed over bakes the same bytes;
+    - the mask takes a block's cells only once the block's rebakes have landed;
+    - a patch with no surveyed cell is not refined, demanded or drawn, and a camera over unsurveyed
+      ground raises no `STREAMING`; a patch waiting for its margin raises it;
+    - after a device loss the cache and the draws are made again and a new lane is taken, and the
+      scripted workers see no `field-init` or `field-chunk`;
+    - with every worker lost there is no demand and no draw, and the fault stands on each handing
+      view's fault line, after a graphics fault, with no `TERRAIN: STREAMING`;
+    - a craft at 900 m closing is a contact and its region is forced; one at 2 km receding is not;
+      a contact over unsurveyed ground forces nothing, one astride the edge exactly its surveyed
+      patches; the mask's invariant holds block by block, a block under a resident stand-in
+      included;
+    - the releases: R01's engine tests of `releaseMesh` and `releaseMaterial`, and over the counting
+      engine a pass made, drawn, restored and disposed leaves no handle of its own, 50 hand-overs
+      and releases leave the tallies where they started, and a view that leaves releases its own;
+      the smoke harness makes and disposes a pass three times with the allocation tally unchanged
+      (decision-r10-t16-contracts §1–3 list the rest);
+    - the smoke harness's `R10.T16 the shared pass` (part 6): two views of one lit pass over the
+      Moon-like fixture's survey on SwiftShader, every frame finite and each view's terrain at its
+      pose; and a device destroyed mid-stream, after which the terrain returns with no block posted
+      again.
+  - **Acceptance.** `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain
+src/renderer/src/view/spike` and `just test-render --part=6`.
+
+- **R10.T16.c Terrain in `VIEW`.**
+  - **The frame's terrain.** The session gives each view's photorealistic frame its own
+    `FrameTerrain` (T10.e).
+    - `draws(plan)`: for each `MeshBodyPlan` whose `role` is `handed-over` (T10.e's `terrain`
+      regime), the body's pass's draw for this view, with:
+      - `TerrainView` from the plan's body: `rotation` the `LitBodyInput.rotation` the plan drew
+        the figure with, so that the terrain, its mask, its class map and the reference surface
+        share one drawn rotation (R07.T10.a's `rotationAt`); `cameraM` the body's `centreM`
+        negated (the camera from the body's centre, along the galactic axes, which are the body
+        frame's); the camera's orientation; the field of view; and the presented size;
+      - `TerrainFrameInput.lighting` from the body's disc record (`plan.discs[mesh.index]`): its
+        lights, occluders and planetshine sources rotated from the galactic axes into the
+        body-fixed ones by the inverse of that rotation, its `elsewhere` and the frame's
+        pre-exposure (`terrainLightingOf`, pure); `sunDirectionBodyFixed` and `sunIlluminanceLx`
+        the brightest light's; and the body's atmosphere tables where R08.T10.a's medium holds
+        them (`TerrainFrameLighting.atmosphere`), the tables of no air otherwise.
+    - `surveyCoverage(body)`: the body's mask, given only while this view's draw set of the body
+      leaves nothing missing and draws no patch of cell code 0 with a vertex outside the survey
+      (decision-r10-t16-review §2). The reference surface stays whole until the terrain draws all
+      the surveyed ground the mask would discard.
+    - The pass is made at a body's first hand-over in any view and disposed when the store releases
+      its field, not at a hand-back. A body whose rotation is not known is never handed over: its
+      figure and disc stand.
+  - **The aerial perspective** stays R08.T10.b's. The terrain draws in the scene target's `bodies`
+    pass (T10.e), which R08.T10.b's composite covers on both scopes once it draws the atmosphere in
+    the view. Until then the view draws no atmosphere over anything, and a generated body reads
+    `ATMOSPHERE: NOT YET MODELLED`, as R08 has it. Whichever of this subtask and R08.T10.b lands
+    second binds the handed-over body's tables and tests the composite over the terrain.
+  - **The label block.** Each view's `labelStatements(run, terrain)` takes the annunciation of the
+    body it hands over (`TERRAIN: STREAMING` or `TERRAIN: DETAIL LIMITED`), the primary's and each
+    instrument's its own; T16.b's fault goes through the label block's fault lines, after any
+    graphics fault, not through `labelStatements`, whose parameter stays R05's
+    `TerrainAnnunciation | null` (decision-r10-t16-contracts §7).
+  - **The survey edge**, in both styles: `DrawOptions.surveyEdges` (T10.c), from each wanted body's
+    coverage in view, its rim at max(drawn height, 0). The drawn height comes from the resident
+    bakes whose survey mask holds the edge, their heights kept on the render thread for those
+    patches alone, and is the datum where none is resident.
+  - **The list's notes.** Each view's list notes each body whose survey edge is in its picture,
+    `SURVEY EDGE <designation> <range>`, nearest first, in `SLANT RANGE`'s units (`m` below 1 km,
+    `formatSurfaceRange` in `lib/format.ts`), outside the options and unselectable, with the
+    options' accessible-name form, stale with the list (the guide's Views; `signoff-12.md` item 28;
+    decision-r10-t16-review §1). Files: `view/terrain/surveyEdge.ts`, `lib/format.ts`,
+    `displays/view/ViewMarkList.tsx`, `viewRun.ts`, `ViewDisplay.tsx`, `useInstruments.ts` and
+    `InstrumentControls.tsx`; tests: the formatter's units, figures and hysteresis, the note's two
+    forms, the list's notes (order, names, never an option, stale, none without an edge) and
+    `VIEW`'s primary and instrument lists in both styles.
+  - **The instruments** draw the same terrain, from their own cameras at their own τ and weight,
+    through the same session.
+  - **The footprints.** A handed-over body writes depth as T10.e's `terrain` regime counts it. T10.b's
+    `PhotorealInputs.terrainFootprints` is fed only if T10.e leaves the body's footprint to it, and
+    is removed otherwise, so that no footprint counts twice.
+  - **Files.** `view/terrain/session.ts`, a new `view/terrain/frameTerrain.ts`;
+    `displays/view/ViewDisplay.tsx`, `viewFrameDrawer.ts`, `useInstruments.ts`, `InstrumentView.tsx`
+    and `photorealFrame.ts`; the callers of R02's `view/wireframe/drawList.ts`.
+  - **Tests:**
+    - under the identity rotation, `terrainLightingOf` gives the record's lights unchanged; under a
+      rotation it gives their directions rotated, exactly; with a one-class palette at the sub-solar
+      point, the terrain's I/F equals the disc record's to 10⁻⁶ (T10.e's agreement, now through the
+      live path);
+    - a body's `TerrainView` is its plan's: the camera's offset from its centre and the rotation,
+      bit for bit;
+    - a body handed over in one view draws its terrain there, and in another view only where that
+      view hands it over too; its pass is made once, at the first hand-over, and disposed at the
+      field's release, not at a hand-back; a body with no rotation is not handed over;
+    - the mask is given only once the view's draw set of the body has nothing missing;
+    - each view's label block carries its own annunciation;
+    - the survey edge's rim stands at the resident bake's height where one holds the edge, and on
+      the datum elsewhere, in both styles;
+    - the smoke harness's `R10.T16 the frame` (part 6): a photorealistic frame with the fixture's
+      body handed over, the terrain drawn over the reference surface, no pixel drawn by both on the
+      datum, and every texel finite.
+  - **Acceptance.** `pnpm --filter hyperion test` (its files reach `displays/view`,
+    `view/photoreal`, `view/bodies` and `view/wireframe`) and `just test-render`.
+
+- **R10.T16.d The terrain test scene and the hidden run.**
+  - **The scene.** A kept scene, `TERRAIN TEST` (`view/scenes/terrainScene.ts`, in `SCENE_OPTIONS`),
+    under `TRAINING`.
+    - Its bodies: a Sun-like star, and an airless Moon-like body, `TEST MOON`, of the fixture
+      field's figure, detail seed and body ID, with a rotation and a hand-made photometry.
+    - Its camera is scripted from beyond the hand-over range down to a few kilometres over the
+      survey and across its edge, with a sunset over the surveyed ground at its `SCENE CLOCK` rate.
+    - Its field is served by a fixture request client (`requestBulk` for `surface_field`) from
+      committed payloads: a first payload, then a delta at a revision rise that the scene's
+      notifications announce, as R09.T19.b answers them.
+    - The payloads are a golden of the worker's writer (`crates/hyperion-surface/tests/golden/worker/`,
+      header 22, re-blessed with the worker's golden at the version in force), read with `?raw` as
+      `smoke/litTerrain.ts` reads `moon_like.golden`. They are `synthetic_worlds()`'s Moon-like world
+      with relief, two surveys and a margin's edge in view, no larger than the crate's largest golden
+      today (about 360 kB). _From decision-r10-t16-contracts §4–5:_ a new
+      `worker/terrain_test.golden`, its header `crate::generator_version()`, with `moon_like.golden`
+      byte-identical and the version test pinning the two names; at least two payloads, a first and a
+      delta at the next revision that extends the first survey, several blocks each, the survey
+      crossing a cube-face edge within a few cells of a cube corner; each payload's revision, cover
+      and `change` lines and the header's DTO values beside its blocks, held to the server's own
+      conversion by a `hyperion-server` test; at most 361,605 B (`cube_sphere.golden`'s size), held
+      by a native-only test; read lazily on the client. The option carries the fixture
+      (`SceneOption.terrain`) and the body its seed (`ViewBody.detailSeed`); `KeptScene` is
+      untouched. `TERRAIN TEST` sits in system `5e5e000000000000`, `TEST MOON` its `.0003`, its ID,
+      seed and figure read from the golden; every other body takes `.0000` or an index of 7 and up.
+      Revisions only rise, whatever the script does.
+  - **The stand-in's caller.** `just place-ship` gains `--survey <source> <resolution>`, which sends
+    R09's `survey_pass` (R09's Risks, "The survey stand-in") over the target body's cells, so that a
+    served world can be surveyed by hand once the serve gate opens. Nothing else sends it.
+  - **The guide.** Drafts, for the owner's sign-off under his delegation:
+    - the `TERRAIN TEST` scene row;
+    - `TEST MOON`'s place in the designation row, and the `SCENE` row's list;
+    - the survey line's state while a body's field is refused or unreadable (the store's
+      `failure`), lean `SURVEY COVERAGE NOT AVAILABLE: survey not received`, for T12 to build.
+
+    Built to the leans, and the guide edited as the sign-off directs. T16.b's fault and its guide
+    row are ruled (decision-r10-t16-contracts §7) and applied as adopted text, with no sign-off
+    item.
+
+  - **The hidden run.** The views-check harness gains a terrain run,
+    `just views-check --hidden --terrain`, offscreen on `TERRAIN TEST`.
+    - One launch a setting (decision-r10-t16-contracts §6): `--terrain` runs at its `--setting`,
+      and with none the script makes two launches, high then low, its exit the first non-zero one.
+      On high: a photorealistic primary alone through the hand-over, the descent and the sunset;
+      the same with a photorealistic and a wireframe instrument; and a device loss forced
+      mid-stream, the harness destroying the device as R01's loss tests do. On low: the primary
+      alone; the primary with a wireframe instrument; and the forced loss. Its own phase, record and
+      results types (`TerrainCheckPhaseName`, `writeTerrainResults`), `ViewsCheckLaunch.terrain`
+      required; full runs under `docs/measurements/terrain-check/`, smoke runs under
+      `target/views-check/terrain/`.
+    - The forced loss is expected exactly once: one `device-lost` with reason `destroyed` inside the
+      loss phase's window, then one restore; the faults verdict excludes that one alone. After it
+      the terrain is drawn again, no `field-init`, `field-chunk` or `surface_field` is asked, and the
+      masks hold the same cells.
+    - It holds every frame drawn and finite, the terrain drawn once handed over, no field asked for
+      again after the loss, and the session torn down at the end. "No pixel drawn by both surfaces
+      on the datum" is held by T16.c's part-6 group, not by the hidden run.
+    - It records, provisional, the patches drawn, the bakes a second, the frame times and the
+      session's memory report.
+  - **By hand, hidden, recorded** on the development machine (RTX 3080), each in its own task's
+    entry:
+    - T8.b's sunset over the survey, at its three places;
+    - T10.c's edge;
+    - T10.d's disc under a live survey;
+    - T10.e's mean brightness across the hand-over at about 30° and 90° of phase, over the surveyed
+      texels; its fully surveyed world waits for a served one (T15).
+
+    The owner's UHD 620 runs of the same stay his.
+
+  - **Files.** `view/scenes/terrainScene.ts` and its fixture client; `displays/view/viewRun.ts`
+    (`SCENE_OPTIONS`); `displays/view/check/`; `apps/hyperion/scripts/viewsCheck.sh`; `src/main/`
+    for the option; `src/tools/placeShip.ts`; `crates/hyperion-surface/src/worker/golden.rs`.
+  - **Tests:**
+    - the scene's script, body and fixture: a first payload, then a delta at a revision rise,
+      through the session to the workers;
+    - `place-ship --survey`'s request, through the tool's fake server;
+    - the console-ux skill's lint, contrast and glyph checks of the drafted strings;
+    - decision-r10-t16-contracts §4–6's: the golden, its two names and its size; the server crate's
+      agreement test; the session for `TERRAIN TEST` sends no frame over `FakeWebSocket`, its body
+      IDs and seed are the golden's, and a loop of the script asks for no field again; the launch
+      reader, the phase refusals, the faults verdict with no loss, one inside the window, one
+      outside, two, and a GPU process's exit; two launches with no `--setting`;
+    - the hidden run.
+  - **Acceptance.** `cargo test -p hyperion-surface --features testing --lib worker::golden`;
+    `pnpm --filter hyperion exec vitest run src/renderer/src/view/scenes src/renderer/src/displays/view
+src/tools`; `just views-check --hidden --smoke --terrain` (exit 0); the console-ux checks; and the
+    figures recorded.
+
 ### R10.T11 The wireframe's terrain
 
 Depth-only terrain in the wireframe style at τ = 4 px from the same bounds and bakes (heights and
@@ -1921,6 +2304,18 @@ graticule sentence (the contours' bullet under "Views") is changed to match in t
 (signoff-9). Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`, the
 smoke run, and the figures recorded.
 
+_From R10.T16 (`decision-r10-live-path.md`, D10): built on T16's session. The wireframe takes a pass
+of its own shading a body (`HeightSourceSetting.weights` `"skipped"`, its bakes skipping the class
+weights and the horizon map as T6.b and T8.b built), through a lane of the session's pool, selected
+at 4 px over the wireframe views that hand the body over; "the same bounds and bakes" reads "the
+same bounds, and bakes of its own shading". Its draw joins each wireframe view's
+`WireframeRenderer.render` through the session, as T16.c's `FrameTerrain` joins the photorealistic
+frame's, and its contours' nadir height comes from the pass's resident bakes. Its legibility check
+may take T16.d's `TERRAIN TEST`._
+
+_From R10.T16 (decision-r10-t16-review §2): wherever a wireframe view takes the survey mask, the
+same code-0 rule withholds it._
+
 ### R10.T12 Coverage and terrain readouts on the view
 
 `SurveyLine` in the view's label block: the survey's coverage of the body and its finest resolution
@@ -1944,7 +2339,10 @@ temperature is the climate field's mean for the month the view's time falls in, 
 point's elevation by the header's lapse rate. Also the line-of-sight mark, the tripod, with its
 give-way and its list note `GROUND AT LINE OF SIGHT`. Both are built to the guide as signed off in
 `signoff-10.md` (this task's drafts, below). The DOM list notes the survey edge while it is in view,
-as `SURVEY EDGE` with its nearest range, a note that cannot be selected. The task also renames the
+as `SURVEY EDGE` with its nearest range, a note that cannot be selected. _Built by R10.T16.c
+(decision-r10-t16-review §1): the `SURVEY EDGE` notes and their length formatter. T12 puts
+`GROUND AT LINE OF SIGHT` first among the notes, gives `SLANT RANGE` the same formatter's units,
+and its by-hand look at 1280 × 720 includes the longest note._ The task also renames the
 descent spike's `SITE HEIGHT` to `SITE ELEVATION`, in `ELEVATION`'s form, and makes the guide's row
 edit in the same commit (signoff-9). Build to the guide's rows as signed off on 2026-10-13
 (`signoff-9.md`) and 2026-10-14 (`signoff-10.md`), and make that file's guide edit (h), the
@@ -1991,6 +2389,13 @@ block's longest lines, `ULTIMATE BEARING CAPACITY ~0.95 MPa S · PAD WIDTH 1.0 m
 out, keeping their length, and the guide's figures change in the same commit (signoff-10).
 Acceptance:
 `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` and the console-ux checks.
+
+_From R10.T16 (`decision-r10-live-path.md`, D10): the readings (T6.b's `reading`, `slantRange` and
+`material`) are asked of the session's pool, whose workers hold the body's field, through a query of
+the pool's beside `classMap`, at 4 Hz for each view's line of sight; `SurveyLine` reads the session's
+survey of the view's `FRAME` body (the store's status, coverage and header, stale while the link is
+down), with the refused field's state as T16.d's draft is signed off. Its by-hand checks may take
+T16.d's `TERRAIN TEST`._
 
 #### The drafts, for the owner
 
@@ -2865,8 +3270,20 @@ RESOLUTION       410 m
   10%; the cache never evicts a patch under a grounded body at the chosen size during a replay of
   the descent's selections. Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`.
+- **R10.T14.c The descent over a generated world** (new at the scoping of 2026-10-16,
+  `decision-r10-live-path.md`; before T14.b). R05's descent spike flies a body source:
+  `--world terrain-test` takes `TERRAIN TEST`'s fixture body and field through T16's session (its
+  store over the fixture client, its pass and its lane), with a landing site inside the survey, the
+  profile's site height and floors measured by the workers' `slantRange` and level table in place of
+  the test planet's `surfaceQuery`; the test planet stays the default. T14.b measures on it, and
+  T15's descent on a served world takes the same path once the serve gate opens. Files:
+  `view/spike/` (`spikeRun.ts`, `spikeScene.ts`, `descentProfile.ts`'s inputs) and
+  `scripts/descentSpike.sh`. Tests: the profile over the fixture clears its floors;
+  `just descent-spike --smoke --world terrain-test` (hidden) exits 0. Acceptance:
+  `pnpm --filter hyperion exec vitest run src/renderer/src/view/spike` and the smoke.
 - **R10.T14.b The measured sizes.** Measure the all-round and frustum peaks per view on R05's
-  scripted descent over a generated world, on both settings and in both styles, with a second view
+  scripted descent over a generated world (T14.c's, through T16's session), on both settings and in
+  both styles, with a second view
   open; set each setting's `cacheBytes` from max(1.3 × all-round peak, 3 × frustum peak) summed
   over the streaming views plus the forced region, or the frustum rule on the high setting if the
   all-round peak is never resident (Design note 15), recording which, whether R05 chose
@@ -2886,8 +3303,11 @@ R05's vertex formation in `Math.fround` (`gpu/vertexEmulation.ts`), from a bake 
 committed as a fixture, and
 interpolates on R05's diagonal, agrees with `ground_at` from the same fixture to 2 mm plus the
 formation's stated error (the height texture's `f32` step at ±20 km is 2⁻⁹ m, 1.95 mm: the
-brainstorm's "about 2 mm", under The geometry); R05's descent run on a generated world at both
-settings with its metrics harness and the horizon map on (T8.b), recording the map's share of the
+brainstorm's "about 2 mm", under The geometry); R05's descent run on a served generated world at
+both settings, through T14.c's body source, once the serve gate opens
+(decision-bump-plan-after-22 §1.4), with T10.e's brightness check on a fully surveyed served world
+and R03.T15's 61-chunk check in the Electron renderer (R09.T19.c's pending item), which T16's
+session now asks for, with its metrics harness and the horizon map on (T8.b), recording the map's share of the
 workers' bake time and `bake/horizon`'s WebAssembly figure (main's ruling for R10.T8.a, 2026-10-15),
 patches a second sustained against the brainstorm's demand of (200 · v + 290 · |ḣ|) ÷ h, the level
 bound per level from T4.a, and pops or cracks seen; every golden of this plan asserted on the three
@@ -2951,7 +3371,10 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   Once rotation is drawn, the terrain sits ωτ ahead of its lighting: about 2,100 km at a Jupiter's
   equator from its Hill sphere's edge (τ 168 s), about 38 km at τ 3 s. This plan decides whether
   to draw rotation-dependent state (the class map's orientation, shadows on terrain) at the
-  retarded time too.
+  retarded time too. _Settled for the terrain by R10.T16.c: the terrain, its mask, its class map
+  and the reference surface take the body's one drawn rotation (R07.T10.a's `rotationAt`), and its
+  lights are the body's lighting frame's, so the terrain adds no offset of its own; the ωτ between
+  geometry and light stands as R07 ruled._
 - **The selection bound's calibration is an owner ruling.** If T4.a's 99.9th-percentile ratios fall
   at the expected 0.3–0.5, the hard bound costs four to eleven times the patches of a perfect bound;
   selection by min(hard, 4σ) recovers two to three times. The owner rules with T4.a's recorded
@@ -3022,6 +3445,11 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   serial chain T8.d removes from uniform discs (about 2.0 M cycles under 4 px). T10.d is to bring
   such discs into the pass: the frame's maps as one array texture with each record's layer in its
   record, or one dispatch a map. Open, for the orchestrator (R07's "Deviations in T8.d, as built").
+- **The live path's costs** (R10.T16). A re-show of `VIEW` fetches every field again (the engine and
+  the session go with the display's hiding); an Earth is about 15 MB a show. One pass a handed-over
+  body holds a whole cache budget, so two bodies handed over at once (a moon over its planet) hold
+  two. T14 measures both and decides whether a session outlives the display or a second pass takes
+  a share.
 - **Composition, for the re-validation (decision-composition, 2026-10-09).** _Folded in at the
   re-validation of `c6d77cac`: Provides' `material`, Design notes 1 and 8, T1.a, T1.b, the new
   T1.c, T10.a, T10.b and T10.d; two questions it leaves are in that record._
@@ -6133,6 +6561,48 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
     with the blend, on the development machine and the owner's UHD 620: no view yet draws a
     generated world's lit terrain under a moving sun to run it in (T15's descent), so neither could
     be captured hidden here. The eight azimuths' missing peaks wait on the same run.
+  - _By hand, hidden, 2026-10-19 (R10.T16.d)_: the development machine (RTX 3080), hidden and
+    offscreen, low (the primary 822 × 544 px) and high (1126 × 906), in `VIEW` on `TERRAIN TEST`:
+    no generated range, but the Moon-like fixture's survey (48 cells of level 6, astride the +x/+y
+    face edge at 45° E, three cells from the +z corner: 24 on +x, 24 on +y, its margin onto +z;
+    corrected by F2, the batch review's D-E, from "all on face +y") under a sun that sets over it
+    at 240 s of the script. The exposure `AUTO` on `LIT`; through a
+    scratch harness on the terrain launch (not committed), the seat's look turned a quarter to
+    starboard at 185 s, north along the survey, since the script's own westward look has the sun
+    in it (T16.d's part 2, deferred); 4 km over the datum; captures at 189 to 250 s, looked at
+    whole and enlarged, and the same moments of the script's next loop in the wireframe style.
+    What was seen, alike on both settings: at 189 and 199 s (the sun some 13° and 10° up) the
+    craters' shadows long, their sunward rims lit, the ground evenly toned, no seam; from 210 s
+    most of the ground in shadow, lit rims and rises in patches; from about 228 s, the sun a few
+    degrees up, the light and shadow step across straight lines in the ground, along which their
+    pattern does not continue (at 228, 232 and 236 s on high, 232 and 236 s on low): at 232 s on
+    high one outlines a quadrilateral with finer detail inside than about it (a finer patch among
+    coarser ones, so a coarse–fine edge, by its detail), and in the shadow some such lines carry
+    single-pixel bright dots (210 s on high, 232 to 236 s on low), the same lines in a second run
+    of each; by 246 to 250 s only a few lit tops remain. What could not be judged: which lines are coarse–fine edges and which same-level
+    ones (the wireframe style draws no terrain until T11, only the survey's bound and the
+    horizon); whether the steps come of the horizon's blend toward the parent, of the
+    patches' relief at their levels or of the skirts, and the dots of the lit figure seen through
+    a crack or of a skirt lit without the horizon's shadow (asked in T16.d's part 2); and the eight
+    azimuths' missing peaks (stills of a moving sun cannot show light leaking under a peak between
+    two azimuths). _The third place, a face edge near a cube corner (F2, 2026-10-20; the batch
+    review's D-E):_ the track crosses the +x/+y edge (the plane x = y, 45° E) at about 222 s, so
+    at 228 s it lies 12.5 km east of the seat, at 232 s 21.6 km and at 236 s 30.9 km. Projected
+    into the saved looks north (the app's own camera at each moment, the cells of the golden's
+    survey 2 marked by face as a check: +x's west of the line, +y's east of it) on both settings,
+    it enters each view from the right over the reference surface, the unsurveyed ground south of
+    the survey's bound, and crosses into the survey only some 45 km out, running thence to the
+    horizon at 110 to 115 km in a strip a few pixels high, where the ground is seen grazing, its
+    lit tops streaked along the view. Enlarged 2.5 times, no step or break shows along it there;
+    one 52° turn of the horizons' azimuths there could not be told at these pixels. Every step
+    seen at 228 to 236 s lies in the nearer ground of face +x, 15 to 40 km out and west of the
+    face edge, so none lies along it. The face edge near the corner stays to be judged on a look
+    that sees it at close range (T15's descent, or a scripted look east over it). the views check times the frame, not the
+    pass alone; its committed full runs (provisional) give, on low, p50 9.00, p95 12.68, max
+    19.92 ms a frame with 144.0 patches drawn on average (211 at most), and on high 4.36, 5.26 and
+    8.31 ms with 254.5 (569) (`docs/measurements/terrain-check/`). The owner's UHD 620 look stays
+    his: `just views-check --terrain --setting low` (shown), the seat's look turned north by hand
+    with the arrow keys at about 185 s of the script.
   - _Limb darkening_ (T8.a's deferred item): R07's term is a uniform disc's, so the 0.33% bound
     stands and there is nothing to recompute.
   - _Generator version._ 22, untouched: the map and its fixtures are presentation, and the worker
@@ -6157,6 +6627,27 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
     test at ρ = 0.1″ and ρ = 0 (built), and the point star's NaN guarded in the shadow code._
 - **Deferred findings (2026-10-13 rule) (R10.T8.b)** (recorded, not ruled; each leaves the
   algorithm and the contracts as built).
+  - _The sunset's steps at patch edges_ (T16.d part 2's by-hand look and question; diagnosed by the
+    batch review's fixes, F1, 2026-10-20, recorded by F2). Not T16's: held by test, the primary's
+    instance records, morph bands and parents' horizon slots and quadrants equal the descent
+    spike's single view's (`frame()`) bit for bit at one pose over one resident set, and an
+    instrument that joins after the first step, or leaves and joins again, writes the primary's
+    records at its pose; and the face-edge lookup is each patch's own face's in the shader
+    (`horizon.wgsl`'s `horizon_grid_azimuth`) and in the bake (`bake/horizon.rs`' `grid_azimuth`),
+    agreeing at a face edge and near a corner, the live path changing neither. The two faces'
+    eight knots point about 52° apart at the survey's centre (60° at the corner), so the horizons
+    either side of the +x/+y edge differ by design, one line along the face edge, which the looks
+    do not show (the third place, above). The candidates, by likelihood (a read-only study,
+    untested): the near field cut at every patch edge (a vertex looking outward has no near
+    horizon while its neighbour's full near field sees the same ground: "Edges between far
+    points", above); normals never morphed at a coarse–fine edge (a fine patch at k = 1 draws its
+    parent's geometry with its own normals, where a low sun is most sensitive); the coarse–fine
+    parent blend; skirts and fins shaded with no horizon map (lit inside shadow: the single bright
+    dots). One T16 effect is inferred, not tested: in an instrument, never in the primary alone,
+    where the steps were seen, ground refined for another view can leave a coarse leaf beyond its
+    band's end beside a finer one, breaking the k = 1 / k = 0 rule at their edge. Lean: a
+    follow-up task that traces it at the same moments of the script on low in a scratch build
+    tinting each patch by its level and its skirts apart, then fixes where it lies.
   - _R07's horizon term in WGSL's trigonometry._ Under T8.b's conversion φ cancels from the cut,
     and the arccos of the visible share costs at most 2.2 × 10⁻⁵ at WGSL's 6.77 × 10⁻⁵, and ρ =
     asin(1/H) at most 0.47% of the share at asin's 6.81 × 10⁻⁵ (2 × 10⁻¹⁰ on Mesa). The exposure is
@@ -6316,16 +6807,39 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
     (`surveyEdge.wasm.test.ts` holds each vertex's span to its patch's): the two surfaces share the
     spheroid's datum. The edge's look by eye, on the development machine and the owner's UHD 620,
     stays pending by hand until a view draws a generated world's terrain (T10.e, T15).
+  - _By hand, hidden, 2026-10-19 (R10.T16.d)_ (it answers decision-r10-t16-contracts §6's deferred
+    "The two discards on hardware" on the RTX 3080, hidden, from 250 km to 4 km: no sliver where
+    the two discards meet; the UHD 620's half stays the owner's): the development machine (RTX
+    3080), hidden and
+    offscreen, high (the primary 1126 × 906 px) and low (822 × 544), in `VIEW` on `TERRAIN TEST`
+    (the Moon-like fixture's two passes, 48 cells of level 6) through the views check's terrain run,
+    the exposure `AUTO` on `LIT`; captures of the page, looked at whole and enlarged. What was seen:
+    from about 250 km at 100 s of the script, looking 18° below the horizon, the survey is drawn
+    as terrain (craters and their shading) exactly inside the `SURVEY EDGE` mark and the reference
+    surface as smooth grey outside it, on both settings; no gap, crack or sliver of background
+    shows along the edge, no step in brightness across it (the survey is highland, as the
+    reference surface's law), and a crater that the edge cuts shows its inner wall inside the
+    survey and the flat reference surface beyond, with no wall standing above the reference
+    surface at that range. From 8 km at 150 s and 4 km at 180 to 199 s (the last looking north,
+    side-lit by a sun 13° to 10° up), the far edge lies near the horizon under its mark, the
+    terrain and the reference surface meeting along it with no visible seam. What could not be
+    judged: the skirt heights themselves (a skirt is at most a few pixels at these ranges, and the
+    track crosses the survey's western edge only after the sunset, from 250 s, when the ground ahead
+    is dark and the setting sun's glare covers the frame: the scene's deferred finding in T16.d's
+    part 2), and the edge at the hand-over level on a world surveyed in part only at close range.
+    The owner's UHD 620 look stays his: `just views-check --terrain --setting low` (shown).
   - _Generator version._ Untouched (22): presentation alone, no golden moved.
-  - _Drafted for the owner_ (the batch review's UX findings, 2026-10-19, for the sign-off queue;
-    nothing new built to them, the note's text as built). Each for T12, which lists the note:
-    (a) with no own ship the note reads `SURVEY EDGE 4.21 km FROM CAMERA`, where the guide shows
-    only the own ship's form (`SURVEY EDGE 4.21 km`); (b) short ranges read `SURVEY EDGE 0.412 km`,
-    and below 10 m `SURVEY EDGE 5.00E-3 km` (the list's range form, `lib/format.ts`'
-    `formatBodyDistance`), while the readout's `SLANT RANGE` turns to m below 1 km; (c) the note is
-    one a body, so two bodies' edges in view give two identical `SURVEY EDGE …` notes: name the
-    body, or keep the nearest alone?; (d) the note's accessible name, which the guide gives for
-    the line-of-sight note and not for `SURVEY EDGE`.
+  - _Signed off 2026-10-19_ (`signoff-12.md`, item 28: (a) as built, (b) `SLANT RANGE`'s units,
+    (c) a note per body named by its designation, (d) the options' accessible-name form). R10.T16.c
+    builds (b)–(d) (decision-r10-t16-review §1); T12 puts `GROUND AT LINE OF SIGHT` before the
+    notes. The findings were: (a) with no own ship the note reads
+    `SURVEY EDGE 4.21 km FROM CAMERA`, where the guide shows only the own ship's form
+    (`SURVEY EDGE 4.21 km`); (b) short ranges read `SURVEY EDGE 0.412 km`, and below 10 m
+    `SURVEY EDGE 5.00E-3 km` (the list's range form, `lib/format.ts`' `formatBodyDistance`), while
+    the readout's `SLANT RANGE` turns to m below 1 km; (c) the note is one a body, so two bodies'
+    edges in view give two identical `SURVEY EDGE …` notes: name the body, or keep the nearest
+    alone?; (d) the note's accessible name, which the guide gives for the line-of-sight note and
+    not for `SURVEY EDGE`.
   - _The batch review (2026-10-19)._ The mark clips its pieces rather than dropping them
     (`surveyEdgeMark`): at the spheroid's horizon by bisection along the side to the crossing, at
     the near plane on the piece's straight view-space segment by its view depth, a piece in the
@@ -6545,6 +7059,24 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
   - _By hand._ None can run here: no view feeds a class map yet. The disc's look under a live
     survey, on the development machine and the owner's UHD 620, stays pending until the store is
     wired (T10.e's hand-over and T15).
+  - _By hand, hidden, 2026-10-19 (R10.T16.d)_: the development machine (RTX 3080), hidden and
+    offscreen, high and low, in `VIEW` on `TERRAIN TEST` through the views check's terrain run,
+    the exposure `AUTO` on `LIT`; and in T10.e's scratch looks at 30° and 90° of phase (T10.e's
+    item). The class map is live: the body's detail seed is the scene's, and its first payload is
+    taken within some 9 s of the session's making, before any capture. What was seen: at 20 s and
+    34 s of the script (59 and 34 Mm) the disc is 60 to 100 px across on high, its survey a few
+    pixels at the disc's middle under the target's mark and the body's graticule, and on low the
+    disc lies under the label block at 20 s; at 30° and 90° of phase, from 3 to 0.85 times the
+    hand-over range and back (the exposure locked at EV100 15.1 and 13.5), the disc 190 to 280 px
+    across on high (on low larger, its range shorter, and in part under the label block), the 30°
+    disc's gibbous face and the 90° disc's lit half evenly shaded to the terminator, with no block,
+    seam, dark or bright texel at the survey; every read-back of the scene target was finite. What
+    could not be judged: the reconstruction itself, since the fixture's surveyed ground is one law
+    equal to the disc's elsewhere (every named material resolving to
+    A 0.20 on the Regolith row; T10.e's record), so a correct map and a uniform one look the same;
+    the disc's brightness off the survey is no check of an area-weighted photometry
+    (decision-r10-t16d-part1, finding (a)). It waits for a served world with a patterned survey
+    (T15). The owner's UHD 620 look stays his: `just views-check --terrain --setting low` (shown).
   - _Generator version._ Untouched (22): presentation alone; no golden moved, the worker golden
     included (the map is tested natively and on the module without one).
   - _The batch review (2026-10-19)._ The class map joins the worker's order-independence test, and
@@ -6737,6 +7269,67 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     each under 1/3 stop; (4) repeat at 90°. Also by eye there: the survey's edge at the hand-over
     level on a partly surveyed world (deferred below) and T10.b's "Back-facing shading normals draw
     black" at grazing views, whose floor on μ T10.e's look was to decide.
+  - _By hand, hidden, 2026-10-19 (R10.T16.d)_: the development machine (RTX 3080), hidden and
+    offscreen, high (the primary 1126 × 906 px of the 1926 × 1086 window; the hand-over range
+    14,551 km) and low (822 × 544 of 1286 × 724; 5,311 km), the load average 6.95 and 2.59 at the
+    starts (provisional). Through a scratch harness on the views check's terrain launch, not
+    committed: two check-only kept scenes, `HANDOVER 30` and `HANDOVER 90`, with `TERRAIN TEST`'s
+    bodies and a fixture serving both its passes at once (the Moon-like world, 48 surveyed cells of
+    level 6: a world surveyed in part, not a served one), the survey's mean normal bisecting the
+    sun and the camera (μ₀ = μ = 0.97 at 30°, 0.71 at 90°), the camera on the line to the body's
+    centre from 3 times the hand-over range to 0.85 of it at 1% of the range a second, a 12 s
+    hold, and back out to 1.25 of it. The procedure above but for: (1) the exposure `AUTO` on
+    `LIT` until it settled, then `INHIBIT` (EV100 15.1 at 30° and 13.5 at 90°, either setting),
+    the meter left on `LIT`, since the ratios are of the scene target before the exposure's
+    scale; (3) the frames before and after are the read-backs either side of the switch, as the
+    harness could take them (33 to 150 ms apart), the body's pixels those of the target's lit and
+    unlit body classes, the luminance Rec. 709's of the HDR, and each pixel's texel the level-6
+    cell that the ray through its centre meets on the spheroid (cast in the harness, its mapping
+    agreeing with the coverage's cells: 0 mismatches of 48), every texel with at least 2 pixels on
+    both sides. The disc's switch to the figure is the first frame drawing the mesh (the regime's
+    switch); the terrain's first draw follows it by 0.47 to 0.82 s (its bakes), compared with the
+    same last frame of the disc. _How the frames were matched (F2, the batch review's D-F, from the
+    harness's code):_ each figure is a mean luminance, not a sum, over each frame's own pixels, the
+    pixel sets recomputed each frame (the body's by the target's classes, the survey's and each
+    texel's by the ray cast through each pixel), so the camera's closing between the paired frames
+    (at 1% of the range a second: 0.03 to 0.15% of it across a switch, 0.47 to 0.8% across the
+    terrain's first draw, the body's pixels growing 0.9 to 1.7%) moves no figure; a sum would rise
+    +0.015 to +0.026 stop across the terrain's first draw. log₂ (after ÷ before) of the means, the
+    body's, the survey's and the largest of the texels' (the survey's pixels):
+
+    | Setting, phase | Disc → figure (body, survey, texel)          | Disc → terrain             | Terrain → disc                       |
+    | -------------- | -------------------------------------------- | -------------------------- | ------------------------------------ |
+    | High, 30°      | +8.2 × 10⁻⁵, −3.9 × 10⁻⁵, 4.5 × 10⁻⁴ (395)   | +6.4 × 10⁻⁴, +0.011, 0.028 | −2.8 × 10⁻⁴, −0.0055, 0.091 (246)    |
+    | High, 90°      | +1.8 × 10⁻⁴, +4.7 × 10⁻⁴, 0.0082 (246)       | −9.2 × 10⁻⁴, +0.041, 0.094 | −6.0 × 10⁻⁴, −0.0074, **0.42** (156) |
+    | Low, 30°       | +2.6 × 10⁻⁴, −2.3 × 10⁻⁴, 3.8 × 10⁻⁴ (2,303) | +0.0016, +0.011, 0.029     | −2.1 × 10⁻⁴, −0.0054, 0.051 (1,382)  |
+    | Low, 90°       | −5.5 × 10⁻⁴, −6.1 × 10⁻⁴, 0.0047 (950)       | −0.0035, +0.037, 0.085     | +1.3 × 10⁻⁴, −0.0055, 0.25 (660)     |
+
+    Every body's and survey's ratio is under 1/3 stop (the largest +0.041, the survey's at the
+    terrain's first draw at 90°, not attributed: below), and every texel's but one: at the
+    hand-back at 90° on high, one texel of 48 changes by 0.42 stop, at about 3 pixels a texel
+    (asked below, in T16.d's part 2). _Re-analysed by F2 (2026-10-20, a new hidden run of the
+    harness on high at 90° alone, the RTX 3080, the load 0.28 at its start, the same procedure, each
+    surveyed pixel's texel and luminance kept so that a texel's mean can be taken over the pixels
+    assigned to it in both frames):_ at the hand-back the outlier is a texel of 5 pixels, the same 5
+    in both frames 33 ms apart, and changes by +0.4185 stop over them, as over its own sets: a
+    real pop at the hand-back, not sampling; three more texels change by 0.32, 0.22 and 0.22 stop
+    (2, 3 and 5 shared pixels), and the survey's mean over its 156 shared pixels by −0.0069 stop.
+    Across the terrain's first draw the survey's mean moves +0.040 over its own sets and +0.032
+    over its 148 shared pixels, the largest texel 0.13 over its own and 0.23 over its shared (3
+    pixels); across the figure's switch every texel within 0.003 stop. The body's and survey's
+    figures repeat the first runs' to 0.002 stop. Recorded below (the deferred findings) with the
+    rise at the first draw, and the lean is main's to rule (T16's F2 record, "Leans for a
+    ruling"). A first pair of runs, whose 30° look stayed at `MAN` EV100 −1.0 (the harness's lock
+    missed), gave each figure within 0.005 stop of these, the frames read back differing from run
+    to run. By eye, in captures before, during and after the
+    hand-over: the disc evenly shaded to the terminator, the survey under its mark no different
+    from the ground about it on either side of either switch (one law: T10.d's item), no seam, no
+    black or bright texel, no edge at the survey's bound at the hand-over level. What could not be
+    judged: a patterned survey's look across the switch (the fixture's one law), a served world
+    fully surveyed (none is, before T15), and T10.b's back-facing normals at grazing views (the
+    survey seen at μ 0.97 and 0.71, no grazing view). The owner's UHD 620 runs stay his, pending:
+    this procedure in `VIEW` once a served world is fully surveyed (T15).
+
   - _The residuals of T10.a against plan 14's p and q._ p: T10.a's own record ("Deviations in
     T10.a, as built", the table): in V zero to rounding (at most 2 × 10⁻¹⁶ relative) on every
     served world, in B and R +35% and −17% on Mercury's colour and +93% and −41% on Mars's, the grey
@@ -6797,6 +7390,27 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     drawn, so its figure is the ground).
 - **Deferred findings (2026-10-13 rule) (R10.T10.e)** (recorded, not ruled; each leaves the
   algorithm and the contracts as built).
+  - _A texel's pop at the hand-back at 90°_ (the by-hand item's re-analysis, F2, 2026-10-20): on
+    high, one texel of the fixture's survey changes by 0.42 stop over the same 5 pixels in the two
+    frames either side of the terrain's hand-back to the disc, and three more by 0.22 to 0.32
+    stop, at 90° of phase (0.091 at most at 30°), the switch's other figures within 0.01 stop. The
+    30° maxima and the rise from 30° to 90° point to the resolved relief's slope shading, which
+    the disc's smooth law averages away; untraced (the HDR read-back holds no pixel's shading
+    normal). The remedies: a cross-fade over the hand-over's hysteresis band, or the disc's law
+    given the roughness its figure leaves unresolved (a macroscopic roughness from the field's
+    unresolved slopes). For T10's follow-up, judged again on a patterned served world (T15); the
+    bound's reading is asked of main (T16's F2 record, "Leans for a ruling").
+  - _The survey's rise at the terrain's first draw at 90°_ (+0.041 stop on high, +0.037 on low;
+    +0.8% at 30°), against the disc's last frame. It cannot come from resolved relief under one
+    law at i = e: relief only darkens or leaves the brightness equal there (Lommel–Seeliger's
+    1 − tan² θ tan² i ≤ 1, and cast shadows darken). Candidates: a law in the terrain brighter than
+    the Regolith row at high phase (Lambert's law on the field's consolidated forms, which part 1
+    of T16.d records, would grow with phase as observed), or shading at the first, coarse terrain
+    draw (the roots and their first children, before finer bakes land). Untraced here: tracing it
+    needs each surveyed pixel's law and shading normal against the geometric one at the same
+    frames, which the read-back does not hold (a shader probe would have to write them). The
+    earlier record's attribution, "the terrain's resolved relief against the smooth figure", is
+    withdrawn. For T10's follow-up or T15.
   - _Design note 13's example is one-sided; the header's relief is peak to trough._ Its "10 km of
     relief either side of the datum" is 20 km from peak to trough, while `realised_relief_m` is
     the highest elevation less the lowest, so a symmetric world of ±10 km takes 20 km and hands
@@ -6826,7 +7440,10 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     partial survey both surfaces draw, or neither, over a strip up to a quad wide, which at the
     range spans π a τ ÷ (128 · relief) px, about 16 px on an Earth of 10 km and 3 px on a Moon-like
     of 15 km. The lever: the terrain's discard reading the GPU coverage mask at the fragment, as the
-    reference surface does, where the patch is coarser than its code can carry.
+    reference surface does, where the patch is coarser than its code can carry. _Since R10.T16.b
+    (decision-r10-t16-review §2): no hole opens there. While such a patch is drawn the mask is
+    withheld, and the reference surface stands whole beneath it. The lever stands, to give the mask
+    there._
   - _The figure's factor after the clamp_ (the batch review's science check, 2026-10-19). The
     per-class oblate factor applies after T10.a's clamp, so it shifts the Lambert to
     Lommel–Seeliger contrast by k_Lambert ÷ k_LS (2.2% at c ÷ a 0.9, 6.7 × 10⁻⁴ at Earth's
@@ -7024,3 +7641,1621 @@ observer)`, in the body-fixed axes (`classMapPointReflection` takes the galactic
     (q 0.62600 in V) taking the rest of p: q_V ≈ 0.665, the glaciers 4.5% of p, against plan 14's
     1.08465 on Mars's template (−38.7%). Not checked against the worker's photometry export; T10.e's
     finding stands, for plan 14 and R10.T1.a's rows.
+- **Deviations in T16.a, as built** (2026-10-19; lane r10-live, on `rendering-and-planets` at
+  `b021342b`).
+  - _Files._ New: `view/terrain/session.ts` (`TerrainSession`, `TerrainSessionOptions`,
+    `TerrainRequests`, `TerrainViewReport`, `TerrainSurvey`, `TerrainSessionMemory`,
+    `viewFieldCandidates`) with `session.test.ts`, which joins `vitest.config.mts`' `DOM_TESTS`;
+    `displays/view/useTerrainSession.ts` (`useTerrainSession`, `terrainSessionSource`,
+    `browserHeightWorker`, `TerrainFixture`, `TerrainFixtureLink`, `TerrainStage`,
+    `TerrainSessionSource`, `TerrainSessionInput`, `SurfaceEvents`) with
+    `useTerrainSession.test.tsx`; `displays/view/ViewDisplayTerrain.test.tsx`; and the test
+    helpers `test/coarseFieldFixtures.ts` and `test/terrainSessionFixtures.ts`. Changed: the
+    task's `ViewDisplay.tsx` (`ViewStage`'s `terrain` for `classMaps`, the loop's step and report,
+    `ViewPanels`' session, `ViewDisplayProps.heightWorkers`), `viewFrameDrawer.ts`
+    (`ViewFrameDrawer.regimes`, `presentedViewport`, `terrainReportOf`) and `useInstruments.ts`
+    (`InstrumentsInput.terrain`, `InstrumentsFrame.reliefs`, each slot's report); R03's
+    `lib/scene/sceneWire.ts` and `useScene.ts`; `view/terrain/coarseFieldStore.ts` (`resync`).
+    Beyond them: `displays/view/viewRun.ts` (`SceneOption.terrain`), `view/terrain/workers/pool.ts`
+    (`defaultHeightWorkers`, `bake` optional, `keptFieldBytes`), `view/spike/spikeRun.ts`
+    (`defaultSpikeWorkers` delegates), `view/scene/model.ts` (`ViewBody.detailSeed`),
+    `lib/system/bodiesWire.ts` (`bodyDetailSeed`), the shared `test/viewDisplayHarness.tsx`
+    (`heightWorkers`) and `ViewDisplay.test.tsx`'s setup, and new tests in `pool.test.ts`,
+    `coarseFieldStore.test.ts`, `sceneWire.test.ts`, `useScene.test.tsx`, `bodiesWire.test.ts` and
+    `viewFrameDrawer.test.ts`. No wire format, payload, shader or golden changes.
+  - _The session's surface_ (the lane lead's decision 1, as suggested but where stated).
+    `new TerrainSession({ engine, universe, requests, linkUp, createWorker, workers? })`, with
+    `workers` Design note 11's default of `navigator.hardwareConcurrency` where absent;
+    `noteView(id, report)`, `forgetView(id)`, `step()`, `setLinkUp`, `noteSurfaceRevisions`,
+    `resync()`; the getters `classMaps` (the `ClassMapStore`) and `reliefs`
+    (`storeReliefSource` over the store); `survey(body)`, a `TerrainSurvey` (the store's
+    `FieldStatus`, coverage and header, `stale` the coverage's or, with none, the link's down),
+    `null` for a body not wanted; `coverageMask(body)`, the mask's texture or `null`; `memory()`;
+    `dispose()`. Added: `wanted`, `workerCount` and `detailSeed(body)` (T16.b's pass source takes
+    the seed). Every method but the getters does nothing once disposed, since a view's loop may run
+    a frame on a session its source has just let go.
+    - _`step()` takes no time._ The suggested `step(nowMs)` would leave its argument unused, which
+      the lint refuses. _(Corrected by F2, the batch review's C8: T16.b did not add it either; each
+      view's debounce takes its own draw's time, `TerrainViewFrameInput.nowMs`.)_
+  - _The pool before lanes_ (decision 2). `HeightWorkerPoolOptions.bake` is optional; a pool
+    without it holds fields and answers class maps, and its `request`, `reprioritise` and
+    `cancelStale` throw ("made without bake settings"). Every spike and pool test passes unchanged;
+    `pool.test.ts` gains the session pool's (refusals, fields, `keptFieldBytes`, the count).
+  - _The worker count_ (decision 3). `defaultHeightWorkers` in `workers/pool.ts`;
+    `defaultSpikeWorkers` delegates to it under its old name, so `displays/` imports nothing of
+    `view/spike/`. A count the browser does not give as a finite number takes one worker (an added
+    guard: ⌊NaN ÷ 4⌋ clamps to NaN, which the pool refuses).
+  - _`ViewStage`'s prop_ (decision 4). `terrain: TerrainSession | null` replaces `classMaps`; the
+    loop reads the session through its inputs' ref, steps it once each frame the primary draws,
+    before the draw (whether or not a drawer is made, so that a device loss releases nothing), and
+    gives its `classMaps` and `reliefs` to the primary's `ViewFrameInputs` and the
+    `InstrumentsFrame`. Each view reports after a frame it drew (`terrainReportOf`, `null` while its
+    stage is not laid out), and has the session forget it when the session changes, its loop ends,
+    or (an instrument) it closes or its canvas goes. The instruments draw in the primary's frame
+    after it, so their reports reach the next step. `ViewFrameDrawer.regimes` exposes `#regimes`:
+    the last photorealistic plan's, which a frame drawn in the wireframe leaves as they were (T16.b
+    reads them with the report's `style`).
+  - _The candidates_ (decision 5), `viewFieldCandidates(report, reliefM)`, pure. `local` is the
+    camera's frame (`sceneFrameFor` over `cameraSceneOf(scene)`); the distance is the body's drawn
+    centre from the camera (`relativeToCamera` of the body frame's origin), the limb's at
+    `ViewBody.radiusM` (the figure's a where plan 14 sends a figure); `reliefM` the held header's
+    `realised_relief_m`, `Infinity` without one. The report's `style` is the budget's (the style the
+    view is to draw), so a photorealistic view whose pipelines still compile is judged at 1 px.
+    The pixel is the presented width's centre pixel (`pixelAngleRad` of the canvas's device px,
+    decision 5), where T10.e's hand-over measures the frame's internal viewport (asked below).
+  - _The sources_ (decision 6). `terrainSessionSource(stage)` is pure: the server's scene of the
+    open universe over `useServerLink()`'s request client, a kept scene's `SceneOption.terrain`, and
+    `null` otherwise (every kept scene today). A `TerrainFixture` is `{ universe, open() }`, its link
+    `{ requests, onSurface, close }`, always up, opened once a session and closed after it; T16.d
+    fills it for `TERRAIN TEST`, and the hook's test holds the seam with a test-only option over a
+    `RequestClient` of its own. `ViewBody.detailSeed` is optional. The hook makes the session in an
+    effect (keyed by the engine, the universe and request client or the fixture, the worker factory
+    and count) and holds it in a `useSyncExternalStore` holder rather than state, takes the link's
+    state through a ref when it makes one and an effect after, and subscribes the scene's
+    `onSurface` (or the fixture's) in an effect of its own. A `ViewStage` remounted on a new scene
+    of the same source keeps the session (the hook is in `ViewPanels`).
+  - _The worker factory_ (beyond the decisions). `ViewDisplayProps.heightWorkers` starts a height
+    worker, `browserHeightWorker` (the module worker on `view/terrain/workers/height.worker.ts`) by
+    default. jsdom has no `Worker`, and a server scene now makes a session in every display test, so
+    the shared harness and `ViewDisplay.test.tsx` pass scripted workers
+    (`ViewDisplayHarness.heightWorkers` lists them). `App.tsx` passes none.
+  - _The masks forget with the workers_ (beyond the decisions). The store posts through a
+    `FieldPool` the session gives it, whose `fieldRelease` makes the body's mask forget its cells
+    first (`#fieldReleased`): a field released, refused by a worker, of another history (a refused
+    `have_revision`), not modelled, or a first payload that failed. `CoverageMask` only adds cells
+    (T10.c), so a dropped field's mask would otherwise keep discarding the reference surface where
+    no field holds ground. T16.b disposes the body's passes at the same point (D4).
+  - _The GPU mask's timing_ (decision 7). `#blockTaken(change)` is the masks' one feed from the
+    workers, at once, as T10.c built it; T16.b gates it there.
+  - _Memory_ (decision 8). `TerrainSessionMemory` is `workerFieldBytes` (`fieldResidentBytes`),
+    `keptFieldBytes` (the pool's new getter: every kept field's blocks) and `gpuBytes`, by category.
+    The GPU bytes are the session's own handles, made through a wrapper of the engine that holds
+    each texture's bytes by the engine's own rule (`textureBytes`), not the engine's allocation tally
+    (`allocationTally`), which counts every allocation of a category whoever made it, from when the
+    tally is made; `coarse-field-gpu` is the session's alone in `VIEW` today, so the two agree there.
+    The masks and maps are under `coarse-field-gpu`, as built.
+  - _Teardown_ (decision 9), in order: the passes (none yet; a comment marks the place), the
+    class-map store, the session's listeners and the masks (each body's detail-seed request
+    cancelled with its mask), the store (its requests and timers cancelled, `field-release` posted
+    to every worker), then the pool (its workers terminated). Tested: no worker running or
+    listening, the request and the retry timer gone, the `coarse-field-gpu` tally back to zero,
+    nothing made at a restore after, and the class map released before the mask and the fields
+    before the workers stop.
+  - _The detail seed._ `bodyDetailSeed(record)` (`bodiesWire.ts`, sharing its form with
+    `toBodyDetail`'s check) reads `hooks.detail_seed` alone: `null` where either section is not
+    `ok` or the seed is malformed. One `body_detail` a want, at the time of the scene of the first
+    report holding the body; a link lost meanwhile asks it again at the return; any other refusal,
+    and hooks not `ok`, give no seed until the body is wanted afresh; a release cancels it. With
+    the seed the session wants the body's class map, which T10.d's store asks once the workers hold
+    the field. R08.T10.a's sharing has its one place (`#askSeed`).
+  - _The scene's revisions_ (G4). `SceneUpdate`'s `ok` carries the push's `surfaceRevisions`, in the
+    order sent, none for a push that names none, and the model keeps none (applying a push with
+    them gives the model the push without them gives). A `surface_revisions` that is not a list of
+    bodies with whole revisions of at least 1 is a fault, `surface revisions unusable`, after which
+    `useScene` resubscribes as for any unusable push. `useScene`'s `SceneView.onSurface(listener)`
+    hands `SceneSurfaceEvent`s (`revisions`, or `resync` when a subscription opened by a
+    resubscription is adopted, the link up throughout) to listeners, never to the snapshot, so that
+    a push naming revisions renders as one that names none; a link return's opening tells no
+    resync, since the link's own state asks the fields again. A listener that throws is reported
+    and leaves the scene and the others as they were.
+  - _The store's resync_ (the task's "where a seam needs it"). `CoarseFieldStore.resync()` asks
+    every kept field again with the revision held, as the link's return does; one whose request is
+    in flight is asked again once it is answered (its answer may predate the rise), and one held
+    failed or not modelled is not asked.
+  - _Tests_ (`session.test.ts` 36, `useTerrainSession.test.tsx` 18, `ViewDisplayTerrain.test.tsx`
+    5, and 29 beside them in `pool.test.ts`, `coarseFieldStore.test.ts`, `sceneWire.test.ts`,
+    `useScene.test.tsx`, `bodiesWire.test.ts` and `viewFrameDrawer.test.ts`): every item of the
+    task's list. On the task's "another body only once some view is within its hand-over range":
+    since a body with no header is wanted only as a local body (main's ruling for T7), a body not
+    local is wanted only while its header is held; the tests hold the moon as one view's local
+    body, then keep it at 0.67 of its 1 px range (its reason `in-range`), keep it in the band
+    inside twice the range, release it beyond, and keep it for a photorealistic view at 2 × 10⁷ m
+    where a wireframe view at the same place releases it (2.66 of its 4 px range).
+  - _Acceptance, as run_ (capped, 4 workers; wider than the task's text, which reaches no
+    `lib/system`, so `bodiesWire.test.ts`, whose `bodyDetailSeed` T16.a added, was run beside it,
+    the batch review's S22): `pnpm --filter hyperion exec vitest run
+src/renderer/src/view/terrain src/renderer/src/displays/view src/renderer/src/lib/scene` (77
+    files, 1,337 tests); `src/renderer/src/view/spike` with `lib/system/bodiesWire.test.ts` (21
+    files, 394 tests); the client suite (430 files, 12,453 tests, 2 skipped); `pnpm --filter
+hyperion typecheck` from a clean cache, `pnpm lint` (type-aware oxlint) and Prettier on the
+    files, clean.
+  - _By hand._ None: no pass draws a body's terrain until T16.b and T16.c, and T16.d's hidden run
+    and by-hand looks follow them.
+  - _Generator version._ Untouched (22): presentation alone, no golden.
+- **Questions for "main" (R10.T16.a)** (none touches a contract of the server's; each built to its
+  lean). _Main's ruling: none relayed to the lane by F2 (2026-10-20); the lane lead marks each
+  here as main rules it._
+  - _The want's pixel._ The field's want is judged at the presented width's centre pixel (decision
+    5), where T10.e's hand-over takes the frame's internal viewport (T10.e's deferred "The
+    hand-over moves with the frame's internal scale"), so at a scale of 0.5 the want's range is
+    twice the hand-over's and a body's field is fetched as early as at full scale. Lean: as built;
+    T10.e's lever (both switches on the presented pixel) would make them one.
+  - _A header with no surveyed ground._ The want takes the header's relief whatever the coverage, so
+    a field whose survey covers nothing is kept within its range, though `handoverReliefM` gives
+    such a body no hand-over. Lean: as built (the want follows the relief alone, so that the first
+    survey's cells reach a field already held).
+  - _The session's GPU bytes._ Counted from its own handles, not the engine's tally (above). Lean:
+    as built; R12's memory line reads the engine's tally by category and the session's report beside
+    it.
+- **Deferred findings (2026-10-13 rule) (R10.T16.a)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _Workers start with the session._ Its pool's workers are started, and each loads the surface
+    module, when the session is made, before any body is wanted: every show of `VIEW` on a server
+    scene starts them, whether or not a camera nears a body. Unmeasured; T14 states it with the
+    re-show's fetches. The lever: a pool made at the first want.
+  - _The candidates each primary frame._ Each step remakes every view's camera scene
+    (`cameraSceneOf`) and frame (`sceneFrameFor`) and every lit body's distance, up to three views'
+    worth: small beside a frame, unmeasured. The lever: the drawer's own camera scene handed with
+    the report.
+  - _The seed's time._ A body's `body_detail` is asked at its scene's time; one absent from its
+    record then (`hooks` `not_applicable`) has no seed until it is wanted afresh, though its field
+    may be held. The scene's bodies are present at its time, so this is a server's edge case.
+  - _Display tests now make sessions._ Every display test on a server scene makes a session with
+    scripted workers, and asks `surface_field` and `body_detail` where the camera is in a lit body's
+    frame; no existing test reads them, and all pass unchanged.
+- **Ruled for T16** (`decision-r10-t16-contracts.md`, 2026-10-19; the lane's seven questions). Q1
+  (the engine's releases) and Q7 (the fault, on the label block's fault lines) differ from the
+  lane's leans; Q2–Q6 take them with conditions. Folded into T16.b–d's text above, plan 05's
+  Design note 9 and plan 01's "Extended by" list. Its deferred findings (recorded, not ruled):
+  - _R01-1: other per-view objects keep their meshes and materials._ Objects disposed while the
+    engine lives still leave their small meshes and materials, once an instrument's lifetime:
+    `PhotorealRenderer`'s sprite quad and triangle, the wireframe's, the bodies', the sky's and the
+    bloom chain's. Their owners adopt `releaseMesh` and `releaseMaterial` when they next touch them.
+  - _R01-2 (T14): a hand-over's churn._ Each hand-over compiles the terrain material afresh and
+    allocates a whole cache budget of 64–400 MB, so a pass made and dropped at an instrument's zoom
+    churns both. T14 measures it beside "The live path's costs" and decides whether passes share a
+    material or a cache, and whether the field's release hysteresis takes a view's field of view.
+  - _For the sensors plan and R11: a craft's site off the survey._ Until the craft's own sensors
+    survey it, the picture shows the reference surface under a craft standing at its true height
+    (the server's `ground_at` over the whole field), above or below it by the local relief.
+  - _For T14.c: the contact's height and ground point._ T16.b's contact rule measures "under 1 km
+    over the datum" and passes the datum's point, behind one function; over surveyed relief the
+    datum can be kilometres off, so a craft landing on a plateau would never count as descending.
+    T14.c gives that function the workers' ground, amends Design note 9's "above the spheroid" to
+    "above the ground where it is held", tests a landing on a plateau more than 1 km above the
+    datum, and takes the level table's highest bound for the ground track's floors off the survey.
+  - _The two discards on hardware._ The terrain discards by a mask interpolated over its vertices,
+    the reference surface by one sampled from a texture; they may differ by part of a pixel at the
+    edge on hardware where SwiftShader agrees. Left to the by-hand look at T10.c's edge, on the
+    RTX 3080 (hidden) and the owner's UHD 620.
+  - _For R07.T20's owner (pre-existing)._ `viewsCheck.sh` uses `setsid` and GNU `timeout`, which
+    macOS lacks and Windows has only under a POSIX shell; the terrain flag adds nothing new.
+  - _For R02: `KEPT_SYSTEM` is a canonical layer-A ID_ (`SystemId::from_parts`' doc example), so a
+    kept scene's bodies could share an ID with a real galaxy's system; harmless while kept scenes
+    never reach the server.
+  - _The `GRAPHICS` panel_ lists `GRAPHICS VIEW REFUSED` beside the label block; whether it lists
+    the terrain fault too is R12's settings ladder's, or the next plan's to touch the panel.
+  - _For T12:_ with every worker lost, the readings cannot be made (lean: Missing, the em dash, the
+    fault line standing as the cause); the survey line's state for a refused field is T12's, its
+    T16.d draft going to the sign-off queue.
+- **Deviations in T16.b, as built** (2026-10-19; lane r10-live, on `rendering-and-planets` at
+  `b021342b`, after T16.a's `63e31fe4`).
+  - _Files._ New: `view/terrain/surveyLookup.ts` (`SurveyedCells`) with `surveyLookup.test.ts` and
+    `surveyLookup.wasm.test.ts`; `view/terrain/terrainPassShared.test.ts`;
+    `view/terrain/sessionPasses.test.ts` (joins `vitest.config.mts`' `DOM_TESTS`);
+    `displays/view/viewFaults.ts` (`faultFor`, moved out of `ViewDisplay.tsx`, and `faultsFor`)
+    with its test; `smoke/sharedPass.ts`. Changed: the task's `workers/pool.ts`, `terrainPass.ts`,
+    `select.ts`, `cache.ts`, `grounded.ts`, `session.ts`; R01's `view/engine/{types,resilientEngine}.ts`,
+    `webgpu/{engine,meshes}.ts`, `test/{fakeRenderEngine,countingRenderEngine}.ts`,
+    `displays/view/check/probedEngine.ts`; `displays/view/ViewLabelBlock.tsx`, `InstrumentView.tsx`
+    and `ViewDisplay.tsx`; beyond them `gpu/resources.ts`, `workers/rebake.ts` (`RebakeLayers`),
+    `annunciation.ts` (`TERRAIN_NOT_AVAILABLE`), `terrainMaterial.ts`,
+    `displays/view/useTerrainSession.ts` (`useTerrainFaults`), `view/spike/DescentSpike.tsx` (its
+    fault as a list), `test/terrainFixtures.ts`, `smoke/page.ts`, and tests beside each.
+    `view/spike/spikeRun.ts` is unchanged: `TerrainPoolFactory` keeps its type, and the session's
+    factory gives a lane. No wire format, payload, shader, Rust code or golden changes.
+  - _The releases_ (decision-r10-t16-contracts §1), as plan 01's "Extended by R10.T16.b" has them.
+    `MeshRecord` keeps its buffers' handles (`buffers`), which `releaseMesh` destroys; a released
+    mesh or material is refused as "was released" by a draw, by `createMaterialAsync`'s `meshes`
+    and by a second release. `ResilientEngine` notes the maker of meshes and materials too (an
+    asynchronous material's maker is the engine asked). `FakeRenderEngine` now makes mesh and
+    material handles and records their releases. `CountingRenderEngine` gains `live` (the handles
+    of each kind made and not released) and `loseHandles()`, which models a loss's end of every
+    handle (each buffer's and texture's `destroyed` event, a later release dropped as
+    `ResilientEngine` drops it); its meshes still raise no allocation events. `TerrainResources`
+    releases every handle it made at `dispose`, the mesh and every view's buffers included, and at
+    a restore releases the lost device's first (dropped by `ResilientEngine`), so that a counting
+    engine restored without `loseHandles` leaves none either.
+  - _The pool's lanes._ `HeightWorkerPool.lane(bake)` returns a `HeightWorkerLane`, an interface
+    the pool fills (not a class, so that no internal type reaches a public signature):
+    `settings`, `currentGeneration`, `queuedCount`, `waitingCount`, `unavailable`
+    (`lostWorkers === workerCount`), `terminated`, `request`, `reprioritise`, `cancelStale`,
+    `onBaked`, `onFailed` and `terminate`. A pool made with `bake` holds its own lane, which its own
+    calls reach, so the spike's pool and its tests are unchanged; `queuedCount` and `waitingCount`
+    now sum the lanes. Added: `workerCount`, and `fieldBlocks(body)` (the blocks posted and
+    reported of the field's current start), which the session's coverage gate reads. An answer to
+    a terminated lane's request is dropped as it arrives, its record still counting against the
+    worker's two in flight.
+  - _The shared pass._ `TerrainPass.step({ views, grounded })` selects once over the views that
+    hand the body over (`TerrainPassView`: `id`, `view`, its style's `tauPx`, `weight`), and
+    `drawFor(id, input)` gives one view's `TerrainViewFrame`: `draw`, `conditions`, the debounced
+    `annunciation`, `fault`, `missing`, `standingIn` and `maskReady` (no fault, nothing it sees
+    missing, and its draw made wherever it sees a patch: decision D7's rule, T16.c's to apply).
+    `frame(input)` is a step and a draw of `DEFAULT_TERRAIN_VIEW` ("primary"), bit for bit R05's:
+    every pass and spike test passes unchanged. Added: `forgetView`, `setLevels`, `fieldChanged`,
+    and the getters `planet`, `settled`, `faulted`, `viewIds`, `lastStep` and `resident(key)`.
+    `TerrainPool` gains the optional `onFailed` and `unavailable`; `HeightWorkerPool` has no
+    `unavailable`, so the spike's pass keeps drawing what is resident with every worker lost, as
+    built. A view left out of a step is forgotten at once, its buffers released; a view's records,
+    bands, uniforms, draw and debounce are its own; `#due` selects again on a change of the views,
+    any view's field of view, size, τ or weight, the level table or the survey's `version`, and on
+    each view's own turn and move (its own nearest coarse patch, or `Selection.nearestSurveyM` with
+    none). Each view's `DETAIL LIMITED` is `limited && limitExcess > w`, or the low setting where
+    it draws a patch itself.
+  - _The per-view buffers_ are `TerrainResources`' (`viewBuffers(view)`, `releaseView`,
+    `writeFrame` and `setLighting` taking the view): the default view's made with the rest under
+    R05's names, every other's at its first frame named `terrain instances (<view>)` and the
+    rest; each has its own lights, and the phase table is shared. `TerrainPhaseRows.setElsewhere`
+    compares the law by value (the L(α) profile by identity), so that two views' law objects
+    upload the table once. A view's buffers are made in `drawFor`, which draws nothing while the
+    device is lost (`EngineUnavailable`) rather than throw.
+  - _The rebake rule._ The pass keeps each resident patch's `RebakeLayers` (`complete`,
+    `unsurveyedCells`, `horizonRefusedCells`; `needsRebake` takes that `Pick` now) and the request
+    it was last asked with (the last demand's, its rebake's, or the one held before, for a bake
+    that lands outside any demand). `fieldChanged(change, settled)` asks again for every resident
+    patch the rule names, drawn or not as the text says, appending them to the selection's demand
+    at their last priority; the block's gate settles once each has landed in its own slot, been
+    evicted, been refused by its slot or been given up (the lane's `onFailed`), and every gate
+    settles at a rebuild, at the fault and at disposal.
+  - _The mask's gate_ (decision D7 and §2's invariant). In `#blockTaken` the body's survey takes the
+    block at once, and the GPU mask takes it at once where no pass draws the body, else in the
+    gate's `settled`, which checks the body is still held at the same field epoch. The store's
+    coverage (`onRevision`) is held back while a pass draws the body until the pass is settled
+    **and** the workers have reported every block posted before the coverage came: the store
+    answers once a payload's blocks are posted, before the workers take the last of them, so
+    holding it for open rebakes alone would let it run ahead of the bakes. Mechanism: the session's
+    choice (§2).
+  - _The survey lookup_ (§3) is `SurveyedCells` in a module of its own, fed by every block's
+    `newlySurveyed` and every store coverage at once, cleared when the workers drop the field: the
+    field-level cells, and a pyramid of every coarser level holding the cells dilated by one across
+    face edges and cube corners (`stepCellInto`), so that a patch no finer than the field asks one
+    entry, and a finer one its cell and the neighbours across the edges and corners it touches;
+    about 0.9 MB a body at level 8. `select.ts` gains `SurveyLookup`, `SelectionInput.survey`,
+    `SelectedPatch.views` and `Selection.nearestSurveyM` (the least over the views of the box
+    distance to the nearest patch of `NEAREST_SURVEY_LEVEL` = 8, or the finest, with surveyed
+    ground under it, found best first, at least one finest patch, `+∞` with no lookup or survey).
+    A bare node keeps its `seenBy`, so the 2:1 balance is unchanged, but wants nothing, is never
+    forced, counts against no budget and is left out of `patches` and `demand`. `SelectedPatch`'s
+    `views` and `Selection`'s `nearestSurveyM` are required (derived outputs); the two test
+    fixtures that build them by hand give view 0 and `+∞`. `DrawSet` gains `views` (per drawn
+    patch, the union of the views of the selected patches it draws or stands in for: a chosen patch
+    drawn by its coarsest chosen ancestor gives that ancestor its views), `standingInViews` and
+    `missingViews`.
+  - _The contacts_ (§2). `grounded.ts` gains `GroundUnder`, `GroundUnderFunction`,
+    `datumGroundUnder(figure)` (the datum's ground under a point: the parametric direction's
+    spheroid point and its normal; the one function T14.c replaces) and `craftContact` (grounded
+    within its held radius, as the spike's `craftContacts` rules it, or `isDescending` of its height
+    and its speed along the normal; passed at the ground point at its radius). The session's
+    `sceneContacts(scene, body, ground, patchM)` takes every craft of the scene: its velocity
+    against the body is its own in the body's frame, less the body's retarded velocity in the
+    system frame, and unknown otherwise (then it counts only while grounded); its radius its hull's
+    farthest vertex (`hullBoundingRadiusM`: `TEST HULL`'s 11.06 m); at most `MAX_CONTACTS`.
+  - _The session's passes._ `#stepPasses` (in `step()`, which still takes no time: each view's
+    debounce takes its own draw's `nowMs`) finds the views that hand each wanted body over (T10.e's
+    `terrain` regime in a photorealistic report; a wireframe view's hand-over is T11's), makes a
+    body's pass at its first hand-over once its header (the pass's figure is the field header's a
+    and c) and detail seed are held and its rotation known, on the first handing view's setting,
+    through `this.#pool.lane(bake)` and the body's survey, and steps every pass over its handing
+    views (`terrainPassViewOf`) with its contacts. A pass made while the device is lost is tried
+    again at the next step. The passes are on the session's engine, not its texture wrapper, so the
+    memory report's `gpuBytes` stays the masks' and maps' (asked below). Added: `passBodies`,
+    `pass(body)`, `drawTerrain(view, body, input)` (T16.c's entry point), `terrainFaults` and
+    `subscribeFaults`, and the pure `terrainPassViewOf`, `sceneContacts` and
+    `hullBoundingRadiusM`. `#fieldReleased` disposes of the body's pass first (D4), and `dispose()`
+    disposes of every pass before the rest.
+  - _The fault_ (§7). `TERRAIN_NOT_AVAILABLE` is ruled's string in `annunciation.ts`. The session's
+    `terrainFaults` holds every view that hands a body over while `lostWorkers === workerCount`,
+    a new set only when it changes, which `useTerrainFaults(session)` follows with
+    `useSyncExternalStore`; `faultsFor` puts it after `faultFor`'s graphics fault; `ViewLabelBlock`
+    and `InstrumentView` take `faults`, each its own `StatusLine` fault line. A faulted pass asks
+    for nothing (`reprioritise([])` once), draws an empty draw set, and gives every view's frame the
+    fault with a `null` annunciation and `maskReady` false.
+  - _`RebakeLayers` leaves out `horizonComplete`_ (the batch review's S23): `needsRebake` does not
+    read it, which is `staleInFlight`'s, so the pass keeps `complete`, `unsurveyedCells` and
+    `horizonRefusedCells` alone.
+  - _The pass reads no `waitingCount`_ (S23): a patch waiting for a block of its surveyed region has
+    no resident bake, so its view's draw set counts it missing or standing in, which raises
+    `TERRAIN: STREAMING` as the text's "(the lane's `waitingCount`) do count" asks; the test holds a
+    patch not yet baked.
+  - _The mask at cell code 0_ (decision-r10-t16-review §2; built in the batch review's fixes, F1).
+    `maskReadyFor(id)` and `drawFor(id, …).maskReady` are false while the view sees a drawn patch,
+    selected or standing in, of cell code 0 (`surveyCellCode(level, fieldLevel) === 0`, six or more
+    levels coarser than the field) whose last bake's `unsurveyedCells` is not empty; nothing else
+    changes (`missingViews`, `standingInViews`, the annunciation, its debounce, the demand and the
+    budget). The invariant, restated: wherever the mask is given, each cell the GPU mask holds
+    surveyed lies under a drawn patch whose bake draws it, at code 1 or more by the cell's centre
+    vertex, at code 0 by every vertex surveyed. Its cost: on the fixture (field level 6, the roots
+    alone of code 0) the mask is withheld for the one bake round after each start from an empty
+    cache in which a root stands in (the first hand-over, a restore, `VIEW` shown again), the
+    reference surface whole beneath it. The error it removes: a strip up to a root quad wide (a
+    level-6 cell, about 39 km) where neither surface drew and the sky showed through, about 3 px at
+    τ 1 and 6 px at τ 2 at the hand-over range and wider than the view at 4 km. Tested by the
+    ruling's four in `terrainPassShared.test.ts` (F1's record).
+  - _`Selection`'s shape since F1_ (decision-r10-t16-review §3; the batch review's S9): each view's
+    own `nearestSurveyByViewM`, `nearestSurveyM` their least as before, under §3's conditions for
+    each view; R05's renderer type as R10 extends it, no cross-lane seam.
+  - _Tests_ (new: `terrainPassShared.test.ts` 17, `sessionPasses.test.ts` 14, `surveyLookup.test.ts`
+    8, `surveyLookup.wasm.test.ts` 1, `viewFaults.test.ts` 3; beside them 8 in `pool.test.ts`, 11
+    in `select.test.ts`, 5 in `cache.test.ts`, 6 in `grounded.test.ts`, 5 in `engine.test.ts`, 2
+    in `resilientEngine.test.ts`, 2 in `ViewLabelBlock.test.tsx` and 1 in
+    `terrainMaterial.test.ts`): every item of the task's list and of the ruling's §1–3 and §7, the
+    mask's invariant block by block over the scripted worker with a block under resident
+    stand-ins (and checked to fail with the gate taken out), the closing on a survey (checked to
+    fail with `nearestSurveyM` taken out), and the 50 hand-overs. "On the module, a patch passed
+    over bakes the same bytes" is T6.b's `fieldsWasm.test.ts` ("bakes the same again every patch
+    the rebake rule passes over at a block"), unchanged. The task's "the fault stands on each
+    handing view's fault line, after a graphics fault" is held by the session's set,
+    `useTerrainFaults`, `faultsFor` and `ViewLabelBlock`; a `VIEW` test with a body handed over in
+    a live frame waits for T16.c, which hands one over.
+  - _The smoke harness_, `R10.T16 the shared pass` (part 6): on an engine of its own (a second
+    adapter, as T9.i's refusal takes one), whose device it destroys, so that part 6's other groups
+    keep theirs; a pool of two module workers made without bake settings holds both of the
+    Moon-like fixture's payloads; the low setting at a 32 MiB cache, as the lit-terrain check's;
+    three checks: three passes made, drawn and disposed leave the tally's bytes by category where
+    they stood; two views of one pass (30 km at 60° below the horizon, 60 km at 75° turned 90°)
+    each draw a finite frame at least 30% terrain; after the device is destroyed with a new pose's
+    bakes in flight, the terrain returns (finite, at least 30%) with no worker made again and no
+    block posted again (the pool's posted count unchanged, no worker lost).
+  - _Acceptance, as run_ (capped, 4 workers; wider than the task's text, which reaches neither
+    `view/engine`, for §1's release tests, nor `displays/view`, for §7's, both run, with `--part=1`
+    beside `--part=6`: the batch review's S22): `pnpm --filter hyperion exec vitest run --maxWorkers=4
+src/renderer/src/view/terrain src/renderer/src/view/spike src/renderer/src/view/engine
+src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); after
+    `build-slot just gen-surface`, `just test-render --part=6` (exit 0, both variants: the three
+    `R10.T16.b` checks pass, the passes holding 34.2 MB of `height-cache` at their peak; the group
+    takes about 28 s) and `--part=1` (exit 0), since the engine's mesh path changed; the client suite (435 files, 12,536 tests, 2 skipped);
+    `pnpm --filter hyperion typecheck` from a clean cache, `pnpm lint` (type-aware oxlint) and
+    Prettier on the files, clean; the console-ux lint of the changed displays (0 errors), the glyph
+    check of the ruled string and `--status-caution` on `--surface-0` (12.01:1), passing.
+  - _By hand._ None: the views draw no terrain until T16.c.
+  - _Generator version._ Untouched (22): presentation alone, no golden.
+- **Questions for "main" (R10.T16.b)** (none touches a contract of the server's; each built to its
+  lean). _Main's ruling: the cell-code-0 question ruled (decision-r10-t16-review §2, below); the
+  others none relayed to the lane by F2 (2026-10-20); the lane lead marks each here as main rules
+  it._
+  - _The mask's coverage gate goes beyond the ruling's words._ The store's coverage waits for the
+    workers' report of the blocks posted before it as well as for the rebakes (above). Lean: as
+    built; without it the mask runs ahead of the bakes for a frame or more at every payload.
+  - _Every resident patch the rule names is baked again, drawn or not, and the gate waits for all_
+    (the text's "for each resident patch"). Lean: as built; T14 may evict an undrawn one instead
+    (deferred below).
+  - _A craft's velocity in another body's frame is not judged_ (a craft descending to a moon while
+    held in its planet's frame): it is a contact only once grounded. Lean: as built until the
+    flight model gives craft velocities against any body; T14.c with the workers' ground.
+  - _The session's memory report leaves out the passes' GPU bytes_ (64–400 MB each). Lean: R12 reads
+    the engine's tally by category (`height-cache` is the passes' alone in `VIEW`) beside the report;
+    a `TerrainPass.gpuBytes` from its layout is the lever if R12 wants the session's sum.
+  - _The mask at cell code 0_ (the batch review's S21, moved here from the deferred findings): the
+    invariant held at code 0 by T10.c's interpolated half alone. Lean: such patches are drawn where
+    a cell is about a pixel. _Ruled (decision-r10-t16-review §2): not as drawn; the lean's bound
+    does not hold (R05's streaming gate draws the roots first at every start from an empty cache,
+    at whatever range the camera holds), so the view's mask is withheld while it sees a drawn
+    code-0 patch with a vertex outside the survey (above, built by F1)._
+- **Deferred findings (2026-10-13 rule) (R10.T16.b)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _The mask withheld at cell code 0_ (decision-r10-t16-review §2). On a field of level 7 or 8,
+    levels 0–2 withhold the mask for as many bake rounds; where such a level is a steady leaf inside
+    the hand-over range, it withholds it over a range of distances, the reference surface standing
+    over surveyed valleys there. Within a whole code-0 patch on such a field, an unsurveyed cell
+    lying between surveyed vertices is drawn by both surfaces, under a quad wide. The lever is
+    T10.e's: the terrain's discard reads the GPU coverage mask where its code is 0, so that the mask
+    can be given there. The trigger: T15's descent on a served world of field level 7 or 8, or
+    T4.b's statistical bound making a code-0 level a steady leaf inside the hand-over range.
+  - _Undrawn rebakes cost worker time_, and delay the mask until they land, at every block that
+    names cached patches no view draws. T14 measures it beside "The live path's costs".
+  - ~~_The default view's buffers in every pass._~~ Retired by the batch review's C4 (F1): every
+    view's buffers, the default's (now `""`) included, are made at its first frame.
+  - _`nearestSurveyM` runs at every selection with a survey_ (a best-first descent of a few tens of
+    patches a view): unmeasured, small beside a selection.
+  - _A wireframe view hands nothing over until T11_, so it shows no terrain fault line either.
+- **Deviations in T16.c, as built** (2026-10-19; lane r10-live, on `rendering-and-planets` at
+  `b021342b`, after T16.a's `63e31fe4` and T16.b's `9097c51a`).
+  - _Files._ New: `view/terrain/frameTerrain.ts` (`terrainLightingOf`, `TerrainLightingFrame`,
+    `terrainViewOf`, `morePressingAnnunciation`, `LiveFrameTerrain`, `LiveFrameTerrainInput`,
+    `FrameTerrainSource`, `FrameTerrainPass`, `ViewTerrainSource`, `ViewTerrainInput`,
+    `surveyEdgeViewsOf`) with `frameTerrain.test.ts`; `view/terrain/residentHeights.ts`
+    (`ResidentHeights`, `ResidentHeightsView`, `COARSE_HEIGHT_STRIDE`, `BOUNDARY_QUADS`) with its
+    test; `view/terrain/shaders/terrainLitShade.wgsl` and `terrainDepth.wgsl`; the smoke harness's
+    `smoke/terrainFrame.ts`. Changed: the task's `viewFrameDrawer.ts` (`ViewFrameInputs.terrain`,
+    `ViewFrameDrawn.terrain`), `ViewDisplay.tsx`, `useInstruments.ts` (`InstrumentShown.terrain`),
+    `InstrumentView.tsx`, `photorealFrame.ts` and `session.ts` (its documentation alone); R02's
+    `view/wireframe/drawList.ts` (documentation; its one caller in `VIEW`, `viewFrameDrawer.ts`,
+    now gives `surveyEdges`); beyond them `photoreal/renderer.ts` (`FrameTerrain`, the overlay's
+    depth), `terrainPass.ts` (`maskReadyFor`, `symbologyDepthMaterial`, `heights`),
+    `terrainMaterial.ts` (`terrainDepthMaterialSpec`, `TERRAIN_DEPTH_MATERIALS`),
+    `shaders/terrainLit.wgsl` (its `Draw` and fragment stage moved out), `engine/catalogue.ts`,
+    `terrain/surveyEdge.ts` (`SurveyEdgeView.ground`, `SurveyEdgeGround`, `groundHidesPoint`,
+    `SIGHT_SAMPLES`, `SIGHT_TOLERANCE_M`, `MAX_SIGHT_TESTS`), `smoke/page.ts` and
+    `smoke/surveyEdge.ts` (its pose and frame helpers exported), and tests beside each. No wire
+    format, payload, Rust code or golden changes.
+  - _The lights_ (decision D5). `terrainLightingOf(record, rotation, exposureScale)` is pure: the
+    record's lights', occluders' and planetshine sources' directions and centres taken by Rᵀ
+    (`rotateToBodyFixed`), every distance, radius, illuminance and annulus as it stands,
+    `elsewhere` the record's surface's first law (`discSurfaceLaws`: the uniform law or the class
+    map's unsurveyed ground's, unscaled, as `packTerrainLighting` scales it), and the frame's
+    pre-exposure; the sun the record's first light (`lightsAt` puts the brightest first), `+z` and
+    zero illuminance with none (R05's spike shading alone reads them).
+  - _`FrameTerrain.draws(plan, bodies)`_ (beyond the text's `draws(plan)`). A `BodyFramePlan`
+    carries no body's centre or rotation (a `DiscRecord` holds a unit direction and a ÷ D, not the
+    `f64` centre), so the renderer passes the frame's `LitBodyInput`s, the inputs the plan was made
+    from, and the terrain view is the input's (`terrainViewOf`: `rotation` the same object,
+    `cameraM` `scale(centreM, −1)`, tested bit for bit with `Object.is`; the camera's orientation
+    and field of view; the presented size). `FrameTerrain` also gains `symbologyDepth()` (below).
+  - _The mask before the plan._ `litBodiesOf` asks `surveyCoverage(body)` before the frame's plan,
+    which takes the mask, exists; the session's step precedes every view's draw, so the draw set
+    is fixed then. `TerrainPass.maskReadyFor(id)` gives `drawFor`'s `maskReady` from the last
+    step alone: the view taken, nothing it sees missing, and wherever it sees a patch the material
+    compiled (and a lit pass's phase table and tables of no air made); `drawFor`'s own also
+    needs the draw made, so the two differ only for a draw refused at its making (a device lost
+    within the frame). `LiveFrameTerrain.surveyCoverage` gives `coverageMask(body)` only then.
+  - _Per view, per frame._ `ViewFrameInputs.terrain` is a `ViewTerrainInput`
+    (`{ source, view, nowMs }`: the session, the view's ID in it, the frame's time) rather than a
+    `FrameTerrain`: the drawer makes its `LiveFrameTerrain` each photorealistic frame (it needs the
+    presented viewport, the camera and the draw list's `occluderSlopePx`) and its draw list's
+    `surveyEdges` in either style, and returns the frame's annunciation (`ViewFrameDrawn.terrain`).
+    The primary's loop gives `{ session, PRIMARY_VIEW_ID, nowMs }`, each instrument
+    `{ session, instrumentViewId(slot), nowMs }`, so that each view draws the session's passes from
+    its own camera, at its own τ and weight (its own report's step), through its own buffers.
+  - _A body whose rotation is not known_ is never handed over: `litBodiesOf` gives it no
+    `handoverReliefM` (its figure and disc stand, the plan's regime never `terrain`), and
+    `LiveFrameTerrain` skips a handed-over body without one.
+  - _The label block_ (G10; decision-r10-t16-contracts §7). Each frame's annunciation is the more
+    pressing of its handed-over bodies' (`TERRAIN: STREAMING`, then `TERRAIN: DETAIL LIMITED`;
+    `morePressingAnnunciation`), published at the readout rate with the run
+    (`Published.terrain`, `InstrumentShown.terrain`): the primary's block reads
+    `labelStatements(shown.run, shown.terrain)`, and an instrument's statements keep its own
+    terrain line beside `POSITIONS AS SEEN FROM SHIP`. The fault stays on the fault lines T16.b
+    built.
+  - _The air_ (D9). `TerrainFrameLighting.atmosphere` is absent: the tables of no air. The binding
+    point is `terrainLightingOf` (the record's `atmosphere`, R08.T10.a's medium's tables); R08.T10.b
+    or this, whichever lands second, binds it and tests the composite. The statement
+    `ATMOSPHERE: NOT YET MODELLED` stays R08.T10.b's to state (`atmosphereStatements` joined to
+    `photorealStatements`, plan 08); nothing here wires it.
+  - _The edge over the image_ (the r10-shader handoff's item a; the choice and its reason). Each
+    handed-over body's terrain is drawn again into the symbology's pass, before its occluders and
+    lines (`PhotorealRenderer.render`), as depth alone: the view's own lit draw
+    (`TerrainPass.drawFor`'s, its instance records, indirect count and buffers) with the new
+    `terrain-depth-<path>` material (`TERRAIN DEPTH`, `TERRAIN DEPTH OFFSETS`): `terrainLit.wgsl`'s
+    vertices, skirts, fins and survey discard (`survey_kept`) with a fragment of its own
+    (`terrainDepth.wgsl`) that writes no colour and pushes its depth away by the overlay's
+    `occluderSlopePx` of its screen slope and 2⁻¹⁶ of the depth, the occluders' rule (R07.T16.d).
+    It binds R05's vertex storage and the survey mask alone, no texture, and is compiled for the
+    canvas beside the lit material (`TerrainPass.ready`; a failure is reported and leaves the image
+    drawn), and released with it. Chosen over a depth read-back, which lags frames and needs a
+    kernel and a copy, and over the scene target's depth, which is at the internal resolution and
+    holds the figures too: the same geometry and discard as the image, in the pass that draws the
+    marks, at the canvas's resolution, at the cost of a second, depth-only raster of the drawn
+    patches. So `terrainLit.wgsl` loses its `Draw` and `fragmentMain` to `terrainLitShade.wgsl`
+    (the lit material composes it after `terrainLit.wgsl`; WGSL's module scope is order-free, and
+    the naga 30.0.1 check of every composed terrain module passes). In the wireframe there is no
+    terrain depth until T11 (D10): the edge is drawn against the occluder spheres alone there.
+  - _The rim_ (`ResidentHeights`). A pass keeps, for each resident body bake whose survey mask
+    holds the edge (a vertex surveyed and one not), its own-level heights whole and its packed mask
+    (21,128 B); the rim at a direction is the finest such bake's over it, bilinear, and the datum
+    where none is (`SurveyEdgeView.heightAtM`, so max(drawn height, 0) as T10.c's mark takes it).
+    The edge lies on patches' sides at the field's level and every finer one, so a point within
+    10⁻⁶ of a quad of a side reads the patch across it too, across a face's edge included (shared
+    side vertices hold one height). The morph to the parent is not followed (within the selection
+    error). Forgotten at eviction, at a restore and at disposal.
+  - _The note's points_ (the handoff's item b; the choice and its reason). A CPU test against the
+    drawn heights: `surveyEdgeMark`'s range is the least over each drawn piece's nearest point,
+    tested nearest first (at most `MAX_SIGHT_TESTS` = 256) by `groundHidesPoint`, a march of 32
+    samples from where the line of sight enters the shell of the drawn ground's highest
+    (`ceilingM` above a, which bounds every drawn point of an oblate figure) to just short of the
+    point, hidden where a sample stands more than 1 m below the drawn ground. The drawn ground is
+    `ResidentHeights.groundHeightAtM`: the finest resident bake's own-level height on its surveyed
+    ground (the edge bake's whole heights read through its mask, `surveyedAt`; a wholly surveyed
+    bake's 17 × 17 grid of every fourth vertex, 1,156 B, so that a pass's copy stays near a
+    megabyte rather than the cache's heights again, 7 to 22 MB), the datum on unsurveyed ground
+    and where none is resident. This goes beyond the text's "heights … for those patches alone",
+    which binds the rim; the line of sight crosses ground no edge bake holds. Chosen over the
+    depth-tested result, which needs a read-back frames late: the note is a reading of the frame
+    drawn. It applies only in a photorealistic view whose body's pass took the view in its last
+    step (`surveyEdgeViewsOf`'s `ground`); in the wireframe every drawn point counts, as nothing
+    there hides the line but the occluder spheres. The 17 × 17 copy of every resident bake is a
+    deviation from the text's "those patches alone", about 1.5 MB a pass on the high setting
+    (accepted by main, 2026-10-19).
+  - _The list's notes_ (decision-r10-t16-review §1; the batch review's M1, built in part F2,
+    2026-10-20). `ViewFrameDrawn.surveyEdges` gives the frame's `WireframeDrawList.surveyEdges`,
+    published at the readout rate with the run (`Published.surveyEdges`,
+    `InstrumentShown.surveyEdges`); `viewRun.ts`' `surveyEdgeNotes(scene, edges, previous)` makes
+    one `SurveyEdgeListNote` a body whose edge has a point seen (`nearestRangeM` not `null`),
+    nearest first by its range in metres, ties by designation, its unit kept from the notes last
+    shown in that view and dropped while the body has none;
+    `surveyEdgeNote(designation, rangeM, fromCamera, previous)` writes
+    `SURVEY EDGE <designation> <range>`, `FROM CAMERA` after the unit with no own ship, through `lib/format.ts`' new `formatSurfaceRange(rangeM, previous)`
+    (`SurfaceRangeUnit`, `FormattedSurfaceRange`): `SLANT RANGE`'s units, `m` below 1 km, then
+    `formatBodyDistance`'s ladder, three figures decided after rounding, `DISTANCE_HYSTERESIS` at
+    every switch, the m–km one included, E notation below 0.01 m, a non-finite range refused.
+    `ViewMarkList` takes `notes`: a region after the options and their position, outside the
+    `listbox` and never windowed, each note a `p` of role `note`, not focusable, which no click or
+    key reaches, plain `--text` wrapping at its spaces (its range in B612 Mono, digits and unit
+    together), its range muted with its `S` while the list is stale, named
+    `<designation>, survey edge, range <reading>` (`, stale` while stale; `surveyEdgeNoteName`);
+    the primary's list and `InstrumentControls`' each take their own view's. Tests:
+    `format.test.ts` (412 m, 999.6 m as `1.00 km`, 4.21 km, 1.50 Mm, the m–km hysteresis both
+    ways, E notation, a non-finite range), `surveyEdge.test.ts` (the two forms, m below 1 km, the
+    unit kept, the name in three forms), `viewRun.test.ts` (order, ties, none unseen,
+    `FROM CAMERA`, the unit kept and dropped), the new `ViewMarkList.test.tsx` (nearest first after the
+    options, the names in both forms and stale, the stale range and `S`, no note in the
+    `listbox`, none focusable, `End` reaching the last option, none without an edge),
+    `viewFrameDrawer.test.ts` (the frame's edges in both styles) and `ViewDisplayTerrain.test.tsx`
+    (on `TERRAIN TEST`, the primary's and INSTRUMENT 1's lists, each in the wireframe and the
+    photorealistic style).
+  - _The survey edges_ (`surveyEdgeViewsOf`): each wanted body of the scene with a rotation, a held
+    header and a coverage with surveyed ground (the store's, `TerrainSession.survey`), its sphere
+    of the header's a plus its relief in the view (`sphereInFrustum`), on the header's figure,
+    about the scene body's rotation, its centre as the draw list places a body.
+  - _The footprints._ T10.e's `promoteOverlapping` counts a handed-over body (`drawnAsMesh`), so
+    `PhotorealInputs.terrainFootprints` (T10.b's, never fed) is removed and `depthWriters` is `[]`
+    until lit craft add theirs: no footprint counts twice.
+  - _T16.b's left test._ A `VIEW` test of the fault line with a body handed over in a live frame
+    (`ViewDisplayTerrain.test.tsx`): the ship 2,000 km over the slice's Earth in its body frame,
+    the primary photorealistic, the Earth's field and its seed answered over `FakeWebSocket`, every
+    scripted height worker lost: the primary's label block holds the ruled fault line and no
+    `TERRAIN: STREAMING`. Checked by hand to fail with the primary left in the wireframe, which
+    hands nothing over.
+  - _Tests_ (new: `frameTerrain.test.ts` 18, `residentHeights.test.ts` 9; beside them 3 in
+    `sessionPasses.test.ts`, 3 in `terrainPassShared.test.ts`, 4 in `terrainMaterial.test.ts`, 6
+    in `surveyEdge.test.ts`, 1 in `renderer.test.ts`, 4 in `ViewDisplayTerrain.test.tsx`, and
+    `photorealFrame.test.ts`' and `viewFrameDrawer.test.ts`' changed for the rotation and the new
+    input, the depth materials joining `terrainPass.test.ts`' stage walk): every item of the task's
+    list. Under the identity the lights are the record's, under the cyclic permutation their
+    directions exactly (v.y, v.z, v.x); with a one-class Regolith palette at the sub-solar point,
+    through `planLitBodies`' record and `terrainLightingOf`, the terrain's I/F is the disc's to
+    10⁻⁶ and its radiance factor to 10⁻¹²; the view bit for bit; a body handed over in one view
+    drawn there and in another only once it hands it over too, each through its own buffers (the
+    pass's single making and its disposal at the field's release, not at a hand-back, are T16.b's
+    `sessionPasses.test.ts` tests, unchanged); the mask only once nothing is missing; each view's
+    label block its own annunciation (the drawer's annunciation set per view); the rim at an edge
+    bake's height and on the datum elsewhere, in both styles.
+  - _The smoke harness_, `R10.T16 the frame` (part 6, after the survey edge's), the holder of "no
+    pixel drawn by both surfaces on the datum" (§6): the Moon-like fixture's first survey in a pool
+    of two module workers made without bake settings, two lit passes on lanes of it, one with
+    every bake laid on the datum, from the survey-edge check's pose, each frame through the live
+    path (`terrainViewOf`, `terrainLightingOf`, `LiveFrameTerrain`'s draws and mask): with relief,
+    the bodies pass as the renderer draws it (the figure under its mask, then the terrain), every
+    texel finite and no pixel undrawn of 3,072; on the datum, terrain 1,144 pixels, reference
+    surface 1,921, both 0; and the whole frame through `PhotorealRenderer` onto a canvas, its plan
+    handing the body over, a mark 15 km under the surveyed ground hidden by the terrain's depth in
+    the symbology's pass and a mark 2 km over it standing, both standing with no terrain depth. A
+    mark 2 km under the datum showed through. _Corrected by F2 (the batch review's S20; the ruling's
+    §3): the push there is about 1.4 km along the ray at the marks (1.38 to 1.62 km), 1.2 to 10 km
+    down the view's centre column, more where the ground slopes away, at this view's pixels (1.8°
+    at its centre, 1.4° the mean), not "some kilometres"; the cause is the fixture's ground, which
+    stands 266 m and 495 m below the datum at the marks' ends (the patch −1,493 to −154 m, by the
+    module's bake of the patch, F2), so that a mark 2 km under the datum was only 1.5 to 1.7 km
+    under the drawn ground, about 1.6 to 1.8 km behind it along rays some 77° steep, a margin of a
+    few hundred metres at most over the push, which its cased pixels where the ground slopes away
+    exceed. Inferred, not drawn again._ The catalogue's part-1 check compiles both depth
+    materials.
+  - _Acceptance, as run_ (capped): `pnpm --filter hyperion exec vitest run --maxWorkers=4` (the
+    client suite: 437 files, 12,584 tests, 2 skipped); after `build-slot just gen-surface`,
+    `just test-render` (all six parts on both variants, every run exit 0, 1,678 checks passed, no
+    uncaptured GPU error; `R10.T16 the frame` about 32 s); `pnpm --filter hyperion typecheck` from
+    a clean cache, `pnpm lint` (type-aware oxlint) and Prettier on the files, clean; the console-ux
+    lint of the changed displays and modules (0 errors, 0 checks).
+  - _By hand._ None run: the edge over the image and the terrain in `VIEW` by eye, on the RTX 3080
+    (hidden) and the owner's UHD 620, are T16.d's hidden run's and the by-hand looks it lists.
+  - _Generator version._ Untouched (22): presentation alone, no golden.
+- **Questions for "main" (R10.T16.c)** (none touches a contract of the server's; each built to its
+  lean; all four accepted as built by main, 2026-10-19).
+  - _`FrameTerrain`'s two changes_: `draws(plan, bodies)` (the plan holds no body's centre or
+    rotation) and `symbologyDepth()`. Lean: as built, T10.e's Provides read with both. _Accepted
+    as built by main, 2026-10-19; R07's `photoreal/renderer.ts` `FrameTerrain` doc records it._
+  - _The terrain's depth is pushed by the occluders' slope term._ A mark up to `occluderSlopePx`
+    pixels' worth of depth behind the ground shows through it, as behind an occluder sphere or a
+    hull; without the push the edge on its rim z-fights with the ground (T10.c's deferred "The mark
+    sits at the ground's own depth"). Lean: as built, one rule for every occluder. _Accepted as
+    built by main, 2026-10-19._ Its size (F2; the batch review's S20 and C6): about
+    1.8 × 10⁻³ × cot(grazing angle) of the range at 1080p across 60°, which is "tens of metres"
+    only in steep views: 37 m at 30 km up looking 60° down, 186 m at 1 km up 10 km out, 492 m at
+    100 m up 5 km out, 15.6 km at 10 km up grazing 2° at 287 km; at the smoke check's 64 × 48
+    pixels, about 1.4 km at its marks (above).
+  - _The note's ground beyond the edge bakes._ The rim reads the edge bakes alone, as the text
+    says; the note's line of sight a 17 × 17 copy of every resident bake (about 1.5 MB a pass on the
+    high setting). Lean: as built; the alternative, a read-back of the depth-tested line, lags.
+    _Accepted as built by main, 2026-10-19._
+  - _The mask predicted from the step_ (`maskReadyFor`). Lean: as built; the reference surface
+    stays whole for a frame where a draw is refused at its making, which a device loss ends anyway.
+    _Accepted as built by main, 2026-10-19._
+- **Deferred findings (2026-10-13 rule) (R10.T16.c)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _The edge's cost a frame._ Every view's draw list marks every wanted body's edge in view every
+    frame, each point now with a rim lookup (a level walk of at most some twenty map reads) and the
+    note's march (32 lookups a candidate, nearest first): unmeasured; a survey of thousands of
+    cells seen from low over it could cost milliseconds. T14 measures it beside "The live path's
+    costs"; the levers are a mark kept while the camera and the bakes stand still, and fewer
+    pieces off the view.
+  - _The depth raster's cost._ Each handed-over body's drawn patches are rastered twice in each
+    photorealistic view, the second time at the canvas's resolution, depth alone (its fragments
+    the discard and a depth write). T14.
+  - _The ground's coarse copy_ misses ridges narrower than four quads of a wholly surveyed patch,
+    a few pixels where it is drawn, and the bilinear heights are not the drawn triangles (1 m of
+    tolerance): a point hidden or shown by a few pixels may count either way.
+  - _The edge marks the store's coverage_, which may trail the blocks the workers took by the
+    store's answer: for that while the terrain draws newly surveyed cells whose edge still stands at
+    the old survey's line. _(F2, the batch review's C8:)_ it can also run ahead of the GPU mask's
+    cells while a pass holds the store's coverage back from the mask (T16.b's gate, D7): for that
+    while the edge stands at the new survey's line over ground the reference surface still draws.
+  - _The depth push over grazing ground_ (the batch review's C6, for T11 and T12, where the edge is
+    read low over the survey): about 1.8 × 10⁻³ × cot(grazing angle) of the range at 1080p across
+    60°, so 492 m at 100 m up 5 km out and 15.6 km at 10 km up grazing 2° at 287 km; a mark that
+    far behind the ground shows through it. The rule is every occluder's (R07.T16.d); the lever, a
+    push bounded in metres or by the slope's own depth range, is T11's and T12's to weigh.
+  - _The annunciation reaches the label block at the readout rate_, up to 250 ms after the
+    debounce's 250 ms onset, as every reading does.
+  - _At a hand-over's first or last frame_ the note's ground follows the pass's last step, which
+    may differ from the frame's plan by one frame.
+  - _A handed-over body's footprint_ in the promotion is its equatorial sphere's; its terrain may
+    stand past it by its relief over its radius (5 × 10⁻⁴ of the disc on the Moon-like world),
+    where a disc behind is not promoted.
+  - _The surveyed body's occluder at its polar radius_ (T10.c's deferred): over the image the band
+    between it and the equatorial limb is now covered where the terrain is drawn, and still open
+    over the reference surface.
+- **Deviations in T16.d, as built (part 1)** (2026-10-19; lane r10-live, on `rendering-and-planets`
+  at `b021342b`, after T16.a's `63e31fe4`, T16.b's `9097c51a`, T16.c's `346948a7` and the merge
+  `062dd79c`). Part 1 of 2: the golden, the server's agreement, the fixture and the scene,
+  `place-ship --survey` and the guide; part 2 builds the views check's terrain run and the hidden
+  and by-hand runs.
+  - _Files._ New: `crates/hyperion-surface/tests/golden/worker/terrain_test.golden` (108,570 B);
+    `view/scenes/terrainGolden.ts` (`parseTerrainGolden`, `blockBytes`, `TerrainGolden`,
+    `TerrainGoldenPayload`, `TerrainGoldenChange`), `view/scenes/terrainFixture.ts`
+    (`terrainTestFixture`, `TerrainTestFixture`, `TerrainTestFixtureOptions`) and
+    `view/scenes/terrainScene.ts` (`TERRAIN_SCENE_NAME`, `TERRAIN_TEST_SCRIPT`, `TERRAIN_TIME_RATE`,
+    `TERRAIN_START_ALTITUDE_M`, `TERRAIN_LOWEST_ALTITUDE_M`, `TERRAIN_ROTATION_PERIOD_S`,
+    `TERRAIN_OBLIQUITY_RAD`, `TERRAIN_MOON_HILL_M`, `TERRAIN_MOON_CENTRE_M`, `TERRAIN_TEST_UNIVERSE`,
+    `TERRAIN_TEST_SHIP`, `terrainTestGolden`, `terrainMoon`, `terrainSystem`, `terrainStar`,
+    `terrainMoonPhotometry`, `terrainMoonRotationAt`, `terrainShipAltitudeM`, `terrainShipGround`,
+    `terrainShipBodyFixedM`, `terrainSceneAt`, `terrainScene`, `terrainSceneFixture`), each with its
+    test; `displays/view/terrainTestSession.test.tsx`. Changed: `worker/golden.rs` (the terrain
+    test's writer and format, the version test pinning the two names, the size test) and
+    `worker/tests.rs` (`terrain_fixture`, `TerrainFixture`, `TerrainPayload`, `payload_cover`);
+    `hyperion-server`'s `requests/surface.rs` (its tests' `terrain_test_golden`);
+    `displays/view/viewRun.ts` (`SCENE_OPTIONS`), `useTerrainSession.ts`
+    (`TerrainFixture.notePlayed`), `ViewDisplay.tsx` (`LoopInputs.notePlayed`, the loop's call);
+    `src/tools/placeShip.ts` (`--survey`, `SurveyAsked`, `SurveyRecorded`, `PlaceShipOptions.survey`,
+    `Placement.survey`, `coarseLevel`, `coarseCellCount`); `docs/frontend/ux-guidelines.md` (the
+    ruled row); tests beside each. No protocol type, wire form, payload layout, shader or generated
+    output changes.
+  - _The golden_ (decision-r10-t16-contracts §4). Its format is the writer's module documentation
+    ("The terrain test's format"): `body`, `seed`, the header's `dto` lines in `SurfaceHeaderDto`'s
+    order (floats as `0x` and their bits, a scalar's line ending in its decimal for the reader),
+    `survey <revision>` (the coverage the server's log folds, the finer code winning), and for each
+    payload `payload <n> <revision> <have>`, its answer's `cover` (the cells its blocks hold, read
+    from the blocks) and its `block` lines; then `change`/`held` for the first payload's and the
+    delta's blocks in turn. Four payloads where the ruling asks two at least: the first (revision 1),
+    the delta from it to 2, the whole field at 2 (for a session made after the rise, as `VIEW`
+    shown again past the delta's time makes one) and block 0 alone (an ask at the revision held,
+    the same bytes at either revision, a test holds it); 5, 3, 6 and 1 blocks of at most 4,096 B
+    (`FIXTURE_BLOCK_BYTES`), 18,395, 9,932, 23,635 and 428 B. The format holds no liquid record (the
+    writer and both readers refuse one): the Moon-like palette has none. `moon_like.golden` is
+    byte-identical; `golden_diff.py`: one new golden, its header 22, no moved value.
+  - _The survey._ The cells of level 6 whose centres lie within 3.1° (cosine 0.9985) of
+    unit(1, 1, 0.8) at 50 m (24 cells: i 61–63 of face +x and 0–2 of +y, rows 56–60, three cells from
+    the corner of +x, +y and +z, the margin reaching round it onto +z), then of unit(1, 1, 0.62) at
+    20 m (24 more, two of the first's surveyed again, finer): 48 at revision 2, on highland
+    (feldspathic) crust, some 15° from the Crisium-like mare. Tests: the edge and the corner, the
+    extension and the finer pass; the first payload and the delta make the field the whole at
+    revision 2 makes; every surveyed cell of revision 2 reported along them.
+  - _The server's agreement_, in `requests/surface.rs`'s tests (beside `sent`, private there): the
+    `dto` lines built into the JSON a client builds and deserialised into `SurfaceHeaderDto` equal
+    `surface_header` of `synthetic_field(MoonLike)`'s header; each payload's cover equals
+    `sent(level, survey(revision), have.map(survey))`. Checked by hand to fail with a cover's run
+    and the relief's last bit edited.
+  - _The fixture link is R03's own `RequestClient`_ (beyond the text), whose messages reach a
+    stand-in of the server's `surface_field` in the page, which answers through the client's own
+    `handleBinaryFrame` and `handleServerMessage`: one frame a block, each frame and the answer on a
+    task of its own (`TerrainTestFixtureOptions.chunkIntervalMs`, 0 by default). So the client's
+    bulk, cancel (`aborted` at once, nothing more sent) and manifest rules hold as over the link,
+    with no cast at the generic `requestBulk`. Answers: the whole field without `have_revision`
+    (or with 0), the delta from below, block 0 alone at the revision held, `bad_request` naming
+    `have_revision` above it; another universe `unknown_universe`, another body `unknown_body`, and
+    `body_detail` (never asked: the body carries its seed) or any other request `unsupported`.
+  - _The rise follows the stage's script_ (§5). `KeptScene` stays R02's, so the script's time is
+    the stage's: `TerrainFixture.notePlayed?(scriptS)`, an optional member of T16.a's seam, which
+    `ViewStage`'s loop calls with `run.tS` each primary frame of a kept run
+    (`LoopInputs.notePlayed`). A link's revision becomes 2 the first time it is told a time at or
+    past `TERRAIN_TEST_SCRIPT.deltaAtS` (120 s, the survey in view from about 50 km), announced
+    once as a scene notification's `surface_revisions` on a task of its own, and never falls; each
+    link (each session) starts at 1. Chosen over a side effect in `sceneAt`, which R02 documents as
+    the scene at a time.
+  - _The golden is bundled, not imported at the link's first answer_ (§4's should, not met).
+    `TEST MOON`'s ID, seed and figure are read from the golden (§5) when the scene is made, and
+    `SceneOption.make` and `KeptScene.sceneAt` are synchronous, as is the session's taking of the
+    seed at the body's first want, before any answer. So `terrainScene.ts` imports the text with
+    `?raw` statically (108,570 B in the renderer's bundle, evaluated as one string) and parses it
+    once at the first make; the blocks' hexadecimal is decoded only at a link's first answer.
+    Asked below. _Ruled (decision-r10-t16d-part1, Q2): accepted; §4's "should" is recorded as not
+    met (no bundle budget exists anywhere, and a lazy load would need a second golden file)._
+  - _The bodies_ (§5). `TEST STAR` `5e5e000000000000.0000`, a Sun at the barycentre, and `TEST MOON`
+    `.0003`, kind `moon`, its parent the star, at rest 1 au out along +x (as `FRAME CHANGE TEST`'s
+    bodies are), its Hill radius about the star with the Moon's GM, a (m ÷ 3M)^⅓ = 3.45 × 10⁸ m
+    (3.4546 × 10⁸; corrected by F2, the batch review's science check; Murray and Dermott 1999, §3.5,
+    and the Moon's GM from Folkner et al. 2014, Table 8, now cited in `terrainScene.ts`), so
+    that the camera's frame is the moon's throughout and the moon is wanted as its local body with
+    no header (main's T7 rule); `radiusM` and the figure the header's a and c (`Object.is`), its
+    pole R ẑ; `KEPT_BARYCENTRE` and `KEPT_TIDAL_RADIUS_M`. No planet: asked below.
+  - _The rotation_ is hand-set: one turn in 86,400 s about a pole tilted 5° about +x, the meridian
+    at 166.5° at the start; the clock 60 s/s.
+  - _The photometry_, derived from the palette: the primary crust's (feldspathic) normal albedo,
+    R, V and B as r, g and b, under R10's Regolith class row at L(0) = 1 (`classRowLaw`, the Moon's
+    template at s = 1), so p = A_N = 0.20 and q is the template's; provenance `modelled`, no label.
+    It refuses a header with an albedo scale (whose clamps it does not model: the fixture's has
+    none) or a crust at or above the particulate rule's onset, 0.60. The mismatch is deferred below.
+  - _The script_ (`TERRAIN_TEST_SCRIPT`, the part-2 seam): 300 s. The descent, 0–180 s, over 28° N
+    47° E, on a smoothstep in the logarithm of the height over the datum from 8 × 10⁷ m to 4 km; the
+    traverse, 180–300 s, west along 28° N to 40° E at 4 km, on a smoothstep in longitude. The seat
+    looks down above 2,000 km and west 12° below the horizon under 20 km, its pitch between on the
+    logarithm of the height. Held by tests: beyond the hand-over range at the start on either
+    setting (24,811 km at 1 px on 1080p at 60°, crossed at about 40 s: 39.8 s by the limb distance,
+    handed over from 41.6 s; corrected from 38 s by F2), the camera in `TEST MOON`'s frame
+    throughout, the sun 10.1° up at 180 s, setting at the ship's ground point at 240 s (`sunsetS`)
+    over the survey (the seat, 4 km up where the horizon dips 3.88°, sees the sun set about 27 s
+    later), the survey's western edge crossed between 250 and 260 s. The ship's velocity is the
+    path's, a central difference over 0.05 s of the script plus ω × r, in metres a second of the
+    scene: up to about 32 km/s (31.5 km/s radial at about 23 s of the script, some 51,000 km up,
+    plus about 3.4 km/s of co-rotation; decision-r10-t16d-part1, finding (c), correcting 24 km/s),
+    a scripted path, as the frame-change scene's is; no readout shows it (the mark list's closure
+    is craft to craft).
+  - _No contact_ (T16.b's rule). Its lowest point is 4 km over the datum, and its time to contact
+    never below about 700 s (the smoothstep in log height), so the ship is never a contact and no
+    patch is forced; `sceneContacts` is empty at every second of the script (tested).
+  - _`just place-ship --survey <SOURCE> <RESOLUTION_M>`._ A variadic option checked for exactly two
+    values (commander 15 has no two-value option), refused with `--look-at barycentre`. After
+    `scene_ship`, one `body_detail` (`full`) for the target's figure, then one `survey_pass` at the
+    placement's time (`from` = `to`), its cells one run `[0, 6 · 4ᴸ)`, L the TypeScript twin
+    `coarseLevel` of ∛(a² c): the server's `coarse_level` of the figure's volumetric radius in both
+    of `field_level`'s branches (the inputs read that radius once modelled). The report gains its
+    line. The justfile's `place-ship` comment is untouched, so that the gate stays smart-ci's plan;
+    `--help` lists the option.
+  - _The guide._ The ruled `TERRAIN NOT AVAILABLE` row (§7's text, adopted) after
+    `TERRAIN: STREAMING`'s; the drafts are below, not in the guide.
+  - _Beyond the files._ T16.a's "is none for a kept scene with no terrain fixture" now expects
+    `TERRAIN TEST` alone to be a fixture's source. `SCENE_OPTIONS`' new entry joins the smoke
+    harness's `R02.T14.c the wireframe` (part 1): its first frame finite and the corner's depth 0.
+  - _Tests_ (Rust: `worker::golden` 5, two of them new goldens, the names and the size; 2 new in
+    `worker::tests`; 2 in the server's; TypeScript: `terrainGolden.test.ts` 5,
+    `terrainFixture.test.ts` 9, `terrainScene.test.ts` 10, `terrainTestSession.test.tsx` 4, 2 new in
+    `ViewDisplayTerrain.test.tsx`, 11 new in `placeShip.test.ts`, 1 changed in
+    `useTerrainSession.test.tsx`): the plan's T16.d list and §4–5's, part 1's share: the golden,
+    its two names and its size; the server's agreement; the session for `TERRAIN TEST` sends no
+    frame over `FakeWebSocket`; its body IDs and seed are the golden's; a first payload then a
+    delta reach the workers through the session, block for block; a loop of the script asks for no
+    field again and lowers no revision; the other kept scenes make no session; the request of
+    `place-ship --survey` through the tool's fake server.
+  - _Acceptance, as run_ (capped; cargo through build-slot):
+    - `cargo test -p hyperion-surface --features testing --lib worker::` (37 passed,
+      `worker::golden` 5);
+    - on `wasm32-wasip1`, `just _wasip1 nextest run --target wasm32-wasip1 -p hyperion-surface`
+      with the filter `test(/worker::golden/)` or `test(/worker::tests::worker_terrain/)` (7
+      passed);
+    - on the browser target, after `just _browser prepare hyperion-surface` (779 tests, as natively
+      less `native_only`), the library's binary through `wasm-bindgen-test-runner` on Electron's
+      V8 with the filter `worker::` (35 passed, the 2 native-only compiled out);
+    - `cargo test -p hyperion-server --lib terrain_test_golden` (2 passed);
+    - `cargo clippy --workspace --all-targets -- -D warnings` and the browser target's Clippy of
+      `hyperion-surface`, clean; `cargo fmt --all --check`, clean;
+    - after `build-slot just gen-surface`, `pnpm --filter hyperion exec vitest run --maxWorkers=4`
+      over `src/renderer/src/view/scenes`, `src/renderer/src/displays/view`, `src/tools` and
+      `src/renderer/src/view/terrain` (101 files, 2,087 tests);
+    - `just test-render --part=1` (exit 0, both variants, the two `R02.T14.c TERRAIN TEST` checks
+      passing);
+    - the console-ux lint of the changed renderer files (0 errors, 0 checks), the glyph check of
+      every new string and the drafts', `contrast.py` (all pairings pass);
+    - `pnpm --filter hyperion typecheck` from a clean cache, `pnpm lint` (type-aware oxlint) and
+      Prettier on the files, clean.
+  - _By hand._ None in part 1: the hidden run and the by-hand looks are part 2's.
+  - _The part-1 ruling's changes_ (decision-r10-t16d-part1; built in the batch review's fixes, F1):
+    the tripwires, `placeShip.test.ts` holding `MAX_MEAN_CELL_M`, `CoarseLevel::MIN`/`MAX` and the
+    pinned switch radii of `field.rs`' `the_level_rule_switches_at_pinned_radii` to the TypeScript
+    `coarseLevel` (read through `node:fs`), and `terrainScene.test.ts` holding
+    `LIMB_ONSET_NORMAL_ALBEDO` to `properties.rs`' `LUNAR_LIMB_ONSET_NORMAL_ALBEDO` (through `?raw`);
+    and the CRLF reader, `parseTerrainGolden` splitting on `/\r?\n/u`, a CRLF copy parsing as the LF
+    one. After R09.T2.f's merge the golden was re-blessed at 22 (F1's record).
+  - _Generator version._ Untouched (22): one golden added at the version in force, no moved value.
+- **Drafted for main's sign-off agent (R10.T16.d)** (decision-r10-live-path G15; not in the guide;
+  built to the leans: the scene's name and the body's designation are shown now, the survey line's
+  state is T12's to build).
+  - _The scene row_, after `ECLIPSE TEST`'s: `TERRAIN TEST` | Scene | The kept test scene of
+    terrain, its clock at 60 s/s: a descent onto `TEST MOON`, its airless Moon-like moon beside the
+    star with no planet, its bodies held at rest as the other kept scenes' are, from beyond the
+    range at which its relief is drawn as terrain down to 4 km over its survey, then west across
+    the survey's edge while the sun sets over the surveyed ground. Its survey is served by the scene
+    itself, not the server; it grows once, in the first descent after the scene is chosen, and
+    keeps that through later loops. _(Redrafted by F2: decision-r10-t16d-part1, Q3's clause, and
+    the batch review's D-D: the `TARGETS` list shows the body's kind `MOON`; later loops start at
+    revision 2, and choosing the scene again starts at 1.)_
+  - _The designation row_ (`TEST STAR`, `TEST PLANET`, `TEST MOON`, …), its list gaining, after
+    `ECLIPSE TEST`'s: "`TERRAIN TEST`'s Sun-like star and its airless Moon-like moon, beside the
+    star with no planet, whose survey and terrain the scene serves".
+  - _The `SCENE` row_, its list reading "a kept test scene, `PRECISION TEST`, `FRAME CHANGE TEST`,
+    `PHASE TEST`, `ECLIPSE TEST` or `TERRAIN TEST`, under the training banner".
+  - _The survey line's state for a refused or unreadable field_ (the store's `failure`; lean, for
+    T12). _Redrafted by F2 (the batch review's D-D, a must-fix of the first draft, which gave no
+    cause and no action: the guide's Voice, "An error says what is wrong, what caused it if known,
+    and what the operator can do", and its Principles 4)._ Two states, as the console's other
+    answers split a refusal from data that fails its checks:
+    - _A refusal by the server_, a status with the server's reason, as `SCENE REJECTED` is: a
+      bullet under the survey line, "Where the server refuses the body's field, the line reads
+      `SURVEY COVERAGE REJECTED: <the server's reason>, reopen VIEW to retry` in its place until
+      the field is asked for afresh, and the view states no contours or terrain readout over it",
+      and its row: `SURVEY COVERAGE REJECTED` | Status | A view's survey line while the server
+      refuses the body's field, with the server's reason and the retry, steady and in `--text`:
+      `SURVEY COVERAGE REJECTED: <reason>, reopen VIEW to retry`.
+    - _Data the client cannot read_, a fault, as `BODY DATA INVALID` is: "Where the body's field
+      fails the client's checks, the line reads
+      `SURVEY DATA INVALID: <the check that failed>, reopen VIEW to retry` in its place, a fault in
+      `--status-caution`, until the field is asked for afresh", and the row's family gaining it: `SYSTEM DATA INVALID`, `BODY DATA INVALID` |
+      Fault | …, also `SURVEY DATA INVALID` for a view's survey line.
+    - The forms, chosen deliberately: the label block's colon form, `STATE: sentence`, as
+      `TERRAIN: STREAMING` and `TERRAIN NOT AVAILABLE: …` are set (Typography: the state tracked,
+      the sentence after the colon not); `REJECTED` and `DATA INVALID` over `NOT AVAILABLE`, since
+      each names its cause where `NOT AVAILABLE` names none, and joins its family's rows. The
+      retry is reopening `VIEW`, since the session asks every field afresh when it is made again
+      (decision D8). Both steady: neither is an alert (the guide's Alerts: a console's own report
+      is never one). ASCII alone, so the glyph check has nothing to flag.
+- **Questions for "main" (R10.T16.d, part 1)** (none touches a contract of the server's; each built
+  to its lean).
+  - _The golden bundled_ (above): §4's lazy import is a should, and the scene needs the golden's
+    lines when it is made. Lean: as built; the alternative, the three values restated in
+    TypeScript with a test holding them to the golden, is what §5 rules out. _Ruled
+    (decision-r10-t16d-part1): accepted; the "should" recorded as not met._
+  - _A moon with no planet_: `TEST MOON` is a `moon` whose parent is the star, at rest. Lean: as
+    built, the designation the plan names; a planet at index 7 or above would add planetshine and
+    nothing T16 checks. _Ruled (decision-r10-t16d-part1): accepted; the scene's draft row says so._
+  - _`TerrainFixture.notePlayed`_, an optional member added to T16.a's seam and called by
+    `ViewStage`'s loop. Lean: as built. _Ruled (decision-r10-t16d-part1): accepted._
+  - _Two payloads and the survey lines beyond §4's list_ (the whole field at revision 2 and block 0
+    alone; `survey`). Lean: as built. _Ruled (decision-r10-t16d-part1): accepted._
+  - _`--survey <SOURCE> <RESOLUTION_M...>`_ as one variadic option. Lean: as built; the alternative
+    is `--survey <SOURCE>` with `--survey-resolution <M>`. _Ruled (decision-r10-t16d-part1):
+    accepted, with the `coarse_level` tripwire (above). Its description and usage error now say
+    "exactly one resolution in metres", the `...` being commander's one-or-more marker (F2, the
+    batch review's D-D)._
+- **Deferred findings (2026-10-13 rule) (R10.T16.d, part 1)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _`TEST MOON`'s photometry against its field's._ Its uniform law is its primary crust's
+    (feldspathic, A_N 0.20 under the Regolith row), where its field's maria (`basalt_fe`, 0.10)
+    cover some 4 to 5 per cent of it by their closed forms and its consolidated forms take
+    Lambert's law, and its cold traps' H2O ice (A_N 0.965) a small area; and the field's header
+    carries no albedo scale (`albedo_scale: null`), so the
+    surveyed ground draws the palette's albedos as resolved (c = 1). Off the survey its disc and
+    figure are then a few per cent brighter than an area-weighted mix of its materials; the survey
+    itself is highland, so no step shows at its edge from the crust alone. The lever: the header's
+    p from R10.T10.a's solve over the field's class fractions (`class_fractions`), pinned in the
+    golden. _Ruled (decision-r10-t16d-part1, finding (a)): deferred; the maria alone make the disc
+    about 2.5% bright (p ≈ 0.195 against 0.20), under Design note 5's 5% tolerance; the lever goes to
+    whoever next re-blesses `terrain_test.golden`, or to T15._
+  - _The interim stars asked again._ `TERRAIN TEST`'s system is not `KEPT_SYSTEM`, so a switch
+    between it and another kept scene asks the four `systems_in_range` again (`useInterimStars`
+    keys its arrival by system), though the queries are the same. _Ruled (finding (b)): deferred,
+    for R02 (`useInterimStars`)._
+  - _The ship's speed high up_, about 32 km/s of scene time at the descent's fastest (31.5 km/s
+    radial at about 23 s of the script, some 51,000 km up, plus about 3.4 km/s of co-rotation;
+    decision-r10-t16d-part1, finding (c), correcting 24 km/s), at the script's 60 s/s: a scripted
+    path, not a flight; no readout shows it (the mark list's closure is craft to craft); the
+    descent from 80,000 km would take about a day at a lunar transfer's speeds. _Ruled: accepted;
+    for T12, a readout of the own ship's speed or vertical rate would show this figure truthfully
+    on `TERRAIN TEST`._
+- **Deviations in T16.d, as built (part 2)** (2026-10-19; lane r10-live, on `rendering-and-planets`
+  at `b021342b`, after T16.a's `63e31fe4`, T16.b's `9097c51a`, T16.c's `346948a7` and the merge
+  `062dd79c`, beside part 1's uncommitted work). Part 2 of 2: the views check's terrain run
+  (decision-r10-t16-contracts §6), its tests, the hidden runs on the development machine and the
+  by-hand looks.
+  - _Files._ New, in the main process: `main/terrainCheckResults.ts` (`buildTerrainCheckResults`,
+    `terrainFaultsVerdict`, `terrainFailures`, `terrainCheckMarkdown`, `writeTerrainResults`,
+    `TERRAIN_PHASES`, `TERRAIN_DELAY_LIMIT_MS`, `BOTH_SURFACES_HELD_BY`, `TERRAIN_CHECK_SCHEMA`
+    and its types), `main/fixtures/terrainRecord.ts` (a passing record for the tests) and
+    `main/viewsCheckScript.test.ts`; in the renderer, `displays/view/check/terrainProbe.ts`
+    (`TerrainProbe`, `WatchedSession`, `WorkerTraffic`, `TerrainMark`, `QuietSpan`,
+    `MaskReading`, `TerrainProbeOptions`, `countedWorker`, `bakesInFlight`, `nonFiniteTexels`,
+    `missedAtCadence`, `TERRAIN_LIT_PREFIX`) and `check/terrainCheckRun.ts` (`runTerrainCheck`,
+    `recordTerrainCheck`, `terrainHandover`, `terrainProbeOptions`, `TERRAIN_CHECK_PLAN`,
+    `TERRAIN_CHECK_TIMING`, `TERRAIN_CHECK_PACE_MS` and their types), each with its tests
+    (`terrainProbe.test.tsx`, `terrainCheckRun.test.tsx`, `terrainCheckEnding.test.ts`).
+    Changed: `preload/api.ts` (`ViewsCheckLaunch.terrain`, `TerrainCheckPhaseName`,
+    `CheckPhaseName`, the `TerrainCheck…` record types; `ViewsCheckApi.startPhase` and `endPhase`
+    take a `CheckPhaseName`, and `writeTerrainResults` and `capture` are new),
+    `preload/viewsCheckLaunch.ts`, `preload/viewsCheckApi.ts`, `main/cli.ts` (`--terrain`),
+    `main/viewsCheck.ts` (the two channels, each phase read against the launch's run, the terrain
+    phases' capture without a trace, `ViewsCheckSession.writeTerrainResults`, `capture`,
+    `consoleError` and a judged `end`, `isCaptureLabel`), `main/viewsCheckRecord.ts`
+    (`readTerrainCheckRecord`), `main/index.ts` (the terrain run's directories and watchdogs, the
+    console's errors), `scripts/viewsCheck.sh` (`--terrain`, two launches); in the renderer
+    `App.tsx`, `ViewDisplay.tsx` (`sceneOptions`, `watchTerrain`), `check/ViewsCheckRunner.tsx`
+    (`terrain`), `check/viewsCheckRun.ts` (`viewDriver`, `ViewDriver`, `ViewDriverDeps`, and
+    `ViewControls` exported with `exposureButton`, `meterButton` and `unfoldPanel`),
+    `check/viewsProbe.ts` (`watch`, `SubmissionWatcher`, `timedFaults`, `TimedFault`,
+    `restoresAtMs`, `frameTimes`, `drawTimes`, `window`, `WindowFigures`, `faultLine` exported),
+    `check/probedEngine.ts` (`EngineProbe.submitted`, `madeTarget`); T16.b's
+    `view/terrain/terrainPass.ts` (`TerrainPass.seesPatch`, asked below) and
+    `view/terrain/coverage.ts` (the mask's `COPY_SRC`); `test/viewDisplayHarness.tsx`; part 1's
+    `view/scenes/terrainFixture.ts` (`traffic`, `TerrainFixtureTraffic`); tests beside each. No
+    wire format, payload, shader, Rust code or golden changes; no displayed string, component or
+    CSS (the console-ux checks have nothing new to read).
+  - _The launch_ (§6). `--terrain` is refused without `--views-check` ("--terrain is an option of
+    --views-check, which was not given"); `ViewsCheckLaunch.terrain` is required, and
+    `readViewsCheckLaunch` refuses a launch without it. One launch a setting: the script's
+    `--terrain` with no `--setting` makes two launches, high then low, each with its own profile
+    (`mktemp` under `TMPDIR`), the client's watchdog and its results file
+    (`<date>-<machine>-<setting>-terrain[-smoke].json` and `.md`), prints each launch's setting and
+    exit, and exits with the first non-zero one. Full runs write under
+    `docs/measurements/terrain-check/`, smoke runs under `target/views-check/terrain/`, the captures
+    under `target/views-check/terrain/captures-<stamp>/` (not committed). The client's watchdog is
+    8 minutes for a terrain smoke and 30 for a full run (T20's 4 and 20); the script's limits 10
+    and 40. The justfile's `views-check` comment is untouched, so that the gate stays smart-ci's
+    plan; the script's header documents `--terrain`.
+  - _Its own types and IPC_ (§6). `TerrainCheckPhaseName` (`terrain-alone`,
+    `terrain-photoreal-wireframe` on high, `terrain-wireframe` on low, `terrain-loss`; the ruling
+    names none), `TerrainCheckRecord` with its phase, view, fault, loss, teardown and memory
+    records, read back by `readTerrainCheckRecord` as T20's are; `startPhase` and `endPhase` take
+    either run's names, and the handlers refuse a name not of the launch's run ("not a phase of the
+    terrain run", "not a phase of T20's run"); `writeTerrainResults` on its own channel, refused on
+    T20's launch. T20's `ViewsCheckPhaseName` and its tables are as they were. Beyond the text: a
+    terrain phase takes no trace (a window of minutes, and a hidden run has no presentation to
+    read), and a narrow `capture(label)` channel (a label of at most 48 lower case letters, digits
+    and hyphens) saves the page as `<phase>-<label>.png` for the looks below.
+  - _The phases by setting_ (§6; `TERRAIN_CHECK_PLAN`, and main's `TERRAIN_PHASES` for the
+    verdict). On high: the photorealistic primary alone from the script's start through the
+    hand-over, the descent and the sunset to 265 s, past the survey's western edge; then
+    instrument 1 photorealistic and instrument 2 in the wireframe through a whole loop of the
+    script back to 265 s; then the loss. On low: the primary alone; the primary with one wireframe
+    instrument; then the loss. A smoke ends its first phase 3 s after the primary first draws the
+    terrain and holds its second 8 s. The controls are driven as T20's are: T20's script's driving
+    is now `viewDriver` in `viewsCheckRun.ts`, shared by both runs, T20's behaviour unchanged (its
+    tests unchanged but for the phase type). Beyond the text: the first phase puts the primary's
+    exposure under `AUTO` (`ENABLE`) on the `LIT` meter (the compact layout's panels unfolded
+    first), so that the looks show the sunlit ground, the disc's included, through the sunset;
+    `VIEW` opens under `MAN` at EV100 −1.0 on `AVG`, and no verdict reads the exposure.
+  - _The paced fixture, through the launch's own seam_ (decision-r10-t16d-part1's note for part 2,
+    and main's binding ruling relayed 2026-10-19). `TerrainProbe` makes `TERRAIN TEST`'s fixture
+    from `terrainSceneFixture(TERRAIN_CHECK_PACE_MS)` (1.5 s before each block and before each
+    answer, so that the delta's three blocks take about six seconds), and `sceneOptions`, the
+    kept scenes with that fixture in `TERRAIN TEST`'s place; `App` gives them to `VIEW`
+    (`ViewDisplay.sceneOptions`, `heightWorkers`, `watchTerrain`) on a `--views-check --terrain`
+    launch alone. It is no `SCENE_OPTIONS` entry and no switch an ordinary launch can reach; it was
+    built this way from the start, so nothing changed for the ruling.
+  - _The forced loss_ (§6). The loss phase takes `VIEW` to `PHASE TEST` and back, so that a fresh
+    session plays the script from its start to the field's revision rise at 120 s; once the
+    delta's first block has been sent, with blocks still to come and bakes in flight (the counted
+    workers' bakes posted and not answered), the run reads the coverage mask back and destroys the
+    device through `TerrainProbe.destroyDevice`: the device the engine was made on, held by the
+    probe's engine source wrapping the adapter's `requestDevice`, a hook made only on this
+    launch, never a `RenderEngine` member (as R01's loss tests and the smoke harness's
+    `checkForcedLoss` reach it). Then it waits for the restore, reads the mask as soon as it reads
+    on the restored device, waits for the stream's end and the primary's terrain again, and after
+    a settle (10 s, 3 s in a smoke) reads the mask a last time. The primary alone: the ruling names
+    no views for the loss.
+  - _What the run holds, and how_ (each a finding of `buildTerrainCheckResults`; a run whose
+    findings do not all pass exits 1, where T20's run exits 0 once recorded):
+    - _The phases_: the setting's three, in order, each holding its views' styles.
+    - _Every frame drawn_: no view missed a draw it was due at its own cadence (its most common
+      gap in animation frames, 1 at 60 Hz and 2 at 30 Hz; `missedAtCadence`), outside the loss's
+      restore. A stall of the whole page, when no animation frame runs at all, is no missed frame:
+      it shows in each view's longest time between draws, recorded beside it, provisional. Chosen
+      over a limit on that time after the first smoke run stalled 1.45 s at the launch's first
+      terrain compile (deferred below).
+    - _Every frame finite_: each photorealistic view's scene target (`<view>:hdr`, `rgba16float`)
+      read back once a second (twice in a smoke), every texel's four halves finite; read-backs, not
+      every frame, so as not to load the run it measures.
+    - _The terrain drawn once handed over_: a view's draw is handed over when `TEST MOON`'s pass
+      took the view and a patch of its draw set lies in the view's (`TerrainPass.viewIds` and
+      `seesPatch` at the submission), and holds the terrain when a draw's material is
+      `terrain-lit-…`; the primary must hand over in the first phase, and every photorealistic
+      view that hands over must draw the terrain within `TERRAIN_DELAY_LIMIT_MS` (15 s) and in
+      every handed-over draw after, outside the restore (the first spans of any gap listed by
+      script time). A view handed over with no drawn patch in view, past the survey where the
+      reference surface alone is drawn, is counted apart (`offSurveyDraws`). The first reading,
+      without `seesPatch`, failed the first full run on exactly those draws: 606 (high) and 323
+      (low) draws from about 255 s to 265 s, past the survey's western edge, and the second
+      phase's start at 268 s through the loop's end, the view still handed over at 4 km with the
+      survey behind it; the terrain itself was drawn wherever the survey was in view.
+    - _The faults_ (`terrainFaultsVerdict`): exactly one `device-lost` with reason `destroyed`
+      inside the loss phase's window, then exactly one restore; that one fault excluded; any other
+      fault, a second loss, a loss outside the window, none, or an exit of the GPU process fails.
+    - _The loss_: destroyed with blocks to come and bakes in flight; the terrain drawn again; after
+      the destruction no `surface_field` asked, no `field-init` posted, and no `field-chunk` but
+      the blocks of the answer in flight, once to each worker (asked below); the GPU mask (read
+      back, `COPY_SRC` added to its usage for it) holding every cell it held before the loss once
+      restored, and at the end exactly the store's coverage.
+    - _The teardown_: `VIEW` taken to `PHASE TEST`, the session's watch ended, no height worker
+      left (each counted at its making and its termination), the session's textures 0 B by its
+      memory report, and the terrain's GPU bytes (every allocation named `terrain …`,
+      `coverage mask …` or `class map …`, tallied by category from the engine's allocation events,
+      the lost device's disposal included) all released.
+    - _"No pixel drawn by both surfaces on the datum"_: held by T16.c's part-6 group
+      (`R10.T16 the frame`), recorded as held there; no probe in the production shaders (§6's
+      deviation, as ruled).
+  - _What it records, provisional_: each phase's patches drawn (the pass's draw set at each primary
+    draw), bakes a second (answered `baked`), field posts and asks, frame intervals, the main
+    thread's time and each frame's timed GPU time, each view's GPU and submission times, its
+    hand-over's script time against `terrainHandover`'s (the descent's crossing of
+    `handoverRangeM` at the primary's canvas), and the session's memory report with the terrain's
+    live and peak GPU bytes; the load average at the start; the console's errors.
+  - _Part 1's files, extended_ (as the brief allowed): `terrainFixture.ts`'s `traffic()` (asks,
+    `surface_field` asks, blocks sent and blocks still to come, over every link a fixture opened),
+    with two tests; nothing else of part 1's changed.
+  - _Beyond the text, fixed_: T20's `ViewsProbe` took the least and greatest resolve of a window
+    by an argument spread, which a terrain phase of minutes (some 10⁵ resolves) overflows
+    ("Maximum call stack size exceeded", the first full attempt of 2026-10-19, both settings, at
+    the end of their first and second phases); now a fold, with a regression test checked to fail
+    without it. The script's Electron can be stood in for by `HYPERION_VIEWS_CHECK_ELECTRON`, for
+    its own test.
+  - _Tests_ (new: `terrainCheckResults.test.ts` 36, `viewsCheckScript.test.ts` 5,
+    `terrainProbe.test.tsx` 10, `terrainCheckRun.test.tsx` 4, `terrainCheckEnding.test.ts` 7;
+    beside them 14 in `viewsCheck.test.ts`, 18 in `viewsCheckRecord.test.ts`, 4 in `cli.test.ts`,
+    3 in `viewsCheckLaunch.test.ts`, 2 in `viewsCheckApi.test.ts`, 5 in `viewsProbe.test.ts`, 2 in
+    `terrainFixture.test.ts`, 1 in `terrainPassShared.test.ts`, 1 in `ViewDisplayTerrain.test.tsx`
+    and 1 in `App.test.tsx`): the
+    ruling's list (the launch reader with and without `terrain`; the phase refusals both ways; the
+    faults verdict with no loss, one inside the window, one outside, two, another reason, another
+    fault, no restore and two; a GPU process's exit; two launches with no `--setting`, one with
+    it, the exit the first failure) and the run's own (each finding's failures; the probe's counts,
+    read-backs, tally, held device, missed draws and off-survey draws; `seesPatch` over and off
+    the survey; the script's sequence over a simulated `VIEW`
+    and probe, the device destroyed once mid-stream, the masks and the restore left out; `VIEW`'s
+    seam; the terrain launch's run in `App`).
+  - _Acceptance, as run_ (capped; Electron runs hidden and offscreen, `MemoryMax=8G` for the client,
+    its GPU process and three module workers, under the GPU lock with the heavy lock free and the
+    load under 16 at their starts, `TMPDIR` the lane's scratch and
+    `DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent`; wider than the plan's acceptance, which names
+    `worker::golden`, `view/scenes`, `displays/view` and `src/tools`: part 1's `worker::` and the
+    server's `terrain_test_golden` beside it, and Vitest over `src/main`, `src/preload`,
+    `view/terrain` and `App.test.tsx`, which the run's code reaches; the batch review's D-E):
+    - after `build-slot just gen-surface`, `just --no-deps views-check --hidden --smoke --terrain`
+      (the recipe without its `gen-surface` dependency, run first through build-slot), exit 0:
+      high 196 s, low 223 s, each launch's checks all passing (load 4.81 at the start; the final
+      tree's, after an earlier pass at 5.47 before `seesPatch` and the `LIT` meter);
+    - `pnpm --filter hyperion exec vitest run --maxWorkers=4` over `src/renderer/src/displays/view`,
+      `src/main`, `src/preload`, `src/renderer/src/view/scenes`, `src/renderer/src/view/terrain`,
+      `src/tools` and `App.test.tsx`: 138 files, 2,902 tests;
+    - `pnpm --filter hyperion typecheck` from a clean cache, `pnpm lint` (type-aware oxlint) and
+      Prettier on the files, clean.
+  - _The full hidden run, provisional_ (`just --no-deps views-check --hidden --terrain`, the RTX
+    3080, hidden, 2026-10-19; its results committed under `docs/measurements/terrain-check/` as
+    `2026-10-20-effect-{high,low}-terrain.{json,md}`, UTC dates). High from 20:56 local (the
+    1-minute load 12.13 at the command's start, 11.48 at the launch's), 723 s, every check
+    passing. The low launch the same command made started at a load of 22.18 (another lane's), so
+    it was set aside and low run alone with `--setting low` from 21:25 (load 1.45), 708 s, every
+    check passing. The first full attempt (19:52) failed both settings on the argument spread
+    above; the second (20:21) on the first reading of "the terrain drawn once handed over"
+    (above); both set aside.
+    - _High_ (the primary 1126 × 906 px, the instruments 240 × 180): the first phase 262.4 s of
+      window (2.9 to 265.3 s of the script), the primary 15,575 draws at 60 Hz, none missed, its
+      longest gap 117 ms; handed over at 51.1 s of the script (the range 14,551 km, crossed at
+      49.3 s; the hysteresis enters at 1 ÷ 1.1 of it), the terrain drawn 350 ms after, then in
+      12,144 of 12,156 handed-over draws (the 12 before its first), 534 draws off the survey;
+      patches drawn 254.5 on average, 569 at most; 2,120 bakes (8.1 a second); each frame's GPU
+      time p50 4.36, p95 5.26, max 8.31 ms; the main thread p50 6.1, p95 14.5, max 66.5 ms. The
+      instruments' phase 297.1 s (268.1 s through the loop to 265.1 s): the primary 15,579 draws,
+      none missed, its longest gap 283 ms, the terrain in all 10,501 handed-over draws, 2,036 off
+      the survey; instrument 1 (photorealistic) 7,790 draws at 30 Hz, handed over at 77.6 s, the
+      terrain in all 4,505, 1,019 off; instrument 2 (wireframe) 7,790; patches 265.6 on average,
+      636 at most; 2,117 bakes (7.1 a second); GPU p50 4.50, p95 6.34, max 9.30 ms; main thread
+      p50 10.8, p95 27.5, max 292.9 ms. The loss: 134.4 s; destroyed at 121.6 s with 2 blocks to
+      come and 6 bakes in flight; restored, and the terrain drawn again 1,465 ms after the
+      destruction; after it 0 asks, 0 inits and 6 chunks (the 2 blocks to 3 workers); the mask 24
+      cells before, 29 after the restore, 48 at the end, the coverage's 48; patches 148.1 on
+      average, 270 at most; 868 bakes (6.5 a second); GPU p50 3.70, p95 5.33, max 8.22 ms. 978
+      read-backs, every texel finite; one fault, the forced loss, excluded; one restore; 32 console
+      errors (deferred below). The session: the workers' fields 3.34 MiB, the kept blocks 27 KiB,
+      its textures 0.12 MiB of `coarse-field-gpu`, the terrain's peak `height-cache` 382.63 MiB and
+      `other` 0.35 to 0.42 MiB; torn down to 0 of 6 workers and no byte left.
+    - _Low_ (the primary 822 × 544 px at 30 Hz, the instrument 240 × 180): the first phase 264.8 s,
+      7,811 draws, none missed, its longest gap 1,317 ms (a stall of the whole page at the
+      hand-over, deferred below); handed over at 68.1 s (the range 5,311 km, crossed at 66.2 s),
+      the terrain 133 ms after, then in 5,533 of 5,537 handed-over draws, 327 off the survey;
+      patches 144.0 on average, 211 at most; 3,963 bakes (15.0 a second); GPU p50 9.00, p95 12.68,
+      max 19.92 ms; main thread p50 1.2, p95 7.5, max 193.9 ms. The instrument's phase 297.6 s: the
+      primary 8,899 draws, the terrain in all 5,574 handed-over draws, 1,291 off; the wireframe
+      instrument 8,899; patches 95.7 on average, 211 at most; 3,178 bakes (10.7 a second); GPU p50
+      9.19, p95 12.10, max 19.85 ms. The loss: 134.1 s; destroyed at 121.6 s with 2 blocks to come
+      and 6 bakes in flight; the terrain again 1,487 ms after; after it 0, 0 and 6 (2 blocks to 3
+      workers); the mask 24, 29 and 48 cells, the coverage's 48; GPU p50 5.17, p95 13.41, max
+      19.87 ms. 686 read-backs, finite; no other fault; no console error. The terrain's peak
+      `height-cache` 65.14 MiB, `other` 0.29 MiB; torn down to 0 of 6 workers and no byte left.
+  - _By hand, hidden_: each in its task's record (T8.b's, T10.c's, T10.d's and T10.e's
+    "_By hand, hidden, 2026-10-19 (R10.T16.d)_" items), from the full run's looks and a scratch
+    harness on the terrain launch, not committed (two check-only scenes for T10.e's phases, the
+    HDR read-backs' sums, and the north looks at the sunset; each item says what it did). The
+    owner's UHD 620 runs stay his, pending: `just views-check --terrain --setting low` (shown:
+    the window, its looks saved under `target/views-check/terrain/`; the seat turned north by hand
+    at about 185 s for T8.b's look), and T10.e's procedure in `VIEW` once a served world is fully
+    surveyed (T15).
+  - _Generator version._ Untouched (22): no golden, no generated output.
+- **Questions for "main" (R10.T16.d, part 2)** (none touches a contract of the server's; each built
+  to its lean but the last two, the looks', which change no code here).
+  - _After the loss, the answer in flight's blocks are posted._ §6 says "no `field-init` or
+    `field-chunk` is posted" after the loss, and also that blocks are still arriving when the
+    device is destroyed; those blocks reach the workers after it. Lean: as built, no ask and no
+    init after it, and no chunk but the answer in flight's, each block once to each worker
+    (`after.fieldChunks = after.blocksSent × workers`): nothing asked or posted again because of
+    the loss. And "the masks hold the same cells" (the batch review's D-E) as built reads: every
+    cell the GPU mask held before the loss is held once restored, and at the end it holds exactly
+    the store's coverage (24 cells before, 29 after the restore, 48 at the end, the coverage's 48).
+    Lean: as built, both readings.
+  - _"Every frame drawn" as no missed draw at the view's cadence._ Lean: as built, the longest gap
+    recorded beside it, provisional; the alternative, a limit on the gap, would fail the run on a
+    first compile's stall of the whole page, which is a performance finding, not a frame undrawn.
+  - _The mask's `COPY_SRC`_, a production texture's usage widened for the check's read-back
+    (24 KiB at level 6; no other reader). Lean: as built; the alternative, the CPU's copy of the
+    mask's cells, would not see a restore that failed to upload them.
+  - _`AUTO` exposure on the `LIT` meter in the first phase_, for the looks. Lean: as built; the
+    verdicts read no exposure.
+  - _`TerrainPass.seesPatch(id)`_, a read-only member added to T16.b's pass for the check: whether
+    the view's last step saw a drawn patch (the loop `maskReadyFor` runs, which it leaves as it
+    was). Lean: as built; without it a view past the survey is indistinguishable from one whose
+    terrain failed to draw.
+  - _The loss on a fresh session at the delta_ (120 s of the script), so that the stream in
+    flight is the delta's while the terrain is drawn, with the session's own bakes in flight. Lean:
+    as built; a loss in the first session's first payload would come before any hand-over, and a
+    delta at an earlier time would change the fixture's script on the check alone.
+  - _The sunset's steps at patch edges_ (T8.b's by-hand item): from about 228 s of the script, the
+    sun a few degrees up, the light and shadow step across straight lines in the surveyed ground,
+    on both settings, one at least a coarse–fine edge by its detail, with single-pixel bright
+    dots along some lines in the shadow. This may be a fault of T8.b's blend or of the skirts, and
+    so of an algorithm; nothing in T16.d's checks reads a look. Lean: a follow-up task, not
+    T16.d's: trace it at the same moments of the script on low in a scratch build that tints each
+    patch by its level and its skirts apart, then fix where it lies (T8.b's horizon toward the
+    parent at a coarse–fine edge, or the skirts' shading). _Diagnosed by the batch review's fixes
+    (F1, 2026-10-20): not T16's, held by test; recorded as T8.b's deferred finding "The sunset's
+    steps at patch edges" with its candidates, the lean unchanged; the face edge (T8.b's third
+    place) lies along none of the steps seen (T8.b's by-hand item, F2's look)._
+  - _T10.e's per-texel bound at a few pixels a texel_ (T10.e's by-hand item): at the hand-back at
+    90° on high one texel of 48 changes by 0.42 stop with about 3 pixels a texel, while the body's
+    and the survey's sums move by under 0.01 stop. Lean: sampling, not a step of the switch (at 3
+    pixels a texel most straddle its bounds, and the terrain's shading inside a texel is not the
+    disc's figure's); T10.e's procedure to hold the per-texel bound over texels of at least 8
+    pixels each side (a floor it does not state), the rest judged together, and the case judged
+    again on a patterned served world (T15). _Withdrawn by F2 (2026-10-20; the batch review's
+    D-F):_ the figures were already each frame's means, not sums (T10.e's item, as now stated), and
+    the re-run's texel holds the same 5 pixels in both frames and changes by 0.42 stop over them,
+    so it is a real pop at the hand-back, not sampling; a floor of 8 px would remove the check on
+    high for this world; entering and leaving differ by 3 to 4.5 times. The new lean is in T16's F2
+    record ("Leans for a ruling"); the pop is T10.e's deferred finding.
+- **Deferred findings (2026-10-13 rule) (R10.T16.d, part 2)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _The launch's first terrain compile._ On the RTX 3080, hidden, high, the day's first launch:
+    4.0 s from the primary's hand-over to its first terrain draw, and a 1.45 s stall of the whole
+    page (no animation frame) meanwhile; later launches 0.13 to 0.4 s and no stall, the driver's
+    shader cache warm; the committed low launch, the session's first on low after the high ones,
+    stalled 1.32 s at its hand-over (its own pipelines, presumably). For T14 (and R01's pipeline
+    cache): the lever is compiling the lit material and its depth material when the session is
+    made, before any hand-over.
+  - _The low setting's GPU time._ Each frame's timed GPU time on low, p50 9.0 ms on 822 × 544 px,
+    is about twice high's, 4.4 ms on 1126 × 906, on the RTX 3080 (hidden; the terrain's and every
+    other pass). Unexplained here; for T14 and R12 (the setting's passes). One candidate (the
+    batch review's science check): the GPU's clocks held lower under the low setting's 30 Hz
+    pacing, which a re-run would log with `nvidia-smi --query-gpu=clocks.gr`; not logged here.
+  - _The sun in view whites out the frame._ From about 205 s of the script, the sun 9° up and
+    lower in the seat's westward view, the bloom of its disc covers the primary's whole frame at
+    the `LIT` meter's EV100 7.6 to 10.6, and from about 240 s, the sun on the horizon, nothing of
+    the ground shows: the sunset over the survey and its western edge cannot be looked at along
+    the script's track (looked at northward instead: T8.b's item). For R07's bloom (the glare's
+    energy and extent near a host disc), and for whoever next scripts the scene (part 1's track
+    looks into the sunset).
+  - _The pass timer at a device loss._ R01's pass timer logs "reading the pass times failed:
+    [object DOMException]" as a console error for each read-back the lost device refuses (15 and 16
+    at the high smokes' losses, none on low): an expected refusal reported as an error, and the
+    exception stringified as `[object DOMException]`. For R01.
+  - _`VIEW` opens kept scenes under `MAN` at EV100 −1.0_, about 12 stops brighter than the sunlit
+    ground of `TERRAIN TEST` meters (EV100 10.9 to 12.9 `AVG`): its first frames are white until
+    the operator presses `ENABLE`. For R07's exposure (the console's default), or the scene's.
+  - _The off-survey disc's brightness_ in these looks is not a check of an area-weighted
+    photometry (decision-r10-t16d-part1, finding (a)): `TEST MOON`'s law is its crust's.
+  - _`VIEW`'s graticule keeps a gap where the flight-path mark stood_ once the mark is no longer
+    drawn: in the scratch scenes' captures at the hold and the back-out (132 s and 175 s), on both
+    settings and at both phases, the graticule's lines break at the disc's middle with no mark
+    there. A knock-out left for a mark not shown; for the view's marks.
+- **The batch review's fixes (F1, 2026-10-20)** (lane r10-live, on `r10-live` at `f4392f3c`, over
+  T16.d's uncommitted parts 1 and 2; fixes-abc.md under its RULED header and fixes-d.md, with
+  decision-r10-t16-review, -contracts, -t16d-part1 and -live-path; part F2 builds the note, the rest
+  of the test items and the records). Each fix in a line:
+  - _D-A, the golden after R09.T2.f._ `worker/golden.rs`' `write_dto` takes `FieldHeaderParts` and
+    each `PaletteEntry` apart whole (each member the wire does not carry named and dropped), so that
+    a new member is a compile error; each `dto palette` line gains `FeO_T` after its liquid token
+    (`0x` bits, `-` not modelled), and `dto weathering_rate` follows `organic_cover`; the module doc
+    states both, with `maturity`'s, `organic_cover`'s and `weathering_rate`'s units and ranges. The
+    server's reader maps a `-` to an absent key (a `null` would read as `Modelled::Null`), panics on
+    a `dto` line of a form it does not read, and holds the header by `serde_json` text, not `==`
+    (signed zeros); the client's (`terrainGolden.ts`) reads the ninth token and the new member.
+    Renamed: `worker_terrain_test_block_zero_carries_the_world_s_header` (its doc points at the
+    server's `terrain_test_golden` tests) and `the_terrain_test_golden_is_within_its_size_cap`.
+  - _The re-bless at 22_ (the sim-determinism skill; the old file copied to the lane's scratch
+    first, `git diff --no-index` against it): moved, as the auditor expected, only these. From the
+    format: `dto palette 0`–`2` gain `0x3fa999999999999a` (0.05), `0x3fc999999999999a` (0.20) and
+    `0x0000000000000000` (0); one new `dto weathering_rate -`. From R09.T2.f's codec (block 0's
+    header 28 B longer, 0x181 to 0x19d): every `block` line, block 0's length 0xffe to 0xfe8
+    (payload 1), 0xff0 to 0xfc1 (payload 2: it ends at cell 3956, the next cell's 75 B passing
+    4,096 B, where the auditor's estimate was about 0xff3), 0xffe to 0xfad (payload 3) and 0x1ac to
+    0x1c8 (payload 4), the later blocks shifted; `held 0` ends `4032-4038`, `held 1` is
+    `4038-4080`, `change 2` gives `6784-6788` to `change 3`, `held 2`, `3` and `4` follow
+    (`4080`…, `6784-6848 8192-8196`, `8196-8204`…), `change 5` ends `3955-3956`, `change 6` starts
+    `3956-3960`. Held: the header line (22), `body`, `seed`, every scalar `dto` line, both `survey`
+    lines, the four `payload` and `cover` lines; the union of the `change` lines is survey 2's 48
+    cells and of the `held` lines the 310 before; blocks 5, 3, 6 and 1, each at most 4,096 B
+    (payloads 18,482, 9,910, 23,604 and 456 B); the file 108,763 B (was 108,570), under its cap;
+    `moon_like.golden` byte-identical; `golden_diff.py` one new golden, no inconsistency.
+  - _D-B._ `placeShip.test.ts` reads `field.rs` through `node:fs` and holds `MAX_MEAN_CELL_M`
+    and `CoarseLevel::MIN`/`MAX` (now exported `MAX_MEAN_CELL_M` and `COARSE_LEVELS`) and each
+    pinned switch radius of `the_level_rule_switches_at_pinned_radii` (`coarseLevel(largest)` and
+    of its next `f64`), each missing item an error naming `field.rs`; `terrainScene.test.ts` holds
+    the exported `LIMB_ONSET_NORMAL_ALBEDO` to `properties.rs`' `LUNAR_LIMB_ONSET_NORMAL_ALBEDO`
+    through `?raw`; `parseTerrainGolden` splits on `/\r?\n/u`, a CRLF copy parsing as the LF one.
+  - _The mask at cell code 0_ (decision-r10-t16-review §2, the RULED header). The pass keeps for
+    each resident bake whether it is of code 0 with `unsurveyedCells`; `maskReadyFor` and
+    `drawFor`'s `maskReady` are false while the view sees such a drawn patch (no `STREAMING`,
+    `missingViews` or budget change). The ruling's four tests in `terrainPassShared.test.ts` at a
+    field of level 6 (a root standing in withholds the mask with only the stand-in's `STREAMING`;
+    given once its children land; given under a root whose bake holds every vertex; withheld under
+    a root kept as a steady leaf by a level table of no relief, with no `STREAMING`), the first and
+    the last failing with the rule taken out, as checked.
+  - _S1._ `surveyEdgeViewsOf` stands the rim on the datum wherever the view draws none of the
+    body's terrain (the wireframe, or a photorealistic view its pass did not take), the bakes'
+    heights only where it draws them; T16.c's test now reads so.
+  - _S2._ `TerrainSession.step` skips `follow` and its releases while it holds no view's report;
+    the primary's loop notes its report before the step (with S6). Tested at the session (a loop
+    starting again on a living session: the field kept, asked once, no `field-release`), checked to
+    fail without the guard. Not built: a `VIEW` test that remounts a stage on the same source (the
+    harness has no path that restarts the loop on a living session); F2 may add one.
+  - _S3._ `#writeTable` makes the larger phase table before releasing the old; `#release` tries
+    every release and reports one that throws, so that a restore always makes the resources and
+    tells their owners; `TerrainPass.dispose`'s releases sit in `finally`s. Tested: a table
+    refused during a loss leaves the restore to rebuild with no release failing (checked to fail
+    with the old order).
+  - _S4._ `CoverageMask` holds its level and cells before it makes its texture, and a texture a
+    loss refuses is made at `restore()`; the pool tells each listener whatever the one before threw
+    (`tell`, reporting it), so that its handler always pumps; also beyond the item, `TerrainPass`'s
+    store takes an upload a loss refuses as refused. Tested: the mask's cells through a loss, and a
+    throwing bake listener (both checked to fail without the fix).
+  - _S5._ `stepTerrainSession` (`useTerrainSession.ts`) guards the loop's step and the drawer's
+    `#surveyEdges` the edges: `EngineUnavailable` passes in silence, anything else is reported once
+    (`console.error`) until it succeeds again, and the loop draws on. Tested both.
+  - _S6._ `ViewSelectionInput.frustumMarginRad?` (`cull.ts`' `frustumOf(camera, marginRad = 0)`)
+    and `TerrainPassOptions.frustumMargin` (`"none"` by default, so the spike's and R05's selections
+    are bit for bit; the session's passes take `"motion"`): each view's frustum opened by
+    `frustumMarginRad`, one pixel plus the turn since its last step plus |Δp| ÷ its nearest selected
+    ground, at most `MAX_FRUSTUM_MARGIN_RAD` (0.1 rad); the primary notes before the step. Found:
+    a 60° view panning 2° a frame leaves no strip (the patches straddling its edge are wider than
+    the strip); a 10° view slewing 3° a frame, 6° below the horizon at 5 km, leaves 117 of 576
+    rays unselected without the margin and none with it (tested, with the margin 0's selection bit
+    for bit and the session pass's margins read back).
+  - _S7._ The pass keeps the keys whose rebake the lane gave up (`givenUp`), leaves them out of
+    later gates, and takes one off at its next bake or eviction. Tested (checked to fail without).
+  - _S8._ `TerrainViewReport.drawnStyle` (the style its last frame was drawn in) decides the
+    hand-over; `style` (the budget's) still judges the fields, so that a loss's wireframe stand-in
+    releases none (D8). The drawer marks its edges in `frameStyleOf`'s foreseen style. Tested: a
+    view standing in hands nothing over (checked to fail with `style`), and `frameStyleOf`'s table.
+  - _S9._ `Selection.nearestSurveyByViewM` (each view's own; `nearestSurveyM` their least, as
+    before, under §3's conditions per view), which the pass's move rule reads. Tested: an
+    instrument over bare ground moving 300 km does not reselect on the primary's 2,000 km (checked
+    to fail on the shared value).
+  - _S10._ `sceneContacts` asks `placeableAgainst` (the frames the scene holds, its barycentre
+    where they meet in the galactic frame) and no longer catches; anything else propagates.
+  - _S11._ `CountingRenderEngine` gains `loseDevice()` (every creation `EngineUnavailable`, an
+    asynchronous one rejected, every write dropped, until `restore`), `failMaterials`, mesh buffers'
+    `created`/`destroyed` events at `MeshRecord`'s bytes, and a lost handle's second release
+    throwing as `ResilientEngine`'s does. Tests: a view whose buffers a loss refuses draws nothing,
+    throws nothing and is given no mask (`drawFor` now withholds `maskReady` on a refused draw,
+    found by it); a pass a loss refused is made at the next step; a failing depth material is
+    reported once and the pass draws on; materials compiled for a pass let go, or a replaced
+    device, released; a loss's refused compile says nothing (C9); a pass's mesh bytes return;
+    `sceneContacts`' system-frame velocity, no rotation, `MAX_CONTACTS` cap and an unplaceable
+    craft; `terrainPassViewOf`'s weights by stream priority (beside T16.b's pass-level quarter).
+  - _C1._ `MAX_SIGHT_TESTS` used up with none seen and more points drawn gives the nearest drawn
+    point's range, not none; documented and tested (checked to fail without).
+  - _C2._ `terrainStatementOf` (`viewFaults.ts`): no terrain annunciation while the view's faults
+    hold `TERRAIN_NOT_AVAILABLE`, in `InstrumentView`; the primary inlines the same rule beside its
+    faults (`faults.includes`), the React Compiler's lint failing the component where an imported
+    function takes the array.
+  - _C3._ `InstrumentsFrame.terrain` (the session the primary stepped) replaces its `classMaps` and
+    `reliefs`; `InstrumentsInput.terrain` and the ref go.
+  - _C4._ `DEFAULT_TERRAIN_VIEW` is `""`, the one name `viewId` refuses; `TerrainPassView.id` is a
+    `ViewId` (`TerrainViewId` within the pass); every view's buffers, the default's included, are
+    made at its first frame; the session tests take `PRIMARY_VIEW_ID` and `instrumentViewId(1)`.
+    T16.b's deferred "80 kB of default-view buffers" is retired (F2 strikes it).
+  - _C9._ `SurveyedCells.surveyedUnder` allocates nothing; `ready()` and `#readyDepth` say nothing
+    of a compile a loss refused or one for a device or pass gone; `TerrainPass.forgetView` is
+    private, so that a view taken again always takes a selection and its morph bands.
+  - _D-C._ `terrainProbe.ts`' read-back chain has its `.catch`, and `#readBack` lets only
+    `EngineUnavailable` and a read-back in flight at the harness's destruction pass (`console.warn`
+    otherwise); `viewsCheck.sh` traps `EXIT`, then `INT` (130) and `TERM` (143), so that a stop
+    makes no second launch (tested by a stand-in that sends TERM); `App.tsx`' `CheckedView.terrain`
+    is one `TerrainSeam` or `null`; the probe's read-backs, their pacing, one in flight a target,
+    a refusal uncounted and only a failure warned, and `readMask`'s cells, tested over the timed
+    engine; `terrainCheckRun.test.tsx`'s listener ends with an `AbortSignal`; `ran.length === 0`;
+    the faults verdict takes `destroyedAtMs` and excludes a loss only at or after it (tested); T20's
+    `writeResults` refused on a terrain launch (tested); the summary prints the CPU governor, and
+    the results record the captures from the repository's root (`capturesRecordedAs`); the two
+    committed runs' files rewritten to it, the governor added to their summaries, and all four
+    formatted by Prettier (the writer's output is not: F2's re-run formats before committing).
+  - _The sunset seams_ (T8.b's by-hand item; the brief's diagnosis). Held by test, so not T16's:
+    the primary's instance records, morph bands and parents' horizon slots and quadrants
+    (`#parentSlotOf`, the records' spare words) equal the descent spike's single view's (`frame()`)
+    bit for bit at one pose over one resident set; an instrument that joins after the first step,
+    and one that leaves and joins again, write the primary's records at its pose (`PRIMARY_VIEW_ID`
+    and `instrumentViewId(1)`, the instrument at `SECONDARY_VIEW_WEIGHT`); C9's zero bands cannot
+    arise now. The face edge: the lookup is the patch's own face's in the shader
+    (`horizon.wgsl`'s `horizon_grid_azimuth`, from the slot record's face) and in the bake
+    (`bake/horizon.rs`' `grid_azimuth`), agreeing at a face edge and near a corner, and the live
+    path changes neither; but the two faces' eight knots point differently (about 52° between their
+    u tangents at the survey's centre, 60° at the corner), so the horizons either side of the
+    +x/+y edge at 45° E differ by design: one line along the face edge. What remains for the lane
+    lead to record as T8.b's finding, by likelihood (a read-only study, untested): the near field
+    truncated at every patch edge (a vertex looking outward has no near horizon while its
+    neighbour's full near field sees the same ground: T8.b's "Edges between far points"); normals
+    never morphed at a coarse–fine edge (a fine patch at k = 1 draws its parent's geometry with its
+    own normals, where a low sun is most sensitive); the coarse–fine parent blend; skirts and fins
+    shaded with no horizon map (lit inside shadow: the single bright dots); the face edge above.
+    One T16 effect is inferred, not tested: a view that did not drive a split may see a coarse leaf
+    beyond its band end beside a finer one, breaking the k = 1 / k = 0 invariant at their edge in
+    an instrument, never in the primary alone, where the seams were seen.
+  - _Acceptance, as run_ (capped; cargo through build-slot, 8 jobs with the heavy lock free, 4
+    while part 6 held it): `cargo test -p hyperion-surface --features testing --lib worker::` (37
+    passed); `cargo test -p hyperion-server --lib terrain_test_golden` (2 passed); on
+    `wasm32-wasip1`, `just _wasip1 nextest run --target wasm32-wasip1 -p hyperion-surface` with
+    `test(/worker::golden/) | test(/worker::tests::worker_terrain/)` (7 passed), and on the browser
+    target, after `just _browser prepare hyperion-surface`, part 1's `browser-by-name.sh` with
+    `worker::` (35 passed); `cargo clippy --workspace --all-targets -- -D warnings`,
+    `cargo fmt --all --check` and `just doc-check`, clean; after `build-slot just gen-surface`,
+    the client suite at `--maxWorkers=4` (451 files, 12,958 tests, 2 skipped);
+    `pnpm --filter hyperion typecheck` from a clean cache, `pnpm lint` (type-aware oxlint) and
+    Prettier on the files, clean; `just test-render --part=6` (exit 0, both variants, the `R10.T16` groups' six checks
+    passing). Each new test checked by hand to fail with its fix taken out, as each item says;
+    and the server's header test with an `FeO_T` token edited, the two tripwires with their
+    TypeScript twins moved, and the CRLF test with the reader's split on `"\n"`.
+  - _Generator version._ Untouched (22): the golden re-blessed at the version in force, its moved
+    lines the format's and R09.T2.f's codec's alone.
+  - _Dropped, with why:_ none of the items held to F1; S6 holds only for narrow or fast views (as
+    found above), and is built for them.
+- **Questions for "main" (F1)** (none touches a contract of the server's; each built to its lean).
+  - _The report's two styles_ (S8): `drawnStyle` hands over, `style` judges the fields, so that a
+    loss's stand-in drops the view from the pass but fetches no field again. Lean: as built.
+  - _The frustum margin's rule and cap_ (S6): one pixel, the turn and |Δp| ÷ d, at most 0.1 rad,
+    the session's passes alone; its patches outside the view count toward a view's `STREAMING`
+    while unbaked, and are T14's to measure. Lean: as built.
+  - _The guards' report_ (S5): `console.error` once, not the label block's fault path, which has no
+    ruled string for a terrain bug. Lean: as built.
+  - _The default view's name_ (C4): `""`. Lean: as built.
+  - _The multi-view morph invariant_ (the seams' inferred T16 effect). Lean: a test and a remedy in
+    T8.b's follow-up or T14 (bands from the levels each view would select, or a morph held at a
+    coarse–fine edge by the selection).
+- **Deferred findings (2026-10-13 rule) (F1)** (recorded, not ruled; each leaves the algorithm and
+  the contracts as built).
+  - _The terrain-check writer's files are not in Prettier's form_ (unaligned tables, expanded
+    arrays); the gate's Prettier would refuse a re-run's files unformatted. The lever: format
+    before committing, or have the writer format.
+  - _The margin's patches_ (S6) cost selection and bakes outside the view during a pan; T14 beside
+    "The live path's costs".
+- **The batch review's fixes (F2, 2026-10-20)** (lane r10-live, on `r10-live` at `f4392f3c`, over
+  T16.d's and F1's uncommitted work; fixes-abc.md under its RULED header and fixes-d.md, with
+  decision-r10-t16-review §1–3, -contracts and -t16d-part1). Each fix in a line, the records'
+  places named:
+  - _M1, the note_ (§1, the ruled form). Built: `lib/format.ts`' `formatSurfaceRange`
+    (`SurfaceRangeUnit`, `FormattedSurfaceRange`), `surveyEdge.ts`' `surveyEdgeNote` in the
+    guide's form (`SurveyEdgeNote`) and `surveyEdgeNoteName`, `viewRun.ts`' `surveyEdgeNotes` and
+    `SurveyEdgeListNote`, `ViewFrameDrawn.surveyEdges`, `Published.surveyEdges` and
+    `InstrumentShown.surveyEdges`, `ViewMarkList`'s `notes` (the primary's list and
+    `InstrumentControls`' each its own view's) and the notes' styles in `styles.css`; recorded in
+    T16.c's text ("The list's notes") and as-built, T12's text, and 28(p1)'s text in T10.c's Risks
+    ("_Signed off 2026-10-19_ … R10.T16.c builds (b)–(d)"). The ruling's tests, all of them, in
+    `format.test.ts`, `surveyEdge.test.ts`, `viewRun.test.ts`, the new `ViewMarkList.test.tsx` and
+    `ViewDisplayTerrain.test.tsx`.
+  - _M2_ (F1 had not built it). `terrainPassShared.test.ts`: two views of one pass, both settled,
+    then the instrument descended from 1,000 km to 50 km over the south pole: its finer patches are
+    drawn by their ancestors, and it alone announces `TERRAIN: STREAMING` once debounced, the
+    primary over resident patches nothing; a budget that binds by an excess of 0.65, between the
+    instrument's weight (0.25) and the primary's (1): the instrument's detail limited, the
+    primary's not (`limitExcess > w`); a contact over unsurveyed ground: it demands nothing, draws
+    nothing and leaves its view's annunciation clear. Checked to fail with each view's stand-ins
+    read as the whole set's, and with the weight left out of the limit. A "missing" patch (one with
+    no resident ancestor) cannot be had in one view alone once the roots are baked, so the
+    stand-in, which the same per-view masks raise, stands in for it (asked below).
+  - _S12._ Split to one reason an `it`, `it.each` or a shared setup where the cases share one:
+    `frameTerrain.test.ts` (a disc's body and an unturned one; the five exclusions of the survey
+    edges), `sessionPasses.test.ts` (the pass's first hand-over in four, the pass a loss refused in
+    two, the wireframe view and the unturned body, the fault in six, the craft contacts in five),
+    `terrainPassShared.test.ts` (the rebake gates in six, the contacts in three, the depth
+    materials in two, the mask's readiness in three), `session.test.ts` (a body held by one view
+    of two; the disposal's two orders), `surveyLookup.test.ts` (the two refusals) and
+    `residentHeights.test.ts` (the ceiling, its fall, the ground forgotten, the rim and the bytes
+    after a clear).
+  - _S13._ The reason above each `oxlint-disable-next-line no-await-in-loop` of
+    `sessionPasses.test.ts`.
+  - _S14._ `useTerrainFaults`' test moved to `useTerrainSession.test.tsx`, through the hook's own
+    session (no session: none; every worker lost under a view that hands the moon over: that view).
+  - _S15._ `ViewDisplayTerrain.test.tsx`'s per-view annunciation test through the boundary fakes:
+    the slice's Earth handed over to the photorealistic primary, its field and seed answered over
+    `FakeWebSocket`, the scripted workers holding the bakes back, INSTRUMENT 1 open in the
+    wireframe: the primary's label block states `TERRAIN: STREAMING`, the instrument's no terrain
+    line. Found: the old fixture's Moon-like header put the Earth's terrain at the Moon's figure,
+    inside the Earth and out of view, and surveyed two cells far from it, so nothing streamed; the
+    field is now surveyed whole at the Earth's figure (`earthHeader`), which the fault test shares,
+    so that its "no `TERRAIN: STREAMING` under the fault" now holds over a view that would stream.
+  - _S16._ `viewFrameDrawer.test.ts`, over a session stand-in: a photorealistic frame gives its
+    terrain's annunciation, a wireframe one none, and both styles the session's survey edges.
+  - _S17._ `ViewDisplayTerrain.test.tsx`: INSTRUMENT 1, photorealistic beside the primary over the
+    Earth, closed: the Earth's pass is the primary's alone at the next steps (checked to fail with
+    `useInstruments`' two `forgetSlot` calls taken out), read through the views check's
+    `watchTerrain` seam (asked below). Not built: an ended loop's forgetting, and S2's `VIEW` test of
+    a stage remounted on the same source, since no harness path ends or restarts the primary's loop
+    on a living session (F1's note); the session-level test holds S2's rule.
+  - _S18._ The two presence queries went with the test S15 rewrote.
+  - _S19._ `ViewLabelBlock.test.tsx`'s fault test split in four.
+  - _S20._ `smoke/terrainFrame.ts`' comment and T16.c's as-built and question corrected: the push
+    about 1.4 km at the marks (1.38 to 1.62 km along the ray), 1.2 to 10 km down the centre column,
+    at 1.8° (centre) and 1.4° (mean) pixels; the cause of the 2 km mark's showing through, the
+    fixture's ground 266 m and 495 m below the datum at the marks (by the module's bake of the
+    patch, in a scratch test), so that the mark stood only 1.5 to 1.7 km under the drawn ground,
+    within the push over its cased pixels: inferred, not drawn again.
+  - _S22, S23, C8._ T16.a's and T16.b's records: the acceptance as run, wider than the text;
+    `RebakeLayers` without `horizonComplete`; no `waitingCount` read; T16.a's `step(nowMs)` line;
+    T16.c's "The edge marks the store's coverage" (it can also run ahead of the GPU mask).
+  - _C5._ `grounded.ts`: the height's error (h f)² ÷ 2a, under a micrometre at 1 km (8.9 × 10⁻⁷ m).
+  - _C6._ T16.c's question and a deferred finding for T11 and T12, with the rule and its figures.
+  - _C7._ Plan 10's Provides, Client: `surveyLookup.ts`, `residentHeights.ts` and
+    `formatSurfaceRange`.
+  - _Main's rulings._ On T16.c: each question marked "accepted as built by main, 2026-10-19"; R07's
+    `photoreal/renderer.ts` `FrameTerrain` doc records the shape change; the slope push's size, and
+    the 17 × 17 grid as a deviation (about 1.5 MB a pass on high), in T16.c's record (the
+    footprints' removal and the unturned body's no relief stood there already). On part 1: each
+    question ruled, Q5 with the tripwire; the scene row's clause; finding (c)'s 32 km/s with "no
+    readout shows it", both places; Q2's should not met; the tripwires and the CRLF reader named;
+    findings (a), naming the cold traps' ice, and (b) deferred. §2's text: T16.b's ("Unsurveyed
+    ground"), T16.c's (`surveyCoverage`), T16.b's as-built ("The mask at cell code 0"), its question
+    ruled and its deferred finding replaced, T10.e's deferred finding and T11's pointer. T16.a's
+    and T16.b's other questions: no ruling relayed by F2 (a marker left).
+  - _D-D._ The survey line's draft redrafted for the sign-off agent (a status for the server's
+    refusal, a fault for unreadable data); the scene and designation drafts; `--survey`'s usage
+    and error ("exactly one resolution in metres"). The `SCENE` selector at 150% (by hand,
+    below): its labels broke inside their buttons, so `.view-display__bar .preset-buttons` wraps
+    between its buttons and each label stays on one line (`white-space: nowrap`), tested on the
+    stylesheet's text (`ViewDisplayLayout.test.tsx`), looked at again.
+  - _D-E._ T8.b's by-hand item: the survey's faces corrected and the third place recorded; the
+    full runs' repeat recorded pending (below); §6's masks' reading in part 2's question; the
+    acceptance as run, wider; T10.c's by-hand item answering §6's "two discards on hardware".
+  - _D-F._ The records: 32 km/s; the hand-over crossed at about 40 s (39.8 s by the limb distance,
+    handed over from 41.6 s); the Hill radius 3.45 × 10⁸ m; the seat's sunset about 27 s after
+    the ground point's at 240 s (the horizon's dip 3.88° at 4 km); `terrainScene.ts` cites
+    Folkner et al. 2014, Table 8 for the Moon's GM and Murray and Dermott 1999, §3.5 for the Hill
+    radius. T10.e's statistic, pixel sets and camera motion stated; its re-analysis by a new hidden
+    run (below); the +0.041 stop's attribution withdrawn, recorded with its candidates; the 8 px
+    floor's lean withdrawn; the low setting's GPU clocks recorded as a candidate, not logged.
+  - _The seams._ F1's diagnosis is T8.b's deferred finding "The sunset's steps at patch edges",
+    with its candidates and the lean of a follow-up task that tints patches by level; part 2's
+    question points at it.
+  - _By hand, hidden_ (the RTX 3080, hidden and offscreen, under the GPU lock with the heavy lock
+    free and the 1-minute load 0.28 to 0.75 at the looks' starts, `TMPDIR` the lane's scratch,
+    `DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent`; a scratch harness on the terrain launch, not
+    committed: the T16.d part-2 harness extended, applied and reverted, `out/` rebuilt from the
+    clean tree before the smoke run):
+    - _The notes in the side column at 1280 × 720_ (decision-r10-t16-review §1). On `TERRAIN TEST`
+      (the smoke's low launch, 1286 × 724): `SURVEY EDGE TEST MOON 2.64 Mm` on one line under the
+      list's one row and its position. `TERRAIN TEST` has an own ship, so its note never carries
+      `FROM CAMERA`; the longest form was looked at on the scene with its ship taken out (the
+      harness's variant, the camera held 1,200 km over the survey in the system's frame):
+      `SURVEY EDGE TEST MOON 1.20 Mm FROM CAMERA` wraps after `FROM`, `CAMERA` on a second line,
+      nothing clipped or truncated, at 100% and at 150% interface scale (the longest reading the
+      units allow is one character longer, `0.960 km` within the hysteresis).
+    - _The `SCENE` selector at 1280 × 720 and 150% interface scale_ (D-D; the root's font size at
+      150%): before the fix every kept scene's label broke inside its button onto two lines, the
+      row itself not overflowing; after it, `SERVER` to `ECLIPSE TEST` on the first line and
+      `TERRAIN TEST` on the second, each label whole; at 100% one line as before. Found beyond it
+      (deferred below): the label block's room at 150%.
+    - _T8.b's third place_: recorded in T8.b's item (the face edge projected into the saved looks;
+      none of the steps along it).
+    - _T10.e's hand-back_: high, `HANDOVER 90` alone, the load 0.28 at the start: the figures
+      repeat the first runs' to 0.002 stop, and the outlier is a real pop over the same 5 pixels
+      (T10.e's item and its deferred finding).
+  - _The full hidden runs_ are not repeated: another lane's cargo build was running when the smoke
+    run ended, so the machine was not quiet. The fixes change what they measure (S6's margin's
+    patches, the code-0 rule's withheld masks, S7's gates), so the repeat stays due, pending, on a
+    quiet machine (the 1-minute load under 1 and no other lane's run), its results then replacing
+    the committed `2026-10-20-effect-{high,low}-terrain` files, formatted by Prettier, both runs
+    recorded.
+  - _Acceptance, as run_ (capped, as the lane's rules say):
+    - `build-slot just gen-surface` (exit 0), then
+      `just --no-deps views-check --hidden --smoke --terrain` (the recipe without its `gen-surface`
+      dependency), exit 0: high 195 s and low
+      211 s, each launch's checks all passing (the load 0.75 at the high launch's start, 3.56 at
+      the low's); the loss destroyed at 121.5 s of the script with 2 blocks to come and 12 and 7
+      bakes in flight, the masks 24, 24 and 48 cells (high) and 24, 28 and 48 (low) of the
+      coverage's 48, nothing asked or posted again; results under `target/views-check/terrain/`
+      (`…-high-terrain-smoke-5`, `…-low-terrain-smoke-4`);
+    - the client suite, `pnpm --filter hyperion exec vitest run --maxWorkers=4`: 452 files,
+      13,050 tests passed, 2 skipped;
+    - `pnpm --filter hyperion typecheck` from a clean cache and `pnpm lint` (type-aware oxlint),
+      clean; Prettier on every file touched and on this plan, clean;
+    - the console-ux checks: `ux_lint.py` over the thirteen renderer files changed, 3 errors and
+      10 checks, every one on a line that predates this part (the smoke frame's literal mark and
+      surface colours; `styles.css`' scroll and colour checks); `contrast.py`, every pairing
+      passing; `glyphs.py` over the notes' strings, which are ASCII alone;
+    - `just test-render --part=6` not run: nothing it draws changed (`smoke/terrainFrame.ts`'s
+      comment and R07's `FrameTerrain` doc alone); no Rust touched.
+  - _Generator version._ Untouched (22): presentation and records alone, no golden.
+- **Questions for "main" (F2)** (none touches a contract of the server's; each built or looked at
+  to its lean).
+  - _The longest note's look on a variant with no own ship_ (§1's by-hand item): `TERRAIN TEST`'s
+    own ship keeps `FROM CAMERA` off its note. Lean: as looked; T12's look repeats it.
+  - _M2's "missing" by the stand-in_ (above). Lean: as built; `streaming` is `missing || standingIn`
+    over the same per-view masks.
+  - _S17 read through the pass's views_, not a `field-release`: in the harness's scenes no body is
+    wanted by an instrument alone (a body with no header is wanted only as a local body, and an
+    instrument opens at the primary's pose). Lean: as built.
+  - _The survey line's two states_ (D-D's redraft): a Status,
+    `SURVEY COVERAGE REJECTED: <reason>, reopen VIEW to retry`, and a Fault,
+    `SURVEY DATA INVALID: <reason>, reopen VIEW to retry`, for the sign-off agent's text. Lean: as
+    drafted.
+  - _The views check's banner_: its terrain run, like T20's, shows `TRAINING`, while the guide's
+    `MEASUREMENT` row names only `--descent-spike`. Lean: a guide question, nothing built: the
+    guide's Layout ("A simulation, training, replay or measurement mode must look unmistakably
+    different from live operation, through a persistent labelled banner in the header strip") and
+    its `MEASUREMENT` row ("a measurement view opened from the command line … flown by script,
+    recording, and driven by no operator input") read on both views checks, for the sign-off.
+- **Leans for a ruling** (F2, gathered from T16.d's, F1's and F2's records: each lean that changes
+  a test criterion or a check's definition).
+  1. _T10.e's per-texel bound, as re-analysed._ Lean: the bound on each texel's mean luminance over
+     the pixels assigned to it in both frames, every texel of at least 2 pixels, no floor (the 8 px
+     floor withdrawn); so read, the fixture fails it at the hand-back at 90° on high (0.42 stop over
+     5 shared pixels), a real pop recorded as T10.e's deferred finding with its remedies (a
+     cross-fade over the hysteresis band, or the disc's law given its unresolved roughness), the
+     bound judged again on a patterned served world at T15.
+  2. _"Every frame drawn"_ (T16.d part 2): no missed draw at the view's own cadence, the longest
+     gap recorded beside it, provisional; not a limit on the gap. Lean: as built.
+  3. _The forced loss on a fresh session at the delta_ (120 s of the script). Lean: as built.
+  4. _The masks after the loss_: every cell held before held once restored, and at the end exactly
+     the store's coverage. Lean: as built, both readings.
+  5. _After the loss, the answer in flight's blocks_: no ask and no init after it, no chunk but the
+     answer in flight's, each block once to each worker. Lean: as built.
+  6. _S8's two styles_ (F1): `drawnStyle` hands over, `style` judges the fields. Lean: as built.
+  7. _S6's frustum margin_ (F1): one pixel, the turn and |Δp| ÷ d, at most 0.1 rad, the session's
+     passes alone, its patches counting toward a view's `STREAMING` while unbaked. Lean: as built.
+  8. _S5's guards' report_ (F1): `console.error` once, not a fault line, so that it shows in the
+     views check's console errors and in no label block. Lean: as built.
+  9. _The multi-view morph invariant_ (F1): a test and a remedy in T8.b's follow-up or T14. Lean:
+     as F1 leans.
+  10. _M2's "missing" by the stand-in_ and _S17 by the pass's views_ (F2, above). Lean: as built.
+  11. _The views check's banner, `TRAINING` or `MEASUREMENT`_ (above). Lean: a guide question.
+  12. _The survey line's split into a Status and a Fault_ (above), for the sign-off agent's text.
+      Lean: as drafted.
+- **Deferred findings (2026-10-13 rule) (F2)** (recorded, not ruled; each leaves the algorithm and
+  the contracts as built).
+  - _A view's joining sets another streaming._ Selection is shared, so a patch split for one view
+    is split for every view that sees it: a primary settled 2,000 km over a pole announces
+    `TERRAIN: STREAMING` for a bake round when an instrument joins over the equator, the faces'
+    roots it sees by their boxes split for the instrument. As designed (decision-r10-t16-contracts
+    §3); for T14, beside "The live path's costs" (the lever, a split taken only for the views that
+    want it, where the 2:1 balance allows).
+  - _The label block's room at 150%._ At 1280 × 720 and 150% the `SCENE` row's second line
+    shortens the stage by about 50 px, and the primary's label block, thirteen lines on the
+    variant without a ship, reaches the stage's bottom edge, its plate's last padding cut, every
+    line still shown; a scene that adds statements (`TERRAIN TEST`'s own ship gives two) would cut
+    its last lines. For R07's layout (the label block at 150%), or T12, whose readouts join the
+    block.
+  - _The notes in the compact list_: at 1280 × 720 the Targets list shows one option row above
+    its notes; a second body's note, or T12's `GROUND AT LINE OF SIGHT`, takes the list's room
+    again. For T12's look at 1280 × 720.
+  - _The harness's console in the views check's log_: this part's first scratch run, without
+    `ELECTRON_ENABLE_LOGGING=1`, logged none of the renderer's console, and its next, with it,
+    logged all of it. For whoever next runs a scratch harness on the views check.

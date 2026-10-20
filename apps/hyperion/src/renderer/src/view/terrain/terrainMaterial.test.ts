@@ -15,6 +15,9 @@ import { oblateAlbedoScale } from "../bodies/oblate";
 import { WGSL_CATALOGUE } from "../engine/catalogue";
 import type { WgslMaterialSpec } from "../engine/types";
 import { annulusEdges } from "../lighting/annuli";
+import { bindingStages } from "../../test/wgslStages";
+import occluderWgsl from "../shaders/occluder.wgsl?raw";
+import terrainDepthWgsl from "./shaders/terrainDepth.wgsl?raw";
 import terrainLitWgsl from "./shaders/terrainLit.wgsl?raw";
 import horizonWgsl from "./shadows/horizon.wgsl?raw";
 import { LIT_VERTEX_CODE } from "./gpu/resources";
@@ -37,11 +40,13 @@ import {
   packTerrainLighting,
   TERRAIN_CLASSES,
   TERRAIN_LIGHT_ROWS,
+  TERRAIN_DEPTH_MATERIALS,
   TERRAIN_LIT_BINDINGS,
   TERRAIN_LIT_MATERIALS,
   PHASE_LAW,
   type TerrainLighting,
   TerrainPhaseRows,
+  terrainDepthMaterialSpec,
   terrainLitMaterialSpec,
   terrainReflectance,
   terrainShares,
@@ -64,6 +69,57 @@ function photometryOf(slots: ReadonlyArray<readonly [number, number, number, num
 function storageNames(spec: WgslMaterialSpec): string[] {
   return (spec.storageBuffers ?? []).map((buffer) => buffer.name);
 }
+
+describe("the lit terrain's depth material for the symbology (R10.T16.c)", () => {
+  it("registers both vertex paths' depth materials in the catalogue", () => {
+    for (const spec of TERRAIN_DEPTH_MATERIALS) {
+      expect(WGSL_CATALOGUE.some((entry) => entry.kind === "material" && entry.spec === spec)).toBe(
+        true,
+      );
+    }
+    expect(TERRAIN_DEPTH_MATERIALS.map((spec) => spec.displayName)).toEqual([
+      "TERRAIN DEPTH OFFSETS",
+      "TERRAIN DEPTH",
+    ]);
+  });
+
+  it("writes depth alone, and binds what its entry points read: R05's vertex storage and the survey mask", () => {
+    const offsets = terrainDepthMaterialSpec("baked-offsets");
+    const read = bindingStages(offsets.vertexWgsl);
+    expect([offsets.colourWrites, offsets.depthWrite, offsets.textures]).toEqual([false, true, []]);
+    expect(
+      (offsets.storageBuffers ?? []).map((buffer) => [
+        buffer.name,
+        [...(buffer.stages ?? [])].toSorted().join(" "),
+        [...(read.get(buffer.binding) ?? [])].toSorted().join(" "),
+      ]),
+    ).toEqual([
+      ["heights", "vertex", "vertex"],
+      ["slots", "vertex", "vertex"],
+      ["instances", "vertex", "vertex"],
+      ["contacts", "vertex", "vertex"],
+      ["offsets", "vertex", "vertex"],
+      ["surveyMask", "fragment vertex", "fragment vertex"],
+    ]);
+    // No binding its entry points read is left out of the layout.
+    const declared = new Set((offsets.storageBuffers ?? []).map((buffer) => buffer.binding));
+    expect([...read.keys()].filter((binding) => !declared.has(binding))).toEqual([]);
+  });
+
+  it("takes the lit material's draw with the overlay's slope term after it", () => {
+    expect(terrainDepthMaterialSpec("face-differences").uniforms.map((u) => u.name)).toEqual([
+      ...terrainLitMaterialSpec("face-differences").uniforms.map((u) => u.name),
+      "occluderSlopePx",
+    ]);
+    expect(terrainDepthWgsl).toContain("occluderSlopePx : f32,");
+  });
+
+  it("pushes its depth away by the occluders' constant fraction", () => {
+    const fraction = /DEPTH_FRACTION\s*=\s*([0-9.]+)/u;
+    const depthFraction = /TERRAIN_DEPTH_FRACTION : f32 = ([0-9.]+)/u;
+    expect(terrainDepthWgsl.match(depthFraction)?.[1]).toBe(occluderWgsl.match(fraction)?.[1]);
+  });
+});
 
 describe("the lit terrain's material (R10.T10.b)", () => {
   it("registers both vertex paths' lit materials in the catalogue", () => {
@@ -244,7 +300,17 @@ describe("the class laws (decision-r10-limb; decision-r07-t8b)", () => {
     const before = rows.version;
     expect(rows.setElsewhere(elsewhere)).toBe(false);
     expect(rows.version).toBe(before);
-    expect(rows.setElsewhere({ ...elsewhere })).toBe(true);
+    expect(rows.setElsewhere({ ...elsewhere, phaseExponent: [1.1, 1, 1] })).toBe(true);
+    expect(rows.version).toBe(before + 1);
+  });
+
+  it("counts no change for a law equal to row 0's by value, as each view's frame gives its own (R10.T16.b)", () => {
+    const elsewhere = classRowLaw(PHASE_LAW.regolith, 1);
+    const rows = new TerrainPhaseRows(elsewhere);
+    const before = rows.version;
+    expect(rows.setElsewhere({ ...elsewhere, a: [...elsewhere.a] })).toBe(false);
+    expect(rows.version).toBe(before);
+    expect(rows.setElsewhere({ ...elsewhere, lommelSeeligerShare: 0.5 })).toBe(true);
     expect(rows.version).toBe(before + 1);
   });
 

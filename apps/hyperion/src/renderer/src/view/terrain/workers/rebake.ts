@@ -45,13 +45,19 @@ export function surveysAny(runs: Uint32Array, cells: Uint32Array): boolean {
   return false;
 }
 
+/** What the rebake rule reads of a bake's layers, which the holder of its patch keeps (R10.T16.b). */
+export type RebakeLayers = Pick<
+  TerrainLayers,
+  "complete" | "unsurveyedCells" | "horizonRefusedCells"
+>;
+
 /**
  * Whether a body's patch baked with `layers` is to be baked again after the block that made
  * `change` (the module documentation's rule). A test planet's bake carries no layers and reads no
  * field, so no block makes it stale.
  */
 export function needsRebake(
-  layers: TerrainLayers | null,
+  layers: RebakeLayers | null,
   change: Pick<FieldBlockAnswer, "newlySurveyed" | "newlyHeld">,
 ): boolean {
   if (layers === null) {

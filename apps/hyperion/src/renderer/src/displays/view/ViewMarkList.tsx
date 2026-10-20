@@ -12,13 +12,17 @@ import { StaleMark } from "../../components/StaleMark";
 import { formatListPosition } from "../../lib/format";
 import { useScrollMetrics } from "../../lib/useScrollMetrics";
 import { windowRange } from "../../lib/windowRange";
-import { type ClosureReading, type MarkRow, rangeText } from "./viewRun";
+import { SURVEY_EDGE_NOTE, surveyEdgeNoteName } from "../../view/terrain/surveyEdge";
+import { type ClosureReading, type MarkRow, rangeText, type SurveyEdgeListNote } from "./viewRun";
 
 /** A row's height, rem. */
 const ROW_REM = 2;
 
 /** Rows drawn beyond the window on each side. */
 const OVERSCAN_ROWS = 4;
+
+/** A list with no notes. */
+const NO_NOTES: ReadonlyArray<SurveyEdgeListNote> = [];
 
 /** A row's closure rate as its accessible name reads it, after a comma, or nothing. */
 function closureName(closure: ClosureReading): string {
@@ -40,6 +44,11 @@ function closureName(closure: ClosureReading): string {
 /** Props of {@link ViewMarkList}. */
 export interface ViewMarkListProps {
   readonly rows: ReadonlyArray<MarkRow>;
+  /**
+   * Its notes, the bodies' survey edges in the view's picture, nearest first (`surveyEdgeNotes`,
+   * plan R10, R10.T16.c): set after the options, never one of them; none by default.
+   */
+  readonly notes?: ReadonlyArray<SurveyEdgeListNote> | undefined;
   /**
    * Whether the ranges are from the camera, the scene having no own ship (`rangesFromCamera`):
    * the range column's head then reads `RANGE FROM CAMERA` and its rows the bare range
@@ -68,9 +77,16 @@ export interface ViewMarkListProps {
  * accessible name keeps `FROM CAMERA` (R07.T19.b, decision-r07-t19-layout).
  * Windowed as plan 05's lists are (its design note D17), though a kept scene's list is short. Stars
  * are not listed: they are not targets.
+ *
+ * Its notes stand after the options and their position, outside the `listbox` and never windowed:
+ * each a `note`, not focusable, which no click or key acts on and the list's keys pass over, its
+ * text wrapping at its spaces, never truncated, its range muted with its `S` while the ranges are
+ * stale, and named in the options' form (the guide's Views; decision-r10-t16-review §1). R10.T12
+ * puts `GROUND AT LINE OF SIGHT` first among them.
  */
 export function ViewMarkList({
   rows,
+  notes = NO_NOTES,
   fromCamera,
   selectedKey,
   onSelect,
@@ -246,6 +262,25 @@ export function ViewMarkList({
         <p className="list-position">
           {formatListPosition(range.firstVisible, range.lastVisible, total)}
         </p>
+      )}
+      {notes.length === 0 ? null : (
+        <div className="view-list__notes">
+          {notes.map((note) => (
+            <p
+              key={note.key}
+              role="note"
+              aria-label={surveyEdgeNoteName(note.designation, note, stale)}
+              className="view-list__note"
+            >
+              {SURVEY_EDGE_NOTE} {note.designation}{" "}
+              <span className={stale ? "stale" : undefined}>
+                <span className="view-list__note-range">{note.range}</span>
+                {note.fromCamera ? " FROM CAMERA" : null}
+              </span>
+              {stale ? <StaleMark /> : null}
+            </p>
+          ))}
+        </div>
       )}
     </div>
   );

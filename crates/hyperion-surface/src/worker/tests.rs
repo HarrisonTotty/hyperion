@@ -190,6 +190,222 @@ pub(super) fn fixture() -> Fixture {
     }
 }
 
+/// `TERRAIN TEST`'s first survey's centre (plan R10, R10.T16.d), not normalised: on the edge
+/// between faces +x and +y, at v = 0.8 of both, some five cells of level 6 from the corner they
+/// share with face +z, so that the survey straddles the edge and its margin reaches round the
+/// corner (T8.b's third place, "a face edge near a cube corner").
+const TERRAIN_FIRST_CENTRE: [f64; 3] = [1.0, 1.0, 0.8];
+
+/// The second survey's centre, along the same edge away from the corner, at v = 0.62: some four
+/// cells from the first's, so that the second overlaps the first's rim and extends it.
+const TERRAIN_SECOND_CENTRE: [f64; 3] = [1.0, 1.0, 0.62];
+
+/// The cosine of each survey's angular radius about its centre, which a surveyed cell's centre is
+/// within: 0.9985, about 3.1°, some two cells of level 6 there.
+const TERRAIN_SURVEY_DOT: f64 = 0.9985;
+
+/// One of `TERRAIN TEST`'s payloads: R09.T19.b's answer, at the body's revision `revision`, to a
+/// `surface_field` with `have_revision` `have`, cut into the fixture's blocks.
+pub(super) struct TerrainPayload {
+    /// The body's coverage revision the payload reflects, from 1.
+    pub(super) revision: u32,
+    /// The revision the asker held, `None` for the whole field.
+    pub(super) have: Option<u32>,
+    /// The payload's blocks, in order.
+    pub(super) blocks: Vec<Vec<u8>>,
+}
+
+/// `TERRAIN TEST`'s field (plan R10, R10.T16.d; decision-r10-t16-contracts §4): the Moon-like
+/// world's two surveys about the edge of faces +x and +y near their corner with +z, and the
+/// payloads R09.T19.b answers over them.
+pub(super) struct TerrainFixture {
+    /// The world's body.
+    pub(super) body: BodyRef,
+    /// The coverage at revisions 1 and 2, as the server's survey log folds it (the finer code
+    /// winning): the first survey at 50 m, then the second's cells at 20 m with it.
+    pub(super) surveys: [Cover; 2],
+    /// The first payload (revision 1, whole); the delta from it to revision 2; the whole field at
+    /// revision 2; and the answer to an ask at the revision held, block 0 alone.
+    pub(super) payloads: [TerrainPayload; 4],
+}
+
+impl TerrainFixture {
+    /// The blocks a session posts in turn: the first payload's, then the delta's.
+    pub(super) fn first_then_delta(&self) -> impl Iterator<Item = &[u8]> {
+        self.payloads[0]
+            .blocks
+            .iter()
+            .chain(&self.payloads[1].blocks)
+            .map(Vec::as_slice)
+    }
+}
+
+/// The cells of the Moon-like world's level whose centres lie within the angle whose cosine is
+/// `dot` of the direction `centre`.
+fn cells_about(centre: [f64; 3], dot: f64) -> BTreeSet<PatchKey> {
+    let level = world(WORLD).header().level();
+    let towards = unit_dir(centre);
+    (0..level.cell_count())
+        .map(|index| cell_at_index(level.get(), index).expect("an index below the count"))
+        .filter(|&cell| {
+            let p = point(cell, 0.5, 0.5);
+            p[0] * towards[0] + p[1] * towards[1] + p[2] * towards[2] >= dot
+        })
+        .collect()
+}
+
+/// `TERRAIN TEST`'s fixture.
+pub(super) fn terrain_fixture() -> TerrainFixture {
+    let field: &CoarseField = world(WORLD);
+    let first = cells_about(TERRAIN_FIRST_CENTRE, TERRAIN_SURVEY_DOT);
+    let second = cells_about(TERRAIN_SECOND_CENTRE, TERRAIN_SURVEY_DOT);
+    let first_cover = cover(&first, |_| code(50.0));
+    let both: BTreeSet<PatchKey> = first.union(&second).copied().collect();
+    let both_cover = cover(&both, |c| {
+        if second.contains(&c) {
+            code(20.0)
+        } else {
+            code(50.0)
+        }
+    });
+    let encode = |c: &Cover, since: Option<&Cover>| {
+        split(&encode_within(
+            field,
+            c,
+            since,
+            SYNTHESIS_MARGIN_CELLS,
+            FIXTURE_BLOCK_BYTES,
+        ))
+    };
+    let payloads = [
+        TerrainPayload {
+            revision: 1,
+            have: None,
+            blocks: encode(&first_cover, None),
+        },
+        TerrainPayload {
+            revision: 2,
+            have: Some(1),
+            blocks: encode(&both_cover, Some(&first_cover)),
+        },
+        TerrainPayload {
+            revision: 2,
+            have: None,
+            blocks: encode(&both_cover, None),
+        },
+        TerrainPayload {
+            revision: 2,
+            have: Some(2),
+            blocks: encode(&both_cover, Some(&both_cover)),
+        },
+    ];
+    TerrainFixture {
+        body: field.header().body(),
+        surveys: [first_cover, both_cover],
+        payloads,
+    }
+}
+
+/// The cover the blocks of a payload hold, every block's cells with their codes in turn.
+pub(super) fn payload_cover(blocks: &[Vec<u8>]) -> Cover {
+    let decoded = decode_payload(&blocks.concat()).expect("the fixture's payloads decode");
+    Cover::from_ranges(
+        decoded
+            .iter()
+            .flat_map(|block| block.cover().ranges().iter().copied()),
+    )
+    .expect("a payload's blocks hold its cells in index order")
+}
+
+#[test]
+fn worker_terrain_fixture_crosses_a_face_edge_by_a_cube_corner() {
+    let f = terrain_fixture();
+    let faces = |cells: &Cover| -> BTreeSet<u8> {
+        cells
+            .cells()
+            .map(|index| {
+                cell_at_index(world(WORLD).header().level().get(), index)
+                    .unwrap()
+                    .face()
+                    .index()
+            })
+            .collect()
+    };
+    // Each survey straddles the edge of faces +x and +y; the margin reaches face +z round their
+    // corner.
+    assert_eq!(faces(&f.surveys[0]), BTreeSet::from([0, 1]));
+    assert_eq!(faces(&f.surveys[1]), BTreeSet::from([0, 1]));
+    let held = payload_cover(&f.payloads[0].blocks);
+    assert_eq!(faces(&held), BTreeSet::from([0, 1, 2]));
+    // The second extends the first: new cells, and some of the first's surveyed again, finer.
+    let first: BTreeSet<u32> = f.surveys[0].cells().collect();
+    let both: BTreeSet<u32> = f.surveys[1].cells().collect();
+    assert!(
+        both.len() > first.len() + 4,
+        "{} {}",
+        both.len(),
+        first.len()
+    );
+    assert!(first.is_subset(&both));
+    let finer = first
+        .iter()
+        .filter(|&&cell| f.surveys[1].code(cell) != f.surveys[0].code(cell))
+        .count();
+    assert!(
+        finer > 0,
+        "the second survey passes over some of the first's cells"
+    );
+}
+
+#[test]
+fn worker_terrain_fixture_payloads_are_the_server_s_answers_in_several_blocks() {
+    let f = terrain_fixture();
+    for payload in &f.payloads[..3] {
+        assert!(payload.blocks.len() >= 3, "{}", payload.blocks.len());
+        for block in &payload.blocks {
+            assert!(block.len() <= FIXTURE_BLOCK_BYTES);
+        }
+    }
+    // An ask at the revision held is block 0 alone, the header, whichever the revision.
+    assert_eq!(f.payloads[3].blocks.len(), 1);
+    assert!(payload_cover(&f.payloads[3].blocks).is_empty());
+    let at_first = split(&encode_within(
+        world(WORLD),
+        &f.surveys[0],
+        Some(&f.surveys[0]),
+        SYNTHESIS_MARGIN_CELLS,
+        FIXTURE_BLOCK_BYTES,
+    ));
+    assert_eq!(at_first, f.payloads[3].blocks);
+    // The first payload and the delta make the field the whole at revision 2 makes.
+    let mut stepped = WorkerFields::new();
+    let mut blocks = f.first_then_delta();
+    stepped.init(f.body, blocks.next().unwrap()).unwrap();
+    for block in blocks {
+        stepped.chunk(f.body, block).unwrap();
+    }
+    let mut whole = WorkerFields::new();
+    let mut blocks = f.payloads[2].blocks.iter();
+    whole.init(f.body, blocks.next().unwrap()).unwrap();
+    for block in blocks {
+        whole.chunk(f.body, block).unwrap();
+    }
+    assert_eq!(stepped.field(f.body), whole.field(f.body));
+    // Every surveyed cell of revision 2 is reported along the first payload and the delta.
+    let mut fields = WorkerFields::new();
+    let mut surveyed = Vec::new();
+    let mut blocks = f.first_then_delta();
+    surveyed.extend(cells_of(
+        &fields.init(f.body, blocks.next().unwrap()).unwrap(),
+    ));
+    for block in blocks {
+        surveyed.extend(cells_of(&fields.chunk(f.body, block).unwrap()));
+    }
+    surveyed.sort_unstable();
+    surveyed.dedup();
+    assert_eq!(surveyed, f.surveys[1].cells().collect::<Vec<_>>());
+}
+
 /// The patch of `level` holding `cell`'s centre.
 pub(super) fn patch_over(cell: PatchKey, level: u8) -> PatchKey {
     PatchKey::containing(level, point(cell, 0.5, 0.5)).unwrap()

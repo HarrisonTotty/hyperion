@@ -1,4 +1,5 @@
 import {
+  decodeServerMessage,
   type KinematicsDto,
   METRES_PER_LIGHT_YEAR,
   type SceneNotificationDto,
@@ -56,6 +57,21 @@ function applyAll(
     (model, notification) => applied(applySceneNotification(model, notification, designateFixture)),
     modelOf(state),
   );
+}
+
+/**
+ * A scene push as a server might send it, whatever its fields hold, read through the protocol's
+ * decoder, which checks the envelope's tags alone.
+ */
+function pushOf(fields: Readonly<Record<string, unknown>>): SceneNotificationDto {
+  const message = decodeServerMessage(
+    JSON.stringify({ type: "notification", subscription: 1, body: { topic: "scene", ...fields } }),
+  );
+  if (message.type !== "notification") {
+    throw new Error("a scene push decodes as one");
+  }
+  const { topic: _topic, ...push } = message.body;
+  return push;
 }
 
 /** Names every system wrongly, so that a label taken from it shows it was used. */
@@ -439,6 +455,70 @@ describe("applySceneNotification", () => {
     );
 
     expect(update).toEqual({ kind: "fault", fault: "bodies re-sent outside a system" });
+  });
+
+  it("carries a push's surface revisions on its update, in the order sent (R10.T16.a)", () => {
+    const revisions = [
+      { body: FIXTURE_JUPITER, revision: 7 },
+      { body: FIXTURE_EARTH, revision: 2 },
+    ];
+
+    const update = applySceneNotification(
+      modelOf(stateInSpace()),
+      { sequence: 1, clock: sceneClock(3_100), bodies: [], surface_revisions: revisions },
+      designateFixture,
+    );
+
+    expect(update.kind === "ok" ? update.surfaceRevisions : null).toEqual(revisions);
+  });
+
+  it("keeps no surface revision on the model, which equals the push's without them", () => {
+    const model = modelOf(stateInSpace());
+    const push: SceneNotificationDto = { sequence: 1, clock: sceneClock(3_100), bodies: [] };
+
+    const named = applied(
+      applySceneNotification(
+        model,
+        { ...push, surface_revisions: [{ body: FIXTURE_EARTH, revision: 2 }] },
+        designateFixture,
+      ),
+    );
+
+    expect(named).toEqual(applied(applySceneNotification(model, push, designateFixture)));
+  });
+
+  it("carries no surface revision for a push that names none", () => {
+    const update = applySceneNotification(
+      modelOf(stateInSpace()),
+      { sequence: 1, clock: sceneClock(3_100), bodies: [] },
+      designateFixture,
+    );
+
+    expect(update.kind === "ok" ? update.surfaceRevisions : null).toEqual([]);
+  });
+
+  it("refuses surface revisions that are not bodies with whole revisions of at least 1", () => {
+    const model = modelOf(stateInSpace());
+    const unusable: ReadonlyArray<unknown> = [
+      [{ body: FIXTURE_EARTH, revision: 0 }],
+      [{ body: FIXTURE_EARTH, revision: 1.5 }],
+      [{ body: FIXTURE_EARTH }],
+      [{ revision: 3 }],
+      [null],
+      "none",
+    ];
+
+    const updates = unusable.map((sent) =>
+      applySceneNotification(
+        model,
+        pushOf({ sequence: 1, clock: sceneClock(3_100), bodies: [], surface_revisions: sent }),
+        designateFixture,
+      ),
+    );
+
+    expect(updates).toEqual(
+      unusable.map(() => ({ kind: "fault", fault: "surface revisions unusable" })),
+    );
   });
 
   it("replaces the craft when they are sent and keeps them when not", () => {

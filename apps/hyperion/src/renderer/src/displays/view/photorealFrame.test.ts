@@ -23,8 +23,8 @@ import {
 import { PROVISIONAL_PHOTOMETRY } from "../../view/appearance/fromWire";
 import type { PhotometricLaw } from "../../view/appearance/law";
 import { lawFor } from "../../view/appearance/phase";
-import type { ScreenCircle } from "../../view/bodies/regime";
 import { IDENTITY_QUATERNION } from "../../view/camera/quaternion";
+import { IDENTITY_ROTATION } from "../../view/coords/rotation";
 import type { TextureHandle } from "../../view/engine/types";
 import type { ClassMapSource } from "../../view/terrain/classMap";
 import { sceneHostDiscs } from "../../view/lighting/hostLights";
@@ -44,16 +44,36 @@ const TOKENS = {
   surface0: "colour-surface-0",
 } as const;
 
+/** A view's terrain that draws nothing and gives no mask. */
+const NO_TERRAIN = { surveyCoverage: () => null, draws: () => [], symbologyDepth: () => [] };
+
 /** A lit body lit as a static scene's: by the frame's hosts and the bodies where drawn. */
 function drawnOnly(body: LitBodyInput): LitBodyInput {
   return { ...body, lighting: undefined };
 }
 
+/** The phase scene's run, its planets turning (their rotations the identity) where `rotated`. */
+function phaseRun(rotated: boolean): ReturnType<typeof startRun> {
+  const run = startRun(phaseScene());
+  return rotated
+    ? {
+        ...run,
+        scene: {
+          ...run.scene,
+          bodies: run.scene.bodies.map((body) =>
+            body.kind === "star" ? body : { ...body, rotation: IDENTITY_ROTATION },
+          ),
+        },
+      }
+    : run;
+}
+
 async function frameOfPhaseScene(
-  sources: Pick<PhotorealInputs, "terrainFootprints" | "classMaps" | "reliefs" | "terrain"> = {},
+  sources: Pick<PhotorealInputs, "classMaps" | "reliefs" | "terrain"> = {},
+  rotated = false,
 ): Promise<ReturnType<typeof photorealFrame>> {
   const engine = await countingRenderEngine();
-  const run = startRun(phaseScene());
+  const run = phaseRun(rotated);
   const pose = runPose(run);
   const camera = { pose, fovXRad: (run.camera.fovDeg * Math.PI) / 180 };
   const list = buildWireframeDrawList(run.scene, camera, VIEWPORT, TOKENS, {
@@ -114,12 +134,12 @@ describe("a photorealistic frame of the phase scene", () => {
     );
   });
 
-  it("takes the terrain's footprints as the geometry that writes depth (R10.T10.b)", async () => {
-    expect((await frameOfPhaseScene()).depthWriters).toEqual([]);
-    const footprint: ScreenCircle = { xPx: 960, yPx: 540, radiusPx: 300 };
-    expect((await frameOfPhaseScene({ terrainFootprints: [footprint] })).depthWriters).toEqual([
-      footprint,
-    ]);
+  it("gives the plan no footprint of its own for a terrain, which its body's regime counts (R10.T16.c)", async () => {
+    const frame = await frameOfPhaseScene(
+      { reliefs: { reliefM: () => 4_000 }, terrain: NO_TERRAIN },
+      true,
+    );
+    expect(frame.depthWriters).toEqual([]);
   });
 
   it("shades each lit body with the view's class maps (R10.T10.d)", async () => {
@@ -134,10 +154,17 @@ describe("a photorealistic frame of the phase scene", () => {
     expect(asked).toEqual([...PHASE_PLANETS, PHASE_GIANT]);
   });
 
-  it("gives each lit body its relief from the view's reliefs (R10.T10.e)", async () => {
-    const frame = await frameOfPhaseScene({ reliefs: { reliefM: () => 4_000 } });
+  it("gives each lit body with a rotation its relief from the view's reliefs (R10.T10.e)", async () => {
+    const frame = await frameOfPhaseScene({ reliefs: { reliefM: () => 4_000 } }, true);
     expect(frame.bodies.map((body) => body.handoverReliefM)).toEqual(
       [...PHASE_PLANETS, PHASE_GIANT].map(() => 4_000),
+    );
+  });
+
+  it("gives a body whose rotation is not known no relief, so that it never hands over (R10.T16.c)", async () => {
+    const frame = await frameOfPhaseScene({ reliefs: { reliefM: () => 4_000 } });
+    expect(frame.bodies.map((body) => body.handoverReliefM)).toEqual(
+      [...PHASE_PLANETS, PHASE_GIANT].map(() => undefined),
     );
   });
 
@@ -150,13 +177,14 @@ describe("a photorealistic frame of the phase scene", () => {
           return null;
         },
         draws: () => [],
+        symbologyDepth: () => [],
       },
     });
     expect(asked).toEqual([...PHASE_PLANETS, PHASE_GIANT]);
   });
 
   it("carries the view's terrain, which draws the bodies handed over (R10.T10.e)", async () => {
-    const terrain = { surveyCoverage: () => null, draws: () => [] };
+    const terrain = { surveyCoverage: () => null, draws: () => [], symbologyDepth: () => [] };
     expect((await frameOfPhaseScene({ terrain })).terrain).toBe(terrain);
   });
 

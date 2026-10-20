@@ -4,7 +4,8 @@
 //! [`CoarseInputs`] is the whole of what the pass reads, so that the field is a pure function of
 //! the surface seed and these values (the brainstorm's "What the generator already owes us"):
 //! the body's figure and gravity, plan 14's hypsometric standard deviation `σ_h`, its liquids and
-//! ices by substance, its mean surface temperature with its signed contrasts, its spin and the
+//! ices by substance, each ice's cold-trapped part with what its cold traps read of its star and
+//! ground (R09.T13.f), its mean surface temperature with its signed contrasts, its spin and the
 //! orbit that sets its seasons, the light of its hosts, its air, its surface state and material,
 //! its tectonic regime with the continental fraction, its volcanism, heat flow and surface age,
 //! its crater contract, its wet epoch, its climate regime, and (decision-composition §1.7, §7.4)
@@ -35,7 +36,7 @@
 //! row's key, or moves these inputs onto `SubstanceId` with the palette's keys resolved from it
 //! (R09's Risks, "Deviations in T10, as built").
 
-use core::f64::consts::TAU;
+use core::f64::consts::{FRAC_PI_2, TAU};
 use core::num::FpCategory;
 use std::error::Error;
 use std::fmt;
@@ -51,11 +52,12 @@ use crate::math;
 use crate::orbit::{BuildOrbitError, Eccentricity, KeplerElements, Orientation, seconds_between};
 use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use crate::planetary::frames::BodyFixedFrame;
+use crate::planetary::hooks::cold_traps::trap_threshold;
 use crate::planetary::hooks::surface::{SeasonalSpin, SeasonsFrom};
 use crate::planetary::placement::OrbitHost;
 use crate::planetary::record::{BodyKind, BodyOrbit, BodyRecord, Modelled, RecordSection, Section};
 use crate::planetary::{BodyIndex, SystemContext};
-use crate::substance::SubstanceId;
+use crate::substance::{SubstanceId, by_key};
 use crate::time::UniverseTime;
 use crate::units::{
     Gigayears, GravitationalParameter, Kelvin, KilogramsPerSquareMetre, Metres,
@@ -63,16 +65,19 @@ use crate::units::{
 };
 
 /// One substance's share of the surface, as plan 14's `surface_liquids` and `surface_ices` list
-/// them (P14.T24.b, by substance per decision-composition §1.10).
+/// them (P14.T24.b, by substance per decision-composition §1.10), or the cold-trapped part of an
+/// ice's ([`CoarseInputs::cold_traps`], P14.T51.f).
 ///
 /// Plain data with public fields: [`CoarseInputsBuilder::build`] validates them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AreaShare {
     /// The substance.
     pub substance: SubstanceKey,
-    /// The share of the body's surface it covers all year, 0 (not −0) to 1: the area R09.T13.d
-    /// places it over, coldest cells first by their annual radiative mean for an ice, so cover
-    /// that comes and goes with the seasons is the climate's, not this share.
+    /// The share of the body's surface it covers all year, 0 (not −0) to 1: the area the climate
+    /// step places it over, for an ice its zonal part coldest cells first by their annual
+    /// radiative mean (R09.T13.d), and its cold-trapped part in each cell's cold-trap fraction
+    /// (R09.T13.f), so cover that comes and goes with the seasons is the climate's, not this
+    /// share.
     pub area_fraction: f64,
 }
 
@@ -342,6 +347,28 @@ pub struct Condensate {
     pub persistence: Persistence,
 }
 
+/// What a body's cold traps read of its star and its ground beyond the other inputs (P14.T51.f;
+/// R09.T13.f): the star's angular radius at periapsis and the bare ground's Bond albedo. The
+/// greatest declination, the flux at periapsis and the heat flow come from
+/// [`CoarseInputs::spin`], [`CoarseInputs::host_flux`] with the seasonal orbit's eccentricity, and
+/// [`CoarseInputs::heat_flow`], by plan 14's own arithmetic (`ColdTrapGround`).
+///
+/// Plain data with public fields: [`CoarseInputsBuilder::build`] validates them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ColdTrapInputs {
+    /// The angular radius α of the star the cold traps see, from the body at its seasonal orbit's
+    /// periapsis, radians in [0, π/2), zero or with a normal square (`cold_trap::Body`'s rule).
+    /// It is plan 14's brightest zone star, and for a moon its planet's periapsis: 0.27° for the
+    /// Sun from the Moon, 0.87° from Mercury at perihelion. Zero treats the star as a point,
+    /// Hayne et al. 2021's convention. On Mercury the disk raises the polar ground's annual
+    /// maximum from 110 to 172 K.
+    pub star_angular_radius: Radians,
+    /// The Bond albedo of the bare ground the cold traps' zonal annual maximum and shadows read,
+    /// in [0, 1), dimensionless. It is plan 14's (P14.T51.f's; the lid regolith's about the
+    /// host's bands from P14.T51.i), not the climate model's `SurfaceState::albedo`.
+    pub bond_albedo: f64,
+}
+
 /// The most condensates plan 14 lists for a body (P14.T51.a).
 pub const MAX_CONDENSATES: usize = 8;
 
@@ -364,6 +391,8 @@ pub struct CoarseInputs {
     sigma_h: Metres,
     liquids: Vec<AreaShare>,
     ices: Vec<AreaShare>,
+    cold_traps: Vec<AreaShare>,
+    cold_trap_inputs: Option<ColdTrapInputs>,
     mean_surface_temperature: Kelvin,
     equator_pole_contrast_k: f64,
     day_night_contrast_k: f64,
@@ -731,6 +760,12 @@ impl CoarseInputs {
     /// and it needs no palette entry. The surface section's crust and condensates are not read:
     /// `crust` and `condensates` stand for them, and `palette` for their resolution.
     ///
+    /// It gives no cold traps: [`cold_traps`](Self::cold_traps) is empty and
+    /// [`cold_trap_inputs`](Self::cold_trap_inputs) `None`, until P14.T54.b puts P14.T51.f's cold
+    /// traps on the record at generator version 24, each solid entry's trapped area with the star's
+    /// angular radius and the regolith's albedo they read (decision-r09-t13f-cold-traps §1.1,
+    /// §2.2). Each ice's share is the record's whole share, its cold-trapped part included.
+    ///
     /// # Errors
     ///
     /// - [`ReadCoarseInputsError::Section`] as [`for_body`](Self::for_body) answers the surface
@@ -953,10 +988,34 @@ impl CoarseInputs {
     }
 
     /// The surface ices by substance, largest area first, ties by key (P14.T24.b's
-    /// `surface_ices`).
+    /// `surface_ices`), each its whole share, its cold-trapped part
+    /// ([`cold_traps`](Self::cold_traps)) included.
     #[must_use]
     pub fn ices(&self) -> &[AreaShare] {
         &self.ices
+    }
+
+    /// The cold-trapped part of each ice's share of the surface, by substance, largest first, ties
+    /// by key (P14.T51.f): the share its exposed ice covers in permanent shadows that stay below
+    /// its cold-trap threshold all year, `f_ct` × `f_x`, 0 (not −0) to 1, never larger than its
+    /// [`ices`](Self::ices) share. R09.T13.f places it in proportion to each cell's cold-trap
+    /// fraction, and R09.T13.d places the rest of the share, its zonal part, by its own rule.
+    ///
+    /// Empty for a body with no cold traps. It is empty from the record until P14.T54.b puts
+    /// P14.T51.f's cold traps on it at generator version 24, and
+    /// [`cold_trap_inputs`](Self::cold_trap_inputs) is `Some` wherever a cold-trapped share is
+    /// above zero.
+    #[must_use]
+    pub fn cold_traps(&self) -> &[AreaShare] {
+        &self.cold_traps
+    }
+
+    /// What the cold traps read of the body's star and ground beyond the other inputs, or `None`
+    /// where the inputs give no cold traps (from the record until P14.T54.b). It is `Some`
+    /// wherever a cold-trapped share of [`cold_traps`](Self::cold_traps) is above zero.
+    #[must_use]
+    pub const fn cold_trap_inputs(&self) -> Option<&ColdTrapInputs> {
+        self.cold_trap_inputs.as_ref()
     }
 
     /// The ocean fraction: the liquids' shares summed in their order from +0, 0 to 1 (+0 with
@@ -1486,6 +1545,20 @@ pub enum BuildCoarseInputsError {
         /// Their sum.
         total: f64,
     },
+    /// A cold-trapped share is larger than its substance's ice share, or its substance has no ice
+    /// share at all (decision-r09-t13f-cold-traps §1.3).
+    ColdTrapExceedsIce {
+        /// The substance.
+        substance: SubstanceKey,
+        /// Its cold-trapped share.
+        trapped: f64,
+        /// Its ice share, 0 where it has none.
+        ice: f64,
+    },
+    /// A cold-trapped substance's registry row has no cold-trap threshold: no phase diagram or no
+    /// molar mass, or no row at all (plan 14's `trap_threshold` is `None`), so it takes no cold
+    /// traps.
+    ColdTrapWithoutThreshold(SubstanceKey),
     /// More condensates than plan 14 lists.
     TooManyCondensates(usize),
     /// The wet epoch ends before it starts.
@@ -1549,6 +1622,17 @@ impl fmt::Display for BuildCoarseInputsError {
                     "the {part}' shares add up to {total}, more than the whole"
                 )
             }
+            Self::ColdTrapExceedsIce {
+                substance,
+                trapped,
+                ice,
+            } => write!(
+                f,
+                "the cold-trapped share {trapped} of {substance} exceeds its ice share {ice}"
+            ),
+            Self::ColdTrapWithoutThreshold(substance) => {
+                write!(f, "{substance} has no cold-trap threshold")
+            }
             Self::TooManyCondensates(count) => write!(
                 f,
                 "{count} condensates are more than the {MAX_CONDENSATES} plan 14 lists"
@@ -1582,7 +1666,8 @@ impl Error for BuildCoarseInputsError {}
 ///
 /// Every value is required, the palette among them, but the body (by default
 /// [`BodyRef::default`]) and the lists and optional parts, whose default is none: no liquid, ice,
-/// gas or condensate, no seasonal orbit and no wet epoch.
+/// cold-trapped share, gas or condensate, no cold-trap inputs, no seasonal orbit and no wet epoch.
+/// The cold-trap inputs are required where a cold-trapped share is above zero.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CoarseInputsBuilder {
     body: BodyRef,
@@ -1591,6 +1676,8 @@ pub struct CoarseInputsBuilder {
     sigma_h: Option<Metres>,
     liquids: Vec<AreaShare>,
     ices: Vec<AreaShare>,
+    cold_traps: Vec<AreaShare>,
+    cold_trap_inputs: Option<ColdTrapInputs>,
     mean_surface_temperature: Option<Kelvin>,
     equator_pole_contrast_k: Option<f64>,
     day_night_contrast_k: Option<f64>,
@@ -1674,6 +1761,89 @@ fn area_shares(
     Ok(shares)
 }
 
+/// Validates the cold-trapped shares `shares` against the ices `ices` and sorts them largest
+/// first, ties by key (decision-r09-t13f-cold-traps §1.3), refusing in this order: a share that is
+/// not finite, outside 0 to 1 or −0 ([`BuildCoarseInputsError::OutOfRange`]), a substance named
+/// twice ([`BuildCoarseInputsError::Duplicate`]), and then, share by share in their order, one
+/// larger than its substance's ice share or of a substance with no ice share at all
+/// ([`BuildCoarseInputsError::ColdTrapExceedsIce`]) and one of a row with no cold-trap threshold
+/// ([`BuildCoarseInputsError::ColdTrapWithoutThreshold`]). Their sum needs no test of its own: each
+/// is at most its ice's, and the ices' sum is at most the whole.
+fn cold_trap_shares(
+    mut shares: Vec<AreaShare>,
+    ices: &[AreaShare],
+) -> Result<Vec<AreaShare>, BuildCoarseInputsError> {
+    const PART: &str = "cold traps";
+    for share in &shares {
+        check_share(PART, share.area_fraction)?;
+    }
+    shares.sort_by(|a, b| {
+        b.area_fraction
+            .total_cmp(&a.area_fraction)
+            .then_with(|| a.substance.cmp(&b.substance))
+    });
+    refuse_duplicates(PART, shares.iter().map(|s| (s.substance, ())))?;
+    for share in &shares {
+        let ice = ices.iter().find(|ice| ice.substance == share.substance);
+        let held = ice.map_or(0.0, |ice| ice.area_fraction);
+        if ice.is_none() || share.area_fraction > held {
+            return Err(BuildCoarseInputsError::ColdTrapExceedsIce {
+                substance: share.substance,
+                trapped: share.area_fraction,
+                ice: held,
+            });
+        }
+        if by_key(share.substance.as_str())
+            .and_then(trap_threshold)
+            .is_none()
+        {
+            return Err(BuildCoarseInputsError::ColdTrapWithoutThreshold(
+                share.substance,
+            ));
+        }
+    }
+    Ok(shares)
+}
+
+/// The cold-trapped shares `shares`, validated against the ices `ices` ([`cold_trap_shares`]),
+/// sorted, with the cold-trap inputs `inputs` checked where they are given
+/// ([`check_cold_trap_inputs`]) and required where a share is above zero
+/// ([`BuildCoarseInputsError::Missing`]), in that order.
+fn cold_traps_of(
+    shares: Vec<AreaShare>,
+    inputs: Option<&ColdTrapInputs>,
+    ices: &[AreaShare],
+) -> Result<Vec<AreaShare>, BuildCoarseInputsError> {
+    let shares = cold_trap_shares(shares, ices)?;
+    match inputs {
+        Some(group) => check_cold_trap_inputs(group)?,
+        None if shares.iter().any(|s| s.area_fraction > 0.0) => {
+            return Err(BuildCoarseInputsError::Missing("cold-trap inputs"));
+        }
+        None => {}
+    }
+    Ok(shares)
+}
+
+/// Refuses cold-trap inputs outside their ranges (decision-r09-t13f-cold-traps §2.2): a star's
+/// angular radius outside [0, π/2), or positive with a square that is not a normal `f64`
+/// (`hyperion_surface::cold_trap::Body`'s rule), and a Bond albedo outside [0, 1).
+fn check_cold_trap_inputs(inputs: &ColdTrapInputs) -> Result<(), BuildCoarseInputsError> {
+    let alpha = inputs.star_angular_radius.value();
+    let normal = alpha <= 0.0 || (alpha * alpha).is_normal();
+    check(
+        "star angular radius",
+        alpha,
+        normal && (0.0..FRAC_PI_2).contains(&alpha),
+    )?;
+    let albedo = inputs.bond_albedo;
+    check(
+        "cold-trap Bond albedo",
+        albedo,
+        (0.0..1.0).contains(&albedo),
+    )
+}
+
 /// Refuses a list in which a key occurs twice: each item is a substance and a second key that
 /// may tell two items of one substance apart.
 fn refuse_duplicates<K: Ord>(
@@ -1729,6 +1899,22 @@ impl CoarseInputsBuilder {
     #[must_use]
     pub fn ices(mut self, ices: impl IntoIterator<Item = AreaShare>) -> Self {
         self.ices = ices.into_iter().collect();
+        self
+    }
+
+    /// The cold-trapped part of each ice's share, by substance, in any order, each 0 to 1 and at
+    /// most its substance's [`ices`](Self::ices) share. The default is none.
+    #[must_use]
+    pub fn cold_traps(mut self, cold_traps: impl IntoIterator<Item = AreaShare>) -> Self {
+        self.cold_traps = cold_traps.into_iter().collect();
+        self
+    }
+
+    /// What the cold traps read of the star and the ground, required where any cold-trapped share
+    /// is above zero.
+    #[must_use]
+    pub const fn cold_trap_inputs(mut self, inputs: ColdTrapInputs) -> Self {
+        self.cold_trap_inputs = Some(inputs);
         self
     }
 
@@ -1882,10 +2068,14 @@ impl CoarseInputsBuilder {
     ///
     /// # Errors
     ///
-    /// [`BuildCoarseInputsError::Missing`] for a required value not given, and otherwise the
-    /// first rule broken, as each value's setter states it: a value out of range or not finite, a
-    /// figure that is not a spheroid, a gas-envelope surface, a substance named twice, shares
-    /// above the whole, too many condensates, a wet epoch that ends before it starts, a crater
+    /// [`BuildCoarseInputsError::Missing`] for a required value not given, the cold-trap inputs
+    /// among them where a cold-trapped share is above zero, and otherwise the first rule broken,
+    /// as each value's setter states it: a value out of range or not finite, a figure that is not
+    /// a spheroid, a gas-envelope surface, a substance named twice, shares above the whole, a
+    /// cold-trapped share above its ice's or of a substance with no ice share
+    /// ([`BuildCoarseInputsError::ColdTrapExceedsIce`]) or with no cold-trap threshold
+    /// ([`BuildCoarseInputsError::ColdTrapWithoutThreshold`]), cold-trap inputs out of range,
+    /// too many condensates, a wet epoch that ends before it starts, a crater
     /// contract of another gravity or of a system younger than the surface
     /// ([`BuildCoarseInputsError::SurfaceOlderThanSystem`]), a crust with neither a primary nor a
     /// secondary crust nor a bulk material ([`BuildCoarseInputsError::NoCrust`]), with a bulk
@@ -1907,6 +2097,7 @@ impl CoarseInputsBuilder {
         check_non_negative("sigma_h", sigma_h.value())?;
         let liquids = area_shares("liquids", self.liquids)?;
         let ices = area_shares("ices", self.ices)?;
+        let cold_traps = cold_traps_of(self.cold_traps, self.cold_trap_inputs.as_ref(), &ices)?;
         let mean_surface_temperature =
             required(self.mean_surface_temperature, "mean surface temperature")?;
         check_positive("mean surface temperature", mean_surface_temperature.value())?;
@@ -1964,6 +2155,8 @@ impl CoarseInputsBuilder {
             sigma_h,
             liquids,
             ices,
+            cold_traps,
+            cold_trap_inputs: self.cold_trap_inputs,
             mean_surface_temperature,
             equator_pole_contrast_k,
             day_night_contrast_k,
@@ -2236,18 +2429,19 @@ fn condensates(mut list: Vec<Condensate>) -> Result<Vec<Condensate>, BuildCoarse
 
 #[cfg(test)]
 mod tests {
-    use super::super::reference;
+    use super::super::reference::{self, builder_of};
     use super::*;
-    use crate::Seed;
     use crate::galaxy::placement::CellKey;
     use crate::id::Layer;
     use crate::planetary::derive::PlanetClass;
     use crate::planetary::derive::atmosphere::Gas;
     use crate::planetary::generate;
+    use crate::planetary::hooks::cold_traps::COLD_TRAPS_VERSION;
     use crate::planetary::record::DetailLevel;
     use crate::planetary::testing::{SampleFilter, sample_contexts, synthetic_star};
     use crate::time::UniverseTime;
     use crate::units::{Degrees, Dex, SolarMasses};
+    use crate::{GENERATOR_VERSION, Seed};
     use hyperion_surface::field::{
         FieldView, LiquidBasis, LiquidProperties, MechanicsFamily, PaletteEntry,
     };
@@ -2322,41 +2516,6 @@ mod tests {
     fn palette(mut entries: Vec<PaletteEntry>) -> MaterialPalette {
         entries.sort_by_key(|e| (e.role, e.substance));
         MaterialPalette::new(entries).unwrap()
-    }
-
-    /// The builder values of `inputs`, as a builder to vary.
-    fn builder_of(inputs: &CoarseInputs) -> CoarseInputsBuilder {
-        let mut builder = CoarseInputs::builder()
-            .body(inputs.body())
-            .figure(inputs.figure())
-            .gravity(inputs.gravity())
-            .sigma_h(inputs.sigma_h())
-            .liquids(inputs.liquids().iter().copied())
-            .ices(inputs.ices().iter().copied())
-            .mean_surface_temperature(inputs.mean_surface_temperature())
-            .equator_pole_contrast_k(inputs.equator_pole_contrast_k())
-            .day_night_contrast_k(inputs.day_night_contrast_k())
-            .spin(*inputs.spin())
-            .host_flux(inputs.host_flux())
-            .surface_pressure(inputs.surface_pressure())
-            .gases(inputs.gases().iter().copied())
-            .surface(inputs.surface_state(), inputs.surface_material())
-            .tectonics(inputs.tectonics(), inputs.continental_fraction())
-            .volcanism(inputs.volcanism())
-            .heat_flow(inputs.heat_flow())
-            .surface_age(inputs.surface_age())
-            .craters(*inputs.craters())
-            .climate(*inputs.climate())
-            .crust(*inputs.crust())
-            .condensates(inputs.condensates().iter().copied())
-            .palette(inputs.palette().clone());
-        if let Some(orbit) = inputs.seasonal_orbit() {
-            builder = builder.seasonal_orbit(*orbit);
-        }
-        if let Some(epoch) = inputs.wet_epoch() {
-            builder = builder.wet_epoch(*epoch);
-        }
-        builder
     }
 
     /// The reference Earth's builder values, as a builder to vary.
@@ -3103,6 +3262,23 @@ mod tests {
             "the ices name H2O twice"
         );
         assert_eq!(
+            BuildCoarseInputsError::ColdTrapExceedsIce {
+                substance: key("H2O"),
+                trapped: 0.5,
+                ice: 0.25
+            }
+            .to_string(),
+            "the cold-trapped share 0.5 of H2O exceeds its ice share 0.25"
+        );
+        assert_eq!(
+            BuildCoarseInputsError::ColdTrapWithoutThreshold(key("He")).to_string(),
+            "He has no cold-trap threshold"
+        );
+        assert_eq!(
+            BuildCoarseInputsError::Missing("cold-trap inputs").to_string(),
+            "the coarse inputs lack the cold-trap inputs"
+        );
+        assert_eq!(
             SurfaceInputsError::NoSolidSurface.to_string(),
             "the body has no solid surface"
         );
@@ -3110,6 +3286,229 @@ mod tests {
             SurfaceInputsError::NotResolved(RecordSection::Surface).to_string(),
             "the record withholds the body's surface section"
         );
+    }
+
+    /// T51.f's lunar cold-trap inputs: the Sun's 0.2711° at Earth's perihelion and the bare
+    /// regolith's Bond albedo 0.12.
+    fn lunar_cold_trap_inputs() -> ColdTrapInputs {
+        ColdTrapInputs {
+            star_angular_radius: Radians::from(Degrees::new(0.2711)),
+            bond_albedo: 0.12,
+        }
+    }
+
+    /// The reference Moon with 2 × 10⁻⁵ of water ice on its ground, 1.7 × 10⁻⁵ of it
+    /// cold-trapped, under [`lunar_cold_trap_inputs`], and with carbon dioxide's and helium's ice
+    /// entries in its palette, as a builder to vary.
+    fn trapped_moon() -> CoarseInputsBuilder {
+        let moon = reference::moon_like();
+        let mut entries = moon.palette().entries().to_vec();
+        entries.extend([
+            entry("CO2", PaletteRole::Ice),
+            entry("He", PaletteRole::Ice),
+        ]);
+        builder_of(&moon)
+            .ices([share_of("H2O", 2e-5)])
+            .cold_traps([share_of("H2O", 1.7e-5)])
+            .cold_trap_inputs(lunar_cold_trap_inputs())
+            .palette(palette(entries))
+    }
+
+    /// Each refusal of the cold-trapped shares (decision-r09-t13f-cold-traps §1.3), by its variant:
+    /// a share out of range, a substance named twice, a share above its ice's or of a substance
+    /// with no ice share, a substance with no cold-trap threshold, and a positive share with no
+    /// cold-trap inputs. A zero share needs no inputs.
+    #[test]
+    fn the_builder_refuses_cold_traps_out_of_place() {
+        let refused = |builder: CoarseInputsBuilder| builder.build().unwrap_err();
+        assert!(trapped_moon().build().is_ok());
+        for value in [f64::NAN, -0.1, 1.5, -0.0, f64::INFINITY] {
+            let error = refused(trapped_moon().cold_traps([share_of("H2O", value)]));
+            let BuildCoarseInputsError::OutOfRange {
+                part: "cold traps",
+                value: refused_value,
+            } = error
+            else {
+                panic!("{value}: {error:?}");
+            };
+            if value.is_nan() {
+                assert!(refused_value.is_nan());
+            } else {
+                assert_same_bits(refused_value, value);
+            }
+        }
+        assert_eq!(
+            refused(trapped_moon().cold_traps([share_of("H2O", 1e-6), share_of("H2O", 2e-6)])),
+            BuildCoarseInputsError::Duplicate {
+                part: "cold traps",
+                substance: key("H2O")
+            }
+        );
+        assert_eq!(
+            refused(trapped_moon().cold_traps([share_of("H2O", 3e-5)])),
+            BuildCoarseInputsError::ColdTrapExceedsIce {
+                substance: key("H2O"),
+                trapped: 3e-5,
+                ice: 2e-5
+            }
+        );
+        // A substance with no ice share at all, at a positive share or a zero one.
+        for trapped in [1e-6, 0.0] {
+            assert_eq!(
+                refused(trapped_moon().cold_traps([share_of("CO2", trapped)])),
+                BuildCoarseInputsError::ColdTrapExceedsIce {
+                    substance: key("CO2"),
+                    trapped,
+                    ice: 0.0
+                }
+            );
+        }
+        // Helium's row has no phase diagram, so no cold-trap threshold.
+        assert_eq!(
+            refused(
+                trapped_moon()
+                    .ices([share_of("H2O", 2e-5), share_of("He", 1e-5)])
+                    .cold_traps([share_of("He", 1e-6)])
+            ),
+            BuildCoarseInputsError::ColdTrapWithoutThreshold(key("He"))
+        );
+        let without = |traps: Vec<AreaShare>| {
+            let mut builder = trapped_moon().cold_traps(traps);
+            builder.cold_trap_inputs = None;
+            builder
+        };
+        assert_eq!(
+            refused(without(vec![share_of("H2O", 1.7e-5)])),
+            BuildCoarseInputsError::Missing("cold-trap inputs")
+        );
+        let untrapped = without(vec![share_of("H2O", 0.0)]).build().unwrap();
+        assert_eq!(untrapped.cold_traps(), [share_of("H2O", 0.0)].as_slice());
+        assert_eq!(untrapped.cold_trap_inputs(), None);
+    }
+
+    /// The cold-trap inputs' refusals (decision-r09-t13f-cold-traps §2.2), by their variant: a
+    /// star's angular radius outside [0, π/2), or with a square that is not a normal `f64`, and a
+    /// Bond albedo outside [0, 1). A point star is in range, and inputs with no traps are harmless,
+    /// but checked.
+    #[test]
+    fn the_builder_refuses_cold_trap_inputs_out_of_range() {
+        let refused = |builder: CoarseInputsBuilder| builder.build().unwrap_err();
+        let inputs = |star_angular_radius: f64, bond_albedo: f64| ColdTrapInputs {
+            star_angular_radius: Radians::new(star_angular_radius),
+            bond_albedo,
+        };
+        for alpha in [-0.1, core::f64::consts::FRAC_PI_2, f64::NAN, 1e-200] {
+            let error = refused(trapped_moon().cold_trap_inputs(inputs(alpha, 0.12)));
+            assert!(
+                matches!(
+                    error,
+                    BuildCoarseInputsError::OutOfRange {
+                        part: "star angular radius",
+                        ..
+                    }
+                ),
+                "{alpha}: {error:?}"
+            );
+        }
+        for albedo in [-0.1, 1.0, f64::NAN] {
+            let error = refused(trapped_moon().cold_trap_inputs(inputs(0.0047, albedo)));
+            assert!(
+                matches!(
+                    error,
+                    BuildCoarseInputsError::OutOfRange {
+                        part: "cold-trap Bond albedo",
+                        ..
+                    }
+                ),
+                "{albedo}: {error:?}"
+            );
+        }
+        assert!(
+            trapped_moon()
+                .cold_trap_inputs(inputs(0.0, 0.0))
+                .build()
+                .is_ok()
+        );
+        let alone = trapped_moon().cold_traps([]).build().unwrap();
+        assert_eq!(alone.cold_traps(), []);
+        assert_eq!(alone.cold_trap_inputs(), Some(&lunar_cold_trap_inputs()));
+        assert!(matches!(
+            refused(
+                trapped_moon()
+                    .cold_traps([])
+                    .cold_trap_inputs(inputs(2.0, 0.12))
+            ),
+            BuildCoarseInputsError::OutOfRange {
+                part: "star angular radius",
+                ..
+            }
+        ));
+    }
+
+    /// Valid cold traps and their inputs come back through their getters, the traps largest first,
+    /// ties by key, whichever order they were given in, each ice keeping its whole share; and
+    /// through the builder of the inputs built (`reference::builder_of`).
+    #[test]
+    fn cold_traps_and_their_inputs_round_trip_through_their_getters() {
+        let inputs = trapped_moon()
+            .ices([share_of("CO2", 1e-6), share_of("H2O", 2e-5)])
+            .cold_traps([share_of("CO2", 1e-6), share_of("H2O", 1.7e-5)])
+            .build()
+            .unwrap();
+        assert_eq!(
+            inputs.cold_traps(),
+            [share_of("H2O", 1.7e-5), share_of("CO2", 1e-6)].as_slice()
+        );
+        assert_eq!(
+            inputs.ices(),
+            [share_of("H2O", 2e-5), share_of("CO2", 1e-6)].as_slice()
+        );
+        assert_eq!(inputs.cold_trap_inputs(), Some(&lunar_cold_trap_inputs()));
+        assert_eq!(builder_of(&inputs).build().unwrap(), inputs);
+        let tied = trapped_moon()
+            .ices([share_of("H2O", 2e-5), share_of("CO2", 2e-5)])
+            .cold_traps([share_of("H2O", 1e-6), share_of("CO2", 1e-6)])
+            .build()
+            .unwrap();
+        let keys: Vec<&str> = tied
+            .cold_traps()
+            .iter()
+            .map(|s| s.substance.as_str())
+            .collect();
+        assert_eq!(keys, ["CO2", "H2O"]);
+        for world in [
+            reference::earth_like(),
+            reference::mars_like(),
+            reference::moon_like(),
+            reference::ceres_like(),
+        ] {
+            assert_eq!(world.cold_traps(), []);
+            assert_eq!(world.cold_trap_inputs(), None);
+        }
+    }
+
+    /// The record gives no cold traps before the 23 → 24 bump: a generated planet's and a
+    /// generated moon's inputs have none, and no cold-trap inputs (decision-r09-t13f-cold-traps
+    /// §7.2). It fails at 24, so that P14.T54.b wires them.
+    #[test]
+    fn the_record_gives_no_cold_traps_until_the_24_bump() {
+        assert!(
+            GENERATOR_VERSION < COLD_TRAPS_VERSION,
+            "the 23 → 24 bump (P14.T54.b) puts P14.T51.f's cold traps on the record: fill \
+             `from_record`'s `cold_traps` from each solid entry's \
+             `CondensateEntry::trapped_area_fraction`, and its `cold_trap_inputs` from the star's \
+             angular radius and the bare regolith's Bond albedo the record's cold traps read, to \
+             the bit, test that a generated qualifying body's field places its record's trapped \
+             areas (placed plus undrawn to one cell, short 0), and delete this test \
+             (decision-r09-t13f-cold-traps §6 step 4 and §8)"
+        );
+        let (_, _, planet) = planet_reading();
+        let (_, moon, its_planet) = generated_moon();
+        let moon = read(&moon, SeasonsFromRecord::Planet(&its_planet));
+        for inputs in [planet, moon] {
+            assert!(inputs.cold_traps().is_empty(), "{:?}", inputs.cold_traps());
+            assert_eq!(inputs.cold_trap_inputs(), None);
+        }
     }
 
     #[test]

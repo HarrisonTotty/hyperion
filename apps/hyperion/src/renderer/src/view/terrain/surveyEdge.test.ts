@@ -9,11 +9,13 @@ import { CoverageView, fieldCellIndex } from "./coverage";
 import { faceUvToDir, stToUv } from "./cube";
 import type { Face } from "./patchKey";
 import {
+  groundHidesPoint,
   SURVEY_EDGE_NOTE,
   SURVEY_EDGE_TICK_REM,
   SURVEY_EDGE_TICK_SPACING_REM,
   surveyEdgeMark,
   surveyEdgeNote,
+  surveyEdgeNoteName,
   type SurveyEdgeOptions,
   type SurveyEdgeView,
 } from "./surveyEdge";
@@ -309,11 +311,159 @@ describe("the survey edge's mark beneath a camera low over it (R10.T10.c)", () =
   });
 });
 
-describe("the survey edge's note", () => {
-  it("states the nearest range to three figures, from the camera where there is no own ship", () => {
+describe("the survey edge's note (decision-r10-t16-review §1)", () => {
+  it("is named as the guide names the mark", () => {
     expect(SURVEY_EDGE_NOTE).toBe("SURVEY EDGE");
-    expect(surveyEdgeNote(4_210, false, null)).toEqual({ text: "SURVEY EDGE 4.21 km", unit: "km" });
-    expect(surveyEdgeNote(4_210, true, null).text).toBe("SURVEY EDGE 4.21 km FROM CAMERA");
-    expect(surveyEdgeNote(3.84e8, false, null)).toEqual({ text: "SURVEY EDGE 384 Mm", unit: "Mm" });
+  });
+
+  it("gives the body's designation and its range from the own ship", () => {
+    expect(surveyEdgeNote("TEST MOON", 4_210, false, null)).toEqual({
+      text: "SURVEY EDGE TEST MOON 4.21 km",
+      range: "4.21 km",
+      reading: "4.21 km",
+      unit: "km",
+    });
+  });
+
+  it("labels its range FROM CAMERA after the unit where there is no own ship", () => {
+    expect(surveyEdgeNote("TEST MOON", 412, true, null).text).toBe(
+      "SURVEY EDGE TEST MOON 412 m FROM CAMERA",
+    );
+  });
+
+  it("reads a range below 1 km in m", () => {
+    expect(surveyEdgeNote("TEST MOON", 412, false, null)).toEqual({
+      text: "SURVEY EDGE TEST MOON 412 m",
+      range: "412 m",
+      reading: "412 m",
+      unit: "m",
+    });
+  });
+
+  it("keeps the unit it was last shown in within its hysteresis", () => {
+    expect(surveyEdgeNote("TEST MOON", 1_020, false, "m").reading).toBe("1020 m");
+  });
+
+  it.each([
+    [false, false, "TEST MOON, survey edge, range 4.21 km"],
+    [true, false, "TEST MOON, survey edge, range 4.21 km FROM CAMERA"],
+    [false, true, "TEST MOON, survey edge, range 4.21 km, stale"],
+  ])("is named in the options' form (from camera %s, stale %s)", (fromCamera, stale, name) => {
+    const note = surveyEdgeNote("TEST MOON", 4_210, fromCamera, null);
+    expect(surveyEdgeNoteName("TEST MOON", note, stale)).toBe(name);
   });
 });
+
+describe("the drawn ground between the camera and an edge's point (R10.T16.c)", () => {
+  const FIGURE = { equatorialRadiusM: RADIUS_M, polarRadiusM: RADIUS_M };
+  // The camera 1 km over the pole, a point on the datum 20 km away along the surface.
+  const cameraM = vec3(0, 0, RADIUS_M + 1_000);
+  const pointM = scale(normalise(vec3(20_000 / RADIUS_M, 0, 1)), RADIUS_M);
+  // A ridge 2 km high across the line of sight, between 8 and 12 km from the pole.
+  const ridgeAt =
+    (fromKm: number, toKm: number): ((d: Vec3) => number) =>
+    (d) => {
+      const alongKm = (Math.atan2(Math.hypot(d.x, d.y), d.z) * RADIUS_M) / 1000;
+      return alongKm >= fromKm && alongKm <= toKm ? 2_000 : 0;
+    };
+
+  it("hides a point behind a ridge across the line of sight", () => {
+    expect(
+      groundHidesPoint(cameraM, pointM, FIGURE, { heightAtM: ridgeAt(8, 12), ceilingM: 2_000 }),
+    ).toBe(true);
+  });
+
+  it("hides no point where the ground stands clear of the line of sight, before or behind it", () => {
+    expect([
+      groundHidesPoint(cameraM, pointM, FIGURE, { heightAtM: () => 0, ceilingM: 2_000 }),
+      groundHidesPoint(cameraM, pointM, FIGURE, { heightAtM: ridgeAt(25, 30), ceilingM: 2_000 }),
+      groundHidesPoint(cameraM, pointM, FIGURE, { heightAtM: () => null, ceilingM: 0 }),
+    ]).toEqual([false, false, false]);
+  });
+});
+
+describe("the survey edge's note counts only the points the operator can see (R10.T16.c)", () => {
+  it("gives the same range where the drawn ground hides nothing", () => {
+    const { view, camera } = viewOf(surveyed([0, 16, 16]), 200_000);
+    const bare = surveyEdgeMark(view, camera, VIEWPORT, OPTIONS);
+    const clear = surveyEdgeMark(
+      { ...view, ground: { heightAtM: () => 0, ceilingM: 1_000 } },
+      camera,
+      VIEWPORT,
+      OPTIONS,
+    );
+    expect(clear.nearestRangeM).toBe(bare.nearestRangeM);
+  });
+
+  it("gives no range where the drawn ground hides every point, though the line is drawn", () => {
+    const { view, camera } = viewOf(surveyed([0, 16, 16]), 200_000);
+    const hidden = surveyEdgeMark(
+      { ...view, ground: { heightAtM: () => 150_000, ceilingM: 150_000 } },
+      camera,
+      VIEWPORT,
+      OPTIONS,
+    );
+    expect([hidden.line.length > 0, hidden.nearestRangeM]).toEqual([true, null]);
+  });
+
+  it("keeps the nearest drawn point's range once its sight tests are used up with none seen", () => {
+    // Twenty-five cells apart, whose edges' pieces are far more than the tests' cap.
+    const cells: Array<readonly [Face, number, number]> = [];
+    for (let i = 12; i <= 20; i += 2) {
+      for (let j = 12; j <= 20; j += 2) {
+        cells.push([0, i, j]);
+      }
+    }
+    const { view, camera } = viewOf(surveyed(...cells), 200_000);
+    const bare = surveyEdgeMark(view, camera, VIEWPORT, OPTIONS);
+    const hidden = surveyEdgeMark(
+      { ...view, ground: { heightAtM: () => 150_000, ceilingM: 150_000 } },
+      camera,
+      VIEWPORT,
+      OPTIONS,
+    );
+    expect(hidden.nearestRangeM).toBe(bare.nearestRangeM);
+  });
+
+  it("gives the range of the nearest point seen past ground that hides a nearer one", () => {
+    // The camera 200 km over a point of the cell nearer its west side (s = 16 ÷ 32), whose
+    // middle is then the line's one nearest point.
+    const up = faceUvToDir(0, stToUv(16.2 / 32), stToUv(16.5 / 32));
+    const cameraM = scale(up, RADIUS_M + 200_000);
+    const view: SurveyEdgeView = {
+      body: "test",
+      coverage: surveyed([0, 16, 16]),
+      figure: { equatorialRadiusM: RADIUS_M, polarRadiusM: RADIUS_M },
+      rotation: IDENTITY_ROTATION,
+      centreM: scale(cameraM, -1),
+      heightAtM: () => null,
+    };
+    const camera = { orientation: lookAlong(scale(up, -1), vec3(0, 0, 1)), fovXRad: Math.PI / 3 };
+    const bare = surveyEdgeMark(view, camera, VIEWPORT, OPTIONS);
+    // A tower halfway between the camera's foot and that point, which hides it and its
+    // neighbours alone.
+    const tower = normalise(add(up, nearestPointDir(view, camera)));
+    const ground = {
+      heightAtM: (d: Vec3): number =>
+        Math.acos(Math.min(1, dot(normalise(d), tower))) * RADIUS_M < 3_000 ? 180_000 : 0,
+      ceilingM: 180_000,
+    };
+    const seen = surveyEdgeMark({ ...view, ground }, camera, VIEWPORT, OPTIONS);
+    expect(seen.nearestRangeM).not.toBeNull();
+    expect(seen.nearestRangeM ?? 0).toBeGreaterThan((bare.nearestRangeM ?? 0) + 10);
+  });
+});
+
+/** The body-fixed direction of the drawn line's point nearest the camera. */
+function nearestPointDir(view: SurveyEdgeView, camera: ProjectionCamera): Vec3 {
+  const { line } = surveyEdgeMark(view, camera, VIEWPORT, OPTIONS);
+  let best = vec3(0, 0, 1);
+  let least = Number.POSITIVE_INFINITY;
+  for (const [a] of segmentsOf(line)) {
+    if (norm(a) < least) {
+      least = norm(a);
+      best = normalise(sub(a, view.centreM));
+    }
+  }
+  return best;
+}

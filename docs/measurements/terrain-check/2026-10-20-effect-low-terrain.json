@@ -1,0 +1,579 @@
+{
+  "schema": "hyperion.views-check.terrain-results",
+  "version": 1,
+  "run": {
+    "startedAt": "2026-10-20T02:25:20.010Z",
+    "machine": {
+      "name": "effect",
+      "cpu": "AMD Ryzen 7 3700X 8-Core Processor",
+      "logicalCores": 16,
+      "memoryBytes": 33554919424,
+      "governor": {
+        "value": "schedutil",
+        "reason": null
+      },
+      "loadAverage": [1.45, 4.28, 9.99],
+      "gpu": {
+        "value": {
+          "vendorId": 4318,
+          "deviceId": 8710,
+          "driverVersion": "615.78.08",
+          "description": null
+        },
+        "reason": null
+      }
+    },
+    "versions": {
+      "app": "0.1.0",
+      "electron": "44.4.3",
+      "chromium": "152.0.7977.130",
+      "node": "24.21.0",
+      "v8": "15.2.124.28-electron.0"
+    },
+    "platform": "linux",
+    "launchMode": "vulkan",
+    "setting": "low",
+    "smoke": false,
+    "switches": [
+      "--use-angle=vulkan",
+      "--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan",
+      "--enable-dawn-features=enable_subgroups_intel_gen9",
+      "--disable-dawn-features=timestamp_quantization"
+    ],
+    "shown": false,
+    "window": {
+      "widthDip": 1286,
+      "heightDip": 724
+    },
+    "devicePixelRatio": 1,
+    "timer": "full",
+    "captures": {
+      "value": "target/views-check/terrain/captures-20261020T022520",
+      "reason": null
+    },
+    "provisional": "provisional: load average 1.45 at the start; a shared machine; a hidden run: no presentation"
+  },
+  "phases": [
+    {
+      "name": "terrain-alone",
+      "purpose": "the photorealistic primary alone, through the hand-over, the descent and the sunset",
+      "held": true,
+      "windowS": 264.82270000000295,
+      "script": {
+        "startS": 2.6998999999999977,
+        "endS": 265.0728000000269
+      },
+      "views": [
+        {
+          "name": "view",
+          "slot": "PRIMARY",
+          "style": "photorealistic",
+          "canvas": {
+            "widthPx": 822,
+            "heightPx": 544
+          },
+          "draws": 7811,
+          "gpuMs": {
+            "count": 7811,
+            "p50Ms": 9.002784,
+            "p95Ms": 12.678336,
+            "p99Ms": 15.774688,
+            "maxMs": 19.91536,
+            "meanMs": 8.299610833952128
+          },
+          "submitMs": {
+            "count": 7811,
+            "p50Ms": 0.7999999970197678,
+            "p95Ms": 1.3999999910593033,
+            "p99Ms": 3,
+            "maxMs": 187.29999999701977,
+            "meanMs": 0.8599795161506428
+          },
+          "missedFrames": 0,
+          "longestGapMs": 1316.699999999997,
+          "handedOverDraws": 5537,
+          "offSurveyDraws": 327,
+          "terrainDraws": 5533,
+          "terrainGaps": 0,
+          "terrainGapSpansS": [],
+          "firstHandoverScriptS": 68.06410000000018,
+          "terrainDelayMs": 133.1999999999971,
+          "readBacks": 260,
+          "nonFiniteTexels": 0
+        }
+      ],
+      "animationFrames": {
+        "count": 15621,
+        "p50Ms": 16.69999999999709,
+        "p95Ms": 16.79999999998836,
+        "p99Ms": 16.800000000017462,
+        "maxMs": 1300,
+        "meanMs": 16.951923692468043
+      },
+      "mainThreadMs": {
+        "count": 15622,
+        "p50Ms": 1.1999999955296516,
+        "p95Ms": 7.5,
+        "p99Ms": 9.700000002980232,
+        "maxMs": 193.89999999850988,
+        "meanMs": 2.5406350018953776
+      },
+      "frameGpuMs": {
+        "count": 7811,
+        "p50Ms": 9.002784,
+        "p95Ms": 12.678336,
+        "p99Ms": 15.774688,
+        "maxMs": 19.91536,
+        "meanMs": 8.299610833952128
+      },
+      "patchesDrawn": {
+        "draws": 5864,
+        "mean": 143.95958390177353,
+        "max": 211,
+        "last": 0
+      },
+      "bakes": {
+        "posted": 3967,
+        "baked": 3963,
+        "refused": 4
+      },
+      "bakedPerS": 14.964729232048294,
+      "fieldPosts": {
+        "inits": 0,
+        "chunks": 21,
+        "releases": 0
+      },
+      "fieldAsks": 1,
+      "blocksSent": 7,
+      "memory": {
+        "workerFieldBytes": 3502548,
+        "keptFieldBytes": 28327,
+        "sessionGpuBytes": [
+          {
+            "category": "coarse-field-gpu",
+            "bytes": 129120
+          }
+        ],
+        "liveBytes": [
+          {
+            "category": "coarse-field-gpu",
+            "bytes": 129120
+          },
+          {
+            "category": "height-cache",
+            "bytes": 68303352
+          },
+          {
+            "category": "other",
+            "bytes": 307164
+          }
+        ],
+        "peakBytes": [
+          {
+            "category": "coarse-field-gpu",
+            "bytes": 129120
+          },
+          {
+            "category": "height-cache",
+            "bytes": 68303352
+          },
+          {
+            "category": "other",
+            "bytes": 307164
+          }
+        ]
+      }
+    },
+    {
+      "name": "terrain-wireframe",
+      "purpose": "the primary with one wireframe instrument (QUALITY LOW allows one photorealistic view)",
+      "held": true,
+      "windowS": 297.6441000000015,
+      "script": {
+        "startS": 267.3728000000274,
+        "endS": 265.0275000000638
+      },
+      "views": [
+        {
+          "name": "view",
+          "slot": "PRIMARY",
+          "style": "photorealistic",
+          "canvas": {
+            "widthPx": 822,
+            "heightPx": 544
+          },
+          "draws": 8899,
+          "gpuMs": {
+            "count": 8899,
+            "p50Ms": 9.166752,
+            "p95Ms": 12.087936,
+            "p99Ms": 15.299744,
+            "maxMs": 19.829248,
+            "meanMs": 8.233595846724354
+          },
+          "submitMs": {
+            "count": 8899,
+            "p50Ms": 0.7999999970197678,
+            "p95Ms": 3.5,
+            "p99Ms": 4.399999998509884,
+            "maxMs": 15.99999999254942,
+            "meanMs": 1.1162377795147378
+          },
+          "missedFrames": 0,
+          "longestGapMs": 116.59999999997672,
+          "handedOverDraws": 5574,
+          "offSurveyDraws": 1291,
+          "terrainDraws": 5574,
+          "terrainGaps": 0,
+          "terrainGapSpansS": [],
+          "firstHandoverScriptS": 67.88540000003528,
+          "terrainDelayMs": 0,
+          "readBacks": 294,
+          "nonFiniteTexels": 0
+        },
+        {
+          "name": "instrument-1",
+          "slot": "INSTRUMENT 1",
+          "style": "wireframe",
+          "canvas": {
+            "widthPx": 240,
+            "heightPx": 180
+          },
+          "draws": 8899,
+          "gpuMs": {
+            "count": 8899,
+            "p50Ms": 0.022912,
+            "p95Ms": 0.051008,
+            "p99Ms": 0.07536,
+            "maxMs": 1.045696,
+            "meanMs": 0.02785760916956967
+          },
+          "submitMs": {
+            "count": 8899,
+            "p50Ms": 0.19999999552965164,
+            "p95Ms": 0.5,
+            "p99Ms": 3,
+            "maxMs": 9,
+            "meanMs": 0.2450837172925345
+          },
+          "missedFrames": 0,
+          "longestGapMs": 116.59999999997672,
+          "handedOverDraws": 0,
+          "offSurveyDraws": 0,
+          "terrainDraws": 0,
+          "terrainGaps": 0,
+          "terrainGapSpansS": [],
+          "firstHandoverScriptS": null,
+          "terrainDelayMs": null,
+          "readBacks": 0,
+          "nonFiniteTexels": 0
+        }
+      ],
+      "animationFrames": {
+        "count": 17797,
+        "p50Ms": 16.699999999953434,
+        "p95Ms": 16.79999999993015,
+        "p99Ms": 16.800000000046566,
+        "maxMs": 100,
+        "meanMs": 16.724065853795583
+      },
+      "mainThreadMs": {
+        "count": 17798,
+        "p50Ms": 2.600000001490116,
+        "p95Ms": 15.099999994039536,
+        "p99Ms": 20.19999999552965,
+        "maxMs": 91.30000000447035,
+        "meanMs": 4.7094224070152055
+      },
+      "frameGpuMs": {
+        "count": 8899,
+        "p50Ms": 9.194752,
+        "p95Ms": 12.104192,
+        "p99Ms": 15.327456,
+        "maxMs": 19.848544,
+        "meanMs": 8.261453455893886
+      },
+      "patchesDrawn": {
+        "draws": 8899,
+        "mean": 95.71030452859871,
+        "max": 211,
+        "last": 0
+      },
+      "bakes": {
+        "posted": 3178,
+        "baked": 3178,
+        "refused": 0
+      },
+      "bakedPerS": 10.677181237592091,
+      "fieldPosts": {
+        "inits": 0,
+        "chunks": 0,
+        "releases": 0
+      },
+      "fieldAsks": 0,
+      "blocksSent": 0,
+      "memory": {
+        "workerFieldBytes": 3502548,
+        "keptFieldBytes": 28327,
+        "sessionGpuBytes": [
+          {
+            "category": "coarse-field-gpu",
+            "bytes": 129120
+          }
+        ],
+        "liveBytes": [
+          {
+            "category": "coarse-field-gpu",
+            "bytes": 129120
+          },
+          {
+            "category": "height-cache",
+            "bytes": 68303352
+          },
+          {
+            "category": "other",
+            "bytes": 307164
+          }
+        ],
+        "peakBytes": [
+          {
+            "category": "coarse-field-gpu",
+            "bytes": 129120
+          },
+          {
+            "category": "height-cache",
+            "bytes": 68303352
+          },
+          {
+            "category": "other",
+            "bytes": 307164
+          }
+        ]
+      }
+    },
+    {
+      "name": "terrain-loss",
+      "purpose": "a fresh session, its device destroyed by the harness mid-stream",
+      "held": true,
+      "windowS": 134.07689999999852,
+      "script": {
+        "startS": 0.65,
+        "endS": 134.7112999999968
+      },
+      "views": [
+        {
+          "name": "view",
+          "slot": "PRIMARY",
+          "style": "photorealistic",
+          "canvas": {
+            "widthPx": 822,
+            "heightPx": 544
+          },
+          "draws": 4016,
+          "gpuMs": {
+            "count": 4008,
+            "p50Ms": 5.168448,
+            "p95Ms": 13.406944,
+            "p99Ms": 15.703936,
+            "maxMs": 19.874688,
+            "meanMs": 6.553956119760485
+          },
+          "submitMs": {
+            "count": 4016,
+            "p50Ms": 0.7000000029802322,
+            "p95Ms": 3.5999999940395355,
+            "p99Ms": 4.800000011920929,
+            "maxMs": 13.900000005960464,
+            "meanMs": 1.1432768924966958
+          },
+          "missedFrames": 0,
+          "longestGapMs": 66.70000000006985,
+          "handedOverDraws": 1964,
+          "offSurveyDraws": 36,
+          "terrainDraws": 1963,
+          "terrainGaps": 0,
+          "terrainGapSpansS": [],
+          "firstHandoverScriptS": 67.94729999999964,
+          "terrainDelayMs": 33.40000000002328,
+          "readBacks": 132,
+          "nonFiniteTexels": 0
+        }
+      ],
+      "animationFrames": {
+        "count": 8032,
+        "p50Ms": 16.699999999953434,
+        "p95Ms": 16.70000000006985,
+        "p99Ms": 16.800000000046566,
+        "maxMs": 50.09999999997672,
+        "meanMs": 16.690898904382475
+      },
+      "mainThreadMs": {
+        "count": 8033,
+        "p50Ms": 1.5,
+        "p95Ms": 8,
+        "p99Ms": 10.899999998509884,
+        "maxMs": 57.100000001490116,
+        "meanMs": 2.1105440059660765
+      },
+      "frameGpuMs": {
+        "count": 4008,
+        "p50Ms": 5.168448,
+        "p95Ms": 13.406944,
+        "p99Ms": 15.703936,
+        "maxMs": 19.874688,
+        "meanMs": 6.553956119760485
+      },
+      "patchesDrawn": {
+        "draws": 1997,
+        "mean": 148.9003505257887,
+        "max": 211,
+        "last": 99
+      },
+      "bakes": {
+        "posted": 1040,
+        "baked": 1029,
+        "refused": 5
+      },
+      "bakedPerS": 7.674700116127472,
+      "fieldPosts": {
+        "inits": 3,
+        "chunks": 21,
+        "releases": 0
+      },
+      "fieldAsks": 1,
+      "blocksSent": 8,
+      "memory": {
+        "workerFieldBytes": 3502548,
+        "keptFieldBytes": 28327,
+        "sessionGpuBytes": [
+          {
+            "category": "coarse-field-gpu",
+            "bytes": 129120
+          }
+        ],
+        "liveBytes": [
+          {
+            "category": "coarse-field-gpu",
+            "bytes": 129120
+          },
+          {
+            "category": "height-cache",
+            "bytes": 68303352
+          },
+          {
+            "category": "other",
+            "bytes": 307164
+          }
+        ],
+        "peakBytes": [
+          {
+            "category": "coarse-field-gpu",
+            "bytes": 129120
+          },
+          {
+            "category": "height-cache",
+            "bytes": 68303352
+          },
+          {
+            "category": "other",
+            "bytes": 307164
+          }
+        ]
+      }
+    }
+  ],
+  "findings": {
+    "phases": {
+      "verdict": "pass",
+      "reasons": []
+    },
+    "framesDrawn": {
+      "verdict": "pass",
+      "reasons": []
+    },
+    "framesFinite": {
+      "verdict": "pass",
+      "reasons": [],
+      "readBacks": 686
+    },
+    "terrainDrawn": {
+      "verdict": "pass",
+      "reasons": []
+    },
+    "faults": {
+      "verdict": "pass",
+      "reasons": [],
+      "expected": {
+        "atMs": 690648.3999999985,
+        "kind": "device-lost",
+        "reason": "destroyed",
+        "line": "device-lost (destroyed): Device was destroyed."
+      },
+      "others": [],
+      "restores": 1,
+      "gpuProcessExits": 0
+    },
+    "loss": {
+      "verdict": "pass",
+      "reasons": [],
+      "record": {
+        "destroyedAtMs": 690647.5,
+        "destroyedAtScriptS": 121.56189999999587,
+        "notDestroyed": null,
+        "blocksToCome": 2,
+        "bakesInFlight": 6,
+        "after": {
+          "fieldAsks": 0,
+          "fieldInits": 0,
+          "fieldChunks": 6,
+          "blocksSent": 2
+        },
+        "workers": 3,
+        "terrainAgainAtMs": 692134.4,
+        "masks": {
+          "before": 24,
+          "afterRestore": 29,
+          "end": 48,
+          "expected": 48,
+          "beforeKept": true,
+          "endAsExpected": true
+        }
+      }
+    },
+    "teardown": {
+      "verdict": "pass",
+      "reasons": [],
+      "record": {
+        "disposed": true,
+        "workersMade": 6,
+        "workersLive": 0,
+        "sessionGpuBytes": 0,
+        "liveBytes": [
+          {
+            "category": "coarse-field-gpu",
+            "bytes": 0
+          },
+          {
+            "category": "height-cache",
+            "bytes": 0
+          },
+          {
+            "category": "other",
+            "bytes": 0
+          }
+        ]
+      }
+    },
+    "bothSurfaces": "held by T16.c's part-6 smoke group, `R10.T16 the frame`, on SwiftShader; not probed here",
+    "handover": {
+      "rangeM": 5311105.603716065,
+      "expectedScriptS": 66.20585374589453,
+      "observedScriptS": 68.06410000000018
+    },
+    "consoleErrors": {
+      "count": 0,
+      "first": []
+    }
+  },
+  "overall": "pass"
+}

@@ -8,6 +8,8 @@ import { vertexDir, xyzToFaceUv, uvToSt } from "./cube";
 import { distanceToBoxM, patchBounds, relativeBounds } from "./bounds";
 import {
   contactHold,
+  craftContact,
+  datumGroundUnder,
   FORCED_REGION_RESIDENCY_S,
   finestPatchSizeM,
   forcedRadiusM,
@@ -306,5 +308,57 @@ describe("selection about a grounded body", () => {
     expect([...twice.patches.entries()].map(([k, p]) => [k, p.forced])).toEqual(
       [...once.patches.entries()].map(([k, p]) => [k, p.forced]),
     );
+  });
+});
+
+describe("a craft as a contact (R10.T16.b)", () => {
+  const SPHERE = { equatorialRadiusM: 1.7374e6, polarRadiusM: 1.7374e6 };
+  const datum = datumGroundUnder(SPHERE);
+  const PATCH_EDGE_M = 30;
+  const RADIUS_M = 10.3;
+  const UP = normalise(vec3(1, 2, 3));
+  /** A point `heightM` above the sphere along {@link UP}. */
+  const at = (heightM: number): Vec3 => scale(UP, SPHERE.equatorialRadiusM + heightM);
+
+  it("stands on the datum's ground: the radial height and the foot on a sphere", () => {
+    const under = datum(at(900));
+    expect(under.heightM).toBeCloseTo(900, 6);
+    const foot = scale(UP, SPHERE.equatorialRadiusM);
+    expect(Math.hypot(...Object.values(sub(under.groundPointM, foot)))).toBeLessThan(1e-6);
+    expect(Math.hypot(...Object.values(sub(under.normal, UP)))).toBeLessThan(1e-12);
+  });
+
+  it("stands within millimetres of the height along the normal on a flattened body", () => {
+    const flattened = datumGroundUnder(WGS84_FIGURE);
+    const dir = vertexDir({ face: 0, level: 6, i: 20, j: 40 }, 32, 32);
+    const [x, y, z] = surfacePoint(WGS84_FIGURE, dir, 1_000);
+    expect(flattened(vec3(x, y, z)).heightM).toBeCloseTo(1_000, 1);
+  });
+
+  it("is a contact at 900 m and closing, passed at the ground beneath it at its radius", () => {
+    const contact = craftContact(at(900), scale(UP, -5), RADIUS_M, datum, PATCH_EDGE_M);
+    expect(contact?.radiusM).toBe(RADIUS_M);
+    expect(
+      contact === null ? Infinity : Math.hypot(...Object.values(contact.positionM)),
+    ).toBeCloseTo(SPHERE.equatorialRadiusM, 6);
+  });
+
+  it("is no contact at 2 km and receding, nor at 900 m with its speed unknown", () => {
+    expect(craftContact(at(2_000), scale(UP, 5), RADIUS_M, datum, PATCH_EDGE_M)).toBeNull();
+    expect(craftContact(at(900), null, RADIUS_M, datum, PATCH_EDGE_M)).toBeNull();
+  });
+
+  it("is a contact at 2 km under 30 s from the ground, and none at 200 s", () => {
+    expect(craftContact(at(2_000), scale(UP, -100), RADIUS_M, datum, PATCH_EDGE_M)).not.toBeNull();
+    expect(craftContact(at(2_000), scale(UP, -10), RADIUS_M, datum, PATCH_EDGE_M)).toBeNull();
+  });
+
+  it("is a contact while grounded, its held sphere reaching the ground, whatever its speed", () => {
+    expect(
+      craftContact(at(RADIUS_M + PATCH_EDGE_M - 0.01), null, RADIUS_M, datum, PATCH_EDGE_M),
+    ).not.toBeNull();
+    expect(
+      craftContact(at(RADIUS_M + PATCH_EDGE_M + 1), null, RADIUS_M, datum, PATCH_EDGE_M),
+    ).toBeNull();
   });
 });

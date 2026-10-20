@@ -19,6 +19,20 @@ import type { Selection } from "./select";
 /** A terrain annunciation's text, as the guide's nomenclature has it. */
 export type TerrainAnnunciation = "TERRAIN: STREAMING" | "TERRAIN: DETAIL LIMITED";
 
+/**
+ * The terrain's fault (plan R10, R10.T16.b; decision-r10-t16-contracts §7, the string and its guide
+ * row ruled under the owner's delegation): every height worker is lost, so no view draws terrain
+ * and each body is drawn by its figure, until `VIEW` is shown again and its terrain made anew.
+ *
+ * @remarks
+ * It is a fault, not a status: set on the label block's fault line in `--status-caution`, after any
+ * graphics fault, on every view that hands a body over, and never among `labelStatements`' steady
+ * statements, whose `TERRAIN: STREAMING` and `TERRAIN: DETAIL LIMITED` it stands in place of. It is
+ * not debounced, since it cannot flicker: it stands until the session is made again.
+ */
+export const TERRAIN_NOT_AVAILABLE =
+  "TERRAIN NOT AVAILABLE: height computation failed, reopen VIEW to retry";
+
 /** How long a condition must hold before its line shows, in milliseconds. */
 export const ANNUNCIATION_ONSET_MS = 250;
 

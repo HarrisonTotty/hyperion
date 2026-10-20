@@ -15,9 +15,18 @@
  * `maxBufferSize`, a storage buffer above `maxStorageBufferBindingSize` (every binding here spans
  * its whole buffer), or a 2D texture above `maxTextureDimension2D` or 256 layers throws
  * {@link LimitExceeded}, where the device would raise a validation error and draw nothing.
+ *
+ * A mesh raises a `created` event for each of its buffers, its attributes' then its indices', at
+ * the bytes R01's `MeshRecord` makes them with (category `other`), and `releaseMesh` their
+ * `destroyed` events (plan R10, R10.T16; the batch review's S11). A device loss can be modelled
+ * as a window ({@link CountingRenderEngine.loseDevice} to {@link CountingRenderEngine.restore}) in
+ * which every creation throws `EngineUnavailable` and every write is dropped, as `ResilientEngine`
+ * does while it has no device, and a material's compilation can be made to fail
+ * ({@link CountingRenderEngine.failMaterials}).
  */
 
 import { BUFFER_USAGE } from "../view/engine/gpuFlags";
+import { EngineUnavailable } from "../view/engine/resilientEngine";
 import type { KernelPair } from "../view/engine/kernels";
 import {
   type AllocationEvent,
@@ -99,6 +108,14 @@ export interface RecordedTextureWrite {
   readonly data: Uint8Array;
 }
 
+/** How many of each kind of handle are live: made and neither released nor lost (R10.T16.b). */
+export interface LiveHandles {
+  readonly buffers: number;
+  readonly textures: number;
+  readonly meshes: number;
+  readonly materials: number;
+}
+
 /** A creation the device's limits would refuse with a validation error. */
 export class LimitExceeded extends Error {
   constructor(message: string) {
@@ -156,7 +173,17 @@ export class CountingRenderEngine implements RenderEngine {
     BufferHandle | TextureHandle,
     { bytes: number; category: MemoryCategory }
   >();
+  /** The meshes made and not released or lost (R10.T16.b), each with its buffers' names and bytes. */
+  readonly #meshes = new Map<MeshHandle, ReadonlyArray<{ name: string; bytes: number }>>();
+  /** The materials made and not released or lost (R10.T16.b). */
+  readonly #materials = new Set<MaterialHandle>();
+  /** The handles a modelled loss took ({@link CountingRenderEngine.loseHandles}), whose release is dropped. */
+  readonly #lost = new WeakSet<BufferHandle | TextureHandle | MeshHandle | MaterialHandle>();
   #capabilities: GpuCapabilities;
+  /** Inside a modelled loss's window ({@link CountingRenderEngine.loseDevice}). */
+  #unavailable = false;
+  /** Which materials' asynchronous compilation rejects, by name; none by default. */
+  #failsMaterial: (name: string) => boolean = () => false;
 
   constructor(device: GPUDevice) {
     this.inner = new FakeRenderEngine(device);
@@ -166,6 +193,82 @@ export class CountingRenderEngine implements RenderEngine {
   /** The device's capabilities: the first device's, or the one the last restore rebuilt onto. */
   get capabilities(): GpuCapabilities {
     return this.#capabilities;
+  }
+
+  /**
+   * The handles live now, by kind: made, and neither released nor taken by a modelled loss, so that
+   * a test holds an owner's teardown to "nothing left" (R10.T16.b; render targets' textures, which
+   * their targets own, count while the engine lives).
+   */
+  get live(): LiveHandles {
+    let buffers = 0;
+    let textures = 0;
+    for (const handle of this.#made.keys()) {
+      if (handle.kind === "buffer") {
+        buffers += 1;
+      } else {
+        textures += 1;
+      }
+    }
+    return { buffers, textures, meshes: this.#meshes.size, materials: this.#materials.size };
+  }
+
+  /**
+   * Models a device loss's end of every handle made so far, as `ResilientEngine`'s lost engine
+   * disposes of them (R10.T16.b): each buffer, texture and mesh buffer raises its `destroyed`
+   * event, every handle leaves the live tallies, and a later release of one is dropped, as the
+   * resilient engine drops it, once: a second release of it throws, as the resilient engine's does,
+   * having forgotten its maker at the first. A test follows it with
+   * {@link CountingRenderEngine.restore}.
+   */
+  loseHandles(): void {
+    for (const [handle, made] of this.#made) {
+      this.#lost.add(handle);
+      this.#emit({ kind: "destroyed", name: handle.name, ...made });
+    }
+    this.#made.clear();
+    for (const [mesh, buffers] of this.#meshes) {
+      this.#lost.add(mesh);
+      for (const buffer of buffers) {
+        this.#emit({ kind: "destroyed", ...buffer, category: "other" });
+      }
+    }
+    this.#meshes.clear();
+    for (const material of this.#materials) {
+      this.#lost.add(material);
+    }
+    this.#materials.clear();
+  }
+
+  /**
+   * Models a device loss's window, as `ResilientEngine` behaves with no device: every handle ends
+   * ({@link CountingRenderEngine.loseHandles}), and until {@link CountingRenderEngine.restore}
+   * every creation throws `EngineUnavailable`, an asynchronous one rejects with it, and every write
+   * is dropped.
+   */
+  loseDevice(): void {
+    this.loseHandles();
+    this.#unavailable = true;
+  }
+
+  /** Whether the engine is inside a modelled loss's window. */
+  get unavailable(): boolean {
+    return this.#unavailable;
+  }
+
+  /**
+   * Makes `createMaterialAsync` reject, with an `Error` naming the material, for each material whose
+   * name `fails` holds, as a compilation the device refuses; `() => false` restores every one.
+   */
+  failMaterials(fails: (name: string) => boolean): void {
+    this.#failsMaterial = fails;
+  }
+
+  /** Throws `EngineUnavailable` for `member` inside a modelled loss's window. */
+  #available(member: string): void {
+    if (this.#unavailable) {
+      throw new EngineUnavailable(member);
+    }
   }
 
   /** Zeroes {@link CountingRenderEngine.counts}; the recorded lists are kept. */
@@ -178,6 +281,7 @@ export class CountingRenderEngine implements RenderEngine {
    * `device` when given (a lesser adapter's, say), whose capabilities hold from then on.
    */
   restore(device?: GPUDevice): void {
+    this.#unavailable = false;
     if (device !== undefined) {
       this.#capabilities = new FakeRenderEngine(device).capabilities;
     }
@@ -202,6 +306,7 @@ export class CountingRenderEngine implements RenderEngine {
   }
 
   createRenderTarget(spec: RenderTargetSpec): RenderTarget {
+    this.#available("createRenderTarget");
     this.counts.renderTargets += 1;
     const colour = this.createTexture({
       name: `${spec.name} colour`,
@@ -247,25 +352,56 @@ export class CountingRenderEngine implements RenderEngine {
   }
 
   createMesh(spec: MeshSpec): MeshHandle {
+    this.#available("createMesh");
     this.counts.meshes += 1;
-    return { kind: "mesh", name: spec.name };
+    const mesh: MeshHandle = { kind: "mesh", name: spec.name };
+    // `MeshRecord`'s buffers: one an attribute, the positions first, then the indices', each a
+    // whole number of words, at least one.
+    const arrays: Array<readonly [string, ArrayBufferView]> = [
+      ["position", spec.positions],
+      ...Object.entries(spec.attributes).map(([name, { data }]) => [name, data] as const),
+      ...Object.entries(spec.instanceAttributes ?? {}).map(
+        ([name, { data }]) => [name, data] as const,
+      ),
+      ...(spec.indices === null ? [] : [["indices", spec.indices] as const]),
+    ];
+    const buffers = arrays.map(([name, data]) => ({
+      name: `${spec.name}:${name}`,
+      bytes: Math.max(4, Math.ceil(data.byteLength / 4) * 4),
+    }));
+    for (const buffer of buffers) {
+      this.#emit({ kind: "created", ...buffer, category: "other" });
+    }
+    this.#meshes.set(mesh, buffers);
+    return mesh;
   }
 
   createMaterial(spec: WgslMaterialSpec): MaterialHandle {
+    this.#available("createMaterial");
     this.counts.materials += 1;
-    return { kind: "material", name: spec.name };
+    const material: MaterialHandle = { kind: "material", name: spec.name };
+    this.#materials.add(material);
+    return material;
   }
 
   createMaterialAsync(spec: WgslMaterialSpec): Promise<MaterialHandle> {
+    if (this.#unavailable) {
+      return Promise.reject(new EngineUnavailable("createMaterialAsync"));
+    }
+    if (this.#failsMaterial(spec.name)) {
+      return Promise.reject(new Error(`material ${spec.name} could not be compiled`));
+    }
     return Promise.resolve(this.createMaterial(spec));
   }
 
   createPostProcess(spec: WgslPostProcessSpec): PostProcessHandle {
+    this.#available("createPostProcess");
     this.counts.postProcesses += 1;
     return { kind: "post-process", name: spec.name };
   }
 
   createCompute(pair: KernelPair): ComputeHandle {
+    this.#available("createCompute");
     this.counts.kernels += 1;
     return { kind: "compute", name: pair.name, path: "reference" };
   }
@@ -275,6 +411,7 @@ export class CountingRenderEngine implements RenderEngine {
   }
 
   createBuffer(spec: BufferSpec): BufferHandle {
+    this.#available("createBuffer");
     const { maxBufferSize, maxStorageBufferBindingSize } = this.#capabilities;
     if (spec.bytes > maxBufferSize) {
       throw new LimitExceeded(`buffer ${spec.name} of ${spec.bytes} B exceeds ${maxBufferSize} B`);
@@ -292,6 +429,7 @@ export class CountingRenderEngine implements RenderEngine {
   }
 
   createTexture(spec: TextureSpec): TextureHandle {
+    this.#available("createTexture");
     const { width, height, depthOrArrayLayers } = extentOf(spec.size);
     const most = this.#capabilities.maxTextureDimension2D;
     if (
@@ -341,7 +479,38 @@ export class CountingRenderEngine implements RenderEngine {
     this.#release(texture);
   }
 
+  /**
+   * Forgets a mesh, raising its buffers' `destroyed` events, as the engine destroys them
+   * (R10.T16.b); a lost one is dropped.
+   */
+  releaseMesh(mesh: MeshHandle): void {
+    if (this.#lost.delete(mesh)) {
+      return;
+    }
+    const buffers = this.#meshes.get(mesh);
+    if (buffers === undefined) {
+      throw new Error(`mesh ${mesh.name} was not made by this engine, or was released`);
+    }
+    this.#meshes.delete(mesh);
+    for (const buffer of buffers) {
+      this.#emit({ kind: "destroyed", ...buffer, category: "other" });
+    }
+  }
+
+  /** Forgets a material, as the engine forgets its record (R10.T16.b); a lost one is dropped. */
+  releaseMaterial(material: MaterialHandle): void {
+    if (this.#lost.delete(material)) {
+      return;
+    }
+    if (!this.#materials.delete(material)) {
+      throw new Error(`material ${material.name} was not made by this engine, or was released`);
+    }
+  }
+
   #release(handle: BufferHandle | TextureHandle): void {
+    if (this.#lost.delete(handle)) {
+      return;
+    }
     const made = this.#made.get(handle);
     if (made === undefined) {
       throw new Error(`${handle.name} was not made by this engine, or was released`);
@@ -367,6 +536,9 @@ export class CountingRenderEngine implements RenderEngine {
   }
 
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {
+    if (this.#unavailable) {
+      return;
+    }
     this.counts.bufferWrites += 1;
     this.writes.push({
       buffer: buffer.name,
@@ -383,6 +555,9 @@ export class CountingRenderEngine implements RenderEngine {
     size: GPUExtent3D,
     data: ArrayBufferView,
   ): void {
+    if (this.#unavailable) {
+      return;
+    }
     this.counts.textureWrites += 1;
     this.textureWritten.push({ texture: texture.name, origin, size, data: copyOf(data) });
     this.#emit({ kind: "uploaded", name: texture.name, bytes: data.byteLength });

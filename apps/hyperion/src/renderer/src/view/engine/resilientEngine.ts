@@ -134,6 +134,9 @@ class ResilientView implements RenderView {
   }
 }
 
+/** A handle a caller releases through the engine that made it. */
+type Released = BufferHandle | TextureHandle | MeshHandle | MaterialHandle;
+
 /** The engine a caller holds: the current one, re-created after each loss. */
 export class ResilientEngine implements RenderEngine {
   readonly depthPolicy: DepthPolicy = "reversed-z-float";
@@ -146,8 +149,11 @@ export class ResilientEngine implements RenderEngine {
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
   readonly #passTimeListeners = new Set<(times: PassTimes) => void>();
   #inner: RenderEngine | null = null;
-  /** The engine that made each buffer and texture, so that a release reaches it or is dropped. */
-  readonly #makers = new WeakMap<BufferHandle | TextureHandle, RenderEngine>();
+  /**
+   * The engine that made each buffer, texture, mesh and material, so that a release reaches it or
+   * is dropped (R06.T13.h; meshes and materials from R10.T16.b).
+   */
+  readonly #makers = new WeakMap<Released, RenderEngine>();
   #capabilities: GpuCapabilities;
   #unsubscribe: Array<() => void> = [];
   #disposed = false;
@@ -198,11 +204,11 @@ export class ResilientEngine implements RenderEngine {
   }
 
   createMesh(spec: MeshSpec): MeshHandle {
-    return this.#current("createMesh").createMesh(spec);
+    return this.#made(this.#current("createMesh").createMesh(spec));
   }
 
   createMaterial(spec: WgslMaterialSpec): MaterialHandle {
-    return this.#current("createMaterial").createMaterial(spec);
+    return this.#made(this.#current("createMaterial").createMaterial(spec));
   }
 
   createMaterialAsync(
@@ -210,9 +216,12 @@ export class ResilientEngine implements RenderEngine {
     targets: ReadonlyArray<RenderTargetFormat>,
     meshes: ReadonlyArray<MeshHandle> = [],
   ): Promise<MaterialHandle> {
-    return this.#currentAsync("createMaterialAsync", (inner) =>
-      inner.createMaterialAsync(spec, targets, meshes),
-    );
+    return this.#currentAsync("createMaterialAsync", async (inner) => {
+      const material = await inner.createMaterialAsync(spec, targets, meshes);
+      // The engine asked, which a loss during the compile has left behind: its release is dropped.
+      this.#makers.set(material, inner);
+      return material;
+    });
   }
 
   createPostProcess(spec: WgslPostProcessSpec): PostProcessHandle {
@@ -270,8 +279,32 @@ export class ResilientEngine implements RenderEngine {
     }
   }
 
+  /**
+   * Releases a mesh the current engine made (R10.T16.b); the release of one a lost engine made is
+   * dropped, as a buffer's is.
+   *
+   * @throws Error as {@link ResilientEngine.releaseBuffer} does.
+   */
+  releaseMesh(mesh: MeshHandle): void {
+    if (this.#releasedFromMaker("mesh", mesh)) {
+      this.#inner?.releaseMesh(mesh);
+    }
+  }
+
+  /**
+   * Releases a material the current engine made (R10.T16.b), as
+   * {@link ResilientEngine.releaseMesh} does a mesh.
+   *
+   * @throws Error as {@link ResilientEngine.releaseBuffer} does.
+   */
+  releaseMaterial(material: MaterialHandle): void {
+    if (this.#releasedFromMaker("material", material)) {
+      this.#inner?.releaseMaterial(material);
+    }
+  }
+
   /** Forgets a handle's maker and says whether it is the current engine, which then releases it. */
-  #releasedFromMaker(kind: string, handle: BufferHandle | TextureHandle): boolean {
+  #releasedFromMaker(kind: string, handle: Released): boolean {
     const maker = this.#makers.get(handle);
     if (maker === undefined) {
       throw new Error(`${kind} ${handle.name} was not made through this engine, or was released`);
@@ -399,7 +432,7 @@ export class ResilientEngine implements RenderEngine {
   }
 
   /** Notes the current engine as a handle's maker, so that its release is forwarded. */
-  #made<T extends BufferHandle | TextureHandle>(handle: T): T {
+  #made<T extends Released>(handle: T): T {
     if (this.#inner !== null) {
       this.#makers.set(handle, this.#inner);
     }

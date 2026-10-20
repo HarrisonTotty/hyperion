@@ -54,6 +54,7 @@ pub(super) struct ModelGrid {
     centre_sine: Vec<f64>,
     centre_cosine: Vec<f64>,
     weight: Vec<f64>,
+    edge_sine: Vec<f64>,
     edge_conductance: Vec<f64>,
     column_width_rad: f64,
     column_sine: Vec<f64>,
@@ -138,6 +139,7 @@ impl ModelGrid {
             centre_sine,
             centre_cosine,
             weight,
+            edge_sine,
             edge_conductance,
             column_width_rad,
             column_sine,
@@ -180,6 +182,14 @@ impl ModelGrid {
     #[must_use]
     pub(super) fn weight(&self, band: usize) -> f64 {
         self.weight[band]
+    }
+
+    /// The sine of edge `edge`'s latitude (from 0, the south pole, to [`LATITUDE_BANDS`], the north
+    /// pole): exactly −1 and 1 at the poles, so that band k spans the sines from edge k's to edge
+    /// k + 1's and its [`weight`](Self::weight) is their difference.
+    #[must_use]
+    pub(super) fn edge_sine(&self, edge: usize) -> f64 {
+        self.edge_sine[edge]
     }
 
     /// The conductance of edge `edge` (from 0, the south pole, to [`LATITUDE_BANDS`], the north
@@ -340,6 +350,61 @@ impl ModelGrid {
                 points,
                 weights: catmull_rom(f),
             }),
+        }
+    }
+}
+
+/// The zonal grid's interpolation to a point in latitude alone, kept small (R09.T13.e reads one for
+/// each field cell every month): [`ModelGrid::stencil_at`]'s on a grid of one column, its four
+/// bands and their weights, its value and its hold the same to the bit.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct BandStencil {
+    bands: [u8; 4],
+    weights: [f64; 4],
+}
+
+impl BandStencil {
+    /// The stencil at sine latitude `sine_latitude`: Catmull and Rom's cubic through the four
+    /// nearest band centres, mirrored across a pole ([`ModelGrid::stencil_at`]).
+    #[must_use]
+    pub(super) fn at(sine_latitude: f64) -> Self {
+        let (nodes, weights) = latitude_nodes(sine_latitude);
+        Self {
+            bands: nodes
+                .map(|node| u8::try_from(mirrored(node).0).expect("a band index is under 72")),
+            weights,
+        }
+    }
+
+    /// The value at the stencil's point of `values`, one a band, held to the range of the values
+    /// it reads ([`Stencil::clamped`]'s value, summed in the same order).
+    ///
+    /// # Panics
+    ///
+    /// If a value it reads is not finite.
+    #[must_use]
+    pub(super) fn clamped(&self, values: &[f64]) -> f64 {
+        let value = self
+            .bands
+            .iter()
+            .zip(self.weights)
+            .fold(0.0, |sum, (&band, w)| sum + w * values[usize::from(band)]);
+        let (low, high) =
+            self.bands
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |range, &band| {
+                    let v = super::finite_k(values[usize::from(band)]);
+                    (
+                        if v < range.0 { v } else { range.0 },
+                        if v > range.1 { v } else { range.1 },
+                    )
+                });
+        if value < low {
+            low
+        } else if value > high {
+            high
+        } else {
+            value
         }
     }
 }
@@ -666,6 +731,31 @@ fn finite_integer(x: f64) -> i64 {
 mod tests {
     use super::*;
     use hyperion_testkit::float::assert_same_bits;
+
+    /// The small band stencil is the zonal grid's stencil to the bit, its value and its hold,
+    /// through both poles and a step that overshoots.
+    #[test]
+    fn the_band_stencil_is_the_zonal_stencil_to_the_bit() {
+        let grid = ModelGrid::zonal();
+        let field: Vec<f64> = (0..LATITUDE_BANDS)
+            .map(|k| {
+                let x = grid.centre_sine(k);
+                if k >= 40 {
+                    400.0 + x
+                } else {
+                    30.0 + 7.0 * x * x
+                }
+            })
+            .collect();
+        for k in 0..=400 {
+            let x = (-1.0 + 0.005 * f64::from(k)).clamp(-1.0, 1.0);
+            let d = [(1.0 - x * x).sqrt(), 0.0, x];
+            assert_same_bits(
+                BandStencil::at(x).clamped(&field),
+                grid.stencil_at(d).clamped(&field).0,
+            );
+        }
+    }
 
     #[test]
     fn the_bands_share_the_sphere_and_their_poles_carry_no_flux() {

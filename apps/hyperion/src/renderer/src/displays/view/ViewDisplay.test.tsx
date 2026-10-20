@@ -12,6 +12,7 @@ import { FakeResizeObserver } from "../../test/FakeResizeObserver";
 import { binaryFrame } from "../../test/binaryFrames";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import { InThreadSkyWorker, skyPayload, skyResponse } from "../../test/skyFixtures";
+import { ScriptedHeightWorker } from "../../test/scriptedHeightWorker";
 import { FIXTURE_EARTH, FIXTURE_SYSTEM } from "../../test/planetaryFixture";
 import {
   anOpenedUniverse,
@@ -99,6 +100,11 @@ interface Setup {
   readonly unmount: () => void;
 }
 
+/** Starts one of the terrain session's height workers, scripted (R10.T16.a). */
+function startHeightWorker(): ScriptedHeightWorker {
+  return new ScriptedHeightWorker();
+}
+
 /** Renders the display in a provider, with fake frames, layout and engine. */
 function setup(
   options: {
@@ -124,7 +130,11 @@ function setup(
           <ViewSceneProvider active={mode === "visible"} knownSystem={null}>
             {() => (
               <Activity mode={mode}>
-                <ViewDisplay engineSource={source} platform={options.platform} />
+                <ViewDisplay
+                  engineSource={source}
+                  platform={options.platform}
+                  heightWorkers={startHeightWorker}
+                />
               </Activity>
             )}
           </ViewSceneProvider>

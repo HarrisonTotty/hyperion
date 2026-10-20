@@ -12,7 +12,9 @@
  * did. A view's name is its engine name (`view`, `instrument-1`), and a target belongs to the view
  * its name begins with, up to a `:` or a space (`view:hdr`, `instrument-1 blue noise`).
  *
- * Only the check's launch makes a probe; nothing else reads it.
+ * Only the check's launch makes a probe; nothing else reads it. The terrain run (plan R10,
+ * R10.T16.d) watches it too ({@link ViewsProbe.watch}): each render's submission and each target
+ * made, and the engine's faults and restores with their times.
  */
 
 import type {
@@ -24,7 +26,14 @@ import type {
   ViewsCheckViewRecord,
 } from "../../../../../preload/api";
 import type { GpuTimer, GraphicsFault } from "../../../view/engine/status";
-import type { PassTimes, RenderEngine, ViewSize } from "../../../view/engine/types";
+import type {
+  FrameSubmission,
+  PassTimes,
+  RenderEngine,
+  RenderTarget,
+  RenderTargetSpec,
+  ViewSize,
+} from "../../../view/engine/types";
 import { DEFAULT_ENGINE_SOURCE, type ViewEngineSource } from "../useViewEngine";
 import { type EngineProbe, ProbedEngine } from "./probedEngine";
 
@@ -71,6 +80,27 @@ export interface ShownView {
   readonly style: ViewsCheckStyle;
 }
 
+/** A fault, with when it was reported. */
+export interface TimedFault {
+  /** The page's clock, ms. */
+  readonly atMs: number;
+  readonly fault: GraphicsFault;
+}
+
+/** What watches the probe's engines' submissions and targets (the terrain run's probe). */
+export interface SubmissionWatcher {
+  /**
+   * A view's or target's render of `frame` returned, in the animation frame stamped `frameMs`
+   * (`null` outside any).
+   */
+  submitted(owner: string, frame: FrameSubmission, frameMs: number | null): void;
+  /** A render target was made of `spec`. */
+  madeTarget(spec: RenderTargetSpec, target: RenderTarget): void;
+}
+
+/** A window's figures: a phase's record without its name ({@link ViewsProbe.window}). */
+export type WindowFigures = Omit<ViewsCheckPhaseRecord, "name">;
+
 /** An allocation event, timed. */
 export interface TimedAllocation {
   readonly atMs: number;
@@ -90,6 +120,9 @@ export class ViewsProbe implements EngineProbe {
   readonly #times = new Map<string, PassTimes>();
   readonly #allocations: TimedAllocation[] = [];
   readonly #faults: string[] = [];
+  readonly #timedFaults: TimedFault[] = [];
+  readonly #restoresAtMs: number[] = [];
+  readonly #watchers = new Set<SubmissionWatcher>();
   readonly #sizes = new Map<string, ViewSize>();
   readonly #scales: ScaleEntry[] = [];
   #timer: GpuTimer | null = null;
@@ -151,6 +184,51 @@ export class ViewsProbe implements EngineProbe {
     part.submitMs += cpuMs;
     part.resolves.push(...keys);
     frame.views.set(view, part);
+  }
+
+  submitted(owner: string, frame: FrameSubmission): void {
+    for (const watcher of this.#watchers) {
+      watcher.submitted(owner, frame, this.#frameMs);
+    }
+  }
+
+  madeTarget(spec: RenderTargetSpec, target: RenderTarget): void {
+    for (const watcher of this.#watchers) {
+      watcher.madeTarget(spec, target);
+    }
+  }
+
+  /** Tells `watcher` of every submission and target from now on; returns its removal. */
+  watch(watcher: SubmissionWatcher): () => void {
+    this.#watchers.add(watcher);
+    return () => {
+      this.#watchers.delete(watcher);
+    };
+  }
+
+  /** Every fault so far, with its time. */
+  timedFaults(): ReadonlyArray<TimedFault> {
+    return [...this.#timedFaults];
+  }
+
+  /** When the engine restored after each loss so far, ms. */
+  restoresAtMs(): ReadonlyArray<number> {
+    return [...this.#restoresAtMs];
+  }
+
+  /** The timestamps of every animation frame from `startMs` up to `endMs`, in order. */
+  frameTimes(startMs: number, endMs: number): number[] {
+    return [...this.#frames.keys()]
+      .filter((atMs) => atMs >= startMs && atMs < endMs)
+      .toSorted((a, b) => a - b);
+  }
+
+  /** The timestamps of the animation frames from `startMs` up to `endMs` in which `view` drew, in order. */
+  drawTimes(view: string, startMs: number, endMs: number): number[] {
+    return [...this.#frames.values()]
+      .filter((frame) => frame.atMs >= startMs && frame.atMs < endMs && frame.views.has(view))
+      .map((frame) => frame.atMs)
+      .toSorted((a, b) => a - b);
   }
 
   sized(owner: string, kind: "view" | "target", size: ViewSize): void {
@@ -223,6 +301,14 @@ export class ViewsProbe implements EngineProbe {
     endMs: number,
     shown: ReadonlyArray<ShownView>,
   ): ViewsCheckPhaseRecord {
+    return { name, ...this.window(startMs, endMs, shown) };
+  }
+
+  /**
+   * The figures of the animation frames stamped from `startMs` up to `endMs`, whose views were
+   * `shown`: {@link ViewsProbe.phase}'s, for a window of either run.
+   */
+  window(startMs: number, endMs: number, shown: ReadonlyArray<ShownView>): WindowFigures {
     const frames = [...this.#frames.values()]
       .filter((frame) => frame.atMs >= startMs && frame.atMs < endMs)
       .toSorted((a, b) => a.atMs - b.atMs);
@@ -282,7 +368,6 @@ export class ViewsProbe implements EngineProbe {
       };
     });
     return {
-      name,
       startMs,
       endMs,
       views,
@@ -312,9 +397,11 @@ export class ViewsProbe implements EngineProbe {
     });
     engine.onFault((fault) => {
       this.#faults.push(faultLine(fault));
+      this.#timedFaults.push({ atMs: this.#nowMs(), fault });
     });
     engine.onRestored(() => {
       this.#generation += 1;
+      this.#restoresAtMs.push(this.#nowMs());
     });
     return new ProbedEngine(engine, this, this.#nowMs);
   }
@@ -353,8 +440,10 @@ export class ViewsProbe implements EngineProbe {
     if (generation === undefined || resolves.length === 0) {
       return 0;
     }
-    const low = Math.min(...resolves);
-    const high = Math.max(...resolves);
+    // A fold rather than an argument spread: a terrain run's window of minutes holds some 10⁵
+    // resolves, past the argument list a spread can take (R10.T16.d).
+    const low = resolves.reduce((least, n) => Math.min(least, n), Number.POSITIVE_INFINITY);
+    const high = resolves.reduce((most, n) => Math.max(most, n), Number.NEGATIVE_INFINITY);
     let ns = 0;
     for (const [key, times] of this.#times) {
       const [g, n] = key.split("/").map(Number);
@@ -378,7 +467,7 @@ function intervalsOf(frames: ReadonlyArray<FrameEntry>): number[] {
 }
 
 /** A fault as one line of the record. */
-function faultLine(fault: GraphicsFault): string {
+export function faultLine(fault: GraphicsFault): string {
   let line: string;
   switch (fault.kind) {
     case "device-lost":

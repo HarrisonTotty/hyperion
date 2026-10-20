@@ -882,10 +882,6 @@ fn northern_mirror(latitude: Radians) -> Radians {
 ///
 /// Plain data with crate-visible fields: [`ColdTrapGround::new`] reads them.
 #[derive(Debug, Clone, Copy)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "R09.T13.f's placement is the first caller")
-)]
 pub(crate) struct ColdTrapGroundParts<'a> {
     /// The obliquity ε of the spin axis to the seasonal orbit, rad in [0, π]. The star's greatest
     /// declination is min(ε, π − ε), the present one (labelled).
@@ -931,10 +927,6 @@ impl ColdTrapGround {
     /// outside [0, 1), a flux, star radius or heat flow that is negative or not finite, or an albedo
     /// outside [0, 1]. Those are a caller's fault, not a body without cold traps.
     #[must_use]
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "R09.T13.f's placement is the first caller")
-    )]
     pub(crate) fn new(parts: &ColdTrapGroundParts<'_>) -> Option<Self> {
         let obliquity = parts.obliquity.value();
         assert!(
@@ -993,7 +985,11 @@ impl ColdTrapGround {
     #[must_use]
     #[cfg_attr(
         not(test),
-        expect(dead_code, reason = "R09.T13.f's placement is the first caller")
+        expect(
+            dead_code,
+            reason = "only the tests read it: R09.T13.f's placement reads `fractions_at`, which \
+                      applies the zonal maximum itself"
+        )
     )]
     pub(crate) fn annual_maximum(&self, latitude: Radians) -> Kelvin {
         self.sunlit.annual_maximum_at(latitude)

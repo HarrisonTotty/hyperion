@@ -304,6 +304,11 @@ export interface ViewsCheckLaunch {
   readonly smoke: boolean;
   /** Where the results file goes, or `null` for the default. */
   readonly out: string | null;
+  /**
+   * Whether the launch runs the terrain run (`--terrain`, plan R10, R10.T16.d;
+   * decision-r10-t16-contracts §6) on `TERRAIN TEST` in place of T20's phases on `PHASE TEST`.
+   */
+  readonly terrain: boolean;
 }
 
 /**
@@ -423,22 +428,256 @@ export interface ViewsCheckWindow {
 }
 
 /**
+ * The terrain run's phases (plan R10, R10.T16.d; decision-r10-t16-contracts §6), each a
+ * configuration of `VIEW` on `TERRAIN TEST`; a launch runs one setting's three, in order: on high
+ * `terrain-alone`, `terrain-photoreal-wireframe` and `terrain-loss`, on low `terrain-alone`,
+ * `terrain-wireframe` and `terrain-loss`.
+ */
+export type TerrainCheckPhaseName =
+  /** The photorealistic primary alone, through the hand-over, the descent and the sunset. */
+  | "terrain-alone"
+  /** High: the same, with instrument 1 photorealistic and instrument 2 in the wireframe. */
+  | "terrain-photoreal-wireframe"
+  /** Low: the primary with one wireframe instrument, since `QUALITY LOW` allows one photorealistic view. */
+  | "terrain-wireframe"
+  /** The primary alone on a fresh session, its device destroyed by the harness mid-stream. */
+  | "terrain-loss";
+
+/** A phase of either run of the views check: T20's or the terrain run's. */
+export type CheckPhaseName = ViewsCheckPhaseName | TerrainCheckPhaseName;
+
+/** Bytes of one memory category (R01's `MemoryCategory` names). */
+export interface TerrainCheckBytes {
+  readonly category: string;
+  readonly bytes: number;
+}
+
+/** The terrain session's memory as a phase ends (`TerrainSession.memory`, and the probe's tally). */
+export interface TerrainCheckMemory {
+  /** What the height workers hold of the fields, bytes. */
+  readonly workerFieldBytes: number;
+  /** The blocks the pool keeps for a worker made again, bytes. */
+  readonly keptFieldBytes: number;
+  /** The session's own textures (masks and class maps), by category. */
+  readonly sessionGpuBytes: ReadonlyArray<TerrainCheckBytes>;
+  /**
+   * The terrain's GPU allocations alive as the phase ends, by category: the session's textures and
+   * its passes' resources, every allocation named `terrain …`, `coverage mask …` or `class map …`.
+   */
+  readonly liveBytes: ReadonlyArray<TerrainCheckBytes>;
+  /** The most of them alive at once over the phase, by category. */
+  readonly peakBytes: ReadonlyArray<TerrainCheckBytes>;
+}
+
+/** One view over one phase of the terrain run. */
+export interface TerrainCheckViewRecord {
+  readonly name: ViewsCheckViewName;
+  /** The style its canvas's accessible name said it drew when the phase ended. */
+  readonly style: ViewsCheckStyle;
+  readonly canvas: ViewsCheckCanvas;
+  /** The animation frames in which it submitted a pass. */
+  readonly draws: number;
+  /** Its timed GPU time in each frame it drew whose resolves all arrived, ms. */
+  readonly gpuMs: ReadonlyArray<number>;
+  /** The engine's CPU time in its `render` calls each frame it drew, ms. */
+  readonly submitMs: ReadonlyArray<number>;
+  /**
+   * The animation frames in which it was due at its own cadence (its most common count of frames
+   * between two draws: 1 at 60 Hz, 2 at 30 Hz) and did not draw, outside the loss's restore (from
+   * the device's destruction to the terrain's first draw after the restore).
+   */
+  readonly missedFrames: number;
+  /**
+   * The longest time between two of its draws, ms, outside the loss's restore: a stall of the
+   * whole page shows here and not among the missed frames, since no animation frame ran.
+   */
+  readonly longestGapMs: number;
+  /**
+   * Its draws while `TEST MOON` was handed over to its terrain with a drawn patch in its view (the
+   * pass took the view, and some patch of its draw set lies in the view's).
+   */
+  readonly handedOverDraws: number;
+  /**
+   * Its draws while handed over with no drawn patch in its view: past the survey, where the
+   * reference surface alone is drawn, or every patch it sees still to come.
+   */
+  readonly offSurveyDraws: number;
+  /** Of those, the draws whose submissions held a draw of the terrain's lit material. */
+  readonly terrainDraws: number;
+  /**
+   * Handed-over draws without the terrain after its first terrain draw of the phase, outside the
+   * loss's restore: a terrain once drawn that went missing.
+   */
+  readonly terrainGaps: number;
+  /** The first spans of those draws, each its first and last draw's script time, s. */
+  readonly terrainGapSpansS: ReadonlyArray<readonly [number, number]>;
+  /** When it first handed over in the phase, ms, and the script's time then, s; `null` for never. */
+  readonly firstHandoverMs: number | null;
+  readonly firstHandoverScriptS: number | null;
+  /** When it first drew the terrain in the phase, ms; `null` for never. */
+  readonly firstTerrainMs: number | null;
+  /** Its scene target's read-backs over the phase. */
+  readonly readBacks: number;
+  /** Texels of those read-backs not finite in any channel. */
+  readonly nonFiniteTexels: number;
+}
+
+/** What the renderer measured over one phase of the terrain run. */
+export interface TerrainCheckPhaseRecord {
+  readonly name: TerrainCheckPhaseName;
+  /** The window, `performance.now()` ms. */
+  readonly startMs: number;
+  readonly endMs: number;
+  /** The script's time at the window's start and at its end, s; it loops at its length. */
+  readonly scriptStartS: number;
+  readonly scriptEndS: number;
+  /** The views shown, the primary first. */
+  readonly views: ReadonlyArray<TerrainCheckViewRecord>;
+  /** Intervals between consecutive animation frames, ms. */
+  readonly frameIntervalsMs: ReadonlyArray<number>;
+  /** Each animation frame's time in the page's `requestAnimationFrame` callbacks, ms. */
+  readonly mainThreadMs: ReadonlyArray<number>;
+  /** Each frame's timed GPU time, every view's passes, where all its resolves arrived, ms. */
+  readonly frameGpuMs: ReadonlyArray<number>;
+  /** The patches `TEST MOON`'s pass drew, at each of the primary's draws while it had a pass. */
+  readonly patchesDrawn: ReadonlyArray<number>;
+  /** Bakes posted to the height workers, and their answers, over the window. */
+  readonly bakes: {
+    readonly posted: number;
+    readonly baked: number;
+    /** Answered `bake-failed` or `bake-unsurveyed`. */
+    readonly refused: number;
+  };
+  /** Field messages posted to the height workers over the window, each worker's counted. */
+  readonly fieldPosts: {
+    readonly inits: number;
+    readonly chunks: number;
+    readonly releases: number;
+  };
+  /** The fixture's `surface_field` asks over the window, and the payload blocks it sent. */
+  readonly fieldAsks: number;
+  readonly blocksSent: number;
+  /** The session's memory as the window ends, or `null` with no session then. */
+  readonly memory: TerrainCheckMemory | null;
+}
+
+/** An engine fault the terrain run saw, with its time. */
+export interface TerrainCheckFault {
+  /** `performance.now()` ms. */
+  readonly atMs: number;
+  /** The fault's kind, as R01's `GraphicsFault` names it. */
+  readonly kind: "device-lost" | "gpu-process-gone" | "shader-refused" | "view-refused";
+  /** A device loss's reason (`destroyed`, `unknown`); `null` for any other fault. */
+  readonly reason: string | null;
+  /** The fault as a line, as T20's record gives it. */
+  readonly line: string;
+}
+
+/** The forced loss (decision-r10-t16-contracts §6): what stood when the harness destroyed the device, and after. */
+export interface TerrainCheckLossRecord {
+  /** When the harness destroyed the device, ms, and the script's time then, s; `null` if it did not. */
+  readonly destroyedAtMs: number | null;
+  readonly destroyedAtScriptS: number | null;
+  /** Why the harness did not destroy the device, or `null`. */
+  readonly notDestroyed: string | null;
+  /** At the destruction: the payload's blocks the fixture had still to send, and bakes in flight. */
+  readonly blocksToCome: number;
+  readonly bakesInFlight: number;
+  /** After the destruction, to the phase's end. */
+  readonly after: {
+    readonly fieldAsks: number;
+    readonly fieldInits: number;
+    readonly fieldChunks: number;
+    /** The blocks the fixture sent: those of the answer in flight at the destruction. */
+    readonly blocksSent: number;
+  };
+  /** The session's height workers, by which each block is posted. */
+  readonly workers: number;
+  /** When the primary first drew the terrain after the restore, ms; `null` for never. */
+  readonly terrainAgainAtMs: number | null;
+  /** The body's GPU coverage mask, read back: surveyed cells, `null` where unread. */
+  readonly masks: {
+    /** Just before the destruction. */
+    readonly before: number | null;
+    /** As soon as it could be read after the restore. */
+    readonly afterRestore: number | null;
+    /** At the phase's end, every block taken. */
+    readonly end: number | null;
+    /** The store's coverage at the phase's end: the cells the mask should hold. */
+    readonly expected: number;
+    /** Whether every cell of `before` is in `afterRestore`. */
+    readonly beforeKept: boolean;
+    /** Whether `end` holds exactly the cells of `expected`. */
+    readonly endAsExpected: boolean;
+  };
+}
+
+/** The terrain session's teardown at the run's end: `VIEW` on a kept scene with no terrain. */
+export interface TerrainCheckTeardownRecord {
+  /** Whether the session was disposed (its watch ended). */
+  readonly disposed: boolean;
+  /** The height workers made over the run, and those not terminated. */
+  readonly workersMade: number;
+  readonly workersLive: number;
+  /** The session's own textures' bytes after it, by its memory report. */
+  readonly sessionGpuBytes: number;
+  /** The terrain's GPU allocations still alive after it, by category. */
+  readonly liveBytes: ReadonlyArray<TerrainCheckBytes>;
+}
+
+/** What the terrain run's renderer reports at the end of a run, for its results file. */
+export interface TerrainCheckRecord {
+  /** The pass timer's kind, as its reports gave it (`absent` when none arrived). */
+  readonly timer: SpikePassTimer;
+  readonly devicePixelRatio: number;
+  readonly phases: ReadonlyArray<TerrainCheckPhaseRecord>;
+  /** Every engine fault over the run, timed. */
+  readonly faults: ReadonlyArray<TerrainCheckFault>;
+  /** Every restore of the engine after a loss, `performance.now()` ms. */
+  readonly restoresAtMs: ReadonlyArray<number>;
+  readonly loss: TerrainCheckLossRecord;
+  readonly teardown: TerrainCheckTeardownRecord;
+  /**
+   * `TEST MOON`'s hand-over range at the primary's canvas and field of view, m, and the script's
+   * time at which the descent crosses it, s (`handoverRangeM`); `null` before its field's header.
+   */
+  readonly handover: { readonly rangeM: number; readonly scriptS: number } | null;
+}
+
+/**
  * The views check's narrow functions (plan R07, T20), present only when the client was launched
  * with `--views-check`; the main process checks each call's sender and arguments.
  */
 export interface ViewsCheckApi {
   readonly launch: ViewsCheckLaunch;
-  /** Starts a phase's trace window. */
-  startPhase(name: ViewsCheckPhaseName): Promise<void>;
+  /**
+   * Starts a phase's trace window; a terrain run's phases (R10.T16.d) take no trace. The main
+   * process refuses a phase that is not of the launch's run.
+   */
+  startPhase(name: CheckPhaseName): Promise<void>;
   /**
    * Ends it: stops the trace, reduces it over the measured `window` (marked in the trace by a
    * `performance.measure` span) and saves a capture of the page.
    */
-  endPhase(name: ViewsCheckPhaseName, window: ViewsCheckWindow): Promise<void>;
+  endPhase(name: CheckPhaseName, window: ViewsCheckWindow): Promise<void>;
   /** Asks the person at a shown run whether every view is the right way up, and keeps the answer. */
   askRightWayUp(): Promise<void>;
   /** Writes the results file and its summary from the renderer's record. */
   writeResults(record: ViewsCheckRecord): Promise<SpikeResultsPaths>;
-  /** Ends the run, and the app with it: 0 for `pass`, 1 for `fail`. */
+  /**
+   * Writes a terrain run's results file and its summary (R10.T16.d) from its renderer's record;
+   * the main process judges it, and a run whose checks fail ends with 1 whatever its end says.
+   */
+  writeTerrainResults(record: TerrainCheckRecord): Promise<SpikeResultsPaths>;
+  /**
+   * Saves a picture of the page under the run's captures, named for the phase recording and
+   * `label` (lower case letters, digits and hyphens, at most 48): a terrain run's look at a moment
+   * of its script, for the looks by eye (R10.T16.d).
+   */
+  capture(label: string): Promise<void>;
+  /**
+   * Ends the run, and the app with it: 0 for `pass`, 1 for `fail` (and for a terrain run whose
+   * results fail).
+   */
   end(outcome: SpikeEnd): Promise<void>;
 }

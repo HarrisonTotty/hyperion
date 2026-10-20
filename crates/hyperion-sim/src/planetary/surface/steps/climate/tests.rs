@@ -1,10 +1,13 @@
-//! The climate step's tests (R09.T13.a–c): the plan's, with the pipeline's own.
+//! The climate step's tests (R09.T13.a–g): the plan's, with the pipeline's own.
 
 use hyperion_surface::field::{ClimateModelKind, CoarseLevel};
 
 use super::coordinates::{Coordinates, substellar_cosine};
-use super::ebm::{self, Air, EnergyBalance, Freezing, MAX_ORBITS, Moisture, contrast};
+use super::ebm::{
+    self, Air, EnergyBalance, Freezing, Ground, MAX_ORBITS, Moisture, Relief, contrast,
+};
 use super::grid::{GEOGRAPHIC_COLUMNS, GridClimate, LATITUDE_BANDS, LOCKED_COLUMNS, ModelGrid};
+use super::hypsometry::{Hypsometry, Shape};
 use super::sun::{NOMINAL_STEP, Sunlight};
 use super::transport::{
     Diffusing, EARTH_TRANSPORT_KG_M2_S, PRESSURE_REFERENCE_CONTRAST_K, PRESSURE_TABLE,
@@ -16,28 +19,19 @@ use crate::math;
 use crate::planetary::hooks::surface::EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K;
 use crate::planetary::surface::grid::CellGraph;
 use crate::planetary::surface::inputs::{
-    ClimateRegime, CoarseInputs, CoarseInputsBuilder, Forcing, SeasonalOrbit, Spin,
+    ClimateRegime, CoarseInputs, Forcing, SeasonalOrbit, Spin,
 };
 use crate::planetary::surface::reference;
 use crate::planetary::surface::steps::{CellState, Pass, Working};
 use crate::substance::by_key;
 use crate::units::consts::SECONDS_PER_DAY;
 use crate::units::{Metres, Radians, Seconds};
+use earth_land::{EARTH_BOX_MEDIAN_M, EARTH_HYPSOMETRY_M, EARTH_LAND_BOXES, EARTH_LAND_SHARE};
 use hyperion_testkit::float::assert_same_bits;
 
-/// Earth's land share of each 2.5° band from the south pole, computed from Natural Earth's
-/// 1:110m land polygons (public domain, naturalearthdata.com, `ne_110m_land`) by even–odd
-/// scanlines, 40 to a band, weighted by cos φ: 0.289 of the sphere, against 0.2905 from Eakins
-/// and Sharman's 361.9 of 510.1 × 10⁶ km² of ocean. Antarctica's ice shelves are not land at that
-/// scale, so 76–84° S reads about 0.8. A synthetic sea in place of R09.T12's relief.
-const EARTH_LAND_SHARE: [f64; LATITUDE_BANDS] = [
-    1.0000, 0.9923, 0.9024, 0.7995, 0.7839, 0.7363, 0.6116, 0.4869, 0.2970, 0.0714, 0.0028, 0.0000,
-    0.0000, 0.0019, 0.0150, 0.0199, 0.0254, 0.0283, 0.0352, 0.0403, 0.0548, 0.0771, 0.1284, 0.1889,
-    0.2127, 0.2216, 0.2437, 0.2483, 0.2363, 0.2381, 0.2140, 0.1947, 0.2218, 0.2396, 0.2500, 0.2304,
-    0.2187, 0.2086, 0.2369, 0.2506, 0.2282, 0.2435, 0.2726, 0.3104, 0.3366, 0.3652, 0.3912, 0.4174,
-    0.4375, 0.4139, 0.4285, 0.4295, 0.4638, 0.4933, 0.5413, 0.5765, 0.5970, 0.5908, 0.5413, 0.5500,
-    0.6712, 0.7375, 0.7771, 0.6655, 0.4426, 0.2690, 0.2468, 0.2321, 0.2065, 0.0420, 0.0000, 0.0000,
-];
+// The builder values of a world, as a builder to vary: `reference`'s one copy, which the step's
+// tests in its other files reach here (decision-r09-t13-test-cost §3.1).
+pub(super) use crate::planetary::surface::reference::builder_of;
 
 /// The first band ERA-Interim's curve reaches: band 5, centred on 76.25° S. South of about 77° S
 /// Siler et al.'s Fig. 2b shows only their model's curve.
@@ -97,33 +91,80 @@ pub(super) fn set_ground(
     }
 }
 
-/// Raises each band's land share of `working`'s cells to `land`'s: in each band, the cells in
-/// order of longitude from −180°, then cell index, are land (100 m above the sea) until their solid
-/// angle reaches the band's land share, and the rest sea (100 m below it, flooded to it with the
-/// main liquid, [`set_ground`]); the sea level is 0.
-fn synthetic_sea(pass: &Pass<'_>, working: &mut Working, land: &[f64; LATITUDE_BANDS]) {
+/// Land at the sea level in every band: the synthetic sea with no relief.
+const SEA_LEVEL_LAND: [[i16; 8]; LATITUDE_BANDS] = [[0; 8]; LATITUDE_BANDS];
+
+/// Lays out Earth's land on `working`'s cells as a synthetic sea, its land at the heights
+/// `hypsometry` gives each band; the sea level is 0 (decision-r09-t13e-asbuilt §1.3–§1.4).
+///
+/// - **The land** is Natural Earth's by 2.5° × 5° box ([`EARTH_LAND_BOXES`], thousandths; a cell's
+///   box the one its centre lies in, the geographic grid's point): in each box the cells in order
+///   of longitude, then cell index, are land until their solid angle reaches the box's share (a
+///   cell is land while half of it fits), and the rest sea, 100 m below the sea level and flooded
+///   to it with the main liquid ([`set_ground`]).
+/// - **The heights**: each band's land cells, in order of their box's Earth2014 median land height
+///   ([`EARTH_BOX_MEDIAN_M`]; a box with no Earth2014 land lowest), then longitude, then cell
+///   index, take the band's eight heights in turn, the q-th eighth of the band's land solid angle
+///   (by each cell's midpoint) at height q, dry ([`SEA_LEVEL_LAND`]: at the sea level). Each
+///   band's heights are so R09.T13.g's eighths, and its relief stands where Earth's does: the
+///   Tibetan Plateau, the Andes, the Rockies, the ice sheets.
+fn synthetic_sea(pass: &Pass<'_>, working: &mut Working, hypsometry: &[[i16; 8]; LATITUDE_BANDS]) {
     let grid = pass.grid();
+    let solid_angles = grid.solid_angles_sr();
     let flood = pass.inputs().main_liquid();
-    let mut bands: Vec<Vec<(f64, usize)>> = vec![Vec::new(); LATITUDE_BANDS];
-    let mut totals = [0.0; LATITUDE_BANDS];
+    let points = ModelGrid::geographic();
+    let mut boxes: Vec<Vec<(f64, usize)>> = vec![Vec::new(); LATITUDE_BANDS * GEOGRAPHIC_COLUMNS];
     for (cell, centre) in grid.centres().iter().enumerate() {
-        let band = ModelGrid::band_of(centre[2]);
-        bands[band].push((math::atan2(centre[1], centre[0]), cell));
-        totals[band] += grid.solid_angles_sr()[cell];
+        boxes[points.point_of(*centre)].push((math::atan2(centre[1], centre[0]), cell));
     }
-    for (band, cells) in bands.iter_mut().enumerate() {
-        cells.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-        let target = land[band] * totals[band];
-        let mut held = 0.0;
-        for &(_, cell) in cells.iter() {
-            let solid_angle = grid.solid_angles_sr()[cell];
-            let is_land = held + 0.5 * solid_angle <= target;
-            if is_land {
-                held += solid_angle;
+    for (band, row) in boxes
+        .as_chunks_mut::<GEOGRAPHIC_COLUMNS>()
+        .0
+        .iter_mut()
+        .enumerate()
+    {
+        // The band's land cells, each with its box's median height and its longitude.
+        let mut lands = Vec::new();
+        for ((cells, &share), &median) in row
+            .iter_mut()
+            .zip(&EARTH_LAND_BOXES[band])
+            .zip(&EARTH_BOX_MEDIAN_M[band])
+        {
+            cells.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            let total = cells
+                .iter()
+                .fold(0.0, |sum, &(_, cell)| sum + solid_angles[cell]);
+            let target = f64::from(share) / 1_000.0 * total;
+            let mut held = 0.0;
+            for &(longitude, cell) in cells.iter() {
+                let solid_angle = solid_angles[cell];
+                if held + 0.5 * solid_angle <= target {
+                    held += solid_angle;
+                    lands.push((median, longitude, cell));
+                } else {
+                    set_ground(
+                        &mut working.cells[cell],
+                        Metres::new(-100.0),
+                        Metres::ZERO,
+                        flood,
+                    );
+                }
             }
+        }
+        lands.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)));
+        let held = lands
+            .iter()
+            .fold(0.0, |sum, &(_, _, cell)| sum + solid_angles[cell]);
+        let mut below = 0.0;
+        for (_, _, cell) in lands {
+            let solid_angle = solid_angles[cell];
+            // The eighths of the band's land its midpoint has passed.
+            let share = (below + 0.5 * solid_angle) / held;
+            let q = (1..8_u8).filter(|&k| 8.0 * share >= f64::from(k)).count();
+            below += solid_angle;
             set_ground(
                 &mut working.cells[cell],
-                Metres::new(if is_land { 100.0 } else { -100.0 }),
+                Metres::new(f64::from(hypsometry[band][q])),
                 Metres::ZERO,
                 flood,
             );
@@ -132,31 +173,64 @@ fn synthetic_sea(pass: &Pass<'_>, working: &mut Working, land: &[f64; LATITUDE_B
     working.sea_level = Metres::ZERO;
 }
 
-/// The plan's Earth test. The reference Earth, with Earth's land share by band as a synthetic sea
-/// (R09.T12's relief is not built), converges within [`MAX_ORBITS`], and its annual-mean zonal
-/// temperature at sea level lies within 5 K of ERA-Interim's (Siler et al. 2018, Fig. 2b) from
-/// 58.75° S to the North Pole.
-///
-/// South of that it is too warm, by up to about 11 K at 76° S, where ERA-Interim's curve ends: the
-/// model's Antarctica lies at sea level, so its summer rises above the albedo's ramp and its ice
-/// darkens, where the real ice sheet, 2–3 km up, stays bright. A diagnostic run of the same model
-/// whose albedo and emission read each band 6.5 K km⁻¹ colder over Antarctica's mean 2.2 km of
-/// land brings every band from 73.75° S north within 5 K and 76.25° S to +7 K (R09's Risks,
-/// "Deviations in T13.a, as built", the Earth test "waits on R09.T12"). Those bands are held to
-/// [`SOUTHERN_BOUND_K`], and every band is printed.
-#[test]
-fn an_earth_like_world_converges_and_lies_within_5_k_of_era_interim() {
+/// The reference Earth at level 7 with Earth's land by 2.5° × 5° box as a synthetic sea
+/// ([`EARTH_LAND_BOXES`]; each band's land share within 0.03 of [`EARTH_LAND_SHARE`]'s, the worst
+/// band printed), its land at the heights `hypsometry` gives it ([`synthetic_sea`]), and its zonal
+/// model's answer over that ground, the zonal relief from its cells as the step builds it: the
+/// pass's grids, the working state, the relief and the answer.
+fn era_earth(hypsometry: &[[i16; 8]; LATITUDE_BANDS]) -> (ebm::Solution, Relief, Working) {
     let inputs = reference::earth_like();
     let (field, climate) = grids(7);
     let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
     let mut working = Working::initial(&pass);
-    synthetic_sea(&pass, &mut working, &EARTH_LAND_SHARE);
+    synthetic_sea(&pass, &mut working, hypsometry);
     let sea = sea_shares(&pass, &working);
+    let mut worst = (0, 0.0_f64);
     for (band, (&s, &l)) in sea.iter().zip(&EARTH_LAND_SHARE).enumerate() {
         assert!((s + l - 1.0).abs() < 0.03, "band {band}: sea {s}, land {l}");
+        if (s + l - 1.0).abs() > worst.1.abs() {
+            worst = (band, s + l - 1.0);
+        }
     }
+    eprintln!(
+        "the synthetic sea's land share against Earth's: {:+.4} at worst, band {}",
+        -worst.1, worst.0
+    );
     let grid = ModelGrid::zonal();
-    let solution = ebm::solve(&inputs, &grid, &sea, NOMINAL_STEP);
+    let relief = Relief::of(
+        &inputs,
+        Hypsometry::of_field(&pass, &working, &grid, Coordinates::Geographic),
+    );
+    let ground = Ground::Relief {
+        grid: &relief,
+        zonal: &relief,
+    };
+    let solution = ebm::solve(&inputs, &grid, &sea, NOMINAL_STEP, ground);
+    (solution, relief, working)
+}
+
+/// The plan's Earth test. The reference Earth, with Earth's land by box as a synthetic sea
+/// (R09.T12's relief is not built; [`era_earth`]) and its land at the sea level, converges within
+/// [`MAX_ORBITS`], and its annual-mean zonal temperature at sea level lies within 5 K of
+/// ERA-Interim's (Siler et al. 2018, Fig. 2b) from 58.75° S to the North Pole.
+///
+/// South of that it is too warm, by up to about 11 K at 76° S, where ERA-Interim's curve ends: the
+/// model's Antarctica lies at sea level, so its summer rises above the albedo's ramp and its ice
+/// darkens, where the real ice sheet, 2–3 km up, stays bright. Those bands are held to
+/// [`SOUTHERN_BOUND_K`], and every band is printed. With Earth's hypsometry
+/// ([`an_earth_with_its_land_s_hypsometry_lies_within_the_ruled_bounds_of_era_interim`]) the model
+/// reads the ice sheet's height (R09.T13.g).
+#[test]
+fn an_earth_like_world_converges_and_lies_within_5_k_of_era_interim() {
+    let (solution, relief, _) = era_earth(&SEA_LEVEL_LAND);
+    assert!(
+        relief
+            .hypsometry()
+            .all()
+            .iter()
+            .all(|point| point.shape == Shape::SeaLevel)
+    );
+    let grid = ModelGrid::zonal();
     let earth = &solution.climate;
     assert!(earth.converged, "{} orbits", earth.orbits);
     assert!(earth.orbits <= MAX_ORBITS);
@@ -184,6 +258,199 @@ fn an_earth_like_world_converges_and_lies_within_5_k_of_era_interim() {
         grid.mean(&earth.annual_k)
     );
     assert!(worst <= 5.0, "worst {worst} K");
+}
+
+/// The bound R09.T13.g's Earth test holds the band of 76.25° S to, K: 11, the measured +9.29 K
+/// with a margin (decision-r09-t13ge §1.3, (i)).
+const RELIEF_POLAR_BOUND_K: f64 = 11.0;
+
+/// The bound it holds the bands from 73.75° S to 61.25° S to, K: 8, the measured +6.85 K with a
+/// margin (decision-r09-t13ge §1.3, (i)).
+const RELIEF_SOUTHERN_BOUND_K: f64 = 8.0;
+
+/// R09.T13.g's Earth test (decision-r09-t13ge §1.6). The reference Earth with its land's
+/// hypsometry by hand ([`EARTH_HYPSOMETRY_M`], each band's land cells at its eight heights in order
+/// of their 2.5° × 5° box's Earth2014 median land height, its sea flooded to the sea level; Natural
+/// Earth's land by box, [`EARTH_LAND_BOXES`], its band totals [`EARTH_LAND_SHARE`]'s;
+/// [`synthetic_sea`], decision-r09-t13e-asbuilt): its annual-mean zonal
+/// temperature at sea level lies within 5 K of Siler et al.'s Fig. 2b from 58.75° S northward,
+/// within 8 K from 73.75° S to 61.25° S and within 11 K at 76.25° S, every band printed, beside the
+/// same Earth with every land cell at the sea level; its 76.25° S and 73.75° S bands are each at
+/// least 1 K colder than that Earth's; and its τ solve's steady state has converged, with τ, the
+/// steady and seasonal surface means printed.
+///
+/// The remaining warm bias in the south (+9.3 K at 76.25° S in the ruling's prototype) is the
+/// model's, deferred to R09.T13.i (decision-r09-t13ge §1.2–§1.3, G1): the Southern Ocean's own
+/// bias, the temperature-only albedo's summer coast and the grey column's surface. ERA-Interim's
+/// sea-level temperatures over the plateau are reduced by ECMWF's own method, unread, where the
+/// model's sea level reads Γ ≈ 5.8 K km⁻¹; the bounds hold either way
+/// (decision-r09-t13a-relief §2.1).
+#[test]
+fn an_earth_with_its_land_s_hypsometry_lies_within_the_ruled_bounds_of_era_interim() {
+    let (solution, relief, _) = era_earth(&EARTH_HYPSOMETRY_M);
+    let (flat, _, _) = era_earth(&SEA_LEVEL_LAND);
+    let grid = ModelGrid::zonal();
+    let (earth, level) = (&solution.climate, &flat.climate);
+    assert!(earth.converged, "{} orbits", earth.orbits);
+    let mut worst: f64 = 0.0;
+    for (band, &era) in (ERA_FIRST_BAND..).zip(&ERA_INTERIM_K) {
+        let (model, sea_level) = (earth.annual_k[band], level.annual_k[band]);
+        let latitude = math::asin(grid.centre_sine(band)).to_degrees();
+        let heights = relief.hypsometry().point(band);
+        eprintln!(
+            "{latitude:7.2}° relief {model:6.2} K ({:+6.2} K), at sea level {sea_level:6.2} K \
+             ({:+6.2} K), ERA-Interim {era:6.1} K; quantiles {:?} m",
+            model - era,
+            sea_level - era,
+            heights.quantiles_m.map(f64::round)
+        );
+        let bound = match band {
+            ERA_FIRST_BAND => RELIEF_POLAR_BOUND_K,
+            _ if band < EARTH_ASSERTED_FROM_BAND => RELIEF_SOUTHERN_BOUND_K,
+            _ => {
+                worst = worst.max((model - era).abs());
+                5.0
+            }
+        };
+        assert!((model - era).abs() <= bound, "{latitude}°: {model} K");
+    }
+    for band in [ERA_FIRST_BAND, ERA_FIRST_BAND + 1] {
+        assert!(
+            earth.annual_k[band] <= level.annual_k[band] - 1.0,
+            "band {band}: {} K against {} K at sea level",
+            earth.annual_k[band],
+            level.annual_k[band]
+        );
+    }
+    assert!(solution.steady_converged, "{:?}", solution.optical_depth);
+    eprintln!(
+        "relief: orbits {}, τ {:.4} ({:?}), steady surface mean {:.3} K, seasonal surface mean \
+         {:.3} K, seasonal sea-level mean {:.3} K, worst from 58.75° S {worst:.2} K",
+        earth.orbits,
+        (solution.emission_factor - 1.0) / ebm::EDDINGTON_COEFFICIENT,
+        solution.optical_depth,
+        solution.steady_surface_mean_k,
+        relief.surface_mean_k(&grid, &earth.annual_k),
+        grid.mean(&earth.annual_k)
+    );
+    eprintln!(
+        "at sea level: orbits {}, τ {:.4} ({:?}), steady mean {:.3} K, seasonal mean {:.3} K",
+        level.orbits,
+        (flat.emission_factor - 1.0) / ebm::EDDINGTON_COEFFICIENT,
+        flat.optical_depth,
+        flat.steady_surface_mean_k,
+        grid.mean(&level.annual_k)
+    );
+    assert!(worst <= 5.0, "worst {worst} K");
+}
+
+/// R09.T13.g's Earth through the step (decision-r09-t13ge §3, G3): the reference Earth with its
+/// land's hypsometry by hand, run through the climate step, whose geographic model reads each
+/// point's own quantiles while its τ solve reads each band's pooled ones. The step's mean constant
+/// c reconciles the two: after it the field cells' surface mean is the input's to 0.1 K
+/// (R09.T13.d's test, on a world with relief). The zonal τ solve's surface mean, the geographic
+/// seasonal run's and c are printed.
+#[test]
+#[ignore = "slow: the 72 × 72 model over the relief Earth's synthetic sea, about 6.5 s"]
+fn the_step_s_mean_constant_reconciles_the_relief_earth_s_surface_means() {
+    let inputs = reference::earth_like();
+    let (field, climate) = grids(7);
+    let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
+    let mut working = Working::initial(&pass);
+    synthetic_sea(&pass, &mut working, &EARTH_HYPSOMETRY_M);
+    let diagnostics = super::run_diagnosed(&pass, &mut working);
+    let means = diagnostics
+        .surface_means
+        .expect("the energy-balance model's surface means");
+    let surface = super::surface_mean_k(&pass, &working);
+    eprintln!(
+        "zonal τ solve's surface mean {:.3} K, the geographic seasonal run's {:.3} K, the mean \
+         constant c {:+.3} K, a {:+.3} K; the field's surface mean after it {surface:.4} K",
+        means.steady_k,
+        means.seasonal_k,
+        diagnostics.correction.mean_k,
+        diagnostics.correction.equator_pole_k
+    );
+    let mean = inputs.mean_surface_temperature().value();
+    assert!((surface - mean).abs() < 0.1, "{surface} K against {mean} K");
+}
+
+/// The two answers of the model are the same to the bit: every record, the orbits, τ and its
+/// steady state's mean.
+fn assert_same_solution(name: &str, a: &ebm::Solution, b: &ebm::Solution) {
+    assert_eq!(a.climate.orbits, b.climate.orbits, "{name}");
+    assert_eq!(a.climate.converged, b.climate.converged, "{name}");
+    assert_eq!(a.optical_depth, b.optical_depth, "{name}");
+    assert_eq!(a.steady_converged, b.steady_converged, "{name}");
+    assert_same_bits(a.emission_factor, b.emission_factor);
+    assert_same_bits(a.steady_surface_mean_k, b.steady_surface_mean_k);
+    assert_eq!(a.climate.months_k.len(), b.climate.months_k.len(), "{name}");
+    for (x, y) in a.climate.annual_k.iter().zip(&b.climate.annual_k) {
+        assert_same_bits(*x, *y);
+    }
+    for (m, n) in a.climate.months_k.iter().zip(&b.climate.months_k) {
+        for (x, y) in m.iter().zip(n) {
+            assert_same_bits(*x, *y);
+        }
+    }
+}
+
+/// R09.T13.g's first test (decision-r09-t13ge §1.6): with every height zero, the model the step
+/// runs, over the relief it builds from the working state, is T13.a's to the bit. On the
+/// reference Earth's synthetic sea (land and sea at the sea level) through the zonal model, the
+/// reference Earth all land at level 5 (about a fifth of the geographic points holding no cell)
+/// through the geographic model, and a one-month locked Earth through the locked model, each
+/// against the model with no relief at all ([`Ground::SeaLevel`]).
+#[test]
+fn with_every_height_zero_the_model_is_t13a_s_to_the_bit() {
+    let inputs = reference::earth_like();
+    let (field, climate) = grids(7);
+    let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
+    let mut working = Working::initial(&pass);
+    synthetic_sea(&pass, &mut working, &SEA_LEVEL_LAND);
+    let zonal = ModelGrid::zonal();
+    let sea = sea_shares(&pass, &working);
+    let (_, relief) = super::reliefs(&pass, &working, &zonal, Coordinates::Geographic);
+    let ground = Ground::Relief {
+        grid: &relief,
+        zonal: &relief,
+    };
+    assert_same_solution(
+        "the zonal Earth",
+        &ebm::solve(&inputs, &zonal, &sea, NOMINAL_STEP, ground),
+        &ebm::solve(&inputs, &zonal, &sea, NOMINAL_STEP, Ground::SeaLevel),
+    );
+    for (name, inputs, grid, coordinates) in [
+        (
+            "the geographic Earth",
+            reference::earth_like(),
+            ModelGrid::geographic(),
+            Coordinates::Geographic,
+        ),
+        (
+            "the locked Earth",
+            locked_earth(0.0, 0.0),
+            ModelGrid::locked(),
+            Coordinates::TidallyLocked,
+        ),
+    ] {
+        let (field, climate) = grids(5);
+        let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
+        let working = Working::initial(&pass);
+        let sea = point_sea_shares(&pass, &working, &grid, coordinates);
+        let (on_grid, zonal) = super::reliefs(&pass, &working, &grid, coordinates);
+        let ground = Ground::Relief {
+            grid: &on_grid,
+            zonal: &zonal,
+        };
+        let solve = |ground| match coordinates {
+            Coordinates::Geographic => ebm::solve(&inputs, &grid, &sea, NOMINAL_STEP, ground),
+            Coordinates::TidallyLocked => {
+                ebm::solve_locked(&inputs, &grid, &sea, NOMINAL_STEP, ground)
+            }
+        };
+        assert_same_solution(name, &solve(ground), &solve(Ground::SeaLevel));
+    }
 }
 
 /// Kaspi and Showman's GCM configuration (2015, §2) as far as the model takes it, seasons off
@@ -404,7 +671,7 @@ fn the_scheme_is_stable_at_a_six_hour_step_for_every_rotation_and_at_venus_s() {
         let mean = inputs.mean_surface_temperature().value();
         let fine = |step: Seconds| {
             let sunlight = Sunlight::of(&inputs, &grid, step);
-            model.run(&grid, &sunlight, mean, &land)
+            model.run(&grid, &sunlight, mean, &land, Ground::SeaLevel)
         };
         let coarse = fine(NOMINAL_STEP).climate;
         let reference = fine(NOMINAL_STEP / 4.0).climate;
@@ -433,7 +700,9 @@ fn each_month_is_the_mean_of_its_steps() {
     let land = [0.0; LATITUDE_BANDS];
     let sunlight = Sunlight::of(&inputs, &grid, NOMINAL_STEP);
     let model = EnergyBalance::for_inputs(&inputs);
-    let climate = model.run(&grid, &sunlight, 288.0, &land).climate;
+    let climate = model
+        .run(&grid, &sunlight, 288.0, &land, Ground::SeaLevel)
+        .climate;
     let mut counts = [0_u32; 12];
     for step in 0..sunlight.steps() {
         counts[usize::from(sunlight.month_of(step))] += 1;
@@ -451,7 +720,9 @@ fn each_month_is_the_mean_of_its_steps() {
     let (july, january) = (&climate.months_k[6], &climate.months_k[0]);
     assert!(july[60] > january[60] + 10.0 && january[11] > july[11] + 10.0);
     let steady = Sunlight::constant(sunlight.annual().to_vec());
-    let one = model.run(&grid, &steady, 288.0, &land).climate;
+    let one = model
+        .run(&grid, &steady, 288.0, &land, Ground::SeaLevel)
+        .climate;
     assert_eq!(one.months_k.len(), 1);
     assert_eq!(one.orbits, 0);
     assert_eq!(one.months_k[0].len(), one.annual_k.len());
@@ -474,12 +745,20 @@ fn the_step_writes_each_climate_cell_from_the_geographic_model() {
     let mut working = Working::initial(&pass);
     let diagnostics = super::run_diagnosed(&pass, &mut working);
     let grid = ModelGrid::geographic();
-    let mut climate = ebm::solve(&inputs, &grid, &vec![0.0; grid.points()], NOMINAL_STEP).climate;
+    let mut climate = ebm::solve(
+        &inputs,
+        &grid,
+        &vec![0.0; grid.points()],
+        NOMINAL_STEP,
+        Ground::SeaLevel,
+    )
+    .climate;
     let zonal = ebm::solve(
         &inputs,
         &ModelGrid::zonal(),
         &[0.0; LATITUDE_BANDS],
         NOMINAL_STEP,
+        Ground::SeaLevel,
     );
     for centre in climate_grid.centres() {
         let own = grid.stencil_at(*centre).apply(&climate.annual_k);
@@ -527,41 +806,6 @@ fn every_band_has_a_sea_share() {
     }
     let sea = sea_shares(&pass, &working);
     assert!(sea.iter().all(|&s| (s - 1.0).abs() < 1e-15), "{sea:?}");
-}
-
-/// The builder values of `inputs`, as a builder to vary (as the inputs' own tests build them).
-pub(super) fn builder_of(inputs: &CoarseInputs) -> CoarseInputsBuilder {
-    let mut builder = CoarseInputs::builder()
-        .body(inputs.body())
-        .figure(inputs.figure())
-        .gravity(inputs.gravity())
-        .sigma_h(inputs.sigma_h())
-        .liquids(inputs.liquids().iter().copied())
-        .ices(inputs.ices().iter().copied())
-        .mean_surface_temperature(inputs.mean_surface_temperature())
-        .equator_pole_contrast_k(inputs.equator_pole_contrast_k())
-        .day_night_contrast_k(inputs.day_night_contrast_k())
-        .spin(*inputs.spin())
-        .host_flux(inputs.host_flux())
-        .surface_pressure(inputs.surface_pressure())
-        .gases(inputs.gases().iter().copied())
-        .surface(inputs.surface_state(), inputs.surface_material())
-        .tectonics(inputs.tectonics(), inputs.continental_fraction())
-        .volcanism(inputs.volcanism())
-        .heat_flow(inputs.heat_flow())
-        .surface_age(inputs.surface_age())
-        .craters(*inputs.craters())
-        .climate(*inputs.climate())
-        .crust(*inputs.crust())
-        .condensates(inputs.condensates().iter().copied())
-        .palette(inputs.palette().clone());
-    if let Some(orbit) = inputs.seasonal_orbit() {
-        builder = builder.seasonal_orbit(*orbit);
-    }
-    if let Some(epoch) = inputs.wet_epoch() {
-        builder = builder.wet_epoch(*epoch);
-    }
-    builder
 }
 
 /// `inputs` with plan 14's own contrasts for an airless body of its mean, read in the radiative
@@ -645,12 +889,20 @@ fn argmax(values: &[f64]) -> usize {
 fn reproduces_the_zonal_model(sea: f64) {
     let inputs = reference::earth_like();
     let (zonal, geographic) = (ModelGrid::zonal(), ModelGrid::geographic());
-    let one = ebm::solve(&inputs, &zonal, &[sea; LATITUDE_BANDS], NOMINAL_STEP).climate;
+    let one = ebm::solve(
+        &inputs,
+        &zonal,
+        &[sea; LATITUDE_BANDS],
+        NOMINAL_STEP,
+        Ground::SeaLevel,
+    )
+    .climate;
     let wide = ebm::solve(
         &inputs,
         &geographic,
         &vec![sea; geographic.points()],
         NOMINAL_STEP,
+        Ground::SeaLevel,
     )
     .climate;
     assert_eq!(wide.orbits, one.orbits);
@@ -714,7 +966,7 @@ fn a_continent_has_larger_seasons_and_a_warmer_summer_than_the_sea_beside_it() {
             }
         })
         .collect();
-    let climate = ebm::solve(&inputs, &grid, &sea, NOMINAL_STEP).climate;
+    let climate = ebm::solve(&inputs, &grid, &sea, NOMINAL_STEP, Ground::SeaLevel).climate;
     assert!(climate.converged, "{} orbits", climate.orbits);
     let at = |longitude: f64| grid.point_of(direction(46.25, longitude));
     let (land, coast, open) = (at(0.0), at(40.0), at(180.0));
@@ -825,7 +1077,13 @@ fn a_locked_world_is_warmest_at_the_substellar_point() {
     let pass = Pass::new(reference::SEED, &inputs, &field, &climate_grid);
     let mut working = Working::initial(&pass);
     let grid = ModelGrid::locked();
-    let solution = ebm::solve_locked(&inputs, &grid, &vec![0.0; grid.points()], NOMINAL_STEP);
+    let solution = ebm::solve_locked(
+        &inputs,
+        &grid,
+        &vec![0.0; grid.points()],
+        NOMINAL_STEP,
+        Ground::SeaLevel,
+    );
     let climate = &solution.climate;
     let _clamped = super::write_climate(
         &pass,
@@ -888,7 +1146,13 @@ fn a_locked_world_has_twelve_months_that_differ(e: f64, obliquity: f64) {
     let pass = Pass::new(reference::SEED, &inputs, &field, &climate_grid);
     let mut working = Working::initial(&pass);
     assert_eq!(working.months, 12);
-    let solution = ebm::solve_locked(&inputs, &grid, &vec![0.0; grid.points()], NOMINAL_STEP);
+    let solution = ebm::solve_locked(
+        &inputs,
+        &grid,
+        &vec![0.0; grid.points()],
+        NOMINAL_STEP,
+        Ground::SeaLevel,
+    );
     let climate = &solution.climate;
     assert!(climate.converged, "{} orbits", climate.orbits);
     assert_eq!(climate.months_k.len(), 12);
@@ -950,6 +1214,9 @@ fn a_locked_world_with_obliquity_has_twelve_months_that_differ() {
     a_locked_world_has_twelve_months_that_differ(0.0, 20.0);
 }
 
+mod cold_traps;
+mod earth_land;
+mod hydrology;
 mod normalisation;
 
 /// R09.T13.c's tests: the radiative model with thermal inertia and the isothermal surface.

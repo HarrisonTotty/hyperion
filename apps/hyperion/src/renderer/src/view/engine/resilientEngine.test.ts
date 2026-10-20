@@ -12,7 +12,7 @@ import type { AllocationEvent } from "./memory";
 import { type AdapterOutcome, requestAdapterOutcome } from "./platform";
 import { DEVICE_LOSS_LIMIT, GraphicsStatusStore, initialGraphicsStatus } from "./status";
 import { EngineUnavailable } from "./resilientEngine";
-import type { RenderEngine } from "./types";
+import type { MeshSpec, RenderEngine, WgslMaterialSpec } from "./types";
 
 const FEATURES: ReadonlyArray<GPUFeatureName> = ["subgroups", "timestamp-query"];
 
@@ -71,6 +71,30 @@ async function load(
   });
   return { engine, status, module, gpu };
 }
+
+/** A mesh the fake engines make a handle for (R10.T16.b's releases). */
+const MESH: MeshSpec = {
+  name: "triangle",
+  positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+  indices: null,
+  topology: "triangle-list",
+  attributes: {},
+};
+
+/** A material the fake engines make a handle for. */
+const MATERIAL: WgslMaterialSpec = {
+  name: "flat",
+  displayName: "FLAT",
+  vertexWgsl: "",
+  fragmentWgsl: "",
+  uniforms: [],
+  samplers: [],
+  textures: [],
+  cullMode: "none",
+  depthWrite: false,
+  colourWrites: true,
+  blend: "none",
+};
 
 function nth(module: ReturnType<typeof fakeEngineModule>, index: number): FakeRenderEngine {
   const engine = module.engines.at(index);
@@ -370,6 +394,37 @@ describe("a device loss", () => {
     const buffer = engine.createBuffer({ name: "b", bytes: 4, usage: 0x40, category: "other" });
     engine.releaseBuffer(buffer);
     expect(nth(module, 1).released).toEqual([buffer]);
+  });
+
+  it("forwards a mesh's and a material's release to the engine that made them (R10.T16.b)", async () => {
+    const { engine, module } = await load([adapter()]);
+    const mesh = engine.createMesh(MESH);
+    const material = await engine.createMaterialAsync(MATERIAL, ["rgba16float"], [mesh]);
+    engine.releaseMaterial(material);
+    engine.releaseMesh(mesh);
+    expect(nth(module, 0).released).toEqual([material, mesh]);
+    expect(() => {
+      engine.releaseMesh(mesh);
+    }).toThrow(/mesh triangle was not made through this engine, or was released/u);
+  });
+
+  it("drops the release of a mesh and a material a lost engine made, and refuses nothing of the new engine's (R10.T16.b)", async () => {
+    const { engine, module } = await load([adapter(), adapter()]);
+    const mesh = engine.createMesh(MESH);
+    const material = engine.createMaterial(MATERIAL);
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(module.engines).toHaveLength(2);
+    });
+    const remade = engine.createMesh(MESH);
+    const recompiled = await engine.createMaterialAsync(MATERIAL, ["rgba16float"], [remade]);
+    engine.releaseMesh(mesh);
+    engine.releaseMaterial(material);
+    expect(nth(module, 0).released).toEqual([]);
+    expect(nth(module, 1).released).toEqual([]);
+    engine.releaseMesh(remade);
+    engine.releaseMaterial(recompiled);
+    expect(nth(module, 1).released).toEqual([remade, recompiled]);
   });
 
   it("drops writes and refuses creations while there is no device", async () => {

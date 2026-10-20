@@ -8,11 +8,12 @@
  */
 
 import type {
+  CheckPhaseName,
   SpikeEnd,
   SpikeResultsPaths,
+  TerrainCheckRecord,
   ViewsCheckApi,
   ViewsCheckLaunch,
-  ViewsCheckPhaseName,
   ViewsCheckRecord,
   ViewsCheckWindow,
 } from "./api";
@@ -24,6 +25,8 @@ export const VIEWS_CHECK_CHANNEL_NAMES = {
   endPhase: "hyperion:views-check:end-phase",
   askRightWayUp: "hyperion:views-check:ask-right-way-up",
   writeResults: "hyperion:views-check:write-results",
+  writeTerrainResults: "hyperion:views-check:write-terrain-results",
+  capture: "hyperion:views-check:capture",
   end: "hyperion:views-check:end",
 } as const;
 
@@ -46,10 +49,10 @@ export function viewsCheckApi(launch: ViewsCheckLaunch, deps: ViewsCheckApiDeps)
   const { invoke } = deps;
   return {
     launch,
-    startPhase: async (name: ViewsCheckPhaseName) => {
+    startPhase: async (name: CheckPhaseName) => {
       await invoke(VIEWS_CHECK_CHANNEL_NAMES.startPhase, name);
     },
-    endPhase: async (name: ViewsCheckPhaseName, window: ViewsCheckWindow) => {
+    endPhase: async (name: CheckPhaseName, window: ViewsCheckWindow) => {
       await invoke(VIEWS_CHECK_CHANNEL_NAMES.endPhase, name, window);
     },
     askRightWayUp: async () => {
@@ -61,6 +64,16 @@ export function viewsCheckApi(launch: ViewsCheckLaunch, deps: ViewsCheckApiDeps)
         throw new Error("the main process wrote no results file");
       }
       return paths;
+    },
+    writeTerrainResults: async (record: TerrainCheckRecord) => {
+      const paths = await invoke(VIEWS_CHECK_CHANNEL_NAMES.writeTerrainResults, record);
+      if (!isPaths(paths)) {
+        throw new Error("the main process wrote no terrain results file");
+      }
+      return paths;
+    },
+    capture: async (label: string) => {
+      await invoke(VIEWS_CHECK_CHANNEL_NAMES.capture, label);
     },
     end: async (outcome: SpikeEnd) => {
       await invoke(VIEWS_CHECK_CHANNEL_NAMES.end, outcome);

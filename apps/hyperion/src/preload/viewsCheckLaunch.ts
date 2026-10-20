@@ -30,15 +30,16 @@ export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
   if (!isRecord(value)) {
     return null;
   }
-  const { setting, smoke, out } = value;
+  const { setting, smoke, out, terrain } = value;
   if (
     (setting !== "high" && setting !== "low") ||
     typeof smoke !== "boolean" ||
-    !(out === null || (typeof out === "string" && out.length > 0))
+    !(out === null || (typeof out === "string" && out.length > 0)) ||
+    typeof terrain !== "boolean"
   ) {
     return null;
   }
-  return { setting, smoke, out };
+  return { setting, smoke, out, terrain };
 }
 
 /**

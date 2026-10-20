@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   countingRenderEngine,
@@ -6,6 +6,7 @@ import {
   LimitExceeded,
 } from "../../../test/countingRenderEngine";
 import { BUFFER_USAGE } from "../../engine/gpuFlags";
+import { EngineUnavailable } from "../../engine/resilientEngine";
 import { MAX_REQUESTED_BUFFER_BYTES } from "../../engine/platform";
 import { TERRAIN_SETTINGS } from "../../quality/qualitySetting";
 import { PHASE_TABLE_SAMPLES } from "../../appearance/law";
@@ -31,6 +32,7 @@ import type { TerrainLayers } from "../workers/messages";
 import { allocationTally } from "./allocationTally";
 import {
   atlasTile,
+  DEFAULT_TERRAIN_VIEW,
   GRID_INDICES,
   GRID_VERTICES,
   INDIRECT_ARGS_BYTES,
@@ -381,12 +383,34 @@ describe("the survey mask (R10.T10.c)", () => {
       return new Uint32Array(write?.data.slice().buffer ?? new ArrayBuffer(4))[0] ?? -1;
     };
     const lit = new TerrainResources(engine, LOW, WGS84, "lit");
+    lit.viewBuffers(DEFAULT_TERRAIN_VIEW);
     expect([lit.mesh.name, indexCount()]).toEqual(["terrain lit patch", LIT_PATCH_INDICES]);
     const spike = new TerrainResources(engine, LOW, WGS84);
+    spike.viewBuffers(DEFAULT_TERRAIN_VIEW);
     expect([spike.mesh.name, indexCount()]).toEqual(["terrain patch", PATCH_INDICES]);
     expect(spike.field("survey-mask")).toBeNull();
     lit.dispose();
     spike.dispose();
+  });
+
+  it("makes no view's frame buffers, the spike's default view's included, before its first frame", async () => {
+    const engine = await countingRenderEngine();
+    const created: string[] = [];
+    engine.onAllocation((event) => {
+      if (event.kind === "created") {
+        created.push(event.name);
+      }
+    });
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit");
+    const before = created.length;
+    resources.viewBuffers(DEFAULT_TERRAIN_VIEW);
+    expect(created.slice(before)).toEqual([
+      "terrain instances",
+      "terrain contacts",
+      "terrain indirect",
+      "terrain lights",
+    ]);
+    resources.dispose();
   });
 });
 
@@ -827,6 +851,44 @@ describe("the terrain's resources", () => {
     expect(resources.phaseRows.laws).toHaveLength(rows);
     const remade = engine.textureWritten.findLast((w) => w.texture === "terrain phase table");
     expect(remade?.size).toEqual({ width: PHASE_TABLE_SAMPLES, height: rows });
+    resources.dispose();
+  });
+
+  it("keep the phase table they hold where a larger one is refused during a loss, and are made again at the restore", async () => {
+    const reported = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit");
+    resources.viewBuffers(DEFAULT_TERRAIN_VIEW);
+    let rebuilt = 0;
+    resources.onRebuilt(() => {
+      rebuilt += 1;
+    });
+    engine.loseDevice();
+    for (let k = 0; k < 6; k += 1) {
+      resources.phaseRows.rowOf(1, 0.5 + 0.05 * k);
+    }
+    const lighting = {
+      lights: [],
+      occluders: [],
+      secondaries: [],
+      elsewhere: lawFor([0.2, 0.2, 0.2], [0.6, 0.6, 0.6], "moon"),
+      exposureScale: 1,
+    };
+    const refused = ((): unknown => {
+      try {
+        resources.setLighting(lighting);
+        return null;
+      } catch (error: unknown) {
+        return error;
+      }
+    })();
+    engine.restore();
+    // No release failed at the restore: the table held was never released twice.
+    expect([refused instanceof EngineUnavailable, rebuilt, reported.mock.calls.length]).toEqual([
+      true,
+      1,
+      0,
+    ]);
     resources.dispose();
   });
 

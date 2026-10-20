@@ -16,7 +16,8 @@
  * front by power. Then the bloom
  * chain over the light above the display's range, the tone-mapping pass with each host disc's glare
  * source, encoded and dithered in the pass (`encoding: "in-pass"`), and a second canvas pass that
- * loads it for the cased symbology (`colourLoad: "load"`, decisions-r06-r07 item 6). Each frame
+ * loads it for the cased symbology (`colourLoad: "load"`, decisions-r06-r07 item 6), the terrain
+ * drawn into its depth first, so that nearer ground hides the marks behind it (R10.T16.c). Each frame
  * that carries a meter takes the scene target's exposure histogram under it (R07.T12), read back
  * for the view's `AutoExposure` ({@link PhotorealRenderer.takeHistogram}); a frame of a view that
  * meters nothing, an instrument's, takes none (R07.T19.c). R08's, R10's and R11's passes join
@@ -80,27 +81,39 @@ import { createSceneTarget } from "./sceneTarget";
 
 /**
  * What draws the terrain of a photorealistic frame's bodies handed over to it (plan R10, R10.T10.e;
- * R10 Design note 13): the view's terrain passes, one a body (`TerrainPass`, lit by its disc
- * record's lights), with the GPU coverage masks of their surveys (`CoverageMask`).
+ * R10 Design note 13): the view's share of the terrain session's passes, one a body
+ * (`TerrainPass`, lit by its disc record's lights), with the GPU coverage masks of their surveys
+ * (`CoverageMask`).
  *
  * @remarks
- * No view draws a body's terrain live yet: the store, the pool and a pass per view and body are a
- * later task's (R10's Risks, "Questions for "main" (R10.T10.e)"). Without one, a body handed over
- * is drawn as a mesh body is, its figure whole.
+ * The terrain session gives each view's frame its own (plan R10, R10.T16.c; `LiveFrameTerrain`).
+ * Without one, a body handed over is drawn as a mesh body is, its figure whole. R10.T16.c changed
+ * T10.e's shape, as main accepted (2026-10-19): `draws(plan, bodies)` takes the frame's lit bodies
+ * beside its plan, which holds no body's centre or rotation, and `symbologyDepth()` is new.
  */
 export interface FrameTerrain {
   /**
    * The GPU coverage mask of `body`'s survey (`terrain/coverage.ts`' `CoverageMask.texture`),
    * beneath whose surveyed cells its figure gives the ground to its terrain once it is handed
-   * over; `null` where it has none.
+   * over; `null` where it has none, or where the view's terrain cannot yet draw all the ground the
+   * mask would discard (R10.T16.c; decision-r10-live-path, D7).
    */
   surveyCoverage(body: BodyIdHex): TextureHandle | null;
   /**
    * The draws of the terrain of each body `plan` hands over (`LitRegime` `terrain`, a
-   * `MeshBodyPlan` whose `role` is `handed-over`, its record its lights), opaque with depth, drawn in the
-   * `bodies` pass after the mesh bodies' figures; none for a body with nothing resident.
+   * `MeshBodyPlan` whose `role` is `handed-over`, its record its lights), opaque with depth, drawn
+   * in the `bodies` pass after the mesh bodies' figures; none for a body with nothing resident.
+   *
+   * @param bodies - The frame's lit bodies, which the plan was made from: each handed-over body's
+   *   terrain is drawn with the rotation and centre the plan drew its figure with (R10.T16.c).
    */
-  draws(plan: BodyFramePlan): ReadonlyArray<DrawItem>;
+  draws(plan: BodyFramePlan, bodies: ReadonlyArray<LitBodyInput>): ReadonlyArray<DrawItem>;
+  /**
+   * The terrain the frame's {@link FrameTerrain.draws} drew, as depth alone, which the symbology's
+   * pass draws before its lines, so that nearer ground hides a mark behind it over the image as it
+   * hides it in the image (plan R10, R10.T16.c).
+   */
+  symbologyDepth(): ReadonlyArray<DrawItem>;
 }
 
 /** What one photorealistic frame draws. */
@@ -464,7 +477,10 @@ export class PhotorealRenderer {
     });
     // The mesh bodies' figures, with depth, before the sequence, then the terrain of the bodies
     // handed over to it over them; no pass where there are none.
-    const meshes = [...this.#bodies.meshDraws(plan), ...(frame.terrain?.draws(plan) ?? [])];
+    const meshes = [
+      ...this.#bodies.meshDraws(plan),
+      ...(frame.terrain?.draws(plan, frame.bodies) ?? []),
+    ];
     if (meshes.length > 0) {
       resources.target.render({
         label: PHOTOREAL_PASS_LABELS.bodies,
@@ -533,7 +549,13 @@ export class PhotorealRenderer {
       encoding: "in-pass",
     });
     if (frame.overlay !== null) {
-      view.render({ ...frame.overlay, colourLoad: "load" });
+      // The terrain's depth first, so that nearer ground hides the marks drawn after it (R10.T16.c).
+      const depth = frame.terrain?.symbologyDepth() ?? [];
+      view.render({
+        ...frame.overlay,
+        draws: depth.length === 0 ? frame.overlay.draws : [...depth, ...frame.overlay.draws],
+        colourLoad: "load",
+      });
     }
     return plan;
   }
