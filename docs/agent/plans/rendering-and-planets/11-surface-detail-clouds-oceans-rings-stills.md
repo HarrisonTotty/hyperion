@@ -1303,3 +1303,86 @@ ejecta-block population), shape parameter or authoritative dip opens a new tag a
   - `liquids.ts`'s four rows become the registry's test values, and a CH₄–C₂H₆–N₂ liquid's index
     follows its composition (from memory, checked then).
   - R11.T4's rock k_base is by (class, entry).
+- **Deviations in T10.a, as built** (2026-10-20; lane `lane/58-r11-t10a-still-job`, on
+  `rendering-and-planets` at `ae4bd052`; main's rulings (a)–(c) for R11.T10.a).
+  - _Files._ New: `stills/stillPlan.ts` and `stills/batchController.ts`, with their tests. No wire,
+    protocol, DTO, golden, generator version, engine type or settings list changes; nothing outside
+    `stills/` changes.
+  - _The Consumes check (ruling (c), at `ae4bd052`)._ R01: `GpuCapabilities.maxTextureDimension2D`
+    (`engine/platform.ts`, on `RenderEngine.capabilities`), `GpuTimer` with `GraphicsStatus.timer`
+    (`engine/status.ts`, its doc naming "Dawn's 65,536 ns quantization"), `onPassTimes` and
+    `createRenderTarget(spec: RenderTargetSpec)` are as the row says; `PassTimes` holds `passes`, a
+    list of `{ label, ns, bracketed }`, not a map keyed by `FrameSubmission.label`; `readTexture`
+    takes a fourth parameter, `access?: "cpu" | "tolerance"`, which the row's
+    `readTexture(texture, level?, rect?)` does not show. R02: the row's "fixed reversed-Z infinite
+    projection" is `perspectiveReversedInfinite(fovXRad, aspect, nearM)` in `camera/projection.ts`,
+    with `project(v, camera, viewport)`, `toViewAxes` and `NEAR_PLANE_M`, as the row says. R05:
+    `QualitySetting` (`"high" | "low"`) is as the row says; `SelectionInput.grounded` is
+    `ReadonlyArray<GroundContact>`, the row's `readonly GroundContact[]`; `selectPatches(input:
+SelectionInput)`, `screenSpaceErrorPx(boundM, distanceM, view)`, `ViewSelectionInput` and
+    `cull.ts`' `Frustum`, `frustumOf` and `inFrustum`, which T10.a reads, are in `terrain/` but not
+    named in the row.
+  - _The decoration-fade test is deferred._ It waits for T2 (the Tasks preamble; main's rulings) and
+    is added when T2's fade exists. The rest of T10.a's test line is built.
+  - _The names._ Provides kept: `planTiles`, `tileProjection`, `nextBatch(measured)` (a method of
+    the class `BatchController`) and `STILL_TILE_MAX_PX`. Added in `stillPlan.ts`:
+    `tileLimitPx(maxTextureDimension2D, setting)`; `tileFrustum(camera, tile, marginPx = 0)`, a
+    `cull.ts` `Frustum`; `footprintView(view, still)`, a `ViewSelectionInput`;
+    `splitDispatch(workgroups, costPerWorkgroupNs | null)`, a `DispatchSplit`; `MAX_DISPATCH_NS`;
+    `PROBE_WORKGROUPS`; the types `PixelRect`, `StillTile`, `StillTiling`, `DispatchPiece` and
+    `DispatchSplit`. In `batchController.ts`: `TIMESTAMP_QUANTUM_NS`, `EMPTY_SUBMIT_SAMPLES`,
+    `batchCapNs(setting, frameIntervalNs)`, `timestampBudgetNs(setting, frameIntervalNs)`,
+    `passTimeBoundNs(measuredNs, timer)`, `medianNs(samplesNs)` and the types `BatchTiming`,
+    `BatchControllerOptions`, `BatchMeasurement`, `MeasuredPass` and `Batch`. T10.b reads them
+    there.
+  - _Where the figures live._ `stillPlan.ts`: `STILL_TILE_MAX_PX`, `MAX_DISPATCH_NS` (50 ms) and the
+    64 px width step from the 256-byte rule. `batchController.ts`: q (`TIMESTAMP_QUANTUM_NS`), the
+    two-quantum margin, the caps (6 ms, T ÷ 4), the 1.5 times growth, the halving and the five
+    empty submits, each a module constant citing Design note 17.
+  - _The calls on the open points._
+    - A batch's unit is one whole pass, named by a label for its pass and tile, since units of one
+      label are predicted at one cost. The controller is built with the job's queue of units and
+      proposes runs of it.
+    - With timestamps, a unit is predicted at its label's latest pass time, the largest of one
+      measurement's passes of that label. Under `quantized` it is measured + q, since a difference
+      of two quantised timestamps is off the true time by less than one quantum, so the sum bounds
+      the batch's true time. The batch is filled to the cap less 2q, which is kept under `full`
+      too, the conservative reading.
+    - Without timestamps, the GPU time is the round trip less the median of five empty submits, at
+      least 0, and the cost per unit that time over the batch's units.
+    - The first batch is one unit in either mode. A dispatch's first piece, before any cost per
+      workgroup, is a probe of one workgroup; the rest is split by the probe's measured cost.
+    - Missing data never grows a batch. With timestamps, a unit whose label has not been measured
+      is proposed alone, unpredicted; without, the last size repeats.
+    - A still width that is not a multiple of 64 px: the last column's texture is padded to the next
+      multiple, under 64 px, and cropped on the CPU at assembly, so any still size works. The
+      grid is as few, and as equal, tiles as L allows: 3,840 px on low is two 1,920 px columns,
+      not 2,048 + 1,792.
+    - A tile's frustum culls against its rect, not its padded texture; `marginPx` lets T10.b
+      widen it by the jitter's reach.
+    - A single unit predicted over the budget, and a workgroup over 50 ms, is proposed alone and
+      flagged (`overBudget`, `over-bound`), never planned silently.
+    - _One departure from the test line._ Whole units cannot grow from one by at most 1.5 times,
+      since ⌊1.5⌋ = 1 would stall, so a batch of one grows to two; from two units on, growth is at
+      most ⌊1.5 n⌋. The test is written so.
+    - After an overrun the next batch is ⌊n ÷ 2⌋ units, or fewer where the cost measured fits
+      fewer: at a threefold jump, 162 → 54, not 81.
+    - `maxUnits` caps a batch's units, which T10.b's re-request after a loss sets to half the
+      batch in flight.
+  - _Figures._ L at a limit of 8,192 and of 16,384: 2,048 and 2,048 on low, 4,096 and 4,096 on high.
+    3,840 × 2,160: 2 × 2 tiles of 1,920 × 1,080 on low (`bytesPerRow` 7,680), one tile of
+    3,840 × 2,160 on high (15,360). The caps less 2q: 5,868,928 ns on low; 4,039,678 ns on high at
+    T = 16.683 ms, whose cap is 4,170,750 ns. The projection test's tolerance, per point:
+    (w ÷ 2) × 2⁻²⁴ × (|m₀ x ÷ w_clip| + |m₈|) px in x, y likewise with h, m₅ and m₉, plus
+    64 ε (W + H) for the `f64` arithmetic; at most about 2⁻²⁴ W, 2.3 × 10⁻⁴ px at 3,840 px wide.
+  - _Sources re-checked_ (2026-10-20, by a research agent): 8,192 is WebGPU's default (the Limits
+    table, the Candidate Recommendation Draft of 15 September 2026); the 256-byte rule is
+    "validating GPUTexelCopyBufferInfo" (§11.2.2), from which `writeTexture` is exempt; 640 ms and
+    2,500 ms are `Kconfig.profile`'s defaults; `TdrDelay` is 2 s (Microsoft). Gen9 preempting
+    compute between thread groups and 3D work between draws is confirmed for Linux only (i915's
+    Gen9 workarounds, Mesa's ANV); Intel's Windows driver is not checked.
+- **Deferred findings (2026-10-13 rule) (R11.T10.a).**
+  - With timestamps, a batch's prediction sums its pass times and leaves out the gaps between
+    passes, which no timestamp covers. Under `quantized` the quantum added to each pass covers
+    them; under `full` only the two-quantum margin does. T10.d's soak shows whether `full` needs an
+    allowance per pass.
