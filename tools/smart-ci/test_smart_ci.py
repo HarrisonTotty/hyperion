@@ -259,9 +259,9 @@ TS_RECIPES = {"_typecheck-ts", "_oxlint", "_vitest-run"}
 # `just test-render`'s steps, which a plan runs beside `ci`'s.
 RENDER_RECIPES = {recipe[0] for recipes in smart_ci.RENDER_PHASES.values() for recipe in recipes}
 CARGO_RECIPES = {
-    "_rustfmt-check", "_clippy-for", "_cross-clippy-for", "_browser-clippy-for", "_relaxed-simd-refused",
-    "_gen-protocol-check-for", "fit-check", "_fit-check-built", "_test-build-for", "_nextest-run", "_doctest-run",
-    "_wasip1-build", "_wasip1-nextest",
+    "_rustfmt-check", "_clippy-for", "_doc-check-for", "_cross-clippy-for", "_browser-clippy-for",
+    "_relaxed-simd-refused", "_gen-protocol-check-for", "fit-check", "_fit-check-built", "_test-build-for",
+    "_nextest-run", "_doctest-run", "_wasip1-build", "_wasip1-nextest",
     "_browser", "_wasm-run", "_wasm-preflight", "gen-surface",
 }
 
@@ -308,10 +308,12 @@ class TheRules(unittest.TestCase):
 
     def test_a_single_crate_runs_its_own_checks_and_tests(self) -> None:
         p = plan("crates/hyperion-server/src/main.rs")
-        self.assertEqual(calls(p), ["_rustfmt-check", "_cross-clippy-for", "_clippy-for", "_test-build-for",
-                                    "_nextest-run", "_doctest-run"])
+        self.assertEqual(calls(p), ["_rustfmt-check", "_cross-clippy-for", "_clippy-for", "_doc-check-for",
+                                    "_test-build-for", "_nextest-run", "_doctest-run"])
         self.assertEqual(args(p, "_rustfmt-check"), ["-p hyperion-server"])
         self.assertEqual(args(p, "_clippy-for"), ["-p hyperion-server"])
+        self.assertEqual(args(p, "_doc-check-for"), ["-p hyperion-server"])
+        self.assertIn("rustdoc: hyperion-server", [step.title for step in p.steps])
         self.assertEqual(args(p, "_cross-clippy-for"), ["-p hyperion-server", ""])
         self.assertEqual(args(p, "_test-build-for"), ["-p hyperion-server"])
         for recipe in ("_nextest-run", "_doctest-run"):
@@ -324,11 +326,13 @@ class TheRules(unittest.TestCase):
         # The fitted tables' check after the test build, building hyperion-fit itself, which the plan
         # does not test, so that the test build makes no binary for it (perf-build Q6).
         self.assertEqual(calls(p), [
-            "_wasm-preflight", "_rustfmt-check", "_smart-ci-test", "_clippy-for", "_test-build-for",
-            "fit-check", "_wasip1-build", "_nextest-run", "_doctest-run", "_wasm-run"])
+            "_wasm-preflight", "_rustfmt-check", "_smart-ci-test", "_clippy-for", "_doc-check-for",
+            "_test-build-for", "fit-check", "_wasip1-build", "_nextest-run", "_doctest-run", "_wasm-run"])
         self.assertEqual(args(p, "_wasm-preflight"), ["wasip1"])
-        # The features `--workspace` gives the sim: the fitting crate asks for `testing`.
+        # The features `--workspace` gives the sim: the fitting crate asks for `testing`, in its
+        # normal dependencies, so `cargo doc --workspace` builds it too.
         self.assertEqual(args(p, "_clippy-for"), ["-p hyperion-sim --features hyperion-sim/testing"])
+        self.assertEqual(args(p, "_doc-check-for"), ["-p hyperion-sim --features hyperion-sim/testing"])
         # The testkit's source scans read the sim's sources: its native suite runs, not its doctests.
         self.assertEqual(packages(p, "_nextest-run"), [SIM, TESTKIT])
         self.assertEqual(packages(p, "_doctest-run"), [SIM])
@@ -338,21 +342,54 @@ class TheRules(unittest.TestCase):
         self.assertIn("hyperion-fit, hyperion-server", " ".join(p.notes))
         self.assertIn("Clippy for the other platforms skips hyperion-sim", " ".join(p.notes))
 
+    def test_rustdoc_runs_for_a_crates_code_after_its_clippy(self) -> None:
+        # A change to code can break a link as surely as a change to a doc (an item moves, or loses
+        # `pub`), so the trigger is the code: every `.rs` file of a crate, its manifest too.
+        for path in ("crates/hyperion-sim/src/galaxy/disc.rs", "crates/hyperion-surface/src/field.rs",
+                     "crates/hyperion-surface/benches/test_planet.rs", "crates/hyperion-protocol/Cargo.toml"):
+            with self.subTest(path=path):
+                p = plan(path)
+                steps = [s for s in p.steps if s.recipe[0] == "_doc-check-for"]
+                self.assertEqual(len(steps), 1, calls(p))
+                self.assertEqual(steps[0].phase, "main")
+                self.assertEqual(calls(p)[calls(p).index("_clippy-for") + 1], "_doc-check-for")
+                self.assertEqual(steps[0].title, "rustdoc: " + ", ".join(packages(p, "_doc-check-for")))
+                self.assertIn(path, steps[0].causes)
+        # No hook runs rustdoc, so `--hook-checks`, which widens Clippy to the workspace's, leaves it
+        # to the changed crates.
+        hooked = make_plan([("crates/hyperion-sim/src/galaxy/disc.rs", False)], workspace(), False, hook_checks=True)
+        self.assertEqual(args(hooked, "_clippy-for"), ["--workspace"])
+        self.assertEqual(args(hooked, "_doc-check-for"), ["-p hyperion-sim --features hyperion-sim/testing"])
+        # Data, goldens, other configuration and docs the crate does not include run no rustdoc.
+        for path in ("crates/hyperion-sim/tests/golden/orbit/states.golden",
+                     "crates/hyperion-fit/data/cie_cmf/CIE_xyz_1931_2deg.csv", "crates/hyperion-fit/manifests/mge.toml",
+                     "crates/hyperion-sim/README.md", ".config/nextest.toml", "rustfmt.toml", "clippy.toml",
+                     "crates/hyperion-base/clippy.toml", "packages/protocol/src/generated/BodyId.ts"):
+            with self.subTest(path=path):
+                self.assertNotIn("_doc-check-for", calls(plan(path)))
+
     def test_dependents_adds_the_reverse_dependents_clippy_and_tests(self) -> None:
         p = plan("crates/hyperion-sim/src/galaxy/disc.rs", dependents=True)
         self.assertEqual(packages(p, "_clippy-for"), [FIT, SERVER, SIM])
+        # Their rustdoc too: a moved or renamed public item breaks their links.
+        self.assertEqual(packages(p, "_doc-check-for"), [FIT, SERVER, SIM])
         self.assertEqual(packages(p, "_nextest-run"), [FIT, SERVER, SIM, TESTKIT])
         self.assertEqual(packages(p, "_rustfmt-check"), [SIM])
         self.assertFalse(any("Not checked" in note for note in p.notes))
         base = plan("crates/hyperion-base/src/math.rs", dependents=True)
         self.assertEqual(packages(base, "_clippy-for"), [BASE, FIT, SERVER, SIM, SURFACE])
+        self.assertEqual(packages(base, "_doc-check-for"), [BASE, FIT, SERVER, SIM, SURFACE])
+        # Without --dependents, the changed crate's alone, and the plan says what it leaves out.
+        alone = plan("crates/hyperion-sim/src/galaxy/disc.rs")
+        self.assertEqual(packages(alone, "_doc-check-for"), [SIM])
+        self.assertIn("hyperion-fit, hyperion-server's Clippy and rustdoc", " ".join(alone.notes))
 
     def test_a_surface_change_rebuilds_the_module_and_runs_the_vitest_files_that_import_it(self) -> None:
         p = plan("crates/hyperion-surface/src/field.rs")
         self.assertEqual(calls(p), [
             "gen-surface", "_wasm-preflight", "_rustfmt-check", "_relaxed-simd-refused", "_vitest-run",
-            "_clippy-for", "_browser-clippy-for", "_test-build-for", "_wasip1-build", "_browser", "_nextest-run",
-            "_doctest-run", "_wasm-run"])
+            "_clippy-for", "_doc-check-for", "_browser-clippy-for", "_test-build-for", "_wasip1-build", "_browser",
+            "_nextest-run", "_doctest-run", "_wasm-run"])
         self.assertEqual(args(p, "_wasm-preflight"), ["wasip1", "browser"])
         self.assertEqual(args(p, "_clippy-for"), ["-p hyperion-surface --features hyperion-surface/testing"])
         self.assertEqual(args(p, "_browser-clippy-for"), ["hyperion-surface"])
@@ -383,7 +420,7 @@ class TheRules(unittest.TestCase):
         p = plan("crates/hyperion-protocol/src/planetary/requests.rs")
         self.assertEqual(calls(p), [
             "gen-surface", "_rustfmt-check", "_typecheck-ts", "_oxlint", "_vitest-run", "_clippy-for",
-            "_gen-protocol-check-for", "_test-build-for", "_nextest-run", "_doctest-run"])
+            "_doc-check-for", "_gen-protocol-check-for", "_test-build-for", "_nextest-run", "_doctest-run"])
         self.assertEqual(args(p, "_gen-protocol-check-for"), ["-p hyperion-protocol"])
         self.assertEqual(args(p, "_vitest-run"), ["", ""])
 
@@ -492,6 +529,7 @@ class TheRules(unittest.TestCase):
     def test_a_crates_manifest_adds_its_dependents(self) -> None:
         p = plan("crates/hyperion-surface/Cargo.toml")
         self.assertEqual(packages(p, "_clippy-for"), [FIT, SERVER, SIM, SURFACE])
+        self.assertEqual(packages(p, "_doc-check-for"), [FIT, SERVER, SIM, SURFACE])
         self.assertEqual(packages(p, "_rustfmt-check"), [SURFACE])
         self.assertEqual(packages(p, "_nextest-run"), [FIT, SERVER, SIM, SURFACE, TESTKIT])
         self.assertIn("gen-surface", calls(p))
@@ -505,6 +543,9 @@ class TheRules(unittest.TestCase):
         own = plan("crates/hyperion-sim/clippy.toml")
         self.assertEqual(packages(own, "_clippy-for"), [SIM])
         self.assertNotIn("_rustfmt-check", calls(own))
+        # Clippy's configuration is no input of rustdoc's.
+        for p in (root, own):
+            self.assertNotIn("_doc-check-for", calls(p))
         self.assertEqual(packages(plan("rustfmt.toml"), "_rustfmt-check"), sorted(workspace().crates))
 
     def test_tools(self) -> None:
@@ -586,8 +627,8 @@ class TheRules(unittest.TestCase):
             "gpu-replay-check", "_cross-clippy-for", "_smart-ci-test"])
         self.assertEqual([s.recipe[0] for s in p.steps if s.phase == "unlocked"], ["_vitest-run"])
         self.assertEqual([s.recipe[0] for s in p.steps if s.phase == "main"], [
-            "_clippy-for", "_browser-clippy-for", "_gen-protocol-check-for", "_test-build-for", "fit-check",
-            "_wasip1-build", "_browser"])
+            "_clippy-for", "_doc-check-for", "_browser-clippy-for", "_gen-protocol-check-for", "_test-build-for",
+            "fit-check", "_wasip1-build", "_browser"])
         self.assertEqual([s.recipe[0] for s in p.steps if s.phase == "locked"], [
             "_nextest-run", "_doctest-run", "_wasm-run"])
 
@@ -652,6 +693,24 @@ class TheRules(unittest.TestCase):
         self.assertEqual(ws.cargo_packages([SURFACE, SERVER]), "-p hyperion-server -p hyperion-surface "
                                                              "--features hyperion-surface/testing")
         self.assertEqual(ws.cargo_packages([SURFACE], universe=ws.wasip1), "-p hyperion-surface")
+        # rustdoc's: `cargo doc --workspace` builds no test, so a dev-dependency enables nothing. The
+        # fitting crate's normal dependency still gives the sim `testing`, and the sim the surface's.
+        self.assertEqual(ws.unified_features(ws.crates, dev=False)[SIM], {"testing"})
+        self.assertEqual(ws.cargo_packages([SURFACE, SERVER], dev=False), "-p hyperion-server -p hyperion-surface "
+                                                                        "--features hyperion-surface/testing")
+        # A feature asked for only by a dev-dependency: Clippy's build, with the tests, has it;
+        # rustdoc's does not.
+        ws.crates[FIT] = Crate(FIT, "crates/" + FIT, [dep(SIM), dep(TESTKIT, "dev")])
+        ws.crates[SERVER].deps.append(dep(SIM, "dev", ["testing"]))
+        self.assertEqual(ws.unified_features(ws.crates)[SIM], {"testing"})
+        self.assertEqual(ws.unified_features(ws.crates, dev=False)[SIM], set())
+        self.assertEqual(ws.unified_features(ws.crates, dev=False)[SURFACE], set())
+        self.assertEqual(ws.cargo_packages([SIM]), "-p hyperion-sim --features hyperion-sim/testing")
+        self.assertEqual(ws.cargo_packages([SIM], dev=False), "-p hyperion-sim")
+        p = make_plan([("crates/hyperion-sim/src/galaxy/disc.rs", False)], ws, False)
+        self.assertEqual(args(p, "_clippy-for"), ["-p hyperion-sim --features hyperion-sim/testing"])
+        self.assertEqual(args(p, "_doc-check-for"), ["-p hyperion-sim"])
+        ws = workspace()
         self.assertEqual(ws.surface_module_crates(), {BASE, SURFACE})
         self.assertEqual(ws.reverse_dependents([BASE]), {SURFACE, SIM, SERVER, FIT})
         self.assertEqual(ws.reverse_dependents([TESTKIT]), {BASE, SURFACE, SIM, SERVER, FIT})
@@ -738,7 +797,11 @@ class GraphMode(unittest.TestCase):
         ws = self.workspace(now)
         included = make_plan([("crates/hyperion-base/README.md", False)], ws, False)
         self.assertEqual(packages(included, "_doctest-run"), [BASE])
-        self.assertNotIn("_nextest-run", calls(make_plan([("crates/hyperion-sim/README.md", False)], ws, False)))
+        # As the crate's docs, its links are rustdoc's: the crate's rustdoc runs.
+        self.assertEqual(args(included, "_doc-check-for"), ["-p hyperion-base"])
+        not_included = make_plan([("crates/hyperion-sim/README.md", False)], ws, False)
+        self.assertNotIn("_nextest-run", calls(not_included))
+        self.assertNotIn("_doc-check-for", calls(not_included))
 
     def test_no_test_reaches_a_change_that_no_test_uses(self) -> None:
         p = self.plan_change("crates/hyperion-base/src/lib.rs", "pub fn documented() {}", "pub fn documented() { }\npub fn new() {}")

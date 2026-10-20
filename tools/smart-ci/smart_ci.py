@@ -27,10 +27,10 @@ file of a crate, natively, every test in any crate whose code lists the Rust sou
 walker, which reads the text of the `.rs` files it finds), which the native step names as "the
 tests that read the Rust sources". A test that reads Rust sources by listing a directory names the
 `rs` extension in the function that lists it, so that smart-ci finds it. `--all-tests` runs every
-test of the changed crates instead. `--dependents` adds the Clippy of every crate that depends on a
-changed crate, and with `--all-tests` their every test (`just smart-ci --help`). `--full` runs the
-full `just ci` whatever the diff, its build phases inside the build slot `SMART_CI_SLOT` names and
-its suites outside it: integration's run.
+test of the changed crates instead. `--dependents` adds the Clippy and rustdoc of every crate that
+depends on a changed crate, and with `--all-tests` their every test (`just smart-ci --help`).
+`--full` runs the full `just ci` whatever the diff, its build phases inside the build slot
+`SMART_CI_SLOT` names and its suites outside it: integration's run.
 
 A run that passes writes a gate stamp (`stamp.py` beside it), keyed by the tree it checked, the
 working tree's with its untracked files: its base, its plan's steps and their causes, the changed
@@ -209,6 +209,7 @@ CI_STEPS: Dict[str, Tuple[str, List[Tuple[str, Optional[List[str]]]]]] = {
     "cross-clippy": ("scoped", [("_cross-clippy-for", ["--workspace", "gpu-replay"])]),
     "_smart-ci-test": ("as is", []),
     "_clippy": ("scoped", [("_clippy-for", ["--workspace"])]),
+    "doc-check": ("scoped", [("_doc-check-for", ["--workspace"])]),
     "_browser-clippy": ("scoped", [("_browser-clippy-for", ["browser_crates"])]),
     "gen-protocol-check": ("scoped", [("_gen-protocol-check-for", ["--workspace"])]),
     "_vitest-all": ("scoped", [("_vitest-run", ["", ""])]),
@@ -230,8 +231,8 @@ CI_PHASES: Dict[str, List[List[str]]] = {
     "side": [["fmt-check"], ["_typecheck-ts"], ["_oxlint"], ["_relaxed-simd-refused"], ["gpu-replay-check"],
              ["cross-clippy"], ["_smart-ci-test"]],
     "unlocked": [["_vitest-all"]],
-    "main": [["_clippy"], ["_browser-clippy"], ["gen-protocol-check"], ["_test-build"], ["_fit-check-built"],
-             ["_wasm-fast-build"]],
+    "main": [["_clippy"], ["doc-check"], ["_browser-clippy"], ["gen-protocol-check"], ["_test-build"],
+             ["_fit-check-built"], ["_wasm-fast-build"]],
     "locked": [["_test-run"], ["_wasm-fast-run"]],
 }
 # `just test-render`'s steps, its dependencies and then its locked run, which a plan runs in its own
@@ -303,7 +304,8 @@ TIMED = ("native", "wasip1", "doctests", "browser")
 # fails if a recipe of `ci` is in neither, or one said not to build runs cargo.
 BUILDS = {
     "gen-surface", "_relaxed-simd-refused", "gpu-replay-check", "_gpu-replay-cargo", "cross-clippy",
-    "_cross-clippy-for", "_clippy", "_clippy-for", "_browser-clippy", "_browser-clippy-for", "gen-protocol-check",
+    "_cross-clippy-for", "_clippy", "_clippy-for", "doc-check", "_doc-check-for", "_browser-clippy",
+    "_browser-clippy-for", "gen-protocol-check",
     "_gen-protocol-check-for", "fit-check", "_test-build", "_test-build-for", "_wasm-fast-build", "_wasip1-build",
     "_wasip1-nextest", "_browser",
 }
@@ -723,13 +725,14 @@ class Workspace:
     def surface_module_crates(self) -> Set[str]:
         return self.linked(SURFACE_CRATE) if SURFACE_CRATE in self.crates else set()
 
-    def unified_features(self, selected: Iterable[str]) -> Dict[str, Set[str]]:
+    def unified_features(self, selected: Iterable[str], dev: bool = True) -> Dict[str, Set[str]]:
         """The features cargo enables on each member when `selected` are built with their tests.
 
         As cargo's resolver does for `-p` (or `--workspace`): the defaults of the selected packages,
         the features each in-workspace dependency is asked for (dev-dependencies of the selected
         packages only, whose tests are built), and the entries of every enabled feature,
-        `crate/feature`, `crate?/feature` and plain names, to a fixed point.
+        `crate/feature`, `crate?/feature` and plain names, to a fixed point. `dev=False` counts no
+        dev-dependency, as for `cargo doc`, which builds no test.
         """
         selected = set(selected)
         enabled: Dict[str, Set[str]] = {name: set() for name in self.crates}
@@ -762,7 +765,7 @@ class Workspace:
                     elif not slash and entry in crate.features:
                         enable(name, entry)
                 for dep, kind, features, default, optional, as_named in crate.deps:
-                    if kind == "dev" and name not in selected:
+                    if kind == "dev" and (not dev or name not in selected):
                         continue
                     if optional and not any(
                         e in (as_named, "dep:" + as_named) or e.startswith((as_named + "/",)) for e in entries
@@ -778,14 +781,16 @@ class Workspace:
         """`-p <crate>` for each name, as `cargo fmt` takes them."""
         return " ".join("-p " + name for name in sorted(set(names)))
 
-    def cargo_packages(self, names: Iterable[str], universe: Optional[Iterable[str]] = None) -> str:
+    def cargo_packages(self, names: Iterable[str], universe: Optional[Iterable[str]] = None,
+                       dev: bool = True) -> str:
         """`-p <crate>` for each name, with `--features` for those `universe` would enable on them.
 
         `universe` is what `just ci`'s step selects, every member for `--workspace`, so that a
-        crate is checked with the features it has there and its build is that build.
+        crate is checked with the features it has there and its build is that build. `dev=False`
+        for a step that builds no test (`cargo doc`), whose dev-dependencies enable nothing.
         """
         names = sorted(set(names))
-        features = self.unified_features(self.crates if universe is None else universe)
+        features = self.unified_features(self.crates if universe is None else universe, dev)
         flags = [
             name + "/" + feature
             for name in names
@@ -981,6 +986,9 @@ class Needs:
         self.code: Dict[str, Set[str]] = {}  # crates whose code changed
         self.fmt: Dict[str, Set[str]] = {}
         self.clippy: Dict[str, Set[str]] = {}
+        # rustdoc (`doc-check`): a crate's code, as for Clippy, since a moved item or one that lost
+        # `pub` breaks a link as surely as an edited doc; and the Markdown its root includes as docs.
+        self.rustdoc: Dict[str, Set[str]] = {}
         self.tests: Dict[str, Set[str]] = {}  # every suite: native, doctests, wasip1, browser
         self.native: Dict[str, Set[str]] = {}  # the native suite alone
         # Changes whose tests the code's graph chooses (Rust code, goldens): every test of the crate
@@ -1019,7 +1027,7 @@ class Needs:
         self.vitest_all.add(path)
 
     def crate_code(self, crate: str, path: str, graph: bool = False) -> None:
-        for table in (self.code, self.fmt, self.clippy, self.graph if graph else self.tests):
+        for table in (self.code, self.fmt, self.clippy, self.rustdoc, self.graph if graph else self.tests):
             self.add(table, crate, path)
 
 
@@ -1127,9 +1135,11 @@ def classify(path: str, deleted: bool, ws: Workspace, needs: Needs) -> None:
             return
         elif ext == ".md" and "/data/" not in "/" + rel:
             # `#![doc = include_str!("../README.md")]`: its code blocks are the crate's doctests. As
-            # the crate's data, its every test (the graph does not read the file's code blocks).
+            # the crate's data, its every test (the graph does not read the file's code blocks); and
+            # as its docs, the crate's rustdoc, which reads its links.
             needs.add(needs.graph, crate.name, path)
-            needs.say(path, f"{crate.name}'s documentation, which its crate root includes: its tests")
+            needs.add(needs.rustdoc, crate.name, path)
+            needs.say(path, f"{crate.name}'s documentation, which its crate root includes: its tests and rustdoc")
         elif rel.startswith(GOLDEN_DIR):
             # A golden: the tests that read it, by name, through the golden reader, and what names it.
             needs.add(needs.graph, crate.name, path)
@@ -1750,9 +1760,9 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
     # and dependents run as without the graph.
     graph_mode = chosen is not None and bool(needs.graph)
 
-    # Reverse dependents: always for a changed manifest, their Clippy and every test; for any code
-    # change with --dependents, their Clippy, and every test only with --all-tests (the graph chooses
-    # their tests otherwise).
+    # Reverse dependents: always for a changed manifest, their Clippy, rustdoc and every test; for any
+    # code change with --dependents, their Clippy and rustdoc, and every test only with --all-tests
+    # (the graph chooses their tests otherwise).
     roots = {crate: set(causes) for crate, causes in needs.manifests.items()}
     if dependents:
         for crate, causes in needs.code.items():
@@ -1761,6 +1771,7 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
         for dependent in sorted(ws.reverse_dependents([root])):
             cause = f"{dependent} depends on {root}"
             needs.add(needs.clippy, dependent, cause)
+            needs.add(needs.rustdoc, dependent, cause)
             if root in needs.manifests or not graph_mode:
                 needs.add(needs.tests, dependent, cause)
     graph_crates = chosen.crates(set(needs.tests)) if chosen else set()
@@ -1931,6 +1942,12 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
              ["_clippy-for", "--workspace"], causes_of(needs.clippy))
     elif clippy:
         step("main", "Clippy: " + ", ".join(clippy), ["_clippy-for", ws.cargo_packages(clippy)], causes_of(needs.clippy))
+    if needs.rustdoc:
+        # After Clippy, as in `ci`, on the dependencies' metadata it built; with the features that
+        # `cargo doc --workspace` gives each crate, which counts no dev-dependency.
+        rustdoc = sorted(needs.rustdoc)
+        step("main", "rustdoc: " + ", ".join(rustdoc), ["_doc-check-for", ws.cargo_packages(rustdoc, dev=False)],
+             causes_of(needs.rustdoc))
     if browser_clippy:
         step("main", "Clippy for wasm32-unknown-unknown: " + ", ".join(browser_clippy),
              ["_browser-clippy-for", " ".join(browser_clippy)], causes_of(needs.clippy, browser_clippy))
@@ -1992,13 +2009,14 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
         notes += chosen.selection.notes
         if not graph_crates and not whole and not needs.native:
             notes.append("No test reaches the changed Rust code through its code: only the tests that read the Rust "
-                         "sources run for it (and its Clippy and rustfmt)." if source_crates else
-                         "No test reaches the changed Rust code: no suite runs for it (its Clippy and rustfmt do).")
+                         "sources run for it (and its Clippy, rustdoc and rustfmt)." if source_crates else
+                         "No test reaches the changed Rust code: no suite runs for it (its Clippy, rustdoc and "
+                         "rustfmt do).")
     if unchecked:
         notes.append(
-            "Not checked: " + ", ".join(sorted(unchecked)) + "'s Clippy, which depend on the changed crates. "
-            + ("`--dependents` adds it; the graph chooses their tests. " if graph_mode else
-               "`--dependents` adds their Clippy and tests. ")
+            "Not checked: " + ", ".join(sorted(unchecked)) + "'s Clippy and rustdoc, which depend on the changed "
+            "crates. " + ("`--dependents` adds them; the graph chooses their tests. " if graph_mode else
+                          "`--dependents` adds their Clippy, rustdoc and tests. ")
             + "Integration's `just ci` runs them anyway."
         )
     if (clippy or needs.gen_protocol) and not hook_checks:
@@ -2438,9 +2456,9 @@ def run_build_phases(phases: Mapping[str, Sequence[Sequence[str]]], runner: Runn
                 sys.stdout.write(log.read())
         sys.stdout.flush()
     if status != 0 or side_status != 0 or unlocked_status != 0:
-        print(f"error: smart-ci failed before the locked suites (builds and Rust checks: exit {status}; formatting, "
-              f"TypeScript, the relaxed-SIMD refusal, gpu-replay, cross-clippy and smart-ci's tests: exit "
-              f"{side_status}; vitest: exit {unlocked_status})", file=sys.stderr)
+        print(f"error: smart-ci failed before the locked suites (builds, rustdoc and Rust checks: exit {status}; "
+              f"formatting, TypeScript, the relaxed-SIMD refusal, gpu-replay, cross-clippy and smart-ci's tests: "
+              f"exit {side_status}; vitest: exit {unlocked_status})", file=sys.stderr)
         return 1
     return 0
 
@@ -2946,15 +2964,18 @@ concerned (`--plan` shows each step and the paths that caused it):
   a crate's code                rustfmt and Clippy (native, wasm32 for the browser crates, and the
                                 other platforms' where its code differs between them: the server,
                                 and any crate the guard finds such code in) of that crate, with the
-                                features `just ci` gives it, and the tests, in any crate, that reach
-                                the changed code through the code's graph (nextest and wasip1 test
-                                by test, doctests by file, the browser suites by crate); a `.rs`
-                                file, the tests in any crate that read the Rust sources, natively
-  a crate's Cargo.toml          that crate's checks and every test, and its dependents' Clippy and tests
+                                features `just ci` gives it, its rustdoc (`doc-check`, with the
+                                features `cargo doc --workspace` gives it), and the tests, in any
+                                crate, that reach the changed code through the code's graph (nextest
+                                and wasip1 test by test, doctests by file, the browser suites by
+                                crate); a `.rs` file, the tests in any crate that read the Rust
+                                sources, natively
+  a crate's Cargo.toml          that crate's checks and every test, and its dependents' Clippy,
+                                rustdoc and tests
   a crate's goldens             the tests of its crate that read goldens, and those that name the file
   a crate's other data          that crate's tests, those of any crate that name the file, and the
                                 vitest files that read it (a Markdown file is data when its crate's
-                                root includes it as documentation)
+                                root includes it as documentation, and runs the crate's rustdoc)
   a configuration file          the checks it configures: nextest.toml every crate's tests and
                                 the bindings' check (the export tests nextest skips by default),
                                 rustfmt.toml and clippy.toml their tool, .oxlintrc.json oxlint,
@@ -2983,11 +3004,12 @@ smart-ci finds it. `--all-tests` runs every test of the changed crates instead, 
 before the graph: another crate's tests that read the Rust sources (the surface crate's tag check,
 for a change to the sim) run only without it.
 
-Dependents: by default only the changed crates' Clippy runs (the owner's rule: a task runs the
-checks of the crates it touched); their tests are the graph's to choose. Integration's full `just ci`
-runs everything. `--dependents` adds the Clippy of every crate that depends on a changed one (with
-`--all-tests`, their tests too): use it when the change alters what other crates use (a public item's
-name or signature). A changed Cargo.toml always adds their Clippy and tests.
+Dependents: by default only the changed crates' Clippy and rustdoc run (the owner's rule: a task
+runs the checks of the crates it touched); their tests are the graph's to choose. Integration's full
+`just ci` runs everything. `--dependents` adds the Clippy and rustdoc of every crate that depends on a
+changed one (with `--all-tests`, their tests too): use it when the change alters what other crates
+use (a public item's name, signature or path, which their docs may link). A changed Cargo.toml always
+adds their Clippy, rustdoc and tests.
 
 Run it as `just ci` is run, capped; its test phase takes the heavy-test lock as `ci`'s does (but
 see below). With
@@ -3029,8 +3051,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                              "or A...B: the commits of B since its merge-base with A, with --plan")
     parser.add_argument("--plan", action="store_true", help="print the plan and run nothing")
     parser.add_argument("--dependents", action="store_true",
-                        help="add the Clippy of every crate that depends on a changed one (with --all-tests, "
-                             "their tests too)")
+                        help="add the Clippy and rustdoc of every crate that depends on a changed one (with "
+                             "--all-tests, their tests too)")
     parser.add_argument("--all-tests", action="store_true",
                         help="run every test of the changed crates, not those the code's graph finds reach the "
                              "change: smart-ci's selection before the graph. Another crate's tests that read the "
