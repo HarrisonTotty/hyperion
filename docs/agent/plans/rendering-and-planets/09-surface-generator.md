@@ -660,7 +660,9 @@ every timing below is provisional and is re-measured on a quiet machine by the t
      and 93 ± 40 km (Belleguic, Lognonné and Wieczorek 2005, JGR 110, E11005), so 723 K would need
      no re-fit there unless F exceeded 22.7 mW m⁻². Where T_s ≥ 870 K, T_e is zero: no
      constructional share, and Airy compensation (α = 0) about T12.c's loads. An ice-rich crust is
-     not described by a silicate isotherm (Risks). _The continental fraction_ (medium-low
+     not described by a silicate isotherm: a water-ice lid's T_e is (567 W m⁻¹ ÷ F)
+     ln(170 K ÷ T_s), from the `H2O` row's conductivity (Risks). T_e never exceeds the body's
+     radius (`decision-r09-t12-coarse.md` item 4). _The continental fraction_ (medium-low
      confidence): continental growth on an Earth-sized plate-tectonic planet depends on its history.
      In Höning and Spohn 2023 (Astrobiology 23(4), 372–394, arXiv:2211.09473; after Höning, Tosi,
      Hansen-Goos and Spohn 2019, PEPI 287, 37–50), the positive feedback between continental crust
@@ -749,31 +751,50 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    great-circle edge lengths, settled in (distance, cell index) order, giving each cell its signed
    distance to the nearest boundary, that boundary's kind (convergent with subduction, convergent
    collision, divergent, transform) from the plates' relative motion, and its obliquity. A stagnant
-   lid gets no boundaries: volcanic provinces sized by the volcanism level, with flexural moats and
-   bulges about each load.
+   lid gets no boundaries: volcanic provinces sized by the volcanism level, with the flexure about
+   each load, its moat filled and its bulge planed to the surface's level
+   (`decision-r09-t12-coarse.md` addenda 2 and 3).
 7. **The variance budget and the landforms** (researched 2026-09-29; Earth2014 split at −2 km; GDH1,
    Stein and Stein 1992; flexure after Turcotte and Schubert 2014 §3.16–3.17, from memory). Crust is
    two populations about sea level, continental and oceanic, as Earth2014 shows (continental mean
-   +406 m, s.d. 1.08 km; oceanic −4,279 m, s.d. 0.93 km); ridges follow GDH1's age–depth law, d =
-   2,600 + 365 √t m below 20 Myr and 5,651 − 2,473 e^(−0.0278 t) m above, with the age t read from
-   the distance to the plate's own divergent boundary, a second distance transform the pass keeps
-   in its `f64` working state (not the nearest boundary of any kind, which would make old floor
-   by a trench young; researched 2026-09-29: Stein and Stein 1992; Müller et al. 2008's age grid),
-   capped at 200 Myr, beyond which GDH1 is within 40 m of its asymptote; the floor's roughness
-   follows its own ridge too: the half-rate at formation sets the abyssal-hill relief (Goff et al.
-   2004), its age the pelagic drape (GlobSed, Goff 2010), and the turbidites of its plate's passive
+   +405 m, s.d. 1.08 km; oceanic −4,281 m, s.d. 0.93 km; the TBI layer at 5′, recomputed
+   2026-10-16), and on a stagnant lid one, plan 14's 0.9 km, a Gaussian field whose degree variance
+   falls as l^−β₁ from degree 2; ridges follow GDH1's age–depth law, d = 2,600 + 365 √t m below
+   20 Myr and 5,651 − 2,473 e^(−0.0278 t) m above, with the age t the floor's steady-state age: the
+   kinematic age d_r ÷ u_h, from the distance to the plate's own divergent boundary, a second
+   distance transform the pass keeps in its `f64` working state (not the nearest boundary of any
+   kind, which would make old floor by a trench young; researched 2026-09-29: Stein and Stein 1992;
+   Müller et al. 2008's age grid), ranked by area onto Parsons 1982's triangular area–age
+   distribution, whose oldest age t_m is 192.9 Myr (Earth's mean of 64.3 Myr) times the world's
+   oceanic share over Earth's 0.595 and Earth's plate speed over the world's (R09.T11's speed law),
+   at most the system's age; GDH1 is the basement unloaded of sediment, and the floor stands above
+   it by the sediment's isostatic load S (ρ_m − ρ̄_s) ÷ (ρ_m − ρ_w), Athy's compaction with Sclater
+   and Christie 1980's shale (`decision-r09-t12-coarse.md` item 1); the floor's roughness follows
+   its own ridge too: the half-rate at formation sets the abyssal-hill relief (Goff et al. 2004),
+   its age the pelagic drape (GlobSed, Goff 2010), and the turbidites of its plate's passive
    margins, trapped by trenches, its plains (Harris et al. 2014's third of the abyss), carried to
    the synthesis in one byte (`decision-r09-t5.md` item 5); collisional belts 200–500 km wide with
    plateaus near 5 km and peaks near 9 km, trenches 2–4 km below the sea floor and volcanic fronts
    190 km behind a trench whose overriding plate is oceanic and 260 km behind one whose overriding
-   plate is continental (Syracuse and Abers 2006's 527 front volcanoes; 10–90% 140–250 and
-   180–330 km; Bird 2003's "200–250 km is more typical" brackets the median), varied along strike
-   by the interquartile range, arcs 60 km and 175 km wide behind them, distances Earth's and
-   unscaled (labelled), all heights scaled by (g⊕ ÷ g) × the lithosphere factor as
-   strength-limited; flexure w = w₀ e^(−x/α)(cos x/α + sin x/α) with α = [4D ÷ ((ρ_m − ρ_fill)
-   g)]^¼, ρ_fill being the fill's bulk density, its palette entry's grain density times one less
-   the porosity T12.c states, D = E T_e³ ÷ 12(1 − ν²), E 100 GPa, ν 0.25 (Olympus Mons at T_e = 70
-   km gives α ≈ 180 km, as observed).
+   plate is continental (Syracuse and Abers 2006's 527 front volcanoes, Table S2a, classified by
+   overriding crust by `decision-r09-t5.md` item 6's split of its arc segments, not a split the
+   paper prints; 10–90% 140–250 and 180–330 km; Bird 2003's "200–250 km is more typical" brackets
+   the median), varied along strike by the interquartile range, arcs 60 km and 175 km wide behind
+   them, distances Earth's and unscaled (labelled), all heights scaled by g⊕ ÷ g as
+   strength-limited, g⊕ the reference Earth's GM ÷ R², so that the factor is 1 there
+   (`decision-r09-t5.md` item 3; the lithosphere factor acts on the constructional share and the
+   edifice cap only, Design note 3); flexure w = w₀ e^(−x/α)(cos x/α + sin x/α) with
+   α = [4D ÷ ((ρ_m − ρ_fill) g + E T_e ÷ R²)]^¼, the last term a spherical shell's membrane support
+   (Brotchie and Silvester 1969), ρ_m the density beneath the lithosphere (3,300 kg m⁻³ under a
+   silicate lid, Turcotte and Schubert's; the lid's own ice under a water-ice lid), ρ_fill = ρ_p,
+   the province's bulk density, its palette entry's grain density times 0.8 (porosity 0.2, from
+   Mars's crust, Goossens et al. 2017), the load's and the moat fill's alike, so that the uniform
+   foundation is exact; each load's height is its height above the filled level, and the surface is
+   raised by h alone: the moat and the bulge both stand at the filled level, the bulge planed, which
+   is the uniform foundation's exact surface (`decision-r09-t12-coarse.md` addendum 3),
+   D = E T_e³ ÷ 12(1 − ν²), E 100 GPa, ν 0.25, T_e at most the body's radius; an open moat at
+   T_e = 70 km under Mars's gravity gives α = 176 km, and the reference Mars's filled moat at its
+   107 km gives 337 km (`decision-r09-t12-coarse.md` items 3 and 4, and addendum 2).
    The synthesis's amplitudes are fixed per body by its `BandSpectrum` (the
    structural share's law, `decision-r09-t5.md` items 2–4: per-degree variance ∝ l^−β₁ from the
    coarse cell to a break at λ_b, and ∝ l^−β₂ below it, continuous; on silicate crusts β₁ 2.0, λ_b
@@ -791,17 +812,22 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    (Earth2014 with the abyssal hills its altimetric bathymetry lacks), 60 m on a rocky stagnant lid
    (Mars's crater-poor plains and the maria) and 50 m on an ice-rich crust (Europa), all medium to
    medium-low confidence (`decision-r09-t5.md` item 3). The coarse elevation is scaled affinely
-   about its area-weighted mean so that the **reconstructed** field's variance, the interpolant of
-   Design note 13 integrated by solid-angle quadrature at sub-cell points, is σ_h² less the local
-   shares: the realised structural share (above), and the craters' and channels' closed forms finer
-   than the coarse cell's Nyquist wavelength, the coarse craters' sharpening included
-   (`decision-r09-t5.md` item 4); and again after erosion, when the channels' share is known; the
-   cell values alone would fall several per cent short by the spline's smoothing. The local share
-   is not negligible at the plan's own levels: above the coarse cell's Nyquist degree it is 0.6% of
-   σ_h² for an Earth or a Mars (about 200 m RMS), 4% for Mercury, 5% for Ceres and 7% for the Moon
-   (about 600 m), all contributions together, against the brainstorm's 0.1–0.2% and 2%, which hold
-   at a 35 km wavelength. Sea level is the area-weighted quantile that leaves plan 14's ocean
-   fraction below it. The realised σ_h and greatest relief go in the header.
+   about its area-weighted mean, the coarse craters' share through their kept relief while the scale
+   is at most 1 and the non-crater field alone above it, so that the **reconstructed** field's
+   variance, the interpolant of Design note 13 integrated by solid-angle quadrature at sub-cell
+   points, is σ_h² less the local shares: the realised structural share (above), and the whole share
+   the craters and channels add below the cells: the small craters' whole, each coarse crater's
+   increase of its mean square from its coarse profile to its band limit's, and the channels'
+   (`decision-r09-t5.md` item 4, amended by `decision-r09-t12-coarse.md` addendum 4); and again
+   after erosion, when the channels' share is known; the cell values alone would fall several per
+   cent short by the spline's smoothing. The local share is not negligible at the plan's own levels:
+   above the coarse cell's Nyquist degree it is 0.6% of σ_h² for an Earth or a Mars (about 200 m
+   RMS), 4% for Mercury, 5% for Ceres and 7% for the Moon (about 600 m), all contributions together,
+   against the brainstorm's 0.1–0.2% and 2%, which hold at a 35 km wavelength. Sea level is the
+   level of the ocean, grown by a priority flood from the largest connected region below the
+   area-weighted quantile that leaves plan 14's ocean fraction below it until it covers that
+   fraction; enclosed depressions below it stay dry until R09.T14 places lakes. The realised σ_h and
+   greatest relief go in the header.
 8. **Climate** (researched 2026-09-29: Ramirez 2024, arXiv:2310.15992; Spiegel, Menou and Scharf
    2008; Siler, Roe and Armour 2018; Hergarten and Robl 2022; Williams and Kasting 1997's exponents
    from memory). Ramirez 2024 cannot be reimplemented from the paper, since its outgoing radiation
@@ -825,9 +851,14 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    a locked world's tidally locked coordinates, rather than the brainstorm's 5° × 30°, which is too
    coarse to interpolate to cells of about 72 km: Spiegel et al. 2008 found a 10° latitude grid
    biases the global mean by over 4 K and converged at 1.25° (researched 2026-09-29, medium
-   confidence; Okuya et al. 2019 for a two-dimensional precedent). The fields are interpolated to
-   the cells bicubically before the lapse term. A month is a twelfth of the seasonal orbit in
-   eccentric anomaly, counted from periapsis.
+   confidence; Okuya et al. 2019 for a two-dimensional precedent). The model reads the relief, its
+   prognostic temperature staying the sea-level one: each grid point's surface heights, as
+   equal-area quantiles, set its albedo and ice heat capacity at the ground's temperature, T − Γz,
+   and its outgoing radiation is the sea-level column's less the change at the raised ground,
+   transmitted through the column above it (R09.T13.g, decision-r09-t13a-relief). The fields are
+   interpolated to the cells bicubically before the lapse term, which re-applies the same Γ at each
+   cell's own height. A month is a twelfth of the seasonal orbit in eccentric anomaly, counted from
+   periapsis.
    - Month k spans E from k·30° to (k + 1)·30°. Its share of the period is
      [ΔE − e (sin E_{k+1} − sin E_k)] ÷ 2π: a twelfth on a circular orbit, 29.9–30.9 d on Earth,
      and 0.4–1.6 twelfths at e = 0.6.
@@ -2301,42 +2332,54 @@ the plate's own divergent boundary, which GDH1 reads, is zero on ridges and neve
 trench; a stagnant-lid world has none; each oceanic cell's source half-rate is |ω × r| ÷ 2 normal
 to the ridge on hand-placed plates, inherited along the own-ridge transform; its age is d_r ÷ u_h,
 capped at 200 Myr; a plate with no divergent boundary has 200 Myr and 23 mm a⁻¹
-(`decision-r09-t5.md` item 5). Acceptance:
+(`decision-r09-t5.md` item 5); that age is the kinematic age, which R09.T12.a ranks into the
+steady-state age (`decision-r09-t12-coarse.md` item 1). Acceptance:
 `cargo test -p hyperion-sim planetary::surface::steps::plates`.
 
 ### R09.T12 Coarse elevation
 
 - **R09.T12.a Crust and ridges.** `steps/relief.rs`: Design note 7's two crust populations (their
   lithologies from plan 14's `crust`: `Oceanic` the secondary crust's entry, `Continental` the
-  tertiary's) about sea level and GDH1's age–depth law from the distance to divergent boundaries.
-  Tests: the reference Earth's hypsometry, binned as Earth2014 was (area-weighted 250 m bins, the
-  TBI layer at 5′), is bimodal with a land mode within 300 m of +125 m, an ocean modal bin among
-  the centres −5,125 to −4,125 m (Earth2014's bins within 10% of its −4,375 m peak) and a mean
-  below −2 km from −4,731 to −3,981 m (Earth2014's −4,281 m, +300 m and −450 m, the deep side
-  widened for the intraplate volcanism no task builds; `decision-r09-t12-coarse.md` item 1); the
-  unloaded basement is GDH1's at 5, 20 and 100 Myr to 1 m. The sea floor's roughness inputs
-  (`decision-r09-t5.md` item 5): H₀ from the source half-rate, the pelagic drape from the age and
-  latitude, the ponded wedge from the plate's passive margins over its own oceanic cells, quantised
-  into `seafloor`. Tests: H₀ within 30% of the mean of Goff et al. 2004's Table 2 entries at full
-  rates of 28, 40, 75 (the axial high alone), 110 and 160 mm a⁻¹ (`decision-r09-t12-coarse.md`
-  item 5a); S_p is 468 m at 81 Myr on the equator; the wedge never crosses a plate boundary; on
-  the reference Earth, oceanic cells whose style amplitude is at most 0.2 cover 25–40% of the
-  oceanic crust deeper than 3 km, and the mean of S_p + S_t over oceanic crust farther than 200 km
-  from a passive margin is 250–600 m (GlobSed's 404 m).
+  tertiary's) about sea level and GDH1's age–depth law on the steady-state age, ranked from the
+  distance to divergent boundaries, under the sediment's isostatic load
+  (`decision-r09-t12-coarse.md` item 1). Tests: the reference Earth's hypsometry, binned as
+  Earth2014 was (area-weighted 250 m bins, the TBI layer at 5′), is bimodal with a land mode within
+  300 m of +125 m, an ocean modal bin among the centres −5,125 to −4,125 m (Earth2014's bins within
+  10% of its −4,375 m peak) and a mean below −2 km from −4,731 to −3,981 m (Earth2014's
+  −4,281 m, +300 m and −450 m, the deep side widened for the intraplate volcanism no task builds;
+  `decision-r09-t12-coarse.md` item 1); the unloaded basement is GDH1's at 5, 20 and 100 Myr to 1 m;
+  the steady-state ages' area-weighted mean is t_m ÷ 3 to 10⁻⁹ relative, they never decrease with
+  the kinematic age, and t_m is 192.9 Myr on the reference Earth and quadruples when the heat flow
+  halves. The sea floor's roughness inputs (`decision-r09-t5.md` item 5): H₀ from the source
+  half-rate, the pelagic drape from the age and latitude, the ponded wedge from the plate's passive
+  margins over its own oceanic cells, quantised into `seafloor`. Tests: H₀ within 30% of the mean of
+  Goff et al. 2004's Table 2 entries at full rates of 28, 40, 75 (the axial high alone), 110 and
+  160 mm a⁻¹ (`decision-r09-t12-coarse.md` item 5a); S_p is 468 m at 81 Myr on the equator; the
+  wedge never crosses a plate boundary; on the reference Earth, oceanic cells whose style amplitude
+  is at most 0.2 cover 25–40% of the oceanic crust deeper than 3 km, and the mean of S_p + S_t over
+  oceanic crust farther than 200 km from a passive margin is 250–600 m (GlobSed's 404 m). On every
+  lid without plates, one structural population about the datum: Gaussian, of plan 14's
+  `STAGNANT_LID_RELIEF`, its degree variance ∝ l^−β₁ from degree 2 to the cell (Turcotte 1987)
+  (`decision-r09-t12-coarse.md` addendum A1).
 - **R09.T12.b Convergent landforms.** Belts, trenches and arcs by boundary kind, scaled as Design
   note 7 says. Tests: belts lie within their stated distance of convergent boundaries; trenches lie
   2–4 km below the neighbouring sea floor and the arcs' volcanic fronts lie behind them with
   medians within 15 km of 190 km (oceanic overriding plate) and 260 km (continental), 80% of
   fronts within 140–250 and 180–330 km (`decision-r09-t5.md` item 6).
 - **R09.T12.c Stagnant-lid provinces and flexure.** After T0.b's isotherm item. Volcanic provinces
-  sized by the volcanism level
-  and the flexural moat and bulge about each load, with T_e = k (870 K − T_s) ÷ F (T0.b's ruling,
-  Design note 3). T_e's isotherm and conductivity come from the crust's substance: the ice lean of
-  Risks becomes the `H2O` row's (decision-composition). Tests: a line load's bulge crest lies at πα
-  with height 0.043 w₀; α at T_e = 70 km under Mars's gravity (3.71 m s⁻²) and radius (3,389.5 km),
-  with ρ_m 3,300 kg m⁻³ and an open moat (ρ_fill = 0), is 180 km ± 10 (its value 175.5 km;
-  `decision-r09-t12-coarse.md` item 3); T_e is 108 km ± 1 at Mars's 19 mW m⁻² and 210 K, and
-  zero where T_s ≥ 870 K, where each load is compensated locally (α = 0).
+  sized by the volcanism level and the flexure about each load, its moat filled and its bulge planed
+  to the surface's level (addenda 2 and 3), with T_e = k (870 K − T_s) ÷ F (T0.b's ruling, Design
+  note 3). T_e's isotherm and conductivity come from the crust's substance: the ice lean of Risks
+  becomes the `H2O` row's (decision-composition). Tests: a line load's bulge crest lies at πα with
+  height 0.043 w₀; α at T_e = 70 km under Mars's gravity (3.71 m s⁻²) and radius (3,389.5 km), with
+  ρ_m 3,300 kg m⁻³ and an open moat (ρ_fill = 0), is 180 km ± 10 (its value 175.5 km;
+  `decision-r09-t12-coarse.md` item 3); a water-ice lid's T_e is (567 W m⁻¹ ÷ F)
+  ln(170 K ÷ T_s), 2.52 km at 200 mW m⁻² and 70 K; T_e never exceeds the body's radius; T_e is
+  108 km ± 1 at Mars's 19 mW m⁻² and 210 K, and zero where T_s ≥ 870 K, where each load is
+  compensated locally (α = 0); under a load the surface stands at the load's height above the filled
+  level, and off the loads at the filled level, in the moat and on the bulge alike; on the reference
+  Mars the loads' footprint covers at most 25% of the surface (`decision-r09-t12-coarse.md`
+  addendum 2).
 - **R09.T12.d Coarse craters.** `steps/craters.rs`, Design notes 5 and 10, after T7.e. Each
   crater's shape is T7.a's `crater_shape`, so the coarse elevation and the client's T7.c rims are
   one profile. Tests:
@@ -2346,10 +2389,12 @@ capped at 200 Myr; a plate with no divergent boundary has 200 Myr and 23 mm a⁻
   the reference Moon's coarse craters' rim heights are Pike 1980b's 0.236 D^0.399 to 1%.
 - **R09.T12.e σ_h and sea level.** Design note 7, on the reconstructed field, after T4 and T5.
   Its σ_h budget books the realised structural share, the area mean of each quadrature point's
-  `Relief::point_variance`, which includes the belts' lift (`decision-r09-t5.md` item 8), with
-  the craters' and channels' closed forms finer than λ_c. The header's spectrum is
-  `BandSpectrum::anchored` of the body's crust class (`decision-r09-t5.md` item 3), chosen from
-  `surface_material` and `tectonics`.
+  `Relief::point_variance`, which includes the belts' lift (`decision-r09-t5.md` item 8), with the
+  whole share the craters and channels add below the cells: the small craters' whole, each coarse
+  crater's increase of its mean square from its coarse profile to its band limit's, and the
+  channels' (`decision-r09-t5.md` item 4, amended by `decision-r09-t12-coarse.md` addendum 4). The
+  header's spectrum is `BandSpectrum::anchored` of the body's crust class (`decision-r09-t5.md`
+  item 3), chosen from `surface_material` and `tectonics`.
   Tests, as main's rulings of 2026-10-19 amend them (`decision-r09-t12-coarse.md` addendum 4): the
   whole surface's reconstructed σ_h, √(Var_recon + S_s + K_w + R_inc + C_c), the craters waiting
   for the erosion step smoothed in, equals the input to 10⁻⁶ relative after the step; the local
@@ -2944,22 +2989,32 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
   - _The belt's shape._ The ridge–valley gain (1.8 at 1.5 breaks, width 0.6 in ln λ) and the
     hillslope steepening (0.4) are fitted to eight SRTM tiles of the Himalaya, Andes and Alps, at
     31 m and coarser. Metre-scale lidar of threshold ranges would test the 1 m figure.
+  - _Intraplate volcanism on a mobile lid._ No task builds oceanic plateaus, seamounts or hotspot
+    swells (GSFM: 10.2% of the ocean), which hold some 250–300 m of Earth2014's ocean mean; T12.a's
+    mean band is widened on its deep side by 150 m until they are built
+    (`decision-r09-t12-coarse.md` item 1).
+  - _A regional volcanic rise._ T12.c's provinces are edifices on filled moats. Mars's
+    constructional relief is mostly Tharsis's rise, which an edifice law reaches only with some 30
+    cap-height shields; a rise component is for T12.c's re-validation (`decision-r09-t12-coarse.md`
+    addendum 2); with it, a standing bulge on its own foundation ρ_m g + E T_e ÷ R² and the
+    axisymmetric (Kelvin-function) profile about each edifice, which the line-load reading
+    overstates (root 2.1×, bulge 5.3×) (`decision-r09-t12-coarse.md` addendum 3).
 - **Remaining checks, as researched** (R09.T0.b, 2026-10-09). Each item is settled in its design
   note; what stays open, with the lean and what would settle it:
-  - _Open question 20, a science ruling for the owner_ (asked by T0.a: does accepting P14.T48.a's
-    σ_h model, labelled empirical, rule the rendering brainstorm's open question 20?). Finding: yes,
-    in substance. The question asks for three things, and T48.a answers each from this plan's
-    research: σ_h published in place of the greatest relief, which the field reports as its
+  - _Open question 20 (accepted, `signoff-3.md` item 1.16)_ (asked by T0.a: does accepting
+    P14.T48.a's σ_h model, labelled empirical, rule the rendering brainstorm's open question 20?).
+    Finding: yes, in substance. The question asks for three things, and T48.a answers each from this
+    plan's research: σ_h published in place of the greatest relief, which the field reports as its
     realised relief instead; σ_h's gravity scaling, none in the structural share and 1/g in the
-    basin and constructional shares (g^−0.22 overall with a 2.5× scatter over seven bodies, so not
-    a function of gravity alone); and the lithosphere factor's part, min(1, T_e ÷ 70 km) on the
+    basin and constructional shares (g^−0.22 overall with a 2.5× scatter over seven bodies, so not a
+    function of gravity alone); and the lithosphere factor's part, min(1, T_e ÷ 70 km) on the
     constructional share and the edifice cap only, with T_e's isotherm now ruled (870 K). Lean:
     accept T48.a, and record open question 20 as ruled by that acceptance with three conditions
     written into the ruling: f_c's law (Design note 3) is part of the model, since the structural
-    share is a function of f_c; Mercury's 21% over-prediction stays the out-of-sample measure,
-    shown by T0.b not to come from its smooth plains, so T48.a's 25% tolerance on Mercury stays; and
-    the age law is stated as global and uncalibrated in its middle (below). What would reopen it is
-    a second out-of-sample body, such as Ganymede's σ_h from JUICE's laser altimeter. The brainstorm
+    share is a function of f_c; Mercury's 21% over-prediction stays the out-of-sample measure, shown
+    by T0.b not to come from its smooth plains, so T48.a's 25% tolerance on Mercury stays; and the
+    age law is stated as global and uncalibrated in its middle (below). What would reopen it is a
+    second out-of-sample body, such as Ganymede's σ_h from JUICE's laser altimeter. The brainstorm
     is not edited here; its revision is the owner's.
   - _The age law's middle._ No body tests √min(1, N ÷ 0.018) between saturation (3.8 Ga by the
     lunar chronology) and the young surfaces where the basin share is negligible, and partly
@@ -2967,13 +3022,13 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
     Mars's lowlands far smoother than the law). Lean: keep it, labelled; a globally resurfaced body
     3.0–3.8 Ga old would settle it, and the Solar System has none.
   - _An ice-rich crust's T_e._ The 870 K silicate isotherm, with k = 3.1 W m⁻¹ K⁻¹, does not
-    describe an ice lithosphere. Lean: T_e = (651 W m⁻¹ ÷ F) ln(T_iso ÷ T_s), from ice's
-    conductivity k = 651 ÷ T W m⁻¹ K⁻¹ (Petrenko and Whitworth 1999, from memory), with T_iso ≈
-    170 K, this check's inversion of Giese et al. 2008's Enceladus (GRL 35(24),
-    doi:10.1029/2008GL036149: an elastic 0.3 km and a mechanical 2.5 km at 200–270 mW m⁻², which
-    give 150–200 K at T_s ≈ 70 K). A pass over icy-satellite flexure (Europa, Ganymede) would
-    settle it before T12.c's provinces reach an icy world; until then T12.c applies the lean,
-    labelled low confidence.
+    describe an ice lithosphere. Ruled (`decision-r09-t12-coarse.md` item 4): T_e = ∫ k dT ÷ F with
+    the `H2O` row's k = 567 ÷ T (Klinger 1980), (567 W m⁻¹ ÷ F) ln(T_iso ÷ T_s), with T_iso = 170 K
+    kept as a rheological isotherm, not re-inverted with the row's k. Giese et al. 2008's fluxes
+    come from their own strength envelope, and 170 K gives their 2.5 km at 200 mW m⁻²; 170 K is also
+    the silicate rule's homologous temperature (870 K ÷ 1,393 K × 273.15 K). Low confidence,
+    labelled; the conductivity's spread (567, 612 and 651 ÷ T) is 15%. A pass over icy-satellite
+    flexure would still settle it.
   - _f_c's distribution and mass._ Höning and Spohn 2023 treat Earth-sized planets only; the
     uniform [0.2, 0.7] draw spans their three outcomes without weighting them, and no mass or
     water-inventory dependence is modelled. Lean: as drafted in P14.T48.a; a continental-growth
@@ -4079,17 +4134,17 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
     those types when they land. A condensate's `reservoir` and a wet epoch's `paleo_inventory` are
     masses per square metre of the whole surface (`KilogramsPerSquareMetre`), not layers, so that
     no density is assumed and condensates sort by mass as P14.T51.a sorts them; an area share is
-    the cover all year, the cells R09.T13.d makes icy by their warmest month, seasonal cover being
-    the climate's. `CrustInputs` leaves which entry a `Lid` and a `Province` cell take to T12 and
-    follow-up B. _The palette's sources are not built:_ the values each palette entry carries (A_N
-    in B, V and R, the phase row, density, transition and mechanics family, resolved by the server)
-    are follow-up B's `PaletteEntry` and `MechanicsFamily`, which do not exist yet, and the deposits
-    (`mars_dust`, `Na2CO3`) come with them. Whichever of follow-up B and this task lands second adds
-    B's header parts (`palette`, `crust_palette`, `main_liquid`) and the cells' `substances` to
-    `quantise` (an empty palette and none for the no-op pass); the palette's sources then follow as
-    a T10 follow-up (proposed R09.T10.b, after B and before T15; lean: a `MaterialPalette` of
-    resolved entries as a builder argument until P14.T49.b–c and T54.a), with the reference worlds'
-    palettes, which T15 and T16 need.
+    the cover all year, the cells R09.T13.d makes icy by their annual radiative mean, seasonal cover
+    being the climate's. `CrustInputs` leaves which entry a `Lid` and a `Province` cell take to T12
+    and follow-up B. _The palette's sources are not built:_ the values each palette entry carries
+    (A_N in B, V and R, the phase row, density, transition and mechanics family, resolved by the
+    server) are follow-up B's `PaletteEntry` and `MechanicsFamily`, which do not exist yet, and the
+    deposits (`mars_dust`, `Na2CO3`) come with them. Whichever of follow-up B and this task lands
+    second adds B's header parts (`palette`, `crust_palette`, `main_liquid`) and the cells'
+    `substances` to `quantise` (an empty palette and none for the no-op pass); the palette's sources
+    then follow as a T10 follow-up (proposed R09.T10.b, after B and before T15; lean: a
+    `MaterialPalette` of resolved entries as a builder argument until P14.T49.b–c and T54.a), with
+    the reference worlds' palettes, which T15 and T16 need.
   - _The months and winds_ (built on T2's follow-up A, `e37b16d6`, merged before commit). The
     quantiser writes each month's wind from the working state's twelve, a one-month year's later
     eleven calm, and the header's `season_eccentricity` from `inputs.seasonal_orbit()`'s
@@ -4694,9 +4749,28 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
     records taken at `RECORD_TIME` (the epoch, the sim's constant since R09.T10.e), and it is frozen
     at 23. P14.T54.a only connects the crust, the condensates and the palette's resolution, and
     R09.T17 and R09.T19.a take the signature from T10.f.
-  - The airless mean temperature is imposed as the radiative mean ⟨T⁴⟩^¼ in R09.T13.c–d, T10's
-    lean, with T13's science check to confirm. `CoarseInputs::mean_surface_temperature`'s
-    documentation says so.
+  - The airless mean temperature is imposed as a radiative mean in R09.T13.c–d, T10's lean, with
+    T13's science check to confirm. _Confirmed and refined 2026-10-16
+    (decision-r09-t13d-normalisation):_ it is the brightness temperature of the emitted flux less
+    the night floor's, averaged as flux over the surface and the year, on every world the radiative
+    model runs, a thin air included. Plan 14's figure is the equilibrium temperature at unit
+    emissivity, a balance of absorbed starlight alone. The literal ⟨T⁴⟩^¼ would cool the Moon's
+    field by 4.2 K and a locked lava world's by about 27 K, half its night floor.
+    `CoarseInputs::mean_surface_temperature`'s documentation says so.
+- **Rulings for T13.d's questions** (2026-10-16, decision-r09-t13d-normalisation).
+  - _The ice's key_ is the cell's annual radiative mean, ⟨T⁴⟩^¼ over the year, ties by the
+    warmest month, then by cell index; the ices go most volatile first. It is not the warmest
+    month, which on a dry, low-heat-capacity world ices the tropics at Earth's tilt, a ring at
+    60–76° in Mars-like cases, and a Pluto's equator. It is not the arithmetic mean either,
+    which ices the poles of a warm dry world at 90° and of a Pluto, whose ice Hamilton et al.
+    2016 find near ±30°.
+  - _The contrasts_ are imposed on the field's ends and on its μ-weighted day and night, by
+    corrections shaped like P₂ and P₁, not on those coefficients, which carry 0.45 of a Moon's
+    ends. The correction is not the field's own shape scaled, which is undefined on an
+    isothermal field and unbounded where a contrast changes sign.
+  - _The kinds of mean_ are arithmetic on the energy-balance and isothermal models, and on the
+    radiative model the brightness of the emitted flux, less the night floor's for the mean and
+    the equator–pole contrast. The radiative model has no lapse term.
 - **Deviations in T17, as built** (2026-10-13).
   - _Files._ The task's `surface/{mod,cache,service,inputs}.rs` and `config.rs`, with `lib.rs`
     (the `AppState::surface` field, its start and its shutdown), `stats.rs`
@@ -6440,8 +6514,9 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
   - _Hydraulic geometry._ Parker et al. 2007, eqs. 10a and 12, at D50 0.073 m and the body's own
     gravity, from `header.craters().gravity()`. The channel-forming discharge is the bankfull flood,
     55 (A ÷ 5 km²)^−0.25 times the mean, held outside 5.4 km² to 2.964 × 10⁶ km²: a least-squares
-    fit by this task's science check to the 1.5-year floods of seven USGS gauges, not published,
-    **drafted for sign-off**. The plan's other candidate, the mean over the 5% reference
+    fit by this task's science check to the 1.5-year floods of seven USGS gauges, empirical and not
+    published, calibrated on humid-to-subhumid US rivers only; signed off 2026-10-19
+    (`signoff-12.md`, item 16). The plan's other candidate, the mean over the 5% reference
     intermittency (20×), was 2.5–8 times too high above 10⁴ km² (must-fix of that check).
   - _Closed forms._ Per level, from measured densities and lengths (0.75, 0.65 and 1.0 cells), a
     finer level's realised share of 0.46 and the whole's 0.52 of the levels' summed variance. The
@@ -6491,8 +6566,20 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     below the 4 m cut down to the heads on the Earth-like world, 14 m (21 m) on the Mars-like.
     Evaluating to the heads alone would cost about 0.11 µs a level more (three or four levels on
     an Earth). Lean: cut at the heads alone. That changes the task's rule, so it waits for a ruling.
-  - _The bankfull ratio is a drafted fit_ to seven humid US gauges, used on every world, a Mars's
-    episodic floods included. It needs the sign-off agent, and a published relation if one exists.
+  - _The bankfull ratio is humid Earth's on every world_ (an empirical fit, signed off as built,
+    `signoff-12.md` item 16). No published relation covers 5 km² to 3 × 10⁶ km²; two humid US
+    regional curves bracket it at 10–50 km² and lie at or below it at 500–1,800 km² (Chaplin 2005,
+    USGS SIR 2005-5147; Sherwood and Huitger 2005, SIR 2005-5153). Deferred:
+    - a Mars's channel-forming flow is about 20 times its mean by science-hoke.md §3, against
+      8.2–4.6 here at 10⁴–10⁵ km², so its channels are 1.5–2.0 times too narrow, which T14.c's Mars
+      volume test reads;
+    - arid floods (1% intermittency), snowmelt rivers and Titan's storms are flashier;
+    - large channels flood less often than small ones (Dodov and Foufoula-Georgiou 2005, WRR 41,
+      W05005; Scott et al. 2019, Nat. Commun. 10, 5194);
+    - without Slade Run the fit is 71 (A ÷ 5 km²)^−0.28.
+
+    A ratio by flood regime moves the height goldens, so it waits for a ruling when it is taken up.
+
   - _Parker's Q̂ range_: ¶12 gives four and a half decades, but the 62 parsed reaches span 3.7
     (242 to 1.3 × 10⁶). Re-derive from all 72.
   - _Bed and liquid_: Parker's fit is for quartz gravel in water (R ≈ 1.65), and no grain size
@@ -7126,9 +7213,11 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     "(distance, cell index)" order is (distance, cell, source), over each plate's own cells. The
     surface crate's registry docs (`tags.rs`) say the same, which T11 left alone to keep its
     files the sim's.
-  - _The working state grew_ by `seafloor_origin`, about 40 B a cell (16 MB at level 8), and the
-    step holds some 70 MB more while it runs (two warped centres, the contacts, two transforms'
-    reaches), beside R09.T17's deferred estimate of about 100 MB a pass ("Concurrent passes").
+  - _The working state grew_ by `seafloor_origin` and `CellState::subducts`, the nearest boundary's
+    polarity, set by `Layout::write` for R09.T12.b (`decision-r09-t12-coarse.md` addendum A2), about
+    40 B a cell (16 MB at level 8), and the step holds some 70 MB more while it runs (two warped
+    centres, the contacts, two transforms' reaches), beside R09.T17's deferred estimate of about
+    100 MB a pass ("Concurrent passes").
   - _Cost_ (provisional, at `opt-level = 2` under shared load): the step takes some 0.6–0.9 s on
     the reference Earth at level 8: the warp 0.06 s, the fit 0.2–0.4 s, the crust 0.08 s, the
     layout 0.33 s (two transforms of 0.15 s each). The pass's own tests on the reference Earth
@@ -7896,7 +7985,8 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     the volcanic construction alone, where the rendering brainstorm's step 4 under "The coarse
     global pass, once per planet" reads "the flexural trough and bulge around each load". Recorded
     for the owner's ruling-driven brainstorm edit, which this lane may not make; DN6's and T12.c's
-    "moats and bulges" (lines 752–753 and 2261) could take the same wording in a docs batch.
+    "moats and bulges" (lines 752–753 and 2261) could take the same wording in a docs batch. _Ruled
+    2026-10-19 (`signoff-12.md`, item 41): the brainstorm, Design note 6 and T12.c's text say so._
   - _The hand-placed edifice_ of the surface test is the reference Mars's edifice laid by hand
     through its own table, since `lay` is private to `provinces`; the laid field's planed cells
     (w < 0, no load) are held to a lift of exactly 0 as well.

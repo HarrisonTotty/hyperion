@@ -65,7 +65,7 @@ In scope:
   line of sight (`ELEVATION`, `SLOPE`, `SLANT RANGE`, `MATERIAL`, `RESOLUTION`) with coverage- and
   resolution-gated uncertainty.
 - The patch cache's sizes, formats and slot layout per setting, and the resident-memory check.
-- Draft UX guide entries these need, for the owner's sign-off.
+- Draft UX guide entries these need, for the sign-off queue (the owner's delegation).
 
 Non-goals:
 
@@ -763,12 +763,12 @@ targets at header 21 (below).
    geometric error for heightmap terrain is a horizontal-spacing heuristic,
    `getEstimatedLevelZeroGeometricErrorForAHeightmap`, with `maximumScreenSpaceError` defaulting to
    2 px (verified in `TerrainProvider.js` and `Globe.js`). So the hard bound stays the stated and
-   tested bound, which is what a sensor's stated error means. The candidate calibration, for the
-   owner's ruling with T4.a's numbers, is that selection takes the smaller of the hard bound and 4σ
-   of the omitted bands, σ from R09's level-keyed closed forms (`Synthesiser::omitted_rms` at the
-   level, added by R10.T5). Over a patch's 4,225 vertices, taken as
-   independent Gaussian deviations, the 1 − 1 ÷ 4,225 quantile of |x| is Φ⁻¹(1 − 1 ÷ 8,450) ≈
-   3.68σ and the expected maximum of |x| about 3.81σ (median 3.77σ), so 4σ is a thin margin: one
+   tested bound, which is what a sensor's stated error means. The candidate calibration, ruled to
+   apply by T4.a's and T4.b's numbers (`signoff-12.md`, item 30), is that selection takes the
+   smaller of the hard bound and 4σ of the omitted bands, σ from R09's level-keyed closed forms
+   (`Synthesiser::omitted_rms` at the level, added by R10.T5). Over a patch's 4,225 vertices, taken
+   as independent Gaussian deviations, the 1 − 1 ÷ 4,225 quantile of |x| is Φ⁻¹(1 − 1 ÷ 8,450)
+   ≈ 3.68σ and the expected maximum of |x| about 3.81σ (median 3.77σ), so 4σ is a thin margin: one
    patch in four or so has a vertex past it, P(max |x| > 4σ) = 1 − (2Φ(4) − 1)^4,225 ≈ 0.23, and
    a bound exceeded in one patch in a thousand would need about 5.2σ (researched 2026-09-29; the
    quantiles computed, high confidence; real deviations are correlated and skewed, which T4.a's
@@ -1045,8 +1045,10 @@ targets at header 21 (below).
     and 4.6 × 10⁶ m in the wireframe. The first lies near the brainstorm's 2 × 10⁷ m (Two styles of
     one renderer), but that figure is a different one, where a 35 km coarse cell spans 4 px, and
     agrees only by coincidence. The resolved slopes and shadows at that level are negligible, which
-    is why the same smooth law holds on both sides of it (Design note 8). A body with no survey
-    never hands over.
+    is why the same smooth law holds on both sides of it (Design note 8). _Not so at high phase: the
+    fixture's level-6 cells, resolved over 2 to 3 px at the hand-over, change by up to 0.42 stop at
+    90° (T16.d, F2), the shading of their mean slope. R10.T10.g gives the disc the field's normals
+    (decision-r10-t16-leans §1)._ A body with no survey never hands over.
 14. **The wireframe's contours are chosen as a scale is** (researched 2026-09-29). The wireframe
     draws its terrain once, depth only, at 4 px, and writes colour only where the interpolated
     height crosses a contour level. The interval is one deterministic rule of pose alone, so every
@@ -1470,10 +1472,11 @@ module (`src/ground/golden.rs`; corrected 2026-10-14; "Deviations in T3, as buil
   figures are recorded.
 - **R10.T4.b Selection by the real bound.** The worker answers `field_init` with the body's
   `LevelBounds` (hard and σ per level, σ R09's level-keyed `Synthesiser::omitted_rms`, added by
-  R10.T5); `levelBounds.ts` holds them per body and `selectionBound`
-  gives R05's `screenSpaceErrorPx` its ε_n under the rule in force (the hard bound until the owner's
-  ruling), for each style's τ: 1 px high and 2 px low (the brainstorm's lean; CesiumJS's default
-  `maximumScreenSpaceError` is 2 px, though its error is a spacing heuristic), and 4 px wireframe.
+  R10.T5); `levelBounds.ts` holds them per body and `selectionBound` gives R05's
+  `screenSpaceErrorPx` its ε_n under the rule in force (the hard bound until T4.b applies
+  `signoff-12.md` item 30's rule), for each style's τ: 1 px high and 2 px low (the brainstorm's
+  lean; CesiumJS's default `maximumScreenSpaceError` is 2 px, though its error is a spacing
+  heuristic), and 4 px wireframe.
   As built, selection reads the bound column of the body's level table (`PlanetGeometry.levels`,
   stride 4), and its error is that bound plus R05's chord sagitta (`selectionErrorM`), so
   `selectionBound` fills that column and `field_init`'s answer carries the rest of the table, the
@@ -1489,8 +1492,10 @@ module (`src/ground/golden.rs`; corrected 2026-10-14; "Deviations in T3, as buil
   parameter; R05's
   history-independence test passes with real bounds; the grounded-body rule still yields the finest
   level. Recorded in this task's plan entry, from T4.a's `level-bounds.json` fixture through
-  `selectPatches` over R05's scripted descent (`descentProfile.ts`): the patches selected at τ = 1
-  px per world under the hard bound and under min(hard, 4σ), so the owner rules with numbers.
+  `selectPatches` over R05's scripted descent (`descentProfile.ts`): the patches selected at
+  τ = 1 px per world under the hard bound and under min(hard, 4σ), and applies `signoff-12.md`
+  item 30's rule to them: min(hard, 4σ) where it saves 1.5 times or more on every world and the
+  per-patch maxima pass 4σ in at most one patch in three, else the hard bound.
   Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` and the counts
   recorded.
 
@@ -1668,6 +1673,19 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   to look: a coarse–fine edge, with the blend, a same-level patch edge (Risks, "Edges between far
   points") and a face edge near a cube corner (decision-r10-t8a §1). Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain/shadows` and the smoke run.
+- **R10.T8.c The sunset's steps at patch edges** (new, decision-r10-t16-leans §9 and §16). The
+  shading normal morphs with the height: blended to the parent's normals tile by k, as
+  `terrainLit.wgsl` blends the horizon, so that a fine patch at k = 1 shades as its parent at a
+  coarse–fine edge (`terrainPatch.wgsl` reads the patch's own tile at every k today). Then a scratch
+  build tinting each patch by its level and its skirts and fins apart, at 228–236 s of
+  `TERRAIN TEST` looking north, on both settings, the primary alone and with a photorealistic
+  instrument, places what remains among T8.b's deferred candidates (the near field cut at patch
+  edges, the parent blend, skirts and fins lit without the horizon), and the task fixes it. The
+  multi-view morph invariant: a test of a view that draws, beyond its band's end, a coarse leaf
+  beside a finer one another view selected, then its remedy (bands from the levels each view draws,
+  or the morph held at a coarse–fine edge). Tests: at k = 1 a fine patch's shading normal equals its
+  parent's along their edge; the invariant; `just test-render --part=6`. By hand, hidden on the RTX
+  3080: the sunset at the same moments; then the owner's UHD 620 look.
 
 ### R10.T9 Cascaded terrain shadows on the high setting
 
@@ -1943,6 +1961,21 @@ src/renderer/src/view/bodies src/renderer/src/displays/view` and `just test-rend
   - **Acceptance.** `pnpm --filter hyperion exec vitest run src/renderer/src/view/bodies` and
     `just test-render`.
   - _As built (Risks, "Deviations in T10.f, as built")._
+- **R10.T10.g The hand-over's photometry** (new, decision-r10-t16-leans §1 and §13). The hand-over
+  is measured at the presented width's centre pixel, as the field's want is, so that the resolution
+  controller never moves it. The disc shades surveyed ground with the field's own normals: a
+  per-body normal map at the field's level over its surveyed cells, made by the workers beside the
+  class map (`coarse-field-gpu`), read by R07's disc in its `class-map` case and by T10.f's point
+  integral, so that disc and terrain share their cell-scale slopes at the switch. A cross-fade over
+  the hysteresis band only if a texel still changes by more than 1/3 stop. The survey's +0.04 stop
+  rise at the terrain's first draw at 90° traced (each pixel's law and shading normal, in a scratch
+  build) and fixed if it is a law or albedo mismatch. T10.e's harness committed as a check-only
+  variant of the terrain run, for T15. Tests: the hand-over range independent of the frame's
+  internal scale; with the normal map the disc's I/F equals the terrain's at the same cell normal,
+  per class, to 10⁻⁶; the point's flux at the 3 px switch within R07's 1% with the normals; the
+  harness at 30°, 90° and a view near the terminator (incidence 75° or more), both settings, every
+  texel of at least 2 shared pixels within 1/3 stop at 30° and 90°, the terminator's recorded.
+  Design note 13's premise and Design note 8's disc recorded.
 
 ### R10.T16 The live terrain path
 
@@ -2268,8 +2301,9 @@ src/renderer/src/view/spike` and `just test-render --part=6`.
       `target/views-check/terrain/`.
     - The forced loss is expected exactly once: one `device-lost` with reason `destroyed` inside the
       loss phase's window, then one restore; the faults verdict excludes that one alone. After it
-      the terrain is drawn again, no `field-init`, `field-chunk` or `surface_field` is asked, and the
-      masks hold the same cells.
+      the terrain is drawn again, no `surface_field` asked and no `field-init` posted, and no
+      `field-chunk` but the blocks of the answer in flight, each once to each worker, and the masks
+      hold the same cells.
     - It holds every frame drawn and finite, the terrain drawn once handed over, no field asked for
       again after the loss, and the session torn down at the end. "No pixel drawn by both surfaces
       on the datum" is held by T16.c's part-6 group, not by the hidden run.
@@ -3250,8 +3284,9 @@ RESOLUTION       410 m
     `ELEVATION`'s form when the spike next changes (R05's row; `DescentSpike.tsx`). It is not this
     task's to change.
   - _NIST and the guide's spans._ The same §7.7 also rules out "0 – 5 V", the form of the guide's
-    spans (`66.0 – 137 Mm`, line 227–229). The drafts do not touch the span rule. Lean: leave it,
-    a separate question for the owner.
+    spans (`66.0 – 137 Mm`, line 227–229). The drafts do not touch the span rule. Lean: leave it, a
+    separate question for the owner. _Ruled 2026-10-19 (`signoff-12.md`, item 18): both forms kept
+    as the console's choice, stated in the guide; a span inside a sentence takes "to"._
 
 - **If signed off, these follow** (other tasks' text, not changed here): Design note 6 (the
   unsurveyed form); Design note 14 (the index width, the fade's scoring, the datum's line and its
@@ -3304,11 +3339,15 @@ RESOLUTION       410 m
   store over the fixture client, its pass and its lane), with a landing site inside the survey, the
   profile's site height and floors measured by the workers' `slantRange` and level table in place of
   the test planet's `surfaceQuery`; the test planet stays the default. T14.b measures on it, and
-  T15's descent on a served world takes the same path once the serve gate opens. Files:
-  `view/spike/` (`spikeRun.ts`, `spikeScene.ts`, `descentProfile.ts`'s inputs) and
-  `scripts/descentSpike.sh`. Tests: the profile over the fixture clears its floors;
-  `just descent-spike --smoke --world terrain-test` (hidden) exits 0. Acceptance:
-  `pnpm --filter hyperion exec vitest run src/renderer/src/view/spike` and the smoke.
+  T15's descent on a served world takes the same path once the serve gate opens. Where it replaces
+  the test planet's ground function, a craft held in another body's frame is judged in that frame,
+  its frame chained through the body's retarded velocity in the system frame, which the scene holds
+  (R10.T16.b's third question, decision-r10-t16-leans §13). Files: `view/spike/` (`spikeRun.ts`,
+  `spikeScene.ts`, `descentProfile.ts`'s inputs) and `scripts/descentSpike.sh`. Tests: the profile
+  over the fixture clears its floors; the frame chaining on a small moon near its planet whose Hill
+  radius approaches its own radius; `just descent-spike --smoke --world terrain-test` (hidden)
+  exits 0. Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/spike` and the
+  smoke.
 - **R10.T14.b The measured sizes.** Measure the all-round and frustum peaks per view on R05's
   scripted descent over a generated world (T14.c's, through T16's session), on both settings and in
   both styles, with a second view
@@ -3323,6 +3362,19 @@ RESOLUTION       410 m
   machine's RTX 3080 and, by the owner, on the UHD 620. Acceptance: the figures recorded and the
   constants updated, with `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`
   passing.
+- **From R10.T16's rulings** (decision-r10-t16-leans §2, §13 and §16, 2026-10-20). T14 also
+  takes:
+  - _The compile lever_ (§2): the lit and depth materials compiled when the terrain session is
+    made, for the whole-page stall at the hand-over (1,317 ms with no animation frame on low, a
+    defect under the guide's Motion rule that a view never stops). Once it lands, the terrain run
+    gains a limit on the longest gap outside the restore, which T14 sets from the quiet-machine
+    runs (the worst gaps today 117 ms on high alone and 300 ms as the instruments open).
+  - _Eviction in place of rebakes_ (§13, T16.b's second question): an undrawn resident patch the
+    rebake rule names may be evicted instead of baked again, weighed beside the deferred
+    "Undrawn rebakes cost worker time".
+  - _The horizon's GPU time_ (§16): T8.b's lookup against the budget's Shadows row (0.3–0.5 ms),
+    by an A/B with the horizon layer off (T8.b's question "The horizon layer as an argument"),
+    since the views check times frames and the lookup is inside the terrain's lit pass.
 
 ### R10.T15 Verification pass
 
@@ -3403,10 +3455,10 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   and the reference surface take the body's one drawn rotation (R07.T10.a's `rotationAt`), and its
   lights are the body's lighting frame's, so the terrain adds no offset of its own; the ωτ between
   geometry and light stands as R07 ruled._
-- **The selection bound's calibration is an owner ruling.** If T4.a's 99.9th-percentile ratios fall
-  at the expected 0.3–0.5, the hard bound costs four to eleven times the patches of a perfect bound;
-  selection by min(hard, 4σ) recovers two to three times. The owner rules with T4.a's recorded
-  counts; until then selection uses the hard bound.
+- **The selection bound's calibration is ruled by its numbers** (`signoff-12.md`, item 30). If
+  T4.a's 99.9th-percentile ratios fall at the expected 0.3–0.5, the hard bound costs four to eleven
+  times the patches of a perfect bound; selection by min(hard, 4σ) recovers two to three times. T4.b
+  applies the rule to T4.a's recorded figures; until then selection uses the hard bound.
 - **The low setting's cache is at its edge.** With 16-bit horizon maps a low-setting patch is
   about 156 kB, and the sizing rule's 430 slots fill 64 MiB exactly before relief and balancing. T14
   decides between a larger low cache (inside the 1 GB ceiling), a half-resolution near-field horizon
@@ -6675,7 +6727,8 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
     where the steps were seen, ground refined for another view can leave a coarse leaf beyond its
     band's end beside a finer one, breaking the k = 1 / k = 0 rule at their edge. Lean: a
     follow-up task that traces it at the same moments of the script on low in a scratch build
-    tinting each patch by its level and its skirts apart, then fixes where it lies.
+    tinting each patch by its level and its skirts apart, then fixes where it lies. _Ruled
+    (decision-r10-t16-leans §16): R10.T8.c traces and fixes it._
   - _R07's horizon term in WGSL's trigonometry._ Under T8.b's conversion φ cancels from the cut,
     and the arccos of the visible share costs at most 2.2 × 10⁻⁵ at WGSL's 6.77 × 10⁻⁵, and ρ =
     asin(1/H) at most 0.47% of the share at asin's 6.81 × 10⁻⁵ (2 × 10⁻¹⁰ on Mesa). The exposure is
@@ -6687,10 +6740,11 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
     horizons of 1°, 5° and 30°. At `atan`'s 4,096 ULP it is 3.3 × 10⁻²; correctly rounded f32,
     1.2 × 10⁻⁵. SwiftShader is accurate here. The lever (R07's): h² atan z − x sin φ √(1 − y²) =
     z + h² (atan z − z), atan z − z by its series, on `preciseTrig.wgsl`, and the η = 0 return
-    clamped at 0; before the owner's UHD 620 sunset (decision-r10-t8b §2).
+    clamped at 0; before the owner's UHD 620 sunset (decision-r10-t8b §2). _Settled by R07.T6.d
+    (`61e156b3`)._
   - _R07's horizon term is NaN for a point star._ `sphere_irradiance` and `sphereIrradianceFactor`
     form H² F with H infinite as ∞ × 0; R07's own disc shading takes no guard (T8.b's shadow code
-    does, above). The lever is R07's, with its trigonometry.
+    does, above). The lever is R07's, with its trigonometry. _Settled by R07.T6.d (`61e156b3`)._
   - _Planetshine is not shadowed by the terrain._ A neighbour's light reaches a crater floor behind
     its rim; the map would shadow it with one more lookup a source.
   - _The high setting's fallback holds the horizon field at its limit._ On `face-differences` the
@@ -7551,7 +7605,8 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     judged: a patterned survey's look across the switch (the fixture's one law), a served world
     fully surveyed (none is, before T15), and T10.b's back-facing normals at grazing views (the
     survey seen at μ 0.97 and 0.71, no grazing view). The owner's UHD 620 runs stay his, pending:
-    this procedure in `VIEW` once a served world is fully surveyed (T15).
+    this procedure in `VIEW` once a served world is fully surveyed (T15). _Ruled a defect
+    (decision-r10-t16-leans §1): fixed by R10.T10.g before T15._
 
   - _The residuals of T10.a against plan 14's p and q._ p: T10.a's own record ("Deviations in
     T10.a, as built", the table): in V zero to rounding (at most 2 × 10⁻¹⁶ relative) on every
@@ -7622,7 +7677,8 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     normal). The remedies: a cross-fade over the hand-over's hysteresis band, or the disc's law
     given the roughness its figure leaves unresolved (a macroscopic roughness from the field's
     unresolved slopes). For T10's follow-up, judged again on a patterned served world (T15); the
-    bound's reading is asked of main (T16's F2 record, "Leans for a ruling").
+    bound's reading is asked of main (T16's F2 record, "Leans for a ruling"). _Ruled a defect
+    (decision-r10-t16-leans §1): fixed by R10.T10.g before T15._
   - _The survey's rise at the terrain's first draw at 90°_ (+0.041 stop on high, +0.037 on low;
     +0.8% at 30°), against the disc's last frame. It cannot come from resolved relief under one
     law at i = e: relief only darkens or leaves the brightness equal there (Lommel–Seeliger's
@@ -7633,7 +7689,7 @@ src/renderer/src/displays/view` (72 files, 1,454 tests; the client suite 423 fil
     needs each surveyed pixel's law and shading normal against the geometric one at the same
     frames, which the read-back does not hold (a shader probe would have to write them). The
     earlier record's attribution, "the terrain's resolved relief against the smooth figure", is
-    withdrawn. For T10's follow-up or T15.
+    withdrawn. For T10's follow-up or T15. _Ruled (decision-r10-t16-leans §1): R10.T10.g traces it._
   - _Design note 13's example is one-sided; the header's relief is peak to trough._ Its "10 km of
     relief either side of the datum" is 20 km from peak to trough, while `realised_relief_m` is
     the highest elevation less the lowest, so a symmetric world of ±10 km takes 20 km and hands
@@ -8012,14 +8068,16 @@ hyperion typecheck` from a clean cache, `pnpm lint` (type-aware oxlint) and Pret
     5), where T10.e's hand-over takes the frame's internal viewport (T10.e's deferred "The
     hand-over moves with the frame's internal scale"), so at a scale of 0.5 the want's range is
     twice the hand-over's and a body's field is fetched as early as at full scale. Lean: as built;
-    T10.e's lever (both switches on the presented pixel) would make them one.
+    T10.e's lever (both switches on the presented pixel) would make them one. _Ruled
+    (decision-r10-t16-leans §13): accepted; R10.T10.g takes T10.e's lever, both switches on the
+    presented pixel._
   - _A header with no surveyed ground._ The want takes the header's relief whatever the coverage, so
     a field whose survey covers nothing is kept within its range, though `handoverReliefM` gives
     such a body no hand-over. Lean: as built (the want follows the relief alone, so that the first
-    survey's cells reach a field already held).
+    survey's cells reach a field already held). _Ruled (decision-r10-t16-leans §13): accepted._
   - _The session's GPU bytes._ Counted from its own handles, not the engine's tally (above). Lean:
     as built; R12's memory line reads the engine's tally by category and the session's report beside
-    it.
+    it. _Ruled (decision-r10-t16-leans §13): accepted, recorded in R12's Consumes._
 - **Deferred findings (2026-10-13 rule) (R10.T16.a)** (recorded, not ruled; each leaves the
   algorithm and the contracts as built).
   - _Workers start with the session._ Its pool's workers are started, and each loads the surface
@@ -8258,16 +8316,19 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
   it._
   - _The mask's coverage gate goes beyond the ruling's words._ The store's coverage waits for the
     workers' report of the blocks posted before it as well as for the rebakes (above). Lean: as
-    built; without it the mask runs ahead of the bakes for a frame or more at every payload.
+    built; without it the mask runs ahead of the bakes for a frame or more at every payload. _Ruled
+    (decision-r10-t16-leans §13): accepted._
   - _Every resident patch the rule names is baked again, drawn or not, and the gate waits for all_
     (the text's "for each resident patch"). Lean: as built; T14 may evict an undrawn one instead
-    (deferred below).
+    (deferred below). _Ruled (decision-r10-t16-leans §13): accepted; T14 weighs eviction instead._
   - _A craft's velocity in another body's frame is not judged_ (a craft descending to a moon while
     held in its planet's frame): it is a contact only once grounded. Lean: as built until the
-    flight model gives craft velocities against any body; T14.c with the workers' ground.
+    flight model gives craft velocities against any body; T14.c with the workers' ground. _Ruled
+    (decision-r10-t16-leans §13): accepted until T14.c, which chains the frames._
   - _The session's memory report leaves out the passes' GPU bytes_ (64–400 MB each). Lean: R12 reads
     the engine's tally by category (`height-cache` is the passes' alone in `VIEW`) beside the report;
-    a `TerrainPass.gpuBytes` from its layout is the lever if R12 wants the session's sum.
+    a `TerrainPass.gpuBytes` from its layout is the lever if R12 wants the session's sum. _Ruled
+    (decision-r10-t16-leans §13): accepted, recorded in R12's Consumes._
   - _The mask at cell code 0_ (the batch review's S21, moved here from the deferred findings): the
     invariant held at code 0 by T10.c's interpolated half alone. Lean: such patches are drawn where
     a cell is about a pixel. _Ruled (decision-r10-t16-review §2): not as drawn; the lean's bound
@@ -9017,23 +9078,27 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     the loss. And "the masks hold the same cells" (the batch review's D-E) as built reads: every
     cell the GPU mask held before the loss is held once restored, and at the end it holds exactly
     the store's coverage (24 cells before, 29 after the restore, 48 at the end, the coverage's 48).
-    Lean: as built, both readings.
+    Lean: as built, both readings. _Ruled (decision-r10-t16-leans §4 and §5): accepted, both
+    readings; T16.d's text amended._
   - _"Every frame drawn" as no missed draw at the view's cadence._ Lean: as built, the longest gap
     recorded beside it, provisional; the alternative, a limit on the gap, would fail the run on a
     first compile's stall of the whole page, which is a performance finding, not a frame undrawn.
+    _Ruled (decision-r10-t16-leans §2): accepted as built; the stall a defect for T14._
   - _The mask's `COPY_SRC`_, a production texture's usage widened for the check's read-back
     (24 KiB at level 6; no other reader). Lean: as built; the alternative, the CPU's copy of the
-    mask's cells, would not see a restore that failed to upload them.
+    mask's cells, would not see a restore that failed to upload them. _Ruled
+    (decision-r10-t16-leans §14): accepted._
   - _`AUTO` exposure on the `LIT` meter in the first phase_, for the looks. Lean: as built; the
-    verdicts read no exposure.
+    verdicts read no exposure. _Ruled (decision-r10-t16-leans §14): accepted._
   - _`TerrainPass.seesPatch(id)`_, a read-only member added to T16.b's pass for the check: whether
     the view's last step saw a drawn patch (the loop `maskReadyFor` runs, which it leaves as it
     was). Lean: as built; without it a view past the survey is indistinguishable from one whose
-    terrain failed to draw.
+    terrain failed to draw. _Ruled (decision-r10-t16-leans §14): accepted._
   - _The loss on a fresh session at the delta_ (120 s of the script), so that the stream in
     flight is the delta's while the terrain is drawn, with the session's own bakes in flight. Lean:
     as built; a loss in the first session's first payload would come before any hand-over, and a
-    delta at an earlier time would change the fixture's script on the check alone.
+    delta at an earlier time would change the fixture's script on the check alone. _Ruled
+    (decision-r10-t16-leans §3): accepted._
   - _The sunset's steps at patch edges_ (T8.b's by-hand item): from about 228 s of the script, the
     sun a few degrees up, the light and shadow step across straight lines in the surveyed ground,
     on both settings, one at least a coarse–fine edge by its detail, with single-pixel bright
@@ -9044,7 +9109,8 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     parent at a coarse–fine edge, or the skirts' shading). _Diagnosed by the batch review's fixes
     (F1, 2026-10-20): not T16's, held by test; recorded as T8.b's deferred finding "The sunset's
     steps at patch edges" with its candidates, the lean unchanged; the face edge (T8.b's third
-    place) lies along none of the steps seen (T8.b's by-hand item, F2's look)._
+    place) lies along none of the steps seen (T8.b's by-hand item, F2's look)._ _Ruled
+    (decision-r10-t16-leans §16): R10.T8.c traces and fixes it._
   - _T10.e's per-texel bound at a few pixels a texel_ (T10.e's by-hand item): at the hand-back at
     90° on high one texel of 48 changes by 0.42 stop with about 3 pixels a texel, while the body's
     and the survey's sums move by under 0.01 stop. Lean: sampling, not a step of the switch (at 3
@@ -9254,16 +9320,23 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     found above), and is built for them.
 - **Questions for "main" (F1)** (none touches a contract of the server's; each built to its lean).
   - _The report's two styles_ (S8): `drawnStyle` hands over, `style` judges the fields, so that a
-    loss's stand-in drops the view from the pass but fetches no field again. Lean: as built.
+    loss's stand-in drops the view from the pass but fetches no field again. Lean: as built. _Ruled
+    (decision-r10-t16-leans §6): accepted._
   - _The frustum margin's rule and cap_ (S6): one pixel, the turn and |Δp| ÷ d, at most 0.1 rad,
     the session's passes alone; its patches outside the view count toward a view's `STREAMING`
-    while unbaked, and are T14's to measure. Lean: as built.
+    while unbaked, and are T14's to measure. Lean: as built. _Ruled (decision-r10-t16-leans §7):
+    accepted; the margin's unbaked patches raise `TERRAIN: STREAMING` only while a view turns or
+    moves, after the 250 ms onset._
   - _The guards' report_ (S5): `console.error` once, not the label block's fault path, which has no
-    ruled string for a terrain bug. Lean: as built.
-  - _The default view's name_ (C4): `""`. Lean: as built.
+    ruled string for a terrain bug. Lean: as built. _Ruled (decision-r10-t16-leans §8): differs from
+    the lean; the `console.error` stays, and a guarded failure lasting 250 ms faults the terrain,
+    built by R10.T16.e._
+  - _The default view's name_ (C4): `""`. Lean: as built. _Ruled (decision-r10-t16-leans §14):
+    accepted._
   - _The multi-view morph invariant_ (the seams' inferred T16 effect). Lean: a test and a remedy in
     T8.b's follow-up or T14 (bands from the levels each view would select, or a morph held at a
-    coarse–fine edge by the selection).
+    coarse–fine edge by the selection). _Ruled (decision-r10-t16-leans §9): accepted, a test first
+    and then a remedy, in R10.T8.c._
 - **Deferred findings (2026-10-13 rule) (F1)** (recorded, not ruled; each leaves the algorithm and
   the contracts as built).
   - _The terrain-check writer's files are not in Prettier's form_ (unaligned tables, expanded
@@ -9420,22 +9493,26 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
 - **Questions for "main" (F2)** (none touches a contract of the server's; each built or looked at
   to its lean).
   - _The longest note's look on a variant with no own ship_ (§1's by-hand item): `TERRAIN TEST`'s
-    own ship keeps `FROM CAMERA` off its note. Lean: as looked; T12's look repeats it.
+    own ship keeps `FROM CAMERA` off its note. Lean: as looked; T12's look repeats it. _Ruled
+    (decision-r10-t16-leans §14): accepted; T12's 1280 × 720 look repeats it._
   - _M2's "missing" by the stand-in_ (above). Lean: as built; `streaming` is `missing || standingIn`
-    over the same per-view masks.
+    over the same per-view masks. _Ruled (decision-r10-t16-leans §10): accepted._
   - _S17 read through the pass's views_, not a `field-release`: in the harness's scenes no body is
     wanted by an instrument alone (a body with no header is wanted only as a local body, and an
-    instrument opens at the primary's pose). Lean: as built.
+    instrument opens at the primary's pose). Lean: as built. _Ruled (decision-r10-t16-leans §10):
+    accepted._
   - _The survey line's two states_ (D-D's redraft): a Status,
     `SURVEY COVERAGE REJECTED: <reason>, reopen VIEW to retry`, and a Fault,
     `SURVEY DATA INVALID: <reason>, reopen VIEW to retry`, for the sign-off agent's text. Lean: as
-    drafted.
+    drafted. _Ruled (decision-r10-t16-leans §12): accepted with changes, which T12 builds._
   - _The views check's banner_: its terrain run, like T20's, shows `TRAINING`, while the guide's
     `MEASUREMENT` row names only `--descent-spike`. Lean: a guide question, nothing built: the
     guide's Layout ("A simulation, training, replay or measurement mode must look unmistakably
     different from live operation, through a persistent labelled banner in the header strip") and
     its `MEASUREMENT` row ("a measurement view opened from the command line … flown by script,
-    recording, and driven by no operator input") read on both views checks, for the sign-off.
+    recording, and driven by no operator input") read on both views checks, for the sign-off. _Ruled
+    (decision-r10-t16-leans §11): differs from the lean; every `--views-check` launch shows
+    `MEASUREMENT`, built by R10.T16.e._
 - **Leans for a ruling** (F2, gathered from T16.d's, F1's and F2's records: each lean that changes
   a test criterion or a check's definition).
   1. _T10.e's per-texel bound, as re-analysed._ Lean: the bound on each texel's mean luminance over
@@ -9443,25 +9520,40 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
      floor withdrawn); so read, the fixture fails it at the hand-back at 90° on high (0.42 stop over
      5 shared pixels), a real pop recorded as T10.e's deferred finding with its remedies (a
      cross-fade over the hysteresis band, or the disc's law given its unresolved roughness), the
-     bound judged again on a patterned served world at T15.
+     bound judged again on a patterned served world at T15. _Ruled (decision-r10-t16-leans §1): the
+     reading accepted; the pop a defect, fixed by R10.T10.g before T15._
   2. _"Every frame drawn"_ (T16.d part 2): no missed draw at the view's own cadence, the longest
-     gap recorded beside it, provisional; not a limit on the gap. Lean: as built.
-  3. _The forced loss on a fresh session at the delta_ (120 s of the script). Lean: as built.
+     gap recorded beside it, provisional; not a limit on the gap. Lean: as built. _Ruled
+     (decision-r10-t16-leans §2): accepted as built; the stall a defect for T14._
+  3. _The forced loss on a fresh session at the delta_ (120 s of the script). Lean: as built. _Ruled
+     (decision-r10-t16-leans §3): accepted._
   4. _The masks after the loss_: every cell held before held once restored, and at the end exactly
-     the store's coverage. Lean: as built, both readings.
+     the store's coverage. Lean: as built, both readings. _Ruled (decision-r10-t16-leans §4):
+     accepted, both readings; D8's exact refill is held by S4's unit test._
   5. _After the loss, the answer in flight's blocks_: no ask and no init after it, no chunk but the
-     answer in flight's, each block once to each worker. Lean: as built.
+     answer in flight's, each block once to each worker. Lean: as built. _Ruled
+     (decision-r10-t16-leans §5): accepted; T16.d's text amended._
   6. _S8's two styles_ (F1): `drawnStyle` hands over, `style` judges the fields. Lean: as built.
+     _Ruled (decision-r10-t16-leans §6): accepted._
   7. _S6's frustum margin_ (F1): one pixel, the turn and |Δp| ÷ d, at most 0.1 rad, the session's
      passes alone, its patches counting toward a view's `STREAMING` while unbaked. Lean: as built.
+     _Ruled (decision-r10-t16-leans §7): accepted; the margin's unbaked patches raise
+     `TERRAIN: STREAMING` only while a view turns or moves, after the 250 ms onset._
   8. _S5's guards' report_ (F1): `console.error` once, not a fault line, so that it shows in the
-     views check's console errors and in no label block. Lean: as built.
+     views check's console errors and in no label block. Lean: as built. _Ruled
+     (decision-r10-t16-leans §8): differs from the lean; the `console.error` stays, and a guarded
+     failure lasting 250 ms faults the terrain, built by R10.T16.e._
   9. _The multi-view morph invariant_ (F1): a test and a remedy in T8.b's follow-up or T14. Lean:
-     as F1 leans.
+     as F1 leans. _Ruled (decision-r10-t16-leans §9): accepted, a test first and then a remedy, in
+     R10.T8.c._
   10. _M2's "missing" by the stand-in_ and _S17 by the pass's views_ (F2, above). Lean: as built.
+      _Ruled (decision-r10-t16-leans §10): accepted._
   11. _The views check's banner, `TRAINING` or `MEASUREMENT`_ (above). Lean: a guide question.
+      _Ruled (decision-r10-t16-leans §11): differs from the lean; every `--views-check` launch
+      shows `MEASUREMENT`, built by R10.T16.e._
   12. _The survey line's split into a Status and a Fault_ (above), for the sign-off agent's text.
-      Lean: as drafted.
+      Lean: as drafted. _Ruled (decision-r10-t16-leans §12): accepted with changes, which T12
+      builds._
 - **Deferred findings (2026-10-13 rule) (F2)** (recorded, not ruled; each leaves the algorithm and
   the contracts as built).
   - _A view's joining sets another streaming._ Selection is shared, so a patch split for one view
@@ -9475,7 +9567,7 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     variant without a ship, reaches the stage's bottom edge, its plate's last padding cut, every
     line still shown; a scene that adds statements (`TERRAIN TEST`'s own ship gives two) would cut
     its last lines. For R07's layout (the label block at 150%), or T12, whose readouts join the
-    block.
+    block. _Ruled (decision-r10-view-block-room): below the floor; built by R10.T12.b._
   - _The notes in the compact list_: at 1280 × 720 the Targets list shows one option row above
     its notes; a second body's note, or T12's `GROUND AT LINE OF SIGHT`, takes the list's room
     again. For T12's look at 1280 × 720.
