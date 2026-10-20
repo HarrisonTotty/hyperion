@@ -21,8 +21,9 @@
 //! - `MethaneIce`: Grundy, Schmitt and Quirico 2002's k at 40 K, k = αλ ÷ 4π at each row and linear
 //!   in λ between rows, to its last row at 4,912.66 nm, with Martonchik and Orton 1994's n linear
 //!   in λ between its rows to 2,381 nm and held there beyond: past it the table's next rows are the
-//!   3.3 µm band's extrema and then 7.675 µm, between which a straight line is not the continuum,
-//!   and the grains are opaque inside the band whatever n is;
+//!   3.3 µm band's extrema (3.315–3.330 µm), three rows at 3.534–3.565 µm (n 1.318–1.321, within
+//!   0.005 of the held 1.316) and then 7.675 µm, between which a straight line is not the
+//!   continuum, and the grains are opaque inside the band whatever n is;
 //! - `NitrogenIce`: Grundy, Schmitt and Quirico 1993's k at 41 K over its band, 1,999.9–2,300.2
 //!   nm, k = αλ ÷ 4π, and 0 elsewhere, with n held at the file's 780 nm value;
 //! - `CarbonMonoxideIce`: Gerakines, Materese and Hudson 2023's n and k at 25 K, linear in
@@ -37,6 +38,9 @@
 //!
 //! A negative k or α elsewhere, noise about zero, is kept in the knots and taken as 0 where w is
 //! computed ([`super::spectral::spectral_single_scattering_albedo`]).
+//!
+//! Every reader checks its knots before it builds a [`Piece`] or a [`Curve`]: a set whose rows do
+//! not lie where its joins need them is refused with [`FitAlbedoError::Infrared`], never a panic.
 
 use std::collections::BTreeMap;
 
@@ -51,18 +55,18 @@ use crate::materials::MaterialFile;
 use crate::task::RunTaskError;
 
 /// Where R08's index files end and each infrared set joins its file, nm: 780.
-pub const JOIN_NM: f64 = 780.0;
+pub(crate) const JOIN_NM: f64 = 780.0;
 
 /// Where every row's data end at the latest, nm: the bins' end, 5,000.
-pub const REACH_END_NM: f64 = SPECTRAL_BIN_EDGES_NM[SPECTRAL_BINS];
+pub(crate) const REACH_END_NM: f64 = SPECTRAL_BIN_EDGES_NM[SPECTRAL_BINS];
 
 /// Where Martonchik and Orton 1994's real index of methane ice is held, nm: its last row before
 /// the 3.3 µm band, 2,381.
-pub const METHANE_N_HELD_FROM_NM: f64 = 2_381.0;
+pub(crate) const METHANE_N_HELD_FROM_NM: f64 = 2_381.0;
 
 /// Where Martonchik, Orton and Appleby 1984's measured infrared of ammonia ice begins, nm: their
 /// 6,840 cm⁻¹ row, 1,462.
-pub const AMMONIA_MEASURED_FROM_NM: f64 = 1_462.0;
+pub(crate) const AMMONIA_MEASURED_FROM_NM: f64 = 1_462.0;
 
 /// The noise floor of Gerakines, Materese and Hudson 2023's k, below which `CarbonMonoxideIce`
 /// takes it as 0, in place of clipping the noise at 0: three times the rms of their k over
@@ -71,16 +75,20 @@ pub const AMMONIA_MEASURED_FROM_NM: f64 = 1_462.0;
 /// cm⁻¹), ¹³CO's band (2,088–2,093 cm⁻¹), the fundamental's high-wavenumber wing to 2,233 cm⁻¹ and
 /// scattered rows of the low-wavenumber wing, where k is near the floor
 /// (`substance_albedos_co_s_noise_floor_is_three_times_its_baseline_rms`).
-pub const CO_NOISE_FLOOR: f64 = 1.02e-3;
+///
+/// The floor discards absorption that matters: at 4.6 µm a k at the floor would give 100 µm grains
+/// Θ ≈ 0.80 and w ≈ 0.71, so `CO`'s 3.5–5 µm bin is an upper bound (the row's sources).
+pub(crate) const CO_NOISE_FLOOR: f64 = 1.02e-3;
 
 /// The band-free window over which [`CO_NOISE_FLOOR`] is measured, cm⁻¹: 2,400–3,000 (3.33–4.17
 /// µm), above α-CO's fundamental and its wing, and above 2,300–2,400 cm⁻¹, where the table's
 /// baseline dips to −1.5 × 10⁻³ (its mean there −5.8 × 10⁻⁴).
-pub const CO_NOISE_WINDOW_PER_CM: [f64; 2] = [2_400.0, 3_000.0];
+#[cfg(test)]
+pub(crate) const CO_NOISE_WINDOW_PER_CM: [f64; 2] = [2_400.0, 3_000.0];
 
 /// The text of each of the task's datasets, by name: each of its files' text, by file name.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct InfraredData {
+pub(crate) struct InfraredData {
     texts: BTreeMap<String, BTreeMap<String, String>>,
 }
 
@@ -92,7 +100,7 @@ impl InfraredData {
     ///
     /// [`RunTaskError::Dataset`] if a dataset cannot be read or fails its hash, and
     /// [`RunTaskError::Input`] if a file is not UTF-8 text.
-    pub fn load(manifest: &Manifest) -> Result<Self, RunTaskError> {
+    pub(crate) fn load(manifest: &Manifest) -> Result<Self, RunTaskError> {
         let mut texts = BTreeMap::new();
         for name in manifest.datasets() {
             let dataset = manifest.load_dataset(name)?;
@@ -106,34 +114,31 @@ impl InfraredData {
         Ok(Self { texts })
     }
 
-    /// The datasets `texts`, one file each, by name, as [`load`](Self::load) gives them.
-    #[must_use]
-    pub fn from_texts(texts: BTreeMap<String, String>) -> Self {
-        Self {
-            texts: texts
-                .into_iter()
-                .map(|(name, text)| (name.clone(), BTreeMap::from([(name, text)])))
-                .collect(),
-        }
-    }
-
     /// The text of dataset `name`, a dataset of one file.
     fn text(&self, name: &'static str) -> Result<&str, FitAlbedoError> {
-        let files = self
+        let mut files = self
             .texts
             .get(name)
-            .ok_or_else(|| malformed(name, "it is not one of the manifest's datasets"))?;
-        match files.values().collect::<Vec<_>>().as_slice() {
-            [text] => Ok(text.as_str()),
+            .ok_or_else(|| malformed(name, "it is not one of the manifest's datasets"))?
+            .values();
+        match (files.next(), files.next()) {
+            (Some(text), None) => Ok(text.as_str()),
             _ => Err(malformed(name, "it is not one file")),
         }
     }
 
     /// Every file's text of dataset `name`, by file name, or `None` if the manifest has no such
     /// dataset.
+    #[cfg(test)]
     #[must_use]
-    pub fn files(&self, name: &str) -> Option<&BTreeMap<String, String>> {
+    pub(crate) fn files(&self, name: &str) -> Option<&BTreeMap<String, String>> {
         self.texts.get(name)
+    }
+
+    /// Takes dataset `name` out, every file's text by file name, or `None` if it holds no such
+    /// dataset: for a reader that owns them, as the laboratory library does splib07a's.
+    pub(crate) fn take(&mut self, name: &str) -> Option<BTreeMap<String, String>> {
+        self.texts.remove(name)
     }
 }
 
@@ -159,7 +164,7 @@ fn malformed(dataset: &'static str, why: &str) -> FitAlbedoError {
 ///
 /// [`FitAlbedoError::Infrared`] if it has no such block, a row is not three numbers, or the
 /// wavelengths do not rise.
-pub fn refractiveindex_rows(
+pub(crate) fn refractiveindex_rows(
     dataset: &'static str,
     text: &str,
 ) -> Result<Vec<[f64; 3]>, FitAlbedoError> {
@@ -197,7 +202,7 @@ pub fn refractiveindex_rows(
 ///
 /// [`FitAlbedoError::Infrared`] if the header is not `header`, a row is not numbers, or the first
 /// column does not rise.
-pub fn table_rows(
+pub(crate) fn table_rows(
     dataset: &'static str,
     text: &str,
     header: &str,
@@ -241,7 +246,7 @@ fn rising<R: AsRef<[f64]>>(dataset: &'static str, rows: &[R]) -> Result<(), FitA
 /// The imaginary index k = αλ ÷ 4π of a Lambert absorption coefficient `alpha_per_cm` (cm⁻¹) at
 /// `wavelength_nm`.
 #[must_use]
-pub fn k_of_alpha(alpha_per_cm: f64, wavelength_nm: f64) -> f64 {
+pub(crate) fn k_of_alpha(alpha_per_cm: f64, wavelength_nm: f64) -> f64 {
     alpha_per_cm * 100.0 * wavelength_nm * 1.0e-9 / (4.0 * core::f64::consts::PI)
 }
 
@@ -271,7 +276,7 @@ fn knots(rows: &[Vec<f64>], column: usize) -> Vec<(f64, f64)> {
 /// # Errors
 ///
 /// [`FitAlbedoError::OffGrid`] if the file does not end at [`JOIN_NM`].
-pub fn visible_piece(
+pub(crate) fn visible_piece(
     file_name: &'static str,
     file: &MaterialFile,
 ) -> Result<Piece, FitAlbedoError> {
@@ -314,12 +319,29 @@ fn nk_piece(dataset: &'static str, text: &str) -> Result<Piece, FitAlbedoError> 
     ))
 }
 
+/// Refuses a set's band over `lo`–`hi` nm, the knots of dataset `dataset` inside its pieces,
+/// unless it lies strictly between [`JOIN_NM`] and [`REACH_END_NM`]: the pieces before and after
+/// it would be empty.
+fn inside_the_joins(dataset: &'static str, lo: f64, hi: f64) -> Result<(), FitAlbedoError> {
+    if lo > JOIN_NM && hi < REACH_END_NM {
+        Ok(())
+    } else {
+        Err(malformed(
+            dataset,
+            "its band does not lie between 780 and 5,000 nm",
+        ))
+    }
+}
+
 /// The pieces of `set` beyond [`JOIN_NM`], from `data`, for a row whose R08 file is `file`.
 ///
 /// # Errors
 ///
-/// [`FitAlbedoError::Infrared`] if a dataset is missing or not as its reader expects.
-pub fn infrared_pieces(
+/// [`FitAlbedoError::Infrared`] if a dataset is missing or not as its reader expects: a reduced
+/// table not as [`table_rows`] or [`refractiveindex_rows`] reads it, or its rows not where the
+/// set's joins need them (a band that reaches 780 or 5,000 nm, a set that ends before 780 nm, or no
+/// row where a column is read).
+pub(crate) fn infrared_pieces(
     set: InfraredIndex,
     file: &MaterialFile,
     data: &InfraredData,
@@ -331,27 +353,12 @@ pub fn infrared_pieces(
     };
     match set {
         InfraredIndex::WaterIce => water_pieces(data),
-        InfraredIndex::MethaneIce => {
-            let (grundy, martonchik) = ("grundy_2002_ch4", "martonchik_orton_1994_ch4");
-            let k = absorption_knots(grundy, data.text(grundy)?)?;
-            let n: Vec<(f64, f64)> = refractiveindex_rows(martonchik, data.text(martonchik)?)?
-                .iter()
-                .map(|r| (r[0] * 1_000.0, r[1]))
-                // Half a nanometre's margin, for the rows' micrometres in binary.
-                .filter(|&(nm, _)| (399.5..=METHANE_N_HELD_FROM_NM + 0.5).contains(&nm))
-                .collect();
-            let end = k[k.len() - 1].0;
-            Ok(vec![Piece::new(
-                JOIN_NM,
-                end,
-                Curve::new(&n, Interpolation::Linear),
-                Curve::new(&k, Interpolation::Linear),
-            )])
-        }
+        InfraredIndex::MethaneIce => methane_pieces(data),
         InfraredIndex::NitrogenIce => {
             let grundy = "grundy_1993_n2";
             let band = absorption_knots(grundy, data.text(grundy)?)?;
             let (lo, hi) = (band[0].0, band[band.len() - 1].0);
+            inside_the_joins(grundy, lo, hi)?;
             Ok(vec![
                 Piece::new(JOIN_NM, lo, file_n.clone(), zero()),
                 Piece::new(
@@ -376,6 +383,35 @@ pub fn infrared_pieces(
     }
 }
 
+/// `MethaneIce`'s piece: Grundy et al. 2002's k from [`JOIN_NM`] to its last row, with Martonchik
+/// and Orton 1994's n to [`METHANE_N_HELD_FROM_NM`], held beyond.
+fn methane_pieces(data: &InfraredData) -> Result<Vec<Piece>, FitAlbedoError> {
+    let (grundy, martonchik) = ("grundy_2002_ch4", "martonchik_orton_1994_ch4");
+    let k = absorption_knots(grundy, data.text(grundy)?)?;
+    let n: Vec<(f64, f64)> = refractiveindex_rows(martonchik, data.text(martonchik)?)?
+        .iter()
+        .map(|r| (r[0] * 1_000.0, r[1]))
+        // Half a nanometre's margin, for the rows' micrometres in binary.
+        .filter(|&(nm, _)| (399.5..=METHANE_N_HELD_FROM_NM + 0.5).contains(&nm))
+        .collect();
+    if n.is_empty() {
+        return Err(malformed(
+            martonchik,
+            "it has no row over 400-2,381 nm, where its n is read",
+        ));
+    }
+    let end = k[k.len() - 1].0;
+    if end <= JOIN_NM {
+        return Err(malformed(grundy, "its rows end at or before 780 nm"));
+    }
+    Ok(vec![Piece::new(
+        JOIN_NM,
+        end,
+        Curve::new(&n, Interpolation::Linear),
+        Curve::new(&k, Interpolation::Linear),
+    )])
+}
+
 /// `WaterIce`'s pieces: Warren and Brandt 2008, with Grundy and Schmitt 1998's k over its range.
 fn water_pieces(data: &InfraredData) -> Result<Vec<Piece>, FitAlbedoError> {
     let (warren, grundy) = ("warren_brandt_2008_h2o", "grundy_schmitt_1998_h2o");
@@ -386,6 +422,7 @@ fn water_pieces(data: &InfraredData) -> Result<Vec<Piece>, FitAlbedoError> {
     let k = Curve::new(&k_knots, Interpolation::LogLog);
     let cold = absorption_knots(grundy, data.text(grundy)?)?;
     let (lo, hi) = (cold[0].0, cold[cold.len() - 1].0);
+    inside_the_joins(grundy, lo, hi)?;
     Ok(vec![
         Piece::new(JOIN_NM, lo, n.clone(), k.clone()),
         Piece::new(lo, hi, n.clone(), Curve::new(&cold, Interpolation::Linear)),
@@ -402,6 +439,9 @@ fn carbon_monoxide_pieces(
     let zero = || Curve::constant(0.0);
     let gerakines = "gerakines_2023_co";
     let mut rows = table_rows(gerakines, data.text(gerakines)?, "wavenumber_per_cm,n,k")?;
+    if rows[0][0] <= 0.0 {
+        return Err(malformed(gerakines, "a wavenumber is not positive"));
+    }
     rows.reverse();
     let at = |column: usize| -> Vec<(f64, f64)> {
         rows.iter().map(|r| (1.0e7 / r[0], r[column])).collect()
@@ -414,6 +454,12 @@ fn carbon_monoxide_pieces(
     let (lo, last) = (n[0].0, n[n.len() - 1].0);
     if last < REACH_END_NM {
         return Err(malformed(gerakines, "its rows do not reach 5,000 nm"));
+    }
+    if lo <= JOIN_NM || lo >= REACH_END_NM {
+        return Err(malformed(
+            gerakines,
+            "its first row does not lie between 780 and 5,000 nm",
+        ));
     }
     Ok(vec![
         Piece::new(JOIN_NM, lo, file_n, zero()),
@@ -431,7 +477,11 @@ fn ammonia_pieces(data: &InfraredData) -> Result<Vec<Piece>, FitAlbedoError> {
     let zero = || Curve::constant(0.0);
     let martonchik = "martonchik_1984_nh3";
     let rows = table_rows(martonchik, data.text(martonchik)?, "wavelength_um,n,k")?;
-    let n = Curve::new(&knots(&rows, 1), Interpolation::Linear);
+    let n_knots = knots(&rows, 1);
+    if n_knots.is_empty() {
+        return Err(malformed(martonchik, "no row gives n"));
+    }
+    let n = Curve::new(&n_knots, Interpolation::Linear);
     // Half a nanometre's margin, for the rows' micrometres in binary.
     let measured: Vec<(f64, f64)> = knots(&rows, 2)
         .into_iter()
@@ -459,7 +509,7 @@ fn ammonia_pieces(data: &InfraredData) -> Result<Vec<Piece>, FitAlbedoError> {
 /// # Errors
 ///
 /// As [`visible_piece`] and [`infrared_pieces`].
-pub fn spectral_index(
+pub(crate) fn spectral_index(
     optics: &CondensedOptics,
     file_name: &'static str,
     file: &MaterialFile,
@@ -470,4 +520,266 @@ pub fn spectral_index(
         pieces.extend(infrared_pieces(set, file, data)?);
     }
     Ok(SpectralIndex::new(pieces))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::tests::manifest;
+    use super::*;
+
+    /// The infrared error of `dataset` for `why`.
+    fn refusal(dataset: &'static str, why: &str) -> FitAlbedoError {
+        FitAlbedoError::Infrared {
+            dataset,
+            why: why.to_owned(),
+        }
+    }
+
+    /// The datasets `files`, each (dataset, its one file's text).
+    fn data(files: &[(&str, &str)]) -> InfraredData {
+        InfraredData {
+            texts: files
+                .iter()
+                .map(|&(dataset, text)| {
+                    (
+                        dataset.to_owned(),
+                        BTreeMap::from([("table".to_owned(), text.to_owned())]),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    /// The pieces of `set` from `files`, for the row of R08's file `file_name`.
+    fn pieces(
+        set: InfraredIndex,
+        file_name: &str,
+        files: &[(&str, &str)],
+    ) -> Result<Vec<Piece>, FitAlbedoError> {
+        let file = manifest().load_material(file_name).unwrap();
+        infrared_pieces(set, &file, &data(files))
+    }
+
+    /// A refractiveindex.info table with rows `rows`, its block indented as the database's are.
+    fn refractiveindex(rows: &str) -> String {
+        format!("DATA:\n  - type: tabulated nk\n    data: |\n{rows}")
+    }
+
+    /// A refractiveindex.info file is refused, by its specific reason, without its `data: |` block,
+    /// with a row that is not numbers or not three of them, and with fewer than two rows or rows
+    /// that do not rise; a well-formed one reads.
+    #[test]
+    fn substance_albedos_a_malformed_refractiveindex_file_is_refused() {
+        let good = refractiveindex("        0.5 1.3 0.0\n        0.6 1.3 0.0\n");
+        assert_eq!(refractiveindex_rows("x", &good).unwrap().len(), 2);
+        let not_rising = "its rows are fewer than two or do not rise";
+        for (text, why) in [
+            (
+                "DATA:\n  - type: tabulated nk\n".to_owned(),
+                "it has no `data: |` block",
+            ),
+            (
+                refractiveindex("        0.5 1.3 zero\n        0.6 1.3 0.0\n"),
+                "a row is not numbers",
+            ),
+            (
+                refractiveindex("        0.5 1.3\n        0.6 1.3 0.0\n"),
+                "a row is not λ, n and k",
+            ),
+            (
+                refractiveindex("        0.6 1.3 0.0\n        0.5 1.3 0.0\n"),
+                not_rising,
+            ),
+            (refractiveindex("        0.6 1.3 0.0\n"), not_rising),
+        ] {
+            assert_eq!(
+                refractiveindex_rows("x", &text),
+                Err(refusal("x", why)),
+                "{text}"
+            );
+        }
+    }
+
+    /// A reduced table is refused, by its specific reason, under another header, with a row that is
+    /// not numbers, not its header's columns or of no first value, and with rows that do not rise;
+    /// the reader's rows rise strictly, so equal wavelengths are refused too.
+    #[test]
+    fn substance_albedos_a_malformed_reduced_table_is_refused() {
+        let header = "wavelength_um,n,k";
+        let good = "wavelength_um,n,k\n0.5,1.3,NaN\n0.6,1.3,0\n";
+        assert_eq!(table_rows("x", good, header).unwrap().len(), 2);
+        let not_rising = "its rows are fewer than two or do not rise";
+        for (text, why) in [
+            (
+                "wavenumber_per_cm,n,k\n0.5,1.3,0\n0.6,1.3,0\n",
+                "its header is not `wavelength_um,n,k`",
+            ),
+            (
+                "wavelength_um,n,k\n0.5,1.3,x\n0.6,1.3,0\n",
+                "a row is not numbers",
+            ),
+            (
+                "wavelength_um,n,k\n0.5,1.3\n0.6,1.3,0\n",
+                "a row is not its header's columns",
+            ),
+            (
+                "wavelength_um,n,k\nNaN,1.3,0\n0.6,1.3,0\n",
+                "a row is not its header's columns",
+            ),
+            ("wavelength_um,n,k\n0.6,1.3,0\n0.5,1.3,0\n", not_rising),
+            ("wavelength_um,n,k\n0.6,1.3,0\n0.6,1.3,0\n", not_rising),
+            ("wavelength_um,n,k\n0.6,1.3,0\n", not_rising),
+        ] {
+            assert_eq!(
+                table_rows("x", text, header),
+                Err(refusal("x", why)),
+                "{text}"
+            );
+        }
+        assert_eq!(rising::<[f64; 1]>("x", &[]), Err(refusal("x", not_rising)));
+        assert_eq!(rising("x", &[[1.0], [2.0]]), Ok(()));
+    }
+
+    /// A table of Grundy's α by λ in µm, of rows `rows`.
+    fn alpha(rows: &str) -> String {
+        format!("wavelength_um,alpha_per_cm\n{rows}")
+    }
+
+    /// `CO`'s set is refused, with its dataset and reason, never a panic, unless its rows reach
+    /// 5,000 nm, begin beyond 780 nm and run on positive wavenumbers.
+    #[test]
+    fn substance_albedos_carbon_monoxide_s_set_off_its_joins_is_refused() {
+        let co = "gerakines_2023_co";
+        for (text, why) in [
+            (
+                "wavenumber_per_cm,n,k\n2100,1.3,0\n2900,1.3,0\n",
+                "its rows do not reach 5,000 nm",
+            ),
+            (
+                "wavenumber_per_cm,n,k\n1900,1.3,0\n13000,1.3,0\n",
+                "its first row does not lie between 780 and 5,000 nm",
+            ),
+            (
+                "wavenumber_per_cm,n,k\n0,1.3,0\n2900,1.3,0\n",
+                "a wavenumber is not positive",
+            ),
+        ] {
+            assert_eq!(
+                pieces(
+                    InfraredIndex::CarbonMonoxideIce,
+                    "carbon-monoxide-ice.json",
+                    &[(co, text)]
+                ),
+                Err(refusal(co, why)),
+                "{text}"
+            );
+        }
+    }
+
+    /// `NH3`'s set is refused unless it has a row at 1,462 nm and a row that gives n.
+    #[test]
+    fn substance_albedos_ammonia_s_set_without_its_rows_is_refused() {
+        let nh3 = "martonchik_1984_nh3";
+        for (text, why) in [
+            (
+                "wavelength_um,n,k\n0.668,1.4,NaN\n1.5,1.4,0.001\n5.1,1.4,0.01\n",
+                "it has no row at 1,462 nm",
+            ),
+            (
+                "wavelength_um,n,k\n0.668,NaN,0\n1.462,NaN,0.001\n",
+                "no row gives n",
+            ),
+        ] {
+            assert_eq!(
+                pieces(
+                    InfraredIndex::AmmoniaIce,
+                    "ammonia-ice.json",
+                    &[(nh3, text)]
+                ),
+                Err(refusal(nh3, why)),
+                "{text}"
+            );
+        }
+    }
+
+    /// `CH4`'s set is refused unless its n has a row over 400–2,381 nm and its k runs past
+    /// 780 nm.
+    #[test]
+    fn substance_albedos_methane_s_set_without_its_rows_is_refused() {
+        let (ch4_k, ch4_n) = ("grundy_2002_ch4", "martonchik_orton_1994_ch4");
+        let methane_n = refractiveindex("        1.0 1.31 0.0\n        2.0 1.31 0.0\n");
+        let far_n = refractiveindex("        3.0 1.31 0.0\n        4.0 1.31 0.0\n");
+        for (k, n, dataset, why) in [
+            (
+                alpha("1.0,1\n4.0,1\n"),
+                &far_n,
+                ch4_n,
+                "it has no row over 400-2,381 nm, where its n is read",
+            ),
+            (
+                alpha("0.5,1\n0.7,1\n"),
+                &methane_n,
+                ch4_k,
+                "its rows end at or before 780 nm",
+            ),
+        ] {
+            assert_eq!(
+                pieces(
+                    InfraredIndex::MethaneIce,
+                    "methane-ice.json",
+                    &[(ch4_k, k.as_str()), (ch4_n, n.as_str())]
+                ),
+                Err(refusal(dataset, why))
+            );
+        }
+    }
+
+    /// `N2`'s and `H2O`'s sets are refused unless their bands lie strictly between 780 and 5,000
+    /// nm, where the pieces before and after them are not empty.
+    #[test]
+    fn substance_albedos_a_band_reaching_a_join_is_refused() {
+        let outside = "its band does not lie between 780 and 5,000 nm";
+        for band in [alpha("0.7,1\n2.1,1\n"), alpha("2.0,1\n5.0,1\n")] {
+            let n2 = "grundy_1993_n2";
+            assert_eq!(
+                pieces(
+                    InfraredIndex::NitrogenIce,
+                    "nitrogen-ice.json",
+                    &[(n2, band.as_str())]
+                ),
+                Err(refusal(n2, outside)),
+                "{band}"
+            );
+            let (warren, grundy) = ("warren_brandt_2008_h2o", "grundy_schmitt_1998_h2o");
+            let ice = refractiveindex("        0.7 1.31 1e-8\n        5.1 1.31 1e-2\n");
+            assert_eq!(
+                pieces(
+                    InfraredIndex::WaterIce,
+                    "water-ice.json",
+                    &[(warren, ice.as_str()), (grundy, band.as_str())]
+                ),
+                Err(refusal(grundy, outside)),
+                "{band}"
+            );
+        }
+    }
+
+    /// A set of one table is refused unless its rows span 780–5,000 nm, and a set missing from
+    /// the data is refused by name.
+    #[test]
+    fn substance_albedos_a_one_table_set_short_of_its_span_is_refused() {
+        let tholin = "khare_1984_tholin";
+        assert_eq!(
+            pieces(
+                InfraredIndex::Tholin,
+                "tholin.json",
+                &[(tholin, "wavelength_um,n,k\n0.7,1.6,0.01\n4.9,1.6,0.01\n")]
+            ),
+            Err(refusal(tholin, "its rows do not span 780-5,000 nm"))
+        );
+        assert_eq!(
+            pieces(InfraredIndex::Tholin, "tholin.json", &[]),
+            Err(refusal(tholin, "it is not one of the manifest's datasets"))
+        );
+    }
 }

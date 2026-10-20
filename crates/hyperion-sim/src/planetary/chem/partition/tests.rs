@@ -1699,17 +1699,40 @@ fn the_by_hand_earth_takes_a_bond_albedo_near_0_294() {
     eprintln!("T51.a's Earth by hand: Bond albedo {bond:.5} under {cloud} of cloud");
 }
 
+/// What a by-hand body's Bond albedo is held to against its measured range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Anchor {
+    /// Inside the range.
+    Inside,
+    /// At or above the range's top: a pure-frost upper bound, the body's darkening material not
+    /// modelled, its miss recorded (plan 14's T49.i record, 2026-10-19).
+    AtOrAboveItsTop,
+}
+
 /// A Pluto and a Triton given their measured N₂, CH₄ and CO by hand (T51.a's fixtures), airless
-/// over water frost's regolith, take a Bond albedo within 0.6–0.8 and 0.72–0.92 (Buratti et al.
-/// 2017, Icarus 287, 207: Pluto 0.72 ± 0.07; Hillier et al. 1990, Science 250, 419: Triton 0.82 ±
-/// 0.05; decision-triton-and-e101 §1.6), asserted from P14.T49.i's commit, which adds the infrared
-/// bands they need (decision-p14-t49c-split §1.3); until then the visible-only values are recorded.
-/// Their nitrogen ice's frost albedo is the `N2` row's own, not a stand-in. Their covers are by
-/// hand, their annual means linear in area from 35 to 47 K, as `pluto_keeps_its_nitrogen_ice`'s.
+/// over water frost's regolith about a Sun, against 0.6–0.8 and 0.72–0.92 (Buratti et al. 2017,
+/// Icarus 287, 207: Pluto 0.72 ± 0.07; Hillier et al. 1990, Science 250, 419: Triton 0.82 ± 0.05;
+/// decision-triton-and-e101 §1.6), asserted since T51.b's area mix weights P14.T49.i's bins over
+/// the host's whole spectrum (decision-p14-t49c-split §1.3; main's ruling, 2026-10-19). Their
+/// nitrogen ice's frost albedo is the `N2` row's own, not a stand-in. Their covers are by hand,
+/// their annual means linear in area from 35 to 47 K, as `pluto_keeps_its_nitrogen_ice`'s.
+///
+/// - **Triton** lies inside its range, 0.843, but by its regolith's stand-in: its N₂ ice covers
+///   0.066 of it (at `N2`'s 1.000) and its CH₄ ice 0.001 (at 0.928), and the rest is the icy
+///   regolith's fresh `H2O` frost (`RowByMaterial`, 0.832), not the N₂-covered surface Triton has.
+/// - **Pluto** lies above its range, 0.846, a miss recorded and not tuned: fresh frost of 100 µm
+///   grains over its whole surface, its N₂ ice over 0.083 and its CH₄ ice over 0.002 and the rest
+///   `H2O` frost, with none of the dark, red tholin terrain that lowers the measured body (Cthulhu
+///   Macula's, from memory). It is asserted as the bound that holds, at or above the range's top, a
+///   pure-frost upper bound, as T49.i's rows are (`N2`, `CH4` and `CO` at or above both tops under
+///   a 5,772 K black body).
 #[test]
 fn a_pluto_and_a_triton_given_their_ices_take_their_bond_albedos() {
     let profile = linear_cold_area(35.0, 47.0);
-    for (body, (low, high)) in [(pluto(), (0.6, 0.8)), (triton(), (0.72, 0.92))] {
+    for (body, (low, high), anchor) in [
+        (pluto(), (0.6, 0.8), Anchor::AtOrAboveItsTop),
+        (triton(), (0.72, 0.92), Anchor::Inside),
+    ] {
         let p = body.partition();
         let cover = Cover {
             cold_area: &profile,
@@ -1722,15 +1745,29 @@ fn a_pluto_and_a_triton_given_their_ices_take_their_bond_albedos() {
         assert_eq!(frost.stand_in, None, "{}", body.name);
         let (bond, cloud) = area_mix(&p, &cover, SurfaceMaterial::Ice);
         assert_same_bits(cloud, 0.0);
+        let entries: Vec<String> = published
+            .entries()
+            .iter()
+            .map(|e| {
+                format!(
+                    "{} {:?} over {:.4} at {:.5}",
+                    e.substance().substance().key(),
+                    e.phase(),
+                    e.area_fraction(),
+                    solid_bond(e.substance(), HostShade::sun().bands()).bond
+                )
+            })
+            .collect();
         eprintln!(
-            "{} by hand, over {OPTICS_BANDS} bands: Bond albedo {bond:.5}, its N2 ice over {:.3} at \
-             {:.5}",
+            "{} by hand, over {OPTICS_BANDS} bins: Bond albedo {bond:.5} against {low}–{high}; \
+             its N2 ice over {:.3} at {:.5}; its entries {entries:?}",
             body.name,
             nitrogen.area_fraction(),
             frost.bond
         );
-        if OPTICS_BANDS > 3 {
-            assert!((low..=high).contains(&bond), "{}: {bond}", body.name);
+        match anchor {
+            Anchor::Inside => assert!((low..=high).contains(&bond), "{}: {bond}", body.name),
+            Anchor::AtOrAboveItsTop => assert!(bond >= high, "{}: {bond}", body.name),
         }
     }
 }

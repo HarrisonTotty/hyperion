@@ -515,7 +515,9 @@ ruled 2026-10-09 and 2026-10-10).
   infrared (galaxy plan 14, P14.T49.i), to 148 of the table's rows, 0.7-5.5 um (its 146 infrared
   rows over 0.8-4.9946 um and the rows at 0.7 and 5.5 um), as the table prints them, in
   crates/hyperion-fit/data/wolff_2009_mars_dust/nk.csv, a tool input (not shipped) from which
-  crates/hyperion-sim/src/tables/substance_albedo.rs is computed.
+  crates/hyperion-sim/src/tables/substance_albedo.rs is computed. Wolff et al. retrieved the dust's
+  indices over CRISM's 440-2920 nm; the table's rows beyond 2.92 um lie outside that retrieval and
+  are the distributed table's, with no stated primary.
 
 - Refractive indices of Titan tholin: B. N. Khare et al., "Optical constants of organic tholins
   produced in a simulated Titanian atmosphere: From soft x-ray to microwave frequencies",
@@ -696,8 +698,12 @@ ruled 2026-10-09 and 2026-10-10).
   CC BY 4.0: raw records, quantised, in
   apps/hyperion/src/renderer/src/view/atmosphere/fixtures/tamudust-excerpt.json, and reduced
   tables at MGS-1 M's index in fixtures/mgs1m-phase.json and at Frattin et al.'s enstatite's in
-  fixtures/enstatite-sample-phase.json. The archive's GPL-3.0 code was read for its record layout
-  only; none of it is included.
+  fixtures/enstatite-sample-phase.json. The reduced tables' extinction and scattering
+  cross-sections are adapted again, integrated over size distributions at 550 nm, into the
+  extinction efficiencies and single-scattering albedos of
+  crates/hyperion-sim/src/tables/condensate_extinction*.rs (galaxy plan 14, P14.T49.e), offered
+  under CC BY 4.0. The archive's GPL-3.0 code was read for its record layout only; none of it is
+  included.
 
 - Single-scattering properties of severely roughened ice crystals: P. Yang, L. Bi, B. A. Baum,
   K.-N. Liou, G. W. Kattawar, M. I. Mishchenko and B. Cole, "Spectrally consistent scattering,
@@ -706,7 +712,10 @@ ruled 2026-10-09 and 2026-10-10).
   (L. Bi and P. Yang, J. Quant. Spectrosc. Radiat. Transfer 189 (2017) 228-237), Zenodo record
   5348402, licensed under CC BY 4.0. The 8-column aggregate, severely roughened, resampled in size
   and angle in apps/hyperion/src/renderer/src/view/atmosphere/materials/phase/; offered under
-  CC BY 4.0.
+  CC BY 4.0. Its extinction and scattering cross-sections are adapted again, integrated over size
+  distributions at 550 nm, into water ice's entry in
+  crates/hyperion-sim/src/tables/condensate_extinction_7.rs (galaxy plan 14, P14.T49.e), offered
+  under CC BY 4.0.
 
 - The infrared optical constants of the condensed optics' frosts and regoliths (galaxy plan 14,
   P14.T49.i), tool inputs in crates/hyperion-fit/data/ (not shipped), each with its

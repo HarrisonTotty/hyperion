@@ -242,8 +242,7 @@ pub use hyperion_surface::substance_key::SubstanceKey; // ASCII ≤ 16 bytes: "H
 pub struct Substance {
     /* key: SubstanceKey, kind: SubstanceKind, elements: &[(Element, u16)], charge: i8,
        molar_mass_g_per_mol: Option<f64>, gas: Option<GasColumns>, phase: Option<PhaseColumns>,
-       condensed: Option<CondensedColumns>, aerosol: Option<AerosolColumns>,
-       sources: &[Source] */
+       condensed: Option<CondensedColumns>, sources: &[Source] */
 }
 pub enum SubstanceKind { Molecule, Atom, Ion, Mineral, Lithology, Solution, Organic }
 pub enum Phase { Solid, Liquid, Vapour, Supercritical }
@@ -293,8 +292,32 @@ impl Substance { pub fn condensed_optics(&self) -> Option<&'static CondensedOpti
 pub enum ReferenceForm { Frost, Regolith } // ::{of_family, grain_diameter, photometry}
 impl CondensedColumns { pub const fn phase_law(&self) -> PhaseLaw; } // R10's for_family
 pub fn optics::rows() -> impl Iterator<Item = (SubstanceId, &'static CondensedOptics)>;
+// T49.i: the spherical albedo in 12 contiguous bins over 0.3–5 µm, from the infrared and the
+// laboratory spectra: CondensedOptics::{input, infrared_source, spherical_albedo_bins,
+// data_reach_nm, grain_diameter, lab_spectra}(); ::index_file() -> Option<&'static str>;
+// SPECTRAL_BIN_EDGES_NM: [f64; 13], 300–5,000 nm.
 pub fn resolve_palette_entry(id: SubstanceId, role: PaletteRole, temperature: Kelvin)
     -> Result<PaletteEntry, ResolvePaletteEntryError>;
+// T49.e: the aerosols' extinction at 550 nm, in `substance::aerosol`, a free function rather than
+// a registry column: the density is Substance::grain_density at the mode's temperature, and the
+// particles are the index file's shape class's (its phase table's, science-r08-nonspherical §6.4).
+// Nothing on the record calls it until T54.b.
+pub fn aerosol_optics(id: SubstanceId, phase: CondensedPhase, variant: FileVariant<'_>,
+    distribution: &SizeDistribution, temperature: Kelvin) -> Result<AerosolOptics, ResolveAerosolError>;
+// SizeDistribution::{gamma, log_normal}(r_eff: Metres, v_eff: f64); AerosolOptics::{
+// mass_extinction_m2_per_kg, extinction_efficiency, single_scattering_albedo, is_stand_in,
+// extinction_basis}(); ExtinctionBasis::{Sphere, PhaseTable, SpheresOutsidePhaseTable,
+// SphereFallback}; extinction_entries() -> impl Iterator<Item = &'static ExtinctionEntry>;
+// ExtinctionEntry::basis() -> EntryBasis::{Sphere, PhaseTable { radii_m }, SphereFallback}.
+// T49.d: the gases' equilibrium constants at 1 bar, from NASA's CEA records with NIST-JANAF's
+// reference states, in `substance::formation`; nothing on the record calls them until T52.a.
+pub fn log10_formation_constant(id: SubstanceId, temperature: Kelvin) -> Option<f64>; // log₁₀ K_f
+pub fn formation_range(id: SubstanceId) -> Option<(Kelvin, Kelvin)>; // None for a row with no record
+pub struct Reaction { /* each (SubstanceId, ν: i32), in the declared order, which is output */ }
+// Reaction::new(&[(SubstanceId, i32)]) -> Result<Reaction, BalanceReactionError> finds each record
+// once and checks every element and the charge (BalanceReactionError::{NoRecord { key },
+// Unbalanced { element }, Charge}); ::species(); ::log10_equilibrium_constant(&self, Kelvin)
+// -> Option<f64>, −Σ ν G ÷ (RT ln 10). formation::NOT_MODELLED: the gas rows with no record (FeH).
 pub enum Element { H, He, C, N, O, Ne, Na, Mg, Al, Si, P, S, Cl, Ar, K, Ca, Ti, V, Cr, Mn, Fe, Ni, Zn, Kr, Xe }
 ```
 
@@ -5444,7 +5467,8 @@ rows' values.
       reference form's by the equivalent slab's internal transmission at a stated n, and put in
       the form.
     - A rock with no whole-rock spectrum is an intimate mixture of its minerals' w at its cited
-      pristine mode, weighted by cross-section (Hapke 2012 §10: volume fraction over diameter):
+      pristine mode, weighted by cross-section (volume fraction over diameter: Hapke 2012, its
+      section not read, as decision-p14-t49i-rock-mixtures §2.1 states it):
       - its silicates at the form's 70 µm;
       - the phases its class's petrography puts below it at 1 µm (`Adopted`: the smallest grain at
         which the equivalent slab is used; never fitted). These are the organics, magnetite,
@@ -5556,9 +5580,16 @@ rows' values.
       values only);
     - over each material's committed index file, `apps/hyperion/src/renderer/src/view/atmosphere/materials/`,
       read as a committed dataset, its hash taken over each file's `key`, `phase`, `variant`,
-      `shape`, `wavelengthsNm`, `n` and `k` only, so that the record's τ(550) and the client's Mie
+      `shape`, `wavelengthsNm`, `n` and `k` only (as built, with T49.h's shared reading, its
+      `temperatureK` and `provenance` too), so that the record's τ(550) and the client's Mie
       use one source of truth and a file's prose (`name`, `paper`, `source`, `licence`,
       `reduction`, `standIn`) moves no output (decision-substance-names);
+    - the particles are the client's (science-r08-nonspherical §6.4, applied by main's ruling of
+      2026-10-19): a `nonSphericalMineral` or `crystal` file that has a phase table in
+      `materials/phase/` (R08.T5.c's and T5.d's) takes the table's `C_ext` and `C_sca`, read in
+      place through each manifest's `phase` list with a data hash over the fields read, and
+      `sphere` files and the rest take Mie spheres; the sim receives only the reduced `Q̄_ext` and
+      ln ω;
     - a file's grid starts at or below 380 nm, and two start at 360 nm (`sulphuric-acid-75.json`
       and the acid UV absorber's `sulphuric-acid-uv-absorber.json`, from R08.T5.d), so the task
       finds 550 nm by wavelength in each file's own grid, never by index (added 2026-10-14);
@@ -5570,10 +5601,13 @@ rows' values.
       (its k_UA is 0 there);
     - the Rayleigh and geometric limits;
     - five shared cases equal R08's `mieSphere` to 10⁻⁶;
-    - every aerosol-material row has an entry.
+    - every aerosol-material row has an entry;
+    - a phase table's `Q̄_ext` and ω at grid nodes against an independent quadrature of the table,
+      and the fallback labelled (§6.4).
   - _Files:_ `substance/aerosol.rs`, `tables/condensate_extinction.rs`, `tasks/condensate_extinction.rs`.
   - _Accept:_ `cargo test -p hyperion-fit condensate_extinction`;
-    `cargo test -p hyperion-sim substance::aerosol`.
+    `cargo test -p hyperion-sim substance::aerosol`;
+    `pnpm --filter hyperion exec vitest run src/renderer/src/view/atmosphere/mieSharedCases`.
 - **P14.T49.f The substance names on the client** (moves no output and rides no bump; built ahead
   of T49.b by rendering plan R08's notes, decision-substance-names, 2026-10-12; before T43.b's
   `SURFACE` rows).
@@ -16900,7 +16934,10 @@ tables::gauss_legendre`.
         found;
       - `FINE_GRAIN_DIAMETER`, `Spectrometer`, `BECKMAN_INCIDENCE_DEG`, `Geometry`,
         `ASD_GEOMETRY`, `LabSpectrum`, `GrainScaling`, `EndMember`, `GrainClass`, `MixturePart`
-        and `ReflectanceLevels`;
+        and `ReflectanceLevels`. `Geometry`'s fields are private (the review's fix): its
+        constructor, `Geometry::new(i, e, azimuth)`, a `const fn`, returns a `Result` of the
+        geometry or a `BuildGeometryError`, holding i and e, degrees, to [0, 90) and the azimuth
+        to [0, 180], with a getter for each and a doctest; `BuildGeometryError` is new;
       - on `CondensedOptics`, six new methods: `input()`, `infrared_source()`,
         `spherical_albedo_bins()`, `data_reach_nm()`, `grain_diameter()` and `lab_spectra()`. The
         bins method has a doctest: water frost is above 0.95 in the B, V and R bins and below 0.1
@@ -16915,12 +16952,16 @@ tables::gauss_legendre`.
       - `VERSION` is 1;
       - `row_optics` returns `BvrValues` (`[f64; BVR_ROW_LEN]`), and `fit` fills the bins and the
         reach after it;
-      - new: `row_optics_at`, `row_optics_of_w`, `reflectance_factor`, `RowGrain`, `FitInputs`,
-        `describe_input`, `row_datasets`, `fit_on_grid(manifest, step_nm)` and `INFRARED_SETS`
-        (every set in a fixed order, which the fingerprint numbers them by; an exhaustive match,
-        so a new set does not compile until it is listed);
-      - new errors: `FitAlbedoError::NoIndexFile`, `FitAlbedoError::Infrared { dataset, why }` and
-        `FitAlbedoError::Spectrum`;
+      - new: `row_optics_at`, `row_optics_of_w`, `reflectance_factor` and `row_datasets`, public;
+        and, crate-visible since the review's fix (nothing outside `hyperion-fit` names them),
+        `RowGrain`, `FitInputs`, `describe_input`, `reflectance_factor_with`, `fit_on_grid` (of a
+        manifest and a step, nm) and `INFRARED_SETS` (every set in a fixed order, which the
+        fingerprint numbers them by; an exhaustive match, so a new set does not compile until it
+        is listed);
+      - new errors: `FitAlbedoError::NoIndexFile`, `FitAlbedoError::Infrared { dataset, why }`,
+        `FitAlbedoError::Spectrum` and `FitAlbedoError::EmptyMixture`;
+      - the modules `spectral`, `infrared` and `lab`, below, and their items are crate-visible
+        (`pub(crate)`) since the review's fix;
       - the module `spectral`: `SPECTRAL_STEP_NM` (0.1), `SphericalAlbedoCache`,
         `spectral_single_scattering_albedo`, `Interpolation` (five rules), `Curve`, `Piece` (with
         `knots_nm`), `SpectralIndex`, `spectral_bins`, and the trait `SpectralGrain`. The trait
@@ -16928,13 +16969,17 @@ tables::gauss_legendre`.
         it;
       - the module `infrared`: `JOIN_NM` (780), `REACH_END_NM` (5,000), `METHANE_N_HELD_FROM_NM`
         (2,381), `AMMONIA_MEASURED_FROM_NM` (1,462), `CO_NOISE_FLOOR` and
-        `CO_NOISE_WINDOW_PER_CM`, `InfraredData` (`load`, `from_texts`, `files`),
+        `CO_NOISE_WINDOW_PER_CM` (test-only), `InfraredData` (`load`, `take`; `files` test-only;
+        the unused `from_texts` deleted at the review),
         `refractiveindex_rows`, `table_rows`, `k_of_alpha`, `visible_piece`, `infrared_pieces`
         and `spectral_index`;
       - the module `lab`: the splib07a reader `LabLibrary`; the inversions `Measurement`,
         `InversionTable`, `invert` and `HAtMu`; the slab's `rescale`; the complex Fresnel
         `hemispherical_fresnel_reflectance`; the grains `EndMemberGrain`, `MixtureGrain`,
-        `LevelsGrain` and `OpaqueGrain`; and `Clamped`;
+        `LevelsGrain` and `OpaqueGrain`; and `Clamped`. `InvertedSpectrum`'s fields are private,
+        with getters, and a row's end-member grain is shared from the fit's cache through its
+        `Arc` (`SpectralGrain` for `Arc<G>`), as the library takes splib07a's texts from the
+        datasets rather than copying them;
       - the manifest gains `datasets`, 16 entries, in the order the rows first name them. The task
         refuses a manifest whose list is not `row_datasets()`, before it reads any dataset;
       - the fingerprint also probes the 13 bin edges, each row's infrared set by its place in
@@ -16986,9 +17031,9 @@ tables::gauss_legendre`.
         4.67 µm band, all beyond 2.8 µm (a test).
     - **B, V and R** stay the palette's point values at 440, 550 and 640 nm (T49.c's), not the
       bins' means.
-  - _The frosts' infrared._ Each set comes from its primary and joins its R08 file at 780 nm. Each
-    has one reference temperature, stated in the row's sources, and all use the reference grain,
-    100 µm.
+  - _The frosts' infrared._ Each set comes from its primary and joins its R08 file at 780 nm, and
+    all use the reference grain, 100 µm. Each piece of a set holds at one reference temperature,
+    stated in the row's sources where its source gives one (_Temperatures_, below).
     - **`H2O` (`WaterIce`).** Warren and Brandt 2008, ice Ih at 266 K, committed raw
       (refractiveindex.info's `Warren-2008.yml`, CC0).
       - n and ln k are linear in ln λ, their table's recommendation.
@@ -17004,7 +17049,8 @@ tables::gauss_legendre`.
         4,912.66 nm.
       - n is Martonchik and Orton 1994's at 90 K, committed raw (`Martonchik-solid-90K.yml`, CC0;
         n only), linear in λ. Beyond its 2,381 nm row n is held at 1.316, because the table's next
-        rows are the 3.3 µm band's extrema and then 7.675 µm.
+        rows are the 3.3 µm band's extrema (3.315–3.330 µm), three rows at 3.534–3.565 µm (n
+        1.318–1.321, within 0.005 of the held value) and then 7.675 µm.
       - At 780 nm, n is within 1%, and k goes from the file's 0 (a gap) to 3.54 × 10⁻⁸, inside
         Grundy's 0.79 µm band.
       - Bins: 1 ×5, then .9482 .8879 .7525 .7481 .5445 .3516 .7110.
@@ -17020,12 +17066,17 @@ tables::gauss_legendre`.
       - Elsewhere to 5 µm k = 0: a statement of transparency, not a measurement.
       - n is held at the file's 780 nm value.
       - Bins: 1 ×8, then .9956 .9992 1 1.
-    - **`CO2` (`CarbonDioxideIce`).** Warren 1986, CO₂ deposited near 80 K, over 0.742–5 µm
-      (optool's `co2-w-Warren1986.lnk`); n linear, and ln k linear, in λ.
+    - **`CO2` (`CarbonDioxideIce`).** Warren 1986 over 0.742–5 µm (optool's
+      `co2-w-Warren1986.lnk`); n linear, and ln k linear, in λ. It is a compilation of laboratory
+      measurements "with emphasis on values for temperatures above 77 K" (its abstract), not one
+      sample deposited near 80 K, as the row first said.
       - The ruling paired it with Hansen 2005, but Hansen 1997's and 2005's near infrared could not
         be fetched.
-      - At 780 nm, n is within 1% and k steps ×2,371. Warren's continuum between the bands is
-        Egan and Spagnolo's impure dry ice, while the file's k is Hansen 2005's visible estimate.
+      - At 780 nm, n is within 1% and k steps ×2,371 over the file's k, Hansen 2005's visible
+        estimate. Between the bands over 1.0–2.5 µm Warren's k is his own interpolation, not a
+        measurement: "no measurements of absorption are available" there "except in the strong
+        narrow absorption lines" (his abstract). The row first called it Egan and Spagnolo's
+        impure dry ice; that is corrected in its sources and its `PROVENANCE.toml`.
       - Bins: .9957 ×5, then .8081 .7961 .7832 .7583 .5500 .5757 .3855.
     - **`CO` (`CarbonMonoxideIce`).** Gerakines, Materese and Hudson 2023's α-CO at 25 K, from
       NASA's Optical Constants Database (OCdb).
@@ -17035,6 +17086,9 @@ tables::gauss_legendre`.
         10⁻³ (`CO_NOISE_FLOOR`), three times its rms over 2,400–3,000 cm⁻¹ (1,245 rows,
         `CO_NOISE_WINDOW_PER_CM`), its baseline, in place of stage A's clipping of the negative
         noise at 0. Stage A's 2.8–3.5 µm bin, 0.958, was that baseline noise; it is now 1.
+      - The floor discards absorption that matters: at 4.6 µm a k at the floor, 1.02 × 10⁻³, would
+        give 100 µm grains Θ ≈ 0.80 and w ≈ 0.71. So the 3.5–5 µm bin, 0.7211, is an upper bound,
+        as the row's sources now say.
       - Over 780–3,333.5 nm k = 0, with the file's 780 nm n. The overtones at 1.58 and 2.35 µm are
         not drawn.
       - n steps by −0.46% at 3,333.5 nm, where the table begins.
@@ -17161,15 +17215,17 @@ tables::gauss_legendre`.
       µm, never the whole table, and no raw file is committed; its header names the infrared rows;
       `NOTICE`'s "Data" entry for Wolff et al. 2009 names them beside the visible ones; and the
       provenance is above (the URL, the SHA-256 and the rows kept);
-    - **Brossier et al. 2018's values** (CC BY-NC-ND), Titan's dunes' single-scattering albedo at
-      1.27, 1.59 and 2.01 µm read by eye from Fig. 7a, asserted in a test as facts with their
+    - **Brossier et al. 2018's values** (CC BY-NC-ND), Titan's dunes' albedo at 1.27, 1.59 and
+      2.01 µm read by eye from Fig. 7a, taken as single-scattering albedo (unconfirmed; the
+      abstract says "surface albedo"; the anchors, below), asserted in a test as facts with their
       citation (decision-composition §5): confirmed by main (2026-10-19), with its conditions met.
       Nothing generated reads them; the test's comment says they were read by eye, to about ±0.01,
       which the test's tolerances exceed; and no figure, digitised curve or data file of the paper
       is committed.
   - _The rows from laboratory spectra_ (`splib07a`; decision-p14-t49i-rock-mixtures).
     - **The inversion.** A Beckman spectrum is the similarity relation's directional-hemispherical
-      albedo at the regolith's asymmetry and μ₀ = cos 10° (`BECKMAN_INCIDENCE_DEG`); an ASD
+      albedo at the regolith's asymmetry and μ₀ = cos 10° (`BECKMAN_INCIDENCE_DEG`, adopted: _The
+      Beckman spectra_, below); an ASD
       spectrum is the IMSA's reflectance factor at i 20°, e 30°, azimuth 90° (g 35.5°; Kokaly et
       al. 2017, DS 1035, p. 7). Each channel is bracketed on a 513-node table of the model in
       √(1 − w) and refined by the Illinois method to a residual below 10⁻¹⁵; every spectrum's round
@@ -17246,7 +17302,8 @@ tables::gauss_legendre`.
     (Cerac I-1047) and `soot` (carbon black GDS68) are spectra, held as measured. `Cr` and
     `graphite` are slabs: w = `S_e` by the complex Fresnel equations (Byrnes 2016, arXiv
     1603.02720, eq. 6, App. D.2), held to Martinez-Anton 2026's dielectric values (0.0918 at n 1.5)
-    and within 4% of Hapke's fit at k ≪ 1; stand-ins, a smooth-grain upper bound: splib07a's iron
+    and within 4% of Hapke's fit at k ≪ 1 over n 1.5–2.8; stand-ins, a smooth-grain upper bound:
+    splib07a's iron
     powder lies 15% below `iron.json`'s slab at 550 nm.
   - _The rest, labelled._
     - `mars_dust`: the slab from R08's file and Wolff et al.'s infrared at its grains' effective
@@ -17261,9 +17318,10 @@ tables::gauss_legendre`.
   - _The anchors._
     - **Enceladus** (T51.b's anchor, checked at the row). `H2O`'s Bond albedo under a 5,772 K
       blackbody is 0.832:
-      - inside Howett et al. 2010's 0.81 ± 0.04 (the test's window, 0.77–0.85);
-      - above Li et al. 2023's 0.76 ± 0.03, read through a secondary (the test asserts no less
-        than 0.73).
+      - inside Howett et al. 2010's 0.81 ± 0.04 (the test's window, 0.77–0.85), a figure from
+        memory: the paper's abstract gives no number, and the paper was not reached;
+      - above Li et al. 2023's 0.76 ± 0.03, read in its abstract in ADS (Icarus 394, 115429,
+        2023Icar..39415429L; the test asserts no less than 0.73).
 
       Pure fresh frost of 100 µm grains is an upper bound on the body, whose grains, impurities
       and weathering darken it; T51.b asserts the body's value. Under a 3,000 K blackbody the same
@@ -17277,9 +17335,12 @@ tables::gauss_legendre`.
       a mix of the three alone lies above Pluto's range, and T51.b asserts the bodies.
     - **Io**: `S8`'s Bond albedo under a 5,772 K blackbody 0.69 and `SO2`'s 0.80, both above Io's
       0.50 ± 0.10 (Simonelli and Veverka 1984).
-    - **Titan's dunes**: `tholin`'s w at 1.28 µm 0.564, inside 0.56–0.57 with the allowance; at
-      1.59 and 2.01 µm 0.644 and 0.572, brighter than the dunes' 0.46 and 0.42, the miss recorded
-      (the dunes mix tholin with ice; `tholin` is not a stand-in for it).
+    - **Titan's dunes**: `tholin`'s w at 1.27 µm, Brossier et al.'s window, 0.558, inside
+      0.56–0.57 with the allowance; at 1.59 and 2.01 µm 0.644 and 0.572, brighter than the dunes'
+      0.46 and 0.42, the miss recorded (the dunes mix tholin with ice; `tholin` is not a stand-in
+      for it). The figure's ordinate is
+      taken as single-scattering albedo, as the lane's preparation read Brossier et al.'s Fig. 7a,
+      which is unconfirmed: their abstract calls the quantity a "surface albedo".
     - **Mars's bright dust**: `mars_dust`'s Bond albedo 0.36 against the bright regions' 0.27
       (Pleskot and Miner 1981), above the allowance's 0.338: a miss, brighter, stated in its
       stand-in's reason.
@@ -17306,6 +17367,150 @@ tables::gauss_legendre`.
     checks against Mars's Bond albedo, and P14.T51.d must not darken it twice; RELAB is not an
     input now, a permissive licence from its rights holder (a `License_Information` in its bundle
     or its page's terms for the PDS copy) or a PDS provider agreement being what would settle it.
+  - _The review's fixes move no value_ (2026-10-19). Every fix is to code paths, errors, tests,
+    visibility or text that reaches neither the table nor a golden, so `substance_albedo` is not
+    refitted: `hyperion-fit check` finds it fresh (40 fresh, 6 warnings, 0 failures), its
+    inputs hash and fingerprint unchanged, and `golden_diff --base HEAD` (P14.T49.i's tree, with
+    T49.e, T49.d and the merge) finds no golden changed. `Geometry`'s fields keep their names, so
+    its `Debug`, which the fingerprint's hash of the rows' inputs reads, is unchanged.
+  - _Modes no source gives_ (the review's fix, 2026-10-19). Each of these mixtures is a stand-in
+    with no band, and its mode's source is now `Adopted`, saying which part is an assumption (the
+    ruling's §4 gives a mode `Reduced`, the cited table converted):
+    - `basalt_reduced`: the chosen 50/30/10/10 wt% inside Charlier and Namur 2017's bounds;
+    - `phyllosilicate`: 82/18 vol% inferred from the registry's grain density;
+    - `komatiite`: the devitrified glass counted as augite;
+    - `cometary`: the silicate split 1:1 between olivine and enstatite;
+    - `granite`: the muscovite counted as microcline;
+    - `chondrite_ci` and `basalt_fe`: their 1:1 splits (phyllosilicate; pyroxene);
+    - `ferric` (beyond the review's list): it carries `basalt_fe`'s parts, so its pyroxene's 1:1
+      split;
+    - `anorthosite`: the registry's 95/5 is science-composition-crusts §7.1's figure, given there
+      from memory, not read, so no read source gives it;
+    - `ultramafic` (added 2026-10-19, at main's request): Hu, Ehlmann and Seager 2012 state "60% Olivine, 40%
+      Enstatite" but not that these are volume fractions, so reading them as such is an assumption.
+
+    The sim's sources test accepts `Adopted` for a mode that says "an assumption" and pins these
+    ten rows. `mars_dust`'s 2.8 µm grain is `Adopted` too, not `Fact`: Wolff et al.'s 1.4 µm
+    effective radius is theirs, and twice it as Hapke's D is the lane's choice. None of this
+    reaches the table or the golden: a source's basis is printed in neither.
+
+  - _No hand values._ Every row decision-p14-t49c-split §4 names is modelled, from an index, a
+    spectrum, a mixture, a slab or levels, so no `HandValue` is added. T54.a's bless note and
+    T33.c's census list the stand-ins only.
+  - _The allowance at the anchors._ The 1.25 is ruled for the classes' bands
+    (decision-p14-t49i-rock-mixtures §3). The lane applies the same model allowance to Mars's
+    bright dust (0.27 widened to 0.216–0.338) and to Titan's dunes at 1.27 µm (0.56–0.57 widened to
+    0.448–0.713): the model's uncertainty is the same there (the form's grains against the
+    surface's, its packing, and the reference photometry against the surface's own), and no other
+    tolerance is ruled for them. `tholin` is read at 1.27 µm in the code
+    (`substance_albedos_tholin_meets_titan_s_dunes`), Brossier et al.'s window, where the code read
+    1.28 µm until 2026-10-19 (0.564 there): 1.27 µm is no node of any grid, its w there, 0.558,
+    interpolated between Khare et al.'s rows at 1.192 and 1.357 µm, and no node of the fit's grid
+    falls at it.
+  - _Temperatures._ One reference temperature holds per piece of a set, not per set: `NH3`'s set
+    states none (optool's copy of Martonchik et al. 1984 gives none); `H2O`'s joins 266 K and
+    100 K; `CH4`'s takes k at 40 K and n at 90 K. `InfraredIndex`'s doc and the rows' module doc
+    say so now.
+  - _The Beckman spectra._ `BECKMAN_INCIDENCE_DEG`, 10°, is adopted, the lane's prototype's value,
+    and its doc no longer states it as fact: DS 1035 gives no angle, refers the instrument to
+    Clark et al. 1990b (not read), and describes the Beckman measurements of powders as biconical
+    reflectance factors, "Because the effect of the sample holder walls" (p. 4). Normal incidence
+    in its place moves a spherical albedo by at most 0.0023. The 31 Beckman spectra are inverted as
+    directional-hemispherical albedos all the same (deferred, below).
+  - _Wolff beyond 2.92 µm._ The `mars_dust` rows beyond 2,920 nm lie outside Wolff et al.'s 2009
+    CRISM retrieval (440–2,920 nm). They are the distributed table's, with no stated primary, and
+    they set `mars_dust`'s 2.8–5 µm bins. `NOTICE`'s Wolff entry, the dataset's
+    `PROVENANCE.toml` and the row's infrared source say so; the `PROVENANCE.toml`'s retrieval and
+    reproduction date is the re-fetch's, 2026-10-19.
+  - _The review's checks of sources_ (2026-10-19):
+    - not reached, recorded and worded so: Howett et al. 2010's 0.81 ± 0.04 is from memory (the
+      abstract gives no number); Brossier et al. 2018's Fig. 7a ordinate, taken as
+      single-scattering albedo, is unconfirmed (the abstract says "surface albedo"); Hapke 2012's
+      section for the mixing rule;
+    - read, the wording corrected: Li et al. 2023's 0.76 ± 0.03 in its ADS abstract (no longer
+      "through a secondary"); Cantillo et al.'s geometry in arXiv:2401.10377, §3.2 (i 0°, e 30°
+      for the ASD), in place of "p. 10"; Amano et al. 2023's CI band, whose lower end, ~2%, is
+      Ryugu's global remote-sensing reflectance (ONC-T, NIRS3) while the returned grains measure
+      ~2 to 4% at v-band (i 30°, e 0°), the band unchanged since the ruling sets it; Warren 1986's
+      compilation (above); `basalt_reduced`'s forsterite density, 3,362 kg m⁻³, olivine at Fa8.1
+      linear between D(calc.) 3.271 and 4.40;
+    - read, contrary to the review: King et al. 2015's Table 1 (p. 154) is in Open Research
+      Online's CC BY 4.0 copy of the version of record, whose Orgueil average is the mode's 83.0,
+      5.7, 6.7, 1.0, 3.3 and 0.3 vol%; Dunn et al. 2010's Table 4 is in the Internet Archive's copy
+      of the publisher's free-access page (2020-06-02), whose 18 H, 17 L and 13 LL rows average to
+      the modes' figures exactly (recomputed here). The modes now say where each was read.
+  - _T51.b's area mix on the bins_ (main's ruling, 2026-10-19: "Switch area_mix.rs to T49.i's
+    edges and bins in this batch's fix commit. Keep it behind the SNAPSHOT_VERSION hold. Turn on
+    the Enceladus test, and add the Pluto and Triton anchors"). Every change is under
+    `SnapshotRules::Batch`: under `Held`, in force at 22, every output is version 22's to the bit,
+    the planetary goldens pass unchanged, and `golden_diff --base HEAD` moves no golden but the
+    batch's two new ones (`substance/aerosol.golden`, `substance/formation.golden`).
+    - **A solid** weights its 12 bins (`spherical_albedo_bins`) by its hosts' light in each bin's
+      edges, over the whole spectrum: the first bin takes all the light below 390 nm and the last
+      all the light above 3,500 nm, so that they stand for the light below 300 nm and above
+      5,000 nm (`optics_shares`; `OPTICS_BANDS` is `SPECTRAL_BINS`, and `VISIBLE_BAND_EDGES_NM` is
+      deleted). The shares are T51.b's 8-point Gauss–Legendre rule in x = c₂ ÷ λT over the new
+      edges, the last bin's x from 0. The first bin's is the rest of the light, 1 less the others,
+      because the rule over x from 390 nm to +∞ would not keep its accuracy at a cool host. Against
+      a 20,000-interval Simpson sum, the worst bin from 2,000 to 40,000 K is 1.6 × 10⁻¹⁴; the open
+      shares are within 4.4 × 10⁻¹⁶ of the Planck series; each set sums to 1. A Sun's light by bin:
+      0.1105 below 390 nm; B, V and R 0.1303, 0.1282 and 0.1191; then 0.0765, 0.1529, 0.1170,
+      0.0757, 0.0422, 0.0221 and 0.0115, and 0.0141 above 3.5 µm. The weathered regolith's seam
+      takes the 12 bins (`RegolithWeathering::Weathered { spherical_bins }`).
+    - **A liquid** keeps r_d and its body term in each of its fifteen bins, each at the bin's own
+      index, and now weighs the light outside 380–760 nm too (`liquid_shares`, `LIQUID_WEIGHTS`,
+      17). The light above 760 nm, which runs through T49.i's infrared bins, takes r_d at the last
+      bin's index, with no body term (decision-p14-t49c-split §2). The light below 380 nm takes the
+      first bin's whole albedo, body term included, as a solid's first bin stands for the light
+      below its data: the lane's reading, for main. Water's sea at 288 K about a Sun is 0.08420
+      (0.06654 at its surface alone), where T51.b's over 380–760 nm was 0.08310; a Sun's light
+      below 380 nm is 0.0997 and above 760 nm 0.4533.
+    - **What moves under `Batch`**, about a Sun: `H2O`'s frost 0.98937 → 0.83204, `N2`'s 1.00000 →
+      0.99980, `CH4`'s 0.92803 and `basalt`'s 0.05187 → 0.05524. The reference Earth's `A_clear`
+      goes 0.10107 → 0.09819 and `A_cloud` 0.38902 → 0.39044; it still gives 0.294000. The table's
+      bodies through the passes:
+      - Earth 0.27983 (T_eq 256.41 K);
+      - Mars 0.49936 (189.88 K);
+      - Ganymede, as a body at 5.2 au, now a snowball, 0.53617 (100.72 K, against 38.62 K over
+        three bands);
+      - Titan 0.53617 (74.23 K);
+      - Venus, the Moon, Mercury and Ceres as before.
+
+      T51.a's Earth by hand gives 0.29947. An icy member placed at 43 au takes 0.83204 at 27.18 K;
+      a Triton-like capture 0.83093 at 78.29 K; Pluto and the table's Triton at their own
+      inventories 0.83204 at 28.59 and 32.49 K. Over the sample (954 bodies) 9 are bracketed: 4
+      jumps and 5 fixed points, and no lossless frost at the clamp, where 20 were before, 8 of them
+      such frosts. The guard's 1% and 3% hold. The comments on the clamp, the passes and the
+      sample test no longer name nitrogen's visible-only albedo as the clamp's case: the frosts
+      T49.i holds lossless (`O2`, `Ar`, `H2S` and `NH4SH`) remain it.
+
+    - **The anchors at the body**, each about a Sun (`HostShade::sun()`):
+      - _Enceladus_, the airless icy regolith's `H2O` frost: **0.83204**, inside 0.7–0.9,
+        asserted. Its weighting is the fit's Planck-series weighting to 10⁻¹² (the row's 0.832,
+        above). The test is renamed `an_enceladus_takes_its_fresh_frost_near_0_8`, from T51.b's
+        `an_enceladus_takes_its_fresh_frost_until_the_infrared`, and is no longer gated.
+      - _Triton_ by hand (T51.a's fixture): **0.84331**, inside 0.72–0.92, asserted. It lies
+        inside by the regolith's stand-in: its N₂ ice covers 0.066 (at 0.99980) and its CH₄ ice
+        0.0013 (at 0.92803), and the rest is the icy regolith's `H2O` frost (`RowByMaterial`),
+        not the N₂-covered surface the measured Triton has.
+      - _Pluto_ by hand: **0.84618**, above 0.6–0.8, **a miss, recorded and not tuned**. Its N₂
+        ice covers 0.083 and its CH₄ ice 0.0016, the rest `H2O` frost: fresh frost of 100 µm
+        grains everywhere, with none of the dark tholin terrain that lowers the measured body.
+        The test asserts the bound that holds, at or above the range's top, a pure-frost upper
+        bound like the rows' check (above), and prints the value. What would darken it is
+        P14.T54.a's lid (T51.c) and P14.T54.b's weathering with T51.d's organic cover.
+
+      The ungated tests are `a_pluto_and_a_triton_given_their_ices_take_their_bond_albedos`
+      (`planetary/chem/partition/tests.rs`, each body's case named, `Inside` or
+      `AtOrAboveItsTop`) and the Enceladus test.
+
+    - **The stale test.** `a_solid_without_optics_takes_water_frost_s_labelled` now takes `SiC`,
+      `Kr`, `C2H6` and `CH3OH`, each checked to have no optics in the test itself, in place of
+      `feldspathic`, `mars_dust`, `graphite` and `SO2`, which T49.i gave optics. Its "never `A_N`"
+      check weights the normal albedo by the B, V and R bins' light.
+    - _Files_: `planetary/derive/photometry/area_mix.rs` and its tests,
+      `planetary/chem/partition/tests.rs`, and comments in `planetary/derive/passes.rs`,
+      `planetary/derive/atmosphere/surface_mix.rs` and `planetary/system/tests.rs`.
   - _Tests._
     - In the sim (`substance::optics`):
       - the bins are contiguous over 0.3–5 µm and rising; B, V and R's bins hold 440, 550 and
@@ -17316,8 +17521,10 @@ tables::gauss_legendre`.
         hold their nearest covered bin's value;
       - the four lossless rows' bins are 1 to 10⁻⁶;
       - each row names its sources and their basis: its file once and its infrared set once
-        (`Reduced`), each end-member's description, a mixture's mode (`Reduced`) and its fine
-        grains (`Adopted`) where it has any, levels' measurement, and a stand-in's reason;
+        (`Reduced`), each end-member's description, a mixture's mode (`Reduced`, or `Adopted` and
+        saying it is an assumption, for the ten rows of _Modes no source gives_, which the test
+        pins) and its fine grains (`Adopted`) where it has any, levels' measurement, and a
+        stand-in's reason;
       - the laboratory inputs are well formed (spectra named for their spectrometer, physical
         indices and grains, a mixture's parts positive and summing to 1, only held end-members
         fine, every laboratory row a regolith, levels within [0, 1]);
@@ -17361,7 +17568,16 @@ tables::gauss_legendre`.
       - the mixtures' bands and their order, and `basalt`'s check (above);
       - the anchors: Enceladus, Pluto and Triton, Io (with `SO2`'s other phase recorded), Titan's
         dunes, Mars's dust, and the iron powder below its slab;
-      - the fingerprint's new probes, with each set listed once.
+      - the fingerprint's new probes, with each set listed once;
+      - the refusals (the review's fix), each by its specific variant and reason: a malformed
+        refractiveindex.info file or reduced table and rows that do not rise; `CO`'s set short of
+        5,000 nm, beginning at or before 780 nm or on a wavenumber that is not positive; `NH3`'s
+        with no 1,462 nm row or no n; `CH4`'s with no n row over 400–2,381 nm or k ending by 780
+        nm; `N2`'s and `H2O`'s bands reaching 780 or 5,000 nm; a one-table set short of
+        780–5,000 nm and a set missing from the data; a spectrum under a name not of the
+        release's form, naming another record, of another channel count, not rising or missing;
+        spectra and a mixture's parts that share no wavelength; a mixture of no part; and
+        `NoIndexFile` for a row with no index file.
     - Also run: `tests/substance_albedos.rs`, the end-to-end `rerender`, unchanged;
       `cargo run -p hyperion-fit -- check` (32 fresh, 6 warnings, 0 failures; `substance_albedos`
       revision 1 fresh); `data.rs`'s `every_recorded_provenance_parses`; the registry golden; and
@@ -17376,11 +17592,11 @@ tables::gauss_legendre`.
     - `NOTICE`, `.pre-commit-config.yaml` (`mixed-line-ending` and `end-of-file-fixer`) and
       `.prettierignore`.
 - **Deferred findings (2026-10-13 rule)**, from P14.T49.i, and as handed to it from P14.T49.c:
-  - _`CO2`'s near infrared is a lower bound._ Between the bands, Warren 1986's k is Egan and
-    Spagnolo's impure dry ice, 2,371 times the file's Hansen 2005 k at 780 nm. It lowers `CO2`'s
-    0.78–2.2 µm bins to 0.76–0.81, so its Bond albedo (0.894 / 0.751) is a lower bound on pure
-    frost's. Hansen 1997's and 2005's near infrared, which could not be fetched, would replace
-    it.
+  - _`CO2`'s near infrared is a lower bound._ Warren 1986's k at 780 nm is 2,371 times the file's
+    Hansen 2005 k, and between the bands over 1.0–2.5 µm it is Warren's interpolation, no
+    absorption having been measured there (his abstract). It lowers `CO2`'s 0.78–2.2 µm bins to
+    0.76–0.81, so its Bond albedo (0.894 / 0.751) is taken as a lower bound on pure frost's.
+    Hansen 1997's and 2005's near infrared, which could not be fetched, would replace it.
   - _The slab outside its derivation._ The equivalent slab assumes k ≪ 1, and T49.c's threshold
     is 0.1. The bins also read it:
     - above k 0.1;
@@ -17389,11 +17605,16 @@ tables::gauss_legendre`.
 
     No source gives that extension. Its n-below-1 branch touches only the bins beyond 2.8 µm.
 
+    The surface term itself (the science check's): in the saturated band cores Hapke's `S_e` fit
+    lies 12–24% below the exact complex value (`H2O` at 3.0 µm, `NH3` at 2.96 µm, `CO` at
+    4.667 µm), and 18% above it at k ≈ 0 and n 1.31. The effect on a Bond albedo is under 0.001.
+
   - _The forward phase function in the infrared._ Fresh snow's lobe (asymmetry 0.503, a visible
     measurement) is applied at every wavelength, including where the grains are opaque inside a
     band and scatter by surface reflection alone.
   - _Methane's real index._ Martonchik and Orton 1994 tabulate n only at band extrema, so `CH4`'s
-    n is held at 1.316 from 2.381 µm. Inside the 3.3 µm band the grains are opaque whatever n is.
+    n is held at 1.316 from 2.381 µm. Their rows at 3.534–3.565 µm (n 1.318–1.321) lie within 0.005
+    of it. Inside the 3.3 µm band the grains are opaque whatever n is.
   - _Bands not drawn._ N₂'s weak 4.3 µm fundamental, CO's overtones at 1.58 and 2.35 µm
     (Quirico and Schmitt 1997, in SSHADE only), and SO₂ frost's infrared bands. The bins there are
     upper bounds on brightness.
@@ -17413,7 +17634,7 @@ tables::gauss_legendre`.
     bin barely depends on the true value.
   - _`H2O`'s steps inside its set._ The ×2.64 step at 962.3 nm and the ×0.561 step at 2,742 nm
     are temperature steps (100 K against 266 K), not errors. A frost's temperature is not a
-    dimension of the row: each set has one reference temperature.
+    dimension of the row: each piece of a set has one reference temperature.
   - _The Nicolet spectra not spliced._ `splib07a`'s Nicolet spectra (1.12–216 µm) are not joined
     beyond the ASD's 2.5 µm and the Beckman's 3 µm, so every laboratory row holds its last covered
     bin out to 5 µm (the 2.2–2.8 µm bin's value for an ASD spectrum and a mixture ending below
@@ -17438,11 +17659,19 @@ tables::gauss_legendre`.
     140–300 nm, so R08.T5.i's lean for ammonia's visible (decision-p14-t49c-split §5.3, Pipes et
     al.'s frost reflectance) is wrong. Hapke et al. 1981 and Lebofsky and Fegley 1976 hold the
     visible, in figures only.
-  - _The Beckman's beam angle_, 10°, is the prototype's: DS 1035 gives none and calls the Beckman
-    measurements biconical reflectance factors (p. 4); Clark et al. 1990b not read. It moves a
-    spherical albedo by at most 0.003.
+  - _The Beckman's beam angle_, 10°, is adopted, the prototype's: DS 1035 gives none (p. 4) and
+    refers the instrument to Clark et al. 1990b, not read. Normal incidence in its place moves a
+    spherical albedo by at most 0.0023.
+  - _The Beckman spectra's quantity._ The 31 Beckman spectra are inverted as
+    directional-hemispherical albedos, while DS 1035 labels the powders' Beckman measurements
+    biconical reflectance factors: "Because the effect of the sample holder walls, these Beckman
+    measurements are described as biconical reflectance factors (BCRF)" (p. 4).
   - _Beck et al. 2021's 0.066_ is a solar-spectrum mean over 0.4–2.5 µm, 0.85–1.25 times the 550
     nm value (their §5.3); CM's band test takes `A_N` at 550 nm, as the ruling's table does.
+  - _Beck et al. 2021's zero phase_ is a quadratic extrapolation from g 10°, 20° and 30°. Under the
+    reference form's photometry the same extrapolation recovers `A_N` ÷ 1.21, so CM's like value
+    is 0.058, still inside 0.047–0.085. The band is ruled as a direct comparison
+    (decision-p14-t49i-rock-mixtures §3); recorded.
   - _The organics' volume fractions_ (CI 9.3, CM 6.3 vol%) rest on second-hand carbon contents and
     an unread organic-matter-to-carbon ratio and density; Jarosewich 1990 gives Orgueil's C 2.80 +
     CO₂ 1.50 wt%, Amano et al. 2023 5.5 wt%.
@@ -17459,9 +17688,12 @@ tables::gauss_legendre`.
     decision-p14-t49c-split §5.7 asked T49.i's science check to read Hapke's book where it adds a
     formula; no record of this task shows it read. Its formulas rest on their reproductions: the
     opaque slab's surface term on Byrnes 2016's complex Fresnel equations (checked against
-    Martinez-Anton 2026's dielectric values, and within 4% of Hapke 2012's fit at k ≪ 1), the
-    cross-section weighting on Hapke 2012 §10 as the ruling states it, and the slab's extension
-    below n = 1 on no source (above).
+    Martinez-Anton 2026's dielectric values, and within 4% of Hapke 2012's fit at k ≪ 1 over n
+    1.5–2.8), the cross-section weighting on Hapke 2012 as decision-p14-t49i-rock-mixtures §2.1
+    states it (its section not read: the "§10" the code first gave is Hapke 2012's chapter "A
+    miscellany of bidirectional reflectances", pp. 263–286, by CrossRef), and the slab's extension
+    below n = 1 on no source (above). The rule itself is right: a part's cross-section per volume
+    is Nσ = 3f ÷ 2D with `Q_E` = 1.
   - _No infrared_ (from T49.c, §5.2): closed by this task.
   - _The lossless frosts' upper bounds_ (from T49.c, §5.6): `CH4`, `NH3`, `N2` and `CO` now carry
     their infrared, where a primary exists. Their visible stays lossless, because R08's files have
@@ -17908,52 +18140,179 @@ tables::gauss_legendre`.
     threshold; its ice belt reads water's.
   - _Overlapping ices_ (several solids in one cold zone) are scaled down to the whole surface in
     proportion, a stand-in for their layering.
-- **Deviations in P14.T49.e, as built: aerosol extinction at 550 nm (`p14-optics`, 2026-10-19).**
+- **Deviations in P14.T49.e, as built: aerosol extinction at 550 nm (`p14-optics`, 2026-10-19;
+  review fixes the same day, with science-r08-nonspherical §6.4 applied).**
   `GENERATOR_VERSION` stays 22, and no generated value moves.
   - _Held at 22_ (decision-bump-plan-after-22 §1.3 and §5). Nothing on the record calls
-    `substance::aerosol`; P14.T52.c and T24.c are its first readers. The seven tables (below, task
-    `condensate_extinction` and its six parts, revision 0, fast) are a first emission stamped since
-    22; **P14.T54.b** restamps them `--since 24`, and from then a changed index file in R08's
-    `materials/` moves τ(550) and rides a bump. Before 24 a refit re-emits through the first-
-    emission path (decision-p14-t49h-liquids §5), no table being read by a golden.
-    `golden_diff --base HEAD`: no golden changed, verdict "nothing to reconcile"; no golden lists
-    the tables. `hyperion-fit check`: the seven `fresh`, 0 failures.
+    `substance::aerosol`; P14.T52.c and T24.c are its first readers, and its tripwire (below)
+    holds it so. The seven tables (below, task `condensate_extinction` and its six parts, revision
+    0, fast) are a first emission stamped since 22. The review's refit re-emitted them through
+    decision-p14-t49h-liquids §5's path, since the emitter refuses a changed body at 22: each table
+    deleted, then the prebuilt `hyperion-fit run <part> --since 22`, the binary built from the same
+    tree; `hyperion-fit check` passes; in `tables.lock` only the seven entries changed; no golden of
+    generated output reads them. **P14.T54.b** restamps them `--since 24`, and from then a changed
+    index file in R08's `materials/`, or a changed phase table in `materials/phase/`, moves τ(550)
+    and rides a bump. The new golden `tests/golden/substance/aerosol.golden` (below) is an
+    extension at 22: `golden_diff --base HEAD` lists it as the one new golden, no pinned value
+    changed, no inconsistency. `hyperion-fit check`: every table `fresh`, 0 failures.
+  - _The methane refit_ (main's order, 2026-10-19). R08.T5.j re-reduced `methane-liquid.json`'s
+    visible k (6.64 × 10⁻¹¹ at 550 nm, from 1.01 × 10⁻⁹; n unchanged), which staled
+    `condensate_extinction_5`. It was refitted at 22 by the same path, with P14.T49.d's review
+    fixes: `cargo build -p hyperion-fit` on the final tree, then the table deleted and the prebuilt
+    `hyperion-fit run condensate_extinction_5 --since 22`. In `tables.lock` only its entry changed
+    (and T49.d's `thermo_equilibrium`, refitted beside it): inputs `dc3fd47c748b…`, body
+    `2ede2d2c9d49…`, the revision, fingerprint and acceptance line unchanged. In the table only
+    the inputs hash, `methane-liquid.json`'s data hash (`b605ae3f62b3`) and `METHANE_LIQUID`'s four
+    grids moved; the other six files' items are bit-identical. The only other table that reads
+    the file, `liquid_optics`, was refitted on origin (baefd68d). `tests/condensate_extinction.rs`
+    reproduces the table; `hyperion-fit check`: 40 fresh, 6 warnings (the provisional tables), 0
+    failures. `aerosol.golden` pins no methane case and is unchanged byte for byte.
+  - _§6.4 applied_ (main's ruling, 2026-10-19, on plan 08 ~8517–8522: "P14.T49.e. κ_ext for
+    `nonSphericalMineral` and `crystal` modes is read from R08.T5.c's tables' C_ext, not from sphere
+    Mie, so that the sim's mass extinction and the client's optics agree").
+    - **The files.** Of the 30 `nonSphericalMineral` and `crystal` index files, 21 have a phase
+      table of their own in `materials/phase/` (the client's `phaseFileOf`, by key, phase and
+      variant: the 20 minerals and water ice), each in its part's manifest's `phase` list. **17
+      take it**: basalt, basaltic glass, calcium titanate, chromium, enstatite glass, amorphous
+      forsterite, graphite, iron sulphide, iron, manganese sulphide, mars dust, the Mars regolith
+      simulant, potassium chloride, silicon dioxide, sodium chloride and sodium sulphide on
+      TAMUdust2020's hexahedra, and water ice on Yang et al. 2013's aggregate
+      (`EntryBasis::PhaseTable`). **13 fall back** to equal-V/A spheres, labelled in their entries
+      and in each value (`EntryBasis::SphereFallback`, `ExtinctionBasis::SphereFallback`): the
+      nine ices but water's (NH₃, NH₄SH, Ar, CO₂, CO, H₂S, CH₄, N₂, O₂), which have no table of
+      their own and whose extinction the client also takes from Mie, drawing them on water ice's
+      table for the phase alone; and the four outside both kernels (below). The 19 `sphere` files keep Mie (`EntryBasis::Sphere`).
+    - **The wavelength.** Only `mars-dust.json` holds a node at 550 nm. A table is read as the
+      client's `tableModeOptics` reads it: the two wavelength nodes about 550 nm, each node's table
+      at 550 nm's size parameter, their per-particle values blended linearly in wavelength (the
+      upper node's weight from 0 for mars dust and 0.04 for chromium and iron to 0.90 for sodium
+      sulphide).
+    - **The size measure.** The modes are written in r = 3V ÷ 4A (P14.T24.c), A the
+      orientation-averaged projected area. The tables index their sizes by x = 2πD ÷ λ, D the
+      maximum dimension, as Saito et al. 2021's kernels do, and give Ṽ, Ã, C̃_ext and C̃_sca in
+      powers of λ ÷ 2π (the files' `encoding`), so a size node's r̃ = 3Ṽ ÷ 4Ã is its volume-to-area
+      size parameter, the client's `rTilde`; x itself is not read. `Q̄_ext` = ⟨C_ext⟩ ÷ ⟨A⟩, so
+      κ_ext = 3 `Q̄_ext` ÷ (4 ρ r_eff) stands. Ã ÷ πr̃² is 2.79 for the hexahedra at every size (to
+      ±0.1%), 4.85 for the ice aggregate and 1 for a sphere.
+    - **Sizes outside a table.** At 550 nm the tables reach r̃ = 0.46 nm to 184.5 µm (the shortwave
+      kernel's), 0.46 nm to 23.1 µm (the longwave kernel's: calcium titanate, chromium, graphite,
+      iron sulphide, iron, manganese sulphide and sodium sulphide) and 0.32 µm to 1.07 mm (water ice,
+      its 530 and 780 nm nodes' common range), against the grid's r_eff of 1 nm to 101 µm, whose
+      distributions reach further. Nothing is extrapolated. Below a table's smallest size the
+      client's own spheres serve: the particle's volume-equivalent sphere for the hexahedra (right
+      in the Rayleigh limit that tail lies in), Ã ÷ πr̃² spheres of radius r̃ for ice (T. C. Grenfell
+      and S. G. Warren, J. Geophys. Res. 104(D24), 31697–31709, 1999). Above its largest, where the
+      client refuses the distribution, the largest node's Ã ÷ πr̃² spheres of radius r̃ (Grenfell and
+      Warren again), at the index that node's table was made at and scaled as it is, so that they
+      continue it. At a table's top the hexahedra and the equal-V/A sphere at one index agree: mars
+      dust's `Q_ext` 2.0031 and `Q_sca` 1.1002 at 184.5 µm against 2.0121 and 1.1004. Each
+      phase-table entry carries its range in its basis (`EntryBasis::PhaseTable { radii_m }`, also
+      `ExtinctionEntry::phase_table_radii()`), and a mode whose r_eff lies outside it is labelled
+      `ExtinctionBasis::SpheresOutsidePhaseTable`.
+    - **The floor.** A node made at a kernel's k floor above the material's own k (10⁻⁴ shortwave,
+      10⁻³ longwave), and every node of Yang's table, has its table's absorption scaled by k ÷
+      `k_table`, k the material's own at 550 nm (the client's `scaledAbsorption`); the spheres below
+      the table keep their own Mie at that k, as the client's do.
+    - **Outside both kernels.** An index with n above 1.70 and k below 10⁻³ at 550 nm lies outside
+      both kernels (the shortwave kernel stops at n 1.70, the longwave starts at k 10⁻³;
+      science-r08-nonspherical §2.5): aluminium oxide (1.768 + 0i), sulphur (2.084 + 0i), titanium
+      dioxide (2.436 + 5.4 × 10⁻⁸i) and zinc sulphide (2.389 + 3.9 × 10⁻⁶i). Their tables are the
+      longwave kernel's floor's, and scaled to their own k they leave a large lossless grain's
+      extinction at the floor's scattering alone: `Q̄_ext` 1.17–1.24 at 101 µm and 1.50–1.56 at
+      10.7 µm (gamma, `v_eff` 0.094), where a lossless grain's is 2.02 and 2.08, whatever its shape.
+      The client itself draws only their modes of `r_eff` about 0.02–0.2 µm from those tables
+      (where the mode's own ω on the floor's table is at least 0.99) and Mie spheres for the rest. So
+      they take the sphere fallback at every size (`phase::within_the_kernels`, which also applies
+      the client's kernel-edge rule, decision-r08-t5d ruling 2, that no committed index reaches).
+    - **The data path.** `hyperion_fit::materials::PhaseTableFile` reads a table in place
+      (`Manifest::load_phase`, `materials/phase/<file>`), checked as the client's `parsePhaseFile`
+      checks it. Its data hash (`PhaseTableFile::data_sha256`) covers the fields read alone: key,
+      phase, variant and model, and each node's `wavelengthNm`, `n`, `nTable`, `k`, `kTable`,
+      `sizeParameters`, `volumes`, `areas`, `extinction` and `scattering`; a table's prose, angles,
+      kernel, asymmetry and matrix move no table. The manifests list their parts' 21 tables (4.1 MB)
+      under `phase`, whose data hashes enter the inputs hash after the index files', each named
+      `materials/phase/<file>`. The sim crate reads nothing under `apps/`; it receives the reduced
+      `Q̄_ext` and ln ω alone.
+    - **smart-ci** saw no phase table as an input (`materials/[^/]+\.json` stops at the directory),
+      so it gains a rule in the same change (`RUST_READERS`): a change under `materials/phase/`
+      runs the fitting crate's native suite, its rerender test among them, and the fit check
+      (`test_r08s_phase_tables_run_the_fitting_crates_tests_and_check`).
+    - **Determinism.** A fixed quadrature: each fine node holds its particle (the table log-linear
+      in ln r̃ between its size nodes, the spheres outside it), and a cell sums them with the area
+      weights in the fine nodes' order, file by file in the part's order; every transcendental
+      through `hyperion_sim::math`; no parallel reduction (the spheres' spectrum's chunks are merged
+      in order).
+    - **The measured gap**, the record of why §6.4 matters. Over mars dust's grid the equal-V/A
+      spheres' κ is 0.38–1.49 times the hexahedra's (both families, every variance), 0.41–1.29 for
+      the gamma variances 0.22–0.37, and 0.48–1.29 there from r_eff 0.05 to 1.5 µm, where the first
+      record had 0.5–1.2; the review's 0.44–1.24 is not reproduced on the grid's nodes. Per particle
+      the hexahedra's C ÷ V exceeds the sphere's for 0.2 ≲ x ≲ 1.3, not "below x ≈ 1", by up to Ψ⁻³
+      ≈ 2.8 in the Rayleigh limit, the equal-V/A sphere holding Ψ³ = 0.36 of the grain's volume
+      (Grenfell and Warren 1999, beside science-r08-mmf §2, for the equal-V/A sphere). At R08's Mars
+      mode (gamma, r_eff 0.8974 µm, v_eff 0.3; science-r08-mmf §3), at 2,600 kg m⁻³: **704 m² kg⁻¹
+      and ω 0.931** (the client's route in Python gives 704.2; the first record had 703 by a
+      trapezoid on the table's nodes), against the spheres' 832 and 0.943.
+    - **τ(550) moves at 24**, for the dust and crystal modes: over the grid each of the 17 files'
+      `Q̄_ext`, and so its κ_ext at a given density and r_eff, is 0.66–6.1 times its spheres'. It is
+      lowest (0.66–0.88) for narrow modes of r_eff 0.1–0.4 µm, where the spheres' first resonance
+      peaks, and highest (2.1–6.1) for modes of 20–50 nm, and 3.6 for the floor's salts and silica
+      at 1 nm; water ice's is 0.72–1.00 and iron sulphide's 0.75–1.21. The four outside both
+      kernels and the nine ices do not move.
   - _Added public items._
     - In `hyperion_sim::substance::aerosol` (re-exported from `substance`): `SizeDistribution`
       (`gamma(r_eff, v_eff)`, `log_normal(r_eff, v_eff)`, `kind()`, `effective_radius()`,
       `effective_variance()`), `SizeDistributionKind` (`Gamma`, `LogNormal`, `name()`),
       `BuildSizeDistributionError`, `AerosolOptics` (`mass_extinction_m2_per_kg()`,
-      `extinction_efficiency()`, `single_scattering_albedo()`, `is_stand_in()`),
-      `aerosol_optics(id, phase, variant, &distribution, temperature)`, which returns
-      `Result<AerosolOptics, ResolveAerosolError>`, with the variants `NotModelled`, `NoFile`,
-      `NoDensity`, `OffGrid` and `NonFiniteTemperature`, `FileVariant` (`Substance`, `Named(&str)`,
-      from a file's `variant`), `ExtinctionEntry` (the table's row type: `file()`, `key()`,
-      `phase()`, `variant()`, `is_stand_in()`), `extinction_entries()`, `density_variant(key)`,
-      `cubic_weights(nodes, at, coordinate)`, `interpolate_grid` (rows, radii, variances, the
-      variances' offset, a radius, a variance and a `GridSpace`, `Logarithmic` or `Linear`), the
-      table's interpolation, which the fit's half-step check calls on its own grids,
-      `EXTINCTION_WAVELENGTH_NM` (550), `GAMMA_VARIANCE_NODES` (12) and `LOG_NORMAL_VARIANCE_NODES`
-      (14).
-    - In `hyperion-fit`: `tasks::condensate_extinction` (`VERSION` 0; the grid and fine-grid
-      constants; `Part` and `PARTS`; `FitExtinctionError` and `FitFileError`, the causes a refused
-      fit carries; `TASK_1` … `TASK_7`; the spectrum, kernels, cells, check and rendering are the
-      crate's own) and its `mie` submodule (`ComplexIndex`, whose n and k are at most
-      `MAX_INDEX_PART` 100, `efficiencies`, `amplitudes`, `term_count`, `Efficiencies`,
-      `Amplitudes`, `ComputeMieError`, `MIN_SIZE_PARAMETER` 10⁻⁶ and `MAX_SIZE_PARAMETER` 20,000,
-      the client's).
+      `extinction_efficiency()`, `single_scattering_albedo()`, `is_stand_in()`,
+      `extinction_basis()`), `ExtinctionBasis` (`Sphere`, `PhaseTable`, `SpheresOutsidePhaseTable`,
+      `SphereFallback`, `name()`), `aerosol_optics(id, phase, variant, &distribution, temperature)`,
+      which returns `Result<AerosolOptics, ResolveAerosolError>`, with the variants `NotModelled`,
+      `NoFile`, `NoDensity`, `OffGrid` and `NonFiniteTemperature`, `FileVariant` (`Substance`,
+      `Named(&str)`, from a file's `variant`), `ExtinctionEntry` (the table's row type: `file()`,
+      `key()`, `phase()`, `variant()`, `is_stand_in()`, `basis()`, `phase_table_radii()`),
+      `EntryBasis` (an entry's basis: `Sphere`, `PhaseTable { radii_m }`, carrying the table's
+      sizes, and `SphereFallback`, which `aerosol_optics` maps onto a mode's `ExtinctionBasis`),
+      `extinction_entries()`, `density_variant(key)`, `cubic_weights(nodes, at, coordinate)`,
+      `interpolate_grid` (rows, radii, variances, the variances' offset, a radius, a variance and a
+      `GridSpace`, `Logarithmic` or `Linear`), the table's interpolation, which the fit's half-step
+      check calls on its own grids, `EXTINCTION_WAVELENGTH_NM` (550), `GAMMA_VARIANCE_NODES` (12)
+      and `LOG_NORMAL_VARIANCE_NODES` (14).
+    - In `hyperion-fit`: `materials::PhaseTableFile`, `PhaseTableNode`, `PhaseModel` and
+      `PHASE_FROM_MATERIALS`, and `Manifest::{phase, load_phase}`; `tasks::condensate_extinction`
+      (`VERSION` 0; the grid and fine-grid constants; `Part` and `PARTS`, with `Part::phase()`;
+      `FitExtinctionError`, with `WrongPhaseTables`, `Shape`, `PhaseTableForSphere` and
+      `PhaseTableMismatch` beside the first five, and `FitFileError`, whose `file()` and `cause()`
+      are getters, the causes a refused fit carries; `TASK_1` … `TASK_7`; the spectrum, kernels,
+      cells, check and rendering are the crate's own), its `phase` submodule (`within_the_kernels`,
+      `KERNEL_EDGE_N`, `KERNEL_K_MAX`, `KERNEL_EDGE_MODEL_EXCESS`,
+      `KERNEL_EDGE_REFLECTANCE_TOLERANCE`, `KERNEL_TRANSPARENT_N_MAX` and `LONGWAVE_K_FLOOR`, the
+      client's) and its `mie` submodule (`ComplexIndex`, whose n and k are at most `MAX_INDEX_PART`
+      100, `efficiencies`, `amplitudes`, `term_count`, `Efficiencies`, `Amplitudes`,
+      `ComputeMieError`, `MIN_SIZE_PARAMETER` 10⁻⁶ and `MAX_SIZE_PARAMETER` 20,000, the client's).
   - _The model._
     - **A Rust Mie** on Wiscombe 1980's structure, the client's `mie.ts` line for line: `N_stop` =
       ⌊x + 4.05 x^(1/3) + 2⌋, Dₙ down from Lentz's continued fraction (modified Lentz, tolerance
       10⁻¹⁵), ψ and χ up, ψ₁ by its series below x = 0.1, the coefficients by Wiscombe's (16), m =
       n + ik used as n − ik. Every transcendental through `hyperion_sim::math`.
-    - **Every shape class is a Mie sphere** at the file's index, a `nonSphericalMineral` or
-      `crystal` file the sphere of equal volume to projected area (science-r08-mmf §2).
+      - _The term count's two ranges._ Wiscombe states his criterion for 0.02 ≤ x ≤ 20,000 (Appl.
+        Opt. 19, p. 1508), which the sphere's bounds follow at the top; below x = 0.02 it is
+        extrapolated to 10⁻⁶, and the Rayleigh test (x = 10⁻³ and 10⁻⁵) holds the series there. He
+        fitted it to data over 0.1 ≤ x ≤ 20,000, 1.05 ≤ Re m ≤ 2.50 and 0 ≤ Im m ≤ 1, a different
+        range: chromium's index at 550 nm, 3.18 + 3.33i, lies outside it, while MIEV0's cases 17–19
+        at 10 − 10i pass to 10⁻⁶.
+      - _Unverifiable_: MIEV0's source labels the downward recurrence for Dₙ "Eq. 22", where the
+        code's comments, after the report's numbering as read, say (23). The report was not read
+        again here; fix the number if it is.
+    - **The particles** are the client's (§6.4, above): Mie spheres for the `sphere` files, the
+      phase tables' particles for 17 of the `nonSphericalMineral` and `crystal` files, and the
+      sphere of equal volume to projected area (science-r08-mmf §2; Grenfell and Warren 1999) for
+      the 13 others.
     - **The size distributions** are Hansen and Travis 1974's gamma (2.56) and log-normal (2.60),
       by `r_eff` and `v_eff` of r = 3V ÷ 4A. The area weight in u = ln(r ÷ `r_eff`) is (u − eᵘ + 1)
       ÷ `v_eff` (the area-weighted radius Gamma-distributed, shape 1 ÷ `v_eff`) and −(u + σ²/2)² ÷
       2σ² (σ² = ln(1 + `v_eff`)), so one kernel per variance serves every radius.
     - **The table is density-free**: per index file (key, phase, variant), at 550 nm found by
-      wavelength on the file's own grid, `Q̄_ext` = ⟨`C_ext`⟩ ÷ ⟨πr²⟩ and ln ω on an (`r_eff`,
+      wavelength on the file's own grid, `Q̄_ext` = ⟨`C_ext`⟩ ÷ ⟨A⟩ and ln ω on an (`r_eff`,
       `v_eff`) grid for each family. The sim applies κ_ext = 3 `Q̄_ext` ÷ (4 ρ `r_eff`) with ρ the
       row's grain density at the mode's temperature, `Substance::grain_density`.
     - **A variant's density.** The registry holds a row's reference composition's density, so
@@ -17961,19 +18320,24 @@ tables::gauss_legendre`.
       `H2SO4` (its source's reference), the substance itself for every other row. The 84.5 wt%
       acid's and seawater's entries exist but return `NoDensity`, as do solid `Ar`, solid `H2S`,
       β-`CO`, β-`O2` and liquid `S8`, whose densities were not read.
+    - **A lossless file's ω is 1 to the bit**: the fit writes its ln ω as +0.0 (a lossless cell's
+      ln(1 − 0) is −0.0, made positive by adding +0.0), and the sim takes ω = 1 for ln ω ≥ 0
+      without `min`, whose result at a signed zero is the platform's.
   - _The grid and the fine grid._
     - **The fine grid**: even in ln r with step 0.002, from x = 10⁻⁶ to 20,000 at 550 nm (11,860
-      nodes), the medium taken as index 1 as the client's. Each node is the mean of its cell's
+      nodes), the medium taken as index 1 as the client's. A sphere's node is the mean of its cell's
       sub-samples: at most 0.000 5 apart in x to x = 60, where the lossless high-index files' sharp
       low-order resonances lie (Chýlek, Kiehl and Ko 1978), 0.1 apart to x = 1,200, 4.5 to 9 a
       period of the ripple (Δx ≈ 0.45–0.9 at the files' indices; Chýlek 1976 and 1990), one sphere
       beyond, where the distributions (at least √0.04 wide in ln r) average the ripple. About 2 ×
-      10⁷ terms of the series per file; the seven tables fit in 13 s on eight threads, the
-      end-to-end test about 8 s a table on one.
+      10⁷ terms of the series per file. A phase table's node holds its particle's A, C_ext and
+      C_sca over πr² at the node's radius, read from the table between its sizes (smooth there:
+      log-linear between nodes some 50 fine steps apart). The end-to-end test reruns the seven in
+      23 s, four at a time on one thread each.
     - **The kernels** are cut where the area weight falls under 10⁻⁶ of its peak (the client's
       `SIZE_WEIGHT_FLOOR`) and, upwards, where the Rayleigh scattering weight r⁶ n(r) does too; a
       cell refuses (`ClippedCell`) if more than 10⁻⁶ of its area or extinction lies off the fine
-      grid.
+      grid, the area's share now bounded by the largest A ÷ πr² on the grid.
     - **The table's grid**: 107 radii from 1 nm (x = 0.011, Rayleigh's) by 0.152 in ln r to
       21 nm, 0.08 to 4.1 µm and 0.16 to 101 µm (x = 1,150, `Q̄_ext` within 1% of 2; 1.3% at
       `v_eff` 0.45); the log-normal's first 100, to 33 µm, its tail being heavier. Variances: 12
@@ -17986,22 +18350,29 @@ tables::gauss_legendre`.
     - **The half-step check** runs in every fit, and the task refuses a table that fails it
       (`MissedHalfStep`): at every half step in radius, variance and both, the table's
       interpolation (the sim's own `interpolate_grid`, from the rounded values) against the direct
-      cell. Worst, over the 49 files:
-      `Q̄_ext` 8.10 × 10⁻⁴ (`manganese-sulphide.json`), ω 7.16 × 10⁻⁴ (`tholin.json`), against
-      10⁻³; 1 − ω, reported and not bounded, 3.0 × 10⁻³.
-    - **Split into seven tables**: 2.76 MB at five digits, so seven files of seven index files in
-      name order (`condensate_extinction`, which also holds the axes `EFFECTIVE_RADII_M`,
-      `GAMMA_EFFECTIVE_VARIANCES`, `LOG_NORMAL_EFFECTIVE_VARIANCES` and
-      `EFFECTIVE_VARIANCE_OFFSET`, then `condensate_extinction_2` … `_7`), 351–455 kB each (2.76 MB
-      in all), under
-      the 500 kB hook. Each lists its files' `ENTRIES` (key, phase, variant, stand-in flag and four
-      grids: `<FILE>_GAMMA_EXTINCTION`, `_GAMMA_LN_ALBEDO`, `_LOG_NORMAL_EXTINCTION`,
-      `_LOG_NORMAL_LN_ALBEDO`). Inputs hashes: `6656fedc52c6…`, `fc8c1fe7460f…`, `248e9a178d80…`,
-      `d68883d8825d…`, `241c92b8e3db…`, `a113702fbef6…`, `2e7180c2de1c…`; sim fingerprint
-      `4043103f5879…` (the two variance-node counts).
+      cell. Worst, over the 49 files: `Q̄_ext` 5.42 × 10⁻⁴ (`titanium-dioxide.json`'s spheres), ω
+      7.16 × 10⁻⁴ (`tholin.json`), against 10⁻³; of the phase tables, `Q̄_ext` 5.19 × 10⁻⁴
+      (`manganese-sulphide.json`) and ω 6.59 × 10⁻⁴ (`iron-sulphide.json`). 1 − ω, reported and not
+      bounded: 8.2 × 10⁻² for `water-ice.json`, whose 1 − ω is some 3 × 10⁻⁸ (Yang's table scaled
+      to k 2.3 × 10⁻⁹), and at most 3.0 × 10⁻³ for the others (`tholin.json`'s). The floor's tables, whose spheres
+      above them continue them, pass it; the floor's spheres at the material's own k above the top
+      did not (titanium dioxide's table missed by 2.3 × 10⁻³ at 18.8 µm before it fell back).
+    - **Split into seven tables**: 2.71 MB in all at five digits, so seven files of seven index
+      files in name order (`condensate_extinction`, which also holds the axes
+      `EFFECTIVE_RADII_M`, `GAMMA_EFFECTIVE_VARIANCES`, `LOG_NORMAL_EFFECTIVE_VARIANCES` and
+      `EFFECTIVE_VARIANCE_OFFSET`, then `condensate_extinction_2` … `_7`), 337–457 kB (336,890 to 456,851 bytes) each, under the
+      500 kB hook. Each lists its files' `ENTRIES` (key, phase, variant, stand-in flag, basis, a
+      phase table's sizes and four grids: `<FILE>_GAMMA_EXTINCTION`, `_GAMMA_LN_ALBEDO`,
+      `_LOG_NORMAL_EXTINCTION`, `_LOG_NORMAL_LN_ALBEDO`), and each task's items end with `ENTRIES`
+      (`toolchain.rs`'s `every_committed_table_declares_its_tasks_items` holds them). Inputs hashes:
+      `b0d61ec7716c…`, `71fbe5f5883a…`, `2f7250d606f5…`, `a4aaa372ed57…`, `dc3fd47c748b…` (since the methane refit, above), `1eaa3e84e912…`, `526f34c7b485…`; sim fingerprint `e566aad3ce8f…` (the two variance-node counts and, since the
+      review, `EXTINCTION_WAVELENGTH_NM`).
     - **The materials** are the 49 index files whose key is one of the registry's 37 aerosol
-      materials, read in place through `materials.rs`, each data hash (key, phase, variant, shape,
-      temperature, provenance, wavelengths, n and k) in the inputs hash. 16 are stand-ins.
+      materials and the 21 phase tables of their non-spherical files, read in place through
+      `materials.rs`, each data hash in the inputs hash: an index file's over key, phase, variant,
+      shape, `temperatureK`, provenance, wavelengths, n and k (T49.h's shared reading, so its
+      `temperatureK` and `provenance` too, the latter carrying the stand-in flag), a phase table's
+      as above. 16 index files are stand-ins.
   - _Tests, with their values._
     - The Mie: MIEV0's cases 5–19, the values `mie.test.ts` holds (`MVTstNew.f`'s `CHEKMI`),
       `Q_ext`, `Q_sca`, g and S₁, S₂ at 0°–180° to 10⁻⁶ (5 × 10⁻⁶ where the client marks Wiscombe's
@@ -18009,16 +18380,39 @@ tables::gauss_legendre`.
       limit to x²; the geometric limit (a 40-size mean within 3 x^(−2/3) of 2 at x = 100–10⁴, each
       sphere within 0.02 at 10⁴); `Q_ext` = `Q_sca` to 10⁻¹² for k = 0; `N_stop`; the refusals.
     - **Five shared cases** with the client's `mieSphere` (the fit's `mie_cases.json`, beside
-      `mie.rs`, written by the new vitest `test/mieSharedCases.test.ts` under a bless and compared
-      byte for byte otherwise; a Rayleigh sphere at 1.44, the 75 wt% acid's index at x =
-      4.5, the dust's at 8, the soot's at 3, titanium dioxide's at 5,000): every efficiency,
+      `mie.rs`, written by the vitest `view/atmosphere/mieSharedCases.test.ts`, moved there from
+      `test/` by the review, under a bless and compared byte for byte otherwise; re-blessed byte for
+      byte, its description alone changed; a Rayleigh sphere at 1.44, the 75 wt% acid's index at x
+      = 4.5, the dust's at 8, the soot's at 3, titanium dioxide's at 5,000): every efficiency,
       asymmetry and amplitude within 2.2 × 10⁻¹⁶ of the client's.
+    - **The phase tables against an independent route**: `Q̄_ext` and ω at ten grid nodes of four
+      files (mars dust's node at 550 nm, basalt's two nodes blended, potassium chloride's floor and
+      water ice's Yang table, whose small crystals are spheres) against the client's
+      `tableModeOptics` in pure Python, Gauss–Legendre panels of order 6 at most 0.1 wide in ln r
+      with the table's nodes for ends (`client_table.py`, committed beside the task's code in
+      `crates/hyperion-fit/src/tasks/condensate_extinction/`, run with `python3 -I` on R08's
+      materials directory, a file, a family, `r_eff` in µm and `v_eff`): within 1.9 × 10⁻⁵ of
+      `Q̄_ext` and 1.3 × 10⁻⁶ of ω (bounds 6 × 10⁻⁵ and 10⁻⁵).
+    - The Mars mode on the hexahedra, 704.2 m² kg⁻¹ and ω 0.9315, and on its spheres 831.5 and
+      0.9432 (within 0.5 and 10⁻⁴); the fallback labelled (ammonia ice, its grids its spheres';
+      titanium dioxide); the phase lists are the client's (every table on file listed, the nine
+      ices the fallbacks); the reader's data hash covers what it reads alone, and a table out of
+      shape is refused; the inputs hash covers the phase tables after the index files; the kernels'
+      rules are the client's.
     - **Venus's four deck modes at n = 1.44** (the sulphur note's modes and columns), combined by
       mass at 1,662.6 kg m⁻³: **418.6 m² kg⁻¹** against the note's 417 (+0.4%, within 2%), τ(550)
       34.52 against 34.5. Through the table and the 75 wt% acid's file (n 1.431): 418.5 m² kg⁻¹,
-      the modes 2,899, 921, 665 and 228 (within 1%).
+      the modes 2,899, 921, 665 and 228 (within 1%); unchanged by §6.4, the acid being a `sphere`
+      file. The widths are ln σ 0.44, 0.25, 0.21 and 0.25, rounded to two decimals as
+      Reyes-Guerrero et al. 2026 §3.1 print them, from Pollack et al. 1993's σ_g = 1.56, 1.29, 1.23
+      and 1.28 (Haus et al. 2016, §2); the test values stay, since they reproduce the sulphur
+      note's. Pollack's exact widths give 420.3 m² kg⁻¹ (measured here, τ 34.50); the science
+      check found that Haus's Table 1 columns give τ 34.75 against Haus's own 34.72.
     - `acid_uv_absorber`'s κ_ext and ω equal `H2SO4`'s at `75wt%` to the bit for five modes; a
-      stand-in's flag (`ice_giant_haze`) carries through and a measured file's does not.
+      stand-in's flag (`ice_giant_haze`) carries through and a measured file's does not; each
+      entry's basis (17, 13 and 19) and a mode's label by its r_eff (iron's table ends at 23 µm,
+      water ice's begins at 0.32 µm); a lossless file's ω is 1 to the bit and its committed ln ω
+      +0.0 at every node (aluminium oxide, sodium chloride, liquid argon).
     - 550 nm by wavelength in the 75 wt% acid's file (from 360 nm, node 38) and water's (from 380
       nm, node 34).
     - Every aerosol-material row has an entry, every entry is one's, none twice (49); the parts are
@@ -18026,32 +18420,60 @@ tables::gauss_legendre`.
       `v_eff` 0.04, 0.45 and 0.65, the last radius of each family) resolve.
     - The kernels hold `r_eff` to 10⁻⁶ and `v_eff` to 10⁻⁵ at every node and half step.
     - Rayleigh at 1 nm: a lossless sphere's `Q̄_ext` against (8/3)|K|²x⁴ times the moment ratio
-      ((1 + b)(1 + 2b)(1 + 3b), e^(6σ²)) within 5 × 10⁻⁵, an absorbing one's absorption against 4x
-      Im K within 1.6 × 10⁻⁴. Geometric at 101 µm: `Q̄_ext` above 2 by under 2%, and a
-      transparent narrow mode's excess 0.0185 against the edge term 2x^(−2/3) = 0.0182.
+      ((1 + b)(1 + 2b)(1 + 3b), e^(6σ²)), measured within 5 × 10⁻⁵, and an absorbing one's
+      absorption against 4x Im K, measured within 1.6 × 10⁻⁴, bound 10⁻³. Geometric at 101 µm:
+      `Q̄_ext` above 2 by under 2%, and a transparent narrow mode's excess 0.0185 against the edge
+      term 2x^(−2/3) = 0.0182.
     - The spectrum's convergence: halving the sub-samples' spacings and doubling their reaches
       moves the hardest files' cells below 30 µm by under 2.5 × 10⁻⁴, and titanium dioxide's at
       101 µm by 3.5 × 10⁻⁴ (bound 4 × 10⁻⁴).
-    - The four hardest files (titanium dioxide, zinc sulphide, manganese sulphide, tholin) meet the
-      half-step bound; a lossless file's ω is 1 exactly; the sim reproduces the table at its nodes
-      to rounding. The refusals, each by its cause: `aerosol_optics`'s five, the distributions'
-      ranges, the Mie's index and size bounds, and the fit's other materials, phase, missing 550 nm,
-      clipped cell and a grid 1% off that misses its half steps.
+    - The five hardest files (titanium dioxide, zinc sulphide, manganese sulphide, potassium
+      chloride, tholin) meet the half-step bound; a lossless file's ω is 1 exactly; the sim
+      reproduces the table at its nodes to rounding. The refusals, each by its cause:
+      `aerosol_optics`'s five, the distributions' ranges, the Mie's index and size bounds, and the
+      fit's other materials, other phase tables, a sphere's table, another material's table, an
+      unknown shape class, phase, missing 550 nm, a Mie failure carrying its file, clipped cell and a
+      grid 1% off that misses its half steps.
+    - **The golden** `tests/golden/substance/aerosol.golden` (`tests/aerosol_golden.rs`, header
+      22): κ_ext, `Q̄_ext` and ω, with each value's basis and stand-in flag, for both families at
+      off-node points near the grid's lower corner, inside a cell and near its upper corner, for
+      aluminium oxide (lossless, the sphere fallback), mars dust (its table), water ice (Yang's),
+      iron (beyond its 23 µm table at the top), the ice-giant haze (a stand-in on spheres), ammonia
+      ice (a stand-in on the fallback), and the 75 wt% acid at Venus's four modes.
+    - **The tripwire** `substance_aerosol_nothing_on_the_record_reads_the_extinction_yet`, on the
+      optics tripwire's walk (`substance::thermal`'s `rust_files`, `out_of_line_test_modules`,
+      `before_inline_tests` and T49.j's whole-name `names`, now shared): outside
+      `substance/aerosol.rs` and `tables/condensate_extinction*.rs` no code of the sim's `src/` names
+      `aerosol_optics(`, `substance::aerosol`, `AerosolOptics`, `extinction_entries(`,
+      `interpolate_grid(` or `condensate_extinction`, but the declarations of `substance/mod.rs` (its
+      module line and its `pub use aerosol::{…};`) and `tables/mod.rs` (its module lines and the
+      `MANIFEST`'s entries). Its held list starts empty, and **P14.T54.b deletes it**. The optics
+      tripwire also bans `aerosol_optics(` outside the substance module until T54.a; no HELD entry
+      was added to any tripwire.
     - `tests/condensate_extinction.rs` reruns each of the seven tables and compares it byte for
       byte.
   - _Files beyond the task's:_ the six other tables `tables/condensate_extinction_{2..7}.rs`, their
-    manifests and lock entries; `tasks/condensate_extinction/mie.rs` and `mie_cases.json`;
-    `apps/hyperion/src/renderer/src/test/mieSharedCases.test.ts`; `.prettierignore` (the fixture,
-    as the sphere matrices); `task.rs` and `tasks/mod.rs` (registration); `substance/mod.rs` (the
-    module line and re-exports); `tables/mod.rs` (seven module lines, each with the tables' usual
-    `approx_constant` allowance).
+    manifests and lock entries; `tasks/condensate_extinction/mie.rs`, `mie_cases.json`,
+    `phase.rs` and `client_table.py` (the quadrature test's reference); `materials.rs` and `manifest.rs` (the phase tables' reader and list);
+    `apps/hyperion/src/renderer/src/view/atmosphere/mieSharedCases.test.ts`; `.prettierignore` (the
+    fixture, as the sphere matrices); `task.rs` and `tasks/mod.rs` (registration);
+    `substance/mod.rs` (the module line and re-exports); `tables/mod.rs` (seven module lines, each
+    with the tables' usual `approx_constant` allowance); `tests/aerosol_golden.rs` and its golden;
+    `substance/thermal/tests.rs` (`names` shared) and `substance/optics.rs` (one pattern);
+    `tools/smart-ci/{smart_ci, test_smart_ci}.py` (the phase tables' rule and its test).
   - _Deviations, with their reasons._
     - **The table is density-free** (`Q̄_ext` and ω, not κ_ext): κ_ext needs ρ at the mode's
       temperature, which several rows give by phase diagram, and some rows have none. The sim
       applies the row's grain density, so the aerosol's density and the surface's are one figure
       (science-r09-drainage §3).
-    - **Mie for every shape class**, as the plan says, not R08's TAMUdust2020 tables for
-      `nonSphericalMineral` and `crystal` (science-r08-nonspherical §5); the gap is measured below.
+    - **No `AerosolColumns`.** The Provides' `Substance::aerosol` column is not built: the optics
+      are the free function `aerosol_optics`, the density is `Substance::grain_density` at the
+      mode's temperature, and the shape class is the index file's. The Provides sketch above names
+      the built items.
+    - **The phase tables for the non-spherical classes** (§6.4), as main ruled, in place of the
+      plan's Mie for every shape class; spheres outside a table's sizes, labelled; four tables not
+      read, their index outside both kernels; the client's mode-level floor rule not mirrored (the
+      deferred findings, below).
     - **Aggregates are out of scope**: no index file is an aggregate's and no `SizeDistribution`
       describes one. A closed set, for the composition audit.
     - **ln ω, not ω, is tabled**, so that both ω (small absorbing particles, ω ≪ 1) and 1 − ω
@@ -18068,21 +18490,32 @@ tables::gauss_legendre`.
       variant is a `FileVariant`, not a bare `Option<&str>` (the rule on parameters): `Substance`
       for a file whose `variant` is null, `Named("75wt%")` for the 75 wt% acid, which `H2SO4`'s
       callers pass.
+  - _Downstream text, for main's docs batch_ (not edited here): **P14.T54.b** restamps all seven
+    `condensate_extinction*` tables, not one (its entry, ~6662, and the Generator version section,
+    ~7113 and ~7118, which name `condensate_extinction`), and plan 15's table of owners
+    (`15-offline-fitting.md` ~150) names one table, "P14.T49.e's κ_ext and ω at 550 nm, from R08's
+    index files", where there are seven, of `Q̄_ext` and ln ω, from the index files and the phase
+    tables.
 - **Deferred findings (2026-10-13 rule)**, from P14.T49.e:
-  - _The hexahedra's gap._ For `mars_dust` at 550 nm over a gamma distribution of `v_eff` 0.3 at
-    R08's Mars mode, `r_eff` 0.8974 µm in r = 3V ÷ 4A (science-r08-mmf §3), TAMUdust2020's
-    hexahedra (sphericity 0.71, R08's committed `phase/mars-dust.json`) give 703 m² kg⁻¹ at 2,600
-    kg m⁻³ and ω 0.931, against the table's spheres' 832 and 0.943: the sphere record overstates
-    the dust's mass extinction by 18% (ratio 0.845) where R08's sky reads the hexahedra. At 1.5
-    µm (Wolff's projected-area size, read as r = 3V ÷ 4A) the ratio is 0.89 (408 against 460).
-  - _The equal-V/A sphere's range._ Over the same distributions the hexahedra's κ ÷ the spheres'
-    is 1.94, 1.32, 0.81, 0.85 and 0.89 at `r_eff` 0.05, 0.1, 0.3, 0.8974 and 1.5 µm: the spheres'
-    κ is 0.5–1.2 times the hexahedra's. Per particle below x ≈ 1 the hexahedra's C ÷ V reaches
-    1.7–2.7 times the sphere's, as expected: the equal-V/A sphere holds Ψ³ = 0.36 of the grain's
-    volume, and Rayleigh scattering goes as V², so per unit mass it scatters up to Ψ⁻³ = 2.8 times
-    less. "A few per cent" (science-r08-mmf) holds only at large x. Whether `nonSphericalMineral`
-    and `crystal` should read the hexahedra's `C_ext` (science-r08-nonspherical §5, item 5) instead
-    of the plan's Mie is main's question.
+  - _The floor's large-grain deficit_ (R08's floor rule, which the client and the sim share). Scaled
+    to k ≈ 0, a kernel floor's table leaves a large transparent grain's extinction at its floor's
+    scattering, short of the 2A that any large grain extinguishes: the shortwave floor's salts and
+    silica (potassium chloride, sodium chloride, silicon dioxide, enstatite glass) give `Q̄_ext` 0.94
+    of their spheres' at 10.7 µm, 0.90–0.92 at 28 µm and 0.78–0.82 at 101 µm (gamma, `v_eff` 0.094),
+    where the shape's own share, as mars dust's ratio shows, is 0.97, 0.98 and 0.99. The client
+    calls those modes an analogue past ω 0.99 on the floor's table and draws them so; the sim
+    agrees with it. A correction (in R08's floor rule, then a refit) changes the client's
+    algorithm, so it is main's question, not this task's.
+  - _The client's floor rule at the mode_ is not mirrored, its switch being a step in r_eff: the
+    client takes aluminium oxide's, sulphur's, titanium dioxide's and zinc sulphide's modes of
+    r_eff about 0.02–0.2 µm from the floor's tables (up to 4.8 times the spheres' `Q̄_ext`, titanium
+    dioxide's at 40 nm), which the sim draws as spheres; and it falls back to Mie for manganese
+    sulphide's modes once their ω on the floor's table is below 0.99, as an absorbing grain's is at
+    most sizes, where the sim keeps the table (its floor node scaled by 1.03). The rule's ω test
+    also fails at small sizes for a reason that is not the floor's (a small grain absorbs more
+    than it scatters at the floor's k, and the scaling is right there).
+  - _1 − ω for water ice_ is interpolated within 8.2 × 10⁻² of itself, its value some 3 × 10⁻⁸;
+    ω itself within 2.3 × 10⁻⁵.
   - _Variants' densities._ The 84.5 wt% acid's and seawater's entries have no density until the
     registry holds a variant's (P14.T49.h's step 3 mass fraction); `NoDensity` meanwhile.
   - _Densities not read_: solid `Ar`, solid `H2S`, β-`CO`, β-`O2` and liquid `S8` (`NoDensity`).
@@ -18091,88 +18524,133 @@ tables::gauss_legendre`.
     memory), small for decks aloft.
   - _The 75 wt% acid's density_ is its 300 K value at every temperature (T49.b's row): near 250
     K it is about 1.71 g cm⁻³ (from memory), which would put Venus's κ some 3% lower.
-  - _1 − ω is not bounded by the check_: its interpolation is within 3.0 × 10⁻³ of itself.
+  - _1 − ω is not bounded by the check_: its interpolation is within 3.0 × 10⁻³ of itself for
+    every file but water ice (tholin's the worst).
   - _Outside the grid_: modes narrower than `v_eff` 0.04, larger than 101 µm (gamma) or 33 µm
     (log-normal), or wider than 0.45 and 0.65, are refused; T52.c's f_sed sizes may want a larger
     top.
-  - _Mars dust's ω at 550 nm_ is 0.911 for spheres on its file (gamma 1.5 µm, 0.3), where R08's
-    note has 0.968 at 650 nm and the measurement 0.975 ± 0.015; recorded, not compared.
+  - _Mars dust's ω at 550 nm_ is 0.892 on its table (gamma 1.5 µm, 0.3; 0.911 on its spheres),
+    where R08's note has 0.968 at 650 nm and the measurement 0.975 ± 0.015; recorded, not
+    compared.
+  - _The tripwires scan the sim alone_ (the batch's last review, a consider): both
+    `substance_aerosol_nothing_on_the_record_reads_the_extinction_yet` and T49.d's
+    `substance_formation_nothing_on_the_record_reads_the_constants_yet` read only
+    `crates/hyperion-sim/src/`, so `hyperion-server` (or another crate) could call
+    `aerosol_optics` or the formation constants unseen. Recorded, not built: T54.b deletes both.
 - **Deviations in P14.T49.d, as built: gas thermochemistry from NASA's CEA records (`p14-optics`,
-  2026-10-19).** `GENERATOR_VERSION` stays 22; the registry golden's `[condensed]` moves three
-  values (below), and no other golden moves.
+  2026-10-19; its review fixes the same day).** `GENERATOR_VERSION` stays 22; the registry golden's
+  `[condensed]` moves three values (below), the new `formation.golden` (header 22) pins the
+  module's output, and no other golden moves.
   - _Held at 22_ (decision-bump-plan-after-22 §1.3 and §5). Nothing on the record calls
-    `substance::formation`; P14.T52.a is its first reader. The table `thermo` (task
-    `thermo_equilibrium`, revision 0, fast) is a first emission stamped since 22; **P14.T54.b**
-    restamps it `--since 24`. Before 24 a refit re-emits through the first-emission path (delete
-    and re-emit, decision-p14-t49h-liquids §5). `hyperion-fit check`: `thermo_equilibrium` fresh,
-    40 fresh, 6 warnings (the provisional tables, as before), 0 failures.
+    `substance::formation`; P14.T52.a is its first reader. The table, `tables/thermo.rs`, is named
+    `thermo_equilibrium` in `tables.lock` and in the sim's `tables::MANIFEST` (its task's name, not
+    `thermo`), and **P14.T54.b** restamps it `--since 24` by that name; it is a first emission
+    stamped since 22 (task `thermo_equilibrium`, revision 0, fast). Before 24 a refit re-emits
+    through the first-emission path (delete and re-emit, decision-p14-t49h-liquids §5), and
+    re-blesses `formation.golden` at the version in force. The review fixes re-emitted it so, for
+    the dataset's change notice and the fingerprint's element probes (below).
+    `hyperion-fit check`: `thermo_equilibrium` fresh, 40 fresh, 6 warnings (the provisional
+    tables, as before), 0 failures.
   - _Added public items._
-    - In `hyperion_sim::substance::formation` (the three functions re-exported from `substance`):
+    - In `hyperion_sim::substance::formation` (re-exported from `substance`):
       `log10_formation_constant(id, temperature) -> Option<f64>`, log₁₀ K_f at 1 bar from the
       elements in their reference states, `None` for a row with no record and outside its range;
       `formation_range(id) -> Option<(Kelvin, Kelvin)>`, its record's range and its elements'
-      references' (and the electron gas's, for an ion) together;
-      `log10_equilibrium_constant(&[(SubstanceId, i32)], temperature) -> Option<f64>`, −Σ ν G ÷
-      (RT ln 10) from the species' own records, over their own ranges, `None` for a species with no
-      record or an unbalanced reaction (elements and charge); `NOT_MODELLED`, the gas rows with no
-      record and why (`FeH`).
+      references' (and the electron gas's, for an ion) together; `Reaction`, a balanced reaction
+      among gas rows:
+      `Reaction::new(&[(SubstanceId, i32)]) -> Result<Reaction, BalanceReactionError>` finds each
+      species' record once and checks every element and the charge
+      (`BalanceReactionError::{NoRecord { key }, Unbalanced { element }, Charge}`), and
+      `Reaction::log10_equilibrium_constant(&self, Kelvin) -> Option<f64>`, −Σ ν G ÷ (RT ln 10)
+      from the species' own records, over their own ranges, summed in the reaction's declared
+      order, which is part of the output; `Reaction::species()`; `NOT_MODELLED`, the gas rows with
+      no record and why (`FeH`), which the fit re-exports rather than keeping a copy.
     - In `hyperion-fit`: `tasks::thermo_equilibrium` (`VERSION` 0, `DATASET`, `LIBRARY`,
-      `UPPER_TEMPERATURE_K` 6,000; `ROWS`, the 57 rows' CEA names; `NOT_MODELLED`;
+      `UPPER_TEMPERATURE_K` 6,000; `ROWS`, the 57 rows' CEA names; `NOT_MODELLED`, the sim's;
       `REFERENCE_GASES`; `Reference` and `reference(element)`; `CONDENSED`; `CROSS_CHECKS`;
-      `JANAF_GAS_FROM_K`; `ITEMS`, 99; `item_name`; `Interval`, `Record`, `parse` and
-      `ParseThermoError`, a reader of Appendix A's layout; `FitThermoError`; `Item`, `Fit`, `fit`,
-      `switch`, `gibbs_over_rt`, `magnesium_sulphate_decomposition_k`, `graphite_sublimation_k`,
-      `render`; `ThermoEquilibriumTask`).
+      `JANAF_GAS_FROM_K`; `ITEMS`, 99; `item_name`; `Phase` (`Gas`, `Condensed`, with `Display`);
+      `Interval`, `Record`, `parse` and `ParseThermoError`, a reader of the TP's record layout
+      (Appendix C, Table C1, p. 43); `FitThermoError`; `Item`, `Fit` (`switch_k`), `fit`,
+      `switch_k`, `gibbs_over_rt`, `magnesium_sulphate_decomposition_k`,
+      `graphite_sublimation_k`, `render`; `ThermoEquilibriumTask`). Kelvin values carry `_k` in
+      their names.
   - _The data_ (decision-composition §5's "committed verbatim" case). The dataset
     `crates/hyperion-fit/data/nasa_cea_thermo/`, class committed: `thermo.inp`, the 111 records the
     task reads, extracted byte for byte (header, CRLF line ends, the `END` lines) by the committed
     `reduce.py` from `data/thermo.inp` of `nasa/cea` at 2f79a647e85737742fb08a127da00d1ea1d069da
     (1,234,323 bytes, SHA-256 fa7746572952…28884363, the T49.b oracle's file; downloaded
-    2026-10-16), 77,658 bytes, SHA-256 1fa29fc93db2…4226b2fd, recorded hash `a334adf45a15…`; the
-    repository's Apache 2.0 `LICENSE.txt` (9,170 bytes, unmodified, not hashed); `PROVENANCE.toml`.
-    The records: the 57 gas rows (CEA's `AL`, `AL+`, `HCL`, `C2H2,acetylene` and `HCN`), the
-    reference states (`CL2`, `S2`, `P2`, `C(gr)` and the 15 other elements' 41 condensed Ref-Elm
-    records, `Cr(cr)`, `Fe(a)` and `Ni(cr)` two each) and the cross-checks' (`MgSO4(II)`,
-    `MgSO4(I)`, `MgO(cr)`, `SO3`, `C`, `C2`–`C5`). NOTICE carries NASA's notice and the Apache 2.0
-    statement. The subset parses to the same evaluation as the whole file, byte for byte.
-  - _The table_, `tables/thermo.rs`, 57,455 bytes: 84 record items of 194 intervals, each row
-    `[T_lo, T_hi, a₁, …, a₇, b₁, b₂]`, the file's decimals to the nearest `f64`, and the 15
-    `<EL>_BOILING_K` switches. Intervals from 6,000 K up are not emitted, and two empty ones are
-    dropped: `Si(cr)`'s and `Ca(a)`'s first intervals run 300 → 298.15 K since CEA's 2021 range
-    update. Inputs hash `97371be39c99…`, sim fingerprint `a0549cb71547…` (each gas row's index,
-    charge and stoichiometry, so that a gas row added or changed asks for a rerun).
-  - _The reference states_ (NIST-JANAF's convention, Chase 1998's introduction; the elements'
-    reference tables read at janaf.nist.gov 2026-10-19 for which gas, one transition per element):
-    H₂, N₂, O₂, Cl₂ and the noble gases at every temperature; graphite throughout; every other
-    element its condensed phases to where their G per atom meets its gas form's at 1 bar, found by
-    bisection on the records, then that gas: the monatomic metal, S₂ (JANAF S-001's liquid ↔ gas
-    at fugacity 1 bar, 882.117 K) and P₂ (P-001, 1,180.008 K, whose heat capacity above it is the
-    diatomic's); the electron gas for charge. The switches against JANAF's: Na 1,170.43 K (−0.10),
-    Mg 1,364.15 (−1.96), Al 2,797.65 (+6.83), Si 3,509.40 (+4.79), P 1,180.96 (+0.96), S 882.42
-    (+0.31), K 1,039.41 (−0.13), Ca 1,778.06 (+4.40), Ti 3,634.62 (+3.66), V 3,704.91 (+14.83), Cr
-    2,951.82 (−0.26), Mn 2,325.03 (−9.49), Fe 3,138.45 (+5.11), Ni 3,159.60 (+3.01), Zn 1,178.83
-    (−1.35). So K_f is continuous and holds to 6,000 K: from 200 K for H₂, H₂O, NH₃, N₂, O₂, Ar, H
-    and O, 298.15 K for e⁻, H⁻ and the ions of Mg, Si and Ca, and 300 K for the rest.
-  - _The model._ G ÷ RT = H ÷ RT − S ÷ R from McBride, Zehe and Gordon's eqs. 4.7–4.8, with
-    `hyperion_sim::math::ln`, the first interval holding T taken (the lower at a shared bound);
-    log₁₀ K_f = −(G − Σ n G_ref + q G_e) ÷ (RT ln 10) for a species of charge q. Nothing is
-    extrapolated.
+    2026-10-16), with one line of its own ahead of the header, a `!` comment stating the change
+    (Apache 2.0 §4(b): "! Changed by HYPERION: reduce.py kept only the 111 records P14.T49.d
+    reads."; CEA's readers and `parse` start at the `thermo` line): 77,735 bytes, SHA-256
+    cf1a1308b377…5a57875, recorded hash `0e268c8c967b…`; the repository's Apache 2.0 `LICENSE.txt`
+    (9,170 bytes, unmodified, not hashed); `PROVENANCE.toml`; and the oracle's scripts, `kf.py`,
+    `cea.py` and `asserted.py` (below), so that another clone can rerun them. The records: the 57
+    gas rows (CEA's `AL`, `AL+`, `HCL`, `C2H2,acetylene` and `HCN`), the reference states (`CL2`,
+    `S2`, `P2`, `C(gr)` and the 15 other elements' 41 condensed Ref-Elm records, `Cr(cr)`, `Fe(a)`
+    and `Ni(cr)` two each) and the cross-checks' (`MgSO4(II)`, `MgSO4(I)`, `MgO(cr)`, `SO3`, `C`,
+    `C2`–`C5`). NOTICE carries NASA's notice and the Apache 2.0 statement. The subset gives the
+    oracle's output byte for byte, as the whole file does.
+  - _The `j`-coded records_ (main, 2026-10-19). Nineteen of the 111 carry CEA's reference-date code
+    `j` (NIST-JANAF, Chase 1998): `PH3` and the condensed phases of V, Cr, Mn, Fe and Ni
+    (`V(cr)`, `V(L)`, `Cr(cr)` ×2, `Cr(L)`, `Mn(a)`–`Mn(d)`, `Mn(L)`, `Fe(a)` ×2, `Fe(c)`, `Fe(d)`,
+    `Fe(L)`, `Ni(cr)` ×2, `Ni(L)`). They are NASA's own CEA coefficients, fitted to JANAF's tables
+    and released under Apache 2.0 with the rest of the library, not a copy of a JANAF table, so
+    decision-p14-t49b-condensed §3.1(3) holds and they are committed as CEA data
+    (decision-composition §5). The switch checks of V, Cr, Mn, Fe and Ni against JANAF are
+    therefore partly against JANAF's own condensed data.
+  - _The table_, `tables/thermo.rs`, 57,706 bytes: 84 record items of 194 intervals, each
+    row `[T_lo, T_hi, a₁, …, a₇, b₁, b₂]`, the file's decimals to the nearest `f64`, and the 15
+    `<EL>_BOILING_K` switches (sulphur's and phosphorus's labelled as not boiling points). Intervals
+    from 6,000 K up are not emitted, and two empty ones are dropped: `Si(cr)`'s and `Ca(a)`'s first
+    intervals run 300 → 298.15 K since CEA's 2021 range update. Inputs hash `c6d8069d8d00…`, sim
+    fingerprint `d704e62cf620…` (each gas row's index, charge and stoichiometry, each element by
+    its place in `Element::ALL` before its count, so that a gas row added or changed asks for a
+    rerun). The acceptance line prints each cross-check's root beside the rows' values as they
+    stand and their differences.
+  - _The reference states_ (NIST-JANAF's convention, Chase 1998, Introduction §5, pp. 13–14; the
+    elements' reference tables read at janaf.nist.gov 2026-10-19 for which gas, one transition per
+    element): H₂, N₂, O₂, Cl₂ and the noble gases at every temperature; graphite throughout; every
+    other element its condensed phases to where their G per atom meets its gas form's at 1 bar,
+    found by bisection on the records, then that gas: the monatomic metal, S₂ (JANAF S-001's
+    liquid ↔ gas at fugacity 1 bar, 882.117 K) and P₂ (P-001, 1,180.008 K, whose heat capacity
+    above it is the diatomic's); the electron gas for charge. `S_BOILING_K` and `P_BOILING_K` are
+    therefore the S₂ and P₂ crossings at a fugacity of 1 bar, not boiling points (for T52). The
+    switches against JANAF's: Na 1,170.43 K (−0.10), Mg 1,364.15 (−1.96), Al 2,797.65 (+6.83), Si
+    3,509.40 (+4.79), P 1,180.96 (+0.96), S 882.42 (+0.31), K 1,039.41 (−0.13), Ca 1,778.06
+    (+4.40), Ti 3,634.62 (+3.66), V 3,704.91 (+14.83), Cr 2,951.82 (−0.26), Mn 2,325.03 (−9.49), Fe
+    3,138.45 (+5.11), Ni 3,159.60 (+3.01), Zn 1,178.83 (−1.35). So K_f is continuous and holds to
+    6,000 K: from 200 K for H₂, H₂O, NH₃, N₂, O₂, Ar, H and O, 298.15 K for e⁻, H⁻ and the ions of
+    Mg, Si and Ca, and 300 K for the rest. The values are CEA's records evaluated with JANAF's
+    reference states, not values CEA prints: CEA keeps a condensed element condensed over its
+    whole range (McBride, Zehe and Gordon 2002, p. 2).
+  - _The model._ G ÷ RT = H ÷ RT − S ÷ R from McBride, Zehe and Gordon's eqs. (2) and (3) (p. 2;
+    c_p ÷ R is eq. (1)), with `hyperion_sim::math::ln`, the first interval holding T taken (the
+    lower at a shared bound); log₁₀ K_f = −(G − Σ n G_ref + q G_e) ÷ (RT ln 10) for a species of
+    charge q, by their eq. (9) (p. 3). Nothing is extrapolated.
   - _Tests, with their values._
-    - **CEA's own evaluation** (`substance_formation_reproduces_cea_s_own_evaluation`): each of the
-      57 rows at 500, 2,500 and 5,000 K to 10⁻⁴ in log K, from an independent Python reading of the
-      raw file (the lane's `scripts/t49d/`, `python3 -I asserted.py kf.py cea.py thermo.inp`, the
-      command and the file's hash in the test's doc). Measured, all 171 values equal the Python's
-      to the bit.
+    - **CEA's records** (`substance_formation_reproduces_the_cea_records`): each of the 57 rows at
+      three temperatures to 10⁻⁴ in log K, from an independent Python reading of the library (the
+      dataset's `kf.py`, `cea.py` and `asserted.py`, run there as
+      `python3 -I asserted.py kf.py cea.py thermo.inp`; the raw file's hash in the test's doc, and
+      the raw file gives the same output byte for byte). A metal's atom has K_f = 1 by definition
+      above its switch, so its three values are taken below it, at 500 K, at its switch rounded
+      down to 100 K and midway (sodium 500, 800 and 1,100 K; vanadium 500, 2,100 and 3,700 K), and
+      every other row at 500, 2,500 and 5,000 K. Measured, all 171 values equal the Python's to the
+      bit.
     - **Completeness**: every gas row that T52.a or T52.b names has an entry but `FeH`; `P`, `Cl`,
       `P+`, `Cl+` and `OH` are not rows; the records are the registry's gas rows in its order.
     - **No extrapolation**: each row has a value at both ends of its range and none 10⁻⁶ K beyond,
-      nor at 0, −300 K, NaN or ∞.
+      nor at 0, −300 K, NaN or ∞; a reaction has none 10⁻⁹ K above 6,000 K.
     - **The references**: log₁₀ K_f = 0 exactly for H₂, N₂, O₂, the noble gases and e⁻, and for each
       metal's atom from its switch; each condensed reference meets its gas there to 10⁻⁹ in G ÷ RT;
-      the fit's switches within 15 K of JANAF's (`thermo_equilibrium_the_switches_meet_janaf_s`).
-    - **NIST-JANAF**, within 3 × 10⁻³: H₂O 40.0453 at 298.15 K (H-064's 40.047, −0.0017) and 10.0592
-      at 1,000 K (10.060, −0.0008); CO 10.4619 at 1,000 K (C-093's 10.461, +0.0009); CH₄ −1.0178 at
-      1,000 K (C-067's −1.018, +0.0002).
+      by the sim's own evaluation, the miss is negative at each `_BOILING_K` and not negative at
+      the next `f64` above (`substance_formation_each_switch_is_the_last_condensed_temperature`),
+      so the fit's bisection and the sim's branch agree; the fit's switches within 15 K of JANAF's
+      (`thermo_equilibrium_the_switches_meet_janaf_s`, which also checks the signs).
+    - **NIST-JANAF**, within 3 × 10⁻³, a cross-check (JANAF prints log K_f to 10⁻³ and differs from
+      the records by up to 1.7 × 10⁻³): H₂O 40.0453 at 298.15 K (H-064's 40.047, −0.0017) and
+      10.0592 at 1,000 K (10.060, −0.0008); CO 10.4619 at 1,000 K (C-093's 10.461, +0.0009); CH₄
+      −1.0178 at 1,000 K (C-067's −1.018, +0.0002).
     - **MgSO₄ and graphite** (decision-p14-t49b-condensed §3.1(5)), by the rows' own arithmetic,
       the roots by bisection: MgSO₄'s open-system decomposition at 1 bar 1,375.441 K (SO₂ 0.648, O₂
       0.324, SO₃ 0.027 bar; interpolated in 1 ÷ T between 1,300 and 1,400 K, 1,375.51), against
@@ -18181,40 +18659,83 @@ tables::gauss_legendre`.
       1,375 K, `GRAPHITE_SUBLIMATION_K` (graphite and soot) 3,973 K, each `Reduced` with its source
       rewritten. The sim's test and the fit's both hold them within 10 K.
     - **An equilibrium constant** equals Σ ν log K_f to 10⁻⁹ for four reactions (CO + 3H₂ = CH₄ +
-      H₂O, N₂ + 3H₂ = 2NH₃, Na = Na⁺ + e⁻, H₂S + 2H₂O = SO₂ + 3H₂) at 500–5,000 K; CH₄'s combustion
-      holds at 250 K (167.42), where CH₄'s K_f, needing graphite, does not; unbalanced reactions and
-      `FeH` give `None`.
+      H₂O, N₂ + 3H₂ = 2NH₃, Na = Na⁺ + e⁻, H₂S + 2H₂O = SO₂ + 3H₂) at 500–5,000 K, each keeping its
+      declared order; CH₄'s combustion holds at 250 K (167.42), where CH₄'s K_f, needing graphite,
+      does not; `Reaction::new` refuses an unbalanced element (`Unbalanced { element: H }`), an
+      unbalanced charge (`Charge`) and a row with no record (`FeH`, graphite: `NoRecord`).
     - **The second thermochemistry** (T49.b's sums against CEA's c_p on the table's records), within
       T49.b's oracle tolerances: N₂ −0.03, −0.13, −0.25% at 300, 700 and 1,000 K; CO₂ +0.03, −0.05,
       −0.29%; H₂O −0.32, −0.34, −0.65%; CH₄ −0.15, −1.28, −2.56%; NH₃ −0.43, −1.53, −1.06%; H₂
       (equilibrium) +0.01, +0.05, +0.13%. No disagreement beyond them.
-    - The fit's reader: a record by its columns, its refusals (no header, not ASCII, other than 7
-      coefficients, other exponents, a short record), a missing or wrong-formula record refused;
-      `tests/thermo_equilibrium.rs` reruns the table and compares it byte for byte. The provenance
-      test parses the new dataset.
+    - **The golden**, `tests/formation_golden.rs` (`formation.golden`, header 22, new): for every
+      gas row in registry order (`FeH` as "no record"), `formation_range`'s ends and log₁₀ K_f at
+      them, at 500, 1,000, 2,500 and 5,000 K, and at each of the 15 `_BOILING_K` and the `f64`
+      above it; the 15 switches; and the four reactions at 500, 1,500, 3,000 and 5,000 K: 2,202
+      lines, 147,337 bytes. `golden_diff --base HEAD` lists it as new, no pinned value changed:
+      its values are the base's, the table's value lines being byte-identical and the evaluation
+      unchanged.
+    - **The tripwire** `substance_formation_nothing_on_the_record_reads_the_constants_yet` (the
+      batch's last review), on the aerosol tripwire's walk (`substance::thermal`'s `rust_files`,
+      `out_of_line_test_modules`, `before_inline_tests` and `names`): outside
+      `substance/formation.rs` and `tables/thermo.rs` no code of the sim's `src/` names
+      `log10_formation_constant(`, `formation_range(`, `log10_equilibrium_constant(`, `Reaction`,
+      `BalanceReactionError`, `substance::formation` or `tables::thermo` (never a bare `thermo`:
+      `substance::thermo` is T49.b's), each a whole name at both ends, so that `Reactions` or
+      `tables::thermo_equilibrium` is not one; but the declarations (`substance/mod.rs`'s module
+      line and `pub use formation::…;`, `tables/mod.rs`'s `pub mod thermo;` and its `MANIFEST`
+      entry's `name: "thermo_equilibrium"`), and text in backticks, which is prose (two condensed
+      rows' citations name `substance::formation`). Its held list starts empty, and **P14.T52.a
+      or T54.b deletes it**; no HELD entry was added to any tripwire.
+    - The fit's reader and fit: a record by its columns; each refusal by its exact variant or
+      message (no header, not ASCII, other than 7 coefficients, other exponents, a short record,
+      more than nine intervals, a count, a coefficient, an element count or a bound that is not a
+      number; `Gap`, `Duplicate`, `Empty`, `NoSwitch`, `Rows`, `Missing` and `Formula`);
+      sulphur's and phosphorus's switches labelled; `tests/thermo_equilibrium.rs` reruns the table
+      and compares it byte for byte. The provenance test parses the dataset.
   - _The replaced rows._ `golden_diff --base HEAD`: one golden changed, the registry's, three
     values, all in `[condensed]`: graphite's and soot's `transition_k` (rows 73 and 75) 4080.0 →
-    3973.0, and MgSO4's (row 100) 1272.0 → 1375.0; its only problem the expected "not bumped" (a `[condensed]` re-bless at the version in force,
-    decision-p14-t49b-condensed §3.1(5)); nothing else moved. Re-blessed at 22 by
+    3973.0, and MgSO4's (row 100) 1272.0 → 1375.0; its only problem the expected "not bumped" (a
+    `[condensed]` re-bless at the version in force, decision-p14-t49b-condensed §3.1(5)); nothing
+    else moved. Re-blessed at 22 by
     `HYPERION_BLESS=1 cargo test -p hyperion-sim --features testing --test substance_golden`.
   - _Files beyond the task's:_ `substance/formation.rs` (for `substance/thermo.rs`, below);
     `substance/mod.rs` (the module line, re-exports, a sentence); `substance/rows/condensed.rs`
     (the two transitions, their sources, the module note); the registry golden;
-    `tables/mod.rs` (the module line and MANIFEST row); `tables.lock`; `task.rs` and
-    `tasks/mod.rs` (registration); `manifests/thermo_equilibrium.toml`;
-    `tests/thermo_equilibrium.rs`; the dataset's four files; `NOTICE`; `.pre-commit-config.yaml`
-    (the subset excluded from `mixed-line-ending`, it and `LICENSE.txt` from `end-of-file-fixer`);
-    `.prettierignore`; `crates/hyperion-fit/clippy.toml` (`McBride` a valid identifier, as the
-    sim's).
+    `tests/formation_golden.rs` and its golden; `tables/mod.rs` (the module line and MANIFEST
+    row); `tables.lock`; `task.rs` and `tasks/mod.rs` (registration);
+    `manifests/thermo_equilibrium.toml`; `tests/thermo_equilibrium.rs`; the dataset's seven files;
+    `NOTICE`; `.pre-commit-config.yaml` (the subset excluded from `mixed-line-ending`, it and
+    `LICENSE.txt` from `end-of-file-fixer`); `.prettierignore`; `crates/hyperion-fit/clippy.toml`
+    (`McBride` a valid identifier, as the sim's); `.gitattributes` (the fit's manifests and every
+    crate's fitted tables checked out as LF text, which their hashes read byte for byte; the
+    batch's last review).
   - _Deviations, with their reasons._
     - **The module is `substance/formation.rs`**, not the plan's `substance/thermo.rs`, which is
-      T49.b's statistical sums; its acceptance is `cargo test -p hyperion-sim substance::formation`.
+      T49.b's statistical sums, since T49.b's _Files_ own `substance/thermo.rs`; its acceptance is
+      `cargo test -p hyperion-sim substance::formation`, and the acceptance filter then selects
+      this task's tests alone.
+    - **The plan's "three tabulated values per species"** are CEA's records evaluated
+      independently (the dataset's Python, above) and asserted to 10⁻⁴ in log K. JANAF prints
+      log K_f to 10⁻³ and differs from CEA by up to 1.7 × 10⁻³, so no JANAF value could meet 10⁻⁴;
+      JANAF is asserted at 3 × 10⁻³ for four values instead, a cross-check (main accepted this
+      reading, 2026-10-19). Each metal's three values lie below its switch, where its K_f is not
+      1 by definition.
+    - **The reference states follow NIST-JANAF's convention** (Chase 1998, Introduction §5): the
+      plan names none; JANAF's convention is the one its asserted tables are in; it keeps K_f
+      continuous through phase changes; and a metal atom's K_f is 1 (log 0) above its switch.
+    - **Two functions and a type beside log K_f**, for T52.a's reactions: `formation_range`, and
+      `Reaction` with its `log10_equilibrium_constant`, which checks a reaction's balance once
+      when it is built (the review's replacement of a free `log10_equilibrium_constant`, which
+      re-checked it on every call; no reader needs the free form).
+    - **A test beyond the plan's**: T49.b's c_p against CEA's.
     - **The NASA-9 polynomials are re-emitted**, the plan's alternative to Chebyshev coefficients:
       they reproduce the source exactly, and their intervals and the elements' phase changes would
       make a Chebyshev fit piecewise anyway.
     - **The records are committed** (a verbatim subset, class committed, Apache 2.0's notice in
-      NOTICE) rather than fetched by URL and checksum, so that the fit reruns in CI; the full file's
-      URL and hash are its provenance.
+      NOTICE and its change notice in the file) rather than fetched by URL and checksum, so that
+      the fit reruns in CI; the full file's URL and hash are its provenance. This is
+      decision-composition §5's own case for coefficient blocks committed verbatim; only the 111
+      records read are committed.
     - **Two rows replaced**: MgSO₄'s decomposition and graphite's sublimation (with soot's) are now
       CEA's, by §3.1(5).
     - **The domain stops at 6,000 K** (the plan's 100–6,000 K "where the data reach"): CEA's atoms
@@ -18222,17 +18743,28 @@ tables::gauss_legendre`.
       298.15 or 300 K.
     - **The table carries the cross-checks' records** (`SO3`, `C`–`C5`, `MgO`, `MgSO4`), which no
       public function reads, so that the sim's own test recomputes the two transitions.
-    - **`log10_equilibrium_constant` refuses an unbalanced reaction** (`None`), which the design
+    - **A `Reaction` refuses an unbalanced reaction** (`BalanceReactionError`), which the design
       did not state; a sum over an unbalanced set has no meaning.
     - **`FeH` is not modelled** (no CEA record, nor a JANAF table): `NOT_MODELLED`, a closed set,
       for the composition audit (P14.T52.d's).
 - **Deferred findings (2026-10-13 rule)**, from P14.T49.d:
-  - _MgSO₄_: CEA's (Gurvich 1996) 1,375.4 K against JANAF's 1,272 K, 103 K apart; no measured
-    decomposition was read (§3.1(5) asks one recorded where read; one in air would lie higher).
+  - _MgSO₄_ (medium confidence): CEA's (Gurvich 1996) 1,375.4 K against JANAF's 1,272 K, 103 K
+    apart. Scheidema and Taskinen 2011 (Ind. Eng. Chem. Res. 50, 9550, abstract) observed the
+    decomposition at 1,100 °C (1,373 K) under N₂ by TG-DSC, and their equilibrium calculation with
+    Δ_fH −1,284.9 kJ/mol gave 1,080 °C; JANAF's 1,272 K follows from its Δ_fH°(298) of
+    −1,261.786 kJ/mol (Mg-018), 27 kJ/mol above Gurvich's −1,288.8. This supports CEA's value
+    (main, 2026-10-19), though a TG run in flowing N₂ is not a 1-bar equilibrium; one in air would
+    lie higher.
   - _Graphite_: CEA's 3,973.3 K against JANAF's reduced 4,079 K (107 K) and TRC's boiling point
-    4,100 ± 100 K (127 K, beyond its stated uncertainty); C₃, 0.72 bar of it, sets it.
+    4,100 ± 100 K. The gap comes from CEA's C₃ (Gurvich 1979), 0.72 bar of the total, and C₅
+    (Gurvich 1991); the C atom's record cites Douglas 1955, Moore 1970b and Gordon 1999. The CEA
+    value lies 127 K below TRC's, beyond its stated uncertainty, while JANAF's 4,079 K sat inside
+    it.
   - _The switches_: CEA's against JANAF's within 15 K, vanadium's +14.8, manganese's −9.5 and
-    aluminium's +6.8 K the largest; the compilations' metal data differ (not chased).
+    aluminium's +6.8 K the largest. CEA's condensed records of V, Cr, Mn, Fe and Ni are Chase
+    1998's own, so their misses come from the gas atoms' Δ_fH: Gurvich 1982's for V, Desai 1987's
+    for Mn, Hultgren 1973's for Fe and Ni (Cr's gas is Chase's too, −0.26 K); aluminium's records
+    are Cox et al. 1989's (CODATA).
   - _JANAF's log K_f_ differs from CEA's by up to 1.7 × 10⁻³ (water at 298.15 K).
   - _Below 300 K_ only H₂, H₂O, NH₃, N₂, O₂, Ar, H and O have a K_f (to 200 K), and e⁻, H⁻, Mg⁺,
     Si⁺ and Ca⁺ to 298.15 K: CEA's 2021 update reset most ranges to 300 K. T52.a takes its major

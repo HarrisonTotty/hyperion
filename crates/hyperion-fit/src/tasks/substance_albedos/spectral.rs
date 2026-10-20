@@ -30,7 +30,7 @@ use super::{energy_albedos, similar_isotropic_albedo, single_scattering_albedo};
 /// The grid's largest step, nm: 0.1. Halving it moves no bin of any row by more than 10⁻⁴
 /// (`substance_albedos_the_bins_converge_on_the_grid`, which measures the largest move); at 0.5
 /// nm, `CO`'s band moved its last bin by 4.6 × 10⁻⁴.
-pub const SPECTRAL_STEP_NM: f64 = 0.1;
+pub(crate) const SPECTRAL_STEP_NM: f64 = 0.1;
 
 /// The intervals of [`SphericalAlbedoCache`]'s grid in s, uniform over [0, 1].
 const CACHE_INTERVALS: u32 = 256;
@@ -44,7 +44,7 @@ const CACHE_INTERVALS: u32 = 256;
 /// cache's error against [`super::energy_albedos`] is held below 10⁻⁷ at any w by
 /// `substance_albedos_the_spherical_albedo_cache_is_exact_to_its_bound`.
 #[derive(Debug, Clone, PartialEq)]
-pub struct SphericalAlbedoCache {
+pub(crate) struct SphericalAlbedoCache {
     /// The spherical albedo at each node.
     values: Vec<f64>,
 }
@@ -58,7 +58,7 @@ impl Default for SphericalAlbedoCache {
 impl SphericalAlbedoCache {
     /// The cache, computed once: 257 of [`super::energy_albedos`]'s isotropic media.
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let values = (0..=CACHE_INTERVALS)
             .map(|j| {
                 let s = f64::from(j) / f64::from(CACHE_INTERVALS);
@@ -75,7 +75,7 @@ impl SphericalAlbedoCache {
     ///
     /// Never: the cubic's first node is at most 253, which a `usize` holds on every target.
     #[must_use]
-    pub fn spherical_albedo(&self, w: f64, asymmetry: f64) -> f64 {
+    pub(crate) fn spherical_albedo(&self, w: f64, asymmetry: f64) -> f64 {
         let similar = similar_isotropic_albedo(w, asymmetry);
         let s = (1.0 - similar).clamp(0.0, 1.0).sqrt();
         let x = s * f64::from(CACHE_INTERVALS);
@@ -115,7 +115,7 @@ impl SphericalAlbedoCache {
 /// which no source gives; `substance_albedos_the_spectral_slab_takes_any_index` holds its
 /// continuity. A negative k, noise about zero in a measurement, is taken as 0.
 #[must_use]
-pub fn spectral_single_scattering_albedo(
+pub(crate) fn spectral_single_scattering_albedo(
     n: f64,
     k: f64,
     wavelength_nm: f64,
@@ -136,7 +136,7 @@ pub fn spectral_single_scattering_albedo(
 
 /// How a tabulated quantity is interpolated between two knots λ₀ < λ < λ₁.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Interpolation {
+pub(crate) enum Interpolation {
     /// Linear in λ.
     Linear,
     /// ln y linear in λ, or y linear in λ where either knot's y is not positive: R08's reduction
@@ -154,7 +154,7 @@ pub enum Interpolation {
 /// A tabulated quantity of wavelength: knots of rising wavelength, nm, their values, and the
 /// interpolation between them; held at its end knots' values outside them.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Curve {
+pub(crate) struct Curve {
     wavelengths_nm: Vec<f64>,
     values: Vec<f64>,
     interpolation: Interpolation,
@@ -166,10 +166,11 @@ impl Curve {
     ///
     /// # Panics
     ///
-    /// If `knots` is empty, or its wavelengths do not rise strictly: every parser here checks its
-    /// table first.
+    /// If `knots` is empty, or its wavelengths do not rise strictly: a broken invariant, since
+    /// every reader checks its knots first and refuses a table without them (`infrared`'s with
+    /// `FitAlbedoError::Infrared`, `lab`'s with `FitAlbedoError::Spectrum`).
     #[must_use]
-    pub fn new(knots: &[(f64, f64)], interpolation: Interpolation) -> Self {
+    pub(crate) fn new(knots: &[(f64, f64)], interpolation: Interpolation) -> Self {
         assert!(!knots.is_empty(), "a curve has a knot");
         assert!(
             knots.windows(2).all(|pair| pair[0].0 < pair[1].0),
@@ -184,20 +185,20 @@ impl Curve {
 
     /// A constant.
     #[must_use]
-    pub fn constant(value: f64) -> Self {
+    pub(crate) fn constant(value: f64) -> Self {
         Self::new(&[(1.0, value)], Interpolation::Linear)
     }
 
     /// Its knots' wavelengths, nm.
     #[must_use]
-    pub fn wavelengths_nm(&self) -> &[f64] {
+    pub(crate) fn wavelengths_nm(&self) -> &[f64] {
         &self.wavelengths_nm
     }
 
     /// Its value at `wavelength_nm`: a knot's own value at a knot, interpolated between knots, and
     /// the end knot's value beyond either end.
     #[must_use]
-    pub fn at(&self, wavelength_nm: f64) -> f64 {
+    pub(crate) fn at(&self, wavelength_nm: f64) -> f64 {
         let grid = &self.wavelengths_nm;
         let upper = grid.partition_point(|&w| w < wavelength_nm);
         if upper == grid.len() {
@@ -238,7 +239,7 @@ impl Curve {
 /// One stretch of a row's optical constants: n and k over [`lo_nm`](Self::lo_nm) to
 /// [`hi_nm`](Self::hi_nm), each a [`Curve`].
 #[derive(Debug, Clone, PartialEq)]
-pub struct Piece {
+pub(crate) struct Piece {
     lo_nm: f64,
     hi_nm: f64,
     n: Curve,
@@ -250,34 +251,36 @@ impl Piece {
     ///
     /// # Panics
     ///
-    /// If `lo_nm` is not below `hi_nm`.
+    /// If `lo_nm` is not below `hi_nm`: a broken invariant, since `infrared`'s readers check their
+    /// joins first and refuse, with `FitAlbedoError::Infrared`, a set whose rows do not lie where
+    /// its joins need them.
     #[must_use]
-    pub fn new(lo_nm: f64, hi_nm: f64, n: Curve, k: Curve) -> Self {
+    pub(crate) fn new(lo_nm: f64, hi_nm: f64, n: Curve, k: Curve) -> Self {
         assert!(lo_nm < hi_nm, "a piece spans {lo_nm} to {hi_nm} nm");
         Self { lo_nm, hi_nm, n, k }
     }
 
     /// Its first wavelength, nm.
     #[must_use]
-    pub const fn lo_nm(&self) -> f64 {
+    pub(crate) const fn lo_nm(&self) -> f64 {
         self.lo_nm
     }
 
     /// Its last wavelength, nm.
     #[must_use]
-    pub const fn hi_nm(&self) -> f64 {
+    pub(crate) const fn hi_nm(&self) -> f64 {
         self.hi_nm
     }
 
     /// Its (n, k) at `wavelength_nm`.
     #[must_use]
-    pub fn at(&self, wavelength_nm: f64) -> (f64, f64) {
+    pub(crate) fn at(&self, wavelength_nm: f64) -> (f64, f64) {
         (self.n.at(wavelength_nm), self.k.at(wavelength_nm))
     }
 
     /// Its ends and its curves' knots between them, nm: where its n and k are smooth between.
     #[must_use]
-    pub fn knots_nm(&self) -> Vec<f64> {
+    pub(crate) fn knots_nm(&self) -> Vec<f64> {
         let mut knots = vec![self.lo_nm, self.hi_nm];
         for curve in [&self.n, &self.k] {
             knots.extend(
@@ -294,7 +297,7 @@ impl Piece {
 
 /// A grain whose spectral single-scattering albedo [`spectral_bins`] averages: what a row's bins
 /// are computed from.
-pub trait SpectralGrain {
+pub(crate) trait SpectralGrain {
     /// Its data's reach, nm: the first and last wavelength over which its w is given.
     fn reach_nm(&self) -> [f64; 2];
 
@@ -310,7 +313,7 @@ pub trait SpectralGrain {
 /// A row's optical constants over its reach: contiguous [`Piece`]s, each starting where the last
 /// ends, R08's file's first and the infrared set's after it.
 #[derive(Debug, Clone, PartialEq)]
-pub struct SpectralIndex {
+pub(crate) struct SpectralIndex {
     pieces: Vec<Piece>,
 }
 
@@ -321,7 +324,7 @@ impl SpectralIndex {
     ///
     /// If `pieces` is empty or not contiguous: each row's builder joins them end to end.
     #[must_use]
-    pub fn new(pieces: Vec<Piece>) -> Self {
+    pub(crate) fn new(pieces: Vec<Piece>) -> Self {
         assert!(!pieces.is_empty(), "an index has a piece");
         assert!(
             pieces
@@ -333,14 +336,15 @@ impl SpectralIndex {
     }
 
     /// Its pieces, in order.
+    #[cfg(test)]
     #[must_use]
-    pub fn pieces(&self) -> &[Piece] {
+    pub(crate) fn pieces(&self) -> &[Piece] {
         &self.pieces
     }
 
     /// Its (n, k) at `wavelength_nm`: the piece's that holds it, the later one's at a join.
     #[must_use]
-    pub fn at(&self, wavelength_nm: f64) -> (f64, f64) {
+    pub(crate) fn at(&self, wavelength_nm: f64) -> (f64, f64) {
         let piece = self
             .pieces
             .iter()
@@ -377,7 +381,7 @@ impl SpectralGrain for SpectralIndex {
 ///
 /// If the grain's reach covers no bin, or `step_nm` is not positive.
 #[must_use]
-pub fn spectral_bins(
+pub(crate) fn spectral_bins(
     grain: &dyn SpectralGrain,
     diameter: Metres,
     asymmetry: f64,

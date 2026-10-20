@@ -278,8 +278,8 @@ fn substance_albedos_an_index_off_its_grid_or_below_unity_is_refused() {
 
 /// The table's rows are the registry's rows with condensed optics, in registry order, each read
 /// from its own solid file by wavelength, the manifest listing those files; a row's provenance is
-/// at least as strict as its file's flag; and a row with no optics or a file not its own is
-/// refused.
+/// at least as strict as its file's flag; and a row with no optics, a row whose optics read no
+/// index file, or a file not its own is refused.
 #[test]
 fn substance_albedos_the_items_are_the_registry_s_optics_rows() {
     let manifest = manifest();
@@ -303,6 +303,12 @@ fn substance_albedos_the_items_are_the_registry_s_optics_rows() {
         row_index(by_key("He").unwrap(), &nitrogen),
         Err(FitAlbedoError::NoOptics { .. })
     ));
+    assert_eq!(
+        row_index(by_key("S8").unwrap(), &nitrogen),
+        Err(FitAlbedoError::NoIndexFile {
+            key: "S8".to_owned()
+        })
+    );
     assert_eq!(
         row_index(by_key("H2O").unwrap(), &nitrogen),
         Err(FitAlbedoError::NotItsFile {
@@ -835,12 +841,14 @@ fn substance_albedos_the_blackbody_shares_are_planck_s() {
 
 /// The anchor the infrared already sets at the row (plan 14, P14.T49.i; decision-p14-t49c-split
 /// §1.3): `H2O`'s Bond albedo under a 5,772 K blackbody, the Sun's effective temperature (0.832),
-/// against Enceladus's measured bolometric Bond albedo, 0.81 ± 0.04 (Howett et al. 2010) and 0.76 ±
-/// 0.03 (Li et al. 2023, read through a secondary): within Howett et al.'s range, and not below Li
-/// et al.'s, pure fresh frost of 100 µm grains being an upper bound on an icy satellite's, whose
-/// grains, impurities and weathering darken it (P14.T51.b asserts the body's). Under a 3,000 K
-/// blackbody, an M dwarf's, the same frost's is 0.528: most of the light is then beyond 1 µm,
-/// where ice absorbs (decision-p14-t49c-split §5.2). The row's B, V and R bins stay above 0.98.
+/// against Enceladus's measured bolometric Bond albedo, 0.81 ± 0.04 (Howett et al. 2010, from
+/// memory: its abstract gives no number, and the paper was not reached) and 0.76 ± 0.03 (Li et al.
+/// 2023, Icarus 394, 115429, its abstract read in ADS, 2023Icar..39415429L): within Howett et al.'s
+/// range as remembered, and not below Li et al.'s, pure fresh frost of 100 µm grains being an upper
+/// bound on an icy satellite's, whose grains, impurities and weathering darken it (P14.T51.b
+/// asserts the body's). Under a 3,000 K blackbody, an M dwarf's, the same frost's is 0.528: most of
+/// the light is then beyond 1 µm, where ice absorbs (decision-p14-t49c-split §5.2). The row's B, V
+/// and R bins stay above 0.98.
 #[test]
 fn substance_albedos_water_frost_s_bond_albedo_meets_enceladus_s() {
     let water = fitted_row("H2O");

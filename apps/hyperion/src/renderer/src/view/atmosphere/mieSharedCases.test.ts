@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import committed from "../../../../../../crates/hyperion-fit/src/tasks/condensate_extinction/mie_cases.json" with { type: "json" };
-import { mieSphere } from "../view/atmosphere/mie";
-import { expectCommittedTable } from "./bless";
+import committed from "../../../../../../../crates/hyperion-fit/src/tasks/condensate_extinction/mie_cases.json" with { type: "json" };
+import { expectCommittedTable } from "../../test/bless";
+import { mieSphere } from "./mie";
 
 /** The committed file, relative to this test file. */
-const FILE = "../../../../../../crates/hyperion-fit/src/tasks/condensate_extinction/mie_cases.json";
+const FILE =
+  "../../../../../../../crates/hyperion-fit/src/tasks/condensate_extinction/mie_cases.json";
 
 /** One case the client's Mie and the fit's share: a size parameter and an index n + ik. */
 interface SharedCase {
@@ -33,17 +34,22 @@ const CASES: ReadonlyArray<SharedCase> = [
 /** The scattering angles at which the amplitudes are shared, degrees. */
 const ANGLES_DEG: ReadonlyArray<number> = [0, 90, 180];
 
+/** An amplitude's (re, im) at each of {@link ANGLES_DEG}, from Mie's interleaved values. */
+function pairs(values: Float64Array): ReadonlyArray<readonly [number, number]> {
+  return ANGLES_DEG.map(
+    (_, j) => [values[2 * j] ?? Number.NaN, values[2 * j + 1] ?? Number.NaN] as const,
+  );
+}
+
 /** The table the fit's Mie is held to: each case's efficiencies, asymmetry and amplitudes. */
 function sharedCasesTable(): unknown {
   const mu = Float64Array.from(ANGLES_DEG, (deg) => Math.cos((deg * Math.PI) / 180));
   return {
     description:
-      "Written by apps/hyperion/src/renderer/src/test/mieSharedCases.test.ts (plan 14, P14.T49.e) from the client's Mie; read by crates/hyperion-fit/src/tasks/condensate_extinction/mie.rs, which holds its own Mie to it to 1e-6. Do not edit by hand.",
+      "Written by apps/hyperion/src/renderer/src/view/atmosphere/mieSharedCases.test.ts (plan 14, P14.T49.e) from the client's Mie; read by crates/hyperion-fit/src/tasks/condensate_extinction/mie.rs, which holds its own Mie to it to 1e-6. Do not edit by hand.",
     anglesDeg: ANGLES_DEG,
     cases: CASES.map(({ name, sizeParameter, n, k }) => {
       const result = mieSphere(sizeParameter, { n, k }, mu);
-      const pairs = (values: Float64Array): number[][] =>
-        ANGLES_DEG.map((_, j) => [values[2 * j] ?? Number.NaN, values[2 * j + 1] ?? Number.NaN]);
       return {
         name,
         sizeParameter,

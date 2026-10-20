@@ -3,6 +3,17 @@
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/kDistributions/*.bin binary
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/kDistributions/*.bin binary
 
+# hyperion-fit's datasets, hashed byte for byte against their PROVENANCE.toml (plan 14, P14.T49.i;
+# splib07a's spectra keep their CRLF line ends): never normalised, so that a checkout with
+# core.autocrlf, as on Windows, keeps their bytes.
+crates/hyperion-fit/data/** -text
+
+# hyperion-fit's manifests and the fitted tables it writes are LF text, hashed byte for byte: a
+# manifest's bytes enter its task's inputs hash, and a table's body its hash in `tables.lock`, so
+# that a checkout with core.autocrlf would fail `hyperion-fit check` (plan 14, P14.T49.d and T49.e).
+crates/hyperion-fit/manifests/*.toml text eol=lf
+crates/*/src/tables/*.rs text eol=lf
+
 # Golden files are LF text, read line by line by the Rust and TypeScript tests; a CRLF checkout
 # (Git for Windows' default) would fail every comparison (decision-r10-t16d-part1, item 6).
 *.golden text eol=lf

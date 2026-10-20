@@ -95,9 +95,9 @@ use crate::manifest::{Manifest, SimFingerprint};
 use crate::materials::MaterialFile;
 use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput, check_manifest};
 
-pub mod infrared;
-pub mod lab;
-pub mod spectral;
+pub(crate) mod infrared;
+pub(crate) mod lab;
+pub(crate) mod spectral;
 
 use infrared::InfraredData;
 use lab::{
@@ -297,7 +297,7 @@ fn shadow_hiding(cos_g: f64, b0: f64, width: f64) -> f64 {
 /// the cosines (μ₀, μ, cos g) of `cosines`, given H at μ₀ and μ (`h0`, `h`): (w ÷ 4) ÷ (μ₀ + μ)
 /// {p(g) [1 + B(g)] + H(μ₀) H(μ) − 1}, B(g) the photometry's opposition effect at w's amplitude.
 #[must_use]
-pub fn reflectance_factor_with(
+pub(crate) fn reflectance_factor_with(
     w: f64,
     photometry: &Photometry,
     cosines: (f64, f64, f64),
@@ -577,6 +577,9 @@ pub enum FitAlbedoError {
         /// What is wrong.
         why: String,
     },
+    /// A mixture names no part.
+    #[error("a mixture has no part")]
+    EmptyMixture,
     /// An infrared dataset is not as its reader expects.
     #[error("the infrared dataset `{dataset}` is malformed: {why}")]
     Infrared {
@@ -657,6 +660,7 @@ pub fn row_datasets() -> Vec<&'static str> {
 /// # Errors
 ///
 /// [`FitAlbedoError::NoOptics`] for a row without condensed optics,
+/// [`FitAlbedoError::NoIndexFile`] for a row whose optics read no index file,
 /// [`FitAlbedoError::NotItsFile`] if `file` is not a solid file of the row's key,
 /// [`FitAlbedoError::OffGrid`] if a band lies outside its grid, and
 /// [`FitAlbedoError::IndexBelowUnity`] if its n at a band is below 1.
@@ -701,7 +705,7 @@ pub fn row_index(id: SubstanceId, file: &MaterialFile) -> Result<[(f64, f64); 3]
 
 /// A row's grain, as its values in B, V and R and its bins read it ([`lab`]).
 #[derive(Debug, Clone, PartialEq)]
-pub enum RowGrain {
+pub(crate) enum RowGrain {
     /// An index file's, R08's to 780 nm and its infrared set's beyond, with its n and k at 440,
     /// 550 and 640 nm as [`row_index`] finds them.
     Index {
@@ -717,8 +721,8 @@ pub enum RowGrain {
         /// Its grain.
         grain: OpaqueGrain,
     },
-    /// One end-member's, its w held at most the regolith's limit.
-    EndMember(Clamped<EndMemberGrain>),
+    /// One end-member's, shared with the fit's cache, its w held at most the regolith's limit.
+    EndMember(Clamped<Arc<EndMemberGrain>>),
     /// A mixture's, its w held at most the regolith's limit.
     Mixture(Clamped<MixtureGrain>),
     /// Measured levels'.
@@ -728,7 +732,7 @@ pub enum RowGrain {
 impl RowGrain {
     /// The grain, as the bins read it.
     #[must_use]
-    pub fn as_spectral(&self) -> &dyn SpectralGrain {
+    pub(crate) fn as_spectral(&self) -> &dyn SpectralGrain {
         match self {
             Self::Index { spectral, .. } => spectral,
             Self::Opaque { grain, .. } => grain,
@@ -742,7 +746,7 @@ impl RowGrain {
     /// equivalent slab ([`single_scattering_albedo`]), an opaque slab's `S_e`, any other's its
     /// grain's at 440, 550 and 640 nm.
     #[must_use]
-    pub fn band_albedos(&self, diameter: Metres) -> [f64; 3] {
+    pub(crate) fn band_albedos(&self, diameter: Metres) -> [f64; 3] {
         match self {
             Self::Index { bands, .. } => core::array::from_fn(|band| {
                 let (n, k) = bands[band];
@@ -760,7 +764,7 @@ impl RowGrain {
 /// What a fit reads beside the rows: the manifest's index files and datasets, the laboratory
 /// library, the regolith's inversion tables, and the end-members inverted so far, each once.
 #[derive(Debug, Clone)]
-pub struct FitInputs<'m> {
+pub(crate) struct FitInputs<'m> {
     manifest: &'m Manifest,
     data: InfraredData,
     library: LabLibrary,
@@ -776,7 +780,7 @@ impl<'m> FitInputs<'m> {
     /// [`RunTaskError::Input`] if the manifest's `materials` are not [`row_files`] or its
     /// `datasets` not [`row_datasets`]; [`RunTaskError::Dataset`] if a dataset cannot be read or
     /// fails its hash.
-    pub fn load(manifest: &'m Manifest) -> Result<Self, RunTaskError> {
+    pub(crate) fn load(manifest: &'m Manifest) -> Result<Self, RunTaskError> {
         let files = row_files();
         if manifest.materials() != files.as_slice() {
             return Err(RunTaskError::Input {
@@ -799,9 +803,9 @@ impl<'m> FitInputs<'m> {
                 .into(),
             });
         }
-        let data = InfraredData::load(manifest)?;
-        let library =
-            LabLibrary::from_texts(data.files(SPLIB_DATASET).cloned().unwrap_or_default());
+        let mut data = InfraredData::load(manifest)?;
+        // The spectra move to the library: no infrared set reads them.
+        let library = LabLibrary::from_texts(data.take(SPLIB_DATASET).unwrap_or_default());
         Ok(Self {
             manifest,
             data,
@@ -816,7 +820,7 @@ impl<'m> FitInputs<'m> {
     /// # Errors
     ///
     /// [`RunTaskError::Input`] if a spectrum is missing or malformed.
-    pub fn end_member(
+    pub(crate) fn end_member(
         &mut self,
         end_member: &EndMember,
     ) -> Result<Arc<EndMemberGrain>, RunTaskError> {
@@ -831,7 +835,7 @@ impl<'m> FitInputs<'m> {
     ///
     /// [`RunTaskError::Dataset`] if its index file cannot be read; [`RunTaskError::Input`] as
     /// [`row_index`] and [`infrared::spectral_index`], or if a spectrum is missing or malformed.
-    pub fn grain(
+    pub(crate) fn grain(
         &mut self,
         id: SubstanceId,
         optics: &CondensedOptics,
@@ -857,10 +861,10 @@ impl<'m> FitInputs<'m> {
                     grain: OpaqueGrain::new(piece),
                 })
             }
-            OpticsInput::Spectrum { end_member } => {
-                let grain = self.end_member(end_member)?;
-                Ok(RowGrain::EndMember(Clamped::new((*grain).clone(), limit)))
-            }
+            OpticsInput::Spectrum { end_member } => Ok(RowGrain::EndMember(Clamped::new(
+                self.end_member(end_member)?,
+                limit,
+            ))),
             OpticsInput::Mixture { parts } => {
                 let grain =
                     MixtureGrain::new(parts, &self.library, &self.tables, &mut self.end_members)
@@ -906,7 +910,7 @@ pub fn fit(manifest: &Manifest) -> Result<Vec<(SubstanceId, AlbedoRow)>, RunTask
 /// # Errors
 ///
 /// As [`fit`].
-pub fn fit_on_grid(
+pub(crate) fn fit_on_grid(
     manifest: &Manifest,
     step_nm: f64,
 ) -> Result<Vec<(SubstanceId, AlbedoRow)>, RunTaskError> {
@@ -1062,13 +1066,8 @@ fn acceptance(rows: &[(SubstanceId, AlbedoRow)]) -> Result<String, RunTaskError>
     let (hemispherical_max, hemispherical_key, hemispherical_offset) =
         highest(rows, 9..BVR_ROW_LEN);
     let (bin_max, bin_max_key, _) = highest(rows, SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET);
-    let negated: Vec<(SubstanceId, AlbedoRow)> = rows
-        .iter()
-        .map(|(id, values)| (*id, values.map(|v| -v)))
-        .collect();
     let (bin_min, bin_min_key, bin_min_offset) =
-        highest(&negated, SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET);
-    let bin_min = -bin_min;
+        lowest(rows, SPECTRAL_BINS_OFFSET..DATA_REACH_OFFSET);
     if !(0.0..=1.0).contains(&bin_min) || !(0.0..=1.0).contains(&bin_max) {
         return Err(RunTaskError::Input {
             task: NAME,
@@ -1117,16 +1116,39 @@ fn acceptance(rows: &[(SubstanceId, AlbedoRow)]) -> Result<String, RunTaskError>
     ))
 }
 
-/// The highest of `rows`' values at `offsets`, with its row's key and offset.
+/// The highest of `rows`' values at `offsets`, with its row's key and offset: the first, in the
+/// rows' order and then the offsets', where several are equal.
 #[must_use]
 fn highest(
     rows: &[(SubstanceId, AlbedoRow)],
     offsets: core::ops::Range<usize>,
 ) -> (f64, String, usize) {
-    let mut best = (f64::NEG_INFINITY, String::new(), 0);
+    extreme(rows, offsets, f64::NEG_INFINITY, |value, best| value > best)
+}
+
+/// The lowest of `rows`' values at `offsets`, with its row's key and offset, the first where
+/// several are equal.
+#[must_use]
+fn lowest(
+    rows: &[(SubstanceId, AlbedoRow)],
+    offsets: core::ops::Range<usize>,
+) -> (f64, String, usize) {
+    extreme(rows, offsets, f64::INFINITY, |value, best| value < best)
+}
+
+/// The first of `rows`' values at `offsets` that `beats` the rest, from `start`: `beats(value,
+/// best)` is whether `value` replaces the best so far.
+#[must_use]
+fn extreme(
+    rows: &[(SubstanceId, AlbedoRow)],
+    offsets: core::ops::Range<usize>,
+    start: f64,
+    beats: impl Fn(f64, f64) -> bool,
+) -> (f64, String, usize) {
+    let mut best = (start, String::new(), 0);
     for (id, values) in rows {
         for offset in offsets.clone() {
-            if values[offset] > best.0 {
+            if beats(values[offset], best.0) {
                 best = (
                     values[offset],
                     id.substance().key().as_str().to_owned(),
@@ -1140,7 +1162,7 @@ fn highest(
 
 /// Every infrared set, in a fixed order, which the fingerprint numbers them by. The match makes a
 /// new set fail to compile here until it is listed.
-pub const INFRARED_SETS: [InfraredIndex; 13] = {
+pub(crate) const INFRARED_SETS: [InfraredIndex; 13] = {
     const fn listed(set: InfraredIndex) -> InfraredIndex {
         match set {
             InfraredIndex::WaterIce
@@ -1179,7 +1201,7 @@ pub const INFRARED_SETS: [InfraredIndex; 13] = {
 /// set, each end-member's name, spectra and scaling, each part's fraction and grain class, the
 /// levels and their geometry, as the fingerprint hashes them.
 #[must_use]
-pub fn describe_input(input: OpticsInput) -> String {
+pub(crate) fn describe_input(input: OpticsInput) -> String {
     let end_member = |e: &EndMember| {
         let files: Vec<&str> = e.spectra().iter().map(LabSpectrum::file).collect();
         format!("{} {files:?} {:?}", e.name(), e.scaling())
@@ -1197,6 +1219,7 @@ pub fn describe_input(input: OpticsInput) -> String {
         OpticsInput::OpaqueSlab { file } => format!("opaque slab {file}"),
         OpticsInput::Spectrum { end_member: e } => format!("spectrum {}", end_member(e)),
         OpticsInput::Mixture { parts } => parts.iter().fold("mixture".to_owned(), |mut text, p| {
+            // Writing into a `String` cannot fail.
             let _ = write!(
                 text,
                 "; {} {:?} {:?}",
@@ -1335,14 +1358,15 @@ impl FitTask for SubstanceAlbedosTask {
             FINE_GRAIN_DIAMETER.value(),
         ));
         probes.push(("Beckman incidence deg".to_owned(), BECKMAN_INCIDENCE_DEG));
-        probes.push(("ASD incidence deg".to_owned(), ASD_GEOMETRY.incidence_deg));
-        probes.push(("ASD emission deg".to_owned(), ASD_GEOMETRY.emission_deg));
-        probes.push(("ASD azimuth deg".to_owned(), ASD_GEOMETRY.azimuth_deg));
+        probes.push(("ASD incidence deg".to_owned(), ASD_GEOMETRY.incidence_deg()));
+        probes.push(("ASD emission deg".to_owned(), ASD_GEOMETRY.emission_deg()));
+        probes.push(("ASD azimuth deg".to_owned(), ASD_GEOMETRY.azimuth_deg()));
         probes.push((
             "regolith highest w".to_owned(),
             REGOLITH_MAX_SINGLE_SCATTERING_ALBEDO,
         ));
         let described = optics::rows().fold(String::new(), |mut text, (id, optics)| {
+            // Writing into a `String` cannot fail.
             let _ = writeln!(
                 text,
                 "{} {}",

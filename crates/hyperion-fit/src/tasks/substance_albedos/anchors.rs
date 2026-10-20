@@ -17,7 +17,10 @@ use super::*;
 
 /// The allowance of every band, `Adopted`: a class passes within [lo ÷ 1.25, 1.25 × hi]
 /// (decision-p14-t49i-rock-mixtures §3: the laboratory powders' grain range, their packing and the
-/// photometry's ratio against each powder's own surge).
+/// photometry's ratio against each powder's own surge). The ruling sets it for the classes' bands;
+/// the lane applies the same model allowance to Mars's bright dust and Titan's dunes, the model's
+/// uncertainty being the same (the form's grains against the surface's, its packing, and the
+/// reference photometry against the surface's own), and no other tolerance being ruled for them.
 const ALLOWANCE: f64 = 1.25;
 
 /// The optics of row `key`.
@@ -44,11 +47,7 @@ fn w_at(key: &str, nm: f64) -> f64 {
 /// The reflectance factor at i 30°, e 0° (g 30°) of grains of albedo `w` under the regolith's
 /// photometry: the 30° laboratory measurements' quantity (decision-p14-t49i-rock-mixtures §1).
 fn reflectance_30(w: f64) -> f64 {
-    let geometry = Geometry {
-        incidence_deg: 30.0,
-        emission_deg: 0.0,
-        azimuth_deg: 0.0,
-    };
+    let geometry = Geometry::new(30.0, 0.0, 0.0).unwrap();
     reflectance_factor(w, &LUNAR_REGOLITH, cosines(geometry))
 }
 
@@ -108,23 +107,23 @@ fn substance_albedos_each_spectrum_round_trips_at_its_geometry() {
                 .find(|(file, _, _)| *file == spectrum.file())
                 .map_or((0, 0), |c| (c.1, c.2));
             assert_eq!(
-                (inverted.bright, inverted.dark),
+                (inverted.bright(), inverted.dark()),
                 clipped,
                 "{}: clipped channels",
                 spectrum.file()
             );
             assert!(
-                inverted.residual < 1e-12,
+                inverted.residual() < 1e-12,
                 "{}: round trip {}",
                 spectrum.file(),
-                inverted.residual
+                inverted.residual()
             );
         }
         if let GrainScaling::Slab {
             lab_grain_diameter, ..
         } = e.scaling()
         {
-            let channels = &grain.spectra()[0].channels;
+            let channels = grain.spectra()[0].channels();
             for &(nm, w) in channels.iter().step_by(37) {
                 let back = grain.single_scattering_albedo(nm, lab_grain_diameter);
                 assert!((back - w).abs() < 1e-12, "{}: {nm} nm", e.name());
@@ -138,9 +137,12 @@ fn substance_albedos_each_spectrum_round_trips_at_its_geometry() {
 /// §3), each within [`ALLOWANCE`]; a row that misses one is a stand-in whose sources state the
 /// miss, a row that meets all of its own is not:
 ///
-/// - `chondrite_ci`: the reflectance factor at i 30°, e 0° at 550 nm in 0.020–0.035, Ryugu's
-///   powder (~2%) to Orgueil's preheated < 155 µm powder (~3.5% at v-band), both at i 30°, e 0°
-///   (Amano et al. 2023, Sci. Adv. 9, eadi3789);
+/// - `chondrite_ci`: the reflectance factor at i 30°, e 0° at 550 nm in 0.020–0.035, the ruling's
+///   band after Amano et al. 2023 (Sci. Adv. 9, eadi3789): its lower end Ryugu's global visible
+///   reflectance, ~2%, from remote sensing (ONC-T and NIRS3), where Ryugu's returned grains measure
+///   ~2 to 4% at v-band at i 30°, e 0° (g 30°), its powder aggregates inside that range and darker
+///   than the coarse ones; its upper end Orgueil's preheated < 155 µm powder (~3.5% at v-band, the
+///   same geometry);
 /// - `chondrite_cm`: `A_N` at 550 nm in 0.047–0.085, CM's equivalent geometric albedo 0.066 ±
 ///   0.019, extrapolated to zero phase without the coherent backscatter (Beck et al. 2021, Icarus
 ///   354, 114066, §6.1), and the reflectance factor at 30° at 560 nm in 0.028–0.140 (Cloutis et al.
@@ -149,8 +151,8 @@ fn substance_albedos_each_spectrum_round_trips_at_its_geometry() {
 ///   Icarus 221, 328, abstract: "∼5% to 13% at 0.56 μm");
 /// - `chondrite_h`, `_l`, `_ll`: the reflectance factor at 30° at 700 nm in 0.25–0.39, the falls
 ///   Chelyabinsk (LL5, 25%) and Viñales (L, 39%) at 45–90 µm (Bowen et al. 2023, PSJ 4, 52, p. 3),
-///   measured at i 0°, e 30° (their lab's geometry, Cantillo et al. 2023, PSJ 4, 177, p. 10), the
-///   same by reciprocity;
+///   measured at i 0°, e 30° (their lab's geometry, Cantillo et al. 2023, PSJ 4, 177, read as
+///   arXiv:2401.10377, §3.2), the same by reciprocity;
 /// - `basalt_fe`: `A_N` at 550 nm above the mature maria's 0.09 and at most the HEDs' 0.5 (Beck et
 ///   al. 2021), bounds rather than a band, with no allowance; it is a stand-in anyway, an upper
 ///   bound (§2.7).
@@ -321,12 +323,10 @@ fn substance_albedos_so2_s_other_phase_is_recorded() {
     let OpticsInput::Levels { levels } = optics_of("SO2").input() else {
         panic!("SO2 is levels");
     };
+    let opposite = levels.geometry();
     let same_side = hyperion_sim::substance::optics::ReflectanceLevels::new(
         levels.knots(),
-        Geometry {
-            azimuth_deg: 0.0,
-            ..levels.geometry()
-        },
+        Geometry::new(opposite.incidence_deg(), opposite.emission_deg(), 0.0).unwrap(),
     );
     let grain = lab::LevelsGrain::new(&same_side, &FRESH_SNOW);
     let cache = SphericalAlbedoCache::new();
@@ -346,27 +346,32 @@ fn substance_albedos_so2_s_other_phase_is_recorded() {
             .any(|s| s.citation().contains("40°") && s.citation().contains(&stated)),
         "SO2's sources record its Bond albedo at 40°, {stated}"
     );
-    assert!(grain.inverted().residual < 1e-12);
+    assert!(grain.inverted().residual() < 1e-12);
 }
 
 /// Titan's dunes in its infrared windows (Brossier et al. 2018, JGR Planets 123, 1089, Fig. 7a, the
-/// dune unit's single-scattering albedo read by eye from the figure, 0.56–0.57 at 1.27 µm, 0.46 at
-/// 1.59 µm and 0.42 at 2.01 µm): the `tholin` row's w at 1.28 µm within the allowance of 1.27 µm's,
-/// and brighter than the dunes at 1.59 and 2.01 µm, the miss recorded: the dunes are not pure
-/// laboratory tholin (their Table 3 mixes 70–90% tholins with water ice), so the anchor tests the
-/// dune material, not the substance, and `tholin` is no stand-in for it. A reading by eye supports
-/// about ±0.01 (the 1.27 µm value is read as the range 0.56–0.57, the others to two decimals), and
-/// the test asks no finer: the allowance of 1.25 at 1.27 µm spans 0.448–0.713, and at 1.59 and 2.01
-/// µm the row lies 0.18 and 0.15 above the readings. These three values are facts with their
-/// citation, asserted here only; nothing generated reads them, and no figure, digitised curve or
-/// data file of the paper (CC BY-NC-ND) is committed (decision-composition §5).
+/// dune unit's values read by eye from the figure, 0.56–0.57 at 1.27 µm, 0.46 at 1.59 µm and 0.42
+/// at 2.01 µm, its ordinate taken as single-scattering albedo, as the lane's preparation read it,
+/// unconfirmed: the abstract calls its quantity a "surface albedo"): the `tholin` row's w at 1.27
+/// µm, the window's wavelength as the figure gives it, interpolated between Khare et al.'s rows at
+/// 1.192 and 1.357 µm (no node of its data or of the fit's grid falls at 1.27 µm), within the
+/// lane's allowance of the dunes' value there, and brighter than the dunes at 1.59 and 2.01 µm,
+/// the miss recorded: the dunes are not pure laboratory tholin (their Table 3 mixes 70–90% tholins
+/// with water ice), so the anchor tests the dune material, not the substance, and `tholin` is no
+/// stand-in for it. A reading by eye supports about ±0.01 (the
+/// 1.27 µm value is read as the range 0.56–0.57, the others to two decimals), and the test asks no
+/// finer: the allowance of 1.25 at 1.27 µm spans 0.448–0.713, and at 1.59 and 2.01 µm the row lies
+/// 0.18 and 0.15 above the readings. These three values are facts with their citation, asserted
+/// here only; nothing generated reads them, and no figure, digitised curve or data file of the
+/// paper (CC BY-NC-ND) is committed (decision-composition §5).
 #[test]
 fn substance_albedos_tholin_meets_titan_s_dunes() {
-    let at_1280 = w_at("tholin", 1_280.0);
+    let at_1270 = w_at("tholin", 1_270.0);
     assert!(
-        inside(at_1280, (0.56, 0.57)),
-        "tholin's w at 1.28 µm {at_1280}"
+        inside(at_1270, (0.56, 0.57)),
+        "tholin's w at 1.27 µm {at_1270}"
     );
+    eprintln!("tholin's w at 1.27 µm: {at_1270:.4}");
     for (nm, dunes) in [(1_590.0, 0.46), (2_010.0, 0.42)] {
         let w = w_at("tholin", nm);
         assert!(

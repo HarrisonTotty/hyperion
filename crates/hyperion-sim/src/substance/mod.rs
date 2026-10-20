@@ -66,8 +66,8 @@ pub mod thermal;
 pub mod thermo;
 
 pub use aerosol::{
-    AerosolOptics, BuildSizeDistributionError, FileVariant, ResolveAerosolError, SizeDistribution,
-    SizeDistributionKind, aerosol_optics,
+    AerosolOptics, BuildSizeDistributionError, ExtinctionBasis, FileVariant, ResolveAerosolError,
+    SizeDistribution, SizeDistributionKind, aerosol_optics,
 };
 pub use condensed::{
     CondensedColumns, CondensedPhase, DensityAt, GrainDensity, Transition, TransitionKind,
@@ -77,7 +77,7 @@ pub use diagram::{
     SolidDensity, SolidPhase, SublimationEquation, SublimationPiece, WagnerEquation,
 };
 pub use element::Element;
-pub use formation::{formation_range, log10_equilibrium_constant, log10_formation_constant};
+pub use formation::{BalanceReactionError, Reaction, formation_range, log10_formation_constant};
 pub use helmholtz::HelmholtzResidual;
 pub use hyperion_surface::substance_key::{SubstanceKey, SubstanceKeyForm};
 pub use liquid::{

@@ -7,36 +7,43 @@
 //! P14.T54.a, so that nothing on the record moves at version 22; T49.c's tripwire holds this file
 //! for that reason. Every optical value is read through the registry when it is used
 //! (`Substance::condensed_optics` and its spherical albedos, and
-//! [`liquid_properties`]), with no copied value, so that P14.T49.i's rows and bands flow through
-//! with no edit here.
+//! [`liquid_properties`]), with no copied value, so that P14.T49.i's rows flow through with no
+//! edit here.
 //!
 //! # The host's light (decision-p14-t49c-split §2)
 //!
-//! Each component's Bond albedo is its spherical albedo by band weighted by the light its hosts
-//! send in each band's edges, normalised over the bands given ([`band_weighted`]): a Planck curve
-//! at each luminous host's effective temperature, its share of the host's light in each band
+//! Each component's Bond albedo is its spherical albedo by bin weighted by the light its hosts
+//! send in each bin's edges, normalised over the bins given ([`band_weighted`]): a Planck curve at
+//! each luminous host's effective temperature, its share of the host's light in each bin
 //! integrated by an 8-node Gauss–Legendre rule ([`planck_share`]), weighted by the host's flux at
 //! the body ([`HostShadeSum`]). The sim's stellar spectrum (`sky::colour::star_colour`) is not
-//! used: a body's hosts reach it as P14.T12's `HostLight`, which carries no surface gravity.
+//! used: a body's hosts reach it as P14.T12's `HostLight`, which carries no surface gravity. Both
+//! weightings take the host's whole spectrum, so that a host whose light lies in the infrared, an
+//! M dwarf's, darkens an ice (decision-p14-t49c-split §5.2):
 //!
-//! - **The solids' bands** are B, V and R, contiguous over 380–760 nm at the midpoints between
-//!   their effective wavelengths ([`VISIBLE_BAND_EDGES_NM`]), until P14.T49.i adds the infrared.
-//!   The weighting reads slices of matching lengths, so T49.i's bins are data, not code.
+//! - **The solids' bins** are P14.T49.i's twelve, contiguous over 0.3–5 µm
+//!   ([`SPECTRAL_BIN_EDGES_NM`]), whose first and last stand for the light outside them
+//!   (`substance::optics`'s module documentation): the first bin takes all the light below 390 nm
+//!   and the last all the light above 3,500 nm ([`optics_shares`]; main's ruling, 2026-10-19).
 //! - **The liquids' bins** are P14.T49.h's fifteen, R08's bake bins over 380–760 nm
-//!   ([`LIQUID_BIN_EDGES_NM`]).
+//!   ([`LIQUID_BIN_EDGES_NM`]), with the light below 380 nm and the light above 760 nm beside them
+//!   ([`liquid_shares`], [`LIQUID_WEIGHTS`]).
 //!
 //! # The components
 //!
-//! - **A solid** ([`solid_bond`]): its row's spherical albedo by band
-//!   (`CondensedOptics::spherical_albedo_bvr`), never its normal albedo `A_N`, a radiance
-//!   factor, and never a normal-incidence Fresnel reflectance.
+//! - **A solid** ([`solid_bond`]): its row's spherical albedo by bin
+//!   (`CondensedOptics::spherical_albedo_bins`), never its normal albedo `A_N`, a radiance factor,
+//!   and never a normal-incidence Fresnel reflectance.
 //! - **A liquid** ([`liquid_bond`]): per bin the cosine-weighted Fresnel reflectance of a flat
 //!   surface `r_d`(n) ([`diffuse_fresnel_reflectance`]) plus the light its body returns,
 //!   (1 − `r_d`)(1 − `r_i`) R∞ ÷ (1 − `r_i` R∞), with R∞ = 0.33 `b_b` ÷ (a + `b_b`) and `b_b` = b ÷ 2
 //!   ([`SUBSURFACE_REFLECTANCE_COEFFICIENT`]'s sources) and `r_i` the surface's
 //!   internal diffuse reflectance ([`internal_diffuse_reflectance`]), from P14.T49.h's record at
-//!   the temperature its condensate lies at. A record without a or b has no body term: a deep,
-//!   flat, pure liquid ([`BodyTerm`]).
+//!   the temperature its condensate lies at, each bin at its own index. A record without a or b
+//!   has no body term: a deep, flat, pure liquid ([`BodyTerm`]). Its first bin stands for the light
+//!   below 380 nm, as a solid's first bin does for the light below its data; the light above 760 nm
+//!   takes `r_d` at its last bin's index, where the body term vanishes (decision-p14-t49c-split
+//!   §2).
 //! - **The regolith** ([`Regolith`]) on the surface the condensates leave: its lid's row, or while
 //!   the passes do not know the lid a stand-in, on an airless rocky body the Moon's 0.11 exactly
 //!   and a known lid's row at most 0.11 ([`airless_silicate_stand_in`]).
@@ -68,7 +75,7 @@ use crate::planetary::chem::partition::{
 };
 use crate::planetary::derive::atmosphere::{Gas, SurfaceMaterial, SurfaceState};
 use crate::planetary::hooks::surface::regime::climate_condensable;
-use crate::substance::optics::BAND_WAVELENGTHS_NM;
+use crate::substance::optics::{SPECTRAL_BIN_EDGES_NM, SPECTRAL_BINS};
 use crate::substance::{
     Composition, LIQUID_BIN_EDGES_NM, ResolveLiquidError, SubstanceId, by_key, diagram,
     liquid_properties,
@@ -80,16 +87,15 @@ use crate::units::{EarthFluxes, Kelvin, KilogramsPerSquareMetre, MetresPerSecond
 #[cfg(test)]
 mod tests;
 
-/// How many bands the condensed optics carry: B, V and R ([`BAND_WAVELENGTHS_NM`]) until
-/// P14.T49.i adds the infrared.
-pub(crate) const OPTICS_BANDS: usize = BAND_WAVELENGTHS_NM.len();
+/// How many bins the condensed optics carry: P14.T49.i's twelve, contiguous over 0.3–5 µm
+/// ([`SPECTRAL_BIN_EDGES_NM`], `CondensedOptics::spherical_albedo_bins`; decision-p14-t49c-split
+/// §1.3), B, V and R the second, third and fourth.
+pub(crate) const OPTICS_BANDS: usize = SPECTRAL_BINS;
 
-/// The edges of the optics' bands, nm: 380, 495, 595 and 760, contiguous, for T49.c's B, V and R at
-/// 440, 550 and 640 nm. The inner edges are the midpoints between consecutive effective
-/// wavelengths, (440 + 550) ÷ 2 and (550 + 640) ÷ 2, and the outer ones the ends of R08's bake range,
-/// the liquids' bins ([`LIQUID_BIN_EDGES_NM`]). T51.b's own until P14.T49.i states its contiguous
-/// bins (decision-p14-t49c-split §1.3), whose edges replace these as data.
-pub(crate) const VISIBLE_BAND_EDGES_NM: [f64; OPTICS_BANDS + 1] = [380.0, 495.0, 595.0, 760.0];
+/// How many weights a liquid's light takes: the light below its first bin, 380 nm, its
+/// [`LIQUID_BINS`] bins over 380–760 nm ([`LIQUID_BIN_EDGES_NM`]), and the light above its last
+/// bin, 760 nm ([`liquid_shares`]).
+pub(crate) const LIQUID_WEIGHTS: usize = LIQUID_BINS + 2;
 
 /// The second radiation constant c₂ = hc ÷ k, m K: 1.438 776 877 × 10⁻² (CODATA 2018, from the exact
 /// h, c and k of the 2019 SI), the scale of a black body's spectrum in λT.
@@ -100,7 +106,9 @@ const SECOND_RADIATION_CONSTANT_M_K: f64 = 1.438_776_877e-2;
 /// x = c₂ ÷ λT between them, which is ∫ `B_λ` dλ over the band divided by σT⁴ ÷ π, by the sim's
 /// 8-point Gauss–Legendre rule ([`GL8_NODES`], [`GL8_WEIGHTS`]; Abramowitz and Stegun 1964, Table
 /// 25.4), exact for a polynomial of degree 15 in x, which a test holds within 10⁻¹² of a fine
-/// Simpson sum on every band and bin from 2,000 to 40,000 K, summed in the table's order. Zero for a
+/// Simpson sum on every band and bin from 2,000 to 40,000 K, summed in the table's order. A
+/// `longest_nm` of +∞ gives the light beyond `shortest_nm`, x running from 0, where the integrand
+/// goes smoothly to 0 as x² (the optics' last bin from 3,500 nm, [`optics_shares`]). Zero for a
 /// temperature that is not positive and finite.
 #[must_use]
 pub(crate) fn planck_share(temperature: Kelvin, shortest_nm: f64, longest_nm: f64) -> f64 {
@@ -135,9 +143,84 @@ pub(crate) fn planck_shares<const N: usize>(temperature: Kelvin, edges: &[f64]) 
     shares
 }
 
-/// Σ aᵢ wᵢ ÷ Σ wᵢ: the albedos `albedos` by band weighted by the light `weights` in each band,
-/// normalised over the bands given, for any number of bands (the slices are of matching lengths).
-/// Light of no weight in every band weighs the bands equally.
+/// The rest of a black body's light, 0 to 1, beyond the shares `shares` of it: 1 less their sum,
+/// summed in their order, the whole spectrum's share being 1 ((15 ÷ π⁴) ∫₀^∞ x³ ÷ (eˣ − 1) dx = 1),
+/// and at least 0, which rounding below a part in 10¹⁶ could otherwise cross.
+#[must_use]
+fn rest_of_the_light(shares: &[f64]) -> f64 {
+    let rest = 1.0 - shares.iter().fold(0.0, |sum, &share| sum + share);
+    if rest > 0.0 { rest } else { 0.0 }
+}
+
+/// The shares of a black body's light at `temperature` in each of the optics' bins
+/// ([`SPECTRAL_BIN_EDGES_NM`]), of its whole spectrum (main's ruling, 2026-10-19): the first and
+/// last bins stand for the light outside 0.3–5 µm (`substance::optics`'s module documentation), so
+/// the last takes all the light above 3,500 nm ([`planck_share`] to +∞), the bins between their
+/// edges' light ([`planck_share`]), and the first all the light below 390 nm, the rest
+/// ([`rest_of_the_light`]), which the Gauss–Legendre rule over x from 390 nm to +∞ would not give
+/// to the rule's accuracy. They sum to 1. All zero for a temperature that is not positive and
+/// finite.
+#[must_use]
+pub(crate) fn optics_shares(temperature: Kelvin) -> [f64; OPTICS_BANDS] {
+    let t = temperature.value();
+    let mut shares = [0.0; OPTICS_BANDS];
+    if !(t.is_finite() && t > 0.0) {
+        return shares;
+    }
+    let last = OPTICS_BANDS - 1;
+    for (bin, share) in shares.iter_mut().enumerate().skip(1) {
+        let longest = if bin == last {
+            f64::INFINITY
+        } else {
+            SPECTRAL_BIN_EDGES_NM[bin + 1]
+        };
+        *share = planck_share(temperature, SPECTRAL_BIN_EDGES_NM[bin], longest);
+    }
+    shares[0] = rest_of_the_light(&shares[1..]);
+    shares
+}
+
+/// The shares of a black body's light at `temperature` that a liquid's albedo weighs
+/// ([`LIQUID_WEIGHTS`]), of its whole spectrum, from the optics' shares `optics` at the same
+/// temperature ([`optics_shares`]):
+///
+/// - the second to the sixteenth, the light in each of the liquids' bins ([`LIQUID_BIN_EDGES_NM`],
+///   [`planck_shares`]);
+/// - the last, all the light above 760 nm: its share up to the optics' first edge at or beyond it
+///   (780 nm), and the optics' bins from there, the last of them to +∞;
+/// - the first, all the light below 380 nm, the rest ([`rest_of_the_light`]).
+///
+/// They sum to 1. All zero for a temperature that is not positive and finite.
+///
+/// # Panics
+///
+/// Never: the optics' last edge, 5,000 nm, lies beyond the liquids' last, 760 nm.
+#[must_use]
+pub(crate) fn liquid_shares(
+    temperature: Kelvin,
+    optics: &[f64; OPTICS_BANDS],
+) -> [f64; LIQUID_WEIGHTS] {
+    let t = temperature.value();
+    let mut shares = [0.0; LIQUID_WEIGHTS];
+    if !(t.is_finite() && t > 0.0) {
+        return shares;
+    }
+    let bins: [f64; LIQUID_BINS] = planck_shares(temperature, &LIQUID_BIN_EDGES_NM);
+    shares[1..=LIQUID_BINS].copy_from_slice(&bins);
+    let longest = LIQUID_BIN_EDGES_NM[LIQUID_BINS];
+    let join = SPECTRAL_BIN_EDGES_NM
+        .iter()
+        .position(|&edge| edge >= longest)
+        .expect("the optics' last edge, 5,000 nm, lies beyond the liquids' last, 760 nm");
+    let gap = planck_share(temperature, longest, SPECTRAL_BIN_EDGES_NM[join]);
+    shares[LIQUID_BINS + 1] = optics[join..].iter().fold(gap, |sum, &share| sum + share);
+    shares[0] = rest_of_the_light(&shares[1..]);
+    shares
+}
+
+/// Σ aᵢ wᵢ ÷ Σ wᵢ: the albedos `albedos` by bin weighted by the light `weights` in each bin,
+/// normalised over the bins given, for any number of bins (the slices are of matching lengths).
+/// Light of no weight in every bin weighs the bins equally.
 #[must_use]
 pub(crate) fn band_weighted(albedos: &[f64], weights: &[f64]) -> f64 {
     debug_assert_eq!(albedos.len(), weights.len(), "an albedo for every band");
@@ -224,15 +307,16 @@ pub(crate) fn sudarsky_bonds(host: Kelvin) -> [f64; SUDARSKY_CLASSES] {
     bonds
 }
 
-/// The light a body's hosts give it, by band, as the area mix reads it (P14.T51.b): each luminous
-/// host's Planck shares in the optics' bands and the liquids' bins, weighted by its flux at the
-/// body, its gas-envelope albedos by class flux-weighted, the water cloud's albedo calibrated on
-/// Earth ([`water_cloud_albedo`]) and the reference cloud column ([`reference_cloud_column`]),
-/// built once per body before its passes ([`HostShadeSum`]) and never across bodies.
+/// The light a body's hosts give it, by bin, as the area mix reads it (P14.T51.b): each luminous
+/// host's Planck shares in the optics' bins ([`optics_shares`]) and the liquids' weights
+/// ([`liquid_shares`]), each of its whole spectrum, weighted by its flux at the body, its
+/// gas-envelope albedos by class flux-weighted, the water cloud's albedo calibrated on Earth
+/// ([`water_cloud_albedo`]) and the reference cloud column ([`reference_cloud_column`]), built
+/// once per body before its passes ([`HostShadeSum`]) and never across bodies.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct HostShade {
     bands: [f64; OPTICS_BANDS],
-    bins: [f64; LIQUID_BINS],
+    bins: [f64; LIQUID_WEIGHTS],
     giants: [f64; SUDARSKY_CLASSES],
     water_cloud: f64,
     cloud_column: KilogramsPerSquareMetre,
@@ -255,7 +339,7 @@ impl HostShade {
         Self::of_host(Kelvin::new(SOLAR_EFFECTIVE_TEMPERATURE_K))
     }
 
-    /// Its light in each of the optics' bands ([`VISIBLE_BAND_EDGES_NM`]), unnormalised.
+    /// Its light in each of the optics' bins ([`optics_shares`]), unnormalised.
     #[must_use]
     pub(crate) const fn bands(&self) -> &[f64; OPTICS_BANDS] {
         &self.bands
@@ -269,7 +353,7 @@ impl HostShade {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct HostShadeSum {
     bands: [f64; OPTICS_BANDS],
-    bins: [f64; LIQUID_BINS],
+    bins: [f64; LIQUID_WEIGHTS],
     giants: [f64; SUDARSKY_CLASSES],
     flux: f64,
 }
@@ -278,7 +362,7 @@ impl HostShadeSum {
     /// No host yet.
     pub(crate) const EMPTY: Self = Self {
         bands: [0.0; OPTICS_BANDS],
-        bins: [0.0; LIQUID_BINS],
+        bins: [0.0; LIQUID_WEIGHTS],
         giants: [0.0; SUDARSKY_CLASSES],
         flux: 0.0,
     };
@@ -291,8 +375,8 @@ impl HostShadeSum {
         if !(flux.is_finite() && flux > 0.0 && t.is_finite() && t > 0.0) {
             return;
         }
-        let bands: [f64; OPTICS_BANDS] = planck_shares(host, &VISIBLE_BAND_EDGES_NM);
-        let bins: [f64; LIQUID_BINS] = planck_shares(host, &LIQUID_BIN_EDGES_NM);
+        let bands = optics_shares(host);
+        let bins = liquid_shares(host, &bands);
         for (sum, share) in self.bands.iter_mut().zip(bands) {
             *sum += flux * share;
         }
@@ -456,16 +540,25 @@ pub(crate) fn liquid_bin_albedo(n: f64, body: BodyTerm) -> f64 {
     outer + (1.0 - outer) * (1.0 - inner) * deep / (1.0 - inner * deep)
 }
 
-/// A liquid's Bond albedo from its P14.T49.h record `record`, weighted by the light `bins` in each
-/// of its bins: [`liquid_bin_albedo`] bin by bin. P14.T49.i's infrared bins take `r_d` at the last
-/// bin's index, where the body term vanishes (decision-p14-t49c-split §2), by appending their bins'
-/// albedos and light here.
+/// A liquid's Bond albedo from its P14.T49.h record `record`, weighted by the light `bins` of its
+/// host's whole spectrum ([`liquid_shares`]):
+///
+/// - in each of its bins, [`liquid_bin_albedo`] at the bin's own index and body term;
+/// - below 380 nm, its first bin's albedo, which stands for the light below it as a solid's first
+///   bin does for the light below its data (`substance::optics`'s module documentation; the
+///   lane's reading, 2026-10-19), since the record gives no index there;
+/// - above 760 nm, through P14.T49.i's infrared bins, `r_d` at its last bin's index, where the
+///   body term vanishes, a growing with wavelength while n changes little
+///   (decision-p14-t49c-split §2).
 #[must_use]
-pub(crate) fn liquid_bond(record: &LiquidProperties, bins: &[f64; LIQUID_BINS]) -> f64 {
-    let mut albedos = [0.0; LIQUID_BINS];
-    for (k, albedo) in albedos.iter_mut().enumerate() {
+pub(crate) fn liquid_bond(record: &LiquidProperties, bins: &[f64; LIQUID_WEIGHTS]) -> f64 {
+    let mut albedos = [0.0; LIQUID_WEIGHTS];
+    for (k, albedo) in albedos[1..=LIQUID_BINS].iter_mut().enumerate() {
         *albedo = liquid_bin_albedo(record.refractive_index[k], BodyTerm::of(record, k));
     }
+    albedos[0] = albedos[1];
+    albedos[LIQUID_BINS + 1] =
+        diffuse_fresnel_reflectance(record.refractive_index[LIQUID_BINS - 1]);
     band_weighted(&albedos, bins)
 }
 
@@ -561,8 +654,8 @@ fn water() -> SubstanceId {
     Gas::Water.substance()
 }
 
-/// The solid `id`'s Bond albedo under the light `bands` in the optics' bands: its spherical albedo
-/// by band (`CondensedOptics::spherical_albedo_bvr`) weighted by the light ([`band_weighted`]),
+/// The solid `id`'s Bond albedo under the light `bands` in the optics' bins: its spherical albedo
+/// by bin (`CondensedOptics::spherical_albedo_bins`) weighted by the light ([`band_weighted`]),
 /// never its normal albedo `A_N`. A row without condensed optics takes water frost's, labelled
 /// ([`StandIn::FrostForAnUnmodelledSolid`]).
 ///
@@ -573,7 +666,7 @@ fn water() -> SubstanceId {
 pub(crate) fn solid_bond(id: SubstanceId, bands: &[f64; OPTICS_BANDS]) -> Component {
     if let Some(optics) = id.substance().condensed_optics() {
         return Component {
-            bond: band_weighted(&optics.spherical_albedo_bvr(), bands),
+            bond: band_weighted(&optics.spherical_albedo_bins(), bands),
             stand_in: None,
         };
     }
@@ -582,7 +675,7 @@ pub(crate) fn solid_bond(id: SubstanceId, bands: &[f64; OPTICS_BANDS]) -> Compon
         .condensed_optics()
         .expect("water's row has condensed optics (T49.c)");
     Component {
-        bond: band_weighted(&frost.spherical_albedo_bvr(), bands),
+        bond: band_weighted(&frost.spherical_albedo_bins(), bands),
         stand_in: Some(StandIn::FrostForAnUnmodelledSolid),
     }
 }
@@ -706,16 +799,17 @@ fn unrecorded_liquid_bond() -> f64 {
     diffuse_fresnel_reflectance(record.refractive_index_at(STAND_IN_INDEX_WAVELENGTH_NM))
 }
 
-/// The liquid entry `entry`'s Bond albedo under the light `bins`, from its P14.T49.h record at the
-/// temperature its condensate lies at in `partition` ([`liquid_record`]): at a temperature no bound
-/// of its range holds, its record at its first melt ([`StandIn::RecordAtItsFirstMelt`]); a
-/// solution without a record takes its solvent's ([`StandIn::SolventForASolution`]), and a row
-/// without one `r_d` at liquid nitrogen's index ([`StandIn::IndexForAnUnrecordedLiquid`]).
+/// The liquid entry `entry`'s Bond albedo under the light `bins` ([`liquid_shares`]), from its
+/// P14.T49.h record at the temperature its condensate lies at in `partition` ([`liquid_record`]):
+/// at a temperature no bound of its range holds, its record at its first melt
+/// ([`StandIn::RecordAtItsFirstMelt`]); a solution without a record takes its solvent's
+/// ([`StandIn::SolventForASolution`]), and a row without one `r_d` at liquid nitrogen's index
+/// ([`StandIn::IndexForAnUnrecordedLiquid`]).
 #[must_use]
 pub(crate) fn liquid_entry_bond(
     entry: &CondensateEntry,
     partition: &Partition,
-    bins: &[f64; LIQUID_BINS],
+    bins: &[f64; LIQUID_WEIGHTS],
 ) -> Component {
     let liquid = entry.substance();
     let condensate = partition
@@ -786,8 +880,8 @@ pub(crate) enum RegolithWeathering {
     /// icy regolith, or one under air, its row as it is ([`Regolith::bond`]). P14.T54.b deletes this
     /// arm when it weathers the area mix with R10.T1.d's law.
     StandIn,
-    /// Weathered: its spherical albedos by band, `spherical_bvr`, which P14.T54.b computes from the
-    /// row by R10.T1.d's law at P14.T51.d's maturity and rate, and which weigh by the host's bands
+    /// Weathered: its spherical albedos by bin, `spherical_bins`, which P14.T54.b computes from the
+    /// row by R10.T1.d's law at P14.T51.d's maturity and rate, and which weigh by the host's bins
     /// as any solid's do ([`Regolith::weathered`]). T51.d's tests reach the area mix through it
     /// with no wiring.
     #[cfg_attr(
@@ -798,8 +892,8 @@ pub(crate) enum RegolithWeathering {
         )
     )]
     Weathered {
-        /// The weathered spherical albedos in the optics' bands.
-        spherical_bvr: [f64; OPTICS_BANDS],
+        /// The weathered spherical albedos in the optics' bins ([`OPTICS_BANDS`]).
+        spherical_bins: [f64; OPTICS_BANDS],
     },
 }
 
@@ -851,7 +945,7 @@ impl Regolith {
         }
     }
 
-    /// A weathered regolith on a body of `material`, of spherical albedos by band `spherical_bvr`
+    /// A weathered regolith on a body of `material`, of spherical albedos by bin `spherical_bins`
     /// ([`RegolithWeathering::Weathered`]): P14.T54.b's, which computes them from the lid's row,
     /// so that it holds no row of its own.
     #[cfg_attr(
@@ -864,12 +958,12 @@ impl Regolith {
     #[must_use]
     pub(crate) const fn weathered(
         material: SurfaceMaterial,
-        spherical_bvr: [f64; OPTICS_BANDS],
+        spherical_bins: [f64; OPTICS_BANDS],
     ) -> Self {
         Self {
             row: None,
             material,
-            weathering: RegolithWeathering::Weathered { spherical_bvr },
+            weathering: RegolithWeathering::Weathered { spherical_bins },
         }
     }
 
@@ -891,7 +985,7 @@ impl Regolith {
 
     /// Its Bond albedo on a body in the state `state` under the light `bands`, by its weathering:
     ///
-    /// - weathered, its band albedos weighted by the light;
+    /// - weathered, its albedos by bin weighted by the light;
     /// - under the stand-in, on an airless rocky body the smaller of its known lid's row's albedo
     ///   and the Moon's 0.11 ([`airless_silicate_stand_in`]), or the Moon's 0.11 exactly where its
     ///   lid is not known, so that the stand-in neither brightens nor darkens a body whose lid the
@@ -900,9 +994,9 @@ impl Regolith {
     ///   each labelled.
     #[must_use]
     pub(crate) fn bond(&self, state: SurfaceState, bands: &[f64; OPTICS_BANDS]) -> Component {
-        if let RegolithWeathering::Weathered { spherical_bvr } = self.weathering {
+        if let RegolithWeathering::Weathered { spherical_bins } = self.weathering {
             return Component {
-                bond: band_weighted(&spherical_bvr, bands),
+                bond: band_weighted(&spherical_bins, bands),
                 stand_in: None,
             };
         }
@@ -1119,17 +1213,15 @@ pub(crate) fn reference_earth_clear_sky() -> f64 {
         + rest * land.bond
 }
 
-/// A 5,772 K Planck curve's light in the optics' bands and the liquids' bins.
+/// A 5,772 K Planck curve's light in the optics' bins and the liquids' weights.
 #[must_use]
-fn sun_light() -> ([f64; OPTICS_BANDS], [f64; LIQUID_BINS]) {
-    let sun = Kelvin::new(SOLAR_EFFECTIVE_TEMPERATURE_K);
-    (
-        planck_shares(sun, &VISIBLE_BAND_EDGES_NM),
-        planck_shares(sun, &LIQUID_BIN_EDGES_NM),
-    )
+fn sun_light() -> ([f64; OPTICS_BANDS], [f64; LIQUID_WEIGHTS]) {
+    let bands = optics_shares(Kelvin::new(SOLAR_EFFECTIVE_TEMPERATURE_K));
+    let bins = liquid_shares(Kelvin::new(SOLAR_EFFECTIVE_TEMPERATURE_K), &bands);
+    (bands, bins)
 }
 
-/// A Sun's light in the optics' bands, at which the photometry's references are taken
+/// A Sun's light in the optics' bins, at which the photometry's references are taken
 /// ([`HostShade::sun`]).
 #[must_use]
 pub(crate) fn sun_bands() -> [f64; OPTICS_BANDS] {

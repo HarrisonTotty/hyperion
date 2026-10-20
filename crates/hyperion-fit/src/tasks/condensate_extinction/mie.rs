@@ -36,13 +36,15 @@ use std::ops::{Add, Div, Mul, Sub};
 
 use hyperion_sim::math;
 
-/// The largest size parameter the sphere accepts: the top of the range over which Wiscombe fitted
-/// his `N_stop` (NCAR/TN-140+STR, (50), 0.02 ≤ x ≤ 20,000; [`term_count`]), the client's
-/// `MIE_MAX_SIZE_PARAMETER`.
+/// The largest size parameter the sphere accepts: the top of the range Wiscombe states for his
+/// `N_stop` criterion, 0.02 ≤ x ≤ 20,000 (Appl. Opt. 19, 1505–1509, 1980, p. 1508; NCAR/TN-140+STR,
+/// (50); [`term_count`]), the client's `MIE_MAX_SIZE_PARAMETER`.
 pub const MAX_SIZE_PARAMETER: f64 = 20_000.0;
 
 /// The smallest size parameter the sphere accepts, far below any aerosol, the client's
-/// `MIE_MIN_SIZE_PARAMETER`: x = 10⁻⁶ is a radius of 9 × 10⁻⁵ nm at 550 nm.
+/// `MIE_MIN_SIZE_PARAMETER`: x = 10⁻⁶ is a radius of 9 × 10⁻⁵ nm at 550 nm. Below x = 0.02, the
+/// bottom of the criterion's range, the term count is extrapolated ([`term_count`]), and the
+/// Rayleigh test holds the series there.
 ///
 /// It keeps the arithmetic far from underflow, which tens of orders of magnitude lower empties
 /// `Q_sca` (|a₁|² ∝ x⁶), leaves g as 0 ÷ 0 and overflows the continued fraction's 1 ÷ |z|².
@@ -179,7 +181,9 @@ pub enum ComputeMieError {
     Cosine(f64),
     /// Lentz's continued fraction did not converge within its cap, a broken invariant: it
     /// converges for every finite z ≠ 0 whose 1 ÷ |z|² is representable.
-    #[error("Lentz's continued fraction for D_{order} did not converge in {cap} iterations")]
+    #[error(
+        "the continued fraction for D_{order} (Lentz 1976) did not converge in {cap} iterations"
+    )]
     Unconverged {
         /// The order whose logarithmic derivative was sought.
         order: usize,
@@ -266,10 +270,18 @@ impl Div for Complex {
 /// The number of terms the Mie series is summed to, `N_stop` = ⌊x + 4.05 x^(1/3) + 2⌋.
 ///
 /// Wiscombe 1980's criterion, (50) of his report: x + 4 x^(1/3) + 1 to x = 8, x + 4.05 x^(1/3) + 2
-/// to x = 4,200, x + 4 x^(1/3) + 2 to 20,000. He fitted it to the first n at which |aₙ|² + |bₙ|² <
-/// 5 × 10⁻¹⁴ (Dave's criterion, his (49), tightened in his §6), over 0.1 ≤ x ≤ 20,000, 1.05 ≤ Re m
-/// ≤ 2.50 and 0 ≤ Im m ≤ 1; his own test cases go beyond that range of index (0.75, 10 − 10i). Its
-/// middle branch is used throughout, as the client's `mieTermCount` does, which is never fewer
+/// to x = 4,200, x + 4 x^(1/3) + 2 to 20,000, stated for 0.02 ≤ x ≤ 20,000 (Appl. Opt. 19, p.
+/// 1508). Two ranges are his, and they differ:
+///
+/// - **the criterion's**, 0.02 ≤ x ≤ 20,000, which the sphere's bounds follow at the top; below x =
+///   0.02 the count is extrapolated to [`MIN_SIZE_PARAMETER`], and the Rayleigh test
+///   (`mie_meets_the_rayleigh_limit`, x = 10⁻³ and 10⁻⁵) holds the series there;
+/// - **the data's** he fitted it to, the first n at which |aₙ|² + |bₙ|² < 5 × 10⁻¹⁴ (Dave's
+///   criterion, his (49), tightened in his §6), over 0.1 ≤ x ≤ 20,000, 1.05 ≤ Re m ≤ 2.50 and 0 ≤
+///   Im m ≤ 1. Chromium's index at 550 nm, 3.18 + 3.33i, lies outside it, as do his own test
+///   cases at 0.75 and 10 − 10i, of which MIEV0's cases 17–19 at 10 − 10i pass here to 10⁻⁶.
+///
+/// Its middle branch is used throughout, as the client's `mieTermCount` does, which is never fewer
 /// terms than the other two and so never less accurate. At least two terms are summed, so a small
 /// sphere keeps its first quadrupole and magnetic-dipole terms.
 ///
@@ -1233,10 +1245,10 @@ mod tests {
     }
 
     /// The five cases the client's `mieSphere` writes into `mie_cases.json`
-    /// (`apps/hyperion/src/renderer/src/test/mieSharedCases.test.ts`): a Rayleigh sphere, the 75
-    /// wt% acid's first resonances, a dust, a soot and a large lossless sphere of high index. This
-    /// Mie gives their efficiencies, asymmetry and amplitudes at 0°, 90° and 180° to 10⁻⁶ of each
-    /// (absolute for g, as against Wiscombe's answers).
+    /// (`apps/hyperion/src/renderer/src/view/atmosphere/mieSharedCases.test.ts`): a Rayleigh
+    /// sphere, the 75 wt% acid's first resonances, a dust, a soot and a large lossless sphere of
+    /// high index. This Mie gives their efficiencies, asymmetry and amplitudes at 0°, 90° and 180°
+    /// to 10⁻⁶ of each (absolute for g, as against Wiscombe's answers).
     #[test]
     fn mie_shares_five_cases_with_the_client() {
         let fixture: serde_json::Value =

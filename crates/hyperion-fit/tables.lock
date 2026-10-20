@@ -113,84 +113,84 @@ name = "condensate_extinction"
 path = "condensate_extinction.rs"
 task = "condensate_extinction"
 revision = 0
-inputs_sha256 = "6656fedc52c6e007fc90265e28f2a242ffd5e6f7563d9aa68e72fbd48478fd35"
-body_sha256 = "5867c7d66ba897a5318de4b6eaccfee0f375439e6725d37714f3c860efd44521"
-fingerprint = [12.0, 14.0]
+inputs_sha256 = "b0d61ec7716c538eb6449f1d682ea8225820926c554166349f13ff07def90a5c"
+body_sha256 = "c68ddec8300237f3e8463c7fec25bced63892cf1cc3eee4df1c5c8216d010bac"
+fingerprint = [12.0, 14.0, 550.0]
 since_generator_version = 22
 provisional = false
-acceptance = "7 index files at 550 nm, found by wavelength on each file's grid; the half-step check: `Q̄_ext` within 4.12e-4 (aluminium-oxide.json) and ω within 1.97e-4 (basalt.json) of the direct values, against 1e-3; 1 − ω within 5.77e-4"
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 1, by spheres 2, by the sphere fallback 4); the half-step check: `Q̄_ext` within 4.12e-4 (aluminium-oxide.json) and ω within 2.17e-4 (basalt.json) of the direct values, against 1e-3; 1 − ω within 5.01e-4"
 
 [[table]]
 name = "condensate_extinction_2"
 path = "condensate_extinction_2.rs"
 task = "condensate_extinction_2"
 revision = 0
-inputs_sha256 = "fc8c1fe7460f724a70c627d49bf707d7dbe7706c53e27e3d241bd4918dc15f24"
-body_sha256 = "4baaf55bf193d08dc378ec336c6dc26fdd669378bbccab8dd48bdff229ed19a6"
-fingerprint = [12.0, 14.0]
+inputs_sha256 = "71fbe5f5883adb35c765c7680939a3096debe417146e0a12b3f32a72ef0882f5"
+body_sha256 = "8014c65ec8affb3c846dc9225b09702fbe0e1e2debf95676f5cf4c3d430c5948"
+fingerprint = [12.0, 14.0, 550.0]
 since_generator_version = 22
 provisional = false
-acceptance = "7 index files at 550 nm, found by wavelength on each file's grid; the half-step check: `Q̄_ext` within 5.09e-4 (calcium-titanate.json) and ω within 5.83e-4 (chromium.json) of the direct values, against 1e-3; 1 − ω within 1.66e-3"
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 3, by spheres 2, by the sphere fallback 2); the half-step check: `Q̄_ext` within 3.86e-4 (carbon-dioxide-ice.json) and ω within 5.19e-4 (chromium.json) of the direct values, against 1e-3; 1 − ω within 1.66e-3"
 
 [[table]]
 name = "condensate_extinction_3"
 path = "condensate_extinction_3.rs"
 task = "condensate_extinction_3"
 revision = 0
-inputs_sha256 = "248e9a178d80f9df253b5487601638dcd7c261abd36423fe42025615d17beb7c"
-body_sha256 = "86765fcaad8f24e9eed61a250382091d0a8ce6a352ede35e0830acb46723b367"
-fingerprint = [12.0, 14.0]
+inputs_sha256 = "2f7250d606f58710daee42f038aeddeb48aa31d4eeffca92459fc54a69376314"
+body_sha256 = "3a9d2de7bd6e55ea3d65a8fcfc8176c9b132077deb1b0d09feabd67a35b8e65f"
+fingerprint = [12.0, 14.0, 550.0]
 since_generator_version = 22
 provisional = false
-acceptance = "7 index files at 550 nm, found by wavelength on each file's grid; the half-step check: `Q̄_ext` within 4.09e-4 (enstatite-glass.json) and ω within 6.83e-4 (graphite.json) of the direct values, against 1e-3; 1 − ω within 1.23e-3"
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 3, by spheres 3, by the sphere fallback 1); the half-step check: `Q̄_ext` within 3.98e-4 (hydrogen-sulphide-ice.json) and ω within 5.32e-4 (graphite.json) of the direct values, against 1e-3; 1 − ω within 1.46e-3"
 
 [[table]]
 name = "condensate_extinction_4"
 path = "condensate_extinction_4.rs"
 task = "condensate_extinction_4"
 revision = 0
-inputs_sha256 = "d68883d8825dc60e8cf7a2e189ca6d2b5d4b23655b3277838c0d05fba06dc714"
-body_sha256 = "95b87eb09f644630dfb747550fa29908eaca671baeb0221e022d67d1389dce64"
-fingerprint = [12.0, 14.0]
+inputs_sha256 = "a4aaa372ed570a533f037fbadb48070f9b045281e2782aacff5766765d6e6ff1"
+body_sha256 = "c555610e346b92e00f7df477ed8d4008a6f40b79b9584a18600869d8bea54604"
+fingerprint = [12.0, 14.0, 550.0]
 since_generator_version = 22
 provisional = false
-acceptance = "7 index files at 550 nm, found by wavelength on each file's grid; the half-step check: `Q̄_ext` within 8.10e-4 (manganese-sulphide.json) and ω within 7.15e-4 (iron.json) of the direct values, against 1e-3; 1 − ω within 2.47e-3"
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 5, by spheres 1, by the sphere fallback 1); the half-step check: `Q̄_ext` within 5.19e-4 (manganese-sulphide.json) and ω within 6.59e-4 (iron-sulphide.json) of the direct values, against 1e-3; 1 − ω within 1.67e-3"
 
 [[table]]
 name = "condensate_extinction_5"
 path = "condensate_extinction_5.rs"
 task = "condensate_extinction_5"
 revision = 0
-inputs_sha256 = "241c92b8e3dbb2696e12440d3fd0ace580750107c2bbd125e0874c40f5ffb3a0"
-body_sha256 = "1237f87d383e7b68da22b98f20df226298f4a17837402846411b3f636b5346ed"
-fingerprint = [12.0, 14.0]
+inputs_sha256 = "dc3fd47c748b9fb0d4fd193a9e08a052ca7a5de755464afecb7646f4a1490e11"
+body_sha256 = "c6dadcf79029c0653971b80f1e1d660441be43661163ee4eafeeeed750317eda"
+fingerprint = [12.0, 14.0, 550.0]
 since_generator_version = 22
 provisional = false
-acceptance = "7 index files at 550 nm, found by wavelength on each file's grid; the half-step check: `Q̄_ext` within 3.82e-4 (potassium-chloride.json) and ω within 7.02e-5 (oxygen-liquid.json) of the direct values, against 1e-3; 1 − ω within 1.45e-3"
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 1, by spheres 4, by the sphere fallback 2); the half-step check: `Q̄_ext` within 3.64e-4 (methane-liquid.json) and ω within 7.02e-5 (oxygen-liquid.json) of the direct values, against 1e-3; 1 − ω within 1.45e-3"
 
 [[table]]
 name = "condensate_extinction_6"
 path = "condensate_extinction_6.rs"
 task = "condensate_extinction_6"
 revision = 0
-inputs_sha256 = "a113702fbef64fb19a472e63aad219e30de10af0f6bcf02a7dc574d0799e8ea3"
-body_sha256 = "a409d0461d5a55786384555b7a1873224eda8fc586ed50689a0d6f743d19c65f"
-fingerprint = [12.0, 14.0]
+inputs_sha256 = "1eaa3e84e9122327ecd10cf4c32efbf705731e956ab5906d07c18463c226b4fd"
+body_sha256 = "eb2c7d4e7b35c08718d57221f2de48f7c43988a9919cb9c8df266eb5dd9e1fd0"
+fingerprint = [12.0, 14.0, 550.0]
 since_generator_version = 22
 provisional = false
-acceptance = "7 index files at 550 nm, found by wavelength on each file's grid; the half-step check: `Q̄_ext` within 4.71e-4 (sulphur.json) and ω within 6.22e-4 (soot.json) of the direct values, against 1e-3; 1 − ω within 1.30e-3"
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 3, by spheres 3, by the sphere fallback 1); the half-step check: `Q̄_ext` within 4.71e-4 (sulphur.json) and ω within 6.22e-4 (soot.json) of the direct values, against 1e-3; 1 − ω within 1.30e-3"
 
 [[table]]
 name = "condensate_extinction_7"
 path = "condensate_extinction_7.rs"
 task = "condensate_extinction_7"
 revision = 0
-inputs_sha256 = "2e7180c2de1ce9a7e6612ba7276929d0aae3dc0a548d9338d2f25c5687f97bd5"
-body_sha256 = "a101dbb7db0fc2529631b223eab358c6681535027998cf9e2eb7154eb6e05a6e"
-fingerprint = [12.0, 14.0]
+inputs_sha256 = "526f34c7b48564f363c391b534117f77925020739b105c4f03a645f092717dcc"
+body_sha256 = "3a9f482846b5188bc33a930af6fdecb3cb64c4c1404def9e66b123a12e60a335"
+fingerprint = [12.0, 14.0, 550.0]
 since_generator_version = 22
 provisional = false
-acceptance = "7 index files at 550 nm, found by wavelength on each file's grid; the half-step check: `Q̄_ext` within 5.42e-4 (titanium-dioxide.json) and ω within 7.16e-4 (tholin.json) of the direct values, against 1e-3; 1 − ω within 3.02e-3"
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 1, by spheres 4, by the sphere fallback 2); the half-step check: `Q̄_ext` within 5.42e-4 (titanium-dioxide.json) and ω within 7.16e-4 (tholin.json) of the direct values, against 1e-3; 1 − ω within 8.23e-2"
 
 [[table]]
 name = "displaced_forms"
@@ -519,12 +519,12 @@ name = "thermo_equilibrium"
 path = "thermo.rs"
 task = "thermo_equilibrium"
 revision = 0
-inputs_sha256 = "97371be39c99e02942a2d52ac9344045a5ed745bc0ff3e43ea7ee08a2cd77b96"
-body_sha256 = "f6f9d36064510fdd8305b11ab1a7458ad3a1470181c81405274fe1b04bac8260"
-fingerprint = [0.0, 0.0, 2.0, 1.0, 0.0, 1.0, 2.0, 0.0, 2.0, 1.0, 3.0, 0.0, 1.0, 4.0, 4.0, 0.0, 1.0, 3.0, 5.0, 0.0, 2.0, 6.0, 0.0, 2.0, 7.0, 0.0, 1.0, 2.0, 8.0, 0.0, 1.0, 9.0, 0.0, 1.0, 10.0, 0.0, 1.0, 11.0, 0.0, 1.0, 12.0, 0.0, 2.0, 1.0, 13.0, 0.0, 1.0, 1.0, 14.0, 0.0, 1.0, 2.0, 15.0, 0.0, 2.0, 1.0, 16.0, 0.0, 3.0, 17.0, 0.0, 1.0, 1.0, 1.0, 18.0, 0.0, 2.0, 2.0, 19.0, 0.0, 2.0, 4.0, 20.0, 0.0, 2.0, 6.0, 21.0, 0.0, 1.0, 3.0, 22.0, 0.0, 1.0, 4.0, 1.0, 23.0, 0.0, 1.0, 24.0, 0.0, 1.0, 25.0, -1.0, 26.0, -1.0, 1.0, 27.0, 0.0, 1.0, 28.0, 0.0, 1.0, 29.0, 0.0, 1.0, 30.0, 0.0, 1.0, 31.0, 0.0, 1.0, 32.0, 0.0, 1.0, 33.0, 0.0, 1.0, 34.0, 0.0, 1.0, 1.0, 35.0, 0.0, 1.0, 1.0, 36.0, 0.0, 1.0, 1.0, 37.0, 0.0, 1.0, 1.0, 38.0, 0.0, 1.0, 39.0, 0.0, 1.0, 40.0, 0.0, 1.0, 41.0, 0.0, 1.0, 42.0, 0.0, 1.0, 43.0, 1.0, 1.0, 44.0, 1.0, 1.0, 45.0, 1.0, 1.0, 46.0, 1.0, 1.0, 47.0, 1.0, 1.0, 48.0, 1.0, 1.0, 49.0, 1.0, 1.0, 50.0, 1.0, 1.0, 51.0, 1.0, 1.0, 52.0, 1.0, 1.0, 53.0, 1.0, 1.0, 54.0, 1.0, 1.0, 55.0, 1.0, 1.0, 56.0, 0.0, 1.0, 1.0, 65.0, 0.0, 1.0]
+inputs_sha256 = "c6d8069d8d0025a207e9a04d3f592063ff9e021faeb1e8678dc0d8ebc7660758"
+body_sha256 = "a7c6ec3f7e15f477ac8b7b8ef143128a6d0ae19d17e7bac012b7910c237901cd"
+fingerprint = [0.0, 0.0, 0.0, 2.0, 1.0, 0.0, 1.0, 1.0, 2.0, 0.0, 0.0, 2.0, 4.0, 1.0, 3.0, 0.0, 2.0, 1.0, 0.0, 4.0, 4.0, 0.0, 3.0, 1.0, 0.0, 3.0, 5.0, 0.0, 3.0, 2.0, 6.0, 0.0, 4.0, 2.0, 7.0, 0.0, 2.0, 1.0, 4.0, 2.0, 8.0, 0.0, 13.0, 1.0, 9.0, 0.0, 5.0, 1.0, 10.0, 0.0, 23.0, 1.0, 11.0, 0.0, 24.0, 1.0, 12.0, 0.0, 3.0, 2.0, 4.0, 1.0, 13.0, 0.0, 2.0, 1.0, 4.0, 1.0, 14.0, 0.0, 11.0, 1.0, 4.0, 2.0, 15.0, 0.0, 0.0, 2.0, 11.0, 1.0, 16.0, 0.0, 4.0, 3.0, 17.0, 0.0, 0.0, 1.0, 2.0, 1.0, 3.0, 1.0, 18.0, 0.0, 2.0, 2.0, 0.0, 2.0, 19.0, 0.0, 2.0, 2.0, 0.0, 4.0, 20.0, 0.0, 2.0, 2.0, 0.0, 6.0, 21.0, 0.0, 10.0, 1.0, 0.0, 3.0, 22.0, 0.0, 2.0, 1.0, 0.0, 4.0, 4.0, 1.0, 23.0, 0.0, 0.0, 1.0, 24.0, 0.0, 4.0, 1.0, 25.0, -1.0, 26.0, -1.0, 0.0, 1.0, 27.0, 0.0, 6.0, 1.0, 28.0, 0.0, 14.0, 1.0, 29.0, 0.0, 20.0, 1.0, 30.0, 0.0, 7.0, 1.0, 31.0, 0.0, 9.0, 1.0, 32.0, 0.0, 15.0, 1.0, 33.0, 0.0, 16.0, 1.0, 34.0, 0.0, 9.0, 1.0, 4.0, 1.0, 35.0, 0.0, 16.0, 1.0, 4.0, 1.0, 36.0, 0.0, 17.0, 1.0, 4.0, 1.0, 37.0, 0.0, 20.0, 1.0, 0.0, 1.0, 38.0, 0.0, 8.0, 1.0, 39.0, 0.0, 17.0, 1.0, 40.0, 0.0, 19.0, 1.0, 41.0, 0.0, 21.0, 1.0, 42.0, 0.0, 22.0, 1.0, 43.0, 1.0, 6.0, 1.0, 44.0, 1.0, 7.0, 1.0, 45.0, 1.0, 8.0, 1.0, 46.0, 1.0, 9.0, 1.0, 47.0, 1.0, 14.0, 1.0, 48.0, 1.0, 15.0, 1.0, 49.0, 1.0, 16.0, 1.0, 50.0, 1.0, 17.0, 1.0, 51.0, 1.0, 18.0, 1.0, 52.0, 1.0, 19.0, 1.0, 53.0, 1.0, 20.0, 1.0, 54.0, 1.0, 21.0, 1.0, 55.0, 1.0, 22.0, 1.0, 56.0, 0.0, 0.0, 1.0, 12.0, 1.0, 65.0, 0.0, 18.0, 1.0]
 since_generator_version = 22
 provisional = false
-acceptance = "57 of the registry's 58 gas rows (`FeH` not modelled), 84 items of 194 intervals re-emitted from the records to the bit; dropped as empty: `Si(cr)` 300–298.15 K, `Ca(a)` 300–298.15 K; the reference states' switches to their gas against NIST-JANAF's: Na 1170.43 K (-0.10), Mg 1364.15 K (-1.96), Al 2797.65 K (+6.83), Si 3509.40 K (+4.79), P 1180.96 K (+0.96), S 882.42 K (+0.31), K 1039.41 K (-0.13), Ca 1778.06 K (+4.40), Ti 3634.62 K (+3.66), V 3704.91 K (+14.83), Cr 2951.82 K (-0.26), Mn 2325.03 K (-9.49), Fe 3138.45 K (+5.11), Ni 3159.60 K (+3.01), Zn 1178.83 K (-1.35), within 14.8 K; `MgSO4`'s decomposition at 1 bar 1375.44 K, which replaces the row's 1,272 K reduced from JANAF, and graphite's sublimation at 1 bar 3973.32 K, which replaces its 4,080 K"
+acceptance = "57 of the registry's 58 gas rows (`FeH` not modelled), 84 items of 194 intervals re-emitted from the records to the bit; dropped as empty: `Si(cr)` 300–298.15 K, `Ca(a)` 300–298.15 K; the reference states' switches to their gas against NIST-JANAF's: Na 1170.43 K (-0.10), Mg 1364.15 K (-1.96), Al 2797.65 K (+6.83), Si 3509.40 K (+4.79), P 1180.96 K (+0.96), S 882.42 K (+0.31), K 1039.41 K (-0.13), Ca 1778.06 K (+4.40), Ti 3634.62 K (+3.66), V 3704.91 K (+14.83), Cr 2951.82 K (-0.26), Mn 2325.03 K (-9.49), Fe 3138.45 K (+5.11), Ni 3159.60 K (+3.01), Zn 1178.83 K (-1.35), within 14.8 K; `MgSO4`'s decomposition at 1 bar 1375.44 K; `MgSO4`'s row 1375.00 K (-0.44); graphite's sublimation at 1 bar 3973.32 K; `graphite`'s row 3973.00 K (-0.32); `soot`'s row 3973.00 K (-0.32)"
 
 [[table]]
 name = "type_ia_delay"

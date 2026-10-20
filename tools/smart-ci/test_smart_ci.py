@@ -183,6 +183,7 @@ FILES: Dict[str, str] = {
     "apps/hyperion/src/main/results.test.ts": 'const dir = join(__dirname, "../../../../docs/measurements/descent-spike");',
     "apps/hyperion/src/smoke/main.ts": "",
     "apps/hyperion/src/renderer/src/view/atmosphere/materials/water.json": "",
+    "apps/hyperion/src/renderer/src/view/atmosphere/materials/phase/mars-dust.json": "",
     "apps/hyperion/src/tools/atmosphereData.ts": "",
     "apps/hyperion/src/tools/atmosphereData.test.ts": 'import { read } from "./atmosphereData";\n'
     'const csv = resolve(here, "../../../../crates/hyperion-fit/data/cie_cmf/CIE_xyz_1931_2deg.csv");',
@@ -475,8 +476,24 @@ class TheRules(unittest.TestCase):
         self.assertIn("_fit-check-built", calls(p))
         self.assertNotIn("_wasip1-build", calls(p))
         # A file beside them that is not a material file reads nothing of the fitting crate.
-        self.assertFalse(re.search(smart_ci.RUST_READERS[-1][0],
-                                   "apps/hyperion/src/renderer/src/view/atmosphere/materials/materials.ts"))
+        for regex, reader, _, _ in smart_ci.RUST_READERS:
+            if reader == FIT:
+                self.assertFalse(re.search(
+                    regex, "apps/hyperion/src/renderer/src/view/atmosphere/materials/materials.ts"))
+
+    def test_r08s_phase_tables_run_the_fitting_crates_tests_and_check(self) -> None:
+        # `condensate_extinction` reads them at run time and hashes the fields it reads (P14.T49.e,
+        # science-r08-nonspherical §6.4): the fitting crate's native suite, with its rerender test,
+        # and the staleness check its build makes.
+        p = plan("apps/hyperion/src/renderer/src/view/atmosphere/materials/phase/mars-dust.json")
+        self.assertIn(FIT, packages(p, "_nextest-run"))
+        self.assertIn("_fit-check-built", calls(p))
+        self.assertNotIn("_wasip1-build", calls(p))
+        # A file deeper down, or not a table, reads nothing of the fitting crate.
+        for path in ("apps/hyperion/src/renderer/src/view/atmosphere/materials/phase/old/x.json",
+                     "apps/hyperion/src/renderer/src/view/atmosphere/materials/phase/README.md"):
+            self.assertFalse(any(re.search(regex, path) for regex, reader, _, _ in smart_ci.RUST_READERS
+                                 if reader == FIT), path)
 
     def test_the_surface_crates_tables_run_the_fitting_crates_tests_and_check(self) -> None:
         p = plan("crates/hyperion-surface/src/tables/bowl_permanent_shadow.rs")

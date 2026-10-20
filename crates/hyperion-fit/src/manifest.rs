@@ -2,14 +2,15 @@
 //! notes 6, 7, 8 and 11).
 //!
 //! A task's *manifest* is a TOML file in `crates/hyperion-fit/manifests/`: its seeds, sample sizes,
-//! grids and parameter ranges under `[params]`, the datasets it reads under `datasets`, and the
-//! rendering plan R08 material files it reads under `materials` ([`crate::materials`]). A slow
-//! task also has `<name>.smoke.toml`, a reduced run of a few seconds that the crate's tests execute.
+//! grids and parameter ranges under `[params]`, the datasets it reads under `datasets`, the
+//! rendering plan R08 material files it reads under `materials` and R08's phase tables under
+//! `phase` ([`crate::materials`]). A slow task also has `<name>.smoke.toml`, a reduced run of a few
+//! seconds that the crate's tests execute.
 //!
 //! The *inputs hash* is the SHA-256 of the task's name, its revision, the manifest file's bytes,
-//! the recorded hash of each dataset the manifest names and the data hash of each material file it
-//! names, in that order ([`InputsHash::compute`]). It does not cover source code: a change to a
-//! task's algorithm bumps its revision.
+//! the recorded hash of each dataset the manifest names, the data hash of each material file it
+//! names and then that of each phase table, in that order ([`InputsHash::compute`]). It does not
+//! cover source code: a change to a task's algorithm bumps its revision.
 //!
 //! The *lock file*, `crates/hyperion-fit/tables.lock`, records for every table its revision,
 //! inputs hash, body hash, fingerprint values, `since-generator-version`, whether it is
@@ -26,7 +27,9 @@ use sha2::{Digest, Sha256};
 
 use crate::data::{Dataset, LoadDatasetError, Provenance, load_dataset};
 use crate::emit::{Workspace, hex, sha256_hex};
-use crate::materials::{MATERIALS_FROM_CRATE, MaterialFile, ReadMaterialError};
+use crate::materials::{
+    MATERIALS_FROM_CRATE, MaterialFile, PHASE_FROM_MATERIALS, PhaseTableFile, ReadMaterialError,
+};
 
 /// A task's manifest, as loaded from its TOML file.
 #[derive(Debug, Clone, PartialEq)]
@@ -36,6 +39,7 @@ pub struct Manifest {
     task: String,
     datasets: Vec<String>,
     materials: Vec<String>,
+    phase: Vec<String>,
     params: toml::Table,
     data_root: PathBuf,
     data_dirs: BTreeMap<String, PathBuf>,
@@ -51,6 +55,8 @@ struct ManifestFile {
     datasets: Vec<String>,
     #[serde(default)]
     materials: Vec<String>,
+    #[serde(default)]
+    phase: Vec<String>,
     #[serde(default)]
     params: toml::Table,
 }
@@ -88,6 +94,7 @@ impl Manifest {
             task: file.task,
             datasets: file.datasets,
             materials: file.materials,
+            phase: file.phase,
             params: file.params,
             data_root: crate_dir.map_or_else(|| PathBuf::from("data"), |dir| dir.join("data")),
             data_dirs: BTreeMap::new(),
@@ -130,6 +137,13 @@ impl Manifest {
         &self.materials
     }
 
+    /// R08's phase tables the task reads, by file name in `materials/phase/`, in the order their
+    /// data hashes enter the inputs hash, after the material files'.
+    #[must_use]
+    pub fn phase(&self) -> &[String] {
+        &self.phase
+    }
+
     /// The directory the material files are read from: R08's `materials/`, found from the
     /// manifest's crate directory ([`MATERIALS_FROM_CRATE`]), unless
     /// [`with_materials_dir`](Self::with_materials_dir) gave another.
@@ -152,6 +166,16 @@ impl Manifest {
     /// As [`MaterialFile::read`].
     pub fn load_material(&self, name: &str) -> Result<MaterialFile, ReadMaterialError> {
         MaterialFile::read(&self.materials_dir, name)
+    }
+
+    /// Reads phase table `name` from the `phase/` directory of
+    /// [`materials_dir`](Self::materials_dir).
+    ///
+    /// # Errors
+    ///
+    /// As [`PhaseTableFile::read`].
+    pub fn load_phase(&self, name: &str) -> Result<PhaseTableFile, ReadMaterialError> {
+        PhaseTableFile::read(&self.materials_dir.join(PHASE_FROM_MATERIALS), name)
     }
 
     /// The `[params]` table.
@@ -310,8 +334,9 @@ impl ManifestParamError {
 pub struct InputsHash([u8; 32]);
 
 impl InputsHash {
-    /// The hash of task `name` at `revision` run on `manifest`, whose datasets' recorded hashes and
-    /// then material files' data hashes are `input_hashes`, in the manifest's order. Each field
+    /// The hash of task `name` at `revision` run on `manifest`, whose datasets' recorded hashes,
+    /// then material files' and then phase tables' data hashes are `input_hashes`, in the
+    /// manifest's order. Each field
     /// is preceded by its length as eight little-endian bytes, so that no two different inputs run
     /// together into one byte string.
     ///
@@ -336,21 +361,24 @@ impl InputsHash {
     }
 
     /// The hash of `task`'s inputs with `manifest`, the datasets' recorded hashes read from their
-    /// `PROVENANCE.toml` under the workspace's data directory, and the material files' data hashes
-    /// read from the manifest's [`materials_dir`](Manifest::materials_dir), each named
-    /// `materials/<file>` in the list returned beside the hash.
+    /// `PROVENANCE.toml` under the workspace's data directory, and the material files' and phase
+    /// tables' data hashes read from the manifest's [`materials_dir`](Manifest::materials_dir),
+    /// each named `materials/<file>` or `materials/phase/<file>` in the list returned beside the
+    /// hash.
     ///
     /// # Errors
     ///
-    /// As [`Provenance::load`], and [`LoadDatasetError::Material`] for a material file that cannot
-    /// be read.
+    /// As [`Provenance::load`], and [`LoadDatasetError::Material`] for a material file or phase
+    /// table that cannot be read.
     pub fn of_task(
         name: &str,
         revision: u32,
         manifest: &Manifest,
         workspace: &Workspace,
     ) -> Result<(Self, Vec<(String, String)>), LoadDatasetError> {
-        let mut hashes = Vec::with_capacity(manifest.datasets().len() + manifest.materials().len());
+        let mut hashes = Vec::with_capacity(
+            manifest.datasets().len() + manifest.materials().len() + manifest.phase().len(),
+        );
         for dataset in manifest.datasets() {
             let provenance = Provenance::load(&workspace.data_dir, dataset)?;
             hashes.push((dataset.clone(), provenance.recorded_hash()));
@@ -360,6 +388,15 @@ impl InputsHash {
                 .load_material(material)
                 .map_err(|e| LoadDatasetError::Material(Box::new(e)))?;
             hashes.push((format!("materials/{material}"), file.data_sha256()));
+        }
+        for table in manifest.phase() {
+            let file = manifest
+                .load_phase(table)
+                .map_err(|e| LoadDatasetError::Material(Box::new(e)))?;
+            hashes.push((
+                format!("materials/{PHASE_FROM_MATERIALS}/{table}"),
+                file.data_sha256(),
+            ));
         }
         let recorded: Vec<String> = hashes.iter().map(|(_, h)| h.clone()).collect();
         Ok((
@@ -720,6 +757,56 @@ mod tests {
         .with_materials_dir(materials.clone());
         assert!(matches!(
             InputsHash::of_task("toy", 0, &missing, &ws),
+            Err(LoadDatasetError::Material(_))
+        ));
+    }
+
+    /// A manifest's phase tables enter the inputs hash after its material files, each named
+    /// `materials/phase/<file>`, by the fields the fit reads alone: a changed cross-section moves
+    /// the hash, a changed matrix element does not, and a missing table is refused.
+    #[test]
+    fn the_inputs_hash_covers_the_phase_tables_data() {
+        let root = tempfile::tempdir().unwrap();
+        let materials = root.path().join("materials");
+        let phase = materials.join(PHASE_FROM_MATERIALS);
+        fs::create_dir_all(&phase).unwrap();
+        let table = |extinction: f64, matrix: &str| {
+            fs::write(
+                phase.join("t.json"),
+                format!(
+                    r#"{{"key":"X","phase":"solid","variant":null,"model":"tamudust2020","nodes":[{{"wavelengthNm":550,"n":1.5,"k":0.001,"kernel":"shortwave","kTable":0.001,"sizeParameters":[1,2],"volumes":[1,8],"areas":[1,4],"extinction":[{extinction},5],"scattering":[0.5,4],"scatteringAsymmetry":[0.1,1],"a1":"{matrix}"}}]}}"#
+                ),
+            )
+            .unwrap();
+        };
+        fs::write(
+            materials.join("m.json"),
+            r#"{"key":"X","phase":"solid","shape":"nonSphericalMineral","provenance":"measured","wavelengthsNm":[380,760],"n":[1.5,1.5],"k":[0.001,0.001]}"#,
+        )
+        .unwrap();
+        let ws = Workspace::under(root.path());
+        let manifest = |phase_list: &str| {
+            Manifest::from_bytes(
+                &root.path().join("manifests/toy.toml"),
+                format!("task = \"toy\"\nmaterials = [\"m.json\"]\nphase = [{phase_list}]\n")
+                    .into_bytes(),
+            )
+            .unwrap()
+            .with_materials_dir(materials.clone())
+        };
+        table(1.0, "AAAA");
+        let (base, data) = InputsHash::of_task("toy", 0, &manifest(r#""t.json""#), &ws).unwrap();
+        let names: Vec<&str> = data.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["materials/m.json", "materials/phase/t.json"]);
+        assert_eq!(manifest(r#""t.json""#).phase(), ["t.json"]);
+        table(1.0, "BBBB");
+        let (same, _) = InputsHash::of_task("toy", 0, &manifest(r#""t.json""#), &ws).unwrap();
+        assert_eq!(same, base);
+        table(1.1, "BBBB");
+        let (moved, _) = InputsHash::of_task("toy", 0, &manifest(r#""t.json""#), &ws).unwrap();
+        assert_ne!(moved, base);
+        assert!(matches!(
+            InputsHash::of_task("toy", 0, &manifest(r#""u.json""#), &ws),
             Err(LoadDatasetError::Material(_))
         ));
     }

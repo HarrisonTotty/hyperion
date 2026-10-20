@@ -25,7 +25,8 @@
 //! bound.
 //!
 //! **The infrared** (P14.T49.i; decision-p14-t49c-split §1.3): each index row's set beyond 780 nm,
-//! from its primaries, at one reference temperature, stated in its sources:
+//! from its primaries, each piece of it at one reference temperature, stated in its sources where
+//! its source gives one (a set may join pieces of different temperatures):
 //!
 //! - `H2O`, `CO2`, `CH4`, `N2`, `CO` and `NH3`: their primaries' infrared, each joined to its R08
 //!   file at 780 nm, `N2` and `CO` transparent where their sets have no band, `NH3` transparent
@@ -259,12 +260,14 @@ const FIT_LAB: Source = source(
     "single-scattering albedo, normal albedo, spherical albedo, directional-hemispherical albedo",
     "hyperion-fit's `substance_albedos` (tables::substance_albedo): each of the row's splib07a \
      spectra inverted channel by channel for w by Hapke's model at its own geometry, a Beckman \
-     spectrum as the similarity relation's directional-hemispherical albedo at μ₀ = cos 10° and an \
+     spectrum as the similarity relation's directional-hemispherical albedo at the adopted μ₀ = \
+     cos 10° and an \
      ASD spectrum as the reflectance factor with isotropic multiple scattering at i 20°, e 30° and \
      g 35.5°, under the lunar regolith's photometry; each end-member taken to the form's grains \
      through the equivalent slab's internal transmission at its stated n (Hapke 2012's \
      surface-reflection fits, as Davalos 2026 reproduces them) or held as measured; a mixture's w \
-     the cross-section weighting Σ (f ÷ D) w ÷ Σ (f ÷ D) (Hapke 2012, §10); w held at most 0.9995; \
+     the cross-section weighting Σ (f ÷ D) w ÷ Σ (f ÷ D) (Hapke 2012, its section not read, as \
+     decision-p14-t49i-rock-mixtures §2.1 states it); w held at most 0.9995; \
      then the normal albedo and the energy albedos as every row's (Hapke et al. 2012, eqs. 2–4; \
      Kawabata 2016, eqs. 2–3; van de Hulst 1974, eq. 14), and the spectral bins the same \
      relation's spherical albedo averaged over each bin from the spectra",
@@ -375,10 +378,13 @@ const BASALT_FE_UPPER_BOUND: Source = stand_in(
 /// `chondrite_ci`'s band.
 const CHONDRITE_CI_BAND: Source = source(
     "band",
-    "its reflectance factor at i 30°, e 0° and 550 nm, 0.042, against CI's 0.020–0.035, \
-     Ryugu's powder to Orgueil's preheated < 155 µm powder, both at i 30°, e 0° (Amano et al. \
-     2023, Sci. Adv. 9, eadi3789), inside the allowance of 1.25 (0.016–0.044), at its top: \
-     passed",
+    "its reflectance factor at i 30°, e 0° and 550 nm, 0.042, against CI's 0.020–0.035 \
+     (decision-p14-t49i-rock-mixtures §3), after Amano et al. 2023 (Sci. Adv. 9, eadi3789): the \
+     ruling's lower end, 0.020, is Ryugu's global visible reflectance, about 2%, from remote \
+     sensing (ONC-T and NIRS3), while Ryugu's returned grains measure about 2 to 4% at v-band at \
+     i 30°, e 0° (g 30°), its powder aggregates inside that range and darker than its coarse \
+     grains; the upper end is Orgueil's preheated < 155 µm powder, about 3.5% at v-band at the \
+     same geometry; inside the allowance of 1.25 (0.016–0.044), at its top: passed",
     Basis::Fitted,
 );
 
@@ -408,8 +414,9 @@ const CHONDRITE_H_BAND: Source = source(
     "band",
     "its reflectance factor at i 30°, e 0° and 700 nm, 0.382, against the falls' 0.25–0.39, \
      Chelyabinsk (LL5) and Viñales (L) at 45–90 µm, measured at i 0°, e 30° (Bowen et al. 2023, \
-     PSJ 4, 52, p. 3; their lab's geometry, Cantillo et al. 2023, PSJ 4, 177, p. 10), the same by \
-     reciprocity, inside the allowance of 1.25 (0.20–0.49): passed",
+     PSJ 4, 52, p. 3; their lab's geometry, Cantillo et al. 2023, PSJ 4, 177, read as \
+     arXiv:2401.10377, §3.2), the same by reciprocity, inside the allowance of 1.25 (0.20–0.49): \
+     passed",
     Basis::Fitted,
 );
 
@@ -418,8 +425,9 @@ const CHONDRITE_L_BAND: Source = source(
     "band",
     "its reflectance factor at i 30°, e 0° and 700 nm, 0.377, against the falls' 0.25–0.39, \
      Chelyabinsk (LL5) and Viñales (L) at 45–90 µm, measured at i 0°, e 30° (Bowen et al. 2023, \
-     PSJ 4, 52, p. 3; their lab's geometry, Cantillo et al. 2023, PSJ 4, 177, p. 10), the same by \
-     reciprocity, inside the allowance of 1.25 (0.20–0.49): passed",
+     PSJ 4, 52, p. 3; their lab's geometry, Cantillo et al. 2023, PSJ 4, 177, read as \
+     arXiv:2401.10377, §3.2), the same by reciprocity, inside the allowance of 1.25 (0.20–0.49): \
+     passed",
     Basis::Fitted,
 );
 
@@ -428,8 +436,9 @@ const CHONDRITE_LL_BAND: Source = source(
     "band",
     "its reflectance factor at i 30°, e 0° and 700 nm, 0.368, against the falls' 0.25–0.39, \
      Chelyabinsk (LL5) and Viñales (L) at 45–90 µm, measured at i 0°, e 30° (Bowen et al. 2023, \
-     PSJ 4, 52, p. 3; their lab's geometry, Cantillo et al. 2023, PSJ 4, 177, p. 10), the same by \
-     reciprocity, inside the allowance of 1.25 (0.20–0.49): passed",
+     PSJ 4, 52, p. 3; their lab's geometry, Cantillo et al. 2023, PSJ 4, 177, read as \
+     arXiv:2401.10377, §3.2), the same by reciprocity, inside the allowance of 1.25 (0.20–0.49): \
+     passed",
     Basis::Fitted,
 );
 
@@ -451,10 +460,9 @@ const SO2_LEVELS: ReflectanceLevels = ReflectanceLevels::new(
         (400.0, 0.775),
         (850.0, 0.775),
     ],
-    Geometry {
-        incidence_deg: 20.0,
-        emission_deg: 60.0,
-        azimuth_deg: 180.0,
+    match Geometry::new(20.0, 60.0, 180.0) {
+        Ok(geometry) => geometry,
+        Err(_) => panic!("Nash, Fanale and Nelson's geometry is inside its ranges"),
     },
 );
 
@@ -560,10 +568,14 @@ pub(in crate::substance) static OPTICS: [CondensedOptics; 55] = [
         frost_sources!(
             "carbon-dioxide-ice.json: n from Warren 1986 (Appl. Opt. 25, 2650, Table I) and k \
              from Hansen 2005's estimated visible absorption (JGR 110, E11003)",
-            "Warren 1986 (Appl. Opt. 25, 2650) beyond 780 nm, through optool's copy, CO2 deposited \
-             near 80 K; between its bands its k is Egan and Spagnolo's impure dry ice, about 2,370 \
-             times the file's at 780 nm, an upper bound on the absorption between bands; Hansen \
-             1997 and 2005's near infrared could not be fetched; the dataset `warren_1986_co2`"
+            "Warren 1986 (Appl. Opt. 25, 2650) beyond 780 nm, through optool's copy, a compilation \
+             of laboratory measurements \"with emphasis on values for temperatures above 77 K\" \
+             (its abstract), not one sample's; its abstract states that \"no measurements of \
+             absorption are available\" over 1.0–2.5 µm \"except in the strong narrow absorption \
+             lines\", so between the bands there its k is Warren's interpolation, not a \
+             measurement; at 780 nm its k is about 2,370 times the file's (Hansen 2005's estimated \
+             continuum), taken as an upper bound on the absorption between bands; Hansen 1997 and \
+             2005's near infrared could not be fetched; the dataset `warren_1986_co2`"
         ),
     ),
     optics(
@@ -600,7 +612,10 @@ pub(in crate::substance) static OPTICS: [CondensedOptics; 55] = [
              its fundamental band, from NASA's Optical Constants Database, averaged to its 0.5 \
              cm⁻¹ resolution, its n 0.46% below the file's where it begins, at 3,333.5 nm; k = 0 \
              over 0.78–3.33 µm with n held at the file's 780 nm value, the overtones at 1.58 and \
-             2.35 µm not drawn (Quirico and Schmitt 1997 being in SSHADE only); the dataset \
+             2.35 µm not drawn (Quirico and Schmitt 1997 being in SSHADE only); its k taken as 0 \
+             below its noise floor, 1.02 × 10⁻³, three times its baseline's rms, which discards \
+             absorption that matters (at 4.6 µm a k at the floor would give 100 µm grains Θ ≈ 0.80 \
+             and w ≈ 0.71), so its 3.5–5 µm bin is an upper bound; the dataset \
              `gerakines_2023_co`"
         ),
     ),
@@ -972,8 +987,10 @@ pub(in crate::substance) static OPTICS: [CondensedOptics; 55] = [
                     "grain size",
                     "2.8 µm, twice the effective radius of Mars's diffuse dust, 1.4 µm (Wolff et \
                      al. 2009, JGR 114, E00D04, abstract: \"a smaller effective particle radius \
-                     more appropriate for diffuse dust conditions (1.4 μm)\")",
-                    Basis::Fact,
+                     more appropriate for diffuse dust conditions (1.4 μm)\"): the radius is \
+                     Wolff et al.'s, and the diameter twice it is the lane's choice for Hapke's \
+                     D, adopted",
+                    Basis::Adopted,
                 ),
                 source(
                     "index",
@@ -985,9 +1002,11 @@ pub(in crate::substance) static OPTICS: [CondensedOptics; 55] = [
                 source(
                     "infrared optical constants",
                     "Wolff et al. 2009 beyond 780 nm, as NASA Ames's Mars Climate Modeling Group \
-                     distributed it, the file's own source, retrieved over CRISM's 440–2,920 nm \
-                     (the table's rows beyond are outside that range), n linear and k linear in \
-                     ln k, as R08's reduction; the dataset `wolff_2009_mars_dust`",
+                     distributed it, the file's own source, retrieved over CRISM's 440–2,920 nm; \
+                     the table's rows beyond 2,920 nm lie outside that retrieval, the distributed \
+                     table's with no stated primary, and they set the row's 2.8–5 µm bins; n \
+                     linear and k linear in ln k, as R08's reduction; the dataset \
+                     `wolff_2009_mars_dust`",
                     Basis::Reduced,
                 ),
                 stand_in(MARS_DUST_STAND_IN),

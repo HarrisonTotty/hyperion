@@ -13,8 +13,9 @@
 //!   Clausius–Clapeyron slope, so F′ < −1 there;
 //! - one whose F jumps across the diagonal, a change of state or cover (the airless threshold or a
 //!   frost's edge crossed) with no self-consistent albedo among the model's discrete states;
-//! - one whose F creeps toward the area mix's clamp too slowly to settle, a lossless visible-only
-//!   frost whose fixed point is the clamp itself (until P14.T49.i's infrared).
+//! - one whose F creeps toward the area mix's clamp too slowly to settle, a lossless frost whose
+//!   fixed point is the clamp itself (a visible-only frost's until the area mix took P14.T49.i's
+//!   bins, 2026-10-19; since then the frosts T49.i holds lossless).
 //!
 //! Such a body solves g(A) = F(A) − A by bisection instead, [`HALVINGS`] of them, a fixed count:
 //!

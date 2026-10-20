@@ -7,10 +7,22 @@
 //!
 //! Every one of rendering plan R08's committed index files whose key is an aerosol material
 //! (`ClientOptics::aerosol_material`), read where it lies ([`crate::materials`]), its data hash in
-//! the inputs hash. The index at 550 nm is found by wavelength on the file's own grid
-//! ([`index_at`]), never by position: two files' grids start at 360 nm, the rest at 380 nm. Every
-//! shape class is a Mie sphere at that index ([`mie`]): a `nonSphericalMineral` or `crystal` file
-//! is the sphere of equal volume to projected area (science-r08-mmf.md §2).
+//! the inputs hash; and R08's phase tables (`materials/phase/`, the manifests' `phase` lists), each
+//! read where it lies and its data hash, over the fields read, in the inputs hash. The index at
+//! 550 nm is found by wavelength on the file's own grid ([`index_at`]), never by position: two
+//! files' grids start at 360 nm, the rest at 380 nm. The particles are the client's
+//! (science-r08-nonspherical.md §6.4):
+//!
+//! - a `sphere` file's are Mie spheres at that index ([`mie`]);
+//! - a `nonSphericalMineral` or `crystal` file with a phase table of its own (21 of the 30) takes
+//!   the table's `C_ext` and `C_sca` ([`phase`]), with spheres outside its sizes, unless its index
+//!   at 550 nm lies outside the hexahedra's kernels ([`phase::within_the_kernels`]): aluminium
+//!   oxide's, sulphur's, titanium dioxide's and zinc sulphide's, transparent above n 1.70, whose
+//!   tables are the floor's (17 take their tables);
+//! - the others, the nine ices but water's, whose extinction the client also takes from Mie, and
+//!   those four, are the spheres of equal volume to projected area (science-r08-mmf.md §2; T. C.
+//!   Grenfell and S. G. Warren, J. Geophys. Res. 104, 31697–31709, 1999), a labelled fallback
+//!   (`EntryBasis::SphereFallback`).
 //!
 //! # What it computes
 //!
@@ -25,11 +37,15 @@
 //!   second averages its ripple within each cell, whose period is the distance between neighbouring
 //!   resonances (P. Chýlek, J. Opt. Soc. Am. 66, 285–287, 1976), Δx ≈ 0.45–0.9 at these indices
 //!   (Chýlek, J. Opt. Soc. Am. A 7, 1609–1613, 1990). Beyond, the ripple is left to the
-//!   distributions, at least √0.04 wide in ln r. Mie is computed once per sub-sample and file.
+//!   distributions, at least √0.04 wide in ln r. Mie is computed once per sub-sample and file. A
+//!   phase table's particles are read at each fine node instead, within its sizes, and spheres
+//!   serve outside them ([`phase`]); each node then holds the particle's A, `C_ext` and `C_sca`
+//!   over πr² (1, `Q_ext` and `Q_sca` for a sphere).
 //! - **The size averages** are sums over that grid: a distribution's area weight r² n(r) dr in u =
 //!   ln(r ÷ `r_eff`) depends on u and `v_eff` alone (`ln_area_weight`), so one kernel per variance
-//!   serves every radius, and a table radius is a fine node. `Q̄_ext` = Σ w `Q_ext` ÷ Σ w and 1 − ω =
-//!   Σ w (`Q_ext` − `Q_sca`) ÷ Σ w `Q_ext`, with w cut below where the area weight falls under
+//!   serves every radius, and a table radius is a fine node. `Q̄_ext` = Σ w `C_ext` ÷ Σ w A and
+//!   1 − ω = Σ w (`C_ext` − `C_sca`) ÷ Σ w `C_ext` (each over πr²; for spheres Σ w `Q_ext` ÷ Σ w),
+//!   a fixed sum in the fine nodes' order, with w cut below where the area weight falls under
 //!   [`WEIGHT_FLOOR`] of its peak and above where both it and the Rayleigh scattering weight r⁶ n(r)
 //!   do, as the client's `SIZE_WEIGHT_FLOOR` cuts. A file whose k is 0 at 550 nm has a co-albedo of
 //!   exactly zero. The table holds ln ω = ln(1 − (1 − ω)), which keeps both ω and 1 − ω to its
@@ -52,30 +68,31 @@
 //!
 //! # The tables
 //!
-//! The 49 files' grids are some 3 MB at five digits, so they are split into seven tables of seven
+//! The 49 files' grids are some 2.7 MB at five digits, so they are split into seven tables of seven
 //! files each, in file-name order, to keep each file under the repository's 500 kB limit, as the
 //! reddening tables are split ([`PARTS`]). The first also holds the grid's axes. Each table
 //! lists its files' entries (`hyperion_sim::substance::aerosol::ExtinctionEntry`): key, phase,
-//! variant, stand-in flag and grids.
+//! variant, stand-in flag, basis, a phase table's sizes and grids.
 
 pub mod mie;
+pub mod phase;
 
 use std::num::NonZeroUsize;
 
 use hyperion_sim::math;
 use hyperion_sim::substance::CondensedPhase;
 use hyperion_sim::substance::aerosol::{
-    EXTINCTION_WAVELENGTH_NM, GAMMA_VARIANCE_NODES, GridSpace, LOG_NORMAL_VARIANCE_NODES,
-    SizeDistributionKind, interpolate_grid,
+    EXTINCTION_WAVELENGTH_NM, EntryBasis, GAMMA_VARIANCE_NODES, GridSpace,
+    LOG_NORMAL_VARIANCE_NODES, SizeDistributionKind, interpolate_grid,
 };
 
 use self::mie::{
     ComplexIndex, ComputeMieError, MAX_SIZE_PARAMETER, MIN_SIZE_PARAMETER, efficiencies,
 };
 use crate::data::LoadDatasetError;
-use crate::emit::{RustTable, TableItem};
+use crate::emit::{RustTable, TableItem, literal};
 use crate::manifest::{Manifest, SimFingerprint};
-use crate::materials::MaterialFile;
+use crate::materials::{MaterialFile, PhaseModel, PhaseTableFile};
 use crate::parallel::map_reduce_chunks;
 use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput, check_manifest};
 use crate::tasks::substance_albedos::index_at;
@@ -152,7 +169,8 @@ pub const RIPPLE_REACH: f64 = 1_200.0;
 /// The fine nodes per chunk of the parallel map.
 const CHUNK: u64 = 32;
 
-/// One table: its name, its file, its index files and whether it holds the grid's axes.
+/// One table: its name, its file, its index files, their phase tables and whether it holds the
+/// grid's axes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Part {
     /// The table's name, its task's.
@@ -161,6 +179,9 @@ pub struct Part {
     table_path: &'static str,
     /// Its index files, in name order.
     files: &'static [&'static str],
+    /// The phase tables of its files that have one, in `materials/phase/` under the index file's
+    /// own name, in name order.
+    phase: &'static [&'static str],
     /// Its items, in order.
     items: &'static [&'static str],
     /// Whether it holds the grid's axes (the first table).
@@ -179,9 +200,15 @@ impl Part {
     pub const fn files(&self) -> &'static [&'static str] {
         self.files
     }
+
+    /// The phase tables of its files that have one, in name order.
+    #[must_use]
+    pub const fn phase(&self) -> &'static [&'static str] {
+        self.phase
+    }
 }
 
-/// The four items of each file, from its prefix ([`item_prefix`]).
+/// The four items of each file, from its prefix ([`item_prefix`]), and the table's `ENTRIES`.
 macro_rules! file_items {
     ($($prefix:literal),* $(,)?) => {
         &[$(
@@ -189,7 +216,7 @@ macro_rules! file_items {
             concat!($prefix, "_GAMMA_LN_ALBEDO"),
             concat!($prefix, "_LOG_NORMAL_EXTINCTION"),
             concat!($prefix, "_LOG_NORMAL_LN_ALBEDO"),
-        )*]
+        )* "ENTRIES"]
     };
     (axes; $($prefix:literal),* $(,)?) => {
         &[
@@ -203,6 +230,7 @@ macro_rules! file_items {
                 concat!($prefix, "_LOG_NORMAL_EXTINCTION"),
                 concat!($prefix, "_LOG_NORMAL_LN_ALBEDO"),
             )*
+            "ENTRIES",
         ]
     };
 }
@@ -221,6 +249,7 @@ pub const PARTS: [Part; 7] = [
             "argon-liquid.json",
             "basalt.json",
         ],
+        phase: &["aluminium-oxide.json", "basalt.json"],
         items: file_items!(
             axes;
             "ALUMINIUM_OXIDE",
@@ -243,6 +272,11 @@ pub const PARTS: [Part; 7] = [
             "carbon-dioxide-liquid.json",
             "carbon-monoxide-ice.json",
             "carbon-monoxide-liquid.json",
+            "chromium.json",
+        ],
+        phase: &[
+            "basaltic-glass.json",
+            "calcium-titanate.json",
             "chromium.json",
         ],
         items: file_items!(
@@ -268,6 +302,11 @@ pub const PARTS: [Part; 7] = [
             "hydrogen-sulphide-liquid.json",
             "ice-giant-haze.json",
         ],
+        phase: &[
+            "enstatite-glass.json",
+            "forsterite-amorphous.json",
+            "graphite.json",
+        ],
         items: file_items!(
             "ENSTATITE_GLASS",
             "ETHANE_LIQUID",
@@ -290,6 +329,13 @@ pub const PARTS: [Part; 7] = [
             "mars-dust.json",
             "mars-regolith-simulant.json",
             "methane-ice.json",
+        ],
+        phase: &[
+            "iron-sulphide.json",
+            "iron.json",
+            "manganese-sulphide.json",
+            "mars-dust.json",
+            "mars-regolith-simulant.json",
         ],
         items: file_items!(
             "IRON_SULPHIDE",
@@ -314,6 +360,7 @@ pub const PARTS: [Part; 7] = [
             "potassium-chloride.json",
             "seawater.json",
         ],
+        phase: &["potassium-chloride.json"],
         items: file_items!(
             "METHANE_LIQUID",
             "NITROGEN_ICE",
@@ -337,6 +384,12 @@ pub const PARTS: [Part; 7] = [
             "sulphur.json",
             "sulphuric-acid-75.json",
         ],
+        phase: &[
+            "silicon-dioxide.json",
+            "sodium-chloride.json",
+            "sodium-sulphide.json",
+            "sulphur.json",
+        ],
         items: file_items!(
             "SILICON_DIOXIDE",
             "SODIUM_CHLORIDE",
@@ -358,6 +411,11 @@ pub const PARTS: [Part; 7] = [
             "titanium-dioxide.json",
             "water-ice.json",
             "water.json",
+            "zinc-sulphide.json",
+        ],
+        phase: &[
+            "titanium-dioxide.json",
+            "water-ice.json",
             "zinc-sulphide.json",
         ],
         items: file_items!(
@@ -588,17 +646,50 @@ pub enum FitExtinctionError {
         /// The part.
         part: &'static str,
     },
+    /// The manifest names other phase tables than the part's.
+    #[error("the manifest names other phase tables than {part}'s")]
+    WrongPhaseTables {
+        /// The part.
+        part: &'static str,
+    },
+    /// The file's shape class is none of `sphere`, `nonSphericalMineral` and `crystal`.
+    #[error("its shape class is {0}, not sphere, nonSphericalMineral or crystal")]
+    Shape(String),
+    /// A `sphere` file was given a phase table, which only the non-spherical classes read.
+    #[error("it is a sphere's, and a phase table serves only nonSphericalMineral and crystal")]
+    PhaseTableForSphere,
+    /// The phase table under the file's name was made for another material (key, phase or
+    /// variant).
+    #[error("its phase table was made for {key} ({phase}), another material")]
+    PhaseTableMismatch {
+        /// The table's key.
+        key: String,
+        /// The table's phase.
+        phase: String,
+    },
 }
 
 /// A file's [`FitExtinctionError`], with the file.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[error("{file}")]
 pub struct FitFileError {
-    /// The file's name.
-    pub file: &'static str,
-    /// Why.
+    file: &'static str,
     #[source]
-    pub cause: FitExtinctionError,
+    cause: FitExtinctionError,
+}
+
+impl FitFileError {
+    /// The file's name.
+    #[must_use]
+    pub const fn file(&self) -> &'static str {
+        self.file
+    }
+
+    /// Why it could not be fitted.
+    #[must_use]
+    pub const fn cause(&self) -> &FitExtinctionError {
+        &self.cause
+    }
 }
 
 /// `cause` for `file` as a task input error.
@@ -609,38 +700,56 @@ fn input_error(file: &'static str, cause: FitExtinctionError) -> RunTaskError {
     }
 }
 
-/// A file's spheres on the fine grid: each node's mean `Q_ext` and `Q_sca` across its cell, and
-/// whether its index absorbs nothing (k = 0), whose co-albedo is then exactly 0.
+/// A file's particles on the fine grid: each node's A, `C_ext` and `C_sca` over πr² (a sphere's 1,
+/// `Q_ext` and `Q_sca`, each the mean across its cell), and whether its index absorbs nothing
+/// (k = 0), whose co-albedo is then exactly 0.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct Spectrum {
+    /// A ÷ πr²: 1 for a sphere.
+    area: Vec<f64>,
+    /// `C_ext` ÷ πr².
     q_ext: Vec<f64>,
+    /// `C_sca` ÷ πr².
     q_sca: Vec<f64>,
     largest_extinction: f64,
+    largest_area: f64,
     lossless: bool,
 }
 
-/// The spectrum of index `index` on the fine grid (`sub_samples`), on `threads` threads.
+/// `cause` of file `file` as a task input error carrying a [`FitFileError`].
+#[must_use]
+fn mie_failure(file: &'static str, cause: ComputeMieError) -> RunTaskError {
+    input_error(file, FitExtinctionError::Mie(cause))
+}
+
+/// The spheres' spectrum of file `file`'s index `index` on the fine grid (`sub_samples`), on
+/// `threads` threads.
 ///
 /// # Errors
 ///
-/// [`FitExtinctionError::Mie`], through [`RunTaskError::Input`], if a sphere's optics cannot be
-/// computed, and [`RunTaskError::Threads`] if the pool cannot be built.
+/// [`RunTaskError::Input`] carrying a [`FitFileError`] of `file` with [`FitExtinctionError::Mie`]
+/// if a sphere's optics cannot be computed, and [`RunTaskError::Threads`] if the pool cannot be
+/// built.
 pub(crate) fn spectrum(
+    file: &'static str,
     index: ComplexIndex,
     threads: NonZeroUsize,
 ) -> Result<Spectrum, RunTaskError> {
-    spectrum_with(index, threads, sub_samples)
+    spectrum_with(file, index, threads, sub_samples)
 }
 
 /// The spectrum with `samples` sub-samples at each node's size parameter, for the convergence
 /// test.
 fn spectrum_with(
+    file: &'static str,
     index: ComplexIndex,
     threads: NonZeroUsize,
     samples: impl Fn(f64) -> u32 + Sync,
 ) -> Result<Spectrum, RunTaskError> {
     let grid = fine_grid();
     let mut out = Spectrum {
+        area: vec![1.0; grid.nodes],
+        largest_area: 1.0,
         lossless: index.k() <= 0.0,
         ..Spectrum::default()
     };
@@ -686,10 +795,7 @@ fn spectrum_with(
         },
     )?;
     if let Some(e) = failure {
-        return Err(RunTaskError::Input {
-            task: "condensate_extinction",
-            source: Box::new(FitExtinctionError::Mie(e)),
-        });
+        return Err(mie_failure(file, e));
     }
     out.largest_extinction = out.q_ext.iter().copied().fold(0.0, f64::max);
     Ok(out)
@@ -768,13 +874,14 @@ pub(crate) fn kernel(kind: SizeDistributionKind, variance: f64) -> Kernel {
 /// A cell's area-weighted `Q̄_ext` and co-albedo 1 − ω.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub(crate) struct Cell {
-    /// `Q̄_ext` = ⟨`C_ext`⟩ ÷ ⟨πr²⟩.
+    /// `Q̄_ext` = ⟨`C_ext`⟩ ÷ ⟨A⟩, A = πr² for a sphere.
     extinction: f64,
     /// 1 − ω = ⟨`C_abs`⟩ ÷ ⟨`C_ext`⟩, 0 for a lossless file.
     coalbedo: f64,
 }
 
-/// The cell of `kernel` about fine node `centre` of `spectrum`.
+/// The cell of `kernel` about fine node `centre` of `spectrum`: a fixed sum over the kernel's
+/// fine nodes in their order.
 ///
 /// # Errors
 ///
@@ -790,16 +897,24 @@ pub(crate) fn cell(
     for (i, &w) in (0_isize..).zip(&kernel.weights) {
         // A negative node lies below the fine grid: `try_from` refuses it, and it is clipped.
         let node = usize::try_from(start.saturating_add(i)).ok();
-        match node.and_then(|j| spectrum.q_ext.get(j).zip(spectrum.q_sca.get(j))) {
-            Some((&q_ext, &q_sca)) => {
-                area += w;
+        let values = node.and_then(|j| {
+            Some((
+                spectrum.area.get(j)?,
+                spectrum.q_ext.get(j)?,
+                spectrum.q_sca.get(j)?,
+            ))
+        });
+        match values {
+            Some((&a, &q_ext, &q_sca)) => {
+                area += w * a;
                 extinction += w * q_ext;
                 absorption += w * (q_ext - q_sca);
             }
             None => clipped += w,
         }
     }
-    let share = (clipped / area).max(clipped * spectrum.largest_extinction / extinction);
+    let share = (clipped * spectrum.largest_area / area)
+        .max(clipped * spectrum.largest_extinction / extinction);
     if share.is_nan() || share > CLIP_TOLERANCE {
         return Err(FitExtinctionError::ClippedCell { centre, share });
     }
@@ -825,6 +940,14 @@ pub(crate) fn significant(value: f64) -> f64 {
     format!("{value:.precision$e}")
         .parse()
         .expect("an f64 formatted in scientific notation parses back")
+}
+
+/// `value` with a negative zero made positive: −0.0 + 0.0 is +0.0 in IEEE 754's round to nearest,
+/// and every other value, a NaN's bits aside, is unchanged. A lossless file's ln ω, ln(1 − 0), is
+/// −0.0, which the table then writes as 0.0.
+#[must_use]
+fn positive_zero(value: f64) -> f64 {
+    value + 0.0
 }
 
 /// One distribution's grid of a file: rows by radius, columns by variance.
@@ -924,7 +1047,7 @@ pub(crate) fn grid_of(
         grid.ln_albedo.push(
             cells
                 .iter()
-                .map(|c| significant(math::ln_1p(-c.coalbedo)))
+                .map(|c| positive_zero(significant(math::ln_1p(-c.coalbedo))))
                 .collect(),
         );
     }
@@ -1011,7 +1134,7 @@ pub(crate) fn halving_check(
     Ok(misses)
 }
 
-/// One file's result: its identity and its two grids.
+/// One file's result: its identity, its basis and its two grids.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FileExtinction {
     /// The file's name.
@@ -1024,6 +1147,8 @@ pub(crate) struct FileExtinction {
     variant: Option<String>,
     /// Whether the file is a stand-in.
     stand_in: bool,
+    /// The particles drawn, with a phase table's sizes at 550 nm ([`phase::TableParticles`]).
+    basis: EntryBasis,
     /// The gamma distribution's grid.
     gamma: Grid,
     /// The log-normal's grid.
@@ -1032,17 +1157,71 @@ pub(crate) struct FileExtinction {
     misses: Misses,
 }
 
-/// Computes file `name` ([`FileExtinction`]) on `threads` threads.
+/// The particles a file's grids are drawn from ([`basis_of`]): its spheres, its own phase table, or
+/// the sphere fallback.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Particles<'a> {
+    /// A `sphere` file's Mie spheres.
+    Spheres,
+    /// A `nonSphericalMineral` or `crystal` file's own phase table.
+    Table(&'a PhaseTableFile),
+    /// The spheres of equal volume to projected area, a labelled fallback.
+    SphereFallback,
+}
+
+/// The particles file `file` takes, with its phase table `table` if one is on file: a `sphere`'s
+/// spheres; a `nonSphericalMineral`'s or `crystal`'s own table, unless its index `index` lies past
+/// the hexahedra's kernels; or the sphere fallback.
+///
+/// # Errors
+///
+/// [`FitExtinctionError::Shape`] for another shape class,
+/// [`FitExtinctionError::PhaseTableForSphere`] for a sphere's table, and
+/// [`FitExtinctionError::PhaseTableMismatch`] for a table made for another material.
+fn basis_of<'a>(
+    file: &MaterialFile,
+    table: Option<&'a PhaseTableFile>,
+    index: ComplexIndex,
+) -> Result<Particles<'a>, FitExtinctionError> {
+    match (file.shape(), table) {
+        ("sphere", None) => Ok(Particles::Spheres),
+        ("sphere", Some(_)) => Err(FitExtinctionError::PhaseTableForSphere),
+        ("nonSphericalMineral" | "crystal", None) => Ok(Particles::SphereFallback),
+        ("nonSphericalMineral" | "crystal", Some(table)) => {
+            if !table.serves(file) {
+                return Err(FitExtinctionError::PhaseTableMismatch {
+                    key: table.key().to_owned(),
+                    phase: table.phase().to_owned(),
+                });
+            }
+            let held = match table.model() {
+                PhaseModel::TamuDust2020 => phase::within_the_kernels(index),
+                PhaseModel::Yang2013 => true,
+            };
+            Ok(if held {
+                Particles::Table(table)
+            } else {
+                Particles::SphereFallback
+            })
+        }
+        (other, _) => Err(FitExtinctionError::Shape(other.to_owned())),
+    }
+}
+
+/// Computes file `name` ([`FileExtinction`]), with its phase table `table` if one is on file, on
+/// `threads` threads.
 ///
 /// # Errors
 ///
 /// [`RunTaskError::Input`] carrying a [`FitFileError`] if the file is neither a solid's nor a
-/// liquid's, has no index at 550 nm on its grid or one the Mie refuses, a cell lies off the fine
-/// grid, a half step lies off the table's grid, or the half-step check misses by more than
-/// [`HALVING_BOUND`]; as [`spectrum`] otherwise.
+/// liquid's, has no index at 550 nm on its grid or one the Mie refuses, its shape class or its
+/// phase table is not one it can take ([`basis_of`]), a sphere's optics cannot be computed, a
+/// cell lies off the fine grid, a half step lies off the table's grid, or the half-step check
+/// misses by more than [`HALVING_BOUND`]; as [`spectrum`] otherwise.
 pub(crate) fn fit_file(
     name: &'static str,
     file: &MaterialFile,
+    table: Option<&PhaseTableFile>,
     threads: NonZeroUsize,
 ) -> Result<FileExtinction, RunTaskError> {
     let fail = |cause: FitExtinctionError| input_error(name, cause);
@@ -1054,7 +1233,19 @@ pub(crate) fn fit_file(
     let (n, k) = index_at(file, EXTINCTION_WAVELENGTH_NM)
         .ok_or_else(|| fail(FitExtinctionError::NoIndexAt550))?;
     let index = ComplexIndex::new(n, k).map_err(|e| fail(FitExtinctionError::Mie(e)))?;
-    let spectrum = spectrum(index, threads)?;
+    let particles = basis_of(file, table, index).map_err(fail)?;
+    let spheres = spectrum(name, index, threads)?;
+    let (spectrum, basis) = match particles {
+        Particles::Spheres => (spheres, EntryBasis::Sphere),
+        Particles::Table(table) => {
+            let drawn = phase::table_particles(name, table, index, &spheres, threads)?;
+            let basis = EntryBasis::PhaseTable {
+                radii_m: drawn.radii_m,
+            };
+            (drawn.spectrum, basis)
+        }
+        Particles::SphereFallback => (spheres, EntryBasis::SphereFallback),
+    };
     let mut misses = Misses::default();
     let mut fit_kind = |kind: SizeDistributionKind| -> Result<Grid, RunTaskError> {
         let grid = grid_of(kind, &spectrum).map_err(fail)?;
@@ -1084,37 +1275,51 @@ pub(crate) fn fit_file(
         phase,
         variant: file.variant().map(str::to_owned),
         stand_in: file.provenance() == "standIn",
+        basis,
         gamma,
         log_normal,
         misses,
     })
 }
 
-/// Computes every file of `part` in `manifest`'s material directory.
+/// Computes every file of `part` in `manifest`'s material directory, each with its phase table
+/// from the `phase/` directory beside them if the part lists one under the file's name.
 ///
 /// # Errors
 ///
-/// [`RunTaskError::Input`] carrying [`FitExtinctionError::WrongMaterials`] if the manifest names
-/// other files than the part's, or as [`fit_file`]; [`RunTaskError::Dataset`] if a file cannot
-/// be read.
+/// [`RunTaskError::Input`] carrying [`FitExtinctionError::WrongMaterials`] or
+/// [`FitExtinctionError::WrongPhaseTables`] if the manifest names other files or phase tables
+/// than the part's, or as [`fit_file`]; [`RunTaskError::Dataset`] if a file cannot be read.
 pub(crate) fn fit(
     part: &Part,
     manifest: &Manifest,
     threads: NonZeroUsize,
 ) -> Result<Vec<FileExtinction>, RunTaskError> {
+    let refuse = |cause: FitExtinctionError| RunTaskError::Input {
+        task: "condensate_extinction",
+        source: Box::new(cause),
+    };
     if manifest.materials() != part.files {
-        return Err(RunTaskError::Input {
-            task: "condensate_extinction",
-            source: Box::new(FitExtinctionError::WrongMaterials { part: part.name }),
-        });
+        return Err(refuse(FitExtinctionError::WrongMaterials {
+            part: part.name,
+        }));
     }
+    if manifest.phase() != part.phase {
+        return Err(refuse(FitExtinctionError::WrongPhaseTables {
+            part: part.name,
+        }));
+    }
+    let unreadable = |e| RunTaskError::Dataset(LoadDatasetError::Material(Box::new(e)));
     part.files
         .iter()
         .map(|&name| {
-            let file = manifest
-                .load_material(name)
-                .map_err(|e| RunTaskError::Dataset(LoadDatasetError::Material(Box::new(e))))?;
-            fit_file(name, &file, threads)
+            let file = manifest.load_material(name).map_err(unreadable)?;
+            let table = if part.phase.contains(&name) {
+                Some(manifest.load_phase(name).map_err(unreadable)?)
+            } else {
+                None
+            };
+            fit_file(name, &file, table.as_ref(), threads)
         })
         .collect()
 }
@@ -1163,53 +1368,84 @@ fn axes_items() -> Vec<TableItem> {
     ]
 }
 
-/// A file's four grid items.
+/// How a file's grid items name the particles drawn.
 #[must_use]
-fn file_items(file: &FileExtinction) -> Vec<TableItem> {
+const fn particles_drawn(basis: EntryBasis) -> &'static str {
+    match basis {
+        EntryBasis::Sphere => "Mie spheres",
+        EntryBasis::PhaseTable { .. } => "phase table's particles",
+        EntryBasis::SphereFallback => "equal-V/A spheres, a fallback,",
+    }
+}
+
+/// A file's four grid items, its grids moved into them.
+#[must_use]
+fn file_items(file: FileExtinction) -> Vec<TableItem> {
     let prefix = item_prefix(file.file);
-    let grid_item = |suffix: &str, what: &str, family: &str, rows: &[Vec<f64>]| TableItem::Nested {
-        name: format!("{prefix}_{suffix}"),
-        doc: vec![
-            format!("`{}`'s {what} at 550 nm over {family},", file.file),
-            "rows by effective radius, columns by effective variance.".to_owned(),
-        ],
-        rows: rows.to_vec(),
-    };
+    let drawn = particles_drawn(file.basis);
+    let grid_item =
+        |suffix: &str, what: &str, family: &str, rows: Vec<Vec<f64>>| TableItem::Nested {
+            name: format!("{prefix}_{suffix}"),
+            doc: vec![
+                format!("`{}`'s {what} at 550 nm", file.file),
+                format!("from its {drawn} over {family}:"),
+                "rows by effective radius, columns by effective variance.".to_owned(),
+            ],
+            rows,
+        };
+    let (gamma, log_normal) = (file.gamma, file.log_normal);
     vec![
         grid_item(
             "GAMMA_EXTINCTION",
             "area-weighted extinction efficiency",
             "the gamma distribution",
-            &file.gamma.extinction,
+            gamma.extinction,
         ),
         grid_item(
             "GAMMA_LN_ALBEDO",
             "single-scattering albedo's natural logarithm ln ω",
             "the gamma distribution",
-            &file.gamma.ln_albedo,
+            gamma.ln_albedo,
         ),
         grid_item(
             "LOG_NORMAL_EXTINCTION",
             "area-weighted extinction efficiency",
             "the log-normal",
-            &file.log_normal.extinction,
+            log_normal.extinction,
         ),
         grid_item(
             "LOG_NORMAL_LN_ALBEDO",
             "single-scattering albedo's natural logarithm ln ω",
             "the log-normal",
-            &file.log_normal.ln_albedo,
+            log_normal.ln_albedo,
         ),
     ]
 }
 
-/// The entries' source: each file's identity and its grids.
+/// The source of an entry's basis, a phase table's with its sizes.
+#[must_use]
+fn basis_source(basis: EntryBasis) -> String {
+    match basis {
+        EntryBasis::Sphere => "EntryBasis::Sphere".to_owned(),
+        EntryBasis::PhaseTable {
+            radii_m: (low, high),
+        } => format!(
+            "EntryBasis::PhaseTable {{ radii_m: ({}, {}) }}",
+            literal(low),
+            literal(high)
+        ),
+        EntryBasis::SphereFallback => "EntryBasis::SphereFallback".to_owned(),
+    }
+}
+
+/// The entries' source: each file's identity, basis, phase table's sizes and grids.
 #[must_use]
 fn entries_source(files: &[FileExtinction]) -> String {
     use std::fmt::Write;
     let mut out = format!(
         "/// The table's index files, in name order, each with its key, phase, variant, stand-in \
-         flag and grids.\n#[rustfmt::skip]\npub static ENTRIES: [ExtinctionEntry; {}] = [\n",
+         flag, basis,\n/// phase table's sizes and grids.\n#[rustfmt::skip]\npub static ENTRIES: \
+         [ExtinctionEntry; {}] = [\n",
         files.len()
     );
     for file in files {
@@ -1227,22 +1463,27 @@ fn entries_source(files: &[FileExtinction]) -> String {
             out,
             "    ExtinctionEntry {{\n        file: {:?},\n        key: {:?},\n        phase: \
              crate::substance::CondensedPhase::{phase},\n        variant: {variant},\n        \
-             stand_in: {},\n        gamma_extinction: &{prefix}_GAMMA_EXTINCTION,\n        \
+             stand_in: {},\n        basis: {},\n        gamma_extinction: \
+             &{prefix}_GAMMA_EXTINCTION,\n        \
              gamma_ln_albedo: &{prefix}_GAMMA_LN_ALBEDO,\n        log_normal_extinction: \
              &{prefix}_LOG_NORMAL_EXTINCTION,\n        log_normal_ln_albedo: \
              &{prefix}_LOG_NORMAL_LN_ALBEDO,\n    }},",
-            file.file, file.key, file.stand_in
+            file.file,
+            file.key,
+            file.stand_in,
+            basis_source(file.basis),
         );
     }
     out.push_str("];\n");
     out
 }
 
-/// The table of `part` for `files`.
+/// The table of `part` for `files`, their grids moved into its items.
 #[must_use]
-pub(crate) fn render(part: &Part, files: &[FileExtinction]) -> RustTable {
+pub(crate) fn render(part: &Part, files: Vec<FileExtinction>) -> RustTable {
+    let entries = entries_source(&files);
     let mut items = vec![TableItem::Source(
-        "use crate::substance::aerosol::ExtinctionEntry;\n".to_owned(),
+        "use crate::substance::aerosol::{EntryBasis, ExtinctionEntry};\n".to_owned(),
     )];
     if part.axes {
         items.extend(axes_items());
@@ -1250,21 +1491,17 @@ pub(crate) fn render(part: &Part, files: &[FileExtinction]) -> RustTable {
     for file in files {
         items.extend(file_items(file));
     }
-    items.push(TableItem::Source(entries_source(files)));
+    items.push(TableItem::Source(entries));
     let mut notes = vec![
-        "Each index file's Mie spheres at its index at 550 nm, found by wavelength on its own grid"
-            .to_owned(),
-        "(every shape class a sphere of equal volume to projected area), averaged over Hansen and"
-            .to_owned(),
-        "Travis 1974's gamma distribution and the log-normal on a fine grid even in ln r: the"
-            .to_owned(),
-        "area-weighted `Q̄_ext` and ln ω, the albedo's logarithm, to five significant digits, on the"
-            .to_owned(),
-        "grid of `EFFECTIVE_RADII_M` and the variances. `substance::aerosol` interpolates them (ln"
-            .to_owned(),
-        "`Q̄_ext` and ln ω) by Lagrange's cubic in ln `r_eff` and ln(`v_eff` + 0.05) and applies the"
-            .to_owned(),
-        "row's grain density.".to_owned(),
+        "Each index file's particles at its index at 550 nm, found by wavelength on its own grid:".to_owned(),
+        "a `sphere` file's Mie spheres; a `nonSphericalMineral` or `crystal` file's own phase table".to_owned(),
+        "(R08.T5.c's `C_ext` and `C_sca`, read as the client reads them, spheres outside its".to_owned(),
+        "sizes), or with none the sphere of equal volume to projected area, a fallback. Each is".to_owned(),
+        "averaged over Hansen and Travis 1974's gamma distribution and the log-normal of r = 3V ÷ 4A".to_owned(),
+        "on a fine grid even in ln r: the area-weighted `Q̄_ext` = ⟨`C_ext`⟩ ÷ ⟨A⟩ and ln ω, the".to_owned(),
+        "albedo's logarithm, to five significant digits, on the grid of `EFFECTIVE_RADII_M` and the".to_owned(),
+        "variances. `substance::aerosol` interpolates them (ln `Q̄_ext` and ln ω) by Lagrange's".to_owned(),
+        "cubic in ln `r_eff` and ln(`v_eff` + 0.05) and applies the row's grain density.".to_owned(),
     ];
     if !part.axes {
         notes.push(String::new());
@@ -1335,7 +1572,8 @@ impl FitTask for CondensateExtinctionTask {
     }
 
     /// The sim values the table depends on: the two families' variance-node counts, which the
-    /// sim's entry type fixes; the material files are the inputs hash's.
+    /// sim's entry type fixes, and the wavelength the sim reads the table at, which the fit finds
+    /// each index at; the material files and phase tables are the inputs hash's.
     fn fingerprint(&self) -> SimFingerprint {
         #[expect(
             clippy::cast_precision_loss,
@@ -1349,6 +1587,10 @@ impl FitTask for CondensateExtinctionTask {
             (
                 "log-normal variance nodes".to_owned(),
                 LOG_NORMAL_VARIANCE_NODES as f64,
+            ),
+            (
+                "extinction wavelength nm".to_owned(),
+                EXTINCTION_WAVELENGTH_NM,
             ),
         ])
     }
@@ -1366,11 +1608,16 @@ impl FitTask for CondensateExtinctionTask {
                 .max_by(|a, b| pick(&a.misses).total_cmp(&pick(&b.misses)))
                 .map_or("none", |f| f.file)
         };
+        let count = |is: fn(EntryBasis) -> bool| files.iter().filter(|f| is(f.basis)).count();
         let acceptance = format!(
-            "{} index files at 550 nm, found by wavelength on each file's grid; the half-step check: \
-             `Q̄_ext` within {:.2e} ({}) and ω within {:.2e} ({}) of the direct values, against \
-             {HALVING_BOUND:e}; 1 − ω within {:.2e}",
+            "{} index files at 550 nm, found by wavelength on each file's grid (by phase table {}, \
+             by spheres {}, by the sphere fallback {}); the half-step check: `Q̄_ext` within {:.2e} \
+             ({}) and ω within {:.2e} ({}) of the direct values, against {HALVING_BOUND:e}; 1 − ω \
+             within {:.2e}",
             files.len(),
+            count(|b| matches!(b, EntryBasis::PhaseTable { .. })),
+            count(|b| matches!(b, EntryBasis::Sphere)),
+            count(|b| matches!(b, EntryBasis::SphereFallback)),
             worst.extinction,
             worst_file(|m| m.extinction),
             worst.albedo,
@@ -1378,12 +1625,15 @@ impl FitTask for CondensateExtinctionTask {
             worst.coalbedo,
         );
         Ok(TaskOutput {
-            table: render(part, &files),
+            table: render(part, files),
             source: "rendering plan R08's committed index files \
                      (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`), each citing its \
-                     own primaries; Mie spheres by Wiscombe 1980 (Appl. Opt. 19, 1505; \
-                     NCAR/TN-140+STR, 1996 edition), held to MIEV0's test cases; the size \
-                     distributions of Hansen and Travis 1974 (Space Sci. Rev. 16, 527, (2.53)–(2.61))"
+                     own primaries, and its phase tables (`materials/phase/`): `TAMUdust2020`'s \
+                     hexahedra (Saito et al. 2021, J. Atmos. Sci. 78, 2089) and Yang et al. 2013's \
+                     ice aggregate (J. Atmos. Sci. 70, 330), adapted CC BY 4.0 data; Mie spheres by \
+                     Wiscombe 1980 (Appl. Opt. 19, 1505; NCAR/TN-140+STR, 1996 edition), held to \
+                     MIEV0's test cases; the size distributions of Hansen and Travis 1974 (Space Sci. \
+                     Rev. 16, 527, (2.53)–(2.61))"
                 .to_owned(),
             acceptance,
             provisional: None,
@@ -1399,7 +1649,7 @@ mod tests {
     use hyperion_testkit::float::assert_same_bits;
 
     use super::*;
-    use crate::materials::MATERIALS_FROM_CRATE;
+    use crate::materials::{MATERIALS_FROM_CRATE, PHASE_FROM_MATERIALS};
 
     /// The repository's material directory.
     fn dir() -> PathBuf {
@@ -1435,7 +1685,7 @@ mod tests {
             let u = fine_ln_radius(grid, j) - math::ln(radius_m);
             if (low..=high).contains(&u) {
                 let w = math::exp(ln_area_weight(kind, variance, u));
-                area += w;
+                area += w * spectrum.area[j];
                 extinction += w * spectrum.q_ext[j];
                 absorption += w * (spectrum.q_ext[j] - spectrum.q_sca[j]);
             }
@@ -1510,14 +1760,16 @@ mod tests {
 
     /// Venus's four deck modes at n = 1.44 (science-r08-sulphur-co2ice.md), combined by mass at
     /// the 75 wt% acid's 1,662.6 kg m⁻³, give the note's 417 m² kg⁻¹ within 2% and its τ(550) of
-    /// 34.5. The modal radii 0.30, 1.00, 1.40 and 3.65 µm and ln σ 0.44, 0.25, 0.21 and 0.25 are
-    /// J. B. Pollack et al.'s (Icarus 103, 1–42, 1993); the columns 3.97 × 10⁸, 7.50 × 10⁷,
-    /// 6.05 × 10⁷ and 1.33 × 10⁷ cm⁻² are N₀ (`z_c` + `H_up` + `H_lo`) of R. Haus et al.'s profiles
-    /// (Icarus 272, 178–205, 2016), both as Reyes-Guerrero, Pérez-Hoyos and Garate-Lopez 2026
-    /// tabulate them (arXiv:2607.22187, §3.1 and Table 2).
+    /// 34.5. The modal radii 0.30, 1.00, 1.40 and 3.65 µm are J. B. Pollack et al.'s (Icarus 103,
+    /// 1–42, 1993), and ln σ 0.44, 0.25, 0.21 and 0.25 are rounded to two decimals as
+    /// Reyes-Guerrero, Pérez-Hoyos and Garate-Lopez 2026 print them (arXiv:2607.22187, §3.1), from
+    /// Pollack et al. 1993's `σ_g` = 1.56, 1.29, 1.23 and 1.28 (R. Haus et al., Icarus 272,
+    /// 178–205, 2016, §2); these values reproduce the sulphur note's. The columns 3.97 × 10⁸,
+    /// 7.50 × 10⁷, 6.05 × 10⁷ and 1.33 × 10⁷ cm⁻² are N₀ (`z_c` + `H_up` + `H_lo`) of Haus et
+    /// al.'s profiles, as Reyes-Guerrero et al. tabulate them (Table 2).
     #[test]
     fn condensate_extinction_venus_modes_give_the_sulphur_note_s_417() {
-        let spectrum = spectrum(index(1.44, 0.0), threads()).unwrap();
+        let spectrum = spectrum("test.json", index(1.44, 0.0), threads()).unwrap();
         let density = 1_662.6;
         let (mut tau, mut mass) = (0.0, 0.0);
         for (modal_radius_m, ln_sigma, column_per_cm2) in [
@@ -1564,7 +1816,7 @@ mod tests {
         let x = size_parameter(FIRST_RADIUS_M);
         let fine = fine_grid();
         for (n, k) in [(1.33, 0.0), (1.57, 0.53)] {
-            let spectrum = spectrum(index(n, k), threads()).unwrap();
+            let spectrum = spectrum("test.json", index(n, k), threads()).unwrap();
             let (k_re, k_im) = polarisability(n, k);
             for kind in [SizeDistributionKind::Gamma, SizeDistributionKind::LogNormal] {
                 for v in [0.04, 0.2] {
@@ -1601,7 +1853,7 @@ mod tests {
         let top = fine.below + radius_offsets()[GAMMA_RADII - 1];
         let x = size_parameter(effective_radii_m()[GAMMA_RADII - 1]);
         for (n, k) in [(1.334, 2.5e-9), (1.547, 0.0), (1.57, 0.53), (3.18, 3.33)] {
-            let spectrum = spectrum(index(n, k), threads()).unwrap();
+            let spectrum = spectrum("test.json", index(n, k), threads()).unwrap();
             for v in [0.04, 0.45] {
                 let c = cell(&spectrum, top, &kernel(SizeDistributionKind::Gamma, v)).unwrap();
                 let excess = c.extinction - 2.0;
@@ -1621,18 +1873,34 @@ mod tests {
         }
     }
 
+    /// The phase table under `name`, if one is on file.
+    fn table(name: &str) -> Option<PhaseTableFile> {
+        PARTS
+            .iter()
+            .any(|p| p.phase.contains(&name))
+            .then(|| PhaseTableFile::read(&dir().join(PHASE_FROM_MATERIALS), name).unwrap())
+    }
+
+    /// File `name` fitted as the task fits it, with its phase table if it has one.
+    fn fitted(name: &'static str) -> FileExtinction {
+        fit_file(name, &read(name), table(name).as_ref(), threads()).unwrap()
+    }
+
     /// The hardest files meet the half-step bound: the lossless high-index titanium dioxide and
-    /// zinc sulphide, whose narrow resonances are the sharpest, manganese sulphide (n 2.87), the
-    /// worst of the fit, and the absorbing tholin, whose ω falls furthest at small sizes.
+    /// zinc sulphide, whose spheres' narrow resonances are the sharpest, manganese sulphide (n
+    /// 2.87), a longwave table with a floor's node, potassium chloride, a shortwave floor's table
+    /// whose spheres above it continue it, and the absorbing tholin, whose ω falls furthest at
+    /// small sizes.
     #[test]
     fn condensate_extinction_the_hardest_files_meet_the_half_step_bound() {
         for name in [
             "titanium-dioxide.json",
             "zinc-sulphide.json",
             "manganese-sulphide.json",
+            "potassium-chloride.json",
             "tholin.json",
         ] {
-            let fitted = fit_file("test.json", &read(name), threads()).unwrap();
+            let fitted = fitted(name);
             assert!(
                 !fitted.misses.exceed_the_bound(),
                 "{name}: {:?}",
@@ -1675,8 +1943,8 @@ mod tests {
         };
         for name in ["titanium-dioxide.json", "manganese-sulphide.json"] {
             let (n, k) = index_at(&read(name), EXTINCTION_WAVELENGTH_NM).unwrap();
-            let standard = spectrum(index(n, k), threads()).unwrap();
-            let fine = spectrum_with(index(n, k), threads(), refined).unwrap();
+            let standard = spectrum("test.json", index(n, k), threads()).unwrap();
+            let fine = spectrum_with("test.json", index(n, k), threads(), refined).unwrap();
             // The worst change below 30 µm, and above it, of `Q̄_ext` and of ω.
             let mut worst = [0.0_f64; 4];
             let radii = effective_radii_m();
@@ -1752,6 +2020,7 @@ mod tests {
                     items.push(format!("{prefix}_{suffix}"));
                 }
             }
+            items.push("ENTRIES".to_owned());
             assert_eq!(items, part.items, "{}", part.name);
             let manifest = Manifest::load(
                 &Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1760,15 +2029,237 @@ mod tests {
             )
             .unwrap();
             assert_eq!(manifest.materials(), part.files, "{}", part.name);
+            assert_eq!(manifest.phase(), part.phase, "{}", part.name);
             assert_eq!(manifest.task(), part.name);
         }
     }
 
-    /// The cause a refused fit carries.
+    /// The parts' phase lists are the client's: each lists, under its own name, the phase table
+    /// made for each of its `nonSphericalMineral` and `crystal` files that has one (the client's
+    /// `phaseFileOf`, by key, phase and variant), and every table on file is listed. That is all 20
+    /// minerals and water ice; the nine other ices take the sphere fallback, as the client takes
+    /// their extinction from Mie.
+    #[test]
+    fn condensate_extinction_the_phase_lists_are_the_client_s() {
+        let phase_dir = dir().join(PHASE_FROM_MATERIALS);
+        let mut tables: Vec<PhaseTableFile> = std::fs::read_dir(&phase_dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .filter(|name| {
+                Path::new(name)
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+            })
+            .map(|name| PhaseTableFile::read(&phase_dir, &name).unwrap())
+            .collect();
+        tables.sort_by(|a, b| a.key().cmp(b.key()));
+        let mut listed = 0;
+        let mut fallbacks = Vec::new();
+        for part in &PARTS {
+            for &name in part.files {
+                let file = read(name);
+                let own = tables.iter().find(|t| t.serves(&file));
+                let non_spherical = matches!(file.shape(), "nonSphericalMineral" | "crystal");
+                assert_eq!(
+                    part.phase.contains(&name),
+                    non_spherical && own.is_some(),
+                    "{name}"
+                );
+                if part.phase.contains(&name) {
+                    listed += 1;
+                    assert!(table(name).unwrap().serves(&file), "{name}");
+                } else if non_spherical {
+                    fallbacks.push(name);
+                }
+            }
+        }
+        assert_eq!(listed, tables.len());
+        assert_eq!(listed, 21);
+        assert_eq!(
+            fallbacks,
+            [
+                "ammonia-ice.json",
+                "ammonium-hydrosulphide.json",
+                "argon-ice.json",
+                "carbon-dioxide-ice.json",
+                "carbon-monoxide-ice.json",
+                "hydrogen-sulphide-ice.json",
+                "methane-ice.json",
+                "nitrogen-ice.json",
+                "oxygen-ice.json",
+            ]
+        );
+    }
+
+    /// The phase tables' cells are the client's quadrature of them: `Q̄_ext` and ω at grid nodes
+    /// of four files (a node at 550 nm, mars dust's; two nodes blended, basalt's; a floor's,
+    /// potassium chloride's; and Yang's ice, whose small crystals are spheres) against an
+    /// independent route, the client's `tableModeOptics` in pure Python, Gauss–Legendre panels of
+    /// order 6 at most 0.1 wide in ln r with the table's nodes for ends (`client_table.py`, in this
+    /// module's directory, run from the repository's root as
+    /// `python3 -I crates/hyperion-fit/src/tasks/condensate_extinction/client_table.py
+    /// apps/hyperion/src/renderer/src/view/atmosphere/materials <file> <family> <r_eff> <v_eff>`,
+    /// `r_eff` in µm), at the grid's radii 0.103 544, 0.897 847, 2.540 20 and 17.326 6 µm (nodes
+    /// 40, 67, 80 and 95) and variances 0.316 071 (gamma node 9), 0.072 927 1 (gamma node 2) and
+    /// 0.119 181 (log-normal node 4). Within 6 × 10⁻⁵ of `Q̄_ext` (the table's five digits) and 10⁻⁵ of ω; measured within
+    /// 1.9 × 10⁻⁵ and 1.3 × 10⁻⁶.
+    #[test]
+    fn condensate_extinction_a_phase_table_meets_the_client_s_quadrature() {
+        let gamma = SizeDistributionKind::Gamma;
+        let log_normal = SizeDistributionKind::LogNormal;
+        let cases: [(&'static str, SizeDistributionKind, usize, usize, f64, f64); 10] = [
+            (
+                "mars-dust.json",
+                gamma,
+                67,
+                9,
+                2.189_913_68,
+                0.931_545_952_5,
+            ),
+            (
+                "mars-dust.json",
+                gamma,
+                40,
+                9,
+                0.798_498_564_7,
+                0.982_006_616,
+            ),
+            (
+                "mars-dust.json",
+                log_normal,
+                67,
+                4,
+                2.143_264_887,
+                0.928_226_572_5,
+            ),
+            (
+                "mars-dust.json",
+                gamma,
+                95,
+                2,
+                2.016_407_103,
+                0.603_830_778_8,
+            ),
+            (
+                "water-ice.json",
+                gamma,
+                67,
+                9,
+                2.219_713_25,
+                0.999_999_971_4,
+            ),
+            (
+                "water-ice.json",
+                gamma,
+                95,
+                2,
+                2.015_622_642,
+                0.999_999_960_6,
+            ),
+            ("basalt.json", gamma, 67, 9, 2.189_841_547, 0.974_623_021_2),
+            ("basalt.json", gamma, 80, 2, 2.061_062_181, 0.927_684_263_5),
+            (
+                "potassium-chloride.json",
+                gamma,
+                40,
+                9,
+                0.780_190_236_1,
+                1.0,
+            ),
+            ("potassium-chloride.json", gamma, 80, 2, 2.046_323_351, 1.0),
+        ];
+        let mut files: Vec<(&str, FileExtinction)> = Vec::new();
+        for (name, kind, k, j, q, omega) in cases {
+            if !files.iter().any(|(n, _)| *n == name) {
+                files.push((name, fitted(name)));
+            }
+            let (_, fit) = files.iter().find(|(n, _)| *n == name).unwrap();
+            assert!(matches!(fit.basis, EntryBasis::PhaseTable { .. }), "{name}");
+            let grid = match kind {
+                SizeDistributionKind::Gamma => &fit.gamma,
+                SizeDistributionKind::LogNormal => &fit.log_normal,
+            };
+            let q_miss = (grid.extinction[k][j] / q - 1.0).abs();
+            let omega_miss = (math::exp(grid.ln_albedo[k][j]) / omega - 1.0).abs();
+            assert!(
+                q_miss < 6e-5,
+                "{name} {kind:?} [{k}][{j}]: {} against {q}",
+                grid.extinction[k][j]
+            );
+            assert!(
+                omega_miss < 1e-5,
+                "{name} {kind:?} [{k}][{j}]: ω miss {omega_miss:e}"
+            );
+        }
+    }
+
+    /// At R08's Mars mode (gamma, `r_eff` 0.8974 µm, `v_eff` 0.3; science-r08-mmf.md §3), at 2,600
+    /// kg m⁻³, the hexahedra of `mars-dust.json`'s table give 704 m² kg⁻¹ and ω 0.931, where its
+    /// equal-V/A spheres would give 832 and 0.943 (science-r08-nonspherical.md §6.4's gap; the
+    /// client's route in Python gives 704.2).
+    #[test]
+    fn condensate_extinction_mars_dust_takes_the_hexahedra() {
+        let name = "mars-dust.json";
+        let file = read(name);
+        let (n, k) = index_at(&file, EXTINCTION_WAVELENGTH_NM).unwrap();
+        let spheres = spectrum(name, index(n, k), threads()).unwrap();
+        let table = table(name).unwrap();
+        let hexahedra = phase::table_particles(name, &table, index(n, k), &spheres, threads())
+            .unwrap()
+            .spectrum;
+        let (radius, variance) = (0.8974e-6, 0.3);
+        let kappa = |c: Cell| 3.0 * c.extinction / (4.0 * 2_600.0 * radius);
+        let hex = cell_at(&hexahedra, SizeDistributionKind::Gamma, variance, radius);
+        let sphere = cell_at(&spheres, SizeDistributionKind::Gamma, variance, radius);
+        assert!((kappa(hex) - 704.2).abs() < 0.5, "{}", kappa(hex));
+        assert!((1.0 - hex.coalbedo - 0.931_5).abs() < 1e-4, "{hex:?}");
+        assert!((kappa(sphere) - 831.5).abs() < 0.5, "{}", kappa(sphere));
+        assert!((1.0 - sphere.coalbedo - 0.943_2).abs() < 1e-4, "{sphere:?}");
+    }
+
+    /// A non-spherical file with no phase table of its own falls back to spheres, labelled: an ice
+    /// but water's, whose grids are its spheres'; so does one whose index lies outside the
+    /// hexahedra's kernels, titanium dioxide; and water ice and the minerals take their tables.
+    #[test]
+    fn condensate_extinction_a_file_with_no_table_falls_back_to_spheres() {
+        let titania = fitted("titanium-dioxide.json");
+        assert_eq!(titania.basis, EntryBasis::SphereFallback);
+        let ammonia = fitted("ammonia-ice.json");
+        assert_eq!(ammonia.basis, EntryBasis::SphereFallback);
+        let (n, k) = index_at(&read("ammonia-ice.json"), EXTINCTION_WAVELENGTH_NM).unwrap();
+        let spheres = spectrum("ammonia-ice.json", index(n, k), threads()).unwrap();
+        assert_eq!(
+            ammonia.gamma,
+            grid_of(SizeDistributionKind::Gamma, &spheres).unwrap()
+        );
+        assert_eq!(fitted("water.json").basis, EntryBasis::Sphere);
+        for name in ["water-ice.json", "iron.json", "manganese-sulphide.json"] {
+            let EntryBasis::PhaseTable {
+                radii_m: (low, high),
+            } = fitted(name).basis
+            else {
+                panic!("{name} takes its phase table");
+            };
+            assert!(low > 0.0 && high > 100.0 * low, "{name}: {low} to {high}");
+        }
+    }
+
+    /// The cause a refused part carries.
+    fn cause_of_part(result: Result<Vec<FileExtinction>, RunTaskError>) -> FitExtinctionError {
+        cause(result.map(|mut files| files.remove(0)))
+    }
+
+    /// The cause a refused fit carries: a file's, or the part's.
     fn cause(result: Result<FileExtinction, RunTaskError>) -> FitExtinctionError {
         match result {
             Err(RunTaskError::Input { source, .. }) => {
-                source.downcast_ref::<FitFileError>().unwrap().cause.clone()
+                if let Some(file) = source.downcast_ref::<FitFileError>() {
+                    file.cause().clone()
+                } else if let Some(part) = source.downcast_ref::<FitExtinctionError>() {
+                    part.clone()
+                } else {
+                    panic!("an input error of another kind: {source}")
+                }
             }
             other => panic!("not an input error: {other:?}"),
         }
@@ -1784,13 +2275,10 @@ mod tests {
             b"task = \"condensate_extinction\"\nmaterials = [\"water.json\"]\n".to_vec(),
         )
         .unwrap();
-        match fit(&PARTS[0], &other, threads()) {
-            Err(RunTaskError::Input { source, .. }) => assert!(matches!(
-                source.downcast_ref::<FitExtinctionError>(),
-                Some(FitExtinctionError::WrongMaterials { .. })
-            )),
-            other => panic!("{other:?}"),
-        }
+        assert!(matches!(
+            cause_of_part(fit(&PARTS[0], &other, threads())),
+            FitExtinctionError::WrongMaterials { .. }
+        ));
         let scratch = tempfile::tempdir().unwrap();
         let write = |name: &str, phase: &str, grid: &str| {
             std::fs::write(
@@ -1805,16 +2293,77 @@ mod tests {
         };
         let red = write("red.json", "solid", "[600,780]");
         assert_eq!(
-            cause(fit_file("red.json", &red, threads())),
+            cause(fit_file("red.json", &red, None, threads())),
             FitExtinctionError::NoIndexAt550
         );
         let vapour = write("vapour.json", "gas", "[380,780]");
         assert!(matches!(
-            cause(fit_file("vapour.json", &vapour, threads())),
+            cause(fit_file("vapour.json", &vapour, None, threads())),
             FitExtinctionError::Phase(_)
         ));
+        // The phase tables: a manifest naming others, a sphere given one, a table made for another
+        // material, and a shape class the fit does not know.
+        let mut text = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("manifests/condensate_extinction.toml"),
+        )
+        .unwrap();
+        text = text.replace("phase = [", "phase = [\n    \"water-ice.json\",");
+        let wrong = Manifest::from_bytes(
+            Path::new("crates/hyperion-fit/manifests/condensate_extinction.toml"),
+            text.into_bytes(),
+        )
+        .unwrap();
+        assert!(matches!(
+            cause_of_part(fit(&PARTS[0], &wrong, threads())),
+            FitExtinctionError::WrongPhaseTables { .. }
+        ));
+        let dust = table("mars-dust.json").unwrap();
+        assert_eq!(
+            cause(fit_file(
+                "water.json",
+                &read("water.json"),
+                Some(&dust),
+                threads()
+            )),
+            FitExtinctionError::PhaseTableForSphere
+        );
+        assert!(matches!(
+            cause(fit_file(
+                "basalt.json",
+                &read("basalt.json"),
+                Some(&dust),
+                threads()
+            )),
+            FitExtinctionError::PhaseTableMismatch { .. }
+        ));
+        std::fs::write(
+            scratch.path().join("aggregate.json"),
+            r#"{"key":"X","phase":"solid","shape":"aggregate","provenance":"measured",
+               "wavelengthsNm":[380,780],"n":[1.3,1.3],"k":[0,0]}"#,
+        )
+        .unwrap();
+        let aggregate = MaterialFile::read(scratch.path(), "aggregate.json").unwrap();
+        assert!(matches!(
+            cause(fit_file("aggregate.json", &aggregate, None, threads())),
+            FitExtinctionError::Shape(_)
+        ));
+        // A Mie failure carries its file.
+        let failure = mie_failure("x.json", ComputeMieError::Unconverged { order: 3, cap: 9 });
+        match &failure {
+            RunTaskError::Input { source, .. } => {
+                assert_eq!(
+                    source.downcast_ref::<FitFileError>().unwrap().file(),
+                    "x.json"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            cause(Err(failure)),
+            FitExtinctionError::Mie(ComputeMieError::Unconverged { .. })
+        ));
         // A cell whose kernel reaches below the fine grid's first node.
-        let spectrum = spectrum(index(1.33, 0.0), threads()).unwrap();
+        let spectrum = spectrum("test.json", index(1.33, 0.0), threads()).unwrap();
         let wide = kernel(SizeDistributionKind::Gamma, 0.45);
         assert!(matches!(
             cell(&spectrum, 0, &wide),
@@ -1832,8 +2381,8 @@ mod tests {
     /// 1 everywhere.
     #[test]
     fn condensate_extinction_a_lossless_file_scatters_all_it_extinguishes() {
-        let salt = spectrum(index(1.546_91, 0.0), threads()).unwrap();
-        let soot = spectrum(index(1.57, 0.53), threads()).unwrap();
+        let salt = spectrum("test.json", index(1.546_91, 0.0), threads()).unwrap();
+        let soot = spectrum("test.json", index(1.57, 0.53), threads()).unwrap();
         for kind in [SizeDistributionKind::Gamma, SizeDistributionKind::LogNormal] {
             let lossless = grid_of(kind, &salt).unwrap();
             assert!(

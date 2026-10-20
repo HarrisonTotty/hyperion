@@ -2,8 +2,8 @@
 """Reduce NASA CEA's `thermo.inp` to the records P14.T49.d reads, kept verbatim (plan 14,
 P14.T49.d; `thermo_equilibrium`).
 
-Reads `thermo.inp` (McBride, Zehe and Gordon 2002, NASA/TP-2002-211556, Appendix A's layout) of
-NASA's `nasa/cea` repository at commit 2f79a647e85737742fb08a127da00d1ea1d069da, from
+Reads `thermo.inp` (McBride, Zehe and Gordon 2002, NASA/TP-2002-211556, the record layout of
+their Appendix C, Table C1, p. 43) of NASA's `nasa/cea` repository at commit 2f79a647e85737742fb08a127da00d1ea1d069da, from
 `crates/hyperion-fit/data/cache/nasa_cea_thermo/` or the path given as the first argument, checks
 its SHA-256, and writes beside this file, or to the path given as the second argument, a library
 in the same layout holding only:
@@ -21,6 +21,10 @@ followed by the file's own `END PRODUCTS` and `END REACTANTS` lines. Nothing is 
 re-encoded, so the output is a CEA library in its own right. A name the file holds twice
 (`Cr(cr)`, `Fe(a)` and `Ni(cr)`, each a condensed phase below and above its lambda transition) is
 copied with both its records.
+
+Ahead of the header the output carries one line of its own, `NOTICE`, a comment in the library's
+own form (`!`), stating that the file was changed (Apache 2.0, §4(b)). CEA's readers, and
+`hyperion-fit`'s, skip everything before the `thermo` line.
 """
 import hashlib
 import pathlib
@@ -49,6 +53,8 @@ REFERENCES = [
 ]
 # The cross-checks' records.
 CROSS_CHECKS = ["MgSO4(II)", "MgSO4(I)", "MgO(cr)", "SO3", "C", "C2", "C3", "C4", "C5"]
+# The change notice (Apache 2.0, §4(b)), the output's first line.
+NOTICE = b"! Changed by HYPERION: reduce.py kept only the 111 records P14.T49.d reads.\r\n"
 
 
 def records(lines: list[bytes]) -> tuple[int, list[tuple[str, int, int]], int, int]:
@@ -90,7 +96,7 @@ def main(argv: list[str]) -> None:
     missing = [name for name in wanted if name not in names]
     if missing:
         raise ValueError(f"the file holds no record named {missing}")
-    chunks = lines[:header_end]
+    chunks = [NOTICE] + lines[:header_end]
     for name, start, end in spans:
         if name in wanted:
             chunks += lines[start:end]

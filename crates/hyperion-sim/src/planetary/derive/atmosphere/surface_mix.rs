@@ -200,8 +200,9 @@ fn pass_condensates(
     Some((solved, published))
 }
 
-/// The largest Bond albedo the type holds, the largest `f64` below 1: a lossless frost's
-/// visible-only Bond albedo of 1 (nitrogen's, until P14.T49.i's infrared) is held just below it.
+/// The largest Bond albedo the type holds, the largest `f64` below 1: a lossless frost's Bond
+/// albedo of 1 (`O2`'s, `Ar`'s, `H2S`'s and `NH4SH`'s, which P14.T49.i holds lossless to 5 µm, no
+/// infrared primary being found for them) is held just below it.
 pub(crate) const LARGEST_BOND_ALBEDO: f64 = 1.0 - f64::EPSILON / 2.0;
 
 /// The area mix's albedo `value` as a [`BondAlbedo`], held into 0 ≤ A < 1

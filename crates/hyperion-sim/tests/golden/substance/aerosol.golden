@@ -1,0 +1,164 @@
+# generator_version = 22
+[gamma]
+Al2O3 solid gamma r_eff 1.05e-9 m v_eff 0.0415: basis sphere fallback, stand-in false
+Al2O3 solid gamma r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x3f61a8c3f5740602  # 0.002155668956789426
+Al2O3 solid gamma r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3e49da4321238928  # 1.2038548856086228e-8
+Al2O3 solid gamma r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+Al2O3 solid gamma r_eff 3.7e-7 m v_eff 0.137: basis sphere fallback, stand-in false
+Al2O3 solid gamma r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x409867ed914be168  # 1561.981999574311
+Al2O3 solid gamma r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x40089736b1c8e3f0  # 3.073834790175617
+Al2O3 solid gamma r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+Al2O3 solid gamma r_eff 9.9e-5 m v_eff 0.44: basis sphere fallback, stand-in false
+Al2O3 solid gamma r_eff 9.9e-5 m v_eff 0.44: mass_extinction_m2_per_kg = 0x400ec248132b89a7  # 3.844864034429708
+Al2O3 solid gamma r_eff 9.9e-5 m v_eff 0.44: extinction_efficiency = 0x4000322fec2f5a2a  # 2.0245054676008936
+Al2O3 solid gamma r_eff 9.9e-5 m v_eff 0.44: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+mars_dust solid gamma r_eff 1.05e-9 m v_eff 0.0415: basis phase table, stand-in false
+mars_dust solid gamma r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x40358d70f2488a4e  # 21.55250467558863
+mars_dust solid gamma r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3f1490c3ed7f8d6e  # 7.845111701914261e-5
+mars_dust solid gamma r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3f30f5426d40d0ed  # 0.00025875922915764745
+mars_dust solid gamma r_eff 3.7e-7 m v_eff 0.137: basis phase table, stand-in false
+mars_dust solid gamma r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x409dcdfb1674cfa1  # 1907.4952028514601
+mars_dust solid gamma r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x400392cd3baac5f8  # 2.4466805135241394
+mars_dust solid gamma r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3fef26916bbe7e22  # 0.9734580139519873
+mars_dust solid gamma r_eff 9.9e-5 m v_eff 0.44: basis phase table, stand-in false
+mars_dust solid gamma r_eff 9.9e-5 m v_eff 0.44: mass_extinction_m2_per_kg = 0x4017656cd8920130  # 5.849048026954094
+mars_dust solid gamma r_eff 9.9e-5 m v_eff 0.44: extinction_efficiency = 0x40000f2435a06dc4  # 2.0073932828506447
+mars_dust solid gamma r_eff 9.9e-5 m v_eff 0.44: single_scattering_albedo = 0x3fe1e0df830e9ce1  # 0.558700328799116
+H2O solid gamma r_eff 1.05e-9 m v_eff 0.0415: basis spheres outside the phase table, stand-in false
+H2O solid gamma r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x3f60f66b15b4b8a0  # 0.0020706264018804516
+H2O solid gamma r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3e27013757be5710  # 2.6781054578395023e-9
+H2O solid gamma r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3fef40b267199289  # 0.9766475690526742
+H2O solid gamma r_eff 3.7e-7 m v_eff 0.137: basis phase table, stand-in false
+H2O solid gamma r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40b14634a8f915d8  # 4422.205703323205
+H2O solid gamma r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x40001fb10ecf9f4f  # 2.0154744298087404
+H2O solid gamma r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3feffffff5e24aa3  # 0.9999999811573911
+H2O solid gamma r_eff 9.9e-5 m v_eff 0.44: basis phase table, stand-in false
+H2O solid gamma r_eff 9.9e-5 m v_eff 0.44: mass_extinction_m2_per_kg = 0x40306a4dd5a09b16  # 16.415250159941102
+H2O solid gamma r_eff 9.9e-5 m v_eff 0.44: extinction_efficiency = 0x400003ac70af8d0b  # 2.0017937472890757
+H2O solid gamma r_eff 9.9e-5 m v_eff 0.44: single_scattering_albedo = 0x3fefffff1492b182  # 0.9999995614830797
+Fe solid gamma r_eff 1.05e-9 m v_eff 0.0415: basis phase table, stand-in false
+Fe solid gamma r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x40a0bbc02ab1ec65  # 2141.8753257371013
+Fe solid gamma r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3f982d874167b863  # 0.02361117684079551
+Fe solid gamma r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3ef177d14b0a350c  # 1.6658818540228818e-5
+Fe solid gamma r_eff 3.7e-7 m v_eff 0.137: basis phase table, stand-in false
+Fe solid gamma r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40835c5c00d453f3  # 619.5449234569663
+Fe solid gamma r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x400340c5559a3567  # 2.406626385468076
+Fe solid gamma r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3fe3084910b45a64  # 0.5947614027271126
+Fe solid gamma r_eff 9.9e-5 m v_eff 0.44: basis spheres outside the phase table, stand-in false
+Fe solid gamma r_eff 9.9e-5 m v_eff 0.44: mass_extinction_m2_per_kg = 0x3fff38c53ec05a2d  # 1.9513599826074242
+Fe solid gamma r_eff 9.9e-5 m v_eff 0.44: extinction_efficiency = 0x400039b70638ac7f  # 2.0281811224027133
+Fe solid gamma r_eff 9.9e-5 m v_eff 0.44: single_scattering_albedo = 0x3fe8146f93b8d775  # 0.7524946103282973
+ice_giant_haze solid gamma r_eff 1.05e-9 m v_eff 0.0415: basis sphere, stand-in true
+ice_giant_haze solid gamma r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x402842291ed26635  # 12.129219973739149
+ice_giant_haze solid gamma r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3ef809accc531c24  # 2.2924225750366994e-5
+ice_giant_haze solid gamma r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3f2787ade9737cea  # 0.00017951963375304549
+ice_giant_haze solid gamma r_eff 3.7e-7 m v_eff 0.137: basis sphere, stand-in true
+ice_giant_haze solid gamma r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40b1ebce8886e4f1  # 4587.8067707356395
+ice_giant_haze solid gamma r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x4008719f22d8ba0c  # 3.055479309309936
+ice_giant_haze solid gamma r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3fefd17e42de64bf  # 0.9943229013471394
+ice_giant_haze solid gamma r_eff 9.9e-5 m v_eff 0.44: basis sphere, stand-in true
+ice_giant_haze solid gamma r_eff 9.9e-5 m v_eff 0.44: mass_extinction_m2_per_kg = 0x4026b93c9b5871ea  # 11.361790518328196
+ice_giant_haze solid gamma r_eff 9.9e-5 m v_eff 0.44: extinction_efficiency = 0x40003286bf030984  # 2.024671070366084
+ice_giant_haze solid gamma r_eff 9.9e-5 m v_eff 0.44: single_scattering_albedo = 0x3fe2fb071bcb487c  # 0.593143038068106
+NH3 solid gamma r_eff 1.05e-9 m v_eff 0.0415: basis sphere fallback, stand-in true
+NH3 solid gamma r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x3f710ade8bfd3f24  # 0.004160756419721943
+NH3 solid gamma r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3e3490ae0ecedd74  # 4.788198487816012e-9
+NH3 solid gamma r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+NH3 solid gamma r_eff 3.7e-7 m v_eff 0.137: basis sphere fallback, stand-in true
+NH3 solid gamma r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40bec8e12e040f92  # 7880.879608396341
+NH3 solid gamma r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x4009911c0f00e8b7  # 3.1958542987968843
+NH3 solid gamma r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+NH3 solid gamma r_eff 9.9e-5 m v_eff 0.44: basis sphere fallback, stand-in true
+NH3 solid gamma r_eff 9.9e-5 m v_eff 0.44: mass_extinction_m2_per_kg = 0x4032a8b13a6ff34c  # 18.658954288798938
+NH3 solid gamma r_eff 9.9e-5 m v_eff 0.44: extinction_efficiency = 0x400032525f6ff8a4  # 2.0245711761518397
+NH3 solid gamma r_eff 9.9e-5 m v_eff 0.44: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+[log-normal]
+Al2O3 solid log-normal r_eff 1.05e-9 m v_eff 0.0415: basis sphere fallback, stand-in false
+Al2O3 solid log-normal r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x3f61c50cd01875f2  # 0.0021691560985022057
+Al2O3 solid log-normal r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3e4a03ab84a2f8c2  # 1.2113869147695418e-8
+Al2O3 solid log-normal r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+Al2O3 solid log-normal r_eff 3.7e-7 m v_eff 0.137: basis sphere fallback, stand-in false
+Al2O3 solid log-normal r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x4098f826e69688ac  # 1598.0379889985006
+Al2O3 solid log-normal r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x4009288774c76c36  # 3.1447896121367434
+Al2O3 solid log-normal r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+Al2O3 solid log-normal r_eff 3.2e-5 m v_eff 0.64: basis sphere fallback, stand-in false
+Al2O3 solid log-normal r_eff 3.2e-5 m v_eff 0.64: mass_extinction_m2_per_kg = 0x402818ba433ecd23  # 12.048296071449448
+Al2O3 solid log-normal r_eff 3.2e-5 m v_eff 0.64: extinction_efficiency = 0x4000679a9bfa8ab4  # 2.050587862571172
+Al2O3 solid log-normal r_eff 3.2e-5 m v_eff 0.64: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+mars_dust solid log-normal r_eff 1.05e-9 m v_eff 0.0415: basis phase table, stand-in false
+mars_dust solid log-normal r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x40358d13764c8856  # 21.551078218159397
+mars_dust solid log-normal r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3f14906ab97fc9f7  # 7.844592471410021e-5
+mars_dust solid log-normal r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3f311092a9e83880  # 0.000260387236182498
+mars_dust solid log-normal r_eff 3.7e-7 m v_eff 0.137: basis phase table, stand-in false
+mars_dust solid log-normal r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x409e3a89d92fd893  # 1934.6346175647675
+mars_dust solid log-normal r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x4003da18212fe06d  # 2.4814913361297415
+mars_dust solid log-normal r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3fef29a8f36b1cbe  # 0.9738354448571938
+mars_dust solid log-normal r_eff 3.2e-5 m v_eff 0.64: basis phase table, stand-in false
+mars_dust solid log-normal r_eff 3.2e-5 m v_eff 0.64: mass_extinction_m2_per_kg = 0x4032276a6499dedd  # 18.153967177930884
+mars_dust solid log-normal r_eff 3.2e-5 m v_eff 0.64: extinction_efficiency = 0x40001c6d2a72fb94  # 2.0138800922717994
+mars_dust solid log-normal r_eff 3.2e-5 m v_eff 0.64: single_scattering_albedo = 0x3fe2ec79345415ff  # 0.5913663885154959
+H2O solid log-normal r_eff 1.05e-9 m v_eff 0.0415: basis spheres outside the phase table, stand-in false
+H2O solid log-normal r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x3f6110fe08775ef0  # 0.002083297880499539
+H2O solid log-normal r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3e2725418bbbb81a  # 2.6944944867912512e-9
+H2O solid log-normal r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3fef41dc34095a01  # 0.9767895714128941
+H2O solid log-normal r_eff 3.7e-7 m v_eff 0.137: basis phase table, stand-in false
+H2O solid log-normal r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40b15df70e004f30  # 4445.965057391484
+H2O solid log-normal r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x400035de5f24d0bf  # 2.0263030465231107
+H2O solid log-normal r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3feffffff5fd619e  # 0.9999999813544951
+H2O solid log-normal r_eff 3.2e-5 m v_eff 0.64: basis phase table, stand-in false
+H2O solid log-normal r_eff 3.2e-5 m v_eff 0.64: mass_extinction_m2_per_kg = 0x404984ee6ba18849  # 51.0385260142071
+H2O solid log-normal r_eff 3.2e-5 m v_eff 0.64: extinction_efficiency = 0x4000182a6b59b8fc  # 2.011799658465973
+H2O solid log-normal r_eff 3.2e-5 m v_eff 0.64: single_scattering_albedo = 0x3fefffffb8717a46  # 0.9999998667152077
+Fe solid log-normal r_eff 1.05e-9 m v_eff 0.0415: basis phase table, stand-in false
+Fe solid log-normal r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x40a0bbc12ba062fb  # 2141.8772859688593
+Fe solid log-normal r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3f982d88b4a44677  # 0.02361119844960632
+Fe solid log-normal r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3ef194a138125e08  # 1.67661523887402e-5
+Fe solid log-normal r_eff 3.7e-7 m v_eff 0.137: basis phase table, stand-in false
+Fe solid log-normal r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40835a15f6b09395  # 619.2607244296111
+Fe solid log-normal r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x40033e8288da32f2  # 2.4055224124516537
+Fe solid log-normal r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3fe30a87d34fc33b  # 0.5950354697398333
+Fe solid log-normal r_eff 3.2e-5 m v_eff 0.64: basis spheres outside the phase table, stand-in false
+Fe solid log-normal r_eff 3.2e-5 m v_eff 0.64: mass_extinction_m2_per_kg = 0x401850ef7bc4328f  # 6.0790385569095085
+Fe solid log-normal r_eff 3.2e-5 m v_eff 0.64: extinction_efficiency = 0x400056a01d76f1d7  # 2.0422975828098333
+Fe solid log-normal r_eff 3.2e-5 m v_eff 0.64: single_scattering_albedo = 0x3fe7e10d54bbd058  # 0.7462221770242747
+ice_giant_haze solid log-normal r_eff 1.05e-9 m v_eff 0.0415: basis sphere, stand-in true
+ice_giant_haze solid log-normal r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x4028422a1be70cdc  # 12.129227516130804
+ice_giant_haze solid log-normal r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3ef809adc71a76ce  # 2.2924240005487224e-5
+ice_giant_haze solid log-normal r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3f27ad4ddb5c4f23  # 0.00018064093972524576
+ice_giant_haze solid log-normal r_eff 3.7e-7 m v_eff 0.137: basis sphere, stand-in true
+ice_giant_haze solid log-normal r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40b20686dbf3ef66  # 4614.526793714473
+ice_giant_haze solid log-normal r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x400896111f29e32a  # 3.073274844613839
+ice_giant_haze solid log-normal r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3fefd1c3ae7e2311  # 0.9943560035763729
+ice_giant_haze solid log-normal r_eff 3.2e-5 m v_eff 0.64: basis sphere, stand-in true
+ice_giant_haze solid log-normal r_eff 3.2e-5 m v_eff 0.64: mass_extinction_m2_per_kg = 0x4041ce0f0d092ab0  # 35.60983431766124
+ice_giant_haze solid log-normal r_eff 3.2e-5 m v_eff 0.64: extinction_efficiency = 0x400068b4fcdbcd3a  # 2.051126456697287
+ice_giant_haze solid log-normal r_eff 3.2e-5 m v_eff 0.64: single_scattering_albedo = 0x3fe71d1376574e6c  # 0.7222993193958707
+NH3 solid log-normal r_eff 1.05e-9 m v_eff 0.0415: basis sphere fallback, stand-in true
+NH3 solid log-normal r_eff 1.05e-9 m v_eff 0.0415: mass_extinction_m2_per_kg = 0x3f71262e63bf31dd  # 0.004186803063884939
+NH3 solid log-normal r_eff 1.05e-9 m v_eff 0.0415: extinction_efficiency = 0x3e34b1a31f952b84  # 4.818172965918788e-9
+NH3 solid log-normal r_eff 1.05e-9 m v_eff 0.0415: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+NH3 solid log-normal r_eff 3.7e-7 m v_eff 0.137: basis sphere fallback, stand-in true
+NH3 solid log-normal r_eff 3.7e-7 m v_eff 0.137: mass_extinction_m2_per_kg = 0x40bf242abc665150  # 7972.16693725095
+NH3 solid log-normal r_eff 3.7e-7 m v_eff 0.137: extinction_efficiency = 0x4009dcec97476f00  # 3.232873136394005
+NH3 solid log-normal r_eff 3.7e-7 m v_eff 0.137: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+NH3 solid log-normal r_eff 3.2e-5 m v_eff 0.64: basis sphere fallback, stand-in true
+NH3 solid log-normal r_eff 3.2e-5 m v_eff 0.64: mass_extinction_m2_per_kg = 0x404d3d6ab6e4b670  # 58.479819165874574
+NH3 solid log-normal r_eff 3.2e-5 m v_eff 0.64: extinction_efficiency = 0x40006874e63ac6ae  # 2.051004217785553
+NH3 solid log-normal r_eff 3.2e-5 m v_eff 0.64: single_scattering_albedo = 0x3ff0000000000000  # 1.0
+[venus]
+H2SO4 75wt% liquid Venus mode 1: basis sphere, stand-in false
+H2SO4 75wt% liquid Venus mode 1: mass_extinction_m2_per_kg = 0x40a6a5f2e44067bb  # 2898.9743976713776
+H2SO4 75wt% liquid Venus mode 1: extinction_efficiency = 0x4009067f3d26d064  # 3.1281723763914204
+H2SO4 75wt% liquid Venus mode 1: single_scattering_albedo = 0x3fefffff9d82765c  # 0.9999998165473687
+H2SO4 75wt% liquid Venus mode 2: basis sphere, stand-in false
+H2SO4 75wt% liquid Venus mode 2: mass_extinction_m2_per_kg = 0x408cc7418356c694  # 920.9069887904502
+H2SO4 75wt% liquid Venus mode 2: extinction_efficiency = 0x400317feb3b45d89  # 2.3867162742059844
+H2SO4 75wt% liquid Venus mode 2: single_scattering_albedo = 0x3feffffeb878d18a  # 0.9999993899314614
+H2SO4 75wt% liquid Venus mode 3: basis sphere, stand-in false
+H2SO4 75wt% liquid Venus mode 3: mass_extinction_m2_per_kg = 0x4084c8925d04b262  # 665.0714664809168
+H2SO4 75wt% liquid Venus mode 3: extinction_efficiency = 0x40026fe9247ac8ac  # 2.304643902775828
+H2SO4 75wt% liquid Venus mode 3: single_scattering_albedo = 0x3feffffe36321369  # 0.9999991472728712
+H2SO4 75wt% liquid Venus mode 4: basis sphere, stand-in false
+H2SO4 75wt% liquid Venus mode 4: mass_extinction_m2_per_kg = 0x406c797e12761b20  # 227.79663966243334
+H2SO4 75wt% liquid Venus mode 4: extinction_efficiency = 0x40013d3738dd56fa  # 2.1548904840991527
+H2SO4 75wt% liquid Venus mode 4: single_scattering_albedo = 0x3feffffb3fbc29f3  # 0.9999977345299257

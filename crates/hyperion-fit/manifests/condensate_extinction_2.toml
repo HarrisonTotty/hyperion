@@ -1,10 +1,13 @@
 # Aerosol extinction at 550 nm (plan 14, P14.T49.e), the second of seven tables:
 # rendering plan R08's committed index files of the aerosol materials, seven to a table in name
-# order, each read where it lies and its data hash in the inputs hash (`hyperion_fit::materials`).
-# Each file's spheres at its index at 550 nm, found by wavelength on its own grid, averaged over
-# Hansen and Travis 1974's gamma distribution and the log-normal. The grid, the fine radius grid
-# and the half-step check are constants of `src/tasks/condensate_extinction.rs`; the task takes
-# no parameters and no dataset.
+# order, and the phase tables of those that have one (`materials/phase/`, under the index file's
+# name), each read where it lies and its data hash in the inputs hash (`hyperion_fit::materials`).
+# A sphere file's Mie spheres at its index at 550 nm, found by wavelength on its own grid; a
+# nonSphericalMineral or crystal file's own phase table's C_ext and C_sca, as the client reads
+# them (science-r08-nonspherical.md section 6.4), or with none equal-V/A spheres, a fallback; each
+# averaged over Hansen and Travis 1974's gamma distribution and the log-normal. The grid, the fine
+# radius grid and the half-step check are constants of `src/tasks/condensate_extinction.rs`; the
+# task takes no parameters and no dataset.
 task = "condensate_extinction_2"
 materials = [
     "basaltic-glass.json",
@@ -13,5 +16,10 @@ materials = [
     "carbon-dioxide-liquid.json",
     "carbon-monoxide-ice.json",
     "carbon-monoxide-liquid.json",
+    "chromium.json",
+]
+phase = [
+    "basaltic-glass.json",
+    "calcium-titanate.json",
     "chromium.json",
 ]

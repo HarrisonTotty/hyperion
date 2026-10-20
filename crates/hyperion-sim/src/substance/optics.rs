@@ -34,7 +34,8 @@
 //!     size is not stated ([`EndMember`], [`GrainScaling`]); w held at most
 //!     [`REGOLITH_MAX_SINGLE_SCATTERING_ALBEDO`];
 //!   - **a mixture** of such end-members at a cited pristine mode, weighted by cross-section
-//!     (Hapke 2012, §10: volume fraction over diameter), its silicates at the form's grains and the
+//!     (volume fraction over diameter: Hapke 2012, its section not read, as
+//!     decision-p14-t49i-rock-mixtures §2.1 states it), its silicates at the form's grains and the
 //!     phases its class's petrography puts below them at [`FINE_GRAIN_DIAMETER`]
 //!     ([`MixturePart`]; decision-p14-t49i-rock-mixtures);
 //!   - **measured levels** at a stated geometry, inverted as a spectrum ([`ReflectanceLevels`]).
@@ -228,7 +229,8 @@ pub enum OpticsInput {
         end_member: &'static EndMember,
     },
     /// An intimate mixture of laboratory end-members at a cited mode, weighted by cross-section,
-    /// volume fraction over diameter (Hapke 2012, §10; decision-p14-t49i-rock-mixtures §2.1): w̄ =
+    /// volume fraction over diameter (Hapke 2012, its section not read, as
+    /// decision-p14-t49i-rock-mixtures §2.1 states it): w̄ =
     /// Σ (fⱼ ÷ Dⱼ) wⱼ ÷ Σ (fⱼ ÷ Dⱼ), each part at the form's grain or at
     /// [`FINE_GRAIN_DIAMETER`] ([`MixturePart`]; P14.T49.i).
     Mixture {
@@ -257,39 +259,137 @@ pub const FINE_GRAIN_DIAMETER: Metres = Metres::new(1.0e-6);
 /// and geometry (Kokaly et al. 2017, USGS Data Series 1035).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Spectrometer {
-    /// The Beckman 5270 with its integrating sphere: a directional-hemispherical reflectance,
-    /// 0.2–3 µm, at the incidence of [`BECKMAN_INCIDENCE_DEG`].
+    /// The Beckman 5270 with its integrating sphere, 0.2–3 µm: inverted as a
+    /// directional-hemispherical reflectance at the adopted incidence of
+    /// [`BECKMAN_INCIDENCE_DEG`], though DS 1035 describes its powder measurements as biconical
+    /// reflectance factors (p. 4; plan 14's deferred findings from P14.T49.i).
     Beckman,
     /// The ASD (Analytical Spectral Devices) spectrometers: a reflectance factor at the geometry of
     /// [`ASD_GEOMETRY`], 0.35–2.5 µm.
     Asd,
 }
 
-/// The Beckman's beam's incidence on the sample, degrees: 10, the near-normal incidence of its
-/// integrating sphere, at which a spectrum is inverted as the similarity relation's
-/// directional-hemispherical albedo (P14.T49.i; its effect on the spherical albedo is at most
-/// 0.003 against normal incidence).
+/// The Beckman's beam's incidence on the sample, degrees: 10, adopted, the lane's prototype's
+/// value, at which a spectrum is inverted as the similarity relation's directional-hemispherical
+/// albedo (P14.T49.i).
+///
+/// No source gives it: DS 1035 states no angle for the Beckman (Kokaly et al. 2017, p. 4, which
+/// refers the instrument to Clark et al. 1990b, not read here), and says of its powder
+/// measurements, "Because the effect of the sample holder walls, these Beckman measurements are
+/// described as biconical reflectance factors (BCRF)". Normal incidence in its place moves a
+/// spherical albedo by at most 0.0023.
 pub const BECKMAN_INCIDENCE_DEG: f64 = 10.0;
 
 /// A measurement's geometry: the incidence and emission angles from the surface's normal and the
 /// azimuth between the planes of incidence and emission, degrees.
+///
+/// Built by [`Geometry::new`], which holds each angle to its range.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "each angle carries its unit, degrees, in its name, as the crate's rule for physical \
+              quantities asks, and the names reach hyperion-fit's fingerprint through `Debug`"
+)]
 pub struct Geometry {
+    incidence_deg: f64,
+    emission_deg: f64,
+    azimuth_deg: f64,
+}
+
+/// Why [`Geometry::new`] refused a geometry: the angle outside its range, degrees.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BuildGeometryError {
+    /// The incidence angle is not in [0, 90).
+    Incidence(f64),
+    /// The emission angle is not in [0, 90).
+    Emission(f64),
+    /// The azimuth is not in [0, 180].
+    Azimuth(f64),
+}
+
+impl std::fmt::Display for BuildGeometryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Incidence(deg) => write!(f, "the incidence angle {deg}° is not in [0, 90)"),
+            Self::Emission(deg) => write!(f, "the emission angle {deg}° is not in [0, 90)"),
+            Self::Azimuth(deg) => write!(f, "the azimuth {deg}° is not in [0, 180]"),
+        }
+    }
+}
+
+impl std::error::Error for BuildGeometryError {}
+
+impl Geometry {
+    /// The geometry of incidence `incidence_deg` and emission `emission_deg`, each from the
+    /// surface's normal in [0, 90), and azimuth `azimuth_deg` between their planes in [0, 180]:
+    /// 180 with the source and the detector on opposite sides of the normal, where the phase angle
+    /// is i + e.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildGeometryError::Incidence`], [`BuildGeometryError::Emission`] or
+    /// [`BuildGeometryError::Azimuth`] for the first angle outside its range, a NaN among them.
+    ///
+    /// # Examples
+    ///
+    /// A grazing beam is refused; the USGS laboratory's ASD geometry is not:
+    ///
+    /// ```
+    /// use hyperion_sim::substance::optics::{BuildGeometryError, Geometry};
+    ///
+    /// assert!(matches!(
+    ///     Geometry::new(90.0, 0.0, 0.0),
+    ///     Err(BuildGeometryError::Incidence(_))
+    /// ));
+    /// let asd = Geometry::new(20.0, 30.0, 90.0)?;
+    /// assert!((asd.incidence_deg() + asd.emission_deg() - 50.0).abs() < 1e-12);
+    /// # Ok::<(), BuildGeometryError>(())
+    /// ```
+    pub const fn new(
+        incidence_deg: f64,
+        emission_deg: f64,
+        azimuth_deg: f64,
+    ) -> Result<Self, BuildGeometryError> {
+        if !(incidence_deg >= 0.0 && incidence_deg < 90.0) {
+            return Err(BuildGeometryError::Incidence(incidence_deg));
+        }
+        if !(emission_deg >= 0.0 && emission_deg < 90.0) {
+            return Err(BuildGeometryError::Emission(emission_deg));
+        }
+        if !(azimuth_deg >= 0.0 && azimuth_deg <= 180.0) {
+            return Err(BuildGeometryError::Azimuth(azimuth_deg));
+        }
+        Ok(Self {
+            incidence_deg,
+            emission_deg,
+            azimuth_deg,
+        })
+    }
+
     /// The incidence angle i, degrees, in [0, 90).
-    pub incidence_deg: f64,
+    #[must_use]
+    pub const fn incidence_deg(&self) -> f64 {
+        self.incidence_deg
+    }
+
     /// The emission angle e, degrees, in [0, 90).
-    pub emission_deg: f64,
-    /// The azimuth between the planes of incidence and emission, degrees, in [0, 180]: 180 with the
-    /// source and the detector on opposite sides of the normal, where the phase angle is i + e.
-    pub azimuth_deg: f64,
+    #[must_use]
+    pub const fn emission_deg(&self) -> f64 {
+        self.emission_deg
+    }
+
+    /// The azimuth between the planes of incidence and emission, degrees, in [0, 180].
+    #[must_use]
+    pub const fn azimuth_deg(&self) -> f64 {
+        self.azimuth_deg
+    }
 }
 
 /// The ASD's geometry in the USGS laboratory: incidence 20°, emission 30°, in planes 90° apart, a
 /// phase angle of 35.5° (Kokaly et al. 2017, USGS Data Series 1035, p. 7).
-pub const ASD_GEOMETRY: Geometry = Geometry {
-    incidence_deg: 20.0,
-    emission_deg: 30.0,
-    azimuth_deg: 90.0,
+pub const ASD_GEOMETRY: Geometry = match Geometry::new(20.0, 30.0, 90.0) {
+    Ok(geometry) => geometry,
+    Err(_) => panic!("the ASD's geometry is inside its ranges"),
 };
 
 /// A spectrum of the USGS Spectral Library version 7, splib07a (Kokaly et al. 2017, USGS Data
@@ -479,15 +579,18 @@ impl ReflectanceLevels {
 }
 
 /// An infrared set: a row's optical constants beyond 780 nm, from its primaries, as
-/// `hyperion-fit`'s datasets hold them (P14.T49.i; decision-composition §5), each at one reference
-/// temperature, which the row's sources state. Closed, for the composition audit: a row gains one
+/// `hyperion-fit`'s datasets hold them (P14.T49.i; decision-composition §5). Each piece of a set
+/// holds at one reference temperature, which the row's sources state where its source gives one:
+/// a set may join pieces of different temperatures (water's 266 K and 100 K, methane's k at 40 K
+/// and n at 90 K), and ammonia's states none. Closed, for the composition audit: a row gains one
 /// where an open primary of its solid's infrared is found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum InfraredIndex {
     /// Ice Ih: Warren and Brandt 2008 at 266 K, with Grundy and Schmitt 1998's absorption at 100 K
     /// over 0.9623–2.742 µm.
     WaterIce,
-    /// CO₂ ice: Warren 1986, near 80 K.
+    /// CO₂ ice: Warren 1986's compilation of laboratory measurements, its emphasis on temperatures
+    /// above 77 K.
     CarbonDioxideIce,
     /// Methane ice I: Grundy, Schmitt and Quirico 2002's absorption at 40 K, with Martonchik and
     /// Orton 1994's real index.
@@ -498,7 +601,8 @@ pub enum InfraredIndex {
     /// α-CO ice: Gerakines, Materese and Hudson 2023's fundamental band at 25 K, transparent below
     /// it.
     CarbonMonoxideIce,
-    /// Ammonia ice: Martonchik, Orton and Appleby 1984's measured infrared from 1.462 µm.
+    /// Ammonia ice: Martonchik, Orton and Appleby 1984's measured infrared from 1.462 µm, at a
+    /// temperature its copy does not state.
     AmmoniaIce,
     /// Titan tholin: Khare et al. 1984, at room temperature.
     Tholin,
@@ -1413,13 +1517,30 @@ mod tests {
         }
     }
 
+    /// The mixtures whose mode, or a split or count inside it, no source gives: each mode `Adopted`
+    /// and saying it is an assumption (plan 14's T49.i record, "Modes no source gives").
+    const ADOPTED_MODES: [&str; 10] = [
+        "anorthosite",
+        "basalt_fe",
+        "komatiite",
+        "basalt_reduced",
+        "granite",
+        "ultramafic",
+        "ferric",
+        "phyllosilicate",
+        "chondrite_ci",
+        "cometary",
+    ];
+
     /// Every row names its sources and their basis: the fit, its reference form's photometry and
     /// grain size, and its input's: an index file, by name, and its infrared set where it has one,
-    /// once; each end-member's description (`Reduced`), a mixture's mode (`Reduced`) and its fine
-    /// grains (`Adopted`) where it has any; levels' measurement; and a stand-in's reason, where it
-    /// comes from no index file whose own source gives it.
+    /// once; each end-member's description (`Reduced`), a mixture's mode (`Reduced` where its
+    /// source gives it, `Adopted` and saying it is an assumption where none does, the rows of
+    /// [`ADOPTED_MODES`]) and its fine grains (`Adopted`) where it has any; levels' measurement;
+    /// and a stand-in's reason, where it comes from no index file whose own source gives it.
     #[test]
     fn substance_optics_every_row_names_its_source_and_basis() {
+        let mut adopted = Vec::new();
         for (_, optics) in rows() {
             let key = optics.key();
             let sources = optics.sources();
@@ -1457,10 +1578,16 @@ mod tests {
                         assert!(sources.contains(&part.end_member().source()), "{key}");
                     }
                     assert_eq!(covering("mode").count(), 1, "{key}");
-                    assert!(
-                        covering("mode").all(|s| s.basis() == Basis::Reduced),
-                        "{key}"
-                    );
+                    for mode in covering("mode") {
+                        match mode.basis() {
+                            Basis::Reduced => {}
+                            Basis::Adopted => {
+                                assert!(mode.citation().contains("an assumption"), "{key}");
+                                adopted.push(key.as_str().to_owned());
+                            }
+                            basis => panic!("{key}: a mode of basis {basis:?}"),
+                        }
+                    }
                     let fine = parts.iter().any(|p| p.grain() == GrainClass::Fine);
                     assert_eq!(covering("fine grains").count(), usize::from(fine), "{key}");
                     assert!(covering("fine grains").all(|s| s.basis() == Basis::Adopted));
@@ -1478,6 +1605,7 @@ mod tests {
             }
             assert!(sources.iter().all(|s| !s.citation().is_empty()));
         }
+        assert_eq!(adopted, ADOPTED_MODES);
     }
 
     /// The rows outside the model are labelled by having none (the closed set of
@@ -1598,9 +1726,12 @@ mod tests {
     /// optics or the palette's resolution, without whitespace: the unambiguous calls
     /// (decision-p14-t49c-split §8.2, which narrowed them: a partition result's own `.condensed()`
     /// is not the registry's; `.grain_density(` is a method of the registry's alone, and a
-    /// `grain_density_kg_m3` field does not match it) and this module's and its table's paths.
-    const PATTERNS: [&str; 23] = [
+    /// `grain_density_kg_m3` field does not match it) and this module's and its table's paths;
+    /// and, until P14.T54.a, P14.T49.e's `aerosol_optics(`, which applies the held grain density
+    /// (`substance::aerosol`'s own tripwire holds the rest of its API).
+    const PATTERNS: [&str; 24] = [
         "condensed_optics(",
+        "aerosol_optics(",
         "resolve_palette_entry(",
         "Substance::condensed",
         ".substance().condensed()",

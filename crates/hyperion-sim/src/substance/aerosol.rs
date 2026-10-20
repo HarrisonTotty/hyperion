@@ -8,30 +8,51 @@
 //! variant of one of rendering plan R08's committed index files
 //! (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`), a [`SizeDistribution`] and a
 //! temperature, and returns the mode's [`AerosolOptics`] at 550 nm: its mass extinction `κ_ext` in
-//! m² kg⁻¹, its single-scattering albedo ω and whether its index is a stand-in. A mode's τ(550)
-//! is `κ_ext` times its column mass (P14.T24.c, P14.T52.c).
+//! m² kg⁻¹, its single-scattering albedo ω, whether its index is a stand-in, and what its value
+//! rests on ([`ExtinctionBasis`]). A mode's τ(550) is `κ_ext` times its column mass (P14.T24.c,
+//! P14.T52.c).
 //!
 //! # The model
 //!
-//! - **The particles are Mie spheres at the file's index**, every shape class alike. A sphere is
-//!   exact for `sphere`; for `nonSphericalMineral` and `crystal` it is the sphere of equal volume to
-//!   projected area, r = 3V ÷ 4A, the radius every mode's `r_eff` is written in (P14.T24.c;
-//!   science-r08-mmf.md §2 accepts it for the column-mass conversion, where `Q̄_ext` differs between
-//!   shapes by a few per cent at large x). Rendering plan R08's client routes those two classes'
-//!   extinction to the `TAMUdust2020` hexahedra's tables instead (science-r08-nonspherical.md §5).
-//!   For `mars_dust` at 550 nm over gamma distributions of `v_eff` 0.3, the spheres' mass
-//!   extinction is 0.5–1.2 times the hexahedra's from `r_eff` 0.05 to 1.5 µm: 832 against 703 m²
-//!   kg⁻¹ at R08's Mars mode, 0.8974 µm (science-r08-mmf.md §3), and half of it for the smallest
-//!   grains, whose equal-V/A sphere holds Ψ³ = 0.36 of the grain's volume and so scatters less per
-//!   unit mass. A deferred finding (plan 14's record of P14.T49.e).
+//! - **The particles are the client's** (science-r08-nonspherical.md §6.4: "`κ_ext` for
+//!   `nonSphericalMineral` and `crystal` modes is read from R08.T5.c's tables' `C_ext`, not from
+//!   sphere Mie, so that the sim's mass extinction and the client's optics agree"):
+//!   - a `sphere` file's are Mie spheres at its index ([`ExtinctionBasis::Sphere`]);
+//!   - a `nonSphericalMineral` or `crystal` file with a phase table of its own (R08.T5.c's and
+//!     T5.d's, 17 of the 21 on file) takes that table's `C_ext` and `C_sca`
+//!     ([`ExtinctionBasis::PhaseTable`]):
+//!     `TAMUdust2020`'s irregular hexahedra at sphericity 0.71 (M. Saito, P. Yang, J. Ding and X.
+//!     Liu, J. Atmos. Sci. 78, 2089–2111, 2021) for the minerals, and Yang et al. 2013's roughened
+//!     aggregate of eight columns for water ice (J. Atmos. Sci. 70, 330–347), read as the client's
+//!     `tableModeOptics` reads them, the floor's absorption scaled by k ÷ `k_floor`. Outside a
+//!     table's sizes spheres serve, as the client's do below them, and above them spheres of the
+//!     particle's volume-to-area radius (T. C. Grenfell and S. G. Warren, J. Geophys. Res. 104,
+//!     31697–31709, 1999), where the client has none ([`ExtinctionBasis::SpheresOutsidePhaseTable`]
+//!     labels a mode whose `r_eff` lies there);
+//!   - a `nonSphericalMineral` or `crystal` file with none (every ice but water's, whose extinction
+//!     the client also takes from Mie), or whose index at 550 nm lies outside the hexahedra's
+//!     kernels (aluminium oxide, sulphur, titanium dioxide and zinc sulphide, transparent above n
+//!     1.70, whose tables are the longwave kernel's floor's and leave a large lossless grain's
+//!     `Q̄_ext` near 1.2, and whose larger modes the client takes from Mie too), is the sphere of
+//!     equal volume to projected area, r = 3V ÷ 4A, a labelled fallback
+//!     ([`ExtinctionBasis::SphereFallback`]).
+//!
+//!   Every `r_eff` is of r = 3V ÷ 4A (P14.T24.c), A the orientation-averaged projected area, and
+//!   `Q̄_ext` = ⟨`C_ext`⟩ ÷ ⟨A⟩. Equal-V/A spheres are not the hexahedra: for `mars_dust` at 550 nm
+//!   the spheres' mass extinction is 0.38–1.49 times the hexahedra's over the grid (0.41–1.29 for
+//!   gamma distributions of `v_eff` 0.22–0.37), and 832 against 704 m² kg⁻¹ at R08's Mars mode
+//!   (gamma, `r_eff` 0.8974 µm, `v_eff` 0.3; science-r08-mmf.md §3); per particle the hexahedra's C ÷ V exceeds the sphere's for 0.2 ≲ x
+//!   ≲ 1.3, up to Ψ⁻³ = 2.8 times in the Rayleigh limit, the equal-V/A sphere holding Ψ³ = 0.36 of
+//!   the grain's volume (plan 14's record of P14.T49.e).
 //! - **The size distribution** is Hansen and Travis 1974's standard gamma distribution or the
 //!   log-normal, each by its effective radius `r_eff` = ⟨r³⟩ ÷ ⟨r²⟩ and effective variance `v_eff` =
 //!   ⟨(r − `r_eff`)² r²⟩ ÷ (`r_eff²` ⟨r²⟩) (J. E. Hansen and L. D. Travis, "Light scattering in
 //!   planetary atmospheres", Space Sci. Rev. 16, 527–610, 1974, (2.53)–(2.61)).
 //! - **The table is density-free.** `hyperion-fit`'s `condensate_extinction` holds, for each index
-//!   file at 550 nm (found by wavelength on the file's own grid), the area-weighted extinction
-//!   efficiency `Q̄_ext` = ⟨`C_ext`⟩ ÷ ⟨πr²⟩ and the albedo's logarithm ln ω = ln(⟨`C_sca`⟩ ÷
-//!   ⟨`C_ext`⟩), which keeps both ω and 1 − ω to its five digits, on an
+//!   file at 550 nm (found by wavelength on the file's own grid; a phase table's two wavelength
+//!   nodes about it blended linearly in wavelength, as the client blends them), the area-weighted
+//!   extinction efficiency `Q̄_ext` = ⟨`C_ext`⟩ ÷ ⟨A⟩ and the albedo's logarithm ln ω =
+//!   ln(⟨`C_sca`⟩ ÷ ⟨`C_ext`⟩), which keeps both ω and 1 − ω to its five digits, on an
 //!   (`r_eff`, `v_eff`) grid for each distribution (`tables::condensate_extinction` and its six other
 //!   parts). This module applies the row's grain density ρ at the mode's temperature
 //!   ([`Substance::grain_density`](super::Substance::grain_density)): `κ_ext` = 3 `Q̄_ext` ÷ (4 ρ
@@ -245,6 +266,60 @@ impl fmt::Display for BuildSizeDistributionError {
 
 impl Error for BuildSizeDistributionError {}
 
+/// What an index file's extinction, or a mode's, rests on: the particles `hyperion-fit`'s
+/// `condensate_extinction` drew (the [module's](self) model).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ExtinctionBasis {
+    /// Mie spheres at the file's index: a `sphere` file, its own shape class.
+    Sphere,
+    /// The file's own phase table, rendering plan R08.T5.c's or T5.d's: its particles' `C_ext` and
+    /// `C_sca` as the client reads them (science-r08-nonspherical.md §6.4), for a mode whose
+    /// `r_eff` lies within the table's sizes.
+    PhaseTable,
+    /// A phase-table file's mode whose `r_eff` lies outside its table's sizes: there the particles
+    /// are spheres, below the table as the client draws them and above it of the particle's
+    /// volume-to-area radius (Grenfell and Warren 1999), so the value rests mostly on them.
+    SpheresOutsidePhaseTable,
+    /// A `nonSphericalMineral` or `crystal` file with no phase table of its own, or whose index at
+    /// 550 nm lies past the hexahedra's kernels: the spheres of its volume-to-area radius, a
+    /// labelled fallback.
+    SphereFallback,
+}
+
+impl ExtinctionBasis {
+    /// The basis's name, as messages and the golden write it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Sphere => "sphere",
+            Self::PhaseTable => "phase table",
+            Self::SpheresOutsidePhaseTable => "spheres outside the phase table",
+            Self::SphereFallback => "sphere fallback",
+        }
+    }
+}
+
+/// The particles `hyperion-fit`'s `condensate_extinction` drew for an index file's grids, a phase
+/// table with its sizes ([`ExtinctionEntry::basis`]). A mode's [`ExtinctionBasis`] is its file's,
+/// a phase table's split by where the mode's `r_eff` lies against the table's sizes.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub enum EntryBasis {
+    /// Mie spheres at the file's index: a `sphere` file, its own shape class.
+    Sphere,
+    /// The file's own phase table, rendering plan R08.T5.c's or T5.d's: its particles' `C_ext` and
+    /// `C_sca` as the client reads them (science-r08-nonspherical.md §6.4), and spheres outside its
+    /// sizes.
+    PhaseTable {
+        /// The table's sizes, the volume-to-area radii r = 3V ÷ 4A from its smallest to its largest
+        /// particle at 550 nm, m, where the two wavelength nodes drawn both hold particles.
+        radii_m: (f64, f64),
+    },
+    /// A `nonSphericalMineral` or `crystal` file with no phase table of its own, or whose index at
+    /// 550 nm lies past the hexahedra's kernels: the spheres of its volume-to-area radius, a
+    /// labelled fallback.
+    SphereFallback,
+}
+
 /// A mode's optics at 550 nm ([`aerosol_optics`]).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct AerosolOptics {
@@ -252,6 +327,7 @@ pub struct AerosolOptics {
     extinction_efficiency: f64,
     single_scattering_albedo: f64,
     stand_in: bool,
+    extinction_basis: ExtinctionBasis,
 }
 
 impl AerosolOptics {
@@ -263,8 +339,9 @@ impl AerosolOptics {
         self.mass_extinction_m2_per_kg
     }
 
-    /// The area-weighted extinction efficiency `Q̄_ext` = ⟨`C_ext`⟩ ÷ ⟨πr²⟩, dimensionless: about 2
-    /// for large particles, falling as `r_eff` (absorbing) or `r_eff⁴` (scattering) for small ones.
+    /// The area-weighted extinction efficiency `Q̄_ext` = ⟨`C_ext`⟩ ÷ ⟨A⟩, A the projected area
+    /// (πr² for a sphere), dimensionless: about 2 for large particles, falling as `r_eff`
+    /// (absorbing) or `r_eff⁴` (scattering) for small ones.
     #[must_use]
     pub const fn extinction_efficiency(&self) -> f64 {
         self.extinction_efficiency
@@ -282,6 +359,13 @@ impl AerosolOptics {
     #[must_use]
     pub const fn is_stand_in(&self) -> bool {
         self.stand_in
+    }
+
+    /// What the value rests on: the file's spheres, its phase table, the spheres outside the
+    /// table's sizes where the mode's `r_eff` lies, or the sphere fallback.
+    #[must_use]
+    pub const fn extinction_basis(&self) -> ExtinctionBasis {
+        self.extinction_basis
     }
 }
 
@@ -377,7 +461,8 @@ const fn phase_name(phase: CondensedPhase) -> &'static str {
 }
 
 /// One index file's entry in the extinction table, as `hyperion-fit`'s `condensate_extinction`
-/// writes it: the file's identity, its stand-in flag, and its grids of `Q̄_ext` and ln ω at 550 nm.
+/// writes it: the file's identity, its stand-in flag, its basis with a phase table's sizes, and
+/// its grids of `Q̄_ext` and ln ω at 550 nm.
 ///
 /// Each grid's row i is the table's effective radius i
 /// (`tables::condensate_extinction::EFFECTIVE_RADII_M`, the log-normal's rows the first of them),
@@ -394,6 +479,8 @@ pub struct ExtinctionEntry {
     pub(crate) variant: Option<&'static str>,
     /// Whether the file's provenance is `standIn`.
     pub(crate) stand_in: bool,
+    /// The particles drawn, with a phase table's sizes.
+    pub(crate) basis: EntryBasis,
     /// `Q̄_ext` for the gamma distribution.
     pub(crate) gamma_extinction: &'static [[f64; GAMMA_VARIANCE_NODES]],
     /// ln ω for the gamma distribution.
@@ -433,6 +520,24 @@ impl ExtinctionEntry {
     #[must_use]
     pub const fn is_stand_in(&self) -> bool {
         self.stand_in
+    }
+
+    /// The particles its grids were computed from, with a phase table's sizes.
+    #[must_use]
+    pub const fn basis(&self) -> EntryBasis {
+        self.basis
+    }
+
+    /// A phase-table file's sizes at 550 nm, from its smallest particle's volume-to-area radius to
+    /// its largest's, or `None` for a file with no phase table.
+    #[must_use]
+    pub const fn phase_table_radii(&self) -> Option<(Metres, Metres)> {
+        match self.basis {
+            EntryBasis::PhaseTable {
+                radii_m: (low, high),
+            } => Some((Metres::new(low), Metres::new(high))),
+            EntryBasis::Sphere | EntryBasis::SphereFallback => None,
+        }
     }
 }
 
@@ -729,21 +834,187 @@ pub fn aerosol_optics(
     let (Some(extinction), Some(ln_albedo)) = (extinction, ln_albedo) else {
         return Err(off_grid);
     };
+    let extinction_basis = match entry.basis {
+        EntryBasis::Sphere => ExtinctionBasis::Sphere,
+        EntryBasis::PhaseTable {
+            radii_m: (low, high),
+        } => {
+            if (low..=high).contains(&radius) {
+                ExtinctionBasis::PhaseTable
+            } else {
+                ExtinctionBasis::SpheresOutsidePhaseTable
+            }
+        }
+        EntryBasis::SphereFallback => ExtinctionBasis::SphereFallback,
+    };
     Ok(AerosolOptics {
         mass_extinction_m2_per_kg: 3.0 * extinction / (4.0 * density.value() * radius),
         extinction_efficiency: extinction,
-        // ln ω is at most 0, which a cubic through nodes of 0 (a lossless file's) keeps exactly.
-        single_scattering_albedo: math::exp(ln_albedo.min(0.0)),
+        // ln ω is at most 0, which a cubic through nodes of 0 (a lossless file's) keeps exactly;
+        // a comparison, not `min`, so that neither zero's sign is left to the platform's `min`.
+        single_scattering_albedo: if ln_albedo >= 0.0 {
+            1.0
+        } else {
+            math::exp(ln_albedo)
+        },
         stand_in: entry.stand_in,
+        extinction_basis,
     })
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use hyperion_testkit::float::assert_same_bits;
 
+    use super::super::thermal::tests::{
+        before_inline_tests, names, out_of_line_test_modules, rust_files,
+    };
     use super::*;
     use crate::substance::{by_key, ids};
+
+    /// The files outside this module and its tables whose reads of its API sit behind a named
+    /// hold, each with it: none yet. **P14.T54.b deletes this list** with the tripwire below.
+    const HELD: [(&str, &str); 0] = [];
+
+    /// The forms by which other code would read this module's extinction or its tables: its calls,
+    /// its paths and its types, and the tables' name.
+    const API_PATTERNS: [&str; 6] = [
+        "aerosol_optics(",
+        "substance::aerosol",
+        "AerosolOptics",
+        "extinction_entries(",
+        "interpolate_grid(",
+        "condensate_extinction",
+    ];
+
+    /// The lines that declare this module and its tables and re-export the module, each by its
+    /// file and the start of its line: `substance/mod.rs`'s module line and its `pub use
+    /// aerosol::{…};` statement, whatever lines that takes, and `tables/mod.rs`'s module lines and
+    /// the entries of the tables' `MANIFEST`, which `hyperion-fit` writes.
+    const DECLARATIONS: [(&str, &str); 4] = [
+        ("substance/mod.rs", "pub mod aerosol;"),
+        ("substance/mod.rs", "pub use aerosol::"),
+        ("tables/mod.rs", "pub mod condensate_extinction"),
+        ("tables/mod.rs", "name: \"condensate_extinction"),
+    ];
+
+    /// Whether the file at `relative` (under the crate's `src/`) is this module's or one of its
+    /// seven tables.
+    fn own(relative: &str) -> bool {
+        relative == "substance/aerosol.rs"
+            || (relative.starts_with("tables/condensate_extinction")
+                && Path::new(relative)
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("rs")))
+    }
+
+    /// The `(line, pattern)` pairs, 1-based, by which the code of the file at `relative`, of text
+    /// `text`, names [`API_PATTERNS`] before its inline test module: its comment lines and its
+    /// [`DECLARATIONS`] (a statement to its `;`) left out, each pattern as a whole name (`names`).
+    fn readers(relative: &str, text: &str) -> Vec<(usize, &'static str)> {
+        let mut found = Vec::new();
+        let mut in_declaration = false;
+        for (n, line) in before_inline_tests(text).iter().enumerate() {
+            let code = line.trim_start();
+            if in_declaration {
+                in_declaration = !code.trim_end().ends_with(';');
+                continue;
+            }
+            if DECLARATIONS
+                .iter()
+                .any(|(file, start)| *file == relative && code.starts_with(start))
+            {
+                in_declaration = !code.trim_end().ends_with(';') && !code.ends_with(',');
+                continue;
+            }
+            if code.starts_with("//") {
+                continue;
+            }
+            for pattern in API_PATTERNS {
+                if names(line, pattern) {
+                    found.push((n + 1, pattern));
+                }
+            }
+        }
+        found
+    }
+
+    /// The scan reads the code alone: it finds a call, a path and a type, leaves out comments, the
+    /// declarations (a re-export over several lines whole) and the inline test module, and reads
+    /// whole names only.
+    #[test]
+    fn substance_aerosol_the_tripwire_s_scan_reads_the_code_alone() {
+        let text = "// aerosol_optics(id, phase, variant, &mode, t)\n\
+                    let optics = substance::aerosol::aerosol_optics(id, p, v, &m, t)?;\n\
+                    let my_condensate_extinction = 1;\n\
+                    #[cfg(test)]\nmod tests {\n    fn f() { extinction_entries(); }\n}\n";
+        assert_eq!(
+            readers("planetary/x.rs", text),
+            [(2, "aerosol_optics("), (2, "substance::aerosol")]
+        );
+        let declarations = "pub mod aerosol;\npub use aerosol::{\n    AerosolOptics, aerosol_optics,\n};\n\
+                            pub use condensed::CondensedPhase;\nfn f(o: AerosolOptics) {}\n";
+        assert_eq!(
+            readers("substance/mod.rs", declarations),
+            [(6, "AerosolOptics")]
+        );
+        let tables = "pub mod condensate_extinction_2;\n    TableInfo {\n        name: \
+                      \"condensate_extinction_2\",\n";
+        assert_eq!(readers("tables/mod.rs", tables), Vec::new());
+        assert!(own("tables/condensate_extinction_7.rs") && !own("tables/mod.rs"));
+    }
+
+    /// Nothing on the record reads the aerosol extinction before P14.T54.b, its bump
+    /// (decision-bump-plan-after-22 §1.3): no code of the crate's `src/` outside this module and
+    /// its seven tables names [`API_PATTERNS`], every file read in sorted order by
+    /// `substance::thermal`'s tripwire's walk, but each inline test module, every file an
+    /// out-of-line test module declares, [`DECLARATIONS`] and [`HELD`]'s files (none). **P14.T54.b
+    /// deletes this tripwire** when P14.T52.c and T24.c first read it.
+    #[test]
+    fn substance_aerosol_nothing_on_the_record_reads_the_extinction_yet() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rust_files(&src, &src, &mut files);
+        assert!(files.len() > 100, "the walk found the crate's sources");
+        let read = |path: &Path| {
+            std::fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+        };
+        assert_eq!(
+            files.iter().filter(|(relative, _)| own(relative)).count(),
+            8,
+            "the module and its seven tables"
+        );
+        for (held, hold) in HELD {
+            assert!(!hold.is_empty(), "{held} names its hold");
+            assert!(
+                files.iter().any(|(relative, _)| relative == held),
+                "{held} is a source file"
+            );
+        }
+        let mut tests = Vec::new();
+        for (relative, path) in &files {
+            tests.extend(out_of_line_test_modules(relative, &read(path)));
+        }
+        let mut found = Vec::new();
+        for (relative, path) in &files {
+            let test_file = tests
+                .iter()
+                .any(|t| relative == t || (t.ends_with('/') && relative.starts_with(t.as_str())));
+            if test_file || own(relative) || HELD.iter().any(|(held, _)| held == relative) {
+                continue;
+            }
+            for (line, pattern) in readers(relative, &read(path)) {
+                found.push(format!("{relative}:{line}: {pattern}"));
+            }
+        }
+        assert!(
+            found.is_empty(),
+            "nothing on the record reads substance::aerosol before P14.T54.b: {found:#?}"
+        );
+    }
 
     fn gamma(radius_m: f64, variance: f64) -> SizeDistribution {
         SizeDistribution::gamma(Metres::new(radius_m), variance).unwrap()
@@ -902,12 +1173,14 @@ mod tests {
     }
 
     /// Venus's four deck modes through the table and the 75 wt% acid's file (n 1.431 at 550 nm),
-    /// combined by mass: κ = Σ N `C̄_ext` ÷ Σ N ρ ⟨V⟩. The modes' radii and ln σ are Pollack et al.
-    /// 1993's (Icarus 103, 1–42), their columns N₀ (`z_c` + `H_up` + `H_lo`) of R. Haus et al.
-    /// 2016's profiles (Icarus 272, 178–205), both as Reyes-Guerrero, Pérez-Hoyos and Garate-Lopez
-    /// 2026 (arXiv:2607.22187, §3.1 and Table 2) tabulate them (science-r08-sulphur-co2ice.md). The sulphur note's 417
-    /// m² kg⁻¹ is at n = 1.44 (the fit's test holds that to 2%); the file's index and the table's
-    /// interpolation keep it within 1%.
+    /// combined by mass: κ = Σ N `C̄_ext` ÷ Σ N ρ ⟨V⟩. The modes' radii are Pollack et al. 1993's
+    /// (Icarus 103, 1–42), their ln σ rounded to two decimals as Reyes-Guerrero, Pérez-Hoyos and
+    /// Garate-Lopez 2026 print them (arXiv:2607.22187, §3.1), from Pollack et al.'s `σ_g` = 1.56,
+    /// 1.29, 1.23 and 1.28 (R. Haus et al. 2016, Icarus 272, 178–205, §2), and their columns
+    /// N₀ (`z_c` + `H_up` + `H_lo`) of Haus et al.'s profiles, as Reyes-Guerrero et al. tabulate them
+    /// (Table 2; science-r08-sulphur-co2ice.md). The acid is a `sphere` file, so its entry is
+    /// Mie's. The sulphur note's 417 m² kg⁻¹ is at n = 1.44 (the fit's test holds that to 2%); the
+    /// file's index and the table's interpolation keep it within 1%.
     #[test]
     fn substance_aerosol_venus_s_deck_is_the_sulphur_note_s() {
         let acid = id("H2SO4");
@@ -1168,6 +1441,96 @@ mod tests {
             condensate_extinction::LOG_NORMAL_EFFECTIVE_VARIANCES[13],
             0.65,
         );
+    }
+
+    /// Each entry's basis is its shape class's (plan 14's record of P14.T49.e): 17 of the 21 files
+    /// with a phase table take it and carry its sizes, the nine other ices and the four minerals
+    /// outside the hexahedra's kernels fall back to spheres, and the rest are spheres. A mode is
+    /// labelled by where its `r_eff` lies against its table's sizes: iron's longwave table ends at
+    /// 23 µm and water ice's begins at 0.32 µm.
+    #[test]
+    fn substance_aerosol_each_entry_carries_its_basis() {
+        let count =
+            |is: fn(EntryBasis) -> bool| extinction_entries().filter(|e| is(e.basis())).count();
+        assert_eq!(count(|b| matches!(b, EntryBasis::PhaseTable { .. })), 17);
+        assert_eq!(count(|b| matches!(b, EntryBasis::SphereFallback)), 13);
+        assert_eq!(count(|b| matches!(b, EntryBasis::Sphere)), 19);
+        let fe = |radius_m: f64| {
+            aerosol_optics(
+                id("Fe"),
+                CondensedPhase::Solid,
+                FileVariant::Substance,
+                &gamma(radius_m, 0.1),
+                Kelvin::new(1_500.0),
+            )
+            .unwrap()
+            .extinction_basis()
+        };
+        assert_eq!(fe(1e-6), ExtinctionBasis::PhaseTable);
+        assert_eq!(fe(50e-6), ExtinctionBasis::SpheresOutsidePhaseTable);
+        let solid = |key: &str, radius_m: f64, t: f64| {
+            aerosol_optics(
+                id(key),
+                CondensedPhase::Solid,
+                FileVariant::Substance,
+                &gamma(radius_m, 0.1),
+                Kelvin::new(t),
+            )
+            .unwrap()
+            .extinction_basis()
+        };
+        assert_eq!(solid("H2O", 30e-6, 220.0), ExtinctionBasis::PhaseTable);
+        assert_eq!(
+            solid("H2O", 0.1e-6, 220.0),
+            ExtinctionBasis::SpheresOutsidePhaseTable
+        );
+        assert_eq!(solid("NH3", 1e-6, 120.0), ExtinctionBasis::SphereFallback);
+        let water = aerosol_optics(
+            id("H2O"),
+            CondensedPhase::Liquid,
+            FileVariant::Substance,
+            &gamma(1e-6, 0.1),
+            Kelvin::new(290.0),
+        )
+        .unwrap();
+        assert_eq!(water.extinction_basis(), ExtinctionBasis::Sphere);
+    }
+
+    /// A lossless file's ω is 1 to the bit at its nodes and between them, and its committed ln ω
+    /// is +0.0 at every node (the fit writes no −0.0): aluminium oxide's sphere fallback, sodium
+    /// chloride's floor table and liquid argon's spheres.
+    #[test]
+    fn substance_aerosol_a_lossless_file_s_albedo_is_one_to_the_bit() {
+        for (key, phase, t) in [
+            ("Al2O3", CondensedPhase::Solid, 1_800.0),
+            ("NaCl", CondensedPhase::Solid, 900.0),
+            ("Ar", CondensedPhase::Liquid, 85.0),
+        ] {
+            let entry = extinction_entries()
+                .find(|e| e.key() == key && e.phase() == phase)
+                .unwrap();
+            let gamma_values = entry.gamma_ln_albedo.iter().flatten();
+            for &value in gamma_values.chain(entry.log_normal_ln_albedo.iter().flatten()) {
+                assert_same_bits(value, 0.0);
+            }
+            for mode in [
+                gamma(1e-9, 0.04),
+                gamma(0.37e-6, 0.137),
+                gamma(5.3e-6, 0.3),
+                log_normal(2.1e-8, 0.61),
+                log_normal(30e-6, 0.05),
+            ] {
+                let optics = aerosol_optics(
+                    id(key),
+                    phase,
+                    FileVariant::Substance,
+                    &mode,
+                    Kelvin::new(t),
+                )
+                .unwrap();
+                assert_same_bits(optics.single_scattering_albedo(), 1.0);
+            }
+        }
     }
 
     /// A file's null variant is the substance itself, and a named one its name.

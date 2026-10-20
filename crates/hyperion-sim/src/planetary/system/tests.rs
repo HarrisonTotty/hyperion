@@ -4164,11 +4164,11 @@ fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
 /// Every body's passes end (P14.T51.h): converged within the plain passes, or bracketed, its
 /// published pass a fixed point or a jump across the diagonal, each bracketed body listed by its
 /// class (decision-p14-t51-batch §4): a jump (a state or cover change with no self-consistent
-/// albedo), a lossless visible-only frost at the area mix's clamp (until P14.T49.i's infrared), or
-/// a fixed point that simple iteration oscillates about, held to a residual under 10⁻⁹. At most 1%
-/// of the sample jumps, the ruling's measure, and at most 3% is bracketed, a guard at 23's
-/// stand-ins; P14.T54.a's re-check holds the bracketed to 1% at its real inputs. The counts and the
-/// lists are recorded.
+/// albedo), a lossless frost at the area mix's clamp (none in the sample since the area mix took
+/// P14.T49.i's bins), or a fixed point that simple iteration oscillates about, held to a residual
+/// under 10⁻⁹. At most 1% of the sample jumps, the ruling's measure, and at most 3% is bracketed, a
+/// guard at 23's stand-ins; P14.T54.a's re-check holds the bracketed to 1% at its real inputs. The
+/// counts and the lists are recorded.
 #[test]
 #[expect(
     clippy::too_many_lines,
@@ -4186,7 +4186,7 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     enum Class {
         /// A state or cover change with no self-consistent albedo.
         Jump,
-        /// A lossless visible-only frost at the area mix's clamp, until P14.T49.i.
+        /// A lossless frost at the area mix's clamp.
         Frost,
         /// A fixed point that simple iteration oscillates about.
         FixedPoint,
@@ -4323,9 +4323,11 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
          passes taken {counts:?}; bracketed {held} of {total}:\n{listed}"
     );
     // The ruling's measure, decision-p14-t51-batch §4: a jump is a state or cover change with no
-    // self-consistent albedo, and more than 1% of them goes to main. At 23's stand-ins 7 of 954
-    // jump (6 at the airless threshold, 1 a cover flip), and 20 are bracketed in all, 8 of them
-    // lossless frosts until P14.T49.i: P14.T54.a's re-check holds all the bracketed to 1%.
+    // self-consistent albedo, and more than 1% of them goes to main. At 23's stand-ins, the area
+    // mix on P14.T49.i's bins (2026-10-19), 4 of 954 jump and 9 are bracketed in all, none a
+    // lossless frost (over B, V and R alone 7 jumped, 6 at the airless threshold and 1 a cover flip,
+    // and 20 were bracketed, 8 of them lossless frosts): P14.T54.a's re-check holds all the
+    // bracketed to 1%.
     let jumps = bracketed.get(&Class::Jump).map_or(0, Vec::len);
     assert!(
         100 * jumps <= usize::try_from(total).unwrap(),

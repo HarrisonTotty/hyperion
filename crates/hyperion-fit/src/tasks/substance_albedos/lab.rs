@@ -8,16 +8,17 @@
 //! `usgs_splib07a`, read by [`LabLibrary`]) is inverted for w channel by channel, at its own
 //! geometry, by the reference form's model ([`Measurement`], [`invert`]):
 //!
-//! - a Beckman spectrum, an integrating sphere's directional-hemispherical reflectance, as the
-//!   similarity relation's plane albedo 1 − √(1 − w*) H(μ₀; w*) at the regolith form's asymmetry
-//!   and μ₀ = cos 10° (`BECKMAN_INCIDENCE_DEG`);
+//! - a Beckman spectrum, an integrating sphere's measurement taken as a directional-hemispherical
+//!   reflectance (DS 1035 calls the powders' Beckman measurements biconical reflectance factors;
+//!   plan 14's deferred findings), as the similarity relation's plane albedo 1 − √(1 − w*) H(μ₀;
+//!   w*) at the regolith form's asymmetry and the adopted μ₀ = cos 10° (`BECKMAN_INCIDENCE_DEG`);
 //! - an ASD spectrum, a reflectance factor at i 20°, e 30° and g 35.5° (`ASD_GEOMETRY`), as the
 //!   IMSA's (w ÷ 4) ÷ (μ₀ + μ) [p(g)(1 + B(g)) + H(μ₀) H(μ) − 1] under the regolith photometry;
 //! - SO₂ frost's levels, a reflectance factor at their own geometry, under the frost's.
 //!
 //! The forward models rise strictly with w, so each channel's w is the one root: bracketed on a
 //! table of the forward model at t = √(1 − w) = j ÷ 512 ([`InversionTable`]), and refined by the
-//! Illinois method on the exact model ([`Measurement::forward`]) to a residual below 10⁻¹⁴. A
+//! Illinois method on the exact model ([`Measurement::forward`]) to a residual below 10⁻¹⁵. A
 //! reflectance above the model's at w = 1 takes w = 1, and one at or below 0 takes w = 0 (each
 //! counted, [`InvertedSpectrum`]).
 //!
@@ -32,9 +33,10 @@
 //!
 //! # A mixture
 //!
-//! An intimate mixture's w is Hapke 2012 §10's cross-section weighting,
-//! w̄ = Σ (fⱼ ÷ Dⱼ) wⱼ ÷ Σ (fⱼ ÷ Dⱼ), each part at the row's grains or at `FINE_GRAIN_DIAMETER`
-//! ([`MixtureGrain`]), over the wavelengths every part's spectrum covers.
+//! An intimate mixture's w is the cross-section weighting w̄ = Σ (fⱼ ÷ Dⱼ) wⱼ ÷ Σ (fⱼ ÷ Dⱼ) (Hapke
+//! 2012, its section not read, as decision-p14-t49i-rock-mixtures §2.1 states it, with `Q_E` ≈ 1: a
+//! part's cross-section per volume is Nσ = 3f ÷ 2D), each part at the row's grains or at
+//! `FINE_GRAIN_DIAMETER` ([`MixtureGrain`]), over the wavelengths every part's spectrum covers.
 //!
 //! # The opaque slab
 //!
@@ -59,18 +61,19 @@ use super::spectral::{Curve, Interpolation, Piece, SpectralGrain};
 use super::{FitAlbedoError, MU_EDGES, similar_isotropic_albedo};
 
 /// The dataset that holds the laboratory spectra: splib07a's files the rows read.
-pub const SPLIB_DATASET: &str = "usgs_splib07a";
+pub(crate) const SPLIB_DATASET: &str = "usgs_splib07a";
 
 /// The Beckman's wavelength file in splib07a, µm by channel.
-pub const BECKMAN_WAVELENGTHS: &str = "splib07a_Wavelengths_BECK_Beckman_0.2-3.0_microns.txt";
+pub(crate) const BECKMAN_WAVELENGTHS: &str =
+    "splib07a_Wavelengths_BECK_Beckman_0.2-3.0_microns.txt";
 
 /// The ASD's wavelength file in splib07a, µm by channel, of every ASD resolution's 2,151
 /// channels.
-pub const ASD_WAVELENGTHS: &str = "splib07a_Wavelengths_ASD_0.35-2.5_microns_2151_ch.txt";
+pub(crate) const ASD_WAVELENGTHS: &str = "splib07a_Wavelengths_ASD_0.35-2.5_microns_2151_ch.txt";
 
 /// A value splib07a marks deleted, at or below which a channel is dropped: the release writes
 /// −1.23 × 10³⁴ (Kokaly et al. 2017, DS 1035).
-pub const DELETED_BELOW: f64 = -1.0e30;
+pub(crate) const DELETED_BELOW: f64 = -1.0e30;
 
 /// Where the bins begin and end, nm: a spectrum's channels outside are not read.
 const BINS_FROM_NM: f64 = SPECTRAL_BIN_EDGES_NM[0];
@@ -79,7 +82,7 @@ const BINS_FROM_NM: f64 = SPECTRAL_BIN_EDGES_NM[0];
 const BINS_TO_NM: f64 = SPECTRAL_BIN_EDGES_NM[SPECTRAL_BINS];
 
 /// The step, nm, at which a row of levels is sampled and inverted where it varies: 1.
-pub const LEVELS_SAMPLE_NM: f64 = 1.0;
+pub(crate) const LEVELS_SAMPLE_NM: f64 = 1.0;
 
 /// The values of one splib07a file: its header line's record name and its values in order, a
 /// deleted one kept as written.
@@ -88,7 +91,10 @@ pub const LEVELS_SAMPLE_NM: f64 = 1.0;
 ///
 /// [`FitAlbedoError::Spectrum`] if its first line is not a splib07a record's header or a value is
 /// not a number.
-pub fn splib_values(file: &'static str, text: &str) -> Result<(String, Vec<f64>), FitAlbedoError> {
+pub(crate) fn splib_values(
+    file: &'static str,
+    text: &str,
+) -> Result<(String, Vec<f64>), FitAlbedoError> {
     let mut lines = text.lines();
     let header = lines.next().unwrap_or_default();
     let record = header
@@ -116,14 +122,14 @@ fn spectrum_error(file: &'static str, why: &str) -> FitAlbedoError {
 
 /// The laboratory spectra of the `usgs_splib07a` dataset, each file's text by name.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct LabLibrary {
+pub(crate) struct LabLibrary {
     texts: BTreeMap<String, String>,
 }
 
 impl LabLibrary {
     /// The library of `texts`, each splib07a file's text by its name.
     #[must_use]
-    pub fn from_texts(texts: BTreeMap<String, String>) -> Self {
+    pub(crate) fn from_texts(texts: BTreeMap<String, String>) -> Self {
         Self { texts }
     }
 
@@ -144,7 +150,10 @@ impl LabLibrary {
     /// [`FitAlbedoError::Spectrum`] if a file is missing or malformed, its header does not name its
     /// record (a header's "<" spelt "lt" in the file's name), its channels are not its wavelength
     /// file's, its wavelengths do not rise strictly, or fewer than two channels remain.
-    pub fn channels(&self, spectrum: LabSpectrum) -> Result<Vec<(f64, f64)>, FitAlbedoError> {
+    pub(crate) fn channels(
+        &self,
+        spectrum: LabSpectrum,
+    ) -> Result<Vec<(f64, f64)>, FitAlbedoError> {
         let file = spectrum.file();
         let wavelengths_file = match spectrum.spectrometer() {
             Spectrometer::Beckman => BECKMAN_WAVELENGTHS,
@@ -193,18 +202,18 @@ impl LabLibrary {
 
 /// The cosines (μ₀, μ, cos g) of `geometry`: cos g = μ₀ μ + sin i sin e cos φ.
 #[must_use]
-pub fn cosines(geometry: Geometry) -> (f64, f64, f64) {
+pub(crate) fn cosines(geometry: Geometry) -> (f64, f64, f64) {
     let radians = core::f64::consts::PI / 180.0;
-    let (sin_i, mu0) = math::sin_cos(geometry.incidence_deg * radians);
-    let (sin_e, mu) = math::sin_cos(geometry.emission_deg * radians);
-    let cos_phi = math::cos(geometry.azimuth_deg * radians);
+    let (sin_i, mu0) = math::sin_cos(geometry.incidence_deg() * radians);
+    let (sin_e, mu) = math::sin_cos(geometry.emission_deg() * radians);
+    let cos_phi = math::cos(geometry.azimuth_deg() * radians);
     (mu0, mu, mu0 * mu + sin_i * sin_e * cos_phi)
 }
 
 /// Chandrasekhar's H-function at one μ, its quadrature's nodes precomputed: what
 /// [`super::h_function`] computes, for any w, without its trigonometry at each call.
 #[derive(Debug, Clone, PartialEq)]
-pub struct HAtMu {
+pub(crate) struct HAtMu {
     mu: f64,
     /// Each node's weight (its kernel included) and its bracket's form: `(c, a, series)`, the
     /// bracket being (1 − w) + w a where `series`, else 1 − w a.
@@ -214,7 +223,7 @@ pub struct HAtMu {
 impl HAtMu {
     /// H at `mu` in [0, 1], by [`super::h_function`]'s quadrature.
     #[must_use]
-    pub fn new(mu: f64) -> Self {
+    pub(crate) fn new(mu: f64) -> Self {
         let half_pi = core::f64::consts::FRAC_PI_2;
         let panels = super::H_PANELS;
         let mut nodes = Vec::new();
@@ -245,7 +254,7 @@ impl HAtMu {
 
     /// H(μ; w) for `w` in [0, 1].
     #[must_use]
-    pub fn at(&self, w: f64) -> f64 {
+    pub(crate) fn at(&self, w: f64) -> f64 {
         if self.mu <= 0.0 || w <= 0.0 {
             return 1.0;
         }
@@ -263,7 +272,7 @@ impl HAtMu {
 
 /// What a spectrum measured, and the model that gives it from w.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Measurement {
+pub(crate) enum Measurement {
     /// A directional-hemispherical reflectance at incidence cosine μ₀, by the similarity relation's
     /// isotropic medium at the grains' asymmetry ξ: 1 − √(1 − w*) H(μ₀; w*), w* = w (1 − ξ) ÷ (1 −
     /// w ξ).
@@ -288,9 +297,10 @@ pub enum Measurement {
 }
 
 impl Measurement {
-    /// A Beckman spectrum's, for grains of phase-function asymmetry `asymmetry`, at μ₀ = cos 10°.
+    /// A Beckman spectrum's, for grains of phase-function asymmetry `asymmetry`, at the adopted
+    /// incidence, μ₀ = cos 10°.
     #[must_use]
-    pub fn beckman(asymmetry: f64) -> Self {
+    pub(crate) fn beckman(asymmetry: f64) -> Self {
         let mu0 = math::cos(BECKMAN_INCIDENCE_DEG * core::f64::consts::PI / 180.0);
         Self::DirectionalHemispherical {
             asymmetry,
@@ -301,7 +311,7 @@ impl Measurement {
     /// A reflectance factor at `geometry` under `photometry`: an ASD spectrum's at
     /// `ASD_GEOMETRY`, or a row of levels' at its own.
     #[must_use]
-    pub fn reflectance_factor(geometry: Geometry, photometry: &Photometry) -> Self {
+    pub(crate) fn reflectance_factor(geometry: Geometry, photometry: &Photometry) -> Self {
         let (mu0, mu, cos_g) = cosines(geometry);
         Self::ReflectanceFactor {
             photometry: *photometry,
@@ -313,13 +323,13 @@ impl Measurement {
 
     /// An ASD spectrum's, under `photometry`.
     #[must_use]
-    pub fn asd(photometry: &Photometry) -> Self {
+    pub(crate) fn asd(photometry: &Photometry) -> Self {
         Self::reflectance_factor(ASD_GEOMETRY, photometry)
     }
 
     /// The measured quantity of grains of single-scattering albedo `w`, in [0, 1].
     #[must_use]
-    pub fn forward(&self, w: f64) -> f64 {
+    pub(crate) fn forward(&self, w: f64) -> f64 {
         match self {
             Self::DirectionalHemispherical { asymmetry, h0 } => {
                 let similar = similar_isotropic_albedo(w, *asymmetry);
@@ -344,7 +354,7 @@ const INVERSION_INTERVALS: u32 = 512;
 /// A measurement's forward model at t = √(1 − w) = j ÷ 512, j = 0 to 512, falling with t: the
 /// brackets of [`invert`].
 #[derive(Debug, Clone, PartialEq)]
-pub struct InversionTable {
+pub(crate) struct InversionTable {
     measurement: Measurement,
     values: Vec<f64>,
 }
@@ -352,7 +362,7 @@ pub struct InversionTable {
 impl InversionTable {
     /// The table of `measurement`: 513 evaluations of its model.
     #[must_use]
-    pub fn new(measurement: Measurement) -> Self {
+    pub(crate) fn new(measurement: Measurement) -> Self {
         let values = (0..=INVERSION_INTERVALS)
             .map(|j| {
                 let t = f64::from(j) / f64::from(INVERSION_INTERVALS);
@@ -364,17 +374,11 @@ impl InversionTable {
             values,
         }
     }
-
-    /// The measurement.
-    #[must_use]
-    pub const fn measurement(&self) -> &Measurement {
-        &self.measurement
-    }
 }
 
 /// Where an inversion's measured value lay outside the model's range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Clip {
+pub(crate) enum Clip {
     /// At or above the model's value at w = 1: w = 1.
     Bright,
     /// At or below 0: w = 0.
@@ -394,7 +398,7 @@ const INVERSION_RESIDUAL: f64 = 1.0e-15;
 ///
 /// Never: a node's index is at most 512, which a `u32` holds.
 #[must_use]
-pub fn invert(table: &InversionTable, value: f64) -> (f64, Option<Clip>) {
+pub(crate) fn invert(table: &InversionTable, value: f64) -> (f64, Option<Clip>) {
     let values = &table.values;
     if value >= values[0] {
         return (1.0, Some(Clip::Bright));
@@ -445,21 +449,54 @@ pub fn invert(table: &InversionTable, value: f64) -> (f64, Option<Clip>) {
 
 /// A spectrum inverted for w channel by channel at its own geometry: (wavelength nm, w), the
 /// counts of its clipped channels, and its largest residual against the model over the rest.
+/// Built by [`invert_channels`] alone.
 #[derive(Debug, Clone, PartialEq)]
-pub struct InvertedSpectrum {
-    /// The channels, (wavelength nm, w at the laboratory grains).
-    pub channels: Vec<(f64, f64)>,
-    /// The channels above the model's value at w = 1.
-    pub bright: usize,
+pub(crate) struct InvertedSpectrum {
+    /// The channels, (wavelength nm, w at the laboratory grains), the wavelength rising and w in
+    /// [0, 1].
+    channels: Vec<(f64, f64)>,
+    /// The channels at or above the model's value at w = 1.
+    bright: usize,
     /// The channels at or below 0.
-    pub dark: usize,
-    /// The largest |model − measured| over the channels not clipped.
-    pub residual: f64,
+    dark: usize,
+    /// The largest |model − measured| over the channels not clipped, at least 0.
+    residual: f64,
+}
+
+impl InvertedSpectrum {
+    /// The channels, (wavelength nm, w at the laboratory grains), the wavelength rising and w in
+    /// [0, 1].
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn channels(&self) -> &[(f64, f64)] {
+        &self.channels
+    }
+
+    /// The number of channels at or above the model's value at w = 1, which take w = 1.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn bright(&self) -> usize {
+        self.bright
+    }
+
+    /// The number of channels at or below 0, which take w = 0.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn dark(&self) -> usize {
+        self.dark
+    }
+
+    /// The largest |model − measured| over the channels not clipped, at least 0.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn residual(&self) -> f64 {
+        self.residual
+    }
 }
 
 /// `channels`, (wavelength nm, measured value), inverted by `table`.
 #[must_use]
-pub fn invert_channels(table: &InversionTable, channels: &[(f64, f64)]) -> InvertedSpectrum {
+pub(crate) fn invert_channels(table: &InversionTable, channels: &[(f64, f64)]) -> InvertedSpectrum {
     let mut inverted = InvertedSpectrum {
         channels: Vec::with_capacity(channels.len()),
         bright: 0,
@@ -484,7 +521,7 @@ pub fn invert_channels(table: &InversionTable, channels: &[(f64, f64)]) -> Inver
 /// The surface terms (`S_e`, `S_i`) of Hapke 2012's fits at real index `n` and k = 0, as
 /// [`super::single_scattering_albedo`] takes them.
 #[must_use]
-pub fn surface_terms(n: f64) -> (f64, f64) {
+pub(crate) fn surface_terms(n: f64) -> (f64, f64) {
     let r0 = (n - 1.0) * (n - 1.0) / ((n + 1.0) * (n + 1.0));
     let s_e = 0.0587 + 0.8543 * r0 + 0.0870 * r0 * r0;
     let s_i = 1.0 - (0.9413 - 0.8543 * r0 - 0.0870 * r0 * r0) / (n * n);
@@ -493,7 +530,7 @@ pub fn surface_terms(n: f64) -> (f64, f64) {
 
 /// The slab's w at internal transmission `theta` and surface terms `s_e`, `s_i`, held at most 1.
 #[must_use]
-pub fn slab_w(theta: f64, s_e: f64, s_i: f64) -> f64 {
+pub(crate) fn slab_w(theta: f64, s_e: f64, s_i: f64) -> f64 {
     let w = s_e + (1.0 - s_e) * (1.0 - s_i) * theta / (1.0 - s_i * theta);
     if w > 1.0 { 1.0 } else { w }
 }
@@ -501,7 +538,7 @@ pub fn slab_w(theta: f64, s_e: f64, s_i: f64) -> f64 {
 /// The slab's internal transmission Θ whose w is `w` at surface terms `s_e`, `s_i`: the inverse of
 /// [`slab_w`], 0 at or below `S_e` and 1 at or above 1.
 #[must_use]
-pub fn slab_theta(w: f64, s_e: f64, s_i: f64) -> f64 {
+pub(crate) fn slab_theta(w: f64, s_e: f64, s_i: f64) -> f64 {
     if w <= s_e {
         return 0.0;
     }
@@ -515,7 +552,7 @@ pub fn slab_theta(w: f64, s_e: f64, s_i: f64) -> f64 {
 /// documentation](self)): through the slab, Θ^(D ÷ `D_lab`), where w lies above `S_e`; else, or
 /// where held, `w` itself.
 #[must_use]
-pub fn rescale(w: f64, scaling: GrainScaling, diameter: Metres) -> f64 {
+pub(crate) fn rescale(w: f64, scaling: GrainScaling, diameter: Metres) -> f64 {
     match scaling {
         GrainScaling::Held => w,
         GrainScaling::Slab {
@@ -589,7 +626,7 @@ impl Complex {
 /// 1603.02720, eqs. 3 and 6 and App. D.2, for fields as e^(−iωt), Im n > 0 absorbing; p's sign, which
 /// half of the textbooks reverse, moves no modulus).
 #[must_use]
-pub fn fresnel_reflectance(n: f64, k: f64, mu: f64) -> f64 {
+pub(crate) fn fresnel_reflectance(n: f64, k: f64, mu: f64) -> f64 {
     let m = Complex::new(n, k);
     let mu_c = Complex::new(mu, 0.0);
     let sin2 = Complex::new((1.0 - mu * mu).max(0.0), 0.0);
@@ -605,7 +642,7 @@ pub fn fresnel_reflectance(n: f64, k: f64, mu: f64) -> f64 {
 /// slab's surface term for an opaque grain: `S_e` = 2 ∫₀¹ R(μ) μ dμ, by 32-point Gauss–Legendre on
 /// each panel of the hemisphere's [`MU_EDGES`], summed in order.
 #[must_use]
-pub fn hemispherical_fresnel_reflectance(n: f64, k: f64) -> f64 {
+pub(crate) fn hemispherical_fresnel_reflectance(n: f64, k: f64) -> f64 {
     let mut sum = 0.0;
     for pair in MU_EDGES.windows(2) {
         let (mid, half) = (f64::midpoint(pair[0], pair[1]), 0.5 * (pair[1] - pair[0]));
@@ -620,8 +657,7 @@ pub fn hemispherical_fresnel_reflectance(n: f64, k: f64) -> f64 {
 /// One end-member's grain: its spectra inverted at their own geometries and how its w is taken to
 /// a row's grains; its w the mean of its spectra's, each linear in wavelength between channels.
 #[derive(Debug, Clone, PartialEq)]
-pub struct EndMemberGrain {
-    name: &'static str,
+pub(crate) struct EndMemberGrain {
     scaling: GrainScaling,
     spectra: Vec<InvertedSpectrum>,
     reach: [f64; 2],
@@ -635,7 +671,7 @@ impl EndMemberGrain {
     ///
     /// As [`LabLibrary::channels`]; [`FitAlbedoError::Spectrum`] if its spectra share no
     /// wavelength.
-    pub fn new(
+    pub(crate) fn new(
         end_member: &EndMember,
         library: &LabLibrary,
         tables: &SpectrometerTables,
@@ -660,22 +696,16 @@ impl EndMemberGrain {
             ));
         }
         Ok(Self {
-            name: end_member.name(),
             scaling: end_member.scaling(),
             spectra,
             reach,
         })
     }
 
-    /// Its name.
-    #[must_use]
-    pub const fn name(&self) -> &'static str {
-        self.name
-    }
-
     /// Its spectra, inverted.
+    #[cfg(test)]
     #[must_use]
-    pub fn spectra(&self) -> &[InvertedSpectrum] {
+    pub(crate) fn spectra(&self) -> &[InvertedSpectrum] {
         &self.spectra
     }
 }
@@ -724,7 +754,7 @@ impl SpectralGrain for EndMemberGrain {
 
 /// The inversion tables of the regolith form's two spectrometers.
 #[derive(Debug, Clone, PartialEq)]
-pub struct SpectrometerTables {
+pub(crate) struct SpectrometerTables {
     beckman: InversionTable,
     asd: InversionTable,
 }
@@ -732,7 +762,7 @@ pub struct SpectrometerTables {
 impl SpectrometerTables {
     /// The tables under `photometry`, the regolith form's.
     #[must_use]
-    pub fn new(photometry: &Photometry) -> Self {
+    pub(crate) fn new(photometry: &Photometry) -> Self {
         let asymmetry = photometry.phase_function().asymmetry();
         Self {
             beckman: InversionTable::new(Measurement::beckman(asymmetry)),
@@ -742,7 +772,7 @@ impl SpectrometerTables {
 
     /// The table of `spectrometer`.
     #[must_use]
-    pub const fn of(&self, spectrometer: Spectrometer) -> &InversionTable {
+    pub(crate) const fn of(&self, spectrometer: Spectrometer) -> &InversionTable {
         match spectrometer {
             Spectrometer::Beckman => &self.beckman,
             Spectrometer::Asd => &self.asd,
@@ -752,14 +782,14 @@ impl SpectrometerTables {
 
 /// The end-members' grains, each inverted once in a fit, by name.
 #[derive(Debug, Clone, Default)]
-pub struct EndMemberCache {
+pub(crate) struct EndMemberCache {
     grains: BTreeMap<&'static str, Arc<EndMemberGrain>>,
 }
 
 impl EndMemberCache {
     /// The empty cache.
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -768,7 +798,7 @@ impl EndMemberCache {
     /// # Errors
     ///
     /// As [`EndMemberGrain::new`].
-    pub fn grain(
+    pub(crate) fn grain(
         &mut self,
         end_member: &EndMember,
         library: &LabLibrary,
@@ -785,7 +815,7 @@ impl EndMemberCache {
 
 /// An intimate mixture's grain (the [module documentation](self)): its parts' grains and weights.
 #[derive(Debug, Clone, PartialEq)]
-pub struct MixtureGrain {
+pub(crate) struct MixtureGrain {
     /// Each part's grain, volume fraction and grain class.
     parts: Vec<(Arc<EndMemberGrain>, f64, GrainClass)>,
     reach: [f64; 2],
@@ -796,17 +826,15 @@ impl MixtureGrain {
     ///
     /// # Errors
     ///
-    /// As [`EndMemberCache::grain`]; [`FitAlbedoError::Spectrum`] if the parts' spectra share no
-    /// wavelength.
-    pub fn new(
+    /// As [`EndMemberCache::grain`]; [`FitAlbedoError::EmptyMixture`] if there are no parts, and
+    /// [`FitAlbedoError::Spectrum`] if the parts' spectra share no wavelength.
+    pub(crate) fn new(
         parts: &[MixturePart],
         library: &LabLibrary,
         tables: &SpectrometerTables,
         cache: &mut EndMemberCache,
     ) -> Result<Self, FitAlbedoError> {
-        let first = parts
-            .first()
-            .ok_or_else(|| spectrum_error("no file", "a mixture has no part"))?;
+        let first = parts.first().ok_or(FitAlbedoError::EmptyMixture)?;
         let mut grains = Vec::with_capacity(parts.len());
         let mut reach = [BINS_FROM_NM, BINS_TO_NM];
         for part in parts {
@@ -829,8 +857,9 @@ impl MixtureGrain {
     }
 
     /// Each part's cross-section weight fⱼ ÷ Dⱼ, m⁻¹, for a form of grains `diameter`.
+    #[cfg(test)]
     #[must_use]
-    pub fn weights(&self, diameter: Metres) -> Vec<f64> {
+    pub(crate) fn weights(&self, diameter: Metres) -> Vec<f64> {
         self.parts
             .iter()
             .map(|(_, fraction, grain)| fraction / part_diameter(*grain, diameter).value())
@@ -840,7 +869,7 @@ impl MixtureGrain {
 
 /// The diameter of a part of class `grain` in a form of grains `diameter`.
 #[must_use]
-pub const fn part_diameter(grain: GrainClass, diameter: Metres) -> Metres {
+pub(crate) const fn part_diameter(grain: GrainClass, diameter: Metres) -> Metres {
     match grain {
         GrainClass::Form => diameter,
         GrainClass::Fine => FINE_GRAIN_DIAMETER,
@@ -881,7 +910,9 @@ impl SpectralGrain for MixtureGrain {
 /// A row of reflectance levels' grain: the levels sampled where they vary, each sample inverted
 /// under the row's photometry at the levels' geometry, w linear between samples.
 #[derive(Debug, Clone, PartialEq)]
-pub struct LevelsGrain {
+pub(crate) struct LevelsGrain {
+    /// The inverted samples, which the tests' round trip reads.
+    #[cfg(test)]
     inverted: InvertedSpectrum,
     curve: Curve,
     reach: [f64; 2],
@@ -896,7 +927,7 @@ impl LevelsGrain {
     /// If the levels have fewer than two knots or their wavelengths do not rise: the rows' are
     /// stated so.
     #[must_use]
-    pub fn new(levels: &ReflectanceLevels, photometry: &Photometry) -> Self {
+    pub(crate) fn new(levels: &ReflectanceLevels, photometry: &Photometry) -> Self {
         let knots = levels.knots();
         assert!(
             knots.len() >= 2 && knots.windows(2).all(|p| p[0].0 < p[1].0),
@@ -927,6 +958,7 @@ impl LevelsGrain {
             knots[knots.len() - 1].0.min(BINS_TO_NM),
         ];
         Self {
+            #[cfg(test)]
             inverted,
             curve,
             reach,
@@ -934,8 +966,9 @@ impl LevelsGrain {
     }
 
     /// The inverted samples.
+    #[cfg(test)]
     #[must_use]
-    pub const fn inverted(&self) -> &InvertedSpectrum {
+    pub(crate) const fn inverted(&self) -> &InvertedSpectrum {
         &self.inverted
     }
 }
@@ -964,14 +997,14 @@ impl SpectralGrain for LevelsGrain {
 /// An opaque solid's grain: w = `S_e` of its index's complex Fresnel reflectance at each
 /// wavelength, from R08's file's piece.
 #[derive(Debug, Clone, PartialEq)]
-pub struct OpaqueGrain {
+pub(crate) struct OpaqueGrain {
     piece: Piece,
 }
 
 impl OpaqueGrain {
     /// The grain of R08's file's `piece`.
     #[must_use]
-    pub const fn new(piece: Piece) -> Self {
+    pub(crate) const fn new(piece: Piece) -> Self {
         Self { piece }
     }
 }
@@ -993,10 +1026,26 @@ impl SpectralGrain for OpaqueGrain {
     }
 }
 
+/// A grain shared through an [`Arc`], read as the grain itself: an end-member's, which the fit's
+/// cache holds once and its rows share.
+impl<G: SpectralGrain + ?Sized> SpectralGrain for Arc<G> {
+    fn reach_nm(&self) -> [f64; 2] {
+        (**self).reach_nm()
+    }
+
+    fn knots_nm(&self) -> Vec<f64> {
+        (**self).knots_nm()
+    }
+
+    fn single_scattering_albedo(&self, wavelength_nm: f64, diameter: Metres) -> f64 {
+        (**self).single_scattering_albedo(wavelength_nm, diameter)
+    }
+}
+
 /// A grain whose w is held at most a limit: a regolith row from a laboratory spectrum at
 /// `REGOLITH_MAX_SINGLE_SCATTERING_ALBEDO`, the lunar photometry's energy bound, a frost's at 1.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Clamped<G> {
+pub(crate) struct Clamped<G> {
     grain: G,
     limit: f64,
 }
@@ -1004,20 +1053,15 @@ pub struct Clamped<G> {
 impl<G: SpectralGrain> Clamped<G> {
     /// `grain`, its w held at most `limit`.
     #[must_use]
-    pub const fn new(grain: G, limit: f64) -> Self {
+    pub(crate) const fn new(grain: G, limit: f64) -> Self {
         Self { grain, limit }
     }
 
     /// The grain, unclamped.
+    #[cfg(test)]
     #[must_use]
-    pub const fn inner(&self) -> &G {
+    pub(crate) const fn inner(&self) -> &G {
         &self.grain
-    }
-
-    /// The limit.
-    #[must_use]
-    pub const fn limit(&self) -> f64 {
-        self.limit
     }
 }
 

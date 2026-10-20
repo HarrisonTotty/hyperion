@@ -1,5 +1,5 @@
 {
-  "description": "Written by apps/hyperion/src/renderer/src/test/mieSharedCases.test.ts (plan 14, P14.T49.e) from the client's Mie; read by crates/hyperion-fit/src/tasks/condensate_extinction/mie.rs, which holds its own Mie to it to 1e-6. Do not edit by hand.",
+  "description": "Written by apps/hyperion/src/renderer/src/view/atmosphere/mieSharedCases.test.ts (plan 14, P14.T49.e) from the client's Mie; read by crates/hyperion-fit/src/tasks/condensate_extinction/mie.rs, which holds its own Mie to it to 1e-6. Do not edit by hand.",
   "anglesDeg": [0, 90, 180],
   "cases": [
     {

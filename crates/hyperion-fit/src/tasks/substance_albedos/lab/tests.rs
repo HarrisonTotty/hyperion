@@ -28,11 +28,7 @@ fn substance_albedos_the_geometries_give_their_phase() {
     let (_, _, cos_g) = cosines(ASD_GEOMETRY);
     let phase = math::acos(cos_g).to_degrees();
     assert!((phase - 35.53).abs() < 0.01, "{phase}");
-    let opposite = Geometry {
-        incidence_deg: 20.0,
-        emission_deg: 60.0,
-        azimuth_deg: 180.0,
-    };
+    let opposite = Geometry::new(20.0, 60.0, 180.0).unwrap();
     let (_, _, cos_g) = cosines(opposite);
     assert!((math::acos(cos_g).to_degrees() - 80.0).abs() < 1e-9);
 }
@@ -42,11 +38,7 @@ fn substance_albedos_the_geometries_give_their_phase() {
 #[test]
 fn substance_albedos_the_forward_models_rise_with_w() {
     let asymmetry = LUNAR_REGOLITH.phase_function().asymmetry();
-    let snow = Geometry {
-        incidence_deg: 20.0,
-        emission_deg: 60.0,
-        azimuth_deg: 180.0,
-    };
+    let snow = Geometry::new(20.0, 60.0, 180.0).unwrap();
     for measurement in [
         Measurement::beckman(asymmetry),
         Measurement::asd(&LUNAR_REGOLITH),
@@ -68,11 +60,7 @@ fn substance_albedos_the_forward_models_rise_with_w() {
 #[test]
 fn substance_albedos_the_inversion_reproduces_its_value() {
     let asymmetry = LUNAR_REGOLITH.phase_function().asymmetry();
-    let snow = Geometry {
-        incidence_deg: 20.0,
-        emission_deg: 60.0,
-        azimuth_deg: 180.0,
-    };
+    let snow = Geometry::new(20.0, 60.0, 180.0).unwrap();
     for measurement in [
         Measurement::beckman(asymmetry),
         Measurement::asd(&LUNAR_REGOLITH),
@@ -221,7 +209,6 @@ fn substance_albedos_a_splib_file_reads() {
 fn substance_albedos_a_mixture_weights_by_cross_section() {
     let wavelengths = [(400.0, 0.5), (900.0, 0.5)];
     let grain = |w: f64| EndMemberGrain {
-        name: "test",
         scaling: GrainScaling::Held,
         spectra: vec![InvertedSpectrum {
             channels: wavelengths.iter().map(|&(nm, _)| (nm, w)).collect(),
@@ -245,4 +232,166 @@ fn substance_albedos_a_mixture_weights_by_cross_section() {
     assert!((w - expected).abs() < 1e-15, "{w} against {expected}");
     let weights = mixture.weights(d);
     assert!((weights[1] / weights[0] - 70.0 / 9.0).abs() < 1e-12);
+}
+
+/// A splib07a file of record `record` holding `values`, one a line.
+fn splib_file(record: &str, values: &[f64]) -> String {
+    use std::fmt::Write as _;
+    let mut text = format!(" splib07a Record=1: {record}\n");
+    for value in values {
+        writeln!(text, " {value}").unwrap();
+    }
+    text
+}
+
+/// A library of the Beckman's wavelengths, 400, 450 and 500 nm, the ASD's, 600 and 700 nm, and
+/// `files`, each (file name, record, values).
+fn library(files: &[(&str, &str, &[f64])]) -> LabLibrary {
+    let mut texts = std::collections::BTreeMap::from([
+        (
+            BECKMAN_WAVELENGTHS.to_owned(),
+            splib_file("Wavelengths BECK", &[0.4, 0.45, 0.5]),
+        ),
+        (
+            ASD_WAVELENGTHS.to_owned(),
+            splib_file("Wavelengths ASD", &[0.6, 0.7]),
+        ),
+    ]);
+    for &(file, record, values) in files {
+        texts.insert(file.to_owned(), splib_file(record, values));
+    }
+    LabLibrary::from_texts(texts)
+}
+
+/// The spectrum error of `file` for `why`.
+fn spectrum_refusal(file: &'static str, why: &str) -> FitAlbedoError {
+    FitAlbedoError::Spectrum {
+        file,
+        why: why.to_owned(),
+    }
+}
+
+/// A spectrum's channels are refused, by their specific reason, under a file name not of the
+/// release's form, when its header names another record, when its channels are not its
+/// wavelength file's, and when its wavelengths do not rise; a well-formed one reads, deleted
+/// channels dropped.
+#[test]
+fn substance_albedos_a_malformed_spectrum_is_refused() {
+    let lib = library(&[
+        (
+            "splib07a_Good_BECKa_AREF.txt",
+            "Good BECKa AREF",
+            &[0.3, -1.23e34, 0.5],
+        ),
+        (
+            "splib07a_Other_BECKa_AREF.txt",
+            "Good BECKa AREF",
+            &[0.3, 0.4, 0.5],
+        ),
+        (
+            "splib07a_Short_BECKa_AREF.txt",
+            "Short BECKa AREF",
+            &[0.3, 0.4],
+        ),
+        ("Plain.txt", "Plain", &[0.3, 0.4, 0.5]),
+    ]);
+    let beckman = |file| LabSpectrum::new(file, Spectrometer::Beckman);
+    let good = lib
+        .channels(beckman("splib07a_Good_BECKa_AREF.txt"))
+        .unwrap();
+    assert_eq!(good.len(), 2, "the deleted channel is dropped");
+    for (file, why) in [
+        (
+            "splib07a_Other_BECKa_AREF.txt",
+            "its header names the record `Good_BECKa_AREF`",
+        ),
+        (
+            "splib07a_Short_BECKa_AREF.txt",
+            "it has 2 channels and its wavelength file 3",
+        ),
+        ("Plain.txt", "its name is not splib07a_<record>.txt"),
+        (
+            "splib07a_Missing_BECKa_AREF.txt",
+            "it is not one of the dataset's files",
+        ),
+    ] {
+        assert_eq!(
+            lib.channels(beckman(file)),
+            Err(spectrum_refusal(file, why))
+        );
+    }
+    let mut texts = std::collections::BTreeMap::from([(
+        ASD_WAVELENGTHS.to_owned(),
+        splib_file("Wavelengths ASD", &[0.7, 0.6]),
+    )]);
+    let down = "splib07a_Down_ASDFRa_AREF.txt";
+    texts.insert(down.to_owned(), splib_file("Down ASDFRa AREF", &[0.3, 0.4]));
+    assert_eq!(
+        LabLibrary::from_texts(texts).channels(LabSpectrum::new(down, Spectrometer::Asd)),
+        Err(spectrum_refusal(
+            down,
+            "its channels are fewer than two or do not rise"
+        ))
+    );
+}
+
+/// Spectra that share no wavelength are refused: an end-member's two spectra over 400–500 and
+/// 600–700 nm, and a mixture of a Beckman end-member and an ASD one over the same; a mixture of
+/// no part is refused as one.
+#[test]
+fn substance_albedos_spectra_that_share_no_wavelength_are_refused() {
+    static SPECTRA: [LabSpectrum; 2] = [
+        LabSpectrum::new("splib07a_Blue_BECKa_AREF.txt", Spectrometer::Beckman),
+        LabSpectrum::new("splib07a_Red_ASDFRa_AREF.txt", Spectrometer::Asd),
+    ];
+    let lib = library(&[
+        (
+            "splib07a_Blue_BECKa_AREF.txt",
+            "Blue BECKa AREF",
+            &[0.3, 0.3, 0.3],
+        ),
+        (
+            "splib07a_Red_ASDFRa_AREF.txt",
+            "Red ASDFRa AREF",
+            &[0.3, 0.3],
+        ),
+    ]);
+    let tables = SpectrometerTables::new(&LUNAR_REGOLITH);
+    let source = hyperion_sim::substance::by_key("S8")
+        .and_then(|id| id.substance().condensed_optics())
+        .unwrap()
+        .sources()[0];
+    // The cache knows an end-member by its name, so each is named.
+    let end_member = |name: &'static str, spectra: &'static [LabSpectrum]| -> &'static EndMember {
+        Box::leak(Box::new(EndMember::new(
+            name,
+            spectra,
+            GrainScaling::Held,
+            source,
+        )))
+    };
+    let both = end_member("both", &SPECTRA);
+    assert_eq!(
+        EndMemberGrain::new(both, &lib, &tables),
+        Err(spectrum_refusal(
+            "splib07a_Blue_BECKa_AREF.txt",
+            "its end-member's spectra share no wavelength"
+        ))
+    );
+    let parts = [
+        MixturePart::new(end_member("blue", &SPECTRA[..1]), 0.5, GrainClass::Form),
+        MixturePart::new(end_member("red", &SPECTRA[1..]), 0.5, GrainClass::Form),
+    ];
+    let mut cache = EndMemberCache::new();
+    assert_eq!(
+        MixtureGrain::new(&parts, &lib, &tables, &mut cache),
+        Err(spectrum_refusal(
+            "splib07a_Blue_BECKa_AREF.txt",
+            "a mixture's spectra share no wavelength"
+        ))
+    );
+    assert_eq!(
+        MixtureGrain::new(&[], &lib, &tables, &mut cache),
+        Err(FitAlbedoError::EmptyMixture)
+    );
 }

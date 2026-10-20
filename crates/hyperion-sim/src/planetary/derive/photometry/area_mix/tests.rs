@@ -150,13 +150,22 @@ fn the_body_term_is_absent_without_absorption_or_scattering() {
 /// Water's sea at 288 K, from P14.T49.h's record about a Sun: its `r_d` at its index, 1.33–1.34,
 /// with its body's light in the blue, 0.066–0.09 (decision-p14-t49c-split §2, against 0.020 at
 /// normal incidence; a pure, deep, flat liquid's, recorded); without its body term, its `r_d`
-/// alone.
+/// alone. Over the host's whole spectrum: its first bin stands for the light below 380 nm, body
+/// term and all, and the light above 760 nm takes `r_d` at its last bin's index alone.
 #[test]
 fn water_s_sea_is_its_diffuse_reflectance_and_a_little_of_its_body() {
     let sea = liquid_properties(id("H2O"), kelvin(288.0), Composition::Reference).unwrap();
     let sun = HostShade::sun();
     let bond = liquid_bond(&sea, &sun.bins);
     assert!((0.066..0.09).contains(&bond), "{bond}");
+    let mut by_bin = [0.0; LIQUID_WEIGHTS];
+    for (k, &n) in sea.refractive_index.iter().enumerate() {
+        by_bin[k + 1] = liquid_bin_albedo(n, BodyTerm::of(&sea, k));
+    }
+    by_bin[0] = by_bin[1];
+    let last = sea.refractive_index[LIQUID_BINS - 1];
+    by_bin[LIQUID_BINS + 1] = diffuse_fresnel_reflectance(last);
+    assert_same_bits(bond, band_weighted(&by_bin, &sun.bins));
     let body: Vec<String> = sea
         .refractive_index
         .iter()
@@ -171,22 +180,52 @@ fn water_s_sea_is_its_diffuse_reflectance_and_a_little_of_its_body() {
     eprintln!("water's body term by bin, 380 to 760 nm: {body:?}");
     let bare = LiquidProperties {
         absorption_per_m: None,
-        ..sea
+        ..sea.clone()
     };
     let surface = liquid_bond(&bare, &sun.bins);
-    let by_bin: Vec<f64> = sea
-        .refractive_index
-        .iter()
-        .map(|&n| diffuse_fresnel_reflectance(n))
-        .collect();
-    assert_same_bits(surface, band_weighted(&by_bin, &sun.bins));
+    let mut by_index = [0.0; LIQUID_WEIGHTS];
+    for (albedo, &n) in by_index[1..=LIQUID_BINS]
+        .iter_mut()
+        .zip(&sea.refractive_index)
+    {
+        *albedo = diffuse_fresnel_reflectance(n);
+    }
+    by_index[0] = by_index[1];
+    by_index[LIQUID_BINS + 1] = diffuse_fresnel_reflectance(last);
+    assert_same_bits(surface, band_weighted(&by_index, &sun.bins));
     assert!(bond > surface, "{bond} {surface}");
-    eprintln!("water's sea at 288 K about a Sun: {bond:.5} ({surface:.5} at its surface alone)");
+    let (below, above) = (sun.bins[0], sun.bins[LIQUID_BINS + 1]);
+    eprintln!(
+        "water's sea at 288 K about a Sun: {bond:.5} ({surface:.5} at its surface alone); the \
+         Sun's light below 380 nm {below:.5}, above 760 nm {above:.5}"
+    );
 }
 
-/// The Gauss–Legendre rule integrates every monomial to degree 15, and every band's and bin's share
-/// of a black body's light from 2,000 to 40,000 K within 10⁻¹² of a 20,000-interval Simpson sum in
-/// x; a Sun sends 0.447 of its light into B, V and R.
+/// The share of a black body's light at `t` K below `nm`, (15 ÷ π⁴) Σₙ e^{−nx} (x³ ÷ n + 3x² ÷ n² +
+/// 6x ÷ n³ + 6 ÷ n⁴), x = c₂ ÷ λT, the Planck integral's series summed to its 600th term
+/// (`hyperion-fit`'s `blackbody_share_below`, P14.T49.i's), independent of the rule.
+fn planck_series_below(nm: f64, t: f64) -> f64 {
+    let x = SECOND_RADIATION_CONSTANT_M_K / (nm * 1e-9 * t);
+    let sum = (1..=600_u32).fold(0.0, |sum, n| {
+        let n = f64::from(n);
+        sum + math::exp(-n * x)
+            * (x * x * x / n
+                + 3.0 * x * x / (n * n)
+                + 6.0 * x / (n * n * n)
+                + 6.0 / (n * n * n * n))
+    });
+    let pi_squared = core::f64::consts::PI * core::f64::consts::PI;
+    15.0 / (pi_squared * pi_squared) * sum
+}
+
+/// The Gauss–Legendre rule integrates every monomial to degree 15, and every bin's share of a black
+/// body's light from 2,000 to 40,000 K within 10⁻¹² of a 20,000-interval Simpson sum in x: the
+/// optics' bins between their edges, their last from 3,500 nm to +∞ (x from 0), and the liquids'
+/// bins. The shares outside, each the rest of the light (the optics' below 390 nm, the liquids'
+/// below 380 nm) or summed from the optics' bins (the liquids' above 760 nm), are the Planck
+/// series' within 10⁻¹³, and each set sums to 1. A Sun sends 0.447 of its light into 380–760 nm,
+/// and, as P14.T49.i's record computes them from the series, 11% below 390 nm and 43% into
+/// 0.78–5 µm.
 #[test]
 fn the_planck_rule_is_within_its_stated_error() {
     for degree in 0..=15_u32 {
@@ -207,7 +246,14 @@ fn the_planck_rule_is_within_its_stated_error() {
         let (low, high) = (x_at(longest), x_at(shortest));
         let intervals = 20_000_u32;
         let h = (high - low) / f64::from(intervals);
-        let f = |x: f64| x * x * x / math::exp_m1(x);
+        // x³ ÷ (eˣ − 1) goes to 0 as x² at x = 0, the light at +∞ nm.
+        let f = |x: f64| {
+            if x > 0.0 {
+                x * x * x / math::exp_m1(x)
+            } else {
+                0.0
+            }
+        };
         let inner = (1..intervals).fold(0.0, |sum, k| {
             let weight = if k % 2 == 1 { 4.0 } else { 2.0 };
             sum + weight * f(low + f64::from(k) * h)
@@ -215,24 +261,66 @@ fn the_planck_rule_is_within_its_stated_error() {
         let pi_squared = core::f64::consts::PI * core::f64::consts::PI;
         15.0 / (pi_squared * pi_squared) * (f(low) + inner + f(high)) * h / 3.0
     };
-    let mut worst = 0.0_f64;
+    let (mut worst, mut worst_open) = (0.0_f64, 0.0_f64);
+    let last = OPTICS_BANDS - 1;
     for t in [
         2_000.0, 2_500.0, 3_200.0, 4_620.0, 5_772.0, 7_500.0, 10_000.0, 20_000.0, 40_000.0,
     ] {
-        for edges in [&VISIBLE_BAND_EDGES_NM[..], &LIQUID_BIN_EDGES_NM[..]] {
-            for pair in edges.windows(2) {
-                let rule = planck_share(kelvin(t), pair[0], pair[1]);
-                let fine = simpson(t, pair[0], pair[1]);
-                worst = worst.max((rule / fine - 1.0).abs());
-            }
+        let optics = optics_shares(kelvin(t));
+        for (bin, &share) in optics.iter().enumerate().skip(1) {
+            let longest = if bin == last {
+                f64::INFINITY
+            } else {
+                SPECTRAL_BIN_EDGES_NM[bin + 1]
+            };
+            let rule = planck_share(kelvin(t), SPECTRAL_BIN_EDGES_NM[bin], longest);
+            assert_same_bits(share, rule);
+            let fine = simpson(t, SPECTRAL_BIN_EDGES_NM[bin], longest);
+            worst = worst.max((rule / fine - 1.0).abs());
+        }
+        let liquids = liquid_shares(kelvin(t), &optics);
+        for (pair, &share) in LIQUID_BIN_EDGES_NM
+            .windows(2)
+            .zip(&liquids[1..=LIQUID_BINS])
+        {
+            let fine = simpson(t, pair[0], pair[1]);
+            worst = worst.max((share / fine - 1.0).abs());
+        }
+        let longest = LIQUID_BIN_EDGES_NM[LIQUID_BINS];
+        for (share, series) in [
+            (optics[0], planck_series_below(SPECTRAL_BIN_EDGES_NM[1], t)),
+            (liquids[0], planck_series_below(LIQUID_BIN_EDGES_NM[0], t)),
+            (
+                liquids[LIQUID_BINS + 1],
+                1.0 - planck_series_below(longest, t),
+            ),
+        ] {
+            worst_open = worst_open.max((share - series).abs());
+        }
+        for sum in [optics.iter().sum::<f64>(), liquids.iter().sum::<f64>()] {
+            assert!((sum - 1.0).abs() < 1e-15, "{t} K: {sum}");
         }
     }
     assert!(worst < 1e-12, "{worst}");
-    let sun: [f64; OPTICS_BANDS] = planck_shares(kelvin(5_772.0), &VISIBLE_BAND_EDGES_NM);
-    let visible = sun.iter().sum::<f64>();
+    assert!(worst_open < 1e-13, "{worst_open}");
+    let sun = optics_shares(kelvin(5_772.0));
+    let visible = planck_share(kelvin(5_772.0), 380.0, 760.0);
     assert!((visible - 0.447).abs() < 0.001, "{visible}");
+    assert!((sun[0] - 0.11).abs() < 0.005, "{}", sun[0]);
+    let infrared =
+        sun[5..].iter().sum::<f64>() - planck_share(kelvin(5_772.0), 5_000.0, f64::INFINITY);
+    assert!((infrared - 0.43).abs() < 0.005, "{infrared}");
     assert_same_bits(planck_share(kelvin(0.0), 380.0, 760.0), 0.0);
-    eprintln!("the Planck rule's worst relative error: {worst:.1e}; a Sun's B, V, R: {sun:?}");
+    for t in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let optics = optics_shares(kelvin(t));
+        for &share in optics.iter().chain(&liquid_shares(kelvin(t), &optics)) {
+            assert_same_bits(share, 0.0);
+        }
+    }
+    eprintln!(
+        "the Planck rule's worst relative error {worst:.1e} in a bin, the open shares' worst \
+         {worst_open:.1e}; a Sun's light by the optics' bins: {sun:.5?}"
+    );
 }
 
 /// The weighting reads any number of bands: a synthetic fourth band, an infrared bin beyond R,
@@ -250,7 +338,7 @@ fn the_weighting_is_band_agnostic() {
     assert!((band_weighted(&four, &[1.0, 2.0, 1.0, 4.0]) - 0.3).abs() < 1e-15);
     assert!((band_weighted(&three, &[0.0, 0.0, 0.0]) - 0.5).abs() < 1e-15);
     let sun = kelvin(5_772.0);
-    let visible: [f64; 3] = planck_shares(sun, &VISIBLE_BAND_EDGES_NM);
+    let visible: [f64; 3] = planck_shares(sun, &[380.0, 495.0, 595.0, 760.0]);
     let with_infrared: [f64; 4] = planck_shares(sun, &[380.0, 495.0, 595.0, 760.0, 2_500.0]);
     for (band, share) in visible.iter().enumerate() {
         assert_same_bits(with_infrared[band], *share);
@@ -345,25 +433,29 @@ fn a_hot_giant_lies_between_its_classes() {
     }
 }
 
-/// A solid's Bond albedo is its spherical albedo by band weighted by the light, never its normal
-/// albedo; a row without condensed optics takes water frost's, labelled; every stand-in has a label.
+/// A solid's Bond albedo is its spherical albedo by bin weighted by the light, never its normal
+/// albedo; a row without condensed optics takes water frost's, labelled: `SiC`, `Kr`, `C2H6` and
+/// `CH3OH`, which P14.T49.i left without optics (each checked here); every stand-in has a label.
 #[test]
 fn a_solid_without_optics_takes_water_frost_s_labelled() {
+    use crate::substance::optics::BVR_BINS;
+
     let sun = sun_bands();
     let water = solid_bond(id("H2O"), &sun);
     assert_eq!(water.stand_in, None);
     let optics = id("H2O").substance().condensed_optics().unwrap();
     assert_same_bits(
         water.bond,
-        band_weighted(&optics.spherical_albedo_bvr(), &sun),
+        band_weighted(&optics.spherical_albedo_bins(), &sun),
     );
-    let normal = band_weighted(&optics.normal_albedo_bvr(), &sun);
+    let normal = band_weighted(&optics.normal_albedo_bvr(), &BVR_BINS.map(|bin| sun[bin]));
     assert!(
         (water.bond - normal).abs() > 0.01,
         "{} {normal}",
         water.bond
     );
-    for key in ["feldspathic", "mars_dust", "graphite", "SO2"] {
+    for key in ["SiC", "Kr", "C2H6", "CH3OH"] {
+        assert!(id(key).substance().condensed_optics().is_none(), "{key}");
         let stood = solid_bond(id(key), &sun);
         assert_eq!(
             stood.stand_in,
@@ -423,11 +515,14 @@ fn the_space_weathering_stand_in_never_brightens_an_airless_silicate_body() {
     let ice = Regolith::of_material(SurfaceMaterial::Ice).bond(SurfaceState::Airless, &sun);
     assert_eq!(ice.stand_in, Some(StandIn::RowByMaterial));
     assert_same_bits(ice.bond, solid_bond(id("H2O"), &sun).bond);
-    let weathered = Regolith::weathered(SurfaceMaterial::Rock, [0.06, 0.08, 0.10]);
+    let bins = [
+        0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16,
+    ];
+    let weathered = Regolith::weathered(SurfaceMaterial::Rock, bins);
     assert_eq!(weathered.row, None);
     let weighed = weathered.bond(SurfaceState::Airless, &sun);
     assert_eq!(weighed.stand_in, None);
-    assert_same_bits(weighed.bond, band_weighted(&[0.06, 0.08, 0.10], &sun));
+    assert_same_bits(weighed.bond, band_weighted(&bins, &sun));
     eprintln!(
         "basalt about a Sun: {basalt:.5}; an airless lid of basalt, by the stand-in, {:.5}; an \
          airless lid not known {:.5}",
@@ -673,26 +768,39 @@ fn a_liquid_s_record_is_held_into_its_range_by_name() {
 }
 
 /// An Enceladus, the airless icy regolith's fresh water frost about a Sun (not a derived moon),
-/// takes `H2O`'s frost by its material, labelled, at a finite albedo in [0, 1). Near 0.8 (Howett
-/// et al. 2010, from memory; Li et al. 2023's 0.76 ± 0.03 through a secondary; both read at
-/// P14.T49.i's build) is asserted from P14.T49.i's commit, which adds the infrared bands its frost
-/// needs (decision-p14-t49c-split §1.3); until then its visible-only albedo is recorded.
+/// takes `H2O`'s frost by its material, labelled, near 0.8: within 0.7–0.9 (Howett et al. 2010's
+/// 0.81 ± 0.04, from memory; Li et al. 2023's 0.76 ± 0.03, Icarus 394, 115429, its abstract read),
+/// asserted since T51.b's area mix weights P14.T49.i's bins over the host's whole spectrum
+/// (decision-p14-t49c-split §1.3; main's ruling, 2026-10-19), where it was visible-only, 0.98937.
+/// It is T49.i's row-level check's weighting to 10⁻¹², each bin by the Planck series' light
+/// between its edges, the first from 0 nm and the last to +∞ (`hyperion-fit`'s `bond_albedo`).
 #[test]
-fn an_enceladus_takes_its_fresh_frost_until_the_infrared() {
+fn an_enceladus_takes_its_fresh_frost_near_0_8() {
     let sun = HostShade::sun();
     let frost = Regolith::of_material(SurfaceMaterial::Ice).bond(SurfaceState::Airless, &sun.bands);
     assert_eq!(frost.stand_in, Some(StandIn::RowByMaterial));
-    assert!(
-        frost.bond.is_finite() && (0.0..1.0).contains(&frost.bond),
-        "{}",
-        frost.bond
-    );
     assert_same_bits(frost.bond, solid_bond(id("H2O"), &sun.bands).bond);
     eprintln!(
-        "Enceladus by its fresh frost, over {OPTICS_BANDS} bands: {:.5}",
+        "Enceladus by its fresh frost, over {OPTICS_BANDS} bins: {:.5}",
         frost.bond
     );
-    if OPTICS_BANDS > 3 {
-        assert!((0.7..=0.9).contains(&frost.bond), "{}", frost.bond);
-    }
+    assert!((0.7..=0.9).contains(&frost.bond), "{}", frost.bond);
+    let bins = id("H2O")
+        .substance()
+        .condensed_optics()
+        .unwrap()
+        .spherical_albedo_bins();
+    let below = |bin: usize| match bin {
+        0 => 0.0,
+        OPTICS_BANDS => 1.0,
+        _ => planck_series_below(SPECTRAL_BIN_EDGES_NM[bin], SOLAR_EFFECTIVE_TEMPERATURE_K),
+    };
+    let by_series = bins.iter().enumerate().fold(0.0, |sum, (bin, &albedo)| {
+        sum + albedo * (below(bin + 1) - below(bin))
+    });
+    assert!(
+        (frost.bond - by_series).abs() < 1e-12,
+        "{} against {by_series}",
+        frost.bond
+    );
 }

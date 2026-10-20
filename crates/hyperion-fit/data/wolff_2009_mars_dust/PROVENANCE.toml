@@ -6,15 +6,18 @@
 # `data/cache/wolff_2009_mars_dust/Dust_Refractive_Indicies.txt`) to 148 of its 229 rows,
 # 0.7-5.5 µm, as the table prints them: its 146 infrared rows over 0.8-4.9946 µm, and the rows at
 # 0.7 and 5.5 µm that bracket the task's 0.78-5 µm. No other row, and no raw file, is committed.
-# Committed as measured values with the citations. Reproduced from the raw by hand on 2026-10-16:
+# Its rows beyond 2,920 nm lie outside Wolff et al.'s 2009 CRISM retrieval (440-2,920 nm): they are
+# the distributed table's, with no stated primary, and they set `mars_dust`'s 2.8-5 µm bins.
+# Committed as measured values with the citations. Re-fetched, and reproduced from the raw by hand,
+# on 2026-10-19:
 # `python3 -I crates/hyperion-fit/data/wolff_2009_mars_dust/reduce.py <raw>
 # crates/hyperion-fit/data/wolff_2009_mars_dust/nk.csv`, from outside the raw's directory. Read by
 # `run substance_albedos`.
 dataset = "wolff_2009_mars_dust"
 class = "committed"
-citation = "M. J. Wolff et al. (2009), J. Geophys. Res. 114, E00D04, DOI 10.1029/2009JE003350: wavelength dependence of dust aerosol single scattering albedo as observed by the Compact Reconnaissance Imaging Spectrometer; n and k of Mars's dust, retrieved over CRISM's 440-2920 nm (the rows beyond are the distributed table's, outside that range); as distributed by NASA Ames's Mars Climate Modeling Group (Dust_Refractive_Indicies.txt, its 1-D radiation code page: \"Dust indicies are taken from Wolff (2009)\")"
+citation = "M. J. Wolff et al. (2009), J. Geophys. Res. 114, E00D04, DOI 10.1029/2009JE003350: wavelength dependence of dust aerosol single scattering albedo as observed by the Compact Reconnaissance Imaging Spectrometer; n and k of Mars's dust, retrieved over CRISM's 440-2920 nm (the rows beyond are the distributed table's, outside that retrieval, with no stated primary); as distributed by NASA Ames's Mars Climate Modeling Group (Dust_Refractive_Indicies.txt, its 1-D radiation code page: \"Dust indicies are taken from Wolff (2009)\")"
 url = "https://web.archive.org/web/20111019190939id_/http://spacescience.arc.nasa.gov/mars-climate-modeling-group/documents/Dust_Refractive_Indicies.txt"
-retrieved = "2026-10-16"
+retrieved = "2026-10-19"
 release = "Dust_Refractive_Indicies.txt as the Internet Archive holds it from NASA Ames's page on 2011-10-19, 2013-02-19 and 2016-02-03 (one digest), sha256 bf6069ad22fbfbbef7bf957d386a8177647c87fd98ed6574b5c5f8d6c8016769, the bytes of the copy R08's mars-dust.json was reduced from (S. Ranjan's repository at 1e67a481); reduced by reduce.py"
 licence = "No terms stated: NASA Ames's page (archived 2013-02-16) names its NASA official and states no licence, and the AGU paper is closed. Reduced values committed with the citations, as decision-r08-licences row 3 rules for the same table's visible rows and decision-composition §5 for reduced values"
 

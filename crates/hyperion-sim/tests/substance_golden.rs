@@ -400,7 +400,9 @@ fn input_lines(w: &mut GoldenWriter, label: &str, input: OpticsInput) {
             let g = levels.geometry();
             w.line(&format!(
                 "{label}: levels at i {} e {} azimuth {} deg",
-                g.incidence_deg, g.emission_deg, g.azimuth_deg
+                g.incidence_deg(),
+                g.emission_deg(),
+                g.azimuth_deg()
             ));
             for (nm, value) in levels.knots() {
                 w.f64(&format!("{label}: level at {nm} nm"), *value);

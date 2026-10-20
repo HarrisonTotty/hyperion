@@ -46,13 +46,24 @@ const fn slab(n: f64, um: f64) -> GrainScaling {
     }
 }
 
-/// An end-member's source: what `citation` describes, its basis `Reduced`.
+/// An end-member's or a mode's source: what `citation` describes, its basis `Reduced`.
 #[must_use]
 const fn described(covers: &'static str, citation: &'static str) -> Source {
     Source {
         covers,
         citation,
         basis: Basis::Reduced,
+    }
+}
+
+/// A mode no source gives whole, its basis `Adopted`: `citation` names its sources and says which
+/// part of it is an assumption.
+#[must_use]
+const fn assumed(citation: &'static str) -> Source {
+    Source {
+        covers: "mode",
+        citation,
+        basis: Basis::Adopted,
     }
 }
 
@@ -686,12 +697,13 @@ pub(in crate::substance) const ANORTHOSITE: &[MixturePart] =
     &[form(&ANORTHITE, 0.95), form(&HYPERSTHENE_C2368, 0.05)];
 
 /// `anorthosite`'s mode.
-pub(in crate::substance) const ANORTHOSITE_MODE: Source = described(
-    "mode",
+pub(in crate::substance) const ANORTHOSITE_MODE: Source = assumed(
     "the registry's anorthosite (its grain density's source, after science-composition-crusts \
      §7.2): 95 per cent An95 plagioclase and 5 per cent low-calcium pyroxene, by volume (its 2,790 \
-     kg m⁻³ is their volume-weighted mean at 2,753 and about 3,500); the pyroxene as hypersthene \
-     NMNHC2368 (Fs26), the nearest of splib07a's low-Ca pyroxenes to a lunar anorthosite's",
+     kg m⁻³ is their volume-weighted mean at 2,753 and about 3,500), a lunar ferroan \
+     anorthosite's proportions as that ruling gives them from memory, not read (its §7.1), so an \
+     assumption here; the pyroxene as hypersthene NMNHC2368 (Fs26), the nearest of splib07a's \
+     low-Ca pyroxenes to a lunar anorthosite's",
 );
 
 /// `feldspathic`'s parts.
@@ -715,8 +727,7 @@ pub(in crate::substance) const KOMATIITE: &[MixturePart] =
     &[form(&OLIVINE_FO89, 0.40), form(&AUGITE, 0.60)];
 
 /// `komatiite`'s mode.
-pub(in crate::substance) const KOMATIITE_MODE: Source = described(
-    "mode",
+pub(in crate::substance) const KOMATIITE_MODE: Source = assumed(
     "the spinifex-textured komatiite SA 3091 of Munro Township, by volume: skeletal olivine 40, \
      subcalcic augite 45 and devitrified glass 15 per cent (Arndt 1976, Carnegie Inst. Washington \
      Year Book 75, 555, p. 555, the registry's grain density's source), the olivine Fo90–92 (the \
@@ -729,11 +740,11 @@ pub(in crate::substance) const ULTRAMAFIC: &[MixturePart] =
     &[form(&OLIVINE_FO89, 0.60), form(&ENSTATITE, 0.40)];
 
 /// `ultramafic`'s mode.
-pub(in crate::substance) const ULTRAMAFIC_MODE: Source = described(
-    "mode",
+pub(in crate::substance) const ULTRAMAFIC_MODE: Source = assumed(
     "Hu, Ehlmann and Seager 2012's ultramafic type, \"60% Olivine, 40% Enstatite\" (ApJ 752, 7, \
-     Table 2, the registry's grain density's source), of Mg# 90 (the registry's assumption), taken \
-     as volume fractions; as olivine GDS70.c (Fo90.5) and enstatite NMNH128288 (Fs7)",
+     Table 2, the registry's grain density's source), of Mg# 90 (the registry's assumption); the \
+     paper does not say that its shares are by volume, so taking them as volume fractions is an \
+     assumption; as olivine GDS70.c (Fo90.5) and enstatite NMNH128288 (Fs7)",
 );
 
 /// `basalt_fe`'s parts.
@@ -746,15 +757,14 @@ pub(in crate::substance) const BASALT_FE: &[MixturePart] = &[
 ];
 
 /// `basalt_fe`'s mode.
-pub(in crate::substance) const BASALT_FE_MODE: Source = described(
-    "mode",
+pub(in crate::substance) const BASALT_FE_MODE: Source = assumed(
     "the low-Ti mare basalts' mode, the mean of the Lunar Sourcebook's (Heiken, Vaniman and French \
      1991, ch. 6, Table 6.1, p. 188) Apollo 12 ilmenite, pigeonite and olivine and Apollo 15 \
      olivine and pigeonite basalts: 61.76 vol% pyroxene, 24.82 plagioclase, 6.44 olivine and 6.94 \
      opaques, to fractions; the pyroxene split 1:1 between augite NMNH120049 (Wo34 En45 Fs21) and \
-     pigeonite HS199.3B, a split no source gives; the opaques (ilmenite, armalcolite, spinel and \
-     troilite, the table's footnote) as ilmenite HS231.3B at the form's grains, no fine fraction \
-     being cited (decision-p14-t49i-rock-mixtures §2.2 and §2.7)",
+     pigeonite HS199.3B, an assumption no source gives; the opaques (ilmenite, armalcolite, spinel \
+     and troilite, the table's footnote) as ilmenite HS231.3B at the form's grains, no fine \
+     fraction being cited (decision-p14-t49i-rock-mixtures §2.2 and §2.7)",
 );
 
 /// `basalt_reduced`'s parts.
@@ -766,14 +776,14 @@ pub(in crate::substance) const BASALT_REDUCED: &[MixturePart] = &[
 ];
 
 /// `basalt_reduced`'s mode.
-pub(in crate::substance) const BASALT_REDUCED_MODE: Source = described(
-    "mode",
+pub(in crate::substance) const BASALT_REDUCED_MODE: Source = assumed(
     "an assumption inside Charlier and Namur 2017's bounds for Mercury's Intermediate Plains \
      (IcP-HCT), whose solidus mineralogy has the most enstatite (above 25%) and much plagioclase \
      (above 45%) (LPSC XLVIII, #1173, p. 2): 50 wt% plagioclase, 30 enstatite, 10 diopside and 10 \
-     forsterite, at the Handbook of Mineralogy's 2,760, 3,189, 3,278 and 3,362 kg m⁻³, to vol%: \
-     0.5400, 0.2804, 0.0909 and 0.0886; the plagioclase as anorthite, the Northern Volcanic \
-     Plains' sodic melts not drawn; sulphides not drawn",
+     forsterite, at the Handbook of Mineralogy's 2,760, 3,189 and 3,278 kg m⁻³ and 3,362 for the \
+     forsterite, olivine at GDS71.a's Fa8.1, linear between forsterite's D(calc.) 3.271 and \
+     fayalite's 4.40 g cm⁻³, to vol%: 0.5400, 0.2804, 0.0909 and 0.0886; the plagioclase as \
+     anorthite, the Northern Volcanic Plains' sodic melts not drawn; sulphides not drawn",
 );
 
 /// `granite`'s parts.
@@ -786,13 +796,12 @@ pub(in crate::substance) const GRANITE: &[MixturePart] = &[
 ];
 
 /// `granite`'s mode.
-pub(in crate::substance) const GRANITE_MODE: Source = described(
-    "mode",
+pub(in crate::substance) const GRANITE_MODE: Source = assumed(
     "Chayes's mode of the granite G-1 (Fairbairn et al. 1951, USGS Bulletin 980, Table 26, p. \
      61): 27.5 vol% quartz, 35.4 K-feldspar, 31.4 plagioclase (oligoclase, p. 59), 3.2 biotite, \
      1.3 muscovite, 0.8 opaques and 0.4 non-opaque accessories; the muscovite counted with the \
-     K-feldspar as microcline, the non-opaque accessories left out and the rest normalised; the \
-     opaques as magnetite HS195.3B",
+     K-feldspar as microcline, an assumption no source gives, the non-opaque accessories left out \
+     and the rest normalised; the opaques as magnetite HS195.3B",
 );
 
 /// `phyllosilicate`'s parts.
@@ -800,11 +809,10 @@ pub(in crate::substance) const PHYLLOSILICATE: &[MixturePart] =
     &[form(&LIZARDITE, 0.82), form(&SAPONITE, 0.18)];
 
 /// `phyllosilicate`'s mode.
-pub(in crate::substance) const PHYLLOSILICATE_MODE: Source = described(
-    "mode",
-    "inferred, not cited: the registry's grain density, 2,500 kg m⁻³, between saponite's 2,270 \
-     (the Handbook of Mineralogy's 2.24–2.30) and lizardite's 2,550 (its D(meas.)), as a \
-     volume-weighted mean, gives 82 vol% lizardite and 18 vol% saponite",
+pub(in crate::substance) const PHYLLOSILICATE_MODE: Source = assumed(
+    "an assumption, inferred and not cited: the registry's grain density, 2,500 kg m⁻³, between \
+     saponite's 2,270 (the Handbook of Mineralogy's 2.24–2.30) and lizardite's 2,550 (its \
+     D(meas.)), as a volume-weighted mean, gives 82 vol% lizardite and 18 vol% saponite",
 );
 
 /// `ferric`'s parts.
@@ -820,15 +828,15 @@ pub(in crate::substance) const FERRIC: &[MixturePart] = &[
 ];
 
 /// `ferric`'s mode.
-pub(in crate::substance) const FERRIC_MODE: Source = described(
-    "mode",
+pub(in crate::substance) const FERRIC_MODE: Source = assumed(
     "the registry's ferric soil (its grain density's source): Rocknest's hematite 1.0 and \
      magnetite 1.8 wt% (Achilles et al. 2017, JGR Planets 122, 2344, Table 1) and nanophase ferric \
      oxide 6.8 wt% (Morris et al. 2013, LPSC 44, 1653, Table 3), in 90.4 wt% `basalt_fe`, at \
      5,260 and 5,175 kg m⁻³ (the Handbook of Mineralogy's), ferrihydrite's 3,700 (the midpoint \
      of Hiemstra and Van Riemsdijk 2009's 3.5–3.9 g cm⁻³) and `basalt_fe`'s 3,310, to vol%: \
-     0.0064, 0.0117, 0.0619 and 0.9200, `basalt_fe`'s parts scaled by 0.9200; the nanophase oxide \
-     as ferrihydrite GDS75, the rest at the form's grains",
+     0.0064, 0.0117, 0.0619 and 0.9200, `basalt_fe`'s parts scaled by 0.9200, its pyroxene's 1:1 \
+     split among them, an assumption no source gives; the nanophase oxide as ferrihydrite GDS75, \
+     the rest at the form's grains",
 );
 
 /// `chondrite_ci`'s parts.
@@ -842,16 +850,16 @@ pub(in crate::substance) const CHONDRITE_CI: &[MixturePart] = &[
 ];
 
 /// `chondrite_ci`'s mode.
-pub(in crate::substance) const CHONDRITE_CI_MODE: Source = described(
-    "mode",
-    "Orgueil's mean mode (King et al. 2015, GCA 165, 148, Table 1, p. 154): 83.0 vol% \
+pub(in crate::substance) const CHONDRITE_CI_MODE: Source = assumed(
+    "Orgueil's mean mode (King et al. 2015, GCA 165, 148, Table 1, p. 154, read in Open Research \
+     Online's CC BY 4.0 copy of the version of record): 83.0 vol% \
      phyllosilicate, 5.7 sulphide, 6.7 magnetite and 1.0 olivine (Fo80), its ferrihydrite (3.3) \
      and gypsum (0.3) left out as terrestrial weathering products (Amano et al. 2023, Sci. Adv. 9, \
      eadi3789: CI's Fe hydroxides and Ca and Mg sulphates formed after the fall), normalised, then \
      scaled by 0.907 for 9.3 vol% organic matter (C 3.5 wt%, Alexander et al. 2012 via Kurokawa et \
      al. 2020, as about 5 wt% organic matter at 1,400 kg m⁻³ in a bulk of 2,590, not read here); \
-     the phyllosilicate split 1:1 between saponite and serpentine (lizardite), a split no source \
-     gives; the olivine as HS285.2B (Fo80), the organics as kerogen",
+     the phyllosilicate split 1:1 between saponite and serpentine (lizardite), an assumption no \
+     source gives; the olivine as HS285.2B (Fo80), the organics as kerogen",
 );
 
 /// `chondrite_ci`'s fine grains.
@@ -995,15 +1003,19 @@ pub(in crate::substance) const CHONDRITE_LL: &[MixturePart] = &[
     form(&CHROMITE, 0.0139),
 ];
 
-/// The ordinary chondrites' mode's source, for group `group`, its olivine Fa and pyroxene Fs.
+/// The ordinary chondrites' mode's source, for group `group` of `rows` meteorites in Dunn et al.
+/// 2010's Table 4, its olivine Fa and pyroxene Fs.
 macro_rules! ordinary_mode {
-    ($group:literal, $mode:literal, $fa:literal, $fs:literal, $split:literal) => {
+    ($group:literal, $rows:literal, $mode:literal, $fa:literal, $fs:literal, $split:literal) => {
         described(
             "mode",
             concat!(
                 "the ",
                 $group,
-                " group's mean mode (Dunn et al. 2010, MAPS 45, 123, Table 4): ",
+                " group's mean mode, the mean of its ",
+                $rows,
+                " rows in Dunn et al. 2010's Table 4 (MAPS 45, 123, read in the Internet \
+                 Archive's copy of the publisher's free-access page, 2020-06-02): ",
                 $mode,
                 " wt% olivine, low-Ca pyroxene, high-Ca pyroxene, plagioclase, troilite, metal and \
                  other phases, to vol% at the Handbook of Mineralogy's D(calc.) (olivine and \
@@ -1029,6 +1041,7 @@ macro_rules! ordinary_mode {
 /// `chondrite_h`'s mode.
 pub(in crate::substance) const CHONDRITE_H_MODE: Source = ordinary_mode!(
     "H",
+    "18",
     "33.04, 25.61, 6.71, 8.98, 5.81, 18.23 and 1.67",
     "19.3",
     "16.25",
@@ -1039,6 +1052,7 @@ pub(in crate::substance) const CHONDRITE_H_MODE: Source = ordinary_mode!(
 /// `chondrite_l`'s mode.
 pub(in crate::substance) const CHONDRITE_L_MODE: Source = ordinary_mode!(
     "L",
+    "17",
     "42.12, 23.18, 8.11, 9.41, 7.22, 8.39 and 1.56",
     "25.2",
     "20.5",
@@ -1049,6 +1063,7 @@ pub(in crate::substance) const CHONDRITE_L_MODE: Source = ordinary_mode!(
 /// `chondrite_ll`'s mode.
 pub(in crate::substance) const CHONDRITE_LL_MODE: Source = ordinary_mode!(
     "LL",
+    "13",
     "51.11, 21.12, 7.38, 9.72, 5.66, 3.46 and 1.58",
     "31.3",
     "24",
@@ -1084,14 +1099,13 @@ pub(in crate::substance) const COMETARY: &[MixturePart] = &[
 ];
 
 /// `cometary`'s mode.
-pub(in crate::substance) const COMETARY_MODE: Source = described(
-    "mode",
+pub(in crate::substance) const COMETARY_MODE: Source = assumed(
     "the registry's cometary refractory (its grain density's source): 45 wt% organics (Bardyn et \
      al. 2017, MNRAS 469, S712, §3.4) at 1,400 kg m⁻³ and 55 wt% minerals at 3,450 (the midpoint \
      of 3,430–3,480), so 66.85 vol% organics, and the minerals silicate to sulphide 4.5:1 by \
      volume (the midpoint of Fulle et al. 2016's 4–5 to 1, MNRAS 462, S132); the silicate split \
-     equally between olivine GDS70.c (Fo90.5) and enstatite NMNH128288, a split no source gives; \
-     the organics as kerogen",
+     equally between olivine GDS70.c (Fo90.5) and enstatite NMNH128288, an assumption no source \
+     gives; the organics as kerogen",
 );
 
 /// `cometary`'s fine grains.

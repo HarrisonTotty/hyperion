@@ -510,8 +510,8 @@ const SHARED: [(&str, &str); 1] = [(
 
 /// Whether `line` names `pattern` as a whole name: at the start of the line, or after a character
 /// that cannot continue an identifier. So `isothermal::` (R09.T13's isothermal climate model) does
-/// not read as `thermal::`.
-fn names(line: &str, pattern: &str) -> bool {
+/// not read as `thermal::`. `substance::aerosol`'s tripwire reads by it too.
+pub(in crate::substance) fn names(line: &str, pattern: &str) -> bool {
     line.match_indices(pattern).any(|(at, _)| {
         line[..at]
             .chars()

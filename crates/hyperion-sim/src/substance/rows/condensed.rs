@@ -1640,8 +1640,11 @@ pub(in crate::substance) const MAGNESIUM_SULPHATE: CondensedColumns = CondensedC
              O-058 and O-034; Chase 1998), 103 K lower, so that the sim has one thermochemistry \
              (decision-p14-t49b-condensed §3.1(5)). CEA's MgSO4 melts at 1,410 K and JANAF's at \
              1,400 K (table Mg-020), which a dense SO2-bearing air approaches; a decomposition \
-             observed in air lies higher, its O2 suppressing SO3's dissociation (no measurement \
-             read)",
+             observed in air lies higher, its O2 suppressing SO3's dissociation. Scheidema and \
+             Taskinen 2011 (Ind. Eng. Chem. Res. 50, 9550, abstract) observed the decomposition at \
+             1,100 °C (1,373 K) under N2 (TG-DSC), and their equilibrium calculation with Δ_fH \
+             −1,284.9 kJ/mol gave 1,080 °C. JANAF's 1,272 K follows from its Δ_fH°(298) of \
+             −1,261.786 kJ/mol (Mg-018), 27 kJ/mol above Gurvich's −1,288.8",
             Basis::Reduced,
         ),
         SALT_FAMILY,
