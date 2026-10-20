@@ -240,26 +240,64 @@ pub fn coarse_pass(seed: SurfaceSeed, inputs: &CoarseInputs) -> CoarseField {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hyperion_surface::field::{Cover, CoverRange, FieldView, ResolutionCode};
+    use hyperion_surface::field::{
+        BoundaryKind, ClimateModelKind, Cover, CoverRange, FieldView, ResolutionCode, SynthesisCell,
+    };
+    use hyperion_surface::spheroid::Spheroid;
     use hyperion_surface::wire::encode_payload;
     use hyperion_testkit::order::assert_order_independent;
 
-    /// The pass is a pure function of its seed and inputs: computed forwards, backwards and
-    /// interleaved, each (seed, world) gives the same field (sim-determinism, "Order
-    /// independence"), which the server's cache of fields relies on (Design note 19).
-    #[test]
-    fn the_pass_is_order_independent() {
-        let worlds = [
-            reference::ceres_like(),
-            reference::moon_like(),
-            reference::mars_like(),
-            reference::earth_like(),
-        ];
+    /// The reference Earth's inputs on a 600 km sphere, at level 5: the pass runs every step that
+    /// only the Earth reaches among the reference worlds (the moving plates and their belts,
+    /// R09.T12.e's sea and reflood, the energy-balance model with its hypsometry, R09.T13.d's liquids
+    /// and R09.T13.e's hydrology) on 6,144 cells (decision-r09-t13-test-cost).
+    fn small_earth() -> CoarseInputs {
+        reference::builder_of(&reference::earth_like())
+            .figure(Spheroid::sphere(600.0e3))
+            .build()
+            .expect("the reference Earth's inputs hold on a smaller sphere")
+    }
+
+    /// Each of `worlds` under two seeds, its pass computed forwards, backwards, permuted and alone,
+    /// gives the same field ([`assert_order_independent`]).
+    fn assert_order_independent_over(worlds: &[CoarseInputs]) {
         let keys: Vec<(SurfaceSeed, usize)> = [reference::SEED, SurfaceSeed::new(0x0dd5)]
             .into_iter()
             .flat_map(|seed| (0..worlds.len()).map(move |world| (seed, world)))
             .collect();
         assert_order_independent(&keys, |&(seed, world)| coarse_pass(seed, &worlds[world]));
+    }
+
+    /// The pass is a pure function of its seed and inputs: computed forwards, backwards and
+    /// interleaved, each (seed, world) gives the same field (sim-determinism, "Order
+    /// independence"), which the server's cache of fields relies on (Design note 19). The small
+    /// Earth stands in for the reference Earth, so that every step's code is order-tested in the
+    /// fast tier, the Earth-only steps' under both seeds; the reference Earth's level-8 passes are
+    /// the slow [`the_reference_earth_s_pass_is_order_independent`]'s (decision-r09-t13-test-cost
+    /// §2.2).
+    #[test]
+    fn the_pass_is_order_independent() {
+        assert_order_independent_over(&[
+            reference::ceres_like(),
+            reference::moon_like(),
+            reference::mars_like(),
+            small_earth(),
+        ]);
+    }
+
+    /// The pass is order-independent on the four reference worlds themselves, the reference Earth
+    /// at level 8 interleaved with the small worlds: the fast test's property at the Earth's own
+    /// level, for a hidden state only level 8 would show (decision-r09-t13-test-cost §2.2).
+    #[test]
+    #[ignore = "slow: the four reference worlds' coarse passes in four orders under two seeds, \
+                eight of them the Earth at level 8"]
+    fn the_reference_earth_s_pass_is_order_independent() {
+        assert_order_independent_over(&[
+            reference::ceres_like(),
+            reference::moon_like(),
+            reference::mars_like(),
+            reference::earth_like(),
+        ]);
     }
 
     /// The whole field's payload, every cell surveyed at the finest code.
@@ -271,13 +309,19 @@ mod tests {
         encode_payload(field, &cover, None)
     }
 
+    /// Each world's pass, run twice, yields the same field and the same payload, its header
+    /// carrying the inputs; and the small Earth's field keeps reaching the steps only the Earth
+    /// reaches: a sea and land, a plate boundary that is not a transform, the energy-balance model,
+    /// a main liquid and rain (decision-r09-t13-test-cost §3.2). The reference Earth's level 8
+    /// is held by `reference`'s `the_reference_worlds_are_the_bodies_they_name`.
     #[test]
     fn the_pass_yields_a_valid_field_twice_with_identical_bytes() {
+        let mut small_earth_field = None;
         for (name, inputs, level) in [
             ("Ceres", reference::ceres_like(), 5),
             ("Moon", reference::moon_like(), 6),
             ("Mars", reference::mars_like(), 7),
-            ("Earth", reference::earth_like(), 8),
+            ("small Earth", small_earth(), 5),
         ] {
             let first = coarse_pass(reference::SEED, &inputs);
             let second = coarse_pass(reference::SEED, &inputs);
@@ -299,7 +343,46 @@ mod tests {
                 "{name}"
             );
             assert_eq!(first.header().main_liquid(), inputs.main_liquid(), "{name}");
+            if name == "small Earth" {
+                small_earth_field = Some(first);
+            }
         }
+
+        // The small Earth keeps reaching the Earth-only steps: R09.T12.e's flood and the land it
+        // leaves, a mobile lid's belts and ridges, the energy-balance model, R09.T13.d's liquid and
+        // R09.T13.e's rain.
+        let field = small_earth_field.expect("the small Earth's row ran");
+        let cells = field.synthesis();
+        assert!(
+            cells.iter().any(SynthesisCell::is_under_water),
+            "the small Earth has a sea"
+        );
+        assert!(
+            cells.iter().any(|cell| !cell.is_under_water()),
+            "the small Earth has land"
+        );
+        assert!(
+            cells.iter().any(|cell| matches!(
+                cell.boundary,
+                BoundaryKind::Subduction | BoundaryKind::Collision | BoundaryKind::Divergent
+            )),
+            "the small Earth has a plate boundary that is not a transform"
+        );
+        assert_eq!(
+            field.header().climate_model(),
+            ClimateModelKind::EnergyBalance
+        );
+        assert!(
+            field.header().main_liquid().is_some(),
+            "the small Earth has a main liquid"
+        );
+        assert!(
+            field.climate_layer().iter().any(|cell| cell
+                .month_precipitation
+                .iter()
+                .any(|month| month.rate_kg_per_m2_s() > 0.0)),
+            "the small Earth rains somewhere"
+        );
     }
 
     #[test]

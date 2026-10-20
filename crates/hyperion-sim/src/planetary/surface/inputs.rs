@@ -2236,7 +2236,7 @@ fn condensates(mut list: Vec<Condensate>) -> Result<Vec<Condensate>, BuildCoarse
 
 #[cfg(test)]
 mod tests {
-    use super::super::reference;
+    use super::super::reference::{self, builder_of};
     use super::*;
     use crate::Seed;
     use crate::galaxy::placement::CellKey;
@@ -2322,41 +2322,6 @@ mod tests {
     fn palette(mut entries: Vec<PaletteEntry>) -> MaterialPalette {
         entries.sort_by_key(|e| (e.role, e.substance));
         MaterialPalette::new(entries).unwrap()
-    }
-
-    /// The builder values of `inputs`, as a builder to vary.
-    fn builder_of(inputs: &CoarseInputs) -> CoarseInputsBuilder {
-        let mut builder = CoarseInputs::builder()
-            .body(inputs.body())
-            .figure(inputs.figure())
-            .gravity(inputs.gravity())
-            .sigma_h(inputs.sigma_h())
-            .liquids(inputs.liquids().iter().copied())
-            .ices(inputs.ices().iter().copied())
-            .mean_surface_temperature(inputs.mean_surface_temperature())
-            .equator_pole_contrast_k(inputs.equator_pole_contrast_k())
-            .day_night_contrast_k(inputs.day_night_contrast_k())
-            .spin(*inputs.spin())
-            .host_flux(inputs.host_flux())
-            .surface_pressure(inputs.surface_pressure())
-            .gases(inputs.gases().iter().copied())
-            .surface(inputs.surface_state(), inputs.surface_material())
-            .tectonics(inputs.tectonics(), inputs.continental_fraction())
-            .volcanism(inputs.volcanism())
-            .heat_flow(inputs.heat_flow())
-            .surface_age(inputs.surface_age())
-            .craters(*inputs.craters())
-            .climate(*inputs.climate())
-            .crust(*inputs.crust())
-            .condensates(inputs.condensates().iter().copied())
-            .palette(inputs.palette().clone());
-        if let Some(orbit) = inputs.seasonal_orbit() {
-            builder = builder.seasonal_orbit(*orbit);
-        }
-        if let Some(epoch) = inputs.wet_epoch() {
-            builder = builder.wet_epoch(*epoch);
-        }
-        builder
     }
 
     /// The reference Earth's builder values, as a builder to vary.

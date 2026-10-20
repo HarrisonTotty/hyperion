@@ -1,4 +1,4 @@
-//! The climate step's tests (R09.T13.a–c): the plan's, with the pipeline's own.
+//! The climate step's tests (R09.T13.a–e): the plan's, with the pipeline's own.
 
 use hyperion_surface::field::{ClimateModelKind, CoarseLevel};
 
@@ -19,28 +19,19 @@ use crate::math;
 use crate::planetary::hooks::surface::EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K;
 use crate::planetary::surface::grid::CellGraph;
 use crate::planetary::surface::inputs::{
-    ClimateRegime, CoarseInputs, CoarseInputsBuilder, Forcing, SeasonalOrbit, Spin,
+    ClimateRegime, CoarseInputs, Forcing, SeasonalOrbit, Spin,
 };
 use crate::planetary::surface::reference;
 use crate::planetary::surface::steps::{CellState, Pass, Working};
 use crate::substance::by_key;
 use crate::units::consts::SECONDS_PER_DAY;
 use crate::units::{Metres, Radians, Seconds};
+use earth_land::{EARTH_BOX_MEDIAN_M, EARTH_HYPSOMETRY_M, EARTH_LAND_BOXES, EARTH_LAND_SHARE};
 use hyperion_testkit::float::assert_same_bits;
 
-/// Earth's land share of each 2.5° band from the south pole, computed from Natural Earth's
-/// 1:110m land polygons (public domain, naturalearthdata.com, `ne_110m_land`) by even–odd
-/// scanlines, 40 to a band, weighted by cos φ: 0.289 of the sphere, against 0.2905 from Eakins
-/// and Sharman's 361.9 of 510.1 × 10⁶ km² of ocean. Antarctica's ice shelves are not land at that
-/// scale, so 76–84° S reads about 0.8. A synthetic sea in place of R09.T12's relief.
-const EARTH_LAND_SHARE: [f64; LATITUDE_BANDS] = [
-    1.0000, 0.9923, 0.9024, 0.7995, 0.7839, 0.7363, 0.6116, 0.4869, 0.2970, 0.0714, 0.0028, 0.0000,
-    0.0000, 0.0019, 0.0150, 0.0199, 0.0254, 0.0283, 0.0352, 0.0403, 0.0548, 0.0771, 0.1284, 0.1889,
-    0.2127, 0.2216, 0.2437, 0.2483, 0.2363, 0.2381, 0.2140, 0.1947, 0.2218, 0.2396, 0.2500, 0.2304,
-    0.2187, 0.2086, 0.2369, 0.2506, 0.2282, 0.2435, 0.2726, 0.3104, 0.3366, 0.3652, 0.3912, 0.4174,
-    0.4375, 0.4139, 0.4285, 0.4295, 0.4638, 0.4933, 0.5413, 0.5765, 0.5970, 0.5908, 0.5413, 0.5500,
-    0.6712, 0.7375, 0.7771, 0.6655, 0.4426, 0.2690, 0.2468, 0.2321, 0.2065, 0.0420, 0.0000, 0.0000,
-];
+// The builder values of a world, as a builder to vary: `reference`'s one copy, which the step's
+// tests in its other files reach here (decision-r09-t13-test-cost §3.1).
+pub(super) use crate::planetary::surface::reference::builder_of;
 
 /// The first band ERA-Interim's curve reaches: band 5, centred on 76.25° S. South of about 77° S
 /// Siler et al.'s Fig. 2b shows only their model's curve.
@@ -100,141 +91,73 @@ pub(super) fn set_ground(
     }
 }
 
-/// Earth's land hypsometry by 2.5° band from the south pole, m: each band's eight equal-area
-/// quantiles of the land's surface height above mean sea level, ice sheets included, the heights
-/// at cumulative (q + ½) ÷ 8 of the band's land solid angle (each 5′ row weighted by the cosine of
-/// its latitude). Computed offline from Earth2014's physical surface, SUR2014, on its 5-arcmin
-/// grid (C. Hirt and M. Rexer 2015, Int. J. Appl. Earth Obs. Geoinf. 39, 103–112, DOI
-/// 10.1016/j.jag.2015.03.001, its readme read; heights over a lake its surface), land being
-/// neither ocean, floating ice shelf nor the Caspian, as Natural Earth's 1:110m land counts it
-/// ([`EARTH_LAND_SHARE`]). Earth2014 is composed of SRTM V4.1 (A. Jarvis, H. I. Reuter, A. Nelson
-/// and E. Guevara 2008, Hole-filled SRTM for the globe Version 4, CGIAR-CSI; CIAT acknowledged as
-/// its source), `SRTM30_PLUS` v9 (J. J. Becker et al. 2009, Marine Geodesy 32, 355), Bedmap2 (P.
-/// Fretwell et al. 2013, The Cryosphere 7, 375) and GBT v3 (J. L. Bamber et al. 2013, The
-/// Cryosphere 7, 499). Only these 576 derived statistics are committed, no grid
-/// (decision-r09-t13ge §1.5; `NOTICE`, "Test data (not shipped)"). The northernmost two bands
-/// hold no land, and 61.25° S and 58.75° S none of Natural Earth's.
-const EARTH_HYPSOMETRY_M: [[i16; 8]; LATITUDE_BANDS] = [
-    [2557, 2672, 2749, 2838, 2946, 3053, 3094, 3124], // 88.75° S
-    [1427, 2046, 2363, 2566, 2731, 2951, 3105, 3259], // 86.25° S
-    [280, 974, 1562, 2054, 2454, 2791, 3286, 3581],   // 83.75° S
-    [319, 957, 1629, 2098, 2529, 3112, 3582, 3886],   // 81.25° S
-    [435, 1244, 1713, 2187, 2788, 3252, 3533, 3717],  // 78.75° S
-    [667, 1213, 1891, 2458, 2855, 3213, 3460, 3650],  // 76.25° S
-    [423, 1216, 2087, 2542, 2904, 3093, 3213, 3423],  // 73.75° S
-    [314, 1068, 1654, 2087, 2458, 2671, 2837, 3027],  // 71.25° S
-    [413, 1046, 1404, 1686, 1923, 2131, 2323, 2513],  // 68.75° S
-    [46, 237, 486, 724, 917, 1107, 1320, 1589],       // 66.25° S
-    [3, 21, 64, 143, 269, 465, 806, 1398],            // 63.75° S
-    [2, 4, 7, 17, 55, 134, 233, 359],                 // 61.25° S
-    [1, 1, 5, 29, 54, 88, 153, 273],                  // 58.75° S
-    [3, 15, 32, 56, 112, 177, 272, 448],              // 56.25° S
-    [6, 28, 65, 115, 169, 243, 345, 541],             // 53.75° S
-    [6, 44, 99, 157, 219, 304, 416, 828],             // 51.25° S
-    [35, 118, 191, 280, 422, 611, 808, 1249],         // 48.75° S
-    [34, 162, 273, 385, 528, 652, 818, 1153],         // 46.25° S
-    [24, 128, 251, 370, 569, 775, 976, 1223],         // 43.75° S
-    [16, 84, 190, 364, 627, 881, 1065, 1276],         // 41.25° S
-    [16, 75, 143, 205, 266, 372, 604, 1153],          // 38.75° S
-    [15, 69, 102, 136, 214, 333, 665, 1494],          // 36.25° S
-    [15, 62, 94, 139, 235, 336, 564, 997],            // 33.75° S
-    [46, 98, 141, 190, 285, 416, 913, 1487],          // 31.25° S
-    [45, 100, 169, 252, 378, 487, 974, 1622],         // 28.75° S
-    [58, 137, 261, 400, 497, 684, 1055, 1664],        // 26.25° S
-    [79, 162, 256, 385, 485, 647, 1051, 1524],        // 23.75° S
-    [91, 211, 289, 366, 459, 724, 1032, 1583],        // 21.25° S
-    [56, 179, 275, 405, 655, 947, 1129, 1998],        // 18.75° S
-    [44, 161, 248, 389, 587, 851, 1118, 1829],        // 16.25° S
-    [53, 176, 305, 458, 642, 1044, 1246, 2398],       // 13.75° S
-    [80, 206, 296, 362, 515, 983, 1215, 1493],        // 11.25° S
-    [27, 141, 216, 295, 414, 649, 1006, 1478],        // 8.75° S
-    [32, 96, 154, 220, 325, 605, 850, 1343],          // 6.25° S
-    [16, 52, 90, 135, 230, 457, 665, 1394],           // 3.75° S
-    [11, 41, 74, 134, 234, 382, 599, 1440],           // 1.25° S
-    [21, 90, 177, 258, 353, 473, 666, 1215],          // 1.25° N
-    [33, 124, 200, 368, 492, 618, 734, 1173],         // 3.75° N
-    [24, 96, 172, 302, 459, 595, 774, 1463],          // 6.25° N
-    [19, 104, 208, 340, 406, 500, 759, 1566],         // 8.75° N
-    [13, 130, 288, 347, 417, 484, 619, 1131],         // 11.25° N
-    [21, 118, 269, 303, 372, 474, 666, 1144],         // 13.75° N
-    [28, 167, 270, 333, 413, 505, 730, 1119],         // 16.25° N
-    [32, 185, 299, 371, 435, 529, 671, 1224],         // 18.75° N
-    [18, 131, 270, 343, 458, 591, 762, 1346],         // 21.25° N
-    [17, 152, 269, 343, 464, 630, 927, 1660],         // 23.75° N
-    [39, 137, 247, 334, 440, 601, 973, 1827],         // 26.25° N
-    [36, 148, 273, 418, 565, 850, 1512, 4353],        // 28.75° N
-    [16, 98, 204, 452, 703, 1151, 2092, 4851],        // 31.25° N
-    [31, 132, 337, 714, 1093, 1669, 3411, 5011],      // 33.75° N
-    [46, 220, 399, 758, 1222, 1760, 2833, 4842],      // 36.25° N
-    [31, 197, 362, 816, 1166, 1437, 1969, 3474],      // 38.75° N
-    [76, 219, 364, 680, 980, 1251, 1563, 2243],       // 41.25° N
-    [56, 165, 257, 389, 616, 1002, 1334, 2086],       // 43.75° N
-    [6, 91, 176, 309, 430, 719, 1136, 1841],          // 46.25° N
-    [40, 142, 245, 349, 462, 667, 949, 1690],         // 48.75° N
-    [57, 142, 204, 282, 392, 597, 871, 1622],         // 51.25° N
-    [44, 122, 174, 228, 339, 521, 729, 1155],         // 53.75° N
-    [56, 116, 147, 215, 342, 493, 728, 1209],         // 56.25° N
-    [44, 92, 141, 196, 296, 407, 547, 989],           // 58.75° N
-    [36, 96, 157, 234, 330, 417, 726, 1285],          // 61.25° N
-    [36, 98, 152, 219, 324, 446, 732, 1319],          // 63.75° N
-    [28, 80, 152, 230, 326, 444, 619, 1176],          // 66.25° N
-    [14, 46, 106, 196, 283, 420, 694, 1828],          // 68.75° N
-    [7, 24, 50, 92, 164, 291, 617, 2808],             // 71.25° N
-    [6, 33, 74, 133, 237, 709, 2404, 2976],           // 73.75° N
-    [9, 58, 148, 299, 691, 1841, 2428, 2722],         // 76.25° N
-    [17, 146, 380, 695, 1229, 1761, 2117, 2380],      // 78.75° N
-    [19, 155, 343, 520, 703, 999, 1413, 1838],        // 81.25° N
-    [10, 119, 249, 389, 520, 652, 814, 1051],         // 83.75° N
-    [0, 0, 0, 0, 0, 0, 0, 0],                         // 86.25° N
-    [0, 0, 0, 0, 0, 0, 0, 0],                         // 88.75° N
-];
-
 /// Land at the sea level in every band: the synthetic sea with no relief.
 const SEA_LEVEL_LAND: [[i16; 8]; LATITUDE_BANDS] = [[0; 8]; LATITUDE_BANDS];
 
-/// Raises each band's land share of `working`'s cells to `land`'s, its land at the heights
-/// `hypsometry` gives it: in each band, the cells in order of longitude from −180°, then cell index,
-/// are land until their solid angle reaches the band's land share, and the rest sea (100 m below
-/// the sea level, flooded to it with the main liquid, [`set_ground`]); the sea level is 0. The
-/// band's land cells, in that order, take its eight heights in turn, the q-th eighth of its land's
-/// solid angle (by each cell's midpoint) at height q, dry ([`SEA_LEVEL_LAND`]: at the sea level).
-fn synthetic_sea(
-    pass: &Pass<'_>,
-    working: &mut Working,
-    land: &[f64; LATITUDE_BANDS],
-    hypsometry: &[[i16; 8]; LATITUDE_BANDS],
-) {
+/// Lays out Earth's land on `working`'s cells as a synthetic sea, its land at the heights
+/// `hypsometry` gives each band; the sea level is 0 (decision-r09-t13e-asbuilt §1.3–§1.4).
+///
+/// - **The land** is Natural Earth's by 2.5° × 5° box ([`EARTH_LAND_BOXES`], thousandths; a cell's
+///   box the one its centre lies in, the geographic grid's point): in each box the cells in order
+///   of longitude, then cell index, are land until their solid angle reaches the box's share (a
+///   cell is land while half of it fits), and the rest sea, 100 m below the sea level and flooded
+///   to it with the main liquid ([`set_ground`]).
+/// - **The heights**: each band's land cells, in order of their box's Earth2014 median land height
+///   ([`EARTH_BOX_MEDIAN_M`]; a box with no Earth2014 land lowest), then longitude, then cell
+///   index, take the band's eight heights in turn, the q-th eighth of the band's land solid angle
+///   (by each cell's midpoint) at height q, dry ([`SEA_LEVEL_LAND`]: at the sea level). Each
+///   band's heights are so R09.T13.g's eighths, and its relief stands where Earth's does: the
+///   Tibetan Plateau, the Andes, the Rockies, the ice sheets.
+fn synthetic_sea(pass: &Pass<'_>, working: &mut Working, hypsometry: &[[i16; 8]; LATITUDE_BANDS]) {
     let grid = pass.grid();
+    let solid_angles = grid.solid_angles_sr();
     let flood = pass.inputs().main_liquid();
-    let mut bands: Vec<Vec<(f64, usize)>> = vec![Vec::new(); LATITUDE_BANDS];
-    let mut totals = [0.0; LATITUDE_BANDS];
+    let points = ModelGrid::geographic();
+    let mut boxes: Vec<Vec<(f64, usize)>> = vec![Vec::new(); LATITUDE_BANDS * GEOGRAPHIC_COLUMNS];
     for (cell, centre) in grid.centres().iter().enumerate() {
-        let band = ModelGrid::band_of(centre[2]);
-        bands[band].push((math::atan2(centre[1], centre[0]), cell));
-        totals[band] += grid.solid_angles_sr()[cell];
+        boxes[points.point_of(*centre)].push((math::atan2(centre[1], centre[0]), cell));
     }
-    for (band, cells) in bands.iter_mut().enumerate() {
-        cells.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-        let target = land[band] * totals[band];
-        let mut held = 0.0;
+    for (band, row) in boxes
+        .as_chunks_mut::<GEOGRAPHIC_COLUMNS>()
+        .0
+        .iter_mut()
+        .enumerate()
+    {
+        // The band's land cells, each with its box's median height and its longitude.
         let mut lands = Vec::new();
-        for &(_, cell) in cells.iter() {
-            let solid_angle = grid.solid_angles_sr()[cell];
-            if held + 0.5 * solid_angle <= target {
-                held += solid_angle;
-                lands.push(cell);
-            } else {
-                set_ground(
-                    &mut working.cells[cell],
-                    Metres::new(-100.0),
-                    Metres::ZERO,
-                    flood,
-                );
+        for ((cells, &share), &median) in row
+            .iter_mut()
+            .zip(&EARTH_LAND_BOXES[band])
+            .zip(&EARTH_BOX_MEDIAN_M[band])
+        {
+            cells.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            let total = cells
+                .iter()
+                .fold(0.0, |sum, &(_, cell)| sum + solid_angles[cell]);
+            let target = f64::from(share) / 1_000.0 * total;
+            let mut held = 0.0;
+            for &(longitude, cell) in cells.iter() {
+                let solid_angle = solid_angles[cell];
+                if held + 0.5 * solid_angle <= target {
+                    held += solid_angle;
+                    lands.push((median, longitude, cell));
+                } else {
+                    set_ground(
+                        &mut working.cells[cell],
+                        Metres::new(-100.0),
+                        Metres::ZERO,
+                        flood,
+                    );
+                }
             }
         }
+        lands.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)));
+        let held = lands
+            .iter()
+            .fold(0.0, |sum, &(_, _, cell)| sum + solid_angles[cell]);
         let mut below = 0.0;
-        for cell in lands {
-            let solid_angle = grid.solid_angles_sr()[cell];
+        for (_, _, cell) in lands {
+            let solid_angle = solid_angles[cell];
             // The eighths of the band's land its midpoint has passed.
             let share = (below + 0.5 * solid_angle) / held;
             let q = (1..8_u8).filter(|&k| 8.0 * share >= f64::from(k)).count();
@@ -250,20 +173,29 @@ fn synthetic_sea(
     working.sea_level = Metres::ZERO;
 }
 
-/// The reference Earth at level 7 with Earth's land share by band as a synthetic sea, its land at
-/// the heights `hypsometry` gives it ([`synthetic_sea`]), and its zonal model's answer over that
-/// ground, the zonal relief from its cells as the step builds it: the pass's grids, the working
-/// state, the relief and the answer.
+/// The reference Earth at level 7 with Earth's land by 2.5° × 5° box as a synthetic sea
+/// ([`EARTH_LAND_BOXES`]; each band's land share within 0.03 of [`EARTH_LAND_SHARE`]'s, the worst
+/// band printed), its land at the heights `hypsometry` gives it ([`synthetic_sea`]), and its zonal
+/// model's answer over that ground, the zonal relief from its cells as the step builds it: the
+/// pass's grids, the working state, the relief and the answer.
 fn era_earth(hypsometry: &[[i16; 8]; LATITUDE_BANDS]) -> (ebm::Solution, Relief, Working) {
     let inputs = reference::earth_like();
     let (field, climate) = grids(7);
     let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
     let mut working = Working::initial(&pass);
-    synthetic_sea(&pass, &mut working, &EARTH_LAND_SHARE, hypsometry);
+    synthetic_sea(&pass, &mut working, hypsometry);
     let sea = sea_shares(&pass, &working);
+    let mut worst = (0, 0.0_f64);
     for (band, (&s, &l)) in sea.iter().zip(&EARTH_LAND_SHARE).enumerate() {
         assert!((s + l - 1.0).abs() < 0.03, "band {band}: sea {s}, land {l}");
+        if (s + l - 1.0).abs() > worst.1.abs() {
+            worst = (band, s + l - 1.0);
+        }
     }
+    eprintln!(
+        "the synthetic sea's land share against Earth's: {:+.4} at worst, band {}",
+        -worst.1, worst.0
+    );
     let grid = ModelGrid::zonal();
     let relief = Relief::of(
         &inputs,
@@ -277,8 +209,8 @@ fn era_earth(hypsometry: &[[i16; 8]; LATITUDE_BANDS]) -> (ebm::Solution, Relief,
     (solution, relief, working)
 }
 
-/// The plan's Earth test. The reference Earth, with Earth's land share by band as a synthetic sea
-/// (R09.T12's relief is not built) and its land at the sea level, converges within
+/// The plan's Earth test. The reference Earth, with Earth's land by box as a synthetic sea
+/// (R09.T12's relief is not built; [`era_earth`]) and its land at the sea level, converges within
 /// [`MAX_ORBITS`], and its annual-mean zonal temperature at sea level lies within 5 K of
 /// ERA-Interim's (Siler et al. 2018, Fig. 2b) from 58.75° S to the North Pole.
 ///
@@ -337,8 +269,10 @@ const RELIEF_POLAR_BOUND_K: f64 = 11.0;
 const RELIEF_SOUTHERN_BOUND_K: f64 = 8.0;
 
 /// R09.T13.g's Earth test (decision-r09-t13ge §1.6). The reference Earth with its land's
-/// hypsometry by hand ([`EARTH_HYPSOMETRY_M`], each band's land cells at its eight heights in turn,
-/// its sea flooded to the sea level, [`EARTH_LAND_SHARE`]'s mask): its annual-mean zonal
+/// hypsometry by hand ([`EARTH_HYPSOMETRY_M`], each band's land cells at its eight heights in order
+/// of their 2.5° × 5° box's Earth2014 median land height, its sea flooded to the sea level; Natural
+/// Earth's land by box, [`EARTH_LAND_BOXES`], its band totals [`EARTH_LAND_SHARE`]'s;
+/// [`synthetic_sea`], decision-r09-t13e-asbuilt): its annual-mean zonal
 /// temperature at sea level lies within 5 K of Siler et al.'s Fig. 2b from 58.75° S northward,
 /// within 8 K from 73.75° S to 61.25° S and within 11 K at 76.25° S, every band printed, beside the
 /// same Earth with every land cell at the sea level; its 76.25° S and 73.75° S bands are each at
@@ -423,7 +357,7 @@ fn the_step_s_mean_constant_reconciles_the_relief_earth_s_surface_means() {
     let (field, climate) = grids(7);
     let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
     let mut working = Working::initial(&pass);
-    synthetic_sea(&pass, &mut working, &EARTH_LAND_SHARE, &EARTH_HYPSOMETRY_M);
+    synthetic_sea(&pass, &mut working, &EARTH_HYPSOMETRY_M);
     let diagnostics = super::run_diagnosed(&pass, &mut working);
     let means = diagnostics
         .surface_means
@@ -473,7 +407,7 @@ fn with_every_height_zero_the_model_is_t13a_s_to_the_bit() {
     let (field, climate) = grids(7);
     let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
     let mut working = Working::initial(&pass);
-    synthetic_sea(&pass, &mut working, &EARTH_LAND_SHARE, &SEA_LEVEL_LAND);
+    synthetic_sea(&pass, &mut working, &SEA_LEVEL_LAND);
     let zonal = ModelGrid::zonal();
     let sea = sea_shares(&pass, &working);
     let (_, relief) = super::reliefs(&pass, &working, &zonal, Coordinates::Geographic);
@@ -872,41 +806,6 @@ fn every_band_has_a_sea_share() {
     }
     let sea = sea_shares(&pass, &working);
     assert!(sea.iter().all(|&s| (s - 1.0).abs() < 1e-15), "{sea:?}");
-}
-
-/// The builder values of `inputs`, as a builder to vary (as the inputs' own tests build them).
-pub(super) fn builder_of(inputs: &CoarseInputs) -> CoarseInputsBuilder {
-    let mut builder = CoarseInputs::builder()
-        .body(inputs.body())
-        .figure(inputs.figure())
-        .gravity(inputs.gravity())
-        .sigma_h(inputs.sigma_h())
-        .liquids(inputs.liquids().iter().copied())
-        .ices(inputs.ices().iter().copied())
-        .mean_surface_temperature(inputs.mean_surface_temperature())
-        .equator_pole_contrast_k(inputs.equator_pole_contrast_k())
-        .day_night_contrast_k(inputs.day_night_contrast_k())
-        .spin(*inputs.spin())
-        .host_flux(inputs.host_flux())
-        .surface_pressure(inputs.surface_pressure())
-        .gases(inputs.gases().iter().copied())
-        .surface(inputs.surface_state(), inputs.surface_material())
-        .tectonics(inputs.tectonics(), inputs.continental_fraction())
-        .volcanism(inputs.volcanism())
-        .heat_flow(inputs.heat_flow())
-        .surface_age(inputs.surface_age())
-        .craters(*inputs.craters())
-        .climate(*inputs.climate())
-        .crust(*inputs.crust())
-        .condensates(inputs.condensates().iter().copied())
-        .palette(inputs.palette().clone());
-    if let Some(orbit) = inputs.seasonal_orbit() {
-        builder = builder.seasonal_orbit(*orbit);
-    }
-    if let Some(epoch) = inputs.wet_epoch() {
-        builder = builder.wet_epoch(*epoch);
-    }
-    builder
 }
 
 /// `inputs` with plan 14's own contrasts for an airless body of its mean, read in the radiative
@@ -1315,6 +1214,8 @@ fn a_locked_world_with_obliquity_has_twelve_months_that_differ() {
     a_locked_world_has_twelve_months_that_differ(0.0, 20.0);
 }
 
+mod earth_land;
+mod hydrology;
 mod normalisation;
 
 /// R09.T13.c's tests: the radiative model with thermal inertia and the isothermal surface.

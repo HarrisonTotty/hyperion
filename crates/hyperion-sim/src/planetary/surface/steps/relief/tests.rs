@@ -17,6 +17,7 @@ use super::*;
 use crate::planetary::hooks::SurfaceSeed;
 use crate::planetary::surface::grid::CellGraph;
 use crate::planetary::surface::inputs::CoarseInputs;
+use crate::planetary::surface::reference::builder_of;
 use crate::planetary::surface::{quantise, reference};
 use crate::units::consts::{SECONDS_PER_JULIAN_YEAR, SECONDS_PER_MEGAYEAR};
 use crate::units::{Gigayears, MetresPerSecond, Seconds, WattsPerSquareMetre};
@@ -536,41 +537,6 @@ fn the_populations_have_their_widths() {
     let (ocean_mean, ocean_spread) = subset_mean_and_spread(&z, omega, &sea);
     eprintln!("oceanic mean {ocean_mean:.0} m, s.d. {ocean_spread:.0} m");
     assert!((ocean_spread / 930.0 - 1.0).abs() < 0.1, "{ocean_spread} m");
-}
-
-/// The builder values of `inputs`, as a builder to vary.
-fn builder_of(inputs: &CoarseInputs) -> crate::planetary::surface::inputs::CoarseInputsBuilder {
-    let mut builder = CoarseInputs::builder()
-        .body(inputs.body())
-        .figure(inputs.figure())
-        .gravity(inputs.gravity())
-        .sigma_h(inputs.sigma_h())
-        .liquids(inputs.liquids().iter().copied())
-        .ices(inputs.ices().iter().copied())
-        .mean_surface_temperature(inputs.mean_surface_temperature())
-        .equator_pole_contrast_k(inputs.equator_pole_contrast_k())
-        .day_night_contrast_k(inputs.day_night_contrast_k())
-        .spin(*inputs.spin())
-        .host_flux(inputs.host_flux())
-        .surface_pressure(inputs.surface_pressure())
-        .gases(inputs.gases().iter().copied())
-        .surface(inputs.surface_state(), inputs.surface_material())
-        .tectonics(inputs.tectonics(), inputs.continental_fraction())
-        .volcanism(inputs.volcanism())
-        .heat_flow(inputs.heat_flow())
-        .surface_age(inputs.surface_age())
-        .craters(*inputs.craters())
-        .climate(*inputs.climate())
-        .crust(*inputs.crust())
-        .condensates(inputs.condensates().iter().copied())
-        .palette(inputs.palette().clone());
-    if let Some(orbit) = inputs.seasonal_orbit() {
-        builder = builder.seasonal_orbit(*orbit);
-    }
-    if let Some(epoch) = inputs.wet_epoch() {
-        builder = builder.wet_epoch(*epoch);
-    }
-    builder
 }
 
 /// Every lid without plates is one population of plan 14's `STAGNANT_LID_RELIEF` about the datum:

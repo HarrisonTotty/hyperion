@@ -44,6 +44,16 @@
 //!    cells' own interpolant at their centres (decision-r09-t13d-normalisation §1).
 //! 8. The liquids (`seas`): the flooded cells shared among them, each to its share of the ocean
 //!    fraction, basin by basin.
+//! 9. The precipitation heuristic and the winds (`hydrology`, R09.T13.e; decision-r09-t13ge §2),
+//!    on the energy-balance models from their own records before step 3's correction: each
+//!    month's zonal moisture budget, Siler et al.'s Hadley-cell partition of the model's own flux
+//!    centred on the month's energy-flux equator, held at Guendelman and Kaspi's ascending-branch
+//!    cap on a rotating world (`partition`); Priestley and Taylor's evaporation over the climate
+//!    condensable's own open liquid (`evaporation`); the large-scale rate; each climate cell's
+//!    10 m wind from the Hadley cells' mass flux and a Ferrel and polar template under a surface
+//!    drag, quantised and decoded into its record (`wind`); the orographic precipitation over land
+//!    along those winds (`lfpm`); and one factor a month that balances the global water. The
+//!    radiative and isothermal models write no precipitation and calm winds.
 //!
 //! A cell's surface temperature is its climate cell's sea-level temperature less
 //! Γ (z − `z_sea`) at its surface height z, the water's surface over water: what R10's classifier
@@ -71,26 +81,36 @@
 //! condensable's freezing point by `SubstanceId` (`frost`). R09.T13.g gave the energy-balance
 //! models the relief (`hypsometry`, and `ebm`'s relief terms, its surface-mean τ and the fold
 //! guard): a world whose every height above the sea level is zero is T13.a's to the bit.
-//! R09.T13.e–f's precipitation, winds and cold traps are still to come. A world places liquids
-//! only on the cells the relief step floods (R09.T12.e's ocean, decision-r09-t12-coarse R8); until
-//! R09.T12.e every world is dry, its sea level its lowest elevation, so the energy-balance models
-//! read every cell's height above that.
+//! R09.T13.e built the precipitation heuristic and the winds (the pipeline's step 9): the
+//! orographic precipitation (`lfpm`), Hergarten and Robl 2022's linear feedback model on the
+//! field's cells, carried along a month's wind from the sea's large-scale rate, with the land's
+//! runoff share; the zonal budget (`partition`), the evaporation (`evaporation`) and the winds
+//! (`wind`); and their pipeline (`hydrology`), which writes each climate cell's monthly
+//! precipitation and 10 m wind, and `annual_runoff_kg_m2_s`, the runoff R09.T14 reads. Each
+//! month's record holds the wind its orographic step carried vapour along, as the record decodes
+//! it. R09.T13.f's cold traps are still to come. A world places liquids only on the cells the
+//! relief step floods (R09.T12.e's ocean, decision-r09-t12-coarse R8).
 
 mod airless;
 mod coordinates;
 mod ebm;
+mod evaporation;
 mod frost;
 mod grid;
+mod hydrology;
 mod hypsometry;
 pub(crate) mod ice;
 mod isothermal;
 mod lapse;
+mod lfpm;
 mod normalise;
+mod partition;
 pub(crate) mod seas;
 mod sun;
 #[cfg(test)]
 mod tests;
 mod transport;
+mod wind;
 
 use hyperion_surface::cube::PatchKey;
 use hyperion_surface::field::{ClimateModelKind, cell_index, month_edges};
@@ -146,6 +166,9 @@ struct Diagnostics {
     liquids: Vec<PlacedLiquid>,
     /// The energy-balance models' surface means ([`SurfaceMeans`]); none on the other models.
     surface_means: Option<SurfaceMeans>,
+    /// The energy-balance models' water cycle ([`hydrology`]); none on the other models, whose
+    /// records are zero and calm.
+    water: Option<hydrology::Diagnostics>,
 }
 
 /// An energy-balance model's surface means over its relief, K, which R09.T13.d's constant c
@@ -176,7 +199,8 @@ enum MeanKind {
 }
 
 /// A model's normalised answer on its grid: its records, its coordinates, its lower bound, the
-/// correction it took and the kind of its mean.
+/// correction it took and the kind of its mean, and an energy-balance model's own records for the
+/// water cycle.
 #[derive(Debug, Clone, PartialEq)]
 struct Normalised {
     grid: ModelGrid,
@@ -187,6 +211,9 @@ struct Normalised {
     residuals_k: [f64; 3],
     kind: MeanKind,
     surface_means: Option<SurfaceMeans>,
+    /// The energy-balance models' own records before the correction, which the precipitation
+    /// heuristic reads ([`hydrology`]); none on the radiative and isothermal models.
+    water: Option<hydrology::OwnRecords>,
 }
 
 /// `t_k`, a climate temperature in kelvin, asserted finite: one that is not is a fault of the
@@ -207,58 +234,23 @@ fn finite_k(t_k: f64) -> f64 {
 #[must_use]
 fn normalised(pass: &Pass<'_>, working: &Working) -> Normalised {
     let inputs = pass.inputs();
-    let floor = night_floor(inputs.heat_flow()).value();
-    let arithmetic = |grid: ModelGrid,
-                      coordinates: Coordinates,
-                      climate: GridClimate,
-                      surface_means: Option<SurfaceMeans>| {
-        let correction = normalise::arithmetic(inputs, &grid, coordinates, &climate.annual_k);
-        let mut climate = climate;
-        normalise::apply(&mut climate, &grid, coordinates, &correction);
-        Normalised {
-            grid,
-            coordinates,
-            climate,
-            lower_bound_k: floor,
-            correction,
-            residuals_k: [0.0; 3],
-            kind: MeanKind::Arithmetic,
-            surface_means,
-        }
-    };
-    let means = |solution: &ebm::Solution, grid: &ModelGrid, relief: &Relief| SurfaceMeans {
-        steady_k: solution.steady_surface_mean_k,
-        seasonal_k: relief.surface_mean_k(grid, &solution.climate.annual_k),
-    };
     match inputs.climate().model {
-        ClimateModelKind::EnergyBalance => {
-            let (grid, coordinates) = (ModelGrid::geographic(), Coordinates::Geographic);
-            let sea_share = point_sea_shares(pass, working, &grid, coordinates);
-            let (on_grid, zonal) = reliefs(pass, working, &grid, coordinates);
-            let ground = Ground::Relief {
-                grid: &on_grid,
-                zonal: &zonal,
-            };
-            let solution = ebm::solve(inputs, &grid, &sea_share, NOMINAL_STEP, ground);
-            let surface_means = Some(means(&solution, &grid, &on_grid));
-            arithmetic(grid, coordinates, solution.climate, surface_means)
-        }
-        ClimateModelKind::LockedEnergyBalance => {
-            let (grid, coordinates) = (ModelGrid::locked(), Coordinates::TidallyLocked);
-            let sea_share = point_sea_shares(pass, working, &grid, coordinates);
-            let (on_grid, zonal) = reliefs(pass, working, &grid, coordinates);
-            let ground = Ground::Relief {
-                grid: &on_grid,
-                zonal: &zonal,
-            };
-            let solution = ebm::solve_locked(inputs, &grid, &sea_share, NOMINAL_STEP, ground);
-            let surface_means = Some(means(&solution, &grid, &on_grid));
-            arithmetic(grid, coordinates, solution.climate, surface_means)
-        }
+        ClimateModelKind::EnergyBalance => energy_balance(
+            pass,
+            working,
+            ModelGrid::geographic(),
+            Coordinates::Geographic,
+        ),
+        ClimateModelKind::LockedEnergyBalance => energy_balance(
+            pass,
+            working,
+            ModelGrid::locked(),
+            Coordinates::TidallyLocked,
+        ),
         ClimateModelKind::Isothermal => {
             let (grid, coordinates) = airless::frame(inputs);
             let climate = isothermal::solve(inputs, &grid);
-            arithmetic(grid, coordinates, climate, None)
+            arithmetic(pass, grid, coordinates, climate)
         }
         ClimateModelKind::RadiativeEquilibrium => {
             let solution = airless::solve(inputs);
@@ -277,9 +269,82 @@ fn normalised(pass: &Pass<'_>, working: &Working) -> Normalised {
                 residuals_k,
                 kind: MeanKind::Radiative { keys_k },
                 surface_means: None,
+                water: None,
             }
         }
     }
+}
+
+/// An arithmetic model's records `climate` on `grid` in `coordinates`, normalised for the body of
+/// `pass`'s inputs by the exact linear solve (decision-r09-t13d-normalisation §2), its lower bound
+/// the night floor; no surface means or own records yet.
+#[must_use]
+fn arithmetic(
+    pass: &Pass<'_>,
+    grid: ModelGrid,
+    coordinates: Coordinates,
+    climate: GridClimate,
+) -> Normalised {
+    let inputs = pass.inputs();
+    let correction = normalise::arithmetic(inputs, &grid, coordinates, &climate.annual_k);
+    let mut climate = climate;
+    normalise::apply(&mut climate, &grid, coordinates, &correction);
+    Normalised {
+        grid,
+        coordinates,
+        climate,
+        lower_bound_k: night_floor(inputs.heat_flow()).value(),
+        correction,
+        residuals_k: [0.0; 3],
+        kind: MeanKind::Arithmetic,
+        surface_means: None,
+        water: None,
+    }
+}
+
+/// The energy-balance model on `grid` in `coordinates` (the geographic model in geographic
+/// coordinates, the locked one in tidally locked ones, or in the tests the zonal grid) over
+/// `working`'s land, sea and relief, normalised, with its surface means and its own records for
+/// the water cycle: its monthly records before the correction, each month's insolation and each
+/// point's water-surface height (R09.T13.e).
+#[must_use]
+fn energy_balance(
+    pass: &Pass<'_>,
+    working: &Working,
+    grid: ModelGrid,
+    coordinates: Coordinates,
+) -> Normalised {
+    let inputs = pass.inputs();
+    let sea_share = point_sea_shares(pass, working, &grid, coordinates);
+    let (on_grid, zonal) = reliefs(pass, working, &grid, coordinates);
+    let ground = Ground::Relief {
+        grid: &on_grid,
+        zonal: &zonal,
+    };
+    let solution = match coordinates {
+        Coordinates::Geographic => ebm::solve(inputs, &grid, &sea_share, NOMINAL_STEP, ground),
+        Coordinates::TidallyLocked => {
+            ebm::solve_locked(inputs, &grid, &sea_share, NOMINAL_STEP, ground)
+        }
+    };
+    let surface_means = SurfaceMeans {
+        steady_k: solution.steady_surface_mean_k,
+        seasonal_k: on_grid.surface_mean_k(&grid, &solution.climate.annual_k),
+    };
+    let own = hydrology::OwnRecords {
+        months_k: solution.climate.months_k.clone(),
+        insolation_w_m2: solution.month_insolation_w_m2,
+        water_m: on_grid
+            .hypsometry()
+            .all()
+            .iter()
+            .map(|point| point.water_m)
+            .collect(),
+    };
+    let mut model = arithmetic(pass, grid, coordinates, solution.climate);
+    model.surface_means = Some(surface_means);
+    model.water = Some(own);
+    model
 }
 
 /// The energy-balance model's relief from `working`'s field (R09.T13.g;
@@ -346,6 +411,7 @@ fn finish(pass: &Pass<'_>, working: &mut Working, mut model: Normalised) -> Diag
         &mut working.cells,
     );
     let liquids = seas::place_liquids(inputs, pass.grid(), &annual_k, &mut working.cells);
+    let water = hydrology::run(pass, working, &model);
     Diagnostics {
         correction: model.correction,
         residuals_k: model.residuals_k,
@@ -356,7 +422,47 @@ fn finish(pass: &Pass<'_>, working: &mut Working, mut model: Normalised) -> Diag
         ices,
         liquids,
         surface_means: model.surface_means,
+        water,
     }
+}
+
+/// The annual runoff-generating rate of field cell `cell` of `working`, kg m⁻² s⁻¹, for R09.T14's
+/// erosion (decision-r09-t13ge §2.8, e8; Hergarten and Robl 2022, eqs. 44, 49): (1 − ε(z)) P,
+/// P its climate cell's annual mean precipitation (its months' rates weighted by their shares of
+/// the year), ε(z) the orographic model's recycled share at its surface's height z above the sea
+/// level ([`lfpm::runoff_kg_m2_s`]); zero over liquid, and on a world where nothing rains. T13.e
+/// writes no `runoff_m_per_year`: that is what the erosion took.
+///
+/// # Panics
+///
+/// If `cell` is not one of the field's cells, or the climate cell's rates are negative or not
+/// finite (a fault of the step).
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "R09.T14's erosion reads the runoff the climate gives"
+    )
+)]
+#[must_use]
+pub(crate) fn annual_runoff_kg_m2_s(pass: &Pass<'_>, working: &Working, cell: u32) -> f64 {
+    let state = &working.climate[usize::try_from(parent_index(cell)).expect("a cell fits a usize")];
+    let months = usize::from(working.months);
+    let precipitation = month_shares(pass, months)
+        .iter()
+        .zip(&state.month_precipitation_kg_m2_s)
+        .fold(0.0, |sum, (&share, &rate)| sum + share * rate);
+    let field_cell = &working.cells[usize::try_from(cell).expect("a cell fits a usize")];
+    let cover = if seas::under_sea(field_cell) {
+        lfpm::Cover::Sea
+    } else {
+        lfpm::Cover::Land
+    };
+    lfpm::runoff_kg_m2_s(
+        precipitation,
+        field_cell.water_surface.value() - working.sea_level.value(),
+        cover,
+    )
 }
 
 /// The field cells' area-weighted mean surface temperature of `working`, K: each cell's climate
@@ -410,12 +516,12 @@ fn floor_climate(working: &mut Working, lower_bound_k: f64) -> u32 {
     raised
 }
 
-/// Each month's share of the year of `climate`'s months on the seasonal orbit of `pass`'s inputs
-/// ([`month_edges`]): twelve shares of mean anomaly, or one.
+/// Each month's share of the year of a year of `months` months on the seasonal orbit of `pass`'s
+/// inputs ([`month_edges`]): twelve shares of mean anomaly, or one.
 #[must_use]
-fn month_shares(pass: &Pass<'_>, climate: &GridClimate) -> Vec<f64> {
-    if climate.months_k.len() != 12 {
-        return vec![1.0; climate.months_k.len()];
+fn month_shares(pass: &Pass<'_>, months: usize) -> Vec<f64> {
+    if months != 12 {
+        return vec![1.0; months];
     }
     let e = pass
         .inputs()
@@ -443,7 +549,7 @@ fn cell_temperatures(
     model: &Normalised,
     clamped: &mut u64,
 ) -> (Vec<f64>, Vec<IceKey>) {
-    let shares = month_shares(pass, &model.climate);
+    let shares = month_shares(pass, model.climate.months_k.len());
     let constant = match model.kind {
         MeanKind::Arithmetic => model.correction.mean_k,
         MeanKind::Radiative { .. } => 0.0,

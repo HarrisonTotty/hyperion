@@ -9,7 +9,7 @@ use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample};
 
 use super::*;
 use crate::planetary::surface::inputs::{CoarseInputs, CoarseInputsBuilder};
-use crate::planetary::surface::reference;
+use crate::planetary::surface::reference::{self, builder_of};
 use crate::planetary::surface::steps::CellState;
 
 /// A body's grids, for its passes.
@@ -59,41 +59,6 @@ fn generate(inputs: CoarseInputs, seed: SurfaceSeed) -> Generated {
 fn earth() -> &'static Generated {
     static EARTH: OnceLock<Generated> = OnceLock::new();
     EARTH.get_or_init(|| generate(reference::earth_like(), reference::SEED))
-}
-
-/// The builder values of `inputs`, as a builder to vary.
-fn builder_of(inputs: &CoarseInputs) -> CoarseInputsBuilder {
-    let mut builder = CoarseInputs::builder()
-        .body(inputs.body())
-        .figure(inputs.figure())
-        .gravity(inputs.gravity())
-        .sigma_h(inputs.sigma_h())
-        .liquids(inputs.liquids().iter().copied())
-        .ices(inputs.ices().iter().copied())
-        .mean_surface_temperature(inputs.mean_surface_temperature())
-        .equator_pole_contrast_k(inputs.equator_pole_contrast_k())
-        .day_night_contrast_k(inputs.day_night_contrast_k())
-        .spin(*inputs.spin())
-        .host_flux(inputs.host_flux())
-        .surface_pressure(inputs.surface_pressure())
-        .gases(inputs.gases().iter().copied())
-        .surface(inputs.surface_state(), inputs.surface_material())
-        .tectonics(inputs.tectonics(), inputs.continental_fraction())
-        .volcanism(inputs.volcanism())
-        .heat_flow(inputs.heat_flow())
-        .surface_age(inputs.surface_age())
-        .craters(*inputs.craters())
-        .climate(*inputs.climate())
-        .crust(*inputs.crust())
-        .condensates(inputs.condensates().iter().copied())
-        .palette(inputs.palette().clone());
-    if let Some(orbit) = inputs.seasonal_orbit() {
-        builder = builder.seasonal_orbit(*orbit);
-    }
-    if let Some(epoch) = inputs.wet_epoch() {
-        builder = builder.wet_epoch(*epoch);
-    }
-    builder
 }
 
 /// The reference Earth's inputs, as a builder to vary.

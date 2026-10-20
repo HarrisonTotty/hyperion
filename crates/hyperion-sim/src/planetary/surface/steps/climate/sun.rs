@@ -618,6 +618,42 @@ impl Sunlight {
         &self.annual_w_m2
     }
 
+    /// Every point's mean insolation in each month on `grid`, W m⁻²: the mean over the month's
+    /// steps of their insolation, the steps whose temperatures the month's record averages
+    /// ([`EnergyBalance::orbits`](super::ebm::EnergyBalance::orbits)), summed in step order; one
+    /// month, the constant, for constant sunlight. The precipitation heuristic's absorbed sunlight
+    /// reads it (R09.T13.e, decision-r09-t13ge §2.11).
+    ///
+    /// # Panics
+    ///
+    /// If a month of a seasonal orbit holds no step, which [`MIN_STEPS_PER_ORBIT`] rules out.
+    #[must_use]
+    pub(super) fn month_means(&self, grid: &ModelGrid) -> Vec<Vec<f64>> {
+        if self.steps == 0 {
+            return vec![self.annual_w_m2.clone()];
+        }
+        let points = grid.points();
+        let mut months = vec![vec![0.0; points]; usize::from(self.months)];
+        let mut counts = vec![0_u32; months.len()];
+        let mut insolation = vec![0.0; points];
+        for step in 0..self.steps {
+            self.fill(step, grid, &mut insolation);
+            let month = usize::from(self.month_of(step));
+            counts[month] += 1;
+            for (sum, &q) in months[month].iter_mut().zip(&insolation) {
+                *sum += q;
+            }
+        }
+        for (month, &count) in months.iter_mut().zip(&counts) {
+            assert!(count > 0, "every month holds a step");
+            let n = f64::from(count);
+            for sum in month.iter_mut() {
+                *sum /= n;
+            }
+        }
+        months
+    }
+
     /// The global mean of the annual insolation on `grid`, W m⁻².
     #[cfg(test)]
     #[must_use]

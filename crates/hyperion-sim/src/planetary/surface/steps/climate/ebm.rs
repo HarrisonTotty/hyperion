@@ -168,7 +168,7 @@ pub(super) const RELATIVE_HUMIDITY: f64 = 0.8;
 
 /// The step of the centred difference that gives h's slope in T, K: 0.01, small against any
 /// curvature of the saturation curve, whose form the registry owns.
-const ENERGY_SLOPE_STEP_K: f64 = 0.01;
+pub(super) const ENERGY_SLOPE_STEP_K: f64 = 0.01;
 
 /// The coefficient of the optical depth in the emission factor 1 + ¾τ: ¾, Spiegel, Menou and
 /// Scharf's Eddington form σT⁴ ÷ (1 + ¾τ) (2008, Table 1, models 1–2, read, as [`emission`]
@@ -435,7 +435,7 @@ impl Moisture {
     /// q = ε e ÷ (p − (1 − ε) e), e the vapour pressure, its relative humidity of the saturation
     /// pressure but at most the surface pressure, where q is 1.
     #[must_use]
-    fn specific_humidity(&self, t_k: f64) -> f64 {
+    pub(super) fn specific_humidity(&self, t_k: f64) -> f64 {
         let saturation = saturation_pressure(self.condensable, Kelvin::new(t_k))
             .map_or(0.0, crate::units::Pascals::value);
         let wanted = RELATIVE_HUMIDITY * saturation;
@@ -482,6 +482,10 @@ pub(super) struct Solution {
     /// That steady state's surface mean, K ([`Fitted::surface_mean_k`]): the inputs' mean for a
     /// body with neither light nor heat.
     pub(super) steady_surface_mean_k: f64,
+    /// Each month's mean insolation at each point of the grid, W m⁻²
+    /// ([`Sunlight::month_means`]): over the steps each month's record averages, one month in a
+    /// one-month year. The precipitation heuristic's absorbed sunlight reads it (R09.T13.e).
+    pub(super) month_insolation_w_m2: Vec<Vec<f64>>,
 }
 
 /// The ground a run of the model reads (R09.T13.g).
@@ -577,7 +581,6 @@ impl Relief {
     }
 
     /// The points' heights.
-    #[cfg(test)]
     #[must_use]
     pub(super) fn hypsometry(&self) -> &Hypsometry {
         &self.hypsometry
@@ -1009,7 +1012,6 @@ impl EnergyBalance {
     }
 
     /// The albedo at `t_k`, K.
-    #[cfg(test)]
     #[must_use]
     pub(super) fn albedo_at(&self, t_k: f64) -> f64 {
         self.albedo_and_slope(t_k).albedo
@@ -1676,6 +1678,7 @@ impl EnergyBalance {
                 optical_depth: depth,
                 steady_converged: converged,
                 steady_surface_mean_k: surface_mean_k,
+                month_insolation_w_m2: sunlight.month_means(grid),
             }
         } else {
             let isothermal = vec![mean_k; grid.points()];
@@ -1690,6 +1693,7 @@ impl EnergyBalance {
                 optical_depth: OpticalDepth::Unforced,
                 steady_converged: true,
                 steady_surface_mean_k: mean_k,
+                month_insolation_w_m2: sunlight.month_means(grid),
             }
         };
         let climate = &solution.climate;

@@ -843,12 +843,31 @@ Geophys. Res. 109, D06303) join this list when their values are quoted; neither 
   10.1364/OE.17.005698, re-implemented from its equations as its published code
   (betasw_ZHH2009.m) states them, at zero salinity; no code of it is copied.
 
+- Earth's land share by 2.5° band (72 values) and by 2.5° × 5° box (72 × 72 values), computed from
+  Natural Earth's 1:110m land polygons (ne_110m_land; public domain,
+  https://www.naturalearthdata.com/about/terms-of-use/), in the climate step's tests (plan R09,
+  R09.T13.a and R09.T13.e). Made with Natural Earth. Only these derived shares are committed; no
+  polygon is.
+
 - Earth's land hypsometry by 2.5° band (72 bands × 8 equal-area quantiles of the surface height,
   ice sheets included), computed from Earth2014's SUR2014 5-arcmin grid (C. Hirt and M. Rexer,
   Int. J. Appl. Earth Obs. Geoinf. 39 (2015) 103-112, DOI: 10.1016/j.jag.2015.03.001), in the
-  climate step's tests (plan R09, R09.T13.g). Earth2014 is composed of SRTM V4.1 (A. Jarvis, H. I.
-  Reuter, A. Nelson and E. Guevara, Hole-filled SRTM for the globe Version 4, CGIAR-CSI, 2008;
-  CIAT acknowledged as its source), SRTM30_PLUS v9 (J. J. Becker et al., Marine Geodesy 32 (2009)
-  355-371), Bedmap2 (P. Fretwell et al., The Cryosphere 7 (2013) 375-393) and GBT v3 (J. L.
-  Bamber et al., The Cryosphere 7 (2013) 499-510). Only these derived statistics are committed;
-  no grid is.
+  climate step's tests (plan R09, R09.T13.g); and each 2.5° × 5° box's median land surface height
+  (72 × 72 values), which places each band's quantiles in longitude (R09.T13.e). Earth2014 is
+  composed of SRTM V4.1 (A. Jarvis, H. I. Reuter, A. Nelson and E. Guevara, Hole-filled SRTM for
+  the globe Version 4, CGIAR-CSI, 2008; CIAT acknowledged as its source), SRTM30_PLUS v9 (J. J.
+  Becker et al., Marine Geodesy 32 (2009) 355-371), Bedmap2 (P. Fretwell et al., The Cryosphere 7
+  (2013) 375-393) and GBT v3 (J. L. Bamber et al., The Cryosphere 7 (2013) 499-510). Only these
+  derived statistics are committed; no grid is.
+
+- The annual zonal-mean precipitation of GPCP v2.3 over 1991-2020 by 2.5° band (72 values),
+  computed from NOAA PSL's long-term monthly means (precip.mon.ltm.1991-2020.nc,
+  https://psl.noaa.gov/data/gridded/data.gpcp.html), printed beside the model in the climate
+  step's tests (plan R09, R09.T13.e). The dataset's citation: R. F. Adler et al., J.
+  Hydrometeor. 4 (2003) 1147-1167. Only these derived means are committed; no grid is.
+
+- The annual zonal-mean 10 m meridional wind of the NCEP/NCAR Reanalysis 1 over 1991-2020 in four
+  5° bins of the trades (4 values), computed from NOAA PSL's long-term monthly means, printed
+  beside the model in the climate step's tests (plan R09, R09.T13.e). The dataset's citation: E.
+  Kalnay et al., Bull. Amer. Meteor. Soc. 77 (1996) 437-471. Only these derived means are
+  committed; no grid is.

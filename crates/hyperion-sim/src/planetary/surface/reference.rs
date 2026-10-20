@@ -52,6 +52,8 @@ use hyperion_surface::field::{
 use hyperion_surface::spheroid::Spheroid;
 use hyperion_surface::substance_key::SubstanceKey;
 
+#[cfg(test)]
+use super::inputs::CoarseInputsBuilder;
 use super::inputs::{
     AreaShare, ClimateRegime, CoarseInputs, Condensate, CondensatePhase, CrustInputs, Forcing,
     GasShare, LidCrust, Persistence, SeasonalOrbit, Spin, TectonicRegime, ThermalRegime, WetEpoch,
@@ -1091,6 +1093,43 @@ const fn condensate(
         area_fraction: area,
         persistence,
     }
+}
+
+/// The builder values of `inputs`, as a builder to vary: the one copy that the inputs', the steps'
+/// and the pass's tests vary a reference world through (decision-r09-t13-test-cost §3.1).
+#[cfg(test)]
+pub(crate) fn builder_of(inputs: &CoarseInputs) -> CoarseInputsBuilder {
+    let mut builder = CoarseInputs::builder()
+        .body(inputs.body())
+        .figure(inputs.figure())
+        .gravity(inputs.gravity())
+        .sigma_h(inputs.sigma_h())
+        .liquids(inputs.liquids().iter().copied())
+        .ices(inputs.ices().iter().copied())
+        .mean_surface_temperature(inputs.mean_surface_temperature())
+        .equator_pole_contrast_k(inputs.equator_pole_contrast_k())
+        .day_night_contrast_k(inputs.day_night_contrast_k())
+        .spin(*inputs.spin())
+        .host_flux(inputs.host_flux())
+        .surface_pressure(inputs.surface_pressure())
+        .gases(inputs.gases().iter().copied())
+        .surface(inputs.surface_state(), inputs.surface_material())
+        .tectonics(inputs.tectonics(), inputs.continental_fraction())
+        .volcanism(inputs.volcanism())
+        .heat_flow(inputs.heat_flow())
+        .surface_age(inputs.surface_age())
+        .craters(*inputs.craters())
+        .climate(*inputs.climate())
+        .crust(*inputs.crust())
+        .condensates(inputs.condensates().iter().copied())
+        .palette(inputs.palette().clone());
+    if let Some(orbit) = inputs.seasonal_orbit() {
+        builder = builder.seasonal_orbit(*orbit);
+    }
+    if let Some(epoch) = inputs.wet_epoch() {
+        builder = builder.wet_epoch(*epoch);
+    }
+    builder
 }
 
 #[cfg(test)]
