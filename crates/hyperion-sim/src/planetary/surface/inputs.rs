@@ -149,6 +149,12 @@ pub use crate::planetary::hooks::figures::TectonicRegime;
 /// Plain data with public fields: [`CoarseInputsBuilder::build`] validates them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WetEpoch {
+    /// The liquid that flowed, a registry row with a liquid density: plan 14's
+    /// `WetEpoch::liquid`, water on every epoch plan 14 computes today. On a world dry now the
+    /// erosion's fluid (its erodibility's density and bed factor) and the paleo-inventory's
+    /// volume are this liquid's, since the present main liquid may be none
+    /// (decision-r09-t14-choices Q6a).
+    pub liquid: SubstanceId,
     /// When the epoch began, thousands of millions of years ago, at or after `end`.
     pub start: Gigayears,
     /// When it ended, thousands of millions of years ago: zero for a world wet now.
@@ -158,6 +164,12 @@ pub struct WetEpoch {
     /// science-hoke.md), in Earth-equivalent years: the stream-power solver's t (Design note 9,
     /// as corrected by R09.T0.b), plan 14's `WetEpoch::effective_flow`. Finite and non-negative.
     pub effective_flow: Years,
+    /// The epoch's runoff at the reference flood intermittency, metres of liquid a Julian year,
+    /// finite and non-negative: the storms' runoff while they flow times 0.05 (science-hoke.md
+    /// §3), plan 14's `WetEpoch::runoff_m_per_year`. On a world dry now it weights the drainage
+    /// area, uniform over the cells, since no past climate is modelled (Design note 9;
+    /// science-hoke.md §3: "`WetEpoch` therefore gains `runoff` (m a⁻¹)").
+    pub runoff_m_per_year: f64,
     /// The liquid inventory then, as its mass over the body's whole surface, M ÷ 4πR², finite and
     /// non-negative: what the pass places as a paleo-sea or spreads through closed basins, by the
     /// liquid's density (Design note 9). A mass, so that it needs no density to be stated.
@@ -166,19 +178,15 @@ pub struct WetEpoch {
 
 impl From<&crate::planetary::hooks::figures::WetEpoch> for WetEpoch {
     /// Plan 14's wet epoch (P14.T48.b) in the pass's vocabulary, as
-    /// [`CoarseInputs::from_record`] reads the record's figures: its span, its effective flow and
-    /// its paleo-inventory, each the record's to the bit.
-    ///
-    /// Two of its members are not carried, since this struct has no place for them yet: the
-    /// epoch's runoff at the reference intermittency, which weights the drainage area on a world
-    /// dry now (Design note 3's `runoff`, which R09.T14.c's dry-now branch reads and adds here),
-    /// and its liquid, which the record states as water alone (P14.T48.b), the liquid the pass
-    /// assumes.
+    /// [`CoarseInputs::from_record`] reads the record's figures: its liquid, its span, its
+    /// effective flow, its runoff and its paleo-inventory, each the record's to the bit.
     fn from(epoch: &crate::planetary::hooks::figures::WetEpoch) -> Self {
         Self {
+            liquid: epoch.liquid(),
             start: epoch.start(),
             end: epoch.end(),
             effective_flow: epoch.effective_flow(),
+            runoff_m_per_year: epoch.runoff_m_per_year(),
             paleo_inventory: epoch.paleo_inventory(),
         }
     }
@@ -1561,6 +1569,9 @@ pub enum BuildCoarseInputsError {
     ColdTrapWithoutThreshold(SubstanceKey),
     /// More condensates than plan 14 lists.
     TooManyCondensates(usize),
+    /// The wet epoch's liquid has no liquid density in the registry (no phase columns), so its
+    /// paleo-inventory has no volume and its erosion no fluid (decision-r09-t14-choices Q6a).
+    WetEpochLiquid(SubstanceId),
     /// The wet epoch ends before it starts.
     WetEpochOrder {
         /// Its start, thousands of millions of years ago.
@@ -1636,6 +1647,11 @@ impl fmt::Display for BuildCoarseInputsError {
             Self::TooManyCondensates(count) => write!(
                 f,
                 "{count} condensates are more than the {MAX_CONDENSATES} plan 14 lists"
+            ),
+            Self::WetEpochLiquid(liquid) => write!(
+                f,
+                "the wet epoch's liquid {} has no liquid density in the registry",
+                liquid.substance().key().as_str()
             ),
             Self::WetEpochOrder { start, end } => write!(
                 f,
@@ -2237,6 +2253,10 @@ fn check_wet_epoch(epoch: &WetEpoch) -> Result<(), BuildCoarseInputsError> {
         });
     }
     check_non_negative("wet epoch's effective flow", epoch.effective_flow.value())?;
+    check_non_negative("wet epoch's runoff", epoch.runoff_m_per_year)?;
+    if epoch.liquid.substance().phase().is_none() {
+        return Err(BuildCoarseInputsError::WetEpochLiquid(epoch.liquid));
+    }
     check_non_negative("wet epoch's paleo-inventory", epoch.paleo_inventory.value())
 }
 
@@ -2613,9 +2633,11 @@ mod tests {
             }
         ));
         let late = WetEpoch {
+            liquid: Gas::Water.substance(),
             start: Gigayears::new(1.0),
             end: Gigayears::new(2.0),
             effective_flow: Years::new(1.0),
+            runoff_m_per_year: 0.1,
             paleo_inventory: KilogramsPerSquareMetre::new(0.0),
         };
         assert_eq!(
@@ -2639,6 +2661,44 @@ mod tests {
                 surface: Gigayears::new(5.0),
                 system
             }
+        );
+    }
+
+    /// The builder refuses a wet epoch whose runoff is negative, or whose liquid has no liquid
+    /// density in the registry (decision-r09-t14-choices Q6a).
+    #[test]
+    fn the_builder_refuses_a_wet_epoch_s_bad_runoff_or_liquid() {
+        let refused = |builder: CoarseInputsBuilder| builder.build().unwrap_err();
+        let epoch = WetEpoch {
+            liquid: Gas::Water.substance(),
+            start: Gigayears::new(2.0),
+            end: Gigayears::new(1.0),
+            effective_flow: Years::new(1.0),
+            runoff_m_per_year: 0.1,
+            paleo_inventory: KilogramsPerSquareMetre::new(0.0),
+        };
+        assert!(earth_builder().wet_epoch(epoch).build().is_ok());
+        assert!(matches!(
+            refused(earth_builder().wet_epoch(WetEpoch {
+                runoff_m_per_year: -0.1,
+                ..epoch
+            })),
+            BuildCoarseInputsError::OutOfRange {
+                part: "wet epoch's runoff",
+                ..
+            }
+        ));
+        let basalt = by_key("basalt").expect("the registry holds basalt");
+        assert!(
+            basalt.substance().phase().is_none(),
+            "basalt has no phase columns"
+        );
+        assert_eq!(
+            refused(earth_builder().wet_epoch(WetEpoch {
+                liquid: basalt,
+                ..epoch
+            })),
+            BuildCoarseInputsError::WetEpochLiquid(basalt)
         );
     }
 

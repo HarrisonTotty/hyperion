@@ -60,9 +60,12 @@ use super::inputs::{
 };
 use super::steps::relief::convergent::EARTH_GRAVITY;
 use crate::math;
-use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
+use crate::planetary::derive::atmosphere::{Gas, SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::irradiation;
 use crate::planetary::hooks::SurfaceSeed;
+use crate::planetary::hooks::figures::wet_epoch::{
+    MARS_EFFECTIVE_FLOW, PAST_EPOCH_RUNOFF_M_PER_YEAR, WET_WORLD_RUNOFF_M_PER_YEAR,
+};
 use crate::substance;
 use crate::units::consts::{SECONDS_PER_DAY, SOLAR_CONSTANT_W_PER_M2};
 use crate::units::{
@@ -649,7 +652,7 @@ fn figure(radius_m: f64, f: f64) -> Spheroid {
 /// | heat flow | 0.0916 W m⁻² | Davies and Davies 2010, Solid Earth 1, 5, Table 7 (46.7 TW) |
 /// | surface age | 0.1 Gyr | a placeholder until P14.T24.b defines its resurfacing time, of the order of the oceanic crust's mean age, 64.2 Myr (Seton et al. 2020, G³ 21, e2020GC009214) |
 /// | craters | lunar-equivalent: the lunar chronology at that age, screened by the air; struck at 19.9 km/s by stony projectiles of 3,000 kg m⁻³, on a non-porous target of 2,550 kg m⁻³ | Design note 12; P14.T48.f's model (science-r09-craters.md items 2 and 4) |
-/// | wet epoch | 4.4 Gyr ago to now, the ocean's inventory | the oldest zircons' evidence of liquid water (Wilde, Valley, Peck and Graham 2001, Nature 409, 175) |
+/// | wet epoch | water, 4.4 Gyr ago to now, the ocean's inventory; a runoff of 0.29 m a⁻¹, which the erosion of a world wet now does not read (its runoff is the climate step's) | the oldest zircons' evidence of liquid water (Wilde, Valley, Peck and Graham 2001, Nature 409, 175); plan 14's `WET_WORLD_RUNOFF_M_PER_YEAR` |
 /// | crust | basaltic oceanic, granitic continents, basaltic provinces; the lid the secondary crust, a mobile lid's basalt | P14.T51.c's Earth; science-composition-crusts.md §5 |
 /// | palette | basalt (secondary crust), granite (tertiary), water as ice and as liquid; the ice's density at its coldest zone, 260 K, 918.6 kg m⁻³ | decision-composition §1.7; each figure its substance's row in this module, with its sources; the coldest zone T₀ − (2/3) × the equator–pole contrast (science-composition-crusts.md §3) |
 ///
@@ -715,12 +718,7 @@ pub fn earth_like() -> CoarseInputs {
                 rate: 1.0,
             },
         ))
-        .wet_epoch(WetEpoch {
-            start: Gigayears::new(4.4),
-            end: Gigayears::new(0.0),
-            effective_flow: Years::new(4.4e9),
-            paleo_inventory: ocean,
-        })
+        .wet_epoch(earth_wet_epoch(ocean))
         .climate(ClimateRegime {
             thermal: ThermalRegime::Efficient,
             forcing: Forcing::Seasonal,
@@ -762,6 +760,19 @@ pub fn earth_like() -> CoarseInputs {
         .expect("the reference Earth's inputs are valid")
 }
 
+/// The Earth-like world's wet epoch: water from 4.4 Gyr ago to now, the span its effective flow,
+/// plan 14's wet world's runoff, `ocean` its inventory (the table above).
+const fn earth_wet_epoch(ocean: KilogramsPerSquareMetre) -> WetEpoch {
+    WetEpoch {
+        liquid: Gas::Water.substance(),
+        start: Gigayears::new(4.4),
+        end: Gigayears::new(0.0),
+        effective_flow: Years::new(4.4e9),
+        runoff_m_per_year: WET_WORLD_RUNOFF_M_PER_YEAR,
+        paleo_inventory: ocean,
+    }
+}
+
 /// A Mars-like world: a stagnant lid under a thin carbon-dioxide air, dry now after a wet epoch,
 /// with water- and carbon-dioxide-ice caps.
 ///
@@ -780,7 +791,7 @@ pub fn earth_like() -> CoarseInputs {
 /// | heat flow | 0.019 W m⁻² | Parro et al. 2017, Sci. Rep. 7, 45629 (Design note 3) |
 /// | surface age | 3.9 Gyr | a placeholder: the Noachian highlands' age, from memory |
 /// | craters | lunar-equivalent: the lunar chronology at that age times `R_b` = 1.92, screened by the air (d\* = 8.5 cm at 636 Pa); struck at 10.6 km/s by stony projectiles of 3,000 kg m⁻³, on a non-porous target of 2,550 kg m⁻³ | Design note 12, whose 8.2 cm takes about 610 Pa; `R_b` is Ivanov 2001's Mars-to-Moon impact rate under the map, standing for plan 14's belt scaling (science-r09-craters.md F1, F4.1); P14.T48.f's model (items 2 and 4) |
-/// | wet epoch | 3.9 to 3.6 Gyr ago, 10⁶ Earth-equivalent years, 1.56 × 10⁵ kg m⁻² of water | the valley networks of about 3.6–3.8 Ga (Hoke and Hynek 2009) in 10⁵–10⁷ such years (Hoke, Hynek and Tucker 2011; not read); Carr and Head 2003's ocean, about 2.3 × 10⁷ km³, 156 m as a global layer (low confidence) |
+/// | wet epoch | water, 3.9 to 3.6 Gyr ago, 2.2 × 10⁵ Earth-equivalent years at a runoff of 0.1 m a⁻¹, 1.56 × 10⁵ kg m⁻² of water | the valley networks of about 3.6–3.8 Ga (Hoke and Hynek 2009); science-hoke.md §4: the foot of Hoke, Hynek and Tucker 2011's 10⁵–10⁸ yr, where the saturated regolith's K reaches Black et al. 2017's K t ≈ 1.9 m^0.1 (plan 14's `MARS_EFFECTIVE_FLOW` and `PAST_EPOCH_RUNOFF_M_PER_YEAR`); Carr and Head 2003's ocean, about 2.3 × 10⁷ km³, 156 m as a global layer (low confidence) |
 /// | crust | iron-rich basalt (secondary crust, its provinces' too), the lid; no primary crust named | P14.T51.c's Mars; science-composition-crusts.md §2 and §5 |
 /// | palette | iron-rich basalt (secondary crust, its provinces' too), CO₂ and water ices, the bright dust as its deposit; the water ice's density at its coldest zone, 177.3 K, 928.4 kg m⁻³, and the CO₂ ice's at 150 K, near its frost point | decision-composition §1.7; each figure its row's; the coldest zone as Earth's, the P₂ fit's pole (science-composition-crusts.md §3), warmer than the contrasts' placeholder pole of 160 K, at which the ice would be 929.9 kg m⁻³ |
 ///
@@ -843,9 +854,11 @@ pub fn mars_like() -> CoarseInputs {
             },
         ))
         .wet_epoch(WetEpoch {
+            liquid: Gas::Water.substance(),
             start: Gigayears::new(3.9),
             end: Gigayears::new(3.6),
-            effective_flow: Years::new(1e6),
+            effective_flow: MARS_EFFECTIVE_FLOW,
+            runoff_m_per_year: PAST_EPOCH_RUNOFF_M_PER_YEAR,
             paleo_inventory: KilogramsPerSquareMetre::new(156.0 * 1_000.0),
         })
         .climate(ClimateRegime {
