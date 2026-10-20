@@ -1037,15 +1037,10 @@ pub struct PartialPressures([Pascals; 9]);
 
 impl PartialPressures {
     /// Every gas's partial pressure from `pressure`, taken in [`Gas::ALL`]'s order, unvalidated:
-    /// for the crate's tests that state an air by hand, such as P14.T51.j's. A caller's values are
-    /// its own to check, as `SurfaceModifiers::derive` checks its inputs'.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the tests state airs by hand; the generator derives them"
-        )
-    )]
+    /// for the crate's tests that state an air by hand, such as P14.T51.j's, and for the surface
+    /// generator's energy balance, which takes plan 14's grey terms of its inputs' gases
+    /// (R09.T13.i, decision-r09-t13i §2.2). A caller's values are its own to check, as
+    /// `SurfaceModifiers::derive` checks its inputs'.
     #[must_use]
     pub(crate) fn from_fn(pressure: impl Fn(Gas) -> Pascals) -> Self {
         Self(Gas::ALL.map(pressure))

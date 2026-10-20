@@ -4,7 +4,7 @@ use hyperion_surface::field::{ClimateModelKind, CoarseLevel};
 
 use super::coordinates::{Coordinates, substellar_cosine};
 use super::ebm::{
-    self, Air, EnergyBalance, Freezing, Ground, MAX_ORBITS, Moisture, Relief, contrast,
+    self, Air, EnergyBalance, Freezing, Greenhouse, Ground, MAX_ORBITS, Moisture, Relief, contrast,
 };
 use super::grid::{GEOGRAPHIC_COLUMNS, GridClimate, LATITUDE_BANDS, LOCKED_COLUMNS, ModelGrid};
 use super::hypsometry::{Hypsometry, Shape};
@@ -523,6 +523,9 @@ impl KaspiShowman {
             }),
             transport_kg_m2_s: factor * EARTH_TRANSPORT_KG_M2_S,
             heat_flow_w_m2: 0.0,
+            // Their GCM's grey radiation holds its optical depth fixed, with no vapour feedback
+            // (§2, §3.3): one τ (decision-r09-t13i §2.2).
+            greenhouse: Greenhouse::Grey,
         }
     }
 

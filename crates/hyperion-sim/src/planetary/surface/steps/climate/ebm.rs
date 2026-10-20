@@ -23,9 +23,16 @@
 //! - C the point's heat capacity, the area-weighted mix of land's ([`LAND_HEAT_CAPACITY_J_PER_M2_K`])
 //!   and the sea's, 40 times land's above `T_f`, 9.2 times from 10 K below it, and 2 times
 //!   colder, an ice's (40 times at every temperature where no ice forms);
-//! - σT⁴ ÷ (1 + ¾τ) the grey outgoing radiation in Spiegel et al.'s Eddington form, with one τ
-//!   for the body, solved once so that the surface mean of the annual-mean steady state is plan
-//!   14's mean ([`CoarseInputs::mean_surface_temperature`]);
+//! - σT⁴ ÷ (1 + ¾τ) the grey outgoing radiation in Spiegel et al.'s Eddington form, its τ solved
+//!   once so that the surface mean of the annual-mean steady state is plan 14's mean
+//!   ([`CoarseInputs::mean_surface_temperature`]): where the body's gases hold water, plan 14's
+//!   own grey law at the column's own temperature, τ(T) = m [`τ_d` + `τ_w`(T)], `τ_d` plan 14's terms
+//!   of the other gases, `τ_w` = `k_w` √(`p_w`(T) ÷ 1 bar) its water term and m one multiplier for
+//!   the body ([`Greenhouse::Vapour`]; R09.T13.i, R1 of decision-r09-t13i §2.2), which thickens the
+//!   moist tropics' column and thins the dry poles': `p_w` = `h_w` `p_sat`(T) at the local
+//!   saturation where liquid water lies at the surface, and otherwise the lesser of that and the
+//!   air's own water, `x_w` `p_s` (its §2.4 follow-up 2 §4, [`Reservoir`]); where the gases hold no
+//!   water, and in Kaspi and Showman's fit, one τ ([`Greenhouse::Grey`]);
 //! - h the near-surface moist static energy `c_p` T + L q, with q the climate condensable's
 //!   specific humidity at 80% relative humidity ([`RELATIVE_HUMIDITY`]), from its saturation
 //!   pressure in the substance registry at the surface pressure, L its latent heat of
@@ -46,7 +53,9 @@
 //! - the outgoing radiation is the mean over the quantiles of
 //!   max(σT⁴ ÷ (1 + ¾τ) − e^(−(3/2)`τ_z`) σ(T⁴ − `T_g`⁴), e^(−(3/2)`τ_z`) σ`T_g`⁴), with
 //!   `τ_z` = τ e^(−z ÷ 2H), plan 14's τ ∝ √p over the air's scale height H, and its diffusivity
-//!   3/2 ([`quantile_emission`]);
+//!   3/2 ([`quantile_emission`]); under the water term `τ_z` = m [`τ_d` e^(−z ÷ 2H) + `τ_w`(`T_g`)],
+//!   the dry gases thinning over 2H and the vapour following the ground's own temperature, over
+//!   its Clausius–Clapeyron height (R2; [`vapour_quantile_emission`]);
 //! - the sea's heat capacity reads its water's surface, T − Γ `z̄_w` (decision-r09-t13ge §1.4, g2);
 //! - τ is solved so that the steady state's surface mean, of each point's quantiles' `T_g`, is
 //!   plan 14's (decision-r09-t13a-relief §1.3), with a guard where the bisection closes on a fold
@@ -58,11 +67,12 @@
 //! # The scheme
 //!
 //! Each step is backward Euler, linearised about the step's start: the emission, h and the absorbed
-//! sunlight by their slopes in T. The heat capacity is taken at the step's start, and of the
-//! absorbed sunlight's slope at most [`IMPLICIT_ALBEDO_SHARE`] of the point's storage and emission
-//! slopes, which keeps the system diagonally dominant; the rest of it is taken at the step's
-//! start, as most energy-balance models take the albedo. The change is in flux form, so the
-//! scheme conserves energy.
+//! sunlight by their slopes in T, the emission's with its water term's, held at least
+//! [`EMISSION_SLOPE_FLOOR`] of its slope at a fixed τ. The heat capacity is taken at the step's
+//! start, and of the absorbed sunlight's slope at most [`IMPLICIT_ALBEDO_SHARE`] of the point's
+//! storage and emission slopes, which keeps the system diagonally dominant; the rest of it is
+//! taken at the step's start, as most energy-balance models take the albedo. The change is in
+//! flux form, so the scheme conserves energy.
 //!
 //! The step's system, (D − Λ Lφ − Λ Lλ) y = r for the change y = h′ δT, with Lφ and Lλ the
 //! Laplacian's latitude and longitude terms, D the storage and radiative restoring over h′ and r
@@ -100,6 +110,10 @@ use super::lapse;
 use super::sun::Sunlight;
 use super::transport::{Diffusing, REFERENCE_PRESSURE_PA, rotation_ratio, transport_kg_m2_s};
 use crate::math;
+use crate::planetary::chem::partition::WATER_SURFACE_HUMIDITY;
+use crate::planetary::derive::atmosphere::{
+    Gas, GreenhouseConstants, PartialPressures, SnapshotRules,
+};
 use crate::planetary::hooks::surface::{
     EARTH_AIR_MOLAR_MASS_G_PER_MOL, EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K,
     FLUX_OPTICAL_DEPTH_PER_GREY, night_floor,
@@ -110,7 +124,7 @@ use crate::substance::{
     mixture_heat_capacity_over_r_at, saturation_pressure,
 };
 use crate::units::consts::STEFAN_BOLTZMANN;
-use crate::units::{Kelvin, Seconds};
+use crate::units::{Kelvin, Pascals, Seconds};
 
 /// Water's freezing point, the model's `T_f` for water, which R09.T13.d shifts to the climate
 /// condensable's ([`EnergyBalance::for_inputs`]), K: 273.15, ice Ih's melting point at 101,325 Pa
@@ -222,6 +236,12 @@ const TABLE_SPACING_K: f64 = 0.05;
 /// and its slope per kelvin, 10⁻¹⁰ and 10⁻⁸.
 const TABLE_TOLERANCES: [f64; 4] = [1e-10, 1e-7, 1e-10, 1e-8];
 
+/// The largest departure of the tabulated water term `τ_w` and of the relief's water transmission
+/// e^(−(3/2) m `τ_w`) from the direct ones, and of their slopes per kelvin, at which an interval is
+/// tabulated under the water term (decision-r09-t13i §2.2): 10⁻¹⁰ and 10⁻⁸ each, as the albedo's
+/// (`Adopted`; both are of order one).
+const WATER_TABLE_TOLERANCES: [f64; 4] = [1e-10, 1e-8, 1e-10, 1e-8];
+
 /// How far the table reaches beyond the run's starting temperatures on either side, K: 200
 /// (`Adopted`), beyond any season's swing; a temperature outside it is evaluated directly.
 const TABLE_MARGIN_K: f64 = 200.0;
@@ -293,13 +313,53 @@ struct AlbedoAt {
     slope_per_k: f64,
 }
 
+/// The albedo at `t_k`, K, where the ice forms as `freezing` says, and its slope in T: Spiegel et
+/// al.'s law about the freezing point ([`ALBEDO_MEAN`]), or the fixed albedo where no ice forms.
+#[must_use]
+fn albedo_of(freezing: Freezing, t_k: f64) -> AlbedoAt {
+    match freezing {
+        Freezing::At { point_k } => {
+            let midpoint = point_k - ALBEDO_MIDPOINT_BELOW_FREEZING_K;
+            let ramp = math::tanh((t_k - midpoint) / ALBEDO_WIDTH_K);
+            AlbedoAt {
+                albedo: ALBEDO_MEAN - ALBEDO_HALF_RANGE * ramp,
+                slope_per_k: -ALBEDO_HALF_RANGE * (1.0 - ramp * ramp) / ALBEDO_WIDTH_K,
+            }
+        }
+        Freezing::Never { albedo } => AlbedoAt {
+            albedo,
+            slope_per_k: 0.0,
+        },
+    }
+}
+
 /// The grey outgoing radiation at a temperature and its slope there.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Emission {
     /// σT⁴ ÷ (1 + ¾τ), W m⁻².
     flux_w_m2: f64,
-    /// Its slope in T, W m⁻² K⁻¹.
+    /// Its slope in T, W m⁻² K⁻¹, which the step reads: under a water term that thickens with T
+    /// (decision-r09-t13i §2.2) the whole slope, held at least [`EMISSION_SLOPE_FLOOR`] of
+    /// [`fixed_slope_w_m2_k`](Self::fixed_slope_w_m2_k); under one τ that slope itself.
     slope_w_m2_k: f64,
+    /// The slope at a fixed τ, 4σT³ ÷ (1 + ¾τ) at the sea level, which the steady state's
+    /// pseudo-capacity reads ([`RELAXATION`]).
+    fixed_slope_w_m2_k: f64,
+}
+
+/// The share of the fixed-τ slope 4σT³ ÷ (1 + ¾τ) at which the emission's slope in T is held:
+/// 0.1, decision-r09-t13i §2.2's guard, which keeps each step diagonally dominant where the water
+/// term's thickening with T outruns the column's own rise (∂ln(1 + ¾τ) ÷ ∂T near 4 ÷ T, a
+/// runaway). The slope only conditions the step: the outgoing radiation itself is exact, so a
+/// converged state is the equation's.
+pub(super) const EMISSION_SLOPE_FLOOR: f64 = 0.1;
+
+/// `slope`, a slope of the outgoing radiation in T, held at least [`EMISSION_SLOPE_FLOOR`] of the
+/// fixed-τ slope `fixed`.
+#[must_use]
+fn floored_slope(slope: f64, fixed: f64) -> f64 {
+    let floor = EMISSION_SLOPE_FLOOR * fixed;
+    if slope > floor { slope } else { floor }
 }
 
 /// A steady state's iteration: the points' temperatures and whether it met its tolerance.
@@ -315,8 +375,10 @@ pub(super) struct Steady {
 /// steady state there, its surface mean and how τ was found.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Fitted {
-    /// The emission factor 1 + ¾τ.
+    /// The emission factor 1 + ¾τ, at plan 14's mean under the water term.
     pub(super) emission_factor: f64,
+    /// The radiation at it.
+    pub(super) radiation: Radiation,
     /// The annual-mean steady state at it.
     pub(super) steady: Steady,
     /// The steady state's surface mean, K: the solid-angle mean of each point's ground
@@ -333,7 +395,10 @@ pub(super) struct Fitted {
 struct Probe {
     /// The probe's emission factor.
     emission_factor: f64,
-    /// Its steady state's surface mean, K.
+    /// Its radiation.
+    radiation: Radiation,
+    /// Its steady state's surface mean, K: not a number where the steady state is not finite, a
+    /// probe the bisection takes as warm (decision-r09-t13i §2.2).
     surface_mean_k: f64,
     /// Its steady state.
     steady: Steady,
@@ -461,6 +526,280 @@ impl Moisture {
     }
 }
 
+/// One bar, Pa: the unit of the partial pressures plan 14's grey terms take their square roots
+/// of (P14.T13.c, `derive::atmosphere`'s τ = Σ k (p ÷ 1 bar)^½).
+const BAR_PA: f64 = 1e5;
+
+/// Plan 14's grey greenhouse under the generator version's rules in force, as the energy balance
+/// reads its water term (R1, decision-r09-t13i §2.2): the constants, and the share of water's
+/// saturation pressure, by weight, that the water term's partial pressure takes, for the air
+/// `air`.
+///
+/// - Under [`SnapshotRules::Held`] (version 22): P14.T13.c's constants
+///   ([`GreenhouseConstants::VERSION_22`], water 2.89 per √bar), the water's column weight held at
+///   its saturation pressure, a share of 1.
+/// - Under [`SnapshotRules::Batch`] (from 23): P14.T57.a's fits ([`GreenhouseConstants::FITTED`],
+///   water 4.47 per √bar) with the water held at [`WATER_SURFACE_HUMIDITY`] of its saturation
+///   pressure by mole (Manabe and Wetherald's 0.77, P14.T51.a's partition), so
+///   [`WATER_SURFACE_HUMIDITY`] × `M_w` ÷ μ of it by weight, μ the air's mean molar mass: 0.496 on
+///   an Earth (`GREENHOUSE_WATER`'s documentation).
+///
+/// P14.T54.a, the 22 → 23 bump, deletes the snapshot lane's hold and its `SnapshotRules`: the
+/// batch's arm is then the only one, and this is the one function to change (main's ruling on
+/// decision-r09-t13i, 2026-10-20). Whichever of R09.T13.i and P14.T54.a lands second re-measures
+/// the climate (decision-r09-t13i §4).
+#[must_use]
+fn greenhouse_in_force(air: &Air) -> (GreenhouseConstants, f64) {
+    match SnapshotRules::in_force() {
+        SnapshotRules::Held => (GreenhouseConstants::VERSION_22, 1.0),
+        SnapshotRules::Batch => (
+            GreenhouseConstants::FITTED,
+            WATER_SURFACE_HUMIDITY * Gas::Water.molar_mass_g_per_mol() / air.molar_mass_g_per_mol,
+        ),
+    }
+}
+
+/// Plan 14's water term of the grey optical depth at a temperature (R1, decision-r09-t13i §2.2):
+/// `τ_w`(T) = `k_w` √(`p_w`(T) ÷ 1 bar), `k_w` plan 14's water constant, and `p_w` the vapour's
+/// partial pressure as its [`Reservoir`] holds it, at most `h_w` `p_sat`(T), `h_w` plan 14's
+/// humidity convention under the rules in force ([`greenhouse_in_force`]) and `p_sat` the
+/// registry's water curve (its ice branch below the triple point): plan 14's own term, which sets
+/// the mean R09.T13.d imposes, taken at the column's own temperature rather than the body's mean,
+/// so that it thickens the moist tropics' column and thins the dry poles'.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct WaterVapour {
+    /// The registry's water row.
+    water: SubstanceId,
+    /// `k_w`, per √bar.
+    constant: f64,
+    /// `h_w`, the water's partial pressure by weight over its saturation pressure.
+    humidity: f64,
+    /// What holds the vapour.
+    reservoir: Reservoir,
+}
+
+/// What holds the water term's vapour (decision-r09-t13i's §2.4 follow-up 2 §4).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum Reservoir {
+    /// Liquid water at the surface, whatever the climate condensable: the sea holds the vapour at
+    /// `h_w` of the local saturation, as the model's moist static energy takes it at a fixed
+    /// relative humidity, `p_w` = `h_w` `p_sat`(T).
+    Surface,
+    /// No liquid water at the surface (a desert, or a world whose water is ice): the air holds the
+    /// water it has, plan 14's listed `x_w` `p_s`, and the saturation caps it where the air is
+    /// colder than that vapour's dew or frost point, the cold trap: `p_w` = min(`h_w` `p_sat`(T),
+    /// `x_w` `p_s`). Uncapped, the term grows with T without limit, and the reference Earth with
+    /// no liquid ran away to a 53,093 K mean.
+    Air {
+        /// `x_w` `p_s`, Pa, the inputs' water mole fraction times their surface pressure, as
+        /// `τ_d` takes the other gases' partial pressures.
+        inventory_pa: f64,
+    },
+}
+
+impl WaterVapour {
+    /// `τ_w` at `t_k`, K: zero where the registry has no saturation pressure there.
+    #[must_use]
+    pub(super) fn depth(&self, t_k: f64) -> f64 {
+        let saturation =
+            saturation_pressure(self.water, Kelvin::new(t_k)).map_or(0.0, Pascals::value);
+        let saturated = self.humidity * saturation;
+        let pressure = match self.reservoir {
+            Reservoir::Surface => saturated,
+            // By comparison, so that a NaN stays one.
+            Reservoir::Air { inventory_pa } => {
+                if saturated > inventory_pa {
+                    inventory_pa
+                } else {
+                    saturated
+                }
+            }
+        };
+        // By comparison, so that a NaN gives no term, as plan 14's root of a NaN's max(0) does.
+        if pressure > 0.0 {
+            self.constant * (pressure / BAR_PA).sqrt()
+        } else {
+            0.0
+        }
+    }
+
+    /// `τ_w` at `t_k`, K, and its slope in T by a centred difference of [`ENERGY_SLOPE_STEP_K`], as
+    /// h's slope is taken, so that the registry may own the curve's form.
+    #[must_use]
+    fn depth_and_slope(&self, t_k: f64) -> [f64; 2] {
+        [
+            self.depth(t_k),
+            (self.depth(t_k + ENERGY_SLOPE_STEP_K) - self.depth(t_k - ENERGY_SLOPE_STEP_K))
+                / (2.0 * ENERGY_SLOPE_STEP_K),
+        ]
+    }
+}
+
+/// What sets the model's grey optical depth (decision-r09-t13i §2.2).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum Greenhouse {
+    /// One τ for every column at every temperature, solved per body as R09.T13.a built it: a world
+    /// whose gases hold no water (its τ is plan 14's dry terms', fixed), and Kaspi and Showman's
+    /// fit, whose GCM's grey radiation holds its optical depth fixed with no vapour feedback (their
+    /// §2, §3.3), so that the transport's tables stay its transport efficiency.
+    Grey,
+    /// Plan 14's grey law at each column's own temperature (R1 and R2):
+    /// τ(T, z) = m [`τ_d` e^(−z ÷ 2H) + `τ_w`(T − Γz)], m one multiplier solved per body.
+    Vapour {
+        /// `τ_d`, plan 14's terms of the gases other than water at their partial pressures
+        /// `x_i p_s`: carbon dioxide's and nitrogen's, nitrogen's collision factor at the body's
+        /// equilibrium temperature ([`Greenhouse::of`]); methane and the other condensables enter
+        /// no term, as in plan 14's law.
+        dry_depth: f64,
+        /// `τ_w`.
+        water: WaterVapour,
+    },
+}
+
+impl Greenhouse {
+    /// The greenhouse of the body of `inputs` in the air `air`, whose albedo law is `freezing`'s:
+    /// [`Greenhouse::Vapour`] where its gases hold water, else [`Greenhouse::Grey`]
+    /// (decision-r09-t13i §2.2). Its vapour's [`Reservoir`] is the surface where water is among
+    /// its surface liquids ([`CoarseInputs::liquids`]), pure or as an aqueous solution's
+    /// component, and otherwise the air's own water, `x_w` `p_s` (decision-r09-t13i's §2.4
+    /// follow-up 2 §4). A solution's lowering of the vapour pressure is not taken: `h_w` stands
+    /// for it as for the humidity.
+    ///
+    /// `τ_d` takes plan 14's grey terms ([`GreenhouseConstants::terms`]) of the inputs' gases at
+    /// `x_i p_s`, water's left out, and nitrogen's collision factor at the body's equilibrium
+    /// temperature, here σ`T_eq`⁴ = (1 − α(T\*)) F ÷ 4 + `F_int`: F the light of its hosts
+    /// ([`CoarseInputs::host_flux`]), α the model's albedo law at plan 14's mean T\* and `F_int`
+    /// its heat flow, the model's own equilibrium with the sunlight at its mean (the lane's choice;
+    /// the ruling names the body's equilibrium temperature, which the inputs do not carry). On an
+    /// Earth that is 256.4 K against plan 14's 255.1 K at its Bond albedo 0.294, which moves
+    /// nitrogen's term by 1%.
+    #[must_use]
+    pub(super) fn of(inputs: &CoarseInputs, air: &Air, freezing: Freezing) -> Self {
+        let water = Gas::Water.substance();
+        let fraction = |gas: Gas| {
+            inputs
+                .gases()
+                .iter()
+                .filter(|share| by_key(share.substance.as_str()) == Some(gas.substance()))
+                .fold(0.0, |sum, share| sum + share.mole_fraction)
+        };
+        let water_fraction = fraction(Gas::Water);
+        if !positive(water_fraction) {
+            return Self::Grey;
+        }
+        let (constants, humidity) = greenhouse_in_force(air);
+        let pressure = inputs.surface_pressure().value();
+        // Water is among a surface liquid's components where the liquid is water or an aqueous
+        // solution, a brine's water as much a reservoir as a fresh sea's.
+        let holds_water = |key: &str| {
+            by_key(key)
+                .and_then(|liquid| liquid.substance().liquid())
+                .is_some_and(|columns| columns.components().contains(&water))
+        };
+        let reservoir = if inputs
+            .liquids()
+            .iter()
+            .any(|liquid| holds_water(liquid.substance.as_str()))
+        {
+            Reservoir::Surface
+        } else {
+            Reservoir::Air {
+                inventory_pa: water_fraction * pressure,
+            }
+        };
+        let mean_k = inputs.mean_surface_temperature().value();
+        let absorbed = (1.0 - albedo_of(freezing, mean_k).albedo) * inputs.host_flux().value()
+            / 4.0
+            + inputs.heat_flow().value();
+        let equilibrium = Kelvin::new((absorbed.max(0.0) / STEFAN_BOLTZMANN).sqrt().sqrt());
+        let dry = PartialPressures::from_fn(|gas| match gas {
+            Gas::Water => Pascals::ZERO,
+            _ => Pascals::new(fraction(gas) * pressure),
+        });
+        let dry_depth = constants
+            .terms(&dry, equilibrium)
+            .iter()
+            .fold(0.0, |sum, &(_, term)| sum + term);
+        let unit = PartialPressures::from_fn(|gas| match gas {
+            Gas::Water => Pascals::new(BAR_PA),
+            _ => Pascals::ZERO,
+        });
+        let constant = constants
+            .terms(&unit, equilibrium)
+            .iter()
+            .find(|(gas, _)| *gas == Gas::Water)
+            .map_or(0.0, |&(_, term)| term);
+        Self::Vapour {
+            dry_depth,
+            water: WaterVapour {
+                water,
+                constant,
+                humidity,
+                reservoir,
+            },
+        }
+    }
+}
+
+/// One run's radiation: its greenhouse at one emission factor (decision-r09-t13i §2.2).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum Radiation {
+    /// One emission factor 1 + ¾τ at every column and temperature.
+    Grey {
+        /// 1 + ¾τ.
+        emission_factor: f64,
+    },
+    /// τ(T, z) = m [`τ_d` e^(−z ÷ 2H) + `τ_w`(T − Γz)].
+    Vapour {
+        /// m.
+        multiplier: f64,
+        /// `τ_d`.
+        dry_depth: f64,
+        /// `τ_w`.
+        water: WaterVapour,
+    },
+}
+
+impl Radiation {
+    /// The radiation of `greenhouse` whose emission factor at the temperature `reference_k`, K,
+    /// is `emission_factor`: that factor itself under one τ; under the water term,
+    /// m = (x − 1) ÷ (¾ (`τ_d` + `τ_w`(T\*))), or one τ where the gases' terms vanish there.
+    #[must_use]
+    pub(super) fn at(greenhouse: Greenhouse, emission_factor: f64, reference_k: f64) -> Self {
+        match greenhouse {
+            Greenhouse::Grey => Self::Grey { emission_factor },
+            Greenhouse::Vapour { dry_depth, water } => {
+                let depth = dry_depth + water.depth(reference_k);
+                if positive(depth) {
+                    Self::Vapour {
+                        multiplier: (emission_factor - 1.0) / (EDDINGTON_COEFFICIENT * depth),
+                        dry_depth,
+                        water,
+                    }
+                } else {
+                    Self::Grey { emission_factor }
+                }
+            }
+        }
+    }
+
+    /// The column's optical depth above the sea level that thins with height alone, the τ of the
+    /// relief's dry transmission e^(−(3/2) τ e^(−z ÷ 2H)) ([`Relief::transmissions_through`]):
+    /// (x − 1) ÷ ¾ under one τ, as R09.T13.g took it, and m `τ_d` under the water term, whose
+    /// own part follows the ground's temperature instead (R2).
+    #[must_use]
+    fn thinning_depth(&self) -> f64 {
+        match *self {
+            Self::Grey { emission_factor } => (emission_factor - 1.0) / EDDINGTON_COEFFICIENT,
+            Self::Vapour {
+                multiplier,
+                dry_depth,
+                ..
+            } => multiplier * dry_depth,
+        }
+    }
+}
+
 /// How the optical depth was found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum OpticalDepth {
@@ -490,8 +829,10 @@ pub(super) enum OpticalDepth {
 pub(super) struct Solution {
     /// The annual and monthly means on the grid, with the orbits run.
     pub(super) climate: GridClimate,
-    /// The emission factor 1 + ¾τ.
+    /// The emission factor 1 + ¾τ, at plan 14's mean under the water term.
     pub(super) emission_factor: f64,
+    /// The radiation the orbits ran under.
+    pub(super) radiation: Radiation,
     /// How τ was found.
     pub(super) optical_depth: OpticalDepth,
     /// Whether the steady state τ was solved on met [`STEADY_TOLERANCE_K`]: true for a body
@@ -543,13 +884,15 @@ pub(super) enum GridGround<R> {
 }
 
 impl<'a> GridGround<&'a Relief> {
-    /// Each point-quantile's transmission at the emission factor `emission_factor`
-    /// ([`Relief::transmissions`]), and none at the sea level.
+    /// Each point-quantile's transmission through the part of the column above it that thins with
+    /// height alone under `radiation` ([`Relief::transmissions_through`] at
+    /// [`Radiation::thinning_depth`]): the whole column's under one τ, the dry gases' under the
+    /// water term; none at the sea level.
     #[must_use]
-    fn transmissions(self, emission_factor: f64) -> Vec<[f64; QUANTILES]> {
+    fn transmissions(self, radiation: &Radiation) -> Vec<[f64; QUANTILES]> {
         match self {
             Self::SeaLevel => Vec::new(),
-            Self::Relief(relief) => relief.transmissions(emission_factor),
+            Self::Relief(relief) => relief.transmissions_through(radiation.thinning_depth()),
         }
     }
 
@@ -697,13 +1040,14 @@ impl Relief {
         grid.mean(&surface)
     }
 
-    /// Each point-quantile's transmission through the column above it at the emission factor
-    /// `emission_factor`, e^(−(3/2) `τ_z`) with `τ_z` = τ e^(−z ÷ 2H) and τ = (x − 1) ÷ ¾ the model's
-    /// own (plan 14's τ ∝ √p, `optical_depth`, and its diffusivity
-    /// [`FLUX_OPTICAL_DEPTH_PER_GREY`]), each through [`math::exp`].
+    /// Each point-quantile's transmission through the column above it whose optical depth at the
+    /// sea level is `tau` and thins with height as e^(−z ÷ 2H): e^(−(3/2) `τ_z`) with
+    /// `τ_z` = τ e^(−z ÷ 2H) (plan 14's τ ∝ √p, `optical_depth`, and its diffusivity
+    /// [`FLUX_OPTICAL_DEPTH_PER_GREY`]), each through [`math::exp`]. Under one τ, τ is the model's
+    /// own, (x − 1) ÷ ¾, as R09.T13.g built it; under the water term the dry gases' m `τ_d`
+    /// ([`Radiation::thinning_depth`]).
     #[must_use]
-    fn transmissions(&self, emission_factor: f64) -> Vec<[f64; QUANTILES]> {
-        let tau = (emission_factor - 1.0) / EDDINGTON_COEFFICIENT;
+    fn transmissions_through(&self, tau: f64) -> Vec<[f64; QUANTILES]> {
         self.thinning
             .iter()
             .map(|point| point.map(|share| math::exp(-FLUX_OPTICAL_DEPTH_PER_GREY * tau * share)))
@@ -791,6 +1135,8 @@ pub(super) struct EnergyBalance {
     pub(super) transport_kg_m2_s: f64,
     /// The internal heat flow, W m⁻².
     pub(super) heat_flow_w_m2: f64,
+    /// What sets the grey optical depth (decision-r09-t13i §2.2).
+    pub(super) greenhouse: Greenhouse,
 }
 
 /// The model's working arrays: h, its slope, the albedo, its slope, the step's right side, its
@@ -880,19 +1226,27 @@ enum Storage<'a> {
 /// 72 ns with the table (measured as built on the reference Earth, at opt-level 2 on a shared
 /// machine). The nodes lie on one absolute lattice, so a temperature's value does not depend on
 /// the span, only on whether the span holds it; the steady states that set τ evaluate directly.
+///
+/// Under the water term (decision-r09-t13i §2.2) it also holds `τ_w` and its slope, and the relief's
+/// water transmission e^(−(3/2) m `τ_w`) and its slope at the run's multiplier m, which each raised
+/// quantile reads at its ground's temperature.
 #[derive(Debug, Clone, PartialEq)]
 struct Tabulated {
     first_node: f64,
     latent: Option<Vec<[f64; 2]>>,
     albedo: Vec<[f64; 2]>,
+    /// `τ_w` and its slope, under the water term.
+    water: Option<Vec<[f64; 2]>>,
+    /// The multiplier m, and e^(−(3/2) m `τ_w`) and its slope at it, under the water term.
+    wet: Option<(f64, Vec<[f64; 2]>)>,
     smooth: Vec<bool>,
 }
 
 impl Tabulated {
-    /// The table of `model`'s functions over the nodes from `low_k` − [`TABLE_MARGIN_K`] (but
-    /// not below 1 K) to `high_k` + [`TABLE_MARGIN_K`].
+    /// The table of `model`'s functions under `radiation` over the nodes from `low_k` −
+    /// [`TABLE_MARGIN_K`] (but not below 1 K) to `high_k` + [`TABLE_MARGIN_K`].
     #[must_use]
-    fn new(model: &EnergyBalance, low_k: f64, high_k: f64) -> Self {
+    fn new(model: &EnergyBalance, radiation: &Radiation, low_k: f64, high_k: f64) -> Self {
         let lowest = ((low_k - TABLE_MARGIN_K) / TABLE_SPACING_K).floor();
         let floor = (1.0 / TABLE_SPACING_K).round();
         let first_node = if lowest > floor { lowest } else { floor };
@@ -926,10 +1280,30 @@ impl Tabulated {
                 [at.albedo, at.slope_per_k]
             })
             .collect();
+        let vapour = match *radiation {
+            Radiation::Vapour {
+                multiplier, water, ..
+            } => Some((multiplier, water)),
+            Radiation::Grey { .. } => None,
+        };
+        let water: Option<Vec<[f64; 2]>> = vapour.map(|(_, water)| {
+            temperatures
+                .iter()
+                .map(|&t| water.depth_and_slope(t))
+                .collect()
+        });
+        let wet = vapour.zip(water.as_ref()).map(|((multiplier, _), water)| {
+            (
+                multiplier,
+                water.iter().map(|&w| wet_of(multiplier, w)).collect(),
+            )
+        });
         let mut table = Self {
             first_node,
             latent,
             albedo,
+            water,
+            wet,
             smooth: vec![true; count - 1],
         };
         let smooth = (0..count - 1)
@@ -938,12 +1312,60 @@ impl Tabulated {
                     let t = temperatures[i] + f * TABLE_SPACING_K;
                     let (read, direct) = (table.read(model, i, f), model.functions(t, None));
                     let scale = [direct[0].abs(), direct[1].abs(), 1.0, 1.0];
-                    (0..4).all(|k| (read[k] - direct[k]).abs() <= TABLE_TOLERANCES[k] * scale[k])
+                    let functions = (0..4)
+                        .all(|k| (read[k] - direct[k]).abs() <= TABLE_TOLERANCES[k] * scale[k]);
+                    let vapour = vapour.is_none_or(|(multiplier, water)| {
+                        let direct_water = water.depth_and_slope(t);
+                        let direct_wet = wet_of(multiplier, direct_water);
+                        let read = table.read_water(i, f);
+                        let direct = [
+                            direct_water[0],
+                            direct_water[1],
+                            direct_wet[0],
+                            direct_wet[1],
+                        ];
+                        read.is_some_and(|read| {
+                            (0..4).all(|k| (read[k] - direct[k]).abs() <= WATER_TABLE_TOLERANCES[k])
+                        })
+                    });
+                    functions && vapour
                 })
             })
             .collect();
         table.smooth = smooth;
         table
+    }
+
+    /// `τ_w`, its slope, the water transmission and its slope read from the table in interval `i` at
+    /// fraction `f`, or `None` where the table holds no water term.
+    #[must_use]
+    fn read_water(&self, i: usize, f: f64) -> Option<[f64; 4]> {
+        let (water, (_, wet)) = (self.water.as_ref()?, self.wet.as_ref()?);
+        let (depth, slope) = hermite(water, i, f);
+        let (transmission, transmission_slope) = hermite(wet, i, f);
+        Some([depth, slope, transmission, transmission_slope])
+    }
+
+    /// `τ_w` and its slope at `t_k`, K, from the table where it holds `t_k` and a water term.
+    #[must_use]
+    fn water_at(&self, t_k: f64) -> Option<[f64; 2]> {
+        let water = self.water.as_ref()?;
+        let (i, f) = self.locate(t_k)?;
+        let (depth, slope) = hermite(water, i, f);
+        Some([depth, slope])
+    }
+
+    /// The water transmission e^(−(3/2) m `τ_w`) and its slope at `t_k`, K, from the table where it
+    /// holds `t_k` and the water term at the multiplier `multiplier`, to the bit.
+    #[must_use]
+    fn wet_at(&self, multiplier: f64, t_k: f64) -> Option<[f64; 2]> {
+        let (held, wet) = self.wet.as_ref()?;
+        if held.total_cmp(&multiplier).is_ne() {
+            return None;
+        }
+        let (i, f) = self.locate(t_k)?;
+        let (transmission, slope) = hermite(wet, i, f);
+        Some([transmission, slope])
     }
 
     /// The functions of `model` read from the table in interval `i` at fraction `f`: h, its
@@ -999,6 +1421,43 @@ fn hermite(nodes: &[[f64; 2]], i: usize, f: f64) -> (f64, f64) {
     (value, slope)
 }
 
+/// The water's share of a raised quantile's transmission, e^(−(3/2) m `τ_w`), and its slope in T,
+/// −(3/2) m `τ_w′` e^(−(3/2) m `τ_w`), at the multiplier `multiplier` from `τ_w` and its slope `water`
+/// (decision-r09-t13i §2.2, R2: the vapour above the ground follows the ground's temperature).
+#[must_use]
+fn wet_of(multiplier: f64, water: [f64; 2]) -> [f64; 2] {
+    let [depth, slope] = water;
+    let transmission = math::exp(-FLUX_OPTICAL_DEPTH_PER_GREY * multiplier * depth);
+    [
+        transmission,
+        -FLUX_OPTICAL_DEPTH_PER_GREY * multiplier * slope * transmission,
+    ]
+}
+
+/// `τ_w` of `water` and its slope at `t_k`, K, from `table` where it holds `t_k`, and directly
+/// otherwise.
+#[must_use]
+fn water_terms(water: &WaterVapour, t_k: f64, table: Option<&Tabulated>) -> [f64; 2] {
+    table
+        .and_then(|table| table.water_at(t_k))
+        .unwrap_or_else(|| water.depth_and_slope(t_k))
+}
+
+/// The water transmission of `water` at the multiplier `multiplier` and its slope at the ground's
+/// temperature `ground_k`, K ([`wet_of`]), from `table` where it holds `ground_k` at that
+/// multiplier, and directly otherwise.
+#[must_use]
+fn wet_terms(
+    water: &WaterVapour,
+    multiplier: f64,
+    ground_k: f64,
+    table: Option<&Tabulated>,
+) -> [f64; 2] {
+    table
+        .and_then(|table| table.wet_at(multiplier, ground_k))
+        .unwrap_or_else(|| wet_of(multiplier, water.depth_and_slope(ground_k)))
+}
+
 /// `x`, a non-negative integer-valued `f64` below 2³², as a `usize`.
 #[must_use]
 #[expect(
@@ -1035,8 +1494,9 @@ impl EnergyBalance {
         } else {
             Diffusing::SensibleHeat
         };
+        let freezing = Freezing::of(inputs);
         Self {
-            freezing: Freezing::of(inputs),
+            freezing,
             specific_heat_j_per_kg_k: air.specific_heat_j_per_kg_k,
             moisture,
             transport_kg_m2_s: transport_kg_m2_s(
@@ -1047,6 +1507,7 @@ impl EnergyBalance {
                 diffusing,
             ),
             heat_flow_w_m2: inputs.heat_flow().value(),
+            greenhouse: Greenhouse::of(inputs, &air, freezing),
         }
     }
 
@@ -1082,23 +1543,10 @@ impl EnergyBalance {
         self.albedo_and_slope(t_k).albedo
     }
 
-    /// The albedo at `t_k`, K, and its slope in T.
+    /// The albedo at `t_k`, K, and its slope in T ([`albedo_of`] under the model's freezing).
     #[must_use]
     fn albedo_and_slope(&self, t_k: f64) -> AlbedoAt {
-        match self.freezing {
-            Freezing::At { point_k } => {
-                let midpoint = point_k - ALBEDO_MIDPOINT_BELOW_FREEZING_K;
-                let ramp = math::tanh((t_k - midpoint) / ALBEDO_WIDTH_K);
-                AlbedoAt {
-                    albedo: ALBEDO_MEAN - ALBEDO_HALF_RANGE * ramp,
-                    slope_per_k: -ALBEDO_HALF_RANGE * (1.0 - ramp * ramp) / ALBEDO_WIDTH_K,
-                }
-            }
-            Freezing::Never { albedo } => AlbedoAt {
-                albedo,
-                slope_per_k: 0.0,
-            },
-        }
+        albedo_of(self.freezing, t_k)
     }
 
     /// h at `t_k`, K, its slope, the albedo and its slope, from `table` where it holds `t_k` and
@@ -1214,15 +1662,15 @@ impl EnergyBalance {
         LAND_HEAT_CAPACITY_J_PER_M2_K * ((1.0 - sea_share) + sea_share * sea_ratio)
     }
 
-    /// The net heating of every grid point at temperatures `t_k`, K, under insolation
-    /// `insolation_w_m2` and emission factor `emission_factor`, W m⁻²: absorbed, internal and
+    /// The net heating of every grid point at the sea level at temperatures `t_k`, K, under
+    /// insolation `insolation_w_m2` and the radiation `radiation`, W m⁻²: absorbed, internal and
     /// emitted, then the diffusion's convergence, each per point.
     #[cfg(test)]
     #[must_use]
     pub(super) fn heating(
         &self,
         grid: &ModelGrid,
-        emission_factor: f64,
+        radiation: &Radiation,
         insolation_w_m2: &[f64],
         t_k: &[f64],
     ) -> (Vec<f64>, Vec<f64>) {
@@ -1230,7 +1678,7 @@ impl EnergyBalance {
         let radiative = (0..grid.points())
             .map(|p| {
                 insolation_w_m2[p] * (1.0 - self.albedo_at(t_k[p])) + self.heat_flow_w_m2
-                    - emission(t_k[p], emission_factor).flux_w_m2
+                    - sea_level_emission(radiation, t_k[p], None).flux_w_m2
             })
             .collect();
         let diffusive = (0..grid.points())
@@ -1254,7 +1702,7 @@ impl EnergyBalance {
     fn advance(
         &self,
         grid: &ModelGrid,
-        emission_factor: f64,
+        radiation: &Radiation,
         insolation_w_m2: &[f64],
         storage: Storage<'_>,
         table: Option<&Tabulated>,
@@ -1292,23 +1740,19 @@ impl EnergyBalance {
             work.upper[k] = -lambda * above / w;
             for column in 0..columns {
                 let p = grid.point(k, column);
-                let tk = t_k[p];
-                // The sea's temperature for its capacity is its water surface's.
                 let (
                     Emission {
                         flux_w_m2: emitted,
                         slope_w_m2_k: emission_slope,
+                        fixed_slope_w_m2_k: fixed_slope,
                     },
                     sea_k,
-                ) = match raised(p) {
-                    None => (emission(tk, emission_factor), tk),
-                    Some((relief, (heights, transmission))) => (
-                        point_emission(tk, emission_factor, heights, transmission, relief),
-                        relief.water_k(tk, heights),
-                    ),
-                };
+                ) = emission_and_sea(radiation, t_k[p], raised(p), table);
+                // The pseudo-capacity reads the slope at a fixed τ, so that the relaxation stays
+                // conditioned as R09.T13.a built it where the water term weakens the restoring
+                // (decision-r09-t13i §2.2); under one τ the two are the same.
                 let stored = match storage {
-                    Storage::Relaxation => RELAXATION * emission_slope,
+                    Storage::Relaxation => RELAXATION * fixed_slope,
                     Storage::Seasonal { step_s, sea_share } => {
                         self.heat_capacity(sea_k, sea_share[p]) / step_s
                     }
@@ -1369,7 +1813,7 @@ impl EnergyBalance {
         largest
     }
 
-    /// The steady state under constant insolation `insolation_w_m2` at emission factor
+    /// The steady state under constant insolation `insolation_w_m2` under one τ of emission factor
     /// `emission_factor`, iterated from the temperatures `start_k`, K, and whether its iteration
     /// met [`STEADY_TOLERANCE_K`] within [`STEADY_ITERATIONS`].
     #[cfg(test)]
@@ -1383,7 +1827,7 @@ impl EnergyBalance {
     ) -> Steady {
         self.relax(
             grid,
-            emission_factor,
+            &Radiation::Grey { emission_factor },
             insolation_w_m2,
             start_k,
             None,
@@ -1405,7 +1849,7 @@ impl EnergyBalance {
     ) -> Steady {
         self.relax(
             grid,
-            emission_factor,
+            &Radiation::Grey { emission_factor },
             insolation_w_m2,
             start_k,
             None,
@@ -1414,9 +1858,11 @@ impl EnergyBalance {
         )
     }
 
-    /// [`steady_state`](Self::steady_state) for at most `iterations`, its functions read from
-    /// `table` where it holds them, over the ground `ground`, its transmissions taken once at the
-    /// emission factor.
+    /// The steady state under constant insolation `insolation_w_m2` and the radiation `radiation`,
+    /// iterated from the temperatures `start_k`, K, for at most `iterations`, its functions read
+    /// from `table` where it holds them, over the ground `ground`, its transmissions taken once at
+    /// the radiation; and whether its iteration met [`STEADY_TOLERANCE_K`]. A state that is no
+    /// longer finite, a runaway's under the water term, stops it, unconverged.
     #[expect(
         clippy::too_many_arguments,
         reason = "the steady state's grid, forcing and start, and the step's table, relief and \
@@ -1426,21 +1872,21 @@ impl EnergyBalance {
     fn relax(
         &self,
         grid: &ModelGrid,
-        emission_factor: f64,
+        radiation: &Radiation,
         insolation_w_m2: &[f64],
         start_k: Vec<f64>,
         table: Option<&Tabulated>,
         ground: GridGround<&Relief>,
         iterations: u32,
     ) -> Steady {
-        let transmission = ground.transmissions(emission_factor);
+        let transmission = ground.transmissions(radiation);
         let at = ground.at(&transmission);
         let mut t_k = start_k;
         let mut work = Work::new(grid);
         for _ in 0..iterations {
             let change = self.advance(
                 grid,
-                emission_factor,
+                radiation,
                 insolation_w_m2,
                 Storage::Relaxation,
                 table,
@@ -1448,6 +1894,9 @@ impl EnergyBalance {
                 &mut t_k,
                 &mut work,
             );
+            if !t_k.iter().all(|t| t.is_finite()) {
+                break;
+            }
             if change < STEADY_TOLERANCE_K {
                 return Steady {
                     t_k,
@@ -1480,6 +1929,12 @@ impl EnergyBalance {
     /// mean `mean_k`, K ([`Relief::surface_mean_k`], decision-r09-t13a-relief §1.3): 48 bisections
     /// of ln(1 + ¾τ); the steady state there, and how τ was found.
     ///
+    /// Under the water term the bisected factor is the one at `mean_k`, plan 14's T\*,
+    /// u = ln(1 + ¾ m (`τ_d` + `τ_w`(T\*))), so that m solves as τ did ([`Radiation::at`];
+    /// decision-r09-t13i §2.2). A τ that grows with T as √`p_sat` makes the outgoing radiation
+    /// fall with T where ∂ln(1 + ¾τ) ÷ ∂T exceeds 4 ÷ T, a runaway: a probe whose steady state is
+    /// not finite counts as warm, its surface mean not being below the target.
+    ///
     /// The fold guard (decision-r09-t13ge §1.4, g4): the bisection keeps, on each side of its
     /// bracket, the last probe whose steady state converged, the bracket's two ends among them. If
     /// the final midpoint's steady state has not converged within [`STEADY_ITERATIONS`], it
@@ -1497,9 +1952,10 @@ impl EnergyBalance {
         ground: GridGround<&Relief>,
     ) -> Fitted {
         let solve = |factor: f64| {
+            let radiation = Radiation::at(self.greenhouse, factor, mean_k);
             let steady = self.relax(
                 grid,
-                factor,
+                &radiation,
                 insolation_w_m2,
                 vec![mean_k; grid.points()],
                 None,
@@ -1512,12 +1968,14 @@ impl EnergyBalance {
             };
             Probe {
                 emission_factor: factor,
+                radiation,
                 surface_mean_k: surface,
                 steady,
             }
         };
         let fitted = |probe: Probe, optical_depth: OpticalDepth| Fitted {
             emission_factor: probe.emission_factor,
+            radiation: probe.radiation,
             steady: probe.steady,
             surface_mean_k: probe.surface_mean_k,
             optical_depth,
@@ -1554,7 +2012,7 @@ impl EnergyBalance {
         }
     }
 
-    /// Whole seasonal orbits of `sunlight` at emission factor `emission_factor` from `start_k`, K,
+    /// Whole seasonal orbits of `sunlight` under the radiation `radiation` from `start_k`, K,
     /// over points of sea share `sea_share` and the ground `ground`, until the annual means move
     /// under [`CONVERGENCE_K`] between orbits, at most [`MAX_ORBITS`]: the last orbit's annual and
     /// monthly means. The table reaches as far below and above the start as the highest and
@@ -1578,7 +2036,7 @@ impl EnergyBalance {
         &self,
         grid: &ModelGrid,
         sunlight: &Sunlight,
-        emission_factor: f64,
+        radiation: &Radiation,
         start_k: Vec<f64>,
         sea_share: &[f64],
         ground: GridGround<&Relief>,
@@ -1602,11 +2060,11 @@ impl EnergyBalance {
             GridGround::SeaLevel => (0.0, 0.0),
             GridGround::Relief(relief) => relief.table_reach_k(),
         };
-        let table = Tabulated::new(self, low - below, high + above);
+        let table = Tabulated::new(self, radiation, low - below, high + above);
         let start_k = if sunlight.varies_in_longitude() {
             self.relax(
                 grid,
-                emission_factor,
+                radiation,
                 sunlight.annual(),
                 start_k,
                 Some(&table),
@@ -1617,7 +2075,7 @@ impl EnergyBalance {
         } else {
             start_k
         };
-        let transmission = ground.transmissions(emission_factor);
+        let transmission = ground.transmissions(radiation);
         let at = ground.at(&transmission);
         let mut t = start_k;
         let mut work = Work::new(grid);
@@ -1637,7 +2095,7 @@ impl EnergyBalance {
                 sunlight.fill(step, grid, &mut insolation);
                 self.advance(
                     grid,
-                    emission_factor,
+                    radiation,
                     &insolation,
                     storage,
                     Some(&table),
@@ -1686,9 +2144,9 @@ impl EnergyBalance {
 
     /// The model's run over `sunlight` for a body of mean surface temperature `mean_k`, over the
     /// points of `grid` of sea share `sea_share` and the ground `ground` (the
-    /// [module documentation](self)): τ solved on the zonal grid in the grid's coordinates, over
-    /// the zonal relief, so that the steady state's surface mean is `mean_k`, then the orbits over
-    /// the grid's own relief.
+    /// [module documentation](self)): τ, or under the water term its multiplier, solved on the
+    /// zonal grid in the grid's coordinates, over the zonal relief, so that the steady state's
+    /// surface mean is `mean_k`, then the orbits over the grid's own relief.
     ///
     /// # Panics
     ///
@@ -1713,6 +2171,7 @@ impl EnergyBalance {
         let solution = if positive(forcing) {
             let Fitted {
                 emission_factor: factor,
+                radiation,
                 steady,
                 surface_mean_k,
                 optical_depth: depth,
@@ -1727,11 +2186,12 @@ impl EnergyBalance {
                     converged,
                 }
             } else {
-                self.orbits(grid, sunlight, factor, steady, sea_share, on_grid)
+                self.orbits(grid, sunlight, &radiation, steady, sea_share, on_grid)
             };
             Solution {
                 climate,
                 emission_factor: factor,
+                radiation,
                 optical_depth: depth,
                 steady_converged: converged,
                 steady_surface_mean_k: surface_mean_k,
@@ -1747,6 +2207,9 @@ impl EnergyBalance {
                     converged: true,
                 },
                 emission_factor: 1.0,
+                radiation: Radiation::Grey {
+                    emission_factor: 1.0,
+                },
                 optical_depth: OpticalDepth::Unforced,
                 steady_converged: true,
                 steady_surface_mean_k: mean_k,
@@ -1799,17 +2262,37 @@ fn solve_longitude(lambda: f64, grid: &ModelGrid, work: &mut Work) {
 #[must_use]
 fn emission(t_k: f64, emission_factor: f64) -> Emission {
     let cube = t_k * t_k * t_k;
+    let slope = 4.0 * STEFAN_BOLTZMANN * cube / emission_factor;
     Emission {
         flux_w_m2: STEFAN_BOLTZMANN * cube * t_k / emission_factor,
-        slope_w_m2_k: 4.0 * STEFAN_BOLTZMANN * cube / emission_factor,
+        slope_w_m2_k: slope,
+        fixed_slope_w_m2_k: slope,
+    }
+}
+
+/// The outgoing radiation at the sea level at `t_k`, K, under `radiation`, its water term read
+/// from `table` where it holds it: [`emission`] under one τ, [`Column::vapour`]'s under the water
+/// term.
+#[must_use]
+fn sea_level_emission(radiation: &Radiation, t_k: f64, table: Option<&Tabulated>) -> Emission {
+    match *radiation {
+        Radiation::Grey { emission_factor } => emission(t_k, emission_factor),
+        Radiation::Vapour {
+            multiplier,
+            dry_depth,
+            water,
+        } => Column::vapour(t_k, multiplier, dry_depth, water_terms(&water, t_k, table)).emission,
     }
 }
 
 /// The sea-level column of a point at one temperature, what each of its quantiles' outgoing
-/// radiation reads: σT⁴ ÷ (1 + ¾τ) and its slope ([`emission`]), T³ and T⁴.
+/// radiation reads: σT⁴ ÷ (1 + ¾τ) and its slope ([`emission`]), T³ and T⁴; under the water
+/// term, also the slope before its floor.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Column {
     emission: Emission,
+    /// The emission's slope before [`floored_slope`]: under one τ, its slope.
+    whole_slope_w_m2_k: f64,
     cube: f64,
     fourth: f64,
 }
@@ -1819,10 +2302,39 @@ impl Column {
     #[must_use]
     fn at(t_k: f64, emission_factor: f64) -> Self {
         let cube = t_k * t_k * t_k;
+        let emission = emission(t_k, emission_factor);
         Self {
-            emission: emission(t_k, emission_factor),
+            emission,
+            whole_slope_w_m2_k: emission.slope_w_m2_k,
             cube,
             fourth: cube * t_k,
+        }
+    }
+
+    /// The column at the sea-level temperature `t_k`, K, under the water term of multiplier
+    /// `multiplier` and dry depth `dry_depth`, its `τ_w` and slope at `t_k` `water`
+    /// (decision-r09-t13i §2.2): x = 1 + ¾ m (`τ_d` + `τ_w`(T)), the flux σT⁴ ÷ x, the fixed-τ slope
+    /// 4σT³ ÷ x, and the whole slope 4σT³ ÷ x − σT⁴ (¾ m ∂`τ_w` ÷ ∂T) ÷ x², held at
+    /// [`EMISSION_SLOPE_FLOOR`] of the fixed one.
+    #[must_use]
+    fn vapour(t_k: f64, multiplier: f64, dry_depth: f64, water: [f64; 2]) -> Self {
+        let [depth, depth_slope] = water;
+        let factor = 1.0 + EDDINGTON_COEFFICIENT * multiplier * (dry_depth + depth);
+        let cube = t_k * t_k * t_k;
+        let fourth = cube * t_k;
+        let fixed = 4.0 * STEFAN_BOLTZMANN * cube / factor;
+        let whole = fixed
+            - STEFAN_BOLTZMANN * fourth * (EDDINGTON_COEFFICIENT * multiplier * depth_slope)
+                / (factor * factor);
+        Self {
+            emission: Emission {
+                flux_w_m2: STEFAN_BOLTZMANN * fourth / factor,
+                slope_w_m2_k: floored_slope(whole, fixed),
+                fixed_slope_w_m2_k: fixed,
+            },
+            whole_slope_w_m2_k: whole,
+            cube,
+            fourth,
         }
     }
 }
@@ -1854,17 +2366,70 @@ fn quantile_emission(
     let ground_fourth = ground_cube * ground_k;
     let through = column.flux_w_m2 - transmission * STEFAN_BOLTZMANN * (fourth - ground_fourth);
     let ground = transmission * STEFAN_BOLTZMANN * ground_fourth;
-    if through >= ground {
-        Emission {
-            flux_w_m2: through,
-            slope_w_m2_k: column.slope_w_m2_k
+    let (flux_w_m2, slope_w_m2_k) = if through >= ground {
+        (
+            through,
+            column.slope_w_m2_k
                 - transmission * 4.0 * STEFAN_BOLTZMANN * (cube - ground_cube * ground_rate),
-        }
+        )
     } else {
-        Emission {
-            flux_w_m2: ground,
-            slope_w_m2_k: transmission * 4.0 * STEFAN_BOLTZMANN * ground_cube * ground_rate,
-        }
+        (
+            ground,
+            transmission * 4.0 * STEFAN_BOLTZMANN * ground_cube * ground_rate,
+        )
+    };
+    Emission {
+        flux_w_m2,
+        slope_w_m2_k,
+        fixed_slope_w_m2_k: slope_w_m2_k,
+    }
+}
+
+/// [`quantile_emission`] under the water term (decision-r09-t13i §2.2, R2): the quantile's
+/// transmission is `dry_transmission`, e^(−(3/2) m `τ_d` e^(−z ÷ 2H)), times the water's
+/// e^(−(3/2) m `τ_w`(`T_g`)) at the ground's temperature, `wet` with its slope in `T_g`
+/// ([`wet_of`]), so that the vapour above raised ground thins over its Clausius–Clapeyron height
+/// with the ground's temperature rather than over the air's 2H. The flux is
+/// max(σT⁴ ÷ x(T) − tr σ(T⁴ − `T_g`⁴), tr σ`T_g`⁴) as [`quantile_emission`]'s; its whole slope adds
+/// the transmission's own slope in T, and is held at [`EMISSION_SLOPE_FLOOR`] of the slope at a
+/// fixed τ and transmission. At z = 0 it is the sea-level column's to the bit.
+#[must_use]
+fn vapour_quantile_emission(
+    column: &Column,
+    ground_k: f64,
+    ground_rate: f64,
+    dry_transmission: f64,
+    wet: [f64; 2],
+) -> Emission {
+    let (cube, fourth) = (column.cube, column.fourth);
+    let ground_cube = ground_k * ground_k * ground_k;
+    let ground_fourth = ground_cube * ground_k;
+    let transmission = dry_transmission * wet[0];
+    let transmission_slope = dry_transmission * wet[1] * ground_rate;
+    let through =
+        column.emission.flux_w_m2 - transmission * STEFAN_BOLTZMANN * (fourth - ground_fourth);
+    let ground = transmission * STEFAN_BOLTZMANN * ground_fourth;
+    let (flux_w_m2, whole, fixed) = if through >= ground {
+        let held = transmission * 4.0 * STEFAN_BOLTZMANN * (cube - ground_cube * ground_rate);
+        (
+            through,
+            column.whole_slope_w_m2_k
+                - transmission_slope * STEFAN_BOLTZMANN * (fourth - ground_fourth)
+                - held,
+            column.emission.fixed_slope_w_m2_k - held,
+        )
+    } else {
+        let held = transmission * 4.0 * STEFAN_BOLTZMANN * ground_cube * ground_rate;
+        (
+            ground,
+            held + transmission_slope * STEFAN_BOLTZMANN * ground_fourth,
+            held,
+        )
+    };
+    Emission {
+        flux_w_m2,
+        slope_w_m2_k: floored_slope(whole, fixed),
+        fixed_slope_w_m2_k: fixed,
     }
 }
 
@@ -1885,19 +2450,62 @@ fn point_emission(
         let (ground, rate) = relief.ground_k(t_k, heights.quantiles_m[q]);
         quantile_emission(&column, ground, rate, transmission[q])
     };
-    match heights.shape {
+    quantile_mean(heights.shape, at)
+}
+
+/// The mean over a point's quantiles of `at`'s emission, quantile by quantile in order, or the
+/// first quantile's alone where the point is level (`shape`).
+#[must_use]
+fn quantile_mean(shape: Shape, at: impl Fn(usize) -> Emission) -> Emission {
+    match shape {
         Shape::SeaLevel | Shape::Level => at(0),
         Shape::Varied => {
-            let (flux, slope) = (0..QUANTILES).fold((0.0, 0.0), |(flux, slope), q| {
-                let quantile = at(q);
-                (flux + quantile.flux_w_m2, slope + quantile.slope_w_m2_k)
-            });
+            let (flux, slope, fixed) =
+                (0..QUANTILES).fold((0.0, 0.0, 0.0), |(flux, slope, fixed), q| {
+                    let quantile = at(q);
+                    (
+                        flux + quantile.flux_w_m2,
+                        slope + quantile.slope_w_m2_k,
+                        fixed + quantile.fixed_slope_w_m2_k,
+                    )
+                });
             Emission {
                 flux_w_m2: flux * QUANTILE_WEIGHT,
                 slope_w_m2_k: slope * QUANTILE_WEIGHT,
+                fixed_slope_w_m2_k: fixed * QUANTILE_WEIGHT,
             }
         }
     }
+}
+
+/// The outgoing radiation of a raised point of heights `heights` under `relief` and its slopes in
+/// T at the sea-level temperature `t_k`, K, under the water term of `radiation`'s multiplier
+/// `multiplier`, dry depth `dry_depth` and water `water`, each quantile seen through its dry
+/// transmission `transmission` and its water's at its ground ([`vapour_quantile_emission`]),
+/// read from `table` where it holds them: the mean over its quantiles, once at a level point.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the point's temperature, its relief and heights, the water term's three parts and the \
+              table; bundling them would only rename them"
+)]
+#[must_use]
+fn vapour_point_emission(
+    t_k: f64,
+    multiplier: f64,
+    dry_depth: f64,
+    water: &WaterVapour,
+    heights: &PointHeights,
+    transmission: &[f64; QUANTILES],
+    relief: &Relief,
+    table: Option<&Tabulated>,
+) -> Emission {
+    let column = Column::vapour(t_k, multiplier, dry_depth, water_terms(water, t_k, table));
+    let at = |q: usize| {
+        let (ground, rate) = relief.ground_k(t_k, heights.quantiles_m[q]);
+        let wet = wet_terms(water, multiplier, ground, table);
+        vapour_quantile_emission(&column, ground, rate, transmission[q], wet)
+    };
+    quantile_mean(heights.shape, at)
 }
 
 /// The diffusion's convergence at the point of band `band` and column `column` of the field
@@ -1985,6 +2593,45 @@ pub(super) fn solve_locked(
     )
 }
 
+/// A point's outgoing radiation at `t_k`, K, under `radiation`, at the sea level where `raised` is
+/// `None` (T13.a's arithmetic to the bit) and otherwise over its relief, heights and
+/// transmissions; and the temperature its sea's capacity reads, its water surface's, K.
+#[must_use]
+fn emission_and_sea(
+    radiation: &Radiation,
+    t_k: f64,
+    raised: Option<(&Relief, (&PointHeights, &[f64; QUANTILES]))>,
+    table: Option<&Tabulated>,
+) -> (Emission, f64) {
+    match (*radiation, raised) {
+        (_, None) => (sea_level_emission(radiation, t_k, table), t_k),
+        (Radiation::Grey { emission_factor }, Some((relief, (heights, transmission)))) => (
+            point_emission(t_k, emission_factor, heights, transmission, relief),
+            relief.water_k(t_k, heights),
+        ),
+        (
+            Radiation::Vapour {
+                multiplier,
+                dry_depth,
+                water,
+            },
+            Some((relief, (heights, transmission))),
+        ) => (
+            vapour_point_emission(
+                t_k,
+                multiplier,
+                dry_depth,
+                &water,
+                heights,
+                transmission,
+                relief,
+                table,
+            ),
+            relief.water_k(t_k, heights),
+        ),
+    }
+}
+
 /// Whether `x` is finite and positive.
 #[must_use]
 fn positive(x: f64) -> bool {
@@ -2038,6 +2685,7 @@ mod tests {
         let (model, sun, grid) = earth();
         let Fitted {
             emission_factor: factor,
+            radiation,
             steady: Steady {
                 t_k: steady,
                 converged,
@@ -2055,7 +2703,7 @@ mod tests {
         );
         let tau = (factor - 1.0) / 0.75;
         assert!((0.3..2.0).contains(&tau), "{tau}");
-        let (radiative, diffusive) = model.heating(&grid, factor, sun.annual(), &steady);
+        let (radiative, diffusive) = model.heating(&grid, &radiation, sun.annual(), &steady);
         let absorbed = grid.mean(sun.annual());
         assert!(
             grid.mean(&diffusive).abs() < 1e-12 * absorbed,
@@ -2142,12 +2790,14 @@ mod tests {
             .collect();
         let mut insolation = vec![0.0; grid.points()];
         sun.fill(300, &grid, &mut insolation);
-        let factor = 1.65;
+        let radiation = Radiation::Grey {
+            emission_factor: 1.65,
+        };
         let mut work = Work::new(&grid);
         let mut state = t.clone();
         model.advance(
             &grid,
-            factor,
+            &radiation,
             &insolation,
             Storage::Seasonal {
                 step_s: sun.step_s(),
@@ -2169,7 +2819,7 @@ mod tests {
             "{stored} against {heating} of {scale}"
         );
         assert!(state.iter().zip(&t).any(|(a, b)| (a - b).abs() > 1e-3));
-        let (_, diffusive) = model.heating(&grid, factor, &insolation, &t);
+        let (_, diffusive) = model.heating(&grid, &radiation, &insolation, &t);
         let total = weighted(&|p| diffusive[p]);
         let size = weighted(&|p| diffusive[p].abs());
         assert!(total.abs() < 1e-12 * size, "{total} of {size}");
@@ -2183,7 +2833,12 @@ mod tests {
     #[test]
     fn the_table_is_the_direct_functions_to_its_interpolant_s_error() {
         let (model, _, _) = earth();
-        let table = Tabulated::new(&model, 250.0, 300.0);
+        let table = Tabulated::new(
+            &model,
+            &Radiation::at(model.greenhouse, 1.65, 288.0),
+            250.0,
+            300.0,
+        );
         let (mut worst_h, mut worst_slope) = (0.0_f64, 0.0_f64);
         let (mut worst_albedo, mut worst_albedo_slope) = (0.0_f64, 0.0_f64);
         for i in 0..40_000 {
@@ -2292,7 +2947,14 @@ mod tests {
         let gamma = lapse::lapse_rate_k_per_m(&inputs);
         let point = model.freezing.point_k().expect("water freezes");
         let midpoint = point - ALBEDO_MIDPOINT_BELOW_FREEZING_K;
-        let table = Tabulated::new(&model, 200.0, 320.0);
+        let table = Tabulated::new(
+            &model,
+            &Radiation::Grey {
+                emission_factor: 1.65,
+            },
+            200.0,
+            320.0,
+        );
         for offset in [-15.0, -8.0, -4.0, -1.0, -0.25, 0.25, 1.0, 4.0, 8.0, 15.0] {
             // The sea level at which the mean height's ground lies `offset` from the midpoint.
             let t = midpoint + offset + gamma * 1_500.0;
@@ -2493,6 +3155,9 @@ mod tests {
     fn the_fold_guard_takes_the_nearer_converged_probe_ties_to_the_warm_side() {
         let probe = |factor: f64, mean: f64| Probe {
             emission_factor: factor,
+            radiation: Radiation::Grey {
+                emission_factor: factor,
+            },
             surface_mean_k: mean,
             steady: Steady {
                 t_k: vec![mean],
