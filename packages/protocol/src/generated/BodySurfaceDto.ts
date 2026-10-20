@@ -73,8 +73,9 @@ mean_molar_mass_g_per_mol: number | null,
 /**
  * The gases' mixed ideal-gas `c_p` ÷ R, Σ xᵢ (`c_p,ᵢ` ÷ R), dimensionless and positive, at
  * the mean surface temperature (the registry's statistical sum over each gas's molecular
- * constants, P14.T49.b's); `null` with an empty `gases`: an airless body, or a surface
- * holding melt with no volatile air.
+ * constants, P14.T49.b's); `null` with an empty `gases` (an airless body, or a surface
+ * holding melt with no volatile air), and at a mean surface temperature not above 0 K or not
+ * finite, where the statistical sum has no `c_p`.
  */
 heat_capacity_over_r: number | null, 
 /**

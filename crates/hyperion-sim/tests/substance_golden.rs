@@ -590,7 +590,8 @@ const PLACEMENT_SAMPLES: u32 = 128;
 const TEST_SAMPLES: u32 = 64;
 
 /// The fraction of the critical temperature to which the fixture holds a diagram row's liquid:
-/// no linear table follows the saturated liquid's approach to the critical density above it
+/// above it, no table of nodes on the 0.01 K grid ([`GRAIN_DENSITY_GRID_PER_K`]) holds the
+/// saturated liquid's approach to the critical density within 10⁻⁴
 /// (decision-p14-t54a-grain-density §2.3).
 const LIQUID_CUT: f64 = 0.99;
 
@@ -629,8 +630,9 @@ fn chord_holds(law: &dyn Fn(f64) -> f64, t0: f64, t1: f64) -> bool {
 ///
 /// The interior nodes lie on a grid of [`GRAIN_DENSITY_GRID_PER_K`] a kelvin. Each is the farthest
 /// grid point from the last node to which the chord holds, found by bisection on the grid. The
-/// placement uses only the law, the four arithmetic operations, `floor` and comparisons, so that
-/// it is the same on every platform, whose `powf`, `exp` and `ln` differ.
+/// placement uses only the law, the four arithmetic operations, `floor`, `ceil`, `f64::midpoint`
+/// and comparisons (and `next_down` for a piece's end before a gap, [`grain_density_pieces`]), each
+/// the same to the bit on every platform, whose `powf`, `exp` and `ln` differ.
 fn place_nodes(law: &dyn Fn(f64) -> f64, from: f64, to: f64, kinks: &[f64]) -> Vec<f64> {
     let grid = |k: f64| k / GRAIN_DENSITY_GRID_PER_K;
     let mut stops = vec![from];
@@ -1133,23 +1135,21 @@ fn row_samples(row: &Substance, phase: CondensedPhase) -> Vec<f64> {
     samples
 }
 
-/// The largest relative error of the fixture's `phase` of `row`, read back as `pieces`, against
-/// `Substance::grain_density` over `samples`, with where it lies, after asserting that the two give
-/// a density at the same temperatures, within 10⁻⁴, a fixed row's to the bit: the one difference a
-/// diagram row's liquid above [`LIQUID_CUT`] of its critical temperature, where the fixture gives
-/// none.
+/// Asserts that the fixture's `phase` of `row`, read back as `pieces`, and
+/// `Substance::grain_density` give a density at the same temperatures of `samples`, within 10⁻⁴,
+/// a fixed row's to the bit: the one difference a diagram row's liquid above [`LIQUID_CUT`] of its
+/// critical temperature, where the fixture gives none.
 fn compare_samples(
     row: &Substance,
     phase: CondensedPhase,
     pieces: Option<&[Piece]>,
     samples: &[f64],
-) -> (f64, f64) {
+) {
     let key = row.key();
     let diagram = match row.condensed().map(CondensedColumns::grain_density) {
         Some(GrainDensity::OfDiagram) => row.phase_diagram(),
         Some(GrainDensity::Fixed { .. }) | None => None,
     };
-    let mut worst = (0.0_f64, f64::NAN);
     for &t in samples {
         let sim = row
             .grain_density(phase, Kelvin::new(t))
@@ -1161,9 +1161,6 @@ fn compare_samples(
                     error <= GRAIN_DENSITY_TOLERANCE,
                     "{key} {phase:?} at {t} K: {m} against {s}"
                 );
-                if error > worst.0 {
-                    worst = (error, t);
-                }
                 if diagram.is_none() {
                     assert_same_bits(m, s);
                 }
@@ -1182,7 +1179,6 @@ fn compare_samples(
             }
         }
     }
-    worst
 }
 
 /// Asserts the shape of `row`'s `pieces` as `phase` (decision-p14-t54a-grain-density §2.1): nodes
@@ -1305,8 +1301,6 @@ fn substance_fixture_grain_density_holds_the_registry() {
         substance::ids().len(),
         "every row is read back"
     );
-    let mut worst = (0.0_f64, String::new());
-    let mut nodes = [0_usize; 2];
     for (id, read) in substance::ids().zip(&mirror) {
         let row = id.substance();
         let key = row.key();
@@ -1316,34 +1310,39 @@ fn substance_fixture_grain_density_holds_the_registry() {
             FileVariant::Named(variant) => Some(variant.to_owned()),
         };
         assert_eq!(read.variant, variant, "{key}'s variant");
-        for (p, phase) in [CondensedPhase::Solid, CondensedPhase::Liquid]
-            .into_iter()
-            .enumerate()
-        {
+        for phase in [CondensedPhase::Solid, CondensedPhase::Liquid] {
             let pieces = read.member(phase);
             let mut samples = pieces.map(piece_samples).unwrap_or_default();
             samples.extend(row_samples(row, phase));
-            let (error, at) = compare_samples(row, phase, pieces, &samples);
-            if error > worst.0 {
-                worst = (error, format!("{key} {phase:?} at {at} K"));
-            }
+            compare_samples(row, phase, pieces, &samples);
             if let Some(pieces) = pieces {
                 check_pieces(row, phase, pieces);
-                nodes[p] += pieces.iter().map(|p| p.temperatures_k.len()).sum::<usize>();
-                eprintln!(
-                    "{key} {phase:?}: {} piece(s) of {:?} nodes",
-                    pieces.len(),
-                    pieces
-                        .iter()
-                        .map(|p| p.temperatures_k.len())
-                        .collect::<Vec<_>>()
-                );
             }
         }
     }
-    eprintln!(
-        "{} solid and {} liquid nodes; the worst error {:.3e} ({})",
-        nodes[0], nodes[1], worst.0, worst.1
-    );
     check_named_shapes(&mirror);
+}
+
+/// The fixture's grain density between two nodes, and a fixed row's, by [`mirror_density`], to
+/// the bit: the literals the client's reader is held to (`grainDensity.test.ts`), written as
+/// `{:?}` prints them, so that the two evaluators of the rule cannot split silently.
+#[test]
+fn substance_fixture_grain_density_is_pinned_between_nodes() {
+    let mirror = read_grain_densities(&fixture());
+    for (key, phase, t, pinned) in [
+        // Ice Ih between its nodes at 87.15 and 110.18 K.
+        ("H2O", CondensedPhase::Solid, 100.0, 932.996_995_807_952),
+        // Liquid water between its nodes at 295.04 and 301.51 K.
+        ("H2O", CondensedPhase::Liquid, 300.0, 996.473_720_095_005_1),
+        // Basalt's one node, held.
+        ("basalt", CondensedPhase::Solid, 150.0, 3_010.0),
+    ] {
+        let row = mirror
+            .iter()
+            .find(|row| row.key == key)
+            .unwrap_or_else(|| panic!("{key} is a row of the fixture"));
+        let density = mirror_density(row.member(phase), t)
+            .unwrap_or_else(|| panic!("{key} has a density as {phase:?} at {t} K"));
+        assert_same_bits(density, pinned);
+    }
 }

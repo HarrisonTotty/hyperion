@@ -5,6 +5,7 @@ use hyperion_surface::field::{ClimateModelKind, CoarseLevel};
 use super::coordinates::{Coordinates, substellar_cosine};
 use super::ebm::{
     self, Air, EnergyBalance, Freezing, Greenhouse, Ground, MAX_ORBITS, Moisture, Relief, contrast,
+    latent_heat_j_per_mol,
 };
 use super::grid::{GEOGRAPHIC_COLUMNS, GridClimate, LATITUDE_BANDS, LOCKED_COLUMNS, ModelGrid};
 use super::hypsometry::{Hypsometry, Shape};
@@ -1429,14 +1430,15 @@ impl KaspiShowman {
             // alone reads a freezing point, never enters.
             freezing: Freezing::Never { albedo: 0.35 },
             specific_heat_j_per_kg_k: EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K,
-            // Its latent heat as `Moisture::of` takes it, at the reference run's mean, 288 K.
+            // Its latent heat as `Moisture::of` takes it, at the reference run's mean, 288 K:
+            // Watson's scaling of the triple point's.
             moisture: Some(Moisture {
                 condensable: water,
-                latent_heat_j_per_kg: row
-                    .phase_diagram()
-                    .unwrap()
-                    .clausius_clapeyron_enthalpy_j_per_mol(crate::units::Kelvin::new(288.0))
-                    .unwrap()
+                latent_heat_j_per_kg: latent_heat_j_per_mol(
+                    row.phase_diagram().unwrap(),
+                    crate::units::Kelvin::new(288.0),
+                )
+                .unwrap()
                     / (mass * 1e-3),
                 mass_ratio: mass / air.molar_mass_g_per_mol,
                 surface_pressure_pa: pressure_pa,

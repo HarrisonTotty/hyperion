@@ -1046,9 +1046,11 @@ pub fn phase_at(id: SubstanceId, temperature: Kelvin, pressure: Pascals) -> Opti
         .and_then(|diagram| diagram.phase_at(temperature, pressure))
 }
 
-/// The rows with a phase diagram, in registry order: fourteen, where the held phase columns
-/// P14.T54.a retired had five. A climate loops over them in this order (P14.T48.d), so a later row
-/// joins as data. The registry re-exports it as `substance::condensables`.
+/// The rows with a phase diagram, in registry order.
+///
+/// They are fourteen, where the held phase columns P14.T54.a retired had five. A climate loops
+/// over them in this order (P14.T48.d), so a later row joins as data. The registry re-exports it
+/// as `substance::condensables`.
 pub fn condensables() -> impl Iterator<Item = SubstanceId> {
     ids().filter(|id| id.substance().phase_diagram().is_some())
 }

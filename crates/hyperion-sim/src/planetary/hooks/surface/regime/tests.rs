@@ -4,7 +4,7 @@ use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
 use crate::planetary::derive::DerivedBody;
-use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
+use crate::planetary::derive::atmosphere::{PartialPressures, SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::solar::{
     PLANETS, SOLAR_AGE, derive_historic, placed_about_the_sun, solar_disc,
 };
@@ -433,6 +433,32 @@ fn the_reservoirs_are_the_gases_held_at_their_caps() {
     assert_eq!(found("Venus"), []);
 }
 
+/// Oxygen, a row the held phase columns lacked, is a reservoir by its phase diagram: an air of
+/// 100 bar of it is held at its cap over a surface at 150 K, where its saturation pressure is some
+/// 42 bar, and over one at 160 K, above its critical temperature, 154.581 K, there is none.
+#[test]
+fn an_oxygen_reservoir_lies_below_its_critical_temperature_only() {
+    let table = table();
+    let (_, earth, _) = table.iter().find(|(n, ..)| *n == "Earth").unwrap();
+    let oxygen = PartialPressures::from_fn(|gas| match gas {
+        Gas::Oxygen => Pascals::new(1e7),
+        _ => Pascals::ZERO,
+    });
+    let at = |t: f64| {
+        let air = (*earth.atmosphere()).with_air(Kelvin::new(t), oxygen);
+        surface_reservoirs(&air)
+    };
+    let critical = Gas::Oxygen
+        .substance()
+        .substance()
+        .phase_diagram()
+        .unwrap()
+        .critical_temperature();
+    assert_same_bits(critical.value(), 154.581);
+    assert_eq!(at(150.0), [Gas::Oxygen.substance()]);
+    assert_eq!(at(160.0), []);
+}
+
 /// An air of mole fractions `gases` at `pressure` Pa over a night at `night` K, its surface holding
 /// reservoirs of `reservoirs`.
 fn night_air<'a>(
@@ -501,6 +527,12 @@ fn the_collapse_pressure_is_wordsworth_s_eq_43() {
     // is its cycle, not a collapse.
     let held = [Gas::Nitrogen.substance()];
     assert!(!collapsed(&air(&nitrogen, 5e4, 60.0, &held), flux, mass));
+    // An oxygen air, which the held phase columns had no data for and never collapsed, condenses
+    // by its phase diagram: a fifth of a bar of it on a 60 K night (its saturation pressure some
+    // 0.7 kPa there) and stands on a 100 K one (some 2.5 bar).
+    let oxygen = [(Gas::Oxygen.substance(), 1.0)];
+    assert!(collapsed(&air(&oxygen, 2e4, 60.0, &[]), flux, mass));
+    assert!(!collapsed(&air(&oxygen, 2e4, 100.0, &[]), flux, mass));
     // A collapsed air in Koll's own regime is airless-like.
     let thick = AirTransport {
         redistribution: 0.9,

@@ -651,7 +651,9 @@ pub fn lapse_factor(
 /// Its limits, recorded in plan 14's Risks:
 /// - the curve's Clausius–Clapeyron enthalpy is the latent heat over z″ − z′, the vapour's
 ///   departure from an ideal gas, which the form assumes: within a few per cent of h″ − h′ far
-///   from the critical point (water's 44.47 kJ mol⁻¹ at 288 K is about 0.1% above it), but finite
+///   from the critical point (water's 44.47 kJ mol⁻¹ at 288 K is about 0.1% above IAPWS-95's
+///   44.42 kJ mol⁻¹, 2,465.9 kJ kg⁻¹; Wagner and Pruss 2002, J. Phys. Chem. Ref. Data 31, 387),
+///   but finite
 ///   at `T_c`, where the latent heat falls to zero; so the departure steps to zero at `T_c` rather
 ///   than falling to it;
 /// - it is read at the ground alone: an air whose ground is above its condensable's critical

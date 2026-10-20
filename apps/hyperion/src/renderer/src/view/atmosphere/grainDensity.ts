@@ -52,8 +52,12 @@ export interface GrainDensityRow {
   readonly liquid_grain_density: ReadonlyArray<GrainDensityPiece> | null;
 }
 
-/** The phase's member of a row. */
-function memberOf(
+/**
+ * A row's member of a phase: its pieces as that phase.
+ *
+ * @returns The solid's or the liquid's pieces, or `null` where the row has none as that phase.
+ */
+export function memberOf(
   row: GrainDensityRow,
   phase: MaterialPhase,
 ): ReadonlyArray<GrainDensityPiece> | null {
@@ -78,7 +82,10 @@ function covers(piece: GrainDensityPiece, temperatureK: number, isLast: boolean)
 }
 
 /** A node of a piece, at an index the caller holds inside it. */
-function nodeOf(piece: GrainDensityPiece, index: number): readonly [number, number] {
+function nodeOf(
+  piece: GrainDensityPiece,
+  index: number,
+): readonly [temperatureK: number, densityKgPerM3: number] {
   const temperatureK = piece.temperatures_k[index];
   const densityKgPerM3 = piece.densities_kg_per_m3[index];
   if (temperatureK === undefined || densityKgPerM3 === undefined) {
@@ -93,19 +100,19 @@ function interpolate(piece: GrainDensityPiece, temperatureK: number): number {
   if (count === 0 || piece.densities_kg_per_m3.length !== count) {
     throw new Error("a grain-density piece has one or more nodes, its arrays of equal length");
   }
-  let [lowK, lowDensity] = nodeOf(piece, 0);
+  let [lowK, lowDensityKgPerM3] = nodeOf(piece, 0);
   if (temperatureK <= lowK) {
-    return lowDensity;
+    return lowDensityKgPerM3;
   }
   for (let index = 1; index < count; index++) {
-    const [highK, highDensity] = nodeOf(piece, index);
+    const [highK, highDensityKgPerM3] = nodeOf(piece, index);
     if (temperatureK <= highK) {
       const f = (temperatureK - lowK) / (highK - lowK);
-      return lowDensity + f * (highDensity - lowDensity);
+      return lowDensityKgPerM3 + f * (highDensityKgPerM3 - lowDensityKgPerM3);
     }
-    [lowK, lowDensity] = [highK, highDensity];
+    [lowK, lowDensityKgPerM3] = [highK, highDensityKgPerM3];
   }
-  return lowDensity;
+  return lowDensityKgPerM3;
 }
 
 /**

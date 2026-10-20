@@ -1578,6 +1578,19 @@ impl Atmosphere {
     pub(crate) const fn with_albedo(self, albedo: BondAlbedo) -> Self {
         Self { albedo, ..self }
     }
+
+    /// The same atmosphere with the partial pressures `partials`, its surface pressure their sum,
+    /// over a surface at `surface_temperature`, for the tests of what reads them.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_air(self, surface_temperature: Kelvin, partials: PartialPressures) -> Self {
+        Self {
+            surface_temperature,
+            surface_pressure: Some(partials.total()),
+            partials,
+            ..self
+        }
+    }
 }
 
 /// The species a body's carbon is airborne as (P14.T24.f, [`Atmosphere::carbon_carrier`]).
@@ -2271,4 +2284,4 @@ fn state_and_greenhouse(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

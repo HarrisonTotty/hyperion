@@ -508,7 +508,7 @@ fn the_latent_heat_departure_is_the_dilute_pseudoadiabat_s() {
         .unwrap()
         .value()
         / 1.0e5;
-    for (gases, t, condensable, near) in [
+    for (gases, t, condensable, near, stated) in [
         // Earth at 288 K under 1 bar, its water saturated, as the sign-off took it.
         (
             vec![
@@ -520,26 +520,37 @@ fn the_latent_heat_departure_is_the_dilute_pseudoadiabat_s() {
             288.0,
             water,
             1.6,
+            (1.68, 0.005),
         ),
         // Titan at 94 K, its methane at Huygens's 5.65%.
-        (vec![(n2, 0.9435), (methane, 0.0565)], 94.0, methane, 1.8),
+        (
+            vec![(n2, 0.9435), (methane, 0.0565)],
+            94.0,
+            methane,
+            1.8,
+            (2.08, 0.005),
+        ),
         // Mars at 210 K, its water at 210 ppm.
         (
             vec![(co2, 0.951), (n2, 0.028), (ar, 0.0208), (water, 2.1e-4)],
             210.0,
             water,
             0.05,
+            (0.046, 0.0005),
         ),
     ] {
         let departure = latent_heat_departure(&gases, Kelvin::new(t), condensable).unwrap();
-        eprintln!(
-            "{} at {t} K: departure {departure:.4}",
-            condensable.substance().key()
-        );
         // The sign-off's figures are by hand, its enthalpies from memory: within a quarter.
         assert!(
             (departure / near - 1.0).abs() < 0.25,
             "{departure} against {near}"
+        );
+        // The diagrams' figures, as `latent_heat_departure`'s documentation states them, to their
+        // digits.
+        let (figure, half_digit) = stated;
+        assert!(
+            (departure - figure).abs() < half_digit,
+            "{departure} against the stated {figure}"
         );
         // Per unit mass: ε L² r ÷ (c_p R_air T²), L the diagram's slope at the ground.
         let latent_molar = condensable

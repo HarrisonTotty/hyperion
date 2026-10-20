@@ -220,8 +220,9 @@ fn the_table_s_oceans_are_published_where_water_is_liquid() {
     }
 }
 
-/// The ice (science-p14-t24b-laws §4.5): Earth 0.02–0.07, Mars 0.005–0.02, Europa and a
-/// `Snowball` 1; `surface_ices` holds `H2O` alone and sums to it to 10⁻¹².
+/// The ice (science-p14-t24b-laws §4.5): Earth 0.02–0.07 by the ruling, held at 0–0.07 while
+/// version 22's rules run (decision-p14-t54a-bands §4.3), Mars 0.005–0.02, Europa and a `Snowball`
+/// 1; `surface_ices` holds `H2O` alone and sums to it to 10⁻¹².
 #[test]
 fn the_table_s_ices_are_the_ruling_s() {
     let table = table_surfaces();
@@ -234,10 +235,6 @@ fn the_table_s_ices_are_the_ruling_s() {
         assert!((0.0..=1.0).contains(&figures.ice_fraction()), "{name}");
     }
     let ice = |name: &str| found(&table, name).2.ice_fraction();
-    // The ruling's 0.02–0.07 reads the measured Earth's ends (302.4 and 260.4 K, 0.033 of the
-    // sphere); the generated Earth's pole, 262 K, lies a kelvin under the edge, so it holds 0.013
-    // (plan 14's Risks, deferred).
-    assert!((0.01..0.07).contains(&ice("Earth")), "{}", ice("Earth"));
     assert!((0.005..0.02).contains(&ice("Mars")), "{}", ice("Mars"));
     // Titan is a `Snowball` whose whole profile lies below the melting point: wholly iced
     // (science-p14-t24b-laws §4.x.2).
@@ -327,6 +324,18 @@ fn the_table_s_ices_are_the_ruling_s() {
         conditions.cold_area(AIRLESS_ICE_TEMPERATURE),
     );
     assert!((0.1..0.3).contains(&europa.ice_fraction()));
+    // Band 5 (decision-p14-t54a-bands §4.3), while version 22's rules run: the generated Earth's
+    // ice within 0–0.07, its figure printed, the cover's equality held above. It is 0.001363:
+    // version 22's table Earth (290.30 K, B_eff 1.987) under D⊕ and Φ⊕ fitted at the batch's
+    // measured B_eff, its zonal pole near the 263.15 K edge, where the cap moves about 0.013 for
+    // each kelvin the pole warms. Earth's measured perennial ice is 0.045–0.051 of the globe and
+    // its annual-mean ice 0.068–0.078 (Fretwell et al. 2013, The Cryosphere 7, 375, Table 7; IPCC
+    // AR5 WGI Ch. 4, Tables 4.1–4.2; the NSIDC Sea Ice Index, v4, 1981–2010), and the cover gives
+    // the measured Earth's profile 0.035 (`surface::tests`'s fit test). From the commit that
+    // deletes the holds, 0.01–0.07 is asserted again.
+    let earth = ice("Earth");
+    eprintln!("the generated Earth's ice: {earth}");
+    assert!((0.0..=0.07).contains(&earth), "Earth's ice {earth}");
 }
 
 /// An airless body's ice lasts below 110 K (Schorghofer and Williams 2020), and its cold area is

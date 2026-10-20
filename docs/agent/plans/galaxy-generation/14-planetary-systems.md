@@ -20754,6 +20754,9 @@ planetary::record` (624 tests at T57.a's commit).
     fit by about 0.3% at most. NASA's "3.5% near surface" is contradicted below 15 km. Re-read
     when the full text or DAVINCI's profile exists.
   - _T24.a's Earth fits read the water constant_ (the batch review; for main and P14.T54.a).
+    **Done** in P14.T54.a's A3, which refitted D⊕ and Φ⊕ at the batch's measured Earth, and
+    refitted again in its fix commit by North, Cahalan and Coakley's procedure
+    (decision-p14-t54a-bands; T54.a's record).
     `EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K` (D⊕, 0.6433) and `WET_ALBEDO_GRADIENT` (Φ⊕, 1.4948)
     were fitted on T24.a's measured Earth through `B_eff` = `B_P` (1 − g), its water at p_sat and
     its τ_w from the greenhouse in force (`earth_gain`): at 22, 2.89 and g⊕ 0.378. From 23 the
@@ -20848,7 +20851,9 @@ planetary::record` (624 tests at T57.a's commit).
     P14.T54.a moves the callers to T49.b's curves. **Done** in P14.T54.a's A1, the phase-data
     switch (below): under both rules the gain takes the diagram's d ln `p_sat` ÷ dT at `T_s`,
     44.47 kJ mol⁻¹ for water at 288 K, and the table's Earth's batch gain is 0.4545.
-- **Deviations in P14.T54.a, as built (lane `p14-wire-23`, 2026-10-20).** The 22 → 23 batch's wiring, built in checkpoint commits blessed at 22 (decision-bump-plan-after-22 §5–§6; main's ruling of 2026-10-20) and one bump commit.
+- **Deviations in P14.T54.a, as built (lane `p14-wire-23`, 2026-10-20).** The 22 → 23 batch's
+  wiring, built in checkpoint commits blessed at 22 (decision-bump-plan-after-22 §5–§6; main's
+  ruling of 2026-10-20) and one bump commit.
   - _A1, the phase-data switch_ (decision-pre-23-review item 23 and "For main" item 2; P14.T49.b's
     step 2, part 1 record). `GENERATOR_VERSION` stays 22, and every golden that moves re-blesses
     at 22 in the same commit. Every caller of P14.T49.a's held phase columns, the five
@@ -20869,10 +20874,12 @@ planetary::record` (624 tests at T57.a's commit).
       - `liquid_water`: the triple temperature and `phase_at` are the diagram's, read at the
         range's point nearest the triple temperature, `coldest.max(T_t).min(warmest)`, in place
         of `coldest.max(T_t)`. On the diagram the liquid at a pressure is one span, from the
-        melting curve, at or below `T_t` up to about 632 MPa (ice Ih melts 0.68 K below it at 92
-        bar), to the boiling point, so that point decides exactly. Above 632 MPa the liquid
-        begins above `T_t`, on the rising branch, and a range across that branch reads dry (the
-        lane's, recorded).
+        melting curve, at or below `T_t` up to 629.3 MPa (ice Ih melts 0.70 K below it at 92
+        bar, 272.463 K by IAPWS R14-08's eq. 1), to the boiling point, so that point decides
+        exactly. Above 629.3 MPa, where ice V's curve reaches `T_t`, the liquid begins above
+        `T_t`, on the rising branch, and a range across that branch reads dry (the lane's,
+        recorded); from 629.3 MPa to ice V and VI's triple point with the liquid, 632.4 MPa at
+        273.31 K, the test at `T_t` reads ice V.
       - `cover.rs`: `melting_point` is the diagram's `T_t` (273.16 K, unchanged),
         `liquid_water_density` its `triple_liquid_density` (IAPWS SR1-86's ancillary, 999.79
         against the held 999.793 kg m⁻³), and `surface_water`'s saturation test the diagram's
@@ -20899,10 +20906,10 @@ planetary::record` (624 tests at T57.a's commit).
         the held columns, with no data for either, never read. The diagram's melting curves enter
         too: a bulk gas above its melting pressure is solid even above `T_c`.
 
-    - _ebm's L._ One L for the body: the diagram's Clausius–Clapeyron enthalpy on the liquid's
-      branch at the body's mean surface temperature, the temperature `Air::of` takes `c_p` at,
-      and at `T_t` for a mean below it, since the moist static energy's vapour leaves the surface
-      liquid `Moisture::of` requires. L and the slope of `q_sat` then agree by Clausius–Clapeyron
+    - _ebm's L_ (amended by the fix commit: Watson's latent heat, below). One L for the body:
+      the diagram's Clausius–Clapeyron enthalpy on the liquid's branch at the body's mean surface
+      temperature, the temperature `Air::of` takes `c_p` at, and at `T_t` for a mean below it,
+      since the moist static energy's vapour leaves the surface liquid `Moisture::of` requires. L and the slope of `q_sat` then agree by Clausius–Clapeyron
       at the mean. The reference Earth's is 2.4686 × 10⁶ J kg⁻¹ at 288 K (the held 2.415 × 10⁶).
       A mean at or above the critical temperature gives no moisture. Kaspi and Showman's
       configuration in the climate tests takes L at its reference run's 288 K.
@@ -20952,17 +20959,22 @@ planetary::record` (624 tests at T57.a's commit).
         the refitted `MARS_ERUPTED_MELT_W_GYR_PER_M2` (2.4 × 10⁻⁶).
       - `planetary/partition`: the published oceans' areas move by 2.7 × 10⁻⁶ with water's
         `triple_liquid_density`, 999.789 against the held 999.793 kg m⁻³.
-      - `planetary/surface_conditions_published` and nine of the 14 `planetary/systems` goldens
-        (all but `eccentric_giant`, `filler_a`, `halo_star`, `hot_jupiter` and `red_giant`):
-        the same causes on the generated bodies, every σ_h by the volcanism refit. Four
-        readings move:
+      - `planetary/surface_conditions_published` and nine of the 15 `planetary/systems` goldens
+        (all but `eccentric_giant`, `filler_a`, `halo_star`, `hot_jupiter`, `red_giant` and
+        `t_tauri`): the same causes on the generated bodies, every σ_h by the volcanism refit.
+        Four readings move:
         - `close_binary`'s 608 K Snowball takes H₂O as its condensable, and its 566 K one, at
           243 bar, loses it. The held water curve ran 1.6–1.7 times high there (above the
           critical pressure at 608 K), so water's partial pressure now lies inside, or above,
-          the diagram's `p_sat` over the range.
-        - `02000b2ca0000001.0400`, a 2.73 GPa air of 99.5% CH₄ at 204 K, now reads collapsed
-          (`AirlessLike`, `RadiativeEquilibrium`): methane's melting curve puts its bulk gas
-          solid above about 620 MPa there, where the held columns read it supercritical.
+          the diagram's `p_sat` over the range. The 608 K body also gains an ocean:
+          `ocean_fraction` 0 → 0.3332, its pressure 207.3 → 187.8 bar and `T_s` 608.2 → 606.1 K,
+          since the diagram's `p_sat` at 606 K, about 130 bar, lies below its air, where the held
+          curve's lay above. The system's ice fraction goes 0.515758 → 0.516049.
+        - `02000b2ca0000001.0400` (with `.1100`, a body of `surface_conditions_published`'s
+          system, not of `close_binary` as 279d5fd7's message has it), a 2.73 GPa air of 99.5%
+          CH₄ at 204 K, now reads collapsed (`AirlessLike`, `RadiativeEquilibrium`): methane's
+          melting curve puts its bulk gas solid above about 620 MPa there, where the held columns
+          read it supercritical.
         - `02000b2ca0000001.1100`, an N₂ air at 78–79 K, holds its whole nitrogen aloft under
           the diagram's curve, 17% above the held one there, so its condensable is its CO₂
           frost, the only reservoir left (N₂ → CO₂). It warms 1.3 K, and its pressure rises 22%.
@@ -20981,7 +20993,7 @@ planetary::record` (624 tests at T57.a's commit).
       (docs); R09's `surface/reference.rs` and `steps/climate/{ebm, transport}.rs`, with the
       climate's tests; `tests/substance_golden.rs` and the 17 goldens.
     - _Deferred_ (2026-10-13 rule):
-      - Above about 632 MPa `liquid_water` misses a range that crosses the rising melting branch.
+      - Above 629.3 MPa `liquid_water` misses a range that crosses the rising melting branch.
       - Version 22's greenhouse never caps oxygen, so on a cold post-runaway world the regime can
         read an oxygen reservoir that its air holds aloft. It dies with the snapshot hold at 23,
         whose partition caps oxygen on its diagram.
@@ -21000,9 +21012,11 @@ planetary::record` (624 tests at T57.a's commit).
       `step_climate`, one computation (`GasFractions::heat_capacity_over_r_at`). No circle
       closes: `c_p` enters the meridional conductance D, the column's heat capacity (the diurnal
       response) and Koll's wave speed, so the contrasts, the range and the regime, never the mean
-      `T_s` that T13.c's greenhouse or the step gives the column. The table's Venus goes 4.319 →
-      6.001 at 735 K, its Earth 3.508 → 3.510 at 290 K. `EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K`, the
-      conductance's reference, keeps 7/2 R over M₀: the sum gives Earth's dry air 3.498 at 288 K.
+      `T_s` that T13.c's greenhouse or the step gives the column. That holds while the passes do
+      not read the climate; brief item 5, which gives them it, restates it. The table's Venus
+      goes 4.319 → 6.001 at 735 K, its Earth 3.508 → 3.510 at 290 K.
+      `EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K`, the conductance's reference, keeps 7/2 R over M₀: the
+      sum gives Earth's dry air 3.498 at 288 K.
     - _Retired:_ `HeatCapacityClass`, `heat_capacity_over_r(mixture)` and its doctest,
       `GasColumns::heat_capacity` and `heat_capacity_over_r`, the `held_class` field (58 rows),
       the four class sources (`ATOM_CLASS`, `LINEAR_CLASS`, `NON_LINEAR_CLASS`,
@@ -21029,9 +21043,11 @@ planetary::record` (624 tests at T57.a's commit).
       - A diagram row's solid has a piece a solid phase with a density, nodes at its ends and at
         its law's kinks (CO₂'s 80 K, Xe's 14 measured nodes), the interior ones placed greedily on
         a 0.01 K grid, each the farthest from the last node whose chord holds the law within 5 ×
-        10⁻⁵ at 128 interior points, by bisection, with the law, + − × ÷, `floor` and comparisons
-        alone. Ice Ih 12 nodes, CH₄ II and I 8 and 14, N₂ α and β 13 and 5, CO₂ 15, Xe 16, each
-        flat piece 2: 97 in all. O₂'s β (23.14–43.78 K) is a gap.
+        10⁻⁵ at 128 interior points, by bisection, with the law, + − × ÷, `floor`, `ceil`,
+        `f64::midpoint` and comparisons alone (and `next_down` for a piece's end before a gap),
+        each the same to the bit on every platform. Ice Ih 12 nodes, CH₄ II and I 8 and 14, N₂ α
+        and β 13 and 5, CO₂ 15, Xe 16, each flat piece 2: 97 in all. O₂'s β (23.14–43.78 K) is a
+        gap.
       - Its liquid is one piece from `T_t` to 0.99 `T_c` (the f64 product): 53 (CO₂) to 81 (H₂O)
         nodes, 906 in all. The fixture holds 1,060 nodes and 77 kB; the ruling's orientation
         counts (about 800) were taken at 10⁻⁴, and placing to 5 × 10⁻⁵ takes about √2 more.
@@ -21044,7 +21060,11 @@ planetary::record` (624 tests at T57.a's commit).
       10⁻⁹ K either side, a 4,097-point sweep of each diagram phase), none exactly where the sim
       gives none but the liquid above 0.99 `T_c`, fixed rows to the bit at 0, `at` and 3,000 K,
       and §2.6's shapes. The worst error is 5.0 × 10⁻⁵ (ice Ih near 208 K). (b)
-      `grainDensity.test.ts` holds §2.6's figures within 10⁻⁴ and the rule on a hand-made row.
+      `grainDensity.test.ts` holds §2.6's figures within 10⁻⁴ and the rule on a hand-made row,
+      and three densities to the bit (`Object.is`), ice Ih at 100 K and liquid water at 300 K
+      between nodes and basalt's held node at 150 K, as `{:?}` literals that
+      `substance_fixture_grain_density_is_pinned_between_nodes` pins on the Rust reader too, so
+      the two evaluators cannot split silently (the fix commit, D1).
       (c) `parity.test.ts` holds every index file of an `aerosol_material` row to a density of
       its phase and variant through the reader, or to the five stated refusals (solid `Ar` and
       `H2S`, liquid `S8`, `84.5wt%` and `S35`). The TS reader equals the Rust one to the bit at
@@ -21054,7 +21074,8 @@ planetary::record` (624 tests at T57.a's commit).
       `grain_density_pieces` in `tests/substance_golden.rs`; `read_grain_densities` and
       `mirror_density` beside them, and `grainDensity.ts` for the client; (a), (b) and (c).
       Prettier leaves the fixture alone (`.prettierignore`, with the reason), so that a piece
-      keeps its line.
+      keeps its line. The fixture re-blesses at this checkpoint, at 22 (main's ruling), where the
+      grain-density ruling's §2.7 had it re-blessed with the bump's goldens.
     - _T57.a's tripwire_ stays green, its figures unmoved, so no refit: k(CO₂) 14.8616 (Venus,
       90.422 bar CO₂ and 2.0876 N₂, `T_eq` 229.0585 K), k(H₂O) 4.4690 (Earth, water 837.204 Pa at
       288 K, `T_eq` 255.1385 K), the measured Earth 288.006 K, the measured Venus 736.980 K
@@ -21088,12 +21109,21 @@ planetary::record` (624 tests at T57.a's commit).
         science-r08-gases-2 §1.4 retires on the client's side: R08's.
       - Xe's piece keeps its 14 measured nodes as kinks (16 nodes, the ruling's table 12).
       - Magma oceans read `c_p` up to about 2,900 K, past the golden's 2,000 K pins and NASA
-        Glenn's 1,500 K checks, where the harmonic sum leaves out anharmonicity and dissociation.
+        Glenn's 1,500 K checks, where the harmonic sum leaves out anharmonicity and dissociation:
+        at 2,879 K it lies below NASA Glenn's by 1.6% for CO₂, 4.7% for H₂O and 1.1% for N₂ (the
+        batch review's science check). `thermo`'s module doc and the published getter's now label
+        it an extrapolation above 1,500 K.
+      - Koll's wave speed, `R_air` √(`T_eq` ÷ `c_p`), takes `c_p` at `T_s`, where his formula reads
+        it at `T_eq`: about 3.5% in c for the 1,527 K CO₂ world (the batch review's science check;
+        recorded only).
   - _A3, T24.a's Earth fits at the batch's state_ (decision-pre-23-review items 20, 23 and 27 and
     "For main" item 3; decision-p14-t57a-fits §1.3–§1.4). `GENERATOR_VERSION` stays 22, and every
     golden that moves re-blesses at 22 in the same commit. The snapshot hold stays.
     - _The order of fits_ is now: N₂ on Titan, CO₂ on Venus, water on Earth, then D⊕ and Φ⊕ on
-      Earth's contrast. Both constants' docs state it.
+      Earth's contrast (amended by the fix commit: then D⊕ alone, Φ⊕ fitted in North, Cahalan and
+      Coakley's balance; decision-p14-t54a-bands §2.6). Both constants' docs state it. The plan's
+      T57.a order-of-fits text (its "Its docs give the order of the fits") is the docs batch's
+      (decision-pre-23-review, "What to record").
     - _The state._ `earth_column` keeps its form: 288 K over 240.25 W m⁻² absorbed, the τ that
       holds it (0.8317), Earth's column of dry air, its radius and spin. Its `earth_gain` takes the
       batch's measured Earth, the state P14.T57.a's water fit takes:
@@ -21134,7 +21164,8 @@ planetary::record` (624 tests at T57.a's commit).
         22's water at saturation it peaked at 0.565 at 320 K.
       - Its doc states each figure. The table's loop and the Venus and Titan checks stay under the
         rules in force.
-    - _Bands that fail at the batch's state._ Each is kept as stated and put to main (the brief's
+    - _Bands that fail at the batch's state_ (ruled by decision-p14-t54a-bands and applied in the
+      fix commit, below). Each is kept as stated and put to main (the brief's
       rule, decision-pre-23-review item 20.5). One cause runs through them: the batch's measured
       Earth's vapour feedback is about 9% stronger than at version 22 (`B_eff` 1.898 against
       2.075). It comes from τ_w, 4.47 √(0.496 `p_sat`) against 2.89 √`p_sat` (decision-pre-23-review
@@ -21151,8 +21182,10 @@ planetary::record` (624 tests at T57.a's commit).
         to about 300 K, where the window closes and the feedback falls, so a rising g there is
         physical. 0.57 was the model's own bound at version 22.
       - T24.b's perennial ice on the generated Earth, 0.01–0.07, in
-        `cover::tests::the_table_s_ices_are_the_ruling_s` (version 22's rules) and
-        `the_batch_publishes_the_table_s_condensates` (the batch's): 0.003063 against 0.010882.
+        `cover::tests::the_table_s_ices_are_the_ruling_s`, version 22's table Earth under its
+        rules, 0.003063 (0.0030626346199317, against 0.010882 at A2), and in
+        `the_batch_publishes_the_table_s_condensates`, the batch's partition published on the same
+        version-22 Earth, 0.003063 (0.0030626346199322; its held and batch condensates agree).
         The lower D⊕ and Φ⊕ give the table's Earth a 41.51 K contrast (42.67), so its coldest
         zone, 262.47 K (261.86), lies 0.68 K under the 263.15 K ice edge, where it lay 1.29 K
         under. The record already deferred that pole's nearness to the edge (plan 14's Risks).
@@ -21187,4 +21220,113 @@ planetary::record` (624 tests at T57.a's commit).
       tripwire message), and the 12 goldens.
     - _Deferred_ (2026-10-13 rule):
       - `cover/tests.rs`'s comment on the generated Earth's pole ("262 K … holds 0.013") is stale
-        at 0.0031. It is left with its band for main's ruling.
+        at 0.0031. It is left with its band for main's ruling (replaced in the fix commit).
+  - _The batch review's fixes_ (the fix commit, after 60599871; amends A1–A3: the five reviews
+    of the three commits, and decision-p14-t54a-bands, applied as its relay says).
+    `GENERATOR_VERSION` stays 22, and the 12 goldens that move re-bless at 22.
+    - _R09's latent heat is Watson's_ (the science check's S1). `Moisture::of`'s L was A1's
+      Clausius–Clapeyron enthalpy, R T² d ln `p_sat` ÷ dT, which exceeds h″ − h′ by the vapour's
+      1 ÷ (z″ − z′) away from the triple point (water's by 1.6% at 373 K and 17% at 500 K,
+      methane's by 28% at 150 K). It is now `ebm::latent_heat_j_per_mol`, Watson's scaling of
+      the triple point's enthalpy, L = `L_t` ((`T_c` − T) ÷ (`T_c` − `T_t`))^0.38 (Watson 1943,
+      Ind. Eng. Chem. 35, 398; Poling, Prausnitz and O'Connell 2001), through `math::powf`, held
+      at `L_t` at and below `T_t`, and `None` at or above `T_c`. Water's is 44.37 kJ mol⁻¹ at
+      288 K (2.4628 × 10⁶ J kg⁻¹, 0.13% under IAPWS-95's 44.42, Wagner and Pruss 2002), 40.04
+      at 373 K and 31.61 at 500 K (4.0% under IAPWS-95's 32.92); methane's 8.586 at 95 K. A1's
+      claim that L and q's slope agree by Clausius–Clapeyron is withdrawn.
+      `latent_heat_departure` keeps the curve's slope, its limit recorded.
+      - R09's transport tables are refitted by `the_transport_tables_are_their_fit`'s own
+        procedure, by up to 0.23% (12 Ω⊕ 0.213 87 → 0.213 38, 50 bar 5.133 77 → 5.129 44); the
+        sweep test holds, and the cap's bound on their product stays 10.9.
+      - No golden pins R09's energy balance (R09.T16's coarse goldens are not yet built), so this
+        moves none.
+    - _Docs and tests the reviews asked for:_
+      - New tests: `liquid_water` at 9.2 MPa over a range ending at 272.6 K (liquid) and at 1 kPa
+        (none); an O₂-bulk night collapsing at 60 K and standing at 100 K; an O₂ reservoir at
+        150 K and none at 160 K, either side of 154.581 K (`Atmosphere::with_air`, a test
+        helper); the gain taking nothing at or above `T_c`, under either rules; `Moisture::of`
+        below `T_t` and at or above `T_c`; Watson's L against IAPWS-95.
+      - Pinned to their stated digits: the departures 1.68, 2.08 and 0.046 (their test's
+        `eprintln!` dropped); the gains and `B_eff`s of `greenhouse_gain`'s doc (0.4311 and 1.898
+        for the measured Earth, 0.3997 and 1.987 for the table's Earth under version 22's rules,
+        0.4545 and 1.841 under the batch's).
+      - `heat_capacity_over_r`'s `None` at a mean `T_s` not above 0 K or not finite, in the getter
+        and the DTO (`BodySurfaceDto.ts` regenerated); `StepColumn::column`'s `(_, None)` arm
+        stated (no gases, or such a surface, which absorbs no light and stores no heat).
+      - Above 1,500 K `c_p` is labelled an extrapolation, in `thermo`'s module doc and the getter.
+      - `liquid_water`'s doc: 0.70 K below `T_t` at 92 bar and 629.3 MPa, as A1's record now says.
+      - `condensables`' doc has its summary line; the tautological assertions and the batch's
+        stray `eprintln!`s (`substance_golden.rs`'s) are gone; `place_nodes` names its
+        operations; `LIQUID_CUT`'s reason is the 0.01 K grid's 10⁻⁴.
+      - T24.a's docs: the 42 K is North, Cahalan and Coakley's symmetrised Northern Hemisphere
+        sea-level fit (Table 1); B is their fit in Budyko's (1969) A + BT form; the measured
+        Earth's air is abiotic; Trenberth and Caron's abstract's 5.0 ± 0.14 PW at 43°N and Siler,
+        Roe and Armour's eq. 2 and §2 are cited; the snapshot hold's tripwire names
+        `the_measured_earth_s_gain_is_the_batch_s_rule`; the at-cap message prints the inventory's
+        water; `with_water_at_humidity` calls the atmosphere's tests' `water_weight_at_humidity`
+        (now `pub(crate)`, its module too).
+      - The client (D1 and T1–T3): `memberOf` is exported and `parity.test.ts` reads it; the
+        reader's tests are one rule each, `it.each` with a label a row, the acid's solid case
+        apart, a bounded piece held beyond its end nodes, the node tuple's names in units, and
+        three densities pinned to the bit on both readers.
+    - _decision-p14-t54a-bands, applied_ (it amends decision-pre-23-review item 20(2)):
+      - _Φ⊕ in North, Cahalan and Coakley's measured balance:_ `earth_column` with its gain set so
+        that `B_eff` is their B, 2.09 (`EARTH_OUTGOING_LONGWAVE_SLOPE_W_PER_M2_K`, new, `pub`,
+        with their p. 8 quote), and D = 0.310 × 2.09 = 0.6479, by the 200-step bisection to 42 K:
+        1.505 462 21 (the held bisection's to 10⁻⁹), committed as 1.505_462_21, where A3 had
+        1.366_706_02.
+      - _D⊕ then at the batch's measured Earth_ (`B_eff`⊕ 1.898 151), at that Φ⊕, by bisection to
+        42 K: 0.676 013 14 (the oracle's to 10⁻⁹), committed as 0.676_013_14, where A3 had
+        0.588_426_96. The fit test holds both to 10⁻⁷.
+      - _The order of fits:_ N₂ on Titan, CO₂ on Venus, water on Earth, then D⊕ on Earth's
+        contrast; Φ⊕ reads none of the chain. The docs of D⊕, Φ⊕, the partition, the module's
+        partition bullet and the fit test state the two-step fit and the quote.
+      - _Its figures:_ 6D⊕ ÷ `B_eff`⊕ 2.137 (North, Cahalan and Coakley's 1.86 at their B; their
+        own balance gives 2.15 at 1.898); the peak transport 5.574 PW; the diffusivity 2.71 × 10⁶
+        m² s⁻¹ (Siler, Roe and Armour's 2.70 × 10⁶); the measured Earth's ends 302.528 and
+        260.528 K; dry 43.36 K; 28.40 K at Φ = 1; W `B_P` 0.0212 against 6D 4.056; the measured
+        Earth's cover, its cold area below 263.15 K, 0.0345.
+      - _Kaspi and Showman's sweeps_ (`the_transport_follows_kaspi_and_showman_s_sweeps`, model
+        against GCM): Fig. 8a −3.8, −1.9, −13.0 (Ω⊕ ÷ 4, the plateau), −1.4, +4.0, +4.8, +3.3 and
+        +2.9% from Ω⊕ ÷ 24 to 12 Ω⊕ (15% allowed); Fig. 15c +9.9 (0.2 bar, the taper's knee),
+        +4.6, −4.5, −2.6, −4.4, −1.0, +2.4, +6.1 and +6.6% from 0.2 to 50 bar (10%); Fig. 18a
+        within 3.5%; Fig. 20b within 6.5% (+5.0% at 1,000 km). All pass.
+      - _The bands, as ruled:_ (1) `B_eff`⊕ 1.898 within 1.7–2.3, its comment the fixed-RH Planck
+        feedback's sources; (2) Φ⊕ 1.5055 within 1.40–1.60; (3) the generated Earth's `B_eff`
+        1.8406 within 1.7–2.3 and 0.058 from the measured Earth's (0.10 allowed); (4) the wet
+        world's gain within (0, 1) at every sample and rising from 260 through 330 K, its own
+        test, `a_wet_world_s_gain_lies_within_zero_and_one_and_rises_to_330_k`, g < 0.57 deleted;
+        (5) Earth's ice, while version 22's rules run, within 0–0.07: 0.001363 in
+        `cover::tests::the_table_s_ices_are_the_ruling_s` (0.0013633364038393) and in
+        `the_batch_publishes_the_table_s_condensates` (0.0013633364038402), the figure printed and
+        no solid entry required at 0; and the measured Earth's cover, 0.0345, within 0.02–0.07,
+        in `the_measured_earth_s_fitted_profile_meets_its_checks`. The stale "262 K … 0.013"
+        comment is replaced by the figure, the cap's 0.013 a kelvin and Earth's perennial
+        0.045–0.051 and annual-mean 0.068–0.078 ice.
+      - _T57.a's fit and L_ stand; the tripwire stays green.
+    - _Moved goldens_, re-blessed at header 22, against A3's (the same 12, towards version 22's):
+      - `planetary/surface_conditions` (21): Earth 41.514 → 41.572 K (coldest 262.47 → 262.60 K),
+        Mars 17.398 → 16.139 K, Venus 1.4161 → 1.4078 K, Titan in its sixth digit, the locked
+        Earth with Earth and the 90° Earth −27.750 → −28.047 K.
+      - `planetary/surface_conditions_published` (69): the same three figures on 23 bodies.
+      - `planetary/global_figures` (1): Earth's surface ice 0.003063 → 0.001363.
+      - `planetary/systems`: `close_binary` (28; its ice fraction 0.515411 → 0.513423),
+        `filler_a` (2), `filler_c` (12), `halo_star` (4), `hierarchical_triple` (4),
+        `m_dwarf_resonant_chain` (10), `solar_like` (10: its 597 K runaway `0200` reads
+        Isothermal again, as at A2, its contrast 15.11 → 13.36 K), `subgiant` (6) and
+        `wide_binary` (4).
+      - The rest of `planetary_golden` holds.
+    - _Deferred_ (2026-10-13 rule):
+      - From decision-p14-t54a-bands §6: D6, the gain's (1 − x) weight above about 330 K on wet
+        worlds, and D7, the grey form's slower fall at 300–320 K (P14.T53.a); D8, the shortwave
+        share in B (recorded); D9, R09's rotation law inverted in the 1.86 partition, which at
+        2.14 still meets Fig. 8a within 4.8% but at the plateau (recorded); D10, the cover at the
+        measured Earth, 0.035, against Earth's perennial 0.045–0.051 (R09.T13); D11, re-reading
+        Trenberth and Caron 2001 and Siler, Roe and Armour 2018 (the next science check of
+        T24.a).
+      - Koll's wave speed takes `c_p` at `T_s` where his formula reads `T_eq` (A2's deferred).
+      - `close_binary`'s 606 K body labelled `Snowball` now holds a 33% ocean, a state-classifier
+        artefact: P14.T53.b's.
+      - _For the docs batch:_ R09's plan (`docs/agent/plans/rendering-and-planets/09-*.md`, about
+        lines 8391–8395 and 8500–8503) still quotes the old `f_Ω` and `f_p` factors and the
+        "2.415 × 10⁶ … at the 22 → 23 bump" lean, which A1 resolved and this commit refits.

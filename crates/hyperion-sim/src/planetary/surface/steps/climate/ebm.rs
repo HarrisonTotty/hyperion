@@ -130,7 +130,7 @@ use crate::planetary::hooks::surface::{
 };
 use crate::planetary::surface::inputs::CoarseInputs;
 use crate::substance::{
-    MOLAR_GAS_CONSTANT, SubstanceId, by_key, mean_molar_mass_g_per_mol,
+    MOLAR_GAS_CONSTANT, PhaseDiagram, SubstanceId, by_key, mean_molar_mass_g_per_mol,
     mixture_heat_capacity_over_r_at, saturation_pressure,
 };
 use crate::units::consts::STEFAN_BOLTZMANN;
@@ -1044,6 +1044,39 @@ impl Air {
     }
 }
 
+/// Watson's exponent, 0.38: the latent heat of vaporisation falls as ((`T_c` − T) ÷ (`T_c` −
+/// `T_ref`))^0.38 from its value at `T_ref` (Watson 1943, Ind. Eng. Chem. 35, 398; Poling,
+/// Prausnitz and O'Connell 2001, The Properties of Gases and Liquids, 5th ed., §7-12, not
+/// re-read; [`latent_heat_j_per_mol`]).
+pub(super) const WATSON_EXPONENT: f64 = 0.38;
+
+/// The latent heat of vaporisation h″ − h′ of the condensable of phase diagram `diagram` at
+/// `temperature`, J mol⁻¹: Watson's scaling of the enthalpy of vaporisation at its triple point,
+/// L = `L_t` ((`T_c` − T) ÷ (`T_c` − `T_t`))^0.38 ([`WATSON_EXPONENT`]), held at `L_t` at and below
+/// the triple temperature; `None` at or above the critical temperature, where it falls to zero,
+/// and for a temperature that is not a number.
+///
+/// It is the latent heat itself, which the moist static energy carries, not the curve's
+/// Clausius–Clapeyron enthalpy ([`PhaseDiagram::clausius_clapeyron_enthalpy_j_per_mol`]), which
+/// exceeds it by the vapour's 1 ÷ (z″ − z′), increasingly away from the triple point: water's by
+/// 1.6% at 373 K and 17% at 500 K, methane's by 28% at 150 K. Against IAPWS-95's h″ − h′ (Wagner
+/// and Pruss 2002, J. Phys. Chem. Ref. Data 31, 387) water's is about 0.13% low at 288 K (44.37
+/// against 44.42 kJ mol⁻¹, 2,465.9 kJ kg⁻¹), 1.5% at 373 K and 4% at 500 K.
+#[must_use]
+pub(super) fn latent_heat_j_per_mol(diagram: &PhaseDiagram, temperature: Kelvin) -> Option<f64> {
+    let t = temperature.value();
+    let triple = diagram.triple_temperature().value();
+    let critical = diagram.critical_temperature().value();
+    if t.is_nan() || t >= critical {
+        return None;
+    }
+    let liquid = if t > triple { t } else { triple };
+    Some(
+        diagram.triple_vaporisation_enthalpy_j_per_mol()
+            * math::powf((critical - liquid) / (critical - triple), WATSON_EXPONENT),
+    )
+}
+
 /// The climate condensable whose latent heat the moist static energy carries.
 ///
 /// Its invariant, a positive and finite surface pressure, is [`Moisture::of`]'s: at no pressure
@@ -1053,9 +1086,8 @@ impl Air {
 pub(super) struct Moisture {
     /// The condensable's registry row.
     pub(super) condensable: SubstanceId,
-    /// Its latent heat of vaporisation, J kg⁻¹: its phase diagram's Clausius–Clapeyron enthalpy
-    /// on the liquid's branch at the body's mean surface temperature, over its molar mass
-    /// ([`Moisture::of`]).
+    /// Its latent heat of vaporisation, J kg⁻¹: Watson's scaling of its triple point's at the
+    /// body's mean surface temperature, over its molar mass ([`Moisture::of`]).
     pub(super) latent_heat_j_per_kg: f64,
     /// Its molar mass over the air's, ε.
     pub(super) mass_ratio: f64,
@@ -1068,14 +1100,14 @@ impl Moisture {
     /// is among its surface liquids, has a phase diagram and a molar mass, under a positive surface
     /// pressure; `None` for a dry world.
     ///
-    /// Its latent heat is the diagram's Clausius–Clapeyron enthalpy, R T² d ln `p_sat` ÷ dT
-    /// (P14.T49.b's fitted curves), at the body's mean surface temperature, the temperature
-    /// [`Air::of`]'s `c_p` is taken at: so that L and the slope of the saturation pressure
-    /// [`specific_humidity`](Self::specific_humidity) reads agree by Clausius–Clapeyron there.
-    /// It is the liquid's branch, whose vapour the moist static energy carries from the surface
-    /// liquid it requires: for a mean below the triple temperature, the triple point's. Water's
-    /// is 44.47 kJ mol⁻¹ at 288 K, 2.469 × 10⁶ J kg⁻¹. `None` too for a mean at or above the
-    /// critical temperature, where the curve, and the latent heat, end.
+    /// Its latent heat is the latent heat of vaporisation at the body's mean surface temperature,
+    /// the temperature [`Air::of`]'s `c_p` is taken at, by Watson's scaling of the triple point's
+    /// enthalpy on the row's phase diagram ([`latent_heat_j_per_mol`]): the liquid's, whose vapour
+    /// the moist static energy carries from the surface liquid it requires, and for a mean below
+    /// the triple temperature the triple point's. Water's is 44.37 kJ mol⁻¹ at 288 K,
+    /// 2.4628 × 10⁶ J kg⁻¹, about 0.13% below IAPWS-95's 2,465.9 kJ kg⁻¹ (44.42 kJ mol⁻¹; Wagner
+    /// and Pruss 2002), and about 4% below it at 500 K. `None` too for a mean at or above the
+    /// critical temperature, where the latent heat falls to zero.
     #[must_use]
     pub(super) fn of(inputs: &CoarseInputs, air: &Air) -> Option<Self> {
         let key = inputs.climate().condensable?;
@@ -1092,13 +1124,7 @@ impl Moisture {
         let row = condensable.substance();
         let diagram = row.phase_diagram()?;
         let mass = row.molar_mass_g_per_mol()?;
-        let liquid = Kelvin::new(
-            inputs
-                .mean_surface_temperature()
-                .value()
-                .max(diagram.triple_temperature().value()),
-        );
-        let latent = diagram.clausius_clapeyron_enthalpy_j_per_mol(liquid)?;
+        let latent = latent_heat_j_per_mol(diagram, inputs.mean_surface_temperature())?;
         Some(Self {
             condensable,
             latent_heat_j_per_kg: latent / (mass * 1e-3),
@@ -5413,9 +5439,10 @@ fn positive(x: f64) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::assert_same_bits;
+
     use super::*;
     use crate::planetary::surface::reference;
-    use hyperion_testkit::float::assert_same_bits;
 
     fn earth() -> (EnergyBalance, Sunlight, ModelGrid) {
         let inputs = reference::earth_like();
@@ -5426,10 +5453,11 @@ mod tests {
 
     /// The reference Earth's air is the registry's, dry air's 1,004.7 J kg⁻¹ K⁻¹ and 28.96 g mol⁻¹
     /// with its water vapour; its water is moist static energy at Earth's transport, its latent
-    /// heat its phase diagram's Clausius–Clapeyron enthalpy at the mean 288 K, 44.47 kJ mol⁻¹ over
-    /// 18.015 g mol⁻¹: 2.4686 × 10⁶ J kg⁻¹ (IAPWS SR1-86's ancillary, about 0.1% above IAPWS-95's
-    /// h″ − h′ there, the vapour's z″ − z′; the held curve's constant 43.5 kJ mol⁻¹ gave
-    /// 2.415 × 10⁶).
+    /// heat Watson's at the mean 288 K, 44.37 kJ mol⁻¹ over 18.015 g mol⁻¹: 2.4628 × 10⁶ J kg⁻¹,
+    /// about 0.13% below IAPWS-95's h″ − h′ there, 2,465.9 kJ kg⁻¹ (44.42 kJ mol⁻¹; Wagner and
+    /// Pruss 2002, J. Phys. Chem. Ref. Data 31, 387). The diagram's Clausius–Clapeyron enthalpy
+    /// gave 2.4686 × 10⁶, about 0.1% above it, and the held curve's constant 43.5 kJ mol⁻¹
+    /// 2.415 × 10⁶.
     #[test]
     fn the_reference_earth_diffuses_moist_static_energy_in_its_own_air() {
         let inputs = reference::earth_like();
@@ -5444,7 +5472,7 @@ mod tests {
         let model = EnergyBalance::for_inputs(&inputs);
         let moisture = model.moisture.expect("water is among Earth's liquids");
         assert!(
-            (moisture.latent_heat_j_per_kg - 2.4686e6).abs() < 1e3,
+            (moisture.latent_heat_j_per_kg - 2.4628e6).abs() < 1e3,
             "{moisture:?}"
         );
         // h rises with T, by more than c_p, and q at 288 K and 80% is about 8.5 g kg⁻¹.
@@ -5453,6 +5481,60 @@ mod tests {
         assert!(model.energy_slope(288.0) > 2.0 * air.specific_heat_j_per_kg_k);
         let lambda = model.transport_kg_m2_s / super::super::transport::EARTH_TRANSPORT_KG_M2_S;
         assert!((lambda - 1.0).abs() < 0.05, "{lambda}");
+    }
+
+    /// Watson's latent heat lies below IAPWS-95's h″ − h′ for water (Wagner and Pruss 2002): by
+    /// about 0.13% at 288 K (44.42 kJ mol⁻¹, 2,465.9 kJ kg⁻¹), 1.5% at 373.15 K (40.65 kJ mol⁻¹)
+    /// and 4% at 500 K (32.92 kJ mol⁻¹, 1,827.1 kJ kg⁻¹); and it is its triple point's enthalpy,
+    /// exactly, at and below the triple temperature.
+    #[test]
+    fn the_latent_heat_is_watson_s_scaling_of_the_triple_point_s() {
+        let water = by_key("H2O").unwrap().substance().phase_diagram().unwrap();
+        let at = |t: f64| latent_heat_j_per_mol(water, Kelvin::new(t)).unwrap();
+        for (t, iapws, within) in [
+            (288.0, 44_423.8, 0.002),
+            (373.15, 40_649.7, 0.02),
+            (500.0, 32_915.2, 0.045),
+        ] {
+            let error = at(t) / iapws - 1.0;
+            assert!(error < 0.0 && error > -within, "{t} K: {} J/mol", at(t));
+        }
+        let triple = water.triple_vaporisation_enthalpy_j_per_mol();
+        assert_same_bits(at(water.triple_temperature().value()), triple);
+        assert_same_bits(at(200.0), triple);
+        assert!(latent_heat_j_per_mol(water, water.critical_temperature()).is_none());
+        assert!(latent_heat_j_per_mol(water, Kelvin::new(f64::NAN)).is_none());
+    }
+
+    /// The moisture's latent heat is Watson's at the mean surface temperature: the triple point's
+    /// for a mean below the triple temperature, whose vapour the surface liquid gives; and a mean
+    /// at or above the critical temperature, where no latent heat is left, has no moisture.
+    #[test]
+    fn the_moisture_s_latent_heat_is_the_triple_point_s_below_it_and_none_above_the_critical() {
+        let earth = reference::earth_like();
+        let row = by_key("H2O").unwrap().substance();
+        let water = row.phase_diagram().unwrap();
+        let mass = row.molar_mass_g_per_mol().unwrap();
+        let at = |t: f64| {
+            let inputs = super::super::tests::builder_of(&earth)
+                .mean_surface_temperature(Kelvin::new(t))
+                .build()
+                .expect("the Earth's inputs at another mean are valid");
+            Moisture::of(&inputs, &Air::of(&inputs))
+        };
+        let cold = at(250.0).expect("a mean below the triple point keeps its moisture");
+        assert_same_bits(
+            cold.latent_heat_j_per_kg,
+            water.triple_vaporisation_enthalpy_j_per_mol() / (mass * 1e-3),
+        );
+        let warm = at(288.0).expect("Earth's mean has its moisture");
+        assert_same_bits(
+            warm.latent_heat_j_per_kg,
+            latent_heat_j_per_mol(water, Kelvin::new(288.0)).unwrap() / (mass * 1e-3),
+        );
+        for t in [water.critical_temperature().value(), 700.0] {
+            assert!(at(t).is_none(), "{t} K");
+        }
     }
 
     /// The steady state's net heating sums to nothing over the sphere, the diffusion's to

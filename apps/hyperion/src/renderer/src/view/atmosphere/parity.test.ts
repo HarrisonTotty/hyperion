@@ -23,7 +23,7 @@
  *    any temperature (`grainDensity.ts`), unless it is one of the sim's stated refusals
  *    (decision-p14-t54a-grain-density §2.6): condition 3's density analogue.
  *
- * The fifth row, the client's τ(550) against the record's within 1%, is held
+ * R08.T19's fifth row, the client's τ(550) against the record's within 1%, is held
  * (decision-bump-plan-after-22): see its tripwire below.
  *
  * The check grows with the registry: a row P14 appends with a flag set is checked once the fixture
@@ -37,7 +37,7 @@ import registry from "../../../../../../../packages/protocol/fixtures/substances
 import { crossSectionAt } from "./absorbers";
 import { committedLineSpecies } from "./absorbers/kDistribution";
 import { NO_VISIBLE_ABSORPTION, PENDING_ABSORBERS } from "./absorbers/transparency";
-import { type GrainDensityRow, grainDensityKgPerM3 } from "./grainDensity";
+import { type GrainDensityRow, grainDensityKgPerM3, memberOf } from "./grainDensity";
 import { MATERIAL_FILES, type MaterialPhase, resolveMaterial } from "./materials/materials";
 import { GAS_MOLAR_MASS_G_PER_MOL, GASES, rayleighOf } from "./rayleigh";
 
@@ -166,8 +166,7 @@ const NO_GRAIN_DENSITY: ReadonlyArray<FileForm & { readonly reason: string }> = 
  * one at a node of the phase's member, of the file's variant.
  */
 function hasGrainDensity(row: GrainDensityRow, form: FileForm): boolean {
-  const pieces = form.phase === "solid" ? row.solid_grain_density : row.liquid_grain_density;
-  return (pieces ?? []).some((piece) =>
+  return (memberOf(row, form.phase) ?? []).some((piece) =>
     piece.temperatures_k.some(
       (t) => grainDensityKgPerM3(row, form.phase, t, form.variant ?? undefined) !== undefined,
     ),

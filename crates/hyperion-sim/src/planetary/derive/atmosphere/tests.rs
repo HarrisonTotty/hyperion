@@ -607,12 +607,6 @@ fn version_22_s_greenhouse_holds_a_condensing_gas_at_its_diagram_s_saturation_pr
     let air = found(&table, "Earth").atmosphere();
     let held = saturation_pressure(Gas::Water.substance(), air.surface_temperature())
         .expect("water has a phase diagram");
-    let diagram = crate::substance::diagram::saturation_pressure(
-        Gas::Water.substance(),
-        air.surface_temperature(),
-    )
-    .expect("water has a phase diagram");
-    assert_same_bits(held.value(), diagram.value());
     assert_same_bits(air.partial_pressures().of(Gas::Water).value(), held.value());
 }
 
@@ -2213,7 +2207,8 @@ fn the_snapshot_lane_is_held_only_until_the_batch_s_bump() {
          `ClimateBody::greenhouse` and the greenhouse gain's held arm (P14.T51.a's fix); let \
          T24.a's tests of the batch's measured Earth (`batch_earth_air`, the North, Cahalan and \
          Coakley partition's test, whose oracle becomes the bisection kept under `#[cfg(test)]`, \
-         and `the_greenhouse_gain_is_the_held_gases_feedback`) read the rules alone; and delete \
+         `the_measured_earth_s_gain_is_the_batch_s_rule` and \
+         `the_greenhouse_gain_is_the_held_gases_feedback`) read the rules alone; and delete \
          this test (plan 14, P14.T51.a, P14.T51.b, P14.T57.a and P14.T54.a as built)"
     );
     assert_eq!(SnapshotRules::in_force(), SnapshotRules::Held);
@@ -2812,7 +2807,7 @@ fn needed_depth(surface: f64, equilibrium: f64) -> f64 {
 /// weights, is [`WATER_SURFACE_HUMIDITY`] of its saturation pressure `saturation` among the other
 /// gases of `partials` (P14.T51.a's minor branch, as `capped_methane_weight` holds methane): the
 /// positive root of w² + b w − c = 0, b = `W_o` − h `p_sat`, c = h `p_sat` `μ_w` `Σ_o` (`w_o` ÷ `μ_o`).
-fn water_weight_at_humidity(partials: &PartialPressures, saturation: f64) -> f64 {
+pub(crate) fn water_weight_at_humidity(partials: &PartialPressures, saturation: f64) -> f64 {
     let others = Gas::ALL.into_iter().filter(|&gas| gas != Gas::Water);
     let (weight, moles) = others.fold((0.0, 0.0), |(w, n), gas| {
         let p = partials.of(gas).value();

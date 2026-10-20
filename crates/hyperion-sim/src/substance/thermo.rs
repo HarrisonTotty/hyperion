@@ -22,6 +22,11 @@
 //!   equilibrium among themselves: low electronic states, a hindered internal rotor's torsional
 //!   levels, or H₂'s rovibrational ladder for one nuclear-spin modification.
 //!
+//! Above 1,500 K, the warmest temperature its reference test holds it to NASA Glenn's at
+//! (`the_heat_capacities_follow_nasa_glenn`), the sum is an extrapolation of its harmonic
+//! oscillators, which leave out anharmonicity: at 2,879 K, a magma ocean's air, it lies below NASA
+//! Glenn's by 1.6% for CO₂, 4.7% for H₂O and 1.1% for N₂ (plan 14's Risks, deferred).
+//!
 //! The enthalpy H̃ = ∫ `c_p` ÷ R dT (kelvin, zero at 0 K) and the entropy S̃ = ∫ `c_p` ÷ (R T) dT
 //! have closed forms term by term: c T and c ln T for the constant parts, θ ÷ (eˣ − 1) and
 //! x ÷ (eˣ − 1) − ln(1 − e⁻ˣ) for each oscillator, and ⟨E⟩ ÷ `k_B` and ln Z + ⟨E⟩ ÷ (`k_B` T) for

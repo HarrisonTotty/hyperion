@@ -40,13 +40,27 @@ describe("grainDensityKgPerM3, by the fixture's rule", () => {
     expect([1, 7].map((t) => grainDensityKgPerM3(PIECES, "solid", t))).toEqual([101, 97]);
   });
 
-  it("covers a piece's lower bound but not its upper, but for the member's last piece", () => {
-    expect([0, 10, 20, 30].map((t) => grainDensityKgPerM3(PIECES, "solid", t))).toEqual([
-      100,
-      undefined,
-      80,
-      70,
-    ]);
+  it("covers a piece's lower bound", () => {
+    expect([0, 20].map((t) => grainDensityKgPerM3(PIECES, "solid", t))).toEqual([100, 80]);
+  });
+
+  it("does not cover a piece's upper bound", () => {
+    expect(grainDensityKgPerM3(PIECES, "solid", 10)).toBeUndefined();
+  });
+
+  it("covers the member's last piece's upper bound", () => {
+    expect(grainDensityKgPerM3(PIECES, "solid", 30)).toBe(70);
+  });
+
+  it("holds a bounded piece's end nodes' densities beyond them, inside its bounds", () => {
+    const inner: GrainDensityRow = {
+      grain_density_variant: null,
+      solid_grain_density: [
+        { from_k: 0, to_k: 10, temperatures_k: [2, 8], densities_kg_per_m3: [100, 94] },
+      ],
+      liquid_grain_density: null,
+    };
+    expect([1, 9].map((t) => grainDensityKgPerM3(inner, "solid", t))).toEqual([100, 94]);
   });
 
   it("gives none in a gap, below the first piece and above the last", () => {
@@ -87,29 +101,61 @@ describe("the fixture's grain densities", () => {
     expect(relative(grainDensityKgPerM3(row(key), phase, t), expected)).toBeLessThan(TOLERANCE);
   });
 
+  /**
+   * The densities the sim's mirror of the rule (`substance_golden.rs`'s `mirror_density`) gives
+   * between two nodes, and a fixed row's, written as Rust's `{:?}` prints them, so that the two
+   * evaluators cannot split silently: `substance_fixture_grain_density_is_pinned_between_nodes`
+   * pins the same literals.
+   */
+  it.each<
+    readonly [
+      label: string,
+      key: string,
+      phase: "solid" | "liquid",
+      temperatureK: number,
+      densityKgPerM3: number,
+    ]
+  >([
+    ["ice Ih between its nodes at 87.15 and 110.18 K", "H2O", "solid", 100, 932.996995807952],
+    [
+      "liquid water between its nodes at 295.04 and 301.51 K",
+      "H2O",
+      "liquid",
+      300,
+      996.4737200950051,
+    ],
+    ["basalt's one node, held", "basalt", "solid", 150, 3010],
+  ])("give %s the sim's mirror's density to the bit", (_label, key, phase, t, expected) => {
+    expect(Object.is(grainDensityKgPerM3(row(key), phase, t), expected)).toBe(true);
+  });
+
   it("give the 75 wt% acid's 1,662.6 kg m⁻³ at Venus's cloud temperatures, of its variant only", () => {
     const acid = row("H2SO4");
     expect([
       grainDensityKgPerM3(acid, "liquid", 250, "75wt%"),
       grainDensityKgPerM3(acid, "liquid", 250, "84.5wt%"),
       grainDensityKgPerM3(acid, "liquid", 250),
-      grainDensityKgPerM3(acid, "solid", 200, "75wt%"),
-    ]).toEqual([1662.6, undefined, undefined, undefined]);
+    ]).toEqual([1662.6, undefined, undefined]);
   });
 
-  it("give none where the sim gives none", () => {
-    expect([
-      // Supercooled water: the saturated liquid starts at the triple point.
-      grainDensityKgPerM3(row("H2O"), "liquid", 260),
-      // A rock's melt is not a registry column.
-      grainDensityKgPerM3(row("basalt"), "liquid", 1400),
-      // Solid argon's density was not read.
-      grainDensityKgPerM3(row("Ar"), "solid", 60),
-      // β-O₂ (23.14–43.78 K) and β-CO (61.585 K to the triple point) have none.
-      grainDensityKgPerM3(row("O2"), "solid", 30),
-      grainDensityKgPerM3(row("CO"), "solid", 65),
-      grainDensityKgPerM3(row("CO"), "solid", 61.585),
-    ]).toEqual([undefined, undefined, undefined, undefined, undefined, undefined]);
+  it("give the 75 wt% acid no solid density", () => {
+    expect(grainDensityKgPerM3(row("H2SO4"), "solid", 200, "75wt%")).toBeUndefined();
+  });
+
+  it.each<readonly [label: string, key: string, phase: "solid" | "liquid", temperatureK: number]>([
+    // The saturated liquid starts at the triple point.
+    ["supercooled water", "H2O", "liquid", 260],
+    // A rock's melt is not a registry column.
+    ["a rock's melt", "basalt", "liquid", 1400],
+    // Solid argon's density was not read.
+    ["solid argon", "Ar", "solid", 60],
+    // β-O₂ runs from 23.14 to 43.78 K.
+    ["β-O₂", "O2", "solid", 30],
+    // β-CO runs from 61.585 K to the triple point.
+    ["β-CO", "CO", "solid", 65],
+    ["β-CO at its start", "CO", "solid", 61.585],
+  ])("give none for %s, as the sim gives none", (_label, key, phase, t) => {
+    expect(grainDensityKgPerM3(row(key), phase, t)).toBeUndefined();
   });
 
   it("are pieces of rising nodes with finite positive densities, rising and apart", () => {
