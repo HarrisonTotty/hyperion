@@ -258,6 +258,21 @@ pub(super) enum Freezing {
 }
 
 impl Freezing {
+    /// Where the model of the body of `inputs` forms its ice: about its climate condensable's
+    /// freezing point shifted onto water's calibration, or nowhere ([`EnergyBalance::for_inputs`]'s
+    /// rule, which it reads; alone, for the frozen ground's test, decision-r09-t13e-revision §4.4).
+    #[must_use]
+    pub(super) fn of(inputs: &CoarseInputs) -> Self {
+        match frost::freezing_point_k(inputs) {
+            Some(point) => Self::At {
+                point_k: WATER_FREEZING_POINT_K + (point - frost::water_freezing_point_k()),
+            },
+            None => Self::Never {
+                albedo: ICE_FREE_ALBEDO,
+            },
+        }
+    }
+
     /// The freezing point, K, or `None` where no ice forms.
     #[cfg(test)]
     #[must_use]
@@ -1020,16 +1035,8 @@ impl EnergyBalance {
         } else {
             Diffusing::SensibleHeat
         };
-        let freezing = match frost::freezing_point_k(inputs) {
-            Some(point) => Freezing::At {
-                point_k: WATER_FREEZING_POINT_K + (point - frost::water_freezing_point_k()),
-            },
-            None => Freezing::Never {
-                albedo: ICE_FREE_ALBEDO,
-            },
-        };
         Self {
-            freezing,
+            freezing: Freezing::of(inputs),
             specific_heat_j_per_kg_k: air.specific_heat_j_per_kg_k,
             moisture,
             transport_kg_m2_s: transport_kg_m2_s(

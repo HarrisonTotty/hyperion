@@ -1,8 +1,10 @@
 //! The precipitation heuristic and the winds, the climate step's last stage (R09.T13.e; Design
 //! note 8, decision-r09-t13ge §2): each month's zonal moisture budget from the energy-balance
-//! model's own records, evaporation over the climate condensable's open liquid, the large-scale
-//! rate, the winds, the orographic precipitation over land along them and the global water balance,
-//! written to the climate cells. Labelled a heuristic in the header
+//! model's own records, evaporation over the climate condensable's open liquid, the sea's rate and
+//! the land's source, the winds, the orographic precipitation over land along the model's bands
+//! and the global water balance, written to the climate cells (R09.T13.j's revision,
+//! decision-r09-t13e-revision, gives the sea its own evaporation and the land the zonal budget's
+//! convergence). Labelled a heuristic in the header
 //! (`PrecipitationSource::Heuristic`).
 //!
 //! # Per month (one, or twelve)
@@ -20,28 +22,41 @@
 //!    surface, T − Γ `z̄_w` (decision-r09-t13ge §2.11), the point the cell's centre lies in, as the
 //!    sea shares bin it; the storage the sea's heat capacity times the centred change of the
 //!    cell's record over the neighbouring months' mid-times, none in a one-month year.
-//! 3. **The large-scale rate:** each band's mean evaporation Ē over all of its cells (land none),
-//!    `P_ls` = max(0, Ē − (E − P)), read at each sea cell by the zonal interpolant in the model's
-//!    coordinates, held to its stencil's range. A band holding no cell takes the nearest band's Ē,
-//!    equatorward first.
+//! 3. **The sea's rate and the land's source** ([`SeaBands`]; decision-r09-t13e-revision §4.1,
+//!    §4.2). Each band's evaporation per unit of its sea's solid angle, `e_b` = Σ Ω E over its
+//!    cells ÷ Σ Ω over its sea cells (`seas::under_sea`'s, every liquid), and its sea share `s_b`,
+//!    a band with no sea taking its nearest band's that has one, equatorward first; its
+//!    convergence `C_b` = −(E − P); and its sea's rate `P_sea` = max(0, `e_b` + `C_b`) where
+//!    `C_b` ≥ 0, else max(0, `e_b` + `C_b` ÷ `s_b`): a sea column rains its own evaporation plus
+//!    the band's convergence, and a divergent band's export falls on its sea alone, since its land
+//!    exports nothing. `P_sea` is read at each sea cell, and max(0, `C_b`) at each land cell, by
+//!    the zonal interpolant in the model's coordinates, held to its stencil's range. On an
+//!    aquaplanet `e_b` is the band mean Ē and `s_b` is 1, so `P_sea` is max(0, Ē − (E − P)) to the
+//!    bit.
 //! 4. **The winds** ([`wind`](super::wind)) at each climate cell, quantised and decoded into its
 //!    record.
 //! 5. **The orography** ([`lfpm`](super::lfpm)): the land cells' rate along each field cell's
-//!    climate cell's decoded wind, the sea's `P_ls` the boundary.
+//!    climate cell's decoded wind's component along the model's bands, east, west or calm by its
+//!    sign ([`wind::along_bands`]; decision-r09-t13e-revision §4.3), since the zonal budget
+//!    already carries the meridional transport, which the wind's meridional part would count
+//!    again over land: its E − P is the divergence of the meridional water flux, Hadley and eddy
+//!    (Siler, Roe and Armour 2018, J. Climate 31, 7481, the text after their eq. 9, and their
+//!    Fig. 2f). The sea's `P_sea` is the boundary, each land cell taking its
+//!    convergence as a vapour source scaled by e^(−H/H₀), and recycling nothing in a month whose
+//!    temperature at its surface, its climate cell's normalised month at its height, lies below
+//!    the condensable's freezing point ([`ground_of`]; §4.4). A wholly calm month needs no rule of
+//!    its own: every land cell is then a sink with its source (§4.5).
 //! 6. **The water balance** (decision-r09-t13ge §2.8, e8): one factor k a month, k = Σ E ÷
-//!    (Σ `P_ls` over the sea + Σ (1 − ε) P over the land), solid-angle sums in cell-index order,
-//!    applied to every cell's rate, so that the global precipitation equals the liquid's
-//!    evaporation plus the land's recycled ε P, which eqs. 42–43 return to the vapour; exact,
-//!    since the orographic model is linear in its inflow. With no evaporation the month rains
-//!    nowhere (a dry world, or one whose liquid is all frozen), while ψ and the winds stand; its
-//!    orographic solve is not run.
+//!    (Σ `P_sea` over the sea + Σ (1 − ε) P over the land), ε the month's on each land cell,
+//!    solid-angle sums in cell-index order, applied to every cell's rate, so that the global
+//!    precipitation equals the liquid's evaporation plus the land's recycled ε P, which eqs. 42–43
+//!    return to the vapour; exact, since the orographic model is linear in its inflow and its
+//!    source. With no evaporation the month rains nowhere (a dry world, or one whose liquid is all
+//!    frozen), while ψ and the winds stand; its orographic solve is not run.
 //! 7. **The records:** each climate cell's month rate the solid-angle mean of its four field
 //!    cells'.
 //!
-//! A month whose every field cell's wind is calm (E-L6) carries nothing inland under the
-//! orographic model's rule; there the land takes the zonal `P_ls` in place, as the sea does, with
-//! its recycled share ε(H): with no wind the zonal budget's rain falls where it forms. Past the
-//! year's months every record is zero and calm.
+//! Past the year's months every record is zero and calm.
 //!
 //! The radiative and isothermal models get no precipitation and calm winds ([`calm`];
 //! decision-r09-t13ge §2.7, e7): right for an airless world and close for a Venus, and missing a
@@ -56,7 +71,7 @@ use hyperion_surface::field::{PaletteRole, Wind};
 use super::coordinates::Coordinates;
 use super::ebm::{EnergyBalance, Freezing, Moisture};
 use super::grid::{BandStencil, LATITUDE_BANDS, ModelGrid};
-use super::lfpm::{self, CellWind, Cover, Mesh, Month, Parameters};
+use super::lfpm::{self, CellWind, Cover, GroundState, Mesh, Month, Parameters};
 use super::partition::{self, Bands, Budget, Circulation, DEGREE_RAD, Turning};
 use super::seas;
 use super::wind::{self, LOWER_BRANCH_DEPTH_SHARE};
@@ -85,9 +100,10 @@ pub(super) struct OwnRecords {
 pub(super) struct MonthCycle {
     /// The month's zonal budget.
     pub(super) budget: Budget,
-    /// Each band's large-scale rate before the balance, kg m⁻² s⁻¹.
-    pub(super) large_scale_kg_m2_s: Vec<f64>,
-    /// Each band's mean evaporation Ē, kg m⁻² s⁻¹.
+    /// Each band's sea: its evaporation per sea area, its sea share, its rate before the balance
+    /// and its convergence, the land's source (decision-r09-t13e-revision §4.7).
+    pub(super) sea: SeaBands,
+    /// Each band's mean evaporation Ē over all of its cells, kg m⁻² s⁻¹.
     pub(super) band_evaporation_kg_m2_s: Vec<f64>,
     /// The balance's factor k; zero where nothing evaporates.
     pub(super) scale: f64,
@@ -97,11 +113,54 @@ pub(super) struct MonthCycle {
     pub(super) recycled_kg_m2_s: f64,
     /// The precipitation after the balance, the global mean, kg m⁻² s⁻¹.
     pub(super) precipitation_kg_m2_s: f64,
-    /// Whether every field cell's wind was calm (the month's land then took the zonal rate).
+    /// The land's frozen share of its solid angle: its cells whose ground is frozen this month;
+    /// zero on a world of no land.
+    pub(super) frozen_land_share: f64,
+    /// The field cells' orographic winds by their sense along the model's bands
+    /// ([`wind::along_bands`]): towards local east, towards local west, and calm.
+    pub(super) band_winds: BandWinds,
+    /// Whether every field cell's orographic wind was calm (its land then a sink each, taking its
+    /// source in place).
     pub(super) calm: bool,
-    /// The orographic solve's diagnostics, or `None` where none ran (nothing evaporated, no land,
-    /// or a wholly calm month).
+    /// The orographic solve's diagnostics, or `None` where none ran (nothing evaporated, or no
+    /// land).
     pub(super) orographic: Option<lfpm::Diagnostics>,
+}
+
+/// A month's field cells by the sense of their orographic wind along the model's bands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub(super) struct BandWinds {
+    /// The cells whose orographic wind blows towards their local east about the model's pole.
+    pub(super) eastward: u32,
+    /// The cells whose orographic wind blows towards their local west.
+    pub(super) westward: u32,
+    /// The cells whose orographic wind is calm: a calm record, a record across the bands, or a
+    /// cell at the model's pole.
+    pub(super) calm: u32,
+}
+
+impl BandWinds {
+    /// The count of the field cells' orographic `winds`, each cell's local east `easts`
+    /// ([`wind::model_east`]).
+    #[must_use]
+    fn of(winds: &[CellWind], easts: &[Option<[f64; 3]>]) -> Self {
+        let mut counts = Self::default();
+        for (wind, east) in winds.iter().zip(easts) {
+            match (wind, east) {
+                (CellWind::Towards(t), Some(e))
+                    if t[0] * e[0] + t[1] * e[1] + t[2] * e[2] > 0.0 =>
+                {
+                    counts.eastward += 1;
+                }
+                (CellWind::Towards(_), Some(_)) => counts.westward += 1,
+                (CellWind::Towards(_), None) => {
+                    unreachable!("along_bands is calm where the bands have no east")
+                }
+                (CellWind::Calm, _) => counts.calm += 1,
+            }
+        }
+        counts
+    }
 }
 
 /// What a run's water cycle did that is no output, for its tests.
@@ -113,8 +172,8 @@ pub(super) struct Diagnostics {
     pub(super) annual_efe_sine: f64,
     /// Each month's cycle.
     pub(super) months: Vec<MonthCycle>,
-    /// Each month's winds, one a climate cell, as the record codes them: the winds that month's
-    /// orographic step read.
+    /// Each month's winds, one a climate cell, as the record codes them: the winds whose
+    /// components along the model's bands that month's orographic step read.
     pub(super) winds: Vec<Vec<Wind>>,
 }
 
@@ -201,31 +260,149 @@ fn cell_bands(pass: &Pass<'_>, coordinates: Coordinates) -> (Vec<usize>, Vec<f64
     (bands, areas)
 }
 
+/// The band nearest `band` for which `holds` holds, `band` itself first, then outward, equatorward
+/// before poleward at each distance (T13.a's rule); `None` where none does.
+#[must_use]
+fn nearest_band(band: usize, holds: impl Fn(usize) -> bool) -> Option<usize> {
+    if holds(band) {
+        return Some(band);
+    }
+    (1..LATITUDE_BANDS).find_map(|distance| {
+        let (equatorward, poleward) = if band < LATITUDE_BANDS / 2 {
+            (band.checked_add(distance), band.checked_sub(distance))
+        } else {
+            (band.checked_sub(distance), band.checked_add(distance))
+        };
+        [equatorward, poleward]
+            .into_iter()
+            .flatten()
+            .filter(|&b| b < LATITUDE_BANDS)
+            .find(|&b| holds(b))
+    })
+}
+
 /// `sums` (one a band) over `areas`, each band's mean, a band of no area taking the nearest
 /// band's that has one, equatorward first (T13.a's rule); zero where none has.
 #[must_use]
 fn band_means(sums: &[f64], areas: &[f64]) -> Vec<f64> {
-    let mean = |band: usize| (areas[band] > 0.0).then(|| sums[band] / areas[band]);
     (0..LATITUDE_BANDS)
-        .map(|band| {
-            mean(band)
-                .or_else(|| {
-                    (1..LATITUDE_BANDS).find_map(|distance| {
-                        let (equatorward, poleward) = if band < LATITUDE_BANDS / 2 {
-                            (band.checked_add(distance), band.checked_sub(distance))
-                        } else {
-                            (band.checked_sub(distance), band.checked_add(distance))
-                        };
-                        [equatorward, poleward]
-                            .into_iter()
-                            .flatten()
-                            .filter(|&b| b < LATITUDE_BANDS)
-                            .find_map(mean)
-                    })
-                })
-                .unwrap_or(0.0)
-        })
+        .map(|band| nearest_band(band, |b| areas[b] > 0.0).map_or(0.0, |b| sums[b] / areas[b]))
         .collect()
+}
+
+/// A month's sea and land source by band (decision-r09-t13e-revision §4.1, §4.2), one value a band
+/// of the model's grid.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct SeaBands {
+    /// `e_b`, each band's evaporation per unit of its sea's solid angle, kg m⁻² s⁻¹: Σ Ω E over
+    /// its cells (as Ē sums it) ÷ Σ Ω over its sea cells; a band with no sea its nearest band's
+    /// that has one, equatorward first; zero where none has.
+    pub(super) evaporation_kg_m2_s: Vec<f64>,
+    /// `s_b`, each band's sea share of its solid angle; a band with no sea its nearest band's that
+    /// has one, as `e_b`, so that the rate never divides by no sea; zero where none has.
+    pub(super) sea_shares: Vec<f64>,
+    /// `P_sea`, each band's sea's rate before the balance, kg m⁻² s⁻¹: max(0, `e_b` + `C_b`) where
+    /// the convergence `C_b` = −(E − P) ≥ 0, else max(0, `e_b` + `C_b` ÷ `s_b`), the divergent
+    /// band's export falling on its sea alone; zero where it diverges and no band has a sea.
+    pub(super) rates_kg_m2_s: Vec<f64>,
+    /// Each band's convergence max(0, `C_b`), kg m⁻² s⁻¹: the land's vapour source at the sea
+    /// level.
+    pub(super) convergence_kg_m2_s: Vec<f64>,
+}
+
+impl SeaBands {
+    /// The month's bands from each band's evaporation `evaporation_sums_kg_m2_s_sr` (Σ Ω E over
+    /// its cells, kg m⁻² s⁻¹ × sr), its solid angle `areas_sr`, its sea's `sea_areas_sr` and the
+    /// zonal budget's E − P `evaporation_less_precipitation_kg_m2_s`, one each a band. Where every
+    /// cell is sea, `e_b` is Ē and `s_b` is 1 to the bit, so that the rate is max(0, Ē − (E − P)).
+    ///
+    /// # Panics
+    ///
+    /// If a slice does not hold one value for each of the model's [`LATITUDE_BANDS`] bands.
+    #[must_use]
+    pub(super) fn of(
+        evaporation_sums_kg_m2_s_sr: &[f64],
+        areas_sr: &[f64],
+        sea_areas_sr: &[f64],
+        evaporation_less_precipitation_kg_m2_s: &[f64],
+    ) -> Self {
+        for (name, values) in [
+            ("evaporation sums", evaporation_sums_kg_m2_s_sr),
+            ("solid angles", areas_sr),
+            ("sea solid angles", sea_areas_sr),
+            ("E − P", evaporation_less_precipitation_kg_m2_s),
+        ] {
+            assert_eq!(
+                values.len(),
+                LATITUDE_BANDS,
+                "the bands' {name} hold one value a band"
+            );
+        }
+        let mut bands = Self {
+            evaporation_kg_m2_s: Vec::with_capacity(LATITUDE_BANDS),
+            sea_shares: Vec::with_capacity(LATITUDE_BANDS),
+            rates_kg_m2_s: Vec::with_capacity(LATITUDE_BANDS),
+            convergence_kg_m2_s: Vec::with_capacity(LATITUDE_BANDS),
+        };
+        for (band, &emp) in evaporation_less_precipitation_kg_m2_s.iter().enumerate() {
+            let (e, s) = nearest_band(band, |b| sea_areas_sr[b] > 0.0).map_or((0.0, 0.0), |b| {
+                (
+                    evaporation_sums_kg_m2_s_sr[b] / sea_areas_sr[b],
+                    sea_areas_sr[b] / areas_sr[b],
+                )
+            });
+            let c = -emp;
+            let rate = if c >= 0.0 {
+                e + c
+            } else if s > 0.0 {
+                e + c / s
+            } else {
+                0.0
+            };
+            bands.evaporation_kg_m2_s.push(e);
+            bands.sea_shares.push(s);
+            bands
+                .rates_kg_m2_s
+                .push(if rate > 0.0 { rate } else { 0.0 });
+            bands
+                .convergence_kg_m2_s
+                .push(if c > 0.0 { c } else { 0.0 });
+        }
+        bands
+    }
+}
+
+/// Field cell `cell`'s month `m` temperature at its surface in `working`, K: its climate cell's
+/// normalised month at its water surface (the ground, where it is dry), `T_sl` − Γ (`z_w` −
+/// `z_sea`) + `a_m`, no anomaly in a one-month year; the temperature evaporation reads at a
+/// liquid's surface and the frozen ground's test reads at the land's.
+#[must_use]
+fn surface_temperature_k(working: &Working, cell: u32, m: usize) -> f64 {
+    let field_cell = &working.cells[slot(cell)];
+    let state = &working.climate[slot(parent_index(cell))];
+    let surface = state.sea_level_temperature.value()
+        - working.lapse_rate_k_per_m
+            * (field_cell.water_surface.value() - working.sea_level.value());
+    let anomaly = if working.months == 12 {
+        state.month_anomaly_k[m]
+    } else {
+        0.0
+    };
+    surface + anomaly
+}
+
+/// Field cell `cell`'s ground in month `m` of `working`, where the model's ice forms as `freezing`
+/// says (decision-r09-t13e-revision §4.4): frozen where its month temperature at its surface
+/// ([`surface_temperature_k`]) lies below the freezing point, else thawed; never frozen where no
+/// ice forms.
+#[must_use]
+pub(super) fn ground_of(working: &Working, cell: u32, m: usize, freezing: Freezing) -> GroundState {
+    match freezing {
+        Freezing::At { point_k } if surface_temperature_k(working, cell, m) < point_k => {
+            GroundState::Frozen
+        }
+        Freezing::At { .. } | Freezing::Never { .. } => GroundState::Thawed,
+    }
 }
 
 /// The mass flux `edges` (one a band edge of `grid`) at the sine latitude `x`, linear in it
@@ -318,6 +495,12 @@ impl Evaporation {
     /// where not. A month is zero where the liquid's temperature, its climate cell's month at its
     /// water surface, lies below the freezing point; else min(1, α s ÷ (s + γ)) × max(0, β `S_abs` −
     /// `C_sea` dT/dt) ÷ L × (1 − its ice fraction), `S_abs` its grid point's.
+    ///
+    /// # Panics
+    ///
+    /// If `rates` does not hold one value for each of `working`'s months: the storage term reads
+    /// a twelve-month year from `rates` and the surface temperature from `working`, which must
+    /// agree.
     pub(super) fn rates(
         &self,
         pass: &Pass<'_>,
@@ -327,6 +510,11 @@ impl Evaporation {
         cell: u32,
         rates: &mut [f64],
     ) -> bool {
+        assert_eq!(
+            rates.len(),
+            usize::from(working.months),
+            "the evaporation's rates hold one value for each of the working state's months"
+        );
         rates.fill(0.0);
         let field_cell = &working.cells[slot(cell)];
         if !seas::under_sea(field_cell) || field_cell.liquid_entry != Some(self.entry) {
@@ -342,13 +530,10 @@ impl Evaporation {
                 0.0
             }
         };
-        let surface = state.sea_level_temperature.value()
-            - working.lapse_rate_k_per_m
-                * (field_cell.water_surface.value() - working.sea_level.value());
         let open = 1.0 - field_cell.ice_fraction;
         let latent = self.moisture.latent_heat_j_per_kg;
         for (m, rate) in rates.iter_mut().enumerate() {
-            let t_w = surface + anomaly(m);
+            let t_w = surface_temperature_k(working, cell, m);
             if self.freezing_k.is_some_and(|f| t_w < f) {
                 continue;
             }
@@ -463,12 +648,25 @@ fn water_cycle(
         })
         .collect();
     let land = cover.contains(&Cover::Land);
-    // Each field cell's local frame and its zonal stencil in the model's coordinates, the same
-    // every month.
+    // Each band's sea, and the land's solid angle, summed in cell-index order.
+    let (mut sea_area, mut land_area) = (vec![0.0; LATITUDE_BANDS], 0.0);
+    for ((&c, &band), &omega) in cover.iter().zip(&cell_band).zip(field.solid_angles_sr()) {
+        match c {
+            Cover::Sea => sea_area[band] += omega,
+            Cover::Land => land_area += omega,
+        }
+    }
+    // Each field cell's local frame, its local east about the model's pole (none at the pole)
+    // and its zonal stencil in the model's coordinates, the same every month.
     let frames: Vec<([f64; 3], [f64; 3])> = field
         .centres()
         .iter()
         .map(|&up| wind::east_north(up))
+        .collect();
+    let easts: Vec<Option<[f64; 3]>> = field
+        .centres()
+        .iter()
+        .map(|&up| wind::model_east(pole, up))
         .collect();
     let stencils: Vec<BandStencil> = field
         .centres()
@@ -480,20 +678,20 @@ fn water_cycle(
     let mut winds_used = Vec::with_capacity(months);
     let mut rates = vec![0.0; field.centres().len()];
     let mut sea_rates = vec![0.0; rates.len()];
+    let mut convergence = vec![0.0; rates.len()];
+    let mut ground = vec![GroundState::Thawed; rates.len()];
     // Each month's headings, field-cell winds and record sums, allocated once and refilled.
     let mut headings: Vec<wind::Heading> = Vec::with_capacity(working.climate.len());
     let mut cell_winds: Vec<CellWind> = Vec::with_capacity(frames.len());
     let mut sums: Vec<(f64, f64)> = Vec::with_capacity(working.climate.len());
     for (m, budget) in budgets.into_iter().enumerate() {
         let band_e = band_means(&band_evaporation[m], &band_area);
-        let large_scale: Vec<f64> = band_e
-            .iter()
-            .zip(&budget.evaporation_less_precipitation_kg_m2_s)
-            .map(|(&e, &emp)| {
-                let rate = e - emp;
-                if rate > 0.0 { rate } else { 0.0 }
-            })
-            .collect();
+        let sea = SeaBands::of(
+            &band_evaporation[m],
+            &band_area,
+            &sea_area,
+            &budget.evaporation_less_precipitation_kg_m2_s,
+        );
 
         // 4. The winds.
         let summer_edge_deg = {
@@ -538,9 +736,10 @@ fn water_cycle(
             codes.push(code);
         }
 
-        // 5. The large-scale rate over the sea, and the winds the orography reads: each field
-        // cell's wind is its climate cell's record read at its own centre (`wind::cell_wind`, with
-        // the cell's frame and the record's heading computed once).
+        // 5. The sea's rate, the land's source and ground, and the winds the orography reads: each
+        // field cell's wind is its climate cell's record read at its own centre
+        // (`wind::cell_wind`, with the cell's frame and the record's heading computed once),
+        // taken along the model's bands (`wind::along_bands`).
         headings.clear();
         headings.extend(
             working
@@ -552,54 +751,63 @@ fn water_cycle(
         cell_winds.extend(
             (0_u32..)
                 .zip(&frames)
-                .map(|(n, &frame)| wind::cell_wind_in(&headings[slot(parent_index(n))], frame)),
+                .zip(&easts)
+                .map(|((n, &frame), &east)| {
+                    wind::along_bands(
+                        wind::cell_wind_in(&headings[slot(parent_index(n))], frame),
+                        east,
+                    )
+                }),
         );
+        let band_winds = BandWinds::of(&cell_winds, &easts);
         let still = cell_winds.iter().all(|&w| w == CellWind::Calm);
-        for ((rate, stencil), &c) in sea_rates.iter_mut().zip(&stencils).zip(&cover) {
-            let reads = c == Cover::Sea || still;
-            *rate = if reads {
-                stencil.clamped(&large_scale)
-            } else {
-                0.0
-            };
+        let mut frozen_area = 0.0;
+        for (n, (((((rate, source), state), stencil), &c), &omega)) in (0_u32..).zip(
+            sea_rates
+                .iter_mut()
+                .zip(convergence.iter_mut())
+                .zip(ground.iter_mut())
+                .zip(&stencils)
+                .zip(&cover)
+                .zip(field.solid_angles_sr()),
+        ) {
+            match c {
+                Cover::Sea => {
+                    *rate = stencil.clamped(&sea.rates_kg_m2_s);
+                    *source = 0.0;
+                    *state = GroundState::Thawed;
+                }
+                Cover::Land => {
+                    *rate = 0.0;
+                    *source = stencil.clamped(&sea.convergence_kg_m2_s);
+                    *state = ground_of(working, n, m, model.freezing);
+                    if *state == GroundState::Frozen {
+                        frozen_area += omega;
+                    }
+                }
+            }
         }
         let evaporated = liquid_evaporation[m];
         let mut orographic = None;
         let mut recycled_shares: Option<Vec<f64>> = None;
         rates.fill(0.0);
         if evaporated > 0.0 && land {
-            if still {
-                recycled_shares = Some(
-                    heights_m
-                        .iter()
-                        .zip(&cover)
-                        .map(|(&z, &c)| match c {
-                            Cover::Land => parameters.recycled_share(z),
-                            Cover::Sea => 0.0,
-                        })
-                        .collect(),
-                );
-                for ((rate, &sea_rate), &c) in rates.iter_mut().zip(&sea_rates).zip(&cover) {
-                    if c == Cover::Land {
-                        *rate = sea_rate;
-                    }
-                }
-            } else {
-                let mesh = mesh.get_or_insert_with(|| Mesh::of_graph(field, inputs.radius()));
-                let solved = lfpm::solve(
-                    mesh,
-                    &Month {
-                        heights_m: &heights_m,
-                        cover: &cover,
-                        winds: &cell_winds,
-                        sea_rates_kg_m2_s: &sea_rates,
-                    },
-                    parameters,
-                );
-                rates.copy_from_slice(&solved.precipitation_kg_m2_s);
-                recycled_shares = Some(solved.recycled_shares);
-                orographic = Some(solved.diagnostics);
-            }
+            let mesh = mesh.get_or_insert_with(|| Mesh::of_graph(field, inputs.radius()));
+            let solved = lfpm::solve(
+                mesh,
+                &Month {
+                    heights_m: &heights_m,
+                    cover: &cover,
+                    ground: &ground,
+                    winds: &cell_winds,
+                    sea_rates_kg_m2_s: &sea_rates,
+                    convergence_kg_m2_s: &convergence,
+                },
+                parameters,
+            );
+            rates.copy_from_slice(&solved.precipitation_kg_m2_s);
+            recycled_shares = Some(solved.recycled_shares);
+            orographic = Some(solved.diagnostics);
         }
 
         // 6. The water balance.
@@ -660,12 +868,18 @@ fn water_cycle(
         }
         cycles.push(MonthCycle {
             budget,
-            large_scale_kg_m2_s: large_scale,
+            sea,
             band_evaporation_kg_m2_s: band_e,
             scale,
             liquid_evaporation_kg_m2_s: evaporated / sphere,
             recycled_kg_m2_s: recycled / sphere,
             precipitation_kg_m2_s: fallen / sphere,
+            frozen_land_share: if land_area > 0.0 {
+                frozen_area / land_area
+            } else {
+                0.0
+            },
+            band_winds,
             calm: still,
             orographic,
         });

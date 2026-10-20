@@ -54,11 +54,14 @@
 //!    month's zonal moisture budget, Siler et al.'s Hadley-cell partition of the model's own flux
 //!    centred on the month's energy-flux equator, held at Guendelman and Kaspi's ascending-branch
 //!    cap on a rotating world (`partition`); Priestley and Taylor's evaporation over the climate
-//!    condensable's own open liquid (`evaporation`); the large-scale rate; each climate cell's
-//!    10 m wind from the Hadley cells' mass flux and a Ferrel and polar template under a surface
-//!    drag, quantised and decoded into its record (`wind`); the orographic precipitation over land
-//!    along those winds (`lfpm`); and one factor a month that balances the global water. The
-//!    radiative and isothermal models write no precipitation and calm winds.
+//!    condensable's own open liquid (`evaporation`); the sea's rate, each band's sea evaporation
+//!    and its convergence, and the land's source, that convergence (R09.T13.j,
+//!    decision-r09-t13e-revision §4.1–§4.2); each climate cell's 10 m wind from the Hadley cells'
+//!    mass flux and a Ferrel and polar template under a surface drag, quantised and decoded into
+//!    its record (`wind`); the orographic precipitation over land along the model's bands, each
+//!    field cell's wind taken east, west or calm by its component along them (`lfpm`; §4.3); and
+//!    one factor a month that balances the global water. The radiative and isothermal models write
+//!    no precipitation and calm winds.
 //!
 //! A cell's surface temperature is its climate cell's sea-level temperature less
 //! Γ (z − `z_sea`) at its surface height z, the water's surface over water: what R10's classifier
@@ -88,7 +91,7 @@
 //! guard): a world whose every height above the sea level is zero is T13.a's to the bit.
 //! R09.T13.e built the precipitation heuristic and the winds (the pipeline's step 9): the
 //! orographic precipitation (`lfpm`), Hergarten and Robl 2022's linear feedback model on the
-//! field's cells, carried along a month's wind from the sea's large-scale rate, with the land's
+//! field's cells, carried along a month's wind from the sea's rate, with the land's
 //! runoff share, solved in the order of the month's upwind graph's strongly connected components,
 //! the small ones exactly and the members of each larger one in its flow order (Eades, Lin and
 //! Smyth's greedy order for the feedback arc set, the ruling's E-L8), by sweeps accelerated by
@@ -97,8 +100,12 @@
 //! budget (`partition`), the evaporation (`evaporation`) and the winds
 //! (`wind`); and their pipeline (`hydrology`), which writes each climate cell's monthly
 //! precipitation and 10 m wind, and `annual_runoff_kg_m2_s`, the runoff R09.T14 reads. Each
-//! month's record holds the wind its orographic step carried vapour along, as the record decodes
-//! it. R09.T13.f added the cold traps (`ice`, the pipeline's step 7): each ice's cold-trapped part,
+//! month's record holds the wind whose component along the model's bands its orographic step
+//! carried vapour along, as the record decodes it. R09.T13.j revised it for the land's water
+//! (decision-r09-t13e-revision): the sea rains its own evaporation plus its band's convergence,
+//! each land cell takes that convergence as a vapour source, the orographic model carries the
+//! sea's air along the bands, and frozen ground recycles nothing. R09.T13.f added the cold traps
+//! (`ice`, the pipeline's step 7): each ice's cold-trapped part,
 //! the inputs' `cold_traps`, placed after the zonal parts in one function in each field cell's
 //! cold-trap fraction, from one call of plan 14's `ColdTrapGround::fractions_at` a cell for every
 //! trapped substance, scaled over every cell to plan 14's area and held to the fraction, the
@@ -451,11 +458,13 @@ fn finish(pass: &Pass<'_>, working: &mut Working, mut model: Normalised) -> Diag
 }
 
 /// The annual runoff-generating rate of field cell `cell` of `working`, kg m⁻² s⁻¹, for R09.T14's
-/// erosion (decision-r09-t13ge §2.8, e8; Hergarten and Robl 2022, eqs. 44, 49): (1 − ε(z)) P,
-/// P its climate cell's annual mean precipitation (its months' rates weighted by their shares of
-/// the year), ε(z) the orographic model's recycled share at its surface's height z above the sea
-/// level ([`lfpm::runoff_kg_m2_s`]); zero over liquid, and on a world where nothing rains. T13.e
-/// writes no `runoff_m_per_year`: that is what the erosion took.
+/// erosion (decision-r09-t13ge §2.8, e8; Hergarten and Robl 2022, eqs. 44, 49): Σₘ sₘ (1 − εₘ) Pₘ
+/// over the months, sₘ each month's share of the year, Pₘ its climate cell's month rate and εₘ the
+/// orographic model's recycled share at its surface's height z above the sea level, ε₀ e^(−z/H₀)
+/// where its month temperature at its surface lies at or above the climate condensable's freezing
+/// point and none below it, where all that falls runs off ([`lfpm::runoff_kg_m2_s`],
+/// [`hydrology::ground_of`]; decision-r09-t13e-revision §4.5); zero over liquid, and on a world
+/// where nothing rains. T13.e writes no `runoff_m_per_year`: that is what the erosion took.
 ///
 /// # Panics
 ///
@@ -472,21 +481,22 @@ fn finish(pass: &Pass<'_>, working: &mut Working, mut model: Normalised) -> Diag
 pub(crate) fn annual_runoff_kg_m2_s(pass: &Pass<'_>, working: &Working, cell: u32) -> f64 {
     let state = &working.climate[usize::try_from(parent_index(cell)).expect("a cell fits a usize")];
     let months = usize::from(working.months);
-    let precipitation = month_shares(pass, months)
-        .iter()
-        .zip(&state.month_precipitation_kg_m2_s)
-        .fold(0.0, |sum, (&share, &rate)| sum + share * rate);
     let field_cell = &working.cells[usize::try_from(cell).expect("a cell fits a usize")];
     let cover = if seas::under_sea(field_cell) {
         lfpm::Cover::Sea
     } else {
         lfpm::Cover::Land
     };
-    lfpm::runoff_kg_m2_s(
-        precipitation,
-        field_cell.water_surface.value() - working.sea_level.value(),
-        cover,
-    )
+    let height_m = field_cell.water_surface.value() - working.sea_level.value();
+    let freezing = ebm::Freezing::of(pass.inputs());
+    month_shares(pass, months)
+        .iter()
+        .zip(&state.month_precipitation_kg_m2_s)
+        .enumerate()
+        .fold(0.0, |sum, (m, (&share, &rate))| {
+            let ground = hydrology::ground_of(working, cell, m, freezing);
+            sum + share * lfpm::runoff_kg_m2_s(rate, height_m, cover, ground)
+        })
 }
 
 /// The field cells' area-weighted mean surface temperature of `working`, K: each cell's climate

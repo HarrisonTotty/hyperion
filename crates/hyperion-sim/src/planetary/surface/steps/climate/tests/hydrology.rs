@@ -1,6 +1,8 @@
 //! R09.T13.e's tests: the precipitation heuristic and the winds, wired into the step
-//! (decision-r09-t13ge §2.13's, with the water cycle's own). The orographic model's own (the ridge,
-//! the inland decay, the runoff's share) are `lfpm`'s.
+//! (decision-r09-t13ge §2.13's, with the water cycle's own), as R09.T13.j's revision for the land's
+//! water amends them (decision-r09-t13e-revision §6.3 and its plan text (b)). The orographic
+//! model's own (the ridge, the inland decay, the land's vapour source, the runoff's share) are
+//! `lfpm`'s.
 
 use hyperion_surface::field::{
     FieldView, LogPrecipitation, PaletteRole, PrecipitationSource, Wind, coarse_level,
@@ -8,11 +10,12 @@ use hyperion_surface::field::{
 use hyperion_surface::spheroid::Spheroid;
 
 use super::super::coordinates::Coordinates;
-use super::super::ebm::EnergyBalance;
-use super::super::grid::{LATITUDE_BANDS, ModelGrid};
-use super::super::hydrology::{self, Evaporation, MonthCycle};
+use super::super::ebm::{EnergyBalance, Freezing, ICE_FREE_ALBEDO};
+use super::super::grid::{BandStencil, LATITUDE_BANDS, ModelGrid};
+use super::super::hydrology::{self, BandWinds, Evaporation, MonthCycle, SeaBands};
 use super::super::lfpm::{
-    self, EARTH_DEEP_TOLERANCE, MAX_RESTARTS, Parameters, RATE_FLOOR_SHARE, TOLERANCE,
+    self, CellWind, Cover, DOWNWIND_TOLERANCE, EARTH_DEEP_TOLERANCE, GroundState, MAX_RESTARTS,
+    Mesh, Month, Parameters, RATE_FLOOR_SHARE, TOLERANCE,
 };
 use super::super::wind;
 use super::super::{
@@ -22,18 +25,43 @@ use super::super::{
 use super::normalisation::titan_with_basins;
 use super::other_regimes::venus_like;
 use super::{
-    EARTH_HYPSOMETRY_M, SEA_LEVEL_LAND, builder_of, grids, locked_earth, set_ground, synthetic_sea,
+    EARTH_HYPSOMETRY_M, SEA_LEVEL_LAND, builder_of, direction, grids, locked_earth, set_ground,
+    synthetic_sea,
 };
 use crate::math;
 use crate::planetary::surface::grid::{CellGraph, parent_index};
 use crate::planetary::surface::inputs::{CoarseInputs, SeasonalOrbit, Spin};
 use crate::planetary::surface::steps::{Pass, Working};
 use crate::planetary::surface::{quantise, reference, steps};
+use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 use crate::units::{Metres, Pascals, Radians, Seconds};
 use hyperion_testkit::float::assert_same_bits;
 
 /// Seconds in a day, for rates in mm of water a day (1 kg m⁻² of water is 1 mm).
 const DAY_S: f64 = 86_400.0;
+
+/// Köppen–Geiger's arid climates' bound on the mean annual precipitation as a multiple of its
+/// threshold, "MAP < 10 × `P_threshold`" (Peel, M. C., Finlayson, B. L., and McMahon, T. A. 2007,
+/// Hydrol. Earth Syst. Sci. 11, 1633, Table 1; "Peel et al. 2007" below), as
+/// `hyperion_surface::material::classify` codes its "Arid" regime (plan 10's T1.b rule), whose
+/// constants are crate-private.
+const KOPPEN_ARID_MULTIPLE: f64 = 10.0;
+
+/// Köppen–Geiger's threshold's offset where the summer half-year holds 70% of the precipitation,
+/// mm a year: `P_threshold` = 2 MAT + 28 (Peel et al. 2007, Table 1).
+const KOPPEN_SUMMER_OFFSET_MM: f64 = 28.0;
+
+/// Köppen–Geiger's threshold's offset where neither half-year holds 70% of the precipitation, mm a
+/// year: `P_threshold` = 2 MAT + 14 (Peel et al. 2007, Table 1). Where the winter
+/// half holds it the threshold is 2 MAT, no offset.
+const KOPPEN_EVEN_OFFSET_MM: f64 = 14.0;
+
+/// The share of the year's precipitation in one half-year at which Köppen–Geiger's threshold takes
+/// that half's offset: 70% (Peel et al. 2007, Table 1; the classifier holds it at or above).
+const KOPPEN_SEASONAL_SHARE: f64 = 0.7;
+
+/// The kelvin of 0 °C, which Köppen–Geiger's temperatures are in.
+const ZERO_CELSIUS_K: f64 = 273.15;
 
 /// GPCP v2.3's annual zonal-mean precipitation over 1991–2020, mm/day, at each 2.5° band from
 /// 88.75° S: the long-term monthly means of NOAA PSL (`precip.mon.ltm.1991-2020.nc`), zonal means
@@ -58,6 +86,97 @@ const GPCP_ANNUAL_MM_PER_DAY: [f64; LATITUDE_BANDS] = [
 /// model, not asserted (`NOTICE`, "Test data (not shipped)").
 const NCEP_TRADES_V_M_S: [(f64, f64); 4] =
     [(12.5, -1.05), (17.5, -1.27), (-12.5, 1.83), (-17.5, 1.77)];
+
+/// A box of the sphere that holds the climate cells whose centres lie in it, its bounds included:
+/// latitude `south` to `north` and longitude `west` to `east`, degrees, the longitude east of the
+/// +x meridian, atan2(y, x), in (−180°, 180°].
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Region {
+    /// The southern bound, degrees of latitude.
+    south: f64,
+    /// The northern bound, degrees of latitude.
+    north: f64,
+    /// The western bound, degrees of longitude.
+    west: f64,
+    /// The eastern bound, degrees of longitude.
+    east: f64,
+}
+
+impl Region {
+    /// The band from latitude `south` to `north`, degrees, at every longitude.
+    const fn band(south: f64, north: f64) -> Self {
+        Self {
+            south,
+            north,
+            west: -180.0,
+            east: 180.0,
+        }
+    }
+
+    /// Whether it holds the centre at latitude `latitude` and longitude `longitude`, degrees.
+    fn holds(&self, latitude: f64, longitude: f64) -> bool {
+        (self.south..=self.north).contains(&latitude)
+            && (self.west..=self.east).contains(&longitude)
+    }
+}
+
+/// Eurasia's interior (decision-r09-t13e-revision §6.3, new assertion 1): 50–60° N, 40–100° E,
+/// its bounds the ruling's estimate script `model1d.py`'s (§3.1).
+const EURASIA_INTERIOR: Region = Region {
+    south: 50.0,
+    north: 60.0,
+    west: 40.0,
+    east: 100.0,
+};
+
+/// Eurasia's Atlantic margin, which its interior is measured against (decision-r09-t13e-revision
+/// §6.3): 50–60° N, 10° W–20° E, its bounds the ruling's estimate script `model1d.py`'s (§3.1).
+const EURASIA_COAST: Region = Region {
+    south: 50.0,
+    north: 60.0,
+    west: -10.0,
+    east: 20.0,
+};
+
+/// The latitudes whose arid share R10 needs held (decision-r09-t13e-revision §6.3, new assertion
+/// 2): 40–70° N, its bounds the ruling's estimate script `model1d.py`'s (§3.1).
+const ARID_NORTH: Region = Region::band(40.0, 70.0);
+
+/// The latitudes whose arid share is printed beside [`ARID_NORTH`]'s: 60° S–70° N, its bounds the
+/// ruling's estimate script `model1d.py`'s (decision-r09-t13e-revision §3.1).
+const ARID_WIDE: Region = Region::band(-60.0, 70.0);
+
+/// The Antarctic plateau's latitudes (decision-r09-t13e-revision §6.3, printed): 75° S and south,
+/// its climate cells taken where their four field cells' mean height exceeds
+/// [`PLATEAU_HEIGHT_M`]; its bounds the ruling's estimate script `model1d.py`'s (§3.1).
+const ANTARCTIC: Region = Region::band(-90.0, -75.0);
+
+/// The height above the sea level above which an Antarctic climate cell is on the plateau, m:
+/// 2 km, §6.3's "land cells south of 75° S above 2 km" (decision-r09-t13e-revision).
+const PLATEAU_HEIGHT_M: f64 = 2_000.0;
+
+/// The Amazon's box (decision-r09-t13e-revision §6.3, printed): 10° S–2° N, 72°–50° W, its
+/// bounds the ruling's estimate script `model1d.py`'s (§3.1).
+const AMAZON: Region = Region {
+    south: -10.0,
+    north: 2.0,
+    west: -72.0,
+    east: -50.0,
+};
+
+/// Central Asia's box (decision-r09-t13e-revision §6.3 and E-P9, printed): 43–50° N, 55–80° E,
+/// its bounds the ruling's estimate script `model1d.py`'s (§3.1).
+const CENTRAL_ASIA: Region = Region {
+    south: 43.0,
+    north: 50.0,
+    west: 55.0,
+    east: 80.0,
+};
+
+/// The E-L7 patch (decision-r09-t13e-lfpm-convergence §5, decision-r09-t13e-revision §5.1): the
+/// coarse pass's reference Earth's land convergence line near 1.11° N, 54.26° E, degrees of
+/// latitude and longitude.
+const E_L7_PATCH_DEG: (f64, f64) = (1.11, 54.26);
 
 /// The grid a test runs the energy-balance model on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,6 +286,200 @@ impl Run {
             })
             .unzip()
     }
+
+    /// Each climate cell's count of land field cells, those not under liquid
+    /// ([`seas::under_sea`]): 4 where it is all land, 0 where it is all sea.
+    fn land_counts(&self) -> Vec<u8> {
+        self.working
+            .cells
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|cells| {
+                cells
+                    .iter()
+                    .map(|cell| u8::from(!seas::under_sea(cell)))
+                    .sum()
+            })
+            .collect()
+    }
+
+    /// Each climate cell's four field cells' mean height above the sea level, m: the solid-angle
+    /// mean of their water surfaces less the sea level (the ground's, where dry), as its rate is
+    /// theirs.
+    fn mean_heights_m(&self) -> Vec<f64> {
+        let sea_level = self.working.sea_level.value();
+        self.working
+            .cells
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(self.field.solid_angles_sr().as_chunks::<4>().0)
+            .map(|(cells, omegas)| {
+                let (sum, area) =
+                    cells
+                        .iter()
+                        .zip(omegas)
+                        .fold((0.0, 0.0), |(sum, area), (cell, &omega)| {
+                            (
+                                sum + omega * (cell.water_surface.value() - sea_level),
+                                area + omega,
+                            )
+                        });
+                sum / area
+            })
+            .collect()
+    }
+
+    /// The solid-angle mean of `values` (one a climate cell) over the climate cells `keep` admits
+    /// by their index and their centre's latitude and longitude ([`latitude_longitude_deg`]), and
+    /// their count; NaN where it admits none.
+    fn mean_where(&self, values: &[f64], keep: impl Fn(usize, f64, f64) -> bool) -> (f64, u32) {
+        let (mut sum, mut area, mut cells) = (0.0, 0.0, 0_u32);
+        for (c, ((centre, &omega), &v)) in self
+            .climate
+            .centres()
+            .iter()
+            .zip(self.climate.solid_angles_sr())
+            .zip(values)
+            .enumerate()
+        {
+            let (latitude, longitude) = latitude_longitude_deg(*centre);
+            if keep(c, latitude, longitude) {
+                sum += omega * v;
+                area += omega;
+                cells += 1;
+            }
+        }
+        (if area > 0.0 { sum / area } else { f64::NAN }, cells)
+    }
+
+    /// Each climate cell's Köppen–Geiger inputs: its mean precipitation in mm a Julian year,
+    /// Σ sₘ Pₘ × 31,557,600 s (1 kg m⁻² of water is 1 mm); its annual mean temperature at its own
+    /// height, its sea-level temperature less Γ times its four field cells' mean height
+    /// ([`Run::mean_heights_m`]); and the share of its precipitation, each month's sₘ Pₘ, in its
+    /// six warmest months by its month temperature `T_sl` + aₘ, ties to the earlier month, summed
+    /// warmest first, as the classifier's `summer_share` does (none in a one-month year).
+    fn koppen(&self) -> Vec<Koppen> {
+        let months = usize::from(self.working.months);
+        let shares = month_shares(&self.pass(), months);
+        let lapse = self.working.lapse_rate_k_per_m;
+        self.working
+            .climate
+            .iter()
+            .zip(self.mean_heights_m())
+            .map(|(state, height_m)| {
+                let fallen = |m: usize| shares[m] * state.month_precipitation_kg_m2_s[m];
+                let precipitation_mm =
+                    (0..months).fold(0.0, |sum, m| sum + fallen(m)) * SECONDS_PER_JULIAN_YEAR;
+                let sea_level_k = state.sea_level_temperature.value();
+                let celsius = sea_level_k - lapse * height_m - ZERO_CELSIUS_K;
+                let summer_share = (months == 12 && precipitation_mm > 0.0).then(|| {
+                    let mut warmest: [(f64, usize); 12] =
+                        core::array::from_fn(|m| (sea_level_k + state.month_anomaly_k[m], m));
+                    warmest.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+                    warmest[..6]
+                        .iter()
+                        .fold(0.0, |sum, &(_, m)| sum + fallen(m))
+                        * SECONDS_PER_JULIAN_YEAR
+                        / precipitation_mm
+                });
+                Koppen {
+                    precipitation_mm,
+                    celsius,
+                    summer_share,
+                }
+            })
+            .collect()
+    }
+
+    /// Whether each climate cell is arid by Köppen–Geiger's bound at its own temperature
+    /// ([`is_arid`]) on its inputs ([`Run::koppen`]).
+    fn arid(&self) -> Vec<bool> {
+        self.koppen()
+            .iter()
+            .map(|k| is_arid(k.precipitation_mm, k.celsius, k.summer_share))
+            .collect()
+    }
+}
+
+/// A climate cell's Köppen–Geiger inputs ([`Run::koppen`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Koppen {
+    /// Its mean precipitation, mm a Julian year.
+    precipitation_mm: f64,
+    /// Its annual mean temperature at its own height, °C.
+    celsius: f64,
+    /// The share of its precipitation in its six warmest months; `None` in a one-month year or
+    /// where nothing falls.
+    summer_share: Option<f64>,
+}
+
+/// Which half-year holds a climate cell's precipitation, by Köppen–Geiger's 70% (Peel et al. 2007,
+/// Table 1; [`KOPPEN_SEASONAL_SHARE`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WarmHalf {
+    /// Its six warmest months hold at least 70% of the year's precipitation: summer-heavy.
+    Summer,
+    /// Its six coldest do: winter-heavy.
+    Winter,
+    /// Neither does, or the year has one month.
+    Neither,
+}
+
+impl WarmHalf {
+    /// The half-year of a cell whose six warmest months hold `summer_share` of its precipitation
+    /// (`None` in a one-month year or where nothing falls), the summer tested first, as the
+    /// classifier tests it.
+    fn of(summer_share: Option<f64>) -> Self {
+        match summer_share {
+            Some(summer) if summer >= KOPPEN_SEASONAL_SHARE => Self::Summer,
+            Some(summer) if 1.0 - summer >= KOPPEN_SEASONAL_SHARE => Self::Winter,
+            _ => Self::Neither,
+        }
+    }
+}
+
+/// Whether a climate cell whose mean precipitation is `precipitation_mm` (a Julian year) and whose
+/// annual mean temperature at its own height is `celsius` (°C) is arid, `summer_share` the share of
+/// its precipitation in its six warmest months (`None` in a one-month year): coded exactly as
+/// `hyperion_surface::material::classify` documents its "Arid" regime (plan 10's T1.b rule; the
+/// classifier's predicate, `is_arid`, is crate-private). It is arid where nothing falls, or where
+/// MAP < 10 (2T + offset) mm a year, the offset 28 mm where the summer half holds at least 70% of
+/// the precipitation, none where the winter half does, and 14 mm otherwise or in a one-month year
+/// ([`WarmHalf::of`]; Peel et al. 2007, Hydrol. Earth Syst. Sci. 11, 1633, Table 1;
+/// [`KOPPEN_ARID_MULTIPLE`]).
+fn is_arid(precipitation_mm: f64, celsius: f64, summer_share: Option<f64>) -> bool {
+    if precipitation_mm <= 0.0 {
+        return true;
+    }
+    let offset = match WarmHalf::of(summer_share) {
+        WarmHalf::Summer => KOPPEN_SUMMER_OFFSET_MM,
+        WarmHalf::Winter => 0.0,
+        WarmHalf::Neither => KOPPEN_EVEN_OFFSET_MM,
+    };
+    precipitation_mm < KOPPEN_ARID_MULTIPLE * (2.0 * celsius + offset)
+}
+
+/// The latitude and longitude of the body-frame unit vector `d`, degrees: the longitude
+/// atan2(y, x), east of the +x meridian, as [`assert_the_solve_converges`] reads it.
+fn latitude_longitude_deg(d: [f64; 3]) -> (f64, f64) {
+    (latitude_deg(d), math::atan2(d[1], d[0]).to_degrees())
+}
+
+/// a · b.
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+/// max(0, `x`), as the water cycle clamps a rate: `x` where it is positive, else zero.
+fn positive(x: f64) -> f64 {
+    if x > 0.0 { x } else { 0.0 }
+}
+
+/// The index into a vector of cell `cell`.
+fn slot(cell: u32) -> usize {
+    usize::try_from(cell).expect("a cell index fits a usize")
 }
 
 /// The latitude of the body-frame unit vector `d`, degrees.
@@ -397,34 +710,26 @@ fn report(name: &str, run: &Run) {
     report_winds(run);
 }
 
-/// [`report`]'s bands: the annual zonal precipitation, its parts and GPCP's.
+/// [`report`]'s bands: the annual zonal precipitation, its parts and GPCP's, and the zonal
+/// budget's sea and source (decision-r09-t13e-revision §4.1, §4.2): k `P_sea`, `e_b`, `s_b` and
+/// max(0, C), each month's band value weighted by its share.
 fn report_bands(name: &str, run: &Run) {
     let annual = run.annual_precipitation();
     let zonal = run.zonal(&annual);
     let grid = ModelGrid::zonal();
     // Each climate cell's cover: its four field cells all sea, all land, or mixed.
-    let seas_of: Vec<u8> = (0..run.climate.len())
-        .map(|c| {
-            (0..4)
-                .map(|k| {
-                    u8::from(seas::under_sea(
-                        &run.working.cells[4 * usize::try_from(c).unwrap() + k],
-                    ))
-                })
-                .sum()
-        })
-        .collect();
+    let land_of = run.land_counts();
     let part = |wanted: u8| -> Vec<f64> {
         let (mut sums, mut areas) = (vec![0.0; LATITUDE_BANDS], vec![0.0; LATITUDE_BANDS]);
-        for (((centre, &omega), &p), &s) in run
+        for (((centre, &omega), &p), &l) in run
             .climate
             .centres()
             .iter()
             .zip(run.climate.solid_angles_sr())
             .zip(&annual)
-            .zip(&seas_of)
+            .zip(&land_of)
         {
-            if s == wanted {
+            if l == wanted {
                 let band = ModelGrid::band_of(centre[2]);
                 sums[band] += omega * p;
                 areas[band] += omega;
@@ -435,23 +740,29 @@ fn report_bands(name: &str, run: &Run) {
             .map(|(s, a)| if *a > 0.0 { s / a } else { f64::NAN })
             .collect()
     };
-    let (sea, land) = (part(4), part(0));
-    let rates = annual_bands(run, |c, k| c.scale * c.large_scale_kg_m2_s[k]);
+    let (sea, land) = (part(0), part(4));
+    let rates = annual_bands(run, |c, k| c.scale * c.sea.rates_kg_m2_s[k]);
+    let sea_evaporation = annual_bands(run, |c, k| c.sea.evaporation_kg_m2_s[k]);
+    let sea_shares = annual_bands(run, |c, k| c.sea.sea_shares[k]);
+    let convergence = annual_bands(run, |c, k| c.sea.convergence_kg_m2_s[k]);
     let evaporation = annual_bands(run, |c, k| c.band_evaporation_kg_m2_s[k]);
     let budget = annual_budget(run);
     eprintln!(
         "{name}: annual zonal precipitation, mm/day, against GPCP v2.3 (1991–2020); the all-sea \
-         and all-land climate cells' means, k P_ls, the bands' Ē and E − P"
+         and all-land climate cells' means, k P_sea, the bands' e_b, s_b, max(0, C), Ē and E − P"
     );
     for (band, (&p, &gpcp)) in zonal.iter().zip(&GPCP_ANNUAL_MM_PER_DAY).enumerate() {
         eprintln!(
-            "  {:7.2}°  {:5.2}  GPCP {gpcp:5.2}  sea {:5.2} land {:5.2}  k P_ls {:5.2}  Ē {:5.2}  \
-             E − P {:+5.2}",
+            "  {:7.2}°  {:5.2}  GPCP {gpcp:5.2}  sea {:5.2} land {:5.2}  k P_sea {:5.2}  e_b {:5.2}  \
+             s_b {:5.3}  max(0, C) {:5.2}  Ē {:5.2}  E − P {:+5.2}",
             degrees(grid.centre_sine(band)),
             p * DAY_S,
             sea[band] * DAY_S,
             land[band] * DAY_S,
             rates[band] * DAY_S,
+            sea_evaporation[band] * DAY_S,
+            sea_shares[band],
+            convergence[band] * DAY_S,
             evaporation[band] * DAY_S,
             budget[band] * DAY_S
         );
@@ -466,16 +777,20 @@ fn report_summary(run: &Run) {
     let zonal = run.zonal(&annual);
     let shares = month_shares(&run.pass(), water.months.len());
     let grid = ModelGrid::zonal();
-    let large_scale = annual_bands(run, |c, k| c.large_scale_kg_m2_s[k]);
+    let sea_rates = annual_bands(run, |c, k| c.sea.rates_kg_m2_s[k]);
+    let sea_evaporation = annual_bands(run, |c, k| c.sea.evaporation_kg_m2_s[k]);
+    let convergence = annual_bands(run, |c, k| c.sea.convergence_kg_m2_s[k]);
     let evaporation = annual_bands(run, |c, k| c.band_evaporation_kg_m2_s[k]);
     let budget = annual_budget(run);
     for (low, high) in [(40.0, 60.0), (15.0, 35.0), (-60.0, -40.0), (-35.0, -15.0)] {
         eprintln!(
             "  window {low:5.1}° to {high:5.1}°: P {:.2} mm/day, GPCP {:.2}; the zonal budget's \
-             P_ls {:.2}, Ē {:.2}, E − P {:+.2}",
+             P_sea {:.2}, e_b {:.2}, max(0, C) {:.2}, Ē {:.2}, E − P {:+.2}",
             run.window(&annual, low, high) * DAY_S,
             band_window(&GPCP_ANNUAL_MM_PER_DAY, low, high),
-            band_window(&large_scale, low, high) * DAY_S,
+            band_window(&sea_rates, low, high) * DAY_S,
+            band_window(&sea_evaporation, low, high) * DAY_S,
+            band_window(&convergence, low, high) * DAY_S,
             band_window(&evaporation, low, high) * DAY_S,
             band_window(&budget, low, high) * DAY_S
         );
@@ -514,8 +829,9 @@ fn report_summary(run: &Run) {
     );
 }
 
-/// [`report`]'s months: each month's energy-flux equator, centre, factor and rate, and its
-/// orographic solve's iteration, components and budget.
+/// [`report`]'s months: each month's energy-flux equator, centre, factor and rate, its land's
+/// frozen share, its field cells' orographic winds along the model's bands, and its orographic
+/// solve's iteration, components, source and budget.
 fn report_months(run: &Run) {
     for (m, cycle) in run.water().months.iter().enumerate() {
         let solve = cycle.orographic.as_ref().map_or_else(String::new, |d| {
@@ -524,7 +840,7 @@ fn report_months(run: &Run) {
                 "; land {} cells, {} restarts, {} sweeps, measure {:.1e}{} (residual {:.1e}); \
                  components of 1: {}, 2: {}, 3–16: {}, > 16: {} ({} cells, the largest {}), the \
                  flow order's backward share {:.4} (the largest's {:.4}); {} below zero; the \
-                 budget's closure {:.1e}",
+                 source {:.4e} kg/s ({:.3} of inflow + source); the budget's closure {:.1e}",
                 d.land_cells,
                 d.restarts,
                 d.sweeps,
@@ -540,23 +856,33 @@ fn report_months(run: &Run) {
                 d.backward_share,
                 d.largest_backward_share,
                 d.negative_cells,
+                d.source_kg_s,
+                d.source_kg_s / (d.inflow_kg_s + d.source_kg_s),
                 closure(d)
             )
         });
+        let winds = &cycle.band_winds;
         eprintln!(
-            "  month {m:2}: EFE {:+6.2}°, centre {:+6.2}°, k {:.4}, P {:.3} mm/day{}{solve}",
+            "  month {m:2}: EFE {:+6.2}°, centre {:+6.2}°, k {:.4}, P {:.3} mm/day, frozen land \
+             {:.4}; the field cells' winds along the bands east {} west {} calm {}{}{solve}",
             degrees(cycle.budget.efe_sine),
             degrees(cycle.budget.centre_sine),
             cycle.scale,
             cycle.precipitation_kg_m2_s * DAY_S,
+            cycle.frozen_land_share,
+            winds.eastward,
+            winds.westward,
+            winds.calm,
             if cycle.calm { ", wholly calm" } else { "" }
         );
     }
 }
 
-/// The orographic solve's land budget's closure, (inflow − runoff − outflow) ÷ inflow.
+/// The orographic solve's land budget's closure, (inflow + source − runoff − outflow) ÷ (inflow +
+/// source).
 fn closure(d: &lfpm::Diagnostics) -> f64 {
-    (d.inflow_kg_s - d.runoff_kg_s - d.outflow_kg_s) / d.inflow_kg_s
+    let given = d.inflow_kg_s + d.source_kg_s;
+    (given - d.runoff_kg_s - d.outflow_kg_s) / given
 }
 
 /// The largest error of `values` against `reference` (one a climate cell) over the climate cells
@@ -697,58 +1023,266 @@ fn report_winds(run: &Run) {
     );
 }
 
-/// The ruled Earth test (decision-r09-t13ge §2.13, e9, as decision-r09-t13e-asbuilt §1.5 rules
-/// it) on the reference Earth: R09.T13.g's synthetic sea, Natural Earth's land by 2.5° × 5° box,
-/// its heights R09.T13.g's band eighths placed by each box's Earth2014 median land height
-/// ([`synthetic_earth`]), the whole step at level 7 on its geographic model, printed against
-/// GPCP v2.3 and NCEP/NCAR R1. In the southern hemisphere the annual zonal precipitation's
-/// solid-angle mean over 40–60° exceeds that over 15–35°; in each hemisphere the zonal budget's
-/// annual E − P has a negative solid-angle mean over 40–60° and a positive one over 15–35°
-/// ([`assert_the_budget_s_pattern`]); and the precipitation's maximum within 30° of the equator
-/// lies within 10° of the annual energy-flux equator.
+/// The regional figures the ruled Earth test asserts (decision-r09-t13e-revision §6.3): annual
+/// means over the all-land climate cells, kg m⁻² s⁻¹, or a share of their solid angle; NaN where a
+/// region holds none.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Regions {
+    /// Eurasia's interior's mean ([`EURASIA_INTERIOR`]).
+    interior: f64,
+    /// Eurasia's Atlantic margin's mean ([`EURASIA_COAST`]).
+    coast: f64,
+    /// The arid share of 40–70° N ([`ARID_NORTH`]; [`Run::arid`]).
+    arid_north: f64,
+}
+
+/// Prints a run's regional figures (decision-r09-t13e-revision §6.3, printed and recorded) and
+/// returns those the ruled Earth test asserts: each window's (40–60° and 15–35° in each
+/// hemisphere) all-land and all-sea climate cells' annual means beside its whole mean; Eurasia's
+/// interior over its Atlantic margin, with their means; the arid shares of 40–70° N and 60° S–70° N
+/// ([`Run::arid`]); and the annual means of the Antarctic plateau, the Amazon and Central Asia,
+/// each over its all-land climate cells, mm/day. A region with no all-land climate cell prints NaN.
+fn report_regions(run: &Run) -> Regions {
+    let annual = run.annual_precipitation();
+    let land = run.land_counts();
+    let mean_of = |values: &[f64], region: Region, cover: u8| {
+        run.mean_where(values, |c, latitude, longitude| {
+            land[c] == cover && region.holds(latitude, longitude)
+        })
+    };
+    for (low, high) in [(40.0, 60.0), (15.0, 35.0), (-60.0, -40.0), (-35.0, -15.0)] {
+        let window = Region::band(low, high);
+        let ((on_land, land_cells), (on_sea, sea_cells)) =
+            (mean_of(&annual, window, 4), mean_of(&annual, window, 0));
+        eprintln!(
+            "  window {low:+5.1}° to {high:+5.1}°: P {:.2} mm/day; its all-land climate cells \
+             {:.2} ({land_cells} cells), its all-sea {:.2} ({sea_cells})",
+            run.window(&annual, low, high) * DAY_S,
+            on_land * DAY_S,
+            on_sea * DAY_S
+        );
+    }
+    let ((interior, inland), (coast, coastal)) = (
+        mean_of(&annual, EURASIA_INTERIOR, 4),
+        mean_of(&annual, EURASIA_COAST, 4),
+    );
+    eprintln!(
+        "  Eurasia's interior (50–60° N, 40–100° E; {inland} all-land climate cells) {:.3} mm/day \
+         over its Atlantic margin (10° W–20° E; {coastal}) {:.3}: {:.3}",
+        interior * DAY_S,
+        coast * DAY_S,
+        interior / coast
+    );
+    let arid: Vec<f64> = run
+        .arid()
+        .into_iter()
+        .map(|arid| f64::from(u8::from(arid)))
+        .collect();
+    let ((arid_north, north_cells), (arid_wide, wide_cells)) =
+        (mean_of(&arid, ARID_NORTH, 4), mean_of(&arid, ARID_WIDE, 4));
+    eprintln!(
+        "  arid by Köppen–Geiger's bound at their own temperatures: {arid_north:.3} of the all-land \
+         climate cells' solid angle at 40–70° N ({north_cells} cells), {arid_wide:.3} at 60° S–70° \
+         N ({wide_cells})"
+    );
+    let heights = run.mean_heights_m();
+    let (plateau, plateau_cells) = run.mean_where(&annual, |c, latitude, longitude| {
+        land[c] == 4 && heights[c] > PLATEAU_HEIGHT_M && ANTARCTIC.holds(latitude, longitude)
+    });
+    let ((amazon, amazon_cells), (asia, asia_cells)) = (
+        mean_of(&annual, AMAZON, 4),
+        mean_of(&annual, CENTRAL_ASIA, 4),
+    );
+    eprintln!(
+        "  annual means, mm/day, of the all-land climate cells: the Antarctic plateau (75° S and \
+         south, above 2 km; {plateau_cells} cells) {:.3}; the Amazon (10° S–2° N, 72°–50° W; \
+         {amazon_cells}) {:.3}; Central Asia (43–50° N, 55–80° E; {asia_cells}) {:.3}",
+        plateau * DAY_S,
+        amazon * DAY_S,
+        asia * DAY_S
+    );
+    Regions {
+        interior,
+        coast,
+        arid_north,
+    }
+}
+
+/// Prints a run's balance factor k by month (decision-r09-t13ge §2.8, e8), and returns them.
+fn report_balance(run: &Run) -> Vec<f64> {
+    let factors: Vec<f64> = run.water().months.iter().map(|c| c.scale).collect();
+    let printed: Vec<String> = factors.iter().map(|k| format!("{k:.4}")).collect();
+    eprintln!("  the balance's factor k by month: {}", printed.join(", "));
+    factors
+}
+
+/// The reference Earth's months, from 0, whose spans' midpoints fall in December–February: months
+/// 11, 0 and 1, whose midpoints lie 352.8, 17.5 and 47.5 days after 1 January. Its months are
+/// equal spans of eccentric anomaly from periapsis ([`month_shares`]; e = 0.0167, a sidereal year),
+/// and periapsis falls about 3 January (Earth's perihelion, from memory): 2.5 days after 1 January,
+/// which puts the reference Earth's March equinox, at true anomaly 77.05°, on 20 March.
+const DJF_MONTHS: [usize; 3] = [11, 0, 1];
+
+/// The reference Earth's months whose spans' midpoints fall in June–August, as [`DJF_MONTHS`]:
+/// months 5, 6 and 7, at 169.7, 200.6 and 231.4 days after 1 January.
+const JJA_MONTHS: [usize; 3] = [5, 6, 7];
+
+/// Prints E-P11's seasons on a run of the reference Earth (decision-r09-t13e-revision, "E-P11
+/// (follow-up)" §4, printed and not asserted), each over the all-land climate cells:
 ///
-/// The northern hemisphere's two windows are printed beside GPCP's, not asserted: on Earth's
-/// geography the storm track's over the subtropics' reads 0.99–1.04 as the relief's placement
-/// moves it (1.00 as built), inside what that placement alone moves it by, against GPCP's 1.27
-/// (decision-r09-t13e-asbuilt §1.2, §1.5; plan 09's deferred finding E-P1, whose revision restores
-/// the assertion).
+/// - the 40–60° N land's DJF and JJA means ([`DJF_MONTHS`], [`JJA_MONTHS`]), each month weighted
+///   equally, as GPCP's seasonal means are, beside GPCP v2.3's 1.51 and 2.27 mm/day (the ruling's
+///   `obs_gpcp.py`, land by Natural Earth's box share, as its §4 quotes them);
+/// - the 40–70° N land's warm-half classes by solid angle ([`WarmHalf::of`] on [`Run::koppen`]'s
+///   summer share, the arid test's month ranking): summer-heavy, winter-heavy and neither, beside
+///   GPCP's 0.28, 0.02 and 0.70 (the ruling's `arid_seasonality.py`, its §3);
+/// - the 40–70° N arid share with Peel's summer offset, 2T + 28, imposed on every cell ([`is_arid`]
+///   with a summer share of 1), beside the ruling's estimate of 0.25 (its §3, the lane-like case's
+///   0.251), and beside the share on the model's own months.
+fn report_seasons(run: &Run) {
+    let land = run.land_counts();
+    let mean_of = |values: &[f64], region: Region| {
+        run.mean_where(values, |c, latitude, longitude| {
+            land[c] == 4 && region.holds(latitude, longitude)
+        })
+    };
+    let season = |months: [usize; 3]| -> Vec<f64> {
+        run.working
+            .climate
+            .iter()
+            .map(|state| {
+                months
+                    .iter()
+                    .fold(0.0, |sum, &m| sum + state.month_precipitation_kg_m2_s[m])
+                    / 3.0
+            })
+            .collect()
+    };
+    let storm_tracks = Region::band(40.0, 60.0);
+    let ((winter, cells), (summer, _)) = (
+        mean_of(&season(DJF_MONTHS), storm_tracks),
+        mean_of(&season(JJA_MONTHS), storm_tracks),
+    );
+    eprintln!(
+        "  E-P11: the 40–60° N all-land climate cells ({cells}) DJF {:.2} mm/day, JJA {:.2}; GPCP \
+         1.51 and 2.27",
+        winter * DAY_S,
+        summer * DAY_S
+    );
+    let koppen = run.koppen();
+    let share_of = |half: WarmHalf| {
+        let indicator: Vec<f64> = koppen
+            .iter()
+            .map(|k| f64::from(u8::from(WarmHalf::of(k.summer_share) == half)))
+            .collect();
+        mean_of(&indicator, ARID_NORTH)
+    };
+    let ((summer_heavy, north_cells), (winter_heavy, _), (neither, _)) = (
+        share_of(WarmHalf::Summer),
+        share_of(WarmHalf::Winter),
+        share_of(WarmHalf::Neither),
+    );
+    eprintln!(
+        "  E-P11: the 40–70° N all-land climate cells' ({north_cells}) warm halves by solid angle: \
+         summer-heavy {summer_heavy:.3}, winter-heavy {winter_heavy:.3}, neither {neither:.3}; \
+         GPCP 0.28, 0.02 and 0.70"
+    );
+    let arid = |summer_share: fn(&Koppen) -> Option<f64>| {
+        let indicator: Vec<f64> = koppen
+            .iter()
+            .map(|k| {
+                f64::from(u8::from(is_arid(
+                    k.precipitation_mm,
+                    k.celsius,
+                    summer_share(k),
+                )))
+            })
+            .collect();
+        mean_of(&indicator, ARID_NORTH).0
+    };
+    eprintln!(
+        "  E-P11: arid at 40–70° N with Peel's summer offset (2T + 28) on every cell {:.3}, the \
+         ruling's estimate 0.25; on the model's own months {:.3}",
+        arid(|_| Some(1.0)),
+        arid(|k| k.summer_share)
+    );
+}
+
+/// The ruled Earth test (decision-r09-t13ge §2.13, e9, as decision-r09-t13e-asbuilt §1.5 set it up
+/// and decision-r09-t13e-revision §6.3 rules it) on the reference Earth: R09.T13.g's synthetic
+/// sea, Natural Earth's land by 2.5° × 5° box, its heights R09.T13.g's band eighths placed by each
+/// box's Earth2014 median land height ([`synthetic_earth`]), the whole step at level 7 on its
+/// geographic model, printed against GPCP v2.3 and NCEP/NCAR R1. It asserts:
+///
+/// - in each hemisphere the annual zonal precipitation's solid-angle mean over 40–60° exceeds that
+///   over 15–35° (decision-r09-t13ge §2.13; the northern window, printed and not asserted under
+///   decision-r09-t13e-asbuilt, plan 09's deferred finding E-P1, is restored by
+///   decision-r09-t13e-revision, whose landing acceptance is a northern ratio of at least 1.10;
+///   GPCP's ratio, printed beside it, is 1.27 in the north);
+/// - in each hemisphere the zonal budget's annual E − P has a negative solid-angle mean over 40–60°
+///   and a positive one over 15–35° ([`assert_the_budget_s_pattern`]);
+/// - the precipitation's maximum within 30° of the equator lies within 10° of the annual
+///   energy-flux equator;
+/// - Eurasia's interior is watered: the solid-angle mean of the annual precipitation over the
+///   all-land climate cells (all four field cells land) whose centres lie between 50° and 60° N and
+///   40° and 100° E is at least 0.4 of that between 10° W and 20° E (GPCP v2.3 1991–2020: 0.59;
+///   the ruling's estimate 0.56, the as-built model's 0.21 on it; decision-r09-t13e-revision §6.3);
+/// - at most a quarter of the solid angle of the all-land climate cells whose centres lie between
+///   40° and 70° N is arid by Köppen–Geiger's bound at their own temperatures ([`Run::arid`],
+///   [`is_arid`]), R10's arid ground (Peel et al. 2007, Hydrol. Earth Syst. Sci. 11, 1633, Table
+///   1, as plan 10's T1.b rule reads it; GPCP with NCEP R1's temperatures 0.08, the ruling's
+///   estimate 0.11, the as-built model's 0.43 on it; decision-r09-t13e-revision §6.3);
+/// - every month's balance factor k lies within [0.85, 1.15] (the as-built model's 1.17–1.35,
+///   measured 1.1685–1.3492, the ruling's estimate 0.97–1.00; decision-r09-t13e-revision §6.3).
+///
+/// It prints the windows' all-land and all-sea parts, k by month, the interior ratio and its two
+/// means, the arid shares of 40–70° N and 60° S–70° N, the Antarctic plateau, the Amazon and
+/// Central Asia ([`report_regions`]), whose observed figures are recorded in plan 09, not here;
+/// and E-P11's seasons ([`report_seasons`]; decision-r09-t13e-revision, "E-P11 (follow-up)" §4):
+/// the 40–60° N land's DJF and JJA means, the 40–70° N land's warm-half classes, and its arid
+/// share with Peel's summer offset imposed on every cell, printed beside GPCP's and the ruling's
+/// estimate, not asserted.
 #[test]
-fn the_reference_earth_s_southern_storm_track_is_wetter_than_its_subtropics_its_midlatitudes_converge_vapour_and_its_rain_band_is_on_its_energy_flux_equator()
+fn the_reference_earth_s_storm_tracks_are_wetter_than_its_subtropics_its_interiors_are_watered_and_its_rain_band_is_on_its_energy_flux_equator()
  {
     let run = run_world(reference::earth_like(), 7, Grid::Own, synthetic_earth);
     report("The reference Earth (synthetic sea)", &run);
+    let regions = report_regions(&run);
+    report_seasons(&run);
+    let factors = report_balance(&run);
     let annual = run.annual_precipitation();
-    let (north_tracks, north_subtropics) = (
-        run.window(&annual, 40.0, 60.0),
-        run.window(&annual, 15.0, 35.0),
-    );
-    eprintln!(
-        "  the northern windows, printed, not asserted: 40–60° N {:.2} mm/day against 15–35° N \
-         {:.2} ({:.2}); GPCP {:.2} against {:.2} ({:.2})",
-        north_tracks * DAY_S,
-        north_subtropics * DAY_S,
-        north_tracks / north_subtropics,
-        band_window(&GPCP_ANNUAL_MM_PER_DAY, 40.0, 60.0),
-        band_window(&GPCP_ANNUAL_MM_PER_DAY, 15.0, 35.0),
-        band_window(&GPCP_ANNUAL_MM_PER_DAY, 40.0, 60.0)
-            / band_window(&GPCP_ANNUAL_MM_PER_DAY, 15.0, 35.0)
-    );
-    let (tracks, subtropics) = (
-        run.window(&annual, -60.0, -40.0),
-        run.window(&annual, -35.0, -15.0),
-    );
-    eprintln!(
-        "  the southern windows: 40–60° S {:.2} mm/day against 15–35° S {:.2} ({:.2})",
-        tracks * DAY_S,
-        subtropics * DAY_S,
-        tracks / subtropics
-    );
-    assert!(
-        tracks > subtropics,
-        "south: 40–60° {} mm/day against 15–35° {}",
-        tracks * DAY_S,
-        subtropics * DAY_S
-    );
+    let mut windows = Vec::with_capacity(2);
+    for (hemisphere, sign) in [("north", 1.0_f64), ("south", -1.0)] {
+        let bounds = |low: f64, high: f64| {
+            if sign > 0.0 {
+                (low, high)
+            } else {
+                (-high, -low)
+            }
+        };
+        let (at_tracks, at_subtropics) = (bounds(40.0, 60.0), bounds(15.0, 35.0));
+        let model = |(low, high): (f64, f64)| run.window(&annual, low, high);
+        let gpcp = |(low, high): (f64, f64)| band_window(&GPCP_ANNUAL_MM_PER_DAY, low, high);
+        let (tracks, subtropics) = (model(at_tracks), model(at_subtropics));
+        let (gpcp_tracks, gpcp_subtropics) = (gpcp(at_tracks), gpcp(at_subtropics));
+        eprintln!(
+            "  the {hemisphere}ern windows: 40–60° {:.2} mm/day against 15–35° {:.2} ({:.3}); \
+             GPCP {gpcp_tracks:.2} against {gpcp_subtropics:.2} ({:.2})",
+            tracks * DAY_S,
+            subtropics * DAY_S,
+            tracks / subtropics,
+            gpcp_tracks / gpcp_subtropics
+        );
+        windows.push((hemisphere, tracks, subtropics));
+    }
+    for (hemisphere, tracks, subtropics) in windows {
+        assert!(
+            tracks > subtropics,
+            "{hemisphere}: 40–60° {} mm/day against 15–35° {}",
+            tracks * DAY_S,
+            subtropics * DAY_S
+        );
+    }
     assert_the_budget_s_pattern(&run);
     let zonal = run.zonal(&annual);
     let grid = ModelGrid::zonal();
@@ -767,6 +1301,20 @@ fn the_reference_earth_s_southern_storm_track_is_wetter_than_its_subtropics_its_
         (maximum - efe).abs() <= 10.0,
         "the tropical maximum at {maximum}° against the energy-flux equator at {efe}°"
     );
+    assert!(
+        regions.interior >= 0.4 * regions.coast,
+        "Eurasia's interior {} mm/day against its Atlantic margin's {}",
+        regions.interior * DAY_S,
+        regions.coast * DAY_S
+    );
+    assert!(
+        regions.arid_north <= 0.25,
+        "{} of 40–70° N's land arid",
+        regions.arid_north
+    );
+    for (m, k) in factors.iter().enumerate() {
+        assert!((0.85..=1.15).contains(k), "month {m}: k {k}");
+    }
 }
 
 /// The ruled balance (decision-r09-t13ge §2.13, e8): global precipitation equals global
@@ -796,14 +1344,189 @@ fn global_precipitation_equals_global_evaporation() {
     }
 }
 
-/// The ruled wind test (decision-r09-t13ge §2.13): each month's quantised wind is the wind that
-/// month's orographic step used. The step writes each climate cell's month as the record's code
-/// decoded, and the orographic step reads each field cell's wind from that state
-/// ([`wind::cell_wind`]); so the quantised field's codes are the ones the step recorded as read,
-/// they decode to the state's samples bit for bit, and re-quantise to themselves. On the
-/// reference Earth's synthetic sea at level 6, every month has a wind somewhere.
+/// Frozen ground on the ruled Earth's inputs (decision-r09-t13e-revision §4.4 and §6.3's unit test
+/// 7): the reference Earth's synthetic sea at level 6 ([`synthetic_earth`]), as
+/// [`global_precipitation_equals_global_evaporation`] runs it. For every month and land field
+/// cell the test computes its month temperature at its height, `T_sl` − Γ (`z_w` − `z_sea`) + aₘ in
+/// that order, against the model's freezing point `T_f` (`EnergyBalance::for_inputs`'s
+/// `Freezing::At`): [`hydrology::ground_of`] agrees with it; the orographic model's recycled share
+/// on that ground is none below `T_f`, and above it bit for bit `recycled_share(H)`, which is
+/// ε₀ e^(−H/H₀) to 10⁻¹², H its height above the sea level read as 0 where negative; and each
+/// month's frozen share of the land's solid angle is the step's `frozen_land_share` to the bit,
+/// both summing Ω over the frozen land cells and over the land cells in cell order, then dividing.
+/// Some month holds both frozen and thawed land.
+///
+/// The twelve-month runoff (§4.5): every land field cell's [`annual_runoff_kg_m2_s`] is, to the
+/// bit, the test's own Σₘ sₘ (1 − εₘ) Pₘ in month order, sₘ the month's share of the year
+/// ([`month_shares`]), Pₘ its climate cell's month rate and εₘ the test's own, `recycled_share(H)`
+/// in a thawed month and none in a frozen one; and some land cell has both frozen and thawed
+/// months.
+/// On a world where no ice forms (`Freezing::Never`), the coldest land cell's coldest month, far
+/// below `T_f`, is thawed. Prints each month's frozen share and the runoff's counts.
 #[test]
-fn each_month_s_quantised_wind_is_the_wind_that_month_s_orographic_step_used() {
+fn on_the_reference_earth_frozen_ground_recycles_nothing_and_thawed_ground_its_share_at_its_height()
+{
+    let run = run_world(reference::earth_like(), 6, Grid::Own, synthetic_earth);
+    let water = run.water();
+    assert_eq!(water.months.len(), 12);
+    let freezing = EnergyBalance::for_inputs(&run.inputs).freezing;
+    let Freezing::At { point_k } = freezing else {
+        panic!("water freezes on the reference Earth: {freezing:?}");
+    };
+    let parameters = Parameters::HERGARTEN_ROBL;
+    let (lapse, sea_level) = (
+        run.working.lapse_rate_k_per_m,
+        run.working.sea_level.value(),
+    );
+    let pass = run.pass();
+    let shares = month_shares(&pass, water.months.len());
+    let cells = run.working.cells.len();
+    // Each field cell's Σₘ sₘ (1 − εₘ) Pₘ so far, and whether it has had a frozen month and a
+    // thawed one.
+    let (mut runoff, mut kinds) = (vec![0.0; cells], vec![(false, false); cells]);
+    let mut coldest: Option<(u32, usize, f64)> = None;
+    let mut both = false;
+    for (m, cycle) in water.months.iter().enumerate() {
+        let (mut land_area, mut frozen_area) = (0.0, 0.0);
+        for (n, (cell, &omega)) in
+            (0_u32..).zip(run.working.cells.iter().zip(run.field.solid_angles_sr()))
+        {
+            if seas::under_sea(cell) {
+                continue;
+            }
+            let state = &run.working.climate[slot(parent_index(n))];
+            let height_m = cell.water_surface.value() - sea_level;
+            let surface_k =
+                state.sea_level_temperature.value() - lapse * height_m + state.month_anomaly_k[m];
+            let frozen = surface_k < point_k;
+            let ground = hydrology::ground_of(&run.working, n, m, freezing);
+            let expected = if frozen {
+                GroundState::Frozen
+            } else {
+                GroundState::Thawed
+            };
+            assert_eq!(ground, expected, "cell {n}, month {m}: {surface_k} K");
+            let share = parameters.recycled_share_on(height_m, ground);
+            let epsilon = if frozen {
+                assert_same_bits(share, 0.0);
+                frozen_area += omega;
+                0.0
+            } else {
+                let epsilon = parameters.recycled_share(height_m);
+                assert_same_bits(share, epsilon);
+                let by_hand = lfpm::SEA_LEVEL_RECYCLED_SHARE
+                    * math::exp(-height_m.max(0.0) / lfpm::HEIGHT_SCALE_M);
+                assert!(
+                    (share - by_hand).abs() <= 1e-12,
+                    "cell {n}, month {m}: ε {share} against {by_hand} at {height_m} m"
+                );
+                epsilon
+            };
+            land_area += omega;
+            let i = slot(n);
+            runoff[i] += shares[m] * ((1.0 - epsilon) * state.month_precipitation_kg_m2_s[m]);
+            if frozen {
+                kinds[i].0 = true;
+            } else {
+                kinds[i].1 = true;
+            }
+            if coldest.is_none_or(|(_, _, k)| surface_k < k) {
+                coldest = Some((n, m, surface_k));
+            }
+        }
+        let frozen_share = frozen_area / land_area;
+        eprintln!(
+            "  month {m:2}: frozen ground on {frozen_share:.4} of the land's solid angle (the \
+             step's {:.4})",
+            cycle.frozen_land_share
+        );
+        assert_same_bits(cycle.frozen_land_share, frozen_share);
+        both |= frozen_area > 0.0 && frozen_area < land_area;
+    }
+    assert!(both, "no month holds both frozen and thawed land");
+    let coldest = coldest.expect("the reference Earth has land");
+    assert_the_annual_runoff(&run, &runoff, &kinds, coldest);
+}
+
+/// Asserts the frozen-ground test's twelve-month runoff on `run` (decision-r09-t13e-revision §4.5):
+/// every land field cell's [`annual_runoff_kg_m2_s`] is its `runoff` (one a field cell, the test's
+/// own Σₘ sₘ (1 − εₘ) Pₘ in month order) to the bit, and some land cell's `kinds` (whether it had a
+/// frozen month, and a thawed one) are both; and the coldest land cell's coldest month, `coldest`
+/// (its cell, month and temperature at its surface, K), is thawed on a world where no ice forms
+/// (`Freezing::Never`). Prints the counts.
+fn assert_the_annual_runoff(
+    run: &Run,
+    runoff: &[f64],
+    kinds: &[(bool, bool)],
+    coldest: (u32, usize, f64),
+) {
+    let pass = run.pass();
+    let (mut land_cells, mut mixed) = (0_u32, 0_u32);
+    for (n, cell) in (0_u32..).zip(&run.working.cells) {
+        if seas::under_sea(cell) {
+            continue;
+        }
+        assert_same_bits(
+            annual_runoff_kg_m2_s(&pass, &run.working, n),
+            runoff[slot(n)],
+        );
+        land_cells += 1;
+        mixed += u32::from(kinds[slot(n)] == (true, true));
+    }
+    let (n, m, surface_k) = coldest;
+    eprintln!(
+        "  the annual runoff of {land_cells} land field cells is Σ sₘ (1 − εₘ) Pₘ to the bit; \
+         {mixed} of them have both frozen and thawed months; the coldest, cell {n} in month {m}, \
+         at {surface_k:.2} K"
+    );
+    assert!(mixed > 0, "no land cell has both frozen and thawed months");
+    assert_eq!(
+        hydrology::ground_of(
+            &run.working,
+            n,
+            m,
+            Freezing::Never {
+                albedo: ICE_FREE_ALBEDO
+            }
+        ),
+        GroundState::Thawed,
+        "cell {n}, month {m}, at {surface_k} K where no ice forms"
+    );
+}
+
+/// Asserts that `wind` blows towards `expected`, to the bit.
+#[track_caller]
+fn assert_towards(wind: CellWind, expected: [f64; 3]) {
+    let CellWind::Towards(towards) = wind else {
+        panic!("a calm wind, not one towards {expected:?}");
+    };
+    for (&a, &e) in towards.iter().zip(&expected) {
+        assert_same_bits(a, e);
+    }
+}
+
+/// Asserts that `wind` is still air.
+#[track_caller]
+fn assert_calm(wind: CellWind) {
+    assert!(matches!(wind, CellWind::Calm), "{wind:?} is not calm");
+}
+
+/// The ruled wind test (decision-r09-t13ge §2.13), as decision-r09-t13e-revision §4.3 and §6.3
+/// reword it: each month's orographic step reads that month's quantised wind, carrying vapour
+/// along its component along the model's bands, east, west or calm by its sign. The step writes
+/// each climate cell's month as the record's code decoded, so the quantised field's codes are the
+/// ones the step recorded, they decode to the state's samples bit for bit and re-quantise to
+/// themselves, and in every month more than half the climate cells' winds move. For every month
+/// and field cell, its climate cell's decoded record read at its centre ([`wind::cell_wind`]), ŵ
+/// as a unit direction, has an along-band component ŵ · ê, ê the cell's [`wind::model_east`]
+/// about the geographic pole +z; the orographic wind [`wind::along_bands`] takes from it is
+/// towards ê where that component exceeds [`DOWNWIND_TOLERANCE`], towards −ê where it is below its
+/// negative, and calm otherwise or where the record is calm; and each month's
+/// [`MonthCycle::band_winds`] counts those senses as the test does over the field cells, which ties
+/// the test to the winds the step read. Both eastward and westward winds occur. On the reference
+/// Earth's synthetic sea at level 6, on a 1,500 km sphere ([`small`]).
+#[test]
+fn each_month_s_orographic_step_reads_its_quantised_wind_along_the_model_s_bands() {
     let run = run_world(
         small(&reference::earth_like()),
         6,
@@ -833,22 +1556,60 @@ fn each_month_s_quantised_wind_is_the_wind_that_month_s_orographic_step_used() {
             );
         }
     }
-    for (m, codes) in water.winds.iter().enumerate() {
-        let moving = codes.iter().filter(|&&w| w != Wind::CALM).count();
+    let pole = [0.0, 0.0, 1.0];
+    let (mut eastward, mut westward) = (0_u32, 0_u32);
+    for (m, (codes, cycle)) in water.winds.iter().zip(&water.months).enumerate() {
+        let moving = codes.iter().filter(|&&code| code != Wind::CALM).count();
+        let mut counts = BandWinds::default();
+        for (n, &up) in (0_u32..).zip(run.field.centres()) {
+            let sample = &run.working.climate[slot(parent_index(n))].month_wind[m];
+            let read = wind::cell_wind(sample, up);
+            let east = wind::model_east(pole, up);
+            let orographic = wind::along_bands(read, east);
+            let along = match (read, east) {
+                (CellWind::Towards(towards), Some(ahead)) => {
+                    dot(towards, ahead) / dot(towards, towards).sqrt()
+                }
+                _ => 0.0,
+            };
+            match east {
+                Some(ahead) if along > DOWNWIND_TOLERANCE => {
+                    assert_towards(orographic, ahead);
+                    counts.eastward += 1;
+                }
+                Some(ahead) if along < -DOWNWIND_TOLERANCE => {
+                    assert_towards(orographic, [-ahead[0], -ahead[1], -ahead[2]]);
+                    counts.westward += 1;
+                }
+                _ => {
+                    assert_calm(orographic);
+                    counts.calm += 1;
+                }
+            }
+        }
         eprintln!(
-            "month {m:2}: {moving} of {} climate cells' winds not calm",
-            codes.len()
+            "month {m:2}: {moving} of {} climate cells' winds not calm; the field cells' winds \
+             along the bands east {} west {} calm {}",
+            codes.len(),
+            counts.eastward,
+            counts.westward,
+            counts.calm
         );
         assert!(moving * 2 > codes.len(), "month {m}: {moving}");
+        assert_eq!(cycle.band_winds, counts, "month {m}");
+        eastward += counts.eastward;
+        westward += counts.westward;
     }
-    // The field cells' winds the orographic step read: each its climate cell's sample at its own
-    // centre, so a field cell's direction is its record's azimuth from its own local north.
+    assert!(
+        eastward > 0 && westward > 0,
+        "east {eastward}, west {westward}"
+    );
+    // A field cell's direction is its record's azimuth from its own local north.
     let n = 1_000_u32;
     let up = run.field.centre(n);
-    let sample = &run.working.climate[usize::try_from(parent_index(n)).unwrap()].month_wind[0];
-    if let lfpm::CellWind::Towards(towards) = wind::cell_wind(sample, up) {
+    let sample = &run.working.climate[slot(parent_index(n))].month_wind[0];
+    if let CellWind::Towards(towards) = wind::cell_wind(sample, up) {
         let (east, north) = wind::east_north(up);
-        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
         let angle = math::atan2(dot(towards, east), dot(towards, north));
         let off = (angle - sample.azimuth.value()).rem_euclid(core::f64::consts::TAU);
         assert!(
@@ -909,6 +1670,140 @@ fn on_a_60_degree_aquaplanet_the_centre_holds_at_the_cap_and_the_equatorial_wind
         assert!(winds[m].speed.value() >= 0.05, "month {m}: {:?}", winds[m]);
     }
     assert_eq!(sign_changes(&v), 2, "{v:?}");
+}
+
+/// The bands of the sea's-rate test that have cells but no sea, each with the band whose sea it
+/// takes, its nearest that has one, equatorward first (T13.a's rule): in the south band 10 takes
+/// its equatorward neighbour 11, band 20 its poleward one 19 (its equatorward 21 has none) and
+/// band 21 its equatorward 22; in the north band 60 takes its equatorward 59.
+const SEALESS_BANDS: [(usize, usize); 4] = [(10, 11), (20, 19), (21, 22), (60, 59)];
+
+/// The sea's-rate test's converging band, E − P < 0.
+const CONVERGING_BAND: usize = 40;
+
+/// The sea's-rate test's diverging band, whose sea still rains: E − P > 0 and `e_b` + `C_b` ÷
+/// `s_b` > 0.
+const DIVERGING_BAND: usize = 30;
+
+/// The sea's-rate test's strongly diverging band, whose export outweighs its sea's evaporation:
+/// `e_b` + `C_b` ÷ `s_b` < 0.
+const EXPORTING_BAND: usize = 25;
+
+/// The sea's rate (decision-r09-t13e-revision §4.1 and §6.3's unit test 8, its synthetic case):
+/// [`SeaBands::of`] on 72 bands, each with cells, their solid angles, seas, evaporation and E − P
+/// set by hand. A band's `e_b` is its evaporation over its sea's solid angle and `s_b` its sea's
+/// share of its own; a converging band's sea rains `e_b` + `C_b`, `C_b` = −(E − P)
+/// ([`CONVERGING_BAND`]); a diverging band's `e_b` + `C_b` ÷ `s_b`, its export falling on its sea
+/// alone ([`DIVERGING_BAND`]); a strongly diverging band's nothing ([`EXPORTING_BAND`]); a band
+/// with cells but no sea takes its nearest band's `e_b` and `s_b`, equatorward first, with its own
+/// `C_b` ([`SEALESS_BANDS`]); and with no sea anywhere `e_b` and `s_b` are 0, a diverging band
+/// rains nothing and a converging band its `C_b`. The land's source is max(0, `C_b`) throughout.
+/// Each is the formula computed here, to the bit.
+#[test]
+fn the_sea_rains_its_evaporation_and_its_band_s_convergence_and_a_divergent_band_s_export_falls_on_its_sea()
+ {
+    let real = |band: usize| f64::from(u32::try_from(band).expect("a band index fits a u32"));
+    let source_of = |band: usize| {
+        SEALESS_BANDS
+            .iter()
+            .find(|&&(sealess, _)| sealess == band)
+            .map_or(band, |&(_, source)| source)
+    };
+    let areas: Vec<f64> = (0..LATITUDE_BANDS)
+        .map(|band| 1e-3 * (1.0 + real(band) / 72.0))
+        .collect();
+    let sea_areas: Vec<f64> = areas
+        .iter()
+        .enumerate()
+        .map(|(band, &area)| {
+            if source_of(band) == band {
+                area * (0.3 + real(band) / 144.0)
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    let evaporated: Vec<f64> = sea_areas
+        .iter()
+        .enumerate()
+        .map(|(band, &sea)| sea * 3e-5 * (1.0 + real(band) / 144.0))
+        .collect();
+    // E − P, kg m⁻² s⁻¹: by hand where the test names a branch, else alternating.
+    let budget: Vec<f64> = (0..LATITUDE_BANDS)
+        .map(|band| match band {
+            CONVERGING_BAND => -1.2e-5,
+            DIVERGING_BAND => 6e-6,
+            EXPORTING_BAND => 3e-5,
+            10 => 4e-6,
+            20 => 2e-6,
+            21 => -3e-6,
+            60 => -5e-6,
+            _ if band % 3 == 0 => -8e-6,
+            _ => 5e-6,
+        })
+        .collect();
+    let sea = SeaBands::of(&evaporated, &areas, &sea_areas, &budget);
+    let divergent_rate = |band: usize| {
+        let source = source_of(band);
+        evaporated[source] / sea_areas[source] - budget[band] / (sea_areas[source] / areas[source])
+    };
+    assert!(budget[CONVERGING_BAND] < 0.0);
+    assert!(budget[DIVERGING_BAND] > 0.0 && divergent_rate(DIVERGING_BAND) > 0.0);
+    assert!(budget[EXPORTING_BAND] > 0.0 && divergent_rate(EXPORTING_BAND) < 0.0);
+    assert_same_bits(sea.rates_kg_m2_s[EXPORTING_BAND], 0.0);
+    for (band, &emp) in budget.iter().enumerate() {
+        let source = source_of(band);
+        let evaporation = evaporated[source] / sea_areas[source];
+        let share = sea_areas[source] / areas[source];
+        let convergence = -emp;
+        let rate = if convergence >= 0.0 {
+            evaporation + convergence
+        } else {
+            evaporation + convergence / share
+        };
+        assert_same_bits(sea.evaporation_kg_m2_s[band], evaporation);
+        assert_same_bits(sea.sea_shares[band], share);
+        assert_same_bits(sea.rates_kg_m2_s[band], positive(rate));
+        assert_same_bits(sea.convergence_kg_m2_s[band], positive(convergence));
+    }
+    let none = vec![0.0; LATITUDE_BANDS];
+    let dry = SeaBands::of(&none, &areas, &none, &budget);
+    for (band, &emp) in budget.iter().enumerate() {
+        let convergence = -emp;
+        assert_same_bits(dry.evaporation_kg_m2_s[band], 0.0);
+        assert_same_bits(dry.sea_shares[band], 0.0);
+        assert_same_bits(
+            dry.rates_kg_m2_s[band],
+            if convergence >= 0.0 { convergence } else { 0.0 },
+        );
+        assert_same_bits(dry.convergence_kg_m2_s[band], positive(convergence));
+    }
+}
+
+/// The sea's rate on an aquaplanet (decision-r09-t13e-revision §4.1 and §6.3's unit test 8): on
+/// the 60° aquaplanet of
+/// [`on_a_60_degree_aquaplanet_the_centre_holds_at_the_cap_and_the_equatorial_wind_reverses_twice`],
+/// every cell sea, each month's every band's `e_b` is its mean evaporation Ē over all its cells
+/// bit for bit, its `s_b` is 1, and its sea's rate `P_sea` is max(0, Ē − (E − P)) bit for bit, the
+/// as-built `P_ls`.
+#[test]
+fn on_a_60_degree_aquaplanet_the_sea_rains_its_band_s_mean_evaporation_less_its_e_minus_p() {
+    let run = run_world(earth_at(60.0, 1.0), 6, Grid::Zonal, flood_all);
+    let water = run.water();
+    assert_eq!(water.months.len(), 12);
+    assert!(run.working.cells.iter().all(seas::under_sea));
+    for cycle in &water.months {
+        for (band, (&mean, &emp)) in cycle
+            .band_evaporation_kg_m2_s
+            .iter()
+            .zip(&cycle.budget.evaporation_less_precipitation_kg_m2_s)
+            .enumerate()
+        {
+            assert_same_bits(cycle.sea.evaporation_kg_m2_s[band], mean);
+            assert_same_bits(cycle.sea.sea_shares[band], 1.0);
+            assert_same_bits(cycle.sea.rates_kg_m2_s[band], positive(mean - emp));
+        }
+    }
 }
 
 /// The ruled slow twin (decision-r09-t13ge §2.13, §2.12): the same aquaplanet at Ω⊕ ÷ 8 has a cap
@@ -1080,31 +1975,61 @@ fn the_header_says_heuristic() {
     );
 }
 
-/// The ruled runoff test (decision-r09-t13ge §2.13, e8; R09.T14's): the annual runoff function is
-/// zero over liquid and on a dry world ([`a_dry_world_under_the_energy_balance_model_has_no_precipitation_and_winds_that_are_not_calm`]),
-/// and over a flat sea-level continent is 1 − ε₀ of P, its climate cell's annual rate: the
-/// unseasonal reference Earth's synthetic sea with its land at the sea level, level 6.
+/// The ruled runoff test (decision-r09-t13ge §2.13, e8; R09.T14's), as decision-r09-t13e-revision
+/// §4.5 and §6.3 reword it: the annual runoff function is zero over liquid and on a dry world
+/// ([`a_dry_world_under_the_energy_balance_model_has_no_precipitation_and_winds_that_are_not_calm`]),
+/// and over a flat sea-level continent is, month by month, 1 − ε₀ of P, its climate cell's rate,
+/// on ground at or above the condensable's freezing point, and all of P on frozen ground: the
+/// unseasonal reference Earth's synthetic sea with its land at the sea level, level 6, one month.
+/// The test reads each land cell's temperature at its surface as its climate cell's sea-level
+/// temperature less Γ times its height above the sea level (one month, so no anomaly), against the
+/// model's freezing point (`EnergyBalance::for_inputs`'s `Freezing::At`). Both kinds of ground
+/// occur, each with rain somewhere.
 #[test]
-fn the_annual_runoff_is_none_over_liquid_and_the_unrecycled_share_over_a_sea_level_continent() {
+fn the_annual_runoff_is_none_over_liquid_the_unrecycled_share_on_thawed_ground_and_all_the_rain_on_frozen_ground()
+ {
     let run = run_world(unseasonal_earth(), 6, Grid::Own, |pass, working| {
         synthetic_sea(pass, working, &SEA_LEVEL_LAND);
     });
     let pass = run.pass();
     let annual = run.annual_precipitation();
-    let (mut land, mut wet) = (0_u32, 0_u32);
+    let freezing = EnergyBalance::for_inputs(&run.inputs).freezing;
+    let Freezing::At { point_k } = freezing else {
+        panic!("water freezes on the reference Earth: {freezing:?}");
+    };
+    let (lapse, sea_level) = (
+        run.working.lapse_rate_k_per_m,
+        run.working.sea_level.value(),
+    );
+    let (mut thawed, mut frozen) = ([0_u32; 2], [0_u32; 2]);
     for (n, cell) in (0_u32..).zip(&run.working.cells) {
         let runoff = annual_runoff_kg_m2_s(&pass, &run.working, n);
         if seas::under_sea(cell) {
             assert_same_bits(runoff, 0.0);
-        } else {
-            let p = annual[usize::try_from(parent_index(n)).unwrap()];
-            assert_same_bits(runoff, (1.0 - lfpm::SEA_LEVEL_RECYCLED_SHARE) * p);
-            land += 1;
-            wet += u32::from(p > 0.0);
+            continue;
         }
+        let parent = slot(parent_index(n));
+        let p = annual[parent];
+        let surface_k = run.working.climate[parent].sea_level_temperature.value()
+            - lapse * (cell.water_surface.value() - sea_level);
+        let counts = if surface_k >= point_k {
+            assert_same_bits(runoff, (1.0 - lfpm::SEA_LEVEL_RECYCLED_SHARE) * p);
+            &mut thawed
+        } else {
+            assert_same_bits(runoff, p);
+            &mut frozen
+        };
+        counts[0] += 1;
+        counts[1] += u32::from(p > 0.0);
     }
-    eprintln!("runoff: {land} land cells, {wet} with rain");
-    assert!(land > 0 && wet > 0);
+    eprintln!(
+        "runoff: {} thawed land cells ({} with rain) and {} frozen ({} with rain)",
+        thawed[0], thawed[1], frozen[0], frozen[1]
+    );
+    assert!(
+        thawed[1] > 0 && frozen[1] > 0,
+        "thawed {thawed:?}, frozen {frozen:?}"
+    );
 }
 
 /// A locked world's circulation converges on its substellar point, uncapped (decision-r09-t13ge
@@ -1153,6 +2078,164 @@ fn a_locked_aquaplanet_s_winds_converge_on_its_substellar_point() {
     assert!(wettest.1 > math::cos(30_f64.to_radians()), "{}", wettest.1);
 }
 
+/// Each month's field-cell precipitation rates after the balance, kg m⁻² s⁻¹, solved again on
+/// `run`'s finished state in its model's `coordinates` at Hergarten and Robl's set: the water
+/// cycle's stages 5 and 6 as [`hydrology::run`] takes them, each month's bands and k its
+/// [`MonthCycle`]'s. Each sea cell's rate is its band's `P_sea` read by the band stencil, and each
+/// land cell's the orographic solve's, with its band's convergence, its month's ground
+/// ([`hydrology::ground_of`]) and its climate cell's decoded wind along the model's bands; each
+/// times the month's k. The water cycle keeps no field cell's rate; [`replication_error`] holds
+/// these to its records.
+fn field_rates(run: &Run, coordinates: Coordinates) -> Vec<Vec<f64>> {
+    let pass = run.pass();
+    let (inputs, field, working) = (pass.inputs(), pass.grid(), &run.working);
+    let sea_level = working.sea_level.value();
+    let heights_m: Vec<f64> = working
+        .cells
+        .iter()
+        .map(|cell| cell.water_surface.value() - sea_level)
+        .collect();
+    let cover: Vec<Cover> = working
+        .cells
+        .iter()
+        .map(|cell| {
+            if seas::under_sea(cell) {
+                Cover::Sea
+            } else {
+                Cover::Land
+            }
+        })
+        .collect();
+    let pole = coordinates.to_body([0.0, 0.0, 1.0]);
+    let stencils: Vec<BandStencil> = field
+        .centres()
+        .iter()
+        .map(|&centre| BandStencil::at(coordinates.to_model(centre)[2]))
+        .collect();
+    let freezing = EnergyBalance::for_inputs(inputs).freezing;
+    let mesh = Mesh::of_graph(field, inputs.radius());
+    let mut months = Vec::with_capacity(run.water().months.len());
+    for (m, cycle) in run.water().months.iter().enumerate() {
+        let mut winds = Vec::with_capacity(cover.len());
+        let mut sea_rates = vec![0.0; cover.len()];
+        let mut convergence = vec![0.0; cover.len()];
+        let mut ground = vec![GroundState::Thawed; cover.len()];
+        for (n, &up) in (0_u32..).zip(field.centres()) {
+            let (i, sample) = (
+                slot(n),
+                &working.climate[slot(parent_index(n))].month_wind[m],
+            );
+            winds.push(wind::along_bands(
+                wind::cell_wind(sample, up),
+                wind::model_east(pole, up),
+            ));
+            match cover[i] {
+                Cover::Sea => sea_rates[i] = stencils[i].clamped(&cycle.sea.rates_kg_m2_s),
+                Cover::Land => {
+                    convergence[i] = stencils[i].clamped(&cycle.sea.convergence_kg_m2_s);
+                    ground[i] = hydrology::ground_of(working, n, m, freezing);
+                }
+            }
+        }
+        let land = if cycle.orographic.is_some() {
+            let month = Month {
+                heights_m: &heights_m,
+                cover: &cover,
+                ground: &ground,
+                winds: &winds,
+                sea_rates_kg_m2_s: &sea_rates,
+                convergence_kg_m2_s: &convergence,
+            };
+            lfpm::solve(&mesh, &month, &Parameters::HERGARTEN_ROBL).precipitation_kg_m2_s
+        } else {
+            vec![0.0; cover.len()]
+        };
+        months.push(
+            cover
+                .iter()
+                .zip(land.iter().zip(&sea_rates))
+                .map(|(&c, (&on_land, &on_sea))| {
+                    cycle.scale
+                        * match c {
+                            Cover::Sea => on_sea,
+                            Cover::Land => on_land,
+                        }
+                })
+                .collect(),
+        );
+    }
+    months
+}
+
+/// The largest relative difference, over every month and climate cell of `run`, of the
+/// solid-angle mean of its four field cells' `rates` ([`field_rates`]) from its record: zero where
+/// the replication is the water cycle's, the same sums in the same order.
+fn replication_error(run: &Run, rates: &[Vec<f64>]) -> f64 {
+    let omegas = run.field.solid_angles_sr().as_chunks::<4>().0;
+    let mut worst = 0.0_f64;
+    for (m, month) in rates.iter().enumerate() {
+        for ((state, omega), rate) in run
+            .working
+            .climate
+            .iter()
+            .zip(omegas)
+            .zip(month.as_chunks::<4>().0)
+        {
+            let (sum, area) = omega
+                .iter()
+                .zip(rate)
+                .fold((0.0, 0.0), |(sum, area), (&o, &p)| (sum + o * p, area + o));
+            let record = state.month_precipitation_kg_m2_s[m];
+            let difference = (sum / area - record).abs() / record.max(f64::MIN_POSITIVE);
+            worst = worst.max(difference);
+        }
+    }
+    worst
+}
+
+/// Prints the E-L7 patch (decision-r09-t13e-revision §5.1; decision-r09-t13e-lfpm-convergence §5):
+/// the field cell nearest [`E_L7_PATCH_DEG`], its cover, its annual rate from `rates`
+/// ([`field_rates`]) and its climate cell's record's, mm/day.
+fn report_patch(run: &Run, rates: &[Vec<f64>]) {
+    let shares = month_shares(&run.pass(), rates.len());
+    let target = direction(E_L7_PATCH_DEG.0, E_L7_PATCH_DEG.1);
+    let nearest = run
+        .field
+        .centres()
+        .iter()
+        .enumerate()
+        .fold((0, f64::NEG_INFINITY), |(best, most), (n, &centre)| {
+            let along = dot(centre, target);
+            if along > most {
+                (n, along)
+            } else {
+                (best, most)
+            }
+        })
+        .0;
+    let annual = rates
+        .iter()
+        .zip(&shares)
+        .fold(0.0, |sum, (month, &s)| sum + s * month[nearest]);
+    let parent = slot(parent_index(
+        u32::try_from(nearest).expect("a cell index fits a u32"),
+    ));
+    let (latitude, longitude) = latitude_longitude_deg(run.field.centres()[nearest]);
+    eprintln!(
+        "  the E-L7 patch: the field cell {nearest} nearest {:.2}° N, {:.2}° E, at {latitude:.3}°, \
+         {longitude:.3}° ({}), annual {:.3} mm/day; its climate cell {:.3}",
+        E_L7_PATCH_DEG.0,
+        E_L7_PATCH_DEG.1,
+        if seas::under_sea(&run.working.cells[nearest]) {
+            "sea"
+        } else {
+            "land"
+        },
+        annual * DAY_S,
+        run.annual_precipitation()[parent] * DAY_S
+    );
+}
+
 /// The coarse pass's reference Earth (its generated continents and R09.T12.e's sea, level 8)
 /// through the climate step, printed beside GPCP and NCEP/NCAR R1 as the synthetic Earth is, its
 /// water cycle run again on the finished state to the same diagnostics. It reads no clock: its
@@ -1166,14 +2249,23 @@ fn a_locked_aquaplanet_s_winds_converge_on_its_substellar_point() {
 /// [`EARTH_DEEP_TOLERANCE`], every month converges before the cap and closes its budget, and every
 /// land climate cell's monthly and annual rate lies within 1% of the deep solve's
 /// ([`assert_the_solve_converges`]).
+///
+/// It prints, never asserts, the windows' land and sea parts, Eurasia's interior ratio and the
+/// other regions of the ruled Earth's ([`report_regions`], NaN where the generated Earth has no
+/// all-land climate cell in a box), k by month, and the E-L7 patch (decision-r09-t13e-revision
+/// §5.1): the field cell nearest 1.11° N, 54.26° E, its annual rate and its climate cell's, the
+/// field cells' rates solved again from the finished state ([`field_rates`], held to the records
+/// to the bit by [`replication_error`]). As built under decision-r09-t13e-lfpm-convergence it
+/// read 17.06 mm/day and its climate cell 12.24, a land convergence line under the trades
+/// (plan 09's E-L7).
 #[test]
-#[ignore = "slow: the reference Earth's coarse pass to the climate at level 8, and its water cycle \
-            again at the deep tolerance, about 40 s"]
+#[ignore = "slow: the reference Earth's coarse pass to the climate at level 8, its water cycle \
+            again at the deep tolerance, and its field cells' rates solved again, about 50 s"]
 fn the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp() {
     let inputs = reference::earth_like();
     let level = hyperion_surface::field::coarse_level(inputs.radius());
     let (field, climate) = (CellGraph::for_field(level), CellGraph::for_climate(level));
-    let (working, diagnostics, deep) = {
+    let (working, diagnostics, deep, coordinates) = {
         let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
         let mut working = Working::initial(&pass);
         steps::plates::run(&pass, &mut working);
@@ -1200,7 +2292,12 @@ fn the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp() {
             level.get(),
             working.cells.len()
         );
-        (working, diagnostics, (deep, deep_working.climate))
+        (
+            working,
+            diagnostics,
+            (deep, deep_working.climate),
+            kept.coordinates,
+        )
     };
     let run = Run {
         field,
@@ -1210,6 +2307,13 @@ fn the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp() {
         diagnostics,
     };
     report("The reference Earth (the coarse pass)", &run);
+    report_regions(&run);
+    report_balance(&run);
+    let rates = field_rates(&run, coordinates);
+    let replication = replication_error(&run, &rates);
+    report_patch(&run, &rates);
+    eprintln!("  the field cells' rates solved again: the records within {replication:.1e}");
+    assert_same_bits(replication, 0.0);
     assert_the_water_balances(&run);
     assert_the_budget_s_pattern(&run);
     assert_the_solve_converges(&run, &deep.0, &deep.1);

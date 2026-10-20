@@ -1,6 +1,8 @@
 //! The orographic precipitation over land (R09.T13.e; Design note 8, decision-r09-t13ge
 //! §2.1–§2.4, §2.8): Hergarten and Robl's linear feedback precipitation model, carried along each
-//! month's wind over the field's cells from the sea's large-scale rate at the coast.
+//! month's wind over the field's cells from the sea's rate at the coast, each land cell taking the
+//! zonal budget's convergence as a vapour source and recycling nothing from frozen ground
+//! (R09.T13.j, decision-r09-t13e-revision §4.2, §4.4).
 //!
 //! The source is Hergarten, S., and Robl, J. 2022, "The linear feedback precipitation model (LFPM
 //! 1.0) – a simple and efficient model for orographic precipitation in the context of landform
@@ -51,13 +53,27 @@
 //! # The sea
 //!
 //! The sea is the boundary (their §7: "Ocean areas were considered to be boundaries, where a
-//! uniform influx was assumed"). A sea cell's air carries the total flux F = `L_l` `P_ls` per unit
-//! width, `P_ls` its large-scale rate, split in the long-range mode as `F_c` = F `L_f` ÷ `L_l` and
-//! `F_v` = F − `F_c` (eq. 31), so that the model's own rate over it, `F_c` ÷ `L_f`, is `P_ls`.
+//! uniform influx was assumed"). A sea cell's air carries the total flux F = `L_l` `P_sea` per
+//! unit width, `P_sea` its rate (the sea's own evaporation plus its band's convergence,
+//! decision-r09-t13e-revision §4.1), split in the long-range mode as `F_c` = F `L_f` ÷ `L_l` and
+//! `F_v` = F − `F_c` (eq. 31), so that the model's own rate over it, `F_c` ÷ `L_f`, is `P_sea`.
 //! Each land cell takes from an upwind sea neighbour what that cell's air carries across their
 //! shared edge, and exchanges with it by dispersion against that boundary value; what a land cell
 //! passes to a sea neighbour leaves the land. Sea cells' rates are not this model's, and it returns
 //! zero over them. The sea is the cells [`Cover::Sea`] names, `seas::under_sea`'s.
+//!
+//! # The land's own vapour and frozen ground
+//!
+//! The zonal budget's convergence, C = −(E − P) where it is positive, is the meridional vapour
+//! transport of the Hadley and eddy circulations, which reaches land and sea alike: each land cell
+//! takes it as a vapour source per unit area, S = C e^(−H/H₀), the column above height H holding
+//! about e^(−H/H₀) of the sea level's vapour, the same physics as β's and ε's height factors
+//! (decision-r09-t13e-revision §4.2). Its balance gains [S A, 0] on its right-hand side, the
+//! vapour's, so that far from any coast a column rains P = S ÷ (1 − ε): its P − E is its
+//! convergence, its E = ε P. The source is part of what the sea gives a sweep, c = F(0), and not
+//! of the sweep's linear part G. On frozen ground ([`GroundState::Frozen`]) the recycled share is
+//! zero, as the sea gives no evaporation when frozen: the cell matrix and the sink's rule read
+//! ε = 0, while the cloud water's re-evaporation β keeps its height factor (§4.4).
 //!
 //! # The discretisation
 //!
@@ -86,8 +102,10 @@
 //!   diffusivity is `L_d` v): a sea cell's per-width flux is its boundary value, and calm air
 //!   disperses nothing.
 //! - A land cell whose air does not move, or that has no downwind edge, passes nothing on: in the
-//!   steady state its column loses all that enters as runoff, (1 − ε) P A = `Q_in`, the recycled
-//!   ε P raining again in place (eqs. 42–44 with no outflow).
+//!   steady state its column loses all that enters as runoff, (1 − ε) P A = `Q_in` + S A, the
+//!   recycled ε P raining again in place (eqs. 42–44 with no outflow). A wholly calm month makes
+//!   every land cell such a sink, P = S ÷ (1 − ε) where no air enters: with no wind the zonal
+//!   budget's convergence falls where it forms (decision-r09-t13e-revision §4.5).
 //! - An edge is downwind only if ŵ · n̂ exceeds [`DOWNWIND_TOLERANCE`], so that a wind along an
 //!   edge, which rounding tilts either way, makes no pair of cells each the other's downwind.
 //!
@@ -148,10 +166,11 @@
 //!   continent's length in cells (plan 09's E-L1).
 //! - **The stop**, at each restart: its residual sweep, F(x) − x, moves no land cell's rate (sinks
 //!   included) by more than [`TOLERANCE`] of max(its rate, [`RATE_FLOOR_SHARE`] `P̄_sea`), `P̄_sea`
-//!   the month's area mean of the sea's large-scale rate over its sea cells. The month keeps that
-//!   sweep's result. A month with no land whose air moves on, or none of the sea's air reaching
-//!   it (‖c‖ = 0), stops at the start. The cap is [`MAX_RESTARTS`] restarts. A month that reaches
-//!   it keeps its last sweep and is flagged as not converged ([`Diagnostics`]); it never panics.
+//!   the month's area mean of the sea's rate over its sea cells. The month keeps that sweep's
+//!   result. A month with no land whose air moves on, or none of the sea's air or the land's
+//!   source reaching it (‖c‖ = 0), stops at the start. The cap is [`MAX_RESTARTS`] restarts. A
+//!   month that reaches it keeps its last sweep and is flagged as not converged ([`Diagnostics`]);
+//!   it never panics.
 //!
 //! Every loop runs in a fixed order (the cells', the components', each component's members', the
 //! edges' in [`Edge::ALL`]'s, and the unknowns' in cell-index order, vapour then cloud water), in
@@ -207,7 +226,12 @@ pub(super) const DISPERSION_LENGTH_M: f64 = 25_000.0;
 pub(super) const SEA_LEVEL_RECYCLED_SHARE: f64 = 0.75;
 
 /// H₀, the height over which the re-evaporation β and the recycled share ε fall by a factor e
-/// (eqs. 15–16, 49), m: 2 km, their §7 set (decision-r09-t13ge §2.1, e1).
+/// (eqs. 15–16, 49), m: 2 km, their §7 set (decision-r09-t13ge §2.1, e1). The land's vapour
+/// source takes the same factor (decision-r09-t13e-revision §4.2): the column factor e^(−H/H₀)
+/// reuses H₀; NCEP/NCAR R1 1991–2020's vapour scale height over the sea is 1.84 km (1.68–2.05 km
+/// by 20° band, 60° S–60° N), and ln W falls with surface height over 1.7–2.5 km at 20–60°
+/// (decision-r09-t13e-revision, "Review points (follow-up 2)"); Clausius–Clapeyron's 2.67 km is a
+/// saturated column's, an upper bound, since relative humidity falls aloft.
 ///
 /// It is water's on the Earth, a closed figure for the composition audit. Their eqs. 12–15 give
 /// H₀ = T₀² ÷ (a Γ) for β ∝ e^(−a/T); a condensable's Clausius–Clapeyron slope a = M L ÷ R makes
@@ -227,8 +251,8 @@ pub(super) const HEIGHT_SCALE_M: f64 = 2_000.0;
 /// cycles. The ruling's figure, medium confidence; not loosened to save time (its §3.4).
 pub(super) const TOLERANCE: f64 = 1e-4;
 
-/// The floor of the stop test's scale as a share of `P̄_sea`, the month's area-mean large-scale
-/// rate over its sea cells: 10⁻³ (decision-r09-t13e-lfpm-convergence §3.2 item 5), so that a land
+/// The floor of the stop test's scale as a share of `P̄_sea`, the month's area-mean sea rate over
+/// its sea cells: 10⁻³ (decision-r09-t13e-lfpm-convergence §3.2 item 5), so that a land
 /// cell all but dry is measured against a thousandth of the sea's rate, not against its own.
 pub(super) const RATE_FLOOR_SHARE: f64 = 1e-3;
 
@@ -414,10 +438,29 @@ impl Parameters {
     }
 
     /// ε, the share of the precipitation at `height_m` above the sea level that evaporates back
-    /// into the air, ε₀ e^(−H/H₀) (eq. 49).
+    /// into the air, ε₀ e^(−H/H₀) (eq. 49), on ground that is not frozen.
     #[must_use]
     pub(super) fn recycled_share(&self, height_m: f64) -> f64 {
         self.sea_level_recycled_share * self.height_factor(height_m)
+    }
+
+    /// ε on `ground` at `height_m` above the sea level: [`Parameters::recycled_share`] on thawed
+    /// ground, and none on frozen ground, from which nothing evaporates
+    /// (decision-r09-t13e-revision §4.4).
+    #[must_use]
+    pub(super) fn recycled_share_on(&self, height_m: f64, ground: GroundState) -> f64 {
+        match ground {
+            GroundState::Thawed => self.recycled_share(height_m),
+            GroundState::Frozen => 0.0,
+        }
+    }
+
+    /// The share of the zonal budget's convergence that a land cell at `height_m` above the sea
+    /// level takes as its vapour source, e^(−H/H₀), a negative height read as 0: the column above
+    /// it holds about that share of the sea level's vapour (decision-r09-t13e-revision §4.2).
+    #[must_use]
+    pub(super) fn column_share(&self, height_m: f64) -> f64 {
+        self.height_factor(height_m)
     }
 
     /// `L̃_l`, the effective long-range length at the sea level with the recycling, m: `L_c` ÷ λ̃₋,
@@ -437,9 +480,9 @@ impl Parameters {
         self.condensation_length_m * larger / fallout
     }
 
-    /// The sea's air per unit width at the large-scale rate `rate_kg_m2_s`, kg m⁻¹ s⁻¹, vapour
-    /// then cloud water: the total `L_l` `P_ls` in the long-range mode, `F_c` = F `L_f` ÷ `L_l`
-    /// and `F_v` = F − `F_c` (eq. 31).
+    /// The sea's air per unit width at the sea's rate `rate_kg_m2_s`, kg m⁻¹ s⁻¹, vapour then
+    /// cloud water: the total `L_l` `P_sea` in the long-range mode, `F_c` = F `L_f` ÷ `L_l` and
+    /// `F_v` = F − `F_c` (eq. 31).
     #[must_use]
     fn sea_air(&self, rate_kg_m2_s: f64) -> [f64; 2] {
         let total = self.long_range_length_m * rate_kg_m2_s;
@@ -454,8 +497,20 @@ pub(crate) enum Cover {
     /// Ground, where the model rains.
     Land,
     /// Liquid ([`seas::under_sea`](super::seas::under_sea)): the boundary, whose air arrives at
-    /// the sea's large-scale rate.
+    /// the sea's rate.
     Sea,
+}
+
+/// Whether a land cell's ground is frozen in a month, as this model reads it: frozen where the
+/// cell's month temperature at its surface lies below the climate condensable's freezing point,
+/// so that it recycles nothing (decision-r09-t13e-revision §4.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum GroundState {
+    /// At or above the freezing point, or on a world where nothing freezes: it recycles
+    /// ε₀ e^(−H/H₀) of what falls.
+    Thawed,
+    /// Below the freezing point: it recycles nothing, and all that falls runs off.
+    Frozen,
 }
 
 /// A cell's wind in a month, as this model reads it: its direction, or still air. Its speed drops
@@ -576,11 +631,17 @@ pub(super) struct Month<'a> {
     pub(super) heights_m: &'a [f64],
     /// What covers each cell.
     pub(super) cover: &'a [Cover],
+    /// Whether each cell's ground is frozen this month; read over the land alone.
+    pub(super) ground: &'a [GroundState],
     /// Each cell's wind.
     pub(super) winds: &'a [CellWind],
-    /// The large-scale precipitation rate over each sea cell, kg m⁻² s⁻¹, non-negative; read over
-    /// the sea alone.
+    /// The sea's precipitation rate over each sea cell, `P_sea`, kg m⁻² s⁻¹, non-negative; read
+    /// over the sea alone.
     pub(super) sea_rates_kg_m2_s: &'a [f64],
+    /// The zonal budget's vapour convergence at each cell, max(0, C) at the sea level,
+    /// kg m⁻² s⁻¹, non-negative; read over the land alone, each land cell taking e^(−H/H₀) of it
+    /// as its vapour source ([`Parameters::column_share`]).
+    pub(super) convergence_kg_m2_s: &'a [f64],
 }
 
 /// A month's orographic precipitation: each cell's rate and recycled share, and what the solve
@@ -590,8 +651,9 @@ pub(super) struct Orographic {
     /// Each cell's precipitation rate P, kg m⁻² s⁻¹, non-negative: the land's, and zero over the
     /// sea, whose rate is not this model's.
     pub(super) precipitation_kg_m2_s: Vec<f64>,
-    /// Each cell's recycled share ε(H) (eq. 49), so that its runoff-generating rate is (1 − ε) P
-    /// (eq. 44): the land's, and zero over the sea.
+    /// Each cell's recycled share ε this month (eq. 49), so that its runoff-generating rate is
+    /// (1 − ε) P (eq. 44): ε₀ e^(−H/H₀) on thawed land, zero on frozen land
+    /// ([`Parameters::recycled_share_on`]) and over the sea.
     pub(super) recycled_shares: Vec<f64>,
     /// What the solve did that is no output.
     pub(super) diagnostics: Diagnostics,
@@ -616,7 +678,8 @@ pub(super) struct ComponentSizes {
 }
 
 /// What a month's solve did that is no output (decision-r09-t13e-lfpm-convergence §3.2 item 7):
-/// its iteration, its components, and the land's water budget at its final state.
+/// its iteration, its components, and the land's water budget at its final state, which closes
+/// as inflow + source = runoff + outflow (decision-r09-t13e-revision §4.7).
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Diagnostics {
     /// The GMRES restarts the solve took, at most its parameters' cap.
@@ -646,20 +709,22 @@ pub(super) struct Diagnostics {
     /// The same share of the largest component alone, the first of equals; zero where it is not
     /// larger than [`EXACT_BLOCK_CELLS`].
     pub(super) largest_backward_share: f64,
-    /// `P̄_sea`, the area mean of the sea's large-scale rate over the month's sea cells,
-    /// kg m⁻² s⁻¹; zero on a world of no sea.
+    /// `P̄_sea`, the area mean of the sea's rate over the month's sea cells, kg m⁻² s⁻¹; zero on a
+    /// world of no sea.
     pub(super) sea_mean_kg_m2_s: f64,
     /// The land cells whose final rate came out below zero and was read as zero: GMRES's iterate
     /// need not be non-negative, though the converged solve is, so a cell whose rate lies within
     /// the stop test's tolerance of zero can end a rounding below it.
     pub(super) negative_cells: u32,
-    /// The area-weighted mean rate over every cell, the land's P and the sea's `P_ls`,
+    /// The area-weighted mean rate over every cell, the land's P and the sea's `P_sea`,
     /// kg m⁻² s⁻¹.
     pub(super) global_mean_kg_m2_s: f64,
     /// The land cells.
     pub(super) land_cells: u32,
     /// The water the land's air took in from the sea, by the wind and by dispersion, kg s⁻¹.
     pub(super) inflow_kg_s: f64,
+    /// The land's vapour source, Σ S A over the land, kg s⁻¹ (decision-r09-t13e-revision §4.7).
+    pub(super) source_kg_s: f64,
     /// The precipitation that ran off, Σ (1 − ε) P A over the land, kg s⁻¹.
     pub(super) runoff_kg_s: f64,
     /// The precipitation that evaporated back into the air, Σ ε P A over the land, kg s⁻¹.
@@ -668,18 +733,24 @@ pub(super) struct Diagnostics {
     pub(super) outflow_kg_s: f64,
 }
 
-/// The runoff-generating rate (1 − ε(H)) P of a cell under precipitation `precipitation_kg_m2_s`,
-/// kg m⁻² s⁻¹, at `height_m` above the sea level, at Hergarten and Robl's set (eqs. 44, 49;
-/// decision-r09-t13ge §2.8, e8): applied to a cell's annual mean rate, the annual runoff R09.T14
-/// reads, ε depending on the height alone. Zero over liquid, and on a dry world, whose rate is
-/// zero. The recycled ε P is the land's evapotranspiration, which the global water balance counts
-/// as evaporation.
+/// The runoff-generating rate (1 − ε) P of a cell under precipitation `precipitation_kg_m2_s`,
+/// kg m⁻² s⁻¹, at `height_m` above the sea level on `ground`, at Hergarten and Robl's set (eqs. 44,
+/// 49; decision-r09-t13ge §2.8, e8): applied to each month's rate, ε₀ e^(−H/H₀) on thawed ground
+/// and nothing on frozen ground ([`Parameters::recycled_share_on`]; decision-r09-t13e-revision
+/// §4.5), the months of the annual runoff R09.T14 reads. Zero over liquid, and on a dry world,
+/// whose rate is zero. The recycled ε P is the land's evapotranspiration, which the global water
+/// balance counts as evaporation.
 ///
 /// # Panics
 ///
 /// If the rate is negative or not finite, or the height not finite.
 #[must_use]
-pub(crate) fn runoff_kg_m2_s(precipitation_kg_m2_s: f64, height_m: f64, cover: Cover) -> f64 {
+pub(crate) fn runoff_kg_m2_s(
+    precipitation_kg_m2_s: f64,
+    height_m: f64,
+    cover: Cover,
+    ground: GroundState,
+) -> f64 {
     assert!(
         precipitation_kg_m2_s.is_finite() && precipitation_kg_m2_s >= 0.0,
         "a precipitation rate is finite and non-negative, got {precipitation_kg_m2_s} kg m^-2 s^-1"
@@ -687,7 +758,8 @@ pub(crate) fn runoff_kg_m2_s(precipitation_kg_m2_s: f64, height_m: f64, cover: C
     let height_m = assert_finite(height_m);
     match cover {
         Cover::Land => {
-            (1.0 - Parameters::HERGARTEN_ROBL.recycled_share(height_m)) * precipitation_kg_m2_s
+            (1.0 - Parameters::HERGARTEN_ROBL.recycled_share_on(height_m, ground))
+                * precipitation_kg_m2_s
         }
         Cover::Sea => 0.0,
     }
@@ -797,8 +869,10 @@ struct Row {
     /// Each neighbour's place among the members of the cell's component where a sweep solves that
     /// component whole, else [`OUTSIDE`].
     block: [u8; 4],
-    /// What the sea gives it by the wind and by dispersion, kg s⁻¹, vapour then cloud water.
-    sea_kg_s: [f64; 2],
+    /// The inflow from outside the land's outflows: the sea's air and the land's own source, kg
+    /// s⁻¹, vapour then cloud water. The sea gives it by the wind and by dispersion; its own
+    /// vapour source is S A.
+    outside_kg_s: [f64; 2],
     /// How its rate follows from its inflow.
     rule: Rule,
 }
@@ -828,11 +902,11 @@ enum Dispersion {
     On,
 }
 
-/// What a sweep takes from the sea: its air, for F, or none, for the sweep's linear part G that
-/// the Krylov steps apply.
+/// What a sweep takes from outside the land's outflows: the sea's air and the land's own vapour
+/// source, for F, or none, for the sweep's linear part G that the Krylov steps apply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Source {
-    Sea,
+    Outside,
     Nothing,
 }
 
@@ -850,11 +924,18 @@ fn across(dot: f64) -> f64 {
 }
 
 /// The cell matrix I + h Ã + δ I of a cell whose path over `L_c` is `path` (h), at `height_m`,
-/// with dispersion diagonal `spread` (δ): Ã = [[1, −β̃], [−1, β̃ + φ̃]] (eqs. 18, 45–47).
+/// recycling the share `share` (ε, [`Parameters::recycled_share_on`]), with dispersion diagonal
+/// `spread` (δ): Ã = [[1, −β̃], [−1, β̃ + φ̃]] with β̃ = β + εφ and φ̃ = (1 − ε)φ (eqs. 18, 45–47),
+/// β at the height.
 #[must_use]
-fn cell_matrix(parameters: &Parameters, path: f64, height_m: f64, spread: f64) -> [[f64; 2]; 2] {
+fn cell_matrix(
+    parameters: &Parameters,
+    path: f64,
+    height_m: f64,
+    share: f64,
+    spread: f64,
+) -> [[f64; 2]; 2] {
     let phi = parameters.length_ratio();
-    let share = parameters.recycled_share(height_m);
     let feedback = parameters.reevaporation(height_m) + share * phi;
     let fallout = (1.0 - share) * phi;
     [
@@ -888,6 +969,13 @@ fn spread_m(parameters: &Parameters, face: &Face, k: usize, local: &Local, other
     parameters.dispersion_length_m * face.conductance * shares
 }
 
+/// Land cell `i`'s vapour source of `month` on `mesh`, S A = C e^(−H/H₀) A, kg s⁻¹
+/// (decision-r09-t13e-revision §4.2).
+#[must_use]
+fn source_kg_s(mesh: &Mesh, month: &Month<'_>, parameters: &Parameters, i: usize) -> f64 {
+    month.convergence_kg_m2_s[i] * parameters.column_share(month.heights_m[i]) * mesh.areas_m2[i]
+}
+
 /// Cell `cell`'s balance, a land cell of `locals`, with or without the dispersion; its places in
 /// a block all [`OUTSIDE`].
 #[must_use]
@@ -902,7 +990,7 @@ fn row(
     let i = slot(cell);
     let (local, faces) = (&locals[i], &mesh.faces[i]);
     let mut pulls = [0.0; 4];
-    let mut sea_kg_s = [0.0; 2];
+    let mut outside_kg_s = [0.0; 2];
     let mut spread = 0.0;
     for (k, face) in faces.iter().enumerate() {
         let j = slot(face.neighbour);
@@ -916,8 +1004,8 @@ fn row(
             Kind::Through => pulls[k] = (given + kappa_m) / other.width_m,
             Kind::Sea => {
                 let air = parameters.sea_air(month.sea_rates_kg_m2_s[j]);
-                for (sea, flux) in sea_kg_s.iter_mut().zip(air) {
-                    *sea += flux * given + kappa_m * flux;
+                for (outside, flux) in outside_kg_s.iter_mut().zip(air) {
+                    *outside += flux * given + kappa_m * flux;
                 }
             }
             Kind::CalmSea | Kind::Sink => {}
@@ -926,11 +1014,16 @@ fn row(
             spread += kappa_m / local.width_m;
         }
     }
+    // The land's own vapour. A zero source leaves the inflow as it was to the bit, so a month with
+    // no source is as before: the accumulator starts at +0.0 and is only added non-negative terms,
+    // so it never holds −0.0, and +0.0 + (+0.0) is +0.0 (x + (+0.0) is x for any other x).
+    outside_kg_s[0] += source_kg_s(mesh, month, parameters, i);
     let height_m = month.heights_m[i];
+    let share = parameters.recycled_share_on(height_m, month.ground[i]);
     let rule = match local.kind {
         Kind::Through => {
             let path = mesh.areas_m2[i] / local.width_m / parameters.condensation_length_m;
-            let matrix = cell_matrix(parameters, path, height_m, spread);
+            let matrix = cell_matrix(parameters, path, height_m, share, spread);
             Rule::Through {
                 matrix,
                 inverse: inverse(matrix),
@@ -938,7 +1031,7 @@ fn row(
             }
         }
         Kind::Sink => Rule::Sink {
-            rate_per_inflow: 1.0 / ((1.0 - parameters.recycled_share(height_m)) * mesh.areas_m2[i]),
+            rate_per_inflow: 1.0 / ((1.0 - share) * mesh.areas_m2[i]),
         },
         Kind::Sea | Kind::CalmSea => unreachable!("the components hold land cells alone"),
     };
@@ -947,7 +1040,7 @@ fn row(
         neighbours: faces.map(|face| face.neighbour),
         pulls,
         block: [OUTSIDE; 4],
-        sea_kg_s,
+        outside_kg_s,
         rule,
     }
 }
@@ -1550,13 +1643,13 @@ impl PartialEq for Pick {
 
 impl Eq for Pick {}
 
-/// What `row`'s cell takes in from the sea (none under [`Source::Nothing`]) and from its
-/// neighbours' latest outflows in `outflow_kg_s` but those `skip` names, kg s⁻¹, vapour then
-/// cloud water, its edges in order.
+/// What `row`'s cell takes in from the sea and its own source (none under [`Source::Nothing`]) and
+/// from its neighbours' latest outflows in `outflow_kg_s` but those `skip` names, kg s⁻¹, vapour
+/// then cloud water, its edges in order.
 #[must_use]
 fn inflow(row: &Row, outflow_kg_s: &[[f64; 2]], source: Source, skip: Skip) -> [f64; 2] {
     let mut inflow = match source {
-        Source::Sea => row.sea_kg_s,
+        Source::Outside => row.outside_kg_s,
         Source::Nothing => [0.0; 2],
     };
     for ((&j, &pull), &place) in row.neighbours.iter().zip(&row.pulls).zip(&row.block) {
@@ -1638,14 +1731,14 @@ fn solve_block(rows: &[Row], factors: &[f64], outflow_kg_s: &mut [[f64; 2]], sou
 
 /// Each land cell's rate at the outflows `outflow_kg_s`, kg m⁻² s⁻¹, into `rates` (one a cell; the
 /// sea's left as they are): a cell whose air moves on, its cloud water's outflow over W `L_f`
-/// (eq. 8); a sink, its whole inflow, the sea's and its neighbours', over (1 − ε) A.
+/// (eq. 8); a sink, its whole inflow, the sea's, its source's and its neighbours', over (1 − ε) A.
 fn rates_at(rows: &[Row], outflow_kg_s: &[[f64; 2]], rates: &mut [f64]) {
     for row in rows {
         let i = slot(row.cell);
         rates[i] = match row.rule {
             Rule::Through { rate_per_cloud, .. } => outflow_kg_s[i][1] * rate_per_cloud,
             Rule::Sink { rate_per_inflow } => {
-                let inflow = inflow(row, outflow_kg_s, Source::Sea, Skip::None);
+                let inflow = inflow(row, outflow_kg_s, Source::Outside, Skip::None);
                 (inflow[0] + inflow[1]) * rate_per_inflow
             }
         };
@@ -1712,8 +1805,8 @@ struct Map<'a> {
 }
 
 impl Map<'_> {
-    /// One sweep from `x` with the sea's air, F(x), or without it, G x, into `out`, by way of
-    /// `outflow_kg_s`, which holds no outflow but the unknowns'.
+    /// One sweep from `x` with the sea's air and the land's source, F(x), or without them, G x,
+    /// into `out`, by way of `outflow_kg_s`, which holds no outflow but the unknowns'.
     fn apply(&self, x: &[f64], source: Source, outflow_kg_s: &mut [[f64; 2]], out: &mut [f64]) {
         unpack(self.through, x, outflow_kg_s);
         sweep(self.balances, self.components, outflow_kg_s, source);
@@ -1832,7 +1925,7 @@ impl Iteration {
 /// GMRES([`RESTART`]) on (I − G) x = c ([`cycle`]), each restart's residual F(x) − x one sweep
 /// from x, until that sweep moves no land cell's rate by more than the parameters' tolerance of
 /// max(its rate, `floor_kg_m2_s`), or the cap, the month keeping that sweep's result. It stops at
-/// the start where the sea's air reaches no unknown (‖c‖ = 0).
+/// the start where neither the sea's air nor the land's source reaches an unknown (‖c‖ = 0).
 fn iterate(
     map: &Map<'_>,
     parameters: &Parameters,
@@ -1843,9 +1936,14 @@ fn iterate(
     let mut x = vec![0.0; unknowns];
     pack(map.through, outflow_kg_s, &mut x);
     let mut swept = vec![0.0; unknowns];
-    map.apply(&vec![0.0; unknowns], Source::Sea, outflow_kg_s, &mut swept);
-    let sea_norm = inner(&swept, &swept).sqrt();
-    if sea_norm <= 0.0 {
+    map.apply(
+        &vec![0.0; unknowns],
+        Source::Outside,
+        outflow_kg_s,
+        &mut swept,
+    );
+    let c_norm = inner(&swept, &swept).sqrt();
+    if c_norm <= 0.0 {
         unpack(map.through, &x, outflow_kg_s);
         return Iteration::at_start(2);
     }
@@ -1863,7 +1961,7 @@ fn iterate(
     loop {
         unpack(map.through, &x, outflow_kg_s);
         rates_at(&map.balances.rows, outflow_kg_s, &mut before);
-        sweep(map.balances, map.components, outflow_kg_s, Source::Sea);
+        sweep(map.balances, map.components, outflow_kg_s, Source::Outside);
         iteration.sweeps += 1;
         rates_at(&map.balances.rows, outflow_kg_s, &mut after);
         pack(map.through, outflow_kg_s, &mut swept);
@@ -1872,7 +1970,7 @@ fn iterate(
         }
         let norm = inner(&swept, &swept).sqrt();
         iteration.measure = measure(&map.balances.rows, &before, &after, floor_kg_m2_s);
-        iteration.relative_residual = norm / sea_norm;
+        iteration.relative_residual = norm / c_norm;
         if iteration.measure <= parameters.tolerance {
             iteration.converged = true;
             return iteration;
@@ -1888,7 +1986,7 @@ fn iterate(
     }
 }
 
-/// `P̄_sea`: the area mean of `month`'s large-scale rate over its sea cells, kg m⁻² s⁻¹, summed in
+/// `P̄_sea`: the area mean of `month`'s sea rate over its sea cells, kg m⁻² s⁻¹, summed in
 /// cell-index order; zero on a world of no sea.
 #[must_use]
 fn sea_mean_kg_m2_s(mesh: &Mesh, month: &Month<'_>) -> f64 {
@@ -1907,8 +2005,8 @@ fn sea_mean_kg_m2_s(mesh: &Mesh, month: &Month<'_>) -> f64 {
     if area > 0.0 { rained / area } else { 0.0 }
 }
 
-/// Checks that `month` holds one value a cell of `mesh`, its heights finite and its sea rates
-/// finite and non-negative.
+/// Checks that `month` holds one value a cell of `mesh`, its heights finite, its sea rates finite
+/// and non-negative over the sea and its convergence finite and non-negative over the land.
 ///
 /// # Panics
 ///
@@ -1918,24 +2016,34 @@ fn check(mesh: &Mesh, month: &Month<'_>) {
     for (name, len) in [
         ("heights", month.heights_m.len()),
         ("covers", month.cover.len()),
+        ("grounds", month.ground.len()),
         ("winds", month.winds.len()),
         ("sea rates", month.sea_rates_kg_m2_s.len()),
+        ("convergences", month.convergence_kg_m2_s.len()),
     ] {
         assert_eq!(len, cells, "a month holds {cells} {name}, one a cell");
     }
-    for (&height_m, (&cover, &rate)) in month
-        .heights_m
-        .iter()
-        .zip(month.cover.iter().zip(month.sea_rates_kg_m2_s))
-    {
+    for ((&height_m, &cover), (&rate, &convergence)) in month.heights_m.iter().zip(month.cover).zip(
+        month
+            .sea_rates_kg_m2_s
+            .iter()
+            .zip(month.convergence_kg_m2_s),
+    ) {
         assert!(
             height_m.is_finite(),
             "a height must be finite, got {height_m} m"
         );
-        assert!(
-            cover == Cover::Land || (rate.is_finite() && rate >= 0.0),
-            "a sea's rate is finite and non-negative, got {rate} kg m^-2 s^-1"
-        );
+        match cover {
+            Cover::Sea => assert!(
+                rate.is_finite() && rate >= 0.0,
+                "a sea's rate is finite and non-negative, got {rate} kg m^-2 s^-1"
+            ),
+            Cover::Land => assert!(
+                convergence.is_finite() && convergence >= 0.0,
+                "a land cell's convergence is finite and non-negative, got {convergence} \
+                 kg m^-2 s^-1"
+            ),
+        }
     }
 }
 
@@ -1949,8 +2057,8 @@ fn check(mesh: &Mesh, month: &Month<'_>) {
 /// # Panics
 ///
 /// If a slice of `month` does not hold one value a cell, a height is not finite, a sea cell's rate
-/// is negative or not finite, a wind is not finite or has no direction along the surface, or a
-/// rate comes out not finite (a fault of the model).
+/// or a land cell's convergence is negative or not finite, a wind is not finite or has no
+/// direction along the surface, or a rate comes out not finite (a fault of the model).
 #[must_use]
 pub(super) fn solve(mesh: &Mesh, month: &Month<'_>, parameters: &Parameters) -> Orographic {
     check(mesh, month);
@@ -1978,7 +2086,7 @@ pub(super) fn solve(mesh: &Mesh, month: &Month<'_>, parameters: &Parameters) -> 
         ),
         &components,
         &mut outflow_kg_s,
-        Source::Sea,
+        Source::Outside,
     );
     let balances = Balances::new(
         mesh,
@@ -2015,7 +2123,7 @@ pub(super) fn solve(mesh: &Mesh, month: &Month<'_>, parameters: &Parameters) -> 
     let recycled_shares: Vec<f64> = (0..cells)
         .map(|i| {
             if locals[i].kind.is_land() {
-                parameters.recycled_share(month.heights_m[i])
+                parameters.recycled_share_on(month.heights_m[i], month.ground[i])
             } else {
                 0.0
             }
@@ -2060,9 +2168,10 @@ struct Solved<'a> {
 }
 
 /// The land's water budget and the global mean rate at `solved`'s values, summed in cell-index
-/// order and each cell's edges in turn: what the sea gave and took, what fell and recycled, and
-/// what passed to the sea, the dispersion counted as the final state's balances carried it
-/// (`dispersion`: none at the start); the iteration's fields left for [`solve`].
+/// order and each cell's edges in turn: what the sea gave and took, the land's own source, what
+/// fell and recycled, and what passed to the sea, the dispersion counted as the final state's
+/// balances carried it (`dispersion`: none at the start); the iteration's fields left for
+/// [`solve`].
 #[must_use]
 fn budget(
     mesh: &Mesh,
@@ -2091,6 +2200,7 @@ fn budget(
         global_mean_kg_m2_s: 0.0,
         land_cells: 0,
         inflow_kg_s: 0.0,
+        source_kg_s: 0.0,
         runoff_kg_s: 0.0,
         recycled_kg_s: 0.0,
         outflow_kg_s: 0.0,
@@ -2105,6 +2215,7 @@ fn budget(
         }
         let fallen_kg_s = precipitation_kg_m2_s[i] * a;
         rained_kg_s += fallen_kg_s;
+        diagnostics.source_kg_s += source_kg_s(mesh, month, parameters, i);
         diagnostics.runoff_kg_s += (1.0 - recycled_shares[i]) * fallen_kg_s;
         diagnostics.recycled_kg_s += recycled_shares[i] * fallen_kg_s;
         let own = outflow_kg_s[i][0] + outflow_kg_s[i][1];

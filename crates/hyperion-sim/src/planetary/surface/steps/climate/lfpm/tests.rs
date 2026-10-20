@@ -9,8 +9,14 @@ use hyperion_testkit::float::assert_same_bits;
 /// The Earth's mean radius, m (6,371 km, from memory), for the strip worlds.
 const EARTH_RADIUS_M: f64 = 6_371_000.0;
 
-/// The sea's large-scale rate in every test world, kg m⁻² s⁻¹: about 2.6 mm a day.
+/// The sea's rate in every test world, kg m⁻² s⁻¹: about 2.6 mm a day.
 const SEA_RATE: f64 = 3.0e-5;
+
+/// The zonal budget's convergence over the land in the source tests, kg m⁻² s⁻¹: about 1.04 mm a
+/// day, a test's set-up (decision-r09-t13e-revision §6.3 asks for any positive value), under which
+/// a column far from any coast rains S ÷ (1 − ε₀) = 4.8 × 10⁻⁵, above [`SEA_RATE`], so that the
+/// land's air disperses towards the sea.
+const CONVERGENCE: f64 = 1.2e-5;
 
 /// The ridge of decision-r09-t13ge §2.4 and §2.13: 3 km high, its half-width at half maximum
 /// 100 km, its plains read at three half-widths from the crest.
@@ -44,6 +50,16 @@ enum Labels {
     AlongTheWind,
     /// In order against the wind.
     AgainstTheWind,
+}
+
+impl Labels {
+    /// The label of the cell at place `x` along the wind of a chain of `n` cells; its own inverse.
+    fn of(self, n: u32, x: u32) -> u32 {
+        match self {
+            Self::AlongTheWind => x,
+            Self::AgainstTheWind => n - 1 - x,
+        }
+    }
 }
 
 impl Mesh {
@@ -146,8 +162,10 @@ impl Mesh {
 struct World {
     heights_m: Vec<f64>,
     cover: Vec<Cover>,
+    ground: Vec<GroundState>,
     winds: Vec<CellWind>,
     rates: Vec<f64>,
+    convergence: Vec<f64>,
 }
 
 impl World {
@@ -156,13 +174,15 @@ impl World {
         Month {
             heights_m: &self.heights_m,
             cover: &self.cover,
+            ground: &self.ground,
             winds: &self.winds,
             sea_rates_kg_m2_s: &self.rates,
+            convergence_kg_m2_s: &self.convergence,
         }
     }
 
     /// A world of `count` cells, each covered, raised and blown by `cell(i)`, the sea at
-    /// [`SEA_RATE`].
+    /// [`SEA_RATE`], its ground thawed and with no source.
     fn of(count: u32, cell: impl Fn(u32) -> (Cover, f64, CellWind)) -> Self {
         let (mut heights_m, mut cover, mut winds, mut rates) =
             (Vec::new(), Vec::new(), Vec::new(), Vec::new());
@@ -173,12 +193,42 @@ impl World {
             winds.push(w);
             rates.push(if c == Cover::Sea { SEA_RATE } else { 0.0 });
         }
+        let cells = cover.len();
         Self {
             heights_m,
             cover,
+            ground: vec![GroundState::Thawed; cells],
             winds,
             rates,
+            convergence: vec![0.0; cells],
         }
+    }
+
+    /// The world with the zonal budget's convergence `convergence_kg_m2_s` at every land cell,
+    /// kg m⁻² s⁻¹, and none at the sea's, which the model does not read.
+    #[must_use]
+    fn with_convergence(mut self, convergence_kg_m2_s: f64) -> Self {
+        for (c, &cover) in self.convergence.iter_mut().zip(&self.cover) {
+            *c = match cover {
+                Cover::Land => convergence_kg_m2_s,
+                Cover::Sea => 0.0,
+            };
+        }
+        self
+    }
+
+    /// The world with each land cell `i` for which `frozen(i)` holds frozen and every other cell
+    /// thawed.
+    #[must_use]
+    fn frozen_where(mut self, frozen: impl Fn(u32) -> bool) -> Self {
+        for ((i, ground), &cover) in (0_u32..).zip(&mut self.ground).zip(&self.cover) {
+            *ground = if cover == Cover::Land && frozen(i) {
+                GroundState::Frozen
+            } else {
+                GroundState::Thawed
+            };
+        }
+        self
     }
 }
 
@@ -196,27 +246,69 @@ fn chain(
     parameters: &Parameters,
     labels: Labels,
 ) -> (Vec<(f64, f64)>, Diagnostics) {
-    let n = land + 2;
-    let label = |x: u32| match labels {
-        Labels::AlongTheWind => x,
-        Labels::AgainstTheWind => n - 1 - x,
-    };
-    let mesh = Mesh::planar(n, 1, dx_m, 1_000.0, Ends::Closed, |x, _| label(x));
-    let centre = |x: u32| (f64::from(x) - 0.5) * dx_m;
-    // Cell i is the cell at x with label(x) = i, and label is its own inverse.
-    let world = World::of(n, |i| {
-        let x = label(i);
-        if x == 0 || x == n - 1 {
-            (Cover::Sea, 0.0, ALONG_X)
-        } else {
-            (Cover::Land, height(centre(x)), ALONG_X)
+    Chain::new(land, dx_m, height, labels).rates(parameters)
+}
+
+/// [`chain`]'s world, its month open to change before it is solved: `land` cells of `dx_m` along
+/// a planar chain between a sea upwind and a sea downwind, under a wind along it.
+struct Chain {
+    /// The planar mesh: `land` + 2 cells of `dx_m` along x by 1 km along y, its x ends closed.
+    mesh: Mesh,
+    /// The month's inputs: a sea cell at either end and the land between, under the wind along
+    /// +x, ground thawed and with no source until a test changes them.
+    world: World,
+    /// The land cells.
+    land: u32,
+    /// Each cell's length along the wind, m.
+    dx_m: f64,
+    /// How the cells are labelled.
+    labels: Labels,
+}
+
+impl Chain {
+    /// The chain of `land` cells of `dx_m`, each land cell at `height(x)` of its centre's distance
+    /// x from the coast, m, the cells labelled as `labels` says, its ground thawed and with no
+    /// source.
+    fn new(land: u32, dx_m: f64, height: impl Fn(f64) -> f64, labels: Labels) -> Self {
+        let n = land + 2;
+        let mesh = Mesh::planar(n, 1, dx_m, 1_000.0, Ends::Closed, |x, _| labels.of(n, x));
+        // Cell i is the cell at x with label(x) = i, and the label is its own inverse.
+        let world = World::of(n, |i| {
+            let x = labels.of(n, i);
+            if x == 0 || x == n - 1 {
+                (Cover::Sea, 0.0, ALONG_X)
+            } else {
+                (Cover::Land, height(Self::centre_at(dx_m, x)), ALONG_X)
+            }
+        });
+        Self {
+            mesh,
+            world,
+            land,
+            dx_m,
+            labels,
         }
-    });
-    let result = solve(&mesh, &world.month(), parameters);
-    let rates = (1..=land)
-        .map(|x| (centre(x), result.precipitation_kg_m2_s[slot(label(x))]))
-        .collect();
-    (rates, result.diagnostics)
+    }
+
+    /// The distance from the coast of the centre of the cell at place `x` along a chain of cells
+    /// of `dx_m`, m, the upwind sea at place 0.
+    fn centre_at(dx_m: f64, x: u32) -> f64 {
+        (f64::from(x) - 0.5) * dx_m
+    }
+
+    /// The chain's month solved at `parameters`: each land cell's (x, P) in order along the wind,
+    /// and the run's diagnostics.
+    fn rates(&self, parameters: &Parameters) -> (Vec<(f64, f64)>, Diagnostics) {
+        let n = self.land + 2;
+        let result = solve(&self.mesh, &self.world.month(), parameters);
+        let rates = (1..=self.land)
+            .map(|x| {
+                let p = result.precipitation_kg_m2_s[slot(self.labels.of(n, x))];
+                (Self::centre_at(self.dx_m, x), p)
+            })
+            .collect();
+        (rates, result.diagnostics)
+    }
 }
 
 /// The rate at `x` interpolated linearly between `points`, sorted by their first member.
@@ -340,9 +432,10 @@ fn backward_share_of(mesh: &Mesh, locals: &[Local], components: &Components) -> 
     backward / internal
 }
 
-/// The land's budget's closure, (inflow − runoff − outflow) ÷ inflow.
+/// The land's budget's closure, (inflow + source − runoff − outflow) ÷ (inflow + source).
 fn closure(d: &Diagnostics) -> f64 {
-    (d.inflow_kg_s - d.runoff_kg_s - d.outflow_kg_s) / d.inflow_kg_s
+    let given = d.inflow_kg_s + d.source_kg_s;
+    (given - d.runoff_kg_s - d.outflow_kg_s) / given
 }
 
 /// Each land cell's error against a deep solve, |P − P*| ÷ max(P*, [`RATE_FLOOR_SHARE`] `P̄_sea`)
@@ -369,8 +462,10 @@ fn errors(cover: &[Cover], rates: &[f64], reference: &Orographic) -> (f64, f64) 
 /// Asserts the ruled convergence of `month` on `mesh` (decision-r09-t13e-lfpm-convergence §3.5):
 /// its solve at the production tolerance converges within the cap, every land cell's rate lies
 /// within 1% of a deep solve's, |P − P*| ≤ 0.01 max(P*, 10⁻³ `P̄_sea`), and the land's budget
-/// closes within 10⁻³ of its inflow; the deep solve meets the stop test at [`DEEP_MEASURE`].
-/// Prints both.
+/// closes within 10⁻³ of its inflow and source, which give it water; the deep solve meets the stop
+/// test at [`DEEP_MEASURE`]. Prints both. With no source the inflow alone must be positive; with
+/// one, the net inflow may be negative, where the land's air, richer than the sea's, disperses
+/// back across the coast.
 fn assert_converges(name: &str, mesh: &Mesh, month: &Month<'_>) -> Orographic {
     let solved = solve(mesh, month, &Parameters::HERGARTEN_ROBL);
     let reference = solve(mesh, month, &Parameters::deep());
@@ -393,7 +488,10 @@ fn assert_converges(name: &str, mesh: &Mesh, month: &Month<'_>) -> Orographic {
     );
     assert!(worst <= 0.01, "{name}: the worst land cell is {worst} off");
     assert!(closure(d).abs() <= 1e-3, "{name}: {d:?}");
-    assert!(d.inflow_kg_s > 0.0 && d.runoff_kg_s > 0.0, "{name}: {d:?}");
+    assert!(
+        d.inflow_kg_s + d.source_kg_s > 0.0 && d.runoff_kg_s > 0.0,
+        "{name}: {d:?}"
+    );
     solved
 }
 
@@ -422,7 +520,7 @@ fn the_set_fixes_beta_zero_and_the_effective_long_range_length() {
     // Without recycling, the long-range length is the one β₀ was set from (eqs. 24, 33).
     let dry = set.with_sea_level_recycled_share(0.0);
     assert!((dry.effective_long_range_length_m() / ll - 1.0).abs() < 1e-12);
-    // The sea's air rains at its own rate in the model: F_c ÷ L_f = P_ls (eqs. 8, 31).
+    // The sea's air rains at its own rate in the model: F_c ÷ L_f = P_sea (eqs. 8, 31).
     let [vapour, cloud] = set.sea_air(SEA_RATE);
     assert!((cloud / lf / SEA_RATE - 1.0).abs() < 1e-15);
     assert!(((vapour + cloud) / (ll * SEA_RATE) - 1.0).abs() < 1e-15);
@@ -440,7 +538,7 @@ fn the_cell_matrix_has_a_non_negative_inverse_at_every_path() {
     for path in [1e-4, 1e-2, 0.5, 1.0, 1.7, 10.0, 1e3, 1e5] {
         for height_m in [-100.0, 0.0, 1_000.0, 3_000.0, 9_000.0] {
             for spread in [0.0, 0.8, 5.0] {
-                let m = cell_matrix(&set, path, height_m, spread);
+                let m = cell_matrix(&set, path, height_m, set.recycled_share(height_m), spread);
                 assert!(m[0][1] <= 0.0 && m[1][0] <= 0.0 && m[0][0] > 0.0 && m[1][1] > 0.0);
                 assert!(m[0][0] * m[1][1] - m[0][1] * m[1][0] > 0.0);
                 let inv = inverse(m);
@@ -1180,8 +1278,10 @@ fn a_two_cell_cycle_equals_the_closed_form_of_its_balance_in_one_sweep() {
     let world = World {
         heights_m: vec![0.0, 500.0, 1_500.0, 0.0],
         cover: vec![Cover::Sea, Cover::Land, Cover::Land, Cover::Sea],
+        ground: vec![GroundState::Thawed; 4],
         winds: vec![east, east, west, west],
         rates: vec![SEA_RATE, 0.0, 0.0, 2.0 * SEA_RATE],
+        convergence: vec![0.0; 4],
     };
     let result = solve(&mesh, &world.month(), &set);
     let d = &result.diagnostics;
@@ -1192,8 +1292,8 @@ fn a_two_cell_cycle_equals_the_closed_form_of_its_balance_in_one_sweep() {
     // The closed form, by 2 × 2 inverses alone.
     let path = side_m * side_m / side_m / CONDENSATION_LENGTH_M;
     let (m_a, m_b) = (
-        cell_matrix(&set, path, 500.0, 0.0),
-        cell_matrix(&set, path, 1_500.0, 0.0),
+        cell_matrix(&set, path, 500.0, set.recycled_share(500.0), 0.0),
+        cell_matrix(&set, path, 1_500.0, set.recycled_share(1_500.0), 0.0),
     );
     let sea = |rate: f64| set.sea_air(rate).map(|flux| flux * side_m);
     let (s_a, s_b) = (sea(SEA_RATE), sea(2.0 * SEA_RATE));
@@ -1350,8 +1450,8 @@ fn a_calm_land_rains_out_its_coastal_inflow_and_nothing_inland() {
     let label = |x: u32, y: u32| y * nx + x;
     let (mesh, world) = planar_world(nx, ny, label, |_, _| 0.0, |_, _| true);
     let result = solve(&mesh, &world.month(), &set);
-    // The coastal column takes the sea's L_l P_ls across each 33 km edge and keeps it all:
-    // (1 − ε₀) P A = L_l P_ls ℓ.
+    // The coastal column takes the sea's L_l P_sea across each 33 km edge and keeps it all:
+    // (1 − ε₀) P A = L_l P_sea ℓ.
     let coastal = LONG_RANGE_LENGTH_M * SEA_RATE / ((1.0 - SEA_LEVEL_RECYCLED_SHARE) * 33_000.0);
     for y in 1..ny - 1 {
         for x in 1..nx - 1 {
@@ -1371,7 +1471,7 @@ fn a_calm_land_rains_out_its_coastal_inflow_and_nothing_inland() {
         (d.restarts, d.sweeps, d.components.single),
         (0, 1, d.land_cells)
     );
-    // A wholly calm month brings the land nothing.
+    // A wholly calm month with no source brings the land nothing.
     let still = World {
         winds: vec![CellWind::Calm; world.winds.len()],
         ..world
@@ -1386,18 +1486,30 @@ fn a_calm_land_rains_out_its_coastal_inflow_and_nothing_inland() {
 #[test]
 fn the_runoff_is_the_unrecycled_share_of_the_rate_and_none_over_liquid() {
     let rate = 2.0e-5;
-    assert_same_bits(runoff_kg_m2_s(rate, 0.0, Cover::Land), 0.25 * rate);
-    assert_same_bits(runoff_kg_m2_s(rate, -300.0, Cover::Land), 0.25 * rate);
-    let high = runoff_kg_m2_s(rate, HEIGHT_SCALE_M, Cover::Land);
+    assert_same_bits(
+        runoff_kg_m2_s(rate, 0.0, Cover::Land, GroundState::Thawed),
+        0.25 * rate,
+    );
+    assert_same_bits(
+        runoff_kg_m2_s(rate, -300.0, Cover::Land, GroundState::Thawed),
+        0.25 * rate,
+    );
+    let high = runoff_kg_m2_s(rate, HEIGHT_SCALE_M, Cover::Land, GroundState::Thawed);
     assert!((high - (1.0 - 0.75 / core::f64::consts::E) * rate).abs() < 1e-18);
-    assert_same_bits(runoff_kg_m2_s(rate, 0.0, Cover::Sea), 0.0);
-    assert_same_bits(runoff_kg_m2_s(0.0, 1_000.0, Cover::Land), 0.0);
+    assert_same_bits(
+        runoff_kg_m2_s(rate, 0.0, Cover::Sea, GroundState::Thawed),
+        0.0,
+    );
+    assert_same_bits(
+        runoff_kg_m2_s(0.0, 1_000.0, Cover::Land, GroundState::Thawed),
+        0.0,
+    );
     // The solve's recycled shares are the runoff's.
     let (mesh, world) = planar_world(6, 4, |x, y| y * 6 + x, hill(2, 2), |_, _| false);
     let result = solve(&mesh, &world.month(), &Parameters::HERGARTEN_ROBL);
     for (i, &share) in result.recycled_shares.iter().enumerate() {
         let p = result.precipitation_kg_m2_s[i];
-        let runoff = runoff_kg_m2_s(p, world.heights_m[i], world.cover[i]);
+        let runoff = runoff_kg_m2_s(p, world.heights_m[i], world.cover[i], world.ground[i]);
         match world.cover[i] {
             Cover::Land => assert!((runoff - (1.0 - share) * p).abs() <= 1e-15 * p),
             Cover::Sea => {
@@ -1407,6 +1519,560 @@ fn the_runoff_is_the_unrecycled_share_of_the_rate_and_none_over_liquid() {
             }
         }
     }
+}
+
+/// Decision-r09-t13e-revision §6.3, new unit test 1: a land ring under a zonal wind with no sea
+/// and a uniform source S ([`CONVERGENCE`]), every cell land round a periodic planar grid of three
+/// rows of 40 cells of 33 km at the sea level, under a wind along its rows. At the deep tolerance
+/// every cell's rate is S ÷ (1 − ε₀) to 10⁻⁹ relative, and S with every cell frozen (ε = 0, §4.4):
+/// far from any coast a column's P − E is its convergence and its E is ε P (§4.2). The world is
+/// exact: on a planar periodic grid with the wind along a row, each cell's inflow width (its
+/// upwind neighbour's +x edge) equals its outflow width (its own +x edge) exactly and no side edge
+/// is downwind, so that the uniform state is the discrete balance's solution, with no coast and no
+/// first-order error. Its budget takes in nothing from a sea and passes nothing to one: what runs
+/// off is its source.
+#[test]
+fn a_land_ring_with_no_sea_rains_its_source_over_the_share_that_runs_off() {
+    let (nx, ny, side_m) = (40, 3, 33_000.0);
+    let mesh = Mesh::planar(nx, ny, side_m, side_m, Ends::Periodic, |x, y| y * nx + x);
+    let area_m2 = side_m * side_m * f64::from(nx * ny);
+    for (ground, share) in [
+        (GroundState::Thawed, SEA_LEVEL_RECYCLED_SHARE),
+        (GroundState::Frozen, 0.0),
+    ] {
+        let world = World::of(nx * ny, |_| (Cover::Land, 0.0, ALONG_X))
+            .with_convergence(CONVERGENCE)
+            .frozen_where(|_| ground == GroundState::Frozen);
+        let result = solve(&mesh, &world.month(), &Parameters::deep());
+        let d = &result.diagnostics;
+        let floor = CONVERGENCE / (1.0 - share);
+        let worst = result
+            .precipitation_kg_m2_s
+            .iter()
+            .fold(0.0_f64, |worst, &p| worst.max((p / floor - 1.0).abs()));
+        eprintln!(
+            "{ground:?} land ring: every cell within {worst:.2e} of S ÷ (1 − ε) = {floor:.6e} \
+             kg/m²/s; inflow {:.1e} kg/s, source {:.9e}, runoff {:.9e}, recycled {:.6e}, outflow \
+             {:.1e}; closure {:.1e}; {}",
+            d.inflow_kg_s,
+            d.source_kg_s,
+            d.runoff_kg_s,
+            d.recycled_kg_s,
+            d.outflow_kg_s,
+            closure(d),
+            describe(d)
+        );
+        assert!(d.converged && d.measure <= DEEP_MEASURE, "{}", describe(d));
+        assert!(worst <= 1e-9, "{ground:?}: the worst cell is {worst} off");
+        assert_same_bits(d.inflow_kg_s, 0.0);
+        assert_same_bits(d.outflow_kg_s, 0.0);
+        assert!(
+            (d.source_kg_s / (CONVERGENCE * area_m2) - 1.0).abs() <= 1e-12,
+            "{d:?}"
+        );
+        assert!((d.runoff_kg_s / d.source_kg_s - 1.0).abs() <= 1e-9, "{d:?}");
+    }
+}
+
+/// Decision-r09-t13e-revision §6.3, new unit test 2, as its "Review points (follow-up 2)" restate
+/// it: the strip with a source. Along a planar chain of 400 land cells of 25 km (10,000 km) at the
+/// sea level between two seas at the sea's rate `P_sea` ([`SEA_RATE`]), under a wind along it,
+/// each land cell taking a uniform source S, the rate tends inland to its floor P∞ = S ÷ (1 − ε₀)
+/// (§4.2: P∞ + (`P_coast` − P∞) e^(−d/`L̃_l`), GPCP's form in its §2.2). From 3 `L̃_l` inland, up
+/// to the last two land cells before the downwind sea, every land cell lies within a tenth of the
+/// coastal excess of the floor, |P − P∞| ≤ 0.1 |`P_sea` − P∞|; and |P − P∞|, its logarithm fitted
+/// by least squares from 500 to 2,500 km inland, e-folds within 2× of `L̃_l`. The decay gives
+/// e⁻³ ≈ 0.05 at 3 `L̃_l` at the exact length, and 0.053 at the cell graph's 2,024–2,043 km, so the
+/// bound has a margin of about 2×; being relative to the coastal excess, it does not hold by the
+/// choice of source. The floor itself is unit test 1's, the ring's S ÷ (1 − ε₀) to 10⁻⁹
+/// ([`a_land_ring_with_no_sea_rains_its_source_over_the_share_that_runs_off`]).
+///
+/// Three sources, as follow-up 2 rules: P∞ = 0.5 `P_sea`, a floor below the coast, as GPCP's
+/// 50–55° N transect decays to one (Eurasia's 1.40 against 2.85 mm a day, the ruling's §2.2);
+/// 1.5 `P_sea`, a floor above it, so that both directions of approach are held; and 0.9 `P_sea`,
+/// the first case.
+///
+/// The bound leaves out the last two land cells before the downwind sea as a margin only. On this
+/// chain no edge disperses: each edge along the wind lies square to it, so that its crosswind
+/// share 1 − (ŵ · n̂)² is zero, and the side edges have no length. The downwind sea therefore does
+/// not reach those cells, which follow the inland decay (the test prints them). For the same reason
+/// the production solve's rates are the deep solve's: each land cell is a component of its own,
+/// and the start is the solve.
+#[test]
+fn inland_of_a_coast_the_rate_tends_to_the_source_s_floor_over_the_effective_long_range_length() {
+    let set = Parameters::HERGARTEN_ROBL;
+    let effective_m = set.effective_long_range_length_m();
+    for floor_share in [0.5, 1.5, 0.9] {
+        let floor = floor_share * SEA_RATE;
+        let source = floor * (1.0 - SEA_LEVEL_RECYCLED_SHARE);
+        let mut strip = Chain::new(400, 25_000.0, |_| 0.0, Labels::AlongTheWind);
+        strip.world = strip.world.with_convergence(source);
+        let (points, d) = strip.rates(&set);
+        let (deep, _) = strip.rates(&Parameters::deep());
+        let off_deep = points
+            .iter()
+            .zip(&deep)
+            .fold(0.0_f64, |worst, (&(_, p), &(_, q))| {
+                worst.max((p / q - 1.0).abs())
+            });
+        // Each cell's distance from the floor over the coastal excess, |P − P∞| ÷ |P_sea − P∞|.
+        let coastal_excess = (SEA_RATE - floor).abs();
+        let off = |p: f64| (p - floor).abs() / coastal_excess;
+        // Up to, but excluding, the last two land cells before the downwind sea.
+        let inland = &points[..points.len() - 2];
+        let beyond: Vec<(f64, f64)> = inland
+            .iter()
+            .filter(|&&(x, _)| x >= 3.0 * effective_m)
+            .map(|&(x, p)| (x, off(p)))
+            .collect();
+        let (worst_m, worst) = beyond
+            .iter()
+            .copied()
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .expect("the chain's land runs beyond 3 L̃_l");
+        let excess: Vec<(f64, f64)> = points
+            .iter()
+            .map(|&(x, p)| (x, (p - floor).abs()))
+            .collect();
+        let folding = e_folding_m(&excess);
+        eprintln!(
+            "strip with a source, P∞ = {floor_share} P_sea = {floor:.4e} kg/m²/s: the coastal cell \
+             {:.4} of P∞ ({:.4} of P_sea); |P − P∞| e-folds over {:.1} km against L̃_l {:.1} km; \
+             from 3 L̃_l ({:.0} km, {} cells) the worst cell {worst:.4} of the coastal excess \
+             |P_sea − P∞|, at {:.0} km; the last two land cells, left out, {:?} of it; the deep \
+             solve's rates within {off_deep:.1e}; {}",
+            points[0].1 / floor,
+            points[0].1 / SEA_RATE,
+            folding / 1e3,
+            effective_m / 1e3,
+            3.0 * effective_m / 1e3,
+            beyond.len(),
+            worst_m / 1e3,
+            points[points.len() - 2..]
+                .iter()
+                .map(|&(_, p)| off(p))
+                .collect::<Vec<_>>(),
+            describe(&d)
+        );
+        assert!(
+            worst <= 0.1,
+            "P∞ = {floor_share} P_sea: {worst} of the coastal excess at {worst_m} m"
+        );
+        assert!(
+            (0.5 * effective_m..=2.0 * effective_m).contains(&folding),
+            "P∞ = {floor_share} P_sea: {folding} m"
+        );
+        assert!(
+            off_deep <= 1e-12,
+            "P∞ = {floor_share} P_sea: the deep solve's rates differ by {off_deep}"
+        );
+    }
+}
+
+/// The zonal ring world of
+/// `a_zonal_ring_is_one_component_a_row_and_converges_wherever_its_labels_start`: three land rows
+/// round a periodic grid of 40 columns of 33 km cells between two sea rows, at the sea level,
+/// under a wind along the rows, labelled by rows.
+fn zonal_ring() -> (Mesh, World) {
+    let (nx, ny) = (40, 5);
+    let mesh = Mesh::planar(nx, ny, 33_000.0, 33_000.0, Ends::Periodic, |x, y| {
+        y * nx + x
+    });
+    let world = World::of(nx * ny, |i| {
+        let y = i / nx;
+        let cover = if y == 0 || y + 1 == ny {
+            Cover::Sea
+        } else {
+            Cover::Land
+        };
+        (cover, 0.0, ALONG_X)
+    });
+    (mesh, world)
+}
+
+/// Decision-r09-t13e-revision §6.3, new unit test 3: the land's budget with a source closes at the
+/// production tolerance within 10⁻³ of inflow + source (§4.7), on the sphere's flat 3,000 km strip
+/// and its 3 km ridge at level 7 and on the planar zonal ring, each land cell taking
+/// [`CONVERGENCE`]; and each solve lies within 1% of a deep solve's ([`assert_converges`]). Where
+/// the land's air is richer than the sea's it disperses back across the coast, which the net
+/// inflow counts: the ring's, fed by dispersion alone, is negative.
+#[test]
+fn the_land_s_budget_with_a_source_closes_on_the_strip_the_ridge_and_the_ring() {
+    let Strip { mesh, world, .. } = Strip::new(7, -35.0, 3_000_000.0, 15.0, |_| 0.0);
+    let flat = (mesh, world.with_convergence(CONVERGENCE));
+    let Strip { mesh, world, .. } = Strip::new(7, -20.0, 1_000_000.0, 15.0, ridge);
+    let raised = (mesh, world.with_convergence(CONVERGENCE));
+    let (mesh, world) = zonal_ring();
+    let ring = (mesh, world.with_convergence(CONVERGENCE));
+    for (name, (mesh, world)) in [
+        ("level 7 strip with a source", flat),
+        ("level 7 ridge with a source", raised),
+        ("zonal ring with a source", ring),
+    ] {
+        let solved = assert_converges(name, &mesh, &world.month());
+        let d = &solved.diagnostics;
+        eprintln!(
+            "  inflow {:.6e} kg/s, source {:.6e}, runoff {:.6e}, recycled {:.6e}, outflow {:.6e}",
+            d.inflow_kg_s, d.source_kg_s, d.runoff_kg_s, d.recycled_kg_s, d.outflow_kg_s
+        );
+        assert!(d.source_kg_s > 0.0, "{name}: {d:?}");
+    }
+}
+
+/// Decision-r09-t13e-revision §6.3, new unit test 4: a sink with a source. Between two seas under a
+/// wind along a planar chain, a land cell at 1,200 m whose air goes nowhere (calm, or blowing
+/// across the chain, where its downwind edge has no length) takes in the upwind sea's air across
+/// their shared edge, `Q_in` = `L_l` `P_sea` (ŵ · n̂)⁺ ℓ (eq. 31), and its own source S A, with
+/// S = C e^(−H/H₀) (§4.2), and runs it all off: P = (`Q_in` + S A) ÷ ((1 − ε) A) to 10⁻¹², with
+/// ε = ε₀ e^(−H/H₀) on thawed ground and 0 on frozen ground (§4.4).
+#[test]
+fn a_sink_with_a_source_runs_off_its_inflow_and_its_source() {
+    let set = Parameters::HERGARTEN_ROBL;
+    let (dx_m, side_m, height_m) = (30_000.0, 40_000.0, 1_200.0);
+    let mesh = Mesh::planar(3, 1, dx_m, side_m, Ends::Closed, |x, _| x);
+    let area_m2 = dx_m * side_m;
+    // The sea's +x edge, of length side_m, faces the wind square on: (ŵ · n̂)⁺ = 1.
+    let [vapour, cloud] = set.sea_air(SEA_RATE);
+    assert!(((vapour + cloud) / (LONG_RANGE_LENGTH_M * SEA_RATE) - 1.0).abs() <= 1e-15);
+    let inflow_kg_s = (vapour + cloud) * side_m;
+    let column = math::exp(-height_m / HEIGHT_SCALE_M);
+    let source_kg_s = CONVERGENCE * column * area_m2;
+    let across = CellWind::Towards([0.0, 1.0, 0.0]);
+    for (air, wind) in [("calm", CellWind::Calm), ("across", across)] {
+        for (ground, share) in [
+            (GroundState::Thawed, SEA_LEVEL_RECYCLED_SHARE * column),
+            (GroundState::Frozen, 0.0),
+        ] {
+            let world = World::of(3, |i| {
+                if i == 1 {
+                    (Cover::Land, height_m, wind)
+                } else {
+                    (Cover::Sea, 0.0, ALONG_X)
+                }
+            })
+            .with_convergence(CONVERGENCE)
+            .frozen_where(|_| ground == GroundState::Frozen);
+            let result = solve(&mesh, &world.month(), &set);
+            let d = &result.diagnostics;
+            let expected = (inflow_kg_s + source_kg_s) / ((1.0 - share) * area_m2);
+            let p = result.precipitation_kg_m2_s[1];
+            let off = (p / expected - 1.0).abs();
+            eprintln!(
+                "{air}, {ground:?} sink: P {p:.12e} kg/m²/s against {expected:.12e} by hand \
+                 ({off:.1e}); inflow {:.9e} kg/s, source {:.9e}, runoff {:.9e}; {}",
+                d.inflow_kg_s,
+                d.source_kg_s,
+                d.runoff_kg_s,
+                describe(d)
+            );
+            assert_eq!((d.land_cells, d.components.single), (1, 1));
+            assert!(off <= 1e-12, "{air}, {ground:?}: {p} against {expected}");
+            assert!((d.inflow_kg_s / inflow_kg_s - 1.0).abs() <= 1e-12, "{d:?}");
+            assert!((d.source_kg_s / source_kg_s - 1.0).abs() <= 1e-12, "{d:?}");
+            assert_same_bits(d.outflow_kg_s, 0.0);
+            assert!(
+                (d.runoff_kg_s / (inflow_kg_s + source_kg_s) - 1.0).abs() <= 1e-12,
+                "{d:?}"
+            );
+        }
+    }
+}
+
+/// What unit test 5 pins of a world's solve
+/// ([`with_no_source_and_every_cell_thawed_five_worlds_solve_to_their_as_built_bits`]): its name,
+/// the sum of its land cells' rates in cell order, kg m⁻² s⁻¹, its [`Diagnostics::restarts`], and
+/// the rates of its first, middle and last land cells by index, kg m⁻² s⁻¹.
+type Pinned = (&'static str, f64, u32, [f64; 3]);
+
+/// The as-built solves of unit test 5's worlds, as the test printed them (Debug's shortest
+/// round-trip form), 2026-10-20.
+#[expect(
+    clippy::unreadable_literal,
+    reason = "the solves' printed digits as the test prints them, so that a re-take compares by eye"
+)]
+const PINNED: [Pinned; 5] = [
+    (
+        "ridge chain",
+        0.008998127113649916,
+        0,
+        [
+            2.9925625733261988e-5,
+            1.9147542496626338e-5,
+            7.0888148962233326e-6,
+        ],
+    ),
+    (
+        "level 7 strip",
+        0.029211721839406693,
+        1,
+        [
+            2.917765169932618e-5,
+            2.8810620604174042e-5,
+            2.233300102153046e-5,
+        ],
+    ),
+    (
+        "pole",
+        0.023121115474501432,
+        2,
+        [
+            6.235461855267233e-6,
+            1.6683814000330068e-5,
+            2.7360550775274634e-5,
+        ],
+    ),
+    (
+        "hill and calm",
+        0.017163815396264492,
+        2,
+        [
+            2.962764042068446e-5,
+            2.9531441062232045e-5,
+            2.2493308696957797e-5,
+        ],
+    ),
+    (
+        "zonal ring",
+        0.0034678279885848227,
+        1,
+        [
+            2.900305066791714e-5,
+            2.868958711108753e-5,
+            2.9003073944479683e-5,
+        ],
+    ),
+];
+
+/// Decision-r09-t13e-revision §6.3, new unit test 5: with no source and no frozen cell, the solve
+/// is as built, bit for bit. Five of the tests' worlds, every cell thawed and no land cell given a
+/// source, are solved at the production set and pinned with `assert_same_bits` against f64
+/// literals ([`PINNED`]): the ridge chain (400 land cells of 2.5 km), the level-7 flat strip, the
+/// pole world ([`pole`]), the hill with a calm column and the zonal ring ([`zonal_ring`]); for
+/// each, the sum of its land cells' rates in cell order, its restarts, and its first, middle and
+/// last land cells' rates by index. The literals are the as-built solves', which the lane's probe
+/// showed equal to the code before R09.T13.j (commit 1870973b) to the bit, by 64-bit fingerprints
+/// of every rate, share and budget figure, before and after. They are re-taken, as this test
+/// prints them, on a deliberate change to the solve.
+#[test]
+fn with_no_source_and_every_cell_thawed_five_worlds_solve_to_their_as_built_bits() {
+    let set = Parameters::HERGARTEN_ROBL;
+    let chain = Chain::new(400, 2_500.0, ridge, Labels::AlongTheWind);
+    let strip = Strip::new(7, -35.0, 3_000_000.0, 15.0, |_| 0.0);
+    let pole = pole();
+    let row_major = |x: u32, y: u32| y * 30 + x;
+    let (hill_mesh, hill_world) =
+        planar_world(30, 14, row_major, hill(10, 7), |x, y| x == 20 && y > 4);
+    let (ring_mesh, ring_world) = zonal_ring();
+    let worlds: [(&Mesh, &World); 5] = [
+        (&chain.mesh, &chain.world),
+        (&strip.mesh, &strip.world),
+        (&pole.mesh, &pole.world),
+        (&hill_mesh, &hill_world),
+        (&ring_mesh, &ring_world),
+    ];
+    let solved: Vec<(f64, u32, [f64; 3])> = worlds
+        .iter()
+        .zip(&PINNED)
+        .map(|(&(mesh, world), &(name, ..))| {
+            assert!(
+                world.ground.iter().all(|&g| g == GroundState::Thawed),
+                "{name}: every cell thawed"
+            );
+            for &c in &world.convergence {
+                assert_same_bits(c, 0.0);
+            }
+            let result = solve(mesh, &world.month(), &set);
+            let land: Vec<usize> = (0..world.cover.len())
+                .filter(|&i| world.cover[i] == Cover::Land)
+                .collect();
+            let sum = land
+                .iter()
+                .fold(0.0, |sum, &i| sum + result.precipitation_kg_m2_s[i]);
+            let cells = [land[0], land[land.len() / 2], land[land.len() - 1]];
+            let rates = cells.map(|i| result.precipitation_kg_m2_s[i]);
+            eprintln!(
+                "{name}: {} land cells, their rates' sum {sum:?}, {} restarts; cells {cells:?}: \
+                 {rates:?}",
+                land.len(),
+                result.diagnostics.restarts
+            );
+            (sum, result.diagnostics.restarts, rates)
+        })
+        .collect();
+    for ((sum, restarts, rates), &(name, pinned_sum, pinned_restarts, pinned_rates)) in
+        solved.iter().zip(&PINNED)
+    {
+        assert_eq!(*restarts, pinned_restarts, "{name}: the restarts");
+        assert_same_bits(*sum, pinned_sum);
+        for (&rate, &pinned) in rates.iter().zip(&pinned_rates) {
+            assert_same_bits(rate, pinned);
+        }
+    }
+}
+
+/// Decision-r09-t13e-revision §6.3, new unit test 6: the column factor. A lone calm land cell
+/// 3 km up, in a month with no sea and no wind, takes e^(−1.5) of its band's convergence C as its
+/// source, S = C e^(−H/H₀) with H₀ = 2 km (§4.2), to 10⁻¹², and rains it where it forms,
+/// P = S ÷ (1 − ε) with ε = ε₀ e^(−H/H₀) (§4.5's wholly calm month); one at the sea level, and one
+/// 200 m below it, which reads as at it, take all of C.
+#[test]
+fn a_cell_three_kilometres_up_takes_e_to_the_minus_one_and_a_half_of_its_band_s_convergence() {
+    let set = Parameters::HERGARTEN_ROBL;
+    let side_m = 33_000.0;
+    let mesh = Mesh::planar(1, 1, side_m, side_m, Ends::Closed, |_, _| 0);
+    let area_m2 = side_m * side_m;
+    assert_same_bits(set.column_share(3_000.0), math::exp(-1.5));
+    assert_same_bits(set.column_share(-200.0), 1.0);
+    for (height_m, column) in [(3_000.0, math::exp(-1.5)), (0.0, 1.0), (-200.0, 1.0)] {
+        let world =
+            World::of(1, |_| (Cover::Land, height_m, CellWind::Calm)).with_convergence(CONVERGENCE);
+        let result = solve(&mesh, &world.month(), &set);
+        let d = &result.diagnostics;
+        let taken = d.source_kg_s / (CONVERGENCE * area_m2);
+        let expected = CONVERGENCE * column / (1.0 - SEA_LEVEL_RECYCLED_SHARE * column);
+        let p = result.precipitation_kg_m2_s[0];
+        eprintln!(
+            "a calm cell at {height_m} m takes {taken:.15} of its convergence (e^(−H/H₀) \
+             {column:.15}, {:.1e} off) and rains {p:.12e} kg/m²/s against S ÷ (1 − ε) \
+             {expected:.12e} ({:.1e} off)",
+            (taken / column - 1.0).abs(),
+            (p / expected - 1.0).abs()
+        );
+        assert!(
+            (taken / column - 1.0).abs() <= 1e-12,
+            "{taken} against {column}"
+        );
+        assert!(
+            (p / expected - 1.0).abs() <= 1e-12,
+            "{p} against {expected}"
+        );
+    }
+}
+
+/// Frozen ground in the solve (decision-r09-t13e-revision §4.4; its §6.3 new unit test 7 holds
+/// the rule on the ruled Earth's inputs, in the step's tests). On a planar world with a 3 km hill
+/// whose southern half of land is frozen, the solve's recycled share is 0 on frozen land,
+/// ε₀ e^(−H/H₀) on thawed land (the bits of [`Parameters::recycled_share`]) and 0 over the sea, and
+/// its budget closes. A chain with every land cell frozen gives the same bits as the chain with no
+/// recycling and every land cell thawed, flat or over the ridge: the cell matrix and the sink's
+/// rule read ε = 0, while β keeps its height factor. So frozen ground's inland decay is `L_l`'s,
+/// backward Euler's Δx ÷ ln(1 + Δx ÷ `L_l`), about 500 km (§4.4).
+#[test]
+fn frozen_ground_recycles_nothing_and_its_rain_decays_over_the_long_range_length() {
+    let set = Parameters::HERGARTEN_ROBL;
+    let (mesh, world) = planar_world(30, 14, |x, y| y * 30 + x, hill(10, 7), |_, _| false);
+    let world = world.frozen_where(|i| i / 30 < 7);
+    let result = solve(&mesh, &world.month(), &Parameters::deep());
+    let (mut frozen_cells, mut thawed_cells) = (0, 0);
+    for (i, &share) in result.recycled_shares.iter().enumerate() {
+        match (world.cover[i], world.ground[i]) {
+            (Cover::Sea, _) => assert_same_bits(share, 0.0),
+            (Cover::Land, GroundState::Frozen) => {
+                frozen_cells += 1;
+                assert_same_bits(share, 0.0);
+            }
+            (Cover::Land, GroundState::Thawed) => {
+                thawed_cells += 1;
+                assert_same_bits(share, set.recycled_share(world.heights_m[i]));
+            }
+        }
+    }
+    let d = &result.diagnostics;
+    eprintln!(
+        "hill, half frozen: {frozen_cells} frozen and {thawed_cells} thawed land cells; closure \
+         {:.1e}; {}",
+        closure(d),
+        describe(d)
+    );
+    assert!(
+        frozen_cells > 0 && thawed_cells > 0,
+        "the hill has frozen and thawed land: {frozen_cells} frozen, {thawed_cells} thawed"
+    );
+    assert!(closure(d).abs() < 1e-10, "{d:?}");
+    let dry = set.with_sea_level_recycled_share(0.0);
+    let frozen_chain = |land, dx_m, height: fn(f64) -> f64| {
+        let mut frozen = Chain::new(land, dx_m, height, Labels::AlongTheWind);
+        frozen.world = frozen.world.frozen_where(|_| true);
+        frozen.rates(&set)
+    };
+    let flat: fn(f64) -> f64 = |_| 0.0;
+    // The lane's no-recycling e-foldings, as the chain test of L̃_l prints them.
+    for (dx_m, land, research) in [
+        (500.0, 6_000, 500.2),
+        (36_000.0, 83, 517.8),
+        (72_000.0, 41, 535.2),
+    ] {
+        let (points, d) = frozen_chain(land, dx_m, flat);
+        let (dry_points, dry_d) = chain(land, dx_m, flat, &dry, Labels::AlongTheWind);
+        for (&(_, p), &(_, q)) in points.iter().zip(&dry_points) {
+            assert_same_bits(p, q);
+        }
+        assert_same_bits(d.runoff_kg_s, dry_d.runoff_kg_s);
+        let folding = e_folding_m(&points);
+        let euler = dx_m / math::ln_1p(dx_m / LONG_RANGE_LENGTH_M);
+        eprintln!(
+            "frozen chain at {:.1} km: e-folding {:.1} km, the bits of the chain with no \
+             recycling (the lane's 1-D {research} km; backward Euler {:.1} km)",
+            dx_m / 1e3,
+            folding / 1e3,
+            euler / 1e3
+        );
+        assert!(
+            (folding / euler - 1.0).abs() < 2e-3,
+            "{folding} m against {euler} m"
+        );
+    }
+    let (points, _) = frozen_chain(400, 2_500.0, ridge);
+    let (dry_points, _) = chain(400, 2_500.0, ridge, &dry, Labels::AlongTheWind);
+    for (&(_, p), &(_, q)) in points.iter().zip(&dry_points) {
+        assert_same_bits(p, q);
+    }
+}
+
+/// Frozen ground's runoff (decision-r09-t13e-revision §4.4–§4.5, the reworded runoff test's unit):
+/// on frozen ground the runoff function is the whole rate at every height, and none over liquid;
+/// and on a world with frozen cells the solve's recycled shares remain the runoff's, to the bit.
+#[test]
+fn the_runoff_on_frozen_ground_is_the_whole_rate_and_the_solve_s_shares_remain_the_runoff_s() {
+    let rate = 2.0e-5;
+    for height_m in [-300.0, 0.0, 1_000.0, HEIGHT_SCALE_M, 5_000.0] {
+        assert_same_bits(
+            runoff_kg_m2_s(rate, height_m, Cover::Land, GroundState::Frozen),
+            rate,
+        );
+        assert_same_bits(
+            runoff_kg_m2_s(rate, height_m, Cover::Sea, GroundState::Frozen),
+            0.0,
+        );
+        assert!(runoff_kg_m2_s(rate, height_m, Cover::Land, GroundState::Thawed) < rate);
+    }
+    assert_same_bits(
+        runoff_kg_m2_s(0.0, 1_000.0, Cover::Land, GroundState::Frozen),
+        0.0,
+    );
+    let (mesh, world) = planar_world(6, 4, |x, y| y * 6 + x, hill(2, 2), |_, _| false);
+    let world = world.frozen_where(|i| i % 2 == 0);
+    let result = solve(&mesh, &world.month(), &Parameters::HERGARTEN_ROBL);
+    let mut frozen_cells = 0;
+    for (i, &share) in result.recycled_shares.iter().enumerate() {
+        let p = result.precipitation_kg_m2_s[i];
+        let runoff = runoff_kg_m2_s(p, world.heights_m[i], world.cover[i], world.ground[i]);
+        match world.cover[i] {
+            Cover::Land => {
+                assert!(p > 0.0, "cell {i}");
+                assert_same_bits(runoff, (1.0 - share) * p);
+                if world.ground[i] == GroundState::Frozen {
+                    frozen_cells += 1;
+                    assert_same_bits(runoff, p);
+                }
+            }
+            Cover::Sea => {
+                assert_same_bits(share, 0.0);
+                assert_same_bits(runoff, 0.0);
+            }
+        }
+    }
+    assert!(frozen_cells > 0);
 }
 
 /// The cost of one month at level 8 (R09.T13.e): the mesh, built once, and a month's solve, on a

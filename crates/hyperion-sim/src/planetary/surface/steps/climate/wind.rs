@@ -1,7 +1,8 @@
 //! The precipitation heuristic's 10 m winds (R09.T13.e; Design note 8, decision-r09-t13ge §2.5,
 //! §2.10): "the three-cell pattern scaled by the Hadley width, centred each month on the month's
 //! energy-flux equator, and converging on the substellar point for slow and locked rotators", each
-//! month's wind the one its orographic step carries vapour along.
+//! month's orographic step carrying vapour along its component along the model's bands
+//! ([`along_bands`]; decision-r09-t13e-revision §4.3).
 //!
 //! # The meridional wind
 //!
@@ -38,13 +39,15 @@
 //! +z × up, and at a pole north the +x meridian's direction: [`Wind`]'s convention), quantised to
 //! the record's codes and decoded ([`recorded`]): what the orographic step reads is exactly what
 //! the record holds. The heuristic has no transients, so the resultant's direction and the mean
-//! scalar speed are the one wind's.
+//! scalar speed are the one wind's. The record is the full vector, for R11; the orographic step
+//! reads its component along the model's bands, since the zonal budget already carries the
+//! meridional transport the record's meridional part would carry again over land.
 
 use core::f64::consts::TAU;
 
 use hyperion_surface::field::Wind;
 
-use super::lfpm::CellWind;
+use super::lfpm::{CellWind, DOWNWIND_TOLERANCE};
 use crate::math;
 use crate::planetary::surface::steps::WindSample;
 use crate::units::{MetresPerSecond, Radians};
@@ -89,15 +92,18 @@ pub(super) const FERREL_POLEWARD_M_S: f64 = 1.21;
 pub(super) const POLAR_EQUATORWARD_M_S: f64 = 1.14;
 
 /// The template's nodes at the Earth's Hadley edge, 25.1°, degrees of latitude: the Hadley and
-/// Ferrel cells' meeting at the surface, 35.4° (the hemispheres' mean of NCEP's annual v's zero as
-/// the lane recorded it, 35.9° N and 34.9° S), the Ferrel cell's greatest wind at 52.5°, its
-/// meeting with the polar cell at 62.75° (61.0° N and 64.5° S; 61.3° N and 64.1° S, mean 62.7°, by
-/// linear interpolation between the bins) and the polar cell's greatest at 72.5° (the same means
-/// as [`FERREL_POLEWARD_M_S`]). The northern Hadley–Ferrel zero reads 36.9° N by linear
-/// interpolation between the bins (−0.23 m/s at 32.5° N, +0.03 at 37.5° N), not 35.9°, which
-/// would put the first node at 35.9°; it is kept at 35.4° as built (plan 09's deferred finding
-/// E-P7). Off the Earth's rotation each lies at the same share of the way from the hemisphere's
-/// edge to its pole. Low confidence.
+/// Ferrel cells' meeting at the surface, 35.4°, the hemispheres' mean of NCEP R1's annual v's
+/// zeros on its native Gaussian rows (about 1.9°), 35.95° N and 34.88° S: the read used, since a
+/// zero is located at the data's own resolution. Its 5° bins give 36.95° N and 34.99° S (mean
+/// 35.97°); linear interpolation between bin means moves a crossing across a curved profile
+/// towards its flatter side, as the "36.9° N" of the as-built ruling's read did (−0.23 m/s at
+/// 32.5° N, +0.03 at 37.5° N). Decision-r09-t13e-revision, "Review points (follow-up 2)", keeps
+/// 35.4° as built and withdraws plan 09's E-P7 node item, a difference of method, not of NCEP.
+/// Then the Ferrel cell's greatest wind at 52.5°, its meeting with the polar cell at 62.75°
+/// (61.0° N and 64.5° S; 61.3° N and 64.1° S, mean 62.7°, by linear interpolation between the
+/// bins) and the polar cell's greatest at 72.5° (the same means as [`FERREL_POLEWARD_M_S`]). Off
+/// the Earth's rotation each lies at the same share of the way from the hemisphere's edge to its
+/// pole. Low confidence; the amplitudes stay as the first read gave them (E-P7, with E-P3).
 const TEMPLATE_NODES_DEG: [f64; 4] = [35.4, 52.5, 62.75, 72.5];
 
 /// The Hadley edge the template's nodes are read against, degrees: the partition's at Ω⊕.
@@ -269,6 +275,44 @@ pub(super) fn cell_wind_in(heading: &Heading, frame: ([f64; 3], [f64; 3])) -> Ce
     ])
 }
 
+/// The local east about the model frame's pole `pole` (a unit vector in the body frame) at the
+/// unit vector `up`: towards the pole × up, the direction along the model's bands, geographic east
+/// in geographic coordinates and the direction about the substellar axis in tidally locked ones;
+/// `None` at the pole or its antipode, where the bands have no direction.
+#[must_use]
+pub(super) fn model_east(pole: [f64; 3], up: [f64; 3]) -> Option<[f64; 3]> {
+    towards_pole(pole, up).map(|north| cross(north, up))
+}
+
+/// The orographic step's wind from a field cell's record's wind `wind` ([`cell_wind_in`]), along
+/// the model's bands (decision-r09-t13e-revision §4.3): towards `east` (the cell's
+/// [`model_east`]) where the wind's unit direction ŵ has ŵ · ê above the orographic model's
+/// downwind tolerance, towards −ê where it is below its negative, and calm otherwise, where the
+/// record is calm, or at the model's poles (`east` `None`). The zonal budget's E − P is the
+/// divergence of the meridional water flux, Hadley and eddy (Siler, Roe and Armour 2018, J.
+/// Climate 31, 7481, the text after their eq. 9, and their Fig. 2f), which the record's meridional
+/// part would carry again over land (E-L7's trap); what the orographic model uniquely supplies is
+/// the exchange between sea and land along the bands.
+#[must_use]
+pub(super) fn along_bands(wind: CellWind, east: Option<[f64; 3]>) -> CellWind {
+    let (CellWind::Towards(towards), Some(east)) = (wind, east) else {
+        return CellWind::Calm;
+    };
+    let length = dot(towards, towards).sqrt();
+    let along = if length > 0.0 {
+        dot(towards, east) / length
+    } else {
+        0.0
+    };
+    if along > DOWNWIND_TOLERANCE {
+        CellWind::Towards(east)
+    } else if along < -DOWNWIND_TOLERANCE {
+        CellWind::Towards([-east[0], -east[1], -east[2]])
+    } else {
+        CellWind::Calm
+    }
+}
+
 /// The Coriolis parameter f = 2Ω sin φ at the body-frame unit vector `up` of a body of sidereal
 /// period `rotation_period_s`, s⁻¹: its third component is the sine of its geographic latitude.
 #[must_use]
@@ -385,5 +429,143 @@ mod tests {
         let (east, north) = east_north([0.0, 0.0, 1.0]);
         assert_eq!(north, [1.0, 0.0, 0.0]);
         assert_eq!(east, [0.0, -1.0, 0.0]);
+    }
+
+    /// `a` ÷ |`a`|.
+    fn unit(a: [f64; 3]) -> [f64; 3] {
+        let length = dot(a, a).sqrt();
+        [a[0] / length, a[1] / length, a[2] / length]
+    }
+
+    /// Asserts that two vectors agree within 10⁻¹⁵ in each component.
+    #[track_caller]
+    fn assert_near(actual: [f64; 3], expected: [f64; 3]) {
+        for (a, e) in actual.iter().zip(&expected) {
+            assert!((a - e).abs() <= 1e-15, "{actual:?} against {expected:?}");
+        }
+    }
+
+    /// Asserts that `wind` blows towards `expected`, to the bit.
+    #[track_caller]
+    fn assert_towards(wind: CellWind, expected: [f64; 3]) {
+        let CellWind::Towards(towards) = wind else {
+            panic!("a calm wind, not one towards {expected:?}");
+        };
+        for (&a, &e) in towards.iter().zip(&expected) {
+            assert_same_bits(a, e);
+        }
+    }
+
+    /// Asserts that `wind` is still air.
+    #[track_caller]
+    fn assert_calm(wind: CellWind) {
+        assert!(matches!(wind, CellWind::Calm), "{wind:?} is not calm");
+    }
+
+    /// Decision-r09-t13e-revision §4.3: the model's east, ê = towards the pole × up, is geographic
+    /// east, +z × up normalised, about the spin pole +z, a unit vector along the surface, with no
+    /// direction at either pole; and in tidally locked coordinates, about a substellar axis such
+    /// as +x, it is the axis's tangent at the cell × up, the direction about that axis, axis × up
+    /// normalised, with no direction at the substellar and antistellar points.
+    #[test]
+    fn the_model_s_east_is_geographic_east_about_the_spin_pole_and_turns_about_a_substellar_axis() {
+        let ups = [
+            [1.0, 0.0, 0.0],
+            [0.6, 0.0, 0.8],
+            [0.48, 0.6, 0.64],
+            [-0.36, 0.48, -0.8],
+            [0.0, 0.8, -0.6],
+        ];
+        let spin = [0.0, 0.0, 1.0];
+        for up in ups {
+            let east = model_east(spin, up).expect("off the poles the bands have a direction");
+            assert_near(east, unit(cross(spin, up)));
+            assert_near(east, east_north(up).0);
+            assert!(
+                dot(east, up).abs() <= 1e-15 && (dot(east, east) - 1.0).abs() <= 1e-15,
+                "the east {east:?} at {up:?} is a unit vector along the surface"
+            );
+        }
+        assert!(model_east(spin, [0.0, 0.0, 1.0]).is_none());
+        assert!(model_east(spin, [0.0, 0.0, -1.0]).is_none());
+        let axis = [1.0, 0.0, 0.0];
+        for (up, by_hand) in [
+            ([0.0, 0.0, 1.0], [0.0, -1.0, 0.0]),
+            ([0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+            ([0.6, 0.0, 0.8], [0.0, -1.0, 0.0]),
+        ] {
+            assert_near(model_east(axis, up).unwrap(), by_hand);
+        }
+        for up in &ups[1..] {
+            let east = model_east(axis, *up).expect("off the axis the bands have a direction");
+            let along = dot(axis, *up);
+            let tangent = unit([
+                axis[0] - along * up[0],
+                axis[1] - along * up[1],
+                axis[2] - along * up[2],
+            ]);
+            assert_near(east, cross(tangent, *up));
+            assert_near(east, unit(cross(axis, *up)));
+        }
+        assert!(model_east(axis, [1.0, 0.0, 0.0]).is_none());
+        assert!(model_east(axis, [-1.0, 0.0, 0.0]).is_none());
+    }
+
+    /// Decision-r09-t13e-revision §4.3: the orographic step's wind along the model's bands is
+    /// towards its east ê where the record's wind has an eastward share ŵ · ê above the downwind
+    /// tolerance (north-east, south-east, east, and ten times the tolerance), towards −ê where it
+    /// has a westward one, and calm for a due-north or due-south wind, whose share lies within the
+    /// tolerance, for one a tenth of the tolerance east, for a calm record, and with no east, at
+    /// the model's poles; the same for a wind of any length; and in tidally locked coordinates
+    /// along the east about the substellar axis.
+    #[test]
+    fn a_wind_along_the_bands_is_east_west_or_calm_by_the_sign_of_its_share_along_them() {
+        let up = [0.48, 0.6, 0.64];
+        let (east, north) = east_north(up);
+        let model = model_east([0.0, 0.0, 1.0], up);
+        let ahead = model.expect("off the poles the bands have a direction");
+        let west = [-ahead[0], -ahead[1], -ahead[2]];
+        let tiny = DOWNWIND_TOLERANCE;
+        for length in [1e-6, 1.0, 7.5, 1e6] {
+            let wind = |u: f64, v: f64| {
+                CellWind::Towards([
+                    length * (u * east[0] + v * north[0]),
+                    length * (u * east[1] + v * north[1]),
+                    length * (u * east[2] + v * north[2]),
+                ])
+            };
+            for (u, v) in [(1.0, 1.0), (1.0, -1.0), (1.0, 0.0), (10.0 * tiny, 1.0)] {
+                assert_towards(along_bands(wind(u, v), model), ahead);
+                assert_towards(along_bands(wind(-u, v), model), west);
+            }
+            for (u, v) in [
+                (0.0, 1.0),
+                (0.0, -1.0),
+                (0.1 * tiny, 1.0),
+                (-0.1 * tiny, -1.0),
+            ] {
+                assert_calm(along_bands(wind(u, v), model));
+            }
+            assert_calm(along_bands(wind(1.0, 1.0), None));
+        }
+        assert_calm(along_bands(CellWind::Calm, model));
+        assert_calm(along_bands(CellWind::Calm, None));
+        let pole = [0.0, 0.0, 1.0];
+        assert_calm(along_bands(
+            CellWind::Towards([1.0, 0.0, 0.0]),
+            model_east(pole, pole),
+        ));
+        // Locked about +x: at the north pole of the body frame, the bands run along −y.
+        let locked = model_east([1.0, 0.0, 0.0], pole);
+        let about = locked.expect("off the axis the bands have a direction");
+        assert_towards(
+            along_bands(CellWind::Towards([0.3, -1.0, 0.0]), locked),
+            about,
+        );
+        assert_towards(
+            along_bands(CellWind::Towards([0.3, 1.0, 0.0]), locked),
+            [-about[0], -about[1], -about[2]],
+        );
+        assert_calm(along_bands(CellWind::Towards([1.0, 0.0, 0.0]), locked));
     }
 }

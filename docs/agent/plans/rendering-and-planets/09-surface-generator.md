@@ -855,21 +855,28 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    Guendelman and Kaspi 2019, ApJ 881, 67, doi:10.3847/1538-4357/ab2a06 (arXiv:1906.05748), §4.4,
    Eq. 20, decision-r09-t13ge) and the dry belts and storm tracks unplaced by hand;
    its width scales with rotation after Held 2000 (from memory); evaporation over open liquid is
-   Priestley–Taylor with α = 1.26 (from memory); onto the cells, Hergarten and Robl's linear
-   feedback precipitation model carries vapour along the month's prevailing wind for orography, rain
-   shadows and inland decay (ε₀ = 0.75, L_c = L_f = L_d = 25 km, L_l = 500 km, H₀ = 2 km, their set
+   Priestley–Taylor with α = 1.26 (from memory); onto the land, Hergarten and Robl's linear
+   feedback precipitation model carries the sea's air along the model's bands, by the month's
+   prevailing wind's component along them, for orography, rain shadows and inland decay, each land
+   cell taking the zonal budget's convergence as a vapour source as the sea does, scaled by
+   e^(−H/H₀) over high ground, and recycling nothing from frozen ground
+   (decision-r09-t13e-revision; ε₀ = 0.75, L_c = L_f = L_d = 25 km, L_l = 500 km, H₀ = 2 km, their set
    for the Himalaya and Tibet, Hergarten and Robl 2022, GMD 15, 2063, §7), solved in each month's
    upwind order of strongly connected components (Tarjan 1972), each component of up to 16 cells
    exactly, by Gauss–Seidel sweeps accelerated by restarted GMRES (Saad and Schultz 1986) until one
    further sweep moves no land cell's rate by more than 10⁻⁴ of it
-   (decision-r09-t13e-lfpm-convergence), and
-   rescaled so that global precipitation equals global evaporation. Prevailing winds are the
+   (decision-r09-t13e-lfpm-convergence); the sea rains its own evaporation plus the band's
+   convergence, a divergent band's export falling on its sea alone; and the whole is rescaled so
+   that global precipitation equals global evaporation. Prevailing winds are the
    three-cell pattern scaled by the Hadley width, centred each month on the month's energy-flux
    equator, and converging on the substellar point for slow and locked rotators.
-   - Each month's wind is the one its orographic step carried vapour along, stored as the
-     month's 10 m wind: the direction of its resultant and its mean speed. These coincide while
-     the pattern has no transients.
-   - The field's rain shadows and its winds therefore agree month by month.
+   - Each month's orographic step carries vapour along its recorded wind's component along the
+     model's bands; the zonal budget carries the meridional transport, Hadley and eddy, which the
+     wind's meridional part would count again over land (decision-r09-t13e-revision). The record
+     stores the month's 10 m wind: the direction of its resultant and its mean speed. These
+     coincide while the pattern has no transients.
+   - The field's rain shadows and its winds' components along the bands therefore agree month by
+     month.
 
    The offline check against ExoPlaSim is a recorded task, never run on arrival.
 
@@ -2432,12 +2439,17 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     plus the land's ε(z) P, to 1%;
   - the reference Earth's annual zonal precipitation, its land Natural Earth's by 2.5° × 5° box and
     its heights R09.T13.g's band eighths placed by each box's Earth2014 median land height:
-    - in the southern hemisphere the solid-angle mean over 40–60° exceeds that over 15–35°;
+    - in each hemisphere the solid-angle mean over 40–60° exceeds that over 15–35° (restored by
+      decision-r09-t13e-revision);
     - in each hemisphere the zonal budget's annual E − P has a negative solid-angle mean over 40–60°
       and a positive one over 15–35°;
     - its maximum within 30° of the equator lies within 10° of the annual energy-flux equator;
-    - the northern hemisphere's two windows are printed beside GPCP's, not asserted
-      (decision-r09-t13e-asbuilt; deferred finding E-P1);
+    - the mean of its all-land climate cells between 50° and 60° N and 40° and 100° E is at least
+      0.4 of that between 10° W and 20° E (GPCP v2.3: 0.59);
+    - at most a quarter of the solid angle of its all-land climate cells between 40° and 70° N is
+      arid by Köppen–Geiger's bound at their own temperatures (Peel et al. 2007, Table 1, as plan 10
+      reads it);
+    - every month's balance factor lies within [0.85, 1.15];
   - on a Gaussian ridge 3 km high with a 100 km half-width at half maximum, under a steady wind, the
     lee plain three half-widths downwind of the crest receives under half the windward plain's rate
     three half-widths upwind, and the maximum lies on the windward side;
@@ -2445,7 +2457,8 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     (ln P fitted from 500 to 2,500 km inland) within 2× of L̃_l = L_c ÷ λ̃₋ (Hergarten and Robl's
     eqs. 24 and 45–47; 2,004 km at their set);
   - the header says heuristic;
-  - each month's quantised wind is the wind that month's orographic step used;
+  - each month's orographic step reads that month's quantised wind, carrying vapour along its
+    component along the model's bands (east, west or calm by its sign);
   - on a synthetic aquaplanet at 60° obliquity and Earth's rotation:
     - no month's rain-band centre lies poleward of the ascending-branch cap, 37.4°;
     - an equatorial cell's meridional wind changes sign twice a year, each month's speed at least
@@ -2458,7 +2471,13 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   - the reference Mars and the Venus-like body have no precipitation and calm winds;
   - a world at e = 0 with no obliquity to its seasonal orbit has one wind;
   - the annual runoff function is zero over liquid and on a dry world, and over a flat sea-level
-    continent is 1 − ε₀ of P;
+    continent is, month by month, 1 − ε₀ of P on ground above the condensable's freezing point and
+    all of P on frozen ground;
+  - the orographic model's vapour source: on a land ring under a zonal wind with no sea every cell's
+    rate is S ÷ (1 − ε₀), and S where the ground is frozen; inland of a coast the rate tends to that
+    floor with the coastal excess e-folding within 2× of `L̃_l`; the land's water budget closes with
+    the source; a cell 3 km up takes e^(−1.5) of its band's convergence
+    (decision-r09-t13e-revision);
   - the orographic solve converges to its test: on the strip, the ridge, a land convergence line and
     a poleward wind against the cell order, every land cell's rate lies within 1% of a deep solve's,
     the land's water budget closes within 10⁻³ of its inflow, and a two-cell cycle equals its closed
@@ -2552,6 +2571,23 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     ground's emission transmitted through the column above it; a τ = 10 column four scale heights
     up takes that floor.
   - _Acceptance:_ `cargo test -p hyperion-sim planetary::surface::steps::climate`.
+- **R09.T13.j The land's water** (after T13.e and T13.f, before R09.T14–T16;
+  decision-r09-t13e-revision, whose specification and tests bind). R09.T13.e's revision for its
+  finding E-P1, land-heavy midlatitudes too dry. The sea rains its own evaporation plus its band's
+  convergence, a divergent band's export falling on its sea alone; each land cell takes the zonal
+  budget's convergence as a vapour source, scaled by e^(−H/H₀); the orographic model carries the
+  sea's air along the model's bands by the recorded wind's component along them; frozen ground
+  recycles nothing, and the annual runoff counts each month's ε; the wholly calm month's rule goes.
+  The winds' first Ferrel node stays 35.4° (the ruling's follow-up 2 withdraws its reread). No
+  contract moves (`GENERATOR_VERSION` 22). It comes
+  before the proposed R09.T13.i, which re-runs its assertions. Its tests are R09.T13.e's above, as
+  the ruling's plan text (b) amends them. _Acceptance:_ the ruled Earth test's northern ratio
+  (40–60° N over 15–35° N) at least 1.10 (1.05–1.10, or a failed new assertion, reported to main);
+  the reference Earth's climate step at level 8 at most 30 s; E-L8's generated sample at most 20
+  restarts a month with every deep comparison within 1%;
+  `cargo test -p hyperion-sim planetary::surface::steps::climate`; and the surface module's slow
+  tests by name, among them `the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp` and
+  `the_reference_earth_s_pass_is_order_independent`.
 
 Offline check (recorded, not in CI): the reference Earth's monthly fields against an ExoPlaSim run
 of the same inputs, with the differences written into this plan. Acceptance:
@@ -10184,7 +10220,10 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     - E8. σ_x saturates at 0.707 below about Ω⊕ ÷ 13, so a Titan's winter hemisphere keeps eddies
       where its solstice cell runs pole to pole (GK19 Eq. 21).
   - _For R09.T14_ (T1): the runoff function's ε₀ = 0.75 gives Earth's land a runoff ratio of 0.425
-    over its hypsometry; T14 reads ice cells' and frozen months' runoff by its own rule.
+    over its hypsometry; T14 reads ice cells' and frozen months' runoff by its own rule. Since
+    R09.T13.j (decision-r09-t13e-revision §5.3) frozen months run off in full in the climate step's
+    own runoff (`annual_runoff_kg_m2_s` takes each month's ε), so R09.T14 no longer needs a
+    frozen-month rule of its own; it keeps its own rule for ice cells.
   - _H₀ = 2 km is water's on the Earth_ (closed figure, for the composition audit; part 1's E-L4):
     another condensable's falls off over R T₀² ÷ (M L Γ), 2.7 km for the Earth's water at 288 K and
     5.8 K km⁻¹ (its latent heat 2.47 MJ kg⁻¹ from memory).
@@ -10199,10 +10238,18 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       either: the converged solve moves 41.4–46.9% of land climate cells by more than 10% from the
       14-sweep build (_The solve_). E-L2's side-edge tolerance is refused (the ruling's §3.1).
     - E-L3. One set for every world: H&R's Himalayan lengths are not scaled with the wind speed.
+      Since R09.T13.j (decision-r09-t13e-revision §5.3) the orographic model advects at full
+      strength along a small along-band component too, as in the deep tropics' rows and on slow
+      rotators whose winds are mostly meridional. Speed-scaled lengths remain the candidate, and van
+      der Ent and Savenije's climate-dependent recycling length (2011, ACP 11, 1853, abstract: 3,000
+      to 5,000 km in temperate climates, more than 7,000 km in desert areas, and as low as 500 to
+      2,000 km in the tropics or mountains) is their evidence.
     - E-L5. First-order upwind spreads across an oblique wind, about Δx ÷ 2 sin 2α, comparable to
       `L_d` at level 8.
     - E-L6. A calm cell takes in everything (up to `L_l` `P_ls` ÷ ((1 − ε) Δx), 67 `P_ls` at 30 km
-      cells); the wholly calm month's rule is built above, and no such month arose.
+      cells); the wholly calm month's rule is built above, and no such month arose. Since R09.T13.j
+      that rule is retired (decision-r09-t13e-revision §4.5), and a calm land cell in a moving row
+      takes its upwind neighbour's along-band flux and its own source (§5.3).
     - E-L7 (decision-r09-t13e-lfpm-convergence §5; for E-P1's revision, with E-L6). **Land
       convergence lines are grid-scale rain traps.**
       - The direction-only LFPM has no exit for converging flux but rain. So where winds meet over
@@ -10218,6 +10265,15 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       - Candidates: the partition's convergence over land as a distributed source and sink (E-P1's
         candidate 2), or a convergence exit scaled with the wind's speed, which the LFPM drops. No
         cap.
+      - **Closed by R09.T13.j: the orographic model carries vapour along the bands, and the ITCZ's
+        land takes the partition's convergence per area** (decision-r09-t13e-revision §5.1). Along
+        the bands the template's u has one sign round each latitude circle, so no land cell takes
+        in converging air. The 1.11° N, 54.26° E patch (field cell 98672, land) reads 4.77 mm/day annually and its climate
+        cell 4.46, against 17.06 and 12.24 as built; its meridian's land column peaks at 7.53 mm/day
+        at 3.44° S, the coast beside the sea's 5.79 at 3.71° S. The LFPM still traps
+        flux under converging winds, which its unit test exercises (the equatorial line, 3.76×
+        the sea's maximum): a solver property no template wind now invokes, which a wind revision
+        with stationary waves or monsoons would bring back, beside E-L8's remainder.
     - E-L8 (the solve's cost and its cap's margin; ruled and closed by
       decision-r09-t13e-lfpm-convergence's E-L8 follow-up, 2026-10-20). In index order the
       reference Earth's months took 20–27 of the cap's 30 restarts (223–300 sweep-equivalents) and
@@ -10242,7 +10298,15 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       takes 29 restarts and stops with its worst cell 1.34% off, 184× the measure. The template's
       zonal winds make no such gyre. Candidates: the held two-level correction; an a posteriori
       error estimate in the stop test (the residual sweep's change over a measured contraction).
-      For any revision that adds stationary waves or monsoon gyres to the wind."
+      For any revision that adds stationary waves or monsoon gyres to the wind." Since R09.T13.j
+      the orographic model's winds are along the bands, so the template cannot make a gyre
+      (decision-r09-t13e-revision §5.3); E-L8's sample is re-measured in _Deviations in T13.j, as
+      built_. Its cost note (follow-up 2), for R09.T16's sample worlds: the land-heavy Earth's step
+      took 29.3 s at load 10 after R09.T13.j, its restarts 146 a year against 131 as built (+11%),
+      so about 26 s on a quiet machine (23.6 s × 1.11); on the final node, 35.4°, 25.9 s at load 10
+      and 141 restarts (+7.6%, about 25.4 s quiet); the 30 s limit is the reference Earth's. A
+      generated world over 30 s on a quiet machine is reported to main; the held two-level
+      correction is the lever.
     - E-L9 (new, from E-L8's generated sample; recorded, not ruled). **Land cells read as zero.**
       GMRES's iterate need not be non-negative, and the residual sweep from it, which the month
       keeps, can leave a land cell a rounding below zero, read as zero and counted
@@ -10300,10 +10364,15 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
         the northern ratio at least 1.1 on the ruled set-up.
       - On the converged solve (decision-r09-t13e-lfpm-convergence) the ruled set-up's northern
         windows read 1.58 against 1.62 mm/day (0.98), and its southern 3.49 against 2.24 (1.56).
+      - **Ruled 2026-10-20 (decision-r09-t13e-revision) and closed by R09.T13.j.** The final run's
+        northern ratio is 1.160 (2.24 against 1.93 mm/day; the ruling's estimate 1.20, GPCP's 1.27); see _Deviations
+        in T13.j, as built_.
     - E-P2. A locked world's rain concentrates at its substellar point: with w = 1 over the whole
       day side, the Hadley cell's moisture converges into the top tidally locked bands, 107.9
       mm/day 3.5° from the substellar point on the locked aquaplanet at level 5. For the revision,
-      with E1's sharper tails and a locked world's own width.
+      with E1's sharper tails and a locked world's own width. Unchanged over the sea by R09.T13.j;
+      its land analogue is now the partition's convergence over (1 − ε) at the substellar land
+      (decision-r09-t13e-revision §5.3).
     - E-P3. The trades are symmetric about the equator (−1.57 and −1.41 m/s at 12.5° and 17.5° N,
       +1.61 and +1.53 S on the synthetic sea as ruled, against NCEP's −1.05, −1.27, +1.83 and
       +1.77): the
@@ -10329,6 +10398,72 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
         linear interpolation), not 35.9°, which would put the node at 35.9° rather than 35.4°.
       - Low impact, since the orographic model reads only the wind's direction. For the revision,
         with E-P3.
+      - **The node item is withdrawn** (decision-r09-t13e-revision, follow-up 2, which reverses its
+        §5.2's 35.9°): a difference of method, not of NCEP. A zero crossing is located at the data's
+        own resolution, NCEP R1's Gaussian rows (about 1.9°): 35.95° N and 34.88° S, mean 35.4°, the
+        node as built, which stays. The "36.9° N" interpolated linearly between the 32.5° and 37.5°
+        bin means (the 5° bins read consistently give 36.95° N and 34.99° S, mean 35.97°); the bins
+        serve the template's amplitudes, not its zeros. The lane's science check found it
+        (2026-10-20). The amplitudes stay deferred, with E-P3; after R09.T13.j they reach the
+        precipitation only through the sign of u.
+    - E-P8 (decision-r09-t13e-revision §8.2, new; for R09.T13.i). **The zonal budget's water
+      cycle against observations.**
+      - The midlatitude sea evaporates too much: 2.69 and 2.37 mm/day per sea area at 40–60° N and
+        S, against NCEP R1's 1.98 and 1.57.
+      - The partition's convergence is weak: 0.57 and 0.54 against 0.73–0.83 and 1.41–1.50 (GPCP
+        less NCEP R1).
+      - The errors offset in the sea's rate, and the land meets the weak convergence directly.
+      - The built model's −0.57 against the prototype's −0.70 is unattributed.
+      - Candidates: T13.i's gradient (no ocean transport, no cloud), β by column (E2), the storage
+        clamp.
+      - The measurement: decision-r09-t13e-revision §1.4.
+    - E-P9 (decision-r09-t13e-revision §8.2, new). **The convergence is uniform in longitude, and
+      there is no monsoon.**
+      - Earth's storm tracks favour the oceans: GPCP's 40–60° N sea 3.42 against land 1.79 mm/day
+        (land and sea by Natural Earth's box share), its P − E about 1.4 over the sea (with NCEP R1's
+        evaporation) against about 0.5–0.7 over land (with the land's evapotranspiration from
+        memory). On the ruling's estimate, Central Asia (43–50° N, 55–80° E) reads 1.57 mm/day
+        against GPCP's 0.84, and is no longer arid; measured on the ruled Earth after R09.T13.j,
+        1.32.
+      - The subtropical land lacks its summer monsoon: 15–35° N land 0.78 against 1.61, its sea
+        2.42 against 2.23 (the estimate's land boxes of share at least 0.5; by box share GPCP reads
+        1.63 and 2.22); measured on the ruled Earth after R09.T13.j, its all-land climate cells
+        1.10 and its all-sea 2.35.
+      - Candidates: an ocean-weighted share of the eddy convergence; a monsoon and stationary-wave
+        wind revision, with E-L8's remainder and E-P3.
+    - E-P10 (decision-r09-t13e-revision §8.2, new; with T1). **One recycled share, ε₀ = 0.75
+      ("rather high", H&R §7).**
+      - Where the ground is warm it amplifies a column's convergence fourfold (P = C ÷ (1 − ε)).
+      - The Amazon's land-origin share on the ruling's estimate is 0.66 (0.66 measured on the ruled
+        Earth after R09.T13.j), against Eltahir and Bras's 25–35% within the basin (Eltahir, E. A.
+        B., and Bras, R. L. 1994, Q. J. R. Meteorol. Soc. 120, 861–880: about 25% with ECMWF's data
+        and 35% with GFDL's) and Trenberth's 34% (Trenberth, K. E. 1999, J. Climate 12, 1368–1381;
+        abstracts read). The definitions differ (land origin anywhere,
+        against the basin's own), but the gap is too large for that alone.
+      - Candidate: an energy-limited ε (evapotranspiration at most the land's Priestley–Taylor
+        potential, a Budyko form). It is nonlinear in P, so it needs its own solve design.
+    - E-P11 (decision-r09-t13e-revision, E-P11 follow-up §6; new, for R09.T13.i beside E-P8).
+      **The midlatitude land's seasons are inverted.**
+      - The figures. On the ruled Earth after R09.T13.j, the 40–60° N all-land climate cells read
+        DJF 1.65 against JJA 0.53 mm/day; GPCP v2.3 (land by box share) has 1.51 against 2.27.
+        - The 40–60° N sea's evaporation per sea area runs from 0.20 mm/day in June and July to
+          5.72 in November (DJF 4.44 ÷ JJA 0.50 = 8.9, against NCEP R1's 2.88 ÷ 0.77 = 3.75). The
+          cause is decision e6's storage clamp, max(0, β `S_abs` − `C_sea` dT/dt), which takes all
+          of β `S_abs` while the sea warms.
+        - The zonal budget's convergence is 0.11 in JJA (max(0, `C_b`) 0.25; 0.20–0.39 from July to
+          September) against 0.81 in DJF (0.76–0.84), against an observed 0.6–1.1 and 1.1–1.3.
+        - The land carries no water from season to season. Which of the sea's evaporation and the
+          convergence dominates the summer's shortfall is not measured.
+        - The monthly table is in _Deviations in T13.j, as built_.
+      - Its effect.
+        - On the ruling's estimate, R10's arid share at 40–70° N is flattered from about 0.19 to 0.11
+          (the measured share with the summer offset imposed everywhere is in T13.j's record).
+        - R09.T15's seasonal letters would read dry-summer across the midlatitude continents.
+      - The acceptance: decision-r09-t13e-revision's E-P11 follow-up §5 (on the ruled Earth at
+        level 7, the 40–60° N all-land JJA above DJF; the 40–60° N sea's evaporation DJF ÷ JJA at
+        most 6; T13.j's assertions still holding; the warm-half classes, the arid share GPCP-shaped
+        against own and the monthly table printed). It must land before R09.T15 asserts any
+        reference-Earth class.
 - **Deviations in T13.f, as built** (2026-10-20; lane r09-climate-2, on `5fa4b0e2`; built to
   decision-r09-t13f-cold-traps, all of it: §1's contract, §2's group, §4.2's frost points, §5's
   placement and §7.2–§7.3's tests, its interface text exact).
@@ -10531,3 +10666,250 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       three in `fractions_at` itself. At 3.67 µs a call on the Moon they are not separable without
       a profile, which was not run; at 20–50 ns an allocation (_estimate_) they would be 0.3–0.7 µs
       of it. Not optimised in this lane, as the brief says.
+- **Deviations in T13.j, as built** (2026-10-20; lane r09-landwater, on `1870973b`; built to
+  decision-r09-t13e-revision, all of it: §4's revision, §5's E-L7, §6.3's tests, its plan text
+  (a)–(c), its E-P11 follow-up §4 and its review points' follow-up 2, which withdraws §5.2's node).
+  - _Files._ `steps/climate/lfpm.rs`, `hydrology.rs`, `wind.rs`, `mod.rs` (`annual_runoff_kg_m2_s`)
+    and `ebm.rs` (`Freezing::of`), with the tests in `lfpm/tests.rs`, `wind.rs` and
+    `tests/hydrology.rs`, and `crates/hyperion-sim/clippy.toml` (the name McMahon, for Peel et al.'s
+    citation). No contract moved: `CoarseInputs`, the working state's types, the field's types, the
+    header, the wire, `NOTICE` (nothing new is committed as data) and every golden are as they were
+    (`golden_diff.py --base 1870973b`: nothing to reconcile); `GENERATOR_VERSION` stays 22. The
+    climate cells' `month_precipitation_kg_m2_s` moves; their winds' record does not.
+  - _The sea's rate_ (§4.1; `hydrology::SeaBands`). Each month, each band's `e_b` = Σ Ω E over its
+    cells (as Ē sums it) ÷ Σ Ω over its sea cells (`seas::under_sea`'s, every liquid, summed in
+    cell-index order), its sea share `s_b`, its convergence `C_b` = −(E − P), and `P_sea` = max(0,
+    `e_b` + `C_b`) where `C_b` ≥ 0, max(0, `e_b` + `C_b` ÷ `s_b`) where it is negative, read at each
+    sea cell by the band stencil, held, in place of `P_ls` everywhere: the sea's rate, the coastal
+    air (eq. 31) and the stop test's `P̄_sea`. On the 60° aquaplanet `e_b` is Ē, `s_b` 1 and `P_sea`
+    the as-built `P_ls`, each to the bit, every month (tested).
+  - _The land's source_ (§4.2). `lfpm::Month::convergence_kg_m2_s` holds max(0, `C_b`) read at
+    each land cell by the same stencil, held; the model takes S = C e^(−H/H₀)
+    (`Parameters::column_share`, its own `HEIGHT_SCALE_M`, a negative height read as 0) and adds S A
+    to the vapour of each land row's inflow from outside the land's outflows (`Row::outside_kg_s`,
+    the sea's air and the source; `Source::Sea` is now `Source::Outside`). So the source is part of
+    c = F(0), the dispersion-off start, every residual sweep and the sinks' rule, and not of G's
+    sweep (`Source::Nothing`): GMRES, the components, the flow order, τ, the cap and the stop test
+    are unchanged. `Diagnostics::source_kg_s` is Σ S A over the land; the budget closes as inflow +
+    source = runoff + outflow.
+  - _Along-band transport_ (§4.3; `wind::model_east`, `wind::along_bands`). Each field cell's
+    orographic wind is its decoded record (`wind::cell_wind_in`, as before) taken along the model's
+    local east ê = towards_pole(pole, up) × up: towards ê where ŵ · ê > `DOWNWIND_TOLERANCE`, towards
+    −ê below −`DOWNWIND_TOLERANCE`, calm otherwise, where the record is calm, or at the model's poles.
+    The record is unchanged.
+  - _Frozen ground_ (§4.4; `lfpm::GroundState`, `hydrology::ground_of`). `Month::ground` holds each
+    cell's `GroundState::{Thawed, Frozen}` (the ruling's "an enum, not a bool"): frozen where the
+    cell's month temperature at its surface, its climate cell's normalised month at its water
+    surface (the ground where dry), `T_sl` − Γ (`z_w` − `z_sea`) + `a_m`, lies below `Freezing::At`'s
+    point; `Freezing::Never` never freezes (tested). The cell matrix (β̃, φ̃) and the sink's rule read
+    ε = `Parameters::recycled_share_on(H, ground)`, none on frozen ground; β keeps its height factor.
+  - _The balance, the runoff and the calm month_ (§4.5). k is as built with each month's ε (the
+    solve's `recycled_shares`). `annual_runoff_kg_m2_s` is Σₘ sₘ (1 − εₘ) Pₘ, each month's ground by
+    `ground_of` under `ebm::Freezing::of(inputs)` (the freezing rule of `EnergyBalance::for_inputs`,
+    taken out so that the runoff's per-cell call builds no model); `lfpm::runoff_kg_m2_s` takes the
+    ground, `runoff_kg_m2_s(P, H, Cover, GroundState)`. The wholly calm month's rule, the land taking
+    `P_ls` in place, is gone: every land cell of such a month is a sink with its source.
+  - _E-P7's node_ (§5.2, withdrawn by follow-up 2): the template's first node stays 35.4°, NCEP
+    R1's zeros on its native rows (35.95° N and 34.88° S); its documentation now gives both reads
+    (the 5° bins' 36.95° N and 34.99° S, mean 35.97°). The amplitudes stay, with E-P3.
+  - _The diagnostics_ (§4.7): `MonthCycle::sea` (`SeaBands`: each band's `e_b`, `s_b`, `P_sea` and
+    max(0, `C_b`)) and `frozen_land_share` (the land's frozen share of its solid angle), and, not in
+    the ruling, `band_winds` (the field cells' orographic winds east, west and calm, which the winds
+    test holds to its own count from the record); `lfpm::Diagnostics::source_kg_s`.
+  - _Choices the ruling did not state_:
+    - a band with no sea takes its nearest band's `s_b` with its `e_b` (equatorward first) and keeps
+      its own `C_b`, only the sea properties it lacks borrowed, as T13.a's empty-band rule does
+      (adopted by follow-up 2); with no sea anywhere `e_b` and `s_b` are 0 and a divergent band's
+      `P_sea` 0 (no sea cell reads it). A literal `s_b` = 0 would give a divergent sea-less band's
+      `P_sea` 0; the two differ only there, in the subtropics of land-heavy worlds, as the stencil of
+      a sea cell beside such a band reads it (a convergent band never reads `s_b`, and Antarctica's
+      interior bands converge), and k absorbs the unrealised export either way;
+    - the source is added after the sea's faces to the row's vapour, whose sum starts at +0.0 and
+      takes only non-negative terms, so a zero source adds +0.0 and a month with no source and no
+      frozen cell is the as-built solve to the bit (below);
+    - the orographic wind is the unit ±ê, the speed dropping out as before; ŵ is the record's
+      direction normalised, a zero-length one read as calm;
+    - the evaporation reads the same `surface_temperature_k` (the same operations in the same
+      order, so its bits are as built), so that the evaporation, the frozen flag and the runoff read
+      one temperature;
+    - `MonthCycle::calm` stays as a diagnostic (every field cell's orographic wind calm);
+    - the runoff's Σₘ sₘ (1 − εₘ) Pₘ is not the as-built (1 − ε) Σₘ sₘ Pₘ to the bit on a thawed
+      twelve-month world (distributivity); on a one-month world it is;
+    - the ruled Earth test's windows' parts are the all-land and all-sea climate cells (four or none
+      of four field cells land), its boxes inclusive in latitude and in longitude atan2(y, x), their
+      bounds the ruling's estimate script's (`model1d.py`); the Antarctic plateau is the all-land
+      climate cells south of 75° S whose four field cells' solid-angle-weighted mean height exceeds
+      2 km;
+    - its arid predicate reads the working state before quantisation, each all-land climate cell's
+      annual temperature at its four field cells' solid-angle-weighted mean height, its months ranked
+      at the sea level (the lapse term is the same each month), ties to the earlier month;
+    - its DJF and JJA are months 11, 0, 1 and 5, 6, 7, whose spans' midpoints fall in December to
+      February and June to August from periapsis on about 3 January, each month weighted equally;
+    - unit test 2 asserts, as follow-up 2 restates §6.3's bound, |P − P∞| ≤ 0.1 |P_sea − P∞| from 3
+      `L̃_l` inland (e^(−3) ≈ 0.05 at the exact length, a 2× margin), with floors P∞ of 0.5, 0.9 and
+      1.5 of the sea's rate, so that its pass does not rest on the chosen source (§6.3's 1% of P∞
+      held only for a coastal excess under about 0.2 P∞); it leaves out the last two land cells,
+      as a margin only (no edge of the chain disperses: its edges with length lie square to the
+      wind), where they read 0.007 of the coastal excess;
+    - unit tests 1 and 3 run on planar periodic grids (with the wind along a row the inflow width
+      equals the outflow width there, which makes the ring exact), unit test 7 on the ruled Earth's
+      inputs at level 6;
+    - the slow coarse-pass test re-solves its field cells for the E-L7 patch and asserts that they
+      reproduce the records to the bit;
+    - plan 09 had no R09.T13.j entry; one is added after R09.T13.g's, pointing at the ruling.
+  - _Bit for bit where nothing moves_ (§6.3 test 5). A probe fingerprinted every rate, recycled
+    share and budget figure of eleven solves (the ridge chain, the strips and ridges at levels 7 and
+    8, the convergence line, the due-south and pole worlds, the pole's deep solve, the hill with a
+    calm column and the zonal ring) at `1870973b` and after the revision, with every cell thawed and
+    no source: the same 64-bit fingerprints (the probe deleted; its source and logs in the lane's
+    scratch, `probe/`). The committed guard is
+    `with_no_source_and_every_cell_thawed_five_worlds_solve_to_their_as_built_bits` (`lfpm/tests.rs`): five
+    worlds (the ridge chain, the level-7 strip, the pole world, the hill with a calm column, the
+    four of them the probe's, and the zonal ring labelled by rows) with every cell thawed and no
+    source, each world's sum of land rates in cell order, its restarts and three cells' rates held
+    to f64 literals to the bit; the literals are re-taken on a deliberate change to the solve.
+  - _Measured, the ruled Earth_ (level 7, the whole step; mm/day; each figure then, in brackets, the
+    ruling's §3.2 estimate, GPCP v2.3 and the as-built run):
+    - the north 2.24 against 1.93, **1.160** (1.20; 1.27; 0.98): the landing acceptance, at least
+      1.10, is met; its all-land and all-sea climate cells 1.40 and 3.06 at 40–60° N (1.37 and 3.16;
+      1.79 and 3.42) and 1.09 and 2.35 at 15–35° N (0.78 and 2.42; 1.63 and 2.22);
+    - the south 2.82 against 2.27, 1.242 (1.29; 1.39; 1.56): its all-land cells 3.16 (44 cells) and
+      1.40, its all-sea 2.81 and 2.48 (GPCP's land and sea 2.49 and 2.99, 2.02 and 2.18); the
+      Southern Ocean's storm track 2.82 against the as-built 3.49 (estimate 2.83, GPCP 2.98);
+    - k by month from periapsis 0.9496, 0.9594, 0.9698, 0.9756, 0.9777, 0.9749, 0.9678, 0.9723,
+      0.9580, 0.9465, 0.9359 and 0.9408 (0.965–0.998; as built 1.17–1.35): the bound [0.85, 1.15] is met;
+    - Eurasia's interior 1.455 ÷ 2.669 = **0.545** (201 and 39 cells; 0.56; 0.59; 0.21); along
+      50–55° N, by 1,000 km from 2.5° W (the estimate's transect), 2.81, 2.24, 1.73, 1.51, 1.31,
+      1.20, 0.90 and 0.64 from 0–1 to 7–8 Mm (2.87, 2.35, 1.80, 1.54, 1.38, 1.32, 0.87, 0.65; GPCP
+      2.59, 2.11, 2.19, 1.72, 1.33, 1.49, 1.40, 1.11; as built 1.60, 1.09, 0.60, 0.33, 0.18, 0.10,
+      0.04, 0.02 on the estimate); along 55–60° N from 2.5° E 2.62, 2.42, 1.87, 1.63, 1.65, 1.60,
+      1.30 and 0.98 (2.76, 2.36, 2.04, 1.87, 1.81, 1.56, 1.21, 0.99; GPCP on the estimate's boxes
+      2.91, 2.41, 2.19, 1.80, 1.80, 1.44, 1.30, 1.52);
+    - the arid share of the 40–70° N land **0.116** (0.11; 0.08; 0.43 on the estimate) and of
+      60° S–70° N 0.306 (0.39; 0.28; 0.60). **The arid share (0.114) is flattered by E-P11: with
+      GPCP's seasons on the same totals, the estimate puts it at about 0.19, under the bound
+      (decision-r09-t13e-revision, E-P11 follow-up)**; with Peel's summer offset imposed on every
+      cell it reads 0.254 (the estimate 0.25; under the ruling's 0.30 at which it is named). The
+      40–70° N land's warm-half classes by solid angle: summer-heavy (at least 70% of the year's P
+      in its six warmest months) 0.117, winter-heavy 0.089 and neither 0.795, against GPCP's 0.28,
+      0.02 and 0.70 (E-P11);
+    - the land's precipitation of land origin, from a second water cycle at ε₀ = 0 on the finished
+      state (the ocean-tagged vapour, whose fallen water never returns to it; the source counted as
+      ocean water, so a lower bound): 0.338 of all the land's by the solves' budgets, 0.397 from the
+      all-land climate cells' records (0.43; van der Ent et al. 2010's 0.40; as built 0.48 on the
+      estimate); the Amazon 0.663 (0.66; 0.77), Eurasia's 50–60° N, 40–100° E interior 0.472 (0.51;
+      0.92), and along 50–60° N from 0.18 at the Atlantic to 0.49 at 3–4 Mm and 0.30 at 8–9 Mm
+      (0.35, 0.53, 0.30; as built 0.40, 0.94, 1.00);
+    - the 40–60° N land's seasons DJF 1.65 and JJA 0.53 (1.00 and 1.58; 1.51 and 2.27): inverted,
+      E-P11; by month from January 1.57, 1.31, 1.22, 1.12, 1.02, 0.64, 0.37, 0.59, 1.69, 2.71, 2.59
+      and 2.06;
+    - the boxes, all-land climate cells' annual means: the Amazon (10° S–2° N, 72–50° W) 4.21 (4.52;
+      6.76; 1.87), the Congo (5° S–5° N, 15–30° E) 2.76 (2.71; 4.78; 0.90), the Antarctic plateau
+      0.27 (207 cells; 0.26; 0.17; 0.14), Greenland above 1.5 km 0.98 (0.80; 0.90; 0.78), Central
+      Asia (43–50° N, 55–80° E) 1.33 (1.57; 0.84; 0.83; E-P9), the Sahara (18–30° N, 10° W–30° E)
+      0.55 (0.37; 0.11; 0.31) and Australia's interior (32–20° S, 120–145° E) 1.04 (0.72; 0.81;
+      0.72);
+    - global P = E 2.767 mm/day (the liquid's 2.494, the land's ε P 0.273; GPCP 2.691; as built
+      2.727), the land 28,182 of 98,304 field cells; the solves 3–4 restarts a month (36–47
+      sweep-equivalents; as built 3–5), the source 0.127–0.216 of the land's inflow and source, the
+      closures within 1.2 × 10⁻⁸;
+    - the 40–60° N band's month by month (the E-P11 follow-up §4's table; mm/day but s_b, k and the
+      whole land's frozen share; months from January):
+
+      | Month                   | J     | F     | M     | A     | M     | J     | J     | A     | S     | O     | N     | D     |
+      | ----------------------- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
+      | `e_b`                   | 4.59  | 3.21  | 2.01  | 1.05  | 0.43  | 0.20  | 0.20  | 1.09  | 3.19  | 4.93  | 5.72  | 5.53  |
+      | Ē                       | 2.11  | 1.47  | 0.93  | 0.50  | 0.21  | 0.10  | 0.10  | 0.53  | 1.49  | 2.28  | 2.64  | 2.55  |
+      | `s_b`                   | 0.458 | 0.458 | 0.458 | 0.458 | 0.458 | 0.458 | 0.458 | 0.458 | 0.458 | 0.458 | 0.458 | 0.458 |
+      | E − P                   | −0.76 | −0.84 | −0.98 | −0.94 | −0.54 | −0.32 | −0.05 | +0.05 | −0.25 | −0.62 | −0.83 | −0.84 |
+      | max(0, C)               | 0.76  | 0.84  | 0.98  | 0.94  | 0.54  | 0.34  | 0.21  | 0.20  | 0.39  | 0.64  | 0.83  | 0.84  |
+      | `P_sea`                 | 5.35  | 4.04  | 3.00  | 1.99  | 0.96  | 0.53  | 0.21  | 0.81  | 3.31  | 5.53  | 6.55  | 6.37  |
+      | k                       | 0.950 | 0.959 | 0.970 | 0.976 | 0.978 | 0.975 | 0.968 | 0.972 | 0.958 | 0.947 | 0.936 | 0.941 |
+      | the land's frozen share | 0.421 | 0.438 | 0.430 | 0.382 | 0.227 | 0.139 | 0.106 | 0.108 | 0.109 | 0.146 | 0.298 | 0.372 |
+      | all-land P              | 1.57  | 1.31  | 1.22  | 1.12  | 1.02  | 0.64  | 0.37  | 0.59  | 1.69  | 2.71  | 2.59  | 2.06  |
+
+      (Band-window means of each band's value; max(0, C) is the mean of each band's, so it can
+      exceed the mean of −(E − P).)
+  - _Measured, the coarse pass's reference Earth_ (level 8; printed, never asserted): the north 2.56
+    against 1.78 (1.439; as built 2.83 against 1.54, 1.84), the south 2.52 against 2.30 (1.095;
+    1.04); k 0.935–0.957 (1.243–1.327); the interior ratio 0.588; the arid shares 0.138 and 0.308;
+    the restarts by month 9, 9, 10, 10, 8, 9, 10, 10, 9, 10, 10 and 8, 112 a year (as built 9, 9, 9,
+    9, 12, 10, 9, 9, 9, 9, 12, 9, 115), every month converged, the deep comparison within 3.1 × 10⁻⁵ annually.
+    **The E-L7 patch** (field cell 98672 at 1.109° N, 54.259° E, land) reads 4.77 mm/day annually
+    and its climate cell 4.46, against 17.06 and 12.24 as built (the ruling's estimate about 6 plus
+    its coastal share); along its meridian the land runs from 7.53 at 3.44° S, beside the sea's 5.79
+    at 3.71° S, to 3.3–4.8 north of the equator, above half its peak over 1,088 km (38 field cells)
+    against as built 4 cells and 84 km: no grid-scale band remains.
+  - _Cost_ (one thread, `CPUQuota` 400%; follow-up 2 rules that no quiet re-time is needed): the
+    reference Earth's climate step at level 8 took 16.01 s at load 11–13 (the model, which T13.j
+    does not touch, 7.42 s against 5.45 s as built, so the rise is the load's; the water cycle
+    8.35 s), against 12.33–12.47 s as built at load 2–4: the limit of 30 s is met. The like-for-like
+    cost is the restarts, which load does not move: 114 a year against 115 as built on the node of
+    35.9°, and 112 on the final 35.4°, whose step took 15.26 s at load 10 (the model 5.81 s, the
+    water cycle 9.46 s). The ruled Earth's step at level 7 8.78 s. The
+    surface module's slow tests by name (nextest at four threads, the heavy lock held elsewhere, load
+    12): 34 passed in 249.6 s, the slow coarse-pass test 48.34 s (as built 38.6 s; the field cells'
+    re-solve for the E-L7 patch adds about 7.6 s) and the slow order test 212.68 s (216.3 s); the
+    fast order test alone (`cargo test`, four threads, load 3) 81.62 s (82.1 s), under
+    decision-r09-t13-test-cost's 120 s.
+  - _The generated sample_ (decision-r09-t13e-lfpm-convergence's E-L8 §4, re-measured since the
+    winds the solve reads change; level 8 through the coarse pass, one probe run once at one thread,
+    load about 10, on the final constant, then deleted, its source and logs in the lane's scratch
+    `probe/`; the run on 35.9° read within a restart of it). Per world: the most
+    restarts in a month (as built), the restarts by month, the deep comparison at 10⁻¹² for the month
+    of most restarts and the worst month's, the climate step and its water cycle:
+    - seed 0x5eed_0e18_0001: 13 (18); 12, 11, 10, 10, 9, 11, 12, 12, 13, 12, 11, 12; month 8
+      1.9 × 10⁻⁴ (month 7, 8.0 × 10⁻⁴); 13.74 s and 9.35 s;
+    - seed 0002: 10 (13); 7, 7, 9, 9, 10, 9, 9, 8, 8, 7, 7, 7; month 4 1.0 × 10⁻⁵ (month 10,
+      6.7 × 10⁻⁴); 23.79 s and 15.43 s;
+    - seed 0003: 10 (12); 9, 8, 9, 8, 8, 9, 8, 8, 8, 10, 10, 9; month 9 2.9 × 10⁻⁶ (month 1,
+      2.5 × 10⁻⁴); 20.79 s and 7.70 s;
+    - seed 0004: 10 (13); 8, 9, 10, 10, 9, 9, 8, 7, 8, 10, 8, 8; month 2 7.7 × 10⁻⁵ (month 7,
+      7.5 × 10⁻⁴); 22.62 s and 8.57 s;
+    - the land-heavy Earth (ocean fraction 0.35, 62.9% land): 14 (13); 14, 9, 9, 11, 11, 12, 11, 14,
+      8, 14, 14, 14, 141 a year against 131 as built (+7.6%); month 0 1.1 × 10⁻⁴ (month 1,
+      8.9 × 10⁻⁴); 25.87 s and 20.68 s (as built 23.64 s and 18.90 s at load 2–4);
+    - the Earth at 60° obliquity: 9 (9); 8 a month but 9 in months 9 and 10; month 9 9.1 × 10⁻⁵
+      (month 1, 3.2 × 10⁻⁴); 15.45 s and 7.17 s;
+    - `locked_earth(0, 0)`: 12 (8); month 0 2.2 × 10⁻⁴; 1.48 s and 1.01 s; up to 5,647 land cells a
+      month across the sample read as zero, each within the stop test's tolerance (E-L9);
+    - **The acceptance is met by every world:** no month takes more than 14 restarts against 20,
+      every month converges, and no deep comparison is off by more than 8.9 × 10⁻⁴ against 1%. With
+      purely along-band winds the template makes no gyre, so E-L8's remainder cannot arise from it.
+  - _The tests_ (§6.3; plan text (b)). In `tests/hydrology.rs`:
+    - renamed: the ruled Earth test is
+      `the_reference_earth_s_storm_tracks_are_wetter_than_its_subtropics_its_interiors_are_watered_and_its_rain_band_is_on_its_energy_flux_equator`
+      (formerly `the_reference_earth_s_southern_storm_track_is_wetter_than_its_subtropics_its_midlatitudes_converge_vapour_and_its_rain_band_is_on_its_energy_flux_equator`),
+      the winds test `each_month_s_orographic_step_reads_its_quantised_wind_along_the_model_s_bands`
+      (formerly `each_month_s_quantised_wind_is_the_wind_that_month_s_orographic_step_used`), the
+      runoff test
+      `the_annual_runoff_is_none_over_liquid_the_unrecycled_share_on_thawed_ground_and_all_the_rain_on_frozen_ground`
+      (formerly `the_annual_runoff_is_none_over_liquid_and_the_unrecycled_share_over_a_sea_level_continent`);
+      T13.e's record above names them by their old names;
+    - new: `on_the_reference_earth_frozen_ground_recycles_nothing_and_thawed_ground_its_share_at_its_height`
+      (unit test 7, with the twelve-month runoff checked against Σₘ sₘ (1 − εₘ) Pₘ),
+      `the_sea_rains_its_evaporation_and_its_band_s_convergence_and_a_divergent_band_s_export_falls_on_its_sea`
+      and `on_a_60_degree_aquaplanet_the_sea_rains_its_band_s_mean_evaporation_less_its_e_minus_p`
+      (unit test 8);
+    - the winds test: on the 1,500 km Earth at level 6, 8,368–9,008 field cells blow east and
+      15,568–16,208 west each month, none calm, each month's `band_winds` the test's own count; the
+      runoff test: 5,858 thawed and 1,176 frozen land cells, each to the bit; on the twelve-month
+      ruled inputs at level 6 every one of the 7,034 land field cells' annual runoff is the test's
+      own Σₘ sₘ (1 − εₘ) Pₘ to the bit, 2,481 of them with both frozen and thawed months, and
+      `Freezing::Never` never freezes;
+    - in `lfpm/tests.rs` (unit tests 1–4, 6–8) and `wind.rs`: the ring with no sea, thawed 4.4 ×
+      10⁻¹² and frozen 6.9 × 10⁻¹³ from S ÷ (1 − ε₀) and S; the strip's coastal excess e-folding over
+      2,016 km against `L̃_l`'s 2,004 km for each floor, its worst cell from 3 `L̃_l` 0.0502, 0.0491
+      and 0.0507 of the coastal excess at floors of 0.5, 0.9 and 1.5 of the sea's rate, against the
+      bound 0.1 (the theory's e^(−3) ≈ 0.05); the budgets
+      with a source closing within 6 × 10⁻⁶; the sink and the column factor exact; frozen ground's
+      chain the no-recycling chain to the bit, decaying over 500.2, 517.8 and 535.2 km at 0.5, 36
+      and 72 km cells; the winds along the bands by sign, at the poles and in locked coordinates;
+    - the runs, capped and through build-slot, on the final tree: the climate module 150 passing and
+      6 ignored in 23.3 s at four threads; the surface module's slow tests, the order tests and the
+      gate as above; Clippy (`-p hyperion-sim --all-targets --features testing -- -D warnings`), fmt
+      and `just doc-check` clean.
+  - _What it supersedes in T13.e's record_: the large-scale rate `P_ls` as the sea's rate and the
+    coastal air (_The large-scale rate_, the part-1 sea's paragraph and _The orography_), _A wholly
+    calm month_, the runoff function's (1 − ε(z)) P of the annual rate, and _The balance_'s `P_ls`;
+    T13.e's figures stand as the as-built record of that model.
