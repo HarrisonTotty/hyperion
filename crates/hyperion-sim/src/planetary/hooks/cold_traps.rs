@@ -117,14 +117,14 @@
 //!
 //! So the zonal annual maxima and every condensable's `f_ct` read only the sky, the regolith's
 //! albedo, the heat flow and the terrain, none of which T13.c's passes change. They are one
-//! [`ColdTrapField`], built once a body ([`ColdTrapField::new`]); [`publish_over`] reads it, the
-//! record's [`publish`] builds it once, and from P14.T54.b every pass reads the same field, so
+//! `ColdTrapField`, built once a body (`ColdTrapField::new`); `publish_over` reads it, the
+//! record's `publish` builds it once, and from P14.T54.b every pass reads the same field, so
 //! the passes and the record agree by construction at one evaluation a body. Its `f_ct` are one
-//! latitude integral for every species at once ([`over_latitude_each`]), each latitude's fractions
-//! one call of [`ColdTrapGround::fractions_at`], whose closed form shares one depth integral among
+//! latitude integral for every species at once (`over_latitude_each`), each latitude's fractions
+//! one call of `ColdTrapGround::fractions_at`, whose closed form shares one depth integral among
 //! the thresholds (`hyperion_surface::cold_trap::fractions`, R09.T7.k). The zonal entries and the
 //! reservoirs stay each publish's, per partition, and whether a body qualifies is tested at every
-//! publish ([`qualifies`]).
+//! publish (`qualifies`).
 //!
 //! # The reservoir
 //!

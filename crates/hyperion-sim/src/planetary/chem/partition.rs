@@ -1724,7 +1724,7 @@ pub struct CondensateEntry {
 impl CondensateEntry {
     /// The part of [`area_fraction`](Self::area_fraction) in cold traps (P14.T51.f, P14.T51.i;
     /// decision-r09-t13f-cold-traps §1.4), 0 to `area_fraction`: the trap's exposed area as
-    /// [`Condensates::with_cold_traps`] merged it, held with the entry to 1 (the zonal part kept
+    /// `Condensates::with_cold_traps` merged it, held with the entry to 1 (the zonal part kept
     /// whole, the trap given what is left), and 0 for an entry with no cold-trapped part. R09's
     /// field places the rest, its zonal part, by its own rule. Dimensionless.
     #[must_use]
