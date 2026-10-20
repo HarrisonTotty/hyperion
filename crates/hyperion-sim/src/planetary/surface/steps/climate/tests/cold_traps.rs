@@ -1,13 +1,17 @@
 //! R09.T13.f's tests: the cold traps (decision-r09-t13f-cold-traps §7.3), plan 09's three under the
 //! ruled contract and the ruling's new ones. Fractions and areas are held to at least 2 × 10⁻³
 //! relative or one cell, never to bits, since P14.T51.i's closed form moves them by up to
-//! 1.1 × 10⁻³ at `trap_threshold`'s thresholds (decision-r09-t13f-cold-traps §3.4).
+//! 1.1 × 10⁻³ at `trap_threshold`'s thresholds (decision-r09-t13f-cold-traps §3.4). One cell at
+//! level 6 is 5.12 × 10⁻⁵ of the sphere, larger than most targets here, so on the Moon-like input
+//! a trapped part's accounting is also held to [`ACCOUNTED_SHARE`] of its target.
 
 use hyperion_surface::cube::PatchKey;
-use hyperion_surface::field::{MaterialPalette, PaletteEntry, PaletteRole, cell_index};
+use hyperion_surface::field::{
+    MaterialPalette, PaletteEntry, PaletteRole, SynthesisCell, cell_index,
+};
 use hyperion_surface::substance_key::SubstanceKey;
 
-use super::super::ice::{IceKey, PlacedTrap, place_ices, trap_fractions};
+use super::super::ice::{ICE_CODES, IceKey, PlacedTrap, place_ices, trap_fractions};
 use super::super::{Diagnostics, run_diagnosed};
 use super::{builder_of, grids};
 use crate::math;
@@ -34,6 +38,12 @@ const LUNAR_PERIAPSIS_FLUX_W_M2: f64 = 1361.0 / (0.98329 * 0.98329);
 /// The Moon's greatest solar declination, degrees: 1.54°, T51.f's lunar case (Hayne et al. 2021's
 /// sky, as plan 14's `lunar_sky` takes it).
 const LUNAR_DECLINATION_DEG: f64 = 1.54;
+
+/// How far a trapped part's placed + undrawn + short may lie from its target on the Moon-like
+/// input, a share of the target: 2 × 10⁻², tighter than one cell there, above main's tolerance
+/// floor of 2 × 10⁻³, and above the quantisation's measured loss (plan 09's F2: about 0.9% of
+/// water's 1.7 × 10⁻⁵ on the Moon-like input, a share carried past the last cell that can draw it).
+const ACCOUNTED_SHARE: f64 = 2e-2;
 
 /// The key `k`, which a test knows to be valid.
 fn key(k: &str) -> SubstanceKey {
@@ -201,6 +211,17 @@ fn trap_of<'a>(traps: &'a [PlacedTrap], k: &str) -> &'a PlacedTrap {
     traps.iter().find(|t| t.substance == key(k)).unwrap()
 }
 
+/// Asserts that `trap`'s placed + undrawn + short lies within [`ACCOUNTED_SHARE`] of its target.
+fn assert_accounted(trap: &PlacedTrap) {
+    let accounted = trap.placed + trap.undrawn + trap.short;
+    let relative = (accounted - trap.target).abs() / trap.target;
+    assert!(
+        relative <= ACCOUNTED_SHARE,
+        "placed + undrawn + short {accounted:e} against {:e}, {relative:e} of it: {trap:?}",
+        trap.target
+    );
+}
+
 /// Plan 09's first test, under the ruled contract: a Moon-like input whose 1.7 × 10⁻⁵ of water
 /// ice is all cold-trapped (T51.f's lunar case: α 0.2711°, A 0.12, q 0.018 W m⁻², δ 1.54°) places
 /// it only poleward of 70°, more than 90% of it poleward of 80°, no cell's share above its
@@ -252,10 +273,70 @@ fn a_moon_like_input_places_its_trapped_water_poleward_of_70_degrees() {
         (trap.placed + trap.undrawn - trap.target).abs() <= one_cell(&field),
         "{trap:?}"
     );
+    assert_accounted(trap);
     assert!(
         (area_of(&field, &working.cells, water) - trap.target).abs() <= one_cell(&field),
         "{trap:?}"
     );
+}
+
+/// The trapped shares' quantisation (the ice module's "The quantisation", `ICE_CODES`), on the
+/// Moon-like input whose water ice is all cold-trapped, so that every cell it draws is a free
+/// cell: each drawn cell's share times 255 is a whole code to the bit, at most ⌊255 f⌋ of its
+/// fraction f; the drawn total over the field is `placed` within one cell; and through the field's
+/// own ice byte (`SynthesisCell::quantise_ice`, decoded in its steps of 1 ÷ 255) every code is kept
+/// and the drawn area still matches the target within one cell, and within [`ACCOUNTED_SHARE`].
+#[test]
+fn the_trapped_shares_are_whole_codes_and_keep_their_area_through_the_field_s_ice_byte() {
+    let inputs = moon_with(&[("H2O", 1.7e-5)], &[("H2O", 1.7e-5)]);
+    let (field, working, diagnostics) = run_at(&inputs, 6);
+    let water = inputs.palette().find(PaletteRole::Ice, key("H2O")).unwrap();
+    let fractions = trap_fractions(&inputs, field.centres(), &[threshold("H2O")]);
+    let trap = trap_of(&diagnostics.cold_traps, "H2O");
+    let total: f64 = field.solid_angles_sr().iter().sum();
+    let (mut drawn, mut coded, mut cells) = (0.0, 0.0, 0_u32);
+    for (((n, cell), &omega), &f) in working
+        .cells
+        .iter()
+        .enumerate()
+        .zip(field.solid_angles_sr())
+        .zip(&fractions)
+    {
+        if cell.ice_entry != Some(water) || cell.ice_fraction <= 0.0 {
+            continue;
+        }
+        let code = ICE_CODES * cell.ice_fraction;
+        assert_same_bits(code, code.round());
+        assert!(
+            code <= (ICE_CODES * f).floor(),
+            "cell {n}: code {code} above ⌊255 f⌋ of its fraction {f}"
+        );
+        let byte = SynthesisCell::quantise_ice(cell.ice_fraction).unwrap();
+        assert_same_bits(f64::from(byte), code);
+        drawn += omega * cell.ice_fraction;
+        coded += omega * f64::from(byte) / ICE_CODES;
+        cells += 1;
+    }
+    let one = one_cell(&field);
+    eprintln!(
+        "the Moon's codes: {cells} cells; drawn {:.6e}, through the ice byte {:.6e}, of {:.6e} \
+         (placed {:.6e}); one cell {one:.3e}",
+        drawn / total,
+        coded / total,
+        trap.target,
+        trap.placed
+    );
+    assert!(cells > 0);
+    assert_eq!(cells, trap.cells);
+    assert!(diagnostics.ices.iter().all(|ice| ice.cells == 0));
+    assert!((drawn / total - trap.placed).abs() <= one, "{trap:?}");
+    assert!((coded / total - trap.target).abs() <= one, "{trap:?}");
+    assert!(
+        (coded / total - trap.target).abs() <= ACCOUNTED_SHARE * trap.target,
+        "{} against {trap:?}",
+        coded / total
+    );
+    assert_accounted(trap);
 }
 
 /// Plan 09's second: at 25° obliquity no cell has a water cold-trap fraction, so a trapped share
@@ -449,6 +530,7 @@ fn a_split_share_lays_its_zonal_part_coldest_first_and_its_traps_by_their_fracti
         (trap.placed + trap.undrawn + trap.short - trap.target).abs() <= one_cell(&field),
         "{trap:?}"
     );
+    assert_accounted(trap);
 }
 
 /// The nesting: the Moon-like input with water's traps and carbon dioxide's, at one exposed
@@ -513,6 +595,8 @@ fn nested_traps_draw_the_ice_of_larger_share_and_count_the_other_as_undrawn() {
     assert!((area_of(&field, &working.cells, water) - water_area).abs() <= one);
     assert!((water_trap.placed - water_area).abs() <= one);
     assert!((co2_trap.placed + co2_trap.undrawn - co2_area).abs() <= one);
+    assert_accounted(water_trap);
+    assert_accounted(co2_trap);
     assert!(
         (area_of(&field, &working.cells, co2) - co2_trap.placed).abs() <= 1e-15,
         "{co2_trap:?}"

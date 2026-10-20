@@ -416,8 +416,10 @@ fn water_cycle(
         .map(|b| partition::budget(grid, &model, &circulation, b))
         .collect();
     let annual = Bands::mean(&bands, &shares);
-    let annual_flux = partition::edge_fluxes(grid, model.transport_kg_m2_s, &annual.energy);
-    let annual_efe_sine = partition::energy_flux_equator(grid, &annual_flux, &annual.energy);
+    let annual_flux =
+        partition::edge_fluxes(grid, model.transport_kg_m2_s, &annual.energy_j_per_kg);
+    let annual_efe_sine =
+        partition::energy_flux_equator(grid, &annual_flux, &annual.energy_j_per_kg);
 
     // 2. The evaporation.
     let sea_level = working.sea_level.value();
@@ -478,6 +480,10 @@ fn water_cycle(
     let mut winds_used = Vec::with_capacity(months);
     let mut rates = vec![0.0; field.centres().len()];
     let mut sea_rates = vec![0.0; rates.len()];
+    // Each month's headings, field-cell winds and record sums, allocated once and refilled.
+    let mut headings: Vec<wind::Heading> = Vec::with_capacity(working.climate.len());
+    let mut cell_winds: Vec<CellWind> = Vec::with_capacity(frames.len());
+    let mut sums: Vec<(f64, f64)> = Vec::with_capacity(working.climate.len());
     for (m, budget) in budgets.into_iter().enumerate() {
         let band_e = band_means(&band_evaporation[m], &band_area);
         let large_scale: Vec<f64> = band_e
@@ -519,7 +525,7 @@ fn water_cycle(
                 v += if x > 0.0 { poleward } else { -poleward };
             }
             let (u, _) = wind::drag_balance(v, wind::coriolis_per_s(rotation_s, up));
-            let velocity = wind::towards_pole(pole, up).map_or([0.0; 3], |north| {
+            let velocity_m_s = wind::towards_pole(pole, up).map_or([0.0; 3], |north| {
                 let across = wind::cross(north, up);
                 [
                     v * north[0] + u * across[0],
@@ -527,7 +533,7 @@ fn water_cycle(
                     v * north[2] + u * across[2],
                 ]
             });
-            let (sample, code) = wind::recorded(velocity, up);
+            let (sample, code) = wind::recorded(velocity_m_s, up);
             state.month_wind[m] = sample;
             codes.push(code);
         }
@@ -535,15 +541,19 @@ fn water_cycle(
         // 5. The large-scale rate over the sea, and the winds the orography reads: each field
         // cell's wind is its climate cell's record read at its own centre (`wind::cell_wind`, with
         // the cell's frame and the record's heading computed once).
-        let headings: Vec<wind::Heading> = working
-            .climate
-            .iter()
-            .map(|state| wind::Heading::of(&state.month_wind[m]))
-            .collect();
-        let cell_winds: Vec<CellWind> = (0_u32..)
-            .zip(&frames)
-            .map(|(n, &frame)| wind::cell_wind_in(&headings[slot(parent_index(n))], frame))
-            .collect();
+        headings.clear();
+        headings.extend(
+            working
+                .climate
+                .iter()
+                .map(|state| wind::Heading::of(&state.month_wind[m])),
+        );
+        cell_winds.clear();
+        cell_winds.extend(
+            (0_u32..)
+                .zip(&frames)
+                .map(|(n, &frame)| wind::cell_wind_in(&headings[slot(parent_index(n))], frame)),
+        );
         let still = cell_winds.iter().all(|&w| w == CellWind::Calm);
         for ((rate, stencil), &c) in sea_rates.iter_mut().zip(&stencils).zip(&cover) {
             let reads = c == Cover::Sea || still;
@@ -638,7 +648,8 @@ fn water_cycle(
         }
 
         // 7. The records.
-        let mut sums = vec![(0.0, 0.0); working.climate.len()];
+        sums.clear();
+        sums.resize(working.climate.len(), (0.0, 0.0));
         for ((n, &rate), &omega) in (0_u32..).zip(&rates).zip(field.solid_angles_sr()) {
             let sum = &mut sums[slot(parent_index(n))];
             sum.0 += omega * rate;

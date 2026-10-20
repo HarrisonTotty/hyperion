@@ -985,7 +985,11 @@ impl ColdTrapGround {
     #[must_use]
     #[cfg_attr(
         not(test),
-        expect(dead_code, reason = "R09.T13.f's placement is the first caller")
+        expect(
+            dead_code,
+            reason = "only the tests read it: R09.T13.f's placement reads `fractions_at`, which \
+                      applies the zonal maximum itself"
+        )
     )]
     pub(crate) fn annual_maximum(&self, latitude: Radians) -> Kelvin {
         self.sunlit.annual_maximum_at(latitude)

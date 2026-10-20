@@ -247,9 +247,10 @@ pub(super) const RESTART: usize = 10;
 /// sea) every month stops after 9–12 restarts (102–135 sweep-equivalents) with its large
 /// components in their flow order, against 20–27 in index order, and on R09.T13.g's synthetic
 /// Earth at level 7 after 3–5 (8–13): 19–25% of the coarse pass's land lies in components larger
-/// than [`EXACT_BLOCK_CELLS`], the largest 11,635 cells. Over the ruling's generated sample (its
-/// E-L8 §4: four more surface seeds, a land-heavy Earth, 60° obliquity and a locked world) no
-/// month took more than 18, inside its acceptance of 20, two-thirds of the cap.
+/// than [`EXACT_BLOCK_CELLS`], the largest of them 11,061–11,635 cells by month (the same in either
+/// order, the final run's). Over the ruling's generated sample (its E-L8 §4: four more surface
+/// seeds, a land-heavy Earth, 60° obliquity and a locked world) no month took more than 18, inside
+/// its acceptance of 20, two-thirds of the cap.
 pub(super) const MAX_RESTARTS: u32 = 30;
 
 /// The largest strongly connected component of a month's upwind graph that a sweep solves

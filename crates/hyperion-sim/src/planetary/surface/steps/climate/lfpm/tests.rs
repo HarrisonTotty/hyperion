@@ -28,17 +28,35 @@ fn ridge(x_m: f64) -> f64 {
     RIDGE_HEIGHT_M * math::exp(-core::f64::consts::LN_2 * offset * offset)
 }
 
+/// How a planar mesh's x ends meet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ends {
+    /// Periodic in x: the last column faces the first.
+    Periodic,
+    /// Closed: each cell at the grid's edge faced by itself across an edge of no length.
+    Closed,
+}
+
+/// How a chain's cells are labelled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Labels {
+    /// In order along the wind.
+    AlongTheWind,
+    /// In order against the wind.
+    AgainstTheWind,
+}
+
 impl Mesh {
     /// A flat grid of `nx` × `ny` cells of `step_m` along x by `side_m` along y, labelled
-    /// `label(x, y)`, a permutation of the cells' indices, its faces in the order −x, +x, −y, +y:
-    /// periodic in x if `periodic`, and otherwise each cell at the grid's edge faced by itself
-    /// across an edge of no length.
+    /// `label(x, y)`, a permutation of the cells' indices, its faces in the order −x, +x, −y, +y,
+    /// its x ends as `ends` says; along y each cell at the grid's edge is faced by itself across an
+    /// edge of no length.
     fn planar(
         nx: u32,
         ny: u32,
         step_m: f64,
         side_m: f64,
-        periodic: bool,
+        ends: Ends,
         label: impl Fn(u32, u32) -> u32,
     ) -> Self {
         let count = slot(nx * ny);
@@ -55,10 +73,11 @@ impl Mesh {
             let n = i64::from(nx);
             if (0..n).contains(&to) {
                 u32::try_from(to).ok()
-            } else if periodic {
-                u32::try_from(to.rem_euclid(n)).ok()
             } else {
-                None
+                match ends {
+                    Ends::Periodic => u32::try_from(to.rem_euclid(n)).ok(),
+                    Ends::Closed => None,
+                }
             }
         };
         for y in 0..ny {
@@ -168,18 +187,21 @@ const ALONG_X: CellWind = CellWind::Towards([1.0, 0.0, 0.0]);
 
 /// The rates along a chain of `land` cells of `dx_m` between a sea upwind and a sea downwind,
 /// under a wind along it, each land cell at `height(x)` of its centre's distance x from the coast,
-/// m, the cells labelled against the wind if `reversed`: each land cell's (x, P) in order along
-/// the wind, and the run's diagnostics.
+/// m, the cells labelled as `labels` says: each land cell's (x, P) in order along the wind, and
+/// the run's diagnostics.
 fn chain(
     land: u32,
     dx_m: f64,
     height: impl Fn(f64) -> f64,
     parameters: &Parameters,
-    reversed: bool,
+    labels: Labels,
 ) -> (Vec<(f64, f64)>, Diagnostics) {
     let n = land + 2;
-    let label = |x: u32| if reversed { n - 1 - x } else { x };
-    let mesh = Mesh::planar(n, 1, dx_m, 1_000.0, false, |x, _| label(x));
+    let label = |x: u32| match labels {
+        Labels::AlongTheWind => x,
+        Labels::AgainstTheWind => n - 1 - x,
+    };
+    let mesh = Mesh::planar(n, 1, dx_m, 1_000.0, Ends::Closed, |x, _| label(x));
     let centre = |x: u32| (f64::from(x) - 0.5) * dx_m;
     // Cell i is the cell at x with label(x) = i, and label is its own inverse.
     let world = World::of(n, |i| {
@@ -477,7 +499,7 @@ fn a_ridge_casts_a_rain_shadow_along_a_chain() {
         (36_000.0, 27, 0.309),
         (72_000.0, 13, 0.335),
     ] {
-        let (points, diagnostics) = chain(land, dx_m, ridge, &set, false);
+        let (points, diagnostics) = chain(land, dx_m, ridge, &set, Labels::AlongTheWind);
         let (plains, slopes, peak_m) = shadow(&points);
         eprintln!(
             "chain at {:.1} km: lee ÷ windward plain {plains:.3} (the lane's 1-D {research}), \
@@ -515,14 +537,14 @@ fn inland_rain_decays_over_the_effective_long_range_length_along_a_chain() {
         (36_000.0, 83, 2_022.0),
         (72_000.0, 41, 2_040.0),
     ] {
-        let (points, _) = chain(land, dx_m, |_| 0.0, &set, false);
+        let (points, _) = chain(land, dx_m, |_| 0.0, &set, Labels::AlongTheWind);
         let folding = e_folding_m(&points);
         let (dry_points, _) = chain(
             land,
             dx_m,
             |_| 0.0,
             &set.with_sea_level_recycled_share(0.0),
-            false,
+            Labels::AlongTheWind,
         );
         let dry = e_folding_m(&dry_points);
         let euler = dx_m / math::ln_1p(dx_m / LONG_RANGE_LENGTH_M);
@@ -908,7 +930,7 @@ fn planar_world(
     height: impl Fn(u32, u32) -> f64,
     calm: impl Fn(u32, u32) -> bool,
 ) -> (Mesh, World) {
-    let mesh = Mesh::planar(nx, ny, 33_000.0, 33_000.0, false, label);
+    let mesh = Mesh::planar(nx, ny, 33_000.0, 33_000.0, Ends::Closed, label);
     let mut at = vec![(0, 0); slot(nx * ny)];
     for y in 0..ny {
         for x in 0..nx {
@@ -991,8 +1013,8 @@ fn the_land_s_water_budget_closes() {
 fn the_rates_do_not_depend_on_the_cells_index_order() {
     let set = Parameters::HERGARTEN_ROBL;
     // A chain's order is its own, whichever way it is labelled: the same bits.
-    let (forward, _) = chain(400, 2_500.0, ridge, &set, false);
-    let (backward, _) = chain(400, 2_500.0, ridge, &set, true);
+    let (forward, _) = chain(400, 2_500.0, ridge, &set, Labels::AlongTheWind);
+    let (backward, _) = chain(400, 2_500.0, ridge, &set, Labels::AgainstTheWind);
     for (&(x, p), &(_, q)) in forward.iter().zip(&backward) {
         assert_same_bits(q, p);
         assert!(p > 0.0, "at {x} m");
@@ -1031,7 +1053,7 @@ fn a_zonal_ring_is_one_component_a_row_and_converges_wherever_its_labels_start()
     let (nx, ny) = (40, 5);
     let run = |shift: u32| {
         let label = move |x: u32, y: u32| y * nx + (x + shift) % nx;
-        let mesh = Mesh::planar(nx, ny, 33_000.0, 33_000.0, true, label);
+        let mesh = Mesh::planar(nx, ny, 33_000.0, 33_000.0, Ends::Periodic, label);
         let mut at = vec![(0, 0); slot(nx * ny)];
         for y in 0..ny {
             for x in 0..nx {
@@ -1092,7 +1114,7 @@ fn a_zonal_ring_s_flow_order_has_one_backward_edge_and_runs_downstream() {
         y * nx + (nx - 1 - x)
     }];
     for (name, label) in ["17 x + 5", "backwards"].into_iter().zip(labels) {
-        let mesh = Mesh::planar(nx, ny, 33_000.0, 33_000.0, true, label);
+        let mesh = Mesh::planar(nx, ny, 33_000.0, 33_000.0, Ends::Periodic, label);
         let mut row = vec![0; slot(nx * ny)];
         for y in 0..ny {
             for x in 0..nx {
@@ -1153,7 +1175,7 @@ fn a_zonal_ring_s_flow_order_has_one_backward_edge_and_runs_downstream() {
 fn a_two_cell_cycle_equals_the_closed_form_of_its_balance_in_one_sweep() {
     let set = Parameters::HERGARTEN_ROBL;
     let side_m = 33_000.0;
-    let mesh = Mesh::planar(4, 1, side_m, side_m, false, |x, _| x);
+    let mesh = Mesh::planar(4, 1, side_m, side_m, Ends::Closed, |x, _| x);
     let (east, west) = (ALONG_X, CellWind::Towards([-1.0, 0.0, 0.0]));
     let world = World {
         heights_m: vec![0.0, 500.0, 1_500.0, 0.0],
@@ -1390,7 +1412,9 @@ fn the_runoff_is_the_unrecycled_share_of_the_rate_and_none_over_liquid() {
 /// The cost of one month at level 8 (R09.T13.e): the mesh, built once, and a month's solve, on a
 /// sphere of some land and on one all land, under zonal belts that reverse at 30° and 60° and under
 /// three cells whose trades and polar easterlies blow equatorward and westerlies poleward; with
-/// each run's iteration.
+/// each run's iteration. A timing alone, asserting nothing, run by name like the crate's other
+/// timings (`planetary::hooks::cold_traps::tests::time_the_cold_traps` among them), and recorded in
+/// plan 09's Risks.
 #[test]
 #[ignore = "a timing, run by name"]
 fn time_one_month_at_level_8() {

@@ -863,8 +863,9 @@ Geophys. Res. 109, D06303) join this list when their values are quoted; neither 
 - The annual zonal-mean precipitation of GPCP v2.3 over 1991-2020 by 2.5° band (72 values),
   computed from NOAA PSL's long-term monthly means (precip.mon.ltm.1991-2020.nc,
   https://psl.noaa.gov/data/gridded/data.gpcp.html), printed beside the model in the climate
-  step's tests (plan R09, R09.T13.e). The dataset's citation: R. F. Adler et al., J.
-  Hydrometeor. 4 (2003) 1147-1167. Only these derived means are committed; no grid is.
+  step's tests (plan R09, R09.T13.e). GPCP's papers: R. F. Adler et al., J. Hydrometeor. 4 (2003)
+  1147-1167 (version 2), and R. F. Adler et al., Atmosphere 9 (2018) 138, DOI:
+  10.3390/atmos9040138 (version 2.3). Only these derived means are committed; no grid is.
 
 - The annual zonal-mean 10 m meridional wind of the NCEP/NCAR Reanalysis 1 over 1991-2020 in four
   5° bins of the trades (4 values), computed from NOAA PSL's long-term monthly means, printed

@@ -60,9 +60,21 @@
 //! contrasts and placed the ices, and the liquids on the relief step's flood, by substance, with
 //! the lapse rate. R09.T13.g gave the energy-balance model the relief, each grid point's
 //! hypsometry setting its albedo, outgoing radiation and sea-ice heat capacity at the ground's
-//! temperature, τ solved for the surface mean. Erosion and the classes are still no-ops: run on any inputs, the pass yields
-//! that relief and sea, with their ices and liquids, under the climate its regime names, with the
-//! inputs' palette. R09.T13.e–T15 fill the rest and R09.T16 pins the reference worlds' fields.
+//! temperature, τ solved for the surface mean. R09.T13.e added the labelled precipitation heuristic
+//! and each month's 10 m wind: Siler et al.'s Hadley-cell partition of the model's own flux,
+//! centred on each month's energy-flux equator held at Guendelman and Kaspi's ascending-branch
+//! cap, Priestley and Taylor's evaporation over open liquid, and Hergarten and Robl's orographic
+//! precipitation over land along the recorded winds, solved in the order of each month's upwind
+//! components and, within the large ones, along the flow, to 10⁻⁴ of each land cell's rate
+//! (decision-r09-t13e-lfpm-convergence), the global water balanced. R09.T13.f added the cold
+//! traps: [`CoarseInputs::cold_traps`], the cold-trapped part of each ice's share, with
+//! [`ColdTrapInputs`], what they read of the star and the ground, both none from the record until
+//! P14.T54.b, and their placement in each field cell's cold-trap fraction, read through plan 14's
+//! `ColdTrapGround`, scaled to plan 14's area and held to the fraction, after the zonal parts.
+//! Erosion and the classes are still no-ops: run on any inputs, the pass yields that relief and
+//! sea, with their ices and liquids, under the climate its regime names, with the inputs'
+//! palette. The rest of R09.T13, R09.T14 and T15 fill the rest and R09.T16 pins the reference
+//! worlds' fields.
 //!
 //! # Consumed items, by their paths in the code
 //!

@@ -449,7 +449,10 @@ impl Moisture {
 /// How the optical depth was found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum OpticalDepth {
-    /// By bisection, so that the steady state's surface mean is the inputs'.
+    /// By bisection, so that the steady state's surface mean is the inputs'. Its steady state
+    /// converged, but where the final probe's did not and the fold guard kept no converged probe
+    /// on either side of the bracket: then the state is the final probe's, unconverged, as before
+    /// the guard ([`Solution::steady_converged`] says which).
     Solved,
     /// By bisection, but the final probe's steady state did not converge within
     /// [`STEADY_ITERATIONS`]: the bisection closed on a fold, a jump of the steady states' mean
@@ -477,7 +480,9 @@ pub(super) struct Solution {
     /// How τ was found.
     pub(super) optical_depth: OpticalDepth,
     /// Whether the steady state τ was solved on met [`STEADY_TOLERANCE_K`]: true for a body
-    /// with neither light nor heat, which has none.
+    /// with neither light nor heat, which has none. It is false with [`OpticalDepth::Solved`]
+    /// where the bisection's final probe did not converge and the fold guard kept no converged
+    /// probe on either side: the state is then the final probe's, as built before the guard.
     pub(super) steady_converged: bool,
     /// That steady state's surface mean, K ([`Fitted::surface_mean_k`]): the inputs' mean for a
     /// body with neither light nor heat.
@@ -510,6 +515,44 @@ pub(super) enum Ground<'a> {
         /// The zonal grid's relief.
         zonal: &'a Relief,
     },
+}
+
+/// The ground one solve reads on one grid (R09.T13.g), `R` the grid's relief ([`Relief`]) or that
+/// relief at one emission factor ([`ReliefAt`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum GridGround<R> {
+    /// Every point at the sea level: T13.a's arithmetic, no hypsometry read.
+    SeaLevel,
+    /// The grid's relief.
+    Relief(R),
+}
+
+impl<'a> GridGround<&'a Relief> {
+    /// Each point-quantile's transmission at the emission factor `emission_factor`
+    /// ([`Relief::transmissions`]), and none at the sea level.
+    #[must_use]
+    fn transmissions(self, emission_factor: f64) -> Vec<[f64; QUANTILES]> {
+        match self {
+            Self::SeaLevel => Vec::new(),
+            Self::Relief(relief) => relief.transmissions(emission_factor),
+        }
+    }
+
+    /// The ground at one emission factor, whose transmissions are `transmission`
+    /// ([`transmissions`](Self::transmissions) at that factor).
+    #[must_use]
+    fn at<'b>(self, transmission: &'b [[f64; QUANTILES]]) -> GridGround<ReliefAt<'b>>
+    where
+        'a: 'b,
+    {
+        match self {
+            Self::SeaLevel => GridGround::SeaLevel,
+            Self::Relief(relief) => GridGround::Relief(ReliefAt {
+                relief,
+                transmission,
+            }),
+        }
+    }
 }
 
 /// The relief the energy-balance model reads on one grid (R09.T13.g; decision-r09-t13a-relief
@@ -701,6 +744,21 @@ impl<'a> ReliefAt<'a> {
     fn raised(self, point: usize) -> Option<(&'a PointHeights, &'a [f64; QUANTILES])> {
         let heights = self.relief.hypsometry.point(point);
         (heights.shape != Shape::SeaLevel).then(|| (heights, &self.transmission[point]))
+    }
+}
+
+impl<'a> GridGround<ReliefAt<'a>> {
+    /// Point `point`'s relief, heights and transmissions ([`ReliefAt::raised`]), or `None` where
+    /// the ground or the point is at the sea level, where the model takes T13.a's arithmetic.
+    #[must_use]
+    fn raised(
+        self,
+        point: usize,
+    ) -> Option<(&'a Relief, (&'a PointHeights, &'a [f64; QUANTILES]))> {
+        match self {
+            Self::SeaLevel => None,
+            Self::Relief(at) => Some((at.relief, at.raised(point)?)),
+        }
     }
 }
 
@@ -1179,9 +1237,8 @@ impl EnergyBalance {
 
     /// One linearised backward-Euler step of the points' temperatures `t_k`, K, under insolation
     /// `insolation_w_m2` (one value per point) and emission factor `emission_factor`, storing heat
-    /// in `storage`, over the ground `relief` at that factor (every point at the sea level where
-    /// `None`), split into the latitude solve and then the longitude one (the
-    /// [module documentation](self)); the largest change, K.
+    /// in `storage`, over the ground `ground` at that factor, split into the latitude solve and
+    /// then the longitude one (the [module documentation](self)); the largest change, K.
     #[expect(
         clippy::too_many_arguments,
         reason = "a step reads the grid, the forcing, the storage, the table, the relief and the \
@@ -1194,13 +1251,13 @@ impl EnergyBalance {
         insolation_w_m2: &[f64],
         storage: Storage<'_>,
         table: Option<&Tabulated>,
-        relief: Option<ReliefAt<'_>>,
+        ground: GridGround<ReliefAt<'_>>,
         t_k: &mut [f64],
         work: &mut Work,
     ) -> f64 {
         let lambda = self.transport_kg_m2_s;
         let columns = grid.columns();
-        let raised = |p: usize| relief.and_then(|at| Some((at.relief, at.raised(p)?)));
+        let raised = |p: usize| ground.raised(p);
         for (p, &v) in t_k.iter().enumerate() {
             let [energy, slope, albedo, albedo_slope] = match raised(p) {
                 // At the sea level, T13.a's arithmetic to the bit.
@@ -1323,7 +1380,7 @@ impl EnergyBalance {
             insolation_w_m2,
             start_k,
             None,
-            None,
+            GridGround::SeaLevel,
             STEADY_ITERATIONS,
         )
     }
@@ -1345,14 +1402,14 @@ impl EnergyBalance {
             insolation_w_m2,
             start_k,
             None,
-            Some(relief),
+            GridGround::Relief(relief),
             STEADY_ITERATIONS,
         )
     }
 
     /// [`steady_state`](Self::steady_state) for at most `iterations`, its functions read from
-    /// `table` where it holds them, over the ground `relief` (every point at the sea level where
-    /// `None`), its transmissions taken once at the emission factor.
+    /// `table` where it holds them, over the ground `ground`, its transmissions taken once at the
+    /// emission factor.
     #[expect(
         clippy::too_many_arguments,
         reason = "the steady state's grid, forcing and start, and the step's table, relief and \
@@ -1366,16 +1423,11 @@ impl EnergyBalance {
         insolation_w_m2: &[f64],
         start_k: Vec<f64>,
         table: Option<&Tabulated>,
-        relief: Option<&Relief>,
+        ground: GridGround<&Relief>,
         iterations: u32,
     ) -> Steady {
-        let transmission = relief.map(|relief| relief.transmissions(emission_factor));
-        let at = relief
-            .zip(transmission.as_deref())
-            .map(|(relief, transmission)| ReliefAt {
-                relief,
-                transmission,
-            });
+        let transmission = ground.transmissions(emission_factor);
+        let at = ground.at(&transmission);
         let mut t_k = start_k;
         let mut work = Work::new(grid);
         for _ in 0..iterations {
@@ -1413,29 +1465,29 @@ impl EnergyBalance {
         insolation_w_m2: &[f64],
         mean_k: f64,
     ) -> Fitted {
-        self.fit(grid, insolation_w_m2, mean_k, None)
+        self.fit(grid, insolation_w_m2, mean_k, GridGround::SeaLevel)
     }
 
     /// The emission factor 1 + ¾τ at which the annual-mean steady state under `insolation_w_m2`
-    /// over the ground `relief` (every point at the sea level where `None`), each solve from an
-    /// isothermal start at `mean_k`, has the surface mean `mean_k`, K ([`Relief::surface_mean_k`],
-    /// decision-r09-t13a-relief §1.3): 48 bisections of ln(1 + ¾τ); the steady state there, and
-    /// how τ was found.
+    /// over the ground `ground`, each solve from an isothermal start at `mean_k`, has the surface
+    /// mean `mean_k`, K ([`Relief::surface_mean_k`], decision-r09-t13a-relief §1.3): 48 bisections
+    /// of ln(1 + ¾τ); the steady state there, and how τ was found.
     ///
     /// The fold guard (decision-r09-t13ge §1.4, g4): the bisection keeps, on each side of its
     /// bracket, the last probe whose steady state converged, the bracket's two ends among them. If
     /// the final midpoint's steady state has not converged within [`STEADY_ITERATIONS`], it
     /// answers whichever kept probe's surface mean lies nearer `mean_k`, ties to the warm side
-    /// ([`OpticalDepth::Folded`]), or the final midpoint where it kept none; otherwise the
-    /// midpoint, as before, to the bit. On a world of one month the steady state is the climate,
-    /// and a steady state that had not converged would be a transient between two branches.
+    /// ([`OpticalDepth::Folded`]), or, where it kept none, the final midpoint, unconverged and
+    /// labelled [`OpticalDepth::Solved`] as before the guard; otherwise the midpoint, as before, to
+    /// the bit. On a world of one month the steady state is the climate, and a steady state that
+    /// had not converged would be a transient between two branches.
     #[must_use]
     fn fit(
         &self,
         grid: &ModelGrid,
         insolation_w_m2: &[f64],
         mean_k: f64,
-        relief: Option<&Relief>,
+        ground: GridGround<&Relief>,
     ) -> Fitted {
         let solve = |factor: f64| {
             let steady = self.relax(
@@ -1444,12 +1496,12 @@ impl EnergyBalance {
                 insolation_w_m2,
                 vec![mean_k; grid.points()],
                 None,
-                relief,
+                ground,
                 STEADY_ITERATIONS,
             );
-            let surface = match relief {
-                Some(relief) => relief.surface_mean_k(grid, &steady.t_k),
-                None => grid.mean(&steady.t_k),
+            let surface = match ground {
+                GridGround::Relief(relief) => relief.surface_mean_k(grid, &steady.t_k),
+                GridGround::SeaLevel => grid.mean(&steady.t_k),
             };
             Probe {
                 emission_factor: factor,
@@ -1496,10 +1548,10 @@ impl EnergyBalance {
     }
 
     /// Whole seasonal orbits of `sunlight` at emission factor `emission_factor` from `start_k`, K,
-    /// over points of sea share `sea_share` and the ground `relief` (every point at the sea level
-    /// where `None`), until the annual means move under [`CONVERGENCE_K`] between orbits, at most
-    /// [`MAX_ORBITS`]: the last orbit's annual and monthly means. The table reaches as far below
-    /// and above the start as the highest and deepest quantiles' grounds need.
+    /// over points of sea share `sea_share` and the ground `ground`, until the annual means move
+    /// under [`CONVERGENCE_K`] between orbits, at most [`MAX_ORBITS`]: the last orbit's annual and
+    /// monthly means. The table reaches as far below and above the start as the highest and
+    /// deepest quantiles' grounds need.
     ///
     /// Where the sunlight varies in the grid's longitude, as a locked world's beam does on an
     /// eccentric or tilted orbit, `start`, the zonal model's steady state under each band's mean
@@ -1522,7 +1574,7 @@ impl EnergyBalance {
         emission_factor: f64,
         start_k: Vec<f64>,
         sea_share: &[f64],
-        relief: Option<&Relief>,
+        ground: GridGround<&Relief>,
     ) -> GridClimate {
         let steps = sunlight.steps();
         assert!(steps > 0, "a seasonal run needs a seasonal orbit");
@@ -1539,7 +1591,10 @@ impl EnergyBalance {
                     if v > high { v } else { high },
                 )
             });
-        let (below, above) = relief.map_or((0.0, 0.0), Relief::table_reach_k);
+        let (below, above) = match ground {
+            GridGround::SeaLevel => (0.0, 0.0),
+            GridGround::Relief(relief) => relief.table_reach_k(),
+        };
         let table = Tabulated::new(self, low - below, high + above);
         let start_k = if sunlight.varies_in_longitude() {
             self.relax(
@@ -1548,20 +1603,15 @@ impl EnergyBalance {
                 sunlight.annual(),
                 start_k,
                 Some(&table),
-                relief,
+                ground,
                 SPIN_UP_ITERATIONS,
             )
             .t_k
         } else {
             start_k
         };
-        let transmission = relief.map(|relief| relief.transmissions(emission_factor));
-        let at = relief
-            .zip(transmission.as_deref())
-            .map(|(relief, transmission)| ReliefAt {
-                relief,
-                transmission,
-            });
+        let transmission = ground.transmissions(emission_factor);
+        let at = ground.at(&transmission);
         let mut t = start_k;
         let mut work = Work::new(grid);
         let mut insolation = vec![0.0; points];
@@ -1646,8 +1696,8 @@ impl EnergyBalance {
         ground: Ground<'_>,
     ) -> Solution {
         let (on_grid, on_zonal) = match ground {
-            Ground::SeaLevel => (None, None),
-            Ground::Relief { grid, zonal } => (Some(grid), Some(zonal)),
+            Ground::SeaLevel => (GridGround::SeaLevel, GridGround::SeaLevel),
+            Ground::Relief { grid, zonal } => (GridGround::Relief(grid), GridGround::Relief(zonal)),
         };
         let months = usize::from(sunlight.months());
         let zonal = ModelGrid::zonal();
@@ -2097,7 +2147,7 @@ mod tests {
                 sea_share: &sea,
             },
             None,
-            None,
+            GridGround::SeaLevel,
             &mut state,
             &mut work,
         );
@@ -2377,7 +2427,10 @@ mod tests {
         let mut floors = 0;
         for tau in [0.0, 0.3, 0.876, 2.0, 5.0, 10.0, 20.0] {
             let factor = 1.0 + EDDINGTON_COEFFICIENT * tau;
-            for scale_heights in [0.0, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0] {
+            // The first height is the sea level's.
+            for (height, scale_heights) in
+                [0.0, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0].into_iter().enumerate()
+            {
                 let z = scale_heights * h;
                 let tr = transmission(tau, z);
                 for ground in [50.0, 100.0, 150.0, 200.0, 250.0, 300.0] {
@@ -2404,7 +2457,7 @@ mod tests {
                     if through < floor {
                         floors += 1;
                     }
-                    if scale_heights == 0.0 {
+                    if height == 0 {
                         let sea = emission(t, factor);
                         assert_same_bits(e.flux_w_m2, sea.flux_w_m2);
                         assert_same_bits(e.slope_w_m2_k, sea.slope_w_m2_k);

@@ -852,8 +852,8 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    nightside and an equatorial belt. Precipitation stays labelled `PrecipitationSource::Heuristic`:
    Siler et al.'s Hadley-cell partition gives E − P with the rain band on the energy-flux equator
    (our extension centres it there each month, capped at the ascending branch's latitude after
-   Guendelman and Kaspi 2019's Eq. 20, decision-r09-t13ge) and the dry belts and storm tracks
-   unplaced by hand;
+   Guendelman and Kaspi 2019, ApJ 881, 67, doi:10.3847/1538-4357/ab2a06 (arXiv:1906.05748), §4.4,
+   Eq. 20, decision-r09-t13ge) and the dry belts and storm tracks unplaced by hand;
    its width scales with rotation after Held 2000 (from memory); evaporation over open liquid is
    Priestley–Taylor with α = 1.26 (from memory); onto the cells, Hergarten and Robl's linear
    feedback precipitation model carries vapour along the month's prevailing wind for orography, rain
@@ -2510,7 +2510,8 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     - a second `place_ices` (R09.T14.d's) leaves every cell's ice to the bit;
     - a cell and its mirror across the equator take equal fractions;
     - the airless frost points of H₂O and CO₂ are `trap_threshold`'s to the bit.
-  - _Acceptance:_ `cargo test -p hyperion-sim planetary::surface::steps::climate`.
+  - _Acceptance:_ `cargo test -p hyperion-sim planetary::surface::steps::climate` and
+    `cargo test -p hyperion-sim planetary::surface::inputs` (the §7.2 tests and the tripwire).
 - **R09.T13.g Relief in the energy balance** (after T13.a, before T13.d, which takes its lapse rate;
   decision-r09-t13a-relief). `steps/climate/ebm.rs` and one lapse-rate function. Each model grid
   point holds its surface heights above the sea level (the water's surface over water) as eight
@@ -9262,6 +9263,11 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     decision-r09-t13ge's plan text (a) amends it, its Tests that ruling's §1.6; the order line
     takes (d), and T13.a's deferred finding "The model never sees the relief" (e). Plan text (a),
     Design note 8's relief sentence, and (b), T13.a's test wording, are left for the docs batch.
+    The subtask's text holds two rules for a point that holds no cell, both verbatim from the
+    rulings: "a point holding none taking the nearest point's, equatorward first" and "takes the
+    cell holding its centre (T13.b's rule)". The code follows decision-r09-t13ge g5's rule (the
+    cell holding its centre on the 72 × 72 and locked grids, the nearest band, equatorward first,
+    on the zonal one; _The quantiles_ below); the first sentence is for main's docs batch.
   - _The ground a run reads._ `ebm::solve`, `solve_locked` and `EnergyBalance::run` take a
     `Ground`: `Relief { grid, zonal }`, the run's grid's relief and the zonal one τ is solved on,
     or `SeaLevel`, the model as T13.a–d built it, which reads no hypsometry. The step always passes
@@ -9306,9 +9312,11 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     SUR2014 at 5′, the lane's table, a `const` of 72 × 8 integers in metres cited to Hirt and Rexer
     2015 with Earth2014's inputs and CIAT acknowledged), each band's land cells, in their order
     from −180°, take its eight heights in turn, the q-th eighth of the band's land by each cell's
-    midpoint at quantile q. T13.a's Earth test now builds its ground as the step does, from the
-    cells, and gives the same bits (its land at the sea level). The mean constant c, which needs
-    the step's 72 × 72 run (6.5 s on one thread), is printed by its own slow test
+    midpoint at quantile q; since R09.T13.e, by each box's Earth2014 median land height on Natural
+    Earth's land by box (decision-r09-t13e-asbuilt; T13.e's record). T13.a's Earth test now builds
+    its ground as the step does, from the cells, and gives the same bits (its land at the sea
+    level). The mean constant c, which needs the step's 72 × 72 run (6.5 s on one thread), is
+    printed by its own slow test
     (`the_step_s_mean_constant_reconciles_the_relief_earth_s_surface_means`, ignored as slow);
     the Earth test prints τ and the steady and seasonal surface means.
   - _Zero relief, measured._ A digest of the reference Earth's model output at level 7 on its
@@ -9651,7 +9659,8 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
         1.0 × 10⁻⁷ (5 × 10⁻⁹ to 2 × 10⁻⁸); the budget's closure 1.2 × 10⁻⁹ to 2.6 × 10⁻⁸
         (2 × 10⁻⁹ to 1.2 × 10⁻⁸); no cell below zero;
       - components: 85,674–92,511 single cells, 43–64 pairs, 2–12 of 3–16 cells, and 11–25 over 16
-        cells holding 21,238–28,179 land cells (18.6–24.7%), the largest 11,061–11,635 (E-L8); the
+        cells holding 21,238–28,179 land cells (18.6–24.7%), the largest 11,061–11,635 (the final
+        run's, the same in either order, since the winds set the components; E-L8); the
         flow order leaves 0.046–0.052 of the large components' internal advective weight pointing
         backward, the largest component's 0.063–0.069;
       - the deep solve at 10⁻¹² (the generated sample's probe, below): 20–27 restarts (223–300
@@ -9765,7 +9774,8 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       - the chain and cell-graph ridge and decay tests, which drop their sweep measures (the
         chain's start is its solve);
       - `the_set_fixes_beta_zero_and_the_effective_long_range_length`, with the ruled constants;
-      - `time_one_month_at_level_8` (ignored): a month takes 0.39–0.42 s with 7–8 restarts on its
+      - `time_one_month_at_level_8` (ignored, a timing alone, run by name like the crate's other
+        timings): a month takes 0.39–0.42 s with 7–8 restarts on its
         land of blobs in the flow order (0.66–0.85 s with 15–20 in index order), and 0.30–0.39 s
         with no restart all land, where no sea air enters (0.15–0.16 s): the order of components
         of up to 196,608 cells costs about 0.15–0.24 s a month there.
@@ -9869,6 +9879,17 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       (`wind::recorded`), azimuth clockwise from north at the climate cell's centre (east +z × up,
       north up × east; at a pole north +x); each field cell reads its climate cell's azimuth from
       its own local north (`wind::cell_wind`, computed once a run as `cell_wind_in`, the same bits).
+  - _The winds' centre and slow rotators._ The three-cell pattern is centred on the capped centre
+    c, not the energy-flux equator (decision-r09-t13ge §2.10); only a world in tidally locked
+    coordinates converges on its substellar point; a slow rotator (`Forcing::SlowRotator`) runs the
+    geographic model, its cap at 90° and its centre on its energy-flux equator (§2.12). Design note
+    8's wind sentence ("centred each month on the month's energy-flux equator, and converging on
+    the substellar point for slow and locked rotators") and plan 14's `regime.rs` documentation of
+    a slow rotator's circulation are for main's docs batch.
+  - _A brainstorm departure._ The brainstorm's rain band "centred each month on the model's
+    energy-flux equator" (`docs/agent/brainstorming/rendering-and-planets.md` about 1109–1110) is
+    capped at Guendelman and Kaspi 2019's Eq. 20 latitude on rotating worlds (e10); it never binds
+    on Earth (19.2°). For the roadmap's brainstorm corrections (main's docs batch).
   - _The orography._ Part 1's model with `P_ls` over every sea cell (any liquid) as the boundary;
     not run in a month where nothing evaporates (k is then 0) or on a world of no land; the mesh
     built on the first month that needs it.
@@ -9914,12 +9935,16 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       the bit; the dry world's is zero, in its test);
     - the module's own: `a_locked_aquaplanet_s_winds_converge_on_its_substellar_point`, the
       partition's two, the evaporation's one, the winds' three, `grid`'s band-stencil test, and
-      the slow `the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp` (ignored, about
-      20 s, run by name: the coarse pass's Earth printed the same way, with the cost; it asserts
-      the water balance in every month, `assert_the_water_balances`, which
-      `global_precipitation_equals_global_evaporation` shares, and the zonal budget's E − P
-      pattern in each hemisphere, never its windows; decision-r09-t13e-asbuilt §1.7; since _The
-      solve_ also its ruled convergence, `assert_the_solve_converges`, and about 90 s).
+      the slow `the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp` (ignored, run by
+      name: the coarse pass's Earth printed the same way; it asserts the water balance in every
+      month, `assert_the_water_balances`, which `global_precipitation_equals_global_evaporation`
+      shares, and the zonal budget's E − P pattern in each hemisphere, never its windows;
+      decision-r09-t13e-asbuilt §1.7; since _The solve_ also its ruled convergence,
+      `assert_the_solve_converges`). Since the batch review's fix it reads no clock, as a test that
+      asserts must not: its time is the runner's, 38.6 s by name under nextest at load 2–3 and
+      `CPUQuota` 400% (with its deep solve at 10⁻⁷; about 20 s before _The solve_, about 90 s in
+      index order). The figures "within the slow test" under _The solve_ were read by its own
+      clock before the fix; the cost by name is `time_one_month_at_level_8`'s.
     - `cargo test -p hyperion-sim --lib planetary::surface::steps::climate -- --test-threads 4`
       runs 125: 119 passing, 6 ignored (the new slow one among them), in 24.8–25.8 s at load 17–24
       with the heavy lock held (19.9 s for 124 at load 15 before the ruling's set-up, the ruled
@@ -10079,12 +10104,14 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     solve_).
   - _Constants_ (each in its doc comment, checked against its source): Siler, Roe and Armour's
     `σ_x` 0.3 and `h_T` ÷ h 1.06 (§2, eqs. 6–8, read); Kaspi and Showman's 25.1° (Fig. 6a, the
-    lane's read); GK19's Eq. 20 exponents 0.71, −0.13, −0.62 and 0.28 (§4.4, read) and C 2.045 483°
-    (the lane's Fig. 13b read); Priestley and Taylor's α 1.26 (eq. 14 and §6, read); β 0.47 (Wild
-    et al. 2015's abstract, and the top-of-air sunlight from memory); Δp 0.07 `p_s` and `C_D` ÷ h
-    4 × 10⁻⁶ m⁻¹ and the template's nodes and amplitudes (NCEP/NCAR R1 1991–2020, the lane's zonal
-    means); H&R's §7 set (part 1, read); GPCP v2.3 (NOAA PSL, Adler et al. 2003 as the dataset
-    cites it).
+    lane's read); the Eq. 20 exponents 0.71, −0.13, −0.62 and 0.28 of Guendelman and Kaspi 2019,
+    ApJ 881, 67, doi:10.3847/1538-4357/ab2a06 (arXiv:1906.05748), §4.4, read, and C 2.045 483°
+    (the lane's Fig. 13b read); Priestley and Taylor's α 1.26 (eq. 14 and §6, read; their γ the
+    text after eq. 3); β 0.47 (Wild et al. 2015's abstract, and the top-of-air sunlight from
+    memory); Δp 0.07 `p_s` and `C_D` ÷ h 4 × 10⁻⁶ m⁻¹ and the template's nodes and amplitudes
+    (NCEP/NCAR R1 1991–2020, the lane's zonal means); H&R's §7 set (part 1, read); GPCP v2.3 (NOAA
+    PSL; Adler et al. 2003, J. Hydrometeor. 4, 1147–1167, as the dataset cites it, beside the
+    version 2.3 paper, Adler et al. 2018, Atmosphere 9, 138, doi:10.3390/atmos9040138).
   - _The pass's tests, re-tiered_ (decision-r09-t13-test-cost, 2026-10-19).
     - The cost: after R09.T12.e's sea and R09.T13.g, `planetary::surface::tests`'
       `the_pass_is_order_independent` took 164 s of the module's 180 s at four threads, most of it
@@ -10116,6 +10143,23 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       same body: the inputs' tests', `steps/plates/tests.rs`'s and `steps/relief/tests.rs`'s (one
       the ruling did not name) are gone, and the climate tests' is now a `pub(super) use` of it, so
       that the step's other files reach it where they did.
+  - _The batch review's fixes_ (2026-10-20, on `71d52587`; the review of `20a52d74`, `fa3d41bf`,
+    `5fa4b0e2` and `29687ae9`). No arithmetic moved: a probe's fingerprint of the working state's
+    cells and climate cells after the climate step (the reference Earth, `locked_earth(0, 0)`, the
+    land-heavy Earth and `locked_earth(0.1, 20)` through the coarse pass at level 8, and the
+    Titan-like world at level 6) is the same to the bit before and after the fix (the probe
+    deleted; its source and logs in the lane's scratch, `fix/`). The ground a solve reads on one
+    grid is `ebm::GridGround` (`SeaLevel` or `Relief`), in place of the bare `Option`s of `relax`,
+    `fit`, `orbits` and `advance`; `OpticalDepth::Solved` and `Solution::steady_converged`
+    document the unconverged state the fold guard answers where it kept no converged probe (no
+    cheap test through `fit` reaches it: every probe, the bracket's ends among them, would have to
+    miss the 10⁻⁹ K stop within 2,000 iterations). The partition's fields and parameters carry
+    their units (`Bands::{energy_j_per_kg, latent_j_per_kg}`, `Budget::flux_w_m2`,
+    `energy_flux_equator`'s), `wind::recorded` takes `velocity_m_s` and asserts it finite, and the
+    water cycle's month loop refills its headings, field-cell winds and record sums. The citations
+    of Guendelman and Kaspi 2019 (ApJ 881, 67), Kaspi and Showman's residual (6.6° at Ω⊕ ÷ 6),
+    Priestley and Taylor's γ (the text after their eq. 3) and GPCP v2.3's paper (Adler et al.'s
+    of 2018) are corrected in the code, `NOTICE` and this record.
 - **Deferred findings (2026-10-13 rule)** (R09.T13.e; recorded, not ruled; each for "main"'s list).
   - _From decision-r09-t13ge §3, for the precipitation's next revision:_
     - E1. High-obliquity rain at Earth-like rotation: the precipitation maximum stays at the summer
@@ -10204,9 +10248,20 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       keeps, can leave a land cell a rounding below zero, read as zero and counted
       (`negative_cells`): none on the reference Earth, but up to 2,092 a month on the land-heavy
       Earth (in 10 of its 12 months), 4,122 in the locked world's one month, 8 and 90 in two months
-      at 60° obliquity, and 13 in one month of the level-7 synthetic Earth. Each lies within the
-      stop test's tolerance of zero (every deep comparison within 1.0 × 10⁻³), so R10's classes
-      read a dry cell either way. Candidate, should a zero matter: the final sweep from the iterate
+      at 60° obliquity, and 13 in one month of the level-7 synthetic Earth. Their size before the
+      clamp (the batch review's probe, level 8 through the coarse pass under the reference seed,
+      its log and source in the lane's scratch, `e/el8/el9-negatives.log` and `el9_probe.rs.txt`):
+      the land-heavy Earth's most negative rate is 5.8 × 10⁻²³ to 3.3 × 10⁻¹³ kg m⁻² s⁻¹ by month,
+      2.0 × 10⁻¹⁸ to 5.9 × 10⁻⁹ of the month's P̄_sea (above 10⁻¹⁰ in two months, 2.1 × 10⁻⁹ and
+      5.9 × 10⁻⁹), and the locked world's 2.8 × 10⁻¹⁶ kg m⁻² s⁻¹, 9.5 × 10⁻¹² of P̄_sea; a locked
+      Earth at e 0.1 and 20° obliquity has 1,505–4,319 a month, at most 7.0 × 10⁻¹² of P̄_sea, and
+      the Titan-like world at level 6 669, 1.1 × 10⁻¹⁷. Each is under the stop test's own
+      resolution on a dry cell, τ `RATE_FLOOR_SHARE` P̄_sea = 10⁻⁷ P̄_sea: rounding, not a sign
+      error. The neighbours give no better scale: each worst cell's neighbours are as dry (their
+      mean rate 0 to 3.4 times its |P|, 7.2 × 10⁻¹⁷ kg m⁻² s⁻¹ on the locked world), and up to
+      1,153 of a month's negative cells have no wet neighbour. Each lies within the stop test's
+      tolerance of zero (every deep comparison within 1.0 × 10⁻³), so R10's classes read a dry cell
+      either way. Candidate, should a zero matter: the final sweep from the iterate
       clipped at zero, which a sweep's non-negative map keeps non-negative. Effect: none beyond the
       tolerance.
   - _From part 2:_
@@ -10284,16 +10339,19 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     with the ruled Display texts, and §1.2's doc amendments to `ices()` and
     `AreaShare::area_fraction`; `from_record` gives none and `None`, stated on it, with no code of
     its own (the builder's defaults). `reference::builder_of` carries both. `steps/climate/ice.rs`
-    rewritten: `place_ices(inputs, solid_angles_sr, centres, keys, cells) -> PlacedIces { zonal,
-traps }`, `PlacedTrap`, `trap_fractions` and `ICE_CODES`. `frost.rs`'s airless branch,
+    rewritten:
+    `place_ices(inputs, solid_angles_sr, centres, keys, cells) -> PlacedIces { zonal, traps }`,
+    `PlacedTrap`, `trap_fractions` and `ICE_CODES`. `frost.rs`'s airless branch,
     `mod.rs`'s pipeline and diagnostics, the tests in `inputs.rs`, `frost.rs`, `ice.rs` and
     `tests/cold_traps.rs`, and the "What is built" lines of `steps/climate/mod.rs`. In plan 14's
     file only the `dead_code` expectations on `ColdTrapGroundParts` and `ColdTrapGround::new` went;
-    `annual_maximum`'s stays, since nothing outside the tests calls it (the tests read it). No other
-    contract moved: the field's types, the header, the wire and every golden are as they were, and
-    `GENERATOR_VERSION` stays 22.
-  - _The interface commit_ (`08f4b812`, `refactor(planetary): R09.T13.f The cold traps by latitude,
-for the field`, bit for bit on 3,939 values): `ColdTrapSky` keeps its declination and periapsis
+    `annual_maximum`'s stays, since nothing outside the tests calls it (the tests read it; its
+    reason says so since the batch review's fix, which named a caller that does not exist). No
+    other contract moved: the field's types, the header, the wire and every golden are as they
+    were, and `GENERATOR_VERSION` stays 22.
+  - _The interface commit_ (`08f4b812`,
+    `refactor(planetary): R09.T13.f The cold traps by latitude, for the field`, bit for bit on
+    3,939 values): `ColdTrapSky` keeps its declination and periapsis
     flux (five plan-14 tests build or read them), the arithmetic shared through two private
     functions rather than moved into `ColdTrapGround::new`; the record path built its ground with a
     private `ColdTrapGround::of` (P14.T51.i has since moved it to `ColdTrapField::of` over a private
@@ -10355,10 +10413,33 @@ for the field`, bit for bit on 3,939 values): `ColdTrapSky` keeps its declinatio
     by `over_latitude` (`ColdTrapGround::trap_fraction`'s own sum, which is private). The nesting
     test gives CO₂ its plan-14 `f_ct` times water's scale, one exposed fraction; the covered test is
     that Moon at 5.2 au with 0.01 of zonal water by hand and CO₂ traps at 0.05 of its `f_ct`; the
-    25° test 10⁻⁴ by hand. Tolerances are one cell (5.12 × 10⁻⁵ of the sphere at level 6) or the
-    agreement test's 5%, never bits but where the rule is a bit identity (the re-application, the
-    mirror, the frost points). The reference worlds carry no cold-trapped share: the reference
+    25° test 10⁻⁴ by hand. Tolerances are one cell (5.12 × 10⁻⁵ of the sphere at level 6), the
+    agreement test's 5%, the mirror's 10⁻¹² relative and, since the batch review, 2 × 10⁻² of a
+    trapped part's target (_The batch review's tests_). Bits only where a figure is exact by
+    construction: the re-application's cells and parts and the frost points (bit identities), the
+    Moon test's `short` (0), the 25° test's `scale`, `short`, `placed` and `undrawn` (1, the given
+    10⁻⁴ and 0, no cell having a fraction), the split's zonal target (0.02 − 10⁻⁵) and the
+    quantisation test's codes. The reference worlds carry no cold-trapped share: the reference
     Moon's water-ice entry still names none (the ruling's §3.4).
+  - _The getters' sentence_ (F1, ruled by main, 2026-10-20). `CoarseInputs::cold_traps()` and
+    `cold_trap_inputs()` say the inputs are `Some` "wherever a cold-trapped share is above zero",
+    not "wherever `cold_traps()` is not empty": a doc correction to decision-r09-t13f-cold-traps's
+    getter sentence (§1.2), accepted by main. The builder's table (§1.3) stands, so a list whose
+    every share is 0 is still built without the inputs.
+  - _The batch review's tests_ (2026-10-20, in `tests/cold_traps.rs`).
+    - `the_trapped_shares_are_whole_codes_and_keep_their_area_through_the_field_s_ice_byte` (the
+      Moon-like input, all its water trapped, so every cell it draws is free): each of the 109
+      drawn cells' share × 255 is a whole code to the bit, at most ⌊255 f⌋; the drawn total
+      (1.684132 × 10⁻⁵) is `placed` within one cell (to every printed digit); through
+      `SynthesisCell::quantise_ice` every byte is its code, and the drawn area, 1.684132 × 10⁻⁵ of
+      1.7 × 10⁻⁵, matches the target within one cell and within 2 × 10⁻².
+    - Beside the one-cell checks, which bind nothing where one cell (5.12 × 10⁻⁵ of the sphere at
+      level 6) exceeds the target, placed + undrawn + short is held within 2 × 10⁻² of the target
+      (`ACCOUNTED_SHARE`; main's tolerance rule allows 2 × 10⁻³ or more, and F2's rounding loss is
+      about 1%) in the Moon test (−0.93%), the split (−0.85%), the nesting (water −0.93%, carbon
+      dioxide −3 × 10⁻¹⁶) and the new test. Not in the covered test (the Moon at 5.2 au): its
+      carbon dioxide reads 5.3710 × 10⁻⁵ of 5.4901 × 10⁻⁵ (−2.17%), F2's loss on its 73 free
+      cells, which write 1.2497 × 10⁻⁵ of their 1.3687 × 10⁻⁵ (−8.7%; deferred with F2).
   - _Measured_ (level 6, the Moon-like input):
     - water's drawn ice: 1.0000 of it poleward of 70°, 0.9692 poleward of 80°; k_s 0.018421, placed
       1.6841 × 10⁻⁵ of 1.7 × 10⁻⁵ on 109 cells, undrawn 0, short 0;
@@ -10387,7 +10468,11 @@ for the field`, bit for bit on 3,939 values): `ColdTrapSky` keeps its declinatio
   - _The plan's text._ R09.T13.f's first two bullets and its placement are §8's text, its tests
     §7.2–§7.3's; R09.T13.d's sentence is §8's. R09.T7.k's line already read §8's ("T13.f reads them
     through plan 14's `ColdTrapGround::fractions_at`, whose signature T51.i keeps"), so it is not
-    edited. Plan 14's P14.T51.i and P14.T54.b texts (§8) are left for the docs batch.
+    edited. Plan 14 already carries §8's P14.T51.i and P14.T54.b texts
+    (`galaxy-generation/14-planetary-systems.md`: P14.T51.i's "R09.T13.f's interface stays" and
+    P14.T54.b's "From P14.T51.i and T51.j" items), so neither is left for the docs batch (corrected
+    in the batch review's fix). The acceptance line also runs `planetary::surface::inputs`, where
+    the §7.2 tests and the tripwire live (since the same fix).
 - **Deferred findings (2026-10-13 rule)** (R09.T13.f; recorded, not ruled; each for "main"'s list).
   - _From decision-r09-t13f-cold-traps §9:_
     - D1. The plains' slope (§4.1). The synthesis's slope variance at the cold traps' scales, with
@@ -10430,7 +10515,8 @@ for the field`, bit for bit on 3,939 values): `ColdTrapSky` keeps its declinatio
       share is 0 is built without the inputs, so the getters' sentence fails in that one case.
       Lean: keep the table (a zero share places nothing), and either P14.T54.b passes only the
       entries whose trapped area is above zero (as `on_the_ground` does for the ices), or the
-      getters' sentence reads "wherever a share of it is above zero".
+      getters' sentence reads "wherever a share of it is above zero". **Ruled by main
+      (2026-10-20):** the getters' sentence; the table stands (_The getters' sentence_ above).
     - F2. A cell whose fraction is under one code (1 ÷ 255) never draws its ice, its share carried
       to the next cell in the order; past the last cell that can take it, the carry is lost to
       rounding: the reference Moon's water placed 3.1988 × 10⁻⁵ of 3.2379 × 10⁻⁵ (−1.2%, 0.0076 of a
@@ -10438,7 +10524,9 @@ for the field`, bit for bit on 3,939 values): `ColdTrapSky` keeps its declinatio
       input's 1.0607 × 10⁻⁴ of 1.0669 × 10⁻⁴ at k 0.45 (−0.6%). Where k_s is near 1 (Mercury's
       exposed fraction reaches 0.45) the cap ⌊255 f⌋ binds more often; a carry that may exceed ⌊255
       f⌋ by one code, or the shares written in a finer code, would keep more. For R10 and the codec,
-      with D6.
+      with D6. The largest loss measured is the covered test's (the Moon at 5.2 au): carbon
+      dioxide's 73 free cells write 1.2497 × 10⁻⁵ of their 1.3687 × 10⁻⁵ (−8.7%, −2.17% of its
+      target), so that test takes no 2 × 10⁻² accounting check (_The batch review's tests_).
     - F3. `fractions_at`'s allocations (P14.T51.i's deferred finding): about 13 small ones a call,
       three in `fractions_at` itself. At 3.67 µs a call on the Moon they are not separable without
       a profile, which was not run; at 20–50 ns an allocation (_estimate_) they would be 0.3–0.7 µs

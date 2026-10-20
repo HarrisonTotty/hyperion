@@ -46,7 +46,16 @@
 //! substance; the water surfaces are the relief step's flood (decision-r09-t12-coarse R8).
 //! R09.T13.g gave the energy-balance models the relief: each grid point's hypsometry of the cells'
 //! heights above the sea level, its albedo, outgoing radiation and sea-ice heat capacity at the
-//! ground's temperature, and τ solved for the surface mean. Erosion and the classes are still no-ops.
+//! ground's temperature, and τ solved for the surface mean. R09.T13.e added the labelled
+//! precipitation heuristic and the winds on the energy-balance models: each climate cell's monthly
+//! precipitation and 10 m wind, the land's rain carried along each month's recorded wind by
+//! Hergarten and Robl's orographic model, solved in the order of each month's upwind components,
+//! each large one's members along its flow, until one further sweep moves no land cell's rate by
+//! more than 10⁻⁴ of it, the global water
+//! balanced; zero and calm on the other models. R09.T13.f added the cold traps: each ice's
+//! cold-trapped part, the inputs' `cold_traps`, placed after its zonal part in each field cell's
+//! cold-trap fraction from plan 14's closed form, scaled to plan 14's area, one ice a cell, the
+//! rest counted as undrawn. Erosion and the classes are still no-ops.
 
 pub mod classes;
 pub mod climate;

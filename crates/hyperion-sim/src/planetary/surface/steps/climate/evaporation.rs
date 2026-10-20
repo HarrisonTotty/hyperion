@@ -7,8 +7,8 @@
 //! Flux and Evaporation Using Large-Scale Parameters", Mon. Wea. Rev. 100, 81–92, read: the
 //! evaporation of a horizontally uniform saturated surface in energy units is α s ÷ (s + γ)
 //! (R − G), α = 1.26 (their eq. 14), s the slope of the saturation specific humidity with the
-//! temperature and γ = `c_p` ÷ L (their eq. 5), R the net radiation and G the heat into the
-//! ground, here the sea's storage. Over a condensable's sea, in kg m⁻² s⁻¹:
+//! temperature and γ = `c_p` ÷ L (their text after eq. 3; α is eq. 5), R the net radiation and G
+//! the heat into the ground, here the sea's storage. Over a condensable's sea, in kg m⁻² s⁻¹:
 //!
 //! E = min(1, α s ÷ (s + γ)) × max(0, β `S_abs` − `C_sea` dT/dt) ÷ L,
 //!

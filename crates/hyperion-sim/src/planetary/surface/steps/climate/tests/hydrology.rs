@@ -38,8 +38,9 @@ const DAY_S: f64 = 86_400.0;
 /// GPCP v2.3's annual zonal-mean precipitation over 1991–2020, mm/day, at each 2.5° band from
 /// 88.75° S: the long-term monthly means of NOAA PSL (`precip.mon.ltm.1991-2020.nc`), zonal means
 /// of the 2.5° grid, months weighted by their days (the lane's `e2/gpcp-zonal.txt`, read; global
-/// mean 2.691 mm/day). Adler, R. F., et al. 2003, J. Hydrometeor. 4, 1147–1167, the dataset's own
-/// citation. Printed beside the model, not asserted.
+/// mean 2.691 mm/day). GPCP's papers: Adler, R. F., et al. 2003, J. Hydrometeor. 4, 1147–1167
+/// (version 2), and Adler, R. F., et al. 2018, Atmosphere 9, 138, doi:10.3390/atmos9040138 (the
+/// version 2.3 paper). Printed beside the model, not asserted.
 const GPCP_ANNUAL_MM_PER_DAY: [f64; LATITUDE_BANDS] = [
     0.38, 0.37, 0.35, 0.37, 0.49, 0.67, 0.79, 0.89, 1.20, 1.47, 2.03, 2.66, 3.11, 3.20, 3.07, 2.91,
     2.80, 2.89, 2.96, 2.97, 2.91, 2.70, 2.54, 2.38, 2.21, 2.06, 1.91, 1.87, 1.97, 2.26, 2.64, 3.01,
@@ -227,8 +228,9 @@ fn flood_all(pass: &Pass<'_>, working: &mut Working) {
 }
 
 /// The reference Earth at obliquity `obliquity_deg` and its rotation rate times `rate`, its solar
-/// day from its sidereal one on its year, under 1 bar, GK19's Earth-like atmosphere (so that its
-/// cap is decision-r09-t13ge §2.10's figure; the reference Earth's 985.5 hPa moves it by 0.2%).
+/// day from its sidereal one on its year, under 1 bar, Guendelman and Kaspi 2019's (ApJ 881, 67)
+/// Earth-like atmosphere (so that its cap is decision-r09-t13ge §2.10's figure; the reference
+/// Earth's 985.5 hPa moves it by 0.2%).
 fn earth_at(obliquity_deg: f64, rate: f64) -> CoarseInputs {
     let earth = reference::earth_like();
     let year = earth.seasonal_orbit().unwrap().period.value();
@@ -858,8 +860,9 @@ fn each_month_s_quantised_wind_is_the_wind_that_month_s_orographic_step_used() {
 
 /// The ruled aquaplanet test (decision-r09-t13ge §2.13, e10): on a synthetic aquaplanet at 60°
 /// obliquity and Earth's rotation (every cell flooded, level 6, the zonal model), no month's
-/// rain-band centre lies poleward of the ascending-branch cap, 37.4° (GK19's Eq. 20 at 60°, 1 bar,
-/// Ω⊕ and a year); an equatorial cell's meridional wind changes sign twice a year, each month's
+/// rain-band centre lies poleward of the ascending-branch cap, 37.4° (Guendelman and Kaspi 2019,
+/// ApJ 881, 67, doi:10.3847/1538-4357/ab2a06 (arXiv:1906.05748), §4.4, Eq. 20, at 60°, 1 bar, Ω⊕
+/// and a year); an equatorial cell's meridional wind changes sign twice a year, each month's
 /// speed at least 0.05 m/s.
 #[test]
 fn on_a_60_degree_aquaplanet_the_centre_holds_at_the_cap_and_the_equatorial_wind_reverses_twice() {
@@ -956,19 +959,18 @@ fn a_titan_like_world_evaporates_only_over_its_methane_seas_and_rains_what_it_ev
     let key = |k: &str| crate::substance::SubstanceKey::new(k).unwrap();
     let methane = palette.find(PaletteRole::Liquid, key("CH4")).unwrap();
     let mut rates = [0.0; 1];
-    let (mut methane_cells, mut wet) = (0_u32, 0_u32);
+    let mut methane_cells = 0_u32;
     for (n, cell) in (0_u32..).zip(&working.cells) {
         let open = evaporation.rates(&pass, &working, &grid, coordinates, n, &mut rates);
         if cell.liquid_entry == Some(methane) {
             assert!(open && rates[0] > 0.0, "methane cell {n}: {}", rates[0]);
             methane_cells += 1;
-            wet += 1;
         } else {
             assert!(!open, "cell {n}: {:?}", cell.liquid_entry);
             assert_same_bits(rates[0], 0.0);
         }
     }
-    assert!(methane_cells > 0 && wet == methane_cells);
+    assert!(methane_cells > 0, "the Titan-like world has methane seas");
     let cycle = &water.months[0];
     let evaporated = cycle.liquid_evaporation_kg_m2_s + cycle.recycled_kg_m2_s;
     let year = 365.25 * DAY_S;
@@ -1152,8 +1154,9 @@ fn a_locked_aquaplanet_s_winds_converge_on_its_substellar_point() {
 }
 
 /// The coarse pass's reference Earth (its generated continents and R09.T12.e's sea, level 8)
-/// through the climate step, printed beside GPCP and NCEP/NCAR R1 as the synthetic Earth is, with
-/// the step's cost, the model and the water cycle apart, one thread. A recorded measurement of the
+/// through the climate step, printed beside GPCP and NCEP/NCAR R1 as the synthetic Earth is, its
+/// water cycle run again on the finished state to the same diagnostics. It reads no clock: its
+/// cost is the test runner's own timing, recorded in plan 09's Risks. A recorded measurement of the
 /// shipped generator's own Earth (decision-r09-t13e-asbuilt §1.7): it asserts the water balance in
 /// every month ([`assert_the_water_balances`]) and the zonal budget's E − P pattern in each
 /// hemisphere ([`assert_the_budget_s_pattern`]), but never its precipitation windows, since its
@@ -1177,19 +1180,12 @@ fn the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp() {
         steps::relief::run(&pass, &mut working);
         steps::craters::run(&pass, &mut working);
         steps::relief::run_after_craters(&pass, &mut working);
-        let start = std::time::Instant::now();
         let model = normalised(&pass, &working);
-        let modelled = start.elapsed().as_secs_f64();
         let kept = model.clone();
-        let start = std::time::Instant::now();
         let diagnostics = finish(&pass, &mut working, model);
-        let finished = start.elapsed().as_secs_f64();
-        let start = std::time::Instant::now();
         let again = hydrology::run(&pass, &mut working, &kept);
-        let cycle = start.elapsed().as_secs_f64();
         assert_eq!(again.as_ref(), diagnostics.water.as_ref());
         let mut deep_working = working.clone();
-        let start = std::time::Instant::now();
         let deep = hydrology::run_with(
             &pass,
             &mut deep_working,
@@ -1197,16 +1193,11 @@ fn the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp() {
             &Parameters::deep().with_tolerance(EARTH_DEEP_TOLERANCE),
         )
         .expect("the Earth's model keeps its own records");
-        let deep_s = start.elapsed().as_secs_f64();
         let land = working.cells.iter().filter(|c| !seas::under_sea(c)).count();
         eprintln!(
-            "level {}: the model {modelled:.2} s, the rest {finished:.2} s, of which the water \
-             cycle {cycle:.2} s; the step without it {:.2} s and with it {:.2} s; {land} of {} \
-             cells land; τ {TOLERANCE:e}; the deep water cycle at τ {EARTH_DEEP_TOLERANCE:e} \
-             {deep_s:.2} s",
+            "level {}: {land} of {} cells land; τ {TOLERANCE:e}; the deep water cycle at τ \
+             {EARTH_DEEP_TOLERANCE:e}",
             level.get(),
-            modelled + finished - cycle,
-            modelled + finished,
             working.cells.len()
         );
         (working, diagnostics, (deep, deep_working.climate))

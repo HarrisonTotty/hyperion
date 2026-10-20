@@ -187,18 +187,22 @@ pub(super) fn east_north(up: [f64; 3]) -> ([f64; 3], [f64; 3]) {
     }
 }
 
-/// The wind of `velocity` (a vector along the surface at `up`, m/s, in the body frame) as its
+/// The wind of `velocity_m_s` (a vector along the surface at `up`, m/s, in the body frame) as its
 /// record holds it: quantised to [`Wind`]'s codes and decoded, the sample and the code; its speed
 /// held below the last code's, so that every wind the heuristic gives has a code.
 ///
 /// # Panics
 ///
-/// If the velocity is not finite.
+/// If a component of the velocity is not finite.
 #[must_use]
-pub(super) fn recorded(velocity: [f64; 3], up: [f64; 3]) -> (WindSample, Wind) {
-    let speed = dot(velocity, velocity).sqrt();
+pub(super) fn recorded(velocity_m_s: [f64; 3], up: [f64; 3]) -> (WindSample, Wind) {
+    assert!(
+        velocity_m_s.iter().all(|v| v.is_finite()),
+        "a wind's velocity must be finite, got {velocity_m_s:?}"
+    );
+    let speed = dot(velocity_m_s, velocity_m_s).sqrt();
     let (east, north) = east_north(up);
-    let azimuth = math::atan2(dot(velocity, east), dot(velocity, north));
+    let azimuth = math::atan2(dot(velocity_m_s, east), dot(velocity_m_s, north));
     let fastest = Wind {
         azimuth: 0,
         speed: u8::MAX,

@@ -25,10 +25,11 @@
 //!   holds one; where F vanishes at both edges the band's middle. The annual one is the same zero
 //!   of the annual-mean F in the band of greatest annual-mean h.
 //! - **The centre**, on a rotating world (decision-r09-t13ge §2.10, e10), is the energy-flux
-//!   equator held at the ascending branch's latitude Φ₁ of Guendelman and Kaspi 2019's Eq. 20,
-//!   c = sign(`x_EFE`) min(|`φ_EFE`|, Φ₁) ([`Circulation::cap_deg`]). A world locked 1:1 to its host
-//!   takes no cap: its circulation converges on the substellar point, in tidally locked
-//!   coordinates (Design note 8), which the energy-flux equator there finds.
+//!   equator held at the ascending branch's latitude Φ₁ of Guendelman and Kaspi 2019, ApJ 881, 67,
+//!   doi:10.3847/1538-4357/ab2a06 (arXiv:1906.05748), §4.4, Eq. 20, c = sign(`x_EFE`)
+//!   min(|`φ_EFE`|, Φ₁) ([`Circulation::cap_deg`]). A world locked 1:1 to its host takes no cap:
+//!   its circulation converges on the substellar point, in tidally locked coordinates (Design note
+//!   8), which the energy-flux equator there finds.
 //! - **The weighting** is 1 between the equator and the centre, with Siler et al.'s Gaussian of
 //!   width `σ_x` beyond each end: from the centre poleward in its hemisphere, and from the equator
 //!   into the other ([`hadley_share`]). At c = 0 it is their eq. 6.
@@ -51,9 +52,9 @@ use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 
 /// The Hadley cell's edge at Earth's rotation, degrees: 25.1°, Kaspi and Showman 2015's (ApJ 804,
 /// 60) Fig. 6a width at Ω⊕, as the lane read it (decision-r09-t13ge §2.5, e5). With the ruled
-/// (Ω⊕ ÷ Ω)^½ it matches their widths from Ω⊕ ÷ 8 to 12 Ω⊕ within 6.3°; the lane's free fit gives
-/// 24.6° (Ω ÷ Ω⊕)^−0.477, 2.9° at most from them. Medium confidence at Earth-like rotation, low
-/// beyond their sweep.
+/// (Ω⊕ ÷ Ω)^½ it matches their widths from Ω⊕ ÷ 8 to 12 Ω⊕ within 6.6° (at Ω⊕ ÷ 6); the lane's
+/// free fit gives 24.6° (Ω ÷ Ω⊕)^−0.477, 2.9° at most from them. Medium confidence at Earth-like
+/// rotation, low beyond their sweep.
 pub(super) const HADLEY_EDGE_AT_EARTH_DEG: f64 = 25.1;
 
 /// Siler, Roe and Armour's Hadley width in sine latitude, `σ_x` of their eq. 6: 0.3, with which
@@ -69,10 +70,11 @@ pub(super) const UPPER_BRANCH_ENERGY_RATIO: f64 = 1.06;
 
 /// The prefactor C of the ascending branch's latitude Φ₁ = C (γ ÷ 1°)^0.71 (`p_s` ÷ p⊕)^−0.13
 /// (Ω ÷ Ω⊕)^−0.62 (P ÷ 1 yr)^0.28, degrees: 2.045 483°, the geometric mean of φ ÷ γ^0.71 over the
-/// lane's reading of Guendelman and Kaspi 2019's Fig. 13b at Ω⊕, 1 bar and a one-year orbit (the
+/// lane's reading of Fig. 13b of Guendelman and Kaspi 2019, ApJ 881, 67,
+/// doi:10.3847/1538-4357/ab2a06 (arXiv:1906.05748), at Ω⊕, 1 bar and a one-year orbit (the
 /// median ascending branch at nine obliquities from 20° to 90°, `e2/gk19-fig13b-read.txt`; 2.045 483
 /// by the decision's `e_checks.py`, recomputed by decision-r09-t13e-asbuilt §2), which reproduces
-/// the reading within 2.6° from 20° to 80° and by 4.9° at 90°. GK19 print Eq. 20 as a
+/// the reading within 2.6° from 20° to 80° and by 4.9° at 90°. GK19 print their §4.4, Eq. 20 as a
 /// proportionality with no prefactor, so C is this fit's. decision-r09-t13ge §2.10 prints it
 /// rounded as 2.0°, but every figure it gives is this value's (Earth 19.2°, the 60° aquaplanet
 /// 37.4°, 90° 49.9°); 2.0° would give 18.8°, 36.6° and 48.8°. Low-to-medium confidence;
@@ -82,7 +84,8 @@ pub(super) const ASCENDING_BRANCH_PREFACTOR_DEG: f64 = 2.045_483;
 
 /// Eq. 20's exponent of the obliquity γ, 0.71 (Guendelman, I., and Kaspi, Y. 2019, "Atmospheric
 /// Dynamics on Terrestrial Planets: The Seasonal Response to Changes in Orbital, Rotational, and
-/// Radiative Timescales", ApJ, arXiv:1906.05748, §4.4, Eq. 20, read; R² 0.87).
+/// Radiative Timescales", ApJ 881, 67, doi:10.3847/1538-4357/ab2a06 (arXiv:1906.05748), §4.4,
+/// Eq. 20, read; R² 0.87).
 pub(super) const ASCENDING_BRANCH_OBLIQUITY_EXPONENT: f64 = 0.71;
 
 /// Eq. 20's exponent of the surface pressure over p⊕, −0.13 (as
@@ -129,12 +132,13 @@ pub(super) enum Turning {
 impl Circulation {
     /// The circulation of the body of `inputs`, which turns as `turning` says.
     ///
-    /// The cap is Guendelman and Kaspi's Eq. 20 ([`ASCENDING_BRANCH_PREFACTOR_DEG`]): γ the
-    /// obliquity to the seasonal orbit, min(ε, 180° − ε); `p_s` over p⊕ =
-    /// [`REFERENCE_PRESSURE_PA`], the transport's 1 bar, GK19's Earth-like atmospheric mass; Ω over
-    /// Ω⊕ as the transport takes it ([`rotation_ratio`]); P the seasonal orbit's period over the
-    /// Julian year. A world with no seasonal orbit has no seasons, and its cap is 0°, Eq. 20's
-    /// limit at no obliquity; a cap that is not a number, as at no pressure, is held at 90°.
+    /// The cap is Guendelman and Kaspi 2019's §4.4, Eq. 20 (ApJ 881, 67;
+    /// [`ASCENDING_BRANCH_PREFACTOR_DEG`]): γ the obliquity to the seasonal orbit, min(ε,
+    /// 180° − ε); `p_s` over p⊕ = [`REFERENCE_PRESSURE_PA`], the transport's 1 bar, GK19's
+    /// Earth-like atmospheric mass; Ω over Ω⊕ as the transport takes it ([`rotation_ratio`]); P the
+    /// seasonal orbit's period over the Julian year. A world with no seasonal orbit has no seasons,
+    /// and its cap is 0°, Eq. 20's limit at no obliquity; a cap that is not a number, as at no
+    /// pressure, is held at 90°.
     #[must_use]
     pub(super) fn for_inputs(inputs: &CoarseInputs, turning: Turning) -> Self {
         let rate = rotation_ratio(inputs.spin().rotation_period.value());
@@ -258,9 +262,9 @@ pub(super) fn hadley_share(x: f64, centre: f64, width: f64) -> f64 {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Bands {
     /// Each band's mean h, J kg⁻¹.
-    pub(super) energy: Vec<f64>,
+    pub(super) energy_j_per_kg: Vec<f64>,
     /// Each band's mean L q, J kg⁻¹; zero on a dry world.
-    pub(super) latent: Vec<f64>,
+    pub(super) latent_j_per_kg: Vec<f64>,
 }
 
 impl Bands {
@@ -278,8 +282,8 @@ impl Bands {
             None => vec![0.0; t_k.len()],
         };
         Self {
-            energy: grid.band_means(&energy),
-            latent: grid.band_means(&latent),
+            energy_j_per_kg: grid.band_means(&energy),
+            latent_j_per_kg: grid.band_means(&latent),
         }
     }
 
@@ -297,8 +301,8 @@ impl Bands {
                 .collect()
         };
         Self {
-            energy: weighted(|b| &b.energy),
-            latent: weighted(|b| &b.latent),
+            energy_j_per_kg: weighted(|b| &b.energy_j_per_kg),
+            latent_j_per_kg: weighted(|b| &b.latent_j_per_kg),
         }
     }
 }
@@ -320,17 +324,21 @@ pub(super) fn edge_fluxes(grid: &ModelGrid, transport_kg_m2_s: f64, values: &[f6
         .collect()
 }
 
-/// The energy-flux equator's sine latitude of the flux `flux` (one an edge) and the bands' h
-/// `energy`: the (−, +) zero of F in the band of greatest h, the first of equals, interpolated
-/// linearly in sine latitude across the band, or the band's middle where F vanishes at both of its
-/// edges (decision-r09-t13ge §2.11).
+/// The energy-flux equator's sine latitude of the flux `flux_w_m2` (one an edge, W m⁻² per 2πR²)
+/// and the bands' h `energy_j_per_kg`, J kg⁻¹: the (−, +) zero of F in the band of greatest h, the
+/// first of equals, interpolated linearly in sine latitude across the band, or the band's middle
+/// where F vanishes at both of its edges (decision-r09-t13ge §2.11).
 ///
 /// # Panics
 ///
 /// If a band's h is not finite.
 #[must_use]
-pub(super) fn energy_flux_equator(grid: &ModelGrid, flux: &[f64], energy: &[f64]) -> f64 {
-    let band = energy
+pub(super) fn energy_flux_equator(
+    grid: &ModelGrid,
+    flux_w_m2: &[f64],
+    energy_j_per_kg: &[f64],
+) -> f64 {
+    let band = energy_j_per_kg
         .iter()
         .enumerate()
         .fold((0, f64::NEG_INFINITY), |(best, most), (k, &h)| {
@@ -339,7 +347,7 @@ pub(super) fn energy_flux_equator(grid: &ModelGrid, flux: &[f64], energy: &[f64]
         })
         .0;
     let (south, north) = (grid.edge_sine(band), grid.edge_sine(band + 1));
-    let (below, above) = (flux[band], flux[band + 1]);
+    let (below, above) = (flux_w_m2[band], flux_w_m2[band + 1]);
     let rise = above - below;
     if rise > 0.0 {
         south + (north - south) * (-below / rise)
@@ -363,8 +371,8 @@ pub(super) struct Budget {
     /// Each band's E − P, kg m⁻² s⁻¹: the divergence of the latent heat's flux over L; zero on a
     /// dry world.
     pub(super) evaporation_less_precipitation_kg_m2_s: Vec<f64>,
-    /// The northward flux of h at each edge, per 2πR² ([`edge_fluxes`]).
-    pub(super) flux: Vec<f64>,
+    /// The northward flux of h at each edge, W m⁻² per 2πR² ([`edge_fluxes`]).
+    pub(super) flux_w_m2: Vec<f64>,
 }
 
 /// The month's budget on `grid` of `model`'s bands `bands` under `circulation` (the [module
@@ -380,23 +388,24 @@ pub(super) fn budget(
     bands: &Bands,
 ) -> Budget {
     let lambda = model.transport_kg_m2_s;
-    let flux = edge_fluxes(grid, lambda, &bands.energy);
-    let diffusive_latent = edge_fluxes(grid, lambda, &bands.latent);
-    let efe_sine = energy_flux_equator(grid, &flux, &bands.energy);
+    let flux = edge_fluxes(grid, lambda, &bands.energy_j_per_kg);
+    let diffusive_latent = edge_fluxes(grid, lambda, &bands.latent_j_per_kg);
+    let efe_sine = energy_flux_equator(grid, &flux, &bands.energy_j_per_kg);
     let centre_sine = circulation.centre_sine(efe_sine);
-    let greatest = bands.energy.iter().fold(
-        f64::NEG_INFINITY,
-        |most, &h| {
-            if h > most { h } else { most }
-        },
-    );
+    let greatest =
+        bands.energy_j_per_kg.iter().fold(
+            f64::NEG_INFINITY,
+            |most, &h| {
+                if h > most { h } else { most }
+            },
+        );
     let upper = UPPER_BRANCH_ENERGY_RATIO * greatest;
     let mut mass_flux = vec![0.0; LATITUDE_BANDS + 1];
     let mut latent_flux = vec![0.0; LATITUDE_BANDS + 1];
     for edge in 1..LATITUDE_BANDS {
         let share = hadley_share(grid.edge_sine(edge), centre_sine, circulation.width());
-        let energy = f64::midpoint(bands.energy[edge], bands.energy[edge - 1]);
-        let latent = f64::midpoint(bands.latent[edge], bands.latent[edge - 1]);
+        let energy = f64::midpoint(bands.energy_j_per_kg[edge], bands.energy_j_per_kg[edge - 1]);
+        let latent = f64::midpoint(bands.latent_j_per_kg[edge], bands.latent_j_per_kg[edge - 1]);
         let psi = share * flux[edge] / (upper - energy);
         mass_flux[edge] = psi;
         latent_flux[edge] = (1.0 - share) * diffusive_latent[edge] - psi * latent;
@@ -419,7 +428,7 @@ pub(super) fn budget(
         centre_sine,
         mass_flux_kg_m2_s: mass_flux,
         evaporation_less_precipitation_kg_m2_s: divergence,
-        flux,
+        flux_w_m2: flux,
     }
 }
 

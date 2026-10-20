@@ -1003,7 +1003,8 @@ impl CoarseInputs {
     ///
     /// Empty for a body with no cold traps. It is empty from the record until P14.T54.b puts
     /// P14.T51.f's cold traps on it at generator version 24, and
-    /// [`cold_trap_inputs`](Self::cold_trap_inputs) is `Some` wherever it is not empty.
+    /// [`cold_trap_inputs`](Self::cold_trap_inputs) is `Some` wherever a cold-trapped share is
+    /// above zero.
     #[must_use]
     pub fn cold_traps(&self) -> &[AreaShare] {
         &self.cold_traps
@@ -1011,7 +1012,7 @@ impl CoarseInputs {
 
     /// What the cold traps read of the body's star and ground beyond the other inputs, or `None`
     /// where the inputs give no cold traps (from the record until P14.T54.b). It is `Some`
-    /// wherever [`cold_traps`](Self::cold_traps) is not empty.
+    /// wherever a cold-trapped share of [`cold_traps`](Self::cold_traps) is above zero.
     #[must_use]
     pub const fn cold_trap_inputs(&self) -> Option<&ColdTrapInputs> {
         self.cold_trap_inputs.as_ref()
@@ -3493,7 +3494,13 @@ mod tests {
     fn the_record_gives_no_cold_traps_until_the_24_bump() {
         assert!(
             GENERATOR_VERSION < COLD_TRAPS_VERSION,
-            "the 23 → 24 bump (P14.T54.b) puts P14.T51.f's cold traps on the record: fill              `from_record`'s `cold_traps` from each solid entry's              `CondensateEntry::trapped_area_fraction`, and its `cold_trap_inputs` from the star's              angular radius and the bare regolith's Bond albedo the record's cold traps read, to              the bit, test that a generated qualifying body's field places its record's trapped              areas (placed plus undrawn to one cell, short 0), and delete this test              (decision-r09-t13f-cold-traps §6 step 4 and §8)"
+            "the 23 → 24 bump (P14.T54.b) puts P14.T51.f's cold traps on the record: fill \
+             `from_record`'s `cold_traps` from each solid entry's \
+             `CondensateEntry::trapped_area_fraction`, and its `cold_trap_inputs` from the star's \
+             angular radius and the bare regolith's Bond albedo the record's cold traps read, to \
+             the bit, test that a generated qualifying body's field places its record's trapped \
+             areas (placed plus undrawn to one cell, short 0), and delete this test \
+             (decision-r09-t13f-cold-traps §6 step 4 and §8)"
         );
         let (_, _, planet) = planet_reading();
         let (_, moon, its_planet) = generated_moon();
