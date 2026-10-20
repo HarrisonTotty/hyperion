@@ -168,6 +168,8 @@ _CLIMBS = frozenset(("parent", "ancestors", "pop"))
 # The names by which an item works with paths, where a climb is a directory's: elsewhere `parent()`
 # may be another type's (`BodyIndex::parent`).
 _PATH_NAMES = frozenset(("Path", "PathBuf", "path", "fs", "env", "OsStr", "OsString", "DirEntry", "ReadDir"))
+# `..` as a path's component (`std::path::Component::ParentDir`), which no string holds.
+_PARENT_COMPONENT = "ParentDir"
 # No cycle of lookups reached a position on the stack (`Graph.lookup`).
 _NO_CYCLE = 1 << 30
 # Items of the value namespace alone, which have no associated items: no path goes on past one.
@@ -996,6 +998,17 @@ class _Scanner:
                 and self.val(group + 2) in (")", "]", "}", ",")
             envs[owner].add(v[group + 1] if named else "?")
 
+        # The environment variables each item reads, in a macro's body and an attribute too, by any
+        # path: `env!("X")`, `std::env::var("X")`, `::std::env::var_os(name)`, `var("X")` imported.
+        for j in range(self.n - 1):
+            if k[j] != "i" or (j and v[j - 1] == "."):
+                continue
+            if v[j] in _ENV_MACROS and v[j + 1] == "!":
+                variable(j + 2, item_of[j])
+            elif v[j] in _ENV_CALLS and v[j + 1] == "(" and (
+                    j < 2 or (v[j - 2] == "env" if v[j - 1] == "::" else v[j - 1] != "fn")):
+                variable(j + 1, item_of[j])
+
         i = 0
         while i < self.n:
             kind = k[i]
@@ -1037,21 +1050,14 @@ class _Scanner:
             if self.val(i + 1) == "!" and self.val(i + 2) != "=":
                 calls[owner].add(v[i])
                 arguments(i + 2, owner)
-                if v[i] in _ENV_MACROS:
-                    variable(i + 2, owner)
                 i += 2
                 continue
             segments, j = self.path_at(i, self.n)
             if self.val(j) == "!" and self.val(j + 1) != "=":
                 calls[owner].add(segments[-1])
                 arguments(j + 1, owner)
-                if segments[-1] in _ENV_MACROS:
-                    variable(j + 1, owner)
             elif segments[0] != "Self":
                 paths[owner].add((test, *segments))
-                if segments[-1] in _ENV_CALLS and (len(segments) == 1 or segments[-2] == "env") \
-                        and self.val(j) == "(":
-                    variable(j, owner)  # `std::env::var("NAME")`; `vars()` names none
             else:
                 methods[owner].update(segments[1:])  # `Self::name`: an associated item of the impl's type
             # On from the path's second token, not its end: its generic arguments (a turbofish,
@@ -2484,21 +2490,24 @@ class Graph:
         """The scope of a test that reads the Rust sources (its node `node`): the crates whose files its
         walker may list, its own crate always among them, sorted; None for every crate. And why.
 
-        It is read from the strings of every item the test's code reaches, in any crate, those on its
-        way to the walker included, since any of them may build the directory it lists: `src` or
-        `src/...` (joined to `CARGO_MANIFEST_DIR`, or relative, from the crate's directory, where cargo
-        and nextest run its tests) names the crate of the test and of the string's item, as
-        `CARGO_MANIFEST_DIR` itself names the item's; `../<crate dir>` or `../<crate dir>/...` names
-        that sibling crate, and a crate's directory name (`hyperion-surface`, `hyperion-sim/src`) that
-        crate. A directory computed rather than named is every crate's: a climb (`parent()`,
-        `ancestors()` or `pop()`, where the item works with paths, is test code or is on the way to a
-        walker: elsewhere it may be another type's; a walker that walks with a stack's `pop()` reads
-        every crate too), `..` in any other form, the string `crates`, or an environment variable
-        other than `CARGO_MANIFEST_DIR`. So is a test whose code names no
-        directory at all. Other strings (`substance/mod.rs`, a pattern, a message) name nothing
-        listed and do not count. A directory that the code reads from data, or builds from a path's
-        components, is beyond the reading, as is a string with `\\` separators (which only Windows
-        would read, so that the test would fail on Linux and macOS)."""
+        It is read from the strings and names of every item the test's code reaches, in any crate,
+        those on its way to the walker and the bodies of the macros it calls included, since any of
+        them may build the directory it lists: `src` or `src/...` (joined to `CARGO_MANIFEST_DIR`, or
+        relative, from the crate's directory, where cargo and nextest run its tests) names the crate
+        of the test and of the string's item, as `CARGO_MANIFEST_DIR` itself names the item's;
+        `../<crate dir>` or `../<crate dir>/...` names that sibling crate, and a crate's directory
+        name (`hyperion-surface`, `hyperion-sim/src`) that crate; and a crate holds the crates whose
+        directories are inside its own. A directory computed rather than named is every crate's: a
+        climb (`parent()`, `ancestors()` or `pop()`, where the item works with paths, is test code or
+        is on the way to a walker: elsewhere it may be another type's; a walker that walks with a
+        stack's `pop()` reads every crate too), `..` in any other form (`Component::ParentDir`
+        among them), the string `crates`, or an environment variable other than
+        `CARGO_MANIFEST_DIR`. So is a test whose code names no directory at all. Other strings
+        (`substance/mod.rs`, a pattern, a message) name nothing listed and do not count. A directory
+        that the code reads from data, builds from a path's components (`components()`) or cuts from
+        a path's string (`rsplit_once('/')`) is beyond the reading, as is a string with `\\`
+        separators (which only Windows would read, so that the test would fail on Linux and
+        macOS)."""
         key = f"{unit_id} {name}"
         cache: Dict[str, Tuple[Optional[List[str]], str]] = self.__dict__.setdefault("_scopes", {})
         if key in cache:
@@ -2524,6 +2533,15 @@ class Graph:
                 continue
             facts, index = found
             holder = self.crate_of(item) or own
+            # Its code's names, a `macro_rules!` body's that it defines included: the body is its
+            # callers' code, and a caller reaches the definition.
+            methods = set(facts.item_methods[index] if index < len(facts.item_methods) else ())
+            names = {s for p in facts.item_paths[index] for s in p[1:]} | methods
+            for entry in self._macros_at(file_of(item), facts).get(index, ()):
+                methods.update(entry[6])
+                names.update(entry[6], (s for p in entry[2] for s in p))
+            if index >= len(facts.item_env):
+                compute("facts that record no environment variable", item)
             for variable in (facts.item_env[index] if index < len(facts.item_env) else ()):
                 if variable == _MANIFEST_DIR:
                     crates.add(holder)
@@ -2550,18 +2568,33 @@ class Graph:
                 elif parts[0] in self._crates_by_name:
                     crates |= self._crates_by_name[parts[0]]
                     named = True
-            climbs = _CLIMBS & set(facts.item_methods[index] if index < len(facts.item_methods) else ())
+            if _PARENT_COMPONENT in names:
+                compute(f"`Component::{_PARENT_COMPONENT}`", item)
+            climbs = _CLIMBS & methods
             if climbs and (item in toward or facts.items[index][5] or self.is_test_file(file_of(item))
-                           or self._works_with_paths(facts, index)):
+                           or names & _PATH_NAMES or (index < len(facts.item_env) and facts.item_env[index])):
                 compute(f"`{sorted(climbs)[0]}()`", item)
         if computed:
             scope: Tuple[Optional[List[str]], str] = (None, f"its directory is computed: {computed}")
         elif not named:
             scope = (None, "no string of its code names the directory it lists")
         else:
-            scope = (sorted(crates), "")
+            # A crate's directory holds any crate whose directory is inside it (a root package's,
+            # `crates/x/fuzz`), whose files a listing of it reads too.
+            inside = {other for crate in crates for other, info in self.crates.items()
+                      if info.dir.startswith(self.crates[crate].dir + "/") or not self.crates[crate].dir}
+            scope = (sorted(crates | inside), "")
         cache[key] = scope
         return scope
+
+    def _macros_at(self, file: str, facts: FileFacts) -> Dict[int, List[list]]:
+        """A file's `macro_rules!` definitions by the item they belong to (`FileFacts.macros`)."""
+        found: Dict[str, Dict[int, List[list]]] = self.__dict__.setdefault("_macro_items", {})
+        if file not in found:
+            found[file] = {}
+            for entry in facts.macros:
+                found[file].setdefault(entry[4], []).append(entry)
+        return found[file]
 
     def _siblings(self, crates: Iterable[str], directory: str) -> Set[str]:
         """The crates whose directory is `directory` beside one of `crates`' (`../<directory>`)."""
@@ -2571,13 +2604,6 @@ class Graph:
             if beside in self._crate_by_dir:
                 out.add(self._crate_by_dir[beside])
         return out
-
-    @staticmethod
-    def _works_with_paths(facts: FileFacts, index: int) -> bool:
-        """Whether an item names a path's type or module (`Path`, `std::fs`), or reads the environment."""
-        names = {s for p in facts.item_paths[index] for s in p[1:]}
-        names.update(facts.item_methods[index] if index < len(facts.item_methods) else ())
-        return bool(names & _PATH_NAMES) or bool(index < len(facts.item_env) and facts.item_env[index])
 
     def _item_facts(self, node: str) -> Optional[Tuple[FileFacts, int]]:
         """An item's node -> its file's facts and its index there; None for another kind of node."""

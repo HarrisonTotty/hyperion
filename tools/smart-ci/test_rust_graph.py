@@ -598,11 +598,43 @@ class SourceScopes(unittest.TestCase):
                 "the environment variable `HOME`",
             f"let root = {manifest}.ancestors().nth(2).unwrap(); rust_files(root, &mut found);": "`ancestors()`",
             f"let mut root = {manifest}.to_path_buf(); root.pop(); rust_files(&root, &mut found);": "`pop()`",
+            f"rust_files(&{manifest}.join(std::path::Component::ParentDir), &mut found);": "`Component::ParentDir`",
+            # The environment by every path: the extern prelude's, `option_env!`, `var_os`, `vars()`.
+            "rust_files(&std::path::PathBuf::from(::std::env::var(\"HOME\").unwrap()), &mut found);":
+                "the environment variable `HOME`",
+            "rust_files(std::path::Path::new(option_env!(\"SOURCES\").unwrap()), &mut found);":
+                "the environment variable `SOURCES`",
+            "rust_files(&std::path::PathBuf::from(std::env::var_os(\"ROOT\").unwrap()), &mut found);":
+                "the environment variable `ROOT`",
+            "let n = std::env::vars().count(); rust_files(std::path::Path::new(\"src\"), &mut found);":
+                "an environment variable that no string names",
+            # A macro's body is its caller's code: a local one, holding `src` elsewhere as the tag check does.
+            "macro_rules! root { () => { std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).parent().unwrap() } }\n"
+            "        let own = std::path::Path::new(\"src\").join(\"lib.rs\"); rust_files(root!(), &mut found);": "`parent()`",
+            "macro_rules! out { () => { std::path::Path::new(env!(\"OUT_DIR\")) } }\n"
+            "        rust_files(&std::path::Path::new(\"src\"), &mut found); rust_files(out!(), &mut found);":
+                "the environment variable `OUT_DIR`",
         }
         for body, why in computed.items():
             crates, reason = self.scope(body)
             self.assertIsNone(crates, body)
             self.assertIn(why, reason, body)
+        # A crate inside another's directory is listed with it.
+        inner = rg.CrateInfo("a-fuzz", "crates/a/fuzz", [], [], [
+            rg.Target("lib", "a_fuzz", "crates/a/fuzz/src/lib.rs", True, True)])
+        ws = Fixture([crate("a"), inner, crate("b")], {
+            "crates/a/src/lib.rs": TESTS + self.WALKER + "    #[test]\n    fn t() {\n        let mut found = Vec::new();\n"
+                                   f"        rust_files({manifest}, &mut found);\n    }}\n}}\n",
+            "crates/a/fuzz/src/lib.rs": "pub fn f() {}\n", "crates/b/src/lib.rs": "pub fn g() {}\n"})
+        self.assertEqual(scoped(ws.change("crates/a/fuzz/src/lib.rs", "{}", "{ }")), {"a tests::t": ["a", "a-fuzz"]})
+        self.assertEqual(readers(ws.change("crates/b/src/lib.rs", "{}", "{ }")), set())
+        # Another crate's macro.
+        crates, reason = self.scope(
+            "let own = std::path::Path::new(\"src\").join(\"lib.rs\"); rust_files(c::root!(), &mut found);",
+            c="#[macro_export]\nmacro_rules! root {\n"
+              "    () => { std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).parent().unwrap() };\n}\n")
+        self.assertIsNone(crates)
+        self.assertIn("`parent()` in crates/c/src/lib.rs (macro root)", reason)
         # A directory that another crate's code computes, and one that nothing names.
         crates, reason = self.scope("rust_files(&c::root(), &mut found);",
                                     c="pub fn root() -> std::path::PathBuf {\n"
