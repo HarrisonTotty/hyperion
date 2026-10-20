@@ -251,6 +251,7 @@ def main() -> None:
     if rust:
         tier1.append(("cargo fmt --all -- --check", "Rust files changed"))
         tier1.append(("cargo clippy --workspace --all-targets -- -D warnings", "Rust files changed; pedantic, warnings are errors"))
+        tier1.append(("just doc-check", "Rust files changed; rustdoc with -D warnings: no links to private items, no broken or redundant links"))
     if workspace_wide and rust:
         tier1.append((f"{NO_EXPORT}cargo test --workspace", "workspace-wide Rust config changed"))
     else:
