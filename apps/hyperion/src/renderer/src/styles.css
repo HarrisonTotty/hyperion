@@ -4116,11 +4116,75 @@ body {
 }
 
 /*
- * With instruments open, the primary's label block takes the width left of them: a slot is at
- * most 18 + 0.5 + 15 rem inside its 0.5 rem padding and border, inset 0.5 rem from the stage.
+ * Beside the slots that stand, whole or as a stub, each of the primary's plates takes the width left
+ * of them: a slot is at most 18 + 0.5 + 15 rem inside its 0.5 rem padding and border, inset 0.5 rem
+ * from the stage (R10.T12.b; decision-r10-view-block-room §3).
  */
-.view__overlay:has(.view-instrument) > .view-label {
+.view-label--beside {
   max-width: calc(100% - 36.5rem);
+}
+
+/*
+ * The primary's lower plate stands on the stage's foot, inset 0.5 rem, so that it grows upward and
+ * nothing on it moves as the upper plate's statements come and go (R10.T12.b).
+ */
+.view-label--lower {
+  top: auto;
+  bottom: 0.5rem;
+}
+
+/*
+ * A part of the upper plate that scrolls where the stage cannot hold the plates whole: its lines
+ * before STARS, or below the floor everything under its VIEW line (R10.T12.b). It is its items'
+ * offset parent, for its position line, and takes the pointer, which the overlay does not, so that
+ * the wheel scrolls it and a drag that starts on it turns no camera.
+ */
+.view-label__scroll {
+  position: relative;
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+/* Inset, so that the plate's edge never clips its ring. */
+.view-label__scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/*
+ * The room's hidden copies of the plates, laid out over the stage as the live ones are, never seen
+ * and never taking the pointer (R10.T12.b).
+ */
+.view-room-sizers {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* A copy's lines before STARS are set at a scroll's width, a scroll bar beside them. */
+.view-room-sizers .view-label__middle {
+  overflow-y: scroll;
+}
+
+/*
+ * A held INSTRUMENT 2 while INSTRUMENT 1 stands: its title row with its CLOSE, and its reason
+ * under it, in its corner at the stage's foot (R10.T12.b).
+ */
+.view-instrument__stub-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.view-instrument__stub-row > .view-instrument__title {
+  margin: 0;
+}
+
+.view-instrument__reason {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
 }
 
 /*
@@ -4183,4 +4247,9 @@ body {
   margin: 0;
   color: var(--text-muted);
   font-size: 0.875rem;
+}
+
+/* A slot held whole, under the folded panel's disclosure row, as a folded panel's statuses stand. */
+.view-instruments-panel__standing {
+  margin-top: 0.25rem;
 }

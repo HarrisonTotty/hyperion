@@ -10,6 +10,7 @@ import { Activity } from "react";
 import { vi } from "vitest";
 
 import { UniverseProvider } from "../components/UniverseProvider";
+import { rootRemPx } from "../lib/useElementSize";
 import type { ViewEngineSource } from "../displays/view/useViewEngine";
 import { ViewDisplay } from "../displays/view/ViewDisplay";
 import { type MarkLabelSide, PLATE_SIDE_PADDING_REM } from "../displays/view/ViewMarkLabels";
@@ -57,11 +58,24 @@ export const STAGE_WIDTH_PX = 1280;
 export const STAGE_HEIGHT_PX = 720;
 
 /**
- * An open instrument slot's laid-out size in the tests, CSS px: as measured on the development
- * machine at 1920 × 1080 (R07.T19).
+ * An open instrument slot's laid-out size in the tests at 16 px to the rem, CSS px: as measured on
+ * the development machine at 1920 × 1080 (R07.T19). Laid out in rem, it grows with the interface
+ * scale (R10.T12.b).
  */
 export const SLOT_WIDTH_PX = 555;
 export const SLOT_HEIGHT_PX = 254;
+
+/**
+ * A held `INSTRUMENT 2`'s stub's laid-out height in the tests at 16 px to the rem, CSS px (plan
+ * R10, R10.T12.b): its 4 rem, `STUB_HEIGHT_REM`, as measured at 1280 × 720; as wide as a slot, and
+ * growing with the interface scale as the slots do.
+ */
+export const STUB_HEIGHT_PX = 64;
+
+/** The interface scale against 16 px to the rem, by which the slots' laid-out sizes grow. */
+function slotScale(): number {
+  return rootRemPx() / 16;
+}
 
 /**
  * The `.view` box's laid-out size in the tests unless a test gives another, CSS px: about the box
@@ -188,16 +202,19 @@ function rect({ widthPx, heightPx }: LaidOutPx): DOMRect {
 }
 
 /**
- * Lays every element out at `stagePx`, but for the `.view` box, at `viewPx()`; each open
- * instrument slot, at {@link SLOT_WIDTH_PX} by {@link SLOT_HEIGHT_PX}; each mark's label, at
+ * Lays every element out at `stagePx` (or, given as a function, at what it gives each time), but
+ * for the `.view` box, at `viewPx()`; each open instrument slot, at {@link SLOT_WIDTH_PX} by
+ * {@link SLOT_HEIGHT_PX}, and a held `INSTRUMENT 2`'s stub at {@link SLOT_WIDTH_PX} by
+ * {@link STUB_HEIGHT_PX}, both grown with the interface scale; each mark's label, at
  * {@link MARK_LABEL_PX}; and the primary's label block, at `blockPx()`, by default nothing at the
  * stage's top left, so that a label is placed clear of it wherever its mark stands (R07.T16.i).
  */
 export function stubViewLayout(
-  stagePx: LaidOutPx,
+  stagePx: LaidOutPx | (() => LaidOutPx),
   viewPx: () => LaidOutPx,
   blockPx: () => LaidOutBoxPx = () => ({ leftPx: 0, topPx: 0, widthPx: 0, heightPx: 0 }),
 ): void {
+  const stageAt = typeof stagePx === "function" ? stagePx : () => stagePx;
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function laidOut(
     this: HTMLElement,
   ) {
@@ -206,6 +223,15 @@ export function stubViewLayout(
     }
     if (this.classList.contains("view-marks__label")) {
       return rect(MARK_LABEL_PX);
+    }
+    // A plate's parts, and the room's hidden copies (R10.T12.b), are laid out as nothing: the plate
+    // stands as `blockPx()` gives it, and its own parts never stand as tall as the stage.
+    if (
+      this.closest(".view-room-sizers") !== null ||
+      (this.closest(".view__overlay > .view-label") !== null &&
+        !this.matches(".view__overlay > .view-label"))
+    ) {
+      return rect({ widthPx: 0, heightPx: 0 });
     }
     if (this.matches(".view__overlay > .view-label")) {
       const block = blockPx();
@@ -216,9 +242,12 @@ export function stubViewLayout(
         height: block.heightPx,
       });
     }
+    if (this.classList.contains("view-instrument--stub")) {
+      return rect({ widthPx: SLOT_WIDTH_PX * slotScale(), heightPx: STUB_HEIGHT_PX * slotScale() });
+    }
     return this.classList.contains("view-instrument")
-      ? rect({ widthPx: SLOT_WIDTH_PX, heightPx: SLOT_HEIGHT_PX })
-      : rect(stagePx);
+      ? rect({ widthPx: SLOT_WIDTH_PX * slotScale(), heightPx: SLOT_HEIGHT_PX * slotScale() })
+      : rect(stageAt());
   });
 }
 
@@ -388,6 +417,11 @@ export interface ViewDisplayHarness {
   readonly advance: (ms: number) => void;
   /** Lays the `.view` box out at another size, as a window resize does, and lays out again. */
   readonly resizeView: (viewPx: LaidOutPx) => void;
+  /**
+   * Lays every element that takes the stage's size out at another, as a window resize or a change
+   * of the side columns does (plan R10, R10.T12.b), and lays out again.
+   */
+  readonly resizeStage: (stagePx: LaidOutPx) => void;
   /** Every view the engines made, first first. */
   readonly views: () => FakeView[];
   /** The server link's socket, which the test answers as the server. */
@@ -418,8 +452,12 @@ export function renderViewDisplay(options: {
 }): ViewDisplayHarness {
   const advanceTimers = fakeFramesAndTimeouts();
   let viewPx: LaidOutPx = options.viewPx ?? FULL_VIEW_PX;
+  let stagePx: LaidOutPx = options.stagePx ?? {
+    widthPx: STAGE_WIDTH_PX,
+    heightPx: STAGE_HEIGHT_PX,
+  };
   stubViewLayout(
-    options.stagePx ?? { widthPx: STAGE_WIDTH_PX, heightPx: STAGE_HEIGHT_PX },
+    () => stagePx,
     () => viewPx,
     options.blockPx,
   );
@@ -471,6 +509,12 @@ export function renderViewDisplay(options: {
     },
     resizeView: (next) => {
       viewPx = next;
+      act(() => {
+        FakeResizeObserver.resizeAll();
+      });
+    },
+    resizeStage: (next) => {
+      stagePx = next;
       act(() => {
         FakeResizeObserver.resizeAll();
       });

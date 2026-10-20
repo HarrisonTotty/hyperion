@@ -53,6 +53,7 @@ import { cameraKinematics } from "../../view/scene/fromServer";
 import type { ViewStar } from "../../view/scene/model";
 import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
 import type { TerrainSession } from "../../view/terrain/session";
+import type { PoseIntervals } from "../../view/terrain/poseInterval";
 import type { DrawAnchor, DrawnSurveyEdge } from "../../view/wireframe/drawList";
 import { availabilityOf, styleRefusals } from "./styleRefusals";
 import type { SkyModel } from "../../view/sky/model";
@@ -105,6 +106,11 @@ export interface InstrumentShown {
    * decision-r10-t16-review §1); none before it draws.
    */
   readonly surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
+  /**
+   * The contour interval its last frame drew its wireframe terrain at, m, for its label block's
+   * `CONTOUR INTERVAL` (plan R10, R10.T12.b); `null` while it draws none.
+   */
+  readonly contourIntervalM: number | null;
 }
 
 /** One slot's standing, as the display renders it. */
@@ -167,6 +173,11 @@ export interface InstrumentsFrame {
    * reads the session the primary stepped (the batch review's C3).
    */
   readonly terrain: TerrainSession | null;
+  /**
+   * The stage's holder of the contour interval each pose states (plan R10, R10.T12.b), through
+   * which an instrument at a pose another view has stated this frame states the same interval.
+   */
+  readonly intervals: PoseIntervals;
 }
 
 /** What `useInstruments` reads. */
@@ -285,15 +296,21 @@ interface SlotLoop {
   surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
   /** The terrain session it last told what it drew, which forgets it when it goes; or `null`. */
   reportedTo: TerrainSession | null;
+  /** The contour interval of its last frame drawn (R10.T12.b). */
+  contourIntervalM: number | null;
+  /** The interval holder it last stated its interval through, which forgets it when it goes. */
+  intervals: PoseIntervals | null;
 }
 
-/** Has the terrain session `loop` last reported to forget slot `slot`'s view. */
+/** Has the terrain session and the interval holder `loop` last told of slot `slot`'s view forget it. */
 function forgetSlot(loop: SlotLoop | undefined, slot: InstrumentSlot): void {
   if (loop === undefined) {
     return;
   }
   loop.reportedTo?.forgetView(instrumentViewId(slot));
   loop.reportedTo = null;
+  loop.intervals?.forget(instrumentViewId(slot));
+  loop.intervals = null;
 }
 
 /**
@@ -333,6 +350,8 @@ function useSlotDrawer(
         terrain: null,
         surveyEdges: [],
         reportedTo: null,
+        contourIntervalM: null,
+        intervals: null,
       });
     });
     return () => {
@@ -487,6 +506,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
             photoreal: "idle",
             terrain: null,
             surveyEdges: [],
+            contourIntervalM: null,
           },
           refused: false,
         })),
@@ -646,10 +666,17 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         terrain:
           session === null
             ? undefined
-            : { source: session, view: instrumentViewId(slot), nowMs: each.nowMs },
+            : {
+                source: session,
+                view: instrumentViewId(slot),
+                nowMs: each.nowMs,
+                intervals: each.intervals,
+              },
       };
+      loop.intervals = each.intervals;
       const drawn = loop.drawer.draw(frameInputs);
       loop.terrain = drawn?.terrain ?? null;
+      loop.contourIntervalM = drawn?.contourIntervalM ?? null;
       if (drawn !== null) {
         loop.anchors = drawn.anchors;
         loop.drawnStyle = drawn.drawnStyle;
@@ -680,6 +707,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           photoreal: loop.drawer.photorealStatus,
           terrain: loop.terrain,
           surveyEdges: loop.surveyEdges,
+          contourIntervalM: loop.contourIntervalM,
         };
         setSlots((previous) =>
           withSlot(previous, slot, (state) =>

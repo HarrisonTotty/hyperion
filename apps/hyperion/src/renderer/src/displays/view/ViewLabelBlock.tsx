@@ -1,8 +1,11 @@
-import type { ReactNode } from "react";
+import { type ReactNode, type Ref, useCallback, useLayoutEffect, useRef } from "react";
 
 import { StaleMark } from "../../components/StaleMark";
 import { StatusLine } from "../../components/StatusLine";
 import { StatusText } from "../../components/StatusText";
+import { formatListPosition } from "../../lib/format";
+import { type ItemsInView, useItemsInView } from "../../lib/itemsInView";
+import type { UpperRoom } from "./viewRoom";
 import { type LabelField, type LabelLine, MISSING_READING } from "./viewRun";
 
 /** Props of {@link ViewLabelBlock}. */
@@ -22,6 +25,48 @@ export interface ViewLabelBlockProps {
   readonly faults: ReadonlyArray<string>;
   /** The block's ID, by which its view's canvas is described (R07.T19), or none. */
   readonly id?: string | undefined;
+  /**
+   * How the block scrolls in its room, the `PRIMARY` view's upper plate's (plan R10, R10.T12.b;
+   * decision-r10-view-block-room §3); none for a block that never scrolls, an instrument's.
+   */
+  readonly scroll?: LabelScroll | undefined;
+  /** More class names for the plate: `view-label--beside` beside the standing slots. */
+  readonly className?: string | undefined;
+  /** Receives the plate, which the display measures for its room (R10.T12.b). */
+  readonly ref?: Ref<HTMLDivElement> | undefined;
+}
+
+/** How a label block scrolls in its room ({@link ViewLabelBlockProps.scroll}). */
+export interface LabelScroll {
+  /**
+   * The label of its first line that never scrolls, `STARS`: the lines before it, `FRAME` to
+   * `METER`, stand in a part of their own that scrolls while `room` has them scroll.
+   */
+  readonly from: string;
+  /** How the block stands in its room ({@link UpperRoom}). */
+  readonly room: UpperRoom;
+  /**
+   * The view's name, `PRIMARY`, by which a scrolling part is named while it scrolls: `PRIMARY lines`
+   * for its lines, `PRIMARY label block` for everything under its `VIEW` line.
+   */
+  readonly view: string;
+}
+
+/** What a reading of the block counts as one in the whole plate's scroll (step 6). */
+const BODY_ITEMS = ".view-label__line, .view-label__statement, .view-label__count, .request-status";
+
+/** A scroll's position line under it, `1-6 of 11` (the guide's "Layout"), or none before it is measured. */
+function positionLine(range: ItemsInView | null): ReactNode {
+  return range === null ? null : (
+    <p className="list-position view-label__position">
+      {formatListPosition(range.firstVisible, range.lastVisible, range.total)}
+    </p>
+  );
+}
+
+/** Whether a scrolling element stands at its foot, to the pixel. */
+function atFoot(element: HTMLElement): boolean {
+  return element.scrollTop + element.clientHeight >= element.scrollHeight - 1;
 }
 
 /** The separator of a reading made of parts (the guide's "Voice and nomenclature"). */
@@ -265,37 +310,141 @@ export function readingParts(
  * after its state (the descent spike's `TEST PLANET: provisional, …`) tracks the state alone; the
  * rest are upper case whole and tracked whole, as before (P05.T13). The stars' count line is a
  * reading of numbers, so an `output` in B612 Mono (the guide's "Typography"), not a statement.
+ *
+ * On the `PRIMARY` view's upper plate (`scrollsFrom`, plan R10, R10.T12.b;
+ * decision-r10-view-block-room §3) the lines before `STARS` stand in a part of their own, which
+ * scrolls where its room says so, as a readout does, with their position and total beneath them
+ * (`1-6 of 11`, the guide's "Layout"); below the floor everything under the `VIEW` line scrolls
+ * instead, held at its foot until the operator scrolls it away, so that its faults and last
+ * statements stay in view. A scrolling part is a named region that takes the focus and the
+ * pointer only while it scrolls, so that the keyboard and the wheel reach it and a drag that starts
+ * on it turns no camera; the `STARS` line and those after it, the statements, the count line and
+ * the faults never scroll but there.
  */
-export function ViewLabelBlock({ lines, statements, countLine, faults, id }: ViewLabelBlockProps) {
+export function ViewLabelBlock({
+  lines,
+  statements,
+  countLine,
+  faults,
+  id,
+  scroll,
+  className,
+  ref,
+}: ViewLabelBlockProps) {
+  const room = scroll?.room ?? WHOLE;
+  const from = scroll?.from;
+  const split = from === undefined ? -1 : lines.findIndex((line) => line.label === from);
+  const middle = from === undefined ? [] : split < 0 ? lines : lines.slice(0, split);
+  const rest = from === undefined ? lines : split < 0 ? [] : lines.slice(split);
+  const middleScrolls = room.kind === "middle";
+  const bodyScrolls = room.kind === "body";
+  const scrollStyle =
+    room.kind === "whole" ? undefined : { maxHeight: `${String(room.heightPx)}px` };
+  const viewName = scroll?.view ?? "";
+  // Measured afresh whenever what the block holds may have changed.
+  const contentKey = [
+    ...lines.map((line) => `${line.label} ${line.value}`),
+    ...statements,
+    countLine ?? "",
+    ...faults,
+  ].join("\n");
+  const middleView = useItemsInView(".view-label__line", contentKey, "middle");
+  const bodyView = useItemsInView(BODY_ITEMS, contentKey, "body");
+  // The whole plate's scroll is held at its foot, so that its faults and last statements stay in
+  // view, until the operator scrolls it away from there (step 6).
+  const bodyRef = useRef<HTMLElement | null>(null);
+  const heldAtFoot = useRef(true);
+  const bodyViewRef = bodyView.ref;
+  const setBody = useCallback(
+    (element: HTMLElement | null): void => {
+      bodyRef.current = element;
+      heldAtFoot.current = true;
+      bodyViewRef(element);
+    },
+    [bodyViewRef],
+  );
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (bodyScrolls && body !== null && heldAtFoot.current) {
+      body.scrollTop = body.scrollHeight;
+    }
+  });
+  const lineOf = (line: LabelLine) => (
+    <div className="field view-label__line" key={line.label}>
+      <dt className="field__label">{line.label}</dt>
+      <dd>
+        <output aria-live="off" className={line.stale === true ? "stale" : undefined}>
+          {readingParts(line.value, line.fields, { dotsLead: line.dotsLead === true })}
+        </output>
+        {line.stale === true ? <StaleMark /> : null}
+      </dd>
+    </div>
+  );
   return (
-    <div className="view-label" id={id}>
+    <div
+      className={className === undefined ? "view-label" : `view-label ${className}`}
+      id={id}
+      ref={ref}
+    >
       <p className="view-label__class">VIEW</p>
-      <dl className="view-label__lines">
-        {lines.map((line) => (
-          <div className="field view-label__line" key={line.label}>
-            <dt className="field__label">{line.label}</dt>
-            <dd>
-              <output aria-live="off" className={line.stale === true ? "stale" : undefined}>
-                {readingParts(line.value, line.fields, { dotsLead: line.dotsLead === true })}
-              </output>
-              {line.stale === true ? <StaleMark /> : null}
-            </dd>
-          </div>
+      {/* A section is a region only while it is named: while it scrolls. */}
+      <section
+        className={bodyScrolls ? "view-label__body view-label__scroll" : "view-label__body"}
+        ref={bodyScrolls ? setBody : undefined}
+        style={bodyScrolls ? scrollStyle : undefined}
+        onScroll={
+          bodyScrolls
+            ? (event) => {
+                heldAtFoot.current = atFoot(event.currentTarget);
+              }
+            : undefined
+        }
+        // A scrolling region with nothing focusable in it takes the focus itself, so that the
+        // keyboard scrolls it (WCAG 2.1.1), and only while it scrolls; the rule allows tabIndex on
+        // interactive roles only.
+        // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+        tabIndex={bodyScrolls ? 0 : undefined}
+        aria-label={bodyScrolls ? `${viewName} label block` : undefined}
+      >
+        {from === undefined ? (
+          <dl className="view-label__lines">{rest.map(lineOf)}</dl>
+        ) : (
+          <>
+            <section
+              className={
+                middleScrolls ? "view-label__middle view-label__scroll" : "view-label__middle"
+              }
+              ref={middleScrolls ? middleView.ref : undefined}
+              style={middleScrolls ? scrollStyle : undefined}
+              // As the whole plate's scroll, above.
+              // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+              tabIndex={middleScrolls ? 0 : undefined}
+              aria-label={middleScrolls ? `${viewName} lines` : undefined}
+            >
+              <dl className="view-label__lines">{middle.map(lineOf)}</dl>
+            </section>
+            {middleScrolls ? positionLine(middleView.range) : null}
+            {rest.length === 0 ? null : <dl className="view-label__lines">{rest.map(lineOf)}</dl>}
+          </>
+        )}
+        {statements.map((statement) => (
+          <p className="view-label__statement" key={statement}>
+            <StatusText text={statement} />
+          </p>
         ))}
-      </dl>
-      {statements.map((statement) => (
-        <p className="view-label__statement" key={statement}>
-          <StatusText text={statement} />
-        </p>
-      ))}
-      {countLine === null ? null : (
-        <p className="view-label__count">
-          <output aria-live="off">{countLine}</output>
-        </p>
-      )}
-      {faults.map((fault) => (
-        <StatusLine key={fault} text={fault} standing="fault" />
-      ))}
+        {countLine === null ? null : (
+          <p className="view-label__count">
+            <output aria-live="off">{countLine}</output>
+          </p>
+        )}
+        {faults.map((fault) => (
+          <StatusLine key={fault} text={fault} standing="fault" />
+        ))}
+      </section>
+      {bodyScrolls ? positionLine(bodyView.range) : null}
     </div>
   );
 }
+
+/** A block that stands whole. */
+const WHOLE: UpperRoom = { kind: "whole" };

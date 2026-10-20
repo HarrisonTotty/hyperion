@@ -1,10 +1,12 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 
 import STYLES from "../../styles.css?raw";
 import { statusLine } from "../../test/statusLine";
 import { TERRAIN_NOT_AVAILABLE } from "../../view/terrain/annunciation";
-import { ViewLabelBlock } from "./ViewLabelBlock";
+import { ViewLabelBlock, type ViewLabelBlockProps } from "./ViewLabelBlock";
+import type { UpperRoom } from "./viewRoom";
 
 /** The classes of the parts the status line reading `text` is set in. */
 function partsOf(text: string): string[] {
@@ -378,5 +380,274 @@ describe("the sky's STARS reading's leading dots (R06.T13.j)", () => {
         (part) => part.querySelector(".view-label__field") !== null,
       ),
     ).toEqual([true, false]);
+  });
+});
+
+/** A block's scrolling part named `name`, a region while it scrolls. */
+function scrolling(name: string): HTMLElement {
+  return screen.getByRole("region", { name });
+}
+
+/** The labels of the lines a part of a block holds, in order. */
+function labelsIn(part: HTMLElement): Array<string | null> {
+  return within(part)
+    .getAllByRole("term")
+    .map((term) => term.textContent);
+}
+
+describe("the PRIMARY view's upper plate in its room (R10.T12.b)", () => {
+  /** Its lines before STARS, which scroll: FRAME to METER, in `labelLines`' order. */
+  const MIDDLE_LABELS = [
+    "FRAME",
+    "TIME",
+    "STYLE",
+    "QUALITY",
+    "CAMERA",
+    "FOV",
+    "CONTOUR INTERVAL",
+    "EXPOSURE",
+    "METER",
+  ];
+  /** STARS and the lines after it, SCENE and SCENE CLOCK as `labelLines` sets them, never scrolled. */
+  const REST_LABELS = ["STARS", "SCENE", "SCENE CLOCK"];
+  const LABELS = [...MIDDLE_LABELS, ...REST_LABELS];
+  const LINES = LABELS.map((label) => ({ label, value: "NOMINAL" }));
+  const STATEMENT = "POSITIONS AS SEEN FROM SHIP";
+  const COUNT = "STARS 1,204 DRAWN";
+  const FAULT = "GRAPHICS DEVICE LOST: re-creating";
+  const LINES_NAME = "PRIMARY lines";
+  const BODY_NAME = "PRIMARY label block";
+
+  /** What the plate's scrolls count as one item each, as the block measures them. */
+  const ITEMS = ".view-label__line, .view-label__statement, .view-label__count, .request-status";
+  /** Each item's laid-out height, and each scroll's box, CSS px. */
+  const ITEM_PX = 20;
+  const BOX_PX = 100;
+
+  const MIDDLE: UpperRoom = { kind: "middle", heightPx: 140, lines: 6 };
+  const BODY: UpperRoom = { kind: "body", heightPx: BOX_PX };
+
+  /**
+   * Lays the plate out as jsdom does not: each item of a scroll 20 px tall, one under another, in
+   * a 100 px box whose content is its items.
+   */
+  function layOut(): void {
+    vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function top(
+      this: HTMLElement,
+    ) {
+      const scroll = this.closest(".view-label__scroll");
+      const index = scroll === null ? -1 : [...scroll.querySelectorAll(ITEMS)].indexOf(this);
+      return index < 0 ? 0 : index * ITEM_PX;
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function tall(
+      this: HTMLElement,
+    ) {
+      return this.matches(ITEMS) ? ITEM_PX : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function box(
+      this: HTMLElement,
+    ) {
+      return this.classList.contains("view-label__scroll") ? BOX_PX : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function content(
+      this: HTMLElement,
+    ) {
+      return this.classList.contains("view-label__scroll")
+        ? this.querySelectorAll(ITEMS).length * ITEM_PX
+        : 0;
+    });
+  }
+
+  /** The plate's props in `room`, its lines scrolling from STARS. */
+  function plate(
+    room: UpperRoom,
+    statements: ReadonlyArray<string> = [STATEMENT],
+  ): ViewLabelBlockProps {
+    return {
+      lines: LINES,
+      statements,
+      countLine: COUNT,
+      faults: [FAULT],
+      scroll: { from: "STARS", room, view: "PRIMARY" },
+    };
+  }
+
+  /** The plate laid out in `room`. */
+  function renderIn(room: UpperRoom): ReturnType<typeof render> {
+    layOut();
+    return render(<ViewLabelBlock {...plate(room)} />);
+  }
+
+  describe("while its lines before STARS scroll", () => {
+    it("scrolls FRAME to METER in a region named for the view", () => {
+      renderIn(MIDDLE);
+      expect(labelsIn(scrolling(LINES_NAME))).toEqual(MIDDLE_LABELS);
+    });
+
+    it("sets the region as a named section, with no role of its own", () => {
+      renderIn(MIDDLE);
+      const region = scrolling(LINES_NAME);
+      expect([region.tagName, region.getAttribute("role")]).toEqual(["SECTION", null]);
+    });
+
+    it("names no region for the whole plate", () => {
+      renderIn(MIDDLE);
+      expect(screen.queryByRole("region", { name: BODY_NAME })).toBeNull();
+    });
+
+    it("gives the region the focus from the keyboard, so that the keys scroll it", async () => {
+      const user = userEvent.setup();
+      renderIn(MIDDLE);
+      await user.tab();
+      expect(scrolling(LINES_NAME)).toHaveFocus();
+    });
+
+    it("sets the region's box as tall as the room gives it", () => {
+      renderIn(MIDDLE);
+      expect(scrolling(LINES_NAME)).toHaveStyle({ maxHeight: "140px" });
+    });
+
+    it("states the lines in view and their total under the region", () => {
+      renderIn(MIDDLE);
+      expect(scrolling(LINES_NAME).nextElementSibling?.textContent).toBe("1-5 of 9");
+    });
+
+    it("keeps STARS, the statements, the count line and the faults out of the region", () => {
+      renderIn(MIDDLE);
+      const region = scrolling(LINES_NAME);
+      expect([
+        within(region).queryByText("STARS"),
+        within(region).queryByText(statusLine(STATEMENT)),
+        within(region).queryByText(COUNT),
+        within(region).queryByText(statusLine(FAULT)),
+      ]).toEqual([null, null, null, null]);
+    });
+
+    it("never scrolls SCENE, which stands after STARS", () => {
+      renderIn(MIDDLE);
+      expect(within(scrolling(LINES_NAME)).queryByText("SCENE")).toBeNull();
+    });
+
+    it("stands the lines from STARS on under the position line", () => {
+      renderIn(MIDDLE);
+      const lines = scrolling(LINES_NAME).nextElementSibling?.nextElementSibling;
+      expect(lines instanceof HTMLElement ? labelsIn(lines) : null).toEqual(REST_LABELS);
+    });
+
+    it("drops the region and its position line once the plate stands whole again", () => {
+      const { rerender } = renderIn(MIDDLE);
+      rerender(<ViewLabelBlock {...plate({ kind: "whole" })} />);
+      expect([
+        screen.queryByRole("region"),
+        document.querySelector(".view-label__position"),
+      ]).toEqual([null, null]);
+    });
+  });
+
+  describe("while it stands whole", () => {
+    it("sets no region", () => {
+      renderIn({ kind: "whole" });
+      expect(screen.queryByRole("region")).toBeNull();
+    });
+
+    it("gives nothing of it the focus", async () => {
+      const user = userEvent.setup();
+      renderIn({ kind: "whole" });
+      await user.tab();
+      expect(document.body).toHaveFocus();
+    });
+
+    it("states no position line", () => {
+      renderIn({ kind: "whole" });
+      expect(screen.queryByText(/ of \d+$/u)).toBeNull();
+    });
+  });
+
+  describe("while everything under its VIEW line scrolls", () => {
+    it("scrolls every line in a region named for the view's label block", () => {
+      renderIn(BODY);
+      expect(labelsIn(scrolling(BODY_NAME))).toEqual(LABELS);
+    });
+
+    it("sets the region as a named section, with no role of its own", () => {
+      renderIn(BODY);
+      const region = scrolling(BODY_NAME);
+      expect([region.tagName, region.getAttribute("role")]).toEqual(["SECTION", null]);
+    });
+
+    it("names no region for the lines before STARS within it", () => {
+      renderIn(BODY);
+      expect(screen.queryByRole("region", { name: LINES_NAME })).toBeNull();
+    });
+
+    it("gives the region the focus from the keyboard", async () => {
+      const user = userEvent.setup();
+      renderIn(BODY);
+      await user.tab();
+      expect(scrolling(BODY_NAME)).toHaveFocus();
+    });
+
+    it("scrolls the statements, the count line and the faults with the lines", () => {
+      renderIn(BODY);
+      const region = scrolling(BODY_NAME);
+      expect([
+        within(region).queryByText(statusLine(STATEMENT)) !== null,
+        within(region).queryByText(COUNT) !== null,
+        within(region).queryByText(statusLine(FAULT)) !== null,
+      ]).toEqual([true, true, true]);
+    });
+
+    it("keeps the VIEW line above the region", () => {
+      renderIn(BODY);
+      expect(within(scrolling(BODY_NAME)).queryByText("VIEW")).toBeNull();
+    });
+
+    it("states its items' position and total under the region, out of it", () => {
+      renderIn(BODY);
+      const position = scrolling(BODY_NAME).nextElementSibling;
+      expect([
+        position?.classList.contains("view-label__position"),
+        position?.textContent.endsWith(" of 15"),
+      ]).toEqual([true, true]);
+    });
+
+    it("holds the scroll at its foot as its content grows", () => {
+      const { rerender } = renderIn(BODY);
+      rerender(<ViewLabelBlock {...plate(BODY, [STATEMENT, "EASED CAMERA MOVES"])} />);
+      expect(scrolling(BODY_NAME).scrollTop).toBe(16 * ITEM_PX);
+    });
+
+    it("leaves the scroll where the operator scrolled it from the foot", () => {
+      const { rerender } = renderIn(BODY);
+      const region = scrolling(BODY_NAME);
+      region.scrollTop = 0;
+      fireEvent.scroll(region);
+      rerender(<ViewLabelBlock {...plate(BODY, [STATEMENT, "EASED CAMERA MOVES"])} />);
+      expect(region.scrollTop).toBe(0);
+    });
+
+    it("takes the region's tab stop away once the plate stands whole again", () => {
+      const { rerender } = renderIn(BODY);
+      const region = scrolling(BODY_NAME);
+      rerender(<ViewLabelBlock {...plate({ kind: "whole" })} />);
+      expect(region.tabIndex).toBe(-1);
+    });
+  });
+
+  describe("on a block that never scrolls, an instrument's", () => {
+    it("sets no region", () => {
+      layOut();
+      render(
+        <ViewLabelBlock lines={LINES} statements={[STATEMENT]} countLine={COUNT} faults={[]} />,
+      );
+      expect(screen.queryByRole("region")).toBeNull();
+    });
+
+    it("keeps its lines in one list", () => {
+      const { container } = render(
+        <ViewLabelBlock lines={LINES} statements={[]} countLine={null} faults={[]} />,
+      );
+      expect(container.querySelectorAll("dl")).toHaveLength(1);
+    });
   });
 });

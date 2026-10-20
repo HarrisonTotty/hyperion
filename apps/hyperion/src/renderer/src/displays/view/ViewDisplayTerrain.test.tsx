@@ -43,7 +43,7 @@ import type { TerrainSession } from "../../view/terrain/session";
 import type { TerrainFixture } from "./useTerrainSession";
 import { instrumentViewId, PRIMARY_VIEW_ID } from "./viewNames";
 import { ViewFrameDrawer, type ViewFrameInputs } from "./viewFrameDrawer";
-import { SCENE_OPTIONS } from "./viewRun";
+import { runPose, SCENE_OPTIONS } from "./viewRun";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -682,7 +682,7 @@ describe("the wireframe's terrain on a live VIEW (R10.T11)", () => {
     ]);
   });
 
-  it("states no contour interval on an instrument's label block, though it hands the Earth over too", async () => {
+  it("states an instrument's own contour interval after its FOV once it hands the Earth over too (R10.T12.b)", async () => {
     const sessions: TerrainSession[] = [];
     const view = await earthInWireframe(sessions);
     await openInstrument(view, "INSTRUMENT 1");
@@ -690,7 +690,61 @@ describe("the wireframe's terrain on a live VIEW (R10.T11)", () => {
     if (sessions.at(-1)?.wirePass(FIXTURE_EARTH)?.viewIds.has(instrumentViewId(1)) !== true) {
       throw new Error("INSTRUMENT 1 does not hand the Earth over in the wireframe");
     }
-    expect(contourIntervalIn(screen.getByRole("region", { name: "INSTRUMENT 1" }))).toBeNull();
+    const slot = screen.getByRole("region", { name: "INSTRUMENT 1" });
+    const labels = within(slot)
+      .getAllByRole("term")
+      .map((term) => term.textContent);
+    expect([
+      contourIntervalIn(slot),
+      labels.indexOf("CONTOUR INTERVAL") - labels.indexOf("FOV"),
+    ]).toEqual([expect.stringMatching(/^[\d.]+ k?m · INDEX [\d.]+ k?m$/u), 1]);
+  });
+
+  describe("with the primary in CHASE and an instrument opened at its pose (R10.T12.b; decision-r10-view-block-room §10)", () => {
+    /** The primary in CHASE by its key, then INSTRUMENT 1 opened, which starts in CHASE. */
+    async function bothInChase(): Promise<ViewDisplayHarness> {
+      const view = await earthInWireframe([]);
+      await view.user.keyboard("2");
+      view.advance(300);
+      await openInstrument(view, "INSTRUMENT 1");
+      await bakeFor(view, 10);
+      return view;
+    }
+
+    it("draws the instrument at the primary's pose in every frame both draw", async () => {
+      const view = await bothInChase();
+      const frames = framesOver(view, 100);
+      // Each instrument frame's camera position, beside the primary's in the frame of that time.
+      const pairs = frames.flatMap(({ inputs }) => {
+        const terrain = inputs.terrain;
+        if (terrain?.view !== instrumentViewId(1)) {
+          return [];
+        }
+        const primary = frames.find(
+          ({ inputs: other }) =>
+            other.terrain?.view === PRIMARY_VIEW_ID && other.terrain.nowMs === terrain.nowMs,
+        );
+        return [
+          {
+            primary: primary === undefined ? null : runPose(primary.inputs.run).positionM,
+            instrument: runPose(inputs.run).positionM,
+          },
+        ];
+      });
+      expect({
+        drawn: pairs.length > 0,
+        positions: pairs.map(({ primary }) => primary),
+      }).toEqual({ drawn: true, positions: pairs.map(({ instrument }) => instrument) });
+    });
+
+    it("states one CONTOUR INTERVAL on both views' label blocks", async () => {
+      await bothInChase();
+      const primary = contourIntervalIn(primaryLabelBlock());
+      expect([
+        primary,
+        contourIntervalIn(screen.getByRole("region", { name: "INSTRUMENT 1" })),
+      ]).toEqual([expect.stringMatching(/^[\d.]+ k?m · INDEX [\d.]+ k?m$/u), primary]);
+    });
   });
 
   it("states the fault on the wireframe primary's label block while it hands the Earth over and every height worker is lost", async () => {

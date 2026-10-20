@@ -76,6 +76,7 @@ import {
   terrainTexelLaws,
 } from "./terrainMaterial";
 import type { TerrainViewFrame, TerrainViewFrameInput } from "./terrainPass";
+import { PoseIntervals } from "./poseInterval";
 import { contourInterval } from "./terrainWire";
 import { type BakedPatch, PALETTE_NONE, PHOTOMETRY_STRIDE } from "./workers/messages";
 
@@ -1028,6 +1029,51 @@ describe("a wireframe view's terrain (R10.T11; Design note 14)", () => {
     const { source } = wireSource(theMoon({ viewIds: new Set([INSTRUMENT]) }));
     const frame = wireframeTerrainOf(source, wireInput({ previousIntervalM: 500 }));
     expect([frame.intervalM, frame.heldIntervalM, frame.annunciation]).toEqual([null, 500, null]);
+  });
+
+  describe("states one interval for a pose through the stage's holder (R10.T12.b)", () => {
+    // 7 km over the pole: 500 m from no interval, 200 m held from 200 m.
+    const HIGH = abovePole(7_000);
+    /** The moon's wireframe pass, which took both views. */
+    const BOTH = theMoon({ viewIds: new Set([VIEW, INSTRUMENT]) });
+
+    it("states the interval a first view stated at the same point in the same frame", () => {
+      const intervals = new PoseIntervals();
+      const { source } = wireSource(BOTH);
+      wireframeTerrainOf(source, wireInput({ camera: HIGH, previousIntervalM: 200, intervals }));
+      const second = wireframeTerrainOf(
+        source,
+        wireInput({ view: INSTRUMENT, camera: HIGH, intervals }),
+      );
+      expect(second.intervalM).toBe(200);
+    });
+
+    it("states a view's own interval where no view stated one at its point", () => {
+      const { source } = wireSource(BOTH);
+      const alone = wireframeTerrainOf(
+        source,
+        wireInput({ view: INSTRUMENT, camera: HIGH, intervals: new PoseIntervals() }),
+      );
+      expect(alone.intervalM).toBe(500);
+    });
+
+    it("forgets a view in a frame in which it draws no body, so that a view at its point keeps its own", () => {
+      const intervals = new PoseIntervals();
+      wireframeTerrainOf(
+        wireSource(BOTH).source,
+        wireInput({ camera: HIGH, previousIntervalM: 200, intervals }),
+      );
+      // The next frame's pass no longer takes the primary: it has no nadir.
+      wireframeTerrainOf(
+        wireSource(theMoon({ viewIds: new Set([INSTRUMENT]) })).source,
+        wireInput({ camera: HIGH, previousIntervalM: 200, intervals, nowMs: 1_250 }),
+      );
+      const second = wireframeTerrainOf(
+        wireSource(BOTH).source,
+        wireInput({ view: INSTRUMENT, camera: HIGH, intervals, nowMs: 1_250 }),
+      );
+      expect(second.intervalM).toBe(500);
+    });
   });
 
   describe("draws the body's graticule as R02's draw list does", () => {

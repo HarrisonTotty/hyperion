@@ -4159,7 +4159,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   the label lines also break at spaces, and two slots fit only while each holds at most one
   statement, so that a line appearing in an open slot without room (the moment of
   `LIGHTING: PENDING`) sets `INSTRUMENT 2` under `INSTRUMENT 1`, its foot past the stage's, until
-  it clears.
+  it clears. _Superseded (decision-r10-view-block-room §3): a slot the stage cannot hold whole is
+  held, and none stands past the stage; built by R10.T12.b._
 - **Deviations in T19.b, as built** (2026-10-05).
   - **Files.** Beyond the task's list: `displays/view/viewLayout.ts` (`ViewLayout`, `viewLayout`,
     `FULL_MIN_WIDTH_REM` 98.5, `FULL_MIN_HEIGHT_REM` 55.25, `FoldPanel`, `DEFAULT_FOLD`,

@@ -71,6 +71,7 @@ import type {
   TerrainViewFrameInput,
 } from "./terrainPass";
 import { contourInterval, heightAboveGroundM } from "./terrainWire";
+import { poseInterval, type PoseIntervals } from "./poseInterval";
 
 /** A body's lights for its terrain's draw, from its disc record ({@link terrainLightingOf}). */
 export interface TerrainLightingFrame {
@@ -245,6 +246,11 @@ export interface ViewTerrainInput {
    * edges have failed (R10.T16.e).
    */
   readonly nowMs: number;
+  /**
+   * The stage's holder of the contour interval each pose states (plan R10, R10.T12.b), through
+   * which the views at one point state one; absent, the view's hysteresis is its own.
+   */
+  readonly intervals?: PoseIntervals | undefined;
 }
 
 /** What a view's photorealistic frame's terrain is made with, beyond its source. */
@@ -477,6 +483,11 @@ export interface WireframeTerrainInput {
   readonly nowMs: number;
   /** The contour interval the view stated last, m, its hysteresis's; `null` with none. */
   readonly previousIntervalM: number | null;
+  /**
+   * The stage's holder of each pose's interval (R10.T12.b): the view takes the interval another
+   * view stated this frame at its point, or steps from the one held there; absent, its own.
+   */
+  readonly intervals?: PoseIntervals | undefined;
 }
 
 /** A wireframe view's terrain in one frame (R10.T11): what its renderer draws, and what its label block states. */
@@ -510,7 +521,10 @@ const NO_LIGHT: readonly [number, number, number] = [0, 0, 0];
  * The interval is one for the view, so that its label block states one: {@link contourInterval} of
  * the camera's height above the ground at its nadir ({@link heightAboveGroundM}, over its pass's
  * resident heights, the datum where the nadir is unsurveyed or not yet drawn) on the body it stands
- * lowest over, from the view's last.
+ * lowest over, from the view's last; and one for a pose (R10.T12.b): through the stage's holder
+ * (`poseInterval`), the interval another view stated this frame where the camera stands at its
+ * point over that body, or stepped from the one held there. A view drawing no body's terrain
+ * leaves the holder.
  */
 export function wireframeTerrainOf(
   source: WireTerrainSource,
@@ -561,6 +575,7 @@ export function wireframeTerrainOf(
     null,
   );
   if (nadir === null) {
+    input.intervals?.forget(view);
     return {
       draws: [],
       surveyed: new Map(),
@@ -569,7 +584,21 @@ export function wireframeTerrainOf(
       heldIntervalM: input.previousIntervalM,
     };
   }
-  const intervalM = contourInterval(nadir.aglM, input.previousIntervalM);
+  const step = (previousM: number | null): number => contourInterval(nadir.aglM, previousM);
+  const intervalM =
+    input.intervals === undefined
+      ? step(input.previousIntervalM)
+      : poseInterval(
+          input.intervals,
+          view,
+          {
+            body: nadir.body.id,
+            cameraBodyFixedM: rotateToBodyFixed(nadir.rotation, scale(nadir.centreM, -1)),
+          },
+          input.nowMs,
+          input.previousIntervalM,
+          step,
+        );
   const colours = {
     muted: linearColour(input.tokens.textMuted),
     text: linearColour(input.tokens.text),

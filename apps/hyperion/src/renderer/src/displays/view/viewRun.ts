@@ -623,8 +623,8 @@ export function sceneClockReading(secondsPerSecond: number): string {
  * at stands directly after `FOV`, `CONTOUR INTERVAL 200 m · INDEX 1 km` (plan R10, R10.T11; the
  * guide's Views; decision-r10-view-block-room §5), the wireframe's statement of vertical scale
  * beside `FOV`'s angular one; it is a statement of the picture drawn, not of the server's data, so
- * it does not go stale. The `PRIMARY` view's block alone carries it until R10.T12.b, which states
- * an instrument's with the slot it holds (decision-r10-view-block-room §6).
+ * it does not go stale. An instrument's block states its own after its `FOV` (R10.T12.b;
+ * decision-r10-view-block-room §6), the stage's views at one pose stating one interval.
  *
  * @param stale - Whether the server's scene is stale (`useScene`'s `stale`): its time, held where
  *   the scene went stale, then reads as the guide's stale value.

@@ -647,8 +647,8 @@ async function nextReport(view: Setup): Promise<number | undefined> {
   return view.socket.requestsOfKind("scene_cameras").at(-1)?.body.cameras.length;
 }
 
-async function serverScene(): Promise<Setup> {
-  const view = await setup();
+async function serverScene(options: Parameters<typeof setup>[0] = {}): Promise<Setup> {
+  const view = await setup(options);
   await openUniverse(view);
   await sceneArrives(view);
   await settle();
@@ -992,5 +992,58 @@ describe("VIEW's instruments under the pointer (R07.T19.f)", () => {
     expect([turned, chaseCameraLine()]).toEqual([turned, turned]);
     expect(turned).toMatch(/^CHASE · LOOK \d{3}° \+00°$/u);
     await view.user.keyboard("{/Control}{/ArrowLeft}");
+  });
+});
+
+/** Sets the interface scale's rem, as the scale setting does, and fires the window's resize. */
+function scaleTo(view: Setup, remPx: number): void {
+  act(() => {
+    document.documentElement.style.fontSize = `${String(remPx)}px`;
+    window.dispatchEvent(new Event("resize"));
+  });
+  view.advance(100);
+}
+
+describe("VIEW's instruments held for the stage's room (R10.T12.b)", () => {
+  /** A stage that holds an instrument at 16 px to the rem, but too narrow for one at 24 px. */
+  const HOLDS_AT_100_ONLY = { widthPx: 1000, heightPx: 720 } as const;
+
+  afterEach(() => {
+    document.documentElement.style.fontSize = "";
+  });
+
+  it("withdraws a held instrument's camera from the server's scene", async () => {
+    const view = await serverScene({ stagePx: HOLDS_AT_100_ONLY });
+    await openInstrument(view, "INSTRUMENT 1");
+    await nextReport(view);
+    scaleTo(view, 24);
+    expect(await nextReport(view)).toBe(1);
+  });
+
+  it("reports a held instrument's camera again once it returns", async () => {
+    const view = await serverScene({ stagePx: HOLDS_AT_100_ONLY });
+    await openInstrument(view, "INSTRUMENT 1");
+    await nextReport(view);
+    scaleTo(view, 24);
+    await nextReport(view);
+    scaleTo(view, 16);
+    expect(await nextReport(view)).toBe(2);
+  });
+
+  it("lets go of the flight keys held on an instrument as it is held", async () => {
+    const view = await setup({ stagePx: HOLDS_AT_100_ONLY });
+    await openInstrument(view, "INSTRUMENT 1");
+    canvasNamed(/INSTRUMENT 1/).focus();
+    const before = chaseCameraLine();
+    await view.user.keyboard("{ArrowLeft>}");
+    view.advance(300);
+    const turning = chaseCameraLine() !== before;
+    scaleTo(view, 24);
+    scaleTo(view, 16);
+    view.advance(300);
+    const returned = chaseCameraLine();
+    view.advance(600);
+    expect([turning, chaseCameraLine()]).toEqual([true, returned]);
+    await view.user.keyboard("{/ArrowLeft}");
   });
 });

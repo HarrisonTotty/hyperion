@@ -2470,6 +2470,55 @@ survey of the view's `FRAME` body (the store's status, coverage and header, stal
 down), with the refused field's state as signed off (decision-r10-t16-leans §12). Its by-hand checks
 may take T16.d's `TERRAIN TEST`._
 
+- **R10.T12.b `VIEW`'s room** (new, decision-r10-view-block-room). The `PRIMARY` view's label block
+  as two plates and the order in which its parts give way, the instrument slots held where the
+  stage cannot hold them, and the wireframe instrument's `CONTOUR INTERVAL`, before R10.T12's
+  label-block work lands:
+  - _The plates_ (`ViewLabelBlock.tsx`, `ViewDisplay.tsx`, `styles.css`): the upper plate as built,
+    with `CONTOUR INTERVAL` after `FOV`; a lower plate at the stage's bottom left, inset 0.5 rem and
+    standing on its foot, whose groups R10.T12 fills (the survey line, `DATUM`,
+    `GROUND AT LINE OF SIGHT`), each with its yield line; both taking the width left of the standing
+    slots, 0.5 rem apart; mark labels clear of both.
+  - _The order_ (one pure function of the plates' laid-out heights, the stage and the standing
+    slots, each lower group reckoned at its tallest): the readout, with its tripod and note; then
+    the survey line's values and `DATUM`; then the upper plate's lines before `STARS` scroll, with
+    their position and total (`formatListPosition`), keeping `FRAME`–`CAMERA` in view at their
+    first position; then the slots are held. Each returns with a line to spare. Below the floor the
+    scroll may go to one line, then the whole upper plate, held at its foot. The `STARS` line and
+    those after it, the statements, the count line, the faults, the survey line's states and the
+    yield lines never give way. The scroller is a focusable region only while it scrolls, and the
+    plate takes the pointer only there.
+  - _Held slots_ (`ViewDisplay.tsx`'s `roomForSlot`, `InstrumentView.tsx`, `InstrumentsPanel.tsx`):
+    a slot the stage cannot hold whole (for the window, the interface scale, its statements or the
+    primary's room) is held, drawing nothing and not rendered, its camera, style and target kept,
+    and returns as it was with a line to spare; `INSTRUMENT 2` first, as its title row with `CLOSE`
+    and `NOT AVAILABLE: no room at this window size` while `INSTRUMENT 1` stands; where no slot can
+    stand, each is held whole and its `INSTRUMENTS` row says so, under the disclosure row while
+    that panel is folded. This ends decision-r07-t19-layout §5's "its foot past the stage's" and the
+    scale-change defect R10.T11 found (an instrument opened at 100% drawn at x = −78 at 150%, the
+    primary's block 36 px wide).
+  - _The instrument's interval_ (`InstrumentView.tsx`, `viewRun.ts`, `viewFrameDrawer.ts`): a
+    wireframe instrument drawing contours states its `CONTOUR INTERVAL` after its `FOV`; views
+    whose cameras stand at one point over one body state one interval, a view taking its held
+    interval from a view already at that point (tolerance at most 1 m, recorded).
+  - _The guide_, in the commit: decision-r10-view-block-room's G-A to G-E.
+
+  Tests (Vitest): the order at each step and its return, on heights; the scroller's position line,
+  its focus, and the lines it never takes; each yield line's text; a held slot's stub, its row and
+  its standing line, and its return as it was; a slot held on a scale change from 100% to 150% and
+  back; `INSTRUMENT 2` held before `INSTRUMENT 1`; the plates never wider than the width left of
+  the standing slots; the instrument's interval line; one interval for two views at one point
+  through a band's crossing, and two for views at different heights; the console-ux checks. By hand,
+  hidden and never on `:0`: `TERRAIN TEST` at about 110 s and 192 s on both settings, the primary
+  wireframe and photorealistic, in `CHASE` with `EASED CAMERA MOVES` on and in `SEAT`, with zero,
+  one and two instruments, at 1920 × 1080 at 100%, 125% and 150% and at 1280 × 720 at 100%, 125%
+  and 150%, with a scratch lower plate of R10.T12's tallest lines; the scale change with an
+  instrument open; measured, every plate and slot within the stage's inset, the plates apart, no
+  slot past the stage, and what gives way against the ruling's §3 table; nothing cut. Acceptance:
+  `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view` and
+  `src/renderer/src/view/terrain`, the console-ux checks, `just ci`. Priority: high; r10-wireframe's
+  next task after R10.T11; before R10.T12 lands, and so before T15.
+
 #### The drafts, for the owner
 
 _Drafted by lane 11 (2026-10-13); signed off 2026-10-14 under the owner's delegation
@@ -10111,3 +10160,183 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
   4. At a ratio of 1 and 80%, the upper ticks' ends come about 1.8 px from the selection bracket's
      arms about a size-class-1 body at the centre, the bracket's casing cutting their tips. Lean:
      acceptable under the draw order; for the look.
+- **`VIEW`'s room, ruled (decision-r10-view-block-room).** The floor is 80 × 45 rem (1280 × 720 at
+  100%, 1920 × 1080 at 150%); a 1280 × 720 window at 125% or 150% is below it. Stated limits: at
+  the floor beside an open instrument the primary holds back its terrain lines and, in `CHASE`,
+  scrolls a line or two of `POSITION` to `METER`, the `EXPOSURE` line included; only one wireframe
+  instrument stands over terrain at the floor; below the floor the upper plate may scroll whole,
+  held at its foot.
+- **Deviations in R10.T12.b, as built** (2026-10-20; decision-r10-view-block-room).
+  - _Files._ Beyond the entry's list, all under `apps/hyperion/src/renderer/src/`:
+    `displays/view/viewRoom.ts` (the pure decision, `viewRoom`, with `roomToOpen` in place of
+    `ViewDisplay.tsx`'s `roomForSlot`, `lowerYieldLine` and `LowerPlatePart`),
+    `displays/view/plateMeasures.ts` (the plates as laid out), `displays/view/ViewRoomSizers.tsx`
+    (the hidden copies), `displays/view/ViewLowerPlate.tsx`, `displays/view/InstrumentStub.tsx`,
+    `view/terrain/poseInterval.ts` (one interval for a pose), `displays/view/useInstruments.ts`
+    (each instrument's published interval and the holder), `view/terrain/frameTerrain.ts` (the
+    holder on `ViewTerrainInput` and `WireframeTerrainInput`) and `test/viewDisplayHarness.tsx`
+    (a plate's parts and the sizers laid out as nothing, the stub's size). `InstrumentView.tsx`
+    gains no held state of its own: a held slot's `InstrumentView` is not rendered.
+  - _How it is decided._ One pure function of the plates' heights at the stage's full width and
+    beside the slots, the stage's size, the slots' last standing heights and the room decided
+    before (the hysteresis), re-run at each render. The heights are measured after each render:
+    the live upper plate, which always holds all its lines and only clips them while it scrolls
+    (its lines measured at the scroll's width while it scrolls); and hidden, `aria-hidden` copies
+    (`ViewRoomSizers`) for what is not shown: the lower plate's three forms at its tallest (whole,
+    the readout given way, the survey given way too) at the live plates' width, and, only while
+    the slots are held for the plates (step 4), both plates beside where the slots would stand,
+    the copy's lines before `STARS` set at a scroll bar's width so that they are reckoned as tall
+    as they would stand scrolled. Beside standing slots the live plates stand for the full width
+    too, a narrower and so a taller reckoning, until the plates take the full width and are
+    measured there. So no decision feeds back on what it measures but through a cut.
+  - _A line to spare_ is one label row, 0.875 rem at B612's 1.25 line height, 1.094 rem
+    (`LINE_SPARE_REM`, the ruling's "about 1.09 rem"): a part that gave way returns, a held slot
+    returns, and slots held for the plates return once beside them the plates would stand by step
+    3, each with it to spare. A slot just opened is not a return: it stands where it fits, as its
+    `OPEN` was given (`roomToOpen`, which keeps `roomForSlot`'s rule with the slots that stand
+    reckoned, a stub as its stub and a held slot as nothing, and holds `OPEN` back where a slot
+    already stands and the plates would not stand beside a second by step 3; with no slot open
+    nothing beside a slot is measured, so an `OPEN` that trips step 4 opens the slot held, its row
+    saying so).
+  - _The hysteresis holds at one stage._ A room sets the next one's hysteresis only where both
+    were decided at the same stage (its size to half a pixel, at the same interface scale) from
+    plates measured there (`ViewRoom.basis`); after a resize or a change of interface scale the
+    room is decided afresh, since no statement came or went (beyond the text, from the lane's
+    tests: at 1280 × 720 at 100% both slots stand with 9 px to spare, and a line's margin would
+    have kept `INSTRUMENT 2` as its stub after 150% and back, against §11's "the slot returns as it
+    was"). `INSTRUMENT 2` held whole returns as its stub only with a line to spare, as a stub
+    returns whole, so that it does not change between the two as `INSTRUMENT 1`'s statements come
+    and go.
+  - _Within a step_ the lines the scroll keeps in view follow the room at once; only a return to a
+    step before asks a line to spare. So the scroll may grow or shrink by a line as a statement
+    comes and goes, and its lines are always reached by scrolling.
+  - _Step 4 at the full width._ Once the slots are held for the plates, the plates are decided again
+    at the stage's full width, from step 0, the line to spare counted from the step decided beside
+    the slots: a part that gave way beside the slots stands again wherever the full width holds it.
+  - _Steps 5 and 6 are not gated by the window's size._ They apply wherever steps 1 to 4 do not
+    hold the plates, which the design expects, and the looks found, only below the floor; gated,
+    the alternative would be a cut, which the ruling forbids at every size. Step 6 keeps the plate's
+    `VIEW` line above its scroll, which takes everything under it, with its position line beneath:
+    "the whole upper plate scrolls" is read as the plate's body, the `VIEW` line naming the plate.
+  - _The scrolling parts_ are `section`s, regions only while they scroll and are named:
+    `PRIMARY lines` for the lines before `STARS`, `PRIMARY label block` for everything under the
+    `VIEW` line, each with the default scroll bar and its position line in `.list-position`'s form,
+    as the readouts' scrolls are (`BodyReadout`'s `Readings`).
+  - _The focus_ (beyond the text; the UX review). Where a render takes away the element over the
+    stage that last held the focus, a held or returning slot's canvas, the stub, or a scroll that
+    ended with its tab stop, the focus goes to the `PRIMARY` view's canvas, never to the page,
+    where no ring would show.
+  - _A held slot_ is not drawn: its `InstrumentView` is not rendered, so its canvas, its drawer
+    and its terrain view go, it leaves the budgets' specs, its camera leaves the server's scene
+    while held (its frames report it again as it returns) and its held flight keys are released;
+    its camera, style and target stay in `useInstruments`. It is reckoned at its height as it last
+    stood whole, in rem, so that a scale change reckons it at the new scale. It is not the
+    `CONTROLS` view while held: its `CONTROLS` button is held back by the no-room line, the side
+    column reads `PRIMARY`, and the operator's choice returns with the slot (the lane's choice;
+    acting on a view that is not drawn would change it unseen). Its statements are not computed
+    while it is not drawn, so it returns once the room about it grows by its height as it stood and
+    a line (a larger stage, or the other slot shorter or closed), not when its own statements would
+    have cleared. `INSTRUMENT 2` is held first: its stub while `INSTRUMENT 1` stands, held whole
+    where even the stub does not fit; where `INSTRUMENT 1` cannot stand, `INSTRUMENT 2` alone may
+    stand in its corner. The stub's `CLOSE` gives the focus to the `PRIMARY` view's canvas, since
+    it goes with the slot.
+  - _The `INSTRUMENTS` panel._ One line,
+    `NOT AVAILABLE: no room for INSTRUMENT 1 and INSTRUMENT 2 at this window size`, names every
+    slot the stage has no room for: a closed one's `OPEN` held back, and an open one held, as its
+    stub or whole; it describes their `OPEN` and the held ones' `CONTROLS`. While the panel is folded, the line naming the slots held whole stands under its
+    own disclosure row, its title (the lane's reading of "under the disclosure row"; a stub states
+    its reason on the stage itself).
+  - _The plates' width_ is an explicit `view-label--beside` class from the room in place of the
+    `.view__overlay:has(.view-instrument)` rule, at the same `calc(100% - 36.5rem)`, so that the
+    sizers' copies and the live plates take one width by one rule.
+  - _One interval for a pose_ (`PoseIntervals`). A view whose camera, body-fixed, stands within
+    1 m (`POSE_TOLERANCE_M`) of a point at which another view stated its interval, over the body
+    its camera stands lowest over, takes that interval where it was stated in the same primary
+    frame, and else steps its hysteresis from the latest interval held at that point, its own or
+    another's, so that its own newer interval is never stepped back from another's older one (a
+    still camera's case, found by the lane's tests); elsewhere, from its own. A view whose frame
+    states none (a photorealistic frame, no body's terrain) leaves the holder, which the
+    primary's redraw effect makes and gives the instruments' frames. The primary draws first in a
+    frame, so instruments at its pose take its interval. Beyond the text: the 4 Hz
+    publish moves to a frame the 30 Hz instruments draw in too (at most 16.7 ms later at a 60 Hz
+    primary), so that every block changes interval in the same render.
+  - _The lower plate's interface_, for R10.T12's label-block commit: `ViewStage`'s `lowerParts`
+    (`NO_LOWER_PARTS` until then), a list of `LowerPlatePart`s in the guide's order, each a
+    `state` line (never yields) or a `survey`, `datum` or `readout` part with its `node` and its
+    `tallest` node (every reading Estimated, stale and `GRAZING`, `DATUM` with `SEA LEVEL`), each
+    T12's own markup with no `id` (a copy stands in the sizers); the plate sets the yield lines
+    (`lowerYieldLine`), stands only while there are parts, and is described to the canvas as
+    `<legend>-lower`; `room.readout` says whether the readout stands, by which T12 draws the
+    tripod and the `GROUND AT LINE OF SIGHT` note.
+  - _Tests_: 141 in the six new files (`viewRoom.test.ts` 79, `plateMeasures.test.tsx` 24,
+    `poseInterval.test.ts` 14, `InstrumentsPanel.test.tsx` 12, `ViewLowerPlate.test.tsx`,
+    `InstrumentStub.test.tsx`) and 61 more in the six changed ones (`ViewDisplayLayout`,
+    `ViewLabelBlock`, `InstrumentView`, `ViewDisplayTerrain`, `viewFrameDrawer`, `frameTerrain`):
+    the order at each step and its return, on heights, at one stage and afresh after a resize or a
+    change of scale; the scroller's position line, its focus and the lines it never takes; each
+    yield line's text; the stub, the held slot's row and standing line, its return as it was
+    (camera, style and target) after 150% and back, `INSTRUMENT 2` returning whole where both slots
+    stood with 9 px to spare; `INSTRUMENT 2` held before `INSTRUMENT 1`; the plates beside the
+    standing slots by their class and the stylesheet's rule; the focus handed to the `PRIMARY`
+    canvas; a held slot's camera out of the scene's reports and back; the instrument's interval
+    line; one interval for two views at one point through a band's crossing, a still camera's case,
+    and two for views at different heights, through the holder, `wireframeTerrainOf`, the drawer
+    and a live `VIEW`.
+  - _Acceptance, as run._ `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view`
+    and `src/renderer/src/view/terrain`: 92 files, 2,173 tests, all passed; the typecheck and
+    `oxlint --type-aware --deny-warnings` clean; the console-ux lint (0 errors), contrast (every new
+    pairing passes, `--text-muted` 6.76:1 on `--surface-1` and 7.22:1 on `--surface-0`) and glyphs
+    (nothing new beyond ASCII and `·`); `just ci` by the gate,
+    `just smart-ci origin/rendering-and-planets --hook-checks`, on the commit's tree.
+  - _By hand, hidden, 2026-10-20_ (the desktop, RTX 3080; the views check's `--hidden --terrain`
+    run, offscreen, windows 1926 × 1086 on high and 1286 × 724 on low; `TERRAIN TEST` at 105–140 s
+    and 188–220 s of its script, the primary wireframe and then photorealistic, each in `CHASE`
+    with `EASED CAMERA MOVES` on and in `SEAT`, with zero, one and two wireframe instruments, at
+    100%, 125% and 150% by the root's font size; a scratch lower plate of R10.T12's tallest lines,
+    the survey line, a state line, `DATUM` with `SEA LEVEL` and the readout with every reading
+    Estimated, stale and `GRAZING`; built from the commit's tree, on `a851f634`, and run from 11:25
+    and 11:44 at 1-minute loads of 9.0 and 13.6, each run's start waiting for the heavy-test lock
+    to be free; the lane's scratch `looks/`, its logs `looks-c-high.log` and `looks-c-low.log`;
+    the same cases on the tree before its last merge, twice, gave the same outcomes). Each
+    case measured every plate and slot against the stage's 0.5 rem inset (to 0.75 px), the plates'
+    gap, the slots against the stage and the plates, and every plate's and slot's scroll against
+    its client size outside the ruled scrollers. 150 cases, none cut:
+
+    | Size (room)                     | Slots | Lower plate                            | Upper plate                                       | Slots standing                                        |
+    | ------------------------------- | ----- | -------------------------------------- | ------------------------------------------------- | ----------------------------------------------------- |
+    | 1920 × 1080, 100%               | 0–2   | whole                                  | whole                                             | as opened                                             |
+    | 1920 × 1080, 125%               | 0–2   | whole                                  | whole                                             | as opened                                             |
+    | 1920 × 1080, 150% (the floor's) | 0     | whole; readout yields in photo `CHASE` | whole                                             | —                                                     |
+    | 1920 × 1080, 150%               | 1–2   | to its one line                        | `1-6` to `1-9 of 10`; whole in most `SEAT` states | `INSTRUMENT 1`; with both, `INSTRUMENT 2` as its stub |
+    | 1280 × 720, 100% (the floor)    | 0     | readout yields                         | whole                                             | —                                                     |
+    | 1280 × 720, 100%                | 1–2   | to its one line                        | `1-5` to `1-8 of 10`                              | `INSTRUMENT 1`; the second `OPEN` held back           |
+    | 1280 × 720, 125% (below)        | 0–2   | to its one line                        | `1-5` to `1-8 of 10`; whole in wireframe `SEAT`   | held whole, the panel's line                          |
+    | 1280 × 720, 150% (below)        | 0–2   | to its one line                        | whole plate, `11-14 of 14` to `15-17 of 17`       | held whole, the panel's line                          |
+
+    The plates stood at least 12 px apart at 150% and 14 px at 100% where they met. The scale change
+    at 1280 × 720: `INSTRUMENT 1` stands at 100%; at 150% it is held whole, its row reading
+    `NOT AVAILABLE: no room for INSTRUMENT 1 and INSTRUMENT 2 at this window size`
+    (`INSTRUMENT 2`, closed, has none either), the primary's plate at the full width; back at 100%
+    it stands again in `CHASE`, wireframe, as it was. At 1920 × 1080 it stands at 150% too. Steps 5
+    and 6 were reached only below the floor (step 6 at 1280 × 720 at 150%; at 125% the scroll
+    stopped at `FRAME`–`CAMERA`); step 4 was not reached. Outcomes other than the ruling's
+    expectations (§4, and its relay's item 5), each with nothing cut: at the floor alone the
+    readout yields in every state, wireframe too, where the estimate had it stand up to four
+    statements, since T12's tallest state carries a state line beside its eight-line readout; at
+    1920 × 1080 at 150% alone it yields in photorealistic `CHASE` with four statements; beside a
+    slot at the floor the upper scroll keeps 5 to 8 of its 10 lines, where the estimate had a line
+    or two in `CHASE`, never below `FRAME`–`CAMERA`; and at the floor the second instrument's
+    `OPEN` is held back (the ruled stated limit), so its stub was seen at 1920 × 1080 at 150%, the
+    same room. The compact column clipped at its foot only below the floor, 3 to 33 px at 1280 × 720
+    at 125% and 141 to 236 px at 150% (decision-r10-view-block-room, "Seen" item 4; G-B allows it).
+
+  - _Generator version._ Untouched (22): presentation alone, no golden (golden_diff: none moved).
+- **Deferred findings (2026-10-13 rule) (R10.T12.b)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _T12's lines at the floor alone._ With the survey line, a state line, `DATUM` with `SEA LEVEL`
+    and the readout in its tallest form, the lower plate did not stand whole at the floor in any
+    measured state, with no instrument open too: the readout gave way there. T12's look measures it
+    with its own lines; a measured layout that keeps the readout there is R10.T12.a's
+    (decision-r10-view-block-room, "Seen" item 1).
+  - _The compact column at 1280 × 720 at 125%_ clips 3 to 33 px at its foot (below the floor, as
+    G-B allows); a selector that holds one row, or a tighter fold, is R07's (Seen items 4 and 5).

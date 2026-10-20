@@ -19,6 +19,7 @@ import { terrainStatementOf } from "./viewFaults";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import { PRIMARY_NAME } from "./viewNames";
 import {
+  CONTOUR_INTERVAL_LABEL,
   type LabelLine,
   labelLines,
   labelStatements,
@@ -77,8 +78,9 @@ export interface InstrumentViewProps {
 /**
  * The lines of an instrument's label block (decision-r07-t19, item 2b): every line of the
  * primary's but `SCENE` and its `SCENE CLOCK` (R07.T16.k), which describe the display's scene, for
- * which the header shows its `TRAINING` banner, and `METER`, the primary's own (R07.T19.b); and the
- * exposure's `SOURCE`, the primary view, before `STARS`.
+ * which the header shows its `TRAINING` banner, and `METER`, the primary's own (R07.T19.b); its own
+ * `CONTOUR INTERVAL` after its `FOV` while its wireframe draws contours (plan R10, R10.T12.b;
+ * decision-r10-view-block-room §6); and the exposure's `SOURCE`, the primary view, before `STARS`.
  */
 const INSTRUMENT_LINES: ReadonlyArray<string> = [
   "FRAME",
@@ -86,6 +88,7 @@ const INSTRUMENT_LINES: ReadonlyArray<string> = [
   "STYLE",
   "CAMERA",
   "FOV",
+  CONTOUR_INTERVAL_LABEL,
   "EXPOSURE",
   "SOURCE",
   "STARS",
@@ -138,7 +141,9 @@ function instrumentLines(
  * (`LIGHTING: …`, `BODY PHOTOMETRY: NOT YET MODELLED`, `CRAFT PHOTOMETRY: NOT YET MODELLED` or the
  * two composed, R07.T16.e) unless the primary's block shows the same line
  * (decision-r07-t19-layout, item 5). `ROTATION: NOT YET MODELLED`, about the scene's bodies, is
- * the primary's alone. Its list and its camera and style controls are the side column's while
+ * the primary's alone. While its wireframe draws a body's contours, its block states its own
+ * `CONTOUR INTERVAL` after its `FOV` (plan R10, R10.T12.b), the interval the primary's states where
+ * the two stand at one pose. Its list and its camera and style controls are the side column's while
  * `CONTROLS` points at it, and so are its `POSITION` and `POINTING` (R07.T19.f): at 1280 × 720 the
  * slot has no room for another line.
  */
@@ -229,7 +234,7 @@ export function InstrumentView({
             <ViewLabelBlock
               id={labelId}
               lines={instrumentLines(
-                labelLines(run, exposure, stale),
+                labelLines(run, exposure, stale, shown?.contourIntervalM ?? null),
                 drawn,
                 instrument.skyLabel ?? (skyAwaiting ? { value: SKY_PENDING } : null),
               )}

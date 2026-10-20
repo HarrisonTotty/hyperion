@@ -417,7 +417,10 @@ export class ViewFrameDrawer {
       terrain = photoreal.terrain;
     }
     let contourIntervalM: number | null = null;
-    if (!drawn) {
+    if (drawn) {
+      // A photorealistic frame states no interval for its pose (R10.T12.b).
+      inputs.terrain?.intervals?.forget(inputs.terrain.view);
+    } else {
       // The bodies this view hands over to the wireframe's passes (R10.T11).
       const wire =
         inputs.terrain === undefined
@@ -433,6 +436,7 @@ export class ViewFrameDrawer {
               occluderSlopePx: list.occluderSlopePx,
               nowMs: inputs.terrain.nowMs,
               previousIntervalM: this.#contourIntervalM,
+              intervals: inputs.terrain.intervals,
             });
       if (wire !== null) {
         terrain = wire.annunciation;

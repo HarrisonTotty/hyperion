@@ -3,6 +3,7 @@ import {
   type FocusEvent,
   type KeyboardEvent,
   memo,
+  type ReactNode,
   useCallback,
   useEffect,
   useId,
@@ -31,6 +32,7 @@ import { useThrottledValue } from "../../spatial/useThrottledValue";
 import { maxFreeRateStep } from "../../view/camera/freeCamera";
 import { BudgetedScale, drawsInFrame, PrimaryFrameTimes } from "../../view/budget/framePacing";
 import {
+  INSTRUMENT_RATE_HZ,
   photorealisticAllowed,
   type ViewBudget,
   viewBudgets,
@@ -93,10 +95,16 @@ import {
   withPermission,
 } from "./styleRefusals";
 import { InstrumentControls } from "./InstrumentControls";
-import { InstrumentsPanel } from "./InstrumentsPanel";
+import { InstrumentsPanel, type InstrumentsPanelSlot } from "./InstrumentsPanel";
 import { InstrumentView } from "./InstrumentView";
 import { type Instrument, type InstrumentsFrame, useInstruments } from "./useInstruments";
-import { PRIMARY_NAME, PRIMARY_VIEW_ID, PRIMARY_VIEW_NAME } from "./viewNames";
+import {
+  type InstrumentSlot,
+  instrumentViewId,
+  PRIMARY_NAME,
+  PRIMARY_VIEW_ID,
+  PRIMARY_VIEW_NAME,
+} from "./viewNames";
 import { autoNotAvailable, ExposurePanel, exposureNote } from "./ExposurePanel";
 import { MeterControl, meterLabel } from "./MeterControl";
 import {
@@ -122,6 +130,24 @@ import {
   type ViewFrameInputs,
 } from "./viewFrameDrawer";
 import { ViewLabelBlock } from "./ViewLabelBlock";
+import { ViewLowerPlate } from "./ViewLowerPlate";
+import { InstrumentStub } from "./InstrumentStub";
+import { measureRoom, NOT_MEASURED, type RoomMeasures, sameRoomMeasures } from "./plateMeasures";
+import { BESIDE_CLASS, ViewRoomSizers } from "./ViewRoomSizers";
+import {
+  INSTRUMENT_SLOT_REM,
+  type LowerPlatePart,
+  type RoomInput,
+  roomToOpen,
+  sameRoom,
+  type SlotRoomInput,
+  type SlotStanding,
+  STUB_HEIGHT_REM,
+  type ViewRoom,
+  viewRoom,
+  wholeRoom,
+} from "./viewRoom";
+import { PoseIntervals } from "../../view/terrain/poseInterval";
 import {
   type MarkLabelState,
   markLabelPlaces,
@@ -191,47 +217,59 @@ const VIEW_NAME = PRIMARY_VIEW_NAME;
 const VIEW_ID: ViewId = PRIMARY_VIEW_ID;
 
 /**
- * An instrument slot's height and width on the stage before one is open, rem (decision-r07-t19,
- * item 2a): its title and padding, and its 15 × 11.25 rem canvas beside a label block up to 18 rem
- * wide, whose dozen lines (the stars' reading over three) set the height, 15.9 rem as measured.
+ * The label of the `PRIMARY` view's upper plate's first line that never scrolls: the lines before
+ * it, `FRAME` to `METER`, scroll where the stage cannot hold the plates whole
+ * (decision-r10-view-block-room §3).
  */
-const INSTRUMENT_SLOT_REM = { heightRem: 16, widthRem: 35 } as const;
-
-/** The insets about and between the slots on the stage, rem. */
-const INSTRUMENT_INSET_REM = 0.5;
+const STARS_LABEL = "STARS";
 
 /**
- * The least width left to the primary's label block beside the slots, rem: the 230 px it had at
- * 1280 × 720 with both open, which the ruling accepted.
+ * The last of the upper plate's lines that stay in view at its scroll's first position, the guide's
+ * "always shown" lines `FRAME` to `CAMERA`, with `QUALITY` among them.
  */
-const PRIMARY_LABEL_MIN_REM = 14;
+const PINNED_THROUGH = "CAMERA";
 
 /**
- * Whether the stage has room for one more instrument slot beside the `open` ones, beside the
- * primary's label block at its least width; `true` before the stage is laid out.
- *
- * @remarks
- * The slots stand at the stage's top right and its foot (decision-r07-t19-layout, item 3), so the
- * room is the stage's height less the open slots' and the insets about them; a new slot is taken
- * to be as tall as those open (a slot's label block, not its canvas, sets its height).
- *
- * @param open - The open slots' panels as laid out, each `null` before it is measured.
+ * The lower plate's parts (decision-r10-view-block-room §3): none until R10.T12 fills them with the
+ * survey line, `DATUM` and `GROUND AT LINE OF SIGHT`, while the view states a body's terrain.
  */
-function roomForSlot(stage: ElementSize | null, open: ReadonlyArray<ElementSize | null>): boolean {
-  if (stage === null || stage.remPx <= 0) {
-    return true;
+const NO_LOWER_PARTS: ReadonlyArray<LowerPlatePart<ReactNode>> = [];
+
+/** How many of `lines` before `STARS` stay in view at the scroll's first position: to `CAMERA`. */
+function pinnedLinesOf(lines: ReadonlyArray<LabelLine>): number {
+  const scrolling = lines.findIndex((line) => line.label === STARS_LABEL);
+  const before = scrolling < 0 ? lines : lines.slice(0, scrolling);
+  return before.findIndex((line) => line.label === PINNED_THROUGH) + 1;
+}
+
+/** How an open slot is held, as the `INSTRUMENTS` panel says it: as its stub, whole, or not. */
+function heldOf(standing: SlotStanding): InstrumentsPanelSlot["held"] {
+  let held: InstrumentsPanelSlot["held"];
+  switch (standing) {
+    case "stub":
+      held = "stub";
+      break;
+    case "held":
+      held = "whole";
+      break;
+    case "stands":
+    case "closed":
+      held = null;
+      break;
   }
-  const inset = INSTRUMENT_INSET_REM * stage.remPx;
-  const defaultPx = INSTRUMENT_SLOT_REM.heightRem * stage.remPx;
-  const heightsPx = open.map((panel) => panel?.heightPx ?? defaultPx);
-  const usedPx = heightsPx.reduce((sum, heightPx) => sum + heightPx + inset, 0);
-  const slotPx =
-    heightsPx.length === 0 ? defaultPx : (usedPx - inset * heightsPx.length) / heightsPx.length;
-  const widthRem = stage.widthPx / stage.remPx;
-  return (
-    inset + usedPx + slotPx + inset <= stage.heightPx &&
-    INSTRUMENT_SLOT_REM.widthRem + 3 * INSTRUMENT_INSET_REM + PRIMARY_LABEL_MIN_REM <= widthRem
-  );
+  return held;
+}
+
+/** What the room reads of a slot: whether it is open, and its height as it last stood whole. */
+function slotRoomOf(slot: Instrument | undefined): SlotRoomInput {
+  const panel = slot?.panelSize ?? null;
+  return {
+    open: slot?.open === true,
+    heightRem:
+      panel === null || !(panel.remPx > 0)
+        ? INSTRUMENT_SLOT_REM.heightRem
+        : panel.heightPx / panel.remPx,
+  };
 }
 
 /** No stars, one array for every frame without an answer. */
@@ -361,6 +399,8 @@ interface BudgetInputs {
 /** An instrument view with its standing in the stage's budgets and graphics (R07.T19). */
 interface InstrumentViewState {
   readonly slot: Instrument;
+  /** Where it stands on the stage (R10.T12.b): whole, as its stub, held whole, or closed. */
+  readonly standing: SlotStanding;
   /** Why each style is held back for it: its adapter's, then (while open) the budget's. */
   readonly refusals: StyleRefusals;
   /** The styles it may switch to. */
@@ -467,14 +507,15 @@ function exposureShownChanged(shown: ExposureControl, next: ExposureControl): bo
 
 /**
  * The chrome over a view's stage, CSS px from its top left (R07.T16.i): every box over the canvas
- * but the marks' labels, which is the label block with its statements, and each open instrument
- * slot, but not the slots' column, which is empty between them.
+ * but the marks' labels, which is the label block's two plates (R10.T12.b), and each instrument
+ * slot standing, whole or as its stub, but not the slots' column, which is empty between them, nor
+ * the room's hidden sizers.
  */
 function chromeBoxesPx(overlay: Element): ScreenBoxPx[] {
   const origin = overlay.getBoundingClientRect();
   return [
     ...overlay.querySelectorAll(
-      ":scope > :not(.view-marks):not(.view-instruments), :scope > .view-instruments > .view-instrument",
+      ":scope > :not(.view-marks):not(.view-instruments):not(.view-room-sizers), :scope > .view-instruments > .view-instrument",
     ),
   ].map((element) => {
     const box = element.getBoundingClientRect();
@@ -709,9 +750,40 @@ function ViewStage({
     setting,
     modifier,
   });
+  // The stage's room (plan R10, R10.T12.b; decision-r10-view-block-room §3): the slots by the
+  // stage's size and their own heights, then the plates' parts in the ruled order beside those that
+  // stand, from the plates as last laid out and the room decided before, its hysteresis's; adjusted
+  // during render as the measures change.
+  const { ref: stubRef, size: stubSize } = useElementSize();
+  const [measures, setMeasures] = useState<RoomMeasures>(NOT_MEASURED);
+  const roomInput: RoomInput = {
+    stage: size,
+    slots: [slotRoomOf(instruments.slots[0]), slotRoomOf(instruments.slots[1])],
+    stubHeightRem:
+      stubSize === null || !(stubSize.remPx > 0)
+        ? STUB_HEIGHT_REM
+        : stubSize.heightPx / stubSize.remPx,
+    full: measures.full,
+    beside: measures.beside,
+    measuredStage: measures.stage,
+  };
+  const [shownRoom, setShownRoom] = useState<ViewRoom>(() => wholeRoom(roomInput.slots));
+  const decided = viewRoom(roomInput, shownRoom);
+  const room = sameRoom(decided, shownRoom) ? shownRoom : decided;
+  if (room !== shownRoom) {
+    setShownRoom(room);
+  }
+  const standingOf = (slot: InstrumentSlot): SlotStanding => room.slots[slot - 1] ?? "closed";
+  // The plates take the width left of the slots that stand, whole or as a stub.
+  const beside = room.slots.some((each) => each === "stands" || each === "stub");
+  const heldOne = standingOf(1) === "stub" || standingOf(1) === "held";
+  const heldTwo = standingOf(2) === "stub" || standingOf(2) === "held";
+  // A held slot draws nothing, so it is budgeted for nothing either.
   const specs: ReadonlyArray<ViewSpec> = [
     { id: VIEW_ID, slot: "primary", style: published.run.camera.style },
-    ...instruments.specs,
+    ...instruments.specs.filter((spec) =>
+      instruments.slots.some((slot) => slot.id === spec.id && standingOf(slot.slot) === "stands"),
+    ),
   ];
   const budgets = viewBudgets(specs, setting);
   // While no view can be drawn both styles are held back, by the style panel and the key 4 alike,
@@ -729,12 +801,15 @@ function ViewStage({
   // view can be drawn the instruments are held, as their canvases are not mounted.
   const instrumentViews: ReadonlyArray<InstrumentViewState> = instruments.slots.map((slot) => {
     const adapter = styleRefusals(graphics, slot.shown?.photoreal ?? "idle");
-    // A closed instrument has no budget to ask, and nothing to switch.
-    const slotRefusals = slot.open
-      ? withPermission(adapter, photorealisticAllowed(specs, setting, slot.id))
-      : adapter;
+    const standing = standingOf(slot.slot);
+    // A closed or held instrument has no budget to ask, and nothing to switch.
+    const slotRefusals =
+      standing === "stands"
+        ? withPermission(adapter, photorealisticAllowed(specs, setting, slot.id))
+        : adapter;
     return {
       slot,
+      standing,
       refusals: slotRefusals,
       availability: availabilityOf(slotRefusals),
       budgetStyle: budgets.get(slot.id)?.style ?? "wireframe",
@@ -742,10 +817,12 @@ function ViewStage({
     };
   });
   // The CONTROLS view: the side column's list and controls, and the single keys pressed off a
-  // canvas, act on it; an instrument closed meanwhile, or no view drawn, leaves PRIMARY there.
+  // canvas, act on it; an instrument closed meanwhile, or held for the stage's room (R10.T12.b),
+  // or no view drawn, leaves PRIMARY there, and a held one takes it back as it returns.
   const operatedView = drawing
     ? (instrumentViews.find(
-        ({ slot }) => slot.open && slot.id === operated && slot.shown !== null,
+        ({ slot, standing }) =>
+          standing === "stands" && slot.id === operated && slot.shown !== null,
       ) ?? null)
     : null;
   const controlsView = operatedView === null ? VIEW_ID : operatedView.slot.id;
@@ -831,6 +908,22 @@ function ViewStage({
     };
   }, [removeCamera]);
 
+  // A held instrument is not drawn (R10.T12.b): its camera leaves the server's scene until it
+  // returns and reports again, and no flight key stays held for it, its canvas gone with its focus.
+  const releaseKeys = instruments.releaseKeys;
+  useEffect(() => {
+    const held: ReadonlyArray<readonly [InstrumentSlot, boolean]> = [
+      [1, heldOne],
+      [2, heldTwo],
+    ];
+    for (const [slot, isHeld] of held) {
+      if (isHeld) {
+        removeCamera?.(instrumentViewId(slot));
+        releaseKeys(slot);
+      }
+    }
+  }, [heldOne, heldTwo, removeCamera, releaseKeys]);
+
   // The redraw loop: every frame while the display is shown; `Activity` tears it down when hidden.
   useEffect(() => {
     if (engineState.kind !== "ready" || canvas === null) {
@@ -903,6 +996,10 @@ function ViewStage({
     let stepGuard = new TerrainFailureGuard();
     // The contour interval of the last frame drawn (R10.T11), for the label block.
     let contourIntervalM: number | null = null;
+    // One interval for a pose (R10.T12.b; decision-r10-view-block-room §10): the stage's views
+    // state the contour interval held at the point their cameras share, through this one holder,
+    // which the primary's frames give the instruments' with their own.
+    const poseIntervals = new PoseIntervals();
     let frame = 0;
     const tick = (nowMs: number): void => {
       animationFrame += 1;
@@ -1010,8 +1107,12 @@ function ViewStage({
           // Every view's lit bodies shade and hand over by the session's (R10.T16.a).
           classMaps: session?.classMaps,
           reliefs: session?.reliefs,
-          // The view's own terrain of the session's passes, and its survey edges (R10.T16.c).
-          terrain: session === null ? undefined : { source: session, view: VIEW_ID, nowMs },
+          // The view's own terrain of the session's passes, and its survey edges (R10.T16.c),
+          // its contour interval through the stage's holder (R10.T12.b).
+          terrain:
+            session === null
+              ? undefined
+              : { source: session, view: VIEW_ID, nowMs, intervals: poseIntervals },
         };
         // What it draws now, in the style it last drew in (S8), for the step below.
         const report =
@@ -1054,8 +1155,13 @@ function ViewStage({
       // What the meter says is true of the frame just drawn: an image coming to be drawn opens
       // the window before its first histogram, and one gone has nothing to meter (R07.T16.b).
       auto.noteImage(drawnStyle === "photorealistic");
-      // The readouts change at 4 Hz, every view's in the same frame, so React renders them once.
-      const publish = nowMs - publishedMs >= READOUT_INTERVAL_MS;
+      // The readouts change at 4 Hz, every view's in the same frame, so React renders them once:
+      // a frame the instruments draw in too, at their 30 Hz, so that every view's block states
+      // what it drew in that frame, one interval among them where they stand at one pose
+      // (R10.T12.b).
+      const publish =
+        nowMs - publishedMs >= READOUT_INTERVAL_MS &&
+        drawsInFrame(animationFrame, INSTRUMENT_RATE_HZ);
       // The instruments in the primary's frame, so that their passes count in it.
       paced.instruments({
         nowMs,
@@ -1069,6 +1175,7 @@ function ViewStage({
         reportCamera:
           run.source.kind === "server" && current !== null ? current.reportCamera : null,
         terrain: session,
+        intervals: poseIntervals,
       });
       if (publish) {
         publishedMs = nowMs;
@@ -1255,7 +1362,9 @@ function ViewStage({
           annunciation === null || graphics.condition.kind === "acquiring"
           ? NOT_MADE
           : annunciation;
-  const openPanels = instruments.slots.flatMap((slot) => (slot.open ? [slot.panelSize] : []));
+  // Room to open one more slot beside those that stand (a slot that is open stays open, held where
+  // the stage cannot hold it).
+  const openRoom = roomToOpen(roomInput, room);
   // Closing the CONTROLS instrument returns CONTROLS to PRIMARY. Its canvas never holds the focus
   // then, since CLOSE takes it.
   const closeInstrument = (id: ViewId): void => {
@@ -1294,6 +1403,40 @@ function ViewStage({
     ...(easedMoves && !reducedMotion ? [EASED_MOVES_STATEMENT] : []),
     ...primaryPhotoreal,
   ];
+  const primaryLines = withPlaceLines(
+    withMeterLine(
+      withQualityLine(
+        withDrawnStyle(
+          withSkyLine(labelLines(shown.run, exposure, stale, shown.contourIntervalM), skyLine),
+          shown.drawnStyle,
+        ),
+        setting,
+      ),
+      meterStands ? meter : null,
+    ),
+    placeLines(place, stale),
+  );
+  const primaryCount = viewSky.drawn === null ? countLine : null;
+  // The lower plate's parts: R10.T12's survey line, DATUM and readout, none until it fills them.
+  const lowerParts = NO_LOWER_PARTS;
+
+  // The plates as laid out after each render, for the room's next decision (R10.T12.b): read from
+  // the DOM, an external system, and kept only where they changed.
+  const upperRef = useRef<HTMLDivElement | null>(null);
+  const sizersRef = useRef<HTMLDivElement | null>(null);
+  const pinnedLines = pinnedLinesOf(primaryLines);
+  useLayoutEffect(() => {
+    const measure = (): void => {
+      const measured = measureRoom({
+        upper: upperRef.current,
+        sizers: sizersRef.current,
+        pinnedLines,
+        liveBeside: beside,
+      });
+      setMeasures((previous) => (sameRoomMeasures(previous, measured) ? previous : measured));
+    };
+    measure();
+  });
 
   // The layout, from the `.view` box's size alone (R07.T19.b; decision-r07-t19-layout, item 1).
   const { ref: viewBoxRef, size: viewBox } = useElementSize();
@@ -1332,6 +1475,27 @@ function ViewStage({
     const section = target instanceof Element ? target.closest("section") : null;
     return FOLD_PANELS.find((panel) => section !== null && section.id === foldIds[panel]) ?? null;
   };
+  // The element over the stage that last took the focus (R10.T12.b). Where a render takes it away,
+  // a slot held or returning with its canvas, or a scroll ended with its tab stop, the focus goes to
+  // the PRIMARY view's canvas, as the stub's CLOSE gives it, never to the page, where no ring would
+  // show it; looked at after every render, since any change of the room can do it.
+  const stageFocusRef = useRef<HTMLElement | null>(null);
+  const onMainFocus = (event: FocusEvent<HTMLDivElement>): void => {
+    stageFocusRef.current = event.target instanceof HTMLElement ? event.target : null;
+  };
+  useLayoutEffect(() => {
+    const last = stageFocusRef.current;
+    const active = document.activeElement;
+    if (last === null || canvas === null) {
+      return;
+    }
+    const gone = !last.isConnected || last.tabIndex < 0;
+    const lost = active === null || active === document.body || active === last;
+    if (gone && lost) {
+      stageFocusRef.current = null;
+      canvas.focus();
+    }
+  });
   const onSideFocus = (event: FocusEvent<HTMLDivElement>): void => {
     setFocusedFold(foldOf(event.target));
   };
@@ -1455,7 +1619,7 @@ function ViewStage({
 
   return (
     <div className={`view view--${layout}`} ref={viewBoxRef}>
-      <div className="view__main">
+      <div className="view__main" onFocus={onMainFocus}>
         {engineLine === null ? (
           <>
             <ViewCanvas
@@ -1467,7 +1631,11 @@ function ViewStage({
                 PRIMARY_NAME,
                 PRESET_NAMES[shown.run.camera.preset],
               ].join(", ")}
-              describedBy={`${legendId}-label ${legendId}`}
+              describedBy={
+                lowerParts.length === 0
+                  ? `${legendId}-label ${legendId}`
+                  : `${legendId}-label ${legendId}-lower ${legendId}`
+              }
               onKeyDown={onCanvasKeyDown}
               onKeyUp={onCanvasKeyUp}
               onBlur={onCanvasBlur}
@@ -1486,30 +1654,38 @@ function ViewStage({
                 labelRef={placeLabel}
               />
               <ViewLabelBlock
+                ref={upperRef}
                 id={`${legendId}-label`}
-                lines={withPlaceLines(
-                  withMeterLine(
-                    withQualityLine(
-                      withDrawnStyle(
-                        withSkyLine(
-                          labelLines(shown.run, exposure, stale, shown.contourIntervalM),
-                          skyLine,
-                        ),
-                        shown.drawnStyle,
-                      ),
-                      setting,
-                    ),
-                    meterStands ? meter : null,
-                  ),
-                  placeLines(place, stale),
-                )}
+                lines={primaryLines}
                 statements={primaryStatements}
-                countLine={viewSky.drawn === null ? countLine : null}
+                countLine={primaryCount}
                 faults={faults}
+                scroll={{ from: STARS_LABEL, room: room.upper, view: PRIMARY_NAME }}
+                className={beside ? BESIDE_CLASS : undefined}
               />
+              {lowerParts.length === 0 ? null : (
+                <ViewLowerPlate
+                  id={`${legendId}-lower`}
+                  parts={lowerParts}
+                  readout={room.readout}
+                  survey={room.survey}
+                  className={beside ? BESIDE_CLASS : undefined}
+                />
+              )}
               <div className="view-instruments">
-                {instrumentViews.map(({ slot, budgetStyle, faults: slotFaults }) =>
-                  slot.open ? (
+                {instrumentViews.map(({ slot, standing, budgetStyle, faults: slotFaults }) =>
+                  standing === "stub" ? (
+                    <InstrumentStub
+                      key={slot.id}
+                      ref={stubRef}
+                      name={slot.name}
+                      onClose={() => {
+                        closeInstrument(slot.id);
+                        // Its CLOSE goes with it: the focus goes to the stage.
+                        canvas?.focus();
+                      }}
+                    />
+                  ) : standing === "stands" ? (
                     <InstrumentView
                       key={slot.id}
                       instrument={slot}
@@ -1551,6 +1727,21 @@ function ViewStage({
                   ) : null,
                 )}
               </div>
+              {size === null ? null : (
+                <ViewRoomSizers
+                  ref={sizersRef}
+                  upper={{
+                    lines: primaryLines,
+                    statements: primaryStatements,
+                    countLine: primaryCount,
+                    faults,
+                  }}
+                  lower={lowerParts}
+                  liveBeside={beside}
+                  beside={room.heldForPlates}
+                  scrollsFrom={STARS_LABEL}
+                />
+              )}
             </ViewCanvas>
             <KeyLegend id={legendId} modifier={modifier} />
           </>
@@ -1581,7 +1772,8 @@ function ViewStage({
               name: slot.name,
               open: slot.open,
               // Room for one more slot beside those open (a slot that is open stays open).
-              room: roomForSlot(size, openPanels),
+              room: openRoom,
+              held: heldOf(standingOf(slot.slot)),
             }))}
             operated={controlsView}
             unavailable={engineLine !== null}
@@ -1958,7 +2150,14 @@ function ViewPanels({
  *
  * The `PRIMARY` view fills the stage, and the instrument views `INSTRUMENT 1` and `INSTRUMENT 2`
  * open in fixed slots over its right edge (plan R07, T19; decision-r07-t19), each with its own
- * camera, style and selection at the primary's exposure. The `Instruments` panel opens and closes
+ * camera, style and selection at the primary's exposure. The primary's label block stands as two
+ * plates, the upper at the stage's top left and, while the view states a body's terrain, the lower
+ * at its foot, both left of the slots that stand; where the stage cannot hold them whole the
+ * lower plate's readout, then its survey line and `DATUM`, give way to lines saying so, then the
+ * upper plate's lines before `STARS` scroll, and then the slots are held; a slot the stage cannot
+ * hold whole, `INSTRUMENT 2` first, is held, as its stub in its corner or off the stage, drawing
+ * nothing until it would stand whole with a line to spare, its camera, style and target kept, so
+ * that nothing over the stage is ever cut (plan R10, R10.T12.b; decision-r10-view-block-room §3). The `Instruments` panel opens and closes
  * them and holds `CONTROLS`, the view the `Targets`, `Camera` and `Style` panels and the single
  * keys pressed off a canvas act on; a press or a view key on a canvas makes its view the one. Every
  * view is budgeted on the quality setting (R07.T18's `viewBudgets`): paced at its rate, an

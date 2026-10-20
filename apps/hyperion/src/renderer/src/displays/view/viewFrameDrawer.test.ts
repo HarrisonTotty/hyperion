@@ -17,6 +17,7 @@ import { PHASE_GIANT, PHASE_PLANETS, phaseScene } from "../../view/scenes/phaseS
 import { CoverageView, fieldCellIndex } from "../../view/terrain/coverage";
 import { ANNUNCIATION_ONSET_MS } from "../../view/terrain/annunciation";
 import type { ViewTerrainSession, ViewTerrainSource } from "../../view/terrain/frameTerrain";
+import { PoseIntervals } from "../../view/terrain/poseInterval";
 import type { ResidentHeightsView } from "../../view/terrain/residentHeights";
 import type { TerrainViewFrameInput } from "../../view/terrain/terrainPass";
 import { heightAboveGroundM } from "../../view/terrain/terrainWire";
@@ -735,6 +736,86 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
     drawer.dispose();
     fresh.dispose();
     expect([at4km, at7km, freshAt7km]).toEqual([200, 200, 500]);
+  });
+
+  describe("through the stage's interval holder (R10.T12.b)", () => {
+    const OTHER = viewId("other");
+
+    /**
+     * The primary's drawer and another's at one camera, over a wireframe pass that took both, the
+     * ground under them first 4 km below and then 7 km: the primary holds 200 m where a view from
+     * no interval states 500 m.
+     */
+    async function twoViews(): Promise<{
+      readonly primary: ViewFrameDrawer;
+      readonly other: ViewFrameDrawer;
+      readonly inputs: (
+        view: typeof OTHER,
+        style: "photorealistic" | "wireframe",
+        nowMs: number,
+      ) => ViewFrameInputs;
+      readonly toSevenKm: () => void;
+    }> {
+      const datumM = datumHeightM(phaseRun(true), HANDED);
+      const ground = { aboveM: 4_000 };
+      const heights: ResidentHeightsView = {
+        ...DATUM,
+        groundHeightAtM: () => datumM - ground.aboveM,
+      };
+      const { source } = wireSource(heights, {
+        wirePass: (body) =>
+          body === HANDED
+            ? {
+                maskReadyFor: () => true,
+                symbologyDepthMaterial: null,
+                heights,
+                viewIds: new Set([VIEW, OTHER]),
+                faulted: false,
+              }
+            : null,
+      });
+      const intervals = new PoseIntervals();
+      const engine = await countingRenderEngine();
+      return {
+        primary: new ViewFrameDrawer(engine, new RecordingView("view"), "view"),
+        other: new ViewFrameDrawer(engine, new RecordingView("other"), "other"),
+        inputs: (view, style, nowMs) => ({
+          ...inputsOver(source, style),
+          terrain: { source, view, nowMs, intervals },
+        }),
+        toSevenKm: () => {
+          ground.aboveM = 7_000;
+        },
+      };
+    }
+
+    it("states the interval another view holds at its camera's point", async () => {
+      const { primary, other, inputs, toSevenKm } = await twoViews();
+      primary.draw(inputs(VIEW, "wireframe", 0));
+      toSevenKm();
+      primary.draw(inputs(VIEW, "wireframe", 16));
+      const otherM = other.draw(inputs(OTHER, "wireframe", 16))?.contourIntervalM;
+      primary.dispose();
+      other.dispose();
+      expect(otherM).toBe(200);
+    });
+
+    it("forgets the view in the holder on a photorealistic frame, so that a view at its point keeps its own", async () => {
+      const { primary, other, inputs, toSevenKm } = await twoViews();
+      primary.draw(inputs(VIEW, "wireframe", 0));
+      toSevenKm();
+      primary.draw(inputs(VIEW, "wireframe", 16));
+      // The first photorealistic frame draws the wireframe while its pipelines compile.
+      primary.draw(inputs(VIEW, "photorealistic", 32));
+      await vi.waitFor(() => {
+        expect(primary.photorealStatus).toBe("ready");
+      });
+      const drawn = primary.draw(inputs(VIEW, "photorealistic", 48));
+      const otherM = other.draw(inputs(OTHER, "wireframe", 64))?.contourIntervalM;
+      primary.dispose();
+      other.dispose();
+      expect([drawn?.drawnStyle, otherM]).toEqual(["photorealistic", 500]);
+    });
   });
 
   it.each([
