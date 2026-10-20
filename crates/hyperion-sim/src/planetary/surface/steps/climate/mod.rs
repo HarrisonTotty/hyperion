@@ -84,7 +84,10 @@
 //! R09.T13.e built the precipitation heuristic and the winds (the pipeline's step 9): the
 //! orographic precipitation (`lfpm`), Hergarten and Robl 2022's linear feedback model on the
 //! field's cells, carried along a month's wind from the sea's large-scale rate, with the land's
-//! runoff share; the zonal budget (`partition`), the evaporation (`evaporation`) and the winds
+//! runoff share, solved in the order of the month's upwind graph's strongly connected components,
+//! the small ones exactly, by sweeps accelerated by restarted GMRES until one further sweep moves
+//! no land cell's rate by more than 10⁻⁴ of it (decision-r09-t13e-lfpm-convergence); the zonal
+//! budget (`partition`), the evaporation (`evaporation`) and the winds
 //! (`wind`); and their pipeline (`hydrology`), which writes each climate cell's monthly
 //! precipitation and 10 m wind, and `annual_runoff_kg_m2_s`, the runoff R09.T14 reads. Each
 //! month's record holds the wind its orographic step carried vapour along, as the record decodes

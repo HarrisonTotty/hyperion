@@ -1,5 +1,7 @@
-//! The orographic model's tests (R09.T13.e's first part; decision-r09-t13ge §2.2, §2.4, §2.13).
+//! The orographic model's tests (R09.T13.e; decision-r09-t13ge §2.2, §2.4, §2.13, and
+//! decision-r09-t13e-lfpm-convergence §3.5, the solve's).
 
+use super::super::wind;
 use super::*;
 use hyperion_surface::cube::Face as CubeFace;
 use hyperion_testkit::float::assert_same_bits;
@@ -251,6 +253,85 @@ fn e_folding_m(points: &[(f64, f64)]) -> f64 {
     -sxx / sxy
 }
 
+/// A solve's iteration and components, for the tests' prints.
+fn describe(d: &Diagnostics) -> String {
+    let c = &d.components;
+    format!(
+        "{} restarts, {} sweeps, measure {:.1e}{}, relative residual {:.1e}; {} land cells in \
+         components of 1: {}, 2: {}, 3–16: {}, > 16: {} ({} cells, the largest {}); {} below zero",
+        d.restarts,
+        d.sweeps,
+        d.measure,
+        if d.converged { "" } else { " (the cap)" },
+        d.relative_residual,
+        d.land_cells,
+        c.single,
+        c.pairs,
+        c.small,
+        c.large,
+        c.large_cells,
+        c.largest,
+        d.negative_cells
+    )
+}
+
+/// The land's budget's closure, (inflow − runoff − outflow) ÷ inflow.
+fn closure(d: &Diagnostics) -> f64 {
+    (d.inflow_kg_s - d.runoff_kg_s - d.outflow_kg_s) / d.inflow_kg_s
+}
+
+/// Each land cell's error against a deep solve, |P − P*| ÷ max(P*, [`RATE_FLOOR_SHARE`] `P̄_sea`)
+/// (decision-r09-t13e-lfpm-convergence §3.5): the largest and the share of land cells above
+/// 10⁻³.
+fn errors(cover: &[Cover], rates: &[f64], reference: &Orographic) -> (f64, f64) {
+    let floor = RATE_FLOOR_SHARE * reference.diagnostics.sea_mean_kg_m2_s;
+    let (mut worst, mut above, mut land) = (0.0_f64, 0_u32, 0_u32);
+    for ((&c, &p), &q) in cover
+        .iter()
+        .zip(rates)
+        .zip(&reference.precipitation_kg_m2_s)
+    {
+        if c == Cover::Land {
+            let error = (p - q).abs() / q.max(floor);
+            worst = worst.max(error);
+            above += u32::from(error > 1e-3);
+            land += 1;
+        }
+    }
+    (worst, f64::from(above) / f64::from(land))
+}
+
+/// Asserts the ruled convergence of `month` on `mesh` (decision-r09-t13e-lfpm-convergence §3.5):
+/// its solve at the production tolerance converges within the cap, every land cell's rate lies
+/// within 1% of a deep solve's, |P − P*| ≤ 0.01 max(P*, 10⁻³ `P̄_sea`), and the land's budget
+/// closes within 10⁻³ of its inflow; the deep solve meets the stop test at [`DEEP_MEASURE`].
+/// Prints both.
+fn assert_converges(name: &str, mesh: &Mesh, month: &Month<'_>) -> Orographic {
+    let solved = solve(mesh, month, &Parameters::HERGARTEN_ROBL);
+    let reference = solve(mesh, month, &Parameters::deep());
+    let (d, dd) = (&solved.diagnostics, &reference.diagnostics);
+    let (worst, above) = errors(month.cover, &solved.precipitation_kg_m2_s, &reference);
+    eprintln!(
+        "{name}: {}; the budget's closure {:.1e}; against the deep solve (closure {:.1e}; {}) the \
+         worst land cell {worst:.2e}, {:.2}% above 0.1%",
+        describe(d),
+        closure(d),
+        closure(dd),
+        describe(dd),
+        100.0 * above
+    );
+    assert!(d.converged, "{name}: {d:?}");
+    assert!(d.measure <= TOLERANCE, "{name}: {d:?}");
+    assert!(
+        dd.measure <= DEEP_MEASURE,
+        "{name}: the deep solve's {dd:?}"
+    );
+    assert!(worst <= 0.01, "{name}: the worst land cell is {worst} off");
+    assert!(closure(d).abs() <= 1e-3, "{name}: {d:?}");
+    assert!(d.inflow_kg_s > 0.0 && d.runoff_kg_s > 0.0, "{name}: {d:?}");
+    solved
+}
+
 #[test]
 fn the_set_fixes_beta_zero_and_the_effective_long_range_length() {
     let set = Parameters::HERGARTEN_ROBL;
@@ -280,7 +361,11 @@ fn the_set_fixes_beta_zero_and_the_effective_long_range_length() {
     let [vapour, cloud] = set.sea_air(SEA_RATE);
     assert!((cloud / lf / SEA_RATE - 1.0).abs() < 1e-15);
     assert!(((vapour + cloud) / (ll * SEA_RATE) - 1.0).abs() < 1e-15);
-    assert_eq!(set.sweeps(), SWEEPS);
+    // The ruled stop (decision-r09-t13e-lfpm-convergence §3.2 item 8).
+    assert_same_bits(set.tolerance(), TOLERANCE);
+    assert_same_bits(TOLERANCE, 1e-4);
+    assert_eq!(set.max_restarts(), MAX_RESTARTS);
+    assert_eq!((RESTART, MAX_RESTARTS, EXACT_BLOCK_CELLS), (10, 30, 16));
     eprintln!("β₀ = {beta_zero}, L̃_l = {:.1} km", effective / 1e3);
 }
 
@@ -338,7 +423,8 @@ fn the_mesh_s_edges_close_each_cell_and_agree_across_it() {
 }
 
 /// Decision-r09-t13ge §2.4's ridge on the lane's 1-D runs: 0.288, 0.309 and 0.335 at spacings of
-/// 0.5, 36 and 72 km, its maximum 4–33 km windward of the crest; here on a chain of the mesh.
+/// 0.5, 36 and 72 km, its maximum 4–33 km windward of the crest; here on a chain of the mesh, whose
+/// cells are each a component of their own and carry no dispersion, so that the start is the solve.
 #[test]
 fn a_ridge_casts_a_rain_shadow_along_a_chain() {
     let set = Parameters::HERGARTEN_ROBL;
@@ -352,17 +438,19 @@ fn a_ridge_casts_a_rain_shadow_along_a_chain() {
         let (plains, slopes, peak_m) = shadow(&points);
         eprintln!(
             "chain at {:.1} km: lee ÷ windward plain {plains:.3} (the lane's 1-D {research}), \
-             slopes {slopes:.3}, maximum {:+.1} km from the crest; cut {}",
+             slopes {slopes:.3}, maximum {:+.1} km from the crest; {}",
             dx_m / 1e3,
             peak_m / 1e3,
-            diagnostics.cut_cells
+            describe(&diagnostics)
         );
         assert!(plains < 0.5, "{plains}");
         assert!(
             peak_m < 0.0,
             "the maximum lies on the windward side: {peak_m} m"
         );
-        assert_eq!(diagnostics.cut_cells, 0);
+        assert_eq!(diagnostics.components.single, land);
+        assert_eq!(diagnostics.restarts, 0);
+        assert_same_bits(diagnostics.measure, 0.0);
         if dx_m < 1_000.0 {
             assert!(
                 (plains - research).abs() < 0.005,
@@ -492,33 +580,113 @@ impl Strip {
     }
 }
 
+/// A sphere of sea at some level with land on face +x where a predicate of each cell's centre's
+/// latitude and longitude holds, flat or raised, under a wind and a sea rate of each cell's.
+struct Sphere {
+    mesh: Mesh,
+    world: World,
+}
+
+impl Sphere {
+    /// The sphere at `level`: land where a cell's centre lies on face +x and `land(latitude°,
+    /// longitude°)` holds, at the height `height(latitude°, longitude°)`, every cell under
+    /// `wind(centre)`, the sea's rate `rate(latitude°)`.
+    fn new(
+        level: u8,
+        land: impl Fn(f64, f64) -> bool,
+        height: impl Fn(f64, f64) -> f64,
+        wind: impl Fn([f64; 3]) -> CellWind,
+        rate: impl Fn(f64) -> f64,
+    ) -> Self {
+        let graph = CellGraph::new(level).unwrap();
+        let mesh = Mesh::of_graph(&graph, Metres::new(EARTH_RADIUS_M));
+        let mut world = World::of(graph.len(), |n| {
+            let c = graph.centre(n);
+            let (latitude, longitude) = (
+                math::asin(c[2]).to_degrees(),
+                math::atan2(c[1], c[0]).to_degrees(),
+            );
+            if graph.cell(n).face() == CubeFace::PosX && land(latitude, longitude) {
+                (Cover::Land, height(latitude, longitude), wind(c))
+            } else {
+                (Cover::Sea, 0.0, wind(c))
+            }
+        });
+        for (n, r) in (0_u32..).zip(&mut world.rates) {
+            if world.cover[slot(n)] == Cover::Sea {
+                *r = rate(math::asin(graph.centre(n)[2]).to_degrees());
+            }
+        }
+        Self { mesh, world }
+    }
+}
+
+/// The wind at `c` towards local east times `u` and local north times `v`, any length.
+fn towards(c: [f64; 3], u: f64, v: f64) -> CellWind {
+    let (east, north) = wind::east_north(c);
+    CellWind::Towards([
+        u * east[0] + v * north[0],
+        u * east[1] + v * north[1],
+        u * east[2] + v * north[2],
+    ])
+}
+
+/// The Earth's sidereal day, s (86,164.0989 s, from memory), for the convergence line's Coriolis
+/// parameter.
+const SIDEREAL_DAY_S: f64 = 86_164.098_9;
+
+/// The ruled convergence line (decision-r09-t13e-lfpm-convergence §3.5, like its replica's
+/// scenario F): a 3,000 km square continent on the equator, flat, under trades converging on it,
+/// v = −1.5 tanh(φ ÷ 8°) m/s with u by the winds' drag balance, the sea's rate 1 + 4 e^(−(φ ÷ 5°)²)
+/// of [`SEA_RATE`].
+fn convergence_line(level: u8) -> Sphere {
+    Sphere::new(
+        level,
+        |latitude, longitude| latitude.abs() <= 13.5 && longitude.abs() <= 13.5,
+        |_, _| 0.0,
+        |c| {
+            let latitude = math::asin(c[2]).to_degrees();
+            let v = -1.5 * math::tanh(latitude / 8.0);
+            let (u, _) = wind::drag_balance(v, wind::coriolis_per_s(SIDEREAL_DAY_S, c));
+            towards(c, u, v)
+        },
+        |latitude| SEA_RATE * (1.0 + 4.0 * math::exp(-(latitude / 5.0) * (latitude / 5.0))),
+    )
+}
+
+/// The ruled side-edge world (decision-r09-t13e-lfpm-convergence §3.5, like its replica's
+/// scenario I): about 3,000 by 1,500 km of flat land at 28.25–41.75° S, 17° W to 17° E, on face
+/// +x, under a due-south wind. The cells' east and west edges are meridians, whose normals lean
+/// poleward by sin φ sin(Δλ ÷ 2) in the cell's tangent plane, so that every east–west pair passes
+/// air both ways and each row of land is one component (plan 09's E-L2); and the cell index, which
+/// rises northward on the face, runs against the flow.
+fn due_south() -> Sphere {
+    Sphere::new(
+        7,
+        |latitude, longitude| (-41.75..=-28.25).contains(&latitude) && longitude.abs() <= 17.0,
+        |_, _| 0.0,
+        |c| towards(c, 0.0, -1.0),
+        |_| SEA_RATE,
+    )
+}
+
 #[test]
 fn a_ridge_casts_a_rain_shadow_on_the_cell_graph() {
     let set = Parameters::HERGARTEN_ROBL;
     for level in [7, 8] {
         let strip = Strip::new(level, -20.0, 1_000_000.0, 15.0, ridge);
         let result = solve(&strip.mesh, &strip.world.month(), &set);
-        let rows = strip.equator(&result.precipitation_kg_m2_s);
-        for row in &rows {
-            let (plains, slopes, peak_m) = shadow(row);
+        for row in strip.equator(&result.precipitation_kg_m2_s) {
+            let (plains, slopes, peak_m) = shadow(&row);
             eprintln!(
                 "level {level}: lee ÷ windward plain {plains:.3}, slopes {slopes:.3}, maximum \
-                 {:+.1} km from the crest; {} land cells, {} cut; last sweep {:.2e} of the mean",
+                 {:+.1} km from the crest; {}",
                 peak_m / 1e3,
-                result.diagnostics.land_cells,
-                result.diagnostics.cut_cells,
-                result.diagnostics.last_relative_changes().largest_kg_m2_s
+                describe(&result.diagnostics)
             );
             assert!(plains < 0.5, "level {level}: {plains}");
             assert!(peak_m < 0.0, "level {level}: the maximum at {peak_m} m");
         }
-        // The ruling's measure at the count, and the stricter largest cell's at 64 sweeps.
-        let last = result.diagnostics.last_relative_changes();
-        assert!(last.mean_kg_m2_s < 1e-3, "{last:?}");
-        let converged = solve(&strip.mesh, &strip.world.month(), &set.with_sweeps(64));
-        print_sweeps(level, "ridge", &converged.diagnostics);
-        let last = converged.diagnostics.last_relative_changes();
-        assert!(last.largest_kg_m2_s < 1e-3, "{last:?}");
     }
 }
 
@@ -532,57 +700,57 @@ fn inland_rain_decays_over_the_effective_long_range_length_on_the_cell_graph() {
         for row in strip.equator(&result.precipitation_kg_m2_s) {
             let folding = e_folding_m(&row);
             eprintln!(
-                "level {level}: e-folding {:.1} km against L̃_l {:.1} km; last sweep {:.2e} of \
-                 the mean",
+                "level {level}: e-folding {:.1} km against L̃_l {:.1} km; {}",
                 folding / 1e3,
                 expected / 1e3,
-                result.diagnostics.last_relative_changes().largest_kg_m2_s
+                describe(&result.diagnostics)
             );
             assert!(
                 (0.5 * expected..=2.0 * expected).contains(&folding),
                 "{folding}"
             );
         }
-        // The ruling's measure at the count, and the stricter largest cell's at 64 sweeps.
-        let last = result.diagnostics.last_relative_changes();
-        assert!(last.mean_kg_m2_s < 1e-3, "{last:?}");
-        let converged = solve(&strip.mesh, &strip.world.month(), &set.with_sweeps(64));
-        print_sweeps(level, "inland", &converged.diagnostics);
-        let last = converged.diagnostics.last_relative_changes();
-        assert!(last.largest_kg_m2_s < 1e-3, "{last:?}");
     }
 }
 
-/// Prints the first sweeps' and every eighth sweep's changes over the global mean: the largest
-/// cell's, and the global mean's own; and the first sweep after which each stays under 10⁻³.
-fn print_sweeps(level: u8, name: &str, diagnostics: &Diagnostics) {
-    let mean = diagnostics.global_mean_kg_m2_s;
-    let count = diagnostics.sweeps.len();
-    let changes: Vec<String> = diagnostics
-        .sweeps
+/// The ruled convergence test (decision-r09-t13e-lfpm-convergence §3.5): on the flat 3,000 km
+/// strip and the 3 km ridge at levels 7 and 8, a land convergence line on the equator and a
+/// due-south wind against the cell order, every land cell's rate at the production tolerance lies
+/// within 1% of a deep solve's, the deep solve meets the stop test at 10⁻¹⁰, and the land's budget
+/// closes within 10⁻³ of its inflow.
+#[test]
+fn the_solve_lies_within_one_percent_of_a_deep_solve_and_closes_the_land_s_budget() {
+    for level in [7, 8] {
+        let strip = Strip::new(level, -35.0, 3_000_000.0, 15.0, |_| 0.0);
+        assert_converges(
+            &format!("level {level} strip"),
+            &strip.mesh,
+            &strip.world.month(),
+        );
+        let ridge = Strip::new(level, -20.0, 1_000_000.0, 15.0, ridge);
+        assert_converges(
+            &format!("level {level} ridge"),
+            &ridge.mesh,
+            &ridge.world.month(),
+        );
+    }
+    let line = convergence_line(8);
+    let solved = assert_converges("level 8 convergence line", &line.mesh, &line.world.month());
+    // The line's rain against the sea's maximum (E-L7's trap).
+    let peak = solved
+        .precipitation_kg_m2_s
         .iter()
-        .enumerate()
-        .filter(|(n, _)| *n < 4 || n % 8 == 7 || n + 1 == count)
-        .map(|(n, change)| {
-            format!(
-                "{}: {:.1e} / {:.1e}",
-                n + 1,
-                change.largest_kg_m2_s / mean,
-                change.mean_kg_m2_s / mean
-            )
-        })
-        .collect();
-    let settled = |of: fn(&SweepChange) -> f64| {
-        (0..count)
-            .find(|&n| diagnostics.sweeps[n..].iter().all(|c| of(c) / mean < 1e-3))
-            .map_or_else(|| "never".to_owned(), |n| format!("sweep {}", n + 1))
-    };
+        .copied()
+        .fold(0.0, f64::max);
     eprintln!(
-        "level {level} {name}: sweep changes ÷ mean, largest / mean's {}; under 1e-3 from {} \
-         (largest), {} (mean's)",
-        changes.join(", "),
-        settled(|c| c.largest_kg_m2_s),
-        settled(|c| c.mean_kg_m2_s)
+        "  the line's wettest land cell {:.2} times the sea's maximum rate",
+        peak / (5.0 * SEA_RATE)
+    );
+    let south = due_south();
+    let solved = assert_converges("level 7 due south", &south.mesh, &south.world.month());
+    assert!(
+        solved.diagnostics.components.large > 0,
+        "the rows are cycles"
     );
 }
 
@@ -626,7 +794,6 @@ fn hill(cx: u32, cy: u32) -> impl Fn(u32, u32) -> f64 {
 
 #[test]
 fn the_land_s_water_budget_closes() {
-    let converged = Parameters::HERGARTEN_ROBL.with_sweeps(600);
     let row_major = |x: u32, y: u32| y * 30 + x;
     let cases: [(&str, (Mesh, World)); 3] = [
         (
@@ -643,16 +810,17 @@ fn the_land_s_water_budget_closes() {
         ),
     ];
     for (name, (mesh, world)) in &cases {
-        let d = solve(mesh, &world.month(), &converged).diagnostics;
+        let d = solve(mesh, &world.month(), &Parameters::deep()).diagnostics;
         let out = d.runoff_kg_s + d.outflow_kg_s;
         eprintln!(
             "{name}: inflow {:.6e} kg/s, runoff {:.6e}, recycled {:.6e}, outflow {:.6e}; \
-             closure {:.1e}",
+             closure {:.1e}; {}",
             d.inflow_kg_s,
             d.runoff_kg_s,
             d.recycled_kg_s,
             d.outflow_kg_s,
-            (d.inflow_kg_s - out) / d.inflow_kg_s
+            closure(&d),
+            describe(&d)
         );
         assert!(d.inflow_kg_s > 0.0 && d.recycled_kg_s > 0.0);
         assert!(
@@ -660,17 +828,20 @@ fn the_land_s_water_budget_closes() {
             "{name}"
         );
     }
-    // On the sphere, at level 7, over flat land: converged, the same.
+    // On the sphere, at level 7, over flat land: deep, the same.
     let strip = Strip::new(7, -20.0, 1_500_000.0, 10.0, |_| 0.0);
-    let d = solve(&strip.mesh, &strip.world.month(), &converged).diagnostics;
-    let closure = (d.inflow_kg_s - d.runoff_kg_s - d.outflow_kg_s) / d.inflow_kg_s;
+    let d = solve(&strip.mesh, &strip.world.month(), &Parameters::deep()).diagnostics;
     eprintln!(
-        "level 7 strip: closure {closure:.1e}, last sweep {:.1e}",
-        d.last_relative_changes().largest_kg_m2_s
+        "level 7 strip: closure {:.1e}; {}",
+        closure(&d),
+        describe(&d)
     );
-    assert!(closure.abs() < 1e-10, "{closure}");
+    assert!(closure(&d).abs() < 1e-10, "{d:?}");
 }
 
+/// The ruled relabelling test (decision-r09-t13e-lfpm-convergence §3.5): a chain labelled either
+/// way gives the same bits, and a grid labelled by rows, by columns and backwards agrees within
+/// 10⁻⁹ of its largest rate at the deep tolerance.
 #[test]
 fn the_rates_do_not_depend_on_the_cells_index_order() {
     let set = Parameters::HERGARTEN_ROBL;
@@ -682,8 +853,7 @@ fn the_rates_do_not_depend_on_the_cells_index_order() {
         assert!(p > 0.0, "at {x} m");
     }
     // A grid labelled by rows, by columns and backwards breaks its ties differently: the same
-    // rates once converged.
-    let converged = set.with_sweeps(400);
+    // rates once deep.
     let (nx, ny) = (24, 12);
     let labels: [&dyn Fn(u32, u32) -> u32; 3] =
         [&|x, y| y * nx + x, &|x, y| x * ny + y, &|x, y| {
@@ -691,11 +861,12 @@ fn the_rates_do_not_depend_on_the_cells_index_order() {
         }];
     let mut runs = labels.iter().map(|label| {
         let (mesh, world) = planar_world(nx, ny, label, hill(8, 6), |_, _| false);
-        let rates = solve(&mesh, &world.month(), &converged).precipitation_kg_m2_s;
+        let result = solve(&mesh, &world.month(), &Parameters::deep());
+        assert!(result.diagnostics.measure <= DEEP_MEASURE);
         let mut by_place = vec![0.0; slot(nx * ny)];
         for y in 0..ny {
             for x in 0..nx {
-                by_place[slot(y * nx + x)] = rates[slot(label(x, y))];
+                by_place[slot(y * nx + x)] = result.precipitation_kg_m2_s[slot(label(x, y))];
             }
         }
         by_place
@@ -704,16 +875,15 @@ fn the_rates_do_not_depend_on_the_cells_index_order() {
     let largest = first.iter().copied().fold(0.0, f64::max);
     for other in runs {
         for (p, q) in first.iter().zip(&other) {
-            assert!((p - q).abs() <= 1e-12 * largest, "{p} against {q}");
+            assert!((p - q).abs() <= 1e-9 * largest, "{p} against {q}");
         }
     }
 }
 
 #[test]
-fn a_cycle_is_cut_at_its_lowest_index_and_converges() {
+fn a_zonal_ring_is_one_component_a_row_and_converges_wherever_its_labels_start() {
     // A ring of three land rows round a periodic grid, sea rows beside it, fed by dispersion.
     let (nx, ny) = (40, 5);
-    let converged = Parameters::HERGARTEN_ROBL.with_sweeps(300);
     let run = |shift: u32| {
         let label = move |x: u32, y: u32| y * nx + (x + shift) % nx;
         let mesh = Mesh::planar(nx, ny, 33_000.0, 33_000.0, true, label);
@@ -732,7 +902,7 @@ fn a_cycle_is_cut_at_its_lowest_index_and_converges() {
             };
             (cover, 0.0, ALONG_X)
         });
-        let result = solve(&mesh, &world.month(), &converged);
+        let result = solve(&mesh, &world.month(), &Parameters::deep());
         let mut by_place = vec![0.0; slot(nx * ny)];
         for y in 0..ny {
             for x in 0..nx {
@@ -743,15 +913,203 @@ fn a_cycle_is_cut_at_its_lowest_index_and_converges() {
     };
     let (first, d) = run(0);
     let (second, _) = run(17);
-    assert_eq!(d.cut_cells, ny - 2, "one cut a land row");
+    eprintln!("zonal ring: {}", describe(&d));
     assert_eq!(d.land_cells, nx * (ny - 2));
+    assert_eq!(
+        (
+            d.components.large,
+            d.components.large_cells,
+            d.components.largest
+        ),
+        (ny - 2, nx * (ny - 2), nx),
+        "one component a land row"
+    );
+    assert!(d.measure <= DEEP_MEASURE);
     let largest = first.iter().copied().fold(0.0, f64::max);
     for y in 1..ny - 1 {
         for x in 0..nx {
             let i = slot(y * nx + x);
             assert!(first[i] > 0.0);
-            assert!((first[i] - second[i]).abs() <= 1e-12 * largest);
+            assert!((first[i] - second[i]).abs() <= 1e-9 * largest);
         }
+    }
+}
+
+/// The ruled two-cell cycle (decision-r09-t13e-lfpm-convergence §3.5): two land cells blowing into
+/// each other between two seas blowing onshore, at different heights, so that all they take in
+/// rains out between them. Their 4 × 4 balance, `M_A` `Q_A` − `Q_B` = `s_A` and `M_B` `Q_B` − `Q_A`
+/// = `s_B` (each passes all its air to the other), has the closed form (`M_A` − `M_B`⁻¹) `Q_A` =
+/// `s_A` + `M_B`⁻¹ `s_B`, `Q_B` = `M_B`⁻¹ (`s_B` + `Q_A`); the solve equals it to 10⁻¹² in its
+/// first sweep.
+#[test]
+fn a_two_cell_cycle_equals_the_closed_form_of_its_balance_in_one_sweep() {
+    let set = Parameters::HERGARTEN_ROBL;
+    let side_m = 33_000.0;
+    let mesh = Mesh::planar(4, 1, side_m, side_m, false, |x, _| x);
+    let (east, west) = (ALONG_X, CellWind::Towards([-1.0, 0.0, 0.0]));
+    let world = World {
+        heights_m: vec![0.0, 500.0, 1_500.0, 0.0],
+        cover: vec![Cover::Sea, Cover::Land, Cover::Land, Cover::Sea],
+        winds: vec![east, east, west, west],
+        rates: vec![SEA_RATE, 0.0, 0.0, 2.0 * SEA_RATE],
+    };
+    let result = solve(&mesh, &world.month(), &set);
+    let d = &result.diagnostics;
+    eprintln!("two-cell cycle: {}", describe(d));
+    assert_eq!((d.land_cells, d.components.pairs), (2, 1));
+    assert_eq!(d.restarts, 0, "the first sweep is the solve");
+    assert_same_bits(d.measure, 0.0);
+    // The closed form, by 2 × 2 inverses alone.
+    let path = side_m * side_m / side_m / CONDENSATION_LENGTH_M;
+    let (m_a, m_b) = (
+        cell_matrix(&set, path, 500.0, 0.0),
+        cell_matrix(&set, path, 1_500.0, 0.0),
+    );
+    let sea = |rate: f64| set.sea_air(rate).map(|flux| flux * side_m);
+    let (s_a, s_b) = (sea(SEA_RATE), sea(2.0 * SEA_RATE));
+    let apply = |m: [[f64; 2]; 2], v: [f64; 2]| {
+        [
+            m[0][0] * v[0] + m[0][1] * v[1],
+            m[1][0] * v[0] + m[1][1] * v[1],
+        ]
+    };
+    let inv_b = inverse(m_b);
+    let schur = [
+        [m_a[0][0] - inv_b[0][0], m_a[0][1] - inv_b[0][1]],
+        [m_a[1][0] - inv_b[1][0], m_a[1][1] - inv_b[1][1]],
+    ];
+    let carried = apply(inv_b, s_b);
+    let q_a = apply(inverse(schur), [s_a[0] + carried[0], s_a[1] + carried[1]]);
+    let q_b = apply(inv_b, [s_b[0] + q_a[0], s_b[1] + q_a[1]]);
+    for (cell, q) in [(1, q_a), (2, q_b)] {
+        let expected = q[1] / (side_m * FALLOUT_LENGTH_M);
+        let p = result.precipitation_kg_m2_s[cell];
+        eprintln!("  cell {cell}: P {p:.12e} against the closed form's {expected:.12e}");
+        assert!(
+            (p / expected - 1.0).abs() <= 1e-12,
+            "{p} against {expected}"
+        );
+    }
+    // Nothing leaves: all the sea gives rains out.
+    assert_same_bits(d.outflow_kg_s, 0.0);
+    assert!(
+        (d.runoff_kg_s / d.inflow_kg_s - 1.0).abs() <= 1e-12,
+        "{d:?}"
+    );
+}
+
+/// The ruled order test (decision-r09-t13e-lfpm-convergence §3.5): on a hand-built graph of a
+/// 2-cycle, a 3-cycle and a 20-cell cycle with chains between them, its nodes labelled out of
+/// order and some not members, every edge between components points forward, each component's
+/// members are contiguous and in index order, the components are the cycles and the chains' nodes
+/// alone, and the same graph gives the same order twice.
+#[test]
+fn the_components_are_in_topological_order_each_contiguous_and_in_index_order() {
+    const NODES: usize = 40;
+    // The graph by name: entry → feed → pair₀ ↔ pair₁ → link → triple₀ → triple₁ → triple₂ →
+    // triple₀, triple₂ → bridge → ring₀ → … → ring₁₉ → ring₀, ring₁₀ → exit, side → ring₅. Names
+    // 0..31; 31..40 are no members.
+    let (entry, feed, link, bridge, exit, side) = (0, 1, 4, 8, 9, 10);
+    let (pair, triple) = ([2, 3], [5, 6, 7]);
+    let ring = |k: usize| 11 + k;
+    let mut edges = vec![
+        (entry, feed),
+        (feed, pair[0]),
+        (pair[0], pair[1]),
+        (pair[1], pair[0]),
+    ];
+    edges.extend([
+        (pair[1], link),
+        (link, triple[0]),
+        (triple[0], triple[1]),
+        (triple[1], triple[2]),
+        (triple[2], triple[0]),
+        (triple[2], bridge),
+        (bridge, ring(0)),
+        (ring(10), exit),
+        (side, ring(5)),
+    ]);
+    edges.extend((0..20).map(|k| (ring(k), ring((k + 1) % 20))));
+    // Each name's label: 17 n + 5 mod 40, a permutation.
+    let label = |n: usize| (17 * n + 5) % NODES;
+    let mut successors = vec![[None; 4]; NODES];
+    for &(from, to) in &edges {
+        let slots: &mut [Option<u32>; 4] = &mut successors[label(from)];
+        let free = slots.iter().position(Option::is_none).unwrap();
+        slots[free] = Some(index(label(to)));
+    }
+    let member = |n: usize| (0..31).any(|name| label(name) == n);
+    let find = || strongly_connected(NODES, member, |n| successors[n]);
+    let components = find();
+    assert_eq!(components, find(), "the same graph, the same order");
+    let mut place = [usize::MAX; NODES];
+    for c in 0..components.len() {
+        let members = &components.cells[components.range(c)];
+        assert!(
+            members.windows(2).all(|pair| pair[0] < pair[1]),
+            "{members:?}"
+        );
+        for &m in members {
+            place[slot(m)] = c;
+        }
+    }
+    assert_eq!(components.cells.len(), 31);
+    for (n, &at) in place.iter().enumerate() {
+        assert_eq!(member(n), at != usize::MAX, "node {n}");
+    }
+    for &(from, to) in &edges {
+        let (cf, ct) = (place[label(from)], place[label(to)]);
+        assert!(cf <= ct, "the edge {from} → {to} points back");
+    }
+    let mut sizes: Vec<usize> = (0..components.len())
+        .map(|c| components.range(c).len())
+        .collect();
+    sizes.sort_unstable();
+    assert_eq!(sizes, [1, 1, 1, 1, 1, 1, 2, 3, 20]);
+    let together = |names: &[usize]| {
+        names
+            .iter()
+            .all(|&n| place[label(n)] == place[label(names[0])])
+    };
+    assert!(together(&pair) && together(&triple));
+    assert!(together(&(0..20).map(ring).collect::<Vec<_>>()));
+    assert!(place[label(entry)] < place[label(pair[0])]);
+    assert!(place[label(triple[2])] < place[label(ring(0))]);
+    let sizes = components.sizes();
+    assert_eq!(
+        (
+            sizes.single,
+            sizes.pairs,
+            sizes.small,
+            sizes.large,
+            sizes.large_cells,
+            sizes.largest
+        ),
+        (6, 1, 1, 1, 20, 20)
+    );
+}
+
+/// The ruled cap (decision-r09-t13e-lfpm-convergence §3.2 item 6, §3.5): a world that needs more
+/// than one restart, solved with the cap lowered to one, reports that it did not converge and
+/// returns finite rates, none negative.
+#[test]
+fn a_solve_that_reaches_its_cap_is_flagged_and_returns_finite_rates() {
+    let (mesh, world) = planar_world(30, 14, |x, y| y * 30 + x, hill(10, 7), |_, _| false);
+    let full = solve(&mesh, &world.month(), &Parameters::HERGARTEN_ROBL);
+    eprintln!("uncapped: {}", describe(&full.diagnostics));
+    assert!(full.diagnostics.converged && full.diagnostics.restarts > 1);
+    let capped = solve(
+        &mesh,
+        &world.month(),
+        &Parameters::HERGARTEN_ROBL.with_max_restarts(1),
+    );
+    let d = &capped.diagnostics;
+    eprintln!("capped at one: {}", describe(d));
+    assert!(!d.converged, "{d:?}");
+    assert_eq!(d.restarts, 1);
+    assert!(d.measure > TOLERANCE, "{d:?}");
+    for &p in &capped.precipitation_kg_m2_s {
+        assert!(p.is_finite() && p >= 0.0, "{p}");
     }
 }
 
@@ -778,6 +1136,11 @@ fn a_calm_land_rains_out_its_coastal_inflow_and_nothing_inland() {
     let d = &result.diagnostics;
     assert!((d.runoff_kg_s / d.inflow_kg_s - 1.0).abs() < 1e-14);
     assert_same_bits(d.outflow_kg_s, 0.0);
+    // No land's air moves on, so the solve stops at the start.
+    assert_eq!(
+        (d.restarts, d.sweeps, d.components.single),
+        (0, 1, d.land_cells)
+    );
     // A wholly calm month brings the land nothing.
     let still = World {
         winds: vec![CellWind::Calm; world.winds.len()],
@@ -816,10 +1179,10 @@ fn the_runoff_is_the_unrecycled_share_of_the_rate_and_none_over_liquid() {
     }
 }
 
-/// The cost of one month at level 8 (R09.T13.e's first part): the mesh, built once, and a month's
-/// solve, on a sphere of some land and on one all land, under zonal belts that reverse at 30° and
-/// 60° and under three cells whose trades and polar easterlies blow equatorward and westerlies
-/// poleward; with each run's convergence.
+/// The cost of one month at level 8 (R09.T13.e): the mesh, built once, and a month's solve, on a
+/// sphere of some land and on one all land, under zonal belts that reverse at 30° and 60° and under
+/// three cells whose trades and polar easterlies blow equatorward and westerlies poleward; with
+/// each run's iteration.
 #[test]
 #[ignore = "a timing, run by name"]
 fn time_one_month_at_level_8() {
@@ -864,17 +1227,10 @@ fn time_one_month_at_level_8() {
             let start = std::time::Instant::now();
             let result = solve(&mesh, &world.month(), &Parameters::HERGARTEN_ROBL);
             let month = start.elapsed().as_secs_f64();
-            let d = &result.diagnostics;
-            let last = d.last_relative_changes();
             eprintln!(
-                "level 8, {name}, {winds}: mesh {built:.3} s once; a month {month:.3} s over {} \
-                 land cells ({} cut), {SWEEPS} sweeps; last sweep {:.1e} (largest) and {:.1e} \
-                 (mean's) of the mean",
-                d.land_cells, d.cut_cells, last.largest_kg_m2_s, last.mean_kg_m2_s
+                "level 8, {name}, {winds}: mesh {built:.3} s once; a month {month:.3} s; {}",
+                describe(&result.diagnostics)
             );
-            if d.global_mean_kg_m2_s > 0.0 {
-                print_sweeps(8, name, d);
-            }
         }
     }
 }

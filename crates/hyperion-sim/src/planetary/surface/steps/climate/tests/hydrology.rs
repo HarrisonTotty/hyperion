@@ -11,7 +11,9 @@ use super::super::coordinates::Coordinates;
 use super::super::ebm::EnergyBalance;
 use super::super::grid::{LATITUDE_BANDS, ModelGrid};
 use super::super::hydrology::{self, Evaporation, MonthCycle};
-use super::super::lfpm::{self, SWEEPS};
+use super::super::lfpm::{
+    self, DEEP_MEASURE, MAX_RESTARTS, Parameters, RATE_FLOOR_SHARE, TOLERANCE,
+};
 use super::super::wind;
 use super::super::{
     Diagnostics, annual_runoff_kg_m2_s, energy_balance, finish, month_shares, normalised,
@@ -511,35 +513,33 @@ fn report_summary(run: &Run) {
 }
 
 /// [`report`]'s months: each month's energy-flux equator, centre, factor and rate, and its
-/// orographic solve's cuts and convergence.
+/// orographic solve's iteration, components and budget.
 fn report_months(run: &Run) {
     for (m, cycle) in run.water().months.iter().enumerate() {
-        let sweeps = cycle.orographic.as_ref().map_or_else(String::new, |d| {
-            let at = |n: usize| {
-                let change = d.sweeps[n - 1];
-                (
-                    change.largest_kg_m2_s / d.global_mean_kg_m2_s,
-                    change.mean_kg_m2_s / d.global_mean_kg_m2_s,
-                )
-            };
-            let first = (1..=d.sweeps.len()).find(|&n| at(n).1 < 1e-3);
-            let profile: Vec<String> = [2, 4, 8, 16, 32, 64]
-                .into_iter()
-                .filter(|&n| n < d.sweeps.len())
-                .chain([d.sweeps.len()])
-                .map(|n| format!("{n}: {:.1e} / {:.1e}", at(n).0, at(n).1))
-                .collect();
+        let solve = cycle.orographic.as_ref().map_or_else(String::new, |d| {
+            let c = &d.components;
             format!(
-                "; land {} cells, cut {} ({:.3}); the mean's change under 10⁻³ from sweep \
-                 {first:?}; the last sweep's change over the global mean, largest / mean's, at {}",
+                "; land {} cells, {} restarts, {} sweeps, measure {:.1e}{} (residual {:.1e}); \
+                 components of 1: {}, 2: {}, 3–16: {}, > 16: {} ({} cells, the largest {}); {} \
+                 below zero; the budget's closure {:.1e}",
                 d.land_cells,
-                d.cut_cells,
-                f64::from(d.cut_cells) / f64::from(d.land_cells.max(1)),
-                profile.join(", ")
+                d.restarts,
+                d.sweeps,
+                d.measure,
+                if d.converged { "" } else { " (the cap)" },
+                d.relative_residual,
+                c.single,
+                c.pairs,
+                c.small,
+                c.large,
+                c.large_cells,
+                c.largest,
+                d.negative_cells,
+                closure(d)
             )
         });
         eprintln!(
-            "  month {m:2}: EFE {:+6.2}°, centre {:+6.2}°, k {:.4}, P {:.3} mm/day{}{sweeps}",
+            "  month {m:2}: EFE {:+6.2}°, centre {:+6.2}°, k {:.4}, P {:.3} mm/day{}{solve}",
             degrees(cycle.budget.efe_sine),
             degrees(cycle.budget.centre_sine),
             cycle.scale,
@@ -547,6 +547,129 @@ fn report_months(run: &Run) {
             if cycle.calm { ", wholly calm" } else { "" }
         );
     }
+}
+
+/// The orographic solve's land budget's closure, (inflow − runoff − outflow) ÷ inflow.
+fn closure(d: &lfpm::Diagnostics) -> f64 {
+    (d.inflow_kg_s - d.runoff_kg_s - d.outflow_kg_s) / d.inflow_kg_s
+}
+
+/// The largest error of `values` against `reference` (one a climate cell) over the climate cells
+/// `land` marks, |P − P*| ÷ max(P*, `floor`), with its cell, and the share of those cells above
+/// 10⁻³.
+fn compare(values: &[f64], reference: &[f64], floor: f64, land: &[bool]) -> (f64, usize, f64) {
+    let (mut worst, mut at, mut above, mut count) = (0.0_f64, 0, 0_u32, 0_u32);
+    for (c, ((&p, &q), &is_land)) in values.iter().zip(reference).zip(land).enumerate() {
+        if !is_land {
+            continue;
+        }
+        let error = (p - q).abs() / q.max(floor);
+        if error > worst {
+            (worst, at) = (error, c);
+        }
+        above += u32::from(error > 1e-3);
+        count += 1;
+    }
+    (worst, at, f64::from(above) / f64::from(count))
+}
+
+/// Asserts the ruled convergence on the coarse pass's Earth (decision-r09-t13e-lfpm-convergence
+/// §3.5): every month's orographic solve converges before the cap and closes the land's budget
+/// within 10⁻³ of its inflow, the deep solve meets the stop test at [`DEEP_MEASURE`], and every
+/// land climate cell's (any of its four field cells land) monthly and annual rate lies within 1%
+/// of the deep solve's, |P − P*| ≤ 0.01 max(P*, 10⁻³ k* `P̄_sea`), `deep` the same water cycle at
+/// the deep tolerance on a clone of the finished state ([`Parameters::deep`]) with its records
+/// `deep_climate`. Prints each month's comparison.
+fn assert_the_solve_converges(
+    run: &Run,
+    deep: &hydrology::Diagnostics,
+    deep_climate: &[steps::ClimateState],
+) {
+    let water = run.water();
+    let shares = month_shares(&run.pass(), water.months.len());
+    let land: Vec<bool> = run
+        .working
+        .cells
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|cells| cells.iter().any(|cell| !seas::under_sea(cell)))
+        .collect();
+    let at = |c: usize| {
+        let centre = run.climate.centre(u32::try_from(c).unwrap());
+        (
+            latitude_deg(centre),
+            math::atan2(centre[1], centre[0]).to_degrees(),
+        )
+    };
+    let (mut annual, mut annual_deep, mut annual_floor) =
+        (vec![0.0; land.len()], vec![0.0; land.len()], 0.0);
+    for (m, (cycle, deep_cycle)) in water.months.iter().zip(&deep.months).enumerate() {
+        let d = cycle
+            .orographic
+            .as_ref()
+            .expect("each month of the coarse pass's Earth solves its orography");
+        let dd = deep_cycle.orographic.as_ref().unwrap();
+        let values: Vec<f64> = run
+            .working
+            .climate
+            .iter()
+            .map(|s| s.month_precipitation_kg_m2_s[m])
+            .collect();
+        let reference: Vec<f64> = deep_climate
+            .iter()
+            .map(|s| s.month_precipitation_kg_m2_s[m])
+            .collect();
+        let floor = RATE_FLOOR_SHARE * deep_cycle.scale * dd.sea_mean_kg_m2_s;
+        let (worst, cell, above) = compare(&values, &reference, floor, &land);
+        let (latitude, longitude) = at(cell);
+        eprintln!(
+            "  month {m:2}: {} restarts, {} sweeps, measure {:.1e}; deep {} restarts, {} sweeps, \
+             measure {:.1e} (residual {:.1e}); the worst land climate cell {worst:.2e} at \
+             {latitude:.2}°, {longitude:.2}° ({:.3} against {:.3} mm/day), {:.2}% above 0.1%",
+            d.restarts,
+            d.sweeps,
+            d.measure,
+            dd.restarts,
+            dd.sweeps,
+            dd.measure,
+            dd.relative_residual,
+            values[cell] * DAY_S,
+            reference[cell] * DAY_S,
+            100.0 * above
+        );
+        assert!(
+            d.converged && d.restarts <= MAX_RESTARTS && d.measure <= TOLERANCE,
+            "month {m}: {d:?}"
+        );
+        assert!(closure(d).abs() <= 1e-3, "month {m}: {d:?}");
+        assert!(
+            dd.measure <= DEEP_MEASURE,
+            "month {m}: the deep solve's {dd:?}"
+        );
+        assert!(
+            worst <= 0.01,
+            "month {m}: the worst land climate cell {worst}"
+        );
+        for (sum, &v) in annual.iter_mut().zip(&values) {
+            *sum += shares[m] * v;
+        }
+        for (sum, &v) in annual_deep.iter_mut().zip(&reference) {
+            *sum += shares[m] * v;
+        }
+        annual_floor += shares[m] * floor;
+    }
+    let (worst, cell, above) = compare(&annual, &annual_deep, annual_floor, &land);
+    let (latitude, longitude) = at(cell);
+    eprintln!(
+        "  annual: the worst land climate cell {worst:.2e} at {latitude:.2}°, {longitude:.2}° \
+         ({:.3} against {:.3} mm/day), {:.2}% above 0.1%, of {} land climate cells",
+        annual[cell] * DAY_S,
+        annual_deep[cell] * DAY_S,
+        100.0 * above,
+        land.iter().filter(|&&l| l).count()
+    );
+    assert!(worst <= 0.01, "annual: the worst land climate cell {worst}");
 }
 
 /// [`report`]'s winds: the annual zonal-mean trades and westerlies against NCEP/NCAR R1's.
@@ -1031,14 +1154,19 @@ fn a_locked_aquaplanet_s_winds_converge_on_its_substellar_point() {
 /// shipped generator's own Earth (decision-r09-t13e-asbuilt §1.7): it asserts the water balance in
 /// every month ([`assert_the_water_balances`]) and the zonal budget's E − P pattern in each
 /// hemisphere ([`assert_the_budget_s_pattern`]), but never its precipitation windows, since its
-/// generated midlatitudes are mostly sea and its southern margin a few per cent.
+/// generated midlatitudes are mostly sea and its southern margin a few per cent. It is also the
+/// ruled slow test of the orographic solve (decision-r09-t13e-lfpm-convergence §3.5): the water
+/// cycle run again at the deep tolerance on a clone of the finished state, every month converges
+/// before the cap and closes its budget, and every land climate cell's monthly and annual rate
+/// lies within 1% of the deep solve's ([`assert_the_solve_converges`]).
 #[test]
-#[ignore = "slow: the reference Earth's coarse pass to the climate at level 8, about 20 s"]
+#[ignore = "slow: the reference Earth's coarse pass to the climate at level 8, and its water cycle \
+            again at the deep tolerance, about a minute"]
 fn the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp() {
     let inputs = reference::earth_like();
     let level = hyperion_surface::field::coarse_level(inputs.radius());
     let (field, climate) = (CellGraph::for_field(level), CellGraph::for_climate(level));
-    let (working, diagnostics) = {
+    let (working, diagnostics, deep) = {
         let pass = Pass::new(reference::SEED, &inputs, &field, &climate);
         let mut working = Working::initial(&pass);
         steps::plates::run(&pass, &mut working);
@@ -1056,17 +1184,22 @@ fn the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp() {
         let again = hydrology::run(&pass, &mut working, &kept);
         let cycle = start.elapsed().as_secs_f64();
         assert_eq!(again.as_ref(), diagnostics.water.as_ref());
+        let mut deep_working = working.clone();
+        let start = std::time::Instant::now();
+        let deep = hydrology::run_with(&pass, &mut deep_working, &kept, &Parameters::deep())
+            .expect("the Earth's model keeps its own records");
+        let deep_s = start.elapsed().as_secs_f64();
         let land = working.cells.iter().filter(|c| !seas::under_sea(c)).count();
         eprintln!(
             "level {}: the model {modelled:.2} s, the rest {finished:.2} s, of which the water \
              cycle {cycle:.2} s; the step without it {:.2} s and with it {:.2} s; {land} of {} \
-             cells land; SWEEPS {SWEEPS}",
+             cells land; τ {TOLERANCE:e}; the deep water cycle {deep_s:.2} s",
             level.get(),
             modelled + finished - cycle,
             modelled + finished,
             working.cells.len()
         );
-        (working, diagnostics)
+        (working, diagnostics, (deep, deep_working.climate))
     };
     let run = Run {
         field,
@@ -1078,4 +1211,5 @@ fn the_coarse_pass_s_reference_earth_s_water_cycle_against_gpcp() {
     report("The reference Earth (the coarse pass)", &run);
     assert_the_water_balances(&run);
     assert_the_budget_s_pattern(&run);
+    assert_the_solve_converges(&run, &deep.0, &deep.1);
 }

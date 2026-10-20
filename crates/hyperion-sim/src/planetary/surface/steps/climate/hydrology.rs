@@ -141,6 +141,28 @@ pub(super) fn run(
     working: &mut Working,
     model: &Normalised,
 ) -> Option<Diagnostics> {
+    run_at(pass, working, model, &Parameters::HERGARTEN_ROBL)
+}
+
+/// [`run`] with the orographic model's `parameters` in place of [`Parameters::HERGARTEN_ROBL`]:
+/// for the tests' deep solves (decision-r09-t13e-lfpm-convergence §3.5).
+#[cfg(test)]
+pub(super) fn run_with(
+    pass: &Pass<'_>,
+    working: &mut Working,
+    model: &Normalised,
+    parameters: &Parameters,
+) -> Option<Diagnostics> {
+    run_at(pass, working, model, parameters)
+}
+
+/// [`run`] at the orographic model's `parameters`.
+fn run_at(
+    pass: &Pass<'_>,
+    working: &mut Working,
+    model: &Normalised,
+    parameters: &Parameters,
+) -> Option<Diagnostics> {
     let Some(own) = &model.water else {
         calm(working);
         return None;
@@ -156,6 +178,7 @@ pub(super) fn run(
         model.coordinates,
         own,
         turning,
+        parameters,
     ))
 }
 
@@ -354,7 +377,8 @@ impl Evaporation {
 }
 
 /// The precipitation heuristic's water cycle on `grid` in `coordinates` over the model's own
-/// records `own`, a circulation that turns as `turning` says (the [module documentation](self)).
+/// records `own`, a circulation that turns as `turning` says, the orographic model at
+/// `parameters` (the [module documentation](self)).
 #[expect(
     clippy::too_many_lines,
     reason = "one month's pipeline of seven stages in order, each a few lines over the same cells; \
@@ -367,6 +391,7 @@ fn water_cycle(
     coordinates: Coordinates,
     own: &OwnRecords,
     turning: Turning,
+    parameters: &Parameters,
 ) -> Diagnostics {
     let inputs = pass.inputs();
     let field = pass.grid();
@@ -419,7 +444,6 @@ fn water_cycle(
     let depth_pa = LOWER_BRANCH_DEPTH_SHARE * inputs.surface_pressure().value();
     let rotation_s = inputs.spin().rotation_period.value();
     let pole = coordinates.to_body([0.0, 0.0, 1.0]);
-    let parameters = Parameters::HERGARTEN_ROBL;
     let heights_m: Vec<f64> = working
         .cells
         .iter()
@@ -560,7 +584,7 @@ fn water_cycle(
                         winds: &cell_winds,
                         sea_rates_kg_m2_s: &sea_rates,
                     },
-                    &parameters,
+                    parameters,
                 );
                 rates.copy_from_slice(&solved.precipitation_kg_m2_s);
                 recycled_shares = Some(solved.recycled_shares);

@@ -858,8 +858,11 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    Priestley–Taylor with α = 1.26 (from memory); onto the cells, Hergarten and Robl's linear
    feedback precipitation model carries vapour along the month's prevailing wind for orography, rain
    shadows and inland decay (ε₀ = 0.75, L_c = L_f = L_d = 25 km, L_l = 500 km, H₀ = 2 km, their set
-   for the Himalaya and Tibet, Hergarten and Robl 2022, GMD 15, 2063, §7), solved by a fixed number
-   of Gauss–Seidel sweeps in each month's upwind order (decision-r09-t13ge), and
+   for the Himalaya and Tibet, Hergarten and Robl 2022, GMD 15, 2063, §7), solved in each month's
+   upwind order of strongly connected components (Tarjan 1972), each component of up to 16 cells
+   exactly, by Gauss–Seidel sweeps accelerated by restarted GMRES (Saad and Schultz 1986) until one
+   further sweep moves no land cell's rate by more than 10⁻⁴ of it
+   (decision-r09-t13e-lfpm-convergence), and
    rescaled so that global precipitation equals global evaporation. Prevailing winds are the
    three-cell pattern scaled by the Hadley width, centred each month on the month's energy-flux
    equator, and converging on the substellar point for slow and locked rotators.
@@ -2456,7 +2459,13 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   - the reference Mars and the Venus-like body have no precipitation and calm winds;
   - a world at e = 0 with no obliquity to its seasonal orbit has one wind;
   - the annual runoff function is zero over liquid and on a dry world, and over a flat sea-level
-    continent is 1 − ε₀ of P.
+    continent is 1 − ε₀ of P;
+  - the orographic solve converges to its test: on the strip, the ridge, a land convergence line and
+    a poleward wind against the cell order, every land cell's rate lies within 1% of a deep solve's,
+    the land's water budget closes within 10⁻³ of its inflow, and a two-cell cycle equals its closed
+    form; on the reference Earth through the coarse pass (slow) every month converges before the
+    cap, its budget closes, and every land climate cell's monthly and annual rate lies within 1% of
+    a deep solve's (decision-r09-t13e-lfpm-convergence).
 - **R09.T13.f Cold traps.** After T13.c, T13.d and T7.d (science-r09-drainage.md §4).
   - **The shared closed form** is T7.d's `hyperion_surface::cold_trap::fraction`, built early in
     the surface crate. This task calls it, as P14.T51.f does, and does not change it.
@@ -9462,11 +9471,11 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       (`L_l` − `L_f`) `P_ls`, so that the model's rate over the sea is `P_ls`; the land's own
       long-range mode with ε₀ differs by 0.2% (`F_c` ÷ F = 0.0499 against 0.05), a transient over
       `L_s`. The model returns zero over the sea.
-    - The order (e3): Kahn's over the land's upwind graph, ties to the lowest index (a min-heap);
-      where the queue empties, the lowest-index land cell left is taken and counted as cut. The
-      first sweep has no dispersion term and nothing across a cut edge (the reading of "the first
-      sweep's none", lane agent, 2026-10-19); the lagged dispersion keeps the own value implicit,
-      every neighbour at its latest value.
+    - The order (e3) as part 1 built it, Kahn's over the land's upwind graph with the lowest-index
+      cell taken where the queue emptied, is replaced by _The solve_ below (the components'
+      order). Kept from part 1: the first sweep has no dispersion term (the reading of "the first
+      sweep's none", lane agent, 2026-10-19), and the lagged dispersion keeps the own value
+      implicit, every neighbour at its latest value.
     - The speed drops out (confirmed): with the lengths fixed (`L_c` = v `τ_c`, `L_f` = v `τ_f`, D
       = `L_d` v) eqs. 42–43 hold no speed, so the module reads only the wind's direction, or calm.
     - Measured on its tests: the 3 km, 100 km ridge's lee ÷ windward plain at ±3 half-widths 0.288,
@@ -9474,12 +9483,14 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       0.336 and 0.313 on the cell graph at levels 7 and 8; the maximum −33.2, −22.0 and −4.0 km
       windward on the chain, −56.7 and −35.7 km on the cell graph; the inland e-folding, fitted
       500–2,500 km, 2,004.0, 2,021.7 and 2,039.5 km on the chain (500.2, 517.8 and 535.2 km with
-      no recycling, backward Euler's closed form) and 2,042.7 and 2,024.1 km on the cell graph,
+      no recycling, backward Euler's closed form) and 2,042.7 and 2,024.1 km on the cell graph
+      (2,024.2 at level 8 on the converged solve),
       against `L̃_l` = 2,003.8 km; β₀ = 18.05; the budget, converged, closes within 3–4 × 10⁻¹⁵; a
       chain labelled both ways gives the same bits, a grid labelled by rows, by columns and
-      backwards agrees within 10⁻¹² of its largest rate, and a periodic ring is cut once a land row.
-      Those two cell-graph tests now take the production count and assert the ruling's measure
-      there, and the stricter largest cell's at 64 sweeps.
+      backwards agrees within 10⁻¹² of its largest rate (10⁻⁹ at the deep tolerance, as _The
+      solve_ rules it), and a periodic ring is cut once a land row (one component a land row
+      since). The two cell-graph tests run the production solve, which _The solve_'s own test
+      holds to a deep one.
     - The set's attribution: Design note 8's "their South American fit" was wrong; the set is
       H&R's §7 India–Asia (the Ghats, the Himalaya, Tibet), chosen "as reasonable values" (e1).
     - Part 1's cost at level 8 (its timing world, 64 sweeps, one thread, load 4–5): the mesh
@@ -9487,21 +9498,146 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       0.41–0.51 s all land. Memory, from the layouts: the mesh 224 B a cell (88 MB); a month 48 B a
       cell for the winds against the edges, 128 B a land cell for the balances, 32 B a cell for the
       outflows, rates and shares; the first sweep's balances are dropped before the rest are built.
-  - _The sweep count_ (e3), `SWEEPS` = 14: the count at which, on the reference Earth through the
-    coarse pass (its generated continents and R09.T12.e's sea, level 8, the step's final winds),
-    every month's last sweep moves the global mean rate by under 10⁻³ of that run's own global
-    mean, 9.5 × 10⁻⁴ at most (its eleventh month). Measured over 64 sweeps the measure is first met
-    at the 9th to the 13th sweep by month against the converged mean; at 13 two months read
-    1.0 × 10⁻³ against their own. On R09.T13.g's synthetic sea at level 7, each band's land in one
-    block, it was met from the 5th to the 8th; on the ruled set-up (Natural Earth's land by box, its
-    heights by box median, below) from the 9th to the 13th in seven months, and not within 14 in
-    five (months 0 and 8–11, 1.0–1.4 × 10⁻³; E-L2). `SWEEPS` stays 14, fixed on the coarse pass's
-    Earth, where it holds. The land cells whose edges were cut: 19.3–25.1% by month on the coarse
-    pass's Earth (21,993–28,586 of 113,947), 35.0–67.4% on the one-block sea (9,893–19,048 of
-    28,262), and 37.0–43.4% on the ruled set-up (10,434–12,223 of 28,182). The ruling's measure is
-    read as the global mean's change, as part 1 and the lane agent read it: the stricter reading,
-    every cell's change under 10⁻³ of the mean, is not met within 64 sweeps on either Earth (below,
-    E-L2).
+  - _The solve_ (decision-r09-t13e-lfpm-convergence, which withdraws decision-r09-t13ge §2.3's fixed
+    sweep count and its global-mean measure, with `SWEEPS`; R09.T13.e's last batch, 2026-10-20,
+    lane r09-climate-2, on `e869930c`). Its specification (the ruling's §3.2):
+    - _The order_: Tarjan's strongly connected components of each month's land upwind graph (an
+      edge from each land cell whose air moves on to each land neighbour across an edge with
+      (ŵ · n̂)⁺ ℓ > 0), iterative with an explicit stack, roots in cell-index order and edges in
+      `Edge::ALL` order; the components in the reverse of Tarjan's completion order, a topological
+      order of the condensation, and each one's members in index order (`strongly_connected`,
+      `upwind_components`). Kahn's order, its forced picks and `cut_cells` are gone.
+    - _A sweep_: a single cell as before; a component of 2 to 16 cells (`EXACT_BLOCK_CELLS`) solved
+      whole, its 2n × 2n balance factorised once a month by Doolittle's elimination in member order
+      without pivoting, a column diagonally dominant M-matrix (positive pivots debug-asserted); a
+      larger one by one Gauss–Seidel pass over its members in index order.
+    - _The start_: one sweep without the dispersion from no air. _The iteration_: restarted
+      GMRES(10) (`RESTART`) on (I − G) x = c, x the vapour and cloud-water outflows of the land
+      cells whose air moves on (in cell-index order, vapour then cloud water), c = F(0), F one
+      sweep with the dispersion and G its linear part (a sweep with no sea air); modified
+      Gram–Schmidt and Givens rotations (`math::hypot`), every sum in the unknowns' order, no
+      threads and no fused multiply–add.
+    - _The stop_: at the first restart where the residual sweep F(x) − x moves no land cell's rate
+      (sinks included) by more than `TOLERANCE` = 10⁻⁴ of max(its rate, 10⁻³ P̄_sea)
+      (`RATE_FLOOR_SHARE`), P̄_sea the month's area mean of `P_ls` over its sea cells, from the
+      `Month`'s sea rates. A month with no land whose air moves on, or with ‖c‖ = 0, stops at the
+      start. The cap is `MAX_RESTARTS` = 30; a month that reaches it keeps its last sweep and is
+      flagged (`Diagnostics::converged`), with no panic. No month starts from another's.
+    - _The diagnostics_ (no output) replace `sweeps`, `cut_cells` and `last_relative_changes`: the
+      restarts, the sweep-equivalents, the final measure and whether it converged, ‖F(x) − x‖ ÷
+      ‖c‖, the components by size (`ComponentSizes`: 1, 2, 3–16, > 16, the cells in the last class
+      and the largest), P̄_sea, the cells read as zero, and the land's budget at the final state.
+    - _The parameters_: `Parameters::with_tolerance` replaces `with_sweeps`; the tests add
+      `with_max_restarts` and `Parameters::deep()`, τ = 10⁻¹² (`DEEP_TOLERANCE`) within 400
+      restarts, held to the stop test at 10⁻¹⁰ (`DEEP_MEASURE`). `SWEEPS`, `SweepChange` and
+      `Diagnostics::last_relative_changes` are gone. The production call in `hydrology.rs` passes
+      `Parameters::HERGARTEN_ROBL`, as before.
+    - _Choices the ruling did not state_:
+      - the month keeps the residual sweep's result, F(x), one sweep past GMRES's iterate, so that
+        its outflows and rates come from one sweep and the budget reads one state;
+      - the stop's P_i is the rate at x, and a sink's rate at a state its inflow from that state;
+        P̄_sea counts every sea cell, calm or not;
+      - a final rate below zero is read as zero and counted (`negative_cells`), since GMRES's
+        iterate need not be non-negative; none arose on any world built here;
+      - the deep solve is asked for 10⁻¹² and must meet 10⁻¹⁰; every deep solve here also reached a
+        relative residual of 10⁻¹³ to 10⁻¹⁶, inside the ruling's 10⁻¹²;
+      - the slow test's "land climate cell" is one with any land field cell, and its floor 10⁻³
+        k* P̄_sea of the deep solve's month (the records are after the balance), the annual floor
+        the months' share-weighted mean;
+      - for the slow test's deep solve, `hydrology::run_with(pass, working, model, &Parameters)`
+        (test-only) runs the water cycle at other parameters: `water_cycle` takes the parameters,
+        and `run` passes `HERGARTEN_ROBL`;
+      - the due-south world lies at 28.25–41.75° S on face +x, whose east and west edges are
+        meridians, rather than at the replica's 45° S, which falls on the face's corner; its rows
+        are components of up to 50 cells and its index rises against the flow;
+      - the strip and the ridge are tested at levels 7 and 8, the convergence line at level 8 and
+        the due-south world at level 7.
+    - _Measured, on the unit tests_ (production against deep; restarts and sweep-equivalents at
+      production): the level-7 strip 1 and 14, its worst land cell 4.4 × 10⁻⁵ off; the level-7
+      ridge 1 and 14, 4.9 × 10⁻⁸; the level-8 strip 3 and 36, 1.1 × 10⁻⁴; the level-8 ridge 1 and
+      14, 8.2 × 10⁻⁵; the level-8 convergence line 5 and 58 (80 two-cell components), 5.8 × 10⁻⁵;
+      the due-south world 2 and 25 (19 components over 16 cells holding 942 of 976 land cells),
+      1.4 × 10⁻⁶. No land cell is off by more than 0.1%; the budgets close within 1.2 × 10⁻⁵ of
+      their inflow at production; the deep solves take 2–14 restarts to measures of 8 × 10⁻¹⁶ to
+      9 × 10⁻¹³. The convergence line's wettest land cell is 3.76 times the sea's maximum rate
+      (E-L7). The chains and the two-cell cycle are exact in their first sweep (the cycle equal to
+      its closed form to every printed digit); the cap's world takes 2 restarts, and capped at one
+      reads 5.0 × 10⁻³, flagged. The relabelled grids agree within 10⁻⁹ of their largest rate at
+      the deep tolerance, and the zonal ring is one component a land row.
+    - _Measured, on the reference Earth through the coarse pass_ (level 8, 113,947 of 393,216 cells
+      land), month by month from periapsis:
+      - restarts 22, 21, 22, 21, 25, 21, 21, 21, 20, 22, 27 and 22, that is 223–300
+        sweep-equivalents (the ruling's replica 47–113), every month before the cap; final measures
+        3.6–9.8 × 10⁻⁵, relative residuals 5 × 10⁻⁹ to 2 × 10⁻⁸; the budget's closure 2 × 10⁻⁹
+        to 1.2 × 10⁻⁸; no cell below zero;
+      - components: 85,674–92,511 single cells, 43–64 pairs, 2–12 of 3–16 cells, and 11–25 over 16
+        cells holding 21,238–28,179 land cells (18.6–24.7%), the largest 11,061–11,635 (E-L8);
+      - the deep solve: 41–53 restarts (454–586 sweep-equivalents), measures 3–10 × 10⁻¹³, relative
+        residuals 4–9 × 10⁻¹⁶. Against it the worst land climate cell is 5.1 × 10⁻⁴ off in a month
+        (month 8, 72.15° N 70.73° E, 0.003 mm/day) and 6.3 × 10⁻⁵ annually; field cells 5.1 × 10⁻⁴
+        and 8.5 × 10⁻⁵. No climate or field land cell is off by more than 0.1%, monthly or annual;
+        the worst all lie on the dry Arctic coast, near the floor;
+      - global P 2.6244 mm/day against the 14-sweep build's 2.6046 (60 sweeps 2.6220), the land's
+        ε P 0.245 against 0.225 (the liquid's 2.379 either way); k 1.2368–1.3132 by month against
+        1.2432–1.3265;
+      - moved from the 14-sweep build, annual: of the climate cells all of whose four field cells
+        are land (26,762) 46.9% by more than 10% and 17.5% by more than 50%; of those with any land
+        (30,364) 41.4% and 15.4%; of the field land cells (113,947) 44.2% and 16.6%; monthly, of the
+        climate cells with any land, 32.8–39.6% and 17.9–21.6%. The mean change is 0.126 mm/day, the
+        largest 6.24 mm/day (5.17 against 11.40) at 1.23° N, 53.74° E;
+      - the 1.11° N, 54.26° E patch (E-L7): its field cell's annual rate 17.06 mm/day converged
+        (7.31 at 14 sweeps, 14.62 at 60), its climate cell's 12.24 (6.05); along its meridian the
+        rate exceeds half its peak from 0.86° N to 1.61° N, 4 field cells (84 km between the outer
+        cells' centres, about 110 km across), the two wettest 17.06 and 15.81 mm/day, against the
+        sea's 5.8 mm/day at 3.7° S on the same meridian;
+      - the climate step, `climate::run` timed alone after the coarse pass (plates, relief, craters
+        and relief after the craters), one thread, `CPUQuota` 400%: 18.45 and 18.53 s at load 3–4,
+        22.78 s at load 16–24, and within the slow test 22.06 s at load 2–3 and 27.66 s at load
+        10–12 (the model 5.45 s); the 14-sweep build's 7.40 s at load 0 (8.05 s at load 15 in
+        _Cost_ below). Under the ruling's limit of 30 s (§3.4). The deep water cycle takes
+        30.5–32.9 s.
+    - _The ruled assertions, re-run on the converged solve_ (decision-r09-t13e-asbuilt §1.5, §1.7),
+      all pass. The ruled Earth test: the southern windows 3.49 against 2.24 mm/day (1.56; 3.51 and
+      2.24 at 14 sweeps); E − P −0.574 and +1.063 north and −0.537 and +1.210 south, unchanged; the
+      rain band at +1.25° (5.86 mm/day) against the annual energy-flux equator at −0.58°; the
+      northern windows, printed, 1.58 against 1.62 (0.98; 1.57 against 1.57 at 14 sweeps); global
+      P 2.727 mm/day (the land's ε P 0.234), and at level 6 2.530–2.965 with k 1.168–1.358. The
+      coarse pass's Earth: P = E every month (2.420–2.873 mm/day), E − P −0.599 and +1.158 north
+      and −0.560 and +1.211 south, unchanged; its windows 2.83 against 1.54 north and 2.55 against
+      2.45 south, its tropical maximum at −1.25° (5.28 mm/day) against the equator at +0.32°.
+      Titan-like: E 0.161 kg m⁻² a⁻¹, k 0.760. The figures elsewhere in this record are the 14-sweep
+      build's unless marked.
+    - _The tests_ (§3.5). New in `lfpm/tests.rs`:
+      - `the_solve_lies_within_one_percent_of_a_deep_solve_and_closes_the_land_s_budget`: the strip
+        and the ridge at levels 7 and 8, the convergence line and the due-south world;
+      - `a_two_cell_cycle_equals_the_closed_form_of_its_balance_in_one_sweep`;
+      - `the_components_are_in_topological_order_each_contiguous_and_in_index_order`: a hand-built
+        graph of 40 nodes, 31 of them members, labelled 17 n + 5 mod 40;
+      - `a_solve_that_reaches_its_cap_is_flagged_and_returns_finite_rates`.
+    - Rewritten in `lfpm/tests.rs`:
+      - `a_zonal_ring_is_one_component_a_row_and_converges_wherever_its_labels_start`, formerly
+        `a_cycle_is_cut_at_its_lowest_index_and_converges`;
+      - `the_rates_do_not_depend_on_the_cells_index_order`, at 10⁻⁹ at the deep tolerance;
+      - `the_land_s_water_budget_closes`, deep;
+      - the chain and cell-graph ridge and decay tests, which drop their sweep measures (the
+        chain's start is its solve);
+      - `the_set_fixes_beta_zero_and_the_effective_long_range_length`, with the ruled constants;
+      - `time_one_month_at_level_8` (ignored): a month takes 0.66–0.85 s with 15–20 restarts on its
+        land of blobs, and 0.15–0.16 s with no restart all land, where no sea air enters.
+    - In `tests/hydrology.rs`, the slow coarse-pass test asserts the ruled convergence
+      (`assert_the_solve_converges`) on a clone of the finished state, run by `hydrology::run_with`
+      at `Parameters::deep()`. `report_months` prints the solve.
+    - The runs, each capped and through build-slot:
+      - `lfpm`: 16 passing and 1 ignored, in 1.3 s at four threads;
+      - the climate module: 123 passing and 6 ignored, in 19.7 s at four threads at load 3;
+      - the slow coarse-pass test, by name at one thread: 77.5 s at load 2–3 and 92.5 s at load
+        10–12, against about 20 s at 14 sweeps without the deep run;
+      - `planetary::surface::`: 267 passing and 35 ignored, in 112.1 s at four threads at load 2;
+      - the slow `the_reference_earth_s_pass_is_order_independent`, by name: 267.2 s, against
+        212.3 s;
+      - fmt, Clippy (`-p hyperion-sim --all-targets --features testing -- -D warnings`) and
+        `just doc-check`: clean.
+    - No golden moved, and `GENERATOR_VERSION` stays 22.
   - _The flux and the energy-flux equator_ (e5, the smaller points). Each band's h and L q are the
     band means over its columns of the model's own monthly record (`Bands::of`); F is −Λ
     `edge_conductance` (h̄ₖ − h̄ₖ₋₁) at each interior edge, zero at the poles, the convergence's own
@@ -9629,7 +9765,8 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       20 s, run by name: the coarse pass's Earth printed the same way, with the cost; it asserts
       the water balance in every month, `assert_the_water_balances`, which
       `global_precipitation_equals_global_evaporation` shares, and the zonal budget's E − P
-      pattern in each hemisphere, never its windows; decision-r09-t13e-asbuilt §1.7).
+      pattern in each hemisphere, never its windows; decision-r09-t13e-asbuilt §1.7; since _The
+      solve_ also its ruled convergence, `assert_the_solve_converges`, and about 90 s).
     - `cargo test -p hyperion-sim --lib planetary::surface::steps::climate -- --test-threads 4`
       runs 125: 119 passing, 6 ignored (the new slow one among them), in 24.8–25.8 s at load 17–24
       with the heavy lock held (19.9 s for 124 at load 15 before the ruling's set-up, the ruled
@@ -9731,7 +9868,7 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
         +1.54 → −1.57, −1.41, +1.61, +1.53 m/s (NCEP −1.05, −1.27, +1.83, +1.77); u at 52.5° S
         +4.95 → +5.03 → +5.04 m/s, at 47.5° N +2.92 → +3.21 → +3.06; v at 52.5° S −0.88 on the
         block and −0.91 as ruled (NCEP −1.88);
-      - the sweeps: the cut land cells and the measure as _The sweep count_ above;
+      - the solve: as _The solve_ above;
       - **T13.a's and T13.g's outputs**: under the mask they moved by ≤ 0.02 K (the ruling's
         figure, the draft against the block). As ruled, T13.a's ERA test (zonal, at the sea level,
         so the heights' order does not enter) is the same to its printed 0.1 K, worst asserted
@@ -9744,8 +9881,8 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
         −4.283 → −4.339 K; the field's surface mean after it 288.0000 K;
       - the one-month test's rates 5,816 → 6,144 → 6,144 of 6,144 climate cells; the runoff test's
         land cells 7,078 → 7,034 → 7,034, all with rain;
-      - `lfpm::SWEEPS`' and `wind::LOWER_BRANCH_DEPTH_SHARE`'s doc comments carry the ruled
-        set-up's figures; neither constant moved.
+      - `wind::LOWER_BRANCH_DEPTH_SHARE`'s doc comment carries the ruled set-up's figures, as
+        `lfpm::SWEEPS`' did until _The solve_ withdrew it; neither constant moved for the set-up.
     - _The coarse pass's Earth_ (§1.7), the slow test run by name, is the generated Earth's water
       cycle, recorded: its windows 2.85 against 1.52 mm/day north and 2.54 against 2.45 south, the
       tropical maximum at +1.25° against the annual energy-flux equator at +0.32°; its zonal
@@ -9784,7 +9921,8 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     `CPUQuota` 400% at load 15): the climate step 6.34 s without the water cycle and 8.05 s with
     it, the water cycle 1.71 s (at 64 sweeps it was 5.13 s at load 15–17, and before the frames,
     headings and band stencils were computed once a run, 2.86 s at 13 sweeps at load 22); the model
-    itself 5.89 s; 113,947 of 393,216 cells land.
+    itself 5.89 s; 113,947 of 393,216 cells land. These are the 14-sweep build's; the converged
+    solve's step takes 18.5–27.7 s (_The solve_).
   - _Constants_ (each in its doc comment, checked against its source): Siler, Roe and Armour's
     `σ_x` 0.3 and `h_T` ÷ h 1.06 (§2, eqs. 6–8, read); Kaspi and Showman's 25.1° (Fig. 6a, the
     lane's read); GK19's Eq. 20 exponents 0.71, −0.13, −0.62 and 0.28 (§4.4, read) and C 2.045 483°
@@ -9853,35 +9991,46 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     another condensable's falls off over R T₀² ÷ (M L Γ), 2.7 km for the Earth's water at 288 K and
     5.8 K km⁻¹ (its latent heat 2.47 MJ kg⁻¹ from memory).
   - _From part 1 (the orographic model):_
-    - E-L1. The lagged dispersion converges slowly over long continents: its smooth crosswind error
-      shrinks by about κ' ÷ (κ' + Δs ÷ `L̃_l`) a sweep, κ' = `L_d` ÷ Δx, 0.98 at level 8 (the
-      lane's 2-D replica, `e/scripts-part1/gs_dispersion2.py`: 38–66 sweeps at 33 km cells,
-      growing with the continent). The other reading of the lag diverged. Candidates: the
-      dispersion implicit across each front (H&R's eq. 20), or Krylov acceleration.
-    - E-L2. Cycles of the upwind graph converge slowly, and are commoner than part 1 measured:
-      wherever a wind has a meridional part, two east–west neighbours exchange air through their
-      side edges, which lean together as the meridians converge (a share about sin φ times half a
-      cell's longitude), so each is the other's downwind. Part 2's probe on the synthetic sea at
-      level 6: 4,550 of 7,078 land cells cut under a uniform northward wind, 1,595 under east plus
-      0.3 north, 64 under pure east, and 4,162 under the step's winds. Through the step the share is
-      19–25% on the coarse pass's Earth and 35–67% on the synthetic sea. At the 14 sweeps the
-      ruled measure fixes, the last sweep's largest cell's change is 0.16–1.2 of the global mean on
-      the coarse pass's Earth (the greatest in its fifth and eleventh months, the ITCZ over the
-      continents) and 0.095–0.25 on the synthetic sea; over 64 it is still 0.013–0.31. The global
-      mean converges regardless. Candidates (part 1's): solve each small strongly connected
-      component as one block, or order by components and cut only true cycles; and for the side
-      edges, an edge tolerance on the share of the outflow rather than on ŵ · n̂.
-      - On the synthetic sea as ruled (Natural Earth's land by box, its heights by box median,
-        level 7) the ruled sweep measure is not met within 14 sweeps in five months (months 0 and
-        8–11, 1.0–1.4 × 10⁻³ of the global mean), where the one-block sea met it by the 8th; its
-        cut share is 37.0–43.4% against 35.0–67.4% (the cause not measured), and its last sweep's
-        largest cell's change 0.15–0.77 of the global mean. The coarse pass's Earth, on which
-        `SWEEPS` was fixed, still meets it.
+    - E-L1 and E-L2. Closed by decision-r09-t13e-lfpm-convergence (components and GMRES); the
+      14-sweep build's misses against 60 sweeps are kept as the record of why. On the coarse pass's
+      Earth (113,947 land cells), the field land cells off by more than 10% were 42.5% and by more
+      than 50% 14.3%, and the climate cells all of whose field cells are land 45.0% and 15.0%. The
+      mean miss was 0.117 mm/day and the largest 7.30 mm/day (7.31 against 14.62) at 1.11° N,
+      54.26° E, every large miss an under-delivery. Global P read 2.6046 against 2.6220 mm/day, and
+      k 1.2432–1.3265 against 1.2373–1.3154 (`e/sweeps-14-vs-60.txt`). 60 sweeps was not converged
+      either: the converged solve moves 41.4–46.9% of land climate cells by more than 10% from the
+      14-sweep build (_The solve_). E-L2's side-edge tolerance is refused (the ruling's §3.1).
     - E-L3. One set for every world: H&R's Himalayan lengths are not scaled with the wind speed.
     - E-L5. First-order upwind spreads across an oblique wind, about Δx ÷ 2 sin 2α, comparable to
       `L_d` at level 8.
     - E-L6. A calm cell takes in everything (up to `L_l` `P_ls` ÷ ((1 − ε) Δx), 67 `P_ls` at 30 km
       cells); the wholly calm month's rule is built above, and no such month arose.
+    - E-L7 (decision-r09-t13e-lfpm-convergence §5; for E-P1's revision, with E-L6). **Land
+      convergence lines are grid-scale rain traps.**
+      - The direction-only LFPM has no exit for converging flux but rain. So where winds meet over
+        land (the ITCZ near the equator, where the trades are nearly meridional), the converged
+        solve rains the converging flux out in a one-to-two cell band, about 1 ÷ (1 − ε) times over.
+      - In decision-r09-t13e-lfpm-convergence's replica the equatorial band peaks at 2.4×, 3.5× and
+        4.5× the sea's ITCZ rate at 60, 30 and 15 km cells (0.39× with ε₀ = 0), with 44% of the
+        land's rain within 100 km of it. On the reference Earth: the 1.11° N, 54.26° E band (14.6
+        mm/day annual at 60 sweeps, higher converged). As built it reads 17.06 mm/day converged,
+        above half its peak over 4 field cells (about 110 km), against 5.8 mm/day over the sea on
+        its meridian; the unit test's convergence line peaks at 3.76 times the sea's maximum.
+      - Effect: magnitude and line runoff for R09.T14; R10's classes barely move.
+      - Candidates: the partition's convergence over land as a distributed source and sink (E-P1's
+        candidate 2), or a convergence exit scaled with the wind's speed, which the LFPM drops. No
+        cap.
+    - E-L8 (the solve's cost and its cap's margin; recorded, not ruled). The reference Earth's
+      months take 20–27 of the cap's 30 restarts (223–300 sweep-equivalents, 2–6 times the ruling's
+      replica's 47–113), and its deep solve 41–53. The side-edge cycles (E-L2) merge whole regions
+      into components of up to 11,333 cells (19–25% of the land), which a sweep passes over once in
+      index order rather than along the flow. The climate step costs 18.5–27.7 s at level 8 on one
+      thread (7.4 s at 14 sweeps), under the ruling's 30 s. A world of longer continents or more
+      cyclic winds may reach the cap, flagged as not converged; nothing panics. Candidates: the
+      ruling's held two-level correction (its §3.1); a large component's members ordered along the
+      flow within it (downwind numbering, Bey and Wittum 1997, Appl. Numer. Math. 23, 177–192, as
+      the ruling cites it), which changes the sweep and not the solution. Effect: cost and the cap's
+      margin, not the converged rates.
   - _From part 2:_
     - E-P1 (decision-r09-t13e-asbuilt §4, which replaces the lane's E-P1). **Land-heavy
       midlatitudes are too dry, and on Earth's geography the northern storm track is no wetter
@@ -9916,6 +10065,8 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
         5. the cause of (a).
       - **Acceptance:** decision-r09-t13ge §2.13's northern window restored as an assertion, with
         the northern ratio at least 1.1 on the ruled set-up.
+      - On the converged solve (decision-r09-t13e-lfpm-convergence) the ruled set-up's northern
+        windows read 1.58 against 1.62 mm/day (0.98), and its southern 3.49 against 2.24 (1.56).
     - E-P2. A locked world's rain concentrates at its substellar point: with w = 1 over the whole
       day side, the Hadley cell's moisture converges into the top tidally locked bands, 107.9
       mm/day 3.5° from the substellar point on the locked aquaplanet at level 5. For the revision,
