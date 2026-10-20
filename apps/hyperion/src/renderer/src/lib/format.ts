@@ -6,8 +6,9 @@
  * Each function returns the value without its unit, except where it chooses one, when it returns
  * the unit beside the value or with it ({@link formatScaleLength}, {@link formatAge},
  * {@link formatSubstellarMass}, {@link formatPeriod}, {@link formatBodyDistance},
- * {@link formatSurfaceRange}, {@link formatPressure}), or where the unit is
- * written against the digits (the degree sign, the `yr` inside {@link formatUniverseTimeDhms}). A
+ * {@link formatSurfaceRange}, {@link formatPressure}, {@link formatBearingCapacity}), or where the
+ * unit is written against the digits (the degree sign, the `yr` inside
+ * {@link formatUniverseTimeDhms}). A
  * missing value is the caller's em dash: every formatter here requires a finite number and throws
  * on anything else, since a `NaN` reaching the screen is a bug upstream.
  */
@@ -42,15 +43,28 @@ type SignStyle = "negative" | "always";
 const numberFormats = new Map<string, Intl.NumberFormat>();
 
 // Building an `Intl.NumberFormat` costs far more than formatting with one, and lists and readouts
-// format many values a render, so each distinct format is built once.
+// format many values a render, so each distinct format is built once. The cache is keyed by the
+// caller's name and the options both: two formats of one name whose options differ (a grouping, a
+// sign) would otherwise share whichever was built first.
 function numberFormat(key: string, options: Intl.NumberFormatOptions): Intl.NumberFormat {
-  const cached = numberFormats.get(key);
+  const cacheKey = `${key}|${optionsKey(options)}`;
+  const cached = numberFormats.get(cacheKey);
   if (cached !== undefined) {
     return cached;
   }
   const created = new Intl.NumberFormat("en-US", options);
-  numberFormats.set(key, created);
+  numberFormats.set(cacheKey, created);
   return created;
+}
+
+// The options as text, each `name=value` in the order of the names, so that the same options
+// written in another order are one format.
+function optionsKey(options: Intl.NumberFormatOptions): string {
+  const entries: ReadonlyArray<readonly [string, unknown]> = Object.entries(options);
+  return entries
+    .map(([name, value]) => `${name}=${String(value)}`)
+    .toSorted()
+    .join(",");
 }
 
 function requireFinite(value: number, what: string): void {
@@ -738,6 +752,123 @@ export function formatPressure(pressurePa: number): FormattedPressure {
     return { value: significant(pressurePa / 1_000), unit: "kPa" };
   }
   return { value: significantOrSci(pressurePa / 1_000_000, 0, 10_000), unit: "MPa" };
+}
+
+/** A pressure band of {@link formatBearingCapacity}'s ladder: its unit, and where it ends. */
+interface PressureBand {
+  readonly unit: PressureUnit;
+  readonly paPerUnit: number;
+  /** Where the band ends and the next begins, Pa. */
+  readonly belowPa: number;
+}
+
+// Each band ends at 1,000 of its unit, as formatPressure's do; MPa runs on.
+const PRESSURE_BANDS: ReadonlyArray<PressureBand> = [
+  { unit: "Pa", paPerUnit: 1, belowPa: 1_000 },
+  { unit: "kPa", paPerUnit: 1_000, belowPa: 1_000_000 },
+  { unit: "MPa", paPerUnit: 1_000_000, belowPa: Number.POSITIVE_INFINITY },
+];
+
+function pressureBandOf(unit: PressureUnit): PressureBand {
+  const band = PRESSURE_BANDS.find((candidate) => candidate.unit === unit);
+  if (band === undefined) {
+    throw new Error(`no pressure band for ${unit}`);
+  }
+  return band;
+}
+
+// Two significant figures, digits grouped from five, as a two-figure quantity is read.
+function twoSignificant(value: number): string {
+  return numberFormat("significant:2", {
+    minimumSignificantDigits: 2,
+    maximumSignificantDigits: 2,
+    useGrouping: "min2",
+    signDisplay: "negative",
+  }).format(value);
+}
+
+/**
+ * A value to two significant figures, or in E notation with two where it lies outside
+ * `[low, high)` in magnitude and is not zero, as {@link significantOrSci} is for three.
+ */
+function twoFiguresOrSci(value: number, low: number, high: number): string {
+  const magnitude = Math.abs(roundSignificant(value, 2));
+  return value !== 0 && (magnitude < low || magnitude >= high)
+    ? formatSci(value, "reading", 2)
+    : twoSignificant(value);
+}
+
+/**
+ * Formats a value to two significant figures, without its unit, digits grouped from five:
+ * `0.010`, `2.0`, `410`, `36,000`; below 0.001 and from 1,000,000 in magnitude in E notation with
+ * two figures, `2.0E-4`.
+ *
+ * @remarks
+ * For a quantity whose precision is two figures, such as a survey's resolution (the guide's
+ * `FINEST` and `RESOLUTION`) or a pad's width (`PAD WIDTH 1.0 m`).
+ */
+export function formatTwoFigures(value: number): string {
+  requireFinite(value, "value");
+  return twoFiguresOrSci(value, 0.001, 1_000_000);
+}
+
+/**
+ * Formats an ultimate bearing capacity to two significant figures in the console's pressure units,
+ * `Pa` below 1,000 Pa, `kPa` below 1,000 kPa and `MPa` from there, switching unit with
+ * {@link DISTANCE_HYSTERESIS} as a view's ranges do (the guide's `ULTIMATE BEARING CAPACITY` row;
+ * plan R10, R10.T12): `5.4 MPa`, `210 kPa`.
+ *
+ * @remarks
+ * It is {@link formatPressure}'s ladder at the two figures the capacity's source holds it to (the
+ * Lunar Sourcebook's 3,000–11,000 kPa about its 6,000; plan R10, T12's Draft 1), and, unlike a
+ * body's surface pressure, it changes as the line of sight moves, so it takes the hysteresis that
+ * {@link formatBodyDistance} and {@link formatSurfaceRange} take. Without a previous unit, or once
+ * the capacity has left the previous unit's band by more than {@link DISTANCE_HYSTERESIS} of
+ * either edge, the band it falls in is taken, decided after rounding so that 999.6 kPa reads
+ * `1.0 MPa`. Inside that margin the previous unit is kept: a capacity shown in `kPa` reads up to
+ * 5% past 1,000 kPa in it (`1000 kPa`), and one shown in `MPa` down to 5% under (`0.96 MPa`).
+ * Below 0.01 Pa and from 10,000 MPa the value is in E notation, as {@link formatPressure}'s is.
+ *
+ * @param previous - The unit this capacity was last shown in, which the caller keeps; `null` for
+ *   the first showing.
+ * @throws RangeError for a capacity that is not finite or is negative.
+ */
+export function formatBearingCapacity(
+  capacityPa: number,
+  previous: PressureUnit | null,
+): FormattedPressure {
+  requireFinite(capacityPa, "bearing capacity");
+  if (capacityPa < 0) {
+    throw new RangeError(`a bearing capacity cannot be ${capacityPa} Pa`);
+  }
+  const nominal =
+    PRESSURE_BANDS.find(
+      (band) => roundSignificant(capacityPa / band.paPerUnit, 2) * band.paPerUnit < band.belowPa,
+    ) ?? pressureBandOf("MPa");
+  let chosen = nominal;
+  if (previous !== null) {
+    const kept = pressureBandOf(previous);
+    const index = PRESSURE_BANDS.indexOf(kept);
+    const abovePa = index > 0 ? (PRESSURE_BANDS[index - 1]?.belowPa ?? 0) : 0;
+    const inMargin =
+      capacityPa >= abovePa * (1 - DISTANCE_HYSTERESIS) &&
+      capacityPa < kept.belowPa * (1 + DISTANCE_HYSTERESIS);
+    chosen = inMargin ? kept : nominal;
+  }
+  const inUnit = capacityPa / chosen.paPerUnit;
+  let value: string;
+  switch (chosen.unit) {
+    case "Pa":
+      value = twoFiguresOrSci(inUnit, 0.01, Number.POSITIVE_INFINITY);
+      break;
+    case "kPa":
+      value = twoSignificant(inUnit);
+      break;
+    case "MPa":
+      value = twoFiguresOrSci(inUnit, 0, 10_000);
+      break;
+  }
+  return { value, unit: chosen.unit };
 }
 
 /**

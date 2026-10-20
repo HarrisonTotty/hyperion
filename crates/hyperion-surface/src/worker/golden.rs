@@ -1,8 +1,10 @@
 //! The worker's golden files, blessed natively and compared on `wasm32-wasip1` and
 //! `wasm32-unknown-unknown` through the testkit's embedded arm: `tests/golden/worker/moon_like.golden`
 //! (plan R10, T6.b), a fixture field's payload blocks and what [`WorkerFields`] answers over them,
-//! and `tests/golden/worker/terrain_test.golden` (R10.T16.d; decision-r10-t16-contracts §4), the
-//! payloads of the client's kept scene `TERRAIN TEST` with the answers R09.T19.b gives with them.
+//! `tests/golden/worker/terrain_test.golden` (R10.T16.d; decision-r10-t16-contracts §4), the
+//! payloads of the client's kept scene `TERRAIN TEST` with the answers R09.T19.b gives with them,
+//! and `tests/golden/worker/earth_like.golden` (R10.T12), an Earth-like survey whose field holds a
+//! finest-level patch of three classes, with the worker's material at each of its vertices.
 //!
 //! The client's worker test (`apps/hyperion/.../workers/fieldsWasm.test.ts`) reads the first: it
 //! posts the blocks to the client's module, through the worker's own answers, and asks the module's
@@ -50,6 +52,49 @@
 //! - for each material, `material <face> <u bits> <v bits>`, then `none` or `class <code> entry
 //!   <entry or ->` and, where the entry is named, its properties' figures.
 //!
+//! # The Earth-like fixture (plan R10, T12)
+//!
+//! The client's test that a finest-level bake's dominant weight at each vertex names the palette
+//! slot of the worker's material there (`fieldsWasm.test.ts`; main's ruling for R10.T10.b) needs a
+//! patch of at least three classes, which neither Moon-like file holds: every cell they survey is
+//! highland, of regolith and bedrock of one entry alone. This one surveys the Earth-like world's
+//! cell (0, 0) of face +x at level 8, at 50 m with its margin (one payload of 4,850 bytes in two
+//! blocks), and pins its finest-level (19) patch (900, 668) of face +x, about 19 m across, centred
+//! near 35.23° S, 44.87° W: soil (class 2), sand (3) and a channel's sediment (4), each of the
+//! continental crust's granite, entry 1, where the arid bound's height contour crosses a channel
+//! (66, 4,120 and 39 of its 4,225 vertices dominant, no tie).
+//!
+//! The spot was found by a deterministic search, recorded here so that it can be run again (it was,
+//! 2026-10-20, to the same patch). A class is the form
+//! [`material_at`](crate::material::material_at) answers over the world's whole field (over the
+//! fixture's survey the search finds the same blocks and the same patch), and "columns in turn,
+//! the rows within each" orders a grid by its first index, then its second.
+//!
+//! - The Earth-like `material` golden's points of bedrock, snow or sediment, in its order, and
+//!   their cells at the field's level, 8, each once, in that order. The first, (0, 0) of face +x,
+//!   holds the spot.
+//! - On a cell (i, j), a 128 × 128 grid of equal squares of the cell in the cube's (s, t), before
+//!   [`st_to_uv`](crate::cube::st_to_uv)'s warp, each 16 × 16 finest-level patches: square (a, b)
+//!   read at its centre, s = (128 i + a + ½) ÷ 2¹⁵ and t = (128 j + b + ½) ÷ 2¹⁵.
+//! - Every 2 × 2 block of squares, at every (a, b) from 0 to 126, so that the blocks overlap,
+//!   columns in turn, the rows within each, that holds at least three classes: here (5, 22),
+//!   (53, 41), (54, 41), then (55, 41).
+//! - For each such block in turn, the 17 × 17 finest-level patches centred on the one whose corner
+//!   of least s and t is the block's centre, (16 (128 i + a + 1), 16 (128 j + b + 1)) on the face,
+//!   from 8 below it to 8 above it each way, columns in turn, the rows within each. Each patch is
+//!   sampled at every eighth vertex, x and y of 0, 8, …, 64, 81 points (`vertex_point`).
+//! - The first patch whose samples hold three classes: the first three blocks have none, and the
+//!   fourth's patches about (896, 672) give (900, 668).
+//!
+//! After the header:
+//!
+//! - `body`, `seed` and `block 1 <index> <bytes>`, as the Moon-like file's;
+//! - the patch's bake as the Moon-like file's bakes, under the name `three_classes`, at the low
+//!   setting's options with the weights;
+//! - `materials <runs>`: the worker's material at each vertex (x, y) in order of 65 y + x, as
+//!   [`WorkerFields::material`] answers it at the vertex's point on its face (`vertex_point`), as
+//!   runs `<code>:<entry or ->*<count>`.
+//!
 //! # The terrain test's format
 //!
 //! After the header, every float as `0x` and its 16 lowercase hexadecimal digits of bits, which is
@@ -85,7 +130,8 @@ use hyperion_testkit::golden::{GoldenWriter, f32_digest, f64_digest};
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
 use super::tests::{
-    WORLD, cell, face_uv, fixture, lit, payload_cover, probes, sight_lines, terrain_fixture,
+    MESH, WORLD, cell, earth_fixture, earth_worker, face_uv, fixture, lit, payload_cover, probes,
+    sight_lines, terrain_fixture, vertex_point,
 };
 use super::*;
 use crate::bake::WeightsLayer;
@@ -396,6 +442,63 @@ fn worker_matches_its_golden() {
     golden!("worker/moon_like", &moon_text());
 }
 
+/// The Earth-like fixture's golden (the module documentation).
+fn earth_text() -> String {
+    let f = earth_fixture();
+    let mut out = GoldenWriter::new();
+    out.header(crate::generator_version());
+    out.line(&format!(
+        "body {:016x}.{:04x}",
+        f.body.raw_system_id(),
+        f.body.body_index()
+    ));
+    out.line(&format!("seed {:016x}", SEED.get()));
+    for (index, block) in f.blocks.iter().enumerate() {
+        out.line(&format!("block 1 {index} {}", hex(block)));
+    }
+    let mut fields = earth_worker(&f);
+    let bake = fields.bake(f.body, SEED, f.patch, &MESH).expect("held");
+    write_bake(&mut out, "three_classes", &MESH, &bake);
+    // One synthesiser for the patch's 4,225 points, where `material` builds one a query: the same
+    // answer (`surveyed_material`, after the same check), which the fixture's test holds at a vertex
+    // of each class.
+    let held = fields.field(f.body).expect("held");
+    let synth = Synthesiser::new(held, SEED);
+    let mut cache = SynthCache::new();
+    let mut words: Vec<(String, u32)> = Vec::new();
+    for y in 0..=PATCH_QUADS {
+        for x in 0..=PATCH_QUADS {
+            let at = vertex_point(f.patch, x, y);
+            assert!(
+                held.is_surveyed(field_cell(held, at)),
+                "the patch is surveyed"
+            );
+            let ground = surveyed_material(&synth, &mut cache, at)
+                .expect("a surveyed cell's margin is held")
+                .ground();
+            let entry = ground
+                .entry()
+                .map_or_else(|| "-".to_owned(), |e| e.to_string());
+            let word = format!("{}:{entry}", u8::from(ground.class()));
+            match words.last_mut() {
+                Some((last, count)) if *last == word => *count += 1,
+                _ => words.push((word, 1)),
+            }
+        }
+    }
+    let runs: Vec<String> = words
+        .iter()
+        .map(|(word, count)| format!("{word}*{count}"))
+        .collect();
+    out.line(&format!("materials {}", runs.join(" ")));
+    out.finish()
+}
+
+#[test]
+fn worker_matches_its_earth_like_golden() {
+    golden!("worker/earth_like", &earth_text());
+}
+
 /// A palette role as the wire spells it (`PaletteRoleDto`).
 fn role_name(role: PaletteRole) -> &'static str {
     match role {
@@ -638,7 +741,11 @@ mod native_only {
 
     /// The files of `tests/golden/worker/`, each one a test writes and compares
     /// (decision-r10-t16-contracts §4): a stray file fails the test below, as before.
-    const WORKER_GOLDENS: [&str; 2] = ["moon_like.golden", "terrain_test.golden"];
+    const WORKER_GOLDENS: [&str; 3] = [
+        "earth_like.golden",
+        "moon_like.golden",
+        "terrain_test.golden",
+    ];
 
     /// The largest the terrain test's golden may be, bytes: `cube_sphere.golden`'s, the crate's
     /// largest when it was written, the plan's "about 360 kB" (decision-r10-t16-contracts §4), since
@@ -654,7 +761,7 @@ mod native_only {
     }
 
     /// Every golden file of `tests/golden/worker/` carries `GENERATOR_VERSION`, and they are the
-    /// two the tests write.
+    /// three the tests write.
     #[test]
     fn every_worker_golden_carries_the_generator_version() {
         let expected = format!("# generator_version = {}", crate::generator_version());

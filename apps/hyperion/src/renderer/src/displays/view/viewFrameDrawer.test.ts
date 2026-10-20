@@ -1,9 +1,11 @@
 import type { BodyIdHex } from "@hyperion/protocol";
 import { describe, expect, it, vi } from "vitest";
 
-import { scale, vec3 } from "../../geometry/vec3";
+import { add, normalise, scale, vec3 } from "../../geometry/vec3";
 import { moonLikeHeader } from "../../test/coarseFieldFixtures";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
+import { aViewCraft, NO_TURN } from "../../test/viewFixtures";
+import { rotate } from "../../view/camera/quaternion";
 import { EngineUnavailable } from "../../view/engine/resilientEngine";
 import type { DrawItem, FrameSubmission, RenderView, TextureHandle } from "../../view/engine/types";
 import { viewId } from "../../view/camera/state";
@@ -759,4 +761,106 @@ describe("a view's wireframe frame of its terrain (R10.T11)", () => {
       ]).toEqual([[null, null], 2, reports]);
     },
   );
+});
+
+describe("a view's line-of-sight mark across its frames (R10.T12)", () => {
+  /**
+   * The phase scene's run with another craft 10⁸ m out, below the view's centre by `belowPx` at
+   * 320 × 180: the camera looks along its −z, its screen's down being its −y.
+   */
+  function runWithCraftBelow(belowPx: number): ViewRun {
+    const run = phaseRun(false);
+    const pose = runPose(run);
+    if (pose.frame.kind !== "system") {
+      throw new Error("the phase scene's camera is not in its system's frame");
+    }
+    const s = 1 / Math.tan((run.camera.fovDeg * Math.PI) / 360);
+    const direction = rotate(pose.orientation, normalise(vec3(0, -belowPx / (s * 160), -1)));
+    const craft = aViewCraft({
+      id: "other",
+      designation: "OTHER",
+      pose: {
+        position: {
+          kind: "system",
+          system: pose.frame.system,
+          m: add(pose.positionM, scale(direction, 1e8)),
+        },
+        attitude: NO_TURN,
+      },
+    });
+    return { ...run, scene: { ...run.scene, craft: [...run.scene.craft, craft] } };
+  }
+
+  /**
+   * The craft below the centre with its upper tick `clearRem` below the end of the tripod's lower
+   * tick, at a ratio of 1 and 16 px a rem: the tripod's ticks from 4.21 to 8.21 px out (its open
+   * centre), the craft's upper tick ending 6.25 + 4 px above its anchor.
+   */
+  function craftClear(clearRem: number): ViewRun {
+    return runWithCraftBelow(1 + 2 + 0.5 + Math.SQRT1_2 + 4 + 10.25 + clearRem * 16);
+  }
+
+  /** A wireframe frame's inputs over `run`, at 320 × 180, its readout's point as given. */
+  function inputsOver(run: ViewRun, lineOfSightPoint?: boolean): ViewFrameInputs {
+    return {
+      run,
+      size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      stars: [],
+      sky: null,
+      selection: null,
+      style: "wireframe",
+      setting: "low",
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+      ...(lineOfSightPoint === undefined ? {} : { lineOfSightPoint }),
+    };
+  }
+
+  /** Each frame's line-of-sight mark, drawn in turn by one drawer. */
+  async function framesOf(
+    ...inputs: ReadonlyArray<ViewFrameInputs>
+  ): Promise<Array<ViewFrameDrawn["lineOfSight"] | undefined>> {
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const drawn = inputs.map((each) => drawer.draw(each)?.lineOfSight);
+    drawer.dispose();
+    return drawn;
+  }
+
+  it("marks no line of sight for a view that states no readout", async () => {
+    expect(await framesOf(inputsOver(phaseRun(false)))).toEqual([null]);
+  });
+
+  it("draws the tripod at the view's centre where the readout has a point", async () => {
+    const [mark] = await framesOf(inputsOver(phaseRun(false), true));
+    const box = mark?.boxPx ?? null;
+    expect({
+      yielded: mark?.yielded,
+      holdsCentre:
+        box !== null &&
+        box.leftPx < 160 &&
+        box.leftPx + box.widthPx > 160 &&
+        box.topPx < 90 &&
+        box.topPx + box.heightPx > 90,
+    }).toEqual({ yielded: false, holdsCentre: true });
+  });
+
+  it("keeps its give-way from frame to frame, so that a craft between 0.5 and 0.75 rem holds it out", async () => {
+    const [near, between, beyond] = await framesOf(
+      inputsOver(craftClear(0.25), true),
+      inputsOver(craftClear(0.6), true),
+      inputsOver(craftClear(0.9), true),
+    );
+    // A drawer whose first frame has the craft between draws the tripod.
+    const [fresh] = await framesOf(inputsOver(craftClear(0.6), true));
+    expect({
+      near: near?.boxPx ?? null,
+      between: between?.boxPx ?? null,
+      beyond: beyond?.boxPx !== null && beyond?.yielded === false,
+      fresh: fresh?.boxPx !== null && fresh?.yielded === false,
+    }).toEqual({ near: null, between: null, beyond: true, fresh: true });
+  });
 });

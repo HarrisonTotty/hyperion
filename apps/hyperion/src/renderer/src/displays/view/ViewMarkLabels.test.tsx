@@ -770,3 +770,38 @@ describe("a label's plate over a neighbouring mark (R07.T16.g; decision-r07-t16d
     expect(/transition|animation/u.test(stylesheetRule(".view-marks__label"))).toBe(false);
   });
 });
+
+describe("a label clear of the line-of-sight mark (R10.T12; the guide's tripod, its place)", () => {
+  // ANCHOR's plate at its right runs from 224 to 324 px across and 91 to 109 px down; the tripod's
+  // box, device px at a ratio of 1, stands over it.
+  const TRIPOD = { leftPx: 250, topPx: 92, widthPx: 16, heightPx: 16 };
+
+  it("stands a label that would cover it on another side of its mark", () => {
+    expect([
+      placesOf([ANCHOR], plates(ANCHOR), STAGE)[0],
+      placesOf([ANCHOR], plates(ANCHOR), STAGE, { lineOfSightPx: TRIPOD })[0],
+    ]).toEqual(["right", "left"]);
+  });
+
+  it("holds its box, given in device px, clear in CSS px at a ratio of 2", () => {
+    const anchor: DrawAnchor = { ...ANCHOR, xPx: 400, yPx: 200, labelOffsetPx: 48 };
+    const stage = { ...STAGE, devicePixelRatio: 2 };
+    const box = { leftPx: 500, topPx: 184, widthPx: 32, heightPx: 32 };
+    expect([
+      placesOf([anchor], plates(anchor), stage)[0],
+      placesOf([anchor], plates(anchor), stage, { lineOfSightPx: box })[0],
+    ]).toEqual(["right", "left"]);
+  });
+
+  it("does not show a label that would cover it on every side of its mark", () => {
+    const about = { leftPx: 60, topPx: 40, widthPx: 280, heightPx: 120 };
+    expect(placesOf([ANCHOR], plates(ANCHOR), STAGE, { lineOfSightPx: about })[0]).toBeNull();
+  });
+
+  it("places every label as before where it is not drawn", () => {
+    const anchors = [ANCHOR, NEIGHBOUR];
+    expect(placesOf(anchors, plates(...anchors), STAGE, { lineOfSightPx: null })).toEqual(
+      placesOf(anchors, plates(...anchors), STAGE),
+    );
+  });
+});

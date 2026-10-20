@@ -508,6 +508,9 @@ function chromeBoxesPx(overlay: Element): ScreenBoxPx[] {
  * afresh.
  *
  * @param labels - The marks' labels by their target's key.
+ * @param lineOfSightPx - The line-of-sight mark's box as the last drawn frame drew it, device px
+ *   (`DrawnLineOfSight.boxPx`, plan R10, R10.T12), held clear as the chrome is; `null` where it was
+ *   not drawn.
  * @param stage - The stage's size, CSS px, its device-pixel ratio and its rem.
  * @param states - Each label's state after the frame before, written for the next.
  * @param nowMs - The animation frame's time, by which each label's changes are counted.
@@ -515,6 +518,7 @@ function chromeBoxesPx(overlay: Element): ScreenBoxPx[] {
 function placeMarkLabels(
   labels: ReadonlyMap<string, HTMLElement>,
   anchors: ReadonlyArray<DrawAnchor>,
+  lineOfSightPx: ScreenBoxPx | null,
   stage: ElementSize,
   selection: CameraTarget | null,
   states: WeakMap<HTMLElement, MarkLabelState>,
@@ -539,6 +543,7 @@ function placeMarkLabels(
   }
   const places = markLabelPlaces(anchors, plates, stage, {
     chrome: overlay === null ? [] : chromeBoxesPx(overlay),
+    lineOfSightPx,
     selection: selection === null ? null : targetKey(selection),
     previous,
     nowMs,
@@ -881,6 +886,9 @@ function ViewStage({
     let lastMs: number | null = null;
     let publishedMs = Number.NEGATIVE_INFINITY;
     let anchors: ReadonlyArray<DrawAnchor> = [];
+    // The line-of-sight mark's box as the last frame drew it, which the labels stand clear of
+    // (R10.T12).
+    let lineOfSightPx: ScreenBoxPx | null = null;
     // Where each mark's label stood after the last frame, kept with its element (R07.T16.i).
     const labelStates = new WeakMap<HTMLElement, MarkLabelState>();
     // The terrain session the view last told what it drew, which forgets it when it goes.
@@ -910,6 +918,7 @@ function ViewStage({
           placeMarkLabels(
             labelsRef.current,
             anchors,
+            lineOfSightPx,
             between.size,
             between.selection,
             labelStates,
@@ -1025,6 +1034,7 @@ function ViewStage({
         const drawn = drawer.draw(frameInputs);
         if (drawn !== null && inputs.size !== null) {
           anchors = drawn.anchors;
+          lineOfSightPx = drawn.lineOfSight?.boxPx ?? null;
           terrainAnnunciation = drawn.terrain;
           surveyEdges = drawn.surveyEdges;
           contourIntervalM = drawn.contourIntervalM;
@@ -1033,6 +1043,7 @@ function ViewStage({
           placeMarkLabels(
             labelsRef.current,
             anchors,
+            lineOfSightPx,
             inputs.size,
             inputs.selection,
             labelStates,

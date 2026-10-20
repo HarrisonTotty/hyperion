@@ -11,7 +11,15 @@ import { FRAME_CHANGE_MOON, frameChangeScene } from "../../view/scenes/frameChan
 import { precisionScene } from "../../view/scenes/precision";
 import { phaseScene } from "../../view/scenes/phaseScene";
 import type { SystemIdHex } from "@hyperion/protocol";
-import { aViewScene, FIXTURE_MOON, FIXTURE_PLANET } from "../../test/viewFixtures";
+import {
+  aViewCraft,
+  aViewScene,
+  FIXTURE_MOON,
+  FIXTURE_PLANET,
+  FIXTURE_SHIP,
+  FIXTURE_SYSTEM,
+  NO_TURN,
+} from "../../test/viewFixtures";
 
 import { rotate } from "../../view/camera/quaternion";
 import {
@@ -21,6 +29,7 @@ import {
   followRun,
   lookReading,
   photorealStatements,
+  frameBody,
   frameName,
   freeRateReading,
   labelLines,
@@ -29,6 +38,7 @@ import {
   rangesFromCamera,
   SCENE_OPTIONS,
   sceneClockReading,
+  slantRangeFromCamera,
   type ViewRun,
   startInstrumentRun,
   startRun,
@@ -730,5 +740,48 @@ describe("surveyEdgeNotes (R10.T16.c; decision-r10-t16-review §1)", () => {
     const gone = surveyEdgeNotes(scene, [], shown);
     const back = surveyEdgeNotes(scene, [{ body: FIXTURE_MOON, nearestRangeM: 1_020 }], gone);
     expect(back[0]?.reading).toBe("1.02 km");
+  });
+});
+
+describe("the terrain lines' body and range label (R10.T12)", () => {
+  it("takes a body frame's body as the FRAME body", () => {
+    const scene = aViewScene();
+    expect(frameBody({ kind: "body", body: FIXTURE_MOON }, scene)?.designation).toBe("TEST MOON");
+  });
+
+  it("takes a craft frame's body from the frame the craft's position is in, as frameName does", () => {
+    const scene = aViewScene();
+    expect(frameBody({ kind: "craft", craft: FIXTURE_SHIP }, scene)?.id).toBe(FIXTURE_PLANET);
+    const inSystem = aViewScene({
+      craft: [
+        aViewCraft({
+          pose: {
+            position: { kind: "system", system: FIXTURE_SYSTEM, m: vec3(1e9, 0, 0) },
+            attitude: NO_TURN,
+          },
+        }),
+      ],
+    });
+    expect(frameBody({ kind: "craft", craft: FIXTURE_SHIP }, inSystem)).toBeNull();
+  });
+
+  it("names no FRAME body for a system or galactic frame, or a body the scene does not hold", () => {
+    const scene = aViewScene();
+    expect([
+      frameBody({ kind: "system", system: FIXTURE_SYSTEM }, scene),
+      frameBody({ kind: "galactic", origin: KEPT_BARYCENTRE }, scene),
+      frameBody({ kind: "body", body: `${FIXTURE_SYSTEM}.0999` }, scene),
+    ]).toEqual([null, null, null]);
+  });
+
+  it("labels the slant range FROM CAMERA off the hull, or with no own ship, and not in SEAT", () => {
+    const run = startServerRun(aViewScene());
+    const shipless = aViewScene({ ownShip: null, craft: [] });
+    expect([
+      slantRangeFromCamera({ ...run.camera, preset: "seat" }, run.scene),
+      slantRangeFromCamera({ ...run.camera, preset: "chase" }, run.scene),
+      slantRangeFromCamera({ ...run.camera, preset: "free" }, run.scene),
+      slantRangeFromCamera({ ...run.camera, preset: "seat" }, shipless),
+    ]).toEqual([false, true, true, true]);
   });
 });

@@ -6,7 +6,7 @@ import type {
   SurfaceHeaderDto,
 } from "@hyperion/protocol";
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
 import protocolSurfaceSource from "../../../../../../../crates/hyperion-protocol/src/surface.rs?raw";
 import wireSource from "../../../../../../../crates/hyperion-surface/src/wire.rs?raw";
@@ -14,6 +14,7 @@ import { RECONNECT_DELAY_MS } from "../../lib/connection";
 import { type ServerLink, useServerLink } from "../../lib/serverLink";
 import { binaryFrame } from "../../test/binaryFrames";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
+import { earthDetail } from "../../test/planetaryFixture";
 import { ScriptedHeightWorker } from "../../test/scriptedHeightWorker";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import { keptBody } from "../scenes/kept";
@@ -24,7 +25,9 @@ import {
   BlockSplitter,
   CoarseFieldStore,
   type FieldCandidate,
+  type FieldCheck,
   fieldDemand,
+  type FieldFailure,
   FIELD_RETRY_DELAY_MS,
   FIELD_RETRY_MAX_DELAY_MS,
   headerFailure,
@@ -185,6 +188,16 @@ function respondReady(
     coverage,
     bulk,
   });
+}
+
+/** The store's failure for a check of the console's own that failed. */
+function invalid(check: FieldCheck): FieldFailure {
+  return { kind: "invalid", check };
+}
+
+/** The console's error log, silenced, so that a test can read what the store logged. */
+function quietErrors(): MockInstance<typeof console.error> {
+  return vi.spyOn(console, "error").mockImplementation(() => undefined);
 }
 
 /** Resolves after `hops` turns of the microtask queue. */
@@ -799,7 +812,12 @@ describe("the coarse-field store", () => {
       field: "body",
     });
     await settle();
-    expect(h.store.status(MOON)?.failure).toMatch(/unknown_body/u);
+    expect(h.store.status(MOON)?.failure).toEqual({
+      kind: "rejected",
+      code: "unknown_body",
+      message: "no such body",
+      refusal: true,
+    });
     h.store.noteSurfaceRevisions([{ body: MOON, revision: 5 }]);
     h.store.setLinkUp(false);
     h.store.setLinkUp(true);
@@ -902,7 +920,8 @@ describe("the coarse-field store", () => {
     expect(told).toEqual([1]);
   });
 
-  it("refuses a field of a level R09 does not serve, or one whose level moved", async () => {
+  it("refuses a field of a level R09 does not serve as a field level unusable, logging why", async () => {
+    const errors = quietErrors();
     const h = harness(1);
     h.store.want(MOON, "local-body");
     const socket = h.socket();
@@ -916,14 +935,21 @@ describe("the coarse-field store", () => {
       bulk: sendFrames(socket, first, block(50, 1), 64),
     });
     await settle();
-    expect(h.store.status(MOON)?.failure).toMatch(/level 9 is not 5 to 8/u);
+    expect(h.store.status(MOON)?.failure).toEqual(invalid("field level unusable"));
+    expect(errors).toHaveBeenCalledOnce();
+    expect(String(errors.mock.calls[0]?.[1])).toMatch(/level 9 is not 5 to 8/u);
     // Nothing was held before, so the workers drop the payload's blocks too.
     expect(fieldLog(h.workers[0] ?? new ScriptedHeightWorker())).toEqual([
       `init ${MOON} 50 #1`,
       `release ${MOON}`,
     ]);
-    h.store.release(MOON);
+  });
+
+  it("drops a held field whole when a delta whose blocks reached the workers fails", async () => {
+    const errors = quietErrors();
+    const h = harness(1);
     h.store.want(MOON, "local-body");
+    const socket = h.socket();
     await answer(h, [block(50, 1)], 1, cover([0, 1, 9]));
     h.store.noteSurfaceRevisions([{ body: MOON, revision: 2 }]);
     const second = latestAsk(socket).id;
@@ -936,20 +962,98 @@ describe("the coarse-field store", () => {
       bulk: sendFrames(socket, second, block(40, 2), 64),
     });
     await settle();
-    expect(h.store.status(MOON)?.failure).toMatch(/moved from 5 to 6/u);
-    // The field held stays, at its revision.
-    expect(h.store.coverage(MOON)?.revision).toBe(1);
+    expect(h.store.status(MOON)?.failure).toEqual(invalid("field level unusable"));
+    expect(String(errors.mock.calls[0]?.[1])).toMatch(/moved from 5 to 6/u);
+    // The half-taken delta never leaves the workers ahead of the coverage: the field goes whole.
+    expect([h.store.coverage(MOON), h.store.header(MOON)]).toEqual([null, null]);
+    expect(fieldLog(h.workers[0] ?? new ScriptedHeightWorker())).toEqual([
+      `init ${MOON} 50 #1`,
+      `chunk ${MOON} 40 #2`,
+      `release ${MOON}`,
+    ]);
   });
 
-  it("refuses an answer whose coverage is not a run of the field's cells", async () => {
+  it("drops a held field whole when the server fails a delta part-way through its blocks", async () => {
+    const h = harness(1);
+    h.store.want(MOON, "local-body");
+    await answer(h, [block(50, 1)], 1, cover([0, 1, 9]));
+    h.store.noteSurfaceRevisions([{ body: MOON, revision: 2 }]);
+    const { id } = latestAsk(h.socket());
+    h.socket().serverSendsBinary(binaryFrame(id, 0, 2, [...block(40, 2)]));
+    h.socket().serverRejects(id, { code: "internal", message: "the delta failed", field: null });
+    await settle();
+    expect(h.store.status(MOON)?.failure).toEqual({
+      kind: "rejected",
+      code: "internal",
+      message: "the delta failed",
+      refusal: false,
+    });
+    expect(h.store.header(MOON)).toBeNull();
+    expect(fieldLog(h.workers[0] ?? new ScriptedHeightWorker()).at(-1)).toBe(`release ${MOON}`);
+  });
+
+  it("keeps a held field when an answer fails before any of its blocks reached the workers", async () => {
+    const h = harness(1);
+    h.store.want(MOON, "local-body");
+    await answer(h, [block(50, 1)], 1, cover([0, 1, 9]));
+    h.store.noteSurfaceRevisions([{ body: MOON, revision: 2 }]);
+    h.socket().serverRejects(latestAsk(h.socket()).id, {
+      code: "storage_failed",
+      message: "the survey log could not be read",
+      field: null,
+    });
+    await settle();
+    expect(h.store.status(MOON)?.failure).toEqual({
+      kind: "rejected",
+      code: "storage_failed",
+      message: "the survey log could not be read",
+      refusal: false,
+    });
+    expect([h.store.coverage(MOON)?.revision, h.store.header(MOON)]).toEqual([1, HEADER]);
+    expect(fieldLog(h.workers[0] ?? new ScriptedHeightWorker())).toEqual([`init ${MOON} 50 #1`]);
+  });
+
+  it("drops a held field whole when an answer fails after a link-cut answer's blocks", async () => {
+    vi.useFakeTimers();
+    const h = harness(1);
+    h.store.want(MOON, "local-body");
+    await answer(h, [block(50, 1)], 1, cover([0, 1, 9]));
+    h.store.noteSurfaceRevisions([{ body: MOON, revision: 2 }]);
+    const { id } = latestAsk(h.socket());
+    h.socket().serverSendsBinary(binaryFrame(id, 0, 2, [...block(40, 2)]));
+    await act(async () => {
+      h.socket().close();
+      await Promise.resolve();
+    });
+    h.store.setLinkUp(false);
+    await settle();
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+    });
+    const next = FakeWebSocket.latest();
+    act(() => {
+      next.serverWelcomes();
+    });
+    h.store.setLinkUp(true);
+    next.serverRejects(latestAsk(next).id, { code: "internal", message: "no", field: null });
+    await settle();
+    // The cut answer's block is in the workers and in no coverage: the field goes whole.
+    expect(h.store.header(MOON)).toBeNull();
+    expect(fieldLog(h.workers[0] ?? new ScriptedHeightWorker()).at(-1)).toBe(`release ${MOON}`);
+  });
+
+  it("refuses an answer whose coverage is not a run of the field's cells as coverage unusable", async () => {
+    const errors = quietErrors();
     const h = harness(1);
     h.store.want(MOON, "local-body");
     await answer(h, [block(50, 1)], 1, cover([0, 7_000, 9]));
-    expect(h.store.status(MOON)?.failure).toMatch(/beyond level 5/u);
+    expect(h.store.status(MOON)?.failure).toEqual(invalid("coverage unusable"));
+    expect(String(errors.mock.calls[0]?.[1])).toMatch(/beyond level 5/u);
     expect(h.store.coverage(MOON)).toBeNull();
   });
 
-  it("gives a payload up whose frame is malformed, cancelling its request", async () => {
+  it("gives a payload up whose frame is malformed as a block unreadable, cancelling its request", async () => {
+    const errors = quietErrors();
     const h = harness(1);
     h.store.want(MOON, "local-body");
     const { id } = latestAsk(h.socket());
@@ -960,20 +1064,53 @@ describe("the coarse-field store", () => {
     expect(h.socket().cancelledIds()).toEqual([id]);
     expect(h.store.status(MOON)).toMatchObject({
       pending: false,
-      failure: expect.stringMatching(/HYSF/u),
+      failure: invalid("block unreadable"),
     });
+    expect(String(errors.mock.calls[0]?.[1])).toMatch(/HYSF/u);
     expect(h.workers[0]?.fieldMessages).toEqual([]);
   });
 
-  it("refuses an answer whose payload ends inside a block", async () => {
+  it("refuses an answer whose payload ends inside a block as a payload cut short", async () => {
+    const errors = quietErrors();
     const h = harness(1);
     h.store.want(MOON, "local-body");
     await answer(h, [block(50, 1), block(40, 2).subarray(0, 20)], 1, cover([0, 1, 9]));
-    expect(h.store.status(MOON)?.failure).toMatch(/inside a block/u);
+    expect(h.store.status(MOON)?.failure).toEqual(invalid("payload cut short"));
+    expect(String(errors.mock.calls[0]?.[1])).toMatch(/inside a block/u);
     expect(h.store.coverage(MOON)).toBeNull();
   });
 
-  it("refuses an answer whose header is out of range, holding why", async () => {
+  it("holds chunks the request client could not assemble as a payload cut short, not the server's reason", async () => {
+    const errors = quietErrors();
+    const h = harness(1);
+    h.store.want(MOON, "local-body");
+    const socket = h.socket();
+    const { id } = latestAsk(socket);
+    const sent = sendFrames(socket, id, block(50, 1), 64);
+    // The manifest states a chunk more than came: the client's finding, in the server's `internal`.
+    respondReady(socket, id, 1, cover([0, 1, 9]), { chunks: sent.chunks + 1, bytes: 100 });
+    await settle();
+    expect(h.store.status(MOON)?.failure).toEqual(invalid("payload cut short"));
+    expect(String(errors.mock.calls[0]?.[1])).toMatch(/chunks/u);
+    expect(h.store.coverage(MOON)).toBeNull();
+  });
+
+  it("holds a chunk it could not take as an answer unreadable, cancelling its request", async () => {
+    const errors = quietErrors();
+    const h = harness(1);
+    h.store.want(MOON, "local-body");
+    const { id } = latestAsk(h.socket());
+    // The pool gone, posting the first block throws: the console's own bug, not the payload's.
+    h.pool.terminate();
+    h.socket().serverSendsBinary(binaryFrame(id, 0, 1, [...block(50, 1)]));
+    await settle();
+    expect(h.socket().cancelledIds()).toEqual([id]);
+    expect(h.store.status(MOON)?.failure).toEqual(invalid("answer unreadable"));
+    expect(String(errors.mock.calls[0]?.[1])).toMatch(/terminated/u);
+  });
+
+  it("refuses an answer whose header is out of range as a header unusable, logging why", async () => {
+    const errors = quietErrors();
     const h = harness(1);
     h.store.want(MOON, "local-body");
     const socket = h.socket();
@@ -987,30 +1124,78 @@ describe("the coarse-field store", () => {
       bulk: sendFrames(socket, id, block(50, 1), 64),
     });
     await settle();
-    expect(h.store.status(MOON)?.failure).toMatch(/maturity, 2, is not from 0 to 1/u);
+    expect(h.store.status(MOON)?.failure).toEqual(invalid("header unusable"));
+    expect(String(errors.mock.calls[0]?.[1])).toMatch(/maturity, 2, is not from 0 to 1/u);
     expect(h.store.coverage(MOON)).toBeNull();
   });
 
-  it("drops a body's field that a worker refuses, holding the refusal", async () => {
+  it("drops a body's field that a worker refuses, holding a block unreadable, logged once", async () => {
+    const errors = quietErrors();
     const h = harness(2);
     h.store.want(MOON, "local-body");
     await answer(h, [block(50, 1)], 1, cover([0, 1, 9]));
-    const worker = h.workers[1] ?? new ScriptedHeightWorker();
-    const init = worker.fieldMessages[0];
-    if (init === undefined) {
-      throw new Error("no field-init was posted");
+    for (const worker of h.workers) {
+      const init = worker.fieldMessages[0];
+      if (init === undefined) {
+        throw new Error("no field-init was posted");
+      }
+      worker.reply({
+        kind: "field-refused",
+        id: init.id,
+        body: MOON,
+        message: "a block of another generator version",
+        heldBytes: 0,
+      });
     }
-    worker.reply({
-      kind: "field-refused",
-      id: init.id,
-      body: MOON,
-      message: "a block of another generator version",
-      heldBytes: 0,
-    });
-    expect(h.store.status(MOON)?.failure).toMatch(/another generator version/u);
+    expect(h.store.status(MOON)?.failure).toEqual(invalid("block unreadable"));
+    expect(errors).toHaveBeenCalledOnce();
+    expect(String(errors.mock.calls[0]?.[1])).toMatch(/another generator version/u);
     expect(h.store.coverage(MOON)).toBeNull();
     expect(h.pool.fieldBodies).toEqual([]);
   });
+
+  it("holds an answer of another kind as an answer unreadable", async () => {
+    const errors = quietErrors();
+    const h = harness(1);
+    h.store.want(MOON, "local-body");
+    h.socket().serverResponds(latestAsk(h.socket()).id, earthDetail());
+    await settle();
+    expect(h.store.status(MOON)?.failure).toEqual(invalid("answer unreadable"));
+    expect(errors).toHaveBeenCalledOnce();
+  });
+
+  it("holds a bug in taking the answer as an answer unreadable, logging it", async () => {
+    const errors = quietErrors();
+    const h = harness(1);
+    h.store.onRevision(() => undefined);
+    h.store.want(MOON, "local-body");
+    const { id } = latestAsk(h.socket());
+    const bulk = sendFrames(h.socket(), id, block(50, 1), 64);
+    // A coverage whose ranges are no list, which the wire's types rule out, sent as raw JSON: the
+    // merge throws, a bug in taking the answer rather than a check that fails.
+    const body = { kind: "surface_field", state: "ready", header: HEADER, revision: 1, bulk };
+    const raw = { type: "response", id, body: { ...body, coverage: { ranges: null } } };
+    h.socket().dispatchEvent(new MessageEvent("message", { data: JSON.stringify(raw) }));
+    await settle();
+    expect(h.store.status(MOON)?.failure).toEqual(invalid("answer unreadable"));
+    expect(errors).toHaveBeenCalledOnce();
+    expect(fieldLog(h.workers[0] ?? new ScriptedHeightWorker()).at(-1)).toBe(`release ${MOON}`);
+  });
+
+  it.each(["queue_full", "too_many_requests", "cancelled"] as const)(
+    "never fails a held field for a busy server's %s, nor marks it stale",
+    async (code) => {
+      vi.useFakeTimers();
+      const h = harness(1);
+      h.store.want(MOON, "local-body");
+      await answer(h, [block(50, 1)], 1, cover([0, 1, 9]));
+      h.store.noteSurfaceRevisions([{ body: MOON, revision: 2 }]);
+      h.socket().serverRejects(latestAsk(h.socket()).id, { code, message: "busy", field: null });
+      await settle();
+      expect(h.store.status(MOON)).toMatchObject({ pending: true, failure: null });
+      expect([h.store.coverage(MOON)?.stale, h.store.header(MOON)]).toEqual([false, HEADER]);
+    },
+  );
 
   it("releases every body and its requests when disposed", () => {
     const h = harness(1);

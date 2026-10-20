@@ -8,6 +8,7 @@ import {
 } from "../../lib/strokes";
 import type { ColourToken } from "../../spatial/drawList";
 import type { ColourTokens } from "../../spatial/paint";
+import type { ScreenBoxPx } from "../../spatial/symbols";
 import type { CameraPose } from "../camera/pose";
 import {
   pixelSolidAngle,
@@ -35,9 +36,14 @@ import { surveyEdgeMark, type SurveyEdgeView } from "../terrain/surveyEdge";
 import {
   anchorRadiusPx,
   bracketHalfSizePx,
+  lineOfSightGivesWay,
+  lineOfSightTripod,
+  markBoxPx,
   markLabelOffsetPx,
   markLabelRisePx,
+  type ScreenMark,
   type ScreenPx,
+  STROKE_FRINGE_PX,
   type SymbologyAnchor,
   symbologyMarks,
   targetMark,
@@ -332,6 +338,48 @@ export interface WireframeDrawList {
    * (T12's).
    */
   readonly surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
+  /**
+   * The line-of-sight mark this frame (plan R10, R10.T12): whether it gives way, the state the
+   * view keeps for its next frame, and its box where it is drawn; `null` where the options give the
+   * list no line of sight ({@link DrawOptions.lineOfSight}).
+   */
+  readonly lineOfSight: DrawnLineOfSight | null;
+}
+
+/**
+ * The view's line of sight as its draw list marks it (plan R10, R10.T12; the guide's tripod): what
+ * its terrain readout reads, and the give-way's state, which the view keeps from frame to frame, so
+ * that the list stays a function of its arguments.
+ */
+export interface LineOfSightOptions {
+  /**
+   * Whether the view's terrain readout reads a point on its line of sight, which the tripod marks:
+   * over surveyed ground or `NOT SURVEYED` ground alike, and unchanged under `GRAZING`; not at
+   * `NO GROUND`, where there is no point. Its changes come with the readout's own updates.
+   */
+  readonly hasPoint: boolean;
+  /**
+   * Whether the tripod gave way to another mark in the view's frame before
+   * ({@link DrawnLineOfSight.yielded}); `false` in the view's first frame.
+   */
+  readonly yielded: boolean;
+}
+
+/** The line-of-sight mark of one frame (plan R10, R10.T12). */
+export interface DrawnLineOfSight {
+  /**
+   * Whether the tripod gives way this frame, a body's symbol, a craft's ticks or the flight path
+   * marker standing within 0.5 rem of its ticks, or not yet 0.75 rem clear of them since it gave
+   * way (`lineOfSightGivesWay`): the view's next {@link LineOfSightOptions.yielded}. It is kept
+   * whether or not the readout has a point, so that the hysteresis runs on through `NO GROUND`.
+   */
+  readonly yielded: boolean;
+  /**
+   * The box that holds every pixel of the drawn tripod, its casing included, device px from the
+   * view's top left, which no mark's label covers; `null` where it is not drawn, given way or with
+   * no point.
+   */
+  readonly boxPx: ScreenBoxPx | null;
 }
 
 /** A survey edge the list draws (R10.T10.c). */
@@ -358,6 +406,7 @@ export function emptyDrawList(
     markStrokePx: strokes.markStrokePx,
     occluderSlopePx: occluderSlopePxAt(strokes.strokeScale),
     surveyEdges: [],
+    lineOfSight: null,
   };
 }
 
@@ -403,6 +452,13 @@ export interface DrawOptions extends ViewStrokes {
    * (R10.T16.c, `surveyEdgeViewsOf`); none without one.
    */
   readonly surveyEdges?: ReadonlyArray<SurveyEdgeView>;
+  /**
+   * The view's line of sight (plan R10, R10.T12): with a point, the list marks it with its tripod at
+   * the picture's centre, in both styles, unless it gives way. Absent or `null`, the list draws no
+   * tripod and is as it was before R10.T12, as for a view that states no terrain readout: an
+   * instrument (decision-r10-t12-leans §3), or a view under `TERRAIN NOT AVAILABLE` (§5).
+   */
+  readonly lineOfSight?: LineOfSightOptions | null;
 }
 
 /** A star as the sprite path takes it: its direction from the camera and its light per channel. */
@@ -496,6 +552,13 @@ function packScreen(segments: ReadonlyArray<readonly [ScreenPx, ScreenPx]>): Flo
  * can stand about its mark (R07.T16.g). Colours come from `tokens` (plan 05's `readTokens`), never
  * literals. Every position is differenced in `f64` and narrowed once. The list is a function of
  * its arguments alone.
+ *
+ * Where the options give the view's line of sight with a point (plan R10, R10.T12), its tripod is
+ * drawn at the picture's centre, the first of the screen-space marks, after the survey edges and
+ * before every other mark, and the survey edges' ticks keep 0.5 rem clear of its ticks. It gives
+ * way, with hysteresis, to a body's symbol, a craft's ticks or the flight path marker near it; the
+ * give-way's state comes in the options and goes out in the list
+ * ({@link WireframeDrawList.lineOfSight}). Without a line of sight the list is as it was before.
  */
 export function buildWireframeDrawList(
   scene: ViewScene,
@@ -707,27 +770,10 @@ export function buildWireframeDrawList(
   }
 
   const own = scene.craft.find((craft) => craft.id === scene.ownShip);
-  // The survey edges (R10.T10.c): a `--text` line, its ticks into the unsurveyed side, cased as
-  // every line, in view space, so that nearer ground hides it; ranges from the own ship.
-  const surveyEdges: DrawnSurveyEdge[] = [];
-  for (const edge of options.surveyEdges ?? []) {
-    const mark = surveyEdgeMark(edge, projection, viewport, {
-      remPx: options.remPx,
-      keepClear: [],
-      rangeFromM: own === undefined ? null : fromCamera(own.pose.position),
-    });
-    const segments = new Float32Array(mark.line.length + mark.ticks.length);
-    segments.set(mark.line);
-    segments.set(mark.ticks, mark.line.length);
-    if (segments.length > 0) {
-      lines.push(
-        batch(`survey-edge:${edge.body}`, "view", segments, "text", drawnPx(STROKE_PX.thin)),
-      );
-    }
-    surveyEdges.push({ body: edge.body, nearestRangeM: mark.nearestRangeM });
-  }
 
-  // Symbology: body symbols, anchors, reticles and the flight path marker, in screen space.
+  // Symbology: body symbols, anchors, reticles and the flight path marker, in screen space; made
+  // before the survey edges, whose ticks keep clear of the line-of-sight mark, which gives way to
+  // some of them, and drawn after.
   const markAt = (pointM: Vec3): ScreenPx | null => {
     const p = project(pointM, projection, viewport);
     return p.inFront ? { xPx: p.xPx, yPx: p.yPx } : null;
@@ -840,6 +886,43 @@ export function buildWireframeDrawList(
     projection,
     viewport,
   );
+  const lineOfSight = lineOfSightMark(options, marks, viewport);
+
+  // The survey edges (R10.T10.c): a `--text` line, its ticks into the unsurveyed side, cased as
+  // every line, in view space, so that nearer ground hides it; ranges from the own ship. Their
+  // ticks keep 0.5 rem clear of the tripod's where it is drawn (R10.T12).
+  const surveyEdges: DrawnSurveyEdge[] = [];
+  for (const edge of options.surveyEdges ?? []) {
+    const mark = surveyEdgeMark(edge, projection, viewport, {
+      remPx: options.remPx,
+      keepClear: lineOfSight.tripod?.segments ?? [],
+      rangeFromM: own === undefined ? null : fromCamera(own.pose.position),
+    });
+    const segments = new Float32Array(mark.line.length + mark.ticks.length);
+    segments.set(mark.line);
+    segments.set(mark.ticks, mark.line.length);
+    if (segments.length > 0) {
+      lines.push(
+        batch(`survey-edge:${edge.body}`, "view", segments, "text", drawnPx(STROKE_PX.thin)),
+      );
+    }
+    surveyEdges.push({ body: edge.body, nearestRangeM: mark.nearestRangeM });
+  }
+
+  // The tripod first of the marks: over the ground's own lines, its casing cutting them, and
+  // beneath the reticles, which stand round it (R10.T12). Its name carries no index, so that the
+  // other marks' names are as they were whether or not it is drawn.
+  if (lineOfSight.tripod !== null) {
+    lines.push(
+      batch(
+        "mark:line_of_sight",
+        "screen",
+        packScreen(lineOfSight.tripod.segments),
+        lineOfSight.tripod.token,
+        markStrokePx,
+      ),
+    );
+  }
   for (const [i, mark] of marks.entries()) {
     // An outline at the marks' width, not the line scale's, so that it keeps its hole; its casing
     // is a line's.
@@ -864,6 +947,44 @@ export function buildWireframeDrawList(
     markStrokePx,
     occluderSlopePx: occluderSlopePxAt(strokeScale),
     surveyEdges,
+    lineOfSight: lineOfSight.drawn,
+  };
+}
+
+/**
+ * The frame's line-of-sight mark (plan R10, R10.T12; the guide's tripod): at the picture's centre,
+ * where the projection puts the line of sight, its ticks as {@link lineOfSightTripod} places them;
+ * drawn where the view's readout has a point and it does not give way to the frame's `marks`
+ * ({@link lineOfSightGivesWay}, from the view's last state), else not.
+ *
+ * @returns The tripod to draw, or `null`; and the frame's {@link DrawnLineOfSight}, `null` with no
+ *   line of sight in the options.
+ */
+function lineOfSightMark(
+  options: DrawOptions,
+  marks: ReadonlyArray<ScreenMark>,
+  viewport: Viewport,
+): { readonly tripod: ScreenMark | null; readonly drawn: DrawnLineOfSight | null } {
+  const input = options.lineOfSight ?? null;
+  if (input === null) {
+    return { tripod: null, drawn: null };
+  }
+  const casingPx = CASING_PX * options.strokeScale;
+  const tripod = lineOfSightTripod(
+    { xPx: viewport.widthPx / 2, yPx: viewport.heightPx / 2 },
+    options.remPx,
+    { markStrokePx: options.markStrokePx, markShiftPx: options.markShiftPx, casingPx },
+  );
+  const yielded = lineOfSightGivesWay(tripod.segments, marks, options.remPx, input.yielded);
+  if (!input.hasPoint || yielded) {
+    return { tripod: null, drawn: { yielded, boxPx: null } };
+  }
+  return {
+    tripod,
+    drawn: {
+      yielded,
+      boxPx: markBoxPx(tripod, options.markStrokePx / 2 + casingPx + STROKE_FRINGE_PX),
+    },
   };
 }
 

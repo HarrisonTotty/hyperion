@@ -97,6 +97,19 @@
 //! - `material(system, body, seed, face, u, v)` returns a `GroundAnswer`, the class's code, its
 //!   entry and, where the palette names the entry, its properties, or `undefined` where the cell
 //!   is not surveyed or no field is held.
+//! - `groundReadout(system, body, seed, ox, oy, oz, dx, dy, dz, maxM, slopeBaselineM, padWidthM,
+//!   seasonMeanAnomalyRad)` returns a `GroundReadoutAnswer`, a view's whole terrain readout in one
+//!   query ([`WorkerFields::ground_readout`], plan R10, T12): its `kind` a `LineOfSightKind`, and
+//!   on `Ground` `slantRange`'s getters (`rangeM`, `rangeSigmaM`, `grazing`, `rangeResolved`,
+//!   `hitM()`, `atFace`, `atU`, `atV`), `Reading`'s at the foot (`elevationM`, `elevationSigmaM`,
+//!   `slopeRmsRad`, `slopeSigmaRad`, `slopeBaselineM`, `resolutionM`, `readingResolved`), the
+//!   material's `classCode` and `entry`, and the ground's properties: `bearingCapacityPa`, its
+//!   `capacitySlopeRad` (the RMS slope over 2 m), `padFriction`, `frictionOnTemperature` and
+//!   `temperatureK`, each `undefined` where not computed. `NotSurveyed` where no field is held, the
+//!   march reads past the cells held, or the foot's cell is not surveyed. The line of sight is
+//!   checked as `slantRange`'s; the baseline must be one of 2 m, 5 m and 100 m, the pad width
+//!   finite and positive, and the season's mean anomaly, radians from periapsis, `undefined` for
+//!   none or finite.
 //! - `photometry(system, body, palette)` takes a bake's `palette()` (a `Uint8Array` of 8 × 2) and
 //!   returns a `Float32Array` of 8 × 5, slot k at `5 k`: the photometry the lit terrain draws its
 //!   material with ([`WorkerFields::photometry`], plan R10, T10.b): its normal albedo in B, V and
@@ -116,7 +129,7 @@
 //!   weights read a cell the field does not hold yet.
 
 use hyperion_base::rng::DetailSeed;
-use hyperion_base::units::Metres;
+use hyperion_base::units::{Kelvin, Metres, Pascals, Radians};
 use wasm_bindgen::JsError;
 use wasm_bindgen::prelude::wasm_bindgen;
 
@@ -130,7 +143,8 @@ use crate::patch::{BakeOptions, NormalScale, PatchBake, VertexPath};
 use crate::reading::{LineOfSight, SlantRange, SurveyedReading};
 use crate::test_planet::{Ridges, TEST_PLANET};
 use crate::worker::{
-    BodyBake, CLASS_MAP_LEVEL, ClassMap, DrawnPhotometry, QueryBodyError, SurveyChange,
+    BodyBake, CLASS_MAP_LEVEL, ClassMap, DrawnPhotometry, GroundAtSight, GroundProperties,
+    GroundReadout, GroundReadoutQuery, QueryBodyError, SeasonAnomaly, SlopeBaseline, SurveyChange,
     SurveyedMaterial, WorkerFields,
 };
 
@@ -457,6 +471,36 @@ const MAX_SIGHT_M: f64 = 1e12;
 #[must_use]
 fn norm([x, y, z]: [f64; 3]) -> f64 {
     (x * x + y * y + z * z).sqrt()
+}
+
+/// A line of sight's reach `max_m`, metres, once its origin, direction and reach are checked.
+///
+/// # Errors
+///
+/// A `JsError` if the origin is not between [`MIN_SIGHT_ORIGIN_M`] and [`MAX_SIGHT_M`] from the
+/// centre, the direction has no finite, non-zero length, or the reach is not between 0 and
+/// [`MAX_SIGHT_M`].
+fn sight_of(origin: [f64; 3], direction: [f64; 3], max_m: f64) -> Result<Metres, JsError> {
+    let ([ox, oy, oz], [dx, dy, dz]) = (origin, direction);
+    let origin_m = norm(origin);
+    if !(MIN_SIGHT_ORIGIN_M..=MAX_SIGHT_M).contains(&origin_m) {
+        return Err(JsError::new(&format!(
+            "origin ({ox}, {oy}, {oz}) m is not between {MIN_SIGHT_ORIGIN_M} m and \
+             {MAX_SIGHT_M} m from the centre"
+        )));
+    }
+    let length = norm(direction);
+    if !(length.is_finite() && length > 0.0) {
+        return Err(JsError::new(&format!(
+            "direction ({dx}, {dy}, {dz}) has no finite, non-zero length"
+        )));
+    }
+    if !(0.0..=MAX_SIGHT_M).contains(&max_m) {
+        return Err(JsError::new(&format!(
+            "reach {max_m} m is not between 0 and {MAX_SIGHT_M} m"
+        )));
+    }
+    Ok(Metres::new(max_m))
 }
 
 /// The palette byte of no entry, and of an empty slot's class and entry.
@@ -903,6 +947,225 @@ impl GroundAnswer {
     }
 }
 
+/// A view's terrain readout where its line of sight meets the ground ([`GroundReadout`], plan R10,
+/// T12): its kind, and on `Ground` the slant range, the reading, the material and the ground's
+/// properties, each getter `undefined` (or `false`) off the ground.
+#[wasm_bindgen]
+#[derive(Debug)]
+pub struct GroundReadoutAnswer {
+    readout: GroundReadout,
+}
+
+impl GroundReadoutAnswer {
+    /// The readout's parts, on `Ground`.
+    #[must_use]
+    fn ground(&self) -> Option<&GroundAtSight> {
+        match &self.readout {
+            GroundReadout::Ground(ground) => Some(ground),
+            GroundReadout::NoGround | GroundReadout::NotSurveyed => None,
+        }
+    }
+
+    /// The slant range, on `Ground`.
+    #[must_use]
+    fn sight(&self) -> Option<&SlantRange> {
+        self.ground().map(GroundAtSight::sight)
+    }
+
+    /// The reading, on `Ground`.
+    #[must_use]
+    fn reading(&self) -> Option<&SurveyedReading> {
+        self.ground().map(GroundAtSight::reading)
+    }
+
+    /// The ground's properties, on `Ground`.
+    #[must_use]
+    fn properties(&self) -> Option<&GroundProperties> {
+        self.ground().map(GroundAtSight::properties)
+    }
+}
+
+#[wasm_bindgen]
+impl GroundReadoutAnswer {
+    /// Whether the line of sight meets surveyed ground, no ground, or ground not surveyed.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn kind(&self) -> JsLineOfSightKind {
+        match self.readout {
+            GroundReadout::Ground(_) => JsLineOfSightKind::Ground,
+            GroundReadout::NoGround => JsLineOfSightKind::NoGround,
+            GroundReadout::NotSurveyed => JsLineOfSightKind::NotSurveyed,
+        }
+    }
+
+    /// The slant range, metres, on `Ground`.
+    #[wasm_bindgen(getter, js_name = rangeM)]
+    #[must_use]
+    pub fn range_m(&self) -> Option<f64> {
+        self.sight().map(|s| s.range().value())
+    }
+
+    /// The range's standard uncertainty, metres, on `Ground` where not grazing.
+    #[wasm_bindgen(getter, js_name = rangeSigmaM)]
+    #[must_use]
+    pub fn range_sigma_m(&self) -> Option<f64> {
+        self.sight().and_then(SlantRange::sigma).map(Metres::value)
+    }
+
+    /// Whether the line of sight grazes the ground, on `Ground`.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn grazing(&self) -> bool {
+        self.sight().is_some_and(SlantRange::is_grazing)
+    }
+
+    /// Whether the survey reaches the band limit at the hit, on `Ground`.
+    #[wasm_bindgen(getter, js_name = rangeResolved)]
+    #[must_use]
+    pub fn range_resolved(&self) -> bool {
+        self.sight().is_some_and(SlantRange::is_resolved)
+    }
+
+    /// The hit, body-fixed metres, on `Ground`.
+    #[wasm_bindgen(js_name = hitM)]
+    #[must_use]
+    pub fn hit_m(&self) -> Option<Vec<f64>> {
+        self.sight().map(|s| s.hit_m().to_vec())
+    }
+
+    /// The face of the hit's foot, on `Ground`.
+    #[wasm_bindgen(getter, js_name = atFace)]
+    #[must_use]
+    pub fn at_face(&self) -> Option<u8> {
+        self.sight().map(|s| s.at().face.index())
+    }
+
+    /// The foot's u, its face coordinate in [−1, 1] on `atFace`, on `Ground`.
+    #[wasm_bindgen(getter, js_name = atU)]
+    #[must_use]
+    pub fn at_u(&self) -> Option<f64> {
+        self.sight().map(|s| s.at().u)
+    }
+
+    /// The foot's v, its face coordinate in [−1, 1] on `atFace`, on `Ground`.
+    #[wasm_bindgen(getter, js_name = atV)]
+    #[must_use]
+    pub fn at_v(&self) -> Option<f64> {
+        self.sight().map(|s| s.at().v)
+    }
+
+    /// The elevation above the datum at the foot, metres, on `Ground`.
+    #[wasm_bindgen(getter, js_name = elevationM)]
+    #[must_use]
+    pub fn elevation_m(&self) -> Option<f64> {
+        self.reading().map(|r| r.elevation().value())
+    }
+
+    /// The elevation's standard uncertainty, metres, on `Ground`.
+    #[wasm_bindgen(getter, js_name = elevationSigmaM)]
+    #[must_use]
+    pub fn elevation_sigma_m(&self) -> Option<f64> {
+        self.reading().map(|r| r.elevation_sigma().value())
+    }
+
+    /// The RMS slope over the baseline, radians, on `Ground`.
+    #[wasm_bindgen(getter, js_name = slopeRmsRad)]
+    #[must_use]
+    pub fn slope_rms_rad(&self) -> Option<f64> {
+        self.reading().map(|r| r.slope_rms().value())
+    }
+
+    /// The slope's standard uncertainty, radians, on `Ground`.
+    #[wasm_bindgen(getter, js_name = slopeSigmaRad)]
+    #[must_use]
+    pub fn slope_sigma_rad(&self) -> Option<f64> {
+        self.reading().map(|r| r.slope_sigma().value())
+    }
+
+    /// The slope's baseline, metres, on `Ground`.
+    #[wasm_bindgen(getter, js_name = slopeBaselineM)]
+    #[must_use]
+    pub fn slope_baseline_m(&self) -> Option<f64> {
+        self.reading().map(|r| r.slope_baseline().value())
+    }
+
+    /// The resolution the reading was taken at, metres, on `Ground`.
+    #[wasm_bindgen(getter, js_name = resolutionM)]
+    #[must_use]
+    pub fn resolution_m(&self) -> Option<f64> {
+        self.reading().map(|r| r.resolution().value())
+    }
+
+    /// Whether the survey reaches the band limit at the foot, so that the reading's uncertainties
+    /// are zero, on `Ground`.
+    #[wasm_bindgen(getter, js_name = readingResolved)]
+    #[must_use]
+    pub fn reading_resolved(&self) -> bool {
+        self.reading().is_some_and(SurveyedReading::is_resolved)
+    }
+
+    /// The form's class code (R10.T1.a's `MaterialClass`), on `Ground`.
+    #[wasm_bindgen(getter, js_name = classCode)]
+    #[must_use]
+    pub fn class_code(&self) -> Option<u8> {
+        self.ground()
+            .map(|g| u8::from(g.material().ground().class()))
+    }
+
+    /// The palette entry, on `Ground` where the palette names the substance.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn entry(&self) -> Option<u8> {
+        self.ground().and_then(|g| g.material().ground().entry())
+    }
+
+    /// The ultimate bearing capacity, Pa, on `Ground` where it is computed.
+    #[wasm_bindgen(getter, js_name = bearingCapacityPa)]
+    #[must_use]
+    pub fn bearing_capacity_pa(&self) -> Option<f64> {
+        self.properties()
+            .and_then(GroundProperties::bearing_capacity)
+            .map(Pascals::value)
+    }
+
+    /// The RMS slope over 2 m the capacity was taken on, radians, on `Ground`.
+    #[wasm_bindgen(getter, js_name = capacitySlopeRad)]
+    #[must_use]
+    pub fn capacity_slope_rad(&self) -> Option<f64> {
+        self.properties().map(|p| p.capacity_slope().value())
+    }
+
+    /// The pad's interface friction, dimensionless, on `Ground` where it is computed.
+    #[wasm_bindgen(getter, js_name = padFriction)]
+    #[must_use]
+    pub fn pad_friction(&self) -> Option<f64> {
+        self.properties().and_then(GroundProperties::friction)
+    }
+
+    /// Whether the friction depends on the temperature, on `Ground`.
+    #[wasm_bindgen(getter, js_name = frictionOnTemperature)]
+    #[must_use]
+    pub fn friction_on_temperature(&self) -> bool {
+        self.properties()
+            .is_some_and(GroundProperties::friction_on_temperature)
+    }
+
+    /// The month's mean temperature at the point, K, on `Ground` where it is computed.
+    #[wasm_bindgen(getter, js_name = temperatureK)]
+    #[must_use]
+    pub fn temperature_k(&self) -> Option<f64> {
+        self.properties()
+            .and_then(GroundProperties::temperature)
+            .map(Kelvin::value)
+    }
+}
+
+impl From<GroundReadout> for GroundReadoutAnswer {
+    fn from(readout: GroundReadout) -> Self {
+        Self { readout }
+    }
+}
+
 /// `answer`'s value, `None` where the field cannot make it yet: no field of the body is held, or
 /// the answer reads a cell still to come.
 #[expect(
@@ -1090,30 +1353,13 @@ impl JsSurfaceFields {
         max_m: f64,
     ) -> Result<LineOfSightAnswer, JsError> {
         let (origin, direction) = ([ox, oy, oz], [dx, dy, dz]);
-        let origin_m = norm(origin);
-        if !(MIN_SIGHT_ORIGIN_M..=MAX_SIGHT_M).contains(&origin_m) {
-            return Err(JsError::new(&format!(
-                "origin ({ox}, {oy}, {oz}) m is not between {MIN_SIGHT_ORIGIN_M} m and \
-                 {MAX_SIGHT_M} m from the centre"
-            )));
-        }
-        let length = norm(direction);
-        if !(length.is_finite() && length > 0.0) {
-            return Err(JsError::new(&format!(
-                "direction ({dx}, {dy}, {dz}) has no finite, non-zero length"
-            )));
-        }
-        if !(0.0..=MAX_SIGHT_M).contains(&max_m) {
-            return Err(JsError::new(&format!(
-                "reach {max_m} m is not between 0 and {MAX_SIGHT_M} m"
-            )));
-        }
+        let max = sight_of(origin, direction, max_m)?;
         let answer = self.fields.slant_range(
             body_ref(system, body)?,
             DetailSeed::new(seed),
             &origin,
             &direction,
-            Metres::new(max_m),
+            max,
         );
         Ok(LineOfSightAnswer::from(
             unless_unsurveyed(answer).unwrap_or(LineOfSight::NotSurveyed),
@@ -1141,6 +1387,65 @@ impl JsSurfaceFields {
         Ok(unless_unsurveyed(answer)
             .flatten()
             .map(|material| GroundAnswer { material }))
+    }
+
+    /// The terrain readout where the line of sight from (`ox`, `oy`, `oz`) along (`dx`, `dy`,
+    /// `dz`), body-fixed, metres, meets the body's ground within `max_m` (see the module
+    /// documentation; [`WorkerFields::ground_readout`]).
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` for a line of sight `slantRange` refuses, a slope baseline that is none of
+    /// 2 m, 5 m and 100 m, a pad width that is not finite and positive, a season's mean anomaly
+    /// that is given and not finite (`undefined` is none), or a body index above 65,535.
+    #[wasm_bindgen(js_name = groundReadout)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a flat call is the binding's cheapest shape; the TypeScript side wraps it"
+    )]
+    pub fn ground_readout(
+        &mut self,
+        system: u64,
+        body: u32,
+        seed: u64,
+        ox: f64,
+        oy: f64,
+        oz: f64,
+        dx: f64,
+        dy: f64,
+        dz: f64,
+        max_m: f64,
+        slope_baseline_m: f64,
+        pad_width_m: f64,
+        season_mean_anomaly_rad: Option<f64>,
+    ) -> Result<GroundReadoutAnswer, JsError> {
+        let (origin_m, direction) = ([ox, oy, oz], [dx, dy, dz]);
+        let max = sight_of(origin_m, direction, max_m)?;
+        let slope_baseline = SlopeBaseline::try_from(Metres::new(slope_baseline_m))
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        if !(pad_width_m.is_finite() && pad_width_m > 0.0) {
+            return Err(JsError::new(&format!(
+                "pad width {pad_width_m} m is not finite and positive"
+            )));
+        }
+        let season = season_mean_anomaly_rad
+            .map(|m| SeasonAnomaly::try_from(Radians::new(m)))
+            .transpose()
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        let query = GroundReadoutQuery {
+            origin_m,
+            direction,
+            max,
+            slope_baseline,
+            pad_width: Metres::new(pad_width_m),
+            season,
+        };
+        let answer =
+            self.fields
+                .ground_readout(body_ref(system, body)?, DetailSeed::new(seed), &query);
+        Ok(GroundReadoutAnswer::from(
+            unless_unsurveyed(answer).unwrap_or(GroundReadout::NotSurveyed),
+        ))
     }
 
     /// The photometry of each slot of a bake's `palette` on the body (see the module

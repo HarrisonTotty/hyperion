@@ -36,12 +36,13 @@
  * for the bakes already delivered (`rebake.ts`).
  *
  * A body's coarse class map for R07's disc (plan R10, T10.d) is asked of one worker
- * ({@link HeightWorkerPool.classMap}), after the blocks posted before it, which it reads.
+ * ({@link HeightWorkerPool.classMap}), after the blocks posted before it, which it reads, and so is a
+ * view's terrain readout (plan R10, T12; {@link HeightWorkerPool.groundReadout}).
  */
 
 import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
 
-import { patchKeyString } from "../patchKey";
+import { patchKeyString, unreachable } from "../patchKey";
 import type { PatchRequest } from "../select";
 import type {
   BakedPatch,
@@ -49,8 +50,10 @@ import type {
   ClassMapAnswer,
   FieldBlockAnswer,
   FieldForm,
+  GroundReadoutQuery,
   HeightWorkerReply,
   HeightWorkerRequest,
+  SurfaceGroundReadout,
   TerrainLayers,
 } from "./messages";
 import { staleInFlight } from "./rebake";
@@ -208,21 +211,31 @@ interface InFlight {
   readonly blocksAtSend: number;
 }
 
-/** A class-map query posted to a worker and not yet answered. */
-interface PendingClassMap {
-  readonly body: BodyIdHex;
-  readonly detailSeed: DetailSeedHex;
-  readonly resolve: (map: ClassMapAnswer | null) => void;
-  readonly reject: (error: Error) => void;
-}
+/** A query posted to a worker and not yet answered: a class map, or a view's terrain readout. */
+type PendingQuery =
+  | {
+      readonly kind: "class-map";
+      readonly body: BodyIdHex;
+      readonly detailSeed: DetailSeedHex;
+      readonly resolve: (map: ClassMapAnswer | null) => void;
+      readonly reject: (error: Error) => void;
+    }
+  | {
+      readonly kind: "ground-readout";
+      readonly body: BodyIdHex;
+      readonly detailSeed: DetailSeedHex;
+      readonly query: GroundReadoutQuery;
+      readonly resolve: (readout: SurfaceGroundReadout | null) => void;
+      readonly reject: (error: Error) => void;
+    };
 
 interface Slot {
   worker: WorkerLike;
   readonly onMessage: (event: MessageEvent<HeightWorkerReply>) => void;
   readonly onError: () => void;
   readonly inFlight: Map<number, InFlight>;
-  /** The class-map queries posted to this worker and not yet answered, by message ID. */
-  readonly queries: Map<number, PendingClassMap>;
+  /** The class-map and readout queries posted to this worker and not yet answered, by message ID. */
+  readonly queries: Map<number, PendingQuery>;
   /** The blocks posted to this worker and not yet answered, by message ID. */
   readonly posted: Map<number, PostedBlock>;
   /** What the worker last said it holds of every body's field, bytes. */
@@ -233,7 +246,7 @@ interface Slot {
   lost: boolean;
 }
 
-/** A worker's requests out: its bakes and class-map queries in flight. */
+/** A worker's requests out: its bakes and its class-map and readout queries in flight. */
 function loadOf(slot: Slot): number {
   return slot.inFlight.size + slot.queries.size;
 }
@@ -723,7 +736,32 @@ export class HeightWorkerPool {
       return Promise.resolve(null);
     }
     return new Promise((resolve, reject) => {
-      this.postQuery({ body, detailSeed, resolve, reject });
+      this.postQuery({ kind: "class-map", body, detailSeed, resolve, reject });
+    });
+  }
+
+  /**
+   * A view's terrain readout of `body` where `query`'s line of sight meets its ground (plan R10,
+   * T12), answered by one worker over the field it holds of the body with the body's detail seed
+   * `detailSeed`, as {@link HeightWorkerPool.classMap} is: the least loaded running worker, posted
+   * after every block posted so far, and asked again of a failed worker's replacement.
+   *
+   * @returns The readout, or `null` where the pool keeps no field of `body`, no worker runs, or the
+   *   pool is terminated before the answer; rejected with the module's message where it refused an
+   *   argument out of its range.
+   * @throws Error once the pool is terminated.
+   */
+  groundReadout(
+    body: BodyIdHex,
+    detailSeed: DetailSeedHex,
+    query: GroundReadoutQuery,
+  ): Promise<SurfaceGroundReadout | null> {
+    this.assertLive();
+    if (!this.fields.has(body)) {
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve, reject) => {
+      this.postQuery({ kind: "ground-readout", body, detailSeed, query, resolve, reject });
     });
   }
 
@@ -969,12 +1007,21 @@ export class HeightWorkerPool {
 
   private receive(slot: Slot, reply: HeightWorkerReply): void {
     slot.failures = 0;
+    this.take(slot, reply);
+    this.pump();
+  }
+
+  /**
+   * Takes one reply of `slot`'s worker. Every kind returns from its case, so that a kind the switch
+   * does not take is a compile error at {@link unreachable}, not a reply dropped unseen.
+   */
+  private take(slot: Slot, reply: HeightWorkerReply): void {
     switch (reply.kind) {
       case "baked": {
         const inFlight = slot.inFlight.get(reply.id);
         slot.inFlight.delete(reply.id);
         if (inFlight === undefined || inFlight.lane.terminated) {
-          break;
+          return;
         }
         const { lane } = inFlight;
         if (this.madeStale(inFlight, reply.bake.layers)) {
@@ -983,13 +1030,13 @@ export class HeightWorkerPool {
           lane.wanted.delete(inFlight.keyString);
           tell(lane.bakedListeners, reply.bake, "bakes");
         }
-        break;
+        return;
       }
       case "bake-unsurveyed": {
         const inFlight = slot.inFlight.get(reply.id);
         slot.inFlight.delete(reply.id);
         if (inFlight === undefined || inFlight.lane.terminated) {
-          break;
+          return;
         }
         const field = this.sourceField(inFlight.lane);
         if (
@@ -1002,7 +1049,7 @@ export class HeightWorkerPool {
         } else if (inFlight.lane.wanted.has(inFlight.keyString)) {
           inFlight.lane.waiting.set(inFlight.keyString, inFlight.request);
         }
-        break;
+        return;
       }
       case "bake-failed": {
         const inFlight = slot.inFlight.get(reply.id);
@@ -1014,7 +1061,7 @@ export class HeightWorkerPool {
           const failure = { keyString: inFlight.keyString, message: reply.message };
           tell(lane.failureListeners, failure, "failed bakes");
         }
-        break;
+        return;
       }
       case "field-held": {
         slot.fieldBytes = reply.heldBytes;
@@ -1023,19 +1070,37 @@ export class HeightWorkerPool {
         if (posted !== undefined && reply.block !== null) {
           this.report(posted, reply.block);
         }
-        break;
+        return;
       }
       case "class-map": {
-        const query = slot.queries.get(reply.id);
-        slot.queries.delete(reply.id);
-        query?.resolve(reply.map);
-        break;
+        const query = this.answered(slot, reply);
+        if (query?.kind === "class-map") {
+          query.resolve(reply.map);
+        }
+        return;
+      }
+      case "ground-readout": {
+        const query = this.answered(slot, reply);
+        if (query?.kind === "ground-readout") {
+          query.resolve(reply.readout);
+        }
+        return;
       }
       case "class-map-failed": {
-        const query = slot.queries.get(reply.id);
-        slot.queries.delete(reply.id);
-        query?.reject(new Error(`the class map of ${reply.body} was refused: ${reply.message}`));
-        break;
+        const query = this.answered(slot, reply);
+        if (query?.kind === "class-map") {
+          query.reject(new Error(`the class map of ${reply.body} was refused: ${reply.message}`));
+        }
+        return;
+      }
+      case "ground-readout-failed": {
+        const query = this.answered(slot, reply);
+        if (query?.kind === "ground-readout") {
+          query.reject(
+            new Error(`the ground readout of ${reply.body} was refused: ${reply.message}`),
+          );
+        }
+        return;
       }
       case "field-refused": {
         slot.fieldBytes = reply.heldBytes;
@@ -1046,10 +1111,35 @@ export class HeightWorkerPool {
           const refusal = { body: reply.body, message: reply.message };
           tell(this.refusalListeners, refusal, "refused fields");
         }
-        break;
+        return;
       }
     }
-    this.pump();
+    unreachable(reply);
+  }
+
+  /**
+   * The query `reply` answers, taken from `slot`'s, or `undefined` where none is pending under its
+   * ID. A reply of another kind than the query's is a bug of the worker's: the query is rejected
+   * naming it, and `undefined` returned, so that no query waits forever on a wrong answer.
+   */
+  private answered(
+    slot: Slot,
+    reply: Extract<
+      HeightWorkerReply,
+      { kind: "class-map" | "class-map-failed" | "ground-readout" | "ground-readout-failed" }
+    >,
+  ): PendingQuery | undefined {
+    const query = slot.queries.get(reply.id);
+    slot.queries.delete(reply.id);
+    if (query === undefined) {
+      return undefined;
+    }
+    const answers = reply.kind === query.kind || reply.kind === `${query.kind}-failed`;
+    if (!answers) {
+      query.reject(new Error(`a ${query.kind} query of ${reply.body} was answered ${reply.kind}`));
+      return undefined;
+    }
+    return query;
   }
 
   /**
@@ -1091,8 +1181,11 @@ export class HeightWorkerPool {
     this.pump();
   }
 
-  /** Posts a class-map query to the least loaded running worker, or answers `null` with none. */
-  private postQuery(query: PendingClassMap): void {
+  /**
+   * Posts a class-map or readout query to the least loaded running worker, or answers `null` with
+   * none.
+   */
+  private postQuery(query: PendingQuery): void {
     let slot: Slot | null = null;
     for (const each of this.slots) {
       if (!each.lost && (slot === null || loadOf(each) < loadOf(slot))) {
@@ -1105,10 +1198,19 @@ export class HeightWorkerPool {
     }
     const id = this.takeId();
     slot.queries.set(id, query);
-    slot.worker.postMessage(
-      { kind: "class-map", id, body: query.body, detailSeed: query.detailSeed },
-      [],
-    );
+    const { body, detailSeed } = query;
+    switch (query.kind) {
+      case "class-map":
+        slot.worker.postMessage({ kind: "class-map", id, body, detailSeed }, []);
+        return;
+      case "ground-readout":
+        slot.worker.postMessage(
+          { ...query.query, kind: "ground-readout", id, body, detailSeed },
+          [],
+        );
+        return;
+    }
+    unreachable(query);
   }
 
   /** Posts block `sequence` of `body`'s field `kept` to a running worker. */

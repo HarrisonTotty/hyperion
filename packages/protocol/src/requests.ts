@@ -31,15 +31,41 @@ export type ResponseFor<K extends RequestKind> = Extract<ResponseBody, { kind: K
  * `link_lost` when the request could not be sent or the link dropped before its answer, `aborted`
  * when it was cancelled, `superseded` when a {@link RequestChannel} replaced it with a newer one,
  * and `protocol_violation` when the server answered with a response of another kind. A request
- * answered in bulk whose chunks broke their order or disagreed with the response's manifest also
- * fails as `internal`, which the client decides then, in the server's error's shape.
+ * answered in bulk that the client could not take also fails as `internal`, which the client
+ * decides then, in the server's error's shape and marked as its own ({@link BulkAssemblyFailure}).
  */
 export type RequestFailure =
   | RequestError
+  | BulkAssemblyFailure
   | {
       readonly code: "link_lost" | "aborted" | "superseded" | "protocol_violation";
       readonly message: string;
     };
+
+/**
+ * A request answered in bulk that the client could not take, in the server's error's shape
+ * (`internal`, with no field) and marked as the client's own finding by `bulkUnassembled`, which
+ * no server's error carries: its chunks were missing, broke their order or disagreed with the
+ * response's manifest, the manifest could not be read, or the caller's `onChunk` threw.
+ */
+export interface BulkAssemblyFailure extends RequestError {
+  readonly code: "internal";
+  readonly field: null;
+  readonly bulkUnassembled: true;
+}
+
+/**
+ * Whether `failure` is the client's own finding that a request answered in bulk could not be
+ * taken ({@link BulkAssemblyFailure}), rather than the server's `internal` or another ending.
+ */
+export function isBulkAssemblyFailure(failure: RequestFailure): failure is BulkAssemblyFailure {
+  return "bulkUnassembled" in failure;
+}
+
+/** A {@link BulkAssemblyFailure} with `message`. */
+function bulkAssemblyFailure(message: string): BulkAssemblyFailure {
+  return { code: "internal", message, field: null, bulkUnassembled: true };
+}
 
 /** How a request ended. */
 export type RequestOutcome<K extends RequestKind> =
@@ -351,7 +377,7 @@ export class RequestClient {
           };
         }
         if (!partial.ok) {
-          this.#abandon(started.id, { code: "internal", message: partial.message, field: null });
+          this.#abandon(started.id, bulkAssemblyFailure(partial.message));
           return;
         }
         // The next answer's chunks are numbered from 0 again.
@@ -380,11 +406,9 @@ export class RequestClient {
       if (assembled === undefined || !assembled.ok) {
         return {
           ok: false,
-          error: {
-            code: "internal",
-            message: assembled?.message ?? `the ${body.kind} response arrived without its chunks`,
-            field: null,
-          },
+          error: bulkAssemblyFailure(
+            assembled?.message ?? `the ${body.kind} response arrived without its chunks`,
+          ),
         };
       }
       return { ok: true, response: settled.response, chunks: assembled.chunks };
@@ -543,18 +567,15 @@ export class RequestClient {
         });
       } catch (error: unknown) {
         // The request must still settle, and the socket's listener must not see the throw.
-        this.#abandon(header.request, {
-          code: "internal",
-          message: `chunk ${header.index} of request ${header.request} could not be taken: ${String(error)}`,
-          field: null,
-        });
+        this.#abandon(
+          header.request,
+          bulkAssemblyFailure(
+            `chunk ${header.index} of request ${header.request} could not be taken: ${String(error)}`,
+          ),
+        );
       }
     } else if (receipt.reason === "broken") {
-      this.#abandon(header.request, {
-        code: "internal",
-        message: receipt.message,
-        field: null,
-      });
+      this.#abandon(header.request, bulkAssemblyFailure(receipt.message));
     }
     return { ok: true };
   }

@@ -61,6 +61,7 @@ import type { TerrainViewReport } from "../../view/terrain/session";
 import {
   buildWireframeDrawList,
   type DrawAnchor,
+  type DrawnLineOfSight,
   type DrawnSurveyEdge,
   type SpriteStar,
   viewStrokesAt,
@@ -126,6 +127,15 @@ export interface ViewFrameInputs {
    * wireframe draws no terrain and no survey edge is marked.
    */
   readonly terrain?: ViewTerrainInput | undefined;
+  /**
+   * Whether the view's terrain readout reads a point on its line of sight this frame, which its
+   * tripod marks at the picture's centre (plan R10, R10.T12): `true` while the readout stands with a
+   * point, over surveyed ground or not; `false` where it has none, at `NO GROUND`. Absent for a view
+   * that states no readout, which draws no tripod: an instrument (decision-r10-t12-leans §3), or a
+   * view under `TERRAIN NOT AVAILABLE` (§5). The drawer keeps the tripod's give-way from frame to
+   * frame while it is given, `false` or `true`.
+   */
+  readonly lineOfSightPoint?: boolean | undefined;
 }
 
 /** What a frame drew. */
@@ -151,6 +161,12 @@ export interface ViewFrameDrawn {
    * decision-r10-t16-review §1); none without a terrain session.
    */
   readonly surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
+  /**
+   * The line-of-sight mark the frame drew (`WireframeDrawList.lineOfSight`, plan R10, R10.T12): its
+   * box where it is drawn, which the view's mark labels stand clear of; `null` where the frame was
+   * given no line of sight.
+   */
+  readonly lineOfSight: DrawnLineOfSight | null;
 }
 
 /**
@@ -268,6 +284,12 @@ export class ViewFrameDrawer {
   /** The contour interval the view's wireframe terrain last held, its hysteresis's (R10.T11). */
   #contourIntervalM: number | null = null;
   #regimes: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
+  /**
+   * Whether the view's tripod gave way in its last frame drawn (plan R10, R10.T12), the give-way's
+   * hysteresis, which its next frame's draw list starts from (`LineOfSightOptions.yielded`); `false`
+   * before its first, and once a frame is drawn with no line of sight.
+   */
+  #lineOfSightYielded = false;
   #sized: ViewSize | null = null;
   readonly #unsubscribe: () => void;
 
@@ -376,8 +398,15 @@ export class ViewFrameDrawer {
                 viewport,
                 frameStyleOf(inputs, this.#photoreal.status),
               ),
+        // The tripod at the picture's centre where the readout has a point, and its give-way's
+        // state from the frame before (R10.T12).
+        lineOfSight:
+          inputs.lineOfSightPoint === undefined
+            ? null
+            : { hasPoint: inputs.lineOfSightPoint, yielded: this.#lineOfSightYielded },
       },
     );
+    this.#lineOfSightYielded = list.lineOfSight?.yielded ?? false;
     const cube = this.#cubeFor(inputs.sky, inputs.setting);
     const exposed = exposureScale(ev100);
     let drawn = false;
@@ -425,6 +454,7 @@ export class ViewFrameDrawer {
       terrain,
       contourIntervalM,
       surveyEdges: list.surveyEdges,
+      lineOfSight: list.lineOfSight,
     };
   }
 

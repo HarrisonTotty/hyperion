@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { SECONDS_PER_JULIAN_YEAR } from "@hyperion/protocol";
 
 import {
   type BodyDistanceUnit,
+  type PressureUnit,
   type SurfaceRangeUnit,
   formatAge,
+  formatBearingCapacity,
   formatBearingDeg,
   formatBodyDistance,
   formatBodySpan,
@@ -29,6 +31,7 @@ import {
   formatSignedDeg,
   formatSigned,
   formatTemperatureK,
+  formatTwoFigures,
   formatUniverseTimeDhms,
   formatUniverseTimeYr,
   KM_PER_AU,
@@ -480,6 +483,94 @@ describe("formatPressure", () => {
 
   it("refuses a negative pressure", () => {
     expect(() => formatPressure(-1)).toThrow(RangeError);
+  });
+});
+
+describe("formatTwoFigures", () => {
+  it.each([
+    [0.01, "0.010"],
+    [2, "2.0"],
+    [1, "1.0"],
+    [410.3, "410"],
+    [36_063, "36,000"],
+    [-0.954, "-0.95"],
+    [2e-4, "2.0E-4"],
+    [3.1e6, "3.1E6"],
+  ])("formats %f as %s", (value, shown) => {
+    expect(formatTwoFigures(value)).toBe(shown);
+  });
+
+  // A fresh module, so that the formatters are built in this test's order: a small mass's two
+  // figures, grouped from four, first.
+  it("groups from five after a small mass's two figures are formatted", async () => {
+    vi.resetModules();
+    const fresh = await import("./format");
+    expect(fresh.formatMassMearth(0.0123)).toBe("0.012");
+    expect(fresh.formatTwoFigures(1040)).toBe("1000");
+  });
+});
+
+describe("formatBearingCapacity (plan R10, R10.T12)", () => {
+  it.each([
+    // The guide's examples: the Moon's regolith under 1.0 m and its top layer's under the same pad.
+    [5_368_600, "5.4", "MPa"],
+    [206_500, "210", "kPa"],
+    [610, "610", "Pa"],
+    [27_840, "28", "kPa"],
+    // Rounds to 1,000 of its unit, which must be read in the next: 1.0 kPa, 1.0 MPa.
+    [999.6, "1.0", "kPa"],
+    [999_600, "1.0", "MPa"],
+    [0, "0.0", "Pa"],
+  ])("formats %f Pa with no previous unit as %s %s, two figures", (pa, value, unit) => {
+    expect(formatBearingCapacity(pa, null)).toEqual({ value, unit });
+  });
+
+  it.each<[number, PressureUnit, string, PressureUnit]>([
+    // Shown in kPa, it keeps the unit up to 5% past 1,000 kPa, then switches.
+    [1_040_000, "kPa", "1000", "kPa"],
+    [1_060_000, "kPa", "1.1", "MPa"],
+    // Shown in MPa, it keeps the unit down to 5% under 1,000 kPa, then switches.
+    [960_000, "MPa", "0.96", "MPa"],
+    [940_000, "MPa", "940", "kPa"],
+    // The same at 1,000 Pa.
+    [1_040, "Pa", "1000", "Pa"],
+    [960, "kPa", "0.96", "kPa"],
+    [940, "kPa", "940", "Pa"],
+    // Far outside the band held, the band it falls in.
+    [5_368_600, "Pa", "5.4", "MPa"],
+  ])("formats %f Pa shown before in %s as %s %s", (pa, previous, value, unit) => {
+    expect(formatBearingCapacity(pa, previous)).toEqual({ value, unit });
+  });
+
+  it("does not flicker across 1,000 kPa as the capacity wanders about it", () => {
+    let unit: PressureUnit | null = null;
+    const units: PressureUnit[] = [];
+    for (const pa of [980_000, 1_010_000, 990_000, 1_030_000, 1_000_000, 970_000]) {
+      unit = formatBearingCapacity(pa, unit).unit;
+      units.push(unit);
+    }
+    expect(units).toEqual(["kPa", "kPa", "kPa", "kPa", "kPa", "kPa"]);
+  });
+
+  it.each([
+    [3e-3, "3.0E-3", "Pa"],
+    [2e10, "2.0E4", "MPa"],
+  ])("writes %f Pa, outside the ladder, in E notation as %s %s", (pa, value, unit) => {
+    expect(formatBearingCapacity(pa, null)).toEqual({ value, unit });
+  });
+
+  it("refuses a negative or non-finite capacity", () => {
+    expect(() => formatBearingCapacity(-1, null)).toThrow(RangeError);
+    expect(() => formatBearingCapacity(Number.NaN, null)).toThrow(RangeError);
+  });
+
+  // A fresh module, as formatTwoFigures' test takes, so that the small mass's formatter is built
+  // first.
+  it("reads 1000 kPa ungrouped after a small mass's two figures are formatted", async () => {
+    vi.resetModules();
+    const fresh = await import("./format");
+    expect(fresh.formatMassMearth(0.0123)).toBe("0.012");
+    expect(fresh.formatBearingCapacity(1_040_000, "kPa")).toEqual({ value: "1000", unit: "kPa" });
   });
 });
 

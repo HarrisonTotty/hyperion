@@ -65,6 +65,12 @@
  *   `"skipped"`), through a lane of the same pool, shared by every wireframe view that hands it
  *   over and made and disposed as the lit one is; each wireframe view draws its own
  *   ({@link TerrainSession.drawWireTerrain}). The body's mask waits for both passes' rebakes.
+ * - **The terrain readout (R10.T12; decision-r10-live-path, D10).** A view's `GROUND AT LINE OF
+ *   SIGHT` is asked of the pool, one query of a worker over its field
+ *   ({@link TerrainSession.groundReadout}), at the guide's 4 Hz. Its season, for `PAD FRICTION`'s
+ *   `AT`, is the mean anomaly of the body's seasonal orbit at the instant asked: the body's own orbit
+ *   from the `body_detail` record its detail seed is read from, or for a moon its planet's, asked
+ *   once (decision-r10-t12-leans §6); none for a kept scene's body, whose record is not asked.
  */
 
 import {
@@ -79,7 +85,14 @@ import {
 } from "@hyperion/protocol";
 
 import { norm, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
-import { bodyDetailSeed, toBodyDetailRequest } from "../../lib/system/bodiesWire";
+import { type KeplerOrbit, meanAnomalyAt } from "../../lib/orbit";
+import {
+  bodyDetailSeed,
+  bodyRecordOrbit,
+  bodyRecordSeasons,
+  type RecordSeasons,
+  toBodyDetailRequest,
+} from "../../lib/system/bodiesWire";
 import type { LitRegime } from "../bodies/regime";
 import type { ViewBudget } from "../budget/viewBudget";
 import type { CameraPose } from "../camera/pose";
@@ -125,7 +138,8 @@ import {
   pixelAngleRad,
   storeReliefSource,
 } from "./handover";
-import { type BodyFigure, planetGeometry } from "./planet";
+import { unreachable } from "./patchKey";
+import { type BodyFigure, type BodyFixedVec3, planetGeometry } from "./planet";
 import { PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
 import { MAX_SELECTION_VIEWS } from "./select";
 import { SurveyedCells } from "./surveyLookup";
@@ -136,6 +150,7 @@ import {
   type TerrainViewFrameInput,
 } from "./terrainPass";
 import { wireframeTerrainSettings } from "./terrainWire";
+import type { SlopeBaselineM, SurfaceGroundReadout } from "./workers/messages";
 import {
   defaultHeightWorkers,
   type FieldChange,
@@ -210,19 +225,30 @@ export interface TerrainViewReport {
 }
 
 /**
- * A wanted body's survey, as the label block's `SurveyLine` reads it (R10.T12): where its field
- * stands, its coverage and its header.
+ * A wanted body's survey, as the label block's survey line and terrain readout read it (R10.T12;
+ * `readouts.ts`): where its field stands, its coverage and its header.
+ *
+ * @remarks
+ * "A survey held" is a held header, from the field's first answer on, `SURVEY COVERAGE NONE`
+ * included (decision-r10-t12-leans §7). A failure that leaves the field held keeps it, stale, and
+ * the survey line states the failure after it (decision-r10-t16-leans §12(c)); one that drops the
+ * field leaves no header.
  */
 export interface TerrainSurvey {
-  /** The store's standing of the field: pending, not modelled or failed. */
+  /**
+   * The store's standing of the field: pending, not modelled or failed, its failure typed
+   * (`FieldFailure`: the server's refusal or failure, or the console's check that failed).
+   */
   readonly status: FieldStatus;
   /** Its coverage, or `null` before a field is held and after it is dropped. */
   readonly coverage: CoverageView | null;
-  /** Its field header, or `null` before one is held. */
+  /** Its field header, or `null` before one is held and after the field is dropped. */
   readonly header: SurfaceHeaderDto | null;
   /**
-   * Whether it may be behind the server's: the link is down, or has not been back long enough for
-   * an answer since (`CoverageView.stale`).
+   * Whether it may be behind the server's, so that its values read stale with their `S`: the link
+   * is down, or has not been back long enough for an answer since (`CoverageView.stale`), or a
+   * failure stands while the field is held, which nothing asks past until the body is wanted
+   * afresh.
    */
   readonly stale: boolean;
 }
@@ -241,6 +267,24 @@ export interface TerrainSessionMemory {
    * (`textureBytes`): its masks and maps under `coarse-field-gpu`.
    */
   readonly gpuBytes: ReadonlyMap<MemoryCategory, number>;
+}
+
+/** The line of sight a view's terrain readout reads along, in the body's body-fixed frame (R10.T12). */
+export interface GroundSight {
+  /** Its origin, body-fixed metres: the camera's, or the hull's. */
+  readonly originM: BodyFixedVec3;
+  /** Its direction, body-fixed, of any length but zero. */
+  readonly direction: BodyFixedVec3;
+  /** How far along it the ground is looked for, metres: past the body's far side for `NO GROUND`. */
+  readonly maxM: number;
+}
+
+/** A terrain readout's settings (R10.T12). */
+export interface GroundReadoutOptions {
+  /** The baseline `SLOPE` is read over, metres (the guide's `BASELINE`), 2 for now. */
+  readonly slopeBaselineM: SlopeBaselineM;
+  /** The width of the pad the bearing capacity is taken under, metres: the reference pad's 1.0. */
+  readonly padWidthM: number;
 }
 
 /**
@@ -538,6 +582,25 @@ type SeedState =
   /** None: its hooks are not modelled, or the record was refused; its coverage alone is wanted. */
   | { readonly kind: "none" };
 
+/** Where the orbit that sets a wanted body's seasons stands (R10.T12's readout). */
+type SeasonState =
+  /** Held: the body's own orbit, or its planet's for a moon. */
+  | { readonly kind: "held"; readonly orbit: KeplerOrbit }
+  /** A moon's planet's record asked of `body_detail` at `time`, the answer awaited. */
+  | {
+      readonly kind: "asking";
+      readonly planet: BodyIdHex;
+      readonly time: UniverseTime;
+      readonly cancel: () => void;
+    }
+  /** A moon's planet's record to be asked at `time` once the link returns. */
+  | { readonly kind: "waiting"; readonly planet: BodyIdHex; readonly time: UniverseTime }
+  /**
+   * None known: the record not yet answered, a kept scene's body, whose record is not asked, or no
+   * orbit the client can propagate on the record.
+   */
+  | { readonly kind: "none" };
+
 /** A wanted body as the session holds it. */
 interface SessionBody {
   /** Its survey's GPU coverage mask. */
@@ -545,6 +608,8 @@ interface SessionBody {
   /** Its survey as its pass's selection reads it, at once (R10.T16.b). */
   readonly survey: SurveyedCells;
   seed: SeedState;
+  /** The orbit that sets its seasons, from the record its seed is read from (R10.T12). */
+  season: SeasonState;
   /**
    * The store's latest coverage held back from the mask while its pass's rebakes are due, with the
    * blocks posted when it came, which the workers must take first.
@@ -893,6 +958,9 @@ export class TerrainSession {
       if (held.seed.kind === "waiting") {
         this.#askSeed(body, held, held.seed.time);
       }
+      if (held.season.kind === "waiting") {
+        this.#askSeason(body, held, held.season.planet, held.season.time);
+      }
     }
   }
 
@@ -917,8 +985,8 @@ export class TerrainSession {
   }
 
   /**
-   * A wanted body's survey for R10.T12's `SurveyLine`: the store's status, coverage and header,
-   * stale while the link is down; `null` for a body not wanted.
+   * A wanted body's survey for R10.T12's survey line and readout: the store's status, coverage and
+   * header, stale while the link is down or a failure stands; `null` for a body not wanted.
    */
   survey(body: BodyIdHex): TerrainSurvey | null {
     const status = this.#store.status(body);
@@ -930,7 +998,7 @@ export class TerrainSession {
       status,
       coverage,
       header: this.#store.header(body),
-      stale: coverage?.stale ?? !this.#linkUp,
+      stale: (coverage?.stale ?? !this.#linkUp) || status.failure !== null,
     };
   }
 
@@ -947,6 +1015,52 @@ export class TerrainSession {
   detailSeed(body: BodyIdHex): DetailSeedHex | null {
     const seed = this.#bodies.get(body)?.seed;
     return seed?.kind === "held" ? seed.seed : null;
+  }
+
+  /**
+   * View `view`'s terrain readout of `body` where `sight` meets its ground (plan R10, T12;
+   * decision-r10-live-path, D10): the slant range, the reading at its foot, the material there and
+   * the ground's two properties, from one worker's query over the body's field
+   * (`HeightWorkerPool.groundReadout`).
+   *
+   * @remarks
+   * The season's mean anomaly is the body's seasonal orbit's at `time` (`meanAnomalyAt`), by which
+   * the module takes the month of `PAD FRICTION`'s `AT`; none where no orbit is known, a kept
+   * scene's body among them, so that a year of twelve months states no temperature then, and a
+   * one-month year its one month.
+   *
+   * @param view - The view whose line of sight it is: only the primary asks in T12
+   *   (decision-r10-t12-leans §3). A view the session holds no report of draws no terrain, so it
+   *   reads none.
+   * @param time - The instant the view lights the body at: its light's emission, the scene's time
+   *   less the body's `retarded.lightTimeS` (`apparent.ts`' `emitted`), the scene's time in a kept
+   *   scene (decision-r10-t12-leans §6 (c)).
+   * @returns The readout; `null` once the session is disposed, for a view it holds no report of, a
+   *   body not wanted, one whose detail seed is not held, or one whose field the pool does not keep
+   *   (and where no worker runs). Every failure is a rejection, never a throw: with a `RangeError`
+   *   for a malformed time (`fractionOfPeriod`), and with the module's message for a setting out of
+   *   its range.
+   */
+  async groundReadout(
+    view: ViewId,
+    body: BodyIdHex,
+    sight: GroundSight,
+    time: UniverseTime,
+    options: GroundReadoutOptions,
+  ): Promise<SurfaceGroundReadout | null> {
+    const held = this.#bodies.get(body);
+    if (this.#disposed || !this.#reports.has(view) || held?.seed.kind !== "held") {
+      return null;
+    }
+    return this.#pool.groundReadout(body, held.seed.seed, {
+      originM: sight.originM,
+      direction: sight.direction,
+      maxM: sight.maxM,
+      slopeBaselineM: options.slopeBaselineM,
+      padWidthM: options.padWidthM,
+      seasonMeanAnomalyRad:
+        held.season.kind === "held" ? meanAnomalyAt(held.season.orbit, time) : undefined,
+    });
   }
 
   /** The session's memory report: the fields' copies and its GPU bytes. */
@@ -983,6 +1097,9 @@ export class TerrainSession {
     for (const held of this.#bodies.values()) {
       if (held.seed.kind === "asking") {
         held.seed.cancel();
+      }
+      if (held.season.kind === "asking") {
+        held.season.cancel();
       }
       held.mask.release();
     }
@@ -1345,6 +1462,7 @@ export class TerrainSession {
       mask: new CoverageMask(this.#textures, `coverage mask ${body}`),
       survey: new SurveyedCells(),
       seed: { kind: "none" },
+      season: { kind: "none" },
       pendingCoverage: null,
       epoch: 0,
     };
@@ -1363,13 +1481,16 @@ export class TerrainSession {
 
   /**
    * Releases a body no longer wanted: its pass (released with its field already, as a rule), its
-   * detail seed's request, its class map and its mask.
+   * detail seed's and its planet's record's requests, its class map and its mask.
    */
   #drop(body: BodyIdHex, held: SessionBody): void {
     this.#disposePasses(body);
     this.#bodies.delete(body);
     if (held.seed.kind === "asking") {
       held.seed.cancel();
+    }
+    if (held.season.kind === "asking") {
+      held.season.cancel();
     }
     this.#classMaps.release(body);
     held.mask.release();
@@ -1394,7 +1515,9 @@ export class TerrainSession {
 
   /**
    * Asks `body`'s record for its detail seed, one `body_detail` at the scene's time, or waits for
-   * the link: the session's one fetch of the hooks, which R08.T10.a's shares.
+   * the link: the session's one fetch of the hooks, which R08.T10.a's shares. The same record gives
+   * the orbit that sets the body's seasons (R10.T12), or names a moon's planet, whose record is then
+   * asked once ({@link TerrainSession}'s `#askSeason`).
    */
   #askSeed(body: BodyIdHex, held: SessionBody, time: UniverseTime): void {
     if (!this.#linkUp) {
@@ -1416,12 +1539,14 @@ export class TerrainSession {
         return;
       }
       if (outcome.ok) {
-        const seed = bodyDetailSeed(outcome.response.record);
+        const { record } = outcome.response;
+        const seed = bodyDetailSeed(record);
         if (seed === null) {
           held.seed = { kind: "none" };
         } else {
           this.#seedHeld(body, held, seed);
         }
+        this.#takeSeasons(body, held, bodyRecordSeasons(record), time);
       } else if (outcome.error.code === "link_lost") {
         held.seed = { kind: "waiting", time };
       } else if (!cancelled(outcome.error.code)) {
@@ -1431,6 +1556,72 @@ export class TerrainSession {
     };
     void take().catch((error: unknown) => {
       console.error(`the detail seed of ${body} could not be taken:`, error);
+    });
+  }
+
+  /**
+   * Holds the orbit `body`'s record says sets its seasons: its own, or for a moon its planet's,
+   * whose record is asked at `time`; none where the record holds none.
+   */
+  #takeSeasons(
+    body: BodyIdHex,
+    held: SessionBody,
+    seasons: RecordSeasons,
+    time: UniverseTime,
+  ): void {
+    switch (seasons.kind) {
+      case "own":
+        held.season = { kind: "held", orbit: seasons.orbit };
+        return;
+      case "planet":
+        this.#askSeason(body, held, seasons.planet, time);
+        return;
+      case "none":
+        held.season = { kind: "none" };
+        return;
+    }
+    unreachable(seasons);
+  }
+
+  /**
+   * Asks the record of `planet`, the planet of the moon `body`, for the orbit that sets the moon's
+   * seasons (R10.T12; decision-r10-t12-leans §6 (b)), one `body_detail` at `time`, or waits for the
+   * link; the season is none where the record is refused or holds no orbit the client propagates.
+   */
+  #askSeason(body: BodyIdHex, held: SessionBody, planet: BodyIdHex, time: UniverseTime): void {
+    if (held.season.kind === "asking") {
+      held.season.cancel();
+    }
+    if (!this.#linkUp) {
+      held.season = { kind: "waiting", planet, time };
+      return;
+    }
+    const pending = this.#requests.request(toBodyDetailRequest(this.#universe, planet, time));
+    const asking: SeasonState = {
+      kind: "asking",
+      planet,
+      time,
+      cancel: () => {
+        pending.cancel();
+      },
+    };
+    held.season = asking;
+    const take = async (): Promise<void> => {
+      const outcome = await pending.outcome;
+      if (this.#bodies.get(body) !== held || held.season !== asking) {
+        return;
+      }
+      if (outcome.ok) {
+        const orbit = bodyRecordOrbit(outcome.response.record);
+        held.season = orbit === null ? { kind: "none" } : { kind: "held", orbit };
+      } else if (outcome.error.code === "link_lost") {
+        held.season = { kind: "waiting", planet, time };
+      } else if (!cancelled(outcome.error.code)) {
+        held.season = { kind: "none" };
+      }
+    };
+    void take().catch((error: unknown) => {
+      console.error(`the seasonal orbit of ${body}'s planet ${planet} could not be taken:`, error);
     });
   }
 }

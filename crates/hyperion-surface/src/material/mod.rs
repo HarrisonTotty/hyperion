@@ -71,8 +71,8 @@ pub use bearing::{
     ultimate_bearing_capacity_on_slope,
 };
 pub use class::{Material, MaterialClass, PhotometricForm};
-pub(crate) use classify::IceCuts;
 pub use classify::{GroundMaterial, MASSIVE_ICE_SHARE, THIN_ATMOSPHERE_PRESSURE, material_at};
+pub(crate) use classify::{IceCuts, lapse_drop_k};
 // One line, unwrapped: until P14.T54.b deletes it, the sim's tripwire
 // (`modifiers_nothing_on_the_record_reads_the_modifiers_yet`) allows the time law's names outside
 // `material/maturity.rs` on this module's one re-export line of that module alone.

@@ -27,6 +27,19 @@
 //! family) row (its shear layers with their bearing factors, its friction at its knots and between
 //! them, its strength, albedo factor and span, or `unmodelled`), and the two lunar capacities.
 //!
+//! `tests/golden/material/bearing_on_slope.golden` is the T1.a slope follow-up's capacities, which
+//! the terrain readout states (plan R10, T12; decision-r10-t12-leans §8; the follow-up's deferred
+//! finding 13): every layer of every shear table at its body's gravity, the lunar regolith's four
+//! at the Moon's 1.62 m s⁻² and Mars's drift and Viking Lander 2's soil at Mars's 3.71 m s⁻², and
+//! a constructed cohesionless φ 30° soil of 1,600 kg m⁻³ at a rounded Earth gravity, 9.81 m s⁻²
+//! (decision-r10-slope-capacity §6), each through [`ultimate_bearing_capacity_on_slope`]
+//! under the 1.0 m reference pad and a 0.1 m pad, on a grid of slopes from 0 to just under the
+//! layer's φ and at φ, just above it and at 89°, where it is `none`; and each table's
+//! [`bearing_capacity_on_slope`], which takes the layer at one pad's depth, on the same pads and
+//! slopes. The ruled figures are among them (decision-r10-slope-capacity §6): 3,730.0 and
+//! 2,331.0 kPa on the lunar 30–60 cm layer under 1 m at 10° and 20°, 133.3 kPa on its 0–15 cm pair
+//! under 1 m at 10°, and 209.9 and 27.84 kPa on Lander 2's soil and the drift under 1 m at 10°.
+//!
 //! `tests/golden/material/weathering.golden` is R10.T1.d's space-weathering law: its constants
 //! and the table's Λ, then τ and the weathered normal, spherical and directional-hemispherical
 //! albedos (at the four incidences), each as its bits, on a grid of fresh albedo, `FeO_T`,
@@ -68,15 +81,18 @@ use hyperion_testkit::lcg::Lcg;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
-use hyperion_base::units::{Kelvin, Metres, MetresPerSecondSquared, Radians};
+use hyperion_base::units::{
+    Kelvin, KilogramsPerCubicMetre, Metres, MetresPerSecondSquared, Pascals, Radians,
+};
 
 use super::{
     BRIGHT_FROST_LIMB_PARAMETER, BRIGHT_FROST_NORMAL_ALBEDO, BearingFactors, CLIFF_SLOPE,
     FrictionModel, LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO, LUNAR_LIMB_ONSET_NORMAL_ALBEDO,
-    MASSIVE_ICE_SHARE, Material, MaterialClass, PARTICULATE_NORMAL_ALBEDO_CEILING, PhaseLaw,
-    SNOW_SHED_SLOPE, THIN_ATMOSPHERE_PRESSURE, TRANSITION_HALF_WIDTH, UNASSIGNED_PHASE_ROW,
-    bearing_capacity, directional_hemispherical_albedo, form_row, interface_friction,
-    limb_parameter, material_at, properties, ultimate_bearing_capacity,
+    MASSIVE_ICE_SHARE, Material, MaterialClass, MaterialProperties, MohrCoulomb,
+    PARTICULATE_NORMAL_ALBEDO_CEILING, PhaseLaw, SNOW_SHED_SLOPE, THIN_ATMOSPHERE_PRESSURE,
+    TRANSITION_HALF_WIDTH, UNASSIGNED_PHASE_ROW, bearing_capacity, bearing_capacity_on_slope,
+    directional_hemispherical_albedo, form_row, interface_friction, limb_parameter, material_at,
+    properties, ultimate_bearing_capacity, ultimate_bearing_capacity_on_slope,
 };
 use super::{
     FEO_MOLAR_MASS_G_PER_MOL, ICE_HOST_INDEX, IRON_DENSITY_KG_M3, IRON_MOLAR_MASS_G_PER_MOL,
@@ -95,6 +111,28 @@ use crate::testing::SyntheticWorld;
 
 /// The points each world's golden pins.
 const POINTS: usize = 1_000;
+
+/// The Moon's surface gravity, 1.62 m s⁻², as the Lunar Sourcebook takes it (§9.1.9, p. 517): the
+/// figure of `bearing.rs`'s tests' `MOON_G`, which is private to them.
+const MOON_G: MetresPerSecondSquared = MetresPerSecondSquared::new(1.62);
+
+/// Mars's surface gravity, 3.71 m s⁻², as plan R10's T12 drafts take it for the Viking soils: the
+/// figure of `bearing.rs`'s tests' `MARS_G`, which is private to them.
+const MARS_G: MetresPerSecondSquared = MetresPerSecondSquared::new(3.71);
+
+/// The gravity the constructed cohesionless soil is taken at, 9.81 m s⁻²: a rounded Earth gravity,
+/// standard gravity's 9.80665 m s⁻² (3rd CGPM, 1901) to three figures. The soil is no body's
+/// (decision-r10-slope-capacity §6 constructs it to pin the slope's ratio q(β) ÷ q(0)), so the
+/// figure is a plausible setting, not a measurement.
+const CONSTRUCTED_SOIL_GRAVITY: MetresPerSecondSquared = MetresPerSecondSquared::new(9.81);
+
+/// The constructed cohesionless soil's bulk density, 1,600 kg m⁻³: a medium-dense dry sand's,
+/// chosen for decision-r10-slope-capacity §6's φ 30° soil, not a measured soil's (the ruled ratio
+/// does not depend on it).
+const CONSTRUCTED_SOIL_DENSITY: KilogramsPerCubicMetre = KilogramsPerCubicMetre::new(1_600.0);
+
+/// The constructed cohesionless soil's friction angle, 30° (decision-r10-slope-capacity §6).
+const CONSTRUCTED_SOIL_FRICTION_DEG: f64 = 30.0;
 
 /// `value`'s IEEE 754 bits, as `0x` and 16 hexadecimal digits.
 fn hex(value: f64) -> String {
@@ -401,8 +439,7 @@ fn table_lunar(out: &mut GoldenWriter) {
         &lunar,
     )
     .expect("entry 0 is in the palette");
-    let moon_g = MetresPerSecondSquared::new(1.62);
-    let deep = bearing_capacity(&soil, moon_g, Metres::new(1.0)).expect("lunar regolith has data");
+    let deep = bearing_capacity(&soil, MOON_G, Metres::new(1.0)).expect("lunar regolith has data");
     out.f64("1 m footing, Pa", deep.value());
     let shallow = soil
         .shear_layer_at(Metres::new(0.1))
@@ -412,7 +449,7 @@ fn table_lunar(out: &mut GoldenWriter) {
         ultimate_bearing_capacity(
             shallow.strength(),
             soil.bulk_density(shallow),
-            moon_g,
+            MOON_G,
             Metres::new(1.0),
         )
         .value(),
@@ -422,6 +459,142 @@ fn table_lunar(out: &mut GoldenWriter) {
 #[test]
 fn material_the_property_table_matches_its_golden() {
     golden!("material/table", &table_text());
+}
+
+/// A silicate entry's form `class` at the grain density `grain_density`, kg m⁻³: the Lunar
+/// Sourcebook's 3,100 for the lunar soil, so that its layers' bulk densities are the Sourcebook's,
+/// and Moore et al.'s assumed 2,600 for the Viking soils (`properties.rs`), so that theirs are
+/// 1,200 and 1,400 kg m⁻³.
+fn silicate(class: MaterialClass, grain_density: f64) -> MaterialProperties {
+    let palette = MaterialPalette::new(vec![PaletteEntry {
+        substance: SubstanceKey::new_const("feldspathic"),
+        role: PaletteRole::PrimaryCrust,
+        normal_albedo_bvr: [0.12; 3],
+        phase_row: UNASSIGNED_PHASE_ROW,
+        grain_density_kg_m3: grain_density,
+        transition: Kelvin::new(1_500.0),
+        mechanics: MechanicsFamily::Silicate,
+        liquid: None,
+        feo_mass_fraction: None,
+    }])
+    .expect("a one-entry palette is valid");
+    properties(
+        Material::new(class, 0).expect("entry 0 is a palette index"),
+        &palette,
+    )
+    .expect("entry 0 is in the palette")
+}
+
+/// The pads the slope golden takes: the 1.0 m reference pad and a narrow 0.1 m one, metres.
+const SLOPE_GOLDEN_PADS: [f64; 2] = [1.0, 0.1];
+
+/// The slopes the slope golden pins for a layer of friction angle `phi`, radians, each with its
+/// label: whole degrees from 0 to 50, shares of φ to 0.99, and φ less 10⁻⁹ rad, all below φ for
+/// the layers' angles above 50°, and those at or past it `none`; then φ, the next float above it and
+/// 89°, which are `none`.
+fn slope_grid(phi: Radians) -> Vec<(String, Radians)> {
+    let phi = phi.value();
+    let mut slopes: Vec<(String, Radians)> = [0_u8, 2, 5, 10, 15, 20, 25, 30, 40, 45, 50]
+        .into_iter()
+        .map(|deg| (format!("{deg}°"), Radians::new(f64::from(deg).to_radians())))
+        .collect();
+    slopes.extend(
+        [0.25, 0.5, 0.75, 0.9, 0.99].map(|share| (format!("{share} φ"), Radians::new(share * phi))),
+    );
+    slopes.extend([
+        ("φ − 1e-9 rad".to_owned(), Radians::new(phi - 1e-9)),
+        ("φ".to_owned(), Radians::new(phi)),
+        ("next above φ".to_owned(), Radians::new(phi.next_up())),
+        ("89°".to_owned(), Radians::new(89.0_f64.to_radians())),
+    ]);
+    slopes
+}
+
+/// Writes `q` under `label`, or `none` where it is not computed.
+fn capacity_line(out: &mut GoldenWriter, label: &str, q: Option<Pascals>) {
+    match q {
+        Some(q) => out.f64(label, q.value()),
+        None => out.line(&format!("{label} none")),
+    }
+}
+
+/// One layer's capacities, `strength` and bulk density `rho` at gravity `g`, under each pad on its
+/// slope grid ([`slope_grid`]).
+fn layer_lines(
+    out: &mut GoldenWriter,
+    strength: MohrCoulomb,
+    rho: KilogramsPerCubicMetre,
+    g: MetresPerSecondSquared,
+) {
+    out.f64("c_pa", strength.cohesion().value());
+    out.f64("phi_rad", strength.friction_angle().value());
+    out.f64("rho_kg_m3", rho.value());
+    for pad in SLOPE_GOLDEN_PADS {
+        for (name, slope) in slope_grid(strength.friction_angle()) {
+            let q = ultimate_bearing_capacity_on_slope(strength, rho, g, Metres::new(pad), slope);
+            capacity_line(out, &format!("pad {pad} m at {name}, Pa"), q);
+        }
+    }
+}
+
+/// The slope golden's text (the module documentation).
+fn bearing_on_slope_text() -> String {
+    let mut out = GoldenWriter::new();
+    out.header(crate::generator_version());
+    for (name, class, grain_density, g) in [
+        ("lunar regolith", MaterialClass::Regolith, 3_100.0, MOON_G),
+        ("Mars's drift", MaterialClass::Dust, 2_600.0, MARS_G),
+        (
+            "Viking Lander 2's soil",
+            MaterialClass::Soil,
+            2_600.0,
+            MARS_G,
+        ),
+    ] {
+        let soil = silicate(class, grain_density);
+        out.line(&format!("table {name}, {class:?} of silicate"));
+        out.f64("gravity_m_s2", g.value());
+        out.f64("grain_density_kg_m3", grain_density);
+        for layer in soil.shear() {
+            out.line(&format!(
+                "layer {} {}",
+                hex(layer.top().value()),
+                hex(layer.bottom().value())
+            ));
+            layer_lines(&mut out, layer.strength(), soil.bulk_density(*layer), g);
+        }
+        for pad in SLOPE_GOLDEN_PADS {
+            let deep = soil
+                .shear_layer_at(Metres::new(pad))
+                .expect("a shear table has a layer at any depth");
+            out.line(&format!(
+                "the table under {pad} m, its layer at {} {}",
+                hex(deep.top().value()),
+                hex(deep.bottom().value())
+            ));
+            for (name, slope) in slope_grid(deep.strength().friction_angle()) {
+                let q = bearing_capacity_on_slope(&soil, g, Metres::new(pad), slope);
+                capacity_line(&mut out, &format!("pad {pad} m at {name}, Pa"), q);
+            }
+        }
+    }
+    out.line("a cohesionless soil of φ 30°, 1,600 kg m⁻³");
+    out.f64("gravity_m_s2", CONSTRUCTED_SOIL_GRAVITY.value());
+    layer_lines(
+        &mut out,
+        MohrCoulomb::new(
+            Pascals::ZERO,
+            Radians::new(CONSTRUCTED_SOIL_FRICTION_DEG.to_radians()),
+        ),
+        CONSTRUCTED_SOIL_DENSITY,
+        CONSTRUCTED_SOIL_GRAVITY,
+    );
+    out.finish()
+}
+
+#[test]
+fn material_the_bearing_capacity_on_slope_matches_its_golden() {
+    golden!("material/bearing_on_slope", &bearing_on_slope_text());
 }
 
 /// The space-weathering law's golden text (the module documentation).
@@ -517,12 +690,27 @@ fn material_the_weathering_law_matches_its_golden() {
 mod native_only {
     use std::path::Path;
 
-    /// The material goldens: one for each synthetic world, the property table's, the
-    /// space-weathering law's, and R10.T1.c's maturity's and halo's.
-    const MATERIAL_GOLDENS: usize = 10;
+    /// The material goldens, by name: one for each synthetic world, the property table's, the
+    /// space-weathering law's, R10.T1.c's maturity's and halo's, and the slope capacities'
+    /// (R10.T12).
+    const MATERIAL_GOLDENS: [&str; 11] = [
+        "bearing_on_slope",
+        "ceres_like",
+        "earth_like",
+        "flat",
+        "halo",
+        "mars_like",
+        "maturity",
+        "moon_like",
+        "one_crater",
+        "table",
+        "weathering",
+    ];
 
     /// Every golden file of `tests/golden/material/` carries `GENERATOR_VERSION`, not R05's
-    /// `TEST_PLANET_VERSION`, which heads the files directly under `tests/golden/`.
+    /// `TEST_PLANET_VERSION`, which heads the files directly under `tests/golden/`, and the files
+    /// are the named ones, so that a stray file fails as a missing one does
+    /// (decision-r10-t16-contracts §4's rule, decision-r10-t12-leans §8).
     #[test]
     fn material_every_golden_carries_the_generator_version() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -530,7 +718,7 @@ mod native_only {
             .join("golden")
             .join("material");
         let expected = format!("# generator_version = {}", crate::generator_version());
-        let mut seen = 0;
+        let mut seen = Vec::new();
         for entry in std::fs::read_dir(&dir).expect("the material golden directory is readable") {
             let path = entry.expect("a directory entry is readable").path();
             if path.extension().is_some_and(|e| e == "golden") {
@@ -541,9 +729,11 @@ mod native_only {
                     "{}",
                     path.display()
                 );
-                seen += 1;
+                let stem = path.file_stem().and_then(|s| s.to_str());
+                seen.push(stem.expect("a golden file's name is UTF-8").to_owned());
             }
         }
+        seen.sort_unstable();
         assert_eq!(seen, MATERIAL_GOLDENS, "the goldens in {}", dir.display());
     }
 }

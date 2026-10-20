@@ -11,7 +11,13 @@ import {
 import type { BulkManifestDto } from "./generated/BulkManifestDto";
 import type { ClientMessage } from "./generated/ClientMessage";
 import type { ResponseBody } from "./generated/ResponseBody";
-import { RequestClient, setLastRequestId } from "./requests";
+import {
+  isBulkAssemblyFailure,
+  type PendingBulkRequest,
+  RequestClient,
+  type RequestFailure,
+  setLastRequestId,
+} from "./requests";
 
 /** The header R03.T10.a pins in `crates/hyperion-server/src/bulk.rs`, byte for byte. */
 const PINNED_HEADER = [
@@ -589,5 +595,98 @@ describe("BulkAssembler's limits", () => {
     }
 
     expect(assembler.add(header(within), payload)).toMatchObject({ ok: false, reason: "broken" });
+  });
+});
+
+/** The failure `pending` ended with. */
+async function failureOf(pending: PendingBulkRequest<"list_universes">): Promise<RequestFailure> {
+  const outcome = await pending.outcome;
+  if (outcome.ok) {
+    throw new Error("the request was answered");
+  }
+  return outcome.error;
+}
+
+describe("the client's own bulk failures (isBulkAssemblyFailure)", () => {
+  it.each<[string, (client: RequestClient) => PendingBulkRequest<"list_universes">]>([
+    [
+      "a chunk out of order",
+      (client) => {
+        const pending = bulkRequest(client, { chunks: 3, bytes: 3 });
+        client.handleBinaryFrame(frame(1, 0, 3, [1]));
+        client.handleBinaryFrame(frame(1, 2, 3, [3]));
+        return pending;
+      },
+    ],
+    [
+      "a chunk missing at the response",
+      (client) => {
+        const pending = bulkRequest(client, { chunks: 2, bytes: 2 });
+        client.handleBinaryFrame(frame(1, 0, 2, [1]));
+        client.handleServerMessage({ type: "response", id: 1, body: ANSWER });
+        return pending;
+      },
+    ],
+    [
+      "a partial answer that lacks its chunks",
+      (client) => {
+        const pending = client.requestBulk(
+          { kind: "list_universes" },
+          () => ({ chunks: 2, bytes: 4 }),
+          { onPartial: () => undefined },
+        );
+        client.handleBinaryFrame(frame(1, 0, 2, [1, 2]));
+        client.handleServerMessage({ type: "partial_response", id: 1, body: ANSWER });
+        return pending;
+      },
+    ],
+    [
+      "a per-chunk option that throws",
+      (client) => {
+        const pending = client.requestBulk(
+          { kind: "list_universes" },
+          () => ({ chunks: 1, bytes: 1 }),
+          {
+            onChunk: () => {
+              throw new Error("no room for the block");
+            },
+          },
+        );
+        client.handleBinaryFrame(frame(1, 0, 1, [1]));
+        return pending;
+      },
+    ],
+    [
+      "a manifest that cannot be read",
+      (client) => {
+        const pending = client.requestBulk({ kind: "list_universes" }, () => {
+          throw new Error("no manifest");
+        });
+        client.handleServerMessage({ type: "response", id: 1, body: ANSWER });
+        return pending;
+      },
+    ],
+  ])("marks %s as the client's own, in the server's internal shape", async (_, start) => {
+    const { client } = recordingClient();
+    const error = await failureOf(start(client));
+    expect([error, isBulkAssemblyFailure(error)]).toEqual([
+      { code: "internal", message: expect.any(String), field: null, bulkUnassembled: true },
+      true,
+    ]);
+  });
+
+  it("does not mark the server's own internal failure", async () => {
+    const { client } = recordingClient();
+    const pending = bulkRequest(client, { chunks: 1, bytes: 1 });
+    client.handleServerMessage({
+      type: "request_error",
+      id: 1,
+      error: { code: "internal", message: "the field failed", field: null },
+    });
+    const error = await failureOf(pending);
+    expect([error, isBulkAssemblyFailure(error)]).toEqual([
+      { code: "internal", message: "the field failed", field: null },
+      false,
+    ]);
   });
 });

@@ -20,7 +20,9 @@
  * the module's `SurfaceFields`, which decodes it (`wire::decode_block`) into the body's
  * `PartialField` (`PartialField::insert`), and bakes, reads and classifies over it with the body's
  * detail seed. A stand-in field, the descent spike's, is held here undecoded, since the test planet
- * reads no field.
+ * reads no field. A view's terrain readout is one query of the module (R10.T12,
+ * {@link WorkerFields.groundReadout}): the line of sight, the reading and the material at its foot,
+ * and the ground's two properties, over one synthesiser.
  */
 
 import { type BodyIdHex, type DetailSeedHex, hexToU64, parseBodyId } from "@hyperion/protocol";
@@ -31,11 +33,18 @@ import type {
   BakedPatch,
   BakeSettings,
   ClassMapAnswer,
+  FacePoint,
   FieldBlockAnswer,
   FieldForm,
+  GroundReadoutQuery,
   HeightSourceSetting,
   HeightWorkerReply,
   HeightWorkerRequest,
+  SurfaceGroundReadout,
+  SurfaceLineOfSight,
+  SurfaceMaterial,
+  SurfaceReading,
+  SurfaceSlantRange,
   TerrainLayers,
   TestPlanetRidges,
   WeightsLayerSetting,
@@ -166,6 +175,38 @@ export interface WasmClassMap {
 }
 
 /**
+ * The module's `GroundReadoutAnswer`, `WorkerFields::ground_readout`'s (R10.T12): its `kind` a
+ * {@link WASM_LINE_OF_SIGHT} value, and on the ground the sight's, the reading's, the material's and
+ * the properties' getters, `undefined` (or `false`) off it and where not computed.
+ */
+export interface WasmGroundReadout {
+  readonly kind: number;
+  readonly rangeM: number | undefined;
+  readonly rangeSigmaM: number | undefined;
+  readonly grazing: boolean;
+  readonly rangeResolved: boolean;
+  hitM(): Float64Array | undefined;
+  readonly atFace: number | undefined;
+  readonly atU: number | undefined;
+  readonly atV: number | undefined;
+  readonly elevationM: number | undefined;
+  readonly elevationSigmaM: number | undefined;
+  readonly slopeRmsRad: number | undefined;
+  readonly slopeSigmaRad: number | undefined;
+  readonly slopeBaselineM: number | undefined;
+  readonly resolutionM: number | undefined;
+  readonly readingResolved: boolean;
+  readonly classCode: number | undefined;
+  readonly entry: number | undefined;
+  readonly bearingCapacityPa: number | undefined;
+  readonly capacitySlopeRad: number | undefined;
+  readonly padFriction: number | undefined;
+  readonly frictionOnTemperature: boolean;
+  readonly temperatureK: number | undefined;
+  free(): void;
+}
+
+/**
  * The module's `SurfaceFields`: a client's field a body (`src/wasm.rs`'s module documentation). A
  * body is its system's raw ID and its index; a seed is the body's detail seed.
  */
@@ -219,6 +260,27 @@ export interface WasmSurfaceFields {
     u: number,
     v: number,
   ): WasmGround | undefined;
+  /**
+   * A view's terrain readout along a line of sight (R10.T12); `NotSurveyed` where no field is held.
+   *
+   * @throws Error for a line of sight `slantRange` refuses, a slope baseline other than 2, 5 or
+   *   100 m, a pad width that is not finite and positive, or a season's anomaly given and not finite.
+   */
+  groundReadout(
+    system: bigint,
+    body: number,
+    seed: bigint,
+    ox: number,
+    oy: number,
+    oz: number,
+    dx: number,
+    dy: number,
+    dz: number,
+    maxM: number,
+    slopeBaselineM: number,
+    padWidthM: number,
+    seasonMeanAnomalyRad: number | undefined,
+  ): WasmGroundReadout;
   /**
    * The photometry of each slot of a bake's palette (R10.T10.b), 8 × 5; `undefined` where no
    * field of the body is held.
@@ -384,70 +446,6 @@ export class StandInFields {
 export type FieldTake =
   | { readonly kind: "taken"; readonly block: FieldBlockAnswer | null }
   | { readonly kind: "refused"; readonly message: string };
-
-/** A point of a face, in the cube's face coordinates (`hyperion_surface::cube::FaceUv`). */
-export interface FacePoint {
-  readonly face: Face;
-  /** In [−1, 1]. */
-  readonly u: number;
-  /** In [−1, 1]. */
-  readonly v: number;
-}
-
-/** What a readout may quote of the ground at a point (R10.T5's `SurveyedReading`). */
-export interface SurfaceReading {
-  readonly elevationM: number;
-  /** The elevation's standard uncertainty, metres; 0 where resolved. */
-  readonly elevationSigmaM: number;
-  readonly slopeRmsRad: number;
-  readonly slopeSigmaRad: number;
-  readonly slopeBaselineM: number;
-  /** The cell code's resolution the reading was taken at, metres. */
-  readonly resolutionM: number;
-  /** Whether the survey reaches the band limit, so that the uncertainties are zero. */
-  readonly resolved: boolean;
-}
-
-/** Where a line of sight meets the ground, as far as the survey can say (R10.T5's `LineOfSight`). */
-export type SurfaceLineOfSight =
-  | {
-      readonly kind: "ground";
-      readonly rangeM: number;
-      /** The range's standard uncertainty, metres; `null` where the line of sight grazes. */
-      readonly sigmaM: number | null;
-      readonly resolved: boolean;
-      /** The hit, body-fixed metres. */
-      readonly hitM: readonly [number, number, number];
-      /** The hit's foot on the datum. */
-      readonly at: FacePoint;
-    }
-  | { readonly kind: "no-ground" }
-  | { readonly kind: "not-surveyed" };
-
-/** The properties of a material whose substance the palette names (R10.T1.a's). */
-export interface SurfaceMaterialProperties {
-  /** The normal albedo in the Johnson B, V and R bands. */
-  readonly normalAlbedoBvr: readonly [number, number, number];
-  /** The photometric law's code (`PhaseLaw`). */
-  readonly phaseLaw: number;
-  /** The law's L(0) at the material's albedo in V. */
-  readonly limbParameter: number;
-  readonly grainDensityKgM3: number;
-  /** The temperature above which the substance is melt or liquid, kelvin. */
-  readonly transitionK: number;
-  /** The substance's mechanics family's code (`MechanicsFamily`). */
-  readonly mechanics: number;
-}
-
-/** The ground's material at a surveyed point (R10.T1.b's `GroundMaterial`, with its properties). */
-export interface SurfaceMaterial {
-  /** The form's class code (`MaterialClass`). */
-  readonly classCode: number;
-  /** The palette entry, `null` where the palette names no substance. */
-  readonly entry: number | null;
-  /** `null` where the palette names no substance. */
-  readonly properties: SurfaceMaterialProperties | null;
-}
 
 /** A body's ID as the module takes it: its system's raw ID and its index. */
 function bodyArgs(body: BodyIdHex): readonly [bigint, number] {
@@ -716,6 +714,41 @@ export class WorkerFields {
   }
 
   /**
+   * A view's terrain readout of `body` where `query`'s line of sight meets its ground (R10.T12,
+   * `WorkerFields::ground_readout`), copied out: `not-surveyed` where no payload field of it is held
+   * (none, or a stand-in's, which holds no ground), as the module answers one it holds no field of.
+   *
+   * @throws Error naming the module's refusal of an argument out of its range (the line of sight,
+   *   a baseline other than 2, 5 or 100 m, the pad width, or a season that is not finite).
+   */
+  groundReadout(
+    body: BodyIdHex,
+    detailSeed: DetailSeedHex,
+    query: GroundReadoutQuery,
+  ): SurfaceGroundReadout {
+    const { originM, direction } = query;
+    const readout = this.#module.groundReadout(
+      ...bodyArgs(body),
+      hexToU64(detailSeed),
+      originM.x,
+      originM.y,
+      originM.z,
+      direction.x,
+      direction.y,
+      direction.z,
+      query.maxM,
+      query.slopeBaselineM,
+      query.padWidthM,
+      query.seasonMeanAnomalyRad,
+    );
+    try {
+      return groundReadoutOf(readout);
+    } finally {
+      readout.free();
+    }
+  }
+
+  /**
    * `body`'s coarse class map for R07's disc over its field, with its detail seed (R10.T10.d,
    * `WorkerFields::class_map`), copied out; `null` where no payload field of it is held (none, or a
    * stand-in's, which holds no ground).
@@ -784,6 +817,105 @@ function faceOf(index: number | undefined): Face {
   throw new Error(`the module answered no face, ${String(index)}`);
 }
 
+/** A slant range as the module's answers give it, by the line of sight's getters' names. */
+interface WasmSlantRange {
+  readonly rangeM: number | undefined;
+  readonly sigmaM: number | undefined;
+  readonly resolved: boolean;
+  readonly hit: Float64Array | undefined;
+  readonly atFace: number | undefined;
+  readonly atU: number | undefined;
+  readonly atV: number | undefined;
+}
+
+/** A slant range the module answered on the ground, copied out. */
+function slantRangeOf(sight: WasmSlantRange): SurfaceSlantRange {
+  const [x, y, z] = sight.hit ?? [];
+  const { rangeM, atU, atV } = sight;
+  if (
+    x === undefined ||
+    y === undefined ||
+    z === undefined ||
+    rangeM === undefined ||
+    atU === undefined ||
+    atV === undefined
+  ) {
+    throw new Error("the module's line of sight meets the ground with no range");
+  }
+  return {
+    rangeM,
+    sigmaM: sight.sigmaM ?? null,
+    resolved: sight.resolved,
+    hitM: [x, y, z],
+    at: { face: faceOf(sight.atFace), u: atU, v: atV },
+  };
+}
+
+/** The module's terrain readout, copied out. */
+function groundReadoutOf(readout: WasmGroundReadout): SurfaceGroundReadout {
+  switch (readout.kind) {
+    case WASM_LINE_OF_SIGHT["no-ground"]:
+      return { kind: "no-ground" };
+    case WASM_LINE_OF_SIGHT["not-surveyed"]:
+      return { kind: "not-surveyed" };
+    case WASM_LINE_OF_SIGHT.ground: {
+      const {
+        elevationM,
+        elevationSigmaM,
+        slopeRmsRad,
+        slopeSigmaRad,
+        slopeBaselineM,
+        resolutionM,
+        classCode,
+        capacitySlopeRad,
+      } = readout;
+      if (
+        elevationM === undefined ||
+        elevationSigmaM === undefined ||
+        slopeRmsRad === undefined ||
+        slopeSigmaRad === undefined ||
+        slopeBaselineM === undefined ||
+        resolutionM === undefined ||
+        classCode === undefined ||
+        capacitySlopeRad === undefined
+      ) {
+        throw new Error("the module's readout meets the ground with no reading");
+      }
+      return {
+        kind: "ground",
+        sight: slantRangeOf({
+          rangeM: readout.rangeM,
+          sigmaM: readout.rangeSigmaM,
+          resolved: readout.rangeResolved,
+          hit: readout.hitM(),
+          atFace: readout.atFace,
+          atU: readout.atU,
+          atV: readout.atV,
+        }),
+        reading: {
+          elevationM,
+          elevationSigmaM,
+          slopeRmsRad,
+          slopeSigmaRad,
+          slopeBaselineM,
+          resolutionM,
+          resolved: readout.readingResolved,
+        },
+        material: { classCode, entry: readout.entry ?? null },
+        properties: {
+          bearingCapacityPa: readout.bearingCapacityPa ?? null,
+          capacitySlopeRad,
+          padFriction: readout.padFriction ?? null,
+          frictionOnTemperature: readout.frictionOnTemperature,
+          temperatureK: readout.temperatureK ?? null,
+        },
+      };
+    }
+    default:
+      throw new Error(`the module answered an unknown readout, ${String(readout.kind)}`);
+  }
+}
+
 /** The module's line of sight, copied out. */
 function lineOfSightOf(sight: WasmLineOfSight): SurfaceLineOfSight {
   switch (sight.kind) {
@@ -791,29 +923,19 @@ function lineOfSightOf(sight: WasmLineOfSight): SurfaceLineOfSight {
       return { kind: "no-ground" };
     case WASM_LINE_OF_SIGHT["not-surveyed"]:
       return { kind: "not-surveyed" };
-    case WASM_LINE_OF_SIGHT.ground: {
-      const hit = sight.hitM();
-      const [x, y, z] = hit ?? [];
-      const { rangeM, atU, atV } = sight;
-      if (
-        x === undefined ||
-        y === undefined ||
-        z === undefined ||
-        rangeM === undefined ||
-        atU === undefined ||
-        atV === undefined
-      ) {
-        throw new Error("the module's line of sight meets the ground with no range");
-      }
+    case WASM_LINE_OF_SIGHT.ground:
       return {
         kind: "ground",
-        rangeM,
-        sigmaM: sight.sigmaM ?? null,
-        resolved: sight.resolved,
-        hitM: [x, y, z],
-        at: { face: faceOf(sight.atFace), u: atU, v: atV },
+        ...slantRangeOf({
+          rangeM: sight.rangeM,
+          sigmaM: sight.sigmaM,
+          resolved: sight.resolved,
+          hit: sight.hitM(),
+          atFace: sight.atFace,
+          atU: sight.atU,
+          atV: sight.atV,
+        }),
       };
-    }
     default:
       throw new Error(`the module answered an unknown line of sight, ${String(sight.kind)}`);
   }
@@ -869,8 +991,8 @@ export interface HeightAnswer {
  * rethrown: the worker raises it as its error and the pool replaces the worker. A body's field
  * blocks go to `fields` (R10.T6.b: decoded into the module's field, or held undecoded for a
  * stand-in), each answered with what the worker then holds and what a payload's block changed. A
- * class-map query is answered over the body's field (R10.T10.d), or refused with the module's
- * message.
+ * class-map query is answered over the body's field (R10.T10.d), and a ground-readout query
+ * likewise (R10.T12), or refused with the module's message.
  */
 export function answerRequest(
   module: HeightModule,
@@ -899,8 +1021,33 @@ export function answerRequest(
       return fieldAnswer(request.id, request.body, fields, { kind: "taken", block: null });
     case "class-map":
       return answerClassMap(request, fields);
+    case "ground-readout":
+      return answerGroundReadout(request, fields);
   }
   return unreachable(request);
+}
+
+/**
+ * Answers a ground-readout query: the readout, or the module's refusal of an argument; a trap is
+ * rethrown, as a bake's is.
+ */
+function answerGroundReadout(
+  request: Extract<HeightWorkerRequest, { kind: "ground-readout" }>,
+  fields: WorkerFields,
+): HeightAnswer {
+  const { id, body, detailSeed } = request;
+  try {
+    const readout = fields.groundReadout(body, detailSeed, request);
+    return { reply: { kind: "ground-readout", id, body, readout }, transfer: [] };
+  } catch (error: unknown) {
+    if (isTrap(error)) {
+      throw error;
+    }
+    return {
+      reply: { kind: "ground-readout-failed", id, body, message: messageOf(error) },
+      transfer: [],
+    };
+  }
 }
 
 /**

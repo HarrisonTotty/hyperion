@@ -7,6 +7,7 @@
 
 import { beforeAll, describe, expect, it } from "vitest";
 
+import earthFixture from "../../../../../../../../crates/hyperion-surface/tests/golden/worker/earth_like.golden?raw";
 import fixture from "../../../../../../../../crates/hyperion-surface/tests/golden/worker/moon_like.golden?raw";
 import {
   bakePatch,
@@ -22,11 +23,11 @@ import { classWeightsAt } from "../../bodies/discSurface";
 import { CLASS_MAP_LEVEL, classMapTexelsOf } from "../classMap";
 import { fieldCellAt } from "../coverage";
 import { faceUvToXyz, stToUv } from "../cube";
-import type { Face } from "../patchKey";
+import type { Face, PatchKey } from "../patchKey";
+import { dominantSlot } from "../terrainMaterial";
 import { f32Digest, f64Digest } from "./f32Digest";
 import {
   answerRequest,
-  type FacePoint,
   type HeightModule,
   packNormals,
   WASM_HORIZON_LAYER,
@@ -39,10 +40,12 @@ import {
 import {
   type BakedPatch,
   type BakeSettings,
+  type FacePoint,
   type HeightSourceSetting,
   type HeightWorkerRequest,
   PALETTE_NONE,
   PHOTOMETRY_STRIDE,
+  type SurfaceGroundReadout,
   type WeightsLayerSetting,
 } from "./messages";
 import { needsRebake } from "./rebake";
@@ -747,6 +750,145 @@ describe("the height worker's fields on the real module", () => {
     expect(answered).toEqual(pinned);
   });
 
+  /** The fixture's lines of sight: origin, direction and reach of each `slant` record. */
+  function fixtureSights(): {
+    readonly originM: { readonly x: number; readonly y: number; readonly z: number };
+    readonly direction: { readonly x: number; readonly y: number; readonly z: number };
+    readonly maxM: number;
+  }[] {
+    return recordsOf("slant").map((record) => {
+      const [ox, oy, oz, dx, dy, dz, reach] = record.head.slice(1).map(fromBits);
+      if (
+        ox === undefined ||
+        oy === undefined ||
+        oz === undefined ||
+        dx === undefined ||
+        dy === undefined ||
+        dz === undefined ||
+        reach === undefined
+      ) {
+        throw new Error(`a malformed line of sight: ${record.head.join(" ")}`);
+      }
+      return {
+        originM: { x: ox, y: oy, z: oz },
+        direction: { x: dx, y: dy, z: dz },
+        maxM: reach,
+      };
+    });
+  }
+
+  it("reads each line of sight's whole readout as the separate queries do, over each baseline (R10.T12)", () => {
+    const fields = heldFields();
+    const readouts: SurfaceGroundReadout[] = [];
+    const separate: unknown[] = [];
+    for (const { originM, direction, maxM } of fixtureSights()) {
+      for (const slopeBaselineM of [2, 5, 100] as const) {
+        readouts.push(
+          fields.groundReadout(FIXTURE.body, FIXTURE.seed, {
+            originM,
+            direction,
+            maxM,
+            slopeBaselineM,
+            padWidthM: 1,
+            seasonMeanAnomalyRad: 1,
+          }),
+        );
+        const line = fields.slantRange(
+          FIXTURE.body,
+          FIXTURE.seed,
+          [originM.x, originM.y, originM.z],
+          [direction.x, direction.y, direction.z],
+          maxM,
+        );
+        if (line.kind !== "ground") {
+          separate.push({ kind: line.kind });
+          continue;
+        }
+        const { kind, ...sight } = line;
+        const { at } = sight;
+        const material = fields.material(FIXTURE.body, FIXTURE.seed, at);
+        separate.push({
+          kind,
+          sight,
+          reading: fields.reading(FIXTURE.body, FIXTURE.seed, at, slopeBaselineM),
+          material: { classCode: material?.classCode, entry: material?.entry },
+          properties: {
+            // The Moon's regolith: a capacity, NAVFAC's constant friction, and the month's
+            // temperature, which a constant does not read.
+            bearingCapacityPa: expect.any(Number),
+            // The capacity's slope is the 2 m reading's whatever the baseline.
+            capacitySlopeRad: fields.reading(FIXTURE.body, FIXTURE.seed, at, 2)?.slopeRmsRad,
+            padFriction: 0.2,
+            frictionOnTemperature: false,
+            temperatureK: expect.any(Number),
+          },
+        });
+      }
+    }
+    expect(readouts).toEqual(separate);
+    expect(
+      readouts.every((r) => r.kind !== "ground" || (r.properties.bearingCapacityPa ?? 0) > 0),
+    ).toBe(true);
+    // The ground below, and low across the second survey to its margin, and up and away.
+    expect(readouts.map((r) => r.kind)).toEqual([
+      ...Array.from({ length: 3 }, () => "ground"),
+      ...Array.from({ length: 3 }, () => "not-surveyed"),
+      ...Array.from({ length: 3 }, () => "no-ground"),
+    ]);
+  });
+
+  it("answers a readout of a body whose field is not held as not surveyed", () => {
+    const fields = new WorkerFields(module);
+    const [sight] = fixtureSights();
+    if (sight === undefined) {
+      throw new Error("the fixture has a line of sight");
+    }
+    expect(
+      fields.groundReadout(FIXTURE.body, FIXTURE.seed, {
+        ...sight,
+        slopeBaselineM: 2,
+        padWidthM: 1,
+        seasonMeanAnomalyRad: undefined,
+      }),
+    ).toEqual({ kind: "not-surveyed" });
+  });
+
+  it("refuses a readout's setting out of its range, a season that is not finite among them, rather than trapping", () => {
+    const fields = heldFields();
+    const [sight] = fixtureSights();
+    if (sight === undefined) {
+      throw new Error("the fixture has a line of sight");
+    }
+    const read = (slopeBaselineM: number, padWidthM: number, season: number | undefined) => () =>
+      fields.groundReadout(FIXTURE.body, FIXTURE.seed, {
+        ...sight,
+        // @ts-expect-error -- a baseline the type rules out, which the module refuses too.
+        slopeBaselineM,
+        padWidthM,
+        seasonMeanAnomalyRad: season,
+      });
+    for (const baseline of [3, 0, -2, Number.NaN, 2 + 2 ** -50]) {
+      expect(read(baseline, 1, undefined)).toThrow(/slope baseline .* none of the readout's/u);
+    }
+    for (const pad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(read(2, pad, undefined)).toThrow(/pad width .* not finite and positive/u);
+    }
+    for (const season of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(read(2, 1, season)).toThrow(/mean anomaly .* not finite/u);
+    }
+    expect(() =>
+      fields.groundReadout(FIXTURE.body, FIXTURE.seed, {
+        ...sight,
+        originM: { x: 0, y: 0, z: 0.5 },
+        slopeBaselineM: 2,
+        padWidthM: 1,
+        seasonMeanAnomalyRad: undefined,
+      }),
+    ).toThrow(/origin/u);
+    // Still the module it was: the next readout is answered.
+    expect(read(2, 1, -1e9)().kind).toBe("ground");
+  });
+
   it("names the fixture's materials as the native classifier does", () => {
     const fields = heldFields();
     const materials = recordsOf("material");
@@ -948,4 +1090,133 @@ describe("the height worker's fields on the real module", () => {
     expect(() => direct.photometry(id, bodyIndex, slot(1, 14))).toThrow(/past a palette/u);
     direct.free();
   });
+
+  it("names at every vertex of a finest-level bake of three classes the slot of the worker's material there (R10.T12)", () => {
+    const fields = new WorkerFields(module);
+    const taken = EARTH.blocks.map(
+      (block, n) =>
+        (n === 0 ? fields.init(EARTH.body, block, "payload") : fields.chunk(EARTH.body, block))
+          .kind,
+    );
+    expect(taken).toEqual(EARTH.blocks.map(() => "taken"));
+    const source = {
+      kind: "body",
+      body: EARTH.body,
+      detailSeed: EARTH.seed,
+      weights: "baked",
+    } as const satisfies HeightSourceSetting;
+    const bake = fields.bake(
+      EARTH.patch,
+      1,
+      { vertexPath: "face-differences", normals: "mesh", source },
+      source,
+    );
+    if (bake?.layers === null || bake?.layers === undefined) {
+      throw new Error("the Earth-like patch was not baked with its layers");
+    }
+    const { palette, weights } = bake.layers;
+    // The module's bake is the native one's.
+    expect([paletteWords(palette), digestHex(byteDigest(weights))]).toEqual([
+      EARTH.palette,
+      EARTH.weights,
+    ]);
+    const word = (slot: number | null): string => {
+      if (slot === null) {
+        return "none";
+      }
+      const entry = palette[2 * slot + 1];
+      return `${String(palette[2 * slot])}:${entry === PALETTE_NONE ? "-" : String(entry)}`;
+    };
+    const named = EARTH.materials.map((_, v) =>
+      dominantSlot([...weights.subarray(8 * v, 8 * v + 8)]),
+    );
+    // At every vertex, the dominant weight's slot is the worker's material there.
+    expect(named.map(word)).toEqual(EARTH.materials);
+    expect(new Set(named).size).toBe(3);
+    // The module's own material query gives the native answers pinned: at the first vertex of
+    // each class, and on a 5 × 5 grid of the patch.
+    const side = 64 * 2 ** EARTH.patch.level;
+    const pointOf = (v: number): FacePoint => ({
+      face: EARTH.patch.face,
+      u: stToUv((64 * EARTH.patch.i + (v % 65)) / side),
+      v: stToUv((64 * EARTH.patch.j + Math.floor(v / 65)) / side),
+    });
+    const sample = [
+      ...new Set([
+        ...EARTH.materials.map((m) => EARTH.materials.indexOf(m)),
+        ...[0, 16, 32, 48, 64].flatMap((y) => [0, 16, 32, 48, 64].map((x) => 65 * y + x)),
+      ]),
+    ];
+    const asked = sample.map((v) => {
+      const material = fields.material(EARTH.body, EARTH.seed, pointOf(v));
+      return material === null
+        ? "none"
+        : `${String(material.classCode)}:${material.entry === null ? "-" : String(material.entry)}`;
+    });
+    expect(asked).toEqual(sample.map((v) => EARTH.materials[v]));
+  });
 });
+
+/** The Earth-like fixture's lines (`tests/golden/worker/earth_like.golden`), parsed. */
+interface EarthFixture {
+  readonly body: string;
+  readonly seed: string;
+  readonly blocks: ReadonlyArray<ArrayBuffer>;
+  /** The finest-level patch of three classes. */
+  readonly patch: PatchKey;
+  /** Its native bake's palette, in `paletteWords`' words. */
+  readonly palette: ReadonlyArray<string>;
+  /** Its native bake's weights' digest, as the golden prints it. */
+  readonly weights: string;
+  /** The worker's material at each vertex, in order of 65 y + x, as `<code>:<entry or ->`. */
+  readonly materials: ReadonlyArray<string>;
+}
+
+function parseEarthFixture(): EarthFixture {
+  let body = "";
+  let seed = "";
+  let patch: PatchKey | null = null;
+  let palette: string[] = [];
+  let weights = "";
+  const blocks: ArrayBuffer[] = [];
+  const materials: string[] = [];
+  for (const line of earthFixture.split("\n").slice(1)) {
+    const [head = "", ...rest] = line.split(" ");
+    switch (head) {
+      case "body":
+        body = rest[0] ?? "";
+        break;
+      case "seed":
+        seed = rest[0] ?? "";
+        break;
+      case "block":
+        blocks.push(bytesOf(rest[2] ?? ""));
+        break;
+      case "patch": {
+        const [, face, level, i, j] = rest;
+        patch = { face: faceOf(face), level: Number(level), i: Number(i), j: Number(j) };
+        break;
+      }
+      case "palette":
+        palette = rest;
+        break;
+      case "weights":
+        weights = (rest[1] ?? "").slice(2);
+        break;
+      case "materials":
+        for (const run of rest) {
+          const [material = "", count = "0"] = run.split("*");
+          materials.push(...Array.from({ length: Number(count) }, () => material));
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  if (patch === null) {
+    throw new Error("the Earth-like fixture names no patch");
+  }
+  return { body, seed, blocks, patch, palette, weights, materials };
+}
+
+const EARTH = parseEarthFixture();

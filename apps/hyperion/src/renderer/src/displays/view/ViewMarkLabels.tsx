@@ -240,6 +240,13 @@ export interface MarkLabelSurroundings {
    * block, each open instrument slot, and any other statement or plate over the canvas.
    */
   readonly chrome?: ReadonlyArray<ScreenBoxPx>;
+  /**
+   * The line-of-sight mark's box as the frame drew it, device px from the stage's top left
+   * (`DrawnLineOfSight.boxPx`, plan R10, R10.T12), or `null` where it is not drawn. No mark's label
+   * is placed over it: it is held clear as the chrome is, so that a label that would cover it
+   * stands on another side of its mark, or is not shown.
+   */
+  readonly lineOfSightPx?: ScreenBoxPx | null;
   /** The selection's target's key, whose label is placed after the destination's and before the rest. */
   readonly selection?: string | null;
   /** Each label's state after the frame before, by its target's key; none for a label just mounted. */
@@ -364,7 +371,8 @@ function shownPlace(state: MarkLabelState | undefined): string | null {
  * out is hidden. So is a label whose mark's centre has left the stage, the destination's and the
  * selection's included, whatever place would fit; its mark stays pickable within the draw list's
  * `ANCHOR_MARGIN_REM`, and in the list, and the destination's chevron set still holds other labels
- * off.
+ * off. The line-of-sight mark, where it is drawn, is held clear as the chrome is (plan R10,
+ * R10.T12; the guide's tripod, "Place").
  *
  * @param plates - The labels' plates' sizes as laid out, by their target's key.
  * @param stage - The stage's size, CSS px, its device-pixel ratio and its rem.
@@ -374,8 +382,28 @@ export function markLabelPlaces(
   anchors: ReadonlyArray<DrawAnchor>,
   plates: ReadonlyMap<string, PlateSizePx>,
   stage: MarkLabelStage,
-  { chrome = [], selection = null, previous = new Map(), nowMs }: MarkLabelSurroundings,
+  {
+    chrome: overStage = [],
+    lineOfSightPx = null,
+    selection = null,
+    previous = new Map(),
+    nowMs,
+  }: MarkLabelSurroundings,
 ): ReadonlyMap<string, MarkLabelState> {
+  const ratio = stage.devicePixelRatio;
+  // The line-of-sight mark in CSS px, held clear as the chrome is (R10.T12).
+  const chrome =
+    lineOfSightPx === null
+      ? overStage
+      : [
+          ...overStage,
+          {
+            leftPx: lineOfSightPx.leftPx / ratio,
+            topPx: lineOfSightPx.topPx / ratio,
+            widthPx: lineOfSightPx.widthPx / ratio,
+            heightPx: lineOfSightPx.heightPx / ratio,
+          },
+        ];
   const rank = (anchor: DrawAnchor): number => {
     if (anchor.labelRisePx !== null) {
       return 0;

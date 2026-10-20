@@ -306,6 +306,132 @@ pub(super) fn terrain_fixture() -> TerrainFixture {
     }
 }
 
+/// The Earth-like fixture (plan R10, T12): one survey of the Earth-like world whose field holds a
+/// finest-level patch of three classes, for the client's test that a bake's dominant weight names
+/// the worker's material at every vertex (`fieldsWasm.test.ts`; `tests/golden/worker/
+/// earth_like.golden`, the [`golden`](super::golden) module's documentation gives the spot).
+pub(super) struct EarthFixture {
+    /// The world's body.
+    pub(super) body: BodyRef,
+    /// The finest-level patch of three classes.
+    pub(super) patch: PatchKey,
+    /// The survey's payload's blocks, in order.
+    pub(super) blocks: Vec<Vec<u8>>,
+}
+
+/// The Earth-like world's cell the fixture surveys at 50 m: (0, 0) of face +x at level 8.
+pub(super) fn earth_cell() -> PatchKey {
+    PatchKey::new(
+        Face::PosX,
+        world(SyntheticWorld::EarthLike).header().level().get(),
+        0,
+        0,
+    )
+    .unwrap()
+}
+
+/// The fixture's patch: (900, 668) of face +x at the Earth-like world's finest level, 19, in
+/// [`earth_cell`], whose ground is soil, sand and a channel's sediment of the continental crust's
+/// granite.
+pub(super) fn earth_patch() -> PatchKey {
+    PatchKey::new(Face::PosX, 19, 900, 668).unwrap()
+}
+
+/// The Earth-like fixture: [`earth_cell`] surveyed at 50 m with its margin, in the fixture's blocks.
+pub(super) fn earth_fixture() -> EarthFixture {
+    let field: &CoarseField = world(SyntheticWorld::EarthLike);
+    let cells: BTreeSet<PatchKey> = [earth_cell()].into_iter().collect();
+    let blocks = split(&encode_within(
+        field,
+        &cover(&cells, |_| code(50.0)),
+        None,
+        SYNTHESIS_MARGIN_CELLS,
+        FIXTURE_BLOCK_BYTES,
+    ));
+    EarthFixture {
+        body: field.header().body(),
+        patch: earth_patch(),
+        blocks,
+    }
+}
+
+/// A worker holding `f`'s blocks.
+pub(super) fn earth_worker(f: &EarthFixture) -> WorkerFields {
+    let mut fields = WorkerFields::new();
+    fields.init(f.body, &f.blocks[0]).unwrap();
+    for block in &f.blocks[1..] {
+        fields.chunk(f.body, block).unwrap();
+    }
+    fields
+}
+
+/// The point of vertex (`x`, `y`) of `key`, on the patch's own face: an interior patch's vertex
+/// direction is `unit_dir(face_uv_to_xyz(...))` of exactly this (`PatchKey::vertex_dir`).
+pub(super) fn vertex_point(key: PatchKey, x: u32, y: u32) -> FaceUv {
+    let side = f64::from(PATCH_QUADS << key.level());
+    FaceUv {
+        face: key.face(),
+        u: st_to_uv(f64::from(key.i() * PATCH_QUADS + x) / side),
+        v: st_to_uv(f64::from(key.j() * PATCH_QUADS + y) / side),
+    }
+}
+
+/// The palette slot of `weights`' largest byte, the lowest on a tie, as the client's
+/// `dominantSlot` takes it; `None` with no weight.
+fn dominant_slot(weights: [u8; crate::material::MAX_CLASSES]) -> Option<usize> {
+    let mut best = None;
+    let mut largest = 0;
+    for (k, &w) in weights.iter().enumerate() {
+        if w > largest {
+            largest = w;
+            best = Some(k);
+        }
+    }
+    best
+}
+
+/// R10.T12: the Earth-like fixture's patch holds three classes, each the dominant weight at some
+/// vertex; its bake is complete; and at every vertex the dominant weight names the slot of the
+/// worker's material there (one synthesiser, `surveyed_material`, as `material` answers it), which
+/// `material` itself gives at a vertex of each class.
+#[test]
+fn worker_earth_fixture_patch_holds_three_classes_its_dominant_weights_name() {
+    let f = earth_fixture();
+    let mut fields = earth_worker(&f);
+    let bake = fields.bake(f.body, SEED, f.patch, &MESH).unwrap();
+    let layers = bake.terrain().layers();
+    assert!(layers.is_complete());
+    let palette = layers.palette();
+    let held = fields.field(f.body).unwrap().clone();
+    let synth = Synthesiser::new(&held, SEED);
+    let mut cache = SynthCache::new();
+    let mut dominant = BTreeSet::new();
+    let mut sample = BTreeMap::new();
+    for (n, weights) in layers.weights().iter().enumerate() {
+        let n = u32::try_from(n).unwrap();
+        let (x, y) = (n % (PATCH_QUADS + 1), n / (PATCH_QUADS + 1));
+        let at = vertex_point(f.patch, x, y);
+        assert_eq!(
+            unit_dir(face_uv_to_xyz(at)),
+            f.patch
+                .vertex_dir(u8::try_from(x).unwrap(), u8::try_from(y).unwrap())
+        );
+        let ground = surveyed_material(&synth, &mut cache, at).unwrap().ground();
+        let slot = dominant_slot(*weights).expect("a vertex of a complete bake has weight");
+        assert_eq!(palette[slot], Some(ground), "vertex ({x}, {y})");
+        dominant.insert(slot);
+        sample.entry(slot).or_insert(at);
+    }
+    assert_eq!(dominant.len(), 3, "{palette:?}");
+    for at in sample.into_values() {
+        let answer = fields.material(f.body, SEED, at).unwrap().unwrap();
+        assert_eq!(
+            Some(answer),
+            Some(surveyed_material(&synth, &mut cache, at).unwrap())
+        );
+    }
+}
+
 /// The cover the blocks of a payload hold, every block's cells with their codes in turn.
 pub(super) fn payload_cover(blocks: &[Vec<u8>]) -> Cover {
     let decoded = decode_payload(&blocks.concat()).expect("the fixture's payloads decode");
@@ -1246,7 +1372,8 @@ fn worker_lines_of_sight_meet_the_survey_leave_it_and_miss() {
 }
 
 /// One of the worker's queries, for the order checks: a probe's bake, a reading at a point and
-/// baseline, a line of sight, a material at a point, or the class map.
+/// baseline, a line of sight, a material at a point, the class map, or a ground readout along a
+/// line of sight over a baseline.
 #[derive(Debug, Clone, Copy)]
 enum Query {
     Bake(usize),
@@ -1254,6 +1381,7 @@ enum Query {
     Sight(usize),
     Material(usize),
     ClassMap,
+    Readout(usize, SlopeBaseline),
 }
 
 /// A [`Query`]'s answer.
@@ -1264,6 +1392,7 @@ enum Answer {
     Sight(Result<LineOfSight, QueryBodyError>),
     Material(Result<Option<SurveyedMaterial>, QueryBodyError>),
     ClassMap(Result<ClassMap, QueryBodyError>),
+    Readout(Result<GroundReadout, QueryBodyError>),
 }
 
 /// The points the order checks read: in either survey, in a margin and not held.
@@ -1284,6 +1413,11 @@ fn queries() -> Vec<Query> {
         queries.push(Query::Reading(n % 4, if n % 2 == 0 { 2.0 } else { 100.0 }));
         queries.push(Query::Sight(n % 3));
         queries.push(Query::Material(n % 4));
+        // Sight 0, the one that meets ground, takes the even rounds and with them every baseline,
+        // so the readouts that read its 2 m slope a second time (at 5 m and 100 m) run too; sights
+        // 1 and 2 share the odd rounds.
+        let sight = if n % 2 == 0 { 0 } else { 1 + (n / 2) % 2 };
+        queries.push(Query::Readout(sight, SlopeBaseline::ALL[(n / 2) % 3]));
         if n % 2 == 0 {
             queries.push(Query::ClassMap);
         }
@@ -1312,6 +1446,18 @@ fn ask(
         }
         Query::Material(n) => Answer::Material(fields.material(body, SEED, query_points()[n])),
         Query::ClassMap => Answer::ClassMap(fields.class_map(body, SEED)),
+        Query::Readout(n, slope_baseline) => {
+            let (origin_m, direction) = sights[n];
+            let query = GroundReadoutQuery {
+                origin_m,
+                direction,
+                max: Metres::new(1e7),
+                slope_baseline,
+                pad_width: Metres::new(1.0),
+                season: Some(SeasonAnomaly::try_from(Radians::new(1.0)).unwrap()),
+            };
+            Answer::Readout(fields.ground_readout(body, SEED, &query))
+        }
     }
 }
 
@@ -1843,5 +1989,450 @@ fn worker_photometry_takes_the_header_s_maturity_and_material_the_point_s() {
                 Some(drawn_bits(mature.photometry(body, m).unwrap()))
             );
         }
+    }
+}
+
+/// The reference pad, 1.0 m (the guide's `PAD WIDTH`).
+const PAD: Metres = Metres::new(1.0);
+
+/// A ground readout's query along `sight`, over `slope_baseline`, under the reference pad, at the
+/// season `season` (radians, or none).
+fn readout_query(
+    (origin_m, direction): ([f64; 3], [f64; 3]),
+    slope_baseline: SlopeBaseline,
+    season: Option<f64>,
+) -> GroundReadoutQuery {
+    GroundReadoutQuery {
+        origin_m,
+        direction,
+        max: Metres::new(1e7),
+        slope_baseline,
+        pad_width: PAD,
+        season: season.map(|m| SeasonAnomaly::try_from(Radians::new(m)).unwrap()),
+    }
+}
+
+/// The readout's parts where it meets the ground, which the test expects it to.
+fn on_ground(readout: GroundReadout) -> GroundAtSight {
+    match readout {
+        GroundReadout::Ground(ground) => *ground,
+        GroundReadout::NoGround | GroundReadout::NotSurveyed => {
+            panic!("the line of sight meets no surveyed ground: {readout:?}")
+        }
+    }
+}
+
+/// R10.T12: a baseline is a member of the readout's list, to the bit, and nothing else.
+#[test]
+fn worker_slope_baselines_are_the_readout_s_three_alone() {
+    for (baseline, metres) in SlopeBaseline::ALL.into_iter().zip(SLOPE_BASELINES) {
+        assert_eq!(bits(baseline.metres().value()), bits(metres.value()));
+        assert_eq!(SlopeBaseline::try_from(metres), Ok(baseline));
+    }
+    assert_eq!(SlopeBaseline::default(), CAPACITY_SLOPE_BASELINE);
+    assert_eq!(bits(CAPACITY_SLOPE_BASELINE.metres().value()), bits(2.0));
+    for length in [0.0, 2.0_f64.next_up(), 3.0, -2.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(
+            SlopeBaseline::try_from(Metres::new(length)).map_err(|e| e.to_string()),
+            Err(format!(
+                "a slope baseline of {length} m is none of the readout's 2 m, 5 m and 100 m"
+            ))
+        );
+    }
+    for anomaly in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(
+            SeasonAnomaly::try_from(Radians::new(anomaly)).map_err(|e| e.to_string()),
+            Err(format!(
+                "a season's mean anomaly of {anomaly} rad is not finite"
+            ))
+        );
+    }
+    let far = SeasonAnomaly::try_from(Radians::new(-1e9)).unwrap();
+    assert_eq!(bits(far.radians().value()), bits(-1e9));
+}
+
+/// R10.T12: every part of a ground readout is the separate query's to the bit, the line of sight's
+/// `slant_range`, the foot's `reading` over each baseline and its `material`; the capacity is
+/// `bearing_capacity_on_slope` at the body's gravity on the reading's RMS slope over 2 m, whatever
+/// the baseline; and a line missing the body reads `NoGround`, one low over the survey's margin
+/// `NotSurveyed`, as `slant_range` gives them.
+#[test]
+fn worker_ground_readout_is_the_separate_queries_bit_for_bit() {
+    let f = fixture();
+    let mut fields = f.worker();
+    let field = f.field();
+    let header = field.header();
+    let max = Metres::new(1e7);
+    let mut grounds = 0;
+    for sight in sight_lines(&field) {
+        for baseline in SlopeBaseline::ALL {
+            let readout = fields
+                .ground_readout(f.body, SEED, &readout_query(sight, baseline, None))
+                .unwrap();
+            let line = fields
+                .slant_range(f.body, SEED, &sight.0, &sight.1, max)
+                .unwrap();
+            let ground = match (line, readout) {
+                (LineOfSight::Ground(line), GroundReadout::Ground(ground)) => {
+                    assert_eq!(*ground.sight(), line);
+                    ground
+                }
+                (LineOfSight::NoGround, readout) => {
+                    assert_eq!(readout, GroundReadout::NoGround);
+                    continue;
+                }
+                (LineOfSight::NotSurveyed, readout) => {
+                    assert_eq!(readout, GroundReadout::NotSurveyed);
+                    continue;
+                }
+                (LineOfSight::Ground(_), readout) => panic!("{readout:?} on ground"),
+            };
+            grounds += 1;
+            let at = ground.sight().at();
+            assert_eq!(
+                fields.reading(f.body, SEED, at, baseline.metres()),
+                Ok(Some(*ground.reading()))
+            );
+            assert_eq!(
+                fields.material(f.body, SEED, at),
+                Ok(Some(*ground.material()))
+            );
+            let two_metres = fields
+                .reading(f.body, SEED, at, CAPACITY_SLOPE_BASELINE.metres())
+                .unwrap()
+                .unwrap();
+            let properties = ground.properties();
+            assert_eq!(
+                bits(properties.capacity_slope().value()),
+                bits(two_metres.slope_rms().value())
+            );
+            assert_eq!(bits(properties.pad_width().value()), bits(PAD.value()));
+            let p = ground
+                .material()
+                .properties()
+                .expect("the regolith is named");
+            let capacity = bearing_capacity_on_slope(
+                p,
+                header.craters().gravity(),
+                PAD,
+                two_metres.slope_rms(),
+            )
+            .expect("the regolith has a shear table");
+            assert_eq!(
+                properties.bearing_capacity().map(|q| bits(q.value())),
+                Some(bits(capacity.value()))
+            );
+        }
+    }
+    assert_eq!(
+        grounds,
+        SlopeBaseline::ALL.len(),
+        "the line down meets the ground"
+    );
+    let [_, across, up] = sight_lines(&field);
+    let ask = |fields: &mut WorkerFields, sight| {
+        fields.ground_readout(
+            f.body,
+            SEED,
+            &readout_query(sight, CAPACITY_SLOPE_BASELINE, None),
+        )
+    };
+    assert_eq!(ask(&mut fields, up), Ok(GroundReadout::NoGround));
+    assert_eq!(ask(&mut fields, across), Ok(GroundReadout::NotSurveyed));
+    assert_eq!(
+        ask(&mut WorkerFields::new(), up),
+        Err(QueryBodyError::NotStarted(f.body))
+    );
+}
+
+/// R10.T12: on regolith the pad friction is NAVFAC's constant, at any temperature and with none:
+/// it does not depend on the temperature, so the readout states no `AT`, and a year of twelve
+/// months with no season takes no temperature.
+#[test]
+fn worker_ground_readout_reads_a_constant_friction_on_regolith() {
+    let f = fixture();
+    let mut fields = f.worker();
+    let [down, ..] = sight_lines(&f.field());
+    let without = on_ground(
+        fields
+            .ground_readout(
+                f.body,
+                SEED,
+                &readout_query(down, SlopeBaseline::TwoMetres, None),
+            )
+            .unwrap(),
+    );
+    let with = on_ground(
+        fields
+            .ground_readout(
+                f.body,
+                SEED,
+                &readout_query(down, SlopeBaseline::TwoMetres, Some(2.0)),
+            )
+            .unwrap(),
+    );
+    assert_eq!(without.material().ground().class(), MaterialClass::Regolith);
+    let p = without.material().properties().unwrap();
+    assert!(matches!(
+        p.interface_friction_model(),
+        Some(FrictionModel::Constant(_))
+    ));
+    for ground in [&without, &with] {
+        let properties = ground.properties();
+        assert!(!properties.friction_on_temperature());
+        for t in [100.0, 250.0, 400.0] {
+            assert_eq!(
+                properties.friction().map(bits),
+                interface_friction(p, Kelvin::new(t)).map(bits)
+            );
+        }
+    }
+    assert_eq!(without.properties().temperature(), None);
+    assert!(with.properties().temperature().is_some());
+}
+
+/// R10.T12: a pad whose width is not finite and positive has no capacity, the zero width included,
+/// under which `bearing_capacity_on_slope` gives the regolith's cohesion term alone; the readout's
+/// other parts are the reference pad's.
+#[test]
+fn worker_ground_readout_takes_no_capacity_under_a_pad_not_finite_and_positive() {
+    let f = fixture();
+    let mut fields = f.worker();
+    let gravity = f.field().header().craters().gravity();
+    let [down, ..] = sight_lines(&f.field());
+    let reference = on_ground(
+        fields
+            .ground_readout(
+                f.body,
+                SEED,
+                &readout_query(down, SlopeBaseline::TwoMetres, None),
+            )
+            .unwrap(),
+    );
+    let p = reference.material().properties().unwrap();
+    let slope = reference.properties().capacity_slope();
+    assert!(
+        bearing_capacity_on_slope(p, gravity, Metres::ZERO, slope).is_some(),
+        "the formula bears a cohesive soil at zero width, so the guard is the readout's"
+    );
+    assert!(reference.properties().bearing_capacity().is_some());
+    for width in [0.0, -0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let query = GroundReadoutQuery {
+            pad_width: Metres::new(width),
+            ..readout_query(down, SlopeBaseline::TwoMetres, None)
+        };
+        let ground = on_ground(fields.ground_readout(f.body, SEED, &query).unwrap());
+        let properties = ground.properties();
+        assert_eq!(properties.bearing_capacity(), None, "{width} m");
+        assert!(
+            properties.pad_width().value().total_cmp(&width).is_eq(),
+            "the width asked is the width held, a NaN's bits included: {width} m"
+        );
+        assert_eq!(ground.reading(), reference.reading());
+        assert_eq!(ground.material(), reference.material());
+        assert_eq!(
+            properties.friction().map(bits),
+            reference.properties().friction().map(bits)
+        );
+    }
+}
+
+/// R10.T12: a foot whose field cell is not surveyed, a survey's margin or a cell not held, reads
+/// `NotSurveyed`, as `material` judges the cell, so that the readout never reads ground the survey
+/// does not hold. The march meets surveyed ground alone, so the foot's guard is held here over the
+/// readout's own reading at a foot.
+#[test]
+fn worker_ground_readout_reads_a_margin_foot_as_not_surveyed() {
+    let f = fixture();
+    let field = f.field();
+    let synth = Synthesiser::new(&field, SEED);
+    let query = readout_query(sight_lines(&field)[0], SlopeBaseline::TwoMetres, None);
+    let margin = face_uv(cell(20, 22), 0.5, 0.5);
+    let beyond = face_uv(cell(40, 40), 0.5, 0.5);
+    let surveyed = face_uv(cell(22, 22), 0.3, 0.6);
+    let mut cache = SynthCache::new();
+    assert!(!field.is_surveyed(field_cell(&field, margin)));
+    assert!(
+        field.resolution(field_cell(&field, margin)).is_some(),
+        "held as margin"
+    );
+    for at in [margin, beyond] {
+        assert!(ground_at(&synth, &mut cache, at, &query).unwrap().is_none());
+    }
+    let ground = ground_at(&synth, &mut cache, surveyed, &query)
+        .unwrap()
+        .expect("surveyed ground is read");
+    let mut fields = f.worker();
+    assert_eq!(
+        fields.reading(f.body, SEED, surveyed, Metres::new(2.0)),
+        Ok(Some(ground.reading))
+    );
+    assert_eq!(
+        fields.material(f.body, SEED, surveyed),
+        Ok(Some(ground.material))
+    );
+}
+
+/// A direction, the unit vector at latitude `lat_deg` and longitude `lon_deg`, degrees.
+fn lat_lon(lat_deg: f64, lon_deg: f64) -> [f64; 3] {
+    let (lat, lon) = (lat_deg.to_radians(), lon_deg.to_radians());
+    [
+        hyperion_base::math::cos(lat) * hyperion_base::math::cos(lon),
+        hyperion_base::math::cos(lat) * hyperion_base::math::sin(lon),
+        hyperion_base::math::sin(lat),
+    ]
+}
+
+/// The Earth-like world's first point, on a grid of the north polar ice from 70° of latitude, whose
+/// material is glacier ice of water ice, whose friction follows the temperature.
+fn earth_glacier() -> [f64; 3] {
+    let field = world(SyntheticWorld::EarthLike);
+    let synth = Synthesiser::new(field, SEED);
+    let mut cache = SynthCache::new();
+    (70..=86)
+        .step_by(4)
+        .flat_map(|lat| (0..360).step_by(30).map(move |lon| (lat, lon)))
+        .map(|(lat, lon)| lat_lon(f64::from(lat), f64::from(lon)))
+        .find(|&dir| {
+            let ground = material_at(&synth, &mut cache, crate::cube::xyz_to_face_uv(dir)).unwrap();
+            ground.class() == MaterialClass::Glacier
+                && ground.material().is_some_and(|m| {
+                    matches!(
+                        properties(m, field.header().palette())
+                            .unwrap()
+                            .interface_friction_model(),
+                        Some(FrictionModel::ByTemperature(_))
+                    )
+                })
+        })
+        .expect("the Earth-like world's polar caps hold glacier ice of H2O")
+}
+
+/// R10.T12 (decision-r10-t12-leans §6): on the Earth-like world's glacier ice of H2O, a year of
+/// twelve months, the readout's temperature is the month's mean at sea level carried to the
+/// reading's elevation by the classifier's expression, `T_sea − Γ (h − sea level)`, bit for bit; the
+/// month is `month_at` the season's mean anomaly, month k − 1 just below edge k and month k at it;
+/// the friction is `interface_friction` at that temperature and depends on it; and with no season
+/// there is no temperature, so no friction, `PAD FRICTION —` with no `AT`.
+#[test]
+fn worker_ground_readout_takes_the_month_s_temperature_on_glacier_ice() {
+    let field = world(SyntheticWorld::EarthLike);
+    let header = field.header();
+    assert_eq!(header.months(), 12);
+    assert!(header.lapse_rate_k_per_m() > 0.0, "a lapse rate to carry");
+    let dir = earth_glacier();
+    let (mut fields, _) = surveyed_about(field, dir);
+    let body = header.body();
+    let origin = header.figure().surface_point(dir, 20_000.0);
+    let sight = (origin, origin.map(|x| -x));
+    let edges = crate::field::month_edges(header.season_eccentricity()).unwrap();
+    let readout_at = |fields: &mut WorkerFields, season: Option<f64>| {
+        on_ground(
+            fields
+                .ground_readout(
+                    body,
+                    SEED,
+                    &readout_query(sight, SlopeBaseline::TwoMetres, season),
+                )
+                .unwrap(),
+        )
+    };
+    let none = readout_at(&mut fields, None);
+    let p = *none.material().properties().unwrap();
+    assert_eq!(none.material().ground().class(), MaterialClass::Glacier);
+    assert!(none.properties().friction_on_temperature());
+    assert_eq!(
+        (
+            none.properties().temperature(),
+            none.properties().friction()
+        ),
+        (None, None)
+    );
+    let held = fields.field(body).unwrap();
+    let foot = none.sight().at();
+    let climate = *held.climate(field_cell(held, foot)).unwrap();
+    let h = none.reading().elevation().value();
+    // `facts`' expression, written out.
+    let expected = |month: u8| {
+        header.month_temperature(&climate, month).unwrap().value()
+            - header.lapse_rate_k_per_m() * (h - header.sea_level().value())
+    };
+    let mut stepped = false;
+    let mut friction_known = false;
+    for k in 0..12_u8 {
+        let edge = edges[usize::from(k)].value();
+        // Just before periapsis is just below the year's end, edge 12: a step below 0 itself
+        // reduces to 0 (`month_at`'s rounding of a lift to 2π).
+        let below = if k == 0 {
+            edges[12].value().next_down()
+        } else {
+            edge.next_down()
+        };
+        let before = if k == 0 { 11 } else { k - 1 };
+        for (anomaly, month) in [(edge, k), (below, before)] {
+            assert_eq!(month_at(header, Radians::new(anomaly)), month);
+            let ground = readout_at(&mut fields, Some(anomaly));
+            let t = ground
+                .properties()
+                .temperature()
+                .expect("a month's temperature");
+            assert_eq!(bits(t.value()), bits(expected(month)), "month {month}");
+            assert_eq!(
+                ground.properties().friction().map(bits),
+                interface_friction(&p, t).map(bits)
+            );
+            friction_known |= ground.properties().friction().is_some();
+        }
+        stepped |= expected(k).total_cmp(&expected(before)).is_ne();
+    }
+    assert!(stepped, "the temperature steps at some month's edge");
+    assert!(
+        friction_known,
+        "some month lies inside Liefferink et al.'s points"
+    );
+}
+
+/// R10.T12: a one-month year reads its one month whatever season is given, or none: the flat
+/// world's ground, whose palette names no substance, so that neither property is computed.
+#[test]
+fn worker_ground_readout_reads_a_one_month_year_s_month_with_no_season() {
+    let field = world(SyntheticWorld::Flat);
+    let header = field.header();
+    assert_eq!(header.months(), 1);
+    let dir = unit_dir([0.2, 1.0, 0.3]);
+    let (mut fields, _) = surveyed_about(field, dir);
+    let body = header.body();
+    let origin = header.figure().surface_point(dir, 20_000.0);
+    let sight = (origin, origin.map(|x| -x));
+    let read = |fields: &mut WorkerFields, season| {
+        on_ground(
+            fields
+                .ground_readout(
+                    body,
+                    SEED,
+                    &readout_query(sight, SlopeBaseline::TwoMetres, season),
+                )
+                .unwrap(),
+        )
+    };
+    let none = read(&mut fields, None);
+    let held = fields.field(body).unwrap();
+    let climate = *held.climate(field_cell(held, none.sight().at())).unwrap();
+    let t = header.month_temperature(&climate, 0).unwrap().value()
+        - header.lapse_rate_k_per_m()
+            * (none.reading().elevation().value() - header.sea_level().value());
+    for season in [None, Some(0.0), Some(3.0), Some(-40.0)] {
+        let ground = read(&mut fields, season);
+        let properties = ground.properties();
+        assert_eq!(
+            properties.temperature().map(|k| bits(k.value())),
+            Some(bits(t))
+        );
+        assert_eq!(ground.material().properties(), None);
+        assert_eq!(
+            (properties.bearing_capacity(), properties.friction()),
+            (None, None)
+        );
+        assert!(!properties.friction_on_temperature());
     }
 }
