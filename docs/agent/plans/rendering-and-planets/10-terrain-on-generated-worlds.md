@@ -188,7 +188,34 @@ pub fn weights_at<F: FieldView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCac
     at: FaceUv, level: BandLevel) -> Result<ClassWeights, QueryHeightError>;
 /// The per-body scale on class albedos that makes the body's geometric albedo p (Design note 8).
 pub struct AlbedoScale { /* scale: f64, residual: f64 */ }
-pub fn albedo_scale(field: &CoarseField, geometric_albedo: f64) -> AlbedoScale;
+pub fn albedo_scale(fractions: &ClassFractions, palette: &MaterialPalette,
+    geometric_albedo_bvr: [f64; 3]) -> Result<AlbedoScale, SolveAlbedoScaleError>;
+/// The solve on the albedos a ground's exposure gives (R10.T1.c); `albedo_scale` is it at
+/// `GroundExposure::NONE`, and the server solves it at `GroundExposure::of_header`.
+pub fn exposed_albedo_scale(fractions: &ClassFractions, palette: &MaterialPalette,
+    exposure: GroundExposure, geometric_albedo_bvr: [f64; 3])
+    -> Result<AlbedoScale, SolveAlbedoScaleError>;
+/// What a ground is exposed to: a maturity and an organic cover, each in [0, 1] or absent.
+pub struct GroundExposure { /* maturity: Option<f64>, organic_cover: Option<f64> */ }
+// NONE, of_header, with_maturity, with_organic_cover, maturity, organic_cover
+/// `properties` with the albedo weathered to the exposure's maturity (`Melt` fresh), times the
+/// form's factor, and blended with the organic cover where the entry takes one.
+pub fn exposed_properties(material: Material, palette: &MaterialPalette,
+    exposure: GroundExposure) -> Result<MaterialProperties, ResolvePropertiesError>;
+/// Whether an entry takes the cover: an `Ice` formula holding carbon, CO₂ excepted, or `N2` beside one.
+pub fn takes_organic_cover(palette: &MaterialPalette, entry: &PaletteEntry) -> bool;
+/// The maturity at a point, m_local: m_body less the largest young-crater deficit there.
+pub fn maturity_at<F: FieldView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCache,
+    at: FaceUv) -> Result<Option<f64>, QueryHeightError>;
+/// One crater's maturity at fresh share s: m_body − s max(0, m_body − maturity_after(t_c, k)).
+pub fn crater_maturity(body_maturity: f64, crater_age: Gigayears, weathering_rate: f64,
+    fresh_share: f64) -> f64;
+/// The fresh share's parts: f_ex below the mature layer d_m, and the halo p(x).
+pub fn excavated_share(surface_age: Gigayears, crater_age: Gigayears, diameter: Metres) -> f64;
+pub fn reworked_depth(exposure: Gigayears) -> Metres;
+pub fn halo_share(distance: f64, outer: f64) -> f64;
+// HALO_LENGTH_RIM_RADII 3, HALO_EXTENT_RIM_RADII 10, EXCAVATION_DEPTH_RATIO 0.084,
+// REWORKING_DEPTH_AT_ONE_MYR 0.022 m, REWORKING_EXPONENT 0.45
 ```
 
 ### `ground` and `reading`
@@ -1155,7 +1182,8 @@ plan, then R09's server and coarse pass):
   `synthetic_worlds()`, and records the owner's counts after T4.a's `level-bounds.json`.
 - **T6.a's bench** waits on R09's follow-up after T8, the fused interpolant pass that main has
   queued before this plan's quiet bake timing; meanwhile its figure is recorded provisional.
-- **New T1.c** (decision-composition) follows T1.b; its cover term waits on P14.T51.d.
+- **New T1.c** (decision-composition) follows T1.b and T1.d, as a Rust half now and a client half
+  after T16 (decision-r10-t1c-maturity).
 - **T10.a** follows T1.b; its server test of `surface_field`'s answer waits on R09.T19.b. **T10.b**
   draws the atmosphere through R07's stubs until R08.T9.b lands, and the ground's thermal emission
   waits on R08.T18.
@@ -1264,17 +1292,61 @@ that own them measure them.
     `cargo test -p hyperion-fit space_weathering`; `cargo run -p hyperion-fit -- check`;
     `just test-wasm-fast`.
 - **R10.T1.c Maturity and cover.** New at the re-validation (decision-composition §1.8 and
-  §7.5). Each regolith entry's `A_N` and colour come from R10.T1.d's law at
-  m_local = min(m_body, `maturity_after`(t_c, k)): the header's `maturity` and `weathering_rate`,
-  and each crater's age t_c (decision-p14-t51d-weathering §2.1). The organic cover blends the
-  `Cover` entry by `organic_cover`. Main-thread readers take weathered values from the shared
-  law, never a TypeScript copy. Files: `material/maturity.rs`. Tests: a
-  fresh crater's ejecta is
-  brighter than mature regolith by the Moon's measured contrast, the fresh/mature ratio at
-  m_local = 0 against m_body = 1; zero cover gives the substance's
-  own albedo. The cover term waits on P14.T51.d (the 23 → 24 batch); until then the exposure term
-  lands alone. The contrast is checked against its primary before it is a constant. Acceptance:
-  `cargo test -p hyperion-surface material::maturity`.
+  §7.5); ruled 2026-10-20 (decision-r10-t1c-maturity). Each material's `A_N` and colour come from
+  R10.T1.d's law at the ground's maturity, blended with the organic cover, by one shared function
+  in `material/maturity.rs`. The server's solve, the worker's photometry and class map (at
+  m_body) and its point query (at m_local) all call it, so main-thread readers take the worker's
+  values, never a TypeScript copy. `properties` stays the fresh join; `Melt` stays fresh.
+  - _The maturity at a point:_ m_local = m_body − max over craters of s × max(0, m_body −
+    `maturity_after`(t_c, k)), from the header's `maturity` and `weathering_rate` and each
+    crater's age t_c (`SmallCrater::age`, `CoarseCrater::age`). A crater's fresh share is
+    s = g f_ex p(x):
+    - p(x) is 1 inside the rim and (e^(−(x − 1) ÷ 3) − e^(−3)) ÷ (1 − e^(−3)) out to 10 rim
+      radii (Grier et al. 2000's radially averaged OMAT), shifted to 0 at the reach (1 + a) R for
+      a coarse crater, which the field carries no farther;
+    - f_ex = (1 − q)², q = d_m ÷ 0.084 D, d_m = 0.022 m ((t_s − t_c) ÷ 1 Myr)^0.45: the share of
+      a paraboloid excavation cavity below the mature layer (Morris 1978; Melosh 1989), so that a
+      crater under about 10 m on old ground exposes nothing fresh;
+    - g is the crater's kept relief, as the synthesis computes it: the gardening that wears a
+      small crater mixes its ejecta away (Grier et al. 2000: small craters "age" faster).
+
+  - _The cover:_ (1 − c) A + c A_cover, with c the header's `organic_cover` and A_cover the first
+    organic `Cover` entry's `A_N`. It applies on every form of an `Ice` entry whose formula holds
+    carbon, CO₂ excepted, and of `N2` beside one (P14.T51.d's `organic_ground` on the palette's
+    keys).
+  - _The split:_
+    - this Rust half now, landing before P14.T54.b (if it does not, T54.b leaves the maturity and
+      the rate absent);
+    - a second Rust follow-up, in which the solve takes each material's albedo averaged over the
+      body's young-crater haloes, so that the drawn mean stays p (generator-versioned: at 24 if
+      ready, else the next bump);
+    - a client half after R10.T16 and with or after that follow-up, which bakes a per-texel
+      maturity with the same function and blends between Rust-computed albedos
+      (`bake/layers.rs`, `worker.rs`, `wasm.rs`, `heightBake.ts`, `terrainMaterial.ts`,
+      `terrainLit.wgsl`, `classMap.ts`, `bodies/draw.ts`), with its check by hand on the RTX 3080.
+      It is presentation, so it owes no bump.
+
+  - _Files (the Rust half):_ `material/{maturity,mod,albedo,properties,classify,golden}.rs`,
+    `synth.rs` (an accessor), `worker.rs`, `testing.rs`, `testing/worlds.rs`,
+    `tests/golden/material/maturity.golden`, `tests/panics.rs` and
+    `crates/hyperion-server/src/surface/service.rs`.
+  - _Tests:_
+    - the fresh/mature contrast is stated, not asserted, against Dollfus and Bowell 1971's Tycho,
+      Proclus and Kepler at each crater's own age. It is a known miss (D2) until T49.i's whole-soil
+      fresh rows, and is asserted within the measured range after their refit. Its invariants and
+      as-built values are pinned;
+    - one crater's profile; k scaling; f_ex and g; overlaps;
+    - the immature shares, with a guard, and Grier et al. 2000's count printed;
+    - the identity, to the bit, with no maturity and no cover;
+    - `Melt` fresh;
+    - zero cover gives the substance's own albedo;
+    - the solve on the exposed albedos;
+    - the golden on native and both wasm targets.
+
+  - _Accept:_ `cargo test -p hyperion-surface material::maturity`;
+    `cargo test -p hyperion-surface --lib material::golden`;
+    `cargo test -p hyperion-surface --test panics maturity`;
+    `cargo test -p hyperion-server albedo_scale`; `just test-wasm-fast`.
 
 ### R10.T2 Class weights for coarser levels
 
@@ -3955,6 +4027,149 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   - _Not taken from the reviews:_ sharing `star_colour/columns.rs`'s refractiveindex.info reader
     (another task's file; the task carries its own small reader), and a modifiers-tripwire pattern
     for the law (another lane's test, for main).
+- **Deviations in T1.c's Rust half, as built** (2026-10-20; issue lane 50, on
+  `origin/rendering-and-planets` at `921a0ba8`; decision-r10-t1c-maturity). Pure at 22: no header
+  or palette outside the `testing` builder carries a maturity, a rate or a cover, so every exposure
+  the server and the worker take is `GroundExposure::NONE`'s and every output is as it was; the
+  golden-diff script shows only `tests/golden/material/maturity.golden` new, and
+  `GENERATOR_VERSION` stays 22.
+  - _Files beyond the list:_ `material/albedo/tests.rs` (the solve's identity on every world),
+    `material/classify/tests.rs` (`pluto_like` moved out), `worker/tests.rs` (the identity on
+    every world, and the weathered photometry and point query), `material/weathering.rs`
+    (`check_unit` made `pub(super)`, the exposure's and the one-crater formula's check) and
+    `synth/test_support.rs` (`along_chord`, the crater transect the tests and the golden share).
+  - _Public items_ (`hyperion_surface::material`): `GroundExposure` (`NONE`, `of_header`,
+    `with_maturity`, `with_organic_cover`, `maturity`, `organic_cover`; no constructor of two bare
+    `Option`s, so the two fractions cannot be swapped), `exposed_properties`, `takes_organic_cover`,
+    `maturity_at`, `crater_maturity` (the one-crater formula), `excavated_share`,
+    `reworked_depth`, `halo_share`, `exposed_albedo_scale`, and the constants
+    `HALO_LENGTH_RIM_RADII` 3, `HALO_EXTENT_RIM_RADII` 10, `EXCAVATION_DEPTH_RATIO` 0.084,
+    `REWORKING_DEPTH_AT_ONE_MYR` 0.022 m and `REWORKING_EXPONENT` 0.45; in `worker`,
+    `SurveyedMaterial::maturity`. Crate-private: `MaterialProperties::with_normal_albedo_bvr`,
+    `classify::organic_cover_entry` (the classifier's own rule, which `Entries` now calls) and
+    `SynthCache::craters_mut`; and, for the tests, `testing`'s `moon_like_builder`,
+    `moon_like_crater_params`, `one_crater_builder`, `one_crater_centre` and `pluto_like`.
+  - _Deviations:_
+    - `albedo_scale` keeps its three arguments, the fresh solve: the sim's
+      `tests/surface_albedo_worlds.rs` and the server's `tests/surface_service.rs` call it, outside
+      the task's files. The exposure goes to a new `exposed_albedo_scale`, of which `albedo_scale`
+      is the `GroundExposure::NONE` case; the server calls it at `GroundExposure::of_header`.
+    - `maturity.rs` keeps its own copy of `synth/craters.rs`'s private `neighbourhood`, that file
+      being another lane's; one shared helper is for whichever lane next edits both.
+    - The sim's tripwire `modifiers_nothing_on_the_record_reads_the_modifiers_yet` (until
+      P14.T54.b deletes it) reads every file of the surface crate but `material/maturity.rs`, less
+      its inline test module and comment lines, for the time law's names and the module's path,
+      and allows them on `material/mod.rs`'s one re-export line alone. So the module's tests stay
+      inline in `maturity.rs`, the maturity golden is written there and only counted in
+      `material/golden.rs` (`MATERIAL_GOLDENS` 9), and the re-export is one line under
+      `#[rustfmt::skip]`. `just test-wasm-fast`'s wasip1 run of the sim caught the first layout.
+    - The search draws no cell that provably lies beyond the octave's largest halo (`is_beyond`:
+      a cell's corners' angles from its centre, or S2's quadratic `kMaxEdge` bound to skip them,
+      with a relative margin of 10⁻⁹ and an absolute one of 10⁻¹² radians), and no octave that
+      draws no crater (`can_expose`); neither moves a value, which the halo search's test holds
+      against a direct search of a wide neighbourhood at the octave's own level. Without the
+      pass-by a lone query on the weathered Moon-like world took about 44 ms (provisional, at a
+      1-minute load of about 4), most of it drawing some 400 craters an octave for about 8 within
+      reach.
+    - The solve's per-form rule replaces T1.d's: `weathered_palette` is gone, and where a header
+      carries a maturity `Melt` stays fresh and a carbon ice takes the cover, where T1.d's solve
+      weathered every entry; T1.d's error-and-`None` path goes with it, the solve reading the
+      header's validated palette. Neither part is carried at 22, so the change reaches the
+      generator-versioned `albedo_scale` with P14.T54.b's 24, whose goldens carry it.
+    - The cover's choices: `A_cover` is the cover entry's `A_N` weathered to the same maturity
+      (the identity at its `FeO_T` of `None` or 0), with no form factor, while the material's own
+      albedo takes its form's factor before the blend; `Melt` keeps both fresh but still takes the
+      cover where its entry does (`maturity_and_cover_weather_both_then_blend`).
+    - The moved `pluto_like`'s tholin is a dark red 0.06/0.09/0.14, illustrative, in place of
+      0.5 in every band, so that the cover's blend can be told apart, and its basin's `arc` is
+      `testing`'s, atan2 of the cross and dot products, where the classifier's tests had acos of
+      the clamped dot: a cell site within about 10⁻¹⁶ radians of the basin's edge could fall the
+      other way. The classifier reads no albedo, no golden pins the world, and its tests pass as
+      they did.
+    - `GroundExposure`'s fractions accept −0, as the law's inputs do; a −0 cover is no cover.
+    - `maturity.golden` pins `maturity_after` directly, on a grid of exposures and rates, which
+      answers plan 14's "Not pinned across targets" for it (P14.T51.d's record); `exposed_fraction`
+      stays P14.T54.b's.
+  - _The halo, printed_ (the one-crater test): p(2), p(4), p(6) and p(8) are 0.702, 0.335, 0.146
+    and 0.050 against North Ray's 0.60–0.62, 0.25–0.30, 0.14–0.15 and 0.085–0.095 (the ruling's
+    ranges) and South Ray's 0.68, 0.24, 0.13 and 0.08 (the science check's reading of Fig. 3).
+  - _The point query's time_ (the measurement test `maturity_at_s_time_per_point`, native at the
+    dev profile's opt-level 2 on the 8-thread laptop, its 1-minute load 2.4–3.7 from another
+    lane's data reductions, so provisional): a lone point from a fresh cache 5.4, 3.6 and 3.1 ms on
+    the 4.4, 3.5 and 1 Gyr worlds, and a vertex of a level-14 patch through one cache 224, 214 and
+    229 µs.
+  - _Acceptance, as built:_ the plan's commands (the golden itself runs under
+    `material::maturity`, as `maturity_matches_its_golden`, and `material::golden` counts it), and
+    those its filters miss, each `cargo test -p hyperion-surface` with:
+    - `--lib worker::tests`;
+    - `--lib material::albedo`;
+    - `--lib material::classify`;
+    - the slow `--lib material::maturity -- --ignored maturity_immature`.
+
+    And the sim's `cargo test -p hyperion-sim modifiers_nothing_on_the_record`, whose tripwire
+    reads this task's files (above).
+
+  - _The pins against the replica_ (the contrast at m_local 0 against 1, then at Tycho's 109 Myr,
+    m 0.283, in B/V/R), each within 0.25% of the ruling's replica and pinned to 1% of the code:
+    highland 6.999/5.442/5.104 and 2.456/2.143/2.045; mare 7.065/7.189/7.059 and
+    1.677/2.116/2.226. At 810 Myr the V contrast is below 1.10 for both rows.
+  - _The known miss, D2, printed_ (600 nm by V and R linearly; Dollfus and Bowell 1971's ranges
+    over T1.d's medians): Tycho (highland, 109 Myr) V 2.143, R 2.045, 600 nm 2.089 against
+    1.34–1.48, 1.41–1.56 times too bright; Kepler (mare) at 50 Myr 3.374 at 600 nm and at 100 Myr
+    2.289, against 1.68, 2.01 and 1.36 times; the model reaches Proclus's 1.58–1.68 at 210–244 Myr
+    (highland), Tycho's 1.34–1.48 at 283–362 Myr and Kepler's 1.68 at 173 Myr, beside the m 0
+    limits (highland V 5.44, R 5.10; mare V 7.19, R 7.06).
+  - _The measured shares_ (the slow test, 10⁴ points uniform in area, at maturity 1 and k = 1),
+    the share of the ground whose deficit m_body − m_local is above 0.05, 0.2 and 0.5:
+    - the Moon-like world at 4.4 Gyr: 4.0%, 0.71% and 0.13%, against R4's 0.3% above 0.2;
+    - its 3.5 Gyr variant (N(>1 km) 4.8 × 10⁻³): 53.9%, 12.5% and 1.64%, against R4's 16% and
+      2.1%; the guard, under 10% above 0.5, holds;
+    - its 1 Gyr variant (N(>1 km) 8.4 × 10⁻⁴): 56.1%, 14.4% and 2.15%.
+  - _Grier's check_, in closed form from the production and the chronology at the present flux
+    (400 bins of D from 1 to 20 km, each bin's share of N(>1 km) times the chronology's count over
+    the age below which its rim deficit, g f_ex (1 − m(t)), is above the threshold): 4.1 × 10⁻⁴
+    km⁻² above 0.2 and 1.75 × 10⁻⁴ above 0.5 on all three surfaces, the ruling's 4.2 × 10⁻⁴ and
+    1.7 × 10⁻⁴, against Grier et al. 2000's 1.26 × 10⁻⁴ with "some discernable degree of
+    immaturity".
+  - _The mean V excess_ of the sampled ground's exposed albedo at m_local over its albedo at
+    m_body (R5b): 0.44% at 4.4 Gyr, 5.2% at 3.5 Gyr and 5.7% at 1 Gyr, against R5b's upper bounds
+    of 0.4% and 18–20%.
+- **Deferred findings (2026-10-13 rule) (R10.T1.c's Rust half)** (recorded, not ruled but where
+  stated; each leaves the algorithm and the contracts as built):
+  1. D2: Tycho is 1.4–1.6 times too bright at its own age, from the stand-in fresh rows; the
+     comparison is stated, and asserted within the measured range after T49.i's whole-soil rows.
+  2. Rays are not modelled, nor a coarse crater's halo beyond its reach.
+  3. Steep slopes' freshness from about 10°, mass wasting's, waits for D2's fix.
+  4. The mature layer is by surface age alone, the Moon's reworking, not by the body's own flux.
+  5. Seasonal ices take the cover: `organic_ground` drops them, which the palette cannot tell.
+  6. Several craters take the largest deficit, not exact compositing.
+  7. The cover's mix keeps the material's one law, where Design note 8 would sum each law's
+     radiance.
+  8. Young craters on covered ice keep the cover.
+  9. New craters' roughness splotches are not modelled.
+  10. One halo serves every size and body (Mercury's ejecta reach about 2 R).
+  11. The OMAT excess stands in for the fresh share.
+  12. Kepler's age is a weak, morphological upper bound, and Proclus has none.
+  13. The haloes in the solve: ruled for a second Rust follow-up before or with the client half;
+      the mean V excess measured here (above) sizes it.
+  14. λ = 3.0 R is the ruling's value, but the science check's fits of the model to North Ray's
+      four quoted points give 2.34 R (linear), 2.45 R (shifted to 0 at 10 R, the code's form) and
+      2.72 R (log space), and to North Ray's and South Ray's whole profiles 2.3–2.8 R; only a
+      log-space fit with a free rim amplitude, which puts the rim at 0.75–0.80, gives about 3.1.
+      Kept; a change moves only `maturity.golden`, the point maturity being presentation.
+  15. The ruling's Fig. 3 ranges are North Ray's alone; South Ray's are 0.68, 0.24, 0.13 and 0.08
+      at 2, 4, 6 and 8 R.
+  16. Tycho's 1.34 is region D3's, a 65″ (about 121 km) average wider than the crater; B42's
+      spot alone gives 1.48.
+  17. Morris 1978's reworking depth is fitted over about 1–500 Myr and is extrapolated here to
+      4.4 Gyr (d_m 0.87–0.96 m on old ground).
+  18. Robinson et al. 2015's quote and Lemelin et al. 2020 were not read (the science check could
+      reach neither text); Lemelin et al.'s subject is impact melts, so its support for the slopes'
+      freshness is unconfirmed.
+  19. The point query's cost for the client half: a vertex costs about 220 µs through a warm
+      cache, about 0.9 s a 65 × 65 patch, so a per-texel bake through `maturity_at` alone is far
+      over the brainstorm's 40 ms a patch; the client half wants a per-patch gather of the craters
+      whose haloes reach the patch, evaluated per texel, or a coarser maturity grid.
 - **Deviations in T5, as built** (2026-10-13; lane r10-readings, begun on R09.T8 and R10.T3 at
   `627e9b35` and finished on R09.T9 and R10.T1.a at `4474e781`; the findings and the interface
   ruled in `decision-r10-t5-closed-forms.md`).

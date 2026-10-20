@@ -14,7 +14,7 @@ use wasm_bindgen_test::wasm_bindgen_test as test;
 
 use super::*;
 use crate::field::{MechanicsFamily, PaletteEntry, PaletteRole};
-use crate::material::{Material, MaterialClass, UNASSIGNED_PHASE_ROW, form_row};
+use crate::material::{Material, MaterialClass, UNASSIGNED_PHASE_ROW, form_row, properties};
 use crate::substance_key::SubstanceKey;
 use crate::test_sizes::per_target;
 
@@ -847,6 +847,20 @@ mod native_only {
             let Some(target) = analogue_p(*world_) else {
                 continue;
             };
+            // R10.T1.c's identity: a header of neither a maturity nor a cover exposes its ground
+            // as fresh, so the server's solve is the as-built one, bit for bit.
+            let exposure = crate::material::GroundExposure::of_header(header);
+            assert_eq!(exposure, crate::material::GroundExposure::NONE);
+            match (
+                exposed_albedo_scale(fractions, header.palette(), exposure, target),
+                albedo_scale(fractions, header.palette(), target),
+            ) {
+                (Ok(exposed), Ok(fresh)) => {
+                    assert_eq!(exposed, fresh, "{world_:?}");
+                    assert_eq!(bits(exposed.scale()), bits(fresh.scale()), "{world_:?}");
+                }
+                (exposed, fresh) => assert_eq!(exposed, fresh, "{world_:?}"),
+            }
             if header.surface_pressure().value() >= THIN_ATMOSPHERE_PRESSURE.value() {
                 continue;
             }

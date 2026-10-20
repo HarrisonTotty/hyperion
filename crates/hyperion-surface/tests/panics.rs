@@ -1271,12 +1271,130 @@ mod material {
     }
 }
 
-/// P14.T51.d's space-weathering maturity law: its inputs out of range are refused.
+/// P14.T51.d's space-weathering maturity law and R10.T1.c's exposure, one-crater formula,
+/// excavated share and halo: their inputs out of range are refused.
 mod maturity {
-    use hyperion_base::units::Gigayears;
-    use hyperion_surface::material::maturity_after;
+    use hyperion_base::units::{Gigayears, Metres};
+    use hyperion_surface::material::{
+        GroundExposure, crater_maturity, excavated_share, halo_share, maturity_after,
+        reworked_depth,
+    };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    #[test]
+    #[should_panic(expected = "an exposure's maturity must be in [0, 1]")]
+    fn an_exposure_refuses_a_maturity_above_one() {
+        let _ = GroundExposure::NONE.with_maturity(1.0 + 1e-12);
+    }
+
+    #[test]
+    #[should_panic(expected = "an exposure's maturity must be in [0, 1]")]
+    fn an_exposure_refuses_a_nan_maturity() {
+        let _ = GroundExposure::NONE
+            .with_maturity(f64::NAN)
+            .with_organic_cover(0.5);
+    }
+
+    #[test]
+    #[should_panic(expected = "an exposure's maturity must be in [0, 1]")]
+    fn an_exposure_refuses_a_point_s_negative_maturity() {
+        let _ = GroundExposure::NONE.with_maturity(-1e-9);
+    }
+
+    #[test]
+    #[should_panic(expected = "an exposure's organic cover must be in [0, 1]")]
+    fn an_exposure_refuses_a_negative_cover() {
+        let _ = GroundExposure::NONE.with_organic_cover(-0.25);
+    }
+
+    #[test]
+    #[should_panic(expected = "an exposure's organic cover must be in [0, 1]")]
+    fn an_exposure_refuses_a_nan_cover() {
+        let _ = GroundExposure::NONE
+            .with_maturity(0.5)
+            .with_organic_cover(f64::NAN);
+    }
+
+    #[test]
+    #[should_panic(expected = "a crater's fresh share must be in [0, 1]")]
+    fn the_one_crater_formula_refuses_a_share_above_one() {
+        let _ = crater_maturity(1.0, Gigayears::new(0.1), 1.0, 1.5);
+    }
+
+    #[test]
+    #[should_panic(expected = "a crater's fresh share must be in [0, 1]")]
+    fn the_one_crater_formula_refuses_a_negative_share() {
+        let _ = crater_maturity(1.0, Gigayears::new(0.1), 1.0, -0.1);
+    }
+
+    #[test]
+    #[should_panic(expected = "a crater's fresh share must be in [0, 1]")]
+    fn the_one_crater_formula_refuses_a_nan_share() {
+        let _ = crater_maturity(1.0, Gigayears::new(0.1), 1.0, f64::NAN);
+    }
+
+    #[test]
+    #[should_panic(expected = "a body's maturity must be in [0, 1]")]
+    fn the_one_crater_formula_refuses_a_body_maturity_above_one() {
+        let _ = crater_maturity(2.0, Gigayears::new(0.1), 1.0, 0.5);
+    }
+
+    #[test]
+    #[should_panic(expected = "an exposure must be finite")]
+    fn the_reworked_depth_refuses_an_infinite_exposure() {
+        let _ = reworked_depth(Gigayears::new(f64::INFINITY));
+    }
+
+    #[test]
+    #[should_panic(expected = "a surface's and a crater's ages must be finite and non-negative")]
+    fn the_excavated_share_refuses_a_negative_crater_age() {
+        let _ = excavated_share(
+            Gigayears::new(3.5),
+            Gigayears::new(-1e-9),
+            Metres::new(100.0),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "a surface's and a crater's ages must be finite and non-negative")]
+    fn the_excavated_share_refuses_a_nan_surface_age() {
+        let _ = excavated_share(
+            Gigayears::new(f64::NAN),
+            Gigayears::ZERO,
+            Metres::new(100.0),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "a crater's diameter must be finite and positive")]
+    fn the_excavated_share_refuses_a_zero_diameter() {
+        let _ = excavated_share(Gigayears::new(3.5), Gigayears::ZERO, Metres::ZERO);
+    }
+
+    #[test]
+    #[should_panic(expected = "a distance must be non-negative")]
+    fn the_halo_refuses_a_nan_distance() {
+        let _ = halo_share(f64::NAN, 10.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a distance must be non-negative")]
+    fn the_halo_refuses_a_negative_distance() {
+        let _ = halo_share(-0.5, 10.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a halo must end finite and at or beyond the rim")]
+    fn the_halo_refuses_an_end_inside_the_rim() {
+        let _ = halo_share(0.5, 0.9);
+    }
+
+    #[test]
+    #[should_panic(expected = "a halo must end finite and at or beyond the rim")]
+    fn the_halo_refuses_an_infinite_end() {
+        let _ = halo_share(2.0, f64::INFINITY);
+    }
 
     #[test]
     #[should_panic(expected = "an exposure must be finite and non-negative")]

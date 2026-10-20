@@ -33,6 +33,20 @@
 //! maturity, wavelength (inside iron's grid and beyond both its ends) and law at one grain density,
 //! a line where every albedo is the fresh one's own bits saying so in a word; and
 //! [`weathered_entry_bvr`] of every synthetic world's palette entries at maturities 0.5 and 1.
+//!
+//! `tests/golden/material/maturity.golden` is R10.T1.c's (decision-r10-t1c-maturity), counted
+//! here and written by the `maturity` module's own tests, since the sim's tripwire
+//! (`modifiers_nothing_on_the_record_reads_the_modifiers_yet`, until P14.T54.b) reads every file
+//! of the crate but `material/maturity.rs` for the time law's names: the time law on a grid of
+//! exposures and rates, which P14.T51.d left unpinned across targets; the fresh share's parts (the
+//! reworked depth, the excavated share and the halo) on grids of their inputs; the maturity at a
+//! point ([`maturity_at`](super::maturity_at)) at the centres of an 8 × 8 grid of each face of the
+//! Moon-like world weathered at maturity 1 and the Moon's rate and of the single crater's world
+//! with its crater 100 Myr old and g 0.8, at its 4 Gyr surface's maturity, with a transect across
+//! the crater from its centre to 3 rim radii; every form of every palette entry's exposed albedo
+//! ([`exposed_properties`](super::exposed_properties)) at `m_body` and at maturities 0.3 and 0.7
+//! (the single crater's palette is empty); and the organic cover's blend on the Pluto-like world
+//! at covers 0, ½ and 1.
 
 use std::fmt::Write as _;
 
@@ -492,9 +506,9 @@ fn material_the_weathering_law_matches_its_golden() {
 mod native_only {
     use std::path::Path;
 
-    /// The material goldens: one for each synthetic world, the property table's and the
-    /// space-weathering law's.
-    const MATERIAL_GOLDENS: usize = 8;
+    /// The material goldens: one for each synthetic world, the property table's, the
+    /// space-weathering law's and R10.T1.c's maturity's.
+    const MATERIAL_GOLDENS: usize = 9;
 
     /// Every golden file of `tests/golden/material/` carries `GENERATOR_VERSION`, not R05's
     /// `TEST_PLANET_VERSION`, which heads the files directly under `tests/golden/`.

@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
+use hyperion_base::math;
 use hyperion_base::rng::DetailSeed;
 use hyperion_testkit::float::bits;
 use hyperion_testkit::lcg::Lcg;
@@ -138,6 +139,20 @@ pub(crate) fn point_in(cell: PatchKey, x: f64, y: f64) -> [f64; 3] {
         u: st_to_uv(s),
         v: st_to_uv(t),
     }))
+}
+
+/// The unit direction whose point on a sphere of radius `radius_m` lies `chord_m` metres, as a
+/// chord, from `centre`'s, along the great circle towards +z: a crater's radial transect
+/// (R10.T1.c's maturity tests and golden).
+pub(crate) fn along_chord(centre: [f64; 3], chord_m: f64, radius_m: f64) -> [f64; 3] {
+    let theta = 2.0 * math::asin(chord_m / (2.0 * radius_m));
+    let towards = unit_dir([
+        -centre[2] * centre[0],
+        -centre[2] * centre[1],
+        1.0 - centre[2] * centre[2],
+    ]);
+    let (s, c) = math::sin_cos(theta);
+    unit_dir([0, 1, 2].map(|k| c * centre[k] + s * towards[k]))
 }
 
 /// `count` points at random in `cell`, even in its face coordinates.

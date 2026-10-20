@@ -704,6 +704,17 @@ impl MaterialProperties {
     pub const fn mechanics(&self) -> MechanicsFamily {
         self.mechanics
     }
+
+    /// The same properties with the normal albedo in B, V and R `normal_albedo_bvr`: the ground's
+    /// exposed albedo ([`exposed_properties`](super::exposed_properties), R10.T1.c), its law, its
+    /// law's origin and every other figure kept.
+    #[must_use]
+    pub(crate) const fn with_normal_albedo_bvr(self, normal_albedo_bvr: [f64; 3]) -> Self {
+        Self {
+            normal_albedo_bvr,
+            ..self
+        }
+    }
 }
 
 /// Why [`properties`] refused a material.

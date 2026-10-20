@@ -537,6 +537,13 @@ impl SynthCache {
         &mut self.channels
     }
 
+    /// The small craters' cache, which R10.T1.c's maturity at a point reads through
+    /// ([`crate::material::maturity_at`]).
+    #[must_use]
+    pub(crate) fn craters_mut(&mut self) -> &mut CraterCache {
+        &mut self.craters
+    }
+
     /// R10's classifier's cuts of each cell's shadowed ground.
     #[must_use]
     pub(crate) fn ice_cuts_mut(&mut self) -> &mut crate::material::IceCuts {

@@ -1,8 +1,9 @@
 //! What a client's height worker holds and answers for real bodies (plan R10, T6.b): a
 //! [`PartialField`] a body, built from R09's payload blocks as the render thread posts them, and
 //! over it R10's bake ([`bake_terrain`]), readings ([`surveyed_reading`], [`slant_range`]),
-//! material ([`material_at`] with [`properties`]) and the photometry the lit terrain draws a
-//! bake's palette with ([`WorkerFields::photometry`], R10.T10.b).
+//! material ([`material_at`] with its [`exposed_properties`] at the point's maturity,
+//! [`maturity_at`]) and the photometry the lit terrain draws a bake's palette with
+//! ([`WorkerFields::photometry`], R10.T10.b, at the header's maturity; R10.T1.c).
 //!
 //! The client's WebAssembly module wraps [`WorkerFields`] in its `SurfaceFields` export
 //! (`src/wasm.rs`) thinly: the decoding, the merge, the survey's change, the level table and each
@@ -79,8 +80,8 @@ use crate::field::{
 };
 use crate::geometry::vertex_spacing;
 use crate::material::{
-    GroundMaterial, Material, MaterialProperties, PhaseLaw, ResolvePropertiesError, WEIGHT_TOTAL,
-    material_at, properties, scaled_normal_albedo, weights_at,
+    GroundExposure, GroundMaterial, Material, MaterialProperties, PhaseLaw, ResolvePropertiesError,
+    WEIGHT_TOTAL, exposed_properties, material_at, maturity_at, scaled_normal_albedo, weights_at,
 };
 use crate::num;
 use crate::reading::{LineOfSight, SurveyedReading, slant_range, surveyed_reading};
@@ -304,8 +305,10 @@ impl From<QueryHeightError> for QueryBodyError {
 }
 
 /// A material's photometry as the lit terrain draws it (plan R10, T10.b; Design note 8): its normal
-/// albedo in B, V and R under the body's albedo scale ([`scaled_normal_albedo`]), its law, and the
-/// law's L(0) at the scaled V ([`PhaseLaw::limb_parameter`]), as T10.a's solve assumed them.
+/// albedo in B, V and R exposed as the body's background ground is, at the header's maturity
+/// `m_body` and organic cover ([`exposed_properties`] at [`GroundExposure::of_header`], R10.T1.c),
+/// under the body's albedo scale ([`scaled_normal_albedo`]), its law, and the law's L(0) at the
+/// scaled V ([`PhaseLaw::limb_parameter`]), as T10.a's solve assumed them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DrawnPhotometry {
     normal_albedo_bvr: [f64; 3],
@@ -315,7 +318,8 @@ pub struct DrawnPhotometry {
 
 impl DrawnPhotometry {
     /// The normal albedo in the Johnson B, V and R bands under the field header's albedo scale c,
-    /// dimensionless: c `A_N`, its V clamped to the material's
+    /// dimensionless: c `A_N`, `A_N` exposed at the header's `m_body` and cover, its V clamped to
+    /// the material's
     /// [`scale_range`](crate::material::scale_range) and its B and R taking V's factor, each from 0
     /// to its law's ceiling ([`PhaseLaw::normal_albedo_ceiling`]: 1.35 for the particulate laws, 1
     /// for Lambert's).
@@ -669,10 +673,12 @@ fn bytes_by_largest_remainder(values: &[f64]) -> [u8; CLASS_MAP_CLASSES] {
     bytes
 }
 
-/// The material at a surveyed point and, where the palette names its substance, its properties.
+/// The material at a surveyed point, its ground's space-weathering maturity, and, where the palette
+/// names its substance, its properties as the point's ground exposes them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SurveyedMaterial {
     ground: GroundMaterial,
+    maturity: Option<f64>,
     properties: Option<MaterialProperties>,
 }
 
@@ -683,8 +689,19 @@ impl SurveyedMaterial {
         self.ground
     }
 
+    /// The space-weathering maturity of the point's ground, `m_local`, dimensionless in [0, 1]:
+    /// the header's `m_body` less the largest deficit a young crater's fresh ejecta leave there
+    /// ([`maturity_at`], R10.T1.c), or `None` where the header carries no maturity, as every
+    /// header does before P14.T54.b.
+    #[must_use]
+    pub const fn maturity(&self) -> Option<f64> {
+        self.maturity
+    }
+
     /// The material's properties, `None` where the palette names no entry
-    /// ([`GroundMaterial::material`] is `None`).
+    /// ([`GroundMaterial::material`] is `None`): [`exposed_properties`] at the point's
+    /// [`maturity`](Self::maturity) and the header's organic cover, so that the albedo is the
+    /// point's own, unscaled (the drawn one is [`WorkerFields::photometry`]'s, at `m_body`).
     #[must_use]
     pub const fn properties(&self) -> Option<&MaterialProperties> {
         self.properties.as_ref()
@@ -927,10 +944,14 @@ impl WorkerFields {
         Ok(slant_range(&synth, cache, origin_m, direction, max)?)
     }
 
-    /// The material at `at` on `body` ([`material_at`]) with its [`properties`], or `None` where
-    /// the field's cell there is not surveyed: a survey's margin, whose ground is known but which
-    /// the ship has not measured, or a cell not held (the readout's `NOT SURVEYED`, as
-    /// [`reading`](Self::reading)'s).
+    /// The material at `at` on `body` ([`material_at`]) with its ground's maturity there
+    /// ([`maturity_at`], `m_local`) and its properties as that ground exposes them
+    /// ([`exposed_properties`] at `m_local` and the header's organic cover, R10.T1.c), or `None`
+    /// where the field's cell there is not surveyed: a survey's margin, whose ground is known but
+    /// which the ship has not measured, or a cell not held (the readout's `NOT SURVEYED`, as
+    /// [`reading`](Self::reading)'s). Where the header carries no maturity the properties are the
+    /// palette's as resolved, [`properties()`](crate::material::properties()), with the cover where
+    /// the header has one.
     ///
     /// # Errors
     ///
@@ -948,27 +969,40 @@ impl WorkerFields {
     ) -> Result<Option<SurveyedMaterial>, QueryBodyError> {
         let BodyField { field, cache, .. } = self.held(body)?;
         let dir = unit_dir(face_uv_to_xyz(at));
-        let level = field.header().level().get();
+        let header = field.header();
+        let level = header.level().get();
         let cell = PatchKey::containing(level, dir).expect("a coarse level is a quadtree level");
         if !field.is_surveyed(cell) {
             return Ok(None);
         }
         let synth = Synthesiser::new(&*field, seed);
         let ground = material_at(&synth, cache, at)?;
+        let maturity = maturity_at(&synth, cache, at)?;
+        let header_exposure = GroundExposure::of_header(header);
+        let exposure = maturity.map_or(header_exposure, |m| header_exposure.with_maturity(m));
         let properties = ground.material().map(|m| {
-            properties(m, field.header().palette())
+            exposed_properties(m, header.palette(), exposure)
                 .expect("the classifier names only entries of the body's palette")
         });
-        Ok(Some(SurveyedMaterial { ground, properties }))
+        Ok(Some(SurveyedMaterial {
+            ground,
+            maturity,
+            properties,
+        }))
     }
 
     /// The photometry `material` is drawn with on `body` ([`DrawnPhotometry`]).
     ///
-    /// Its properties over the body's palette ([`properties`]), its albedo under the field header's
-    /// scale (R10.T10.a's c, 1 where the header holds none: the palette's albedos as resolved, as
+    /// Its properties over the body's palette as its background ground exposes them, at the
+    /// header's maturity `m_body` and organic cover ([`exposed_properties`] at
+    /// [`GroundExposure::of_header`], R10.T1.c: the albedos the header's scale was solved on), its
+    /// albedo under the field header's scale (R10.T10.a's c, 1 where the header holds none: the
+    /// palette's albedos as resolved, as
     /// [`FieldHeaderParts::albedo_scale`](crate::field::FieldHeaderParts::albedo_scale)'s contract
     /// has it), and its law's L(0) there. It reads the header alone, so it answers wherever the
-    /// body's field is held, surveyed or not.
+    /// body's field is held, surveyed or not; where the header carries neither a maturity nor a
+    /// cover, as every header does before P14.T54.b, the properties are
+    /// [`properties()`](crate::material::properties())'.
     ///
     /// # Errors
     ///
@@ -985,8 +1019,12 @@ impl WorkerFields {
             .ok_or(ResolvePhotometryError::NotStarted(body))?
             .field
             .header();
-        let resolved =
-            properties(material, header.palette()).map_err(ResolvePhotometryError::Properties)?;
+        let resolved = exposed_properties(
+            material,
+            header.palette(),
+            GroundExposure::of_header(header),
+        )
+        .map_err(ResolvePhotometryError::Properties)?;
         let normal_albedo_bvr =
             scaled_normal_albedo(&resolved, header.albedo_scale().unwrap_or(1.0));
         let phase_law = resolved.phase_law();
