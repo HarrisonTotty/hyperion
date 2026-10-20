@@ -2726,6 +2726,85 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     ground's emission transmitted through the column above it; a τ = 10 column four scale heights
     up takes that floor.
   - _Acceptance:_ `cargo test -p hyperion-sim planetary::surface::steps::climate`.
+- **R09.T13.h The thin air's slab and frost** (after T13.d, in any order with T13.e–g and T13.j;
+  decision-r09-t13-thin-air §1.8–§1.10, as decision-r09-t13h-scope amends them, whose specification
+  and tests bind). R09.T13.c's thin air revised: the balanced bounded slab with its snowfall.
+  - _The slab's column_ c is the site on the whole-days clock, each phase column on the true-time
+    clock and each point on a world locked 1:1. F̄_{c,k} is the previous orbit's mean of εσT_s⁴ over
+    column c's samples in month k; in true time column p reads the previous orbit's column at the
+    same hour angles, p + N frac(D) (mod N), interpolated linearly between the two either side of a
+    fractional turn, a turn within `COMMENSURATE_COLUMNS` of a whole number taken whole. On the first
+    orbit F̄_{c,k} = 2(⟨S⟩_{c,k} + E_nf) ÷ (2 − εβ), ⟨S⟩ the site's month mean (T13.c's input) on
+    whole days and on a locked world, and the phase column's own month mean in true time.
+  - _The slab_ σT_a⁴ = max(F̄ ÷ 2, σT_fa⁴), T_fa the bulk gas's saturation temperature at x_b p_s ÷ e
+    from the registry's phase diagram (Kieffer 2013, [46]), absent where `Frost::of` finds no frost.
+    The back radiation is βσT_a⁴, of which the surface takes ε. The snow, β(2σT_a⁴ − F̄) ÷ L, zero
+    unless the slab is bounded, joins column c's frost at every step of month k over the step's true
+    duration, frost or none on the ground, before the frost's balance; a step whose frost (its snow
+    included) the step's energy more than sublimes re-solves its surface with the frost's latent
+    heat over the step's true duration taken off, so that no remainder is lost
+    (decision-r09-t13h-scope §2).
+  - _β_ = (2 ÷ ε)(1 − (⟨S⟩ + E_nf) ÷ (σT\*⁴ + E_nf)), held to [0, 1].
+  - _The closed form_ (a world locked 1:1 in a one-month year, or one with no seasonal orbit), with
+    E_in = S + εσT_CMB⁴ + Q, F = εσT⁴, A = σT_fa⁴ and B = εσT_f⁴, each of A and B absent where
+    `Frost::of` finds no frost, is the march's own steady state under constant light, with the snow
+    sublimed as the march's is (decision-r09-t13h-scope, "§1.9 item 5 amended", which replaces
+    decision-r09-t13-thin-air §1.9 item 5):
+    - F = max(B, G), G being the bare column's balance: E_in ÷ (1 − εβ ÷ 2) where E_in ≥ E_hi =
+      (2 − εβ)A, the slab unbounded (everywhere, where there is no bound); (E_in − (2 − ε)βA) ÷
+      (1 − β) below E_hi, the slab bounded and its snow, β(2A − F), sublimed by the ground; at β = 1
+      this branch is empty, and below E_hi the column is held at B;
+    - where F = B the column is held at T_f and its frost grows, as an endless reservoir does;
+    - the back radiation is R⇓ = β max(F ÷ 2, A), so a frost-held night under the bound takes
+      βσT_fa⁴;
+    - the form is continuous at E_hi and at E_lo = (1 − β)B + (2 − ε)βA, where G meets B; at β = 1
+      it steps from B to 2A at E_in = (2 − ε)A.
+  - The spin-up starts each column at its share of that closed form's temperature under its
+    annual-mean sunlight. Convergence is the existing 0.1 K stop and `MAX_ORBITS`. The slab's level
+    is p ÷ e.
+  - No contract moves (`GENERATOR_VERSION` 22): the frost stays internal, and nothing is added to
+    the payload or the record (decision-r09-t13h-scope §6.2).
+  - _Tests_ (decision-r09-t13-thin-air §1.10; decision-r09-t13h-scope §8 (a)):
+    1. **The polar-night slab** (reference Mars): in each pole's coldest month the slab lies at the
+       bulk gas's frost point at x p_s ÷ e, the registry's figure, to 0.5 K (141.1 K by James et
+       al.'s curve), and in 135–150 K; no column's slab in any month lies below its bound.
+    2. **The balance limit**: on a frost-free column under constant sunlight in the closed form
+       T_a⁴ = εT_s⁴ ÷ 2 and εσT_s⁴ = 2(S + E_nf) ÷ (2 − εβ) to 10⁻⁹ relative; with Q and T_CMB set
+       to 0 the form is T13.c's closed form to 10⁻¹².
+    3. **Energy.** Over the converged orbit, ⟨S + εσT_CMB⁴ + Q⟩ = ⟨(1 − β)εσT_s⁴ + (2 − ε)βσT_a⁴⟩ +
+       ⟨P_store⟩ − L ΔM ÷ P + β⟨εσT_s⁴ − F̄⟩ to 10⁻⁶ of ⟨S⟩.
+       - Each step is weighted by its true share of the orbit, each phase column by 1 ÷ N and each
+         grid point by area.
+       - P_store is each step's Σᵢ sᵢ (Tᵢ − tᵢ), its own implicit storage. ΔM is the orbit's change
+         in the grid's frost, snow included.
+       - The stored power and the slab's lag are printed, and each is asserted below 10⁻³ of ⟨S⟩.
+       - It runs on the reference Mars, on the 3:2 Mercury with the reference Mars's air, and on a
+         seasonal locked world with that air (decision-r09-t13h-scope §3).
+    4. **The seasonal caps** (reference Mars): the orbit's swing in Σ frost × area over p_s A ÷ g,
+       at the inertia and albedo as built, lies in [0.18, 0.40]; it is printed against [0.20, 0.32]
+       and 0.244, the tight window being the calibration's acceptance, not this task's; the south's
+       peak exceeds the north's; every column's frost is periodic over the converged orbit to
+       1 kg m⁻².
+    5. Printed: both poles' CO₂ clearing Ls, against 70–100° for the north.
+    6. **Any thin air**: a β = 1 thin-air world (the reference Mars with plan 14's mean raised until
+       β saturates) converges within `MAX_ORBITS`, each orbit's move and the band that moves most
+       printed, and its polar-night total condensation, surface plus snow, lies within 10% of the
+       slab-free column's; if it does not converge, its last move is pinned (below 0.2 K) and
+       recorded, and the stop, the cap and the snow rule do not change (decision-r09-t13h-scope §4);
+       a Pluto-like N₂ input converges, with its slab at N₂'s bound in its night; an air whose bulk
+       gas has no diagram takes no bound and no snow, its polar-night slab (ε⟨T_s⁴⟩ ÷ 2)^¼; the
+       lanes test (the reference Moon and Mars, one column at a time and in eights) stays exact to
+       the bit with the slab's state.
+    - The true-time map: the column it reads is the one `absorbed` lights identically one orbit
+      back, for N frac(D) = 12 and 11.5, and each band's ring sum of F̄ equals the previous orbit's
+      to 10⁻¹² (decision-r09-t13h-scope §7.2).
+    - The closed form (decision-r09-t13h-scope, "§1.9 item 5 amended"): a thin-aired world locked
+      1:1 (the reference Mars at e and obliquity 10⁻⁷, against both at 0) marches every point to
+      within 0.1 K of its closed form, as the airless one does; G is continuous at E_hi and E_lo to
+      10⁻⁹ relative, every bare column's books close, E_in = (1 − β)F + (2 − ε)β max(F ÷ 2, A), to
+      10⁻¹² relative, and at β = 1 the band is empty, F stepping from B to 2A at (2 − ε)A.
+  - _Acceptance:_ `cargo test -p hyperion-sim planetary::surface::steps::climate`, and the surface
+    module's slow tests by name.
 - **R09.T13.j The land's water** (after T13.e and T13.f, before R09.T14–T16;
   decision-r09-t13e-revision, whose specification and tests bind). R09.T13.e's revision for its
   finding E-P1, land-heavy midlatitudes too dry. The sea rains its own evaporation plus its band's
@@ -9191,13 +9270,15 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     inertia to about 200 against the vacuum's 55, its frost's albedo (KRC's 0.65), the slab's own
     heat capacity, dust and the slab's thinning with height are not modelled (research-c's D7; the
     relief ruling's R5); with Γ 200 research-c found Mars's equatorial arithmetic mean 15 K warmer
-    and its radiative mean unchanged.
+    and its radiative mean unchanged. R09.T13.h solves β with `E_nf` in both terms (0.2653 on the
+    reference Mars); D6 and the rest go to its follow-on (decision-r09-t13h-scope §1, §6.3).
   - _The reference Mars's albedo_ is plan 14's temperate 0.294, Earth's, against Mars's Bond
     albedo of about 0.25 (from memory). It is plan 14's surface-state table. For plan 14.
   - _A frost that lasts the year_ grows without bound (its mass is not output, and no reference
     world's does: Mars's caps clear in summer without a frost albedo), and the bulk gas is an
     endless reservoir: a thin air locked 1:1 would condense onto its nightside without collapsing.
     The step in which a frost runs out loses its remainder, under one step's flux. Lean: record.
+    The run-out's lost remainder is closed by R09.T13.h (decision-r09-t13h-scope §2).
   - _The registry's inertia law_ (research-c's D3, for P14.T54.a's switch): the Gundlach–Blum
     vacuum law at the reference form, uniform with depth, gives the lunar predawn about 87 K
     against Diviner's 95 K; constant Γ 55 gives 96 K. The column's Γ follows plan 14's constant
@@ -9481,6 +9562,8 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     - It is to be calibrated with the frost's albedo, the high latitudes' inertia, the reservoir's
       pressure and the air's transport over the cap. The revision builds it with them; the lean
       alone (the unbounded balance) is refused.
+    - Built by R09.T13.h, the balanced bounded slab with its snowfall; its calibration is the
+      follow-on's (decision-r09-t13h-scope §1, §6.3; T13.h's record and deferred findings).
   - _No ocean heat transport_ (ruled 2026-10-19, decision-r09-t13-thin-air: deferred to the
     energy-balance model's revision, R09.T13.i as proposed).
     - Siler et al.'s D carries the atmosphere's transport alone (their forcing is the top's net flux
@@ -10430,9 +10513,10 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
       candidate.
     - E3. The ITCZ lags the energy-flux equator (Wei and Bordoni 2018); the heuristic has no lag.
     - E4. A thin air's winds on the radiative model are calm (Mars's are a few m/s), with
-      R09.T13.h's air transport.
+      the air's transport over the cap (T5, D5), which is the thin air's calibration's, follow-on
+      B of R09.T13.h (decision-r09-t13h-scope §1, §6.3), not R09.T13.h's.
     - E5. A surface liquid under the radiative or isothermal models gets no precipitation; for
-      T13.h and T13.i.
+      T13.i (R09.T13.h does not build it: decision-r09-t13h-scope §1).
     - E6. The winter subtropics under the flat-top weighting are drier than GPCP in the zonal
       prototype; re-read with the orographic model's ε P (decision-r09-t13e-asbuilt §4, from the
       final run): 15–35° N 1.57 and 1.52 mm/day against GPCP's 2.00, and 15–35° S 2.24 and 2.45
@@ -11136,6 +11220,180 @@ hyperion-sim --lib planetary::surface::` passes, 114 with three ignored (35.6 s 
     coastal air (_The large-scale rate_, the part-1 sea's paragraph and _The orography_), _A wholly
     calm month_, the runoff function's (1 − ε(z)) P of the annual rate, and _The balance_'s `P_ls`;
     T13.e's figures stand as the as-built record of that model.
+- **Deviations in T13.h, as built** (2026-10-20; lane r09-thinair, on `e1c94a43`, merged with
+  `6fa6a405` before its gate; built to decision-r09-t13-thin-air §1.9–§1.10 and
+  decision-r09-t13h-scope, all of it: §1's split, §2's run-out, §3's books, §4's test 6, §5's level,
+  §7's map, §8's texts and its "§1.9 item 5 amended").
+  - _Files._ `steps/climate/airless.rs` (the slab, its snow, the run-out, the true-time map, the
+    closed form and the run's observer), with tests in its own `tests` module, the new
+    `steps/climate/tests/thin_air.rs`, `tests.rs`'s `with_thin_air` and one more world in
+    `tests/normalisation.rs`'s run-twice test; one-sentence "What is built" lines in
+    `planetary/surface/mod.rs`, `steps/mod.rs` and `steps/climate/mod.rs`. No contract moved:
+    `CoarseInputs`, the working state's types, the field's types, the header, the wire, `NOTICE` and
+    every golden are as they were (`golden_diff.py --base 6fa6a405`: nothing to reconcile);
+    `GENERATOR_VERSION` stays 22; the frost stays internal, nothing added to the payload or the
+    record (§6.2).
+  - _Only thin-air worlds move._ An airless world's slab sends nothing and it has no frost or
+    snow, and its closed form and spin-up start sum their inputs as T13.c did
+    (`Regolith::outside_w_m2`, held by `an_airless_closed_form_is_t13c_s_to_the_bit`). A digest of
+    every record, moment, end column and lower bound of the radiative model's runs of the reference
+    Moon and Ceres, the 3:2 Mercury, the locked Moon and the locked lava world equals `e1c94a43`'s,
+    bit for bit (a probe, not kept).
+  - _The slab_ (`ThinAir::slab`, `Slab`): σT_a⁴ = max(F̄ ÷ 2, σT_fa⁴), its back radiation βσT_a⁴ and
+    its snow's latent flux β (2σT_a⁴ − F̄), set to exactly zero where the slab is unbounded. The slab
+    emits βσT_a⁴ from each face (Kieffer 2013, [43]); `Slab::blackbody_w_m2` holds σT_a⁴.
+    `Frost::aloft_point_k` is the registry's saturation temperature at x_b p_s ÷ e, absent with the
+    frost: the sublimation branch is a line in 1 ÷ T below its coldest piece, so it has a point
+    wherever the surface's curve has one. It is 141.09 K on the reference Mars, against 141.13 K by
+    James et al.'s curve as Kieffer gives it, and 35.50 K for the Pluto-like test's nitrogen at
+    1.29 Pa ÷ e.
+  - _F̄ and its columns_ (`Model::march`, `first_emission`, `carried`, `Turn`). Each orbit sums every
+    column's εσT_s⁴ over each month's steps, whose shares within a month are equal, and F̄ is that
+    sum over the month's steps, carried to the next orbit. On the true-time clock `carried` reads
+    column p + n, and for a fractional turn blends p + n + 1 by w, `Turn::of` giving n + w =
+    N frac(D), a turn within `COMMENSURATE_COLUMNS` of a whole number taken whole; `long_run_means`
+    reads the same `Turn`, to the bit as before. The first orbit's ⟨S⟩ is `month_absorbed` on whole
+    days and on a locked world, and each phase column's own month mean of `absorbed` at the first
+    orbit's hour angles in true time (§7.3).
+  - _The snow and the run-out_ (`Model::advance`, §2). Each step's snow, its slab's snow flux over L
+    times the step's true duration, joins the column's frost before the frost's balance, so a snowed
+    bare column enters the held branch. Where the frost, snow included, is spent (m − U Δt ÷ L ≤ 0),
+    the frost goes to zero and the surface is re-solved, `surface_temperatures` on that lane alone,
+    with m L ÷ Δt off its right side, Δt the true duration; its root lies at or above T_f, so no clamp
+    follows. A frost-free step that would fall below T_f still forms frost; a step whose balance at
+    T_f is nil to rounding with nothing to spend takes T_f.
+  - _β, the closed form and the start_ (§1.9 items 4–6). `ThinAir::of` takes `E_nf` in both terms.
+    `ThinAir::balance` is the closed form as "§1.9 item 5 amended" replaces it, F = max(B, G): the
+    ruled item 5's bounded branch, εσT⁴ = E_in + εβσT_fa⁴, left out the latent heat of the snow its
+    item 3 has the ground sublime, which ran the reference Mars's bounded bare band (E_in
+    19.95–39.28 W m⁻²) up to 6.9 K warm, so the closed form was not the march's steady state; the
+    amended form is (decision-r09-t13-thin-air §1.9 items 3 and 5; decision-r09-t13h-scope §2 and
+    "§1.9 item 5 amended", the lane's science check). It joins the unbounded slab at
+    (2 ÷ ε)^¼ T_fa, 169.95 K on Mars. The spin-up's start is each site's share of its temperature
+    under the site's annual-mean sunlight, the frost floor included.
+  - _The observer_ (`Observer`, `Sample`). The run's samples carry the step, its mean anomaly, the
+    column, its weight and true duration, the surface, the sunlight, the input, the slab with the F̄
+    it was formed from, the frost and its change, and, for an observer whose `STORED_HEAT` is true,
+    the step's stored heat Σᵢ sᵢ (Tᵢ − tᵢ). `solve` passes a no-op closure, so the production run
+    skips the stored-heat sums; `solve_observed` is `pub(super)` for the tests' recorder.
+  - _Choices the ruling did not state:_ `Slab` carrying its F̄, for test 3's lag; test 6's slab-free
+    column, the reference Mars at 200 K, where β is held at 0; test 6's β = 1 world at 250 K (β holds
+    at 1 from 243.1 K); its "polar-night condensation" the latent heat of the frost each pole's end
+    column gains over its months with no sunlight, over their duration; the no-diagram air neon (the
+    registry's row with no diagram) in the reference Mars's carbon dioxide's place, its slab compared
+    with its converged orbit's own (ε⟨T_s⁴⟩ ÷ 2)^¼ to 0.5 K and with F̄ ÷ 2 to the bit; the
+    Pluto-like input on NASA's Pluto fact sheet's orbit, rotation, obliquity (119.51°, taken as
+    60.49°), 1.3 Pa and air (99% nitrogen, 0.5% methane, 0.05% carbon monoxide), read by the lane's
+    science check, with plan 14's snowball albedo on ice, 0.50 (the fact sheet's Bond albedo is
+    0.72), an assumed 3 mW m⁻² of heat flow (from memory, no source read), a mean 1.004 of its
+    equilibrium temperature (β 0.0325, the ruling's estimate 0.03), and the reference Ceres's
+    figure, gravity and craters, which the radiative model does not read (the builder ties the
+    craters' gravity to the body's); test 3's other two worlds, the climate tests' 3:2 Mercury and
+    seasonal locked Moon under the reference Mars's pressure and gases at 1.02 of their own means
+    (β 0.161 and 0.160), and the lanes test's Mercury under the same air.
+  - _Deviations from decision-r09-t13-thin-air §1.10's wording._ Test 3 asserts §3's identity with
+    the stored power and the slab's lag, the ruled two-term books printed beside it
+    (decision-r09-t13h-scope §3, §9.1); test 4 asserts [0.18, 0.40] and prints [0.20, 0.32] and
+    0.244 (§1); test 6 prints each orbit's move (§4); the closed form's tests are the amendment's;
+    the slab's level stays p ÷ e, p ÷ 2 withdrawn as its alternative (§5).
+  - _As measured_ (the reference Mars's radiative model, its 72 bands and three end columns; as built
+    or the ruling's prototype in brackets):
+    - 4 orbits (3); β 0.2653 (0.2653); the brightness mean 213.85 K (214.09 K); T13.d's corrections c
+      −0.606 K (−0.958 K) and a −9.223 K (−10.289 K).
+    - Test 1: both poles' coldest-month slab 141.091 K, F̄ 25.61 W m⁻², snow 5.129 W m⁻² (the
+      ruling's 5.14); the coldest slab of any column in any month 141.0913 K, the bound.
+    - Test 3 (as fractions of ⟨S⟩): the reference Mars, ⟨S⟩ 103.93 W m⁻², stored power −2.36 × 10⁻⁵,
+      lag −1.35 × 10⁻⁵, the ruled two-term books −3.71 × 10⁻⁵, the full identity 2.6 × 10⁻¹⁴; the 3:2
+      Mercury under Mars's air (24 phase columns, 4 orbits) 2.6 × 10⁻⁶, 6.6 × 10⁻⁶, 9.2 × 10⁻⁶ and
+      1.8 × 10⁻¹⁴; the seasonal locked Moon under it (4 orbits) −9.9 × 10⁻⁷, −8.0 × 10⁻⁹,
+      −9.9 × 10⁻⁷ and 1.3 × 10⁻¹⁴. Its nightside condenses 12.6 W m⁻² of the year's latent heat, the
+      endless reservoir.
+    - Test 4: the swing 0.342 of the air (the prototype's 0.336; above the calibration's
+      [0.20, 0.32] and Kelly et al.'s 0.244, as expected before the frost's albedo and the high
+      latitudes' inertia), the total's peak 0.415, the north's 0.269 and the south's 0.415 (0.264,
+      0.408); every column's frost periodic over the converged orbit to 0.072 kg m⁻².
+    - Test 5 (printed): the north pole clears at Ls 63.4 and the south at Ls 248.5 (the prototype's
+      63.4 and 248.7; observed in the north at 70–100).
+    - Test 6: the β = 1 world converges in 9 orbits, its moves 4.245, 0.653, 0.558, 0.505, 0.439,
+      0.187, 0.100 and 0.096 K, the last at 48.75° S; its polar nights condense 22.95 and
+      23.14 W m⁻², −9.1% and −8.6% against the slab-free column's 25.24 and 25.32 (the prototype's
+      −7.8%), and the reference's β 0.265 −2.2% at both poles (−2.1%); the Pluto-like air β 0.0325 in
+      3 orbits, nitrogen's frost point 37.06 K at 1.29 Pa and 35.50 K aloft, both poles'
+      coldest-month slab at the bound; the neon air's poles' coldest-month slabs 53.84 and 51.26 K
+      against their converged orbit's own 53.82 and 51.35 K.
+    - The closed form: the reference Mars locked 1:1 marched at e and obliquity 10⁻⁷ lies within
+      0.023 K of its closed form at every point (4 orbits, β 0.2648), 144 of them in the bounded
+      bare band, 147.66–169.95 K.
+  - _Against the as-built records_ (the reference Mars's radiative model before T13.d, 864
+    band-months): the worst band-month moves −14.81 K, at 88.75° S in the twelfth month from
+    periapsis, the southern spring's clearing (the ruling's −13.9 K at 71.25° S); 55 band-months
+    move by more than 1 K (the ruling's 61), all poleward of 41° but two, at 28.75° S and 36.25° N;
+    the worst annual mean moves −1.19 K, at 73.75° N (the ruling's 1.1 K at 76.25° N); the field's
+    area-mean annual temperature 196.84 K against 197.20 K.
+  - _Cost_ (one thread, `CPUQuota` 100%, load 5–12): the reference Mars's radiative solve 165 ms
+    against 125 ms as built, 41 ms an orbit both, the slab's fixed point taking a fourth orbit; the
+    reference Moon 8.8 ms (8.4) and Ceres 164 ms (163), unchanged. The energy-balance worlds' climate
+    step, the reference Earth's, is untouched.
+  - _The tests._ In `airless.rs`'s `tests`: `a_column_step_conserves_energy` gains snow on frost and
+    on bare ground and a frost that runs out; `the_balanced_slab_s_limit_is_t13c_s_closed_form`
+    (test 2); `an_airless_closed_form_is_t13c_s_to_the_bit`;
+    `the_closed_form_s_branches_join_and_close_their_books` and
+    `a_thin_aired_locked_world_s_seasonal_march_tends_to_its_closed_form` (the amendment's);
+    `the_true_time_map_reads_the_column_at_the_same_hour_angles_one_orbit_back` (§7.2); and the
+    lanes test with the slabs' mean emissions and the frosts, and the 3:2 Mercury under Mars's air.
+    In `tests/thin_air.rs`: `the_polar_night_slab_lies_at_the_frost_point_aloft` (test 1),
+    `the_thin_air_conserves_energy_over_the_converged_orbit` (test 3),
+    `the_reference_mars_s_seasonal_caps_swing_within_their_window_the_south_s_the_larger` (tests 4
+    and 5), `a_saturated_slab_converges_and_condenses_a_polar_night_as_the_slab_free_column`,
+    `a_pluto_like_nitrogen_air_converges_with_its_night_slab_at_its_bound` and
+    `an_air_whose_bulk_gas_has_no_diagram_takes_no_bound_and_no_snow` (test 6). The reference Mars
+    joins `the_step_writes_the_same_bits_from_the_same_state`. The climate module: 161 passed and 6
+    ignored; the surface module's fast tests, 312 passed in 168 s at four threads (load 21), the fast
+    order test 92.2 s against decision-r09-t13-test-cost's 120 s.
+- **Deferred findings (2026-10-13 rule)** (R09.T13.h; recorded, not ruled; each for "main"'s list).
+  - _The follow-on_ (ruled 2026-10-20, decision-r09-t13h-scope §6.3), in two parts.
+    - **A: the slab's own heat capacity (T2)**, Kieffer's eq. 6 with [45]–[46] per step. It replaces
+      F̄, its first orbit and the true-time mapping. It cures the near-neutral convergence at β → 1,
+      where a bounded slab whose snow sublimes on bare ground has a per-orbit gain of β, not εβ ÷ 2
+      (decision-r09-t13h-scope §4; decision-r09-t13-thin-air §1.5 corrected). Its c_p should be the
+      registry's: Kieffer's Table 1 takes 860 J kg⁻¹ K⁻¹ ("MARS p.855") against the ruling's 735 from
+      memory, a time constant of 4.9 sols at 141 K rather than 4.2 (the lane's science check).
+    - **B: the calibration**, against test 5 and test 4's [0.20, 0.32]. It takes:
+      - the frost's albedo and emissivity (T3);
+      - the reservoir's pressure (T4: the frost point falls as the caps grow);
+      - transport over the cap (T5);
+      - the high latitudes' inertia, with P14.T54.a's law and P14.T49.l's pore gas (T6);
+      - dust's solar heating of the slab (Kieffer's H_V), from plan 14's aerosol modes;
+      - β thinned with height, and the frost point at the ground's own pressure (R5; 0.63 K km⁻¹ on
+        Mars, 135 K on Olympus Mons and 152 K in Hellas);
+      - the kind of the reference Mars's 214 K (D6);
+      - the absorber's weighting of the slab's level (T7).
+  - _The slab's level._ p ÷ e is built. On a column held at CO₂'s saturation curve the mass-weighted
+    ⟨T⁴⟩^¼ is 141.73 K, against T_sat(p ÷ e)'s 141.13 K, so p ÷ 2 (143.08 K) is no column mean. A
+    pressure-broadened absorber weights it towards p e^−½ (144.50 K). For the calibration.
+  - _The endless reservoir._ A frost that lasts the year still grows without bound, and the bulk gas
+    is still an endless reservoir (T4): test 3's seasonal locked Moon under Mars's air condenses
+    12.6 W m⁻² of its year's latent heat onto its nightside, every orbit. The step whose frost runs
+    out now pays its remainder's latent heat (closed by R09.T13.h).
+  - _Frost by month_ is not in the payload. The frost is internal, and frost by month waits on
+    P14.T55.e or the calibration, on a later `SURFACE_PAYLOAD_FORMAT` (decision-r09-t13h-scope §6.2).
+  - _Airs under 100 Pa reach the pass at 0 Pa_ (decision-r09-t13h-scope §9.3). Plan 14 labels any
+    air below `AIRLESS_PRESSURE` `Airless`, and `surface_pressure_of` writes exactly 0 for it, the
+    ruled header contract (decision-r11-palette-liquids item 5), so no generated Pluto or Triton
+    takes the slab or the frost floor. The way through is P14.T53.c's `Tenuous` state, at 24; the
+    hand-built Pluto-like test stands in until then. A retained air below 100 Pa with no ice would
+    still lose its frost floor (a 50 Pa CO₂ air its 132 K, its polar nights falling about 70 K), for
+    T53.c's brief.
+  - _Kelly et al.'s 6.0 × 10¹⁵ kg_ may be the caps' peak total rather than their swing (its abstract
+    says "the total amount of condensed carbon dioxide mass seen by the GRS"); the test prints both
+    the swing (0.342) and the total's peak (0.415) beside it. For the calibration.
+  - _The polar night's non-condensable gases._ Hayne et al. 2012 (JGR 117, E08014, abstract read)
+    find the polar-winter air "enriched by a factor ∼5–7 in non-condensable gases", which would
+    lower T_f by 1.6–2.5 K (James et al.'s curve) and the frost's emission by 4–7%. For the
+    calibration, beside T4.
+  - _The clearing's sources_ (Kieffer and Titus 2001, Icarus 154, 162; Piqueux et al. 2015, Icarus
+    251, 164) could not be read by the lane's science check; the 70–100° window stays from memory,
+    for the calibration to read.
 - **Deviations in T7.i, as built** (2026-10-20; lane `r09-craters`, from
   `origin/rendering-and-planets` at `8f307d16` with the plan text of `84c56ed5`, measured there and
   merged with `1870973b` before its goldens were blessed; main's rulings of 2026-10-19,

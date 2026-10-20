@@ -104,7 +104,11 @@
 //! carried vapour along, as the record decodes it. R09.T13.j revised it for the land's water
 //! (decision-r09-t13e-revision): the sea rains its own evaporation plus its band's convergence,
 //! each land cell takes that convergence as a vapour source, the orographic model carries the
-//! sea's air along the bands, and frozen ground recycles nothing. R09.T13.f added the cold traps
+//! sea's air along the bands, and frozen ground recycles nothing. R09.T13.h revised the radiative
+//! model's thin air (decision-r09-t13-thin-air §1.9): its slab is in balance with its column's
+//! mean emission over each month of the orbit before, bounded at the bulk gas's frost point one
+//! scale height up, its deficit falling as snow on every column, and a frost that runs out within
+//! a step pays its latent heat. R09.T13.f added the cold traps
 //! (`ice`, the pipeline's step 7): each ice's cold-trapped part,
 //! the inputs' `cold_traps`, placed after the zonal parts in one function in each field cell's
 //! cold-trap fraction, from one call of plan 14's `ColdTrapGround::fractions_at` a cell for every

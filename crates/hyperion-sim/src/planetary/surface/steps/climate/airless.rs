@@ -1,5 +1,5 @@
-//! Radiative equilibrium with thermal inertia (R09.T13.c, Design note 8): the climate of airless
-//! and thin-air worlds, which
+//! Radiative equilibrium with thermal inertia (R09.T13.c, its thin air R09.T13.h's; Design note
+//! 8): the climate of airless and thin-air worlds, which
 //! [`ClimateModelKind::RadiativeEquilibrium`](hyperion_surface::field::ClimateModelKind::RadiativeEquilibrium)
 //! names, built to the lane's research for it (research-c, in the lane's scratch directory,
 //! `research-c/notes.md`).
@@ -62,9 +62,11 @@
 //!   of the tidally locked grid marches its own column over the seasonal orbit in
 //!   [`MIN_STEPS_PER_MONTH`] steps a month, lit by the host's beam (T13.b's [`HostTrack`]); in a
 //!   one-month year, or with no orbit at all, the column is in radiative balance with its constant
-//!   light, the closed form εσT⁴ = F + Q, its night the heat flow's floor.
+//!   light, the closed form εσT⁴ = F + Q, its night the heat flow's floor, under a thin air its
+//!   balance with the slab ([`ThinAir::balance`]).
 //!
-//! The run starts every column at [`SPIN_UP_START`] of its annual-mean radiative temperature (all
+//! The run starts every column at [`SPIN_UP_START`] of its closed form's temperature under its
+//! annual-mean sunlight ([`ThinAir::balance`]: its radiative temperature on an airless world; all
 //! of it on a locked world), runs one orbit, then jumps every layer so that its mean over the
 //! orbit is the surface's plus the heat flow's gradient (Kieffer 2013, JGR Planets 118, 451,
 //! §3.2.5 [108]–[109], read: "the condition for no net heat flow with temperature-independent
@@ -77,13 +79,21 @@
 //! # The thin air
 //!
 //! A positive surface pressure (the reference Mars's) adds Kieffer's one-layer grey slab with no
-//! solar heating (2013, §2.2.3 eq. 5 and §2.3.2 eqs. 11–12, read): it absorbs a share β of the surface's
-//! emission, and in its own balance σ`T_a`⁴ = F ÷ (2 − εβ) it sends down β σ`T_a`⁴, of which the
-//! surface takes ε, held at each point's monthly-mean absorbed sunlight (the slab's time constant is
-//! "a few sols", his [118]). β is solved once so that the model's mean in the brightness kind is
-//! plan 14's ([`ThinAir`]). Where the air's bulk gas condenses, the surface never falls below its
-//! frost point at its partial pressure: Kieffer's [101], "the unbalanced energy W is applied to
-//! condensation or sublimation" ([`Frost`]).
+//! solar heating (2013, §2.2.3 eq. 5 and [43]–[46], read), balanced and bounded, with its snowfall
+//! (decision-r09-t13-thin-air §1.9, R09.T13.h). It absorbs a share β of the surface's emission and
+//! emits βσ`T_a`⁴ from each face, so in its own balance σ`T_a`⁴ = F̄ ÷ 2, F̄ being its column's mean
+//! emission ⟨εσ`T_s`⁴⟩ over the same month of the orbit before (the slab's time constant is "a few
+//! sols", his [118], shorter than a month and longer than a day); the first orbit takes a column in
+//! balance with its month's sunlight under the unbounded slab, T13.c's form. Where the bulk gas
+//! condenses, the slab never falls below its frost point one scale height up
+//! ([`Frost::aloft_point_k`], his [46]), and where it is held there its deficit β (2σ`T_a`⁴ − F̄)
+//! falls as snow on the column, frost or none on the ground ([`Slab`]), which sublimes from bare
+//! ground through the frost's balance. The surface takes ε of the back radiation βσ`T_a`⁴. A slab's column is a site on the
+//! whole-days clock, a phase column in true time (whose emission is carried to the hour angles it
+//! takes in the next orbit, [`carried`]) and a point on a locked world. β is solved once so that the
+//! model's mean in the brightness kind is plan 14's ([`ThinAir`]). Where the air's bulk gas
+//! condenses, the surface never falls below its frost point at its partial pressure: Kieffer's
+//! [101], "the unbalanced energy W is applied to condensation or sublimation" ([`Frost`]).
 //!
 //! # The answer
 //!
@@ -94,7 +104,7 @@
 //! weight in the field's means, and the model's lower bound. No lapse term (that ruling's §2.4 and
 //! decision-r09-t13a-relief §2.2).
 
-use core::f64::consts::{PI, TAU};
+use core::f64::consts::{E, PI, TAU};
 
 use hyperion_surface::field::month_edges;
 
@@ -164,9 +174,10 @@ const MAX_NODES: usize = 64;
 /// month is under a solar day takes at most about 2,100 in its longest).
 const MAX_STEPS_PER_MONTH: u32 = 4_096;
 
-/// The share of a column's annual-mean radiative temperature, ((F + Q) ÷ εσ)^¼, that a turning
-/// world's columns start at: 0.8 (`Adopted`; research-c §2.3, a day's arithmetic mean lying below
-/// its radiative one). A locked world's start at all of it.
+/// The share of a column's closed-form temperature under its annual-mean sunlight
+/// ([`ThinAir::balance`]; on an airless world its radiative temperature, ((F + Q) ÷ εσ)^¼) that a
+/// turning world's columns start at: 0.8 (`Adopted`; research-c §2.3, a day's arithmetic mean
+/// lying below its radiative one). A locked world's start at all of it.
 pub(super) const SPIN_UP_START: f64 = 0.8;
 
 /// The most orbits a run takes: 16 (`Adopted`; research-c §2.3 measured 1–2 orbits at the lunar
@@ -258,20 +269,20 @@ impl Regolith {
         self.background_w_m2() + self.heat_flow_w_m2
     }
 
+    /// What heats a column of absorbed sunlight `absorbed_w_m2` from outside the slab, W m⁻²: the
+    /// sunlight, the background and the heat flow, `E_in` = S + εσ`T_CMB`⁴ + Q, summed as T13.c's
+    /// radiative temperature summed them, so that an airless column's closed form is T13.c's to
+    /// the bit.
+    #[must_use]
+    fn outside_w_m2(&self, absorbed_w_m2: f64) -> f64 {
+        self.input(absorbed_w_m2, 0.0) + self.heat_flow_w_m2
+    }
+
     /// A column's input under absorbed sunlight `absorbed_w_m2` and the slab's back radiation
     /// `down_w_m2`, W m⁻²: the sunlight, the background and ε of the back radiation.
     #[must_use]
     fn input(&self, absorbed_w_m2: f64, down_w_m2: f64) -> f64 {
         absorbed_w_m2 + self.background_w_m2() + self.emissivity * down_w_m2
-    }
-
-    /// The radiative temperature of a column of input `input`, W m⁻² ([`input`](Self::input)):
-    /// ((input + Q) ÷ εσ)^¼.
-    #[must_use]
-    fn radiative_k(&self, input: f64) -> f64 {
-        ((input + self.heat_flow_w_m2) / self.emission())
-            .sqrt()
-            .sqrt()
     }
 }
 
@@ -287,7 +298,7 @@ fn albedo_of(state: SurfaceState, material: SurfaceMaterial) -> f64 {
     state.albedo(material).value()
 }
 
-/// The frost point where the air's bulk gas condenses on the ground.
+/// The frost point where the air's bulk gas condenses on the ground, and the slab's bound aloft.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct Frost {
     /// The bulk gas's frost point at its partial pressure, K: the registry's saturation
@@ -296,12 +307,21 @@ pub(super) struct Frost {
     /// Its latent heat there, J kg⁻¹: the registry curve's own Clausius–Clapeyron enthalpy over
     /// the gas's molar mass.
     pub(super) latent_heat_j_per_kg: f64,
+    /// The bulk gas's frost point one scale height up, at its partial pressure over e, K.
+    ///
+    /// The slab cannot fall below it: its air condenses until it is held there (Kieffer 2013, JGR
+    /// Planets 118, 451, [46], read: "bounded at this value and the excess energy loss is converted
+    /// to snow"; decision-r09-t13-thin-air §1.9). The reference Mars's
+    /// carbon dioxide at 604.8 Pa ÷ e, 222.5 Pa, holds it at 141.13 K by James et al.'s curve as
+    /// Kieffer gives it (the ruling's figure), and at 141.09 K by the registry's.
+    pub(super) aloft_point_k: f64,
 }
 
 impl Frost {
     /// The frost of the air of `inputs`: its largest gas's, at its mole fraction of the surface
     /// pressure, where the registry holds the gas's phase diagram and molar mass and the gas
-    /// condenses at that pressure; `None` otherwise, or on an airless body.
+    /// condenses at that pressure, with its frost point at a scale height's lower pressure;
+    /// `None` otherwise, or on an airless body.
     #[must_use]
     pub(super) fn of(inputs: &CoarseInputs) -> Option<Self> {
         let pressure = inputs.surface_pressure().value();
@@ -312,13 +332,25 @@ impl Frost {
         let row = by_key(bulk.substance.as_str())?.substance();
         let diagram = row.phase_diagram()?;
         let mass = row.molar_mass_g_per_mol()?;
-        let point = diagram.saturation_temperature(Pascals::new(bulk.mole_fraction * pressure))?;
+        let partial = bulk.mole_fraction * pressure;
+        let point = diagram.saturation_temperature(Pascals::new(partial))?;
         let enthalpy = diagram.clausius_clapeyron_enthalpy_j_per_mol(point)?;
         let latent = enthalpy / (mass * 1e-3);
-        (point.value() > 0.0 && latent > 0.0).then_some(Self {
+        // A lower positive pressure than the surface's, at which the curve has a frost point
+        // wherever it has one at the surface: below its coldest piece it is a line in 1 ÷ T.
+        let aloft = diagram.saturation_temperature(Pascals::new(partial / E))?;
+        (point.value() > 0.0 && latent > 0.0 && aloft.value() > 0.0).then_some(Self {
             point_k: point.value(),
             latent_heat_j_per_kg: latent,
+            aloft_point_k: aloft.value(),
         })
+    }
+
+    /// The slab's bound σ`T_fa`⁴, W m⁻²: the blackbody flux at the frost point aloft, of which a
+    /// slab there emits β from each face.
+    #[must_use]
+    fn aloft_blackbody_w_m2(&self) -> f64 {
+        STEFAN_BOLTZMANN * math::powi(self.aloft_point_k, 4)
     }
 }
 
@@ -342,22 +374,24 @@ impl ThinAir {
     /// The thin air of `inputs` over `regolith`, under a grid-mean annual absorbed sunlight of
     /// `absorbed_w_m2`: β solved so that the mean in the brightness kind of
     /// decision-r09-t13d-normalisation §2.2, (⟨F⟩ − `E_nf`) ÷ σ with F the emitted flux and `E_nf`
-    /// the night floor's, is plan 14's mean T\*, by energy without frost: the surface emits
-    /// `E_nf` + ⟨S⟩ 2 ÷ (2 − εβ), so β = (2 ÷ ε) (1 − ⟨S⟩ ÷ σT\*⁴), held to [0, 1].
+    /// the night floor's, is plan 14's mean T\*, by energy with no frost and no bound: a periodic
+    /// column under the balanced slab emits a mean ⟨F⟩ with ⟨F⟩ (1 − εβ ÷ 2) = ⟨S⟩ + `E_nf`, so
+    /// β = (2 ÷ ε) (1 − (⟨S⟩ + `E_nf`) ÷ (σT\*⁴ + `E_nf`)), held to [0, 1]
+    /// (decision-r09-t13-thin-air §1.9 item 4).
     ///
     /// The reference Mars's (T\* 214 K, ⟨S⟩ 103.9 W m⁻², a `T_eq` of 206.9 K at plan 14's temperate
     /// albedo) is 0.265, above Kieffer's clear carbon dioxide's 0.163 at 636 Pa (2013, eq. 4 with
     /// his C₁ 0.11 at 700 Pa, as research-c §8 computed it), because the brightness kind lays the
     /// whole 7 K of plan 14's greenhouse on the slab (R09's Risks, "Deferred findings (2026-10-13
-    /// rule) (R09.T13.c)"). A frost that lasts the year adds its latent heat, which R09.T13.d's
-    /// constant takes up.
+    /// rule) (R09.T13.c)"). The frost's and the snow's remainders are R09.T13.d's constant.
     #[must_use]
     pub(super) fn of(inputs: &CoarseInputs, regolith: &Regolith, absorbed_w_m2: f64) -> Self {
         if !positive(inputs.surface_pressure().value()) {
             return Self::NONE;
         }
+        let floor = regolith.floor_flux_w_m2();
         let target = STEFAN_BOLTZMANN * math::powi(inputs.mean_surface_temperature().value(), 4);
-        let beta = 2.0 / regolith.emissivity * (1.0 - absorbed_w_m2 / target);
+        let beta = 2.0 / regolith.emissivity * (1.0 - (absorbed_w_m2 + floor) / (target + floor));
         // By comparison, so that a NaN takes no slab.
         let absorptivity = if beta > 1.0 {
             1.0
@@ -372,11 +406,117 @@ impl ThinAir {
         }
     }
 
-    /// The share of a month's absorbed sunlight that the slab sends down, β ÷ (2 − εβ) (Kieffer
-    /// 2013, eq. 12 with no solar heating of the slab, times β).
+    /// The balanced bounded slab over a column whose mean emission over a month is
+    /// `mean_emission_w_m2`, F̄ = ⟨εσ`T_s`⁴⟩ (decision-r09-t13-thin-air §1.9 items 1–3).
+    ///
+    /// In its own balance with no solar heating the slab absorbs βF̄ and emits βσ`T_a`⁴ from each
+    /// face (Kieffer 2013, [43] and eq. 5 with no net heating), so σ`T_a`⁴ = F̄ ÷ 2. Where the bulk
+    /// gas condenses it never falls below its frost point aloft, σ`T_a`⁴ = max(F̄ ÷ 2, σ`T_fa`⁴)
+    /// ([`Frost::aloft_point_k`], his [46]), and its deficit β (2σ`T_a`⁴ − F̄) falls as snow. Its
+    /// back radiation is βσ`T_a`⁴.
     #[must_use]
-    fn down_share(&self, emissivity: f64) -> f64 {
-        self.absorptivity / (2.0 - emissivity * self.absorptivity)
+    pub(super) fn slab(&self, mean_emission_w_m2: f64) -> Slab {
+        let half = 0.5 * mean_emission_w_m2;
+        let (blackbody, snow) = match self.frost {
+            Some(frost) if half < frost.aloft_blackbody_w_m2() => {
+                let bound = frost.aloft_blackbody_w_m2();
+                (
+                    bound,
+                    self.absorptivity * (2.0 * bound - mean_emission_w_m2),
+                )
+            }
+            Some(_) | None => (half, 0.0),
+        };
+        Slab {
+            mean_emission_w_m2,
+            blackbody_w_m2: blackbody,
+            down_w_m2: self.absorptivity * blackbody,
+            snow_w_m2: snow,
+        }
+    }
+
+    /// The balanced column of emissivity `emissivity` under a constant input from outside the
+    /// slab, `outside_w_m2` = S + εσ`T_CMB`⁴ + Q, `E_in`: the march's own steady state under
+    /// constant light (decision-r09-t13-thin-air §1.9 item 5, as decision-r09-t13h-scope's "§1.9
+    /// item 5 amended" replaces it).
+    ///
+    /// With F = εσT⁴, A = σ`T_fa`⁴ and B = εσ`T_f`⁴, F = max(B, G), G the bare column's balance:
+    /// `E_in` ÷ (1 − εβ ÷ 2), T13.c's form with the background and the heat flow under the slab, where
+    /// `E_in` ≥ (2 − εβ) A, the slab unbounded (everywhere, with no bound); and below that, the slab
+    /// bounded and its snow β (2A − F) sublimed by the ground as the march's is (§1.9 item 3;
+    /// decision-r09-t13h-scope §2), (`E_in` − (2 − ε) βA) ÷ (1 − β), for β < 1 only, the column at
+    /// β = 1 held at B. Where F = B the column is held at its frost point and its frost grows, and
+    /// its back radiation is β max(F ÷ 2, A): βσ`T_fa`⁴ wherever B < 2A, as on Mars.
+    #[must_use]
+    pub(super) fn balance(&self, emissivity: f64, outside_w_m2: f64) -> Balanced {
+        let emission = emissivity * STEFAN_BOLTZMANN;
+        let beta = self.absorptivity;
+        let eb = emissivity * beta;
+        let unbounded = 2.0 * outside_w_m2 / (2.0 - eb);
+        let open = |emitted: f64| Balanced {
+            surface_k: (emitted / emission).sqrt().sqrt(),
+            slab: self.slab(emitted),
+        };
+        let Some(frost) = self.frost else {
+            return open(unbounded);
+        };
+        let bound = frost.aloft_blackbody_w_m2();
+        let frosted = emission * math::powi(frost.point_k, 4);
+        let bare = if outside_w_m2 >= (2.0 - eb) * bound {
+            Some(unbounded)
+        } else if beta < 1.0 {
+            Some((outside_w_m2 - (2.0 - emissivity) * beta * bound) / (1.0 - beta))
+        } else {
+            None
+        };
+        match bare {
+            Some(emitted) if emitted > frosted => open(emitted),
+            Some(_) | None => Balanced {
+                surface_k: frost.point_k,
+                slab: self.slab(frosted),
+            },
+        }
+    }
+}
+
+/// A column in balance under constant light ([`ThinAir::balance`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Balanced {
+    /// The surface temperature, K.
+    pub(super) surface_k: f64,
+    /// The slab over it.
+    pub(super) slab: Slab,
+}
+
+/// A thin air's slab over one column in one month (decision-r09-t13-thin-air §1.9): the
+/// [`ThinAir::slab`] of the column's mean emission.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "each is a flux in W m⁻², its unit in its name as the crate's rules ask"
+)]
+pub(super) struct Slab {
+    /// The column's mean emission F̄ it was formed from, W m⁻².
+    pub(super) mean_emission_w_m2: f64,
+    /// σ`T_a`⁴, W m⁻²: the blackbody flux at the slab's temperature, of which the slab emits β
+    /// from each face (Kieffer 2013, [43]).
+    pub(super) blackbody_w_m2: f64,
+    /// Its back radiation R⇓ = βσ`T_a`⁴, W m⁻², of which the surface absorbs ε.
+    pub(super) down_w_m2: f64,
+    /// Its deficit β (2σ`T_a`⁴ − F̄), W m⁻², the latent heat of the snow it condenses.
+    ///
+    /// It is zero but where the slab is bounded. Its snow, this over the frost's latent heat,
+    /// falls on the column at every step of the month over the step's true duration, frost or none
+    /// on the ground.
+    pub(super) snow_w_m2: f64,
+}
+
+impl Slab {
+    /// The slab's temperature `T_a`, K.
+    #[cfg(test)]
+    #[must_use]
+    pub(super) fn temperature_k(&self) -> f64 {
+        (self.blackbody_w_m2 / STEFAN_BOLTZMANN).sqrt().sqrt()
     }
 }
 
@@ -700,12 +840,26 @@ struct Schedule {
     share: Vec<f64>,
     /// Each step's true duration, s, over which a frost condenses or sublimes.
     duration_s: Vec<f64>,
+    /// Each step's middle, its mean anomaly from periapsis, rad.
+    mean_anomaly_rad: Vec<f64>,
     /// The columns of each site, at hour angles evenly spaced round the day.
     phases: usize,
     /// The sunlight.
     light: Light,
     /// Each month's mean absorbed sunlight at each site, W m⁻², `month * sites + site`.
     month_absorbed: Vec<f64>,
+}
+
+impl Schedule {
+    /// Each month's steps.
+    #[must_use]
+    fn steps_in_months(&self) -> Vec<u32> {
+        let mut steps = vec![0_u32; self.months];
+        for &month in &self.month_of {
+            steps[month] += 1;
+        }
+        steps
+    }
 }
 
 /// How a run's orbit is stepped.
@@ -792,13 +946,163 @@ impl Tally {
     }
 }
 
-/// A run's marched state: the tallies of its last orbit, the orbits it took and whether it
-/// converged.
+/// A run's marched state: the tallies of its last orbit, the orbits it took, whether it
+/// converged, the mean emissions its last orbit's slabs were formed from (`month * columns +
+/// column`, W m⁻²) and each column's frost at its end, kg m⁻².
 #[derive(Debug, Clone, PartialEq)]
 struct Marched {
     tallies: Vec<Tally>,
     orbits: u32,
     converged: bool,
+    mean_emission_w_m2: Vec<f64>,
+    frost_kg_m2: Vec<f64>,
+}
+
+/// What an orbit sums for the next: each column's mean surface temperature over the orbit, K;
+/// its emission εσT⁴ summed over each month's steps, `month * columns + column`, W m⁻²; and on
+/// the first orbit each node's mean, `column * nodes + node`, K, for the jump.
+#[derive(Debug, Clone, PartialEq)]
+struct OrbitSums {
+    surface_means: Vec<f64>,
+    emitted_w_m2: Vec<f64>,
+    layer_means: Option<Vec<f64>>,
+}
+
+/// One column's state after one step of a run, for the run's [`Observer`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Sample {
+    /// The orbit, from 0.
+    pub(super) orbit: u32,
+    /// The step of the orbit.
+    pub(super) step: usize,
+    /// The step's middle, its mean anomaly from periapsis, rad.
+    pub(super) mean_anomaly_rad: f64,
+    /// The step's month.
+    pub(super) month: usize,
+    /// The column, `site * phases + phase`.
+    pub(super) column: usize,
+    /// The column's site: the grid's points first, then the end columns.
+    pub(super) site: usize,
+    /// The sample's weight in its site's tally: its step's share of the orbit over the phases.
+    pub(super) weight: f64,
+    /// The step's true duration, s, over which the frost and the snow change.
+    pub(super) duration_s: f64,
+    /// The surface temperature after the step, K.
+    pub(super) surface_k: f64,
+    /// The sunlight the surface absorbed over the step, W m⁻².
+    pub(super) absorbed_w_m2: f64,
+    /// The column's input over the step, W m⁻²: the sunlight, the background and ε of the slab's
+    /// back radiation.
+    pub(super) input_w_m2: f64,
+    /// The slab over the column in the step's month.
+    pub(super) slab: Slab,
+    /// The frost on the column after the step, kg m⁻².
+    pub(super) frost_kg_m2: f64,
+    /// The frost's change over the step, its snow included, kg m⁻².
+    pub(super) frost_change_kg_m2: f64,
+    /// The column's change of stored heat over the step, `Σᵢ (Cᵢ ÷ Δt) ΔTᵢ` over its nodes with
+    /// each month's compression, W m⁻², where the observer asks for it
+    /// ([`Observer::STORED_HEAT`]); 0 otherwise.
+    pub(super) stored_w_m2: f64,
+}
+
+/// What watches a run's samples: every closure over a [`Sample`], or a test's own recorder.
+pub(super) trait Observer {
+    /// Whether the samples carry each step's change of the column's stored heat, which costs a
+    /// sum over the nodes twice a step.
+    const STORED_HEAT: bool = false;
+
+    /// Takes one sample.
+    fn sample(&mut self, sample: &Sample);
+}
+
+impl<F: FnMut(&Sample)> Observer for F {
+    fn sample(&mut self, sample: &Sample) {
+        self(sample);
+    }
+}
+
+/// Each lane's stored heat Σᵢ (Cᵢ ÷ Δt) Tᵢ over the nodes `t` under the system `implicit`, W m⁻²:
+/// its change over a step is what the step stored.
+#[must_use]
+fn heat_content<const L: usize>(implicit: &Implicit, t: &[[f64; L]]) -> [f64; L] {
+    let mut heat = [0.0; L];
+    for (storage, node) in implicit.storage_w_per_m2_k.iter().zip(t) {
+        for (sum, value) in heat.iter_mut().zip(node) {
+            *sum += storage * value;
+        }
+    }
+    heat
+}
+
+/// The next orbit's mean emissions, `month * columns + column`, from this orbit's `means`, W m⁻².
+///
+/// On a world stepped in true time each column takes the emission at the hour angles it takes in
+/// the next orbit, an orbit turning every phase column on by the fraction of a day it holds
+/// (decision-r09-t13-thin-air §1.5, the slab following local time; decision-r09-t13h-scope §7):
+/// the column that many phase columns on, interpolated linearly between the two either side of a
+/// fractional turn, whose convex weights keep each band's ring sum (§7.2); elsewhere its own.
+#[must_use]
+fn carried(schedule: &Schedule, means: Vec<f64>, count: usize) -> Vec<f64> {
+    let Some(turn) = Turn::of(schedule) else {
+        return means;
+    };
+    let phases = schedule.phases;
+    let (whole, part) = match turn {
+        Turn::Whole(whole) => (whole, 0.0),
+        Turn::Between(whole, part) => (whole, part),
+    };
+    means
+        .chunks_exact(count)
+        .flat_map(|month| {
+            month.chunks_exact(phases).flat_map(move |site| {
+                (0..phases).map(move |phase| {
+                    let near = (phase + whole) % phases;
+                    match turn {
+                        Turn::Whole(_) => site[near],
+                        Turn::Between(..) => {
+                            (1.0 - part) * site[near] + part * site[(near + 1) % phases]
+                        }
+                    }
+                })
+            })
+        })
+        .collect()
+}
+
+/// How far an orbit turns the hour angles of a world stepped in true time, in phase columns:
+/// N frac(D), N the phase columns and D the solar days an orbit holds, so that phase column p
+/// takes in each orbit the hour angles column p + N frac(D) (mod N) took in the orbit before
+/// (decision-r09-t13h-scope §7.1).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Turn {
+    /// A whole number of columns, mod N: within [`COMMENSURATE_COLUMNS`] of one (a 3:2 Mercury's
+    /// 11.999 86 is 12).
+    Whole(usize),
+    /// n + w columns, 0 < w < 1, n mod N.
+    Between(usize, f64),
+}
+
+impl Turn {
+    /// The turn of `schedule`'s orbit; `None` where it is not stepped in true time.
+    #[must_use]
+    fn of(schedule: &Schedule) -> Option<Self> {
+        let Light::Turning { days_per_orbit, .. } = schedule.light else {
+            return None;
+        };
+        let phases = schedule.phases;
+        let turn = (days_per_orbit - days_per_orbit.floor()) * index(phases);
+        let nearest = turn.round();
+        let count = |x: f64| {
+            usize::try_from(floor_count(x, u32::MAX)).expect("a column count fits a usize") % phases
+        };
+        Some(if (turn - nearest).abs() < COMMENSURATE_COLUMNS {
+            Self::Whole(count(nearest))
+        } else {
+            let whole = turn.floor();
+            Self::Between(count(whole), turn - whole)
+        })
+    }
 }
 
 /// The radiative model of one body.
@@ -812,8 +1116,21 @@ struct Model {
 impl Model {
     /// One step of a group of `L` columns, node i of lane l at `t[i][l]`, their frosts
     /// `frost_kg_m2`, under the inputs `input` (W m⁻²: the absorbed sunlight, the background and
-    /// the slab's share), over the system `implicit`, its true duration `duration_s` seconds for the
-    /// frost; `scratch` holds the elimination's rᵢ. Each lane's arithmetic is a lone column's.
+    /// the slab's share) and the slab's snowfall `snow_kg_m2_s`, over the system `implicit`, its true
+    /// duration `duration_s` seconds for the frost and the snow; `scratch` holds the elimination's
+    /// rᵢ. Each lane's arithmetic is a lone column's.
+    ///
+    /// The snow joins the frost before the frost's balance, so that snow on warmer ground sublimes
+    /// through it (decision-r09-t13-thin-air §1.9 item 3). A frost that the step's energy more than
+    /// sublimes is spent within the step: the surface is solved free with the frost's latent heat
+    /// taken from its balance, so that the step conserves energy (R09.T13.c's deferred finding, "the
+    /// step in which a frost runs out loses its remainder").
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a step reads the system, the inputs, the snow and the duration, and writes the \
+                  nodes, the frosts and the elimination's scratch; bundling them would only \
+                  rename them"
+    )]
     fn advance<const L: usize>(
         &self,
         implicit: &Implicit,
@@ -821,6 +1138,7 @@ impl Model {
         frost_kg_m2: &mut [f64; L],
         scratch: &mut [[f64; L]],
         input: [f64; L],
+        snow_kg_m2_s: [f64; L],
         duration_s: f64,
     ) {
         let last = t.len() - 1;
@@ -844,26 +1162,48 @@ impl Model {
             rhs[lane] = s[0] * t[0][lane] + input[lane] + g[0] * scratch[1][lane];
         }
         let emission = self.regolith.emission();
-        let free = surface_temperatures(implicit.surface_w_per_m2_k, emission, rhs, t[0]);
+        let linear = implicit.surface_w_per_m2_k;
+        let free = surface_temperatures(linear, emission, rhs, t[0]);
         for lane in 0..L {
             let surface = match self.air.frost {
-                Some(frost) if frost_kg_m2[lane] > 0.0 || free[lane] < frost.point_k => {
-                    let held = frost.point_k;
-                    let below = factor[1] * held + scratch[1][lane];
-                    let unbalanced = input[lane] - emission * math::powi(held, 4)
-                        + g[0] * (below - held)
-                        - s[0] * (held - t[0][lane]);
-                    let mass =
-                        frost_kg_m2[lane] - unbalanced * duration_s / frost.latent_heat_j_per_kg;
-                    if mass > 0.0 {
-                        frost_kg_m2[lane] = mass;
-                        held
+                Some(frost) => {
+                    let available = frost_kg_m2[lane] + snow_kg_m2_s[lane] * duration_s;
+                    if available > 0.0 || free[lane] < frost.point_k {
+                        let held = frost.point_k;
+                        let below = factor[1] * held + scratch[1][lane];
+                        let unbalanced = input[lane] - emission * math::powi(held, 4)
+                            + g[0] * (below - held)
+                            - s[0] * (held - t[0][lane]);
+                        let latent = frost.latent_heat_j_per_kg;
+                        let mass = available - unbalanced * duration_s / latent;
+                        if mass > 0.0 {
+                            frost_kg_m2[lane] = mass;
+                            held
+                        } else {
+                            frost_kg_m2[lane] = 0.0;
+                            // The frost's latent heat over the step's true duration, W m⁻², is no
+                            // more than the balance's excess at the frost point, so the balance
+                            // less it rises through zero at or above that point
+                            // (decision-r09-t13h-scope §2). With no frost at all, the balance is
+                            // nil at the point itself.
+                            let spent = available * latent / duration_s;
+                            if spent > 0.0 {
+                                let [warmer] = surface_temperatures(
+                                    linear,
+                                    emission,
+                                    [rhs[lane] - spent],
+                                    [t[0][lane]],
+                                );
+                                warmer
+                            } else {
+                                held
+                            }
+                        }
                     } else {
-                        frost_kg_m2[lane] = 0.0;
-                        if free[lane] > held { free[lane] } else { held }
+                        free[lane]
                     }
                 }
-                Some(_) | None => free[lane],
+                None => free[lane],
             };
             t[0][lane] = surface;
         }
@@ -926,40 +1266,42 @@ impl Model {
         }
     }
 
-    /// One orbit of `schedule` over the run's columns, at the sites `directions`, in `columns`
-    /// (the slab's shares `down`, `month * sites + site`): each site's tally about its reference in
-    /// `tallies`, each column's mean surface temperature into `surface_means` and, where
-    /// `layer_means` is given, each node's mean; every sample also to `observe` (site, month,
-    /// weight, T).
+    /// One orbit of `schedule` over the run's columns, at the sites `directions`, in `columns`,
+    /// under the slabs `slabs` (`month * columns + column`): each site's tally about its reference
+    /// in `tallies`, and into `sums` each column's mean surface temperature, its emission summed
+    /// over each month's steps and, where it asks for them, each node's mean; every sample also to
+    /// `observe`.
     ///
     /// Step by step over every group of columns: a group's [`LANES`] columns advance together.
     #[expect(
         clippy::too_many_arguments,
-        reason = "an orbit reads the schedule and the sites and writes the columns, the tallies \
-                  and the jump's means; bundling them would only rename them"
+        reason = "an orbit reads the schedule, the sites and the slabs and writes the columns, the \
+                  tallies and the orbit's sums; bundling them would only rename them"
     )]
-    fn orbit<const L: usize, F: FnMut(usize, usize, f64, f64)>(
+    fn orbit<const L: usize, O: Observer>(
         &self,
         schedule: &Schedule,
         directions: &[[f64; 3]],
-        down: &[f64],
+        slabs: &[Slab],
         columns: &mut Columns<L>,
         tallies: &mut [Tally],
-        surface_means: &mut [f64],
-        mut layer_means: Option<&mut [f64]>,
+        sums: &mut OrbitSums,
         orbit: u32,
-        observe: &mut F,
+        observe: &mut O,
     ) {
         let nodes = self.layers.nodes();
         let sites = directions.len();
         let (phases, count) = (schedule.phases, columns.count);
         let mut scratch = vec![[0.0; L]; nodes];
         let phase_weight = 1.0 / index(phases);
+        let emission = self.regolith.emission();
+        let latent = self.air.frost.map(|frost| frost.latent_heat_j_per_kg);
         for step in 0..schedule.month_of.len() {
             let month = schedule.month_of[step];
             let (implicit, duration) = (&schedule.implicit[month], schedule.duration_s[step]);
             let share = schedule.share[step];
             let weight = share * phase_weight;
+            let month_slabs = &slabs[month * count..(month + 1) * count];
             for (group, (t, frost)) in columns
                 .states
                 .chunks_exact_mut(nodes)
@@ -967,8 +1309,8 @@ impl Model {
                 .enumerate()
             {
                 let first = group * L;
-                let mut input = [0.0; L];
-                for (lane, value) in input.iter_mut().enumerate() {
+                let (mut absorbed, mut input, mut snow) = ([0.0; L], [0.0; L], [0.0; L]);
+                for lane in 0..L {
                     // A group's lanes past the last column repeat its first.
                     let column = if first + lane < count {
                         first + lane
@@ -976,17 +1318,31 @@ impl Model {
                         first
                     };
                     let (site, phase) = (column / phases, column % phases);
-                    let absorbed =
+                    let slab = month_slabs[column];
+                    absorbed[lane] =
                         Self::absorbed(schedule, directions, site, phase, step, orbit, sites);
-                    *value = self.regolith.input(absorbed, down[month * sites + site]);
+                    input[lane] = self.regolith.input(absorbed[lane], slab.down_w_m2);
+                    snow[lane] = latent.map_or(0.0, |latent| slab.snow_w_m2 / latent);
                 }
-                self.advance(implicit, t, frost, &mut scratch, input, duration);
+                let frost_before = *frost;
+                let heat_before = if O::STORED_HEAT {
+                    heat_content(implicit, t)
+                } else {
+                    [0.0; L]
+                };
+                self.advance(implicit, t, frost, &mut scratch, input, snow, duration);
+                let heat_after = if O::STORED_HEAT {
+                    heat_content(implicit, t)
+                } else {
+                    [0.0; L]
+                };
                 for lane in 0..L.min(count - first) {
                     let column = first + lane;
                     let (site, surface) = (column / phases, t[0][lane]);
                     tallies[site].add(month, weight, surface);
-                    surface_means[column] += share * surface;
-                    if let Some(means) = layer_means.as_deref_mut() {
+                    sums.surface_means[column] += share * surface;
+                    sums.emitted_w_m2[month * count + column] += emission * math::powi(surface, 4);
+                    if let Some(means) = sums.layer_means.as_deref_mut() {
                         for (mean, node) in means[column * nodes..(column + 1) * nodes]
                             .iter_mut()
                             .zip(t.iter())
@@ -994,7 +1350,23 @@ impl Model {
                             *mean += share * node[lane];
                         }
                     }
-                    observe(site, month, weight, surface);
+                    observe.sample(&Sample {
+                        orbit,
+                        step,
+                        mean_anomaly_rad: schedule.mean_anomaly_rad[step],
+                        month,
+                        column,
+                        site,
+                        weight,
+                        duration_s: duration,
+                        surface_k: surface,
+                        absorbed_w_m2: absorbed[lane],
+                        input_w_m2: input[lane],
+                        slab: month_slabs[column],
+                        frost_kg_m2: frost[lane],
+                        frost_change_kg_m2: frost[lane] - frost_before[lane],
+                        stored_w_m2: heat_after[lane] - heat_before[lane],
+                    });
                 }
             }
         }
@@ -1004,39 +1376,43 @@ impl Model {
     /// site) plus the heat flow's gradient, in groups of `L` columns: the first orbit, the jump,
     /// then orbits until no site's annual mean moves by [`CONVERGENCE_K`], at most
     /// [`MAX_ORBITS`]; every sample of every orbit to `observe`.
-    fn march<const L: usize, F: FnMut(usize, usize, f64, f64)>(
+    ///
+    /// Each orbit's slabs are formed from each column's mean emission in each month of the orbit
+    /// before ([`carried`]), the first orbit's from its sunlight ([`first_emission`](Self::first_emission));
+    /// decision-r09-t13-thin-air §1.9.
+    fn march<const L: usize, O: Observer>(
         &self,
         schedule: &Schedule,
         directions: &[[f64; 3]],
         start: &[f64],
-        observe: &mut F,
+        observe: &mut O,
     ) -> Marched {
         let nodes = self.layers.nodes();
         let phases = schedule.phases;
         let count = directions.len() * phases;
-        let down_share = self.air.down_share(self.regolith.emissivity);
-        let down: Vec<f64> = schedule
-            .month_absorbed
-            .iter()
-            .map(|a| down_share * a)
-            .collect();
+        let months = schedule.months;
         let mut columns = Columns::<L>::new(count, nodes, |column, node| {
             start[column / phases] + self.layers.geothermal_k[node]
         });
+        let steps = schedule.steps_in_months();
+        let mut mean_emission = self.first_emission(schedule, directions, &steps);
         let mut reference: Vec<f64> = start.to_vec();
         let mut orbits = 0;
         loop {
+            let slabs: Vec<Slab> = mean_emission.iter().map(|&f| self.air.slab(f)).collect();
             let mut tallies: Vec<Tally> = reference.iter().map(|&r| Tally::new(r)).collect();
-            let mut surface_means = vec![0.0; count];
-            let mut layer_means = (orbits == 0).then(|| vec![0.0; count * nodes]);
+            let mut sums = OrbitSums {
+                surface_means: vec![0.0; count],
+                emitted_w_m2: vec![0.0; months * count],
+                layer_means: (orbits == 0).then(|| vec![0.0; count * nodes]),
+            };
             self.orbit(
                 schedule,
                 directions,
-                &down,
+                &slabs,
                 &mut columns,
                 &mut tallies,
-                &mut surface_means,
-                layer_means.as_deref_mut(),
+                &mut sums,
                 orbits,
                 observe,
             );
@@ -1058,13 +1434,70 @@ impl Model {
                     tallies,
                     orbits,
                     converged,
+                    mean_emission_w_m2: mean_emission,
+                    frost_kg_m2: columns.frosts(),
                 };
             }
-            if let Some(means) = &layer_means {
-                let targets = long_run_means(schedule, &surface_means);
+            if let Some(means) = &sums.layer_means {
+                let targets = long_run_means(schedule, &sums.surface_means);
                 self.jump(&mut columns, means, &targets);
             }
             reference = annual;
+            let mut means = sums.emitted_w_m2;
+            for (i, sum) in means.iter_mut().enumerate() {
+                *sum /= f64::from(steps[i / count]);
+            }
+            mean_emission = carried(schedule, means, count);
+        }
+    }
+
+    /// The first orbit's mean emission of each column in each month, `month * columns + column`,
+    /// W m⁻²: 2 (⟨S⟩ + `E_nf`) ÷ (2 − εβ).
+    ///
+    /// That is a column in balance with its month's mean absorbed sunlight ⟨S⟩ under the unbounded
+    /// slab, T13.c's slab at balance (decision-r09-t13-thin-air §1.9; decision-r09-t13h-scope §7.3).
+    /// ⟨S⟩ is the site's month mean, T13.c's input, on whole days and on a locked world; in true
+    /// time it is each phase column's own mean over the month's steps at the first orbit's hour
+    /// angles, the window §1.5 gives the slab there. `steps` holds each month's steps.
+    #[must_use]
+    fn first_emission(
+        &self,
+        schedule: &Schedule,
+        directions: &[[f64; 3]],
+        steps: &[u32],
+    ) -> Vec<f64> {
+        let sites = directions.len();
+        let phases = schedule.phases;
+        let count = sites * phases;
+        let scale = 2.0 / (2.0 - self.regolith.emissivity * self.air.absorptivity);
+        let floor = self.regolith.floor_flux_w_m2();
+        match schedule.light {
+            Light::Turning { .. } => {
+                let mut sums = vec![0.0; schedule.months * count];
+                for (step, &month) in schedule.month_of.iter().enumerate() {
+                    let row = &mut sums[month * count..(month + 1) * count];
+                    for (column, sum) in row.iter_mut().enumerate() {
+                        *sum += Self::absorbed(
+                            schedule,
+                            directions,
+                            column / phases,
+                            column % phases,
+                            step,
+                            0,
+                            sites,
+                        );
+                    }
+                }
+                for (i, sum) in sums.iter_mut().enumerate() {
+                    *sum = scale * (*sum / f64::from(steps[i / count]) + floor);
+                }
+                sums
+            }
+            Light::Table(_) | Light::Beam { .. } => schedule
+                .month_absorbed
+                .iter()
+                .map(|s| scale * (s + floor))
+                .collect(),
         }
     }
 
@@ -1129,6 +1562,14 @@ impl<const L: usize> Columns<L> {
             frost: vec![[0.0; L]; groups],
         }
     }
+
+    /// Each column's frost, kg m⁻².
+    #[must_use]
+    fn frosts(&self) -> Vec<f64> {
+        (0..self.count)
+            .map(|column| self.frost[column / L][column % L])
+            .collect()
+    }
 }
 
 /// How far from a whole number of phase columns an orbit may turn the hour angles for the run to
@@ -1144,13 +1585,13 @@ const COMMENSURATE_COLUMNS: f64 = 0.01;
 #[must_use]
 fn long_run_means(schedule: &Schedule, surface_means: &[f64]) -> Vec<f64> {
     let phases = schedule.phases;
-    let Light::Turning { days_per_orbit, .. } = schedule.light else {
+    let Some(turn) = Turn::of(schedule) else {
         return surface_means.to_vec();
     };
-    let turn = (days_per_orbit - days_per_orbit.floor()) * index(phases);
-    let nearest = turn.round();
-    let step = ((turn - nearest).abs() < COMMENSURATE_COLUMNS)
-        .then(|| usize::try_from(floor_count(nearest, u32::MAX)).expect("a column count fits"));
+    let step = match turn {
+        Turn::Whole(step) => Some(step),
+        Turn::Between(..) => None,
+    };
     surface_means
         .chunks_exact(phases)
         .flat_map(|site| {
@@ -1421,6 +1862,7 @@ impl Plan<'_> {
             month_of: Vec::new(),
             share: Vec::new(),
             duration_s: Vec::new(),
+            mean_anomaly_rad: Vec::new(),
             phases: match self.clock {
                 Clock::TrueTime { .. } => PHASE_COLUMNS,
                 Clock::WholeDays { .. } | Clock::Locked => 1,
@@ -1449,6 +1891,7 @@ impl Plan<'_> {
                 schedule.month_of.push(month);
                 schedule.share.push(width / TAU / f64::from(steps));
                 schedule.duration_s.push(duration / f64::from(steps));
+                schedule.mean_anomaly_rad.push(middle);
                 for (mean, n) in absorbed.iter_mut().zip(self.directions) {
                     let (value, day) = self.site_light(&sun, *n);
                     *mean += value / f64::from(steps);
@@ -1539,15 +1982,21 @@ fn day_edge(k: u32) -> f64 {
 /// If a value of the answer is not finite: a fault of the model.
 #[must_use]
 pub(super) fn solve(inputs: &CoarseInputs) -> RadiativeSolution {
-    solve_observed(inputs, &mut |_, _, _, _| {})
+    solve_observed(inputs, &mut |_: &Sample| {})
 }
 
-/// [`solve`], every sample of every orbit also to `observe` (site, month, weight, T): the grid
-/// points' sites first, then the end columns'.
+/// [`solve`], every sample of every orbit also to `observe`.
+///
+/// The samples come the grid points' sites first, then the end columns'. A body whose light is
+/// constant takes the closed form and has no samples.
+///
+/// # Panics
+///
+/// If a value of the answer is not finite: a fault of the model.
 #[must_use]
-fn solve_observed<F: FnMut(usize, usize, f64, f64)>(
+pub(super) fn solve_observed<O: Observer>(
     inputs: &CoarseInputs,
-    observe: &mut F,
+    observe: &mut O,
 ) -> RadiativeSolution {
     let (grid, coordinates) = frame(inputs);
     let regolith = Regolith::of(inputs);
@@ -1574,10 +2023,16 @@ fn solve_observed<F: FnMut(usize, usize, f64, f64)>(
                 Coordinates::TidallyLocked => 1.0,
                 Coordinates::Geographic => SPIN_UP_START,
             };
-            let down_share = air.down_share(regolith.emissivity);
+            // Each column's closed form under its annual-mean sunlight (decision-r09-t13-thin-air
+            // §1.9 item 6).
             let start: Vec<f64> = annual_absorbed
                 .iter()
-                .map(|&a| start_share * regolith.radiative_k(regolith.input(a, down_share * a)))
+                .map(|&a| {
+                    start_share
+                        * air
+                            .balance(regolith.emissivity, regolith.outside_w_m2(a))
+                            .surface_k
+                })
                 .collect();
             let marched = model.march::<LANES, _>(&schedule, &directions, &start, observe);
             let climate = GridClimate {
@@ -1639,8 +2094,9 @@ fn solve_observed<F: FnMut(usize, usize, f64, f64)>(
 
 /// The closed form of a body whose light is constant (a world locked 1:1 to its host in a
 /// one-month year, or one with no seasonal orbit): every column of `grid` and every end column at
-/// `directions` in radiative balance with its sunlight, εσT⁴ = F + Q, and never below the frost
-/// point; its tallies, each one sample, its one month and its thin air.
+/// `directions` in radiative balance with its sunlight, the background, the heat flow and its
+/// balanced bounded slab ([`ThinAir::balance`]), and never below the frost point; its tallies, each
+/// one sample, its one month and its thin air.
 #[must_use]
 fn closed_form(
     inputs: &CoarseInputs,
@@ -1662,12 +2118,12 @@ fn closed_form(
         })
         .collect();
     let air = ThinAir::of(inputs, regolith, grid.mean(&absorbed[..grid.points()]));
-    let down_share = air.down_share(regolith.emissivity);
     let tallies: Vec<Tally> = absorbed
         .iter()
         .map(|&a| {
-            let t = regolith.radiative_k(regolith.input(a, down_share * a));
-            let t = air.frost.map_or(t, |frost| t.max(frost.point_k));
+            let t = air
+                .balance(regolith.emissivity, regolith.outside_w_m2(a))
+                .surface_k;
             let mut tally = Tally::new(t);
             tally.add(0, 1.0, t);
             tally
@@ -1704,21 +2160,28 @@ mod tests {
     /// One step from a profile that varies with depth conserves the column's energy: the change
     /// of its stored heat is the step's net input, sunlight and background in, the emission at
     /// the step's end out, the heat flow in at the bottom; and with the surface held at a frost
-    /// point the rest goes into the frost, at its latent heat.
+    /// point the rest goes into the frost, at its latent heat. So it does where snow falls on the
+    /// frost or on bare ground, and where the step spends the last of a frost and warms past its
+    /// point (decision-r09-t13-thin-air §1.9 item 3).
     #[test]
     fn a_column_step_conserves_energy() {
-        for (inputs, input, frosty) in [
-            (reference::moon_like(), 900.0, false),
-            (reference::moon_like(), 0.0, false),
-            (reference::mars_like(), 1.0, true),
-            (reference::mars_like(), 400.0, true),
+        let (moon, mars) = (reference::moon_like(), reference::mars_like());
+        for (inputs, input, frosty, frost_kg_m2, snow_kg_m2_s) in [
+            (&moon, 900.0, false, 0.0, 0.0),
+            (&moon, 0.0, false, 0.0, 0.0),
+            (&mars, 1.0, true, 5.0, 0.0),
+            (&mars, 400.0, true, 5.0, 0.0),
+            (&mars, 1.0, true, 5.0, 2e-5),
+            (&mars, 400.0, true, 0.0, 2e-5),
+            (&mars, 400.0, true, 0.01, 0.0),
+            (&mars, 40.0, true, 0.0, 1e-6),
         ] {
-            let regolith = Regolith::of(&inputs);
+            let regolith = Regolith::of(inputs);
             let day = inputs.spin().solar_day.unwrap().value();
             let year = inputs.seasonal_orbit().unwrap().period.value();
             let layers = layers_of(Clock::WholeDays { day_s: day }, year, &regolith);
             let air = if frosty {
-                ThinAir::of(&inputs, &regolith, 100.0)
+                ThinAir::of(inputs, &regolith, 100.0)
             } else {
                 ThinAir::NONE
             };
@@ -1734,14 +2197,26 @@ mod tests {
                 .map(|i| [150.0 + 40.0 * math::sin(index(i))])
                 .collect();
             let before = t.clone();
-            let (mut frost, mut scratch) = ([if frosty { 5.0 } else { 0.0 }], vec![[0.0]; nodes]);
+            let (mut frost, mut scratch) = ([frost_kg_m2], vec![[0.0]; nodes]);
             let frost_before = frost[0];
-            model.advance(&implicit, &mut t, &mut frost, &mut scratch, [input], step);
+            // The step's true duration, longer than its stepped length as a whole day's month's is.
+            let duration = 3.5 * step;
+            model.advance(
+                &implicit,
+                &mut t,
+                &mut frost,
+                &mut scratch,
+                [input],
+                [snow_kg_m2_s],
+                duration,
+            );
             let stored = (0..nodes).fold(0.0, |sum, i| {
                 sum + implicit.storage_w_per_m2_k[i] * (t[i][0] - before[i][0])
             });
+            // The latent heat the surface gave the frost: its condensation, the snow aside.
             let into_frost = model.air.frost.map_or(0.0, |f| {
-                (frost_before - frost[0]) * f.latent_heat_j_per_kg / step
+                (frost_before + snow_kg_m2_s * duration - frost[0]) * f.latent_heat_j_per_kg
+                    / duration
             });
             let surface = t[0][0];
             let net = input + regolith.heat_flow_w_m2
@@ -1750,7 +2225,8 @@ mod tests {
             let scale = input.abs() + regolith.emission() * math::powi(surface, 4) + 1.0;
             assert!(
                 (stored - net).abs() < 1e-10 * scale,
-                "input {input}, frost {frosty}: stored {stored} against {net}"
+                "input {input}, frost {frost_kg_m2}, snow {snow_kg_m2_s}: stored {stored} against \
+                 {net}"
             );
             if frosty {
                 let point = model.air.frost.unwrap().point_k;
@@ -1863,6 +2339,7 @@ mod tests {
                     &mut column.frost[0],
                     &mut scratch,
                     [input],
+                    [0.0],
                     interval_s,
                 );
                 cycle.push(t[0][0]);
@@ -1905,24 +2382,27 @@ mod tests {
     }
 
     /// The groups' lanes are the lone column's to the bit, on every clock: the reference Moon's
-    /// and Mars's runs (whole days, the slab and the frost), the climate tests' 3:2 Mercury (true
-    /// time, phase columns) and a seasonal locked Moon (the beam, at e 0.05 and the Moon's 1.535°
-    /// of obliquity, every 37th site of its grid, so that its last group is part-filled) give the
-    /// same orbits and the same tallies, every field, in groups of [`LANES`] as one column at a
-    /// time.
+    /// and Mars's runs (whole days, the slab, its snow and the frost), the climate tests' 3:2
+    /// Mercury, bare and under the reference Mars's air (true time, phase columns, the slab's
+    /// map), and a seasonal locked Moon (the beam, at e 0.05 and the Moon's 1.535° of obliquity,
+    /// every 37th site of its grid, so that its last group is part-filled) give the same orbits,
+    /// the same tallies, every field, the same slabs' mean emissions and the same frosts, in
+    /// groups of [`LANES`] as one column at a time.
     #[test]
     fn the_lanes_are_the_lone_column_to_the_bit() {
         use hyperion_testkit::float::assert_same_bits;
         let moon = reference::moon_like();
         let locked = locked_like(&moon, 0.05, 1.535_f64.to_radians());
+        let (mercury, mars) = (
+            super::super::tests::other_regimes::mercury_like(),
+            reference::mars_like(),
+        );
+        let thin_mercury = super::super::tests::with_thin_air(&mercury, &mars);
         for (name, inputs, every) in [
             ("Moon", moon, 1),
-            ("Mars", reference::mars_like(), 1),
-            (
-                "Mercury",
-                super::super::tests::other_regimes::mercury_like(),
-                1,
-            ),
+            ("Mars", mars, 1),
+            ("Mercury", mercury, 1),
+            ("Mercury under Mars's air", thin_mercury, 1),
             ("locked Moon", locked, 37),
         ] {
             let (grid, coordinates) = frame(&inputs);
@@ -1940,9 +2420,9 @@ mod tests {
                 layers,
             };
             let start = vec![200.0; directions.len()];
-            let lone = model.march::<1, _>(&schedule, &directions, &start, &mut |_, _, _, _| {});
+            let lone = model.march::<1, _>(&schedule, &directions, &start, &mut |_: &Sample| {});
             let grouped =
-                model.march::<LANES, _>(&schedule, &directions, &start, &mut |_, _, _, _| {});
+                model.march::<LANES, _>(&schedule, &directions, &start, &mut |_: &Sample| {});
             eprintln!(
                 "{name}: {} columns of {} phases, {} orbits",
                 directions.len(),
@@ -1967,6 +2447,150 @@ mod tests {
                     assert_same_bits(*x, *y);
                 }
             }
+            for (pair, name_of) in [
+                (
+                    (&lone.mean_emission_w_m2, &grouped.mean_emission_w_m2),
+                    "mean emission",
+                ),
+                ((&lone.frost_kg_m2, &grouped.frost_kg_m2), "frost"),
+            ] {
+                assert_eq!(pair.0.len(), pair.1.len(), "{name}: {name_of}");
+                for (x, y) in pair.0.iter().zip(pair.1) {
+                    assert_same_bits(*x, *y);
+                }
+            }
+        }
+    }
+
+    /// The true-time map of the slab's mean emission (decision-r09-t13h-scope §7.2).
+    ///
+    /// On the 3:2 Mercury's schedule with its orbit made to turn the day by 12 and by 11.5 phase
+    /// columns: each phase column p takes in orbit o the hour angles column p + N frac(D) took in
+    /// orbit o − 1; `absorbed` lights it as column p + 12 one orbit back, and at 11.5 as column
+    /// p + 23 two orbits back, at every step; the map reads that column, copied where the turn is
+    /// whole and blended half and half at 11.5; a turn within [`COMMENSURATE_COLUMNS`] of a whole
+    /// number (11.996) is taken as whole; and each band's sum of the mapped emission round its ring
+    /// is the previous orbit's to 10⁻¹² relative.
+    #[test]
+    fn the_true_time_map_reads_the_column_at_the_same_hour_angles_one_orbit_back() {
+        let inputs = super::super::tests::other_regimes::mercury_like();
+        let (grid, coordinates) = frame(&inputs);
+        let regolith = Regolith::of(&inputs);
+        let (directions, _) = sites(&grid, coordinates);
+        let (mut schedule, _) = schedule(&inputs, &directions, &regolith, coordinates).unwrap();
+        let (phases, sites) = (schedule.phases, directions.len());
+        assert_eq!(phases, PHASE_COLUMNS);
+        let count = sites * phases;
+        for (turned, expected) in [
+            (12.0, Turn::Whole(12)),
+            (11.5, Turn::Between(11, 0.5)),
+            (11.996, Turn::Whole(12)),
+        ] {
+            let days = 7.0 + turned / index(phases);
+            if let Light::Turning { days_per_orbit, .. } = &mut schedule.light {
+                *days_per_orbit = days;
+            }
+            let turn = Turn::of(&schedule).unwrap();
+            match (turn, expected) {
+                (Turn::Whole(a), Turn::Whole(b)) => assert_eq!(a, b),
+                (Turn::Between(a, w), Turn::Between(b, v)) => {
+                    assert_eq!(a, b);
+                    assert!((w - v).abs() < 1e-12, "{w}");
+                }
+                (Turn::Whole(_), Turn::Between(..)) | (Turn::Between(..), Turn::Whole(_)) => {
+                    panic!("{turned} columns: {turn:?}")
+                }
+            }
+            assert_lit_alike_orbits_back(&schedule, &directions, days, turned);
+            assert_the_map_reads_its_turn(&schedule, count, turn, turned);
+        }
+    }
+
+    /// For [`the_true_time_map_reads_the_column_at_the_same_hour_angles_one_orbit_back`]: on
+    /// `schedule` at the sites `directions`, its orbit turning `days` solar days and so `turned`
+    /// phase columns, each phase column p takes in orbit o the hour angles column p + `turned` took
+    /// in orbit o − 1; and where one or two orbits turn it by a whole number of columns,
+    /// `absorbed` lights it as that column then, at every seventh step and three sites.
+    fn assert_lit_alike_orbits_back(
+        schedule: &Schedule,
+        directions: &[[f64; 3]],
+        days: f64,
+        turned: f64,
+    ) {
+        let (phases, sites) = (schedule.phases, directions.len());
+        let offset = |orbit: u32, phase: f64| {
+            let turns = f64::from(orbit) * days;
+            TAU * (turns - turns.floor()) + TAU * phase / index(phases)
+        };
+        // The fewest orbits back, one or two, over which the turn is whole, and its columns.
+        let back = (1..=2_u32).find_map(|k| {
+            let whole = f64::from(k) * turned;
+            ((whole - whole.round()).abs() < 1e-12).then(|| (k, whole.round()))
+        });
+        for orbit in 2..5 {
+            for p in 0..phases {
+                let (now, then) = (
+                    offset(orbit, index(p)),
+                    offset(orbit - 1, index(p) + turned),
+                );
+                assert!(
+                    reduced(now - then).abs() < 1e-10,
+                    "{turned}: {p}, orbit {orbit}"
+                );
+                let Some((k, whole)) = back else {
+                    continue;
+                };
+                let q = (p + usize::try_from(floor_count(whole, u32::MAX)).unwrap()) % phases;
+                for step in (0..schedule.month_of.len()).step_by(7) {
+                    for site in [10, 36, 60] {
+                        let a = Model::absorbed(schedule, directions, site, p, step, orbit, sites);
+                        let b =
+                            Model::absorbed(schedule, directions, site, q, step, orbit - k, sites);
+                        assert!(
+                            (a - b).abs() < 1e-9 * (a.abs() + 1.0),
+                            "{turned}: column {p} against {q}, {k} orbits back: {a} against {b}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// For [`the_true_time_map_reads_the_column_at_the_same_hour_angles_one_orbit_back`]: on
+    /// `schedule`'s `count` columns, `carried` copies column p + n where the turn `turn` is whole
+    /// and blends p + n and p + n + 1 by its fraction otherwise, and keeps each band's ring sum to
+    /// 10⁻¹² relative, on a synthetic table of means.
+    fn assert_the_map_reads_its_turn(schedule: &Schedule, count: usize, turn: Turn, turned: f64) {
+        let phases = schedule.phases;
+        let means: Vec<f64> = (0..schedule.months * count)
+            .map(|i| 100.0 + 50.0 * math::sin(0.37 * index(i)))
+            .collect();
+        let next = carried(schedule, means.clone(), count);
+        for (month, (before, after)) in means
+            .chunks_exact(count)
+            .zip(next.chunks_exact(count))
+            .enumerate()
+        {
+            for (site, (ring, mapped)) in before
+                .chunks_exact(phases)
+                .zip(after.chunks_exact(phases))
+                .enumerate()
+            {
+                for (p, &value) in mapped.iter().enumerate() {
+                    let expected = match turn {
+                        Turn::Whole(n) => ring[(p + n) % phases],
+                        Turn::Between(n, w) => {
+                            (1.0 - w) * ring[(p + n) % phases] + w * ring[(p + n + 1) % phases]
+                        }
+                    };
+                    hyperion_testkit::float::assert_same_bits(value, expected);
+                }
+                let (a, b): (f64, f64) = (ring.iter().sum(), mapped.iter().sum());
+                assert!(
+                    (a / b - 1.0).abs() < 1e-12,
+                    "{turned}: month {month}, site {site}: {a} against {b}"
+                );
+            }
         }
     }
 
@@ -1983,8 +2607,10 @@ mod tests {
     fn the_moments_are_the_direct_sums() {
         let inputs = reference::moon_like();
         let mut recorder = Recorder::default();
-        let solution = solve_observed(&inputs, &mut |site, month, weight, t| {
-            recorder.samples.push((site, month, weight, t));
+        let solution = solve_observed(&inputs, &mut |s: &Sample| {
+            recorder
+                .samples
+                .push((s.site, s.month, s.weight, s.surface_k));
         });
         let climate = &solution.climate;
         let points = solution.grid.points();
@@ -2108,6 +2734,82 @@ mod tests {
         );
     }
 
+    /// The balanced slab's limit (decision-r09-t13-thin-air §1.10, test 2): a frost-free column
+    /// under constant sunlight S in the closed form has a slab of σ`T_a`⁴ = εσ`T_s`⁴ ÷ 2 and emits
+    /// εσ`T_s`⁴ = 2 (S + `E_nf`) ÷ (2 − εβ), each to 10⁻⁹ relative, with no snow; and with the heat
+    /// flow and the background set to nothing it is T13.c's closed form, εσT⁴ = S + εβ ÷ (2 − εβ) S,
+    /// to 10⁻¹² relative, for every β from none to 1. Under the reference Mars's frost a dark
+    /// column is held at its frost point under the slab's bound, its frost point aloft.
+    #[test]
+    fn the_balanced_slab_s_limit_is_t13c_s_closed_form() {
+        let mars = reference::mars_like();
+        let regolith = Regolith::of(&mars);
+        let (epsilon, floor) = (regolith.emissivity, regolith.floor_flux_w_m2());
+        for beta in [0.0, 0.163, 0.265, 0.6, 1.0] {
+            let air = ThinAir {
+                absorptivity: beta,
+                frost: None,
+            };
+            for sunlight in [0.5, 50.0, 103.9, 400.0, 1_200.0] {
+                let Balanced { surface_k, slab } = air.balance(epsilon, sunlight + floor);
+                let emitted = regolith.emission() * math::powi(surface_k, 4);
+                let expected = 2.0 * (sunlight + floor) / (2.0 - epsilon * beta);
+                assert!(
+                    (emitted / expected - 1.0).abs() < 1e-9,
+                    "β {beta}, S {sunlight}"
+                );
+                assert!(
+                    (slab.blackbody_w_m2 / (0.5 * emitted) - 1.0).abs() < 1e-9,
+                    "β {beta}, S {sunlight}"
+                );
+                assert!(
+                    (slab.down_w_m2 - beta * slab.blackbody_w_m2).abs() < 1e-12 * emitted,
+                    "β {beta}, S {sunlight}"
+                );
+                hyperion_testkit::float::assert_same_bits(slab.snow_w_m2, 0.0);
+                let bare = air.balance(epsilon, sunlight).surface_k;
+                let present = ((sunlight + epsilon * beta / (2.0 - epsilon * beta) * sunlight)
+                    / regolith.emission())
+                .sqrt()
+                .sqrt();
+                assert!(
+                    (bare / present - 1.0).abs() < 1e-12,
+                    "β {beta}, S {sunlight}: {bare} against T13.c's {present}"
+                );
+            }
+        }
+        let air = ThinAir::of(&mars, &regolith, 103.9);
+        let frost = air.frost.expect("Mars's carbon dioxide condenses");
+        let dark = air.balance(epsilon, floor);
+        hyperion_testkit::float::assert_same_bits(dark.surface_k, frost.point_k);
+        hyperion_testkit::float::assert_same_bits(
+            dark.slab.blackbody_w_m2,
+            frost.aloft_blackbody_w_m2(),
+        );
+        assert!(dark.slab.snow_w_m2 > 0.0);
+    }
+
+    /// An airless column's closed form and spin-up start are T13.c's to the bit: with no slab,
+    /// [`ThinAir::balance`] of [`Regolith::outside_w_m2`] is ((S + εσ`T_CMB`⁴ + 0) + Q) ÷ εσ, its
+    /// fourth root, summed as T13.c summed it, for the reference Moon's and Ceres's regoliths at
+    /// any sunlight.
+    #[test]
+    fn an_airless_closed_form_is_t13c_s_to_the_bit() {
+        for inputs in [reference::moon_like(), reference::ceres_like()] {
+            let regolith = Regolith::of(&inputs);
+            for sunlight in [0.0, 1e-3, 0.5, 37.2, 341.0, 1_361.0, 9_126.6] {
+                let t = ThinAir::NONE
+                    .balance(regolith.emissivity, regolith.outside_w_m2(sunlight))
+                    .surface_k;
+                let t13c = ((regolith.input(sunlight, 0.0) + regolith.heat_flow_w_m2)
+                    / regolith.emission())
+                .sqrt()
+                .sqrt();
+                hyperion_testkit::float::assert_same_bits(t, t13c);
+            }
+        }
+    }
+
     /// A world locked 1:1 on an orbit all but circular and untilted, which has twelve months,
     /// marches each point's column to its closed form: the seasonal path on the locked grid.
     #[test]
@@ -2129,6 +2831,123 @@ mod tests {
             .fold(0.0, |most: f64, (a, b)| most.max((a - b).abs()));
         eprintln!("{} orbits, worst {worst:e} K", marched.climate.orbits);
         assert!(worst < 0.1, "{worst}");
+    }
+
+    /// The closed form's branches (decision-r09-t13h-scope, "§1.9 item 5 amended"), on the
+    /// reference Mars's frost at β 0.2653, 0.6 and 0.9: F = max(B, G) is continuous to 10⁻⁹
+    /// relative where the bound meets the unbounded slab, `E_hi` = (2 − εβ) A, F = 2A there, and
+    /// where the bare column meets the frost, `E_lo` = (1 − β) B + (2 − ε) β A, F = B there; every
+    /// bare column's books close, `E_in` = (1 − β) F + (2 − ε) β max(F ÷ 2, A), to 10⁻¹² relative;
+    /// below `E_lo` the column is held at its frost point under the bound; and at β = 1 the bare
+    /// band is empty, F stepping from B to 2A at `E_in` = (2 − ε) A.
+    #[test]
+    fn the_closed_form_s_branches_join_and_close_their_books() {
+        use hyperion_testkit::float::assert_same_bits;
+        let mars = reference::mars_like();
+        let regolith = Regolith::of(&mars);
+        let epsilon = regolith.emissivity;
+        let frost = Frost::of(&mars).expect("Mars's carbon dioxide condenses");
+        let (a, b) = (
+            frost.aloft_blackbody_w_m2(),
+            regolith.emission() * math::powi(frost.point_k, 4),
+        );
+        assert!(b < 2.0 * a, "a frost-held night lies under the bound");
+        let emitted =
+            |air: &ThinAir, outside: f64| air.balance(epsilon, outside).slab.mean_emission_w_m2;
+        for beta in [0.2653, 0.6, 0.9] {
+            let air = ThinAir {
+                absorptivity: beta,
+                frost: Some(frost),
+            };
+            let high = (2.0 - epsilon * beta) * a;
+            let low = (1.0 - beta) * b + (2.0 - epsilon) * beta * a;
+            assert!(low < high, "β {beta}: {low} against {high}");
+            for (edge, value) in [(high, 2.0 * a), (low, b)] {
+                let (below, above) = (
+                    emitted(&air, edge * (1.0 - 1e-12)),
+                    emitted(&air, edge * (1.0 + 1e-12)),
+                );
+                assert!(
+                    (above / below - 1.0).abs() < 1e-9,
+                    "β {beta}, at {edge}: {below} against {above}"
+                );
+                assert!(
+                    (emitted(&air, edge) / value - 1.0).abs() < 1e-9,
+                    "β {beta}, at {edge}"
+                );
+            }
+            for k in 0..=64 {
+                let outside = low + (2.0 * high - low) * f64::from(k) / 64.0;
+                let f = emitted(&air, outside);
+                if f > b {
+                    let books = (1.0 - beta) * f + (2.0 - epsilon) * beta * (0.5 * f).max(a);
+                    assert!(
+                        (books / outside - 1.0).abs() < 1e-12,
+                        "β {beta}, E_in {outside}: {books}"
+                    );
+                }
+            }
+            let night = air.balance(epsilon, 0.5 * low);
+            assert_same_bits(night.surface_k, frost.point_k);
+            assert_same_bits(night.slab.blackbody_w_m2, a);
+        }
+        let air = ThinAir {
+            absorptivity: 1.0,
+            frost: Some(frost),
+        };
+        let step = (2.0 - epsilon) * a;
+        assert_same_bits(
+            air.balance(epsilon, step * (1.0 - 1e-12)).surface_k,
+            frost.point_k,
+        );
+        assert!((emitted(&air, step) / (2.0 * a) - 1.0).abs() < 1e-12);
+    }
+
+    /// A thin-aired world locked 1:1 on an orbit all but circular and untilted marches each
+    /// point's column to within 0.1 K of its closed form, as the airless one does
+    /// (decision-r09-t13h-scope, "§1.9 item 5 amended", test 1): the reference Mars locked 1:1 at
+    /// e and obliquity 10⁻⁷ against both at 0. The closed form's bounded slab over bare ground pays
+    /// the snow it sublimes, as the march's ground does (decision-r09-t13-thin-air §1.9 items 3 and
+    /// 5; decision-r09-t13h-scope §2), so the terminator's band, where the slab is bounded and the
+    /// ground bare, `T_f` < T < (2 ÷ ε)^¼ `T_fa`, agrees with the march too.
+    #[test]
+    fn a_thin_aired_locked_world_s_seasonal_march_tends_to_its_closed_form() {
+        let mars = reference::mars_like();
+        let marched = solve(&locked_like(&mars, 1e-7, 1e-7));
+        let closed = solve(&locked_like(&mars, 0.0, 0.0));
+        assert!(
+            marched.climate.converged,
+            "{} orbits",
+            marched.climate.orbits
+        );
+        assert!(marched.air.absorptivity > 0.0);
+        let frost = closed.air.frost.expect("Mars's carbon dioxide condenses");
+        let join = (2.0 / closed.emissivity).sqrt().sqrt() * frost.aloft_point_k;
+        let (mut worst, mut at, mut band) = (0.0_f64, 0, 0);
+        for (p, (a, b)) in marched
+            .climate
+            .annual_k
+            .iter()
+            .zip(&closed.climate.annual_k)
+            .enumerate()
+        {
+            if *b > frost.point_k + 1e-9 && *b < join {
+                band += 1;
+            }
+            if (a - b).abs() > worst {
+                (worst, at) = ((a - b).abs(), p);
+            }
+        }
+        eprintln!(
+            "{} orbits, β {:.4}: worst {worst:.3e} K at point {at} ({:.3} K closed); {band} points \
+             in the bounded bare band, {:.2}–{join:.2} K",
+            marched.climate.orbits,
+            marched.air.absorptivity,
+            closed.climate.annual_k[at],
+            frost.point_k
+        );
+        assert!(band > 0, "the test reaches the bounded bare band");
+        assert!(worst < 0.1, "{worst} at {at}");
     }
 
     /// `inputs` locked 1:1 to its seasonal host on its own orbit's period at eccentricity `e` and

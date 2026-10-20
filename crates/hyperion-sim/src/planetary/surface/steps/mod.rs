@@ -55,7 +55,9 @@
 //! balanced; zero and calm on the other models. R09.T13.f added the cold traps: each ice's
 //! cold-trapped part, the inputs' `cold_traps`, placed after its zonal part in each field cell's
 //! cold-trap fraction from plan 14's closed form, scaled to plan 14's area, one ice a cell, the
-//! rest counted as undrawn. Erosion and the classes are still no-ops.
+//! rest counted as undrawn. R09.T13.h balanced the radiative model's thin-air slab with its
+//! column's own emission, bounded at the frost point aloft with its snowfall. Erosion and the
+//! classes are still no-ops.
 
 pub mod classes;
 pub mod climate;

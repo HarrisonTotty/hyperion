@@ -1,4 +1,4 @@
-//! The climate step's tests (R09.T13.a–g): the plan's, with the pipeline's own.
+//! The climate step's tests (R09.T13.a–h, j): the plan's, with the pipeline's own.
 
 use hyperion_surface::field::{ClimateModelKind, CoarseLevel};
 
@@ -32,6 +32,20 @@ use hyperion_testkit::float::assert_same_bits;
 // The builder values of a world, as a builder to vary: `reference`'s one copy, which the step's
 // tests in its other files reach here (decision-r09-t13-test-cost §3.1).
 pub(super) use crate::planetary::surface::reference::builder_of;
+
+/// `inputs` under the air of `air`, its pressure and its gases, with its mean set 2% above its own
+/// so that its slab's β is solved positive (R09.T13.h's tests, decision-r09-t13h-scope §3: the 3:2
+/// Mercury and a seasonal locked world under the reference Mars's air).
+pub(super) fn with_thin_air(inputs: &CoarseInputs, air: &CoarseInputs) -> CoarseInputs {
+    builder_of(inputs)
+        .surface_pressure(air.surface_pressure())
+        .gases(air.gases().iter().copied())
+        .mean_surface_temperature(crate::units::Kelvin::new(
+            1.02 * inputs.mean_surface_temperature().value(),
+        ))
+        .build()
+        .expect("a world's inputs hold under a thin air")
+}
 
 /// The first band ERA-Interim's curve reaches: band 5, centred on 76.25° S. South of about 77° S
 /// Siler et al.'s Fig. 2b shows only their model's curve.
@@ -1218,6 +1232,7 @@ mod cold_traps;
 mod earth_land;
 mod hydrology;
 mod normalisation;
+mod thin_air;
 
 /// R09.T13.c's tests: the radiative model with thermal inertia and the isothermal surface.
 pub(super) mod other_regimes {

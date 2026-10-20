@@ -1207,14 +1207,16 @@ fn runs_twice_to_the_same_bits(name: &str, inputs: &CoarseInputs, start: Option<
 
 /// The step is a function of its inputs (sim-determinism): run twice from the same working state
 /// at level 5, on the locked Moon (the radiative model on the tidally locked grid, twelve months),
-/// the Venus-like body (the isothermal model), the Titan-like world with its basins (the
-/// energy-balance model and two liquids) and the reference Earth locked 1:1 in a one-month year
-/// (the locked energy-balance model), it writes every climate record and cell field to the same
-/// bits. The locked model's seasonal march is the slow test's below.
+/// the reference Mars (the radiative model under R09.T13.h's thin air: its slab carried from orbit
+/// to orbit, its snow and its frost), the Venus-like body (the isothermal model), the Titan-like
+/// world with its basins (the energy-balance model and two liquids) and the reference Earth locked
+/// 1:1 in a one-month year (the locked energy-balance model), it writes every climate record and
+/// cell field to the same bits. The locked model's seasonal march is the slow test's below.
 #[test]
 fn the_step_writes_the_same_bits_from_the_same_state() {
     let (_, _, titan, basins) = titan_with_basins(5);
     runs_twice_to_the_same_bits("locked Moon", &super::other_regimes::locked_moon(), None);
+    runs_twice_to_the_same_bits("reference Mars", &reference::mars_like(), None);
     runs_twice_to_the_same_bits("Venus-like", &venus(), None);
     runs_twice_to_the_same_bits("Titan-like", &titan, Some(basins));
     runs_twice_to_the_same_bits("locked Earth", &super::locked_earth(0.0, 0.0), None);

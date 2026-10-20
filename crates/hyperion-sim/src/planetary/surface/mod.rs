@@ -71,7 +71,9 @@
 //! [`ColdTrapInputs`], what they read of the star and the ground, both none from the record until
 //! P14.T54.b, and their placement in each field cell's cold-trap fraction, read through plan 14's
 //! `ColdTrapGround`, scaled to plan 14's area and held to the fraction, after the zonal parts.
-//! Erosion and the classes are still no-ops: run on any inputs, the pass yields that relief and
+//! R09.T13.h balanced the thin air's grey slab with its column's own emission, bounded at the
+//! bulk gas's frost point aloft, its deficit falling as snow. Erosion and the classes are still
+//! no-ops: run on any inputs, the pass yields that relief and
 //! sea, with their ices and liquids, under the climate its regime names, with the inputs'
 //! palette. The rest of R09.T13, R09.T14 and T15 fill the rest and R09.T16 pins the reference
 //! worlds' fields.
