@@ -473,7 +473,14 @@ describe("the field header's checks", () => {
     expect(headerFailure({ ...SEA_HEADER, weathering_rate: null })).toMatch(
       /maturity is present without its weathering rate/u,
     );
-    // Each part's own range comes first.
+    const withoutRate: SurfaceHeaderDto = { ...SEA_HEADER };
+    delete withoutRate.weathering_rate;
+    expect("weathering_rate" in withoutRate).toBe(false);
+    expect(withoutRate.maturity).toBe(0.75);
+    expect(headerFailure(withoutRate)).toMatch(/maturity is present without its weathering rate/u);
+  });
+
+  it("checks each part's own range before their pairing", () => {
     expect(headerFailure({ ...SEA_HEADER, maturity: null, weathering_rate: -1 })).toMatch(
       /weathering rate, -1, is not/u,
     );

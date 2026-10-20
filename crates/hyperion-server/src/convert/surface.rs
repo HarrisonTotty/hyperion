@@ -544,10 +544,19 @@ mod tests {
     use hyperion_surface::field::{FieldView, MaterialPalette, MechanicsFamily};
     use hyperion_surface::substance_key::SubstanceKey;
     use hyperion_surface::testing::{FieldBuilder, basaltic_melt, liquid_water};
+    use hyperion_testkit::float::assert_same_bits;
 
     use super::*;
     use crate::compute::{ComputeError, JobError, SubmitJobError};
     use crate::knowledge::SaveKnowledgeError;
+
+    /// Asserts that `value` is a value with `expected`'s bits.
+    fn assert_modelled_bits(value: Modelled<f64>, expected: f64) {
+        let Modelled::Value(value) = value else {
+            panic!("{value:?} against {expected}");
+        };
+        assert_same_bits(value, expected);
+    }
 
     fn body() -> BodyIdHex {
         BodyIdHex::from_parts(0x0200_0800_2000_0000, 0x0103)
@@ -885,14 +894,14 @@ mod tests {
             .build();
         let wire = surface_header(field.header());
         assert_eq!(wire.main_liquid, Some(2));
-        assert_eq!(wire.maturity, Modelled::Value(0.75));
-        assert_eq!(wire.organic_cover, Modelled::Value(0.0));
-        assert_eq!(wire.weathering_rate, Modelled::Value(2.5));
+        assert_modelled_bits(wire.maturity, 0.75);
+        assert_modelled_bits(wire.organic_cover, 0.0);
+        assert_modelled_bits(wire.weathering_rate, 2.5);
         let [melt, rock, sea] = wire.palette.as_slice() else {
             panic!("{:?}", wire.palette);
         };
         assert_eq!(rock.liquid, None);
-        assert_eq!(melt.feo_mass_fraction, Modelled::Value(0.110));
+        assert_modelled_bits(melt.feo_mass_fraction, 0.110);
         assert!(rock.feo_mass_fraction.is_not_modelled(), "{rock:?}");
         assert!(sea.feo_mass_fraction.is_not_modelled(), "{sea:?}");
         let record = liquid_water();

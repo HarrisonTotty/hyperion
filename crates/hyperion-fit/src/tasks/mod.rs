@@ -24,6 +24,7 @@ pub mod saturation_curves;
 pub mod sky_binary_light;
 pub mod sky_envelope;
 pub mod sky_phase_envelope;
+pub mod space_weathering;
 pub mod star_colour;
 pub mod stellar_fates;
 pub mod stripping;

@@ -29,7 +29,12 @@
 //! note 8). The space-weathering maturity's time law ([`maturity_after`], [`body_maturity`],
 //! [`LUNAR_MATURATION_TIME`]; plan 14's P14.T51.d, decision-p14-t51d-weathering §2.1) is the one
 //! the sim's surface modifiers and R10.T1.c's crater fading share; nothing on the record calls it
-//! until P14.T54.b.
+//! until P14.T54.b. The darkening that maturity drives ([`weathered_normal_albedo`],
+//! [`weathered_spherical_albedo`], [`weathered_hemispherical_albedos`], [`weathered_entry_bvr`],
+//! [`npfe_optical_depth`]; R10.T1.d, decision-p14-t51d-weathering §1) is Hapke 2001's
+//! nanophase-iron absorption inside the equivalent slab, applied to an entry's fresh albedo in its
+//! reference form by `hyperion-fit`'s fitted table, the one law the server's albedo scale, the
+//! sim's area mix and R10.T1.c share.
 //!
 //! Nothing here draws from a stream, so the module opens no domain tag.
 
@@ -41,6 +46,7 @@ mod classify;
 mod golden;
 mod maturity;
 mod properties;
+mod weathering;
 mod weights;
 
 pub use albedo::{
@@ -61,6 +67,11 @@ pub use properties::{
     MaterialProperties, MohrCoulomb, PARTICULATE_NORMAL_ALBEDO_CEILING, PhaseLaw, PhaseLawOrigin,
     ResolvePropertiesError, ShearLayer, UNASSIGNED_PHASE_ROW, directional_hemispherical_albedo,
     form_row, interface_friction, limb_parameter, properties,
+};
+pub use weathering::{
+    FEO_MOLAR_MASS_G_PER_MOL, ICE_HOST_INDEX, IRON_DENSITY_KG_M3, IRON_MOLAR_MASS_G_PER_MOL,
+    REGOLITH_HOST_INDEX, npfe_optical_depth, weathered_entry_bvr, weathered_hemispherical_albedos,
+    weathered_normal_albedo, weathered_spherical_albedo,
 };
 pub use weights::{ClassWeights, MAX_CLASSES, SLOPE_LAG, WEIGHT_TOTAL, weights_at};
 pub(crate) use weights::{kept_omitted_rms, weights_with_sample};

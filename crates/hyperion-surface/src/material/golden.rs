@@ -26,6 +26,13 @@
 //! albedos and L(α) on a grid of phases, a few directional-hemispherical albedos, every (form,
 //! family) row (its shear layers with their bearing factors, its friction at its knots and between
 //! them, its strength, albedo factor and span, or `unmodelled`), and the two lunar capacities.
+//!
+//! `tests/golden/material/weathering.golden` is R10.T1.d's space-weathering law: its constants
+//! and the table's Λ, then τ and the weathered normal, spherical and directional-hemispherical
+//! albedos (at the four incidences), each as its bits, on a grid of fresh albedo, `FeO_T`,
+//! maturity, wavelength (inside iron's grid and beyond both its ends) and law at one grain density,
+//! a line where every albedo is the fresh one's own bits saying so in a word; and
+//! [`weathered_entry_bvr`] of every synthetic world's palette entries at maturities 0.5 and 1.
 
 use std::fmt::Write as _;
 
@@ -45,6 +52,11 @@ use super::{
     SNOW_SHED_SLOPE, THIN_ATMOSPHERE_PRESSURE, TRANSITION_HALF_WIDTH, UNASSIGNED_PHASE_ROW,
     bearing_capacity, directional_hemispherical_albedo, form_row, interface_friction,
     limb_parameter, material_at, properties, ultimate_bearing_capacity,
+};
+use super::{
+    FEO_MOLAR_MASS_G_PER_MOL, ICE_HOST_INDEX, IRON_DENSITY_KG_M3, IRON_MOLAR_MASS_G_PER_MOL,
+    REGOLITH_HOST_INDEX, npfe_optical_depth, weathered_entry_bvr, weathered_hemispherical_albedos,
+    weathered_normal_albedo, weathered_spherical_albedo,
 };
 use crate::cube::{PatchKey, unit_dir, xyz_to_face_uv};
 use crate::field::{
@@ -387,13 +399,102 @@ fn material_the_property_table_matches_its_golden() {
     golden!("material/table", &table_text());
 }
 
+/// The space-weathering law's golden text (the module documentation).
+fn weathering_text() -> String {
+    use crate::tables::space_weathering as table;
+    const DENSITY: f64 = 3_000.0;
+    let mut out = GoldenWriter::new();
+    out.header(crate::generator_version());
+    out.line("constants");
+    for (label, value) in [
+        ("regolith_host_index", REGOLITH_HOST_INDEX),
+        ("ice_host_index", ICE_HOST_INDEX),
+        ("iron_density_kg_m3", IRON_DENSITY_KG_M3),
+        ("iron_molar_mass_g_per_mol", IRON_MOLAR_MASS_G_PER_MOL),
+        ("feo_molar_mass_g_per_mol", FEO_MOLAR_MASS_G_PER_MOL),
+        ("regolith_lambda_m", table::REGOLITH_LAMBDA_M),
+        ("frost_lambda_m", table::FROST_LAMBDA_M),
+    ] {
+        out.f64(label, value);
+    }
+    out.line(
+        "law: <law> a0 <fresh> f <FeO_T> m <maturity> nm <wavelength>: tau, then A_N, A_S and A_h \
+         at the four incidences from a fresh a0 each, or `same` where all seven are a0's bits",
+    );
+    let mut line = String::new();
+    for law in PhaseLaw::ALL.iter().copied() {
+        for fresh in [0.05, 0.2, 0.667, 1.2] {
+            for feo in [0.0, 0.05, 0.2] {
+                for maturity in [0.0, 0.5, 1.0] {
+                    for wavelength in [250.0, 440.0, 550.0, 640.0, 2_200.0, 5_200.0] {
+                        let tau = npfe_optical_depth(law, wavelength, DENSITY, feo, maturity);
+                        let normal =
+                            weathered_normal_albedo(fresh, wavelength, law, DENSITY, feo, maturity);
+                        let sphere = weathered_spherical_albedo(
+                            fresh, wavelength, law, DENSITY, feo, maturity,
+                        );
+                        let plane = weathered_hemispherical_albedos(
+                            [fresh; 4], wavelength, law, DENSITY, feo, maturity,
+                        );
+                        line.clear();
+                        write!(
+                            line,
+                            "{law:?} a0 {fresh} f {feo} m {maturity} nm {wavelength}: {}",
+                            hex(tau)
+                        )
+                        .expect("a string takes any write");
+                        let albedos = [normal, sphere, plane[0], plane[1], plane[2], plane[3]];
+                        // Where the law is the identity every albedo is the fresh one's own bits,
+                        // which the line states in a word, and the bits it compares pin it.
+                        if albedos.iter().all(|&a| bits(a) == bits(fresh)) {
+                            line.push_str(" same");
+                        } else {
+                            for a in albedos {
+                                write!(line, " {}", hex(a)).expect("a string takes any write");
+                            }
+                        }
+                        out.line(&line);
+                    }
+                }
+            }
+        }
+    }
+    out.line("entries: <world> <entry> <key> m <maturity>: A_N in B, V and R");
+    for &w in SyntheticWorld::ALL {
+        let palette = world(w).header().palette();
+        for (index, entry) in palette.entries().iter().enumerate() {
+            for maturity in [0.5, 1.0] {
+                let [b, v, r] = weathered_entry_bvr(entry, maturity);
+                line.clear();
+                write!(
+                    line,
+                    "{w:?} {index} {} m {maturity}: {} {} {}",
+                    entry.substance,
+                    hex(b),
+                    hex(v),
+                    hex(r)
+                )
+                .expect("a string takes any write");
+                out.line(&line);
+            }
+        }
+    }
+    out.finish()
+}
+
+#[test]
+fn material_the_weathering_law_matches_its_golden() {
+    golden!("material/weathering", &weathering_text());
+}
+
 /// The tests that read files, which the browser target cannot (plan R04, Design note 12).
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod native_only {
     use std::path::Path;
 
-    /// The material goldens: one for each synthetic world, and the property table's.
-    const MATERIAL_GOLDENS: usize = 7;
+    /// The material goldens: one for each synthetic world, the property table's and the
+    /// space-weathering law's.
+    const MATERIAL_GOLDENS: usize = 8;
 
     /// Every golden file of `tests/golden/material/` carries `GENERATOR_VERSION`, not R05's
     /// `TEST_PLANET_VERSION`, which heads the files directly under `tests/golden/`.

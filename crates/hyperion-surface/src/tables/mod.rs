@@ -12,12 +12,17 @@
 //!
 //! [`GENERATOR_VERSION`]: hyperion_base::GENERATOR_VERSION
 
-// The table is written whole by `hyperion-fit`, so its one lint allowance is on its module.
+// Each table is written whole by `hyperion-fit`, so its one lint allowance is on its module.
 #[allow(
     clippy::approx_constant,
     reason = "fitted values that may land near a constant are data"
 )]
 pub mod bowl_permanent_shadow;
+#[allow(
+    clippy::approx_constant,
+    reason = "fitted values that may land near a constant are data"
+)]
+pub mod space_weathering;
 
 use hyperion_base::version::TableInfo;
 
@@ -31,6 +36,12 @@ pub const MANIFEST: &[TableInfo] = &[
         name: "bowl_permanent_shadow",
         revision: 0,
         since_generator_version: 21,
+        provisional: false,
+    },
+    TableInfo {
+        name: "space_weathering",
+        revision: 0,
+        since_generator_version: 22,
         provisional: false,
     },
 ];

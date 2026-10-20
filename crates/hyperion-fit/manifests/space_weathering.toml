@@ -1,0 +1,91 @@
+# The space-weathering law's tables (rendering plan R10, R10.T1.d; decision-p14-t51d-weathering
+# §1.1 and §1.4, and its addendum of 2026-10-19): each reference form's albedos on a grid of
+# single-scattering albedos, its equivalent slab, iron's z(λ) at its host index, and Λ, fitted to
+# the Moon's mature highland and mare normal albedos in B, V and R at m = 1. The reference forms'
+# photometry and grain sizes are the sim's (`substance::optics`), the host indices, iron's density
+# and the molar masses the surface crate's (`material`), and the fresh rows the sim's registry's,
+# all of which the task's fingerprint probes. Iron's index is the two committed datasets below.
+task = "space_weathering"
+datasets = ["johnson_christy_1974_fe", "ordal_1988_fe"]
+
+[params]
+# Single-scattering albedos w from 0 to 1, uniform in √(1 − w): 129 nodes.
+nodes = 129
+# Iron's z on 300–5,000 nm every 10 nm: 471 nodes, through P14.T49.i's last infrared bin, 3.5–5 µm,
+# which Ordal et al. cover.
+iron_z_first_nm = 300.0
+iron_z_step_nm = 10.0
+iron_z_nodes = 471
+# Λ's golden-section bracket, m, and its steps in ln Λ: ln(10⁴) × 0.618¹⁰⁰ is far below the 10⁻¹²
+# relative the search can resolve.
+lambda_min_m = 1.0e-8
+lambda_max_m = 1.0e-4
+search_iterations = 100
+# P90 − P10 of a normal distribution, in σ: 2 × 1.2816. Each residual is divided by its anchor's σ.
+spread_to_sigma = 2.563
+
+# The anchors' colour: Dollfus and Bowell 1971, Eq. 11, p. 50, read: log Ā = 0.83 log λ − 0.80, λ
+# in µm, fitted to Gehrels et al. 1964's Table XIII; only its slope is used, R(λ) ÷ R(600 nm) =
+# (λ ÷ 600 nm)^0.83, which the task computes at the sim's band wavelengths, 0.7730/0.9303/1.0550,
+# taking each terrain's 600 nm median and 10–90% bounds to B, V and R with no rounding: mare
+# 0.05566/0.06698/0.07596 (P10 0.04793/0.05768/0.06541, P90 0.06339/0.07629/0.08651), highland
+# 0.08813/0.10606/0.12027 (P10 0.07421/0.08931/0.10128, P90 0.10977/0.13211/0.14981). Eq. 11
+# gives 0.1037 at 0.6 µm (only its slope enters); the whole-Moon mean 0.101 is Eq. 8's figure.
+# One colour for both terrains; the terrains' mean B/V differ by < 1% at zero phase (Gehrels et
+# al. 1964, Table XIII); the maria's own ±3.5% spread is not modelled
+# (decision-r10-t1d-anchor-colour).
+#
+# The stated check, never an input: Gehrels, Coffeen and Owings 1964 (AJ 69, 826, Table XIII,
+# p. 839) zero-phase B/V, maria 0.80–0.86 (mean 0.826, n 8) and highlands 0.82–0.84 (mean 0.831,
+# n 2), against Eq. 11's 0.831; Lane and Irvine 1973 (AJ 78, 267, Table VIII) whole disk 0.832.
+# The decision record compared these colours with laboratory LSCC/RELAB soil spectra. RELAB's terms
+# are non-commercial, so nothing from them is committed.
+#
+# Dollfus and Bowell's scale is built from catalogues at phase angles 1.5–12° (their Table 7), its
+# whole-Moon mean 0.101 (Eq. 8) against p_V 0.12, so the anchors are not zero-phase albedos
+# (decision-p14-t51d-weathering's addendum, D6).
+anchor_wavelength_nm = 600.0
+colour_exponent = 0.83
+
+# The highlands: the fresh `feldspathic` row (P14.T49.i) at the anchor soils' FeO_T, 0.055: the
+# eight mature Apollo 16 soils' median, 5.5 wt% (5.1–5.8; Morris 1980, Proc. LPSC 11, 1697,
+# Table 1, read; decision-p14-t51d-weathering's addendum, which rules the anchor soil's FeO_T and
+# not the registry row's 0.05).
+highland_row = "feldspathic"
+highland_feo_mass_fraction = 0.055
+# Dollfus and Bowell 1971, Table 4 (read): the highlands' normal albedo at 600 nm, median 0.114 and
+# 10–90% 0.096–0.142 (ray craters excluded).
+highland_median = 0.114
+highland_p10 = 0.096
+highland_p90 = 0.142
+
+# The maria: the fresh `basalt_fe` row (P14.T49.i) at the anchor soils' FeO_T, 0.16: the Apollo
+# 11, 12 and 17 mare-plain soils of Morris 1980's Table 1, median 16.5 wt%, the mature ones' 15.6
+# (read; the addendum), not the registry basalt's 0.20.
+mare_row = "basalt_fe"
+mare_feo_mass_fraction = 0.16
+# Dollfus and Bowell 1971, Table 4: the maria's normal albedo at 600 nm, median 0.072 and 10–90%
+# 0.062–0.082 (n 51).
+mare_median = 0.072
+mare_p10 = 0.062
+mare_p90 = 0.082
+
+# The check of the implied yield y_sat = Λ ÷ ⟨D⟩ (reported, never fitted): Morris 1980's Eq. 4 as
+# printed, Fe⁰ = 3.2 × 10⁻⁴ × FeO × (I_s/FeO) (p. 1701, read; zero intercept), per FeO. The task
+# takes it per FeO-iron, × M_FeO ÷ M_Fe = 71.844 ÷ 55.845, which is 4.117 × 10⁻⁴; at the mature
+# background's I_s/FeO of 75 that P14.T51.d's τ_L holds (`material/maturity.rs`) that is 0.0309,
+# held within a factor of 3; beside the mature soils' medians per FeO-iron, mare 0.029 and
+# highland 0.040 (Table 1, as the addendum computes them).
+morris_slope = 3.2e-4
+morris_index = 75.0
+yield_factor = 3.0
+yield_mare_median = 0.029
+yield_highland_median = 0.040
+
+# The fresh/mature contrast (stated, never fitted): fresh craters over the terrains' medians at
+# 600 nm (Dollfus and Bowell 1971, Table 4): Tycho 1.34–1.48, Proclus 1.58–1.68, Kepler 1.68.
+tycho_contrast_low = 1.34
+tycho_contrast_high = 1.48
+proclus_contrast_low = 1.58
+proclus_contrast_high = 1.68
+kepler_contrast = 1.68

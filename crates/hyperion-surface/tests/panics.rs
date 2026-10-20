@@ -1297,6 +1297,84 @@ mod maturity {
     }
 }
 
+mod weathering {
+    use hyperion_base::units::Kelvin;
+    use hyperion_surface::field::{MechanicsFamily, PaletteEntry, PaletteRole};
+    use hyperion_surface::material::{
+        PhaseLaw, npfe_optical_depth, weathered_entry_bvr, weathered_hemispherical_albedos,
+        weathered_normal_albedo, weathered_spherical_albedo,
+    };
+    use hyperion_surface::substance_key::SubstanceKey;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    #[test]
+    #[should_panic(expected = "a fresh albedo must be finite and non-negative")]
+    fn the_weathering_law_refuses_a_negative_fresh_albedo() {
+        let _ = weathered_normal_albedo(-1e-9, 550.0, PhaseLaw::Regolith, 3_000.0, 0.1, 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a fresh albedo must be finite and non-negative")]
+    fn the_weathering_law_refuses_a_nan_fresh_albedo() {
+        let _ = weathered_spherical_albedo(f64::NAN, 550.0, PhaseLaw::Ice, 917.0, 0.0, 0.5);
+    }
+
+    #[test]
+    #[should_panic(expected = "a fresh albedo must be finite and non-negative")]
+    fn the_weathering_law_refuses_an_infinite_hemispherical_albedo() {
+        let _ = weathered_hemispherical_albedos(
+            [0.5, 0.5, f64::INFINITY, 0.5],
+            550.0,
+            PhaseLaw::Regolith,
+            3_000.0,
+            0.1,
+            1.0,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "a wavelength must be finite and positive")]
+    fn the_weathering_law_refuses_a_zero_wavelength() {
+        let _ = npfe_optical_depth(PhaseLaw::Lambert, 0.0, 3_000.0, 0.1, 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a grain density must be finite and positive")]
+    fn the_weathering_law_refuses_an_infinite_density() {
+        let _ = weathered_normal_albedo(0.1, 550.0, PhaseLaw::Regolith, f64::INFINITY, 0.1, 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "an FeO_T mass fraction must be in [0, 1]")]
+    fn the_weathering_law_refuses_an_iron_fraction_above_one() {
+        let _ = weathered_normal_albedo(0.1, 550.0, PhaseLaw::Regolith, 3_000.0, 1.5, 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a maturity must be in [0, 1]")]
+    fn the_weathering_law_refuses_a_nan_maturity() {
+        let _ = npfe_optical_depth(PhaseLaw::Ice, 550.0, 917.0, 0.0, f64::NAN);
+    }
+
+    #[test]
+    #[should_panic(expected = "a maturity must be in [0, 1]")]
+    fn the_weathering_law_refuses_a_negative_maturity_for_an_entry_without_iron() {
+        let entry = PaletteEntry {
+            substance: SubstanceKey::new("granite").unwrap(),
+            role: PaletteRole::PrimaryCrust,
+            normal_albedo_bvr: [0.275; 3],
+            phase_row: 0,
+            grain_density_kg_m3: 2_650.0,
+            transition: Kelvin::new(1_233.15),
+            mechanics: MechanicsFamily::Silicate,
+            liquid: None,
+            feo_mass_fraction: None,
+        };
+        let _ = weathered_entry_bvr(&entry, -0.1);
+    }
+}
+
 mod reading {
     use hyperion_base::rng::DetailSeed;
     use hyperion_base::units::Metres;

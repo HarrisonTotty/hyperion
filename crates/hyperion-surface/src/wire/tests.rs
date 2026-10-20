@@ -4,7 +4,7 @@
 use std::sync::OnceLock;
 
 use hyperion_base::units::{Gigayears, Kelvin};
-use hyperion_testkit::float::assert_same_bits;
+use hyperion_testkit::float::{assert_same_bits, bits};
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 use hyperion_testkit::lcg::Lcg;
@@ -233,19 +233,19 @@ fn a_wire_payload_carries_its_liquid_records_and_fractions() {
     {
         assert_eq!(got.liquid, put.liquid, "{}", put.substance.as_str());
         assert_eq!(
-            got.feo_mass_fraction,
-            put.feo_mass_fraction,
+            got.feo_mass_fraction.map(bits),
+            put.feo_mass_fraction.map(bits),
             "{}",
             put.substance.as_str()
         );
     }
-    let feo: Vec<Option<f64>> = held
+    let feo: Vec<Option<u64>> = held
         .palette()
         .entries()
         .iter()
-        .map(|e| e.feo_mass_fraction)
+        .map(|e| e.feo_mass_fraction.map(bits))
         .collect();
-    assert_eq!(feo, [Some(0.110), Some(0.0), None]);
+    assert_eq!(feo, [Some(bits(0.110)), Some(bits(0.0)), None]);
     assert_eq!(
         first_difference(&encode_payload(&rebuilt, &cover, None), &bytes),
         None

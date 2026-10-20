@@ -138,7 +138,7 @@ pub trait FitTask: Sync + std::fmt::Debug {
 }
 
 /// Every task, in name order. A new task is one more entry (see the module's documentation).
-pub static REGISTRY: [&dyn FitTask; 46] = [
+pub static REGISTRY: [&dyn FitTask; 47] = [
     &tasks::binary_cooling_floor::BinaryCoolingFloorTask,
     &tasks::binary_pair_light::C_TASK,
     &tasks::binary_pair_light::D_TASK,
@@ -171,6 +171,7 @@ pub static REGISTRY: [&dyn FitTask; 46] = [
     &tasks::sky_binary_light::E_TASK,
     &tasks::sky_envelope::SkyEnvelopeTask,
     &tasks::sky_phase_envelope::SkyPhaseEnvelopeTask,
+    &tasks::space_weathering::SpaceWeatheringTask,
     &tasks::star_colour::StarColourTask,
     &tasks::star_colour::REDDENING_TASK,
     &tasks::star_colour::REDDENING_AV02_05_TASK,
@@ -299,6 +300,7 @@ mod tests {
                 "sky_binary_light_e",
                 "sky_envelope",
                 "sky_phase_envelope",
+                "space_weathering",
                 "star_colour",
                 "star_colour_reddening",
                 "star_colour_reddening_av02_05",
@@ -321,11 +323,12 @@ mod tests {
 
     /// Each task names the crate its table lives in: the sky's for the tasks listed here, which
     /// are none until the crate split's move (CS.T2) gives it the sky's twelve, the surface
-    /// crate's for the bowl's permanent shadow, and the sim's for every other.
+    /// crate's for the bowl's permanent shadow and the space-weathering law, and the sim's for
+    /// every other.
     #[test]
     fn each_task_names_its_tables_crate() {
         let sky: [&str; 0] = [];
-        let surface = ["bowl_permanent_shadow"];
+        let surface = ["bowl_permanent_shadow", "space_weathering"];
         for task in registry() {
             let expected = if sky.contains(&task.name()) {
                 TableCrate::Sky

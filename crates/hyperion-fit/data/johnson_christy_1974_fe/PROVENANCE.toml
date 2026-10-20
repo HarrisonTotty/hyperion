@@ -1,0 +1,17 @@
+# The optical constants of iron at room temperature of Johnson and Christy (1974), as the
+# refractiveindex.info database tabulates them (λ in µm, n, k; 0.188-1.937 µm, 49 rows): the
+# absorption of the nanophase iron of the space-weathering law (rendering plan R10, R10.T1.d;
+# decision-p14-t51d-weathering §1.4). Rendering plan R08's `iron.json` is this file's 380-780 nm
+# reduction. The database is in the public domain (CC0 1.0), so the file is committed unmodified.
+# Read by `run space_weathering`, which joins `ordal_1988_fe` beyond 1.937 µm.
+dataset = "johnson_christy_1974_fe"
+class = "committed"
+citation = "Johnson and Christy (1974), Phys. Rev. B 9, 5056, DOI 10.1103/PhysRevB.9.5056: optical constants of transition metals (Ti, V, Cr, Mn, Fe, Co, Ni and Pd), iron at room temperature, 0.188-1.937 µm, 49 rows; via the refractiveindex.info database (Polyanskiy 2024, Sci. Data 11, 94)"
+url = "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/c5c2f188e848453def5970e347399d653df2ffc2/database/data/main/Fe/nk/Johnson.yml"
+retrieved = "2026-10-19"
+release = "database/data/main/Fe/nk/Johnson.yml at the database's commit c5c2f188e848453def5970e347399d653df2ffc2"
+licence = "CC0 1.0 Universal (the file's header: \"refractiveindex.info database is in the public domain; copyright and related rights waived via CC0 1.0\")"
+
+[[files]]
+name = "Johnson.yml"
+sha256 = "8d774beaac808662370242790c18b9998a9856ba850d9f35c45f6db3da31a7cd"

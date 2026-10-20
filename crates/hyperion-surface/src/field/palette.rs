@@ -644,7 +644,7 @@ impl MaterialPalette {
 
 #[cfg(test)]
 mod tests {
-    use hyperion_testkit::float::assert_same_bits;
+    use hyperion_testkit::float::{assert_same_bits, bits};
 
     use super::*;
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -921,12 +921,12 @@ mod tests {
         let mut ice = entry("H2O", PaletteRole::Ice);
         ice.feo_mass_fraction = Some(0.0);
         let palette = MaterialPalette::new(vec![lava.clone(), ice, sea]).unwrap();
-        let held: Vec<Option<f64>> = palette
+        let held: Vec<Option<u64>> = palette
             .entries()
             .iter()
-            .map(|e| e.feo_mass_fraction)
+            .map(|e| e.feo_mass_fraction.map(bits))
             .collect();
-        assert_eq!(held, [Some(0.110), Some(0.0), None]);
+        assert_eq!(held, [Some(bits(0.110)), Some(bits(0.0)), None]);
         assert!(palette.entries()[0].liquid.is_some());
         lava.liquid.as_mut().unwrap().temperature = Kelvin::new(0.0);
         lava.feo_mass_fraction = Some(2.0);

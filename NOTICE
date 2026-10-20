@@ -65,6 +65,20 @@ Kept unmodified in crates/hyperion-fit/data/green2008_si/ (a tool input, not shi
 camera band terms of crates/hyperion-sim/src/tables/star_colour.rs are computed from it.
 
 --------------------------------------------------------------------------------
+Data: optical constants of iron
+https://creativecommons.org/publicdomain/zero/1.0/
+
+P. B. Johnson and R. W. Christy, "Optical constants of transition metals: Ti, V, Cr, Mn, Fe, Co,
+Ni, and Pd", Phys. Rev. B 9, 5056-5070 (1974), DOI: 10.1103/PhysRevB.9.5056; M. A. Ordal,
+R. J. Bell, R. W. Alexander, L. A. Newquist and M. R. Querry, "Optical properties of Al, Fe, Ti,
+Ta, W, and Mo at submillimeter wavelengths", Appl. Opt. 27, 1203-1209 (1988), DOI:
+10.1364/AO.27.001203; both as tabulated by the refractiveindex.info database (M. N. Polyanskiy,
+Sci. Data 11, 94 (2024); commit c5c2f188), which is dedicated to the public domain (CC0 1.0). Kept
+unmodified in crates/hyperion-fit/data/johnson_christy_1974_fe/ and
+crates/hyperion-fit/data/ordal_1988_fe/ (tool inputs, not shipped); the nanophase iron's
+absorption in crates/hyperion-surface/src/tables/space_weathering.rs is computed from them.
+
+--------------------------------------------------------------------------------
 Bevy
 https://github.com/bevyengine/bevy
 

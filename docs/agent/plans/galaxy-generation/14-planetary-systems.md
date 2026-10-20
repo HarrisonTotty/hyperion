@@ -6926,7 +6926,13 @@ feeding back into p_s, T_s, the albedo or the bulk.
 
     It weathers the area mix with R10.T1.d's law at m_body, each regolith component's spherical
     albedo in every band the optics carry, and deletes T51.b's space-weathering stand-in. If
-    R10.T1.d has not landed, the stand-in stays and the weathering takes the next bump.
+    R10.T1.d has not landed, the stand-in stays and the weathering takes the next bump. Wiring the
+    law, it restamps the surface crate's `space_weathering` table `--since 24`, which R10.T1.d
+    stamped since 22 while nothing read it (main's ruling, 2026-10-19). The generated Moon at the
+    registry's FeO_T 0.05 and 0.20 gives highlands 0.094/0.132/0.147 and maria 0.051/0.054/0.056
+    at m = 1, the maria grey against the anchors' B/R of 0.733 and the highland-to-mare V contrast
+    2.45 against the measured 1.58: a stated miss its record test states and does not assert
+    (decision-p14-t51d-weathering, addendum 2026-10-19, D1–D3; decision-r10-t1d-anchor-colour §3).
 
     _Tests:_
     - Mercury's Bond albedo 0.088 ± 0.003 (Mallama 2017, arXiv:1703.02670, the spherical
