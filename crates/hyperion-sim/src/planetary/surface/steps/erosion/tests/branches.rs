@@ -2,7 +2,9 @@
 //! the "T14.d follow-up"): which branch a world takes and the share of its epoch; a surface no
 //! older than its epoch's end, and a world never wet, left untouched to the bit; the young surface
 //! inside the waiting craters' rims eroded by the solver but shedding no runoff of its own; the
-//! paleo-water stored to its inventory; and the outputs the step writes on the reference Mars.
+//! paleo-water stored to its inventory; the outputs the step writes on the reference Mars; and the
+//! final field's realised relief on the fast reference worlds (decision-r09-t14-choices, "T14.c
+//! follow-up" item 3 (i)).
 
 use hyperion_surface::field::{Crust, FlowDirection};
 use hyperion_testkit::float::assert_same_bits;
@@ -120,6 +122,23 @@ fn a_world_never_wet_is_left_untouched() {
         assert_same_bits(cell.steepness_index_m0_9, 0.0);
         assert_same_bits(cell.runoff_m_per_year, 0.0);
         assert_same_bits(cell.catchment_runoff_m_per_year, 0.0);
+    }
+}
+
+/// The final field's realised relief lies within R09.T12.e's 6–16 `σ_h` on the fast reference
+/// worlds (decision-r09-t14-choices, "T14.c follow-up" item 3 (i); the reference Earth's is the
+/// slow `earth` test's): the reference Mars, Moon and Ceres, each staged to the climate's end and
+/// taken through the rest of the pass, the erosion and the late coarse craters, have a cells'
+/// range of 6 to 16 times their `σ_h` ([`assert_final_relief`]).
+#[test]
+fn the_final_field_s_relief_is_six_to_sixteen_sigma_h() {
+    for (name, inputs) in [
+        ("reference Mars", reference::mars_like()),
+        ("reference Moon", reference::moon_like()),
+        ("reference Ceres", reference::ceres_like()),
+    ] {
+        let staged = Staged::of(inputs);
+        assert_final_relief(name, &staged.inputs, &staged.finished());
     }
 }
 

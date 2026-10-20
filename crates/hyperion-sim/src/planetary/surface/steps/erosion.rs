@@ -52,14 +52,18 @@
 //!   of the path's τ and interpolated inside its link), m = 0.45 on the equivalent area with the
 //!   slope correction; roots, bounds and cells of no equivalent area kept at their ground and
 //!   reset the path to their base; no deposition on a cell with no uplift; the elevation returned
-//!   as a base and a part linear in the uplift's scale.
+//!   as a base and a part linear in the uplift's scale; and, at steady state, a threshold slope
+//!   that holds each link's rise to min(u ℓ ÷ a, `s_c` ℓ), Tzathas et al.'s §6.2 term in its hard
+//!   limit (decision-r09-t14-choices, "T14.c follow-up" item 2).
 //! - `multigrid`: the fixed point of routing and solution with the moving average of weight ½,
 //!   coarse to fine from level 4 on the quadtree's parents (solid-angle-weighted means), six
 //!   iterations a level, the finest level's last iteration the pure solution; once a level, on its
 //!   construction, the water bodies, the bounds and, on a world wet now, each cell's basin and
-//!   base level, with the uplift u = `λ_b` max(0, z0 − `ℓ_b`) refitted every iteration so that
-//!   each basin keeps its construction's mean height above its base level
-//!   (decision-r09-t14-choices Q1); and each finer level's start, its construction plus the
+//!   base level, with the uplift u = `λ_b` max(0, z0 − `ℓ_b`) a field fixed in space, each cell's
+//!   own basin's `λ_b` in the path integral, started from Q1's closed form at each level and
+//!   refitted multiplicatively every iteration, damped, so that each basin keeps its
+//!   construction's mean height above its base level (decision-r09-t14-choices Q1, as its "T14.c
+//!   follow-up" item 1 rules it); and each finer level's start, its construction plus the
 //!   upsample of the coarser level's change through R09.T4's interpolant at child centres
 //!   jittered on `surface.coarse.erosion` (instance 1, the receivers' being 0; "T14.b follow-up"
 //!   item 3), with each level's residuals, largest changes and changed receivers, `λ_b`'s
@@ -69,14 +73,15 @@
 //!
 //! - `branches`: never wet, nothing; dry now, the transient for the wet epoch's effective flow
 //!   times the share of the epoch the surface saw, nothing where it saw none, with no uplift, the
-//!   epoch's runoff on every cell and the paleo-inventory's lakes as bounds, the young surface
+//!   epoch's runoff on every cell and the paleo-inventory's lakes as bounds, no threshold slope, the young surface
 //!   inside the waiting craters' rims eroded but shedding no runoff of its own (Q2, Q4), the
 //!   volcanic provinces exposed and bedded by their own surface's age and renewed after the solve
 //!   where younger than the epoch, and each eroded cell lowered by its valley's void, its
 //!   bankfull floor and 10:1 walls, not its channel's whole incision
 //!   (decision-r09-t14-mars-ceiling §2.1–2.2); wet now, the steady state under each basin's
-//!   freeboard with the climate's runoff, ice cells shedding it as it is, the sea the bound and
-//!   every closed depression a dry playa (Q1, Q3, Q5).
+//!   freeboard with the climate's runoff, no link rising more than `DEBRIS_FLOW_SLOPE` times its
+//!   length, ice cells shedding it as it is, the sea the bound and every closed depression a dry
+//!   playa (Q1, Q3, Q5; the "T14.c follow-up" items 1–2).
 //! - `outputs`: the elevation, the water surfaces, the final elevation's routing, flow, geometric
 //!   drainage and steepness index on the filled surface, the own and catchment runoffs, a world
 //!   dry now's channel incision (F2), and the marker that the field is routed.
@@ -158,13 +163,20 @@ fn dry_now(pass: &Pass<'_>, working: &mut Working) {
     );
 }
 
-/// The wet-now branch's erosion and outputs (decision-r09-t14-choices Q1, Q3 and Q5), its source
-/// the climate's annual runoff, read for every cell before any changes.
+/// The wet-now branch's erosion and outputs (decision-r09-t14-choices Q1, Q3 and Q5, and the "T14.c
+/// follow-up 2" §2's remap), its source the climate's annual runoff, read for every cell before
+/// any changes.
 #[cfg(test)]
 fn wet_now(pass: &Pass<'_>, working: &mut Working) {
     let fluid = erodibility::Fluid::of(pass.inputs()).expect("a world wet now has a fluid");
     let runoff = branches::wet_now_runoff_m_per_year(pass, working, fluid);
     let outcome = branches::erode_wet_now(pass, working, &runoff);
+    let z0: Vec<f64> = working
+        .cells
+        .iter()
+        .map(|cell| cell.elevation.value())
+        .collect();
+    let remapped = branches::remap_onto_construction(&outcome, &z0, &outcome.z_m);
     let sea = branches::sea_cells(working);
     let sea_level_m = working.sea_level.value();
     outputs::write(
@@ -172,7 +184,7 @@ fn wet_now(pass: &Pass<'_>, working: &mut Working) {
         sea_level_m,
         &outcome,
         &outputs::Written {
-            elevation_m: &outcome.z_m,
+            elevation_m: &remapped.elevation_m,
             sea: &sea,
             runoff_m_per_year: &runoff,
             channel_incision_m: None,

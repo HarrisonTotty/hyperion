@@ -56,6 +56,15 @@ const VALLEY_LAYER_FINDING_M: f64 = 6.1;
 /// (decision-r09-t14-mars-ceiling's relay, (A1)'s record).
 const DEEP_VALLEY_SHARE: f64 = 0.046;
 
+/// The drainage classes by which (A1)'s deep tail is recorded, m², each from its lower bound to
+/// the next: 10⁴–10⁵, 10⁵–10⁶ and above 10⁶ km² (decision-r09-t14-choices, "T14.c follow-up"
+/// item 4).
+const DRAINAGE_CLASSES_M2: [(f64, f64, &str); 3] = [
+    (1.0e10, 1.0e11, "10⁴–10⁵ km²"),
+    (1.0e11, 1.0e12, "10⁵–10⁶ km²"),
+    (1.0e12, f64::INFINITY, "above 10⁶ km²"),
+];
+
 /// Matsubara, Howard and Drummond 2011's highland standing water, 15–30% of the highlands at
 /// their X of 7 to 3 (JGR 116, E04001, ¶61; decision-r09-t14-mars-ceiling §3).
 const HIGHLAND_WATER_SHARE: (f64, f64) = (0.15, 0.30);
@@ -89,6 +98,13 @@ struct Ceiling<'a> {
     radius_m: f64,
     /// The eroded cells: not bound, of equivalent area above zero, of exposure above zero.
     eroded: Vec<usize>,
+}
+
+/// The share of `incision` deeper than Black et al.'s 350 m, 0 where it is empty.
+fn deep_share(incision: &[f64]) -> f64 {
+    let deep = incision.iter().filter(|&&d| d > TRUNK_INCISION_M.1).count();
+    u32::try_from(deep).map_or(0.0, f64::from)
+        / u32::try_from(incision.len().max(1)).map_or(1.0, f64::from)
 }
 
 /// One cell above (B), as §4.1 records it.
@@ -241,24 +257,42 @@ impl<'a> Ceiling<'a> {
     }
 
     /// Prints the figures under `what`: (A1)'s trunk incision, its p90 and the share deeper than
-    /// 350 m; the lowering; (B) as an area quantile, its maximum, the share above and the cells
-    /// whose `f_w` reaches 1; (A2); the residuals by level; and the residual criterion
-    /// (decision-r09-t14-mars-ceiling §4.2).
+    /// 350 m, whole and by drainage class ([`DRAINAGE_CLASSES_M2`]); the lowering; (B) as an area
+    /// quantile, its maximum, the share above and the cells whose `f_w` reaches 1; (A2); the
+    /// residuals by level; and the residual criterion (decision-r09-t14-mars-ceiling §4.2).
     fn print(&self, what: &str) {
         let trunk = self.trunk();
-        let deep = trunk.iter().filter(|&&d| d > TRUNK_INCISION_M.1).count();
-        let share_deep = u32::try_from(deep).map_or(0.0, f64::from)
-            / u32::try_from(trunk.len()).map_or(1.0, f64::from);
         print_distribution(
             &format!("{what}: (A1) trunk channel incision, eroded cells draining ≥ 10⁴ km²"),
-            trunk,
+            trunk.clone(),
         );
         eprintln!(
             "{what}: (A1) trunk cells deeper than 350 m: {:.2}% against Williams and Phillips's \
-             about {:.1}%",
-            100.0 * share_deep,
+             about {:.1}% (a finding for the w_v check and R09.T6.c)",
+            100.0 * deep_share(&trunk),
             100.0 * DEEP_VALLEY_SHARE
         );
+        for (lo, hi, class) in DRAINAGE_CLASSES_M2 {
+            let incision: Vec<f64> = self
+                .eroded
+                .iter()
+                .filter(|&&c| (lo..hi).contains(&self.dry.outcome.drainage_m2[c]))
+                .map(|&c| self.incision(c))
+                .collect();
+            let share = deep_share(&incision);
+            match quantiles(incision.clone()) {
+                Some(q) => eprintln!(
+                    "{what}: (A1) drainage {class}: {} trunk cells, {:.2}% deeper than 350 m, \
+                     median {:.1} m, p90 {:.1} m, max {:.1} m",
+                    incision.len(),
+                    100.0 * share,
+                    q[3],
+                    q[5],
+                    q[6]
+                ),
+                None => eprintln!("{what}: (A1) drainage {class}: no trunk cells"),
+            }
+        }
         print_distribution(
             &format!("{what}: channel incision, every eroded cell"),
             self.eroded.iter().map(|&c| self.incision(c)).collect(),
@@ -431,7 +465,9 @@ fn print_paleo_water(what: &str, working: &Working, outcome: &Outcome, omega: &[
                 100.0 * wet / all,
                 if crust == Crust::Lid {
                     format!(
-                        " (Matsubara et al.'s {:.0}–{:.0}% of the highlands)",
+                        " (Matsubara et al.'s {:.0}–{:.0}% of the highlands; Q2's static fill, an \
+                         upper bound on the paleo-lakes' extent, its cells bounds during the epoch, \
+                         recorded beside (A2))",
                         100.0 * HIGHLAND_WATER_SHARE.0,
                         100.0 * HIGHLAND_WATER_SHARE.1
                     )
@@ -599,14 +635,26 @@ fn rebuilt_variance(grooves: &[Groove], radius_m: f64, finer_than_m: f64) -> f64
 ///
 /// - (A1), asserted: the median channel incision over the eroded cells (not bound, of equivalent
 ///   area and exposure above zero) draining at least 10⁴ km² lies within Black et al. 2017's
-///   50–350 m; its p90 and the share deeper than 350 m are recorded;
+///   50–350 m (187.8 m as built); its p90 and the share deeper than 350 m are recorded, whole and
+///   by drainage class, 10⁴–10⁵, 10⁵–10⁶ and above 10⁶ km² ([`DRAINAGE_CLASSES_M2`]). The tail
+///   is a finding, not an assertion: 21.2% of the trunk cells lie deeper than 350 m against
+///   Williams and Phillips 2001's about 4.6% (JGR 106, 23737, a sample of valleys narrower than
+///   many of the model's trunks); it is the construction's own, the incision S₀ times the
+///   knickpoint's travel, which grows as (r A)^0.45 K t, so that the steeper, larger trunks run
+///   deep. It goes to the `w_v` science check and to R09.T6.c, which takes the solver's incision as
+///   its valley depth: a depth relation by drainage belongs there, not in K t
+///   (decision-r09-t14-choices, "T14.c follow-up" item 4);
 /// - (A0), recorded: the coarse volume plus the synthesis's sub-cell term, the trunks' mean depth
 ///   of T6.b's closed form over each channelled cell, its port pinned by rebuilding
 ///   `channel_variance` on every channelled cell to 10⁻⁹;
-/// - (A2), recorded: the coarse volume against Luo et al.'s 1.2 m, a finding above 6.1 m;
+/// - (A2), recorded: the coarse volume against Luo et al.'s 1.2 m, a finding above 6.1 m (2.226
+///   m as built); beside it, the paleo-water floods 46.4% of the lid's area under the reference
+///   Mars's 156 m of global layer, Q2's static fill, an upper bound on the paleo-lakes' extent,
+///   labelled: 46% of the cells are bounds during the epoch (the "T14.c follow-up" item 6);
 /// - (B), asserted: the area p99 of the eroded cells' coarse lowering over 350 m × 10 km ÷ each
-///   cell's width is at most 1 (88.3 m against 91.3 m at the mean cell, measured), the maximum and
-///   the share above printed (the cells above in [`measure_the_reference_mars_s_ceiling`]);
+///   cell's width is at most 1 (88.3 m against 91.3 m at the mean cell, measured, the p99 accepted
+///   as the assertion by the "T14.c follow-up" item 6), the maximum and the share above printed
+///   (the cells above in [`measure_the_reference_mars_s_ceiling`]);
 /// - the residual criterion and the paleo-water's records, printed.
 #[test]
 fn the_reference_mars_s_trunk_incision_is_black_et_al_s() {
@@ -786,7 +834,7 @@ fn measure_the_level_starts_on_the_reference_mars() {
             &staged.working,
             Options {
                 start,
-                ..Options::STEP
+                ..Options::DRY_NOW
             },
         )
         .unwrap();
@@ -817,6 +865,15 @@ fn measure_the_level_starts_on_the_reference_mars() {
 /// its level-7 parents by solid angle; and the coarse volume, trunk median and (B) at the ends of
 /// Hoke, Hynek and Tucker 2011's range, 10⁵ yr at 0.073 m a⁻¹ and 10⁸ yr at 1.10 m a⁻¹
 /// (science-hoke §4).
+///
+/// **The dependence on resolution, a finding for R09.T6.c and the `w_v` check**
+/// (decision-r09-t14-choices, "T14.c follow-up" item 6): at level 8 (cells of about 19 km), (B)'s
+/// p99 is 1.94 times its bound and (A2) is 5.64 m, against 0.97 and 2.226 m at level 7. Every
+/// coarse cell carries a trunk, so a finer level carries four times the valley length and the void
+/// per area grows with resolution. Not a blocker, since a Mars-sized body is always level 7; but
+/// any world needs the closure and the network invariant with the level: a cell carries a valley,
+/// and the closure, only where its drainage exceeds the epoch's channel-initiation area, which a
+/// larger world dry now, at level 8, depends on.
 #[test]
 #[ignore = "slow: the reference Mars at levels 7 and 8 and two more epochs, R09.T14.c"]
 fn the_reference_mars_s_slow_record() {

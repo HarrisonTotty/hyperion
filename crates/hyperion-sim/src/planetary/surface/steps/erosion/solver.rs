@@ -19,7 +19,7 @@
 //! - 1/a = `correction(c)` ÷ (K `A_eq`^m), m = [`DRAINAGE_EXPONENT`], with Tzathas et al.'s
 //!   slope correction (§4.3) and the equivalent area (Hergarten 2021, eq. 16); the link takes its
 //!   upstream cell's 1/a, so dτ = ℓ/a, `τ_c` = `τ_r` + dτ and `Σ_c` = `Σ_r` + `u_c` dτ (eqs.
-//!   10–18, with δx the link);
+//!   10–18, with δx the link; the rise `u_c` dτ held to `s_c` ℓ under a threshold, below);
 //! - at steady state, or where `τ_c` ≤ t, z = the path's base + λ `Σ_c` (eq. 9);
 //! - otherwise `D` lies where τ = `τ_c` − t: a binary search of the path's τ, which does not
 //!   decrease from the base, finds its link, inside which z0 and Σ are interpolated linearly in τ,
@@ -37,6 +37,14 @@
 //!
 //! The elevation is linear in λ, z = base + λ F, below that ceiling, and the solution returns the
 //! two parts, so that the uplift's scale (decision-r09-t14-choices Q1) is one division.
+//!
+//! At steady state a [`Threshold::Slope`] holds each link's rise to min(u ℓ ÷ a, `s_c` ℓ): the
+//! hard limit (`k_t` → ∞) of Tzathas et al.'s threshold term, their §6.2 (eqs. 27–29), for the
+//! ridges where stream power alone "degenerate[s] into infinitely steep slopes" (§2). The
+//! elevation is then no longer linear in λ: F is the rise at the uplift as given, so that only λ
+//! = 1 is its elevation, and each cell held at the threshold is marked
+//! ([`Solution::held_at_threshold`]; decision-r09-t14-choices, "T14.c follow-up" item 2).
+//!
 //! Implemented from the paper alone; no code is copied or paraphrased from Tzathas et al.'s
 //! repository (Inria research-only licence).
 
@@ -106,6 +114,19 @@ pub(crate) enum Time {
     Years(f64),
 }
 
+/// The steepest a link of the steady state rises (decision-r09-t14-choices, "T14.c follow-up"
+/// item 2).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Threshold {
+    /// None: the stream-power law alone, the elevation linear in the uplift's scale (a world dry
+    /// now's transient, and the closed form's solve at λ = 1).
+    None,
+    /// Each link's rise at most this slope times its length, metres a metre, finite and positive:
+    /// the bed held at the threshold wherever the fluvial steady state would be steeper (Tzathas
+    /// et al. 2024's §6.2 term in its hard limit). At steady state only.
+    Slope(f64),
+}
+
 /// The per-cell inputs of a solve, each one a cell in cell-index order.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Cells<'a> {
@@ -124,17 +145,34 @@ pub(crate) struct Cells<'a> {
 }
 
 /// A solve's elevations, z = min(base + λ F, ceiling) for the uplift's scale λ ≥ 0, each a cell's
-/// in metres.
+/// in metres; under a [`Threshold::Slope`], at λ = 1 only.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Solution {
     base: Vec<f64>,
     per_lambda: Vec<f64>,
     ceiling: Vec<f64>,
+    held: Vec<bool>,
+    link_years: Vec<f64>,
 }
 
 impl Solution {
+    /// Each cell's own link's τ, years: its length over a, ℓ ÷ a, so that u ℓ ÷ a is the link's
+    /// fluvial rise under an uplift u; zero at a root, a bound and a cell of no equivalent area.
+    #[must_use]
+    pub(crate) fn link_years(&self) -> &[f64] {
+        &self.link_years
+    }
+
+    /// Whether each cell's own link rises at the threshold slope, its fluvial rise u ℓ ÷ a above
+    /// `s_c` ℓ: false everywhere without a [`Threshold::Slope`].
+    #[must_use]
+    pub(crate) fn held_at_threshold(&self) -> &[bool] {
+        &self.held
+    }
+
     /// Each cell's elevation at λ = 0, metres: its path's base, or z0(D), the construction where
     /// its characteristic left it.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the solver's tests read it"))]
     #[must_use]
     pub(crate) fn base_m(&self) -> &[f64] {
         &self.base
@@ -173,41 +211,40 @@ struct Step {
     start: usize,
 }
 
-/// Tzathas et al.'s solution on `network` with `cells`' inputs at `time` (see the module
-/// documentation).
+/// Tzathas et al.'s solution on `network` with `cells`' inputs at `time`, by the stream-power law
+/// alone ([`solve_with`] with [`Threshold::None`]).
+///
+/// # Panics
+///
+/// As [`solve_with`].
+#[must_use]
+pub(crate) fn solve<N: Network + ?Sized>(network: &N, cells: &Cells<'_>, time: Time) -> Solution {
+    solve_with(network, cells, time, Threshold::None)
+}
+
+/// Tzathas et al.'s solution on `network` with `cells`' inputs at `time`, each link's rise held
+/// to `threshold` (see the module documentation).
 ///
 /// # Panics
 ///
 /// If an input is not one a cell, a value is not finite, an uplift or an equivalent area is
-/// negative, an erodibility is not positive, the time is negative or not finite, or the network's
-/// depths are not its receivers' plus 1.
+/// negative, an erodibility is not positive, the time is negative or not finite, a threshold slope
+/// is not finite and positive or is given off the steady state, or the network's depths are not
+/// its receivers' plus 1.
 #[must_use]
-pub(crate) fn solve<N: Network + ?Sized>(network: &N, cells: &Cells<'_>, time: Time) -> Solution {
-    let count = slot(network.len());
-    for (what, len) in [
-        ("height", cells.z0_m.len()),
-        ("uplift", cells.uplift_m_per_year.len()),
-        ("erodibility", cells.erodibility_m0_1_per_year.len()),
-        ("equivalent area", cells.equivalent_area_m2.len()),
-        ("bound", cells.fixed.len()),
-    ] {
-        assert_eq!(len, count, "one {what} a cell");
-    }
-    if let Time::Years(years) = time {
-        assert!(
-            years.is_finite() && years >= 0.0,
-            "a time is finite and non-negative, not {years} years"
-        );
-    }
-    assert_eq!(
-        network.preorder().len(),
-        count,
-        "the preorder holds every cell"
-    );
+pub(crate) fn solve_with<N: Network + ?Sized>(
+    network: &N,
+    cells: &Cells<'_>,
+    time: Time,
+    threshold: Threshold,
+) -> Solution {
+    let count = checked_count(network, cells, time, threshold);
     let mut solution = Solution {
         base: vec![0.0; count],
         per_lambda: vec![0.0; count],
         ceiling: vec![f64::INFINITY; count],
+        held: vec![false; count],
+        link_years: vec![0.0; count],
     };
     let mut path: Vec<Step> = Vec::new();
     for &cell in network.preorder() {
@@ -251,10 +288,13 @@ pub(crate) fn solve<N: Network + ?Sized>(network: &N, cells: &Cells<'_>, time: T
         assert!(uplift >= 0.0, "cell {cell}'s uplift is {uplift} m a⁻¹");
         let inv_a = network.correction(cell) / (erodibility * math::powf(area, DRAINAGE_EXPONENT));
         let dtau = num::assert_finite(length_m * inv_a);
+        let (rise, held) = link_rise(uplift * dtau, length_m, threshold);
+        solution.held[at] = held;
+        solution.link_years[at] = dtau;
         let below = path[depth - 1];
         let here = Step {
             tau_years: below.tau_years + dtau,
-            sigma_m: below.sigma_m + uplift * dtau,
+            sigma_m: below.sigma_m + rise,
             z0_m: z0,
             start: below.start,
         };
@@ -276,6 +316,60 @@ pub(crate) fn solve<N: Network + ?Sized>(network: &N, cells: &Cells<'_>, time: T
         solution.per_lambda[at] = per_lambda;
     }
     solution
+}
+
+/// The number of cells of `network`, once `cells`, `time` and `threshold` are checked against it.
+///
+/// # Panics
+///
+/// As [`solve_with`]'s inputs.
+fn checked_count<N: Network + ?Sized>(
+    network: &N,
+    cells: &Cells<'_>,
+    time: Time,
+    threshold: Threshold,
+) -> usize {
+    if let Threshold::Slope(slope) = threshold {
+        assert!(
+            slope.is_finite() && slope > 0.0,
+            "a threshold slope is finite and positive, not {slope}"
+        );
+        assert!(
+            matches!(time, Time::Steady),
+            "a threshold slope holds at steady state, not at {time:?}"
+        );
+    }
+    let count = slot(network.len());
+    for (what, len) in [
+        ("height", cells.z0_m.len()),
+        ("uplift", cells.uplift_m_per_year.len()),
+        ("erodibility", cells.erodibility_m0_1_per_year.len()),
+        ("equivalent area", cells.equivalent_area_m2.len()),
+        ("bound", cells.fixed.len()),
+    ] {
+        assert_eq!(len, count, "one {what} a cell");
+    }
+    if let Time::Years(years) = time {
+        assert!(
+            years.is_finite() && years >= 0.0,
+            "a time is finite and non-negative, not {years} years"
+        );
+    }
+    assert_eq!(
+        network.preorder().len(),
+        count,
+        "the preorder holds every cell"
+    );
+    count
+}
+
+/// A link's rise, metres, from its fluvial rise `fluvial` (u ℓ ÷ a) over its length `length_m`:
+/// held to `s_c` ℓ under a [`Threshold::Slope`] `s_c`, and whether it is held.
+fn link_rise(fluvial: f64, length_m: f64, threshold: Threshold) -> (f64, bool) {
+    match threshold {
+        Threshold::Slope(slope) if fluvial > slope * length_m => (slope * length_m, true),
+        Threshold::None | Threshold::Slope(_) => (fluvial, false),
+    }
 }
 
 /// The base and F of the last entry of `path` (from its base to the cell, τ non-decreasing, the

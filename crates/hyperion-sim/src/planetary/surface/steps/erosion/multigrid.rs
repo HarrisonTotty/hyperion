@@ -23,13 +23,23 @@
 //!   basin b, the root it drains to, and the basin's base level `ℓ_b`.
 //! - **Each iteration**: the routing with water on the current z ([`route_with_water`]) with the
 //!   level's bodies; the equivalent area, the runoff times the cells' area accumulated and over
-//!   [`REFERENCE_RUNOFF_M_PER_YEAR`] (Hergarten 2021, eqs. 16 and 20); the solve; for
-//!   [`Uplift::BasinFreeboard`], each basin's `λ_b` refitted on it, so that the basin keeps its
-//!   construction's mean height, a basin with no response keeping its construction; the residual,
+//!   [`REFERENCE_RUNOFF_M_PER_YEAR`] (Hergarten 2021, eqs. 16 and 20); the solve; the residual,
 //!   the root mean square by area of the solution less z over the cells not bound; and z ← ½ (z +
-//!   s). On the finest level the last iteration's output is s itself, not the
-//!   average, so that the final elevation is an analytic solution on its routing (the lane's
-//!   choice).
+//!   s). On the finest level the last iteration's output is s itself, not the average, so that
+//!   the final elevation is an analytic solution on its routing (the lane's choice).
+//! - **The uplift as a field** for [`Uplift::BasinFreeboard`] (decision-r09-t14-choices Q1, as
+//!   its "T14.c follow-up" item 1 rules it): the rock uplift is fixed in space, u(i) = `λ_b(i)`
+//!   max(0, z0(i) − `ℓ_b(i)`), each cell's own construction basin's `λ_b` applied at that cell, so
+//!   that the solve is the path integral of a non-negative field (Tzathas et al. 2024's eq. 9
+//!   under an uplift that "varies in space but not in time", §4.1), each link's rise held to the
+//!   problem's [`Threshold`]. Each level's first iteration takes `λ_b` from Q1's closed form,
+//!   `Σ_b` Ω (z0 − `ℓ_b`) ÷ `Σ_b` Ω F on a solve at λ = 1 ([`closed_form`]), exact only where every
+//!   path stays in its basin. After each solve each construction basin's mean elevation, which no
+//!   base enters, is held by an additive (Jacobi) step ([`refit`]; decision-r09-t14-choices, "T14.c
+//!   follow-up 2" §1): `λ_b` ← max(0, `λ_b` + ½ `Σ_b` Ω (z0 − s) ÷ `S_b`), `S_b` the basin's own
+//!   sensitivity along the part of each path that lies in it, a basin of `S_b` zero keeping its
+//!   `λ_b`. The finest level's last iteration refits once more and solves again on the same
+//!   routing, so that the field takes the `λ_b` refitted on its own routing (the lane's choice).
 //! - **The start of each finer level** ([`LEVEL_START`], decision-r09-t14-choices, "T14.b
 //!   follow-up" item 3): the level's own construction plus the upsample of the change the coarser
 //!   level made to its construction, z = `z0_{k+1}` + I(`z_k` − `z0_k`), each bound's change zero
@@ -46,8 +56,9 @@
 //!   change, and the receivers that changed between its last two routings. The fixed point does
 //!   not converge exactly: its receivers flip on a floor that grows with the level, and the field
 //!   takes the last solve on its own routing (decision-r09-t14-choices, "T14.b follow-up" items
-//!   1–2). The receivers are drawn afresh at every iteration; [`Receivers::Sticky`], the ruling's
-//!   lever, keeps them at the finest level while they stay lower, measured and off by default.
+//!   1–2). On a world dry now the receivers are drawn afresh at every iteration; on a world wet
+//!   now [`Receivers::Sticky`] keeps them at every level from its third iteration while they stay
+//!   lower ([`Options::WET_NOW`]; "T14.c follow-up 2" §3).
 //!
 //! Implemented from the paper alone; no code is copied or paraphrased from Tzathas et al.'s
 //! repository (Inria research-only licence).
@@ -64,7 +75,7 @@ use super::super::plates::{cell_of, slot};
 use super::depressions::{self, Measure, WaterBodies, route_with_water, route_with_water_from};
 use super::drainage::{self, Routing, receiver_uniforms};
 use super::mesh::Mesh;
-use super::solver::{self, Cells, Time};
+use super::solver::{self, Cells, Threshold, Time};
 use crate::planetary::hooks::SurfaceSeed;
 use crate::planetary::surface::grid::CellGraph;
 use crate::rng::ObjectKey;
@@ -128,67 +139,44 @@ pub(crate) enum Receivers {
     /// Afresh at every iteration from each cell's stored uniform (Tzathas et al. 2024, §4.3): the
     /// step's.
     Fresh,
-    /// Sticky at the finest level from its third iteration on: a cell keeps its previous receiver
+    /// Sticky at every level from its third iteration on: a cell keeps its previous receiver
     /// while that stays strictly lower on the filled surface, and draws afresh only when it does
-    /// not (`drainage::route_from`). Not Tzathas et al.'s: the ruling's lever, measured on a
-    /// finding and off by default.
+    /// not (`drainage::route_from`). Not Tzathas et al.'s: the "T14.b follow-up" item 2's lever,
+    /// the wet-now branch's default since the field formulation makes a flip carry another
+    /// basin's `λ_b` (decision-r09-t14-choices, "T14.c follow-up 2" §3).
     Sticky,
 }
 
-/// The finest level's first iteration from which [`Receivers::Sticky`] keeps receivers: the third
-/// (index 2; decision-r09-t14-choices, "T14.b follow-up" item 2).
+/// Each level's first iteration from which [`Receivers::Sticky`] keeps receivers: the third
+/// (index 2; decision-r09-t14-choices, "T14.b follow-up" item 2, and "T14.c follow-up 2" §3).
 const STICKY_FROM_ITERATION: usize = 2;
 
-/// How [`Uplift::BasinFreeboard`]'s basins scale their uplift (decision-r09-t14-choices Q1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum UpliftFit {
-    /// R09.T14.b's as built: each cell takes its own basin's `λ_b` times the whole of its path's
-    /// integral at λ = 1, s(c) = base(c) + `λ_b(c)` F(c), and each iteration refits `λ_b` = `Σ_b`
-    /// Ω (z0 − base) ÷ `Σ_b` Ω F. Where a path crosses from one construction basin into another,
-    /// the downstream basin's uplift is scaled by the upstream cell's `λ_b`, and the heights
-    /// compound (the reference Earth's 41 km cell, R09.T14.c's record).
-    Diagonal,
-    /// The uplift a field in space, u(i) = `λ_b(i)` max(0, z0(i) − `ℓ_b(i)`), solved as such, so
-    /// that each cell's own basin's `λ_b` enters the path integral cell by cell and z(c) = base +
-    /// Σ over the path of u(i) ℓᵢ ÷ aᵢ (Tzathas et al. 2024's eq. 9 under a uplift map, as their
-    /// §4.1 has it). Each level's first iteration takes `λ_b` from the diagonal formula on its
-    /// solve at λ = 1; after each solve `λ_b` is refitted multiplicatively, `λ_b` ← `λ_b` `Σ_b` Ω
-    /// (z0 − base) ÷ `Σ_b` Ω (z − base), over the basin's cells not bound and of equivalent area
-    /// above zero in cell-index order, a basin whose `Σ_b` Ω (z − base) is zero keeping its own
-    /// (the lane's fix of R09.T14.c's record, pending main's ruling).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the uplift fits' measurement runs it")
-    )]
-    SpatialField,
-}
+/// The additive refit's weight w: ½, the moving average's ([`MOVING_AVERAGE_WEIGHT`];
+/// decision-r09-t14-choices, "T14.c follow-up 2" §1). The step is linear in the `λ` vector, Jacobi
+/// on a diagonally dominant system, and needs no damping beyond it.
+const REFIT_WEIGHT: f64 = MOVING_AVERAGE_WEIGHT;
 
-/// The step's uplift fit: [`UpliftFit::Diagonal`], as built, pending main's ruling on the lane's
-/// measurement (R09.T14.c). On the reference Earth at level 8 the spatial field ends no cell below
-/// its receiver (1 against 620) and lowers the highest land from 41.2 to 24.8 km and the largest
-/// change from 16.8 to 9.8 km, but its final residual is 155.7 m against 141.2 m, its finest
-/// level falls to 0.340 of its first against 0.326, and on R09.T14.b's synthetic worlds its
-/// residuals are higher and the basins' means drift by up to 21 m.
-pub(crate) const UPLIFT_FIT: UpliftFit = UpliftFit::Diagonal;
-
-/// How the multigrid runs: the start of each finer level, the receivers' draw and the uplift's
-/// fit.
+/// How the multigrid runs: the start of each finer level and the receivers' draw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Options {
     /// Where each finer level starts.
     pub(crate) start: Start,
     /// How each iteration draws its receivers.
     pub(crate) receivers: Receivers,
-    /// How the basins scale their uplift.
-    pub(crate) uplift_fit: UpliftFit,
 }
 
 impl Options {
-    /// The step's own: [`LEVEL_START`], with receivers drawn afresh, and [`UPLIFT_FIT`].
-    pub(crate) const STEP: Self = Self {
+    /// The wet-now branch's: [`LEVEL_START`], with sticky receivers (decision-r09-t14-choices,
+    /// "T14.c follow-up 2" §3).
+    pub(crate) const WET_NOW: Self = Self {
+        start: LEVEL_START,
+        receivers: Receivers::Sticky,
+    };
+
+    /// The dry-now branch's: [`LEVEL_START`], with receivers drawn afresh, as built.
+    pub(crate) const DRY_NOW: Self = Self {
         start: LEVEL_START,
         receivers: Receivers::Fresh,
-        uplift_fit: UPLIFT_FIT,
     };
 }
 
@@ -197,9 +185,10 @@ impl Options {
 pub(crate) enum Uplift {
     /// None: the construction is "the initial surface rather than a rate" (a world dry now).
     None,
-    /// u = `λ_b` max(0, z0 − `ℓ_b`) on the cells not bound, b each cell's basin on the level's
-    /// construction routing and `ℓ_b` its base level, `λ_b` refitted at every iteration so that
-    /// each basin keeps its construction's mean height above `ℓ_b` (a world wet now).
+    /// u = `λ_b` max(0, z0 − `ℓ_b`) on the cells not bound, a field fixed in space, b each cell's
+    /// basin on the level's construction routing and `ℓ_b` its base level, `λ_b` refitted at every
+    /// iteration so that each basin keeps its construction's mean height above `ℓ_b` (a world wet
+    /// now).
     BasinFreeboard,
 }
 
@@ -256,6 +245,8 @@ pub(crate) struct Problem<'a> {
     pub(crate) uplift: Uplift,
     /// When the solution is taken.
     pub(crate) time: Time,
+    /// The steepest a link rises, at steady state only.
+    pub(crate) threshold: Threshold,
 }
 
 /// One level's residuals: at each iteration, the root mean square by area of the iteration's
@@ -271,6 +262,11 @@ pub(crate) struct LevelResidual {
     /// Each iteration's largest change, the greatest |s − z| over the cells not bound, metres, in
     /// iteration order.
     pub(crate) largest_change_by_iteration_m: Vec<f64>,
+    /// Each iteration's basin misfit for [`Uplift::BasinFreeboard`], metres, in iteration order:
+    /// the root mean square by area, over the fitted basins, of each basin's mean height above
+    /// `ℓ_b` in the iteration's solution less its construction's, over the cells [`refit`] counts.
+    /// Empty without uplift.
+    pub(crate) basin_misfit_by_iteration_m: Vec<f64>,
     /// The cells whose receiver differs between the level's last two routings.
     pub(crate) receivers_changed: u32,
 }
@@ -339,8 +335,13 @@ pub(crate) struct Diagnostics {
     /// Each level's residuals, coarsest first.
     pub(crate) residuals: Vec<LevelResidual>,
     /// `λ_b`'s distribution at the finest level, for [`Uplift::BasinFreeboard`] with a basin
-    /// fitted.
+    /// fitted: the `λ_b` of the delivered solve.
     pub(crate) lambda: Option<LambdaSpread>,
+    /// The fitted basins of the finest level whose last refit found their sensitivity `S_b` zero
+    /// and kept their `λ_b` ([`refit`]).
+    pub(crate) insensitive_basins: usize,
+    /// The cells of the delivered solve whose own link rises at the threshold slope.
+    pub(crate) held_at_threshold: usize,
     /// The implied mean uplift over the land (the cells off the sea), Σ Ω u ÷ Σ Ω at the finest
     /// level's last iteration, m a⁻¹: the steady state's denudation, against Earth's measured 0.05–
     /// 0.1 mm a⁻¹ (Milliman and Meade 1983, from memory; recorded, not asserted). Zero without
@@ -372,6 +373,12 @@ pub(crate) struct Outcome {
     /// Each cell's basin on the field's construction routing, its root, for
     /// [`Uplift::BasinFreeboard`]; empty without uplift.
     pub(crate) basins: Vec<u32>,
+    /// Each cell's basin's base level `ℓ_b` on the field's construction routing, metres, for
+    /// [`Uplift::BasinFreeboard`]; empty without uplift.
+    pub(crate) construction_base_m: Vec<f64>,
+    /// Each cell's uplift in the delivered solve, m a⁻¹: `λ_b` max(0, z0 − `ℓ_b`) for
+    /// [`Uplift::BasinFreeboard`], zero on a bound, in a basin not fitted and without uplift.
+    pub(crate) uplift_m_per_year: Vec<f64>,
     /// Each cell's change at the field's last iteration, its solution less the elevation that
     /// iteration started from, metres (zero on a bound): the final residual's terms.
     pub(crate) last_change_m: Vec<f64>,
@@ -480,6 +487,9 @@ struct Setup {
     freeboard_m: Vec<f64>,
     /// Each cell's basin, its root on the construction's routing, for [`Uplift::BasinFreeboard`].
     basin: Vec<u32>,
+    /// Each cell's basin's base level `ℓ_b` on the construction's routing, metres, for
+    /// [`Uplift::BasinFreeboard`].
+    base_level_m: Vec<f64>,
 }
 
 impl Setup {
@@ -501,8 +511,8 @@ impl Setup {
         let bodies = depressions::water_bodies(&level.mesh, &level.z0_m, &level.sea, measure);
         let fixed = bounds(&level.sea, problem.sea_level_m, &bodies);
         let uniforms = receiver_uniforms(problem.seed, &level.graph);
-        let (freeboard_m, basin) = match problem.uplift {
-            Uplift::None => (vec![0.0; n], Vec::new()),
+        let (freeboard_m, basin, base_level_m) = match problem.uplift {
+            Uplift::None => (vec![0.0; n], Vec::new(), Vec::new()),
             Uplift::BasinFreeboard => {
                 let routing = route_with_water(
                     &level.mesh,
@@ -521,6 +531,7 @@ impl Setup {
             uniforms,
             freeboard_m,
             basin,
+            base_level_m,
         }
     }
 }
@@ -541,21 +552,32 @@ fn bounds(sea: &[bool], sea_level_m: f64, bodies: &WaterBodies) -> Vec<Option<f6
 }
 
 /// Each cell's freeboard max(0, z0 − `ℓ_b`) on the construction's routing `routing`, 0 on a bound,
-/// and its basin, the root it drains to (decision-r09-t14-choices Q1's u = `λ_b` max(0, z0 −
-/// `ℓ_b`) at λ = 1 a⁻¹, b keyed by the root's cell): the uplift's pattern is fixed in space for the
-/// level's iterations.
-fn basin_freeboard(routing: &Routing, z0_m: &[f64], fixed: &[Option<f64>]) -> (Vec<f64>, Vec<u32>) {
-    (0..routing.len())
-        .map(|c| {
-            let ci = slot(c);
-            let freeboard = if fixed[ci].is_some() {
-                0.0
-            } else {
-                num::max(0.0, z0_m[ci] - routing.base_level_m(c))
-            };
-            (freeboard, routing.root_of(c))
-        })
-        .unzip()
+/// its basin, the root it drains to, and the basin's base level `ℓ_b` (decision-r09-t14-choices
+/// Q1's u = `λ_b` max(0, z0 − `ℓ_b`) at λ = 1 a⁻¹, b keyed by the root's cell): the uplift's
+/// pattern is fixed in space for the level's iterations.
+fn basin_freeboard(
+    routing: &Routing,
+    z0_m: &[f64],
+    fixed: &[Option<f64>],
+) -> (Vec<f64>, Vec<u32>, Vec<f64>) {
+    let n = slot(routing.len());
+    let (mut freeboard_m, mut basin, mut base_level_m) = (
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+    );
+    for c in 0..routing.len() {
+        let ci = slot(c);
+        let base = routing.base_level_m(c);
+        freeboard_m.push(if fixed[ci].is_some() {
+            0.0
+        } else {
+            num::max(0.0, z0_m[ci] - base)
+        });
+        basin.push(routing.root_of(c));
+        base_level_m.push(base);
+    }
+    (freeboard_m, basin, base_level_m)
 }
 
 /// Level `level`'s values as R09.T4's interpolant reads them.
@@ -654,31 +676,44 @@ pub(crate) fn upsample(
         .collect()
 }
 
-/// The basins' `λ_b` on `solution`, a⁻¹, keyed by root, and whether each basin was fitted: `λ_b` =
-/// `Σ_b` Ω (z0 − base) ÷ `Σ_b` Ω F over the basin's cells not bound and of equivalent area above zero,
-/// in cell-index order, each value asserted finite; held at zero or above.
-///
-/// Lean, pending decision-r09-t14-choices Q1: the ruling's `Σ_b` Ω (z0 − `ℓ_b`) with each cell's own
-/// base in place of `ℓ_b`, which it is wherever a cell drains to its basin's root through no bound
-/// (design §4.2's form): it holds the basin's mean height above `ℓ_b` exactly also where a cell
-/// drains through a full lake or, at a later iteration, to another basin's root.
-fn basin_lambdas(
+/// Each basin's `λ_b`, a⁻¹, keyed by root, and whether it is fitted.
+#[derive(Debug, Clone, PartialEq)]
+struct Lambdas {
+    /// Each basin's `λ_b`, a⁻¹, zero or above.
+    lambda: Vec<f64>,
+    /// Whether the basin is fitted: its `Σ_b` Ω F at λ = 1 in the level's closed form above zero.
+    fitted: Vec<bool>,
+}
+
+/// Whether [`closed_form`] and [`refit`] count cell `c` in its basin's sums: not bound and of
+/// equivalent area above zero (decision-r09-t14-choices Q1's bounds).
+fn counted(setup: &Setup, equivalent_area_m2: &[f64], c: usize) -> bool {
+    setup.fixed[c].is_none() && equivalent_area_m2[c] > 0.0
+}
+
+/// Q1's closed form of the basins' `λ_b` on `unit`, the solve at λ = 1 a⁻¹ (decision-r09-t14-
+/// choices Q1): `λ_b` = `Σ_b` Ω (z0 − `ℓ_b`) ÷ `Σ_b` Ω F over the cells [`counted`] in each
+/// construction basin, in cell-index order, each value asserted finite and `λ_b` held at zero or
+/// above; a basin is fitted where its `Σ_b` Ω F is above zero, and one that is not keeps its
+/// construction. Exact only where every path stays in its basin (the "T14.c follow-up" item 1's
+/// erratum), it starts each level's [`refit`].
+fn closed_form(
     mesh: &Mesh,
     z0_m: &[f64],
     setup: &Setup,
     equivalent_area_m2: &[f64],
-    solution: &solver::Solution,
-) -> (Vec<f64>, Vec<bool>) {
+    unit: &solver::Solution,
+) -> Lambdas {
     let n = z0_m.len();
     let (mut excess, mut response) = (vec![0.0; n], vec![0.0; n]);
-    for c in 0..n {
-        if setup.fixed[c].is_some() || equivalent_area_m2[c] <= 0.0 {
+    for (c, &z0) in z0_m.iter().enumerate() {
+        if !counted(setup, equivalent_area_m2, c) {
             continue;
         }
         let b = slot(setup.basin[c]);
         let a = mesh.area_m2(cell_of(c));
-        excess[b] += a * num::assert_finite(z0_m[c] - solution.base_m()[c]);
-        response[b] += a * num::assert_finite(solution.per_lambda_m()[c]);
+        excess[b] += a * num::assert_finite(z0 - setup.base_level_m[c]);
+        response[b] += a * num::assert_finite(unit.per_lambda_m()[c]);
     }
     let fitted: Vec<bool> = response.iter().map(|&f| f > 0.0).collect();
     let lambda = excess
@@ -686,95 +721,180 @@ fn basin_lambdas(
         .zip(&response)
         .map(|(&e, &f)| if f > 0.0 { num::max(0.0, e / f) } else { 0.0 })
         .collect();
-    (lambda, fitted)
+    Lambdas { lambda, fitted }
 }
 
-/// [`UpliftFit::SpatialField`]'s iteration on `level` over `routing` with `cells` (its uplift the
-/// freeboard at λ = 1) at `time`: each basin's `λ_b` carried from the level's previous iteration,
-/// or on its first from the diagonal formula on the solve at λ = 1; the solve under the uplift
-/// field u(i) = `λ_b(i)` × freeboard(i); and the basins refitted multiplicatively on it for the
-/// next iteration. The solution, the records of the `λ_b` it used and the implied mean uplift.
-fn spatial_field(
-    level: &Level<'_>,
-    setup: &Setup,
-    routing: &Routing,
-    cells: &Cells<'_>,
-    time: Time,
-    carried: &mut Option<Lambdas>,
-) -> (Vec<f64>, Option<LambdaSpread>, f64) {
-    let mesh = &level.mesh;
-    let n = cells.z0_m.len();
-    let (lambdas, fitted) = carried.take().unwrap_or_else(|| {
-        let unit = solver::solve(routing, cells, time);
-        basin_lambdas(mesh, &level.z0_m, setup, cells.equivalent_area_m2, &unit)
-    });
-    let field: Vec<f64> = (0..n)
-        .map(|c| {
-            let b = slot(setup.basin[c]);
-            if fitted[b] {
-                lambdas[b] * setup.freeboard_m[c]
+/// The uplift field of `lambdas` on `setup`, m a⁻¹: u(i) = `λ_b(i)` × freeboard(i) where i's basin
+/// is fitted, else zero.
+fn uplift_field(setup: &Setup, lambdas: &Lambdas) -> Vec<f64> {
+    setup
+        .freeboard_m
+        .iter()
+        .zip(&setup.basin)
+        .map(|(&freeboard, &b)| {
+            let b = slot(b);
+            if lambdas.fitted[b] {
+                lambdas.lambda[b] * freeboard
             } else {
                 0.0
             }
         })
-        .collect();
-    let solution = solver::solve(
+        .collect()
+}
+
+/// The solve under `field` on `routing` with `cells` at `time`, held to `threshold`: each cell's
+/// elevation at λ = 1, its construction where its basin is not fitted, and the solve itself.
+fn solve_field(
+    level: &Level<'_>,
+    setup: &Setup,
+    lambdas: &Lambdas,
+    field: &[f64],
+    (routing, cells): (&Routing, &Cells<'_>),
+    (time, threshold): (Time, Threshold),
+) -> (Vec<f64>, solver::Solution) {
+    let solution = solver::solve_with(
         routing,
         &Cells {
-            uplift_m_per_year: &field,
+            uplift_m_per_year: field,
             ..*cells
         },
         time,
+        threshold,
     );
-    let s: Vec<f64> = (0..n)
+    let s = (0..field.len())
         .map(|c| {
-            if fitted[slot(setup.basin[c])] {
+            if lambdas.fitted[slot(setup.basin[c])] {
                 solution.elevation_m(cell_of(c), 1.0)
             } else {
                 level.z0_m[c]
             }
         })
         .collect();
-    let (mean, lambda) = uplift_records(level, setup, &lambdas, &fitted);
-    let (ratio, responded) = basin_lambdas(
-        mesh,
-        &level.z0_m,
-        setup,
-        cells.equivalent_area_m2,
-        &solution,
-    );
-    let refitted = lambdas
-        .iter()
-        .zip(&ratio)
-        .zip(&responded)
-        .map(|((&l, &r), &any)| if any { num::max(0.0, l * r) } else { l })
-        .collect();
-    *carried = Some((refitted, fitted));
-    (s, lambda, mean)
+    (s, solution)
 }
 
-/// The records of a basin fit `lambdas` (`fitted` marking the basins fitted) on `level`: the
-/// implied mean uplift over its land, Σ Ω `λ_b` u ÷ Σ Ω over the cells off the sea, m a⁻¹, and
-/// the fitted basins' `λ_b` distribution.
+/// A refit's result.
+struct Refitted {
+    /// The basins' `λ_b` for the next solve.
+    lambdas: Lambdas,
+    /// The basin misfit of the solve refitted on, metres ([`LevelResidual`]'s).
+    misfit_m: f64,
+    /// The fitted basins whose sensitivity `S_b` is zero, which kept their `λ_b`.
+    insensitive: usize,
+}
+
+/// The additive refit of `lambdas` on the solve `solution`, of elevations `s`, over `routing`
+/// (decision-r09-t14-choices, "T14.c follow-up 2" §1): each construction basin's mean elevation,
+/// which no base enters, is held by `λ_b` ← max(0, `λ_b` + w `Σ_b` Ω (z0 − s) ÷ `S_b`), w the
+/// [`REFIT_WEIGHT`].
+///
+/// - `S_b` = `Σ_b` Ω P(c) is the basin's own sensitivity along the part of each path that lies in
+///   it: P(c) = `g_c` + [b(r(c)) = b(c)] P(r(c)) in the routing's preorder, r(c) the cell's
+///   receiver, and `g_c` its own link's rise per unit λ, freeboard × ℓ ÷ a
+///   ([`solver::Solution::link_years`]), zero where the threshold holds the link.
+/// - Both sums run over the cells [`counted`] in each construction basin, in cell-index order, each
+///   value asserted finite.
+/// - A fitted basin whose `S_b` is zero keeps its `λ_b`. No ratio can turn non-positive, so a basin
+///   whose cells drain to a lower base, a perched playa captured by the sea's basins, keeps its
+///   mean too.
+fn refit(
+    mesh: &Mesh,
+    (z0_m, setup, equivalent_area_m2): (&[f64], &Setup, &[f64]),
+    lambdas: &Lambdas,
+    routing: &Routing,
+    (s, solution): (&[f64], &solver::Solution),
+) -> Refitted {
+    let n = z0_m.len();
+    let mut own = vec![0.0; n];
+    for &cell in routing.preorder() {
+        let at = slot(cell);
+        if !counted(setup, equivalent_area_m2, at) {
+            continue;
+        }
+        let rise = if solution.held_at_threshold()[at] {
+            0.0
+        } else {
+            setup.freeboard_m[at] * solution.link_years()[at]
+        };
+        let upstream = routing.receiver(cell).map_or(0.0, |link| {
+            let receiver = slot(link.cell);
+            if setup.basin[receiver] == setup.basin[at] {
+                own[receiver]
+            } else {
+                0.0
+            }
+        });
+        own[at] = num::assert_finite(rise + upstream);
+    }
+    let (mut gap, mut sensitivity, mut area) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+    for (c, &z0) in z0_m.iter().enumerate() {
+        if !counted(setup, equivalent_area_m2, c) {
+            continue;
+        }
+        let b = slot(setup.basin[c]);
+        let a = mesh.area_m2(cell_of(c));
+        gap[b] += a * num::assert_finite(z0 - s[c]);
+        sensitivity[b] += a * own[c];
+        area[b] += a;
+    }
+    let (mut squares, mut weight, mut insensitive) = (0.0, 0.0, 0);
+    let lambda = (0..n)
+        .map(|b| {
+            let held = lambdas.lambda[b];
+            if !lambdas.fitted[b] {
+                return held;
+            }
+            if area[b] > 0.0 {
+                let misfit = gap[b] / area[b];
+                squares += area[b] * misfit * misfit;
+                weight += area[b];
+            }
+            if sensitivity[b] > 0.0 {
+                num::max(0.0, held + REFIT_WEIGHT * gap[b] / sensitivity[b])
+            } else {
+                insensitive += 1;
+                held
+            }
+        })
+        .collect();
+    Refitted {
+        lambdas: Lambdas {
+            lambda,
+            fitted: lambdas.fitted.clone(),
+        },
+        misfit_m: if weight > 0.0 {
+            (squares / weight).sqrt()
+        } else {
+            0.0
+        },
+        insensitive,
+    }
+}
+
+/// The records of the basin fit `lambdas` under `field` on `level`: the implied mean uplift over
+/// its land, Σ Ω u ÷ Σ Ω over the cells off the sea, m a⁻¹, and the fitted basins' `λ_b`
+/// distribution.
 fn uplift_records(
     level: &Level<'_>,
-    setup: &Setup,
-    lambdas: &[f64],
-    fitted: &[bool],
+    lambdas: &Lambdas,
+    field: &[f64],
 ) -> (f64, Option<LambdaSpread>) {
     let mesh = &level.mesh;
     let (mut uplift, mut land) = (0.0, 0.0);
-    for c in 0..lambdas.len() {
+    for (c, &u) in field.iter().enumerate() {
         if level.sea[c] {
             continue;
         }
         let a = mesh.area_m2(cell_of(c));
         land += a;
-        uplift += a * lambdas[slot(setup.basin[c])] * setup.freeboard_m[c];
+        uplift += a * u;
     }
-    let roots_fitted: Vec<f64> = (0..lambdas.len())
-        .filter(|&b| fitted[b])
-        .map(|b| lambdas[b])
+    let roots_fitted: Vec<f64> = lambdas
+        .lambda
+        .iter()
+        .zip(&lambdas.fitted)
+        .filter(|&(_, &fitted)| fitted)
+        .map(|(&l, _)| l)
         .collect();
     let mean = if land > 0.0 { uplift / land } else { 0.0 };
     (mean, spread(roots_fitted))
@@ -924,13 +1044,14 @@ fn start(
 }
 
 /// The multigrid's fixed point for `problem` (see the module documentation), run as `options` say
-/// ([`Options::STEP`] for the step).
+/// ([`Options::WET_NOW`] and [`Options::DRY_NOW`] for the step's branches).
 ///
 /// # Panics
 ///
 /// If an input is not one a cell of the problem's grid, a value is not finite, a runoff is
-/// negative, an erodibility is not positive, a sea cell's ground lies above the sea's level, or the
-/// parent grid is not one level up.
+/// negative, an erodibility is not positive, a sea cell's ground lies above the sea's level, the
+/// parent grid is not one level up, or a threshold slope is not finite and positive or is given
+/// off the steady state.
 #[must_use]
 pub(crate) fn erode(problem: &Problem<'_>, options: Options) -> Outcome {
     let levels = levels(problem);
@@ -948,58 +1069,8 @@ pub(crate) fn erode(problem: &Problem<'_>, options: Options) -> Outcome {
         });
         z = start(problem.seed, level, &setup.fixed, coarse, options.start);
         let finest = at + 1 == levels.len();
-        let mut by_iteration_m = Vec::with_capacity(ITERATIONS_PER_LEVEL);
-        let mut largest_change_by_iteration_m = Vec::with_capacity(ITERATIONS_PER_LEVEL);
-        let mut receivers: Vec<Option<u32>> = Vec::new();
-        let mut receivers_changed = 0;
-        let mut last = None;
-        let mut previous: Option<Routing> = None;
-        let mut fitted = None;
-        for iteration in 0..ITERATIONS_PER_LEVEL {
-            let sticky = finest
-                && options.receivers == Receivers::Sticky
-                && iteration >= STICKY_FROM_ITERATION;
-            let step = iterate(
-                level,
-                &setup,
-                &z,
-                problem,
-                previous.as_ref().filter(|_| sticky),
-                (options.uplift_fit, &mut fitted),
-            );
-            by_iteration_m.push(step.residual_m);
-            largest_change_by_iteration_m.push(step.largest_change_m);
-            let now: Vec<Option<u32>> = (0..step.routing.len())
-                .map(|c| step.routing.receiver(c).map(|link| link.cell))
-                .collect();
-            if iteration + 1 == ITERATIONS_PER_LEVEL {
-                receivers_changed = cell_of(
-                    receivers
-                        .iter()
-                        .zip(&now)
-                        .filter(|(before, after)| before != after)
-                        .count(),
-                );
-            }
-            receivers = now;
-            if finest && iteration + 1 == ITERATIONS_PER_LEVEL {
-                for (h, &s) in z.iter_mut().zip(&step.solution_m) {
-                    *h = s - *h;
-                }
-                last = Some((step, core::mem::take(&mut z)));
-            } else {
-                for (h, &s) in z.iter_mut().zip(&step.solution_m) {
-                    *h += MOVING_AVERAGE_WEIGHT * (s - *h);
-                }
-                previous = Some(step.routing);
-            }
-        }
-        residuals.push(LevelResidual {
-            level: level.graph.level(),
-            by_iteration_m,
-            largest_change_by_iteration_m,
-            receivers_changed,
-        });
+        let (residual, last) = iterate_level(level, &setup, &mut z, problem, options, finest);
+        residuals.push(residual);
         match last {
             Some(step) => finished = Some((setup, step)),
             None => below = Some((at, setup.fixed)),
@@ -1023,13 +1094,102 @@ pub(crate) fn erode(problem: &Problem<'_>, options: Options) -> Outcome {
         bounds: setup.fixed,
         uniforms: setup.uniforms,
         basins: setup.basin,
+        construction_base_m: setup.base_level_m,
+        uplift_m_per_year: step.uplift_m_per_year,
         last_change_m,
         diagnostics: Diagnostics {
             residuals,
             lambda: step.lambda,
+            insensitive_basins: step.insensitive,
+            held_at_threshold: step.held,
             mean_uplift_m_per_year: step.mean_uplift_m_per_year,
         },
     }
+}
+
+/// `level`'s [`ITERATIONS_PER_LEVEL`] iterations of the fixed point for `problem` from `z`, run as
+/// `options` say, `finest` where the level is the field's: their records, and on the finest level
+/// its last iteration with each cell's change at it, `z` taken; on any other, `z` left as the
+/// level's last moving average.
+fn iterate_level(
+    level: &Level<'_>,
+    setup: &Setup,
+    z: &mut Vec<f64>,
+    problem: &Problem<'_>,
+    options: Options,
+    finest: bool,
+) -> (LevelResidual, Option<(Iteration, Vec<f64>)>) {
+    let mut by_iteration_m = Vec::with_capacity(ITERATIONS_PER_LEVEL);
+    let mut largest_change_by_iteration_m = Vec::with_capacity(ITERATIONS_PER_LEVEL);
+    let mut basin_misfit_by_iteration_m = Vec::new();
+    let mut receivers: Vec<Option<u32>> = Vec::new();
+    let mut receivers_changed = 0;
+    let mut last = None;
+    let mut previous: Option<Routing> = None;
+    let mut lambdas = None;
+    for iteration in 0..ITERATIONS_PER_LEVEL {
+        let sticky = options.receivers == Receivers::Sticky && iteration >= STICKY_FROM_ITERATION;
+        let turn = if finest && iteration + 1 == ITERATIONS_PER_LEVEL {
+            Turn::Final
+        } else {
+            Turn::Inner
+        };
+        let step = iterate(
+            level,
+            setup,
+            z,
+            problem,
+            previous.as_ref().filter(|_| sticky),
+            (turn, &mut lambdas),
+        );
+        by_iteration_m.push(step.residual_m);
+        largest_change_by_iteration_m.push(step.largest_change_m);
+        basin_misfit_by_iteration_m.extend(step.misfit_m);
+        let now: Vec<Option<u32>> = (0..step.routing.len())
+            .map(|c| step.routing.receiver(c).map(|link| link.cell))
+            .collect();
+        if iteration + 1 == ITERATIONS_PER_LEVEL {
+            receivers_changed = cell_of(
+                receivers
+                    .iter()
+                    .zip(&now)
+                    .filter(|(before, after)| before != after)
+                    .count(),
+            );
+        }
+        receivers = now;
+        match turn {
+            Turn::Final => {
+                for (h, &s) in z.iter_mut().zip(&step.solution_m) {
+                    *h = s - *h;
+                }
+                last = Some((step, core::mem::take(z)));
+            }
+            Turn::Inner => {
+                for (h, &s) in z.iter_mut().zip(&step.solution_m) {
+                    *h += MOVING_AVERAGE_WEIGHT * (s - *h);
+                }
+                previous = Some(step.routing);
+            }
+        }
+    }
+    let residual = LevelResidual {
+        level: level.graph.level(),
+        by_iteration_m,
+        largest_change_by_iteration_m,
+        basin_misfit_by_iteration_m,
+        receivers_changed,
+    };
+    (residual, last)
+}
+
+/// Which of the multigrid's iterations runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Turn {
+    /// Any but the finest level's last.
+    Inner,
+    /// The finest level's last, whose solve the field takes.
+    Final,
 }
 
 /// One iteration's results.
@@ -1037,26 +1197,32 @@ struct Iteration {
     routing: Routing,
     equivalent_area_m2: Vec<f64>,
     solution_m: Vec<f64>,
+    uplift_m_per_year: Vec<f64>,
     residual_m: f64,
     largest_change_m: f64,
     lambda: Option<LambdaSpread>,
     mean_uplift_m_per_year: f64,
+    /// The basin misfit of the solve, for [`Uplift::BasinFreeboard`].
+    misfit_m: Option<f64>,
+    /// The fitted basins whose refit on the solve found their sensitivity zero.
+    insensitive: usize,
+    /// The cells of the solve held at the threshold.
+    held: usize,
 }
 
-/// Each basin's `λ_b`, a⁻¹, keyed by root, and whether it is fitted.
-type Lambdas = (Vec<f64>, Vec<bool>);
-
 /// One iteration of the fixed point on `level` from the elevation `z`: route (keeping the
-/// receivers of `previous` that stay lower, where it is given), accumulate, solve, scale the
-/// uplift by `fit`'s rule, its basins' `λ_b` carried from the level's previous iteration for
-/// [`UpliftFit::SpatialField`], and measure the residual.
+/// receivers of `previous` that stay lower, where it is given), accumulate, solve, and measure the
+/// residual. For [`Uplift::BasinFreeboard`] the solve is the uplift field's, its basins' `λ_b`
+/// carried in `lambdas` from the level's previous iteration (Q1's closed form on its first) and
+/// refitted on the solve for the next; on the [`Turn::Final`] iteration the solve is taken again
+/// on the same routing with the refitted `λ_b`.
 fn iterate(
     level: &Level<'_>,
     setup: &Setup,
     z: &[f64],
     problem: &Problem<'_>,
     previous: Option<&Routing>,
-    fit: (UpliftFit, &mut Option<Lambdas>),
+    (turn, lambdas): (Turn, &mut Option<Lambdas>),
 ) -> Iteration {
     let mesh = &level.mesh;
     let routing = route_with_water_from(
@@ -1085,44 +1251,33 @@ fn iterate(
         equivalent_area_m2: &equivalent_area_m2,
         fixed: &setup.fixed,
     };
-    let unit = || solver::solve(&routing, &cells, problem.time);
     let n = z.len();
-    let (solution_m, lambda, mean_uplift_m_per_year) = match (problem.uplift, fit) {
-        (Uplift::None, _) => {
-            let solution = unit();
-            let s: Vec<f64> = (0..n)
-                .map(|c| solution.elevation_m(cell_of(c), 0.0))
-                .collect();
-            (s, None, 0.0)
+    let fit = match problem.uplift {
+        Uplift::None => {
+            let solution = solver::solve_with(&routing, &cells, problem.time, problem.threshold);
+            Fit {
+                solution_m: (0..n)
+                    .map(|c| solution.elevation_m(cell_of(c), 0.0))
+                    .collect(),
+                uplift_m_per_year: vec![0.0; n],
+                lambda: None,
+                mean_uplift_m_per_year: 0.0,
+                misfit_m: None,
+                insensitive: 0,
+                held: count_held(&solution),
+            }
         }
-        (Uplift::BasinFreeboard, (UpliftFit::Diagonal, _)) => {
-            let solution = unit();
-            let (lambdas, fitted) =
-                basin_lambdas(mesh, &level.z0_m, setup, &equivalent_area_m2, &solution);
-            let s: Vec<f64> = (0..n)
-                .map(|c| {
-                    let b = slot(setup.basin[c]);
-                    if fitted[b] {
-                        solution.elevation_m(cell_of(c), lambdas[b])
-                    } else {
-                        level.z0_m[c]
-                    }
-                })
-                .collect();
-            let (mean, lambda) = uplift_records(level, setup, &lambdas, &fitted);
-            (s, lambda, mean)
-        }
-        (Uplift::BasinFreeboard, (UpliftFit::SpatialField, carried)) => {
-            spatial_field(level, setup, &routing, &cells, problem.time, carried)
+        Uplift::BasinFreeboard => {
+            basin_fit(level, setup, (&routing, &cells), problem, (turn, lambdas))
         }
     };
     let (mut squares, mut weight, mut largest_change_m) = (0.0, 0.0, 0.0);
-    for c in 0..n {
+    for (c, (&s, &h)) in fit.solution_m.iter().zip(z).enumerate() {
         if setup.fixed[c].is_some() {
             continue;
         }
         let a = mesh.area_m2(cell_of(c));
-        let d = num::assert_finite(solution_m[c] - z[c]);
+        let d = num::assert_finite(s - h);
         squares += a * d * d;
         weight += a;
         largest_change_m = num::max(largest_change_m, d.abs());
@@ -1135,10 +1290,85 @@ fn iterate(
     Iteration {
         routing,
         equivalent_area_m2,
-        solution_m,
+        solution_m: fit.solution_m,
+        uplift_m_per_year: fit.uplift_m_per_year,
         residual_m,
         largest_change_m,
+        lambda: fit.lambda,
+        mean_uplift_m_per_year: fit.mean_uplift_m_per_year,
+        misfit_m: fit.misfit_m,
+        insensitive: fit.insensitive,
+        held: fit.held,
+    }
+}
+
+/// One iteration's solve and its records.
+struct Fit {
+    solution_m: Vec<f64>,
+    uplift_m_per_year: Vec<f64>,
+    lambda: Option<LambdaSpread>,
+    mean_uplift_m_per_year: f64,
+    misfit_m: Option<f64>,
+    insensitive: usize,
+    held: usize,
+}
+
+/// The cells of `solution` held at the threshold.
+fn count_held(solution: &solver::Solution) -> usize {
+    solution
+        .held_at_threshold()
+        .iter()
+        .filter(|&&held| held)
+        .count()
+}
+
+/// [`Uplift::BasinFreeboard`]'s solve on `routing` with `cells`, their uplift the freeboard at
+/// unit λ, for `problem`: the basins' `λ_b` carried in `lambdas`, or Q1's closed form on a solve
+/// at unit λ with no threshold where the level starts ([`closed_form`]); the solve under their uplift
+/// field held to the problem's threshold ([`solve_field`]); the refit on it for the next
+/// iteration ([`refit`]); and, on the [`Turn::Final`] iteration, the solve again with the
+/// refitted `λ_b` (see the module documentation) and its own refit, for the records.
+fn basin_fit(
+    level: &Level<'_>,
+    setup: &Setup,
+    (routing, cells): (&Routing, &Cells<'_>),
+    problem: &Problem<'_>,
+    (turn, lambdas): (Turn, &mut Option<Lambdas>),
+) -> Fit {
+    let mesh = &level.mesh;
+    let sums = (level.z0_m.as_slice(), setup, cells.equivalent_area_m2);
+    let solve = |used: &Lambdas| {
+        let field = uplift_field(setup, used);
+        let (s, solution) = solve_field(
+            level,
+            setup,
+            used,
+            &field,
+            (routing, cells),
+            (problem.time, problem.threshold),
+        );
+        let refitted = refit(mesh, sums, used, routing, (&s, &solution));
+        (field, s, count_held(&solution), refitted)
+    };
+    let mut used = lambdas.take().unwrap_or_else(|| {
+        let unit = solver::solve(routing, cells, problem.time);
+        closed_form(mesh, &level.z0_m, setup, cells.equivalent_area_m2, &unit)
+    });
+    let (mut field, mut s, mut held, mut refitted) = solve(&used);
+    if turn == Turn::Final {
+        used = refitted.lambdas;
+        (field, s, held, refitted) = solve(&used);
+    }
+    let (mean_uplift_m_per_year, lambda) = uplift_records(level, &used, &field);
+    let fit = Fit {
+        solution_m: s,
+        uplift_m_per_year: field,
         lambda,
         mean_uplift_m_per_year,
-    }
+        misfit_m: Some(refitted.misfit_m),
+        insensitive: refitted.insensitive,
+        held,
+    };
+    *lambdas = Some(refitted.lambdas);
+    fit
 }

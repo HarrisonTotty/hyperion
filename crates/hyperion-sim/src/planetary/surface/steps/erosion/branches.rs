@@ -16,9 +16,13 @@
 //!   they are younger than the epoch, and every eroded cell lowers by its valley's void, not its
 //!   channel's whole incision (decision-r09-t14-mars-ceiling §2.1–2.2).
 //! - **Wet now** (an epoch that runs to now): the steady state (eq. 9) under each basin's uplift in
-//!   proportion to its freeboard (Q1), the climate's annual runoff the source, ice cells shedding
-//!   it as it is (Q5), the sea's cells the bounds, and every closed depression a dry playa until
-//!   R09.T14.d's water balance (Q3).
+//!   proportion to its freeboard, a field fixed in space (Q1, as its "T14.c follow-up" item 1 rules
+//!   it), each construction basin's mean elevation held by an additive refit and the receivers
+//!   sticky ("T14.c follow-up 2" §1 and §3), no link rising more than the debris-flow slope times
+//!   its length (the "T14.c follow-up" item 2), the climate's annual runoff the source, ice cells
+//!   shedding it as it is (Q5), the sea's cells the bounds, and every closed depression a dry playa
+//!   until R09.T14.d's water balance (Q3); its heights above base then remapped in order onto its
+//!   construction's ([`remap_onto_construction`], "T14.c follow-up 2" §2).
 //!
 //! Each choice is one function whose documentation cites the ruling's question.
 
@@ -26,15 +30,16 @@ use hyperion_surface::num;
 
 use hyperion_surface::field::Crust;
 use hyperion_surface::synth::channels::{
-    bankfull_width, channel_forming_discharge_m3_s, mean_discharge_m3_s,
+    DEBRIS_FLOW_SLOPE, bankfull_width, channel_forming_discharge_m3_s, mean_discharge_m3_s,
 };
 
 use super::super::climate::seas::under_sea;
 use super::super::craters::waits;
+use super::super::plates::{cell_of, slot};
 use super::super::{CellState, Pass, Working};
 use super::erodibility::{Erodibility, Fluid};
 use super::multigrid::{self, Options, Outcome, Problem, Uplift, Water};
-use super::solver::{self, Cells, Time};
+use super::solver::{self, Cells, Threshold, Time};
 use crate::planetary::surface::inputs::{CoarseInputs, WetEpoch};
 use crate::units::{Gigayears, MetresPerSecondSquared, SquareMetres};
 
@@ -356,7 +361,7 @@ fn renewed_channels(
         let renewal = solver::solve(&outcome.routing, &cells, Time::Years(effective_flow * x));
         for (c, &own) in exposure.iter().enumerate() {
             if own.total_cmp(&x).is_eq() {
-                solved[c] = renewal.elevation_m(super::super::plates::cell_of(c), 0.0);
+                solved[c] = renewal.elevation_m(cell_of(c), 0.0);
             }
         }
     }
@@ -383,7 +388,7 @@ fn renewed_channels(
 /// If `pass`'s world has no wet epoch, or as [`multigrid::erode`].
 #[must_use]
 pub(crate) fn erode_dry_now(pass: &Pass<'_>, working: &Working) -> Option<Outcome> {
-    erode_dry_now_with(pass, working, Options::STEP)
+    erode_dry_now_with(pass, working, Options::DRY_NOW)
 }
 
 /// [`erode_dry_now`] with the multigrid run as `options` say.
@@ -407,10 +412,17 @@ pub(crate) fn erode_dry_now_with(
         working,
         &runoff,
         Water::Volume { water_m3: &water },
-        Uplift::None,
-        Time::Years(years),
+        (Uplift::None, Time::Years(years), dry_now_threshold()),
         options,
     ))
+}
+
+/// The threshold slope on a world dry now: none (decision-r09-t14-choices, "T14.c follow-up" item
+/// 2). The transient never raises a cell, and a threshold there would erode crater walls, which no
+/// fluvial process cuts.
+#[must_use]
+pub(crate) const fn dry_now_threshold() -> Threshold {
+    Threshold::None
 }
 
 /// The solver's time on a world wet now: the steady state (decision-r09-t14-choices Q1).
@@ -430,6 +442,27 @@ pub(crate) const fn wet_now_time() -> Time {
 #[must_use]
 pub(crate) const fn wet_now_uplift() -> Uplift {
     Uplift::BasinFreeboard
+}
+
+/// The threshold slope on a world wet now: no link of the steady state rises more than
+/// [`DEBRIS_FLOW_SLOPE`] (0.1, the synthesis's own constant) times its length
+/// (decision-r09-t14-choices, "T14.c follow-up" item 2).
+///
+/// Stream power alone has no relief bound at its ridges: its solutions "lead to singularities
+/// close to the ridges … which are therefore less impacted by erosion and eventually degenerate
+/// into infinitely steep slopes. In practice, fluvial erosion is negligible or even not applicable
+/// in these locations, in which other erosion processes dominate" (Tzathas et al. 2024, CGF
+/// 43(2), §2). This is their §6.2 threshold term (eqs. 27–29) in its hard limit, `k_t` → ∞:
+/// wherever the fluvial steady state would be steeper, the bed is held at the threshold. At the
+/// coarse cell the threshold is the channel's, the slope above which debris flows, not rivers,
+/// hold the bed: fluvial incision "rarely extends to slopes greater than ∼0.03 to 0.10" (Stock
+/// and Dietrich 2003, WRR 39(4), 1089, doi:10.1029/2001WR001057, abstract). Their hillslope term
+/// (§6.1) is negligible at the coarse cell, and their threshold of 0.57 (30°) is a hillslope's,
+/// above the channel's. Labelled: one threshold on every body; debris flows' threshold under
+/// another gravity or liquid is not modelled.
+#[must_use]
+pub(crate) const fn wet_now_threshold() -> Threshold {
+    Threshold::Slope(DEBRIS_FLOW_SLOPE)
 }
 
 /// The water on the land of a world wet now: none, every closed depression a dry playa whose
@@ -476,9 +509,11 @@ pub(crate) fn wet_now_runoff_m_per_year(
 
 /// The erosion of a world wet now, on `working` as the climate step left it, with each cell's own
 /// runoff `runoff_m_per_year` (m a⁻¹, `wet_now_runoff_m_per_year`): the multigrid's steady state
-/// ([`wet_now_time`]) under each basin's freeboard ([`wet_now_uplift`]), K of each cell's crust
-/// under the main liquid ([`Erodibility`]), the sea's cells ([`sea_cells`]) the bounds at the
-/// sea's level, and no water on the land ([`wet_now_water`]).
+/// ([`wet_now_time`]) under each basin's freeboard ([`wet_now_uplift`]) held to the threshold
+/// slope ([`wet_now_threshold`]), with sticky receivers ([`Options::WET_NOW`]), K of each cell's
+/// crust under the main liquid ([`Erodibility`]), the sea's cells ([`sea_cells`]) the bounds at the
+/// sea's level, and no water on the land ([`wet_now_water`]). The solve, before the remap
+/// ([`remap_onto_construction`]).
 ///
 /// # Panics
 ///
@@ -496,7 +531,7 @@ pub(crate) fn erode_wet_now(
     working: &Working,
     runoff_m_per_year: &[f64],
 ) -> Outcome {
-    erode_wet_now_with(pass, working, runoff_m_per_year, Options::STEP)
+    erode_wet_now_with(pass, working, runoff_m_per_year, Options::WET_NOW)
 }
 
 /// [`erode_wet_now`] with the multigrid run as `options` say.
@@ -516,22 +551,151 @@ pub(crate) fn erode_wet_now_with(
         working,
         runoff_m_per_year,
         wet_now_water(),
-        wet_now_uplift(),
-        wet_now_time(),
+        (wet_now_uplift(), wet_now_time(), wet_now_threshold()),
         options,
     )
 }
 
-/// The multigrid on `working`'s elevation as its construction, with `runoff`, `water`, `uplift`
-/// and `time`, run as `options` say: K of each cell's crust under the world's fluid, the sea's
-/// cells ([`sea_cells`]) at the working sea level, the climate grid the field's parents.
+/// A world wet now's field remapped onto its construction's hypsometry
+/// ([`remap_onto_construction`]).
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "R09.T14.d calls the wet-now branch outside the tests, with the climate's runoff"
+    )
+)]
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Remapped {
+    /// Each cell's elevation, metres: a remapped cell's base plus its construction's height above
+    /// base at its rank, re-capped; any other cell's the solve's, its ground.
+    pub(crate) elevation_m: Vec<f64>,
+    /// The cells the solver moved, which the remap maps: not bound and of equivalent area above
+    /// zero.
+    pub(crate) moved: Vec<bool>,
+    /// The links the threshold re-capped after the remap.
+    pub(crate) recapped: usize,
+    /// The largest lowering of a re-capped cell, metres; zero where none is.
+    pub(crate) largest_recap_m: f64,
+}
+
+/// A world wet now's solve `s_m` on `outcome`'s last routing remapped onto its construction
+/// `z0_m`'s area-weighted heights above base (decision-r09-t14-choices, "T14.c follow-up 2" §2).
+///
+/// 1. **Heights above base.** Every cell not bound and of equivalent area above zero (the sea's
+///    cells, lake beds and cells of zero equivalent area keep their ground) takes h = s − the
+///    base of its own root on the routing.
+/// 2. **The order.** Those cells sorted by h, each asserted finite, ties broken by the routing's
+///    preorder (each receiver before its donors), with their cumulative area, each takes the
+///    construction's height above base at its own cumulative midpoint: the construction's heights
+///    z0 − `ℓ_b` over the same cells, sorted by (value, cell index) with their cumulative area, the
+///    value of the construction cell whose interval holds the midpoint, with no interpolation,
+///    clamped at zero or above. Its elevation is its base plus that value. The ruling's tie-break
+///    is the cell index; the preorder is the lane's, since a link of no rise (a cell without
+///    uplift, level with its receiver) would otherwise put a donor of lower index below its
+///    receiver (12 cells on the reference Earth).
+/// 3. **The threshold again.** In the routing's preorder, any such cell more than
+///    [`DEBRIS_FLOW_SLOPE`] times its link above its receiver (the water's surface over a bound) is
+///    lowered to its receiver plus that, undoing the remap's local stretching.
+///
+/// The map is monotone in the height above base and a path shares one base, so the drainage is
+/// the solve's. Labelled: the coarse land's hypsometry on a world wet now is its construction's,
+/// to the re-cap and the cells' sizes. T12's construction is calibrated on an eroded planet's
+/// hypsometry (Earth2014's), so the steady state's own reshaping of it, a concave profile that
+/// keeps each basin's mean and so lengthens its upper tail, would count erosion twice; the
+/// steady state organises the drainage, not the distribution. Basin means move by the global map,
+/// and `k_s` is the final field's S A^θ, no longer u ÷ K exactly.
+///
+/// Recorded: the heights are taken above the final routing's bases and given back from the
+/// construction's own, so a cell whose root has moved (a captured basin) moves with its base. On
+/// the reference Earth the heights above base are the construction's to the re-cap (their highest
+/// 8,299 m), but above the sea the land's median falls from 550 to 490 m and its highest rises
+/// from 8,594 to 10,696 m, a cell draining to a closed basin of high base.
+///
+/// # Panics
+///
+/// If an input is not one a cell of `outcome`, the outcome carries no construction base levels
+/// (it is not a world wet now's), or a height is not finite.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "R09.T14.d calls the wet-now branch outside the tests, with the climate's runoff"
+    )
+)]
+#[must_use]
+pub(crate) fn remap_onto_construction(outcome: &Outcome, z0_m: &[f64], s_m: &[f64]) -> Remapped {
+    let n = s_m.len();
+    for (what, len) in [
+        ("construction", z0_m.len()),
+        ("bound", outcome.bounds.len()),
+        ("construction base", outcome.construction_base_m.len()),
+    ] {
+        assert_eq!(len, n, "one {what} a cell");
+    }
+    let routing = &outcome.routing;
+    let area = outcome.mesh.areas_m2();
+    let moved: Vec<bool> = (0..n)
+        .map(|c| outcome.bounds[c].is_none() && outcome.equivalent_area_m2[c] > 0.0)
+        .collect();
+    let base = |c: usize| routing.base_level_m(cell_of(c));
+    let mut order = vec![0; n];
+    for (rank, &cell) in routing.preorder().iter().enumerate() {
+        order[slot(cell)] = rank;
+    }
+    let ranked = |height: &dyn Fn(usize) -> f64, tie: &dyn Fn(usize) -> usize| {
+        let mut cells: Vec<(f64, usize)> = (0..n)
+            .filter(|&c| moved[c])
+            .map(|c| (num::assert_finite(height(c)), c))
+            .collect();
+        cells.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(tie(a.1).cmp(&tie(b.1))));
+        cells
+    };
+    let solved = ranked(&|c| s_m[c] - base(c), &|c| order[c]);
+    let built = ranked(&|c| z0_m[c] - outcome.construction_base_m[c], &|c| c);
+    let mut elevation_m = s_m.to_vec();
+    let (mut below, mut j) = (0.0, 0);
+    let mut upto = built.first().map_or(0.0, |&(_, c)| area[c]);
+    for &(_, c) in &solved {
+        let midpoint = below + 0.5 * area[c];
+        below += area[c];
+        while j + 1 < built.len() && upto <= midpoint {
+            j += 1;
+            upto += area[built[j].1];
+        }
+        elevation_m[c] = base(c) + num::max(0.0, built[j].0);
+    }
+    let (mut recapped, mut largest_recap_m) = (0, 0.0);
+    for &cell in routing.preorder() {
+        let c = slot(cell);
+        let Some(link) = routing.receiver(cell).filter(|_| moved[c]) else {
+            continue;
+        };
+        let r = slot(link.cell);
+        let top = outcome.bounds[r].unwrap_or(elevation_m[r]) + DEBRIS_FLOW_SLOPE * link.length_m;
+        if elevation_m[c] > top {
+            largest_recap_m = num::max(largest_recap_m, elevation_m[c] - top);
+            elevation_m[c] = top;
+            recapped += 1;
+        }
+    }
+    Remapped {
+        elevation_m,
+        moved,
+        recapped,
+        largest_recap_m,
+    }
+}
+
+/// The multigrid on `working`'s elevation as its construction, with `runoff`, `water`, `uplift`,
+/// `time` and `threshold`, run as `options` say: K of each cell's crust under the world's fluid,
+/// the sea's cells ([`sea_cells`]) at the working sea level, the climate grid the field's parents.
 fn erode(
     pass: &Pass<'_>,
     working: &Working,
     runoff: &[f64],
     water: Water<'_>,
-    uplift: Uplift,
-    time: Time,
+    (uplift, time, threshold): (Uplift, Time, Threshold),
     options: Options,
 ) -> Outcome {
     let inputs = pass.inputs();
@@ -558,6 +722,7 @@ fn erode(
             water,
             uplift,
             time,
+            threshold,
         },
         options,
     )
@@ -581,7 +746,7 @@ pub(crate) fn inside_waiting_rims(pass: &Pass<'_>, working: &Working) -> Vec<boo
             let gap = [p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]];
             let chord = (gap[0] * gap[0] + gap[1] * gap[1] + gap[2] * gap[2]).sqrt();
             if chord < rim {
-                inside[super::super::plates::slot(cell)] = true;
+                inside[slot(cell)] = true;
             }
         }
     }
