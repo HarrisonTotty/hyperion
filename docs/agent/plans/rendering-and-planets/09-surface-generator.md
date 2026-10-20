@@ -1998,7 +1998,8 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
   `just test-slow -E 'binary(surface_reading_worlds)'`.
 
 - **R09.T7.k The cold-trap fraction's shared integral and cheaper rules** (a T7.d follow-up,
-  built by plan 14's P14.T51.i in lane `p14-t51hij`; decision-p14-t51-batch §1).
+  built by plan 14's P14.T51.i in lane `p14-t51hij`, the `p14-snapshot` lane's successor;
+  decision-p14-t51-batch §1).
   - The multi-threshold form, bit for bit with `fraction`.
   - `instantaneous` at at most 8 points.
   - `INTERVALS` 128.
@@ -2014,6 +2015,11 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
       each threshold's share read from the running sum where its own would stop, by the same
       operations, so each is `fraction`'s to the bit. `fraction` is `fractions` at one threshold.
       Its panics (lengths, a threshold not finite) are in `tests/panics.rs`.
+    - The shared integral skips the bowls shallower than the shallowest that keeps any shadow,
+      whose share `read`'s first test makes +0, with a margin of a millionth of the ratio, far
+      above that test's rounding: neither the bowl nor the density is evaluated there, and the sums
+      keep their bits, tested against the unskipped `shadowed` (the ruling's optional "evaluate
+      only where it can bind", in its cheapest form). `the_shared_integral_is_the_one_threshold_path_to_the_bit` holds the shared sums to `cumulative` and `shadowed`, which never share.
     - The instantaneous shadow takes the 8-point Gauss–Legendre rule (`GAUSS_LEGENDRE_8`, the sim's
       `tables::gauss_legendre` literals), within 4.4 × 10⁻¹⁶ of the 16-point rule over colatitudes
       0.1–30°, D 0–20° and d/D 0.005–0.5 on 10,800 points (the ruling's port: 4 × 10⁻¹⁶).
@@ -2023,8 +2029,9 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
       +2.1 × 10⁻³ and +1.9 × 10⁻³; Mercury's water +2.6 × 10⁻⁴; Ceres's permanent shadow at 4°
       −4.2 × 10⁻⁵ (B) and −3.7 × 10⁻⁶ (A), and at 20° −2.1 × 10⁻⁴ (A).
     - T7.d's tests keep their tolerances but one: the trapezoid's unit-integrand test, whose
-      5 × 10⁻⁵ was the 512 intervals' bound. At 128 it is 8 × 10⁻⁴, 16 times, the rule's h², and the
-      worst measured is 3.2 × 10⁻⁴. The rule's degree test is now 15, the 8-point rule's.
+      5 × 10⁻⁵ was the 512 intervals' bound. At 128 the rule's h² is 16 times as large, the worst
+      measured is 3.2 × 10⁻⁴, and the bound is 4 × 10⁻⁴. The rule's degree test is now 15, the
+      8-point rule's.
     - `bowl_permanent_shadow`'s fit (`hyperion-fit`) reads the cap through it, and its 0.003
       acceptance cannot tell 4.4 × 10⁻¹⁶.
 

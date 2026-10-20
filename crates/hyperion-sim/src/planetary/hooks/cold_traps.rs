@@ -108,7 +108,9 @@
 //! bands, airless (`DerivedBody::regolith_albedo`, T51.b's `Regolith` row: the lid's from
 //! P14.T54.a, weathered from P14.T54.b), not the body's area-mix Bond albedo (decision-p14-t51-batch
 //! §6). The shadows lie in the regolith's craters, whose walls are the regolith (Ingersoll, Svitek
-//! and Murray 1992; Hayne et al. 2021 take 0.12 for the Moon), and the zonal maximum asks whether
+//! and Murray 1992; Hayne, Aharonson and Schörghofer 2021, Nat. Astron. 5, 169, Methods' energy
+//! balance on a rough surface, take 0.12 for the Moon, after Hayne et al. 2017, JGR Planets 122,
+//! 2371), and the zonal maximum asks whether
 //! bare ground stays below a threshold, a criterion with no history, where the area mix's global
 //! mean is neither the bare ground's nor the frost's. On the table's Moon, Mercury and Ceres the two
 //! are the Moon's 0.11, so no figure moves.
@@ -197,7 +199,7 @@ use crate::planetary::chem::partition::{
     SolidEdges, TrappedIce, exosphere_threshold,
 };
 use crate::planetary::derive::atmosphere::{
-    ATOMIC_MASS_CONSTANT_KG, Atmosphere, Gas, SurfaceState,
+    ATOMIC_MASS_CONSTANT_KG, Atmosphere, Gas, PartialPressures, SurfaceState,
 };
 use crate::planetary::hooks::figures::Crust;
 use crate::planetary::hooks::surface::{ColdProfile, REGOLITH_EMISSIVITY, area_below};
@@ -502,7 +504,8 @@ pub(crate) struct ColdTrapBody<'a> {
 /// qualify ([`qualifies`]), and on one that does the zonal annual maximum's branch
 /// ([`SolidEdges::Exosphere`]) with each condensable's cold-trapped ice merged in, over the field
 /// it builds once ([`ColdTrapField::of`], P14.T51.i). A body whose derivation gives no regolith
-/// albedo keeps P14.T51.a's publish.
+/// albedo keeps P14.T51.a's publish. From P14.T54.b the record takes the passes' field instead
+/// ([`publish_over`]), so that a body builds one field, not one for its passes and one here.
 #[must_use]
 pub(crate) fn publish(
     partition: &Partition,
@@ -607,7 +610,7 @@ impl ColdTrapField {
     ///
     /// Each `f_ct` is the latitude integral of the ground's [`ColdTrapGround::fractions_at`],
     /// one call a latitude node for every species at once, each species' sum in
-    /// [`over_latitude`]'s order ([`over_latitude_each`]), so that it equals the one-species
+    /// `over_latitude`'s order ([`over_latitude_each`]), so that it equals the one-species
     /// integral to the bit. Where the closed form refuses the ground (a star that gives no light or
     /// fills the sky, or an albedo of 1), every `f_ct` is 0 and the maxima stand.
     ///
@@ -673,7 +676,7 @@ impl ColdTrapField {
     }
 
     /// The zonal annual maximum at each area point, `(x, T_max)`, K.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the field's tests read it"))]
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn maxima(&self) -> &[(f64, f64)] {
         &self.maxima
@@ -698,7 +701,18 @@ pub(crate) fn is_collisional(atmosphere: &Atmosphere, gravity: MetresPerSecondSq
     let Some(pressure) = atmosphere.surface_pressure() else {
         return true;
     };
-    let partials = atmosphere.partial_pressures();
+    is_collisional_air(pressure, atmosphere.partial_pressures(), gravity)
+}
+
+/// Whether an air of surface pressure `pressure` and gases `partials` is collisional at the
+/// surface of a body of surface gravity `gravity` ([`is_collisional`]'s test, its arithmetic):
+/// P14.T51.f's, which P14.T51.j's oxidised surface reads too.
+#[must_use]
+pub(crate) fn is_collisional_air(
+    pressure: Pascals,
+    partials: &PartialPressures,
+    gravity: MetresPerSecondSquared,
+) -> bool {
     let moles = Gas::ALL.iter().fold(0.0, |sum, &gas| {
         sum + partials.of(gas).value() / gas.molar_mass_g_per_mol()
     });
@@ -1049,13 +1063,7 @@ impl ColdTrapGround {
     /// # Panics
     ///
     /// If the threshold is not finite and positive.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the one-species integral the field's sums are held to"
-        )
-    )]
+    #[cfg(test)]
     #[must_use]
     fn trap_fraction(&self, threshold: Kelvin) -> f64 {
         over_latitude(|latitude| {
@@ -1069,14 +1077,9 @@ impl ColdTrapGround {
 /// ∫ f(φ) cos φ dφ from the equator to the pole, φ in radians: the share of a hemisphere's area, and
 /// of the whole surface for a profile symmetric about the equator. Four-point Gauss–Legendre rules
 /// on each band of [`TRAP_BAND_EDGES_DEG`], the bands and their nodes summed in their fixed order.
-/// The field sums several at once by its rule ([`over_latitude_each`]).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the one-profile integral the field's sums are held to"
-    )
-)]
+/// The field sums several at once by its rule ([`over_latitude_each`]); this one-profile form is
+/// the tests' reference.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn over_latitude(f: impl Fn(Radians) -> f64) -> f64 {
     let mut sum = 0.0;
@@ -1092,10 +1095,11 @@ pub(crate) fn over_latitude(f: impl Fn(Radians) -> f64) -> f64 {
     sum
 }
 
-/// [`over_latitude`] of several profiles at once (P14.T51.i): `f` writes each profile's value at a
+/// The tests' `over_latitude` of several profiles at once (P14.T51.i): `f` writes each profile's
+/// value at a
 /// latitude into its slot of the slice it is given, which is as long as `sums`, and each profile's
-/// sum runs in [`over_latitude`]'s order with its operations, so that each equals its own
-/// [`over_latitude`] to the bit. `sums` is overwritten.
+/// sum runs in `over_latitude`'s order with its operations, so that each equals its own
+/// `over_latitude` to the bit. `sums` is overwritten.
 pub(crate) fn over_latitude_each(sums: &mut [f64], mut f: impl FnMut(Radians, &mut [f64])) {
     let mut values = vec![0.0; sums.len()];
     sums.fill(0.0);

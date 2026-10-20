@@ -585,9 +585,14 @@ pub struct SurfaceModifiersDto {
     /// The resurfacing rate from volcanism or tidal heat, m per Julian year, not negative.
     pub resurfacing_m_per_yr: f64,
     /// The volcanic deposits an Io is resurfaced with, SO₂ frost and sulphur, each a key of the
-    /// substance registry with its share of the surface in `[0, 1]`, together at most 1; empty for
-    /// every other body.
+    /// substance registry with its share of the surface in `[0, 1]`; empty for every other body.
+    /// With the weathering deposits, together at most 1.
     pub volcanic_deposits: Vec<SubstanceAreaDto>,
+    /// The weathering deposits a surface carries (P14.T51.j): an oxidised `basalt_fe` surface's
+    /// `ferric` over the dusty share of its dry, ice-free land, each a key of the substance
+    /// registry with its share of the surface in `[0, 1]`, at most one today; empty for every other
+    /// body. With the volcanic deposits, together at most 1.
+    pub weathering_deposits: Vec<SubstanceAreaDto>,
 }
 
 /// One net surface flux of a biosphere.
@@ -1502,6 +1507,7 @@ pub(crate) mod tests {
                     area_fraction: 0.716,
                 },
             ],
+            weathering_deposits: vec![],
         }
     }
 
@@ -1515,6 +1521,7 @@ pub(crate) mod tests {
                 { "substance": "SO2", "area_fraction": 0.27 },
                 { "substance": "S8", "area_fraction": 0.716 },
             ],
+            "weathering_deposits": [],
         })
     }
 

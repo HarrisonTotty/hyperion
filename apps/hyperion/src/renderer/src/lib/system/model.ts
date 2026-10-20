@@ -741,10 +741,15 @@ export interface SurfaceModifiers {
   readonly organicCover: number;
   readonly resurfacingMPerYr: number;
   /**
-   * An Io's SO₂ frost and sulphur, by registry key, each with its share of the surface, together
-   * at most 1; empty for every other body.
+   * An Io's SO₂ frost and sulphur, by registry key, each with its share of the surface; empty for
+   * every other body. With the weathering deposits, together at most 1.
    */
   readonly volcanicDeposits: ReadonlyArray<SubstanceArea>;
+  /**
+   * An oxidised surface's `ferric` deposit (plan 14's P14.T51.j), by registry key, with its share
+   * of the surface; empty for every other body. With the volcanic deposits, together at most 1.
+   */
+  readonly weatheringDeposits: ReadonlyArray<SubstanceArea>;
 }
 
 /** One net surface flux of a biosphere. */

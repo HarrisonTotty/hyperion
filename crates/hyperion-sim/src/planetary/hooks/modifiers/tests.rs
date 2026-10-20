@@ -45,6 +45,9 @@ fn moon(condensates: &Condensates) -> ModifierInputs<'_> {
         surface_temperature: Kelvin::new(250.0),
         mantle_sulphur: Kilograms::new(1e19),
         condensates,
+        lid: id("basalt"),
+        gases: PartialPressures::default(),
+        water: WaterHistory::NeverWet,
     }
 }
 
@@ -235,12 +238,13 @@ fn a_magnetised_twin_is_less_weathered() {
     assert!(old.maturity() > 0.99, "{old:?}");
 }
 
-/// Mercury weathers faster than the Moon, k > 1, its two terms printed. Its dust's term is
-/// 0.387^(−2.8) ≈ 14, within 10% of Cintala 1992's "almost 14 times more impact melt" than the
-/// Moon's (JGR 97, 947, abstract read), the ruling's check. Braden and Robinson 2013 (JGR Planets
-/// 118, 1903, abstract read) find Mercury's optical maturation "up to 4 times faster" than the
-/// Moon's: the ruling's shares and laws give about 9, the recorded model difference, pinned here
-/// within a factor of 3 above it (plan 14's deferred findings from P14.T51.d).
+/// Mercury weathers faster than the Moon, k > 1, its two terms printed (decision-p14-t51-batch §3,
+/// restated in P14.T51.j's commit; no value moves). k is a dose ratio: its dust term, 0.387^(−2.8)
+/// ≈ 14, lies within 10.5–17.5, Cintala 1992's "almost 14 times more impact melt" than the Moon's
+/// (JGR 97, 947, abstract read) ± 25%; its wind term's open share under its weak dipole, its wind
+/// term over an unshielded Mercury's, lies within 0.4–0.6 (the model's 0.515, against 0.44 at
+/// Winslow et al. 2013's 1.45 `R_M`). Braden and Robinson 2013's "up to 4 times faster" (JGR Planets
+/// 118, 1903) is an optical rate, R10.T1.d's check through the darkening law, not this one's.
 #[test]
 fn mercury_weathers_faster_than_the_moon() {
     let none = Condensates::default();
@@ -254,7 +258,7 @@ fn mercury_weathers_faster_than_the_moon() {
         modifiers.maturity()
     );
     assert!(k > 1.0, "k {k}");
-    assert!((w.dust() / 14.0 - 1.0).abs() < 0.1, "dust {}", w.dust());
+    assert!((10.5..=17.5).contains(&w.dust()), "dust {}", w.dust());
     // Its weak dipole closes part of its surface: an unshielded Mercury's wind term would be its
     // 1 ÷ a² √(1 − e²) over the Moon's.
     let bare = SurfaceModifiers::derive(&ModifierInputs {
@@ -262,12 +266,9 @@ fn mercury_weathers_faster_than_the_moon() {
         ..mercury(&none)
     })
     .unwrap();
-    assert!(w.wind() < bare.weathering().wind(), "{w:?}");
-    let ratio = k / 4.0;
-    assert!(
-        (1.0..3.0).contains(&ratio),
-        "Mercury's k {k} against Braden and Robinson's up to 4: the recorded misfit moved"
-    );
+    let open = w.wind() / bare.weathering().wind();
+    eprintln!("Mercury's open share {open:.4}");
+    assert!((0.4..=0.6).contains(&open), "open share {open}");
 }
 
 /// Air above the tenuous floor's stand-in stops the wind's ions, and air below it does not; Mars's
@@ -493,6 +494,13 @@ fn the_modifiers_keep_the_units_contract() {
                                     ("wind", m.weathering().wind(), false),
                                     ("dust", m.weathering().dust(), false),
                                     ("resurfacing", m.resurfacing_m_per_yr(), false),
+                                    (
+                                        "weathering deposits",
+                                        m.weathering_deposits()
+                                            .iter()
+                                            .fold(0.0, |sum, d| sum + d.area_fraction()),
+                                        true,
+                                    ),
                                 ] {
                                     assert!(
                                         value.is_finite()
@@ -542,6 +550,211 @@ fn the_modifiers_draw_nothing_and_repeat_to_the_bit() {
     assert_eq!(draws, Vec::<&str>::new());
 }
 
+/// The table's Mars by hand for the oxidised surface (P14.T51.j): NASA's Mars fact sheet's 6.36 mb
+/// of 95.1% carbon dioxide, 2.59% nitrogen and 1.94% argon by volume (read by the science check),
+/// as column weights xᵢ Mᵢ ÷ Σ xⱼ Mⱼ of 636 Pa, at 3.73 m s⁻² and its orbit, on T51.c's `basalt_fe`
+/// lid (given by hand; P14.T54.b passes `CrustComposition::lid()`), dry for 3.5 Gyr since its wet
+/// epoch (Bibring et al. 2006's siderikian age), over the condensates `condensates`.
+fn mars(condensates: &Condensates) -> ModifierInputs<'_> {
+    ModifierInputs {
+        orbit: HeliocentricOrbit {
+            semi_major_axis: au(1.523_68),
+            eccentricity: 0.0934,
+        },
+        gravity: MetresPerSecondSquared::new(3.73),
+        surface_pressure: Pascals::new(636.0),
+        surface_age: Years::new(3.9e9),
+        surface_temperature: Kelvin::new(210.0),
+        lid: id("basalt_fe"),
+        gases: PartialPressures::from_fn(|gas| match gas {
+            Gas::CarbonDioxide => Pascals::new(614.0),
+            Gas::Nitrogen => Pascals::new(10.6),
+            Gas::Argon => Pascals::new(11.4),
+            _ => Pascals::ZERO,
+        }),
+        water: WaterHistory::DrySince(Gigayears::new(3.5)),
+        ..moon(condensates)
+    }
+}
+
+/// A perennial water-ice cap over 0.01 of the surface, Mars's polar caps' order (P14.T24.b's
+/// 0.005–0.02).
+fn mars_caps() -> Condensates {
+    let ice = |gas: Gas, area: f64| crate::planetary::chem::partition::TrappedIce {
+        substance: gas.substance(),
+        reservoir: KilogramsPerSquareMetre::new(1.0),
+        area_fraction: area,
+        threshold: Kelvin::new(150.0),
+    };
+    Condensates::default().with_cold_traps(&[ice(Gas::Water, 0.01)])
+}
+
+/// P14.T51.j: a Mars on T51.c's `basalt_fe` lid under its collisional, oxidising carbon dioxide,
+/// dry for 3.5 Gyr, carries `ferric` over [`DUSTY_SHARE`] of its ice-free land, 0.31 × 0.99; and
+/// with no ice, over 0.31 of its surface.
+#[test]
+fn a_mars_carries_a_ferric_deposit_over_its_dusty_land() {
+    let caps = mars_caps();
+    let modifiers = SurfaceModifiers::derive(&mars(&caps)).unwrap();
+    let [deposit] = modifiers.weathering_deposits() else {
+        panic!("{modifiers:?}");
+    };
+    assert_eq!(deposit.substance(), id("ferric"));
+    assert_same_bits(deposit.area_fraction(), DUSTY_SHARE * (1.0 - 0.01));
+    let none = Condensates::default();
+    let bare = SurfaceModifiers::derive(&mars(&none)).unwrap();
+    assert_same_bits(bare.weathering_deposits()[0].area_fraction(), DUSTY_SHARE);
+    eprintln!(
+        "Mars: ferric over {:.4} of the surface, k {:e}",
+        deposit.area_fraction(),
+        modifiers.weathering_rate()
+    );
+}
+
+/// P14.T51.j: the same Mars carries none wet, airless, on another lid, under hydrogen, or dried too
+/// lately; one never wet carries it over its surface age, unless that is too young.
+#[test]
+fn a_surface_that_is_not_oxidised_carries_no_ferric() {
+    let caps = mars_caps();
+    let mars = mars(&caps);
+    let carries = |inputs: ModifierInputs<'_>| {
+        !SurfaceModifiers::derive(&inputs)
+            .unwrap()
+            .weathering_deposits()
+            .is_empty()
+    };
+    assert!(carries(mars));
+    // Under liquid water: clays or sulphates, for the composition audit.
+    assert!(!carries(ModifierInputs {
+        water: WaterHistory::WetNow,
+        ..mars
+    }));
+    // Airless: its column below m̄ g ÷ σ_c, with carbon dioxide in its exosphere.
+    let exosphere = PartialPressures::from_fn(|gas| match gas {
+        Gas::CarbonDioxide => Pascals::new(1e-9),
+        _ => Pascals::ZERO,
+    });
+    assert!(!carries(ModifierInputs {
+        surface_pressure: Pascals::new(1e-9),
+        gases: exosphere,
+        ..mars
+    }));
+    // A `basalt` lid, Venus's and Earth's: `ferric` is the oxidised `basalt_fe` alone.
+    assert!(!carries(ModifierInputs {
+        lid: id("basalt"),
+        ..mars
+    }));
+    // Hydrogen the largest gas by number though not by weight: 2,000 Pa of it is 1,000 moles' worth
+    // against carbon dioxide's 100.
+    let reducing = PartialPressures::from_fn(|gas| match gas {
+        Gas::Hydrogen => Pascals::new(2_000.0),
+        Gas::CarbonDioxide => Pascals::new(4_401.0),
+        _ => Pascals::ZERO,
+    });
+    assert!(!carries(ModifierInputs {
+        surface_pressure: Pascals::new(6_401.0),
+        gases: reducing,
+        ..mars
+    }));
+    // No oxidant: nitrogen and argon alone.
+    let inert = PartialPressures::from_fn(|gas| match gas {
+        Gas::Nitrogen => Pascals::new(620.0),
+        Gas::Argon => Pascals::new(16.0),
+        _ => Pascals::ZERO,
+    });
+    assert!(!carries(ModifierInputs {
+        gases: inert,
+        ..mars
+    }));
+    // Dry for under 0.1 Gyr.
+    assert!(!carries(ModifierInputs {
+        water: WaterHistory::DrySince(Gigayears::new(0.09)),
+        ..mars
+    }));
+    assert!(carries(ModifierInputs {
+        water: WaterHistory::DrySince(OXIDISED_DRY_TIME),
+        ..mars
+    }));
+    // Dry since long ago, on a surface younger than the dry time: dry for its own age only.
+    assert!(!carries(ModifierInputs {
+        surface_age: Years::new(5e7),
+        ..mars
+    }));
+    // Never wet: dry over its surface age.
+    assert!(carries(ModifierInputs {
+        water: WaterHistory::NeverWet,
+        ..mars
+    }));
+    assert!(!carries(ModifierInputs {
+        water: WaterHistory::NeverWet,
+        surface_age: Years::new(5e7),
+        ..mars
+    }));
+    // Land wholly under ice carries none.
+    let iced =
+        Condensates::default().with_cold_traps(&[crate::planetary::chem::partition::TrappedIce {
+            substance: Gas::Water.substance(),
+            reservoir: KilogramsPerSquareMetre::new(1.0),
+            area_fraction: 1.0,
+            threshold: Kelvin::new(150.0),
+        }]);
+    assert!(!carries(ModifierInputs {
+        condensates: &iced,
+        ..mars
+    }));
+}
+
+/// P14.T51.j: the volcanic and weathering deposits together cover at most the surface. An
+/// oxidised Mars-like world resurfaced as an Io is (extreme heat flow, mantle sulphur, its ground
+/// below SO₂'s frost point) lays its volcanic deposits, and its `ferric` takes the dusty share of
+/// the land they and its cap leave.
+#[test]
+fn the_deposits_together_cover_at_most_the_surface() {
+    let caps = mars_caps();
+    let erupting = SurfaceModifiers::derive(&ModifierInputs {
+        heat_flow: WattsPerSquareMetre::new(2.5),
+        surface_temperature: Kelvin::new(100.0),
+        ..mars(&caps)
+    })
+    .unwrap();
+    let volcanic = erupting
+        .volcanic_deposits()
+        .iter()
+        .fold(0.0, |sum, d| sum + d.area_fraction());
+    assert!(volcanic > 0.9, "{erupting:?}");
+    let [ferric] = erupting.weathering_deposits() else {
+        panic!("{erupting:?}");
+    };
+    assert_same_bits(
+        ferric.area_fraction(),
+        DUSTY_SHARE * ((1.0 - 0.01) - volcanic),
+    );
+    assert!(volcanic + ferric.area_fraction() <= 1.0);
+}
+
+/// P14.T51.j: the oxidised surface draws nothing and repeats to the bit, and moves no other
+/// modifier: the Mars's maturity, rate, cover and resurfacing are its airless-lid twin's.
+#[test]
+fn the_oxidised_surface_repeats_and_moves_nothing_else() {
+    let caps = mars_caps();
+    let [a, b] = [0, 1].map(|_| SurfaceModifiers::derive(&mars(&caps)).unwrap());
+    assert_eq!(a, b);
+    assert_same_bits(
+        a.weathering_deposits()[0].area_fraction(),
+        b.weathering_deposits()[0].area_fraction(),
+    );
+    let twin = SurfaceModifiers::derive(&ModifierInputs {
+        lid: id("basalt"),
+        ..mars(&caps)
+    })
+    .unwrap();
+    assert_same_bits(a.maturity(), twin.maturity());
+    assert_same_bits(a.weathering_rate(), twin.weathering_rate());
+    assert_same_bits(a.organic_cover(), twin.organic_cover());
+    assert_same_bits(a.resurfacing_m_per_yr(), twin.resurfacing_m_per_yr());
+    assert_eq!(a.volcanic_deposits(), twin.volcanic_deposits());
+}
+
 /// Inputs out of range are refused, each by name.
 #[test]
 fn the_modifiers_refuse_inputs_out_of_range() {
@@ -589,6 +802,26 @@ fn the_modifiers_refuse_inputs_out_of_range() {
         (
             jovian_moon(&none, -1.0),
             ModifierInput::PlanetocentricSemiMajorAxis,
+        ),
+        (
+            ModifierInputs {
+                gases: PartialPressures::from_fn(|gas| {
+                    if gas == Gas::Oxygen {
+                        Pascals::new(-1.0)
+                    } else {
+                        Pascals::ZERO
+                    }
+                }),
+                ..moon(&none)
+            },
+            ModifierInput::Gases,
+        ),
+        (
+            ModifierInputs {
+                water: WaterHistory::DrySince(Gigayears::new(f64::NAN)),
+                ..moon(&none)
+            },
+            ModifierInput::DryTime,
         ),
     ];
     for (inputs, input) in cases {

@@ -202,8 +202,10 @@ const PLAINS_SURROUNDINGS: f64 = 0.0035;
 
 /// The 8-point Gauss–Legendre rule on [−1, 1]: its positive nodes and their weights.
 ///
-/// The rule is symmetric about 0 (Abramowitz and Stegun 1964, Table 25.4; DLMF §3.5(v)), each value
-/// the correctly rounded `f64`, as the sim's `tables::gauss_legendre` holds them. It replaces the
+/// The rule is symmetric about 0: its nodes the zeros of P₈ and its weights 2 ÷ ((1 − x²) P₈′(x)²)
+/// (DLMF §3.5(v), which defines the rule but tabulates other orders), the values Abramowitz and
+/// Stegun 1964's (Table 25.4, p. 916), each the correctly rounded `f64`, as the sim's
+/// `tables::gauss_legendre` holds them (and as the science check recomputed them). It replaces the
 /// 16-point rule in the instantaneous shadow's integral (P14.T51.i; R09.T7.k): over colatitudes
 /// 0.1–30°, D = δ + α from 0 to 20° and d/D 0.005–0.5 the two differ by at most 4.4 × 10⁻¹⁶,
 /// measured on 10,800 points (the ruling's port gave 4 × 10⁻¹⁶, decision-p14-t51-batch §1.2), at
@@ -222,11 +224,13 @@ const GAUSS_LEGENDRE_8: [(f64, f64); 4] = [
 /// limit, so that each function is monotone in its inputs to the last bit: every node's term is,
 /// and the cold limit only decides how far the sum runs. The bowl's shadow is piecewise smooth in
 /// the depth ratio, with a kink at each of the table's cells it crosses, which the rule resolves
-/// as the square of its step. Against 512 intervals, the cold traps move by relative amounts the
-/// ruling measured on its port of the model (decision-p14-t51-batch §1.2): the Moon's water by
-/// −9 × 10⁻⁵ with craters of distribution B and +2.8 × 10⁻⁴ with A, its CO₂ by +1.1 × 10⁻³,
-/// Mercury's water by +2.6 × 10⁻⁴, and Ceres's permanent shadow at 4° by −4 × 10⁻⁵ (B) and
-/// −4 × 10⁻⁶ (A); the lane's own figures are in plan 14's P14.T51.i record.
+/// as the square of its step. Against 512 intervals and the 16-point rule, the lane measured these
+/// relative moves (the real Sun and Hayne et al.'s lunar terrain; plan 09's R09.T7.k): the Moon's
+/// water −9.3 × 10⁻⁵ with craters of distribution B and +2.8 × 10⁻⁴ with A; its CO₂ at 58.18 K
+/// +1.1 × 10⁻³ (B) and +8.5 × 10⁻⁴ (A), and at 55.53 K +2.1 × 10⁻³ and +1.9 × 10⁻³; Mercury's water
+/// +2.6 × 10⁻⁴; Ceres's permanent shadow at 4° −4.2 × 10⁻⁵ (B) and −3.7 × 10⁻⁶ (A), and at 20°
+/// −2.1 × 10⁻⁴ (A). The ruling's port measured the same at 4° and 58.18 K
+/// (decision-p14-t51-batch §1.2).
 const INTERVALS: u32 = 128;
 
 /// Standard deviations either side of a population's centre over which its bowls are integrated:
@@ -845,7 +849,18 @@ impl Band {
                 }
             })
             .collect();
-        dist.cumulative_each(&tops, |gamma| self.bowl(gamma), shares);
+        // A bowl shallower than the shallowest that keeps a shadow keeps none, its share +0 by
+        // `read`'s first test: those nodes are not evaluated. The margin, a millionth of the ratio,
+        // lies far above the rounding of that test (a few ulps of its slope, 2 atan(2γ)), so every
+        // skipped node's share is the +0 it would have had, and the sums keep their bits
+        // (P14.T51.i's fast path, decision-p14-t51-batch §1.5's "evaluate only where it can bind",
+        // tested against `shadowed`).
+        let zero_below = if shallowest > 0.0 {
+            shallowest * (1.0 - 1e-6)
+        } else {
+            0.0
+        };
+        dist.cumulative_each(&tops, zero_below, |gamma| self.bowl(gamma), shares);
         // Bowls deeper than a hemisphere count as hemispheres, if they are cold.
         let mut deepest = None;
         for ((&limit, &top), share) in limits.iter().zip(&tops).zip(shares.iter_mut()) {
@@ -1049,7 +1064,17 @@ impl Population {
     /// the largest top, and each top's share is read from the running sum where its own sum would
     /// stop, by the same operations, so that each equals [`cumulative`](Self::cumulative)'s to the
     /// bit.
-    fn cumulative_each(self, tops: &[f64], g: impl Fn(f64) -> f64, shares: &mut [f64]) {
+    ///
+    /// g is taken as 0 below the depth ratio `zero_below`, where the caller knows it is +0 (a bowl
+    /// too shallow to keep a shadow), and neither g nor the density is evaluated there: +0 times
+    /// the density is the +0 it stands for, so the sums keep their bits. 0 evaluates every node.
+    fn cumulative_each(
+        self,
+        tops: &[f64],
+        zero_below: f64,
+        g: impl Fn(f64) -> f64,
+        shares: &mut [f64],
+    ) {
         debug_assert_eq!(tops.len(), shares.len());
         let (lo, hi) = self.window();
         // Each top's end in the window's variable, and the tops still to stop, latest first, so
@@ -1070,7 +1095,20 @@ impl Population {
         }
         pending.sort_by(|a, b| b.1.total_cmp(&a.1).then(b.0.cmp(&a.0)));
         let step = (hi - lo) / f64::from(INTERVALS);
-        let value = |x: f64| g(self.ratio(x)) * self.density(x);
+        // A node below `zero_below`'s variable lies below that ratio, within the variable's
+        // rounding, which the caller's margin covers.
+        let zero_x = if zero_below > 0.0 {
+            self.variable(zero_below)
+        } else {
+            f64::NEG_INFINITY
+        };
+        let value = |x: f64| {
+            if x < zero_x {
+                0.0
+            } else {
+                g(self.ratio(x)) * self.density(x)
+            }
+        };
         let mut left = value(lo);
         let mut sum = 0.0;
         for i in 0..INTERVALS {
@@ -1925,9 +1963,9 @@ mod tests {
     fn the_trapezoid_rule_follows_each_populations_mass() {
         // The rule with a unit integrand is the population's mass up to `top`, within the rule's
         // h² f′ ÷ 12 where it stops, and never falls as `top` rises, whether `top` falls on a node or
-        // inside an interval. At 128 intervals (P14.T51.i; R09.T7.k) the bound is 16 times the 512
-        // intervals' 5 × 10⁻⁵, the rule's h² at a quarter of the intervals; the worst, printed, is
-        // 3.2 × 10⁻⁴ at 128.
+        // inside an interval. At 128 intervals (P14.T51.i; R09.T7.k) the rule's h² is 16 times the
+        // 512 intervals', whose bound was 5 × 10⁻⁵; the worst measured, printed, is 3.2 × 10⁻⁴, held
+        // here to 4 × 10⁻⁴.
         let mut worst: f64 = 0.0;
         let populations = [
             Population::LogNormal(DepthRatios::HAYNE_A.log_normal()),
@@ -1945,7 +1983,7 @@ mod tests {
                 let mass = dist.mass(0.0, top);
                 worst = num::max(worst, (sum - mass).abs());
                 assert!(
-                    (sum - mass).abs() <= 8e-4,
+                    (sum - mass).abs() <= 4e-4,
                     "{dist:?} at {top}: {sum} against {mass}"
                 );
             }
@@ -2026,6 +2064,149 @@ mod tests {
         }
         eprintln!("the 8-point rule against the 16-point: at most {worst:e}");
         assert!(worst <= 1e-15, "{worst:e}");
+    }
+
+    /// The shared integral is the one-threshold path's to the bit, against code that never shares
+    /// (P14.T51.i; R09.T7.k): `cumulative_each` is `cumulative` at each top (on a node, inside an
+    /// interval, at and below the window's start, at and above its end, and repeated);
+    /// `shadowed_each` is `shadowed` at each limit (at and below the shallowest bowl, inside, at
+    /// and above a hemisphere); and `fractions` is the one-threshold arithmetic written out, the
+    /// cold limits by bisection and the terrain's shadow by `shadowed`.
+    #[test]
+    fn the_shared_integral_is_the_one_threshold_path_to_the_bit() {
+        let populations = [
+            Population::LogNormal(DepthRatios::HAYNE_A.log_normal()),
+            Population::LogNormal(DepthRatios::HAYNE_B.log_normal()),
+            Population::of_plains(Radians::new(math::atan(0.1))).unwrap(),
+        ];
+        let g = |gamma: f64| math::sin(7.0 * gamma) + 2.0 * gamma;
+        for dist in populations {
+            let (lo, hi) = dist.window();
+            let step = (hi - lo) / f64::from(INTERVALS);
+            let node = dist.ratio(lo + 17.0 * step);
+            let inside = dist.ratio(lo + 40.5 * step);
+            let tops = [
+                node,
+                inside,
+                dist.ratio(lo),
+                0.5 * dist.ratio(lo),
+                0.0,
+                HEMISPHERE,
+                inside,
+                dist.ratio(hi),
+            ];
+            let mut shares = [f64::NAN; 8];
+            dist.cumulative_each(&tops, 0.0, g, &mut shares);
+            for (&top, &share) in tops.iter().zip(&shares) {
+                assert_same_bits(share, dist.cumulative(top, g));
+            }
+        }
+        let body = moon();
+        for (latitude, depths) in [(88.0, DepthRatios::HAYNE_B), (80.0, DepthRatios::HAYNE_A)] {
+            let sky = Sky::at(degrees(latitude), &body);
+            let shallowest = sky.band.shallowest();
+            let limits = [
+                0.0,
+                shallowest,
+                f64::midpoint(shallowest, HEMISPHERE),
+                0.9 * HEMISPHERE,
+                HEMISPHERE,
+                0.7,
+                0.9 * HEMISPHERE,
+            ];
+            let population = Population::LogNormal(depths.log_normal());
+            let mut shares = [f64::NAN; 7];
+            sky.band.shadowed_each(population, &limits, &mut shares);
+            for (&limit, &share) in limits.iter().zip(&shares) {
+                assert_same_bits(share, sky.band.shadowed(population, limit));
+            }
+            let terrain = best_fit(depths);
+            let thresholds = [20.0, 58.18, 110.0, 200.0].map(Kelvin::new);
+            let mut fractions_of = [f64::NAN; 4];
+            fractions(
+                degrees(latitude),
+                &body,
+                &terrain,
+                &thresholds,
+                &mut fractions_of,
+            );
+            for (&threshold, &shared) in thresholds.iter().zip(&fractions_of) {
+                let crater_limit = body.coldest_limit(sky.sin_highest, threshold, 0.0);
+                let alone = if crater_limit <= 0.0 {
+                    0.0
+                } else {
+                    let plains_limit =
+                        body.coldest_limit(sky.sin_highest, threshold, PLAINS_SURROUNDINGS);
+                    let share = terrain.shadowed(&sky, crater_limit, plains_limit)
+                        * (1.0 - terrain.parts.share_under_cutoff);
+                    num::max(0.0, num::min(1.0, share))
+                };
+                assert_same_bits(shared, alone);
+            }
+        }
+    }
+
+    /// The bowls `shadowed_each` skips, those shallower than the shallowest that keeps a shadow,
+    /// keep their bits (P14.T51.i): against `shadowed`, which evaluates every node, over a Moon, a
+    /// Ceres at 4° and 20° and a Mercury under its disk, every half degree from 50° to the pole,
+    /// both crater distributions and the plains, at limits just above the shallowest bowl, between,
+    /// at a hemisphere and beyond.
+    #[test]
+    fn the_skipped_bowls_keep_the_shadow_s_bits() {
+        let parts = moon_parts();
+        let bodies = [
+            moon(),
+            Body::new(BodyParts {
+                greatest_declination: degrees(4.0),
+                star_radius: degrees(0.104),
+                ..parts
+            })
+            .unwrap(),
+            Body::new(BodyParts {
+                greatest_declination: degrees(20.0),
+                star_radius: degrees(0.104),
+                ..parts
+            })
+            .unwrap(),
+            Body::new(BodyParts {
+                greatest_declination: degrees(0.034),
+                star_radius: degrees(0.87),
+                ..parts
+            })
+            .unwrap(),
+        ];
+        let populations = [
+            Population::LogNormal(DepthRatios::HAYNE_A.log_normal()),
+            Population::LogNormal(DepthRatios::HAYNE_B.log_normal()),
+            Population::of_plains(Radians::new(math::atan(0.1))).unwrap(),
+            Population::of_plains(Radians::new(math::atan(0.4))).unwrap(),
+        ];
+        let mut compared = 0;
+        for body in &bodies {
+            for i in 0..=80 {
+                let band = Sky::at(degrees(50.0 + 0.5 * f64::from(i)), body).band;
+                let shallowest = band.shallowest();
+                if shallowest >= HEMISPHERE {
+                    continue;
+                }
+                let limits = [
+                    shallowest * (1.0 + 1e-9),
+                    shallowest * 1.01,
+                    f64::midpoint(shallowest, HEMISPHERE),
+                    HEMISPHERE,
+                    0.8,
+                ];
+                for population in populations {
+                    let mut shares = [f64::NAN; 5];
+                    band.shadowed_each(population, &limits, &mut shares);
+                    for (&limit, &share) in limits.iter().zip(&shares) {
+                        assert_same_bits(share, band.shadowed(population, limit));
+                        compared += usize::from(share > 0.0);
+                    }
+                }
+            }
+        }
+        assert!(compared > 1_000, "{compared}");
     }
 
     /// The shared form is [`fraction`] at each threshold to the bit (P14.T51.i; R09.T7.k), over the

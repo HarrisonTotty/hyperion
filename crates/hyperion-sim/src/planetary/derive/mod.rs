@@ -1291,6 +1291,7 @@ pub(crate) fn derive_body_driven(
         age: age_now,
     }
     .passes(holds.snapshot, driver);
+    let (passes, regolith_albedo) = passes;
 
     let volume = 4.0 / 3.0 * core::f64::consts::PI * (r * r * r);
     let density = KilogramsPerCubicMetre::new(mass_kg.value() / volume);
@@ -1324,7 +1325,7 @@ pub(crate) fn derive_body_driven(
         atmosphere: passes.air,
         atmosphere_passes: passes.count,
         convergence: passes.convergence,
-        regolith_albedo: passes.regolith_albedo,
+        regolith_albedo,
         internal_luminosity,
         radius,
         density,
@@ -1388,7 +1389,7 @@ struct PassBody<'a> {
 
 /// What the passes leave (P14.T13.c, P14.T51.b, P14.T51.h): the albedo the published pass read,
 /// its equilibrium and heated temperatures and its atmosphere, how many passes were taken and how
-/// they ended, and the bare regolith's albedo under the batch (P14.T51.i).
+/// they ended.
 #[derive(Debug, Clone, Copy)]
 struct Passes {
     albedo: BondAlbedo,
@@ -1397,7 +1398,6 @@ struct Passes {
     air: Atmosphere,
     count: u32,
     convergence: Convergence,
-    regolith_albedo: Option<f64>,
 }
 
 impl PassBody<'_> {
@@ -1452,8 +1452,12 @@ impl PassBody<'_> {
     /// ([`PassSurface::stand_in`]) under the body's hosts' light, which [`Sky::of`] builds under
     /// the batch's rules alone (the held rules read no light). So a pass is a function of the
     /// albedo it reads alone, which the bisection needs.
+    ///
+    /// Beside them, the bare regolith's Bond albedo the cold traps read (P14.T51.i): the passes'
+    /// regolith provider on the airless state under the hosts' light, `None` where the held rules
+    /// build no light.
     #[must_use]
-    fn passes(&self, rules: SnapshotRules, driver: PassDriver) -> Passes {
+    fn passes(&self, rules: SnapshotRules, driver: PassDriver) -> (Passes, Option<f64>) {
         let light = self
             .sky
             .shade
@@ -1482,7 +1486,6 @@ impl PassBody<'_> {
                     air,
                     count: ATMOSPHERE_PASSES,
                     convergence: Convergence::Fixed,
-                    regolith_albedo: None,
                 }
             }
             SnapshotRules::Batch => match driver {
@@ -1504,17 +1507,13 @@ impl PassBody<'_> {
                         air,
                         count: solved.count,
                         convergence: solved.convergence,
-                        regolith_albedo: None,
                     }
                 }
                 #[cfg(test)]
                 PassDriver::T51b => self.t51b_passes(&surface),
             },
         };
-        Passes {
-            regolith_albedo,
-            ..ended
-        }
+        (ended, regolith_albedo)
     }
 
     /// The batch's passes over `surface` by P14.T51.b's loop as it was built, for the tests that
@@ -1545,7 +1544,6 @@ impl PassBody<'_> {
             air,
             count,
             convergence: Convergence::Converged,
-            regolith_albedo: None,
         }
     }
 }

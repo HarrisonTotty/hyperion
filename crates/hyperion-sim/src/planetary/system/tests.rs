@@ -4341,6 +4341,70 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
     );
 }
 
+/// P14.T51.i, end to end: under 24's record rules (the batch's partition and cold traps) the
+/// sample's airless, uncollisional planets and members carry the regolith's albedo from their
+/// derivation, and their records' ices move from the held rules' where the cold traps' branch and
+/// traps apply; under the held rules their derivations give the albedo too (the batch's passes)
+/// but the record reads none of it.
+#[test]
+fn under_24_s_record_rules_the_records_read_the_derivations_regolith() {
+    use crate::planetary::derive::atmosphere::SnapshotRules;
+    use crate::planetary::hooks::cold_traps::{ColdTrapRules, is_collisional};
+
+    let t = UniverseTime::EPOCH;
+    let (mut airless, mut moved) = (0_u32, 0_u32);
+    for (ctx, system) in whole().iter().take(12) {
+        if ctx.age_at_epoch().value() <= 0.0 {
+            continue;
+        }
+        let under = |cold_traps| {
+            system
+                .clone()
+                .with_snapshot_rules(SnapshotRules::Batch)
+                .with_record_rules(RecordRules {
+                    partition: SnapshotRules::Batch,
+                    cold_traps,
+                })
+        };
+        let (held, batch) = (under(ColdTrapRules::Held), under(ColdTrapRules::Batch));
+        let (held_epoch, batch_epoch) = (Epoch::new(&held, ctx, t), Epoch::new(&batch, ctx, t));
+        for body in batch.bodies() {
+            if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+                continue;
+            }
+            let host = fate_host(ctx, batch.zone_of(body));
+            let fate = batch.fate_of(body, &host);
+            let label = label::label(&batch, body.index).unwrap();
+            let (record, now) = batch.primary_record(&batch_epoch, body, label, &fate);
+            let (Some(derived), Section::Ok(bulk), Section::Ok(surface)) =
+                (now.derived, record.bulk(), record.surface())
+            else {
+                continue;
+            };
+            let air = derived.atmosphere();
+            if air.state() != SurfaceState::Airless || is_collisional(air, bulk.surface_gravity()) {
+                continue;
+            }
+            let regolith = derived
+                .regolith_albedo()
+                .expect("the batch's passes give it");
+            assert!((0.0..1.0).contains(&regolith), "{regolith}");
+            airless += 1;
+            let label = label::label(&held, body.index).unwrap();
+            let (other, _) = held.primary_record(&held_epoch, body, label, &fate);
+            let Section::Ok(other) = other.surface() else {
+                continue;
+            };
+            let ices = |s: &Surface| format!("{:?}", s.figures().surface_ices());
+            moved += u32::from(ices(surface) != ices(other));
+        }
+    }
+    eprintln!(
+        "{airless} airless, uncollisional bodies; {moved} with their ices moved by the traps"
+    );
+    assert!(airless > 20 && moved > 5, "{airless} {moved}");
+}
+
 /// P14.T51.i's budget over the sample (decision-p14-t51-batch §1.5): the cold traps' cost per system
 /// on 24's record path, measured, not counted. Each of the first 60 systems generated whole is
 /// derived under the batch and its every planet's, member's and moon's record built under the

@@ -154,11 +154,13 @@ fn the_cold_traps_are_held_only_until_the_24_bump() {
         "the 23 → 24 bump (P14.T54.b) puts the cold traps on the record: every airless body with \
          no collisional air that is not locked to its star takes the zonal annual maximum's \
          airless branch and its cold-trapped ices. Delete `COLD_TRAPS_VERSION`, `ColdTrapRules` \
-         and its `Held` arm, `condensates_under`'s `traps` parameter and its `Held` branch, \
-         `with_partition`'s `ColdTrapRules::in_force()`, and this test. Settle too that T13.c's \
-         passes (`surface_mix::pass_condensates`) keep P14.T51.a's airless branch: give them the \
-         record's sky and these rules, or the Bond albedo reads other areas than the record \
-         publishes (plan 14, P14.T51.f as built)"
+         and its `Held` arm, `RecordColdTraps::rules` and `condensates_under`'s `Held` branch, \
+         `RecordRules` with `SurfaceCase::record` and `PlanetarySystem::with_record_rules` (the \
+         record's partition then follows the snapshot's hold, deleted at 23), and this test. \
+         Settle too that T13.c's passes (`surface_mix::pass_condensates`) keep P14.T51.a's \
+         airless branch: give them `cold_traps::publish_over` over one `ColdTrapField` a body \
+         (P14.T51.i), with the record's sky and these rules, or the Bond albedo reads other areas \
+         than the record publishes (plan 14, P14.T51.f and T51.i as built)"
     );
     assert_eq!(ColdTrapRules::in_force(), ColdTrapRules::Held);
     let sky = lunar_sky();
@@ -786,14 +788,31 @@ fn the_record_path_publishes_the_moon_s_cold_traps_under_the_batch() {
 }
 
 /// The cost of the cold traps per body of the table, in release: the batch's published
-/// condensates against the held ones, the best of five interleaved rounds each (plan 14's Risks
-/// record it; P14.T51.i's budget, at most 0.6 ms for each qualifying table body, all its species,
-/// decision-p14-t51-batch §1.5). A timing alone, asserting nothing.
+/// condensates against the held ones, the best of five interleaved rounds each, Mercury and Ceres
+/// in their own skies (plan 14's Risks record it; P14.T51.i's budget, at most 0.6 ms for each
+/// qualifying table body, all its species, decision-p14-t51-batch §1.5). A timing alone,
+/// asserting nothing.
 #[test]
 #[ignore = "a timing, run by name in release"]
 fn time_the_cold_traps() {
-    let sky = lunar_sky();
+    // Mercury and Ceres in their own skies (NASA's fact sheets, *from memory*: Mercury 0.387 au,
+    // e 0.2056, 0.034°; Ceres 2.767 au, e 0.0785, 4°), the Moon in its own, every other body in the
+    // Moon's (none of them qualifies).
+    let own = |degrees: f64, (a_au, e): (f64, f64)| {
+        ColdTrapSky::at_periapsis(
+            Radians::from(Degrees::new(degrees)),
+            WattsPerSquareMetre::new(1361.0 / (a_au * a_au * (1.0 - e * e).sqrt())),
+            (Metres::new(a_au * METRES_PER_AU), e),
+            Some(SolarRadii::new(1.0)),
+            0.035,
+        )
+    };
     for (name, body) in historic_table() {
+        let sky = match name {
+            "Mercury" => own(0.034, (0.387_098, 0.205_63)),
+            "Ceres" => own(4.0, (2.767, 0.0785)),
+            _ => lunar_sky(),
+        };
         let Some(figures) = table_figures_under(SnapshotRules::Batch, &body) else {
             continue;
         };
