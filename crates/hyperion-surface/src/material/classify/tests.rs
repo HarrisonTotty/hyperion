@@ -25,11 +25,9 @@ use crate::field::{CoarseField, MaterialPalette, PaletteEntry, cell_at_index};
 use crate::material::PhaseLaw;
 use crate::substance_key::SubstanceKey;
 use crate::synth::test_support::{Held, SEED, king_distances, random_points_in, world};
-use crate::synth::{
-    BandSpectrum, STRUCTURAL_RMS_ICE_RICH, STRUCTURAL_RMS_STAGNANT_LID, SpectrumShape,
-};
+use crate::synth::{BandSpectrum, STRUCTURAL_RMS_STAGNANT_LID, SpectrumShape};
 use crate::test_sizes::per_target;
-use crate::testing::{CellSite, ClimateSample, FieldBuilder, Routing, SyntheticWorld};
+use crate::testing::{CellSite, ClimateSample, FieldBuilder, Routing, SyntheticWorld, pluto_like};
 
 /// A palette entry of `key` in `role`, illustrative values: a normal albedo of 0.5 in every band,
 /// a grain density of `density`, a transition of `transition_k`, the family `mechanics` and no
@@ -791,80 +789,6 @@ fn material_aridity_is_koppen_geiger_s_threshold() {
         is_arid(frozen.header(), climate, 200.0, 0.0),
         "frozen, nothing falls"
     );
-}
-
-/// A Pluto-like world (decision-composition's): Pluto's radius, 1,188.3 km (Nimmo et al. 2017,
-/// Icarus 287, 12), a water-ice crust, nitrogen and methane ices and a tholin cover, under 1 Pa of
-/// air (New Horizons' 10.2–12.8 µbar at exit and entry; Hinson et al. 2017, Icarus 290, 96, as
-/// Meza et al. 2019, A&A 625, A42, §4.3, quote it) at 40 K, with a nitrogen
-/// glacier filling a basin about 25° N, 175° E (Sputnik Planitia's place) and methane frost over a
-/// part of each mid-northern cell; `pressure` overrides the air.
-fn pluto_like(pressure: Pascals) -> CoarseField {
-    let radius = 1.1883e6;
-    let basin = lat_lon(25.0, 175.0);
-    // Illustrative values near the real ones: water ice at 40 K, 934 kg m⁻³ (IAPWS R10-06);
-    // methane ice, 522 kg m⁻³, melting at 90.7 K; β-nitrogen, the phase above 35.6 K, about 990 kg
-    // m⁻³, melting at 63.15 K (science-composition-crusts §3.1); a tholin of 1,500 kg m⁻³ that
-    // decomposes near 600 K, unsourced.
-    let pluto = palette(vec![
-        entry(
-            "H2O",
-            PaletteRole::PrimaryCrust,
-            934.0,
-            273.15,
-            MechanicsFamily::WaterIce,
-        ),
-        entry(
-            "CH4",
-            PaletteRole::Ice,
-            522.0,
-            90.7,
-            MechanicsFamily::VolatileIce,
-        ),
-        entry(
-            "N2",
-            PaletteRole::Ice,
-            990.0,
-            63.15,
-            MechanicsFamily::VolatileIce,
-        ),
-        entry(
-            "tholin",
-            PaletteRole::Cover,
-            1_500.0,
-            600.0,
-            MechanicsFamily::Organic,
-        ),
-    ]);
-    let in_basin = move |dir: [f64; 3]| arc(dir, basin) < 0.3;
-    let in_band = |dir: [f64; 3]| {
-        let lat = latitude(dir).to_degrees();
-        (35.0..60.0).contains(&lat)
-    };
-    FieldBuilder::new(Metres::new(radius))
-        .palette(pluto)
-        .crust_palette([None, None, Some(0), None])
-        .surface_pressure(pressure)
-        .spectrum(BandSpectrum::anchored(
-            SpectrumShape::ICE_RICH,
-            Metres::new(radius),
-            STRUCTURAL_RMS_ICE_RICH,
-        ))
-        .climate(|_| ClimateSample::still(Kelvin::new(40.0)))
-        .elevation(move |site: &CellSite| {
-            Metres::new(if in_basin(site.dir) { -3_000.0 } else { 0.0 })
-        })
-        .ice(move |site, _| {
-            if in_basin(site.dir) {
-                1.0
-            } else if in_band(site.dir) {
-                0.3
-            } else {
-                0.0
-            }
-        })
-        .ice_entry(move |site| if in_basin(site.dir) { 2 } else { 1 })
-        .build()
 }
 
 /// The Pluto-like world takes its frost and its glacier: the basin's nitrogen is `Glacier · N2`

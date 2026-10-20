@@ -395,11 +395,19 @@ impl Entries {
             salt,
             regolith: crust.or(loose_deposit).or(cover).or(deposit),
             loose: loose_deposit.or(cover).or(crust).or(deposit),
-            organic_cover: first(palette, |e| {
-                e.role == PaletteRole::Cover && e.mechanics == MechanicsFamily::Organic
-            }),
+            organic_cover: organic_cover_entry(palette),
         }
     }
+}
+
+/// The index of `palette`'s organic cover: its first `Cover` entry of the organic family, the
+/// classifier's `OrganicSediment` substance and R10.T1.c's cover blend's
+/// ([`exposed_properties`](super::exposed_properties)), or `None` where it has none.
+#[must_use]
+pub(crate) fn organic_cover_entry(palette: &MaterialPalette) -> Option<u8> {
+    first(palette, |e| {
+        e.role == PaletteRole::Cover && e.mechanics == MechanicsFamily::Organic
+    })
 }
 
 /// The index of the first entry of `palette` for which `which` holds.

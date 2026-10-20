@@ -34,7 +34,16 @@
 //! [`npfe_optical_depth`]; R10.T1.d, decision-p14-t51d-weathering §1) is Hapke 2001's
 //! nanophase-iron absorption inside the equivalent slab, applied to an entry's fresh albedo in its
 //! reference form by `hyperion-fit`'s fitted table, the one law the server's albedo scale, the
-//! sim's area mix and R10.T1.c share.
+//! sim's area mix and R10.T1.c share. R10.T1.c applies it (decision-r10-t1c-maturity): a
+//! material's exposed albedo ([`exposed_properties`]) is its properties' weathered to the ground's
+//! exposure ([`GroundExposure`]) and blended with the organic cover where its entry takes one
+//! ([`takes_organic_cover`]), the one function the server's solve ([`exposed_albedo_scale`]) and
+//! the worker's photometry, class map and point query call; and the maturity at a point
+//! ([`maturity_at`]) is the header's less the largest deficit a young crater's fresh ejecta leave
+//! there ([`crater_maturity`]), at its fresh share of the crater's wear, its excavated share
+//! ([`excavated_share`], [`reworked_depth`], [`EXCAVATION_DEPTH_RATIO`],
+//! [`REWORKING_DEPTH_AT_ONE_MYR`], [`REWORKING_EXPONENT`]) and its halo ([`halo_share`],
+//! [`HALO_LENGTH_RIM_RADII`], [`HALO_EXTENT_RIM_RADII`]).
 //!
 //! Nothing here draws from a stream, so the module opens no domain tag.
 
@@ -51,7 +60,8 @@ mod weights;
 
 pub use albedo::{
     ALBEDO_SCALE_FLOOR, AlbedoScale, BuildClassFractionsError, ClassFractions,
-    SolveAlbedoScaleError, albedo_scale, class_fractions, scale_range, scaled_normal_albedo,
+    SolveAlbedoScaleError, albedo_scale, class_fractions, exposed_albedo_scale, scale_range,
+    scaled_normal_albedo,
 };
 pub use bearing::{
     BearingFactors, bearing_capacity, bearing_capacity_on_slope, ultimate_bearing_capacity,
@@ -60,7 +70,11 @@ pub use bearing::{
 pub use class::{Material, MaterialClass, PhotometricForm};
 pub(crate) use classify::IceCuts;
 pub use classify::{GroundMaterial, MASSIVE_ICE_SHARE, THIN_ATMOSPHERE_PRESSURE, material_at};
-pub use maturity::{LUNAR_MATURATION_TIME, body_maturity, maturity_after};
+// One line, unwrapped: until P14.T54.b deletes it, the sim's tripwire
+// (`modifiers_nothing_on_the_record_reads_the_modifiers_yet`) allows the time law's names outside
+// `material/maturity.rs` on this module's one re-export line of that module alone.
+#[rustfmt::skip]
+pub use maturity::{EXCAVATION_DEPTH_RATIO, GroundExposure, HALO_EXTENT_RIM_RADII, HALO_LENGTH_RIM_RADII, LUNAR_MATURATION_TIME, REWORKING_DEPTH_AT_ONE_MYR, REWORKING_EXPONENT, body_maturity, crater_maturity, excavated_share, exposed_properties, halo_share, maturity_after, maturity_at, reworked_depth, takes_organic_cover};
 pub use properties::{
     AlbedoSpan, BRIGHT_FROST_LIMB_PARAMETER, BRIGHT_FROST_NORMAL_ALBEDO, Citation, Figure, FormRow,
     FrictionModel, LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO, LUNAR_LIMB_ONSET_NORMAL_ALBEDO,

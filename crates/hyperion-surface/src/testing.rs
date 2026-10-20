@@ -31,7 +31,14 @@ pub use liquids::{
     LIQUID_METHANE_TITAN_DENSITY_KG_M3, LIQUID_WATER_DENSITY_KG_M3, basaltic_melt,
     liquid_methane_titan, liquid_water,
 };
+#[cfg(test)]
+pub(crate) use worlds::pluto_like;
 pub use worlds::{SyntheticWorld, synthetic_field};
+// R10.T1.c's tests weather and vary these worlds (`material/maturity.rs`, `material/golden.rs`).
+#[cfg(test)]
+pub(crate) use worlds::{
+    moon_like_builder, moon_like_crater_params, one_crater_builder, one_crater_centre,
+};
 
 use hyperion_base::math;
 use hyperion_base::units::{

@@ -19,13 +19,10 @@ use hyperion_sim::planetary::surface::{
 };
 use hyperion_sim::planetary::{BodyIndex, ResolveBodyError};
 use hyperion_sim::units::Metres;
-use hyperion_surface::field::{
-    BuildPaletteError, CoarseField, CoarseLevel, FieldView, MaterialPalette, PaletteEntry,
-    coarse_level,
-};
+use hyperion_surface::field::{CoarseField, CoarseLevel, FieldView, coarse_level};
 use hyperion_surface::material::{
-    SolveAlbedoScaleError, THIN_ATMOSPHERE_PRESSURE, albedo_scale, class_fractions,
-    weathered_entry_bvr,
+    GroundExposure, SolveAlbedoScaleError, THIN_ATMOSPHERE_PRESSURE, class_fractions,
+    exposed_albedo_scale,
 };
 use hyperion_surface::synth::{SynthCache, Synthesiser};
 use tokio::sync::watch;
@@ -568,9 +565,9 @@ fn compute(
 
 /// The albedo scale `FieldHeader::albedo_scale` carries for `field`, whose body's photometry is
 /// `photometry` and detail seed `detail` (rendering plan R10, T10.a; Design note 8): the one scale
-/// on its class albedos ([`albedo_scale`]) that makes its materials' area fractions over every
-/// cell ([`class_fractions`]) give the body's geometric albedo, fitted in V; or `None`, which
-/// means the palette entries' albedos as resolved, unscaled.
+/// on its class albedos ([`exposed_albedo_scale`]) that makes its materials' area fractions over
+/// every cell ([`class_fractions`]) give the body's geometric albedo, fitted in V; or `None`,
+/// which means the palette entries' albedos as resolved, unscaled.
 ///
 /// It is `None` (main's rulings, 2026-10-14), never fitting the ground to a cloud deck's p:
 /// - where the photometry is not `Ok` (not modelled, withheld or not applicable): there is no p to
@@ -590,10 +587,13 @@ fn compute(
 /// templates below 30 kPa. A photometry whose p is not positive, or a material past the palette, is
 /// a bug, logged at `error`, and gives `None` too.
 ///
-/// Where the header carries the ground's space-weathering maturity, the scale is solved on the
-/// palette's albedos weathered to it (each entry's [`weathered_entry_bvr`], R10.T1.d), so that the
-/// scale never undoes the weathering: R10 draws c × the weathered albedo
-/// (decision-p14-t51d-weathering §1.5). Without one, it is solved on the palette's albedos as they
+/// The materials' albedos are those the ground exposes at the header's maturity and organic cover
+/// ([`exposed_albedo_scale`] at [`GroundExposure::of_header`], R10.T1.c's shared function): where
+/// the header carries the ground's space-weathering maturity, the scale is solved on the albedos
+/// weathered to it (R10.T1.d's law, `Melt` kept fresh), blended with the cover where an entry takes
+/// one, so that the scale never undoes the weathering: R10 draws c × the weathered albedo
+/// (decision-p14-t51d-weathering §1.5), and the worker's photometry draws the same function's
+/// albedos at the same exposure. Without either, it is solved on the palette's albedos as they
 /// are, as before.
 ///
 /// It reads every cell, about 20 µs each (provisional: R10's Risks, "Deviations in T10.a, as
@@ -619,28 +619,15 @@ pub fn field_albedo_scale(
         return None;
     }
     let p = photometry.geometric_albedo();
-    let weathered;
-    let palette = match header.maturity() {
-        Some(maturity) => match weathered_palette(header.palette(), maturity) {
-            Ok(palette) => {
-                weathered = palette;
-                &weathered
-            }
-            Err(error) => {
-                tracing::error!(
-                    body = ?header.body(),
-                    %error,
-                    "a body's palette weathered to its maturity is not a palette"
-                );
-                return None;
-            }
-        },
-        None => header.palette(),
-    };
     let synth = Synthesiser::new(field, detail);
     let fractions = class_fractions(&synth, &mut SynthCache::new())
         .expect("a coarse field holds every cell its classes read");
-    match albedo_scale(&fractions, palette, [p.b, p.v, p.r]) {
+    match exposed_albedo_scale(
+        &fractions,
+        header.palette(),
+        GroundExposure::of_header(header),
+        [p.b, p.v, p.r],
+    ) {
         Ok(scale) => Some(scale.scale()),
         Err(SolveAlbedoScaleError::NoNamedGround) => None,
         Err(
@@ -655,31 +642,6 @@ pub fn field_albedo_scale(
             None
         }
     }
-}
-
-/// `palette` with each entry's normal albedos weathered to `maturity` (in [+0, 1], the header's),
-/// [`weathered_entry_bvr`]: the albedos the albedo scale is solved on where a header carries a
-/// maturity (decision-p14-t51d-weathering §1.5). An entry without `FeO_T`, or of `FeO_T` 0, keeps
-/// its albedos to the bit, and at maturity 0 every entry does.
-///
-/// # Errors
-///
-/// [`BuildPaletteError`] if the weathered entries are not a palette, a bug: the law changes only
-/// the albedos, each finite and no lower than +0 for a fresh one that was.
-fn weathered_palette(
-    palette: &MaterialPalette,
-    maturity: f64,
-) -> Result<MaterialPalette, BuildPaletteError> {
-    MaterialPalette::new(
-        palette
-            .entries()
-            .iter()
-            .map(|entry| PaletteEntry {
-                normal_albedo_bvr: weathered_entry_bvr(entry, maturity),
-                ..entry.clone()
-            })
-            .collect(),
-    )
 }
 
 /// The level of the field of `key`'s body in `system`, on the pool, as
@@ -859,6 +821,7 @@ mod tests {
         Cover, CoverRange, MaterialPalette, MechanicsFamily, PaletteEntry, PaletteRole,
         ResolutionCode,
     };
+    use hyperion_surface::material::{Material, MaterialClass, albedo_scale, exposed_properties};
     use hyperion_surface::substance_key::SubstanceKey;
     use hyperion_surface::testing::FieldBuilder;
     use hyperion_surface::wire::encode_payload;
@@ -1874,41 +1837,68 @@ mod tests {
         }
     }
 
-    /// Where the header carries a maturity, the scale is solved on the palette's albedos weathered
-    /// to it (R10.T1.d; decision-p14-t51d-weathering §1.5): at maturity 1 and the Moon's rate it is
-    /// `albedo_scale` on the weathered palette, bit for bit, and larger than the fresh solve, since
-    /// the weathered ground is darker; at maturity 0 it is the fresh solve exactly, as it is with
-    /// no maturity (the test above).
+    /// The scale is solved on the albedos the header's exposure gives (R10.T1.c's shared solve,
+    /// `exposed_albedo_scale` at `GroundExposure::of_header`; decision-p14-t51d-weathering §1.5):
+    /// at maturity 1 and the Moon's rate it is that solve, bit for bit, and larger than the fresh
+    /// solve, since the weathered ground is darker; at maturity 0 it is the fresh solve exactly, as
+    /// it is with no maturity, which is `albedo_scale` itself.
     #[test]
     fn a_field_s_albedo_scale_is_solved_on_its_weathered_albedos() {
         let detail = detail_seed(Seed::new(SEED), system().1[0]);
         let photometry = photometry_in(SurfaceState::Airless, Pascals::ZERO);
         let p = photometry.geometric_albedo();
         let section = Section::Ok(photometry);
-        let fresh = field_albedo_scale(&weathering_field(None), &section, detail)
+        let solved = |field: &CoarseField, exposure| {
+            let synth = Synthesiser::new(field, detail);
+            let fractions = class_fractions(&synth, &mut SynthCache::new()).unwrap();
+            let palette = field.header().palette();
+            let shared = exposed_albedo_scale(&fractions, palette, exposure, [p.b, p.v, p.r])
+                .unwrap()
+                .scale();
+            let fresh = albedo_scale(&fractions, palette, [p.b, p.v, p.r])
+                .unwrap()
+                .scale();
+            (shared, fresh)
+        };
+        let none_field = weathering_field(None);
+        let fresh = field_albedo_scale(&none_field, &section, detail)
             .expect("an airless field of named ground has a scale");
+        let (none_shared, none_fresh) =
+            solved(&none_field, GroundExposure::of_header(none_field.header()));
+        assert_eq!(fresh.to_bits(), none_shared.to_bits());
+        assert_eq!(fresh.to_bits(), none_fresh.to_bits());
         let mature_field = weathering_field(Some(1.0));
         let mature = field_albedo_scale(&mature_field, &section, detail)
             .expect("a mature field of named ground has a scale");
+        let exposure = GroundExposure::of_header(mature_field.header());
+        assert_eq!(
+            exposure.maturity().map(f64::to_bits),
+            Some(1.0_f64.to_bits())
+        );
+        let (want, unweathered) = solved(&mature_field, exposure);
+        assert_eq!(mature.to_bits(), want.to_bits());
+        assert_eq!(unweathered.to_bits(), fresh.to_bits());
+        assert_ne!(mature.to_bits(), fresh.to_bits());
+        // The weathered regolith is darker in every band than its fresh entry, so the scale rises.
         let palette = mature_field.header().palette();
-        let weathered = weathered_palette(palette, 1.0).unwrap();
-        let (entry, darker) = (&palette.entries()[0], &weathered.entries()[0]);
+        let regolith = Material::new(MaterialClass::Regolith, 0).unwrap();
+        let darker = exposed_properties(regolith, palette, exposure).unwrap();
+        let entry = &palette.entries()[0];
         assert!(
-            (0..3).all(|band| darker.normal_albedo_bvr[band] < entry.normal_albedo_bvr[band]),
+            (0..3).all(|band| darker.normal_albedo_bvr()[band] < entry.normal_albedo_bvr[band]),
             "{:?} against {:?}",
-            darker.normal_albedo_bvr,
+            darker.normal_albedo_bvr(),
             entry.normal_albedo_bvr
         );
-        let synth = Synthesiser::new(&mature_field, detail);
-        let fractions = class_fractions(&synth, &mut SynthCache::new()).unwrap();
-        let want = albedo_scale(&fractions, &weathered, [p.b, p.v, p.r])
-            .unwrap()
-            .scale();
-        assert_eq!(mature.to_bits(), want.to_bits());
-        assert_ne!(mature.to_bits(), fresh.to_bits());
         assert!(mature > fresh, "{mature} against {fresh}");
-        let young = field_albedo_scale(&weathering_field(Some(0.0)), &section, detail);
+        let young_field = weathering_field(Some(0.0));
+        let young = field_albedo_scale(&young_field, &section, detail);
         assert_eq!(young.map(f64::to_bits), Some(fresh.to_bits()));
+        let (young_shared, _) = solved(
+            &young_field,
+            GroundExposure::of_header(young_field.header()),
+        );
+        assert_eq!(young_shared.to_bits(), fresh.to_bits());
     }
 
     /// A field of a generator version this build does not generate is refused.

@@ -15,10 +15,10 @@ use crate::field::{
     CoarseField, CoarseLevel, Cover, CoverRange, ResolutionCode, SYNTHESIS_MARGIN_CELLS,
     SynthesisCell,
 };
-use crate::material::MaterialClass;
+use crate::material::{MaterialClass, properties};
 use crate::patch::{BakeOptions, NormalScale, VertexPath};
 use crate::synth::test_support::{SEED, world};
-use crate::testing::SyntheticWorld;
+use crate::testing::{SyntheticWorld, moon_like_builder};
 use crate::wire::{BLOCK_HEADER_BYTES, decode_payload, encode_within};
 
 /// The fixture's world: the Moon-like, at level 6.
@@ -954,7 +954,13 @@ fn worker_queries_are_the_free_functions_over_the_field() {
                 let properties = ground
                     .material()
                     .map(|m| properties(m, field.header().palette()).unwrap());
-                Some(SurveyedMaterial { ground, properties })
+                // The fixture's header carries no maturity, so the point has none, and its
+                // properties are the palette's as resolved (R10.T1.c's identity).
+                Some(SurveyedMaterial {
+                    ground,
+                    maturity: None,
+                    properties,
+                })
             } else {
                 None
             };
@@ -1452,4 +1458,174 @@ fn worker_class_map_keeps_the_heaviest_classes_past_sixteen() {
     assert!(kept.contains(&materials[0]));
     assert!(!kept.contains(&materials[1]));
     assert_eq!(kept, [&materials[..1], &materials[2..]].concat());
+}
+
+/// A worker holding a survey of the 2 × 2 cells of `field`'s level about the direction `dir`, at
+/// 50 m, with its margin, and the cells.
+fn surveyed_about(field: &CoarseField, dir: [f64; 3]) -> (WorkerFields, BTreeSet<PatchKey>) {
+    let level = field.header().level().get();
+    let home = PatchKey::containing(level, dir).unwrap();
+    let (i, j) = (home.i() & !1, home.j() & !1);
+    let cells: BTreeSet<PatchKey> = [(0, 0), (1, 0), (0, 1), (1, 1)]
+        .map(|(a, b)| PatchKey::new(home.face(), level, i + a, j + b).unwrap())
+        .into_iter()
+        .collect();
+    let blocks = split(&encode_within(
+        field,
+        &cover(&cells, |_| code(50.0)),
+        None,
+        SYNTHESIS_MARGIN_CELLS,
+        FIXTURE_BLOCK_BYTES,
+    ));
+    let body = field.header().body();
+    let mut fields = WorkerFields::new();
+    fields.init(body, &blocks[0]).unwrap();
+    for block in &blocks[1..] {
+        fields.chunk(body, block).unwrap();
+    }
+    (fields, cells)
+}
+
+/// A drawn photometry's bits: its albedos, its law and its L(0).
+fn drawn_bits(d: DrawnPhotometry) -> ([u64; 3], PhaseLaw, u64) {
+    (
+        d.normal_albedo_bvr().map(bits),
+        d.phase_law(),
+        bits(d.limb_parameter()),
+    )
+}
+
+/// R10.T1.c's identity: on every synthetic world, whose header carries neither a maturity nor a
+/// cover, the worker's photometry, class map and material are their as-built answers, the
+/// palette's properties as resolved under the header's scale, bit for bit.
+#[test]
+fn worker_answers_are_as_built_without_a_maturity_or_a_cover_on_every_world() {
+    for &w in SyntheticWorld::ALL {
+        let field = world(w);
+        let header = field.header();
+        assert_eq!((header.maturity(), header.organic_cover()), (None, None));
+        let (mut fields, cells) = surveyed_about(field, unit_dir([0.3, 1.0, 0.2]));
+        let body = header.body();
+        let palette = header.palette();
+        let c = header.albedo_scale().unwrap_or(1.0);
+        let as_built = |m: Material| {
+            let p = properties(m, palette).unwrap();
+            let bvr = scaled_normal_albedo(&p, c);
+            (
+                bvr.map(bits),
+                p.phase_law(),
+                bits(p.phase_law().limb_parameter(bvr[1])),
+            )
+        };
+        for entry in 0..u8::try_from(palette.len()).unwrap() {
+            for &class in MaterialClass::ALL {
+                let m = Material::new(class, entry).unwrap();
+                let drawn = fields.photometry(body, m).unwrap();
+                assert_eq!(drawn_bits(drawn), as_built(m), "{w:?} {m:?}");
+            }
+        }
+        let held = fields.field(body).unwrap().clone();
+        let synth = Synthesiser::new(&held, SEED);
+        for &cell in &cells {
+            for (x, y) in [(0.3, 0.6), (0.7, 0.2)] {
+                let at = face_uv(cell, x, y);
+                let ground = material_at(&synth, &mut SynthCache::new(), at).unwrap();
+                let want = SurveyedMaterial {
+                    ground,
+                    maturity: None,
+                    properties: ground.material().map(|m| properties(m, palette).unwrap()),
+                };
+                assert_eq!(fields.material(body, SEED, at), Ok(Some(want)), "{w:?}");
+            }
+        }
+        let map = fields.class_map(body, SEED).unwrap();
+        assert!(!map.classes().is_empty(), "{w:?}");
+        for class in map.classes() {
+            match class.material().material() {
+                Some(m) => assert_eq!(
+                    class.photometry().map(drawn_bits),
+                    Some(as_built(m)),
+                    "{w:?}"
+                ),
+                None => assert_eq!(class.photometry(), None, "{w:?}"),
+            }
+        }
+    }
+}
+
+/// R10.T1.c on a weathered Moon-like world: the photometry, and so the class map, draws each
+/// material's albedo exposed at the header's maturity, `Melt` fresh, darker than the fresh
+/// world's, and at maturity 0 the fresh world's to the bit; and the point query takes the point's
+/// own maturity, `maturity_at`'s, and its material's properties exposed there.
+#[test]
+fn worker_photometry_takes_the_header_s_maturity_and_material_the_point_s() {
+    let weathered = moon_like_builder()
+        .maturity(1.0)
+        .weathering_rate(1.0)
+        .build();
+    let young = moon_like_builder()
+        .maturity(0.0)
+        .weathering_rate(1.0)
+        .build();
+    let dir = point(cell(22, 22), 0.5, 0.5);
+    let (fresh, _) = surveyed_about(world(WORLD), dir);
+    let (zero, _) = surveyed_about(&young, dir);
+    let (mut mature, cells) = surveyed_about(&weathered, dir);
+    let header = weathered.header();
+    let body = header.body();
+    assert_eq!(body, world(WORLD).header().body());
+    let palette = header.palette();
+    let exposure = GroundExposure::of_header(header);
+    assert_eq!(exposure.maturity().map(bits), Some(bits(1.0)));
+    let mut darker = false;
+    for entry in 0..u8::try_from(palette.len()).unwrap() {
+        for &class in MaterialClass::ALL {
+            let m = Material::new(class, entry).unwrap();
+            let unweathered = fresh.photometry(body, m).unwrap();
+            assert_eq!(
+                drawn_bits(zero.photometry(body, m).unwrap()),
+                drawn_bits(unweathered),
+                "{m:?} at maturity 0"
+            );
+            let drawn = mature.photometry(body, m).unwrap();
+            let exposed = exposed_properties(m, palette, exposure).unwrap();
+            let bvr = scaled_normal_albedo(&exposed, header.albedo_scale().unwrap_or(1.0));
+            assert_eq!(drawn.normal_albedo_bvr().map(bits), bvr.map(bits), "{m:?}");
+            if class == MaterialClass::Melt {
+                assert_eq!(drawn_bits(drawn), drawn_bits(unweathered), "{m:?}");
+            }
+            darker |= drawn.normal_albedo_bvr()[1] < unweathered.normal_albedo_bvr()[1];
+        }
+    }
+    assert!(darker, "the weathered crust draws darker");
+    let held = mature.field(body).unwrap().clone();
+    let synth = Synthesiser::new(&held, SEED);
+    let mut immature = false;
+    for &cell in &cells {
+        for (x, y) in [(0.3, 0.6), (0.7, 0.2), (0.5, 0.5)] {
+            let at = face_uv(cell, x, y);
+            let got = mature.material(body, SEED, at).unwrap().unwrap();
+            let local = maturity_at(&synth, &mut SynthCache::new(), at)
+                .unwrap()
+                .unwrap();
+            assert_eq!(got.maturity().map(bits), Some(bits(local)));
+            immature |= local < 1.0;
+            let ground = material_at(&synth, &mut SynthCache::new(), at).unwrap();
+            assert_eq!(got.ground(), ground);
+            let want = ground
+                .material()
+                .map(|m| exposed_properties(m, palette, exposure.with_maturity(local)).unwrap());
+            assert_eq!(got.properties(), want.as_ref());
+        }
+    }
+    assert!(immature, "some point lies in a young crater's halo");
+    let map = mature.class_map(body, SEED).unwrap();
+    for class in map.classes() {
+        if let Some(m) = class.material().material() {
+            assert_eq!(
+                class.photometry().map(drawn_bits),
+                Some(drawn_bits(mature.photometry(body, m).unwrap()))
+            );
+        }
+    }
 }

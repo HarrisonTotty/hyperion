@@ -1061,6 +1061,31 @@ fn procellarum() -> [f64; 3] {
 }
 
 fn moon_like() -> CoarseField {
+    moon_like_builder().build()
+}
+
+/// The Moon-like world's crater contract at the lunar-equivalent density `n_1km` above 1 km: its
+/// own at 0.05 km⁻², and R10.T1.c's variants' at a younger surface's (`maturity` tests).
+#[must_use]
+pub(crate) fn moon_like_crater_params(n_1km: PerSquareKilometre) -> CraterParams {
+    CraterParams::new(CraterParamsParts {
+        n_1km,
+        screening: Screening::None,
+        gravity: MetresPerSecondSquared::new(1.62),
+        k_target: 1.0,
+        // The lunar reference itself, where the diameter map is the identity.
+        impact_velocity: Some(LUNAR_IMPACT_VELOCITY),
+        projectile_density: LUNAR_PROJECTILE_DENSITY,
+        target: LUNAR_TARGET,
+        system_age: SOLAR_SYSTEM_AGE,
+    })
+    .expect("the Moon-like crater contract is valid")
+}
+
+/// The Moon-like world's builder, its craters included: what [`SyntheticWorld::MoonLike`] builds,
+/// and what R10.T1.c's tests weather and vary (a maturity and a rate, a younger surface).
+#[must_use]
+pub(crate) fn moon_like_builder() -> FieldBuilder {
     // The highlands are a feldspathic crust and the maria an iron-rich basalt
     // (science-composition-crusts.md §2 and §7). Water ice lies in the Moon's cold traps (Li et al.
     // 2018, PNAS 115, 8907), an entry no cell's share names until P14.T51.f states the area and
@@ -1081,20 +1106,7 @@ fn moon_like() -> CoarseField {
             Spheroid::from_volumetric(MOON_RADIUS_M, 0.0012).expect("the Moon's figure is valid"),
         )
         .spectrum(stagnant_lid_spectrum(MOON_RADIUS_M))
-        .crater_params(
-            CraterParams::new(CraterParamsParts {
-                n_1km: PerSquareKilometre::new(0.05),
-                screening: Screening::None,
-                gravity: MetresPerSecondSquared::new(1.62),
-                k_target: 1.0,
-                // The lunar reference itself, where the diameter map is the identity.
-                impact_velocity: Some(LUNAR_IMPACT_VELOCITY),
-                projectile_density: LUNAR_PROJECTILE_DENSITY,
-                target: LUNAR_TARGET,
-                system_age: SOLAR_SYSTEM_AGE,
-            })
-            .expect("the Moon-like crater contract is valid"),
-        )
+        .crater_params(moon_like_crater_params(PerSquareKilometre::new(0.05)))
         .climate_model(ClimateModelKind::RadiativeEquilibrium)
         .months(12)
         .season_eccentricity(EARTH_ORBIT_E)
@@ -1141,7 +1153,7 @@ fn moon_like() -> CoarseField {
             Gigayears::new(3.8),
             40,
         );
-    spiral_craters(builder, 40, (100e3, 400e3), (3.0, 4.3)).build()
+    spiral_craters(builder, 40, (100e3, 400e3), (3.0, 4.3))
 }
 
 fn ceres_like() -> CoarseField {
@@ -1227,14 +1239,120 @@ fn flat() -> CoarseField {
 }
 
 fn one_crater() -> CoarseField {
-    // On the edge between faces 0 and 2 (x = z), which face 0 owns by the lowest-index rule.
-    flat_builder(6)
-        .crater(
-            unit_dir([1.0, 0.3, 1.0]),
-            Metres::new(300e3),
-            Gigayears::new(3.9),
-            0,
-        )
+    one_crater_builder(Gigayears::new(3.9), 0).build()
+}
+
+/// The single crater's builder with the crater formed `age` ago, of degradation code
+/// `degradation`: what [`SyntheticWorld::OneCrater`] builds at 3.9 Gyr and 0, and R10.T1.c's tests
+/// a young crater of (`maturity` tests).
+#[must_use]
+pub(crate) fn one_crater_builder(age: Gigayears, degradation: u8) -> FieldBuilder {
+    flat_builder(6).crater(one_crater_centre(), Metres::new(300e3), age, degradation)
+}
+
+/// The single crater's centre, a unit vector on the edge between faces 0 and 2 (x = z), which face
+/// 0 owns by the lowest-index rule.
+#[must_use]
+pub(crate) fn one_crater_centre() -> [f64; 3] {
+    unit_dir([1.0, 0.3, 1.0])
+}
+
+/// A Pluto-like world (decision-composition's): Pluto's radius, 1,188.3 km (Nimmo et al. 2017,
+/// Icarus 287, 12), a water-ice crust, nitrogen and methane ices and a tholin cover, under 1 Pa of
+/// air (New Horizons' 10.2–12.8 µbar at exit and entry; Hinson et al. 2017, Icarus 290, 96, as
+/// Meza et al. 2019, A&A 625, A42, §4.3, quote it) at 40 K, with a nitrogen
+/// glacier filling a basin about 25° N, 175° E (Sputnik Planitia's place) and methane frost over a
+/// part of each mid-northern cell; `pressure` overrides the air.
+///
+/// The classifier's tests and R10.T1.c's cover blend share it (`material/classify/tests.rs`,
+/// `material/maturity.rs`). The ices' and the crust's normal albedos are 0.5 in every band and the
+/// tholin's a dark red 0.06/0.09/0.14, illustrative values that tell the cover's blend apart,
+/// not measured ones; no entry carries `FeO_T`.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn pluto_like(pressure: Pascals) -> CoarseField {
+    use crate::synth::STRUCTURAL_RMS_ICE_RICH;
+    use crate::testing::CellSite;
+    let entry =
+        |key: &str, role, density_kg_m3, transition_k, mechanics, normal_albedo_bvr| PaletteEntry {
+            substance: SubstanceKey::new(key).expect("a test key is in the grammar"),
+            role,
+            normal_albedo_bvr,
+            phase_row: 0,
+            grain_density_kg_m3: density_kg_m3,
+            transition: Kelvin::new(transition_k),
+            mechanics,
+            liquid: None,
+            feo_mass_fraction: None,
+        };
+    let radius = 1.1883e6;
+    let basin = lat_lon(25.0, 175.0);
+    // Illustrative values near the real ones: water ice at 40 K, 934 kg m⁻³ (IAPWS R10-06);
+    // methane ice, 522 kg m⁻³, melting at 90.7 K; β-nitrogen, the phase above 35.6 K, about 990 kg
+    // m⁻³, melting at 63.15 K (science-composition-crusts §3.1); a tholin of 1,500 kg m⁻³ that
+    // decomposes near 600 K, unsourced.
+    let pluto = palette(vec![
+        entry(
+            "H2O",
+            PaletteRole::PrimaryCrust,
+            934.0,
+            273.15,
+            MechanicsFamily::WaterIce,
+            [0.5; 3],
+        ),
+        entry(
+            "CH4",
+            PaletteRole::Ice,
+            522.0,
+            90.7,
+            MechanicsFamily::VolatileIce,
+            [0.5; 3],
+        ),
+        entry(
+            "N2",
+            PaletteRole::Ice,
+            990.0,
+            63.15,
+            MechanicsFamily::VolatileIce,
+            [0.5; 3],
+        ),
+        entry(
+            "tholin",
+            PaletteRole::Cover,
+            1_500.0,
+            600.0,
+            MechanicsFamily::Organic,
+            [0.06, 0.09, 0.14],
+        ),
+    ]);
+    let in_basin = move |dir: [f64; 3]| arc(dir, basin) < 0.3;
+    let in_band = |dir: [f64; 3]| {
+        let lat = latitude(dir).to_degrees();
+        (35.0..60.0).contains(&lat)
+    };
+    FieldBuilder::new(Metres::new(radius))
+        .palette(pluto)
+        .crust_palette([None, None, Some(0), None])
+        .surface_pressure(pressure)
+        .spectrum(BandSpectrum::anchored(
+            SpectrumShape::ICE_RICH,
+            Metres::new(radius),
+            STRUCTURAL_RMS_ICE_RICH,
+        ))
+        .climate(|_| ClimateSample::still(Kelvin::new(40.0)))
+        .elevation(move |site: &CellSite| {
+            Metres::new(if in_basin(site.dir) { -3_000.0 } else { 0.0 })
+        })
+        .ice(move |site, _| {
+            if in_basin(site.dir) {
+                1.0
+            } else if in_band(site.dir) {
+                0.3
+            } else {
+                0.0
+            }
+        })
+        .ice_entry(move |site| if in_basin(site.dir) { 2 } else { 1 })
         .build()
 }
 

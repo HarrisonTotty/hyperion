@@ -49,8 +49,9 @@
 use std::collections::BTreeMap;
 
 use super::{
-    AlbedoSpan, BRIGHT_FROST_NORMAL_ALBEDO, GroundMaterial, LUNAR_LIMB_ONSET_NORMAL_ALBEDO,
-    MaterialProperties, PhaseLaw, ResolvePropertiesError, properties, weights_at,
+    AlbedoSpan, BRIGHT_FROST_NORMAL_ALBEDO, GroundExposure, GroundMaterial,
+    LUNAR_LIMB_ONSET_NORMAL_ALBEDO, MaterialProperties, PhaseLaw, ResolvePropertiesError,
+    exposed_properties, weights_at,
 };
 use crate::cube::{FaceUv, PATCH_QUADS, PatchKey, st_to_uv};
 use crate::field::{FieldView, MaterialPalette, cell_at_index};
@@ -408,17 +409,54 @@ impl From<ResolvePropertiesError> for SolveAlbedoScaleError {
 /// in each band (the `albedo` module documentation).
 ///
 /// Each material's albedo is its entry's times its form's factor, its law the form's or the
-/// entry's ([`properties`]). The ground whose palette names no substance is left out, and the named
-/// ground is solved for the body's p. The answer depends on the fractions, the palette and p alone.
+/// entry's ([`properties()`](super::properties())): the fresh, uncovered albedos,
+/// [`exposed_albedo_scale`] at [`GroundExposure::NONE`]. The ground whose palette names no
+/// substance is left out, and the named ground is solved for the body's p. The answer depends on
+/// the fractions, the palette and p alone.
+///
+/// # Errors
+///
+/// As [`exposed_albedo_scale`].
+pub fn albedo_scale(
+    fractions: &ClassFractions,
+    palette: &MaterialPalette,
+    geometric_albedo_bvr: [f64; 3],
+) -> Result<AlbedoScale, SolveAlbedoScaleError> {
+    exposed_albedo_scale(
+        fractions,
+        palette,
+        GroundExposure::NONE,
+        geometric_albedo_bvr,
+    )
+}
+
+/// The scale on the class albedos of a body of palette `palette` whose ground's area fractions are
+/// `fractions`, its ground exposed as `exposure` has it, that makes the scaled materials'
+/// geometric albedo in V the body's, `geometric_albedo_bvr[1]`, with the residual in each band
+/// (the `albedo` module documentation; R10.T1.c, decision-r10-t1c-maturity R2).
+///
+/// Each material's albedo is its [`exposed_properties`] at `exposure`: its entry's weathered to the
+/// exposure's maturity, times its form's factor, blended with the organic cover where its entry
+/// takes one, its law the form's or the entry's. The server solves it at the header's exposure
+/// ([`GroundExposure::of_header`]), so that the scale never undoes the weathering: R10 draws c ×
+/// the weathered albedo (decision-p14-t51d-weathering §1.5). At [`GroundExposure::NONE`] it is
+/// [`albedo_scale`], the fresh solve. The ground whose palette names no substance is left out, and
+/// the named ground is solved for the body's p. The answer depends on the fractions, the palette,
+/// the exposure and p alone.
 ///
 /// # Errors
 ///
 /// [`SolveAlbedoScaleError::GeometricAlbedo`] for a band of `geometric_albedo_bvr` that is not finite
 /// and positive, [`SolveAlbedoScaleError::NoNamedGround`] where no material names an entry, and
 /// [`SolveAlbedoScaleError::Properties`] for an entry past `palette`.
-pub fn albedo_scale(
+///
+/// # Panics
+///
+/// As [`exposed_properties`], for an entry whose values a [`MaterialPalette`] refuses (a bug).
+pub fn exposed_albedo_scale(
     fractions: &ClassFractions,
     palette: &MaterialPalette,
+    exposure: GroundExposure,
     geometric_albedo_bvr: [f64; 3],
 ) -> Result<AlbedoScale, SolveAlbedoScaleError> {
     for (band, &value) in ["B", "V", "R"].into_iter().zip(&geometric_albedo_bvr) {
@@ -439,7 +477,7 @@ pub fn albedo_scale(
         let Some(material) = ground.material() else {
             continue;
         };
-        let p = properties(material, palette)?;
+        let p = exposed_properties(material, palette, exposure)?;
         terms.push(Term::new(
             share / named,
             p.normal_albedo_bvr(),

@@ -302,7 +302,7 @@ fn node_index(below: f64) -> usize {
 /// # Panics
 ///
 /// If it is not, naming it `what`.
-fn check_unit(what: &str, value: f64) {
+pub(super) fn check_unit(what: &str, value: f64) {
     assert!(
         (0.0..=1.0).contains(&value),
         "{what} must be in [0, 1], got {value}"
