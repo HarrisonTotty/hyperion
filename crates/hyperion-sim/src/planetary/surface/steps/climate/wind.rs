@@ -143,6 +143,20 @@ pub(super) fn extratropical_m_s(latitude_deg: f64, edge_deg: f64) -> f64 {
     shape * span / earth_span
 }
 
+/// The latitude at which the Hadley and Ferrel cells meet at the surface in a hemisphere whose
+/// Hadley edge lies at `edge_deg`, degrees: the template's first node at its Earth share of the
+/// way from the edge to the pole ([`TEMPLATE_NODES_DEG`]; 35.4° at Earth's 25.1°), the pole where
+/// the edge reaches it. The ocean's Ekman cells return their water at it (decision-r09-t13i
+/// §2.3.1; Klinger and Marotzke 2000 take the contrast to the zero-wind latitude, about 30°).
+#[must_use]
+pub(super) fn return_latitude_deg(edge_deg: f64) -> f64 {
+    if edge_deg >= 90.0 {
+        return 90.0;
+    }
+    let share = (TEMPLATE_NODES_DEG[0] - TEMPLATE_EDGE_DEG) / (90.0 - TEMPLATE_EDGE_DEG);
+    edge_deg + share * (90.0 - edge_deg)
+}
+
 /// The Hadley cells' lower-branch meridional wind, m/s, towards the model's north pole: −ψ R g ÷
 /// (cos φ Δp) for the mass flux `mass_flux_kg_m2_s` over 2πR² (southward positive) at the sine
 /// latitude `sine_latitude` in the model's frame, on a body of radius `radius_m` and gravity

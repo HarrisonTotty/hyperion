@@ -131,6 +131,7 @@ mod isothermal;
 mod lapse;
 mod lfpm;
 mod normalise;
+mod ocean;
 mod partition;
 pub(crate) mod seas;
 mod sun;
@@ -354,10 +355,13 @@ fn energy_balance(
         grid: &on_grid,
         zonal: &zonal,
     };
+    let ocean = sea_transport(pass, working);
     let solution = match coordinates {
-        Coordinates::Geographic => ebm::solve(inputs, &grid, &sea_share, NOMINAL_STEP, ground),
+        Coordinates::Geographic => {
+            ebm::solve(inputs, &grid, &sea_share, NOMINAL_STEP, ground, ocean)
+        }
         Coordinates::TidallyLocked => {
-            ebm::solve_locked(inputs, &grid, &sea_share, NOMINAL_STEP, ground)
+            ebm::solve_locked(inputs, &grid, &sea_share, NOMINAL_STEP, ground, ocean)
         }
     };
     let surface_means = SurfaceMeans {
@@ -378,6 +382,19 @@ fn energy_balance(
     model.surface_means = Some(surface_means);
     model.water = Some(own);
     model
+}
+
+/// The sea's heat transport over `working`'s field (R09.T13.i, decision-r09-t13i §2.3.3): the
+/// ocean's Ekman cells and gyres over its flooded cells (`seas::under_sea`, every liquid), of
+/// mean depth Σ Ω (`z_w` − z) ÷ Σ Ω over them ([`ocean::mean_depth_m`]), in cell-index order.
+#[must_use]
+fn sea_transport(pass: &Pass<'_>, working: &Working) -> ocean::OceanTransport {
+    let depths = working.cells.iter().map(|cell| {
+        seas::under_sea(cell).then(|| cell.water_surface.value() - cell.elevation.value())
+    });
+    ocean::OceanTransport::Currents {
+        mean_depth_m: ocean::mean_depth_m(depths, pass.grid().solid_angles_sr()),
+    }
 }
 
 /// The energy-balance model's relief from `working`'s field (R09.T13.g;

@@ -848,7 +848,7 @@ fn a_pluto_like_world_ices_its_middle_latitudes() {
 }
 
 /// The Titan-like world of [`a_titan_like_world_s_methane_fills_its_basins_to_its_share`].
-fn titan_like() -> CoarseInputs {
+pub(super) fn titan_like() -> CoarseInputs {
     let earth = reference::earth_like();
     let mut entries: Vec<PaletteEntry> = earth.palette().entries().to_vec();
     let water = entries

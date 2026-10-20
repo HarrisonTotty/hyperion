@@ -263,7 +263,7 @@ fn cell_bands(pass: &Pass<'_>, coordinates: Coordinates) -> (Vec<usize>, Vec<f64
 /// The band nearest `band` for which `holds` holds, `band` itself first, then outward, equatorward
 /// before poleward at each distance (T13.a's rule); `None` where none does.
 #[must_use]
-fn nearest_band(band: usize, holds: impl Fn(usize) -> bool) -> Option<usize> {
+pub(super) fn nearest_band(band: usize, holds: impl Fn(usize) -> bool) -> Option<usize> {
     if holds(band) {
         return Some(band);
     }

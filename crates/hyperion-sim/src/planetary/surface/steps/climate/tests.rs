@@ -8,6 +8,7 @@ use super::ebm::{
 };
 use super::grid::{GEOGRAPHIC_COLUMNS, GridClimate, LATITUDE_BANDS, LOCKED_COLUMNS, ModelGrid};
 use super::hypsometry::{Hypsometry, Shape};
+use super::ocean::OceanTransport;
 use super::sun::{NOMINAL_STEP, Sunlight};
 use super::transport::{
     Diffusing, EARTH_TRANSPORT_KG_M2_S, PRESSURE_REFERENCE_CONTRAST_K, PRESSURE_TABLE,
@@ -219,7 +220,14 @@ fn era_earth(hypsometry: &[[i16; 8]; LATITUDE_BANDS]) -> (ebm::Solution, Relief,
         grid: &relief,
         zonal: &relief,
     };
-    let solution = ebm::solve(&inputs, &grid, &sea, NOMINAL_STEP, ground);
+    let solution = ebm::solve(
+        &inputs,
+        &grid,
+        &sea,
+        NOMINAL_STEP,
+        ground,
+        super::sea_transport(&pass, &working),
+    );
     (solution, relief, working)
 }
 
@@ -358,6 +366,46 @@ fn an_earth_with_its_land_s_hypsometry_lies_within_the_ruled_bounds_of_era_inter
     assert!(worst <= 5.0, "worst {worst} K");
 }
 
+/// R09.T13.i's liquid (decision-r09-t13i §2.5, test 5): the reference Earth's sea is water's, its
+/// heat capacities' factor and its specific heat ratio exactly 1; a Titan-like world's methane sea
+/// takes its own, `ρ_l c_l` ÷ (`ρ_w c_w`) at the model's freezing point plus 10 K (100.7 K for
+/// methane, water held at its column's 275 K), within 2% of the reference equations' own ratio at
+/// those states: Setzmann and Wagner 1991 (J. Phys. Chem. Ref. Data 20, 1061), Table 39, at 100 K,
+/// 438.89 kg m⁻³ and 3.4084 J g⁻¹ K⁻¹ (the state `substance::liquid`'s tests hold), over IAPWS-95
+/// at 275 K as NIST's Chemistry WebBook (SRD 69) evaluates it, 999.887 406 kg m⁻³ and 4.213 946 42
+/// J g⁻¹ K⁻¹ (the same tests' state; the cross-check of asserted values only, decision-composition
+/// §5): 0.355. Its Ekman cells carry methane's `c_l` and its gyres `c_l` ÷ `c_w`.
+#[test]
+fn a_methane_sea_holds_its_own_heat_and_water_s_ratio_is_one() {
+    let earth = reference::earth_like();
+    let water = super::ocean::SeaLiquid::of(&earth, Freezing::of(&earth));
+    assert!(water.has_column());
+    assert_same_bits(water.capacity_ratio(), 1.0);
+    assert_same_bits(water.heat_ratio(), 1.0);
+    let titan = normalisation::titan_like();
+    let methane = super::ocean::SeaLiquid::of(&titan, Freezing::of(&titan));
+    let expected = (438.89 * 3_408.4) / (999.887_406 * 4_213.946_42);
+    eprintln!(
+        "water: c_l {:.1} J kg⁻¹ K⁻¹; methane: c_l {:.1} J kg⁻¹ K⁻¹, r_l {:.4} against {expected:.4}, \
+         c_l ÷ c_w {:.4}, its column {}",
+        water.specific_heat_j_per_kg_k(),
+        methane.specific_heat_j_per_kg_k(),
+        methane.capacity_ratio(),
+        methane.heat_ratio(),
+        methane.has_column()
+    );
+    assert!(methane.has_column());
+    assert!(
+        (methane.capacity_ratio() / expected - 1.0).abs() < 0.02,
+        "{} against {expected}",
+        methane.capacity_ratio()
+    );
+    // The model's sea capacities take it, and water's are as built.
+    let model = EnergyBalance::for_inputs(&titan);
+    assert_same_bits(model.sea_capacity_ratio, methane.capacity_ratio());
+    assert_same_bits(EnergyBalance::for_inputs(&earth).sea_capacity_ratio, 1.0);
+}
+
 /// R09.T13.g's Earth through the step (decision-r09-t13ge §3, G3): the reference Earth with its
 /// land's hypsometry by hand, run through the climate step, whose geographic model reads each
 /// point's own quantiles while its τ solve reads each band's pooled ones. The step's mean constant
@@ -429,10 +477,11 @@ fn with_every_height_zero_the_model_is_t13a_s_to_the_bit() {
         grid: &relief,
         zonal: &relief,
     };
+    let ocean = super::sea_transport(&pass, &working);
     assert_same_solution(
         "the zonal Earth",
-        &ebm::solve(&inputs, &zonal, &sea, NOMINAL_STEP, ground),
-        &ebm::solve(&inputs, &zonal, &sea, NOMINAL_STEP, Ground::SeaLevel),
+        &ebm::solve(&inputs, &zonal, &sea, NOMINAL_STEP, ground, ocean),
+        &ebm::solve(&inputs, &zonal, &sea, NOMINAL_STEP, Ground::SeaLevel, ocean),
     );
     for (name, inputs, grid, coordinates) in [
         (
@@ -457,10 +506,13 @@ fn with_every_height_zero_the_model_is_t13a_s_to_the_bit() {
             grid: &on_grid,
             zonal: &zonal,
         };
+        let ocean = super::sea_transport(&pass, &working);
         let solve = |ground| match coordinates {
-            Coordinates::Geographic => ebm::solve(&inputs, &grid, &sea, NOMINAL_STEP, ground),
+            Coordinates::Geographic => {
+                ebm::solve(&inputs, &grid, &sea, NOMINAL_STEP, ground, ocean)
+            }
             Coordinates::TidallyLocked => {
-                ebm::solve_locked(&inputs, &grid, &sea, NOMINAL_STEP, ground)
+                ebm::solve_locked(&inputs, &grid, &sea, NOMINAL_STEP, ground, ocean)
             }
         };
         assert_same_solution(name, &solve(ground), &solve(Ground::SeaLevel));
@@ -526,6 +578,7 @@ impl KaspiShowman {
             // Their GCM's grey radiation holds its optical depth fixed, with no vapour feedback
             // (§2, §3.3): one τ (decision-r09-t13i §2.2).
             greenhouse: Greenhouse::Grey,
+            sea_capacity_ratio: 1.0,
         }
     }
 
@@ -688,7 +741,7 @@ fn the_scheme_is_stable_at_a_six_hour_step_for_every_rotation_and_at_venus_s() {
         let mean = inputs.mean_surface_temperature().value();
         let fine = |step: Seconds| {
             let sunlight = Sunlight::of(&inputs, &grid, step);
-            model.run(&grid, &sunlight, mean, &land, Ground::SeaLevel)
+            model.run(&grid, &sunlight, mean, &land, Ground::SeaLevel, None)
         };
         let coarse = fine(NOMINAL_STEP).climate;
         let reference = fine(NOMINAL_STEP / 4.0).climate;
@@ -718,7 +771,7 @@ fn each_month_is_the_mean_of_its_steps() {
     let sunlight = Sunlight::of(&inputs, &grid, NOMINAL_STEP);
     let model = EnergyBalance::for_inputs(&inputs);
     let climate = model
-        .run(&grid, &sunlight, 288.0, &land, Ground::SeaLevel)
+        .run(&grid, &sunlight, 288.0, &land, Ground::SeaLevel, None)
         .climate;
     let mut counts = [0_u32; 12];
     for step in 0..sunlight.steps() {
@@ -738,7 +791,7 @@ fn each_month_is_the_mean_of_its_steps() {
     assert!(july[60] > january[60] + 10.0 && january[11] > july[11] + 10.0);
     let steady = Sunlight::constant(sunlight.annual().to_vec());
     let one = model
-        .run(&grid, &steady, 288.0, &land, Ground::SeaLevel)
+        .run(&grid, &steady, 288.0, &land, Ground::SeaLevel, None)
         .climate;
     assert_eq!(one.months_k.len(), 1);
     assert_eq!(one.orbits, 0);
@@ -768,6 +821,7 @@ fn the_step_writes_each_climate_cell_from_the_geographic_model() {
         &vec![0.0; grid.points()],
         NOMINAL_STEP,
         Ground::SeaLevel,
+        OceanTransport::None,
     )
     .climate;
     let zonal = ebm::solve(
@@ -776,6 +830,7 @@ fn the_step_writes_each_climate_cell_from_the_geographic_model() {
         &[0.0; LATITUDE_BANDS],
         NOMINAL_STEP,
         Ground::SeaLevel,
+        OceanTransport::None,
     );
     for centre in climate_grid.centres() {
         let own = grid.stencil_at(*centre).apply(&climate.annual_k);
@@ -912,6 +967,7 @@ fn reproduces_the_zonal_model(sea: f64) {
         &[sea; LATITUDE_BANDS],
         NOMINAL_STEP,
         Ground::SeaLevel,
+        OceanTransport::None,
     )
     .climate;
     let wide = ebm::solve(
@@ -920,6 +976,7 @@ fn reproduces_the_zonal_model(sea: f64) {
         &vec![sea; geographic.points()],
         NOMINAL_STEP,
         Ground::SeaLevel,
+        OceanTransport::None,
     )
     .climate;
     assert_eq!(wide.orbits, one.orbits);
@@ -983,7 +1040,15 @@ fn a_continent_has_larger_seasons_and_a_warmer_summer_than_the_sea_beside_it() {
             }
         })
         .collect();
-    let climate = ebm::solve(&inputs, &grid, &sea, NOMINAL_STEP, Ground::SeaLevel).climate;
+    let climate = ebm::solve(
+        &inputs,
+        &grid,
+        &sea,
+        NOMINAL_STEP,
+        Ground::SeaLevel,
+        OceanTransport::None,
+    )
+    .climate;
     assert!(climate.converged, "{} orbits", climate.orbits);
     let at = |longitude: f64| grid.point_of(direction(46.25, longitude));
     let (land, coast, open) = (at(0.0), at(40.0), at(180.0));
@@ -1100,6 +1165,7 @@ fn a_locked_world_is_warmest_at_the_substellar_point() {
         &vec![0.0; grid.points()],
         NOMINAL_STEP,
         Ground::SeaLevel,
+        OceanTransport::None,
     );
     let climate = &solution.climate;
     let _clamped = super::write_climate(
@@ -1169,6 +1235,7 @@ fn a_locked_world_has_twelve_months_that_differ(e: f64, obliquity: f64) {
         &vec![0.0; grid.points()],
         NOMINAL_STEP,
         Ground::SeaLevel,
+        OceanTransport::None,
     );
     let climate = &solution.climate;
     assert!(climate.converged, "{} orbits", climate.orbits);

@@ -107,6 +107,8 @@ use super::grid::{
 };
 use super::hypsometry::{Hypsometry, PointHeights, QUANTILES, Shape};
 use super::lapse;
+use super::ocean::{Currents, OceanGrid, OceanTransport, Returning, SeaLiquid};
+use super::partition::{Circulation, Turning};
 use super::sun::Sunlight;
 use super::transport::{Diffusing, REFERENCE_PRESSURE_PA, rotation_ratio, transport_kg_m2_s};
 use crate::math;
@@ -847,6 +849,10 @@ pub(super) struct Solution {
     /// ([`Sunlight::month_means`]): over the steps each month's record averages, one month in a
     /// one-month year. The precipitation heuristic's absorbed sunlight reads it (R09.T13.e).
     pub(super) month_insolation_w_m2: Vec<Vec<f64>>,
+    /// The sea's heat transport over the last orbit, or at the steady state in a one-month year:
+    /// each month's ocean heat convergence at each point and the transports at each edge
+    /// (decision-r09-t13i §2.3.3); `None` with no sea's transport, or none to carry.
+    pub(super) ocean: Option<OceanRecord>,
 }
 
 /// The ground a run of the model reads (R09.T13.g).
@@ -1137,13 +1143,19 @@ pub(super) struct EnergyBalance {
     pub(super) heat_flow_w_m2: f64,
     /// What sets the grey optical depth (decision-r09-t13i §2.2).
     pub(super) greenhouse: Greenhouse,
+    /// `r_l`, the sea's heat capacities' factor on water's, its liquid's `ρ_l c_l` ÷ (`ρ_w c_w`)
+    /// ([`SeaLiquid::of`]; decision-r09-t13i §2.1): exactly 1 for water.
+    pub(super) sea_capacity_ratio: f64,
 }
 
 /// The model's working arrays: h, its slope, the albedo, its slope, the step's right side, its
 /// restoring D, the latitude
 /// systems' diagonal and the solution at each grid point; the latitude systems' off-diagonals,
 /// the same in every column, and one column's system, at each band; and one band's periodic
-/// system in longitude, at each column.
+/// system in longitude, at each column. With the sea's transport (decision-r09-t13i §2.3), the
+/// latitude systems' off-diagonals at each point, each point's water-surface temperature, the
+/// bands' mean h and sea temperature, the Ekman cells' gain at each edge, and the atmosphere's,
+/// the Ekman cells' and the gyres' northward flux at each point's southern edge.
 #[derive(Debug, Clone, PartialEq)]
 struct Work {
     energy: Vec<f64>,
@@ -1156,6 +1168,17 @@ struct Work {
     solution: Vec<f64>,
     lower: Vec<f64>,
     upper: Vec<f64>,
+    point_lower: Vec<f64>,
+    point_upper: Vec<f64>,
+    water: Vec<f64>,
+    band_energy: Vec<f64>,
+    band_sea: Vec<f64>,
+    gains: Vec<f64>,
+    south_atmosphere: Vec<f64>,
+    south_ekman: Vec<f64>,
+    south_gyres: Vec<f64>,
+    column_lower: Vec<f64>,
+    column_upper: Vec<f64>,
     column_diagonal: Vec<f64>,
     column_rhs: Vec<f64>,
     column_solution: Vec<f64>,
@@ -1183,9 +1206,20 @@ impl Work {
             rhs: points.clone(),
             restoring: points.clone(),
             diagonal: points.clone(),
+            point_lower: points.clone(),
+            point_upper: points.clone(),
+            water: points.clone(),
+            south_atmosphere: points.clone(),
+            south_ekman: points.clone(),
+            south_gyres: points.clone(),
             solution: points,
             lower: bands.clone(),
             upper: bands.clone(),
+            band_energy: bands.clone(),
+            band_sea: bands.clone(),
+            gains: vec![0.0; LATITUDE_BANDS + 1],
+            column_lower: bands.clone(),
+            column_upper: bands.clone(),
             column_diagonal: bands.clone(),
             column_rhs: bands.clone(),
             column_solution: bands.clone(),
@@ -1508,6 +1542,7 @@ impl EnergyBalance {
             ),
             heat_flow_w_m2: inputs.heat_flow().value(),
             greenhouse: Greenhouse::of(inputs, &air, freezing),
+            sea_capacity_ratio: SeaLiquid::of(inputs, freezing).capacity_ratio(),
         }
     }
 
@@ -1646,7 +1681,9 @@ impl EnergyBalance {
     /// The heat capacity, J m⁻² K⁻¹, of a grid point of sea share `sea_share` at `t_k`, K:
     /// (1 − s) `C_l` + s `C_sea`(T), the sea's open water's at every temperature where no ice
     /// forms. Over relief the sea's T is its water surface's, T − Γ `z̄_w` (decision-r09-t13ge
-    /// §1.4, g2), which the caller gives; land's capacity reads no temperature.
+    /// §1.4, g2), which the caller gives; land's capacity reads no temperature. The sea's three
+    /// capacities are its liquid's: water's times `r_l` ([`sea_capacity_ratio`](Self::sea_capacity_ratio);
+    /// decision-r09-t13i §2.1).
     #[must_use]
     pub(super) fn heat_capacity(&self, t_k: f64, sea_share: f64) -> f64 {
         let sea_ratio = match self.freezing {
@@ -1658,7 +1695,7 @@ impl EnergyBalance {
                 }
             }
             Freezing::At { .. } | Freezing::Never { .. } => SEA_HEAT_CAPACITY_RATIO,
-        };
+        } * self.sea_capacity_ratio;
         LAND_HEAT_CAPACITY_J_PER_M2_K * ((1.0 - sea_share) + sea_share * sea_ratio)
     }
 
@@ -1707,6 +1744,7 @@ impl EnergyBalance {
         storage: Storage<'_>,
         table: Option<&Tabulated>,
         ground: GridGround<ReliefAt<'_>>,
+        ocean: Option<(&OceanGrid, Returning)>,
         t_k: &mut [f64],
         work: &mut Work,
     ) -> f64 {
@@ -1771,25 +1809,16 @@ impl EnergyBalance {
                 work.diagonal[p] = work.restoring[p] + lambda * (below + above) / w;
             }
         }
-        // The latitude solve, column by column from the west.
-        for column in 0..columns {
-            for k in 0..LATITUDE_BANDS {
-                let p = grid.point(k, column);
-                work.column_diagonal[k] = work.diagonal[p];
-                work.column_rhs[k] = work.rhs[p];
+        // The sea's terms (decision-r09-t13i §2.3), on the latitude systems of the points whose
+        // edges carry them; elsewhere the systems are as built.
+        let coupled = match ocean {
+            Some((ocean, returning)) if ocean.any() => {
+                self.couple_ocean(grid, ocean, returning, t_k, ground, work);
+                true
             }
-            solve_tridiagonal(
-                &work.lower,
-                &work.column_diagonal,
-                &work.upper,
-                &work.column_rhs,
-                &mut work.column_solution,
-                &mut work.column_scratch,
-            );
-            for k in 0..LATITUDE_BANDS {
-                work.solution[grid.point(k, column)] = work.column_solution[k];
-            }
-        }
+            Some(_) | None => false,
+        };
+        solve_latitudes(grid, coupled, work);
         if columns > 1 {
             solve_longitude(lambda, grid, work);
         }
@@ -1813,6 +1842,97 @@ impl EnergyBalance {
         largest
     }
 
+    /// The sea's terms of a step at the points' starting temperatures `t_k`, K, over the ground
+    /// `ground`, on the latitude systems in `work` (whose h, slopes, right sides and diagonals the
+    /// step has filled), under `ocean` with the return temperatures `returning` (decision-r09-t13i
+    /// §2.3): each point's off-diagonals the band's, then at a point whose edges carry a term the
+    /// Ekman cells' conductance Λ A γ on its h and the gyres' K on its water-surface temperature,
+    /// implicit in the step's change y = h′ δT (δT = y ÷ h′ at each point), with their fluxes at
+    /// the step's start on its right side. Each point's northward fluxes at its southern edge, the
+    /// atmosphere's, the Ekman cells' and the gyres', go to `work` for the record.
+    fn couple_ocean(
+        &self,
+        grid: &ModelGrid,
+        ocean: &OceanGrid,
+        returning: Returning,
+        t_k: &[f64],
+        ground: GridGround<ReliefAt<'_>>,
+        work: &mut Work,
+    ) {
+        let lambda = self.transport_kg_m2_s;
+        let columns = grid.columns();
+        for (p, &t) in t_k.iter().enumerate() {
+            work.water[p] = match ground.raised(p) {
+                None => t,
+                Some((relief, (heights, _))) => relief.water_k(t, heights),
+            };
+        }
+        let bands = grid.band_means(&work.energy);
+        work.band_energy.copy_from_slice(&bands);
+        ocean.band_sea_k(grid, &work.water, &mut work.band_sea);
+        ocean.ekman_gains(
+            grid,
+            lambda,
+            &work.band_energy,
+            &work.band_sea,
+            returning,
+            &mut work.gains,
+        );
+        for k in 0..LATITUDE_BANDS {
+            let (below, above, w) = (
+                grid.edge_conductance(k),
+                grid.edge_conductance(k + 1),
+                grid.weight(k),
+            );
+            for column in 0..columns {
+                let p = grid.point(k, column);
+                work.point_lower[p] = work.lower[k];
+                work.point_upper[p] = work.upper[k];
+                let south = (k > 0).then(|| p - columns);
+                let north = (k + 1 < LATITUDE_BANDS).then_some(p + columns);
+                let gamma_below = ocean.edge_share(p) * work.gains[k];
+                let gamma_above = north.map_or(0.0, |q| ocean.edge_share(q) * work.gains[k + 1]);
+                let gyres_below = ocean.diffusive(p);
+                let gyres_above = north.map_or(0.0, |q| ocean.diffusive(q));
+                let atmosphere =
+                    south.map_or(0.0, |q| -lambda * below * (work.energy[p] - work.energy[q]));
+                work.south_atmosphere[p] = atmosphere;
+                work.south_ekman[p] = gamma_below * atmosphere;
+                work.south_gyres[p] =
+                    south.map_or(0.0, |q| -gyres_below * (work.water[p] - work.water[q]));
+                // By comparison, so that a point whose edges carry nothing is stepped as built.
+                if !(gamma_below > 0.0
+                    || gamma_above > 0.0
+                    || gyres_below > 0.0
+                    || gyres_above > 0.0)
+                {
+                    continue;
+                }
+                let ekman_below = lambda * below * gamma_below;
+                let ekman_above = lambda * above * gamma_above;
+                let (energy, slope, water) = (work.energy[p], work.slope[p], work.water[p]);
+                let mut flux = 0.0;
+                let mut lower = ekman_below;
+                let mut upper = ekman_above;
+                if let Some(q) = north {
+                    flux += ekman_above * (work.energy[q] - energy)
+                        + gyres_above * (work.water[q] - water);
+                    upper += gyres_above / work.slope[q];
+                }
+                if let Some(q) = south {
+                    flux -= ekman_below * (energy - work.energy[q])
+                        + gyres_below * (water - work.water[q]);
+                    lower += gyres_below / work.slope[q];
+                }
+                work.rhs[p] += flux / w;
+                work.diagonal[p] +=
+                    (ekman_below + ekman_above + (gyres_below + gyres_above) / slope) / w;
+                work.point_lower[p] -= lower / w;
+                work.point_upper[p] -= upper / w;
+            }
+        }
+    }
+
     /// The steady state under constant insolation `insolation_w_m2` under one τ of emission factor
     /// `emission_factor`, iterated from the temperatures `start_k`, K, and whether its iteration
     /// met [`STEADY_TOLERANCE_K`] within [`STEADY_ITERATIONS`].
@@ -1832,6 +1952,7 @@ impl EnergyBalance {
             start_k,
             None,
             GridGround::SeaLevel,
+            None,
             STEADY_ITERATIONS,
         )
     }
@@ -1854,6 +1975,7 @@ impl EnergyBalance {
             start_k,
             None,
             GridGround::Relief(relief),
+            None,
             STEADY_ITERATIONS,
         )
     }
@@ -1861,12 +1983,13 @@ impl EnergyBalance {
     /// The steady state under constant insolation `insolation_w_m2` and the radiation `radiation`,
     /// iterated from the temperatures `start_k`, K, for at most `iterations`, its functions read
     /// from `table` where it holds them, over the ground `ground`, its transmissions taken once at
-    /// the radiation; and whether its iteration met [`STEADY_TOLERANCE_K`]. A state that is no
-    /// longer finite, a runaway's under the water term, stops it, unconverged.
+    /// the radiation, with the sea's transport `ocean` at its own state's return temperatures
+    /// (decision-r09-t13i §2.3.3); and whether its iteration met [`STEADY_TOLERANCE_K`]. A state
+    /// that is no longer finite, a runaway's under the water term, stops it, unconverged.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the steady state's grid, forcing and start, and the step's table, relief and \
-                  count; bundling them would only rename them"
+        reason = "the steady state's grid, forcing and start, and the step's table, relief, ocean \
+                  and count; bundling them would only rename them"
     )]
     #[must_use]
     fn relax(
@@ -1877,6 +2000,7 @@ impl EnergyBalance {
         start_k: Vec<f64>,
         table: Option<&Tabulated>,
         ground: GridGround<&Relief>,
+        ocean: Option<&OceanGrid>,
         iterations: u32,
     ) -> Steady {
         let transmission = ground.transmissions(radiation);
@@ -1891,6 +2015,7 @@ impl EnergyBalance {
                 Storage::Relaxation,
                 table,
                 at,
+                ocean.map(|ocean| (ocean, Returning::Own)),
                 &mut t_k,
                 &mut work,
             );
@@ -1921,7 +2046,7 @@ impl EnergyBalance {
         insolation_w_m2: &[f64],
         mean_k: f64,
     ) -> Fitted {
-        self.fit(grid, insolation_w_m2, mean_k, GridGround::SeaLevel)
+        self.fit(grid, insolation_w_m2, mean_k, GridGround::SeaLevel, None)
     }
 
     /// The emission factor 1 + ¾τ at which the annual-mean steady state under `insolation_w_m2`
@@ -1950,6 +2075,7 @@ impl EnergyBalance {
         insolation_w_m2: &[f64],
         mean_k: f64,
         ground: GridGround<&Relief>,
+        ocean: Option<&OceanGrid>,
     ) -> Fitted {
         let solve = |factor: f64| {
             let radiation = Radiation::at(self.greenhouse, factor, mean_k);
@@ -1960,6 +2086,7 @@ impl EnergyBalance {
                 vec![mean_k; grid.points()],
                 None,
                 ground,
+                ocean,
                 STEADY_ITERATIONS,
             );
             let surface = match ground {
@@ -2013,10 +2140,15 @@ impl EnergyBalance {
     }
 
     /// Whole seasonal orbits of `sunlight` under the radiation `radiation` from `start_k`, K,
-    /// over points of sea share `sea_share` and the ground `ground`, until the annual means move
-    /// under [`CONVERGENCE_K`] between orbits, at most [`MAX_ORBITS`]: the last orbit's annual and
-    /// monthly means. The table reaches as far below and above the start as the highest and
-    /// deepest quantiles' grounds need.
+    /// over points of sea share `sea_share` and the ground `ground`, with the sea's transport
+    /// `ocean`, until the annual means move under [`CONVERGENCE_K`] between orbits, at most
+    /// [`MAX_ORBITS`]: the last orbit's annual and monthly means, its ocean record, and the state
+    /// at its end. The table reaches as far below and above the start as the highest and deepest
+    /// quantiles' grounds need.
+    ///
+    /// The Ekman cells' return temperature is the state's own in the first orbit, and from the
+    /// second the previous orbit's coldest month's band-mean sea temperature at the return
+    /// latitude in each hemisphere (decision-r09-t13i §2.3.1).
     ///
     /// Where the sunlight varies in the grid's longitude, as a locked world's beam does on an
     /// eccentric or tilted orbit, `start`, the zonal model's steady state under each band's mean
@@ -2031,8 +2163,18 @@ impl EnergyBalance {
     ///
     /// If `sunlight` is constant, or a month holds no step, which [`Sunlight::seasonal`]'s step
     /// count rules out.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the orbits' grid, sunlight, radiation and start, and the points' sea, relief and \
+                  ocean; bundling them would only rename them"
+    )]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one orbit loop: the steps, the months' sums, the ocean's record and return \
+                  temperatures and the stop, over the same arrays"
+    )]
     #[must_use]
-    pub(super) fn orbits(
+    fn orbits(
         &self,
         grid: &ModelGrid,
         sunlight: &Sunlight,
@@ -2040,7 +2182,8 @@ impl EnergyBalance {
         start_k: Vec<f64>,
         sea_share: &[f64],
         ground: GridGround<&Relief>,
-    ) -> GridClimate {
+        ocean: Option<&OceanGrid>,
+    ) -> Orbited {
         let steps = sunlight.steps();
         assert!(steps > 0, "a seasonal run needs a seasonal orbit");
         let points = grid.points();
@@ -2069,6 +2212,7 @@ impl EnergyBalance {
                 start_k,
                 Some(&table),
                 ground,
+                ocean,
                 SPIN_UP_ITERATIONS,
             )
             .t_k
@@ -2077,6 +2221,7 @@ impl EnergyBalance {
         };
         let transmission = ground.transmissions(radiation);
         let at = ground.at(&transmission);
+        let ocean = ocean.filter(|ocean| ocean.any());
         let mut t = start_k;
         let mut work = Work::new(grid);
         let mut insolation = vec![0.0; points];
@@ -2084,6 +2229,10 @@ impl EnergyBalance {
         let mut previous: Option<Vec<f64>> = None;
         let (mut annual, mut months) = (vec![0.0; points], vec![vec![0.0; points]; 12]);
         let mut counts = [0_u32; 12];
+        let mut recorder = ocean.map(|_| Recorder::new(points, 12));
+        let mut returning = Returning::Own;
+        let mut water = vec![0.0; points];
+        let mut band_sea = vec![0.0; LATITUDE_BANDS];
         let (mut orbits, mut converged) = (0, false);
         while orbits < MAX_ORBITS {
             annual.fill(0.0);
@@ -2091,6 +2240,9 @@ impl EnergyBalance {
                 month.fill(0.0);
             }
             counts = [0; 12];
+            if let Some(recorder) = &mut recorder {
+                recorder.clear();
+            }
             for step in 0..steps {
                 sunlight.fill(step, grid, &mut insolation);
                 self.advance(
@@ -2100,6 +2252,7 @@ impl EnergyBalance {
                     storage,
                     Some(&table),
                     at,
+                    ocean.map(|ocean| (ocean, returning)),
                     &mut t,
                     &mut work,
                 );
@@ -2109,11 +2262,25 @@ impl EnergyBalance {
                     *sum += v;
                     *month_sum += v;
                 }
+                if let Some(recorder) = &mut recorder {
+                    recorder.add(grid, &work, month);
+                }
             }
             orbits += 1;
             let n = f64::from(steps);
             for sum in &mut annual {
                 *sum /= n;
+            }
+            if let Some(ocean) = ocean {
+                returning = Returning::Coldest(coldest_return_k(
+                    grid,
+                    ocean,
+                    at,
+                    &months,
+                    &counts,
+                    &mut water,
+                    &mut band_sea,
+                ));
             }
             if let Some(last) = &previous {
                 let moved = annual.iter().zip(last).fold(0.0, |most: f64, (a, b)| {
@@ -2134,19 +2301,50 @@ impl EnergyBalance {
                 *sum /= n;
             }
         }
-        GridClimate {
-            annual_k: annual,
-            months_k: months,
-            orbits,
-            converged,
+        Orbited {
+            climate: GridClimate {
+                annual_k: annual,
+                months_k: months,
+                orbits,
+                converged,
+            },
+            ocean: recorder.map(|recorder| recorder.finish(&counts, steps)),
+            final_k: t,
+            returning,
         }
     }
 
+    /// The ocean's record of one state `t_k`, K, a steady state's, the year's one month: the
+    /// sea's fluxes at that state, its own return temperatures (decision-r09-t13i §2.3.3).
+    #[must_use]
+    fn steady_ocean_record(
+        &self,
+        grid: &ModelGrid,
+        radiation: &Radiation,
+        t_k: &[f64],
+        ground: GridGround<&Relief>,
+        ocean: &OceanGrid,
+    ) -> OceanRecord {
+        let transmission = ground.transmissions(radiation);
+        let at = ground.at(&transmission);
+        let mut work = Work::new(grid);
+        for (p, &t) in t_k.iter().enumerate() {
+            let [energy, slope] = self.energies(t, None);
+            work.energy[p] = energy;
+            work.slope[p] = slope;
+        }
+        self.couple_ocean(grid, ocean, Returning::Own, t_k, at, &mut work);
+        let mut recorder = Recorder::new(grid.points(), 1);
+        recorder.add(grid, &work, 0);
+        recorder.finish(&[1], 1)
+    }
+
     /// The model's run over `sunlight` for a body of mean surface temperature `mean_k`, over the
-    /// points of `grid` of sea share `sea_share` and the ground `ground` (the
-    /// [module documentation](self)): τ, or under the water term its multiplier, solved on the
-    /// zonal grid in the grid's coordinates, over the zonal relief, so that the steady state's
-    /// surface mean is `mean_k`, then the orbits over the grid's own relief.
+    /// points of `grid` of sea share `sea_share` and the ground `ground`, with the sea's transport
+    /// `currents` (the [module documentation](self)): τ, or under the water term its multiplier,
+    /// solved on the zonal grid in the grid's coordinates, over the zonal relief and its bands' sea
+    /// shares, so that the steady state's surface mean is `mean_k`, then the orbits over the grid's
+    /// own relief and sea.
     ///
     /// # Panics
     ///
@@ -2159,6 +2357,7 @@ impl EnergyBalance {
         mean_k: f64,
         sea_share: &[f64],
         ground: Ground<'_>,
+        currents: Option<&Currents>,
     ) -> Solution {
         let (on_grid, on_zonal) = match ground {
             Ground::SeaLevel => (GridGround::SeaLevel, GridGround::SeaLevel),
@@ -2168,6 +2367,9 @@ impl EnergyBalance {
         let zonal = ModelGrid::zonal();
         let annual = grid.band_means(sunlight.annual());
         let forcing = zonal.mean(&annual) + self.heat_flow_w_m2;
+        let ocean = currents.map(|currents| OceanGrid::new(grid, sea_share, currents));
+        let zonal_ocean =
+            currents.map(|currents| OceanGrid::new(&zonal, &grid.band_means(sea_share), currents));
         let solution = if positive(forcing) {
             let Fitted {
                 emission_factor: factor,
@@ -2175,18 +2377,33 @@ impl EnergyBalance {
                 steady,
                 surface_mean_k,
                 optical_depth: depth,
-            } = self.fit(&zonal, &annual, mean_k, on_zonal);
+            } = self.fit(&zonal, &annual, mean_k, on_zonal, zonal_ocean.as_ref());
             let converged = steady.converged;
             let steady = grid.broadcast(&steady.t_k);
-            let climate = if sunlight.steps() == 0 {
-                GridClimate {
-                    annual_k: steady.clone(),
-                    months_k: vec![steady; months],
-                    orbits: 0,
-                    converged,
-                }
+            let (climate, record) = if sunlight.steps() == 0 {
+                let record = ocean.as_ref().filter(|ocean| ocean.any()).map(|ocean| {
+                    self.steady_ocean_record(grid, &radiation, &steady, on_grid, ocean)
+                });
+                (
+                    GridClimate {
+                        annual_k: steady.clone(),
+                        months_k: vec![steady; months],
+                        orbits: 0,
+                        converged,
+                    },
+                    record,
+                )
             } else {
-                self.orbits(grid, sunlight, &radiation, steady, sea_share, on_grid)
+                let orbited = self.orbits(
+                    grid,
+                    sunlight,
+                    &radiation,
+                    steady,
+                    sea_share,
+                    on_grid,
+                    ocean.as_ref(),
+                );
+                (orbited.climate, orbited.ocean)
             };
             Solution {
                 climate,
@@ -2196,6 +2413,7 @@ impl EnergyBalance {
                 steady_converged: converged,
                 steady_surface_mean_k: surface_mean_k,
                 month_insolation_w_m2: sunlight.month_means(grid),
+                ocean: record,
             }
         } else {
             let isothermal = vec![mean_k; grid.points()];
@@ -2214,6 +2432,7 @@ impl EnergyBalance {
                 steady_converged: true,
                 steady_surface_mean_k: mean_k,
                 month_insolation_w_m2: sunlight.month_means(grid),
+                ocean: None,
             }
         };
         let climate = &solution.climate;
@@ -2226,6 +2445,211 @@ impl EnergyBalance {
         }
         solution
     }
+}
+
+/// What a seasonal run's orbits leave: the last orbit's means, the ocean's record over it, the
+/// state at its end and the return temperatures its successor would read.
+#[derive(Debug, Clone, PartialEq)]
+struct Orbited {
+    /// The last orbit's annual and monthly means, with the orbits run.
+    climate: GridClimate,
+    /// The ocean's record over the last orbit, where the sea's transport ran.
+    ocean: Option<OceanRecord>,
+    /// The state at the last orbit's end, K.
+    final_k: Vec<f64>,
+    /// The return temperatures after the last orbit.
+    returning: Returning,
+}
+
+/// The northward transports at each band edge of a grid ([`LATITUDE_BANDS`] + 1 values, zero at
+/// the poles), each the mean over the edge's columns of its points' southern-edge fluxes, W m⁻²
+/// per 2πR² (times 2πR² the zonal transport in W; decision-r09-t13i §2.3.3): the atmosphere's
+/// moist static energy, which the partition reads, the Ekman cells' and the gyres'.
+#[derive(Debug, Clone, PartialEq)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "each field is one carrier's flux, its unit in its name as the crate's rules ask"
+)]
+pub(super) struct Transports {
+    /// The atmosphere's.
+    pub(super) atmosphere_w_m2: Vec<f64>,
+    /// The Ekman cells'.
+    pub(super) ekman_w_m2: Vec<f64>,
+    /// The gyres' and eddies'.
+    pub(super) gyres_w_m2: Vec<f64>,
+}
+
+impl Transports {
+    /// Every edge's at zero.
+    #[must_use]
+    fn zero() -> Self {
+        Self {
+            atmosphere_w_m2: vec![0.0; LATITUDE_BANDS + 1],
+            ekman_w_m2: vec![0.0; LATITUDE_BANDS + 1],
+            gyres_w_m2: vec![0.0; LATITUDE_BANDS + 1],
+        }
+    }
+
+    /// Each part's sum at each edge with `other`'s times `weight`.
+    fn add(&mut self, other: &Self, weight: f64) {
+        for (mine, theirs) in [
+            (&mut self.atmosphere_w_m2, &other.atmosphere_w_m2),
+            (&mut self.ekman_w_m2, &other.ekman_w_m2),
+            (&mut self.gyres_w_m2, &other.gyres_w_m2),
+        ] {
+            for (a, b) in mine.iter_mut().zip(theirs) {
+                *a += weight * b;
+            }
+        }
+    }
+}
+
+/// The sea's heat transport over a run (decision-r09-t13i §2.3.3), which the water cycle's
+/// evaporation reads (its batch 2) and the tests compare with Trenberth and Caron: no output.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct OceanRecord {
+    /// Each month's mean ocean heat convergence at each point, W m⁻² of the point's area: the
+    /// Ekman cells' and the gyres' fluxes into it less out of it, over its area's share of 2πR².
+    pub(super) convergence_w_m2: Vec<Vec<f64>>,
+    /// Each month's mean transports at each band edge.
+    pub(super) months: Vec<Transports>,
+    /// The year's.
+    pub(super) annual: Transports,
+}
+
+/// A run's sums of the ocean's fluxes, month by month, over one orbit's steps.
+#[derive(Debug, Clone, PartialEq)]
+struct Recorder {
+    convergence: Vec<Vec<f64>>,
+    months: Vec<Transports>,
+}
+
+impl Recorder {
+    /// Sums of every point's convergence and every edge's transports for `months` months of a grid
+    /// of `points` points, each zero.
+    #[must_use]
+    fn new(points: usize, months: usize) -> Self {
+        Self {
+            convergence: vec![vec![0.0; points]; months],
+            months: vec![Transports::zero(); months],
+        }
+    }
+
+    /// Every sum back to zero, for the next orbit.
+    fn clear(&mut self) {
+        for month in &mut self.convergence {
+            month.fill(0.0);
+        }
+        for month in &mut self.months {
+            *month = Transports::zero();
+        }
+    }
+
+    /// Adds one step's fluxes in `work` (its points' southern-edge fluxes, [`EnergyBalance`]'s
+    /// `couple_ocean`) on `grid` to month `month`'s sums, edges from the south and columns from
+    /// the west.
+    fn add(&mut self, grid: &ModelGrid, work: &Work, month: usize) {
+        let columns = grid.columns();
+        let n = super::grid::index(columns);
+        let mean = |values: &[f64], k: usize| {
+            values[k * columns..(k + 1) * columns]
+                .iter()
+                .fold(0.0, |sum, v| sum + v)
+                / n
+        };
+        let transports = &mut self.months[month];
+        for k in 1..LATITUDE_BANDS {
+            transports.atmosphere_w_m2[k] += mean(&work.south_atmosphere, k);
+            transports.ekman_w_m2[k] += mean(&work.south_ekman, k);
+            transports.gyres_w_m2[k] += mean(&work.south_gyres, k);
+        }
+        let convergence = &mut self.convergence[month];
+        for k in 0..LATITUDE_BANDS {
+            let w = grid.weight(k);
+            for column in 0..columns {
+                let p = grid.point(k, column);
+                let into = work.south_ekman[p] + work.south_gyres[p];
+                let out = if k + 1 < LATITUDE_BANDS {
+                    work.south_ekman[p + columns] + work.south_gyres[p + columns]
+                } else {
+                    0.0
+                };
+                convergence[p] += (into - out) / w;
+            }
+        }
+    }
+
+    /// The record: each month's sums over its `counts` steps, and the year's over all `steps`.
+    #[must_use]
+    fn finish(self, counts: &[u32], steps: u32) -> OceanRecord {
+        let mut annual = Transports::zero();
+        let total = f64::from(steps);
+        for month in &self.months {
+            annual.add(month, 1.0 / total);
+        }
+        let months = self
+            .months
+            .iter()
+            .zip(counts)
+            .map(|(sums, &count)| {
+                let mut mean = Transports::zero();
+                mean.add(sums, 1.0 / f64::from(count));
+                mean
+            })
+            .collect();
+        let convergence_w_m2 = self
+            .convergence
+            .into_iter()
+            .zip(counts)
+            .map(|(sums, &count)| {
+                let n = f64::from(count);
+                sums.into_iter().map(|sum| sum / n).collect()
+            })
+            .collect();
+        OceanRecord {
+            convergence_w_m2,
+            months,
+            annual,
+        }
+    }
+}
+
+/// The return temperatures, south and north, K, that the next orbit's Ekman cells read: each
+/// hemisphere's least over the months of its return band's sea temperature ([`OceanGrid::return_k`]),
+/// from each month's sums `months` of the points' sea-level temperatures over its `counts` steps,
+/// each point's water surface under the ground `ground`, with `water` and `band_sea` the scratch
+/// of one month's points and bands.
+#[must_use]
+fn coldest_return_k(
+    grid: &ModelGrid,
+    ocean: &OceanGrid,
+    ground: GridGround<ReliefAt<'_>>,
+    months: &[Vec<f64>],
+    counts: &[u32; 12],
+    water: &mut [f64],
+    band_sea: &mut [f64],
+) -> [f64; 2] {
+    let mut coldest = [f64::INFINITY; 2];
+    for (sums, &count) in months.iter().zip(counts) {
+        if count == 0 {
+            continue;
+        }
+        let n = f64::from(count);
+        for (p, (&sum, out)) in sums.iter().zip(water.iter_mut()).enumerate() {
+            let t = sum / n;
+            *out = match ground.raised(p) {
+                None => t,
+                Some((relief, (heights, _))) => relief.water_k(t, heights),
+            };
+        }
+        ocean.band_sea_k(grid, water, band_sea);
+        for (least, value) in coldest.iter_mut().zip(ocean.return_k(band_sea)) {
+            if value < *least {
+                *least = value;
+            }
+        }
+    }
+    coldest
 }
 
 /// A step's longitude solve on `grid` of more than one column, under the transport coefficient
@@ -2547,9 +2971,36 @@ pub(super) fn contrast(t: &[f64]) -> f64 {
     at(0.0) - f64::midpoint(at(1.0), at(-1.0))
 }
 
+/// The currents of the body of `inputs` under the model `model` that `ocean` asks for, turning
+/// as `turning` says: the Ekman cells under its Hadley circulation on a rotating world, none on a
+/// locked one (decision-r09-t13i §2.3.1).
+#[must_use]
+fn currents_of(
+    inputs: &CoarseInputs,
+    model: &EnergyBalance,
+    ocean: OceanTransport,
+    turning: Turning,
+) -> Option<Currents> {
+    match ocean {
+        OceanTransport::None => None,
+        OceanTransport::Currents { mean_depth_m } => {
+            let circulation = match turning {
+                Turning::Rotating => Some(Circulation::for_inputs(inputs, turning)),
+                Turning::Locked => None,
+            };
+            Some(Currents::of(
+                inputs,
+                model.freezing,
+                mean_depth_m,
+                circulation,
+            ))
+        }
+    }
+}
+
 /// The model's answer for the body of `inputs`, which turns under its sun, over the points of
 /// `grid` (the zonal or the geographic grid) of sea share `sea_share` and the ground `ground`,
-/// under the diurnal-mean sunlight, at a nominal step of `step`
+/// with the sea's transport `ocean`, under the diurnal-mean sunlight, at a nominal step of `step`
 /// ([`NOMINAL_STEP`](super::sun::NOMINAL_STEP) in the pass).
 #[must_use]
 pub(super) fn solve(
@@ -2558,22 +3009,26 @@ pub(super) fn solve(
     sea_share: &[f64],
     step: Seconds,
     ground: Ground<'_>,
+    ocean: OceanTransport,
 ) -> Solution {
     let model = EnergyBalance::for_inputs(inputs);
     let sunlight = Sunlight::of(inputs, grid, step);
+    let currents = currents_of(inputs, &model, ocean, Turning::Rotating);
     model.run(
         grid,
         &sunlight,
         inputs.mean_surface_temperature().value(),
         sea_share,
         ground,
+        currents.as_ref(),
     )
 }
 
 /// The model's answer for the body of `inputs`, locked 1:1 to its seasonal host, over the points
 /// of `grid` (the locked grid) in tidally locked coordinates, of sea share `sea_share` and the
-/// ground `ground` (its zonal relief the tidally locked bands'), under the host's beam
-/// ([`Sunlight::locked`]), at a nominal step of `step`.
+/// ground `ground` (its zonal relief the tidally locked bands'), with the sea's transport `ocean`
+/// (the gyres' diffusion alone, unwalled), under the host's beam ([`Sunlight::locked`]), at a
+/// nominal step of `step`.
 #[must_use]
 pub(super) fn solve_locked(
     inputs: &CoarseInputs,
@@ -2581,15 +3036,18 @@ pub(super) fn solve_locked(
     sea_share: &[f64],
     step: Seconds,
     ground: Ground<'_>,
+    ocean: OceanTransport,
 ) -> Solution {
     let model = EnergyBalance::for_inputs(inputs);
     let sunlight = Sunlight::locked(inputs, grid, Coordinates::TidallyLocked, step);
+    let currents = currents_of(inputs, &model, ocean, Turning::Locked);
     model.run(
         grid,
         &sunlight,
         inputs.mean_surface_temperature().value(),
         sea_share,
         ground,
+        currents.as_ref(),
     )
 }
 
@@ -2629,6 +3087,39 @@ fn emission_and_sea(
             ),
             relief.water_k(t_k, heights),
         ),
+    }
+}
+
+/// The step's latitude solve, column by column from the west, of `work`'s systems on `grid`: each
+/// column's own sub- and super-diagonals where the sea's terms are `coupled` into them, and the
+/// diffusion's shared ones otherwise; into `work.solution`.
+fn solve_latitudes(grid: &ModelGrid, coupled: bool, work: &mut Work) {
+    for column in 0..grid.columns() {
+        for k in 0..LATITUDE_BANDS {
+            let p = grid.point(k, column);
+            work.column_diagonal[k] = work.diagonal[p];
+            work.column_rhs[k] = work.rhs[p];
+            if coupled {
+                work.column_lower[k] = work.point_lower[p];
+                work.column_upper[k] = work.point_upper[p];
+            }
+        }
+        let (lower, upper) = if coupled {
+            (&work.column_lower, &work.column_upper)
+        } else {
+            (&work.lower, &work.upper)
+        };
+        solve_tridiagonal(
+            lower,
+            &work.column_diagonal,
+            upper,
+            &work.column_rhs,
+            &mut work.column_solution,
+            &mut work.column_scratch,
+        );
+        for k in 0..LATITUDE_BANDS {
+            work.solution[grid.point(k, column)] = work.column_solution[k];
+        }
     }
 }
 
@@ -2745,7 +3236,14 @@ mod tests {
         let (mut model, _, grid) = earth();
         let dark = Sunlight::constant(vec![0.0; LATITUDE_BANDS]);
         model.heat_flow_w_m2 = 0.0;
-        let none = model.run(&grid, &dark, 40.0, &[0.0; LATITUDE_BANDS], Ground::SeaLevel);
+        let none = model.run(
+            &grid,
+            &dark,
+            40.0,
+            &[0.0; LATITUDE_BANDS],
+            Ground::SeaLevel,
+            None,
+        );
         assert_eq!(none.optical_depth, OpticalDepth::Unforced);
         assert!(
             none.climate
@@ -2754,7 +3252,14 @@ mod tests {
                 .all(|t| (t - 40.0).abs() < 1e-12)
         );
         model.heat_flow_w_m2 = 0.0916;
-        let warm = model.run(&grid, &dark, 60.0, &[0.0; LATITUDE_BANDS], Ground::SeaLevel);
+        let warm = model.run(
+            &grid,
+            &dark,
+            60.0,
+            &[0.0; LATITUDE_BANDS],
+            Ground::SeaLevel,
+            None,
+        );
         assert_eq!(warm.optical_depth, OpticalDepth::Solved);
         assert!(
             warm.climate
@@ -2805,6 +3310,7 @@ mod tests {
             },
             None,
             GridGround::SeaLevel,
+            None,
             &mut state,
             &mut work,
         );
