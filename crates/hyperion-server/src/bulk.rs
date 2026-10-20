@@ -588,10 +588,29 @@ mod tests {
         /// `SO_RCVBUF` reading through a 5 MB/s token bucket. Measured by hand, since a token
         /// bucket is real time; the figures go in the plan's notes, provisional on a shared
         /// machine.
+        ///
+        /// Off Linux and Android it runs only the [`Tap::Kernel`] leg, since
+        /// [`tap_socket`](crate::tap_socket) sets no mark there, and its report says so (R03.T17).
+        /// On macOS the reader's fixed 64 KiB receive buffer keeps XNU's send buffer at its
+        /// 128 KiB start (`tcp_sendspace`): the buffer grows only while, among its conditions, the
+        /// peer's window × 5/4 is at least the buffer (`tcp_output()`,
+        /// apple-oss-distributions/xnu, `main`, read 2026-10-05), and 64 KiB × 5/4 is 80 KiB, less
+        /// than 128 KiB.
         #[tokio::test]
         #[ignore = "measurement on an emulated slow link, run by hand: cargo test -p hyperion-server --lib bulk::tests::streaming::heartbeat_latency -- --ignored --nocapture"]
         async fn heartbeat_latency_behind_a_transfer_on_a_slow_link() {
-            for tap in [Tap::LowWaterMark, Tap::Kernel] {
+            let marked = cfg!(any(target_os = "linux", target_os = "android"));
+            let taps: &[Tap] = if marked {
+                &[Tap::LowWaterMark, Tap::Kernel]
+            } else {
+                &[Tap::Kernel]
+            };
+            let note = if marked {
+                ""
+            } else {
+                " (no low-water mark on this platform: tap_socket sets it on Linux and Android only)"
+            };
+            for &tap in taps {
                 let latencies = heartbeat_latencies(tap).await;
                 let mut sorted = latencies.clone();
                 sorted.sort_unstable();
@@ -604,7 +623,7 @@ mod tests {
                 )]
                 {
                     eprintln!(
-                        "{tap:?}: {} heartbeats during the transfer, median {median:?}, worst {worst:?}",
+                        "{tap:?}: {} heartbeats during the transfer, median {median:?}, worst {worst:?}{note}",
                         latencies.len()
                     );
                 }
