@@ -651,6 +651,7 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
             organic_cover: 0.1,
             resurfacing_m_per_yr: 0.01,
             volcanic_deposits: [{ substance: "SO2", area_fraction: 0.27 }],
+            weathering_deposits: [],
           },
         }),
       ).surface,
@@ -692,6 +693,7 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
         organicCover: 0.1,
         resurfacingMPerYr: 0.01,
         volcanicDeposits: [{ substance: "SO2", areaFraction: 0.27 }],
+        weatheringDeposits: [],
       },
     });
   });
@@ -983,6 +985,17 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
       "whose deposit's share is negative, which only the deposit's own check catches",
       { volcanic_deposits: [{ substance: "SO2", area_fraction: -0.2 }] },
     ],
+    [
+      "whose weathering deposit's share is negative",
+      { weathering_deposits: [{ substance: "ferric", area_fraction: -0.2 }] },
+    ],
+    [
+      "whose volcanic and weathering deposits together cover more than the surface",
+      {
+        volcanic_deposits: [{ substance: "SO2", area_fraction: 0.8 }],
+        weathering_deposits: [{ substance: "ferric", area_fraction: 0.3 }],
+      },
+    ],
   ])("refuses surface modifiers %s", (_, change) => {
     const modifiers: SurfaceModifiersDto = {
       maturity: 0.8,
@@ -990,6 +1003,7 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
       organic_cover: 0,
       resurfacing_m_per_yr: 0,
       volcanic_deposits: [],
+      weathering_deposits: [],
       ...change,
     };
     expect(surfaceFault({ modifiers })).toBe("surface modifiers unusable");
@@ -1005,6 +1019,7 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
         { substance: "SO2", area_fraction: 0.4 },
         { substance: "S8", area_fraction: 0.6 + 5e-10 },
       ],
+      weathering_deposits: [],
     };
     const surface = okSection(recordOf(earthWithSurface({ ...earthSurface(), modifiers })).surface);
 
@@ -1019,6 +1034,31 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
           { substance: "SO2", areaFraction: 0.4 },
           { substance: "S8", areaFraction: 0.6 + 5e-10 },
         ],
+        weatheringDeposits: [],
+      },
+    });
+  });
+
+  it("reads an oxidised surface's ferric deposit (plan 14's P14.T51.j)", () => {
+    const modifiers: SurfaceModifiersDto = {
+      maturity: 0,
+      weathering_rate: 2.2e-248,
+      organic_cover: 0,
+      resurfacing_m_per_yr: 0,
+      volcanic_deposits: [],
+      weathering_deposits: [{ substance: "ferric", area_fraction: 0.3069 }],
+    };
+    const surface = okSection(recordOf(earthWithSurface({ ...earthSurface(), modifiers })).surface);
+
+    expect(surface.modifiers).toEqual({
+      kind: "value",
+      value: {
+        maturity: 0,
+        weatheringRate: 2.2e-248,
+        organicCover: 0,
+        resurfacingMPerYr: 0,
+        volcanicDeposits: [],
+        weatheringDeposits: [{ substance: "ferric", areaFraction: 0.3069 }],
       },
     });
   });

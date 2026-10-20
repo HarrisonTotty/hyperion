@@ -4340,3 +4340,196 @@ fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
         "{bodies} {moons} {icy}"
     );
 }
+
+/// P14.T51.i, end to end: under 24's record rules (the batch's partition and cold traps) the
+/// sample's airless, uncollisional planets and members carry the regolith's albedo from their
+/// derivation, and their records' ices move from the held rules' where the cold traps' branch and
+/// traps apply; under the held rules their derivations give the albedo too (the batch's passes)
+/// but the record reads none of it.
+#[test]
+fn under_24_s_record_rules_the_records_read_the_derivations_regolith() {
+    use crate::planetary::derive::atmosphere::SnapshotRules;
+    use crate::planetary::hooks::cold_traps::{ColdTrapRules, is_collisional};
+
+    let t = UniverseTime::EPOCH;
+    let (mut airless, mut moved) = (0_u32, 0_u32);
+    for (ctx, system) in whole().iter().take(12) {
+        if ctx.age_at_epoch().value() <= 0.0 {
+            continue;
+        }
+        let under = |cold_traps| {
+            system
+                .clone()
+                .with_snapshot_rules(SnapshotRules::Batch)
+                .with_record_rules(RecordRules {
+                    partition: SnapshotRules::Batch,
+                    cold_traps,
+                })
+        };
+        let (held, batch) = (under(ColdTrapRules::Held), under(ColdTrapRules::Batch));
+        let (held_epoch, batch_epoch) = (Epoch::new(&held, ctx, t), Epoch::new(&batch, ctx, t));
+        for body in batch.bodies() {
+            if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+                continue;
+            }
+            let host = fate_host(ctx, batch.zone_of(body));
+            let fate = batch.fate_of(body, &host);
+            let label = label::label(&batch, body.index).unwrap();
+            let (record, now) = batch.primary_record(&batch_epoch, body, label, &fate);
+            let (Some(derived), Section::Ok(bulk), Section::Ok(surface)) =
+                (now.derived, record.bulk(), record.surface())
+            else {
+                continue;
+            };
+            let air = derived.atmosphere();
+            if air.state() != SurfaceState::Airless || is_collisional(air, bulk.surface_gravity()) {
+                continue;
+            }
+            let regolith = derived
+                .regolith_albedo()
+                .expect("the batch's passes give it");
+            assert!((0.0..1.0).contains(&regolith), "{regolith}");
+            airless += 1;
+            let label = label::label(&held, body.index).unwrap();
+            let (other, _) = held.primary_record(&held_epoch, body, label, &fate);
+            let Section::Ok(other) = other.surface() else {
+                continue;
+            };
+            let ices = |s: &Surface| format!("{:?}", s.figures().surface_ices());
+            moved += u32::from(ices(surface) != ices(other));
+        }
+    }
+    eprintln!(
+        "{airless} airless, uncollisional bodies; {moved} with their ices moved by the traps"
+    );
+    assert!(airless > 20 && moved > 5, "{airless} {moved}");
+}
+
+/// P14.T51.i's budget over the sample (decision-p14-t51-batch §1.5): the cold traps' cost per system
+/// on 24's record path, measured, not counted. Each of the first 60 systems generated whole is
+/// derived under the batch and its every planet's, member's and moon's record built under the
+/// record path's partition with the cold traps' batch and with their hold, the best of three
+/// interleaved rounds of each; the difference is the cold traps'. The budget is a mean of at most
+/// 7 ms a system and at most 50 ms in any. A timing alone, run by name in release and recorded in
+/// plan 14's Risks; it asserts nothing.
+#[test]
+#[ignore = "a timing, run by name in release"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one timed walk of the sample's records under two rules, tallied and printed"
+)]
+fn time_the_cold_traps_over_the_sample() {
+    use std::time::Instant;
+
+    use crate::planetary::derive::atmosphere::SnapshotRules;
+    use crate::planetary::hooks::cold_traps::{ColdTrapRules, is_collisional};
+
+    let t = UniverseTime::EPOCH;
+    let mut costs: Vec<(f64, u32, String)> = Vec::new();
+    let mut listed = [0_usize; 2];
+    for (ctx, system) in whole().iter().take(60) {
+        if ctx.age_at_epoch().value() <= 0.0 {
+            continue;
+        }
+        let under = |cold_traps| {
+            system
+                .clone()
+                .with_snapshot_rules(SnapshotRules::Batch)
+                .with_record_rules(RecordRules {
+                    partition: SnapshotRules::Batch,
+                    cold_traps,
+                })
+        };
+        let (held, batch) = (under(ColdTrapRules::Held), under(ColdTrapRules::Batch));
+        // Every record of the system, how many of its bodies are airless and not collisional, and
+        // how many ices its records' figures list, the cold traps' among them.
+        let records = |system: &PlanetarySystem| {
+            let epoch = Epoch::new(system, ctx, t);
+            let mut airless = 0_u32;
+            let mut ices = 0_usize;
+            let mut count = |record: &BodyRecord| {
+                if let Section::Ok(surface) = record.surface() {
+                    ices += surface
+                        .figures()
+                        .surface_ices()
+                        .iter()
+                        .filter(|&&(_, area)| area > 0.0)
+                        .count();
+                }
+            };
+            for body in system.bodies() {
+                if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+                    continue;
+                }
+                let host = fate_host(ctx, system.zone_of(body));
+                let fate = system.fate_of(body, &host);
+                let label = label::label(system, body.index).unwrap();
+                let (record, now) = system.primary_record(&epoch, body, label, &fate);
+                if let (Some(derived), Section::Ok(bulk)) = (now.derived, record.bulk()) {
+                    let air = derived.atmosphere();
+                    airless += u32::from(
+                        air.state() == SurfaceState::Airless
+                            && !is_collisional(air, bulk.surface_gravity()),
+                    );
+                }
+                for child in system.children(body.index) {
+                    if !matches!(child.part, Part::Moon(_)) {
+                        continue;
+                    }
+                    let label = label::label(system, child.index).unwrap();
+                    let moon = system.satellite_record(&epoch, child, label, &now, &fate);
+                    count(&moon);
+                }
+                count(&record);
+            }
+            (airless, ices)
+        };
+        let (mut best_held, mut best_batch) = (f64::INFINITY, f64::INFINITY);
+        let (mut airless, mut ices) = (0, [0; 2]);
+        for _ in 0..3 {
+            for (k, system) in [&held, &batch].into_iter().enumerate() {
+                let start = Instant::now();
+                (airless, ices[k]) = records(system);
+                let ms = start.elapsed().as_secs_f64() * 1e3;
+                if k == 0 && ms < best_held {
+                    best_held = ms;
+                }
+                if k == 1 && ms < best_batch {
+                    best_batch = ms;
+                }
+            }
+        }
+        costs.push((
+            best_batch - best_held,
+            airless,
+            format!(
+                "{:?}: held {best_held:.2} ms, batch {best_batch:.2} ms, ices listed {} held and {} \
+                 with the cold traps",
+                ctx.id(),
+                ices[0],
+                ices[1]
+            ),
+        ));
+        listed[0] += ices[0];
+        listed[1] += ices[1];
+    }
+    let n = costs.len();
+    let total: f64 = costs.iter().map(|c| c.0).sum();
+    costs.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let median = costs[n / 2].0;
+    let planets: u32 = costs.iter().map(|c| c.1).sum();
+    eprintln!(
+        "the cold traps over {n} systems ({planets} airless, uncollisional planets and members): \
+         mean {:.3} ms a system, median {median:.3} ms, least {:.3} ms, most {:.3} ms",
+        total / f64::from(u32::try_from(n).unwrap()),
+        costs[0].0,
+        costs[n - 1].0,
+    );
+    eprintln!(
+        "ices listed on the records: {} held, {} with the cold traps",
+        listed[0], listed[1]
+    );
+    for (cost, airless, what) in costs.iter().rev().take(5) {
+        eprintln!("  {cost:.3} ms, {airless} airless: {what}");
+    }
+}

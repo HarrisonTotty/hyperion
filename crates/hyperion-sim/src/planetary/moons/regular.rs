@@ -1205,6 +1205,13 @@ impl DerivedMoon {
         self.body.albedo()
     }
 
+    /// The Bond albedo of its bare regolith, airless, under the batch (P14.T51.i;
+    /// [`DerivedBody::regolith_albedo`]).
+    #[must_use]
+    pub(crate) const fn regolith_albedo(&self) -> Option<f64> {
+        self.body.regolith_albedo()
+    }
+
     /// How many passes its derivation took (P14.T51.b; [`DerivedBody::atmosphere_passes`]).
     #[cfg(test)]
     #[must_use]

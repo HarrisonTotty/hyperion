@@ -2497,6 +2497,35 @@ fn a_body_that_settles_keeps_t51b_s_bits() {
     }
 }
 
+/// P14.T51.i: the bare regolith's Bond albedo the cold traps read comes from the batch's passes
+/// alone: under version 22's rules every body of the table has none, and under the batch the
+/// table's Moon, Mercury and Ceres take the Moon's 0.11 to the bit, as their area mix does (their
+/// cold-trap figures move by nothing), and Ganymede, icy, its frost's.
+#[test]
+fn the_regolith_albedo_is_the_batch_s_bare_ground() {
+    let (held, batch) = (
+        table_under(SnapshotRules::Held),
+        table_under(SnapshotRules::Batch),
+    );
+    for (name, body) in &held {
+        assert_eq!(body.regolith_albedo(), None, "{name}");
+    }
+    let moon = SurfaceState::Airless.albedo(SurfaceMaterial::Rock).value();
+    for name in ["Moon", "Mercury", "Ceres"] {
+        let body = found(&batch, name);
+        assert_same_bits(body.regolith_albedo().unwrap(), moon);
+        assert_same_bits(body.albedo().value(), moon);
+    }
+    let frost = Regolith::of_material(SurfaceMaterial::Ice)
+        .bond(SurfaceState::Airless, &sun_bands())
+        .bond;
+    let ganymede = found(&batch, "Ganymede").regolith_albedo().unwrap();
+    assert!(
+        (ganymede - frost).abs() < 1e-3,
+        "{ganymede} against {frost}"
+    );
+}
+
 /// Under version 22's rules the passes are T13.c's fixed three, and `derive_body_under`'s held arm
 /// is `derive_body`, bit for bit, for every body of the table.
 #[test]

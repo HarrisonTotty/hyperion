@@ -49,7 +49,8 @@
 //!
 //! with e the star disk's flux-weighted elevation at min(90°, e₀ + δ), e₀ the colatitude
 //! (`hyperion_surface::cold_trap::flux_weighted_elevation`, the one the cold traps' shadows take),
-//! `S_p` the flux at periapsis, A the Bond albedo, q the heat flow and ε [`REGOLITH_EMISSIVITY`].
+//! `S_p` the flux at periapsis, A the bare regolith's Bond albedo (P14.T51.i, below), q the heat
+//! flow and ε [`REGOLITH_EMISSIVITY`].
 //! It is taken at the annual-mean profile's area points, and its cold area read by the same rule,
 //! linear between them. It falls toward the pole, so its cold area is a polar cap, nothing or the
 //! whole surface. On the Moon it is 158 K at the pole and 227 K at 85°, and on Mercury 172 K at
@@ -83,7 +84,8 @@
 //!   obliquity to its seasonal orbit, labelled, since cold traps record the obliquity's history;
 //! - the flux at periapsis, the orbit-mean flux × √(1 − e²) ÷ (1 − e)², and the star's angular
 //!   radius there;
-//! - the Bond albedo, [`REGOLITH_EMISSIVITY`] and the heat flow (P14.T24.b);
+//! - the bare regolith's Bond albedo (P14.T51.i), [`REGOLITH_EMISSIVITY`] and the heat flow
+//!   (P14.T24.b);
 //! - the terrain, stand-ins labelled as such: a crater fraction of [`SATURATED_CRATER_FRACTION`] ×
 //!   min(1, N(>100 m) ÷ its saturation), from the body's crater contract and Trask's saturation
 //!   ([`CRATER_REFERENCE_DIAMETER`]); Hayne et al.'s distribution B of d/D, the one that passes
@@ -99,6 +101,30 @@
 //! latitude integral of its fractions, and R09.T13.f's field reads its cells' fractions from the
 //! same calls, so that the record's area and the field's cells are one model
 //! (decision-r09-t13f-cold-traps §3).
+//!
+//! # The albedo, and the field (P14.T51.i)
+//!
+//! The flat ground and the shadows read the bare regolith's Bond albedo about the body's hosts'
+//! bands, airless (`DerivedBody::regolith_albedo`, T51.b's `Regolith` row: the lid's from
+//! P14.T54.a, weathered from P14.T54.b), not the body's area-mix Bond albedo (decision-p14-t51-batch
+//! §6). The shadows lie in the regolith's craters, whose walls are the regolith (Ingersoll, Svitek
+//! and Murray 1992; Hayne, Aharonson and Schörghofer 2021, Nat. Astron. 5, 169, Methods' energy
+//! balance on a rough surface, take 0.12 for the Moon, after Hayne et al. 2017, JGR Planets 122,
+//! 2371), and the zonal maximum asks whether
+//! bare ground stays below a threshold, a criterion with no history, where the area mix's global
+//! mean is neither the bare ground's nor the frost's. On the table's Moon, Mercury and Ceres the two
+//! are the Moon's 0.11, so no figure moves.
+//!
+//! So the zonal annual maxima and every condensable's `f_ct` read only the sky, the regolith's
+//! albedo, the heat flow and the terrain, none of which T13.c's passes change. They are one
+//! [`ColdTrapField`], built once a body ([`ColdTrapField::new`]); [`publish_over`] reads it, the
+//! record's [`publish`] builds it once, and from P14.T54.b every pass reads the same field, so
+//! the passes and the record agree by construction at one evaluation a body. Its `f_ct` are one
+//! latitude integral for every species at once ([`over_latitude_each`]), each latitude's fractions
+//! one call of [`ColdTrapGround::fractions_at`], whose closed form shares one depth integral among
+//! the thresholds (`hyperion_surface::cold_trap::fractions`, R09.T7.k). The zonal entries and the
+//! reservoirs stay each publish's, per partition, and whether a body qualifies is tested at every
+//! publish ([`qualifies`]).
 //!
 //! # The reservoir
 //!
@@ -152,7 +178,8 @@
 //!
 //! One new tag, [`tags::BODY_COLD_TRAPS`], keyed by the body; word 0 read, words 1–7 reserved
 //! ([`EXPOSED_FRACTION_WORDS`]). No existing stream gains a draw. The integral sums its bands and
-//! nodes in their fixed order, the species are taken in registry order, and nothing is cached.
+//! nodes in their fixed order, the species are taken in registry order, and nothing is cached: a
+//! field is a value its caller builds and passes, never kept behind a call.
 
 #[cfg(test)]
 mod tests;
@@ -172,7 +199,7 @@ use crate::planetary::chem::partition::{
     SolidEdges, TrappedIce, exosphere_threshold,
 };
 use crate::planetary::derive::atmosphere::{
-    ATOMIC_MASS_CONSTANT_KG, Atmosphere, Gas, SurfaceState,
+    ATOMIC_MASS_CONSTANT_KG, Atmosphere, Gas, PartialPressures, SurfaceState,
 };
 use crate::planetary::hooks::figures::Crust;
 use crate::planetary::hooks::surface::{ColdProfile, REGOLITH_EMISSIVITY, area_below};
@@ -408,13 +435,50 @@ pub(crate) fn lunar_sky() -> ColdTrapSky {
     }
 }
 
+/// What the record's cold traps read beyond a body's figures and conditions
+/// (`GlobalFigures::condensates_under`; P14.T51.f, P14.T51.i): their rules, their sky and draw, and
+/// the bare regolith's Bond albedo its derivation gives.
+///
+/// Plain data with crate-visible fields.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RecordColdTraps<'a> {
+    /// Which rules they follow, their hold at 24.
+    pub(crate) rules: ColdTrapRules,
+    /// The body's sky and its exposed fraction.
+    pub(crate) sky: &'a ColdTrapSky,
+    /// The bare regolith's Bond albedo about the body's hosts' bands, airless
+    /// (`DerivedBody::regolith_albedo`), 0 to 1; `None` from a derivation under version 22's rules.
+    pub(crate) regolith_albedo: Option<f64>,
+}
+
+#[cfg(test)]
+impl<'a> RecordColdTraps<'a> {
+    /// The record's cold traps under `rules` and the sky `sky`, at the Bond albedo of the
+    /// atmosphere `air` as the regolith's: what the tests of bodies derived under version 22's
+    /// rules take, whose airless rock is the Moon's 0.11, the regolith's under the batch, so that
+    /// their figures are P14.T51.f's.
+    #[must_use]
+    pub(crate) fn at_the_albedo_of(
+        rules: ColdTrapRules,
+        sky: &'a ColdTrapSky,
+        air: &Atmosphere,
+    ) -> Self {
+        Self {
+            rules,
+            sky,
+            regolith_albedo: Some(air.albedo().value()),
+        }
+    }
+}
+
 /// What a body's cold traps read beyond its partition and its cover, on the record path
 /// (`GlobalFigures::condensates_under`).
 ///
 /// Plain data with crate-visible fields.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ColdTrapBody<'a> {
-    /// Its atmosphere: its state, its pressure and gases, and its Bond albedo.
+    /// Its atmosphere: its state, its pressure and gases, which decide whether it qualifies. Its
+    /// area-mix Bond albedo is not read (P14.T51.i).
     pub(crate) atmosphere: &'a Atmosphere,
     /// Its conditions' annual-mean profile, whose area points the zonal annual maximum takes, and
     /// which tells a locked body.
@@ -429,22 +493,69 @@ pub(crate) struct ColdTrapBody<'a> {
     pub(crate) craters: &'a CraterParams,
     /// Its sky and its exposed fraction.
     pub(crate) sky: &'a ColdTrapSky,
+    /// Its bare regolith's Bond albedo about its hosts' bands, airless (P14.T51.i;
+    /// `DerivedBody::regolith_albedo`), 0 to 1, which its flat ground and its shadows read; `None`
+    /// from a derivation under version 22's rules, which gives none, and so takes no cold traps.
+    pub(crate) regolith_albedo: Option<f64>,
 }
 
 /// The published condensates of the partition `partition` over the cover `cover` with the cold
 /// traps (P14.T51.f, under [`ColdTrapRules::Batch`]): P14.T51.a's publish on a body that does not
-/// qualify ([the module](self)'s "Which bodies"), and on one that does the zonal annual maximum's
-/// branch ([`SolidEdges::Exosphere`]) with each condensable's cold-trapped ice merged in.
+/// qualify ([`qualifies`]), and on one that does the zonal annual maximum's branch
+/// ([`SolidEdges::Exosphere`]) with each condensable's cold-trapped ice merged in, over the field
+/// it builds once ([`ColdTrapField::of`], P14.T51.i). A body whose derivation gives no regolith
+/// albedo keeps P14.T51.a's publish. From P14.T54.b the record takes the passes' field instead
+/// ([`publish_over`]), so that a body builds one field, not one for its passes and one here.
 #[must_use]
 pub(crate) fn publish(
     partition: &Partition,
     cover: &Cover<'_>,
     body: &ColdTrapBody<'_>,
 ) -> Condensates {
-    let Some(maxima) = annual_maxima(body) else {
+    if !qualifies(body) {
+        return partition.publish(cover);
+    }
+    let Some(field) = ColdTrapField::of(body, partition) else {
         return partition.publish(cover);
     };
-    let warm_below = |t: Kelvin| area_below(&maxima, t);
+    published_over(partition, cover, body, &field)
+}
+
+/// [`publish`] over the field `field`, built once a body (P14.T51.i; decision-p14-t51-batch §6): the
+/// one function T13.c's passes call from P14.T54.b, every pass over the same field, so that the
+/// record's condensates and the last pass's agree to the bit. Whether the body qualifies is tested
+/// here, at every call ([`qualifies`]); the field holds what no pass changes. It must hold every
+/// condensable of `partition` that has a threshold ([`ColdTrapField::of`]'s list, or a superset).
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "P14.T54.b's passes call it; the record path builds its own"
+    )
+)]
+#[must_use]
+pub(crate) fn publish_over(
+    partition: &Partition,
+    cover: &Cover<'_>,
+    body: &ColdTrapBody<'_>,
+    field: &ColdTrapField,
+) -> Condensates {
+    if !qualifies(body) {
+        return partition.publish(cover);
+    }
+    published_over(partition, cover, body, field)
+}
+
+/// The qualifying body `body`'s condensates over the field `field`: the zonal annual maximum's
+/// branch, with its traps merged in.
+#[must_use]
+fn published_over(
+    partition: &Partition,
+    cover: &Cover<'_>,
+    body: &ColdTrapBody<'_>,
+    field: &ColdTrapField,
+) -> Condensates {
+    let warm_below = |t: Kelvin| area_below(&field.maxima, t);
     let zonal = partition.publish_with(
         &Cover {
             cold_area: &warm_below,
@@ -455,24 +566,131 @@ pub(crate) fn publish(
             water_keeps_cover: body.crust == Crust::IceRich,
         },
     );
-    let traps = trapped_ices(partition, &zonal, body);
+    let traps = trapped_ices(partition, &zonal, body, field);
     zonal.with_cold_traps(&traps)
 }
 
-/// The zonal annual maximum of the body `body` at its profile's area points, `(x, T)` with x the
-/// sine of the latitude from 0 to 1, or `None` where it takes no cold traps: a body that is not
-/// airless, whose air is collisional ([`is_collisional`]), or that is locked to its star.
+/// Whether the body `body` takes the cold traps ([the module](self)'s "Which bodies"): it rotates
+/// under its star (a zonal profile), it is airless and its air is not collisional
+/// ([`is_collisional`]). It reads the pass's atmosphere, so it is tested at every publish; the
+/// field does not read it.
 #[must_use]
-fn annual_maxima(body: &ColdTrapBody<'_>) -> Option<Vec<(f64, f64)>> {
-    let ColdProfile::Zonal(points) = body.profile else {
-        return None;
-    };
-    if body.atmosphere.state() != SurfaceState::Airless
-        || is_collisional(body.atmosphere, body.gravity)
-    {
-        return None;
+pub(crate) fn qualifies(body: &ColdTrapBody<'_>) -> bool {
+    matches!(body.profile, ColdProfile::Zonal(_))
+        && body.atmosphere.state() == SurfaceState::Airless
+        && !is_collisional(body.atmosphere, body.gravity)
+}
+
+/// A body's cold-trap field (P14.T51.i; decision-p14-t51-batch §6): its zonal annual maxima at its
+/// profile's area points and each condensable's cold-trap fraction `f_ct`, which read only its
+/// sky, its bare regolith's Bond albedo, its heat flow and its terrain ([the module](self)'s "The
+/// albedo, and the field"). T13.c's passes change none of these, so it is built once a body and
+/// read by every publish ([`publish_over`]).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ColdTrapField {
+    /// The zonal annual maximum at each area point, `(x, T_max)` with x the sine of the latitude
+    /// from 0 to 1, K.
+    maxima: Vec<(f64, f64)>,
+    /// Each condensable with a threshold, in the order given, with its `f_ct`.
+    traps: Vec<FieldTrap>,
+}
+
+/// One condensable's place in a [`ColdTrapField`]: its threshold and its cold-trap fraction.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FieldTrap {
+    substance: SubstanceId,
+    threshold: Kelvin,
+    fraction: f64,
+}
+
+impl ColdTrapField {
+    /// The field of the flat ground `sunlit` over the terrain `terrain` at the area points
+    /// `points` (their x read alone), for the condensables `species`, each at its
+    /// [`trap_threshold`] (one with none is left out).
+    ///
+    /// Each `f_ct` is the latitude integral of the ground's [`ColdTrapGround::fractions_at`],
+    /// one call a latitude node for every species at once, each species' sum in
+    /// `over_latitude`'s order ([`over_latitude_each`]), so that it equals the one-species
+    /// integral to the bit. Where the closed form refuses the ground (a star that gives no light or
+    /// fills the sky, or an albedo of 1), every `f_ct` is 0 and the maxima stand.
+    ///
+    /// # Panics
+    ///
+    /// If an area point's x is outside [−1, 1].
+    #[must_use]
+    pub(crate) fn new(
+        sunlit: &Sunlit,
+        terrain: Terrain,
+        points: &[(f64, f64)],
+        species: &[SubstanceId],
+    ) -> Self {
+        let listed: Vec<(SubstanceId, Kelvin)> = species
+            .iter()
+            .filter_map(|&substance| trap_threshold(substance).map(|t| (substance, t)))
+            .collect();
+        let thresholds: Vec<Kelvin> = listed.iter().map(|&(_, t)| t).collect();
+        let mut fractions = vec![0.0; listed.len()];
+        if let Some(ground) = ColdTrapGround::under(*sunlit, terrain)
+            && !thresholds.is_empty()
+        {
+            over_latitude_each(&mut fractions, |latitude, values| {
+                ground.fractions_at(latitude, &thresholds, values);
+            });
+        }
+        Self {
+            maxima: sunlit.maxima(points),
+            traps: listed
+                .into_iter()
+                .zip(fractions)
+                .map(|((substance, threshold), fraction)| FieldTrap {
+                    substance,
+                    threshold,
+                    fraction,
+                })
+                .collect(),
+        }
     }
-    Some(Sunlit::of(body).maxima(points))
+
+    /// The record path's field of the body `body` of partition `partition`: its ground under its
+    /// sky at its regolith's albedo, over [`terrain_of`] its craters, at its profile's area points,
+    /// for its [`condensables`], water left out on an ice-rich crust, which keeps P14.T24.b's ice.
+    /// `None` where its derivation gives no regolith albedo, or its profile is not zonal.
+    #[must_use]
+    pub(crate) fn of(body: &ColdTrapBody<'_>, partition: &Partition) -> Option<Self> {
+        let albedo = body.regolith_albedo?;
+        let ColdProfile::Zonal(points) = body.profile else {
+            return None;
+        };
+        let sunlit = Sunlit::new(*body.sky, albedo, body.heat_flow);
+        let water = Gas::Water.substance();
+        let species: Vec<SubstanceId> = condensables(partition)
+            .into_iter()
+            .filter(|&substance| !(substance == water && body.crust == Crust::IceRich))
+            .collect();
+        Some(Self::new(
+            &sunlit,
+            terrain_of(body.craters),
+            points,
+            &species,
+        ))
+    }
+
+    /// The zonal annual maximum at each area point, `(x, T_max)`, K.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn maxima(&self) -> &[(f64, f64)] {
+        &self.maxima
+    }
+
+    /// The threshold and the cold-trap fraction `f_ct` of `substance`, a share of the whole
+    /// surface, 0 to 1; `None` where the field holds no such condensable.
+    #[must_use]
+    pub(crate) fn trap(&self, substance: SubstanceId) -> Option<(Kelvin, f64)> {
+        self.traps
+            .iter()
+            .find(|trap| trap.substance == substance)
+            .map(|trap| (trap.threshold, trap.fraction))
+    }
 }
 
 /// Whether the air of `atmosphere` is collisional at the surface of a body of surface gravity
@@ -483,7 +701,18 @@ pub(crate) fn is_collisional(atmosphere: &Atmosphere, gravity: MetresPerSecondSq
     let Some(pressure) = atmosphere.surface_pressure() else {
         return true;
     };
-    let partials = atmosphere.partial_pressures();
+    is_collisional_air(pressure, atmosphere.partial_pressures(), gravity)
+}
+
+/// Whether an air of surface pressure `pressure` and gases `partials` is collisional at the
+/// surface of a body of surface gravity `gravity` ([`is_collisional`]'s test, its arithmetic):
+/// P14.T51.f's, which P14.T51.j's oxidised surface reads too.
+#[must_use]
+pub(crate) fn is_collisional_air(
+    pressure: Pascals,
+    partials: &PartialPressures,
+    gravity: MetresPerSecondSquared,
+) -> bool {
     let moles = Gas::ALL.iter().fold(0.0, |sum, &gas| {
         sum + partials.of(gas).value() / gas.molar_mass_g_per_mol()
     });
@@ -524,12 +753,6 @@ pub(crate) struct Sunlit {
 }
 
 impl Sunlit {
-    /// The ground of the body `body`: its sky, its atmosphere's Bond albedo and its heat flow.
-    #[must_use]
-    fn of(body: &ColdTrapBody<'_>) -> Self {
-        Self::new(*body.sky, body.atmosphere.albedo().value(), body.heat_flow)
-    }
-
     /// The ground under the sky `sky`, of Bond albedo `albedo` and heat flow `heat_flow`: the sky's
     /// greatest declination, flux at periapsis and angular radius.
     #[must_use]
@@ -748,14 +971,6 @@ impl ColdTrapGround {
         Self::under(sunlit, terrain_of(parts.craters))
     }
 
-    /// The ground of the body `body` on the record path: its sky as [`ColdTrapSky::at_periapsis`]
-    /// took it, its atmosphere's Bond albedo, its heat flow and [`terrain_of`] its crater contract,
-    /// or `None` where `hyperion_surface::cold_trap::Body` refuses them.
-    #[must_use]
-    fn of(body: &ColdTrapBody<'_>) -> Option<Self> {
-        Self::under(Sunlit::of(body), terrain_of(body.craters))
-    }
-
     /// The flat ground `sunlit` over the terrain `terrain`, or `None` where its shadows are
     /// refused ([`Sunlit::shadows`]).
     #[must_use]
@@ -821,12 +1036,23 @@ impl ColdTrapGround {
         let maximum = self
             .sunlit
             .annual_maximum(Radians::new(FRAC_PI_2 - north.value()));
-        for (fraction, &threshold) in fractions.iter_mut().zip(thresholds) {
-            *fraction = if maximum >= threshold {
-                cold_trap::fraction(north, &self.shadows, &self.terrain, threshold)
-            } else {
-                0.0
-            };
+        // The thresholds the zonal maximum reaches take the closed form, in one call that shares
+        // its depth integral among them (P14.T51.i; R09.T7.k): each `fraction`'s, to the bit.
+        let mut open = Vec::with_capacity(thresholds.len());
+        for (k, (fraction, &threshold)) in fractions.iter_mut().zip(thresholds).enumerate() {
+            *fraction = 0.0;
+            if maximum >= threshold {
+                open.push(k);
+            }
+        }
+        if open.is_empty() {
+            return;
+        }
+        let gated: Vec<Kelvin> = open.iter().map(|&k| thresholds[k]).collect();
+        let mut shares = vec![0.0; gated.len()];
+        cold_trap::fractions(north, &self.shadows, &self.terrain, &gated, &mut shares);
+        for (&k, share) in open.iter().zip(shares) {
+            fractions[k] = share;
         }
     }
 
@@ -837,6 +1063,7 @@ impl ColdTrapGround {
     /// # Panics
     ///
     /// If the threshold is not finite and positive.
+    #[cfg(test)]
     #[must_use]
     fn trap_fraction(&self, threshold: Kelvin) -> f64 {
         over_latitude(|latitude| {
@@ -850,6 +1077,9 @@ impl ColdTrapGround {
 /// ∫ f(φ) cos φ dφ from the equator to the pole, φ in radians: the share of a hemisphere's area, and
 /// of the whole surface for a profile symmetric about the equator. Four-point Gauss–Legendre rules
 /// on each band of [`TRAP_BAND_EDGES_DEG`], the bands and their nodes summed in their fixed order.
+/// The field sums several at once by its rule ([`over_latitude_each`]); this one-profile form is
+/// the tests' reference.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn over_latitude(f: impl Fn(Radians) -> f64) -> f64 {
     let mut sum = 0.0;
@@ -863,6 +1093,29 @@ pub(crate) fn over_latitude(f: impl Fn(Radians) -> f64) -> f64 {
         }
     }
     sum
+}
+
+/// The tests' `over_latitude` of several profiles at once (P14.T51.i): `f` writes each profile's
+/// value at a
+/// latitude into its slot of the slice it is given, which is as long as `sums`, and each profile's
+/// sum runs in `over_latitude`'s order with its operations, so that each equals its own
+/// `over_latitude` to the bit. `sums` is overwritten.
+pub(crate) fn over_latitude_each(sums: &mut [f64], mut f: impl FnMut(Radians, &mut [f64])) {
+    let mut values = vec![0.0; sums.len()];
+    sums.fill(0.0);
+    for band in TRAP_BAND_EDGES_DEG.windows(2) {
+        let low = Radians::from(Degrees::new(band[0])).value();
+        let high = Radians::from(Degrees::new(band[1])).value();
+        let (half, middle) = (0.5 * (high - low), f64::midpoint(low, high));
+        for (&x, &w) in GL4_NODES.iter().zip(&GL4_WEIGHTS) {
+            let latitude = middle + half * x;
+            f(Radians::new(latitude), &mut values);
+            let weight = half * w * math::cos(latitude);
+            for (sum, &value) in sums.iter_mut().zip(&values) {
+                *sum += weight * value;
+            }
+        }
+    }
 }
 
 /// The terrain of a body of crater contract `craters` ([the module](self)'s stand-ins): a crater
@@ -924,28 +1177,29 @@ pub(crate) fn trap_threshold(substance: SubstanceId) -> Option<Kelvin> {
 }
 
 /// The cold-trapped ices of a qualifying body `body` of partition `partition`, whose zonal entries
-/// are `zonal`: one for each condensable ([`condensables`]) with a cold-trap fraction at its
-/// [`trap_threshold`], its area `f_ct` × `f_x` and its reservoir [`trap_reservoir`]'s. Water takes
+/// are `zonal`, over its field `field`: one for each condensable ([`condensables`]) whose `f_ct` in
+/// the field is above 0, its area `f_ct` × `f_x` and its reservoir [`trap_reservoir`]'s. Water takes
 /// none on an ice-rich crust.
 #[must_use]
 fn trapped_ices(
     partition: &Partition,
     zonal: &Condensates,
     body: &ColdTrapBody<'_>,
+    field: &ColdTrapField,
 ) -> Vec<TrappedIce> {
-    let Some(ground) = ColdTrapGround::of(body) else {
-        return Vec::new();
-    };
     let water = Gas::Water.substance();
     let mut traps = Vec::new();
     for substance in condensables(partition) {
         if substance == water && body.crust == Crust::IceRich {
             continue;
         }
-        let Some(threshold) = trap_threshold(substance) else {
+        let Some((threshold, trapped)) = field.trap(substance) else {
+            debug_assert!(
+                trap_threshold(substance).is_none(),
+                "the field holds every condensable with a threshold"
+            );
             continue;
         };
-        let trapped = ground.trap_fraction(threshold);
         if trapped.is_nan() || trapped <= 0.0 {
             continue;
         }

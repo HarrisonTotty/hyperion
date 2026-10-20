@@ -29,7 +29,14 @@ organic_cover: number,
 resurfacing_m_per_yr: number, 
 /**
  * The volcanic deposits an Io is resurfaced with, SO₂ frost and sulphur, each a key of the
- * substance registry with its share of the surface in `[0, 1]`, together at most 1; empty for
- * every other body.
+ * substance registry with its share of the surface in `[0, 1]`; empty for every other body.
+ * With the weathering deposits, together at most 1.
  */
-volcanic_deposits: Array<SubstanceAreaDto>, };
+volcanic_deposits: Array<SubstanceAreaDto>, 
+/**
+ * The weathering deposits a surface carries (P14.T51.j): an oxidised `basalt_fe` surface's
+ * `ferric` over the dusty share of its dry, ice-free land, each a key of the substance
+ * registry with its share of the surface in `[0, 1]`, at most one today; empty for every other
+ * body. With the volcanic deposits, together at most 1.
+ */
+weathering_deposits: Array<SubstanceAreaDto>, };

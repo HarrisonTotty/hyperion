@@ -880,6 +880,21 @@ pub fn grey_surface_temperature(equilibrium: Kelvin, tau: f64) -> Kelvin {
 pub struct PartialPressures([Pascals; 9]);
 
 impl PartialPressures {
+    /// Every gas's partial pressure from `pressure`, taken in [`Gas::ALL`]'s order, unvalidated:
+    /// for the crate's tests that state an air by hand, such as P14.T51.j's. A caller's values are
+    /// its own to check, as `SurfaceModifiers::derive` checks its inputs'.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the tests state airs by hand; the generator derives them"
+        )
+    )]
+    #[must_use]
+    pub(crate) fn from_fn(pressure: impl Fn(Gas) -> Pascals) -> Self {
+        Self(Gas::ALL.map(pressure))
+    }
+
     /// The partial pressure of `gas`.
     #[must_use]
     pub const fn of(&self, gas: Gas) -> Pascals {
@@ -1382,6 +1397,13 @@ impl Atmosphere {
             (w.value() > 0.0).then(|| (gas.substance(), w))
         }))
         .expect("an atmosphere's column holds finite weights of gas rows, each once")
+    }
+
+    /// The same atmosphere with the Bond albedo `albedo`, for the tests of what reads it.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn with_albedo(self, albedo: BondAlbedo) -> Self {
+        Self { albedo, ..self }
     }
 }
 

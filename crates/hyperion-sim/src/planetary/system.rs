@@ -131,7 +131,7 @@ use crate::planetary::frames::BodyFixedFrame;
 use crate::planetary::halo::{
     ADIABATIC_INDEX_LIMIT, CometaryHalo, HaloBounds, HaloHost, RUNAWAY_INDEX, Scatterer, halo,
 };
-use crate::planetary::hooks::cold_traps::{self, ColdTrapRules, ColdTrapSky};
+use crate::planetary::hooks::cold_traps::{self, ColdTrapRules, ColdTrapSky, RecordColdTraps};
 use crate::planetary::hooks::figures::{
     BeltMembership, Continents, CraterInputs, FiguresInputs, HostOrbit, HostOrbiter, ImpactorOrbit,
     ImpactorSources, MoonBirth, SourceBelt, VolatileHistory, VolatileHistoryInputs, WindowAt,
@@ -961,6 +961,31 @@ pub struct PlanetarySystem {
     /// version 22's below the bump, and the batch's area-mix albedo, on the bulk its record
     /// states, from it.
     snapshot: SnapshotRules,
+    /// Which rules its records' partition and cold traps follow (P14.T51.a, P14.T51.f): those in
+    /// force, which the tests may change ([`with_record_rules`](Self::with_record_rules)).
+    record: RecordRules,
+}
+
+/// The rules a system's records' partition and cold traps follow (P14.T51.a's second part,
+/// P14.T51.f): the generator version's, and for the tests the batches' ahead of their bumps.
+/// P14.T54.b deletes it with the holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RecordRules {
+    /// The record's partition: the `p14-snapshot` lane's hold.
+    pub(crate) partition: SnapshotRules,
+    /// Its cold traps: their hold at 24.
+    pub(crate) cold_traps: ColdTrapRules,
+}
+
+impl RecordRules {
+    /// The rules this generator version gives.
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        Self {
+            partition: SnapshotRules::in_force(),
+            cold_traps: ColdTrapRules::in_force(),
+        }
+    }
 }
 
 /// A system's cometary halo and the orbit host it surrounds.
@@ -1252,6 +1277,7 @@ pub fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
         moon_inventories: MoonInventories::in_force(),
         moon_tides: MoonTideRule::in_force(),
         snapshot: SnapshotRules::in_force(),
+        record: RecordRules::in_force(),
     }
 }
 
@@ -1684,6 +1710,18 @@ impl PlanetarySystem {
     pub(crate) fn with_snapshot_rules(self, rules: SnapshotRules) -> Self {
         Self {
             snapshot: rules,
+            ..self
+        }
+    }
+
+    /// The same system with its records' partition and cold traps under `rules` (P14.T51.i), for
+    /// the tests and the cold traps' probe to reach 24's record path ahead of the bump. P14.T54.b
+    /// deletes it with the holds.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_record_rules(self, rules: RecordRules) -> Self {
+        Self {
+            record: rules,
             ..self
         }
     }
@@ -2283,6 +2321,7 @@ impl PlanetarySystem {
                 sources: sources.as_ref(),
                 continental_asymptote,
                 cold_traps,
+                record: self.record,
             },
             SurfaceOf::Moon {
                 moon,
@@ -2298,6 +2337,7 @@ impl PlanetarySystem {
                 sources: sources.as_ref(),
                 continental_asymptote,
                 cold_traps,
+                record: self.record,
             },
         };
         let surface = published_surface(&time, &case);
@@ -3430,6 +3470,9 @@ struct SurfaceSky<'a> {
     equilibrium_temperature: Kelvin,
     flux: EarthFluxes,
     xuv_flux: WattsPerSquareMetre,
+    /// The bare regolith's Bond albedo its derivation gives under the batch (P14.T51.i), which its
+    /// cold traps read.
+    regolith_albedo: Option<f64>,
 }
 
 /// What a body's global figures read at a time beyond its bulk section, its sky and its spin
@@ -3452,6 +3495,7 @@ impl SurfaceSky<'_> {
             equilibrium_temperature: derived.equilibrium_temperature(),
             flux: derived.flux(),
             xuv_flux: derived.xuv_flux(),
+            regolith_albedo: derived.regolith_albedo(),
         }
     }
 
@@ -3463,6 +3507,7 @@ impl SurfaceSky<'_> {
             equilibrium_temperature: derived.equilibrium_temperature(),
             flux: derived.flux(),
             xuv_flux: derived.xuv_flux(),
+            regolith_albedo: derived.regolith_albedo(),
         }
     }
 }
@@ -3553,6 +3598,8 @@ struct SurfaceCase<'a> {
     continental_asymptote: f64,
     /// What its cold traps read beyond its sky (P14.T51.f).
     cold_traps: ColdTrapCase,
+    /// The rules its partition and cold traps follow.
+    record: RecordRules,
 }
 
 /// What a body's cold traps read beyond its sky and its spin (P14.T51.f): its exposed fraction,
@@ -3783,7 +3830,8 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
 /// orbit `seasons`, with P14.T51.a's partition on the record, held by the `p14-snapshot` lane's
 /// hold ([`GlobalFigures::condensates_under`]): from 23 the conditions' liquid-water flag, the ocean
 /// and ices, and the regime's reservoirs read it; below 23 nothing. Its cold traps (P14.T51.f)
-/// take the sky [`cold_trap_sky`] gives, under their own hold at 24.
+/// take the sky [`cold_trap_sky`] gives and the bare regolith's albedo its derivation gives
+/// (P14.T51.i), under their own hold at 24. Both follow the case's rules, those in force.
 #[must_use]
 fn with_partition(
     figures: &GlobalFigures,
@@ -3792,12 +3840,15 @@ fn with_partition(
     conditions: SurfaceConditions,
 ) -> (SurfaceConditions, Option<(Partition, Condensates)>) {
     let condensates = figures.condensates_under(
-        SnapshotRules::in_force(),
+        case.record.partition,
         case.sky.atmosphere,
         &conditions,
         case.bulk.surface_gravity(),
-        ColdTrapRules::in_force(),
-        &cold_trap_sky(case, seasons),
+        &RecordColdTraps {
+            rules: case.record.cold_traps,
+            sky: &cold_trap_sky(case, seasons),
+            regolith_albedo: case.sky.regolith_albedo,
+        },
     );
     let conditions = match &condensates {
         Some((_, published)) => conditions.with_condensates(published),

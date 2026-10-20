@@ -798,6 +798,7 @@ Order and parallelism:
     T49.c; T49.b → T49.c → T49.i (lane `p14-optics`) and T49.b → T49.j (lane `p14-thermal`), T49.c
     split in three (decision-p14-t49c-split, 2026-10-16); T50.a → T50.c → T51.a → T51.b, after T49.c
     and T49.h's step 1 (lane `p14-snapshot`, one lane: all four edit `derive/atmosphere.rs`) →
+    T51.h, the passes' bracketed fixed point, behind the same hold (decision-p14-t51-batch §4) →
     T57.a, after T51.b and T49.i (decision-p14-moons), which stays in 23 since only its water refit
     holds Earth at 288 K once T51.a moves Earth's water column; T51.c after T50.a (lane
     `p14-crust`); T56.a → T56.c → T56.d (lane `p14-moons`; T56.c after T50.a and T50.c),
@@ -812,7 +813,9 @@ Order and parallelism:
       → T24.c with T24.g (after T51.a) → T24.d with T52.d.
     - Riders, which board if they have landed when T54.b's wiring starts and otherwise take the
       next bump, renumbering their hold: T51.f (after T51.a and R09.T7.d's
-      `cold_trap::fraction`), behind a hold at 24; T51.d → T51.e → T51.g (one lane: T51.e and
+      `cold_trap::fraction`), behind a hold at 24, → T51.i, its fast path and field, behind the
+      same hold (with R09.T7.k; decision-p14-t51-batch §1 and §6); T51.j, the oxidised surface,
+      pure (after T51.c and T51.d; §5); T51.d → T51.e → T51.g (one lane: T51.e and
       T51.g both edit `moons/`; T51.e and T51.g after T54.a, T51.g also after T56.d, T50.c and
       T49.b, behind `OCEAN_VERSION`); T48.g (its own lane), at once, behind a hold at 24 in
       `belts.rs` and `hooks/figures.rs`; T53.a (after T57.a) → T53.b (after its section ruling)
@@ -5986,7 +5989,7 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
     - Earth granitic continents on basaltic oceanic crust;
     - Venus a `basalt` stagnant lid;
     - Mars a `basalt_fe` lid over a buried ultramafic primary crust, with its ferric surface from
-      T51.d;
+      P14.T51.j;
     - an icy body whose ice melted an `H2O` primary crust;
     - a Ceres-like body (470 km, a quarter water, t_f 3 Myr) a primary phyllosilicate crust and
       no secondary;
@@ -6284,6 +6287,122 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
     - two runs agree to the bit.
   - _Files:_ `planetary/derive/mod.rs` and its tests.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive`, and T51.b's widened filter.
+
+- **P14.T51.i The cold traps' fast path and their pass-invariant field** (23 → 24; lane
+  `p14-snapshot`, behind `COLD_TRAPS_VERSION`; amends T51.f and, additively, rendering plan R09's
+  T7.d (recorded there as R09.T7.k); before T54.b's wiring; decision-p14-t51-batch §1 and §6).
+  - **One depth integral for every species** (bit for bit):
+    - `hyperion_surface::cold_trap` gains a form that evaluates one latitude's shadows for several
+      thresholds;
+    - each population's trapezoid integrand is evaluated once on its fixed nodes, up to the
+      largest cold limit;
+    - each threshold's value is read from the running sums at its own limit, in
+      `Population::cumulative`'s order, so it equals `fraction`'s to the bit;
+    - `fraction` stays, as its one-threshold case;
+    - T51.f's traps call the new form once a latitude node, for all of a body's condensables.
+  - **Cheaper rules** (a value change in the surface crate; no golden reads it):
+    - `instantaneous`'s Gauss–Legendre rule falls from 16 points to at most 8. GL-8 is within
+      4 × 10⁻¹⁶ of 16 points, GL-6 within 7 × 10⁻¹² and GL-4 within 3 × 10⁻⁷, over colatitudes
+      0.1–30°, D 0–20° and d/D 0.005–0.5. The lane states its choice and its measured difference.
+    - `INTERVALS` falls from 512 to 128. The Moon's water traps move by under 3 × 10⁻⁴ of
+      themselves, its CO₂ by 1.1 × 10⁻³, Mercury's by 2.6 × 10⁻⁴, and Ceres's shadow by under
+      5 × 10⁻⁵. Its doc states the measured differences.
+    - R09.T7.d's tests keep their tolerances, and `bowl_permanent_shadow`'s fit acceptance is
+      unchanged.
+  - **The albedo the cold traps read** is the regolith's Bond albedo about the body's hosts
+    (T51.b's `Regolith` row: the lid's from T54.a, weathered from T54.b), not the body's area-mix
+    Bond albedo.
+    - The shadows lie in the regolith's craters, whose walls are the regolith (Ingersoll et al.
+      1992; Hayne et al. 2021's 0.12).
+    - The zonal maximum asks whether bare ground stays below the threshold.
+    - The table's Moon, Mercury and Ceres move by nothing.
+  - **The field.** The zonal annual maxima and each condensable's f_ct then read only the sky,
+    the regolith's albedo, T24.b's heat flow and the terrain, none of which the passes change.
+    So `ColdTrapField` (crate-private) is built once a body and read by every pass and by the
+    record's `publish`. Its zonal entries and reservoirs stay per partition.
+  - **R09.T13.f's interface stays** (decision-r09-t13f-cold-traps §3 and §8): it keeps
+    `ColdTrapGround::{new, annual_maximum, fractions_at}` and `trap_threshold`, with the shared
+    form inside `fractions_at`; `ColdTrapField` is built from a `ColdTrapGround`; the regolith's
+    albedo is passed as `ColdTrapGroundParts::bond_albedo`. It adds
+    `CondensateEntry::trapped_area_fraction` (§1.4).
+  - **Budget** (release, under the heavy lock, decision-p14-t51ij-budget §1):
+    - **binding:** over the 60-system sample, measured with a probe and recorded, a mean of at most
+      7 ms a system and at most 50 ms in any;
+    - **a design target**, not a gate: at most 0.6 ms for each qualifying table body, all its
+      species, under T51.f's measure (the Moon's sky); the bodies' own skies are recorded;
+    - if the binding figures are missed, here or in T33.a's re-run after 24, R09.T7.g's plains table,
+      then main.
+  - _Tests:_
+    - the shared form equals `fraction` to the bit for each threshold, over the table's bodies
+      and thresholds of 20–200 K;
+    - T51.f's Moon, CO₂, Ceres and 30° tests hold;
+    - the field is built once a body;
+    - a body whose area-mix albedo rises under a zonal frost keeps the traps its regolith gives;
+    - `time_the_cold_traps` prints the figures (ignored);
+    - `fractions_at` through the shared form equals one `cold_trap::fraction` per threshold with
+      the gate, bit for bit; `ColdTrapField`'s f_ct is the latitude integral of `fractions_at`, bit
+      for bit; a merged entry's `trapped_area_fraction` is its trap's area, a zonal-only entry's 0
+      and an inserted trap's its `area_fraction`; R09.T13.f's tests pass unchanged
+      (decision-r09-t13f-cold-traps §7.4).
+  - _Files:_ `crates/hyperion-surface/src/cold_trap.rs`; `planetary/hooks/cold_traps.rs` and its
+    tests; `planetary/hooks/figures.rs`.
+  - _Accept:_ `cargo test -p hyperion-surface cold_trap`;
+    `cargo test -p hyperion-sim planetary::hooks::cold_traps`; `just test-wasm-fast`.
+
+- **P14.T51.j The oxidised surface** (23 → 24 rider; pure; after T51.c and T51.d; amends T51.d;
+  decision-p14-t51-batch §5; decision-backlog-2 §1.5).
+  - `hooks/modifiers.rs` (or a submodule): Bibring et al. 2006's dry, oxidising age (Science
+    312, 400). A surface takes a `ferric` weathering deposit where all hold:
+    - **its lid's crust (T51.c) is `basalt_fe`.** `ferric` is the oxidised `basalt_fe` alone;
+      another Fe-bearing lid takes none, a closed set for the composition audit;
+    - **its air is collisional at the ground and oxidising.** Collisional is P14.T51.f's test, or
+      P14.T53.c's tenuous floor once it exists. Oxidising means CO₂, H₂O or O₂ present and H₂
+      not the largest gas. An airless surface takes none;
+    - **it is dry now** (T24.a's liquid-water flag false), **and has been for at least a labelled
+      0.1 Gyr of its present surface's age:** min(the time since its wet epoch's end (T48.b), its
+      surface age (T24.b)), or its surface age if it was never wet. A surface renewed since its wet
+      epoch has been dry only for its own age, and its deposit is buried with it
+      (decision-p14-t51ij-budget §2). A wet surface's clays and sulphates are recorded for the
+      composition audit.
+  - **Its area** is the dusty share of the dry, ice-free land: a labelled Mars value from Ruff
+    and Christensen 2002's dust cover index (JGR 107, 5127), checked against Putzig et al.
+    2005's bright, low-inertia terrains, both read at build. It is the same for every world until
+    a dust cycle is modelled. It is less any volcanic deposit, which lies on top. Every body that
+    carries one has a surface far younger than 0.1 Gyr, so the two never coexist from the record.
+    The exclusion keeps the deposits together at most 1 for any inputs
+    (decision-p14-t51ij-budget §3).
+  - **Published** as `SurfaceModifiers::weathering_deposits` (`{ substance, area }`, at most one
+    today), beside `volcanic_deposits`, and as
+    `SurfaceModifiersDto.weathering_deposits: Vec<SubstanceAreaDto>`.
+    - Never sent, so `PROTOCOL_VERSION` stays 2.
+    - The client's reader takes it under T51.d's rules: each area a fraction, all deposits
+      together at most 1.
+  - **T54.b wires it:**
+    - a palette `Deposit` entry `ferric`, the source of the body's sand and dust;
+    - its area in the area mix, at `ferric`'s optics (P14.T49.i).
+
+    `mars_dust` stays R09's reference worlds' row and R08's aerosol; no generated palette places
+    it.
+
+  - **Also in its commit** (test only): T51.d's Mercury test reads
+    - k above 1, both terms printed;
+    - its dust term within 10.5–17.5 (Cintala 1992's "almost 14 times" ± 25%);
+    - its wind term's open share within 0.4–0.6.
+
+    The `k ÷ 4 ∈ [1, 3)` pin goes (decision-p14-t51-batch §3).
+
+  - _Tests:_
+    - a Mars (T51.c's `basalt_fe` lid, its measured CO₂ given by hand, dry for 3.5 Gyr) carries
+      the deposit over the share of its ice-free land;
+    - the same body under liquid water carries none;
+    - an airless `basalt_fe` body, a `basalt` lid, an H₂-dominated air, and a world dry for under
+      0.1 Gyr each carry none;
+    - deterministic, with no draw, and no existing value moves.
+  - _Sources:_ Bibring et al. 2006; Ruff and Christensen 2002; Putzig et al. 2005; Hu, Ehlmann
+    and Seager 2012 (the row's spectral type).
+  - _Files:_ `planetary/hooks/modifiers.rs`; the protocol's surface-modifiers DTO; the client's
+    reader.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::modifiers`; `just gen-protocol-check`.
 
 #### P14.T52 Atmospheric chemistry
 
@@ -6658,8 +6777,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - _Anchors_, which gate it: T49.d; T49.e; and T24.e → T50.b → T52.a → T52.b → T52.c → T24.c
     with T24.g → T24.d with T52.d, each after what Tasks, "Order and parallelism", names.
   - _Riders_ board if they have landed when its wiring starts, and otherwise take the next bump,
-    renumbering their hold: T51.f; T51.d → T51.e → T51.g; T48.g; T53.a → T53.b → T53.c; T53.d;
-    and T31.a → T31.b → T31.c. T33.c follows T54.b.
+    renumbering their hold: T51.f; T51.i (held at 24 with T51.f); T51.j (pure); T51.d → T51.e →
+    T51.g; T48.g; T53.a → T53.b → T53.c; T53.d; and T31.a → T31.b → T31.c. T33.c follows T54.b.
   - _It adds_ `vertical_structure` (T24.e), `aerosols` (T24.c with T24.g) and `record::Envelope`
     (T24.d with T52.d, replacing `match envelope {}`). With them come the protocol fixture's
     hot-Jupiter envelope and a Jupiter whose envelope is `Ok` with an NH₃ deck (both from T54.a),
@@ -6678,6 +6797,23 @@ feeding back into p_s, T_s, the albedo or the bulk.
     - the primordial He/H: protosolar times the host star's Y/X (X = 0.76 − 3Z,
       Y = 1 − X − Z + ΔY, from its `Composition`) over the same at solar Z, then T53.a's
       fractionation.
+  - _From P14.T51.i and T51.j_ (decision-p14-t51-batch §9.6; decision-r09-t13f-cold-traps §8):
+    - the passes call `cold_traps::publish_over` over T51.i's field, one `ColdTrapField` a body,
+      which `condensates_under` then reads, so that every body's published condensates equal its
+      last pass's to the bit. It builds the passes' `ColdTrapField` once a body, from the passes'
+      terrain and heat flow (T54.a), and carries it to `condensates_under`, replacing the record
+      path's own build, so that its test counts one build a body (decision-p14-t51ij-budget §5);
+    - T51.j's wiring: a palette `Deposit` entry `ferric`, the source of the body's sand and dust,
+      and its area in the area mix at `ferric`'s optics (P14.T49.i); `ModifierInputs::lid` from
+      `CrustComposition::lid()`, `gases` from the atmosphere's partial pressures and `water` from
+      T24.a's flag and T48.b's `WetEpoch::end`;
+    - Mars's Bond albedo within 0.20–0.30 with `ferric`'s deposit, asserted once T49.i's `ferric`
+      row has optics;
+    - R09's `CoarseInputs::cold_traps()` filled from each solid entry's `trapped_area_fraction`,
+      and `cold_trap_inputs()` from the star angular radius and the regolith's albedo its cold
+      traps read, to the bit; R09's tripwire `the_record_gives_no_cold_traps_until_the_24_bump`
+      deleted; test: a generated qualifying body's field places its record's trapped areas,
+      placed plus undrawn to one cell, with `short` 0.
   - _The escape valve._ If T52.c still cannot start when every other member of 24 has landed,
     T54.b leaves without T52.c, T24.c with T24.g, T24.d with T52.d, T53.c and T53.d. Their members
     stay `NotModelled`, and those tasks take the next planetary bump.
@@ -15993,7 +16129,7 @@ tables::gauss_legendre`.
       `ultramafic`, lid `Secondary`, `Oxidised`, mantle FeO 7.3 wt% (core 0.325); Venus: `basalt`
       over `ultramafic`, `Oxidised`, FeO 10.9 wt% at a core of 0.30 (Venera's 7.7–9.3 wt%); Mars
       (core 0.204): `basalt_fe` lid over a buried `ultramafic`, `Intermediate`, FeO 22.8 wt%
-      (18.7 at Stähler et al.'s 0.24); its ferric surface is P14.T51.d's. None holds melt;
+      (18.7 at Stähler et al.'s 0.24); its ferric surface is P14.T51.j's. None holds melt;
     - Io (tidal, regular, IW+0.95 from Zolotov and Fegley 2000's NNO − 3.3 at 1,440 K, by NNO =
       FMQ + 0.7 and the crate's FMQ − IW of 3.55 there): no primary, a `komatiite`
       secondary lid and provinces, melt area **0**, against an active share the lane estimates at
@@ -17428,7 +17564,9 @@ tables::gauss_legendre`.
   - _Not applied here_ (main's docs batch): the ruling's plan text for P14.T54.b, R10.T1.d, R10.T1.c
     and R09.T2.f. T51.b's Mercury line was applied in T51.b's own commit (c70ec278).
 - **Deferred findings (2026-10-13 rule)**, from P14.T51.d:
-  - _Mercury's k against Braden and Robinson 2013_ (JGR Planets 118, 1903, abstract read: "up to
+  - _Mercury's k against Braden and Robinson 2013_ (**ruled**, decision-p14-t51-batch §3: the anchor
+    is restated as a dose ratio and the dust law stays; the test restated in P14.T51.j's commit,
+    and Braden and Robinson's optical rate is R10.T1.d's check) (JGR Planets 118, 1903, abstract read: "up to
     4 times faster"): the ruling's shares and laws give 8.89, its dust term alone 7.1. The test
     pins k ÷ 4 in [1, 3). It is a difference of models, not a misreading (verified by the science
     check): k is a dose ratio, whose dust term reproduces Cintala 1992's "almost 14 times more
@@ -17467,7 +17605,8 @@ tables::gauss_legendre`.
   - _Leinert et al. 1981's r^(−1.3)_ (A&A 103, 177, Summary, read) is measured over 0.3–1.0 au;
     beyond it, where the source says nothing, the law is an extrapolation: Mercury's 0.387 au lies
     inside, every belt and Kuiper-belt body outside.
-  - _For P14.T51.e:_ Vernazza et al. 2009's asteroid timescale, under 10⁶ yr (Nature 458, 993,
+  - _For P14.T51.e:_ (**escalated**: a ruling before T51.e is briefed, decision-p14-t51-batch §7.1,
+    E4) Vernazza et al. 2009's asteroid timescale, under 10⁶ yr (Nature 458, 993,
     _from memory_), against the lunar calibration's τ_L ÷ k, about 2.8 Gyr at 2.5 au (k about
     0.12): a gap of three orders of magnitude, for T51.e, whose Q/S threshold reads this m. Morris
     1978 (p. 2290, read) finds I_s/FeO does not saturate, the regolith's thickness setting its
@@ -17490,8 +17629,9 @@ tables::gauss_legendre`.
     factor e ÷ (e − 1), only where k_irr τ ≪ 1 and the cover is small. The eligible ground sums
     its entries' areas, which may overlap, held to 1.
   - _The Moon's reference_ ignores its months in Earth's magnetotail, which cancel in k_Moon.
-  - _No ferric surface_ (decision-backlog-2 §1.5): T51.c's Mars expects its ferric surface "from
-    T51.d", which places none. The rule, and where its result goes, are unruled: for main.
+  - _No ferric surface_ (**ruled: P14.T51.j, the oxidised surface**, decision-p14-t51-batch §5)
+    (decision-backlog-2 §1.5): T51.c's Mars expected its ferric surface "from T51.d", which placed
+    none; P14.T51.j places it.
   - _Not pinned across targets:_ `maturity_after` and `exposed_fraction` have no golden bits yet.
     Recorded for P14.T54.b, or for R10.T1.c, whichever reads them first.
 - **Deviations in P14.T51.f, as built (`p14-snapshot`, 2026-10-19).** The cold traps on airless
@@ -17566,7 +17706,9 @@ tables::gauss_legendre`.
     3.21 ms, the Moon 3.05 ms, Ceres 3.06 ms), against P14.T51.a's 0.17 ms, so about 1.5 ms a
     species where the research estimated 0.5–0.8 ms; the bodies that do not qualify move by under
     0.01 ms.
-  - _The passes_ (`surface_mix::pass_condensates`) keep P14.T51.a's airless branch. From 24 the
+  - _The passes_ (**owned by P14.T54.b, over P14.T51.i's field**, which makes one evaluation a body
+    serve every pass, decision-p14-t51-batch §6) (`surface_mix::pass_condensates`) keep P14.T51.a's
+    airless branch. From 24 the
     record takes the cold traps' branch, so P14.T54.b must give T13.c's passes the same sky and
     rules, or the Bond albedo reads other areas than the record publishes. The cold traps'
     tripwire names it among what T54.b settles.
@@ -17578,7 +17720,9 @@ tables::gauss_legendre`.
     Gyr⁻¹; the regolith's 1,500 kg m⁻³ is labelled _from memory_; and σ_c's doc records N₂'s
     kinetic diameter.
 - **Deferred findings (2026-10-13 rule)**, from P14.T51.f:
-  - _The cost per system_ (for main, before P14.T54.b): about 3.1 ms for each airless body that is
+  - _The cost per system_ (**ruled: P14.T51.i's fast path and field**, decision-p14-t51-batch §1;
+    measured after it at 0.50 ms a qualifying table body and a mean of 0.83 ms a system, P14.T51.i's
+    record) (for main, before P14.T54.b): about 3.1 ms for each airless body that is
     not locked to its star and whose air is not collisional, for its two delivered species (about
     1.5 ms more for each further condensable), against P14.T33.a's 3.47 ms a field system and
     decision-p14-t51a-partition §6's refusal of 2.1 ms a body. Over the 60-system sample under the
@@ -17587,7 +17731,9 @@ tables::gauss_legendre`.
     taking none; a mean of 11.5 a system (median 8, at most 73), so about 36 ms a system (median
     25 ms, at most 0.23 s), some ten times a field system's whole cost. At 23's stand-ins a
     Pluto's or a Triton's N₂ is deleted, so they count until P14.T53.c.
-  - _Grazing-angle albedo_ (for main): Hayne et al. 2017 (JGR Planets 122, 2371, eq. A8 and Table
+  - _Grazing-angle albedo_ (**ruled deferred**, not made before 24, decision-p14-t51-batch §2: for
+    P14.T55.c's rough-ground zonal annual maximum) (for main): Hayne et al. 2017 (JGR Planets 122,
+    2371, eq. A8 and Table
     A1) give A(θ) = A₀ + 0.06 (θ ÷ 45°)³ + 0.25 (θ ÷ 90°)⁸ at the solar incidence angle θ. With it
     the Moon's polar T_max falls from 158 to 111 K, its 85° from 227 to 182 K, and Mercury's pole
     from 172 to 118 K. The current results survive, but the lunar pole's margin to water's 110 K
@@ -17715,6 +17861,224 @@ tables::gauss_legendre`.
     with Venus's full deck at T_s 45.8 K, its insolation once inside the runaway limit at its
     host's largest past luminosity (T13.c's classification), which no cold body's air holds. For
     T13.c's re-validation (P14.T54.a's bless note).
+- **Deviations in P14.T51.i, as built (`p14-t51hij`, 2026-10-19).** The cold traps' fast path and
+  their pass-invariant field, behind the cold traps' hold (`COLD_TRAPS_VERSION` 24) inside the
+  `p14-snapshot` lane's at 23: nothing on the record moves at 22 or 23 (golden_diff: nothing to
+  reconcile). The surface crate's half is its own commit, recorded in plan 09 as R09.T7.k, with
+  its measured figures.
+  - _The choice of rule:_ 8 points (GL-8), 4.4 × 10⁻¹⁶ from 16 points on the ruling's 10,800
+    points (its port: 4 × 10⁻¹⁶), and 128 intervals. GL-6 and GL-4 were timed and do not buy the
+    budget (below), so the closest rule is kept.
+  - _A third lever, bit for bit_ (the ruling's optional "evaluate only where it can bind", in its
+    cheapest form): the shared integral skips the bowls shallower than the shallowest that keeps
+    any shadow, whose share `read`'s first test makes +0, with a margin of a millionth of the depth
+    ratio, far above that test's rounding; neither the bowl nor the density is evaluated there,
+    and every sum keeps its bits (`the_skipped_bowls_keep_the_shadow_s_bits`, against the
+    unskipped `shadowed` over four bodies, every half degree from 50°, four populations, five
+    limits). The cap's own bound and the bisections' closed root, the ruling's other optional
+    levers, are not built.
+  - _The measured differences_ (the lane's, against 16 points and 512 intervals; plan 09's
+    R09.T7.k): the Moon's water −9.3 × 10⁻⁵ (B), +2.8 × 10⁻⁴ (A); its CO₂ at 58.18 K +1.1 × 10⁻³
+    (B), +8.5 × 10⁻⁴ (A), and at 10 kg m⁻² Gyr⁻¹'s 55.53 K +2.1 × 10⁻³ and +1.9 × 10⁻³; Mercury's
+    water +2.6 × 10⁻⁴; Ceres's shadow at 4° −4.2 × 10⁻⁵ (B), −3.7 × 10⁻⁶ (A), and at 20°
+    −2.1 × 10⁻⁴ (A, 52.7 km², under T51.f's 68 km²), beyond the plan's "under 5 × 10⁻⁵", which the
+    ruling's port measured at 4° alone. T51.f's tests hold unchanged. R09.T7.d's trapezoid test's
+    unit-integrand bound is restated for 128 intervals, 4 × 10⁻⁴ (the rule's h² is 16 times 512
+    intervals', whose bound was 5 × 10⁻⁵; 3.2 × 10⁻⁴ measured), and its degree test is the 8-point
+    rule's 15; its other tolerances are unchanged.
+  - _For R09.T13.f's lane:_ decision-r09-t13f-cold-traps §3.4's tolerance floor of 2 × 10⁻³ assumes
+    moves of at most 1.1 × 10⁻³; that holds at `trap_threshold`'s 58.18 K for CO₂, but CO₂ at
+    55.53 K moves 2.1 × 10⁻³. T13.f's lane, landing after T51.i, runs its tests on a tip that holds
+    T51.i, at §3.4's tolerances.
+  - _The regolith's albedo_ is computed in the passes under the batch
+    (`DerivedBody::regolith_albedo`, crate-private, with `DerivedMoon`'s, beside `Passes`): the
+    passes' regolith provider (`PassSurface::regolith`, `Regolith::of_material` until P14.T54.a's
+    lid) at the airless state under the hosts' light, so that T54.a's lid and T54.b's weathering
+    reach it with no change. `None` under the held rules, whose passes read no light; a record
+    whose derivation gives none keeps P14.T51.a's publish. The record path carries it in the
+    surface section's sky (`SurfaceSky::regolith_albedo`) to `condensates_under`, whose cold-trap
+    arguments are bundled as `RecordColdTraps` (rules, sky, regolith albedo), a deviation in that
+    crate-private signature; `ColdTrapSky`, on R09's interface, is untouched. Under the batch the
+    table's Moon, Mercury and Ceres take the Moon's 0.11 to the bit, their area mix's
+    (`the_regolith_albedo_is_the_batch_s_bare_ground`).
+  - _The field_ (`ColdTrapField`, crate-private): the zonal maxima at the profile's area points and
+    each condensable's threshold and f_ct, built by `ColdTrapField::new` from a `Sunlit` and a
+    terrain (its f_ct through a `ColdTrapGround`'s `fractions_at`, one call a latitude node for
+    every species, each species' sum in `over_latitude`'s order by `over_latitude_each`), or on the
+    record path by `ColdTrapField::of`. `publish` tests the body's qualification first
+    (`qualifies`: a zonal profile, airless, not collisional) and only then builds the field, once;
+    `publish_over(partition, cover, body, field)` is the function T54.b's passes call over one
+    field, testing qualification at every call. Where the closed form refuses the ground, the
+    field keeps its maxima and every f_ct is 0, as T51.f's traps were. The field's species are the
+    record's condensables, water left out on an ice-rich crust; T54.b builds its passes' field over
+    a set that does not change between passes (the body's inventory's condensables and the
+    delivered species), since the field must hold every condensable a pass's partition names
+    (debug-asserted).
+  - _The field's carry_ (a deviation from §6's "crate-private on `DerivedBody`"): `DerivedBody`
+    carries the regolith's albedo, the input the passes alone know, not the field, whose terrain
+    (P14.T48.c's crater contract) and heat flow (P14.T24.b's) are the record path's until P14.T54.a
+    and P14.T54.b give them to the passes. The record's `publish` builds its own field, once. T54.b
+    builds the passes' field, carries it to `condensates_under`, so that a body builds one, and its
+    test counts the builds; `one_field_built_once_serves_every_publish` shows here that one field
+    serves every publish.
+  - _The trapped part_ (`CondensateEntry::trapped_area_fraction`, public, additive): an inserted
+    trap's whole area, a merged one's the trap's area, and where the merge is held to 1 the trap
+    takes 1 − the zonal part (the zonal part kept whole). 0 at 22 and 23.
+  - _Tests' sites:_ `RecordColdTraps::at_the_albedo_of` (tests) passes the atmosphere's albedo as
+    the regolith's for the table's bodies derived under version 22's rules, so T51.f's figures
+    hold; `Atmosphere::with_albedo` (tests) raises an area mix. `PlanetarySystem::with_record_rules`
+    (tests; `RecordRules`, deleted by T54.b with the holds, as the tripwire now lists) puts the
+    record's partition and cold traps under the batches for the end-to-end test and the probe.
+  - _The budget, measured_ (release, under the heavy lock, one thread at a 100% quota, the
+    1-minute load 7–9; the best of five interleaved rounds of 200, and of three for the sample),
+    with the skip; **ruled: accepted** (decision-p14-t51ij-budget §1):
+    - **the binding budget is the sample's** (`time_the_cold_traps_over_the_sample`, every record
+      of the first 60 systems): a mean of 0.68 ms a system, median 0.27 ms, at most 4.1 ms (before
+      the skip 0.80–0.86, 0.31 and 4.8–4.9 ms), against 7 and 50 ms. Its 611 count is the airless,
+      uncollisional planets and members; its time includes the moons' records too. The most
+      costly system holds 8 such bodies, and the most belt-rich, 66, costs under 2.1 ms. The
+      record path's ices differ under the cold traps' batch (954 listed against 980 held), so the
+      path runs. Most airless bodies cost less than the table's, their zonal gate shut at every
+      latitude or their warmest threshold with few cold bowls;
+    - **the per-body figure is a design target**, met under T51.f's measure (every body in the
+      Moon's sky): the Moon, Mercury and Ceres 0.48–0.50 ms each, all species included, against
+      3.05–3.21 ms at T51.f and the target's 0.6 ms. Own skies recorded (`time_the_cold_traps` now
+      gives Mercury and Ceres theirs): the Moon 0.48 ms, Mercury 0.25 ms, Ceres 0.73 ms. GL-6 gives
+      Ceres 0.74 ms and GL-4 0.63 ms: its time is the integrand's table reads, not the quadrature,
+      so GL-8 with the skip stands, and R09.T7.g's plains table stays the first lever if a later run
+      misses 7 or 50 ms.
+  - _Tests:_ the surface crate's `the_shared_integral_is_the_one_threshold_path_to_the_bit` (the
+    shared sums against `cumulative` and `shadowed`, which never share, and `fractions` against the
+    one-threshold arithmetic written out), `the_skipped_bowls_keep_the_shadow_s_bits`,
+    `the_shared_form_is_fraction_at_each_threshold_to_the_bit` (four bodies, two terrains, 60–90°,
+    nine thresholds of 20–200 K, any order, repeated) and
+    `the_8_point_rule_keeps_the_16_point_shadow`; `fractions`' panics in `tests/panics.rs`; the
+    sim's `the_field_s_f_ct_is_the_latitude_integral_of_fractions_at`,
+    `fractions_at_through_the_shared_form_is_one_fraction_per_threshold_with_the_gate` (the Moon,
+    a Mercury, a Ceres, every degree pole to pole, 20–200 K),
+    `a_body_whose_area_mix_albedo_rises_keeps_the_traps_its_regolith_gives`,
+    `one_field_built_once_serves_every_publish`, the merge test's trapped parts,
+    `the_regolith_albedo_is_the_batch_s_bare_ground`,
+    `under_24_s_record_rules_the_records_read_the_derivations_regolith` (end to end: 93 airless,
+    uncollisional bodies of the sample's first systems read their derivation's albedo, 33 with
+    their ices moved by the traps), and the two timings (ignored). R09.T13.f's tests are not on
+    integration yet; R09's `planetary::surface::steps::climate` passes unchanged.
+- **Deferred findings (2026-10-13 rule)**, from P14.T51.i:
+  - _Ceres's own-sky cost_ (above): 0.73 ms against the 0.6 ms target, **ruled: accepted**,
+    decision-p14-t51ij-budget §1.
+  - _The supervolatiles' rule moves_ (decision-p14-t51ij-budget §4.4; measured against the
+    pre-T51.i rules, the real Sun, Hayne et al.'s terrains B and A, A 0.12, at their
+    `trap_threshold`s, on airless bodies of 3–4° at 2.77–40 au with heat flows of 1–2 mW m⁻², where
+    each traps; on the Moon N₂, CO and CH₄ trap nowhere, the heat flow's floor of about 24 K at
+    0.018 W m⁻² and ε 0.95 lying above their thresholds, 17.35, 18.39 and 23.65 K): where a species traps at least
+    10⁻⁵ of the surface, every move is at most 2.0 × 10⁻³ (CH₄ at 10 au: +2.0 × 10⁻³ (B), +1.3 ×
+    10⁻³ (A); N₂ at 30–40 au: at most 6.4 × 10⁻⁴; CO: at most 5.9 × 10⁻⁴; NH₃ (68.73 K): at most
+    8.4 × 10⁻⁴); at 10⁻⁸ of the surface at most 4.0 × 10⁻³ (NH₃ and CO₂ at their traps' onset at
+    30 and 40 au). **Moves above 10⁻² occur only at a trap's onset**, over 2.3 × 10⁻¹⁰ of the
+    surface or less: CH₄ at 5.2 au +3.3 × 10⁻² (B, 1.3 × 10⁻¹⁰) and +3.4 × 10⁻² (A, 1.4 × 10⁻¹²);
+    CO at 10 au +2.9 × 10⁻² (B, 2.2 × 10⁻¹⁰) and +3.3 × 10⁻² (A); N₂ at 10 au +6.6 × 10⁻² (B,
+    7.7 × 10⁻¹³) and +6.4 × 10⁻² (A). Reported to main before T54.b's wiring, as the ruling asks:
+    there the cold limit barely clears the shallowest shadow-keeping bowl, and 128 intervals
+    resolve that edge more coarsely.
+  - _No golden pins the surface crate's cold-trap bits across targets_ (the determinism audit): the
+    closed form's values moved at 22 with no golden to catch it, safely, since only the batch's
+    record path reads them. A `cold_trap` golden of `fraction` and `permanent_shadow`, blessed at
+    the version in force, would pin native, wasip1 and the browser; for P14.T54.b, whose record
+    goldens pin them first, or main.
+  - _Allocations:_ a `fractions_at` call allocates some thirteen small vectors; within budget now,
+    but R09.T13.f calls it once a field cell. A caller's scratch would remove them.
+  - _Locked bodies' blended edge_ (decision-p14-t51-batch §7.2's optional one-liner) is not taken:
+    it is not one line here, since a locked body has no zonal profile for the field's maxima.
+
+- **Deviations in P14.T51.j, as built (`p14-t51hij`, 2026-10-19).** The oxidised surface, pure:
+  nothing on the record calls `hooks/modifiers.rs` until P14.T54.b (its tripwire unchanged), it
+  draws nothing, and no value on the record moves (golden_diff: nothing to reconcile).
+  `PROTOCOL_VERSION` stays 2.
+  - _The inputs_ (`ModifierInputs` gains three, each a value T54.b passes from the record):
+    `lid`, the lithology T51.c's `CrustComposition::lid()` names (the tests give it by hand);
+    `gases`, the air's `PartialPressures` (with a crate-private `PartialPressures::from_fn` for an
+    air the tests state by hand); and
+    `water`, a `WaterHistory` (`WetNow`, `DrySince(Gigayears)` or `NeverWet`), which joins T24.a's
+    flag and T48.b's `WetEpoch::end` in one value, so that a wet surface with a dry time cannot be
+    stated (a deviation from two inputs). Refusals: `ModifierInput::Gases` (a gas not finite or
+    negative) and `ModifierInput::DryTime`.
+  - _The rule as built_ (`weathering_deposits`): the lid `basalt_fe`; collisional by T51.f's own
+    arithmetic (`cold_traps::is_collisional_air`, split out of `is_collisional` to the bit) on the
+    inputs' surface pressure, gases and gravity; oxidising where CO₂, H₂O or O₂ has any weight and
+    H₂ is not the largest gas by number (each gas's weight over its molar mass, in `Gas::ALL`'s
+    order: 2,000 Pa of H₂ against 4,401 Pa of CO₂ is reducing); dry for at least
+    `OXIDISED_DRY_TIME`, 0.1 Gyr, since the wet epoch's end held to the surface age, or over the
+    surface age if never wet: min(t_dry, S), **ruled** (decision-p14-t51ij-budget §2), the time
+    the present surface has been there and dry, since resurfacing buries any oxidised deposit.
+  - _Its area_: `DUSTY_SHARE` 0.31 (0.18–0.43) × the dry, ice-free land not under a volcanic
+    deposit: 1 less the perennial solid and the liquid entries of the published condensates and
+    the volcanic deposits, the rest held to at least 0 (a seasonal frost is land). So the volcanic
+    and weathering deposits together cover at most the surface, as the DTO and the client's reader
+    require (a deviation the reviews asked for: an oxidised world resurfaced as an Io is would
+    otherwise publish some 1.29). The share is read by the lane's science checks: Ruff and
+    Christensen 2002 (§6.1 ¶40, read in full by the first) state no area, so 0.31 is the share of
+    TES-mapped Mars (about 80°S to 65°N, the caps left out) below their "conservative 1σ" dust
+    cover index of 0.940, measured from their Fig. 14 weighted by the cosine of the latitude
+    (31.1%); the second could not reach the paper and found its 0.94 edge for thin dust coatings
+    quoted in the InSight landing site's assessment (JGR Planets, 2020). Putzig et al. 2005 was not
+    reached: its unit of bright, unconsolidated fines, 19% of the TES-mapped 85% of Mars, is Ojha et
+    al. 2018's quotation (Nat. Commun. 9, 2867); thermal inertia at most 100 covers 18.4% of
+    Mellon et al. 2000's grid. Those are the thick mantles; the index senses the optical surface's
+    tens of µm, which the area mix reads; the partly dusty band counted in proportion gives about
+    0.43. Hu, Ehlmann and Seager 2012 (ApJ 752, 7, Table 2,
+    read) give the row's type, "Fe-oxidized" (50% nanophase hematite, 50% basalt, "Current Mars").
+    Bibring et al. 2006's siderikian era is quoted from its abstract.
+  - _As measured_: the Mars by hand (NASA's fact sheet's 6.36 mb of 95.1% CO₂, 2.59% N₂ and 1.94%
+    Ar by volume as column weights, 614.0, 10.6 and 11.4 Pa, at 3.73 m s⁻², dry 3.5 Gyr; the first
+    draft took the volume fractions as weights, which the science check caught) carries `ferric`
+    over 0.3069 of its surface, 0.31 × 0.99 beside a perennial cap over 0.01; wet, airless (1 nPa
+    of CO₂), on a `basalt` lid, under the H₂ air, under N₂ and Ar alone, dried 0.09 Gyr ago, dried
+    3.5 Gyr ago on a 50 Myr surface, never wet on a 50 Myr surface, or under ice everywhere, it
+    carries none; dried exactly 0.1 Gyr ago, or never wet on its 3.9 Gyr surface, it does.
+    Resurfaced as an Io (2.5 W m⁻², 100 K), its volcanic deposits cover 0.986 and its `ferric`
+    0.31 × (0.99 − 0.986), together under 1. Those inputs are inconsistent on purpose (2.5 W m⁻² on
+    a 3.9 Gyr surface; the generator's surface age at that heat flow is some thousands of years):
+    the test pins the contract's guard. With the min() in place, the two deposits cannot occur
+    together in generated bodies, since every body with volcanic deposits has a surface far younger
+    than 0.1 Gyr (decision-p14-t51ij-budget §3, ruled: the volcanic layer, the youngest, lies on
+    top).
+  - _The Mercury test, restated_ (no value moves): k 8.89 above 1, its terms printed; its dust term
+    14.26 within 10.5–17.5; its wind term's open share, its wind term over an unshielded Mercury's,
+    0.516 within 0.4–0.6. The `k ÷ 4 ∈ [1, 3)` pin is gone.
+  - _The protocol and the client_: `SurfaceModifiersDto.weathering_deposits` (its JSON pinned
+    with the Io fixture's `[]`, `cargo test -p hyperion-protocol`); the client's reader takes
+    `weatheringDeposits`, each a fraction and the volcanic and weathering deposits together at most
+    1, with its tests (`bodiesWire.test.ts`). The acceptance is the task's two commands and those
+    two.
+  - _What waits for P14.T49.i_ (p14-optics, unlanded): nothing in T51.j. `ferric`'s row exists
+    (row 94); its optics, and T54.b's area mix and palette entry at them, are T49.i's and T54.b's.
+    No test of T51.j reads an optic.
+  - _Not applied here_ (main's docs batch): decision-p14-t51-batch §9.4 (P14.T24.h), §9.5
+    (T54.a's tests and bless note, T57.a's Titan guard), §9.6's T51.b items, §9.7 (R10.T1.d's
+    check and R10's Risks), §9.8 (P14.T55.c's list) and §9.9 (status.md); and
+    decision-r09-t13f-cold-traps §8's plan-09 text for R09.T13.f and T13.d and its D1–D7. Applied: §9.1–§9.3, T51.c's
+    test text, §9.6's T54.b items and T51.f's and T51.d's findings, the riders of 24, and §8's
+    P14.T51.i and P14.T54.b items.
+- **Deferred findings (2026-10-13 rule)**, from P14.T51.j:
+  - _The surface's clock:_ ruled min(t_dry, S) (decision-p14-t51ij-budget §2). Old dust on locally
+    young patches needs regional surface ages, which the model lacks (fresh rock reddens locally
+    within decades on a dusty world, Geissler 2005, as the ruling records). The 0.1 Gyr step is a
+    labelled stand-in, for a smooth law with the dust cycle (P14.T24.c, R08) and the composition
+    audit.
+  - _The double count:_ a volcanic SO₂ frost also listed as a condensate is subtracted twice from
+    the land. That is conservative; recorded.
+  - _The oxidant test is any trace:_ a trace of CO₂, H₂O or O₂ makes an air oxidising, and methane's
+    reducing power is not weighed against it. A redox balance of the air (its oxidants against its
+    H₂ and CH₄) is for the composition audit, with the clays and sulphates of wet surfaces and
+    every Fe-bearing lid but `basalt_fe` (the closed set).
+  - _The dusty share is one figure for every world:_ derived from one figure of one paper, the
+    mapped area standing for the dry, ice-free land; a dust cycle (P14.T24.c's airborne dust
+    reading its ground's deposit, as the ruling records for T24.c and R08) would give each world
+    its own.
+  - _The tenuous floor:_ the collisional test is T51.f's until P14.T53.c's tenuous floor exists.
+  - _For R10_ (the ruling's record): on an oxidised world `Sand` may belong to the crust's entry
+    and only `Dust` to the `Deposit`'s, since Mars's dark dunes are basaltic.
+
 - **Deviations in P14.T49.h, as built: step 3, the solutions (`p14-liquids`, 2026-10-16).**
   `GENERATOR_VERSION` stays 22. Nothing on the record reads `liquid_properties` before P14.T54.a
   (decision-bump-plan-after-22 §1.2), so `liquids.golden` is re-blessed at 22. Nothing is

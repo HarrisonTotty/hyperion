@@ -1221,13 +1221,18 @@ function toCrust(crust: CrustCompositionDto): CrustComposition {
 
 function toModifiers(modifiers: SurfaceModifiersDto): SurfaceModifiers {
   const deposits = modifiers.volcanic_deposits;
-  const deposited = deposits.reduce((all, deposit) => all + deposit.area_fraction, 0);
+  const weathered = modifiers.weathering_deposits;
+  const deposited = [...deposits, ...weathered].reduce(
+    (all, deposit) => all + deposit.area_fraction,
+    0,
+  );
   check(
     fraction(modifiers.maturity) &&
       atLeastZero(modifiers.weathering_rate) &&
       fraction(modifiers.organic_cover) &&
       atLeastZero(modifiers.resurfacing_m_per_yr) &&
       deposits.every((deposit) => fraction(deposit.area_fraction)) &&
+      weathered.every((deposit) => fraction(deposit.area_fraction)) &&
       deposited <= 1 + MIXTURE_SUM_TOLERANCE,
     "surface modifiers unusable",
   );
@@ -1237,6 +1242,10 @@ function toModifiers(modifiers: SurfaceModifiersDto): SurfaceModifiers {
     organicCover: modifiers.organic_cover,
     resurfacingMPerYr: modifiers.resurfacing_m_per_yr,
     volcanicDeposits: deposits.map((deposit) => ({
+      substance: deposit.substance,
+      areaFraction: deposit.area_fraction,
+    })),
+    weatheringDeposits: weathered.map((deposit) => ({
       substance: deposit.substance,
       areaFraction: deposit.area_fraction,
     })),

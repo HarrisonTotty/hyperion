@@ -1,7 +1,7 @@
 //! A solid surface's modifiers (plan 14, P14.T51.d; decision-p14-t51d-weathering §2,
 //! decision-r11-palette-liquids §2 item 4): its space-weathering rate and maturity, its
-//! irradiated-organics cover, its resurfacing rate, and an Io's volcanic deposits
-//! ([`SurfaceModifiers::derive`]).
+//! irradiated-organics cover, its resurfacing rate, an Io's volcanic deposits, and an oxidised
+//! surface's weathering deposit (P14.T51.j) ([`SurfaceModifiers::derive`]).
 //!
 //! # The weathering rate
 //!
@@ -78,6 +78,36 @@
 //! rest is its lid's own silicate. Neither registry row has optics yet: their albedo waits for
 //! P14.T49.i.
 //!
+//! # The oxidised surface (P14.T51.j)
+//!
+//! Bibring et al. 2006's dry, oxidising age, its "siderikian" era, "dominated by the formation of
+//! anhydrous ferric oxides in a slow superficial weathering, without liquid water playing a major
+//! role" (Science 312, 400, abstract, read through the science check): a surface takes a
+//! `ferric` weathering deposit ([`WeatheringDeposit`]) where all of these hold
+//! (decision-p14-t51-batch §5):
+//!
+//! 1. **Its lid's crust (P14.T51.c) is `basalt_fe`.** `ferric` is the oxidised `basalt_fe` alone
+//!    (decision-backlog-2 §1.1). Another Fe-bearing lid takes none, and neither do Venus's and
+//!    Earth's `basalt`: a closed set, for the composition audit.
+//! 2. **Its air is collisional at the ground and oxidising.** Collisional is P14.T51.f's test,
+//!    p ≥ m̄ g ÷ `σ_c` (`cold_traps::is_collisional_air`), until P14.T53.c's tenuous floor
+//!    exists. Oxidising: it holds CO₂, H₂O or O₂, and H₂ is not its largest gas by number; the
+//!    oxidants are photochemical products of CO₂ and H₂O, whose hydrogen escapes. An airless body
+//!    takes none: the wind's hydrogen reduces its surface, and its weathering is the maturity's.
+//! 3. **Its surface is dry now and has been for at least [`OXIDISED_DRY_TIME`]**: since its wet
+//!    epoch's end (P14.T48.b's `WetEpoch::end`), held to its surface age, or over its surface age
+//!    if it was never wet ([`WaterHistory`]; decision-p14-t51ij-budget §2). A wet surface weathers to clays (neutral water) or sulphates (acid
+//!    water) instead: recorded for the composition audit, not built here.
+//!
+//! The deposit covers [`DUSTY_SHARE`] of the dry, ice-free land: the surface less its perennial
+//! ices and its liquids, as P14.T51.a publishes them, and less any volcanic deposit, so that the
+//! two kinds of deposit together cover at most the surface. It is a labelled Mars value, the same for
+//! every world until a dust cycle is modelled. P14.T54.b puts it in the body's palette as a
+//! `Deposit` entry, the source of its sand and dust, and in the area mix at `ferric`'s optics
+//! (P14.T49.i); R09's reference worlds keep `mars_dust`, which no generated palette places. The
+//! row's spectral type is Hu, Ehlmann and Seager 2012's "Fe-oxidized" (ApJ 752, 7, Table 2: 50%
+//! nanophase hematite and 50% basalt, by oxidative weathering, "Current Mars").
+//!
 //! # Which `SurfaceModifiers`
 //!
 //! [`SurfaceModifiers`] here is the derivation's value.
@@ -108,7 +138,8 @@ use hyperion_surface::material::body_maturity;
 use crate::math;
 use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase, Condensates};
 use crate::planetary::context::XuvHistory;
-use crate::planetary::derive::atmosphere::{ATOMIC_MASS_CONSTANT_KG, Gas};
+use crate::planetary::derive::atmosphere::{ATOMIC_MASS_CONSTANT_KG, Gas, PartialPressures};
+use crate::planetary::hooks::cold_traps::is_collisional_air;
 use crate::planetary::hooks::figures::MagneticField;
 use crate::planetary::moons::Volcanism;
 use crate::substance::{self, Element, SubstanceId};
@@ -249,6 +280,31 @@ pub const IO_SO2_FROST_SHARE: f64 = 0.27;
 /// ("almost a third") and yellow ("about 40%") sulphur compounds. Labelled as Io's.
 pub const IO_SULPHUR_SHARE: f64 = 1.0 - IO_SO2_FROST_SHARE - 0.014;
 
+/// The share of a surface's dry, ice-free land an oxidised surface's `ferric` deposit covers
+/// (P14.T51.j): 0.31 (0.18–0.43), a labelled Mars value, the same for every world until a dust
+/// cycle is modelled (decision-p14-t51-batch §5).
+///
+/// It is the share of the TES-mapped Mars, about 80°S to 65°N, so the polar caps and their
+/// fringes left out, whose dust cover index lies below 0.940, Ruff and Christensen 2002's "more
+/// conservative 1σ" value for dust-covered surfaces (JGR 107(E12), 5127, §6.1 ¶40): 31.1%,
+/// measured from their Fig. 14, the colour bins weighted by the cosine of the latitude, since the
+/// paper states no area. The paper was read in full by the lane's first science check, which made
+/// the measurement; a second could not reach it, and found the 0.94 edge for thin dust coatings
+/// quoted from it elsewhere (the InSight landing site's assessment, JGR Planets, 2020). The index senses dust tens
+/// of µm thick, the optical surface, which an area mix at the deposit's optics reads. The bounds:
+/// below, Putzig et al. 2005's unit consistent with bright, unconsolidated fines, 19% of the
+/// TES-mapped 85% of Mars (Icarus 173, 325, unread, as quoted by Ojha et al. 2018, Nat. Commun.
+/// 9, 2867), and thermal inertia at most 100 J m⁻² K⁻¹ s^(−½) over 18.4% of Mellon et al. 2000's
+/// mapped grid (Icarus 148, 437), the thick mantles; above, about 0.43, counting the partly dusty
+/// index band, 0.940 to 0.962, in proportion.
+pub const DUSTY_SHARE: f64 = 0.31;
+
+/// The least time a surface must have lain dry, since its wet epoch's end or over its surface age,
+/// for its oxidised deposit (P14.T51.j): 0.1 Gyr, labelled (decision-p14-t51-batch §5). Bibring et
+/// al. 2006's siderikian era has run some 3.5 Gyr on Mars; the label only keeps a surface just
+/// dried from reading as weathered.
+pub const OXIDISED_DRY_TIME: Gigayears = Gigayears::new(0.1);
+
 /// The eccentricity of the Moon's reference orbit about the Sun, Earth's: 0.0167 (*from memory*;
 /// 0.016 71 at J2000).
 pub const LUNAR_REFERENCE_ECCENTRICITY: f64 = 0.0167;
@@ -373,6 +429,26 @@ pub struct ModifierInputs<'a> {
     pub mantle_sulphur: Kilograms,
     /// Its published condensates, P14.T51.a's [`Condensates`].
     pub condensates: &'a Condensates,
+    /// Its lid's lithology, P14.T51.c's `CrustComposition` member its `lid()` names: the crust at
+    /// its surface (P14.T51.j).
+    pub lid: SubstanceId,
+    /// Its air's gases at the surface, P14.T13's `Atmosphere::partial_pressures`, each finite and
+    /// at least 0 (P14.T51.j).
+    pub gases: PartialPressures,
+    /// Its surface's water, now and since its wet epoch (P14.T51.j).
+    pub water: WaterHistory,
+}
+
+/// A surface's water, now and since its wet epoch, as P14.T51.j's oxidised surface reads it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WaterHistory {
+    /// Liquid water lies on the surface now: P14.T24.a's flag.
+    WetNow,
+    /// The surface is dry now, its wet epoch ended this long before the present: P14.T48.b's
+    /// `WetEpoch::end`, finite and at least 0.
+    DrySince(Gigayears),
+    /// The surface is dry now and has never been wet: dry over its whole surface age.
+    NeverWet,
 }
 
 /// An input of [`ModifierInputs`] out of its range ([`DeriveModifiersError::OutOfRange`]).
@@ -406,6 +482,10 @@ pub enum ModifierInput {
     SurfaceTemperature,
     /// [`ModifierInputs::mantle_sulphur`].
     MantleSulphur,
+    /// [`ModifierInputs::gases`].
+    Gases,
+    /// [`WaterHistory::DrySince`]'s time.
+    DryTime,
 }
 
 impl ModifierInput {
@@ -427,6 +507,8 @@ impl ModifierInput {
             Self::HeatFlow => "heat flow",
             Self::SurfaceTemperature => "surface temperature",
             Self::MantleSulphur => "mantle's sulphur",
+            Self::Gases => "air's gases",
+            Self::DryTime => "time since its wet epoch",
         }
     }
 }
@@ -511,8 +593,31 @@ impl VolcanicDeposit {
     }
 }
 
+/// One weathering deposit a surface carries (P14.T51.j): a registry row and its share of the
+/// surface, `ferric` on an oxidised surface.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct WeatheringDeposit {
+    substance: SubstanceId,
+    area_fraction: f64,
+}
+
+impl WeatheringDeposit {
+    /// The deposit's substance: `ferric`, the oxidised `basalt_fe`.
+    #[must_use]
+    pub const fn substance(&self) -> SubstanceId {
+        self.substance
+    }
+
+    /// Its share of the surface, dimensionless in (0, 1).
+    #[must_use]
+    pub const fn area_fraction(&self) -> f64 {
+        self.area_fraction
+    }
+}
+
 /// A solid surface's modifiers (P14.T51.d; the [module](self) documentation): its weathering rate
-/// and maturity, its organic cover, its resurfacing rate and an Io's volcanic deposits.
+/// and maturity, its organic cover, its resurfacing rate, an Io's volcanic deposits and an oxidised
+/// surface's weathering deposit (P14.T51.j).
 ///
 /// The record's [`record::SurfaceModifiers`](crate::planetary::record::SurfaceModifiers) is a
 /// placeholder of the same name, which P14.T54.b replaces with this type.
@@ -524,6 +629,7 @@ pub struct SurfaceModifiers {
     organic_cover: f64,
     resurfacing_m_per_yr: f64,
     volcanic_deposits: Vec<VolcanicDeposit>,
+    weathering_deposits: Vec<WeatheringDeposit>,
 }
 
 impl SurfaceModifiers {
@@ -544,11 +650,13 @@ impl SurfaceModifiers {
     ///
     /// ```
     /// use hyperion_sim::planetary::chem::partition::Condensates;
+    /// use hyperion_sim::planetary::derive::atmosphere::PartialPressures;
     /// use hyperion_sim::planetary::hooks::figures::MagneticField;
     /// use hyperion_sim::planetary::hooks::modifiers::{
     ///     HeliocentricOrbit, LUNAR_REFERENCE_ECCENTRICITY, ModifierHost, ModifierInputs, Primary,
-    ///     SurfaceModifiers,
+    ///     SurfaceModifiers, WaterHistory,
     /// };
+    /// use hyperion_sim::substance::by_key;
     /// use hyperion_sim::units::consts::METRES_PER_AU;
     /// use hyperion_sim::units::{
     ///     Kelvin, Kilograms, Metres, MetresPerSecondSquared, Pascals, WattsPerSquareMetre, Years,
@@ -571,12 +679,16 @@ impl SurfaceModifiers {
     ///     surface_temperature: Kelvin::new(250.0),
     ///     mantle_sulphur: Kilograms::new(1e19),
     ///     condensates: &none,
+    ///     lid: by_key("basalt").expect("basalt is a registry row"),
+    ///     gases: PartialPressures::default(),
+    ///     water: WaterHistory::NeverWet,
     /// };
     /// let modifiers = SurfaceModifiers::derive(&moon)?;
     /// assert!((modifiers.weathering_rate() - 1.0).abs() < 1e-12);
     /// assert!(modifiers.maturity() > 0.99);
     /// assert!(modifiers.organic_cover() < 1e-12);
     /// assert_eq!(modifiers.volcanic_deposits(), []);
+    /// assert_eq!(modifiers.weathering_deposits(), []);
     /// # Ok::<(), hyperion_sim::planetary::hooks::modifiers::DeriveModifiersError>(())
     /// ```
     pub fn derive(inputs: &ModifierInputs<'_>) -> Result<Self, DeriveModifiersError> {
@@ -602,6 +714,7 @@ impl SurfaceModifiers {
             return Err(DeriveModifiersError::RateNotFinite);
         }
         let maturity = body_maturity(Gigayears::from(inputs.surface_age), rate);
+        let volcanic = volcanic_deposits(inputs);
         let tau = inputs.resurfacing_time.value();
         // An infinite resurfacing time renews nothing: +0.
         let resurfacing_per_yr = 1.0 / tau;
@@ -621,7 +734,8 @@ impl SurfaceModifiers {
             organic_ground,
             organic_cover,
             resurfacing_m_per_yr: RESURFACING_DEPTH.value() * resurfacing_per_yr,
-            volcanic_deposits: volcanic_deposits(inputs),
+            weathering_deposits: weathering_deposits(inputs, &volcanic),
+            volcanic_deposits: volcanic,
         })
     }
 
@@ -672,6 +786,110 @@ impl SurfaceModifiers {
     #[must_use]
     pub fn volcanic_deposits(&self) -> &[VolcanicDeposit] {
         &self.volcanic_deposits
+    }
+
+    /// Its weathering deposits (P14.T51.j): an oxidised surface's `ferric` over [`DUSTY_SHARE`]
+    /// of its dry, ice-free land, at most one today; empty for every other body.
+    #[must_use]
+    pub fn weathering_deposits(&self) -> &[WeatheringDeposit] {
+        &self.weathering_deposits
+    }
+}
+
+/// The weathering deposits of the surface `inputs` describe, whose volcanic deposits are
+/// `volcanic` (P14.T51.j; the [module](self)'s "The oxidised surface"): `ferric` over
+/// [`DUSTY_SHARE`] of its dry, ice-free land not under a volcanic deposit, where its lid is
+/// `basalt_fe`, its air collisional and oxidising, and its surface dry for at least
+/// [`OXIDISED_DRY_TIME`]; none otherwise, nor where that land is none. So the volcanic and
+/// weathering deposits together cover at most the surface.
+///
+/// The dry time is the time since the wet epoch's end, held to the surface age, since a surface
+/// renewed since its wet epoch has lain dry only for its own age and its deposit is buried with
+/// it; a surface never wet takes its age (decision-p14-t51ij-budget §2).
+///
+/// # Panics
+///
+/// Never: the registry holds `basalt_fe` and `ferric`.
+#[must_use]
+fn weathering_deposits(
+    inputs: &ModifierInputs<'_>,
+    volcanic: &[VolcanicDeposit],
+) -> Vec<WeatheringDeposit> {
+    let basalt_fe = substance::by_key("basalt_fe").expect("basalt_fe is a registry row");
+    let ferric = substance::by_key("ferric").expect("ferric is a registry row");
+    let age = Gigayears::from(inputs.surface_age).value();
+    let dry_for = match inputs.water {
+        WaterHistory::WetNow => return Vec::new(),
+        WaterHistory::DrySince(end) => {
+            if end.value() < age {
+                end.value()
+            } else {
+                age
+            }
+        }
+        WaterHistory::NeverWet => age,
+    };
+    let oxidised = inputs.lid == basalt_fe
+        && is_collisional_air(inputs.surface_pressure, &inputs.gases, inputs.gravity)
+        && oxidising(&inputs.gases)
+        && dry_for >= OXIDISED_DRY_TIME.value();
+    if !oxidised {
+        return Vec::new();
+    }
+    let erupted = volcanic
+        .iter()
+        .fold(0.0, |sum, deposit| sum + deposit.area_fraction());
+    let land = dry_ice_free_land(inputs.condensates) - erupted;
+    let area = if land > 0.0 { DUSTY_SHARE * land } else { 0.0 };
+    if area > 0.0 {
+        vec![WeatheringDeposit {
+            substance: ferric,
+            area_fraction: area,
+        }]
+    } else {
+        Vec::new()
+    }
+}
+
+/// Whether the air of gases `gases` is oxidising (P14.T51.j): it holds carbon dioxide, water or
+/// oxygen, and hydrogen is not its largest gas by number, each gas's moles its weight over its
+/// molar mass, in [`Gas::ALL`]'s order. A trace of an oxidant counts, and methane's reducing power
+/// is not weighed (recorded for the composition audit).
+#[must_use]
+fn oxidising(gases: &PartialPressures) -> bool {
+    let holds = |gas: Gas| gases.of(gas).value() > 0.0;
+    if !(holds(Gas::CarbonDioxide) || holds(Gas::Water) || holds(Gas::Oxygen)) {
+        return false;
+    }
+    let moles = |gas: Gas| gases.of(gas).value() / gas.molar_mass_g_per_mol();
+    let hydrogen = moles(Gas::Hydrogen);
+    Gas::ALL
+        .iter()
+        .filter(|&&gas| gas != Gas::Hydrogen)
+        .any(|&gas| moles(gas) > hydrogen)
+}
+
+/// The share of the surface that is dry, ice-free land (P14.T51.j): 1 less the areas of the
+/// perennial solid entries and the liquid entries of `condensates`, summed in their order and held
+/// to [0, 1]. A seasonal frost lies on the land part of the year and is counted as land.
+#[must_use]
+fn dry_ice_free_land(condensates: &Condensates) -> f64 {
+    let covered = condensates
+        .entries()
+        .iter()
+        .filter(|e| match e.phase() {
+            CondensatePhase::Solid => !e.is_seasonal(),
+            CondensatePhase::Liquid => true,
+            CondensatePhase::Supercritical => false,
+        })
+        .fold(0.0, |sum, e| sum + e.area_fraction());
+    let land = 1.0 - covered;
+    if land.is_nan() || land <= 0.0 {
+        0.0
+    } else if land < 1.0 {
+        land
+    } else {
+        1.0
     }
 }
 
@@ -816,6 +1034,19 @@ fn validate(inputs: &ModifierInputs<'_>) -> Result<(), DeriveModifiersError> {
         (
             non_negative(inputs.mantle_sulphur.value()),
             ModifierInput::MantleSulphur,
+        ),
+        (
+            Gas::ALL
+                .iter()
+                .all(|&gas| non_negative(inputs.gases.of(gas).value())),
+            ModifierInput::Gases,
+        ),
+        (
+            match inputs.water {
+                WaterHistory::DrySince(end) => non_negative(end.value()),
+                WaterHistory::WetNow | WaterHistory::NeverWet => true,
+            },
+            ModifierInput::DryTime,
         ),
     ];
     let planet = match inputs.primary {
