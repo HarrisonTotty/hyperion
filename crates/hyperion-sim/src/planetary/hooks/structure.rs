@@ -81,6 +81,8 @@ use std::fmt;
 use crate::math;
 use crate::planetary::derive::atmosphere::Gas;
 use crate::planetary::hooks::surface::SurfaceConditions;
+#[cfg(doc)]
+use crate::substance::PhaseDiagram;
 use crate::substance::{
     MOLAR_GAS_CONSTANT, SubstanceId, mean_molar_mass_g_per_mol, mixture_entropy_over_r,
     mixture_heat_capacity_over_r_at,
@@ -633,22 +635,25 @@ pub fn lapse_factor(
 /// ```
 ///
 /// with L the molar latent heat, x the condensable's mole fraction, `M_c` its molar mass and M and
-/// `c_p` the air's. L is the registry row's enthalpy of the branch at the ground
-/// ([`PhaseColumns`](crate::substance::PhaseColumns)): vaporisation at or above the triple point,
-/// sublimation below, and zero at or above the critical temperature, where no liquid forms. For a
-/// condensable that makes up the whole air (x `M_c` ≥ M) the departure diverges: its lapse rate is
-/// then its saturation curve's, which no α draws (Robinson and Catling 2012: "very moist
-/// atmospheres will have temperature varying as 1/ln(p/p0)").
+/// `c_p` the air's. L is the row's phase diagram's Clausius–Clapeyron enthalpy at the ground, R T²
+/// d ln `p_sat` ÷ dT, on P14.T49.b's fitted curves
+/// ([`PhaseDiagram::clausius_clapeyron_enthalpy_j_per_mol`]): the branch's in force,
+/// vaporisation's at or above the triple point and sublimation's below, so that the saturated
+/// mixing ratio's slope, which the form's L² carries, is the curve's; and zero at or above the
+/// critical temperature, where no liquid forms. For a condensable that makes up
+/// the whole air (x `M_c` ≥ M) the departure diverges: its lapse rate is then its saturation
+/// curve's, which no α draws (Robinson and Catling 2012: "very moist atmospheres will have
+/// temperature varying as 1/ln(p/p0)").
 ///
 /// Signoff-3.md's figures, by hand: about 1.6 for Earth's water, 1.8 for Titan's methane and 0.05
-/// for a Mars's water; the registry's rows give 1.56, 2.07 and 0.046 (this module's tests).
+/// for a Mars's water; the registry's diagrams give 1.68, 2.08 and 0.046 (this module's tests).
 ///
 /// Its limits, recorded in plan 14's Risks:
-/// - the row's branch enthalpy is a constant, its triple point's or an effective value, which
-///   overstates L as T nears the critical temperature, where L falls to zero; so the departure
-///   steps to zero at `T_c` rather than falling to it. P14.T49.b's fitted enthalpies take the
-///   constants' place at the 22 → 23 batch's wiring (P14.T54.a), when they replace the phase
-///   columns;
+/// - the curve's Clausius–Clapeyron enthalpy is the latent heat over z″ − z′, the vapour's
+///   departure from an ideal gas, which the form assumes: within a few per cent of h″ − h′ far
+///   from the critical point (water's 44.47 kJ mol⁻¹ at 288 K is about 0.1% above it), but finite
+///   at `T_c`, where the latent heat falls to zero; so the departure steps to zero at `T_c` rather
+///   than falling to it;
 /// - it is read at the ground alone: an air whose ground is above its condensable's critical
 ///   temperature but whose upper air condenses takes the dry α.
 ///
@@ -696,7 +701,7 @@ pub fn latent_heat_departure(
     if !is_positive(t) {
         return None;
     }
-    let phase = condensable.substance().phase()?;
+    let diagram = condensable.substance().phase_diagram()?;
     let condensable_mass = condensable.substance().molar_mass_g_per_mol()?;
     let x = gases
         .iter()
@@ -704,13 +709,10 @@ pub fn latent_heat_departure(
         .map_or(0.0, |&(_, x)| x);
     let air_mass = mean_molar_mass_g_per_mol(gases)?;
     let heat_capacity = mixture_heat_capacity_over_r_at(gases, surface_temperature)?;
-    let latent = if t >= phase.critical_temperature().value() {
-        0.0
-    } else if t < phase.triple_temperature().value() {
-        phase.sublimation_enthalpy_j_per_mol()
-    } else {
-        phase.vaporisation_enthalpy_j_per_mol()
-    };
+    // None at or above the critical temperature, where no liquid forms.
+    let latent = diagram
+        .clausius_clapeyron_enthalpy_j_per_mol(surface_temperature)
+        .unwrap_or(0.0);
     let rest = 1.0 - x * condensable_mass / air_mass;
     if rest.is_nan() || rest <= 0.0 {
         return Some(f64::INFINITY);

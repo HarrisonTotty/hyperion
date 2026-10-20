@@ -400,8 +400,8 @@ fn methane_and_oxygen_reach_the_fractions_through_the_speciated_derivation() {
 
 /// Earth's measured state as [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] and
 /// [`WET_ALBEDO_GRADIENT`] are fitted to: 288 K over 240.25 W m⁻² absorbed, the grey τ that holds
-/// it, Earth's column of dry air under g₀, water vapour at its saturation pressure on the
-/// registry's curve, its radius, obliquity and sidereal day.
+/// it, Earth's column of dry air under g₀, water vapour at its saturation pressure on the curve the
+/// fit took ([`FITTED_WATER`]), its radius, obliquity and sidereal day.
 fn earth_column() -> (Column, SeasonalSpin) {
     let absorbed = (1.0 - 0.294) * crate::units::consts::SOLAR_CONSTANT_W_PER_M2 / 4.0;
     let surface = Kelvin::new(288.0);
@@ -428,19 +428,29 @@ fn earth_column() -> (Column, SeasonalSpin) {
     (column, spin)
 }
 
+/// The water curve Earth's measured state was fitted on: version 22's held Clausius–Clapeyron
+/// curve of water (P14.T13.c's), `p_t` exp(−(L ÷ R)(1 ÷ T − 1 ÷ `T_t`)) from its triple point,
+/// 273.16 K and 611.657 Pa, at L = 43.5 kJ mol⁻¹, whose slope L ÷ (R T²) the gain took: the
+/// registry's until P14.T54.a's switch to P14.T49.b's fitted curves retired it (1.64 kPa at 288 K
+/// against the diagram's 1.689, and 43.5 kJ mol⁻¹ against its 44.47). The fit test keeps it until
+/// P14.T54.a's Earth refit takes the batch's measured Earth on the diagram
+/// (decision-pre-23-review item 20). Triple temperature (K), triple pressure (Pa) and enthalpy
+/// (J mol⁻¹).
+const FITTED_WATER: (f64, f64, f64) = (273.16, 611.657, 43_500.0);
+
 /// The greenhouse gain of Earth's measured state, by hand: water at its saturation pressure on
-/// the registry's curve at `surface`, its mole fraction among `pressure` of dry air, in a column of
-/// grey optical depth `tau`.
+/// the fit's curve ([`FITTED_WATER`]) at `surface`, its mole fraction among `pressure` of dry air,
+/// in a column of grey optical depth `tau`.
 fn earth_gain(surface: Kelvin, tau: f64, pressure: f64) -> f64 {
     let water = Gas::Water;
-    let phase = water.substance().substance().phase().unwrap();
-    let p_w = phase.saturation_pressure(surface).value();
+    let (triple_temperature, triple_pressure, enthalpy) = FITTED_WATER;
+    let t = surface.value();
+    let p_w = triple_pressure
+        * math::exp(-(enthalpy / MOLAR_GAS_CONSTANT) * (1.0 / t - 1.0 / triple_temperature));
     let moles_w = p_w / water.molar_mass_g_per_mol();
     let x_w = moles_w / ((pressure - p_w) / EARTH_AIR_MOLAR_MASS_G_PER_MOL + moles_w);
     let tau_w = greenhouse().water() * (p_w / 1e5).sqrt();
-    let t = surface.value();
-    let slope = (1.0 - x_w) * 0.5 * tau_w * phase.vaporisation_enthalpy_j_per_mol()
-        / (MOLAR_GAS_CONSTANT * t * t);
+    let slope = (1.0 - x_w) * 0.5 * tau_w * enthalpy / (MOLAR_GAS_CONSTANT * t * t);
     t / 4.0 * 0.75 * slope / (1.0 + 0.75 * tau)
 }
 
@@ -578,19 +588,20 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
         );
     }
     // The generated Earth holds its water at saturation: by hand, as `earth_gain` takes the
-    // measured state, at its own temperature, depth and water fraction.
+    // measured state, at its own temperature, depth and water fraction, on water's phase diagram,
+    // its curve's slope at T_s (44.47 kJ mol⁻¹ at 288 K).
     let (_, earth, conditions) = found(&table, "Earth");
     let (column, _) = column_of(earth, spin_of("Earth"));
     let air = earth.atmosphere();
     let t_s = air.surface_temperature();
     let water = Gas::Water;
-    let phase = water.substance().substance().phase().unwrap();
-    assert!(air.partial_pressures().of(water) >= phase.saturation_pressure(t_s));
+    let diagram = water.substance().substance().phase_diagram().unwrap();
+    assert!(air.partial_pressures().of(water) >= diagram.saturation_pressure(t_s));
     let t = t_s.value();
     let tau_w = greenhouse().water() * (air.partial_pressures().of(water).value() / 1e5).sqrt();
+    let enthalpy = diagram.clausius_clapeyron_enthalpy_j_per_mol(t_s).unwrap();
     let slope =
-        (1.0 - fraction(conditions, water)) * 0.5 * tau_w * phase.vaporisation_enthalpy_j_per_mol()
-            / (MOLAR_GAS_CONSTANT * t * t);
+        (1.0 - fraction(conditions, water)) * 0.5 * tau_w * enthalpy / (MOLAR_GAS_CONSTANT * t * t);
     let by_hand = t / 4.0 * 0.75 * slope / (1.0 + 0.75 * air.optical_depth());
     assert!(
         (column.greenhouse_gain - by_hand).abs() < 1e-12,
@@ -620,15 +631,13 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
             * 0.75_f64.sqrt();
     for t in [260.0, 273.17, 288.0, 300.0, 320.0, 340.0, 360.0] {
         let surface = Kelvin::new(t);
-        let p_w = phase.saturation_pressure(surface).value();
+        let p_w = diagram.saturation_pressure(surface).value();
         let moles_w = p_w / water.molar_mass_g_per_mol();
         let x_w = moles_w / (75_000.0 / n2 + moles_w);
         let tau_w = greenhouse().water() * (p_w / 1e5).sqrt();
-        let enthalpy = if t < phase.triple_temperature().value() {
-            phase.sublimation_enthalpy_j_per_mol()
-        } else {
-            phase.vaporisation_enthalpy_j_per_mol()
-        };
+        let enthalpy = diagram
+            .clausius_clapeyron_enthalpy_j_per_mol(surface)
+            .unwrap();
         let slope = (1.0 - x_w) * 0.5 * tau_w * enthalpy / (MOLAR_GAS_CONSTANT * t * t);
         let gain = grey_gain(surface, tau_w + dry_depth, slope);
         eprintln!("{t} K: gain {gain:.3}");
@@ -653,17 +662,17 @@ fn under_the_batch_the_greenhouse_gain_counts_the_water_the_partition_holds() {
     let (column, _) = column_of(&earth, spin);
     let air = earth.atmosphere();
     let water = Gas::Water;
-    let phase = water.substance().substance().phase().unwrap();
+    let diagram = water.substance().substance().phase_diagram().unwrap();
     let t_s = air.surface_temperature();
     let p_w = air.partial_pressures().of(water);
     // Version 22's rule would not count it.
-    assert!(p_w < phase.saturation_pressure(t_s), "{p_w:?}");
+    assert!(p_w < diagram.saturation_pressure(t_s), "{p_w:?}");
     let t = t_s.value();
     let tau_w = SnapshotRules::Batch.greenhouse().water() * (p_w.value() / 1e5).sqrt();
     let slope = (1.0 - fraction(&conditions, water))
         * 0.5
         * tau_w
-        * phase.vaporisation_enthalpy_j_per_mol()
+        * diagram.clausius_clapeyron_enthalpy_j_per_mol(t_s).unwrap()
         / (MOLAR_GAS_CONSTANT * t * t);
     let by_hand = t / 4.0 * 0.75 * slope / (1.0 + 0.75 * air.optical_depth());
     let held = column_of(&found(&table(), "Earth").1, spin)

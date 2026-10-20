@@ -185,7 +185,7 @@ pub const VOLCANISM_SATURATION: f64 = 1.983_695_652_173_913;
 /// W m⁻² Gyr: its integral by [`erupted_melt_w_gyr_per_m2`] over its surface age, so that its volcanism level
 /// is 1 (science-p14-t24b-laws §4.1, whose replica gives about 0.0335): 0.0349 over its 3.90 Gyr
 /// surface. `Fitted`: a test refits it.
-pub const MARS_ERUPTED_MELT_W_GYR_PER_M2: f64 = 0.034_943_949_696_657_574;
+pub const MARS_ERUPTED_MELT_W_GYR_PER_M2: f64 = 0.034_944_033_055_635_99;
 
 /// The Solar System table's Mars's plume vigour, g `D_m`³, m⁴ s⁻² ([`plume_vigour_m4_per_s2`]), so that its
 /// volcanism level is 1 (science-p14-t24b-laws §4.1): 2.22 × 10¹⁹, its mantle 1,814 km deep over

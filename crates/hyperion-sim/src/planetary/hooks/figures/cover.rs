@@ -12,8 +12,9 @@
 //!   it, as Mars has.
 //! - **The potential ocean** `f_pot` ([`potential_ocean`]): the area that water fills of
 //!   P14.T48.a's own hypsometry ([`Hypsometry`]), each population a Gaussian truncated at ±3σ, to
-//!   the level whose volume is the liquid's, `σ_s` ÷ `ρ_l` (T49.a's
-//!   [`triple_liquid_density`](crate::substance::PhaseColumns::triple_liquid_density)). It reaches
+//!   the level whose volume is the liquid's, `σ_s` ÷ `ρ_l` (water's saturated liquid at its triple
+//!   point on its phase diagram,
+//!   [`triple_liquid_density`](crate::substance::PhaseDiagram::triple_liquid_density)). It reaches
 //!   1, an ocean world, when the level tops the upper population, and is continuous throughout.
 //!   It needs no width or capacity constant, which the logistic it replaces would have had to fit.
 //! - **The published ocean** `f_o` is `f_pot` where the body holds liquid now (P14.T24.a's
@@ -102,36 +103,37 @@ pub const OCEAN_LEVEL_HALVINGS: u32 = 64;
 /// 99.73% of a Gaussian's area (science-p14-t24b-laws §4.2).
 const TRUNCATION: f64 = 3.0;
 
-/// The melting point of water ice, the triple temperature of water's registry row: 273.16 K, the
-/// solid–liquid line of the registry's diagram, which P14.T24.a's liquid flag reads too, so the
-/// ice and the flag share one line (science-p14-t24b-laws §4.x.2).
+/// The melting point of water ice, the triple temperature of water's phase diagram: 273.16 K
+/// (IAPWS-95's), where the diagram's solid and liquid meet at their vapour pressure, which
+/// P14.T24.a's liquid flag reads too, so the ice and the flag share one line
+/// (science-p14-t24b-laws §4.x.2).
 ///
 /// # Panics
 ///
-/// Never: water's registry row carries its phase columns (the registry's tests).
+/// Never: water's registry row carries its phase diagram (the registry's tests).
 #[must_use]
 pub fn melting_point() -> Kelvin {
     Gas::Water
         .substance()
         .substance()
-        .phase()
-        .expect("water's registry row carries its phase columns")
+        .phase_diagram()
+        .expect("water's registry row carries its phase diagram")
         .triple_temperature()
 }
 
-/// The density of liquid water at its triple point, kg m⁻³: T49.a's row (P14.T24.b's `ρ_l`, which
-/// T49.b's `ρ_l`(T) supersedes).
+/// The density of liquid water at its triple point, kg m⁻³: its phase diagram's saturated liquid
+/// there, IAPWS SR1-86's ancillary (P14.T49.b), 999.79 (P14.T24.b's `ρ_l`).
 ///
 /// # Panics
 ///
-/// Never: water's registry row carries its phase columns (the registry's tests).
+/// Never: water's registry row carries its phase diagram (the registry's tests).
 #[must_use]
 pub fn liquid_water_density() -> KilogramsPerCubicMetre {
     Gas::Water
         .substance()
         .substance()
-        .phase()
-        .expect("water's registry row carries its phase columns")
+        .phase_diagram()
+        .expect("water's registry row carries its phase diagram")
         .triple_liquid_density()
 }
 
@@ -215,9 +217,9 @@ pub fn surface_water(
     let saturation = Gas::Water
         .substance()
         .substance()
-        .phase()
-        .map_or(Pascals::new(f64::INFINITY), |phase| {
-            phase.saturation_pressure(atmosphere.surface_temperature())
+        .phase_diagram()
+        .map_or(Pascals::new(f64::INFINITY), |diagram| {
+            diagram.saturation_pressure(atmosphere.surface_temperature())
         });
     if vapour < saturation {
         return KilogramsPerSquareMetre::ZERO;
@@ -237,7 +239,8 @@ pub fn surface_water(
 /// after, as T24.b's, of the water condensed at the surface, `M` ÷ 4πR² − `p_H₂O` ÷ g, with T24.b's
 /// gate on the state and the retention, but with no test of the vapour's saturation: the partition
 /// holds a minor condensable's vapour at its humidity, 0.77 of saturation for water, on T49.b's
-/// curve, which that test, on the held curve, would read as no reservoir on every wet world. The
+/// curve, which version 22's test, the vapour at least its saturation pressure, would read as no
+/// reservoir on every wet world. The
 /// condensed water is the partition's, the vapour its airborne weight: the one water that the
 /// potential ocean, its weight θ, the ice, the ocean under a `Snowball`'s ice, the own sea's weight
 /// in the partition and the published water entries all read.

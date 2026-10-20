@@ -105,8 +105,8 @@ pub(super) fn coefficient(moisture: &Moisture, specific_heat_j_per_kg_k: f64, t_
     let triple_k = moisture
         .condensable
         .substance()
-        .phase()
-        .map_or(0.0, |phase| phase.triple_temperature().value());
+        .phase_diagram()
+        .map_or(0.0, |diagram| diagram.triple_temperature().value());
     let at_k = if t_k < triple_k + ENERGY_SLOPE_STEP_K {
         triple_k + ENERGY_SLOPE_STEP_K
     } else {

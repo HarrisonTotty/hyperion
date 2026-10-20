@@ -1282,11 +1282,11 @@ lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fe0000000000000  # 0.5
 bond_ratio = 0x3fefd83ea50b71d8  # 0.9951470588235294
 surface_state: Snowball, Rock; climate Efficient, Seasonal, CO2, EnergyBalance
-mean_surface_temperature_k = 0x405e58efffbe7013  # 121.38964837644043
-equator_pole_contrast_k = 0x3fff1b742a872c80  # 1.9442025815249337
-day_night_contrast_k = 0x3ff866a87d71c540  # 1.5250630283520223
-surface_pressure_pa = 0x40b522e2cccaf3e7  # 5410.885937389895
-sigma_h_m = 0x408f4bdcb9993eda  # 1001.4827758762651
+mean_surface_temperature_k = 0x405e518476d93760  # 121.27370997631579
+equator_pole_contrast_k = 0x3fff18a6a0cb6400  # 1.9435182839426943
+day_night_contrast_k = 0x3ff8685188302a80  # 1.5254683799600173
+surface_pressure_pa = 0x40b5226051fe3a20  # 5410.376251115027
+sigma_h_m = 0x408f4bde3fea2124  # 1001.4835203448642
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fa087b5458de8fe  # 0.03228537057926138
 surface_age_yr = 0x41d47254431a6f4e  # 1372147980.4130435
@@ -1973,15 +1973,15 @@ lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fe0000000000000  # 0.5
 bond_ratio = 0x3fefd83ea50b71d8  # 0.9951470588235294
 surface_state: Snowball, Rock; climate Efficient, Seasonal, CO2, Isothermal
-mean_surface_temperature_k = 0x4050deebac61dab5  # 67.4831343608483
-equator_pole_contrast_k = 0x3fc661655112f000  # 0.174847282969381
+mean_surface_temperature_k = 0x4050deeb6fe2e49d  # 67.48311993749162
+equator_pole_contrast_k = 0x3fc6616542dc5400  # 0.17484727635078912
 day_night_contrast_k = 0x0000000000000000  # 0.0
-surface_pressure_pa = 0x40b49a4c4894bbb9  # 5274.2979824980075
+surface_pressure_pa = 0x40b49a4c4894ac3b  # 5274.2979824944005
 sigma_h_m = 0x408c2000f372ecf7  # 900.0004643419805
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x4024aa4139aa4276  # 10.332528879197735
 surface_age_yr = 0x4051d2af401dca0d  # 71.29194643887622
-ocean_fraction = 0x3fe787cc803cf0f1  # 0.735327005829758
+ocean_fraction = 0x3fe787cf58acbafd  # 0.7353283626488004
 ice_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 0504 A f IV: Moon(Regular) about Some(Body(BodyIndex(1280))), Present
@@ -2058,15 +2058,15 @@ lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fe0000000000000  # 0.5
 bond_ratio = 0x3fefd83ea50b71d8  # 0.9951470588235294
 surface_state: Snowball, Rock; climate Efficient, Seasonal, CO2, Isothermal
-mean_surface_temperature_k = 0x4052db1f849e948e  # 75.4237987087856
-equator_pole_contrast_k = 0x3fc0614ca8649000  # 0.12796934339814925
+mean_surface_temperature_k = 0x4052db1e20069158  # 75.42371369019872
+equator_pole_contrast_k = 0x3fc0614c89ff7c00  # 0.1279693292444506
 day_night_contrast_k = 0x0000000000000000  # 0.0
-surface_pressure_pa = 0x40ed865dd90bb9e6  # 60466.932744849284
+surface_pressure_pa = 0x40ed865dd90ae50e  # 60466.93274445283
 sigma_h_m = 0x408c2036e2696caa  # 900.0267990337645
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3ff1a67c4f7596d6  # 1.103145895374316
 surface_age_yr = 0x40e7447e0b6f98d6  # 47651.93889598704
-ocean_fraction = 0x3fef043bb576474f  # 0.9692667526416957
+ocean_fraction = 0x3fef043cd48c5c39  # 0.969267287381519
 ice_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 0505 A f VII: Moon(Captured) about Some(Body(BodyIndex(1280))), Present
@@ -5258,11 +5258,11 @@ lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fe0000000000000  # 0.5
 bond_ratio = 0x3fefd83ea50b71d8  # 0.9951470588235294
 surface_state: Snowball, Rock; climate Efficient, Seasonal, CO2, EnergyBalance
-mean_surface_temperature_k = 0x405e58efda23a18c  # 121.38963941077799
-equator_pole_contrast_k = 0x3fff1b73b3533d00  # 1.9442021374596266
-day_night_contrast_k = 0x3ff866a826913580  # 1.5250627047092564
-surface_pressure_pa = 0x40b522e2cc1a936a  # 5410.885926877012
-sigma_h_m = 0x408f4bdcc7770f7f  # 1001.482802324448
+mean_surface_temperature_k = 0x405e5184518884cf  # 121.27370107967293
+equator_pole_contrast_k = 0x3fff18a629a9aa00  # 1.9435178401423627
+day_night_contrast_k = 0x3ff8685131331340  # 1.5254680559020954
+surface_pressure_pa = 0x40b52260515b2aa2  # 5410.376241395863
+sigma_h_m = 0x408f4bde4dc7e4af  # 1001.4835467926658
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fa087b52ad5f899  # 0.03228536746881722
 surface_age_yr = 0x41d47254a33314c8  # 1372148364.7981434
@@ -5949,15 +5949,15 @@ lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fe0000000000000  # 0.5
 bond_ratio = 0x3fefd83ea50b71d8  # 0.9951470588235294
 surface_state: Snowball, Rock; climate Efficient, Seasonal, CO2, Isothermal
-mean_surface_temperature_k = 0x4050deeb9f425352  # 67.48313123204323
-equator_pole_contrast_k = 0x3fc6616500ab5000  # 0.17484724552798525
+mean_surface_temperature_k = 0x4050deeb62c36173  # 67.48311680870192
+equator_pole_contrast_k = 0x3fc66164f274b400  # 0.17484723890939335
 day_night_contrast_k = 0x0000000000000000  # 0.0
-surface_pressure_pa = 0x40b49a4c48a83498  # 5274.297983658638
+surface_pressure_pa = 0x40b49a4c48a8251a  # 5274.297983655031
 sigma_h_m = 0x408c2000f372ecfb  # 900.000464341981
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x4024aa413988a472  # 10.332528875284172
 surface_age_yr = 0x4051d2af40721835  # 71.29194651739165
-ocean_fraction = 0x3fe787cc803cf0ef  # 0.7353270058297577
+ocean_fraction = 0x3fe787cf58acbafb  # 0.7353283626488002
 ice_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 0504 A f IV: Moon(Regular) about Some(Body(BodyIndex(1280))), Present
@@ -6034,15 +6034,15 @@ lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fe0000000000000  # 0.5
 bond_ratio = 0x3fefd83ea50b71d8  # 0.9951470588235294
 surface_state: Snowball, Rock; climate Efficient, Seasonal, CO2, Isothermal
-mean_surface_temperature_k = 0x4052db1f7844b73f  # 75.42379576406982
-equator_pole_contrast_k = 0x3fc0614c6c1d4000  # 0.12796931532875533
+mean_surface_temperature_k = 0x4052db1e13acc741  # 75.42371074555287
+equator_pole_contrast_k = 0x3fc0614c4db83400  # 0.12796930117511351
 day_night_contrast_k = 0x0000000000000000  # 0.0
-surface_pressure_pa = 0x40ed865dd91895f5  # 60466.93275098122
+surface_pressure_pa = 0x40ed865dd917c11e  # 60466.932750584776
 sigma_h_m = 0x408c2036e26978f0  # 900.0267990341217
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3ff1a67c4e1a236b  # 1.1031458903182407
 surface_age_yr = 0x40e7447e10a3665f  # 47651.93953104014
-ocean_fraction = 0x3fef043bb5764560  # 0.9692667526416407
+ocean_fraction = 0x3fef043cd48c5a4b  # 0.9692672873814642
 ice_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body 0505 A f VII: Moon(Captured) about Some(Body(BodyIndex(1280))), Present

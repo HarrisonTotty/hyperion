@@ -124,7 +124,11 @@ fn a_saturated_mars_s_regolith_has_ten_times_the_rock_s_erodibility() {
     assert_eq!(fluid.key.as_str(), "H2O");
     assert_same_bits(
         fluid.density_kg_m3,
-        water.phase().unwrap().triple_liquid_density().value(),
+        water
+            .phase_diagram()
+            .unwrap()
+            .triple_liquid_density()
+            .value(),
     );
     assert!(crater_saturated(&inputs));
     assert_eq!(erodibility.surface(Crust::Lid), Surface::SaturatedRegolith);

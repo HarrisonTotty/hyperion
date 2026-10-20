@@ -1429,9 +1429,14 @@ impl KaspiShowman {
             // alone reads a freezing point, never enters.
             freezing: Freezing::Never { albedo: 0.35 },
             specific_heat_j_per_kg_k: EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K,
+            // Its latent heat as `Moisture::of` takes it, at the reference run's mean, 288 K.
             moisture: Some(Moisture {
                 condensable: water,
-                latent_heat_j_per_kg: row.phase().unwrap().vaporisation_enthalpy_j_per_mol()
+                latent_heat_j_per_kg: row
+                    .phase_diagram()
+                    .unwrap()
+                    .clausius_clapeyron_enthalpy_j_per_mol(crate::units::Kelvin::new(288.0))
+                    .unwrap()
                     / (mass * 1e-3),
                 mass_ratio: mass / air.molar_mass_g_per_mol,
                 surface_pressure_pa: pressure_pa,

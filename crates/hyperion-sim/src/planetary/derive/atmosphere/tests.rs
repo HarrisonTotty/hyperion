@@ -596,69 +596,24 @@ fn escape_and_retention_follow_their_formulae() {
     assert!((loss.value() / expected - 1.0).abs() < 1e-12);
 }
 
-/// P14.T13.c's private Clausius–Clapeyron constants, frozen here as they were before the substance
-/// registry took them (P14.T49.a): triple temperature (K) and pressure (Pa), the enthalpies of
-/// sublimation and vaporisation (J mol⁻¹) and the critical temperature (K).
-const T13_CONDENSATION: [(Gas, [f64; 5]); 4] = [
-    (Gas::Water, [273.16, 611.657, 51_059.0, 43_500.0, 647.1]),
-    (
-        Gas::CarbonDioxide,
-        [216.58, 518_500.0, 26_100.0, 15_300.0, 304.13],
-    ),
-    (Gas::Nitrogen, [63.15, 12_520.0, 6_900.0, 5_570.0, 126.19]),
-    (Gas::Argon, [83.81, 68_890.0, 7_800.0, 6_430.0, 150.69]),
-];
-
-/// P14.T13.c's private saturation pressure, verbatim, on the constants `c` of
-/// [`T13_CONDENSATION`].
-fn t13_saturation_pressure(c: [f64; 5], t: f64) -> f64 {
-    let [
-        triple_temperature,
-        triple_pressure,
-        sublimation,
-        vaporisation,
-        critical_temperature,
-    ] = c;
-    if t >= critical_temperature {
-        return f64::INFINITY;
-    }
-    if t.is_nan() || t <= 0.0 {
-        return 0.0;
-    }
-    let enthalpy = if t < triple_temperature {
-        sublimation
-    } else {
-        vaporisation
-    };
-    // The molar gas constant as P14.T13.c wrote it, frozen too.
-    let molar_gas_constant = 8.314_462_618_153_24;
-    triple_pressure
-        * math::exp(-(enthalpy / molar_gas_constant) * (1.0 / t - 1.0 / triple_temperature))
-}
-
-/// The registry's saturation pressures of the four are P14.T13.c's to the bit, at 200 temperatures
-/// from a fifth of the triple point to past the critical point, and at the edges.
+/// Version 22's greenhouse holds a condensing gas at its phase diagram's saturation pressure at the
+/// surface temperature it publishes, to the bit: the test the greenhouse gain and the surface's
+/// reservoirs read (`partial ≥ p_sat`), on the table's Earth, whose water is held. It replaces the
+/// test that held the registry's curves to P14.T13.c's private Clausius–Clapeyron constants bit
+/// for bit, which P14.T54.a's switch to P14.T49.b's fitted curves retired with the held columns.
 #[test]
-fn the_registry_s_saturation_pressures_are_t13_s_to_the_bit() {
-    for (gas, c) in T13_CONDENSATION {
-        let (low, high) = (0.2 * c[0], 1.1 * c[4]);
-        let mut temperatures: Vec<f64> = (0..200)
-            .map(|i| low + (high - low) * f64::from(i) / 199.0)
-            .collect();
-        temperatures.extend([0.0, -1.0, f64::NAN, c[0], c[4], f64::INFINITY]);
-        for t in temperatures {
-            let registry = saturation_pressure(gas.substance(), Kelvin::new(t))
-                .expect("the gas has phase data")
-                .value();
-            assert_same_bits(registry, t13_saturation_pressure(c, t));
-        }
-        let phase = gas.substance().substance().phase().unwrap();
-        assert_same_bits(phase.triple_temperature().value(), c[0]);
-        assert_same_bits(phase.triple_pressure().value(), c[1]);
-        assert_same_bits(phase.sublimation_enthalpy_j_per_mol(), c[2]);
-        assert_same_bits(phase.vaporisation_enthalpy_j_per_mol(), c[3]);
-        assert_same_bits(phase.critical_temperature().value(), c[4]);
-    }
+fn version_22_s_greenhouse_holds_a_condensing_gas_at_its_diagram_s_saturation_pressure() {
+    let table = table();
+    let air = found(&table, "Earth").atmosphere();
+    let held = saturation_pressure(Gas::Water.substance(), air.surface_temperature())
+        .expect("water has a phase diagram");
+    let diagram = crate::substance::diagram::saturation_pressure(
+        Gas::Water.substance(),
+        air.surface_temperature(),
+    )
+    .expect("water has a phase diagram");
+    assert_same_bits(held.value(), diagram.value());
+    assert_same_bits(air.partial_pressures().of(Gas::Water).value(), held.value());
 }
 
 #[test]
@@ -2313,8 +2268,9 @@ fn titan_inputs() -> AtmosphereInputs {
 
 /// Under the batch's rules the passes hold each condensable as the partition does: Earth's water,
 /// a minor condensable, at Manabe and Wetherald's 0.77 of its saturation at the mean, and Titan's
-/// methane on the minor branch at its humidity, within 1% of version 22's (the registry's fitted
-/// curve against the held one; plan 14's test keeps Titan minor).
+/// methane on the minor branch at its humidity, within 1% of version 22's (both on the registry's
+/// fitted curve since P14.T54.a's switch, as they were within 1% against the held one; plan 14's
+/// test keeps Titan minor).
 ///
 /// Version 22 held Earth's water at 1, its column weight at the saturation pressure, so under
 /// version 22's constants the partition cooled this Earth some 5 K. P14.T57.a's water refit takes

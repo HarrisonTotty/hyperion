@@ -20,8 +20,7 @@
 //!   Clausius–Clapeyron line at the range's end;
 //! - **the melting curve** ([`MeltingCurve`]) is the reference's melting equation where it has
 //!   one, so that a liquid under pressure freezes and water's ice melts under pressure. Without
-//!   one the melting line stands at the triple temperature, as the held columns
-//!   ([`PhaseColumns`](super::PhaseColumns)) take every melting line;
+//!   one the melting line stands at the triple temperature;
 //! - **the densities**: the saturated liquid's `ρ_l`(T) is the same reference's ancillary density
 //!   equation ([`DensityEquation`]), and each solid phase's `ρ_s`(T) ([`SolidPhase`]) its measured
 //!   density, as a fit of its lattice or bulk density in temperature where one was read, or one
@@ -31,10 +30,11 @@
 //!   enthalpy R T² d ln p ÷ dT at any temperature ([`PhaseDiagram::clausius_clapeyron_enthalpy_j_per_mol`]),
 //!   which a reader integrating Clausius–Clapeyron takes so that it reproduces the curve.
 //!
-//! Generator version 22 publishes none of it: the record still reads the held columns, and
-//! P14.T54.a points its callers at this module's [`saturation_pressure`], [`phase_at`] and
-//! [`condensables`], which carry the held functions' names, at the 22 → 23 bump
-//! (decision-bump-plan-after-22 §1.2).
+//! The registry re-exports this module's [`saturation_pressure`], [`phase_at`] and
+//! [`condensables`] as `substance::saturation_pressure`, `substance::phase_at` and
+//! `substance::condensables`, and every caller reads them: P14.T54.a's switch from P14.T49.a's
+//! held phase columns, five constant-enthalpy Clausius–Clapeyron sets, which it retired
+//! (decision-bump-plan-after-22 §1.2; decision-pre-23-review item 23).
 //!
 //! The arithmetic is the crate's deterministic `math`, in fixed term order, and every inversion a
 //! fixed number of bisections, so that a value is the same bits on every target (sim-determinism).
@@ -733,8 +733,7 @@ impl PhaseDiagram {
     /// the liquid above.
     ///
     /// Infinite at and above the critical temperature, where the substance never condenses, and
-    /// zero at or below 0 K and for a temperature that is not a number, as the held
-    /// [`PhaseColumns::saturation_pressure`](super::PhaseColumns::saturation_pressure) answers.
+    /// zero at or below 0 K and for a temperature that is not a number.
     #[must_use]
     pub fn saturation_pressure(&self, temperature: Kelvin) -> Pascals {
         if temperature >= self.critical_temperature {
@@ -839,9 +838,8 @@ impl PhaseDiagram {
             .then(|| self.liquid_density.density(temperature))
     }
 
-    /// The saturated liquid's density at the triple point: what a body's liquid inventory occupies
-    /// where the held columns' [`triple_liquid_density`](super::PhaseColumns::triple_liquid_density)
-    /// is read now.
+    /// The saturated liquid's density at the triple point: what a body's liquid inventory
+    /// occupies (P14.T24.b's ocean volume).
     #[must_use]
     pub fn triple_liquid_density(&self) -> KilogramsPerCubicMetre {
         self.liquid_density.density(self.triple_temperature)
@@ -984,8 +982,7 @@ impl PhaseDiagram {
 /// The saturation vapour pressure of the substance `id` at `temperature` on its phase diagram
 /// ([`PhaseDiagram::saturation_pressure`]), or `None` for a row with none.
 ///
-/// P14.T54.a re-exports it at `substance::` in place of the held
-/// [`substance::saturation_pressure`](super::saturation_pressure).
+/// The registry re-exports it as `substance::saturation_pressure` (P14.T54.a).
 ///
 /// # Examples
 ///
@@ -1020,8 +1017,7 @@ pub fn saturation_pressure(id: SubstanceId, temperature: Kelvin) -> Option<Pasca
 /// ([`PhaseDiagram::phase_at`]).
 ///
 /// `None` for a row with none, or a temperature or pressure that is negative or not a number.
-/// P14.T54.a re-exports it at `substance::` in place of the held
-/// [`substance::phase_at`](super::phase_at).
+/// The registry re-exports it as `substance::phase_at` (P14.T54.a).
 ///
 /// # Examples
 ///
@@ -1050,10 +1046,9 @@ pub fn phase_at(id: SubstanceId, temperature: Kelvin, pressure: Pascals) -> Opti
         .and_then(|diagram| diagram.phase_at(temperature, pressure))
 }
 
-/// The rows with a phase diagram, in registry order.
-///
-/// P14.T54.a re-exports it at `substance::` in place of the held
-/// [`substance::condensables`](super::condensables), whose five rows it extends.
+/// The rows with a phase diagram, in registry order: fourteen, where the held phase columns
+/// P14.T54.a retired had five. A climate loops over them in this order (P14.T48.d), so a later row
+/// joins as data. The registry re-exports it as `substance::condensables`.
 pub fn condensables() -> impl Iterator<Item = SubstanceId> {
     ids().filter(|id| id.substance().phase_diagram().is_some())
 }
@@ -1077,8 +1072,8 @@ mod tests {
         (ours / theirs - 1.0).abs()
     }
 
-    /// The fourteen condensables, in registry order: the five of P14.T13.c's held columns and
-    /// every row whose reference equation of state was read.
+    /// The fourteen condensables, in registry order: every row whose reference equation of state
+    /// was read, the five of P14.T13.c's retired held columns among them.
     #[test]
     fn diagram_condensables_are_the_fourteen_in_registry_order() {
         let keys: Vec<String> = condensables()
@@ -1091,10 +1086,6 @@ mod tests {
                 "H2S", "C2H6"
             ]
         );
-        // Every held condensable has a diagram.
-        for id in crate::substance::condensables() {
-            assert!(id.substance().phase_diagram().is_some(), "{id:?}");
-        }
     }
 
     /// Triple and critical points are their references' values, exactly.
@@ -1275,7 +1266,7 @@ mod tests {
     }
 
     /// Methane within 0.1% of NIST's WebBook at 100, 150 and 180 K (science-p14-t24f §6.3), where
-    /// the held Clausius–Clapeyron curve runs 9.5–11.3% high.
+    /// the retired held columns' constant-enthalpy Clausius–Clapeyron curve ran 9.5–11.3% high.
     #[test]
     fn diagram_methane_meets_the_webbook() {
         let d = diagram("CH4");
@@ -1363,8 +1354,8 @@ mod tests {
     }
 
     /// Below the coldest piece the branch is that piece's Clausius–Clapeyron tangent, continuous
-    /// with it in value and slope; at and above the critical temperature, at or below 0 K and for
-    /// NaN the curve answers as the held one does.
+    /// with it in value and slope; at and above the critical temperature the curve is infinite,
+    /// and at or below 0 K and for NaN zero.
     #[test]
     fn diagram_curves_extrapolate_and_answer_outside() {
         for id in condensables() {
@@ -1532,7 +1523,8 @@ mod tests {
         }
     }
 
-    /// Each condensable's four regions, as the held columns' test has them, on its own curve.
+    /// Each condensable's four regions, as the retired held columns' test had them, on its own
+    /// curve.
     #[test]
     fn diagram_each_condensable_has_its_four_regions() {
         for id in condensables() {
@@ -1660,11 +1652,11 @@ mod tests {
         assert!(relative(below, 307e6) < 1e-3, "{below}");
     }
 
-    /// The Solar System's surfaces lie in their phases on the new curves, as on the held ones, and
-    /// the rows the held columns lack at points on either side of their curves: sulphur dioxide
-    /// frost at 110 K under a millipascal, carbon monoxide ice at 38 K, ammonia ice at 150 K and
-    /// 0.7 bar, and liquid ethane at Titan's surface (93.65 K and 1.467 bar; Fulchignoni et al.
-    /// 2005, Nature 438, 785).
+    /// The Solar System's surfaces lie in their phases on the diagrams, as they did on the retired
+    /// held columns, and the rows those lacked at points on either side of their curves: sulphur
+    /// dioxide frost at 110 K under a millipascal, carbon monoxide ice at 38 K, ammonia ice at
+    /// 150 K and 0.7 bar, and liquid ethane at Titan's surface (93.65 K and 1.467 bar; Fulchignoni
+    /// et al. 2005, Nature 438, 785).
     #[test]
     fn diagram_the_solar_system_s_surfaces_lie_in_their_phases() {
         let earth = 101_325.0;

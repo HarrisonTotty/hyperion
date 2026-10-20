@@ -520,8 +520,9 @@ pub(crate) const SNAPSHOT_VERSION: GeneratorVersion = GeneratorVersion::new(23);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum SnapshotRules {
     /// Version 22's: P14.T13.c's greenhouse, each condensable held at its saturation pressure at
-    /// the mean surface temperature on the held Clausius–Clapeyron curves, and methane at its
-    /// humidity ([`greenhouse`]).
+    /// the mean surface temperature on the registry's phase diagrams (P14.T49.b's fitted curves,
+    /// in place of the held constant-enthalpy Clausius–Clapeyron curves since P14.T54.a's
+    /// switch), and methane at its humidity ([`greenhouse`]).
     Held,
     /// The 22 → 23 batch's: the condensate partition over the body's climate
     /// ([`partition`](crate::planetary::chem::partition), P14.T51.a) on the registry's phase
@@ -1813,7 +1814,9 @@ fn capped_methane_weight(inventory: Pascals, cap: Pascals, others: &[Pascals; 9]
 /// equilibrium at `equilibrium`: the temperature iterated [`GREENHOUSE_STEPS`] times upward from
 /// the equilibrium temperature through the grey greenhouse its partial pressures give, each held at
 /// its saturation vapour pressure there (the substance registry's
-/// [`saturation_pressure`](crate::substance::saturation_pressure)), methane's partial pressure in
+/// [`saturation_pressure`](crate::substance::saturation_pressure), on P14.T49.b's phase diagrams
+/// since P14.T54.a's switch from the held Clausius–Clapeyron curves; this arm dies with the
+/// snapshot hold at the 22 → 23 bump), methane's partial pressure in
 /// the air at [`METHANE_RELATIVE_HUMIDITY`] of it ([`capped_methane_weight`]), and held by
 /// `saturate` at the hottest host's. The carbon is airborne as its carrier
 /// ([`Airborne::carbon_carrier`]). The greenhouse's constants are version 22's
@@ -1843,9 +1846,9 @@ fn greenhouse(
             CarbonCarrier::Methane => {}
         }
         p[Gas::Nitrogen.index()] = Pascals::new(held(airborne.nitrogen, Gas::Nitrogen));
-        // Oxygen never condenses on a world that keeps it, whatever phase data its row gains. It
-        // is written only where there is some, so that a body without it is P14.T13.c's to the
-        // bit for every input.
+        // Version 22 never holds oxygen at its saturation pressure, though its row has a phase
+        // diagram now (the batch's partition caps it on that curve). It is written only where
+        // there is some (P14.T24.f's), leaving a body without it as P14.T13.c built it.
         if airborne.oxygen > 0.0 {
             p[Gas::Oxygen.index()] = Pascals::new(airborne.oxygen * weight);
         }

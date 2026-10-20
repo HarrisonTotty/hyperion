@@ -438,8 +438,10 @@ pub(crate) struct NightAir<'a> {
 /// - Pure carbon dioxide within Wordsworth's fit collapses below his collapse pressure
 ///   ([`carbon_dioxide_collapse_pressure`]).
 /// - Any other air collapses where its bulk gas, the largest by number, is condensed at its partial
-///   pressure at the night's temperature, by the registry's phase diagram: Wordsworth's own
-///   criterion, a minimum temperature below the condensation temperature, at the night's mean.
+///   pressure at the night's temperature, by the registry's phase diagram (P14.T49.b's, whose
+///   fourteen rows include an oxygen or an ammonia air's bulk, which the held phase columns had
+///   no data for and never collapsed): Wordsworth's own criterion, a minimum temperature below the
+///   condensation temperature, at the night's mean.
 ///   A bulk gas the surface holds a reservoir of is held at its saturation pressure already, so
 ///   its night's condensation is its own cycle, the climate's condensable, and not a collapse:
 ///   its pressure is its cold trap's, P14.T51.a's (22 → 23).
@@ -587,11 +589,19 @@ pub fn slow_rotator_onset(flux: WattsPerSquareMetre) -> Seconds {
 /// holding reservoirs of `reservoirs` (P14.T48.d; signoff-3.md, item 1.12).
 ///
 /// The loop runs over the registry's condensables in registry order ([`substance::condensables`]:
-/// water, methane, nitrogen, carbon dioxide and argon today). A row is a candidate where the air
-/// holds it, at a partial pressure p = x `p_s`, and its phase changes inside the range: its
-/// saturation temperature at p lies within it, `p_sat`(`T_cold`) ≤ p ≤ `p_sat`(`T_warm`) on the
-/// registry's curve, or the surface holds a reservoir of it. The condensable is the candidate of
-/// the largest p, ties by registry order; or none.
+/// the fourteen rows with a phase diagram, P14.T49.b's, where the held phase columns had five). A
+/// row is a candidate where the air holds it, at a partial pressure p = x `p_s`, and its phase
+/// changes inside the range: its saturation temperature at p lies within it, `p_sat`(`T_cold`) ≤ p
+/// ≤ `p_sat`(`T_warm`) on its diagram's curve, or the surface holds a reservoir of it. The
+/// condensable is the candidate of the largest p, ties by registry order; or none.
+///
+/// The nine rows the held columns lacked are candidates by the same test. A climate's air of
+/// P14.T13.c's nine gases ([`ClimateRegime::of`]) can hold two of them: ammonia, which T13.c never
+/// writes, and oxygen, which it writes uncapped where a runaway past left some (P14.T24.f), a
+/// candidate only where its curve, which ends at its critical temperature, 154.581 K, crosses the
+/// range, or it is a reservoir ([`surface_reservoirs`]). The area mix's air is the partition's
+/// species, any of the fourteen, with the partition's reservoirs, named on the same curves
+/// (P14.T51.b).
 ///
 /// # Examples
 ///
@@ -658,6 +668,14 @@ pub fn climate_condensable(
 /// - P14.T24.f holds methane's partial pressure in the air, x `p_s`, at
 ///   [`METHANE_RELATIVE_HUMIDITY`] of its saturation pressure where the surface holds a reservoir
 ///   of it, met to [`RESERVOIR_CAP_TOLERANCE`].
+///
+/// Every saturation pressure is the row's phase diagram's, as T13.c's own is (P14.T49.b's curves,
+/// since P14.T54.a's switch). The loop runs over the fourteen condensables, of which seven are
+/// T13.c's gases and carry a partial pressure here: with the held columns' five, ammonia, which
+/// T13.c never writes, and oxygen, which it writes uncapped where a runaway past left some
+/// (P14.T24.f), so that it is read as a reservoir only below its critical temperature, 154.581 K,
+/// where its weight reaches its saturation pressure: a surface it would frost onto, though
+/// version 22's air keeps it all aloft (the batch's partition caps it on the same curve).
 ///
 /// A row the atmosphere does not carry holds none, until P14.T51.a's partition names its
 /// reservoir (22 → 23). An atmosphere with no surface pressure, an envelope's, or over a surface

@@ -5,12 +5,14 @@
 //!   generator version: the elements' order, each row's identity (index, key, kind, charge,
 //!   stoichiometry and molar mass), its client optics, its gas columns (the held class, the
 //!   molecular constants, and `c_p` ÷ R, H̃ and S̃ at fixed temperatures; P14.T49.b), its phase
-//!   columns, its phase diagram (its points, anchors, curve, densities and enthalpies at fixed
-//!   fractions of its triple and critical temperatures; P14.T49.b), and its condensed columns
-//!   (grain density, transition and mechanics family; P14.T49.b), and its condensed optics (each
-//!   modelled row's reference form, index file, phase law and fitted albedos; P14.T49.c). A changed
-//!   value is moved output, which bumps the version; until P14.T54.a nothing on the record reads
-//!   the diagram, condensed and albedo sections, which re-bless at the version in force.
+//!   diagram (its points, anchors, curve, densities and enthalpies at fixed fractions of its triple
+//!   and critical temperatures; P14.T49.b), and its condensed columns (grain density, transition
+//!   and mechanics family; P14.T49.b), and its condensed optics (each modelled row's reference
+//!   form, index file, phase law and fitted albedos; P14.T49.c). A changed value is moved output,
+//!   which bumps the version. The record reads the diagram section since P14.T54.a's switch,
+//!   which retired the held phase columns and their `[phase]` section; until P14.T54.a's bump
+//!   nothing on the record reads the condensed and albedo sections, which re-bless at the version
+//!   in force.
 //! - `packages/protocol/fixtures/substances.json` mirrors the rows for the client (index, key,
 //!   kind, molar mass, `c_p` ÷ R and the three optics flags), which rendering plan R08's parity
 //!   check and P14.T35.e's decode tests read. `just bless` (`HYPERION_BLESS=1`) writes it, and
@@ -534,35 +536,6 @@ fn registry_golden() -> String {
         ));
     }
     gas_section(&mut w);
-    w.line("[phase]");
-    for id in substance::condensables() {
-        let row = id.substance();
-        let phase = row.phase().expect("a condensable has phase columns");
-        let label = format!("phase {} {}", id.index(), row.key());
-        for (name, value) in [
-            ("triple_temperature_k", phase.triple_temperature().value()),
-            ("triple_pressure_pa", phase.triple_pressure().value()),
-            (
-                "critical_temperature_k",
-                phase.critical_temperature().value(),
-            ),
-            ("critical_pressure_pa", phase.critical_pressure().value()),
-            (
-                "sublimation_j_per_mol",
-                phase.sublimation_enthalpy_j_per_mol(),
-            ),
-            (
-                "vaporisation_j_per_mol",
-                phase.vaporisation_enthalpy_j_per_mol(),
-            ),
-            (
-                "triple_liquid_density_kg_per_m3",
-                phase.triple_liquid_density().value(),
-            ),
-        ] {
-            w.f64(&format!("{label}: {name}"), value);
-        }
-    }
     diagram_section(&mut w);
     condensed_section(&mut w);
     albedo_section(&mut w);

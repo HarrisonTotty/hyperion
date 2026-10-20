@@ -465,21 +465,20 @@ const EARTH_DRY_AIR: [GasShare; 7] = [
 ///
 /// The vapour's partial pressure is plan 14's own rule for a generated Earth (P14.T13.c,
 /// `derive::atmosphere`'s `greenhouse`: each condensable held at the registry's saturation vapour
-/// pressure at the surface temperature, [`substance::saturation_pressure`]): 1.64 kPa at 288 K
-/// (the held curve's; IAPWS gives 1.689 kPa at 288 K, Wagner and Pruss 2002, which P14.T54.a's
-/// phase diagram takes), x = 0.0167 of the 98.55 kPa. It enters the air's `c_p`, mean molar mass
-/// and lapse rate (plan 14's
-/// lapse factor reads it, `hooks::structure::lapse_factor`); the energy-balance model's moist
-/// static energy keeps its own 80% relative humidity.
+/// pressure at the surface temperature, [`substance::saturation_pressure`]): on water's phase
+/// diagram (P14.T49.b's fitted curves; IAPWS SR1-86's ancillary to IAPWS-95, Wagner and Pruss
+/// 2002), 1.689 kPa at 288 K, x = 0.0171 of the 98.55 kPa. It enters the air's `c_p`, mean molar
+/// mass and lapse rate (plan 14's lapse factor reads it, `hooks::structure::lapse_factor`); the
+/// energy-balance model's moist static energy keeps its own 80% relative humidity.
 ///
 /// # Panics
 ///
-/// Never: the registry holds water's phase columns.
+/// Never: the registry holds water's phase diagram.
 #[must_use]
 fn earth_air(mean: Kelvin, pressure: Pascals) -> [GasShare; 8] {
     let water = substance::by_key(H2O.as_str())
         .and_then(|id| substance::saturation_pressure(id, mean))
-        .expect("the registry holds water's phase columns");
+        .expect("the registry holds water's phase diagram");
     let x = water.value() / pressure.value();
     let mut air = [GasShare {
         substance: H2O,

@@ -349,8 +349,8 @@ pub(in crate::substance) const METHANE: PhaseDiagram = PhaseDiagram {
         Source {
             covers: "L_fus",
             citation: "0.9392 kJ mol⁻¹, Vogt and Pitzer 1976 (J. Chem. Thermodyn. 8, 1011), as \
-                       NIST's WebBook lists it and the held phase columns cite it; the anchored \
-                       solid branch's slope implies 0.935",
+                       NIST's WebBook lists it and P14.T24.f's retired held columns cited it; the \
+                       anchored solid branch's slope implies 0.935",
             basis: Basis::Fact,
         },
     ],

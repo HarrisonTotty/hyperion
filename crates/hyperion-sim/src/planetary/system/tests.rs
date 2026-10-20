@@ -2997,7 +2997,7 @@ fn the_published_climate_regimes_hold_over_the_sample() {
                 );
             }
             if let Some(id) = regime.condensable() {
-                assert!(id.substance().phase().is_some(), "{index:?}");
+                assert!(id.substance().phase_diagram().is_some(), "{index:?}");
                 assert!(
                     c.gases().iter().any(|&(gas, x)| gas == id && x > 0.0),
                     "{index:?}"

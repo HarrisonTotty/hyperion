@@ -203,7 +203,7 @@ impl Fluid {
     /// # Panics
     ///
     /// Never for built inputs: the builder checks the main liquid's entry and the epoch's liquid's
-    /// phase columns.
+    /// phase diagram.
     #[must_use]
     pub(crate) fn of(inputs: &CoarseInputs) -> Option<Self> {
         let epoch = inputs.wet_epoch()?;
@@ -230,13 +230,13 @@ impl Fluid {
     ///
     /// # Panics
     ///
-    /// Never for built inputs: the builder checks the epoch's liquid's phase columns.
+    /// Never for built inputs: the builder checks the epoch's liquid's phase diagram.
     #[must_use]
     pub(crate) fn of_epoch(epoch: &WetEpoch) -> Self {
         let row = epoch.liquid.substance();
         let density = row
-            .phase()
-            .expect("the builder checks the epoch's liquid's phase columns")
+            .phase_diagram()
+            .expect("the builder checks the epoch's liquid's phase diagram")
             .triple_liquid_density();
         Self {
             key: row.key(),

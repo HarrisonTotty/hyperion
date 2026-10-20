@@ -7,19 +7,15 @@
 //!
 //! Rows 0–8 are P14.T13's nine gases in the order of
 //! [`Gas::ALL`](crate::planetary::derive::atmosphere::Gas::ALL) (P14.T49.a). Their molar masses
-//! are P14.T13's, moved here so that `Gas` reads them; their phase data, for the five that
-//! condense, are P14.T13.c's Clausius–Clapeyron constants moved verbatim, with each critical
-//! pressure and triple-point liquid density added, and methane's for P14.T24.f. Each reference
-//! equation of state is cited as the primary; NIST's Chemistry Web Book (SRD 69) is only the
-//! check of the values asserted from it (decision-composition §5). Where P14.T13.c adopted an
-//! effective enthalpy rather than a source's value, its source says so ([`Basis::Adopted`]) and
-//! names the reference value beside it, for P14.T49.b's fitted curves.
+//! are P14.T13's, moved here so that `Gas` reads them. Each reference equation of state is cited
+//! as the primary; NIST's Chemistry Web Book (SRD 69) is only the check of the values asserted
+//! from it (decision-composition §5).
 //!
 //! P14.T49.b appends rows 9–111 in its plan's order and gives every gas row its molecular
 //! constants ([`MolecularConstants`]), over which [`thermo`](super::thermo) sums its heat
 //! capacity. Rows 0–8 keep every value generator version 22 publishes until the 22 → 23 bump
-//! (P14.T54.a; decision-bump-plan-after-22 §1.2): their held `c_p` ÷ R class, their phase
-//! columns and their client flags (P14.T49.b's flags for `H2`, `He`, `N2` and `CO2`, `absorber`
+//! (P14.T54.a; decision-bump-plan-after-22 §1.2): their held `c_p` ÷ R class and their client
+//! flags (P14.T49.b's flags for `H2`, `He`, `N2` and `CO2`, `absorber`
 //! true for their collision-induced and band absorption, wait for the bump).
 //!
 //! Each gas's harmonic fundamentals are Shimanouchi's selected gas-phase values (NSRDS-NBS 39,
@@ -30,13 +26,14 @@
 //! over their formulae, an ion's less or more the electron's.
 //!
 //! P14.T49.b's second step gives the fourteen rows whose reference equations of state were read
-//! their phase diagrams ([`diagram`](super::diagram), the data in `rows/diagrams.rs`): rows 0–8's
-//! five held condensables beside their held phase columns, and ammonia, oxygen, krypton, xenon,
-//! nitrous oxide, carbon monoxide, sulphur dioxide, hydrogen sulphide and ethane. Its second
-//! part gives 71 rows their condensed columns ([`condensed`](super::condensed), the data in
-//! `rows/condensed.rs`): the diagram rows through their diagrams, and the condensates aloft, the
-//! hazes, the solutions, the lithologies, the salts, the organics and the undifferentiated
-//! bodies' materials with their own figures.
+//! their phase diagrams ([`diagram`](super::diagram), the data in `rows/diagrams.rs`): water,
+//! methane, nitrogen, carbon dioxide and argon, whose held phase columns (P14.T13.c's constant
+//! enthalpies) the diagrams replaced at the 22 → 23 batch's wiring (P14.T54.a), and ammonia,
+//! oxygen, krypton, xenon, nitrous oxide, carbon monoxide, sulphur dioxide, hydrogen sulphide and
+//! ethane. Its second part gives 71 rows their condensed columns ([`condensed`](super::condensed),
+//! the data in `rows/condensed.rs`): the diagram rows through their diagrams, and the condensates
+//! aloft, the hazes, the solutions, the lithologies, the salts, the organics and the
+//! undifferentiated bodies' materials with their own figures.
 
 mod condensed;
 mod diagrams;
@@ -46,12 +43,10 @@ mod melts;
 pub(super) mod optics;
 
 use super::mix::{GasColumns, HeatCapacityClass};
-use super::phase::PhaseColumns;
 use super::thermo::{
     Level, LevelSet, MolecularConstants, NuclearSpin, Rotation, RovibrationalTerms, Vibration,
 };
 use super::{Basis, ClientOptics, Element, Source, Substance, SubstanceKey, SubstanceKind};
-use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
 
 /// The rows, in registry order.
 pub(super) static ROWS: [Substance; 112] = [
@@ -383,7 +378,6 @@ const HYDROGEN: Substance = Substance {
         held_class: Some(HeatCapacityClass::Linear),
         sources: &[LINEAR_CLASS, HYDROGEN_TERMS_SOURCE],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: ClientOptics {
@@ -417,7 +411,6 @@ const HELIUM: Substance = Substance {
             },
         ],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: ClientOptics {
@@ -452,55 +445,6 @@ const WATER: Substance = Substance {
             Source {
                 covers: "rotation, vibrations",
                 citation: "the fundamentals 3657, 1595, 3756 cm⁻¹ (Shimanouchi 1972, Tables of Molecular Vibrational Frequencies, Consolidated Volume I, NSRDS-NBS 39, p. 10, its selected values), as harmonic oscillators; a non-linear rotor",
-                basis: Basis::Fact,
-            },
-        ],
-    }),
-    phase: Some(PhaseColumns {
-        triple_temperature: Kelvin::new(273.16),
-        triple_pressure: Pascals::new(611.657),
-        critical_temperature: Kelvin::new(647.1),
-        critical_pressure: Pascals::new(22.064e6),
-        sublimation_enthalpy_j_per_mol: 51_059.0,
-        vaporisation_enthalpy_j_per_mol: 43_500.0,
-        triple_liquid_density: KilogramsPerCubicMetre::new(999.793),
-        sources: &[
-            Source {
-                covers: "T_t, p_t",
-                citation: "273.16 K and 611.657 Pa, the triple point: Guildner, Johnson and Jones \
-                           1976's measured pressure (J. Res. Natl. Bur. Stand. 80A, 505), as \
-                           Wagner and Pruss 2002 (JPCRD 31, 387) and IAPWS R10-06 quote it; \
-                           IAPWS-95's own value is 611.655 Pa",
-                basis: Basis::Fact,
-            },
-            Source {
-                covers: "T_c, p_c",
-                citation: "647.096 K, held at P14.T13.c's 647.1 K, and 22.064 MPa (Wagner and \
-                           Pruss 2002; NIST's WebBook, SRD 69, as the check: 647.096 K, 22,064.0 \
-                           kPa)",
-                basis: Basis::Fact,
-            },
-            Source {
-                covers: "L_sub",
-                citation: "51.059 kJ mol⁻¹, P14.T13.c's, ice Ih's enthalpy of sublimation at the \
-                           triple point: Murphy and Koop 2005 (Q. J. R. Meteorol. Soc. 131, 1539), \
-                           eq. 5, gives 51.059, and IAPWS-95 with Feistel and Wagner 2006's ice \
-                           Ih (IAPWS-06) 51.062",
-                basis: Basis::Fact,
-            },
-            Source {
-                covers: "L_vap",
-                citation: "43.5 kJ mol⁻¹, P14.T13.c's effective value, between the liquid's \
-                           45.055 at 273.16 K and 40.651 at 373.124 K (Wagner and Pruss 2002; \
-                           NIST's WebBook as the check); it puts the saturation pressure at \
-                           373.124 K at 103.5 kPa, 2.2% above one atmosphere, where 43.32 would \
-                           meet it exactly",
-                basis: Basis::Adopted,
-            },
-            Source {
-                covers: "ρ_l(T_t)",
-                citation: "999.793 kg m⁻³, the saturated liquid at the triple point (Wagner and \
-                           Pruss 2002; NIST's WebBook as the check: 999.7925)",
                 basis: Basis::Fact,
             },
         ],
@@ -544,45 +488,6 @@ const METHANE: Substance = Substance {
             },
         ],
     }),
-    phase: Some(PhaseColumns {
-        triple_temperature: Kelvin::new(90.6941),
-        triple_pressure: Pascals::new(11_696.0),
-        critical_temperature: Kelvin::new(190.564),
-        critical_pressure: Pascals::new(4.5992e6),
-        sublimation_enthalpy_j_per_mol: 9_670.7,
-        vaporisation_enthalpy_j_per_mol: 8_731.5,
-        triple_liquid_density: KilogramsPerCubicMetre::new(451.475),
-        sources: &[
-            Source {
-                covers: "T_t, p_t, T_c, p_c",
-                citation: "90.6941 K and 11.696 kPa; 190.564 K and 4.5992 MPa (Setzmann and Wagner \
-                           1991, JPCRD 20, 1061; NIST's WebBook, SRD 69, as the check: 90.6941 K, \
-                           11.6961 kPa, 190.564 K, 4,599.20 kPa)",
-                basis: Basis::Fact,
-            },
-            Source {
-                covers: "L_vap",
-                citation: "8.7315 kJ mol⁻¹, the saturated vapour's enthalpy less the liquid's at \
-                           the triple point (Setzmann and Wagner 1991; NIST's WebBook as the \
-                           check: 7.57930 + 1.15220 kJ mol⁻¹)",
-                basis: Basis::Fact,
-            },
-            Source {
-                covers: "L_sub",
-                citation: "9.6707 kJ mol⁻¹, L_vap plus the enthalpy of fusion at the triple point, \
-                           0.9392 kJ mol⁻¹ (Vogt and Pitzer 1976, J. Chem. Thermodyn. 8, 1011, as \
-                           NIST's WebBook lists it); Stull 1947's 9.62 at 77 K and Stephenson and \
-                           Malanowski 1987's 9.7 at 72 K agree",
-                basis: Basis::Reduced,
-            },
-            Source {
-                covers: "ρ_l(T_t)",
-                citation: "451.475 kg m⁻³, the saturated liquid at the triple point (Setzmann and \
-                           Wagner 1991; NIST's WebBook as the check: 451.475)",
-                basis: Basis::Fact,
-            },
-        ],
-    }),
     diagram: Some(diagrams::METHANE),
     condensed: Some(condensed::METHANE),
     optics: ClientOptics {
@@ -622,7 +527,6 @@ const AMMONIA: Substance = Substance {
             },
         ],
     }),
-    phase: None,
     diagram: Some(diagrams::AMMONIA),
     condensed: Some(condensed::AMMONIA),
     optics: ClientOptics {
@@ -653,46 +557,6 @@ const NITROGEN: Substance = Substance {
             Source {
                 covers: "rotation, vibrations, electronic levels",
                 citation: "Huber and Herzberg 1979, Constants of Diatomic Molecules (the NIST WebBook's transcription as the finding aid): ω_e 2,358.57 and ω_e x_e 14.324 cm⁻¹, so the fundamental ω_e − 2ω_e x_e is 2,329.922 cm⁻¹; its X¹Σg⁺ ground alone lies below 15,000 cm⁻¹",
-                basis: Basis::Fact,
-            },
-        ],
-    }),
-    phase: Some(PhaseColumns {
-        triple_temperature: Kelvin::new(63.15),
-        triple_pressure: Pascals::new(12_520.0),
-        critical_temperature: Kelvin::new(126.19),
-        critical_pressure: Pascals::new(3.3958e6),
-        sublimation_enthalpy_j_per_mol: 6_900.0,
-        vaporisation_enthalpy_j_per_mol: 5_570.0,
-        triple_liquid_density: KilogramsPerCubicMetre::new(867.222),
-        sources: &[
-            Source {
-                covers: "T_t, p_t, T_c, p_c",
-                citation: "63.151 K and 12.5198 kPa, held at P14.T13.c's 63.15 K and 12.52 kPa; \
-                           126.192 K, held at 126.19 K, and 3.3958 MPa (Span, Lemmon, Jacobsen, \
-                           Wagner and Yokozeki 2000, JPCRD 29, 1361; NIST's WebBook, SRD 69, as \
-                           the check)",
-                basis: Basis::Fact,
-            },
-            Source {
-                covers: "L_sub",
-                citation: "6.9 kJ mol⁻¹, P14.T13.c's effective value; at the triple point L_vap, \
-                           6.037 kJ mol⁻¹ (Span et al. 2000), plus the enthalpy of fusion, about \
-                           0.72 (Giauque and Clayton 1933, JACS 55, 4875; not read here), gives \
-                           6.76",
-                basis: Basis::Adopted,
-            },
-            Source {
-                covers: "L_vap",
-                citation: "5.57 kJ mol⁻¹, P14.T13.c's, near the normal boiling point's: Span et \
-                           al. 2000 give 5.580 at 77.355 K, and Giauque and Clayton 1933 5.6 at 77 \
-                           K (as NIST's WebBook lists it); 6.037 at the triple point",
-                basis: Basis::Adopted,
-            },
-            Source {
-                covers: "ρ_l(T_t)",
-                citation: "867.222 kg m⁻³, the saturated liquid at the triple point (Span et al. \
-                           2000; NIST's WebBook as the check: 867.222)",
                 basis: Basis::Fact,
             },
         ],
@@ -735,7 +599,6 @@ const OXYGEN: Substance = Substance {
             },
         ],
     }),
-    phase: None,
     diagram: Some(diagrams::OXYGEN),
     condensed: Some(condensed::OXYGEN),
     optics: ClientOptics {
@@ -773,50 +636,6 @@ const CARBON_DIOXIDE: Substance = Substance {
             },
         ],
     }),
-    phase: Some(PhaseColumns {
-        triple_temperature: Kelvin::new(216.58),
-        triple_pressure: Pascals::new(518_500.0),
-        critical_temperature: Kelvin::new(304.13),
-        critical_pressure: Pascals::new(7.3773e6),
-        sublimation_enthalpy_j_per_mol: 26_100.0,
-        vaporisation_enthalpy_j_per_mol: 15_300.0,
-        triple_liquid_density: KilogramsPerCubicMetre::new(1_178.46),
-        sources: &[
-            Source {
-                covers: "T_t, p_t",
-                citation: "216.58 K and 518.5 kPa, P14.T13.c's (Angus, Armstrong and de Reuck \
-                           1976, IUPAC's tables, as NIST's WebBook, SRD 69, lists them); Span and \
-                           Wagner 1996, JPCRD 25, 1509, give 216.592 K and 517.95 kPa",
-                basis: Basis::Fact,
-            },
-            Source {
-                covers: "T_c, p_c",
-                citation: "304.1282 K, held at P14.T13.c's 304.13 K, and 7.3773 MPa (Span and \
-                           Wagner 1996; NIST's WebBook as the check)",
-                basis: Basis::Fact,
-            },
-            Source {
-                covers: "L_sub",
-                citation: "26.1 kJ mol⁻¹ at 207 K, not at the triple point (Stephenson and \
-                           Malanowski 1987, from data over 198–216 K, as NIST's WebBook lists \
-                           it), P14.T13.c's",
-                basis: Basis::Fact,
-            },
-            Source {
-                covers: "L_vap",
-                citation: "15.3 kJ mol⁻¹, P14.T13.c's effective value, near Span and Wagner 1996's \
-                           15.420 at the triple point (NIST's WebBook as the check: 18.9425 − \
-                           3.52235 kJ mol⁻¹)",
-                basis: Basis::Adopted,
-            },
-            Source {
-                covers: "ρ_l(T_t)",
-                citation: "1,178.46 kg m⁻³, the saturated liquid at the triple point (Span and \
-                           Wagner 1996; NIST's WebBook as the check: 1,178.46)",
-                basis: Basis::Fact,
-            },
-        ],
-    }),
     diagram: Some(diagrams::CARBON_DIOXIDE),
     condensed: Some(condensed::CARBON_DIOXIDE),
     optics: ClientOptics {
@@ -846,43 +665,6 @@ const ARGON: Substance = Substance {
             Source {
                 covers: "electronic levels",
                 citation: "an atom whose first excited level lies 11.55 eV up (Minnhagen 1973, J. Opt. Soc. Am. 63, 1185, as NIST's Atomic Spectra Database v5.12 lists it), so `c_p` ÷ R is 5/2 at every temperature the generator reaches",
-                basis: Basis::Fact,
-            },
-        ],
-    }),
-    phase: Some(PhaseColumns {
-        triple_temperature: Kelvin::new(83.81),
-        triple_pressure: Pascals::new(68_890.0),
-        critical_temperature: Kelvin::new(150.69),
-        critical_pressure: Pascals::new(4.863e6),
-        sublimation_enthalpy_j_per_mol: 7_800.0,
-        vaporisation_enthalpy_j_per_mol: 6_430.0,
-        triple_liquid_density: KilogramsPerCubicMetre::new(1_416.77),
-        sources: &[
-            Source {
-                covers: "T_t, p_t, T_c, p_c",
-                citation: "83.8058 K and 68.891 kPa, held at P14.T13.c's 83.81 K and 68.89 kPa; \
-                           150.687 K, held at 150.69 K, and 4.863 MPa (Tegeler, Span and Wagner \
-                           1999, JPCRD 28, 779; NIST's WebBook, SRD 69, as the check)",
-                basis: Basis::Fact,
-            },
-            Source {
-                covers: "L_sub",
-                citation: "7.8 kJ mol⁻¹, P14.T13.c's effective value; at the triple point L_vap, \
-                           6.540 kJ mol⁻¹ (Tegeler et al. 1999), plus a handbook enthalpy of \
-                           fusion of about 1.18 (its primary not reached), gives about 7.72",
-                basis: Basis::Adopted,
-            },
-            Source {
-                covers: "L_vap",
-                citation: "6.43 kJ mol⁻¹, P14.T13.c's, near Tegeler et al. 1999's 6.437 at the \
-                           normal boiling point, 87.302 K; 6.540 at the triple point",
-                basis: Basis::Adopted,
-            },
-            Source {
-                covers: "ρ_l(T_t)",
-                citation: "1,416.77 kg m⁻³, the saturated liquid at the triple point (Tegeler et \
-                           al. 1999; NIST's WebBook as the check: 1,416.77)",
                 basis: Basis::Fact,
             },
         ],
@@ -1371,7 +1153,6 @@ const NEON: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ONLY,
@@ -1398,7 +1179,6 @@ const KRYPTON: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: Some(diagrams::KRYPTON),
     condensed: Some(condensed::KRYPTON),
     optics: RAYLEIGH_ONLY,
@@ -1425,7 +1205,6 @@ const XENON: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: Some(diagrams::XENON),
     condensed: Some(condensed::XENON),
     optics: RAYLEIGH_ONLY,
@@ -1456,7 +1235,6 @@ const NITROUS_OXIDE: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: Some(diagrams::NITROUS_OXIDE),
     condensed: Some(condensed::NITROUS_OXIDE),
     optics: RAYLEIGH_ABSORBER,
@@ -1483,7 +1261,6 @@ const CARBON_MONOXIDE: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: Some(diagrams::CARBON_MONOXIDE),
     condensed: Some(condensed::CARBON_MONOXIDE),
     optics: RAYLEIGH_ABSORBER_AEROSOL,
@@ -1514,7 +1291,6 @@ const SULPHUR_DIOXIDE: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: Some(diagrams::SULPHUR_DIOXIDE),
     condensed: Some(condensed::SULPHUR_DIOXIDE),
     optics: RAYLEIGH_ABSORBER,
@@ -1545,7 +1321,6 @@ const HYDROGEN_SULPHIDE: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: Some(diagrams::HYDROGEN_SULPHIDE),
     condensed: Some(condensed::HYDROGEN_SULPHIDE),
     optics: RAYLEIGH_ABSORBER_AEROSOL,
@@ -1576,7 +1351,6 @@ const OZONE: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ABSORBER,
@@ -1607,7 +1381,6 @@ const HYDROGEN_CYANIDE: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ABSORBER,
@@ -1640,7 +1413,6 @@ const ACETYLENE: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ABSORBER,
@@ -1680,7 +1452,6 @@ const ETHYLENE: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ABSORBER,
@@ -1729,7 +1500,6 @@ const ETHANE: Substance = Substance {
             },
         ],
     }),
-    phase: None,
     // A cloud's material since R08.T5.g's `ethane-liquid.json`, the client's index file for it.
     diagram: Some(diagrams::ETHANE),
     condensed: Some(condensed::ETHANE),
@@ -1762,7 +1532,6 @@ const PHOSPHINE: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ABSORBER,
@@ -1811,7 +1580,6 @@ const METHANOL: Substance = Substance {
             },
         ],
     }),
-    phase: None,
     diagram: None,
     condensed: Some(condensed::METHANOL),
     optics: RAYLEIGH_ABSORBER,
@@ -1838,7 +1606,6 @@ const ATOMIC_HYDROGEN: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ABSORBER,
@@ -1868,7 +1635,6 @@ const ATOMIC_OXYGEN: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ABSORBER,
@@ -1895,7 +1661,6 @@ const ELECTRON: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: ABSORBER_ONLY,
@@ -1922,7 +1687,6 @@ const HYDRIDE: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: ABSORBER_ONLY,
@@ -1949,7 +1713,6 @@ const SODIUM: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ABSORBER,
@@ -1979,7 +1742,6 @@ const POTASSIUM: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ABSORBER,
@@ -2009,7 +1771,6 @@ const IRON: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: Some(condensed::IRON),
     optics: RAYLEIGH_ABSORBER_AEROSOL,
@@ -2036,7 +1797,6 @@ const MAGNESIUM: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ABSORBER,
@@ -2066,7 +1826,6 @@ const SILICON: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ABSORBER,
@@ -2093,7 +1852,6 @@ const CALCIUM: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ABSORBER,
@@ -2123,7 +1881,6 @@ const TITANIUM: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ABSORBER,
@@ -2150,7 +1907,6 @@ const SILICON_MONOXIDE: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ABSORBER,
@@ -2180,7 +1936,6 @@ const TITANIUM_MONOXIDE: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ABSORBER,
@@ -2210,7 +1965,6 @@ const VANADIUM_MONOXIDE: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ABSORBER,
@@ -2240,7 +1994,6 @@ const IRON_HYDRIDE: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_ABSORBER,
@@ -2270,7 +2023,6 @@ const ALUMINIUM: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_AWAITING_ABSORPTION,
@@ -2300,7 +2052,6 @@ const VANADIUM: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_AWAITING_ABSORPTION,
@@ -2327,7 +2078,6 @@ const MANGANESE: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_AWAITING_ABSORPTION,
@@ -2357,7 +2107,6 @@ const NICKEL: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_AWAITING_ABSORPTION,
@@ -2384,7 +2133,6 @@ const ZINC: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_AWAITING_ABSORPTION,
@@ -2411,7 +2159,6 @@ const SODIUM_ION: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: ION_AWAITING_ABSORPTION,
@@ -2438,7 +2185,6 @@ const MAGNESIUM_ION: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: ABSORBER_ONLY,
@@ -2465,7 +2211,6 @@ const ALUMINIUM_ION: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: ION_AWAITING_ABSORPTION,
@@ -2495,7 +2240,6 @@ const SILICON_ION: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: ION_AWAITING_ABSORPTION,
@@ -2522,7 +2266,6 @@ const POTASSIUM_ION: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: ION_AWAITING_ABSORPTION,
@@ -2552,7 +2295,6 @@ const CALCIUM_ION: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: ABSORBER_ONLY,
@@ -2582,7 +2324,6 @@ const TITANIUM_ION: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: ABSORBER_ONLY,
@@ -2612,7 +2353,6 @@ const VANADIUM_ION: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: ION_AWAITING_ABSORPTION,
@@ -2642,7 +2382,6 @@ const CHROMIUM_ION: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: ION_AWAITING_ABSORPTION,
@@ -2672,7 +2411,6 @@ const MANGANESE_ION: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: ION_AWAITING_ABSORPTION,
@@ -2702,7 +2440,6 @@ const IRON_ION: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: ABSORBER_ONLY,
@@ -2732,7 +2469,6 @@ const NICKEL_ION: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: ION_AWAITING_ABSORPTION,
@@ -2759,7 +2495,6 @@ const ZINC_ION: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: ION_AWAITING_ABSORPTION,
@@ -2786,7 +2521,6 @@ const HYDROGEN_CHLORIDE: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: None,
     optics: RAYLEIGH_AWAITING_ABSORPTION,
@@ -2801,7 +2535,6 @@ const AMMONIUM_HYDROSULPHIDE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(51.107),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::AMMONIUM_HYDROSULPHIDE),
     optics: AEROSOL_ONLY,
@@ -2816,7 +2549,6 @@ const SULPHURIC_ACID: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(98.072),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::SULPHURIC_ACID),
     optics: AEROSOL_ONLY,
@@ -2831,7 +2563,6 @@ const SULPHUR: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(256.48),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::SULPHUR),
     optics: AEROSOL_ONLY,
@@ -2846,7 +2577,6 @@ const POTASSIUM_CHLORIDE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(74.548),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::POTASSIUM_CHLORIDE),
     optics: AEROSOL_ONLY,
@@ -2861,7 +2591,6 @@ const SODIUM_CHLORIDE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(58.44),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::SODIUM_CHLORIDE),
     optics: AEROSOL_ONLY,
@@ -2876,7 +2605,6 @@ const ZINC_SULPHIDE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(97.44),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::ZINC_SULPHIDE),
     optics: AEROSOL_ONLY,
@@ -2891,7 +2619,6 @@ const SODIUM_SULPHIDE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(78.04),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::SODIUM_SULPHIDE),
     optics: AEROSOL_ONLY,
@@ -2906,7 +2633,6 @@ const MANGANESE_SULPHIDE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(86.998),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::MANGANESE_SULPHIDE),
     optics: AEROSOL_ONLY,
@@ -2936,7 +2662,6 @@ const CHROMIUM: Substance = Substance {
             basis: Basis::Fact,
         }],
     }),
-    phase: None,
     diagram: None,
     condensed: Some(condensed::CHROMIUM),
     optics: RAYLEIGH_ABSORBER_AEROSOL,
@@ -2951,7 +2676,6 @@ const IRON_SULPHIDE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(87.905),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::IRON_SULPHIDE),
     optics: AEROSOL_ONLY,
@@ -2966,7 +2690,6 @@ const ENSTATITE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(100.387),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::ENSTATITE),
     optics: AEROSOL_ONLY,
@@ -2981,7 +2704,6 @@ const FORSTERITE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(140.691),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::FORSTERITE),
     optics: AEROSOL_ONLY,
@@ -2996,7 +2718,6 @@ const SILICA: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(60.083),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::SILICA),
     optics: AEROSOL_ONLY,
@@ -3011,7 +2732,6 @@ const CORUNDUM: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(101.961),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::CORUNDUM),
     optics: AEROSOL_ONLY,
@@ -3026,7 +2746,6 @@ const PEROVSKITE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(135.942),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::PEROVSKITE),
     optics: AEROSOL_ONLY,
@@ -3041,7 +2760,6 @@ const RUTILE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(79.865),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::RUTILE),
     optics: AEROSOL_ONLY,
@@ -3056,7 +2774,6 @@ const GRAPHITE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(12.011),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::GRAPHITE),
     optics: AEROSOL_ONLY,
@@ -3071,7 +2788,6 @@ const THOLIN: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::THOLIN),
     optics: AEROSOL_ONLY,
@@ -3086,7 +2802,6 @@ const SOOT: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::SOOT),
     optics: AEROSOL_ONLY,
@@ -3101,7 +2816,6 @@ const CHROMOPHORE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::CHROMOPHORE),
     optics: AEROSOL_ONLY,
@@ -3116,7 +2830,6 @@ const ICE_GIANT_HAZE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::ICE_GIANT_HAZE),
     optics: AEROSOL_ONLY,
@@ -3131,7 +2844,6 @@ const MARS_DUST: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::MARS_DUST),
     optics: AEROSOL_ONLY,
@@ -3146,7 +2858,6 @@ const ACID_UV_ABSORBER: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::ACID_UV_ABSORBER),
     optics: AEROSOL_ONLY,
@@ -3161,7 +2872,6 @@ const BRINE_NACL: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::BRINE_NACL),
     optics: NO_CLIENT_OPTICS,
@@ -3176,7 +2886,6 @@ const BRINE_MGSO4: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::BRINE_MGSO4),
     optics: NO_CLIENT_OPTICS,
@@ -3191,7 +2900,6 @@ const BRINE_NACLO4: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::BRINE_NACLO4),
     optics: NO_CLIENT_OPTICS,
@@ -3206,7 +2914,6 @@ const BRINE_MGCLO4: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::BRINE_MGCLO4),
     optics: NO_CLIENT_OPTICS,
@@ -3221,7 +2928,6 @@ const AMMONIA_WATER: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::AMMONIA_WATER),
     optics: NO_CLIENT_OPTICS,
@@ -3236,7 +2942,6 @@ const TITAN_LIQUID: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::TITAN_LIQUID),
     optics: NO_CLIENT_OPTICS,
@@ -3251,7 +2956,6 @@ const ANORTHOSITE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::ANORTHOSITE),
     optics: NO_CLIENT_OPTICS,
@@ -3266,7 +2970,6 @@ const FELDSPATHIC: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::FELDSPATHIC),
     optics: NO_CLIENT_OPTICS,
@@ -3281,7 +2984,6 @@ const BASALT: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::BASALT),
     optics: AEROSOL_ONLY,
@@ -3296,7 +2998,6 @@ const BASALT_FE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::BASALT_FE),
     optics: AEROSOL_ONLY,
@@ -3311,7 +3012,6 @@ const KOMATIITE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::KOMATIITE),
     optics: NO_CLIENT_OPTICS,
@@ -3326,7 +3026,6 @@ const BASALT_REDUCED: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::BASALT_REDUCED),
     optics: NO_CLIENT_OPTICS,
@@ -3341,7 +3040,6 @@ const GRANITE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::GRANITE),
     optics: NO_CLIENT_OPTICS,
@@ -3356,7 +3054,6 @@ const ULTRAMAFIC: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::ULTRAMAFIC),
     optics: NO_CLIENT_OPTICS,
@@ -3372,7 +3069,6 @@ const FERRIC: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::FERRIC),
     optics: NO_CLIENT_OPTICS,
@@ -3387,7 +3083,6 @@ const PHYLLOSILICATE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::PHYLLOSILICATE),
     optics: NO_CLIENT_OPTICS,
@@ -3402,7 +3097,6 @@ const LAVA_GLASS: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::LAVA_GLASS),
     optics: AEROSOL_ONLY,
@@ -3417,7 +3111,6 @@ const CA_AL_RESIDUE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::CA_AL_RESIDUE),
     optics: NO_CLIENT_OPTICS,
@@ -3432,7 +3125,6 @@ const IRON_NICKEL: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::IRON_NICKEL),
     optics: NO_CLIENT_OPTICS,
@@ -3447,7 +3139,6 @@ const SILICON_CARBIDE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(40.096),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::SILICON_CARBIDE),
     optics: NO_CLIENT_OPTICS,
@@ -3462,7 +3153,6 @@ const MAGNESIUM_SULPHATE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(120.361),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::MAGNESIUM_SULPHATE),
     optics: NO_CLIENT_OPTICS,
@@ -3477,7 +3167,6 @@ const SODIUM_CARBONATE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(105.988),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::SODIUM_CARBONATE),
     optics: NO_CLIENT_OPTICS,
@@ -3492,7 +3181,6 @@ const CALCITE: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: Some(100.086),
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::CALCITE),
     optics: NO_CLIENT_OPTICS,
@@ -3507,7 +3195,6 @@ const CARBONACEOUS: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::CARBONACEOUS),
     optics: NO_CLIENT_OPTICS,
@@ -3522,7 +3209,6 @@ const CHONDRITE_CI: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::CHONDRITE_CI),
     optics: NO_CLIENT_OPTICS,
@@ -3537,7 +3223,6 @@ const CHONDRITE_CM: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::CHONDRITE_CM),
     optics: NO_CLIENT_OPTICS,
@@ -3552,7 +3237,6 @@ const CHONDRITE_CV: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::CHONDRITE_CV),
     optics: NO_CLIENT_OPTICS,
@@ -3567,7 +3251,6 @@ const CHONDRITE_H: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::CHONDRITE_H),
     optics: NO_CLIENT_OPTICS,
@@ -3582,7 +3265,6 @@ const CHONDRITE_L: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::CHONDRITE_L),
     optics: NO_CLIENT_OPTICS,
@@ -3597,7 +3279,6 @@ const CHONDRITE_LL: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::CHONDRITE_LL),
     optics: NO_CLIENT_OPTICS,
@@ -3612,7 +3293,6 @@ const CHONDRITE_E: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::CHONDRITE_E),
     optics: NO_CLIENT_OPTICS,
@@ -3627,7 +3307,6 @@ const COMETARY: Substance = Substance {
     charge: 0,
     molar_mass_g_per_mol: None,
     gas: None,
-    phase: None,
     diagram: None,
     condensed: Some(condensed::COMETARY),
     optics: NO_CLIENT_OPTICS,

@@ -532,18 +532,22 @@ fn the_latent_heat_departure_is_the_dilute_pseudoadiabat_s() {
         ),
     ] {
         let departure = latent_heat_departure(&gases, Kelvin::new(t), condensable).unwrap();
+        eprintln!(
+            "{} at {t} K: departure {departure:.4}",
+            condensable.substance().key()
+        );
         // The sign-off's figures are by hand, its enthalpies from memory: within a quarter.
         assert!(
             (departure / near - 1.0).abs() < 0.25,
             "{departure} against {near}"
         );
-        // Per unit mass: ε L² r ÷ (c_p R_air T²).
-        let phase = condensable.substance().phase().unwrap();
-        let latent_molar = if t < phase.triple_temperature().value() {
-            phase.sublimation_enthalpy_j_per_mol()
-        } else {
-            phase.vaporisation_enthalpy_j_per_mol()
-        };
+        // Per unit mass: ε L² r ÷ (c_p R_air T²), L the diagram's slope at the ground.
+        let latent_molar = condensable
+            .substance()
+            .phase_diagram()
+            .unwrap()
+            .clausius_clapeyron_enthalpy_j_per_mol(Kelvin::new(t))
+            .unwrap();
         let m_c = condensable.substance().molar_mass_g_per_mol().unwrap() * 1e-3;
         let m_air = mean_molar_mass_g_per_mol(&gases).unwrap() * 1e-3;
         let x = gases.iter().find(|(id, _)| *id == condensable).unwrap().1;

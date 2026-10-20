@@ -1588,7 +1588,7 @@ pub enum BuildCoarseInputsError {
     ColdTrapWithoutThreshold(SubstanceKey),
     /// More condensates than plan 14 lists.
     TooManyCondensates(usize),
-    /// The wet epoch's liquid has no liquid density in the registry (no phase columns), so its
+    /// The wet epoch's liquid has no liquid density in the registry (no phase diagram), so its
     /// paleo-inventory has no volume and its erosion no fluid (decision-r09-t14-choices Q6a).
     WetEpochLiquid(SubstanceId),
     /// The wet epoch ends before it starts.
@@ -2315,7 +2315,7 @@ fn check_wet_epoch(epoch: &WetEpoch) -> Result<(), BuildCoarseInputsError> {
     }
     check_non_negative("wet epoch's effective flow", epoch.effective_flow.value())?;
     check_non_negative("wet epoch's runoff", epoch.runoff_m_per_year)?;
-    if epoch.liquid.substance().phase().is_none() {
+    if epoch.liquid.substance().phase_diagram().is_none() {
         return Err(BuildCoarseInputsError::WetEpochLiquid(epoch.liquid));
     }
     check_non_negative("wet epoch's paleo-inventory", epoch.paleo_inventory.value())
@@ -2795,8 +2795,8 @@ mod tests {
         ));
         let basalt = by_key("basalt").expect("the registry holds basalt");
         assert!(
-            basalt.substance().phase().is_none(),
-            "basalt has no phase columns"
+            basalt.substance().phase_diagram().is_none(),
+            "basalt has no phase diagram"
         );
         assert_eq!(
             refused(earth_builder().wet_epoch(WetEpoch {

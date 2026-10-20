@@ -20845,4 +20845,147 @@ planetary::record` (624 tests at T57.a's commit).
   - _Deferred_ (2026-10-13 rule): under `Batch`, the gain's Lᵢ ÷ (R `T_s`²) is still the held
     phase data's enthalpy (43.5 kJ mol⁻¹ for water), not the registry's diagram's slope (44.4 at
     288 K, so the water term is 2% low at Earth, 5% low at 250 K and 5% high at 373 K), until
-    P14.T54.a moves the callers to T49.b's curves.
+    P14.T54.a moves the callers to T49.b's curves. **Done** in P14.T54.a's A1, the phase-data
+    switch (below): under both rules the gain takes the diagram's d ln `p_sat` ÷ dT at `T_s`,
+    44.47 kJ mol⁻¹ for water at 288 K, and the table's Earth's batch gain is 0.4545.
+- **Deviations in P14.T54.a, as built (lane `p14-wire-23`, 2026-10-20).** The 22 → 23 batch's wiring, built in checkpoint commits blessed at 22 (decision-bump-plan-after-22 §5–§6; main's ruling of 2026-10-20) and one bump commit.
+  - _A1, the phase-data switch_ (decision-pre-23-review item 23 and "For main" item 2; P14.T49.b's
+    step 2, part 1 record). `GENERATOR_VERSION` stays 22, and every golden that moves re-blesses
+    at 22 in the same commit. Every caller of P14.T49.a's held phase columns, the five
+    constant-enthalpy Clausius–Clapeyron sets, reads P14.T49.b's fitted curves, and the held set
+    is retired.
+    - _The switch, caller by caller:_
+      - `substance::{saturation_pressure, phase_at, condensables}` are `diagram`'s, re-exported in
+        place of the held ones, so the callers by name moved with them: T13.c's `greenhouse`
+        (version 22's arm, which dies with the snapshot hold), `regime.rs`'s three loops, R09's
+        `Moisture::specific_humidity` and `reference::earth_air` (1.689 kPa at 288 K, x =
+        0.0171, where the held curve gave 1.64 kPa and 0.0167).
+      - `greenhouse_gain`: both arms read the gas's diagram. `Held` compares with its `p_sat`,
+        equal to the bit to T13.c's cap on the same curve (a new test holds it on the table's
+        Earth). Lᵢ ÷ (R `T_s`²) is `clausius_clapeyron_enthalpy_j_per_mol(T_s)` ÷ (R `T_s`²),
+        the curve's d ln `p_sat` ÷ dT on the branch in force: 44.47 kJ mol⁻¹ for water at 288 K,
+        against the held 43.5. A gas at or above its critical temperature at `T_s`, where the
+        curve has no slope, adds none (the held arm took its vaporisation constant there).
+      - `liquid_water`: the triple temperature and `phase_at` are the diagram's, read at the
+        range's point nearest the triple temperature, `coldest.max(T_t).min(warmest)`, in place
+        of `coldest.max(T_t)`. On the diagram the liquid at a pressure is one span, from the
+        melting curve, at or below `T_t` up to about 632 MPa (ice Ih melts 0.68 K below it at 92
+        bar), to the boiling point, so that point decides exactly. Above 632 MPa the liquid
+        begins above `T_t`, on the rising branch, and a range across that branch reads dry (the
+        lane's, recorded).
+      - `cover.rs`: `melting_point` is the diagram's `T_t` (273.16 K, unchanged),
+        `liquid_water_density` its `triple_liquid_density` (IAPWS SR1-86's ancillary, 999.79
+        against the held 999.793 kg m⁻³), and `surface_water`'s saturation test the diagram's
+        `p_sat`.
+      - `latent_heat_departure`: L is the diagram's Clausius–Clapeyron enthalpy at the ground,
+        zero from `T_c`. The departures go from 1.56, 2.07 and 0.046 to 1.68 (Earth's water, by
+        L² and the 3% higher `p_sat`), 2.08 (Titan's methane) and 0.046 (a Mars's water). The
+        limit stays recorded: that enthalpy is L ÷ (z″ − z′), finite at `T_c`.
+      - R09's `Moisture::of`, below.
+      - `frost.rs`, `seas.rs`, the partition and the area mix already read the diagrams.
+
+    - _The fourteen condensables._ `condensables` gives fourteen rows where the held function gave
+      five. Each loop does the same physics with the nine new rows, as its docs now state:
+      - `climate_condensable`: a row is a candidate by the same test. In the record's air, T13.c's
+        nine gases, only ammonia (which T13.c never writes) and oxygen (written uncapped, a
+        candidate only below its critical temperature, 154.581 K, or as a reservoir) can appear.
+        The area mix's air is the partition's species, any of the fourteen, with the partition's
+        reservoirs, named on the same curves.
+      - `surface_reservoirs`: seven of the fourteen are T13.c's gases. Ammonia carries no partial
+        pressure there, and oxygen reads as a reservoir only below its critical temperature where
+        its uncapped weight reaches its `p_sat`: a surface it would frost onto, though version
+        22's air keeps it all aloft.
+      - `collapsed`: an oxygen- or ammonia-bulk air can now collapse onto its night side, which
+        the held columns, with no data for either, never read. The diagram's melting curves enter
+        too: a bulk gas above its melting pressure is solid even above `T_c`.
+
+    - _ebm's L._ One L for the body: the diagram's Clausius–Clapeyron enthalpy on the liquid's
+      branch at the body's mean surface temperature, the temperature `Air::of` takes `c_p` at,
+      and at `T_t` for a mean below it, since the moist static energy's vapour leaves the surface
+      liquid `Moisture::of` requires. L and the slope of `q_sat` then agree by Clausius–Clapeyron
+      at the mean. The reference Earth's is 2.4686 × 10⁶ J kg⁻¹ at 288 K (the held 2.415 × 10⁶).
+      A mean at or above the critical temperature gives no moisture. Kaspi and Showman's
+      configuration in the climate tests takes L at its reference run's 288 K.
+    - _Refits the switch forces._ Each is a test that holds a constant to its fit, refitted by
+      the test's own procedure; no tolerance changed.
+      - R09's transport tables (`ROTATION_TABLE`, `PRESSURE_TABLE`), fitted on Kaspi and
+        Showman's configuration, whose moisture is the registry's water: up to 6% (Ω⊕ ÷ 24 2.146
+        → 2.116, 12 Ω⊕ 0.201 → 0.214, 50 bar 5.027 → 5.134). The sweep test holds 2 K under
+        either; the cap's bound on their product is now 10.9.
+      - `MARS_ERUPTED_MELT_W_GYR_PER_M2`, the table's Mars's erupted melt, which moved by
+        2.4 × 10⁻⁶ with its surface temperature (215.0644 → 215.0628 K, its water on the
+        diagram's ice curve): 0.034 944 033 055 635 99. It scales every body's volcanism level
+        by that ratio.
+      - Not refitted: D⊕ and Φ⊕. Their fit test's measured Earth keeps the water curve it was
+        fitted on, as the test's `FITTED_WATER` (the held curve's `T_t`, `p_t` and 43.5 kJ
+        mol⁻¹), until brief item 3's refit takes the batch's measured Earth on the diagram
+        (decision-pre-23-review item 20). At the diagram's L that Earth has g ≈ 0.431 and `B_eff`
+        ≈ 1.898 W m⁻² K⁻¹ by hand (0.422 and 1.929 at 43.5), so item 20's D⊕ ≈ 0.598 becomes
+        about 0.588.
+
+    - _Retired:_ `PhaseColumns` and its five rows' data with their sources; `Substance::phase`
+      and its field; the held `saturation_pressure`, `phase_at` and `condensables` and their tests
+      in `substance/phase.rs`; the registry golden's `[phase]` section (36 lines);
+      `the_registry_s_saturation_pressures_are_t13_s_to_the_bit`, replaced by
+      `version_22_s_greenhouse_holds_a_condensing_gas_at_its_diagram_s_saturation_pressure`;
+      `substance_condensables_are_in_registry_order`, replaced by
+      `substance_condensables_are_the_diagram_rows_in_registry_order` (the re-exports against
+      the diagrams); and the phase block of `substance_values_name_their_sources`, whose
+      diagrams' test holds theirs. `Phase`, `MOLAR_GAS_CONSTANT` and `ice_ih_density` stay in
+      `substance::phase`, which `diagram` imports.
+    - _Tests re-taken on the diagram:_ the gain's by-hand checks, with L the curve's slope at
+      `T_s` (the generated Earth's gain 0.3845 → 0.3997 and `B_eff` 1.987, inside 1.9–2.1; the
+      wet world's peak 0.565 at 320 K, as on the held curve, under 0.57; the batch's Earth
+      0.4456 → 0.4545); the departure's by-hand form; the reference Earth's L, 2.4686 × 10⁶ ±
+      10³ J kg⁻¹.
+    - _Moved goldens_, each re-blessed at header 22 (`golden_diff.py`: 17 moved and the version
+      not bumped, as main's ruling for a checkpoint has it):
+      - `substance/registry`: the `[phase]` section is gone (36 lines), and nothing else moves.
+      - `planetary/derive_body`, `atmosphere_speciation`, `surface_conditions` and
+        `vertical_structure`: T13.c's version-22 caps on the diagram. Earth goes 289.954 →
+        290.303 K and its water 1,854.8 → 1,957.1 Pa, by the diagram's 3% higher `p_sat` at
+        288 K. Mars goes 215.0644 → 215.0628 K on the ice curve. The icy bodies' methane is 10–11%
+        lower, since the held methane curve ran 9.5–11.3% high at 100–180 K. Titan's pressure goes
+        147,332 → 147,343 Pa. The structure's moist lapse takes the new departure too.
+      - `planetary/global_figures`: Earth's surface water, ocean and volcanism move with its
+        temperature, and every body's volcanism level, σ_h and constructional relief move with
+        the refitted `MARS_ERUPTED_MELT_W_GYR_PER_M2` (2.4 × 10⁻⁶).
+      - `planetary/partition`: the published oceans' areas move by 2.7 × 10⁻⁶ with water's
+        `triple_liquid_density`, 999.789 against the held 999.793 kg m⁻³.
+      - `planetary/surface_conditions_published` and nine of the 14 `planetary/systems` goldens
+        (all but `eccentric_giant`, `filler_a`, `halo_star`, `hot_jupiter` and `red_giant`):
+        the same causes on the generated bodies, every σ_h by the volcanism refit. Four
+        readings move:
+        - `close_binary`'s 608 K Snowball takes H₂O as its condensable, and its 566 K one, at
+          243 bar, loses it. The held water curve ran 1.6–1.7 times high there (above the
+          critical pressure at 608 K), so water's partial pressure now lies inside, or above,
+          the diagram's `p_sat` over the range.
+        - `02000b2ca0000001.0400`, a 2.73 GPa air of 99.5% CH₄ at 204 K, now reads collapsed
+          (`AirlessLike`, `RadiativeEquilibrium`): methane's melting curve puts its bulk gas
+          solid above about 620 MPa there, where the held columns read it supercritical.
+        - `02000b2ca0000001.1100`, an N₂ air at 78–79 K, holds its whole nitrogen aloft under
+          the diagram's curve, 17% above the held one there, so its condensable is its CO₂
+          frost, the only reservoir left (N₂ → CO₂). It warms 1.3 K, and its pressure rises 22%.
+
+    - _T57.a's tripwire_ (`the_greenhouse_constants_are_their_fits`) stays green, since no input
+      of the fits moved: k(CO₂) 14.8616 at the measured Venus (90.422 bar of CO₂ and 2.0876 of
+      N₂, `T_eq` 229.0585 K) and k(H₂O) 4.4690 on the table's Earth (42.084 Pa of CO₂, 0.74739
+      bar of N₂, water 837.204 Pa at 288 K, `T_eq` 255.1385 K), as in T51.a's record. The
+      anchors: the measured Earth is 288.006 K (water 837.504 Pa), the measured Venus 736.980 K
+      under the batch (778.051 K under version 22's), and the batch's Titan 92.752 K at a Bond
+      albedo of 0.5362.
+    - _Files:_ `substance/{phase, mod, rows, diagram}.rs` and `rows/diagrams.rs` (a citation's
+      wording); `planetary/hooks/surface.rs`, `surface/regime.rs`, `structure.rs`,
+      `figures/cover.rs` and `figures/relief.rs`, with the surface's, structure's and system's
+      tests; `planetary/derive/atmosphere.rs` and its tests; `planetary/chem/partition.rs`
+      (docs); R09's `surface/reference.rs` and `steps/climate/{ebm, transport}.rs`, with the
+      climate's tests; `tests/substance_golden.rs` and the 17 goldens.
+    - _Deferred_ (2026-10-13 rule):
+      - Above about 632 MPa `liquid_water` misses a range that crosses the rising melting branch.
+      - Version 22's greenhouse never caps oxygen, so on a cold post-runaway world the regime can
+        read an oxygen reservoir that its air holds aloft. It dies with the snapshot hold at 23,
+        whose partition caps oxygen on its diagram.
+      - The regime's partial pressures are by number, x `p_s`, where T13.c caps column weights,
+        as `close_binary`'s 566 K body seems to show (its water by number above `p_sat` at its
+        warmest, its weight below the cap). This was so before the switch.
+      - The 2.73 GPa methane air is T13.c's version-22 state, which a solid bulk gas cannot hold.

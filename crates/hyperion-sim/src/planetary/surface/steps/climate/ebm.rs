@@ -1053,7 +1053,9 @@ impl Air {
 pub(super) struct Moisture {
     /// The condensable's registry row.
     pub(super) condensable: SubstanceId,
-    /// Its latent heat of vaporisation, J kg⁻¹: the registry's enthalpy over its molar mass.
+    /// Its latent heat of vaporisation, J kg⁻¹: its phase diagram's Clausius–Clapeyron enthalpy
+    /// on the liquid's branch at the body's mean surface temperature, over its molar mass
+    /// ([`Moisture::of`]).
     pub(super) latent_heat_j_per_kg: f64,
     /// Its molar mass over the air's, ε.
     pub(super) mass_ratio: f64,
@@ -1063,8 +1065,17 @@ pub(super) struct Moisture {
 
 impl Moisture {
     /// The moisture of the body of `inputs` in the air `air`: its climate condensable, where that
-    /// is among its surface liquids, has phase columns and a molar mass, under a positive surface
+    /// is among its surface liquids, has a phase diagram and a molar mass, under a positive surface
     /// pressure; `None` for a dry world.
+    ///
+    /// Its latent heat is the diagram's Clausius–Clapeyron enthalpy, R T² d ln `p_sat` ÷ dT
+    /// (P14.T49.b's fitted curves), at the body's mean surface temperature, the temperature
+    /// [`Air::of`]'s `c_p` is taken at: so that L and the slope of the saturation pressure
+    /// [`specific_humidity`](Self::specific_humidity) reads agree by Clausius–Clapeyron there.
+    /// It is the liquid's branch, whose vapour the moist static energy carries from the surface
+    /// liquid it requires: for a mean below the triple temperature, the triple point's. Water's
+    /// is 44.47 kJ mol⁻¹ at 288 K, 2.469 × 10⁶ J kg⁻¹. `None` too for a mean at or above the
+    /// critical temperature, where the curve, and the latent heat, end.
     #[must_use]
     pub(super) fn of(inputs: &CoarseInputs, air: &Air) -> Option<Self> {
         let key = inputs.climate().condensable?;
@@ -1079,11 +1090,18 @@ impl Moisture {
         }
         let condensable = by_key(key.as_str())?;
         let row = condensable.substance();
-        let phase = row.phase()?;
+        let diagram = row.phase_diagram()?;
         let mass = row.molar_mass_g_per_mol()?;
+        let liquid = Kelvin::new(
+            inputs
+                .mean_surface_temperature()
+                .value()
+                .max(diagram.triple_temperature().value()),
+        );
+        let latent = diagram.clausius_clapeyron_enthalpy_j_per_mol(liquid)?;
         Some(Self {
             condensable,
-            latent_heat_j_per_kg: phase.vaporisation_enthalpy_j_per_mol() / (mass * 1e-3),
+            latent_heat_j_per_kg: latent / (mass * 1e-3),
             mass_ratio: mass / air.molar_mass_g_per_mol,
             surface_pressure_pa: pressure,
         })
@@ -5407,7 +5425,11 @@ mod tests {
     }
 
     /// The reference Earth's air is the registry's, dry air's 1,004.7 J kg⁻¹ K⁻¹ and 28.96 g mol⁻¹
-    /// with its water vapour; its water is moist static energy at Earth's transport.
+    /// with its water vapour; its water is moist static energy at Earth's transport, its latent
+    /// heat its phase diagram's Clausius–Clapeyron enthalpy at the mean 288 K, 44.47 kJ mol⁻¹ over
+    /// 18.015 g mol⁻¹: 2.4686 × 10⁶ J kg⁻¹ (IAPWS SR1-86's ancillary, about 0.1% above IAPWS-95's
+    /// h″ − h′ there, the vapour's z″ − z′; the held curve's constant 43.5 kJ mol⁻¹ gave
+    /// 2.415 × 10⁶).
     #[test]
     fn the_reference_earth_diffuses_moist_static_energy_in_its_own_air() {
         let inputs = reference::earth_like();
@@ -5422,7 +5444,7 @@ mod tests {
         let model = EnergyBalance::for_inputs(&inputs);
         let moisture = model.moisture.expect("water is among Earth's liquids");
         assert!(
-            (moisture.latent_heat_j_per_kg - 2.415e6).abs() < 1e3,
+            (moisture.latent_heat_j_per_kg - 2.4686e6).abs() < 1e3,
             "{moisture:?}"
         );
         // h rises with T, by more than c_p, and q at 288 K and 80% is about 8.5 g kg⁻¹.

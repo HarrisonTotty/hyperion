@@ -49,7 +49,8 @@
 //!   max(n(n + 1)D, W `B_P`)).
 //!   - `B_P` = 4F ÷ `T_s` is the grey column's restoring at fixed τ, F the absorbed mean flux.
 //!     `B_eff` = `B_P` (1 − g) is its restoring with its own vapour feedback, g the gain of the
-//!     gases the surface holds at their cap (0.38 on Earth under version 22's rules).
+//!     gases the surface holds at their cap (0.38 on Earth's measured state as its fit takes it,
+//!     on version 22's held water curve).
 //!   - Φ multiplies a wet world's `P₂` forcing, its cold zones' brightening by ice, cloud and low
 //!     sun, which a uniform albedo misses ([`WET_ALBEDO_GRADIENT`], fitted on that partition; the
 //!     Earth Radiation Budget's gradient within 3%). It is 1 + (Φ⊕ − 1)θ at the ocean weight θ.
@@ -135,6 +136,8 @@ use crate::planetary::derive::rotation::{SpinOrbitResonance, SpinState};
 use crate::planetary::frames::BodyFixedFrame;
 #[cfg(doc)]
 use crate::planetary::hooks::figures::GlobalFigures;
+#[cfg(doc)]
+use crate::substance::PhaseDiagram;
 use crate::substance::{
     Phase, SubstanceId, heat_capacity_over_r, mean_molar_mass_g_per_mol, phase_at,
 };
@@ -182,8 +185,11 @@ pub const EARTH_TRANSPORT_PARTITION: f64 = 0.310;
 /// [`SOLAR_CONSTANT_W_PER_M2`](crate::units::consts::SOLAR_CONSTANT_W_PER_M2)), the grey τ that
 /// holds 288 K over it, a column of [`EARTH_COLUMN_MASS_KG_PER_M2`] of dry air
 /// ([`EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K`]) under [`STANDARD_GRAVITY`], water vapour at its
-/// saturation pressure at 288 K on the substance registry's curve, a radius of 6,371.0 km and
-/// [`EARTH_SIDEREAL_DAY`]. Its `B_eff` is 2.08 W m⁻² K⁻¹, against North, Cahalan and Coakley's
+/// saturation pressure at 288 K on version 22's held Clausius–Clapeyron curve (1.64 kPa, and its
+/// 43.5 kJ mol⁻¹ as the gain's slope; the registry's curve when the fit was taken, which
+/// P14.T54.a's switch to P14.T49.b's phase diagrams retired, and whose Earth refit takes the
+/// batch's measured Earth on the diagram, decision-pre-23-review item 20), a radius of 6,371.0 km
+/// and [`EARTH_SIDEREAL_DAY`]. Its `B_eff` is 2.08 W m⁻² K⁻¹, against North, Cahalan and Coakley's
 /// 2.09 and the grey column's 3.34 at fixed τ.
 ///
 /// Cross-checks, not fitted (science-p14-t24a-climate.md §1): the peak diffusive transport,
@@ -1743,19 +1749,24 @@ pub(crate) fn step_climate(
 ///   the same ∂ln p ÷ ∂T (decision-p14-t57a-fits §5; P14.T51.a's fix).
 ///
 /// - ½τᵢ is ∂τᵢ ÷ ∂ln pᵢ for the terms in √pᵢ;
-/// - Lᵢ ÷ (R `T_s`²) is the slope of the registry's held curve, exact under version 22's rules,
-///   with the enthalpy of its branch in force, of sublimation below the triple point and of
-///   vaporisation at and above it. Under the batch the partition holds the vapour on T49.b's
-///   phase diagram, whose slope at Earth's 288 K is 2% steeper (44.4 against 43.5 kJ mol⁻¹ for
-///   water), until P14.T54.a moves this to T49.b's curves;
+/// - Lᵢ ÷ (R `T_s`²) is d ln `p_sat` ÷ dT at `T_s` on the gas's phase diagram, P14.T49.b's fitted
+///   curves ([`PhaseDiagram::clausius_clapeyron_enthalpy_j_per_mol`]): the slope of the branch in
+///   force there, sublimation's below the triple point and vaporisation's from it, under either
+///   rules, whose vapour is held on that curve, at `p_sat` under version 22's and at h `p_sat`
+///   under the batch's (P14.T54.a's switch from the held constant-enthalpy curves;
+///   decision-pre-23-review item 23). Water's is 44.47 kJ mol⁻¹ at
+///   Earth's 288 K, where the held curve took 43.5. A gas at or above its critical temperature at
+///   `T_s`, where the curve has no slope, adds none;
 /// - xᵢ is the gas's published mole fraction: the factor 1 − xᵢ removes a dominant condensable,
 ///   whose pressure the cold trap sets globally, not locally, continuously in its share.
 ///
-/// Earth's measured state gives 0.38 (`B_eff` 2.08 W m⁻² K⁻¹) under version 22's rules, the
-/// counterpart of Kaspi and Showman's prescribed τ, which they state stands in for water vapour,
-/// with no feedback of its own. Under the batch's, the table's Earth through the passes' stand-ins
-/// gives 0.4456, and Earth's measured state, at 288 K, about 0.42 (`B_eff` 1.93 W m⁻² K⁻¹, by
-/// hand). Zero where no gas is held, or at a surface not above 0 K.
+/// Earth's measured state gives 0.38 (`B_eff` 2.08 W m⁻² K⁻¹) on version 22's held water curve,
+/// as [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] is fitted on it, the counterpart of Kaspi and
+/// Showman's prescribed τ, which they state stands in for water vapour, with no feedback of its
+/// own; the table's Earth, on the diagram under version 22's rules, gives 0.3997 (`B_eff` 1.987).
+/// Under the batch's, the table's Earth through the passes' stand-ins gives 0.4545, and Earth's
+/// measured state, at 288 K, about 0.431 (`B_eff` 1.898 W m⁻² K⁻¹, by hand: 0.422 and 1.929 at
+/// the held curve's 43.5 kJ mol⁻¹). Zero where no gas is held, or at a surface not above 0 K.
 #[must_use]
 fn greenhouse_gain(
     surface: Kelvin,
@@ -1776,11 +1787,11 @@ fn greenhouse_gain(
         .into_iter()
         .fold(0.0, |sum, (gas, term)| {
             let id = gas.substance();
-            let Some(phase) = id.substance().phase() else {
+            let Some(diagram) = id.substance().phase_diagram() else {
                 return sum;
             };
             let unheld = match greenhouse {
-                SnapshotRules::Held => partials.of(gas) < phase.saturation_pressure(surface),
+                SnapshotRules::Held => partials.of(gas) < diagram.saturation_pressure(surface),
                 // Held only where some of it condensed: a weight that is not a number is not.
                 SnapshotRules::Batch => !matches!(
                     partials.of(gas).partial_cmp(&inventory.of(gas)),
@@ -1790,10 +1801,10 @@ fn greenhouse_gain(
             if unheld {
                 return sum;
             }
-            let enthalpy = if t < phase.triple_temperature().value() {
-                phase.sublimation_enthalpy_j_per_mol()
-            } else {
-                phase.vaporisation_enthalpy_j_per_mol()
+            // The curve's own slope at T_s, R T_s² d ln p_sat ÷ dT: none at or above the critical
+            // temperature, which the curve does not reach.
+            let Some(enthalpy) = diagram.clausius_clapeyron_enthalpy_j_per_mol(surface) else {
+                return sum;
             };
             let share = gases
                 .iter()
@@ -2886,21 +2897,27 @@ pub(crate) fn climate_range(
 
 /// Whether water can be liquid at `pressure` somewhere over the climate's range `range`, coldest
 /// then warmest ([`SurfaceConditions::climate_range`]; P14.T48.d's), by the registry's
-/// [`phase_at`] on `H2O`'s row.
+/// [`phase_at`] on `H2O`'s phase diagram (P14.T49.b's).
 ///
-/// The registry's liquid at a pressure lies from the triple temperature to the boiling point, so
-/// the range holds liquid exactly where its coldest point not below the triple temperature does.
+/// On the diagram water's liquid at a pressure from its triple point's to about 632 MPa (ice V
+/// and VI meeting the liquid at 273.31 K, IAPWS R14-08) is one span of temperature, from its
+/// melting curve, at or below the triple temperature (ice Ih melts under pressure: 0.68 K below it
+/// at Venus's 92 bar), to its boiling point or the critical temperature. So the range holds liquid
+/// exactly where its point nearest the triple temperature does: the triple temperature itself
+/// where the range holds it, and otherwise its nearer end. Above 632 MPa the liquid begins above
+/// the triple temperature, on the melting curve's rising branch, and a range across that branch
+/// reads no liquid (the lane's, recorded).
 #[must_use]
 pub fn liquid_water(range: (Kelvin, Kelvin), pressure: Pascals) -> bool {
     let (coldest, warmest) = (range.0.value(), range.1.value());
     let water = Gas::Water.substance();
     let Some(triple) = water
         .substance()
-        .phase()
-        .map(|p| p.triple_temperature().value())
+        .phase_diagram()
+        .map(|d| d.triple_temperature().value())
     else {
         return false;
     };
-    let candidate = coldest.max(triple);
-    candidate <= warmest && phase_at(water, Kelvin::new(candidate), pressure) == Some(Phase::Liquid)
+    let nearest = coldest.max(triple).min(warmest);
+    coldest <= warmest && phase_at(water, Kelvin::new(nearest), pressure) == Some(Phase::Liquid)
 }

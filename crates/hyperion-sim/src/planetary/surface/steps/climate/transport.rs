@@ -55,7 +55,7 @@ pub(super) const EARTH_TRANSPORT_KG_M2_S: f64 = REFERENCE_PRESSURE_PA * EARTH_MS
 
 /// The cap on the transport, as a multiple of Earth's dry-equivalent Λ⊕ `c_p⊕`: 30 (Design note 8;
 /// low confidence). It is a guard that only the molar-mass and heat-capacity factors can reach, as
-/// in an H₂-rich air, since the tables' product is at most 10.8 (2.15 at Ω⊕ ÷ 24 by 5.03 at 50
+/// in an H₂-rich air, since the tables' product is at most 10.9 (2.12 at Ω⊕ ÷ 24 by 5.13 at 50
 /// bar).
 pub(super) const TRANSPORT_CAP: f64 = 30.0;
 
@@ -107,7 +107,10 @@ pub(super) const PRESSURE_REFERENCE_CONTRAST_K: f64 = 42.1;
 ///   insolation at the top of the atmosphere (their eq. 10 without its e^(−`τ_s` σ²), which, a
 ///   uniform factor, cancels to first order in the ratio of contrasts the fit matches), the same
 ///   albedo, every band sea, no internal heat, Earth's dry air
-///   ([`EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K`]) with water at 80% relative humidity, and one grey τ
+///   ([`EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K`]) with water at 80% relative humidity on its phase
+///   diagram, its latent heat the curve's Clausius–Clapeyron enthalpy at 288 K (P14.T49.b's fitted
+///   curves; refitted at P14.T54.a's switch from the held Clausius–Clapeyron curve, which moved
+///   these factors by up to 6%), and one grey τ
 ///   for every latitude (theirs varies from 8.4 at the equator to 2.2 at the poles, their eq. 8,
 ///   which this model cannot hold), solved so that the reference run's global mean is 288 K
 ///   (their Fig. 14b's 1 bar profile averages about 287 K over area, read roughly) and then held,
@@ -120,24 +123,24 @@ pub(super) const PRESSURE_REFERENCE_CONTRAST_K: f64 = 42.1;
 ///
 /// [`ModelGrid::stencil`]: super::grid::ModelGrid::stencil
 pub(super) const ROTATION_TABLE: [TransportNode; 18] = [
-    node(1.0 / 24.0, 23.5, 2.145_68),
-    node(1.0 / 20.0, 25.0, 1.983_33),
-    node(1.0 / 16.0, 28.2, 1.689_98),
-    node(1.0 / 12.0, 28.2, 1.689_98),
-    node(1.0 / 8.0, 28.4, 1.673_48),
-    node(1.0 / 6.0, 31.6, 1.439_48),
-    node(1.0 / 4.0, 36.6, 1.158_55),
-    node(1.0 / 3.0, 35.9, 1.193_08),
-    node(1.0 / 2.0, 35.5, 1.213_43),
-    node(2.0 / 3.0, 36.8, 1.148_93),
+    node(1.0 / 24.0, 23.5, 2.115_60),
+    node(1.0 / 20.0, 25.0, 1.957_25),
+    node(1.0 / 16.0, 28.2, 1.672_77),
+    node(1.0 / 12.0, 28.2, 1.672_77),
+    node(1.0 / 8.0, 28.4, 1.656_74),
+    node(1.0 / 6.0, 31.6, 1.429_10),
+    node(1.0 / 4.0, 36.6, 1.155_05),
+    node(1.0 / 3.0, 35.9, 1.188_77),
+    node(1.0 / 2.0, 35.5, 1.208_64),
+    node(2.0 / 3.0, 36.8, 1.145_65),
     node(1.0, ROTATION_REFERENCE_CONTRAST_K, 1.0),
-    node(4.0 / 3.0, 43.4, 0.880_89),
-    node(2.0, 48.3, 0.728_08),
-    node(3.0, 53.9, 0.585_66),
-    node(4.0, 58.6, 0.485_56),
-    node(6.0, 65.6, 0.360_67),
-    node(8.0, 70.1, 0.292_25),
-    node(12.0, 77.0, 0.201_41),
+    node(4.0 / 3.0, 43.4, 0.883_33),
+    node(2.0, 48.3, 0.733_42),
+    node(3.0, 53.9, 0.593_45),
+    node(4.0, 58.6, 0.494_89),
+    node(6.0, 65.6, 0.371_68),
+    node(8.0, 70.1, 0.303_99),
+    node(12.0, 77.0, 0.213_87),
 ];
 
 /// `f_p`: the transport's factor at each of Kaspi and Showman's 11 surface-pressure runs, 0.2 to
@@ -151,17 +154,17 @@ pub(super) const ROTATION_TABLE: [TransportNode; 18] = [
 /// is ("we … do not vary optical thickness despite increasing atmospheric mass", §3.3), scaled by
 /// [`PRESSURE_REFERENCE_CONTRAST_K`].
 pub(super) const PRESSURE_TABLE: [TransportNode; 11] = [
-    node(0.2, 47.0, 0.307_59),
-    node(0.3, 45.9, 0.432_24),
-    node(0.5, 44.3, 0.639_15),
+    node(0.2, 47.0, 0.301_79),
+    node(0.3, 45.9, 0.425_90),
+    node(0.5, 44.3, 0.633_55),
     node(1.0, PRESSURE_REFERENCE_CONTRAST_K, 1.0),
-    node(2.0, 39.7, 1.431_11),
-    node(3.0, 37.3, 1.769_05),
-    node(5.0, 34.9, 2.177_88),
-    node(10.0, 30.4, 2.936_47),
-    node(20.0, 26.3, 3.798_44),
-    node(30.0, 24.0, 4.384_31),
-    node(50.0, 21.9, 5.027_02),
+    node(2.0, 39.7, 1.443_07),
+    node(3.0, 37.3, 1.790_21),
+    node(5.0, 34.9, 2.212_73),
+    node(10.0, 30.4, 2.992_27),
+    node(20.0, 26.3, 3.876_40),
+    node(30.0, 24.0, 4.476_00),
+    node(50.0, 21.9, 5.133_77),
 ];
 
 /// The factor `table` gives at ratio `ratio`: linear in log–log between its nodes, held at the

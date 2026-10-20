@@ -57,7 +57,8 @@
 //!
 //! Every saturation pressure is the registry's phase diagram's
 //! ([`diagram::saturation_pressure`](crate::substance::diagram::saturation_pressure), P14.T49.b's
-//! fitted curves), not the held Clausius–Clapeyron sets that T13.c's greenhouse reads at 22. The
+//! fitted curves), as T13.c's greenhouse reads it too since P14.T54.a retired the held
+//! Clausius–Clapeyron sets. The
 //! frost and boiling points are compared through the saturation pressure, which rises monotonically,
 //! so the partition never inverts a curve (`saturation_temperature`'s 64 bisections are not on the
 //! snapshot path).

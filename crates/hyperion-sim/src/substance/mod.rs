@@ -26,8 +26,8 @@
 //! A row carries its identity (key, [`SubstanceKind`], stoichiometry, charge, molar mass) and then
 //! groups of columns, each `None` where the substance has no such data: so far the gas columns
 //! ([`GasColumns`], with each gas's [`MolecularConstants`], over which [`thermo`] sums its heat
-//! capacity, enthalpy and entropy by temperature), the held phase columns ([`PhaseColumns`]), the
-//! phase diagrams ([`PhaseDiagram`], whose functions are [`diagram`]'s), the condensed columns
+//! capacity, enthalpy and entropy by temperature), the phase diagrams ([`PhaseDiagram`], whose
+//! functions are [`diagram`]'s, re-exported here), the condensed columns
 //! ([`CondensedColumns`]: a solid's or a liquid's grain density, its transition and its mechanics
 //! family) and the liquid columns ([`LiquidColumns`]: a surface liquid's optics and transport,
 //! which [`liquid_properties`] resolves into a palette's liquid record). [`formation`] gives each
@@ -42,8 +42,9 @@
 //! Rows 0–8 are `H2`, `He`, `H2O`, `CH4`, `NH3`, `N2`, `O2`, `CO2` and `Ar`: the nine gases of
 //! P14.T13, in [`Gas::ALL`]'s order, so that every sum over them keeps its bits.
 //! [`Gas`] stays the typed view of these nine for escape and the greenhouse ([`Gas::substance`],
-//! [`SubstanceId::gas`]). Five carry phase data, in registry order water, methane, nitrogen,
-//! carbon dioxide and argon ([`condensables`]).
+//! [`SubstanceId::gas`]). Seven of them carry a phase diagram, in registry order water, methane,
+//! ammonia, nitrogen, oxygen, carbon dioxide and argon, and seven later rows do ([`condensables`]:
+//! fourteen in all).
 //!
 //! P14.T49.b appends, in its plan's order: the gases R08 measures (`Ne`, `Kr`, `Xe`, `N2O`); the
 //! gases of the chemistry, atoms and their first ions among them (`CO` … `FeH`, `Al` … `Zn`,
@@ -74,7 +75,8 @@ pub use condensed::{
 };
 pub use diagram::{
     DensityEquation, DensityForm, MeltingCurve, MeltingEquation, MeltingPiece, PhaseDiagram,
-    SolidDensity, SolidPhase, SublimationEquation, SublimationPiece, WagnerEquation,
+    SolidDensity, SolidPhase, SublimationEquation, SublimationPiece, WagnerEquation, condensables,
+    phase_at, saturation_pressure,
 };
 pub use element::Element;
 pub use formation::{BalanceReactionError, Reaction, formation_range, log10_formation_constant};
@@ -87,9 +89,7 @@ pub use liquid::{
 };
 pub use mix::{GasColumns, HeatCapacityClass, heat_capacity_over_r, mean_molar_mass_g_per_mol};
 pub use optics::{CondensedOptics, ReferenceForm, ResolvePaletteEntryError, resolve_palette_entry};
-pub use phase::{
-    MOLAR_GAS_CONSTANT, Phase, PhaseColumns, ice_ih_density, phase_at, saturation_pressure,
-};
+pub use phase::{MOLAR_GAS_CONSTANT, Phase, ice_ih_density};
 pub use rows::EQUILIBRIUM_HYDROGEN;
 pub use thermal::{RegolithForm, RegolithInertia, ThermalColumns, regolith_thermal_inertia};
 pub use thermo::{
@@ -298,7 +298,6 @@ pub struct Substance {
     charge: i8,
     molar_mass_g_per_mol: Option<f64>,
     gas: Option<GasColumns>,
-    phase: Option<PhaseColumns>,
     diagram: Option<PhaseDiagram>,
     condensed: Option<CondensedColumns>,
     optics: ClientOptics,
@@ -343,14 +342,8 @@ impl Substance {
         self.gas.as_ref()
     }
 
-    /// Its phase columns, for a row that condenses.
-    #[must_use]
-    pub const fn phase(&self) -> Option<&PhaseColumns> {
-        self.phase.as_ref()
-    }
-
     /// Its phase diagram, for a row whose reference equations of state were read (P14.T49.b):
-    /// what P14.T54.a's callers read in place of [`phase`](Self::phase).
+    /// where it condenses, and in which phase it lies.
     #[must_use]
     pub const fn phase_diagram(&self) -> Option<&PhaseDiagram> {
         self.diagram.as_ref()
@@ -403,13 +396,6 @@ pub fn by_key(key: &str) -> Option<SubstanceId> {
 pub fn ids() -> impl ExactSizeIterator<Item = SubstanceId> {
     (0..ROWS.len())
         .map(|i| SubstanceId(u16::try_from(i).expect("the registry holds fewer than 65,536 rows")))
-}
-
-/// The rows that condense, those with phase columns, in registry order: so far water, methane,
-/// nitrogen, carbon dioxide and argon. A climate loops over them in this order (P14.T48.d), so a
-/// later row joins as data.
-pub fn condensables() -> impl Iterator<Item = SubstanceId> {
-    ids().filter(|id| id.substance().phase.is_some())
 }
 
 #[cfg(test)]
@@ -844,9 +830,9 @@ mod tests {
         }
     }
 
-    /// Every value names its sources: the identity, every gas column, every condensed column and
-    /// every phase column, with each condensed and phase value covered by name in some source's
-    /// comma-separated `covers`.
+    /// Every value names its sources: the identity, every gas column and every condensed column,
+    /// with each condensed value covered by name in some source's comma-separated `covers` (the
+    /// phase diagrams' own test, `diagram_values_name_their_sources`, holds theirs).
     #[test]
     fn substance_values_name_their_sources() {
         let named = |sources: &[Source]| {
@@ -866,19 +852,6 @@ mod tests {
                 for value in ["grain density", "transition", "mechanics"] {
                     assert!(
                         condensed
-                            .sources()
-                            .iter()
-                            .any(|s| s.covers().split(", ").any(|covered| covered == value)),
-                        "{:?}'s {value} names a source",
-                        row.key()
-                    );
-                }
-            }
-            if let Some(phase) = row.phase() {
-                named(phase.sources());
-                for value in ["T_t", "p_t", "T_c", "p_c", "L_sub", "L_vap", "ρ_l(T_t)"] {
-                    assert!(
-                        phase
                             .sources()
                             .iter()
                             .any(|s| s.covers().split(", ").any(|covered| covered == value)),
@@ -1089,30 +1062,37 @@ mod tests {
         assert!((density - mixed).abs() < 0.05, "{density} against {mixed}");
     }
 
-    /// The condensables are water, methane, nitrogen, carbon dioxide and argon, in registry
-    /// order, each with a triple point below its critical point and the enthalpy of sublimation
-    /// above that of vaporisation.
+    /// The condensables are the rows with a phase diagram, in registry order (the diagrams' own
+    /// test, `diagram_condensables_are_the_fourteen_in_registry_order`, names them), and the
+    /// functions re-exported here are the diagrams': each row's triple point lies below its
+    /// critical point, its latent heats are positive and its sublimation, where its enthalpy of
+    /// fusion was read, takes more than its vaporisation.
     #[test]
-    fn substance_condensables_are_in_registry_order() {
+    fn substance_condensables_are_the_diagram_rows_in_registry_order() {
         let found: Vec<_> = condensables().collect();
-        let expected = [
-            Gas::Water,
-            Gas::Methane,
-            Gas::Nitrogen,
-            Gas::CarbonDioxide,
-            Gas::Argon,
-        ]
-        .map(Gas::substance);
-        assert_eq!(found, expected);
+        let diagrams: Vec<_> = ids()
+            .filter(|id| id.substance().phase_diagram().is_some())
+            .collect();
+        assert_eq!(found, diagrams);
+        assert_eq!(found.len(), 14);
+        assert!(found.windows(2).all(|pair| pair[0] < pair[1]));
         for id in condensables() {
-            let phase = id.substance().phase().unwrap();
-            assert!(phase.triple_temperature() < phase.critical_temperature());
-            assert!(phase.triple_pressure() < phase.critical_pressure());
-            assert!(
-                phase.sublimation_enthalpy_j_per_mol() > phase.vaporisation_enthalpy_j_per_mol()
-            );
-            assert!(phase.vaporisation_enthalpy_j_per_mol() > 0.0);
-            assert!(phase.triple_liquid_density().value() > 0.0);
+            let d = id.substance().phase_diagram().unwrap();
+            assert!(d.triple_temperature() < d.critical_temperature());
+            assert!(d.triple_pressure() < d.critical_pressure());
+            let vaporisation = d.triple_vaporisation_enthalpy_j_per_mol();
+            assert!(vaporisation > 0.0);
+            if let Some(sublimation) = d.triple_sublimation_enthalpy_j_per_mol() {
+                assert!(sublimation > vaporisation);
+            }
+            assert!(d.triple_liquid_density().value() > 0.0);
+            let t = Kelvin::new(f64::midpoint(
+                d.triple_temperature().value(),
+                d.critical_temperature().value(),
+            ));
+            assert_eq!(saturation_pressure(id, t), Some(d.saturation_pressure(t)));
+            let p = d.saturation_pressure(t) * 2.0;
+            assert_eq!(phase_at(id, t, p), d.phase_at(t, p));
         }
     }
 
