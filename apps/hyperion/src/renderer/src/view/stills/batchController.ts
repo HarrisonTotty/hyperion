@@ -184,7 +184,7 @@ export interface MeasuredPass {
  *
  * - `none`: nothing, as at the job's start, or while a batch's pass times have yet to resolve;
  * - `pass-times`: with timestamps, the passes resolved since the last call, of any earlier batches;
- *   passes whose labels are not the job's are ignored;
+ *   passes whose labels are not the job's, and negative times, are ignored;
  * - `round-trip`: without timestamps, the last batch's submit round trip, ns, from its submit to
  *   its `onSubmittedWorkDone()`.
  */
@@ -275,6 +275,9 @@ export class BatchController {
   private costPerUnitNs: number | null = null;
 
   /**
+   * A controller for one still's job, its first batch proposed by the first
+   * {@link BatchController.nextBatch}.
+   *
    * @throws RangeError if the frame interval is not positive and finite, `maxUnits` is not a
    *   positive integer, or, without timestamps, there are not {@link EMPTY_SUBMIT_SAMPLES} finite,
    *   non-negative round trips.
@@ -317,7 +320,7 @@ export class BatchController {
    *
    * @throws Error if `measured` is of the other timing's kind, or a round trip arrives before any
    *   batch was proposed: both are the caller's bugs.
-   * @throws RangeError if a measured time is negative or not finite.
+   * @throws RangeError if a pass time is not finite, or a round trip is negative or not finite.
    */
   nextBatch(measured: BatchMeasurement): Batch | null {
     const timing = this.timing;
@@ -374,14 +377,19 @@ export class BatchController {
     return this.propose(first, count, predictedNs, false);
   }
 
-  /** Each of the job's labels takes the largest of its passes in `passes`. */
+  /**
+   * Each of the job's labels takes the largest of its passes in `passes`. A negative pass time,
+   * which a reset of the timestamp counter gives, says nothing and is skipped, the label keeping
+   * its last time: the WebGPU specification's note on timestamp queries calls such values rare and
+   * safe to ignore.
+   */
   private learn(passes: ReadonlyArray<MeasuredPass>): void {
     const latest = new Map<string, number>();
     for (const pass of passes) {
-      if (!(Number.isFinite(pass.ns) && pass.ns >= 0)) {
-        throw new RangeError("a pass time must be finite and not negative");
+      if (!Number.isFinite(pass.ns)) {
+        throw new RangeError("a pass time must be finite");
       }
-      if (this.labels.has(pass.label)) {
+      if (pass.ns >= 0 && this.labels.has(pass.label)) {
         latest.set(pass.label, Math.max(latest.get(pass.label) ?? 0, pass.ns));
       }
     }

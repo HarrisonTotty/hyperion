@@ -638,6 +638,18 @@ describe("the dispatch split", () => {
     expect(split.kind === "split" ? split.pieces.length : split.kind).toBe(42);
   });
 
+  it("predicts its largest piece, the larger pieces first", () => {
+    const split = splitDispatch(262_144, 7_919);
+    if (split.kind !== "split") {
+      throw new Error(`expected a split, got ${split.kind}`);
+    }
+    const sizes = split.pieces.map((p) => p.workgroups);
+    expect({
+      ordered: sizes.every((n, k) => k === 0 || n <= (sizes[k - 1] ?? 0)),
+      largestNs: split.largestPredictedNs,
+    }).toEqual({ ordered: true, largestNs: Math.max(...sizes) * 7_919 });
+  });
+
   it("flags a workgroup that alone exceeds 50 ms", () => {
     expect(splitDispatch(100, 60_000_000)).toEqual({ kind: "over-bound", workgroupNs: 60_000_000 });
   });
