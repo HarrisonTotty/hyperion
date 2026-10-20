@@ -1032,12 +1032,13 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     saturation) per octave, which on an old surface is the saturation cap (the reference Moon's
     production gives about 2,500 above 100 km and the cap about 300, the brainstorm's "a few
     hundred"); positions uniform on the sphere, morphology by diameter against D_t, degradation by
-    age. They are smoothed into the elevation and sent as a list sorted by (`cell_index` of the
-    centre's cell, diameter), each recording in its `reach` every cell its reach (2.54 rim radii,
-    Design note 13) touches, so that a block carries every crater that reaches its cells. The field
-    keeps a per-cell index of the craters reaching each cell, built from the `reach` lists, which
-    is what `FieldView::craters_reaching` walks; the index is rebuilt on the client as blocks
-    arrive and is not on the wire.
+    age through T7.b's relief factor, worn to equilibrium (R09.T7.j), one law with the small craters
+    (`decision-r09-t12-coarse.md` item 5b). They are smoothed into the elevation and sent as a list
+    sorted by (`cell_index` of the centre's cell, diameter), each recording in its `reach` every
+    cell its reach (2.54 rim radii, Design note 13) touches, so that a block carries every crater
+    that reaches its cells. The field keeps a per-cell index of the craters reaching each cell,
+    built from the `reach` lists, which is what `FieldView::craters_reaching` walks; the index is
+    rebuilt on the client as blocks arrive and is not on the wire.
 11. **Classes** (researched 2026-09-29: Peel, Finlayson and McMahon 2007, Table 1; Beck et al.
     2018). Köppen–Geiger for seasonal water-cycle regimes, by Peel et al.'s Table 1, which Beck et
     al. adopt (researched 2026-09-29, high confidence): C and D divide at a coldest month of 0 °C
@@ -1242,11 +1243,13 @@ every timing below is provisional and is re-measured on a quiet machine by the t
       1.35 rim radii beyond the rim (Moore et al. 1974 in Pike 1980b, Table 6).
 
     The rim is
-    band-limited by a cubic Hermite fillet over the level's spacing or the crater's diffusive age,
-    √(2κt), whose volume change a compensating (1 − (r/r₁)²)² term cancels, so every crater
-    integrates to zero at every level. Every contribution is attributable to a level; the set per
-    level is fixed per body from the level's largest cell. The renderer's morph blends level n with
-    the parent band carried in the patch, so the height function itself is discrete per level.
+    band-limited by a cubic Hermite fillet over the level's band, the central peak fading with it as
+    the fillet reaches across the peak's base, and a compensating c (1 − ((r − R) ÷ w)²)² on the
+    fillet's span restores the volume it moved (R09.T7.i), so every crater integrates to zero at
+    every level; the crater's age enters as its relief factor g (R09.T7.b), worn to equilibrium
+    where its octave is saturated (R09.T7.j). Every contribution is attributable to a level; the set
+    per level is fixed per body from the level's largest cell. The renderer's morph blends level n
+    with the parent band carried in the patch, so the height function itself is discrete per level.
 
 14. **The cost** (researched 2026-09-29; kernels measured under shared load, scaled by a guessed
     2–2.3× to a quiet machine; provisional throughout). The whole height function with its gradient
@@ -2052,6 +2055,95 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
   Acceptance: `cargo test -p hyperion-surface synth`,
   `cargo test -p hyperion-surface --lib height_golden`, `just test-wasm-fast`, and
   `just test-slow -E 'binary(surface_reading_worlds)'`.
+- **R09.T7.i The fillet through the peak** (a T7 follow-up, after R09.T12.e;
+  `decision-r09-t12-coarse.md` addendum 4, D1.5 and D4.2, and addendum 5). Before
+  R09.T14, whose drainage reads the coarse field. A fillet whose inner end 1 − w lay inside a
+  complex crater's central cone started its Hermite at the peak's top and the cone's slope (−9.5 km
+  per rim radius on a 113 km lunar crater, over a span of 2w), which runs below the floor and 4 km
+  below the rim, and the compensating c (1 − (x ÷ r₁)²)² over the reach put the volume it took back
+  as a dome on the centre. Every fillet held at min(1, a) rim radii reaches the cone, so the coarse
+  craters of `D_b` to about 2 `D_b` were inverted in the coarse field (a 113 km lunar crater
+  +2,165 m at its centre and −607 m at its rim, fresh −1,080 and +1,553 m), those to about 2.6 `D_b`
+  too shallow, and the client drew them so at every level whose band reaches the cone, as it drew
+  small complex craters at the first level that keeps them. `synth/craters.rs`'
+  `CraterProfile::filleted`:
+  - _The cone faded with the rim._ Where 1 − w lies within the peak's base c_p, the Hermite starts
+    from the floor, −(d − h), at zero slope, and the cone keeps the share (1 − w) ÷ c_p of its
+    relief, so that it fades continuously to nothing where the fillet is held at one rim radius
+    (main's ruling: a cone dropped outright jumps by its whole relief at the switch); elsewhere the
+    fillet is as built.
+  - _The compensation on the fillet's span_, c (1 − ((x − 1) ÷ w)²)² on [1 − w, 1 + w] with
+    c = −15 Δ ÷ (32 w), Δ the volume the fillet and the faded cone took, in place of the
+    reach-wide term, which raised a crater's whole floor (786 m on the 113 km crater at w = 0.41 R).
+    Outside the span every profile is its fresh shape's, to the bit.
+  - Each piece stays a polynomial of degree at most 4, so the moments and `difference_moments`
+    stay exact; every profile integrates to zero, reaches no farther, is continuous in w and is C¹
+    but for the kept share of the cone's kinks. `rims.rs`' and `bound.rs`' documentation and Design
+    note 13 follow.
+  - _Tests:_ over shapes of D ÷ `D_t` 0.5–30 and w ÷ R from 0.05 to held: the balance to 10⁻⁶ of
+    the cavity volume at levels 0–24; height and slope continuous at 1 − w, 1 + w and 1 − w within
+    the cone to 10⁻⁹ relative, and the profile continuous across the switch; the fresh shape
+    outside the span, to the bit; a depression, F(0) < 0 and below F at every x ≥ 1; the 113 km
+    lunar crater over the reference Moon's coarse band (92.6 km) is −(d − h) at its centre (about
+    −3,330 m; +2,165 m as built). In `steps::craters`: one 113 km crater alone in a flat state at
+    the reference Moon's level, read through T4's interpolant, lies at its centre at least 1,000 m
+    below its mean over 1.2–2 R (main's planar estimate 2,010 m; a Gaussian low-pass of s.d.
+    `w_c` ÷ π, 1,450 m; 320 m as built). Reported: the share of the reference Moon's first coarse
+    octave whose centre's cell lies below its 1.2–2 R cells, before and after.
+  - The synthesis's goldens on the cratered `testing` worlds, `tests/golden/wire/` and R10's that
+    read them move: re-blessed at the version in force with no bump (the serve gate), with
+    `golden_diff.py` accounting for each. Acceptance: `cargo test -p hyperion-surface craters`,
+    `cargo test -p hyperion-surface --lib height_golden`,
+    `cargo test -p hyperion-sim --lib planetary::surface::steps::craters` and
+    `just test-wasm-fast`.
+- **R09.T7.j Craters worn to equilibrium** (a T7 follow-up, after T7.i;
+  `decision-r09-t12-coarse.md` item 5b, addendum 4, D1.4 and D4.1, and addendum 5;
+  `decision-r09-t7ij-refresh.md`). Before R09.T16's goldens. The relief factor carried only
+  Fassett and Thomson 2014's κ, which leaves a 50 km crater 99.95% of its relief after 4 Gyr, so
+  a surface at Trask's saturation was a field of fresh Pike profiles, which no equilibrium
+  population is (Head et al. 2010: "the most-densely cratered portion of the highlands reached a
+  state of saturation equilibrium"). The craters below the cell carried 2–4 times the bodies'
+  measured share above l_N (T12.e's test 2: 27.0% of σ_h² on the reference Moon against 4–10%),
+  and the Moon's crater term in expectation 1.8 times plan 14's basin share. `synth/craters.rs`
+  and `steps/craters.rs`:
+  - _The law._ g = (b ÷ (K ÷ R² + b))², b = 0.15 (Minton et al. 2019, eq. 8, as built), with
+    K ÷ R² = max(κt ÷ R², K_v q): κt the as-built diffusion; K_v = 0.17, Minton et al.'s
+    visibility function at γ = 2 (eq. 7 and Fig. 5: a crater stops being countable at
+    K ÷ r² = 0.17, d/D 0.050; eq. 8 inverted there gives 0.163, and the paper's 0.17 is kept);
+    q = N(t) P ÷ (N_S S), the production of the crater's octave since it formed over the octave's
+    saturation, N(t) the chronology's density over the crater's age, N_S the surface's, P and S
+    the octave's production and Trask's saturation.
+  - Over a capped octave's window q runs uniformly from 0 to 1, so its oldest craters stand at the
+    visibility limit, where equilibrium loses them (Minton et al. §2: degradation accumulates with
+    the production, and a crater is lost when it reaches the visibility function); there
+    E[g²] = (b ÷ K_v)(1 − (b ÷ (K_v + b))³) ÷ 3 = 0.2638 where κ is negligible. On an uncapped
+    octave q ≤ P ÷ S: the rate per unit production is the cap's, the same at every size (geometric
+    similarity, γ = ψ = 2). Below a few kilometres, where κ is the larger, κ's calibration stands.
+    No constant is fitted.
+  - One law: every small crater's g, the small craters' E[g²] over the window (`CraterOctaves`'
+    closed forms, T7.h's among them) and every coarse crater's degradation byte (T12.d's, the
+    nearest integer to 255 (1 − g), item 5b). No stream, draw or word changes. T12.e's crater
+    scale composes with it (addendum 4, D4.7). Provides: K_v and the law's one public function in
+    `synth::craters`, and `profile` and `CraterProfile::new` taking the crater's wear (its
+    diffusion and its share q) where they took its diffusion; the names are the record's.
+  - Labelled: the visibility limit is Minton et al.'s for simple mare craters, carried to complex
+    craters and basins by relative relief, g = (b ÷ (K_v + b))² = 0.220 of the fresh relief at
+    every size (medium-low confidence); the uncapped octaves' rate (medium-low); q uniform, the
+    wear standing in too for the overprinting the superposed craters lack (Minton et al.'s
+    first-order loss, and Riedel et al. 2020's cookie cutting in the highlands, would leave
+    survivors fresher); κ held constant (T7.b's finding stands); fluvial and aeolian infill,
+    viscous relaxation and mare or melt infill not modelled.
+  - _Tests:_ g at q = 1 and κt = 0 is (15 ÷ 32)² to 10⁻¹²; q is the crater's draw share u on a
+    capped octave and u P ÷ S on an uncapped one, to 10⁻¹²; E[g²] against dense sums over the
+    window to 0.1% on every synthetic world's octaves, and 0.2638 to 10⁻³ on a capped octave of
+    50 km craters; on the reference Moon, every coarse octave capped, every byte is at most 199
+    and the listed craters' mean g² lies in 0.21–0.32. T12.e's test 2 is asserted where it holds,
+    a miss reported and recorded, never loosened (main's estimates: the reference Moon 6.2% in
+    4–10%; the Earth 0.44% and Mars 1.0–1.1% in 0.3–1%; Ceres 2.4–2.7% in 3–8%); its tests that
+    read T12.d's bytes of 0 keep their invariants. The reference Moon's crater term in expectation,
+    rendered at the band limit, lies within 25% of plan 14's 2.05 km basin share (estimated
+    1.88–2.02 km; 3.67 km before). Goldens as T7.i's. Acceptance: T7.i's, with
+    `cargo test -p hyperion-sim --lib planetary::surface::steps::relief`.
 
 - **R09.T7.k The cold-trap fraction's shared integral and cheaper rules** (a T7.d follow-up,
   built by plan 14's P14.T51.i in lane `p14-t51hij`, the `p14-snapshot` lane's successor;
@@ -2100,7 +2192,8 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
     - `bowl_permanent_shadow`'s fit (`hyperion-fit`) reads the cap through it, and its 0.003
       acceptance cannot tell 4.4 × 10⁻¹⁶.
 
-Acceptance: `cargo test -p hyperion-surface craters` (T7.a–c and T7.e) and
+Acceptance: `cargo test -p hyperion-surface craters` (T7.a–c, T7.e, T7.i and T7.j, with
+`cargo test -p hyperion-sim --lib planetary::surface::steps::craters` for T7.i–j) and
 `cargo test -p hyperion-surface cold_trap` (T7.d).
 
 ### R09.T8 Assembly, the bound and the patch
@@ -2640,11 +2733,11 @@ of the same inputs, with the differences written into this plan. Acceptance:
 
 ### R09.T14 Erosion
 
-- **R09.T14.a Drainage.** Random receivers on `surface.coarse.erosion` with the slope correction;
-  the depth-first order; drainage area by solid angle; priority flood with pop-order flats and
-  Fill–Spill–Merge. Tests: drainage area at every outlet sums to the draining area; no cell drains
-  uphill after filling; the same seed gives the same receivers; a finite inventory fills the lowest
-  basins first and spills.
+- **R09.T14.a Drainage.** After R09.T7.i, so that the coarse craters are depressions. Random
+  receivers on `surface.coarse.erosion` with the slope correction; the depth-first order; drainage
+  area by solid angle; priority flood with pop-order flats and Fill–Spill–Merge. Tests: drainage
+  area at every outlet sums to the draining area; no cell drains uphill after filling; the same seed
+  gives the same receivers; a finite inventory fills the lowest basins first and spills.
 - **R09.T14.b The solver.** After T0.b's erodibility item. Tzathas et al.'s recursion with n = 1,
   the fixed point with its moving
   average, multigrid to level 4 at six iterations a level with the upsample through T4's
@@ -2729,6 +2822,7 @@ testing --example surface_map` writing its three images.
 
 ### R09.T16 Coarse goldens and benches
 
+After R09.T7.j, whose wear moves the fields it pins.
 `crates/hyperion-sim/tests/surface_coarse_golden.rs`, over a shared
 `crates/hyperion-sim/tests/common/surface_worlds.rs` that runs `reference::*` through the pass once
 per binary and that R10's world tests reuse: the quantised fields of the reference Ceres
