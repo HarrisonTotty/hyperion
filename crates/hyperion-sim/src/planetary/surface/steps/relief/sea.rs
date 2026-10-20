@@ -161,13 +161,14 @@ impl PartialEq for Entry {
 
 impl Eq for Entry {}
 
-/// The code of a height, millimetres, the field's ([`SynthesisCell::quantise_height`]).
+/// The code of a height, millimetres, the field's ([`SynthesisCell::quantise_height`]): what "under
+/// water" is read on, here and in R09.T14.a's water bodies.
 ///
 /// # Panics
 ///
 /// If the height has no code: a fault of the step that wrote it.
 #[must_use]
-fn code(height_m: f64) -> i32 {
+pub(crate) fn code(height_m: f64) -> i32 {
     SynthesisCell::quantise_height(Metres::new(height_m))
         .unwrap_or_else(|e| panic!("a coarse height has a code, but {e} ({e:?})"))
 }
