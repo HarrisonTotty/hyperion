@@ -1303,8 +1303,9 @@ ejecta-block population), shape parameter or authoritative dip opens a new tag a
   - `liquids.ts`'s four rows become the registry's test values, and a CH₄–C₂H₆–N₂ liquid's index
     follows its composition (from memory, checked then).
   - R11.T4's rock k_base is by (class, entry).
-- **Deviations in T10.a, as built** (2026-10-20; lane `lane/58-r11-t10a-still-job`, on
-  `rendering-and-planets` at `ae4bd052`; main's rulings (a)–(c) for R11.T10.a).
+- **Deviations in T10.a, as built** (2026-10-20; lane `lane/58-r11-t10a-still-job`, from
+  `rendering-and-planets` at `ae4bd052`, merged with `b9515f03`; main's rulings (a)–(c) for
+  R11.T10.a).
   - _Files._ New: `stills/stillPlan.ts` and `stills/batchController.ts`, with their tests. No wire,
     protocol, DTO, golden, generator version, engine type or settings list changes; nothing outside
     `stills/` changes.
@@ -1314,16 +1315,20 @@ ejecta-block population), shape parameter or authoritative dip opens a new tag a
     `createRenderTarget(spec: RenderTargetSpec)` are as the row says; `PassTimes` holds `passes`, a
     list of `{ label, ns, bracketed }`, not a map keyed by `FrameSubmission.label`; `readTexture`
     takes a fourth parameter, `access?: "cpu" | "tolerance"`, which the row's
-    `readTexture(texture, level?, rect?)` does not show. R02: the row's "fixed reversed-Z infinite
+    `readTexture(texture, level?, rect?)` does not show, and throws `PresentationOnlyReadback` for
+    a texture last written by a `presentation-only` kernel, which T10.b's read-back must not meet.
+    R02: the row's "fixed reversed-Z infinite
     projection" is `perspectiveReversedInfinite(fovXRad, aspect, nearM)` in `camera/projection.ts`,
     with `project(v, camera, viewport)`, `toViewAxes` and `NEAR_PLANE_M`, as the row says. R05:
     `QualitySetting` (`"high" | "low"`) is as the row says; `SelectionInput.grounded` is
-    `ReadonlyArray<GroundContact>`, the row's `readonly GroundContact[]`; `selectPatches(input:
-SelectionInput)`, `screenSpaceErrorPx(boundM, distanceM, view)`, `ViewSelectionInput` and
+    `ReadonlyArray<GroundContact>`, the row's `readonly GroundContact[]`; `selectPatches(input)`
+    on a `SelectionInput`, `screenSpaceErrorPx(boundM, distanceM, view)`, `ViewSelectionInput` and
     `cull.ts`' `Frustum`, `frustumOf` and `inFrustum`, which T10.a reads, are in `terrain/` but not
     named in the row.
   - _The decoration-fade test is deferred._ It waits for T2 (the Tasks preamble; main's rulings) and
-    is added when T2's fade exists. The rest of T10.a's test line is built.
+    is added when T2's fade exists, in `stillPlan.test.ts`, with the fade taken at
+    `footprintView`'s pixel; T10.a's test line is complete only then, and main assigns the task that
+    adds it. The rest of T10.a's test line is built.
   - _The names._ Provides kept: `planTiles`, `tileProjection`, `nextBatch(measured)` (a method of
     the class `BatchController`) and `STILL_TILE_MAX_PX`. Added in `stillPlan.ts`:
     `tileLimitPx(maxTextureDimension2D, setting)`; `tileFrustum(camera, tile, marginPx = 0)`, a
@@ -1364,7 +1369,19 @@ SelectionInput)`, `screenSpaceErrorPx(boundM, distanceM, view)`, `ViewSelectionI
       flagged (`overBudget`, `over-bound`), never planned silently.
     - _One departure from the test line._ Whole units cannot grow from one by at most 1.5 times,
       since ⌊1.5⌋ = 1 would stall, so a batch of one grows to two; from two units on, growth is at
-      most ⌊1.5 n⌋. The test is written so.
+      most ⌊1.5 n⌋. Either step is still limited to what fits the cap at the cost measured. The
+      test is written so.
+    - _Two readings of the test line._ With timestamps, a single unit predicted over the budget
+      (`overBudget`) and a unit not yet measured (`predictedNs` `null`) are proposed alone and are
+      exempt from "no proposed batch's predicted time exceeds the cap less two quanta"; T10.b
+      answers `overBudget` by splitting the pass. Without timestamps, "never proposes a batch whose
+      GPU time exceeds the cap" is checked at the cost per unit last measured, since a jump in cost
+      makes one overrun unavoidable, which the halving answers.
+    - A negative pass time, which a reset of the timestamp counter gives (R01 does not clamp it),
+      is skipped and its label keeps its last time, as the WebGPU specification's note on
+      timestamp queries allows.
+    - WebGPU has no base workgroup, so a `DispatchPiece` runs as a dispatch of its own count with
+      `firstWorkgroup` an offset its kernel adds (a uniform in T10.b's split kernels).
     - After an overrun the next batch is ⌊n ÷ 2⌋ units, or fewer where the cost measured fits
       fewer: at a threefold jump, 162 → 54, not 81.
     - `maxUnits` caps a batch's units, which T10.b's re-request after a loss sets to half the

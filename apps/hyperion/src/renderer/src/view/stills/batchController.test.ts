@@ -187,6 +187,16 @@ const TIMED_CASES = QUALITY_SETTINGS.flatMap((setting) =>
   ),
 );
 
+/** A controller timed by `full` timestamps on low for a job of `units` passes labelled `sky`. */
+function timedSky(units: number): BatchController {
+  return new BatchController({
+    setting: "low",
+    frameIntervalNs: 16_683_000,
+    timing: { timer: "full" },
+    units: Array.from({ length: units }, () => "sky"),
+  });
+}
+
 describe("a batch sized from timestamps", () => {
   it.each(TIMED_CASES)(
     "is never predicted over the cap less two quanta ($setting, $frameNs ns, $timer)",
@@ -283,8 +293,58 @@ describe("a batch sized from timestamps", () => {
     });
     controller.nextBatch({ kind: "none" });
     expect(() => controller.nextBatch({ kind: "round-trip", roundTripNs: 4_000_000 })).toThrow(
-      Error,
+      /timed by timestamps was given a round trip/,
     );
+  });
+
+  it("takes the largest of one measurement's passes of a label", () => {
+    const controller = timedSky(3);
+    controller.nextBatch({ kind: "none" });
+    const batch = controller.nextBatch({
+      kind: "pass-times",
+      passes: [
+        { label: "sky", ns: 1_000_000 },
+        { label: "sky", ns: 2_000_000 },
+      ],
+    });
+    expect(batch).toMatchObject({ count: 2, predictedNs: 4_000_000 });
+  });
+
+  it("takes a label's latest measurement over an earlier one", () => {
+    // Units 1 and 2 fit 5.869 ms at 2 ms each, so unit 3 is left for the third call.
+    const controller = timedSky(4);
+    controller.nextBatch({ kind: "none" });
+    controller.nextBatch({ kind: "pass-times", passes: [{ label: "sky", ns: 2_000_000 }] });
+    const batch = controller.nextBatch({
+      kind: "pass-times",
+      passes: [{ label: "sky", ns: 1_000_000 }],
+    });
+    expect(batch).toMatchObject({ first: 3, count: 1, predictedNs: 1_000_000 });
+  });
+
+  it("skips a negative pass time, keeping the label's last", () => {
+    // Units 1 and 2 fit 5.869 ms at 2 ms each, so unit 3 is left for the third call.
+    const controller = timedSky(4);
+    controller.nextBatch({ kind: "none" });
+    controller.nextBatch({ kind: "pass-times", passes: [{ label: "sky", ns: 2_000_000 }] });
+    const batch = controller.nextBatch({
+      kind: "pass-times",
+      passes: [{ label: "sky", ns: -65_536 }],
+    });
+    expect(batch).toMatchObject({ first: 3, count: 1, predictedNs: 2_000_000 });
+  });
+
+  it.each([0, 1.5, -2])("refuses a maxUnits of %f", (maxUnits) => {
+    expect(
+      () =>
+        new BatchController({
+          setting: "low",
+          frameIntervalNs: 16_683_000,
+          timing: { timer: "full" },
+          units: ["sky"],
+          maxUnits,
+        }),
+    ).toThrow(RangeError);
   });
 });
 
@@ -442,7 +502,20 @@ describe("a batch sized from round trips", () => {
       units: ["unit", "unit"],
     });
     controller.nextBatch({ kind: "none" });
-    expect(() => controller.nextBatch({ kind: "pass-times", passes: [] })).toThrow(Error);
+    expect(() => controller.nextBatch({ kind: "pass-times", passes: [] })).toThrow(
+      /timed by round trips was given pass times/,
+    );
+  });
+
+  it("refuses a negative round trip", () => {
+    const controller = new BatchController({
+      setting: "low",
+      frameIntervalNs: 16_683_000,
+      timing: { timer: "absent", emptyRoundTripsNs: EMPTY_ROUND_TRIPS_NS },
+      units: ["unit", "unit"],
+    });
+    controller.nextBatch({ kind: "none" });
+    expect(() => controller.nextBatch({ kind: "round-trip", roundTripNs: -1 })).toThrow(RangeError);
   });
 
   it("refuses a round trip before any batch", () => {
@@ -453,7 +526,7 @@ describe("a batch sized from round trips", () => {
       units: ["unit"],
     });
     expect(() => controller.nextBatch({ kind: "round-trip", roundTripNs: 4_000_000 })).toThrow(
-      Error,
+      /before any batch was proposed/,
     );
   });
 });

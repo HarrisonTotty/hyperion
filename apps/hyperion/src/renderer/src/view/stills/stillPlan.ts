@@ -204,7 +204,7 @@ export function planTiles(
  * tile whose width is a multiple of 64 projects through P itself, bit for bit.
  *
  * @param fovXRad - The still's horizontal field of view, rad, in (0, π).
- * @param still - The still's size, px.
+ * @param still - The full still's size, px, never the tile's.
  * @param tile - One of `planTiles(still, …)`'s tiles.
  * @throws RangeError for a field of view or size {@link perspectiveReversedInfinite} refuses.
  */
@@ -280,10 +280,10 @@ export function tileFrustum(camera: FrustumCamera, tile: StillTile, marginPx = 0
  * `selectPatches` reads the viewport as the presented size: ρ grows with its width, so a tile-sized
  * viewport would choose coarser levels than the still's pixels warrant. A still selects once with
  * this view, then culls the selection per tile with {@link tileFrustum}. Its camera is frozen, so
- * it needs no motion margin.
+ * it needs no motion margin; one the view carries is kept, which only widens what is selected.
  *
  * @param view - The still's view; its own `viewport` is replaced.
- * @param still - The still's size, px.
+ * @param still - The full still's size, px, which becomes the viewport.
  */
 export function footprintView(view: ViewSelectionInput, still: ViewSize): ViewSelectionInput {
   return { ...view, viewport: { widthPx: still.widthPx, heightPx: still.heightPx } };
@@ -345,9 +345,11 @@ export type DispatchSplit =
  * Without a cost the first piece is a probe of {@link PROBE_WORKGROUPS}; the caller measures it and
  * splits the remaining workgroups again with the cost it gives. The cost must bound the true cost:
  * under a quantised timer, `passTimeBoundNs` of the measured time divided by the workgroups
- * measured (`batchController.ts`). A cost measured on a small piece over-states a large one's,
- * since a GPU runs many workgroups at once, so later splits are coarser. The same split serves a
- * draw's instances.
+ * measured (`batchController.ts`); a negative pass time, which a reset of the timestamp counter
+ * gives, says nothing, and the caller measures again. A cost measured on a small piece over-states
+ * a large one's, since a GPU runs many workgroups at once, so later splits are coarser. WebGPU has
+ * no base workgroup, so a piece runs as a dispatch of its own count with `firstWorkgroup` an offset
+ * the kernel adds. The same split serves a draw's instances.
  *
  * @param workgroups - The dispatch's workgroups, a positive integer.
  * @param costPerWorkgroupNs - The measured cost of one workgroup, ns, positive and finite, or
