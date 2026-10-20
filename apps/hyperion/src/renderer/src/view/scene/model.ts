@@ -121,6 +121,13 @@ export interface ViewBody {
    * server body, whose seed the session asks of its record, and for a kept body with no terrain.
    */
   readonly detailSeed?: DetailSeedHex;
+  /**
+   * Whether the body has no surface for a view's survey line to speak of (plan R10, R10.T12;
+   * decision-r10-t12-commit3 §5): `true` for a kept scene's giant and for a served body in the
+   * gas-envelope state (a sub-Neptune, an ice giant or a gas giant by its bulk section's class), so
+   * that a view whose `FRAME` is its states no terrain lines; absent for every other body.
+   */
+  readonly surfaceless?: true;
 }
 
 /** Whether a scene body is lit in the photorealistic style: a planet, dwarf planet or moon. */

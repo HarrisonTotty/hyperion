@@ -106,7 +106,6 @@ import { EngineUnavailable } from "../engine/resilientEngine";
 import type { RenderEngine, TextureHandle } from "../engine/types";
 import { isLitBody } from "../lighting/retarded";
 import type { QualitySetting, TerrainSettings } from "../quality/qualitySetting";
-import type { HullOutline } from "../scene/hull";
 import { cameraSceneOf, type ViewBody, type ViewCraft, type ViewScene } from "../scene/model";
 import {
   TERRAIN_COMPUTATION_FAILED,
@@ -150,6 +149,7 @@ import {
   type TerrainViewFrameInput,
 } from "./terrainPass";
 import { wireframeTerrainSettings } from "./terrainWire";
+import { hullBoundingRadiusM } from "../wireframe/hulls";
 import type { SlopeBaselineM, SurfaceGroundReadout } from "./workers/messages";
 import {
   defaultHeightWorkers,
@@ -222,6 +222,14 @@ export interface TerrainViewReport {
    * take the bodies it hands over (T10.e's `terrain`).
    */
   readonly regimes: ReadonlyMap<BodyIdHex, LitRegime>;
+  /**
+   * The body whose terrain readout the view states, its `FRAME` body (plan R10, R10.T12; the
+   * `PRIMARY` view's alone, decision-r10-t12-leans §3), or `null` or absent with none: wanted as the
+   * view's local body is, so that its survey is asked wherever the camera is, and the view shows the
+   * terrain's fault as a view that hands a body over does, unless the body's terrain is not
+   * modelled ({@link TerrainSession.terrainFaults}; decision-r10-t12-commit3 §6).
+   */
+  readonly readoutBody?: BodyIdHex | null;
 }
 
 /**
@@ -293,7 +301,8 @@ export interface GroundReadoutOptions {
  * ratio at the view's style's τ.
  *
  * @remarks
- * - `local` is the body frame the view's camera belongs in by R02's rule (`sceneFrameFor`).
+ * - `local` is the body frame the view's camera belongs in by R02's rule (`sceneFrameFor`), and the
+ *   body whose terrain readout the view states ({@link TerrainViewReport.readoutBody}; R10.T12).
  * - `rangeRatio` is T10.e's `handoverRangeRatio`: the camera's distance to the body's limb
  *   (`limbDistanceM` of its distance from the centre and the body's equatorial radius) over the
  *   range where `reliefM` subtends τ pixels, τ the view's style's on its setting
@@ -325,7 +334,7 @@ export function viewFieldCandidates(
     const limbM = limbDistanceM(norm(centreM), body.radiusM);
     return {
       body: body.id,
-      local: body.id === local,
+      local: body.id === local || body.id === report.readoutBody,
       rangeRatio: handoverRangeRatio(limbM, reliefM(body.id), tauPx, radPerPx),
     };
   });
@@ -434,11 +443,6 @@ function placeableAgainst(position: ViewPosition, body: ViewBody, scene: ViewSce
       break;
   }
   return placeable;
-}
-
-/** A hull's bounding radius, m: its farthest vertex from its reference point (`TEST HULL`'s 11.06 m). */
-export function hullBoundingRadiusM(hull: HullOutline): number {
-  return Math.max(0, ...hull.vertices.map((v) => norm(v)));
 }
 
 /**
@@ -785,13 +789,26 @@ export class TerrainSession {
   /**
    * The views whose label blocks show the terrain's fault after any graphics fault
    * (decision-r10-t16-contracts §7; decision-r10-t16-leans §8), each with its text, the session's
-   * first cause: every view that hands a body over, in either style, once every height worker is
-   * lost (`TERRAIN_NOT_AVAILABLE`) or a guarded computation has kept failing
+   * first cause: every view that hands a body over, in either style, and every view whose report
+   * names a body whose terrain readout it states (`TerrainViewReport.readoutBody`, R10.T12) unless
+   * that body's terrain is not modelled (decision-r10-t12-commit3 §6), once
+   * every height worker is lost (`TERRAIN_NOT_AVAILABLE`) or a guarded computation has kept failing
    * (`TERRAIN_COMPUTATION_FAILED`, {@link TerrainSession.failComputation}); the same object until
    * it changes, for `useSyncExternalStore`.
    */
   get terrainFaults(): ReadonlyMap<ViewId, TerrainFault> {
     return this.#faults;
+  }
+
+  /**
+   * The session's terrain fault, its first cause, whichever views show it, or `null` while none is
+   * raised (R10.T12): under it no view states a terrain readout (decision-r10-t12-leans §5).
+   */
+  get terrainFault(): TerrainFault | null {
+    if (this.#cause !== null) {
+      return this.#cause;
+    }
+    return this.#pool.lostWorkers === this.#pool.workerCount ? TERRAIN_NOT_AVAILABLE : null;
   }
 
   /**
@@ -1256,16 +1273,26 @@ export class TerrainSession {
   }
 
   /**
-   * Follows the fault over `views`, the views that hand a body over: each shows the session's
-   * cause once one is raised, and none before; the listeners are told of a change.
+   * Follows the fault over `views`, the views that hand a body over, and the views whose label
+   * blocks carry the survey of a body whose terrain is modelled, their reports' readout bodies
+   * (R10.T12; decision-r10-t12-commit3 §6): each shows the session's cause once one is raised, and
+   * none before; the listeners are told of a change.
    */
   #followFaults(views: ReadonlyArray<ViewId>): void {
     this.#noteLostWorkers();
     const cause = this.#cause;
+    const showing = new Set(views);
+    for (const [id, report] of this.#reports) {
+      const body = report.readoutBody ?? null;
+      // Not on the survey of a body whose terrain is not modelled (decision-r10-t12-commit3 §6).
+      if (body !== null && (this.#store.status(body)?.notModelled ?? null) === null) {
+        showing.add(id);
+      }
+    }
     const faults: ReadonlyMap<ViewId, TerrainFault> =
-      cause === null || views.length === 0
+      cause === null || showing.size === 0
         ? NO_FAULTS
-        : new Map(views.map((id) => [id, cause] as const));
+        : new Map([...showing].map((id) => [id, cause] as const));
     if (
       faults.size !== this.#faults.size ||
       [...faults].some(([id, text]) => this.#faults.get(id) !== text)

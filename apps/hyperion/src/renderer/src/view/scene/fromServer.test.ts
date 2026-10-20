@@ -1,10 +1,16 @@
-import { type BodyGrantDto, type CameraReportDto, type SceneStateDto } from "@hyperion/protocol";
+import {
+  type BodyGrantDto,
+  type BodyIdHex,
+  type CameraReportDto,
+  type KinematicsDto,
+  type SceneStateDto,
+} from "@hyperion/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { stepRun, startServerRun, type ViewRun } from "../../displays/view/viewRun";
 import { bodyPositionM, layoutBodies } from "../../displays/system/bodyMap";
-import { add, dot, norm, scale, sub, vec3, type Vec3 } from "../../geometry/vec3";
-import type { SceneFrame } from "../../lib/scene/apparent";
+import { add, dot, norm, normalise, scale, sub, vec3, type Vec3 } from "../../geometry/vec3";
+import { placedTrack, type SceneFrame, sceneAt, systemPlacements } from "../../lib/scene/apparent";
 import { CAMERA_REPORT_INTERVAL_MS, CameraReporter } from "../../lib/scene/cameraReports";
 import { spanSeconds } from "../../lib/scene/lightTime";
 import { layoutHierarchy, orbitNormal } from "../../lib/system/hierarchy";
@@ -24,16 +30,18 @@ import {
   sceneModelOf,
   shipFrameOf,
   shipInSystem,
-  sliceSceneSystem,
   stateAfterHeartbeat,
   stateInSpace,
+  stateInSystem,
+  stateNearEarth,
   viewBodyOf,
   viewSceneOf,
 } from "../../test/sceneFixture";
 import type { CameraPose } from "../camera/pose";
-import { IDENTITY_QUATERNION } from "../camera/quaternion";
+import type { ProjectionCamera } from "../camera/projection";
+import { IDENTITY_QUATERNION, lookAlong } from "../camera/quaternion";
 import { sceneFrameFor, viewId } from "../camera/state";
-import { galacticTranslated } from "../coords/position";
+import { differenceM, frameOf, galacticTranslated, type ViewPosition } from "../coords/position";
 import { rotateToBody } from "../coords/rotation";
 import { bodyFixedAxesAt } from "../../lib/system/rotation";
 import type { SystemBody } from "../../lib/system/model";
@@ -47,27 +55,18 @@ import {
   serverSceneAtPush,
   serverSceneGap,
 } from "./fromServer";
-import { cameraSceneOf, type ViewScene } from "./model";
+import { flightPathMarker } from "../wireframe/symbology";
+import {
+  cameraSceneOf,
+  type CraftPose,
+  sceneOrigins,
+  type ViewCraft,
+  type ViewScene,
+} from "./model";
 
 afterEach(() => {
   vi.useRealTimers();
 });
-
-/** The ship 10,000 km from the slice's Earth, in the Earth's frame, at `seconds`. */
-function stateNearEarth(seconds = 3_000): SceneStateDto {
-  return {
-    sequence: 0,
-    clock: sceneClock(seconds),
-    ship: {
-      position: { frame: "body", body: FIXTURE_EARTH, offset_m: [1e7, 0, 0] },
-      velocity_m_s: [0, 7_000, 0],
-      time: { seconds, nanos: 0 },
-    },
-    system: sliceSceneSystem(),
-    tidal_radius_m: SCENE_TIDAL_RADIUS_M,
-    craft: [],
-  };
-}
 
 /** The populated answer, or `bodies`, as a scene's system: every kind, a moon and a ring among them. */
 function statePopulated(bodies = populatedBodies()): SceneStateDto {
@@ -95,6 +94,55 @@ function freeAt(run: ViewRun, pose: CameraPose): ViewRun {
 
 function relativeError(a: Vec3, b: Vec3): number {
   return norm(sub(a, b)) / norm(b);
+}
+
+/**
+ * A scene's own ship.
+ *
+ * @throws Error when the scene has none.
+ */
+function ownShipOf(scene: ViewScene): ViewCraft {
+  const own = scene.craft.find((craft) => craft.id === scene.ownShip);
+  if (own === undefined) {
+    throw new Error("the fixture's scene has its own ship");
+  }
+  return own;
+}
+
+/** A position of the scene resolved to metres from its barycentre, through its drawn frames. */
+function inSystemM(position: ViewPosition, scene: ViewScene): Vec3 {
+  const barycentre: ViewPosition = { kind: "system", system: scene.system, m: vec3(0, 0, 0) };
+  return differenceM(position, barycentre, sceneOrigins(scene));
+}
+
+/** The slice's Earth as a frame places it: where it is at the frame's time, and its Hill radius. */
+interface EarthPlaced {
+  readonly geometricM: Vec3;
+  readonly hillRadiusM: number;
+}
+
+/**
+ * The slice's Earth in `frame`.
+ *
+ * @throws Error when the frame does not place it with a Hill radius.
+ */
+function earthIn(frame: SceneFrame): EarthPlaced {
+  const earth = frame.bodies.find((each) => each.id === FIXTURE_EARTH);
+  if (earth?.kind !== "placed" || earth.hillRadiusM === null) {
+    throw new Error("the fixture's frame places its Earth with a Hill radius");
+  }
+  return { geometricM: earth.geometricM, hillRadiusM: earth.hillRadiusM };
+}
+
+/** {@link stateNearEarth} with the ship stand-in at `position` on the wire, at `velocityMPerS`. */
+function stateWithShip(
+  position: KinematicsDto["position"],
+  velocityMPerS: [number, number, number] = [0, 7_000, 0],
+): SceneStateDto {
+  return {
+    ...stateNearEarth(),
+    ship: { position, velocity_m_s: velocityMPerS, time: { seconds: 3_000, nanos: 0 } },
+  };
 }
 
 describe("the server's scene as the view draws it", () => {
@@ -267,17 +315,29 @@ describe("the server's scene as the view draws it", () => {
     ]).toEqual([null, false, { kind: "system", system: FIXTURE_SYSTEM }]);
   });
 
-  it("makes the ship stand-in the own ship, at the observer's present position, with the test hull", () => {
+  // Re-pinned by decision-r10-ship-frame (R10.T12): the own ship near the Earth was held in the
+  // system frame; it is now held in its local body's, the Earth's.
+  it("makes the ship stand-in the own ship, held in its local body's frame, not the system's, with the test hull", () => {
     const model = sceneModelOf(stateNearEarth());
     const frame = shipFrameOf(model);
     const scene = viewSceneOf(model, frame);
-    const own = scene.craft.find((craft) => craft.id === scene.ownShip);
-    expect([scene.ownShip, own?.hull, own?.pose.position, scene.provenance]).toEqual([
+    const own = ownShipOf(scene);
+    expect([scene.ownShip, own.hull, frameOf(own.pose.position), scene.provenance]).toEqual([
       SERVER_OWN_SHIP,
       TEST_HULL,
-      { kind: "system", system: FIXTURE_SYSTEM, m: frame.observer.positionM },
+      { kind: "body", body: FIXTURE_EARTH },
       { kind: "server" },
     ]);
+  });
+
+  it("puts the own ship held in the Earth's frame at the observer's present position, within 4 ε of its distance", () => {
+    const model = sceneModelOf(stateNearEarth());
+    const frame = shipFrameOf(model);
+    const scene = viewSceneOf(model, frame);
+    const errorM = norm(
+      sub(inSystemM(ownShipOf(scene).pose.position, scene), frame.observer.positionM),
+    );
+    expect(errorM).toBeLessThanOrEqual(4 * Number.EPSILON * norm(frame.observer.positionM));
   });
 
   it("states the scene's tidal radius, time and running rate", () => {
@@ -483,10 +543,252 @@ describe("the server's scene as the view draws it", () => {
   });
 });
 
-/** The ship 1 au out in the slice's system, where its Earth is not the local body. */
-function stateInSystem(seconds = 3_000): SceneStateDto {
-  return { ...stateNearEarth(seconds), ship: shipInSystem(seconds) };
+/** The step of {@link crossing}'s distance from the Earth, as a fraction of its Hill radius. */
+const CROSSING_STEP = 0.01;
+
+/** One step of {@link crossing}, as the frame and the view's scene then hold the ship. */
+interface CrossingStep {
+  /** The ship's distance from the Earth's centre over the Earth's Hill radius. */
+  readonly ratio: number;
+  /** `sceneAt`'s local body. */
+  readonly localBody: BodyIdHex | null;
+  /** The body whose frame the own ship is held in, or `null` in the system frame. */
+  readonly heldIn: BodyIdHex | null;
+  /** The own ship resolved to metres from the barycentre through the scene's frames. */
+  readonly resolvedM: Vec3;
+  /** The observer's position, m from the barycentre. */
+  readonly observerM: Vec3;
+  readonly attitude: CraftPose["attitude"];
 }
+
+/**
+ * A path into the slice's Earth's Hill sphere and out: from 1.105 of its radius to 0.795 and back
+ * to 1.105, {@link CROSSING_STEP} of it each 1,000 s (about 15 km/s against the Earth), so that no
+ * step falls on a threshold. Each step's frame is `sceneAt`'s with the frame before carried, and
+ * the ship's velocity against the barycentre is held, so that only its frame changes.
+ */
+function crossing(): CrossingStep[] {
+  const model = sceneModelOf(stateNearEarth());
+  const start = shipFrameOf(model);
+  const { hillRadiusM } = earthIn(start);
+  if (model.system === null) {
+    throw new Error("the fixture's scene holds a system");
+  }
+  const earth = placedTrack(systemPlacements(model.system), FIXTURE_EARTH);
+  const direction = normalise(vec3(1, 1, 0.2));
+  // In thousandths of the radius, whole numbers, so that every step is CROSSING_STEP exactly.
+  const stepPermille = Math.round(CROSSING_STEP * 1_000);
+  const ratiosPermille = [
+    ...Array.from({ length: 32 }, (_, k) => 1_105 - stepPermille * k),
+    ...Array.from({ length: 31 }, (_, k) => 805 + stepPermille * k),
+  ];
+  const steps: CrossingStep[] = [];
+  let previous: SceneFrame | null = null;
+  for (const [k, ratioPermille] of ratiosPermille.entries()) {
+    const time = { seconds: 3_000 + 1_000 * k, nanos: 0 };
+    const earthM = earth.positionAt(time);
+    if (earthM === null) {
+      throw new Error("the fixture's Earth is placed at every time");
+    }
+    const observer = {
+      positionM: add(earthM, scale(direction, (ratioPermille / 1_000) * hillRadiusM)),
+      velocityMPerS: start.observer.velocityMPerS,
+    };
+    const frame = sceneAt(model, observer, time, previous);
+    if (frame === null) {
+      throw new Error("the fixture's scene has a frame at every step");
+    }
+    const scene = viewSceneOf(model, frame);
+    const own = ownShipOf(scene);
+    const position = own.pose.position;
+    steps.push({
+      ratio: norm(sub(observer.positionM, earthM)) / hillRadiusM,
+      localBody: frame.localBody,
+      heldIn: position.kind === "body" ? position.body : null,
+      resolvedM: inSystemM(position, scene),
+      observerM: observer.positionM,
+      attitude: own.pose.attitude,
+    });
+    previous = frame;
+  }
+  return steps;
+}
+
+/** The indices of the steps at which the own ship's frame changes from the step before. */
+function changesOf(steps: ReadonlyArray<CrossingStep>): number[] {
+  return steps.flatMap((step, k) => (k > 0 && step.heldIn !== steps[k - 1]?.heldIn ? [k] : []));
+}
+
+/**
+ * The step before the change at `k` and the change's.
+ *
+ * @throws Error when either is not a step of `steps`.
+ */
+function aroundChange(
+  steps: ReadonlyArray<CrossingStep>,
+  k: number,
+): readonly [CrossingStep, CrossingStep] {
+  const before = steps[k - 1];
+  const after = steps[k];
+  if (before === undefined || after === undefined) {
+    throw new Error(`the crossing has no steps about ${String(k)}`);
+  }
+  return [before, after];
+}
+
+/** A stand-in at rest 10,000 km from the slice's Earth, in its frame. */
+function stateAtRestNearEarth(): SceneStateDto {
+  return stateWithShip({ frame: "body", body: FIXTURE_EARTH, offset_m: [1e7, 0, 0] }, [0, 0, 0]);
+}
+
+describe("the own ship held in its local body's frame (R10.T12; decision-r10-ship-frame)", () => {
+  it("keeps a stand-in outside every sphere in the system frame, at the observer's present position", () => {
+    const model = sceneModelOf(stateInSystem());
+    const frame = shipFrameOf(model);
+    if (frame.localBody !== null) {
+      throw new Error("the fixture's ship 1 au out is in no body's Hill sphere");
+    }
+    expect(ownShipOf(viewSceneOf(model, frame)).pose.position).toEqual({
+      kind: "system",
+      system: FIXTURE_SYSTEM,
+      m: frame.observer.positionM,
+    });
+  });
+
+  it("holds a stand-in the wire holds in the system frame, at half the Earth's Hill radius, in the Earth's frame", () => {
+    const earth = earthIn(shipFrameOf(sceneModelOf(stateNearEarth())));
+    const shipM = add(earth.geometricM, vec3(0.5 * earth.hillRadiusM, 0, 0));
+    const model = sceneModelOf(
+      stateWithShip({
+        frame: "system",
+        system: FIXTURE_SYSTEM,
+        offset_m: [shipM.x, shipM.y, shipM.z],
+      }),
+    );
+    expect(frameOf(ownShipOf(viewSceneOf(model, shipFrameOf(model))).pose.position)).toEqual({
+      kind: "body",
+      body: FIXTURE_EARTH,
+    });
+  });
+
+  it("holds a stand-in the wire holds in the Earth's frame, beyond its Hill sphere, in the system frame", () => {
+    const { hillRadiusM } = earthIn(shipFrameOf(sceneModelOf(stateNearEarth())));
+    const model = sceneModelOf(
+      stateWithShip({ frame: "body", body: FIXTURE_EARTH, offset_m: [1.2 * hillRadiusM, 0, 0] }),
+    );
+    const frame = shipFrameOf(model);
+    expect(ownShipOf(viewSceneOf(model, frame)).pose.position).toEqual({
+      kind: "system",
+      system: FIXTURE_SYSTEM,
+      m: frame.observer.positionM,
+    });
+  });
+
+  it("gives the own ship held in the Earth's frame the wire's velocity against the Earth, to 10⁻⁹", () => {
+    const model = sceneModelOf(stateNearEarth());
+    const velocity = ownShipOf(viewSceneOf(model, shipFrameOf(model))).velocityMPerS;
+    expect(
+      velocity === null ? Number.NaN : relativeError(velocity, vec3(0, 7_000, 0)),
+    ).toBeLessThanOrEqual(1e-9);
+  });
+
+  it("gives a stand-in at rest in its body's frame exactly zero velocity", () => {
+    const model = sceneModelOf(stateAtRestNearEarth());
+    expect(ownShipOf(viewSceneOf(model, shipFrameOf(model))).velocityMPerS).toEqual(vec3(0, 0, 0));
+  });
+
+  it("draws no flight path marker for a stand-in at rest in its body's frame, looking along its barycentric velocity or at its star", () => {
+    const model = sceneModelOf(stateAtRestNearEarth());
+    const frame = shipFrameOf(model);
+    const [star] = frame.stars;
+    if (star === undefined) {
+      throw new Error("the fixture's frame sees its star");
+    }
+    const own = ownShipOf(viewSceneOf(model, frame));
+    // Along the system frame's velocity, and sunward, along which a retarded velocity's a·τ would
+    // point (decision-r10-ship-frame §2).
+    const markers = [
+      frame.observer.velocityMPerS,
+      sub(star.geometricM, frame.observer.positionM),
+    ].map((along) => {
+      const camera: ProjectionCamera = {
+        orientation: lookAlong(along, vec3(0, 0, 1)),
+        fovXRad: Math.PI / 3,
+      };
+      return flightPathMarker(own.velocityMPerS, camera, { widthPx: 1920, heightPx: 1080 }, 16, 0);
+    });
+    expect(markers).toEqual([null, null]);
+  });
+
+  it("keeps the ship's attitude, along its velocity against the barycentre, the same quaternion on either side of its entry", () => {
+    const steps = crossing();
+    const entry = changesOf(steps).find((k) => steps[k]?.heldIn === FIXTURE_EARTH);
+    if (entry === undefined) {
+      throw new Error("the crossing enters the Earth's sphere");
+    }
+    const [before, after] = aroundChange(steps, entry);
+    expect(after.attitude).toEqual(before.attitude);
+  });
+
+  it("keeps the ship in the system frame, at the observer's velocity, where its local body is one the scene does not draw", () => {
+    const model = sceneModelOf(statePopulated());
+    const frame = shipFrameOf(model);
+    // The populated answer's ring: a record with no view kind, which the scene never draws.
+    const ring = `${FIXTURE_SYSTEM}.0180`;
+    const scene = viewSceneOf(model, {
+      ...frame,
+      localBody: ring,
+      localBodyVelocityMPerS: vec3(0, 29_780, 0),
+    });
+    if (
+      recordOf(model, ring).kind.kind !== "ring" ||
+      scene.bodies.some((body) => body.id === ring)
+    ) {
+      throw new Error("the populated answer's ring is a ring the scene does not draw");
+    }
+    const own = ownShipOf(scene);
+    expect([own.pose.position, own.velocityMPerS]).toEqual([
+      { kind: "system", system: FIXTURE_SYSTEM, m: frame.observer.positionM },
+      frame.observer.velocityMPerS,
+    ]);
+  });
+
+  describe("on a path into the Earth's Hill sphere and out, through sceneAt with the frame before carried", () => {
+    it("holds the own ship at every step in the frame of sceneAt's local body", () => {
+      const steps = crossing();
+      expect(steps.map((step) => step.heldIn)).toEqual(steps.map((step) => step.localBody));
+    });
+
+    it("enters at 0.9 of the Hill radius or less and leaves beyond it, each within a step of its threshold", () => {
+      const steps = crossing();
+      expect(
+        changesOf(steps).map((k) => {
+          const [, step] = aroundChange(steps, k);
+          return {
+            to: step.heldIn,
+            withinAStep:
+              step.heldIn === null
+                ? step.ratio > 1 && step.ratio <= 1 + CROSSING_STEP
+                : step.ratio <= 0.9 && step.ratio > 0.9 - CROSSING_STEP,
+          };
+        }),
+      ).toEqual([
+        { to: FIXTURE_EARTH, withinAStep: true },
+        { to: null, withinAStep: true },
+      ]);
+    });
+
+    it("moves the own ship's resolved position with the path, to 1 mm, across each change of frame", () => {
+      const steps = crossing();
+      const jumpsM = changesOf(steps).map((k) => {
+        const [before, after] = aroundChange(steps, k);
+        const moved = sub(after.observerM, before.observerM);
+        return norm(sub(sub(after.resolvedM, before.resolvedM), moved));
+      });
+      expect(jumpsM.map((jumpM) => jumpM <= 1e-3)).toEqual([true, true]);
+    });
+  });
+});
 
 /** A record of the scene's system, by ID. */
 function recordOf(model: ReturnType<typeof sceneModelOf>, id: string): SystemBody {
@@ -587,6 +889,17 @@ describe("a server body's rotation and shading from plan 14's sections (R07.T2.b
       viewBodyOf(scene, FIXTURE_EARTH).radiusM,
       viewBodyOf(scene, FIXTURE_JUPITER).radiusM,
     ]).toEqual([6_378_137, jupiter.bulk.state === "ok" ? jupiter.bulk.value.radiusM : Number.NaN]);
+  });
+
+  it("marks a body in the gas-envelope state as having no surface for a survey line, and a rocky one not (R10.T12)", () => {
+    const model = sceneModelOf(stateNearEarth());
+    const scene = viewSceneOf(model, shipFrameOf(model));
+    const jupiter = recordOf(model, FIXTURE_JUPITER);
+    expect([
+      jupiter.bulk.state === "ok" ? jupiter.bulk.value.planetClass : null,
+      viewBodyOf(scene, FIXTURE_JUPITER).surfaceless,
+      viewBodyOf(scene, FIXTURE_EARTH).surfaceless,
+    ]).toEqual(["gas_giant", true, undefined]);
   });
 
   it("shades a body without a photometric section with the provisional photometry, labelled", () => {
@@ -697,10 +1010,15 @@ describe("the view's camera reports", () => {
     expect(sent.length).toBeLessThanOrEqual(10);
   });
 
-  it("state a camera held to the own ship in the frame of the ship's position", () => {
+  // Re-pinned by decision-r10-ship-frame (R10.T12): the ship beside the Earth, which was held in the
+  // system frame, is held in the Earth's, so that a camera held to it is reported in the Earth's.
+  it("state a camera held to the own ship in the frame of the ship's position, the Earth's beside it", () => {
     const model = sceneModelOf(stateNearEarth());
     const scene = viewSceneOf(model, shipFrameOf(model));
-    const own = scene.craft.find((craft) => craft.id === scene.ownShip);
+    const position = ownShipOf(scene).pose.position;
+    if (position.kind !== "body") {
+      throw new Error("the own ship beside the fixture's Earth is held in a body's frame");
+    }
     const report = cameraKinematics(
       {
         frame: { kind: "craft", craft: SERVER_OWN_SHIP },
@@ -709,11 +1027,10 @@ describe("the view's camera reports", () => {
       },
       scene,
     );
-    const shipM = own?.pose.position.kind === "system" ? own.pose.position.m : vec3(0, 0, 0);
     expect(report.position).toEqual({
-      kind: "system",
-      system: FIXTURE_SYSTEM,
-      offsetM: add(shipM, vec3(0, 10, 60)),
+      kind: "body",
+      body: FIXTURE_EARTH,
+      offsetM: add(position.m, vec3(0, 10, 60)),
     });
   });
 

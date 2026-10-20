@@ -63,6 +63,7 @@ import {
   type DrawAnchor,
   type DrawnLineOfSight,
   type DrawnSurveyEdge,
+  type LineOfSightPoint,
   type SpriteStar,
   viewStrokesAt,
 } from "../../view/wireframe/drawList";
@@ -128,14 +129,15 @@ export interface ViewFrameInputs {
    */
   readonly terrain?: ViewTerrainInput | undefined;
   /**
-   * Whether the view's terrain readout reads a point on its line of sight this frame, which its
-   * tripod marks at the picture's centre (plan R10, R10.T12): `true` while the readout stands with a
-   * point, over surveyed ground or not; `false` where it has none, at `NO GROUND`. Absent for a view
-   * that states no readout, which draws no tripod: an instrument (decision-r10-t12-leans §3), or a
-   * view under `TERRAIN NOT AVAILABLE` (§5). The drawer keeps the tripod's give-way from frame to
-   * frame while it is given, `false` or `true`.
+   * What the view's terrain readout reads of its line of sight this frame, which its tripod marks
+   * at the picture's centre (plan R10, R10.T12): with a point while the readout stands over ground,
+   * surveyed or not, and the point's slant range where it is known; without one at `NO GROUND`.
+   * Absent for a view that states no readout, which draws no tripod: an instrument
+   * (decision-r10-t12-leans §3), a view under `TERRAIN NOT AVAILABLE` (§5), or one whose readout
+   * gives way for room. The drawer keeps the tripod's give-way from frame to frame while it is
+   * given.
    */
-  readonly lineOfSightPoint?: boolean | undefined;
+  readonly lineOfSightPoint?: LineOfSightPoint | undefined;
 }
 
 /** What a frame drew. */
@@ -403,7 +405,7 @@ export class ViewFrameDrawer {
         lineOfSight:
           inputs.lineOfSightPoint === undefined
             ? null
-            : { hasPoint: inputs.lineOfSightPoint, yielded: this.#lineOfSightYielded },
+            : { ...inputs.lineOfSightPoint, yielded: this.#lineOfSightYielded },
       },
     );
     this.#lineOfSightYielded = list.lineOfSight?.yielded ?? false;

@@ -1155,6 +1155,9 @@ targets at header 21 (below).
     (×0.98–1.25 and ×0.89–1.33); on the boxes' horizon, as `selectPatches` culls until R10.T14.e,
     ×1.75–2.21, ×1.29–1.75 and ×1.36–1.90. The sizing rule's figures from it are T14.a's record's,
     the constants provisional for T14.b (decision-r10-t14a and its #56 follow-up)._
+    _As amended by R10.T14.e: on the boxes' horizon the columns are now ×1.60–1.92, ×1.06–1.38 and
+    ×1.05–1.72 the note's; on the exact one ×1.51–1.82, ×0.98–1.25 and ×0.89–1.33 (T14.e's
+    record)._
 
 16. **The client fetches what the camera can resolve, and nothing more.** A body's field is wanted
     once it is the camera's local body or within the hand-over range of Design note 13 of any view's
@@ -3590,7 +3593,8 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   the 64 MiB outright. _As built: 422 lit slots in 64 MiB (158,936 B a slot); the model's rule gives
   about 935 at τ_sel on the boxes' horizon, what the cache holds today, and about 676 on the exact
   one, the estimate after R10.T14.e, each with the descent's 71 forced patches (T14.a's record).
-  T14.b decides after the UHD 620 run._
+  T14.b decides after the UHD 620 run._ _After R10.T14.e: about 708 at τ_sel on the boxes' horizon
+  (T14.e's record)._
 - **Coarse weights assume Gaussian slopes.** The slope-exceedance probability of Design note 3
   treats the unresolved slope as Gaussian; ridged and cratered terrain is not. The ten-point test is
   the guard; if it fails on a class of world, the fallback is counting a sparse sample of finest
@@ -10271,6 +10275,226 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
      test 3 holds the note's cells on the exact one: _Ruled (decision-r10-t14a, the #56 follow-up):
      accepted, with the exact horizon made exact rather than sampled (Amendment A) and R05's margin
      fixed by R10.T14.e, not here (Amendment B)._ Both are built and recorded above.
+- **Deviations in T14.e, as built** (2026-10-20; lane `lane/57-r10-t14e-box-margin`, on
+  `rendering-and-planets` at `ae4bd052`; decision-r10-t14a's #56 follow-up).
+  - _Files._ Changed: `view/terrain/bounds.ts` and `bounds.test.ts`; the pins in
+    `view/spike/demandRecord.test.ts`, `view/terrain/select.test.ts`, `cacheBudget.test.ts` and
+    `cache.test.ts`; `cacheBudget.ts`' `PatchCountModel` doc alone; and plan 05's pointer in
+    R05.T7.a's record. No wire, protocol, DTO, golden, generator version or Rust change;
+    `select.ts`, `cull.ts` and the rest of the brief's "don't change" list are untouched, and the
+    ranges fixture is as it was. New in `bounds.ts`: `normalMarginM`, of the angle bound, a, c and
+    H, `NORMAL_BEND_FACTOR` (1.155) and `ROUNDING_ALLOWANCE_EPSILONS` (64).
+    `PATCH_GEOMETRY_LENGTH` grows from 408 to 411 numbers, which `select.ts` allocates by.
+  - _The bound as built._ The normal's half-extent is half the samples' span along ν_c plus
+    δ = (Θ² ÷ 8)(a + K H a² ÷ c²) + 64 ε (a + H), with Θ² bounded by q² ÷ (1 − q² ÷ 4) for q the
+    largest chord between neighbouring ring samples' unit directions (Θ = 2 asin(q ÷ 2) and
+    asin x ≤ x ÷ √(1 − x²)), K = 1.155 ≥ 2 ÷ √3, H the range's largest |h| and ε = 2⁻⁵². The
+    tangents' half-extents and the sphere's radius keep the chord, unchanged to the bit, as do the
+    box's centre, axes and sampled extremes. It is carried in the patch's geometry `g`: three
+    numbers that `patchGeometryInto` writes (the angle bound, a and c), the brief's lean, so
+    `select.ts`, which allocates by `PATCH_GEOMETRY_LENGTH`, is unchanged. Where H reaches c² ÷ a
+    the normal keeps R05's chord (no level table approaches it).
+  - _"Rounded up", as built._ The bound is an upper bound at each step rather than a figure
+    rounded to a unit: Θ² through asin x ≤ x ÷ √(1 − x²), K = 1.155 ≥ 2 ÷ √3, |h| at its largest
+    end, then the allowance for the `f64` arithmetic. The top along ν_c is argued from the critical
+    points of x·ν_c on the regular offset surface, not from a convexity theorem, so it holds below
+    the datum down to −c² ÷ a; the cut-off there, which keeps R05's chord, is tested on both sides.
+  - _Its derivation_ (`normalMarginM`'s doc; checked by the science-checker, which re-derived ν″
+    against finite differences and read both citations). For h > −c² ÷ a, X(d) = M·d + h·ν(d) is
+    regular with normal ν(d), so x·ν_c over the sphere of directions has two critical points only,
+    d_c (the greatest) and −d_c on the opposite face: the volume's top along ν_c is the centre
+    vertex at the top of the range, sampled, and its bottom lies on the patch's boundary at an end
+    of the range. Between neighbouring samples an edge is a great-circle arc of directions θ in
+    [0, Θ], and the remainder of linear interpolation (Burden and Faires, 9th ed., §3.1, Theorem
+    3.3) puts f(θ) = X(θ)·ν_c at most Θ² ÷ 8 · max|X″| below the lower sample, with
+    |X″| ≤ a + (2 ÷ √3)|h| a² ÷ c² ((M·d)″ = −M·d; |ν″| ≤ (2 ÷ √3)|m′|² ÷ |m|², m = M⁻¹d).
+  - _Deviation: the sagitta taken in the arc's angle, not the chord's length._ The entry has the
+    chord's sagitta under a curvature bound ρ. A bound in the chord L needs a lower bound on the
+    offset curves' radius of curvature and a separate argument that each arc is short (a curve of
+    bounded curvature can wind); in the angle Θ it is one step, the interpolation remainder, with no
+    condition on the arc. The two agree: on a sphere at the datum δ is R Θ² ÷ 8, the arc's own
+    sagitta to O(Θ⁴), about L² ÷ (8R); on the spheroid the chord is at least 2c sin(Θ ÷ 2), so at
+    the datum δ is about L² ÷ (8ρ) with ρ = c² ÷ a, `chordSagittaM`'s least radius of curvature
+    (R05.T7.b's ruling). The radius-of-curvature bound the curvature form would need,
+    (c − H a ÷ c)² ÷ (a + K H a² ÷ c²), is c² ÷ a at H = 0 and 6,259 km on an Earth at ±24.5 km.
+  - _Not relying on the tops' chord._ The normal's margin reads no chord, so it holds for the bottom
+    of the range without the brief's note that the tops' chord is the longer; the tangents' margin
+    still takes the tops', as R05 built it.
+  - _The figures of the bound_ (tests 5 and 6, WGS 84). The sagitta of a 566 m chord on an Earth is
+    6.28 mm (a level-10 patch's mean spacing; 5.3–8.6 mm across a face as the warp's spacing
+    varies, the science-checker's); ±24.5 km adds 0.45%. The allowance is 90.6 nm (91.0 nm at
+    24.5 km). The sagitta is 20–33 nm at level 19, an Earth's finest, and from level 22 below an
+    ulp of a (0.93 nm; 0.31–0.51 nm there), where the allowance alone pads the normal; the test
+    holds levels 22–24 on every face with every vertex enclosed. The level-10 patch of test 5
+    (face 2, (300, 700), the level's ±24.4 km) has a normal excess of 8.05 mm, where the base added
+    its chord, 641.7 m, which its tangents keep. The allowance's tally (sampled points, a client's
+    vertex, their projections, the box's centre and its half-extent) is under 30 ε (a + H);
+    64 ε (a + H) more than doubles it. The margin tests hold each axis to 10 nm, finer than the
+    margin at every level.
+  - _The enclosure_ (test 1). Every vertex of the 65 × 65 grid and a 257 × 257 sampling of the
+    surface through `stToUv`, `faceUvToXyz` and `unitDir`, at both ends of the level's range, of
+    [−24,500, −1,000] m and of a baked patch's [120, 180] m, lies in the box and the sphere, for 20
+    patches a figure (levels 0–19, by turns at a cube corner, on a face's edge and inside a face,
+    each kind at every level across the three figures) on WGS 84, a sphere and c = 0.9 a: 180
+    patch-ranges, 25 million points, none outside, about 3 s. The most a point lies past the
+    samples' extremes along ν_c is 1.45 nm (level 19, WGS 84, the range below the datum; 1.0 nm
+    above it), against a margin there of 111 nm; at levels 0–18 it is 0 on every figure: no point
+    lies below the lowest sample or above the centre.
+  - _The count model, before and after_ (tests 2 and 3; k₀ = 5 at τ, no margin or relief;
+    all-round / the frustum's least–greatest peak, then model ÷ the note's). On the boxes' horizon,
+    selection's, after (T14.a's table above is the before):
+
+    | Height | High, 1 px 1080p                    | Low, 2 px 720p                  | Wireframe, 4 px 1080p           |
+    | ------ | ----------------------------------- | ------------------------------- | ------------------------------- |
+    | 100 m  | 2,397 / 423–432 (×1.63; ×1.72–1.61) | 428 / 90–93 (×1.29; ×1.13–1.06) | 313 / 80–82 (×1.10; ×1.05–1.08) |
+    | 1 km   | 1,981 / 327–346 (×1.63; ×1.64–1.65) | 348 / 76–81 (×1.34; ×1.19–1.19) | 252 / 58–63 (×1.19; ×1.12–1.13) |
+    | 10 km  | 1,497 / 259–273 (×1.60; ×1.80–1.66) | 287 / 67–69 (×1.38; ×1.34–1.28) | 191 / 44–47 (×1.29; ×1.16–1.12) |
+    | 100 km | 989 / 177–189 (×1.64; ×1.92–1.63)   | 193 / 46–47 (×1.27; ×1.21–1.12) | 135 / 37–41 (×1.30; ×1.42–1.37) |
+    | 400 km | 692 / 147–151 (×1.63; ×1.88–1.64)   | 156 / 39–43 (×1.34; ×1.30–1.34) | 101 / 31–32 (×1.49; ×1.72–1.60) |
+
+    On the exact horizon, after, moved a little since refinement and the frustum still read the
+    boxes:
+
+    | Height | High, 1 px 1080p                    | Low, 2 px 720p                  | Wireframe, 4 px 1080p           |
+    | ------ | ----------------------------------- | ------------------------------- | ------------------------------- |
+    | 100 m  | 2,348 / 414–424 (×1.60; ×1.68–1.58) | 400 / 85–88 (×1.20; ×1.06–1.00) | 284 / 71–74 (×1.00; ×0.93–0.97) |
+    | 1 km   | 1,943 / 321–338 (×1.60; ×1.60–1.61) | 317 / 71–75 (×1.22; ×1.11–1.10) | 218 / 52–55 (×1.03; ×1.00–0.98) |
+    | 10 km  | 1,424 / 247–260 (×1.52; ×1.72–1.59) | 259 / 58–60 (×1.25; ×1.16–1.11) | 163 / 34–38 (×1.10; ×0.89–0.90) |
+    | 100 km | 941 / 167–180 (×1.56; ×1.82–1.55)   | 166 / 39–41 (×1.09; ×1.03–0.98) | 109 / 28–34 (×1.05; ×1.08–1.13) |
+    | 400 km | 642 / 137–140 (×1.51; ×1.76–1.52)   | 126 / 32–33 (×1.09; ×1.07–1.03) | 75 / 24–24 (×1.10; ×1.33–1.20)  |
+
+    | Figure                                                                | Before (T14.a)                     | After (T14.e)                      |
+    | --------------------------------------------------------------------- | ---------------------------------- | ---------------------------------- |
+    | Boxes ÷ the note, high / low / wire                                   | ×1.75–2.21 / 1.29–1.75 / 1.36–1.90 | ×1.60–1.92 / 1.06–1.38 / 1.05–1.72 |
+    | Exact ÷ the note, high / low / wire                                   | ×1.53–1.91 / 0.98–1.25 / 0.89–1.33 | ×1.51–1.82 / 0.98–1.25 / 0.89–1.33 |
+    | The note's cells past 2 on the boxes                                  | 6 (high)                           | none                               |
+    | Boxes ÷ exact, all-round / frustum                                    | 1.15–1.44 / 1.14–1.56              | 1.02–1.35 / 1.02–1.33              |
+    | 100 m leaves the boxes pass, the exact horizon not: high / low / wire | 654 / 178 / 125                    | 49 / 28 / 29                       |
+
+    The boxes' counts fall toward the exact ones and stop short, as the brief expected: a box's
+    flat top still stands above its patch's curved edges, and its tangents keep the chord. The
+    count of "no fewer on the boxes' horizon than on the exact one" and test 4's cross-check
+    against `selectPatches` (within [0.8, 2]) pass unchanged; test 3 still asserts on the exact
+    horizon, the boxes' ratios recorded only.
+
+  - _The sizing rule at τ_sel_ (test 7; 100 m, each column's peak, the replay's 71 forced patches;
+    against the provisional constants, recorded, not asserted):
+
+    | Column               | Peaks, boxes    | Rule, boxes                                    | Peaks, exact    | Rule, exact                           | As built                   |
+    | -------------------- | --------------- | ---------------------------------------------- | --------------- | ------------------------------------- | -------------------------- |
+    | High, before         | 3,498 / 637–646 | 4,619 slots, 1,436,619,856 B                   | 2,750 / 494–503 | 3,646 slots, 1,133,993,504 B          | 1,286 slots, 400,000,000 B |
+    | High, after          | 2,790 / 500–506 | 3,698 slots, 1,150,166,752 B                   | 2,741 / 492–497 | 3,635 slots, 1,130,572,240 B          | 1,286 slots, 400,000,000 B |
+    | High frustum, before | 646             | 2,009 slots, 624,847,216 B                     | 503             | 1,580 slots, 491,417,920 B            | 1,286 slots, 400,000,000 B |
+    | High frustum, after  | 506             | 1,589 slots, 494,217,136 B                     | 497             | 1,562 slots, 485,819,488 B            | 1,286 slots, 400,000,000 B |
+    | Low, before          | 664 / 134–145   | 935 slots, 148,605,160 B                       | 465 / 87–100    | 676 slots, 107,440,736 B              | 422 slots, 64 MiB          |
+    | Low, after           | 490 / 92–105    | 708 slots, 112,526,688 B                       | 462 / 87–100    | 672 slots, 106,804,992 B              | 422 slots, 64 MiB          |
+    | Wireframe, before    | 461 / 114–116   | 671 slots, 25,516,788 B low, 93,556,188 B high | 328 / 80–83     | 498 slots, 18,937,944 B, 69,435,144 B | 520 slots                  |
+    | Wireframe, after     | 352 / 88–91     | 529 slots, 20,116,812 B low, 73,757,412 B high | 319 / 80–82     | 486 slots, 18,481,608 B, 67,762,008 B | 520 slots                  |
+
+    The all-round term still governs. The high rule on the boxes falls from 3.6 to 2.9 times the
+    provisional bytes, and the low rule from 2.2 to 1.7 times 64 MiB; the frustum rule for high,
+    1,589 slots, still passes the 1,323 a default binding holds on `baked-offsets`. The boxes' and
+    the exact rule now differ by 2% on high and 5% on low.
+
+  - _The inputs_ (test 5; boxes; after, beside T14.a's table above). The frustum still never
+    falls as the margin opens or the relief grows (tested).
+
+    | Case            | Column    | 100 m                | 1 km                 | 10 km                |
+    | --------------- | --------- | -------------------- | -------------------- | -------------------- |
+    | Margin 0.1 rad  | High      | 2,397 / 516–523      | 1,981 / 404–417      | 1,497 / 316–322      |
+    | Margin 0.1 rad  | Low       | 428 / 106–110        | 348 / 92–93          | 287 / 79–84          |
+    | Margin 0.1 rad  | Wireframe | 313 / 89–96          | 252 / 65–76          | 191 / 54–57          |
+    | k₀ = 15         | High      | 15,466 / 2,684–2,709 | 14,312 / 2,297–2,316 | 10,880 / 1,663–1,696 |
+    | k₀ = 15         | Low       | 2,397 / 423–432      | 1,981 / 327–346      | 1,497 / 259–273      |
+    | k₀ = 15         | Wireframe | 1,505 / 273–290      | 1,202 / 230–236      | 907 / 162–174        |
+    | Relief ±24.5 km | High      | 3,956 / 2,618–2,631  | 3,957 / 2,620–2,631  | 3,984 / 2,596–2,607  |
+    | Relief ±24.5 km | Low       | 766 / 526–527        | 767 / 526–527        | 765 / 525–525        |
+    | Relief ±24.5 km | Wireframe | 542 / 383–388        | 543 / 383–389        | 545 / 384–388        |
+
+    Against the frustum's greatest peak at k₀ = 5 with neither: the margin's cap ×1.15–1.22 (before
+    ×1.16–1.22); k₀ = 15 ×3.5–6.7 (×3.6–6.3); the relief ×4.7–9.5 (×3.8–8.8), its counts nearly
+    unmoved, since a box ±24.5 km tall is the relief's, not the chord's, while the smooth case's
+    peaks fell. The wireframe's share (r, all-round then at the frustum's greatest peak, at 100 m,
+    1 km and 10 km), after: k₀ = 5 boxes 0.131, 0.127, 0.128 and 0.190, 0.182, 0.172; exact 0.121,
+    0.112, 0.114 and 0.175, 0.163, 0.146; k₀ = 15 boxes 0.097, 0.084, 0.083 and 0.107, 0.102,
+    0.103; exact 0.095, 0.082, 0.081 and 0.105, 0.099, 0.100; all above τ⁻² = 0.0625 (tested).
+
+  - _The replay_ (test 6, `cache.test.ts`; re-pinned). The forced peak is 71 in each case and no
+    forced insert is refused, as before. Low lit: pins peak at 422 of 422 slots, past them in 107
+    frames (before 136). High lit: 887 of 1,286 (before 884), never past: the budget the culled
+    patches free refines elsewhere. The wireframe: 520 of 520, past in 4, unchanged.
+  - _The fourteen descent windows_ (`demandRecord.test.ts`; re-pinned with a dated sentence). All
+    14 hashes moved, none kept: every window's selected bounds changed. Mean / most patches a
+    frame, and the measured demand ÷ D:
+
+    | Window              | High, before      | High, after       | Low, before       | Low, after        |
+    | ------------------- | ----------------- | ----------------- | ----------------- | ----------------- |
+    | Orbit coast         | 77.1 / 79, 4.41   | 74.1 / 75, 0      | 18 / 18, 0        | 17 / 17, 0        |
+    | Descent arc         | 209.9 / 212, 0.49 | 194.2 / 198, 0.93 | 53 / 53, 0        | 47.3 / 49, 1.64   |
+    | Approach and flare  | 182.8 / 191, 1.32 | 169.5 / 177, 1.37 | 46.8 / 50, 1.33   | 42.6 / 47, 1.12   |
+    | Low fast pass       | 211.1 / 220, 0.64 | 198.6 / 208, 0.65 | 59.7 / 63, 1.68   | 54.3 / 58, 1.68   |
+    | Slowdown            | 160.0 / 166, 0.61 | 155.6 / 162, 0.61 | 121.9 / 124, 1.09 | 121.9 / 125, 1.09 |
+    | Vertical descent    | 66 / 66, 0        | 66 / 66, 0        | 68 / 68, 0        | 69 / 69, 0        |
+    | Hover and touchdown | 66 / 66, no D     | 66 / 66, no D     | 68 / 68, no D     | 69 / 69, no D     |
+
+    `WITHIN_TWO` gains high's and low's descent arcs (0.49 to 0.93, and no demand to 1.64), a
+    finding, not a looser test (below). No window asked a key the ranges fixture lacks, so it was
+    not regenerated (§2.5 (c)); its 121,270 B are as they were.
+
+  - _`select.test.ts`' digests_ (re-recorded, each comment dated). Patches with no budget, then
+    under it, before → after: one view, no ranges 12,731 → 12,721 and 300 → 299; two views over
+    ranges baked to level 7 287 → 251 and 198 → 198 (demand 159 → 126 and 84 → 87); orbit and a
+    secondary 13,220 → 13,210 and 1,998 → 2,000. The 1.5 km pose: 981 → 980, 1,952 → 1,952 and
+    12,731 → 12,721. The approach: 48 frames, 38,823 → 38,746 patches in all (mean 808.8 → 807.2,
+    most 1,003 both), its requests 14,209 → 15,326. Every other `select.test.ts` assertion passes
+    unchanged.
+  - _Other tests._ `bounds.test.ts`' camera test tightens from "more than 9,800 m" to within a
+    millimetre of 10,000 m (the box stands above the centre vertex by under a millimetre at level
+    12, against R05's 150 m chord). Nothing in `cull.test.ts`, `fixedStep.test.ts` or the pass's
+    tests moved; `terrainWireSelection.test.ts`' brackets pass unedited. Acceptance as run: the
+    brief's Vitest command (terrain, spike and quality; the entry names none), 77 files and 1,846
+    tests (1,827 at the base), on this laptop beside #46's reductions, load about 3. It does not reach `view/bodies` or `displays/view`, which also
+    select through the boxes; the gate's Vitest selection, 117 files that read the change, does,
+    and `just ci` at landing.
+  - _R07's mesh regime moves too._ `view/bodies/smoothMesh.ts` selects through the same boxes on a
+    figure with no level table, so its selection moves with the terrain's. And since refinement
+    reads the box's distance (`distanceToBoxM`), a camera above a patch is now farther from its
+    box's top by up to the old chord: some places are drawn a level coarser, still within τ, as
+    well as coarse patches below the horizon left out.
+  - _For the desktop's `just test-render` at landing._ The smoke harness's terrain parts and the
+    lit bodies' mesh select through these boxes, so their selected and drawn counts may fall: where
+    a view looks across a horizon (the descent's windows fell by up to 15.7 patches a frame on the
+    mean), and where a patch's error now passes τ a level sooner. A coarse patch whose box no
+    longer clears the horizon is one the exact horizon also hides; a coarser level is within τ.
+- **Deferred findings (2026-10-13 rule) (R10.T14.e)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _The boundary does not dip at all along the normal._ (M·d)″ = −M·d makes f″ =
+    −M·d·ν_c + h ν″·ν_c, negative wherever M·d·ν_c > K |h| a² ÷ c², so along every edge arc the
+    boundary bulges above its chord in ν_c and its lowest point is a sample. The science-checker
+    puts the condition at H below about 0.49 a on an Earth-like figure and 0.36 a for c ≥ 0.9 a
+    (every real planet; an Earth's H ÷ a is 0.004), and not for much flatter small bodies (H below
+    0.17 a at c = 0.7 a). Test 1 sees it: no point past the samples at levels 0–15. The sagitta is
+    kept as ruled; it costs millimetres.
+  - _The boxes' remaining excess over the exact horizon_ (49 of the high setting's leaves at
+    100 m, 1.02–1.35 across the table) is the box's flat top over its patch's curved edges, and the
+    tangents' chord. Tighter volumes there (a box per edge, or the ring's own points against the
+    horizon) are out of this task's scope; for T14.b, if the sizing needs it.
+  - _Descent arcs now within two of D._ High's (0.49 → 0.93) and low's (no demand → 1.64), moved
+    into `WITHIN_TWO`; high's orbit coast fell from 4.41 to no demand at all (still outside).
+  - _High's replay pins rose by 3_ (884 → 887) as the boxes tightened: freed budget refines
+    elsewhere under the replay's half-the-slots budget. Low's frames past its slots fell from 136
+    to 107. T14.b measures on real bakes.
+  - _A patch more in low's last two windows_ (68 → 69): the balance or the freed budget, not a
+    looser box (every box is tighter or equal).
+  - _Requests rose along the approach_ while its patches fell: 14,209 → 15,326 bake requests over
+    its 48 frames (+7.9%) against 38,823 → 38,746 patches (−0.2%), and the orbit-and-secondary case
+    under its budget asks 3 bakes where it asked 1. Worker time for T14.b.
+  - _Skirts can hang below the box._ The mesh regime's `skirtDepthM`, and terrain skirts where
+    `inheritedRangeInto` clamps a range to its level's low; before, the chord's slack covered them.
+    Harmless: only culling and refinement read the box, and a skirt under a culled patch lies
+    behind drawn surface.
+  - _The box bounds the `f64` surface, not the GPU's `f32` vertices,_ which can sit a few parts in
+    10⁸ of their distance from the camera outside it: far under a pixel, and culling only.
 - **Deviations in T12's back end, as built** (2026-10-20; lane r10-readouts, branch
   `r10-readouts-land`, after R10.T16.e's commit, on `rendering-and-planets` at `6fa6a405`;
   decision-r10-t12-leans, decision-r10-t16-leans §12, decision-r10-view-block-room §2–§4).
@@ -10350,11 +10574,10 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
     the screen-space marks when `DrawOptions.lineOfSight` has a point, beneath the reticles and over
     the survey edge; it gives way at 0.5 rem and returns at 0.75 rem, centreline to centreline, to
     symbol-sized body symbols, a craft's ticks and the flight path marker, and the drawer keeps the
-    give-way per view. The open centre counts the casing, so at a device-pixel ratio of 1 the ticks
-    start 4.21 px out from 80% to 125% (reaching 0.58, 0.51 and 0.46 rem), in place of the plan's
-    by-hand fallback of 0.25 rem; the guide's prose ("they start further out, keeping their
-    length") covers it, and its figures stand. The edge's ticks keep 0.5 rem clear only where the
-    tripod is drawn, and mark labels keep off its box.
+    give-way per view. The open centre is the coloured stroke's, as Layout's hole is; the casings
+    may meet over the point (decision-r10-t12-commit3 §3), so the ticks start 0.1875 rem plus δ at
+    every ratio in use, the guard never binding (0.08 px to spare at 0.78125 and 80%). The edge's
+    ticks keep 0.5 rem clear only where the tripod is drawn, and mark labels keep off its box.
   - _The descent spike._ `SITE ELEVATION` in `ELEVATION`'s form, with its row (signoff-9 (k)
     part 2).
   - _The guide._ §12's survey-line texts with G6 in place of their second sub-bullet, and G1–G5
@@ -10382,7 +10605,8 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
   - _By hand, hidden._ `just views-check --hidden --smoke --terrain` on the RTX 3080, both
     settings, exit 0, with R10.T16.e's "No terrain fault" passing. The §12 looks
     (decision-r10-view-block-room) are the label-block commit's.
-- **Left for T12's label-block commit (on R10.T12.b; decision-r10-view-block-room §3–§4, §12)**:
+- **Left for T12's label-block commit (on R10.T12.b; decision-r10-view-block-room §3–§4, §12)**
+  (_built by commit 3, below_):
   - the lower plate's groups through R10.T12.b's interface (`LowerPlatePart`: `survey`, `state`,
     `datum`, `readout`, each with its tallest form; the plate's own yield lines), the tripod and the
     `GROUND AT LINE OF SIGHT` note only while the readout stands there;
@@ -10414,14 +10638,20 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
      reach Vesić 1975 or EM 1110-1-1905); the slope ruling read them.
 - **Leans for commit 3's rulings** (main rules them with its §12 look):
   1. In `CHASE` the tripod stands over the own ship's hull at the centre: the give-way list names
-     no hull outline. Lean: a hull outline within 0.5 rem also makes it give way.
+     no hull outline. Lean: a hull outline within 0.5 rem also makes it give way. _Ruled
+     (decision-r10-t12-commit3 §1), amended: a craft's hull nearer than the point gives way by its
+     outline, clipped at the near plane, or by its opaque faces over the point, so `CHASE` draws no
+     tripod; the note stands._
   2. The `GROUND AT LINE OF SIGHT` row's "Stated while …" is broader than "Views" (main has queued
-     "while its terrain readout stands (see "Views")" for the docs batch).
+     "while its terrain readout stands (see "Views")" for the docs batch). _Ruled
+     (decision-r10-t12-commit3 §2): C3, applied in commit 3._
   3. The casing counting for the open centre (above). Lean: it counts; the look at a ratio of 1
-     confirms it.
+     confirms it. _Ruled (decision-r10-t12-commit3 §3), differs: the casing does not count; the
+     ticks start 0.1875 rem plus δ._
   4. At a ratio of 1 and 80%, the upper ticks' ends come about 1.8 px from the selection bracket's
      arms about a size-class-1 body at the centre, the bracket's casing cutting their tips. Lean:
-     acceptable under the draw order; for the look.
+     acceptable under the draw order; for the look. _Ruled (decision-r10-t12-commit3 §4): settled
+     by 3, the ends 3.13 px from the arms; the look checks it._
 - **`VIEW`'s room, ruled (decision-r10-view-block-room).** The floor is 80 × 45 rem (1280 × 720 at
   100%, 1920 × 1080 at 150%); a 1280 × 720 window at 125% or 150% is below it. Stated limits: at
   the floor beside an open instrument the primary holds back its terrain lines and, in `CHASE`,
@@ -10602,3 +10832,289 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
     (decision-r10-view-block-room, "Seen" item 1).
   - _The compact column at 1280 × 720 at 125%_ clips 3 to 33 px at its foot (below the floor, as
     G-B allows); a selector that holds one row, or a tighter fold, is R07's (Seen items 4 and 5).
+- **Deviations in T12's label-block commit (commit 3), as built** (2026-10-20; lane r10-readouts-3,
+  branch `r10-readouts-3`, on `rendering-and-planets` at `bd185668`, R10.T12.b's `27f8af0b`
+  beneath; decision-r10-t12-commit3, decision-r10-view-block-room §3, §4 and §12,
+  decision-r10-t12-leans §3 to §7, decision-r10-t16-leans §12).
+  - _Files._ Beyond the entry's list, all under `apps/hyperion/src/renderer/src/`:
+    `displays/view/groundReadout.ts` (`GroundReadouts`, the primary's readout asked at each
+    publish; `groundBodyOf`, `surfaceUnsetOf`, `readoutBodyOf`, `litTimeOf`, `lineOfSightPointOf`,
+    `GROUND_READOUT_OPTIONS`), `displays/view/useTerrainLines.ts` (the lines and their units'
+    hysteresis; `standingReadout`), `displays/view/terrainPlate.tsx` (`terrainLowerParts`, the
+    lower plate's parts), `view/terrain/TerrainReading.tsx` and `TerrainStatus.tsx` beside the
+    entry's `SurveyLine.tsx` and `TerrainReadout.tsx`; `view/terrain/failureGuard.ts`
+    (`succeeded`, `failed`); `view/terrain/session.ts` (`TerrainViewReport.readoutBody`,
+    `TerrainSession.terrainFault`, the fault's views; `hullBoundingRadiusM` moved to
+    `view/wireframe/hulls.ts`, with `hullOnView`); `view/wireframe/symbology.ts` (`HullOnView`,
+    the stroke-only open centre); `view/wireframe/drawList.ts` (`LineOfSightPoint` with the point's
+    range); `displays/view/viewFrameDrawer.ts`; `view/scene/model.ts` (`ViewBody.surfaceless`) with
+    `view/scenes/eclipseScene.ts`'s and `phaseScene.ts`'s giants and `view/scene/fromServer.ts`'s
+    gas-envelope bodies; `lib/scene/lightTime.ts` (`spanFromSeconds` exported); `styles.css`; and
+    `displays/view/ViewDisplay.tsx` (`ViewStage`'s `lowerParts` from `terrainLowerParts`, the loop's
+    `GroundReadouts` at each publish, the primary's report's `readoutBody`,
+    `LoopInputs.lineOfSightPoint` from the committed render, the list's `groundNote`). The entry's
+    `displays/view/viewRun.ts` and `ViewLabelBlock.tsx` are untouched: T12's lines stand on
+    R10.T12.b's lower plate (decision-r10-view-block-room §3 and §4), and `frameBody` came with the
+    back end.
+  - _The ask (decision-r10-t12-leans §3, §6 (c), §7)._ The primary alone, at the loop's publish
+    (4 Hz, on a frame the 30 Hz instruments draw in too): the `FRAME` body (`frameBody` of the
+    camera's frame, as the back end defined it) where it has a surface (`isLitBody`, not
+    `surfaceless`); its survey; `lineOfSightOf` along `runPose`; `TerrainSession.groundReadout` at
+    the scene's time less the body's `retarded.lightTimeS` (the scene's time where that is 0 or not
+    known), `SLOPE` over 2 m and the 1.0 m pad. One query in flight; a publish while one is out
+    asks nothing, the next asks afresh. The answer is taken at the next publish, and dropped for a
+    session let go or a body no longer framed; a `null` answer (no seed or field yet, no worker
+    left) leaves no readout. Nothing is asked, and what is held is let go, while no header is held,
+    the body is not modelled, or the session's terrain fault stands, so that the readout returns
+    with a first answer of its own, as a cut. The lane's choice: the readout is asked while the
+    plate's readout gives way for room too, so that it stands at once when the room returns.
+  - _No line of sight (the lane's choice; accepted by main)._ Where `lineOfSightOf` gives none (the body's
+    rotation not known, or the camera past the binding's 10¹² m), nothing is asked, and no `DATUM`,
+    readout, tripod or note stands; the survey line stands, and the upper plate's
+    `ROTATION: NOT YET MODELLED` states the rotation's gap.
+  - _No session._ With no terrain session (the engine not yet ready, or a server scene with no
+    universe), a served body states no terrain lines, as before T12; a kept scene's body with no
+    terrain reads `TERRAIN: NOT YET MODELLED` with or without one (below).
+  - _The guard (§5)._ The answers' outcomes go through `TerrainFailureGuard`'s new `succeeded` and
+    `failed`, taken at the publish with its frame's time, so that a run's onset is counted in the
+    loop's time, as the step's and the edges' are; the ask's own work has a guard of its own. A
+    refusal changes nothing; refusals for 250 ms fault the terrain (`failComputation`), said once
+    (`the terrain readout's query failed:`).
+  - _The lines._ `terrainLabelModel` in `useTerrainLines`, its units kept from publish to publish
+    and started afresh when the `FRAME` body changes; the readout stands only while no terrain
+    fault stands, the view's own or the session's (`TerrainSession.terrainFault`, beside the
+    view's fault lines: decision-r10-t12-commit3 §6). The parts (R10.T12.b's interface): the survey
+    line or a state in its place (`state`), a state after a survey held, `DATUM` and the readout,
+    each that gives way with its tallest form.
+  - _The tallest forms (`tallestTerrainLines`)._ Every field at its longest reading and stale with
+    its `S`; `DATUM` the header's spheroid, both radii, with its `SEA LEVEL`;
+    `SLANT RANGE FROM CAMERA` with both the widest Estimated range and uncertainty and the
+    `· GRAZING` part, so that
+    it is as tall as either of its forms at any width (beyond the ruling's "Estimated, stale and
+    `GRAZING`", which names the two forms one at a time); `MATERIAL` the longest form's name and
+    the longest substance the header's palette names, or `UNLISTED MATERIAL`; `SLOPE` with the
+    longest `BASELINE`, 100 m, for R10.T12.a's selector.
+  - _The components._ Each value in an `output` (`aria-live` off), an inline block as wide as its
+    field in ch, right-aligned, an uncertainty left-aligned (`.terrain-field--start`), each `S`'s
+    place a 2 ch `.terrain-mark`, `MATERIAL`'s names' too (the UX review: their place was not kept
+    before); a value with its uncertainty and its `S`'s place one `.view-label__run`, so that a `±`
+    reading or its `S` never starts a line alone (the UX review); a blank uncertainty's place an
+    `aria-hidden` span; segments and pieces set as chains, not lists, so that no key is a position
+    (the TypeScript review). Statements (`PENDING`, `TERRAIN: NOT YET MODELLED`, `NOT SURVEYED`,
+    `NO GROUND`) are the block's statements through `StatusText`; the survey line's failures,
+    `SURVEY COVERAGE REJECTED` and `SURVEY DATA INVALID`, are set through `StatusLine` as every
+    request's status is (the model's status line gains `failure`, `refused` or `fault`; the UX
+    review). The heading `GROUND AT LINE OF SIGHT` is an `h3` of a new `.view-label__heading`, set
+    as `.system-readout__heading` is (muted, 0.2 em tracking) at the plate's type size. The model's
+    status lines keep their `colour`, which states the line's colour token; the renderer sets it by
+    `failure`.
+  - _The tripod._ Its point comes from the committed render: the lines' answer while the plate's
+    readout stands (`standingReadout`), so that the mark and the plate never disagree; with the
+    point's slant range (`LineOfSightPoint.rangeM`; none at `NOT SURVEYED`, whose answer carries
+    none). The give-way to a craft's hull (decision-r10-t12-commit3 §1): `hullOnView` projects every
+    edge, its windows' and those hidden behind its own faces included, clipped at the near plane,
+    and casts the camera's forward ray in `f64` against its opaque faces (Möller and Trumbore 1997;
+    a window is no face); a hull counts where the list draws it, not behind a body's limb, and its
+    bounding sphere's near side is nearer than the point, every drawn hull where the range is not
+    known or there is no point. So `CHASE` draws no tripod, at any size, and `SEAT` does. The open
+    centre is the coloured stroke's (decision-r10-t12-commit3 §3): `lineOfSightInnerPx` drops the
+    casing term; its tests follow.
+  - _The note._ `ViewMarkList`'s `groundNote`: `GROUND AT LINE OF SIGHT` first of the notes,
+    `role="note"`, named "Ground at line of sight, at the view's centre", outside the listbox, not
+    focusable, never stale; while the plate's readout has a point, drawn or given way.
+  - _Kept scenes (decision-r10-t12-commit3 §5)._ A kept planet, dwarf planet or moon with no detail
+    seed reads `TERRAIN: NOT YET MODELLED` in the survey line's place, with or without a session,
+    with nothing asked; a star states nothing, and the kept giants are marked
+    `ViewBody.surfaceless`: `ECLIPSE TEST`'s and `PHASE TEST`'s.
+  - _Served giants (beyond the ruling; the UX review's must-fix; accepted by main)._ A served body in the
+    gas-envelope state, a sub-Neptune, an ice giant or a gas giant by its bulk section's class, is
+    marked `surfaceless` too (`fromServer.ts`), so that a view framed in a giant states no
+    `SURVEY COVERAGE REJECTED: … has no solid surface …`, the server's refusal of its field: the
+    scene's records hold no `surface` section, and the record's `not_applicable` one is the same
+    state (P14.T35.e). A body whose bulk is not sent is taken to have a surface, as its survey then
+    says.
+  - _The fault's views (decision-r10-t12-commit3 §6)._ `TerrainViewReport.readoutBody` (the
+    primary's `readoutBodyOf`) keeps the `FRAME` body wanted as the view's local body, and gives the
+    view the terrain's fault line once the session is faulted, beside the views that hand a body
+    over, unless the body reads not modelled.
+  - _The `FRAME` from the ship in a served system._ Built to `frameBody` as the back end defined it;
+    the own ship then reads the system frame there (R02.T17's view scene), so commit 4 holds it in
+    its local body's frame (decision-r10-ship-frame; commit 4's record, "Beyond T12's files").
+  - _Keyboard reach._ The entry's "keyboard reach of the readout's target through the DOM list" is
+    tested as `NEXT TARGET` (`]`), which points the camera at the next body or craft in the view's
+    list (the guide's row), so that the readout's line of sight moves with no pointer; the list's
+    own options select and do not aim.
+  - _The guide._ decision-r10-t12-commit3's C1 to C6, signed off there: the tripod's _Beside other
+    marks._ (the hull), _In the list._, _Size and stroke._ (the casings), the survey line's
+    not-modelled clause and the `TERRAIN: NOT YET MODELLED` row (kept scenes), the
+    `GROUND AT LINE OF SIGHT` row ("and its terrain readout stands") and the
+    `TERRAIN NOT AVAILABLE` row's place. Drawn now, which the back end applied ahead of the display:
+    the survey line's bullet and sub-bullets, the readout's bullet, the capacity's and the Missing
+    sub-bullets, the instruments' clause (G3), and the rows `ULTIMATE BEARING CAPACITY`, `DATUM`,
+    `SURVEY COVERAGE REJECTED`, `SURVEY DATA INVALID` and `TERRAIN NOT AVAILABLE`.
+  - _Tests._ New: `groundReadout.test.ts` (44), `useTerrainLines.test.tsx` (9; jsdom, so `.tsx`),
+    `terrainPlate.test.tsx` (11), `TerrainReadout.test.tsx` (32), `SurveyLine.test.tsx` (17); and
+    in the changed files `readouts.test.ts` (the tallest forms, 39), `failureGuard.test.ts` (9),
+    `session.test.ts` (9, the pending survey among them), `ViewMarkList.test.tsx` (9), `hulls.test.ts` (9), `symbology.test.ts`
+    (6, and the open-centre cases at 0.1875 rem plus δ), `drawList.test.ts` (11: 0.4, 0.6 and
+    0.8 rem, an edge from behind the camera clipped and counted, a face, a window, beyond the point, `rangeM` unknown, behind a limb, `CHASE` over
+    TEST HULL at 1920 × 1080 and 1280 × 720 from 80% to 150%, `SEAT`), `viewFrameDrawer.test.ts`,
+    `fromServer.test.ts` (the gas-envelope body) and `ViewDisplayTerrain.test.tsx` (14: the plate
+    before and from the first answer, the 4 Hz ask of the primary alone, the frames' point and
+    range, no readout on an instrument, the note, `CHASE`'s tripod given way with its note first,
+    `NO GROUND`, stale on loss of the link, the fault, the refusals' fault, the keyboard's
+    `NEXT TARGET` moving the line of sight, and the kept scenes).
+  - _Generator version._ Untouched (22): presentation alone; no golden, wire or payload moved
+    (decision-r10-t12-commit3, Flags).
+  - _Acceptance, as run._ `pnpm --filter hyperion exec vitest run` over
+    `src/renderer/src/view/terrain`, `src/renderer/src/displays/view`,
+    `src/renderer/src/view/wireframe`, `src/renderer/src/view/scene`,
+    `src/renderer/src/view/scenes` and `src/renderer/src/lib/scene` (125 files, 4,024 tests), the
+    entry's `view/terrain` among them; the typecheck and `oxlint --type-aware --deny-warnings` clean; the
+    console-ux checks by the UX review (`ux_lint.py` 0 errors, its 12 checks on lines older than
+    this change; `glyphs.py` on `° ± × · —` and U+00A0, all in both faces; no new colour, so no
+    contrast owed beyond `--text-muted` 7.22:1 and `--status-caution` 12.01:1 on `--surface-0`);
+    the gate, `just smart-ci origin/rendering-and-planets --hook-checks`, once over commits 3 and 4.
+  - _By hand, hidden, 2026-10-20_ (the desktop, RTX 3080; the views check's `--hidden --terrain`
+    run, offscreen at a device-pixel ratio of 1, windows 1926 × 1086 on high and 1286 × 724 on low;
+    R10.T12.b's harness in the lane's scratch `looks/`, its scratch plate replaced by T12's real
+    parts; built from this commit's tree, run after the UX review's fixes, its logs
+    `looks-b-high.log` and `looks-b-low.log`, the first run's `looks-a-*` the same outcomes before
+    them). `TERRAIN TEST` at 105–140 s and 188–220 s of its script, the primary wireframe and then
+    photorealistic, each in `CHASE` with `EASED CAMERA MOVES` and in `SEAT`, with zero, one and two
+    wireframe instruments, at 100%, 125% and 150% by the root's font size, the lower plate in its
+    tallest state (every part's tallest form, `DATUM` with `SEA LEVEL`, and a state line,
+    `SURVEY DATA INVALID: field level unusable, reopen VIEW to retry`, after the survey line); then
+    the live plate and the tripod in both styles in `SEAT` at 80%, 100% and 125% and in `CHASE` at
+    100%, and beside the class-1 bracket, `FREE` from the chase pose aimed at `TEST MOON` with it
+    selected, at 80% and 100%. Each case measured every plate and slot against the stage's 0.5 rem
+    inset, the plates' gap, the slots against the stage and the plates, every plate's and slot's
+    scroll against its client size outside the ruled scrollers, every part, run and field of the
+    lower plate within it, no terrain readout on an instrument, the tripod (drawn, given way or
+    absent, its box, what covers it, and the gap between the slots) against the readout, and the
+    list's notes, `GROUND AT LINE OF SIGHT` first while the readout has a point. 184 cases, none
+    cut:
+
+    | Size (room)                     | Slots | Lower plate (tallest)                      | Upper plate                                 | Slots standing                                     | Tripod, `SEAT`               | Tripod, `CHASE` |
+    | ------------------------------- | ----- | ------------------------------------------ | ------------------------------------------- | -------------------------------------------------- | ---------------------------- | --------------- |
+    | 1920 × 1080, 100%               | 0–2   | whole                                      | whole                                       | as opened                                          | drawn, clear                 | given way       |
+    | 1920 × 1080, 125%               | 0–2   | whole                                      | whole                                       | as opened                                          | drawn, clear                 | given way       |
+    | 1920 × 1080, 150% (the floor's) | 0     | whole in `SEAT`; readout yields in `CHASE` | whole                                       | —                                                  | drawn, under the upper plate | absent          |
+    | 1920 × 1080, 150%               | 1–2   | to its one line                            | `1-5` to `1-9 of 10`                        | `INSTRUMENT 1`; with both, `INSTRUMENT 2` its stub | absent                       | absent          |
+    | 1280 × 720, 100% (the floor)    | 0     | readout yields; once to its one line       | whole; once `1-6 of 10`                     | —                                                  | absent                       | absent          |
+    | 1280 × 720, 100%                | 1–2   | readout yields, or to its one line         | whole, or `1-5` to `1-8 of 10`              | `INSTRUMENT 1`; the second `OPEN` held back        | absent                       | absent          |
+    | 1280 × 720, 125% (below)        | 0–2   | to its one line                            | whole, or `1-5` to `1-7 of 10`              | held whole, the panel's line                       | absent                       | absent          |
+    | 1280 × 720, 150% (below)        | 0–2   | to its one line                            | whole plate, `11-14 of 14` to `15-17 of 17` | held whole, the panel's line                       | absent                       | absent          |
+    - _The tripod._ Drawn wherever the readout stands and nothing makes it give way: in `SEAT`
+      (and `FREE`) at every size where the readout stands, never in `CHASE`, where the own hull's
+      faces stand over the point, the note `GROUND AT LINE OF SIGHT` standing first all the same
+      (decision-r10-t12-commit3 §1). At 1920 × 1080 at 100% and 125% with both slots open, in
+      `SEAT`, it stands in the gap between them, under their span, covered by neither (at 100%,
+      slot 1's foot at 421 px, slot 2's top at 695 px, the tripod 551–569 px). Under the upper plate
+      at 1920 × 1080 at 150% and, live, at 1280 × 720 at 100%, as the guide's chrome clause has it
+      (decision-r10-view-block-room, "Seen" item 1).
+    - _The open centre at a ratio of 1_ (`looks/crops`, 400% and 1600% kept): at 80% and 100%, over
+      the lit ground in the photorealistic style and over the wireframe, the three `--text` ends
+      apart and the centre dark, never a solid "Y"; at 80% open and small, as signoff-10 had it.
+    - _Beside the class-1 bracket_ at 80% and 100% (photorealistic, `TEST MOON` selected and aimed):
+      the upper ticks whole but for their tips, the bracket's casing between them and its arms, not
+      touching (decision-r10-t12-commit3 §4).
+    - _The longest note at 1280 × 720_: `GROUND AT LINE OF SIGHT` with
+      `SURVEY EDGE TEST MOON 178 km` beneath it, whole. At 1280 × 720 at 150% the compact column
+      clips at its foot (141–236 px, as R10.T12.b measured) and its notes with it, below the floor,
+      as G-B allows.
+    - _Outcomes beside the ruling's expectations_ (decision-r10-view-block-room §4), each with
+      nothing cut: at the floor alone the readout gives way in the tallest state in every style and
+      preset, and once (photorealistic `SEAT`, five statements) the survey line and `DATUM` too, with
+      the upper plate's lines scrolling `1-6 of 10`; live, at the floor alone the readout stands in
+      `SEAT` and gives way in `CHASE`; at 1920 × 1080 at 150% alone it gives way in `CHASE`, in both
+      styles.
+- **Deferred findings (2026-10-13 rule) (T12's commit 3)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _A nearer body on the line of sight_ (decision-r10-t12-commit3, "Seen" item 1): a moon crossing
+    the picture's centre in front of the `FRAME` body's point is the ground the line of sight first
+    meets, yet the readout reads the `FRAME` body behind it and the tripod stands over the moon's
+    disc. For R10.T12.a or a later pass.
+  - _The open centre at a ratio of 0.78125 and 80%_ ("Seen" item 3): 0.08 px to spare, its ends
+    about 1 px apart; this machine renders no such ratio.
+  - _Hidden hull parts count_ ("Seen" item 2), erring to leave the tripod out; the note stands.
+  - _`NOT SURVEYED` carries no range_, so every drawn hull counts there, nearer than the ground or
+    not.
+  - _A query that never settles_ (a worker that hangs without failing) holds the last readout
+    unstale; nothing times a query out, as nothing times a bake out.
+  - _The readout asked while it gives way for room_ costs a worker query at 4 Hz that nothing
+    shows.
+  - _A stated line where no line of sight can be formed_ (the body's rotation not known, or the
+    camera beyond the binding's 10¹² m): the plate states the survey line alone there (above); a
+    line of its own is R10.T12.a's, for a later UX pass (main, 2026-10-20).
+  - _The labels wrap in a narrow plate_ (`SLANT RANGE FROM` | `CAMERA`, `ULTIMATE BEARING` |
+    `CAPACITY`), as the label block's line markup sets a long label beside its value; a layout
+    that keeps them whole is R10.T12.a's to weigh with its measurements.
+- **Beyond T12's files (decision-r10-ship-frame; commit 4)** (2026-10-20; lane r10-readouts-3).
+  - _The own ship's `FRAME` in a served system._ R02.T17's view scene held the server's ship
+    stand-in in the system frame, so that `frameBody` named no body from `SEAT` or `CHASE` and T12's
+    lines never stood from the ship in a served system. `view/scene/fromServer.ts` now holds it in
+    the frame of `sceneAt`'s local body, the sim's body-frame rule over geometric present positions
+    with its hysteresis (not `sceneFrameFor`), at the observer's position less the body's drawn,
+    geometric centre, and its velocity against the body's present velocity, so that a stand-in at
+    rest in its body's frame reads exactly zero and draws no flight path marker; the system frame
+    where the frame has no local body or the scene draws none for it. `lib/scene/apparent.ts`'s
+    `SceneFrame` gains `localBodyVelocityMPerS` (`composedVelocity` at the frame's time, the same
+    that `shipObserver` adds). The stand-in's attitude, the observer, light time, which body is
+    drawn geometrically, `defaultPose`, kept scenes and the session's `local` are unchanged; no
+    wire, server, golden or version change. `frameName`, `frameBody`, `POSITION`, the free camera's
+    detach and the camera report follow with no change of their own, so that the lower plate stands
+    in `SEAT` and `CHASE` within 0.9 of a served body's Hill radius: `TERRAIN: NOT YET MODELLED`
+    while the serve gate is shut.
+  - _The guide._ decision-r10-ship-frame's G1 and G2: the `SYSTEM BARYCENTRIC` row ("or the craft it
+    is held to, is in no body's Hill sphere (see `BODY`)") and the `BODY` row (the innermost body,
+    the sphere entered at 0.9 of its radius and left beyond it).
+  - _Records._ Plan 02's R02.T17 ("Fixed in R10.T12") and Design note 22; plan 03's T13 (the new
+    field).
+  - _Tests._ decision-r10-ship-frame §5's eleven: `fromServer.test.ts` (12 more: the ship in
+    Earth's frame with `stateNearEarth`, resolving to the observer within 4 ε |observer|; the system
+    frame outside every sphere; the rule in both directions, not the wire's frame; the velocity, the
+    wire's `[0, 7000, 0]` to 10⁻⁹ and exactly zero at rest with no flight path marker; the attitude
+    across an entry; a path into Earth's sphere and out, 63 steps of 1,000 s through `sceneAt` with
+    `previous`, its frame body always `frame.localBody`, entry at 0.9 or less and exit above 1
+    within a step, continuous to 1 mm; an undrawn local body, made by hand with the ring `.0180` as the frame's local body (`sceneAt`
+    names only planets, dwarf planets and moons, which the scene draws once seen; the guard's live
+    case is a candidate `apparentPosition` does not see, which `sceneAt` leaves out of
+    `frame.bodies`); the camera report in Earth's frame; the two pins of the
+    system-held ship re-pinned with the change stated), `apparent.test.ts` (4: the present velocity
+    against `stateAt` along the parent chain to 10⁻¹² and equal to a body-held stand-in's observer's,
+    a ±0.5 s central difference to 10⁻⁶, `null` with no local body), `viewRun.test.ts` (5) and
+    `cameraPlace.test.ts` (4) (`SEAT` and `CHASE` reading `BODY <Earth>` with Earth the `FRAME`
+    body and `POSITION` from its centre, `SYSTEM BARYCENTRIC` and `null` outside; `FREE` detached
+    at 0.95 of the Hill radius keeping Earth's frame), and `ViewDisplayTerrain.test.tsx` (3: in
+    `SEAT` 2,000 km over Earth the plate's `SURVEY COVERAGE: PENDING`, then
+    `TERRAIN: NOT YET MODELLED` on a `not_modelled` answer, and none at 1 au); `stateNearEarth` and
+    `stateInSystem` moved to `test/sceneFixture.ts` to be shared, and a served run cut to a preset
+    in `test/servedRun.ts` (the TypeScript review). No session figure moved: the session's tests
+    build no served scene.
+  - _Acceptance, as run._ `pnpm --filter hyperion exec vitest run` over `src/renderer/src/view/scene`,
+    `src/renderer/src/lib/scene`, `src/renderer/src/displays/view`, `src/renderer/src/view/terrain`,
+    `src/renderer/src/view/camera` and `src/renderer/src/view/wireframe` (135 files, 4,182 tests),
+    then the gate over commits 3 and 4. No by-hand look is owed (decision-r10-ship-frame §5); the
+    served-world look is T15's.
+- **Deferred findings (2026-10-13 rule) (decision-r10-ship-frame)** (recorded, not ruled; each
+  leaves the algorithm and the contracts as built).
+  - _`FRAME CHANGE TEST`'s ship is held in the system frame_ (`frameChange.ts`): in `SEAT` and
+    `CHASE` its `FRAME` never changes, against G1 and G2; the scene could hold it per scripted
+    segment, as R02.T8.b's scene test re-expresses it, and would then read
+    `TERRAIN: NOT YET MODELLED` inside its bodies' frames. Owner: R02's kept scenes, the next time
+    they are touched.
+  - _The closure rate and the symbology anchor's relative velocity_ (`viewRun.ts`'s closure,
+    `drawList.ts`) subtract two craft's velocities with no check that they are held in the same
+    frame: wrong before for a body-held contact against the system-held ship, and now for a
+    system-held contact against a body-held ship; unreachable on a served world while the server's
+    craft source is `NoCraft`, and in the kept scenes, whose second craft carry no velocity. The fix compares in a common frame, or reads `unknown`. Owner: the
+    plan that first serves craft.
+  - _`place-ship`'s default distance_ (0.01 au) is outside the entry ratio for an Earth (1.017) and
+    far outside for inner planets, and its doc's "inside an Earth's Hill sphere" is false by R02's
+    pericentre form and band; the fix is a default of half the target's pericentre Hill radius.
+    Owner: main's tooling; T15 passes `--distance` meanwhile.
+  - _`velocityAgainst`'s system branch_ subtracts a body's retarded velocity; for the local body,
+    drawn at the present, the present velocity is the reference, and after commit 4 the branch
+    applies only to other craft held in the system frame, none of them served. Owner: T14.c, with
+    its frame chaining.

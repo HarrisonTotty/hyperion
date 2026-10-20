@@ -199,53 +199,61 @@ const NOTE: Readonly<Record<Column["name"], ReadonlyArray<Cell>>> = {
   ],
 };
 
-/** The model's own table at τ, k₀ = 5, no margin or relief: on the boxes' horizon (selection's). */
+/**
+ * The model's own table at τ, k₀ = 5, no margin or relief: on the boxes' horizon (selection's).
+ * Re-pinned for R10.T14.e's normal margin (2026-10-20): 100 m high from 3,014 / 537–554 to 2,397 /
+ * 423–432, the rest as plan 10's T14.e record has it.
+ */
 const MODEL_BOX: Readonly<Record<Column["name"], ReadonlyArray<Cell>>> = {
   high: [
-    [3_014, 537, 554],
-    [2_323, 394, 410],
-    [1_640, 291, 298],
-    [1_120, 203, 222],
-    [772, 162, 167],
+    [2_397, 423, 432],
+    [1_981, 327, 346],
+    [1_497, 259, 273],
+    [989, 177, 189],
+    [692, 147, 151],
   ],
   low: [
-    [581, 127, 130],
-    [439, 102, 105],
-    [331, 76, 77],
-    [214, 51, 54],
-    [164, 42, 44],
+    [428, 90, 93],
+    [348, 76, 81],
+    [287, 67, 69],
+    [193, 46, 47],
+    [156, 39, 43],
   ],
   wire: [
-    [409, 104, 104],
-    [303, 75, 76],
-    [234, 53, 57],
-    [145, 37, 46],
-    [115, 34, 38],
+    [313, 80, 82],
+    [252, 58, 63],
+    [191, 44, 47],
+    [135, 37, 41],
+    [101, 31, 32],
   ],
 };
 
-/** The same on the exact horizon, Design note 15's premise. */
+/**
+ * The same on the exact horizon, Design note 15's premise. Re-pinned for R10.T14.e (2026-10-20):
+ * refinement and the frustum still measure the boxes, so it moved a little too (100 m high from
+ * 2,360 / 423–432 to 2,348 / 414–424).
+ */
 const MODEL_EXACT: Readonly<Record<Column["name"], ReadonlyArray<Cell>>> = {
   high: [
-    [2_360, 423, 432],
-    [1_955, 324, 340],
-    [1_430, 251, 261],
-    [950, 176, 188],
-    [648, 137, 143],
+    [2_348, 414, 424],
+    [1_943, 321, 338],
+    [1_424, 247, 260],
+    [941, 167, 180],
+    [642, 137, 140],
   ],
   low: [
-    [403, 85, 88],
-    [323, 77, 80],
-    [259, 58, 61],
-    [169, 41, 41],
-    [126, 33, 33],
+    [400, 85, 88],
+    [317, 71, 75],
+    [259, 58, 60],
+    [166, 39, 41],
+    [126, 32, 33],
   ],
   wire: [
-    [284, 72, 74],
-    [221, 55, 58],
-    [169, 34, 38],
+    [284, 71, 74],
+    [218, 52, 55],
+    [163, 34, 38],
     [109, 28, 34],
-    [81, 24, 26],
+    [75, 24, 24],
   ],
 };
 
@@ -353,9 +361,9 @@ describe("the count model's own table (k₀ = 5, no margin, no relief, at τ)", 
 describe("Design note 15's table against the model (decision-r10-t14a, R7)", () => {
   // Ruled (decision-r10-t14a, R7, and its #56 follow-up): each cell within [0.5, 2] of the model
   // on the exact horizon, the note's premise, with every ratio recorded in plan 10. The boxes'
-  // ratios are recorded beside them, not asserted: R05's bounds' margin along the normal lets coarse
-  // patches wholly below the true horizon count there, and six of the high column's cells pass 2,
-  // until R10.T14.e.
+  // ratios are recorded beside them, not asserted: R05's bounds' margin along the normal let coarse
+  // patches wholly below the true horizon count there, and six of the high column's cells passed 2.
+  // Since R10.T14.e's normal margin none does (the boxes' high column ×1.60–1.92).
   it.each(TABLE)(
     "holds every $column.name cell within [0.5, 2] of the model on the exact horizon",
     ({ column, models }) => {
@@ -611,20 +619,21 @@ describe("the sizing rule (Design note 15)", () => {
   /**
    * The model at τ_sel = τ ÷ 1.1 and 100 m, each column's peak over Design note 15's heights, on
    * the boxes' horizon and then the exact one: the sizing rule's inputs, whose slots and bytes plan
-   * 10 records beside the provisional constants (not asserted against them).
+   * 10 records beside the provisional constants (not asserted against them). Re-pinned for
+   * R10.T14.e's normal margin (2026-10-20): high's boxes from 3,498 / 637–646.
    */
   const AT_SELECTION_TAU: Readonly<Record<Column["name"], readonly [box: Cell, exact: Cell]>> = {
     high: [
-      [3_498, 637, 646],
-      [2_750, 494, 503],
+      [2_790, 500, 506],
+      [2_741, 492, 497],
     ],
     low: [
-      [664, 134, 145],
-      [465, 87, 100],
+      [490, 92, 105],
+      [462, 87, 100],
     ],
     wire: [
-      [461, 114, 116],
-      [328, 80, 83],
+      [352, 88, 91],
+      [319, 80, 82],
     ],
   };
 
@@ -635,6 +644,8 @@ describe("the sizing rule (Design note 15)", () => {
   });
 
   it("rounds a budget up to whole slots before it takes their bytes", () => {
+    // T14.a's high peak at τ_sel, before R10.T14.e: kept as a case whose rule, 4,618.4 slots, needs
+    // the rounding.
     const views = [{ allRound: 3_498, frustum: 646 }];
     const slots = sizingRuleSlots(views, REPLAY_FORCED_PEAK);
     expect([slots, slotBudgetBytes(slots, 311_024)]).toEqual([

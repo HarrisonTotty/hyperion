@@ -20,7 +20,7 @@ import {
   type UniverseTime,
 } from "@hyperion/protocol";
 
-import { add, norm, scale, vec3, type Vec3 } from "../../geometry/vec3";
+import { add, norm, scale, sub, vec3, type Vec3 } from "../../geometry/vec3";
 import { KM_PER_RSUN } from "../../lib/format";
 import {
   type SceneFrame,
@@ -180,6 +180,32 @@ function viewKind(body: SystemBody): ViewBodyKind | null {
       break;
   }
   return kind;
+}
+
+/**
+ * Whether a served body has no solid surface for a view's survey line to speak of (plan R10,
+ * R10.T12): its bulk section's class an envelope's, a sub-Neptune, an ice giant or a gas giant
+ * (plan 14's `PlanetClass`), which is the gas-envelope state, whose record's `surface` section is
+ * `not_applicable` and whose field the server refuses (P14.T35.e); a body whose bulk is not sent is
+ * taken to have one, as its survey's state then says.
+ */
+function surfaceless(body: SystemBody): boolean {
+  if (body.bulk.state !== "ok") {
+    return false;
+  }
+  let none: boolean;
+  switch (body.bulk.value.planetClass) {
+    case "sub_neptune":
+    case "ice_giant":
+    case "gas_giant":
+      none = true;
+      break;
+    case "rocky":
+    case "icy":
+      none = false;
+      break;
+  }
+  return none;
 }
 
 /** A body's own symbol from the ship-wide set: a giant's larger triangle, a dwarf's smaller one. */
@@ -351,7 +377,13 @@ function standInAttitude(velocityMPerS: Vec3): CraftPose["attitude"] {
  * about their planet, each in the plane its normal gives, its planet's local Laplace plane (plan
  * 14, P14.T56.a and T56.b), or in the planet's orbital plane where an older server sends no normal;
  * orbits are every placed planet's and moon's about the body or star it orbits, or about the barycentre for the root, and one about a pair below the root is not drawn.
- * The ship stand-in is the own ship, in the system frame at the observer's present position.
+ * The ship stand-in is the own ship, at the observer's present position, held in the frame of
+ * `sceneAt`'s local body, the sim's body-frame rule over geometric present positions with its
+ * hysteresis (R02 Design notes 6 and 22, R03 Design note 7; decision-r10-ship-frame), and its
+ * velocity against that body's present velocity, so that a stand-in at rest in its body's frame
+ * reads exactly zero; in the system frame where the frame has no local body, or the scene draws
+ * none for it. Its attitude stays the barycentric velocity's ({@link standInAttitude}), so that its
+ * nose does not swing as its frame changes.
  */
 export function viewSceneFromServer(
   model: SceneModel,
@@ -430,6 +462,8 @@ export function viewSceneFromServer(
       appearance,
       orbitNormal: record.orbit.state === "ok" ? orbitNormal(record.orbit.value.orbit) : null,
       symbol: symbolOf(record, kind),
+      // A giant's or a sub-Neptune's FRAME states no survey line (R10.T12).
+      ...(surfaceless(record) ? { surfaceless: true as const } : {}),
     });
   }
   const drawn = new Set<string>(bodies.map((body) => body.id));
@@ -471,16 +505,25 @@ export function viewSceneFromServer(
     }
   }
 
+  // The own ship in its local body's frame (decision-r10-ship-frame §2): the body is drawn at its
+  // geometric centre, so the ship resolves to the observer's position.
+  const local = frame.localBody === null ? undefined : byId.get(frame.localBody);
+  const localVelocity = frame.localBodyVelocityMPerS;
+  const held = local !== undefined && localVelocity !== null;
   const ownShip: ViewCraft = {
     id: SERVER_OWN_SHIP,
     designation: SERVER_OWN_SHIP_DESIGNATION,
     hull: TEST_HULL,
     pose: {
-      position: { kind: "system", system: systemId, m: frame.observer.positionM },
+      position: held
+        ? { kind: "body", body: local.id, m: sub(frame.observer.positionM, local.centreM) }
+        : { kind: "system", system: systemId, m: frame.observer.positionM },
       attitude: standInAttitude(frame.observer.velocityMPerS),
     },
     predictedPath: null,
-    velocityMPerS: frame.observer.velocityMPerS,
+    velocityMPerS: held
+      ? sub(frame.observer.velocityMPerS, localVelocity)
+      : frame.observer.velocityMPerS,
   };
   const craft = [
     ownShip,

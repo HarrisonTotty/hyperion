@@ -1,17 +1,22 @@
 /**
  * The bounding volumes of patches, from the cube-sphere mirror and the level table's height ranges
- * (plan R05, T7.a, Design notes 7 and 8).
+ * (plan R05, T7.a, Design notes 7 and 8; the normal's margin plan R10, T14.e).
  *
  * @remarks
- * A patch's volume is every point M·d + h·ν over its directions d at heights h in its level's
- * range. Its farthest points from an interior point lie on its boundary, its extremes along the
- * box's tangent axes too (they point about 90° from the centre, outside any patch), and its extreme
- * along the centre's normal at the centre vertex (M·ν there is along the centre's direction), so
- * the bounds are built
- * from the boundary's vertices at every fourth vertex, the centre vertex, both ends of the height
- * range, and a margin of the largest chord between neighbouring samples, which no boundary point
- * lies farther than from its nearest sample. Bounds are conservative: they may be larger than the
- * volume, never smaller.
+ * A patch's volume is every point M·d + h·ν over its directions d at heights h in its range. The
+ * bounds are built from the boundary's vertices at every fourth vertex, the centre vertex and both
+ * ends of the height range, and each is padded by what can lie past those samples:
+ * - the box's tangent axes and the sphere's radius by the largest chord between neighbouring
+ *   samples, which no boundary point lies farther than from its nearest sample: the volume's
+ *   farthest points from an interior point, and its extremes along the tangents (they point about
+ *   90° from the centre, outside any patch), lie on its boundary, but can fall between samples;
+ * - the centre's normal ν_c by {@link normalMarginM}, the boundary's sagitta between neighbouring
+ *   samples and a rounding allowance: the volume's highest point along ν_c is the centre vertex at
+ *   the top of the range (where the surface's normal is ν_c itself), sampled, and its lowest lies
+ *   on the boundary at an end of the range, which dips below the lower of two neighbouring samples
+ *   by at most that sagitta.
+ *
+ * Bounds are conservative: they may be larger than the volume, never smaller.
  */
 
 import { add, dot, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
@@ -82,13 +87,21 @@ const POINTS = 2 * SPHEROID_POINTS;
 /**
  * The numbers of a patch's geometry, which does not depend on its height range
  * ({@link patchGeometryInto}): the spheroid point M·d under the centre, the centre's spheroid
- * normal ν and the box's tangents t1 and t2, three numbers each, then each point's M·d and ν, six
- * numbers a point, the ring's in order and then the centre's.
+ * normal ν and the box's tangents t1 and t2, three numbers each; the normal's margin's inputs, a
+ * bound on the square of the largest angle between neighbouring ring samples' directions, rad², and
+ * the spheroid's semi-axes a and c, metres ({@link normalMarginM}); then each point's M·d and ν,
+ * six numbers a point, the ring's in order and then the centre's.
  */
-export const PATCH_GEOMETRY_LENGTH = 12 + 6 * SPHEROID_POINTS;
+export const PATCH_GEOMETRY_LENGTH = 15 + 6 * SPHEROID_POINTS;
+
+/** Where the normal's margin's angle bound, rad², is in a patch's geometry. */
+const GEOMETRY_ANGLE_SQ = 12;
+
+/** Where the spheroid's semi-axes a and then c, metres, are in a patch's geometry. */
+const GEOMETRY_FIGURE = 13;
 
 /** Where the points start in a patch's geometry. */
-const GEOMETRY_POINTS = 12;
+const GEOMETRY_POINTS = 15;
 
 /**
  * The numbers of a patch's packed bounds ({@link packPatchBounds}): the box's centre (also the
@@ -397,14 +410,120 @@ export function patchGeometryInto(g: Float64Array, planet: PlanetGeometry, key: 
   g[9] = ny * t1z - nz * t1y;
   g[10] = nz * t1x - nx * t1z;
   g[11] = nx * t1y - ny * t1x;
-  // Each ring vertex's spheroid point and normal, then the centre's.
+  // Each ring vertex's spheroid point and normal, then the centre's, and the largest squared chord
+  // q² between neighbouring ring vertices' unit directions.
   let at = GEOMETRY_POINTS;
+  let largestTurnSq = 0;
+  let px = 0;
+  let py = 0;
+  let pz = 0;
   for (let n = 0; n < RING_X.length; n += 1) {
     sampleDirIntoScratch(key, RING_X[n] ?? 0, RING_Y[n] ?? 0);
-    spheroidPointInto(g, at, DIR[0] ?? 0, DIR[1] ?? 0, DIR[2] ?? 0, a, c);
+    const dx = DIR[0] ?? 0;
+    const dy = DIR[1] ?? 0;
+    const dz = DIR[2] ?? 0;
+    if (n > 0) {
+      const qx = dx - px;
+      const qy = dy - py;
+      const qz = dz - pz;
+      largestTurnSq = Math.max(largestTurnSq, qx * qx + qy * qy + qz * qz);
+    }
+    px = dx;
+    py = dy;
+    pz = dz;
+    spheroidPointInto(g, at, dx, dy, dz, a, c);
     at += 6;
   }
   spheroidPointInto(g, at, cd0, cd1, cd2, a, c);
+  // The angle Θ = 2 asin(q ÷ 2) ≤ q ÷ √(1 − q² ÷ 4), as asin x ≤ x ÷ √(1 − x²) = tan(asin x) on
+  // [0, 1), so Θ² ≤ q² ÷ (1 − q² ÷ 4): q is at most about 0.08, at level 0.
+  g[GEOMETRY_ANGLE_SQ] = largestTurnSq / (1 - largestTurnSq / 4);
+  g[GEOMETRY_FIGURE] = a;
+  g[GEOMETRY_FIGURE + 1] = c;
+}
+
+/**
+ * The factor K on the normal's bend in {@link normalMarginM}, |ν″| ≤ K a² ÷ c²: 2 ÷ √3 =
+ * 1.1547…, rounded up.
+ */
+export const NORMAL_BEND_FACTOR = 1.155;
+
+/**
+ * The normal's rounding allowance in {@link normalMarginM}, in machine epsilons of the largest
+ * coordinate a + H: more than twice a worst-case tally of the `f64` rounding it covers
+ * ({@link normalMarginM}'s remarks).
+ */
+export const ROUNDING_ALLOWANCE_EPSILONS = 64;
+
+/**
+ * The margin of a patch's box along its centre's normal ν_c, metres: the most its volume can lie
+ * past its sampled extremes along ν_c, (Θ² ÷ 8)(a + K H a² ÷ c²) + N ε (a + H), K =
+ * {@link NORMAL_BEND_FACTOR}, N = {@link ROUNDING_ALLOWANCE_EPSILONS} and ε = `Number.EPSILON`.
+ *
+ * @remarks
+ * Why the samples nearly suffice (R10.T14.e; decision-r10-t14a, the #56 follow-up). At a height
+ * h > −c² ÷ a, c² ÷ a the spheroid's least radius of curvature, X(d) = M·d + h·ν(d) over the
+ * sphere of directions is regular (it stretches the spheroid's tangents by 1 + hκ > 0, κ ≤ a ÷ c²)
+ * with normal ν(d), so x·ν_c along it has exactly two critical points, where ν(d) = ±ν_c: the
+ * centre's direction d_c and −d_c. The greater is d_c's, since their difference is
+ * 2(M·d_c·ν_c + h) and M·d_c·ν_c ≥ c > |h|. A patch holds d_c and lies within one cube face, away
+ * from −d_c on the opposite face, so along ν_c:
+ * - the volume's highest point is M·d_c + h·ν_c at the top of the range: the centre vertex, which
+ *   the bounds sample, from the same d_c as ν_c;
+ * - its lowest lies on the patch's boundary, since no other point is critical, and, linear in h,
+ *   at an end of the range.
+ *
+ * Between two neighbouring ring samples the boundary is an arc of a great circle of directions,
+ * d(θ) = cos θ e₁ + sin θ e₂ for θ from 0 to Θ, since a patch's edge is a straight line on its
+ * cube face (the warp acts on each face coordinate alone). Along it, f(θ) = X(θ)·ν_c with
+ * X(θ) = M·d(θ) + h·ν(d(θ)) lies at most Θ² ÷ 8 · max|f″| below the line between the samples'
+ * values, by the remainder of linear interpolation, f − p₁ = ½ θ(θ − Θ) f″(ξ) (Burden and Faires,
+ * Numerical Analysis, 9th ed., 2011, §3.1, Theorem 3.3, eq. (3.3); Atkinson, An Introduction to
+ * Numerical Analysis, 2nd ed., 1989, Theorem 3.2), so at most that below the lower sample: the
+ * arc's sagitta. And |f″| ≤ |X″| ≤ a + K |h| a² ÷ c²:
+ * - (M·d)″ = −M·d, of length at most a;
+ * - ν = m ÷ r with m = M⁻¹d, r = |m| and m″ = −m, so ν″ = −ν p² ÷ r² − 2 r′ P m′ ÷ r², P the
+ *   projection off ν and p = |P m′|, two orthogonal terms: |ν″|² = p²(p² + 4 r′²) ÷ r⁴, at most
+ *   (4 ÷ 3)|m′|⁴ ÷ r⁴ with p² + r′² = |m′|², so |ν″| ≤ (2 ÷ √3) a² ÷ c² as |m′| ≤ 1 ÷ c and
+ *   r ≥ 1 ÷ a.
+ *
+ * It holds at both ends of the range, below the datum as above, on any spheroid with c ≤ a and at
+ * every level. On a sphere of radius R at the datum it is R Θ² ÷ 8, the sagitta of the arc's chord
+ * L = 2R sin(Θ ÷ 2), about L² ÷ (8R): 6.3 mm for a 566 m chord on an Earth, a level-10 patch's
+ * mean spacing (5.3–8.6 mm across a face, the warp's spacing varying). On the spheroid the chord
+ * is at least 2c sin(Θ ÷ 2), M stretching no direction by less than c, so at the datum it is at
+ * most about L² ÷ (8ρ) with ρ = c² ÷ a, the least radius of curvature that `select.ts`'
+ * `chordSagittaM` takes (R05.T7.b's ruling); the term in H is the offsets' bend.
+ *
+ * The allowance, N ε (a + H) with N = 64, covers the `f64` rounding between the exact surface and a
+ * vertex a client computes and tests against the box (`surfacePoint`, then its offset from the
+ * box's centre along ν_c). With u = ε ÷ 2 and r = a + H, the largest coordinate, a crude worst-case
+ * tally (the sampled points and the client's vertex each within about 10 u r of the surface and
+ * their directions' rounding about 4 u r more, their projections onto ν_c about 8 u r each, the
+ * box's centre about 10 u r and its half-extent about 4 u r) is under 30 ε r, which also covers
+ * this margin's own rounding; the allowance more than doubles it. It is about 91 nm on an Earth,
+ * against a sagitta of millimetres at level 10 and 20–33 nm at level 19, an Earth's finest; from
+ * level 22, on larger bodies, the sagitta is below an ulp of a, and the allowance alone pads the
+ * normal.
+ *
+ * @param angleSqRad2 - A bound on Θ², the square of the largest angle between neighbouring ring
+ *   samples' directions, rad².
+ * @param equatorialRadiusM - The spheroid's semi-axis a, metres.
+ * @param polarRadiusM - Its polar semi-axis c, metres, 0 < c ≤ a.
+ * @param heightM - H, the largest magnitude of the range's heights, metres, below c² ÷ a.
+ */
+export function normalMarginM(
+  angleSqRad2: number,
+  equatorialRadiusM: number,
+  polarRadiusM: number,
+  heightM: number,
+): number {
+  const stretch = equatorialRadiusM / polarRadiusM;
+  const bendM = equatorialRadiusM + NORMAL_BEND_FACTOR * heightM * (stretch * stretch);
+  return (
+    (angleSqRad2 * bendM) / 8 +
+    ROUNDING_ALLOWANCE_EPSILONS * Number.EPSILON * (equatorialRadiusM + heightM)
+  );
 }
 
 /**
@@ -442,6 +561,15 @@ function squaredFrom(a: number, x: number, y: number, z: number): number {
  * Writes into `out` (of {@link PACKED_BOUNDS_LENGTH} numbers) the bounds of the patch whose
  * geometry ({@link patchGeometryInto}) is `g`, at every height from `minHeightM` to `maxHeightM`,
  * metres: {@link patchBounds}' numbers, packed.
+ *
+ * @remarks
+ * Each half-extent is half the samples' span along its axis plus a margin: the normal's
+ * {@link normalMarginM}, from the geometry's angle bound and figure and the range's largest |h|,
+ * and the tangents' the largest chord between neighbouring samples at the top of the range, which
+ * the sphere's radius takes too (the module's doc). Where a height's magnitude reaches the
+ * spheroid's least radius of curvature c² ÷ a (the normal's argument needs every height above
+ * −c² ÷ a; an Earth's is 6,335 km, against its level table's ±24.5 km), the normal keeps R05's
+ * chord.
  */
 export function packPatchBounds(
   out: Float64Array,
@@ -480,7 +608,8 @@ export function packPatchBounds(
     XYZ[count + 5] = p2 + minHeightM * nu2;
     count += 6;
   }
-  // The largest chord between neighbouring tops, the ring's six numbers a vertex apart.
+  // The tangents' and the sphere's margin: the largest chord between neighbouring tops, the ring's
+  // six numbers a vertex apart.
   const ringEnd = 6 * RING_X.length;
   let largestSq = 0;
   for (let top = 6; top < ringEnd; top += 6) {
@@ -499,6 +628,13 @@ export function packPatchBounds(
       );
     }
   }
+  // The normal's margin: the boundary's sagitta and the rounding allowance, within the spheroid's
+  // least radius of curvature; R05's chord past it.
+  const a = g[GEOMETRY_FIGURE] ?? 0;
+  const c = g[GEOMETRY_FIGURE + 1] ?? 0;
+  const heightM = Math.max(Math.abs(minHeightM), Math.abs(maxHeightM));
+  const normalM =
+    heightM < (c * c) / a ? normalMarginM(g[GEOMETRY_ANGLE_SQ] ?? 0, a, c, heightM) : marginM;
 
   let lo0 = Infinity;
   let lo1 = Infinity;
@@ -555,7 +691,7 @@ export function packPatchBounds(
   out[PACKED_AXES + 6] = t2x;
   out[PACKED_AXES + 7] = t2y;
   out[PACKED_AXES + 8] = t2z;
-  out[PACKED_HALF_EXTENTS] = (hi0 - lo0) / 2 + marginM;
+  out[PACKED_HALF_EXTENTS] = (hi0 - lo0) / 2 + normalM;
   out[PACKED_HALF_EXTENTS + 1] = (hi1 - lo1) / 2 + marginM;
   out[PACKED_HALF_EXTENTS + 2] = (hi2 - lo2) / 2 + marginM;
 }

@@ -389,6 +389,13 @@ export interface SceneFrame {
    * R02's `selectCameraFrame` over the ship's geometric position (Design note 7).
    */
   readonly localBody: BodyIdHex | null;
+  /**
+   * The local body's present velocity relative to the barycentre at the frame's time, m/s
+   * ({@link composedVelocity}, as {@link shipObserver} adds it for a stand-in held in a body's
+   * frame), against which the view holds the own ship's velocity in that body's frame (plan R10,
+   * R10.T12; decision-r10-ship-frame §2); `null` with no local body.
+   */
+  readonly localBodyVelocityMPerS: Vec3 | null;
 }
 
 /** The candidates' parent: a moon's planet, a planet's star, or `null` for a pair or barycentre. */
@@ -441,7 +448,9 @@ function framesBody(body: SystemBody): boolean {
  * not of the frame rule. A contact is placed at the server's `apparent_m` with no geometric position
  * (Design note 13). The ship's local body is chosen among the planets, dwarf planets and moons with
  * a Hill radius, by their present geometric distance from the observer, with `previous`'s local
- * body as the current one. With `previous` the light times start warm from its own.
+ * body as the current one. With `previous` the light times start warm from its own. The local body's
+ * present velocity comes with it, the same `composedVelocity` a body-held stand-in's observer
+ * takes, so that the view holds the own ship against it (decision-r10-ship-frame §2).
  *
  * @param previous - The frame before, or `null` for none: required, so that a caller that has one
  *   cannot forget it and lose the frame rule's hysteresis.
@@ -542,11 +551,14 @@ export function sceneAt(
     });
   }
 
+  const localBody = selectCameraFrame(candidates, previous?.localBody ?? null);
   return {
     time,
     observer,
     bodies,
     stars,
-    localBody: selectCameraFrame(candidates, previous?.localBody ?? null),
+    localBody,
+    localBodyVelocityMPerS:
+      localBody === null ? null : composedVelocity(placements, localBody, time),
   };
 }

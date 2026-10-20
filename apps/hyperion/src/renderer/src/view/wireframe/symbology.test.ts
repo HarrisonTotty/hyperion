@@ -5,7 +5,7 @@ import { FIXTURE_MOON, FIXTURE_PLANET } from "../../test/viewFixtures";
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import { IDENTITY_QUATERNION, quaternionFromAxisAngle } from "../camera/quaternion";
 import type { CameraTarget } from "../camera/state";
-import { CASING_PX, lineScale, markShiftDevicePx, markStrokeDevicePx } from "../../lib/strokes";
+import { markShiftDevicePx, markStrokeDevicePx } from "../../lib/strokes";
 import { SIZE_CLASS_REM } from "../../spatial/symbols";
 import { bodyKindSymbol } from "../scene/model";
 import {
@@ -16,6 +16,7 @@ import {
   destinationHalfSizePx,
   destinationReticle,
   flightPathMarker,
+  type HullOnView,
   lineOfSightClearancePx,
   lineOfSightGivesWay,
   type LineOfSightStrokes,
@@ -443,7 +444,6 @@ function tripodStrokesAt(ratio: number): LineOfSightStrokes {
   return {
     markStrokePx: markStrokeDevicePx(ratio),
     markShiftPx: markShiftDevicePx(ratio),
-    casingPx: CASING_PX * lineScale(ratio),
   };
 }
 
@@ -493,9 +493,12 @@ function degreesApart(aDeg: number, bDeg: number): number {
   return Math.round((((aDeg - bDeg) % 360) + 360) % 360);
 }
 
-/** A tick's casing's reach from its centreline, device px, as `lines.wgsl` lights it. */
-function casingReachPx(strokes: LineOfSightStrokes): number {
-  return strokes.markStrokePx / 2 + strokes.casingPx + 0.5;
+/**
+ * How far from its centreline a tick's coloured stroke lights a pixel, device px, as `lines.wgsl`
+ * lights it: half the stroke and the fringe, its casing apart (decision-r10-t12-commit3 §3).
+ */
+function strokeReachPx(strokes: LineOfSightStrokes): number {
+  return strokes.markStrokePx / 2 + 0.5;
 }
 
 /** A point on the view, px. */
@@ -557,9 +560,10 @@ describe("the line-of-sight mark, the tripod (R10.T12)", () => {
   });
 
   it.each([
-    // [ratio, the interface's rem in CSS px (80% and 100%), the ticks' start, device px]
-    [1, 12.8, 1 + 2 + 0.5 + Math.SQRT1_2],
-    [1, 16, 1 + 2 + 0.5 + Math.SQRT1_2],
+    // [ratio, the interface's rem in CSS px (80% and 100%), the ticks' start, device px]: 0.1875 rem
+    // and δ, the casings free to meet over the point (decision-r10-t12-commit3 §3).
+    [1, 12.8, 0.1875 * 12.8 + 0.25],
+    [1, 16, 0.1875 * 16 + 0.25],
     [2, 12.8, 0.1875 * 25.6],
     [2, 16, 0.1875 * 32],
   ])(
@@ -583,7 +587,7 @@ describe("the line-of-sight mark, the tripod (R10.T12)", () => {
             : [pixel];
         return pixels.every((p) =>
           tripod.segments.every(
-            (segment) => pointToSegmentPx(p, segment) >= casingReachPx(strokes),
+            (segment) => pointToSegmentPx(p, segment) >= strokeReachPx(strokes),
           ),
         );
       });
@@ -600,13 +604,16 @@ describe("the line-of-sight mark, the tripod (R10.T12)", () => {
     },
   );
 
-  it.each([12.8, 16])(
-    "would close the point at a ratio of 1 and a rem of %d px at 0.1875 rem and the shift",
-    (remCssPx) => {
-      // Its casing would reach past the point from every tick's inner end.
-      expect(0.1875 * remCssPx + markShiftDevicePx(1)).toBeLessThan(
-        casingReachPx(tripodStrokesAt(1)),
+  it.each([0.78125, 1, 1.25, 2, 3])(
+    "never needs its guard at a ratio of %d from the 80% interface scale up, 0.1875 rem and the shift keeping the point open",
+    (ratio) => {
+      const strokes = tripodStrokesAt(ratio);
+      // The guard: the stroke's reach and half a pixel's diagonal (decision-r10-t12-commit3 §3).
+      const guardPx = strokeReachPx(strokes) + Math.SQRT1_2;
+      const starts = [12.8, 16, 20, 24].map(
+        (remCssPx) => 0.1875 * remCssPx * ratio + markShiftDevicePx(ratio),
       );
+      expect(starts.every((startPx) => startPx >= guardPx)).toBe(true);
     },
   );
 
@@ -743,5 +750,53 @@ describe("the line-of-sight mark's give-way (R10.T12; the guide's tripod, beside
 
   it("returns at once where no mark is near it", () => {
     expect(lineOfSightGivesWay(tripod.segments, [], REM, true)).toBe(false);
+  });
+
+  /**
+   * A craft's hull as the tripod gives way to it (decision-r10-t12-commit3 §1): one edge across
+   * the view below the point, `clearRem` from the end of the lower tick (14 px down), and whether
+   * one of its opaque faces stands over the point.
+   */
+  function hullBelow(clearRem: number, coversPoint: boolean): HullOnView {
+    const yPx = 540 + 14 + clearRem * REM;
+    return {
+      edges: [
+        [
+          { xPx: 800, yPx },
+          { xPx: 1120, yPx },
+        ],
+      ],
+      coversPoint,
+    };
+  }
+
+  it("stands 0 clear of a hull whose opaque face covers the point, its edges 2 rem away", () => {
+    const clearRem = (hull: HullOnView): number =>
+      Math.round((lineOfSightClearancePx(tripod.segments, [], [hull]) / REM) * 1e9) / 1e9;
+    expect([clearRem(hullBelow(2, true)), clearRem(hullBelow(2, false))]).toEqual([0, 2]);
+  });
+
+  it.each(below)("measures a hull's edges as it measures %s's strokes", (_, at) => {
+    const mark = at(0.6);
+    expect(
+      lineOfSightClearancePx(tripod.segments, [], [{ edges: mark.segments, coversPoint: false }]),
+    ).toBe(lineOfSightClearancePx(tripod.segments, [mark]));
+  });
+
+  it("takes the nearer of the marks and the hulls", () => {
+    const [, craftTicks] = below[0] ?? absent("the craft's ticks");
+    expect(
+      lineOfSightClearancePx(tripod.segments, [craftTicks(1)], [hullBelow(0.3, false)]) / REM,
+    ).toBeCloseTo(0.3, 9);
+  });
+
+  it("leaves for a hull's edge within 0.5 rem, and returns only once it is 0.75 rem clear", () => {
+    const givesWay = (clearRem: number, yielded: boolean): boolean =>
+      lineOfSightGivesWay(tripod.segments, [], REM, yielded, [hullBelow(clearRem, false)]);
+    expect({
+      leavesWithin: givesWay(0.4, false),
+      heldInTheBand: [givesWay(0.6, false), givesWay(0.6, true)],
+      returnsAt: givesWay(0.8, true),
+    }).toEqual({ leavesWithin: true, heldInTheBand: [false, true], returnsAt: false });
   });
 });

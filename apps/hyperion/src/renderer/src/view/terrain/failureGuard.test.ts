@@ -91,3 +91,97 @@ describe("a terrain computation's guard (R10.T16.e; decision-r10-t16-leans §8)"
     expect([through.faults, next.faults]).toEqual([0, 1]);
   });
 });
+
+/** A guard's later outcomes, each a failure of `error` taken at one of `timesMs`; the faults raised. */
+function failAt(guard: TerrainFailureGuard, timesMs: ReadonlyArray<number>, error: Error): number {
+  let faults = 0;
+  for (const atMs of timesMs) {
+    guard.failed(error, atMs, {
+      describe: "the query failed:",
+      onFault: () => {
+        faults += 1;
+      },
+    });
+  }
+  return faults;
+}
+
+describe("a guard's outcomes that come later than their call (R10.T12; decision-r10-t12-leans §5)", () => {
+  const refused = new Error("the query was refused");
+  const lost = new EngineUnavailable("createBuffer");
+  const bug = throwing(new Error("a bug of the ask's"));
+
+  it("says a run of failures once, the error with it", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    failAt(new TerrainFailureGuard(), [0, 16, 300], refused);
+    expect(error.mock.calls).toEqual([["the query failed:", refused]]);
+  });
+
+  it("stands a run of failures from its first", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const guard = new TerrainFailureGuard();
+    failAt(guard, [0], refused);
+    expect(guard.failing).toBe(true);
+  });
+
+  it("faults the terrain once its failures have lasted the onset, by the times they are taken at", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const guard = new TerrainFailureGuard();
+    const before = failAt(guard, [1_000, 1_100, 1_000 + ANNUNCIATION_ONSET_MS - 1], refused);
+    const after = failAt(guard, [1_000 + ANNUNCIATION_ONSET_MS], refused);
+    expect([before, after]).toEqual([0, 1]);
+  });
+
+  it("faults the terrain once a run, however long the run lasts", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const faults = failAt(
+      new TerrainFailureGuard(),
+      [0, ANNUNCIATION_ONSET_MS, 2 * ANNUNCIATION_ONSET_MS, 10 * ANNUNCIATION_ONSET_MS],
+      refused,
+    );
+    expect(faults).toBe(1);
+  });
+
+  it("ends the run at a success: the next failure is said again and its onset counted afresh", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const guard = new TerrainFailureGuard();
+    const first = failAt(guard, [0, 200], refused);
+    guard.succeeded();
+    const ended = guard.failing;
+    const second = failAt(guard, [216, 400], refused);
+    expect([first, ended, second, error.mock.calls.length]).toEqual([0, false, 0, 2]);
+  });
+
+  it("faults again in a new run once a success has ended the run that faulted", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const guard = new TerrainFailureGuard();
+    const first = failAt(guard, [0, ANNUNCIATION_ONSET_MS], refused);
+    guard.succeeded();
+    const second = failAt(guard, [300, 300 + ANNUNCIATION_ONSET_MS], refused);
+    expect([first, second]).toEqual([1, 1]);
+  });
+
+  it("lets a loss pass in silence, starting no run of failures", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const guard = new TerrainFailureGuard();
+    const faults = failAt(guard, [0, 300, 600], lost);
+    expect([faults, guard.failing, error.mock.calls.length]).toEqual([0, false, 0]);
+  });
+
+  it("shares one run with its calls: a throw, then failures taken later, fault at the onset from the throw", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const guard = new TerrainFailureGuard();
+    const thrown = runAt(guard, [0], bug);
+    const later = failAt(guard, [100, ANNUNCIATION_ONSET_MS], refused);
+    expect([thrown.faults, later, error.mock.calls.length]).toEqual([0, 1, 1]);
+  });
+
+  it("ends a run that failures taken later began at a call that returns", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const guard = new TerrainFailureGuard();
+    const before = failAt(guard, [0], refused);
+    runAt(guard, [100], (atMs) => atMs);
+    const after = failAt(guard, [ANNUNCIATION_ONSET_MS], refused);
+    expect([before, after, error.mock.calls.length]).toEqual([0, 0, 2]);
+  });
+});

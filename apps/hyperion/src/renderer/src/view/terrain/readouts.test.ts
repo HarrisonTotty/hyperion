@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import classSource from "../../../../../../../crates/hyperion-surface/src/material/class.rs?raw";
 import wasmSource from "../../../../../../../crates/hyperion-surface/src/wasm.rs?raw";
 import { add, norm, scale, sub, vec3, type Vec3 } from "../../geometry/vec3";
+import { substanceName } from "../../lib/substances";
 import { moonLikeHeader } from "../../test/coarseFieldFixtures";
 import { aBody, aViewScene, FIXTURE_PLANET } from "../../test/viewFixtures";
 import type { CameraPose } from "../camera/pose";
@@ -47,6 +48,7 @@ import {
   SLOPE_UNCERTAINTY_CH,
   STALE_MARK_CH,
   surveyLines,
+  tallestTerrainLines,
   TEMPERATURE_FIELD_CH,
   terrainLabelModel,
   terrainReadoutStands,
@@ -1102,6 +1104,324 @@ describe("whether the readout stands (decision-r10-t12-leans §5 and §7)", () =
       NO_READOUT_UNITS,
     );
     expect([model.survey.length, model.datum, model.readout]).toEqual([1, null, []]);
+  });
+});
+
+/**
+ * A segment's set width, ch of B612 Mono: a field its fixed width, or its text and any `S` it holds
+ * where that is longer; a kept place 2 ch; the console's text and a status their length.
+ */
+function setWidthCh(segment: ReadoutSegment): number {
+  let widthCh = 0;
+  for (const piece of segment) {
+    switch (piece.kind) {
+      case "field":
+        widthCh += Math.max(piece.widthCh, piece.text.length + (piece.staleMark ? 2 : 0));
+        break;
+      case "mark":
+        widthCh += 2;
+        break;
+      case "text":
+      case "status":
+        widthCh += piece.text.length;
+        break;
+    }
+  }
+  return widthCh;
+}
+
+/** A whole line's set width, ch: a reading's label, its segments and their middle dots. */
+function lineWidthCh(line: ReadoutLine): number {
+  if (line.kind !== "reading") {
+    return line.text.length;
+  }
+  const segmentsCh = line.segments.reduce((sum, segment) => sum + setWidthCh(segment), 0);
+  return line.label.length + 1 + segmentsCh + " · ".length * (line.segments.length - 1);
+}
+
+/**
+ * Where a reading is wider than `tallest`, its tallest form: a longer label, more segments, or a
+ * segment wider than the tallest's in its place; none where it is no wider.
+ */
+function widerThan(line: ReadoutLine, tallest: ReadoutLine): string[] {
+  if (line.kind !== "reading" || tallest.kind !== "reading") {
+    return lineWidthCh(line) > lineWidthCh(tallest) ? [readoutLineText(line)] : [];
+  }
+  const wider: string[] = [];
+  if (line.label.length > tallest.label.length) {
+    wider.push(`the label ${line.label}`);
+  }
+  if (line.segments.length > tallest.segments.length) {
+    wider.push(`${String(line.segments.length)} segments in ${readoutLineText(line)}`);
+  }
+  line.segments.forEach((segment, i) => {
+    const room = tallest.segments[i];
+    if (room !== undefined && setWidthCh(segment) > setWidthCh(room)) {
+      wider.push(`segment ${String(i)} of ${readoutLineText(line)}`);
+    }
+  });
+  return wider;
+}
+
+/** Where a readout's lines are wider than the tallest's, each against the line in its place. */
+function readoutWiderThan(
+  lines: ReadonlyArray<ReadoutLine>,
+  tallest: ReadonlyArray<ReadoutLine>,
+): string[] {
+  const wider = lines.length > tallest.length ? [`${String(lines.length)} lines`] : [];
+  lines.forEach((line, i) => {
+    const room = tallest[i];
+    if (room === undefined) {
+      return;
+    }
+    wider.push(...widerThan(line, room));
+  });
+  return wider;
+}
+
+/**
+ * The values of a line that stand without their `S`: each field not stale, or with no `S` after
+ * it, a `±` reading's one `S` after its uncertainty serving its value too (decision-r10-t12-leans
+ * §4).
+ */
+function valuesWithoutS(line: ReadoutLine): string[] {
+  if (line.kind !== "reading") {
+    return [];
+  }
+  return line.segments.flatMap((segment) =>
+    segment.flatMap((piece, i) => {
+      if (piece.kind !== "field") {
+        return [];
+      }
+      const next = segment[i + 1];
+      const marked =
+        piece.staleMark ||
+        (next?.kind === "mark" && next.stale) ||
+        (next?.kind === "field" && next.staleMark);
+      return piece.tone === "stale" && marked ? [] : [piece.text];
+    }),
+  );
+}
+
+/** The guide's Moon-like example once the survey resolves the point, its range with it. */
+function resolvedGround(): SurfaceGroundReadout {
+  return groundAt({ reading: { resolved: true }, sight: { resolved: true, sigmaM: 0 } });
+}
+
+describe("the tallest forms (decision-r10-view-block-room §3)", () => {
+  const TALLEST = tallestTerrainLines(HEADER, 1);
+
+  it.each<readonly [string, SurfaceGroundReadout, Partial<ReadoutContext>, ReadoutUnits]>([
+    ["Estimated", groundAt(), {}, NO_READOUT_UNITS],
+    ["Estimated and stale", groundAt(), { stale: true }, NO_READOUT_UNITS],
+    ["resolved", resolvedGround(), {}, NO_READOUT_UNITS],
+    ["resolved and stale", resolvedGround(), { stale: true }, NO_READOUT_UNITS],
+    ["grazing", groundAt({ sight: { sigmaM: null } }), {}, NO_READOUT_UNITS],
+    ["grazing and stale", groundAt({ sight: { sigmaM: null } }), { stale: true }, NO_READOUT_UNITS],
+    ["from the camera", groundAt(), { slantFromCamera: true }, NO_READOUT_UNITS],
+    [
+      "grazing from the camera and stale",
+      groundAt({ sight: { sigmaM: null } }),
+      { slantFromCamera: true, stale: true },
+      NO_READOUT_UNITS,
+    ],
+    [
+      "at its widest Estimated readings",
+      groundAt({
+        reading: {
+          elevationM: -99_999.94,
+          elevationSigmaM: 99_000,
+          slopeRmsRad: rad(89.6),
+          slopeSigmaRad: rad(89),
+        },
+        sight: { rangeM: 900e3, sigmaM: 9_960e3 },
+      }),
+      { stale: true, slantFromCamera: true },
+      NO_READOUT_UNITS,
+    ],
+    [
+      "resolved at its lowest elevation",
+      groundAt({ reading: { resolved: true, elevationM: -99_999.94 }, sight: { resolved: true } }),
+      { stale: true },
+      NO_READOUT_UNITS,
+    ],
+    [
+      "below 1 cm in E notation",
+      groundAt({ sight: { rangeM: 5e-3, sigmaM: 3.4e-4 } }),
+      { stale: true, slantFromCamera: true },
+      NO_READOUT_UNITS,
+    ],
+    [
+      "grazing below 1 cm",
+      groundAt({ sight: { rangeM: 5e-3, sigmaM: null } }),
+      { stale: true },
+      NO_READOUT_UNITS,
+    ],
+    [
+      "with its em dashes and AT",
+      groundAt({
+        entry: null,
+        properties: {
+          bearingCapacityPa: null,
+          padFriction: null,
+          frictionOnTemperature: true,
+          temperatureK: 102,
+        },
+      }),
+      { stale: true },
+      NO_READOUT_UNITS,
+    ],
+    [
+      "with its plain em dashes and no AT",
+      groundAt({
+        classCode: 8,
+        entry: null,
+        properties: { bearingCapacityPa: null, padFriction: null },
+      }),
+      {},
+      NO_READOUT_UNITS,
+    ],
+    [
+      "with AT",
+      groundAt({
+        classCode: 7,
+        entry: 1,
+        properties: { padFriction: 0.08, frictionOnTemperature: true, temperatureK: 243.4 },
+      }),
+      { stale: true },
+      NO_READOUT_UNITS,
+    ],
+    [
+      "on organic sediment of an unlisted substance",
+      groundAt({ classCode: 11, entry: 2 }),
+      { stale: true },
+      NO_READOUT_UNITS,
+    ],
+    [
+      "with its units held past their switch",
+      groundAt({
+        reading: { resolutionM: 1_040 },
+        sight: { rangeM: 1_040, sigmaM: 4 },
+        properties: { bearingCapacityPa: 1_040_000 },
+      }),
+      { stale: true },
+      { finest: "m", resolution: "m", slantRange: "m", capacity: "kPa" },
+    ],
+    ["NOT SURVEYED", { kind: "not-surveyed" }, { stale: true }, NO_READOUT_UNITS],
+    ["NO GROUND", { kind: "no-ground" }, {}, NO_READOUT_UNITS],
+  ])("holds the readout %s within its tallest form", (_, readout, overrides, units) => {
+    const { lines } = groundReadoutLines(readout, HEADER, context(overrides), units);
+    expect(readoutWiderThan(lines, TALLEST.readout)).toEqual([]);
+  });
+
+  it.each<readonly [string, TerrainSurvey, ReadoutUnits]>([
+    ["at NONE", aSurvey({ coverage: coverageOf(0) }), NO_READOUT_UNITS],
+    ["at NONE, stale", aSurvey({ coverage: coverageOf(0), stale: true }), NO_READOUT_UNITS],
+    ["with its figures", aSurvey(), NO_READOUT_UNITS],
+    ["with its figures, stale", aSurvey({ stale: true }), NO_READOUT_UNITS],
+    [
+      "at ABOVE 99.9 % and its coarsest FINEST, stale",
+      aSurvey({ coverage: coverageOf(fieldCellCount(5) - 1, 255), stale: true }),
+      NO_READOUT_UNITS,
+    ],
+    [
+      "with FINEST held in m past 1 km",
+      aSurvey({ coverage: coverageOf(5, 134) }),
+      { ...NO_READOUT_UNITS, finest: "m" },
+    ],
+    [
+      "stale beside a failure",
+      aSurvey({
+        stale: true,
+        status: standing({ failure: { kind: "invalid", check: "coverage unusable" } }),
+      }),
+      NO_READOUT_UNITS,
+    ],
+  ])("holds the survey line %s within its tallest form", (_, survey, units) => {
+    const readings = surveyLines(survey, units).lines.filter((line) => line.kind === "reading");
+    expect(readings.map((line) => widerThan(line, TALLEST.survey))).toEqual([[]]);
+  });
+
+  /** The test header's body made a sphere of the Moon's mean radius. */
+  const SPHERE_HEADER: SurfaceHeaderDto = {
+    ...HEADER,
+    equatorial_radius_m: 1_737_400,
+    polar_radius_m: 1_737_400,
+  };
+
+  it.each<readonly [string, SurfaceHeaderDto, boolean]>([
+    ["of a sphere", SPHERE_HEADER, false],
+    ["of a sphere, stale", SPHERE_HEADER, true],
+    ["of a sphere with a sea", { ...SPHERE_HEADER, main_liquid: 1, sea_level_m: -2.4 }, true],
+    ["of a spheroid", HEADER, false],
+    ["of a spheroid with a sea", SEA_HEADER, false],
+    ["of a spheroid with a sea, stale", SEA_HEADER, true],
+  ])("holds DATUM %s within its tallest form", (_, header, stale) => {
+    expect(widerThan(datumLine(header, stale), tallestTerrainLines(header, 1).datum)).toEqual([]);
+  });
+
+  it("states DATUM as a spheroid with its SEA LEVEL, for a sphere with no sea too", () => {
+    expect(readoutLineText(tallestTerrainLines(SPHERE_HEADER, 1).datum)).toBe(
+      "DATUM REFERENCE SPHEROID 1737.4 km × 1737.4 km S · SEA LEVEL -2000.0 m S",
+    );
+  });
+
+  /** The longest material form the guide names. */
+  const LONGEST_FORM = Array.from({ length: 15 }, (_, code) => materialFormName(code) ?? "").reduce(
+    (longest, form) => (form.length > longest.length ? form : longest),
+  );
+
+  it("takes the longest form and UNLISTED MATERIAL where the palette names none longer", () => {
+    expect(readoutLineText(lineOf(TALLEST.readout, "MATERIAL"))).toBe(
+      `MATERIAL ${LONGEST_FORM} S · UNLISTED MATERIAL S`,
+    );
+  });
+
+  it("takes the longest substance the palette names where it is longer than UNLISTED MATERIAL", () => {
+    const longest = substanceName("acid_uv_absorber", "upper");
+    const header: SurfaceHeaderDto = {
+      ...HEADER,
+      palette: [entry("basalt_fe", "primary_crust"), entry("acid_uv_absorber", "deposit")],
+    };
+    expect([
+      longest.length > "UNLISTED MATERIAL".length,
+      readoutLineText(lineOf(tallestTerrainLines(header, 1).readout, "MATERIAL")),
+    ]).toEqual([true, `MATERIAL ${LONGEST_FORM} S · ${longest} S`]);
+  });
+
+  it("marks every value of every line stale, each with its S", () => {
+    const lines = [TALLEST.survey, TALLEST.datum, ...TALLEST.readout];
+    expect(lines.flatMap(valuesWithoutS)).toEqual([]);
+  });
+
+  it("reads the survey line and DATUM at their longest values, each with its S", () => {
+    expect([TALLEST.survey, TALLEST.datum].map(readoutLineText)).toEqual([
+      "SURVEY COVERAGE ABOVE 99.9 % S · FINEST 36,000 km S",
+      "DATUM REFERENCE SPHEROID 1738.1 km × 1736.0 km S · SEA LEVEL -2000.0 m S",
+    ]);
+  });
+
+  it("states the heading and the seven readings in the guide's order", () => {
+    expect(
+      TALLEST.readout.map((line) =>
+        line.kind === "reading" ? line.label : `${line.kind} ${line.text}`,
+      ),
+    ).toEqual([
+      "heading GROUND AT LINE OF SIGHT",
+      "ELEVATION",
+      "SLOPE",
+      "SLANT RANGE FROM CAMERA",
+      "MATERIAL",
+      "ULTIMATE BEARING CAPACITY",
+      "PAD FRICTION",
+      "RESOLUTION",
+    ]);
+  });
+
+  it("holds both of SLANT RANGE's forms at once: its widest uncertainty, then GRAZING", () => {
+    expect(readoutLineText(lineOf(TALLEST.readout, "SLANT RANGE FROM CAMERA"))).toBe(
+      `SLANT RANGE FROM CAMERA ~5.00E-3 m${PM}10,000 km S · GRAZING`,
+    );
   });
 });
 

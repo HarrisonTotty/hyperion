@@ -24,6 +24,15 @@ const OVERSCAN_ROWS = 4;
 /** A list with no notes. */
 const NO_NOTES: ReadonlyArray<SurveyEdgeListNote> = [];
 
+/**
+ * The note of the view's line-of-sight mark (the guide's tripod, "In the list"; plan R10, R10.T12):
+ * its text, as the readout's heading reads.
+ */
+export const GROUND_NOTE = "GROUND AT LINE OF SIGHT";
+
+/** The note's accessible name, which gives the mark's place (the guide's tripod, "In the list"). */
+export const GROUND_NOTE_NAME = "Ground at line of sight, at the view's centre";
+
 /** A row's closure rate as its accessible name reads it, after a comma, or nothing. */
 function closureName(closure: ClosureReading): string {
   let text: string;
@@ -49,6 +58,12 @@ export interface ViewMarkListProps {
    * plan R10, R10.T16.c): set after the options, never one of them; none by default.
    */
   readonly notes?: ReadonlyArray<SurveyEdgeListNote> | undefined;
+  /**
+   * Whether the list notes the view's line-of-sight mark, `GROUND AT LINE OF SIGHT`, first of its
+   * notes (plan R10, R10.T12): while the view's terrain readout stands with a point, the tripod
+   * drawn or left out for another mark; not by default.
+   */
+  readonly groundNote?: boolean | undefined;
   /**
    * Whether the ranges are from the camera, the scene having no own ship (`rangesFromCamera`):
    * the range column's head then reads `RANGE FROM CAMERA` and its rows the bare range
@@ -81,12 +96,15 @@ export interface ViewMarkListProps {
  * Its notes stand after the options and their position, outside the `listbox` and never windowed:
  * each a `note`, not focusable, which no click or key acts on and the list's keys pass over, its
  * text wrapping at its spaces, never truncated, its range muted with its `S` while the ranges are
- * stale, and named in the options' form (the guide's Views; decision-r10-t16-review §1). R10.T12
- * puts `GROUND AT LINE OF SIGHT` first among them.
+ * stale, and named in the options' form (the guide's Views; decision-r10-t16-review §1). The
+ * line-of-sight mark's note, `GROUND AT LINE OF SIGHT`, stands first of them while the view's
+ * terrain readout has a point (R10.T12), named by the mark's place and carrying no range, since the
+ * readout's `SLANT RANGE` is the point's; it is never stale, since it marks the picture's centre.
  */
 export function ViewMarkList({
   rows,
   notes = NO_NOTES,
+  groundNote = false,
   fromCamera,
   selectedKey,
   onSelect,
@@ -263,8 +281,13 @@ export function ViewMarkList({
           {formatListPosition(range.firstVisible, range.lastVisible, total)}
         </p>
       )}
-      {notes.length === 0 ? null : (
+      {notes.length === 0 && !groundNote ? null : (
         <div className="view-list__notes">
+          {groundNote ? (
+            <p role="note" aria-label={GROUND_NOTE_NAME} className="view-list__note">
+              {GROUND_NOTE}
+            </p>
+          ) : null}
           {notes.map((note) => (
             <p
               key={note.key}

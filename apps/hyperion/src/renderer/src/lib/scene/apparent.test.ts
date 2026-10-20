@@ -17,13 +17,16 @@ import {
 import {
   apparentPosition,
   placedTrack,
+  type SceneFrame,
   type SceneObserver,
   sceneAt,
   type SeenSource,
   shipObserver,
   systemPlacements,
+  type SystemPlacements,
 } from "./apparent";
 import { cameraFrameCandidate, selectCameraFrame } from "../../view/camera/frames";
+import { stateAt } from "../orbit";
 import { SPEED_OF_LIGHT_M_PER_S } from "./lightTime";
 import type { SceneModel, SceneSystem } from "./model";
 import { toSceneModel } from "./sceneWire";
@@ -164,6 +167,69 @@ function seenOrThrow(result: ReturnType<typeof apparentPosition>): SeenSource {
     throw new Error(`not seen: ${result.kind}`);
   }
   return result;
+}
+
+/**
+ * An observer at rest against the barycentre, `ratio` of body `id`'s Hill radius from it along +x
+ * at `time`.
+ *
+ * @throws Error when the body is not placed with a Hill radius.
+ */
+function observerNear(
+  system: SceneSystem,
+  id: BodyIdHex,
+  time: UniverseTime,
+  ratio: number,
+): SceneObserver {
+  const hillRadiusM = system.hillRadiiM.get(id);
+  const at = placedTrack(systemPlacements(system), id).positionAt(time);
+  if (hillRadiusM === undefined || at === null) {
+    throw new Error(`${id} is placed with a Hill radius`);
+  }
+  return {
+    positionM: plus(at, { x: ratio * hillRadiusM, y: 0, z: 0 }),
+    velocityMPerS: { x: 0, y: 0, z: 0 },
+  };
+}
+
+/**
+ * A placed body's velocity relative to the barycentre at `time`, m/s, derived here from its
+ * placements: each orbit's own velocity at `time` (`stateAt`) along its chain of parents to the
+ * origin, a pair member's by its share. It restates the private `composedVelocity` on purpose, as
+ * decision-r10-ship-frame §5 item 11 asks the field to equal it; the central difference and the
+ * equality with `shipObserver`'s observer check the field apart from it.
+ *
+ * @throws Error when the chain does not reach the origin.
+ */
+function chainVelocity(placements: SystemPlacements, id: BodyIdHex, time: UniverseTime): Vec3 {
+  let velocity: Vec3 = { x: 0, y: 0, z: 0 };
+  let at: string = id;
+  for (let steps = 0; steps <= placements.placements.size; steps += 1) {
+    const placement = placements.placements.get(at);
+    if (placement === undefined) {
+      throw new Error(`no body ${at} is placed, on the chain of ${id}`);
+    }
+    if (placement.kind === "origin") {
+      return velocity;
+    }
+    const share = placement.kind === "member" ? placement.share : 1;
+    velocity = plus(velocity, times(stateAt(placement.orbit, time).velocityMPerS, share));
+    at = placement.parentId;
+  }
+  throw new Error(`the chain of parents of ${id} does not reach the origin`);
+}
+
+/**
+ * Where a frame places body `id` at its time.
+ *
+ * @throws Error when the frame does not place it.
+ */
+function geometricOf(frame: SceneFrame, id: BodyIdHex): Vec3 {
+  const body = frame.bodies.find((each) => each.id === id);
+  if (body?.kind !== "placed") {
+    throw new Error(`the frame places ${id}`);
+  }
+  return body.geometricM;
 }
 
 /** One golden source the wire also lists, with the scene it is placed in. */
@@ -574,6 +640,72 @@ describe("sceneAt", () => {
 
     expect(fresh.localBody).toBe(idOf("0500"));
     expect(kept?.localBody).toBe(moon);
+  });
+
+  describe("the local body's present velocity (R10.T12; decision-r10-ship-frame §2)", () => {
+    const moon = idOf("0501");
+
+    /**
+     * The frame at `nanos` from the golden time, the ship at half the moon `.0501`'s Hill radius
+     * from it at the golden time, where the moon is its local body.
+     *
+     * @throws Error when the moon is not then the local body.
+     */
+    const nearMoonAt = (nanos: number): SceneFrame => {
+      const frame = sceneAt(
+        model,
+        observerNear(system, moon, golden.time, 0.5),
+        later(golden.time, nanos),
+        null,
+      );
+      if (frame?.localBody !== moon) {
+        throw new Error("the ship at half the moon's Hill radius has the moon as its local body");
+      }
+      return frame;
+    };
+
+    it("is the local body's orbits' velocities at the frame's time, composed along its chain of parents", () => {
+      const velocity = nearMoonAt(0).localBodyVelocityMPerS;
+      const expected = chainVelocity(systemPlacements(system), moon, golden.time);
+
+      expect(
+        velocity === null ? Number.NaN : norm(minus(velocity, expected)) / norm(expected),
+      ).toBeLessThanOrEqual(1e-12);
+    });
+
+    it("is the very velocity a stand-in held at rest in the local body's frame moves at", () => {
+      const atRest: SceneModel = {
+        ...model,
+        ship: {
+          position: { kind: "body", body: moon, offsetM: { x: 0, y: 0, z: 0 } },
+          velocityMPerS: { x: 0, y: 0, z: 0 },
+          time: golden.time,
+        },
+      };
+
+      expect(nearMoonAt(0).localBodyVelocityMPerS).toEqual(
+        shipObserver(atRest, golden.time)?.velocityMPerS,
+      );
+    });
+
+    it("agrees with a central difference of the local body's geometric position over ±0.5 s, to 10⁻⁶", () => {
+      const velocity = nearMoonAt(0).localBodyVelocityMPerS;
+      const ahead = geometricOf(nearMoonAt(500_000_000), moon);
+      const behind = geometricOf(nearMoonAt(-500_000_000), moon);
+      // Over 1 s, so the difference is the velocity in m/s.
+      const difference = minus(ahead, behind);
+
+      expect(
+        velocity === null ? Number.NaN : norm(minus(velocity, difference)) / norm(difference),
+      ).toBeLessThanOrEqual(1e-6);
+    });
+
+    it("is null with no local body", () => {
+      const far = { positionM: { x: 0, y: 0, z: 1e12 }, velocityMPerS: { x: 0, y: 0, z: 0 } };
+      const frame = sceneAt(model, far, golden.time, null);
+
+      expect([frame?.localBody, frame?.localBodyVelocityMPerS]).toEqual([null, null]);
+    });
   });
 
   it("leaves out a body its record says is gone", () => {
