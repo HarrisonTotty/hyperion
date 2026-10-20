@@ -25,6 +25,7 @@ import { withTemplateCurve } from "../view/appearance/phase";
 import type { Quaternion } from "../view/camera/pose";
 import { viewRotation4 } from "../view/camera/projection";
 import { quaternionFromRows } from "../view/camera/quaternion";
+import { viewId } from "../view/camera/state";
 import { IDENTITY_ROTATION } from "../view/coords/rotation";
 import type { MemoryCategory } from "../view/engine/memory";
 import type { RenderEngine } from "../view/engine/types";
@@ -320,13 +321,13 @@ export async function checkSharedPass(
       throw new Error("the workers did not take the fixture's blocks in time");
     }
     const primary: TerrainPassView = {
-      id: "view",
+      id: viewId("view"),
       view: viewOver(30_000, 60, 0),
       tauPx: TERRAIN_SETTINGS.low.tauPx,
       weight: 1,
     };
     const instrument: TerrainPassView = {
-      id: "instrument 1",
+      id: viewId("instrument 1"),
       view: viewOver(60_000, 75, 90),
       tauPx: TERRAIN_SETTINGS.low.tauPx,
       weight: 0.25,

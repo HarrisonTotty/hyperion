@@ -2,6 +2,7 @@ import type { BodyIdHex, DetailSeedHex, ResponseFor, UniverseIdHex } from "@hype
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { instrumentViewId, PRIMARY_VIEW_ID } from "../../displays/view/viewNames";
 import { type ServerLink, useServerLink } from "../../lib/serverLink";
 import {
   answerBlock,
@@ -29,7 +30,6 @@ import {
 } from "../../test/terrainSessionFixtures";
 import { aBody, FIXTURE_PLANET_CENTRE_M, FIXTURE_SYSTEM } from "../../test/viewFixtures";
 import { lawFor } from "../appearance/phase";
-import { viewId } from "../camera/state";
 import type { AllocationEvent } from "../engine/memory";
 import type { ViewBody, ViewScene } from "../scene/model";
 import { CLASS_MAP_LEVEL } from "./classMap";
@@ -46,8 +46,8 @@ const PLANET: BodyIdHex = SESSION_PLANET;
 const SCENE: ViewScene = SESSION_SCENE;
 const MOON_RADIUS_M = SESSION_MOON_RADIUS_M;
 const SEED: DetailSeedHex = "0123456789abcdef";
-const PRIMARY = viewId("primary");
-const INSTRUMENT = viewId("instrument 1");
+const PRIMARY = PRIMARY_VIEW_ID;
+const INSTRUMENT = instrumentViewId(1);
 
 /** Resolves after `hops` turns of the microtask queue. */
 function microtasks(hops: number): Promise<void> {
@@ -283,16 +283,45 @@ describe("the terrain session's fields (R10.T16.a)", () => {
     expect([...h.session.wanted]).toEqual([]);
   });
 
-  it("keeps a body while any view holds it, and judges without a view it forgets", async () => {
+  it("keeps every field while it holds no view's report, as a loop starting again on it does (S2)", async () => {
     const h = await harness();
     await holdMoon(h);
-    h.session.noteView(PRIMARY, viewAt(2e7, "wireframe"));
-    h.session.noteView(INSTRUMENT, viewAt(2e7, "photorealistic"));
+    h.session.noteView(PRIMARY, viewAt(2e7));
     h.session.step();
-    const both = [...h.session.wanted];
-    h.session.forgetView(INSTRUMENT);
+    // The loop's cleanup forgets the primary; the new loop steps before its first report.
+    h.session.forgetView(PRIMARY);
     h.session.step();
-    expect([both, [...h.session.wanted]]).toEqual([[MOON], []]);
+    h.session.noteView(PRIMARY, viewAt(2e7));
+    h.session.step();
+    expect([
+      [...h.session.wanted],
+      h.socket().requestsOfKind("surface_field").length,
+      h.workers.map((w) => w.fieldMessages.filter((m) => m.kind === "field-release").length),
+    ]).toEqual([[MOON], 1, [0, 0]]);
+  });
+
+  describe("a body held by one view of two", () => {
+    /** The moon held, then judged by a wireframe primary and a photorealistic instrument. */
+    async function twoViews(): Promise<Awaited<ReturnType<typeof harness>>> {
+      const h = await harness();
+      await holdMoon(h);
+      h.session.noteView(PRIMARY, viewAt(2e7, "wireframe"));
+      h.session.noteView(INSTRUMENT, viewAt(2e7, "photorealistic"));
+      h.session.step();
+      return h;
+    }
+
+    it("is kept while any view holds it", async () => {
+      const h = await twoViews();
+      expect([...h.session.wanted]).toEqual([MOON]);
+    });
+
+    it("is judged without a view the session forgets", async () => {
+      const h = await twoViews();
+      h.session.forgetView(INSTRUMENT);
+      h.session.step();
+      expect([...h.session.wanted]).toEqual([]);
+    });
   });
 
   it("asks a body's delta alone at a revision rise on the scene topic", async () => {
@@ -367,7 +396,8 @@ describe("the terrain session's detail seeds and class maps (R10.T16.a)", () => 
     const h = await harness();
     h.session.noteView(PRIMARY, viewAt(5e6));
     h.session.step();
-    h.session.forgetView(PRIMARY);
+    // Out of the moon's frame with no header held: it is wanted no more.
+    h.session.noteView(PRIMARY, viewAt(7e7));
     h.session.step();
     h.session.noteView(PRIMARY, viewAt(5e6));
     h.session.step();
@@ -594,29 +624,40 @@ describe("the terrain session's pool, memory and teardown (R10.T16.a)", () => {
     ]);
   });
 
-  it("releases the class maps before the masks, and the fields before the workers stop", async () => {
-    const h = await harness();
-    await holdMoon(h);
-    answerBlock(workerAt(h, 0), 0, blockChange(5, [0, 2]));
-    h.socket().serverAnswers("body_detail", () => detailWithSeed(SEED));
-    await settle();
-    const query = h.workers.flatMap((w) => w.pendingClassMaps.map((q) => ({ w, q })))[0];
-    query?.w.reply({ kind: "class-map", id: query.q.id, body: MOON, map: oneTexelMap() });
-    await settle();
-    const from = h.allocations.length;
-    h.session.dispose();
-    const destroyed = h.allocations
-      .slice(from)
-      .flatMap((event) => (event.kind === "destroyed" ? [event.name] : []));
-    expect([destroyed, h.workers.map((w) => [w.fieldMessages.at(-1)?.kind, w.terminated])]).toEqual(
-      [
-        [`class map ${MOON}`, `coverage mask ${MOON}`],
-        [
-          ["field-release", true],
-          ["field-release", true],
-        ],
-      ],
-    );
+  describe("disposed with a body's class map and mask made", () => {
+    /** The moon held with its class map answered, then the session disposed. */
+    async function disposedHolding(): Promise<{
+      readonly h: Awaited<ReturnType<typeof harness>>;
+      readonly destroyed: ReadonlyArray<string>;
+    }> {
+      const h = await harness();
+      await holdMoon(h);
+      answerBlock(workerAt(h, 0), 0, blockChange(5, [0, 2]));
+      h.socket().serverAnswers("body_detail", () => detailWithSeed(SEED));
+      await settle();
+      const query = h.workers.flatMap((w) => w.pendingClassMaps.map((q) => ({ w, q })))[0];
+      query?.w.reply({ kind: "class-map", id: query.q.id, body: MOON, map: oneTexelMap() });
+      await settle();
+      const from = h.allocations.length;
+      h.session.dispose();
+      const destroyed = h.allocations
+        .slice(from)
+        .flatMap((event) => (event.kind === "destroyed" ? [event.name] : []));
+      return { h, destroyed };
+    }
+
+    it("releases the class maps before the masks", async () => {
+      const { destroyed } = await disposedHolding();
+      expect(destroyed).toEqual([`class map ${MOON}`, `coverage mask ${MOON}`]);
+    });
+
+    it("releases the fields before the workers stop", async () => {
+      const { h } = await disposedHolding();
+      expect(h.workers.map((w) => [w.fieldMessages.at(-1)?.kind, w.terminated])).toEqual([
+        ["field-release", true],
+        ["field-release", true],
+      ]);
+    });
   });
 
   it("does nothing once disposed", async () => {

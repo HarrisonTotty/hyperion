@@ -352,6 +352,21 @@ function listen<T>(listeners: Set<T>, listener: T): () => void {
 }
 
 /**
+ * Tells every listener of `listeners` `value`, each whatever the one before threw: a listener that
+ * throws, a bug of its own, is reported, so that the others hear and the pool's message handler
+ * goes on to pump the queue (plan R10, R10.T16; the batch review's S4).
+ */
+function tell<T>(listeners: Iterable<(value: T) => void>, value: T, what: string): void {
+  for (const listener of listeners) {
+    try {
+      listener(value);
+    } catch (error: unknown) {
+      console.error(`a listener of the height workers' ${what} failed:`, error);
+    }
+  }
+}
+
+/**
  * The pool of height workers that bake patches for the cache.
  *
  * @remarks
@@ -966,9 +981,7 @@ export class HeightWorkerPool {
           this.requeue(inFlight);
         } else if (lane.wanted.has(inFlight.keyString)) {
           lane.wanted.delete(inFlight.keyString);
-          for (const listener of lane.bakedListeners) {
-            listener(reply.bake);
-          }
+          tell(lane.bakedListeners, reply.bake, "bakes");
         }
         break;
       }
@@ -999,9 +1012,7 @@ export class HeightWorkerPool {
           lane.wanted.delete(inFlight.keyString);
           lane.failedKeys.add(inFlight.keyString);
           const failure = { keyString: inFlight.keyString, message: reply.message };
-          for (const listener of lane.failureListeners) {
-            listener(failure);
-          }
+          tell(lane.failureListeners, failure, "failed bakes");
         }
         break;
       }
@@ -1033,9 +1044,7 @@ export class HeightWorkerPool {
         if (kept !== undefined && reply.id >= kept.sinceId && !kept.refused) {
           kept.refused = true;
           const refusal = { body: reply.body, message: reply.message };
-          for (const listener of this.refusalListeners) {
-            listener(refusal);
-          }
+          tell(this.refusalListeners, refusal, "refused fields");
         }
         break;
       }
@@ -1170,9 +1179,7 @@ export class HeightWorkerPool {
     field.reported = sequence + 1;
     field.levels = block.levels;
     const change: FieldChange = { ...block, body, sequence };
-    for (const listener of this.changeListeners) {
-      listener(change);
-    }
+    tell(this.changeListeners, change, "field changes");
   }
 
   /** The next message ID, shared by bakes and field messages. */

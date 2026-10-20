@@ -85,6 +85,7 @@ export function viewAt(
     fovXRad: SESSION_FOV_X_RAD,
     presentedPx: SESSION_PRESENTED,
     style,
+    drawnStyle: style,
     setting: "high",
     streamPriority: "primary",
     regimes: new Map(),

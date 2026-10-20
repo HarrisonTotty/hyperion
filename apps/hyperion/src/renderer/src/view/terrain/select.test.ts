@@ -357,6 +357,7 @@ function levelGaps(keys: readonly PatchKey[]): number {
     limitExcess: 0,
     hiddenBaked: [],
     nearestSurveyM: Number.POSITIVE_INFINITY,
+    nearestSurveyByViewM: [Number.POSITIVE_INFINITY],
   };
   let gaps = 0;
   for (const k of keys) {

@@ -202,7 +202,7 @@ export function engineName(slot: string): ViewsCheckViewName | null {
 }
 
 /** `VIEW`'s controls and canvases in the page, as the operator finds them. */
-class ViewControls {
+export class ViewControls {
   readonly #document: Document;
 
   constructor(document: Document) {
@@ -250,6 +250,37 @@ class ViewControls {
       }
     }
     return null;
+  }
+
+  /** A command of the shown `EXPOSURE` panel (`ENABLE`, `INHIBIT`), or `null`. */
+  exposureButton(label: string): HTMLButtonElement | null {
+    const panel = this.#document.querySelector("section.view-exposure:not([hidden])");
+    return panel === null ? null : buttonIn(panel, label);
+  }
+
+  /** A meter of the shown `EXPOSURE METER` panel's `SELECT` (`AVG`, `LIT`, `DARK`), or `null`. */
+  meterButton(label: string): HTMLButtonElement | null {
+    const panel = this.#document.querySelector("section.view-meter:not([hidden])");
+    return panel === null ? null : buttonIn(panel, label);
+  }
+
+  /**
+   * Unfolds a side panel (`view-exposure`, `view-meter`) where the compact layout has folded it,
+   * by its disclosure button; nothing where it stands unfolded.
+   */
+  unfoldPanel(panelClass: "view-exposure" | "view-meter"): void {
+    const panel = this.#document.querySelector<HTMLElement>(`section.${panelClass}`);
+    if (panel === null || panel.hidden === false || panel.id.length === 0) {
+      return;
+    }
+    for (const button of this.#document.querySelectorAll<HTMLButtonElement>(
+      ".view-folds__button",
+    )) {
+      if (button.getAttribute("aria-controls") === panel.id) {
+        button.click();
+        return;
+      }
+    }
   }
 
   /** Unfolds the `Instruments` panel where the compact layout has folded it. */
@@ -318,23 +349,64 @@ function shownViews(controls: ViewControls): ShownView[] {
     );
 }
 
-/** The instruments a phase opens, by slot, with their styles; `null` for one it closes. */
+/** The instruments a configuration opens, by slot, with their styles; `null` for one it closes. */
 function instrumentStyles(
-  plan: ViewsCheckPhasePlan,
+  instruments: ViewsCheckPhasePlan["instruments"],
 ): ReadonlyArray<readonly [InstrumentSlot, ViewsCheckStyle | null]> {
-  return INSTRUMENT_SLOTS.map((slot, index) => [slot, plan.instruments[index] ?? null] as const);
+  return INSTRUMENT_SLOTS.map((slot, index) => [slot, instruments[index] ?? null] as const);
+}
+
+/** What a {@link ViewDriver} drives and reads: the page, the clocks and the stop. */
+export interface ViewDriverDeps extends Pick<
+  ViewsCheckDeps,
+  "document" | "nowMs" | "sleep" | "signal"
+> {
+  readonly timing: Pick<ViewsCheckTiming, "waitMs" | "pollMs">;
 }
 
 /**
- * Runs the check in `deps.document`'s `VIEW` and returns its record.
- *
- * @throws Error naming the step when a control does not take effect within the timing's wait, or
- * when the run is stopped through `deps.signal`.
+ * `VIEW` driven by its controls, as an operator would (both runs of the views check: T20's and the
+ * terrain run's, R10.T16.d): each call looks first whether the run was stopped, and a control that
+ * does not take effect within the timing's wait throws, naming the step.
  */
-export async function runViewsCheck(deps: ViewsCheckDeps): Promise<ViewsCheckRecord> {
-  const { probe, timing } = deps;
+export interface ViewDriver {
+  /** Throws {@link STOPPED} if the run was stopped. */
+  readonly stopped: () => void;
+  /** Waits `ms` on the page's timers, looking whether the run was stopped before and after. */
+  readonly wait: (ms: number) => Promise<void>;
+  /**
+   * Waits until `test` holds, looking every poll.
+   *
+   * @throws Error naming `what`, with `why`'s reason, when it does not hold within the wait.
+   */
+  readonly until: (what: string, test: () => boolean, why?: () => string) => Promise<void>;
+  /** Presses the button `find` finds, once it is there. */
+  readonly press: (
+    find: () => HTMLButtonElement | null,
+    what: string,
+  ) => Promise<HTMLButtonElement>;
+  /** Sets a slot's view (`PRIMARY`, `INSTRUMENT 1`) to `style`, through its `CONTROLS` and the style key. */
+  readonly setStyle: (slot: string, style: ViewsCheckStyle) => Promise<void>;
+  /** Opens or closes an instrument. */
+  readonly setOpen: (slot: InstrumentSlot, open: boolean) => Promise<void>;
+  /**
+   * Sets `VIEW` up as `plan` asks: the instruments opened or closed, every view off the
+   * photorealistic style first, so that the low setting's one photorealistic view is free before
+   * another takes it, then each in its style, the primary's controls last.
+   */
+  readonly configure: (plan: Pick<ViewsCheckPhasePlan, "primary" | "instruments">) => Promise<void>;
+  /** Presses the `SCENE` button `name` and waits until it is chosen and the primary draws. */
+  readonly chooseScene: (name: string) => Promise<void>;
+  /** The views shown, primary first, with the styles their canvases name. */
+  readonly shownViews: () => ShownView[];
+  /** `VIEW`'s controls and canvases. */
+  readonly controls: ViewControls;
+}
+
+/** {@link ViewDriver} over `deps.document`'s `VIEW`. */
+export function viewDriver(deps: ViewDriverDeps): ViewDriver {
+  const { timing } = deps;
   const controls = new ViewControls(deps.document);
-  // Every step, wait and call to the main process first looks whether the run was stopped.
   const stopped = (): void => {
     if (deps.signal.aborted) {
       throw new Error(STOPPED);
@@ -350,20 +422,6 @@ export async function runViewsCheck(deps: ViewsCheckDeps): Promise<ViewsCheckRec
       stopped();
       await act(item);
     });
-  const api: ViewsCheckDeps["api"] = {
-    startPhase: async (name) => {
-      stopped();
-      await deps.api.startPhase(name);
-    },
-    endPhase: async (name, window) => {
-      stopped();
-      await deps.api.endPhase(name, window);
-    },
-    askRightWayUp: async () => {
-      stopped();
-      await deps.api.askRightWayUp();
-    },
-  };
   const until = async (
     what: string,
     test: () => boolean,
@@ -426,8 +484,10 @@ export async function runViewsCheck(deps: ViewsCheckDeps): Promise<ViewsCheckRec
       () => controls.reasonOf(button),
     );
   };
-  const configure = async (plan: ViewsCheckPhasePlan): Promise<void> => {
-    const instruments = instrumentStyles(plan);
+  const configure = async (
+    plan: Pick<ViewsCheckPhasePlan, "primary" | "instruments">,
+  ): Promise<void> => {
+    const instruments = instrumentStyles(plan.instruments);
     await step(instruments, ([slot, style]) => setOpen(slot, style !== null));
     const wanted: ReadonlyArray<readonly [string, ViewsCheckStyle]> = [
       [PRIMARY_NAME, plan.primary],
@@ -435,8 +495,6 @@ export async function runViewsCheck(deps: ViewsCheckDeps): Promise<ViewsCheckRec
         style === null ? [] : [[instrumentName(slot), style] as const],
       ),
     ];
-    // Every view off the photorealistic style first, so that the low setting's one
-    // photorealistic view is free before another takes it.
     await step(
       [
         ...wanted.filter(([, style]) => style === "wireframe"),
@@ -446,12 +504,68 @@ export async function runViewsCheck(deps: ViewsCheckDeps): Promise<ViewsCheckRec
     );
     await operate(PRIMARY_NAME);
   };
+  const chooseScene = async (name: string): Promise<void> => {
+    await until(
+      "VIEW did not show its primary view",
+      () => controls.styleOf(PRIMARY_NAME) !== null,
+    );
+    await press(() => controls.sceneButton(name), `the SCENE button ${name}`);
+    await until(
+      `${name} was not chosen`,
+      () =>
+        controls.sceneButton(name)?.getAttribute("aria-pressed") === "true" &&
+        controls.styleOf(PRIMARY_NAME) !== null,
+    );
+  };
+  return {
+    stopped,
+    wait,
+    until,
+    press,
+    setStyle,
+    setOpen,
+    configure,
+    chooseScene,
+    shownViews: () => shownViews(controls),
+    controls,
+  };
+}
+
+/**
+ * Runs the check in `deps.document`'s `VIEW` and returns its record.
+ *
+ * @throws Error naming the step when a control does not take effect within the timing's wait, or
+ * when the run is stopped through `deps.signal`.
+ */
+export async function runViewsCheck(deps: ViewsCheckDeps): Promise<ViewsCheckRecord> {
+  const { probe, timing } = deps;
+  const driver = viewDriver(deps);
+  const { controls, stopped, wait, configure } = driver;
+  const step = <T>(items: ReadonlyArray<T>, act: (item: T) => Promise<void>): Promise<void> =>
+    inOrder(items, async (item) => {
+      stopped();
+      await act(item);
+    });
+  const api: ViewsCheckDeps["api"] = {
+    startPhase: async (name) => {
+      stopped();
+      await deps.api.startPhase(name);
+    },
+    endPhase: async (name, window) => {
+      stopped();
+      await deps.api.endPhase(name, window);
+    },
+    askRightWayUp: async () => {
+      stopped();
+      await deps.api.askRightWayUp();
+    },
+  };
   const resizePrimary = async (): Promise<ViewsCheckResizeRecord> => {
     const stage = controls.primaryStage();
     if (stage === null) {
       throw new Error("views check: the primary's stage was not found");
     }
-    const names = shownViews(controls).map((view) => view.name);
+    const names = driver.shownViews().map((view) => view.name);
     const canvases = (): ViewsCheckResizeRecord["before"] =>
       names.map((name) => ({ name, canvas: probe.canvasOf(name) }));
     const before = canvases();
@@ -471,14 +585,7 @@ export async function runViewsCheck(deps: ViewsCheckDeps): Promise<ViewsCheckRec
     return { before, steps, allocations };
   };
 
-  await until("VIEW did not show its primary view", () => controls.styleOf(PRIMARY_NAME) !== null);
-  await press(() => controls.sceneButton(PHASE_SCENE_NAME), `the SCENE button ${PHASE_SCENE_NAME}`);
-  await until(
-    `${PHASE_SCENE_NAME} was not chosen`,
-    () =>
-      controls.sceneButton(PHASE_SCENE_NAME)?.getAttribute("aria-pressed") === "true" &&
-      controls.styleOf(PRIMARY_NAME) !== null,
-  );
+  await driver.chooseScene(PHASE_SCENE_NAME);
   const phases: ViewsCheckPhaseRecord[] = [];
   const resized: ViewsCheckResizeRecord[] = [];
   await step(VIEWS_CHECK_PLAN, async (plan) => {
@@ -493,7 +600,7 @@ export async function runViewsCheck(deps: ViewsCheckDeps): Promise<ViewsCheckRec
     // The trace stops at the window's end; the pass timer's last reads arrive after it.
     await api.endPhase(plan.name, window);
     await wait(timing.graceMs);
-    phases.push(probe.phase(plan.name, window.startMs, window.endMs, shownViews(controls)));
+    phases.push(probe.phase(plan.name, window.startMs, window.endMs, driver.shownViews()));
     if (plan.name === COCKPIT_PHASE) {
       resized.push(await resizePrimary());
     }

@@ -92,10 +92,10 @@ export type GroundUnderFunction = (positionM: BodyFixedVec3) => GroundUnder;
  *
  * @remarks
  * Exact on a sphere. On a flattened body the parametric direction and the normal differ by up to
- * about f rad, so the height is short by up to about h f² ÷ 2 and the ground point stands up to
- * about h f off the normal's foot: 6 mm and 3.4 m at the 1 km a descent is judged within, for
- * WGS 84's f = 1 ÷ 298.257223563 (NIMA TR8350.2, 3rd ed., 2000, Table 3.1), well inside a finest
- * patch. Over surveyed relief the datum can lie kilometres from the ground: R10.T14.c replaces it
+ * about f rad, so the ground point stands up to about h f off the normal's foot and the height is
+ * short by up to about (h f)² ÷ 2a: 3.4 m and under a micrometre (8.9 × 10⁻⁷ m at worst) at the
+ * 1 km a descent is judged within, for WGS 84's f = 1 ÷ 298.257223563 and a = 6,378,137 m (NIMA
+ * TR8350.2, 3rd ed., 2000, Table 3.1), well inside a finest patch. Over surveyed relief the datum can lie kilometres from the ground: R10.T14.c replaces it
  * with the workers' ground, and amends Design note 9's "above the spheroid" (the ruling's §2).
  */
 export function datumGroundUnder(

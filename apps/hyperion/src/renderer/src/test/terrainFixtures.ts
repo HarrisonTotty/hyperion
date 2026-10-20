@@ -72,5 +72,6 @@ export function selectionOf(
     limitExcess: 0,
     hiddenBaked,
     nearestSurveyM: Number.POSITIVE_INFINITY,
+    nearestSurveyByViewM: [Number.POSITIVE_INFINITY],
   };
 }

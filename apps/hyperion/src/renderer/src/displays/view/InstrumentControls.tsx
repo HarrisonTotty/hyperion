@@ -7,12 +7,21 @@ import { maxFreeRateStep } from "../../view/camera/freeCamera";
 import type { ViewKeyAction } from "../../view/camera/keys";
 import { type CameraTarget, offeredPresets } from "../../view/camera/state";
 import { cameraSceneOf } from "../../view/scene/model";
+import type { DrawnSurveyEdge } from "../../view/wireframe/drawList";
 import { CameraControls } from "./CameraControls";
 import { useCameraPlace } from "./cameraPlace";
 import type { InstrumentShown } from "./useInstruments";
 import type { SideFolds } from "./viewLayout";
 import { ViewMarkList } from "./ViewMarkList";
-import { type MarkRow, markRows, rangesFromCamera, targetKey, type ViewRun } from "./viewRun";
+import {
+  type MarkRow,
+  markRows,
+  rangesFromCamera,
+  type SurveyEdgeListNote,
+  surveyEdgeNotes,
+  targetKey,
+  type ViewRun,
+} from "./viewRun";
 
 /** Props of {@link InstrumentControls}. */
 export interface InstrumentControlsProps {
@@ -34,10 +43,16 @@ export interface InstrumentControlsProps {
   readonly modifier: PrimaryModifier;
 }
 
-/** The rows of the list, with the units they were last shown in kept for their hysteresis. */
+/**
+ * The rows and notes of the list, with the units they were last shown in kept for their
+ * hysteresis.
+ */
 interface ShownRows {
   readonly run: ViewRun;
   readonly rows: ReadonlyArray<MarkRow>;
+  /** The survey edges its notes were made from, and the notes (R10.T16.c). */
+  readonly edges: ReadonlyArray<DrawnSurveyEdge>;
+  readonly notes: ReadonlyArray<SurveyEdgeListNote>;
 }
 
 function unitsOf(rows: ReadonlyArray<MarkRow>): ReadonlyMap<string, BodyDistanceUnit> {
@@ -71,13 +86,20 @@ export function InstrumentControls({
   modifier,
 }: InstrumentControlsProps) {
   const titleId = useId();
-  const { run } = shown;
-  // The ranges switch unit with hysteresis, adjusted during render as each run arrives.
-  const [shownRows, setShownRows] = useState<ShownRows>(() => ({ run, rows: markRows(run) }));
-  let rows = shownRows.rows;
-  if (shownRows.run !== run) {
-    rows = markRows(run, unitsOf(shownRows.rows));
-    setShownRows({ run, rows });
+  const { run, surveyEdges } = shown;
+  // The ranges switch unit with hysteresis, adjusted during render as each run arrives, and its
+  // notes with them (R10.T16.c).
+  const [shownRows, setShownRows] = useState<ShownRows>(() => ({
+    run,
+    rows: markRows(run),
+    edges: surveyEdges,
+    notes: surveyEdgeNotes(run.scene, surveyEdges),
+  }));
+  let { rows, notes } = shownRows;
+  if (shownRows.run !== run || shownRows.edges !== surveyEdges) {
+    rows = shownRows.run === run ? rows : markRows(run, unitsOf(shownRows.rows));
+    notes = surveyEdgeNotes(run.scene, surveyEdges, shownRows.notes);
+    setShownRows({ run, rows, edges: surveyEdges, notes });
   }
   const cameraScene = cameraSceneOf(run.scene);
   const place = useCameraPlace(run);
@@ -90,6 +112,7 @@ export function InstrumentControls({
         </h2>
         <ViewMarkList
           rows={rows}
+          notes={notes}
           fromCamera={rangesFromCamera(run.scene)}
           stale={stale}
           selectedKey={selection === null ? null : targetKey(selection)}

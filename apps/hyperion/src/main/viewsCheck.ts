@@ -9,12 +9,22 @@
  * launch. Each phase is one trace window, started at its measured window and stopped at its end,
  * reduced by R05's reducer for the presentations and the GPU process's main thread, and scanned
  * for the GPU process's slices named as copies; the trace file is removed once read.
+ *
+ * A `--terrain` launch (plan R10, R10.T16.d; decision-r10-t16-contracts §6) runs the terrain run
+ * through the same channels: its phases take no trace (each lasts minutes, and a hidden run has no
+ * presentation to read), each ends with a capture of the page, the run may capture named moments
+ * between ({@link ViewsCheckSession.capture}), and its record goes through its own narrow writer,
+ * judged here (`terrainCheckResults.ts`): a run whose checks fail ends with 1. Each handler refuses
+ * a phase that is not of the launch's run.
  */
 
 import type { ContentTracing, IpcMainInvokeEvent, TraceConfig } from "electron";
 
 import type {
+  CheckPhaseName,
   SpikeResultsPaths,
+  TerrainCheckPhaseName,
+  TerrainCheckRecord,
   ViewsCheckLaunch,
   ViewsCheckPhaseName,
   ViewsCheckRecord,
@@ -23,7 +33,13 @@ import type {
 import { type Measured, measured, missing } from "./measured";
 import { readTraceEvents, recordedGpuSlices, TraceReducer, type TraceFigures } from "./reduceTrace";
 import { readSpikeEnd } from "./spike";
-import { readViewsCheckRecord } from "./viewsCheckRecord";
+import {
+  buildTerrainCheckResults,
+  type TerrainCheckResults,
+  terrainFailures,
+  writeTerrainResults,
+} from "./terrainCheckResults";
+import { readTerrainCheckRecord, readViewsCheckRecord } from "./viewsCheckRecord";
 import {
   buildViewsCheckResults,
   type NamedSlice,
@@ -40,6 +56,8 @@ export const VIEWS_CHECK_CHANNELS = {
   endPhase: "hyperion:views-check:end-phase",
   askRightWayUp: "hyperion:views-check:ask-right-way-up",
   writeResults: "hyperion:views-check:write-results",
+  writeTerrainResults: "hyperion:views-check:write-terrain-results",
+  capture: "hyperion:views-check:capture",
   end: "hyperion:views-check:end",
 } as const;
 
@@ -262,6 +280,12 @@ export interface ViewsCheckSessionDeps {
   readonly removeFile: (path: string) => Promise<void>;
   /** Where the captures go, or `null` for none. */
   readonly capturesDir: string | null;
+  /**
+   * The captures' directory as a terrain run's results record it, from the repository's root, so
+   * that no committed results file names a checkout's own path (the batch review's D-C); the
+   * directory itself where absent.
+   */
+  readonly capturesRecordedAs?: string;
   /** Saves the page as a PNG at `path`. */
   readonly capture: (path: string) => Promise<void>;
   /** Asks the person whether every view is the right way up; `null` when unanswered. */
@@ -272,8 +296,34 @@ export interface ViewsCheckSessionDeps {
     dir: string,
     results: ViewsCheckResults,
   ) => Promise<{ readonly json: string; readonly markdown: string }>;
+  /** Writes a terrain run's results into a directory: {@link writeTerrainResults} by default. */
+  readonly writeTerrain?: (
+    dir: string,
+    results: TerrainCheckResults,
+  ) => Promise<{ readonly json: string; readonly markdown: string }>;
   readonly exit: (code: number) => void;
   readonly log: (line: string) => void;
+}
+
+/** The terrain run's phases (`TerrainCheckPhaseName`), which the handlers take on a terrain launch. */
+const TERRAIN_PHASE_NAMES: ReadonlyArray<TerrainCheckPhaseName> = [
+  "terrain-alone",
+  "terrain-photoreal-wireframe",
+  "terrain-wireframe",
+  "terrain-loss",
+];
+
+/** Whether `name` is one of the terrain run's phases. */
+function isTerrainPhase(name: CheckPhaseName): name is TerrainCheckPhaseName {
+  return TERRAIN_PHASE_NAMES.some((each) => each === name);
+}
+
+/** A capture's label: lower case letters, digits and hyphens, 1 to 48 of them. */
+const CAPTURE_LABEL = /^[a-z0-9-]{1,48}$/u;
+
+/** Whether `value` is a label a capture may be named by (`ViewsCheckApi.capture`). */
+export function isCaptureLabel(value: unknown): value is string {
+  return typeof value === "string" && CAPTURE_LABEL.test(value);
 }
 
 /** One run's state in the main process, from its start to its results. */
@@ -281,8 +331,11 @@ export class ViewsCheckSession {
   readonly #deps: ViewsCheckSessionDeps;
   readonly #run: Promise<Omit<ViewsCheckRunInput, "captures" | "window">>;
   readonly #traces = new Map<ViewsCheckPhaseName, PhaseTraceFigures>();
-  #recording: ViewsCheckPhaseName | null = null;
+  readonly #consoleErrors: string[] = [];
+  #recording: CheckPhaseName | null = null;
   #captured = false;
+  /** A terrain run's results once written, judged. */
+  #terrainResults: TerrainCheckResults | null = null;
   #rightWayUp: Measured<"yes" | "no">;
   #passTimerDrops = 0;
   #untimedPasses = 0;
@@ -314,21 +367,29 @@ export class ViewsCheckSession {
     }
   }
 
+  /** Keeps a console error of the page, which a terrain run's results list. */
+  consoleError(message: string): void {
+    this.#consoleErrors.push(message);
+  }
+
   /** Counts an exit of the GPU process. */
   gpuProcessGone(): void {
     this.#gpuProcessExits += 1;
   }
 
   /**
-   * Starts a phase's trace window.
+   * Starts a phase's trace window; a terrain run's phase is marked alone, with no trace.
    *
    * @throws Error if another phase's window is still recording.
    */
-  async startPhase(name: ViewsCheckPhaseName): Promise<void> {
+  async startPhase(name: CheckPhaseName): Promise<void> {
     if (this.#recording !== null) {
       throw new Error(`the trace of ${this.#recording} is still recording`);
     }
     this.#recording = name;
+    if (isTerrainPhase(name)) {
+      return;
+    }
     try {
       await this.#deps.tracing.startRecording(viewsCheckTraceConfig());
     } catch (error: unknown) {
@@ -343,11 +404,31 @@ export class ViewsCheckSession {
    *
    * @throws Error if `name` is not the phase recording.
    */
-  async endPhase(name: ViewsCheckPhaseName, window: ViewsCheckWindow): Promise<void> {
+  async endPhase(name: CheckPhaseName, window: ViewsCheckWindow): Promise<void> {
     if (this.#recording !== name) {
       throw new Error(`${name} is not the phase recording`);
     }
     this.#recording = null;
+    if (!isTerrainPhase(name)) {
+      await this.#endTrace(name, window);
+    }
+    await this.#capture(name);
+  }
+
+  /**
+   * Saves a picture of the page as `<phase>-<label>.png` among the captures, `<phase>` the phase
+   * recording or `between` (a terrain run's looks at moments of its script, R10.T16.d).
+   *
+   * @throws Error for a label {@link isCaptureLabel} refuses.
+   */
+  async capture(label: string): Promise<void> {
+    if (!CAPTURE_LABEL.test(label)) {
+      throw new Error(`${label} is not a capture's label`);
+    }
+    await this.#capture(`${this.#recording ?? "between"}-${label}`);
+  }
+
+  async #endTrace(name: ViewsCheckPhaseName, window: ViewsCheckWindow): Promise<void> {
     const path = await this.#deps.tracing.stopRecording(this.#deps.tracePath(name));
     const shown = (await this.#run).shown;
     try {
@@ -360,6 +441,10 @@ export class ViewsCheckSession {
         this.#deps.log(`views check: the trace ${path} was not removed: ${String(error)}`);
       });
     }
+  }
+
+  /** Saves the page as `<name>.png` among the captures, if the run keeps any; never rejects. */
+  async #capture(name: string): Promise<void> {
     const dir = this.#deps.capturesDir;
     if (dir !== null) {
       try {
@@ -408,8 +493,52 @@ export class ViewsCheckSession {
     return paths;
   }
 
-  /** Ends the run with an exit status, and a reason for a failure. */
+  /** Builds a terrain run's results from its renderer's record, judges and writes them. */
+  async writeTerrainResults(record: TerrainCheckRecord): Promise<SpikeResultsPaths> {
+    const run = await this.#run;
+    const dir = this.#deps.capturesDir;
+    const results = buildTerrainCheckResults({
+      run: {
+        ...run,
+        window: this.#deps.windowSize(),
+        captures:
+          dir === null
+            ? missing("no capture directory")
+            : this.#captured
+              ? measured(this.#deps.capturesRecordedAs ?? dir)
+              : missing("no capture was saved"),
+      },
+      record,
+      gpuProcessExits: this.#gpuProcessExits,
+      consoleErrors: this.#consoleErrors,
+    });
+    const write = this.#deps.writeTerrain ?? writeTerrainResults;
+    const paths = await write(this.#deps.outDir, results);
+    this.#terrainResults = results;
+    this.#deps.log(`views check: wrote ${paths.json} and ${paths.markdown}`);
+    return paths;
+  }
+
+  /**
+   * Ends the run with an exit status, and a reason for a failure; a terrain run that would end
+   * with 0 ends with 1 unless its results were written and pass.
+   */
   end(code: number, reason: string | null): void {
+    if (code === 0 && this.#deps.launch.terrain) {
+      const results = this.#terrainResults;
+      if (results === null) {
+        this.#finish(1, "the terrain run ended with no results written");
+        return;
+      }
+      if (results.overall !== "pass") {
+        this.#finish(1, `the terrain run's checks failed: ${terrainFailures(results)}`);
+        return;
+      }
+    }
+    this.#finish(code, reason);
+  }
+
+  #finish(code: number, reason: string | null): void {
     this.#ended = true;
     this.#deps.log(
       code === 0 ? "views check: PASS the run is recorded" : `views check: FAIL ${reason ?? ""}`,
@@ -432,8 +561,19 @@ export interface ViewsCheckHandlerDeps<E = IpcMainInvokeEvent> {
   readonly isSender: (event: E) => boolean;
   readonly session: Pick<
     ViewsCheckSession,
-    "startPhase" | "endPhase" | "askRightWayUp" | "writeResults" | "end"
+    | "startPhase"
+    | "endPhase"
+    | "askRightWayUp"
+    | "writeResults"
+    | "writeTerrainResults"
+    | "capture"
+    | "end"
   >;
+  /**
+   * Whether the launch runs the terrain run (`ViewsCheckLaunch.terrain`): its handlers take the
+   * terrain run's phases alone, and T20's otherwise.
+   */
+  readonly terrain: boolean;
 }
 
 const PHASE_NAMES: ReadonlyArray<ViewsCheckPhaseName> = [
@@ -444,8 +584,11 @@ const PHASE_NAMES: ReadonlyArray<ViewsCheckPhaseName> = [
   "wireframe-alone",
 ];
 
-function readPhaseName(value: unknown): ViewsCheckPhaseName | null {
-  return PHASE_NAMES.find((name) => name === value) ?? null;
+/** `value` as a phase of the launch's run (the terrain run's, or T20's), or `null`. */
+function readPhaseName(value: unknown, terrain: boolean): CheckPhaseName | null {
+  return terrain
+    ? (TERRAIN_PHASE_NAMES.find((name) => name === value) ?? null)
+    : (PHASE_NAMES.find((name) => name === value) ?? null);
 }
 
 /** `value` as a measured window, or `null`: two finite times, the end not before the start. */
@@ -480,32 +623,53 @@ export function registerViewsCheckHandlers<E>(deps: ViewsCheckHandlerDeps<E>): v
       return run(args);
     });
   };
+  const run = deps.terrain ? "the terrain run" : "T20's run";
   guarded(VIEWS_CHECK_CHANNELS.startPhase, async ([value]) => {
-    const name = readPhaseName(value);
+    const name = readPhaseName(value, deps.terrain);
     if (name === null) {
-      throw new ViewsCheckCallRefused(`${VIEWS_CHECK_CHANNELS.startPhase} refused: not a phase`);
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.startPhase} refused: not a phase of ${run}`,
+      );
     }
     await deps.session.startPhase(name);
   });
   guarded(VIEWS_CHECK_CHANNELS.endPhase, async ([value, span]) => {
-    const name = readPhaseName(value);
+    const name = readPhaseName(value, deps.terrain);
     const window = readWindow(span);
     if (name === null || window === null) {
       throw new ViewsCheckCallRefused(
-        `${VIEWS_CHECK_CHANNELS.endPhase} refused: not a phase and its window`,
+        `${VIEWS_CHECK_CHANNELS.endPhase} refused: not a phase of ${run} and its window`,
       );
     }
     await deps.session.endPhase(name, window);
   });
   guarded(VIEWS_CHECK_CHANNELS.askRightWayUp, () => deps.session.askRightWayUp());
   guarded(VIEWS_CHECK_CHANNELS.writeResults, async ([value]) => {
-    const record = readViewsCheckRecord(value);
+    // A terrain launch writes its own results alone (the batch review's D-C).
+    const record = deps.terrain ? null : readViewsCheckRecord(value);
     if (record === null) {
       throw new ViewsCheckCallRefused(
         `${VIEWS_CHECK_CHANNELS.writeResults} refused: not the check's record`,
       );
     }
     return deps.session.writeResults(record);
+  });
+  guarded(VIEWS_CHECK_CHANNELS.writeTerrainResults, async ([value]) => {
+    const record = deps.terrain ? readTerrainCheckRecord(value) : null;
+    if (record === null) {
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.writeTerrainResults} refused: not the terrain run's record`,
+      );
+    }
+    return deps.session.writeTerrainResults(record);
+  });
+  guarded(VIEWS_CHECK_CHANNELS.capture, async ([value]) => {
+    if (!deps.terrain || !isCaptureLabel(value)) {
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.capture} refused: not a terrain run's capture label`,
+      );
+    }
+    await deps.session.capture(value);
   });
   guarded(VIEWS_CHECK_CHANNELS.end, async ([value]) => {
     const end = readSpikeEnd(value);

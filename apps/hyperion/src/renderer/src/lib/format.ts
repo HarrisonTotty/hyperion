@@ -6,7 +6,7 @@
  * Each function returns the value without its unit, except where it chooses one, when it returns
  * the unit beside the value or with it ({@link formatScaleLength}, {@link formatAge},
  * {@link formatSubstellarMass}, {@link formatPeriod}, {@link formatBodyDistance},
- * {@link formatPressure}), or where the unit is
+ * {@link formatSurfaceRange}, {@link formatPressure}), or where the unit is
  * written against the digits (the degree sign, the `yr` inside {@link formatUniverseTimeDhms}). A
  * missing value is the caller's em dash: every formatter here requires a finite number and throws
  * on anything else, since a `NaN` reaching the screen is a bug upstream.
@@ -499,6 +499,69 @@ function distanceIn(distanceKm: number, band: DistanceBand): string {
   return band.unit === "km"
     ? significantOrSci(inUnit, 0.01, Number.POSITIVE_INFINITY)
     : significantOrSci(inUnit, 0, band.unit === "AU" ? 1_000_000 : Number.POSITIVE_INFINITY);
+}
+
+/**
+ * Unit of a range to the ground as {@link formatSurfaceRange} writes it: metres, then a planetary
+ * system's distance units.
+ */
+export type SurfaceRangeUnit = "m" | BodyDistanceUnit;
+
+/** A range to the ground split into its digits and unit, so that the unit can be set apart. */
+export interface FormattedSurfaceRange {
+  readonly value: string;
+  readonly unit: SurfaceRangeUnit;
+}
+
+/** Ranges below this many metres, after rounding, are read in `m`. */
+const SURFACE_RANGE_METRES_BELOW_M = 1_000;
+
+/**
+ * Formats a range from the ship or the camera to a body's ground in `SLANT RANGE`'s units: `m`
+ * below 1 km, then {@link formatBodyDistance}'s `km`, `Mm`, `Gm` and `AU`, to three significant
+ * figures, the unit switching with {@link DISTANCE_HYSTERESIS} at every boundary (the guide's
+ * Views and its `SLANT RANGE` row; decision-r10-t16-review §1).
+ *
+ * @remarks
+ * The view list's `SURVEY EDGE` notes read it (plan R10, R10.T16.c), and R10.T12's `SLANT RANGE`
+ * takes the same units and precision before rounding by its uncertainty, so that the same quantity
+ * reads alike in both. The unit is decided after rounding, so 999.6 m reads `1.00 km`. A range shown
+ * in `m` keeps it up to 5% past 1 km (`1020 m`), and one shown in `km` keeps it down to 5% under
+ * (`0.960 km`); above 1 km the switches are {@link formatBodyDistance}'s. Below 0.01 m the value is
+ * in E notation (`5.00E-3 m`). A view's list keeps its target ranges in {@link formatBodyDistance}'s
+ * units (signoff-12, "Seen, not ruled", 1).
+ *
+ * @param rangeM - The range, m.
+ * @param previous - The unit this range was last shown in, which the caller keeps; `null` for the
+ *   first showing.
+ * @throws Error for a range that is not finite.
+ */
+export function formatSurfaceRange(
+  rangeM: number,
+  previous: SurfaceRangeUnit | null,
+): FormattedSurfaceRange {
+  requireFinite(rangeM, "range");
+  const magnitudeM = Math.abs(rangeM);
+  const metresBelowM = SURFACE_RANGE_METRES_BELOW_M;
+  let metres: boolean;
+  switch (previous) {
+    case "m":
+      metres = magnitudeM < metresBelowM * (1 + DISTANCE_HYSTERESIS);
+      break;
+    case "km":
+      metres = magnitudeM < metresBelowM * (1 - DISTANCE_HYSTERESIS);
+      break;
+    case null:
+    case "Mm":
+    case "Gm":
+    case "AU":
+      metres = roundSignificant(magnitudeM, 3) < metresBelowM;
+      break;
+  }
+  if (metres) {
+    return { value: significantOrSci(rangeM, 0.01, Number.POSITIVE_INFINITY), unit: "m" };
+  }
+  return formatBodyDistance(rangeM / 1_000, previous === "m" ? null : previous);
 }
 
 /** What joins a span's two ends: a spaced en dash, which both B612 faces draw (ruling 113.3). */

@@ -428,16 +428,18 @@ describe("a view's frame terrain (R10.T16.c)", () => {
     ]);
   });
 
-  it("draws no terrain of a body its plan draws as a disc, nor of one whose rotation is not known", () => {
+  it("draws no terrain of a body its plan draws as a disc", () => {
     const far = bodyAt(200 * A, { handoverReliefM: 1 });
+    const { source, drawn } = fakeSource();
+    frameTerrain(source).draws(planOf(far), [far]);
+    expect(drawn).toEqual([]);
+  });
+
+  it("draws no terrain of a body whose rotation is not known", () => {
     const { plan, body } = handed();
     const { source, drawn } = fakeSource();
-    const terrain = frameTerrain(source);
-    expect([
-      terrain.draws(planOf(far), [far]),
-      terrain.draws(plan, [unturned(body)]),
-      drawn,
-    ]).toEqual([[], [], []]);
+    frameTerrain(source).draws(plan, [unturned(body)]);
+    expect(drawn).toEqual([]);
   });
 
   it("gives a body's mask only while its pass says the view's draw set leaves nothing missing", () => {
@@ -607,27 +609,37 @@ describe("the survey edges a view marks (R10.T16.c)", () => {
     expect(edge?.centreM.z).toBeCloseTo(-(1_736_000 + 300_000), 6);
   });
 
-  it("marks no body not wanted, without a surveyed coverage, a header or a rotation, or out of view", () => {
+  describe("marks no body", () => {
     const heights = new ResidentHeights();
-    const views = (source: ViewTerrainSource, scene = SCENE, camera = DRAW_CAMERA): number =>
-      surveyEdgeViewsOf(source, VIEW, scene, camera, VIEWPORT, "photorealistic").length;
     const behind = {
       ...DRAW_CAMERA,
       pose: { ...POSE, orientation: lookAlong(vec3(0, 0, 1), vec3(1, 0, 0)) },
     };
-    expect([
-      views(edgeSource(heights, { wanted: new Set() })),
-      views(
-        edgeSource(heights, {
-          survey: () => ({ coverage: CoverageView.empty(5), header: moonLikeHeader(MOON) }),
-        }),
-      ),
-      views(
-        edgeSource(heights, { survey: () => ({ coverage: coverageOf([CELL_A]), header: null }) }),
-      ),
-      views(edgeSource(heights), SESSION_SCENE),
-      views(edgeSource(heights), SCENE, behind),
-    ]).toEqual([0, 0, 0, 0, 0]);
+    it.each<[string, () => ViewTerrainSource, ViewScene, typeof DRAW_CAMERA]>([
+      ["not wanted", () => edgeSource(heights, { wanted: new Set() }), SCENE, DRAW_CAMERA],
+      [
+        "without a surveyed coverage",
+        () =>
+          edgeSource(heights, {
+            survey: () => ({ coverage: CoverageView.empty(5), header: moonLikeHeader(MOON) }),
+          }),
+        SCENE,
+        DRAW_CAMERA,
+      ],
+      [
+        "without a header",
+        () =>
+          edgeSource(heights, { survey: () => ({ coverage: coverageOf([CELL_A]), header: null }) }),
+        SCENE,
+        DRAW_CAMERA,
+      ],
+      ["without a rotation", () => edgeSource(heights), SESSION_SCENE, DRAW_CAMERA],
+      ["out of view", () => edgeSource(heights), SCENE, behind],
+    ])("%s", (_case, source, scene, camera) => {
+      expect(surveyEdgeViewsOf(source(), VIEW, scene, camera, VIEWPORT, "photorealistic")).toEqual(
+        [],
+      );
+    });
   });
 
   it("hides points behind the drawn ground only in a photorealistic view its body's pass draws", () => {
@@ -642,47 +654,64 @@ describe("the survey edges a view marks (R10.T16.c)", () => {
     ]).toEqual([true, false, false]);
   });
 
-  it.each(["photorealistic", "wireframe"] as const)(
-    "stands the rim at a resident bake's height where one holds the edge, and on the datum elsewhere, in the %s style",
-    (style) => {
-      const heights = new ResidentHeights();
-      heights.take(edgeBake(CELL_A, 500));
-      const [edge] = surveyEdgeViewsOf(
-        edgeSource(heights),
-        VIEW,
-        SCENE,
-        DRAW_CAMERA,
-        VIEWPORT,
-        style,
-      );
-      if (edge === undefined) {
-        throw new Error("the moon's edge is marked");
-      }
-      const { line } = surveyEdgeMark(
-        edge,
-        { orientation: POSE.orientation, fovXRad: DRAW_CAMERA.fovXRad },
-        VIEWPORT,
-        { remPx: 16, keepClear: [], rangeFromM: null },
-      );
-      const a = edge.figure.equatorialRadiusM;
-      const c = edge.figure.polarRadiusM;
-      // Each line point's height over the datum, by the cell whose sides it lies on: A's columns
-      // span s from 15 to 16 thirty-seconds of face +z, B's from 17 to 18.
-      const onA: number[] = [];
-      const onB: number[] = [];
-      for (let n = 0; n + 2 < line.length; n += 3) {
-        const q = sub(vec3(line[n] ?? 0, line[n + 1] ?? 0, line[n + 2] ?? 0), edge.centreM);
-        const d = normalise(vec3(q.x / a, q.y / a, q.z / c));
-        const datum = vec3(a * d.x, a * d.y, c * d.z);
-        const height = dot(sub(q, datum), normalise(vec3(d.x / a, d.y / a, d.z / c)));
-        // Face +z's u is −x ÷ z (`xyzToFaceUv`), its s = uvToSt(u); 32 cells a side.
-        const column = 32 * uvToSt(-d.x / d.z);
-        (column <= 16.5 ? onA : onB).push(height);
-      }
-      expect(onA.length).toBeGreaterThan(8);
-      expect(onB.length).toBeGreaterThan(8);
-      expect(onA.every((h) => Math.abs(h - 500) < 1)).toBe(true);
-      expect(onB.every((h) => Math.abs(h) < 1)).toBe(true);
+  /** The heights over the datum of the moon's edge's line points on cells A and B, in `view`. */
+  function rimHeights(
+    style: "photorealistic" | "wireframe",
+    view = VIEW,
+  ): { readonly onA: number[]; readonly onB: number[] } {
+    const heights = new ResidentHeights();
+    heights.take(edgeBake(CELL_A, 500));
+    const [edge] = surveyEdgeViewsOf(
+      edgeSource(heights),
+      view,
+      SCENE,
+      DRAW_CAMERA,
+      VIEWPORT,
+      style,
+    );
+    if (edge === undefined) {
+      throw new Error("the moon's edge is marked");
+    }
+    const { line } = surveyEdgeMark(
+      edge,
+      { orientation: POSE.orientation, fovXRad: DRAW_CAMERA.fovXRad },
+      VIEWPORT,
+      { remPx: 16, keepClear: [], rangeFromM: null },
+    );
+    const a = edge.figure.equatorialRadiusM;
+    const c = edge.figure.polarRadiusM;
+    // Each line point's height over the datum, by the cell whose sides it lies on: A's columns
+    // span s from 15 to 16 thirty-seconds of face +z, B's from 17 to 18.
+    const onA: number[] = [];
+    const onB: number[] = [];
+    for (let n = 0; n + 2 < line.length; n += 3) {
+      const q = sub(vec3(line[n] ?? 0, line[n + 1] ?? 0, line[n + 2] ?? 0), edge.centreM);
+      const d = normalise(vec3(q.x / a, q.y / a, q.z / c));
+      const datum = vec3(a * d.x, a * d.y, c * d.z);
+      const height = dot(sub(q, datum), normalise(vec3(d.x / a, d.y / a, d.z / c)));
+      // Face +z's u is −x ÷ z (`xyzToFaceUv`), its s = uvToSt(u); 32 cells a side.
+      const column = 32 * uvToSt(-d.x / d.z);
+      (column <= 16.5 ? onA : onB).push(height);
+    }
+    return { onA, onB };
+  }
+
+  it("stands the rim at a resident bake's height where one holds the edge, and on the datum elsewhere, where the view draws the terrain", () => {
+    const { onA, onB } = rimHeights("photorealistic");
+    expect([
+      onA.length > 8 && onA.every((h) => Math.abs(h - 500) < 1),
+      onB.length > 8 && onB.every((h) => Math.abs(h) < 1),
+    ]).toEqual([true, true]);
+  });
+
+  it.each([
+    ["the wireframe", "wireframe", VIEW],
+    ["a view its pass does not draw", "photorealistic", INSTRUMENT],
+  ] as const)(
+    "stands the rim on the datum, the figure drawn, where the view draws no terrain of the body: %s",
+    (_name, style, view) => {
+      const { onA, onB } = rimHeights(style, view);
+      expect([...onA, ...onB].every((h) => Math.abs(h) < 1)).toBe(true);
     },
   );
 });

@@ -41,11 +41,27 @@ export interface FrustumCamera {
   readonly viewport: ViewSize;
 }
 
-/** The frustum of `camera`, in the body-fixed axes about the camera. */
-export function frustumOf(camera: FrustumCamera): Frustum {
-  const halfX = camera.fovXRad / 2;
+/**
+ * The widest a frustum's side may be opened ({@link frustumOf}'s `marginRad`), short of a right
+ * angle, so that a side plane never turns past the view's back.
+ */
+const MAX_HALF_ANGLE_RAD = Math.PI / 2 - 1e-6;
+
+/**
+ * The frustum of `camera`, in the body-fixed axes about the camera, each side opened outwards by
+ * `marginRad` (plan R10, R10.T16; a view's selection margin, `ViewSelectionInput.frustumMarginRad`).
+ *
+ * @param marginRad - The angle each side plane is turned outwards by, rad, at least 0; 0, the
+ *   default, gives the camera's own frustum, bit for bit.
+ */
+export function frustumOf(camera: FrustumCamera, marginRad = 0): Frustum {
   const aspect = camera.viewport.widthPx / camera.viewport.heightPx;
-  const halfY = Math.atan(Math.tan(halfX) / aspect);
+  let halfX = camera.fovXRad / 2;
+  let halfY = Math.atan(Math.tan(halfX) / aspect);
+  if (marginRad > 0) {
+    halfX = Math.min(halfX + marginRad, MAX_HALF_ANGLE_RAD);
+    halfY = Math.min(halfY + marginRad, MAX_HALF_ANGLE_RAD);
+  }
   const inView: readonly Vec3[] = [
     vec3(Math.cos(halfX), 0, -Math.sin(halfX)),
     vec3(-Math.cos(halfX), 0, -Math.sin(halfX)),

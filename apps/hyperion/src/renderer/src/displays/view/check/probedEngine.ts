@@ -7,7 +7,8 @@
  * view, so {@link ProbedEngine} forwards every member to the engine it wraps and wraps only the
  * views and targets it makes: their `render` notes the resolves it took and its CPU time, and their
  * `resize` the size given. Nothing else changes, so `VIEW` draws as it does on any launch. Only the
- * check's launch uses it (`ViewsProbe`).
+ * check's launch uses it (`ViewsProbe`). The terrain run (plan R10, R10.T16.d) also reads each
+ * render's submission and each target made, through the same probe.
  */
 
 import type {
@@ -56,6 +57,10 @@ export interface EngineProbe {
   rendered(owner: string, firstResolve: number, lastResolve: number, cpuMs: number): void;
   /** A view or target was made at, or resized to, `size`. */
   sized(owner: string, kind: "view" | "target", size: ViewSize): void;
+  /** A view's or target's `render` of `frame` returned (after {@link EngineProbe.rendered}). */
+  submitted(owner: string, frame: FrameSubmission): void;
+  /** A target was made of `spec`; its attachments are read through it, as a resize replaces them. */
+  madeTarget(spec: RenderTargetSpec, target: RenderTarget): void;
 }
 
 /** A view that reports its renders and sizes. */
@@ -84,6 +89,7 @@ class ProbedView implements RenderView {
     const startMs = this.#nowMs();
     this.#inner.render(frame);
     this.#probe.rendered(this.name, first, this.#engine.passTimesFrame, this.#nowMs() - startMs);
+    this.#probe.submitted(this.name, frame);
   }
 
   readBack(): Promise<Float32Array | Uint8Array> {
@@ -130,6 +136,7 @@ class ProbedTarget implements RenderTarget {
     const startMs = this.#nowMs();
     this.#inner.render(frame);
     this.#probe.rendered(this.name, first, this.#engine.passTimesFrame, this.#nowMs() - startMs);
+    this.#probe.submitted(this.name, frame);
   }
 
   dispose(): void {
@@ -168,7 +175,9 @@ export class ProbedEngine implements RenderEngine {
   createRenderTarget(spec: RenderTargetSpec): RenderTarget {
     const target = this.#inner.createRenderTarget(spec);
     this.#probe.sized(spec.name, "target", spec.size);
-    return new ProbedTarget(target, this, this.#probe, this.#nowMs);
+    const probed = new ProbedTarget(target, this, this.#probe, this.#nowMs);
+    this.#probe.madeTarget(spec, probed);
+    return probed;
   }
 
   createMesh(spec: MeshSpec): MeshHandle {

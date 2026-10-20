@@ -271,6 +271,12 @@ describe("the survey's edge (R10.T10.c)", () => {
   });
 });
 
+/** The texel of a level-5 mask that holds cell `index`: face, then row, then column. */
+function level5TexelOf(index: number): number {
+  const at = fieldCellAt(5, index);
+  return (at.face * 32 + at.j) * 32 + at.i;
+}
+
 describe("the GPU coverage mask", () => {
   it("is a byte a cell a face, face then row j then column i, surveyed cells set", () => {
     const margin = cell(1, 4, 4);
@@ -397,6 +403,25 @@ describe("the GPU coverage mask", () => {
     expect(events.filter((e) => e.kind !== "uploaded").map((e) => e.kind)).toEqual([
       "destroyed",
       "created",
+    ]);
+  });
+
+  it("makes the texture a loss refused at the restore, with the cells it was given meanwhile", async () => {
+    const engine = await countingRenderEngine();
+    const mask = new CoverageMask(engine, "coverage mask");
+    engine.loseDevice();
+    mask.survey({ fieldLevel: 5, newlySurveyed: Uint32Array.from([3, 5]) });
+    const during = mask.texture;
+    engine.restore();
+    mask.restore();
+    const written = engine.textureWritten.findLast((w) => w.texture === "coverage mask")?.data;
+    const surveyedTexels = [...(written ?? [])].flatMap((value, at) =>
+      value === COVERAGE_MASK_SURVEYED ? [at] : [],
+    );
+    expect([during, mask.texture !== null, surveyedTexels]).toEqual([
+      null,
+      true,
+      [level5TexelOf(3), level5TexelOf(4)].toSorted((a, b) => a - b),
     ]);
   });
 

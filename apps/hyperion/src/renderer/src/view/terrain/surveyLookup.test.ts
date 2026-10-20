@@ -135,12 +135,12 @@ describe("a body's survey as selection reads it (R10.T16.b)", () => {
     expect(survey.surveyedUnder({ face: 2, level: 7, i: 5, j: 5 })).toBe(true);
   });
 
-  it("refuses a run of cells no field of its level has", () => {
+  it.each([
+    ["past a level-6 field's last cell", 6, Uint32Array.of(0, 6 * 4 ** 6 + 1)],
+    ["of a level below any field's", 4, Uint32Array.of(0, 1)],
+  ])("refuses a run of cells %s", (_case, fieldLevel, newlySurveyed) => {
     expect(() => {
-      new SurveyedCells().add({ fieldLevel: 6, newlySurveyed: Uint32Array.of(0, 6 * 4 ** 6 + 1) });
-    }).toThrow(RangeError);
-    expect(() => {
-      new SurveyedCells().add({ fieldLevel: 4, newlySurveyed: Uint32Array.of(0, 1) });
+      new SurveyedCells().add({ fieldLevel, newlySurveyed });
     }).toThrow(RangeError);
   });
 });

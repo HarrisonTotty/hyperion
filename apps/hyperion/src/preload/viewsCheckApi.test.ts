@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { VIEWS_CHECK_CHANNELS } from "../main/viewsCheck";
+import { TERRAIN_RECORD } from "../main/fixtures/terrainRecord";
 import type { ViewsCheckRecord } from "./api";
 import { VIEWS_CHECK_CHANNEL_NAMES, viewsCheckApi, viewsCheckMember } from "./viewsCheckApi";
 import { type ViewsCheckLaunch, viewsCheckSwitch } from "./viewsCheckLaunch";
 
-const LAUNCH: ViewsCheckLaunch = { setting: "high", smoke: true, out: null };
+const LAUNCH: ViewsCheckLaunch = { setting: "high", smoke: true, out: null, terrain: false };
 
 const RECORD: ViewsCheckRecord = {
   timer: "full",
@@ -46,6 +47,32 @@ describe("the preload's views-check functions", () => {
       [VIEWS_CHECK_CHANNEL_NAMES.writeResults, RECORD],
       [VIEWS_CHECK_CHANNEL_NAMES.end, { status: "pass" }],
     ]);
+  });
+
+  it("send a terrain run's operations on their own channels (R10.T16.d)", async () => {
+    const invoke = vi.fn<(channel: string, ...args: unknown[]) => Promise<unknown>>((channel) =>
+      Promise.resolve(
+        channel === VIEWS_CHECK_CHANNEL_NAMES.writeTerrainResults
+          ? { json: "a", markdown: "b" }
+          : null,
+      ),
+    );
+    const api = viewsCheckApi({ ...LAUNCH, terrain: true }, { invoke });
+    await api.startPhase("terrain-loss");
+    await api.capture("restored");
+    await api.endPhase("terrain-loss", { startMs: 1, endMs: 2 });
+    expect(await api.writeTerrainResults(TERRAIN_RECORD)).toEqual({ json: "a", markdown: "b" });
+    expect(invoke.mock.calls).toEqual([
+      [VIEWS_CHECK_CHANNEL_NAMES.startPhase, "terrain-loss"],
+      [VIEWS_CHECK_CHANNEL_NAMES.capture, "restored"],
+      [VIEWS_CHECK_CHANNEL_NAMES.endPhase, "terrain-loss", { startMs: 1, endMs: 2 }],
+      [VIEWS_CHECK_CHANNEL_NAMES.writeTerrainResults, TERRAIN_RECORD],
+    ]);
+  });
+
+  it("refuses a terrain results answer of the wrong shape", async () => {
+    const api = viewsCheckApi(LAUNCH, { invoke: () => Promise.resolve(undefined) });
+    await expect(api.writeTerrainResults(TERRAIN_RECORD)).rejects.toThrow(/terrain results/);
   });
 
   it("refuses a results answer of the wrong shape", async () => {

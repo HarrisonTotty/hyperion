@@ -1,9 +1,19 @@
 /**
  * The check of what the several-views check's renderer sends the main process (plan R07, T20):
- * its record, which the IPC handler treats as `unknown` until it passes.
+ * its record, which the IPC handler treats as `unknown` until it passes; and the terrain run's
+ * (plan R10, R10.T16.d), checked the same way.
  */
 
 import type {
+  TerrainCheckBytes,
+  TerrainCheckFault,
+  TerrainCheckLossRecord,
+  TerrainCheckMemory,
+  TerrainCheckPhaseName,
+  TerrainCheckPhaseRecord,
+  TerrainCheckRecord,
+  TerrainCheckTeardownRecord,
+  TerrainCheckViewRecord,
   ViewsCheckCanvas,
   ViewsCheckNamedCanvas,
   ViewsCheckPhaseName,
@@ -224,4 +234,304 @@ export function readViewsCheckRecord(value: unknown): ViewsCheckRecord | null {
     return null;
   }
   return { timer, devicePixelRatio, phases, resize: resized, faults, perCanvasOverheadMs };
+}
+
+/** A finite number or `null`, `undefined` where it is neither. */
+function finiteOrNull(value: unknown): number | null | undefined {
+  return value === null ? null : isFiniteNumber(value) ? value : undefined;
+}
+
+/** The terrain run's phases (`TerrainCheckPhaseName`). */
+const TERRAIN_PHASES: ReadonlyArray<TerrainCheckPhaseName> = [
+  "terrain-alone",
+  "terrain-photoreal-wireframe",
+  "terrain-wireframe",
+  "terrain-loss",
+];
+
+function terrainPhaseName(value: unknown): TerrainCheckPhaseName | null {
+  return TERRAIN_PHASES.find((name) => name === value) ?? null;
+}
+
+function bytesOf(value: unknown): TerrainCheckBytes | null {
+  return isRecord(value) && typeof value["category"] === "string" && isCount(value["bytes"])
+    ? { category: value["category"], bytes: value["bytes"] }
+    : null;
+}
+
+function memoryOf(value: unknown): TerrainCheckMemory | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { workerFieldBytes, keptFieldBytes } = value;
+  const sessionGpuBytes = listOf(value["sessionGpuBytes"], bytesOf);
+  const liveBytes = listOf(value["liveBytes"], bytesOf);
+  const peakBytes = listOf(value["peakBytes"], bytesOf);
+  return isCount(workerFieldBytes) &&
+    isCount(keptFieldBytes) &&
+    sessionGpuBytes !== null &&
+    liveBytes !== null &&
+    peakBytes !== null
+    ? { workerFieldBytes, keptFieldBytes, sessionGpuBytes, liveBytes, peakBytes }
+    : null;
+}
+
+function terrainView(value: unknown): TerrainCheckViewRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const name = viewName(value["name"]);
+  const drawn = style(value["style"]);
+  const size = canvas(value["canvas"]);
+  const gpuMs = numbers(value["gpuMs"]);
+  const submitMs = numbers(value["submitMs"]);
+  const firstHandoverMs = finiteOrNull(value["firstHandoverMs"]);
+  const firstHandoverScriptS = finiteOrNull(value["firstHandoverScriptS"]);
+  const firstTerrainMs = finiteOrNull(value["firstTerrainMs"]);
+  const { draws, missedFrames, longestGapMs, handedOverDraws, offSurveyDraws } = value;
+  const { terrainDraws, terrainGaps } = value;
+  const terrainGapSpansS = listOf(value["terrainGapSpansS"], (span) =>
+    Array.isArray(span) && span.length === 2 && isFiniteNumber(span[0]) && isFiniteNumber(span[1])
+      ? ([span[0], span[1]] as const)
+      : null,
+  );
+  const { readBacks, nonFiniteTexels } = value;
+  if (
+    name === null ||
+    drawn === null ||
+    size === null ||
+    gpuMs === null ||
+    submitMs === null ||
+    firstHandoverMs === undefined ||
+    firstHandoverScriptS === undefined ||
+    firstTerrainMs === undefined ||
+    !isCount(draws) ||
+    !isCount(missedFrames) ||
+    !isFiniteNumber(longestGapMs) ||
+    longestGapMs < 0 ||
+    !isCount(handedOverDraws) ||
+    !isCount(offSurveyDraws) ||
+    terrainGapSpansS === null ||
+    !isCount(terrainDraws) ||
+    !isCount(terrainGaps) ||
+    !isCount(readBacks) ||
+    !isCount(nonFiniteTexels)
+  ) {
+    return null;
+  }
+  return {
+    name,
+    style: drawn,
+    canvas: size,
+    draws,
+    gpuMs,
+    submitMs,
+    missedFrames,
+    longestGapMs,
+    handedOverDraws,
+    offSurveyDraws,
+    terrainDraws,
+    terrainGaps,
+    terrainGapSpansS,
+    firstHandoverMs,
+    firstHandoverScriptS,
+    firstTerrainMs,
+    readBacks,
+    nonFiniteTexels,
+  };
+}
+
+function terrainPhase(value: unknown): TerrainCheckPhaseRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const name = terrainPhaseName(value["name"]);
+  const views = listOf(value["views"], terrainView);
+  const frameIntervalsMs = numbers(value["frameIntervalsMs"]);
+  const mainThreadMs = numbers(value["mainThreadMs"]);
+  const frameGpuMs = numbers(value["frameGpuMs"]);
+  const patchesDrawn = numbers(value["patchesDrawn"]);
+  const bakes = value["bakes"];
+  const posts = value["fieldPosts"];
+  const memory = value["memory"] === null ? null : memoryOf(value["memory"]);
+  const { startMs, endMs, scriptStartS, scriptEndS, fieldAsks, blocksSent } = value;
+  if (
+    name === null ||
+    views === null ||
+    frameIntervalsMs === null ||
+    mainThreadMs === null ||
+    frameGpuMs === null ||
+    patchesDrawn === null ||
+    !patchesDrawn.every(isCount) ||
+    !isFiniteNumber(startMs) ||
+    !isFiniteNumber(endMs) ||
+    endMs < startMs ||
+    !isFiniteNumber(scriptStartS) ||
+    !isFiniteNumber(scriptEndS) ||
+    !isCount(fieldAsks) ||
+    !isCount(blocksSent) ||
+    !isRecord(bakes) ||
+    !isCount(bakes["posted"]) ||
+    !isCount(bakes["baked"]) ||
+    !isCount(bakes["refused"]) ||
+    !isRecord(posts) ||
+    !isCount(posts["inits"]) ||
+    !isCount(posts["chunks"]) ||
+    !isCount(posts["releases"]) ||
+    (value["memory"] !== null && memory === null)
+  ) {
+    return null;
+  }
+  return {
+    name,
+    startMs,
+    endMs,
+    scriptStartS,
+    scriptEndS,
+    views,
+    frameIntervalsMs,
+    mainThreadMs,
+    frameGpuMs,
+    patchesDrawn,
+    bakes: { posted: bakes["posted"], baked: bakes["baked"], refused: bakes["refused"] },
+    fieldPosts: { inits: posts["inits"], chunks: posts["chunks"], releases: posts["releases"] },
+    fieldAsks,
+    blocksSent,
+    memory,
+  };
+}
+
+const FAULT_KINDS: ReadonlyArray<TerrainCheckFault["kind"]> = [
+  "device-lost",
+  "gpu-process-gone",
+  "shader-refused",
+  "view-refused",
+];
+
+function fault(value: unknown): TerrainCheckFault | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const kind = FAULT_KINDS.find((each) => each === value["kind"]) ?? null;
+  const { atMs, reason, line } = value;
+  return kind !== null &&
+    isFiniteNumber(atMs) &&
+    (reason === null || typeof reason === "string") &&
+    typeof line === "string"
+    ? { atMs, kind, reason, line }
+    : null;
+}
+
+function loss(value: unknown): TerrainCheckLossRecord | null {
+  if (!isRecord(value) || !isRecord(value["after"]) || !isRecord(value["masks"])) {
+    return null;
+  }
+  const after = value["after"];
+  const masks = value["masks"];
+  const destroyedAtMs = finiteOrNull(value["destroyedAtMs"]);
+  const destroyedAtScriptS = finiteOrNull(value["destroyedAtScriptS"]);
+  const terrainAgainAtMs = finiteOrNull(value["terrainAgainAtMs"]);
+  const before = finiteOrNull(masks["before"]);
+  const afterRestore = finiteOrNull(masks["afterRestore"]);
+  const end = finiteOrNull(masks["end"]);
+  const { notDestroyed, blocksToCome, bakesInFlight, workers } = value;
+  const { expected, beforeKept, endAsExpected } = masks;
+  if (
+    destroyedAtMs === undefined ||
+    destroyedAtScriptS === undefined ||
+    terrainAgainAtMs === undefined ||
+    before === undefined ||
+    afterRestore === undefined ||
+    end === undefined ||
+    !(notDestroyed === null || typeof notDestroyed === "string") ||
+    !isCount(blocksToCome) ||
+    !isCount(bakesInFlight) ||
+    !isCount(workers) ||
+    !isCount(after["fieldAsks"]) ||
+    !isCount(after["fieldInits"]) ||
+    !isCount(after["fieldChunks"]) ||
+    !isCount(after["blocksSent"]) ||
+    !isCount(expected) ||
+    typeof beforeKept !== "boolean" ||
+    typeof endAsExpected !== "boolean"
+  ) {
+    return null;
+  }
+  return {
+    destroyedAtMs,
+    destroyedAtScriptS,
+    notDestroyed,
+    blocksToCome,
+    bakesInFlight,
+    after: {
+      fieldAsks: after["fieldAsks"],
+      fieldInits: after["fieldInits"],
+      fieldChunks: after["fieldChunks"],
+      blocksSent: after["blocksSent"],
+    },
+    workers,
+    terrainAgainAtMs,
+    masks: { before, afterRestore, end, expected, beforeKept, endAsExpected },
+  };
+}
+
+function teardown(value: unknown): TerrainCheckTeardownRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const liveBytes = listOf(value["liveBytes"], bytesOf);
+  const { disposed, workersMade, workersLive, sessionGpuBytes } = value;
+  return typeof disposed === "boolean" &&
+    isCount(workersMade) &&
+    isCount(workersLive) &&
+    isCount(sessionGpuBytes) &&
+    liveBytes !== null
+    ? { disposed, workersMade, workersLive, sessionGpuBytes, liveBytes }
+    : null;
+}
+
+/** `value` as the terrain run's record (R10.T16.d), or `null` if it is not one. */
+export function readTerrainCheckRecord(value: unknown): TerrainCheckRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { timer, devicePixelRatio } = value;
+  const phases = listOf(value["phases"], terrainPhase);
+  const faults = listOf(value["faults"], fault);
+  const restoresAtMs = numbers(value["restoresAtMs"]);
+  const lost = loss(value["loss"]);
+  const torn = teardown(value["teardown"]);
+  const handover = value["handover"];
+  const range =
+    handover === null
+      ? null
+      : isRecord(handover) &&
+          isFiniteNumber(handover["rangeM"]) &&
+          handover["rangeM"] > 0 &&
+          isFiniteNumber(handover["scriptS"])
+        ? { rangeM: handover["rangeM"], scriptS: handover["scriptS"] }
+        : undefined;
+  if (
+    (timer !== "full" && timer !== "quantized" && timer !== "absent") ||
+    !isFiniteNumber(devicePixelRatio) ||
+    devicePixelRatio <= 0 ||
+    phases === null ||
+    faults === null ||
+    restoresAtMs === null ||
+    lost === null ||
+    torn === null ||
+    range === undefined
+  ) {
+    return null;
+  }
+  return {
+    timer,
+    devicePixelRatio,
+    phases,
+    faults,
+    restoresAtMs,
+    loss: lost,
+    teardown: torn,
+    handover: range,
+  };
 }

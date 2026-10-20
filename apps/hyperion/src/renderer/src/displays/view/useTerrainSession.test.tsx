@@ -25,16 +25,21 @@ import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import { ScriptedHeightWorker } from "../../test/scriptedHeightWorker";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
-import { SESSION_MOON, viewAt } from "../../test/terrainSessionFixtures";
+import { SESSION_MOON, SESSION_SCENE, viewAt } from "../../test/terrainSessionFixtures";
 import { viewId } from "../../view/camera/state";
+import { IDENTITY_ROTATION } from "../../view/coords/rotation";
+import { EngineUnavailable } from "../../view/engine/resilientEngine";
 import type { RenderEngine } from "../../view/engine/types";
 import type { TerrainSession } from "../../view/terrain/session";
-import type { WorkerLike } from "../../view/terrain/workers/pool";
+import { MAX_CONSECUTIVE_WORKER_FAILURES, type WorkerLike } from "../../view/terrain/workers/pool";
 import { precisionScene } from "../../view/scenes/precision";
+import { TERRAIN_SCENE_NAME } from "../../view/scenes/terrainScene";
 import {
+  stepTerrainSession,
   type SurfaceEvents,
   type TerrainFixture,
   terrainSessionSource,
+  useTerrainFaults,
   useTerrainSession,
 } from "./useTerrainSession";
 import { SCENE_OPTIONS, type SceneOption } from "./viewRun";
@@ -231,9 +236,14 @@ describe("the terrain session's source (R10.T16.a)", () => {
     });
   });
 
-  it("is none for a kept scene with no terrain fixture", () => {
-    expect(SCENE_OPTIONS.map((option) => terrainSessionSource({ kind: "kept", option }))).toEqual(
-      SCENE_OPTIONS.map(() => null),
+  it("is none for a kept scene with no terrain fixture, every one but TERRAIN TEST (R10.T16.d)", () => {
+    expect(
+      SCENE_OPTIONS.map((option) => [
+        option.name,
+        terrainSessionSource({ kind: "kept", option })?.kind ?? null,
+      ]),
+    ).toEqual(
+      SCENE_OPTIONS.map(({ name }) => [name, name === TERRAIN_SCENE_NAME ? "fixture" : null]),
     );
   });
 });
@@ -487,5 +497,79 @@ describe("useTerrainSession (R10.T16.a)", () => {
         : [],
     );
     expect(asks).toEqual([null, 1]);
+  });
+});
+
+/** A session whose every step throws `error`. */
+function throwing(error: Error): Pick<TerrainSession, "step"> {
+  return {
+    step: () => {
+      throw error;
+    },
+  };
+}
+
+describe("the loop's guarded step of its session (the batch review's S5)", () => {
+  it("reports a step's bug once, however many steps fail after it, and keeps the loop going", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const session = throwing(new Error("a bug of the session's"));
+    const failing = [false, true, true].map((before) => stepTerrainSession(session, before));
+    expect([failing, error.mock.calls.length]).toEqual([[true, true, true], 1]);
+  });
+
+  it("lets a loss pass in silence", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const failing = stepTerrainSession(throwing(new EngineUnavailable("createBuffer")), false);
+    expect([failing, error.mock.calls.length]).toEqual([false, 0]);
+  });
+
+  it("clears once a step succeeds, and steps no session where there is none", () => {
+    expect([
+      stepTerrainSession({ step: () => undefined }, true),
+      stepTerrainSession(null, true),
+    ]).toEqual([false, false]);
+  });
+});
+
+describe("the terrain's faults for the label blocks (useTerrainFaults; decision-r10-t16-contracts §7)", () => {
+  const moon = SESSION_SCENE.bodies.find((body) => body.id === SESSION_MOON);
+  const turningMoon = moon === undefined ? undefined : { ...moon, rotation: IDENTITY_ROTATION };
+  /** The scene with its moon turning, so that a view can hand it over. */
+  const TURNING = {
+    ...SESSION_SCENE,
+    bodies: SESSION_SCENE.bodies.map((body) =>
+      body.id === SESSION_MOON ? (turningMoon ?? body) : body,
+    ),
+  };
+
+  it("gives no view without a session", () => {
+    const { result } = renderHook(() => useTerrainFaults(null));
+    expect(result.current.size).toBe(0);
+  });
+
+  it("gives every view that hands a body over once every height worker is lost", async () => {
+    const engine = await countingRenderEngine();
+    const feed = new SurfaceFeed();
+    const { result, workers } = renderSession({
+      choice: { kind: "server", universe: UNIVERSE, onSurface: feed.onSurface },
+      engine,
+    });
+    const session = sessionOf(result.current);
+    await holdMoon(session, FakeWebSocket.latest());
+    session.noteView(PRIMARY, {
+      ...viewAt(5e6, "photorealistic", { scene: TURNING }),
+      regimes: new Map([[SESSION_MOON, "terrain"]]),
+    });
+    session.step();
+    const faults = renderHook(() => useTerrainFaults(session));
+    act(() => {
+      for (let round = 0; round < MAX_CONSECUTIVE_WORKER_FAILURES; round += 1) {
+        for (const worker of workers.slice(-2)) {
+          worker.fail();
+        }
+      }
+      session.step();
+    });
+    expect([...faults.result.current]).toEqual([PRIMARY]);
   });
 });

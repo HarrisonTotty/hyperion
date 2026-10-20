@@ -3254,13 +3254,23 @@ body {
   gap: 0.5rem 1rem;
 }
 
+/*
+ * The SCENE selector wraps between its buttons, each label kept on one line, so that the row holds
+ * at 150% interface scale in a 1280 × 720 window (the guide's Accessibility; R10.T16's batch
+ * review, D-D: `TERRAIN TEST` made it need about 1,350 CSS px).
+ */
 .view-display__bar .preset-buttons {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.25rem;
   margin: 0;
   border: 0;
   padding: 0;
+}
+
+.view-display__bar .preset-buttons__button {
+  white-space: nowrap;
 }
 
 /* Where the server's scene stands, beside the SCENE selector: one line per condition. */
@@ -3619,6 +3629,29 @@ body {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   text-align: right;
+  white-space: nowrap;
+}
+
+/*
+ * The list's notes (R10.T16.c; decision-r10-t16-review §1): after the options and their position,
+ * never windowed or clipped, each plain `--text` wrapping at its spaces.
+ */
+.view-list__notes {
+  flex: none;
+  margin: 0.25rem 0 0;
+}
+
+.view-list__note {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: normal;
+  white-space: normal;
+}
+
+/* A note's range in the figures the list's ranges take, its digits and unit kept on one line. */
+.view-list__note-range {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 

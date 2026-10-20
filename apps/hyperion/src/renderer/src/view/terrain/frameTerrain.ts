@@ -328,18 +328,20 @@ const NO_HEIGHT = (): number | null => null;
 /**
  * The survey edges a view's draw list marks (plan R10, R10.T16.c; `DrawOptions.surveyEdges`), in
  * both styles: each wanted body of `scene` with a rotation, a held header and a coverage with
- * surveyed ground, whose sphere of its equatorial radius and relief meets the view, its rim from
- * its pass's resident bakes that hold the edge (`ResidentHeightsView.rimHeightAtM`, the datum
- * where none does or it has no pass), its centre from the camera as the draw list places a body
- * (`relativeToCamera` of its frame's origin).
+ * surveyed ground, whose sphere of its equatorial radius and relief meets the view, its centre
+ * from the camera as the draw list places a body (`relativeToCamera` of its frame's origin).
  *
  * @remarks
- * Only in the photorealistic style, and only for a body whose pass this view's last step drew,
- * does the drawn ground hide a point from the note's range (`SurveyEdgeView.ground`): the
- * wireframe draws no terrain until R10.T11, and its edge is drawn against the occluder spheres
- * alone.
+ * The edge stands on the ground the view draws. Only in the photorealistic style, and only for a
+ * body whose pass this view's last step drew, is that the terrain: there the rim is its pass's
+ * resident bakes that hold the edge (`ResidentHeightsView.rimHeightAtM`, the datum where none
+ * does), and the drawn ground hides a point from the note's range (`SurveyEdgeView.ground`).
+ * Elsewhere the view draws no terrain of the body (the wireframe until R10.T11, or a frame that
+ * hands it over to no pass), so the rim is the datum, the figure it draws, and the edge is drawn
+ * against the occluder spheres alone (decision-r10-t16-review §3; the batch review's S1).
  *
- * @param style - The style the view draws (`ViewBudget.style`).
+ * @param style - The style the frame is drawn in (`ViewFrameDrawn.drawnStyle`, as the drawer
+ *   foresees it before the draw).
  */
 export function surveyEdgeViewsOf(
   source: ViewTerrainSource,
@@ -387,7 +389,10 @@ export function surveyEdgeViewsOf(
       },
       rotation,
       centreM,
-      heightAtM: heights === null ? NO_HEIGHT : (direction) => heights.rimHeightAtM(direction),
+      heightAtM:
+        drawsGround && heights !== null
+          ? (direction) => heights.rimHeightAtM(direction)
+          : NO_HEIGHT,
       ...(drawsGround && heights !== null
         ? {
             ground: {

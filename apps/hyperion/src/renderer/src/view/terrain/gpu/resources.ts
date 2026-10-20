@@ -22,8 +22,8 @@
  *
  * Each view that draws the terrain has its own frame buffers (plan R10, R10.T16.b): its instance,
  * contact and indirect buffers and, on a lit layout, its lights, made at its first frame and
- * released when it leaves ({@link TerrainResources.releaseView}); {@link DEFAULT_TERRAIN_VIEW}'s are
- * made with the rest, under R05's names. {@link TerrainResources.dispose} releases every handle the
+ * released when it leaves ({@link TerrainResources.releaseView}); {@link DEFAULT_TERRAIN_VIEW}'s go
+ * by R05's names and with the resources. {@link TerrainResources.dispose} releases every handle the
  * resources made, so that a pass disposed while the engine lives leaves nothing behind
  * (decision-r10-t16-contracts §1); after a device loss the old handles are released first, which
  * `ResilientEngine` drops, as they went with the lost device.
@@ -130,10 +130,12 @@ export const LIT_PATCH_INDICES =
 const LIT_TABLE_ROWS = 4;
 
 /**
- * The view whose frame buffers are made with the resources, under R05's names (`terrain instances`
- * and the rest): the descent spike's one view, `TerrainPass.frame`'s (R10.T16.b).
+ * The view whose frame buffers go by R05's names (`terrain instances` and the rest): the descent
+ * spike's one view, `TerrainPass.frame`'s (R10.T16.b). The empty string, which no `ViewId` is
+ * (`viewId` refuses it), so that it never meets a view of `VIEW`'s; its buffers are made at its
+ * first frame, as every other view's are (the batch review's C4).
  */
-export const DEFAULT_TERRAIN_VIEW = "primary";
+export const DEFAULT_TERRAIN_VIEW = "";
 
 /** The texture format of the normals atlas: an octahedral pair as two half floats. */
 export const NORMALS_FORMAT = "rg16float";
@@ -617,7 +619,7 @@ interface Made {
   readonly slotRecords: BufferHandle;
   readonly normals: TextureHandle;
   readonly mesh: MeshHandle;
-  /** Each view's frame buffers, {@link DEFAULT_TERRAIN_VIEW}'s made with the rest. */
+  /** Each view's frame buffers, made at its first frame on the device. */
   readonly views: Map<string, TerrainViewBuffers>;
 }
 
@@ -667,7 +669,9 @@ export class TerrainResources {
     this.#normalsScratch = this.#scratchFor(this.#made.layout);
     this.#horizonHeld = new Uint8Array(this.#made.layout.slots.slotCount);
     this.#offRestored = engine.onRestored(() => {
-      // The lost device's handles went with it: `ResilientEngine` drops their release.
+      // The lost device's handles went with it: `ResilientEngine` drops their release. A release
+      // that throws is reported, and the restore goes on to make the resources and tell their
+      // owners (the batch review's S3).
       this.#release(this.#made);
       this.#made = this.#make();
       this.#normalsScratch = this.#scratchFor(this.#made.layout);
@@ -719,8 +723,8 @@ export class TerrainResources {
 
   /**
    * `view`'s frame buffers (R10.T16.b), made at its first call on the current device: named after
-   * the view, as `terrain instances (view)`, all but {@link DEFAULT_TERRAIN_VIEW}'s, which are made
-   * with the resources under R05's names.
+   * the view, as `terrain instances (view)`, all but {@link DEFAULT_TERRAIN_VIEW}'s, which take
+   * R05's names.
    */
   viewBuffers(view: string): TerrainViewBuffers {
     if (this.#disposed) {
@@ -959,21 +963,46 @@ export class TerrainResources {
     this.#release(this.#made);
   }
 
-  /** Releases every handle of `made`: the slot buffers, records and atlas, the mesh, the table and the views'. */
+  /**
+   * Releases every handle of `made`: the slot buffers, records and atlas, the mesh, the table and
+   * the views'. Each release is tried whatever the one before did; one that throws, a bug (a handle
+   * released twice), is reported, so that a restore always goes on to make the resources again
+   * and a disposal releases the rest (the batch review's S3).
+   */
   #release(made: Made): void {
-    for (const buffer of made.fields.values()) {
-      this.#engine.releaseBuffer(buffer);
-    }
-    this.#engine.releaseBuffer(made.slotRecords);
-    this.#engine.releaseTexture(made.normals);
-    this.#engine.releaseMesh(made.mesh);
-    if (made.lit !== null) {
-      this.#engine.releaseTexture(made.lit.table);
-    }
-    for (const buffers of made.views.values()) {
-      this.#releaseView(buffers);
-    }
+    const { lit } = made;
+    const releases: Array<() => void> = [
+      ...[...made.fields.values()].map((buffer) => () => {
+        this.#engine.releaseBuffer(buffer);
+      }),
+      () => {
+        this.#engine.releaseBuffer(made.slotRecords);
+      },
+      () => {
+        this.#engine.releaseTexture(made.normals);
+      },
+      () => {
+        this.#engine.releaseMesh(made.mesh);
+      },
+      ...(lit === null
+        ? []
+        : [
+            (): void => {
+              this.#engine.releaseTexture(lit.table);
+            },
+          ]),
+      ...[...made.views.values()].map((buffers) => () => {
+        this.#releaseView(buffers);
+      }),
+    ];
     made.views.clear();
+    for (const release of releases) {
+      try {
+        release();
+      } catch (error: unknown) {
+        console.error("a terrain resource could not be released:", error);
+      }
+    }
   }
 
   #releaseView(buffers: TerrainViewBuffers): void {
@@ -1063,9 +1092,13 @@ export class TerrainResources {
     }
     const laws = rows.laws;
     if (laws.length > lit.tableRows) {
+      // The larger table first: one refused during a device loss (`EngineUnavailable`) leaves the
+      // table held, never a released handle (the batch review's S3).
+      const tableRows = Math.max(2 * lit.tableRows, laws.length);
+      const table = this.#table(tableRows);
       this.#engine.releaseTexture(lit.table);
-      lit.tableRows = Math.max(2 * lit.tableRows, laws.length);
-      lit.table = this.#table(lit.tableRows);
+      lit.table = table;
+      lit.tableRows = tableRows;
     }
     this.#engine.writeTexture(
       lit.table,
@@ -1193,8 +1226,8 @@ export class TerrainResources {
       topology: "triangle-list",
       attributes: {},
     });
-    // The default view's buffers, made after the mesh and before the table, as R05's were.
-    const views = new Map([[DEFAULT_TERRAIN_VIEW, this.#makeView(layout, DEFAULT_TERRAIN_VIEW)]]);
+    // Every view's buffers, the default view's included, are made at its first frame.
+    const views = new Map<string, TerrainViewBuffers>();
     return {
       layout,
       lit: lit ? this.#makeLit() : null,

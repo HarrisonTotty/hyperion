@@ -73,8 +73,15 @@ import { otherStyle, styleName, withStyle } from "../../view/photoreal/style";
 import type { StyleAvailability } from "../../view/engine/platform";
 import { PHASE_SCENE_NAME, phaseScene } from "../../view/scenes/phaseScene";
 import { PRECISION_SCENE_NAME, precisionScene } from "../../view/scenes/precision";
+import {
+  TERRAIN_SCENE_NAME,
+  terrainScene,
+  terrainSceneFixture,
+} from "../../view/scenes/terrainScene";
 import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
+import { type SurveyEdgeNote, surveyEdgeNote } from "../../view/terrain/surveyEdge";
 import { type LightingState, lightingStatement } from "../../view/lighting/hostLights";
+import type { DrawnSurveyEdge } from "../../view/wireframe/drawList";
 import { closureRateMPerS } from "../../view/wireframe/symbology";
 import type { TerrainFixture } from "./useTerrainSession";
 
@@ -91,14 +98,15 @@ export interface SceneOption {
 }
 
 /**
- * The kept scenes: `PRECISION TEST`, `FRAME CHANGE TEST`, `PHASE TEST` (R07.T8.a) and
- * `ECLIPSE TEST` (R07.T10.c).
+ * The kept scenes: `PRECISION TEST`, `FRAME CHANGE TEST`, `PHASE TEST` (R07.T8.a),
+ * `ECLIPSE TEST` (R07.T10.c) and `TERRAIN TEST` (R10.T16.d), the one with a terrain fixture.
  */
 export const SCENE_OPTIONS: ReadonlyArray<SceneOption> = [
   { name: PRECISION_SCENE_NAME, make: precisionScene },
   { name: FRAME_CHANGE_SCENE_NAME, make: frameChangeScene },
   { name: PHASE_SCENE_NAME, make: phaseScene },
   { name: ECLIPSE_SCENE_NAME, make: eclipseScene },
+  { name: TERRAIN_SCENE_NAME, make: terrainScene, terrain: terrainSceneFixture() },
 ];
 
 /** The `SCENE` selector's name for the server's scene of the open universe (R02.T17). */
@@ -751,6 +759,64 @@ export function rangeText(row: MarkRow): string {
 /** Whether a scene's ranges are from the camera: it has no own ship to measure from. */
 export function rangesFromCamera(scene: ViewScene): boolean {
   return !scene.craft.some((craft) => craft.id === scene.ownShip);
+}
+
+/**
+ * A note of a view's list (plan R10, R10.T16.c; decision-r10-t16-review §1): a body's survey edge
+ * in the view's picture, with its range, set after the list's options and never one of them.
+ */
+export interface SurveyEdgeListNote extends SurveyEdgeNote {
+  /** The note's key, its body's: the next showing keeps its unit within its hysteresis by it. */
+  readonly key: string;
+  /** The body's designation, as the list's option for it names it (`MarkRow.name`). */
+  readonly designation: string;
+  /** The range to the edge's nearest point seen, m, by which the notes are ordered. */
+  readonly rangeM: number;
+  /** Whether the range is from the camera, there being no own ship: `FROM CAMERA` follows it. */
+  readonly fromCamera: boolean;
+}
+
+/**
+ * The view list's survey-edge notes (the guide's Views; decision-r10-t16-review §1): one for each
+ * body whose edge has a point seen in the frame's picture, nearest first by its range, ties by its
+ * designation, each range from the own ship where there is one, else from the camera
+ * (`FROM CAMERA`), its unit kept within its hysteresis from the note `previous` gave it.
+ *
+ * @param edges - The frame's survey edges (`WireframeDrawList.surveyEdges`); one with no point seen
+ *   has no note, and a body's unit is dropped while it has none.
+ * @param previous - The notes last shown in this view, whose units the new ones keep.
+ */
+export function surveyEdgeNotes(
+  scene: ViewScene,
+  edges: ReadonlyArray<DrawnSurveyEdge>,
+  previous: ReadonlyArray<SurveyEdgeListNote> = [],
+): ReadonlyArray<SurveyEdgeListNote> {
+  const fromCamera = rangesFromCamera(scene);
+  const notes: SurveyEdgeListNote[] = [];
+  for (const edge of edges) {
+    const body = scene.bodies.find((each) => each.id === edge.body);
+    if (edge.nearestRangeM === null || body === undefined) {
+      continue;
+    }
+    const key = `survey-edge:${edge.body}`;
+    const unit = previous.find((note) => note.key === key)?.unit ?? null;
+    notes.push({
+      ...surveyEdgeNote(body.designation, edge.nearestRangeM, fromCamera, unit),
+      key,
+      designation: body.designation,
+      rangeM: edge.nearestRangeM,
+      fromCamera,
+    });
+  }
+  return notes.toSorted((a, b) => {
+    if (a.rangeM !== b.rangeM) {
+      return a.rangeM - b.rangeM;
+    }
+    if (a.designation === b.designation) {
+      return 0;
+    }
+    return a.designation < b.designation ? -1 : 1;
+  });
 }
 
 /** A target's key, stable from frame to frame. */

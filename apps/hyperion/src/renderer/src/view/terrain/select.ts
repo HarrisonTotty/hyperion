@@ -152,6 +152,13 @@ export interface Selection {
    * unchanged.
    */
   readonly nearestSurveyM: number;
+  /**
+   * {@link Selection.nearestSurveyM} for each view alone, in `views`' order: view k's camera's
+   * distance to the nearest surveyed ground, metres, at least one finest patch, `+∞` with no survey
+   * lookup or no surveyed cell (plan R10, R10.T16; the batch review's S9), so that a view over bare
+   * ground reselects by its own distance, not another view's. `nearestSurveyM` is their least.
+   */
+  readonly nearestSurveyByViewM: ReadonlyArray<number>;
 }
 
 /**
@@ -192,6 +199,14 @@ export interface ViewSelectionInput {
   readonly weight: number;
   /** The view's tolerance τ, pixels: the setting's, or a style's own (the wireframe's 4 px). */
   readonly tauPx: number;
+  /**
+   * The angle each side of the view's frustum is opened outwards by for culling, rad, at least 0
+   * (plan R10, R10.T16; the terrain pass's margin for the view's motion between selections);
+   * absent or 0, the camera's own frustum, so that every caller that gives none, R05's spike and
+   * fixtures among them, selects as before, bit for bit. Its error, morph bands and budget weight
+   * are the view's own whatever the margin.
+   */
+  readonly frustumMarginRad?: number;
 }
 
 /** Everything selection reads. */
@@ -979,7 +994,10 @@ export function selectPatches(input: SelectionInput): Selection {
     views: input.views.map((v) => ({
       input: v,
       geometry: viewGeometry(
-        frustumOf({ orientation: v.camera.orientation, fovXRad: v.fovXRad, viewport: v.viewport }),
+        frustumOf(
+          { orientation: v.camera.orientation, fovXRad: v.fovXRad, viewport: v.viewport },
+          v.frustumMarginRad ?? 0,
+        ),
         v.camera.positionM,
         horizonCone(planet, v.camera.positionM).occluderRadiusM,
         v.viewport.widthPx / (2 * Math.tan(v.fovXRad / 2) * v.tauPx),
@@ -1057,13 +1075,18 @@ export function selectPatches(input: SelectionInput): Selection {
     }
     patches.set(cell.keyString, selected);
   }
+  // In the order the result was always made: the demand, the hidden bakes, then the survey's.
+  const demand = demandOf(t, leaves);
+  const hiddenBaked = hiddenBakedOf(t, tree);
+  const nearestSurveyByView = nearestSurveyByViewOf(t);
   return {
     patches,
-    demand: demandOf(t, leaves),
+    demand,
     limited,
     limitExcess,
-    hiddenBaked: hiddenBakedOf(t, tree),
-    nearestSurveyM: nearestSurveyOf(t),
+    hiddenBaked,
+    nearestSurveyM: Math.min(Number.POSITIVE_INFINITY, ...nearestSurveyByView),
+    nearestSurveyByViewM: nearestSurveyByView,
   };
 }
 
@@ -1083,19 +1106,19 @@ interface SurveyStep {
 }
 
 /**
- * {@link Selection.nearestSurveyM}: the least over the views of each camera's box distance to the
- * nearest patch of {@link NEAREST_SURVEY_LEVEL} (or the finest level) with surveyed ground under it,
- * found best first from the six roots through the patches with surveyed ground under them, and at
- * least one finest patch; `+∞` with no lookup or no surveyed ground.
+ * {@link Selection.nearestSurveyByViewM}: for each view, its camera's box distance to the nearest
+ * patch of {@link NEAREST_SURVEY_LEVEL} (or the finest level) with surveyed ground under it, found
+ * best first from the six roots through the patches with surveyed ground under them, and at least
+ * one finest patch; `+∞` with no lookup or no surveyed ground.
  */
-function nearestSurveyOf(t: Traversal): number {
+function nearestSurveyByViewOf(t: Traversal): number[] {
   const survey = t.survey;
   if (survey === null) {
-    return Number.POSITIVE_INFINITY;
+    return t.views.map(() => Number.POSITIVE_INFINITY);
   }
   const deepest = Math.min(NEAREST_SURVEY_LEVEL, t.planet.finestLevel);
-  let nearest = Number.POSITIVE_INFINITY;
-  for (const view of t.views) {
+  return t.views.map((view) => {
+    let nearest = Number.POSITIVE_INFINITY;
     const camera = view.input.camera.positionM;
     const step = (key: PatchKey, cell: MemoCell, above: BakedRange | null): SurveyStep => {
       cell.usedAt = t.memo.call;
@@ -1135,8 +1158,8 @@ function nearestSurveyOf(t: Traversal): number {
         }
       }
     }
-  }
-  return Number.isFinite(nearest) ? Math.max(nearest, t.patchSizeM) : nearest;
+    return Number.isFinite(nearest) ? Math.max(nearest, t.patchSizeM) : nearest;
+  });
 }
 
 /** The baked patches among the tree's bare keys ({@link Selection.hiddenBaked}). */

@@ -161,17 +161,41 @@ describe("what the resident heights keep (R10.T16.c)", () => {
     expect([heights.bytes, heights.edgeBakes]).toEqual([65 * 65 * 4 + 4_228 + 17 * 17 * 4, 1]);
   });
 
-  it("forgets a bake as it leaves, every bake at a clear, and stands its ceiling at the highest held", () => {
-    const heights = new ResidentHeights();
-    heights.take(bakeOf(KEY, () => 250, WEST_HALF));
-    heights.take(bakeOf({ ...KEY, i: 11 }, () => 900, EVERY));
-    heights.take(bakeOf({ ...KEY, i: 12 }, () => 5_000, NONE));
-    const ceiling = heights.ceilingM;
-    heights.forget(patchKeyString({ ...KEY, i: 11 }));
-    const afterForget = [heights.ceilingM, heights.groundHeightAtM(at({ ...KEY, i: 11 }, 30, 30))];
-    heights.clear();
-    expect([ceiling, ...afterForget, heights.rimHeightAtM(at(KEY, 10, 10)), heights.bytes]).toEqual(
-      [900, 250, null, null, 0],
-    );
+  describe("three bakes held, at 250 m, 900 m and 5,000 m, the last surveying nothing", () => {
+    function threeHeld(): ResidentHeights {
+      const heights = new ResidentHeights();
+      heights.take(bakeOf(KEY, () => 250, WEST_HALF));
+      heights.take(bakeOf({ ...KEY, i: 11 }, () => 900, EVERY));
+      heights.take(bakeOf({ ...KEY, i: 12 }, () => 5_000, NONE));
+      return heights;
+    }
+
+    it("stands its ceiling at the highest surveyed ground held", () => {
+      expect(threeHeld().ceilingM).toBe(900);
+    });
+
+    it("lowers its ceiling as the highest bake leaves", () => {
+      const heights = threeHeld();
+      heights.forget(patchKeyString({ ...KEY, i: 11 }));
+      expect(heights.ceilingM).toBe(250);
+    });
+
+    it("holds no ground where a bake has left", () => {
+      const heights = threeHeld();
+      heights.forget(patchKeyString({ ...KEY, i: 11 }));
+      expect(heights.groundHeightAtM(at({ ...KEY, i: 11 }, 30, 30))).toBeNull();
+    });
+
+    it("holds no rim after a clear", () => {
+      const heights = threeHeld();
+      heights.clear();
+      expect(heights.rimHeightAtM(at(KEY, 10, 10))).toBeNull();
+    });
+
+    it("holds no bytes after a clear", () => {
+      const heights = threeHeld();
+      heights.clear();
+      expect(heights.bytes).toBe(0);
+    });
   });
 });

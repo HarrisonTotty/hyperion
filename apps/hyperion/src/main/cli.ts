@@ -22,7 +22,9 @@
  *
  * `--views-check` runs the several-views check in the consoles' `VIEW` (plan R07, T20), with the
  * spike's `--setting`, `--smoke` and `--out`; the spike's other options are refused with it, and
- * so is `--descent-spike`.
+ * so is `--descent-spike`. With `--terrain` (plan R10, R10.T16.d; decision-r10-t16-contracts §6)
+ * it runs the terrain run on `TERRAIN TEST` instead, at its `--setting`; `--terrain` is refused
+ * without `--views-check`.
  *
  * The variables name the *server*, not this process, so they are not the server's own
  * `HYPERION_ADDR` and `HYPERION_PORT`: an address to listen on and an address to connect to are
@@ -187,6 +189,9 @@ export function buildCommand(version: string): Command {
         "the quality setting VIEW draws at, or the spike's or the check's (default high)",
       ).choices(["high", "low"]),
     )
+    .addOption(
+      new Option("--terrain", "the check's terrain run on TERRAIN TEST (plan R10), not T20's"),
+    )
     .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))
     .addOption(new Option("--smoke", "a short hidden spike or check run that exits with a status"))
     .addOption(
@@ -234,6 +239,9 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   const port: unknown = options["port"];
   if (typeof address !== "string" || typeof port !== "number") {
     throw new Error("the command line yielded no address and port");
+  }
+  if (options["terrain"] === true && options["viewsCheck"] !== true) {
+    command.error("error: --terrain is an option of --views-check, which was not given");
   }
   if (options["viewsCheck"] === true) {
     // Throws a CommanderError, as the parser's own refusals do (`exitOverride`).
@@ -285,6 +293,7 @@ function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCh
     setting: settingOf(options),
     smoke: options["smoke"] === true,
     out: typeof out === "string" ? out : null,
+    terrain: options["terrain"] === true,
   };
 }
 

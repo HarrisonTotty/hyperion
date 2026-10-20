@@ -18,6 +18,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import type { ServerLink } from "../../lib/serverLink";
 import type { SceneSurfaceEvent, SceneView } from "../../lib/scene/useScene";
 import type { ViewId } from "../../view/camera/state";
+import { EngineUnavailable } from "../../view/engine/resilientEngine";
 import { TerrainSession, type TerrainRequests } from "../../view/terrain/session";
 import type { WorkerLike } from "../../view/terrain/workers/pool";
 import type { ViewEngineState } from "./useViewEngine";
@@ -35,6 +36,13 @@ export interface TerrainFixture {
   readonly universe: UniverseIdHex;
   /** Opens its link for one session, which closes it after the session is disposed. */
   readonly open: () => TerrainFixtureLink;
+  /**
+   * Takes the time, s, to which the stage has played the kept scene's script (`ViewRun.tS`), each
+   * primary frame: `TERRAIN TEST`'s fixture raises its field's revision the first time the script
+   * passes the delta's time (R10.T16.d; decision-r10-t16-contracts §5). Absent, a fixture follows
+   * no script.
+   */
+  readonly notePlayed?: (scriptS: number) => void;
 }
 
 /** A terrain fixture's link for one session: always up. */
@@ -262,4 +270,31 @@ export function useTerrainFaults(session: TerrainSession | null): ReadonlySet<Vi
     session?.subscribeFaults ?? noFaults,
     () => session?.terrainFaults ?? NO_TERRAIN_FAULTS,
   );
+}
+
+/**
+ * Steps a view's terrain session once (`TerrainSession.step`), guarded (plan R10, R10.T16; the batch
+ * review's S5): a device loss (`EngineUnavailable`) passes in silence, and anything else, a bug, is
+ * reported once until a step succeeds again, so that no throw stops the view's loop and every view
+ * draws on with what the last step left.
+ *
+ * @param failing - Whether the last step failed with a bug.
+ * @returns Whether this step leaves it failing.
+ */
+export function stepTerrainSession(
+  session: Pick<TerrainSession, "step"> | null,
+  failing: boolean,
+): boolean {
+  try {
+    session?.step();
+    return false;
+  } catch (error: unknown) {
+    if (error instanceof EngineUnavailable) {
+      return failing;
+    }
+    if (!failing) {
+      console.error("the terrain session's step failed:", error);
+    }
+    return true;
+  }
 }

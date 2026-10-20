@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ViewsCheckRecord } from "../preload/api";
+import type { TerrainCheckRecord, ViewsCheckRecord } from "../preload/api";
+import { TERRAIN_RECORD } from "./fixtures/terrainRecord";
 import type { TraceFigures } from "./reduceTrace";
 import { measured } from "./results";
 import {
@@ -14,6 +15,7 @@ import {
   type ViewsCheckSessionDeps,
   WindowScan,
 } from "./viewsCheck";
+import type { TerrainCheckResults } from "./terrainCheckResults";
 import { NO_WINDOW_REASON, type ViewsCheckResults } from "./viewsCheckResults";
 
 const RECORD: ViewsCheckRecord = {
@@ -78,10 +80,12 @@ function session(overrides: Partial<ViewsCheckSessionDeps> = {}): {
   readonly session: ViewsCheckSession;
   readonly deps: ViewsCheckSessionDeps;
   readonly written: ViewsCheckResults[];
+  readonly terrainWritten: TerrainCheckResults[];
 } {
   const written: ViewsCheckResults[] = [];
+  const terrainWritten: TerrainCheckResults[] = [];
   const deps: ViewsCheckSessionDeps = {
-    launch: { setting: "high", smoke: false, out: null },
+    launch: { setting: "high", smoke: false, out: null, terrain: false },
     describe: () =>
       Promise.resolve({
         startedAt: new Date("2026-10-05T12:00:00Z"),
@@ -123,11 +127,25 @@ function session(overrides: Partial<ViewsCheckSessionDeps> = {}): {
       written.push(results);
       return Promise.resolve({ json: "/out/a.json", markdown: "/out/a.md" });
     },
+    writeTerrain: (_dir, results) => {
+      terrainWritten.push(results);
+      return Promise.resolve({ json: "/out/t.json", markdown: "/out/t.md" });
+    },
     exit: vi.fn<(code: number) => void>(),
     log: () => undefined,
     ...overrides,
   };
-  return { session: new ViewsCheckSession(deps), deps, written };
+  return { session: new ViewsCheckSession(deps), deps, written, terrainWritten };
+}
+
+/** A terrain launch's session (R10.T16.d). */
+function terrainSession(
+  overrides: Partial<ViewsCheckSessionDeps> = {},
+): ReturnType<typeof session> {
+  return session({
+    launch: { setting: "high", smoke: false, out: null, terrain: true },
+    ...overrides,
+  });
 }
 
 describe("the views check's trace", () => {
@@ -266,10 +284,82 @@ describe("the views check's session", () => {
   });
 });
 
+describe("the views check's session on a terrain launch (R10.T16.d)", () => {
+  it("takes no trace of a phase, and captures the page at its end", async () => {
+    const { session: run, deps } = terrainSession();
+    await run.startPhase("terrain-alone");
+    await run.endPhase("terrain-alone", SPAN);
+    expect(deps.tracing.startRecording).not.toHaveBeenCalled();
+    expect(deps.tracing.stopRecording).not.toHaveBeenCalled();
+    expect(deps.capture).toHaveBeenCalledWith("/captures/terrain-alone.png");
+  });
+
+  it("captures a look named for the phase recording", async () => {
+    const { session: run, deps } = terrainSession();
+    await run.startPhase("terrain-alone");
+    await run.capture("sunset-240s");
+    await run.endPhase("terrain-alone", SPAN);
+    await run.capture("restored");
+    expect(deps.capture).toHaveBeenCalledWith("/captures/terrain-alone-sunset-240s.png");
+    expect(deps.capture).toHaveBeenCalledWith("/captures/between-restored.png");
+  });
+
+  it("refuses a capture label of another shape", async () => {
+    const { session: run } = terrainSession();
+    await expect(run.capture("../escape")).rejects.toThrow(/label/);
+  });
+
+  it("judges the record it writes, with the GPU process's exits and the console's errors", async () => {
+    const { session: run, terrainWritten } = terrainSession();
+    run.gpuProcessGone();
+    run.consoleError("the terrain's depth material for the symbology failed");
+    await run.writeTerrainResults(TERRAIN_RECORD);
+    expect(terrainWritten[0]?.findings.faults.gpuProcessExits).toBe(1);
+    expect(terrainWritten[0]?.findings.consoleErrors.count).toBe(1);
+    expect(terrainWritten[0]?.overall).toBe("fail");
+  });
+
+  it("records its captures from the repository's root, not by the checkout's own path", async () => {
+    const { session: run, terrainWritten } = terrainSession({
+      capturesRecordedAs: "target/views-check/terrain/captures-x",
+    });
+    await run.startPhase("terrain-alone");
+    await run.capture("early");
+    await run.writeTerrainResults(TERRAIN_RECORD);
+    expect(terrainWritten[0]?.run.captures.value).toBe("target/views-check/terrain/captures-x");
+  });
+
+  it("ends with 0 when its results pass", async () => {
+    const { session: run, deps } = terrainSession();
+    await run.writeTerrainResults(TERRAIN_RECORD);
+    run.end(0, null);
+    expect(deps.exit).toHaveBeenCalledWith(0);
+  });
+
+  it("ends with 1 when its results fail, whatever its end says", async () => {
+    const failing: TerrainCheckRecord = {
+      ...TERRAIN_RECORD,
+      teardown: { ...TERRAIN_RECORD.teardown, workersLive: 1 },
+    };
+    const lines: string[] = [];
+    const { session: run, deps } = terrainSession({ log: (line) => lines.push(line) });
+    await run.writeTerrainResults(failing);
+    run.end(0, null);
+    expect(deps.exit).toHaveBeenCalledWith(1);
+    expect(lines.at(-1)).toMatch(/1 height workers left/);
+  });
+
+  it("ends with 1 when it ends with no results written", () => {
+    const { session: run, deps } = terrainSession();
+    run.end(0, null);
+    expect(deps.exit).toHaveBeenCalledWith(1);
+  });
+});
+
 describe("the views check's handlers", () => {
   type Listener = (event: { own: boolean }, ...args: unknown[]) => Promise<unknown>;
 
-  function handlers(): {
+  function handlers(terrain = false): {
     readonly call: (channel: string, own: boolean, ...args: unknown[]) => Promise<unknown>;
     readonly calls: string[];
   } {
@@ -297,10 +387,19 @@ describe("the views check's handlers", () => {
           calls.push("write");
           return Promise.resolve({ json: "a", markdown: "b" });
         },
+        writeTerrainResults: () => {
+          calls.push("write terrain");
+          return Promise.resolve({ json: "a", markdown: "b" });
+        },
+        capture: (label) => {
+          calls.push(`capture ${label}`);
+          return Promise.resolve();
+        },
         end: (code, reason) => {
           calls.push(`exit ${String(code)} ${String(reason)}`);
         },
       },
+      terrain,
     });
     return {
       call: (channel, own, ...args) => {
@@ -363,6 +462,64 @@ describe("the views check's handlers", () => {
   ] as const)("refuse %s", async (_what, channel, own, args, error) => {
     const { call, calls } = handlers();
     await expect(call(channel, own, ...args)).rejects.toThrow(error);
+    expect(calls).toEqual([]);
+  });
+
+  it("carry out a terrain run's operations on a terrain launch", async () => {
+    const { call, calls } = handlers(true);
+    await call(VIEWS_CHECK_CHANNELS.startPhase, true, "terrain-loss");
+    await call(VIEWS_CHECK_CHANNELS.capture, true, "restored");
+    await call(VIEWS_CHECK_CHANNELS.endPhase, true, "terrain-loss", SPAN);
+    await call(VIEWS_CHECK_CHANNELS.writeTerrainResults, true, TERRAIN_RECORD);
+    expect(calls).toEqual([
+      "start terrain-loss",
+      "capture restored",
+      "end terrain-loss",
+      "write terrain",
+    ]);
+  });
+
+  it.each([
+    [VIEWS_CHECK_CHANNELS.startPhase, ["photoreal-alone"]],
+    [VIEWS_CHECK_CHANNELS.endPhase, ["photoreal-alone", SPAN]],
+  ] as const)("refuse T20's phase on %s on a terrain launch", async (channel, args) => {
+    const { call, calls } = handlers(true);
+    await expect(call(channel, true, ...args)).rejects.toThrow(/not a phase of the terrain run/);
+    expect(calls).toEqual([]);
+  });
+
+  it.each([
+    [VIEWS_CHECK_CHANNELS.startPhase, ["terrain-alone"]],
+    [VIEWS_CHECK_CHANNELS.endPhase, ["terrain-alone", SPAN]],
+  ] as const)("refuse a terrain phase on %s on T20's launch", async (channel, args) => {
+    const { call, calls } = handlers(false);
+    await expect(call(channel, true, ...args)).rejects.toThrow(/not a phase of T20's run/);
+    expect(calls).toEqual([]);
+  });
+
+  it("refuse T20's record on a terrain launch, which writes its own alone", async () => {
+    const { call, calls } = handlers(true);
+    await expect(call(VIEWS_CHECK_CHANNELS.writeResults, true, RECORD)).rejects.toThrow(
+      /not the check's record/,
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it("refuse a terrain record and a capture on T20's launch", async () => {
+    const { call, calls } = handlers(false);
+    await expect(
+      call(VIEWS_CHECK_CHANNELS.writeTerrainResults, true, TERRAIN_RECORD),
+    ).rejects.toThrow(/terrain run's record/);
+    await expect(call(VIEWS_CHECK_CHANNELS.capture, true, "restored")).rejects.toThrow(/capture/);
+    expect(calls).toEqual([]);
+  });
+
+  it("refuse a terrain record that does not check, and a capture label of another shape", async () => {
+    const { call, calls } = handlers(true);
+    await expect(
+      call(VIEWS_CHECK_CHANNELS.writeTerrainResults, true, { ...TERRAIN_RECORD, phases: null }),
+    ).rejects.toThrow(/terrain run's record/);
+    await expect(call(VIEWS_CHECK_CHANNELS.capture, true, "A/B")).rejects.toThrow(/capture/);
     expect(calls).toEqual([]);
   });
 });

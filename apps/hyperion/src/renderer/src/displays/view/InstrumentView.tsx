@@ -15,6 +15,7 @@ import type { Instrument } from "./useInstruments";
 import type { SkyLineReading } from "./useViewSky";
 import type { DragKind } from "./useViewDrag";
 import { ViewCanvas } from "./ViewCanvas";
+import { terrainStatementOf } from "./viewFaults";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import { PRIMARY_NAME } from "./viewNames";
 import {
@@ -172,7 +173,7 @@ export function InstrumentView({
       ? []
       : [
           // Its own terrain annunciation, of the bodies its frame hands over (R10.T16.c).
-          ...labelStatements(run, shown?.terrain ?? null).filter(
+          ...labelStatements(run, terrainStatementOf(shown?.terrain ?? null, faults)).filter(
             (statement) => statement === POSITIONS_FROM_SHIP || statement === shown?.terrain,
           ),
           // Its own preparing, and the photorealistic style's statements about its picture that

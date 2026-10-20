@@ -23,6 +23,13 @@
  *   so the nose looks back down at it: at a single system's star, but at empty space between the
  *   stars of a wide multiple (the default system's two stars are 19 and 69 au from it).
  *
+ * With `--survey <SOURCE> <RESOLUTION_M>` (plan R10, R10.T16.d; decision-r10-live-path, gap G3),
+ * it then records one R09 `survey_pass` over the target body: every cell of its coarse field, one
+ * run at the level the server finds from the body's figure ({@link coarseLevel} of `body_detail`'s
+ * ∛(a² c)), at the placement's time, so that a served world can be surveyed by hand once the serve
+ * gate opens and `VIEW` has its surveyed ground to draw. Nothing else in the client sends it: the
+ * sensors plan replaces both.
+ *
  * Failures, a refused request or a system with no planet, end the run with a message: they are
  * thrown as `Error`s and `main` reports them, which suits a one-shot command line tool better
  * than result unions through every step.
@@ -45,6 +52,7 @@ import {
   type RequestKind,
   type RequestOf,
   type ResponseFor,
+  type SurveySourceDto,
   type SystemRecord,
   type UniverseInfo,
   type UniverseTime,
@@ -102,6 +110,59 @@ export type LookAt =
   | { readonly kind: "planet" }
   | { readonly kind: "body"; readonly body: string };
 
+/**
+ * A survey pass to record over the target body, R09's stand-in for the sensors (plan R10,
+ * R10.T16.d; R09's Risks, "The survey stand-in"): how it measured and how finely.
+ */
+export interface SurveyAsked {
+  readonly source: SurveySourceDto;
+  /** How finely it measured, m: finite and positive; the server refuses one coarser than 36,000 km. */
+  readonly resolutionM: number;
+}
+
+/** The survey sources the wire names (`SurveySourceDto`). */
+const SURVEY_SOURCES: ReadonlyArray<SurveySourceDto> = ["orbital", "close_range", "landed"];
+
+/**
+ * The widest mean cell of a body's coarse field, m: R09's `MAX_MEAN_CELL_M`, the brainstorm's
+ * "no wider than about 40 km" (R09 Design note 4). A test holds it to `field.rs`.
+ */
+export const MAX_MEAN_CELL_M = 40_000;
+
+/** The levels a coarse field takes, R09's `CoarseLevel::MIN` and `MAX`; a test holds them. */
+export const COARSE_LEVELS = { min: 5, max: 8 } as const;
+
+/**
+ * The level of the coarse field of a body of volumetric mean radius `radiusM`, m: R09's
+ * `coarse_level` (`crates/hyperion-surface/src/field.rs`), the shallowest of levels 5 to 7 whose
+ * mean cell, (R × √(4π ÷ 6)) ÷ 2ᴸ in that order, is no wider than {@link MAX_MEAN_CELL_M}, and 8
+ * otherwise: 6 for the Moon, 8 for an Earth.
+ *
+ * @remarks
+ * The server takes the radius from the body's figure as ∛(a² c) through its own `cbrt`; `Math.cbrt`
+ * may differ from it in the last place, which moves the level only for a radius within an ulp of
+ * one of the three radii where it changes.
+ *
+ * @throws RangeError for a radius that is not finite and positive.
+ */
+export function coarseLevel(radiusM: number): number {
+  if (!(Number.isFinite(radiusM) && radiusM > 0)) {
+    throw new RangeError(`a body's radius must be finite and positive, got ${String(radiusM)} m`);
+  }
+  const wholeFace = radiusM * Math.sqrt((4 * Math.PI) / 6);
+  for (let level: number = COARSE_LEVELS.min; level < COARSE_LEVELS.max; level += 1) {
+    if (wholeFace / 2 ** level <= MAX_MEAN_CELL_M) {
+      return level;
+    }
+  }
+  return COARSE_LEVELS.max;
+}
+
+/** The number of cells of a coarse field at `level`, 6 · 4ᴸ. */
+export function coarseCellCount(level: number): number {
+  return 6 * 4 ** level;
+}
+
 /** The tool's options, after parsing. */
 export interface PlaceShipOptions {
   /** The server's address, as a URL host. */
@@ -126,6 +187,11 @@ export interface PlaceShipOptions {
   readonly timeS: number;
   /** The clock's rate: 0 or a power of ten from 1 to 100,000, which the server checks. */
   readonly rate: number;
+  /**
+   * A survey pass to record over every cell of the target body (`--survey`), or `null` for none;
+   * never with the barycentre as the target.
+   */
+  readonly survey: SurveyAsked | null;
 }
 
 /** Reads a number that must be finite and above zero. */
@@ -264,7 +330,44 @@ export function buildCommand(): Command {
         .default(1)
         .argParser(parseWhole),
     )
+    .addOption(
+      new Option(
+        "--survey <SOURCE> <RESOLUTION_M...>",
+        "after placing the ship, survey every cell of the target body (R09's survey_pass): " +
+          "its source, orbital, close_range or landed, then exactly one resolution in " +
+          "metres, such as --survey orbital 50",
+      ),
+    )
     .exitOverride();
+}
+
+/**
+ * Reads `--survey`'s two values, its source and its resolution, refusing any other count or form
+ * through `command`, which throws its `CommanderError`.
+ */
+function surveyOf(command: Command, values: unknown): SurveyAsked | null {
+  if (values === undefined) {
+    return null;
+  }
+  const usage =
+    "option '--survey <SOURCE> <RESOLUTION_M...>' takes a source, orbital, close_range or " +
+    "landed, then exactly one resolution in metres above zero";
+  if (!Array.isArray(values) || values.length !== 2) {
+    command.error(`error: ${usage}`, { code: "commander.invalidArgument" });
+  }
+  const [source, resolution] = values;
+  const known = SURVEY_SOURCES.find((each) => each === source);
+  const resolutionM = typeof resolution === "string" ? Number(resolution) : Number.NaN;
+  if (
+    known === undefined ||
+    typeof resolution !== "string" ||
+    resolution.trim().length === 0 ||
+    !Number.isFinite(resolutionM) ||
+    resolutionM <= 0
+  ) {
+    command.error(`error: ${usage}`, { code: "commander.invalidArgument" });
+  }
+  return { source: known, resolutionM };
 }
 
 /** Narrows an option commander has already parsed, naming the broken invariant otherwise. */
@@ -299,11 +402,18 @@ const isLookAt = (value: unknown): value is LookAt => {
  * @throws CommanderError when an argument cannot be used, or when `--help` was asked for.
  */
 export function parsePlaceShipArgs(args: readonly string[]): PlaceShipOptions {
-  const options = buildCommand()
-    .parse([...args], { from: "user" })
-    .opts();
+  const command = buildCommand();
+  const options = command.parse([...args], { from: "user" }).opts();
   const distance = option(options["distance"], isOptionalNumber, "distance");
   const system = option(options["system"], isOptionalString, "system");
+  const lookAt = option(options["lookAt"], isLookAt, "target");
+  const survey = surveyOf(command, options["survey"]);
+  if (survey !== null && lookAt.kind === "barycentre") {
+    command.error(
+      "error: option '--survey' surveys a body: give --look-at planet or a body ID, not barycentre",
+      { code: "commander.conflictingOption" },
+    );
+  }
   return {
     address: option(options["address"], isString, "address"),
     port: option(options["port"], isNumber, "port"),
@@ -312,10 +422,11 @@ export function parsePlaceShipArgs(args: readonly string[]): PlaceShipOptions {
     system: system ?? null,
     nearLy: option(options["near"], isNear, "search centre"),
     radiusLy: option(options["radius"], isNumber, "radius"),
-    lookAt: option(options["lookAt"], isLookAt, "target"),
+    lookAt,
     distanceAu: distance ?? null,
     timeS: option(options["time"], isNumber, "time"),
     rate: option(options["rate"], isNumber, "rate"),
+    survey,
   };
 }
 
@@ -361,6 +472,63 @@ export interface Placement {
   readonly ship: KinematicsDto;
   /** The clock rate as the server set it. */
   readonly rate: number;
+  /** The survey pass recorded over the body, or `null` for none asked. */
+  readonly survey: SurveyRecorded | null;
+}
+
+/** A survey pass the server recorded over the target body. */
+export interface SurveyRecorded extends SurveyAsked {
+  /** The level of the body's coarse field the pass covered, its every cell. */
+  readonly level: number;
+  /** The body's coverage revision with the pass folded in. */
+  readonly revision: number;
+}
+
+/**
+ * The level of `body`'s coarse field, as the server finds it for a pass: {@link coarseLevel} of
+ * the volumetric radius ∛(a² c) of its figure, from `body_detail`.
+ *
+ * @throws Error for a body whose figure section is not `ok`, which the server refuses too.
+ */
+async function fieldLevel(
+  ask: Ask,
+  universe: string,
+  body: string,
+  time: UniverseTime,
+): Promise<number> {
+  const { record } = await ask({ kind: "body_detail", universe, body, time, detail: "full" });
+  const figure = record.figure;
+  if (figure?.state !== "ok") {
+    throw new Error(`body ${body} has no figure to give its coarse field's level`);
+  }
+  const { equatorial_radius_m: a, polar_radius_m: c } = figure.value;
+  return coarseLevel(Math.cbrt(a * a * c));
+}
+
+/**
+ * Records `survey` over every cell of `body`'s coarse field at `time`: one `survey_pass` of the
+ * run of every cell at the field's level, R09's stand-in for the sensors, so that a served world's
+ * field holds surveyed ground to draw (decision-r10-live-path, gap G3).
+ */
+async function surveyBody(
+  ask: Ask,
+  universe: string,
+  body: string,
+  survey: SurveyAsked,
+  time: UniverseTime,
+): Promise<SurveyRecorded> {
+  const level = await fieldLevel(ask, universe, body, time);
+  const { revision } = await ask({
+    kind: "survey_pass",
+    universe,
+    body,
+    from: time,
+    to: time,
+    source: survey.source,
+    resolution_m: survey.resolutionM,
+    cells: [{ start: 0, end: coarseCellCount(level) }],
+  });
+  return { ...survey, level, revision };
 }
 
 /** The universe `name` or ID names, created with `seed` when a name is not found. */
@@ -591,6 +759,11 @@ export async function placeShip(ask: Ask, options: PlaceShipOptions): Promise<Pl
     ship,
     time_rate: options.rate,
   });
+  // `parsePlaceShipArgs` refuses a survey of the barycentre, so a survey has a body here.
+  const survey =
+    options.survey === null || body === null
+      ? null
+      : await surveyBody(ask, info.id, body, options.survey, time);
   return {
     universe: info,
     created,
@@ -600,6 +773,7 @@ export async function placeShip(ask: Ask, options: PlaceShipOptions): Promise<Pl
     distanceM: distanceAu * AU_M,
     ship,
     rate: set.clock.time_rate,
+    survey,
   };
 }
 
@@ -610,12 +784,20 @@ export function describePlacement(placement: Placement): string {
     placement.designation === null
       ? placement.system
       : `${placement.designation} (${placement.system})`;
+  const survey = placement.survey;
   return [
     `universe  ${placement.universe.name} (${placement.universe.id}, seed ${placement.universe.seed})` +
       (placement.created ? ", created" : ""),
     `system    ${system}`,
     `ship      ${String(placement.distanceM / AU_M)} au from ${target}, looking at it from the seat`,
     `clock     ${String(placement.ship.time.seconds)} s, rate ${String(placement.rate)}`,
+    ...(survey === null
+      ? []
+      : [
+          `survey    ${survey.source} at ${String(survey.resolutionM)} m over all ` +
+            `${String(coarseCellCount(survey.level))} cells of level ${String(survey.level)}, ` +
+            `revision ${String(survey.revision)}`,
+        ]),
     `next      in the client: F2, open ${placement.universe.name}, then F4 (VIEW)`,
   ].join("\n");
 }

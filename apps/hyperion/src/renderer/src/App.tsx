@@ -10,8 +10,13 @@ import { SystemDisplay } from "./displays/system/SystemDisplay";
 import { ViewSceneProvider } from "./displays/view/ViewSceneProvider";
 import { ViewDisplay } from "./displays/view/ViewDisplay";
 import { ViewsCheckRunner } from "./displays/view/check/ViewsCheckRunner";
+import { terrainProbeOptions } from "./displays/view/check/terrainCheckRun";
+import { TerrainProbe } from "./displays/view/check/terrainProbe";
 import { ViewsProbe } from "./displays/view/check/viewsProbe";
 import type { ViewEngineSource } from "./displays/view/useViewEngine";
+import type { SceneOption } from "./displays/view/viewRun";
+import type { TerrainSession } from "./view/terrain/session";
+import type { WorkerLike } from "./view/terrain/workers/pool";
 import type { SystemOpening, SystemTarget } from "./displays/system/systemTarget";
 import { type ConnectionState, useServerConnection } from "./lib/connection";
 import type { SystemPlace } from "./lib/scene/model";
@@ -29,12 +34,53 @@ interface DisplayInputs {
   readonly serverUrl: string;
   readonly systemOpening: SystemOpening | null;
   readonly openSystem: (target: SystemTarget) => void;
-  /** `VIEW`'s engine on a `--views-check` launch (R07.T20), else `null`. */
-  readonly checkedView: { readonly engineSource: ViewEngineSource } | null;
+  /** `VIEW`'s engine on a `--views-check` launch (R07.T20), and its terrain run's seam, else `null`. */
+  readonly checkedView: CheckedView | null;
   /** The quality setting `VIEW` draws at, the launch's `--setting` (R07.T17). */
   readonly setting: QualitySetting;
   /** The platform the client runs on, whose primary modifier `VIEW`'s rate chord takes (R07.T19.f). */
   readonly platform: string;
+}
+
+/**
+ * The terrain run's seam a `--terrain` check launch hands `VIEW` (R10.T16.d): its counted height
+ * workers, its kept scenes with `TERRAIN TEST`'s paced fixture, and its watch of the terrain
+ * session, all three together.
+ */
+interface TerrainSeam {
+  readonly heightWorkers: () => WorkerLike;
+  readonly sceneOptions: ReadonlyArray<SceneOption>;
+  readonly watchTerrain: (session: TerrainSession) => () => void;
+}
+
+/**
+ * What a `--views-check` launch hands `VIEW`: its probe's engine source (R07.T20), and the terrain
+ * run's seam on a `--terrain` launch, `null` on T20's (the batch review's D-C).
+ */
+interface CheckedView {
+  readonly engineSource: ViewEngineSource;
+  readonly terrain: TerrainSeam | null;
+}
+
+/** The probes of a `--views-check` launch: the views probe, and the terrain run's on a `--terrain` one. */
+interface CheckProbes {
+  readonly views: ViewsProbe;
+  readonly terrain: TerrainProbe | null;
+}
+
+/** The view a check launch hands `VIEW`, from its probes. */
+function checkedViewOf(probes: CheckProbes): CheckedView {
+  const terrain = probes.terrain;
+  return terrain === null
+    ? { engineSource: probes.views.source, terrain: null }
+    : {
+        engineSource: terrain.source,
+        terrain: {
+          heightWorkers: terrain.heightWorkers,
+          sceneOptions: terrain.sceneOptions,
+          watchTerrain: terrain.watchTerrain,
+        },
+      };
 }
 
 function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
@@ -62,6 +108,9 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
       content = (
         <ViewDisplay
           engineSource={inputs.checkedView?.engineSource}
+          heightWorkers={inputs.checkedView?.terrain?.heightWorkers}
+          sceneOptions={inputs.checkedView?.terrain?.sceneOptions}
+          watchTerrain={inputs.checkedView?.terrain?.watchTerrain}
           setting={inputs.setting}
           platform={inputs.platform}
         />
@@ -110,8 +159,19 @@ export function App() {
   useSurfaceModuleCheck(connection.serverGeneratorVersion);
   const link = useServerLinkValue(connection);
   const viewsCheck = window.hyperion.viewsCheck;
-  // A `--views-check` launch opens on `VIEW`, whose engine its probe watches (R07.T20).
-  const [probe] = useState(() => (viewsCheck === undefined ? null : new ViewsProbe()));
+  // A `--views-check` launch opens on `VIEW`, whose engine its probe watches (R07.T20); a
+  // `--terrain` one also its terrain run's (R10.T16.d).
+  const [probes] = useState((): CheckProbes | null => {
+    if (viewsCheck === undefined) {
+      return null;
+    }
+    const views = new ViewsProbe();
+    const { terrain, smoke } = viewsCheck.launch;
+    return {
+      views,
+      terrain: terrain ? new TerrainProbe(views, terrainProbeOptions(smoke)) : null,
+    };
+  });
   const [activeDisplay, setActiveDisplay] = useState<DisplayId>(
     viewsCheck === undefined ? "link" : "view",
   );
@@ -143,14 +203,14 @@ export function App() {
     serverUrl,
     systemOpening,
     openSystem,
-    checkedView: viewsCheck === undefined || probe === null ? null : { engineSource: probe.source },
+    checkedView: probes === null ? null : checkedViewOf(probes),
     setting: window.hyperion.setting,
     platform: window.hyperion.platform,
   };
   return (
     <GraphicsStatusProvider graphics={window.hyperion.graphics} gpu={navigatorGpu()}>
-      {viewsCheck === undefined || probe === null ? null : (
-        <ViewsCheckRunner api={viewsCheck} probe={probe} />
+      {viewsCheck === undefined || probes === null ? null : (
+        <ViewsCheckRunner api={viewsCheck} probe={probes.views} terrain={probes.terrain} />
       )}
       <ServerLinkContext value={link}>
         <UniverseProvider>

@@ -15,6 +15,7 @@ import {
   SURVEY_EDGE_TICK_SPACING_REM,
   surveyEdgeMark,
   surveyEdgeNote,
+  surveyEdgeNoteName,
   type SurveyEdgeOptions,
   type SurveyEdgeView,
 } from "./surveyEdge";
@@ -310,12 +311,46 @@ describe("the survey edge's mark beneath a camera low over it (R10.T10.c)", () =
   });
 });
 
-describe("the survey edge's note", () => {
-  it("states the nearest range to three figures, from the camera where there is no own ship", () => {
+describe("the survey edge's note (decision-r10-t16-review §1)", () => {
+  it("is named as the guide names the mark", () => {
     expect(SURVEY_EDGE_NOTE).toBe("SURVEY EDGE");
-    expect(surveyEdgeNote(4_210, false, null)).toEqual({ text: "SURVEY EDGE 4.21 km", unit: "km" });
-    expect(surveyEdgeNote(4_210, true, null).text).toBe("SURVEY EDGE 4.21 km FROM CAMERA");
-    expect(surveyEdgeNote(3.84e8, false, null)).toEqual({ text: "SURVEY EDGE 384 Mm", unit: "Mm" });
+  });
+
+  it("gives the body's designation and its range from the own ship", () => {
+    expect(surveyEdgeNote("TEST MOON", 4_210, false, null)).toEqual({
+      text: "SURVEY EDGE TEST MOON 4.21 km",
+      range: "4.21 km",
+      reading: "4.21 km",
+      unit: "km",
+    });
+  });
+
+  it("labels its range FROM CAMERA after the unit where there is no own ship", () => {
+    expect(surveyEdgeNote("TEST MOON", 412, true, null).text).toBe(
+      "SURVEY EDGE TEST MOON 412 m FROM CAMERA",
+    );
+  });
+
+  it("reads a range below 1 km in m", () => {
+    expect(surveyEdgeNote("TEST MOON", 412, false, null)).toEqual({
+      text: "SURVEY EDGE TEST MOON 412 m",
+      range: "412 m",
+      reading: "412 m",
+      unit: "m",
+    });
+  });
+
+  it("keeps the unit it was last shown in within its hysteresis", () => {
+    expect(surveyEdgeNote("TEST MOON", 1_020, false, "m").reading).toBe("1020 m");
+  });
+
+  it.each([
+    [false, false, "TEST MOON, survey edge, range 4.21 km"],
+    [true, false, "TEST MOON, survey edge, range 4.21 km FROM CAMERA"],
+    [false, true, "TEST MOON, survey edge, range 4.21 km, stale"],
+  ])("is named in the options' form (from camera %s, stale %s)", (fromCamera, stale, name) => {
+    const note = surveyEdgeNote("TEST MOON", 4_210, fromCamera, null);
+    expect(surveyEdgeNoteName("TEST MOON", note, stale)).toBe(name);
   });
 });
 
@@ -369,6 +404,25 @@ describe("the survey edge's note counts only the points the operator can see (R1
       OPTIONS,
     );
     expect([hidden.line.length > 0, hidden.nearestRangeM]).toEqual([true, null]);
+  });
+
+  it("keeps the nearest drawn point's range once its sight tests are used up with none seen", () => {
+    // Twenty-five cells apart, whose edges' pieces are far more than the tests' cap.
+    const cells: Array<readonly [Face, number, number]> = [];
+    for (let i = 12; i <= 20; i += 2) {
+      for (let j = 12; j <= 20; j += 2) {
+        cells.push([0, i, j]);
+      }
+    }
+    const { view, camera } = viewOf(surveyed(...cells), 200_000);
+    const bare = surveyEdgeMark(view, camera, VIEWPORT, OPTIONS);
+    const hidden = surveyEdgeMark(
+      { ...view, ground: { heightAtM: () => 150_000, ceilingM: 150_000 } },
+      camera,
+      VIEWPORT,
+      OPTIONS,
+    );
+    expect(hidden.nearestRangeM).toBe(bare.nearestRangeM);
   });
 
   it("gives the range of the nearest point seen past ground that hides a nearer one", () => {

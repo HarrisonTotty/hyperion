@@ -9,6 +9,7 @@ import type { BodyIdHex, DetailSeedHex, UniverseIdHex } from "@hyperion/protocol
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { instrumentViewId, PRIMARY_VIEW_ID } from "../../displays/view/viewNames";
 import { add, normalise, scale, vec3 } from "../../geometry/vec3";
 import { type ServerLink, useServerLink } from "../../lib/serverLink";
 import {
@@ -34,7 +35,7 @@ import {
   SESSION_SCENE,
   viewAt,
 } from "../../test/terrainSessionFixtures";
-import { aViewCraft, NO_TURN } from "../../test/viewFixtures";
+import { aViewCraft, FIXTURE_SYSTEM, NO_TURN } from "../../test/viewFixtures";
 import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
 import { lawFor } from "../appearance/phase";
 import { type BodyFramePlan, type LitBodyInput, planLitBodies } from "../bodies/draw";
@@ -53,17 +54,23 @@ import { allocationTally } from "./gpu/allocationTally";
 import { datumGroundUnder } from "./grounded";
 import { limbDistanceM, pixelAngleRad } from "./handover";
 import { childKeys, type PatchKey, patchKeyString } from "./patchKey";
-import { useTerrainFaults } from "../../displays/view/useTerrainSession";
-import { type TerrainViewReport, sceneContacts, TerrainSession } from "./session";
-import type { TerrainView, TerrainViewFrameInput } from "./terrainPass";
+import { MAX_CONTACTS } from "./gpu/uniforms";
+import { PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
+import {
+  sceneContacts,
+  TerrainSession,
+  terrainPassViewOf,
+  type TerrainViewReport,
+} from "./session";
+import type { TerrainPass, TerrainView, TerrainViewFrameInput } from "./terrainPass";
 import { PALETTE_NONE, type TerrainLayers } from "./workers/messages";
 import { MAX_CONSECUTIVE_WORKER_FAILURES } from "./workers/pool";
 
 const UNIVERSE: UniverseIdHex = "000000000000002a";
 const MOON: BodyIdHex = SESSION_MOON;
 const SEED: DetailSeedHex = "0123456789abcdef";
-const PRIMARY = viewId("primary");
-const INSTRUMENT = viewId("instrument 1");
+const PRIMARY = PRIMARY_VIEW_ID;
+const INSTRUMENT = instrumentViewId(1);
 const THIRD = viewId("instrument 2");
 
 /** The field's level, `moonLikeHeader`'s. */
@@ -341,31 +348,100 @@ afterEach(() => {
 });
 
 describe("the terrain session's passes (R10.T16.b; decision-r10-live-path, D3 and D4)", () => {
-  it("makes a body's pass at its first hand-over, one for every view that hands it over", async () => {
+  describe("a body's pass, made at its first hand-over", () => {
+    /** The moon's field held, then handed over by the primary and an instrument for two steps. */
+    async function handedOverTwice(): Promise<{
+      readonly h: Harness;
+      readonly first: TerrainPass | null;
+    }> {
+      const h = await harness();
+      h.session.noteView(PRIMARY, notHanding(5e6));
+      h.session.step();
+      await answerField(h);
+      h.session.step();
+      h.session.noteView(PRIMARY, handing(5e6));
+      h.session.noteView(INSTRUMENT, handing(6e6, { streamPriority: "secondary" }));
+      h.session.step();
+      const first = h.session.pass(MOON);
+      h.session.step();
+      return { h, first };
+    }
+
+    it("is not made while the body's field is held but no view hands it over", async () => {
+      const h = await harness();
+      h.session.noteView(PRIMARY, notHanding(5e6));
+      h.session.step();
+      await answerField(h);
+      h.session.step();
+      expect(h.session.passBodies.size).toBe(0);
+    });
+
+    it("is made for the body handed over", async () => {
+      const { h } = await handedOverTwice();
+      expect([...h.session.passBodies]).toEqual([MOON]);
+    });
+
+    it("is the one pass at every later step", async () => {
+      const { h, first } = await handedOverTwice();
+      expect(h.session.pass(MOON)).toBe(first);
+    });
+
+    it("takes every view that hands the body over", async () => {
+      const { first } = await handedOverTwice();
+      expect([...(first?.viewIds ?? [])]).toEqual([PRIMARY, INSTRUMENT]);
+    });
+  });
+
+  describe("a pass that a device loss refused at its first hand-over", () => {
+    /** The moon's field held and handed over by the primary, its first pass made during a loss. */
+    async function refused(): Promise<Harness> {
+      const h = await harness();
+      h.session.noteView(PRIMARY, handing(5e6));
+      h.session.step();
+      await answerField(h);
+      h.engine.loseDevice();
+      h.session.step();
+      return h;
+    }
+
+    it("is not made while the loss lasts", async () => {
+      const h = await refused();
+      expect(h.session.passBodies.size).toBe(0);
+    });
+
+    it("is made at the next step after the restore", async () => {
+      const h = await refused();
+      h.engine.restore();
+      h.session.step();
+      await settle();
+      expect([...h.session.passBodies]).toEqual([MOON]);
+    });
+  });
+
+  it("hands nothing over for a view whose last frame stood in with the wireframe", async () => {
     const h = await harness();
-    h.session.noteView(PRIMARY, notHanding(5e6));
+    h.session.noteView(PRIMARY, handing(5e6, { drawnStyle: "wireframe" }));
     h.session.step();
     await answerField(h);
     h.session.step();
     expect(h.session.passBodies.size).toBe(0);
-    h.session.noteView(PRIMARY, handing(5e6));
-    h.session.noteView(INSTRUMENT, handing(6e6, { streamPriority: "secondary" }));
-    h.session.step();
-    const pass = h.session.pass(MOON);
-    h.session.step();
-    expect([...h.session.passBodies]).toEqual([MOON]);
-    expect(h.session.pass(MOON)).toBe(pass);
-    expect([...(pass?.viewIds ?? [])]).toEqual([PRIMARY, INSTRUMENT]);
   });
 
-  it("hands nothing over for a wireframe view, or a body whose rotation is not known", async () => {
+  it("hands nothing over for a wireframe view", async () => {
     const h = await harness();
-    h.session.noteView(PRIMARY, handing(5e6, { style: "wireframe" }));
+    h.session.noteView(PRIMARY, handing(5e6, { style: "wireframe", drawnStyle: "wireframe" }));
     h.session.step();
     await answerField(h);
     h.session.step();
+    expect(h.session.passBodies.size).toBe(0);
+  });
+
+  it("hands nothing over of a body whose rotation is not known", async () => {
+    const h = await harness();
     const unturned = withMoon(SCENE, { ...sceneMoon(SCENE), rotation: null });
-    h.session.noteView(INSTRUMENT, handing(5e6, {}, unturned));
+    h.session.noteView(PRIMARY, handing(5e6, {}, unturned));
+    h.session.step();
+    await answerField(h);
     h.session.step();
     expect(h.session.passBodies.size).toBe(0);
   });
@@ -415,10 +491,12 @@ describe("the terrain session's passes (R10.T16.b; decision-r10-live-path, D3 an
     for (let n = 0; n < 50; n += 1) {
       h.session.noteView(PRIMARY, handing(5e6));
       h.session.step();
-      // The field is asked afresh each time: answered, the body handed over.
+      // The field is asked afresh each time: answered, the body handed over. Each cycle hands
+      // over and releases after the one before, so the cycles cannot run together.
       // oxlint-disable-next-line no-await-in-loop
       await answerField(h, 1);
       h.session.step();
+      // The cycle's pass is made once its field has settled, before it is released.
       // oxlint-disable-next-line no-await-in-loop
       await settle();
       expect(h.session.passBodies.size).toBe(1);
@@ -527,44 +605,67 @@ function runsOf(cells: ReadonlyArray<number>): number[] {
 }
 
 describe("the terrain session's fault (R10.T16.b; decision-r10-t16-contracts §7)", () => {
-  it("shows the fault on every view that hands a body over once every worker is lost, and draws nothing", async () => {
+  /**
+   * The moon handed over by the primary and an instrument, a third view handing nothing over, the
+   * changes of the session's faults counted in `told`.
+   */
+  async function threeViews(): Promise<{ readonly h: Harness; readonly told: { count: number } }> {
     const h = await harness();
     await handedOver(h);
     h.session.noteView(INSTRUMENT, handing(6e6, { streamPriority: "secondary" }));
     h.session.noteView(THIRD, notHanding(6e6));
     h.session.step();
-    let told = 0;
+    const told = { count: 0 };
     h.session.subscribeFaults(() => {
-      told += 1;
+      told.count += 1;
     });
+    return { h, told };
+  }
+
+  /** {@link threeViews} with every worker lost, stepped once. */
+  async function faulted(): Promise<{ readonly h: Harness; readonly told: { count: number } }> {
+    const views = await threeViews();
+    loseEveryWorker(views.h);
+    views.h.session.step();
+    return views;
+  }
+
+  it("shows no fault while its workers live", async () => {
+    const { h } = await threeViews();
     expect(h.session.terrainFaults.size).toBe(0);
-    loseEveryWorker(h);
-    h.session.step();
-    const frame = h.session.drawTerrain(PRIMARY, MOON, frameAt(5_000));
+  });
+
+  it("shows the fault on every view that hands a body over once every worker is lost", async () => {
+    const { h } = await faulted();
     expect([...h.session.terrainFaults].toSorted()).toEqual([INSTRUMENT, PRIMARY].toSorted());
-    expect(told).toBe(1);
+  });
+
+  it("tells its listeners of the fault once", async () => {
+    const { told } = await faulted();
+    expect(told.count).toBe(1);
+  });
+
+  it("draws nothing under the fault, giving the fault and no annunciation", async () => {
+    const { h } = await faulted();
+    const frame = h.session.drawTerrain(PRIMARY, MOON, frameAt(5_000));
     expect([frame?.draw, frame?.fault, frame?.annunciation]).toEqual([
       null,
       TERRAIN_NOT_AVAILABLE,
       null,
     ]);
-    // The same set while nothing changes, for `useSyncExternalStore`.
-    const faults = h.session.terrainFaults;
-    h.session.step();
-    expect([h.session.terrainFaults, told]).toEqual([faults, 1]);
   });
 
-  it("reaches the label blocks through useTerrainFaults, and none without a session", async () => {
-    const h = await harness();
-    await handedOver(h);
-    const hook = renderHook(() => useTerrainFaults(h.session));
-    const none = renderHook(() => useTerrainFaults(null));
-    expect([hook.result.current.size, none.result.current.size]).toEqual([0, 0]);
-    act(() => {
-      loseEveryWorker(h);
-      h.session.step();
-    });
-    expect([...hook.result.current]).toEqual([PRIMARY]);
+  it("keeps the same set while nothing changes, for useSyncExternalStore", async () => {
+    const { h } = await faulted();
+    const faults = h.session.terrainFaults;
+    h.session.step();
+    expect(h.session.terrainFaults).toBe(faults);
+  });
+
+  it("tells its listeners nothing while nothing changes", async () => {
+    const { h, told } = await faulted();
+    h.session.step();
+    expect(told.count).toBe(1);
   });
 });
 
@@ -620,17 +721,97 @@ describe("the scene's craft as a pass's contacts (R10.T16.b; R05 Design note 9)"
     };
   }
 
-  it("takes a craft at 900 m and closing as a contact on the ground beneath it, at the hull's radius", () => {
+  it("takes a craft at 900 m and closing as one contact", () => {
+    expect(sceneContacts(withCraft(900, -5), moon, ground, 30)).toHaveLength(1);
+  });
+
+  it("puts the contact on the ground beneath the craft", () => {
     const contacts = sceneContacts(withCraft(900, -5), moon, ground, 30);
-    expect(contacts).toHaveLength(1);
     expect(contacts[0]?.positionM.z).toBeCloseTo(figure.polar_radius_m, 3);
+  });
+
+  it("gives the contact the hull's radius", () => {
+    const contacts = sceneContacts(withCraft(900, -5), moon, ground, 30);
     // TEST HULL's farthest vertex, a corner of its 8 m × 5 m stern 10 m aft: √(4² + 2.5² + 10²).
     expect(contacts[0]?.radiusM).toBeCloseTo(Math.hypot(4, 2.5, 10), 12);
   });
 
-  it("takes no contact of a craft at 2 km and receding, nor of a craft far from the body", () => {
+  it("takes no contact of a craft at 2 km and receding", () => {
     expect(sceneContacts(withCraft(2_000, 5), moon, ground, 30)).toEqual([]);
+  });
+
+  it("takes no contact of a craft far from the body", () => {
     expect(sceneContacts(SCENE, moon, ground, 30)).toEqual([]);
+  });
+
+  it("judges a craft in the system's frame by its velocity less the body's, closing on it", () => {
+    // The moon moves at 1 km/s along x and 10 m/s up its pole; the craft, 900 m over the pole,
+    // rises at 5 m/s with it along x: it closes on the ground at 5 m/s.
+    const moving: ViewBody = {
+      ...moon,
+      retarded: {
+        centreM: moon.centreM,
+        velocityMPerS: vec3(1_000, 0, 10),
+        lightTimeS: 0,
+      },
+    };
+    const scene: ViewScene = {
+      ...withMoon(SCENE, moving),
+      craft: [
+        aViewCraft({
+          pose: {
+            position: {
+              kind: "system",
+              system: FIXTURE_SYSTEM,
+              m: add(moon.centreM, vec3(0, 0, figure.polar_radius_m + 900)),
+            },
+            attitude: NO_TURN,
+          },
+          velocityMPerS: vec3(1_000, 0, 5),
+        }),
+      ],
+    };
+    expect(sceneContacts(scene, moving, ground, 30)).toHaveLength(1);
+  });
+
+  it("takes no contact over a body whose rotation is not known", () => {
+    expect(sceneContacts(withCraft(900, -5), { ...moon, rotation: null }, ground, 30)).toEqual([]);
+  });
+
+  it("takes at most MAX_CONTACTS of the craft over the body", () => {
+    const one = withCraft(900, -5).craft[0] ?? fail();
+    const scene: ViewScene = {
+      ...SCENE,
+      // The scene's own ship first, as the scene needs it among its craft.
+      craft: Array.from({ length: MAX_CONTACTS + 3 }, (_, n) => ({
+        ...one,
+        id: n === 0 ? one.id : `craft-${String(n)}`,
+      })),
+    };
+    expect(sceneContacts(scene, moon, ground, 30)).toHaveLength(MAX_CONTACTS);
+  });
+
+  it("passes over a craft the scene cannot place against the body, and takes the rest", () => {
+    const placed = withCraft(900, -5).craft[0] ?? fail();
+    const elsewhere = aViewCraft({
+      id: "elsewhere",
+      pose: {
+        position: { kind: "system", system: "0000000000000099", m: vec3(0, 0, 0) },
+        attitude: NO_TURN,
+      },
+      velocityMPerS: vec3(0, 0, -5),
+    });
+    const scene: ViewScene = { ...SCENE, craft: [elsewhere, placed] };
+    expect(sceneContacts(scene, moon, ground, 30)).toHaveLength(1);
+  });
+
+  it("weighs a view by its budget's streaming priority: a secondary's a quarter of a primary's", () => {
+    const weightOf = (streamPriority: "primary" | "secondary"): number | undefined =>
+      terrainPassViewOf(INSTRUMENT, handing(6e6, { streamPriority }), moon)?.weight;
+    expect([weightOf("primary"), weightOf("secondary")]).toEqual([
+      PRIMARY_VIEW_WEIGHT,
+      SECONDARY_VIEW_WEIGHT,
+    ]);
   });
 
   it("forces the pass's region under a craft descending over its survey", async () => {
@@ -704,6 +885,7 @@ async function streamBakes(h: Harness, rounds: number): Promise<void> {
   for (let n = 0; n < rounds; n += 1) {
     h.session.step();
     answerBakes(h, new Set([0, 1]), new Map());
+    // Each round answers the bakes the round before asked, so the rounds cannot run together.
     // oxlint-disable-next-line no-await-in-loop
     await settle();
   }

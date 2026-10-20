@@ -56,14 +56,15 @@
  *   (`surveyEdgeViewsOf`).
  */
 
-import type {
-  BodyIdHex,
-  DetailSeedHex,
-  RequestClient,
-  SurfaceHeaderDto,
-  SurfaceRevisionDto,
-  UniverseIdHex,
-  UniverseTime,
+import {
+  type BodyIdHex,
+  type DetailSeedHex,
+  parseBodyId,
+  type RequestClient,
+  type SurfaceHeaderDto,
+  type SurfaceRevisionDto,
+  type UniverseIdHex,
+  type UniverseTime,
 } from "@hyperion/protocol";
 
 import { norm, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
@@ -73,7 +74,7 @@ import type { ViewBudget } from "../budget/viewBudget";
 import type { CameraPose } from "../camera/pose";
 import type { Viewport } from "../camera/projection";
 import { type RenderStyle, sceneFrameFor, type ViewId } from "../camera/state";
-import { differenceM } from "../coords/position";
+import { differenceM, type ViewPosition } from "../coords/position";
 import { relativeToCamera } from "../coords/relative";
 import { rotateToBodyFixed } from "../coords/rotation";
 import { type MemoryCategory, textureBytes, type TextureSpec } from "../engine/memory";
@@ -170,6 +171,13 @@ export interface TerrainViewReport {
   readonly presentedPx: Viewport;
   /** The style its budget draws (`ViewBudget.style`), whose τ judges its range (Design note 13). */
   readonly style: RenderStyle;
+  /**
+   * The style its last frame was drawn in (`ViewFrameDrawn.drawnStyle`): the wireframe while its
+   * photorealistic pipelines compile, or stand in after a device loss. Only a view whose last frame
+   * was photorealistic hands a body over to a pass (the batch review's S8); its fields are judged
+   * by {@link TerrainViewReport.style}, so that a loss releases none.
+   */
+  readonly drawnStyle: RenderStyle;
   /** The quality setting it draws at, whose τ the photorealistic style takes. */
   readonly setting: QualitySetting;
   /** Its budget's terrain streaming priority (`ViewBudget.streamPriority`), for R10.T16.b's weights. */
@@ -294,6 +302,31 @@ export function terrainPassViewOf(
   };
 }
 
+/**
+ * Whether `scene` can place `position` against `body`, its centre (`differenceM` answers rather than
+ * throws): every frame the two meet in is one the scene holds, its barycentre known where they meet
+ * in the galactic frame (the batch review's S10).
+ */
+function placeableAgainst(position: ViewPosition, body: ViewBody, scene: ViewScene): boolean {
+  const system = parseBodyId(body.id).system;
+  let placeable: boolean;
+  switch (position.kind) {
+    case "body":
+    case "body_fixed":
+      placeable =
+        scene.bodies.some((each) => each.id === position.body) &&
+        (position.body === body.id || parseBodyId(position.body).system === system);
+      break;
+    case "system":
+      placeable = position.system === system;
+      break;
+    case "galactic":
+      placeable = scene.system === system && scene.barycentre !== null;
+      break;
+  }
+  return placeable;
+}
+
 /** A hull's bounding radius, m: its farthest vertex from its reference point (`TEST HULL`'s 11.06 m). */
 export function hullBoundingRadiusM(hull: HullOutline): number {
   return Math.max(0, ...hull.vertices.map((v) => norm(v)));
@@ -350,17 +383,15 @@ export function sceneContacts(
   const origins = cameraSceneOf(scene).origins;
   const contacts: GroundContact[] = [];
   for (const craft of scene.craft) {
-    let fromCentreM: Vec3;
-    try {
-      fromCentreM = differenceM(
-        craft.pose.position,
-        { kind: "body", body: body.id, m: vec3(0, 0, 0) },
-        origins,
-      );
-    } catch {
-      // A frame the scene does not know: nothing to place the craft by.
+    if (!placeableAgainst(craft.pose.position, body, scene)) {
+      // A frame the scene does not hold: nothing to place the craft by.
       continue;
     }
+    const fromCentreM = differenceM(
+      craft.pose.position,
+      { kind: "body", body: body.id, m: vec3(0, 0, 0) },
+      origins,
+    );
     const v = velocityAgainst(craft, body);
     const contact = craftContact(
       rotateToBodyFixed(rotation, fromCentreM),
@@ -657,13 +688,17 @@ export class TerrainSession {
     if (this.#disposed) {
       return;
     }
-    const reliefM = (body: BodyIdHex): number | null =>
-      this.#store.header(body)?.realised_relief_m ?? null;
-    const candidates = [...this.#reports.values()].flatMap((report) =>
-      viewFieldCandidates(report, reliefM),
-    );
-    this.#store.follow(candidates);
-    this.#followWants();
+    // With no view's report there is nothing to judge the fields by: a loop that starts again on
+    // a living session, before its first report, keeps every field (D1; the batch review's S2).
+    if (this.#reports.size > 0) {
+      const reliefM = (body: BodyIdHex): number | null =>
+        this.#store.header(body)?.realised_relief_m ?? null;
+      const candidates = [...this.#reports.values()].flatMap((report) =>
+        viewFieldCandidates(report, reliefM),
+      );
+      this.#store.follow(candidates);
+      this.#followWants();
+    }
     this.#stepPasses();
   }
 
@@ -925,7 +960,9 @@ export class TerrainSession {
   #handingViews(): Map<BodyIdHex, HandingView[]> {
     const handing = new Map<BodyIdHex, HandingView[]>();
     for (const [id, report] of this.#reports) {
-      if (report.style !== "photorealistic") {
+      // The style the view drew, not the one it is to draw: a view standing in with the wireframe
+      // after a device loss hands nothing over (S8).
+      if (report.drawnStyle !== "photorealistic") {
         continue;
       }
       for (const [body, regime] of report.regimes) {
@@ -973,6 +1010,9 @@ export class TerrainSession {
         source: { kind: "body", body, detailSeed, weights: "baked" },
         createPool: (bake) => this.#pool.lane(bake),
         survey: held.survey,
+        // Each view's selection opened by its motion, so that no strip at its leading edge is
+        // left unselected while its mask discards the reference surface there (S6).
+        frustumMargin: "motion",
       });
     } catch (error: unknown) {
       if (error instanceof EngineUnavailable) {

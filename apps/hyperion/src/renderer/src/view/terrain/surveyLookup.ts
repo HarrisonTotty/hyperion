@@ -60,6 +60,16 @@ export class SurveyedCells implements SurveyLookup {
   #pyramid: Uint8Array[] = [];
   #version = 0;
   readonly #step: CellOut = { face: 0, i: 0, j: 0 };
+  /**
+   * The field-level cell under a finer patch, rewritten in place by each lookup, so that selection's
+   * hot path allocates nothing (the batch review's C9).
+   */
+  readonly #under: { face: PatchKey["face"]; level: number; i: number; j: number } = {
+    face: 0,
+    level: 0,
+    i: 0,
+    j: 0,
+  };
 
   /** A count of the changes: every cell added, and every clear. */
   get version(): number {
@@ -143,15 +153,20 @@ export class SurveyedCells implements SurveyLookup {
       return this.#pyramid[key.level]?.[rowIndex(key.face, key.level, key.i, key.j)] === 1;
     }
     const shift = key.level - level;
-    const cell: PatchKey = { face: key.face, level, i: key.i >> shift, j: key.j >> shift };
+    const cell = this.#under;
+    cell.face = key.face;
+    cell.level = level;
+    cell.i = key.i >> shift;
+    cell.j = key.j >> shift;
     if (cells[rowIndex(cell.face, level, cell.i, cell.j)] === 1) {
       return true;
     }
     // The cells across the edges and corners of its cell that the patch touches.
     const last = 2 ** shift - 1;
-    const within = { i: key.i & last, j: key.j & last };
-    const di = within.i === 0 ? -1 : within.i === last ? 1 : 0;
-    const dj = within.j === 0 ? -1 : within.j === last ? 1 : 0;
+    const withinI = key.i & last;
+    const withinJ = key.j & last;
+    const di = withinI === 0 ? -1 : withinI === last ? 1 : 0;
+    const dj = withinJ === 0 ? -1 : withinJ === last ? 1 : 0;
     // A patch as wide as its cell is not finer than it, so it touches one side of each axis at most.
     return (
       (di !== 0 && this.#surveyedAt(cell, di, 0)) ||

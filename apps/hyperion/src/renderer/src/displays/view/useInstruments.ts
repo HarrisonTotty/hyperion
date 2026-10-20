@@ -52,10 +52,8 @@ import type { QualitySetting } from "../../view/quality/qualitySetting";
 import { cameraKinematics } from "../../view/scene/fromServer";
 import type { ViewStar } from "../../view/scene/model";
 import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
-import type { ClassMapSource } from "../../view/terrain/classMap";
-import type { HandoverReliefSource } from "../../view/terrain/handover";
 import type { TerrainSession } from "../../view/terrain/session";
-import type { DrawAnchor } from "../../view/wireframe/drawList";
+import type { DrawAnchor, DrawnSurveyEdge } from "../../view/wireframe/drawList";
 import { availabilityOf, styleRefusals } from "./styleRefusals";
 import type { SkyModel } from "../../view/sky/model";
 import {
@@ -102,6 +100,11 @@ export interface InstrumentShown {
    * own, for its label block; `null` with none.
    */
   readonly terrain: TerrainAnnunciation | null;
+  /**
+   * The survey edges its last frame marked, for its list's notes (plan R10, R10.T16.c;
+   * decision-r10-t16-review §1); none before it draws.
+   */
+  readonly surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
 }
 
 /** One slot's standing, as the display renders it. */
@@ -157,16 +160,13 @@ export interface InstrumentsFrame {
   /** Reports each instrument's camera to the server's scene, or `null` for a kept scene. */
   readonly reportCamera: ((view: ViewId, pose: SceneKinematics) => void) | null;
   /**
-   * The class maps the lit bodies' discs shade with (plan R10, R10.T10.d), the terrain session's as
-   * the primary's frame read them (R10.T16.a), or `null` with no session: every disc uniform.
+   * The stage's terrain session as the primary's frame stepped it (plan R10, R10.T16.a), or `null`
+   * with none: each instrument tells it what it drew, its lit bodies take its class maps and
+   * reliefs, and its photorealistic frame its terrain; with none every disc is uniform and none
+   * hands over. Given with the frame, as the class maps and reliefs were, so that an instrument
+   * reads the session the primary stepped (the batch review's C3).
    */
-  readonly classMaps: ClassMapSource | null;
-  /**
-   * The lit bodies' reliefs, by which a body hands over (plan R10, R10.T10.e), the terrain
-   * session's as the primary's frame read them (R10.T16.a), or `null` with no session: none hands
-   * over.
-   */
-  readonly reliefs: HandoverReliefSource | null;
+  readonly terrain: TerrainSession | null;
 }
 
 /** What `useInstruments` reads. */
@@ -192,11 +192,6 @@ export interface InstrumentsInput {
   readonly setting: QualitySetting;
   /** The platform's primary modifier, whose chord with the arrows steps the rate (R07.T19.f). */
   readonly modifier: PrimaryModifier;
-  /**
-   * The stage's terrain session (plan R10, R10.T16.a), or `null`: each instrument tells it what it
-   * drew each frame it draws, and is forgotten by it when it closes or its canvas goes.
-   */
-  readonly terrain: TerrainSession | null;
 }
 
 /** The instruments, their commands and their loop. */
@@ -286,6 +281,8 @@ interface SlotLoop {
   drawnStyle: RenderStyle;
   /** The terrain's annunciation of its last frame drawn (R10.T16.c). */
   terrain: TerrainAnnunciation | null;
+  /** The survey edges its last frame drawn marked (R10.T16.c). */
+  surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
   /** The terrain session it last told what it drew, which forgets it when it goes; or `null`. */
   reportedTo: TerrainSession | null;
 }
@@ -334,6 +331,7 @@ function useSlotDrawer(
         anchors: [],
         drawnStyle: "wireframe",
         terrain: null,
+        surveyEdges: [],
         reportedTo: null,
       });
     });
@@ -386,7 +384,6 @@ export function useInstruments(input: InstrumentsInput): Instruments {
     exposure,
     setting,
     modifier,
-    terrain,
   } = input;
   const graphics = useGraphicsStatus();
   const [slots, setSlots] = useState<Slots>([CLOSED, CLOSED]);
@@ -408,11 +405,6 @@ export function useInstruments(input: InstrumentsInput): Instruments {
   const loopsRef = useRef(new Map<InstrumentSlot, SlotLoop>());
   const inputsRef = useRef<ReadonlyMap<InstrumentSlot, SlotInputs>>(new Map());
   const reducedMotionRef = useRef(reducedMotion);
-  // The loops read the terrain session through a ref, current after every commit (R10.T16.a).
-  const terrainRef = useRef(terrain);
-  useLayoutEffect(() => {
-    terrainRef.current = terrain;
-  }, [terrain]);
 
   const availability = useCallback(
     (slot: InstrumentSlot): StyleAvailability =>
@@ -488,7 +480,14 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           open: true,
           style: run.camera.style,
           selection: null,
-          shown: { run, anchors: [], drawnStyle: "wireframe", photoreal: "idle", terrain: null },
+          shown: {
+            run,
+            anchors: [],
+            drawnStyle: "wireframe",
+            photoreal: "idle",
+            terrain: null,
+            surveyEdges: [],
+          },
           refused: false,
         })),
       );
@@ -624,7 +623,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
       if (next.source.kind === "server") {
         each.reportCamera?.(instrumentViewId(slot), cameraKinematics(runPose(next), next.scene));
       }
-      const session = terrainRef.current;
+      const session = each.terrain;
       const frameInputs: ViewFrameInputs = {
         run: next,
         size: inputs.size,
@@ -640,8 +639,8 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         // The primary is the exposure's source: an instrument meters nothing (Design note 11).
         meter: null,
         // The terrain session's, as the primary's frame read them (R10.T16.a).
-        classMaps: each.classMaps ?? undefined,
-        reliefs: each.reliefs ?? undefined,
+        classMaps: session?.classMaps,
+        reliefs: session?.reliefs,
         // Its own terrain of the session's passes, from its own camera, and its survey edges
         // (R10.T16.c).
         terrain:
@@ -654,6 +653,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
       if (drawn !== null) {
         loop.anchors = drawn.anchors;
         loop.drawnStyle = drawn.drawnStyle;
+        loop.surveyEdges = drawn.surveyEdges;
         // What it drew, for the terrain session's next step (R10.T16.a).
         if (loop.reportedTo !== session) {
           forgetSlot(loop, slot);
@@ -662,7 +662,12 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         const report =
           session === null
             ? null
-            : terrainReportOf(frameInputs, loop.drawer.regimes, budget.streamPriority);
+            : terrainReportOf(
+                frameInputs,
+                loop.drawer.regimes,
+                budget.streamPriority,
+                drawn.drawnStyle,
+              );
         if (session !== null && report !== null) {
           session.noteView(instrumentViewId(slot), report);
         }
@@ -674,6 +679,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           drawnStyle: loop.drawnStyle,
           photoreal: loop.drawer.photorealStatus,
           terrain: loop.terrain,
+          surveyEdges: loop.surveyEdges,
         };
         setSlots((previous) =>
           withSlot(previous, slot, (state) =>

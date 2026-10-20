@@ -5,7 +5,7 @@
 
 import type { ViewId } from "../../view/camera/state";
 import type { GraphicsAnnunciation, GraphicsStatus } from "../../view/engine/status";
-import { TERRAIN_NOT_AVAILABLE } from "../../view/terrain/annunciation";
+import { TERRAIN_NOT_AVAILABLE, type TerrainAnnunciation } from "../../view/terrain/annunciation";
 
 /**
  * A graphics fault to show on a view's plate: the standing fault, unless it is another view's
@@ -38,4 +38,18 @@ export function faultsFor(
   const graphicsFault = faultFor(graphics, annunciation, viewName);
   const faults = graphicsFault === null ? [] : [graphicsFault];
   return terrainFaults.has(view) ? [...faults, TERRAIN_NOT_AVAILABLE] : faults;
+}
+
+/**
+ * A view's terrain annunciation for its label block's statements (`labelStatements`), or `null`
+ * while its faults hold the terrain's (`TERRAIN_NOT_AVAILABLE`): the fault reaches the block at
+ * once, and the annunciation at the readout rate, so without this the two could stand together
+ * for up to a readout interval, `TERRAIN: STREAMING` beside a fault that says nothing is coming
+ * (decision-r10-t16-contracts §7; the batch review's C2).
+ */
+export function terrainStatementOf(
+  terrain: TerrainAnnunciation | null,
+  faults: ReadonlyArray<string>,
+): TerrainAnnunciation | null {
+  return faults.includes(TERRAIN_NOT_AVAILABLE) ? null : terrain;
 }

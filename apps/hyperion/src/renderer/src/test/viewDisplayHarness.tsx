@@ -44,6 +44,8 @@ import { SCENE_TIDAL_RADIUS_M, sceneClock, shipInSystem, sliceSceneSystem } from
 import { ScriptedHeightWorker } from "./scriptedHeightWorker";
 import { ServerLinkHarness } from "./ServerLinkHarness";
 import type { WorkerLike } from "../view/terrain/workers/pool";
+import type { TerrainSession } from "../view/terrain/session";
+import type { SceneOption } from "../displays/view/viewRun";
 
 /**
  * The stage's laid-out width in the tests, CSS px (and device px, at a ratio of 1): 80 rem, room
@@ -409,6 +411,10 @@ export function renderViewDisplay(options: {
   readonly viewPx?: LaidOutPx;
   /** The primary's label block's laid-out box, each time it is measured: nothing by default. */
   readonly blockPx?: () => LaidOutBoxPx;
+  /** The kept scenes `VIEW` offers: its own by default (the views check's terrain run gives its own). */
+  readonly sceneOptions?: ReadonlyArray<SceneOption>;
+  /** The views check's watch of the terrain session (R10.T16.d): none by default. */
+  readonly watchTerrain?: (session: TerrainSession) => () => void;
 }): ViewDisplayHarness {
   const advanceTimers = fakeFramesAndTimeouts();
   let viewPx: LaidOutPx = options.viewPx ?? FULL_VIEW_PX;
@@ -440,6 +446,8 @@ export function renderViewDisplay(options: {
                     engineSource={options.source}
                     setting={options.setting}
                     heightWorkers={startHeightWorker}
+                    sceneOptions={options.sceneOptions}
+                    watchTerrain={options.watchTerrain}
                   />
                 </main>
               </Activity>

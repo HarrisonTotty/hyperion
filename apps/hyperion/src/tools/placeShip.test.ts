@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import {
   type BodySummaryDto,
   type ClientMessage,
@@ -19,11 +22,15 @@ import {
   AU_M,
   askThrough,
   bodyKinematics,
+  COARSE_LEVELS,
+  coarseCellCount,
+  coarseLevel,
   DEFAULT_BODY_DISTANCE_AU,
   DEFAULT_NEAR_LY,
   DEFAULT_SEED,
   DEFAULT_UNIVERSE,
   describePlacement,
+  MAX_MEAN_CELL_M,
   nearestFirst,
   type PlaceShipOptions,
   parsePlaceShipArgs,
@@ -80,6 +87,39 @@ function aBody(
 /** A planet 1 au out on +x, moving at 30 km/s along +y. */
 function planetAt(seconds: number): BodySummaryDto {
   return aBody(`${NEAR}.0100`, "planet", [AU_M, 30_000 * seconds, 0]);
+}
+
+/**
+ * The planet's equatorial and polar radii, m: the Moon's, NASA's Moon fact sheet's 1,738.1 and
+ * 1,736.0 km, whose volumetric radius, 1,737.4 km, puts its coarse field at level 6.
+ */
+const PLANET_FIGURE_M = { a: 1_738_100, c: 1_736_000 } as const;
+
+/** The planet's record at the `full` level: its figure `ok`, its other sections not modelled. */
+function planetDetail(body: Extract<RequestBody, { kind: "body_detail" }>): ResponseBody {
+  return {
+    kind: "body_detail",
+    universe: body.universe,
+    time: body.time,
+    granted: body.detail,
+    record: {
+      ...planetAt(body.time.seconds),
+      figure: {
+        state: "ok",
+        value: {
+          equatorial_radius_m: PLANET_FIGURE_M.a,
+          polar_radius_m: PLANET_FIGURE_M.c,
+          flattening: 1 - PLANET_FIGURE_M.c / PLANET_FIGURE_M.a,
+          pole: [0, 0, 1],
+          moment_of_inertia_factor: 0.393,
+          law: "rotational",
+          datum: "solid_surface",
+        },
+      },
+      surface: { state: "not_modelled" },
+      hooks: { state: "not_modelled" },
+    },
+  };
 }
 
 /**
@@ -148,18 +188,23 @@ class FakeServer {
           kind: "scene_ship",
           clock: { time: body.ship.time, time_rate: body.time_rate, state: "running" },
         };
+      case "body_detail":
+        if (body.body === `${NEAR}.0100`) {
+          return planetDetail(body);
+        }
+        return { code: "unknown_body", message: `no body ${body.body}`, field: "body" };
+      case "survey_pass":
+        return { kind: "survey_pass", revision: 1 };
       case "open_universe":
       case "galaxy_parameters":
       case "density_map":
       case "system_summary":
-      case "body_detail":
       case "body_events":
       case "subscribe":
       case "unsubscribe":
       case "scene_cameras":
       case "sky":
       case "surface_field":
-      case "survey_pass":
       case "extinction_map":
       case "extinction":
       case "resolve_system":
@@ -210,6 +255,11 @@ class FakeServer {
     }
     return request;
   }
+
+  /** The `survey_pass` requests it was sent, first first. */
+  surveyPasses(): Array<Extract<RequestBody, { kind: "survey_pass" }>> {
+    return this.requests.flatMap((sent) => (sent.kind === "survey_pass" ? [sent] : []));
+  }
 }
 
 function options(args: readonly string[]): PlaceShipOptions {
@@ -243,6 +293,18 @@ describe("place-ship's command line", () => {
       distanceAu: null,
       timeS: 0,
       rate: 1,
+      survey: null,
+    });
+  });
+
+  it("reads a survey's source and resolution (R10.T16.d)", () => {
+    expect(options(["--survey", "close_range", "2.5"]).survey).toEqual({
+      source: "close_range",
+      resolutionM: 2.5,
+    });
+    expect(options(["--survey", "orbital", "50", "--rate", "10"])).toMatchObject({
+      survey: { source: "orbital", resolutionM: 50 },
+      rate: 10,
     });
   });
 
@@ -275,6 +337,12 @@ describe("place-ship's command line", () => {
     [["--seed", "xyz"]],
     [["--time", "1.5"]],
     [["stray"]],
+    [["--survey", "orbital"]],
+    [["--survey", "orbital", "50", "60"]],
+    [["--survey", "sonar", "50"]],
+    [["--survey", "orbital", "0"]],
+    [["--survey", "orbital", "fine"]],
+    [["--survey", "orbital", "50", "--look-at", "barycentre"]],
   ])("refuses %j", (args) => {
     expect(() => options(args)).toThrow(CommanderError);
   });
@@ -368,6 +436,66 @@ describe("placing the ship", () => {
     const placement = await placeShip(askThrough(server.client()), options(["-u", "Survey"]));
     expect(describePlacement(placement)).toContain("F2, open Survey, then F4 (VIEW)");
   });
+
+  it("sends no survey_pass unless asked", async () => {
+    const server = new FakeServer();
+    const placement = await placeShip(askThrough(server.client()), options(["-u", "Survey"]));
+    expect([placement.survey, server.surveyPasses()]).toEqual([null, []]);
+  });
+
+  it("surveys every cell of the target body's coarse field after placing the ship (R10.T16.d)", async () => {
+    const server = new FakeServer();
+    const placement = await placeShip(
+      askThrough(server.client()),
+      options(["-u", "Survey", "--time", "3600", "--survey", "orbital", "50"]),
+    );
+    const time = { seconds: 3600, nanos: 0 };
+    // The Moon-sized figure's field is at level 6: 6 · 4⁶ cells, in one run.
+    expect(server.surveyPasses()).toEqual([
+      {
+        kind: "survey_pass",
+        universe: UNIVERSE.id,
+        body: `${NEAR}.0100`,
+        from: time,
+        to: time,
+        source: "orbital",
+        resolution_m: 50,
+        cells: [{ start: 0, end: 24_576 }],
+      },
+    ]);
+    expect(server.requests.map((sent) => sent.kind).slice(-3)).toEqual([
+      "scene_ship",
+      "body_detail",
+      "survey_pass",
+    ]);
+    expect(placement.survey).toEqual({
+      source: "orbital",
+      resolutionM: 50,
+      level: 6,
+      revision: 1,
+    });
+    expect(describePlacement(placement)).toContain(
+      "orbital at 50 m over all 24576 cells of level 6, revision 1",
+    );
+  });
+
+  it("refuses to survey a body with no figure to give its field's level", async () => {
+    const server = new FakeServer();
+    const answer = server.answer.bind(server);
+    vi.spyOn(server, "answer").mockImplementation((body) => {
+      const given = answer(body);
+      return body.kind === "body_detail" && "kind" in given && given.kind === "body_detail"
+        ? { ...given, record: { ...given.record, figure: { state: "not_modelled" } } }
+        : given;
+    });
+    await expect(
+      placeShip(
+        askThrough(server.client()),
+        options(["-u", "Survey", "--survey", "landed", "0.5"]),
+      ),
+    ).rejects.toThrow(`body ${NEAR}.0100 has no figure to give its coarse field's level`);
+    expect(server.surveyPasses()).toEqual([]);
+  });
 });
 
 describe("the geometry", () => {
@@ -386,6 +514,103 @@ describe("the geometry", () => {
       "no velocity",
     );
   });
+
+  it("finds a body's coarse level as R09's coarse_level does: 5 for a Ceres to 8 for an Earth", () => {
+    // Volumetric mean radii: Ceres's 469.7 km (Dawn), the Moon's 1,737.4 km, Mars's 3,389.5 km and
+    // Earth's 6,371.0 km (NASA's fact sheets); a world of 2 R⊕ where the cap at 8 binds.
+    expect([469_700, 1_737_400, 3_389_500, 6_371_000, 12_742_000].map(coarseLevel)).toEqual([
+      5, 6, 7, 8, 8,
+    ]);
+    // A level changes where (R √(4π ÷ 6)) ÷ 2ᴸ crosses 40 km: here between levels 5 and 6.
+    const switchM = (40_000 * 2 ** 5) / Math.sqrt((4 * Math.PI) / 6);
+    expect([coarseLevel(switchM * (1 - 1e-12)), coarseLevel(switchM * (1 + 1e-12))]).toEqual([
+      5, 6,
+    ]);
+    expect(coarseCellCount(6)).toBe(24_576);
+    expect(() => coarseLevel(0)).toThrow(RangeError);
+  });
+});
+
+/**
+ * R09's level rule as `crates/hyperion-surface/src/field.rs` states it, read from the source, so
+ * that a change there fails the tripwire below (decision-r10-t16d-part1, Q5): its widest mean cell,
+ * its levels' bounds and the three switch radii its own test pins.
+ */
+interface RustLevelRule {
+  readonly maxMeanCellM: number;
+  readonly min: number;
+  readonly max: number;
+  readonly switches: ReadonlyArray<readonly [level: number, largestM: number]>;
+}
+
+/** A Rust literal's number, its digit separators dropped. */
+function rustNumber(digits: string): number {
+  return Number(digits.replaceAll("_", ""));
+}
+
+/** `field.rs`'s level rule, each item found or an error naming the file and the item. */
+function rustLevelRule(): RustLevelRule {
+  const source = readFileSync(
+    fileURLToPath(new URL("../../../../crates/hyperion-surface/src/field.rs", import.meta.url)),
+    "utf8",
+  );
+  const found = (pattern: RegExp, item: string, from = 0): string => {
+    const value = pattern.exec(source.slice(from))?.[1];
+    if (value === undefined) {
+      throw new Error(`crates/hyperion-surface/src/field.rs no longer states ${item}`);
+    }
+    return value;
+  };
+  const level = source.indexOf("impl CoarseLevel {");
+  const pinned = source.indexOf("fn the_level_rule_switches_at_pinned_radii()");
+  if (level === -1 || pinned === -1) {
+    throw new Error(
+      "crates/hyperion-surface/src/field.rs no longer has `impl CoarseLevel` or its pinned radii",
+    );
+  }
+  const pairs = source.slice(pinned, source.indexOf("] {", pinned));
+  const switches = [...pairs.matchAll(/\((\d+), ([0-9_.]+)\)/gu)].map(
+    ([, at, largest]): readonly [number, number] => [
+      rustNumber(at ?? ""),
+      rustNumber(largest ?? ""),
+    ],
+  );
+  if (switches.length === 0) {
+    throw new Error("crates/hyperion-surface/src/field.rs pins no switch radius");
+  }
+  return {
+    maxMeanCellM: rustNumber(found(/const MAX_MEAN_CELL_M: f64 = ([0-9_.]+);/u, "MAX_MEAN_CELL_M")),
+    min: rustNumber(found(/pub const MIN: Self = Self\((\d+)\);/u, "CoarseLevel::MIN", level)),
+    max: rustNumber(found(/pub const MAX: Self = Self\((\d+)\);/u, "CoarseLevel::MAX", level)),
+    switches,
+  };
+}
+
+/** The next `f64` above a positive finite `x`, through its bits, as Rust's `next_up`. */
+function nextUp(x: number): number {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, x);
+  view.setBigUint64(0, view.getBigUint64(0) + 1n);
+  return view.getFloat64(0);
+}
+
+describe("the level rule's tie to R09's source (a tripwire)", () => {
+  const rule = rustLevelRule();
+
+  it("takes field.rs's widest mean cell", () => {
+    expect(MAX_MEAN_CELL_M).toBe(rule.maxMeanCellM);
+  });
+
+  it("takes field.rs's bounds of a coarse field's levels", () => {
+    expect([COARSE_LEVELS.min, COARSE_LEVELS.max]).toEqual([rule.min, rule.max]);
+  });
+
+  it.each(rule.switches)(
+    "switches from level %i to the next at R09's pinned radius %f m, to the bit",
+    (level, largestM) => {
+      expect([coarseLevel(largestM), coarseLevel(nextUp(largestM))]).toEqual([level, level + 1]);
+    },
+  );
 });
 
 /** Whether a message the client sent is a request, as the fake socket recorded it. */

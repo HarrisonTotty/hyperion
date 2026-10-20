@@ -1,4 +1,4 @@
-import type { ResponseBody, ResponseFor } from "@hyperion/protocol";
+import type { ResponseBody, ResponseFor, SurfaceHeaderDto } from "@hyperion/protocol";
 import { act, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -13,7 +13,7 @@ import {
 } from "../../test/coarseFieldFixtures";
 import { earthDetail, FIXTURE_EARTH } from "../../test/planetaryFixture";
 import { SCENE_TIDAL_RADIUS_M, sceneClock, sliceSceneSystem } from "../../test/sceneFixture";
-import { TERRAIN_NOT_AVAILABLE } from "../../view/terrain/annunciation";
+import { ANNUNCIATION_ONSET_MS, TERRAIN_NOT_AVAILABLE } from "../../view/terrain/annunciation";
 import { MAX_CONSECUTIVE_WORKER_FAILURES } from "../../view/terrain/workers/pool";
 
 import {
@@ -27,20 +27,32 @@ import {
   type ViewDisplayHarness,
 } from "../../test/viewDisplayHarness";
 import { GraphicsStatusStore, initialGraphicsStatus } from "../../view/engine/status";
+import { blockBytes } from "../../view/scenes/terrainGolden";
+import {
+  TERRAIN_SCENE_NAME,
+  terrainSceneFixture,
+  terrainTestGolden,
+} from "../../view/scenes/terrainScene";
+import type { TerrainSession } from "../../view/terrain/session";
+import type { TerrainFixture } from "./useTerrainSession";
 import { instrumentViewId, PRIMARY_VIEW_ID } from "./viewNames";
 import { ViewFrameDrawer, type ViewFrameInputs } from "./viewFrameDrawer";
+import { SCENE_OPTIONS } from "./viewRun";
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
-/** `VIEW` rendered over a fake engine, its first frames drawn. */
-async function setup(): Promise<ViewDisplayHarness> {
+/** `VIEW` rendered over a fake engine, its first frames drawn, with the views check's seams given. */
+async function setup(
+  seams: Pick<Parameters<typeof renderViewDisplay>[0], "sceneOptions" | "watchTerrain"> = {},
+): Promise<ViewDisplayHarness> {
   const fake = timedEngineSource();
   const view = renderViewDisplay({
     store: new GraphicsStatusStore(initialGraphicsStatus("vulkan", false)),
     source: fake.source,
     engines: fake.engines,
+    ...seams,
   });
   await settle();
   view.advance(100);
@@ -139,33 +151,29 @@ describe("VIEW's terrain session (R10.T16.a)", () => {
     );
   });
 
-  it("states each view's own terrain annunciation on its own label block (G10; R10.T16.c)", async () => {
-    const view = await serverScene();
-    await openInstrument(view, "INSTRUMENT 1");
-    // Each view's frame says what its own terrain annunciates: the primary's streaming, the
-    // instrument's detail limited, as `LiveFrameTerrain` gives them from the session's passes.
-    // The drawer's own draw, called on its drawer as the loop calls it.
-    // oxlint-disable-next-line typescript/unbound-method
-    const draw = ViewFrameDrawer.prototype.draw;
-    vi.spyOn(ViewFrameDrawer.prototype, "draw").mockImplementation(function (
-      this: ViewFrameDrawer,
-      inputs: ViewFrameInputs,
-    ) {
-      const drawn = draw.call(this, inputs);
-      const own =
-        inputs.terrain?.view === PRIMARY_VIEW_ID ? "TERRAIN: STREAMING" : "TERRAIN: DETAIL LIMITED";
-      return drawn === null ? null : { ...drawn, terrain: own };
+  describe("each view's own terrain annunciation on its own label block (G10; R10.T16.c)", () => {
+    /**
+     * The Earth handed over to the photorealistic primary, its field answered and its bakes held
+     * back, INSTRUMENT 1 open in the wireframe beside it, past the annunciation's onset.
+     */
+    async function earthStreaming(): Promise<void> {
+      const view = await earthHandedOver();
+      await openInstrument(view, "INSTRUMENT 1");
+      view.advance(ANNUNCIATION_ONSET_MS + 500);
+      await settle();
+    }
+
+    it("states TERRAIN: STREAMING on the primary's, whose terrain waits for its bakes", async () => {
+      await earthStreaming();
+      expect(within(primaryLabelBlock()).getByText("TERRAIN: STREAMING")).toBeInTheDocument();
     });
-    view.advance(600);
-    await settle();
-    const primary = primaryLabelBlock();
-    const instrument = screen.getByRole("region", { name: "INSTRUMENT 1" });
-    expect([
-      within(primary).queryByText("TERRAIN: STREAMING") !== null,
-      within(primary).queryByText("TERRAIN: DETAIL LIMITED"),
-      within(instrument).queryByText("TERRAIN: DETAIL LIMITED") !== null,
-      within(instrument).queryByText("TERRAIN: STREAMING"),
-    ]).toEqual([true, null, true, null]);
+
+    it("states none on a wireframe instrument's, which hands nothing over", async () => {
+      await earthStreaming();
+      expect(
+        within(screen.getByRole("region", { name: "INSTRUMENT 1" })).queryByText(/^TERRAIN:/u),
+      ).toBeNull();
+    });
   });
 
   it("is disposed when a kept scene is chosen, its height workers stopped", async () => {
@@ -180,6 +188,187 @@ describe("VIEW's terrain session (R10.T16.a)", () => {
         (w) => w.terminated && w.listening.message === 0 && w.listening.error === 0,
       ),
     ]).toEqual([true, true]);
+  });
+});
+
+/** The `TERRAIN TEST` option's fixture, as `SCENE_OPTIONS` holds it. */
+function terrainTestFixtureOfOptions(): TerrainFixture {
+  const fixture = SCENE_OPTIONS.find(({ name }) => name === TERRAIN_SCENE_NAME)?.terrain;
+  if (fixture === undefined) {
+    throw new Error("TERRAIN TEST carries a terrain fixture");
+  }
+  return fixture;
+}
+
+describe("VIEW's TERRAIN TEST (R10.T16.d)", () => {
+  it("makes its session over its fixture, the first payload reaching the height workers and nothing sent over the link", async () => {
+    const view = await setup();
+    await view.user.click(screen.getByRole("button", { name: TERRAIN_SCENE_NAME }));
+    for (let step = 0; step < 4; step += 1) {
+      view.advance(100);
+      // Each step waits on the last.
+      // oxlint-disable-next-line no-await-in-loop
+      await settle();
+    }
+    const first = view.heightWorkers[0]?.fieldMessages ?? [];
+    const blocks = terrainTestGolden().payloads[0]?.blocksHex ?? [];
+    expect(
+      first.map((message) =>
+        message.kind === "field-release" ? null : Array.from(new Uint8Array(message.block)),
+      ),
+    ).toEqual(blocks.map((hex) => Array.from(blockBytes(hex))));
+    expect([
+      view.socket.requestsOfKind("surface_field"),
+      view.socket.requestsOfKind("body_detail"),
+    ]).toEqual([[], []]);
+  });
+
+  it("tells its fixture, each frame, how far its script has played", async () => {
+    const fixture = terrainTestFixtureOfOptions();
+    if (fixture.notePlayed === undefined) {
+      throw new Error("TERRAIN TEST's fixture follows its script");
+    }
+    const played = vi.spyOn(fixture, "notePlayed");
+    const view = await setup();
+    await view.user.click(screen.getByRole("button", { name: TERRAIN_SCENE_NAME }));
+    played.mockClear();
+    view.advance(1_000);
+    const times = played.mock.calls.map(([scriptS]) => scriptS);
+    expect([
+      times.length > 10,
+      times.every((t, at) => at === 0 || t >= (times[at - 1] ?? 0)),
+      (times.at(-1) ?? 0) > 0.5,
+    ]).toEqual([true, true, true]);
+  });
+});
+
+/** A survey-edge note of `TEST MOON`, by its accessible name, whatever its range. */
+const TEST_MOON_EDGE = /^TEST MOON, survey edge, range [\d.,]+ (?:m|km|Mm)$/u;
+
+/** `VIEW` on `TERRAIN TEST` over a nominal adapter, its first payload arrived and drawn. */
+async function terrainTestShown(): Promise<ViewDisplayHarness> {
+  const fake = timedEngineSource();
+  const view = renderViewDisplay({
+    store: await nominalStore(),
+    source: fake.source,
+    engines: fake.engines,
+  });
+  await settle();
+  view.advance(100);
+  await view.user.click(screen.getByRole("button", { name: TERRAIN_SCENE_NAME }));
+  await playFor(view, 6);
+  return view;
+}
+
+/** Plays `steps` × 300 ms of frames, letting each step's work settle. */
+async function playFor(view: ViewDisplayHarness, steps: number): Promise<void> {
+  for (let step = 0; step < steps; step += 1) {
+    view.advance(300);
+    // Each step waits on the last.
+    // oxlint-disable-next-line no-await-in-loop
+    await settle();
+  }
+}
+
+/**
+ * Switches the `CONTROLS` view to the photorealistic style by its key, checking that its label
+ * block (`block`) then states it.
+ */
+async function photorealistic(view: ViewDisplayHarness, block: () => HTMLElement): Promise<void> {
+  await view.user.keyboard("4");
+  await playFor(view, 4);
+  const style = within(block()).getByText("STYLE", { selector: "dt" }).nextElementSibling;
+  if (style?.textContent !== "PHOTOREALISTIC") {
+    throw new Error(`the view draws ${String(style?.textContent)}, not PHOTOREALISTIC`);
+  }
+}
+
+/** Opens INSTRUMENT 1 and points `CONTROLS` at it, so that the side column shows its list. */
+async function controlInstrument(view: ViewDisplayHarness): Promise<void> {
+  await openInstrument(view, "INSTRUMENT 1");
+  await view.user.click(
+    within(screen.getByRole("group", { name: "CONTROLS" })).getByRole("button", {
+      name: "INSTRUMENT 1",
+    }),
+  );
+  await playFor(view, 4);
+}
+
+describe("VIEW's lists note the survey edges (R10.T16.c; decision-r10-t16-review §1)", () => {
+  it("notes TEST MOON's edge in the primary's list in the wireframe", async () => {
+    await terrainTestShown();
+    expect(
+      within(screen.getByRole("region", { name: "Targets PRIMARY" })).getByRole("note", {
+        name: TEST_MOON_EDGE,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("notes TEST MOON's edge in the primary's list in the photorealistic style", async () => {
+    const view = await terrainTestShown();
+    await photorealistic(view, primaryLabelBlock);
+    expect(
+      within(screen.getByRole("region", { name: "Targets PRIMARY" })).getByRole("note", {
+        name: TEST_MOON_EDGE,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("notes TEST MOON's edge in an instrument's own list in the wireframe", async () => {
+    const view = await terrainTestShown();
+    await controlInstrument(view);
+    expect(
+      within(screen.getByRole("region", { name: "Targets INSTRUMENT 1" })).getByRole("note", {
+        name: TEST_MOON_EDGE,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("notes TEST MOON's edge in an instrument's own list in the photorealistic style", async () => {
+    const view = await terrainTestShown();
+    await controlInstrument(view);
+    await photorealistic(view, () => screen.getByRole("region", { name: "INSTRUMENT 1" }));
+    expect(
+      within(screen.getByRole("region", { name: "Targets INSTRUMENT 1" })).getByRole("note", {
+        name: TEST_MOON_EDGE,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("notes no survey edge in a kept scene with no terrain", async () => {
+    await setup();
+    expect(screen.queryByRole("note")).toBeNull();
+  });
+});
+
+describe("VIEW's seams for the views check's terrain run (R10.T16.d, part 2)", () => {
+  it("offers the kept scenes it is given, TERRAIN TEST's fixture theirs, and lets the run watch its session", async () => {
+    const fixture = terrainSceneFixture(0);
+    const sceneOptions = SCENE_OPTIONS.map((option) =>
+      option.name === TERRAIN_SCENE_NAME ? Object.assign({}, option, { terrain: fixture }) : option,
+    );
+    const watched: string[] = [];
+    const view = await setup({
+      sceneOptions,
+      watchTerrain: (session) => {
+        watched.push(`made ${String(session.workerCount)}`);
+        return () => {
+          watched.push("let go");
+        };
+      },
+    });
+    await view.user.click(screen.getByRole("button", { name: TERRAIN_SCENE_NAME }));
+    for (let step = 0; step < 4; step += 1) {
+      view.advance(100);
+      // Each step waits on the last.
+      // oxlint-disable-next-line no-await-in-loop
+      await settle();
+    }
+    expect([watched, fixture.traffic().fieldAsks]).toEqual([[expect.stringMatching(/^made /)], 1]);
+    await view.user.click(screen.getByRole("button", { name: "PHASE TEST" }));
+    view.advance(100);
+    await settle();
+    expect(watched).toEqual([expect.stringMatching(/^made /), "let go"]);
   });
 });
 
@@ -211,6 +400,16 @@ async function shipOverEarthArrives(view: ViewDisplayHarness): Promise<void> {
   });
 }
 
+/** The slice's Earth's field header: the Moon-like fixture's, at the Earth's figure (WGS 84's). */
+function earthHeader(): SurfaceHeaderDto {
+  return {
+    ...moonLikeHeader(FIXTURE_EARTH),
+    radius_m: 6_371_000,
+    equatorial_radius_m: EARTH_RADIUS_M,
+    polar_radius_m: 6_356_752.314_245,
+  };
+}
+
 /** The primary's label block's fault lines, as they read. */
 function faultLines(): string[] {
   return within(primaryLabelBlock())
@@ -231,39 +430,53 @@ function earthWithSeed(): ResponseFor<"body_detail"> {
   };
 }
 
+/**
+ * `VIEW` drawing the server's scene photorealistically, the ship 2,000 km over the slice's Earth,
+ * the Earth's field (surveyed whole) and seed answered and its bakes held back by the scripted
+ * workers, so that the primary hands it over with its terrain waiting.
+ */
+async function earthHandedOver(
+  seams: Pick<Parameters<typeof renderViewDisplay>[0], "watchTerrain"> = {},
+): Promise<ViewDisplayHarness> {
+  const fake = timedEngineSource();
+  const view = renderViewDisplay({
+    store: await nominalStore(),
+    source: fake.source,
+    engines: fake.engines,
+    ...seams,
+  });
+  await settle();
+  view.advance(100);
+  await openUniverse(view);
+  await shipOverEarthArrives(view);
+  await settle();
+  view.advance(300);
+  // The primary draws photorealistically.
+  await view.user.keyboard("4");
+  view.advance(100);
+  await settle();
+  view.advance(300);
+  await settle();
+  // The Earth, the camera's local body, has its field and its seed asked; both answered.
+  const { id } = latestFieldAsk(view.socket);
+  const bulk = sendFieldFrames(view.socket, id, fieldPayload([fieldBlock(50, 1)]));
+  await act(async () => {
+    view.socket.serverResponds(
+      id,
+      // Surveyed whole at level 5, so that the ground in view waits for its bakes.
+      readyField(earthHeader(), 1, fieldCover([0, 6 * 4 ** 5, 30]), bulk),
+    );
+    view.socket.serverAnswers("body_detail", () => earthWithSeed());
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  view.advance(500);
+  await settle();
+  return view;
+}
+
 describe("the terrain's fault on a live VIEW (R10.T16.b's line, a body handed over in a live frame; R10.T16.c)", () => {
   it("states the fault on the primary's label block while it hands the Earth over and every height worker is lost", async () => {
-    const fake = timedEngineSource();
-    const view = renderViewDisplay({
-      store: await nominalStore(),
-      source: fake.source,
-      engines: fake.engines,
-    });
-    await settle();
-    view.advance(100);
-    await openUniverse(view);
-    await shipOverEarthArrives(view);
-    await settle();
-    view.advance(300);
-    // The primary draws photorealistically.
-    await view.user.keyboard("4");
-    view.advance(100);
-    await settle();
-    view.advance(300);
-    await settle();
-    // The Earth, the camera's local body, has its field and its seed asked; both answered.
-    const { id } = latestFieldAsk(view.socket);
-    const bulk = sendFieldFrames(view.socket, id, fieldPayload([fieldBlock(50, 1)]));
-    await act(async () => {
-      view.socket.serverResponds(
-        id,
-        readyField(moonLikeHeader(FIXTURE_EARTH), 1, fieldCover([0, 2, 30]), bulk),
-      );
-      view.socket.serverAnswers("body_detail", () => earthWithSeed());
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    view.advance(500);
-    await settle();
+    const view = await earthHandedOver();
     const before = faultLines();
     // Every height worker the session runs fails, each replacement too, until none is left.
     const workers = view.heightWorkers.length;
@@ -277,5 +490,39 @@ describe("the terrain's fault on a live VIEW (R10.T16.b's line, a body handed ov
     // The fault stands only for a view that hands a body over: the primary's live frame does.
     expect([before, faultLines()]).toEqual([[], [TERRAIN_NOT_AVAILABLE]]);
     expect(within(primaryLabelBlock()).queryByText("TERRAIN: STREAMING")).toBeNull();
+  });
+});
+
+describe("a closed instrument forgotten by the terrain session (the batch review's S17)", () => {
+  /**
+   * The Earth handed over to the primary and to INSTRUMENT 1, both photorealistic, with the
+   * session `VIEW` made given to `sessions`.
+   */
+  async function bothHandOver(sessions: TerrainSession[]): Promise<ViewDisplayHarness> {
+    const view = await earthHandedOver({
+      watchTerrain: (session) => {
+        sessions.push(session);
+        return () => undefined;
+      },
+    });
+    await controlInstrument(view);
+    await photorealistic(view, () => screen.getByRole("region", { name: "INSTRUMENT 1" }));
+    const views = sessions.at(-1)?.pass(FIXTURE_EARTH)?.viewIds;
+    if (views?.has(instrumentViewId(1)) !== true) {
+      throw new Error("INSTRUMENT 1 does not hand the Earth over");
+    }
+    return view;
+  }
+
+  it("leaves the Earth's pass to the primary alone once INSTRUMENT 1 is closed", async () => {
+    const sessions: TerrainSession[] = [];
+    const view = await bothHandOver(sessions);
+    await view.user.click(
+      within(screen.getByRole("group", { name: "INSTRUMENT 1" })).getByRole("button", {
+        name: "CLOSE",
+      }),
+    );
+    await playFor(view, 2);
+    expect(sessions.at(-1)?.pass(FIXTURE_EARTH)?.viewIds).toEqual(new Set([PRIMARY_VIEW_ID]));
   });
 });

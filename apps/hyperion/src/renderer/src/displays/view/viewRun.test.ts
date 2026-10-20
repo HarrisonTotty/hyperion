@@ -11,7 +11,7 @@ import { FRAME_CHANGE_MOON, frameChangeScene } from "../../view/scenes/frameChan
 import { precisionScene } from "../../view/scenes/precision";
 import { phaseScene } from "../../view/scenes/phaseScene";
 import type { SystemIdHex } from "@hyperion/protocol";
-import { aViewScene } from "../../test/viewFixtures";
+import { aViewScene, FIXTURE_MOON, FIXTURE_PLANET } from "../../test/viewFixtures";
 
 import { rotate } from "../../view/camera/quaternion";
 import {
@@ -33,6 +33,7 @@ import {
   startRun,
   startServerRun,
   stepRun,
+  surveyEdgeNotes,
 } from "./viewRun";
 
 const STILL = { serverScene: null, dtS: 0, held: new Set<string>(), reducedMotion: false };
@@ -625,5 +626,52 @@ describe("an instrument's run (R07.T19)", () => {
       { dtS: 0, held: new Set(), reducedMotion: true },
     );
     expect([moved.camera.preset, moved.camera.target]).toEqual(["chase", null]);
+  });
+});
+
+describe("surveyEdgeNotes (R10.T16.c; decision-r10-t16-review §1)", () => {
+  const scene = aViewScene();
+
+  it("gives one note a body, nearest first", () => {
+    const notes = surveyEdgeNotes(scene, [
+      { body: FIXTURE_PLANET, nearestRangeM: 9_000 },
+      { body: FIXTURE_MOON, nearestRangeM: 412 },
+    ]);
+    expect(notes.map((note) => note.text)).toEqual([
+      "SURVEY EDGE TEST MOON 412 m",
+      "SURVEY EDGE TEST PLANET 9.00 km",
+    ]);
+  });
+
+  it("breaks a tie of ranges by the designation", () => {
+    const notes = surveyEdgeNotes(scene, [
+      { body: FIXTURE_PLANET, nearestRangeM: 4_210 },
+      { body: FIXTURE_MOON, nearestRangeM: 4_210 },
+    ]);
+    expect(notes.map((note) => note.designation)).toEqual(["TEST MOON", "TEST PLANET"]);
+  });
+
+  it("gives no note for an edge with no point seen", () => {
+    expect(surveyEdgeNotes(scene, [{ body: FIXTURE_MOON, nearestRangeM: null }])).toEqual([]);
+  });
+
+  it("labels its range FROM CAMERA in a scene with no own ship", () => {
+    const notes = surveyEdgeNotes(aViewScene({ craft: [], ownShip: null }), [
+      { body: FIXTURE_MOON, nearestRangeM: 412 },
+    ]);
+    expect(notes[0]?.text).toBe("SURVEY EDGE TEST MOON 412 m FROM CAMERA");
+  });
+
+  it("keeps each body's unit from the notes last shown", () => {
+    const shown = surveyEdgeNotes(scene, [{ body: FIXTURE_MOON, nearestRangeM: 990 }]);
+    const next = surveyEdgeNotes(scene, [{ body: FIXTURE_MOON, nearestRangeM: 1_020 }], shown);
+    expect(next[0]?.reading).toBe("1020 m");
+  });
+
+  it("drops a body's unit once its edge has left the view", () => {
+    const shown = surveyEdgeNotes(scene, [{ body: FIXTURE_MOON, nearestRangeM: 990 }]);
+    const gone = surveyEdgeNotes(scene, [], shown);
+    const back = surveyEdgeNotes(scene, [{ body: FIXTURE_MOON, nearestRangeM: 1_020 }], gone);
+    expect(back[0]?.reading).toBe("1.02 km");
   });
 });

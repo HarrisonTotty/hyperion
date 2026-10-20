@@ -3,8 +3,8 @@
  * body's surveyed terrain meets ground the ship has not surveyed, a solid `--text` line `1px` wide
  * along the surveyed terrain's border, with a tick `0.25rem` long every `1rem` of the drawn line,
  * pointing into the unsurveyed side, cased as every mark is, and hidden by nearer ground as a limb
- * hides a graticule. The view's list notes it as `SURVEY EDGE` with the range to its nearest point
- * in the picture.
+ * hides a graticule. The view's list notes it as `SURVEY EDGE` with the body's designation and the
+ * range to its nearest point in the picture ({@link surveyEdgeNote}).
  *
  * @remarks
  * Pure: the edge is the coverage's ({@link surveyEdges}), each piece a side of a surveyed coarse
@@ -18,8 +18,8 @@
  * cut at its view depth, so that the line runs on to the view's edge beneath a ship low over it.
  * The line and the ticks are view-space segments, so that the draw's depth test hides them behind
  * nearer ground (R02's lines). The first view to draw a body's terrain (R10.T10.e's hand-over,
- * T11's wireframe) gives the view its coverage and heights; T12 lists the note and draws the
- * line-of-sight mark the ticks keep clear of.
+ * T11's wireframe) gives the view its coverage and heights; R10.T16.c lists the note
+ * (decision-r10-t16-review §1), and T12 draws the line-of-sight mark the ticks keep clear of.
  *
  * The note's range counts only the points the operator can see (plan R10, R10.T16.c; the
  * r10-shader handoff's "For R10.T16", item b): where the view draws the body's terrain it gives the
@@ -29,7 +29,7 @@
  * Without it, as in the wireframe until R10.T11 draws its terrain, nothing but the spheroid's own
  * horizon hides a point, as nothing but the occluder spheres hides the line there.
  */
-import { type BodyDistanceUnit, formatBodyDistance } from "../../lib/format";
+import { formatSurfaceRange, type SurfaceRangeUnit } from "../../lib/format";
 import { add, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import {
   NEAR_PLANE_M,
@@ -94,8 +94,10 @@ export const SIGHT_SAMPLES = 32;
 export const SIGHT_TOLERANCE_M = 1;
 
 /**
- * The most drawn pieces' nearest points tested for sight, nearest first, before the note's range
- * is given up as none seen.
+ * The most drawn pieces' nearest points tested for sight, nearest first: a hand cap on the note's
+ * cost a frame (each test a march of {@link SIGHT_SAMPLES}). Where every point tested is hidden and
+ * more were drawn, the note keeps the nearest drawn point's range rather than none, conservatively,
+ * so that it never drops while the edge is drawn (the batch review's C1).
  */
 export const MAX_SIGHT_TESTS = 256;
 
@@ -642,7 +644,8 @@ export function surveyEdgeMark(
 /**
  * The least range of `nearest`'s points that no drawn ground hides from the camera, m, tested
  * nearest first, at most {@link MAX_SIGHT_TESTS} of them; the least of all where the view draws no
- * ground; `null` with none seen.
+ * ground, and where the cap is used up with none seen and more points were drawn; `null` where
+ * every point was tested and none is seen.
  */
 function nearestSeenM(
   view: SurveyEdgeView,
@@ -656,17 +659,23 @@ function nearestSeenM(
       null,
     );
   }
-  const ordered = nearest.toSorted((p, q) => p.rangeM - q.rangeM).slice(0, MAX_SIGHT_TESTS);
-  const visible = ordered.find(
-    ({ pointM }) =>
-      !groundHidesPoint(
-        cameraBodyFixedM,
-        rotateToBodyFixed(view.rotation, sub(pointM, view.centreM)),
-        view.figure,
-        ground,
-      ),
-  );
-  return visible?.rangeM ?? null;
+  const ordered = nearest.toSorted((p, q) => p.rangeM - q.rangeM);
+  const visible = ordered
+    .slice(0, MAX_SIGHT_TESTS)
+    .find(
+      ({ pointM }) =>
+        !groundHidesPoint(
+          cameraBodyFixedM,
+          rotateToBodyFixed(view.rotation, sub(pointM, view.centreM)),
+          view.figure,
+          ground,
+        ),
+    );
+  if (visible !== undefined) {
+    return visible.rangeM;
+  }
+  // The cap used up with none seen: a point not tested may be, so the nearest drawn point's range.
+  return ordered.length > MAX_SIGHT_TESTS ? (ordered[0]?.rangeM ?? null) : null;
 }
 
 /**
@@ -731,20 +740,56 @@ function cameraAxes(camera: ProjectionCamera): readonly [Vec3, Vec3] {
   return [vec3(r0.x, r1.x, r2.x), vec3(r0.y, r1.y, r2.y)];
 }
 
+/** A survey edge's note in a view's list (plan R10, R10.T16.c; decision-r10-t16-review §1). */
+export interface SurveyEdgeNote {
+  /** The note as shown: `SURVEY EDGE TEST MOON 4.21 km`, `SURVEY EDGE TEST MOON 412 m FROM CAMERA`. */
+  readonly text: string;
+  /** Its range with its unit: `4.21 km`, `412 m`. */
+  readonly range: string;
+  /** Its range as read, after the designation: `4.21 km`, `412 m FROM CAMERA`. */
+  readonly reading: string;
+  /** The unit its range is in, which the next showing keeps within its hysteresis. */
+  readonly unit: SurfaceRangeUnit;
+}
+
 /**
- * The view list's note of a survey edge (the guide's `SURVEY EDGE 4.21 km`): its nearest range to
- * three figures, as the list's ranges are, `FROM CAMERA` where there is no own ship to measure
- * from, the unit kept within its hysteresis from `previous` (`formatBodyDistance`).
+ * The view list's note of a body's survey edge (the guide's Views and `SURVEY EDGE` row;
+ * decision-r10-t16-review §1): `SURVEY EDGE <designation> <range>`, the range to the edge's nearest
+ * point in the picture in `SLANT RANGE`'s units ({@link formatSurfaceRange}: `m` below 1 km, three
+ * figures, the unit kept within its hysteresis from `previous`), `FROM CAMERA` after the unit where
+ * the scene has no own ship to measure from.
+ *
+ * @param designation - The body's designation, as the list's option for it names it.
+ * @param rangeM - The range to the edge's nearest point seen, m (`DrawnSurveyEdge.nearestRangeM`).
+ * @param fromCamera - Whether the range is from the camera, the scene having no own ship.
+ * @param previous - The unit the note's range was last shown in, `null` for its first showing.
  */
 export function surveyEdgeNote(
+  designation: string,
   rangeM: number,
   fromCamera: boolean,
-  previous: BodyDistanceUnit | null,
-): { readonly text: string; readonly unit: BodyDistanceUnit } {
-  const distance = formatBodyDistance(rangeM / 1000, previous);
-  const range = `${distance.value} ${distance.unit}`;
+  previous: SurfaceRangeUnit | null,
+): SurveyEdgeNote {
+  const range = formatSurfaceRange(rangeM, previous);
+  const shown = `${range.value} ${range.unit}`;
+  const reading = fromCamera ? `${shown} FROM CAMERA` : shown;
   return {
-    text: fromCamera ? `${SURVEY_EDGE_NOTE} ${range} FROM CAMERA` : `${SURVEY_EDGE_NOTE} ${range}`,
-    unit: distance.unit,
+    text: `${SURVEY_EDGE_NOTE} ${designation} ${reading}`,
+    range: shown,
+    reading,
+    unit: range.unit,
   };
+}
+
+/**
+ * A survey edge's note's accessible name, in the options' form (the guide's Views;
+ * decision-r10-t16-review §1): `TEST MOON, survey edge, range 412 m FROM CAMERA`, with `, stale`
+ * while the list's ranges are stale, as the options' names take it.
+ */
+export function surveyEdgeNoteName(
+  designation: string,
+  note: Pick<SurveyEdgeNote, "reading">,
+  stale: boolean,
+): string {
+  return `${designation}, survey edge, range ${note.reading}${stale ? ", stale" : ""}`;
 }

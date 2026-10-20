@@ -2,6 +2,7 @@ import { act, cleanup, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  CheckPhaseName,
   ViewsCheckPhaseName,
   ViewsCheckRecord,
   ViewsCheckWindow,
@@ -42,7 +43,7 @@ const TIMING: ViewsCheckTiming = {
 type Outcome = { readonly record: ViewsCheckRecord } | { readonly error: unknown };
 
 /** What the script asked of the main process, in order. */
-type Call = readonly [operation: string, phase?: ViewsCheckPhaseName];
+type Call = readonly [operation: string, phase?: CheckPhaseName];
 
 /** When each trace started, the windows the script marked, and those it handed on. */
 interface Windows {

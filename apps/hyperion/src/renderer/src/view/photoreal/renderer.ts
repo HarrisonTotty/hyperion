@@ -87,7 +87,9 @@ import { createSceneTarget } from "./sceneTarget";
  *
  * @remarks
  * The terrain session gives each view's frame its own (plan R10, R10.T16.c; `LiveFrameTerrain`).
- * Without one, a body handed over is drawn as a mesh body is, its figure whole.
+ * Without one, a body handed over is drawn as a mesh body is, its figure whole. R10.T16.c changed
+ * T10.e's shape, as main accepted (2026-10-19): `draws(plan, bodies)` takes the frame's lit bodies
+ * beside its plan, which holds no body's centre or rotation, and `symbologyDepth()` is new.
  */
 export interface FrameTerrain {
   /**

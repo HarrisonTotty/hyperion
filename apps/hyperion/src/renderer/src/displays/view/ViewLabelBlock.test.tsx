@@ -11,6 +11,18 @@ function partsOf(text: string): string[] {
   return [...screen.getByText(statusLine(text)).children].map((part) => part.className);
 }
 
+/** The label block with a graphics fault and the terrain's. */
+function renderFaults(): void {
+  render(
+    <ViewLabelBlock
+      lines={[{ label: "STYLE", value: "PHOTOREALISTIC" }]}
+      statements={[]}
+      countLine={null}
+      faults={["GRAPHICS DEVICE LOST: re-creating", TERRAIN_NOT_AVAILABLE]}
+    />,
+  );
+}
+
 describe("the view's label block", () => {
   it("shows a terrain annunciation as a steady statement, not an alert or a fault", () => {
     render(
@@ -43,29 +55,36 @@ describe("the view's label block", () => {
     ]).toEqual([["status-text__state"], ["status-text__state", "status-text__sentence"]]);
   });
 
-  it("sets each fault on a fault line of its own in --status-caution, the graphics fault first (R10.T16.b)", () => {
-    render(
-      <ViewLabelBlock
-        lines={[{ label: "STYLE", value: "PHOTOREALISTIC" }]}
-        statements={[]}
-        countLine={null}
-        faults={["GRAPHICS DEVICE LOST: re-creating", TERRAIN_NOT_AVAILABLE]}
-      />,
-    );
-    const faults = screen
-      .getAllByRole("status")
-      .filter((output) => output.classList.contains("request-status__text--fault"));
-    expect(faults.map((output) => output.textContent)).toEqual([
-      "GRAPHICS DEVICE LOST: re-creating",
-      "TERRAIN NOT AVAILABLE: height computation failed, reopen VIEW to retry",
-    ]);
-    // The fault line's class is set in the caution colour, the guide's for a failed system.
-    expect(STYLES).toMatch(
-      /\.request-status__text--fault,[^{]*\{\s*color: var\(--status-caution\);\s*\}/u,
-    );
-    // The terrain's state is tracked and its sentence after the colon is not (Typography).
-    expect(partsOf(TERRAIN_NOT_AVAILABLE)).toEqual(["status-text__state", "status-text__sentence"]);
-    expect(screen.queryByRole("alert")).toBeNull();
+  describe("with a graphics fault and the terrain's (R10.T16.b)", () => {
+    it("sets each fault on a fault line of its own, the graphics fault first", () => {
+      renderFaults();
+      const faults = screen
+        .getAllByRole("status")
+        .filter((output) => output.classList.contains("request-status__text--fault"));
+      expect(faults.map((output) => output.textContent)).toEqual([
+        "GRAPHICS DEVICE LOST: re-creating",
+        "TERRAIN NOT AVAILABLE: height computation failed, reopen VIEW to retry",
+      ]);
+    });
+
+    it("sets the fault line in --status-caution, the guide's colour for a failed system", () => {
+      expect(STYLES).toMatch(
+        /\.request-status__text--fault,[^{]*\{\s*color: var\(--status-caution\);\s*\}/u,
+      );
+    });
+
+    it("tracks the terrain's state and leaves its sentence after the colon untracked (Typography)", () => {
+      renderFaults();
+      expect(partsOf(TERRAIN_NOT_AVAILABLE)).toEqual([
+        "status-text__state",
+        "status-text__sentence",
+      ]);
+    });
+
+    it("raises no alert", () => {
+      renderFaults();
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
   });
 
   it("sets no fault line with no fault", () => {

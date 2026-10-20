@@ -394,9 +394,13 @@ export async function checkTerrainFrame(engine: RenderEngine, checks: Checks): P
     // The whole frame through the renderer, the marks under and over the surveyed ground.
     await photoreal.prepare(VIEWPORT, "low", "eye", pose.camera);
     // Each mark along the survey's rows over the surveyed column, apart from the other. The one
-    // under the ground stands 15 km beneath it: the terrain's depth there is pushed away by the
-    // slope term, `occluderSlopePx` pixels of its slope, some 3.5 km of ground at this view's
-    // 1.4° pixels (a few tens of metres at 1080p), as the occluders' is.
+    // under the ground stands 15 km beneath the datum: the terrain's depth there is pushed away by
+    // the slope term, `occluderSlopePx` pixels of its slope, as the occluders' is: about 1.4 km
+    // along the ray at the marks (1.38 to 1.62 km) at this view's pixels (1.8° at its centre, 1.4°
+    // the mean), 1.2 to 10 km down its centre column, more where the ground slopes away, and a
+    // few tens of metres in a steep view at 1080p. A mark 2 km under the datum stands only 1.5 to
+    // 1.7 km under the fixture's ground here (266 m and 495 m below the datum at the marks'
+    // ends), within that push over its cased pixels, and showed through (the batch review's S20).
     const fromCamera = (x: number, y: number, upM: number): Vec3 => {
       const { p, nu } = datumAt(OVER, x, y);
       return sub(add(p, scale(nu, upM)), pose.cameraM);

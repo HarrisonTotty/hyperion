@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { keptBody } from "../../scenes/kept";
 import { bakeOf, ScriptedHeightWorker } from "../../../test/scriptedHeightWorker";
@@ -499,6 +499,22 @@ describe("the height-worker pool", () => {
       return [baked.length === 1, w.pendingBakes.length === 1];
     });
     expect(outcomes).toEqual(cases.map(([, kept]) => [kept, !kept]));
+  });
+
+  it("tells every listener of a bake and pumps its queue on, whatever one listener throws", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { pool, created, baked } = poolOf(1);
+    pool.onBaked(() => {
+      throw new Error("a listener's own bug");
+    });
+    pool.reprioritise([req(0, 3), req(1, 2), req(2, 1)]);
+    const worker = workerAt(created, 0);
+    worker.bakeOldest();
+    expect([baked, bakedKeys(worker), error.mock.calls.length]).toEqual([
+      [patchKeyString(keyAt(0))],
+      [0, 1, 2].map((i) => patchKeyString(keyAt(i))),
+      1,
+    ]);
   });
 
   it("reports each block's change once, from the first worker to answer it", () => {

@@ -18,9 +18,11 @@
  * contacts, baked height ranges, level table or survey; an orientation change of more than one
  * pixel's angle in any view; or a camera move of more than {@link RESELECT_MOVE_FRACTION} = m ÷
  * (1 + m), for m = `SELECTION_MARGIN`, of the box distance to the nearest selected patch the view
- * sees that is not at the finest level (with none, the nearest surveyed ground,
- * `Selection.nearestSurveyM`). It selects at τ ÷ (1 + m), so that the drawn error stays within τ
- * between runs, and with a budget of half the cache's slots (4b). The morph bands are computed at
+ * sees that is not at the finest level (with none, the view's own nearest surveyed ground,
+ * `Selection.nearestSurveyByViewM`). It selects at τ ÷ (1 + m), so that the drawn error stays within
+ * τ between runs, and with a budget of half the cache's slots (4b). Under
+ * {@link TerrainPassOptions.frustumMargin}'s `motion`, the terrain session's, each view's frustum
+ * is opened for selection by its motion ({@link frustumMarginRad}). The morph bands are computed at
  * τ, raised where the budget binds ({@link effectiveTauPx}). The draw set is resolved when
  * selection runs, in place by one `DrawSetResolver` per cache, and each view's instance and contact
  * records are written every frame into buffers made once.
@@ -56,6 +58,7 @@
 
 import type { Quaternion } from "../camera/pose";
 import { conjugate, multiply, quaternionFromRows } from "../camera/quaternion";
+import type { ViewId } from "../camera/state";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import { type Rotation3, rotateToBodyFixed } from "../coords/rotation";
 import type {
@@ -88,6 +91,7 @@ import { type DrawSet, DrawSetResolver, PatchCache } from "./cache";
 import { terrainMaterialSpec } from "./gpu/material";
 import {
   DEFAULT_TERRAIN_VIEW,
+  surveyCellCode,
   type TerrainLayout,
   TerrainResources,
   type TerrainViewBuffers,
@@ -123,6 +127,26 @@ import type {
 import { needsRebake, type RebakeLayers } from "./workers/rebake";
 
 export { DEFAULT_TERRAIN_VIEW } from "./gpu/resources";
+
+/**
+ * A view of a pass: a `VIEW` view's own {@link ViewId}, or the descent spike's single view,
+ * {@link DEFAULT_TERRAIN_VIEW}, which no `ViewId` can be (the batch review's C4).
+ */
+export type TerrainViewId = ViewId | typeof DEFAULT_TERRAIN_VIEW;
+
+/**
+ * How a pass opens each view's frustum for its selection (plan R10, R10.T16; the batch review's
+ * S6): `none`, the camera's own frustum, as R05's spike selects; `motion`, opened by
+ * {@link frustumMarginRad}, so that a view turning or moving between selections, or drawing a frame
+ * after the step that selected for it, finds its leading edge selected.
+ */
+export type TerrainFrustumMargin = "none" | "motion";
+
+/**
+ * The most a view's frustum is opened by under `motion`, rad (about 5.7°): a view that jumps between
+ * two steps, as a scene's camera cut does, would otherwise select most of a hemisphere.
+ */
+export const MAX_FRUSTUM_MARGIN_RAD = 0.1;
 
 /**
  * How far through a level's distance band the CDLOD morph to its parent begins (Design note 6): a
@@ -251,7 +275,7 @@ export interface TerrainFrame {
 /** One view that hands the pass's body over, as a step takes it (R10.T16.b). */
 export interface TerrainPassView {
   /** The view's own name, which its draw ({@link TerrainPass.drawFor}) and its buffers go by. */
-  readonly id: string;
+  readonly id: ViewId;
   /** Its camera, from the body, as it last drew. */
   readonly view: TerrainView;
   /**
@@ -265,6 +289,9 @@ export interface TerrainPassView {
    */
   readonly weight: number;
 }
+
+/** A view as a step takes it: a {@link TerrainPassView}, or the spike's default view. */
+type StepView = Omit<TerrainPassView, "id"> & { readonly id: TerrainViewId };
 
 /** One step's inputs: the views that hand the body over, and the grounded bodies. */
 export interface TerrainStepInput {
@@ -348,6 +375,12 @@ export interface TerrainPassOptions {
   /** Called with each patch the cache stores and the GPU holds, for the spike's tallies. */
   readonly onResident?: (key: PatchKey) => void;
   /**
+   * How each view's frustum is opened for selection ({@link TerrainFrustumMargin}); `none`, the
+   * default, keeps R05's selection bit for bit, as the descent spike's `frame` takes it. The terrain
+   * session's passes take `motion` (R10.T16; the batch review's S6).
+   */
+  readonly frustumMargin?: TerrainFrustumMargin;
+  /**
    * Called with each selection's input and result, right after `selectPatches` and outside the
    * `terrain.select` span, for the spike's second, calibrated pass (T13.c). Unset, it costs nothing.
    */
@@ -363,6 +396,12 @@ interface Resident {
   readonly layers: RebakeLayers | null;
   /** The request it was last asked for with, at whose priority a rebake asks again. */
   readonly request: PatchRequest;
+  /**
+   * Whether its bake is of survey cell code 0 (`surveyCellCode`: six or more levels coarser than the
+   * field) and holds a vertex outside the survey, so that its vertices cannot hold its cells and a
+   * view that draws it is given no coverage mask (decision-r10-t16-review §2).
+   */
+  readonly codeZeroOpen: boolean;
 }
 
 /** A block's rebakes still to land, and whom to tell once they have (decision D7). */
@@ -396,11 +435,17 @@ interface Device {
   readonly gates: Gate[];
   /** The last demand's requests, by key string, for the priority of a bake as it lands. */
   readonly asked: Map<string, PatchRequest>;
+  /**
+   * The resident patches whose rebake the pool gave up (its `onFailed`): the lane asks no more for
+   * them, so no later block's gate waits on them (the batch review's S7); a new bake of one, or its
+   * eviction, takes it off.
+   */
+  readonly givenUp: Set<string>;
 }
 
 /** One view's own frame state: its records, bands, uniforms, draw and debounce. */
 interface ViewState {
-  readonly id: string;
+  readonly id: TerrainViewId;
   readonly debounce: TerrainAnnunciationDebounce;
   readonly instances: InstanceRecords;
   readonly contacts: ContactRecords;
@@ -428,14 +473,14 @@ interface ViewState {
 
 /** A view as selection takes it, with the pass's name for it and the τ of its morph bands. */
 interface PassSelectionView extends ViewSelectionInput {
-  readonly id: string;
+  readonly id: TerrainViewId;
   /** The view's τ, pixels, at which its morph bands are made: selection's `tauPx` is τ ÷ (1 + m). */
   readonly bandTauPx: number;
 }
 
 /** One view as the last selection took it. */
 interface SelectedView {
-  readonly id: string;
+  readonly id: TerrainViewId;
   readonly cameraBodyFixedM: Vec3;
   readonly orientationBodyFixed: Quaternion;
   readonly fovXRad: number;
@@ -543,6 +588,53 @@ export function effectiveTauPx(tauPx: number, limitExcess: number, weight: numbe
   return tauPx * Math.max(1, limitExcess / weight);
 }
 
+/** A view's camera as a step took it, body-fixed: where it stood and how it looked. */
+export interface SteppedCamera {
+  /** Its position from the body's centre, body-fixed metres. */
+  readonly positionM: Vec3;
+  /** Its orientation in the body-fixed axes. */
+  readonly orientation: Quaternion;
+}
+
+/**
+ * The angle a view's frustum is opened by for its selection under `motion`
+ * ({@link TerrainFrustumMargin}), rad (plan R10, R10.T16; the batch review's S6): one pixel's
+ * angle, the turn the pass lets a view make before it selects again, plus the view's motion since
+ * its previous step, the angle it turned and the angle its translation moved its nearest selected
+ * ground by (|Δp| ÷ d), at most {@link MAX_FRUSTUM_MARGIN_RAD}.
+ *
+ * @remarks
+ * Between selections a view turns by up to a pixel, and a view may draw a frame after the step that
+ * selected for it (an instrument draws after the primary's step, so that its report reaches the
+ * step after). A strip at its leading edge would then have no patch selected while its coverage
+ * mask discards the reference surface there, and the sky would show through the body. Opened by
+ * the reselection budget and one frame's motion, the selection holds that strip, and a patch of it
+ * not yet baked withholds the view's mask as any missing patch does (decision D7).
+ *
+ * @param previous - The view's camera at its previous step, or `null` at its first.
+ * @param nearestM - The distance to the view's nearest selected ground, metres (the move rule's
+ *   d), or `+∞` where none is known, when its translation counts for nothing.
+ */
+export function frustumMarginRad(
+  view: Pick<ViewSelectionInput, "camera" | "fovXRad" | "viewport">,
+  previous: SteppedCamera | null,
+  nearestM: number,
+): number {
+  const pixelRad = view.fovXRad / view.viewport.widthPx;
+  if (previous === null) {
+    return Math.min(pixelRad, MAX_FRUSTUM_MARGIN_RAD);
+  }
+  const q = view.camera.orientation;
+  const p = previous.orientation;
+  const dot = Math.abs(q.w * p.w + q.x * p.x + q.y * p.y + q.z * p.z);
+  const turnedRad = 2 * Math.acos(Math.min(dot, 1));
+  const movedRad =
+    Number.isFinite(nearestM) && nearestM > 0
+      ? distance(view.camera.positionM, previous.positionM) / nearestM
+      : 0;
+  return Math.min(pixelRad + turnedRad + movedRad, MAX_FRUSTUM_MARGIN_RAD);
+}
+
 /** The terrain pass of one body, shared by the views that hand it over. */
 export class TerrainPass {
   readonly #engine: RenderEngine;
@@ -555,10 +647,13 @@ export class TerrainPass {
   readonly #measureSelection: boolean;
   readonly #onResident: ((key: PatchKey) => void) | null;
   readonly #onSelect: ((input: SelectionInput, selection: Selection) => void) | null;
+  readonly #frustumMargin: TerrainFrustumMargin;
   readonly #offRestored: () => void;
   readonly #shading: TerrainShading;
   /** Each view's own frame state, by its name. */
-  readonly #views = new Map<string, ViewState>();
+  readonly #views = new Map<TerrainViewId, ViewState>();
+  /** Each view's camera at the last step, for its motion ({@link frustumMarginRad}). */
+  readonly #stepped = new Map<TerrainViewId, SteppedCamera>();
   /** What the render thread keeps of the resident bakes' heights (R10.T16.c), on the current device. */
   readonly #heights = new ResidentHeights();
   /** The planet as selection reads it: its figure and the field's level table, which grows. */
@@ -583,6 +678,7 @@ export class TerrainPass {
     this.#measureSelection = options.measureSelection ?? false;
     this.#onResident = options.onResident ?? null;
     this.#onSelect = options.onSelect ?? null;
+    this.#frustumMargin = options.frustumMargin ?? "none";
     this.#device = this.#makeDevice();
     this.#offRestored = this.#device.resources.onRebuilt(() => {
       this.#rebuild();
@@ -620,7 +716,7 @@ export class TerrainPass {
   }
 
   /** The views of the pass's current draws, by name. */
-  get viewIds(): ReadonlySet<string> {
+  get viewIds(): ReadonlySet<TerrainViewId> {
     return new Set(this.#views.keys());
   }
 
@@ -673,11 +769,22 @@ export class TerrainPass {
     const device = this.#device;
     const path = device.resources.layout.vertexPath;
     const depth = this.#shading === "lit" ? this.#readyDepth(device, path) : Promise.resolve();
-    const material = await this.#engine.createMaterialAsync(
-      this.#shading === "lit" ? terrainLitMaterialSpec(path) : terrainMaterialSpec(path),
-      ["rgba16float"],
-      [device.resources.mesh],
-    );
+    let material: MaterialHandle;
+    try {
+      material = await this.#engine.createMaterialAsync(
+        this.#shading === "lit" ? terrainLitMaterialSpec(path) : terrainMaterialSpec(path),
+        ["rgba16float"],
+        [device.resources.mesh],
+      );
+    } catch (error: unknown) {
+      // Refused for a device a restore replaced, during a loss (whose restore compiles it again),
+      // or for a pass let go meanwhile: not a failure of the material (the batch review's C9).
+      if (this.#superseded(device) || error instanceof EngineUnavailable) {
+        await depth;
+        return;
+      }
+      throw error;
+    }
     if (device === this.#device && !this.#disposed && device.material === null) {
       device.material = material;
     } else {
@@ -702,9 +809,17 @@ export class TerrainPass {
         this.#engine.releaseMaterial(depth);
       }
     } catch (error: unknown) {
-      // The symbology then has no terrain depth over the image; the terrain itself still draws.
-      console.error("the terrain's depth material for the symbology failed:", error);
+      // A device replaced, a loss or a pass let go meanwhile is no failure (C9); otherwise the
+      // symbology has no terrain depth over the image, and the terrain itself still draws.
+      if (!this.#superseded(device) && !(error instanceof EngineUnavailable)) {
+        console.error("the terrain's depth material for the symbology failed:", error);
+      }
     }
+  }
+
+  /** Whether `device`'s materials are wanted no more: a restore replaced it, or the pass went. */
+  #superseded(device: Device): boolean {
+    return device !== this.#device || this.#disposed;
   }
 
   /**
@@ -738,7 +853,8 @@ export class TerrainPass {
     }
     const keys = new Set<string>();
     for (const [keyString, resident] of device.residents) {
-      if (needsRebake(resident.layers, change)) {
+      // The lane asks no more for a key it gave up, so no gate may wait on one (S7).
+      if (!device.givenUp.has(keyString) && needsRebake(resident.layers, change)) {
         keys.add(keyString);
         device.rebakes.set(keyString, resident.request);
       }
@@ -759,16 +875,24 @@ export class TerrainPass {
    * @throws RangeError for more than {@link MAX_SELECTION_VIEWS} views.
    */
   step(input: TerrainStepInput): TerrainStep {
-    if (input.views.length > MAX_SELECTION_VIEWS) {
+    return this.#step(input.views, input);
+  }
+
+  /** {@link TerrainPass.step} over `stepViews`, the spike's default view among them for `frame`. */
+  #step(
+    stepViews: ReadonlyArray<StepView>,
+    input: Pick<TerrainStepInput, "grounded">,
+  ): TerrainStep {
+    if (stepViews.length > MAX_SELECTION_VIEWS) {
       throw new RangeError(
-        `a terrain pass draws at most ${MAX_SELECTION_VIEWS} views, got ${input.views.length}`,
+        `a terrain pass draws at most ${MAX_SELECTION_VIEWS} views, got ${stepViews.length}`,
       );
     }
     if (this.#disposed) {
       // Nothing is asked or drawn of a pass let go.
       return this.#faultedStep();
     }
-    this.#leaveViews(input.views);
+    this.#leaveViews(stepViews);
     const device = this.#device;
     if (!this.#faulted && device.pool.unavailable === true) {
       this.#fault();
@@ -776,11 +900,14 @@ export class TerrainPass {
     if (this.#faulted) {
       return this.#faultedStep();
     }
-    const views = input.views.map((view) => this.#selectionView(view));
+    const views = stepViews.map((view) => this.#selectionView(view));
     let reselected = false;
     if (this.#due(views, input)) {
-      this.#select(views, input);
+      this.#select(this.#withMargins(views), input);
       reselected = true;
+    }
+    for (const view of views) {
+      this.#stepped.set(view.id, view.camera);
     }
     const selected = this.#selected;
     if (selected === null) {
@@ -809,7 +936,7 @@ export class TerrainPass {
    *
    * @throws RangeError if more contacts are given than the contact buffer holds.
    */
-  drawFor(id: string, input: TerrainViewFrameInput): TerrainViewFrame {
+  drawFor(id: TerrainViewId, input: TerrainViewFrameInput): TerrainViewFrame {
     const selected = this.#selected;
     const state = this.#views.get(id);
     const bit = selected?.views.findIndex((view) => view.id === id) ?? -1;
@@ -829,7 +956,7 @@ export class TerrainPass {
     const mask = 1 << bit;
     const missing = (drawSet.missingViews & mask) !== 0;
     const standingIn = (drawSet.standingInViews & mask) !== 0;
-    const { draw, count } = this.#writeOrNone(state, mask, selected.nearContacts, input);
+    const { draw, count, refused } = this.#writeOrNone(state, mask, selected.nearContacts, input);
     const conditions: TerrainConditions = {
       streaming: missing || standingIn,
       // A view of weight w is limited where its τ′ is above τ (decision-r10-t16-contracts §3); the
@@ -846,19 +973,20 @@ export class TerrainPass {
       fault: null,
       missing,
       standingIn,
-      maskReady: !missing && (draw !== null || count === 0),
+      // A draw a loss refused at its making withholds the mask, whatever it would have drawn.
+      maskReady:
+        !missing && !refused && (draw !== null || count === 0) && !this.#seesCodeZeroOpen(mask),
     };
   }
 
   /**
-   * Whether view `id`'s frame may give the body's coverage mask (decision D7), as the last step
-   * leaves it, before the view's draw: no fault, the view taken by that step, nothing it sees
-   * missing, and its draw ready to be made wherever it sees a patch (the material compiled, and a
-   * lit pass's phase table and tables of no air made). {@link TerrainPass.drawFor}'s `maskReady`
-   * is this, but for a draw refused at its making (a device lost meanwhile); a view's frame reads
-   * this one before its plan, which takes the mask (R10.T16.c).
+   * Whether view `id` sees a drawn patch at the last step: no fault, the view taken by that step,
+   * and some patch of the draw set in its view. Where it holds, the view's draw draws the terrain
+   * once its material is made; where it does not, the view sees no surveyed ground the pass draws
+   * (past the survey, or every patch it sees still missing). The views check's terrain run reads it
+   * (R10.T16.d), so that a view past the survey's edge is not taken for one whose terrain failed.
    */
-  maskReadyFor(id: string): boolean {
+  seesPatch(id: TerrainViewId): boolean {
     const selected = this.#selected;
     if (this.#faulted || this.#disposed || selected === null || !this.#views.has(id)) {
       return false;
@@ -869,7 +997,36 @@ export class TerrainPass {
     }
     const mask = 1 << bit;
     const { drawSet } = selected;
-    if ((drawSet.missingViews & mask) !== 0) {
+    for (let n = 0; n < drawSet.count; n += 1) {
+      if (((drawSet.views[n] ?? 0) & mask) !== 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Whether view `id`'s frame may give the body's coverage mask (decision D7), as the last step
+   * leaves it, before the view's draw: no fault, the view taken by that step, nothing it sees
+   * missing, no drawn patch it sees of survey cell code 0 whose bake holds a vertex outside the
+   * survey (decision-r10-t16-review §2: its vertices cannot hold its cells), and its draw ready to
+   * be made wherever it sees a patch (the material compiled, and a lit pass's phase table and
+   * tables of no air made). {@link TerrainPass.drawFor}'s `maskReady` is this, but for a draw
+   * refused at its making (a device lost meanwhile); a view's frame reads this one before its plan,
+   * which takes the mask (R10.T16.c).
+   */
+  maskReadyFor(id: TerrainViewId): boolean {
+    const selected = this.#selected;
+    if (this.#faulted || this.#disposed || selected === null || !this.#views.has(id)) {
+      return false;
+    }
+    const bit = selected.views.findIndex((view) => view.id === id);
+    if (bit < 0) {
+      return false;
+    }
+    const mask = 1 << bit;
+    const { drawSet } = selected;
+    if ((drawSet.missingViews & mask) !== 0 || this.#seesCodeZeroOpen(mask)) {
       return false;
     }
     let sees = false;
@@ -886,24 +1043,53 @@ export class TerrainPass {
   }
 
   /**
+   * Whether the views of `mask` see a drawn patch, selected or standing in, of survey cell code 0
+   * whose last bake holds a vertex outside the survey (decision-r10-t16-review §2): one is drawn as
+   * the stream's first bake and first stand-in at whatever range the camera holds, and where its
+   * cells lie between its vertices neither surface would draw them, so the mask is withheld while
+   * it is drawn; it raises no `TERRAIN: STREAMING` of its own.
+   */
+  #seesCodeZeroOpen(mask: number): boolean {
+    const drawSet = this.#selected?.drawSet;
+    if (drawSet === undefined) {
+      return false;
+    }
+    const { residents } = this.#device;
+    for (let n = 0; n < drawSet.count; n += 1) {
+      const drawn = drawSet.patches[n];
+      if (
+        drawn !== undefined &&
+        ((drawSet.views[n] ?? 0) & mask) !== 0 &&
+        residents.get(drawn.keyString)?.codeZeroOpen === true
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Runs one frame of the descent spike's single view, {@link DEFAULT_TERRAIN_VIEW}: a step at the
    * terrain's τ and weight 1, then its draw, as R05 built it.
    *
    * @throws RangeError if more contacts are given than the contact buffer holds.
    */
   frame(input: TerrainFrameInput): TerrainFrame {
-    const { drawSet, selection, reselected } = this.step({
-      views: [
-        { id: DEFAULT_TERRAIN_VIEW, view: input.view, tauPx: this.#terrain.tauPx, weight: 1 },
-      ],
-      grounded: input.grounded,
-    });
+    const { drawSet, selection, reselected } = this.#step(
+      [{ id: DEFAULT_TERRAIN_VIEW, view: input.view, tauPx: this.#terrain.tauPx, weight: 1 }],
+      input,
+    );
     const { draw, conditions, annunciation } = this.drawFor(DEFAULT_TERRAIN_VIEW, input);
     return { draw, drawSet, selection, reselected, conditions, annunciation };
   }
 
-  /** Releases view `id`'s own draw resources, as a view that no longer hands the body over. */
-  forgetView(id: string): void {
+  /**
+   * Releases view `id`'s own draw resources, as a view that no longer hands the body over; only a
+   * step that leaves the view out does it, so that a view taken again always takes a selection,
+   * and with it its morph bands (the batch review's C9).
+   */
+  #forgetView(id: TerrainViewId): void {
+    this.#stepped.delete(id);
     if (this.#views.delete(id)) {
       this.#device.resources.releaseView(id);
     }
@@ -921,15 +1107,23 @@ export class TerrainPass {
     }
     this.#disposed = true;
     const device = this.#device;
-    this.#settleAll(device);
-    this.#offRestored();
-    device.offBaked();
-    device.offFailed();
-    device.pool.terminate();
-    this.#views.clear();
-    this.#heights.clear();
-    device.resources.dispose();
-    this.#releaseDevice(device);
+    try {
+      this.#settleAll(device);
+    } finally {
+      // Whatever a block's listener threw, the lane ends and every handle goes (S3, S4).
+      this.#offRestored();
+      device.offBaked();
+      device.offFailed();
+      device.pool.terminate();
+      this.#views.clear();
+      this.#stepped.clear();
+      this.#heights.clear();
+      try {
+        device.resources.dispose();
+      } finally {
+        this.#releaseDevice(device);
+      }
+    }
   }
 
   /** The materials and the tables of no air of `device`. */
@@ -978,6 +1172,7 @@ export class TerrainPass {
       rebakes: new Map(),
       gates: [],
       asked: new Map(),
+      givenUp: new Set(),
     };
     return device;
   }
@@ -1037,7 +1232,17 @@ export class TerrainPass {
     if (stored.evicted !== null) {
       this.#forget(device, stored.evicted);
     }
-    const upload = device.resources.upload({ slot: stored.slot, ...bake });
+    let upload: ReturnType<TerrainResources["upload"]>;
+    try {
+      upload = device.resources.upload({ slot: stored.slot, ...bake });
+    } catch (error: unknown) {
+      if (!(error instanceof EngineUnavailable)) {
+        throw error;
+      }
+      // A bake landing during a loss, whose phase table could not grow: the restore's rebuild
+      // asks for it again.
+      upload = { kind: "refused", reason: "slot-outside-layout" };
+    }
     if (upload.kind !== "uploaded") {
       device.cache.remove(keyString);
       this.#forget(device, keyString);
@@ -1046,6 +1251,7 @@ export class TerrainPass {
     // A rebake replaces its old bake in its slot (`PatchCache.insert` of a resident key).
     this.#heights.take(bake);
     const layers = bake.layers;
+    device.givenUp.delete(keyString);
     device.residents.set(keyString, {
       layers:
         layers === null
@@ -1060,6 +1266,10 @@ export class TerrainPass {
       request: device.asked.get(keyString) ??
         device.rebakes.get(keyString) ??
         device.residents.get(keyString)?.request ?? { key: bake.key, priority: 0, forced: false },
+      codeZeroOpen:
+        layers !== null &&
+        layers.unsurveyedCells.length > 0 &&
+        surveyCellCode(bake.key.level, layers.fieldLevel) === 0,
     });
     device.rebakes.delete(keyString);
     this.#landed(device, keyString);
@@ -1071,6 +1281,7 @@ export class TerrainPass {
   /** A patch no longer resident: evicted, or refused by its slot. */
   #forget(device: Device, keyString: string): void {
     device.residents.delete(keyString);
+    device.givenUp.delete(keyString);
     this.#heights.forget(keyString);
     if (device.rebakes.delete(keyString)) {
       this.#demandDirty = true;
@@ -1082,6 +1293,9 @@ export class TerrainPass {
   #givenUp(device: Device, keyString: string): void {
     if (device !== this.#device) {
       return;
+    }
+    if (device.residents.has(keyString)) {
+      device.givenUp.add(keyString);
     }
     if (device.rebakes.delete(keyString)) {
       this.#demandDirty = true;
@@ -1116,10 +1330,10 @@ export class TerrainPass {
   }
 
   /** Forgets the views that no longer hand the body over, and keeps a state for each that does. */
-  #leaveViews(views: ReadonlyArray<TerrainPassView>): void {
+  #leaveViews(views: ReadonlyArray<StepView>): void {
     for (const id of this.#views.keys()) {
       if (!views.some((view) => view.id === id)) {
-        this.forgetView(id);
+        this.#forgetView(id);
       }
     }
     for (const { id } of views) {
@@ -1129,7 +1343,7 @@ export class TerrainPass {
     }
   }
 
-  #viewState(id: string): ViewState {
+  #viewState(id: TerrainViewId): ViewState {
     const bodyRotation = new Float32Array(16);
     const atlas = new Float32Array(4);
     return {
@@ -1153,7 +1367,7 @@ export class TerrainPass {
   }
 
   /** A view as selection takes it: body-fixed, at τ_sel ({@link selectionTolerancePx}). */
-  #selectionView(view: TerrainPassView): PassSelectionView {
+  #selectionView(view: StepView): PassSelectionView {
     const { rotation, cameraM, orientation } = view.view;
     const qBody = quaternionFromRows(rotation.rows);
     return {
@@ -1170,7 +1384,10 @@ export class TerrainPass {
     };
   }
 
-  #due(views: ReadonlyArray<PassSelectionView>, input: TerrainStepInput): boolean {
+  #due(
+    views: ReadonlyArray<PassSelectionView>,
+    input: Pick<TerrainStepInput, "grounded">,
+  ): boolean {
     const last = this.#selected;
     if (last === null) {
       return true;
@@ -1204,8 +1421,11 @@ export class TerrainPass {
       if (2 * Math.acos(Math.min(dot, 1)) > pixelRad) {
         return true;
       }
-      // With no coarse patch in view, the nearest surveyed ground (+∞ with no survey, as R05's).
-      const nearestM = Number.isFinite(was.nearestM) ? was.nearestM : last.selection.nearestSurveyM;
+      // With no coarse patch in view, its own nearest surveyed ground (+∞ with no survey, as
+      // R05's), not another view's (S9).
+      const nearestM = Number.isFinite(was.nearestM)
+        ? was.nearestM
+        : (last.selection.nearestSurveyByViewM[n] ?? last.selection.nearestSurveyM);
       // m ÷ (1 + m) of d_min, not m, so that the drawn error stays within τ, not τ ÷ (1 − m²).
       return (
         distance(view.camera.positionM, was.cameraBodyFixedM) > RESELECT_MOVE_FRACTION * nearestM
@@ -1213,18 +1433,54 @@ export class TerrainPass {
     });
   }
 
-  #select(views: ReadonlyArray<PassSelectionView>, input: TerrainStepInput): void {
+  /**
+   * `views` with each one's frustum margin under `motion` ({@link frustumMarginRad}), from its
+   * camera at the last step and its nearest selected ground; unchanged under `none`.
+   */
+  #withMargins(views: ReadonlyArray<PassSelectionView>): ReadonlyArray<PassSelectionView> {
+    if (this.#frustumMargin === "none") {
+      return views;
+    }
+    const last = this.#selected;
+    return views.map((view) => {
+      const n = last?.views.findIndex((was) => was.id === view.id) ?? -1;
+      const was = n < 0 ? undefined : last?.views[n];
+      const nearestM =
+        was !== undefined && Number.isFinite(was.nearestM)
+          ? was.nearestM
+          : (last?.selection.nearestSurveyByViewM[n] ?? Number.POSITIVE_INFINITY);
+      return {
+        ...view,
+        frustumMarginRad: frustumMarginRad(view, this.#stepped.get(view.id) ?? null, nearestM),
+      };
+    });
+  }
+
+  #select(
+    views: ReadonlyArray<PassSelectionView>,
+    input: Pick<TerrainStepInput, "grounded">,
+  ): void {
     const planet = this.#planet;
     const selectionInput: SelectionInput = {
       planet,
       // Selection's own view inputs, without the pass's names for them.
-      views: views.map(({ camera, fovXRad, viewport, weight, tauPx }): ViewSelectionInput => ({
-        camera,
-        fovXRad,
-        viewport,
-        weight,
-        tauPx,
-      })),
+      views: views.map(
+        ({
+          camera,
+          fovXRad,
+          viewport,
+          weight,
+          tauPx,
+          frustumMarginRad: margin,
+        }): ViewSelectionInput => ({
+          camera,
+          fovXRad,
+          viewport,
+          weight,
+          tauPx,
+          ...(margin === undefined ? {} : { frustumMarginRad: margin }),
+        }),
+      ),
       setting: this.#setting,
       grounded: input.grounded,
       maxPatches: this.maxPatches,
@@ -1303,20 +1559,21 @@ export class TerrainPass {
   }
 
   /**
-   * The records written on the current device, or no draw while the device is lost: a view's
-   * frame buffers are made at its first frame, and nothing can be made then (`EngineUnavailable`).
+   * The records written on the current device, or no draw while the device is lost (`refused`): a
+   * view's frame buffers are made at its first frame, and nothing can be made then
+   * (`EngineUnavailable`).
    */
   #writeOrNone(
     state: ViewState,
     mask: number,
     contacts: ReadonlyArray<GroundContact>,
     input: TerrainViewFrameInput,
-  ): { readonly draw: DrawItem | null; readonly count: number } {
+  ): { readonly draw: DrawItem | null; readonly count: number; readonly refused: boolean } {
     try {
-      return this.#write(this.#device, state, mask, contacts, input);
+      return { ...this.#write(this.#device, state, mask, contacts, input), refused: false };
     } catch (error: unknown) {
       if (error instanceof EngineUnavailable) {
-        return { draw: null, count: 0 };
+        return { draw: null, count: 0, refused: true };
       }
       throw error;
     }
@@ -1542,4 +1799,5 @@ const EMPTY_SELECTION: Selection = {
   limitExcess: 0,
   hiddenBaked: [],
   nearestSurveyM: Number.POSITIVE_INFINITY,
+  nearestSurveyByViewM: [],
 };

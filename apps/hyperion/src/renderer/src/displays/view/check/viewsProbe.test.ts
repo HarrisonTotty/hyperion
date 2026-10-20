@@ -206,6 +206,89 @@ describe("the views probe", () => {
     expect(probe.faults()).toEqual(["device-lost (destroyed): fake loss"]);
   });
 
+  it("keeps every fault and restore with its time, for the terrain run (R10.T16.d)", async () => {
+    const { probe, page, timed } = await probed();
+    page.nowMs = 40;
+    timed.engines[0]?.loseDevice("destroyed");
+    page.nowMs = 90;
+    timed.engines[0]?.raiseRestored();
+    expect(probe.timedFaults()).toEqual([
+      { atMs: 40, fault: { kind: "device-lost", reason: "destroyed", message: "fake loss" } },
+    ]);
+    expect(probe.restoresAtMs()).toEqual([90]);
+  });
+
+  it("tells a watcher of each submission in its animation frame, and each target made", async () => {
+    const { probe, page, engine } = await probed();
+    const seen: Array<readonly [string, string, number | null]> = [];
+    const targets: string[] = [];
+    const unwatch = probe.watch({
+      submitted: (owner, submission, frameMs) => {
+        seen.push([owner, submission.label, frameMs]);
+      },
+      madeTarget: (spec) => {
+        targets.push(spec.name);
+      },
+    });
+    const primary = engine.createView(document.createElement("canvas"), "view");
+    const target = engine.createRenderTarget({
+      name: "view:hdr",
+      size: { widthPx: 8, heightPx: 4 },
+      format: "rgba16float",
+      mips: 1,
+      depth: true,
+      category: "render-targets",
+    });
+    inFrame(page, 100, () => {
+      target.render(frame("discs"));
+      primary.render(frame("tonemap"));
+    });
+    primary.render(frame("outside"));
+    unwatch();
+    inFrame(page, 116, () => {
+      primary.render(frame("tonemap"));
+    });
+    expect(targets).toEqual(["view:hdr"]);
+    expect(seen).toEqual([
+      ["view:hdr", "discs", 100],
+      ["view", "tonemap", 100],
+      ["view", "outside", null],
+    ]);
+  });
+
+  it("gives every animation frame's time, and a view's draws', within a window", async () => {
+    const { probe, page, engine } = await probed();
+    const primary = engine.createView(document.createElement("canvas"), "view");
+    inFrame(page, 100, () => {
+      primary.render(frame("tonemap"));
+    });
+    inFrame(page, 116, () => undefined);
+    inFrame(page, 133, () => {
+      primary.render(frame("tonemap"));
+    });
+    expect(probe.frameTimes(0, 200)).toEqual([100, 116, 133]);
+    expect(probe.drawTimes("view", 0, 200)).toEqual([100, 133]);
+    expect(probe.drawTimes("view", 110, 200)).toEqual([133]);
+    const { name, ...window } = probe.phase("wireframe-alone", 0, 200, [
+      { name: "view", style: "wireframe" },
+    ]);
+    expect(name).toBe("wireframe-alone");
+    expect(probe.window(0, 200, [{ name: "view", style: "wireframe" }])).toEqual(window);
+  });
+
+  it("summarises a window of more resolves than an argument list takes (a terrain run's minutes)", async () => {
+    const { probe, page } = await probed();
+    // Two hundred renders of a thousand resolves each: some 10⁵ resolves in a window, as a
+    // terrain run's minutes hold, which an argument spread over them could not take.
+    inFrame(page, 100, () => {
+      for (let render = 0; render < 200; render += 1) {
+        probe.rendered("view:hdr", render * 1_000, (render + 1) * 1_000, 0);
+      }
+    });
+    const record = probe.window(0, 200, [{ name: "view", style: "photorealistic" }]);
+    expect([record.droppedResolves, record.unattributedGpuMs]).toEqual([200_000, 0]);
+  });
+
   it("gives the page's own requestAnimationFrame back", () => {
     const probe = new ViewsProbe();
     const page = new FakePage();
