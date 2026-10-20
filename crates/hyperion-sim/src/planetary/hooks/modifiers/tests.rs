@@ -707,7 +707,9 @@ fn a_surface_that_is_not_oxidised_carries_no_ferric() {
 /// P14.T51.j: the volcanic and weathering deposits together cover at most the surface. An
 /// oxidised Mars-like world resurfaced as an Io is (extreme heat flow, mantle sulphur, its ground
 /// below SO₂'s frost point) lays its volcanic deposits, and its `ferric` takes the dusty share of
-/// the land they and its cap leave.
+/// the land they and its cap leave. Its inputs are inconsistent on purpose: 2.5 W m⁻² on a 3.9 Gyr
+/// surface, where the generator's surface age at that heat flow is some thousands of years, so the
+/// test pins the contract's guard, not a generated case (decision-p14-t51ij-budget §3).
 #[test]
 fn the_deposits_together_cover_at_most_the_surface() {
     let caps = mars_caps();

@@ -96,7 +96,7 @@
 //!    takes none: the wind's hydrogen reduces its surface, and its weathering is the maturity's.
 //! 3. **Its surface is dry now and has been for at least [`OXIDISED_DRY_TIME`]**: since its wet
 //!    epoch's end (P14.T48.b's `WetEpoch::end`), held to its surface age, or over its surface age
-//!    if it was never wet ([`WaterHistory`]). A wet surface weathers to clays (neutral water) or sulphates (acid
+//!    if it was never wet ([`WaterHistory`]; decision-p14-t51ij-budget §2). A wet surface weathers to clays (neutral water) or sulphates (acid
 //!    water) instead: recorded for the composition audit, not built here.
 //!
 //! The deposit covers [`DUSTY_SHARE`] of the dry, ice-free land: the surface less its perennial
@@ -804,8 +804,8 @@ impl SurfaceModifiers {
 /// weathering deposits together cover at most the surface.
 ///
 /// The dry time is the time since the wet epoch's end, held to the surface age, since a surface
-/// younger than that has lain dry only for its own age; a surface never wet takes its age (the
-/// lane's reading of the ruling's "since its wet epoch's end", for main).
+/// renewed since its wet epoch has lain dry only for its own age and its deposit is buried with
+/// it; a surface never wet takes its age (decision-p14-t51ij-budget §2).
 ///
 /// # Panics
 ///

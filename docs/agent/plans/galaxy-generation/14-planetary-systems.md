@@ -6325,11 +6325,13 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
     form inside `fractions_at`; `ColdTrapField` is built from a `ColdTrapGround`; the regolith's
     albedo is passed as `ColdTrapGroundParts::bond_albedo`. It adds
     `CondensateEntry::trapped_area_fraction` (§1.4).
-  - **Budget** (release, `time_the_cold_traps`):
-    - at most 0.6 ms for each qualifying table body, all its species;
-    - over the 60-system sample, measured with a probe and recorded, a mean of at most 7 ms a
-      system and at most 50 ms in any;
-    - if missed, R09.T7.g's plains table, then main.
+  - **Budget** (release, under the heavy lock, decision-p14-t51ij-budget §1):
+    - **binding:** over the 60-system sample, measured with a probe and recorded, a mean of at most
+      7 ms a system and at most 50 ms in any;
+    - **a design target**, not a gate: at most 0.6 ms for each qualifying table body, all its
+      species, under T51.f's measure (the Moon's sky); the bodies' own skies are recorded;
+    - if the binding figures are missed, here or in T33.a's re-run after 24, R09.T7.g's plains table,
+      then main.
   - _Tests:_
     - the shared form equals `fraction` to the bit for each threshold, over the table's bodies
       and thresholds of 20–200 K;
@@ -6356,13 +6358,19 @@ only with an `envelope` section and read by T52.a and T52.d (decision-p14-t50b-e
     - **its air is collisional at the ground and oxidising.** Collisional is P14.T51.f's test, or
       P14.T53.c's tenuous floor once it exists. Oxidising means CO₂, H₂O or O₂ present and H₂
       not the largest gas. An airless surface takes none;
-    - **it is dry now** (T24.a's liquid-water flag false), and **has been for at least a
-      labelled 0.1 Gyr**: since its wet epoch's end (T48.b), or over its surface age if never
-      wet. A wet surface's clays and sulphates are recorded for the composition audit.
+    - **it is dry now** (T24.a's liquid-water flag false), **and has been for at least a labelled
+      0.1 Gyr of its present surface's age:** min(the time since its wet epoch's end (T48.b), its
+      surface age (T24.b)), or its surface age if it was never wet. A surface renewed since its wet
+      epoch has been dry only for its own age, and its deposit is buried with it
+      (decision-p14-t51ij-budget §2). A wet surface's clays and sulphates are recorded for the
+      composition audit.
   - **Its area** is the dusty share of the dry, ice-free land: a labelled Mars value from Ruff
     and Christensen 2002's dust cover index (JGR 107, 5127), checked against Putzig et al.
     2005's bright, low-inertia terrains, both read at build. It is the same for every world until
-    a dust cycle is modelled.
+    a dust cycle is modelled. It is less any volcanic deposit, which lies on top. Every body that
+    carries one has a surface far younger than 0.1 Gyr, so the two never coexist from the record.
+    The exclusion keeps the deposits together at most 1 for any inputs
+    (decision-p14-t51ij-budget §3).
   - **Published** as `SurfaceModifiers::weathering_deposits` (`{ substance, area }`, at most one
     today), beside `volcanic_deposits`, and as
     `SurfaceModifiersDto.weathering_deposits: Vec<SubstanceAreaDto>`.
@@ -6792,7 +6800,9 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - _From P14.T51.i and T51.j_ (decision-p14-t51-batch §9.6; decision-r09-t13f-cold-traps §8):
     - the passes call `cold_traps::publish_over` over T51.i's field, one `ColdTrapField` a body,
       which `condensates_under` then reads, so that every body's published condensates equal its
-      last pass's to the bit; the field is built once a body (a test counts the builds);
+      last pass's to the bit. It builds the passes' `ColdTrapField` once a body, from the passes'
+      terrain and heat flow (T54.a), and carries it to `condensates_under`, replacing the record
+      path's own build, so that its test counts one build a body (decision-p14-t51ij-budget §5);
     - T51.j's wiring: a palette `Deposit` entry `ferric`, the source of the body's sand and dust,
       and its area in the area mix at `ferric`'s optics (P14.T49.i); `ModifierInputs::lid` from
       `CrustComposition::lid()`, `gases` from the atmosphere's partial pressures and `water` from
@@ -17921,22 +17931,22 @@ tables::gauss_legendre`.
     record's partition and cold traps under the batches for the end-to-end test and the probe.
   - _The budget, measured_ (release, under the heavy lock, one thread at a 100% quota, the
     1-minute load 7–9; the best of five interleaved rounds of 200, and of three for the sample),
-    with the skip:
-    - the table's qualifying bodies in their own skies (`time_the_cold_traps`, Mercury and Ceres
-      given theirs; T51.f's version gave every body the Moon's): the Moon 0.48 ms, Mercury 0.25
-      ms, Ceres 0.73 ms, all species included, against 3.05–3.21 ms at T51.f and the budget's
-      0.6 ms. **Ceres misses it by about 20%** (the ruling's port put belt bodies at about 0.6 ms);
-      under the Moon's sky, the measure as T51.f built it, all three are 0.48–0.50 ms. GL-6 gives
-      Ceres 0.74 ms and GL-4 0.63 ms: its time is the integrand's table reads, not the
-      quadrature. For main (the ruling's next lever is R09.T7.g's plains table): the lane's lean
-      is to accept it, recorded, since the per-body figure serves the sample's, which is met tenfold.
-    - over the sample (`time_the_cold_traps_over_the_sample`, every record of the first 60
-      systems, 611 airless, uncollisional planets and members, moons' records included): a mean
-      of 0.68 ms a system, median 0.27 ms, at most 4.1 ms (before the skip 0.80–0.86, 0.31 and
-      4.8–4.9 ms), against the budget's 7 and 50 ms. The record path's ices differ under the cold
-      traps' batch (954 listed against 980 held), so the path runs. Most airless bodies cost less
-      than the table's, their zonal gate shut at every latitude or their warmest threshold with few
-      cold bowls.
+    with the skip; **ruled: accepted** (decision-p14-t51ij-budget §1):
+    - **the binding budget is the sample's** (`time_the_cold_traps_over_the_sample`, every record
+      of the first 60 systems): a mean of 0.68 ms a system, median 0.27 ms, at most 4.1 ms (before
+      the skip 0.80–0.86, 0.31 and 4.8–4.9 ms), against 7 and 50 ms. Its 611 count is the airless,
+      uncollisional planets and members; its time includes the moons' records too. The most
+      costly system holds 8 such bodies, and the most belt-rich, 66, costs under 2.1 ms. The
+      record path's ices differ under the cold traps' batch (954 listed against 980 held), so the
+      path runs. Most airless bodies cost less than the table's, their zonal gate shut at every
+      latitude or their warmest threshold with few cold bowls;
+    - **the per-body figure is a design target**, met under T51.f's measure (every body in the
+      Moon's sky): the Moon, Mercury and Ceres 0.48–0.50 ms each, all species included, against
+      3.05–3.21 ms at T51.f and the target's 0.6 ms. Own skies recorded (`time_the_cold_traps` now
+      gives Mercury and Ceres theirs): the Moon 0.48 ms, Mercury 0.25 ms, Ceres 0.73 ms. GL-6 gives
+      Ceres 0.74 ms and GL-4 0.63 ms: its time is the integrand's table reads, not the quadrature,
+      so GL-8 with the skip stands, and R09.T7.g's plains table stays the first lever if a later run
+      misses 7 or 50 ms.
   - _Tests:_ the surface crate's `the_shared_integral_is_the_one_threshold_path_to_the_bit` (the
     shared sums against `cumulative` and `shadowed`, which never share, and `fractions` against the
     one-threshold arithmetic written out), `the_skipped_bowls_keep_the_shadow_s_bits`,
@@ -17954,7 +17964,22 @@ tables::gauss_legendre`.
     their ices moved by the traps), and the two timings (ignored). R09.T13.f's tests are not on
     integration yet; R09's `planetary::surface::steps::climate` passes unchanged.
 - **Deferred findings (2026-10-13 rule)**, from P14.T51.i:
-  - _Ceres's own-sky cost_ (above), for main: 0.73 ms against 0.6 ms.
+  - _Ceres's own-sky cost_ (above): 0.73 ms against the 0.6 ms target, **ruled: accepted**,
+    decision-p14-t51ij-budget §1.
+  - _The supervolatiles' rule moves_ (decision-p14-t51ij-budget §4.4; measured against the
+    pre-T51.i rules, the real Sun, Hayne et al.'s terrains B and A, A 0.12, at their
+    `trap_threshold`s, on airless bodies of 3–4° at 2.77–40 au with heat flows of 1–2 mW m⁻², where
+    each traps; on the Moon N₂, CO and CH₄ trap nowhere, the heat flow's floor of about 24 K at
+    0.018 W m⁻² and ε 0.95 lying above their thresholds, 17.35, 18.39 and 23.65 K): where a species traps at least
+    10⁻⁵ of the surface, every move is at most 2.0 × 10⁻³ (CH₄ at 10 au: +2.0 × 10⁻³ (B), +1.3 ×
+    10⁻³ (A); N₂ at 30–40 au: at most 6.4 × 10⁻⁴; CO: at most 5.9 × 10⁻⁴; NH₃ (68.73 K): at most
+    8.4 × 10⁻⁴); at 10⁻⁸ of the surface at most 4.0 × 10⁻³ (NH₃ and CO₂ at their traps' onset at
+    30 and 40 au). **Moves above 10⁻² occur only at a trap's onset**, over 2.3 × 10⁻¹⁰ of the
+    surface or less: CH₄ at 5.2 au +3.3 × 10⁻² (B, 1.3 × 10⁻¹⁰) and +3.4 × 10⁻² (A, 1.4 × 10⁻¹²);
+    CO at 10 au +2.9 × 10⁻² (B, 2.2 × 10⁻¹⁰) and +3.3 × 10⁻² (A); N₂ at 10 au +6.6 × 10⁻² (B,
+    7.7 × 10⁻¹³) and +6.4 × 10⁻² (A). Reported to main before T54.b's wiring, as the ruling asks:
+    there the cold limit barely clears the shallowest shadow-keeping bowl, and 128 intervals
+    resolve that edge more coarsely.
   - _No golden pins the surface crate's cold-trap bits across targets_ (the determinism audit): the
     closed form's values moved at 22 with no golden to catch it, safely, since only the batch's
     record path reads them. A `cold_trap` golden of `fraction` and `permanent_shadow`, blessed at
@@ -17983,9 +18008,8 @@ tables::gauss_legendre`.
     H₂ is not the largest gas by number (each gas's weight over its molar mass, in `Gas::ALL`'s
     order: 2,000 Pa of H₂ against 4,401 Pa of CO₂ is reducing); dry for at least
     `OXIDISED_DRY_TIME`, 0.1 Gyr, since the wet epoch's end held to the surface age, or over the
-    surface age if never wet. **The hold to the surface age is the lane's reading** of the
-    ruling's "since its wet epoch's end": a surface younger than that has lain dry only for its
-    own age (for main; a decision agent has it).
+    surface age if never wet: min(t_dry, S), **ruled** (decision-p14-t51ij-budget §2), the time
+    the present surface has been there and dry, since resurfacing buries any oxidised deposit.
   - _Its area_: `DUSTY_SHARE` 0.31 (0.18–0.43) × the dry, ice-free land not under a volcanic
     deposit: 1 less the perennial solid and the liquid entries of the published condensates and
     the volcanic deposits, the rest held to at least 0 (a seasonal frost is land). So the volcanic
@@ -18012,7 +18036,12 @@ tables::gauss_legendre`.
     3.5 Gyr ago on a 50 Myr surface, never wet on a 50 Myr surface, or under ice everywhere, it
     carries none; dried exactly 0.1 Gyr ago, or never wet on its 3.9 Gyr surface, it does.
     Resurfaced as an Io (2.5 W m⁻², 100 K), its volcanic deposits cover 0.986 and its `ferric`
-    0.31 × (0.99 − 0.986), together under 1.
+    0.31 × (0.99 − 0.986), together under 1. Those inputs are inconsistent on purpose (2.5 W m⁻² on
+    a 3.9 Gyr surface; the generator's surface age at that heat flow is some thousands of years):
+    the test pins the contract's guard. With the min() in place, the two deposits cannot occur
+    together in generated bodies, since every body with volcanic deposits has a surface far younger
+    than 0.1 Gyr (decision-p14-t51ij-budget §3, ruled: the volcanic layer, the youngest, lies on
+    top).
   - _The Mercury test, restated_ (no value moves): k 8.89 above 1, its terms printed; its dust term
     14.26 within 10.5–17.5; its wind term's open share, its wind term over an unshielded Mercury's,
     0.516 within 0.4–0.6. The `k ÷ 4 ∈ [1, 3)` pin is gone.
@@ -18031,6 +18060,13 @@ tables::gauss_legendre`.
     test text, §9.6's T54.b items and T51.f's and T51.d's findings, the riders of 24, and §8's
     P14.T51.i and P14.T54.b items.
 - **Deferred findings (2026-10-13 rule)**, from P14.T51.j:
+  - _The surface's clock:_ ruled min(t_dry, S) (decision-p14-t51ij-budget §2). Old dust on locally
+    young patches needs regional surface ages, which the model lacks (fresh rock reddens locally
+    within decades on a dusty world, Geissler 2005, as the ruling records). The 0.1 Gyr step is a
+    labelled stand-in, for a smooth law with the dust cycle (P14.T24.c, R08) and the composition
+    audit.
+  - _The double count:_ a volcanic SO₂ frost also listed as a condensate is subtracted twice from
+    the land. That is conservative; recorded.
   - _The oxidant test is any trace:_ a trace of CO₂, H₂O or O₂ makes an air oxidising, and methane's
     reducing power is not weighed against it. A redox balance of the air (its oxidants against its
     H₂ and CH₄) is for the composition audit, with the clays and sulphates of wet surfaces and
