@@ -614,22 +614,73 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
     `hyperion_server::tap_socket`, does it, and all three places that call `axum::serve` use it:
     `main.rs`, the unit-test `Harness` in `src/testing.rs` and the integration harness in
     `tests/common/mod.rs`, so every scene and bulk test runs with the option set. A failure is
-    logged at `warn` and the connection goes on. socket2 does not expose it on
-    macOS, and Windows has none, so there the chunk bound alone holds. At 40 Mbit/s of Wi-Fi a push
-    then waits about 52 ms behind a chunk and 13 ms behind the kernel, plus the bytes in flight, under
-    the main screen's 100 ms loop; at 1 Gbit/s about 2 ms. With 1 MB chunks it would be over 200 ms
-    however the kernel is tuned. A chunk takes about 2 s at 1 Mbit/s, inside the 10 s write timeout.
-    Loopback drains a megabyte in microseconds, so R03.T10.b measures on an emulated slow link: a test
-    reader with a fixed 64 KiB receive buffer (socket2's `set_recv_buffer_size`, which turns off
-    receive autotuning) reading through a 5 MB/s token bucket, with the low-water mark on and off.
-    The renderer must not stall its own receive path either, since Chromium's backpressure reaches the
-    TCP window: chunks are kept as `ArrayBuffer`s and parsed when complete, by R06 and R09 off the
-    main thread. Measured by R03.T10.b on 2026-09-30, on the shared development machine (load
-    average 6–12, provisional; `bulk::tests::streaming::heartbeat_latency_behind_a_transfer_on_a_slow_link`,
-    run by hand): a heartbeat behind a 15 MB transfer, read at 5 MB/s through a 64 KiB receive
-    buffer, waited a median of 103–108 ms and at worst 150–156 ms with the low-water mark on, and
-    577–616 ms with it off. The worst case with it on is a finding over the 100 ms of this note,
-    for R12: the reader's own buffer and the chunk ahead of the push add to the kernel's share.
+    logged at `warn` and the connection goes on. Off Linux and Android the mark is not set, a limit
+    stated by a delegated decision of 2026-10-06 (R03.T17) from sources read on 2026-10-05:
+
+    - **macOS has the option, but it does not do what Linux's does.** XNU
+      (`apple-oss-distributions/xnu`, `main`) defines `TCP_NOTSENT_LOWAT` publicly, 0x201 in
+      `bsd/netinet/tcp.h`, and `tcp_usrreq.c` sets it. Only `tcp_notsent_lowat_check()`
+      (`tcp_subr.c`) reads it, for `sowriteable()` (`uipc_socket2.c`, behind select and poll) and
+      `filt_sowrite_common()` (`uipc_socket.c`, behind kqueue's `EVFILT_WRITE`), and reports the
+      socket writable once the unsent bytes are at most the mark. `sosendcheck()` (`uipc_socket.c`)
+      checks only the buffer's space against `sb_lowat`, so a non-blocking `send` goes on taking
+      bytes up to the buffer's high-water mark: the mark gates the readiness event, not the write,
+      where Linux refuses new data once the unsent bytes reach it.
+    - **Under tokio it would barely help.** tokio 1.53.1 retries a write until `WouldBlock` and
+      waits for readiness only after that (`Registration::poll_io`,
+      `src/runtime/io/registration.rs`), so on XNU the mark would delay each refill until 64 KiB or
+      less is unsent, and tokio would then fill the buffer to its high-water mark again: the rhythm
+      of the refills would change, not the worst case a push waits behind. Setting it would need
+      `unsafe` besides: libc 0.2.190 has no Apple binding, socket2 0.6.5 gates the option to Linux
+      and Android, and rustix 1.1.5 and nix 0.31.3 have none. All of it holds at the locked tokio
+      1.53.3 and libc 0.2.191, rechecked on 2026-10-20.
+    - **What XNU holds without it.** The send buffer starts at `tcp_sendspace`, 128 KiB
+      (`tcp_usrreq.c`), and grows in steps of `tcp_autosndbuf_inc`, 8 KiB, up to
+      `tcp_autosndbuf_max` (`tcp_output.c`): 2 MiB, 4 MiB on machines with at least 4 GiB of memory
+      and 8 MiB under `serverperfmode` (`tcp_subr.c`). It grows only while the peer's window × 5/4
+      is at least the buffer, the buffer is at least 7/8 full and `min(snd_wnd, snd_cwnd)` covers
+      every unsent byte (`tcp_output()`), and it is trimmed when the congestion window backs off
+      (`tcp_sbsnd_trim()`, `tcp_input.c`). So the unsent bytes stay at about one send window at
+      most. Setting `SO_SNDBUF` clears `SB_AUTOSIZE` (`uipc_socket.c`) and pins the buffer.
+    - **Windows has no such option, and keeps about one ideal send backlog outstanding.** Microsoft
+      Learn's SIO_IDEAL_SEND_BACKLOG_QUERY page: "the send buffer limit determines how much data is
+      kept outstanding in TCP"; the ideal send backlog, "the ideal value for the amount of data
+      outstanding (sent but not acknowledged yet)", is a function of the bandwidth-delay product and
+      the receiver's advertised receive window, at most 16 MB; and "Dynamic send buffering for TCP
+      is enabled unless an application sets the SO_SNDBUF socket option". So Windows holds about
+      what is in flight and little unsent, the effect the mark has on Linux.
+
+    | Platform | The kernel's share behind a push                                                                                                                           |
+    | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+    | Linux    | at most 64 KiB unsent (13.1 ms at 40 Mbit/s), plus the bytes in flight                                                                                     |
+    | macOS    | at most max(128 KiB, about one send window) unsent, from XNU's autosizing rule: at least 26.2 ms at 40 Mbit/s, and growing only with the congestion window |
+    | Windows  | about one ideal send backlog outstanding in total                                                                                                          |
+
+    Each comes on top of the one-chunk bound, which is platform-independent and tested on every
+    platform (`every_chunk_precedes_the_terminal_response_in_order_and_one_is_queued_at_a_time` is
+    not gated), and over loopback, where the single-player local server runs, all three are
+    negligible (R03.T15). `SO_SNDBUF` is pinned on neither platform: on macOS it would cap
+    throughput at the buffer per round trip on every path, where the autosizing rule already keeps
+    the unsent part near one window, and on Windows it would turn dynamic send buffering off.
+    Pacing in the application would need the link's rate, which the server does not know. R03.T17.b
+    adds the `Kernel` figures measured on macOS, by hand.
+
+    On Linux, at 40 Mbit/s of Wi-Fi a push then waits about 52 ms behind a chunk and 13 ms behind
+    the kernel, plus the bytes in flight, under the main screen's 100 ms loop; at 1 Gbit/s about
+    2 ms. With 1 MB chunks it would be over 200 ms however the kernel is tuned. A chunk takes about
+    2 s at 1 Mbit/s, inside the 10 s write timeout. Loopback drains a megabyte in microseconds, so
+    R03.T10.b measures on an emulated slow link: a test reader with a fixed 64 KiB receive buffer
+    (socket2's `set_recv_buffer_size`, which turns off receive autotuning) reading through a 5 MB/s
+    token bucket, with the low-water mark on and off. The renderer must not stall its own receive
+    path either, since Chromium's backpressure reaches the TCP window: chunks are kept as
+    `ArrayBuffer`s and parsed when complete, by R06 and R09 off the main thread. Measured by
+    R03.T10.b on 2026-09-30, on the shared development machine (load average 6–12, provisional;
+    `bulk::tests::streaming::heartbeat_latency_behind_a_transfer_on_a_slow_link`, run by hand): a
+    heartbeat behind a 15 MB transfer, read at 5 MB/s through a 64 KiB receive buffer, waited a
+    median of 103–108 ms and at worst 150–156 ms with the low-water mark on, and 577–616 ms with it
+    off. The worst case with it on is a finding over the 100 ms of this note, for R12: the reader's
+    own buffer and the chunk ahead of the push add to the kernel's share.
+
 12. **Open question 21: no version bump.** `lib.rs`'s rule bumps `PROTOCOL_VERSION` for a removed or
     changed message and not for an added kind or optional field, because an older peer refuses what
     it does not know. The first `notification` and the first binary frames are additions of the same
@@ -686,7 +737,9 @@ order; T6 follows T5.a; T7 follows T3 and T6, since it evaluates contacts with `
 follows T5.b and T7; T9 follows T8. T10.a (binary frames) can start after T1 and runs beside
 T4–T9; T10.b follows T5.b and T10.a, and its heartbeat measurement follows T8.a; T11 follows
 T10.a. T12 follows T5.c; T13 follows T3, T12 and R02.T8.a; T14 follows T8, T11 and T13. T15
-closes. T16, added 2026-10-02 by a delegated decision, follows T15 and R02.T17.
+closes. T16, added 2026-10-02 by a delegated decision, follows T15 and R02.T17. T17, added
+2026-10-06 by a delegated decision, follows T10.b and changes no behaviour; T17.b is by hand on the
+owner's Mac, optional, and blocks nothing.
 
 ### R03.T1 Reconcile, reserve the kinds, rule question 21
 
@@ -1157,6 +1210,36 @@ and no kind is added.
   `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view`;
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/scene`; `just ci`.
 
+### R03.T17 The low-water mark off Linux, stated
+
+Added 2026-10-06 by a delegated decision (`decision-cross-platform-server.md`, item 1). Nothing
+changes behaviour. The decision accepts the low-water mark's absence off Linux and Android with a
+stated limit (Design note 11): no `TCP_NOTSENT_LOWAT` on macOS, since it would not work under tokio,
+and no `SO_SNDBUF` on either platform. No `unsafe` exception is asked for. T17 follows T10.b, and
+T17.b follows T17.a.
+
+- **R03.T17.a The limit, in the code and the plan.** `crates/hyperion-server/src/lib.rs`: correct
+  `tap_socket`'s docs, whose reason, "socket2 does not expose the option there", is incomplete. They
+  say that XNU has the option (0x201), but it gates only writability events while `send` fills the
+  buffer, and tokio writes until `WouldBlock`, so it would not bound the queue; that Windows has
+  none, and its dynamic send buffering keeps about one ideal send backlog; and the stated limit.
+  `src/limits.rs`: the same in `TCP_NOTSENT_LOWAT_BYTES`'s docs. `src/testing.rs`:
+  `Tap::LowWaterMark`'s docs say that it sets the mark on Linux and Android only. `src/bulk.rs`,
+  `heartbeat_latency_behind_a_transfer_on_a_slow_link`: off Linux and Android, run only the `Kernel`
+  leg, and say in its report that no mark exists there; note in its docs that the reader's fixed
+  64 KiB receive buffer keeps XNU's buffer at its 128 KiB start, since 64 KiB × 5/4 is less than
+  128 KiB; gate any import this needs as 7f8cf94 did. This plan: in Design note 11, replace
+  "socket2 does not expose it on macOS, and Windows has none, so there the chunk bound alone holds"
+  with the findings and the limit, citing the XNU and Microsoft sources; add to Risks the R12
+  candidate (text frames ahead of a queued chunk); add this task. Tests: none new, since behaviour
+  does not change; the Linux-only tests stay gated as they are. Acceptance:
+  `cargo test -p hyperion-server bulk`; `cargo doc -p hyperion-server --no-deps` with no warnings;
+  `just cross-clippy`, for `aarch64-apple-darwin` and `x86_64-pc-windows-msvc`; `just ci`.
+- **R03.T17.b The macOS figure, by hand (the owner, optional, blocks nothing).** On the Mac, quiet,
+  run
+  `cargo test -p hyperion-server --lib bulk::tests::streaming::heartbeat_latency -- --ignored --nocapture`
+  and record the `Kernel` figures, marked provisional, in Design note 11 beside the Linux ones.
+
 ## Verification
 
 - **Honest scene:** the Knowledge-bound test over 200 camera placements, with a level per body
@@ -1195,9 +1278,15 @@ convention, and `PROTOCOL_VERSION` stays 2 (Design note 12).
 - **Head-of-line blocking below the server.** The chunk size, the one-chunk queue and
   `TCP_NOTSENT_LOWAT` bound what the server and the kernel hold, not the router's or access point's
   queue, which a bufferbloated access point can hold for hundreds of milliseconds, nor macOS and
-  Windows, where the option is not set. If a wired LAN still holds pushes past the main screen's
-  100 ms loop, the fallbacks are, in order: pacing bulk to a fraction of the measured goodput, then a
-  second WebSocket for bulk, which escapes the send buffer but still shares the bottleneck queue.
+  Windows, where the option is not set (Design note 11 states the kernel's share there). If a wired
+  LAN still holds pushes past the main screen's 100 ms loop, the fallbacks are, in order: pacing
+  bulk to a fraction of the measured goodput, then a second WebSocket for bulk, which escapes the
+  send buffer but still shares the bottleneck queue.
+- **An R12 candidate: text frames ahead of a queued chunk (R03.T17, delegated decision
+  2026-10-06).** Prioritising control frames in the writer would remove the chunk ahead of a push,
+  at most 52.4 ms at 40 Mbit/s, on every platform alike. That is a lever for R12's existing finding,
+  the worst case of 150–156 ms on Linux over Design note 11's 100 ms (R03.T10.b), not a fix for a
+  platform gap, so it is recorded for R12 and not built.
 - **Gravitational deflection is omitted**, as SPICE omits it: 1.75″ at the Sun's limb, some 8.5
   telescopic pixels, milliarcseconds in the anti-solar hemisphere, and about 3.6 × 10⁻⁴ rad at 10⁴ km
   from a white dwarf. No task; a telescopic view near a compact remnant is where it would first show.
@@ -2068,3 +2157,25 @@ Vec3Tuple`, and `time`), `charted` (the chart's barycentre only, which `App` bui
   `BulkAssembler` checks each answer against its own manifest and starts again from chunk 0.
   `PROTOCOL_VERSION` stays 2: only a client that asks `sky` receives one. R06's Risks,
   "Deviations in T11.d, as built", have the rest.
+- **Deviations in T17.a, as built.** The entry is the delegated decision's, in this plan's style;
+  its acceptance names `just cross-clippy`, which has landed. Design note 11 and the doc comments
+  cite XNU (`apple-oss-distributions/xnu`, `main`, read 2026-10-05) by file and function, not by
+  line, since those sources were not re-read and their lines move; tokio by `Registration::poll_io`
+  and Microsoft Learn by the SIO_IDEAL_SEND_BACKLOG_QUERY page. The lock has moved past the
+  decision's tokio 1.53.1 and libc 0.2.190 to 1.53.3 and 0.2.191: the crate facts were rechecked
+  there on 2026-10-20 and hold (`poll_io` unchanged; libc binds the option for Linux-likes and Hurd
+  only; socket2 0.6.5 gates it to Linux and Android; rustix 1.1.5 and nix 0.31.3 have none), and the
+  doc comments cite the locked versions, Design note 11 both. The note's Linux figures and
+  R03.T10.b's measurement are unchanged; the sentence that gives them now starts "On Linux," so that
+  it reads after the off-Linux limit, and the limit's table keeps the decision's "Linux" row, though
+  `tap_socket` sets the mark on Android too. `TCP_NOTSENT_LOWAT_BYTES`'s "Linux only" is "Linux and
+  Android", as `tap_socket` has it. "Head-of-line blocking below the server" points at the note's
+  limit, and nothing else in it changed. Off Linux and Android,
+  `heartbeat_latency_behind_a_transfer_on_a_slow_link` runs only the `Kernel` leg, and its line ends
+  "(no low-water mark on this platform: tap_socket sets it on Linux and Android only)"; the legs are
+  chosen with `cfg!`, so both arms type-check everywhere and no import or helper became
+  platform-gated (`Tap::LowWaterMark` stays in use on every platform, as
+  `Harness::start_with_limits`'s default and in `push_latency_on_loopback`). The test's docs give
+  64 KiB × 5/4 as 80 KiB, below XNU's 128 KiB start. The off-Linux leg is compiled by cross-clippy
+  only, and untested until a macOS or Windows runner exists; R03.T17.b's macOS figures are still
+  owed.

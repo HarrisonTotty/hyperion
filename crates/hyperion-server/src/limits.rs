@@ -84,14 +84,23 @@ pub const MAX_BINARY_FRAME_BYTES: usize = 262_144;
 /// note 11). R03.T10.b streams under it.
 pub const BULK_QUEUED_BYTES: usize = 262_144;
 
-/// `TCP_NOTSENT_LOWAT` on every accepted socket, Linux only: 65,536 bytes (rendering plan R03,
-/// Design note 11).
+/// `TCP_NOTSENT_LOWAT` on every accepted socket, Linux and Android only: 65,536 bytes (rendering
+/// plan R03, Design note 11).
 ///
 /// Once that much is unsent the kernel takes no more from the writer, so a push waits behind at
 /// most this much of the send buffer rather than up to `tcp_wmem`'s maximum, up to 4 MB, that Linux autotunes it to (kernel
 /// `ip-sysctl` documentation, `tcp_notsent_lowat`; Cloudflare found 16 KiB kept connections fully
-/// used, P. Meenan 2018, "HTTP/2 Prioritization with NGINX"). About 13 ms at 40 Mbit/s. socket2
-/// does not expose it on macOS, and Windows has none; there the chunk bound alone holds.
+/// used, P. Meenan 2018, "HTTP/2 Prioritization with NGINX"). About 13 ms at 40 Mbit/s.
+///
+/// It is set nowhere else, a limit Design note 11 states (R03.T17;
+/// [`tap_socket`](crate::tap_socket) has the detail). XNU has the option, but it gates only the
+/// writability events while `send` fills the buffer (`tcp_notsent_lowat_check()` and
+/// `sosendcheck()`, apple-oss-distributions/xnu, `main`, read 2026-10-05), and tokio writes until
+/// `WouldBlock` (tokio 1.53.3, `Registration::poll_io`), so it would not bound the queue; XNU's
+/// send-buffer autosizing keeps at most max(128 KiB, about one send window) unsent. Windows has
+/// none, and its dynamic send buffering keeps about one ideal send backlog outstanding (Microsoft
+/// Learn, `SIO_IDEAL_SEND_BACKLOG_QUERY`). There the kernel's share is that much, on top of the
+/// one-chunk bound of [`BULK_QUEUED_BYTES`].
 pub const TCP_NOTSENT_LOWAT_BYTES: u32 = 65_536;
 
 /// Subscriptions one connection may hold at once, those still opening included (rendering plan

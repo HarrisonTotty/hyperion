@@ -306,8 +306,35 @@ impl Server {
 /// kernel holds little unsent behind a scene push (rendering plan R03, Design note 11).
 ///
 /// Every place that serves the router calls it, through axum's `ListenerExt::tap_io`, so that every
-/// connection is prepared alike. A failure is logged at `warn` and the connection goes on; elsewhere
-/// it does nothing, since socket2 does not expose the option there.
+/// connection is prepared alike. A failure is logged at `warn` and the connection goes on.
+///
+/// Elsewhere it does nothing, a limit Design note 11 states (R03.T17; XNU and Microsoft Learn read
+/// 2026-10-05, the crates rechecked at their locked versions 2026-10-20):
+///
+/// - **macOS.** XNU has the option (`TCP_NOTSENT_LOWAT`, 0x201, in `bsd/netinet/tcp.h`), but it
+///   gates only the writability events: `tcp_notsent_lowat_check()` (`tcp_subr.c`) is read by
+///   `sowriteable()` (`uipc_socket2.c`) and `filt_sowrite_common()` (`uipc_socket.c`) alone, while
+///   `sosendcheck()` (`uipc_socket.c`) lets `send` fill the buffer to its high-water mark
+///   (apple-oss-distributions/xnu, `main`). tokio writes until `WouldBlock` before it waits for
+///   readiness (tokio 1.53.3, `Registration::poll_io`), so the mark would not bound the queue,
+///   only the rhythm of the refills. Setting it would need `unsafe` besides: socket2 0.6.5 gates
+///   it to Linux and Android, libc 0.2.191 has no Apple binding, and rustix 1.1.5 and nix 0.31.3
+///   have none. XNU's send-buffer autosizing starts at `tcp_sendspace`, 128 KiB (`tcp_usrreq.c`),
+///   and grows only while, among its conditions, `min(snd_wnd, snd_cwnd)` covers every unsent
+///   byte (`tcp_output()`), so the unsent bytes stay near one send window.
+/// - **Windows** has no such option. Its dynamic send buffering, on unless an application sets
+///   `SO_SNDBUF`, keeps about one ideal send backlog outstanding, "the ideal value for the amount
+///   of data outstanding (sent but not acknowledged yet)", at most 16 MB (Microsoft Learn,
+///   `SIO_IDEAL_SEND_BACKLOG_QUERY`), so little of it is unsent.
+///
+/// So the kernel's share behind a push is at most 64 KiB unsent on Linux (13.1 ms at 40 Mbit/s),
+/// plus the bytes in flight; on macOS at most max(128 KiB, about one send window) unsent, at
+/// least 26.2 ms at 40 Mbit/s and growing only with the congestion window; on Windows about one
+/// ideal send backlog outstanding in total. Each comes on top of the one-chunk bound,
+/// [`BULK_QUEUED_BYTES`](limits::BULK_QUEUED_BYTES), which holds on every platform, and over
+/// loopback all three are negligible. `SO_SNDBUF` is set on no platform: on macOS it clears
+/// `SB_AUTOSIZE` (`uipc_socket.c`) and pins the buffer, and on Windows it turns dynamic send
+/// buffering off.
 ///
 /// # Examples
 ///

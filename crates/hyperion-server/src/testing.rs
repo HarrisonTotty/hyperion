@@ -548,7 +548,11 @@ impl Client {
 /// How a [`Harness`] prepares the sockets it accepts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Tap {
-    /// As every server does: [`tap_socket`](crate::tap_socket) sets the low-water mark.
+    /// As every server does: [`tap_socket`](crate::tap_socket) sets the low-water mark on Linux and
+    /// Android only.
+    ///
+    /// Elsewhere the socket is left as the kernel makes it, as with [`Tap::Kernel`] (rendering plan
+    /// R03, Design note 11).
     LowWaterMark,
     /// As the kernel makes them.
     Kernel,
