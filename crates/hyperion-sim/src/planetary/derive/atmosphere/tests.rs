@@ -8,7 +8,7 @@ use crate::planetary::derive::solar::{
 };
 use crate::planetary::derive::{
     BodyHolds, BodyHosts, DerivedBody, HostLight, PlacedBody, composition, derive_body,
-    derive_body_under, formation_composition, radius_chen_kipping,
+    formation_composition, radius_chen_kipping,
 };
 use crate::planetary::disc::DiscProfile;
 use crate::stellar::Composition;
@@ -1475,12 +1475,15 @@ fn icy_worlds_beyond_the_maximum_greenhouse_hold_no_carbon_dioxide_greenhouse() 
     // only their nitrogen warms them, as on Titan: each surface lies within 2% of the
     // nitrogen-only grey temperature by hand, frozen. Under P14.T13.c's rules, before the 21 → 22
     // batch's bump, they were carbon-dioxide greenhouses of 580 and 706 K, which no carbon-dioxide
-    // air can be beyond the limit (Kopparapu et al. 2013).
+    // air can be beyond the limit (Kopparapu et al. 2013). The two `beyond` bodies formed at 4 au,
+    // between the zero-age Sun's snow line and its ammonia line (4.31 au), so their nitrogen is
+    // Earth's per unit mass (P14.T50.c): 0.90 and 0.66 bar of N₂ hold them at 128.7 and 127.2 K,
+    // where version 22's hundredfold nitrogen, 90 and 66 bar, held them at 180.1 and 174.5 K.
     let disc = solar_disc();
     for (name, placed, kelvin) in [
         ("icy", golden_placed(EARTH_MASS_KG, 5.0, 0.05, 0.9), 157.0),
-        ("beyond_dry", beyond_the_snow_line(&disc, true), 180.0),
-        ("beyond_watery", beyond_the_snow_line(&disc, false), 175.0),
+        ("beyond_dry", beyond_the_snow_line(&disc, true), 128.7),
+        ("beyond_watery", beyond_the_snow_line(&disc, false), 127.2),
     ] {
         // As `derive_body`'s golden derives its bodies: about the present Sun with no X-ray
         // history.
@@ -1756,32 +1759,6 @@ fn formed_at_now_at(formed_au: f64, a_au: f64) -> PlacedBody {
     .unwrap()
 }
 
-/// `placed` derived in the zero-age Sun's disc about the present Sun with its history, at `age`,
-/// with nitrogen's boost beyond `line`.
-fn derive_under(line: NitrogenLine, placed: &PlacedBody, age: Years) -> DerivedBody {
-    let lights = [historic_sun()];
-    let hosts = BodyHosts::new(
-        Kilograms::new(SOLAR_MASS_KG),
-        Composition::SOLAR,
-        &lights,
-        &[],
-    )
-    .unwrap();
-    let holds = BodyHolds {
-        line,
-        snapshot: SnapshotRules::in_force(),
-    };
-    derive_body_under(
-        holds,
-        placed,
-        &hosts,
-        &solar_disc(),
-        age,
-        UniverseTime::EPOCH,
-    )
-    .unwrap()
-}
-
 /// P14.T50.c: half of nitrogen is in its icy carrier, ammonia monohydrate, by 123 K, the element
 /// registry's 50% condensation temperature of nitrogen (decision-ammonia-line; the constant's
 /// source is on it), against the snow line's 170 K, and the boost holds at or below it. At the
@@ -1860,10 +1837,10 @@ fn the_zero_age_sun_s_ammonia_line_lies_at_4_3_au() {
     }
 }
 
-/// P14.T50.c: under the ammonia line, a body formed at 3 au of the zero-age Sun, between its snow
-/// line and its ammonia line, has Earth's nitrogen per unit mass at its rank, and one formed at
-/// 5 au a hundred times it, as version 22 gives both; their water, carbon and argon are version
-/// 22's, bit for bit.
+/// P14.T50.c: a body formed at 3 au of the zero-age Sun, between its snow line and its ammonia
+/// line, has Earth's nitrogen per unit mass at its rank, and one formed at 5 au a hundred times
+/// it. Their water, carbon and argon do not read the formation temperature, so they are the same
+/// at both distances, bit for bit.
 #[test]
 fn nitrogen_takes_the_icy_boost_only_beyond_the_ammonia_line() {
     let snow = solar_disc().snow_line();
@@ -1889,52 +1866,46 @@ fn nitrogen_takes_the_icy_boost_only_beyond_the_ammonia_line() {
     ] {
         let kg = mass.value() * EARTH_MASS_KG;
         for draws in nitrogen_ranks() {
-            for (formed_au, boosted) in [(3.0, false), (5.0, true)] {
+            let formed_at = |formed_au: f64| {
                 let formed_at = formation_temperature(Metres::new(formed_au * METRES_PER_AU), snow);
-                let under = |line| {
-                    volatile_inventory_under(
-                        line,
-                        mass,
-                        &fractions,
-                        SnowLineSide::Beyond,
-                        formed_at,
-                        &draws,
-                        SOLAR_AGE,
-                    )
-                };
-                let (then, now) = (under(NitrogenLine::Snow), under(NitrogenLine::Ammonia));
-                let earth = earth_nitrogen(&draws, kg);
-                let expected = if boosted {
-                    ICY_VOLATILE_BOOST * earth
-                } else {
-                    earth
-                };
-                let what = format!("{} M⊕ formed at {formed_au} au", mass.value());
+                volatile_inventory(
+                    mass,
+                    &fractions,
+                    SnowLineSide::Beyond,
+                    formed_at,
+                    &draws,
+                    SOLAR_AGE,
+                )
+            };
+            let (between, beyond) = (formed_at(3.0), formed_at(5.0));
+            let earth = earth_nitrogen(&draws, kg);
+            for (formed_au, inventory, expected) in [
+                (3.0, &between, earth),
+                (5.0, &beyond, ICY_VOLATILE_BOOST * earth),
+            ] {
                 assert!(
-                    (now.nitrogen().value() / expected - 1.0).abs() < 1e-12,
-                    "{what}: {} kg of nitrogen against {expected}",
-                    now.nitrogen().value()
+                    (inventory.nitrogen().value() / expected - 1.0).abs() < 1e-12,
+                    "{} M⊕ formed at {formed_au} au: {} kg of nitrogen against {expected}",
+                    mass.value(),
+                    inventory.nitrogen().value()
                 );
-                assert!(
-                    (then.nitrogen().value() / (ICY_VOLATILE_BOOST * earth) - 1.0).abs() < 1e-12,
-                    "{what}: version 22 boosts it beyond the snow line"
-                );
-                for (x, y) in [
-                    (now.water(), then.water()),
-                    (now.carbon_dioxide(), then.carbon_dioxide()),
-                    (now.argon(), then.argon()),
-                ] {
-                    assert_same_bits(x.value(), y.value());
-                }
+            }
+            for (x, y) in [
+                (between.water(), beyond.water()),
+                (between.carbon_dioxide(), beyond.carbon_dioxide()),
+                (between.argon(), beyond.argon()),
+            ] {
+                assert_same_bits(x.value(), y.value());
             }
         }
     }
 }
 
-/// P14.T50.c: a body formed inside the snow line holds the same inventory under either line, bit
-/// for bit, at every rank, whatever formation temperature it is given.
+/// P14.T50.c: a body formed inside the snow line takes no nitrogen boost whatever formation
+/// temperature it is given, at 10 au's 80 K too: at every rank its inventory is the same at every
+/// one, bit for bit, and its nitrogen is Earth's per unit mass at its rank.
 #[test]
-fn an_inventory_formed_inside_the_snow_line_does_not_move() {
+fn an_inventory_formed_inside_the_snow_line_takes_no_nitrogen_boost() {
     let snow = solar_disc().snow_line();
     let fractions = composition(
         EarthMasses::new(1.0),
@@ -1945,72 +1916,67 @@ fn an_inventory_formed_inside_the_snow_line_does_not_move() {
     .unwrap()
     .fractions();
     for draws in nitrogen_ranks() {
-        for formed_au in [0.05, 0.4, 1.0, 2.0, 2.25, 10.0] {
+        let formed_at = |formed_au: f64| {
             let formed_at = formation_temperature(Metres::new(formed_au * METRES_PER_AU), snow);
-            let under = |line| {
-                volatile_inventory_under(
-                    line,
-                    EarthMasses::new(1.0),
-                    &fractions,
-                    SnowLineSide::Inside,
-                    formed_at,
-                    &draws,
-                    SOLAR_AGE,
-                )
-            };
+            volatile_inventory(
+                EarthMasses::new(1.0),
+                &fractions,
+                SnowLineSide::Inside,
+                formed_at,
+                &draws,
+                SOLAR_AGE,
+            )
+        };
+        let at_1_au = formed_at(1.0);
+        let earth = earth_nitrogen(&draws, EARTH_MASS_KG);
+        assert!(
+            (at_1_au.nitrogen().value() / earth - 1.0).abs() < 1e-12,
+            "{} kg of nitrogen against {earth}",
+            at_1_au.nitrogen().value()
+        );
+        for formed_au in [0.05, 0.4, 2.0, 2.25, 10.0] {
             assert_same_inventory(
-                &under(NitrogenLine::Ammonia),
-                &under(NitrogenLine::Snow),
+                &formed_at(formed_au),
+                &at_1_au,
                 &format!("formed inside at {formed_au} au"),
             );
         }
     }
 }
 
-/// P14.T50.c: the atmosphere table under the ammonia line. Ceres, formed at 2.77 au, between the
-/// zero-age Sun's snow line (2.26 au) and its ammonia line (4.31 au), keeps a hundredth of its
-/// nitrogen and stays airless; its water and carbon do not move. Mercury, Venus, Earth, Mars and
-/// the Moon, formed inside the snow line, and Ganymede and Titan, placed at their parents'
-/// distances beyond the ammonia line, are unchanged, bit for bit.
+/// P14.T50.c: the atmosphere table's nitrogen. The four giants, and Ganymede and Titan placed at
+/// their parents' distances, all beyond the zero-age Sun's ammonia line (4.31 au), hold a hundred
+/// times Earth's nitrogen per unit mass at the median ranks; Mercury, Venus, Earth, Mars and the
+/// Moon, formed inside its snow line (2.26 au), and Ceres, formed at 2.77 au between the two
+/// lines, the only one there, hold Earth's. Ceres, at a hundredth of version 22's, stays airless
+/// with no nitrogen in its air.
 #[test]
-fn the_table_under_the_ammonia_line_moves_only_ceres_s_nitrogen() {
+fn the_table_s_nitrogen_takes_the_boost_only_beyond_the_ammonia_line() {
     let disc = solar_disc();
-    for &(name, kg, km, a, e) in table_bodies() {
-        let placed = placed_about_the_sun(&disc, (kg, km, a, e));
-        let then = derive_under(NitrogenLine::Snow, &placed, SOLAR_AGE);
-        let now = derive_under(NitrogenLine::Ammonia, &placed, SOLAR_AGE);
-        if name == "Ceres" {
-            let ratio = now.inventory().nitrogen().value() / then.inventory().nitrogen().value();
-            assert!(
-                (ratio - 1.0 / ICY_VOLATILE_BOOST).abs() < 1e-14,
-                "Ceres keeps {ratio} of its nitrogen"
-            );
-            for (x, y) in [
-                (now.inventory().water(), then.inventory().water()),
-                (
-                    now.inventory().carbon_dioxide(),
-                    then.inventory().carbon_dioxide(),
-                ),
-                (now.inventory().argon(), then.inventory().argon()),
-            ] {
-                assert_same_bits(x.value(), y.value());
-            }
-            assert_eq!(then.atmosphere().state(), SurfaceState::Airless);
-            assert_eq!(now.atmosphere().state(), SurfaceState::Airless);
-            assert_eq!(
-                format!("{:?}", now.atmosphere()),
-                format!("{:?}", then.atmosphere()),
-                "Ceres's air holds no nitrogen either way"
-            );
+    let (snow, ammonia) = (disc.snow_line(), ammonia_line(disc.snow_line()));
+    let bodies = table();
+    for (name, body) in &bodies {
+        let name = *name;
+        let &(_, _, _, a_au, _) = table_bodies().find(|(n, ..)| *n == name).unwrap();
+        let formed = Metres::new(a_au * METRES_PER_AU);
+        let boost = if formed >= ammonia {
+            ICY_VOLATILE_BOOST
         } else {
-            assert_eq!(now, then, "{name}");
-            assert_eq!(
-                format!("{now:?}"),
-                format!("{then:?}"),
-                "{name}, bit for bit"
-            );
-        }
+            1.0
+        };
+        let kg = Kilograms::from(body.mass()).value();
+        let nitrogen = body.inventory().nitrogen().value();
+        let expected = boost * earth_nitrogen(&VolatileDraws::MEDIAN, kg);
+        assert!(
+            (nitrogen / expected - 1.0).abs() < 1e-12,
+            "{name}: {nitrogen} kg of nitrogen against {expected}"
+        );
+        let between = snow <= formed && formed < ammonia;
+        assert_eq!(between, name == "Ceres", "{name}");
     }
+    let ceres = found(&bodies, "Ceres").atmosphere();
+    assert_eq!(ceres.state(), SurfaceState::Airless);
+    assert_same_bits(ceres.partial_pressures().of(Gas::Nitrogen).value(), 0.0);
 }
 
 /// P14.T50.c: the boost is a step in formation distance only. A body keeps the same nitrogen per
@@ -2023,16 +1989,16 @@ fn the_ammonia_line_is_a_step_in_formation_distance_only() {
         body.inventory().nitrogen().value() / Kilograms::from(body.mass()).value()
     };
     for formed_au in [3.0, 5.0] {
-        let first = per_mass(&derive_under(
-            NitrogenLine::Ammonia,
+        let first = per_mass(&derive(
             &formed_at_now_at(formed_au, formed_au),
+            &solar_disc(),
             SOLAR_AGE,
         ));
         for a_au in [0.8, 1.5, formed_au, 6.0] {
             for age in [3e8, 1e9, 4.57e9, 8e9] {
-                let body = derive_under(
-                    NitrogenLine::Ammonia,
+                let body = derive(
                     &formed_at_now_at(formed_au, a_au),
+                    &solar_disc(),
                     Years::new(age),
                 );
                 let n = per_mass(&body);
@@ -2044,9 +2010,9 @@ fn the_ammonia_line_is_a_step_in_formation_distance_only() {
         }
     }
     let across = |factor: f64| {
-        per_mass(&derive_under(
-            NitrogenLine::Ammonia,
+        per_mass(&derive(
             &formed_at_now_at(line_au * factor, 1.0),
+            &solar_disc(),
             SOLAR_AGE,
         ))
     };
@@ -2055,68 +2021,6 @@ fn the_ammonia_line_is_a_step_in_formation_distance_only() {
         (beyond / inside - ICY_VOLATILE_BOOST).abs() < 1e-9,
         "{beyond} against {inside}"
     );
-}
-
-/// P14.T50.c is held until the 22 → 23 batch's bump (P14.T54.a), so that the batch's goldens move
-/// once: below `AMMONIA_LINE_VERSION` the line in force is the snow line, and every inventory and
-/// derivation is version 22's, bit for bit. The bump removes the hold, and this test with it.
-#[test]
-fn the_ammonia_line_is_held_only_until_the_batch_s_bump() {
-    assert!(
-        GENERATOR_VERSION < AMMONIA_LINE_VERSION,
-        "the 22 → 23 bump applies the ammonia line to every inventory: delete \
-         `AMMONIA_LINE_VERSION`, `NitrogenLine` and its `Snow` arm, call the ammonia line's rule \
-         where `volatile_inventory_under`, `element_inventory_under` and `derive_body_under` are \
-         called, and remove them and this test (plan 14, P14.T50.c as built)"
-    );
-    assert_eq!(NitrogenLine::in_force(), NitrogenLine::Snow);
-    let snow = solar_disc().snow_line();
-    let fractions = composition(
-        EarthMasses::new(1.0),
-        EarthRadii::new(1.0),
-        SnowLineSide::Inside,
-        EarthFluxes::new(1.0),
-    )
-    .unwrap()
-    .fractions();
-    for draws in nitrogen_ranks() {
-        for formed_au in [0.4, 2.0, 2.3, 2.77, 3.0, 4.30, 4.32, 5.0, 30.0] {
-            let d = Metres::new(formed_au * METRES_PER_AU);
-            let side = if d < snow {
-                SnowLineSide::Inside
-            } else {
-                SnowLineSide::Beyond
-            };
-            let formed_at = formation_temperature(d, snow);
-            let in_force = volatile_inventory(
-                EarthMasses::new(1.0),
-                &fractions,
-                side,
-                formed_at,
-                &draws,
-                SOLAR_AGE,
-            );
-            let held = volatile_inventory_under(
-                NitrogenLine::Snow,
-                EarthMasses::new(1.0),
-                &fractions,
-                side,
-                formed_at,
-                &draws,
-                SOLAR_AGE,
-            );
-            assert_same_inventory(&in_force, &held, &format!("formed at {formed_au} au"));
-        }
-    }
-    let ceres = *found(&table(), "Ceres");
-    let disc = solar_disc();
-    let &(_, kg, km, a, e) = table_bodies().find(|(n, ..)| *n == "Ceres").unwrap();
-    let held = derive_under(
-        NitrogenLine::Snow,
-        &placed_about_the_sun(&disc, (kg, km, a, e)),
-        SOLAR_AGE,
-    );
-    assert_eq!(format!("{ceres:?}"), format!("{held:?}"));
 }
 
 // P14.T51.a: the condensate partition in T13.c's passes, held at 22 by the lane's hold.
@@ -2426,7 +2330,6 @@ fn a_body_that_settles_keeps_t51b_s_bits() {
     )
     .unwrap();
     let holds = BodyHolds {
-        line: NitrogenLine::in_force(),
         snapshot: SnapshotRules::Batch,
     };
     let mut placed: Vec<(&str, PlacedBody)> = table_bodies()

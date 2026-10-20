@@ -113,9 +113,9 @@ pub use rotation::tidal_locking_time;
 
 use crate::orbit::KeplerElements;
 use crate::planetary::derive::atmosphere::{
-    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, NitrogenLine, PassLight,
-    PassSurface, SnapshotRules, SurfaceMaterial, VolatileDraws, VolatileInventory,
-    atmosphere_under, energy_limited_loss, formation_temperature, volatile_inventory_under,
+    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, PassLight, PassSurface,
+    SnapshotRules, SurfaceMaterial, VolatileDraws, VolatileInventory, atmosphere_under,
+    energy_limited_loss, formation_temperature, volatile_inventory,
 };
 use crate::planetary::derive::composition::{
     SolveCompositionError, dry_composition, formed_with_envelope,
@@ -1168,13 +1168,10 @@ pub fn derive_body(
     derive_body_under(BodyHolds::in_force(), placed, hosts, disc, age, t)
 }
 
-/// The holds a body's derivation is read under (crate-private): P14.T50.c's nitrogen line, which
-/// only the volatile inventory reads, and the `p14-snapshot` lane's rules (P14.T51.a–b), which its
-/// passes follow, each version 22's until the 22 → 23 bump.
+/// The holds a body's derivation is read under (crate-private): the `p14-snapshot` lane's rules
+/// (P14.T51.a–b), which its passes follow, version 22's until the 22 → 23 bump.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct BodyHolds {
-    /// The line beyond which its nitrogen takes the icy boost.
-    pub(crate) line: NitrogenLine,
     /// The rules its passes follow.
     pub(crate) snapshot: SnapshotRules,
 }
@@ -1184,14 +1181,13 @@ impl BodyHolds {
     #[must_use]
     pub(crate) fn in_force() -> Self {
         Self {
-            line: NitrogenLine::in_force(),
             snapshot: SnapshotRules::in_force(),
         }
     }
 }
 
 /// [`derive_body`] under the holds `holds`, for the holds' tests and the system's switches
-/// (P14.T50.c, P14.T51.a–b): [`derive_body`] is this under [`BodyHolds::in_force`].
+/// (P14.T51.a–b): [`derive_body`] is this under [`BodyHolds::in_force`].
 ///
 /// Under [`SnapshotRules::Held`] the passes are P14.T13.c's fixed three ([`ATMOSPHERE_PASSES`]).
 /// Under [`SnapshotRules::Batch`] they take the area-mix albedo (P14.T51.b) and run from
@@ -1270,13 +1266,7 @@ pub(crate) fn derive_body_driven(
 
     // T12 and T13's passes (T13.c, P14.T51.b): the albedo of one pass's surface sets the
     // equilibrium temperature the next pass reads, at the bulk its air reads, with its inventory.
-    let bulk = placed.air_of(
-        holds.line,
-        disc,
-        formed,
-        (mass, radius, &fractions),
-        age_now,
-    );
+    let bulk = placed.air_of(disc, formed, (mass, radius, &fractions), age_now);
     let crust = match placed.molten_until {
         Some(until) if age_now < until => Crust::Molten,
         Some(_) | None => Crust::Solid,
@@ -1751,12 +1741,12 @@ struct AirBulk {
 }
 
 impl PlacedBody {
-    /// The [`AirBulk`] of this body at age `age`, with nitrogen's boost beyond `nitrogen_line`,
-    /// whose solve gives it the mass, radius and fractions `solved` at the time.
+    /// The [`AirBulk`] of this body at age `age`, whose solve gives it the mass, radius and
+    /// fractions `solved` at the time.
     ///
     /// - Its bulk is the one [`with_bulk`](Self::with_bulk) states, at its placed mass, where it
     ///   has one (a moon's own, P14.T56.c's follow-up), and `solved` otherwise.
-    /// - Its inventory is [`volatile_inventory_under`] with its ranks at that mass and those
+    /// - Its inventory is [`volatile_inventory`] with its ranks at that mass and those
     ///   fractions, at the side and formation temperature of its
     ///   [`volatile_zone`](Self::volatile_zone) where it has one, and otherwise at `formed`, the
     ///   side of `disc`'s snow line it formed on, and its formation temperature in `disc`
@@ -1764,7 +1754,6 @@ impl PlacedBody {
     #[must_use]
     fn air_of(
         &self,
-        nitrogen_line: NitrogenLine,
         disc: &DiscProfile,
         formed: SnowLineSide,
         solved: (EarthMasses, EarthRadii, &MassFractions),
@@ -1781,15 +1770,8 @@ impl PlacedBody {
                 formation_temperature(self.formation_distance, disc.snow_line()),
             ),
         };
-        let inventory = volatile_inventory_under(
-            nitrogen_line,
-            mass,
-            &fractions,
-            side,
-            temperature,
-            &self.volatiles,
-            age,
-        );
+        let inventory =
+            volatile_inventory(mass, &fractions, side, temperature, &self.volatiles, age);
         AirBulk {
             mass: Kilograms::from(mass),
             radius,
@@ -2280,8 +2262,7 @@ pub(crate) mod solar {
             .collect()
     }
 
-    /// [`derive_historic`] under the `p14-snapshot` lane's rules `snapshot`, with the nitrogen line
-    /// in force.
+    /// [`derive_historic`] under the `p14-snapshot` lane's rules `snapshot`.
     pub(crate) fn derive_historic_under(
         snapshot: SnapshotRules,
         placed: &PlacedBody,
@@ -2296,10 +2277,7 @@ pub(crate) mod solar {
             &[],
         )
         .unwrap();
-        let holds = BodyHolds {
-            line: NitrogenLine::in_force(),
-            snapshot,
-        };
+        let holds = BodyHolds { snapshot };
         derive_body_under(holds, placed, &hosts, disc, age, UniverseTime::EPOCH).unwrap()
     }
 

@@ -108,7 +108,7 @@ use crate::planetary::belts::{
 use crate::planetary::chem::partition::{Condensates, Partition};
 use crate::planetary::context::{SystemContext, XuvHistory};
 use crate::planetary::derive::atmosphere::{
-    Atmosphere, NitrogenLine, SnapshotRules, SurfaceMaterial, VolatileDraws, VolatileInventory,
+    Atmosphere, SnapshotRules, SurfaceMaterial, VolatileDraws, VolatileInventory,
 };
 #[cfg(doc)]
 use crate::planetary::derive::derive_body;
@@ -3121,7 +3121,6 @@ impl PlanetarySystem {
             MoonInventories::Own => (satellite.own_volatiles(), MoonBulkRule::Own),
         };
         let holds = MoonHolds {
-            line: NitrogenLine::in_force(),
             bulk: rule,
             tides: self.moon_tides,
             snapshot: self.snapshot,
@@ -3418,7 +3417,6 @@ impl PlanetarySystem {
         )
         .expect("a present body orbits a positive mass and at least one star");
         let holds = BodyHolds {
-            line: NitrogenLine::in_force(),
             snapshot: self.snapshot,
         };
         let age = epoch.ctx.age_at_epoch();

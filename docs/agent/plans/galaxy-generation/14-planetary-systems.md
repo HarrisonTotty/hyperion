@@ -21330,3 +21330,107 @@ planetary::record` (624 tests at T57.a's commit).
       - _For the docs batch:_ R09's plan (`docs/agent/plans/rendering-and-planets/09-*.md`, about
         lines 8391–8395 and 8500–8503) still quotes the old `f_Ω` and `f_p` factors and the
         "2.415 × 10⁶ … at the 22 → 23 bump" lean, which A1 resolved and this commit refits.
+  - _B1, the ammonia line's hold_ (P14.T50.c; decision-pre-23-review, "For main" item 4, "The
+    holds"). A checkpoint at 22: `GENERATOR_VERSION` stays 22, and the 7 goldens that move
+    re-bless at header 22 in the same commit. The moons' hold (`MOONS_VERSION`) and the snapshot's
+    (`SNAPSHOT_VERSION`) stay, for B2 and B3.
+    - _Deleted, as the tripwire listed:_ `AMMONIA_LINE_VERSION`, `NitrogenLine` with its `Snow`
+      arm and `in_force`, the seams `volatile_inventory_under` and `element_inventory_under`, and
+      the tripwire `the_ammonia_line_is_held_only_until_the_batch_s_bump`.
+      - `volatile_inventory` holds the rule itself: nitrogen takes `ICY_VOLATILE_BOOST` only
+        beyond the snow line and at or below 123 K (`nitrogen_boosted`), multiplied in the order
+        the `Ammonia` arm used. `element_inventory` reads `volatile_inventory` at the inputs'
+        formation temperature, and `PlacedBody::air_of` loses its line parameter.
+      - Every caller of `NitrogenLine::in_force()` now takes the rule: `derive_body`,
+        `derive_moon`, the system's planet, member and moon derivations, and the test helper
+        `derive_historic_under`. A regular moon's nitrogen takes its nursery's ammonia line, as
+        T50.c's record says ("Moons follow at 23 through `derive_body`").
+      - `BodyHolds` and `MoonHolds` lose their `line` members and keep the rest:
+        `BodyHolds { snapshot }` and `MoonHolds { bulk, tides, snapshot }` (`MoonHolds::BATCH`
+        too). `MoonRules` had none. `derive_body_under` stays as the seam of the snapshot hold
+        that `BodyHolds` still carries, which B3 deletes with it.
+    - _The inventory inputs._ `InventoryInputs` keeps its fields, and their docs now state what a
+      caller passes: the formation distance and snow line the body's derivation read
+      (`PlacedBody::formation_distance` and its disc's snow line; for a moon derived in its
+      planet's nursery, the distance its derivation reads and the nursery's line). The element
+      inventory's carriers are then the body's inventory to the bit, between the two lines too.
+      No caller on the record builds one before B4.
+    - _The tests, one arm each_, as the line has no switch:
+      - `nitrogen_takes_the_icy_boost_only_beyond_the_ammonia_line`: Earth's nitrogen per unit
+        mass at 3 au and a hundred times it at 5 au, their water, carbon and argon the same at
+        both distances, bit for bit.
+      - `an_inventory_formed_inside_the_snow_line_takes_no_nitrogen_boost` (was
+        `…_does_not_move`): one inventory, bit for bit, at the formation temperatures of 0.05 to
+        10 au (80 K), with Earth's nitrogen.
+      - `the_table_s_nitrogen_takes_the_boost_only_beyond_the_ammonia_line` (was
+        `the_table_under_the_ammonia_line_moves_only_ceres_s_nitrogen`): every table body's
+        nitrogen against Earth's per unit mass, a hundredfold for the four giants, Ganymede and
+        Titan beyond 4.31 au; Ceres the only body between the lines, airless with no N₂.
+      - `the_ammonia_line_is_a_step_in_formation_distance_only` derives through `derive_body`.
+      - `the_nitrogen_carrier_follows_the_ammonia_line` (chem): Earth and Ceres hold Earth's
+        nitrogen per unit mass at every rank tried and Titan a hundred times it, as carrier and as
+        element (to 10⁻⁹); `table_body_under` goes, and `the_carriers_are_today_s_to_the_bit`
+        still holds the carriers to the derived body's.
+      - The moons' helpers `moon_under`, `own_moon` and `moon_read_at` lose the line, and the
+        snow-line arms of the Ganymede–Callisto, Titan and airless tests go.
+      - `icy_worlds_beyond_the_maximum_greenhouse_hold_no_carbon_dioxide_greenhouse`: the golden
+        `beyond_dry` and `beyond_watery` bodies (1 M⊕ at 4.0 au, 1.77 snow lines) expect 128.7
+        and 127.2 K in place of 180 and 175 K; their nitrogen-only grey check within 2% holds.
+    - _Bless note._
+      - _Giants and sub-Neptunes:_ of the golden systems, three gas giants formed between 1 and
+        1.910 snow-line distances keep 1% of their stored nitrogen, and no sub-Neptune or ice
+        giant formed there. They are `hot_jupiter`'s `0100` and `eccentric_giant`'s `0100`, both
+        at the giant-core site, the snow line itself (170 K), and `red_giant`'s `0500` at 1.17
+        snow lines. No golden pins a giant's stored inventory, and their envelopes are T50.b's,
+        so no record moves.
+      - _Solid bodies:_ of the golden systems, 48 keep 1% of their stored nitrogen. They are four
+        rocky and three icy planets, 37 dwarf planets (35 icy) and four icy regular moons
+        (`solar_like` `0503`, `red_giant` `0503` and `0504`, `filler_b` `0303`), which lie
+        between their nurseries' ice and ammonia lines. Forty-one are airless and hold: 36 dwarf
+        planets, `hierarchical_triple`'s 17 K icy `1800` and the four moons (`t_tauri`'s four
+        members there have not formed). Seven move, all snowballs that keep their state, their
+        N₂ a hundredfold lower and their methane following the colder surface:
+        - `m_dwarf_resonant_chain` `0300`, rocky at 1.47 snow lines: 83.4 → 2.14 bar and
+          176.9 → 128.1 K;
+        - `close_binary` `0900`, rocky at 1.47: 6.27 → 1.28 bar and 141.8 → 124.0 K;
+        - `close_binary` `0a00`, rocky at 1.69: 7.50 → 0.770 bar and 138.1 → 116.4 K;
+        - `wide_binary` `0700`, icy at 1.27: 29.4 → 2.37 bar and 166.9 → 133.3 K;
+        - `filler_c` `0300`, rocky at 1.17: 62.9 → 4.01 bar and 185.6 → 142.9 K;
+        - `filler_c` `0400`, icy at 1.56: 3.25 → 0.867 bar and 131.8 → 118.5 K;
+        - `filler_c` `e201`, an icy dwarf planet at 1.02: 12.7 → 4.49 bar and 164.5 → 146.7 K.
+      - _The lib sample_ (`surface_conditions_published`): three snowballs move.
+        `02000b2ca0000001.0400` held 27,302 bar at 204.5 K, its methane all airborne above
+        methane's 190.6 K critical point under version 22's N₂ greenhouse; it now holds 4.81 bar
+        (CH₄ 59% and N₂ 40% by mole) at 137.8 K, and its regime reads `Efficient`, CH₄ and
+        `EnergyBalance` in place of `AirlessLike`, H₂O and `RadiativeEquilibrium`.
+        `02000b2ca0000000.0500` falls 34.1 → 3.31 bar and 174.0 → 139.7 K, and
+        `02000b2ca0000000.0600` 17.8 → 1.17 bar and 151.4 → 121.7 K.
+      - _Ceres's row:_ its exchangeable nitrogen (`chem_values`) falls 6.1035 × 10¹⁶ →
+        6.1035 × 10¹⁴ kg. It stays airless, and its rows of `atmosphere_speciation`,
+        `global_figures`, `impactors`, `crust` and `surface_conditions` hold.
+    - _Moved goldens_, re-blessed at header 22 (`golden_diff.py`: 7 changed, none new):
+      - `planetary/chem_values` (1): Ceres's exchangeable N, a hundredth.
+      - `planetary/derive_body` (10): `beyond_dry` and `beyond_watery`, between the lines at
+        4.0 au. Their N₂ falls 90.1 → 0.901 and 66.1 → 0.661 bar, their CH₄, held at
+        saturation, 10.1 → 1.41 and 8.49 → 1.32 bar, their totals 100.2 → 2.32 and
+        74.6 → 1.99 bar, and their surfaces 180.1 → 128.7 and 174.5 → 127.2 K.
+      - `planetary/surface_conditions_published` (46): the lib sample's three snowballs above.
+      - `planetary/systems/close_binary` (16): `0900` and `0a00`, at the epoch and at +H.
+      - `planetary/systems/filler_c` (24): `0300`, `0400` and `e201`.
+      - `planetary/systems/m_dwarf_resonant_chain` (10): `0300`, its σ_h with it.
+      - `planetary/systems/wide_binary` (22 new and 22 gone): `0700`, whose climate model reads
+        `EnergyBalance` in place of `Isothermal`, so that its surface lines change their label.
+      - The rest hold: the 15 other golden integration targets run (`planetary_derive_golden`,
+        `planetary_giants_golden`, `planetary_moons_golden`, `planetary_small_bodies_golden`,
+        `observe_in_system_golden`, `body_frame_golden`, `body_rotations_golden`,
+        `body_fixed_golden`, `photometry_templates_golden`, `planetary_context_golden`,
+        `planetary_fate_golden`, `planetary_masses_golden`, `planetary_placement_golden`,
+        `planetary_placement` and `orbit_drifting_states`) and the planetary lib's other goldens.
+    - _Deferred_ (2026-10-13 rule):
+      - A giant placed inside the giant-core site formed at the snow line itself, so every
+        migrated giant's stored nitrogen now takes no boost. Nothing reads it while its envelope
+        is T50.b's; a later reader of a giant's `ElementInventory` (B4, P14.T55) should know it.
+      - Version 22's 27,302-bar methane snowball shows that an N₂ greenhouse can lift a methane
+        world above methane's critical point and put its whole inventory in the air, recorded
+        `AirlessLike`. This body no longer does, but bodies beyond the ammonia line still can:
+        P14.T53.b's state classifier and T24.f's speciation.

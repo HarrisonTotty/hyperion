@@ -9,9 +9,9 @@
 //!   `planet.volatiles` ([`VolatileDraws`]), is the body's water, carbon and nitrogen, each a
 //!   log-normal multiple of Earth's per unit mass ([`volatile_inventory`]), raised beyond the snow
 //!   line where ices condensed, where a body's water is its bulk ice; a body that migrated keeps the
-//!   inventory of the side it formed on. From version 23 nitrogen is raised only beyond the
-//!   ammonia line, where its carrier, ammonia hydrate, condensed (P14.T50.c, held by
-//!   `AMMONIA_LINE_VERSION`). Radiogenic argon grows with age from the decay of ⁴⁰K.
+//!   inventory of the side it formed on. Nitrogen is raised only beyond the ammonia line, where
+//!   its carrier, ammonia hydrate, condensed (P14.T50.c). Radiogenic argon grows with age from the
+//!   decay of ⁴⁰K.
 //!   The same stream's words 3–5 rank its sulphur, chlorine and mantle redox, which the element
 //!   inventory reads ([`chem`](crate::planetary::chem), P14.T50.a); nothing here reads them.
 //! - **Escape** (P14.T13.b). A gas is retained over the system's age when its Jeans parameter λ =
@@ -393,9 +393,8 @@ pub const POTASSIUM_40_HALF_LIFE: Years = Years::new(1.248e9);
 /// Earth's share (the lane's, provisional). Its ices carried ammonia and carbon that the inner
 /// disc never condensed (the plan's "raised beyond the snow line").
 ///
-/// Carbon takes it beyond the snow line. Nitrogen takes it beyond the snow line below generator
-/// version 23 (`AMMONIA_LINE_VERSION`), and from it only where its carrier, ammonia hydrate,
-/// condensed: beyond the ammonia line ([`nitrogen_boosted`], P14.T50.c).
+/// Carbon takes it beyond the snow line. Nitrogen takes it only where its carrier, ammonia
+/// hydrate, condensed: beyond the ammonia line ([`nitrogen_boosted`], P14.T50.c).
 pub const ICY_VOLATILE_BOOST: f64 = 100.0;
 
 /// The temperature at or below which nitrogen's icy carrier, ammonia monohydrate (NH₃·H₂O), holds
@@ -452,10 +451,9 @@ pub fn formation_temperature(formation_distance: Metres, snow_line: Metres) -> K
 }
 
 /// Whether a body formed at the temperature `formation_temperature` holds nitrogen's icy carrier
-/// ([`AMMONIA_HYDRATE_CONDENSATION`]): true at or below 123 K (P14.T50.c). From generator version
-/// 23 (`AMMONIA_LINE_VERSION`) a body formed beyond the snow line takes [`ICY_VOLATILE_BOOST`] in
-/// its nitrogen only where this holds; below it, everywhere beyond the snow line. Water and carbon
-/// keep the snow line, at [`SNOW_LINE_TEMPERATURE`].
+/// ([`AMMONIA_HYDRATE_CONDENSATION`]): true at or below 123 K (P14.T50.c). A body formed beyond
+/// the snow line takes [`ICY_VOLATILE_BOOST`] in its nitrogen only where this holds. Water and
+/// carbon keep the snow line, at [`SNOW_LINE_TEMPERATURE`].
 #[must_use]
 pub fn nitrogen_boosted(formation_temperature: Kelvin) -> bool {
     formation_temperature <= AMMONIA_HYDRATE_CONDENSATION
@@ -470,37 +468,6 @@ pub fn nitrogen_boosted(formation_temperature: Kelvin) -> bool {
 pub fn ammonia_line(snow_line: Metres) -> Metres {
     let ratio = SNOW_LINE_TEMPERATURE.value() / AMMONIA_HYDRATE_CONDENSATION.value();
     snow_line * (ratio * ratio)
-}
-
-/// The generator version from which a body's nitrogen takes the ammonia line: 23, the 22 → 23
-/// batch's bump (P14.T50.c; plan 14, "Order and parallelism", Phase L).
-///
-/// Below it [`NitrogenLine::in_force`] is the snow line, so that every inventory is version 22's
-/// bit for bit until P14.T54.a's wiring, which removes this hold and its tripwire
-/// (`the_ammonia_line_is_held_only_until_the_batch_s_bump`).
-pub(crate) const AMMONIA_LINE_VERSION: GeneratorVersion = GeneratorVersion::new(23);
-
-/// The line beyond which a body's nitrogen takes [`ICY_VOLATILE_BOOST`] (P14.T50.c, held by
-/// [`AMMONIA_LINE_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum NitrogenLine {
-    /// The snow line, as water's and carbon's: version 22's rule.
-    Snow,
-    /// The ammonia line ([`nitrogen_boosted`]), beyond the snow line.
-    Ammonia,
-}
-
-impl NitrogenLine {
-    /// The line this generator version gives: the ammonia line from [`AMMONIA_LINE_VERSION`], and
-    /// the snow line below it.
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        if GENERATOR_VERSION >= AMMONIA_LINE_VERSION {
-            Self::Ammonia
-        } else {
-            Self::Snow
-        }
-    }
 }
 
 /// The generator version from which T13.c's passes take the `p14-snapshot` lane's rules: 23, the
@@ -732,10 +699,10 @@ impl VolatileInventory {
 ///   of median 1 and scatter [`VOLATILE_SCATTER_DEX`], at the body's rank.
 /// - Beyond the snow line carbon is [`ICY_VOLATILE_BOOST`] times richer, and the water is the
 ///   larger of that and the body's bulk water, its ice.
-/// - Nitrogen is [`ICY_VOLATILE_BOOST`] times richer beyond the snow line below generator
-///   version 23 (`AMMONIA_LINE_VERSION`). From it, only where the body also formed at or below
-///   ammonia hydrate's [`AMMONIA_HYDRATE_CONDENSATION`] ([`nitrogen_boosted`]); between the two
-///   lines it is Earth's per unit mass at its rank.
+/// - Nitrogen is [`ICY_VOLATILE_BOOST`] times richer only where the body formed beyond the snow
+///   line and at or below ammonia hydrate's [`AMMONIA_HYDRATE_CONDENSATION`]
+///   ([`nitrogen_boosted`]): beyond the ammonia line. Between the two lines, as inside the snow
+///   line whatever temperature it is given, it is Earth's per unit mass at its rank.
 /// - Argon is Earth's per unit of rock, grown as the ⁴⁰K of a body of the Sun's age has
 ///   decayed: Earth's × (1 − e^(−λt)) ÷ (1 − e^(−λ × 4.57 Gyr)).
 ///
@@ -750,30 +717,6 @@ pub fn volatile_inventory(
     draws: &VolatileDraws,
     age: Years,
 ) -> VolatileInventory {
-    volatile_inventory_under(
-        NitrogenLine::in_force(),
-        mass,
-        fractions,
-        formed,
-        formation_temperature,
-        draws,
-        age,
-    )
-}
-
-/// [`volatile_inventory`] with nitrogen's boost beyond the line `nitrogen_line`, for the hold's tests
-/// (P14.T50.c): [`volatile_inventory`] is this under [`NitrogenLine::in_force`]. The water, carbon
-/// and argon do not read the line.
-#[must_use]
-pub(crate) fn volatile_inventory_under(
-    nitrogen_line: NitrogenLine,
-    mass: EarthMasses,
-    fractions: &MassFractions,
-    formed: SnowLineSide,
-    formation_temperature: Kelvin,
-    draws: &VolatileDraws,
-    age: Years,
-) -> VolatileInventory {
     let kg = mass.value() * EARTH_MASS_KG;
     let multiple =
         |rank: UnitUniform| math::exp10(VOLATILE_SCATTER_DEX * math::normal_quantile(rank.value()));
@@ -781,16 +724,9 @@ pub(crate) fn volatile_inventory_under(
         SnowLineSide::Inside => 1.0,
         SnowLineSide::Beyond => ICY_VOLATILE_BOOST,
     };
-    let nitrogen_boost = match (nitrogen_line, formed) {
-        (NitrogenLine::Snow, _) => boost,
-        (NitrogenLine::Ammonia, SnowLineSide::Inside) => 1.0,
-        (NitrogenLine::Ammonia, SnowLineSide::Beyond) => {
-            if nitrogen_boosted(formation_temperature) {
-                ICY_VOLATILE_BOOST
-            } else {
-                1.0
-            }
-        }
+    let nitrogen_boost = match formed {
+        SnowLineSide::Beyond if nitrogen_boosted(formation_temperature) => ICY_VOLATILE_BOOST,
+        SnowLineSide::Inside | SnowLineSide::Beyond => 1.0,
     };
     let drawn_water = EARTH_WATER_PER_MASS * multiple(draws.water) * kg;
     let water = match formed {

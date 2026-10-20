@@ -842,11 +842,11 @@ phase_integral_r = 0x3ff028f5c28f5c29  # 1.01
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fe0000000000000  # 0.5
 bond_ratio = 0x3fefd83ea50b71d8  # 0.9951470588235294
-surface_state: Snowball, Ice; climate Efficient, Seasonal, CH4, Isothermal
-mean_surface_temperature_k = 0x4064dce9f78ea540  # 166.90356042728854
-equator_pole_contrast_k = 0x4009bbe2d7782680  # 3.2167412599126806
-day_night_contrast_k = 0x3f326b5dd8080000  # 0.0002810577498451039
-surface_pressure_pa = 0x4146695a3e979bcf  # 2937524.489001728
+surface_state: Snowball, Ice; climate Efficient, Seasonal, CH4, EnergyBalance
+mean_surface_temperature_k = 0x4060aa1dfa9d2c4b  # 133.3161595411096
+equator_pole_contrast_k = 0x400b2eb678e3ea80  # 3.3978089756540726
+day_night_contrast_k = 0x3f6286a2cb5b0000  # 0.0022614650323191654
+surface_pressure_pa = 0x410ce027b630f2ea  # 236548.96396055009
 sigma_h_m = 0x408c202e5c9100ed  # 900.0226374939353
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fae9a71b91b2304  # 0.059772065969417226
@@ -4250,11 +4250,11 @@ phase_integral_r = 0x3ff028f5c28f5c29  # 1.01
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fe0000000000000  # 0.5
 bond_ratio = 0x3fefd83ea50b71d8  # 0.9951470588235294
-surface_state: Snowball, Ice; climate Efficient, Seasonal, CH4, Isothermal
-mean_surface_temperature_k = 0x4064dce9f89247d0  # 166.90356091089643
-equator_pole_contrast_k = 0x4009bbe2dcd37980  # 3.216741299823468
-day_night_contrast_k = 0x3f326b5ddb100000  # 0.0002810577526020097
-surface_pressure_pa = 0x4146695a406ddf07  # 2937524.503353003
+surface_state: Snowball, Ice; climate Efficient, Seasonal, CH4, EnergyBalance
+mean_surface_temperature_k = 0x4060aa1dfbb956eb  # 133.31616007041097
+equator_pole_contrast_k = 0x400b2eb67d481180  # 3.397809008371212
+day_night_contrast_k = 0x3f6286a2c7950000  # 0.002261465004863794
+surface_pressure_pa = 0x410ce027c4093b23  # 236548.97072073174
 sigma_h_m = 0x408c202e5c93e043  # 900.0226375153364
 continental_fraction = 0x0000000000000000  # 0.0
 heat_flow_w_m2 = 0x3fae9a710ebddfb4  # 0.05977204613640144

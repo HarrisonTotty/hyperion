@@ -93,7 +93,7 @@ use crate::GENERATOR_VERSION;
 use crate::Seed;
 use crate::math;
 use crate::orbit::KeplerElements;
-use crate::planetary::derive::atmosphere::{NitrogenLine, SnapshotRules, VolatileDraws};
+use crate::planetary::derive::atmosphere::{SnapshotRules, VolatileDraws};
 use crate::planetary::derive::rotation::{
     SpinTides, SpinningBody, moment_of_inertia_factor, tidal_locking_time,
 };
@@ -1024,13 +1024,11 @@ impl MoonTideRule {
     }
 }
 
-/// The holds a moon's derivation is read under (crate-private): P14.T50.c's nitrogen line, the
-/// bulk its air is read at (P14.T56.c's follow-up), its tides (P14.T56.d) and the rules its
-/// atmosphere's passes follow (the `p14-snapshot` lane's, P14.T51.a–b).
+/// The holds a moon's derivation is read under (crate-private): the bulk its air is read at
+/// (P14.T56.c's follow-up), its tides (P14.T56.d) and the rules its atmosphere's passes follow
+/// (the `p14-snapshot` lane's, P14.T51.a–b).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct MoonHolds {
-    /// The line beyond which its nitrogen takes the icy boost.
-    pub(crate) line: NitrogenLine,
     /// The bulk its inventory and atmosphere are read at.
     pub(crate) bulk: MoonBulkRule,
     /// Its tides.
@@ -1045,7 +1043,6 @@ impl MoonHolds {
     #[must_use]
     pub(crate) fn in_force() -> Self {
         Self {
-            line: NitrogenLine::in_force(),
             bulk: MoonBulkRule::in_force(),
             tides: MoonTideRule::in_force(),
             snapshot: SnapshotRules::in_force(),
@@ -1058,7 +1055,6 @@ impl MoonHolds {
     /// snapshot lane's batch, which the tests that read it set ([`MoonHolds::snapshot`]).
     #[cfg(test)]
     pub(crate) const BATCH: Self = Self {
-        line: NitrogenLine::Ammonia,
         bulk: MoonBulkRule::Own,
         tides: MoonTideRule::ByState,
         snapshot: SnapshotRules::Held,
@@ -1751,7 +1747,6 @@ pub(crate) fn derive_moon_under(
     )
     .map_err(DeriveMoonError::Hosts)?;
     let body_holds = BodyHolds {
-        line: holds.line,
         snapshot: holds.snapshot,
     };
     let body = derive_body_under(body_holds, &placed, &hosts, &nursery.disc, age, t)
@@ -2617,17 +2612,16 @@ mod tests {
     }
 
     /// A moon of `kg` on `orbit` about `parent`, from `nursery` under `sky`, derived at the epoch
-    /// at the radius rank `rank` with `volatiles`, under the nitrogen line `line`, its inventory
-    /// and atmosphere read at the composition solve's bulk, version 22's.
+    /// at the radius rank `rank` with `volatiles`, its inventory and atmosphere read at the
+    /// composition solve's bulk, version 22's.
     fn moon_under(
-        line: NitrogenLine,
         mass: (f64, UnitUniform),
         orbit: &KeplerElements,
         giant: &(MoonParent, MoonNursery, MoonSky),
         volatiles: &MoonVolatiles,
     ) -> DerivedMoon {
         moon_read_at(
-            (line, MoonBulkRule::Solved),
+            MoonBulkRule::Solved,
             mass,
             orbit,
             giant,
@@ -2639,27 +2633,18 @@ mod tests {
     /// [`moon_under`]'s moon with its inventory and atmosphere read at its own bulk `bulk`
     /// (P14.T56.c's follow-up), as from [`MOONS_VERSION`].
     fn own_moon(
-        line: NitrogenLine,
         mass: (f64, UnitUniform),
         orbit: &KeplerElements,
         giant: &(MoonParent, MoonNursery, MoonSky),
         volatiles: &MoonVolatiles,
         bulk: MoonBulk,
     ) -> DerivedMoon {
-        moon_read_at(
-            (line, MoonBulkRule::Own),
-            mass,
-            orbit,
-            giant,
-            volatiles,
-            bulk,
-        )
+        moon_read_at(MoonBulkRule::Own, mass, orbit, giant, volatiles, bulk)
     }
 
-    /// [`moon_under`]'s moon under the nitrogen line `line` and the bulk rule `rule`, with the
-    /// bulk `bulk`.
+    /// [`moon_under`]'s moon under the bulk rule `rule`, with the bulk `bulk`.
     fn moon_read_at(
-        (line, rule): (NitrogenLine, MoonBulkRule),
+        rule: MoonBulkRule,
         mass: (f64, UnitUniform),
         orbit: &KeplerElements,
         giant: &(MoonParent, MoonNursery, MoonSky),
@@ -2667,7 +2652,6 @@ mod tests {
         bulk: MoonBulk,
     ) -> DerivedMoon {
         let holds = MoonHolds {
-            line,
             bulk: rule,
             tides: MoonTideRule::ClassPair,
             snapshot: SnapshotRules::Held,
@@ -2814,8 +2798,8 @@ mod tests {
     /// Ganymede, which at 15.0 radii formed at about 151.6 K and takes Earth's nitrogen per unit
     /// mass, and Callisto, which at 26.3 formed at about 114.3 K and takes a hundred times it.
     /// The ruling's temperatures are at an ice line of 11.9 radii as rounded, so they hold within
-    /// the 0.35 K that its last digit spans (the generated line is 11.86 radii). Below the ammonia
-    /// line's hold both take the boost, as at version 22; their water and carbon do not move.
+    /// the 0.35 K that its last digit spans (the generated line is 11.86 radii). Both, formed
+    /// beyond the ice line, take carbon's boost.
     #[test]
     fn the_generated_jupiter_s_ammonia_line_lies_between_ganymede_and_callisto() {
         use crate::planetary::derive::atmosphere::{
@@ -2843,17 +2827,12 @@ mod tests {
             let formed = formation_temperature(orbit.semi_major_axis(), line).value();
             assert!((formed - t_f).abs() < 0.35, "{a_km} km: {formed} K");
             assert_eq!(nitrogen_boosted(Kelvin::new(formed)), boost > 1.0);
-            let ammonia = moon_under(NitrogenLine::Ammonia, mass, &orbit, &jupiter, &shared);
-            let snow = moon_under(NitrogenLine::Snow, mass, &orbit, &jupiter, &shared);
-            let (n, c, w) = per_earth(&ammonia, kg);
+            let derived = moon_under(mass, &orbit, &jupiter, &shared);
+            let (n, c, _) = per_earth(&derived, kg);
             assert!(
                 (n / boost - 1.0).abs() < 1e-12,
                 "{a_km} km: {n}× Earth's nitrogen"
             );
-            let (n22, c22, w22) = per_earth(&snow, kg);
-            assert!((n22 / 100.0 - 1.0).abs() < 1e-12, "{n22}");
-            assert_same_bits(c, c22);
-            assert_same_bits(w, w22);
             assert!((c / 100.0 - 1.0).abs() < 1e-12, "{c}");
         }
     }
@@ -2883,16 +2862,14 @@ mod tests {
             line.value() / 6.0268e7
         );
         let (shared, own) = (MoonVolatiles::SHARED, MoonBulk::Derived);
-        let titan = own_moon(NitrogenLine::Ammonia, mass, &orbit, &saturn, &shared, own);
+        let titan = own_moon(mass, &orbit, &saturn, &shared, own);
         let nitrogen = titan.atmosphere().partial_pressures().of(Gas::Nitrogen);
         assert!(nitrogen.value() >= 1e5, "{nitrogen:?}");
-        let snow_line = own_moon(NitrogenLine::Snow, mass, &orbit, &saturn, &shared, own);
-        assert_eq!(titan.atmosphere(), snow_line.atmosphere());
     }
 
     /// P14.T56.c and its follow-up: the table's Ganymede and Callisto stay airless at every radius
-    /// rank, under either line, read at their own bulk: Jeans escape removes what nitrogen and
-    /// methane they hold (decision-p14-moons §2.1, Ganymede's λ near the threshold).
+    /// rank, read at their own bulk: Jeans escape removes what nitrogen and methane they hold
+    /// (decision-p14-moons §2.1, Ganymede's λ near the threshold).
     ///
     /// Read at the composition solve's bulk, version 22's, they were airless only near the rank
     /// that keeps their measured radii. At the median rank that solve gives Ganymede 2,281 km
@@ -2909,38 +2886,29 @@ mod tests {
         for moon in [GANYMEDE, CALLISTO] {
             let ((kg, keep), orbit) = table_moon(moon, &jupiter);
             for rank in every_rank(keep) {
-                for line in [NitrogenLine::Snow, NitrogenLine::Ammonia] {
-                    let derived = own_moon(
-                        line,
-                        (kg, rank),
-                        &orbit,
-                        &jupiter,
-                        &MoonVolatiles::SHARED,
-                        MoonBulk::Derived,
-                    );
-                    let air = derived.atmosphere();
-                    assert_eq!(
-                        air.state(),
-                        SurfaceState::Airless,
-                        "{} km at {rank:?}: {air:?}",
-                        moon.2
-                    );
-                }
+                let derived = own_moon(
+                    (kg, rank),
+                    &orbit,
+                    &jupiter,
+                    &MoonVolatiles::SHARED,
+                    MoonBulk::Derived,
+                );
+                let air = derived.atmosphere();
+                assert_eq!(
+                    air.state(),
+                    SurfaceState::Airless,
+                    "{} km at {rank:?}: {air:?}",
+                    moon.2
+                );
             }
             // At the rank that keeps its radius, the solve's bulk lies near its own, as before.
-            let derived = moon_under(
-                NitrogenLine::Ammonia,
-                (kg, keep),
-                &orbit,
-                &jupiter,
-                &MoonVolatiles::SHARED,
-            );
+            let derived = moon_under((kg, keep), &orbit, &jupiter, &MoonVolatiles::SHARED);
             assert_eq!(derived.atmosphere().state(), SurfaceState::Airless);
         }
     }
 
     /// P14.T56.c's follow-up: every moon of the table, read at its own bulk at every radius rank
-    /// with the median volatile ranks under the ammonia line, as from version 23.
+    /// with the median volatile ranks, as from version 23.
     ///
     /// - Its escape is judged at its own radius and mass: a regular moon's [`moon_radius`] at its
     ///   ice fraction, and Triton's, a capture's, its measured mean radius (JPL).
@@ -2992,8 +2960,7 @@ mod tests {
             };
             for rank in every_rank(keep) {
                 let bulk = stated.map_or(MoonBulk::Derived, |(bulk, _)| bulk);
-                let line = NitrogenLine::Ammonia;
-                let derived = own_moon(line, (kg, rank), &orbit, giant, &volatiles, bulk);
+                let derived = own_moon((kg, rank), &orbit, giant, &volatiles, bulk);
                 let air = derived.atmosphere();
                 let at = format!("{name} at {rank:?}: {air:?}");
                 let (radius, ice) = match bulk {
@@ -3048,22 +3015,15 @@ mod tests {
             for rank in every_rank(keep) {
                 let mass = (kg, rank);
                 let shared = &MoonVolatiles::SHARED;
-                let line = NitrogenLine::Ammonia;
-                let own = own_moon(line, mass, &orbit, giant, shared, MoonBulk::Derived);
+                let own = own_moon(mass, &orbit, giant, shared, MoonBulk::Derived);
                 let stated = MoonBulk::Stated {
                     radius: own.radius(),
                     fractions: own.fractions(),
                 };
-                assert_eq!(own_moon(line, mass, &orbit, giant, shared, stated), own);
-                let solved = moon_under(line, mass, &orbit, giant, shared);
-                let ignored = moon_read_at(
-                    (line, MoonBulkRule::Solved),
-                    mass,
-                    &orbit,
-                    giant,
-                    shared,
-                    stated,
-                );
+                assert_eq!(own_moon(mass, &orbit, giant, shared, stated), own);
+                let solved = moon_under(mass, &orbit, giant, shared);
+                let ignored =
+                    moon_read_at(MoonBulkRule::Solved, mass, &orbit, giant, shared, stated);
                 assert_eq!(ignored, solved);
                 // The bulk the record states does not move with what its air is read at.
                 assert_same_bits(own.radius().value(), solved.radius().value());
@@ -3091,7 +3051,6 @@ mod tests {
                 (MoonBulkRule::Own, MoonTideRule::ByState),
             ] {
                 let holds = MoonHolds {
-                    line: NitrogenLine::Ammonia,
                     bulk: rule,
                     tides,
                     snapshot: SnapshotRules::Held,
@@ -3139,10 +3098,9 @@ mod tests {
         };
         let (bulk, ice) = captured_bulk(kg, km);
         assert!((ice - 0.238).abs() < 0.005, "{ice}");
-        let line = NitrogenLine::Ammonia;
         let mass = (kg, UnitUniform::HALF);
-        let own = own_moon(line, mass, &orbit, &home, &volatiles, bulk);
-        let solved = moon_under(line, mass, &orbit, &home, &volatiles);
+        let own = own_moon(mass, &orbit, &home, &volatiles, bulk);
+        let solved = moon_under(mass, &orbit, &home, &volatiles);
         let water = own.inventory().water().value();
         assert!((water / (ice * kg) - 1.0).abs() < 1e-12, "{water} kg");
         let drawn = solved.inventory().water().value() / (kg * EARTH_WATER_PER_MASS);
@@ -3167,7 +3125,7 @@ mod tests {
     ///   boosts.
     #[test]
     fn a_captured_moon_takes_the_volatiles_of_its_parent_s_zone() {
-        use crate::planetary::derive::atmosphere::volatile_inventory_under;
+        use crate::planetary::derive::atmosphere::volatile_inventory;
         let himalia = (0.151_55e9 / GRAVITATIONAL_CONSTANT, 11_439_000.0, 0.160);
         let triton = (1_428.495_46e9 / GRAVITATIONAL_CONSTANT, 714_920.0, 0.0);
         let at_3_au = table_giant("Jupiter", 5, Some(3.0));
@@ -3184,10 +3142,9 @@ mod tests {
             (triton, &home, (100.0, 100.0)),
         ] {
             let orbit = about(&giant.0, a_km, e);
-            let line = NitrogenLine::Ammonia;
             let mass = (kg, UnitUniform::HALF);
-            let nursery = moon_under(line, mass, &orbit, giant, &site(VolatileSite::Nursery));
-            let zone = moon_under(line, mass, &orbit, giant, &site(VolatileSite::ParentZone));
+            let nursery = moon_under(mass, &orbit, giant, &site(VolatileSite::Nursery));
+            let zone = moon_under(mass, &orbit, giant, &site(VolatileSite::ParentZone));
             let (n, c, _) = per_earth(&zone, kg);
             let (n_nursery, c_nursery, _) = per_earth(&nursery, kg);
             assert!(
@@ -3200,8 +3157,7 @@ mod tests {
             );
             // The inventory is the parent's zone's, at the moon's own mass and solve.
             let parent_zone = giant.1.parent_zone();
-            let expected = volatile_inventory_under(
-                line,
+            let expected = volatile_inventory(
                 zone.body.mass(),
                 &zone.body.fractions(),
                 parent_zone.side(),
@@ -3254,17 +3210,10 @@ mod tests {
         let mut steps = Vec::new();
         for radii in [8.0, 40.0] {
             let orbit = about(&rocky.0, radii * r, 0.0);
-            let line = NitrogenLine::Ammonia;
             let draws = VolatileDraws::MEDIAN;
             let site = |site| MoonVolatiles { draws, site };
-            let zone = moon_under(
-                line,
-                moon_kg,
-                &orbit,
-                &rocky,
-                &site(VolatileSite::ParentZone),
-            );
-            let nursery = moon_under(line, moon_kg, &orbit, &rocky, &site(VolatileSite::Nursery));
+            let zone = moon_under(moon_kg, &orbit, &rocky, &site(VolatileSite::ParentZone));
+            let nursery = moon_under(moon_kg, &orbit, &rocky, &site(VolatileSite::Nursery));
             let (n, c, _) = per_earth(&zone, moon_kg.0);
             assert!(
                 (n - 1.0).abs() < 1e-12 && (c / 100.0 - 1.0).abs() < 1e-12,
