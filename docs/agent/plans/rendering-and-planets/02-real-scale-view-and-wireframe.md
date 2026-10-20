@@ -625,7 +625,8 @@ the call sites here change.
     target craft, are held in a `craft` `CameraFrame` as an offset from that craft, and
     `relativeToCamera` computes (p − craft) − offset, so that the hull's own offset is exact and
     only far objects carry ulp(D), where it is sub-pixel. The camera's frame selection (Design
-    note 6) then applies to the craft's position, and to the camera's own only in `free`.
+    note 6) then applies to the craft's position (for the server's ship stand-in, `sceneAt`'s local
+    body; R03 Design note 7), and to the camera's own only in `free`.
 
 ## Tasks
 
@@ -1804,6 +1805,16 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
   `CAMERA REPORT UNANSWERED` and `OWN SHIP`, marked `_Draft (plan R02, R02.T17, nomenclature)…_`
   for the owner. **Pending by eye:** the status line, `RETRY` and the muted stale readings in the
   running client, at 1920 × 1080 and 1280 × 720.
+- **Fixed in R10.T12 (2026-10-20; decision-r10-ship-frame): the own ship held in its local body's
+  frame.** R02.T17 held the server's ship stand-in in the system frame at the observer's present
+  position, so that a `SEAT` or `CHASE` camera beside a body read `FRAME SYSTEM BARYCENTRIC`,
+  against the guide's `BODY` row and Design notes 6 and 22. `viewSceneFromServer` now holds it in
+  the frame of `sceneAt`'s local body (`m` the observer's position less the body's drawn, geometric
+  centre), its velocity against that body's present velocity (`SceneFrame.localBodyVelocityMPerS`,
+  the same `composedVelocity` that `shipObserver` adds), and in the system frame where the frame
+  has no local body or the scene draws none for it; its attitude stays the barycentric velocity's.
+  `frameName`, `frameBody`, `POSITION`, the free camera's detach and the camera report follow
+  unchanged. `fromServer.test.ts`'s pin of the system-held ship is re-pinned to the rule.
 - **Fixed in RM1 validation (2026-10-02): R02.T7.b's transparent-layer order (M1).** The text and
   `transparentLayerOrder` drew a body's shells below the camera first and its shells above it last,
   so a high cloud deck and the air were composited over the nearer low deck. Along any ray that meets

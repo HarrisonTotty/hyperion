@@ -109,6 +109,30 @@ export function earthReSentAsContact(): SceneBodyDto {
   };
 }
 
+/**
+ * The ship 10,000 km from the slice's Earth, in the Earth's frame, at `seconds`: well inside 0.9 of
+ * the Earth's Hill radius, which its `full` grant gives, so that the Earth is its local body.
+ */
+export function stateNearEarth(seconds = 3_000): SceneStateDto {
+  return {
+    sequence: 0,
+    clock: sceneClock(seconds),
+    ship: {
+      position: { frame: "body", body: FIXTURE_EARTH, offset_m: [1e7, 0, 0] },
+      velocity_m_s: [0, 7_000, 0],
+      time: { seconds, nanos: 0 },
+    },
+    system: sliceSceneSystem(),
+    tidal_radius_m: SCENE_TIDAL_RADIUS_M,
+    craft: [],
+  };
+}
+
+/** The ship 1 au out in the slice's system ({@link shipInSystem}), inside no body's Hill sphere. */
+export function stateInSystem(seconds = 3_000): SceneStateDto {
+  return { ...stateNearEarth(seconds), ship: shipInSystem(seconds) };
+}
+
 /** The scene's opening state: the ship in the galactic frame, with no system. */
 export function stateInSpace(): SceneStateDto {
   return {

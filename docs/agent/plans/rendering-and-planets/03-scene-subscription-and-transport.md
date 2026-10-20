@@ -1681,6 +1681,11 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   `lightTime.test.ts`. _R07.T10.a adds `emittedM` (`apparentPosition`'s `geometricThenM`) and
   `emittedVelocityMPerS` (the composed orbits' velocity at `emitted`) to `placed` entries and to
   `SceneStarFrame`, the retarded centres lighting takes; fields only._
+- **Added in R10.T12 to T13's `SceneFrame` (2026-10-20; decision-r10-ship-frame):**
+  `SceneFrame.localBodyVelocityMPerS`, the local body's present velocity relative to the
+  barycentre at the frame's time (`composedVelocity`, as `shipObserver` adds it for a body-held
+  stand-in), `null` with no local body, against which R02.T17's view scene holds the own ship's
+  velocity in that body's frame.
 - **Deviations in T8.a, as built.** The topic is `scene/topic.rs`: `open` (reached through
   `Handlers::subscribe`) builds the core on the pool at `Priority::Interactive`, re-running the
   job after fetching each system it asks for (`FetchSystemError`) from the body cache, and spawns

@@ -10,7 +10,18 @@ import { eclipseScene } from "../../view/scenes/eclipseScene";
 import { FRAME_CHANGE_MOON, frameChangeScene } from "../../view/scenes/frameChange";
 import { precisionScene } from "../../view/scenes/precision";
 import { phaseScene } from "../../view/scenes/phaseScene";
-import type { SystemIdHex } from "@hyperion/protocol";
+import type { SystemIdHex, UniverseTime } from "@hyperion/protocol";
+import { type SceneFrame, sceneAt, shipObserver } from "../../lib/scene/apparent";
+import { FIXTURE_EARTH } from "../../test/planetaryFixture";
+import {
+  SCENE_CHARTED_PLACE,
+  SCENE_DESIGNATION,
+  sceneModelOf,
+  stateInSystem,
+  stateNearEarth,
+} from "../../test/sceneFixture";
+import { servedRun } from "../../test/servedRun";
+import { viewSceneFromServer } from "../../view/scene/fromServer";
 import {
   aViewCraft,
   aViewScene,
@@ -783,5 +794,96 @@ describe("the terrain lines' body and range label (R10.T12)", () => {
       slantRangeFromCamera({ ...run.camera, preset: "free" }, run.scene),
       slantRangeFromCamera({ ...run.camera, preset: "seat" }, shipless),
     ]).toEqual([false, true, true, true]);
+  });
+});
+
+/** The speed of {@link servedRunInBand}'s ship out from the Earth, m/s. */
+const OUTWARD_M_PER_S = 1e4;
+
+/**
+ * A run of the server's scene, its camera at the ship's seat, the ship come out in the Earth's
+ * frame from half the slice's Earth's Hill radius to 0.95 of it with each frame carried, so that
+ * the frame rule's hysteresis keeps it in the Earth's frame, where a ship arriving from outside
+ * would not be.
+ *
+ * @throws Error when the scene cannot be drawn, or a fresh frame at 0.95 enters a sphere.
+ */
+function servedRunInBand(): ViewRun {
+  const hillRadiusM = sceneModelOf(stateNearEarth()).system?.hillRadiiM.get(FIXTURE_EARTH);
+  if (hillRadiusM === undefined) {
+    throw new Error("the fixture's Earth has a Hill radius");
+  }
+  const start = { seconds: 3_000, nanos: 0 };
+  const model = sceneModelOf({
+    ...stateNearEarth(),
+    ship: {
+      position: { frame: "body", body: FIXTURE_EARTH, offset_m: [0.5 * hillRadiusM, 0, 0] },
+      velocity_m_s: [OUTWARD_M_PER_S, 0, 0],
+      time: start,
+    },
+  });
+  const frameAt = (time: UniverseTime, previous: SceneFrame | null): SceneFrame => {
+    const observer = shipObserver(model, time);
+    const frame = observer === null ? null : sceneAt(model, observer, time, previous);
+    if (frame === null) {
+      throw new Error("the fixture's served scene has a frame");
+    }
+    return frame;
+  };
+  const inBand = {
+    seconds: start.seconds + Math.round((0.45 * hillRadiusM) / OUTWARD_M_PER_S),
+    nanos: 0,
+  };
+  if (frameAt(inBand, null).localBody !== null) {
+    throw new Error(
+      "0.95 of the Earth's Hill radius is in its band, where a fresh frame enters no sphere",
+    );
+  }
+  const scene = viewSceneFromServer(
+    model,
+    frameAt(inBand, frameAt(start, null)),
+    SCENE_CHARTED_PLACE,
+  );
+  if (scene === null) {
+    throw new Error("the fixture's served scene can be drawn");
+  }
+  return startServerRun(scene);
+}
+
+describe("the own ship's FRAME in a served system (R10.T12; decision-r10-ship-frame §3)", () => {
+  /** The slice's Earth's frame as the label block names it. */
+  const EARTH_FRAME = `BODY ${SCENE_DESIGNATION} /768`;
+
+  it.each([
+    ["SEAT", "seat"],
+    ["CHASE", "chase"],
+  ] as const)(
+    "names the Earth's frame in %s beside the served Earth, the Earth its FRAME body",
+    (_name, preset) => {
+      const { camera, scene } = servedRun(stateNearEarth(), preset);
+      expect([
+        frameName(camera.pose.frame, scene),
+        frameBody(camera.pose.frame, scene)?.id,
+      ]).toEqual([EARTH_FRAME, FIXTURE_EARTH]);
+    },
+  );
+
+  it.each([
+    ["SEAT", "seat"],
+    ["CHASE", "chase"],
+  ] as const)(
+    "names the system's frame in %s with the ship outside every sphere, and no FRAME body",
+    (_name, preset) => {
+      const { camera, scene } = servedRun(stateInSystem(), preset);
+      expect([frameName(camera.pose.frame, scene), frameBody(camera.pose.frame, scene)]).toEqual([
+        "SYSTEM BARYCENTRIC",
+        null,
+      ]);
+    },
+  );
+
+  it("keeps the Earth's frame for a FREE camera detached from the ship in the sphere's band, at 0.95 of its Hill radius", () => {
+    const free = done(commandRun(servedRunInBand(), { kind: "preset", preset: "free" }, CUT));
+    expect(free.camera.pose.frame).toEqual({ kind: "body", body: FIXTURE_EARTH });
   });
 });

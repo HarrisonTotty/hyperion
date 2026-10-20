@@ -20,7 +20,7 @@ import {
   TERRAIN_NOT_AVAILABLE,
 } from "../../view/terrain/annunciation";
 import { PALETTE_NONE, type SurfaceGroundReadout } from "../../view/terrain/workers/messages";
-import { NO_BREAK_SPACE } from "../../view/terrain/readouts";
+import { NO_BREAK_SPACE, SURVEY_PENDING, TERRAIN_NOT_MODELLED } from "../../view/terrain/readouts";
 import { MAX_CONSECUTIVE_WORKER_FAILURES } from "../../view/terrain/workers/pool";
 
 import {
@@ -1131,6 +1131,58 @@ describe("a kept scene's terrain lines (decision-r10-t12-commit3 §5)", () => {
 
   it("states no terrain lines where its FRAME is the system's", async () => {
     await setup();
+    expect(lowerPlate()).toBeNull();
+  });
+});
+
+/**
+ * `VIEW` drawing the server's scene, its primary at the own ship's seat, the ship 2,000 km over the
+ * slice's Earth in its frame: far inside 0.9 of the Earth's Hill radius (about 1.5 × 10⁹ m, which
+ * its `full` grant gives), so that the ship is held in the Earth's frame; the Earth's field asked
+ * and not yet answered.
+ *
+ * @throws Error when the primary's camera is not at the seat.
+ */
+async function seatOverEarth(): Promise<ViewDisplayHarness> {
+  const view = await setup();
+  await openUniverse(view);
+  await shipOverEarthArrives(view);
+  await settle();
+  view.advance(300);
+  await settle();
+  if (readingIn(primaryLabelBlock(), "CAMERA") !== "SEAT") {
+    throw new Error("the primary's camera is at the own ship's seat");
+  }
+  return view;
+}
+
+describe("the primary's survey line from the own ship in a served system (R10.T12; decision-r10-ship-frame §3)", () => {
+  it("states SURVEY COVERAGE: PENDING on the primary's lower plate in SEAT beside the Earth, before its field answers", async () => {
+    await seatOverEarth();
+    expect(within(plate()).getByText(SURVEY_PENDING)).toBeInTheDocument();
+  });
+
+  it("states TERRAIN: NOT YET MODELLED there in SEAT once the server answers the Earth's terrain not modelled", async () => {
+    const view = await seatOverEarth();
+    const { id } = latestFieldAsk(view.socket);
+    await act(async () => {
+      view.socket.serverResponds(id, {
+        kind: "surface_field",
+        state: "not_modelled",
+        section: "surface",
+      });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    view.advance(300);
+    await settle();
+    expect(within(plate()).getByText(TERRAIN_NOT_MODELLED)).toBeInTheDocument();
+  });
+
+  it("stands no lower plate in SEAT with the ship 1 au out, outside every sphere", async () => {
+    await serverScene();
+    if (readingIn(primaryLabelBlock(), "CAMERA") !== "SEAT") {
+      throw new Error("the primary's camera is at the own ship's seat");
+    }
     expect(lowerPlate()).toBeNull();
   });
 });

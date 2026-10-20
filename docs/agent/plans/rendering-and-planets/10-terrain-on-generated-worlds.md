@@ -11050,3 +11050,71 @@ src/renderer/src/App.test.tsx src/main` (197 files, 5,565 tests) and the protoco
   - _The labels wrap in a narrow plate_ (`SLANT RANGE FROM` | `CAMERA`, `ULTIMATE BEARING` |
     `CAPACITY`), as the label block's line markup sets a long label beside its value; a layout
     that keeps them whole is R10.T12.a's to weigh with its measurements.
+- **Beyond T12's files (decision-r10-ship-frame; commit 4)** (2026-10-20; lane r10-readouts-3).
+  - _The own ship's `FRAME` in a served system._ R02.T17's view scene held the server's ship
+    stand-in in the system frame, so that `frameBody` named no body from `SEAT` or `CHASE` and T12's
+    lines never stood from the ship in a served system. `view/scene/fromServer.ts` now holds it in
+    the frame of `sceneAt`'s local body, the sim's body-frame rule over geometric present positions
+    with its hysteresis (not `sceneFrameFor`), at the observer's position less the body's drawn,
+    geometric centre, and its velocity against the body's present velocity, so that a stand-in at
+    rest in its body's frame reads exactly zero and draws no flight path marker; the system frame
+    where the frame has no local body or the scene draws none for it. `lib/scene/apparent.ts`'s
+    `SceneFrame` gains `localBodyVelocityMPerS` (`composedVelocity` at the frame's time, the same
+    that `shipObserver` adds). The stand-in's attitude, the observer, light time, which body is
+    drawn geometrically, `defaultPose`, kept scenes and the session's `local` are unchanged; no
+    wire, server, golden or version change. `frameName`, `frameBody`, `POSITION`, the free camera's
+    detach and the camera report follow with no change of their own, so that the lower plate stands
+    in `SEAT` and `CHASE` within 0.9 of a served body's Hill radius: `TERRAIN: NOT YET MODELLED`
+    while the serve gate is shut.
+  - _The guide._ decision-r10-ship-frame's G1 and G2: the `SYSTEM BARYCENTRIC` row ("or the craft it
+    is held to, is in no body's Hill sphere (see `BODY`)") and the `BODY` row (the innermost body,
+    the sphere entered at 0.9 of its radius and left beyond it).
+  - _Records._ Plan 02's R02.T17 ("Fixed in R10.T12") and Design note 22; plan 03's T13 (the new
+    field).
+  - _Tests._ decision-r10-ship-frame §5's eleven: `fromServer.test.ts` (12 more: the ship in
+    Earth's frame with `stateNearEarth`, resolving to the observer within 4 ε |observer|; the system
+    frame outside every sphere; the rule in both directions, not the wire's frame; the velocity, the
+    wire's `[0, 7000, 0]` to 10⁻⁹ and exactly zero at rest with no flight path marker; the attitude
+    across an entry; a path into Earth's sphere and out, 63 steps of 1,000 s through `sceneAt` with
+    `previous`, its frame body always `frame.localBody`, entry at 0.9 or less and exit above 1
+    within a step, continuous to 1 mm; an undrawn local body, made by hand with the ring `.0180` as the frame's local body (`sceneAt`
+    names only planets, dwarf planets and moons, which the scene draws once seen; the guard's live
+    case is a candidate `apparentPosition` does not see, which `sceneAt` leaves out of
+    `frame.bodies`); the camera report in Earth's frame; the two pins of the
+    system-held ship re-pinned with the change stated), `apparent.test.ts` (4: the present velocity
+    against `stateAt` along the parent chain to 10⁻¹² and equal to a body-held stand-in's observer's,
+    a ±0.5 s central difference to 10⁻⁶, `null` with no local body), `viewRun.test.ts` (5) and
+    `cameraPlace.test.ts` (4) (`SEAT` and `CHASE` reading `BODY <Earth>` with Earth the `FRAME`
+    body and `POSITION` from its centre, `SYSTEM BARYCENTRIC` and `null` outside; `FREE` detached
+    at 0.95 of the Hill radius keeping Earth's frame), and `ViewDisplayTerrain.test.tsx` (3: in
+    `SEAT` 2,000 km over Earth the plate's `SURVEY COVERAGE: PENDING`, then
+    `TERRAIN: NOT YET MODELLED` on a `not_modelled` answer, and none at 1 au); `stateNearEarth` and
+    `stateInSystem` moved to `test/sceneFixture.ts` to be shared, and a served run cut to a preset
+    in `test/servedRun.ts` (the TypeScript review). No session figure moved: the session's tests
+    build no served scene.
+  - _Acceptance, as run._ `pnpm --filter hyperion exec vitest run` over `src/renderer/src/view/scene`,
+    `src/renderer/src/lib/scene`, `src/renderer/src/displays/view`, `src/renderer/src/view/terrain`,
+    `src/renderer/src/view/camera` and `src/renderer/src/view/wireframe` (135 files, 4,182 tests),
+    then the gate over commits 3 and 4. No by-hand look is owed (decision-r10-ship-frame §5); the
+    served-world look is T15's.
+- **Deferred findings (2026-10-13 rule) (decision-r10-ship-frame)** (recorded, not ruled; each
+  leaves the algorithm and the contracts as built).
+  - _`FRAME CHANGE TEST`'s ship is held in the system frame_ (`frameChange.ts`): in `SEAT` and
+    `CHASE` its `FRAME` never changes, against G1 and G2; the scene could hold it per scripted
+    segment, as R02.T8.b's scene test re-expresses it, and would then read
+    `TERRAIN: NOT YET MODELLED` inside its bodies' frames. Owner: R02's kept scenes, the next time
+    they are touched.
+  - _The closure rate and the symbology anchor's relative velocity_ (`viewRun.ts`'s closure,
+    `drawList.ts`) subtract two craft's velocities with no check that they are held in the same
+    frame: wrong before for a body-held contact against the system-held ship, and now for a
+    system-held contact against a body-held ship; unreachable on a served world while the server's
+    craft source is `NoCraft`, and in the kept scenes, whose second craft carry no velocity. The fix compares in a common frame, or reads `unknown`. Owner: the
+    plan that first serves craft.
+  - _`place-ship`'s default distance_ (0.01 au) is outside the entry ratio for an Earth (1.017) and
+    far outside for inner planets, and its doc's "inside an Earth's Hill sphere" is false by R02's
+    pericentre form and band; the fix is a default of half the target's pericentre Hill radius.
+    Owner: main's tooling; T15 passes `--distance` meanwhile.
+  - _`velocityAgainst`'s system branch_ subtracts a body's retarded velocity; for the local body,
+    drawn at the present, the present velocity is the reference, and after commit 4 the branch
+    applies only to other craft held in the system frame, none of them served. Owner: T14.c, with
+    its frame chaining.
