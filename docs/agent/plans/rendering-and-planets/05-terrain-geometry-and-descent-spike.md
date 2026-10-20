@@ -6700,7 +6700,9 @@ medium, sizes, figure)`.
   `box: OrientedBox` (the centre's spheroid normal and two tangents, with half-extents) beside its
   sphere, whose centre is the box's; the bounds sample the patch's boundary at every fourth vertex
   and the centre vertex at both ends of the level's height range and pad by the largest chord
-  between neighbouring samples (about a sixteenth of the patch). Added beside the Provides names:
+  between neighbouring samples (about a sixteenth of the patch). _The normal's margin amended by
+  R10.T14.e_ (plan 10: the normal's half-extent takes the chord's sagitta; the tangents and the
+  sphere keep the chord). Added beside the Provides names:
   in `planet.ts` `LEVEL_TABLE_STRIDE`, `levelBoundM`, `levelHeightRangeM`, `lowestHeightM`,
   `spheroidPoint`, `spheroidNormal` and `surfacePoint`; in `bounds.ts` `OrientedBox`,
   `boxCorners`, `relativeBounds`, `distanceToBoxM` (selection's distance to the nearest point)

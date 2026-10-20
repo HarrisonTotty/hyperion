@@ -164,11 +164,13 @@ export interface CountModelCounts {
  * @remarks
  * Its own fields are the counts on `cull.ts`' {@link aboveHorizon}, on each patch's box, which is
  * what `selectPatches` selects and the cache must hold; the sizing rule reads them. R05's bounds
- * add the largest chord between their ring samples, a sixteenth of the patch's edge, to every
- * half-extent, the normal's included (`bounds.ts`), so a coarse patch wholly below the true horizon
- * can have its box's top above it: at 100 m over an Earth about a fifth of the high setting's
- * all-round leaves are such patches, until R10.T14.e (decision-r10-t14a, the #56 follow-up).
- * {@link PatchCountModel.exactHorizon} leaves them out.
+ * added the largest chord between their ring samples, a sixteenth of the patch's edge, to every
+ * half-extent, the normal's included, so a coarse patch wholly below the true horizon could have
+ * its box's top above it: at 100 m over an Earth about a fifth of the high setting's all-round
+ * leaves (654 of 3,014; decision-r10-t14a, the #56 follow-up). Since R10.T14.e the normal takes the
+ * boundary's sagitta (`bounds.ts`' `normalMarginM`), millimetres, and the boxes' count there is
+ * 2,397, 49 over the exact horizon's: a box's flat top still stands above its patch's curved edges,
+ * and its tangents keep the chord. {@link PatchCountModel.exactHorizon} leaves them out.
  */
 export interface PatchCountModel extends CountModelCounts {
   /** The camera, body-fixed metres from the body's centre. */
