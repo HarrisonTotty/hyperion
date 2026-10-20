@@ -20552,12 +20552,17 @@ tables::gauss_legendre`.
       `FITTED`, and `SnapshotRules::greenhouse` gives each rules' set.
     - T13.c's `greenhouse` (`Held`) reads `VERSION_22`, and `partitioned_greenhouse` (`Batch`)
       reads `FITTED`.
-    - The public `optical_depth` and the crate-private `optical_depth_terms` read the rules in
-      force, so T24.a's column reads version 22's set at 22 (P14.T51.a's fix below gives it its
-      atmosphere's).
-    - The tripwire `the_snapshot_lane_is_held_only_until_the_batch_s_bump` asserts that the set in
-      force is `VERSION_22`. Its message names `GreenhouseConstants::VERSION_22` and
-      `SnapshotRules::greenhouse` for P14.T54.a to delete.
+    - The public `optical_depth` reads the rules in force. At T57.a's commit so did the
+      crate-private `optical_depth_terms`, so T24.a's column read version 22's set at 22;
+      P14.T51.a's fix below removes it and gives the column its atmosphere's set.
+    - The tripwire `the_snapshot_lane_is_held_only_until_the_batch_s_bump` names
+      `GreenhouseConstants::VERSION_22` and `SnapshotRules::greenhouse` for P14.T54.a to delete.
+      T57.a's commit also gave it the line "refit `GREENHOUSE_WATER` on the real inputs if the fits
+      test says so", the lean decision-p14-t57a-fits overruled; P14.T51.a's fix commit replaces it.
+    - The public constants carry version 23's values at 22, read only through `FITTED` and the
+      tests; the determinism review's "make them crate-private until P14.T54.a" was not taken,
+      since they are T13.c's public constants, their docs say when they take effect, and nothing
+      outside the sim reads them.
   - _The rule_ (decision-p14-t57a-fits §1). Each constant is fitted at its body's measured
     inventory and measured Bond albedo, under the generator's own irradiation, in the order
     nitrogen on Titan, carbon dioxide on Venus, then water on Earth.
@@ -20576,12 +20581,20 @@ tables::gauss_legendre`.
       masses (mean 43.4496 g mol⁻¹) that is 4.6917 × 10²⁰ kg of CO₂ and 1.0832 × 10¹⁹ kg of N₂,
       which confirms the plan's figures from memory. By weight over the generator's Venus
       (g = 8.870 m s⁻²) it is 90.422 and 2.0876 bar.
-    - _737 K:_ VIRA's 735.3 K and 92.10 bar at its altitude zero, 6,052 km (Seiff et al. 1985, Adv.
-      Space Res. 5(11), 3, doi:10.1016/0273-1177(85)90197-8, through Venus-GRAM's `VIRALow.txt`
-      and the Planetary Scientist's Companion, p. 119). Carried 0.2 km down to the 6,051.8 km mean
-      radius at VIRA's 7.6 K km⁻¹, that is 736.8 K, NASA's 737 K. The plan's "735 K at the mean
-      radius" was the datum's figure. The 6,052 km datum is read in a snippet; if Seiff et al. put
-      it at 6,051.8 km, the target returns to 735 K and 14.70 (the ruling's caveat).
+    - _Venus's nitrogen:_ von Zahn et al.'s 3.5 ± 0.8% is compiled from Pioneer Venus's and
+      Venera 11/12's samples in descent, among them Pioneer Venus's gas chromatograph's 4.60, 3.54
+      and 3.41% at 51.6, 41.7 and 21.6 km (Oyama et al. 1980, JGR 85, 7891, Table 2), as Johnson
+      and de Oliveira 2019 compile them (read there, not at source). decision-p14-t57a-fits §4's
+      "a measurement above 22 km" is so corrected (the science review). A bulk anywhere in
+      2.5–4.5% moves the CO₂ fit by about 0.3% at most (−0.30% at 2.5%, +0.31% at 4.5%).
+    - _737 K:_ VIRA's 735.3 K and 92.10 bar, and 7.6 K km⁻¹ over its lowest kilometre, at its
+      altitude zero (Seiff et al. 1985, Adv. Space Res. 5(11), 3, doi:10.1016/0273-1177(85)90197-8,
+      through Venus-GRAM's `VIRALow.txt`, Justh et al. 2021, NASA/TM-20210022168, which sets that
+      level at its own 6,051.8 km reference radius). Seiff et al. put the zero at 6,052 km, as a
+      search excerpt gives it (lower confidence). Carried 0.2 km down to the 6,051.8 km mean
+      radius, that is 736.8 K, NASA's 737 K. The plan's "735 K at the mean radius" was the
+      datum's figure. If Seiff et al. put it at 6,051.8 km, the target returns to 735 K and 14.70
+      (the ruling's caveat).
     - _288.0 K:_ the pre-industrial Earth's surface emission temperature, (S↑ ÷ σ)^¼, which is
       what the grey `T_s` is.
       - Route 1: Jones et al. 1999's 14.0 °C for 1961–1990, less AR6's 0.36 K, is the arithmetic
@@ -20609,16 +20622,16 @@ tables::gauss_legendre`.
       CO₂ and 0.74739 bar of N₂ by weight, with 1,277 Pa of argon.
       - Its T_eq is the irradiation at 0.294: 255.1385 K.
       - Its water lies on the partition's minor branch, x_w P = 0.77 p_sat(T_s) on the registry's
-        curve, checked to 10⁻⁶ at its own `T_s`. At 288 K that is 837.20 Pa by weight, 0.495 of
+        curve, checked to 10⁻⁶ at its own `T_s`. At 288 K that is 837.20 Pa by weight, 0.496 of
         p_sat (1,689.27 Pa).
       - 288 K needs τ = 0.8314. Less CO₂'s 0.3048 and N₂'s 0.1177, the water's 0.4089 gives
         k = 4.4690, so 4.47.
   - _Deviations._
     - _The water constant is 4.47_, not decision-p14-moons §4.2's estimate of 3.46, for two
       reasons. The partition holds the water's partial pressure at the humidity, not its column
-      weight: 0.495 p_sat by weight (0.77 × μ_w ÷ μ̄), where version 22 held the column weight at
+      weight: 0.496 p_sat by weight (0.77 × μ_w ÷ μ̄), where version 22 held the column weight at
       p_sat. And the fit's T_eq is the irradiation at 0.294 (decision-p14-t57a-fits §1). At a given
-      temperature the batch's water term, 4.47 × √0.495 = 3.15 √p_sat, is 9% stronger than version
+      temperature the batch's water term, 4.47 × √0.496 = 3.15 √p_sat, is 9% stronger than version
       22's 2.89, and its CO₂ term is 20% weaker (the ruling's D4).
     - _The lane's first lean was overruled._ It fitted water at the passes' stand-in Earth (A
       0.2798, T_eq 256.41 K: 4.05), with T54.a refitting. That would absorb the generated cover's
@@ -20636,9 +20649,9 @@ tables::gauss_legendre`.
       288 K and 0–3 K below version 22's: 287.73 against 289.70 K.
     - _T53.a's pin of the dry 2-au Earth_ (`a_dry_earth_beyond_the_maximum_greenhouse_still_runs_away_past_its_cold_trap`)
       reads the batch's constants in its by-hand τ, and still runs away above 500 K.
-    - _A first build was reverted._ It threaded the rules into T24.a's column (`StepColumn`), which
-      broke two T24.a tests that switch only the zonal solver on version 22's atmospheres. P14.T51.a's
-      fix below gives the column its atmosphere's rules instead.
+    - _A first build was reverted._ It threaded the rules into T24.a's column (`StepColumn`),
+      which broke two T24.a tests that switch only the zonal solver on version 22's atmospheres.
+      P14.T51.a's fix below gives the column its atmosphere's rules instead.
   - _Tests_ (in `planetary::derive::atmosphere::tests`):
     - `the_greenhouse_constants_are_their_fits`;
     - `the_measured_venus_reaches_737_k_under_the_batch`, 737 K ± 2%;
@@ -20649,14 +20662,14 @@ tables::gauss_legendre`.
     - `the_table_s_median_venus_holds_55_to_60_bar_and_reaches_680_to_710_k`;
     - `under_the_batch_titan_is_94_k`, a check (E1);
     - T13.c's `the_table_s_surface_temperatures_are_within_eight_per_cent`, on the measured Venus;
-    - the tripwire's new assertion;
     - in `planetary::system::tests`, `the_batch_s_surface_temperatures_over_the_sample_are_recorded`
       (ignored, a measurement run by name).
 
     The re-check of T24.e's Venus test on this task's Venus stays P14.T54.b's, held by T24.e's
     tripwire, as the entry says. The acceptance, `cargo test -p hyperion-sim planetary::derive`,
-    and the lane's wider filter (`planetary::{derive, chem::partition, hooks, system,
-moons::regular, record}`) pass: 624 tests.
+    passes, as does the lane's wider run, `cargo test -p hyperion-sim --lib -- planetary::derive
+planetary::chem::partition planetary::hooks planetary::system planetary::moons::regular
+planetary::record` (624 tests at T57.a's commit).
 
   - _Measured under `Batch`_ (the table and the sample, debug builds; for P14.T54.a's bless note):
     - _The table._ Moves are given as before T57.a → after, with version 22's value in brackets.
@@ -20677,12 +20690,20 @@ moons::regular, record}`) pass: 624 tests.
       - 4 of the 32 snowballs (to −22.0 K, −5.1%);
       - none of the 796 airless and 61 enveloped bodies.
 
-      Four magma oceans, under 14–155 bar of CO₂, fall below the 1,394 K solidus and take the
-      runaway state. The cloud's 0.76 then cuts their T_eq: 1,514–1,537 → 1,031–1,046 K, a state
-      change at a threshold that reads `T_s`, as the plan expects. The largest temperate move,
-      272.05 → 220.72 K (3.35 bar with 690 Pa of CO₂, T_eq 178.9 K), ices over in the stand-in's
-      step cover. Through the whole hold at 23 (version 22 → `Batch`), 475 of the 970 move by more
-      than 2 K, against 427 before T57.a. Version 22's columns are identical in both runs.
+      The states are those after T57.a. Four magma oceans (14.4–155 bar of air, 14.3–127.8 bar of
+      CO₂) take the runaway state: `T_s` 1,514–1,537 → 1,031–1,046 K, T_eq 427–565 → 307–406 K
+      under the cloud's 0.76. At their molten T_eq, 14.86 still gives 1,434–1,456 K, above the
+      1,394 K solidus, so the passes choose between two self-consistent states ("The stand-ins'
+      state flips", below), not a threshold crossed. Surface pressure moves by more than 1% on
+      six bodies. Three hot snowballs, science-p14-t24f's finding 1, at 546–574 K after T57.a,
+      lose 16–18% (163.4 → 137.5, 100.4 → 82.5 and 104.4 → 86.7 bar), their CO₂ unchanged. Two
+      cold runaway greenhouses lose 1.7 and 2.5%. One flipped ocean rises from 56.2 to 155.0 bar,
+      its CO₂ unchanged, as the runaway state's air keeps the oxygen the melt held. So the
+      entry's "no inventory or partition moves" holds for the inventories, not for what
+      condenses. The largest temperate move, 272.05 → 220.72 K (3.35 bar with 690 Pa of CO₂,
+      T_eq 178.9 K), ices over in the stand-in's step cover. Through the whole hold at 23
+      (version 22 → `Batch`), 475 of the 970 move by more than 2 K, against 427 before T57.a.
+      Version 22's columns are identical in both runs.
 
     - _Against the PRE-23 note "Earth −5 K"._ Under version 22's constants the partition put the
       table's Earth 3.3 K below 22: 286.64 against 289.95 K. T51.a's −5 K was at 22's T_eq of
@@ -20695,9 +20716,20 @@ moons::regular, record}`) pass: 624 tests.
 - **Deferred findings (2026-10-13 rule)**, from P14.T57.a and decision-p14-t57a-fits §6:
   - _D1, Venus's N₂ profile._ Mogul, Limaye and Way 2025 (GRL 52, e2025GL118909) find 2.49 ±
     0.10% below 15 km and 5.21 ± 0.18% at 51–59 km, non-uniformly mixed between. Lebonnois and
-    Schubert 2017 propose a total 15% below the usual. A bulk anywhere in 2.5–3.5% moves the CO₂
-    fit by under 0.3%. NASA's "3.5% near surface" is contradicted below 15 km. Re-read when the
-    full text or DAVINCI's profile exists.
+    Schubert 2017 propose a total 15% below the usual. A bulk anywhere in 2.5–4.5% moves the CO₂
+    fit by about 0.3% at most. NASA's "3.5% near surface" is contradicted below 15 km. Re-read
+    when the full text or DAVINCI's profile exists.
+  - _T24.a's Earth fits read the water constant_ (the batch review; for main and P14.T54.a).
+    `EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K` (D⊕, 0.6433) and `WET_ALBEDO_GRADIENT` (Φ⊕, 1.4948)
+    were fitted on T24.a's measured Earth through `B_eff` = `B_P` (1 − g), its water at p_sat and
+    its τ_w from the greenhouse in force (`earth_gain`): at 22, 2.89 and g⊕ 0.378. From 23 the
+    constants in force are 4.47, and under the partition the measured Earth's gain is about 0.42
+    (`B_eff` 1.93, by hand), so 6D⊕ ÷ `B_eff` moves from 1.86 to 1.96 and the contrast by about 2%
+    (+0.7 K on 42 K). `earth_s_measured_state_takes_north_cahalan_and_coakley_s_partition`'s 10⁻⁷
+    check, Φ⊕'s bisection and `the_greenhouse_gain_is_the_held_gases_feedback`'s saturation check
+    then trip at P14.T54.a, whose tripwire's message names them. Whether T54.a refits D⊕ and Φ⊕
+    at the batch's measured Earth, after water, is put to main (decision-p14-t57a-fits §1.5 rules
+    only the greenhouse constants).
   - _D2, the albedo's epoch._ Earth's 0.294 is a 2000s measurement, about 0.004 brighter than a
     natural Earth's (AR6's aerosol and land-use terms). It is P14.T24.h's, which re-splits Earth's
     cloud and refits in this order.
@@ -20715,3 +20747,68 @@ moons::regular, record}`) pass: 624 tests.
   - _The stand-ins' state flips._ The four magma oceans that become runaway greenhouses, and the
     temperate worlds that ice over in the step cover, are bistable between their states' albedos
     at the passes' stand-ins. P14.T54.a's cold profile and real cover re-check them.
+- **Deviations in P14.T51.a, as built: the greenhouse gain under the partition (`p14-t57a`,
+  2026-10-19; decision-p14-t57a-fits §5).** A fix to T24.a's column under the batch, behind the
+  same hold: under `Held` every output is version 22's to the bit, and no golden moves.
+  - _The defect._ `hooks/surface.rs`'s `greenhouse_gain` counted a gas's vapour feedback only
+    where its weight was at least its saturation pressure at `T_s`. That is T13.c's holding, and
+    it was right at 22. Under the batch the partition holds a minor condensable's partial pressure
+    at its humidity, below its saturation pressure: Earth's water at 0.77 of it, a weight of 0.496
+    of it. So the batch's Earth lost its water's feedback, though h p_sat(T) has the same
+    ∂ln p ÷ ∂T. Measured on the table's Earth, the gain was 0.3845 under `Held` and 0.0000 under
+    `Batch`; after the fix it is 0.4456, equal to the value by hand to 10⁻¹². Earth's measured
+    state under the batch gives about 0.42 (`B_eff` 1.93 W m⁻² K⁻¹, by hand, the science
+    review).
+  - _The rule._ Under `Batch` a gas counts where the partition holds it at its cap, on either
+    branch, by the partition's own state: where some of its inventory condensed, so that its
+    airborne weight lies below its inventory's. The (1 − x) weight still takes a dominant
+    condensable's cold-trapped pressure out of its local feedback, continuously in its share.
+    Under `Held` the comparison with the saturation pressure stays, NaN semantics included. A
+    rule-agnostic form would have moved version 22 where `T_s` is not the temperature the
+    partials were held at, a magma ocean clamped to the solidus.
+  - _The gain reads its atmosphere's greenhouse._
+    - `Atmosphere` carries the rules it was derived under (`Atmosphere::rules`) and exposes its
+      inventory's weights (`Atmosphere::inventory_weights`). The record's column
+      (`Surface::of`) reads both, so the constants of the gain's terms are the ones the
+      atmosphere's τ was taken with.
+    - The passes' step climate (`step_climate`, P14.T54.a's) reads the same from `ClimateBody`'s
+      new `greenhouse` and `inventory`. The zonal solver's switch stays `step_climate`'s and
+      `SurfaceConditions::derive_under`'s `rules`, so T24.a's tests can still switch the solver
+      alone on version 22's atmospheres.
+    - `optical_depth_terms` is removed. Its test callers read `air.rules().greenhouse().terms`.
+      The public `optical_depth` keeps the rules in force.
+  - _What moves under `Batch`:_ the record path's and the passes' T24.a contrasts, wherever a
+    minor condensable is held below its saturation pressure. At 22 nothing moves. The passes'
+    stand-in climate is isothermal and reads no gain, so P14.T57.a's fits and every figure in its
+    record above are unchanged (14.8616 and 4.4690, the measured Earth at 288.006 K). P14.T54.a's
+    climate in the passes reads the mended gain.
+  - _Tests:_ `planetary::hooks::surface::tests::under_the_batch_the_greenhouse_gain_counts_the_water_the_partition_holds`
+    fails before the fix (0 against 0.4456) and passes after; Venus's and Titan's bulk give none.
+    The tests' `ClimateBody`s take their atmosphere's greenhouse (`climate_body`) or the batch's
+    over the inputs' airborne inventory (`t24a_span`). The solar table gains
+    `solar::derive_historic_under` and `solar::historic_under`, which the atmosphere tests'
+    `derived_under` now reads. _Accept:_ `cargo test -p hyperion-sim --lib planetary::hooks::surface`
+    and `cargo test -p hyperion-sim planetary::derive`; the lane's wider run (above) passes 625
+    tests.
+  - _The batch review's fixes_ (2026-10-20): the docs of `hooks/surface.rs`'s module, its
+    `Column::greenhouse_gain` and `greenhouse_gain` state both rules, label version 22's 0.38
+    and give the batch's figures; Venus's N₂ and VIRA's datum are re-sourced (T57.a's record
+    above); the tripwire's message drops T57.a's overruled refit line and names T24.a's tests
+    that hold Earth's water at saturation; its redundant assertion of the constants in force is
+    dropped.
+  - _Files:_ `planetary/hooks/surface.rs` and its tests, `planetary/derive/atmosphere.rs` and its
+    tests, `planetary/derive/mod.rs` (the solar table's helper), and `planetary/system/tests.rs`.
+  - _Limits_ (the science review, recorded for P14.T54.a):
+    - _The (1 − x) weight is not the partition's dominance._ At d = 1 the cap belongs wholly to
+      the cold trap, which no local warming moves, yet the gain keeps 1 − x of the local feedback:
+      once T54.a's contrasts cold-trap Mars's CO₂, it takes g ≈ 0.03–0.05, and Pluto's and
+      Triton's N₂ about 0.5%. A weight of (1 − x)(1 − d) would vanish there.
+    - _The step at the onset of condensation._ g jumps from 0 to the whole term (about 0.4 for an
+      Earth-like world) where the inventory crosses the cap, the true kink of min(M, cap(T)), as
+      version 22's switch had. T54.a checks that a body near its onset converges in the passes.
+    - _A reservoir only at the poles_ (Mars's water) takes a local feedback it lacks, negligibly
+      (τ_w ≈ 0.003), from T51.a's minor branch.
+  - _Deferred_ (2026-10-13 rule): under `Batch`, the gain's Lᵢ ÷ (R `T_s`²) is still the held
+    phase data's enthalpy (43.5 kJ mol⁻¹ for water), not the registry's diagram's slope (44.4 at
+    288 K, so the water term is 2% low at Earth, 5% low at 250 K and 5% high at 373 K), until
+    P14.T54.a moves the callers to T49.b's curves.

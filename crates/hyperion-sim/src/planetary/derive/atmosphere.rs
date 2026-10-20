@@ -830,15 +830,20 @@ pub(crate) fn volatile_inventory_under(
 ///   compile it). At the registry's molar masses that is 4.69 × 10²⁰ kg of carbon dioxide and
 ///   1.08 × 10¹⁹ kg of nitrogen, 90.4 and 2.09 bar by weight over the generator's Venus, M g ÷ 4πR²
 ///   as its partial pressures are taken, not the volume shares of the surface pressure.
-/// - _Its nitrogen:_ the 3.5% rests on measurements above 22 km (Oyama et al. 1980, JGR 85, 7891,
-///   Table 2). Mogul, Limaye and Way 2025 (GRL 52, e2025GL118909) find 2.49 ± 0.10% below 15 km and
-///   5.21 ± 0.18% in the clouds; a bulk anywhere in 2.5–3.5% moves this fit by under 0.3%.
+/// - _Its nitrogen:_ von Zahn et al.'s 3.5 ± 0.8% is compiled from Pioneer Venus's and Venera
+///   11/12's samples in descent (Pioneer Venus's gas chromatograph: 4.60, 3.54 and 3.41% at 51.6,
+///   41.7 and 21.6 km, Oyama et al. 1980, JGR 85, 7891, Table 2), as Johnson and de Oliveira 2019
+///   compile them. Mogul, Limaye and Way 2025 (GRL 52, e2025GL118909) find 2.49 ± 0.10% below
+///   15 km and 5.21 ± 0.18% in the clouds. A bulk anywhere in 2.5–4.5% moves this fit by about
+///   0.3% at most (−0.30% at 2.5%, +0.31% at 4.5%).
 /// - _Its surface:_ 737 K, the mean over a sphere of Venus's 6,051.8 km mean radius. The Venus
-///   International Reference Atmosphere gives 735.3 K at its altitude zero, 6,052 km (Seiff et al.
-///   1985, Adv. Space Res. 5(11), 3, read in transcription: Venus-GRAM's `VIRALow.txt`, Justh et
-///   al. 2021, NASA/TM-20210022168, and the Planetary Scientist's Companion, p. 119). Carried
-///   0.2 km down at its own 7.6 K km⁻¹ over the lowest kilometre, that is 736.8 K, NASA's fact
-///   sheet's 737 K.
+///   International Reference Atmosphere gives 735.3 K and 7.6 K km⁻¹ over its lowest kilometre at
+///   its altitude zero (Seiff et al. 1985, Adv. Space Res. 5(11), 3, read in transcription:
+///   Venus-GRAM's `VIRALow.txt`, Justh et al. 2021, NASA/TM-20210022168, which sets that level at
+///   its own 6,051.8 km reference radius). Seiff et al. put that zero at 6,052 km, as a search
+///   excerpt gives it (lower confidence); carried 0.2 km down, that is 736.8 K, NASA's fact sheet's
+///   737 K (decision-p14-t57a-fits §3). Should Seiff et al. put it at 6,051.8 km, the target is
+///   735 K and the fit 14.70.
 /// - _The fit:_ at the generator's irradiation for Venus at 0.76, 229.06 K, which the batch's
 ///   passes give the measured Venus, with the nitrogen term as built and no water, which a runaway
 ///   world has lost, 737 K needs τ = 141.6, which gives 14.862. At 14.86 the measured Venus
@@ -863,9 +868,9 @@ pub const GREENHOUSE_CARBON_DIOXIDE: f64 = 14.86;
 /// - _Its water_ is P14.T51.a's partition's: a minor condensable whose partial pressure, its mole
 ///   fraction times the surface pressure, is held at Manabe and Wetherald's 0.77 of its saturation
 ///   pressure on the registry's curve ([`WATER_SURFACE_HUMIDITY`]). That is 837 Pa by weight at
-///   288 K, 0.495 of the saturation pressure, since a water molecule weighs 0.64 of the air's mean.
+///   288 K, 0.496 of the saturation pressure, since a water molecule weighs 0.64 of the air's mean.
 ///   P14.T13.c's 2.89 held the water's column weight at its saturation pressure, so at a given
-///   temperature the new term, 4.47 × √0.495 = 3.15 times √`p_sat`, is 9% the stronger.
+///   temperature the new term, 4.47 × √0.496 = 3.15 times √`p_sat`, is 9% the stronger.
 /// - _Its surface:_ 288.0 K, the pre-industrial Earth's surface emission temperature,
 ///   (S↑ ÷ σ)^¼, which is what the grey `T_s` is (P14.T24.a's zonal profile has F = σ `T_s`⁴).
 ///   Jones et al. 1999's 14.0 °C for 1961–1990 (Rev. Geophys. 37, 173), less 0.36 K of warming
@@ -966,8 +971,8 @@ impl GreenhouseConstants {
     /// The terms of [`optical_depth`](Self::optical_depth) one by one, each with its gas, in its
     /// order (carbon dioxide, water, nitrogen), so that their sum in that order is its τ to the bit
     /// (tested). Each term goes as the square root of its gas's partial pressure, so that
-    /// ∂τᵢ ÷ ∂ln pᵢ = ½τᵢ, which P14.T24.a's greenhouse gain reads (science-p14-t24a-climate.md
-    /// §1). [`optical_depth`](Self::optical_depth)'s own arithmetic is T13.c's output, and stays as
+    /// ∂τᵢ ÷ ∂ln pᵢ = ½τᵢ, which P14.T24.a's greenhouse gain reads, under its atmosphere's rules
+    /// ([`Atmosphere::rules`]; science-p14-t24a-climate.md §1). [`optical_depth`](Self::optical_depth)'s own arithmetic is T13.c's output, and stays as
     /// it is.
     #[must_use]
     pub(crate) fn terms(
@@ -1017,24 +1022,6 @@ pub fn optical_depth(partials: &PartialPressures, equilibrium: Kelvin) -> f64 {
     SnapshotRules::in_force()
         .greenhouse()
         .optical_depth(partials, equilibrium)
-}
-
-/// The terms of [`optical_depth`] one by one under the rules in force
-/// ([`GreenhouseConstants::terms`]), which P14.T24.a's greenhouse gain reads.
-///
-/// Like [`optical_depth`], which the passes' step climate reads, they take the generator
-/// version's constants, not the lane's rules a test gives `SurfaceConditions::derive_under`, which
-/// switch its zonal solver: at every version the record's atmosphere and its column then read one
-/// set. Until P14.T54.a gives the passes a step climate, a batch atmosphere at 22 exists only in
-/// the tests.
-#[must_use]
-pub(crate) fn optical_depth_terms(
-    partials: &PartialPressures,
-    equilibrium: Kelvin,
-) -> [(Gas, f64); 3] {
-    SnapshotRules::in_force()
-        .greenhouse()
-        .terms(partials, equilibrium)
 }
 
 /// The surface temperature of a grey atmosphere of optical depth `tau` over a surface in
@@ -1468,9 +1455,30 @@ pub struct Atmosphere {
     cloud_fraction: f64,
     carbon_carrier: Option<CarbonCarrier>,
     column: PartialPressures,
+    /// The `p14-snapshot` lane's rules its greenhouse was taken under.
+    rules: SnapshotRules,
 }
 
 impl Atmosphere {
+    /// The `p14-snapshot` lane's rules its greenhouse was taken under ([`atmosphere_under`]): their
+    /// constants ([`SnapshotRules::greenhouse`]) gave its optical depth, and their rule held its
+    /// condensables, at their saturation pressure under [`SnapshotRules::Held`] and by P14.T51.a's
+    /// partition under [`SnapshotRules::Batch`]. P14.T24.a's column reads both of it
+    /// (`hooks::surface`'s greenhouse gain), so that a record's column and its greenhouse cannot
+    /// read two sets.
+    #[must_use]
+    pub(crate) const fn rules(&self) -> SnapshotRules {
+        self.rules
+    }
+
+    /// What escape and the climate left free to fill the air, before any of it condensed, as
+    /// column weights M g ÷ 4πR² by gas ([`column_inventory`](Self::column_inventory)'s): all
+    /// zero for a gas envelope, a body of no mass or radius, and one whose weights are not finite.
+    #[must_use]
+    pub(crate) const fn inventory_weights(&self) -> &PartialPressures {
+        &self.column
+    }
+
     /// The surface state.
     #[must_use]
     pub const fn state(&self) -> SurfaceState {
@@ -2178,6 +2186,7 @@ fn state_and_greenhouse(
         cloud_fraction: state.cloud_fraction(),
         carbon_carrier: carrier,
         column: PartialPressures::default(),
+        rules,
     };
     if inputs.envelope_fraction >= THIN_ENVELOPE_FRACTION {
         let state = SurfaceState::GasEnvelope;
@@ -2259,6 +2268,7 @@ fn state_and_greenhouse(
         cloud_fraction: state.cloud_fraction(),
         carbon_carrier: carrier,
         column,
+        rules,
     }
 }
 

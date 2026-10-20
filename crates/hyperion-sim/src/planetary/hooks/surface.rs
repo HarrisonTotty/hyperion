@@ -24,9 +24,10 @@
 //! # The contrasts' model
 //!
 //! Both contrasts are closed forms of a linear energy balance on the body's mean state, so that
-//! they need no field and are continuous in every input but one switch, a gas's reaching its
-//! saturation pressure (which turns on its vapour feedback). A world's wetness enters continuously,
-//! as P14.T24.b's ocean weight θ ([`OceanWeight`], [`SurfaceInputs::ocean_weight`]), which weights
+//! they need no field and are continuous in every input but one switch, a gas's reaching its cap
+//! (which turns on its vapour feedback): its saturation pressure under version 22's rules, and
+//! from 23 the condensate partition's holding of it (`greenhouse_gain`). A world's wetness enters
+//! continuously, as P14.T24.b's ocean weight θ ([`OceanWeight`], [`SurfaceInputs::ocean_weight`]), which weights
 //! the transport's moist share and Φ (science-p14-t24a-climate.md §1; science-p14-t24b-laws
 //! §4.4). They are science-p14-t24a-climate.md's (2026-10-11), each piece cited on its constant;
 //! plan 14's Risks ("Deviations in P14.T24.a, as built") records how they compare with the Solar
@@ -48,7 +49,7 @@
 //!   max(n(n + 1)D, W `B_P`)).
 //!   - `B_P` = 4F ÷ `T_s` is the grey column's restoring at fixed τ, F the absorbed mean flux.
 //!     `B_eff` = `B_P` (1 − g) is its restoring with its own vapour feedback, g the gain of the
-//!     gases T13.c holds at their saturation pressure (0.38 on Earth).
+//!     gases the surface holds at their cap (0.38 on Earth under version 22's rules).
 //!   - Φ multiplies a wet world's `P₂` forcing, its cold zones' brightening by ice, cloud and low
 //!     sun, which a uniform albedo misses ([`WET_ALBEDO_GRADIENT`], fitted on that partition; the
 //!     Earth Radiation Budget's gradient within 3%). It is 1 + (Φ⊕ − 1)θ at the ocean weight θ.
@@ -128,8 +129,7 @@ use crate::planetary::chem::partition::{ClimateSpan, CondensatePhase, Condensate
 use crate::planetary::context::XuvHistory;
 use crate::planetary::derive::atmosphere::{
     AIRLESS_PRESSURE, Atmosphere, EARTH_REFERENCE_AGE, Gas, MOLAR_GAS_CONSTANT, PartialPressures,
-    REFERENCE_SUN_ZAMS_LUMINOSITY, SnapshotRules, SurfaceMaterial, SurfaceState, optical_depth,
-    optical_depth_terms,
+    REFERENCE_SUN_ZAMS_LUMINOSITY, SnapshotRules, SurfaceMaterial, SurfaceState,
 };
 use crate::planetary::derive::rotation::{SpinOrbitResonance, SpinState};
 use crate::planetary::frames::BodyFixedFrame;
@@ -1328,8 +1328,9 @@ pub(crate) struct Column {
     pub(crate) surface_gravity: MetresPerSecondSquared,
     /// The grey optical depth of the greenhouse (P14.T13.c).
     pub(crate) optical_depth: f64,
-    /// The greenhouse gain g of the gases held at saturation ([`greenhouse_gain`]): zero for
-    /// none.
+    /// The greenhouse gain g of the gases the surface holds at their cap, at their saturation
+    /// pressure under version 22's rules and by the condensate partition from 23
+    /// ([`greenhouse_gain`]): zero for none.
     pub(crate) greenhouse_gain: f64,
     /// The body's mean radius.
     pub(crate) radius: Metres,
@@ -1426,6 +1427,8 @@ impl Surface {
             equilibrium_temperature: inputs.equilibrium_temperature,
             surface_gravity: inputs.surface_gravity,
             radius: inputs.radius,
+            greenhouse: air.rules(),
+            inventory: air.inventory_weights(),
         }
         .column()
         .expect("every `Gas` row of the registry has a molar mass");
@@ -1525,6 +1528,12 @@ struct StepColumn<'a> {
     surface_gravity: MetresPerSecondSquared,
     /// The mean radius.
     radius: Metres,
+    /// The `p14-snapshot` lane's rules its greenhouse was taken under, whose constants and
+    /// holding of its condensables the greenhouse gain reads ([`greenhouse_gain`]).
+    greenhouse: SnapshotRules,
+    /// Its airborne inventory before any of it condensed, as column weights
+    /// ([`Atmosphere::inventory_weights`]).
+    inventory: &'a PartialPressures,
 }
 
 impl StepColumn<'_> {
@@ -1567,6 +1576,8 @@ impl StepColumn<'_> {
                     self.optical_depth,
                     fractions.as_slice(),
                     self.equilibrium_temperature,
+                    self.greenhouse,
+                    self.inventory,
                 )
             },
             radius: self.radius,
@@ -1635,6 +1646,14 @@ pub(crate) struct ClimateBody {
     pub(crate) spin: SeasonalSpin,
     /// Its internal heat flow at the surface, which raises the night's floor.
     pub(crate) heat_flow: WattsPerSquareMetre,
+    /// The `p14-snapshot` lane's rules the pass's greenhouse is taken under, whose constants give
+    /// the step's optical depth and whose holding of the condensables the greenhouse gain reads
+    /// ([`Atmosphere::rules`]): the passes' own. The zonal solver's are [`step_climate`]'s
+    /// `rules`, the same in the passes, which the tests may set apart.
+    pub(crate) greenhouse: SnapshotRules,
+    /// The pass's airborne inventory before any of it condensed, as column weights
+    /// ([`Atmosphere::inventory_weights`]): the condensate partition's inventory.
+    pub(crate) inventory: PartialPressures,
 }
 
 /// The span of the climate of the body `body` at a step of T13.c's passes whose mean surface
@@ -1647,7 +1666,8 @@ pub(crate) struct ClimateBody {
 /// It is P14.T24.a's range by the one computation the record's
 /// [`climate_range`](SurfaceConditions::climate_range) is (`climate_of`), on the column the
 /// conditions would build of an atmosphere of that temperature and those partial pressures: its
-/// greenhouse's optical depth T13.c's ([`optical_depth`]), and airless below
+/// greenhouse's optical depth T13.c's under the pass's greenhouse
+/// ([`ClimateBody::greenhouse`]'s constants), and airless below
 /// [`AIRLESS_PRESSURE`], as T13.c's state is but for a molten surface, which T13.c calls a
 /// `MagmaOcean` and on which nothing condenses. So a body's last step reads the range its record
 /// publishes, but where the range does not hold the mean, whose ends are then widened to it
@@ -1669,11 +1689,16 @@ pub(crate) fn step_climate(
         surface_temperature,
         partials,
         surface_pressure,
-        optical_depth: optical_depth(partials, body.equilibrium_temperature),
+        optical_depth: body
+            .greenhouse
+            .greenhouse()
+            .optical_depth(partials, body.equilibrium_temperature),
         airless: surface_pressure < AIRLESS_PRESSURE,
         equilibrium_temperature: body.equilibrium_temperature,
         surface_gravity: body.surface_gravity,
         radius: body.radius,
+        greenhouse: body.greenhouse,
+        inventory: &body.inventory,
     };
     let Ok((column, _)) = step.column() else {
         // A partial pressure that is not finite has no climate the contrasts can give.
@@ -1693,29 +1718,44 @@ pub(crate) fn step_climate(
 
 /// The greenhouse gain g of an air over a surface at `surface` under the partial pressures
 /// `partials`, whose greenhouse's optical depth is `optical_depth` and whose published mole
-/// fractions are `gases`, over a surface in equilibrium at `equilibrium` ([`StepColumn::column`],
-/// at a step of T13.c's passes as on the record): the share of the grey column's Planck
-/// restoring that its condensing gases' vapour feedback takes back, `B_eff` = `B_P` (1 − g)
-/// (science-p14-t24a-climate.md §1).
+/// fractions are `gases`, over a surface in equilibrium at `equilibrium`, its greenhouse taken under
+/// the `p14-snapshot` lane's rules `greenhouse` from the airborne inventory `inventory`, as column
+/// weights before any of it condensed ([`StepColumn::column`], at a step of T13.c's passes as on
+/// the record): the share of the grey column's Planck restoring that its condensing gases' vapour
+/// feedback takes back, `B_eff` = `B_P` (1 − g) (science-p14-t24a-climate.md §1).
 ///
-/// P14.T13.c holds each condensing gas at its saturation pressure at `T_s`, so the column's
-/// outgoing flux σ `T_s`⁴ ÷ (1 + ¾τ(`T_s`)) has the slope `B_P` (1 − g), with
+/// Each condensing gas is held at its cap, so the column's outgoing flux σ `T_s`⁴ ÷ (1 + ¾τ(`T_s`))
+/// has the slope `B_P` (1 − g), with
 ///
 /// g = (`T_s` ÷ 4) ¾ Σᵢ (1 − xᵢ) ½τᵢ Lᵢ ÷ (R `T_s`²) ÷ (1 + ¾τ),
 ///
-/// summed in their order over T13.c's τ terms whose gas it holds at saturation, where its
-/// partial pressure is at least the saturation pressure at `T_s` (equal to the bit, since T13.c
-/// took the lesser of the two at the same temperature):
+/// summed in their order over T13.c's τ terms, at the constants of `greenhouse`
+/// ([`SnapshotRules::greenhouse`]), whose gas the surface holds at its cap:
+///
+/// - under [`SnapshotRules::Held`], version 22's, where its partial pressure is at least the
+///   saturation pressure at `T_s` (equal to the bit, since P14.T13.c held each condensing gas at
+///   the lesser of the two at the same temperature);
+/// - under [`SnapshotRules::Batch`], where P14.T51.a's partition holds it at its cap, on either
+///   branch, by the partition's own state: some of its inventory condensed, so that its airborne
+///   weight lies below its inventory's. The partition holds a minor condensable's partial pressure
+///   at its humidity, below its saturation pressure (Earth's water at 0.77 of it, a weight of 0.496
+///   of it), where version 22's comparison would drop its feedback, which h `p_sat`(T) keeps, with
+///   the same ∂ln p ÷ ∂T (decision-p14-t57a-fits §5; P14.T51.a's fix).
 ///
 /// - ½τᵢ is ∂τᵢ ÷ ∂ln pᵢ for the terms in √pᵢ;
-/// - Lᵢ ÷ (R `T_s`²) is the exact slope of the registry's curve, with the enthalpy of its branch
-///   in force, of sublimation below the triple point and of vaporisation at and above it;
+/// - Lᵢ ÷ (R `T_s`²) is the slope of the registry's held curve, exact under version 22's rules,
+///   with the enthalpy of its branch in force, of sublimation below the triple point and of
+///   vaporisation at and above it. Under the batch the partition holds the vapour on T49.b's
+///   phase diagram, whose slope at Earth's 288 K is 2% steeper (44.4 against 43.5 kJ mol⁻¹ for
+///   water), until P14.T54.a moves this to T49.b's curves;
 /// - xᵢ is the gas's published mole fraction: the factor 1 − xᵢ removes a dominant condensable,
 ///   whose pressure the cold trap sets globally, not locally, continuously in its share.
 ///
-/// Earth's measured state gives 0.38 (`B_eff` 2.08 W m⁻² K⁻¹), the counterpart of Kaspi and
-/// Showman's prescribed τ, which they state stands in for water vapour, with no feedback of its
-/// own. Zero where no gas is held, or at a surface not above 0 K.
+/// Earth's measured state gives 0.38 (`B_eff` 2.08 W m⁻² K⁻¹) under version 22's rules, the
+/// counterpart of Kaspi and Showman's prescribed τ, which they state stands in for water vapour,
+/// with no feedback of its own. Under the batch's, the table's Earth through the passes' stand-ins
+/// gives 0.4456, and Earth's measured state, at 288 K, about 0.42 (`B_eff` 1.93 W m⁻² K⁻¹, by
+/// hand). Zero where no gas is held, or at a surface not above 0 K.
 #[must_use]
 fn greenhouse_gain(
     surface: Kelvin,
@@ -1723,33 +1763,44 @@ fn greenhouse_gain(
     optical_depth: f64,
     gases: &[(SubstanceId, f64)],
     equilibrium: Kelvin,
+    greenhouse: SnapshotRules,
+    inventory: &PartialPressures,
 ) -> f64 {
     let t = surface.value();
     if t.is_nan() || t <= 0.0 {
         return 0.0;
     }
-    let slope =
-        optical_depth_terms(partials, equilibrium)
-            .into_iter()
-            .fold(0.0, |sum, (gas, term)| {
-                let id = gas.substance();
-                let Some(phase) = id.substance().phase() else {
-                    return sum;
-                };
-                if partials.of(gas) < phase.saturation_pressure(surface) {
-                    return sum;
-                }
-                let enthalpy = if t < phase.triple_temperature().value() {
-                    phase.sublimation_enthalpy_j_per_mol()
-                } else {
-                    phase.vaporisation_enthalpy_j_per_mol()
-                };
-                let share = gases
-                    .iter()
-                    .find(|&&(gas, _)| gas == id)
-                    .map_or(0.0, |&(_, x)| x);
-                sum + (1.0 - share) * 0.5 * term * enthalpy / (MOLAR_GAS_CONSTANT * t * t)
-            });
+    let slope = greenhouse
+        .greenhouse()
+        .terms(partials, equilibrium)
+        .into_iter()
+        .fold(0.0, |sum, (gas, term)| {
+            let id = gas.substance();
+            let Some(phase) = id.substance().phase() else {
+                return sum;
+            };
+            let unheld = match greenhouse {
+                SnapshotRules::Held => partials.of(gas) < phase.saturation_pressure(surface),
+                // Held only where some of it condensed: a weight that is not a number is not.
+                SnapshotRules::Batch => !matches!(
+                    partials.of(gas).partial_cmp(&inventory.of(gas)),
+                    Some(core::cmp::Ordering::Less)
+                ),
+            };
+            if unheld {
+                return sum;
+            }
+            let enthalpy = if t < phase.triple_temperature().value() {
+                phase.sublimation_enthalpy_j_per_mol()
+            } else {
+                phase.vaporisation_enthalpy_j_per_mol()
+            };
+            let share = gases
+                .iter()
+                .find(|&&(gas, _)| gas == id)
+                .map_or(0.0, |&(_, x)| x);
+            sum + (1.0 - share) * 0.5 * term * enthalpy / (MOLAR_GAS_CONSTANT * t * t)
+        });
     grey_gain(surface, optical_depth, slope)
 }
 

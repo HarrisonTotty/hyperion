@@ -6,7 +6,8 @@ use crate::planetary::derive::atmosphere::{
     GreenhouseConstants, NITROGEN_REFERENCE_TEMPERATURE, VolatileDraws,
 };
 use crate::planetary::derive::solar::{
-    PLANETS, SMALL_BODIES, SOLAR_AGE, derive_historic, historic_table, orbit, solar_disc,
+    PLANETS, SMALL_BODIES, SOLAR_AGE, derive_historic, historic_table, historic_under, orbit,
+    solar_disc,
 };
 use crate::planetary::derive::{DerivedBody, PlacedBody};
 use crate::planetary::frames::FrameSpin;
@@ -563,7 +564,10 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
             continue;
         }
         // T13.c's terms sum to its τ to the bit, at the derivation's equilibrium temperature.
-        let terms = optical_depth_terms(air.partial_pressures(), body.equilibrium_temperature());
+        let terms = air
+            .rules()
+            .greenhouse()
+            .terms(air.partial_pressures(), body.equilibrium_temperature());
         let sum = terms.iter().fold(0.0, |sum, &(_, term)| sum + term);
         assert_same_bits(sum, air.optical_depth());
         eprintln!(
@@ -629,6 +633,61 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
         let gain = grey_gain(surface, tau_w + dry_depth, slope);
         eprintln!("{t} K: gain {gain:.3}");
         assert!((0.0..0.57).contains(&gain), "{t} K: {gain}");
+    }
+}
+
+/// P14.T51.a's partition holds a minor condensable's partial pressure at its humidity, below its
+/// saturation pressure: Earth's water at 0.77 of it, a column weight of 0.496 of it. So under the
+/// batch the greenhouse gain counts a gas where the partition holds it at its cap, on either
+/// branch, as the partition's own state says (some of its inventory condensed: its airborne weight
+/// below its inventory's), not where its weight reaches its saturation pressure, version 22's rule,
+/// under which the batch's Earth lost its water's feedback (decision-p14-t57a-fits §5). The batch's
+/// Earth keeps it, by hand as `the_greenhouse_gain_is_the_held_gases_feedback` takes it, with the
+/// batch's constants, the ones its τ was taken under; Venus's and Titan's bulk, which nothing
+/// condenses, give none.
+#[test]
+fn under_the_batch_the_greenhouse_gain_counts_the_water_the_partition_holds() {
+    let spin = spin_of("Earth");
+    let earth = historic_under(SnapshotRules::Batch, "Earth");
+    let conditions = conditions_of(&earth, spin).unwrap();
+    let (column, _) = column_of(&earth, spin);
+    let air = earth.atmosphere();
+    let water = Gas::Water;
+    let phase = water.substance().substance().phase().unwrap();
+    let t_s = air.surface_temperature();
+    let p_w = air.partial_pressures().of(water);
+    // Version 22's rule would not count it.
+    assert!(p_w < phase.saturation_pressure(t_s), "{p_w:?}");
+    let t = t_s.value();
+    let tau_w = SnapshotRules::Batch.greenhouse().water() * (p_w.value() / 1e5).sqrt();
+    let slope = (1.0 - fraction(&conditions, water))
+        * 0.5
+        * tau_w
+        * phase.vaporisation_enthalpy_j_per_mol()
+        / (MOLAR_GAS_CONSTANT * t * t);
+    let by_hand = t / 4.0 * 0.75 * slope / (1.0 + 0.75 * air.optical_depth());
+    let held = column_of(&found(&table(), "Earth").1, spin)
+        .0
+        .greenhouse_gain;
+    eprintln!(
+        "Earth's greenhouse gain: {:.4} under the batch ({:.4} by hand), {held:.4} under version \
+         22's rules",
+        column.greenhouse_gain, by_hand
+    );
+    assert!(
+        (column.greenhouse_gain - by_hand).abs() < 1e-12,
+        "{} against {by_hand}",
+        column.greenhouse_gain
+    );
+    assert!(column.greenhouse_gain > 0.3, "{}", column.greenhouse_gain);
+    for name in ["Venus", "Titan"] {
+        let body = historic_under(SnapshotRules::Batch, name);
+        let (column, _) = column_of(&body, spin_of(name));
+        assert!(
+            column.greenhouse_gain.abs() < 1e-3,
+            "{name}: {}",
+            column.greenhouse_gain
+        );
     }
 }
 
@@ -2268,7 +2327,8 @@ fn the_passes_climate_is_the_record_s_range() {
     assert!(compared >= 16, "{compared} bodies compared");
 }
 
-/// What the passes' climate reads of the table's derived body `body` under the spin `spin`.
+/// What the passes' climate reads of the table's derived body `body` under the spin `spin`, its
+/// greenhouse its atmosphere's ([`Atmosphere::rules`], [`Atmosphere::inventory_weights`]).
 fn climate_body(body: &DerivedBody, spin: SeasonalSpin) -> ClimateBody {
     ClimateBody {
         equilibrium_temperature: body.equilibrium_temperature(),
@@ -2277,6 +2337,8 @@ fn climate_body(body: &DerivedBody, spin: SeasonalSpin) -> ClimateBody {
         material: SurfaceMaterial::of(&body.fractions()),
         spin,
         heat_flow: heat_flow_of(body),
+        greenhouse: body.atmosphere().rules(),
+        inventory: *body.atmosphere().inventory_weights(),
     }
 }
 

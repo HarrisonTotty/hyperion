@@ -2280,6 +2280,38 @@ pub(crate) mod solar {
             .collect()
     }
 
+    /// [`derive_historic`] under the `p14-snapshot` lane's rules `snapshot`, with the nitrogen line
+    /// in force.
+    pub(crate) fn derive_historic_under(
+        snapshot: SnapshotRules,
+        placed: &PlacedBody,
+        disc: &DiscProfile,
+        age: Years,
+    ) -> DerivedBody {
+        let lights = [historic_sun()];
+        let hosts = BodyHosts::new(
+            Kilograms::new(SOLAR_MASS_KG),
+            Composition::SOLAR,
+            &lights,
+            &[],
+        )
+        .unwrap();
+        let holds = BodyHolds {
+            line: NitrogenLine::in_force(),
+            snapshot,
+        };
+        derive_body_under(holds, placed, &hosts, disc, age, UniverseTime::EPOCH).unwrap()
+    }
+
+    /// The table's body `name` ([`historic_table`]) derived under the `p14-snapshot` lane's rules
+    /// `snapshot` ([`derive_historic_under`]).
+    pub(crate) fn historic_under(snapshot: SnapshotRules, name: &str) -> DerivedBody {
+        let disc = solar_disc();
+        let &(_, kg, km, a, e) = table_bodies().find(|(n, ..)| *n == name).unwrap();
+        let placed = placed_about_the_sun(&disc, (kg, km, a, e));
+        derive_historic_under(snapshot, &placed, &disc, SOLAR_AGE)
+    }
+
     pub(crate) fn found<'a>(bodies: &'a [(&str, DerivedBody)], name: &str) -> &'a DerivedBody {
         &bodies.iter().find(|(n, _)| *n == name).unwrap().1
     }

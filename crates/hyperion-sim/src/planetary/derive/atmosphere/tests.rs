@@ -2209,10 +2209,16 @@ fn earth_inputs(equilibrium: f64, insolation: Insolation) -> AtmosphereInputs {
 /// The span of the climate T24.a gives the body `inputs` describes for a column of partial
 /// pressures `partials` over a mean surface at `t`, with Earth's spin (23.44° of obliquity, a
 /// sidereal day of 86,164.1 s and a solar day of 24 h), Earth's heat flow, 0.0925 W m⁻², and no
-/// ocean: the passes' climate ([`step_climate`], T24.a's own range under the batch's rules), as
-/// P14.T54.a's wiring gives it from a body's own spin.
+/// ocean: the passes' climate ([`step_climate`], T24.a's own range under the batch's rules, its
+/// greenhouse the batch's over the body's airborne inventory, as `state_and_greenhouse`'s steps 2
+/// and 3 leave it), as P14.T54.a's wiring gives it from a body's own spin.
 fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) -> ClimateSpan {
     let (m, r) = (inputs.mass.value(), inputs.radius.value());
+    let exobase = exobase_temperature(inputs.worst_equilibrium, inputs.xuv_fluence);
+    let retention = Retention::of(inputs.mass, inputs.radius, exobase).with_methane_as_nitrogen();
+    let mut airborne = Airborne::kept(inputs, retention);
+    airborne.divide(inputs, retention);
+    let weight = GRAVITATIONAL_CONSTANT * m / (r * r) / (4.0 * core::f64::consts::PI * r * r);
     let body = ClimateBody {
         equilibrium_temperature: inputs.equilibrium,
         surface_gravity: MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r)),
@@ -2224,6 +2230,8 @@ fn t24a_span(inputs: &AtmosphereInputs, t: Kelvin, partials: &PartialPressures) 
             solar_day: Some(Seconds::new(86_400.0)),
         },
         heat_flow: WattsPerSquareMetre::new(0.0925),
+        greenhouse: SnapshotRules::Batch,
+        inventory: airborne.column_weights(weight),
     };
     step_climate(SnapshotRules::Batch, &body, OceanWeight::NONE, t, partials)
 }
@@ -2245,16 +2253,17 @@ fn the_snapshot_lane_is_held_only_until_the_batch_s_bump() {
          `ATMOSPHERE_PASSES`, `TemplateRow::reference_bond` and `BodyPhotometry::derive`'s held \
          reference, `photometry_of`'s held albedo, `PlanetarySystem::with_snapshot_rules`, \
          T49.c's tripwire's hold of `photometry/area_mix.rs`, `GreenhouseConstants::VERSION_22` \
-         and `SnapshotRules::greenhouse` (the greenhouse then reads P14.T57.a's constants alone; \
-         refit `GREENHOUSE_WATER` on the real inputs if `the_greenhouse_constants_are_their_fits` \
-         says so), and this test (plan 14, P14.T51.a, P14.T51.b and P14.T57.a as built)"
+         and `SnapshotRules::greenhouse` (the greenhouse then reads P14.T57.a's constants alone, \
+         which `the_greenhouse_constants_are_their_fits` keeps at their fits), `Atmosphere::rules`, \
+         `ClimateBody::greenhouse` and the greenhouse gain's held arm (P14.T51.a's fix); rework \
+         T24.a's tests that hold Earth's water at its saturation pressure by hand under the \
+         constants in force (`earth_gain`, the North, Cahalan and Coakley partition's test and \
+         `the_greenhouse_gain_is_the_held_gases_feedback`'s saturation check), whose \
+         `EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K` and `WET_ALBEDO_GRADIENT` were fitted at version \
+         22's 2.89 (plan 14, P14.T57.a's deferred findings); and delete this test (plan 14, \
+         P14.T51.a, P14.T51.b and P14.T57.a as built)"
     );
     assert_eq!(SnapshotRules::in_force(), SnapshotRules::Held);
-    // P14.T57.a's constants wait with the rest: the record's τ reads version 22's.
-    assert_eq!(
-        SnapshotRules::in_force().greenhouse(),
-        GreenhouseConstants::VERSION_22
-    );
     let unread = |_: Kelvin, _: &PartialPressures| -> ClimateSpan {
         panic!("the held rules read no climate")
     };
@@ -2434,19 +2443,7 @@ use crate::planetary::params::ICY_WATER_FRACTION;
 /// `placed` derived in the zero-age Sun's disc `disc` about the present Sun with its history at
 /// the Solar System's age, under the lane's rules `snapshot`.
 fn derived_under(snapshot: SnapshotRules, placed: &PlacedBody, disc: &DiscProfile) -> DerivedBody {
-    let lights = [historic_sun()];
-    let hosts = BodyHosts::new(
-        Kilograms::new(SOLAR_MASS_KG),
-        Composition::SOLAR,
-        &lights,
-        &[],
-    )
-    .unwrap();
-    let holds = BodyHolds {
-        line: NitrogenLine::in_force(),
-        snapshot,
-    };
-    derive_body_under(holds, placed, &hosts, disc, SOLAR_AGE, UniverseTime::EPOCH).unwrap()
+    crate::planetary::derive::solar::derive_historic_under(snapshot, placed, disc, SOLAR_AGE)
 }
 
 /// Every body of the table under the lane's rules `snapshot`.
@@ -2796,10 +2793,11 @@ use crate::planetary::chem::partition::WATER_SURFACE_HUMIDITY;
 /// 2024; [`GREENHOUSE_CARBON_DIOXIDE`]).
 const VENUS_AIR_KG: f64 = 4.8e20;
 /// Venus's carbon dioxide's share of its air by volume, 96.5 ± 0.8% below 45 km (von Zahn et al.
-/// 1983, in _Venus_, University of Arizona Press, Table II).
+/// 1983, in _Venus_, University of Arizona Press, Table II, as Johnson and de Oliveira 2019 compile
+/// it).
 const VENUS_CARBON_DIOXIDE_BY_VOLUME: f64 = 0.965;
 /// Venus's nitrogen's share of its air by volume, 3.5 ± 0.8% below 45 km (von Zahn et al. 1983,
-/// Table II).
+/// Table II, as Johnson and de Oliveira 2019 compile it).
 const VENUS_NITROGEN_BY_VOLUME: f64 = 0.035;
 
 /// Venus's carbon dioxide and nitrogen as measured, kg: [`VENUS_AIR_KG`] divided by mass at its
@@ -2835,9 +2833,10 @@ fn measured_venus(snapshot: SnapshotRules) -> DerivedBody {
 }
 
 /// Venus's measured surface temperature, the fit's target: 737 K, the mean over a sphere of its
-/// 6,051.8 km mean radius, the Venus International Reference Atmosphere's 735.3 K at its 6,052 km
-/// altitude zero carried 0.2 km down at its 7.6 K km⁻¹ (Seiff et al. 1985, Adv. Space Res. 5(11),
-/// 3, read in transcription), NASA's fact sheet's 737 K (decision-p14-t57a-fits §3;
+/// 6,051.8 km mean radius: the Venus International Reference Atmosphere's 735.3 K at its altitude
+/// zero (Seiff et al. 1985, Adv. Space Res. 5(11), 3, read in transcription), which Seiff et al.
+/// put at 6,052 km as a search excerpt gives it (lower confidence), carried 0.2 km down at its
+/// 7.6 K km⁻¹: NASA's fact sheet's 737 K (decision-p14-t57a-fits §3;
 /// [`GREENHOUSE_CARBON_DIOXIDE`]).
 const VENUS_SURFACE_TEMPERATURE: f64 = 737.0;
 

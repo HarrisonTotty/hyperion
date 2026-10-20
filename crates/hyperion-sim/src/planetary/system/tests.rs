@@ -16,7 +16,7 @@ use crate::id::Layer;
 use crate::orbit::Eccentricity;
 use crate::planetary::architecture::HostMultiplicity;
 use crate::planetary::architecture::template::EARTH_MASSES_PER_JUPITER_MASS;
-use crate::planetary::derive::atmosphere::{Gas, SurfaceState, optical_depth_terms};
+use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
 use crate::planetary::derive::{PlanetClass, habitable_zone};
 use crate::planetary::fate::DestructionCause;
 use crate::planetary::hooks::figures::{Crust, LEFTOVER_DENSITY, TectonicRegime};
@@ -2783,8 +2783,10 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
             // which is the one the moon's τ was computed at.
             let air = derived.atmosphere();
             if air.state() != SurfaceState::Airless {
-                let terms =
-                    optical_depth_terms(air.partial_pressures(), derived.equilibrium_temperature());
+                let terms = air
+                    .rules()
+                    .greenhouse()
+                    .terms(air.partial_pressures(), derived.equilibrium_temperature());
                 let sum = terms.iter().fold(0.0, |sum, &(_, term)| sum + term);
                 assert_same_bits(sum, air.optical_depth());
             }
