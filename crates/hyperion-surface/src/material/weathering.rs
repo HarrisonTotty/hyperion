@@ -236,7 +236,8 @@ impl Form {
     }
 
     /// τ at `wavelength_nm` for grains of density `grain_density_kg_m3`, `FeO_T`
-    /// `feo_mass_fraction` and maturity `maturity` (the [module documentation](self), step 4).
+    /// `feo_mass_fraction` and maturity `maturity` (the law's step 4, in the module's
+    /// documentation).
     #[must_use]
     fn optical_depth(
         &self,
@@ -344,8 +345,8 @@ fn check_fresh(fresh: f64) {
 }
 
 /// The npFe⁰ optical depth τ, dimensionless, of grains under `law` at `wavelength_nm` (nm): m f
-/// (`M_Fe` ÷ `M_FeO`)(`ρ_h` ÷ `ρ_Fe`)(36π z(λ) ÷ λ) Λ (the [module documentation](self), step 4); 0
-/// for [`PhaseLaw::Lambert`].
+/// (`M_Fe` ÷ `M_FeO`)(`ρ_h` ÷ `ρ_Fe`)(36π z(λ) ÷ λ) Λ (the law's step 4,
+/// decision-p14-t51d-weathering §1.1); 0 for [`PhaseLaw::Lambert`].
 ///
 /// `grain_density_kg_m3` is the host's grain density `ρ_h` (kg m⁻³), `feo_mass_fraction` its
 /// `FeO_T` f and `maturity` m, both dimensionless in [0, 1]. Iron's z is the table's at the form's
@@ -411,8 +412,8 @@ fn weathered(
 }
 
 /// The normal albedo `A_N` of ground whose fresh normal albedo is `fresh`, weathered to `maturity`
-/// under `law` at `wavelength_nm` (the [module documentation](self)): a₀ `A_N`(w) ÷ `A_N`(w₀),
-/// dimensionless, never above `fresh`.
+/// under `law` at `wavelength_nm` (decision-p14-t51d-weathering §1.1's law): a₀ `A_N`(w) ÷
+/// `A_N`(w₀), dimensionless, never above `fresh`.
 ///
 /// It is `fresh` itself, to the bit, at m = 0, at f = 0, under [`PhaseLaw::Lambert`], for an opaque
 /// grain (w₀ at or below the slab's `S_e`), and wherever τ is too small to move w; and it does not
