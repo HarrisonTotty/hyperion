@@ -573,7 +573,7 @@ impl<'a> From<Option<&'a str>> for FileVariant<'a> {
 }
 
 /// The variant whose density is the row's grain density: `75wt%` for `H2SO4`, and the substance
-/// itself for every other row ([`DENSITY_VARIANTS`]).
+/// itself for every other row (`DENSITY_VARIANTS`).
 #[must_use]
 pub fn density_variant(key: &str) -> FileVariant<'static> {
     DENSITY_VARIANTS

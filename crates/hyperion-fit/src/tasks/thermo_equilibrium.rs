@@ -38,7 +38,7 @@
 //! # The reference states
 //!
 //! NIST-JANAF's convention (Chase 1998, Introduction §5, pp. 13–14): each element's reference
-//! state is its stable form at 1 bar ([`reference`]). H, N, O, Cl and the noble gases are their
+//! state is its stable form at 1 bar ([`reference()`]). H, N, O, Cl and the noble gases are their
 //! gases at every temperature, carbon is graphite throughout, and every other element is its
 //! condensed Ref-Elm records up to the temperature where their G per atom meets its gas form's at
 //! 1 bar, then that gas: the monatomic gas for the metals, S₂ for sulphur and P₂ for phosphorus,

@@ -36,8 +36,8 @@
 //!    serves the energy test of `A_N` alone (decision-r10-limb §4).
 //! 5. **The spectral bins** (P14.T49.i): the same slab and similarity relation's spherical albedo,
 //!    averaged over each of `substance::optics::SPECTRAL_BIN_EDGES_NM`'s bins on a fine grid
-//!    ([`spectral`]), from the row's index file to 780 nm and its infrared set beyond, each set
-//!    read from the manifest's `datasets` and joined to the file there ([`infrared`]), and the
+//!    (`spectral`), from the row's index file to 780 nm and its infrared set beyond, each set
+//!    read from the manifest's `datasets` and joined to the file there (`infrared`), and the
 //!    reach of the row's data.
 //!
 //! Every transcendental goes through `hyperion_sim::math`, and every sum runs in a fixed order, so
@@ -315,7 +315,7 @@ pub(crate) fn reflectance_factor_with(
 }
 
 /// The IMSA's reflectance factor of grains of single-scattering albedo `w` under `photometry` at
-/// the cosines (μ₀, μ, cos g) of `cosines` ([`reflectance_factor_with`], with [`h_function`]): what
+/// the cosines (μ₀, μ, cos g) of `cosines` (`reflectance_factor_with`, with [`h_function`]): what
 /// a laboratory measures at a bidirectional geometry, such as the reflectance factor at i 30°, e 0°
 /// that decision-p14-t49i-rock-mixtures §1 compares with 30° measurements.
 #[must_use]
@@ -633,7 +633,7 @@ pub fn row_files() -> Vec<&'static str> {
 }
 
 /// The datasets of the rows with condensed optics, each once, in the order the rows first name
-/// them: each row's infrared set's, and the laboratory spectra's ([`lab::SPLIB_DATASET`]) where a
+/// them: each row's infrared set's, and the laboratory spectra's (`lab::SPLIB_DATASET`) where a
 /// row reads one; what the task's manifest lists under `datasets`.
 #[must_use]
 pub fn row_datasets() -> Vec<&'static str> {
@@ -896,11 +896,11 @@ fn input_error(e: FitAlbedoError) -> RunTaskError {
 
 /// Every row with condensed optics, in registry order, and its optics, its index file read from
 /// `manifest`'s material directory, its infrared set and laboratory spectra from the manifest's
-/// datasets, the bins on a grid of largest step [`SPECTRAL_STEP_NM`].
+/// datasets, the bins on a grid of largest step `SPECTRAL_STEP_NM`.
 ///
 /// # Errors
 ///
-/// As [`FitInputs::load`] and [`FitInputs::grain`].
+/// As `FitInputs::load` and `FitInputs::grain`.
 pub fn fit(manifest: &Manifest) -> Result<Vec<(SubstanceId, AlbedoRow)>, RunTaskError> {
     fit_on_grid(manifest, SPECTRAL_STEP_NM)
 }
@@ -1278,10 +1278,10 @@ impl FitTask for SubstanceAlbedosTask {
     ///   amplitude at w = 0.1 and 0.9;
     /// - each row's reference form, 0 for the frost and 1 for the regolith;
     /// - the spectral bins' edges, and each row's infrared set, by its place in
-    ///   [`INFRARED_SETS`], 0 for none;
+    ///   `INFRARED_SETS`, 0 for none;
     /// - the laboratory rows' constants: the fine grains' diameter, the Beckman's incidence, the
     ///   ASD's geometry and the regolith's highest w; and every row's input, its numbers and names
-    ///   without its prose ([`describe_input`]), as four 16-bit words of their FNV-1a hash, so that
+    ///   without its prose (`describe_input`), as four 16-bit words of their FNV-1a hash, so that
     ///   a changed end-member, part, fraction, grain size or level finds the table stale (each word
     ///   is a probe of 1 to 65,536, which the lock file's relative tolerance tells apart).
     fn fingerprint(&self) -> SimFingerprint {
