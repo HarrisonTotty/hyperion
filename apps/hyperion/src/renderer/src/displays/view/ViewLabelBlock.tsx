@@ -178,8 +178,9 @@ export interface ReadingOptions {
   /**
    * Whether each middle dot leads the part after it (R06.T13.j): set at the head of that part's
    * box, on one line with its first word or run, the break at the space before it, so that no dot
-   * stands alone at a line's end. Off unless asked: the sky's `STARS` readings ask it
-   * (`LabelLine.dotsLead`), and every other reading keeps its dots between its parts.
+   * stands alone at a line's end. Off unless asked: the sky's `STARS` readings and the wireframe's
+   * `CONTOUR INTERVAL` ask it (`LabelLine.dotsLead`), and every other reading keeps its dots
+   * between its parts.
    */
   readonly dotsLead?: boolean;
 }

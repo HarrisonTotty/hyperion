@@ -33,6 +33,7 @@ import { SKY_SPRITE_HDR_MATERIAL } from "../sky/spriteHdr";
 import { LIT_AGX_MATERIAL } from "../spike/litView";
 import { TERRAIN_MATERIALS } from "../terrain/gpu/material";
 import { TERRAIN_DEPTH_MATERIALS, TERRAIN_LIT_MATERIALS } from "../terrain/terrainMaterial";
+import { TERRAIN_WIRE_MATERIALS } from "../terrain/terrainWire";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import { SUBGROUP_TWINS } from "./twins";
 import type { PointSplatSpec, WgslMaterialSpec, WgslPostProcessSpec } from "./types";
@@ -60,7 +61,8 @@ const TWIN_ENTRIES: ReadonlyArray<CatalogueEntry> = SUBGROUP_TWINS.map((spec) =>
 
 /**
  * R02's wireframe materials (plan R02, R02.T14.c): the lines, the two occluders and the star
- * sprites, each as `WireframeRenderer` creates it.
+ * sprites, with R10.T11's lines and occluder sphere over a body's surveyed terrain, each as
+ * `WireframeRenderer` creates it.
  */
 const WIREFRAME_ENTRIES: ReadonlyArray<CatalogueEntry> = Object.values(WIREFRAME_MATERIALS).map(
   (spec) => ({ kind: "material", spec }),
@@ -99,14 +101,16 @@ const ATMOSPHERE_VIEW_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 
 /**
  * R05.T11.b's terrain pass, one material per vertex path, T11.c's lit view's display pass,
- * R10.T10.b's lit terrain, one material per vertex path, and R10.T16.c's lit terrain as depth
- * alone for the symbology's pass, one per vertex path.
+ * R10.T10.b's lit terrain, one material per vertex path, R10.T16.c's lit terrain as depth
+ * alone for the symbology's pass, one per vertex path, and R10.T11's wireframe terrain, one per
+ * vertex path.
  */
 const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   ...TERRAIN_MATERIALS,
   LIT_AGX_MATERIAL,
   ...TERRAIN_LIT_MATERIALS,
   ...TERRAIN_DEPTH_MATERIALS,
+  ...TERRAIN_WIRE_MATERIALS,
 ].map((spec) => ({ kind: "material", spec }));
 
 /**

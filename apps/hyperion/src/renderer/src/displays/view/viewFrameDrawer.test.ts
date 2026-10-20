@@ -1,15 +1,22 @@
+import type { BodyIdHex } from "@hyperion/protocol";
 import { describe, expect, it, vi } from "vitest";
 
+import { scale, vec3 } from "../../geometry/vec3";
 import { moonLikeHeader } from "../../test/coarseFieldFixtures";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { EngineUnavailable } from "../../view/engine/resilientEngine";
-import type { FrameSubmission, RenderView } from "../../view/engine/types";
+import type { DrawItem, FrameSubmission, RenderView, TextureHandle } from "../../view/engine/types";
 import { viewId } from "../../view/camera/state";
-import { IDENTITY_ROTATION } from "../../view/coords/rotation";
+import { relativeToCamera } from "../../view/coords/relative";
+import { IDENTITY_ROTATION, rotateToBodyFixed } from "../../view/coords/rotation";
 import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
+import { sceneOrigins } from "../../view/scene/model";
 import { PHASE_GIANT, PHASE_PLANETS, phaseScene } from "../../view/scenes/phaseScene";
 import { CoverageView, fieldCellIndex } from "../../view/terrain/coverage";
 import type { ViewTerrainSource } from "../../view/terrain/frameTerrain";
+import type { ResidentHeightsView } from "../../view/terrain/residentHeights";
+import type { TerrainViewFrameInput } from "../../view/terrain/terrainPass";
+import { heightAboveGroundM } from "../../view/terrain/terrainWire";
 import {
   frameStyleOf,
   makeViewFrameDrawer,
@@ -20,7 +27,7 @@ import {
   type ViewFrameDrawn,
   type ViewFrameInputs,
 } from "./viewFrameDrawer";
-import { runPose, startRun } from "./viewRun";
+import { runPose, startRun, type ViewRun } from "./viewRun";
 
 /** A canvas view that records whether it was disposed. */
 class RecordingView implements RenderView {
@@ -186,6 +193,8 @@ describe("a view's photorealistic frame (R10.T10.d, T10.e)", () => {
           survey: () => null,
           drawTerrain: () => null,
           coverageMask: () => null,
+          wirePass: () => null,
+          drawWireTerrain: () => null,
           pass: (body) => {
             asked.push(body);
             return null;
@@ -347,6 +356,8 @@ describe("a view's survey edges that cannot be marked (the batch review's S5)", 
           },
           drawTerrain: () => null,
           coverageMask: () => null,
+          wirePass: () => null,
+          drawWireTerrain: () => null,
           pass: () => null,
         },
         view: viewId("view"),
@@ -395,6 +406,8 @@ describe("what a view's frame gives its label block and list (the batch review's
         maskReady: false,
       }),
       coverageMask: () => null,
+      wirePass: () => null,
+      drawWireTerrain: () => null,
       pass: () => null,
     };
   }
@@ -438,7 +451,7 @@ describe("what a view's frame gives its label block and list (the batch review's
     expect((await drawnIn("photorealistic"))?.terrain).toBe("TERRAIN: STREAMING");
   });
 
-  it("gives no terrain annunciation of a wireframe frame, which hands nothing over", async () => {
+  it("gives no terrain annunciation of a wireframe frame whose source has no wireframe pass", async () => {
     expect((await drawnIn("wireframe"))?.terrain).toBeNull();
   });
 
@@ -446,6 +459,223 @@ describe("what a view's frame gives its label block and list (the batch review's
     "gives the session's survey edges in the %s style",
     async (style) => {
       expect((await drawnIn(style))?.surveyEdges.map((edge) => edge.body)).toEqual([SURVEYED]);
+    },
+  );
+});
+
+/** The camera's height above `body`'s datum in `run`, as its header's figure gives it, m. */
+function datumHeightM(run: ViewRun, body: BodyIdHex): number {
+  const centreM = relativeToCamera(
+    { kind: "body", body, m: vec3(0, 0, 0) },
+    runPose(run),
+    sceneOrigins(run.scene),
+  );
+  const header = moonLikeHeader(body);
+  return heightAboveGroundM(
+    rotateToBodyFixed(IDENTITY_ROTATION, scale(centreM, -1)),
+    { equatorialRadiusM: header.equatorial_radius_m, polarRadiusM: header.polar_radius_m },
+    () => null,
+  );
+}
+
+describe("a view's wireframe frame of its terrain (R10.T11)", () => {
+  // The planet at 90°, which the camera looks at.
+  const HANDED = PHASE_PLANETS[1];
+  const VIEW = viewId("view");
+  const MASK: TextureHandle = { kind: "texture", name: "coverage mask" };
+  /** The wireframe pass's draw, as the session's would name it. */
+  const WIRE_DRAW: DrawItem = {
+    mesh: { kind: "mesh", name: "terrain patches" },
+    material: { kind: "material", name: "terrain-wire-face-differences" },
+    offsetFromCameraM: new Float32Array(3),
+    uniforms: {},
+    textures: {},
+  };
+
+  /** No resident ground: the datum everywhere. */
+  const DATUM: ResidentHeightsView = {
+    rimHeightAtM: () => null,
+    groundHeightAtM: () => null,
+    ceilingM: 0,
+  };
+
+  /**
+   * A terrain session stand-in whose wireframe pass of the 90° planet took the view, over `heights`,
+   * each of its draws annunciating `TERRAIN: STREAMING`, the frame inputs it was given in `asked`;
+   * no field is wanted, so that no survey edge reads it.
+   */
+  function wireSource(
+    heights: ResidentHeightsView = DATUM,
+    overrides: Partial<ViewTerrainSource> = {},
+  ): { readonly source: ViewTerrainSource; readonly asked: TerrainViewFrameInput[] } {
+    const asked: TerrainViewFrameInput[] = [];
+    return {
+      asked,
+      source: {
+        wanted: new Set(),
+        survey: (body) =>
+          body === HANDED ? { coverage: null, header: moonLikeHeader(HANDED) } : null,
+        drawTerrain: () => null,
+        coverageMask: (body) => (body === HANDED ? MASK : null),
+        pass: () => null,
+        wirePass: (body) =>
+          body === HANDED
+            ? {
+                maskReadyFor: () => true,
+                symbologyDepthMaterial: null,
+                heights,
+                viewIds: new Set([VIEW]),
+              }
+            : null,
+        drawWireTerrain: (_view, body, input) => {
+          if (body !== HANDED) {
+            return null;
+          }
+          asked.push(input);
+          return {
+            draw: WIRE_DRAW,
+            conditions: { streaming: true, detailLimited: false },
+            annunciation: "TERRAIN: STREAMING",
+            fault: null,
+            missing: false,
+            standingIn: false,
+            maskReady: true,
+          };
+        },
+        ...overrides,
+      },
+    };
+  }
+
+  /** The phase scene's frame inputs over `source` in `style`, its planets turning. */
+  function inputsOver(
+    source: ViewTerrainSource,
+    style: "photorealistic" | "wireframe" = "wireframe",
+  ): ViewFrameInputs {
+    return {
+      run: phaseRun(true),
+      size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      stars: [],
+      sky: null,
+      selection: null,
+      style,
+      setting: "low",
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+      terrain: { source, view: VIEW, nowMs: 0 },
+    };
+  }
+
+  /** A drawer's wireframe frame over `source`, with what its view was given. */
+  async function wireframeOf(source: ViewTerrainSource): Promise<{
+    readonly drawn: ViewFrameDrawn | null;
+    readonly frame: FrameSubmission | undefined;
+  }> {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView("view");
+    const drawer = new ViewFrameDrawer(engine, view, "view");
+    const drawn = drawer.draw(inputsOver(source));
+    drawer.dispose();
+    return { drawn, frame: view.frames.at(-1) };
+  }
+
+  it("draws the wireframe pass's terrain after the occluders and before the lines", async () => {
+    const { frame } = await wireframeOf(wireSource().source);
+    const names = frame?.draws.map((draw) => draw.material.name) ?? [];
+    const at = names.indexOf(WIRE_DRAW.material.name);
+    const occluders = names.flatMap((name, n) =>
+      name.startsWith("wireframe:occluder") ? [n] : [],
+    );
+    const lines = names.flatMap((name, n) => (name.startsWith("wireframe:lines") ? [n] : []));
+    expect([
+      occluders.length > 0 && lines.length > 0,
+      occluders.every((n) => n < at),
+      lines.every((n) => n > at),
+    ]).toEqual([true, true, true]);
+  });
+
+  it("binds the body's coverage mask to its datum's draws, which give way to its terrain", async () => {
+    const { frame } = await wireframeOf(wireSource().source);
+    expect(frame?.draws.some((draw) => draw.textures["coverageMask"] === MASK)).toBe(true);
+  });
+
+  it("gives the contour interval its terrain was drawn at, and the terrain's annunciation", async () => {
+    const { source, asked } = wireSource();
+    const { drawn } = await wireframeOf(source);
+    const intervalM = asked[0]?.wire?.intervalM;
+    expect([
+      intervalM !== undefined && intervalM > 0,
+      drawn?.contourIntervalM,
+      drawn?.terrain,
+    ]).toEqual([true, intervalM, "TERRAIN: STREAMING"]);
+  });
+
+  it("gives no contour interval of a photorealistic frame, which draws no wireframe terrain", async () => {
+    const { source, asked } = wireSource();
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    // The first photorealistic frame draws the wireframe while its pipelines compile.
+    drawer.draw(inputsOver(source, "photorealistic"));
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    const before = asked.length;
+    const drawn = drawer.draw(inputsOver(source, "photorealistic"));
+    drawer.dispose();
+    expect([drawn?.drawnStyle, drawn?.contourIntervalM, asked.length - before]).toEqual([
+      "photorealistic",
+      null,
+      0,
+    ]);
+  });
+
+  it("holds the contour interval from frame to frame while the height lies between its thresholds", async () => {
+    // The ground under the camera raised so that it stands 4 km over it, then 7 km: a twentieth of
+    // 7 km is 350 m, past the midpoint 316 m to 500 m but short of its 1.2 × 316 m.
+    const datumM = datumHeightM(phaseRun(true), HANDED);
+    const ground = { aboveM: 4_000 };
+    const heights: ResidentHeightsView = {
+      ...DATUM,
+      groundHeightAtM: () => datumM - ground.aboveM,
+    };
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const fresh = new ViewFrameDrawer(engine, new RecordingView("fresh"), "fresh");
+    const { source } = wireSource(heights);
+    const at4km = drawer.draw(inputsOver(source))?.contourIntervalM;
+    ground.aboveM = 7_000;
+    const at7km = drawer.draw(inputsOver(source))?.contourIntervalM;
+    const freshAt7km = fresh.draw(inputsOver(source))?.contourIntervalM;
+    drawer.dispose();
+    fresh.dispose();
+    expect([at4km, at7km, freshAt7km]).toEqual([200, 200, 500]);
+  });
+
+  it.each([
+    ["reports a bug of its source's once", new Error("a bug of the source's"), 1],
+    ["passes a loss in silence", new EngineUnavailable("createMaterial"), 0],
+  ] as const)(
+    "draws on without the wireframe terrain when it cannot be drawn, and %s",
+    async (_case, failure, reports) => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const { source } = wireSource(DATUM, {
+        wirePass: () => {
+          throw failure;
+        },
+      });
+      const engine = await countingRenderEngine();
+      const view = new RecordingView("view");
+      const drawer = new ViewFrameDrawer(engine, view, "view");
+      const drawn = [drawer.draw(inputsOver(source)), drawer.draw(inputsOver(source))];
+      drawer.dispose();
+      expect([
+        drawn.map((each) => each?.contourIntervalM),
+        view.frames.length,
+        error.mock.calls.length,
+      ]).toEqual([[null, null], 2, reports]);
     },
   );
 });

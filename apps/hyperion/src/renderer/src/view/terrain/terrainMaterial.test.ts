@@ -19,6 +19,7 @@ import { bindingStages } from "../../test/wgslStages";
 import occluderWgsl from "../shaders/occluder.wgsl?raw";
 import terrainDepthWgsl from "./shaders/terrainDepth.wgsl?raw";
 import terrainLitWgsl from "./shaders/terrainLit.wgsl?raw";
+import terrainSurveyWgsl from "./shaders/terrainSurvey.wgsl?raw";
 import horizonWgsl from "./shadows/horizon.wgsl?raw";
 import { LIT_VERTEX_CODE } from "./gpu/resources";
 import {
@@ -176,7 +177,7 @@ describe("the lit terrain's material (R10.T10.b)", () => {
       ["horizon_map", TERRAIN_LIT_BINDINGS.horizonMap],
       ["survey_mask", TERRAIN_LIT_BINDINGS.surveyMask],
     ] as const) {
-      expect(terrainLitWgsl + horizonWgsl).toMatch(
+      expect(terrainLitWgsl + horizonWgsl + terrainSurveyWgsl).toMatch(
         new RegExp(`@binding\\(${String(binding)}\\) var[^\\n]* ${name}`, "u"),
       );
     }
@@ -208,8 +209,10 @@ describe("the lit terrain's material (R10.T10.b)", () => {
 
   it("carries the survey mask's layout: its words a slot, and the byte of its cell's code (R10.T10.c)", () => {
     expect([
-      terrainLitWgsl.includes(`const SURVEY_MASK_WORDS : u32 = ${String(SURVEY_MASK_BYTES / 4)}u;`),
-      terrainLitWgsl.includes(
+      terrainSurveyWgsl.includes(
+        `const SURVEY_MASK_WORDS : u32 = ${String(SURVEY_MASK_BYTES / 4)}u;`,
+      ),
+      terrainSurveyWgsl.includes(
         `const SURVEY_CELL_CODE_BYTE : u32 = ${String(SURVEY_CELL_CODE_BYTE)}u;`,
       ),
     ]).toEqual([true, true]);
@@ -219,7 +222,7 @@ describe("the lit terrain's material (R10.T10.b)", () => {
     "carries the lit mesh's vertex code %s as resources.ts gives it (R10.T10.c)",
     (name, code) => {
       const constant = `LIT_${name.replace(/[A-Z]/gu, (letter) => `_${letter}`).toUpperCase()}`;
-      expect(terrainLitWgsl).toContain(`const ${constant} : u32 = ${String(code)}u;`);
+      expect(terrainSurveyWgsl).toContain(`const ${constant} : u32 = ${String(code)}u;`);
     },
   );
 });

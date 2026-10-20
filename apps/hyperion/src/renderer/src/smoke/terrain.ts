@@ -30,7 +30,7 @@ import { GraphicsStatusStore, initialGraphicsStatus } from "../view/engine/statu
 import type { BufferHandle, RenderEngine, RenderTarget } from "../view/engine/types";
 import { TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
 import { terrainMaterialSpec } from "../view/terrain/gpu/material";
-import { TerrainResources } from "../view/terrain/gpu/resources";
+import { normalsAtlasOf, TerrainResources } from "../view/terrain/gpu/resources";
 import { ContactRecords, InstanceRecords, patchTerms } from "../view/terrain/gpu/uniforms";
 import type { PatchKey } from "../view/terrain/patchKey";
 import type {
@@ -51,7 +51,8 @@ const DEFAULT_STORAGE_BINDING_BYTES = 134_217_728;
 /** Makes `setting`'s resources on `engine`, writes its first and last slots and one frame. */
 function exercise(engine: RenderEngine, setting: "high" | "low"): TerrainResources {
   const resources = new TerrainResources(engine, TERRAIN_SETTINGS[setting], WGS84);
-  const { slots, atlas, vertexPath } = resources.layout;
+  const { slots, vertexPath } = resources.layout;
+  const atlas = normalsAtlasOf(resources.layout);
   const n = atlas.samplesPerSide;
   for (const slot of [0, slots.slotCount - 1]) {
     resources.upload({
@@ -75,7 +76,8 @@ function exercise(engine: RenderEngine, setting: "high" | "low"): TerrainResourc
 
 /** Describes a layout for a check's detail. */
 function describe(resources: TerrainResources): string {
-  const { slots, atlas, vertexPath, fallback } = resources.layout;
+  const { slots, vertexPath, fallback } = resources.layout;
+  const atlas = normalsAtlasOf(resources.layout);
   return `${vertexPath} (fallback ${fallback}), ${slots.slotCount} slots, atlas ${atlas.widthTexels} × ${atlas.heightTexels} × ${atlas.layers}`;
 }
 
@@ -343,7 +345,7 @@ async function drawShot(
       storageBuffers[name] = buffer;
     }
   }
-  const atlas = layout.atlas;
+  const atlas = normalsAtlasOf(layout);
   target.render({
     label: "terrain",
     viewRotation: viewRotation4(orientation),

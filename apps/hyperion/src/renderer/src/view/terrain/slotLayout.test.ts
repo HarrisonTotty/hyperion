@@ -118,3 +118,42 @@ describe("the slot layout", () => {
     ).toThrow(/fewer than 6/u);
   });
 });
+
+describe("the wireframe's slot layout (R10.T11)", () => {
+  it("holds a face-differences wire slot's heights and survey mask alone, its normals and horizon map at no bytes", () => {
+    expect(terrainSlotFields(SETTINGS.low.terrain, "wire")).toEqual([
+      { name: "heights", storage: "storage-buffer", bytes: HEIGHTS_BYTES },
+      { name: "normals", storage: "texture", bytes: 0 },
+      { name: "horizon-map", storage: "storage-buffer", bytes: 0 },
+      { name: "survey-mask", storage: "storage-buffer", bytes: SURVEY_MASK_BYTES },
+    ]);
+  });
+
+  it("adds the offsets to a baked-offsets wire slot, and no normals at twice the mesh's resolution", () => {
+    const { terrain } = SETTINGS.high;
+    expect([terrain.normals, terrainSlotFields(terrain, "wire")]).toEqual([
+      "double",
+      [
+        { name: "heights", storage: "storage-buffer", bytes: HEIGHTS_BYTES },
+        { name: "offsets", storage: "storage-buffer", bytes: OFFSETS_BYTES },
+        { name: "normals", storage: "texture", bytes: 0 },
+        { name: "horizon-map", storage: "storage-buffer", bytes: 0 },
+        { name: "survey-mask", storage: "storage-buffer", bytes: SURVEY_MASK_BYTES },
+      ],
+    ]);
+  });
+
+  it("sizes a wire slot at 38,028 B on the face-differences path and 139,428 B on the baked-offsets path", () => {
+    expect([
+      terrainSlotLayout(SETTINGS.low.terrain, "wire").bytesPerSlot,
+      terrainSlotLayout(SETTINGS.high.terrain, "wire").bytesPerSlot,
+    ]).toEqual([33_800 + 4_228, 33_800 + 101_400 + 4_228]);
+  });
+
+  it("carries no class layers in a wire slot, which draws no class", () => {
+    const names = (["low", "high"] as const).flatMap((setting) =>
+      terrainSlotFields(SETTINGS[setting].terrain, "wire").map((f) => f.name),
+    );
+    expect(names).not.toContain("class-layers");
+  });
+});

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { TerrainCheckViewRecord } from "../../../../../preload/api";
 import { fakeViewEngineSource } from "../../../test/fakeViewEngine";
 import { FakeRenderEngine } from "../../../test/fakeRenderEngine";
 import { ScriptedHeightWorker } from "../../../test/scriptedHeightWorker";
@@ -23,6 +24,7 @@ import {
   missedAtCadence,
   nonFiniteTexels,
   TERRAIN_LIT_PREFIX,
+  TERRAIN_WIRE_PREFIX,
   TerrainProbe,
   type WatchedSession,
   type WorkerTraffic,
@@ -98,6 +100,7 @@ function watchedSession(
       lastStep: { drawSet: patches },
       seesPatch: (id) => handing.has(id) && !blind.has(id),
     }),
+    wirePass: () => null,
     coverageMask: () => null,
     survey: () => null,
     memory: () => ({
@@ -308,6 +311,102 @@ describe("the terrain probe (R10.T16.d)", () => {
       sessionGpuBytes: 24_576,
     });
     stop();
+  });
+
+  describe("a wireframe view's terrain (R10.T11)", () => {
+    /**
+     * The record of a wireframe view's five frames into its canvas: before any hand-over; handed
+     * over without its terrain; twice with it (drawing `material`); then past the survey, seeing no
+     * patch. The session hands the view over through its wireframe pass, or its lit pass where
+     * `through` says so.
+     */
+    async function wireframeRecord(
+      material: string,
+      through: "wire" | "lit" = "wire",
+    ): Promise<TerrainCheckViewRecord> {
+      const timed = timedEngineSource();
+      const page = new FakePage();
+      const views = new ViewsProbe(timed.source, () => page.nowMs);
+      const probe = new TerrainProbe(views, {
+        paceMs: 0,
+        readBackMs: 1_000,
+        nowMs: () => page.nowMs,
+      });
+      const outcome = await probe.source.requestAdapter();
+      if (outcome.kind !== "adapter") {
+        throw new Error("the fake gave no adapter");
+      }
+      const engine: RenderEngine = await probe.source.load(outcome, STORE());
+      views.installFrameClock(page);
+      const stop = probe.start();
+      const handing = new Set<string>();
+      const blind = new Set<string>();
+      const patches = { count: 0 };
+      const lit = watchedSession(handing, patches, blind);
+      probe.watchTerrain(
+        through === "wire" ? { ...lit, pass: () => null, wirePass: (body) => lit.pass(body) } : lit,
+      );
+      const canvas = engine.createView(document.createElement("canvas"), "view");
+      const draw = (terrain: boolean): void => {
+        canvas.render(frame("wireframe", terrain ? ["wireframe:occluderSphere", material] : []));
+      };
+      const start = probe.mark();
+      page.frame(100, () => {
+        draw(false);
+      });
+      handing.add("view");
+      patches.count = 12;
+      page.frame(116, () => {
+        draw(false);
+      });
+      page.frame(133, () => {
+        draw(true);
+      });
+      page.frame(150, () => {
+        draw(true);
+      });
+      blind.add("view");
+      page.frame(166, () => {
+        draw(false);
+      });
+      page.nowMs = 200;
+      const record = probe.phase(
+        "terrain-photoreal-wireframe",
+        start,
+        probe.mark(),
+        [{ name: "view", style: "wireframe" }],
+        null,
+      );
+      stop();
+      const view = record.views[0];
+      if (view === undefined) {
+        throw new Error("the phase records the view");
+      }
+      return view;
+    }
+
+    it("counts a frame with the wireframe's terrain material as drawing the terrain", async () => {
+      expect(await wireframeRecord(`${TERRAIN_WIRE_PREFIX}face-differences`, "lit")).toMatchObject({
+        terrainDraws: 2,
+        firstTerrainMs: 133,
+      });
+    });
+
+    it("counts a view its wireframe pass took as handed over where it sees a patch, and off the survey where it sees none", async () => {
+      expect(await wireframeRecord(`${TERRAIN_WIRE_PREFIX}face-differences`)).toMatchObject({
+        draws: 5,
+        handedOverDraws: 3,
+        offSurveyDraws: 1,
+        firstHandoverMs: 116,
+      });
+    });
+
+    it("counts no terrain in a frame of the wireframe's other materials", async () => {
+      expect(await wireframeRecord("wireframe:linesSurveyed")).toMatchObject({
+        terrainDraws: 0,
+        firstTerrainMs: null,
+      });
+    });
   });
 
   it("tallies the terrain's own allocations, by category, and nothing else's", async () => {

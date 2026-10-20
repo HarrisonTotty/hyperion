@@ -220,6 +220,19 @@ export const TERRAIN_SETTINGS: Readonly<Record<QualitySetting, TerrainSettings>>
 export const WIREFRAME_TERRAIN_TAU_PX = 4;
 
 /**
+ * The slots of the wireframe's terrain cache on either setting (plan R10, R10.T11), provisional
+ * until R10.T14 measures it: Design note 15's sizing rule over its wireframe column (4 px at 1080p),
+ * max(1.3 × the all-round peak, 3 × the frustum peak) = max(1.3 × 284, 3 × 76) ≈ 370 at 100 m, and
+ * the 20–40% the count model leaves out for relief, the 2:1 rule and the forced region at its
+ * upper end, about 520. Sized by its slots, not by the setting's bytes: a wireframe slot holds its
+ * heights, offsets on their path and survey mask alone (139,428 B on `baked-offsets`, 45% of a lit
+ * slot; 38,028 B on `face-differences`, a quarter), so the high setting's 400 MB would give it
+ * 2,868 slots, whose offsets pass a default 128 MiB storage binding, and on that path's fallback
+ * 10,518, whose heights pass it too.
+ */
+export const WIREFRAME_TERRAIN_SLOTS = 520;
+
+/**
  * A terrain variant for the spike's runs (T13.c's `--vertex-path` and `--normals`, T17's): the
  * fields given replace the setting's own; nothing else is overridable.
  */

@@ -111,11 +111,69 @@ export type SlotFieldName =
   "heights" | "offsets" | "normals" | "horizon-map" | "class-layers" | "survey-mask";
 
 /**
- * How a terrain's patches are shaded: R05's spike shading, one hand albedo (the test planet, and a
- * body baked without weights), or R10's lit material from each patch's class weights and laws
- * (R10.T10.b), which takes their field, `class-layers`.
+ * How a terrain's patches are shaded: R05's spike shading, one hand albedo (the test planet); R10's
+ * lit material from each patch's class weights and laws (R10.T10.b), which takes their field,
+ * `class-layers`; or the wireframe's depth with its contours (R10.T11, a body baked without
+ * weights), which takes its heights and its survey mask alone.
  */
-export type TerrainShading = "spike" | "lit";
+export type TerrainShading = "spike" | "lit" | "wire";
+
+/** What one {@link TerrainShading} holds and draws, where the shadings differ. */
+export interface TerrainShadingTraits {
+  /** Whether its slots hold normals, in the normals atlas: R05's spike shading and R10's lit. */
+  readonly normals: boolean;
+  /**
+   * Whether it is R10's lit material, with its class layers, horizon map, phase table and lights.
+   */
+  readonly lit: boolean;
+  /** Whether its slots hold the survey mask, so that each upload carries its layers (R10.T10.c). */
+  readonly surveyMask: boolean;
+  /** Whether it draws the lit mesh, with the survey edge's skirt heads and fins (R10.T10.c). */
+  readonly litMesh: boolean;
+  /** Whether each view holds the wireframe's phase records beside its instances (R10.T11). */
+  readonly phases: boolean;
+  /**
+   * Whether the low setting draws it coarser than the high one, so that it states
+   * `TERRAIN: DETAIL LIMITED` there wherever it draws (R05 Design note 26): not the wireframe's,
+   * whose τ and presented size are the same on both settings (R10.T11).
+   */
+  readonly coarserOnLow: boolean;
+}
+
+/**
+ * Each {@link TerrainShading}'s {@link TerrainShadingTraits}, read wherever the shadings differ, so
+ * that a shading added to the union is a compile error until its traits are given.
+ *
+ * @remarks
+ * The wireframe's (R10.T11) draws the lit mesh, whose skirts and fins close its depth at the
+ * survey's edge, and holds the survey mask, its heights and its phases, but no normals.
+ */
+export const TERRAIN_SHADING_TRAITS: Readonly<Record<TerrainShading, TerrainShadingTraits>> = {
+  spike: {
+    normals: true,
+    lit: false,
+    surveyMask: false,
+    litMesh: false,
+    phases: false,
+    coarserOnLow: true,
+  },
+  lit: {
+    normals: true,
+    lit: true,
+    surveyMask: true,
+    litMesh: true,
+    phases: false,
+    coarserOnLow: true,
+  },
+  wire: {
+    normals: false,
+    lit: false,
+    surveyMask: true,
+    litMesh: true,
+    phases: true,
+    coarserOnLow: false,
+  },
+};
 
 /** Where a slot field lives on the GPU. */
 export type SlotFieldStorage =
@@ -178,7 +236,9 @@ export function slotLayout(fields: ReadonlyArray<SlotField>, budgetBytes: number
  * lit shading, the horizon map at {@link HORIZON_MAP_BYTES} (R10.T8.b), the class layers, weights
  * and laws (R10.T10.b), and the survey mask at {@link SURVEY_MASK_BYTES} (R10.T10.c), and the
  * horizon map at zero bytes on R05's spike shading, which draws no shadow and no survey, so that
- * R05's test planet and its spike keep their slots.
+ * R05's test planet and its spike keep their slots. The wireframe's (R10.T11) holds the heights,
+ * the offsets on their path and the survey mask alone: it draws depth and its contours from the
+ * heights, and no normal, shadow or class (its normals and horizon map at zero bytes).
  */
 export function terrainSlotFields(
   terrain: TerrainSettings,
@@ -203,15 +263,23 @@ export function terrainSlotFields(
       normalsBytes = MESH_NORMALS_BYTES;
       break;
   }
-  fields.push({ name: "normals", storage: "texture", bytes: normalsBytes });
+  const traits = TERRAIN_SHADING_TRAITS[shading];
+  fields.push({
+    name: "normals",
+    storage: "texture",
+    bytes: traits.normals ? normalsBytes : 0,
+  });
   fields.push({
     name: "horizon-map",
     storage: "storage-buffer",
-    bytes: shading === "lit" ? HORIZON_MAP_BYTES : 0,
+    bytes: traits.lit ? HORIZON_MAP_BYTES : 0,
   });
   switch (shading) {
     case "lit":
       fields.push({ name: "class-layers", storage: "storage-buffer", bytes: CLASS_LAYERS_BYTES });
+      fields.push({ name: "survey-mask", storage: "storage-buffer", bytes: SURVEY_MASK_BYTES });
+      break;
+    case "wire":
       fields.push({ name: "survey-mask", storage: "storage-buffer", bytes: SURVEY_MASK_BYTES });
       break;
     case "spike":

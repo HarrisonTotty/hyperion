@@ -50,6 +50,9 @@ import {
   LiveFrameTerrain,
   surveyEdgeViewsOf,
   type ViewTerrainInput,
+  type WireframeTerrainFrame,
+  type WireframeTerrainInput,
+  wireframeTerrainOf,
 } from "../../view/terrain/frameTerrain";
 import type { HandoverReliefSource } from "../../view/terrain/handover";
 import type { TerrainViewReport } from "../../view/terrain/session";
@@ -60,7 +63,7 @@ import {
   type SpriteStar,
   viewStrokesAt,
 } from "../../view/wireframe/drawList";
-import { WireframeRenderer } from "../../view/wireframe/submit";
+import { NO_WIREFRAME_TERRAIN, WireframeRenderer } from "../../view/wireframe/submit";
 import { photorealFrame } from "./photorealFrame";
 import { bakeInputOf, type DrawnSky } from "./useViewSky";
 import { runPose, type ViewRun } from "./viewRun";
@@ -115,9 +118,10 @@ export interface ViewFrameInputs {
   /**
    * The view's terrain this frame (plan R10, R10.T16.c): the terrain session, the view's ID in it
    * and the frame's time, from which the drawer makes its photorealistic frame's `FrameTerrain`
-   * (`LiveFrameTerrain`: the terrain of the bodies it hands over, on the drawer's engine) and its
-   * draw list's survey edges, in either style (`surveyEdgeViewsOf`); absent, a body handed over is
-   * drawn as a mesh body is and no survey edge is marked.
+   * (`LiveFrameTerrain`: the terrain of the bodies it hands over, on the drawer's engine), its
+   * wireframe frame's terrain (`wireframeTerrainOf`, R10.T11) and its draw list's survey edges, in
+   * either style (`surveyEdgeViewsOf`); absent, a body handed over is drawn as a mesh body is, the
+   * wireframe draws no terrain and no survey edge is marked.
    */
   readonly terrain?: ViewTerrainInput | undefined;
 }
@@ -130,10 +134,15 @@ export interface ViewFrameDrawn {
   readonly drawnStyle: RenderStyle;
   /**
    * The terrain's annunciation of the bodies the frame hands over, for the view's label block
-   * (`labelStatements(run, terrain)`, plan R10, R10.T16.c); `null` with none, and for a frame drawn
-   * in the wireframe, which hands nothing over until R10.T11.
+   * (`labelStatements(run, terrain)`, plan R10, R10.T16.c), in either style (the wireframe's from
+   * R10.T11); `null` with none.
    */
   readonly terrain: TerrainAnnunciation | null;
+  /**
+   * The contour interval the frame's wireframe terrain is drawn at, m, for the view's label block's
+   * `CONTOUR INTERVAL` line (plan R10, R10.T11); `null` for a frame that draws no contours.
+   */
+  readonly contourIntervalM: number | null;
   /**
    * The bodies' survey edges the frame marked, each with the range to its nearest point seen
    * (`WireframeDrawList.surveyEdges`), for the view's list notes (plan R10, R10.T16.c;
@@ -247,6 +256,10 @@ export class ViewFrameDrawer {
   #frameFailed = false;
   /** The survey edges could not be made: said once until they are made again (S5). */
   #edgesFailed = false;
+  /** The wireframe's terrain could not be drawn: said once until it is drawn again (R10.T11). */
+  #wireTerrainFailed = false;
+  /** The contour interval the view's wireframe terrain last held, its hysteresis's (R10.T11). */
+  #contourIntervalM: number | null = null;
   #regimes: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
   #sized: ViewSize | null = null;
   readonly #unsubscribe: () => void;
@@ -367,21 +380,67 @@ export class ViewFrameDrawer {
       drawn = photoreal.drawn;
       terrain = photoreal.terrain;
     }
+    let contourIntervalM: number | null = null;
     if (!drawn) {
+      // The bodies this view hands over to the wireframe's passes (R10.T11).
+      const wire =
+        inputs.terrain === undefined
+          ? null
+          : this.#wireTerrain(inputs.terrain, {
+              view: inputs.terrain.view,
+              scene: run.scene,
+              camera,
+              viewport,
+              strokeScale: list.strokeScale,
+              lowSetting: inputs.setting === "low",
+              tokens,
+              occluderSlopePx: list.occluderSlopePx,
+              nowMs: inputs.terrain.nowMs,
+              previousIntervalM: this.#contourIntervalM,
+            });
+      if (wire !== null) {
+        terrain = wire.annunciation;
+        contourIntervalM = wire.intervalM;
+        this.#contourIntervalM = wire.heldIntervalM;
+      }
       this.#wireframe.render(
         this.#view,
         list,
         camera,
         viewport,
         cube === null ? [] : [this.#cubes.draw(cube, "display", exposed)],
+        wire ?? NO_WIREFRAME_TERRAIN,
       );
     }
     return {
       anchors: list.anchors,
       drawnStyle: drawn ? "photorealistic" : "wireframe",
       terrain,
+      contourIntervalM,
       surveyEdges: list.surveyEdges,
     };
+  }
+
+  /**
+   * The wireframe's terrain this frame (`wireframeTerrainOf`, plan R10, R10.T11), or none where it
+   * cannot be drawn: a loss (`EngineUnavailable`) passes in silence, and anything else, a bug, is
+   * reported once until it is drawn again, so that the view draws on, as the survey edges do.
+   */
+  #wireTerrain(
+    terrain: ViewTerrainInput,
+    input: WireframeTerrainInput,
+  ): WireframeTerrainFrame | null {
+    try {
+      const wire = wireframeTerrainOf(terrain.source, input);
+      this.#wireTerrainFailed = false;
+      return wire;
+    } catch (error: unknown) {
+      if (!(error instanceof EngineUnavailable) && !this.#wireTerrainFailed) {
+        console.error(`the wireframe terrain of ${this.#name} could not be drawn:`, error);
+        this.#wireTerrainFailed = true;
+      }
+      return null;
+    }
   }
 
   #drawPhotoreal(

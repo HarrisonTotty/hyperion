@@ -42,8 +42,10 @@
  * records; the view's rotation is the camera's orientation in the body's axes.
  *
  * A body's patches baked with their class weights take R10's lit material (R10.T10.b,
- * `terrainMaterial.ts`), lit by the frame's {@link TerrainFrameInput.lighting}; the test planet,
- * and a body baked without weights, keep R05's material and its one sun.
+ * `terrainMaterial.ts`), lit by the frame's {@link TerrainFrameInput.lighting}; a body's baked
+ * without them take the wireframe's depth with its contours and graticule (R10.T11,
+ * `terrainWire.ts`), drawn by each frame's {@link TerrainFrameInput.wire}; the test planet keeps
+ * R05's material and its one sun.
  *
  * {@link TerrainPass.dispose} releases every handle the pass made on the current device: its
  * resources, every view's, its mesh, its materials and its tables of no air
@@ -64,9 +66,11 @@ import { type Rotation3, rotateToBodyFixed } from "../coords/rotation";
 import type {
   DrawItem,
   MaterialHandle,
+  RenderTargetFormat,
   RenderEngine,
   TextureHandle,
   ViewSize,
+  WgslMaterialSpec,
 } from "../engine/types";
 import type { BufferHandle } from "../engine/types";
 import {
@@ -91,12 +95,19 @@ import { type DrawSet, DrawSetResolver, PatchCache } from "./cache";
 import { terrainMaterialSpec } from "./gpu/material";
 import {
   DEFAULT_TERRAIN_VIEW,
+  normalsAtlasOf,
   surveyCellCode,
   type TerrainLayout,
   TerrainResources,
   type TerrainViewBuffers,
 } from "./gpu/resources";
-import { ContactRecords, InstanceRecords, NO_PARENT_SLOT, parentQuadrant } from "./gpu/uniforms";
+import {
+  ContactRecords,
+  InstanceRecords,
+  NO_PARENT_SLOT,
+  parentQuadrant,
+  WirePhaseRecords,
+} from "./gpu/uniforms";
 import { MAX_LEVEL, type PatchKey, patchKeyString } from "./patchKey";
 import { type PlanetGeometry, planetGeometry } from "./planet";
 import { finestPatchSizeM, type GroundContact, heldRadiusM, morphRampM } from "./grounded";
@@ -111,13 +122,20 @@ import {
   type ViewSelectionInput,
 } from "./select";
 import { RESELECT_MOVE_FRACTION, selectionTolerancePx } from "./selectionTolerance";
-import type { TerrainShading } from "./slotLayout";
+import { TERRAIN_SHADING_TRAITS, type TerrainShading } from "./slotLayout";
 import { ResidentHeights, type ResidentHeightsView } from "./residentHeights";
 import {
   terrainDepthMaterialSpec,
   type TerrainLighting,
   terrainLitMaterialSpec,
 } from "./terrainMaterial";
+import {
+  CONTOUR_PX,
+  contourPhase,
+  type GraticulePatch,
+  graticulePatch,
+  terrainWireMaterialSpec,
+} from "./terrainWire";
 import type {
   BakedPatch,
   BakeSettings,
@@ -166,7 +184,8 @@ export const SPIKE_ALBEDO = 0.15;
 
 /**
  * How a source's patches are shaded: R10's lit material for a body baked with its class weights,
- * R05's spike shading for the test planet and for a body baked without them (the wireframe's).
+ * the wireframe's depth and contours for a body baked without them (R10.T11; decision D10), and
+ * R05's spike shading for the test planet.
  */
 export function terrainShadingOf(source: HeightSourceSetting): TerrainShading {
   let shading: TerrainShading;
@@ -180,12 +199,46 @@ export function terrainShadingOf(source: HeightSourceSetting): TerrainShading {
           shading = "lit";
           break;
         case "skipped":
-          shading = "spike";
+          shading = "wire";
           break;
       }
       break;
   }
   return shading;
+}
+
+/**
+ * A wireframe view's contours and graticule over a body's terrain this frame (plan R10, R10.T11;
+ * Design note 14), which the wireframe's pass draws with its depth.
+ */
+export interface TerrainWireFrameInput {
+  /** The view's contour interval, m (`terrainWire.ts`' `contourInterval`). */
+  readonly intervalM: number;
+  /**
+   * The field's sea level, m above the datum, where the world has a sea, at which the coastline is
+   * drawn; `null` where it has none.
+   */
+  readonly seaLevelM: number | null;
+  /** The device px drawn for each CSS px of a line (`ViewStrokes.strokeScale`). */
+  readonly strokeScale: number;
+  /**
+   * The body's graticule as the view's draw list draws it (R02's `graticule`): its step, rad, and
+   * its thin and heavy widths and its casing's on each side, device px; `null` where it draws none.
+   */
+  readonly graticule: {
+    readonly stepRad: number;
+    readonly thinPx: number;
+    readonly heavyPx: number;
+    readonly casingPx: number;
+  } | null;
+  /** `--text-muted`, `--text` and `--surface-0` as linear colours, alpha 1 (`linearColour`). */
+  readonly colours: {
+    readonly muted: Float32Array;
+    readonly text: Float32Array;
+    readonly casing: Float32Array;
+  };
+  /** The draw list's slope term, device px (`WireframeDrawList.occluderSlopePx`). */
+  readonly occluderSlopePx: number;
 }
 
 /** A frame's lights of a lit terrain, with its body's atmosphere tables where it has one. */
@@ -251,6 +304,11 @@ export interface TerrainFrameInput {
    * patches unlit.
    */
   readonly lighting?: TerrainFrameLighting;
+  /**
+   * What the wireframe's terrain draws over its depth (R10.T11): its contours and graticule. A
+   * wireframe pass given none draws nothing; the other shadings read none.
+   */
+  readonly wire?: TerrainWireFrameInput;
   /** A monotonic time for the annunciation's debounce, milliseconds. */
   readonly nowMs: number;
 }
@@ -402,6 +460,17 @@ interface Resident {
    * view that draws it is given no coverage mask (decision-r10-t16-review §2).
    */
   readonly codeZeroOpen: boolean;
+  /**
+   * Its bake's origin height h₀ above the datum, m, as its slot record holds it narrowed, from
+   * which the wireframe's contour phase is formed (R10.T11; `contourPhase`).
+   */
+  readonly originHeightM: number;
+}
+
+/** A resident patch's place for the graticule at one step (R10.T11), kept until the step changes. */
+interface HeldGraticule {
+  readonly stepRad: number;
+  readonly patch: GraticulePatch;
 }
 
 /** A block's rebakes still to land, and whom to tell once they have (decision D7). */
@@ -441,6 +510,8 @@ interface Device {
    * eviction, takes it off.
    */
   readonly givenUp: Set<string>;
+  /** Each resident patch's place for the wireframe's graticule, by key string (R10.T11). */
+  readonly graticules: Map<string, HeldGraticule>;
 }
 
 /** One view's own frame state: its records, bands, uniforms, draw and debounce. */
@@ -463,6 +534,21 @@ interface ViewState {
     readonly cameraBodyFixedM: Float32Array;
     readonly atlas: Float32Array;
   };
+  /** The wireframe's `Draw` (`terrainWire.wgsl`), rewritten in place each frame (R10.T11). */
+  readonly wireUniforms: {
+    readonly bodyRotation: Float32Array;
+    /** Zeros: `terrainPatch.wgsl` names it, and the wireframe reads no normals. */
+    readonly atlas: Float32Array;
+    readonly contour: Float32Array;
+    readonly contourWidthsPx: Float32Array;
+    readonly graticule: Float32Array;
+    readonly muted: Float32Array;
+    readonly text: Float32Array;
+    readonly casing: Float32Array;
+    readonly occluderSlopePx: Float32Array;
+  };
+  /** The wireframe's phase records, one a drawn patch; `null` for the other shadings. */
+  readonly phases: WirePhaseRecords | null;
   /** Its draw, made once the material is ready on the device it was made for. */
   draw: DrawItem | null;
   drawDevice: Device | null;
@@ -771,11 +857,9 @@ export class TerrainPass {
     const depth = this.#shading === "lit" ? this.#readyDepth(device, path) : Promise.resolve();
     let material: MaterialHandle;
     try {
-      material = await this.#engine.createMaterialAsync(
-        this.#shading === "lit" ? terrainLitMaterialSpec(path) : terrainMaterialSpec(path),
-        ["rgba16float"],
-        [device.resources.mesh],
-      );
+      material = await this.#engine.createMaterialAsync(...this.#materialFor(path), [
+        device.resources.mesh,
+      ]);
     } catch (error: unknown) {
       // Refused for a device a restore replaced, during a loss (whose restore compiles it again),
       // or for a pass let go meanwhile: not a failure of the material (the batch review's C9).
@@ -793,6 +877,29 @@ export class TerrainPass {
       this.#engine.releaseMaterial(material);
     }
     await depth;
+  }
+
+  /**
+   * The pass's material and the target it is compiled for: R10's lit material and R05's spike
+   * shading into the scene target (`rgba16float`), and the wireframe's into the canvas, which the
+   * wireframe's frame draws into (R10.T11).
+   */
+  #materialFor(
+    path: TerrainLayout["vertexPath"],
+  ): readonly [WgslMaterialSpec, ReadonlyArray<RenderTargetFormat>] {
+    let made: readonly [WgslMaterialSpec, ReadonlyArray<RenderTargetFormat>];
+    switch (this.#shading) {
+      case "lit":
+        made = [terrainLitMaterialSpec(path), ["rgba16float"]];
+        break;
+      case "wire":
+        made = [terrainWireMaterialSpec(path), ["canvas"]];
+        break;
+      case "spike":
+        made = [terrainMaterialSpec(path), ["rgba16float"]];
+        break;
+    }
+    return made;
   }
 
   /** Compiles `device`'s depth material for the canvas (R10.T16.c); never rejects. */
@@ -960,10 +1067,13 @@ export class TerrainPass {
     const conditions: TerrainConditions = {
       streaming: missing || standingIn,
       // A view of weight w is limited where its τ′ is above τ (decision-r10-t16-contracts §3); the
-      // low setting is coarser than the high one wherever terrain is drawn (Design note 26).
+      // low setting is coarser than the high one wherever terrain is drawn (Design note 26), but
+      // for the wireframe's, whose τ and depth are the same on both settings (R10.T11).
       detailLimited:
         (selection.limited && selection.limitExcess > (view?.weight ?? 1)) ||
-        (this.#setting === "low" && count > 0),
+        (this.#setting === "low" &&
+          TERRAIN_SHADING_TRAITS[this.#shading].coarserOnLow &&
+          count > 0),
     };
     const annunciation = state.debounce.update(conditions, input.nowMs);
     return {
@@ -1173,6 +1283,7 @@ export class TerrainPass {
       gates: [],
       asked: new Map(),
       givenUp: new Set(),
+      graticules: new Map(),
     };
     return device;
   }
@@ -1270,7 +1381,9 @@ export class TerrainPass {
         layers !== null &&
         layers.unsurveyedCells.length > 0 &&
         surveyCellCode(bake.key.level, layers.fieldLevel) === 0,
+      originHeightM: Math.fround(bake.originHeightM),
     });
+    device.graticules.delete(keyString);
     device.rebakes.delete(keyString);
     this.#landed(device, keyString);
     this.#rangesVersion += 1;
@@ -1282,6 +1395,7 @@ export class TerrainPass {
   #forget(device: Device, keyString: string): void {
     device.residents.delete(keyString);
     device.givenUp.delete(keyString);
+    device.graticules.delete(keyString);
     this.#heights.forget(keyString);
     if (device.rebakes.delete(keyString)) {
       this.#demandDirty = true;
@@ -1346,10 +1460,11 @@ export class TerrainPass {
   #viewState(id: TerrainViewId): ViewState {
     const bodyRotation = new Float32Array(16);
     const atlas = new Float32Array(4);
+    const { slotCount } = this.#device.resources.layout.slots;
     return {
       id,
       debounce: new TerrainAnnunciationDebounce(),
-      instances: new InstanceRecords(this.#device.resources.layout.slots.slotCount),
+      instances: new InstanceRecords(slotCount),
       contacts: new ContactRecords(),
       morph: new Float64Array(2 * (MAX_LEVEL + 1)),
       uniforms: {
@@ -1359,6 +1474,18 @@ export class TerrainPass {
         atlas,
       },
       litUniforms: { bodyRotation, cameraBodyFixedM: new Float32Array(4), atlas },
+      wireUniforms: {
+        bodyRotation,
+        atlas: new Float32Array(4),
+        contour: new Float32Array(4),
+        contourWidthsPx: new Float32Array(4),
+        graticule: new Float32Array(4),
+        muted: new Float32Array(4),
+        text: new Float32Array(4),
+        casing: new Float32Array(4),
+        occluderSlopePx: new Float32Array(1),
+      },
+      phases: TERRAIN_SHADING_TRAITS[this.#shading].phases ? new WirePhaseRecords(slotCount) : null,
       draw: null,
       drawDevice: null,
       drawnTable: null,
@@ -1591,11 +1718,13 @@ export class TerrainPass {
     input: TerrainViewFrameInput,
   ): { readonly draw: DrawItem | null; readonly count: number } {
     const { resources } = device;
-    const { instances, morph } = state;
+    const { instances, morph, phases } = state;
     const { cameraM } = input.view;
     const [r0, r1, r2] = input.view.rotation.rows;
     const drawSet = this.#selected?.drawSet;
+    const wire = input.wire;
     instances.clear();
+    phases?.clear();
     if (drawSet !== undefined) {
       // `patches` holds exactly the `count` drawn patches (`DrawSetResolver`).
       for (let n = 0; n < drawSet.count; n += 1) {
@@ -1617,6 +1746,9 @@ export class TerrainPass {
           this.#parentSlotOf(device, patch.key),
           parentQuadrant(patch.key),
         );
+        if (phases !== null && wire !== undefined) {
+          this.#pushPhase(device, phases, drawn.keyString, patch.originM, wire);
+        }
       }
     }
     const records = state.contacts;
@@ -1633,14 +1765,37 @@ export class TerrainPass {
       );
     }
     resources.writeFrame(instances, records, state.id);
+    if (phases !== null) {
+      resources.writePhases(phases, state.id);
+    }
     const count = instances.count;
     if (device.material === null || count === 0) {
       return { draw: null, count };
     }
     rotationMat4(input.view.rotation, state.uniforms.bodyRotation);
-    if (this.#shading === "lit") {
-      return { draw: this.#writeLit(device, state, input), count };
+    let draw: DrawItem | null;
+    switch (this.#shading) {
+      case "lit":
+        draw = this.#writeLit(device, state, input);
+        break;
+      case "wire":
+        // A wireframe view's frame with no contours to draw draws nothing (R10.T11).
+        draw = wire === undefined ? null : this.#writeWire(device, state, device.material, wire);
+        break;
+      case "spike":
+        draw = this.#writeSpike(device, state, device.material, input);
+        break;
     }
+    return { draw, count };
+  }
+
+  /** R05's spike shading's uniforms for this frame, and its draw item, made once a device. */
+  #writeSpike(
+    device: Device,
+    state: ViewState,
+    material: MaterialHandle,
+    input: TerrainViewFrameInput,
+  ): DrawItem {
     const u = state.uniforms;
     const sun = input.sunDirectionBodyFixed;
     u.sunDirection[0] = sun.x;
@@ -1652,10 +1807,10 @@ export class TerrainPass {
     u.sunRadiance[1] = green * k;
     u.sunRadiance[2] = blue * k;
     if (state.draw === null || state.drawDevice !== device) {
-      state.draw = this.#drawItem(device, state, device.material);
+      state.draw = this.#drawItem(device, state, material);
       state.drawDevice = device;
     }
-    return { draw: state.draw, count };
+    return state.draw;
   }
 
   /**
@@ -1709,6 +1864,112 @@ export class TerrainPass {
   }
 
   /**
+   * Appends a drawn patch's wireframe phases (R10.T11): its contour phase at the view's interval
+   * from its bake's origin height, its origin's height above the sea, and its place for the
+   * graticule at the view's step, kept for the patch until the step changes.
+   */
+  #pushPhase(
+    device: Device,
+    phases: WirePhaseRecords,
+    keyString: string,
+    originM: Vec3,
+    wire: TerrainWireFrameInput,
+  ): void {
+    const resident = device.residents.get(keyString);
+    if (resident === undefined) {
+      // The draw set is the device's cache's, made again at a restore, and a patch is cached
+      // only once its upload has made its record.
+      throw new Error(`the drawn patch ${keyString} has no resident record`);
+    }
+    const { originHeightM } = resident;
+    const stepRad = wire.graticule?.stepRad ?? 0;
+    let held = device.graticules.get(keyString);
+    if (held?.stepRad !== stepRad) {
+      held = { stepRad, patch: graticulePatch(originM, stepRad) };
+      device.graticules.set(keyString, held);
+    }
+    phases.push(
+      contourPhase(originHeightM, wire.intervalM),
+      wire.seaLevelM === null ? 0 : originHeightM - wire.seaLevelM,
+      held.patch,
+    );
+  }
+
+  /**
+   * A wireframe frame's uniforms (R10.T11; `terrainWire.wgsl`'s `Draw`): its interval, stroke
+   * scale and coastline, the contours' widths at the scale, the graticule's step and widths, the
+   * colours and the slope term; and its draw, made once a device.
+   */
+  #writeWire(
+    device: Device,
+    state: ViewState,
+    material: MaterialHandle,
+    wire: TerrainWireFrameInput,
+  ): DrawItem {
+    const u = state.wireUniforms;
+    const scale = wire.strokeScale;
+    u.contour[0] = wire.intervalM;
+    u.contour[1] = scale;
+    u.contour[2] = wire.seaLevelM === null ? 0 : 1;
+    // 1 ÷ CI in f64, narrowed once: the shader multiplies by it, which WGSL rounds correctly.
+    u.contour[3] = 1 / wire.intervalM;
+    u.contourWidthsPx[0] = CONTOUR_PX.minor * scale;
+    u.contourWidthsPx[1] = CONTOUR_PX.index * scale;
+    u.contourWidthsPx[2] = CONTOUR_PX.coastline * scale;
+    const graticule = wire.graticule;
+    u.graticule[0] = graticule?.stepRad ?? 0;
+    u.graticule[1] = graticule?.thinPx ?? 0;
+    u.graticule[2] = graticule?.heavyPx ?? 0;
+    u.graticule[3] = graticule?.casingPx ?? 0;
+    u.muted.set(wire.colours.muted);
+    u.text.set(wire.colours.text);
+    u.casing.set(wire.colours.casing);
+    u.occluderSlopePx[0] = wire.occluderSlopePx;
+    if (state.draw === null || state.drawDevice !== device) {
+      state.draw = this.#wireDrawItem(device, state, material);
+      state.drawDevice = device;
+    }
+    return state.draw;
+  }
+
+  /**
+   * View `state`'s wireframe draw of `device`'s resources (R10.T11): R05's vertex storage, the
+   * survey mask and the view's phases, its `Draw` the view's wireframe uniforms.
+   */
+  #wireDrawItem(device: Device, state: ViewState, material: MaterialHandle): DrawItem {
+    const { resources } = device;
+    const buffers = resources.viewBuffers(state.id);
+    const heights = resources.field("heights");
+    const surveyMask = resources.field("survey-mask");
+    if (heights === null || surveyMask === null || buffers.phases === null) {
+      throw new Error(
+        "a wireframe terrain's draw has no wireframe layout: its heights, masks or phases",
+      );
+    }
+    const storageBuffers: Record<string, BufferHandle> = {
+      heights,
+      slots: resources.slotRecords,
+      instances: buffers.instances,
+      contacts: buffers.contacts,
+      surveyMask,
+      wirePhases: buffers.phases,
+    };
+    const offsets = resources.field("offsets");
+    if (offsets !== null) {
+      storageBuffers["offsets"] = offsets;
+    }
+    return {
+      mesh: resources.mesh,
+      material,
+      offsetFromCameraM: ZERO_OFFSET,
+      uniforms: state.wireUniforms,
+      textures: {},
+      storageBuffers,
+      indirect: { buffer: buffers.indirect, offsetBytes: 0 },
+    };
+  }
+
+  /**
    * View `state`'s draw of `device`'s resources with `material`, its uniforms the view's arrays and
    * its frame buffers the view's own; a lit terrain's binds its class weights, laws, the view's
    * lights, the `phase` table and atmosphere tables too.
@@ -1738,7 +1999,7 @@ export class TerrainPass {
     if (offsets !== null) {
       storageBuffers["offsets"] = offsets;
     }
-    const { atlas } = resources.layout;
+    const atlas = normalsAtlasOf(resources.layout);
     state.uniforms.atlas.set([
       atlas.columns,
       atlas.tilesPerLayer,

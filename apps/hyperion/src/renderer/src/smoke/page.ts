@@ -14,8 +14,8 @@
  * itself. R08.T6.f's slices and bands run in two groups in part 5: the Saturn-class figure's, and
  * Earth's, which took R08.T6.g's Earth; R08.T9.b's surface lighting in two in part 6, Earth's and
  * the Saturn-class figure's, and beside them R10.T10.b's lit terrain, R10.T10.c's survey edge,
- * R10.T16.c's frame and R10.T16.b's shared pass (on an engine of its own, whose device it
- * destroys), part 6 being the shortest.
+ * R10.T16.c's frame, R10.T11's wireframe terrain and R10.T16.b's shared pass (on an engine of its
+ * own, whose device it destroys), part 6 being the shortest.
  */
 
 import { WGSL_CATALOGUE } from "../view/engine/catalogue";
@@ -69,6 +69,7 @@ import { checkStrokeContrast } from "./strokeContrast";
 import { checkWireframe } from "./wireframe";
 import { checkSharedPass } from "./sharedPass";
 import { checkTerrainFrame } from "./terrainFrame";
+import { checkWireframeTerrain } from "./wireframeTerrain";
 import { checkForcedLoss, checkOneLayerArrays, checkTargetsAsyncIndirectTiming } from "./work";
 
 /** What the page reports, as `src/smoke/result.ts` reads it. */
@@ -300,6 +301,7 @@ async function run(
   await group(6, "R10.T10.b the lit terrain", () => checkLitTerrain(engine, checks));
   await group(6, "R10.T10.c the survey edge", () => checkSurveyEdge(engine, checks));
   await group(6, "R10.T16 the frame", () => checkTerrainFrame(engine, checks));
+  await group(6, "R10.T11 the wireframe's terrain", () => checkWireframeTerrain(engine, checks));
   // On an engine of its own, whose device it destroys mid-stream (R10.T16.b).
   await group(6, "R10.T16 the shared pass", async () => {
     const second = await requestAdapterOutcome(navigator.gpu);

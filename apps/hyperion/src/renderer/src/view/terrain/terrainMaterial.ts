@@ -56,6 +56,7 @@ import terrainDepthWgsl from "./shaders/terrainDepth.wgsl?raw";
 import terrainLitWgsl from "./shaders/terrainLit.wgsl?raw";
 import terrainLitShadeWgsl from "./shaders/terrainLitShade.wgsl?raw";
 import terrainPatchWgsl from "./shaders/terrainPatch.wgsl?raw";
+import terrainSurveyWgsl from "./shaders/terrainSurvey.wgsl?raw";
 import { PATCH_VERTICES_PER_SIDE } from "./slotLayout";
 import { PHOTOMETRY_STRIDE } from "./workers/messages";
 
@@ -89,8 +90,9 @@ const DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
 /**
  * What every lit terrain module composes before its `Draw` and fragment stage: `frame.wgsl`,
  * `patchVertex.wgsl`, R08's surface lighting, R07's `litBody.wgsl`, `terrainPatch.wgsl`, the
- * horizon map's lookup (`shadows/horizon.wgsl`, R10.T8.b) and `terrainLit.wgsl`, its vertices and
- * survey discard.
+ * horizon map's lookup (`shadows/horizon.wgsl`, R10.T8.b), the survey's placement and discard
+ * (`terrainSurvey.wgsl`, which the wireframe's terrain shares, R10.T11) and `terrainLit.wgsl`, its
+ * vertices and shading.
  */
 const LIT_TERRAIN_SOURCE =
   frameWgsl +
@@ -99,6 +101,7 @@ const LIT_TERRAIN_SOURCE =
   litBodyWgsl +
   terrainPatchWgsl +
   horizonWgsl +
+  terrainSurveyWgsl +
   terrainLitWgsl;
 
 /**

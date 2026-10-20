@@ -173,6 +173,7 @@ interface Seen {
 function fakeProbe(view: FakeView, clock: () => number, seen: Seen): TerrainCheckDeps["terrain"] {
   const session: WatchedSession = {
     pass: () => null,
+    wirePass: () => null,
     coverageMask: () => null,
     survey: () => null,
     memory: () => ({ workerFieldBytes: 0, keptFieldBytes: 0, gpuBytes: new Map() }),

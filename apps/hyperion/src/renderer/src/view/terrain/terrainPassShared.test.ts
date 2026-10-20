@@ -21,6 +21,7 @@ import { TERRAIN_SETTINGS } from "../quality/qualitySetting";
 import { TERRAIN_NOT_AVAILABLE } from "./annunciation";
 import { uvToSt, vertexDir, xyzToFaceUv } from "./cube";
 import { allocationTally } from "./gpu/allocationTally";
+import { normalsAtlasOf } from "./gpu/resources";
 import { INSTANCE_RECORD_BYTES, NO_PARENT_SLOT } from "./gpu/uniforms";
 import { craftContact, datumGroundUnder, finestPatchSizeM } from "./grounded";
 import { MAX_LEVEL, patchKeyString, type PatchKey } from "./patchKey";
@@ -104,7 +105,7 @@ class ScriptedLane implements TerrainPool {
   }
 
   deliver(pass: TerrainPass, key: PatchKey): void {
-    const n = pass.layout.atlas.samplesPerSide;
+    const n = normalsAtlasOf(pass.layout).samplesPerSide;
     const bake: BakedPatch = {
       key,
       generation: 1,

@@ -438,6 +438,11 @@ interface Published {
    * decision-r10-t16-review §1).
    */
   readonly surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
+  /**
+   * The contour interval its last frame drew its wireframe terrain at, m, for its label block's
+   * `CONTOUR INTERVAL` (plan R10, R10.T11); `null` while it draws none.
+   */
+  readonly contourIntervalM: number | null;
 }
 
 /** The survey edges before the loop's first frame: none. */
@@ -635,6 +640,7 @@ function ViewStage({
     photoreal: "idle",
     terrain: null,
     surveyEdges: NO_SURVEY_EDGES,
+    contourIntervalM: null,
   });
   const shown = useThrottledValue(published, READOUT_INTERVAL_MS);
   // The meter as the loop last read it out (R07.T16.b): given in the same frame as the exposure the
@@ -881,6 +887,8 @@ function ViewStage({
     let terrainAnnunciation: TerrainAnnunciation | null = null;
     // The survey edges the last frame drawn marked, for the list's notes (R10.T16.c).
     let surveyEdges = NO_SURVEY_EDGES;
+    // The contour interval of the last frame drawn (R10.T11), for the label block.
+    let contourIntervalM: number | null = null;
     // The terrain session's step failed, said once until a step succeeds (the batch review's S5).
     let stepFailed = false;
     let frame = 0;
@@ -1013,6 +1021,7 @@ function ViewStage({
           anchors = drawn.anchors;
           terrainAnnunciation = drawn.terrain;
           surveyEdges = drawn.surveyEdges;
+          contourIntervalM = drawn.contourIntervalM;
           // The wireframe, and the photorealistic view's stand-in while its pipelines compile.
           drawnStyle = drawn.drawnStyle;
           placeMarkLabels(
@@ -1061,6 +1070,7 @@ function ViewStage({
           photoreal: drawer?.photorealStatus ?? "idle",
           terrain: terrainAnnunciation,
           surveyEdges,
+          contourIntervalM,
         });
       }
       frame = requestAnimationFrame(tick);
@@ -1464,7 +1474,10 @@ function ViewStage({
                   withMeterLine(
                     withQualityLine(
                       withDrawnStyle(
-                        withSkyLine(labelLines(shown.run, exposure, stale), skyLine),
+                        withSkyLine(
+                          labelLines(shown.run, exposure, stale, shown.contourIntervalM),
+                          skyLine,
+                        ),
                         shown.drawnStyle,
                       ),
                       setting,

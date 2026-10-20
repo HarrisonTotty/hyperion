@@ -36,8 +36,14 @@ function photoreal(
   };
 }
 
-/** A wireframe view, which hands nothing over. */
-function wireframe(name: TerrainCheckViewRecord["name"]): TerrainCheckViewRecord {
+/**
+ * A wireframe view, which hands `TEST MOON` over to its wireframe pass at 1.5 s of its phase and
+ * draws the wireframe's terrain 0.2 s later (plan R10, R10.T11), and reads nothing back.
+ */
+function wireframe(
+  name: TerrainCheckViewRecord["name"],
+  phaseStartMs: number,
+): TerrainCheckViewRecord {
   return {
     name,
     style: "wireframe",
@@ -47,14 +53,14 @@ function wireframe(name: TerrainCheckViewRecord["name"]): TerrainCheckViewRecord
     submitMs: [0.3],
     missedFrames: 0,
     longestGapMs: 40,
-    handedOverDraws: 0,
-    offSurveyDraws: 0,
-    terrainDraws: 0,
+    handedOverDraws: 30,
+    offSurveyDraws: 6,
+    terrainDraws: 30,
     terrainGaps: 0,
     terrainGapSpansS: [],
-    firstHandoverMs: null,
-    firstHandoverScriptS: null,
-    firstTerrainMs: null,
+    firstHandoverMs: phaseStartMs + 1_500,
+    firstHandoverScriptS: 270.2,
+    firstTerrainMs: phaseStartMs + 1_700,
     readBacks: 0,
     nonFiniteTexels: 0,
   };
@@ -113,7 +119,7 @@ export const TERRAIN_RECORD: TerrainCheckRecord = {
     phase("terrain-photoreal-wireframe", 280_000, 580_000, [
       photoreal("view", 280_000),
       photoreal("instrument-1", 280_000),
-      wireframe("instrument-2"),
+      wireframe("instrument-2", 280_000),
     ]),
     phase("terrain-loss", LOSS_WINDOW.startMs, LOSS_WINDOW.endMs, [
       photoreal("view", LOSS_WINDOW.startMs),

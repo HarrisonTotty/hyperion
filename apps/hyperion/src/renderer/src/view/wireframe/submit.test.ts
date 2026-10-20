@@ -3,7 +3,23 @@ import { describe, expect, it } from "vitest";
 import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import { centresJustBeyond, limbPastRightEdge } from "../../test/beyondView";
 import { aCameraPose, NO_TURN } from "../../test/viewFixtures";
-import type { BufferHandle, MaterialHandle, MeshHandle, WgslMaterialSpec } from "../engine/types";
+import { bindingStages } from "../../test/wgslStages";
+import type {
+  BufferHandle,
+  DrawItem,
+  FrameSubmission,
+  MaterialHandle,
+  MeshHandle,
+  RenderView,
+  TextureHandle,
+  WgslMaterialSpec,
+} from "../engine/types";
+import {
+  declaredStructLayout,
+  OFFSET_MEMBER,
+  type StructLayout,
+  uniformLayout,
+} from "../engine/webgpu/uniforms";
 import {
   perspectiveReversedInfinite,
   project,
@@ -22,16 +38,20 @@ import {
   type WireframeDrawList,
 } from "./drawList";
 import {
+  COVERAGE_MASK_BINDING,
   linearColour,
   MATERIAL_BUFFER,
+  NO_WIREFRAME_TERRAIN,
   OUTSIDE_VIEW_MARGIN_PX,
   type PackedDraw,
   packWireframe,
   sphereScreenRect,
+  type SurveyedDatum,
   WIREFRAME_MATERIALS,
   type WireframeEngine,
   type WireframeMaterial,
   WireframeRenderer,
+  type WireframeTerrain,
 } from "./submit";
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
@@ -608,13 +628,515 @@ describe("WireframeRenderer", () => {
     const renderer = new WireframeRenderer(engine);
     engine.restore();
     renderer.dispose();
-    expect(engine.materials.length).toBe(10);
+    expect(engine.materials.length).toBe(14);
   });
 
   it("stops following the engine's restores once disposed", () => {
     const engine = new RecordingEngine();
     new WireframeRenderer(engine).dispose();
     engine.restore();
-    expect(engine.materials.length).toBe(5);
+    expect(engine.materials.length).toBe(7);
+  });
+});
+
+/** The two materials of a body's datum over its surveyed terrain (R10.T11). */
+const SURVEYED_MATERIALS: ReadonlyArray<WireframeMaterial> = [
+  "linesSurveyed",
+  "occluderSphereSurveyed",
+];
+
+/** A layout's members as `name : type @ offset`. */
+function membersOf(layout: StructLayout | null): string[] | undefined {
+  return layout?.members.map((m) => `${m.name} : ${m.type} @ ${String(m.offsetBytes)}`);
+}
+
+describe("the wireframe's shaders over a surveyed body (R10.T11)", () => {
+  it.each(SURVEYED_MATERIALS)(
+    "%s's Draw is laid out as the engine packs the offset and the spec's uniforms",
+    (name) => {
+      const spec = WIREFRAME_MATERIALS[name];
+      expect(membersOf(declaredStructLayout(spec.vertexWgsl, "Draw"))).toEqual(
+        membersOf(uniformLayout([OFFSET_MEMBER, ...spec.uniforms])),
+      );
+    },
+  );
+
+  it.each(SURVEYED_MATERIALS)(
+    "%s declares the frame, the draw, its buffer and the coverage mask at R01's groups",
+    (name) => {
+      const source = WIREFRAME_MATERIALS[name].vertexWgsl.replace(/\s*:\s*/g, ": ");
+      expect(
+        [
+          "@group(0) @binding(0) var<uniform> frame: Frame;",
+          "@group(1) @binding(0) var<uniform> draw: Draw;",
+          `@group(2) @binding(0) var<storage, read> ${MATERIAL_BUFFER[name]}: array<vec4f>;`,
+          `@group(2) @binding(${String(COVERAGE_MASK_BINDING)}) var coverage_mask: texture_2d_array<f32>;`,
+        ].filter((line) => !source.includes(line)),
+      ).toEqual([]);
+    },
+  );
+
+  it.each(SURVEYED_MATERIALS)(
+    "%s lists its buffer at binding 0 and the coverage mask, a 2D array, at binding 1",
+    (name) => {
+      const spec = WIREFRAME_MATERIALS[name];
+      expect([COVERAGE_MASK_BINDING, spec.storageBuffers, spec.textures, spec.samplers]).toEqual([
+        1,
+        [{ name: MATERIAL_BUFFER[name], binding: 0 }],
+        [{ name: "coverageMask", binding: 1, viewDimension: "2d-array" }],
+        [],
+      ]);
+    },
+  );
+
+  it.each(SURVEYED_MATERIALS)(
+    "%s reads the coverage mask in its fragment stage alone, and no binding its spec leaves out",
+    (name) => {
+      const read = bindingStages(WIREFRAME_MATERIALS[name].vertexWgsl);
+      expect([
+        [...read.keys()].toSorted((a, b) => a - b),
+        [...(read.get(COVERAGE_MASK_BINDING) ?? [])],
+      ]).toEqual([[0, 1], ["fragment"]]);
+    },
+  );
+
+  it.each(SURVEYED_MATERIALS)("%s has the entry points vertexMain and fragmentMain", (name) => {
+    const source = WIREFRAME_MATERIALS[name].vertexWgsl;
+    expect([/fn vertexMain\(/.test(source), /fn fragmentMain\(/.test(source)]).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("draw as their twins do: the datum's lines as R02's lines, its occluder as R02's occluder", () => {
+    expect([
+      state(WIREFRAME_MATERIALS.linesSurveyed),
+      state(WIREFRAME_MATERIALS.occluderSphereSurveyed),
+    ]).toEqual([state(WIREFRAME_MATERIALS.lines), state(WIREFRAME_MATERIALS.occluderSphere)]);
+  });
+
+  it("take R02's line uniforms first, as the pack spreads them, then the coverage's", () => {
+    expect(WIREFRAME_MATERIALS.linesSurveyed.uniforms.map((u) => u.name)).toEqual([
+      ...WIREFRAME_MATERIALS.lines.uniforms.map((u) => u.name),
+      "coverageAxes",
+      "coverageStretch",
+      "coverageCentreM",
+    ]);
+  });
+
+  it("name the two on the console DATUM LINES and DATUM OCCLUDER", () => {
+    expect(SURVEYED_MATERIALS.map((name) => WIREFRAME_MATERIALS[name].displayName)).toEqual([
+      "DATUM LINES",
+      "DATUM OCCLUDER",
+    ]);
+  });
+});
+
+/** A body's occluder sphere 10⁷ m ahead, `x` and `y` m off the view's axis. */
+function sphereOf(id: string, x: number, y = 0): OccluderSphere {
+  return {
+    id,
+    centreF32: new Float32Array([x, y, -1e7]),
+    radiusM: 5e5,
+    altitudeM: Math.hypot(x, y, 1e7) - 5e5,
+  };
+}
+
+/** A body's own line batch, its limb or graticule, in view space before it. */
+function bodyBatch(body: string, kind: "major" | "graticule"): LineBatch {
+  return aBatch({
+    id: `body:${body}:${kind}`,
+    space: "view",
+    segments: new Float32Array([0, 0, -1e7, 1e5, 0, -1e7]),
+    widthPx: kind === "major" ? 3 : 2,
+    body,
+  });
+}
+
+/** A body's datum with distinct axes and stretch. */
+function datumOf(seed: number): SurveyedDatum {
+  return {
+    axes: Float32Array.from({ length: 16 }, (_, k) => seed + k / 16),
+    stretch: 1 + seed / 1_000,
+  };
+}
+
+/** A draw's uniforms as plain arrays. */
+function uniformsOf(draw: PackedDraw | undefined): Record<string, number[]> {
+  return Object.fromEntries(
+    Object.entries(draw?.uniforms ?? {}).map(([name, value]) => [name, [...value]]),
+  );
+}
+
+/** A pack's line draws, R02's and the surveyed ones, in their order. */
+function lineDraws(draws: ReadonlyArray<PackedDraw>): PackedDraw[] {
+  return draws.filter((d) => d.material === "lines" || d.material === "linesSurveyed");
+}
+
+/** The packed sphere rows' centres, in their order in the buffer. */
+function sphereCentres(spheres: Float32Array): number[][] {
+  const centres: number[][] = [];
+  for (let row = 0; row < spheres.length / 12; row += 1) {
+    centres.push([...spheres.subarray(row * 12 + 4, row * 12 + 7)]);
+  }
+  return centres;
+}
+
+describe("packWireframe over a surveyed body's terrain (R10.T11)", () => {
+  // Three bodies in view, b's datum giving way to its terrain; a's and b's own lines and an orbit.
+  const list: WireframeDrawList = {
+    ...EMPTY,
+    occluderSpheres: [sphereOf("a", -2e6), sphereOf("b", 0), sphereOf("c", 2e6)],
+    lines: [
+      bodyBatch("a", "major"),
+      bodyBatch("b", "major"),
+      bodyBatch("b", "graticule"),
+      aBatch({
+        id: "orbit:c",
+        space: "view",
+        segments: new Float32Array([0, 0, -1e7, 1, 0, -1e7]),
+      }),
+    ],
+    occluderSlopePx: 5,
+  };
+  const B = datumOf(2);
+  const surveyed = new Map([["b", B]]);
+  const packed = packWireframe(list, CAMERA, VIEWPORT, surveyed);
+  const plain = packWireframe(list, CAMERA, VIEWPORT);
+
+  it("packs the surveyed body's sphere after the others in the spheres' buffer", () => {
+    expect(sphereCentres(packed.spheres)).toEqual([
+      [-2e6, 0, -1e7],
+      [2e6, 0, -1e7],
+      [0, 0, -1e7],
+    ]);
+  });
+
+  it("draws the other spheres as one occluderSphere draw of their count, the surveyed one as its own", () => {
+    const spheres = packed.draws.filter(
+      (d) => d.material === "occluderSphere" || d.material === "occluderSphereSurveyed",
+    );
+    expect(
+      spheres.map((d) => [
+        d.material,
+        d.instanceCount,
+        d.uniforms["firstSphere"]?.[0] ?? null,
+        d.surveyedBody ?? null,
+      ]),
+    ).toEqual([
+      ["occluderSphere", 2, null, null],
+      ["occluderSphereSurveyed", 1, 2, "b"],
+    ]);
+  });
+
+  it("gives each of several surveyed bodies' spheres its own index among the frame's spheres", () => {
+    const four: WireframeDrawList = {
+      ...list,
+      occluderSpheres: [
+        sphereOf("a", -2e6),
+        sphereOf("b", 0),
+        sphereOf("c", 2e6),
+        sphereOf("d", 0, 1.5e6),
+      ],
+    };
+    const both = packWireframe(
+      four,
+      CAMERA,
+      VIEWPORT,
+      new Map([
+        ["b", B],
+        ["d", datumOf(4)],
+      ]),
+    );
+    const centres = sphereCentres(both.spheres);
+    expect(
+      both.draws
+        .filter((d) => d.material === "occluderSphereSurveyed")
+        .map((d) => {
+          const first = d.uniforms["firstSphere"]?.[0] ?? -1;
+          return [d.surveyedBody, first, centres[first]];
+        }),
+    ).toEqual([
+      ["b", 2, [0, 0, -1e7]],
+      ["d", 3, [0, 1.5e6, -1e7]],
+    ]);
+  });
+
+  it("gives the surveyed sphere the list's slope term and its datum's axes and stretch", () => {
+    const sphere = packed.draws.find((d) => d.material === "occluderSphereSurveyed");
+    expect(uniformsOf(sphere)).toEqual({
+      occluderSlopePx: [5],
+      firstSphere: [2],
+      coverageAxes: [...B.axes],
+      coverageStretch: [Math.fround(B.stretch), 0, 0, 0],
+    });
+  });
+
+  it("draws no surveyed sphere for a surveyed body off the view, and packs none for it", () => {
+    const off = packWireframe(
+      { ...list, occluderSpheres: [sphereOf("a", -2e6), sphereOf("b", 1e8)] },
+      CAMERA,
+      VIEWPORT,
+      surveyed,
+    );
+    expect([
+      off.draws.filter((d) => d.material.startsWith("occluder")).map((d) => d.material),
+      off.spheres.length,
+    ]).toEqual([["occluderSphere"], 12]);
+  });
+
+  it("draws the surveyed body's own lines, casing and stroke, with linesSurveyed", () => {
+    expect(
+      lineDraws(packed.draws).map((d) => [d.material, d.surveyedBody ?? null, d.instanceCount]),
+    ).toEqual([
+      ["lines", null, 1],
+      ["lines", null, 1],
+      ["linesSurveyed", "b", 1],
+      ["linesSurveyed", "b", 1],
+      ["linesSurveyed", "b", 1],
+      ["linesSurveyed", "b", 1],
+      ["lines", null, 1],
+      ["lines", null, 1],
+    ]);
+  });
+
+  it("gives a surveyed line R02's line uniforms with its datum's axes and stretch and its body's centre", () => {
+    const surveyedLines = lineDraws(packed.draws);
+    const r02 = lineDraws(plain.draws);
+    expect([2, 3, 4, 5].map((n) => uniformsOf(surveyedLines[n]))).toEqual(
+      [2, 3, 4, 5].map((n) =>
+        Object.assign(uniformsOf(r02[n]), {
+          coverageAxes: [...B.axes],
+          coverageStretch: [Math.fround(B.stretch), 0, 0, 0],
+          coverageCentreM: [0, 0, -1e7, 0],
+        }),
+      ),
+    );
+  });
+
+  it("draws every other line as R02 did", () => {
+    const surveyedLines = lineDraws(packed.draws);
+    const r02 = lineDraws(plain.draws);
+    expect([0, 1, 6, 7].map((n) => surveyedLines[n])).toEqual([0, 1, 6, 7].map((n) => r02[n]));
+  });
+
+  it("draws a surveyed body's lines as R02's where the list holds no sphere of it", () => {
+    const sphereless = packWireframe(
+      { ...list, occluderSpheres: [sphereOf("a", -2e6)], lines: [bodyBatch("b", "major")] },
+      CAMERA,
+      VIEWPORT,
+      surveyed,
+    );
+    expect(lineDraws(sphereless.draws).map((d) => [d.material, "surveyedBody" in d])).toEqual([
+      ["lines", false],
+      ["lines", false],
+    ]);
+  });
+
+  it("writes the same segments, corners and sprites whether or not a body is surveyed", () => {
+    expect([packed.segments, packed.corners, packed.sprites]).toEqual([
+      plain.segments,
+      plain.corners,
+      plain.sprites,
+    ]);
+  });
+
+  it("packs R02's draws with no body surveyed: one sphere draw for every sphere, every line R02's", () => {
+    expect(
+      packWireframe(list, CAMERA, VIEWPORT, new Map()).draws.map((d) => [
+        d.material,
+        d.instanceCount,
+        "surveyedBody" in d,
+      ]),
+    ).toEqual([
+      ["occluderSphere", 3, false],
+      ...Array.from({ length: 8 }, () => ["lines", 1, false]),
+    ]);
+  });
+
+  it("packs with an empty survey exactly as with none given", () => {
+    expect(packWireframe(list, CAMERA, VIEWPORT, new Map())).toEqual(plain);
+  });
+});
+
+/** An engine that records each material's spec too. */
+class SpecRecordingEngine extends RecordingEngine {
+  readonly specs: WgslMaterialSpec[] = [];
+
+  override createMaterial(spec: WgslMaterialSpec): MaterialHandle {
+    this.specs.push(spec);
+    return super.createMaterial(spec);
+  }
+}
+
+describe("WireframeRenderer over the bodies' terrain (R10.T11)", () => {
+  const MASK: TextureHandle = { kind: "texture", name: "coverage mask b" };
+  const TERRAIN_DRAW: DrawItem = {
+    mesh: { kind: "mesh", name: "terrain lit patch" },
+    material: { kind: "material", name: "terrain-wire-face-differences" },
+    offsetFromCameraM: new Float32Array(3),
+    uniforms: {},
+    textures: {},
+  };
+  const CUBE: DrawItem = {
+    mesh: { kind: "mesh", name: "sky cube triangle" },
+    material: { kind: "material", name: "sky:cubeDisplay" },
+    offsetFromCameraM: new Float32Array(3),
+    uniforms: {},
+    textures: {},
+  };
+  const list: WireframeDrawList = {
+    ...EMPTY,
+    occluderSpheres: [sphereOf("a", -2e6), sphereOf("b", 0)],
+    occluderMeshes: [
+      {
+        id: "hull",
+        originF32: new Float32Array([0, 0, -1]),
+        triangles: new Float32Array(9).fill(1),
+        twoSided: true,
+        fill: "#05080d",
+      },
+    ],
+    lines: [bodyBatch("b", "major"), aBatch({ id: "mark:craft" })],
+    sprites: [
+      {
+        id: "star",
+        directionF32: new Float32Array([0, 0, -1]),
+        xPx: 960,
+        yPx: 540,
+        exposedRgb: [1, 1, 1],
+        illuminanceLx: 1e-6,
+      },
+    ],
+  };
+  const terrain: WireframeTerrain = {
+    draws: [TERRAIN_DRAW],
+    surveyed: new Map([["b", { ...datumOf(2), mask: MASK }]]),
+  };
+
+  it("encodes the occluders, the surveyed sphere among them, then the terrain, the background and the rest", () => {
+    const renderer = new WireframeRenderer(new RecordingEngine());
+    const frame = renderer.frame(list, CAMERA, VIEWPORT, [CUBE], terrain);
+    expect(frame.draws.map((d) => d.material.name)).toEqual([
+      "wireframe:occluderSphere",
+      "wireframe:occluderSphereSurveyed",
+      "wireframe:hullSilhouette",
+      "terrain-wire-face-differences",
+      "sky:cubeDisplay",
+      "wireframe:starSprite",
+      "wireframe:linesSurveyed",
+      "wireframe:linesSurveyed",
+      "wireframe:lines",
+      "wireframe:lines",
+    ]);
+  });
+
+  it("binds the body's coverage mask to its surveyed draws alone", () => {
+    const renderer = new WireframeRenderer(new RecordingEngine());
+    const frame = renderer.frame(list, CAMERA, VIEWPORT, [], terrain);
+    expect(
+      frame.draws
+        .filter((d) => d !== TERRAIN_DRAW)
+        .map((d) => [d.material.name, Object.values(d.textures).map((texture) => texture.name)]),
+    ).toEqual([
+      ["wireframe:occluderSphere", []],
+      ["wireframe:occluderSphereSurveyed", ["coverage mask b"]],
+      ["wireframe:hullSilhouette", []],
+      ["wireframe:starSprite", []],
+      ["wireframe:linesSurveyed", ["coverage mask b"]],
+      ["wireframe:linesSurveyed", ["coverage mask b"]],
+      ["wireframe:lines", []],
+      ["wireframe:lines", []],
+    ]);
+  });
+
+  it("binds the mask by the materials' name for it", () => {
+    const renderer = new WireframeRenderer(new RecordingEngine());
+    const frame = renderer.frame(list, CAMERA, VIEWPORT, [], terrain);
+    const surveyedDraws = frame.draws.filter((d) => d.material.name.endsWith("Surveyed"));
+    expect(surveyedDraws.map((d) => Object.keys(d.textures))).toEqual([
+      ["coverageMask"],
+      ["coverageMask"],
+      ["coverageMask"],
+    ]);
+  });
+
+  it("binds each surveyed draw's storage buffer by its material's", () => {
+    const renderer = new WireframeRenderer(new RecordingEngine());
+    const frame = renderer.frame(list, CAMERA, VIEWPORT, [], terrain);
+    expect(
+      frame.draws
+        .filter((d) => d.material.name.endsWith("Surveyed"))
+        .map((d) => [d.material.name, Object.keys(d.storageBuffers ?? {})]),
+    ).toEqual([
+      ["wireframe:occluderSphereSurveyed", ["spheres"]],
+      ["wireframe:linesSurveyed", ["segments"]],
+      ["wireframe:linesSurveyed", ["segments"]],
+    ]);
+  });
+
+  it("adds the terrain's draws alone, after the occluders, where no body's datum gives way", () => {
+    const r02 = new WireframeRenderer(new RecordingEngine()).frame(list, CAMERA, VIEWPORT, [CUBE]);
+    const withTerrain = new WireframeRenderer(new RecordingEngine()).frame(
+      list,
+      CAMERA,
+      VIEWPORT,
+      [CUBE],
+      { draws: [TERRAIN_DRAW], surveyed: new Map() },
+    );
+    const names = r02.draws.map((d) => d.material.name);
+    expect(withTerrain.draws.map((d) => d.material.name)).toEqual([
+      ...names.slice(0, 2),
+      TERRAIN_DRAW.material.name,
+      ...names.slice(2),
+    ]);
+  });
+
+  it("gives R02's frame with no terrain", () => {
+    const given = new WireframeRenderer(new RecordingEngine()).frame(
+      list,
+      CAMERA,
+      VIEWPORT,
+      [CUBE],
+      NO_WIREFRAME_TERRAIN,
+    );
+    const r02 = new WireframeRenderer(new RecordingEngine()).frame(list, CAMERA, VIEWPORT, [CUBE]);
+    expect(given).toEqual(r02);
+  });
+
+  it("renders into the view the frame with the bodies' terrain", () => {
+    const frames: FrameSubmission[] = [];
+    const view: RenderView = {
+      name: "view",
+      resize: () => undefined,
+      render: (frame) => {
+        frames.push(frame);
+      },
+      readBack: () => Promise.resolve(new Uint8Array()),
+      dispose: () => undefined,
+    };
+    new WireframeRenderer(new RecordingEngine()).render(view, list, CAMERA, VIEWPORT, [], terrain);
+    const expected = new WireframeRenderer(new RecordingEngine()).frame(
+      list,
+      CAMERA,
+      VIEWPORT,
+      [],
+      terrain,
+    );
+    expect(frames).toEqual([expected]);
+  });
+
+  it("makes its seven materials, the datum's two among them", () => {
+    const engine = new SpecRecordingEngine();
+    new WireframeRenderer(engine).dispose();
+    expect(engine.specs.map((spec) => [spec.name, spec.displayName])).toEqual([
+      ["wireframe:lines", "WIREFRAME LINES"],
+      ["wireframe:occluderSphere", "BODY OCCLUDER"],
+      ["wireframe:occluderHull", "HULL OCCLUDER"],
+      ["wireframe:hullSilhouette", "HULL SILHOUETTE"],
+      ["wireframe:starSprite", "STAR SPRITES"],
+      ["wireframe:linesSurveyed", "DATUM LINES"],
+      ["wireframe:occluderSphereSurveyed", "DATUM OCCLUDER"],
+    ]);
   });
 });

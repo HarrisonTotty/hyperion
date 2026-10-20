@@ -76,6 +76,12 @@ import {
 /** The terrain's lit material's names begin with this (`terrainLitMaterialSpec`, `terrain-lit-<path>`). */
 export const TERRAIN_LIT_PREFIX = "terrain-lit-";
 
+/**
+ * The wireframe's terrain material's names begin with this (`terrainWireMaterialSpec`,
+ * `terrain-wire-<path>`; plan R10, R10.T11).
+ */
+export const TERRAIN_WIRE_PREFIX = "terrain-wire-";
+
 /** The allocations that are the terrain's: its passes' resources, and the session's masks and maps. */
 const TERRAIN_ALLOCATION = /^(?:terrain |coverage mask |class map )/u;
 
@@ -85,16 +91,21 @@ const MAX_GAP_SPANS = 8;
 /** A photorealistic view's scene target (`sceneTarget.ts`'s `<view>:hdr`). */
 const SCENE_TARGET = /^[^: ]+:hdr$/u;
 
+/** What the probe reads of one of a body's passes. */
+export interface WatchedPass {
+  readonly viewIds: ReadonlySet<string>;
+  readonly lastStep: { readonly drawSet: { readonly count: number } } | null;
+  seesPatch(id: string): boolean;
+}
+
 /**
  * What the probe reads of a terrain session (`TerrainSession`'s members of these names): its body's
- * pass, mask and survey, its memory report and its worker count.
+ * passes, the lit one and the wireframe's (R10.T11), its mask and survey, its memory report and its
+ * worker count.
  */
 export interface WatchedSession {
-  pass(body: BodyIdHex): {
-    readonly viewIds: ReadonlySet<string>;
-    readonly lastStep: { readonly drawSet: { readonly count: number } } | null;
-    seesPatch(id: string): boolean;
-  } | null;
+  pass(body: BodyIdHex): WatchedPass | null;
+  wirePass(body: BodyIdHex): WatchedPass | null;
   coverageMask(body: BodyIdHex): TextureHandle | null;
   survey(body: BodyIdHex): { readonly coverage: { maskTexels(): Uint8Array } | null } | null;
   memory(): TerrainSessionMemory;
@@ -709,15 +720,25 @@ export class TerrainProbe {
     if (frameMs !== null) {
       const seen = this.#frameAt(frameMs);
       const part = seen.views.get(view) ?? { handedOver: false, offSurvey: false, terrain: false };
-      if (frame.draws.some((draw) => draw.material.name.startsWith(TERRAIN_LIT_PREFIX))) {
+      // The lit terrain's material, or the wireframe's (R10.T11).
+      if (
+        frame.draws.some(
+          (draw) =>
+            draw.material.name.startsWith(TERRAIN_LIT_PREFIX) ||
+            draw.material.name.startsWith(TERRAIN_WIRE_PREFIX),
+        )
+      ) {
         part.terrain = true;
       }
       const pass = this.#session?.pass(this.#moon) ?? null;
-      if (pass?.viewIds.has(view) === true) {
-        if (pass.seesPatch(view)) {
-          part.handedOver = true;
-        } else {
-          part.offSurvey = true;
+      // A view hands the body over to its lit pass or, in the wireframe, to its wireframe pass.
+      for (const each of [pass, this.#session?.wirePass(this.#moon) ?? null]) {
+        if (each?.viewIds.has(view) === true) {
+          if (each.seesPatch(view)) {
+            part.handedOver = true;
+          } else {
+            part.offSurvey = true;
+          }
         }
       }
       seen.views.set(view, part);

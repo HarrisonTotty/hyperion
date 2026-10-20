@@ -54,6 +54,14 @@
  *   view's draw set of the body leaves nothing missing (`TerrainPass.maskReadyFor`); its draw
  *   list's survey edges read {@link TerrainSession.survey} and each pass's resident heights
  *   (`surveyEdgeViewsOf`).
+ * - **The wireframe's passes (R10.T11; decision D10).** A wireframe view hands a body over where
+ *   its relief subtends the wireframe's 4 px (`WIREFRAME_TERRAIN_TAU_PX`) at its limb, with R07's
+ *   hysteresis ({@link wireframeHandovers}), judged here at each step from the view's report, since
+ *   a wireframe frame plans no regimes. Each body so handed over has a pass of its own shading,
+ *   baked without the class weights and the horizon map (`HeightSourceSetting.weights`
+ *   `"skipped"`), through a lane of the same pool, shared by every wireframe view that hands it
+ *   over and made and disposed as the lit one is; each wireframe view draws its own
+ *   ({@link TerrainSession.drawWireTerrain}). The body's mask waits for both passes' rebakes.
  */
 
 import {
@@ -81,7 +89,7 @@ import { type MemoryCategory, textureBytes, type TextureSpec } from "../engine/m
 import { EngineUnavailable } from "../engine/resilientEngine";
 import type { RenderEngine, TextureHandle } from "../engine/types";
 import { isLitBody } from "../lighting/retarded";
-import type { QualitySetting } from "../quality/qualitySetting";
+import type { QualitySetting, TerrainSettings } from "../quality/qualitySetting";
 import type { HullOutline } from "../scene/hull";
 import { cameraSceneOf, type ViewBody, type ViewCraft, type ViewScene } from "../scene/model";
 import { type ClassMapSource, ClassMapStore } from "./classMap";
@@ -104,6 +112,7 @@ import {
   handoverRangeRatio,
   type HandoverReliefSource,
   handoverTauPx,
+  handsOver,
   limbDistanceM,
   pixelAngleRad,
   storeReliefSource,
@@ -118,12 +127,14 @@ import {
   type TerrainViewFrame,
   type TerrainViewFrameInput,
 } from "./terrainPass";
+import { wireframeTerrainSettings } from "./terrainWire";
 import {
   defaultHeightWorkers,
   type FieldChange,
   HeightWorkerPool,
   type WorkerLike,
 } from "./workers/pool";
+import type { WeightsLayerSetting } from "./workers/messages";
 
 /**
  * What a session asks of its server: R09's `surface_field` for the fields and `body_detail` for
@@ -174,8 +185,9 @@ export interface TerrainViewReport {
   /**
    * The style its last frame was drawn in (`ViewFrameDrawn.drawnStyle`): the wireframe while its
    * photorealistic pipelines compile, or stand in after a device loss. Only a view whose last frame
-   * was photorealistic hands a body over to a pass (the batch review's S8); its fields are judged
-   * by {@link TerrainViewReport.style}, so that a loss releases none.
+   * was photorealistic hands a body over to the lit pass (the batch review's S8), and only one
+   * whose last frame and budget are the wireframe's to the wireframe's (R10.T11); its fields are
+   * judged by {@link TerrainViewReport.style}, so that a loss releases none.
    */
   readonly drawnStyle: RenderStyle;
   /** The quality setting it draws at, whose τ the photorealistic style takes. */
@@ -300,6 +312,51 @@ export function terrainPassViewOf(
     tauPx: handoverTauPx(report.style, report.setting),
     weight: report.streamPriority === "primary" ? PRIMARY_VIEW_WEIGHT : SECONDARY_VIEW_WEIGHT,
   };
+}
+
+/**
+ * The bodies a wireframe view hands over to terrain (plan R10, R10.T11; Design note 13): each lit
+ * body of its scene whose rotation is known and whose relief (`reliefM`) subtends the wireframe's
+ * τ (`handoverTauPx`, 4 px on both settings) at its limb from the view's camera, at the presented
+ * size's centre pixel, with R07's hysteresis (`handsOver`) from the bodies it handed over last
+ * (`previous`). A view whose budget does not draw the wireframe, or whose last frame was not drawn
+ * in it, hands nothing over in it: a photorealistic view standing in with the wireframe draws no
+ * terrain, as before (the batch review's S8).
+ *
+ * @param reliefM - A body's relief by which it hands over (`HandoverReliefSource.reliefM`), or
+ *   `null` where it never does.
+ */
+export function wireframeHandovers(
+  report: TerrainViewReport,
+  reliefM: (body: BodyIdHex) => number | null,
+  previous: ReadonlySet<BodyIdHex>,
+): Set<BodyIdHex> {
+  const handed = new Set<BodyIdHex>();
+  if (report.style !== "wireframe" || report.drawnStyle !== "wireframe") {
+    return handed;
+  }
+  const { scene, pose } = report;
+  const origins = cameraSceneOf(scene).origins;
+  const tauPx = handoverTauPx("wireframe", report.setting);
+  const radPerPx = pixelAngleRad(
+    { orientation: pose.orientation, fovXRad: report.fovXRad },
+    report.presentedPx,
+  );
+  for (const body of scene.bodies) {
+    if (!isLitBody(body) || body.rotation === null) {
+      continue;
+    }
+    const centreM = relativeToCamera(
+      { kind: "body", body: body.id, m: vec3(0, 0, 0) },
+      pose,
+      origins,
+    );
+    const limbM = limbDistanceM(norm(centreM), body.radiusM);
+    if (handsOver(limbM, reliefM(body.id), tauPx, radPerPx, previous.has(body.id))) {
+      handed.add(body.id);
+    }
+  }
+  return handed;
 }
 
 /**
@@ -496,8 +553,17 @@ interface HandingView {
   readonly body: ViewBody;
 }
 
+/**
+ * A body's passes by their shading (R10.T11): the photorealistic style's, lit, and the
+ * wireframe's.
+ */
+type PassShading = "lit" | "wire";
+
 /** No view shows the terrain's fault. */
 const NO_FAULTS: ReadonlySet<ViewId> = new Set();
+
+/** No body handed over. */
+const NO_BODIES: ReadonlySet<BodyIdHex> = new Set();
 
 /** Whether a request ended because the client cancelled it (the protocol's own codes). */
 function cancelled(code: string): boolean {
@@ -526,6 +592,13 @@ export class TerrainSession {
   readonly #reports = new Map<ViewId, TerrainViewReport>();
   /** Each handed-over body's pass (R10.T16.b), from its first hand-over to its field's release. */
   readonly #passes = new Map<BodyIdHex, TerrainPass>();
+  /**
+   * Each body handed over in the wireframe's pass (R10.T11), from its first hand-over in a
+   * wireframe view to its field's release.
+   */
+  readonly #wirePasses = new Map<BodyIdHex, TerrainPass>();
+  /** The bodies each wireframe view handed over at the last step, its hysteresis's (R10.T11). */
+  readonly #wireHanded = new Map<ViewId, ReadonlySet<BodyIdHex>>();
   readonly #faultListeners = new Set<() => void>();
   readonly #unsubscribe: ReadonlyArray<() => void>;
   readonly #workerCount: number;
@@ -614,6 +687,14 @@ export class TerrainSession {
   }
 
   /**
+   * The bodies with a wireframe pass: each handed over in a wireframe view since its field was last
+   * taken (R10.T11).
+   */
+  get wirePassBodies(): ReadonlySet<BodyIdHex> {
+    return new Set(this.#wirePasses.keys());
+  }
+
+  /**
    * The views whose label blocks show the terrain's fault, `TERRAIN_NOT_AVAILABLE`, after any
    * graphics fault (decision-r10-t16-contracts §7): every view that hands a body over while every
    * height worker is lost; the same object until it changes, for `useSyncExternalStore`.
@@ -657,6 +738,31 @@ export class TerrainSession {
     return this.#passes.get(body)?.drawFor(view, input) ?? null;
   }
 
+  /** `body`'s wireframe pass (R10.T11), from its first hand-over in a wireframe view, or `null`. */
+  wirePass(body: BodyIdHex): TerrainPass | null {
+    return this.#wirePasses.get(body) ?? null;
+  }
+
+  /**
+   * Wireframe view `view`'s draw of `body`'s terrain this frame (R10.T11; the wireframe's frame
+   * terrain calls it): its wireframe pass's `drawFor` with the view's `TerrainView` and its
+   * contours' and graticule's input (`TerrainFrameInput.wire`), or `null` where no wireframe pass
+   * draws the body, or once the session is disposed. Call it after the frame's
+   * {@link TerrainSession.step}, once a view frame.
+   *
+   * @throws RangeError if more contacts are given than the contact buffer holds.
+   */
+  drawWireTerrain(
+    view: ViewId,
+    body: BodyIdHex,
+    input: TerrainViewFrameInput,
+  ): TerrainViewFrame | null {
+    if (this.#disposed) {
+      return null;
+    }
+    return this.#wirePasses.get(body)?.drawFor(view, input) ?? null;
+  }
+
   /**
    * Takes what view `id` drew this frame; it judges the fields from the next
    * {@link TerrainSession.step} on, until the view draws again or is forgotten.
@@ -671,6 +777,7 @@ export class TerrainSession {
   /** Forgets view `id`, closed or unmounted: its fields are judged without it from the next step. */
   forgetView(id: ViewId): void {
     this.#reports.delete(id);
+    this.#wireHanded.delete(id);
   }
 
   /**
@@ -795,10 +902,12 @@ export class TerrainSession {
       return;
     }
     this.#disposed = true;
-    for (const pass of this.#passes.values()) {
+    for (const pass of [...this.#passes.values(), ...this.#wirePasses.values()]) {
       pass.dispose();
     }
     this.#passes.clear();
+    this.#wirePasses.clear();
+    this.#wireHanded.clear();
     this.#faultListeners.clear();
     this.#classMaps.dispose();
     for (const unsubscribe of this.#unsubscribe) {
@@ -828,20 +937,42 @@ export class TerrainSession {
       return;
     }
     held.survey.add(change);
-    const pass = this.#passes.get(change.body);
-    if (pass === undefined) {
+    const passes = this.#passesOf(change.body);
+    if (passes.length === 0) {
       held.mask.survey(change);
       return;
     }
-    pass.setLevels(change.levels);
     const epoch = held.epoch;
-    pass.fieldChanged(change, () => {
-      if (!this.#disposed && this.#bodies.get(change.body) === held && held.epoch === epoch) {
-        held.mask.survey(change);
-        this.#flushCoverage(change.body, held, pass);
+    // The mask takes the block once every pass that draws the body has its rebakes (R10.T11: the
+    // lit one and the wireframe's alike).
+    let unsettled = passes.length;
+    for (const pass of passes) {
+      pass.setLevels(change.levels);
+      pass.fieldChanged(change, () => {
+        unsettled -= 1;
+        if (
+          unsettled === 0 &&
+          !this.#disposed &&
+          this.#bodies.get(change.body) === held &&
+          held.epoch === epoch
+        ) {
+          held.mask.survey(change);
+          this.#flushCoverage(change.body, held);
+        }
+      });
+    }
+    this.#flushCoverage(change.body, held);
+  }
+
+  /** The passes that draw `body`: its lit pass and its wireframe pass, each where it has one. */
+  #passesOf(body: BodyIdHex): TerrainPass[] {
+    const passes: TerrainPass[] = [];
+    for (const pass of [this.#passes.get(body), this.#wirePasses.get(body)]) {
+      if (pass !== undefined) {
+        passes.push(pass);
       }
-    });
-    this.#flushCoverage(change.body, held, pass);
+    }
+    return passes;
   }
 
   /**
@@ -856,19 +987,21 @@ export class TerrainSession {
       return;
     }
     held.survey.merge(coverage);
-    const pass = this.#passes.get(body);
-    if (pass === undefined) {
+    if (this.#passesOf(body).length === 0) {
       held.mask.update(coverage);
       return;
     }
     held.pendingCoverage = { coverage, posted: this.#pool.fieldBlocks(body)?.posted ?? 0 };
-    this.#flushCoverage(body, held, pass);
+    this.#flushCoverage(body, held);
   }
 
-  /** Gives a body's mask the coverage held back, once its pass is settled and the blocks taken. */
-  #flushCoverage(body: BodyIdHex, held: SessionBody, pass: TerrainPass): void {
+  /**
+   * Gives a body's mask the coverage held back, once every pass that draws it is settled and the
+   * blocks taken.
+   */
+  #flushCoverage(body: BodyIdHex, held: SessionBody): void {
     const pending = held.pendingCoverage;
-    if (pending === null || !pass.settled) {
+    if (pending === null || this.#passesOf(body).some((pass) => !pass.settled)) {
       return;
     }
     const blocks = this.#pool.fieldBlocks(body);
@@ -891,12 +1024,19 @@ export class TerrainSession {
       held.pendingCoverage = null;
       held.survey.clear();
     }
-    const pass = this.#passes.get(body);
-    if (pass !== undefined) {
-      this.#passes.delete(body);
-      pass.dispose();
-    }
+    this.#disposePasses(body);
     held?.mask.release();
+  }
+
+  /** Disposes of `body`'s passes, the lit one and the wireframe's, where it has them. */
+  #disposePasses(body: BodyIdHex): void {
+    for (const passes of [this.#passes, this.#wirePasses]) {
+      const pass = passes.get(body);
+      if (pass !== undefined) {
+        passes.delete(body);
+        pass.dispose();
+      }
+    }
   }
 
   /**
@@ -906,32 +1046,28 @@ export class TerrainSession {
    */
   #stepPasses(): void {
     const handing = this.#handingViews();
-    for (const [body, views] of handing) {
-      const first = views[0];
-      if (!this.#passes.has(body) && first !== undefined) {
-        this.#makePass(body, first);
+    const wireHanding = this.#wireHandingViews();
+    for (const [shading, passes, views] of [
+      ["lit", this.#passes, handing],
+      ["wire", this.#wirePasses, wireHanding],
+    ] as const) {
+      for (const [body, each] of views) {
+        const first = each[0];
+        if (!passes.has(body) && first !== undefined) {
+          this.#makePass(body, first, shading, passes);
+        }
       }
-    }
-    for (const [body, pass] of this.#passes) {
-      const views = handing.get(body) ?? [];
-      const passViews = views
-        .flatMap(({ id, report, body: seen }) => terrainPassViewOf(id, report, seen) ?? [])
-        .slice(0, MAX_SELECTION_VIEWS);
-      const seen = this.#sceneWith(body);
-      const grounded =
-        seen === null
-          ? []
-          : sceneContacts(
-              seen.scene,
-              seen.body,
-              datumGroundUnder(pass.planet.figure),
-              finestPatchSizeM(pass.planet),
-            );
-      pass.step({ views: passViews, grounded });
+      for (const [body, pass] of passes) {
+        this.#stepPass(body, pass, views.get(body) ?? []);
+      }
     }
     const faulted = this.#pool.lostWorkers === this.#pool.workerCount;
     const faults = faulted
-      ? new Set([...handing.values()].flatMap((views) => views.map(({ id }) => id)))
+      ? new Set(
+          [...handing.values(), ...wireHanding.values()].flatMap((views) =>
+            views.map(({ id }) => id),
+          ),
+        )
       : NO_FAULTS;
     if (faults.size !== this.#faults.size || [...faults].some((id) => !this.#faults.has(id))) {
       this.#faults = faults.size === 0 ? NO_FAULTS : faults;
@@ -939,6 +1075,55 @@ export class TerrainSession {
         listener();
       }
     }
+  }
+
+  /** Steps `body`'s pass over the views that hand it over, with the scene's craft as its contacts. */
+  #stepPass(body: BodyIdHex, pass: TerrainPass, views: ReadonlyArray<HandingView>): void {
+    const passViews = views
+      .flatMap(({ id, report, body: seen }) => terrainPassViewOf(id, report, seen) ?? [])
+      .slice(0, MAX_SELECTION_VIEWS);
+    const seen = this.#sceneWith(body);
+    const grounded =
+      seen === null
+        ? []
+        : sceneContacts(
+            seen.scene,
+            seen.body,
+            datumGroundUnder(pass.planet.figure),
+            finestPatchSizeM(pass.planet),
+          );
+    pass.step({ views: passViews, grounded });
+  }
+
+  /**
+   * The wireframe views that hand each wanted body over (R10.T11), in the order they first
+   * reported: {@link wireframeHandovers} of each report, from the bodies it handed over at the last
+   * step, which it keeps for the next.
+   */
+  #wireHandingViews(): Map<BodyIdHex, HandingView[]> {
+    const handing = new Map<BodyIdHex, HandingView[]>();
+    for (const [id, report] of this.#reports) {
+      const handed = wireframeHandovers(
+        report,
+        (body) => (this.#bodies.has(body) ? this.#reliefs.reliefM(body) : null),
+        this.#wireHanded.get(id) ?? NO_BODIES,
+      );
+      if (handed.size === 0) {
+        this.#wireHanded.delete(id);
+        continue;
+      }
+      this.#wireHanded.set(id, handed);
+      for (const body of handed) {
+        const seen = report.scene.bodies.find((each) => each.id === body);
+        if (seen === undefined) {
+          continue;
+        }
+        const views = handing.get(body) ?? [];
+        views.push({ id, report, body: seen });
+        handing.set(body, views);
+      }
+    }
+    return handing;
   }
 
   /** A scene of the views' last reports holding `body`, with the body as it holds it; `null` where none does. */
@@ -955,7 +1140,7 @@ export class TerrainSession {
   /**
    * The views that hand each wanted body over, in the order they first reported: T10.e's `terrain`
    * regime in a photorealistic view's last plan, for a body whose rotation is known (R10.T16.b;
-   * the wireframe's hand-over is R10.T11's).
+   * the wireframe's are {@link TerrainSession}'s `#wireHandingViews`, R10.T11).
    */
   #handingViews(): Map<BodyIdHex, HandingView[]> {
     const handing = new Map<BodyIdHex, HandingView[]>();
@@ -982,11 +1167,17 @@ export class TerrainSession {
   }
 
   /**
-   * Makes `body`'s pass at its first hand-over, on its field header's figure and the workers' level
-   * table, through a lane of the pool, once its detail seed and header are held; nothing while the
-   * device is lost (the next step tries again).
+   * Makes `body`'s pass of `shading` into `passes` at its first hand-over in a view of its style,
+   * on its field header's figure and the workers' level table, through a lane of the pool, once its
+   * detail seed and header are held; nothing while the device is lost (the next step tries again).
+   * The wireframe's bakes skip the class weights and the horizon map (decision D10).
    */
-  #makePass(body: BodyIdHex, first: HandingView): void {
+  #makePass(
+    body: BodyIdHex,
+    first: HandingView,
+    shading: PassShading,
+    passes: Map<BodyIdHex, TerrainPass>,
+  ): void {
     const held = this.#bodies.get(body);
     const header = this.#store.header(body);
     const detailSeed = this.detailSeed(body);
@@ -1001,13 +1192,30 @@ export class TerrainSession {
     if (!(figure.polarRadiusM > 0 && figure.polarRadiusM <= figure.equatorialRadiusM)) {
       return;
     }
+    let terrain: TerrainSettings | null;
+    let weights: WeightsLayerSetting;
+    let material: string;
+    switch (shading) {
+      case "lit":
+        terrain = null;
+        weights = "baked";
+        material = "terrain material";
+        break;
+      case "wire":
+        // The wireframe's cache, sized by its slots (`WIREFRAME_TERRAIN_SLOTS`, R10.T11).
+        terrain = wireframeTerrainSettings(first.report.setting);
+        weights = "skipped";
+        material = "wireframe's terrain material";
+        break;
+    }
     let pass: TerrainPass;
     try {
       pass = new TerrainPass({
         engine: this.#engine,
         setting: first.report.setting,
+        ...(terrain === null ? {} : { terrain }),
         planet: planetGeometry(figure, this.#pool.fieldLevels(body)),
-        source: { kind: "body", body, detailSeed, weights: "baked" },
+        source: { kind: "body", body, detailSeed, weights },
         createPool: (bake) => this.#pool.lane(bake),
         survey: held.survey,
         // Each view's selection opened by its motion, so that no strip at its leading edge is
@@ -1020,9 +1228,9 @@ export class TerrainSession {
       }
       throw error;
     }
-    this.#passes.set(body, pass);
+    passes.set(body, pass);
     void pass.ready().catch((error: unknown) => {
-      console.error(`the terrain material of ${body} failed:`, error);
+      console.error(`the ${material} of ${body} failed:`, error);
     });
   }
 
@@ -1075,8 +1283,7 @@ export class TerrainSession {
    * detail seed's request, its class map and its mask.
    */
   #drop(body: BodyIdHex, held: SessionBody): void {
-    this.#passes.get(body)?.dispose();
-    this.#passes.delete(body);
+    this.#disposePasses(body);
     this.#bodies.delete(body);
     if (held.seed.kind === "asking") {
       held.seed.cancel();

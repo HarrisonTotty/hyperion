@@ -2,7 +2,8 @@
  * The terrain session's passes (plan R10, R10.T16.b): one a handed-over body, shared by the views
  * that hand it over, made at its first hand-over and disposed at its field's release; the mask held
  * behind the rebakes a block names; the fault; the device loss; and the releases, over R03's
- * `FakeWebSocket`, scripted height workers and R01's counting engine.
+ * `FakeWebSocket`, scripted height workers and R01's counting engine. The wireframe's passes
+ * (R10.T11) beside the lit ones close the file; the hand-over they take is `sessionWire.test.ts`'.
  */
 
 import type { BodyIdHex, DetailSeedHex, UniverseIdHex } from "@hyperion/protocol";
@@ -28,6 +29,7 @@ import { FakeWebSocket } from "../../test/FakeWebSocket";
 import { ScriptedHeightWorker } from "../../test/scriptedHeightWorker";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import {
+  moonRangeM,
   SESSION_FOV_X_RAD,
   SESSION_MOON,
   SESSION_MOON_RADIUS_M,
@@ -45,6 +47,7 @@ import type { MemoryCategory } from "../engine/memory";
 import { DISC_ANNULI_HIGH } from "../lighting/annuli";
 import { sunLikeHostDisc } from "../lighting/hostDisc";
 import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
+import { WIREFRAME_TERRAIN_SLOTS, WIREFRAME_TERRAIN_TAU_PX } from "../quality/qualitySetting";
 import { AU_M } from "../scenes/kept";
 import type { ViewBody, ViewScene } from "../scene/model";
 import { TERRAIN_NOT_AVAILABLE } from "./annunciation";
@@ -62,7 +65,12 @@ import {
   terrainPassViewOf,
   type TerrainViewReport,
 } from "./session";
-import type { TerrainPass, TerrainView, TerrainViewFrameInput } from "./terrainPass";
+import type {
+  TerrainPass,
+  TerrainView,
+  TerrainViewFrame,
+  TerrainViewFrameInput,
+} from "./terrainPass";
 import { PALETTE_NONE, type TerrainLayers } from "./workers/messages";
 import { MAX_CONSECUTIVE_WORKER_FAILURES } from "./workers/pool";
 
@@ -427,13 +435,13 @@ describe("the terrain session's passes (R10.T16.b; decision-r10-live-path, D3 an
     expect(h.session.passBodies.size).toBe(0);
   });
 
-  it("hands nothing over for a wireframe view", async () => {
+  it("hands a wireframe view's body to its wireframe pass alone, never the lit one (R10.T11)", async () => {
     const h = await harness();
     h.session.noteView(PRIMARY, handing(5e6, { style: "wireframe", drawnStyle: "wireframe" }));
     h.session.step();
     await answerField(h);
     h.session.step();
-    expect(h.session.passBodies.size).toBe(0);
+    expect([[...h.session.passBodies], [...h.session.wirePassBodies]]).toEqual([[], [MOON]]);
   });
 
   it("hands nothing over of a body whose rotation is not known", async () => {
@@ -931,5 +939,346 @@ describe("each view's frame terrain through the session (R10.T16.c)", () => {
     expect(terrain.symbologyDepth().map((draw) => draw.material.name)).toEqual([
       h.session.pass(MOON)?.symbologyDepthMaterial?.name,
     ]);
+  });
+});
+
+/** A wireframe view `distanceM` above the moon's north pole (R10.T11). */
+function wireAt(distanceM: number, overrides: Partial<TerrainViewReport> = {}): TerrainViewReport {
+  return { ...viewAt(distanceM, "wireframe", { scene: SCENE }), ...overrides };
+}
+
+/** The moon handed over by `views`' reports, its field answered over `cells`, its passes made. */
+async function handedOverBy(
+  h: Harness,
+  views: ReadonlyArray<readonly [ViewId, TerrainViewReport]>,
+  cells: ReadonlyArray<number> = [0, 1],
+): Promise<void> {
+  for (const [id, report] of views) {
+    h.session.noteView(id, report);
+  }
+  h.session.step();
+  await answerField(h, 1, cells);
+  h.session.step();
+  await settle();
+}
+
+/** The survey each pass's bakes are answered over, by its weights, or `null` to hold them. */
+interface BakeSurveys {
+  /** The lit pass's (`weights: "baked"`). */
+  readonly baked: ReadonlySet<number> | null;
+  /** The wireframe pass's (`weights: "skipped"`). */
+  readonly skipped: ReadonlySet<number> | null;
+}
+
+/** Answers every bake the workers hold of a pass whose survey `surveys` gives; returns how many. */
+function answerBakesOf(h: Harness, surveys: BakeSurveys): number {
+  let answered = 0;
+  for (const worker of h.workers) {
+    for (const request of worker.pendingBakes) {
+      const { key, settings } = request;
+      const source = settings.source;
+      const surveyed = source.kind === "body" ? surveys[source.weights] : null;
+      if (surveyed === null) {
+        continue;
+      }
+      const n = settings.normals === "double" ? 129 : 65;
+      worker.reply({
+        kind: "baked",
+        id: request.id,
+        bake: {
+          key,
+          generation: request.generation,
+          originM: vec3(0, 0, SESSION_MOON_RADIUS_M),
+          heights: new Float32Array(65 * 65 * 2),
+          offsets: settings.vertexPath === "baked-offsets" ? new Float32Array(65 * 65 * 6) : null,
+          normals: new Float16Array(n * n * 2),
+          heightRangeM: [0, 0],
+          boundingRadiusM: 1,
+          originHeightM: 0,
+          skirtDepthM: 1,
+          layers: layersOver(key, surveyed),
+        },
+      });
+      answered += 1;
+    }
+  }
+  return answered;
+}
+
+/** Steps the session and answers the bakes asked over `surveys`, `rounds` times. */
+async function streamBakesOf(h: Harness, rounds: number, surveys: BakeSurveys): Promise<void> {
+  for (let n = 0; n < rounds; n += 1) {
+    h.session.step();
+    answerBakesOf(h, surveys);
+    // Each round answers the bakes the round before asked, so the rounds cannot run together.
+    // oxlint-disable-next-line no-await-in-loop
+    await settle();
+  }
+  h.session.step();
+}
+
+/** Both passes' bakes answered over cells 0 and 1. */
+const BOTH_OVER_FIRST_CELLS: BakeSurveys = { baked: new Set([0, 1]), skipped: new Set([0, 1]) };
+
+/** A wireframe frame's input from the primary's camera, its contours at 200 m (R10.T11). */
+function wireFrameAt(nowMs: number): TerrainViewFrameInput {
+  return {
+    view: PRIMARY_VIEW,
+    sunDirectionBodyFixed: { x: 0, y: 0, z: 1 },
+    sunIlluminanceLx: [0, 0, 0],
+    exposureScale: 1,
+    wire: {
+      intervalM: 200,
+      seaLevelM: null,
+      strokeScale: 1,
+      graticule: null,
+      colours: {
+        muted: new Float32Array([0.3, 0.3, 0.3, 1]),
+        text: new Float32Array([0.8, 0.8, 0.8, 1]),
+        casing: new Float32Array([0, 0, 0, 1]),
+      },
+      occluderSlopePx: 3,
+    },
+    nowMs,
+  };
+}
+
+/** The material a view's frame of a pass draws with, or `null` where it draws nothing. */
+function material(frame: TerrainViewFrame | null): string | null {
+  return frame?.draw?.material.name ?? null;
+}
+
+/** Cells of face +z at the field's level, by their `[i, j]`. */
+function faceZCells(ijs: ReadonlyArray<readonly [number, number]>): number[] {
+  return ijs.map(([i, j]) => fieldCellIndex({ face: 2, level: FIELD_LEVEL, i, j }));
+}
+
+describe("the terrain session's wireframe pass (R10.T11; decision D10)", () => {
+  it("is made at a wireframe view's first hand-over, its cache of the wireframe's 520 slots", async () => {
+    const h = await harness();
+    await handedOverBy(h, [[PRIMARY, wireAt(5e6)]]);
+    expect(h.session.wirePass(MOON)?.layout.slots.slotCount).toBe(WIREFRAME_TERRAIN_SLOTS);
+  });
+
+  it("asks its bakes without the class weights and the horizon map", async () => {
+    const h = await harness();
+    await handedOverBy(h, [[PRIMARY, wireAt(5e6)]]);
+    const weights = h.workers.flatMap((w) =>
+      w.pendingBakes.map((b) =>
+        b.settings.source.kind === "body" ? b.settings.source.weights : null,
+      ),
+    );
+    expect([weights.length > 0, new Set(weights)]).toEqual([true, new Set(["skipped"])]);
+  });
+
+  it("bakes through a lane of the session's one pool, starting no worker of its own", async () => {
+    const h = await harness();
+    await handedOverBy(h, [[PRIMARY, wireAt(5e6)]]);
+    expect([h.workers.length, h.workers.every((w) => w.pendingBakes.length > 0)]).toEqual([
+      2,
+      true,
+    ]);
+  });
+
+  it("hands a photorealistic view's body to its lit pass alone, never the wireframe's", async () => {
+    const h = await harness();
+    await handedOverBy(h, [[PRIMARY, handing(5e6)]]);
+    expect([[...h.session.passBodies], [...h.session.wirePassBodies]]).toEqual([[MOON], []]);
+  });
+
+  it("makes no wireframe pass of a body with no survey, whose relief hands nothing over", async () => {
+    const h = await harness();
+    await handedOverBy(h, [[PRIMARY, wireAt(5e6)]], []);
+    expect(h.session.wirePassBodies.size).toBe(0);
+  });
+});
+
+describe("a body handed over in both styles at once (R10.T11)", () => {
+  /** The views of both styles by the moon's pole, the primary photorealistic. */
+  const BOTH: ReadonlyArray<readonly [ViewId, TerrainViewReport]> = [
+    [PRIMARY, handing(5e6)],
+    [INSTRUMENT, wireAt(5e6, { streamPriority: "secondary" })],
+  ];
+
+  /** Both views far beyond twice their ranges, where the field is released. */
+  function farAway(h: Harness): void {
+    h.session.noteView(PRIMARY, notHanding(7e7));
+    h.session.noteView(INSTRUMENT, wireAt(7e7, { streamPriority: "secondary" }));
+    h.session.step();
+  }
+
+  it("has both passes, on the one pool's two workers", async () => {
+    const h = await harness();
+    await handedOverBy(h, BOTH);
+    expect([[...h.session.passBodies], [...h.session.wirePassBodies], h.workers.length]).toEqual([
+      [MOON],
+      [MOON],
+      2,
+    ]);
+  });
+
+  it("takes each view into its own style's pass", async () => {
+    const h = await harness();
+    await handedOverBy(h, BOTH);
+    expect([
+      [...(h.session.pass(MOON)?.viewIds ?? [])],
+      [...(h.session.wirePass(MOON)?.viewIds ?? [])],
+    ]).toEqual([[PRIMARY], [INSTRUMENT]]);
+  });
+
+  it("draws each view through its own style's pass, and neither through the other's", async () => {
+    const h = await harness();
+    await handedOverBy(h, BOTH);
+    await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
+    expect([
+      material(h.session.drawTerrain(PRIMARY, MOON, frameAt(0)))?.startsWith("terrain-lit-"),
+      material(h.session.drawWireTerrain(INSTRUMENT, MOON, wireFrameAt(0)))?.startsWith(
+        "terrain-wire-",
+      ),
+      material(h.session.drawTerrain(INSTRUMENT, MOON, frameAt(16))),
+      material(h.session.drawWireTerrain(PRIMARY, MOON, wireFrameAt(16))),
+    ]).toEqual([true, true, null, null]);
+  });
+
+  it("gives the mask a block's cells only once the wireframe pass's rebakes have landed too", async () => {
+    const h = await harness();
+    // The first survey: four cells about the north pole of face +z; the delta, two beside them.
+    const first = faceZCells([
+      [15, 15],
+      [16, 15],
+      [15, 16],
+      [16, 16],
+    ]);
+    const second = faceZCells([
+      [17, 15],
+      [17, 16],
+    ]);
+    const both = new Set([...first, ...second]);
+    await handedOverBy(h, BOTH, first);
+    for (const worker of h.workers) {
+      answerBlock(worker, 0, blockChange(FIELD_LEVEL, runsOf(first)));
+    }
+    // The lit pass's bakes hold the delta's cells already, so that its block names no rebake of
+    // the lit pass's, and the wireframe pass's do not, so that it names the wireframe pass's: under
+    // a countdown of the lit pass's alone, the mask would take the cells at once.
+    await streamBakesOf(h, 6, { baked: both, skipped: new Set(first) });
+    const lit = h.session.pass(MOON);
+    const wire = h.session.wirePass(MOON);
+    if ((lit?.lastStep?.drawSet.count ?? 0) === 0 || (wire?.lastStep?.drawSet.count ?? 0) === 0) {
+      throw new Error("both passes draw patches over the survey");
+    }
+    h.session.noteSurfaceRevisions([{ body: MOON, revision: 2 }]);
+    await answerField(h, 2, second);
+    for (const worker of h.workers) {
+      answerBlock(worker, 1, blockChange(FIELD_LEVEL, runsOf(second)));
+    }
+    const held = {
+      lit: lit?.settled,
+      wire: wire?.settled,
+      masked: second.some((cell) => maskCells(h).has(cell)),
+    };
+    await streamBakesOf(h, 6, { baked: both, skipped: both });
+    const landed = {
+      lit: lit?.settled,
+      wire: wire?.settled,
+      masked: second.every((cell) => maskCells(h).has(cell)),
+    };
+    expect([held, landed]).toEqual([
+      { lit: true, wire: false, masked: false },
+      { lit: true, wire: true, masked: true },
+    ]);
+  });
+
+  it("disposes of both passes at the field's release, its handles and tallies where they started", async () => {
+    const h = await harness();
+    const categories: ReadonlyArray<MemoryCategory> = ["height-cache", "other", "coarse-field-gpu"];
+    const before = h.engine.live;
+    const bytes = categories.map((c) => h.tally.liveBytes(c));
+    await handedOverBy(h, BOTH);
+    await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
+    h.session.drawTerrain(PRIMARY, MOON, frameAt(0));
+    h.session.drawWireTerrain(INSTRUMENT, MOON, wireFrameAt(0));
+    farAway(h);
+    expect([h.session.passBodies.size, h.session.wirePassBodies.size]).toEqual([0, 0]);
+    expect(h.engine.live).toEqual(before);
+    expect(categories.map((c) => h.tally.liveBytes(c))).toEqual(bytes);
+  });
+
+  it("draws nothing of the wireframe pass once the field is released", async () => {
+    const h = await harness();
+    await handedOverBy(h, BOTH);
+    await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
+    farAway(h);
+    expect(h.session.drawWireTerrain(INSTRUMENT, MOON, wireFrameAt(16))).toBeNull();
+  });
+
+  it("disposes of both passes when disposed, leaving no handle", async () => {
+    const h = await harness();
+    const before = h.engine.live;
+    await handedOverBy(h, BOTH);
+    h.session.dispose();
+    expect([h.engine.live, h.session.passBodies.size, h.session.wirePassBodies.size]).toEqual([
+      before,
+      0,
+      0,
+    ]);
+  });
+});
+
+describe("the terrain session's fault in the wireframe (R10.T11; decision-r10-t16-contracts §7)", () => {
+  it("shows the fault on a wireframe view that hands a body over once every worker is lost", async () => {
+    const h = await harness();
+    await handedOverBy(h, [
+      [PRIMARY, wireAt(5e6)],
+      [THIRD, wireAt(6e7, { streamPriority: "secondary" })],
+    ]);
+    loseEveryWorker(h);
+    h.session.step();
+    expect([...h.session.terrainFaults]).toEqual([PRIMARY]);
+  });
+
+  it("shows the fault on the views of both styles that hand a body over", async () => {
+    const h = await harness();
+    await handedOverBy(h, [
+      [PRIMARY, handing(5e6)],
+      [INSTRUMENT, wireAt(5e6, { streamPriority: "secondary" })],
+    ]);
+    loseEveryWorker(h);
+    h.session.step();
+    expect([...h.session.terrainFaults].toSorted()).toEqual([INSTRUMENT, PRIMARY].toSorted());
+  });
+});
+
+describe("a wireframe view's hysteresis in the session (R10.T11)", () => {
+  /** The moon's hand-over range in the wireframe, at its 4 px, m. */
+  const wireRangeM = moonRangeM(WIREFRAME_TERRAIN_TAU_PX);
+
+  /** A wireframe primary whose camera is `limbM` from the moon's limb. */
+  function wireAtLimb(limbM: number): TerrainViewReport {
+    return wireAt(Math.hypot(limbM, SESSION_MOON_RADIUS_M));
+  }
+
+  /** The moon handed over by the wireframe primary well inside its range, its pass made. */
+  async function handedOverInside(): Promise<Harness> {
+    const h = await harness();
+    await handedOverBy(h, [[PRIMARY, wireAtLimb(0.5 * wireRangeM)]]);
+    return h;
+  }
+
+  it("keeps a body handed over while the view moves out between the bands", async () => {
+    const h = await handedOverInside();
+    // At the range itself: past range ÷ 1.1, where it would not hand over afresh, and inside
+    // range ÷ 0.9, where it keeps the hand-over it had.
+    h.session.noteView(PRIMARY, wireAtLimb(wireRangeM));
+    h.session.step();
+    expect([...(h.session.wirePass(MOON)?.viewIds ?? [])]).toEqual([PRIMARY]);
+  });
+
+  it("judges a forgotten view afresh: reported again between the bands, it hands nothing over", async () => {
+    const h = await handedOverInside();
+    h.session.forgetView(PRIMARY);
+    h.session.noteView(PRIMARY, wireAtLimb(wireRangeM));
+    h.session.step();
+    expect([...(h.session.wirePass(MOON)?.viewIds ?? [])]).toEqual([]);
   });
 });

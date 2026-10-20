@@ -1,16 +1,18 @@
 /**
  * A view's live terrain in its frame (plan R10, R10.T16.c): the lights from its body's disc
  * record, its view from the plan's body, the draws and the mask through the session's seams, and
- * the survey edges every view's draw list marks, in both styles.
+ * the survey edges every view's draw list marks, in both styles; and a wireframe view's terrain
+ * (R10.T11), its contours at one interval and its bodies' graticules.
  */
 
-import type { BodyIdHex } from "@hyperion/protocol";
+import type { BodyIdHex, SurfaceHeaderDto } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import { add, dot, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import {
   FIXTURE_MOON,
   FIXTURE_MOON_CENTRE_M,
+  FIXTURE_PLANET,
   FIXTURE_SYSTEM,
   NO_TURN,
 } from "../../test/viewFixtures";
@@ -27,6 +29,7 @@ import {
 } from "../bodies/draw";
 import { type DiscRecord, discReflectance } from "../bodies/discShading";
 import { discSurfaceLaws } from "../bodies/discSurface";
+import { rotationColumns } from "../bodies/smoothMesh";
 import type { CameraPose } from "../camera/pose";
 import type { ProjectionCamera } from "../camera/projection";
 import { IDENTITY_QUATERNION, lookAlong, rotationRows } from "../camera/quaternion";
@@ -43,6 +46,8 @@ import { sunLikeHostDisc } from "../lighting/hostDisc";
 import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
 import type { ViewScene } from "../scene/model";
 import { AU_M } from "../scenes/kept";
+import type { DrawCamera } from "../wireframe/drawList";
+import { linearColour } from "../wireframe/submit";
 import type { TerrainAnnunciation } from "./annunciation";
 import { CLASS_MAP_LEVEL, classMapLawsOf } from "./classMap";
 import { CoverageView, fieldCellIndex } from "./coverage";
@@ -55,6 +60,9 @@ import {
   terrainLightingOf,
   terrainViewOf,
   type ViewTerrainSource,
+  type WireframeTerrainInput,
+  wireframeTerrainOf,
+  type WireTerrainSource,
 } from "./frameTerrain";
 import { handoverTauPx, limbDistanceM, pixelAngleRad } from "./handover";
 import type { PatchKey } from "./patchKey";
@@ -68,6 +76,7 @@ import {
   terrainTexelLaws,
 } from "./terrainMaterial";
 import type { TerrainViewFrame, TerrainViewFrameInput } from "./terrainPass";
+import { contourInterval } from "./terrainWire";
 import { type BakedPatch, PALETTE_NONE, PHOTOMETRY_STRIDE } from "./workers/messages";
 
 const BODY: BodyIdHex = "0200080020000000.0301";
@@ -375,6 +384,8 @@ function fakeSource(
       wanted: new Set(),
       survey: () => null,
       coverageMask: (body) => (body === BODY ? MASK : null),
+      wirePass: () => null,
+      drawWireTerrain: () => null,
       pass: (body) => (body === BODY && options.hasPass !== false ? pass : null),
       drawTerrain: (view, body, input) => {
         drawn.push({ view, body, input });
@@ -573,6 +584,8 @@ function edgeSource(
         ? { coverage: coverageOf([CELL_A, CELL_B]), header: moonLikeHeader(MOON) }
         : null,
     coverageMask: () => null,
+    wirePass: () => null,
+    drawWireTerrain: () => null,
     drawTerrain: () => null,
     pass: (body) =>
       body === MOON && heights !== null
@@ -585,6 +598,11 @@ function edgeSource(
         : null,
     ...overrides,
   };
+}
+
+/** Whether every height of `heights` lies within a metre of `heightM`, and there are some. */
+function allNear(heights: ReadonlyArray<number>, heightM: number): boolean {
+  return heights.length > 8 && heights.every((h) => Math.abs(h - heightM) < 1);
 }
 
 describe("the survey edges a view marks (R10.T16.c)", () => {
@@ -642,7 +660,7 @@ describe("the survey edges a view marks (R10.T16.c)", () => {
     });
   });
 
-  it("hides points behind the drawn ground only in a photorealistic view its body's pass draws", () => {
+  it("hides points behind the drawn ground only in a photorealistic view its body's lit pass draws, with no wireframe pass", () => {
     const heights = new ResidentHeights();
     const ground = (style: "photorealistic" | "wireframe", view = VIEW): boolean =>
       surveyEdgeViewsOf(edgeSource(heights), view, SCENE, DRAW_CAMERA, VIEWPORT, style)[0]
@@ -654,21 +672,23 @@ describe("the survey edges a view marks (R10.T16.c)", () => {
     ]).toEqual([true, false, false]);
   });
 
-  /** The heights over the datum of the moon's edge's line points on cells A and B, in `view`. */
+  /** A source whose lit pass's resident bakes stand the edge on cell A at 500 m. */
+  function litAt500(): ViewTerrainSource {
+    const heights = new ResidentHeights();
+    heights.take(edgeBake(CELL_A, 500));
+    return edgeSource(heights);
+  }
+
+  /**
+   * The heights over the datum of the moon's edge's line points on cells A and B, in `view`, over
+   * `source`.
+   */
   function rimHeights(
     style: "photorealistic" | "wireframe",
     view = VIEW,
+    source: ViewTerrainSource = litAt500(),
   ): { readonly onA: number[]; readonly onB: number[] } {
-    const heights = new ResidentHeights();
-    heights.take(edgeBake(CELL_A, 500));
-    const [edge] = surveyEdgeViewsOf(
-      edgeSource(heights),
-      view,
-      SCENE,
-      DRAW_CAMERA,
-      VIEWPORT,
-      style,
-    );
+    const [edge] = surveyEdgeViewsOf(source, view, SCENE, DRAW_CAMERA, VIEWPORT, style);
     if (edge === undefined) {
       throw new Error("the moon's edge is marked");
     }
@@ -705,7 +725,7 @@ describe("the survey edges a view marks (R10.T16.c)", () => {
   });
 
   it.each([
-    ["the wireframe", "wireframe", VIEW],
+    ["the wireframe, with no wireframe pass", "wireframe", VIEW],
     ["a view its pass does not draw", "photorealistic", INSTRUMENT],
   ] as const)(
     "stands the rim on the datum, the figure drawn, where the view draws no terrain of the body: %s",
@@ -714,4 +734,368 @@ describe("the survey edges a view marks (R10.T16.c)", () => {
       expect([...onA, ...onB].every((h) => Math.abs(h) < 1)).toBe(true);
     },
   );
+
+  /**
+   * A source whose lit pass's bakes stand the edge on cell A at 900 m, taking `VIEW`, and whose
+   * wireframe pass's at 500 m, taking `wireViews` (R10.T11).
+   */
+  function bothPasses(wireViews: ReadonlySet<string>): ViewTerrainSource {
+    const lit = new ResidentHeights();
+    lit.take(edgeBake(CELL_A, 900));
+    const wire = new ResidentHeights();
+    wire.take(edgeBake(CELL_A, 500));
+    return edgeSource(lit, {
+      wirePass: (body) =>
+        body === MOON
+          ? {
+              maskReadyFor: () => true,
+              symbologyDepthMaterial: null,
+              heights: wire,
+              viewIds: wireViews,
+            }
+          : null,
+    });
+  }
+
+  it("stands the rim on the wireframe pass's bakes in a wireframe view it takes, not the lit pass's (R10.T11)", () => {
+    const { onA, onB } = rimHeights("wireframe", VIEW, bothPasses(new Set([VIEW])));
+    expect([allNear(onA, 500), allNear(onB, 0)]).toEqual([true, true]);
+  });
+
+  it("stands the rim on the lit pass's bakes in the photorealistic style, not the wireframe pass's", () => {
+    const { onA } = rimHeights("photorealistic", VIEW, bothPasses(new Set([VIEW])));
+    expect(allNear(onA, 900)).toBe(true);
+  });
+
+  it("stands the rim on the datum in a wireframe view its wireframe pass did not take, the lit pass's taking it", () => {
+    const { onA, onB } = rimHeights("wireframe", VIEW, bothPasses(new Set([INSTRUMENT])));
+    expect(allNear([...onA, ...onB], 0)).toBe(true);
+  });
+
+  it("hides points behind the drawn ground in a wireframe view only where its wireframe pass takes it", () => {
+    const ground = (wireViews: ReadonlySet<string>): boolean =>
+      surveyEdgeViewsOf(bothPasses(wireViews), VIEW, SCENE, DRAW_CAMERA, VIEWPORT, "wireframe")[0]
+        ?.ground !== undefined;
+    expect([ground(new Set([VIEW])), ground(new Set([INSTRUMENT]))]).toEqual([true, false]);
+  });
+});
+
+/** Stand-in colours of the wireframe's terrain, one distinct colour per token. */
+const WIRE_TOKENS = { textMuted: "#909090", text: "#e0e0e0", surface0: "#101010" } as const;
+
+/** A draw the wireframe's fake pass gives. */
+const WIRE_DRAW: DrawItem = {
+  mesh: { kind: "mesh", name: "terrain patches" },
+  material: { kind: "material", name: "terrain-wire-baked-offsets" },
+  offsetFromCameraM: new Float32Array(3),
+  uniforms: {},
+  textures: {},
+};
+
+/** The moon's datum's polar radius, m (`moonLikeHeader`'s). */
+const MOON_POLAR_M = 1_736_000;
+
+/** A camera `distanceM` from the moon's centre over its north pole, looking down, across 90°. */
+function cameraAt(distanceM: number): DrawCamera {
+  return {
+    pose: { ...POSE, positionM: add(FIXTURE_MOON_CENTRE_M, vec3(0, 0, distanceM)) },
+    fovXRad: Math.PI / 2,
+  };
+}
+
+/** A camera `heightM` above the moon's datum at its north pole. */
+function abovePole(heightM: number): DrawCamera {
+  return cameraAt(MOON_POLAR_M + heightM);
+}
+
+/**
+ * A camera from which the moon's sphere of its scene radius spans `diameterPx` across
+ * {@link VIEWPORT} at 90°: 2 asin(r ÷ d) at 960 px a radian.
+ */
+function seeingMoonAt(diameterPx: number): DrawCamera {
+  return cameraAt(1_738_100 / Math.sin(diameterPx / (2 * 960)));
+}
+
+/** A body as the wireframe's fake source holds it. */
+interface WireBody {
+  /** The views its wireframe pass took: `VIEW` by default. */
+  readonly viewIds?: ReadonlySet<string>;
+  /** Its pass's resident heights: none by default. */
+  readonly heights?: ResidentHeights;
+  /** Its survey's header: `moonLikeHeader`'s of the body by default. */
+  readonly header?: SurfaceHeaderDto | null;
+  /** What its draw gives beyond a drawn frame, its mask ready. */
+  readonly frame?: Partial<TerrainViewFrame>;
+  /** Its coverage mask: {@link MASK} by default. */
+  readonly mask?: TextureHandle | null;
+}
+
+/** A wireframe source holding a wireframe pass of each body of `bodies`, recording what it draws. */
+function wireSource(bodies: ReadonlyMap<BodyIdHex, WireBody>): {
+  readonly source: WireTerrainSource;
+  readonly drawn: Array<{ view: string; body: string; input: TerrainViewFrameInput }>;
+} {
+  const drawn: Array<{ view: string; body: string; input: TerrainViewFrameInput }> = [];
+  return {
+    drawn,
+    source: {
+      wirePass: (body) => {
+        const each = bodies.get(body);
+        return each === undefined
+          ? null
+          : {
+              maskReadyFor: () => true,
+              symbologyDepthMaterial: null,
+              heights: each.heights ?? new ResidentHeights(),
+              viewIds: each.viewIds ?? new Set([VIEW]),
+            };
+      },
+      drawWireTerrain: (view, body, input) => {
+        drawn.push({ view, body, input });
+        const each = bodies.get(body);
+        return each === undefined
+          ? null
+          : {
+              draw: WIRE_DRAW,
+              conditions: { streaming: false, detailLimited: false },
+              annunciation: null,
+              fault: null,
+              missing: false,
+              standingIn: false,
+              maskReady: true,
+              ...each.frame,
+            };
+      },
+      coverageMask: (body) => {
+        const mask = bodies.get(body)?.mask;
+        return mask === undefined ? MASK : mask;
+      },
+      survey: (body) => {
+        const each = bodies.get(body);
+        if (each === undefined) {
+          return null;
+        }
+        return {
+          coverage: null,
+          header: each.header === undefined ? moonLikeHeader(body) : each.header,
+        };
+      },
+    },
+  };
+}
+
+/** The moon alone, as `wireSource` holds it with `moon`. */
+function theMoon(moon: WireBody = {}): ReadonlyMap<BodyIdHex, WireBody> {
+  return new Map([[MOON, moon]]);
+}
+
+/** A wireframe frame's input over {@link SCENE} from 300 km over the moon's pole. */
+function wireInput(overrides: Partial<WireframeTerrainInput> = {}): WireframeTerrainInput {
+  return {
+    view: VIEW,
+    scene: SCENE,
+    camera: abovePole(300_000),
+    viewport: VIEWPORT,
+    strokeScale: 1,
+    lowSetting: false,
+    tokens: WIRE_TOKENS,
+    occluderSlopePx: 3,
+    nowMs: 1_234,
+    previousIntervalM: null,
+    ...overrides,
+  };
+}
+
+/** The scene with its planet and its moon both turning, the planet first. */
+const BOTH_TURNING: ViewScene = {
+  ...SESSION_SCENE,
+  bodies: SESSION_SCENE.bodies.map((body) => ({ ...body, rotation: IDENTITY_ROTATION })),
+};
+
+/** A fully surveyed bake of `key` at `heightM` everywhere. */
+function groundBake(key: PatchKey, heightM: number): BakedPatch {
+  const bake = edgeBake(key, heightM);
+  const layers = bake.layers;
+  if (layers === null) {
+    throw new Error("the edge bake has layers");
+  }
+  return { ...bake, layers: { ...layers, surveyMask: new Uint8Array(65 * 65).fill(255) } };
+}
+
+describe("a wireframe view's terrain (R10.T11; Design note 14)", () => {
+  it("draws each body whose wireframe pass took the view, giving its draw", () => {
+    const { source, drawn } = wireSource(theMoon());
+    const frame = wireframeTerrainOf(source, wireInput());
+    expect([frame.draws, drawn.map(({ view, body }) => [view, body])]).toEqual([
+      [WIRE_DRAW],
+      [[VIEW, MOON]],
+    ]);
+  });
+
+  describe("draws no terrain of a body", () => {
+    it.each<[string, ReadonlyMap<BodyIdHex, WireBody>, ViewScene]>([
+      [
+        "whose wireframe pass did not take the view",
+        theMoon({ viewIds: new Set([INSTRUMENT]) }),
+        SCENE,
+      ],
+      ["with no wireframe pass", new Map(), SCENE],
+      ["whose rotation is not known", theMoon(), SESSION_SCENE],
+      ["with no header held", theMoon({ header: null }), SCENE],
+    ])("%s", (_case, bodies, scene) => {
+      const { source, drawn } = wireSource(bodies);
+      const frame = wireframeTerrainOf(source, wireInput({ scene }));
+      expect([frame.draws, drawn]).toEqual([[], []]);
+    });
+  });
+
+  it("draws from the view's camera, in the body's rotation, at the frame's time and slope term", () => {
+    const { source, drawn } = wireSource(theMoon());
+    wireframeTerrainOf(source, wireInput());
+    const input = drawn[0]?.input;
+    expect([
+      input?.view.rotation,
+      input?.view.orientation,
+      input?.view.fovXRad,
+      input?.view.viewport,
+      input?.nowMs,
+      input?.wire?.occluderSlopePx,
+    ]).toEqual([IDENTITY_ROTATION, POSE.orientation, Math.PI / 2, VIEWPORT, 1_234, 3]);
+    // The camera from the moon's centre: 300 km over the datum at its pole.
+    expect(input?.view.cameraM.z).toBeCloseTo(MOON_POLAR_M + 300_000, 6);
+  });
+
+  it("states one interval for the view, from the body it stands lowest over, and draws every body at it", () => {
+    const { source, drawn } = wireSource(
+      new Map([
+        [FIXTURE_PLANET, {}],
+        [MOON, {}],
+      ]),
+    );
+    const frame = wireframeTerrainOf(source, wireInput({ scene: BOTH_TURNING }));
+    // 300 km over the moon's datum, 384,000 km from the planet's: a twentieth of 300 km is 15 km.
+    const intervalM = contourInterval(300_000, null);
+    expect([intervalM, frame.intervalM, drawn.map(({ input }) => input.wire?.intervalM)]).toEqual([
+      20_000,
+      20_000,
+      [20_000, 20_000],
+    ]);
+  });
+
+  it("measures the height at the nadir over the wireframe pass's resident ground", () => {
+    // 4 km over the datum: 200 m contours; over ground drawn at 2 km, 2 km over it: 100 m.
+    const heights = new ResidentHeights();
+    heights.take(groundBake({ face: 2, level: 0, i: 0, j: 0 }, 2_000));
+    const over = (moon: WireBody): number | null =>
+      wireframeTerrainOf(wireSource(theMoon(moon)).source, wireInput({ camera: abovePole(4_000) }))
+        .intervalM;
+    expect([over({}), over({ heights })]).toEqual([200, 100]);
+  });
+
+  it("holds the last interval while the height lies between its thresholds", () => {
+    // 7 km: a twentieth is 350 m, past the midpoint 316 m to 500 m but short of its 1.2 × 316 m.
+    const at = (previousIntervalM: number | null): number | null =>
+      wireframeTerrainOf(
+        wireSource(theMoon()).source,
+        wireInput({ camera: abovePole(7_000), previousIntervalM }),
+      ).intervalM;
+    expect([at(null), at(200)]).toEqual([500, 200]);
+  });
+
+  it("states no interval while it draws nothing, holding the one its pose sets", () => {
+    const { source } = wireSource(theMoon({ frame: { draw: null } }));
+    const frame = wireframeTerrainOf(source, wireInput({ previousIntervalM: 50_000 }));
+    expect([frame.draws, frame.intervalM, frame.heldIntervalM]).toEqual([[], null, 20_000]);
+  });
+
+  it("holds the last interval with no body to draw", () => {
+    const { source } = wireSource(theMoon({ viewIds: new Set([INSTRUMENT]) }));
+    const frame = wireframeTerrainOf(source, wireInput({ previousIntervalM: 500 }));
+    expect([frame.intervalM, frame.heldIntervalM, frame.annunciation]).toEqual([null, 500, null]);
+  });
+
+  describe("draws the body's graticule as R02's draw list does", () => {
+    /** The graticule each draw of the moon is given, from `camera` at `strokeScale`. */
+    function graticuleOf(
+      camera: DrawCamera,
+      overrides: Partial<WireframeTerrainInput> = {},
+    ): NonNullable<TerrainViewFrameInput["wire"]>["graticule"] | undefined {
+      const { source, drawn } = wireSource(theMoon());
+      wireframeTerrainOf(source, wireInput({ camera, ...overrides }));
+      return drawn[0]?.input.wire?.graticule;
+    }
+
+    it("at 15° on a body 128 px or more across at a scale of 2, its widths at that scale", () => {
+      expect(graticuleOf(seeingMoonAt(200), { strokeScale: 2 })).toEqual({
+        stepRad: (15 * Math.PI) / 180,
+        thinPx: 2,
+        heavyPx: 3,
+        casingPx: 2,
+      });
+    });
+
+    it.each([
+      ["under 64 px across", seeingMoonAt(30), false],
+      ["at the low setting", seeingMoonAt(200), true],
+    ])("at 30° on a body %s", (_case, camera, lowSetting) => {
+      expect(graticuleOf(camera, { lowSetting })?.stepRad).toBeCloseTo((30 * Math.PI) / 180, 15);
+    });
+
+    it("not at all on a body under 8 px across, drawn as its limb", () => {
+      expect(graticuleOf(seeingMoonAt(5))).toBeNull();
+    });
+  });
+
+  it("draws the coastline at the header's sea level on a world with a sea, and none without", () => {
+    const seaLevel = (header: SurfaceHeaderDto): number | null | undefined => {
+      const { source, drawn } = wireSource(theMoon({ header }));
+      wireframeTerrainOf(source, wireInput());
+      return drawn[0]?.input.wire?.seaLevelM;
+    };
+    expect([
+      seaLevel({ ...moonLikeHeader(MOON), main_liquid: 0 }),
+      seaLevel(moonLikeHeader(MOON)),
+    ]).toEqual([-2_000, null]);
+  });
+
+  it("colours its lines with the tokens linearised", () => {
+    const { source, drawn } = wireSource(theMoon());
+    wireframeTerrainOf(source, wireInput());
+    expect(drawn[0]?.input.wire?.colours).toEqual({
+      muted: linearColour(WIRE_TOKENS.textMuted),
+      text: linearColour(WIRE_TOKENS.text),
+      casing: linearColour(WIRE_TOKENS.surface0),
+    });
+  });
+
+  it("gives a body's mask, axes and stretch only where its draw may take the mask", () => {
+    const surveyed = (moon: WireBody): ReturnType<typeof wireframeTerrainOf>["surveyed"] =>
+      wireframeTerrainOf(wireSource(theMoon(moon)).source, wireInput()).surveyed;
+    expect([
+      surveyed({}),
+      surveyed({ frame: { maskReady: false } }),
+      surveyed({ mask: null }),
+    ]).toEqual([
+      new Map([
+        [
+          MOON,
+          { mask: MASK, axes: rotationColumns(IDENTITY_ROTATION), stretch: 1_738_100 / 1_736_000 },
+        ],
+      ]),
+      new Map(),
+      new Map(),
+    ]);
+  });
+
+  it("annunciates the more pressing of its bodies' lines", () => {
+    const { source } = wireSource(
+      new Map([
+        [FIXTURE_PLANET, { frame: { annunciation: "TERRAIN: DETAIL LIMITED" } }],
+        [MOON, { frame: { annunciation: "TERRAIN: STREAMING" } }],
+      ]),
+    );
+    expect(wireframeTerrainOf(source, wireInput({ scene: BOTH_TURNING })).annunciation).toBe(
+      "TERRAIN: STREAMING",
+    );
+  });
 });

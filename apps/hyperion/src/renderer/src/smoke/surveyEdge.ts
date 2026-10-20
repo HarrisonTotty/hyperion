@@ -54,7 +54,7 @@ import { TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
 import { AU_M } from "../view/scenes/kept";
 import { CoverageMask } from "../view/terrain/coverage";
 import { handoverTauPx, limbDistanceM, pixelAngleRad } from "../view/terrain/handover";
-import { TerrainResources } from "../view/terrain/gpu/resources";
+import { normalsAtlasOf, TerrainResources } from "../view/terrain/gpu/resources";
 import { vertexDir } from "../view/terrain/cube";
 import { ContactRecords, InstanceRecords } from "../view/terrain/gpu/uniforms";
 import type { PatchKey } from "../view/terrain/patchKey";
@@ -320,7 +320,7 @@ async function terrainDraw(
     ["rgba16float"],
     [resources.mesh],
   );
-  const { atlas } = layout;
+  const atlas = normalsAtlasOf(layout);
   const c = pose.cameraM;
   return {
     mesh: resources.mesh,

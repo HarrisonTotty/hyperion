@@ -9259,3 +9259,315 @@ src/renderer/src/displays/view src/renderer/src/test` (129 files, 1,992 tests); 
   - _The harness's console in the views check's log_: this part's first scratch run, without
     `ELECTRON_ENABLE_LOGGING=1`, logged none of the renderer's console, and its next, with it,
     logged all of it. For whoever next runs a scratch harness on the views check.
+- **Deviations in T11, as built** (2026-10-20; lane r10-wireframe, on `rendering-and-planets` at
+  `8a7378d6`, on T16's session).
+  - _Files._ New: `view/terrain/terrainWire.ts` (`contourStepM`, `contourInterval`,
+    `contourPhase`, `contourFade`, `lineCoverage`, `lineDistancePx`, `contourShade`,
+    `graticulePatch`, `graticuleOffsetsRad`, `heightAboveGroundM`, `contourLengthReading`,
+    `contourIntervalReading`, `CONTOUR_FIELD_CH`, `wireframeTerrainSettings`,
+    `terrainWireMaterialSpec`, `TERRAIN_WIRE_MATERIALS`, `TERRAIN_WIRE_BINDINGS` and the constants
+    of Design note 14) with `terrainWire.test.ts` and `terrainWireSelection.test.ts`;
+    `shaders/terrainWire.wgsl`; `shaders/terrainSurvey.wgsl` (the survey's placement and discard,
+    moved out of `terrainLit.wgsl`, which the lit and depth materials and the wireframe's now
+    share); R07's `view/shaders/cubeTexel.wgsl` (the cube sphere's texel lookup, moved out of
+    `bodyDisc.wgsl`); R02's `view/shaders/lineStroke.wgsl` and `occluderSphereHit.wgsl` (the
+    strokes' and the occluder spheres' geometry, moved out of `lines.wgsl` and
+    `occluderSphere.wgsl`), and beside them `wireCoverage.wgsl`, `linesSurveyed.wgsl` and
+    `occluderSphereSurveyed.wgsl`; `smoke/wireframeTerrain.ts` (part 6's group,
+    `R10.T11 the wireframe's terrain`), `view/terrain/terrainPassWire.test.ts` and
+    `view/terrain/sessionWire.test.ts`.
+    Changed: `slotLayout.ts` (`TerrainShading`'s `wire`, `TERRAIN_SHADING_TRAITS`),
+    `gpu/resources.ts` (`TerrainLayout` a union by its normals, `normalsAtlasOf`),
+    `gpu/uniforms.ts` (`WirePhaseRecords`), `terrainPass.ts`, `session.ts`, `frameTerrain.ts`,
+    `terrainMaterial.ts`, `shaders/terrainLit.wgsl`; `view/quality/qualitySetting.ts`
+    (`WIREFRAME_TERRAIN_SLOTS`); R02's `view/wireframe/drawList.ts` (`LineBatch.body`) and
+    `submit.ts`; R07's `bodies/draw.ts` and `shaders/bodyDisc.wgsl` (the move alone);
+    `engine/catalogue.ts`; `displays/view/viewFrameDrawer.ts`, `ViewDisplay.tsx`, `viewRun.ts`
+    (`contourIntervalLine`) and `ViewLabelBlock.tsx` (its doc); the views check's
+    `check/terrainProbe.ts`, `main/terrainCheckResults.ts` and its fixture; the smoke harness's
+    `page.ts`, `terrain.ts`, `litTerrain.ts` and `surveyEdge.ts` (`normalsAtlasOf`); and tests
+    beside each. No wire format, payload, Rust code, guide text or golden changes.
+  - _The shading_ (D10's "a pass of its own shading"). `TerrainShading` gains `wire`, a body's
+    bakes with `weights: "skipped"` (`terrainShadingOf`; T6.b's and T8.b's skipped layers), and
+    each place the shadings differ reads `TERRAIN_SHADING_TRAITS` (normals, the lit fields, the
+    survey mask, the lit mesh, the phases, the low setting's coarser detail), so that a fourth
+    shading is a compile error until its traits are given. Its slot holds the heights, the offsets
+    on their path and the `survey-mask` field T10.c's lit slot holds, nothing else: 38,028 B on
+    `face-differences`, 139,428 B on `baked-offsets` (the task's "heights and mask only", the
+    vertex path's offsets beside them). So it has no normals atlas (`WireTerrainLayout`, whose
+    `atlas` is `null`; `normalsAtlasOf` the lit and spike layouts' reader), and the bake's normals,
+    which the worker still makes, are not kept (deferred below). It draws the lit material's mesh
+    (`litPatchMeshData`, 190,644 B under `other` a pass, where decision-r10-t16-contracts §1
+    foresaw R05's spike mesh, 158,268 B), whose skirts and fins close the terrain's depth to the
+    occluder sphere at the survey's edge, and each view has a phases buffer beside its instances
+    (`WirePhaseRecords`, 48 B a drawn patch).
+  - _The cache, sized by its slots_ (beyond the text, which names no budget; T14 decides; _Ruled
+    (decision-r10-view-block-room §8): kept at 520, provisional_). `WIREFRAME_TERRAIN_SLOTS` = 520
+    on both settings (`wireframeTerrainSettings`), 19.8 MB on the low setting and 72.5 MB on the
+    high, its selection budget half of it, 260 patches (decision-r05-patch-demand.md, 4b). The
+    figure is Design note 15's sizing rule over its wireframe column, max(1.3 × 284, 3 × 76) ≈ 370
+    at 100 m, with the 40% the count model leaves out for relief, the 2:1 rule and the forced
+    region; it was read without the budget's halving. The setting's own bytes would have given
+    2,868 slots on the high setting's `baked-offsets`, whose offsets pass a default 128 MiB storage
+    binding, and 10,518 on its fallback, whose heights do too. Measured in `TERRAIN TEST`'s descent
+    (the hidden look's selection every 10 s of the script, the primary alone): the 260 bind from
+    80–90 s to the script's end on both settings, the refused split's weighted excess rising to 28
+    on low and 33 on high, the stand-ins settled within a bake round (48 at most). With a scratch
+    build of 3,000 slots (1,500 patches; about 114 MB on low and 418 MB on high) they still bind,
+    from 100 s to 220 s on low with the excess to 7.1 and from 140 s to 210 s on high with it to
+    9.9, and the bakes stand in for most of the descent (on low 1,395 at 90 s, settled at 160 s,
+    about 21 bakes a second; on high 1,477 at 130 s and 743 still at 180 s, about 11 a second on
+    `baked-offsets`). So no cache of a few hundred
+    megabytes leaves the descent unlimited at 4 px, and a larger one trades `DETAIL LIMITED` for
+    `STREAMING` at the pool's rate, on high a `STREAMING` that never clears; at 520 `STREAMING`
+    clears within a round and `DETAIL LIMITED` is true. The 520 stand, provisional, for T14
+    (deferred below: the selection's demand on R09's moon).
+  - _The pass_ (`terrainPass.ts`). A wireframe pass compiles `terrainWireMaterialSpec(path)` for
+    the canvas, which the wireframe's frame draws into; `TerrainFrameInput.wire`
+    (`TerrainWireFrameInput`: the interval, the sea level or `null`, the stroke scale, the
+    graticule's step and widths or `null`, the colours and the slope term) is what each view's draw
+    takes, and with none a wireframe pass draws nothing. Each drawn patch's phase record, in the
+    instances' order: φ = h₀ mod 5 CI (`contourPhase`) from the bake's origin height as its slot
+    record narrows it, h₀ less the sea level, and its place for the graticule
+    (`graticulePatch(originM, step)`, kept for the resident patch until the step changes). Its
+    `TERRAIN: DETAIL LIMITED` is the selection's budget alone: the low setting's clause
+    (`setting === "low" && count > 0`, Design note 26) is not taken (the shading's
+    `coarserOnLow`), since R05's note has the low setting say it "whenever terrain is in view" for
+    the photorealistic style's coarser τ and resolution, and the brainstorm's rule, "whenever the
+    setting draws the surface below the detail the camera's position warrants" (Two styles of one
+    renderer), is never met by the wireframe, whose τ and presented size are the same on both
+    settings. The mask rule (`maskReadyFor`, `drawFor`'s `maskReady`) is the lit pass's, the code-0
+    rule included (decision-r10-t16-review §2, the task's pointer), with no phase table to wait
+    for. The craft's contacts are written for its draw as for the lit one's, so that the ground
+    under a grounded craft holds its morph at zero (`terrainPassWire.test.ts`).
+  - _The hand-over in the wireframe_ (the lane lead's decision; the text's "selected at 4 px over
+    the wireframe views that hand the body over"). A wireframe frame plans no regimes, so the
+    session judges it at each step from the view's report (`wireframeHandovers`, pure): each lit
+    body of its scene with a rotation whose relief (`HandoverReliefSource.reliefM`) subtends
+    `handoverTauPx("wireframe")`, 4 px, at its limb from the camera at the presented size's centre
+    pixel, with R07's hysteresis (`handsOver`, from the bodies the view handed over at its last
+    step), for a view whose budget's style and last frame are both the wireframe's: a
+    photorealistic view standing in with the wireframe hands nothing over, as T16's S8 has it. The
+    first such hand-over makes the body's wireframe pass, through a lane of the session's one pool
+    (`HeightWorkerPool.lane`) with its `frustumMargin` of `motion`, stepped over the wireframe
+    views that hand the body over with the scene's contacts, and disposed with the lit pass where
+    the workers drop the field (D4). A body may have both passes, on one pool, and then holds both
+    caches, the lit setting's budget and the wireframe's (Risks, "The live terrain path's costs"):
+    the GPU mask takes a block's cells once every pass that draws the body has its rebakes
+    (`#blockTaken`), and the store's coverage once every pass is settled (`#flushCoverage`). Every
+    wireframe view that hands a body over takes `TERRAIN_NOT_AVAILABLE` with every worker lost, as
+    T16.b's fault has it. Added: `wirePass(body)`, `drawWireTerrain(view, body, input)`,
+    `wirePassBodies`.
+  - _The frame_ (`frameTerrain.ts`' `wireframeTerrainOf`; the text's "its draw joins each wireframe
+    view's `WireframeRenderer.render` through the session"). For each body whose wireframe pass
+    took the view in its last step: its `TerrainView` from the scene's body (its rotation, its
+    centre from the camera negated), its draw with the frame's `wire`, its annunciation (the more
+    pressing), and, where the draw may take the mask (`maskReady`), the body's coverage mask. One
+    interval for the view (the label block states one): `contourInterval` of the camera's height
+    above the ground at its nadir (`heightAboveGroundM`: along the spheroid's normal, less the
+    wireframe pass's `ResidentHeights.groundHeightAtM` at the nadir's parametric direction, the
+    datum where none is drawn) over the body it stands lowest over, from the view's last
+    (`ViewFrameDrawer`'s held interval, each view's hysteresis its own until R10.T12.b, below). The
+    graticule's step
+    and widths are R02's for the body's apparent size (`graticuleStepDeg`, `bodyRegime`: none in
+    the limb regime), so that the terrain's graticule continues the datum's. The sea level is the
+    header's `sea_level_m` where the header names a main liquid (`main_liquid`), and no coastline
+    otherwise (the header's sea level on a world with no sea is its lowest cell's).
+    `WireframeRenderer.frame` takes it (`WireframeTerrain`): the terrain's draws after every
+    occluder, so that a nearer body or hull hides its contours, and before the background and the
+    lines, which its depth hides.
+  - _The datum gives way to the terrain_ (beyond the text; Design note 12's "so no terrain is
+    claimed there and no reference surface shows through a surveyed valley", carried into the
+    wireframe). In the wireframe the reference surface is the body's occluder sphere and its own
+    lines, its limb and graticule on the datum. Where a view's draw of the body takes its mask,
+    both are discarded over every cell the GPU mask holds surveyed (`occluderSphereSurveyed`,
+    `DATUM OCCLUDER`; `linesSurveyed`, `DATUM LINES`, for the batches that carry `LineBatch.body`;
+    both read the mask through `wireCoverage.wgsl`, the hit's or the stroke's point stretched along
+    the pole as R07's figure reads it), so that no datum line floats over a surveyed valley and the
+    sphere hides none of it. While the mask is withheld (anything missing, or a code-0 patch drawn)
+    both stand whole, as the reference surface does in the photorealistic style.
+  - _The contours_ (Design note 14 as signed off, signoff-9). Depth with colour only on its lines:
+    minor 1 px and index 1.5 px in `--text-muted`, the coastline 2 px in `--text`, each in CSS px
+    times the view's stroke scale, uncased; antialiased from the screen gradient's length; a
+    family drawn in full from 6 px of spacing and gone at 3 px, the minor first; no line on the
+    skirts or fins, which are the ground's depth alone. The height varies patch-local, h − h₀ for
+    the slot record's own h₀, both `f32`. Two departures from the note's arithmetic: φ is
+    h₀ mod 5 CI, the index's period, rather than mod CI, so that the index contour is told from the
+    minor ones; and the coordinate is (h − h₀ + φ) × (1 ÷ CI), 1 ÷ CI formed in `f64`, since WGSL
+    rounds a product correctly where it allows a quotient 2.5 ULP. The tests hold the coordinate to
+    the `f64` levels within 1 mm at ±20 km (`terrainWire.test.ts`, the phase's two tests, at WGSL's
+    bounds); the lane's emulation over the same points measured 0.24 mm with the product against
+    1.19 mm with the quotient at a 1 km interval. The depth is pushed away by the occluders' rule
+    (R07.T16.d: `occluderSlopePx` pixels of its slope and 2⁻¹⁶ of the depth), so that the survey
+    edge on its rim stands in front of the ground it lies on.
+  - _The graticule on the terrain_ (Design note 14's "R02's graticule is drawn over the terrain's
+    height where terrain is surveyed"). The terrain's fragment draws it: its parallels (not the
+    poles) and meridians at R02's step, the equator and the prime meridian at the heavy width, by
+    the terrain point's geocentric latitude and longitude, as R02's sphere graticule takes them
+    (`bodies.ts`' `unitAt`), cased in `--surface-0` as R02's lines are (the lane lead's choice; its
+    casing cuts the contours where it crosses them). Each vertex's latitude and longitude less its
+    patch origin's are formed from its offset in a form that takes no difference of nearly equal
+    numbers (`graticuleOffsetsRad`, `wire_graticule_offsets`), through `preciseTrig.wgsl`'s
+    `preciseAtan2` rather than WGSL's `atan2`, bounded only to 4,096 ULP, and the origin's own
+    less its nearest lines' in `f64` on the CPU. The tests hold a fine patch's lines in `f32`, at
+    every corner of WGSL's bounds, within 2 × 10⁻⁹ rad of arc of the truth for offsets up to 2 km,
+    and show the absolute position's `f32` latitude erring past 2 × 10⁻⁸ rad over the same points;
+    the emulation measured 1.8 × 10⁻¹⁰ rad correctly rounded and 3.7 × 10⁻¹⁰ at WGSL's bounds,
+    against 9.8 × 10⁻⁸ rad for the absolute position, some 0.6 m on an Earth.
+  - _The survey edge in the wireframe_ (T16.c's S1 interim ended). `surveyEdgeViewsOf` takes the
+    rim and the note's ground from the wireframe pass's resident heights where it took the view,
+    as from the lit pass's in the photorealistic style; the edge is drawn over the terrain's own
+    depth, which hides it behind nearer ground.
+  - _The label block_ (_Ruled (decision-r10-view-block-room §5, §6, §10)_).
+    `labelLines(run, exposure, stale, contourIntervalM)` states
+    `CONTOUR INTERVAL 200 m · INDEX 1 km` directly after `FOV`, the picture's other scale, while
+    the view draws contours
+    (`ViewFrameDrawn.contourIntervalM`), not stale, being the picture's statement of scale. The
+    plan names `labelStatements`; the interval is a label and its value (the guide's
+    `CONTOUR INTERVAL` row, kind `Label`), so it is a `labelLines` line (`contourIntervalLine`),
+    drawn by the same `ViewLabelBlock.tsx`. The interval stands in a field of 8 ch
+    (`CONTOUR_FIELD_CH`, its longest reading `10000 km`: 40 km of relief handed over through a 10°
+    field on a 3,840 px canvas, some 220,000 km out), so that `· INDEX` never moves as the
+    interval steps (the guide's "Numbers"); the index ends the line with no field, since nothing
+    follows it to move (where the line is its plate's widest, the plate is a character narrower or
+    wider as the index changes unit); and the line's middle dot leads the index's part
+    (`dotsLead`, as the sky's `STARS` line has it). One departure from the ruling's "the
+    `INDEX 2.5 km` run stays unbroken": the index's part may break before its value, as it does
+    beside an open slot at 1280 × 720, where the block sets the line on three rows, `500 m`,
+    `· INDEX` and `2.5 km` (`500 m ·`, `INDEX` and `2.5 km` with the dot between the parts), since
+    its column there, about 114 px, is narrower than the part's 128 px, which would otherwise run
+    past the plate's edge; there the leading dot keeps `INTERVAL` and `INDEX`, side by side on the
+    second row, from reading as one label. Two deviations until R10.T12.b, which builds both with
+    its held slot: a wireframe instrument draws its contours without stating its interval (the
+    `PRIMARY` view's block alone states one; on today's slot rule the line would carry slot 2 about
+    56 px past the stage at the floor), and each view holds its own interval for Design note 14's
+    ±20% hysteresis, so two views at one pose that reached it from different heights could state
+    intervals a step apart, where the guide has "every view in one pose states the same one" (no
+    instrument states one yet, so none is seen to differ). A wireframe instrument states its own
+    terrain annunciation and fault.
+  - _The views check_ (T16.d's hidden run). The probe counts a frame as drawing the terrain by
+    either material (`TERRAIN_WIRE_PREFIX`), and a view as handing over through either pass; the
+    verdict "The terrain drawn once handed over" no longer fails a wireframe view for handing
+    over, and holds its delay and gaps as a photorealistic one's. Its phase table's patch counts
+    are still the lit pass's alone (the probe's `view:hdr` frames).
+  - _Tests_: 193 in the four new files (`terrainWire.test.ts` 149, `terrainPassWire.test.ts` 24,
+    `terrainWireSelection.test.ts` 10, `sessionWire.test.ts` 10) and 110 more declared in the
+    fifteen changed ones, 1,785 in all nineteen. `patchCountModel` is T14.a's and unbuilt, so Design
+    note 15's frustum columns stand for it in `terrainWireSelection.test.ts`: r = 0.263, 0.260 and
+    0.269 at 1, 10 and 100 km. _Ruled (decision-r10-view-block-room §9)_: on a level table of the
+    model's own premise (a patch accepted at 5 edges at 1 px) the selection is held to [r ÷ 2, 2r],
+    as the plan has it; on R05's golden level table, which accepts a patch at about 15 edges at
+    1 px, to [τ⁻², 2r], where it measured 0.115, 0.115 and 0.070, below r ÷ 2. The floor is
+    physical: under a screen-space error bound a selection refined well past the quadtree's coarse
+    levels scales as τ⁻², with τ = 4 the wireframe's 4 px over the lit style's 1 px, so 1/16 is
+    the least the wire-to-lit ratio can be (a level cap or the forced region raises it, nothing
+    lowers it); the golden table's patches stay past the granular floor at 4 px and head for it,
+    while the model's premise sits near that floor, so its ratio stays near the table's quarter.
+  - _Acceptance, as run._ `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`
+    and, since the task's changes reach past it, `view/wireframe`, `displays/view`, `view/bodies`,
+    `view/engine`, `view/quality` and `src/main/terrainCheckResults.test.ts`: 132 files, 3,736
+    tests, all passed; the typecheck and `oxlint --type-aware --deny-warnings` clean. The smoke run
+    on SwiftShader, headless, parts 1 and 6 on both variants: exit 0, part 6's four `R10.T11`
+    checks passing (297 contour or graticule pixels and 400 casing pixels; the mark 15 km under the
+    surveyed ground hidden and the one 2 km over it shown; the datum's line not drawn over the
+    survey and drawn beyond, its occluder hiding the mark 15 km under the datum beyond the edge
+    alone; the allocation tally back where it stood). The gate,
+    `just smart-ci origin/rendering-and-planets --hook-checks`, on the commit's tree. The figures
+    recorded, the UHD 620's the owner's.
+  - _By hand, hidden, 2026-10-20_ (`TERRAIN TEST`'s scripted descent in the views check's
+    `--hidden --terrain` run, a scratch harness capturing at chosen moments of the script and
+    logging the passes' selections and the label block's boxes; the lane's scratch `looks/`).
+    The runs: the wireframe primary alone, then turned north to the survey's north edge (T16.d's
+    look), then with a wireframe instrument, and (low) a photorealistic primary with a wireframe
+    instrument, on high at 1920 × 1080 and low at 1280 × 720; the label block's room at 100% and
+    150% alone, with one instrument and with both; and the selection with a scratch 3,000-slot
+    cache (the cache, above).
+    - _Legibility, steep and gentle._ Over the moon's craters, their rims and the plains between,
+      the contours read as closed loops about each crater and as smooth runs over the plains, the
+      index contours a step heavier, none on the unsurveyed ground, the survey edge drawn over the
+      terrain with its ticks into the unsurveyed side. From 75 s, 3.7 Mm out, the interval steps
+      down the 1-2-5 sequence as the camera descends, held through each band (the captures read
+      `100 km · INDEX 500 km`, then among others `50 km`, `10 km`, `2 km`, `1 km`, `500 m`, `200 m`
+      and `100 m`).
+    - _The graticule told from the contours._ A graticule line runs across the survey in the
+      north look (190–243 s) and crosses its contours, which never cross one another, its
+      `--surface-0` casing cutting them where it crosses; so the graticule stays over surveyed
+      terrain, and signoff-9's fallback is not taken.
+    - _Near the horizon_ the far contours break into short pieces (deferred below).
+    - _A small body_: none surveyed in any scene, not seen (deferred below).
+    - _Both styles at once_ (low): the photorealistic primary and the wireframe instrument hand
+      the moon over to its two passes on the one pool, each drawn in its own view.
+    - _Annunciations._ `TERRAIN: STREAMING` often on the low setting's fast pass (the scene clock
+      runs at 60 s/s), `TERRAIN: DETAIL LIMITED` while the cache binds (above).
+    - _The label block at 1280 × 720_ (window 1286 × 724, low): the primary alone 484 × 294 px,
+      242 px to spare at 100%; beside one open slot 238 × 420, 116 px to spare, the interval's line
+      on three rows (`500 m`, `· INDEX`, `2.5 km`); at 150% alone 566 × 461, its foot 91 px past
+      the stage's (592 px), `SCENE`, `SCENE CLOCK` and `TERRAIN: STREAMING` cut, about 41 of them
+      T16's (its deferred "The label block's room at 150%") and some 50 the interval's two rows;
+      with two slots open, 98 px to spare. Both slots open at 100%: each grown from 254 to 274 px,
+      a chase camera's `POSITIONS AS SEEN FROM SHIP` and the terrain's annunciation under each,
+      `INSTRUMENT 2` at 395–669 px against the stage's foot at 649, 20 px past, its
+      `TERRAIN: DETAIL LIMITED` cut; that breaks decision-r07-t19-layout §5's limit of one
+      statement a slot (plan 07's, not the guide's), and with the cache binding the cut does not
+      clear. A slot opened at 100% stays open at 150%, 680 px wide at x = −78, past the stage's and
+      the window's left edge, and leaves the primary's block 36 px wide. At 1920 × 1080 everything
+      fits: 604 px to spare at 100%, 400 at 150%, and both slots open, slot 2 ending at 1003 px
+      against 1011. _Ruled (decision-r10-view-block-room §5, §7, §11, §12)_: the line adds no cut
+      at or above the floor, 80 × 45 rem (1280 × 720 at 100%, 1920 × 1080 at 150%); 1280 × 720 at
+      150% is below it, and its 91 px, the two slots' 20 px and the scale change's slot predate T11
+      in kind and are R10.T12.b's, whose plates, order of giving way and held slots end them; the
+      annunciation under a wireframe slot stands, as the guide's G3 has it.
+    - _The UHD 620's timing_ (`timestamp-query` p50, p95 and p99 a pass, the GPU clock from
+      `intel_gpu_top`, the patch and triangle counts, during the low fast pass with the workers
+      busy): the owner's, by hand on the laptop, not taken here.
+  - _Generator version._ Untouched (22): presentation alone, no golden.
+- **Questions for "main" (R10.T11)** (none touches a contract of the server's), each _Ruled
+  (decision-r10-view-block-room §5–§10)_.
+  1. _The interval on the primary, and the block's room at 150%_ (§5): accepted, amended; the line
+     lands on the primary, after `FOV`, the interval in its field and the index in none; the room
+     at 150% is R10.T12.b's.
+  2. _`CONTOUR INTERVAL` on an instrument_ (§6): amended; every view that draws contours states its
+     interval, instruments included, built by R10.T12.b with its held slot; T11 records the
+     deviation (the label block, above).
+  3. _An instrument's terrain annunciation in the wireframe_ (§7): as built; the premise corrected,
+     the one-statement limit being plan 07's, not the guide's; the two-slot figures recorded.
+  4. _The wireframe cache_ (§8): kept at 520, provisional, recorded for T14 (the cache, above;
+     deferred below).
+  5. _The selection test's bracket_ (§9): accepted, [τ⁻², 2r] on the golden table and [r ÷ 2, 2r]
+     on the model's premise (the tests, above; deferred below).
+  6. _One interval for a pose_ (§10): amended; views at one point over one body state one interval,
+     built with item 2 in R10.T12.b; T11 records the deviation (the label block, above).
+- **Deferred findings (2026-10-13 rule) (R10.T11)** (recorded, not ruled; each leaves the algorithm
+  and the contracts as built).
+  - _The selection's demand on R09's moon_ (decision-r10-view-block-room §8). At 4 px the
+    wireframe's selection over `TERRAIN TEST` binds a budget of 1,500 patches with a weighted excess
+    of 7 to 10 (the cache, above), more than twenty times Design note 15's 76 in the frustum at
+    100 m on an Earth; the lit style's, at 1 or 2 px and its own budget, binds harder. The scene's
+    clock runs at 60 s/s, and the frustum margin `motion` sets from the camera's motion a frame
+    widens the selection with it. For T14: the count model's motion margin at a scene clock above
+    1 s/s; a measurement at 1 s/s, the game's own rate; the wireframe's budget sized from that,
+    with these figures and the 520's derivation (the cache, above); and the selection's error
+    bounds on R09's relief against the model's premise.
+  - _The wireframe's share on R05's golden level table_ (decision-r10-view-block-room §9). Design
+    note 15's wireframe column assumes r ≈ 0.26 at k = 5 edges, while the golden table's k ≈ 15
+    gives 0.070 to 0.115 at 1, 10 and 100 km; beside the absolute count above, twenty times the
+    frustum figure, the note's wireframe sizing is off both ways. T14.a's `patchCountModel` and
+    T14.b measure it, and the brainstorm's "about a fifth" waits on them.
+  - _Two caches on one pool, and one view's slots._ A body handed over in both styles holds the
+    lit setting's cache and the wireframe's at once (19.8–72.5 MB more), and the 520 slots are one
+    view's, where Design note 15 sums over the views that stream (two wireframe instruments at one
+    position share its all-round term). For T14.b.
+  - _Normals baked for nothing._ A wireframe bake still makes its normals, and the slot drops
+    them. The lever: a skipped-normals bake setting beside the weights' (T6.b's worker).
+  - _Contours in pieces near the horizon._ Where a family's spacing on screen passes through the
+    fade's 6 to 3 px along a line, judged pixel by pixel, and nearer ground hides it in places,
+    far contours break into short pieces (high `between-wire-248s`, `between-wire-north-220s`); in
+    the captures they read as fragments of the ground's lines rather than dashes, which the guide
+    reserves for predictions. The lever: the fade judged from a smoother measure of the spacing
+    (the patch's gradient, or the screen gradient over a coarser footprint).
+  - _No small body seen._ `TERRAIN TEST`'s moon is the only surveyed scene, so the legibility
+    check's "on a small body too" was not seen; for the first kept scene or served system with a
+    surveyed small body (T15's verification pass).
+  - _The views check's patch counts._ The probe's phase table counts the lit pass's patches alone
+    (its `view:hdr` frames), so a wireframe-only run records none; for the views check's next
+    revision.

@@ -176,6 +176,12 @@ export interface LineBatch {
   readonly casingColour: string;
   /** The dash, device px on and off, for predicted paths only, or `null` for a solid stroke. */
   readonly dash: { readonly onPx: number; readonly offPx: number } | null;
+  /**
+   * The body whose datum the batch draws, its limb and graticule, which give way to its surveyed
+   * terrain where the wireframe draws it (plan R10, R10.T11; `packWireframe`'s `surveyed`); absent
+   * for every other batch.
+   */
+  readonly body?: string;
 }
 
 /** A body's depth-only occluder sphere (Design note 5). */
@@ -579,26 +585,28 @@ export function buildWireframeDrawList(
     const major = wireframe.lines.filter((line) => line.major).flatMap((line) => line.runs);
     const minor = wireframe.lines.filter((line) => !line.major).flatMap((line) => line.runs);
     if (major.length > 0) {
-      lines.push(
-        batch(
+      lines.push({
+        ...batch(
           `body:${body.id}:major`,
           "view",
           packPolylines(major),
           "textMuted",
           drawnPx(STROKE_PX.heavy),
         ),
-      );
+        body: body.id,
+      });
     }
     if (minor.length > 0) {
-      lines.push(
-        batch(
+      lines.push({
+        ...batch(
           `body:${body.id}:graticule`,
           "view",
           packPolylines(minor),
           "textMuted",
           drawnPx(STROKE_PX.thin),
         ),
-      );
+        body: body.id,
+      });
     }
   }
 

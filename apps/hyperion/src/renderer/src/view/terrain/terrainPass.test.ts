@@ -11,7 +11,9 @@ import type { Vec3 } from "../../geometry/vec3";
 import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
 import { TERRAIN_SETTINGS, terrainSettingsFor } from "../quality/qualitySetting";
 import { terrainMaterialSpec } from "./gpu/material";
+import { normalsAtlasOf } from "./gpu/resources";
 import { CLASS_LAWS_BYTES, terrainSlotLayout } from "./slotLayout";
+import { terrainWireMaterialSpec } from "./terrainWire";
 import { distanceToBoxM, relativeBounds } from "./bounds";
 import type { DrawSet } from "./cache";
 import { vertexDir } from "./cube";
@@ -123,7 +125,7 @@ class FakePool implements TerrainPool {
   }
 
   deliver(pass: TerrainPass, key: PatchRequest["key"]): void {
-    const n = pass.layout.atlas.samplesPerSide;
+    const n = normalsAtlasOf(pass.layout).samplesPerSide;
     const bake: BakedPatch = {
       key,
       generation: 1,
@@ -1036,11 +1038,11 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     exposureScale: 1e-4,
   } satisfies TerrainLighting;
 
-  it("shades a body baked with its weights with the lit material, and the test planet and the wireframe's bakes with R05's", async () => {
+  it("shades a body baked with its weights with the lit material, the wireframe's bakes with its depth and contours (R10.T11), and the test planet with R05's", async () => {
     const lit = await passOn("high", { source: BODY });
     expect(lit.pass.shading).toBe("lit");
     expect(lit.pass.layout.shading).toBe("lit");
-    expect(terrainShadingOf({ ...BODY, weights: "skipped" })).toBe("spike");
+    expect(terrainShadingOf({ ...BODY, weights: "skipped" })).toBe("wire");
     expect(terrainShadingOf({ kind: "test-planet", ridges: "on" })).toBe("spike");
     const planet = await passOn("high");
     expect(planet.pass.shading).toBe("spike");
@@ -1227,6 +1229,7 @@ describe("the terrain materials' storage bindings by stage (decision-r10-t10b-r0
     terrainMaterialSpec(path),
     terrainLitMaterialSpec(path),
     terrainDepthMaterialSpec(path),
+    terrainWireMaterialSpec(path),
   ]);
 
   it("count at most WebGPU's default eight storage buffers in each stage, by their declared stages", () => {
@@ -1244,6 +1247,14 @@ describe("the terrain materials' storage bindings by stage (decision-r10-t10b-r0
     expect(
       storageBuffersPerStage(materialBindings(terrainLitMaterialSpec("face-differences"))),
     ).toEqual({ vertex: 5, fragment: 4 });
+    // The wireframe's (R10.T11): R05's five (four on face-differences), the survey mask and the
+    // view's phases in the vertex stage, and the survey mask in the fragment stage.
+    expect(
+      storageBuffersPerStage(materialBindings(terrainWireMaterialSpec("baked-offsets"))),
+    ).toEqual({ vertex: 7, fragment: 1 });
+    expect(
+      storageBuffersPerStage(materialBindings(terrainWireMaterialSpec("face-differences"))),
+    ).toEqual({ vertex: 6, fragment: 1 });
   });
 
   it("declare each storage buffer to the stages whose entry points read it, and no other", () => {

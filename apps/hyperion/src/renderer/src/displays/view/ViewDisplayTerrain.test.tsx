@@ -11,9 +11,11 @@ import {
   readyField,
   sendFieldFrames,
 } from "../../test/coarseFieldFixtures";
+import { vec3 } from "../../geometry/vec3";
 import { earthDetail, FIXTURE_EARTH } from "../../test/planetaryFixture";
 import { SCENE_TIDAL_RADIUS_M, sceneClock, sliceSceneSystem } from "../../test/sceneFixture";
 import { ANNUNCIATION_ONSET_MS, TERRAIN_NOT_AVAILABLE } from "../../view/terrain/annunciation";
+import { PALETTE_NONE } from "../../view/terrain/workers/messages";
 import { MAX_CONSECUTIVE_WORKER_FAILURES } from "../../view/terrain/workers/pool";
 
 import {
@@ -375,8 +377,11 @@ describe("VIEW's seams for the views check's terrain run (R10.T16.d, part 2)", (
 /** The slice's Earth's equatorial radius, m (the fixture's figure, WGS 84's). */
 const EARTH_RADIUS_M = 6_378_137;
 
-/** Answers the scene subscription with the ship 2,000 km over the slice's Earth, in its frame. */
-async function shipOverEarthArrives(view: ViewDisplayHarness): Promise<void> {
+/**
+ * Answers the scene subscription with the ship `heightM` (2,000 km by default) over the slice's
+ * Earth, in its frame.
+ */
+async function shipOverEarthArrives(view: ViewDisplayHarness, heightM = 2e6): Promise<void> {
   const answer: ResponseBody = {
     kind: "subscribe",
     subscription: 5,
@@ -385,7 +390,11 @@ async function shipOverEarthArrives(view: ViewDisplayHarness): Promise<void> {
       sequence: 0,
       clock: sceneClock(3_000),
       ship: {
-        position: { frame: "body", body: FIXTURE_EARTH, offset_m: [0, 0, EARTH_RADIUS_M + 2e6] },
+        position: {
+          frame: "body",
+          body: FIXTURE_EARTH,
+          offset_m: [0, 0, EARTH_RADIUS_M + heightM],
+        },
         velocity_m_s: [0, 0, 0],
         time: { seconds: 3_000, nanos: 0 },
       },
@@ -490,6 +499,159 @@ describe("the terrain's fault on a live VIEW (R10.T16.b's line, a body handed ov
     // The fault stands only for a view that hands a body over: the primary's live frame does.
     expect([before, faultLines()]).toEqual([[], [TERRAIN_NOT_AVAILABLE]]);
     expect(within(primaryLabelBlock()).queryByText("TERRAIN: STREAMING")).toBeNull();
+  });
+});
+
+/**
+ * Answers every bake the height workers hold with a flat patch over a field surveyed whole, as the
+ * real workers would bake the slice's Earth; returns how many.
+ */
+function answerEveryBake(view: ViewDisplayHarness): number {
+  let answered = 0;
+  for (const worker of view.heightWorkers) {
+    for (const request of worker.pendingBakes) {
+      const { key, settings } = request;
+      const n = settings.normals === "double" ? 129 : 65;
+      worker.reply({
+        kind: "baked",
+        id: request.id,
+        bake: {
+          key,
+          generation: request.generation,
+          originM: vec3(0, 0, EARTH_RADIUS_M),
+          heights: new Float32Array(65 * 65 * 2),
+          offsets: settings.vertexPath === "baked-offsets" ? new Float32Array(65 * 65 * 6) : null,
+          normals: new Float16Array(n * n * 2),
+          heightRangeM: [0, 0],
+          boundingRadiusM: 1,
+          originHeightM: 0,
+          skirtDepthM: 1,
+          layers: {
+            palette: new Uint8Array(16).fill(PALETTE_NONE),
+            weights: new Uint8Array(),
+            surveyMask: new Uint8Array(65 * 65).fill(255),
+            fieldLevel: 5,
+            boundM: 1,
+            sigmaM: 0,
+            complete: true,
+            unsurveyedCells: new Uint32Array(),
+            photometry: new Float32Array(40),
+            horizonNear: new Uint32Array(),
+            horizonFar: new Uint32Array(),
+            horizonComplete: true,
+            horizonRefusedCells: new Uint32Array(),
+          },
+        },
+      });
+      answered += 1;
+    }
+  }
+  return answered;
+}
+
+/** The ship 500 km over the slice's Earth, inside its wireframe hand-over range at 1280 px. */
+const LOW_OVER_EARTH_M = 5e5;
+
+/**
+ * `VIEW` drawing the server's scene in the wireframe, the ship 500 km over the slice's Earth, the
+ * Earth's field (surveyed whole) and seed answered, its bakes held back by the scripted workers,
+ * with the session `VIEW` made given to `sessions`.
+ */
+async function earthInWireframe(sessions: TerrainSession[]): Promise<ViewDisplayHarness> {
+  const fake = timedEngineSource();
+  const view = renderViewDisplay({
+    store: await nominalStore(),
+    source: fake.source,
+    engines: fake.engines,
+    watchTerrain: (session) => {
+      sessions.push(session);
+      return () => undefined;
+    },
+  });
+  await settle();
+  view.advance(100);
+  await openUniverse(view);
+  await shipOverEarthArrives(view, LOW_OVER_EARTH_M);
+  await settle();
+  view.advance(300);
+  await settle();
+  const { id } = latestFieldAsk(view.socket);
+  const bulk = sendFieldFrames(view.socket, id, fieldPayload([fieldBlock(50, 1)]));
+  await act(async () => {
+    view.socket.serverResponds(
+      id,
+      readyField(earthHeader(), 1, fieldCover([0, 6 * 4 ** 5, 30]), bulk),
+    );
+    view.socket.serverAnswers("body_detail", () => earthWithSeed());
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  view.advance(500);
+  await settle();
+  return view;
+}
+
+/** Plays `steps` × 100 ms of frames, answering every bake asked after each. */
+async function bakeFor(view: ViewDisplayHarness, steps: number): Promise<void> {
+  for (let step = 0; step < steps; step += 1) {
+    view.advance(100);
+    answerEveryBake(view);
+    // Each step answers the bakes the one before asked.
+    // oxlint-disable-next-line no-await-in-loop
+    await settle();
+  }
+}
+
+/** A label block's `CONTOUR INTERVAL` reading, or `null` where it states none. */
+function contourIntervalIn(block: HTMLElement): string | null {
+  const label = within(block).queryByText("CONTOUR INTERVAL", { selector: "dt" });
+  const line = label?.parentElement ?? null;
+  return line === null ? null : within(line).getByRole("status").textContent;
+}
+
+describe("the wireframe's terrain on a live VIEW (R10.T11)", () => {
+  it("makes a wireframe pass of the Earth that the wireframe primary hands over, and no lit pass", async () => {
+    const sessions: TerrainSession[] = [];
+    await earthInWireframe(sessions);
+    const session = sessions.at(-1);
+    expect([
+      [...(session?.wirePass(FIXTURE_EARTH)?.viewIds ?? [])],
+      session?.pass(FIXTURE_EARTH) ?? null,
+    ]).toEqual([[PRIMARY_VIEW_ID], null]);
+  });
+
+  it("states the contour interval on the primary's label block once its terrain draws", async () => {
+    const view = await earthInWireframe([]);
+    const before = contourIntervalIn(primaryLabelBlock());
+    await bakeFor(view, 10);
+    expect([before, contourIntervalIn(primaryLabelBlock())]).toEqual([
+      null,
+      expect.stringMatching(/^[\d.]+ k?m · INDEX [\d.]+ k?m$/u),
+    ]);
+  });
+
+  it("states no contour interval on an instrument's label block, though it hands the Earth over too", async () => {
+    const sessions: TerrainSession[] = [];
+    const view = await earthInWireframe(sessions);
+    await openInstrument(view, "INSTRUMENT 1");
+    await bakeFor(view, 10);
+    if (sessions.at(-1)?.wirePass(FIXTURE_EARTH)?.viewIds.has(instrumentViewId(1)) !== true) {
+      throw new Error("INSTRUMENT 1 does not hand the Earth over in the wireframe");
+    }
+    expect(contourIntervalIn(screen.getByRole("region", { name: "INSTRUMENT 1" }))).toBeNull();
+  });
+
+  it("states the fault on the wireframe primary's label block while it hands the Earth over and every height worker is lost", async () => {
+    const view = await earthInWireframe([]);
+    const before = faultLines();
+    const workers = view.heightWorkers.length;
+    for (let round = 0; round < MAX_CONSECUTIVE_WORKER_FAILURES; round += 1) {
+      for (const worker of view.heightWorkers.slice(-workers)) {
+        worker.fail();
+      }
+    }
+    view.advance(500);
+    await settle();
+    expect([before, faultLines()]).toEqual([[], [TERRAIN_NOT_AVAILABLE]]);
   });
 });
 

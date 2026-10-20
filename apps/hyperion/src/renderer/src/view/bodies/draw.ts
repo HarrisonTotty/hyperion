@@ -97,6 +97,7 @@ import type { Rgb } from "../photometry/toneCurve";
 import frameWgsl from "../shaders/frame.wgsl?raw";
 import litBodyWgsl from "../shaders/litBody.wgsl?raw";
 import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
+import cubeTexelWgsl from "../shaders/cubeTexel.wgsl?raw";
 import bodyDiscCellsWgsl from "../shaders/bodyDiscCells.wgsl?raw";
 import bodyDiscDrawWgsl from "../shaders/bodyDiscDraw.wgsl?raw";
 import smoothMeshWgsl from "../shaders/smoothMesh.wgsl?raw";
@@ -665,9 +666,10 @@ export function planLitBodies(
 /**
  * What every lit-body module composes before its own: R01's frame, R08's surface lighting (plan
  * R08, R08.T9.b: `preciseTrig.wgsl`, `common.wgsl`, `oblate.wgsl` and `surfaceLighting.wgsl`, in
- * place of `litBody.wgsl`'s stubs), the lit-body library and the disc's shading.
+ * place of `litBody.wgsl`'s stubs), the lit-body library, the cube sphere's texel lookup
+ * (`cubeTexel.wgsl`, R10.T11) and the disc's shading.
  */
-const LIT_SOURCE = frameWgsl + SURFACE_LIGHTING_WGSL + litBodyWgsl + bodyDiscWgsl;
+const LIT_SOURCE = frameWgsl + SURFACE_LIGHTING_WGSL + litBodyWgsl + cubeTexelWgsl + bodyDiscWgsl;
 
 const DISC_SOURCE = LIT_SOURCE + bodyDiscDrawWgsl;
 

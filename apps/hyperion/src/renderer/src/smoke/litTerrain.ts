@@ -34,7 +34,7 @@ import type {
 } from "../view/engine/types";
 import { annulusEdges } from "../view/lighting/annuli";
 import { TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
-import { TerrainResources } from "../view/terrain/gpu/resources";
+import { normalsAtlasOf, TerrainResources } from "../view/terrain/gpu/resources";
 import {
   ContactRecords,
   InstanceRecords,
@@ -407,7 +407,7 @@ async function renderInto(
 ): Promise<LitFrame> {
   const { resources, material, air, lit, storageBuffers, orientation, camera } = draw;
   const { layout } = resources;
-  const { atlas } = layout;
+  const atlas = normalsAtlasOf(layout);
   target.render({
     label: "terrain",
     viewRotation: viewRotation4(orientation),

@@ -6,9 +6,11 @@
  * The draw list (R02.T13) is packed into four storage buffers, one per shader, and drawn in this
  * order: the bodies' occluder spheres and the hulls' opaque faces (each pushed away in its
  * fragment by the list's `occluderSlopePx`, R07.T16.d; depth only, or over the photorealistic image
- * a silhouette filled opaque in its mesh's `fill`, R07.T16.e), the star sprites (additive), then
- * each line batch, its `--surface-0` casing first and its stroke over it, both premultiplied over
- * what is beneath. Sprites go before the lines, where the draw list lists them
+ * a silhouette filled opaque in its mesh's `fill`, R07.T16.e), the bodies' surveyed terrain where a
+ * view hands it over (plan R10, R10.T11: its depth, black, with its contours and graticule), the
+ * star sprites (additive), then each line batch, its `--surface-0` casing first and its stroke over
+ * it, both premultiplied over what is beneath. A body whose terrain is drawn has its occluder sphere
+ * and its own lines discarded over its surveyed cells, its terrain standing there in their place. Sprites go before the lines, where the draw list lists them
  * after, so that a mark's casing covers a star beneath it, as the guide's casing rule wants of every
  * mark over the image. The shaders are standard WGSL in R01's convention (its Design note 23):
  * `frame.wgsl`'s `Frame` at `@group(0)`, each material's `Draw` at `@group(1)` (the draw's offset
@@ -28,6 +30,7 @@ import type {
   MeshSpec,
   RenderEngine,
   RenderView,
+  TextureHandle,
   WgslMaterialSpec,
 } from "../engine/types";
 import {
@@ -39,20 +42,35 @@ import {
   type Viewport,
   viewRotation4,
 } from "../camera/projection";
+import cubeTexelWgsl from "../shaders/cubeTexel.wgsl?raw";
 import frameWgsl from "../shaders/frame.wgsl?raw";
+import lineStrokeWgsl from "../shaders/lineStroke.wgsl?raw";
 import linesWgsl from "../shaders/lines.wgsl?raw";
+import linesSurveyedWgsl from "../shaders/linesSurveyed.wgsl?raw";
 import occluderWgsl from "../shaders/occluder.wgsl?raw";
 import occluderSphereWgsl from "../shaders/occluderSphere.wgsl?raw";
+import occluderSphereHitWgsl from "../shaders/occluderSphereHit.wgsl?raw";
+import occluderSphereSurveyedWgsl from "../shaders/occluderSphereSurveyed.wgsl?raw";
 import starSpriteWgsl from "../shaders/starSprite.wgsl?raw";
 import toneCurveWgsl from "../shaders/toneCurve.wgsl?raw";
+import wireCoverageWgsl from "../shaders/wireCoverage.wgsl?raw";
 import type { DrawCamera, LineBatch, OccluderSphere, WireframeDrawList } from "./drawList";
 
 /**
  * The wireframe's materials, by name: `occluderHull` a hull's faces as depth alone, and
- * `hullSilhouette` the same faces filled opaque over the photorealistic image (R07.T16.e).
+ * `hullSilhouette` the same faces filled opaque over the photorealistic image (R07.T16.e); and,
+ * for a body whose surveyed terrain the wireframe draws (plan R10, R10.T11), its occluder sphere and
+ * its own lines, its limb and graticule at the datum, each discarded over the cells its coverage
+ * mask holds surveyed (`occluderSphereSurveyed`, `linesSurveyed`).
  */
 export type WireframeMaterial =
-  "lines" | "occluderSphere" | "occluderHull" | "hullSilhouette" | "starSprite";
+  | "lines"
+  | "occluderSphere"
+  | "occluderHull"
+  | "hullSilhouette"
+  | "starSprite"
+  | "linesSurveyed"
+  | "occluderSphereSurveyed";
 
 /** The meshes the wireframe instances: a unit quad's two triangles, and one triangle. */
 export type WireframeMesh = "quad" | "triangle";
@@ -65,11 +83,18 @@ export const WIREFRAME_PASS_LABEL = "view:wireframe";
 
 /** The sources, each composed after `frame.wgsl` by plain concatenation; no preprocessor. */
 const SOURCES: Readonly<Record<WireframeMaterial, string>> = {
-  lines: frameWgsl + linesWgsl,
-  occluderSphere: frameWgsl + occluderSphereWgsl,
+  lines: frameWgsl + lineStrokeWgsl + linesWgsl,
+  occluderSphere: frameWgsl + occluderSphereHitWgsl + occluderSphereWgsl,
   occluderHull: frameWgsl + occluderWgsl,
   hullSilhouette: frameWgsl + occluderWgsl,
   starSprite: frameWgsl + toneCurveWgsl + starSpriteWgsl,
+  linesSurveyed: frameWgsl + lineStrokeWgsl + cubeTexelWgsl + wireCoverageWgsl + linesSurveyedWgsl,
+  occluderSphereSurveyed:
+    frameWgsl +
+    occluderSphereHitWgsl +
+    cubeTexelWgsl +
+    wireCoverageWgsl +
+    occluderSphereSurveyedWgsl,
 };
 
 /** Which storage buffer each material reads, at `@group(2) @binding(0)`. */
@@ -79,6 +104,8 @@ export const MATERIAL_BUFFER: Readonly<Record<WireframeMaterial, WireframeBuffer
   occluderHull: "corners",
   hullSilhouette: "corners",
   starSprite: "sprites",
+  linesSurveyed: "segments",
+  occluderSphereSurveyed: "spheres",
 };
 
 /**
@@ -91,11 +118,20 @@ const DISPLAY_NAMES: Readonly<Record<WireframeMaterial, string>> = {
   occluderHull: "HULL OCCLUDER",
   hullSilhouette: "HULL SILHOUETTE",
   starSprite: "STAR SPRITES",
+  linesSurveyed: "DATUM LINES",
+  occluderSphereSurveyed: "DATUM OCCLUDER",
 };
+
+/**
+ * The binding of a body's coverage mask in `@group(2)` (`wireCoverage.wgsl`), beside the
+ * material's storage buffer at 0 (R10.T11).
+ */
+export const COVERAGE_MASK_BINDING = 1;
 
 function spec(
   name: WireframeMaterial,
-  state: Pick<WgslMaterialSpec, "uniforms" | "depthWrite" | "colourWrites" | "blend">,
+  state: Pick<WgslMaterialSpec, "uniforms" | "depthWrite" | "colourWrites" | "blend"> &
+    Pick<Partial<WgslMaterialSpec>, "textures">,
 ): WgslMaterialSpec {
   return {
     name: `wireframe:${name}`,
@@ -111,6 +147,11 @@ function spec(
   };
 }
 
+/** A surveyed body's mask, as both of its materials bind it (R10.T11). */
+const COVERAGE_TEXTURES: NonNullable<WgslMaterialSpec["textures"]> = [
+  { name: "coverageMask", binding: COVERAGE_MASK_BINDING, viewDimension: "2d-array" },
+];
+
 /**
  * Whether each material writes the depth that hides what follows it, so that its draws go before
  * the background and every line (R06.T13.g; R07.T16.e): the occluders and the hulls' silhouettes.
@@ -121,7 +162,19 @@ const IS_OCCLUDER: Readonly<Record<WireframeMaterial, boolean>> = {
   occluderHull: true,
   hullSilhouette: true,
   starSprite: false,
+  linesSurveyed: false,
+  occluderSphereSurveyed: true,
 };
+
+/** The uniforms of a line's stroke, for both of its materials, in its `Draw` struct's order. */
+const LINE_UNIFORMS: WgslMaterialSpec["uniforms"] = [
+  { name: "colour", type: "vec4f" },
+  { name: "widthPx", type: "f32" },
+  { name: "firstSegment", type: "f32" },
+  { name: "space", type: "f32" },
+  { name: "dashOnPx", type: "f32" },
+  { name: "dashOffPx", type: "f32" },
+];
 
 /** A hull face's uniforms, for both of its materials, which share one source. */
 const HULL_UNIFORMS: WgslMaterialSpec["uniforms"] = [
@@ -131,7 +184,8 @@ const HULL_UNIFORMS: WgslMaterialSpec["uniforms"] = [
 ];
 
 /**
- * The wireframe's five materials (Design notes 5, 9 and 12).
+ * The wireframe's seven materials (Design notes 5, 9 and 12; the two over a body's surveyed
+ * terrain, plan R10, R10.T11).
  *
  * @remarks
  * Lines and sprites are depth-tested and write no depth; the occluders write depth and no colour,
@@ -144,17 +198,34 @@ const HULL_UNIFORMS: WgslMaterialSpec["uniforms"] = [
  */
 export const WIREFRAME_MATERIALS: Readonly<Record<WireframeMaterial, WgslMaterialSpec>> = {
   lines: spec("lines", {
-    uniforms: [
-      { name: "colour", type: "vec4f" },
-      { name: "widthPx", type: "f32" },
-      { name: "firstSegment", type: "f32" },
-      { name: "space", type: "f32" },
-      { name: "dashOnPx", type: "f32" },
-      { name: "dashOffPx", type: "f32" },
-    ],
+    uniforms: LINE_UNIFORMS,
     depthWrite: false,
     colourWrites: true,
     blend: "premultiplied",
+  }),
+  linesSurveyed: spec("linesSurveyed", {
+    uniforms: [
+      ...LINE_UNIFORMS,
+      { name: "coverageAxes", type: "mat4x4f" },
+      { name: "coverageStretch", type: "vec4f" },
+      { name: "coverageCentreM", type: "vec4f" },
+    ],
+    textures: COVERAGE_TEXTURES,
+    depthWrite: false,
+    colourWrites: true,
+    blend: "premultiplied",
+  }),
+  occluderSphereSurveyed: spec("occluderSphereSurveyed", {
+    uniforms: [
+      { name: "occluderSlopePx", type: "f32" },
+      { name: "firstSphere", type: "f32" },
+      { name: "coverageAxes", type: "mat4x4f" },
+      { name: "coverageStretch", type: "vec4f" },
+    ],
+    textures: COVERAGE_TEXTURES,
+    depthWrite: true,
+    colourWrites: false,
+    blend: "none",
   }),
   occluderSphere: spec("occluderSphere", {
     uniforms: [{ name: "occluderSlopePx", type: "f32" }],
@@ -209,7 +280,43 @@ export interface PackedDraw {
   readonly instanceCount: number;
   readonly offsetFromCameraM: Float32Array;
   readonly uniforms: Readonly<Record<string, Float32Array>>;
+  /**
+   * The body whose coverage mask the draw binds (R10.T11): a surveyed body's occluder sphere or
+   * one of its own lines; absent for every other draw.
+   */
+  readonly surveyedBody?: string;
 }
+
+/**
+ * A body whose datum the wireframe draws beside its surveyed terrain (plan R10, R10.T11), as the
+ * pack takes it: its occluder sphere and its own lines, its limb and graticule, are discarded where
+ * its coverage mask holds a cell surveyed.
+ */
+export interface SurveyedDatum {
+  /** Its body-fixed axes into the camera frame's, as a column-major `mat4x4f` (`rotationColumns`). */
+  readonly axes: Float32Array;
+  /** Its equatorial radius over its polar, a ÷ c, by which a direction is stretched along its pole. */
+  readonly stretch: number;
+}
+
+/** A surveyed body's datum with its coverage mask, as the frame binds it (R10.T11). */
+export interface SurveyedDatumFrame extends SurveyedDatum {
+  /** Its GPU coverage mask (`TerrainSession.coverageMask`), given only while it may discard. */
+  readonly mask: TextureHandle;
+}
+
+/**
+ * What the wireframe draws of the bodies' terrain in one frame (plan R10, R10.T11): each handed-over
+ * body's depth with its contours, drawn after the occluders and before the background and the
+ * lines, so that it hides what lies behind it; and the bodies whose datum gives way to it.
+ */
+export interface WireframeTerrain {
+  readonly draws: ReadonlyArray<DrawItem>;
+  readonly surveyed: ReadonlyMap<string, SurveyedDatumFrame>;
+}
+
+/** No terrain: the wireframe as R02 built it. */
+export const NO_WIREFRAME_TERRAIN: WireframeTerrain = { draws: [], surveyed: new Map() };
 
 /** One frame of the wireframe, packed for the GPU: the buffers' contents and the draws. */
 export interface PackedWireframe {
@@ -441,14 +548,23 @@ function dashPhases(batch: LineBatch, camera: ProjectionCamera, viewport: Viewpo
 
 const ZERO_OFFSET = new Float32Array(3);
 
+/** No body's datum gives way to its terrain. */
+const NO_SURVEYED_DATUM: ReadonlyMap<string, SurveyedDatum> = new Map();
+
 /**
  * Packs one frame of the draw list for the GPU (plan R02, R02.T14): a function of its arguments
  * alone, so that what reaches the engine is tested without a GPU.
+ *
+ * @param surveyed - The bodies whose datum gives way to their surveyed terrain (plan R10, R10.T11):
+ *   each one's occluder sphere is its own draw of `occluderSphereSurveyed`, after the others in the
+ *   spheres' buffer, and each of its own lines (`LineBatch.body`) is drawn with `linesSurveyed`,
+ *   both discarding where its coverage mask holds a cell surveyed.
  */
 export function packWireframe(
   list: WireframeDrawList,
   camera: DrawCamera,
   viewport: Viewport,
+  surveyed: ReadonlyMap<string, SurveyedDatum> = NO_SURVEYED_DATUM,
 ): PackedWireframe {
   const projection: ProjectionCamera = {
     orientation: camera.pose.orientation,
@@ -459,30 +575,64 @@ export function packWireframe(
 
   const sphereRows: number[] = [];
   let sphereCount = 0;
-  for (const sphere of list.occluderSpheres) {
-    const centre = centreOf(sphere);
-    // Behind the camera or across its plane the rectangle is the whole view, each fragment
-    // rejecting itself (R07.T19.e).
-    if (sphereOutsideView(centre, sphere.radiusM, projection, viewport)) {
-      continue;
+  // A surveyed body's sphere, packed after the others: its index, and its centre from the camera.
+  const surveyedSpheres: Array<{ readonly body: string; readonly index: number }> = [];
+  const surveyedCentres = new Map<string, Float32Array>();
+  for (const pass of ["plain", "surveyed"] as const) {
+    for (const sphere of list.occluderSpheres) {
+      if ((pass === "surveyed") !== surveyed.has(sphere.id)) {
+        continue;
+      }
+      if (pass === "surveyed") {
+        surveyedCentres.set(sphere.id, sphere.centreF32);
+      }
+      const centre = centreOf(sphere);
+      // Behind the camera or across its plane the rectangle is the whole view, each fragment
+      // rejecting itself (R07.T19.e).
+      if (sphereOutsideView(centre, sphere.radiusM, projection, viewport)) {
+        continue;
+      }
+      const rect = sphereScreenRect(centre, sphere.radiusM, projection, viewport);
+      if (rect === null) {
+        continue;
+      }
+      const c = sphere.centreF32;
+      sphereRows.push(rect.leftPx, rect.topPx, rect.rightPx, rect.bottomPx);
+      sphereRows.push(c[0] ?? 0, c[1] ?? 0, c[2] ?? 0, sphere.radiusM);
+      sphereRows.push(sphere.altitudeM, 0, 0, 0);
+      if (pass === "surveyed") {
+        surveyedSpheres.push({ body: sphere.id, index: sphereCount });
+      }
+      sphereCount += 1;
     }
-    const rect = sphereScreenRect(centre, sphere.radiusM, projection, viewport);
-    if (rect === null) {
-      continue;
-    }
-    const c = sphere.centreF32;
-    sphereRows.push(rect.leftPx, rect.topPx, rect.rightPx, rect.bottomPx);
-    sphereRows.push(c[0] ?? 0, c[1] ?? 0, c[2] ?? 0, sphere.radiusM);
-    sphereRows.push(sphere.altitudeM, 0, 0, 0);
-    sphereCount += 1;
   }
-  if (sphereCount > 0) {
+  const plainSpheres = sphereCount - surveyedSpheres.length;
+  if (plainSpheres > 0) {
     draws.push({
       material: "occluderSphere",
       mesh: "quad",
-      instanceCount: sphereCount,
+      instanceCount: plainSpheres,
       offsetFromCameraM: ZERO_OFFSET,
       uniforms: { occluderSlopePx },
+    });
+  }
+  for (const { body, index } of surveyedSpheres) {
+    const datum = surveyed.get(body);
+    if (datum === undefined) {
+      continue;
+    }
+    draws.push({
+      material: "occluderSphereSurveyed",
+      mesh: "quad",
+      instanceCount: 1,
+      offsetFromCameraM: ZERO_OFFSET,
+      uniforms: {
+        occluderSlopePx,
+        firstSphere: new Float32Array([index]),
+        coverageAxes: datum.axes,
+        coverageStretch: new Float32Array([datum.stretch, 0, 0, 0]),
+      },
+      surveyedBody: body,
     });
   }
 
@@ -550,20 +700,42 @@ export function packWireframe(
       segmentRows.push(s[i * 6] ?? 0, s[i * 6 + 1] ?? 0, s[i * 6 + 2] ?? 0, phases?.[i] ?? 0);
       segmentRows.push(s[i * 6 + 3] ?? 0, s[i * 6 + 4] ?? 0, s[i * 6 + 5] ?? 0, 0);
     }
-    const stroke = (colour: string, widthPx: number): PackedDraw => ({
-      material: "lines",
-      mesh: "quad",
-      instanceCount: count,
-      offsetFromCameraM: batch.space === "view" ? batch.originF32 : ZERO_OFFSET,
-      uniforms: {
+    // A surveyed body's own lines give way to its terrain (R10.T11).
+    const datum = batch.body === undefined ? undefined : surveyed.get(batch.body);
+    const centre = batch.body === undefined ? undefined : surveyedCentres.get(batch.body);
+    const stroke = (colour: string, widthPx: number): PackedDraw => {
+      const uniforms = {
         colour: linearColour(colour),
         widthPx: new Float32Array([widthPx]),
         firstSegment: new Float32Array([first]),
         space: new Float32Array([batch.space === "screen" ? 1 : 0]),
         dashOnPx: new Float32Array([batch.dash?.onPx ?? 0]),
         dashOffPx: new Float32Array([batch.dash?.offPx ?? 0]),
-      },
-    });
+      };
+      const offsetFromCameraM = batch.space === "view" ? batch.originF32 : ZERO_OFFSET;
+      if (batch.body === undefined || datum === undefined || centre === undefined) {
+        return {
+          material: "lines",
+          mesh: "quad",
+          instanceCount: count,
+          offsetFromCameraM,
+          uniforms,
+        };
+      }
+      return {
+        material: "linesSurveyed",
+        mesh: "quad",
+        instanceCount: count,
+        offsetFromCameraM,
+        uniforms: {
+          ...uniforms,
+          coverageAxes: datum.axes,
+          coverageStretch: new Float32Array([datum.stretch, 0, 0, 0]),
+          coverageCentreM: new Float32Array([centre[0] ?? 0, centre[1] ?? 0, centre[2] ?? 0, 0]),
+        },
+        surveyedBody: batch.body,
+      };
+    };
     if (batch.casingWidthPx > 0) {
       draws.push(stroke(batch.casingColour, batch.widthPx + 2 * batch.casingWidthPx));
     }
@@ -634,6 +806,8 @@ export class WireframeRenderer {
         occluderHull: material("occluderHull"),
         hullSilhouette: material("hullSilhouette"),
         starSprite: material("starSprite"),
+        linesSurveyed: material("linesSurveyed"),
+        occluderSphereSurveyed: material("occluderSphereSurveyed"),
       },
       meshes: {
         quad: engine.createMesh(WIREFRAME_MESHES.quad),
@@ -680,14 +854,18 @@ export class WireframeRenderer {
    * @param viewport - The view's size, px, which the projection's aspect follows.
    * @param background - Draws at infinity, such as R06's baked star cube, encoded after the
    *   occluders (so that they hide them) and before the lines and sprites.
+   * @param terrain - The bodies' terrain (plan R10, R10.T11): its draws, encoded after the
+   *   occluders, so that the depth they wrote hides the contours, and before the background, which
+   *   they hide; and the bodies whose datum gives way to it.
    */
   frame(
     list: WireframeDrawList,
     camera: DrawCamera,
     viewport: Viewport,
     background: ReadonlyArray<DrawItem> = [],
+    terrain: WireframeTerrain = NO_WIREFRAME_TERRAIN,
   ): FrameSubmission {
-    const packed = packWireframe(list, camera, viewport);
+    const packed = packWireframe(list, camera, viewport, terrain.surveyed);
     const buffers: Record<WireframeBuffer, BufferHandle> = {
       segments: this.#write("segments", packed.segments),
       spheres: this.#write("spheres", packed.spheres),
@@ -697,24 +875,28 @@ export class WireframeRenderer {
     const { materials, meshes } = this.#resources;
     const bound: DrawItem[] = packed.draws.map((draw) => {
       const bufferName = MATERIAL_BUFFER[draw.material];
+      const mask =
+        draw.surveyedBody === undefined ? undefined : terrain.surveyed.get(draw.surveyedBody)?.mask;
       return {
         mesh: meshes[draw.mesh],
         material: materials[draw.material],
         offsetFromCameraM: draw.offsetFromCameraM,
         uniforms: draw.uniforms,
-        textures: {},
+        textures: mask === undefined ? {} : { coverageMask: mask },
         instanceCount: draw.instanceCount,
         storageBuffers: { [bufferName]: buffers[bufferName] },
       };
     });
-    // The occluders, then the background they hide, then everything else in its packed order: the
-    // spheres before the hulls' faces, a silhouette's included, and every line after them.
+    // The occluders, then the terrain, which they hide and which hides the background, then the
+    // background, then everything else in its packed order: the spheres before the hulls' faces,
+    // a silhouette's included, and every line after them.
     const isOccluder = (index: number): boolean => {
       const material = packed.draws[index]?.material;
       return material !== undefined && IS_OCCLUDER[material];
     };
     const draws = [
       ...bound.filter((_, index) => isOccluder(index)),
+      ...terrain.draws,
       ...background,
       ...bound.filter((_, index) => !isOccluder(index)),
     ];
@@ -731,15 +913,16 @@ export class WireframeRenderer {
     };
   }
 
-  /** Packs, writes and renders one frame into `view`. */
+  /** Packs, writes and renders one frame into `view`, with the bodies' terrain (R10.T11). */
   render(
     view: RenderView,
     list: WireframeDrawList,
     camera: DrawCamera,
     viewport: Viewport,
     background: ReadonlyArray<DrawItem> = [],
+    terrain: WireframeTerrain = NO_WIREFRAME_TERRAIN,
   ): void {
-    view.render(this.frame(list, camera, viewport, background));
+    view.render(this.frame(list, camera, viewport, background, terrain));
   }
 
   /** Stops following the engine's restores; the engine owns and frees the handles. */

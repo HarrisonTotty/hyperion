@@ -475,6 +475,47 @@ describe("buildWireframeDrawList", () => {
   });
 });
 
+/** The fixture scene with a ring about the planet, facing the camera. */
+function ringedScene(): ViewScene {
+  return {
+    ...scene(),
+    rings: [
+      { body: FIXTURE_PLANET, innerRadiusM: 1e7, outerRadiusM: 1.5e7, normal: vec3(0, 0, 1) },
+    ],
+  };
+}
+
+describe("buildWireframeDrawList's datum lines (R10.T11)", () => {
+  it("names the planet as the body of its limb's and graticule's batches", () => {
+    const planet = build()
+      .lines.filter((line) => line.id.startsWith(`body:${FIXTURE_PLANET}:`))
+      .map((line) => [line.id, line.body]);
+    expect(planet).toEqual([
+      [`body:${FIXTURE_PLANET}:major`, FIXTURE_PLANET],
+      [`body:${FIXTURE_PLANET}:graticule`, FIXTURE_PLANET],
+    ]);
+  });
+
+  it("names each body's own batches after the body they are drawn of", () => {
+    const own = build().lines.filter((line) => line.id.startsWith("body:"));
+    expect([own.length > 0, own.map((line) => line.body)]).toEqual([
+      true,
+      own.map((line) => line.id.split(":")[1]),
+    ]);
+  });
+
+  it("names no body on an orbit, a ring, a hull, a predicted path, a mark or a survey edge", () => {
+    const list = withSurveyEdge(ringedScene());
+    const others = list.lines.filter((line) => !line.id.startsWith("body:"));
+    expect([
+      [...new Set(others.map((line) => line.id.split(":")[0] ?? ""))].toSorted((a, b) =>
+        a.localeCompare(b),
+      ),
+      others.filter((line) => "body" in line).map((line) => line.id),
+    ]).toEqual([["hull", "mark", "orbit", "predicted", "ring", "survey-edge"], []]);
+  });
+});
+
 /** A batch's line widths, device px: its stroke, its casing each side and its dash. */
 function widths(list: WireframeDrawList, kinds: (id: string) => boolean): unknown[] {
   return list.lines

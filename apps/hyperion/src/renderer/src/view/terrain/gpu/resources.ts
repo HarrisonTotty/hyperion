@@ -20,6 +20,11 @@
  * holds each slot's survey mask and draws the lit material's own mesh, whose skirts and fins join
  * the terrain to the reference surface at the survey's edge (R10.T10.c, Design note 12).
  *
+ * A wireframe layout (plan R10, R10.T11) holds each slot's heights, offsets on their path and
+ * survey mask alone, with no normals atlas, and draws the lit material's mesh, whose skirts and fins
+ * join the terrain's depth to the body's occluder at the survey's edge; each of its views has its
+ * phases' buffer too (`WirePhaseRecords`), which its contours and graticule read.
+ *
  * Each view that draws the terrain has its own frame buffers (plan R10, R10.T16.b): its instance,
  * contact and indirect buffers and, on a lit layout, its lights, made at its first frame and
  * released when it leaves ({@link TerrainResources.releaseView}); {@link DEFAULT_TERRAIN_VIEW}'s go
@@ -48,6 +53,7 @@ import {
   type SlotLayout,
   SURVEY_CELL_CODE_BYTE,
   SURVEY_MASK_BYTES,
+  TERRAIN_SHADING_TRAITS,
   type TerrainShading,
   terrainSlotLayout,
   NORMALS_GUTTER_TEXELS,
@@ -71,6 +77,8 @@ import {
   MAX_CONTACTS,
   patchTerms,
   SLOT_RECORD_BYTES,
+  WIRE_PHASE_RECORD_BYTES,
+  type WirePhaseRecords,
   writeSlotRecord,
 } from "./uniforms";
 
@@ -223,10 +231,8 @@ export type TerrainLimits = Pick<
   "maxStorageBufferBindingSize" | "maxBufferSize" | "maxTextureDimension2D"
 >;
 
-/** A setting's terrain layout on one device. */
-export interface TerrainLayout {
-  /** How its patches are shaded: R05's spike shading, or R10's lit material with its fields. */
-  readonly shading: TerrainShading;
+/** What every {@link TerrainLayout} holds, whatever its shading. */
+export interface TerrainLayoutFields {
   /** The vertex path the device can hold: the setting's, or `face-differences` on a fallback. */
   readonly vertexPath: TerrainVertexPath;
   /**
@@ -234,9 +240,40 @@ export interface TerrainLayout {
    * exceed the device's storage-binding or buffer limit (decisions-r06-r07.md item 7); else `none`.
    */
   readonly fallback: "none" | "binding-limit";
-  /** T8's layout for {@link vertexPath} over the setting's cache budget. */
+  /** T8's layout for {@link TerrainLayoutFields.vertexPath} over the setting's cache budget. */
   readonly slots: SlotLayout;
+}
+
+/** The layout of R05's spike shading or R10's lit material, whose slots hold normals. */
+export interface NormalsTerrainLayout extends TerrainLayoutFields {
+  /** R05's spike shading, or R10's lit material with its fields. */
+  readonly shading: "spike" | "lit";
+  /** Where each slot's normals sit. */
   readonly atlas: NormalsAtlasLayout;
+}
+
+/** The wireframe's layout (R10.T11): its heights, offsets and survey mask, and no normals. */
+export interface WireTerrainLayout extends TerrainLayoutFields {
+  /** The wireframe's depth with its contours. */
+  readonly shading: "wire";
+  /** No atlas: the wireframe's slots hold no normals. */
+  readonly atlas: null;
+}
+
+/** A setting's terrain layout on one device, by how its patches are shaded. */
+export type TerrainLayout = NormalsTerrainLayout | WireTerrainLayout;
+
+/**
+ * A layout's normals atlas, for the callers that draw with it: R05's spike shading and R10's lit
+ * material, which never hold the wireframe's layout.
+ *
+ * @throws Error for the wireframe's layout, which holds no normals (R10.T11).
+ */
+export function normalsAtlasOf(layout: TerrainLayout): NormalsAtlasLayout {
+  if (layout.shading === "wire") {
+    throw new Error("the wireframe's terrain layout holds no normals atlas");
+  }
+  return layout.atlas;
 }
 
 /** The bytes a storage-buffer field takes over every slot. */
@@ -275,6 +312,9 @@ export function terrainLayout(
     throw new Error(
       `the terrain's ${slots.slotCount} slots exceed the device's storage binding of ${limits.maxStorageBufferBindingSize} B`,
     );
+  }
+  if (shading === "wire") {
+    return { shading, vertexPath, fallback, slots, atlas: null };
   }
   let samplesPerSide: number;
   switch (terrain.normals) {
@@ -607,21 +647,39 @@ export interface TerrainViewBuffers {
   readonly indirect: BufferHandle;
   /** A lit layout's lights for it, `TERRAIN_LIGHT_ROWS` `vec4f`; `null` for R05's spike shading. */
   readonly lights: BufferHandle | null;
+  /**
+   * A wireframe layout's phase records for it ({@link WIRE_PHASE_RECORD_BYTES} each), one per slot
+   * at most (R10.T11); `null` on the other layouts.
+   */
+  readonly phases: BufferHandle | null;
 }
 
-/** The buffers and textures of one layout, made together. */
-interface Made {
-  readonly layout: TerrainLayout;
-  /** The lit layout's phase table; `null` for R05's spike shading. */
+/** The buffers and textures of one layout, made together, whatever its shading. */
+interface MadeFields {
+  /** The lit layout's phase table; `null` for R05's spike shading and the wireframe's. */
   readonly lit: LitMade | null;
   /** Each storage-buffer field of the layout with bytes, by its name. */
   readonly fields: ReadonlyMap<SlotFieldName, BufferHandle>;
   readonly slotRecords: BufferHandle;
-  readonly normals: TextureHandle;
   readonly mesh: MeshHandle;
   /** Each view's frame buffers, made at its first frame on the device. */
   readonly views: Map<string, TerrainViewBuffers>;
 }
+
+/** A layout with normals made, with its atlas's texture. */
+interface NormalsMade extends MadeFields {
+  readonly layout: NormalsTerrainLayout;
+  readonly normals: TextureHandle;
+}
+
+/** The wireframe's layout made (R10.T11), with no atlas. */
+interface WireMade extends MadeFields {
+  readonly layout: WireTerrainLayout;
+  readonly normals: null;
+}
+
+/** One layout's buffers and textures, by whether it holds normals. */
+type Made = NormalsMade | WireMade;
 
 /**
  * The terrain's GPU resources for one setting and figure, made at once and written slot by slot.
@@ -690,15 +748,23 @@ export class TerrainResources {
   /**
    * The 65 × 65 mesh with skirts the layout draws: R05's shared one ({@link patchMeshData}) on
    * R05's spike shading, and the lit material's ({@link litPatchMeshData}), with the survey edge's
-   * skirt heads and fins, on a lit layout.
+   * skirt heads and fins, on a lit or wireframe layout.
    */
   get mesh(): MeshHandle {
     return this.#made.mesh;
   }
 
-  /** The normals atlas, `rg16float`, a 2D texture of {@link NormalsAtlasLayout.layers} layers. */
+  /**
+   * The normals atlas, `rg16float`, a 2D texture of {@link NormalsAtlasLayout.layers} layers.
+   *
+   * @throws Error on the wireframe's layout, which holds no normals (R10.T11).
+   */
   get normals(): TextureHandle {
-    return this.#made.normals;
+    const normals = this.#made.normals;
+    if (normals === null) {
+      throw new Error("the wireframe's terrain layout holds no normals");
+    }
+    return normals;
   }
 
   /** The per-slot records ({@link SLOT_RECORD_BYTES} each). */
@@ -827,12 +893,14 @@ export class TerrainResources {
    * bake skipped them) then its class laws, adding their rows to the phase table, its horizon
    * map, the near field's words then the far field's (R10.T8.b), or words of no horizon where the
    * bake skipped it, and its survey mask with the code of its survey's cell size
-   * ({@link packSurveyMask}, R10.T10.c).
+   * ({@link packSurveyMask}, R10.T10.c). On the wireframe's layout (R10.T11) it writes the heights,
+   * the offsets on their path, the record and the survey mask alone: the bake's normals are not
+   * kept.
    *
    * @returns `refused` with nothing written for a bake that no longer fits the layout: one baked
    * before a restore re-derived it ({@link TerrainResources.onRebuilt}), whose slot is past the new
-   * count or whose offsets the new vertex path does not take; or, on a lit layout, a bake without
-   * R10's layers; else `uploaded`.
+   * count or whose offsets the new vertex path does not take; or, on a lit or wireframe layout, a
+   * bake without R10's layers; else `uploaded`.
    * @throws RangeError also for class weights, a horizon map or a survey mask of another size than
    * a slot's, or a field level that is not an integer, before any write.
    * @throws RangeError if an array's length is not the layout's, which no bake of the setting gives.
@@ -847,7 +915,8 @@ export class TerrainResources {
       return { kind: "refused", reason: "vertex-path-mismatch" };
     }
     const { layers } = patch;
-    if (this.#made.lit !== null && layers === null) {
+    const masked = TERRAIN_SHADING_TRAITS[layout.shading].surveyMask;
+    if (masked && layers === null) {
       return { kind: "refused", reason: "layers-missing" };
     }
     const weightsBytes = layers?.weights.length ?? 0;
@@ -868,16 +937,19 @@ export class TerrainResources {
       );
     }
     const surveyMask =
-      this.#made.lit !== null && layers !== null
+      masked && layers !== null
         ? packSurveyMask(layers.surveyMask, surveyCellCode(patch.key.level, layers.fieldLevel))
         : null;
     this.#checkLength("heights", patch.heights.byteLength);
     if (patch.offsets !== null) {
       this.#checkLength("offsets", patch.offsets.byteLength);
     }
-    const n = layout.atlas.samplesPerSide;
-    if (patch.normals.length !== n * n * 2) {
-      throw new RangeError(`${patch.normals.length / 2} normals, where a tile holds ${n} × ${n}`);
+    const { atlas } = layout;
+    if (atlas !== null) {
+      const n = atlas.samplesPerSide;
+      if (patch.normals.length !== n * n * 2) {
+        throw new RangeError(`${patch.normals.length / 2} normals, where a tile holds ${n} × ${n}`);
+      }
     }
     this.#writeField("heights", slot, patch.heights);
     if (patch.offsets !== null) {
@@ -894,7 +966,10 @@ export class TerrainResources {
       slot * SLOT_RECORD_BYTES,
       this.#slotRecordBytes,
     );
-    this.#writeNormals(slot, patch.normals);
+    const made = this.#made;
+    if (made.normals !== null) {
+      this.#writeNormals(slot, made, patch.normals);
+    }
     const lit = this.#made.lit;
     if (lit !== null && layers !== null) {
       const { weights } = layers;
@@ -949,6 +1024,26 @@ export class TerrainResources {
   }
 
   /**
+   * Writes a frame's phase records into `view`'s phases buffer, one a drawn patch in its instances'
+   * order (R10.T11); nothing on a layout other than the wireframe's, or with none this frame.
+   *
+   * @throws RangeError if `phases` holds more records than the buffer, whose capacity is the slot
+   * count.
+   */
+  writePhases(phases: WirePhaseRecords, view: string = DEFAULT_TERRAIN_VIEW): void {
+    const made = this.#made;
+    if (phases.count > made.layout.slots.slotCount) {
+      throw new RangeError(
+        `${phases.count} phase records exceed the ${made.layout.slots.slotCount} slots`,
+      );
+    }
+    const buffer = this.viewBuffers(view).phases;
+    if (buffer !== null && phases.count > 0) {
+      this.#engine.writeBuffer(buffer, 0, phases.bytes());
+    }
+  }
+
+  /**
    * Releases every handle the resources made on the current device, every view's buffers with
    * them, and stops following restores (decision-r10-t16-contracts §1). A caller never disposes of
    * resources a frame not yet submitted draws.
@@ -970,7 +1065,7 @@ export class TerrainResources {
    * and a disposal releases the rest (the batch review's S3).
    */
   #release(made: Made): void {
-    const { lit } = made;
+    const { lit, normals } = made;
     const releases: Array<() => void> = [
       ...[...made.fields.values()].map((buffer) => () => {
         this.#engine.releaseBuffer(buffer);
@@ -978,9 +1073,13 @@ export class TerrainResources {
       () => {
         this.#engine.releaseBuffer(made.slotRecords);
       },
-      () => {
-        this.#engine.releaseTexture(made.normals);
-      },
+      ...(normals === null
+        ? []
+        : [
+            (): void => {
+              this.#engine.releaseTexture(normals);
+            },
+          ]),
       () => {
         this.#engine.releaseMesh(made.mesh);
       },
@@ -1011,6 +1110,9 @@ export class TerrainResources {
     this.#engine.releaseBuffer(buffers.indirect);
     if (buffers.lights !== null) {
       this.#engine.releaseBuffer(buffers.lights);
+    }
+    if (buffers.phases !== null) {
+      this.#engine.releaseBuffer(buffers.phases);
     }
   }
 
@@ -1056,8 +1158,8 @@ export class TerrainResources {
     this.#horizonHeld[slot] = 1;
   }
 
-  #writeNormals(slot: number, normals: Float16Array): void {
-    const { atlas } = this.#made.layout;
+  #writeNormals(slot: number, made: NormalsMade, normals: Float16Array): void {
+    const { atlas } = made.layout;
     const n = atlas.samplesPerSide;
     const source = new Uint16Array(normals.buffer, normals.byteOffset, normals.length);
     const stored = atlas.tileTexels;
@@ -1077,7 +1179,7 @@ export class TerrainResources {
     }
     const tile = atlasTile(atlas, slot);
     this.#engine.writeTexture(
-      this.#made.normals,
+      made.normals,
       { x: tile.x, y: tile.y, z: tile.layer },
       { width: stored, height: stored, depthOrArrayLayers: 1 },
       out,
@@ -1130,8 +1232,8 @@ export class TerrainResources {
   }
 
   /**
-   * `view`'s frame buffers on `layout`: its instances, contacts and indirect arguments, and on a lit
-   * layout its lights, with no star until its first frame's.
+   * `view`'s frame buffers on `layout`: its instances, contacts and indirect arguments, on a lit
+   * layout its lights, with no star until its first frame's, and on the wireframe's its phases.
    */
   #makeView(layout: TerrainLayout, view: string): TerrainViewBuffers {
     const engine = this.#engine;
@@ -1155,15 +1257,15 @@ export class TerrainResources {
       usage: BUFFER_USAGE.INDIRECT | BUFFER_USAGE.COPY_DST,
       category: "other",
     });
-    const lit = layout.shading === "lit";
+    const traits = TERRAIN_SHADING_TRAITS[layout.shading];
     // indexCount, instanceCount, firstIndex, baseVertex, firstInstance: only the count changes.
     engine.writeBuffer(
       indirect,
       0,
-      new Uint32Array([lit ? LIT_PATCH_INDICES : PATCH_INDICES, 0, 0, 0, 0]),
+      new Uint32Array([traits.litMesh ? LIT_PATCH_INDICES : PATCH_INDICES, 0, 0, 0, 0]),
     );
     let lights: BufferHandle | null = null;
-    if (lit) {
+    if (traits.lit) {
       lights = engine.createBuffer({
         name: named("lights"),
         bytes: TERRAIN_LIGHT_ROWS * 16,
@@ -1173,11 +1275,20 @@ export class TerrainResources {
       // No star until the view's first frame's lights: nothing is lit.
       engine.writeBuffer(lights, 0, new Float32Array(TERRAIN_LIGHT_ROWS * 4));
     }
-    return { instances, contacts, indirect, lights };
+    const phases = traits.phases
+      ? engine.createBuffer({
+          name: named("phases"),
+          bytes: layout.slots.slotCount * WIRE_PHASE_RECORD_BYTES,
+          usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+          category: "other",
+        })
+      : null;
+    return { instances, contacts, indirect, lights, phases };
   }
 
   #scratchFor(layout: TerrainLayout): Uint16Array {
-    return new Uint16Array(layout.atlas.tileTexels * layout.atlas.tileTexels * 2);
+    const tile = layout.shading === "wire" ? 0 : layout.atlas.tileTexels;
+    return new Uint16Array(tile * tile * 2);
   }
 
   #make(): Made {
@@ -1204,12 +1315,30 @@ export class TerrainResources {
       usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
       category: "height-cache",
     });
+    const traits = TERRAIN_SHADING_TRAITS[layout.shading];
+    const rest = (): MadeFields => {
+      const { positions, indices } = traits.litMesh ? litPatchMeshData() : patchMeshData();
+      const mesh = engine.createMesh({
+        name: traits.litMesh ? "terrain lit patch" : "terrain patch",
+        positions,
+        indices,
+        topology: "triangle-list",
+        attributes: {},
+      });
+      // Every view's buffers, the default view's included, are made at its first frame.
+      const views = new Map<string, TerrainViewBuffers>();
+      return { lit: traits.lit ? this.#makeLit() : null, fields, slotRecords, mesh, views };
+    };
+    if (layout.shading === "wire") {
+      return { ...rest(), layout, normals: null };
+    }
+    const { atlas } = layout;
     const normals = engine.createTexture({
       name: "terrain normals",
       size: {
-        width: layout.atlas.widthTexels,
-        height: layout.atlas.heightTexels,
-        depthOrArrayLayers: layout.atlas.layers,
+        width: atlas.widthTexels,
+        height: atlas.heightTexels,
+        depthOrArrayLayers: atlas.layers,
       },
       dimension: "2d",
       format: NORMALS_FORMAT,
@@ -1217,25 +1346,6 @@ export class TerrainResources {
       usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
       category: "height-cache",
     });
-    const lit = layout.shading === "lit";
-    const { positions, indices } = lit ? litPatchMeshData() : patchMeshData();
-    const mesh = engine.createMesh({
-      name: lit ? "terrain lit patch" : "terrain patch",
-      positions,
-      indices,
-      topology: "triangle-list",
-      attributes: {},
-    });
-    // Every view's buffers, the default view's included, are made at its first frame.
-    const views = new Map<string, TerrainViewBuffers>();
-    return {
-      layout,
-      lit: lit ? this.#makeLit() : null,
-      fields,
-      slotRecords,
-      normals,
-      mesh,
-      views,
-    };
+    return { ...rest(), layout, normals };
   }
 }

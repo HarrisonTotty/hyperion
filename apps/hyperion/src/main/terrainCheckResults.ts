@@ -12,10 +12,11 @@
  *   recorded beside it, provisional (a stall of the whole page, when no animation frame runs).
  * - **Every frame finite**: every read-back of a photorealistic view's scene target was finite.
  * - **The terrain drawn once handed over**: the primary handed `TEST MOON` over in the first phase,
- *   and every photorealistic view that handed it over with a drawn patch in its view drew the
- *   terrain's material within {@link TERRAIN_DELAY_LIMIT_MS}, and in every such draw after
- *   (outside the restore); a view past the survey, which sees no patch, draws the reference
- *   surface alone, and its draws are counted apart.
+ *   and every view that handed it over with a drawn patch in its view, a photorealistic one to its
+ *   lit pass or a wireframe one to its wireframe pass (plan R10, R10.T11), drew its style's terrain
+ *   material within {@link TERRAIN_DELAY_LIMIT_MS}, and in every such draw after (outside the
+ *   restore); a view past the survey, which sees no patch, draws the reference surface alone, and
+ *   its draws are counted apart.
  * - **The faults**: exactly one `device-lost` with reason `destroyed` inside the loss phase's
  *   window, then exactly one restore, and no other fault and no exit of the GPU process
  *   ({@link terrainFaultsVerdict}).
@@ -464,10 +465,10 @@ function terrainDrawnFinding(phases: ReadonlyArray<TerrainPhaseFigures>): Terrai
     reasons.push("terrain-alone: the primary never handed TEST MOON over");
   }
   for (const phase of phases) {
+    // A view of either style hands the body over: the photorealistic to its lit pass, the
+    // wireframe to its wireframe pass (R10.T11), and each draws its own terrain's material.
     for (const view of phase.views.filter((each) => each.handedOverDraws > 0)) {
-      if (view.style !== "photorealistic") {
-        reasons.push(`${phase.name}: ${view.slot} handed over in the ${view.style}`);
-      } else if (view.terrainDelayMs === null) {
+      if (view.terrainDelayMs === null) {
         reasons.push(`${phase.name}: ${view.slot} handed over and never drew the terrain`);
       } else if (view.terrainDelayMs > TERRAIN_DELAY_LIMIT_MS) {
         reasons.push(

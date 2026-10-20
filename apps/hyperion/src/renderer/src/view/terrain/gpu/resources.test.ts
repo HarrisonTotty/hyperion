@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  type CountingRenderEngine,
   countingRenderEngine,
   fakeDevice,
   LimitExceeded,
@@ -27,6 +28,7 @@ import {
 import { bindingStages } from "../../../test/wgslStages";
 import { materialBindings, storageBuffersPerStage } from "../../engine/webgpu/materials";
 import { terrainLitMaterialSpec } from "../terrainMaterial";
+import { terrainWireMaterialSpec } from "../terrainWire";
 import { terrainMaterialSpec } from "./material";
 import type { TerrainLayers } from "../workers/messages";
 import { allocationTally } from "./allocationTally";
@@ -41,6 +43,7 @@ import {
   litPatchMeshData,
   NO_HORIZON_WORD,
   normalsAtlasLayout,
+  normalsAtlasOf,
   PATCH_INDICES,
   packSurveyMask,
   patchMeshData,
@@ -52,7 +55,13 @@ import {
   TerrainResources,
   terrainLayout,
 } from "./resources";
-import { ContactRecords, InstanceRecords, SLOT_RECORD_BYTES } from "./uniforms";
+import {
+  ContactRecords,
+  InstanceRecords,
+  SLOT_RECORD_BYTES,
+  WIRE_PHASE_RECORD_BYTES,
+  WirePhaseRecords,
+} from "./uniforms";
 
 const WGS84 = { equatorialRadiusM: 6_378_137, polarRadiusM: 6_356_752.314_245 };
 
@@ -529,7 +538,7 @@ describe("a terrain layout", () => {
     const layout = terrainLayout(LOW, DEFAULT_LIMITS);
     expect(layout.fallback).toBe("none");
     expect(layout.slots.slotCount).toBe(terrainSlotLayout(LOW).slotCount);
-    expect(layout.atlas.layers).toBe(1);
+    expect(normalsAtlasOf(layout).layers).toBe(1);
   });
 });
 
@@ -552,7 +561,8 @@ describe("the terrain's resources", () => {
     });
     const tally = allocationTally(engine);
     const resources = new TerrainResources(engine, HIGH, WGS84);
-    const { slots, atlas } = resources.layout;
+    const { slots } = resources.layout;
+    const atlas = normalsAtlasOf(resources.layout);
     expect(resources.layout.vertexPath).toBe("baked-offsets");
     const slotsBytes = slots.slotCount * (HEIGHTS_BYTES + OFFSETS_BYTES + SLOT_RECORD_BYTES);
     const atlasBytes = atlas.widthTexels * atlas.heightTexels * atlas.layers * 4;
@@ -902,5 +912,347 @@ describe("the terrain's resources", () => {
     resources.dispose();
     engine.restore();
     expect(rebuilt).toBe(0);
+  });
+});
+
+/** A wireframe bake's layers (R10.T11): no class weights and no horizon map, its survey mask whole. */
+function wireLayers(): TerrainLayers {
+  return {
+    ...mappedLayers(),
+    surveyMask: new Uint8Array(65 * 65).fill(255),
+    horizonNear: new Uint32Array(),
+    horizonFar: new Uint32Array(),
+  };
+}
+
+/** A patch's place for the graticule with a distinct value in every word. */
+const A_PLACE = {
+  radiusM: 6_378_137.5,
+  latPhaseRad: 0.01,
+  lonPhaseRad: -0.02,
+  latIndex: 3,
+  lonIndex: -7,
+  sinLat: 0.5,
+  cosLat: Math.sqrt(3) / 2,
+  sinLon: -0.6,
+  cosLon: 0.8,
+};
+
+/** The names of the buffers `engine` makes while `act` runs, in order. */
+function createdDuring(engine: CountingRenderEngine, act: () => void): string[] {
+  const created: string[] = [];
+  const off = engine.onAllocation((event) => {
+    if (event.kind === "created") {
+      created.push(event.name);
+    }
+  });
+  act();
+  off();
+  return created;
+}
+
+describe("the wireframe's terrain resources (R10.T11)", () => {
+  it("lay the wireframe out with no normals atlas, over its own slot layout", () => {
+    const layout = terrainLayout(LOW, DEFAULT_LIMITS, "wire");
+    expect([layout.shading, layout.atlas, layout.slots]).toEqual([
+      "wire",
+      null,
+      terrainSlotLayout(LOW, "wire"),
+    ]);
+  });
+
+  it("give no normals atlas for the wireframe's layout", () => {
+    expect(() => normalsAtlasOf(terrainLayout(LOW, DEFAULT_LIMITS, "wire"))).toThrow(
+      /the wireframe.s terrain layout holds no normals atlas/u,
+    );
+  });
+
+  it("make no texture, neither a normals atlas nor a phase table", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "wire");
+    resources.viewBuffers(DEFAULT_TERRAIN_VIEW);
+    expect([engine.counts.textures, resources.phaseTable, resources.lit]).toEqual([0, null, null]);
+    resources.dispose();
+  });
+
+  it("hand out no normals texture, having made none", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "wire");
+    expect(() => resources.normals).toThrow(/holds no normals/u);
+    resources.dispose();
+  });
+
+  it("make no texture again at a restore", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "wire");
+    engine.restore();
+    expect([resources.layout.atlas, engine.counts.textures]).toEqual([null, 0]);
+    resources.dispose();
+  });
+
+  it("hold the heights and survey masks in storage, and no class layers or horizon map", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "wire");
+    const { slotCount } = resources.layout.slots;
+    expect([
+      resources.field("heights")?.bytes,
+      resources.field("survey-mask")?.bytes,
+      resources.field("offsets"),
+      resources.field("class-layers"),
+      resources.field("horizon-map"),
+    ]).toEqual([slotCount * HEIGHTS_BYTES, slotCount * SURVEY_MASK_BYTES, null, null, null]);
+    resources.dispose();
+  });
+
+  it("tally the height cache to the heights, survey masks and slot records alone", async () => {
+    const engine = await countingRenderEngine();
+    const tally = allocationTally(engine);
+    const resources = new TerrainResources(engine, LOW, WGS84, "wire");
+    expect(tally.liveBytes("height-cache")).toBe(
+      resources.layout.slots.slotCount * (HEIGHTS_BYTES + SURVEY_MASK_BYTES + SLOT_RECORD_BYTES),
+    );
+    tally.dispose();
+    resources.dispose();
+  });
+
+  it("draw the lit material's mesh, its index count in each view's indirect arguments", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "wire");
+    resources.viewBuffers("view");
+    const args = engine.writes.findLast(
+      (w) => w.buffer === "terrain indirect (view)" && w.offsetBytes === 0,
+    );
+    expect([
+      resources.mesh.name,
+      [...new Uint32Array(args?.data.slice().buffer ?? new ArrayBuffer(0))],
+    ]).toEqual(["terrain lit patch", [LIT_PATCH_INDICES, 0, 0, 0, 0]]);
+    resources.dispose();
+  });
+
+  it("make each view's phases buffer beside its frame buffers, R05's names for the default view", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "wire");
+    const named = createdDuring(engine, () => {
+      resources.viewBuffers("view");
+      resources.viewBuffers(DEFAULT_TERRAIN_VIEW);
+    });
+    expect(named).toEqual([
+      "terrain instances (view)",
+      "terrain contacts (view)",
+      "terrain indirect (view)",
+      "terrain phases (view)",
+      "terrain instances",
+      "terrain contacts",
+      "terrain indirect",
+      "terrain phases",
+    ]);
+    resources.dispose();
+  });
+
+  it("size a view's phases buffer at 48 B a slot, in the other category", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "wire");
+    const made: Array<readonly [number, string]> = [];
+    engine.onAllocation((event) => {
+      if (event.kind === "created" && event.name === "terrain phases (view)") {
+        made.push([event.bytes, event.category]);
+      }
+    });
+    const { phases } = resources.viewBuffers("view");
+    expect([WIRE_PHASE_RECORD_BYTES, phases?.bytes, made]).toEqual([
+      48,
+      resources.layout.slots.slotCount * 48,
+      [[resources.layout.slots.slotCount * 48, "other"]],
+    ]);
+    resources.dispose();
+  });
+
+  it("make no phases buffer on a lit or spike layout", async () => {
+    const engine = await countingRenderEngine();
+    const lit = new TerrainResources(engine, LOW, WGS84, "lit");
+    const spike = new TerrainResources(engine, LOW, WGS84);
+    expect([lit.viewBuffers("view").phases, spike.viewBuffers("view").phases]).toEqual([
+      null,
+      null,
+    ]);
+    lit.dispose();
+    spike.dispose();
+  });
+
+  it("release a view's phases buffer with the view's other buffers", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "wire");
+    const before = engine.live;
+    resources.viewBuffers("view");
+    const destroyed: string[] = [];
+    engine.onAllocation((event) => {
+      if (event.kind === "destroyed") {
+        destroyed.push(event.name);
+      }
+    });
+    resources.releaseView("view");
+    expect([engine.live, destroyed]).toEqual([
+      before,
+      [
+        "terrain instances (view)",
+        "terrain contacts (view)",
+        "terrain indirect (view)",
+        "terrain phases (view)",
+      ],
+    ]);
+    resources.dispose();
+  });
+
+  it("release every handle at dispose, each view's phases buffer among them", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "wire");
+    resources.viewBuffers(DEFAULT_TERRAIN_VIEW);
+    resources.viewBuffers("view");
+    resources.viewBuffers("instrument");
+    resources.dispose();
+    expect(engine.live).toEqual({ buffers: 0, textures: 0, meshes: 0, materials: 0 });
+  });
+
+  it("write a frame's phase records at the start of the view's phases buffer", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "wire");
+    resources.viewBuffers("view");
+    const records = new WirePhaseRecords(resources.layout.slots.slotCount);
+    records.push(120.5, 270.75, A_PLACE);
+    records.push(3.25, -40, { ...A_PLACE, latIndex: 4, cosLon: -0.8 });
+    resources.writePhases(records, "view");
+    const write = engine.writes.at(-1);
+    expect([write?.buffer, write?.offsetBytes, write?.data]).toEqual([
+      "terrain phases (view)",
+      0,
+      records.bytes(),
+    ]);
+    resources.dispose();
+  });
+
+  it("write no phase record in a frame that draws none", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "wire");
+    resources.viewBuffers("view");
+    engine.resetCounts();
+    resources.writePhases(new WirePhaseRecords(resources.layout.slots.slotCount), "view");
+    expect(engine.counts.bufferWrites).toBe(0);
+    resources.dispose();
+  });
+
+  it("write no phase record on a lit layout", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "lit");
+    resources.viewBuffers("view");
+    engine.resetCounts();
+    const records = new WirePhaseRecords(resources.layout.slots.slotCount);
+    records.push(120.5, 270.75, A_PLACE);
+    resources.writePhases(records, "view");
+    expect(engine.counts.bufferWrites).toBe(0);
+    resources.dispose();
+  });
+
+  it("refuse more phase records than the slots", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "wire");
+    const { slotCount } = resources.layout.slots;
+    const records = new WirePhaseRecords(slotCount + 1);
+    for (let n = 0; n <= slotCount; n += 1) {
+      records.push(n, n, A_PLACE);
+    }
+    expect(() => {
+      resources.writePhases(records, "view");
+    }).toThrow(RangeError);
+    resources.dispose();
+  });
+
+  it("upload a bake's heights, slot record and survey mask, and no normals", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "wire");
+    const before = engine.writes.length;
+    engine.resetCounts();
+    const result = resources.upload({ ...upload(5, 65, false), layers: wireLayers() });
+    expect([
+      result.kind,
+      engine.writes.slice(before).map((w) => [w.buffer, w.offsetBytes, w.bytes]),
+      engine.counts.textureWrites,
+    ]).toEqual([
+      "uploaded",
+      [
+        ["terrain heights", 5 * HEIGHTS_BYTES, HEIGHTS_BYTES],
+        ["terrain slot records", 5 * SLOT_RECORD_BYTES, SLOT_RECORD_BYTES],
+        ["terrain survey-mask", 5 * SURVEY_MASK_BYTES, SURVEY_MASK_BYTES],
+      ],
+      0,
+    ]);
+    resources.dispose();
+  });
+
+  it("pack a slot's survey mask with the code of its survey's cell size", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "wire");
+    const mask = maskOf((x, y) => x + y < 70);
+    const bake = { ...upload(2, 65, false), key: { face: 1, level: 4, i: 3, j: 5 } as const };
+    resources.upload({ ...bake, layers: { ...wireLayers(), surveyMask: mask, fieldLevel: 8 } });
+    const write = engine.writes.findLast((w) => w.buffer === "terrain survey-mask");
+    // A patch at level 4 over a field at level 8: cells of 2^(4 + 6 − 8) quads, code 2.
+    expect(write?.data).toEqual(packSurveyMask(mask, 2));
+    resources.dispose();
+  });
+
+  it("keep none of a bake's normals, whatever their resolution", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "wire");
+    engine.resetCounts();
+    const result = resources.upload({ ...upload(0, 129, false), layers: wireLayers() });
+    expect([result.kind, engine.counts.textureWrites]).toEqual(["uploaded", 0]);
+    resources.dispose();
+  });
+
+  it("upload the offsets too on the baked-offsets path", async () => {
+    const engine = await countingRenderEngine({
+      maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
+      maxBufferSize: MAX_REQUESTED_BUFFER_BYTES,
+    });
+    const resources = new TerrainResources(engine, HIGH, WGS84, "wire");
+    resources.upload({ ...upload(3, 129, true), layers: wireLayers() });
+    const offsets = engine.writes.filter((w) => w.buffer === "terrain offsets");
+    expect([resources.layout.vertexPath, offsets.map((w) => [w.offsetBytes, w.bytes])]).toEqual([
+      "baked-offsets",
+      [[3 * OFFSETS_BYTES, OFFSETS_BYTES]],
+    ]);
+    resources.dispose();
+  });
+
+  it("refuse, writing nothing, a bake without R10's layers", async () => {
+    const engine = await countingRenderEngine();
+    const resources = new TerrainResources(engine, LOW, WGS84, "wire");
+    engine.resetCounts();
+    expect([
+      resources.upload({ ...upload(0, 65, false), layers: null }),
+      engine.counts.bufferWrites,
+    ]).toEqual([{ kind: "refused", reason: "layers-missing" }, 0]);
+    resources.dispose();
+  });
+
+  it("bind every storage field the layout makes in the wireframe's material, on both paths", async () => {
+    const engine = await countingRenderEngine();
+    const unbound = (["baked-offsets", "face-differences"] as const).flatMap((path) => {
+      const spec = terrainWireMaterialSpec(path);
+      const resources = new TerrainResources(
+        engine,
+        { ...LOW, vertexPath: path, cacheBytes: 2 ** 25 },
+        WGS84,
+        "wire",
+      );
+      const names = new Set((spec.storageBuffers ?? []).map((buffer) => buffer.name));
+      const missing = resources.layout.slots.fields
+        .filter((field) => field.storage === "storage-buffer" && field.bytes > 0)
+        .filter((field) => !names.has(STORAGE_NAMES[field.name]))
+        .map((field) => `${spec.name} ${field.name}`);
+      resources.dispose();
+      return missing;
+    });
+    expect(unbound).toEqual([]);
   });
 });

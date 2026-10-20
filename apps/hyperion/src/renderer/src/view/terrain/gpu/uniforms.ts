@@ -17,6 +17,7 @@
 import type { Vec3 } from "../../../geometry/vec3";
 import type { SpheroidFigure } from "../../atmosphere/hillaire";
 import type { Face, PatchKey } from "../patchKey";
+import type { GraticulePatch } from "../terrainWire";
 
 /**
  * Bytes of one slot record:
@@ -372,6 +373,92 @@ export class InstanceRecords {
    */
   bytes(): Uint8Array {
     return viewOf(this.#views, this.buffer, this.#count * INSTANCE_RECORD_BYTES);
+  }
+}
+
+/**
+ * Bytes of one wireframe phase record (plan R10, R10.T11), one per drawn patch a frame, in the
+ * instances' order:
+ *
+ * ```wgsl
+ * struct WirePhase {
+ *   contour : vec4f,  // φ = h₀ mod 5 CI, m; h₀ less the sea level, m; |P₀|, m; 0
+ *   latLon : vec4f,   // φ₀ and λ₀ less their nearest lines', rad; those lines' indices
+ *   frame : vec4f,    // sin φ₀, cos φ₀, sin λ₀, cos λ₀
+ * }
+ * ```
+ *
+ * Each value is formed in `f64` (`terrainWire.ts`' `contourPhase` and `graticulePatch`) and
+ * narrowed once by the store.
+ */
+export const WIRE_PHASE_RECORD_BYTES = 48;
+
+const F32_WORDS_PER_WIRE_PHASE = WIRE_PHASE_RECORD_BYTES / 4;
+
+/**
+ * One wireframe view's phase records a frame (plan R10, R10.T11), in a buffer made once at the
+ * cache's slot count and refilled each frame, one a drawn patch in the instances' order.
+ */
+export class WirePhaseRecords {
+  /** The most records it holds: the slot count, as {@link InstanceRecords.capacity}. */
+  readonly capacity: number;
+  /** The records, {@link WIRE_PHASE_RECORD_BYTES} each, the first {@link count} this frame's. */
+  readonly buffer: ArrayBuffer;
+  readonly #f32: Float32Array;
+  readonly #views = new Map<number, Uint8Array>();
+  #count = 0;
+
+  constructor(capacity: number) {
+    if (!Number.isInteger(capacity) || capacity < 1) {
+      throw new RangeError(`a phase buffer needs a whole, positive capacity, not ${capacity}`);
+    }
+    this.capacity = capacity;
+    this.buffer = new ArrayBuffer(capacity * WIRE_PHASE_RECORD_BYTES);
+    this.#f32 = new Float32Array(this.buffer);
+  }
+
+  /** Records this frame. */
+  get count(): number {
+    return this.#count;
+  }
+
+  /** Starts a frame with no records. */
+  clear(): void {
+    this.#count = 0;
+  }
+
+  /**
+   * Appends a drawn patch's phases, narrowed here, once.
+   *
+   * @param contourPhaseM - φ = h₀ mod 5 CI, m (`terrainWire.ts`' `contourPhase`).
+   * @param aboveSeaM - The patch origin's height h₀ less the field's sea level, m.
+   * @param graticule - The patch's place for the graticule (`graticulePatch`).
+   * @throws RangeError past {@link capacity}.
+   */
+  push(contourPhaseM: number, aboveSeaM: number, graticule: GraticulePatch): void {
+    if (this.#count >= this.capacity) {
+      throw new RangeError(`more than ${this.capacity} phase records in a frame`);
+    }
+    const base = this.#count * F32_WORDS_PER_WIRE_PHASE;
+    const f = this.#f32;
+    f[base] = contourPhaseM;
+    f[base + 1] = aboveSeaM;
+    f[base + 2] = graticule.radiusM;
+    f[base + 3] = 0;
+    f[base + 4] = graticule.latPhaseRad;
+    f[base + 5] = graticule.lonPhaseRad;
+    f[base + 6] = graticule.latIndex;
+    f[base + 7] = graticule.lonIndex;
+    f[base + 8] = graticule.sinLat;
+    f[base + 9] = graticule.cosLat;
+    f[base + 10] = graticule.sinLon;
+    f[base + 11] = graticule.cosLon;
+    this.#count += 1;
+  }
+
+  /** This frame's records as bytes, for one `writeBuffer`, as {@link InstanceRecords.bytes}. */
+  bytes(): Uint8Array {
+    return viewOf(this.#views, this.buffer, this.#count * WIRE_PHASE_RECORD_BYTES);
   }
 }
 

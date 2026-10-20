@@ -31,26 +31,35 @@
  *   datum where none does (`ResidentHeights`). Over the image the terrain's depth is drawn into the
  *   symbology's pass before its lines ({@link LiveFrameTerrain.symbologyDepth}), so that nearer
  *   ground hides the edge as it does in the image, and the note's range counts only the points
- *   that ground leaves in sight (`SurveyEdgeView.ground`); in the wireframe, which draws no terrain
- *   until R10.T11 (D10), the edge is drawn against the occluder spheres alone, and every drawn point
- *   counts.
+ *   that ground leaves in sight (`SurveyEdgeView.ground`); in the wireframe the rim stands on the
+ *   wireframe pass's resident bakes, and the terrain the wireframe draws gives the edge its depth
+ *   (R10.T11).
+ * - **The wireframe's terrain** (R10.T11; D10; {@link wireframeTerrainOf}): each body a wireframe
+ *   view hands over to its wireframe pass, drawn as depth with its contours and graticule at one
+ *   interval for the view, and the bodies whose datum, their occluder sphere and own lines, gives
+ *   way to it where their coverage mask may be given.
  */
 
-import type { BodyIdHex } from "@hyperion/protocol";
+import type { BodyIdHex, SurfaceHeaderDto } from "@hyperion/protocol";
 
 import { scale, type Vec3, vec3 } from "../../geometry/vec3";
+import { CASING_PX } from "../../lib/strokes";
+import type { ColourTokens } from "../../spatial/paint";
 import type { BodyFramePlan, LitBodyInput } from "../bodies/draw";
 import type { DiscRecord } from "../bodies/discShading";
 import { discSurfaceLaws } from "../bodies/discSurface";
+import { rotationColumns } from "../bodies/smoothMesh";
 import type { ProjectionCamera, Viewport } from "../camera/projection";
 import type { RenderStyle, ViewId } from "../camera/state";
 import { relativeToCamera } from "../coords/relative";
 import { type Rotation3, rotateToBodyFixed } from "../coords/rotation";
 import type { DrawItem, MaterialHandle, TextureHandle, ViewSize } from "../engine/types";
 import type { FrameTerrain } from "../photoreal/renderer";
-import { sceneOrigins, type ViewScene } from "../scene/model";
+import { sceneOrigins, type ViewBody, type ViewScene } from "../scene/model";
+import { angularDiameterPx, bodyRegime, graticuleStepDeg } from "../wireframe/bodies";
 import { sphereInFrustum } from "../wireframe/cull";
-import type { DrawCamera } from "../wireframe/drawList";
+import { type DrawCamera, STROKE_PX } from "../wireframe/drawList";
+import { linearColour, type SurveyedDatumFrame, type WireframeTerrain } from "../wireframe/submit";
 import type { TerrainAnnunciation } from "./annunciation";
 import type { ResidentHeightsView } from "./residentHeights";
 import type { TerrainSurvey } from "./session";
@@ -61,6 +70,7 @@ import type {
   TerrainViewFrame,
   TerrainViewFrameInput,
 } from "./terrainPass";
+import { contourInterval, heightAboveGroundM } from "./terrainWire";
 
 /** A body's lights for its terrain's draw, from its disc record ({@link terrainLightingOf}). */
 export interface TerrainLightingFrame {
@@ -185,12 +195,26 @@ export interface FrameTerrainSource {
   pass(body: BodyIdHex): FrameTerrainPass | null;
 }
 
-/** What a view's survey edges read of its source beyond its frame terrain's. */
-export interface ViewTerrainSource extends FrameTerrainSource {
-  /** The bodies whose fields are wanted (`TerrainSession.wanted`). */
-  readonly wanted: ReadonlySet<BodyIdHex>;
+/** What a wireframe view's frame terrain reads of its source (R10.T11): `TerrainSession`'s. */
+export interface WireTerrainSource {
+  /** `body`'s wireframe pass, or `null` (`TerrainSession.wirePass`). */
+  wirePass(body: BodyIdHex): FrameTerrainPass | null;
+  /** View `view`'s wireframe draw of `body`'s terrain this frame (`TerrainSession.drawWireTerrain`). */
+  drawWireTerrain(
+    view: ViewId,
+    body: BodyIdHex,
+    input: TerrainViewFrameInput,
+  ): TerrainViewFrame | null;
+  /** `body`'s GPU coverage mask, or `null` (`TerrainSession.coverageMask`). */
+  coverageMask(body: BodyIdHex): TextureHandle | null;
   /** A wanted body's survey: its coverage and header (`TerrainSession.survey`). */
   survey(body: BodyIdHex): Pick<TerrainSurvey, "coverage" | "header"> | null;
+}
+
+/** What a view's survey edges and its wireframe's terrain read of its source beyond its frame terrain's. */
+export interface ViewTerrainSource extends FrameTerrainSource, WireTerrainSource {
+  /** The bodies whose fields are wanted (`TerrainSession.wanted`). */
+  readonly wanted: ReadonlySet<BodyIdHex>;
 }
 
 /** A view's terrain for one frame, as its loop gives its drawer (`ViewFrameInputs.terrain`). */
@@ -332,13 +356,15 @@ const NO_HEIGHT = (): number | null => null;
  * from the camera as the draw list places a body (`relativeToCamera` of its frame's origin).
  *
  * @remarks
- * The edge stands on the ground the view draws. Only in the photorealistic style, and only for a
- * body whose pass this view's last step drew, is that the terrain: there the rim is its pass's
- * resident bakes that hold the edge (`ResidentHeightsView.rimHeightAtM`, the datum where none
- * does), and the drawn ground hides a point from the note's range (`SurveyEdgeView.ground`).
- * Elsewhere the view draws no terrain of the body (the wireframe until R10.T11, or a frame that
- * hands it over to no pass), so the rim is the datum, the figure it draws, and the edge is drawn
- * against the occluder spheres alone (decision-r10-t16-review §3; the batch review's S1).
+ * The edge stands on the ground the view draws. Where the view's last step drew a body's terrain,
+ * its lit pass in the photorealistic style or its wireframe pass in the wireframe (R10.T11), that
+ * is the terrain: there the rim is that pass's resident bakes that hold the edge
+ * (`ResidentHeightsView.rimHeightAtM`, the datum where none does), and the drawn ground hides a
+ * point from the note's range (`SurveyEdgeView.ground`); in the wireframe the edge then takes the
+ * terrain's own depth, which the wireframe's terrain writes. Elsewhere the view draws no terrain of
+ * the body (a frame that hands it over to no pass), so the rim is the datum, the figure it draws,
+ * and the edge is drawn against the occluder spheres alone (decision-r10-t16-review §3; the batch
+ * review's S1).
  *
  * @param style - The style the frame is drawn in (`ViewFrameDrawn.drawnStyle`, as the drawer
  *   foresees it before the draw).
@@ -377,9 +403,10 @@ export function surveyEdgeViewsOf(
     if (!sphereInFrustum(centreM, reachM, projection, viewport)) {
       continue;
     }
-    const pass = source.pass(body.id);
+    // The pass whose terrain this view draws in its style: the lit one, or the wireframe's.
+    const pass = style === "photorealistic" ? source.pass(body.id) : source.wirePass(body.id);
     const heights = pass?.heights ?? null;
-    const drawsGround = style === "photorealistic" && pass !== null && pass.viewIds.has(view);
+    const drawsGround = pass !== null && pass.viewIds.has(view);
     views.push({
       body: body.id,
       coverage,
@@ -404,4 +431,187 @@ export function surveyEdgeViewsOf(
     });
   }
   return views;
+}
+
+/** What a wireframe view's frame terrain is made with, beyond its source (R10.T11). */
+export interface WireframeTerrainInput {
+  /** The view, as the session knows it. */
+  readonly view: ViewId;
+  /** The scene the frame draws. */
+  readonly scene: ViewScene;
+  /** The frame's camera. */
+  readonly camera: DrawCamera;
+  /** The size the view is presented at, device px: its canvas's, at which its pass selects. */
+  readonly viewport: ViewSize;
+  /** The device px drawn for each CSS px of a line (`ViewStrokes.strokeScale`). */
+  readonly strokeScale: number;
+  /** The wireframe's low setting, whose graticules are at 30° only (R02's `lowSetting`). */
+  readonly lowSetting: boolean;
+  /** The colours the contours and graticule take, as `readTokens` read them. */
+  readonly tokens: Pick<ColourTokens, "textMuted" | "text" | "surface0">;
+  /** The draw list's slope term, device px (`WireframeDrawList.occluderSlopePx`). */
+  readonly occluderSlopePx: number;
+  /** The frame's monotonic time, ms, for the annunciation's debounce. */
+  readonly nowMs: number;
+  /** The contour interval the view stated last, m, its hysteresis's; `null` with none. */
+  readonly previousIntervalM: number | null;
+}
+
+/** A wireframe view's terrain in one frame (R10.T11): what its renderer draws, and what its label block states. */
+export interface WireframeTerrainFrame extends WireframeTerrain {
+  /** The more pressing annunciation of the bodies it hands over; `null` with none to say. */
+  readonly annunciation: TerrainAnnunciation | null;
+  /**
+   * The contour interval its label block states, m (`CONTOUR INTERVAL`), while it draws some
+   * body's terrain; `null` while it draws none.
+   */
+  readonly intervalM: number | null;
+  /**
+   * The interval its hysteresis holds for the next frame: the one this frame's pose sets, or the
+   * last where it sets none.
+   */
+  readonly heldIntervalM: number | null;
+}
+
+/** The light the wireframe's terrain takes: none, since it is depth with its lines. */
+const NO_LIGHT: readonly [number, number, number] = [0, 0, 0];
+
+/**
+ * A wireframe view's terrain in one frame (plan R10, R10.T11; Design note 14), pure but for its
+ * source's draws: each body that this view hands over to its wireframe pass (`wirePass`, the view in
+ * its last step), drawn from the view's camera with the contours at one interval and the body's
+ * graticule at the step and widths R02's draw list draws it with, and, where the view's draw of the
+ * body may take the mask (`TerrainViewFrame.maskReady`, the same code-0 rule as the photorealistic
+ * style's, decision-r10-t16-review §2), the body's coverage mask, by which its datum gives way.
+ *
+ * @remarks
+ * The interval is one for the view, so that its label block states one: {@link contourInterval} of
+ * the camera's height above the ground at its nadir ({@link heightAboveGroundM}, over its pass's
+ * resident heights, the datum where the nadir is unsurveyed or not yet drawn) on the body it stands
+ * lowest over, from the view's last.
+ */
+export function wireframeTerrainOf(
+  source: WireTerrainSource,
+  input: WireframeTerrainInput,
+): WireframeTerrainFrame {
+  const { view, scene, camera, viewport, strokeScale } = input;
+  const origins = sceneOrigins(scene);
+  const projection: ProjectionCamera = {
+    orientation: camera.pose.orientation,
+    fovXRad: camera.fovXRad,
+  };
+  const drawn: Array<{
+    readonly body: ViewBody;
+    readonly rotation: Rotation3;
+    readonly header: SurfaceHeaderDto;
+    readonly centreM: Vec3;
+    readonly aglM: number;
+  }> = [];
+  for (const body of scene.bodies) {
+    const rotation = body.rotation;
+    const pass = source.wirePass(body.id);
+    if (rotation === null || pass === null || !pass.viewIds.has(view)) {
+      continue;
+    }
+    const header = source.survey(body.id)?.header ?? null;
+    if (header === null) {
+      continue;
+    }
+    const centreM = relativeToCamera(
+      { kind: "body", body: body.id, m: vec3(0, 0, 0) },
+      camera.pose,
+      origins,
+    );
+    const figure = {
+      equatorialRadiusM: header.equatorial_radius_m,
+      polarRadiusM: header.polar_radius_m,
+    };
+    const heights = pass.heights;
+    const aglM = heightAboveGroundM(
+      rotateToBodyFixed(rotation, scale(centreM, -1)),
+      figure,
+      (direction) => heights.groundHeightAtM(direction),
+    );
+    drawn.push({ body, rotation, header, centreM, aglM });
+  }
+  const nadir = drawn.reduce<(typeof drawn)[number] | null>(
+    (lowest, each) => (lowest === null || each.aglM < lowest.aglM ? each : lowest),
+    null,
+  );
+  if (nadir === null) {
+    return {
+      draws: [],
+      surveyed: new Map(),
+      annunciation: null,
+      intervalM: null,
+      heldIntervalM: input.previousIntervalM,
+    };
+  }
+  const intervalM = contourInterval(nadir.aglM, input.previousIntervalM);
+  const colours = {
+    muted: linearColour(input.tokens.textMuted),
+    text: linearColour(input.tokens.text),
+    casing: linearColour(input.tokens.surface0),
+  };
+  const draws: DrawItem[] = [];
+  const surveyed = new Map<string, SurveyedDatumFrame>();
+  let annunciation: TerrainAnnunciation | null = null;
+  for (const { body, rotation, header, centreM } of drawn) {
+    // The graticule R02's draw list draws on this body, at its step and widths, or none.
+    const diameterPx = angularDiameterPx(centreM, body.radiusM, projection, viewport);
+    const graticule =
+      bodyRegime(diameterPx, strokeScale) === "graticule"
+        ? {
+            stepRad: (graticuleStepDeg(diameterPx, strokeScale, input.lowSetting) * Math.PI) / 180,
+            thinPx: STROKE_PX.thin * strokeScale,
+            heavyPx: STROKE_PX.heavy * strokeScale,
+            casingPx: CASING_PX * strokeScale,
+          }
+        : null;
+    const frame = source.drawWireTerrain(view, body.id, {
+      view: {
+        rotation,
+        cameraM: scale(centreM, -1),
+        orientation: camera.pose.orientation,
+        fovXRad: camera.fovXRad,
+        viewport,
+      },
+      sunDirectionBodyFixed: NO_SUN,
+      sunIlluminanceLx: NO_LIGHT,
+      exposureScale: 1,
+      wire: {
+        intervalM,
+        // A world with a sea has its main liquid's entry; on one with none, the header's sea level
+        // is its lowest cell's, no coastline.
+        seaLevelM: header.main_liquid === null ? null : header.sea_level_m,
+        strokeScale,
+        graticule,
+        colours,
+        occluderSlopePx: input.occluderSlopePx,
+      },
+      nowMs: input.nowMs,
+    });
+    if (frame === null) {
+      continue;
+    }
+    annunciation = morePressingAnnunciation(annunciation, frame.annunciation);
+    if (frame.draw !== null) {
+      draws.push(frame.draw);
+    }
+    const mask = frame.maskReady ? source.coverageMask(body.id) : null;
+    if (mask !== null) {
+      surveyed.set(body.id, {
+        mask,
+        axes: rotationColumns(rotation),
+        stretch: header.equatorial_radius_m / header.polar_radius_m,
+      });
+    }
+  }
+  return {
+    draws,
+    surveyed,
+    annunciation,
+    intervalM: draws.length > 0 ? intervalM : null,
+    heldIntervalM: intervalM,
+  };
 }

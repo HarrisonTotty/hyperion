@@ -17,6 +17,7 @@ import { rotate } from "../../view/camera/quaternion";
 import {
   cameraReading,
   commandRun,
+  contourIntervalLine,
   followRun,
   lookReading,
   photorealStatements,
@@ -371,6 +372,62 @@ describe("the label block", () => {
     expect(
       SCENE_OPTIONS.map(({ name, make }) => [name, Number.isInteger(make().sceneAt(0).timeRate)]),
     ).toEqual(SCENE_OPTIONS.map(({ name }) => [name, true]));
+  });
+
+  describe("the wireframe's contour interval (R10.T11; the guide's Views)", () => {
+    it("states it directly after the field of view, the picture's other scale, while the view draws its terrain", () => {
+      const lines = labelLines(startRun(precisionScene()), DEFAULT_EXPOSURE, false, 200);
+      expect(lines.map((line) => line.label)).toEqual([
+        "FRAME",
+        "TIME",
+        "STYLE",
+        "CAMERA",
+        "FOV",
+        "CONTOUR INTERVAL",
+        "EXPOSURE",
+        "STARS",
+        "SCENE",
+      ]);
+    });
+
+    it.each([
+      [200, "200 m · INDEX 1 km"],
+      [2_000, "2 km · INDEX 10 km"],
+    ])("reads an interval of %d m as %s", (intervalM, reading) => {
+      expect(
+        labelLines(startRun(precisionScene()), DEFAULT_EXPOSURE, false, intervalM).find(
+          (line) => line.label === "CONTOUR INTERVAL",
+        )?.value,
+      ).toBe(reading);
+    });
+
+    it("states none while the view draws no terrain", () => {
+      expect(
+        labelLines(startRun(precisionScene()), DEFAULT_EXPOSURE, false, null).some(
+          (line) => line.label === "CONTOUR INTERVAL",
+        ),
+      ).toBe(false);
+    });
+
+    it("never marks it stale, a statement of the picture drawn, while the scene's time is", () => {
+      const server = startServerRun(aViewScene());
+      const lines = labelLines(server, DEFAULT_EXPOSURE, true, 200);
+      const line = lines.find((each) => each.label === "CONTOUR INTERVAL");
+      expect([
+        lines.find((each) => each.label === "TIME")?.stale,
+        line?.stale,
+        line?.fields?.map((field) => field.stale),
+      ]).toEqual([true, undefined, [false]]);
+    });
+
+    it("sets the interval in a field of its longest reading's width and the index in none, its dot leading the index", () => {
+      expect(contourIntervalLine(500)).toEqual({
+        label: "CONTOUR INTERVAL",
+        value: "500 m · INDEX 2.5 km",
+        fields: [{ text: "500 m", widthCh: 8, stale: false }],
+        dotsLead: true,
+      });
+    });
   });
 
   it("names the scene only in a kept scene", () => {

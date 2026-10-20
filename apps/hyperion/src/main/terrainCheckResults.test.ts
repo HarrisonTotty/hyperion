@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { TerrainCheckFault, TerrainCheckRecord } from "../preload/api";
+import type { TerrainCheckFault, TerrainCheckRecord, TerrainCheckViewRecord } from "../preload/api";
 import { DESTROYED_AT_MS, LOSS_WINDOW, TERRAIN_RECORD } from "./fixtures/terrainRecord";
 import { measured, type ResultsFiles } from "./results";
 import {
@@ -178,6 +178,53 @@ describe("the terrain run's results", () => {
     const results = buildTerrainCheckResults(changed({ phases: [{ ...alone, views }, ...rest] }));
     expect(results.findings.terrainDrawn.verdict).toBe("fail");
     expect(results.findings.terrainDrawn.reasons.join("; ")).toMatch(reason);
+  });
+
+  describe("a wireframe view handing over to its wireframe pass (R10.T11)", () => {
+    /** The fixture with its wireframe instrument's figures changed by `change`. */
+    function wireframeChanged(change: Partial<TerrainCheckViewRecord>): TerrainCheckInput {
+      return changed({
+        phases: TERRAIN_RECORD.phases.map((phase) => ({
+          ...phase,
+          views: phase.views.map((view) =>
+            view.style === "wireframe" ? { ...view, ...change } : view,
+          ),
+        })),
+      });
+    }
+
+    it("passes where it handed over and drew its terrain", () => {
+      const wireframe = TERRAIN_RECORD.phases
+        .flatMap((phase) => phase.views)
+        .filter((view) => view.style === "wireframe");
+      if (!wireframe.some((view) => view.handedOverDraws > 0 && view.firstTerrainMs !== null)) {
+        throw new Error("the fixture's wireframe view hands over and draws");
+      }
+      expect(buildTerrainCheckResults(input()).findings.terrainDrawn).toMatchObject({
+        verdict: "pass",
+        reasons: [],
+      });
+    });
+
+    it("fails where it handed over and never drew its terrain, for that reason alone", () => {
+      const results = buildTerrainCheckResults(
+        wireframeChanged({ terrainDraws: 0, firstTerrainMs: null }),
+      );
+      expect(results.findings.terrainDrawn.reasons).toEqual([
+        "terrain-photoreal-wireframe: INSTRUMENT 2 handed over and never drew the terrain",
+      ]);
+    });
+
+    it("fails where it drew its terrain too late after its hand-over, as a photorealistic view does", () => {
+      const view = TERRAIN_RECORD.phases[1]?.views.find((each) => each.style === "wireframe");
+      const handoverMs = view?.firstHandoverMs ?? 0;
+      const results = buildTerrainCheckResults(
+        wireframeChanged({ firstTerrainMs: handoverMs + TERRAIN_DELAY_LIMIT_MS + 1 }),
+      );
+      expect(results.findings.terrainDrawn.reasons.join("; ")).toMatch(
+        /INSTRUMENT 2 drew the terrain \d+ ms after its hand-over, over/,
+      );
+    });
   });
 
   it.each([

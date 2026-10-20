@@ -80,6 +80,11 @@ import {
 } from "../../view/scenes/terrainScene";
 import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
 import { type SurveyEdgeNote, surveyEdgeNote } from "../../view/terrain/surveyEdge";
+import {
+  CONTOUR_FIELD_CH,
+  contourIntervalReading,
+  contourLengthReading,
+} from "../../view/terrain/terrainWire";
 import { type LightingState, lightingStatement } from "../../view/lighting/hostLights";
 import type { DrawnSurveyEdge } from "../../view/wireframe/drawList";
 import { closureRateMPerS } from "../../view/wireframe/symbology";
@@ -480,7 +485,8 @@ export interface LabelLine {
   readonly fields?: ReadonlyArray<LabelField>;
   /**
    * Set where each middle dot of the reading leads the part after it rather than standing between
-   * the parts (`readingParts`' `dotsLead`): on the sky's `STARS` readings alone (R06.T13.j).
+   * the parts (`readingParts`' `dotsLead`): on the sky's `STARS` readings (R06.T13.j) and the
+   * wireframe's `CONTOUR INTERVAL` (R10.T11).
    */
   readonly dotsLead?: true;
 }
@@ -562,13 +568,23 @@ export function sceneClockReading(secondsPerSecond: number): string {
  * them stand on the `PRIMARY` view's block alone. The server's scene names neither: its time is
  * the simulation's own, not a kept scene's script.
  *
+ * While the view draws a body's surveyed terrain in the wireframe, the contour interval it draws it
+ * at stands directly after `FOV`, `CONTOUR INTERVAL 200 m · INDEX 1 km` (plan R10, R10.T11; the
+ * guide's Views; decision-r10-view-block-room §5), the wireframe's statement of vertical scale
+ * beside `FOV`'s angular one; it is a statement of the picture drawn, not of the server's data, so
+ * it does not go stale. The `PRIMARY` view's block alone carries it until R10.T12.b, which states
+ * an instrument's with the slot it holds (decision-r10-view-block-room §6).
+ *
  * @param stale - Whether the server's scene is stale (`useScene`'s `stale`): its time, held where
  *   the scene went stale, then reads as the guide's stale value.
+ * @param contourIntervalM - The contour interval the view's last frame drew its wireframe terrain
+ *   at, m (`ViewFrameDrawn.contourIntervalM`), or `null` while it draws none.
  */
 export function labelLines(
   run: ViewRun,
   exposure: ExposureControl,
   stale = false,
+  contourIntervalM: number | null = null,
 ): ReadonlyArray<LabelLine> {
   const { scene, camera } = run;
   const time = `UT ${formatUniverseTimeDhms(scene.time)}`;
@@ -578,6 +594,7 @@ export function labelLines(
     { label: "STYLE", value: styleName(camera.style) },
     { label: "CAMERA", value: cameraReading(camera) },
     { label: "FOV", value: `${String(camera.fovDeg)}°` },
+    ...(contourIntervalM === null ? [] : [contourIntervalLine(contourIntervalM)]),
     { label: "EXPOSURE", value: exposureReading(exposure) },
     {
       label: "STARS",
@@ -591,6 +608,37 @@ export function labelLines(
     }
   }
   return lines;
+}
+
+/** The label of the wireframe's contour interval's line (plan R10, R10.T11; the guide's row). */
+export const CONTOUR_INTERVAL_LABEL = "CONTOUR INTERVAL";
+
+/**
+ * The wireframe's `CONTOUR INTERVAL` line at `intervalM`, m: `200 m · INDEX 1 km`, the interval in
+ * a field of {@link CONTOUR_FIELD_CH}, so that `· INDEX` never moves as the interval steps (the
+ * guide's "Numbers"), and its middle dot leading the index's part, as the sky's `STARS` line's
+ * lead theirs (decision-r10-view-block-room §5).
+ *
+ * @remarks
+ * The index ends the line with no field: nothing follows it for it to move, and where this line is
+ * its plate's widest the plate is a character narrower or wider as the index changes unit. Beside
+ * an open slot at 1280 × 720 the block sets the line on three rows, `500 m`, `· INDEX` and
+ * `2.5 km` (seen in R10.T11's look), the index's part breaking where its column, about 114 px, is
+ * narrower than its 128: the leading dot keeps `INTERVAL` and `INDEX`, side by side on the second
+ * row, from reading as one label.
+ */
+export function contourIntervalLine(intervalM: number): LabelLine {
+  const interval: LabelField = {
+    text: contourLengthReading(intervalM),
+    widthCh: CONTOUR_FIELD_CH,
+    stale: false,
+  };
+  return {
+    label: CONTOUR_INTERVAL_LABEL,
+    value: contourIntervalReading(intervalM),
+    fields: [interval],
+    dotsLead: true,
+  };
 }
 
 /** The statement of a view whose camera is off the hull: positions are as the ship sees them. */
