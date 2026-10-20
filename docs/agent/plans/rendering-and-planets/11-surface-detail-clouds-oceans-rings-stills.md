@@ -1027,6 +1027,18 @@ tests. Acceptance: `pnpm test`, `just ci`, `just test-render`, by hand at the su
   different times give the same coverage at the same t, bit for bit; the time-rate fade reaches the
   mean above its named rate.
 
+  - _The split (main's ruling, 2026-10-20)._ T7.a is built in two parts under this one ID.
+    T7.a.1, first: `cloudOptics.ts` and its tests above (the twelve cases, plain Eddington's
+    negative control, R + T + A = 1, R monotonic in τ, the unscaled direct part) with the Monte
+    Carlo reference at a smoke size. It reads no other plan's names, so it starts before T1 and
+    needs no re-validation. Its Monte Carlo bounds are 3% for τ ≥ 10 and 10% at τ = 1 at either
+    μ₀, against the table's Monte Carlo column: the table's own τ = 10, g = 0.85, μ₀ = 0.5 row is
+    2.54%, and its τ = 1, μ₀ = 1 rows are 8.9% and 5.8%. The smoke reproduces that column within
+    four combined standard deviations, its own and the table's 0.002. The rest, `condensates.ts`,
+    `coverage.ts` and their tests, waits for P14.T52.c's decks, a condensate mode through R08's
+    `modeOptics` and R09's zonal climatology, and is re-validated first (Risks, "Composition,
+    for the re-validation").
+
 - **R11.T7.b The two-dimensional layer.** `cloudDensity.ts`, `cloudLayer.wgsl` and
   `cloudShadow.wgsl`: a shell at the condensate's altitude, its per-texel τ the column integral of
   the shared density, lit through R08's `atmosphere_sun_transmittance` at the shell's geodetic
@@ -1403,3 +1415,91 @@ ejecta-block population), shape parameter or authoritative dip opens a new tag a
     passes, which no timestamp covers. Under `quantized` the quantum added to each pass covers
     them; under `full` only the two-quantum margin does. T10.d's soak shows whether `full` needs an
     allowance per pass.
+- **Deviations in T7.a.1, as built** (2026-10-20; lane `lane/60-r11-t7a1-delta-eddington`, from
+  `rendering-and-planets` at `61f628e4`; main's rulings (a)–(i) for R11.T7.a.1).
+  - _Files._ New: `clouds/cloudOptics.ts`, `clouds/slabMonteCarlo.ts` and `clouds/slabFixtures.ts`,
+    with `cloudOptics.test.ts` and `slabMonteCarlo.test.ts`. Nothing outside `clouds/` changes; no
+    wire, protocol, DTO, golden, generator version, engine type or settings list moves.
+  - _The tolerance (ruling (e))._ δ-Eddington's R is held to 3% of the table's Monte Carlo column
+    at τ ≥ 10 and to 10% at τ = 1 at either μ₀. The test line's 2.5% fails the table's own τ 10,
+    g 0.85, μ₀ 0.5 row (2.54%), and its 10% at τ = 1, given for an oblique sun only, is extended to
+    μ₀ = 1, where the table's rows are 8.9% and 5.8%. The smoke holds |R_N − R_table| to
+    4√(σ_N² + 0.002²), σ_N = √(R_table(1 − R_table) ÷ N); δ-Eddington is never compared with the
+    smoke run, whose σ on a bias near 10% would make the result hang on the seed.
+  - _The names._ Provides kept: `deltaEddington({ tau, asymmetry, singleScatterAlbedo, mu0 })`.
+    Added in `cloudOptics.ts`: the types `DeltaEddingtonInput` and `SlabFluxFractions`
+    (`reflectance`, `directTransmittance`, `diffuseTransmittance`, `absorptance`) and
+    `CONSERVATIVE_CO_ALBEDO`. In `slabMonteCarlo.ts`: `slabMonteCarlo(input, uniform)` with
+    `SlabMonteCarloInput` (`tau`, `asymmetry`, `mu0`, `photons`) and `SlabMonteCarloResult`
+    (`photons`, `reflected`, `transmitted`, `reflectance`, `transmittance`). In `slabFixtures.ts`:
+    `SLAB_CASES` and `SlabCase`, the twelve cases as one fixture for both tests, in `clouds/`
+    because the lane could not edit `test/`.
+  - _The calls._
+    - The conservative switch: the conservative solution at 1 − ϖ₀ ≤ 10⁻¹²
+      (`CONSERVATIVE_CO_ALBEDO`), the rulings' lean. Across it R moves at most 8.0 × 10⁻¹¹ at
+      τ ≤ 50 (g 0–0.85, μ₀ 0.05–1), and the absorptance dropped is at most 1.2 × 10⁻¹⁰. The
+      scaled co-albedo is computed as (1 − ϖ₀) ÷ (1 − ϖ₀f), without the cancellation of 1 − ϖ′.
+    - kμ₀ = 1: within |1 − kμ₀| < 10⁻⁵ the scattered part (R, and T less the scaled direct beam
+      e^(−τ′ ÷ μ₀)) is interpolated linearly in μ₀ between the closed form at kμ₀ = 1 ∓ 10⁻⁵, and
+      e^(−τ′ ÷ μ₀) is added at μ₀ itself, so that ϖ₀ = 0 keeps T_diff = 0 exactly (interpolating
+      the whole T left T_diff at −4 × 10⁻¹² there). Inside the window the result is within
+      8.3 × 10⁻¹² of an 80-digit solution, and the step at the window's edges is up to
+      1.7 × 10⁻¹¹ in R or T; the tests hold the step to 10⁻⁹, and ϖ₀ = 0 there to 10⁻¹⁵.
+    - The Monte Carlo takes no ϖ₀: it is the table's conservative run, and R_N + T_N = 1 holds by
+      count. It draws isotropic scatterings below |g| = 10⁻⁸, where the inverse's 0 ÷ 0 loses
+      precision.
+    - The monotonic test allows a fall of 10⁻¹⁵, a few ulps, for `Math.exp`'s platform
+      differences; no fall occurs on the grid here.
+  - _Figures._
+    - The twelve cases: largest |R − table| 4.53 × 10⁻⁵, at τ 10, g 0.75, μ₀ 0.5 (0.695645).
+    - Against the Monte Carlo column: largest |R − R_MC| ÷ R_MC 2.53% at τ ≥ 10 (τ 10, g 0.85,
+      μ₀ 0.5) and 9.65% at τ = 1 (g 0.85, μ₀ 0.5).
+    - The ODE check at 20,000 RK4 steps: largest difference 5.1 × 10⁻¹⁴ for the general solution
+      (ϖ₀ 0.5–0.999), 5.1 × 10⁻¹³ for the conservative one, and 4.7 × 10⁻¹² at kμ₀ = 1 (ϖ₀ 0.5,
+      g 0.5; ϖ₀ 0.9, g 0.95). The review's 80-digit solution meets the code to 2 × 10⁻¹⁴ at 944
+      regular points, and the general solution just above the switch to 7 × 10⁻¹¹ down to
+      τ = 10⁻³.
+    - The closure grid (3 × 5 × 4 × 61): R + T + A within 1.1 × 10⁻¹⁶ of 1, no part below 0, A = 0
+      at ϖ₀ = 1, and no fall of R in τ. Main's 600-value grid (below), re-run here, shows none.
+    - The smoke: N = 20,000 photons a case, case i on `seededRandom(0x7a11 + i)`. The twelve cases
+      took 1.12 s under Vitest on the laptop at a 1-minute load of 2.1, and 1.2 s in plain Node at
+      2.3. Its largest deviation is 0.0061 against a bound of 0.0111 (τ 1, g 0.75, μ₀ 1), 0.55 of
+      it; the isotropic control is 0.430 off the g 0.85 row, against a bound of 0.016.
+  - _Main's checks (2026-10-20)._ A 2 × 10⁶-photon Monte Carlo reproduces the table's column within
+    0.0026; δ-Eddington's largest biases against it are 2.62% at τ ≥ 10 and 9.85% at τ = 1. The
+    grid of ϖ₀ {0.99, 0.999, 1}, eleven g, nine μ₀ and 600 τ over [10⁻⁴, 10⁴] shows no violation of
+    R ∈ [0, 1], A ≥ 0, T_diff ≥ 0 or R non-decreasing in τ.
+  - _Sources re-checked_ (2026-10-20, by a research agent, from the scanned pages). Every formula of
+    the rulings matches the papers read; no difference to raise.
+    - Joseph, Wiscombe and Weinman 1976, read in full: f = g² (eq. 5a), g′ = (g − f) ÷ (1 − f)
+      (eq. 2b) = g ÷ (1 + g) (eq. 5b), τ′ (eq. 13), ϖ′ (eq. 14). They give no closed-form R or T
+      themselves, and validated over g 0–0.95, τ 0.01–100, ϖ₀ 0.1–0.99 and μ₀ 0.1–1 (their
+      Table 1).
+    - Meador and Weaver 1980, read in full: γ₁–γ₃ (Table 1, the Eddington row; the table has no
+      δ-Eddington row, the scaled values going into the Eddington coefficients), γ₄ = 1 − γ₃
+      (eq. 21), the two-stream equations (eqs. 12 and 13), R and T for a collimated beam over a
+      black surface (eqs. 14 and 15), α₁, α₂ and k (eqs. 16–18) and the conservative solution
+      (eq. 24). Their τ′ is the layer's total optical thickness, not a scaled one.
+    - Henyey and Greenstein 1941, read in full: the phase function (eq. 2) and g as its mean
+      cosine (eq. 3). The inverse-CDF draw is not theirs; it is read as eq. 3.19 of Wang and
+      Jacques's MCML manual, which conditions it on g > 0 and gives 2ξ − 1 at g = 0, as built.
+    - Toon et al. 1989 not read (closed, and no open copy found); cited as the secondary statement
+      of the two-stream equations' form only.
+- **Deferred findings (2026-10-13 rule) (R11.T7.a.1).**
+  - δ-Eddington's absorptance is 2–10% below a plane-parallel Henyey–Greenstein Monte Carlo's at
+    ϖ₀ 0.99–0.999 (main's, 5 × 10⁵ photons, 2026-10-20). A by δ-Eddington against A by the Monte
+    Carlo, at ϖ₀ 0.99, g 0.85 and μ₀ 1 unless stated: 0.01124 against 0.01182 at τ 1; 0.16364
+    against 0.17627 at τ 10; 0.16130 against 0.17158 at τ 10, μ₀ 0.5; 0.48950 against 0.50001 at
+    τ 50; 0.01831 against 0.02036 at ϖ₀ 0.999, τ 10; 0.10275 against 0.10622 at ϖ₀ 0.999, τ 50. R
+    is within about 2% at τ ≥ 10, and 11% high at τ = 1. T7.c's octave fit and R12's audit read it.
+    Nothing changes, since visible cloud ϖ₀ is about 1 − 10⁻⁵.
+  - The removable singularity at kμ₀ = 1 is reachable at ϖ₀ ≥ 0.9 when g is near 1, since ϖ′ falls
+    to 0 as g rises to 1: from g 0.930 at ϖ₀ 0.9 (k 1.11 at g 0.95), from g 0.994 at ϖ₀ 0.99 and
+    from g 0.9994 at ϖ₀ 0.999. The rulings' "k ≤ 0.76 there" holds at g 0.85. `deltaEddington`
+    steps around it at every ϖ₀, so nothing changes here; T7.b's and T7.c's `f32` twins must step
+    around it too, with a window wide enough for `f32`.
+  - At τ 1, g 0.85, μ₀ 1, δ-Eddington's R (0.046669) is about 10% above a converged Monte Carlo:
+    10.0 ± 0.2% and 10.2 ± 0.15% in two 10⁷-photon runs (this lane's and its review's, 2026-10-20;
+    R_MC 0.04243 and 0.04235), against main's 9.85% at 2 × 10⁶. The table's 0.0429 sits about
+    0.0005 high, within its stated 0.002, so the 10% bound holds against the table's column but not
+    against a converged run. T7.c's octave fit and R12's audit should read it as about 10%.
