@@ -2,7 +2,7 @@
 //! §7 and §9; decision-composition §1.2): its primary, secondary and tertiary crusts, or the
 //! undifferentiated body's own `bulk` material, each a substance-registry row; which of them lies
 //! at the surface (`lid`) and the lithology of its volcanic provinces; the mantle's redox class;
-//! and the share of the surface above the lid's solidus, a lava world's dayside pool
+//! and the share of the surface above a silicate lid's solidus, a lava world's dayside pool
 //! ([`CrustComposition::derive`]).
 //!
 //! A body with no solid surface, in the gas-envelope state, has no crust: P14.T54.a does not call
@@ -83,11 +83,31 @@
 //! `Primary`, a resurfaced share shows as provinces of the secondary crust where the volcanism
 //! level is above zero (the Moon's maria); otherwise the provinces are the lid's own substance.
 //!
+//! A `graphite` primary crust is never the lid where the body has a secondary crust, which every
+//! body whose rock melted has: the lid is then `Secondary`, its provinces the lid's own, and the
+//! graphite stays the buried `primary` (decision-pre-23-review item 3). A minor-phase flotation
+//! layer is disrupted and buried by early volcanism and impacts. It survives as buried remnants,
+//! the low-reflectance material's source, and, mixed into the volcanic crust, as the surface's
+//! darkening agent, which the lid's row does not carry (P14.T49.k's). On Mercury the oldest
+//! surfaces formed "about 4.0–4.1 Gyr ago", and the craters' agreement "implies that resurfacing
+//! was global and was due to volcanism" (Marchi et al. 2013, Nature 499, 59, abstract). Peplowski
+//! et al. propose that "the heavily disrupted remnants" of its graphite flotation crust persist
+//! beneath the present upper crust, and find its low-reflectance material 1–3 wt% richer in carbon
+//! than its surroundings (2016, Nat. Geosci. 9, 273, abstract). Secondary volcanism and impacts
+//! that mixed the primary and secondary crusts would explain the dark, low-`FeO` surface; graphite
+//! is the one mineral buoyant in its melts, and its `FeO`-poor melts erupt readily from a shallow
+//! mantle (Vander Kaaden and McCubbin 2015, JGR Planets 120, 195, abstract). The rule is an
+//! extrapolation from Mercury to every reduced body that had a magma ocean. It holds whatever the
+//! surface age, which on the generated Mercury is its whole age since its magma ocean (its present
+//! heat flow resurfaces nothing; the cause is P14.T24.b's, recorded for P14.T33.c's census).
+//!
 //! # The melt area
 //!
-//! The share of the surface above the lid's solidus, its row's transition
+//! The share of the surface above a silicate lid's solidus, its row's transition
 //! (decision-p14-t49b-condensed §2): 1 − [`SurfaceConditions::cold_area`] at it, T24.a's one
-//! closed form. A world
+//! closed form. Outside the `MagmaOcean` state an ice lid (`H2O`) takes 0: its liquid is the
+//! condensates' water, not a melt of the crust, so a warm zone on an ice-shelled body claims no
+//! silicate vapour on the wire (decision-pre-23-review item 10). A world
 //! locked 1:1 to its host reads its eyeball, a dayside pool and a solid night, ½\[1 − (`T_sol`⁴ −
 //! `T_n`⁴) ÷ (`T_ss`⁴ − `T_n`⁴)\] (Léger et al. 2011; Kite et al. 2016); a rotating one its zonal
 //! profile. A body in the `MagmaOcean` state takes 1, so that "a surface holding melt" agrees
@@ -288,6 +308,33 @@ impl CrustLithology {
     #[must_use]
     pub fn transition(self) -> Kelvin {
         first_melt(self.substance())
+    }
+
+    /// Whether it is an ice, whose liquid is a condensate and not a melt of the crust
+    /// ([module](self)'s "The melt area"): `H2O` alone; every other lithology's transition is a
+    /// silicate's solidus, or graphite's sublimation.
+    #[must_use]
+    const fn is_ice(self) -> bool {
+        match self {
+            Self::Water => true,
+            Self::Graphite
+            | Self::Feldspathic
+            | Self::Basalt
+            | Self::IronRichBasalt
+            | Self::Komatiite
+            | Self::ReducedBasalt
+            | Self::Granite
+            | Self::Ultramafic
+            | Self::Phyllosilicate
+            | Self::ChondriteCi
+            | Self::ChondriteCm
+            | Self::ChondriteCv
+            | Self::ChondriteH
+            | Self::ChondriteL
+            | Self::ChondriteLl
+            | Self::ChondriteE
+            | Self::Cometary => false,
+        }
     }
 }
 
@@ -1255,7 +1302,8 @@ impl CrustComposition {
         self.redox
     }
 
-    /// The share of the surface above the lid's solidus, 0 to 1.
+    /// The share of the surface above a silicate lid's solidus, 0 to 1; 0 for an ice lid, whose
+    /// liquid is a condensate, outside the `MagmaOcean` state, which takes 1.
     #[must_use]
     pub const fn melt_area_fraction(&self) -> f64 {
         self.melt_area_fraction
@@ -1533,7 +1581,8 @@ fn unmelted_bulk(inputs: &CrustCompositionInputs<'_>, redox: RedoxClass) -> Crus
 /// counts as unresurfaced: the two are one subtraction apart on the record.
 const SURFACE_AGE_ROUNDING: f64 = 1e-9;
 
-/// The body's lid ([module](self)'s "The lid and the provinces"), and the lithology it names.
+/// The body's lid ([module](self)'s "The lid and the provinces"), and the lithology it names: a
+/// `graphite` primary crust is never the lid, since a melted body's secondary crust buries it.
 #[must_use]
 fn lid_of(inputs: &CrustCompositionInputs<'_>, crusts: Crusts) -> (LidCrust, CrustLithology) {
     let since_melt = inputs
@@ -1547,17 +1596,23 @@ fn lid_of(inputs: &CrustCompositionInputs<'_>, crusts: Crusts) -> (LidCrust, Cru
             primary: Some(primary),
             ice_shell,
             ..
-        } if ice_shell || unresurfaced => (LidCrust::Primary, primary),
+        } if ice_shell || (unresurfaced && primary != CrustLithology::Graphite) => {
+            (LidCrust::Primary, primary)
+        }
         Crusts::Melted { secondary, .. } => (LidCrust::Secondary, secondary),
     }
 }
 
 /// The share of the surface above the solidus of `lid` ([module](self)'s "The melt area"), in
-/// [0, 1]: 1 in the `MagmaOcean` state.
+/// [0, 1]: 1 in the `MagmaOcean` state, and otherwise 0 for an ice lid, whose liquid is a
+/// condensate.
 #[must_use]
 fn melt_area(inputs: &CrustCompositionInputs<'_>, lid: CrustLithology) -> f64 {
     if inputs.state == SurfaceState::MagmaOcean {
         return 1.0;
+    }
+    if lid.is_ice() {
+        return 0.0;
     }
     let melt = 1.0 - inputs.surface.cold_area(lid.transition());
     // By comparison, so that a NaN, which no valid surface makes, becomes no melt.

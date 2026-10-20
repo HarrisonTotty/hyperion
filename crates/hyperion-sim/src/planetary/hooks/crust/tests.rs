@@ -288,6 +288,42 @@ fn mercury_has_a_reduced_basalt_lid_over_a_graphite_primary_crust() {
     assert!(feo < 0.02, "{feo}");
 }
 
+/// A generated Mercury, reduced and with a magma ocean, whose surface age is its whole age since
+/// the melt (P14.T24.b's: its present heat flow resurfaces nothing): its `graphite` flotation crust
+/// lies buried under a `basalt_reduced` `Secondary` lid with the lid's own provinces, as on the
+/// measured-age Mercury (decision-pre-23-review item 3). The Moon, unresurfaced too, keeps its
+/// `feldspathic` `Primary` lid.
+#[test]
+fn a_generated_mercury_s_graphite_crust_lies_buried_under_its_reduced_basalt() {
+    let surface = table_conditions("Mercury");
+    let since_melt = Years::new(SOLAR_AGE.value() - median_magma_ocean_end().value());
+    let generated = CrustCompositionInputs {
+        surface_age: since_melt,
+        ..mercury(&surface)
+    };
+    let crust = CrustComposition::derive(&generated).unwrap();
+    assert_eq!(
+        keys(&crust),
+        [
+            "graphite",
+            "basalt_reduced",
+            "none",
+            "none",
+            "basalt_reduced"
+        ]
+    );
+    assert_eq!(crust.lid(), LidCrust::Secondary);
+    assert_eq!(crust.redox(), RedoxClass::Reduced);
+    assert_eq!(
+        crust.thermal_history(),
+        ThermalHistory::RockMelted(MeltCause::MagmaOcean)
+    );
+    let moon_surface = table_conditions("Moon");
+    let moon = CrustComposition::derive(&moon(&moon_surface)).unwrap();
+    assert_eq!(moon.lid(), LidCrust::Primary);
+    assert_eq!(key(moon.primary()), "feldspathic");
+}
+
 #[test]
 fn earth_has_granite_continents_on_a_basalt_ocean_floor() {
     let surface = table_conditions("Earth");
@@ -693,6 +729,28 @@ fn a_locked_lava_world_s_melt_area_is_its_dayside_pool() {
         last = melt;
     }
     assert!(last > 0.2, "the hottest pool covers {last}");
+}
+
+/// An ice lid's melt area is 0 where a zone lies above its 273.16 K transition, since its liquid is
+/// the condensates' water and not a melt of the crust (decision-pre-23-review item 10): a body of
+/// 400 km radius and 40% ice formed at 2.5 Myr, whose ocean froze into an `H2O` shell, under the
+/// table Moon's surface, whose mean lies below 273 K and whose warmest zone lies above the
+/// transition.
+#[test]
+fn an_ice_lid_s_melt_area_is_zero_where_a_zone_lies_above_its_transition() {
+    let surface = table_conditions("Moon");
+    let t_s = table_equilibrium_temperature("Ceres").value();
+    let icy = small_body(&surface, 400.0, 0.4, 2.5, SnowLineSide::Beyond, t_s);
+    let crust = CrustComposition::derive(&icy).unwrap();
+    assert_eq!(key(crust.primary()), "H2O", "{:?}", crust.thermal_history());
+    assert_eq!(crust.lid(), LidCrust::Primary);
+    let warm = 1.0 - surface.cold_area(CrustLithology::Water.transition());
+    eprintln!(
+        "mean {:.2} K, above the transition {warm:.4}",
+        surface.mean_surface_temperature().value()
+    );
+    assert!(warm > 0.0, "{warm}");
+    hyperion_testkit::float::assert_same_bits(crust.melt_area_fraction(), 0.0);
 }
 
 /// A magma ocean's surface holds melt everywhere, whatever its lid.

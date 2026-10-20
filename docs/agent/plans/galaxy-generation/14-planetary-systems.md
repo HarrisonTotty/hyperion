@@ -16352,8 +16352,8 @@ tables::gauss_legendre`.
     evaluations of 24 terms of 5 sources, 4,560 quotients and 266 exponentials, beside
     `cold_area`'s zonal profile; planets, rocky impact moons and tidal bodies skip it. It was not
     timed; P14.T33.a's bench should take it, and over a microsecond a body it is a finding. An
-    `H2O` lid's melt area is read at its 273.16 K, so a warm zone on an ice-shelled body counts as
-    melt: the wire's `silicate_vapour` rule should read a silicate lid's melt alone.
+    `H2O` lid's melt area was read at its 273.16 K, so a warm zone on an ice-shelled body counted
+    as melt (ruled: 0 for an ice lid, the amendment below).
   - _For main._ P14.T49.c's tripwire, as held, fails on `.condensed()` outside `substance/`:
     `planetary/hooks/crust.rs` calls it for the lid's and the solidus's transitions, so its held
     list may need `planetary/hooks/crust.rs` (hold: this module's own tripwire). Io's melt area is
@@ -16368,12 +16368,38 @@ tables::gauss_legendre`.
     Risks' lean "none until P14.T51.c's lid gives the crust's lithology and thickness", meet this
     module's ocean-freeze rule, which reads `Crust::of`: `Crust::of` can read the crust only if that
     rule stops reading it, and the crust gives no thickness or density.
+  - _Amended at 22, P14.T54.a's first checkpoint_ (lane `p14-wire-23`, 2026-10-20, under this
+    task's ID; decision-pre-23-review items 3 and 10). Pure, so no bump, and `crust.golden` does
+    not move: its Mercury anchor takes the measured 4.0 Gyr surface age, which was resurfaced
+    already.
+    - **Mercury's lid.** `lid_of` never makes a `graphite` primary crust the lid where the body has
+      a secondary crust, which every body whose rock melted has: the lid is `Secondary`, its
+      provinces the lid's own, and the graphite stays the buried `primary`. The module doc cites
+      Marchi et al. 2013, Peplowski et al. 2016 and Vander Kaaden and McCubbin 2015 (abstracts,
+      read again by the checkpoint's science check, which had the doc state their mixing and
+      remnants as the papers' proposals, and the rule as an extrapolation from Mercury). The generated Mercury, whose surface age is its whole
+      age since its magma ocean, so has a `basalt_reduced` lid over a buried `graphite`
+      (`a_generated_mercury_s_graphite_crust_lies_buried_under_its_reduced_basalt`, which also
+      holds the Moon's `feldspathic` `Primary` lid). P14.T49.j's record ("Mercury's lid is
+      `basalt_reduced`'s, and its buried graphite needs none") is true from here: the lid has
+      thermal columns, and the `NoThermalColumns` fallback is not reached on Mercury. Mercury's
+      darkness at 24 is P14.T49.k's graphite-bearing reduced basalt, not the lid's row.
+    - **The ice lid's melt area is 0.** `melt_area` gives 0 for an `H2O` lid outside the
+      `MagmaOcean` state (which still takes 1): its liquid is the condensates' water, not a melt of
+      the crust, so a warm zone on an ice-shelled body claims no silicate vapour. `H2O` is the one
+      ice of the closed set (`CrustLithology::is_ice`, an exhaustive match). The test
+      `an_ice_lid_s_melt_area_is_zero_where_a_zone_lies_above_its_transition` puts a body of
+      400 km radius with an `H2O` shell under the table Moon's surface (mean 270.35 K, 0.5742 of
+      it above 273.16 K). R09's `CrustInputs::melt_area_fraction` doc follows.
+      `CrustCompositionDto.melt_area_fraction`'s doc becomes "the share of the surface above a
+      silicate lid's solidus, in `[0, 1]`; 0 for an ice lid, whose liquid is a condensate", with
+      its binding regenerated, so the client's `holdsMelt` rule stays as T54.a's entry writes it.
 - **Deferred findings (2026-10-13 rule)**, from P14.T51.c:
-  - The generated Mercury's surface age is its age since its magma ocean (P14.T24.b: its 10.8 mW
-    m⁻² resurface nothing in 33 Gyr), so from T54.a its lid is its `graphite` primary crust,
+  - _Ruled (decision-pre-23-review item 3; the lid rule above):_ the generated Mercury's surface
+    age is its age since its magma ocean (P14.T24.b: its 10.8 mW m⁻² resurface nothing in 33 Gyr),
     where its oldest surfaces formed 4.0–4.1 Gyr ago in a global volcanic resurfacing (Marchi et
-    al. 2013); the Mercury test states the measured age. For T24.b's surface age or a later lid
-    rule.
+    al. 2013). Its lid no longer reads the surface age; the surface age's own cause, T24.b's
+    present heat flow alone, is recorded for P14.T33.c's census.
   - The generated Venus's core, 0.288 of its solids, gives a mantle FeO of 12.5 wt% by the mass
     balance, `basalt_fe`: the edge lies at a core of 0.292, and the balance moves 1.4 wt% per 0.01
     of core. Venera's basalts hold 7.7–9.3 wt%. For the bless note, or a ruling on the edge.

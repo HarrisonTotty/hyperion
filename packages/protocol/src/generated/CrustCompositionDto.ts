@@ -45,6 +45,7 @@ redox: RedoxClassDto,
  */
 mantle_redox_iw: number, 
 /**
- * The share of the surface above the lid's solidus, in `[0, 1]`.
+ * The share of the surface above a silicate lid's solidus, in `[0, 1]`; 0 for an ice lid,
+ * whose liquid is a condensate.
  */
 melt_area_fraction: number, };

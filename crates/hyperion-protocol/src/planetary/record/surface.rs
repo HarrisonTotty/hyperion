@@ -562,7 +562,8 @@ pub struct CrustCompositionDto {
     /// The mantle's oxygen fugacity relative to the iron–wüstite buffer, ΔIW, log₁₀ units, finite
     /// and of either sign: below 0 more reduced than the buffer.
     pub mantle_redox_iw: f64,
-    /// The share of the surface above the lid's solidus, in `[0, 1]`.
+    /// The share of the surface above a silicate lid's solidus, in `[0, 1]`; 0 for an ice lid,
+    /// whose liquid is a condensate.
     pub melt_area_fraction: f64,
 }
 

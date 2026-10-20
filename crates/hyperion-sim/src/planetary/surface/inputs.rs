@@ -286,8 +286,9 @@ pub struct CrustInputs {
     pub lid: LidCrust,
     /// The volcanic provinces' lithology.
     pub provinces: SubstanceKey,
-    /// The share of the surface above the solidus of the lid's crust or bulk material, 0 to 1 (a
-    /// locked lava world's dayside pool).
+    /// The share of the surface above a silicate lid's solidus, the lid's crust or bulk
+    /// material's, 0 to 1 (a locked lava world's dayside pool); 0 for an ice lid, whose liquid is
+    /// a condensate.
     ///
     /// R09.T13.c applies the solidus per cell. The lid's solidus amends science-r09-drainage.md
     /// §5.2 item 4's "the secondary's, or the primary's where there is none", which on a Moon
