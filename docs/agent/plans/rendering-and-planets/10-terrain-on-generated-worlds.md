@@ -437,8 +437,9 @@ targets at header 21 (below).
 - **R01:** the engine adapter, its WGSL-only material path, its adapter feature report
   (`GpuCapabilities` in `view/engine/platform.ts`, with `depthClipControl`, commented as for R10's
   cascades, and `timestampQuery`) and the headless SwiftShader smoke harness, with its no-f16 and
-  no-subgroup runs; `MemoryCategory` (`view/engine/memory.ts`), which has neither
-  `coarse-field-gpu` nor `shadows` yet (T7 and T9.a add them).
+  no-subgroup runs; `MemoryCategory` (`view/engine/memory.ts`), which had neither
+  `coarse-field-gpu` nor `shadows` (T7 added the first; T9.b adds the second where it creates the
+  layers, decision-r10-t9-split).
 - **R02:** the view's camera, per-patch origin convention and rotation-only view matrix; the
   wireframe style's line tokens, casing and label block (`displays/view/viewRun.ts`'s
   `labelStatements(run, terrain)` and `labelLines`, drawn by `ViewLabelBlock.tsx`); the DOM list
@@ -1013,10 +1014,12 @@ targets at header 21 (below).
     whose worst step over a 50 km range is about 3 mm, and keep the project's greater-equal
     convention for uniformity only, which the code says so that no one tunes bias expecting
     precision. Casters in front of the near plane are pancaked through `primitive.unclippedDepth`
-    where the adapter offers `depth-clip-control` (to be confirmed on the UHD 620 through R01's
-    feature report), and otherwise the near plane is pulled towards the sun by Δh ÷ sin(e_sun),
-    capped. Acne is held by slope-scaled bias (`depthBias`, `depthBiasSlopeScale`, `depthBiasClamp`)
-    and a normal offset of 1–1.5 texels of the cascade's world-space size; filtering is 2 × 2
+    where the adapter offers `depth-clip-control` (the UHD 620 offers it under the forced switches,
+    by R01's probe of 2026-09-29, and SwiftShader does not; cascades are the high setting's alone;
+    decision-r10-t9-split), and otherwise the near plane is pulled towards the sun by
+    Δh ÷ sin(e_sun), capped. Acne is held by slope-scaled bias (`depthBias`,
+    `depthBiasSlopeScale`, `depthBiasClamp`) and a normal offset of 1–1.5 texels of the cascade's
+    world-space size; filtering is 2 × 2
     hardware PCF through `textureSampleCompare` with a few Poisson taps, since the Sun's penumbra at
     10 m from an occluder is about 9 cm and PCSS is unneeded. Four 2,048² `depth32float` layers are
     64 MiB, the brainstorm's figure. Zhang et al.'s formula, Valient's snapping and the bias recipes
@@ -1668,22 +1671,47 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
 
 ### R10.T9 Cascaded terrain shadows on the high setting
 
-- **R10.T9.a Cascades.** `shadows/cascades.ts` (Design note 11): four 2,048² `depth32float` layers
-  (the brainstorm's 64 MB), allocated under the `MemoryCategory` `shadows`, added to R01's union
-  under R12's name, PSSM splits with λ ≈ 0.75 over the shadowed range f(h), bounding-sphere
-  fitting, whole-texel snapping, light matrices camera-relative in `f64`, `unclippedDepth` where
-  `depth-clip-control` is offered and the pulled-back near plane otherwise, slope-scaled bias and
-  normal offset; the sources of Design note 11 re-checked. Tests (pure): the splits are monotonic
-  and continuous in the height above ground; snapping moves a cascade by whole texels only; the
-  fitted radius does not change as the camera turns; cascades are off where cascade 1's texel is
-  coarser than the horizon map's. Acceptance:
+- **R10.T9.a Cascades** (split from T9.b by decision-r10-t9-split; pure, no GPU work).
+  `shadows/cascades.ts` (Design note 11): the spec of four 2,048² `depth32float` layers (the
+  brainstorm's 64 MB, 67,108,864 B) for the `MemoryCategory` `shadows`, which T9.b adds to R01's
+  union under R12's name where it creates them; PSSM splits with λ = 0.75 from the view's near plane
+  over the shadowed range f(h), the view's far infinite as built; bounding-sphere fitting;
+  whole-texel snapping, each cascade's grid carried from its own snapped centre of the frame before
+  by whole texels, so that the sun's turn slides it against the ground by at most that turn times
+  the cascade's radius (with no frame before, from the camera's place rounded to a body-fixed
+  lattice of cascade 1's diameter, a power of two); light matrices built camera-relative in `f64`
+  and narrowed to `f32` once; `unclippedDepth` where `depth-clip-control` is offered, and otherwise
+  the near plane pulled towards the sun by the caster reach min(Δh ÷ sin e★, √(2 R Δh));
+  slope-scaled bias and a normal offset of one texel, as data; the cascades' weight, 1 where cascade
+  1's texel is at most half the horizon map's at the nadir and 0 where it is coarser, linear
+  between; the sources of Design note 11 re-checked. Tests (pure): the splits are monotonic and
+  continuous in the height above ground; each sphere holds its slice; snapping moves a cascade by
+  whole texels only, a carried grid never re-grids however the camera moves, the sun's turn slides
+  it by at most that turn times the cascade's radius, and the body's rotation moves nothing in its
+  axes; the fitted radius does not change as the camera turns; the matrices map the sphere and the
+  depth range as stated, camera-relative; the weight is 0 where cascade 1's texel is coarser than
+  the horizon map's. Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain/shadows`.
-- **R10.T9.b The high setting's shadow term.** The horizon map everywhere, cascades by `min`, each
-  cascade fading to lit over its last 10%, 2 × 2 PCF with Poisson taps, exposed to R11 through
-  `terrain_shadow_factor`. By hand, recorded: the discrete target (the development machine's
-  RTX 3080) at 1080p against the budget's 1.5–3 ms, and no double-dark band at a cascade's edge in a
-  sunset scene; R01's feature report on whether the UHD 620 offers `depth-clip-control`. Smoke run
-  on SwiftShader. Acceptance: the smoke run passes and the figures are recorded.
+- **R10.T9.b The high setting's shadow term** (after T9.a, T11, T12 and R10.T8.c; on the development
+  machine). The `shadows` member of R01's `MemoryCategory` and the layers' creation: one set of four
+  for the engine (64 MiB), drawn again for each photorealistic view that hands a body over on the
+  high setting, before its terrain; the engine's depth-only layered target, a comparison sampler,
+  `primitive.unclippedDepth` and `depthBiasClamp`; a caster pass for each cascade, drawing the
+  view's selected patches with that view's own morph factors, culled by T9.a's caster reach; each
+  view's four snapped centres kept from frame to frame and handed back to T9.a, and dropped when the
+  view, its body or the pass is new; a list of other casters' draws for each cascade, for craft and
+  R11's rocks. The horizon map everywhere and the cascades by `min`: min(1, c′ ÷ m), 1 where m = 0,
+  with c′ = 1 − w (1 − c) and w T9.a's weight, in a function of its own from the camera-relative
+  position, beside R11's `terrain_shadow_factor(p)`, whose signature stays (a body-scaled `f32` p
+  places a point only to about 0.4 m on an Earth); the direct sun takes their product. Each cascade
+  blends into the next over its last 10% and the last fades to lit; 2 × 2 PCF with Poisson taps; the
+  normal offset and bias tuned by hand within 1–1.5 texels. The smoke harness's category list gains
+  `shadows`. By hand, recorded, hidden on the discrete target (the development machine's RTX 3080):
+  1080p against the budget's 1.5–3 ms; no double-dark band at a cascade's edge in a sunset scene
+  (`TERRAIN TEST` looking north at 228–236 s); the sun's residual crawl at `TERRAIN TEST`'s 60 s/s;
+  whether the radius needs steps against shimmer in a descent. Smoke run on SwiftShader, which lacks
+  `depth-clip-control` and so runs the pulled-back path. Acceptance: the smoke run passes and the
+  figures are recorded.
 
 ### R10.T10 The lit style on generated terrain
 
@@ -6673,6 +6701,201 @@ worker` (the photometry's Rust test), which the task's two commands do not reach
     review).
   - _The low setting's cache._ 433 lit slots in 64 MiB against the rule's 430, as Risks' "The low
     setting's cache is at its edge" has it; T14.
+- **Deviations in T9.a, as built** (2026-10-20; issue #52, on `rendering-and-planets` at
+  `8a7378d6`; decision-r10-t9-split S1–S10 built as ruled, S3 as amended, except where stated).
+  - _Files._ New: `view/terrain/shadows/cascades.ts` and `cascades.test.ts` (173 tests); this plan.
+    Nothing under `view/engine/`, `view/shaders/` or `smoke/`, no `.wgsl`, no caller: T9.b wires it.
+  - _S3 is replaced: the grid is carried_ (decision-r10-t9-split, ruling 7 amended, 2026-10-20, on
+    this task's question below). The brief's S3 snapped each centre to whole texels measured from
+    the body's centre; a basis built from the body-fixed sun and pole turns with the body about its
+    pole, so that grid slides under the ground by up to R δ a frame. As built, each cascade's grid
+    is carried from its own snapped centre P of the frame before: with c its unsnapped centre now,
+    a = (c − P) · x_L ÷ texel, b = (c − P) · y_L ÷ texel and d = (c − P) · z_L in this frame's
+    axes and texel, the snapped centre is P + texel (round(a) x_L + round(b) y_L) + d z_L,
+    body-fixed in `f64`. With no frame before, all four are snapped from one lattice point
+    O = L ⌊x ÷ L + ½⌋ per body-fixed component of the camera's place, L = 2^⌈log₂(2 r₁)⌉, the power
+    of two in [D₁, 2D₁) (256 m at h ≤ 100 m, 2,048 m at 1 km and 8,192 m at 4 km, for a 60°, 16:9
+    view). `CascadeInput.previousCentresBodyFixedM` (four `Vec3`s, refused unless four and finite)
+    takes the previous centres; `gridLatticeSpacingM` gives L; the body-centre path is gone. Tests:
+    a carried grid never re-grids after moves of 1 m, 1 km and 100 km or a 90° turn, on `TEST MOON`
+    and an Earth, to 10⁻⁶ texel; each centre is within half a texel of its unsnapped centre at its
+    depth, on both paths; a first frame is whole texels from O, one O for all four, within L√3 ÷ 2
+    of the camera; the outputs are bit for bit whatever the order of calls; a texel's change scales
+    the grid about P (a receiver s from P moves by s ε, to 8.8 × 10⁻¹¹ m); and the finding's
+    regression on `TERRAIN TEST`'s geometry (below).
+  - _Public names._ Constants `CASCADE_COUNT`, `CASCADE_SIZE_PX`, `CASCADE_SPLIT_LAMBDA`,
+    `MIN_SHADOWED_RANGE_M`, `SHADOWED_RANGE_PER_HEIGHT`, `CASCADE_FADE_FRACTION`,
+    `NORMAL_OFFSET_TEXELS`, `CASCADE_WEIGHT_FULL`, `CASCADE_WEIGHT_OFF`, `POLE_FALLBACK_RAD`,
+    `CASCADE_TEXTURE` (`Omit<TextureSpec, "category">`, named "terrain shadow cascades"),
+    `CASCADE_MEMORY_CATEGORY` (`"shadows"`), `CASCADE_BYTES` and `CASCADE_DEPTH_BIAS`
+    (`CascadeDepthBias`: `constant`, `slopeScale`, `clamp`). Functions `shadowedRangeM`,
+    `cascadeSplitsM`, `sliceSphere` (`SliceSphere`), `lightBasis` (`LightBasis`), `sunElevationRad`,
+    `casterReachM`, `cascadeWeight` and `fitCascades` (`CascadeInput` → `CascadeSet` of four
+    `Cascade`s), with the brief's members, and the ruling's `gridLatticeSpacingM` and
+    `CascadeInput.previousCentresBodyFixedM`. Added: `halfDiagonalTanSquared(fovXRad, aspect)`, t²;
+    `cascadeMatricesF64` (`CascadeMatricesF64`), the three matrices in `f64` before narrowing, which
+    `fitCascades` narrows and the tests read; `Cascade.centreFromCameraLightM`, the snapped centre
+    less the camera in the light's axes (the projection's offset), its input; and `cascades` as a
+    four-tuple. `casterReachM`'s first parameter is `elevationRad`.
+  - _λ's value is the ruling's, not a source's_ (the sources' re-check, below). Built at 0.75 (S2).
+    The form, λ on the logarithmic term, is Zhang, Sun and Nyman 2007's (GPU Gems 3, §10.2.1:
+    "C_i = λC_i^log + (1 − λ)C_i^uni, 0 < λ < 1"), whose default is ½ ("λ = 0.5 is the default
+    setting in our current implementation"); Zhang et al. 2006, the plan's citation, takes "the
+    even value of C_i^log and C_i^uniform" plus a non-negative δbias (§3.3, eq. 6–7). At n = 0.1 m
+    and f = 2 km the logarithmic split alone puts C₁ at 1.19 m, ½ at 250.6 m and 0.75 at 125.9 m.
+    The docs cite each for what it says.
+  - _The sphere is Valient's, not Microsoft's._ Microsoft's "fit to cascade" pads the projection to
+    the slice's corner-to-corner diagonal, also invariant as the camera turns, and names no sphere;
+    the bounding sphere is from Valient's Develop 2007 slides. `sliceSphere` is the least sphere on
+    the axis, tighter than one about the corners' centroid.
+  - _The continuity bound of test 1(a)._ Across h = 100 ± 10⁻⁶ m the splits cannot differ by under
+    10⁻⁶ m: above the kink f rises at 20 m a metre, so C₄ = f moves 2 × 10⁻⁵ m (C₁ 1.25 × 10⁻⁶ m).
+    Tested as no jump: the step is at most 20 δ i ÷ N at δ = 10⁻⁶ and 10⁻⁸ m, and under 10⁻⁶ m at
+    δ = 10⁻⁸ m.
+  - _More refusals._ Beyond the brief's: a negative relief range or caster height, a far plane not
+    beyond the near (`cascadeSplitsM` refuses f ≤ n), and in `casterReachM` an elevation outside
+    [−π ÷ 2, π ÷ 2]. The sun and normal may have any length; each is normalised.
+  - _The splits' ends are exact_: C₀ = n and C₄ = f are set, not evaluated.
+  - _Test 6's second figure is measured_, from body-centred `f32` positions in metres (the
+    snapped centre from the body's centre in the translation), not R11's body-scaled p: 4.6 of
+    cascade 1's texels, 0.40 m, at an Earth's radius and h = 2 m.
+  - _The depth's precision without `depth-clip-control`_ (the science check). Design note 11's
+    "reversed-Z buys nothing" holds where the sphere fills the depth range, with the feature. On the
+    pulled-back path the sphere sits in [0, 2r ÷ (2r + reach)], where the floats are densest: its
+    receivers step by at most 2⁻²³ × 2r, and the range's worst step, 2⁻²⁴ (2r + reach), falls on
+    far casters alone (1.36 cm for cascade 1 at `TERRAIN TEST`'s cap, 2.0 cm for cascade 4 at
+    4 km up). The convention is kept for uniformity, as ruled, and the code says both.
+- **Sources re-checked (R10.T9.a)** (Design note 11's "checked against the sources in T9.a").
+  - _Zhang, Sun, Xu and Lun 2006_ (VRCIA): read, as the authors' preprint through the Internet
+    Archive (the ACM copy refused it), which may differ in detail from pp. 311–318. Supports the
+    logarithmic split n(f ÷ n)^(i ÷ m) (eq. 4) and the uniform n + (f − n) i ÷ m (eq. 5), C₀ = n
+    and C_m = f. Its practical scheme is their average plus δbias (eq. 6–7), with no λ, and
+    "PSSM(3) produces the best result". Changed: the citation of λ's form and value (above).
+  - _Zhang, Sun and Nyman 2007_ (GPU Gems 3, ch. 10, NVIDIA's online edition, whose equations are
+    unnumbered images): read. Supports the λ-weighted form, λ on the logarithmic term, default ½;
+    four splits in all its tests (§10.3.2). It says nothing of stabilisation (no snapping, spheres
+    or shimmer). For casters outside a split's box it holds the box's near z at the light's
+    (§10.2.2). Changed: λ's citation.
+  - _Valient 2008_ (ShaderX6, 231–238): not reached. Read instead his "Deferred Rendering in
+    Killzone 2" (Develop 2007, Guerrilla's site), slide 37: "Make bounding sphere of cascade
+    frustum — Use it to generate cascade light matrix. Remove sub-pixel movements — Project world
+    origin onto shadow map — Use it to round light matrix to nearest shadow pixel corner"; at most
+    four cascades. It rounds no radius (S8 stands). The radius quantisation ⌈16 r⌉ ÷ 16 seen in a
+    secondary sample (MJP's Shadows sample) is that sample's, not Valient's. Changed: nothing.
+  - _Microsoft, "Common Techniques to Improve Shadow Depth Maps"_ and "Cascaded Shadow Maps": read,
+    with the CascadedShadowMaps11 sample's source. Supports stabilisation by texel-sized increments
+    ("a divide operation, a floor operation, and a multiply"; "the texture is 1 pixel larger"), and
+    slope-scaled bias in words, with no figures. The sample's rasterizer state: `DepthBias` 0,
+    `SlopeScaledDepthBias` 1.0, `DepthBiasClamp` 0, a pancaking state with `DepthClipEnable` false,
+    and a receiver offset of 0.002 of depth. Contradicts the plan's "fit to a sphere" (above).
+    Changed: the sphere's citation, the bias's values (below).
+  - _Holbert 2011_ (GDC 2011 poster "Saying 'Goodbye' to Shadow Acne", his blog and demo, through
+    the Internet Archive): read. The receiver moves along its geometric normal before projection,
+    by the offset × saturate(1 − N·L) × a texel's size (the demo's offset 1.0 texel), with "a small,
+    constant depth bias" beside it. Changed: the offset's angular rule, recorded for T9.b.
+  - _WebGPU and WGSL_ (W3C Candidate Recommendation drafts of 2026-09-15 and 2026-09-21, the
+    editor's draft of 2026-10-16): read. `GPUDepthBias` is a `long`, the slope scale and clamp
+    `float`s. §10.3.6's "biased fragment depth": for float formats bias = `depthBias` ×
+    2^(exp(max depth in primitive) − r) + `depthBiasSlopeScale` × maxDepthSlope, the clamp a bound
+    above where positive and below where negative, none at 0, which compatibility mode requires. Its
+    float wording reuses the unorm r; Direct3D 11's "Depth Bias", which it follows, gives the
+    mantissa bits, 23. `unclippedDepth`: "depth clipping is not applied" (§23.2.4), and the depth is
+    "clamped to the current [[viewport]] depth range" at output merging (§23.2.7), so casters in
+    front are pancaked onto the near plane. A comparison sampler's filtering is
+    implementation-dependent (§7.1.1). `textureSampleCompare` on `texture_depth_2d_array` runs in
+    the fragment stage alone, in uniform control flow; `textureSampleCompareLevel` samples mip 0 in
+    any stage and needs no uniform control flow. Changed: the bias formula's citation.
+  - _The Sun's disc_: 2 arcsin(6.957 × 10⁸ m ÷ 1 au) = 0.533° (IAU 2015 B3, IAU 2012 B2), so its
+    penumbra 10 m behind an occluder is 9.3 cm.
+- **The bias and the offset, as built (R10.T9.a).** `CASCADE_DEPTH_BIAS`, in `depthBiasAway`'s
+  sign (away from the light): `constant` 1, the least non-zero WebGPU integer, for Holbert's "small,
+  constant depth bias"; `slopeScale` 1 and `clamp` 0 (none), the CascadedShadowMaps11 sample's. The
+  normal offset is `NORMAL_OFFSET_TEXELS` = 1 texel (Design note 11's 1–1.5; Holbert's demo's 1.0),
+  along the geometric normal, × saturate(1 − N·L) per fragment (Holbert), T9.b's to apply and tune.
+- **Figures (R10.T9.a).**
+  - _§2.5 test 3_ (φx 60°, aspect 16 ÷ 9, n 0.1 m), as computed, equal to the brief's figures to
+    the given digits; cascades 2 and 3 take the far cap's sphere in every row.
+
+    | h               | f        | C₁ / C₂ / C₃ / C₄, m                      | r₁ / r₂ / r₃ / r₄, m                        | Texel₁ / texel₄    |
+    | --------------- | -------- | ----------------------------------------- | ------------------------------------------- | ------------------ |
+    | 2 m (and 100 m) | 2,000 m  | 125.91 / 260.62 / 501.14 / 2,000          | 90.55 / 172.64 / 331.97 / 1,339.96          | 8.843 cm / 1.309 m |
+    | 1 km            | 20,000 m | 1,251.60 / 2,533.55 / 4,459.31 / 20,000   | 900.38 / 1,678.28 / 2,953.94 / 13,464.76    | 0.879 m / 13.149 m |
+    | 4 km            | 80,000 m | 5,002.26 / 10,067.09 / 17,006.23 / 80,000 | 3,598.60 / 6,668.66 / 11,265.29 / 53,968.99 | 3.514 m / 52.704 m |
+
+  - _The lattice's L_ for that view: 256 m at h = 2 m (and to 100 m), 2,048 m at 1 km, 8,192 m at
+    4 km.
+  - _§2.5 test 6_ (|camera| 6.371 × 10⁶ m, h = 2 m, 500 seeded points across cascade 1's sphere):
+    camera-relative, the `f32` matrix on `f32`-rounded positions errs by at most 1.4 × 10⁻⁴ texel;
+    body-centred `f32` positions err by 4.6 texels (0.40 m).
+  - _The ruling's test (c)_ (`TERRAIN TEST`'s geometry: R 1,737.4 km, 28° N, h = 2 m, the sun 30° up
+    in the east, turned δ = 2π ÷ 86,400 rad about the pole; 500 seeded receivers in cascade 1's
+    sphere): carried, a receiver's grid phase changes by at most 0.073 texel (the bound 1,024 δ is
+    0.0745); on a grid from the body's centre the same receivers slide by 573 texels at the least.
+  - _S6 on `TERRAIN TEST`_ (R 1,737.4 km, Δh 14.9 km, S6's figure; the worker golden's realised
+    relief is 14,921.5 m, whose cap is 227.70 km): the cap 227.54 km; Δh ÷ sin e★ 853.75 km at 1°
+    (so the reach is the cap), 170.96 km at 5°, 85.81 km at 10° and 29.80 km at 30°; without
+    `depth-clip-control` the range's worst step at the cap is 2⁻²⁴ × 227.5 km = 1.36 cm, on far
+    casters alone.
+- **Questions for "main" (R10.T9.a)** (asked on issue #52).
+  - _The grid's origin_ (S3). Light coordinates of a body-fixed point, measured from the body's
+    centre, are the same numbers in the body-fixed basis and in the non-rotating one, since S4's
+    basis turns with the body about its pole (x_L · p = (R x_L) · (R p)). So the grid slides under
+    the ground by up to R δ a frame, δ the sun's turn a frame in body-fixed axes, not S3's
+    3 × 10⁻⁴ m (which took δ from a 29.5-day turn and the cascade's radius as the lever, by the
+    ruling's §1). On `TERRAIN TEST` at 60 s/s and 60 Hz, R δ = 126 m. Its sun stays on the
+    equator (the pole is tilted about +x, normal to the sun's line), so the slide is exactly
+    R δ sin e★: 11.0 m a frame with the sun 5° up (125 of cascade 1's texels), 63.2 m (714) at 30°
+    and 109.4 m (1,237) at 60°. The figures asked, 9.7, 56 and 97 m, took a sun off the equator,
+    which the scene does not have (the science check). On an Earth at 1 s/s, 0.67 to 6.7 m. Lean:
+    an optional `gridOriginBodyFixedM` kept by T9.b near the camera. _Ruled 2026-10-20
+    (decision-r10-t9-split, ruling 7 amended): carried centres, with the lattice for a first
+    frame_.
+  - _λ = 0.75_ (above). Lean: as built, the ruling's value, cited as the ruling's.
+- **Deferred findings (2026-10-13 rule) (R10.T9.a)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _The grid's residual crawl as the sun turns_: at most 1,024 δ texel a frame for every cascade
+    (0.074 at `TERRAIN TEST`'s 60 s/s, 0.0012 on an Earth at 1 s/s), a turn about a pivot inside
+    the cascade; T9.b judges it by eye (0.073 measured in the ruling's test (c)).
+  - _A caller that passes no centres_ is snapped from the lattice and re-grids at each lattice face
+    crossed, by under one texel on a filtered edge, and at each step of L in a descent.
+  - _The pole switch_ (S4): within 1° of either pole the body-fixed +x stands in for the pole, a
+    one-frame re-grid by sub-texel amounts.
+  - _The radius is continuous in h_ (S8), so texels rescale through a descent; whether steps beat
+    the crawl is T9.b's call by eye (MJP's sample quantises to ⌈16 r⌉ ÷ 16, a precedent). With the
+    carry, a descent's texel rescaling pivots at P, at most about 1,024 ε texel a frame: about 0.2
+    at h = 4 km descending at 50 m/s, and 0.35 at 500 m and 10 m/s. Measured from the body's centre
+    it would be about 100 texels.
+  - _The reach's cap._ Under the minimum, far casters are the horizon map's, so T9.b may measure and
+    lower the cap of √(2 R Δh).
+  - _A constant bias unit's world size_ (S6, S7). The brief expected it to scale with the depth
+    range and so differ between the two capability paths; it does not (the science check). One unit
+    is 2^(e − 23) of the range D at a caster's depth d in [2^e, 2^(e+1)), and d D is the caster's
+    distance from the far plane, which stands at r from the centre on both paths. So for a caster
+    in the sphere one unit is 2⁻²⁴ to 2⁻²³ of that distance on both, the same to within a factor of
+    2 (1.23 to 1.55 across cascades 1 and 4 at 2 m and 4 km up); the slope term's world size is
+    free of D too.
+  - _Snapping's overhang._ Snapping moves a centre by up to half a texel in x_L and y_L, so the
+    slice can overhang its map by that much at the edge (Microsoft's sample makes the map a texel
+    larger); a point there falls to the next cascade, inside the blend band.
+  - _PCF is not guaranteed._ WebGPU leaves a comparison sampler's filtering to the implementation,
+    so on some adapter the 2 × 2 is a single compare and T9.b's Poisson taps carry the filtering.
+  - _A cooler host's penumbra._ At the same insolation a host's disc scales as (T☉ ÷ T★)²,
+    T☉ = 5,772 K (IAU 2015 B3): a 3,000 K star subtends about 2.0°, and its penumbra 10 m behind an
+    occluder is about 34 cm, four of cascade 1's texels at 2 m up, so "PCSS is unneeded" holds for
+    a Sun-like host; T9.b's filter may need to follow the host's angular radius.
+  - _Rounding, not flooring._ Valient rounds to the nearest texel corner and Microsoft floors; both
+    are whole-texel snaps, and `Math.round` is built.
+  - _No receiver offset in depth._ Microsoft's sample also offsets the receiver's compared depth by
+    0.002; the normal offset stands in for it here, as Holbert's method has it.
+  - _SwiftShader's `depth-clip-control`._ R01's record of its engine task reads SwiftShader's
+    capabilities as "no `shader-f16`, the rest present", while `platform.test.ts`'s
+    `SWIFTSHADER_FEATURES` lacks the feature; T9.b's smoke run should log which path it takes, and
+    withhold the feature where it is to run the pulled-back path.
+  - _Pointers left for main._ The README's asks table ("met: … R10.T7, T10.d, T9.a" for the memory
+    categories), plan 12's R12.T3.a (`shadows` "by R10.T7 and T9.a", and "`shadows` (R10.T9.a)")
+    and this plan's Tasks opening (T9 after T8 alone) predate the split: T9.b adds `shadows`, and
+    follows T9.a, T11, T12 and R10.T8.c. R10.T8.c, which T9.b's entry names, is the entry another
+    change inserts above R10.T9's heading. This task edits four places of this plan alone.
 - **Deviations in T10.c, as built** (2026-10-16; lane r10-shader, on `rendering-and-planets` at
   `5da24214`).
   - _Files._ In `view/terrain/`: `shaders/terrainLit.wgsl` (the discard, the skirts' and fins'
