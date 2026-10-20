@@ -3,8 +3,7 @@ use hyperion_testkit::float::assert_same_bits;
 use super::*;
 use crate::orbit::{Eccentricity, Orientation};
 use crate::planetary::derive::atmosphere::{
-    GREENHOUSE_CARBON_DIOXIDE, GREENHOUSE_NITROGEN, GREENHOUSE_WATER,
-    NITROGEN_REFERENCE_TEMPERATURE, VolatileDraws,
+    GreenhouseConstants, NITROGEN_REFERENCE_TEMPERATURE, VolatileDraws,
 };
 use crate::planetary::derive::solar::{
     PLANETS, SMALL_BODIES, SOLAR_AGE, derive_historic, historic_table, orbit, solar_disc,
@@ -96,6 +95,12 @@ fn column_of(body: &DerivedBody, spin: SeasonalSpin) -> (Column, OceanWeight) {
     let inputs = inputs_of(body, spin);
     let surface = Surface::of(&inputs).unwrap();
     (surface.column, inputs.ocean_weight)
+}
+
+/// The grey greenhouse's constants the record reads: the rules in force's (version 22's below the
+/// `p14-snapshot` lane's hold, P14.T57.a's from it).
+fn greenhouse() -> GreenhouseConstants {
+    SnapshotRules::in_force().greenhouse()
 }
 
 /// The dayside's and nightside's temperatures of the derived body `body` under the spin `spin`,
@@ -431,7 +436,7 @@ fn earth_gain(surface: Kelvin, tau: f64, pressure: f64) -> f64 {
     let p_w = phase.saturation_pressure(surface).value();
     let moles_w = p_w / water.molar_mass_g_per_mol();
     let x_w = moles_w / ((pressure - p_w) / EARTH_AIR_MOLAR_MASS_G_PER_MOL + moles_w);
-    let tau_w = GREENHOUSE_WATER * (p_w / 1e5).sqrt();
+    let tau_w = greenhouse().water() * (p_w / 1e5).sqrt();
     let t = surface.value();
     let slope = (1.0 - x_w) * 0.5 * tau_w * phase.vaporisation_enthalpy_j_per_mol()
         / (MOLAR_GAS_CONSTANT * t * t);
@@ -578,7 +583,7 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
     let phase = water.substance().substance().phase().unwrap();
     assert!(air.partial_pressures().of(water) >= phase.saturation_pressure(t_s));
     let t = t_s.value();
-    let tau_w = GREENHOUSE_WATER * (air.partial_pressures().of(water).value() / 1e5).sqrt();
+    let tau_w = greenhouse().water() * (air.partial_pressures().of(water).value() / 1e5).sqrt();
     let slope =
         (1.0 - fraction(conditions, water)) * 0.5 * tau_w * phase.vaporisation_enthalpy_j_per_mol()
             / (MOLAR_GAS_CONSTANT * t * t);
@@ -605,8 +610,8 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
     // bar of N₂ and 42 Pa of CO₂ over a surface in equilibrium at 255 K, its water at saturation
     // (science-p14-t24a-climate.md §1).
     let n2 = Gas::Nitrogen.molar_mass_g_per_mol();
-    let dry_depth = GREENHOUSE_CARBON_DIOXIDE * (42.0_f64 / 1e5).sqrt()
-        + GREENHOUSE_NITROGEN
+    let dry_depth = greenhouse().carbon_dioxide() * (42.0_f64 / 1e5).sqrt()
+        + greenhouse().nitrogen()
             * math::powi(NITROGEN_REFERENCE_TEMPERATURE.value() / 255.0, 2)
             * 0.75_f64.sqrt();
     for t in [260.0, 273.17, 288.0, 300.0, 320.0, 340.0, 360.0] {
@@ -614,7 +619,7 @@ fn the_greenhouse_gain_is_the_held_gases_feedback() {
         let p_w = phase.saturation_pressure(surface).value();
         let moles_w = p_w / water.molar_mass_g_per_mol();
         let x_w = moles_w / (75_000.0 / n2 + moles_w);
-        let tau_w = GREENHOUSE_WATER * (p_w / 1e5).sqrt();
+        let tau_w = greenhouse().water() * (p_w / 1e5).sqrt();
         let enthalpy = if t < phase.triple_temperature().value() {
             phase.sublimation_enthalpy_j_per_mol()
         } else {

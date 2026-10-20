@@ -4535,3 +4535,90 @@ fn time_the_cold_traps_over_the_sample() {
         eprintln!("  {cost:.3} ms, {airless} airless: {what}");
     }
 }
+
+/// P14.T57.a's moves at 23, measured for P14.T54.a's bless note: over the sample's first 60 systems
+/// generated whole (`whole`), every present planet's, member's and moon's mean surface temperature
+/// under version 22's rules and under the `p14-snapshot` lane's batch (P14.T51.a's partition,
+/// T51.b's area mix, T51.h's passes and T57.a's greenhouse constants), each body on its own line,
+/// and how many move by more than 2 K, by their state under the batch. Run by name and recorded in
+/// plan 14's Risks ("Deviations in P14.T57.a, as built"); a measurement, it asserts nothing.
+#[test]
+#[ignore = "a measurement, run by name"]
+fn the_batch_s_surface_temperatures_over_the_sample_are_recorded() {
+    use std::collections::BTreeMap;
+
+    use crate::planetary::derive::DerivedBody;
+    use crate::planetary::derive::atmosphere::SnapshotRules;
+
+    /// What a body's line holds: its state, `T_s` and `T_eq`, K, and its surface pressure and
+    /// partial pressures of carbon dioxide and water, Pa.
+    type Row = (SurfaceState, f64, f64, f64, f64, f64);
+    let row = |derived: &DerivedBody| -> Row {
+        let air = derived.atmosphere();
+        (
+            air.state(),
+            air.surface_temperature().value(),
+            derived.equilibrium_temperature().value(),
+            air.surface_pressure()
+                .map_or(0.0, crate::units::Pascals::value),
+            air.partial_pressures().of(Gas::CarbonDioxide).value(),
+            air.partial_pressures().of(Gas::Water).value(),
+        )
+    };
+    let t = UniverseTime::EPOCH;
+    let walk = |rules: SnapshotRules| {
+        let mut rows: BTreeMap<String, Row> = BTreeMap::new();
+        for (ctx, system) in whole().iter().take(60) {
+            if ctx.age_at_epoch().value() <= 0.0 {
+                continue;
+            }
+            let system = system.clone().with_snapshot_rules(rules);
+            let epoch = Epoch::new(&system, ctx, t);
+            for body in system.bodies() {
+                if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+                    continue;
+                }
+                let host = fate_host(ctx, system.zone_of(body));
+                let fate = system.fate_of(body, &host);
+                let label = label::label(&system, body.index).unwrap();
+                let (_, now) = system.primary_record(&epoch, body, label, &fate);
+                let Some(derived) = now.derived else {
+                    continue;
+                };
+                rows.insert(format!("{:?} {:?}", ctx.id(), body.index), row(&derived));
+                for child in system.children(body.index) {
+                    let Part::Moon(moon) = &child.part else {
+                        continue;
+                    };
+                    let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
+                    let Some(derived) = system.moon_derived(&epoch, moon, &orbit, &now) else {
+                        continue;
+                    };
+                    rows.insert(
+                        format!("{:?} {:?} moon", ctx.id(), child.index),
+                        row(derived.body()),
+                    );
+                }
+            }
+        }
+        rows
+    };
+    let (held, batch) = (walk(SnapshotRules::Held), walk(SnapshotRules::Batch));
+    let mut moved: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+    for (key, b) in &batch {
+        let Some(h) = held.get(key) else {
+            continue;
+        };
+        eprintln!(
+            "T57A | {key} | {:?} | {:?} | {:.3} | {:.3} | {:.3} | {:.6e} | {:.6e} | {:.6e}",
+            h.0, b.0, h.1, b.1, b.2, b.3, b.4, b.5
+        );
+        let tally = moved.entry(format!("{:?}", b.0)).or_default();
+        tally.0 += 1;
+        tally.1 += u32::from((b.1 - h.1).abs() > 2.0);
+    }
+    eprintln!(
+        "{} bodies; by state under the batch, (bodies, moved by more than 2 K): {moved:?}",
+        batch.len()
+    );
+}

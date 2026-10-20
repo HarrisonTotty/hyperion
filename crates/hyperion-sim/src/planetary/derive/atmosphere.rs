@@ -30,8 +30,9 @@
 //!   ([`partition`](crate::planetary::chem::partition)) over the body's climate, on the
 //!   registry's phase diagrams, and the Bond albedo and cloud fraction are P14.T51.b's area mix
 //!   over the condensates the pass publishes, its regolith and its cloud
-//!   (`area_mix`), in place of the state's
-//!   table.
+//!   (`area_mix`), in place of the state's table. From the same version the grey greenhouse's
+//!   carbon dioxide and water constants are P14.T57.a's, fitted at Venus's and then Earth's
+//!   measured states ([`GREENHOUSE_CARBON_DIOXIDE`], [`GREENHOUSE_WATER`]).
 //! - **Carbon speciation and oxygen** (P14.T24.f). A body formed beyond the snow line that lies
 //!   beyond the maximum-greenhouse limit carries its carbon as methane, held where a reservoir lies
 //!   on its surface at [`METHANE_RELATIVE_HUMIDITY`] of its saturation pressure; a runaway world
@@ -509,8 +510,8 @@ impl NitrogenLine {
 /// It is the one hold of the lane's edits on the record path: P14.T51.a's condensate partition in
 /// the greenhouse ([`SnapshotRules::Batch`], [`atmosphere_under`]), P14.T51.b's area-mix albedo
 /// with its converging passes, its record bulk for icy members and its photometry's references, and
-/// P14.T57.a's refitted greenhouse constants, which take its `Batch` arm as they land. Below
-/// it [`SnapshotRules::in_force`] is [`SnapshotRules::Held`], so that every atmosphere is version
+/// P14.T57.a's refitted greenhouse constants, which its `Batch` arm reads
+/// ([`SnapshotRules::greenhouse`]). Below it [`SnapshotRules::in_force`] is [`SnapshotRules::Held`], so that every atmosphere is version
 /// 22's bit for bit until P14.T54.a's wiring, which gives the passes the body's climate and removes
 /// this hold and its tripwire (`the_snapshot_lane_is_held_only_until_the_batch_s_bump`).
 pub(crate) const SNAPSHOT_VERSION: GeneratorVersion = GeneratorVersion::new(23);
@@ -537,6 +538,16 @@ impl SnapshotRules {
             Self::Batch
         } else {
             Self::Held
+        }
+    }
+
+    /// The grey greenhouse's constants these rules give: version 22's under
+    /// [`SnapshotRules::Held`], and P14.T57.a's fits under [`SnapshotRules::Batch`].
+    #[must_use]
+    pub(crate) const fn greenhouse(self) -> GreenhouseConstants {
+        match self {
+            Self::Held => GreenhouseConstants::VERSION_22,
+            Self::Batch => GreenhouseConstants::FITTED,
         }
     }
 }
@@ -799,73 +810,231 @@ pub(crate) fn volatile_inventory_under(
     )
 }
 
-/// The greenhouse constant of carbon dioxide, per √bar: 18.5, fixed by Venus (P14.T13.c; the lane's
-/// fit, provisional). With 57 bar of carbon dioxide at its median inventory it warms Venus's
-/// 229 K to 735 K.
-pub const GREENHOUSE_CARBON_DIOXIDE: f64 = 18.5;
+/// The greenhouse constant of carbon dioxide, per √bar: 14.86, fitted on Venus's measured state
+/// (P14.T57.a, decision-p14-moons §4 and decision-p14-t57a-fits §1–§3; amends P14.T13.c).
+///
+/// The grey greenhouse's constants are fitted in this order, each at its body's measured inventory
+/// and measured Bond albedo under the generator's own irradiation: nitrogen on Titan
+/// ([`GREENHOUSE_NITROGEN`]), carbon dioxide on Venus (this one), then water on Earth
+/// ([`GREENHOUSE_WATER`]). A constant of the radiative model calibrates on a body as measured,
+/// never as generated. Venus's measured Bond albedo is 0.76 (Haus et al. 2016, Icarus 272, 178,
+/// which states no uncertainty; NASA's fact sheet gives 0.77), which its cloud gives it in
+/// P14.T51.b's area mix; Earth's is 0.294 (NASA's Earth fact sheet), to which the reference
+/// Earth's cloud is calibrated; Titan's reference temperature is taken at the snowball albedo
+/// until P14.T24.h.
+///
+/// - _Venus's measured air:_ about 4.8 × 10²⁰ kg (NASA's Venus fact sheet, Williams, updated
+///   2024), 96.5 ± 0.8% carbon dioxide and 3.5 ± 0.8% nitrogen by volume, recommended below 45 km
+///   (von Zahn, Kumar, Niemann and Prinn 1983, in _Venus_, eds Hunten et al., University of
+///   Arizona Press, 299–430, Table II, as Johnson and de Oliveira 2019, Earth Space Sci. 6, 1299,
+///   compile it). At the registry's molar masses that is 4.69 × 10²⁰ kg of carbon dioxide and
+///   1.08 × 10¹⁹ kg of nitrogen, 90.4 and 2.09 bar by weight over the generator's Venus, M g ÷ 4πR²
+///   as its partial pressures are taken, not the volume shares of the surface pressure.
+/// - _Its nitrogen:_ the 3.5% rests on measurements above 22 km (Oyama et al. 1980, JGR 85, 7891,
+///   Table 2). Mogul, Limaye and Way 2025 (GRL 52, e2025GL118909) find 2.49 ± 0.10% below 15 km and
+///   5.21 ± 0.18% in the clouds; a bulk anywhere in 2.5–3.5% moves this fit by under 0.3%.
+/// - _Its surface:_ 737 K, the mean over a sphere of Venus's 6,051.8 km mean radius. The Venus
+///   International Reference Atmosphere gives 735.3 K at its altitude zero, 6,052 km (Seiff et al.
+///   1985, Adv. Space Res. 5(11), 3, read in transcription: Venus-GRAM's `VIRALow.txt`, Justh et
+///   al. 2021, NASA/TM-20210022168, and the Planetary Scientist's Companion, p. 119). Carried
+///   0.2 km down at its own 7.6 K km⁻¹ over the lowest kilometre, that is 736.8 K, NASA's fact
+///   sheet's 737 K.
+/// - _The fit:_ at the generator's irradiation for Venus at 0.76, 229.06 K, which the batch's
+///   passes give the measured Venus, with the nitrogen term as built and no water, which a runaway
+///   world has lost, 737 K needs τ = 141.6, which gives 14.862. At 14.86 the measured Venus
+///   reaches 737.0 K (the test `the_greenhouse_constants_are_their_fits`).
+///
+/// The generated Venus is a median draw of the inventory, not the measured one: the table's Venus
+/// holds 57.8 bar and reaches 696.3 K, while the measured Venus lies at the 65th percentile of its
+/// carbon and the 86th of its nitrogen under [`VOLATILE_SCATTER_DEX`] (decision-p14-moons §4.1).
+/// P14.T13.c's 18.5 was fitted at the median's 57 bar, and put the measured Venus at 778 K.
+///
+/// It takes effect with the `p14-snapshot` lane's hold (`SNAPSHOT_VERSION`, 23); below it the
+/// greenhouse reads version 22's 18.5.
+pub const GREENHOUSE_CARBON_DIOXIDE: f64 = 14.86;
 
-/// The greenhouse constant of water vapour, per √bar: 2.89, fixed by Earth with its carbon dioxide
-/// and nitrogen (P14.T13.c; the lane's fit, provisional).
-pub const GREENHOUSE_WATER: f64 = 2.89;
+/// The greenhouse constant of water vapour, per √bar: 4.47, fitted on Earth's measured state after
+/// carbon dioxide (P14.T57.a, decision-p14-t57a-fits §1–§2; amends P14.T13.c), the last of the
+/// three fits ([`GREENHOUSE_CARBON_DIOXIDE`] gives their order and the rule).
+///
+/// - _Earth's air:_ the table's median Earth's, whose carbon dioxide and nitrogen are Earth's per
+///   unit mass: 42 Pa of carbon dioxide by weight, the pre-industrial 2.2 × 10¹⁵ kg (278.3 ±
+///   2.9 ppm in 1750, IPCC AR6 WG1 ch. 2, §2.2.3.2.1), and 0.747 bar of nitrogen.
+/// - _Its water_ is P14.T51.a's partition's: a minor condensable whose partial pressure, its mole
+///   fraction times the surface pressure, is held at Manabe and Wetherald's 0.77 of its saturation
+///   pressure on the registry's curve ([`WATER_SURFACE_HUMIDITY`]). That is 837 Pa by weight at
+///   288 K, 0.495 of the saturation pressure, since a water molecule weighs 0.64 of the air's mean.
+///   P14.T13.c's 2.89 held the water's column weight at its saturation pressure, so at a given
+///   temperature the new term, 4.47 × √0.495 = 3.15 times √`p_sat`, is 9% the stronger.
+/// - _Its surface:_ 288.0 K, the pre-industrial Earth's surface emission temperature,
+///   (S↑ ÷ σ)^¼, which is what the grey `T_s` is (P14.T24.a's zonal profile has F = σ `T_s`⁴).
+///   Jones et al. 1999's 14.0 °C for 1961–1990 (Rev. Geophys. 37, 173), less 0.36 K of warming
+///   since 1850–1900 (AR6 WG1, Cross-Chapter Box 2.3, Table 1), is the arithmetic mean, 286.8 K,
+///   and the spatial structure of the emission adds 1.3 K (Trenberth, Fasullo and Kiehl 2009,
+///   BAMS 90, 311: 396.4 against 389.2 W m⁻², p. 315), 288.1 K; their 396 W m⁻² less about 0.8 K
+///   of warming gives 288.2–288.3 K. NASA's fact sheet's 288 K is the same figure, with no epoch.
+///   The climatology's ±0.5 K (AR6 WG1 Fig. 1.11) is about ±2.5% in this constant.
+/// - _The fit:_ at the generator's irradiation for the table's Earth at 0.294, 255.14 K, 288 K
+///   needs τ = 0.8314; less carbon dioxide's 0.3048 and nitrogen's 0.1177 that leaves 0.4089 for
+///   the water, which gives 4.469 (the test `the_greenhouse_constants_are_their_fits`).
+///
+/// The fit reads none of the passes' stand-ins, and the generated Earth is not fitted: through the
+/// batch's passes at their stand-in surface (no basins, so no sea; a Bond albedo of 0.2798) the
+/// table's Earth reaches about 290.6 K, which P14.T54.a's real inputs settle and its test holds
+/// to 288 ± 2 K. It takes effect with the `p14-snapshot` lane's hold (`SNAPSHOT_VERSION`, 23);
+/// below it the greenhouse reads version 22's 2.89.
+///
+/// [`WATER_SURFACE_HUMIDITY`]: crate::planetary::chem::partition::WATER_SURFACE_HUMIDITY
+pub const GREENHOUSE_WATER: f64 = 4.47;
 
 /// The greenhouse constant of nitrogen, per √bar at [`NITROGEN_REFERENCE_TEMPERATURE`]: 1.55,
-/// fixed by Titan (P14.T13.c; the lane's fit, provisional). Nitrogen absorbs only when molecules
+/// fixed by Titan (P14.T13.c; the lane's fit, provisional), the first of the three fits
+/// ([`GREENHOUSE_CARBON_DIOXIDE`] gives their order). Nitrogen absorbs only when molecules
 /// collide, as the square of the density, so the constant falls as (`T_ref` ÷ `T_eq`)², which
 /// leaves Earth's nitrogen a tenth of Titan's warming.
+///
+/// P14.T57.a refits nothing on Titan: its Bond albedo lacks its haze until P14.T24.h, which refits
+/// this constant and its reference temperature on Titan's measured state (decision-p14-t51-batch
+/// §7, E1). Under the batch the table's Titan reaches 92.8 K, inside 94 ± 3 K.
 pub const GREENHOUSE_NITROGEN: f64 = 1.55;
 
 /// The equilibrium temperature at which [`GREENHOUSE_NITROGEN`] holds, K: Titan's, 75.6, at the
 /// snowball albedo.
 pub const NITROGEN_REFERENCE_TEMPERATURE: Kelvin = Kelvin::new(75.6);
 
-/// The grey optical depth of partial pressures `partials` over a surface in equilibrium at
-/// `equilibrium`: τ = Σ k × (p ÷ 1 bar)^½ over carbon dioxide, water and nitrogen (P14.T13.c), the
-/// plan's square root of each partial pressure, nitrogen's scaled for collision-induced
-/// absorption. Methane and oxygen enter no term ([`atmosphere`] says why).
+/// The grey greenhouse's constants, per √bar, under one of the `p14-snapshot` lane's rules
+/// ([`SnapshotRules::greenhouse`]; P14.T13.c, P14.T57.a): carbon dioxide's, water's and nitrogen's
+/// at [`NITROGEN_REFERENCE_TEMPERATURE`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct GreenhouseConstants {
+    carbon_dioxide: f64,
+    water: f64,
+    nitrogen: f64,
+}
+
+impl GreenhouseConstants {
+    /// Version 22's, P14.T13.c's fits: carbon dioxide 18.5, at the median Venus's 57 bar, and
+    /// water 2.89, on Earth with its water's column weight at its saturation pressure, with
+    /// [`GREENHOUSE_NITROGEN`]. P14.T54.a deletes them with the lane's hold.
+    pub(crate) const VERSION_22: Self = Self {
+        carbon_dioxide: 18.5,
+        water: 2.89,
+        nitrogen: GREENHOUSE_NITROGEN,
+    };
+
+    /// The batch's: P14.T57.a's [`GREENHOUSE_CARBON_DIOXIDE`] and [`GREENHOUSE_WATER`], with
+    /// [`GREENHOUSE_NITROGEN`].
+    pub(crate) const FITTED: Self = Self {
+        carbon_dioxide: GREENHOUSE_CARBON_DIOXIDE,
+        water: GREENHOUSE_WATER,
+        nitrogen: GREENHOUSE_NITROGEN,
+    };
+
+    /// Carbon dioxide's constant, per √bar, for the tests' values by hand.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn carbon_dioxide(&self) -> f64 {
+        self.carbon_dioxide
+    }
+
+    /// Water's constant, per √bar, for the tests' values by hand.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn water(&self) -> f64 {
+        self.water
+    }
+
+    /// Nitrogen's constant, per √bar at [`NITROGEN_REFERENCE_TEMPERATURE`], for the tests' values
+    /// by hand.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn nitrogen(&self) -> f64 {
+        self.nitrogen
+    }
+
+    /// The grey optical depth of partial pressures `partials` over a surface in equilibrium at
+    /// `equilibrium` under these constants ([`optical_depth`]).
+    #[must_use]
+    pub(crate) fn optical_depth(&self, partials: &PartialPressures, equilibrium: Kelvin) -> f64 {
+        let root = |gas: Gas| (partials.of(gas).value().max(0.0) / PASCALS_PER_BAR).sqrt();
+        let collisions = collision_factor(equilibrium);
+        self.carbon_dioxide * root(Gas::CarbonDioxide)
+            + self.water * root(Gas::Water)
+            + self.nitrogen * collisions * root(Gas::Nitrogen)
+    }
+
+    /// The terms of [`optical_depth`](Self::optical_depth) one by one, each with its gas, in its
+    /// order (carbon dioxide, water, nitrogen), so that their sum in that order is its τ to the bit
+    /// (tested). Each term goes as the square root of its gas's partial pressure, so that
+    /// ∂τᵢ ÷ ∂ln pᵢ = ½τᵢ, which P14.T24.a's greenhouse gain reads (science-p14-t24a-climate.md
+    /// §1). [`optical_depth`](Self::optical_depth)'s own arithmetic is T13.c's output, and stays as
+    /// it is.
+    #[must_use]
+    pub(crate) fn terms(
+        &self,
+        partials: &PartialPressures,
+        equilibrium: Kelvin,
+    ) -> [(Gas, f64); 3] {
+        let root = |gas: Gas| (partials.of(gas).value().max(0.0) / PASCALS_PER_BAR).sqrt();
+        let collisions = collision_factor(equilibrium);
+        [
+            (
+                Gas::CarbonDioxide,
+                self.carbon_dioxide * root(Gas::CarbonDioxide),
+            ),
+            (Gas::Water, self.water * root(Gas::Water)),
+            (
+                Gas::Nitrogen,
+                self.nitrogen * collisions * root(Gas::Nitrogen),
+            ),
+        ]
+    }
+}
+
+/// Nitrogen's collision-induced scaling at the equilibrium temperature `equilibrium`:
+/// (`T_ref` ÷ `T_eq`)² with `T_ref` [`NITROGEN_REFERENCE_TEMPERATURE`], and 0 at or below 0 K.
 #[must_use]
-pub fn optical_depth(partials: &PartialPressures, equilibrium: Kelvin) -> f64 {
-    let root = |gas: Gas| (partials.of(gas).value().max(0.0) / PASCALS_PER_BAR).sqrt();
+fn collision_factor(equilibrium: Kelvin) -> f64 {
     let t = equilibrium.value();
-    let collisions = if t > 0.0 {
+    if t > 0.0 {
         let ratio = NITROGEN_REFERENCE_TEMPERATURE.value() / t;
         ratio * ratio
     } else {
         0.0
-    };
-    GREENHOUSE_CARBON_DIOXIDE * root(Gas::CarbonDioxide)
-        + GREENHOUSE_WATER * root(Gas::Water)
-        + GREENHOUSE_NITROGEN * collisions * root(Gas::Nitrogen)
+    }
 }
 
-/// The terms of [`optical_depth`] one by one, each with its gas, in its order (carbon dioxide,
-/// water, nitrogen), so that their sum in that order is its τ to the bit (tested). Each term goes
-/// as the square root of its gas's partial pressure, so that ∂τᵢ ÷ ∂ln pᵢ = ½τᵢ, which P14.T24.a's
-/// greenhouse gain reads (science-p14-t24a-climate.md §1). [`optical_depth`]'s own arithmetic is
-/// T13.c's output, and stays as it is.
+/// The grey optical depth of partial pressures `partials` over a surface in equilibrium at
+/// `equilibrium`: τ = Σ k × (p ÷ 1 bar)^½ over carbon dioxide, water and nitrogen (P14.T13.c), the
+/// plan's square root of each partial pressure, nitrogen's scaled for collision-induced
+/// absorption. Methane and oxygen enter no term ([`atmosphere`] says why).
+///
+/// The constants are the generator version's: version 22's below the `p14-snapshot` lane's hold
+/// (`SNAPSHOT_VERSION`, 23), and from it P14.T57.a's [`GREENHOUSE_CARBON_DIOXIDE`] and
+/// [`GREENHOUSE_WATER`], with [`GREENHOUSE_NITROGEN`] at [`NITROGEN_REFERENCE_TEMPERATURE`].
+#[must_use]
+pub fn optical_depth(partials: &PartialPressures, equilibrium: Kelvin) -> f64 {
+    SnapshotRules::in_force()
+        .greenhouse()
+        .optical_depth(partials, equilibrium)
+}
+
+/// The terms of [`optical_depth`] one by one under the rules in force
+/// ([`GreenhouseConstants::terms`]), which P14.T24.a's greenhouse gain reads.
+///
+/// Like [`optical_depth`], which the passes' step climate reads, they take the generator
+/// version's constants, not the lane's rules a test gives `SurfaceConditions::derive_under`, which
+/// switch its zonal solver: at every version the record's atmosphere and its column then read one
+/// set. Until P14.T54.a gives the passes a step climate, a batch atmosphere at 22 exists only in
+/// the tests.
 #[must_use]
 pub(crate) fn optical_depth_terms(
     partials: &PartialPressures,
     equilibrium: Kelvin,
 ) -> [(Gas, f64); 3] {
-    let root = |gas: Gas| (partials.of(gas).value().max(0.0) / PASCALS_PER_BAR).sqrt();
-    let t = equilibrium.value();
-    let collisions = if t > 0.0 {
-        let ratio = NITROGEN_REFERENCE_TEMPERATURE.value() / t;
-        ratio * ratio
-    } else {
-        0.0
-    };
-    [
-        (
-            Gas::CarbonDioxide,
-            GREENHOUSE_CARBON_DIOXIDE * root(Gas::CarbonDioxide),
-        ),
-        (Gas::Water, GREENHOUSE_WATER * root(Gas::Water)),
-        (
-            Gas::Nitrogen,
-            GREENHOUSE_NITROGEN * collisions * root(Gas::Nitrogen),
-        ),
-    ]
+    SnapshotRules::in_force()
+        .greenhouse()
+        .terms(partials, equilibrium)
 }
 
 /// The surface temperature of a grey atmosphere of optical depth `tau` over a surface in
@@ -1644,7 +1813,8 @@ fn capped_methane_weight(inventory: Pascals, cap: Pascals, others: &[Pascals; 9]
 /// [`saturation_pressure`](crate::substance::saturation_pressure)), methane's partial pressure in
 /// the air at [`METHANE_RELATIVE_HUMIDITY`] of it ([`capped_methane_weight`]), and held by
 /// `saturate` at the hottest host's. The carbon is airborne as its carrier
-/// ([`Airborne::carbon_carrier`]).
+/// ([`Airborne::carbon_carrier`]). The greenhouse's constants are version 22's
+/// ([`GreenhouseConstants::VERSION_22`]).
 fn greenhouse(
     airborne: &Airborne,
     weight: f64,
@@ -1690,13 +1860,14 @@ fn greenhouse(
         }
         PartialPressures(p)
     };
+    let constants = SnapshotRules::Held.greenhouse();
     let mut t = equilibrium.value();
     for _ in 0..GREENHOUSE_STEPS {
-        let tau = optical_depth(&partials_at(t), equilibrium);
+        let tau = constants.optical_depth(&partials_at(t), equilibrium);
         t = saturate(grey_surface_temperature(equilibrium, tau).value()).value();
     }
     let partials = partials_at(t);
-    let tau = optical_depth(&partials, equilibrium);
+    let tau = constants.optical_depth(&partials, equilibrium);
     (t, partials, tau)
 }
 
@@ -1743,7 +1914,8 @@ fn whole_column(inventory: &ColumnInventory) -> PartialPressures {
 /// the grey greenhouse its partial pressures give, each step's partial pressures the partition's
 /// of the airborne inventory `inventory`, as column weights ([`Airborne::column`]), over the climate
 /// `climate` gives for the step's temperature and the previous step's partial pressures, on the
-/// ground `ground`, and held by `saturate` at the hottest host's.
+/// ground `ground`, and held by `saturate` at the hottest host's. The greenhouse's constants are
+/// P14.T57.a's fits ([`GreenhouseConstants::FITTED`]).
 ///
 /// The climate reads the column of the step before, so that a column's contrasts can follow its
 /// pressure: a thin air's large contrast holds its dominant condensable at a cold trap, which keeps
@@ -1760,18 +1932,19 @@ fn partitioned_greenhouse(
     climate: &ClimateOf<'_>,
     ground: &Ground,
 ) -> (f64, PartialPressures, f64) {
+    let constants = SnapshotRules::Batch.greenhouse();
     let mut weights = AirborneWeights::new();
     let mut partials = whole_column(inventory);
     let mut t = equilibrium.value();
     for _ in 0..GREENHOUSE_STEPS {
         let span = climate(Kelvin::new(t), &partials);
         partials = partitioned_partials(inventory, &span, ground, &mut weights);
-        let tau = optical_depth(&partials, equilibrium);
+        let tau = constants.optical_depth(&partials, equilibrium);
         t = saturate(grey_surface_temperature(equilibrium, tau).value()).value();
     }
     let span = climate(Kelvin::new(t), &partials);
     partials = partitioned_partials(inventory, &span, ground, &mut weights);
-    let tau = optical_depth(&partials, equilibrium);
+    let tau = constants.optical_depth(&partials, equilibrium);
     (t, partials, tau)
 }
 
@@ -1953,6 +2126,8 @@ fn greenhouse_under(
 ///   the basins and with the water's surface share `surface` gives its own seas' weight
 ///   (decision-p14-t51a-partition §4; decision-p14-t51a-part2 §4.2): the previous pass's, from
 ///   P14.T54.a;
+/// - the grey greenhouse reads P14.T57.a's constants, refitted at Venus's and then Earth's
+///   measured states ([`GreenhouseConstants::FITTED`]);
 /// - after step 5 the Bond albedo and cloud fraction are the area mix's (P14.T51.b) over the
 ///   condensates the pass's partition publishes at its final climate, its regolith and its cloud
 ///   (`surface_mix::area_mixed`).

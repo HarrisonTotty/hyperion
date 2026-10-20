@@ -312,15 +312,23 @@ fn the_solar_system_keeps_its_atmospheres_where_it_does() {
 
 #[test]
 fn the_table_s_surface_temperatures_are_within_eight_per_cent() {
-    // P14.T13.c: Venus 735 K, Earth 288 K, Mars 215 K, Titan 94 K.
+    // P14.T13.c: Venus 737 K (decision-p14-t57a-fits §3), Earth 288 K, Mars 215 K, Titan 94 K.
+    // Venus is taken at its measured inventory, given by hand (P14.T57.a): the table's Venus is a
+    // median draw. The measured one is 778 K under version 22's constants, 737 K under the batch's.
     let table = table();
+    let measured = measured_venus(SnapshotRules::in_force());
     for (name, kelvin) in [
-        ("Venus", 735.0),
+        ("Venus", 737.0),
         ("Earth", 288.0),
         ("Mars", 215.0),
         ("Titan", 94.0),
     ] {
-        let t = found(&table, name).surface_temperature().value();
+        let body = if name == "Venus" {
+            &measured
+        } else {
+            found(&table, name)
+        };
+        let t = body.surface_temperature().value();
         assert!(
             ((t - kelvin) / kelvin).abs() < 0.08,
             "{name} at {t} K against {kelvin}"
@@ -2235,11 +2243,18 @@ fn the_snapshot_lane_is_held_only_until_the_batch_s_bump() {
          passes' water cover and `Regolith::of_material`), delete `SNAPSHOT_VERSION`, \
          `SnapshotRules` and its `Held` arm, `greenhouse`, `capped_methane_weight`, the fixed \
          `ATMOSPHERE_PASSES`, `TemplateRow::reference_bond` and `BodyPhotometry::derive`'s held \
-         reference, `photometry_of`'s held albedo, `PlanetarySystem::with_snapshot_rules` and \
-         T49.c's tripwire's hold of `photometry/area_mix.rs`, and this test (plan 14, P14.T51.a \
-         and P14.T51.b as built)"
+         reference, `photometry_of`'s held albedo, `PlanetarySystem::with_snapshot_rules`, \
+         T49.c's tripwire's hold of `photometry/area_mix.rs`, `GreenhouseConstants::VERSION_22` \
+         and `SnapshotRules::greenhouse` (the greenhouse then reads P14.T57.a's constants alone; \
+         refit `GREENHOUSE_WATER` on the real inputs if `the_greenhouse_constants_are_their_fits` \
+         says so), and this test (plan 14, P14.T51.a, P14.T51.b and P14.T57.a as built)"
     );
     assert_eq!(SnapshotRules::in_force(), SnapshotRules::Held);
+    // P14.T57.a's constants wait with the rest: the record's τ reads version 22's.
+    assert_eq!(
+        SnapshotRules::in_force().greenhouse(),
+        GreenhouseConstants::VERSION_22
+    );
     let unread = |_: Kelvin, _: &PartialPressures| -> ClimateSpan {
         panic!("the held rules read no climate")
     };
@@ -2288,10 +2303,15 @@ fn titan_inputs() -> AtmosphereInputs {
 }
 
 /// Under the batch's rules the passes hold each condensable as the partition does: Earth's water,
-/// a minor condensable, at Manabe and Wetherald's 0.77 of its saturation at the mean (version 22
-/// held it at 1, so Earth cools some 5 K, which P14.T57.a's water refit takes up), and Titan's
+/// a minor condensable, at Manabe and Wetherald's 0.77 of its saturation at the mean, and Titan's
 /// methane on the minor branch at its humidity, within 1% of version 22's (the registry's fitted
 /// curve against the held one; plan 14's test keeps Titan minor).
+///
+/// Version 22 held Earth's water at 1, its column weight at the saturation pressure, so under
+/// version 22's constants the partition cooled this Earth some 5 K. P14.T57.a's water refit takes
+/// that up: under the batch's constants this Earth, at 255 K, about the generator's irradiation for
+/// Earth's measured 0.294 (255.14 K), lies within 1 K of the refit's 288 K, about 2 K below
+/// version 22's 290 K.
 #[test]
 fn the_batch_holds_earth_s_water_and_titan_s_methane_on_the_minor_branch() {
     let earth = earth_inputs(255.0, Insolation::Habitable);
@@ -2318,8 +2338,13 @@ fn the_batch_holds_earth_s_water_and_titan_s_methane_on_the_minor_branch() {
         "{water} Pa against {held}"
     );
     let version_22 = atmosphere(&earth).surface_temperature().value();
-    let cooler = version_22 - air.surface_temperature().value();
-    assert!((3.0..8.0).contains(&cooler), "{cooler} K cooler");
+    let t = air.surface_temperature().value();
+    eprintln!("this Earth under the batch: {t:.3} K, against version 22's {version_22:.3} K");
+    assert!((t - EARTH_SURFACE_TEMPERATURE).abs() < 1.0, "{t} K");
+    assert!(
+        (0.0..3.0).contains(&(version_22 - t)),
+        "{version_22} K against {t} K"
+    );
     let titan = titan_inputs();
     let climate = |t: Kelvin, p: &PartialPressures| t24a_span(&titan, t, p);
     let batch = atmosphere_under(
@@ -2385,7 +2410,9 @@ fn a_dry_earth_beyond_the_maximum_greenhouse_still_runs_away_past_its_cold_trap(
         }
         let warmed = grey_surface_temperature(
             earth.equilibrium,
-            optical_depth(&partials, earth.equilibrium),
+            SnapshotRules::Batch
+                .greenhouse()
+                .optical_depth(&partials, earth.equilibrium),
         );
         assert!(warmed > t, "{t:?} holds itself at {warmed:?}: {partials:?}");
     }
@@ -2758,4 +2785,302 @@ fn time_the_batch_passes() {
         );
     }
     eprintln!("({sink})");
+}
+
+// P14.T57.a: the greenhouse's calibration at Venus's measured state, then water at Earth, under
+// the batch, held at 22 by the lane's hold.
+
+use crate::planetary::chem::partition::WATER_SURFACE_HUMIDITY;
+
+/// The mass of Venus's air, kg: about 4.8 × 10²⁰ (NASA's Venus fact sheet, Williams, updated
+/// 2024; [`GREENHOUSE_CARBON_DIOXIDE`]).
+const VENUS_AIR_KG: f64 = 4.8e20;
+/// Venus's carbon dioxide's share of its air by volume, 96.5 ± 0.8% below 45 km (von Zahn et al.
+/// 1983, in _Venus_, University of Arizona Press, Table II).
+const VENUS_CARBON_DIOXIDE_BY_VOLUME: f64 = 0.965;
+/// Venus's nitrogen's share of its air by volume, 3.5 ± 0.8% below 45 km (von Zahn et al. 1983,
+/// Table II).
+const VENUS_NITROGEN_BY_VOLUME: f64 = 0.035;
+
+/// Venus's carbon dioxide and nitrogen as measured, kg: [`VENUS_AIR_KG`] divided by mass at its
+/// shares by volume and the registry's molar masses, 4.69 × 10²⁰ and 1.08 × 10¹⁹ kg.
+fn venus_measured_kg() -> (f64, f64) {
+    let co2 = VENUS_CARBON_DIOXIDE_BY_VOLUME * Gas::CarbonDioxide.molar_mass_g_per_mol();
+    let n2 = VENUS_NITROGEN_BY_VOLUME * Gas::Nitrogen.molar_mass_g_per_mol();
+    (
+        VENUS_AIR_KG * co2 / (co2 + n2),
+        VENUS_AIR_KG * n2 / (co2 + n2),
+    )
+}
+
+/// The table's Venus given its measured inventory by hand: its carbon's and nitrogen's ranks those
+/// at which T13.a's log-normal gives [`venus_measured_kg`] (z = log₁₀(M ÷ `M_median`) ÷ 0.5 dex,
+/// ranked by Φ through `math::erfc`), derived about the Sun under the lane's rules `snapshot`.
+fn measured_venus(snapshot: SnapshotRules) -> DerivedBody {
+    let disc = solar_disc();
+    let &(_, kg, km, a, e) = table_bodies().find(|(name, ..)| *name == "Venus").unwrap();
+    let placed = placed_about_the_sun(&disc, (kg, km, a, e));
+    let mass = placed.mass().value() * EARTH_MASS_KG;
+    let rank = |measured: f64, median: f64| {
+        let z = math::log10(measured / median) / VOLATILE_SCATTER_DEX;
+        UnitUniform::new(0.5 * math::erfc(-z * core::f64::consts::FRAC_1_SQRT_2)).unwrap()
+    };
+    let (co2, n2) = venus_measured_kg();
+    let draws = VolatileDraws {
+        carbon: rank(co2, EARTH_CARBON_DIOXIDE_PER_MASS * mass),
+        nitrogen: rank(n2, EARTH_NITROGEN_PER_MASS * mass),
+        ..VolatileDraws::MEDIAN
+    };
+    derived_under(snapshot, &placed.with_volatiles(draws), &disc)
+}
+
+/// Venus's measured surface temperature, the fit's target: 737 K, the mean over a sphere of its
+/// 6,051.8 km mean radius, the Venus International Reference Atmosphere's 735.3 K at its 6,052 km
+/// altitude zero carried 0.2 km down at its 7.6 K km⁻¹ (Seiff et al. 1985, Adv. Space Res. 5(11),
+/// 3, read in transcription), NASA's fact sheet's 737 K (decision-p14-t57a-fits §3;
+/// [`GREENHOUSE_CARBON_DIOXIDE`]).
+const VENUS_SURFACE_TEMPERATURE: f64 = 737.0;
+
+/// Earth's surface temperature, the water fit's target: 288.0 K, the pre-industrial Earth's surface
+/// emission temperature, which the grey `T_s` is (decision-p14-t57a-fits §2; [`GREENHOUSE_WATER`]).
+const EARTH_SURFACE_TEMPERATURE: f64 = 288.0;
+
+/// Titan's surface temperature, 94 K: the Huygens probe's 93.65 ± 0.25 K at 1,467 hPa (Fulchignoni
+/// et al. 2005, Nature 438, 785).
+const TITAN_SURFACE_TEMPERATURE: f64 = 94.0;
+
+/// The grey optical depth a surface at `surface` K over an equilibrium at `equilibrium` K needs:
+/// τ = ((`T_s` ÷ `T_eq`)⁴ − 1) ÷ ¾, the inverse of [`grey_surface_temperature`].
+fn needed_depth(surface: f64, equilibrium: f64) -> f64 {
+    (math::powi(surface / equilibrium, 4) - 1.0) / 0.75
+}
+
+/// The column weight, Pa, at which water's partial pressure, its mole fraction times the summed
+/// weights, is [`WATER_SURFACE_HUMIDITY`] of its saturation pressure `saturation` among the other
+/// gases of `partials` (P14.T51.a's minor branch, as `capped_methane_weight` holds methane): the
+/// positive root of w² + b w − c = 0, b = `W_o` − h `p_sat`, c = h `p_sat` `μ_w` `Σ_o` (`w_o` ÷ `μ_o`).
+fn water_weight_at_humidity(partials: &PartialPressures, saturation: f64) -> f64 {
+    let others = Gas::ALL.into_iter().filter(|&gas| gas != Gas::Water);
+    let (weight, moles) = others.fold((0.0, 0.0), |(w, n), gas| {
+        let p = partials.of(gas).value();
+        (w + p, n + p / gas.molar_mass_g_per_mol())
+    });
+    let held = WATER_SURFACE_HUMIDITY * saturation;
+    let b = weight - held;
+    let c = held * Gas::Water.molar_mass_g_per_mol() * moles;
+    2.0 * c / (b + (b * b + 4.0 * c).sqrt())
+}
+
+/// Water's saturation pressure at `t` K on the registry's curve, Pa, as the partition reads it.
+fn water_saturation(t: f64) -> f64 {
+    crate::substance::diagram::saturation_pressure(Gas::Water.substance(), Kelvin::new(t))
+        .unwrap()
+        .value()
+}
+
+/// The equilibrium temperature the generator's irradiation gives `body` at the Bond albedo of the
+/// state `state` on rock, its measured one: Venus's 0.76 for the runaway state, Earth's 0.294 for
+/// the temperate, the albedos the area mix's clouds are calibrated to (`water_cloud_albedo`;
+/// decision-p14-t57a-fits §1.3).
+fn at_measured_albedo(body: &DerivedBody, state: SurfaceState) -> Kelvin {
+    equilibrium_temperature(body.flux(), state.albedo(SurfaceMaterial::Rock))
+}
+
+/// The table's Earth's inputs under the batch at the equilibrium temperature `equilibrium`, its
+/// inventory and bulk as derived: what its passes give its greenhouse, with the hosts' light and
+/// history Earth's ([`earth_inputs`]).
+fn table_earth_inputs(earth: &DerivedBody, equilibrium: Kelvin) -> AtmosphereInputs {
+    AtmosphereInputs {
+        mass: Kilograms::from(earth.mass()),
+        radius: Metres::from(earth.radius()),
+        material: SurfaceMaterial::of(&earth.fractions()),
+        envelope_fraction: earth.fractions().envelope(),
+        inventory: *earth.inventory(),
+        equilibrium,
+        worst_equilibrium: equilibrium,
+        heated: equilibrium,
+        ..earth_inputs(equilibrium.value(), Insolation::Habitable)
+    }
+}
+
+/// P14.T57.a: the grey greenhouse's constants are their fits, in their order, each at its body's
+/// measured inventory and measured Bond albedo under the generator's own irradiation
+/// (decision-p14-t57a-fits §1.3–§1.4), recomputed here from the code, so that a change to what the
+/// fits read fails here with the refit:
+///
+/// - carbon dioxide on Venus at its measured inventory, given by hand ([`measured_venus`]), at the
+///   irradiation for 0.76, which the batch's passes give it: its τ at [`VENUS_SURFACE_TEMPERATURE`]
+///   less the nitrogen term as built, over √p(CO₂), 14.862;
+/// - then water on the table's Earth, whose carbon dioxide and nitrogen are Earth's, at the
+///   irradiation for 0.294: its water held by the partition on the minor branch at Manabe and
+///   Wetherald's humidity (checked at its own `T_s` under the batch), solved at
+///   [`EARTH_SURFACE_TEMPERATURE`], and its τ there less the carbon dioxide and nitrogen terms, over
+///   √p(H₂O), 4.469.
+///
+/// Each constant is held to half a unit in its second decimal. The fits read no input P14.T54.a's
+/// wiring moves. Titan's nitrogen is not refitted (decision-p14-t51-batch E1;
+/// `under_the_batch_titan_is_94_k`).
+#[test]
+fn the_greenhouse_constants_are_their_fits() {
+    let fitted = SnapshotRules::Batch.greenhouse();
+    let root = |p: f64| (p / PASCALS_PER_BAR).sqrt();
+    let nitrogen_term = |partials: &PartialPressures, equilibrium: f64| {
+        fitted.nitrogen()
+            * math::powi(NITROGEN_REFERENCE_TEMPERATURE.value() / equilibrium, 2)
+            * root(partials.of(Gas::Nitrogen).value())
+    };
+
+    let venus = measured_venus(SnapshotRules::Batch);
+    let (co2_kg, n2_kg) = venus_measured_kg();
+    assert!((venus.inventory().carbon_dioxide().value() / co2_kg - 1.0).abs() < 1e-9);
+    assert!((venus.inventory().nitrogen().value() / n2_kg - 1.0).abs() < 1e-9);
+    let air = venus.atmosphere();
+    assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
+    let partials = air.partial_pressures();
+    assert_eq!(partials.of(Gas::Water), Pascals::ZERO);
+    let t_eq = at_measured_albedo(&venus, SurfaceState::RunawayGreenhouse);
+    assert_same_bits(t_eq.value(), venus.equilibrium_temperature().value());
+    let t_eq = t_eq.value();
+    let carbon_dioxide = (needed_depth(VENUS_SURFACE_TEMPERATURE, t_eq)
+        - nitrogen_term(partials, t_eq))
+        / root(partials.of(Gas::CarbonDioxide).value());
+    eprintln!(
+        "Venus measured: {:.3} bar of CO2 and {:.4} of N2 by weight, T_eq {t_eq:.4} K: k(CO2) \
+         {carbon_dioxide:.4}",
+        partials.of(Gas::CarbonDioxide).value() / PASCALS_PER_BAR,
+        partials.of(Gas::Nitrogen).value() / PASCALS_PER_BAR,
+    );
+    assert!(
+        (GREENHOUSE_CARBON_DIOXIDE - carbon_dioxide).abs() <= 0.005,
+        "refit GREENHOUSE_CARBON_DIOXIDE at Venus's measured state: {carbon_dioxide:.3}"
+    );
+
+    let batch = table_under(SnapshotRules::Batch);
+    let earth = found(&batch, "Earth");
+    let air = earth.atmosphere();
+    assert_eq!(air.state(), SurfaceState::Temperate);
+    let partials = air.partial_pressures();
+    // The partition holds Earth's water at its humidity on the minor branch, as the fit takes it.
+    let own = water_weight_at_humidity(
+        partials,
+        water_saturation(air.surface_temperature().value()),
+    );
+    let water = partials.of(Gas::Water).value();
+    assert!(
+        (water / own - 1.0).abs() < 1e-6,
+        "{water} Pa against {own} Pa"
+    );
+    let t_eq = at_measured_albedo(earth, SurfaceState::Temperate).value();
+    let at_target = water_weight_at_humidity(partials, water_saturation(EARTH_SURFACE_TEMPERATURE));
+    let water_constant = (needed_depth(EARTH_SURFACE_TEMPERATURE, t_eq)
+        - fitted.carbon_dioxide() * root(partials.of(Gas::CarbonDioxide).value())
+        - nitrogen_term(partials, t_eq))
+        / root(at_target);
+    eprintln!(
+        "Earth: {:.3} Pa of CO2 and {:.5} bar of N2, water {at_target:.3} Pa at \
+         {EARTH_SURFACE_TEMPERATURE} K, T_eq {t_eq:.4} K: k(H2O) {water_constant:.4}",
+        partials.of(Gas::CarbonDioxide).value(),
+        partials.of(Gas::Nitrogen).value() / PASCALS_PER_BAR,
+    );
+    assert!(
+        (GREENHOUSE_WATER - water_constant).abs() <= 0.005,
+        "refit GREENHOUSE_WATER on Earth after carbon dioxide: {water_constant:.3}"
+    );
+}
+
+/// P14.T57.a: Venus at its measured inventory, given by hand ([`measured_venus`]), is 737 K ± 2%
+/// under the batch's constants; under version 22's, fitted at the median, it was 778 K (recorded).
+#[test]
+fn the_measured_venus_reaches_737_k_under_the_batch() {
+    let batch = measured_venus(SnapshotRules::Batch);
+    let t = batch.atmosphere().surface_temperature().value();
+    let held = measured_venus(SnapshotRules::Held)
+        .atmosphere()
+        .surface_temperature()
+        .value();
+    eprintln!("the measured Venus: {t:.3} K under the batch, {held:.3} K under version 22's");
+    assert!(
+        ((t - VENUS_SURFACE_TEMPERATURE) / VENUS_SURFACE_TEMPERATURE).abs() < 0.02,
+        "{t} K"
+    );
+}
+
+/// P14.T57.a: the measured Earth, the table's Earth's inputs under the batch at the generator's
+/// irradiation for Earth's measured Bond albedo, 0.294, through the passes' greenhouse and
+/// partition (`atmosphere_under` on the passes' stand-in surface), is 288 ± 2 K: the solver's fixed
+/// point against the fit's closed form, which puts it at 288.0 K. Its carbon dioxide and nitrogen
+/// are the table's Earth's.
+///
+/// The table's Earth through the batch's passes, at their stand-in surface (no basins, so no sea),
+/// is recorded, not asserted (about 290.6 K at a Bond albedo of 0.2798): P14.T54.a asserts it at its
+/// real inputs (decision-p14-t57a-fits §1.5).
+#[test]
+fn the_measured_earth_holds_288_k_under_the_batch() {
+    let batch = table_under(SnapshotRules::Batch);
+    let earth = found(&batch, "Earth");
+    let equilibrium = at_measured_albedo(earth, SurfaceState::Temperate);
+    let measured = atmosphere_under(
+        SnapshotRules::Batch,
+        &table_earth_inputs(earth, equilibrium),
+        &PassSurface::stand_in(PassLight::HottestHost),
+    );
+    assert_eq!(measured.state(), SurfaceState::Temperate);
+    for gas in [Gas::CarbonDioxide, Gas::Nitrogen] {
+        let (p, table) = (
+            measured.partial_pressures().of(gas).value(),
+            earth.atmosphere().partial_pressures().of(gas).value(),
+        );
+        assert!(
+            (p / table - 1.0).abs() < 1e-12,
+            "{gas:?}: {p} Pa against {table}"
+        );
+    }
+    let t = measured.surface_temperature().value();
+    let generated = earth.atmosphere().surface_temperature().value();
+    eprintln!(
+        "the measured Earth: {t:.3} K at T_eq {:.4} K, water {:.3} Pa; the table's Earth through \
+         the batch's passes {generated:.3} K at {:.5} (T_eq {:.4} K)",
+        equilibrium.value(),
+        measured.partial_pressures().of(Gas::Water).value(),
+        earth.albedo().value(),
+        earth.equilibrium_temperature().value(),
+    );
+    assert!(
+        (t - EARTH_SURFACE_TEMPERATURE).abs() < 2.0,
+        "the measured Earth at {t} K"
+    );
+}
+
+/// P14.T57.a: the table's Venus is a median draw of the inventory, 55–60 bar, and under the
+/// batch's constants it reaches 680–710 K, about 696 K, in place of the 735 K that version 22's
+/// constant was fitted to give it (decision-p14-moons §4.2; decision-p14-t57a-fits §3).
+#[test]
+fn the_table_s_median_venus_holds_55_to_60_bar_and_reaches_680_to_710_k() {
+    let batch = table_under(SnapshotRules::Batch);
+    let air = found(&batch, "Venus").atmosphere();
+    assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
+    let bar = air.surface_pressure().unwrap().value() / PASCALS_PER_BAR;
+    let t = air.surface_temperature().value();
+    eprintln!("the table's Venus under the batch: {bar:.3} bar at {t:.3} K");
+    assert!((55.0..60.0).contains(&bar), "{bar} bar");
+    assert!((680.0..710.0).contains(&t), "{t} K");
+}
+
+/// P14.T57.a: under the batch the table's Titan is 94 ± 3 K. It is a check only: no constant is
+/// refitted on Titan, whose Bond albedo lacks its haze until P14.T24.h (decision-p14-t51-batch
+/// §9.5, E1), and a miss here is recorded for T24.h, not cured by moving the nitrogen constant.
+/// Under the batch at 23's stand-ins it reaches 92.8 K at a Bond albedo of 0.536 (measured 0.265).
+#[test]
+fn under_the_batch_titan_is_94_k() {
+    let batch = table_under(SnapshotRules::Batch);
+    let titan = found(&batch, "Titan");
+    let t = titan.atmosphere().surface_temperature().value();
+    eprintln!(
+        "under the batch: Titan {t:.3} K at a Bond albedo of {:.4}",
+        titan.albedo().value()
+    );
+    assert!(
+        (t - TITAN_SURFACE_TEMPERATURE).abs() < 3.0,
+        "Titan at {t} K"
+    );
 }

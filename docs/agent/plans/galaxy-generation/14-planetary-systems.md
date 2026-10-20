@@ -7272,11 +7272,13 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
 #### P14.T57 The greenhouse's calibration (decision-p14-moons, 2026-10-10)
 
 - **P14.T57.a The CO₂ greenhouse constant at Venus's measured state** (22 → 23; lane
-  `p14-snapshot`, after T51.b; amends T13.c). It is held as that lane's other subtasks are, so
-  that the goldens move once, at T54.a. It follows T51.a, whose humidity moves Earth's water
-  column, which the water refit needs; T51.b, so that the fit reads the final Bond albedos and
-  T_eq; and the 21 → 22 batch's T24.f, which adds CH₄ and O₂ to T13.c's inventory
-  (decision-p14-moons §4).
+  `p14-snapshot`, after T51.b and P14.T49.i; amends T13.c). It is held as that lane's other
+  subtasks are, so that the goldens move once, at T54.a. It follows T51.a, whose humidity moves
+  Earth's water column, which the water refit needs; T51.b with P14.T49.i's infrared, so that the
+  fit reads the final Bond albedos and T_eq; and the 21 → 22 batch's T24.f, which adds CH₄ and O₂
+  to T13.c's inventory (decision-p14-moons §4; decision-p14-t49c-split §7, change 7). No
+  greenhouse constant is refitted on Titan, whose Bond albedo lacks its haze until P14.T24.h. If
+  the Titan check fails, it is recorded for T24.h (decision-p14-t51-batch §9.5, E1).
   - `GREENHOUSE_CARBON_DIOXIDE` is fitted at Venus's measured inventory: 4.69 × 10²⁰ kg of CO₂ and
     1.08 × 10¹⁹ kg of N₂, from 4.8 × 10²⁰ kg at 96.5% and 3.5% by volume (from memory), checked at
     build. It reaches 735 K (VIRA, Seiff et al. 1985, from memory) at the generator's T_eq for
@@ -20532,3 +20534,184 @@ tables::gauss_legendre`.
     - `cargo test -p hyperion-server --lib scene::core`: 17 passed, `time_an_arrival` ignored;
     - `cargo test -p hyperion-server --test scene --test scene_agree --test scene_knowledge`: 2, 1
       and 1 passed, as before.
+- **Deviations in P14.T57.a, as built (`p14-t57a`, 2026-10-19).** The greenhouse's calibration,
+  wholly behind the `p14-snapshot` lane's hold (`SnapshotRules::Batch`, `SNAPSHOT_VERSION` = 23):
+  under `Held`, in force at 22, every output is version 22's to the bit and no golden moves. The
+  rulings are decision-p14-moons §4, decision-bump-plan-after-22 §1.2, decision-p14-t51-batch §9.5
+  and E1, decision-p14-t49c-split §1.4 and §7 change 7 (applied to the entry above, with §9.5's
+  Titan sentence), decision-p14-t51a-partition §4, and **decision-p14-t57a-fits** (2026-10-19). That
+  ruling sets the measured-state rule for both bodies, the targets' definitions (288 K as an
+  emission temperature, 737 K at the mean radius) and the sources' corrections. It supersedes
+  decision-p14-moons §4.2 on Venus's 735 K, on the water estimate of 3.46 and on "the generator's
+  own T_eq". Its plan text (§7: T57.a's entry, T54.a's tests, T13.c's test (c) and the Venus Risk)
+  is the docs batch's.
+  - _Where it is._
+    - `GREENHOUSE_CARBON_DIOXIDE` is 14.86 and `GREENHOUSE_WATER` 4.47 (they were 18.5 and 2.89).
+      `GREENHOUSE_NITROGEN` and `NITROGEN_REFERENCE_TEMPERATURE` are unchanged.
+    - Version 22's constants sit in the crate-private `GreenhouseConstants::VERSION_22`, beside
+      `FITTED`, and `SnapshotRules::greenhouse` gives each rules' set.
+    - T13.c's `greenhouse` (`Held`) reads `VERSION_22`, and `partitioned_greenhouse` (`Batch`)
+      reads `FITTED`.
+    - The public `optical_depth` and the crate-private `optical_depth_terms` read the rules in
+      force, so T24.a's column reads version 22's set at 22 (P14.T51.a's fix below gives it its
+      atmosphere's).
+    - The tripwire `the_snapshot_lane_is_held_only_until_the_batch_s_bump` asserts that the set in
+      force is `VERSION_22`. Its message names `GreenhouseConstants::VERSION_22` and
+      `SnapshotRules::greenhouse` for P14.T54.a to delete.
+  - _The rule_ (decision-p14-t57a-fits §1). Each constant is fitted at its body's measured
+    inventory and measured Bond albedo, under the generator's own irradiation, in the order
+    nitrogen on Titan, carbon dioxide on Venus, then water on Earth.
+    - The equilibrium temperature is `equilibrium_temperature(flux, state.albedo(Rock))` for the
+      runaway and temperate states. Those are the albedos the area mix's clouds are calibrated to:
+      Venus's 0.76 (Haus et al. 2016, Icarus 272, 178, with no uncertainty stated; NASA's fact
+      sheet gives 0.77) and Earth's 0.294 (NASA's, through `water_cloud_albedo`).
+    - No input of the fit is a pass stand-in, so P14.T54.a refits nothing on Earth or Venus.
+  - _The sources_ (a science-checker, 2026-10-19, and the ruling's). Read: NASA's Venus and Earth
+    fact sheets, Johnson and de Oliveira 2019 in full, and Venus-GRAM's user guide. Read in
+    transcription only: VIRA's table. Not reached: Seiff et al. 1985 and von Zahn et al. 1983
+    themselves.
+    - _Venus's air:_ about 4.8 × 10²⁰ kg (NASA), 96.5 ± 0.8% CO₂ and 3.5 ± 0.8% N₂ by volume,
+      recommended below 45 km (von Zahn, Kumar, Niemann and Prinn 1983, in _Venus_, Table II, as
+      Johnson and de Oliveira 2019, Earth Space Sci. 6, 1299, compile it). At the registry's molar
+      masses (mean 43.4496 g mol⁻¹) that is 4.6917 × 10²⁰ kg of CO₂ and 1.0832 × 10¹⁹ kg of N₂,
+      which confirms the plan's figures from memory. By weight over the generator's Venus
+      (g = 8.870 m s⁻²) it is 90.422 and 2.0876 bar.
+    - _737 K:_ VIRA's 735.3 K and 92.10 bar at its altitude zero, 6,052 km (Seiff et al. 1985, Adv.
+      Space Res. 5(11), 3, doi:10.1016/0273-1177(85)90197-8, through Venus-GRAM's `VIRALow.txt`
+      and the Planetary Scientist's Companion, p. 119). Carried 0.2 km down to the 6,051.8 km mean
+      radius at VIRA's 7.6 K km⁻¹, that is 736.8 K, NASA's 737 K. The plan's "735 K at the mean
+      radius" was the datum's figure. The 6,052 km datum is read in a snippet; if Seiff et al. put
+      it at 6,051.8 km, the target returns to 735 K and 14.70 (the ruling's caveat).
+    - _288.0 K:_ the pre-industrial Earth's surface emission temperature, (S↑ ÷ σ)^¼, which is
+      what the grey `T_s` is.
+      - Route 1: Jones et al. 1999's 14.0 °C for 1961–1990, less AR6's 0.36 K, is the arithmetic
+        mean, 286.8 K. Spatial structure adds 1.3 K (Trenberth, Fasullo and Kiehl 2009: 396.4
+        against 389.2 W m⁻²), giving 288.1 K.
+      - Route 2: their 396 W m⁻², less about 0.8 K of warming since 1850–1900, gives
+        288.2–288.3 K.
+      - NASA's 288 K is the same figure. The climatology's ±0.5 K (AR6 WG1 Fig. 1.11) is about
+        ±2.5% in the water constant.
+    - _Earth's CO₂:_ the generator's 42 Pa by weight is the pre-industrial 2.2 × 10¹⁵ kg (AR6: 278.3
+      ± 2.9 ppm in 1750).
+    - _Titan:_ 93.65 ± 0.25 K at 1,467 hPa (Fulchignoni et al. 2005, Nature 438, 785).
+  - _The fits._ `the_greenhouse_constants_are_their_fits` recomputes them from the code, on
+    integration at 0e9adf71, and holds each constant to ±0.005.
+    - _Carbon dioxide._ The measured Venus is given by hand (`measured_venus`): its carbon's and
+      nitrogen's ranks are those at which T13.a's log-normal gives the measured masses,
+      z = log₁₀(M ÷ M_median) ÷ 0.5 dex, ranked by Φ through `math::erfc`, so its inventory lies
+      within 10⁻⁹ of them.
+      - Derived about the Sun under `Batch`, it is a runaway greenhouse at A = 0.76 under a cloud of
+        1, the irradiation at 0.76 to the bit: T_eq 229.0585 K, with no water and 1,095 Pa of argon,
+        which enters no τ term.
+      - 737 K needs τ = 141.6. Less the nitrogen term's 0.2442, that gives k = 14.8616, so 14.86.
+      - At 14.86 the measured Venus reaches 736.98 K, against 778.05 K under 18.5.
+    - _Water._ The table's Earth under `Batch`, whose air is Earth's per unit mass: 42.084 Pa of
+      CO₂ and 0.74739 bar of N₂ by weight, with 1,277 Pa of argon.
+      - Its T_eq is the irradiation at 0.294: 255.1385 K.
+      - Its water lies on the partition's minor branch, x_w P = 0.77 p_sat(T_s) on the registry's
+        curve, checked to 10⁻⁶ at its own `T_s`. At 288 K that is 837.20 Pa by weight, 0.495 of
+        p_sat (1,689.27 Pa).
+      - 288 K needs τ = 0.8314. Less CO₂'s 0.3048 and N₂'s 0.1177, the water's 0.4089 gives
+        k = 4.4690, so 4.47.
+  - _Deviations._
+    - _The water constant is 4.47_, not decision-p14-moons §4.2's estimate of 3.46, for two
+      reasons. The partition holds the water's partial pressure at the humidity, not its column
+      weight: 0.495 p_sat by weight (0.77 × μ_w ÷ μ̄), where version 22 held the column weight at
+      p_sat. And the fit's T_eq is the irradiation at 0.294 (decision-p14-t57a-fits §1). At a given
+      temperature the batch's water term, 4.47 × √0.495 = 3.15 √p_sat, is 9% stronger than version
+      22's 2.89, and its CO₂ term is 20% weaker (the ruling's D4).
+    - _The lane's first lean was overruled._ It fitted water at the passes' stand-in Earth (A
+      0.2798, T_eq 256.41 K: 4.05), with T54.a refitting. That would absorb the generated cover's
+      offset into a radiative constant (decision-p14-t57a-fits §1.2).
+    - _"Given by hand" goes through the volatile ranks_ (`PlacedBody::with_volatiles`), so that the
+      passes give the measured Venus its own T_eq.
+    - _Where the tests are._ They sit in `derive/atmosphere/tests.rs`, beside T13.c's table tests,
+      not in `derive/mod.rs`. `hooks/surface/tests.rs` reads the constants in force
+      (`greenhouse()`), and `system/tests.rs` holds the sample's measurement.
+    - _T13.c's "within eight per cent"_ takes the measured Venus under the rules in force, at
+      737 K. At 22 it is 778.05 K, 5.6% over and inside 8%.
+    - _P14.T51.a's pin is restated._ `the_batch_holds_earth_s_water_and_titan_s_methane_on_the_minor_branch`
+      held the partition's cooling of an Earth at 3–8 K under version 22's constants, "which
+      P14.T57.a's water refit takes up". It now holds that Earth, at T_eq 255 K, within 1 K of
+      288 K and 0–3 K below version 22's: 287.73 against 289.70 K.
+    - _T53.a's pin of the dry 2-au Earth_ (`a_dry_earth_beyond_the_maximum_greenhouse_still_runs_away_past_its_cold_trap`)
+      reads the batch's constants in its by-hand τ, and still runs away above 500 K.
+    - _A first build was reverted._ It threaded the rules into T24.a's column (`StepColumn`), which
+      broke two T24.a tests that switch only the zonal solver on version 22's atmospheres. P14.T51.a's
+      fix below gives the column its atmosphere's rules instead.
+  - _Tests_ (in `planetary::derive::atmosphere::tests`):
+    - `the_greenhouse_constants_are_their_fits`;
+    - `the_measured_venus_reaches_737_k_under_the_batch`, 737 K ± 2%;
+    - `the_measured_earth_holds_288_k_under_the_batch`: the table's Earth's inputs at the
+      irradiation for 0.294, through the passes' greenhouse and partition, 288 ± 2 K (288.006 K),
+      its CO₂ and N₂ the table's to 10⁻¹². The table's Earth through the passes is printed, not
+      asserted: P14.T54.a asserts it;
+    - `the_table_s_median_venus_holds_55_to_60_bar_and_reaches_680_to_710_k`;
+    - `under_the_batch_titan_is_94_k`, a check (E1);
+    - T13.c's `the_table_s_surface_temperatures_are_within_eight_per_cent`, on the measured Venus;
+    - the tripwire's new assertion;
+    - in `planetary::system::tests`, `the_batch_s_surface_temperatures_over_the_sample_are_recorded`
+      (ignored, a measurement run by name).
+
+    The re-check of T24.e's Venus test on this task's Venus stays P14.T54.b's, held by T24.e's
+    tripwire, as the entry says. The acceptance, `cargo test -p hyperion-sim planetary::derive`,
+    and the lane's wider filter (`planetary::{derive, chem::partition, hooks, system,
+moons::regular, record}`) pass: 624 tests.
+
+  - _Measured under `Batch`_ (the table and the sample, debug builds; for P14.T54.a's bless note):
+    - _The table._ Moves are given as before T57.a → after, with version 22's value in brackets.
+      - The median Venus (57.843 bar): 735.07 → 696.33 K (735.07 K).
+      - The measured Venus: 778.05 → 736.98 K.
+      - Earth through the stand-in passes: 286.64 → 290.57 K (289.95 K), at A 0.27983 and T_eq
+        256.41 K. The measured Earth is at 288.006 K.
+      - Mars: 197.48 → 196.61 K (215.06 K), at A 0.4993 (decision-p14-t51-batch E3, T54.a's).
+      - Titan: 92.75 → 92.75 K (93.99 K). Its carbon is methane and its water is frozen, so no
+        term it reads moves.
+      - Ganymede, a snowball under the batch: 117.02 K. The airless bodies do not move.
+    - _The sample_ (`the_batch_s_surface_temperatures_over_the_sample_are_recorded`): the first 60
+      systems of the 400 at the solar circle, generated whole, 970 planets, members and moons.
+      T57.a's own moves (`Batch` before → after) exceed 2 K on 65 of the 970:
+      - 42 of the 50 runaway greenhouses (median −5.28%; the plan estimated about 5.6%);
+      - 12 of the 24 temperate worlds (median −2.11 K, from −51.3 to +1.98 K);
+      - all 7 magma oceans (median −5.31%);
+      - 4 of the 32 snowballs (to −22.0 K, −5.1%);
+      - none of the 796 airless and 61 enveloped bodies.
+
+      Four magma oceans, under 14–155 bar of CO₂, fall below the 1,394 K solidus and take the
+      runaway state. The cloud's 0.76 then cuts their T_eq: 1,514–1,537 → 1,031–1,046 K, a state
+      change at a threshold that reads `T_s`, as the plan expects. The largest temperate move,
+      272.05 → 220.72 K (3.35 bar with 690 Pa of CO₂, T_eq 178.9 K), ices over in the stand-in's
+      step cover. Through the whole hold at 23 (version 22 → `Batch`), 475 of the 970 move by more
+      than 2 K, against 427 before T57.a. Version 22's columns are identical in both runs.
+
+    - _Against the PRE-23 note "Earth −5 K"._ Under version 22's constants the partition put the
+      table's Earth 3.3 K below 22: 286.64 against 289.95 K. T51.a's −5 K was at 22's T_eq of
+      255.14 K, before T51.b's area mix and T49.i's bins warmed it by 1.27 K. The measured Earth is
+      now at 288.0 K. The table's Earth through the stand-in passes is at 290.57 K, 0.62 K above
+      22, until T54.a's basins.
+    - _Goldens at 23_ (the plan's list stands): `planetary/derive_body`'s Venus and Earth rows,
+      and every `planetary/systems` golden with a CO₂- or water-bearing atmosphere. R08's 58-bar
+      Venus fixture takes about 696 K. golden_diff reports nothing to reconcile at 22.
+- **Deferred findings (2026-10-13 rule)**, from P14.T57.a and decision-p14-t57a-fits §6:
+  - _D1, Venus's N₂ profile._ Mogul, Limaye and Way 2025 (GRL 52, e2025GL118909) find 2.49 ±
+    0.10% below 15 km and 5.21 ± 0.18% at 51–59 km, non-uniformly mixed between. Lebonnois and
+    Schubert 2017 propose a total 15% below the usual. A bulk anywhere in 2.5–3.5% moves the CO₂
+    fit by under 0.3%. NASA's "3.5% near surface" is contradicted below 15 km. Re-read when the
+    full text or DAVINCI's profile exists.
+  - _D2, the albedo's epoch._ Earth's 0.294 is a 2000s measurement, about 0.004 brighter than a
+    natural Earth's (AR6's aerosol and land-use terms). It is P14.T24.h's, which re-splits Earth's
+    cloud and refits in this order.
+  - _D3, the record's mean surface temperature is a flux mean_, about 1.3 K above the area mean
+    for Earth-like contrasts. It is one doc line, T54.a's.
+  - _D4, the batch's water term is 9% stronger and its CO₂ term 20% weaker_ than version 22's:
+    for T54.a's bless note, through the sample's measurement above.
+  - _D5, the grey form's limits_ (one exponent for Venus and Mars, no methane or H₂ collision term)
+    stay T53.a's.
+  - _VIRA's datum_ is read in a snippet. If Seiff et al. 1985 put it at 6,051.8 km, the target
+    returns to 735 K and 14.70.
+  - _The mass of Venus's air._ VIRA's 92.10 bar, integrated over the spherical shell, gives
+    4.82 × 10²⁰ kg, 0.9% above p_s A ÷ g. 4.8 × 10²⁰ is kept: at 4.82 × 10²⁰ k would fall by
+    0.23%.
+  - _The stand-ins' state flips._ The four magma oceans that become runaway greenhouses, and the
+    temperate worlds that ice over in the step cover, are bistable between their states' albedos
+    at the passes' stand-ins. P14.T54.a's cold profile and real cover re-check them.
