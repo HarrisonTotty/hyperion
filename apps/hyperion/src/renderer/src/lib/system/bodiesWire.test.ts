@@ -1049,6 +1049,62 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
     ).toBe("condensate unusable");
   });
 
+  it("reads a condensate's layer, and an absent one as not modelled (P14.T54.a)", () => {
+    const surface = okSection(
+      recordOf(
+        earthWithSurface({
+          ...earthSurface(),
+          condensates: [
+            {
+              substance: "H2O",
+              phase: "liquid",
+              reservoir_gel_m: 2_600,
+              area_fraction: 0.71,
+              seasonal: false,
+            },
+            { substance: "Ar", phase: "solid", area_fraction: 0.01, seasonal: true },
+          ],
+        }),
+      ).surface,
+    );
+
+    expect(surface.condensates).toEqual({
+      kind: "value",
+      value: [
+        {
+          substance: "H2O",
+          phase: "liquid",
+          reservoirGelM: 2_600,
+          areaFraction: 0.71,
+          seasonal: false,
+        },
+        {
+          substance: "Ar",
+          phase: "solid",
+          reservoirGelM: null,
+          areaFraction: 0.01,
+          seasonal: true,
+        },
+      ],
+    });
+  });
+
+  it("refuses a surface condensate whose layer is negative", () => {
+    expect(
+      surfaceFault({
+        condensates: [
+          {
+            substance: "CO2",
+            phase: "solid",
+            reservoir_gel_m: -0.2,
+            area_fraction: 0.02,
+            seasonal: true,
+          },
+        ],
+      }),
+    ).toBe("condensate unusable");
+  });
+
   it.each<[string, Partial<SurfaceModifiersDto>]>([
     ["whose maturity is not a fraction", { maturity: 1.5 }],
     ["whose weathering rate is negative", { weathering_rate: -1 }],

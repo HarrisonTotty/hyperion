@@ -2,12 +2,14 @@
 import type { SubstancePhaseDto } from "./SubstancePhaseDto";
 
 /**
- * One condensate at a surface (plan 14, P14.T51.a's partition). Absent from the wire, in its
- * list, until P14.T51.a, which may reshape it.
+ * One condensate at a surface (plan 14, P14.T51.a's partition): a substance in one phase, with
+ * its share of the substance's reservoir at the surface, the area it covers and whether it is
+ * seasonal. Sent from P14.T54.a's batch.
  */
 export type SurfaceCondensateDto = { 
 /**
- * The substance: a key of the substance registry.
+ * The substance: a key of the substance registry, for a liquid the solution it lies as
+ * (`ch4_c2h6_n2` for a methane sea under nitrogen).
  */
 substance: string, 
 /**
@@ -15,14 +17,25 @@ substance: string,
  */
 phase: SubstancePhaseDto, 
 /**
- * Its condensed reservoir as a global equivalent layer, m, not negative.
+ * Its condensed reservoir as a global equivalent layer, m, not negative: its mass over the
+ * whole surface over its grain density in its phase at the temperature it lies at, and 0 for a
+ * supercritical fluid. On a body whose water froze, the whole frozen water the partition
+ * holds, shell and deeper ice included, until P14.T53.c divides it between the condensate,
+ * the crust and the shell (decision-pre-23-review item 12).
+ *
+ * Absent where the registry has not read the phase's density (argon's ice and oxygen's β ice
+ * among them), so that a reader takes the layer as not modelled, never as none. Optional on
+ * the wire, as a ring's `normal` is.
  */
-reservoir_gel_m: number, 
+reservoir_gel_m?: number, 
 /**
- * The share of the surface it covers, in `[0, 1]`.
+ * The share of the surface it covers, in `[0, 1]`: a liquid's by its volume over the basins,
+ * a solid's the climate's cold area below its edge, capped by its mass; 0 for a supercritical
+ * fluid, which is the air at the surface.
  */
 area_fraction: number, 
 /**
- * Whether it is seasonal: the warmest zone rises above its frost point.
+ * Whether it is seasonal: the warmest zone takes this phase off the surface, melting or
+ * subliming a solid and boiling a liquid.
  */
 seasonal: boolean, };

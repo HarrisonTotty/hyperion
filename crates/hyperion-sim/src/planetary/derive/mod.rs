@@ -112,10 +112,11 @@ pub use radius::{
 pub use rotation::tidal_locking_time;
 
 use crate::orbit::KeplerElements;
+use crate::planetary::chem::inventory::{ElementInventory, InventoryInputs, element_inventory};
 use crate::planetary::derive::atmosphere::{
     AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, PassLight, PassSurface,
     SurfaceMaterial, VolatileDraws, VolatileInventory, atmosphere_under, energy_limited_loss,
-    formation_temperature, volatile_inventory,
+    formation_temperature,
 };
 use crate::planetary::derive::composition::{
     SolveCompositionError, dry_composition, formed_with_envelope,
@@ -676,7 +677,7 @@ pub struct DerivedBody {
     albedo: BondAlbedo,
     equilibrium_temperature: Kelvin,
     effective_temperature: Option<Kelvin>,
-    inventory: VolatileInventory,
+    inventory: ElementInventory,
     atmosphere: Atmosphere,
     atmosphere_passes: u32,
     convergence: Convergence,
@@ -841,10 +842,21 @@ impl DerivedBody {
         &self.atmosphere
     }
 
-    /// The volatile inventory the atmosphere was derived from (P14.T13.a), at the time: what
-    /// P14.T23's [`BulkComposition`](crate::planetary::hooks::BulkComposition) holds.
+    /// The volatile inventory the atmosphere was derived from (P14.T13.a), at the time: the stored
+    /// carriers of the body's [`element_inventory`](Self::element_inventory), its view
+    /// ([`ElementInventory::volatiles`]).
     #[must_use]
     pub const fn inventory(&self) -> &VolatileInventory {
+        self.inventory.volatiles()
+    }
+
+    /// The element inventory at the time (P14.T50.a), what P14.T23's
+    /// [`BulkComposition`](crate::planetary::hooks::BulkComposition) holds: built by
+    /// [`element_inventory`](fn@element_inventory) from the inputs the atmosphere's inventory
+    /// reads, so that its carriers are that inventory to the bit
+    /// ([`inventory`](Self::inventory)).
+    #[must_use]
+    pub const fn element_inventory(&self) -> &ElementInventory {
         &self.inventory
     }
 
@@ -1364,7 +1376,7 @@ impl PassBody<'_> {
             radius: bulk.radius,
             material: SurfaceMaterial::of(&bulk.fractions),
             envelope_fraction: bulk.fractions.envelope(),
-            inventory: bulk.inventory,
+            inventory: *bulk.inventory.volatiles(),
             formed: bulk.side,
             equilibrium: irradiated,
             worst_equilibrium: equilibrium_temperature(sky.peak_flux, albedo),
@@ -1655,9 +1667,9 @@ fn envelope_escape(
     }
 }
 
-/// What a body's volatile inventory and atmosphere read (T13; P14.T50.c; P14.T56.c and its
+/// What a body's inventory and atmosphere read (T13; P14.T50.a, T50.c; P14.T56.c and its
 /// follow-up): the bulk its air is weighed at, and the side of the snow line its volatiles formed
-/// on with the inventory they give.
+/// on with the element inventory they give.
 #[derive(Debug, Clone, Copy)]
 struct AirBulk {
     /// The mass its air is weighed at.
@@ -1669,8 +1681,8 @@ struct AirBulk {
     /// The side of the snow line its volatiles formed on, which its carbon's carrier follows: its
     /// own, or a captured or giant-impact moon's parent's (P14.T56.c).
     side: SnowLineSide,
-    /// Its volatile inventory.
-    inventory: VolatileInventory,
+    /// Its element inventory, whose carriers its atmosphere reads.
+    inventory: ElementInventory,
 }
 
 impl PlacedBody {
@@ -1679,11 +1691,15 @@ impl PlacedBody {
     ///
     /// - Its bulk is the one [`with_bulk`](Self::with_bulk) states, at its placed mass, where it
     ///   has one (a moon's own, P14.T56.c's follow-up), and `solved` otherwise.
-    /// - Its inventory is [`volatile_inventory`] with its ranks at that mass and those
-    ///   fractions, at the side and formation temperature of its
-    ///   [`volatile_zone`](Self::volatile_zone) where it has one, and otherwise at `formed`, the
-    ///   side of `disc`'s snow line it formed on, and its formation temperature in `disc`
-    ///   ([`formation_temperature`]).
+    /// - Its inventory is [`element_inventory`](fn@element_inventory) with its ranks at that mass
+    ///   and those fractions (P14.T50.a), at its [`volatile_zone`](Self::volatile_zone)'s side,
+    ///   distance and snow line where it has one (P14.T56.c: a captured or giant-impact moon's
+    ///   parent's zone of the star's disc), and otherwise at `formed`, the side of `disc`'s snow
+    ///   line it formed on, its formation distance and `disc`'s snow line. Its carriers are
+    ///   therefore [`volatile_inventory`](crate::planetary::derive::atmosphere::volatile_inventory)'s
+    ///   at that side and the [`formation_temperature`] of that distance and snow line, to the bit,
+    ///   which is [`FormationZone::temperature`] for a zone; its ΔIW reads the same distance and
+    ///   snow line.
     #[must_use]
     fn air_of(
         &self,
@@ -1696,15 +1712,19 @@ impl PlacedBody {
             Some(bulk) => (self.mass, bulk.radius, bulk.fractions.over(solved.2)),
             None => (solved.0, Metres::from(solved.1), *solved.2),
         };
-        let (side, temperature) = match self.volatile_zone {
-            Some(zone) => (zone.side(), zone.temperature()),
-            None => (
-                formed,
-                formation_temperature(self.formation_distance, disc.snow_line()),
-            ),
+        let (side, formation_distance, snow_line) = match self.volatile_zone {
+            Some(zone) => (zone.side(), zone.distance(), zone.snow_line()),
+            None => (formed, self.formation_distance, disc.snow_line()),
         };
-        let inventory =
-            volatile_inventory(mass, &fractions, side, temperature, &self.volatiles, age);
+        let inventory = element_inventory(&InventoryInputs {
+            mass,
+            fractions,
+            formed: side,
+            formation_distance,
+            snow_line,
+            draws: self.volatiles,
+            age,
+        });
         AirBulk {
             mass: Kilograms::from(mass),
             radius,
@@ -3187,6 +3207,102 @@ mod tests {
         assert_same_bits(a.radius().value(), b.radius().value());
         assert_eq!(a.fractions(), b.fractions());
         assert_same_bits(a.surface_gravity().value(), b.surface_gravity().value());
+    }
+
+    /// P14.T50.a, wired by P14.T54.a: a derived body holds the element inventory of the inputs its
+    /// atmosphere's inventory reads, and its carriers, the view the atmosphere reads, are
+    /// `volatile_inventory`'s of those inputs to the bit, the inventory version 22 read. So for a
+    /// body that keeps its own zone, inside the snow line, between it and the ammonia line and
+    /// beyond both, at the median and the extreme ranks; for one whose volatiles formed in another
+    /// zone (P14.T56.c, a captured moon's), whose ΔIW then reads that zone too; and for one given
+    /// its own bulk, read at its placed mass and that bulk's fractions.
+    #[test]
+    fn a_body_s_element_inventory_keeps_its_atmosphere_s_carriers_to_the_bit() {
+        use crate::planetary::derive::atmosphere::volatile_inventory;
+        let disc = solar_disc();
+        let line = disc.snow_line();
+        let r = |u: f64| UnitUniform::new(u).unwrap();
+        let extreme = VolatileDraws {
+            water: r(1e-6),
+            carbon: r(0.999_999),
+            nitrogen: r(0.841_344_746_068_542_9),
+            sulphur: r(0.158_655_253_931_457_05),
+            chlorine: r(0.999_999),
+            redox: r(1e-6),
+        };
+        let far = FormationZone::new(Metres::new(9.58 * METRES_PER_AU), line).unwrap();
+        let given = MassFractions::solid(0.0, 0.6, 0.4);
+        let titan_bulk = GivenBulk::new(Metres::new(2.575e6), GivenFractions::Exactly(given));
+        let check = |body: &PlacedBody,
+                     zone: Option<FormationZone>,
+                     mass: EarthMasses,
+                     fractions: MassFractions| {
+            let derived = derive(body, &disc).unwrap();
+            let (formed, formation_distance, snow_line) = zone
+                .map_or((derived.formed(), body.formation_distance(), line), |z| {
+                    (z.side(), z.distance(), z.snow_line())
+                });
+            let inputs = InventoryInputs {
+                mass,
+                fractions,
+                formed,
+                formation_distance,
+                snow_line,
+                draws: *body.volatiles(),
+                age: SOLAR_AGE,
+            };
+            assert_eq!(*derived.element_inventory(), element_inventory(&inputs));
+            let carriers = volatile_inventory(
+                mass,
+                &fractions,
+                formed,
+                formation_temperature(formation_distance, snow_line),
+                body.volatiles(),
+                SOLAR_AGE,
+            );
+            let view = derived.inventory();
+            for (a, b) in [
+                (view.water(), carriers.water()),
+                (view.carbon_dioxide(), carriers.carbon_dioxide()),
+                (view.nitrogen(), carriers.nitrogen()),
+                (view.argon(), carriers.argon()),
+            ] {
+                assert_same_bits(a.value(), b.value());
+            }
+            assert_eq!(view, derived.element_inventory().volatiles());
+            derived
+        };
+        let mut checked = 0;
+        for (kg, a_au) in [
+            (EARTH_MASS_KG, 1.0),
+            (0.107 * EARTH_MASS_KG, 1.524),
+            (EARTH_MASS_KG, 3.0),
+            (1.3452e23, 6.0),
+            (1.3452e23, 9.58),
+        ] {
+            for draws in [VolatileDraws::MEDIAN, extreme] {
+                let own = placed(kg, a_au, 0.0, 0.5).with_volatiles(draws);
+                let solved = derive(&own, &disc).unwrap();
+                let at_home = check(&own, None, solved.mass(), solved.fractions());
+                let moved = check(
+                    &own.with_volatiles_from(far),
+                    Some(far),
+                    solved.mass(),
+                    solved.fractions(),
+                );
+                // Inside the snow line, where the redox trend still varies with distance.
+                if a_au < 2.0 {
+                    assert_ne!(
+                        at_home.element_inventory().mantle_delta_iw(),
+                        moved.element_inventory().mantle_delta_iw(),
+                        "{a_au} au"
+                    );
+                }
+                check(&own.with_bulk(titan_bulk), None, own.mass(), given);
+                checked += 3;
+            }
+        }
+        assert_eq!(checked, 30);
     }
 
     /// P14.T56.c's follow-up: a body given its own bulk ([`PlacedBody::with_bulk`]) has its

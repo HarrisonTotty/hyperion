@@ -3,6 +3,7 @@
 //! - [`inventory`]: a body's [`ElementInventory`](inventory::ElementInventory), its volatile and
 //!   redox-active elements by mass and reservoir, of which P14.T13's
 //!   [`VolatileInventory`](crate::planetary::derive::atmosphere::VolatileInventory) is the view.
+//!   Every derived body holds one from P14.T54.a, and so does its bulk composition.
 //! - [`redox`]: the mantle's one redox figure, ΔIW, and its banding,
 //!   [`RedoxClass`](redox::RedoxClass).
 //! - [`envelope_abundances`]: a gas envelope's elements relative to hydrogen

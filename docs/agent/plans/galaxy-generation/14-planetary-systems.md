@@ -21756,3 +21756,133 @@ planetary::record` (624 tests at T57.a's commit).
         `formation_golden`), the lib's other goldens (`moon_tides`, `moon_volatiles` and
         `partition` among them), and the server's `scene_systems`, `system_bodies` and
         `systems_in_range`.
+  - _B4, the record and the wire_ (decision-pre-23-review items 12 and 24 and "For main" item 4;
+    P14.T50.a's and T51.a's part 2 records; T56.c's "For T54.a"). A checkpoint at 22:
+    `GENERATOR_VERSION` stays 22, and the goldens that move re-bless at header 22 in the same
+    commit. The crust stays `NotModelled` on the record and absent on the wire until Batch C, with
+    the crust and optics tripwires, and the holds at 24 stay.
+    - _The record's condensates._ `record::Surface` holds P14.T51.a's published
+      `chem::partition::Condensates`, `Modelled::Ok` on every record's surface, and
+      `record::Condensates`, the uninhabited placeholder, goes. `Surface::new` takes them after
+      the figures, and `published_surface` passes the ones `with_partition` published, which the
+      figures' liquids and ices already read, in place of dropping them; the rebuild test
+      (`a_surface_holds_a_solid_state_and_its_conditions_regime`) rebuilds with them. No value is
+      computed anew: the entries are the partition's as they were.
+    - _The wire's contract._ The server fills `condensates` (`convert/planetary.rs`'s
+      `condensates`, through `later(...)`): a list from every server of this batch, never absent
+      or `null`, the record's entries in their order, each substance its registry key, its phase
+      `solid`, `liquid` or `supercritical`, its layer, area and seasonal flag the record's to the
+      bit. Its shape is first sent `Ok` here, so it is fixed from this commit: a change from now
+      bumps `PROTOCOL_VERSION`, as the protocol module's doc now says.
+      - `SurfaceCondensateDto.reservoir_gel_m` is `Option<f64>`, ring `normal`'s pattern
+        (`#[serde(default, skip_serializing_if = "Option::is_none")]`, `#[ts(optional)]`): absent
+        where the registry has not read the phase's density, which a reader takes as not
+        modelled. A `null` decodes as absent. Its doc and the sim's `reservoir_gel` carry item
+        12's sentence: on a body whose water froze, the whole frozen water the partition holds,
+        shell and deeper ice included, until P14.T53.c divides it between the condensate, the
+        crust and the shell.
+      - The DTO's other docs follow the sim's: `substance` names the solution a liquid lies as,
+        `area_fraction` is a liquid's by its volume over the basins and a solid's cold area below
+        its edge (0 for a supercritical fluid), and `seasonal` is the per-phase flag (the warmest
+        zone takes the phase off). `BodySurfaceDto.condensates` is "sent from P14.T54.a's batch",
+        its ties by registry order, then phase.
+      - `just gen-protocol` regenerated `SurfaceCondensateDto.ts` and `BodySurfaceDto.ts`. The
+        client's `toCondensates` checks a layer only where one is sent, and
+        `SurfaceCondensate.reservoirGelM` is `number | null`, `null` for an absent layer.
+    - _`ElementInventory`_ (T50.a's record). `DerivedBody` and `BulkComposition` hold an
+      `ElementInventory` in place of a `VolatileInventory`, each with an `element_inventory()`
+      accessor (and `DerivedMoon`'s, its body's). `inventory()` stays on all three as the view,
+      `ElementInventory::volatiles`, so its readers do not change. `PlacedBody::air_of` builds it
+      by `element_inventory(&InventoryInputs { .. })` at the mass and fractions the air reads (a
+      given bulk's at the placed mass), at the side, distance and snow line of the body's
+      `volatile_zone` where it has one (a captured or giant-impact moon's parent's zone, as T56.c
+      asked) and otherwise at the side it formed on, its formation distance and its disc's snow
+      line; the atmosphere reads `*inventory.volatiles()`. So a captured moon's ΔIW reads its
+      parent's zone, and a regular moon's its nursery. `InventoryInputs`' docs say so.
+      - _The carriers to the bit, by construction:_ `element_inventory`'s carriers are
+        `volatile_inventory` at `formation_temperature(distance, snow_line)`, the function and
+        arguments the old `air_of` called (`FormationZone::temperature` is
+        `formation_temperature` of its distance and snow line).
+      - _And tested:_ `a_body_s_element_inventory_keeps_its_atmosphere_s_carriers_to_the_bit`
+        (derive; 30 bodies: an Earth at 1 au, a Mars at 1.524 au, an Earth at 3 au between the
+        snow and ammonia lines, a Titan mass at 6 and 9.58 au, each at the median and the extreme
+        ranks, each also with its volatiles from 9.58 au and with a given bulk) holds each
+        derived body's whole inventory equal to `element_inventory` of its inputs and each
+        carrier to `volatile_inventory`'s by `assert_same_bits`, and a moved zone's ΔIW apart
+        from the body's own inside the snow line (beyond it the redox trend is flat, so the two
+        agree). `the_carriers_are_today_s_to_the_bit` now also holds the table's eight bodies'
+        whole inventories, and `every_moon_s_inventory_is_its_own_ranks_at_its_own_bulk` every
+        sample moon's bulk composition's element inventory, its carriers the view. No golden that
+        pins an atmosphere, a surface or a figure moved (below).
+    - _D3's doc lines_ (item 24), on `SurfaceConditions::mean_surface_temperature` and
+      `BodySurfaceDto.mean_surface_temperature_k`: "the surface's emission mean, (⟨σT⁴⟩ ÷ σ)^¼,
+      about 1.3 K above the area mean for Earth-like contrasts (decision-p14-t57a-fits §2.2)".
+    - _The tests:_
+      - sim, `the_record_s_surface_holds_its_published_condensates` (60 systems, 893 surfaces,
+        441 entries, 41 supercritical, 115 with no layer, every one argon's ice): at most eight,
+        each substance and phase once in `publish`'s order, areas fractions, reservoirs and layers
+        not negative, a supercritical fluid covering nothing, every entry with an area among the
+        figures' lists and every listed substance but water with its entry; and "an Earth's
+        `condensates` holds `H2O`": each of the sample's 4 temperate worlds with liquid water and
+        a water ocean holds a liquid `H2O` entry with a reservoir, a layer and an area;
+      - server, `every_surface_sends_its_record_s_condensates` (the golden systems' 341
+        surfaces, 109 entries, 28 with no layer, 1 Earth): the record's entries to the bit, and
+        the Earth's `H2O` liquid with a layer; `every_key_the_server_sends_is_a_registry_key`
+        takes the condensates' keys ("every present planet's keyed members hold registry keys
+        only"); `the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed` drops the
+        condensates from its absent list;
+      - protocol, `a_condensate_s_layer_is_optional_on_the_wire` (absent and `null` decode
+        alike, a value round-trips), and the fixture's layer `Some(0.2)`;
+      - client, a condensate's layer read and an absent one `null`, and a negative layer
+        refused.
+    - _An Earth's condensates as published_ (the sample's four, at the epoch):
+      `02000b2cdfff0000.0200` (274.8 K, 64.6 kPa) holds `H2O` liquid, 3.78 × 10⁷ kg m⁻², a
+      37.8 km layer over the whole surface, perennial, and `H2O` solid, 1.01 × 10⁶ kg m⁻², 1.11 km
+      over 0.573, seasonal; `02000b2ce0000001.0200` (279.9 K) the same pair, a 7.74 km sea and
+      1.10 km of ice over 0.573; `01ffeb2ce0000000.0300` (277.7 K, 1.28 bar) its ice, 183 m over
+      0.095, seasonal, and a liquid of 2.9 × 10⁻¹¹ kg m⁻² over 0.280 (below);
+      `01fffb2be0000001.0100` (282.9 K, 4.19 bar) a 20.9 m sea over 0.030, perennial. The two
+      water worlds' sea covers the whole surface under its ice, the overlap T24.b's ocean and ice
+      fractions already hold.
+    - _Moved goldens_, re-blessed at header 22 (`golden_diff.py`: 11 extended only, none
+      changed, the version not bumped):
+      - `planetary/systems`: `close_binary` (72 new), `fallback_black_hole` (112), `filler_a`
+        (8), `filler_b` (200), `filler_c` (120), `halo_star` (24), `hierarchical_triple` (184),
+        `hot_jupiter` (8), `m_dwarf_resonant_chain` (72), `subgiant` (56) and `wide_binary` (16):
+        `write_surface` now pins each record surface's published condensates (substance, phase
+        and seasonal flag; reservoir, layer or `none`, and area), at the epoch and at +H, so that
+        the bump's bless note can attribute their moves. The values are the partition's that the
+        base already computed and fed to the liquids and ices, so nothing moved. The other four
+        (`eccentric_giant`, `red_giant`, `solar_like`, `t_tauri`) publish none: their surfaces
+        are runaways, magma oceans and airless rocks, or there are none.
+      - The rest hold: `planetary_golden`'s other tests, `planetary_moons_golden` and
+        `planetary_derive_golden`; the lib's goldens (`derive_body`, `moon_volatiles`,
+        `moon_tides`, `chem_values`, `chem_draws`, `partition`, `surface_conditions`,
+        `surface_conditions_published`, `global_figures`, `atmosphere_speciation`,
+        `vertical_structure`, `crust`, `envelope_abundances`, `impactors` and `registry`, each run
+        by name); and the server's `system_bodies`. The other integration targets were not run
+        here.
+    - _Files:_ `planetary/{record, system}.rs` and `system/tests.rs`,
+      `planetary/chem/{mod, inventory, partition}.rs` and `chem/inventory/tests.rs`,
+      `planetary/derive/mod.rs`, `planetary/hooks/{mod, surface}.rs`, `planetary/moons/regular.rs`,
+      `tests/planetary_golden.rs` and its 11 goldens; `hyperion-protocol`'s
+      `planetary/record/surface.rs`; `hyperion-server`'s `convert/planetary.rs`;
+      `packages/protocol/src/generated/{SurfaceCondensateDto, BodySurfaceDto}.ts`; the client's
+      `lib/system/{model, bodiesWire, bodiesWire.test}.ts`.
+    - _Deferred_ (2026-10-13 rule):
+      - _Water's liquid keeps the potential ocean's area at any mass._ `water_parts` gives the
+        liquid T24.b's `potential_ocean` as its area and the reservoir less the ice sheet as its
+        mass, so where the sheet takes almost all of it the liquid is a residue over a real
+        area: `01ffeb2ce0000000.0300` publishes 2.9 × 10⁻¹¹ kg m⁻² of liquid water over 28% of
+        its surface beside 183 m of ice, and the record's `ocean_fraction` reads the same 0.28.
+        The ocean and the ice are both read from the whole surface water. It was so before B4;
+        the wire now shows it. For main: P14.T53.c, which divides a body's water, or a T51.a
+        follow-up that takes the liquid's area from its own volume on the basins, as the other
+        liquids'.
+      - _Argon's ice has no layer_: 115 of the sample's 441 entries (26%) are argon ice with no
+        solid density in the registry (T51.a part 2's finding, p14-registry), so the wire sends
+        no `reservoir_gel_m` for them; the golden systems pin 56 (`hot_jupiter`'s only entries
+        among them, one body's at the epoch and at +H).
+      - The water the figures list with no condensate entry (T24.b's ice where the partition
+        holds no water solid, and the ocean under ice) is not on the wire's condensates, which
+        hold the partition's alone.

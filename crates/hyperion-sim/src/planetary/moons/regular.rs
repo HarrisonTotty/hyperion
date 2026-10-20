@@ -1033,12 +1033,20 @@ struct TideState {
 }
 
 impl DerivedMoon {
-    /// The moon's volatile inventory at the time, from P14.T16's
-    /// [`derive_body`] (P14.T13.a), which P14.T23's
-    /// [`BulkComposition`](crate::planetary::hooks::BulkComposition) holds.
+    /// The moon's volatile inventory at the time, from P14.T16's [`derive_body`] (P14.T13.a): the
+    /// stored carriers of its [`element_inventory`](Self::element_inventory).
     #[must_use]
     pub const fn inventory(&self) -> &crate::planetary::derive::atmosphere::VolatileInventory {
         self.body.inventory()
+    }
+
+    /// The moon's element inventory at the time (P14.T50.a), from P14.T16's [`derive_body`], which
+    /// P14.T23's [`BulkComposition`](crate::planetary::hooks::BulkComposition) holds: built at its
+    /// own volatile ranks where its volatiles formed (P14.T56.c), in its planet's nursery or, for a
+    /// captured or giant-impact moon, its parent's zone of the star's disc.
+    #[must_use]
+    pub const fn element_inventory(&self) -> &crate::planetary::chem::inventory::ElementInventory {
+        self.body.element_inventory()
     }
 
     /// The flux the moon receives from its planet and the stars, from P14.T16's

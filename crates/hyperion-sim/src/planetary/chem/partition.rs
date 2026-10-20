@@ -50,9 +50,9 @@
 //! [`atmosphere`](crate::planetary::derive::atmosphere), and its call on the record
 //! `GlobalFigures::condensates_under`, both on the record since P14.T54.a deleted the
 //! `p14-snapshot` lane's hold, so its rules and constants are output, and a change to any of them a
-//! generator-version change. Left to P14.T54.a's later steps: the record's `condensates` member,
-//! which takes [`Condensates`], and the passes' climate (P14.T24.a's range, `step_climate`, from
-//! the body's spin derived before them).
+//! generator-version change. The record's surface section holds the published [`Condensates`]
+//! (P14.T54.a), and the wire sends them. Left to P14.T54.a's later steps: the passes' climate
+//! (P14.T24.a's range, `step_climate`, from the body's spin derived before them).
 //!
 //! Every saturation pressure is the registry's phase diagram's
 //! ([`diagram::saturation_pressure`](crate::substance::diagram::saturation_pressure), P14.T49.b's
@@ -1755,7 +1755,10 @@ impl CondensateEntry {
     ///
     /// It is its reservoir over its grain density in its phase at the temperature it lies at
     /// ([`Substance::grain_density`]); `None` where the registry has not read that density, which
-    /// P14.T54.a sends as absent. Zero for a supercritical fluid.
+    /// the wire sends as absent (P14.T54.a). Zero for a supercritical fluid. On a body whose water
+    /// froze, the whole frozen water the partition holds, shell and deeper ice included, until
+    /// P14.T53.c divides it between the condensate, the crust and the shell
+    /// (decision-pre-23-review item 12).
     #[must_use]
     pub const fn reservoir_gel(&self) -> Option<Metres> {
         self.reservoir_gel
@@ -1780,8 +1783,8 @@ impl CondensateEntry {
 /// A body's published condensates (P14.T51.a; [`Partition::publish`]).
 ///
 /// At most [`MAX_CONDENSATES`] entries, one for each substance and phase, sorted by reservoir mass,
-/// largest first, with ties by `SubstanceId`, then phase. P14.T54.a puts this type in the place of
-/// the record's [`Condensates`](crate::planetary::record::Condensates).
+/// largest first, with ties by `SubstanceId`, then phase. A record's surface section holds them
+/// ([`Surface::condensates`](crate::planetary::record::Surface::condensates), from P14.T54.a).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Condensates {
     entries: Vec<CondensateEntry>,

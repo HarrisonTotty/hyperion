@@ -23,9 +23,10 @@
 //! with no condensable's `condensable`, a world never wet's `wet_epoch`, a body computed to hold no
 //! subsurface ocean's `subsurface_ocean`. A member this generator version does not compute is
 //! absent ([`Modelled::NotModelled`]), and a reader takes it as not modelled, never as none. The
-//! members whose tasks land later (P14.T24.c, T24.e, T51.a, T51.c, T51.d, T53.d and T55.b) are
-//! absent until they do, and each task may reshape its own member's type while no build has sent a
-//! value of it; once a build has, a change bumps [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION).
+//! members whose tasks land later (P14.T24.c, T24.e, T51.c, T51.d, T53.d and T55.b) are absent
+//! until they do, and each task may reshape its own member's type while no build has sent a value
+//! of it; once a build has, a change bumps [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION). The
+//! condensates (P14.T51.a) are sent from P14.T54.a's batch, so their shape is now fixed.
 //!
 //! # Closed classes
 //!
@@ -519,20 +520,35 @@ pub struct AerosolInventoryDto {
     pub absorbers: Vec<AbsorberDto>,
 }
 
-/// One condensate at a surface (plan 14, P14.T51.a's partition). Absent from the wire, in its
-/// list, until P14.T51.a, which may reshape it.
+/// One condensate at a surface (plan 14, P14.T51.a's partition): a substance in one phase, with
+/// its share of the substance's reservoir at the surface, the area it covers and whether it is
+/// seasonal. Sent from P14.T54.a's batch.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SurfaceCondensateDto {
-    /// The substance: a key of the substance registry.
+    /// The substance: a key of the substance registry, for a liquid the solution it lies as
+    /// (`ch4_c2h6_n2` for a methane sea under nitrogen).
     pub substance: String,
     /// Its phase where it lies: `solid`, `liquid` or `supercritical`, never `vapour`.
     pub phase: SubstancePhaseDto,
-    /// Its condensed reservoir as a global equivalent layer, m, not negative.
-    pub reservoir_gel_m: f64,
-    /// The share of the surface it covers, in `[0, 1]`.
+    /// Its condensed reservoir as a global equivalent layer, m, not negative: its mass over the
+    /// whole surface over its grain density in its phase at the temperature it lies at, and 0 for a
+    /// supercritical fluid. On a body whose water froze, the whole frozen water the partition
+    /// holds, shell and deeper ice included, until P14.T53.c divides it between the condensate,
+    /// the crust and the shell (decision-pre-23-review item 12).
+    ///
+    /// Absent where the registry has not read the phase's density (argon's ice and oxygen's β ice
+    /// among them), so that a reader takes the layer as not modelled, never as none. Optional on
+    /// the wire, as a ring's `normal` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reservoir_gel_m: Option<f64>,
+    /// The share of the surface it covers, in `[0, 1]`: a liquid's by its volume over the basins,
+    /// a solid's the climate's cold area below its edge, capped by its mass; 0 for a supercritical
+    /// fluid, which is the air at the surface.
     pub area_fraction: f64,
-    /// Whether it is seasonal: the warmest zone rises above its frost point.
+    /// Whether it is seasonal: the warmest zone takes this phase off the surface, melting or
+    /// subliming a solid and boiling a liquid.
     pub seasonal: bool,
 }
 
@@ -645,7 +661,8 @@ pub struct BodySurfaceDto {
     /// The surface material.
     pub material: SurfaceMaterialDto,
     /// The mean surface temperature, K, positive (P14.T24.a): the temperature rendering plan R08's
-    /// profile starts from.
+    /// profile starts from. It is the surface's emission mean, (⟨σT⁴⟩ ÷ σ)^¼, about 1.3 K above
+    /// the area mean for Earth-like contrasts (decision-p14-t57a-fits §2.2).
     pub mean_surface_temperature_k: f64,
     /// The annual-mean equator–pole contrast T(0°) − T(90°), K: negative where the poles are the
     /// warmer, as at an obliquity of 53.9° to 126.1°.
@@ -730,8 +747,9 @@ pub struct BodySurfaceDto {
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<AerosolInventoryDto>>", optional)]
     pub aerosols: Modelled<AerosolInventoryDto>,
-    /// The condensates at the surface, at most eight, by reservoir mass with ties by registry order
-    /// (P14.T51.a); absent until that task.
+    /// The condensates at the surface, at most eight, one for each substance and phase, by
+    /// reservoir mass with ties by registry order, then phase (P14.T51.a); sent from P14.T54.a's
+    /// batch, and absent from a server whose generator does not model them.
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<Vec<SurfaceCondensateDto>>>", optional)]
     pub condensates: Modelled<Vec<SurfaceCondensateDto>>,
@@ -1450,7 +1468,7 @@ pub(crate) mod tests {
         vec![SurfaceCondensateDto {
             substance: "CO2".to_owned(),
             phase: SubstancePhaseDto::Solid,
-            reservoir_gel_m: 0.2,
+            reservoir_gel_m: Some(0.2),
             area_fraction: 0.02,
             seasonal: true,
         }]
@@ -1632,6 +1650,28 @@ pub(crate) mod tests {
             wire[member] = value;
             assert_wire_form(&with(member, true), wire);
         }
+    }
+
+    /// Decision-pre-23-review item 12: a condensate's layer is absent where the registry has not
+    /// read its phase's density, written with no key, and a condensate without one reads as
+    /// absent, as a ring's `normal` does.
+    #[test]
+    fn a_condensate_s_layer_is_optional_on_the_wire() {
+        let argon = SurfaceCondensateDto {
+            substance: "Ar".to_owned(),
+            reservoir_gel_m: None,
+            ..condensates()[0].clone()
+        };
+        let mut wire = condensates_json()[0].clone();
+        wire["substance"] = json!("Ar");
+        wire.as_object_mut()
+            .expect("a condensate is an object")
+            .remove("reservoir_gel_m");
+        assert_wire_form(&argon, wire.clone());
+        wire["reservoir_gel_m"] = Value::Null;
+        let null: SurfaceCondensateDto = serde_json::from_value(wire).unwrap();
+        assert_eq!(null, argon);
+        assert_wire_form(&condensates()[0], condensates_json()[0].clone());
     }
 
     /// Decision-p14-t35e-wire §1.5 item 3: an `ok` surface with a member the types lack still

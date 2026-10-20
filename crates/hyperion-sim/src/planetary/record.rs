@@ -8,7 +8,7 @@
 //! | [`Contact`](DetailLevel::Contact) | the identity with the kind unknown, and the position (the brainstorm's "unresolved contact") |
 //! | [`MassAndOrbit`](DetailLevel::MassAndOrbit) | the kind and label, the mass, the orbit, the lists of moons and rings, and a population's extent; on a system, its belts and halo |
 //! | [`Bulk`](DetailLevel::Bulk) | radius, density, surface gravity, class, composition and equilibrium temperature; the rotation, the body-fixed frame (P14.T46.b), the figure, the reference spheroid (P14.T46.d), and the photometry, the template and albedos the disc is drawn with (P14.T47.c); on a system, the belts' members, as bodies and in each belt's list |
-//! | [`Surface`](DetailLevel::Surface) | the surface: its state and material, surface conditions with their climate regime and global figures (P14.T24, T48, [`Surface`]); or a gas-envelope body's envelope ([`Envelope`], P14.T24.d) |
+//! | [`Surface`](DetailLevel::Surface) | the surface: its state and material, surface conditions with their climate regime, global figures and condensates (P14.T24, T48, T51.a, [`Surface`]); or a gas-envelope body's envelope ([`Envelope`], P14.T24.d) |
 //! | [`Full`](DetailLevel::Full) | the hooks: the detail seed (the rendering plans' R09.T1.b), and with P14.T23–T26 the bulk composition, habitability and resources; never the surface seed, which stays on the server |
 //!
 //! Every optional section carries one of four states (ruling 34 of 2026-09-22, item 3):
@@ -38,6 +38,7 @@ use crate::events::EventsPerSecond;
 use crate::id::{BodyId, SystemId};
 use crate::orbit::KeplerElements;
 use crate::planetary::belts::{Belt, BeltComponent, BeltComposition, BeltGap, BeltPart, BeltSite};
+use crate::planetary::chem::partition::Condensates;
 use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::figure::BodyFigure;
 use crate::planetary::derive::photometry::BodyPhotometry;
@@ -586,10 +587,10 @@ impl BulkProperties {
 }
 
 /// The contents of a surface section (design note 16, P14.T48.e): a body's surface state and
-/// material, its surface conditions with their climate regime (P14.T24.a, T48.d) and its global
-/// figures (P14.T24.b, T48.a–c), every substance in them a [`SubstanceId`](crate::substance::SubstanceId),
-/// and the members whose tasks land later, each [`Modelled::NotModelled`] until they do
-/// (decision-composition §1.10).
+/// material, its surface conditions with their climate regime (P14.T24.a, T48.d), its global
+/// figures (P14.T24.b, T48.a–c) and its condensates (P14.T51.a, from P14.T54.a), every substance in
+/// them a [`SubstanceId`](crate::substance::SubstanceId), and the members whose tasks land later,
+/// each [`Modelled::NotModelled`] until they do (decision-composition §1.10).
 ///
 /// It is the one section rendering plan R09's coarse pass reads
 /// ([`CoarseInputs::for_body`](crate::planetary::surface::CoarseInputs::for_body)). A record's
@@ -616,15 +617,18 @@ pub struct Surface {
 
 impl Surface {
     /// The surface of a body in the state `state`, of material `material`, with the conditions
-    /// `conditions` and the figures `figures`; `None` for the gas-envelope state, which has no
-    /// surface, and for conditions without their climate regime, which the batch's second stage
-    /// gives ([`SurfaceConditions::with_climate`]).
+    /// `conditions`, the figures `figures` and the published condensates `condensates`
+    /// ([`Partition::publish`](crate::planetary::chem::partition::Partition::publish)), which the
+    /// figures' liquids and ices read; `None` for the gas-envelope state, which has no surface,
+    /// and for conditions without their climate regime, which the batch's second stage gives
+    /// ([`SurfaceConditions::with_climate`]).
     #[must_use]
     pub(crate) fn new(
         state: SurfaceState,
         material: SurfaceMaterial,
         conditions: SurfaceConditions,
         figures: GlobalFigures,
+        condensates: Condensates,
     ) -> Option<Self> {
         if state == SurfaceState::GasEnvelope {
             return None;
@@ -637,7 +641,7 @@ impl Surface {
             figures,
             vertical_structure: Modelled::NotModelled,
             aerosols: Modelled::NotModelled,
-            condensates: Modelled::NotModelled,
+            condensates: Modelled::Ok(condensates),
             crust: Modelled::NotModelled,
             modifiers: Modelled::NotModelled,
             biosphere: Modelled::NotModelled,
@@ -700,7 +704,11 @@ impl Surface {
         self.aerosols.as_ref()
     }
 
-    /// The condensates at the surface by substance (P14.T51.a), not modelled until they land.
+    /// The condensates at the surface by substance and phase (P14.T51.a's published partition, on
+    /// the record from P14.T54.a): at most eight entries, by reservoir mass, each with its
+    /// reservoir, its global equivalent layer where the registry has read its density, its area
+    /// and whether it is seasonal. Always [`Modelled::Ok`] on a record's surface; an empty list is
+    /// a surface with none.
     #[must_use]
     pub const fn condensates(&self) -> Modelled<&Condensates> {
         self.condensates.as_ref()
@@ -773,11 +781,6 @@ pub enum VerticalStructure {}
 /// which no task builds yet, so the type has no value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum AerosolInventory {}
-
-/// The condensates at a surface by substance (P14.T51.a's partition), which no task builds yet,
-/// so the type has no value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Condensates {}
 
 /// A body's crust by substance (P14.T51.c: its primary, secondary and tertiary crusts or bulk
 /// material, its lid, provinces and redox), which no task builds yet, so the type has no value.

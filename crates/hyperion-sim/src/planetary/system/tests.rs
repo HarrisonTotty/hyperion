@@ -23,7 +23,9 @@ use crate::planetary::hooks::figures::{Crust, LEFTOVER_DENSITY, TectonicRegime};
 use crate::planetary::index::{BodySlot, BodySub};
 use crate::planetary::params::{FLATTENING_CAP, HILL_STABLE_GAP};
 use crate::planetary::placement::mutual_hill_radius;
-use crate::planetary::record::{DetailLevel, MoonOrigin, Population, RecordSection, SectionState};
+use crate::planetary::record::{
+    DetailLevel, Modelled, MoonOrigin, Population, RecordSection, SectionState,
+};
 use crate::planetary::satellites::{MoonPlane, generate_satellites};
 use crate::planetary::testing::{SampleFilter, sample_contexts, synthetic_binary, synthetic_star};
 use crate::stellar::Phase;
@@ -596,8 +598,9 @@ fn a_record_tags_what_the_generator_does_not_compute() {
 }
 
 /// P14.T48.e: a record's surface is rebuilt from its parts bit for bit, its regime the
-/// conditions' own, and `Surface::new` refuses the gas-envelope state and conditions before
-/// their second stage, which have no regime.
+/// conditions' own and its condensates (P14.T54.a) the published ones it was built with, and
+/// `Surface::new` refuses the gas-envelope state and conditions before their second stage, which
+/// have no regime.
 #[test]
 fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
     let mut checked = 0;
@@ -608,30 +611,204 @@ fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
             };
             let (state, material) = (surface.state(), surface.material());
             let (conditions, figures) = (surface.conditions().clone(), surface.figures().clone());
+            let Modelled::Ok(condensates) = surface.condensates() else {
+                panic!("a record's surface holds its condensates");
+            };
             assert_ne!(state, SurfaceState::GasEnvelope);
             assert_eq!(
                 surface.conditions().climate_regime().as_ref(),
                 Some(surface.climate_regime())
             );
-            let rebuilt = Surface::new(state, material, conditions.clone(), figures.clone());
+            let rebuilt = Surface::new(
+                state,
+                material,
+                conditions.clone(),
+                figures.clone(),
+                condensates.clone(),
+            );
             assert_eq!(rebuilt.as_ref(), Some(surface));
             assert_eq!(
                 Surface::new(
                     SurfaceState::GasEnvelope,
                     material,
                     conditions.clone(),
-                    figures.clone()
+                    figures.clone(),
+                    condensates.clone(),
                 ),
                 None
             );
             assert_eq!(
-                Surface::new(state, material, conditions.without_climate(), figures),
+                Surface::new(
+                    state,
+                    material,
+                    conditions.without_climate(),
+                    figures,
+                    condensates.clone()
+                ),
                 None
             );
             checked += 1;
         }
     }
     assert!(checked > 20, "{checked}");
+}
+
+/// P14.T54.a: a record's surface section holds P14.T51.a's published condensates, the ones its
+/// liquids and ices read ([`check_record_condensates`]), and an Earth's condensates hold `H2O`:
+/// every temperate world with liquid water whose figures list a water ocean holds a liquid `H2O`
+/// entry with a reservoir, a layer and an area, which the test prints.
+#[test]
+fn the_record_s_surface_holds_its_published_condensates() {
+    use crate::planetary::chem::partition::CondensatePhase;
+    let water = Gas::Water.substance();
+    let (mut surfaces, mut entries, mut earths) = (0_u32, 0_usize, 0_u32);
+    let mut tally = CondensateTally::default();
+    for (ctx, system) in whole().iter().take(60) {
+        for record in system.snapshot_at(ctx, UniverseTime::EPOCH).bodies() {
+            let Section::Ok(surface) = record.surface() else {
+                continue;
+            };
+            let id = record.identity().id();
+            let condensates = check_record_condensates(id, surface, &mut tally);
+            let ocean = surface
+                .figures()
+                .surface_liquids()
+                .iter()
+                .any(|&(s, f)| s == water && f > 0.0);
+            if surface.state() == SurfaceState::Temperate
+                && surface.conditions().liquid_water()
+                && ocean
+            {
+                let sea = condensates
+                    .entry(water, CondensatePhase::Liquid)
+                    .unwrap_or_else(|| panic!("{id}: an Earth's condensates hold its water"));
+                assert!(
+                    sea.reservoir().value() > 0.0
+                        && sea.reservoir_gel().is_some_and(|gel| gel.value() > 0.0)
+                        && sea.area_fraction() > 0.0,
+                    "{id}: {sea:?}"
+                );
+                eprintln!(
+                    "an Earth, {id}, at {:.2} K and {:.0} Pa: {:?}",
+                    surface.conditions().mean_surface_temperature().value(),
+                    surface.conditions().surface_pressure().value(),
+                    condensates
+                        .entries()
+                        .iter()
+                        .map(described)
+                        .collect::<Vec<_>>()
+                );
+                earths += 1;
+            }
+            surfaces += 1;
+            entries += condensates.entries().len();
+        }
+    }
+    eprintln!(
+        "{surfaces} surfaces, {entries} entries ({} supercritical; with no layer {:?}), {earths} \
+         Earths",
+        tally.supercritical, tally.unlayered
+    );
+    assert!(
+        surfaces > 100 && entries > 100 && earths > 0,
+        "{surfaces} {entries} {earths}"
+    );
+}
+
+/// What [`check_record_condensates`] counts: the supercritical entries, and the entries with no
+/// layer by substance and phase.
+#[derive(Debug, Default)]
+struct CondensateTally {
+    supercritical: u32,
+    unlayered: std::collections::BTreeMap<
+        (String, crate::planetary::chem::partition::CondensatePhase),
+        u32,
+    >,
+}
+
+/// A published condensate, printed: its substance, phase, reservoir, layer, area and flag.
+fn described(e: &crate::planetary::chem::partition::CondensateEntry) -> String {
+    format!(
+        "{} {:?} {:.4e} kg m⁻² ({:?} m), area {:.4}, seasonal {}",
+        e.substance().substance().key(),
+        e.phase(),
+        e.reservoir().value(),
+        e.reservoir_gel().map(crate::units::Metres::value),
+        e.area_fraction(),
+        e.is_seasonal()
+    )
+}
+
+/// P14.T54.a: the condensates of `surface`, the record of `id`, which it holds `Ok`, checked. There
+/// are at most `MAX_CONDENSATES` entries, each substance and phase once, in `Partition::publish`'s
+/// order (by reservoir mass, largest first, ties by substance, then phase). Each area is a
+/// fraction, each reservoir and each layer, where the registry has read its density, not
+/// negative, and a supercritical fluid covers nothing. Every liquid and solid that covers an area
+/// is among the figures' liquids or ices, and every substance listed there but water, which keeps
+/// T24.b's ice and its ocean under ice where the partition holds none, has its entry.
+fn check_record_condensates<'a>(
+    id: crate::id::BodyId,
+    surface: &'a Surface,
+    tally: &mut CondensateTally,
+) -> &'a crate::planetary::chem::partition::Condensates {
+    use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
+    use crate::planetary::surface::MAX_CONDENSATES;
+    use std::cmp::Ordering;
+    let order = |a: &CondensateEntry, b: &CondensateEntry| {
+        b.reservoir()
+            .value()
+            .total_cmp(&a.reservoir().value())
+            .then(a.substance().cmp(&b.substance()))
+            .then(a.phase().cmp(&b.phase()))
+    };
+    let Modelled::Ok(condensates) = surface.condensates() else {
+        panic!("{id}: a record's surface holds its condensates");
+    };
+    let (figures, list) = (surface.figures(), condensates.entries());
+    assert!(list.len() <= MAX_CONDENSATES, "{id}: {list:?}");
+    for pair in list.windows(2) {
+        assert_eq!(order(&pair[0], &pair[1]), Ordering::Less, "{id}: {list:?}");
+    }
+    let listed = |areas: &[(crate::substance::SubstanceId, f64)], e: &CondensateEntry| {
+        areas.iter().any(|&(other, _)| other == e.substance())
+    };
+    for e in list {
+        let area = e.area_fraction();
+        assert!((0.0..=1.0).contains(&area), "{id}: {e:?}");
+        assert!(e.reservoir().value() >= 0.0, "{id}: {e:?}");
+        if let Some(gel) = e.reservoir_gel() {
+            assert!(gel.value() >= 0.0, "{id}: {e:?}");
+        } else {
+            let key = (e.substance().substance().key().to_string(), e.phase());
+            *tally.unlayered.entry(key).or_insert(0) += 1;
+        }
+        match e.phase() {
+            CondensatePhase::Supercritical => {
+                assert_same_bits(area, 0.0);
+                tally.supercritical += 1;
+            }
+            CondensatePhase::Liquid if area > 0.0 => {
+                assert!(listed(figures.surface_liquids(), e), "{id}: {e:?}");
+            }
+            CondensatePhase::Solid if area > 0.0 => {
+                assert!(listed(figures.surface_ices(), e), "{id}: {e:?}");
+            }
+            CondensatePhase::Liquid | CondensatePhase::Solid => {}
+        }
+    }
+    let water = Gas::Water.substance();
+    for (areas, phase) in [
+        (figures.surface_liquids(), CondensatePhase::Liquid),
+        (figures.surface_ices(), CondensatePhase::Solid),
+    ] {
+        for &(substance, _) in areas.iter().filter(|&&(s, _)| s != water) {
+            assert!(
+                condensates.entry(substance, phase).is_some(),
+                "{id}: {substance:?} {phase:?} listed with no entry"
+            );
+        }
+    }
+    condensates
 }
 
 /// P14.T48.e's gas-envelope split on a present body's record with a bulk section: a body with a
@@ -3867,7 +4044,8 @@ fn on_the_laplace_surface_every_law_is_its_record_s() {
 /// ([`Satellite::own_volatiles`](crate::planetary::satellites::Satellite::own_volatiles)) at its
 /// own bulk ([`PlanetarySystem::moon_own_bulk`]), and its atmosphere's escape is judged at its
 /// record's own radius and mass, which for a regular moon is its derivation's
-/// ([`DerivedMoon::radius`]).
+/// ([`DerivedMoon::radius`]). From P14.T54.a its bulk composition holds its derivation's element
+/// inventory, whose carriers are that inventory.
 #[test]
 fn every_moon_s_inventory_is_its_own_ranks_at_its_own_bulk() {
     use crate::planetary::derive::atmosphere::Retention;
@@ -3880,13 +4058,17 @@ fn every_moon_s_inventory_is_its_own_ranks_at_its_own_bulk() {
                 continue;
             };
             let index = body.index();
-            let Some(mine) = system
-                .hooks_at(ctx, index, t)
-                .unwrap()
-                .and_then(|hooks| hooks.bulk().ok().map(|bulk| *bulk.inventory()))
+            let Some((mine, elements)) =
+                system.hooks_at(ctx, index, t).unwrap().and_then(|hooks| {
+                    hooks
+                        .bulk()
+                        .ok()
+                        .map(|bulk| (*bulk.inventory(), *bulk.element_inventory()))
+                })
             else {
                 continue;
             };
+            assert_eq!(&mine, elements.volatiles(), "{index:?}");
             let planet = system.body(parent).unwrap();
             let epoch = Epoch::new(system, ctx, t);
             let host = fate_host(ctx, system.zone_of(planet));
@@ -3915,6 +4097,7 @@ fn every_moon_s_inventory_is_its_own_ranks_at_its_own_bulk() {
             };
             let derived = derive(&inputs);
             assert_eq!(*derived.inventory(), mine, "{index:?}");
+            assert_eq!(*derived.element_inventory(), elements, "{index:?}");
             // Its own ranks, not the median's, make its inventory.
             inputs.volatiles = MoonVolatiles {
                 site: satellite.volatile_site(),

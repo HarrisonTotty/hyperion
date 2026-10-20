@@ -60,13 +60,19 @@ fn draws_to_try() -> Vec<VolatileDraws> {
 
 /// P14.T50.a: H₂O, CO₂, N₂ and Ar as today, to the bit: the inventory's carriers are
 /// `volatile_inventory`'s, and for the table's bodies the atmosphere's own inventory, at every
-/// rank tried, on either side of the snow line.
+/// rank tried, on either side of the snow line. From P14.T54.a each table body holds the element
+/// inventory of its inputs.
 #[test]
 fn the_carriers_are_today_s_to_the_bit() {
     for name in [
         "Mercury", "Venus", "Earth", "Mars", "Moon", "Ganymede", "Titan", "Ceres",
     ] {
         let (body, at_median) = table_body(name, VolatileDraws::MEDIAN);
+        assert_eq!(
+            *body.element_inventory(),
+            element_inventory(&at_median),
+            "{name}"
+        );
         let view = *element_inventory(&at_median).volatiles();
         for (a, b) in [
             (view.water(), body.inventory().water()),

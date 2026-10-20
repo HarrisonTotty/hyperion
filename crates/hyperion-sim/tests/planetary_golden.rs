@@ -47,7 +47,7 @@ use hyperion_sim::planetary::placement::{
     satisfies_floor, spacing_floor,
 };
 use hyperion_sim::planetary::record::{
-    BodyKind, BodyRecord, DetailLevel, Population as BodyPopulation, Section, Surface,
+    BodyKind, BodyRecord, DetailLevel, Modelled, Population as BodyPopulation, Section, Surface,
     SystemSnapshot,
 };
 use hyperion_sim::planetary::{self, Body, BodyIndex, PlanetarySystem, SystemContext};
@@ -1176,9 +1176,10 @@ fn write_record(w: &mut GoldenWriter, record: &BodyRecord) {
     write_section_state(w, "envelope", record.envelope());
 }
 
-/// A body's surface section, in summary (P14.T48.e): its state, material and climate regime, and
-/// the figures R09's coarse pass reads first. `planetary/surface_conditions_published` pins the
-/// sections whole on a sample.
+/// A body's surface section, in summary (P14.T48.e): its state, material and climate regime, the
+/// figures R09's coarse pass reads first, and its published condensates (P14.T51.a, on the record
+/// from P14.T54.a), each entry's substance, phase and seasonal flag, reservoir, layer and area.
+/// `planetary/surface_conditions_published` pins the conditions and figures whole on a sample.
 fn write_surface(w: &mut GoldenWriter, surface: &Surface) {
     let regime = surface.climate_regime();
     w.line(&format!(
@@ -1209,6 +1210,23 @@ fn write_surface(w: &mut GoldenWriter, surface: &Surface) {
     w.f64("surface_age_yr", figures.surface_age().value());
     w.f64("ocean_fraction", figures.ocean_fraction());
     w.f64("ice_fraction", figures.ice_fraction());
+    let Modelled::Ok(condensates) = surface.condensates() else {
+        panic!("a record's surface holds its condensates");
+    };
+    for entry in condensates.entries() {
+        w.line(&format!(
+            "condensate: {}, {:?}, seasonal {}",
+            entry.substance().substance().key(),
+            entry.phase(),
+            entry.is_seasonal()
+        ));
+        w.f64("reservoir_kg_m2", entry.reservoir().value());
+        match entry.reservoir_gel() {
+            Some(gel) => w.f64("reservoir_gel_m", gel.value()),
+            None => w.line("reservoir_gel_m: none"),
+        }
+        w.f64("area_fraction", entry.area_fraction());
+    }
 }
 
 /// A unit vector's components, labelled `name_x` to `name_z`.

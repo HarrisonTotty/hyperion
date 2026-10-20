@@ -25,8 +25,12 @@
 //! sulphur and chlorine, which outgassing (T24.g's present outgassing, P14.T55.a) and the oceans'
 //! leaching (P14.T51.g) move there.
 //!
-//! Nothing on the record reads this module until P14.T54.a, which wires it in the 22 → 23 batch,
-//! so no generated output moves with it.
+//! From P14.T54.a every derived body holds its element inventory in place of its volatile
+//! inventory
+//! ([`DerivedBody::element_inventory`](crate::planetary::derive::DerivedBody::element_inventory)),
+//! built from the inputs its atmosphere's inventory reads, and its bulk composition hook carries
+//! it ([`BulkComposition`](crate::planetary::hooks::BulkComposition)). The atmosphere reads the
+//! carriers, so they are what it read before, to the bit, and no generated output moves with it.
 
 use crate::math;
 use crate::planetary::chem::redox::{self, RedoxClass, RedoxInputs};
@@ -113,8 +117,10 @@ pub struct InventoryInputs {
     pub mass: EarthMasses,
     /// Its bulk composition.
     pub fractions: MassFractions,
-    /// The side of its host's snow line it formed on: the atmosphere's
-    /// ([`DerivedBody::formed`](crate::planetary::derive::DerivedBody::formed)), which sets its
+    /// The side of its host's snow line its volatiles formed on: the atmosphere's
+    /// ([`DerivedBody::formed`](crate::planetary::derive::DerivedBody::formed), or for a captured or
+    /// giant-impact moon its parent's zone's,
+    /// [`FormationZone::side`](crate::planetary::derive::FormationZone::side)), which sets its
     /// carriers and its chlorine. The caller keeps it consistent with the distances, which set its
     /// ΔIW and its formation temperature, and so whether its nitrogen takes the icy boost
     /// (P14.T50.c).
@@ -122,10 +128,12 @@ pub struct InventoryInputs {
     /// Where it formed from its host: the formation distance its derivation read
     /// ([`PlacedBody::formation_distance`]), so that its carriers are its derivation's inventory to
     /// the bit, between the snow and ammonia lines too (P14.T50.c). For a moon derived in its
-    /// planet's nursery, the distance from the planet that its derivation reads.
+    /// planet's nursery, the distance from the planet that its derivation reads; for a captured or
+    /// giant-impact moon, its parent's zone's distance from the star (P14.T56.c,
+    /// [`PlacedBody::volatile_zone`]).
     pub formation_distance: Metres,
     /// The snow line of the disc its derivation read: its host's, or for a moon derived in its
-    /// planet's nursery, the nursery's.
+    /// planet's nursery, the nursery's; for a captured or giant-impact moon, its parent's zone's.
     pub snow_line: Metres,
     /// Its ranks on `planet.volatiles`.
     pub draws: VolatileDraws,

@@ -103,11 +103,10 @@ use crate::planetary::architecture::{
 use crate::planetary::belts::{
     Belt, BeltComposition, BeltHost, BeltMember, FIRST_BELT_SLOT, LAST_BELT_SLOT, host_belts,
 };
+use crate::planetary::chem::inventory::ElementInventory;
 use crate::planetary::chem::partition::{Condensates, Partition};
 use crate::planetary::context::{SystemContext, XuvHistory};
-use crate::planetary::derive::atmosphere::{
-    Atmosphere, SurfaceMaterial, VolatileDraws, VolatileInventory,
-};
+use crate::planetary::derive::atmosphere::{Atmosphere, SurfaceMaterial, VolatileDraws};
 use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
 use crate::planetary::derive::irradiation::{BondAlbedo, luminosity_flux};
 use crate::planetary::derive::photometry::{BodyPhotometry, PhotometryInputs};
@@ -2097,7 +2096,7 @@ impl PlanetarySystem {
                     Some(d) => {
                         let properties =
                             icy_member_bulk(body, &d).unwrap_or_else(|| BulkProperties::from(&d));
-                        bulk_composition(ctx, properties.fractions(), *d.inventory())
+                        bulk_composition(ctx, properties.fractions(), *d.element_inventory())
                     }
                     None => Section::NotApplicable,
                 };
@@ -2112,7 +2111,11 @@ impl PlanetarySystem {
                     match Self::moon_derived(&epoch, moon, &orbit, &now) {
                         Some(derived) => {
                             let properties = Self::moon_bulk_of(moon, &derived, &now);
-                            bulk_composition(ctx, properties.fractions(), *derived.inventory())
+                            bulk_composition(
+                                ctx,
+                                properties.fractions(),
+                                *derived.element_inventory(),
+                            )
                         }
                         None => Section::NotModelled,
                     }
@@ -3306,13 +3309,13 @@ struct ParentNow {
     nursery: Option<MoonNursery>,
 }
 
-/// The bulk composition hook of a body of mass fractions `fractions` and volatile inventory
-/// `inventory` in the system of `ctx`, at its \[Fe/H\] and \[α/Fe\] (P14.T23).
+/// The bulk composition hook of a body of mass fractions `fractions` and element inventory
+/// `inventory` (P14.T50.a) in the system of `ctx`, at its \[Fe/H\] and \[α/Fe\] (P14.T23).
 #[must_use]
 fn bulk_composition(
     ctx: &SystemContext,
     fractions: MassFractions,
-    inventory: VolatileInventory,
+    inventory: ElementInventory,
 ) -> Section<BulkComposition> {
     Section::Ok(BulkComposition::new(
         fractions,
@@ -3557,7 +3560,8 @@ struct SurfaceCraters {
 }
 
 /// The surface section of the body `case` describes at `time` (P14.T24.a, T24.b, T48.a–e): its
-/// surface conditions and global figures.
+/// surface conditions and global figures, and P14.T51.a's published condensates, which its liquids
+/// and ices read ([`with_partition`]).
 ///
 /// [`Section::NotModelled`] with no seasonal orbit, crater inputs or impactor sources, or for
 /// inputs the figures refuse; [`Section::NotApplicable`] for a body with no surface; and
@@ -3653,8 +3657,8 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         window,
         outgassing: |age: Years| past_outgassing(&figure_inputs, age),
     });
-    let (partition, published) = &condensates;
-    let figures = figures.with_surface_under(&conditions, history, Some(published));
+    let (partition, published) = condensates;
+    let figures = figures.with_surface_under(&conditions, history, Some(&published));
     // Step 10, the climate regime (P14.T48.d): it reads the cover, which reads no regime (an ice
     // belt's band is the profile's cold equator, science-p14-t24b-laws §4.3), so it follows the
     // second stage with no loop.
@@ -3667,7 +3671,14 @@ fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<
         ice_threshold: figures.ice_threshold(),
     });
     Section::Ok(
-        Surface::new(sky.atmosphere.state(), material, conditions, figures).expect(
+        Surface::new(
+            sky.atmosphere.state(),
+            material,
+            conditions,
+            figures,
+            published,
+        )
+        .expect(
             "conditions exist only off the gas-envelope state, and `with_climate` gives their regime",
         ),
     )

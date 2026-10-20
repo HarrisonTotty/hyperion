@@ -704,8 +704,12 @@ export interface SurfaceCondensate {
   /** By its registry key. */
   readonly substance: string;
   readonly phase: CondensatePhase;
-  /** Its reservoir as a global equivalent layer. */
-  readonly reservoirGelM: number;
+  /**
+   * Its reservoir as a global equivalent layer; on a body whose water froze, its whole frozen
+   * water, shell and deeper ice included, until plan 14's P14.T53.c divides it. `null` where the
+   * server's registry has not read the phase's density, which is not modelled, never none.
+   */
+  readonly reservoirGelM: number | null;
   /** In `[0, 1]`. */
   readonly areaFraction: number;
   readonly seasonal: boolean;

@@ -39,7 +39,8 @@ state: SurfaceStateDto,
 material: SurfaceMaterialDto, 
 /**
  * The mean surface temperature, K, positive (P14.T24.a): the temperature rendering plan R08's
- * profile starts from.
+ * profile starts from. It is the surface's emission mean, (⟨σT⁴⟩ ÷ σ)^¼, about 1.3 K above
+ * the area mean for Earth-like contrasts (decision-p14-t57a-fits §2.2).
  */
 mean_surface_temperature_k: number, 
 /**
@@ -176,8 +177,9 @@ vertical_structure?: VerticalStructureDto | null,
  */
 aerosols?: AerosolInventoryDto | null, 
 /**
- * The condensates at the surface, at most eight, by reservoir mass with ties by registry order
- * (P14.T51.a); absent until that task.
+ * The condensates at the surface, at most eight, one for each substance and phase, by
+ * reservoir mass with ties by registry order, then phase (P14.T51.a); sent from P14.T54.a's
+ * batch, and absent from a server whose generator does not model them.
  */
 condensates?: Array<SurfaceCondensateDto> | null, 
 /**

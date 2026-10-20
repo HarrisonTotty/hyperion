@@ -1222,19 +1222,26 @@ function toCondensatePhase(phase: SubstancePhaseDto): CondensatePhase {
   return result;
 }
 
+/**
+ * A surface's condensates, checked: each layer, where the server sends one, not negative, and each
+ * area a fraction. A layer is absent where the server's registry has not read the phase's
+ * density (P14.T54.a), which reads `null`.
+ */
 function toCondensates(
   condensates: ReadonlyArray<SurfaceCondensateDto>,
 ): ReadonlyArray<SurfaceCondensate> {
   check(
     condensates.every(
-      (condensate) => atLeastZero(condensate.reservoir_gel_m) && fraction(condensate.area_fraction),
+      (condensate) =>
+        (condensate.reservoir_gel_m === undefined || atLeastZero(condensate.reservoir_gel_m)) &&
+        fraction(condensate.area_fraction),
     ),
     "condensate unusable",
   );
   return condensates.map((condensate) => ({
     substance: condensate.substance,
     phase: toCondensatePhase(condensate.phase),
-    reservoirGelM: condensate.reservoir_gel_m,
+    reservoirGelM: condensate.reservoir_gel_m ?? null,
     areaFraction: condensate.area_fraction,
     seasonal: condensate.seasonal,
   }));

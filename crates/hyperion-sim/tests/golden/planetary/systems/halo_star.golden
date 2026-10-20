@@ -99,6 +99,14 @@ heat_flow_w_m2 = 0x3f72794ca2e092a6  # 0.004510211334523595
 surface_age_yr = 0x4205cba8913ea11c  # 11701391911.828667
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+condensate: N2, Supercritical, seasonal false
+reservoir_kg_m2 = 0x0000000000000000  # 0.0
+reservoir_gel_m = 0x0000000000000000  # 0.0
+area_fraction = 0x0000000000000000  # 0.0
+condensate: CO2, Supercritical, seasonal false
+reservoir_kg_m2 = 0x0000000000000000  # 0.0
+reservoir_gel_m = 0x0000000000000000  # 0.0
+area_fraction = 0x0000000000000000  # 0.0
 envelope: NotApplicable
 body 0200 A c: Planet about Some(Star(0)), Present
 mass_mearth = 0x3ff8a2933da0bd48  # 1.5396912009562858
@@ -187,6 +195,10 @@ heat_flow_w_m2 = 0x3f75a9b8b4d2740e  # 0.005288812169195202
 surface_age_yr = 0x4205c096864624dd  # 11678175432.768
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+condensate: CO2, Supercritical, seasonal false
+reservoir_kg_m2 = 0x0000000000000000  # 0.0
+reservoir_gel_m = 0x0000000000000000  # 0.0
+area_fraction = 0x0000000000000000  # 0.0
 envelope: NotApplicable
 body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3dd7d4ffa6229b0a  # 8.670040513112042e-11
@@ -301,6 +313,14 @@ heat_flow_w_m2 = 0x3f72794c88a04e04  # 0.00451021095252058
 surface_age_yr = 0x4205cba8b07ea11c  # 11701392911.828667
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+condensate: N2, Supercritical, seasonal false
+reservoir_kg_m2 = 0x0000000000000000  # 0.0
+reservoir_gel_m = 0x0000000000000000  # 0.0
+area_fraction = 0x0000000000000000  # 0.0
+condensate: CO2, Supercritical, seasonal false
+reservoir_kg_m2 = 0x0000000000000000  # 0.0
+reservoir_gel_m = 0x0000000000000000  # 0.0
+area_fraction = 0x0000000000000000  # 0.0
 envelope: NotApplicable
 body 0200 A c: Planet about Some(Star(0)), Present
 mass_mearth = 0x3ff8a2933da0bd48  # 1.5396912009562858
@@ -389,6 +409,10 @@ heat_flow_w_m2 = 0x3f75a9b8960a0f92  # 0.005288811721246749
 surface_age_yr = 0x4205c096a58624dd  # 11678176432.768
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+condensate: CO2, Supercritical, seasonal false
+reservoir_kg_m2 = 0x0000000000000000  # 0.0
+reservoir_gel_m = 0x0000000000000000  # 0.0
+area_fraction = 0x0000000000000000  # 0.0
 envelope: NotApplicable
 body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3dd7d4ff8400ee60  # 8.670039773002226e-11

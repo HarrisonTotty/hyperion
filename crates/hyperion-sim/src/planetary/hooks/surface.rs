@@ -924,7 +924,9 @@ impl SurfaceConditions {
         })
     }
 
-    /// The mean surface temperature (P14.T13.c), which rendering plan R08's profile starts from.
+    /// The mean surface temperature (P14.T13.c), which rendering plan R08's profile starts from:
+    /// the surface's emission mean, (⟨σT⁴⟩ ÷ σ)^¼, about 1.3 K above the area mean for Earth-like
+    /// contrasts (decision-p14-t57a-fits §2.2).
     #[must_use]
     pub const fn mean_surface_temperature(&self) -> Kelvin {
         self.mean_surface_temperature

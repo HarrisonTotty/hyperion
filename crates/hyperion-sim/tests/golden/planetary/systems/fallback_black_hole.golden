@@ -110,6 +110,18 @@ heat_flow_w_m2 = 0x3fd7c5272132391c  # 0.37140825502219044
 surface_age_yr = 0x41313b142e1e9262  # 1129236.1801539888
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fece7ac035387f6  # 0.9032802643744151
+condensate: CO2, Solid, seasonal true
+reservoir_kg_m2 = 0x41465ed8c55fd585  # 2932145.5419871234
+reservoir_gel_m = 0x409b2f55e86d584a  # 1739.8338944516313
+area_fraction = 0x3fecd8d421593c87  # 0.9014683390941095
+condensate: N2, Solid, seasonal true
+reservoir_kg_m2 = 0x40ac0d3765b89475  # 3590.6081979447576
+reservoir_gel_m = 0x400bb527e00d73de  # 3.4634549621682558
+area_fraction = 0x3f5d66d4a049b2ed  # 0.0017945362498281118
+condensate: Ar, Solid, seasonal true
+reservoir_kg_m2 = 0x4047c5ca2fefcf60  # 47.54523276528812
+reservoir_gel_m: none
+area_fraction = 0x3ef23bd5134b1dd5  # 1.7389030477569574e-5
 envelope: NotApplicable
 body 0300 A d: Planet about Some(Star(0)), Present
 mass_mearth = 0x3fff11f14936ec3c  # 1.9418804988806775
@@ -195,6 +207,18 @@ heat_flow_w_m2 = 0x3fd6f6e198b61125  # 0.358818434841185
 surface_age_yr = 0x41330c53a85e4638  # 1248339.6576885115
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fdf188c403aae0c  # 0.4858732821691951
+condensate: CO2, Solid, seasonal true
+reservoir_kg_m2 = 0x4137f0654fb9496a  # 1568869.3114210018
+reservoir_gel_m = 0x408d174d8b9bc6ba  # 930.9128639383337
+area_fraction = 0x3fdedea15764d610  # 0.48233827147063923
+condensate: N2, Solid, seasonal true
+reservoir_kg_m2 = 0x40bb7ffd2c23d3c5  # 7039.988954772188
+reservoir_gel_m = 0x401b29a8ff0fa3a9  # 6.790683732347056
+area_fraction = 0x3f6cd2ce63480a40  # 0.0035184889804907027
+condensate: Ar, Solid, seasonal true
+reservoir_kg_m2 = 0x4046963fbb08c452  # 45.173819903641416
+reservoir_gel_m: none
+area_fraction = 0x3ef15303d1f9facf  # 1.6521718065205464e-5
 envelope: NotApplicable
 body e100 BELT 1: Belt(Asteroid) about Some(Star(0)), Present
 mass_mearth = 0x3fe6e321c5b03c7f  # 0.715226064787103
@@ -300,6 +324,14 @@ heat_flow_w_m2 = 0x3fbda16c216fd876  # 0.11574436012583242
 surface_age_yr = 0x417ff3c6084fb4e5  # 33504352.519459624
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fb32d9eb79fbc06  # 0.07491485579497245
+condensate: CO2, Solid, seasonal true
+reservoir_kg_m2 = 0x410dbe24ad31e398  # 243652.58456781204
+reservoir_gel_m = 0x40621266a2072132  # 144.57502843277467
+area_fraction = 0x3fb32d42326f06d7  # 0.07490934115687807
+condensate: Ar, Solid, seasonal true
+reservoir_kg_m2 = 0x402e2805daa30e03  # 15.078169662861006
+reservoir_gel_m: none
+area_fraction = 0x3ed7214c2d4bab19  # 5.514638094376487e-6
 envelope: NotApplicable
 body e102 BELT 1-2: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3fb0222e14f81102  # 0.06302154552401265
@@ -385,6 +417,14 @@ heat_flow_w_m2 = 0x3fb244f972b2b599  # 0.07136496591802767
 surface_age_yr = 0x41a04bac434ed9bf  # 136697377.65400502
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fb32edb8ce7c207  # 0.07493374052115352
+condensate: CO2, Solid, seasonal true
+reservoir_kg_m2 = 0x410dc05037700a1a  # 243722.02706916706
+reservoir_gel_m = 0x406213b82eb7f857  # 144.61623321468025
+area_fraction = 0x3fb32ea862632f50  # 0.07493069078480841
+condensate: Ar, Solid, seasonal true
+reservoir_kg_m2 = 0x4020ad5ee6766d96  # 8.338614656406929
+reservoir_gel_m: none
+area_fraction = 0x3ec99542495b4a6a  # 3.049736345109041e-6
 envelope: NotApplicable
 body e103 BELT 1-3: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3fa06a8e6c15ec4f  # 0.03206296033291577
@@ -1000,6 +1040,18 @@ heat_flow_w_m2 = 0x3fb7c5b81b058a4d  # 0.09286070499141737
 surface_age_yr = 0x418e5067230a83d2  # 63573220.38013424
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fb6792eb2b0d946  # 0.08778659689491972
+condensate: CO2, Solid, seasonal true
+reservoir_kg_m2 = 0x4111215a1cb2784b  # 280662.5280245586
+reservoir_gel_m = 0x4064d122695e4353  # 166.5354506341051
+area_fraction = 0x3fb616f5078dad0b  # 0.086287798256013
+condensate: N2, Solid, seasonal true
+reservoir_kg_m2 = 0x40a75d5522f1be19  # 2990.666282228904
+reservoir_gel_m = 0x400713fc54c03e73  # 2.884758627049274
+area_fraction = 0x3f587d33054e8497  # 0.0014946935891447016
+condensate: Ar, Solid, seasonal true
+reservoir_kg_m2 = 0x402672b82e535e76  # 11.224061439206007
+reservoir_gel_m: none
+area_fraction = 0x3ed137c37c8a556c  # 4.105049762022843e-6
 envelope: NotApplicable
 body e202 BELT 2-2: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3fa28c1358328f4b  # 0.036224941746040594
@@ -1085,6 +1137,10 @@ heat_flow_w_m2 = 0x3fb046d559f7c46f  # 0.06358083197098251
 surface_age_yr = 0x41a6cc8f383b1762  # 191252380.11541277
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3facb9be6bc180c8  # 0.05610461297396935
+condensate: CO2, Solid, seasonal true
+reservoir_kg_m2 = 0x410646bda97c5a45  # 182487.70775671504
+reservoir_gel_m = 0x405b120ab30c1a9d  # 108.28190303976085
+area_fraction = 0x3facb9be6bc180c8  # 0.05610461297396935
 envelope: NotApplicable
 body e203 BELT 2-3: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f92df479df8315f  # 0.018429869667714423
@@ -1786,6 +1842,18 @@ heat_flow_w_m2 = 0x3fd7c5265236df7b  # 0.3714080622553337
 surface_age_yr = 0x41313b15e2639252  # 1129237.8843318415
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fece7ac03585bc0  # 0.9032802644095383
+condensate: CO2, Solid, seasonal true
+reservoir_kg_m2 = 0x41465ed8c55fd585  # 2932145.5419871234
+reservoir_gel_m = 0x409b2f55e86d584a  # 1739.8338944516313
+area_fraction = 0x3fecd8d421593c87  # 0.9014683390941095
+condensate: N2, Solid, seasonal true
+reservoir_kg_m2 = 0x40ac0d3765b89475  # 3590.6081979447576
+reservoir_gel_m = 0x400bb527e00d73de  # 3.4634549621682558
+area_fraction = 0x3f5d66d4a049b2ed  # 0.0017945362498281118
+condensate: Ar, Solid, seasonal true
+reservoir_kg_m2 = 0x4047c5cd5587e6d0  # 47.545328799589356
+reservoir_gel_m: none
+area_fraction = 0x3ef23bd77d303335  # 1.7389065600825765e-5
 envelope: NotApplicable
 body 0300 A d: Planet about Some(Star(0)), Present
 mass_mearth = 0x3fff11f14936ec3c  # 1.9418804988806775
@@ -1871,6 +1939,18 @@ heat_flow_w_m2 = 0x3fd6f6e0d0bedb5a  # 0.3588182486086474
 surface_age_yr = 0x41330c558aa6fb44  # 1248341.5416104356
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fdf188c4043da5a  # 0.48587328220256654
+condensate: CO2, Solid, seasonal true
+reservoir_kg_m2 = 0x4137f0654fb9496a  # 1568869.3114210018
+reservoir_gel_m = 0x408d174d8b9bc6ba  # 930.9128639383337
+area_fraction = 0x3fdedea15764d610  # 0.48233827147063923
+condensate: N2, Solid, seasonal true
+reservoir_kg_m2 = 0x40bb7ffd2c23d3c5  # 7039.988954772188
+reservoir_gel_m = 0x401b29a8ff0fa3a9  # 6.790683732347056
+area_fraction = 0x3f6cd2ce63480a40  # 0.0035184889804907027
+condensate: Ar, Solid, seasonal true
+reservoir_kg_m2 = 0x40469642b8729f9d  # 45.17391114804125
+reservoir_gel_m: none
+area_fraction = 0x3ef153061d0d77bb  # 1.6521751436619536e-5
 envelope: NotApplicable
 body e100 BELT 1: Belt(Asteroid) about Some(Star(0)), Present
 mass_mearth = 0x3fe6e321c33e54e4  # 0.7152260602330469
@@ -1976,6 +2056,14 @@ heat_flow_w_m2 = 0x3fbda16b1f6cae5c  # 0.1157443000526483
 surface_age_yr = 0x417ff3c931510d90  # 33504403.082288325
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fb32d9eb7abfb4d  # 0.0749148558061112
+condensate: CO2, Solid, seasonal true
+reservoir_kg_m2 = 0x410dbe24ad31e398  # 243652.58456781204
+reservoir_gel_m = 0x40621266a2072132  # 144.57502843277467
+area_fraction = 0x3fb32d42326f06d7  # 0.07490934115687807
+condensate: Ar, Solid, seasonal true
+reservoir_kg_m2 = 0x402e2809d88f30a2  # 15.078200118521924
+reservoir_gel_m: none
+area_fraction = 0x3ed7214f3d1d8851  # 5.5146492331255285e-6
 envelope: NotApplicable
 body e102 BELT 1-2: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3fb0222e14f81102  # 0.06302154552401265
@@ -2061,6 +2149,14 @@ heat_flow_w_m2 = 0x3fb244f8d39d46ef  # 0.07136492887846278
 surface_age_yr = 0x41a04baddfe64878  # 136697583.94977164
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fb32edb8cee87ea  # 0.07493374052731352
+condensate: CO2, Solid, seasonal true
+reservoir_kg_m2 = 0x410dc05037700a1a  # 243722.02706916706
+reservoir_gel_m = 0x406213b82eb7f857  # 144.61623321468025
+area_fraction = 0x3fb32ea862632f50  # 0.07493069078480841
+condensate: Ar, Solid, seasonal true
+reservoir_kg_m2 = 0x4020ad611b9ca68b  # 8.338631499168761
+reservoir_gel_m: none
+area_fraction = 0x3ec99545ac4d2f2a  # 3.0497425051230274e-6
 envelope: NotApplicable
 body e103 BELT 1-3: DwarfPlanet about Some(Body(BodyIndex(57600))), Present
 mass_mearth = 0x3fa06a8e6c15ec4f  # 0.03206296033291577
@@ -2676,6 +2772,18 @@ heat_flow_w_m2 = 0x3fb7c5b74c054246  # 0.09286065679521824
 surface_age_yr = 0x418e506a2291bad2  # 63573316.32115711
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3fb6792eb2b9f726  # 0.0877865969032113
+condensate: CO2, Solid, seasonal true
+reservoir_kg_m2 = 0x4111215a1cb2784b  # 280662.5280245586
+reservoir_gel_m = 0x4064d122695e4353  # 166.5354506341051
+area_fraction = 0x3fb616f5078dad0b  # 0.086287798256013
+condensate: N2, Solid, seasonal true
+reservoir_kg_m2 = 0x40a75d5522f1be19  # 2990.666282228904
+reservoir_gel_m = 0x400713fc54c03e73  # 2.884758627049274
+area_fraction = 0x3f587d33054e8497  # 0.0014946935891447016
+condensate: Ar, Solid, seasonal true
+reservoir_kg_m2 = 0x402672bb2709387c  # 11.22408411014134
+reservoir_gel_m: none
+area_fraction = 0x3ed137c5c40257f6  # 4.105058053613031e-6
 envelope: NotApplicable
 body e202 BELT 2-2: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3fa28c1358328f4b  # 0.036224941746040594
@@ -2761,6 +2869,10 @@ heat_flow_w_m2 = 0x3fb046d4cc3c7634  # 0.06358079897150831
 surface_age_yr = 0x41a6cc91797c1fc7  # 191252668.74242994
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x3facb9be6bc180c8  # 0.05610461297396935
+condensate: CO2, Solid, seasonal true
+reservoir_kg_m2 = 0x410646bda97c5a45  # 182487.70775671504
+reservoir_gel_m = 0x405b120ab30c1a9d  # 108.28190303976085
+area_fraction = 0x3facb9be6bc180c8  # 0.05610461297396935
 envelope: NotApplicable
 body e203 BELT 2-3: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f92df479df8315f  # 0.018429869667714423

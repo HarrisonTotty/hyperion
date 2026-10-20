@@ -7,9 +7,9 @@
 //!   `body.surface` keyed by the body's ID, which depends on nothing else, so that no change to the
 //!   derivation moves a map; and its [`DetailSeed`] (R09.T1.b), likewise on `body.surface.detail`,
 //!   which the client is given in the surface seed's place.
-//! - [`BulkComposition`]: the body's mass fractions (P14.T11), the volatile inventory of its
-//!   atmosphere (P14.T13) and its host's \[Fe/H\] and \[α/Fe\], which the resource model and the
-//!   later generators read.
+//! - [`BulkComposition`]: the body's mass fractions (P14.T11), its element inventory (P14.T50.a),
+//!   whose carriers are the volatile inventory of its atmosphere (P14.T13), and its host's
+//!   \[Fe/H\] and \[α/Fe\], which the resource model and the later generators read.
 //! - [`surface`]: the body's [`SurfaceConditions`] (P14.T24.a): its mean temperature and signed
 //!   contrasts, its surface pressure and gases as mole fractions, the light and radiation it
 //!   receives, whether water can be liquid on it, and its [`ClimateRegime`] (P14.T48.d).
@@ -64,29 +64,30 @@ pub use seed::{DetailSeed, SurfaceSeed, detail_seed, surface_seed};
 pub use structure::{ProfileNode, RadiativeConvective, VerticalStructure};
 pub use surface::{ClimateRegime, RadiationClass, SurfaceConditions};
 
+use crate::planetary::chem::inventory::ElementInventory;
 use crate::planetary::derive::MassFractions;
 use crate::planetary::derive::atmosphere::VolatileInventory;
 use crate::planetary::record::Section;
 use crate::units::Dex;
 
 /// A body's bulk composition as the layers above read it (P14.T23): its mass fractions of iron,
-/// rock, water and envelope, its volatile inventory, and its host's abundances.
+/// rock, water and envelope, its element inventory (P14.T50.a), and its host's abundances.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct BulkComposition {
     fractions: MassFractions,
-    inventory: VolatileInventory,
+    inventory: ElementInventory,
     fe_h: Dex,
     alpha_fe: Option<Dex>,
 }
 
 impl BulkComposition {
-    /// The composition of a body of mass fractions `fractions` and volatile inventory
+    /// The composition of a body of mass fractions `fractions` and element inventory
     /// `inventory`, about a host of \[Fe/H\] `fe_h` and \[α/Fe\] `alpha_fe` (`None` for a host
     /// with no stellar abundances of its own, as [`SystemContext::alpha_fe`](crate::planetary::SystemContext::alpha_fe) keeps it).
     #[must_use]
     pub const fn new(
         fractions: MassFractions,
-        inventory: VolatileInventory,
+        inventory: ElementInventory,
         fe_h: Dex,
         alpha_fe: Option<Dex>,
     ) -> Self {
@@ -106,9 +107,18 @@ impl BulkComposition {
     }
 
     /// The volatile inventory at the time (P14.T13.a): water, carbon dioxide, nitrogen and argon,
-    /// before escape and the climate divide them.
+    /// before escape and the climate divide them. It is the stored carriers of the
+    /// [`element_inventory`](Self::element_inventory), its view ([`ElementInventory::volatiles`]).
     #[must_use]
     pub const fn inventory(&self) -> &VolatileInventory {
+        self.inventory.volatiles()
+    }
+
+    /// The element inventory at the time (P14.T50.a): its eleven elements by reservoir, its stored
+    /// carriers and its mantle's ΔIW, the body's derivation's
+    /// ([`DerivedBody::element_inventory`](crate::planetary::derive::DerivedBody::element_inventory)).
+    #[must_use]
+    pub const fn element_inventory(&self) -> &ElementInventory {
         &self.inventory
     }
 

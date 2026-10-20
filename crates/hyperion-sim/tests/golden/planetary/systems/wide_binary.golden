@@ -859,6 +859,14 @@ heat_flow_w_m2 = 0x3fae9a71b91b2304  # 0.059772065969417226
 surface_age_yr = 0x4140f32302b1a846  # 2221638.021046671
 ocean_fraction = 0x3ff0000000000000  # 1.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal false
+reservoir_kg_m2 = 0x41825af3e6751ac7  # 38493820.80717998
+reservoir_gel_m = 0x40e429a6b2a12638  # 41293.209305357595
+area_fraction = 0x3ff0000000000000  # 1.0
+condensate: ch4_c2h6_n2, Liquid, seasonal true
+reservoir_kg_m2 = 0x41822a73039e32bc  # 38096480.452245206
+reservoir_gel_m = 0x40f1ec9c4ec1b01d  # 73417.76922768397
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3f68f1426a3d7eee  # 0.0030447289627061258
@@ -4273,6 +4281,14 @@ heat_flow_w_m2 = 0x3fae9a710ebddfb4  # 0.05977204613640144
 surface_age_yr = 0x4140f324150e293b  # 2221640.164494661
 ocean_fraction = 0x3ff0000000000000  # 1.0
 ice_fraction = 0x3ff0000000000000  # 1.0
+condensate: H2O, Solid, seasonal false
+reservoir_kg_m2 = 0x41825af3e6751ac7  # 38493820.80717998
+reservoir_gel_m = 0x40e429a6b2a18b79  # 41293.209305546196
+area_fraction = 0x3ff0000000000000  # 1.0
+condensate: ch4_c2h6_n2, Liquid, seasonal true
+reservoir_kg_m2 = 0x41822a73039ddda7  # 38096480.452082925
+reservoir_gel_m = 0x40f1ec9c4ec15c29  # 73417.76922737122
+area_fraction = 0x3ff0000000000000  # 1.0
 envelope: NotApplicable
 body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3f68f1426a3d7ba3  # 0.00304472896270576

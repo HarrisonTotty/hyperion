@@ -19,15 +19,17 @@ use hyperion_protocol::{
     MassFractionsDto, Modelled, MoonOriginDto, OceanFloorDto, OrbitDriftDto, OrbitHostDto,
     PhaseTemplateDto, PlanetClassDto, PopulationDto, RadiationClassDto, RequestError, RingDto,
     RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto, SceneSystemDto, SectionDto,
-    SeenPositionDto, SpinResonanceDto, SubstanceAreaDto, SubsurfaceOceanDto, SurfaceMaterialDto,
-    SurfaceStateDto, SystemBodiesDto, SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto,
-    SystemSummaryRequest, TectonicRegimeDto, ThermalRegimeDto, WetEpochDto, ZoneDto,
+    SeenPositionDto, SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto,
+    SurfaceCondensateDto, SurfaceMaterialDto, SurfaceStateDto, SystemBodiesDto,
+    SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest, TectonicRegimeDto,
+    ThermalRegimeDto, WetEpochDto, ZoneDto,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::placement::Existence;
 use hyperion_sim::id::SystemId;
 use hyperion_sim::planetary::architecture::{ArchitectureClass, HostMultiplicity};
 use hyperion_sim::planetary::belts::{BeltComposition, BeltSite};
+use hyperion_sim::planetary::chem::partition::{CondensatePhase, Condensates};
 use hyperion_sim::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use hyperion_sim::planetary::derive::figure::{BodyFigure, Datum, FigureLaw};
 use hyperion_sim::planetary::derive::photometry::{Bands, BodyPhotometry, PhaseTemplate};
@@ -922,6 +924,28 @@ fn substance_areas(areas: &[(SubstanceId, f64)]) -> Vec<SubstanceAreaDto> {
         .collect()
 }
 
+/// A surface's published condensates as the wire carries them (P14.T51.a, sent from P14.T54.a):
+/// in the record's order, each substance by its registry key, its layer absent where the record
+/// has none (the registry has not read its phase's density, decision-pre-23-review item 12).
+#[must_use]
+fn condensates(condensates: &Condensates) -> Vec<SurfaceCondensateDto> {
+    condensates
+        .entries()
+        .iter()
+        .map(|entry| SurfaceCondensateDto {
+            substance: key(entry.substance()),
+            phase: match entry.phase() {
+                CondensatePhase::Solid => SubstancePhaseDto::Solid,
+                CondensatePhase::Liquid => SubstancePhaseDto::Liquid,
+                CondensatePhase::Supercritical => SubstancePhaseDto::Supercritical,
+            },
+            reservoir_gel_m: entry.reservoir_gel().map(Metres::value),
+            area_fraction: entry.area_fraction(),
+            seasonal: entry.is_seasonal(),
+        })
+        .collect()
+}
+
 /// A member of the surface section that a later task fills, as the wire carries it (P14.T35.e):
 /// absent while this generator version does not model it, and once it does, its value converted
 /// by `value`, which is `None` for a member computed as none, sent `null`.
@@ -937,8 +961,9 @@ fn later<T, U>(member: RecordModelled<&T>, value: impl FnOnce(&T) -> Option<U>) 
 /// [`Surface`] in its unit and every substance by its registry key.
 ///
 /// The members of later tasks are absent, as the record holds them not modelled; each task fills
-/// its own here when it lands. The melt's own vapour, `silicate_vapour`, has no member in the
-/// record and is sent absent from every surface until P14.T55.b.
+/// its own here when it lands, as P14.T54.a fills the condensates. The melt's own vapour,
+/// `silicate_vapour`, has no member in the record and is sent absent from every surface until
+/// P14.T55.b.
 #[must_use]
 fn surface(surface: &Surface) -> BodySurfaceDto {
     let conditions = surface.conditions();
@@ -990,7 +1015,9 @@ fn surface(surface: &Surface) -> BodySurfaceDto {
             |structure| match *structure {},
         ),
         aerosols: later(surface.aerosols(), |aerosols| match *aerosols {}),
-        condensates: later(surface.condensates(), |condensates| match *condensates {}),
+        condensates: later(surface.condensates(), |published| {
+            Some(condensates(published))
+        }),
         crust: later(surface.crust(), |crust| match *crust {}),
         modifiers: later(surface.modifiers(), |modifiers| match *modifiers {}),
         biosphere: later(surface.biosphere(), |biosphere| match *biosphere {}),
@@ -1426,7 +1453,8 @@ mod tests {
 
     /// P14.T35.e: the members of later tasks are absent, as the record holds them, with
     /// P14.T35.f's `silicate_vapour`, which the record does not hold, and a subsurface ocean is
-    /// computed for a regular moon alone, an object or `null`, until P14.T51.g.
+    /// computed for a regular moon alone, an object or `null`, until P14.T51.g. The condensates
+    /// are sent from P14.T54.a (`every_surface_sends_its_record_s_condensates`).
     #[test]
     fn the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed() {
         let mut moons = 0;
@@ -1435,15 +1463,13 @@ mod tests {
                 [
                     dto.vertical_structure.is_not_modelled(),
                     dto.aerosols.is_not_modelled(),
-                    dto.condensates.is_not_modelled(),
                     dto.crust.is_not_modelled(),
                     dto.modifiers.is_not_modelled(),
                     dto.biosphere.is_not_modelled(),
                     dto.silicate_vapour.is_not_modelled(),
                 ],
-                [true; 7],
-                "{}: the structure, aerosols, condensates, crust, modifiers, biosphere and silicate \
-                 vapour",
+                [true; 6],
+                "{}: the structure, aerosols, crust, modifiers, biosphere and silicate vapour",
                 wire.id
             );
             let regular = wire.kind
@@ -1466,6 +1492,73 @@ mod tests {
             moons += usize::from(regular);
         }
         assert!(moons > 0, "no regular moon's ocean was checked");
+    }
+
+    /// P14.T54.a: every `ok` surface sends its record's published condensates (P14.T51.a), a
+    /// list, never absent or `null`: the record's entries in its order, each substance by its
+    /// registry key and phase, its layer, area and seasonal flag to the bit, the layer absent
+    /// where the record has none. An Earth's hold `H2O`: every temperate surface with liquid
+    /// water whose liquids list water sends a liquid `H2O` entry with a layer.
+    #[test]
+    fn every_surface_sends_its_record_s_condensates() {
+        let (mut surfaces, mut entries, mut earths, mut unlayered) = (0, 0, 0, 0);
+        for (sim, dto, wire) in ok_surfaces() {
+            let RecordModelled::Ok(published) = sim.condensates() else {
+                panic!("{}: a record's surface holds its condensates", wire.id);
+            };
+            let Modelled::Value(sent) = &dto.condensates else {
+                panic!("{}: the condensates are sent", wire.id);
+            };
+            assert_eq!(sent.len(), published.entries().len(), "{}", wire.id);
+            for (dto, entry) in sent.iter().zip(published.entries()) {
+                assert_eq!(dto.substance, key(entry.substance()), "{}", wire.id);
+                let phase = match entry.phase() {
+                    CondensatePhase::Solid => SubstancePhaseDto::Solid,
+                    CondensatePhase::Liquid => SubstancePhaseDto::Liquid,
+                    CondensatePhase::Supercritical => SubstancePhaseDto::Supercritical,
+                };
+                assert_eq!(dto.phase, phase, "{}", wire.id);
+                assert_eq!(
+                    dto.reservoir_gel_m.map(f64::to_bits),
+                    entry.reservoir_gel().map(|gel| gel.value().to_bits()),
+                    "{}",
+                    wire.id
+                );
+                assert_eq!(
+                    dto.area_fraction.to_bits(),
+                    entry.area_fraction().to_bits(),
+                    "{}",
+                    wire.id
+                );
+                assert_eq!(dto.seasonal, entry.is_seasonal(), "{}", wire.id);
+                unlayered += usize::from(dto.reservoir_gel_m.is_none());
+            }
+            let earth = dto.state == SurfaceStateDto::Temperate
+                && dto.liquid_water
+                && dto
+                    .surface_liquids
+                    .iter()
+                    .any(|area| area.substance == "H2O" && area.area_fraction > 0.0);
+            if earth {
+                assert!(
+                    sent.iter().any(|c| c.substance == "H2O"
+                        && c.phase == SubstancePhaseDto::Liquid
+                        && c.reservoir_gel_m.is_some_and(|gel| gel > 0.0)),
+                    "{}: {sent:?}",
+                    wire.id
+                );
+                earths += 1;
+            }
+            surfaces += 1;
+            entries += sent.len();
+        }
+        eprintln!(
+            "{surfaces} surfaces, {entries} condensates, {unlayered} with no layer, {earths} Earths"
+        );
+        assert!(
+            surfaces > 50 && entries > 50 && earths > 0,
+            "{surfaces} {entries} {earths}"
+        );
     }
 
     /// P14.T35.e: the gases sum to 1 to 10⁻⁹ and descend, an airless body's are empty, a body with
@@ -1585,6 +1678,9 @@ mod tests {
             keys.extend(dto.wet_epoch.as_ref().map(|epoch| epoch.liquid.clone()));
             if let Modelled::Value(ocean) = &dto.subsurface_ocean {
                 keys.push(ocean.liquid.clone());
+            }
+            if let Modelled::Value(condensates) = &dto.condensates {
+                keys.extend(condensates.iter().map(|c| c.substance.clone()));
             }
         }
         assert!(keys.len() > 100, "{} keys", keys.len());

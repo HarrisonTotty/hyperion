@@ -99,6 +99,10 @@ heat_flow_w_m2 = 0x3fb5fea3f5d69ae4  # 0.08591675521766323
 surface_age_yr = 0x4193001520716b32  # 79693128.11076048
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+condensate: CO2, Supercritical, seasonal false
+reservoir_kg_m2 = 0x0000000000000000  # 0.0
+reservoir_gel_m = 0x0000000000000000  # 0.0
+area_fraction = 0x0000000000000000  # 0.0
 envelope: NotApplicable
 body 0101 A b I: Moon(GiantImpact) about Some(Body(BodyIndex(256))), Unbound { at: UniverseTime { seconds: -56792117131135768, nanos: 0 } }
 mass_mearth = 0x3f61a851be737767  # 0.0021554562150489123
@@ -397,6 +401,10 @@ heat_flow_w_m2 = 0x3fb5fea36a50261d  # 0.0859167227319166
 surface_age_yr = 0x419300167ee88a7e  # 79693215.7270908
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+condensate: CO2, Supercritical, seasonal false
+reservoir_kg_m2 = 0x0000000000000000  # 0.0
+reservoir_gel_m = 0x0000000000000000  # 0.0
+area_fraction = 0x0000000000000000  # 0.0
 envelope: NotApplicable
 body 0101 A b I: Moon(GiantImpact) about Some(Body(BodyIndex(256))), Unbound { at: UniverseTime { seconds: -56792117131135768, nanos: 0 } }
 mass_mearth = 0x3f61a851be737767  # 0.0021554562150489123
