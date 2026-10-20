@@ -355,6 +355,25 @@ _clippy: (_clippy-for "--workspace")
 _clippy-for packages:
     cargo clippy {{ packages }} --all-targets -- -D warnings
 
+# rustdoc over every crate of the workspace, its warnings errors: an intra-doc link that does not
+# resolve, names an item that is not public or is ambiguous, a bare URL, a stray HTML tag, a
+# redundant link target. Until it, no check ran rustdoc, and links broke unseen. It builds in the
+# workspace's own build directory, `ci` running it right after Clippy: `RUSTDOCFLAGS` reaches only
+# rustdoc's runs, so the dependencies' metadata that Clippy built is reused (11 s after
+# `cargo clean --doc`, 0.1 s warm, at 4 jobs on 2026-10-19), where a directory of its own would add
+# a cold build of every dependency to every checkout (62 s and 0.8 GB). `--no-deps`: the
+# workspace's crates alone. A set `CARGO_ENCODED_RUSTDOCFLAGS` would take the place of
+# `RUSTDOCFLAGS` and drop `-D warnings`; nothing `ci` runs sets it. It documents the host's target
+# only: code behind another target's cfg (the surface crate's `wasm` module) goes unchecked here.
+# Check the workspace's docs with rustdoc, its warnings errors.
+doc-check: (_doc-check-for "--workspace")
+
+# `doc-check` over `packages`, cargo's selection as for `_clippy-for`: `--workspace`, or
+# `-p <crate>` for each crate with the `--features` that `cargo doc --workspace` gives it, which
+# builds no dev-dependencies.
+_doc-check-for packages:
+    RUSTDOCFLAGS="-D warnings" cargo doc {{ packages }} --no-deps
+
 # The platforms that `cross-clippy` checks, less the one it runs on: Linux, macOS on Apple silicon
 # and Windows, each on the architecture its developers use. `rust-toolchain.toml` lists them too,
 # so that rustup installs their standard libraries.
@@ -1247,19 +1266,22 @@ build: gen-surface
     pnpm build
 
 # `ci` runs what `fmt-check check lint test fit-check gen-protocol-check test-wasm-fast` ran, and
-# `cross-clippy` and smart-ci's own tests, in three phases. First, beside the builds, the checks
-# that need no cargo build directory of the worktree (formatting, `tsc`, oxlint, and the
+# `cross-clippy`, `doc-check` and smart-ci's own tests, in three phases. First, beside the builds,
+# the checks that need no cargo build directory of the worktree (formatting, `tsc`, oxlint, and the
 # relaxed-SIMD refusal, `gpu-replay-check` and `cross-clippy`, which have target directories of
 # their own, and `_smart-ci-test`), their output held until they finish. Second, the cargo steps
 # one after another, since they share the build directory's lock: Clippy, which compiles every
-# target as `cargo check` would, so `check`'s `cargo check` is not repeated; the bindings' check,
-# before any test can rewrite the bindings it compares; then every test build, the fitted tables'
-# check right after the native one, whose `hyperion-fit` binary it runs. Beside both, vitest, as a job of its own at 4 workers in its capped scope, which takes no
-# lock (decision-test-coverage.md R1), its output held too. Third, one hold of the heavy-test lock
-# for all the Rust suites, rather than three turns in the queue behind other worktrees. `smart-ci`
-# runs these same steps, fewer of them and narrower, and `_smart-ci-test` fails if this recipe runs a
-# step, or a step runs a command, that smart-ci does not know (`CI_STEPS` in
-# `tools/smart-ci/smart_ci.py`).
+# target as `cargo check` would, so `check`'s `cargo check` is not repeated; rustdoc
+# (`doc-check`), on the dependencies' metadata Clippy built, here rather than beside the builds,
+# where it waited on their lock (16 s of a 19 s Clippy, 2026-10-19) and then held up the next of
+# them for its own run; the bindings' check, before any test can rewrite the bindings it compares;
+# then every test build, the fitted tables' check right after the native one, whose `hyperion-fit`
+# binary it runs. Beside both, vitest, as a job of its own at 4 workers in its capped scope, which
+# takes no lock (decision-test-coverage.md R1), its output held too. Third, one hold of the
+# heavy-test lock for all the Rust suites, rather than three turns in the queue behind other
+# worktrees. `smart-ci` runs these same steps, fewer of them and narrower, and `_smart-ci-test`
+# fails if this recipe runs a step, or a step runs a command, that smart-ci does not know
+# (`CI_STEPS` in `tools/smart-ci/smart_ci.py`).
 # The gate before a commit: everything but the slow tests, with the fast suites on WebAssembly.
 ci: gen-surface (_wasm-preflight "wasip1" "browser")
     #!/usr/bin/env bash
@@ -1273,14 +1295,14 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
     just _vitest-all >"$vitest_log" 2>&1 &
     vitest=$!
     status=0
-    just _clippy _browser-clippy gen-protocol-check _test-build _fit-check-built _wasm-fast-build || status=$?
+    just _clippy doc-check _browser-clippy gen-protocol-check _test-build _fit-check-built _wasm-fast-build || status=$?
     side_status=0
     wait "$side" || side_status=$?
     vitest_status=0
     wait "$vitest" || vitest_status=$?
     cat "$side_log" "$vitest_log"
     if [[ "$status" -ne 0 || "$side_status" -ne 0 || "$vitest_status" -ne 0 ]]; then
-        echo "error: ci failed before the locked suites (builds and Rust checks: exit $status; formatting, TypeScript, the relaxed-SIMD refusal, gpu-replay, cross-clippy and smart-ci's tests: exit $side_status; vitest: exit $vitest_status)" >&2
+        echo "error: ci failed before the locked suites (builds, rustdoc and Rust checks: exit $status; formatting, TypeScript, the relaxed-SIMD refusal, gpu-replay, cross-clippy and smart-ci's tests: exit $side_status; vitest: exit $vitest_status)" >&2
         exit 1
     fi
     just _locked just _test-run _wasm-fast-run
@@ -1293,20 +1315,23 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
 # steps above, scoped and in `ci`'s order: a TypeScript-free change skips every TypeScript check; a
 # change to a crate's code runs that crate's rustfmt and Clippy (native, wasm32 where `ci` runs it,
 # and the other platforms' for a crate with code that differs between them: the server, and any other
-# its guard finds), with the features `ci` gives it, and the tests that reach the changed code,
-# in any crate, through the code's graph (`tools/smart-ci/rust_graph.py`): nextest and wasip1 test
-# by test, through the filters above, doctests by file, the browser suites by crate; a TypeScript
-# source the vitest files whose imports reach it, outside the lock as `ci` runs them. The protocol
-# crate adds the bindings' check and the TypeScript side, the surface module's sources `gen-surface`
-# and the vitest files that import it, Markdown Prettier alone, and shaders, the engine and the smoke
-# harness `just test-render`'s steps, its run in the suites' hold of the heavy-test lock. A path
-# no rule knows, and the inputs of the whole workspace (this justfile, Cargo.toml, Cargo.lock,
-# pnpm-lock.yaml, rust-toolchain.toml, `.cargo/`, `tools/portable/`), run the full `ci`'s phases.
+# its guard finds), with the features `ci` gives it, its rustdoc (`doc-check`'s, with the features
+# `cargo doc --workspace` gives it; a Markdown file that the crate's root includes as its docs runs
+# it too), and the tests that reach the changed code, in any crate, through the code's graph
+# (`tools/smart-ci/rust_graph.py`): nextest and wasip1 test by test, through the filters above,
+# doctests by file, the browser suites by crate; a TypeScript source the vitest files whose imports
+# reach it, outside the lock as `ci` runs them. The protocol crate adds the bindings' check and the
+# TypeScript side, the surface module's sources `gen-surface` and the vitest files that import it,
+# Markdown Prettier alone, and shaders, the engine and the smoke harness `just test-render`'s steps,
+# its run in the suites' hold of the heavy-test lock. A path no rule knows, and the inputs of the
+# whole workspace (this justfile, Cargo.toml, Cargo.lock, pnpm-lock.yaml, rust-toolchain.toml,
+# `.cargo/`, `tools/portable/`), run the full `ci`'s phases.
 # `--plan` prints the plan, each step with the paths that caused it and the tests chosen, and runs
 # nothing; a run prints it first. `--all-tests` runs every test of the changed crates and every
-# vitest file, as smart-ci did before the graph. `--dependents` adds the Clippy of every crate that
-# depends on a changed one (and with `--all-tests` their tests); a changed `Cargo.toml` always adds
-# their Clippy and tests. `--full` runs the full `ci`'s phases whatever the diff (integration's run).
+# vitest file, as smart-ci did before the graph. `--dependents` adds the Clippy and rustdoc of every
+# crate that depends on a changed one (and with `--all-tests` their tests); a changed `Cargo.toml`
+# always adds their Clippy, rustdoc and tests. `--full` runs the full `ci`'s phases whatever the
+# diff (integration's run).
 # Run it capped, with `SMART_CI_SLOT` naming the machine's build-slot command where there is one,
 # never inside it: smart-ci holds a slot only while it builds. Its suites take the heavy-test lock as
 # `ci`'s do, unless they are small by the timings recorded from earlier runs (at most 300 of

@@ -223,13 +223,13 @@ somewhere else, and the `LINK` display shows the endpoint in use.
 | `just test`  | `cargo test`              | `vitest`                      |
 
 `just ci` is the gate before a commit: the four checks above, a check that the fitted tables are
-fresh, a check that the generated protocol bindings are up to date, `just cross-clippy`, and
-`just test-wasm-fast`, the fast suites on WebAssembly. vitest runs beside its builds, at 4 workers
-in a scope capped at 5 GB and 4 cores, and takes no lock; the Rust suites run in one hold of the
-heavy-test lock, wasip1 and the browser target side by side. On 2026-10-10 it took 57 minutes on the
-recommended machine with nothing else running and its builds warm, 51 of them in the suites, most
-of those the sim's (below). A task's gate is `just smart-ci`, the part of it that the change needs
-(below); integration runs the whole.
+fresh, a check that the generated protocol bindings are up to date, `just cross-clippy`,
+`just doc-check`, and `just test-wasm-fast`, the fast suites on WebAssembly. vitest runs beside
+its builds, at 4 workers in a scope capped at 5 GB and 4 cores, and takes no lock; the Rust suites
+run in one hold of the heavy-test lock, wasip1 and the browser target side by side. On 2026-10-10
+it took 57 minutes on the recommended machine with nothing else running and its builds warm, 51 of
+them in the suites, most of those the sim's (below). A task's gate is `just smart-ci`, the part of
+it that the change needs (below); integration runs the whole.
 
 - `just cross-clippy`, part of `just ci`, runs Clippy over every target of the workspace and of
   `tools/gpu-replay` for the other two platforms, of Linux (x86-64), macOS (Apple silicon) and
@@ -239,6 +239,15 @@ of those the sim's (below). A task's gate is `just smart-ci`, the part of it tha
   platforms' standard libraries, which rustup installs from `rust-toolchain.toml`, and a stand-in
   C compiler that it writes under `target/cross/`. It builds in `target/cross` and
   `target/tools-cross` and runs beside the other builds; on a warm tree it takes about a second.
+- `just doc-check`, part of `just ci`, runs rustdoc over every crate of the workspace
+  (`cargo doc --workspace --no-deps`) with its warnings as errors: an intra-doc link that does not
+  resolve, that names an item that is not public, or whose name is ambiguous, a bare URL, a stray
+  HTML tag, a redundant link target. Link a public item by a path rustdoc resolves from the
+  documented item's module (``[`super::Y`]``, ``[`crate::x::Y`]``), and name one that is not
+  public in backticks with no link. It builds in the workspace's own build directory, right after
+  Clippy, whose dependency metadata it reuses: about 11 s from `cargo clean --doc`, well under a
+  second warm. It documents the host's target alone, so code behind another target's cfg (the
+  surface crate's `wasm` module) goes unchecked.
 - `just ci-slow` is `just ci` plus `just test-slow` and `just test-wasm-slow`. The slow tests take
   far longer than the rest, so run it before a push that changes the sim, and after a
   `GENERATOR_VERSION` bump.
@@ -317,22 +326,22 @@ in a fresh build directory takes the lock, and so does a test that reads a fixtu
 (the sky's luminosity tables), whose recorded time leaves its build out. `--full` and the smoke
 harness always take it. The plan says which, and why.
 
-| A change to                                                                                                                  | runs                                                                                                                                                                                                                                                                                |
-| ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Markdown                                                                                                                     | Prettier on those files                                                                                                                                                                                                                                                             |
-| a package's sources (`src/`)                                                                                                 | tsc, oxlint, and the vitest files that import or read the change (every one of the package if its setup file does)                                                                                                                                                                  |
-| a package's configuration, `package.json`, `tsconfig`, the Node floor's preflight (`tools/node-floor/`)                      | tsc, oxlint and every vitest file (and smart-ci's tests, for the preflight). No TypeScript change runs no TypeScript check                                                                                                                                                          |
-| a crate's code                                                                                                               | that crate's rustfmt and Clippy (native, wasm32 for the browser crates, and macOS and Windows for a crate whose code differs between the platforms: the server, or a crate the guard finds such code in), with the features `just ci` gives it, and the tests that reach the change |
-| a crate's `Cargo.toml`                                                                                                       | that crate's checks and every test, and the Clippy and tests of the crates that depend on it                                                                                                                                                                                        |
-| a crate's goldens                                                                                                            | the tests of the crate that read goldens, those that name the file, and the vitest files that read it                                                                                                                                                                               |
-| a crate's other data (fitted inputs, fixtures)                                                                               | its tests, the tests that name the file, and the vitest files that read it                                                                                                                                                                                                          |
-| `crates/hyperion-protocol`, the bindings                                                                                     | the bindings' check and the TypeScript side                                                                                                                                                                                                                                         |
-| `packages/protocol/fixtures/`                                                                                                | the TypeScript side and the tests of the crates that read the fixture                                                                                                                                                                                                               |
-| the surface module's sources (`hyperion-surface`, `hyperion-base`)                                                           | `gen-surface` and the vitest files that import the module; tsc and oxlint when its exports change                                                                                                                                                                                   |
-| the sim's sources (`crates/hyperion-sim/src/`), the testkit's `golden.rs`                                                    | smart-ci's own tests too, whose guard holds the tests that `wasm_sky` leaves out of the wasip1 runs to pinning no value                                                                                                                                                             |
-| WGSL, the engine, the smoke harness                                                                                          | `just test-render`'s build, and its run in the same hold of the heavy-test lock as the suites                                                                                                                                                                                       |
-| `.config/nextest.toml`, `rustfmt.toml`, `clippy.toml`, Prettier's or oxlint's configuration                                  | the checks it configures                                                                                                                                                                                                                                                            |
-| `justfile`, `Cargo.toml`, `Cargo.lock`, `pnpm-lock.yaml`, `rust-toolchain.toml`, `.cargo/`, `tools/portable/`, unknown paths | the full `just ci`                                                                                                                                                                                                                                                                  |
+| A change to                                                                                                                  | runs                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Markdown                                                                                                                     | Prettier on those files                                                                                                                                                                                                                                                                                                                                                 |
+| a package's sources (`src/`)                                                                                                 | tsc, oxlint, and the vitest files that import or read the change (every one of the package if its setup file does)                                                                                                                                                                                                                                                      |
+| a package's configuration, `package.json`, `tsconfig`, the Node floor's preflight (`tools/node-floor/`)                      | tsc, oxlint and every vitest file (and smart-ci's tests, for the preflight). No TypeScript change runs no TypeScript check                                                                                                                                                                                                                                              |
+| a crate's code                                                                                                               | that crate's rustfmt and Clippy (native, wasm32 for the browser crates, and macOS and Windows for a crate whose code differs between the platforms: the server, or a crate the guard finds such code in), with the features `just ci` gives it, its rustdoc (`just doc-check`, with the features `cargo doc --workspace` gives it), and the tests that reach the change |
+| a crate's `Cargo.toml`                                                                                                       | that crate's checks and every test, and the Clippy, rustdoc and tests of the crates that depend on it                                                                                                                                                                                                                                                                   |
+| a crate's goldens                                                                                                            | the tests of the crate that read goldens, those that name the file, and the vitest files that read it                                                                                                                                                                                                                                                                   |
+| a crate's other data (fitted inputs, fixtures)                                                                               | its tests, the tests that name the file, and the vitest files that read it (a Markdown file its root includes as docs is data, and runs its rustdoc too)                                                                                                                                                                                                                |
+| `crates/hyperion-protocol`, the bindings                                                                                     | the bindings' check and the TypeScript side                                                                                                                                                                                                                                                                                                                             |
+| `packages/protocol/fixtures/`                                                                                                | the TypeScript side and the tests of the crates that read the fixture                                                                                                                                                                                                                                                                                                   |
+| the surface module's sources (`hyperion-surface`, `hyperion-base`)                                                           | `gen-surface` and the vitest files that import the module; tsc and oxlint when its exports change                                                                                                                                                                                                                                                                       |
+| the sim's sources (`crates/hyperion-sim/src/`), the testkit's `golden.rs`                                                    | smart-ci's own tests too, whose guard holds the tests that `wasm_sky` leaves out of the wasip1 runs to pinning no value                                                                                                                                                                                                                                                 |
+| WGSL, the engine, the smoke harness                                                                                          | `just test-render`'s build, and its run in the same hold of the heavy-test lock as the suites                                                                                                                                                                                                                                                                           |
+| `.config/nextest.toml`, `rustfmt.toml`, `clippy.toml`, Prettier's or oxlint's configuration                                  | the checks it configures                                                                                                                                                                                                                                                                                                                                                |
+| `justfile`, `Cargo.toml`, `Cargo.lock`, `pnpm-lock.yaml`, `rust-toolchain.toml`, `.cargo/`, `tools/portable/`, unknown paths | the full `just ci`                                                                                                                                                                                                                                                                                                                                                      |
 
 **Clippy for the other platforms.** `just ci` runs `cross-clippy` over the whole workspace. smart-ci
 runs it only for the crates whose code differs between Linux, macOS and Windows: those in
@@ -377,15 +386,16 @@ and other assets) and from the paths that tests read at run time.
 smart-ci did before the graph: another crate's tests that read the Rust sources (the surface crate's
 tag check, for a change to the sim) run only without it.
 
-By default the Clippy of only the changed crates runs, not of the crates that depend on them:
-integration's full `just ci` catches a break there. Their tests are the graph's to choose: every
-test of theirs that reaches the change runs. So `just smart-ci --dependents` no longer adds their
-tests; it adds their Clippy, which builds all of their code and not only the code their tests
-reach, for a change to what other crates use (a public item's name or signature). With
-`--all-tests` it adds every test of theirs as well, as before the graph. `just ci` runs smart-ci's tests
-(`tools/smart-ci/test_smart_ci.py`, which runs `test_rust_graph.py`'s too): the graph's traps, each
-on a small workspace of its own, and the agreement with `ci`, which fails if `ci` gains a step, or a
-step gains a command, that smart-ci does not know.
+By default the Clippy and rustdoc of only the changed crates run, not of the crates that depend on
+them: integration's full `just ci` catches a break there. Their tests are the graph's to choose:
+every test of theirs that reaches the change runs. So `just smart-ci --dependents` no longer adds
+their tests; it adds their Clippy, which builds all of their code and not only the code their tests
+reach, and their rustdoc, for a change to what other crates use (a public item's name, signature or
+path, which their docs may link). With `--all-tests` it adds every test of theirs as well, as
+before the graph. `just ci` runs smart-ci's tests (`tools/smart-ci/test_smart_ci.py`, which runs
+`test_rust_graph.py`'s too): the graph's traps, each on a small workspace of its own, and the
+agreement with `ci`, which fails if `ci` gains a step, or a step gains a command, that smart-ci does
+not know.
 
 **Gate stamps: the git hooks don't repeat a passing gate.** A run of `just smart-ci` that passes
 writes a stamp keyed by the tree it checked: the git tree id of the working tree, uncommitted and
